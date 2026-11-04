@@ -6,7 +6,7 @@
 
 | 优先级 | harness | 说明 |
 |---|---|---|
-| 首批 | Hermes | 主会话、注入、无头运行、推送与唤醒都在它上面端到端验证。它没有通用的压缩前入口，压缩前保存跳过 |
+| 首批 | Hermes | 主会话、注入、无头运行与唤醒都在它上面端到端验证。它没有通用的压缩前入口，压缩前保存跳过 |
 | 后续 | dsh、Claude Code、Codex CLI | Hermes 端到端验证完成后接入，检验通用接口能否不改内核接入其他 harness；压缩前保存在这里首次验证（Claude Code、Codex CLI 用 `PreCompact`，dsh 见 A.6） |
 | 覆盖 | Gemini CLI、OpenCode、Pi、OpenClaw | 实测后再声明 |
 
@@ -22,7 +22,6 @@
 | 回执捕获 | `apa report`，异步 | 只匹配执行者类工具且参数含事项 id；无事项 id 不捕获；对模型无可见输出 |
 | 候选捕获 | `POST /capture`，异步 | 只在开启捕获的项目；不用强制续跑；运行身份下不生效 |
 | 压缩前保存 | 同候选捕获 | 只保存，不阻止压缩 |
-| 消息推送 | 领取 `route` 为网关推送的投递，调 harness 的发送命令，回报送达 | 网关插件才有 |
 | 会话唤醒 | 领取 `class: wake` 的投递，调 harness 的唤醒入口，并把运行 id 透传到该回合的 CLI 调用 | 网关插件才有 |
 | 执行者清单 | 经 `apa declare` 提交本 harness 可用的执行者，并在插件内实现从执行者 id 到调用方式的映射 | 不把调用命令写进账本；本人在 Web 确认后才进入清单 |
 | 会话身份透传 | 让 CLI 调用带上 `APA_SESSION`，或把 CLI 包成原生工具 | 都不可用时操作者只到 token 粒度 |
@@ -104,19 +103,19 @@ main_session:
 
 **公约数**（8 个 harness 都可用）：常驻指令文件、首次注入、用户消息提交前注入、工具前后钩子、回合结束钩子、转录访问、插件打包、无头一次性运行。
 
-**非公约数**（通用层不得依赖）：每次模型请求前注入、可阻止的压缩、子 agent 钩子、harness 自带调度、推送进运行中的会话、推送到聊天渠道。
+**非公约数**（通用层不得依赖）：每次模型请求前注入、可阻止的压缩、子 agent 钩子、harness 自带调度、推送进运行中的会话、推送到聊天渠道。其中推送到聊天渠道 APA 不使用，这条路径只走渠道 ext（主文档 §10.3）。
 
 ## A.5 插件组合参考
 
-**Hermes**：`plugin.yaml` 声明钩子；`register(ctx)` 里 `register_system_prompt_section` 承担常驻指令（不超过 4000 字，新会话冻结）；`pre_llm_call` 承担会话开始注入和消息前注入（上下文进用户消息，插件内自设不超过 2 秒的超时）；`post_tool_call`、`subagent_stop` 承担回执捕获；`on_session_end` 承担候选捕获（回合级）；`register_tool` 把 CLI 包成原生工具并带上 `session_id`；`hermes send` 承担消息推送；`ctx.inject_message`（需开启 `allow_gateway_injection`）或 webhook 路由承担会话唤醒。
+**Hermes**：`plugin.yaml` 声明钩子；`register(ctx)` 里 `register_system_prompt_section` 承担常驻指令（不超过 4000 字，新会话冻结）；`pre_llm_call` 承担会话开始注入和消息前注入（上下文进用户消息，插件内自设不超过 2 秒的超时）；`post_tool_call`、`subagent_stop` 承担回执捕获；`on_session_end` 承担候选捕获（回合级）；`register_tool` 把 CLI 包成原生工具并带上 `session_id`；`ctx.inject_message`（需开启 `allow_gateway_injection`）或 webhook 路由承担会话唤醒。
 
-**dsh**（后续）：npm 包声明 `dsh.bundle` 与 `engines.dsh`，`cordis.patch.yml` 插入插件行，按用到的 profile 分别安装；`ctx.systemPrompt.section` 承担常驻指令；`agent/created` 承担会话开始注入和 `apa agents check`（插件捕获全部错误，自设不超过 2 秒的超时）；`agent/pre-step` 承担消息前注入（按 `turn` 去重，失败时 `next()`）；`tools/result`、`subagent/end` 承担回执捕获；`agent/turn-stopping` 承担候选捕获（不调用 `steer`）；`session/event` 观察 `compaction/start` 承担压缩前保存（需实测）；`ctx.tools.register` 把 CLI 包成原生工具，显式传入 `APA_SESSION`；运行凭据经文件传递；不声明消息推送和会话唤醒。各接入面的依据与实测状态见 A.6。
+**dsh**（后续）：npm 包声明 `dsh.bundle` 与 `engines.dsh`，`cordis.patch.yml` 插入插件行，按用到的 profile 分别安装；`ctx.systemPrompt.section` 承担常驻指令；`agent/created` 承担会话开始注入和 `apa agents check`（插件捕获全部错误，自设不超过 2 秒的超时）；`agent/pre-step` 承担消息前注入（按 `turn` 去重，失败时 `next()`）；`tools/result`、`subagent/end` 承担回执捕获；`agent/turn-stopping` 承担候选捕获（不调用 `steer`）；`session/event` 观察 `compaction/start` 承担压缩前保存（需实测）；`ctx.tools.register` 把 CLI 包成原生工具，显式传入 `APA_SESSION`；运行凭据经文件传递；不声明会话唤醒。各接入面的依据与实测状态见 A.6。
 
 **Claude Code**：常驻指令写成 skill；`SessionStart` 负责会话开始注入、`apa agents check`，并写 `$CLAUDE_ENV_FILE` 导出 `APA_SESSION`；`UserPromptSubmit` 负责消息前注入；`PostToolUse`、`SubagentStop` 负责回执捕获；`Stop` 负责候选捕获（用 `last_assistant_message`）；`PreCompact` 负责压缩前保存；执行者走 `Agent` 工具或 Bash。
 
 **Codex CLI**：常驻指令走 AGENTS.md 或 skill；`SessionStart`、`UserPromptSubmit`、`PostToolUse`、`SubagentStop`、`Stop`、`PreCompact` 对应同上；带钩子的插件需手动安装并在 `/hooks` 审核；默认只读沙箱可能阻止 CLI 访问 APA 端口，stdout 末段回执是这种情况下的兜底。
 
-**OpenClaw**：`openclaw.plugin.json` + skills，钩子写在代码里；`before_prompt_build` 负责会话开始注入和消息前注入；`after_tool_call`、`subagent_ended` 负责回执捕获；`agent_end` 负责候选捕获；`before_compaction` 负责压缩前保存；`resolve_exec_env` 透传会话身份；`openclaw message send` 承担消息推送；`POST /hooks/agent` 或 `POST /hooks/wake` 承担会话唤醒。
+**OpenClaw**：`openclaw.plugin.json` + skills，钩子写在代码里；`before_prompt_build` 负责会话开始注入和消息前注入；`after_tool_call`、`subagent_ended` 负责回执捕获；`agent_end` 负责候选捕获；`before_compaction` 负责压缩前保存；`resolve_exec_env` 透传会话身份；`POST /hooks/agent` 或 `POST /hooks/wake` 承担会话唤醒。
 
 ## A.6 DeepSeek Harness（dsh）接入面（后续参考）
 
@@ -144,7 +143,7 @@ dsh 不进首批，等 Hermes 端到端验证完成后再接入。本节是接�
 | 模型凭据 | `headless` 禁用托管凭据，图形界面保存的登录不生效；密钥来自启动环境、工作目录 `.env`、`$DSH_HOME/.env`。外呼调用器只传白名单变量（§7.7），所以在 APA 主机上写 `$DSH_HOME/.env` | `headless/README.md` | 公开依据 |
 | ACP | `dsh --profile acp`：stdio 上的标准 ACP v1（换行分隔 JSON-RPC），提供 `session/new`、`session/resume`、`session/prompt`、`session/close`。内核只认"命令 + 退出码 + stdout"，要用它需由插件提供适配命令，对内核仍表现为一次性运行 | `packages/bundle/acp-app/README.md`、`packages/acp/acp/README.md` | 协议有公开依据；作为 APA 通道需实测，接入时首选 headless |
 | SDK | `dsh --profile sdk`：stdio 上换行分隔的 JSON-RPC，有 TypeScript 客户端和 Python 包 `deepseek-harness-sdk`。接入方式同 ACP | `packages/sdk/README.md`、`docs/user/guide/python-sdk.md` | 协议有公开依据；作为 APA 通道需实测，接入时首选 headless |
-| 消息推送、会话唤醒 | CLI 帮助和仓库未见聊天渠道发送命令，也未见供外部程序唤醒运行中主会话的文档化入口；实验性 webhook 只创建新会话，schedule 依赖进程常驻。插件不声明这两项，`main_session.launch` 用 `headless`，投递走渠道 ext 或 Web 未读 | `docs/cli-help.md`、`docs/subsystems/webhook.md`、`docs/subsystems/schedule.md` | 公开资料未提供 |
+| 会话唤醒 | CLI 帮助和仓库未见供外部程序唤醒运行中主会话的文档化入口；实验性 webhook 只创建新会话，schedule 依赖进程常驻。插件不声明这一项，`main_session.launch` 用 `headless`，投递走渠道 ext 或 Web 未读 | `docs/cli-help.md`、`docs/subsystems/webhook.md`、`docs/subsystems/schedule.md` | 公开资料未提供 |
 | 会话日志上传 | 基础配置默认挂载 `session-log-deepseek`，向官方 DeepSeek 端点的请求附带会话日志，APA 注入的内容会进入该日志（§21.2 风险 20）。部署说明默认建议关闭（§16.4，见下方片段） | `apps/cli/reference/README.md`、`docs/config-catalog.md` | 公开依据 |
 
 **无头运行声明**（字段示意，只声明 `read` 档；`apa-read` 是插件配置的只读预设）：

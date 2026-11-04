@@ -311,5 +311,5 @@ access: read
 | `background-run` | `start_background_run` 的规则样例，初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
 | `guideline-draft` | 缺规范检测时钟规则；任务型起草提示词 |
 | `agents-md` | AGENTS.md 渲染模板 |
-| `inbound-triage` | 来源规则（含 GitHub、邮件、日历；邮件和日历按语义类型匹配，不绑定工具）；webhook 校验方案与字段映射；判断型提示词（是否建议、kind、项目，声明 `event_stats`）；生成型提示词（标题、摘要、候选抽取） |
+| `inbound-triage` | 来源规则（含 GitHub、邮件、日历；邮件和日历按语义类型匹配，包内不出现工具名，首版适配器 himalaya、gog calendar 与后续组合共用同一组规则，主文档 §9.7）；webhook 校验方案与字段映射；判断型提示词（是否建议、kind、项目，声明 `event_stats`）；生成型提示词（标题、摘要、候选抽取） |
 | `delegation-verify` | 响应 `delegation.reported` 的事件规则，初始 `observe`；判断型初筛提示词；任务型核验提示词 |

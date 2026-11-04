@@ -2,7 +2,7 @@
 
 APA 是架在 agent harness 之上的开源、自部署个人 agent 层，它让只在被调用时才工作的 harness 能主动感知、主动跟进、了解用户，使人的注意力回到自己真正需要关注的事情上。
 
-APA 的设计已定稿，尚无代码。首版 harness 只有 Hermes，其他 harness 在它端到端验证完成后接入（§20）。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
+APA 的设计已定稿，尚无代码。首版支持 Hermes，接口按多 harness 设计，其他 harness 在 Hermes 端到端验证完成后接入（§20）。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
 
 ## 文档清单
 
