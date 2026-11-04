@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>APA 入站流水线</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'JetBrains Mono', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+    
+    .container {
+      max-width: 1690px;
+      margin: 0 auto;
+    }
+    
+    .header {
+      margin-bottom: 2rem;
+    }
+    
+    .header-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+    }
+    
+    .pulse-dot {
+      width: 12px;
+      height: 12px;
+      background: #22d3ee;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+    }
+    
+    .subtitle {
+      color: #cbd5e1;
+      font-size: 0.9375rem;
+      margin-left: 1.75rem;
+    }
+    
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+    
+    svg {
+      width: 100%;
+      min-width: 1570px;
+      display: block;
+    }
+    
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+    }
+    
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    
+    .card-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+    
+    .card h3 {
+      font-size: 0.9375rem;
+      font-weight: 600;
+    }
+    
+    .card ul {
+      list-style: none;
+      color: #cbd5e1;
+      font-size: 0.8125rem;
+    }
+    
+    .card li {
+      margin-bottom: 0.375rem;
+    }
+    
+    .footer {
+      text-align: center;
+      margin-top: 1.5rem;
+      color: #94a3b8;
+      font-size: 0.8125rem;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      margin-left: auto;
+      flex-shrink: 0;
+      align-items: center;
+    }
+    .toolbar-toggle {
+      background: transparent;
+      border: none;
+      color: #475569;
+      cursor: pointer;
+      font-size: 1.25rem;
+      line-height: 1;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.375rem;
+      transition: color 0.2s, background 0.2s;
+    }
+    .toolbar-toggle:hover { color: #94a3b8; background: rgba(30, 41, 59, 0.5); }
+    .toolbar-actions {
+      display: none;
+      gap: 0.5rem;
+    }
+    .toolbar.expanded .toolbar-actions { display: flex; }
+    .toolbar-actions button {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid #334155;
+      color: #94a3b8;
+      padding: 0.375rem 0.75rem;
+      border-radius: 0.375rem;
+      font-family: inherit;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .toolbar-actions button:hover {
+      background: rgba(51, 65, 85, 0.8);
+      color: white;
+      border-color: #475569;
+    }
+
+    @media print {
+      body { background: #020617; padding: 1rem; }
+      .toolbar { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container" id="report-container">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>APA 入站流水线</h1>
+        <div class="toolbar">
+          <div class="toolbar-actions">
+            <button onclick="copyAsImage(this)">📋 Copy</button>
+            <button onclick="downloadPNG(this)">🖼️ PNG</button>
+            <button onclick="downloadPDF(this)">📄 PDF</button>
+          </div>
+          <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">⋯</button>
+        </div>
+      </div>
+      <p class="subtitle">外部事件从进入 APA 到成为建议或挂靠到原事项的路径</p>
+    </div>
+
+    <!-- Main Diagram -->
+    <div class="diagram-container">
+      <svg viewBox="0 0 1570 650" role="img" aria-label="APA 入站流水线">
+<defs>
+<marker id="arrow-sync" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#cbd5e1"/></marker><marker id="arrow-event" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#38bdf8"/></marker><marker id="arrow-opt" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#cbd5e1"/></marker><marker id="arrow-bg" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#fde047"/></marker><marker id="arrow-deny" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#fb7185"/></marker>
+<pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+</defs>
+<rect width="100%" height="100%" fill="url(#grid)"/>
+<rect class="frame" x="20" y="24" width="246" height="360" rx="10" fill="rgba(15,23,42,0.55)" stroke="#f97316" stroke-width="1.5"/>
+<text x="32" y="44" fill="#f97316" font-size="14" font-weight="700">入站三型</text>
+<path class="conn" d="M 250 92 L 286 92 L 286 176 L 320 176" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 142 244 L 142 298" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 250 330 L 286 330 L 286 206 L 320 206" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 516 190 L 580 190" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 680 156 L 680 96 L 840 96" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 1060 96 L 1120 96" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 680 224 L 680 300" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 780 334 L 840 334" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 1040 334 L 1100 334" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 1300 334 L 1344 334" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 1000 368 L 1000 392 L 1400 392 L 1400 368" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 680 368 L 680 492 L 1450 492 L 1450 368" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 900 368 L 900 412" fill="none" stroke="#cbd5e1" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-opt)"/>
+<path class="conn" d="M 1290 132 L 1290 256 L 940 256 L 940 300" fill="none" stroke="#cbd5e1" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-opt)"/>
+<path class="conn" d="M 1510 368 L 1510 580 L 1330 580" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 1100 580 L 1040 580" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 840 580 L 780 580" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 580 580 L 520 580" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<rect x="36" y="60" width="214" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="36" y="60" width="214" height="64" rx="6" fill="rgba(154, 52, 18, 0.45)" stroke="#f97316" stroke-width="1.5"/>
+<text x="143.0" y="87.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">定时拉取 · 自定义脚本</text>
+<text x="143.0" y="106.0" fill="#e2e8f0" font-size="13" text-anchor="middle">时钟拉起 · 同一执行契约</text>
+<rect x="36" y="180" width="214" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="36" y="180" width="214" height="64" rx="6" fill="rgba(154, 52, 18, 0.45)" stroke="#f97316" stroke-width="1.5"/>
+<text x="143.0" y="207.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Webhook 接收</text>
+<text x="143.0" y="226.0" fill="#e2e8f0" font-size="13" text-anchor="middle">校验 · 落盘 · 回 2xx</text>
+<rect x="36" y="298" width="214" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="36" y="298" width="214" height="64" rx="6" fill="rgba(154, 52, 18, 0.45)" stroke="#f97316" stroke-width="1.5"/>
+<text x="143.0" y="325.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">字段映射 · 转换脚本</text>
+<text x="143.0" y="344.0" fill="#e2e8f0" font-size="13" text-anchor="middle">能力包映射或脚本转换</text>
+<rect x="320" y="156" width="196" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="320" y="156" width="196" height="68" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+<text x="418.0" y="185.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">去重</text>
+<text x="418.0" y="204.0" fill="#e2e8f0" font-size="13" text-anchor="middle">去重域 + 事件 id</text>
+<rect x="580" y="156" width="200" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="580" y="156" width="200" height="68" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+<text x="680.0" y="185.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">跟进消息归属</text>
+<text x="680.0" y="204.0" fill="#e2e8f0" font-size="13" text-anchor="middle">按关联键匹配</text>
+<rect x="840" y="62" width="220" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="840" y="62" width="220" height="68" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="950.0" y="91.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">挂靠原事项</text>
+<text x="950.0" y="110.0" fill="#e2e8f0" font-size="13" text-anchor="middle">不进规则与判断</text>
+<rect x="1120" y="62" width="420" height="70" rx="6" fill="#0f172a"/>
+<rect class="box" x="1120" y="62" width="420" height="70" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="1330.0" y="92.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">转给负责执行者</text>
+<text x="1330.0" y="111.0" fill="#e2e8f0" font-size="13" text-anchor="middle">经上下文增量 · 无人值守链路只转白名单发送者</text>
+<rect x="580" y="300" width="200" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="580" y="300" width="200" height="68" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+<text x="680.0" y="329.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">确定性规则</text>
+<text x="680.0" y="348.0" fill="#e2e8f0" font-size="13" text-anchor="middle">名单 · 直接映射 · 归项目</text>
+<rect x="840" y="300" width="200" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="840" y="300" width="200" height="68" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+<text x="940.0" y="329.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">判断型</text>
+<text x="940.0" y="348.0" fill="#e2e8f0" font-size="13" text-anchor="middle">是否建议 · kind · 项目</text>
+<rect x="1100" y="300" width="200" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="1100" y="300" width="200" height="68" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+<text x="1200.0" y="329.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">生成型</text>
+<text x="1200.0" y="348.0" fill="#e2e8f0" font-size="13" text-anchor="middle">起标题与摘要</text>
+<rect x="1344" y="300" width="200" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="1344" y="300" width="200" height="68" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="1444.0" y="329.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">proposed</text>
+<text x="1444.0" y="348.0" fill="#e2e8f0" font-size="13" text-anchor="middle">不计承诺 · 不投递</text>
+<rect x="800" y="412" width="200" height="60" rx="6" fill="#0f172a"/>
+<rect class="box" x="800" y="412" width="200" height="60" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="900.0" y="437.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">不建事项</text>
+<text x="900.0" y="456.0" fill="#e2e8f0" font-size="13" text-anchor="middle">只记处置结果</text>
+<rect x="1100" y="546" width="230" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="1100" y="546" width="230" height="68" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="1215.0" y="575.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">建议流</text>
+<text x="1215.0" y="594.0" fill="#e2e8f0" font-size="13" text-anchor="middle">Web 列表 · 下次上下文带入</text>
+<rect x="840" y="546" width="200" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="840" y="546" width="200" height="68" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="940.0" y="575.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">本人接受</text>
+<text x="940.0" y="594.0" fill="#e2e8f0" font-size="13" text-anchor="middle">open 或 needs_input</text>
+<rect x="580" y="546" width="200" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="580" y="546" width="200" height="68" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="680.0" y="575.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">触达</text>
+<text x="680.0" y="594.0" fill="#e2e8f0" font-size="13" text-anchor="middle">打扰控制 · 产出 Delivery</text>
+<rect x="320" y="546" width="200" height="68" rx="6" fill="#0f172a"/>
+<rect class="box" x="320" y="546" width="200" height="68" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="420.0" y="575.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">投递消费方</text>
+<text x="420.0" y="594.0" fill="#e2e8f0" font-size="13" text-anchor="middle">注入 · 插件 · ext · Web</text>
+<text class="lab" x="690" y="88" fill="#38bdf8" font-size="13" text-anchor="start">命中已委派的未关闭事项</text>
+<text class="lab" x="690" y="268" fill="#38bdf8" font-size="13" text-anchor="start">未命中 · 只命中已关闭 · 命中多个</text>
+<text class="lab" x="1070" y="326" fill="#38bdf8" font-size="13" text-anchor="middle">低置信</text>
+<text class="lab" x="1200" y="412" fill="#38bdf8" font-size="13" text-anchor="middle">置信度足够</text>
+<text class="lab" x="1100" y="484" fill="#38bdf8" font-size="13" text-anchor="middle">规则已能判定</text>
+<text class="lab" x="1120" y="248" fill="#cbd5e1" font-size="13" text-anchor="middle">交回一次 · 事项关闭时退回</text>
+<text class="lab" x="890" y="394" fill="#cbd5e1" font-size="13" text-anchor="end">不值得</text>
+<rect class="legend" x="24" y="410" width="270" height="96" rx="10" fill="rgba(15,23,42,0.55)" stroke="#334155" stroke-width="1"/>
+<text x="40" y="434" fill="white" font-size="14" font-weight="600">图例 · 连线</text>
+<path d="M 40 454 L 100 454" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<text x="112" y="459" fill="#e2e8f0" font-size="13">事件主路径</text>
+<path d="M 40 476 L 100 476" fill="none" stroke="#cbd5e1" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-opt)"/>
+<text x="112" y="481" fill="#e2e8f0" font-size="13">退回或不入账</text>
+</svg>
+    </div>
+
+    <!-- Info Cards -->
+    <div class="cards">
+      <div class="card"><div class="card-header"><div class="card-dot cyan"></div><h3>统一流水线</h3></div>
+        <ul><li>• 三种来源只在入口不同，转换成标准事件后走同一条路</li><li>• 去重键为去重域加事件 id，事件落盘后才推进游标</li><li>• 原始 payload 落盘后才回 2xx，崩溃不丢事件</li></ul></div>
+      <div class="card"><div class="card-header"><div class="card-dot violet"></div><h3>规则优先，模型兜底</h3></div>
+        <ul><li>• 规则能判定的不调模型</li><li>• 判断型只回枚举与置信度，低置信再升级</li><li>• 模型不可用时事件标记未判定，留在来源页，不丢</li></ul></div>
+      <div class="card"><div class="card-header"><div class="card-dot emerald"></div><h3>跟进消息不重复建事项</h3></div>
+        <ul><li>• 关联键命中已委派的未关闭事项才挂靠，命中多个或只命中已关闭时不猜</li><li>• 无人值守链路只转白名单发送者，其余只进 Web 与本人在场的主会话</li><li>• 挂靠消息一律不拉起新运行</li></ul></div>
+    </div>
+
+    <!-- Footer -->
+    <p class="footer">APA · 入站流水线</p>
+  </div>
+
+  <script>
+    async function copyAsImage(btn) {
+      const orig = btn.textContent;
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        btn.textContent = '✓ Copied!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPNG(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const link = document.createElement('a');
+        link.download = 'diagram.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPDF(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
+        const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height], hotfixes: ['px_scaling'] });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save('diagram.pdf');
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+  </script>
+</body>
+</html>

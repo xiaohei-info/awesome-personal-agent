@@ -1,0 +1,41 @@
+# 文档索引
+
+APA 目前处于设计评审阶段，尚无代码。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
+
+## 文档清单
+
+| 文档 | 内容 | 什么时候读 |
+|---|---|---|
+| [solution-design.md](solution-design.md) | 主设计文档：背景、目标、场景、架构、领域模型、模块详设、安全、路线、待评审决定 | 必读 |
+| [appendix-a-harness.md](appendix-a-harness.md) | 插件约定、无头运行声明、各 harness 的标志与退出码、钩子全表 | 开发 harness 插件时 |
+| [appendix-b-api-cli.md](appendix-b-api-cli.md) | CLI 逐条清单、HTTP 路由、错误响应、标准事件类型 | 开发内核、CLI、Web、ext 时 |
+| [appendix-c-capability-pack.md](appendix-c-capability-pack.md) | `pack.yaml` 字段、枚举动作、提示词约定、校验规则、示例 | 编写或加载能力包时 |
+
+## 图
+
+每张图都有可交互的 HTML 和渲染好的 PNG。
+
+| 图 | 文件 | 正文位置 |
+|---|---|---|
+| 系统架构 | [HTML](diagrams/architecture.html) · [PNG](diagrams/architecture.png) | §5.1 |
+| 领域模型 | [HTML](diagrams/domain-model.html) · [PNG](diagrams/domain-model.png) | §6.1 |
+| 事项生命周期 | [HTML](diagrams/item-lifecycle.html) · [PNG](diagrams/item-lifecycle.png) | §6.4 |
+| 入站流水线 | [HTML](diagrams/inbound-pipeline.html) · [PNG](diagrams/inbound-pipeline.png) | §9 |
+| 后台执行 | [HTML](diagrams/background-execution.html) · [PNG](diagrams/background-execution.png) | §13.6 |
+
+## 阅读顺序
+
+| 读者 | 建议顺序 |
+|---|---|
+| 评审者 | §1–§5 → §13.6 → §14 → §20–§21 |
+| 内核与 Web 开发者 | §5 → §6–§10 → §12–§15 → §17 → 附录 B、C |
+| harness 插件开发者 | §5 → §6.13 → §11 → §13.6 → §14 → 附录 A |
+| ext 与 Source 开发者 | §5 → §9 → §10 → §17 → 附录 B |
+
+## 目录约定
+
+- 主文档章节编号保持稳定，其他文档用 `§` 引用。
+- 新增文档必须登记到本页；附录数量保持克制。
+- `diagrams/<名称>.html` 与同名 `.png` 成对存在，一起更新。
+- 文档写当前设计，用现在时；待评审决定有结论后写回相应章节。
+- 改行为时的同步要求见 [`AGENTS.md`](../AGENTS.md)。

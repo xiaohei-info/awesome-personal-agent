@@ -1,0 +1,46 @@
+# 操作系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# 凭据与本地配置（任何情况下都不提交）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+credentials.yaml
+secrets.json
+secrets.yaml
+
+# 运行数据（账本、附件、运行记录都属于本地数据目录）
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+/data/
+/.apa/
+
+# 日志与临时文件
+*.log
+logs/
+tmp/
+.cache/
+coverage/
+
+# 构建产物与依赖目录
+dist/
+build/
+/bin/
+out/
+node_modules/
+vendor/
+__pycache__/
+*.py[cod]
+.venv/

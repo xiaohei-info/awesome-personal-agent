@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>APA 后台执行</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'JetBrains Mono', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+    
+    .container {
+      max-width: 1690px;
+      margin: 0 auto;
+    }
+    
+    .header {
+      margin-bottom: 2rem;
+    }
+    
+    .header-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+    }
+    
+    .pulse-dot {
+      width: 12px;
+      height: 12px;
+      background: #22d3ee;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+    }
+    
+    .subtitle {
+      color: #cbd5e1;
+      font-size: 0.9375rem;
+      margin-left: 1.75rem;
+    }
+    
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+    
+    svg {
+      width: 100%;
+      min-width: 1570px;
+      display: block;
+    }
+    
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+    }
+    
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    
+    .card-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+    
+    .card h3 {
+      font-size: 0.9375rem;
+      font-weight: 600;
+    }
+    
+    .card ul {
+      list-style: none;
+      color: #cbd5e1;
+      font-size: 0.8125rem;
+    }
+    
+    .card li {
+      margin-bottom: 0.375rem;
+    }
+    
+    .footer {
+      text-align: center;
+      margin-top: 1.5rem;
+      color: #94a3b8;
+      font-size: 0.8125rem;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      margin-left: auto;
+      flex-shrink: 0;
+      align-items: center;
+    }
+    .toolbar-toggle {
+      background: transparent;
+      border: none;
+      color: #475569;
+      cursor: pointer;
+      font-size: 1.25rem;
+      line-height: 1;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.375rem;
+      transition: color 0.2s, background 0.2s;
+    }
+    .toolbar-toggle:hover { color: #94a3b8; background: rgba(30, 41, 59, 0.5); }
+    .toolbar-actions {
+      display: none;
+      gap: 0.5rem;
+    }
+    .toolbar.expanded .toolbar-actions { display: flex; }
+    .toolbar-actions button {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid #334155;
+      color: #94a3b8;
+      padding: 0.375rem 0.75rem;
+      border-radius: 0.375rem;
+      font-family: inherit;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .toolbar-actions button:hover {
+      background: rgba(51, 65, 85, 0.8);
+      color: white;
+      border-color: #475569;
+    }
+
+    @media print {
+      body { background: #020617; padding: 1rem; }
+      .toolbar { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container" id="report-container">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>APA 后台执行</h1>
+        <div class="toolbar">
+          <div class="toolbar-actions">
+            <button onclick="copyAsImage(this)">📋 Copy</button>
+            <button onclick="downloadPNG(this)">🖼️ PNG</button>
+            <button onclick="downloadPDF(this)">📄 PDF</button>
+          </div>
+          <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">⋯</button>
+        </div>
+      </div>
+      <p class="subtitle">无人值守运行的触发、两种运行者、委派回收与续接</p>
+    </div>
+
+    <!-- Main Diagram -->
+    <div class="diagram-container">
+      <svg viewBox="0 0 1570 654" role="img" aria-label="APA 后台执行">
+<defs>
+<marker id="arrow-sync" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#cbd5e1"/></marker><marker id="arrow-event" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#38bdf8"/></marker><marker id="arrow-opt" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#cbd5e1"/></marker><marker id="arrow-bg" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#fde047"/></marker><marker id="arrow-deny" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#fb7185"/></marker>
+<pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+</defs>
+<rect width="100%" height="100%" fill="url(#grid)"/>
+<rect class="frame" x="20" y="14" width="1530" height="232" rx="10" fill="rgba(15,23,42,0.55)" stroke="#34d399" stroke-width="1.5"/>
+<text x="32" y="34" fill="#34d399" font-size="14" font-weight="700">内核</text>
+<rect class="frame" x="600" y="276" width="950" height="132" rx="10" fill="rgba(15,23,42,0.55)" stroke="#fbbf24" stroke-width="1.5"/>
+<text x="612" y="296" fill="#fbbf24" font-size="14" font-weight="700">运行者</text>
+<text x="684" y="296" fill="#e2e8f0" font-size="13">无头运行时进程在 APA 所在主机，由外呼调用器拉起</text>
+<path class="conn" d="M 230 102 L 280 102" fill="none" stroke="#fde047" stroke-width="1.8" marker-end="url(#arrow-bg)"/>
+<path class="conn" d="M 500 102 L 540 102" fill="none" stroke="#fde047" stroke-width="1.8" marker-end="url(#arrow-bg)"/>
+<path class="conn" d="M 780 102 L 830 102" fill="none" stroke="#fde047" stroke-width="1.8" marker-end="url(#arrow-bg)"/>
+<path class="conn" d="M 1070 102 L 1110 102" fill="none" stroke="#fde047" stroke-width="1.8" marker-end="url(#arrow-bg)"/>
+<path class="conn" d="M 390 134 L 390 170" fill="none" stroke="#cbd5e1" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-opt)"/>
+<path class="conn" d="M 600 170 L 600 134" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 740 134 L 740 152 L 950 152 L 950 170" fill="none" stroke="#fb7185" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-deny)"/>
+<path class="conn" d="M 830 202 L 780 202" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 1000 70 L 1000 44 L 1450 44 L 1450 70" fill="none" stroke="#cbd5e1" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-opt)"/>
+<path class="conn" d="M 1220 134 L 1220 276" fill="none" stroke="#fde047" stroke-width="1.8" marker-end="url(#arrow-bg)"/>
+<path class="conn" d="M 1450 134 L 1450 312" fill="none" stroke="#cbd5e1" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-opt)"/>
+<path class="conn" d="M 950 276 L 950 234" fill="none" stroke="#fb7185" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-deny)"/>
+<path class="conn" d="M 830 392 L 830 442" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 1200 392 L 1200 442" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 1324 474 L 1370 474" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 1450 506 L 1450 566" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 1080 598 L 1040 598" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 620 598 L 60 598 L 60 134" fill="none" stroke="#fde047" stroke-width="1.8" marker-end="url(#arrow-bg)"/>
+<rect x="40" y="70" width="190" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="40" y="70" width="190" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="135.0" y="97.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">时钟 · 事件规则</text>
+<text x="135.0" y="116.0" fill="#e2e8f0" font-size="13" text-anchor="middle">能力包规则触发</text>
+<rect x="280" y="70" width="220" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="280" y="70" width="220" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="390.0" y="97.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">观察模式判定</text>
+<text x="390.0" y="116.0" fill="#e2e8f0" font-size="13" text-anchor="middle">off · observe · auto</text>
+<rect x="280" y="170" width="220" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="280" y="170" width="220" height="64" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+<text x="390.0" y="197.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">只记 Event</text>
+<text x="390.0" y="216.0" fill="#e2e8f0" font-size="13" text-anchor="middle">本来会做什么</text>
+<rect x="540" y="70" width="240" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="540" y="70" width="240" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="660.0" y="97.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">前置校验</text>
+<text x="660.0" y="116.0" fill="#e2e8f0" font-size="13" text-anchor="middle">策略复核 · 单运行 · 链路深度</text>
+<rect x="540" y="170" width="240" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="540" y="170" width="240" height="64" rx="6" fill="rgba(136, 19, 55, 0.35)" stroke="#fb7185" stroke-width="1.5"/>
+<text x="660.0" y="197.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">本人回答</text>
+<text x="660.0" y="216.0" fill="#e2e8f0" font-size="13" text-anchor="middle">按当前策略复核后续接</text>
+<rect x="830" y="70" width="240" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="830" y="70" width="240" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="950.0" y="97.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">运行记录</text>
+<text x="950.0" y="116.0" fill="#e2e8f0" font-size="13" text-anchor="middle">运行凭据 · 授权依据</text>
+<rect x="830" y="170" width="240" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="830" y="170" width="240" height="64" rx="6" fill="rgba(136, 19, 55, 0.35)" stroke="#fb7185" stroke-width="1.5"/>
+<text x="950.0" y="197.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">needs_input</text>
+<text x="950.0" y="216.0" fill="#e2e8f0" font-size="13" text-anchor="middle">决策请求 · 触达送达</text>
+<rect x="1110" y="70" width="220" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="1110" y="70" width="220" height="64" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+<text x="1220.0" y="97.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">外呼调用器</text>
+<text x="1220.0" y="116.0" fill="#e2e8f0" font-size="13" text-anchor="middle">无头运行 · 续接</text>
+<rect x="1370" y="70" width="160" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="1370" y="70" width="160" height="64" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+<text x="1450.0" y="97.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">唤醒类投递</text>
+<text x="1450.0" y="116.0" fill="#e2e8f0" font-size="13" text-anchor="middle">网关插件领取</text>
+<rect x="620" y="312" width="420" height="80" rx="6" fill="#0f172a"/>
+<rect class="box" x="620" y="312" width="420" height="80" rx="6" fill="rgba(113, 80, 15, 0.28)" stroke="#fbbf24" stroke-width="1.5"/>
+<text x="830.0" y="337.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">runner = task</text>
+<text x="830.0" y="357.0" fill="#e2e8f0" font-size="13" text-anchor="middle">任务型专属 agent · 能力包提示词 · 自己完成工作</text>
+<text x="830.0" y="376.0" fill="#e2e8f0" font-size="13" text-anchor="middle">读上下文按白名单过滤 · 不能代本人决策</text>
+<rect x="1080" y="312" width="450" height="80" rx="6" fill="#0f172a"/>
+<rect class="box" x="1080" y="312" width="450" height="80" rx="6" fill="rgba(113, 80, 15, 0.28)" stroke="#fbbf24" stroke-width="1.5"/>
+<text x="1305.0" y="337.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">runner = main_session</text>
+<text x="1305.0" y="357.0" fill="#e2e8f0" font-size="13" text-anchor="middle">主会话角色 · 同一份指令、技能与执行者调用方式</text>
+<text x="1305.0" y="376.0" fill="#e2e8f0" font-size="13" text-anchor="middle">读上下文按白名单过滤 · 可委派与回执 · 不能代本人决策</text>
+<rect x="620" y="442" width="420" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="620" y="442" width="420" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="830.0" y="469.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">回执</text>
+<text x="830.0" y="488.0" fill="#e2e8f0" font-size="13" text-anchor="middle">经 CLI 或 stdout 末段写回 · 目标事项带证据</text>
+<rect x="1080" y="442" width="244" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="1080" y="442" width="244" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="1202.0" y="469.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">apa delegate</text>
+<text x="1202.0" y="488.0" fill="#e2e8f0" font-size="13" text-anchor="middle">内核校验项目允许执行者</text>
+<rect x="1370" y="442" width="160" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="1370" y="442" width="160" height="64" rx="6" fill="rgba(113, 80, 15, 0.28)" stroke="#fbbf24" stroke-width="1.5"/>
+<text x="1450.0" y="469.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">执行者</text>
+<text x="1450.0" y="488.0" fill="#e2e8f0" font-size="13" text-anchor="middle">可在任何主机</text>
+<rect x="1080" y="566" width="450" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="1080" y="566" width="450" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="1305.0" y="593.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">子事项回执</text>
+<text x="1305.0" y="612.0" fill="#e2e8f0" font-size="13" text-anchor="middle">执行者经 CLI 写回 · 子事项 done · 父事项回 open</text>
+<rect x="620" y="566" width="420" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="620" y="566" width="420" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="830.0" y="593.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">接续</text>
+<text x="830.0" y="612.0" fill="#e2e8f0" font-size="13" text-anchor="middle">原会话已结束时由下一次后台运行或主会话注入接续</text>
+<text class="lab" x="398" y="156" fill="#cbd5e1" font-size="13" text-anchor="start">observe</text>
+<text class="lab" x="608" y="156" fill="#cbd5e1" font-size="13" text-anchor="start">复核</text>
+<text class="lab" x="852" y="146" fill="#fb7185" font-size="13" text-anchor="middle">复核不通过</text>
+<text class="lab" x="1225" y="38" fill="#cbd5e1" font-size="13" text-anchor="middle">插件声明为唤醒时</text>
+<text class="lab" x="1230" y="200" fill="#fde047" font-size="13" text-anchor="start">无头运行</text>
+<text class="lab" x="1460" y="200" fill="#cbd5e1" font-size="13" text-anchor="start">唤醒</text>
+<text class="lab" x="940" y="262" fill="#fb7185" font-size="13" text-anchor="end">需要决策 · 失败 · 超时</text>
+<text class="lab" x="70" y="360" fill="#fde047" font-size="13" text-anchor="start">规则再次触发 · 链路深度 +1</text>
+<rect class="legend" x="90" y="390" width="300" height="128" rx="10" fill="rgba(15,23,42,0.55)" stroke="#334155" stroke-width="1"/>
+<text x="106" y="414" fill="white" font-size="14" font-weight="600">图例 · 连线</text>
+<path d="M 106 434 L 166 434" fill="none" stroke="#fde047" stroke-width="1.8" marker-end="url(#arrow-bg)"/>
+<text x="178" y="439" fill="#e2e8f0" font-size="13">后台执行主路径</text>
+<path d="M 106 456 L 166 456" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<text x="178" y="461" fill="#e2e8f0" font-size="13">回执、委派与回答</text>
+<path d="M 106 478 L 166 478" fill="none" stroke="#cbd5e1" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-opt)"/>
+<text x="178" y="483" fill="#e2e8f0" font-size="13">可选路径</text>
+<path d="M 106 500 L 166 500" fill="none" stroke="#fb7185" stroke-width="1.8" stroke-dasharray="7,5" marker-end="url(#arrow-deny)"/>
+<text x="178" y="505" fill="#e2e8f0" font-size="13">转交本人</text>
+</svg>
+    </div>
+
+    <!-- Info Cards -->
+    <div class="cards">
+      <div class="card"><div class="card-header"><div class="card-dot amber"></div><h3>两种运行者</h3></div>
+        <ul><li>• task：任务型专属 agent，在子事项上承担执行者角色</li><li>• main_session：主会话角色，读上下文后像本人回复时一样处理事项，把工作委派给执行者</li><li>• 带网关的 harness 可由插件声明改为唤醒真实主会话，与无头运行二者择一</li></ul></div>
+      <div class="card"><div class="card-header"><div class="card-dot rose"></div><h3>内核强制的边界</h3></div>
+        <ul><li>• 运行凭据没有代答能力：不能决策，不能接受建议，需要决策时转 needs_input</li><li>• 只有转发白名单内发送者的跟进消息能进入无人值守链路</li><li>• 规则默认 observe，切换 auto 只在 Web</li><li>• 子事项 assignee 必须在项目允许的执行者范围内</li></ul></div>
+      <div class="card"><div class="card-header"><div class="card-dot violet"></div><h3>位置与续接</h3></div>
+        <ul><li>• 只约束运行者进程本身在 APA 所在主机，实际工作经委派可在任何主机</li><li>• 同一事项同时只有一个运行；账本是真理源，harness 会话可丢失</li><li>• 不支持续接或会话失效时，用新会话加事项上下文</li><li>• 全程可经 apa why 回放</li></ul></div>
+    </div>
+
+    <!-- Footer -->
+    <p class="footer">APA · 后台执行</p>
+  </div>
+
+  <script>
+    async function copyAsImage(btn) {
+      const orig = btn.textContent;
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        btn.textContent = '✓ Copied!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPNG(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const link = document.createElement('a');
+        link.download = 'diagram.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function downloadPDF(btn) {
+      const orig = btn.textContent;
+      btn.textContent = '⏳ ...';
+      try {
+        const el = document.getElementById('report-container');
+        const r = el.getBoundingClientRect();
+        const pad = 32;
+        const canvas = await html2canvas(document.body, { backgroundColor: '#020617', scale: 2, useCORS: true, ignoreElements: (e) => e.classList && e.classList.contains('toolbar'), x: r.left + window.scrollX - pad, y: r.top + window.scrollY - pad, width: r.width + pad * 2, height: r.height + pad * 2 });
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
+        const pdf = new jsPDF({ orientation, unit: 'px', format: [canvas.width, canvas.height], hotfixes: ['px_scaling'] });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save('diagram.pdf');
+        btn.textContent = '✓ Done!';
+      } catch (e) {
+        btn.textContent = '✗ Failed';
+      }
+      setTimeout(() => btn.textContent = orig, 2000);
+    }
+  </script>
+</body>
+</html>
