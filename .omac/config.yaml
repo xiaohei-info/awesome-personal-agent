@@ -7,6 +7,7 @@ roles:
   orchestrator: omac-orchestrator
   workers:
   - omac-worker-backend
+  - omac-worker-backend-oracle
   - omac-worker-frontend
   reviewers:
   - omac-reviewer
