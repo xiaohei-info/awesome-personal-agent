@@ -296,7 +296,7 @@ access: read
 | `brief` | kind `brief`；实例参数（周期、项目范围）；周期时钟规则；任务型提示词；列表与卡片视图 |
 | `review` | 实例参数（周期、项目范围）；周期时钟规则；任务型提示词；写回 `brief` kind，由 `spec.period` 区分周期 |
 | `follow-up` | 跟进间隔时钟规则；判断型提示词（枚举：催、再等、建议放弃、需要解释）；逐级升级用的生成型与任务型提示词 |
-| `decision-card` | 生成型提示词（决策卡片文案、一句话摘要、材料修订摘要）；判断型提示词（投递阈值） |
+| `decision-card` | 生成型提示词（决策卡片文案、一句话摘要、材料修订摘要）；判断型提示词（投递阈值、web_only 升级初筛） |
 | `background-run` | `start_background_run` 的规则样例，初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
 | `guideline-draft` | 缺规范检测时钟规则；任务型起草提示词 |
 | `agents-md` | AGENTS.md 渲染模板 |

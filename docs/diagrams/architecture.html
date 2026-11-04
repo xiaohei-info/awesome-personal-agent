@@ -381,7 +381,7 @@
 <rect class="chip" x="1460" y="628" width="130" height="40" rx="4" fill="rgba(15,23,42,0.75)" stroke="#fbbf24" stroke-opacity="0.8" stroke-width="1"/>
 <text x="1525.0" y="652.5" fill="#e2e8f0" font-size="13" text-anchor="middle">会话上下文注入</text>
 <rect class="chip" x="1600" y="628" width="130" height="40" rx="4" fill="rgba(15,23,42,0.75)" stroke="#fbbf24" stroke-opacity="0.8" stroke-width="1"/>
-<text x="1665.0" y="652.5" fill="#e2e8f0" font-size="13" text-anchor="middle">工具调用前后钩子</text>
+<text x="1665.0" y="652.5" fill="#e2e8f0" font-size="13" text-anchor="middle">工具调用后捕获</text>
 <rect class="chip" x="1320" y="680" width="130" height="40" rx="4" fill="rgba(15,23,42,0.75)" stroke="#fbbf24" stroke-opacity="0.8" stroke-width="1"/>
 <text x="1385.0" y="704.5" fill="#e2e8f0" font-size="13" text-anchor="middle">无头运行 · 续接</text>
 <rect class="chip" x="1460" y="680" width="130" height="40" rx="4" fill="rgba(15,23,42,0.75)" stroke="#fbbf24" stroke-opacity="0.8" stroke-width="1"/>
@@ -431,9 +431,11 @@
 <text class="lab" x="1235" y="188" fill="#cbd5e1" font-size="13" text-anchor="middle">命令 · 回执</text>
 <text class="lab" x="1186" y="560" fill="#fde047" font-size="13" text-anchor="start">后台执行</text>
 <text class="lab" x="1262" y="330" fill="#fde047" font-size="13" text-anchor="end">回执经 CLI</text>
-<text class="lab" x="1235" y="720" fill="#fde047" font-size="13" text-anchor="middle">无头运行</text>
-<text class="lab" x="1235" y="738" fill="#fde047" font-size="13" text-anchor="middle">任务型 Agent</text>
-<text class="lab" x="1235" y="756" fill="#fde047" font-size="13" text-anchor="middle">后台执行</text>
+<text class="lab" x="1235" y="720" fill="#fde047" font-size="13" text-anchor="middle">后台执行</text>
+<text class="lab" x="1235" y="738" fill="#fde047" font-size="13" text-anchor="middle">默认无头运行</text>
+<text class="lab" x="1235" y="760" fill="#fde047" font-size="13" text-anchor="middle">运行者两种：</text>
+<text class="lab" x="1235" y="778" fill="#fde047" font-size="13" text-anchor="middle">主会话角色</text>
+<text class="lab" x="1235" y="796" fill="#fde047" font-size="13" text-anchor="middle">任务型</text>
 <text class="lab" x="1326" y="490" fill="#cbd5e1" font-size="13" text-anchor="start">读取上下文</text>
 <text class="lab" x="1408" y="290" fill="#cbd5e1" font-size="13" text-anchor="start">回执上报</text>
 <text class="lab" x="1568" y="290" fill="#cbd5e1" font-size="13" text-anchor="start">命令调用</text>
@@ -480,7 +482,7 @@
       <div class="card"><div class="card-header"><div class="card-dot cyan"></div><h3>内核对外接口</h3></div>
         <ul><li>• 事件订阅：面向系统的稳定事件流</li><li>• 投递队列：面向渠道的提醒领取与送达回执</li><li>• 外部通知由消费方领取，内核不主动推送</li><li>• 健康视图：Web 与 CLI 统一呈现运行异常，只报不修</li></ul></div>
       <div class="card"><div class="card-header"><div class="card-dot violet"></div><h3>外呼与安全控制</h3></div>
-        <ul><li>• 外呼调用器：内核唯一外呼出口</li><li>• 外呼范围：模型调用与子进程运行</li><li>• 后台执行：由主动服务触发，无头运行，回执经 CLI 写回</li><li>• 高风险决策与策略变更：仅限 Web 中台确认</li></ul></div>
+        <ul><li>• 外呼调用器：内核唯一外呼出口</li><li>• 外呼范围：模型调用与子进程运行</li><li>• 后台执行：主动服务触发，运行者分主会话角色与任务型</li><li>• 高风险决策与策略变更：仅限 Web 中台确认</li></ul></div>
       <div class="card"><div class="card-header"><div class="card-dot amber"></div><h3>扩展机制</h3></div>
         <ul><li>• 能力包：声明式自动化定义，不含代码</li><li>• 外部扩展：独立密钥，按类型限权，可随时吊销</li><li>• Agent Harness：经通用接口接入，内核不依赖具体实现</li></ul></div>
     </div>

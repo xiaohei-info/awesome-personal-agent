@@ -2,6 +2,14 @@
 
 > 主文档 §11 的细节补充，面向插件开发者。依据各 harness 2026-11 的公开文档、源码与 CLI 帮助整理。标"需实测"的行为在实现相应插件时验证（§21.3），结论写回本附录。
 
+**实现优先级**（里程碑划分见 §20）：
+
+| 优先级 | harness | 说明 |
+|---|---|---|
+| 首批 | Hermes | 主会话、注入、无头运行、推送与唤醒都在它上面端到端验证。它没有通用的压缩前入口，压缩前保存跳过 |
+| 后续 | Claude Code、Codex CLI | 检验通用接口能否不改内核接入编码型 harness；压缩前保存在这里首次验证 |
+| 覆盖 | Gemini CLI、OpenCode、Pi、OpenClaw | 实测后再声明 |
+
 ## A.1 插件实现约定
 
 插件只实现 §11.2 的能力，钩子脚本只做"读 stdin、调内核、写 stdout"，不含判断逻辑。
@@ -21,7 +29,7 @@
 
 ## A.2 无头运行声明
 
-插件经 `apa declare <文件>` 提交，本人在 Web 确认后生效（§14.12）。内核只把它当数据处理，不认识具体 harness。
+插件经 `apa declare <文件>` 提交，本人在 Web 确认后生效；本人也可以直接写主机配置文件（§14.12）。内核只把它当数据处理，不认识具体 harness。
 
 | 字段 | 语义 |
 |---|---|
@@ -98,10 +106,10 @@ main_session:
 
 ## A.5 插件组合参考
 
+**Hermes**：`plugin.yaml` 声明钩子；`register(ctx)` 里 `register_system_prompt_section` 承担常驻指令（不超过 4000 字，新会话冻结）；`pre_llm_call` 承担会话开始注入和消息前注入（上下文进用户消息，插件内自设不超过 2 秒的超时）；`post_tool_call`、`subagent_stop` 承担回执捕获；`on_session_end` 承担候选捕获（回合级）；`register_tool` 把 CLI 包成原生工具并带上 `session_id`；`hermes send` 承担消息推送；`ctx.inject_message`（需开启 `allow_gateway_injection`）或 webhook 路由承担会话唤醒。
+
 **Claude Code**：常驻指令写成 skill；`SessionStart` 负责会话开始注入、`apa agents check`，并写 `$CLAUDE_ENV_FILE` 导出 `APA_SESSION`；`UserPromptSubmit` 负责消息前注入；`PostToolUse`、`SubagentStop` 负责回执捕获；`Stop` 负责候选捕获（用 `last_assistant_message`）；`PreCompact` 负责压缩前保存；执行者走 `Agent` 工具或 Bash。
 
 **Codex CLI**：常驻指令走 AGENTS.md 或 skill；`SessionStart`、`UserPromptSubmit`、`PostToolUse`、`SubagentStop`、`Stop`、`PreCompact` 对应同上；带钩子的插件需手动安装并在 `/hooks` 审核；默认只读沙箱可能阻止 CLI 访问 APA 端口，stdout 末段回执是这种情况下的兜底。
-
-**Hermes**：`plugin.yaml` 声明钩子；`register(ctx)` 里 `register_system_prompt_section` 承担常驻指令（不超过 4000 字，新会话冻结）；`pre_llm_call` 承担会话开始注入和消息前注入（上下文进用户消息，插件内自设不超过 2 秒的超时）；`post_tool_call`、`subagent_stop` 承担回执捕获；`on_session_end` 承担候选捕获（回合级）；`register_tool` 把 CLI 包成原生工具并带上 `session_id`；`hermes send` 承担消息推送；`ctx.inject_message`（需开启 `allow_gateway_injection`）或 webhook 路由承担会话唤醒。
 
 **OpenClaw**：`openclaw.plugin.json` + skills，钩子写在代码里；`before_prompt_build` 负责会话开始注入和消息前注入；`after_tool_call`、`subagent_ended` 负责回执捕获；`agent_end` 负责候选捕获；`before_compaction` 负责压缩前保存；`resolve_exec_env` 透传会话身份；`openclaw message send` 承担消息推送；`POST /hooks/agent` 或 `POST /hooks/wake` 承担会话唤醒。

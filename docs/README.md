@@ -1,12 +1,12 @@
 # 文档索引
 
-APA 目前处于设计评审阶段，尚无代码。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
+APA 的设计已定稿，尚无代码。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
 
 ## 文档清单
 
 | 文档 | 内容 | 什么时候读 |
 |---|---|---|
-| [solution-design.md](solution-design.md) | 主设计文档：背景、目标、场景、架构、领域模型、模块详设、安全、路线、待评审决定 | 必读 |
+| [solution-design.md](solution-design.md) | 主设计文档：背景、目标、场景、架构、领域模型、模块详设、安全、路线、已定决定与风险 | 必读 |
 | [appendix-a-harness.md](appendix-a-harness.md) | 插件约定、无头运行声明、各 harness 的标志与退出码、钩子全表 | 开发 harness 插件时 |
 | [appendix-b-api-cli.md](appendix-b-api-cli.md) | CLI 逐条清单、HTTP 路由、错误响应、标准事件类型 | 开发内核、CLI、Web、ext 时 |
 | [appendix-c-capability-pack.md](appendix-c-capability-pack.md) | `pack.yaml` 字段、枚举动作、提示词约定、校验规则、示例 | 编写或加载能力包时 |
@@ -37,5 +37,5 @@ APA 目前处于设计评审阶段，尚无代码。权威顺序：`docs/` 设�
 - 主文档章节编号保持稳定，其他文档用 `§` 引用。
 - 新增文档必须登记到本页；附录数量保持克制。
 - `diagrams/<名称>.html` 与同名 `.png` 成对存在，一起更新。
-- 文档写当前设计，用现在时；待评审决定有结论后写回相应章节。
+- 文档写当前设计，用现在时；已定决定写回相应章节，主文档 §21.1 只留结论与理由。
 - 改行为时的同步要求见 [`AGENTS.md`](../AGENTS.md)。
