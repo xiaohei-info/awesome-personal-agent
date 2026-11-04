@@ -1,0 +1,13 @@
+engine: multica
+language: cn
+workspace: 2e2d6fe6-a09e-440c-bb92-018e7dd7b11b
+project: a72a65fe-0850-4499-b253-4e142e615192
+roles:
+  planner: omac-planner
+  orchestrator: omac-orchestrator
+  workers:
+  - omac-worker-backend
+  - omac-worker-frontend
+  reviewers:
+  - omac-reviewer
+  acceptor: omac-acceptor

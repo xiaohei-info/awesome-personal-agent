@@ -16,14 +16,14 @@
 | `apa declare <文件>` | 提交插件声明（无头运行、执行者），本人在 Web 确认后生效 | worker | 4 |
 | **上下文** | | | |
 | `apa context [--session] [--scope project/cwd/item/all] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息 | observer | 3、7 |
-| `apa inbox` | 列出待决和建议 | observer | |
+| `apa inbox` | 列出待决和建议；web_only 初筛未返回的决策请求不列出 | observer | |
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建 | observer | |
 | `apa item show/list` | 读事项 | observer | 5 |
 | `apa item add/update/transition/relate` | 增改事项、转阶段、关联 | worker（自己的事项）；delegate（任意，附证据） | 4、6 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
-| `apa decide <id> --option --evidence` | 代答决策 | delegate | 4、6、20 |
+| `apa decide <id> --option --evidence` | 代答决策 | delegate | 4、6、20、22 |
 | `apa accept <id> --evidence` | 接受建议 | delegate | 4、20 |
 | `apa dismiss <id> --reason --evidence` | 丢弃建议 | delegate | 4 |
 | **委派** | | | |
@@ -118,7 +118,8 @@
 ```
 
 - `why` 与 `next` 只写机制，不含账本里的用户内容。`allowed` 是 Web 中配置的执行者 id。
-- HTTP 状态与退出码的对应：400 → 2；401 → 3；403 → 4、20、21（由 `code` 区分）；404 → 5；409 → 6；其余错误 → 1。不可达时 CLI 返回 7。
+- HTTP 状态与退出码的对应：400 → 2；401 → 3；403 → 4、20、21、22（由 `code` 区分）；404 → 5；409 → 6；其余错误 → 1。不可达时 CLI 返回 7。
+- 退出码 22 的 `code` 为 `risk_screening_pending`，`why` 说明 web_only 初筛未返回，`web_url` 给出 Web 链接（主文档 §14.4）。
 
 ## B.4 标准事件类型
 
