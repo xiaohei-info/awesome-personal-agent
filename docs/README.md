@@ -1,6 +1,6 @@
 # 文档索引
 
-APA 是架在 agent harness 之上的开源、自部署个人 agent 层，它让只在被叫到时才干活的 harness 能主动感知、主动跟进、了解用户，使人的注意力回到自己真正需要关注的事情上。
+APA 是架在 agent harness 之上的开源、自部署个人 agent 层，它让只在被调用时才工作的 harness 能主动感知、主动跟进、了解用户，使人的注意力回到自己真正需要关注的事情上。
 
 APA 的设计已定稿，尚无代码。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
 

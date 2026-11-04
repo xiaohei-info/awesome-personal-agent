@@ -74,6 +74,15 @@ source_rules:
     kind: task
     project_by: repo_remote
     then: proposed
+  - id: calendar-event
+    match: {source_type: caldav, event_type: [event.created, event.updated]}
+    kind: task
+    project_by: "fixed:<项目>"
+    then: proposed
+  - id: mail-received
+    match: {source_type: imap, event_type: [mail.received]}
+    project_by: "fixed:<项目>"
+    then: judge
 ```
 
 **webhook_schemes**：校验方案。内核按数据执行，不含产品分支。
@@ -147,6 +156,7 @@ front matter 二选一：`agent` 声明专属 agent 类别，或 `run_as` 声明
 | `confidence_threshold` | 判断型的升级阈值 |
 | `output_schema` | 生成型必填，JSON Schema，含"信息不足"的标记 |
 | `escalate_to` | 级联目标模板 |
+| `event_stats` | 判断型、生成型可选。要附带的 Event 统计，当前只有 `proposal_outcome`：同一来源、kind、项目下，建议被本人接受和丢弃的次数，默认统计最近 90 天（主文档 §8.4）。web_only 初筛不附带统计 |
 | `timeout` | 超时 |
 | `access` | 经 `call_agent` 调用任务型时需要的权限档位。后台运行以规则动作里的声明为准 |
 | `cwd` | 经 `call_agent` 调用任务型时的工作目录：`run_dir`（默认）或 `project_checkout`（本机有检出时使用）。后台运行同样以规则动作为准 |
@@ -196,6 +206,7 @@ Markdown 模板，占位符由连接模块提供。`agents-md` 包的 `templates
 | `mode` 声明为 `auto` | 拒绝 |
 | 出现可执行命令、脚本路径、策略字段 | 拒绝 |
 | 判断型要求产出文本、生成型声明工具 | 拒绝 |
+| `event_stats` 不在枚举内，或声明在判断型、生成型以外的模板上 | 拒绝 |
 | `run_as: main_session` 带 `escalate_to` | 拒绝 |
 | 动作不在枚举内 | 拒绝 |
 | JSON Schema 不合法 | 拒绝 |
@@ -300,5 +311,5 @@ access: read
 | `background-run` | `start_background_run` 的规则样例，初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
 | `guideline-draft` | 缺规范检测时钟规则；任务型起草提示词 |
 | `agents-md` | AGENTS.md 渲染模板 |
-| `inbound-triage` | 来源规则；webhook 校验方案与字段映射；判断型提示词（是否建议、kind、项目）；生成型提示词（标题、摘要、候选抽取） |
+| `inbound-triage` | 来源规则（含 GitHub、IMAP 邮件、CalDAV 日历）；webhook 校验方案与字段映射；判断型提示词（是否建议、kind、项目，声明 `event_stats`）；生成型提示词（标题、摘要、候选抽取） |
 | `delegation-verify` | 响应 `delegation.reported` 的事件规则，初始 `observe`；判断型初筛提示词；任务型核验提示词 |
