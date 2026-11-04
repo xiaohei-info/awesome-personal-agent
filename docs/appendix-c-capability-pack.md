@@ -59,7 +59,7 @@ kinds:
 | 字段 | 语义 |
 |---|---|
 | `id` | 规则 id |
-| `match` | 来源类型或 id、事件类型，平铺的相等或成员判断 |
+| `match` | 来源类型（Source 登记的 `source_type`，如 `github`、`mail`、`calendar`，不随具体工具变化）或 id、事件类型，平铺的相等或成员判断 |
 | `kind` | 直接映射的 kind |
 | `project_by` | `repo_remote`（按仓库远程地址归项目）、`fixed:<项目>`、`none` |
 | `then` | `proposed`（默认）、`ignore`、`judge`（交判断型） |
@@ -75,12 +75,12 @@ source_rules:
     project_by: repo_remote
     then: proposed
   - id: calendar-event
-    match: {source_type: caldav, event_type: [event.created, event.updated]}
+    match: {source_type: calendar, event_type: [event.created, event.updated]}
     kind: task
     project_by: "fixed:<项目>"
     then: proposed
   - id: mail-received
-    match: {source_type: imap, event_type: [mail.received]}
+    match: {source_type: mail, event_type: [mail.received]}
     project_by: "fixed:<项目>"
     then: judge
 ```
@@ -311,5 +311,5 @@ access: read
 | `background-run` | `start_background_run` 的规则样例，初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
 | `guideline-draft` | 缺规范检测时钟规则；任务型起草提示词 |
 | `agents-md` | AGENTS.md 渲染模板 |
-| `inbound-triage` | 来源规则（含 GitHub、IMAP 邮件、CalDAV 日历）；webhook 校验方案与字段映射；判断型提示词（是否建议、kind、项目，声明 `event_stats`）；生成型提示词（标题、摘要、候选抽取） |
+| `inbound-triage` | 来源规则（含 GitHub、邮件、日历；邮件和日历按语义类型匹配，不绑定工具）；webhook 校验方案与字段映射；判断型提示词（是否建议、kind、项目，声明 `event_stats`）；生成型提示词（标题、摘要、候选抽取） |
 | `delegation-verify` | 响应 `delegation.reported` 的事件规则，初始 `observe`；判断型初筛提示词；任务型核验提示词 |

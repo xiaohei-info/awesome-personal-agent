@@ -2,14 +2,14 @@
 
 APA 是架在 agent harness 之上的开源、自部署个人 agent 层，它让只在被调用时才工作的 harness 能主动感知、主动跟进、了解用户，使人的注意力回到自己真正需要关注的事情上。
 
-APA 的设计已定稿，尚无代码。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
+APA 的设计已定稿，尚无代码。首版 harness 只有 Hermes，其他 harness 在它端到端验证完成后接入（§20）。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
 
 ## 文档清单
 
 | 文档 | 内容 | 什么时候读 |
 |---|---|---|
 | [solution-design.md](solution-design.md) | 主设计文档：为什么做（定位、背景、问题、价值）、目标、场景、架构、领域模型、模块详设、安全、与商业产品的对照、路线、已定决定与风险 | 必读 |
-| [appendix-a-harness.md](appendix-a-harness.md) | 插件约定、无头运行声明、各 harness 的标志与退出码、钩子全表 | 开发 harness 插件时 |
+| [appendix-a-harness.md](appendix-a-harness.md) | 插件约定、无头运行声明、各 harness 的标志与退出码、钩子全表、dsh 接入面（后续参考） | 开发 harness 插件时 |
 | [appendix-b-api-cli.md](appendix-b-api-cli.md) | CLI 逐条清单、HTTP 路由、错误响应、标准事件类型 | 开发内核、CLI、Web、ext 时 |
 | [appendix-c-capability-pack.md](appendix-c-capability-pack.md) | `pack.yaml` 字段、枚举动作、提示词约定、校验规则、示例 | 编写或加载能力包时 |
 

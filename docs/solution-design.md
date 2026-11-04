@@ -21,7 +21,7 @@
 | 术语 | 含义 |
 |---|---|
 | 本人 | 账本的所有者，也是 Web 登录者；架构图中的"用户"即本人。APA 是单用户系统 |
-| harness | agent 的运行环境，如 Claude Code、Codex CLI、Hermes。它负责 agent loop、工具与权限 |
+| harness | agent 的运行环境，如 Hermes、Claude Code、Codex CLI、DeepSeek Harness（dsh）。它负责 agent loop、工具与权限 |
 | 个人 agent | personal agent：能主动感知、主动跟进、了解用户的 agent 形态。商业产品把它做成托管服务，APA 在用户已有的 harness 上提供 |
 | 了解用户 | 在 APA 中指了解本人的工作现场：在跟的项目和任务、相关材料、事项、作过的决定和偏好规则。不是个人记忆或人格档案；个人长期记忆由 harness 负责，APA 不重复保存（§1.3） |
 | 工作台 | 本人处理工作、生活和日常事务的统一入口，由账本、Web 中台、注入与渠道共同构成，Web 中台是首要视图 |
@@ -153,6 +153,7 @@ APA 提供的是主动性和持久状态，不再造 harness，也不做托管�
 | 聊天界面、模型路由、沙箱、工具级权限守卫 | 都是 harness 的职责。APA 的业务决策与 harness 的工具权限是两层，互不替代 |
 | 字段设计器、工作流引擎 | 用 `kind + spec + ext + tag + relation` 承接扩展；证据表明不够时再加实体 |
 | 内核插件运行时、内核 hook | 内核只加载声明式能力包和 Source 登记（§10.5） |
+| 自实现外部协议与鉴权 | IMAP/SMTP、CalDAV、MIME 解析、OAuth 和令牌刷新交给成熟工具，APA 只做薄适配（§5.7、§9.7） |
 | 内置渠道体系 | 飞书、微信、Telegram、邮件都是 ext，内核不认识它们 |
 | 依赖笔记软件 | 笔记软件只是可选的导出目标，不是存储 |
 | 在非 APA 主机上拉起进程 | 外呼调用器只在 APA 所在主机起进程；要在别的主机执行工作，走任务委派（§13.6） |
@@ -290,9 +291,9 @@ APA 提供的是主动性和持久状态，不再造 harness，也不做托管�
 
 ### 3.11 场景九：生活事务（保险续保）
 
-**前提**：已登记 IMAP 邮件来源和 CalDAV 日历来源，建有一个无仓库的"家庭事务"项目，能力包规则把这两个来源的事件归入该项目。资金属于默认的 web_only 类。
+**前提**：已登记邮件来源和日历来源（对现成 CLI 的薄适配，§9.7），建有一个无仓库的"家庭事务"项目，能力包规则把这两个来源的事件归入该项目。资金属于默认的 web_only 类。
 
-1. 时钟到期，外呼调用器拉起 IMAP 来源程序，一封续保通知成为标准事件。邮件正文是不可信输入，只作资料，不作指令。
+1. 时钟到期，外呼调用器拉起邮件来源的适配器，一封续保通知成为标准事件。邮件正文是不可信输入，只作资料，不作指令。
 2. 内核去重后查跟进消息归属，未命中。规则把事件归入项目并交给判断型；判断型参考同类建议过去被接受和丢弃的统计（§8.4），给出"值得成为建议、kind 为 `task`、置信度"，低置信时级联生成型起标题和摘要。
 3. 生成 `proposed` 事项：进入 Web 建议流，不产生投递。
 4. 本人接受后事项进入 `open`，带上截止日的 Timer。日历上的相关安排由确定性规则直接映射为事项，不经判断型。
@@ -352,7 +353,7 @@ CLI 是同一命令模型的薄客户端，面向 agent 设计：
 - `apa guide` 自带使用说明，agent 不读文档也能上手。
 - 所有逻辑在 HTTP API 后面。不能跑 shell 的 harness 直接用 HTTP；将来如需 MCP，也只是 API 上的一层适配。
 
-少数命令在本机直接工作：`apa source auth` 启动该来源程序的认证模式，凭据写入来源自己的目录；`apa agents sync` 写工作区文件；`apa ext run` 启动 ext 进程。
+少数命令在本机直接工作：`apa source auth` 启动附带拉取程序的认证模式，凭据写入来源自己的目录（工具适配的来源用工具自己的认证命令，§9.7）；`apa agents sync` 写工作区文件；`apa ext run` 启动 ext 进程。
 
 ### 4.3 harness 插件
 
@@ -378,12 +379,13 @@ CLI 是同一命令模型的薄客户端，面向 agent 设计：
 - 插件内的"工具调用后捕获"对应 §11.2 的回执捕获。APA 不做工具前守卫（§11.7）。
 - 后台执行的运行者分主会话角色与任务型两种，默认无头运行（§13.6）。
 
-### 5.2 四条原则
+### 5.2 五条原则
 
 1. **账本是真理源，Web 是首要视图。** 任意端访问，事项与跟着项目走的材料默认进账本。改代码时必须跟着改的设计文档以代码仓库为权威，账本只登记（§12.2）。理由：若把 Web 当核心，数据模型会被页面牵着走。
 2. **内核只改账本、只提供接口，不主动推。** 一切外部副作用在 harness 执行者或 ext 各自的权限体系内完成。内核不向任何渠道或订阅方发起推送，对外只提供事件订阅与投递队列。内核有且只有一个外呼调用器，安全边界不靠"不外呼"，靠"外呼不产生业务副作用、写账本只经 API 与凭据"。
 3. **判断不写死在内核，交给专属 agent；采集不跑 agent，交给程序。** 事件进 `proposed` 规则优先、模型兜底；模型只做判断、生成和需要工具的任务。
 4. **不寄生 harness 记忆，不造插件运行时。** 内核只加载能力包（yaml + 模板）与 Source 登记，不设内核 hook；对 harness 只认通用能力与自定义能力两组接口（§11.2），不认识任何具体 harness。
+5. **外部对接优先复用现成工具。** 来源、渠道 ext 和文件监视这类对接，能用成熟的 CLI 或库就不自实现；协议细节和鉴权留给工具，APA 只做薄适配。自实现要在文档写明理由（§5.7）。理由：这些协议和鉴权的长期维护成本不属于 APA 要解决的问题。
 
 ### 5.3 分层与职责
 
@@ -432,13 +434,34 @@ CLI 是同一命令模型的薄客户端，面向 agent 设计：
 | harness 钩子 | 超时、失败或 harness 不支持 | 放行，不注入；由下一次注入或 Web 未读兜底 |
 | 内核本身 | 停机或不可达 | CLI 返回退出码 7；钩子放行；错过的周期定时醒来只补最近一次 |
 | 外部来源 | 临时失败、认证失败、永久失败 | 分别退避重试、生成 `needs_input`、停用并通知（§9.2） |
+| 来源依赖的外部工具 | 未安装、版本不在声明范围、认证失效、输出无法解析 | 适配器返回退出码 2，生成 `needs_input`；其他来源照常（§9.7） |
 | 渠道 ext | 未运行或发送失败 | 投递按退避重试，超限后退回 Web 未读 |
 | 托管文档读取器 | 读不到仓库 | 只显示登记信息与"暂不可读" |
 | 网关型 harness | 未接入 | 消息推送与会话唤醒退化为 Web 未读，无头运行照常 |
 
 ### 5.7 复用判断
 
-调研了 agent-autoloop 和 dsh-superagent 两个开源项目（§19）。结论是不基于它们二次开发：前者是把 CLI agent 变成后台工人的执行编排器，没有账本、Web 和项目材料；后者是绑定特定 harness、面向单个 GitHub 仓库的研究原型。两者都没有跨 harness 的个人事务状态层，改造的成本高于按本文实现。APA 只吸收它们验证过的机制（§19.3）。
+调研了 agent-autoloop 和 dsh-superagent 两个开源项目（§19）。结论是不基于它们二次开发：前者是把 CLI agent 变成后台工人的执行编排器，没有账本、Web 和项目材料；后者是绑定 dsh、面向单个 GitHub 仓库的研究原型。两者都没有跨 harness 的个人事务状态层，改造的成本高于按本文实现。APA 只吸收它们验证过的机制（§19.3）。dsh 本身是后续接入的 harness 之一（§20），届时经插件和无头运行接入，不依赖 dsh-superagent 的编排层。
+
+**外部对接优先复用现成工具**（§5.2 原则 5）。下表是首批的选择，新增对接按同样方式判断。
+
+| 对接面 | 复用 | APA 只做 |
+|---|---|---|
+| 邮件、日历 | 成熟开源 CLI（himalaya、gog；vdirsyncer + khal、gog calendar） | 薄适配：调用工具、转成标准事件（§9.7） |
+| GitHub | `gh` CLI 或官方 API 库 | 游标与事件映射 |
+| RSS/Atom、本地目录监视 | 成熟的解析库、文件监视库 | 游标与事件映射 |
+| Telegram 等渠道 ext | 平台官方或成熟 SDK | 对接投递领取协议（§10.3） |
+
+**自实现的部分与理由**：
+
+| 部分 | 理由 |
+|---|---|
+| 账本、命令模型、时钟、决策、触达 | 这是 APA 本身，没有可替代的现成件 |
+| Source 协议、投递领取协议 | APA 自己的内部边界，刻意保持为 stdin/stdout 和 HTTP，便于用任意工具实现 |
+| webhook 接收路由与签名校验 | 要在落盘后才回 2xx（§9.5），又不能让内核认识具体产品；校验按能力包数据执行，密码学部分用标准库 |
+| 通用 HTTP JSON 轮询 | 标准库就够，字段映射是声明式数据 |
+
+内核不适用这条原则里的外部 CLI 和 SDK：内核的外呼只有外呼调用器一个出口，这些依赖都在内核之外（`sources/`、`ext/`、`plugins/`）。
 
 ---
 ## 6 领域模型
@@ -620,7 +643,7 @@ Event 是账本的追加日志，也是对外事件流。
 
 ### 6.10 Source 登记、来源事件、Ingest
 
-**Source 登记**：`{id, type: pull / script / webhook, command?, schedule?, timeout?, credentials_path?, dedupe_domain?, config, cursor, enabled, stats}`。
+**Source 登记**：`{id, type: pull / script / webhook, source_type?, command?, schedule?, timeout?, credentials_path?, dedupe_domain?, config, cursor, enabled, stats}`。`source_type` 是能力包规则匹配用的语义类型（如 `github`、`mail`、`calendar`），内核只当字符串比较，不随具体工具变化。
 
 **来源事件**：
 
@@ -853,7 +876,8 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 | 两种外呼 | HTTP 模型调用（判断型、生成型）；子进程（Source 执行器含托管文档只读读取器、webhook 转换脚本、任务型与后台运行及其续接） |
 | 统一契约 | 子进程一律"命令 + stdin JSON → 退出码 + stdout" |
 | 运行位置 | 子进程只在 APA 所在主机运行。这是对运行者进程本身的约束，实际工作经委派可以在任何主机 |
-| 环境 | 子进程不继承内核环境，只拿白名单变量；agent 运行另外注入 `APA_URL`、`APA_TOKEN`（运行凭据）、`APA_RUN`、`APA_PROJECT` |
+| 环境 | 子进程不继承内核环境，只拿白名单变量（含 `PATH`、`HOME` 和 XDG 目录变量）；agent 运行另外注入 `APA_URL`、`APA_TOKEN`（运行凭据）、`APA_RUN`、`APA_PROJECT` |
+| 运行凭据的文件传递（接入 dsh 时适用，不是首版约束） | 有的 harness 会从工具环境清除名称像凭据的变量（dsh 清除名称含 `KEY`、`PASSWORD`、`SECRET`、`TOKEN` 的变量），`APA_TOKEN` 到不了 CLI。无头运行声明了 `headless.credential: file` 时，内核把运行凭据写入 `<APA_HOME>/run-credentials/<run-id>`（目录 0700，文件 0600），只注入路径变量 `APA_RUN_CREDENTIAL_FILE`，不再注入 `APA_TOKEN`。运行结束（含超时和失败）时删除文件并使凭据失效，重启恢复时清理没有存活进程的文件，续接时生成新凭据。不靠改变量名绕过清除：路径不是凭据，凭据本身仍不进环境。文件对运行内的模型可读，暴露面与环境变量相同，由运行凭据的 worker 级绑定和运行结束失效兜底。需实测（§21.3） |
 | 并发额度 | 子进程分长时运行和短任务两类，各有额度和队列，互不挤占。长时运行（`task`、`background`：harness 无头运行，含任务型、主会话角色运行及其续接）受 `max_subprocesses` 限制，默认 4；短任务（`source`、`transform`、`reader`：Source 拉取、转换脚本、托管文档读取）受 `max_short_subprocesses` 限制，默认 2。模型 HTTP 调用和网关唤醒不起子进程，不占额度。额度是保护主机的运行配置，不是预算，不按费用或用量判断 |
 | 排队 | 超限的 Run 留在 `queued`，不丢、不降级；带目标事项的排队运行算作在途运行。定时拉取到期时，同一来源已有排队或运行中的 Run 就不重复入队。本人显式触发的运行在所在队列内优先，例如在 Web 打开托管文档或重放入站记录，在短任务队列内排在定时拉取之前 |
 | 超时与统计 | 超时杀进程组；超时、失败、最近成功时间写入 Run |
@@ -919,7 +943,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 
 ## 9 Source 与 webhook
 
-入站是纯程序化的，不跑 agent。入站只有下面三种类型，不设入站适配器。
+入站是纯程序化的，不跑 agent。入站只有下面三种类型，不另设适配器类型；对现成工具的薄适配属于自定义脚本（§9.7）。
 
 ![APA 入站流水线](diagrams/inbound-pipeline.png)
 
@@ -929,8 +953,8 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 
 | 类型 | 是什么 | 放在哪 | 驱动 |
 |---|---|---|---|
-| **定时拉取** | 随发行附带的通用拉取程序：Gmail、Google Calendar、Google Drive 变更、GitHub（issue、PR、通知）、IMAP、CalDAV、RSS/Atom、本地目录监视、通用 HTTP JSON 轮询 | 安装即登记；`apa source auth <id>` 一次认证，凭据存在该来源自己的目录，内核不读 | 外呼调用器按时钟拉起 |
-| **自定义脚本** | 用户自写脚本（内部系统、自建巡检） | 在 Source 登记里填命令、周期、超时、凭据路径；登记命令只在 Web 或主机配置文件（§14.12） | 同上 |
+| **定时拉取** | 随发行附带的通用拉取程序：GitHub（issue、PR、通知）、RSS/Atom、本地目录监视、通用 HTTP JSON 轮询 | 安装即登记；`apa source auth <id>` 一次认证，凭据存在该来源自己的目录，内核不读 | 外呼调用器按时钟拉起 |
+| **自定义脚本** | 用户自写脚本（内部系统、自建巡检），以及对现成工具的薄适配（邮件、日历，§9.7） | 在 Source 登记里填命令、周期、超时、凭据路径；登记命令只在 Web 或主机配置文件（§14.12） | 同上 |
 | **webhook 推送** | 外部系统主动 POST，无游标、无常驻进程 | HTTP API 的接收路由 `POST /ingest/{source_id}`，每个 source 独立 URL + 密钥 | 外部系统推送 |
 
 **内核调度 + 独立可执行文件**：定时拉取不做常驻进程，也不做内核内插件。轮询周期是时钟语义，归内核才能随账本迁移、统一失败统计；采集逻辑放在可执行文件里，内核不需要插件运行时，两种拉取走同一路径。
@@ -1016,6 +1040,36 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 ### 9.6 Source 与 ext 的分界
 
 Source 由内核按时钟或接收路由驱动，只产事件。ext 自行运行，经 API 读写。同一系统可以兼有两者，例如邮箱既是拉取 Source，又有投递用的邮件 ext。AGENTS.md 渲染不是 ext，内置在连接模块。
+
+### 9.7 工具适配：邮件与日历
+
+APA 不实现 IMAP/SMTP、CalDAV、MIME 解析和 OAuth。邮件和日历来源是对成熟开源 CLI 的薄适配，属于自定义脚本（`type: script`），走 §9.2 的执行契约，不是第四种类型。不按是否需要 OAuth 限制服务商，工具能接入的都可以用。
+
+**路径**：外呼调用器拉起适配器，经 stdin 传入 `config`、`cursor`、`window` → 适配器调用工具取 JSON → 转成标准事件 JSONL 和新游标 → 内核去重落盘，进入 §9.3 的流水线。适配器放在 `sources/`，内核代码不出现这些工具的名字。
+
+| 类别 | 工具 | 取数方式 | 鉴权（归工具） |
+|---|---|---|---|
+| 邮件 | himalaya（IMAP、JMAP、Gmail 等） | `himalaya envelope search`、`message read`，加 `--json` | 密码经 `password.command` 取得；OAuth 由外部令牌工具（如 ortie）经 `token.command` 提供，himalaya 2.x 不含 OAuth 流程 |
+| 邮件（Google） | gog | `gog --readonly --gmail-no-send --no-input --json gmail search` | `gog auth`，自行刷新令牌；无桌面环境用它的加密文件后端 |
+| 日历 | vdirsyncer + khal | `vdirsyncer sync` 同步到本地，再 `khal list --json <字段>` | vdirsyncer 配置（密码命令或 OAuth） |
+| 日历（Google） | gog calendar | `gog --readonly --no-input --json calendar events` | 同 gog |
+
+SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6），不在首批。
+
+| 约定 | 内容 |
+|---|---|
+| 鉴权 | 认证和令牌刷新都用工具自己的命令，`apa source auth` 不用于这类来源。APA 不读、不存这些凭据 |
+| 登记 | 只登记命令，只在 Web 或主机配置文件（§14.12）。适配器随发行附带，登记方式与自定义脚本相同，delegate 不能登记 |
+| 语义类型 | 登记时填 `source_type: mail` 或 `calendar`。能力包规则按它匹配，换工具不用改规则 |
+| 只读 | 能用工具的只读开关就用；不发信，不改已读标记。邮件内容不拼进命令行，参数一律按 argv 传递 |
+| 事件 id | 与工具无关：邮件用 Message-ID；日历用 UID 加 RECURRENCE-ID，再加更新时间或内容摘要以区分更新。换工具时沿用同一 `dedupe_domain`，不产生重复事项 |
+| 发件人 | 工具不给出可核实的结论时不设 `sender_verified: true`，按不在转发白名单处理（§14.6） |
+| 退出码 | 工具未安装、版本不在声明范围、认证失败、输出无法解析返回 2（生成 `needs_input`）；网络等临时错误返回 1。解析失败时不输出新游标，已输出事件靠去重保证安全（§9.2） |
+| 版本声明 | 每个适配器声明支持的工具版本范围，运行时比对 `--version`。工具的参数和输出会变：himalaya 的 JSON 标志在不同版本是 `--output json` 和 `--json` |
+| 契约测试 | 每个声明的版本保留一份录制的工具输出，测试其转换结果和退出码映射。升级工具版本时先加录制样本，再放宽声明；CI 不连真实账号 |
+| 环境 | 子进程环境白名单含 `PATH`、`HOME` 和 XDG 目录变量（§7.7）。工具的配置和凭据在工具自己的目录，不在 APA 数据目录（§16.2） |
+
+**需实测，结论写回本节**：himalaya 读正文是否改变已读标记，JSON 中是否带 Message-ID；gog 邮件结果的粒度（线程或消息）及其增量查询方式；`khal list --json` 没有更新时间字段时如何识别更新，以及重复事件的展开；工具的认证失败能否从退出码或 stderr 可靠识别。
 
 ---
 
@@ -1103,7 +1157,7 @@ Source 由内核按时钟或接收路由驱动，只产事件。ext 自行运行
 
 ### 11.2 接入能力
 
-**通用能力**（七个主流 harness 的公约数）：
+**通用能力**（八个主流 harness 的公约数）：
 
 | 能力 | APA 用它做什么 | 约束 | 缺失时 |
 |---|---|---|---|
@@ -1129,19 +1183,19 @@ Source 由内核按时钟或接收路由驱动，只产事件。ext 自行运行
 
 官方名称如下，取自各 harness 2026-11 的公开文档与 CLI 帮助。
 
-| 能力 | Claude Code | Codex CLI | Gemini CLI | OpenCode | Pi | OpenClaw | Hermes |
-|---|---|---|---|---|---|---|---|
-| 会话开始注入 | `SessionStart` | `SessionStart` | `SessionStart` | 首次 `chat.message` | 首次 `before_agent_start` | 首次 `before_prompt_build` | 首次 `pre_llm_call` |
-| 消息前注入 | `UserPromptSubmit` | `UserPromptSubmit` | `BeforeAgent` | `chat.message`；V2 `session.hook("prompt")` | `input` + `before_agent_start` | `before_prompt_build` | `pre_llm_call` |
-| 回执捕获 | `PostToolUse`、`SubagentStop` | `PostToolUse`、`SubagentStop` | `AfterTool` | `tool.execute.after` | `tool_result` | `after_tool_call`、`subagent_ended` | `post_tool_call`、`subagent_stop` |
-| 候选捕获 | `Stop` | `Stop` | `AfterAgent` | `session.idle` | `turn_end` | `agent_end` | `on_session_end`（回合级） |
-| 压缩前保存 | `PreCompact` | `PreCompact` | `PreCompress`（仅通知） | `experimental.session.compacting` | `session_before_compact` | `before_compaction` | 无通用入口，跳过 |
-| 无头运行 | `claude -p` | `codex exec` | `gemini -p` | `opencode run` | `pi -p` | `openclaw agent` | `hermes chat -q --oneshot` |
-| 会话身份透传 | `SessionStart` 写 `$CLAUDE_ENV_FILE` | 钩子的 `session_id`（环境注入需实测） | `GEMINI_SESSION_ID` | `shell.env` | 注册工具包装 CLI（需实测） | `resolve_exec_env` | `register_tool` 包装 CLI |
-| 消息推送 | 无 | 无 | 无 | 无 | 无 | `openclaw message send` | `hermes send` |
-| 会话唤醒 | 无 | 无 | 无 | 无 | 无 | `POST /hooks/agent`、`/hooks/wake` | `ctx.inject_message`、webhook 路由 |
+| 能力 | Claude Code | Codex CLI | Gemini CLI | OpenCode | Pi | OpenClaw | Hermes | dsh |
+|---|---|---|---|---|---|---|---|---|
+| 会话开始注入 | `SessionStart` | `SessionStart` | `SessionStart` | 首次 `chat.message` | 首次 `before_agent_start` | 首次 `before_prompt_build` | 首次 `pre_llm_call` | `agent/created` |
+| 消息前注入 | `UserPromptSubmit` | `UserPromptSubmit` | `BeforeAgent` | `chat.message`；V2 `session.hook("prompt")` | `input` + `before_agent_start` | `before_prompt_build` | `pre_llm_call` | `agent/pre-step`（按回合去重） |
+| 回执捕获 | `PostToolUse`、`SubagentStop` | `PostToolUse`、`SubagentStop` | `AfterTool` | `tool.execute.after` | `tool_result` | `after_tool_call`、`subagent_ended` | `post_tool_call`、`subagent_stop` | `tools/result`、`subagent/end` |
+| 候选捕获 | `Stop` | `Stop` | `AfterAgent` | `session.idle` | `turn_end` | `agent_end` | `on_session_end`（回合级） | `agent/turn-stopping` |
+| 压缩前保存 | `PreCompact` | `PreCompact` | `PreCompress`（仅通知） | `experimental.session.compacting` | `session_before_compact` | `before_compaction` | 无通用入口，跳过 | 无专用入口；`session/event` 观察 `compaction/start`（需实测） |
+| 无头运行 | `claude -p` | `codex exec` | `gemini -p` | `opencode run` | `pi -p` | `openclaw agent` | `hermes chat -q --oneshot` | `dsh --profile headless` |
+| 会话身份透传 | `SessionStart` 写 `$CLAUDE_ENV_FILE` | 钩子的 `session_id`（环境注入需实测） | `GEMINI_SESSION_ID` | `shell.env` | 注册工具包装 CLI（需实测） | `resolve_exec_env` | `register_tool` 包装 CLI | `DSH_SESSION_ID`；`ctx.tools.register` 包装 CLI（需实测） |
+| 消息推送 | 无 | 无 | 无 | 无 | 无 | `openclaw message send` | `hermes send` | 无 |
+| 会话唤醒 | 无 | 无 | 无 | 无 | 无 | `POST /hooks/agent`、`/hooks/wake` | `ctx.inject_message`、webhook 路由 | 无 |
 
-部分编码 harness 有形态各异的进程内推送方式（需要 `opencode serve`、`pi --mode rpc` 这类常驻进程，或仍处预览阶段的渠道功能），不是日常用法，APA 不依赖。
+部分编码 harness 有形态各异的进程内推送方式（需要 `opencode serve`、`pi --mode rpc`、`dsh --profile acp` 这类常驻进程，或仍处预览阶段的渠道功能），不是日常用法，APA 不依赖。
 
 ### 11.4 各 harness 落地方式
 
@@ -1154,6 +1208,7 @@ Source 由内核按时钟或接收路由驱动，只产事件。ext 自行运行
 | Pi | `pi install`（extensions、skills、prompts） | AGENTS.md | 只有外部 CLI，没有子 agent | 权限模型与其他 harness 不同，需实测 |
 | OpenClaw | `openclaw.plugin.json` + skills，钩子在代码里 | AGENTS.md | 原生子 agent 或外部 CLI | 有网关，支持消息推送和会话唤醒 |
 | Hermes | `plugin.yaml` + `register(ctx)`，工具、钩子、skill 同包 | `register_system_prompt_section`（不超过 4000 字，新会话冻结） | `delegate_task` 或 `terminal` | 有网关，支持消息推送和会话唤醒 |
+| dsh（后续） | npm 包（`package.json` 的 `dsh.bundle` + `cordis.patch.yml`），Cordis 插件，按 profile 安装 | `ctx.systemPrompt.section`；项目 AGENTS.md 由 `dsh-agent-instructions` 加载 | `dsh-tool-subagent` 或 shell | 无网关，不声明消息推送和会话唤醒；处于 developer preview，插件用 `engines.dsh` 声明支持的版本（附录 A.6） |
 
 需要别名文件的 harness（如 CLAUDE.md、GEMINI.md）由插件在本机做符号链接，不进账本。
 
@@ -1172,11 +1227,13 @@ Source 由内核按时钟或接收路由驱动，只产事件。ext 自行运行
 | Pi | `pi -p` | `--mode json` | `--session-id` 预设 | `--session <id>` |
 | OpenClaw | `openclaw agent -m` | `--json` | `--session-id` 预设 | 相同 `--session-id` |
 | Hermes | `hermes chat -q --oneshot` | `--format stream-json` | `init` 与 `result` 事件的 `session_id` | `--resume <id>` |
+| dsh（后续） | `dsh --profile headless` | `--json` | 首个 `session` 事件的 `sessionId`，不能预设 | `--session-id <id>`，要求工作目录相同 |
 
 运行约定：
 
 - **不依赖钩子**：运行者需要的上下文由提示词、资料文件和 `apa context` 提供，因为各 harness 在无头模式下是否触发钩子并不一致（Claude Code 的 `--bare` 会跳过钩子）。钩子如果触发，CLI 一律使用运行凭据；候选捕获在运行身份下不生效，防止回环。
-- **CLI 凭据优先级**：设置了 `APA_RUN` 时，CLI 只使用环境变量里的运行凭据，不回退到本机凭据文件。
+- **CLI 凭据优先级**：设置了 `APA_RUN` 时，CLI 只使用运行凭据（`APA_TOKEN`，或 `APA_RUN_CREDENTIAL_FILE` 指向的文件），不回退到本机凭据文件。
+- **运行凭据要能到达 CLI**：Hermes 按具名清单清除环境变量，`APA_TOKEN` 不在清单内，首版经环境变量传递（需实测，§21.3）。接入按名称模式清除的 harness（如 dsh）时，插件声明 `headless.credential: file`，改用凭据文件（§7.7）；文件也不可读时，该 harness 不能用于需要写账本的运行，只能靠 stdout 末段回执（§8.4）。
 - **续接是可丢失的优化**：真理源是账本，harness 会话可丢失。插件未声明续接或会话已失效时，用新会话加事项上下文（含问题、回答、白名单内的挂靠消息）。
 
 ### 11.6 注入规则
@@ -1388,7 +1445,7 @@ GitHub 来源看到 AGENTS.md 相关提交时也触发同一检测。已有手�
 
 **用哪个 harness**：规则可以指定一个已确认声明的 harness，未指定时用 Web 设置的默认 harness。
 
-**权限档位**：无人值守会话无法弹出权限提示，权限必须事先给定。规则声明所需档位（`read`、`edit`、`full`），插件声明每档对应的标志，本人在 Web 按 harness 设上限（默认 `read`）。超过上限时不拉起并转 `needs_input`。`main_session` 运行者要调用执行者，通常需要 `edit` 及以上。
+**权限档位**：无人值守会话无法弹出权限提示，权限必须事先给定。规则声明所需档位（`read`、`edit`、`full`），插件声明每档对应的标志，本人在 Web 按 harness 设上限（默认 `read`）。超过上限或插件未声明该档位时不拉起并转 `needs_input`。`main_session` 运行者要调用执行者，通常需要 `edit` 及以上。
 
 **安全边界**：见 §14.11。
 
@@ -1416,7 +1473,7 @@ Web 登录者是本人；CLI 调用者是持 token 的 agent，可能被外部�
 | webhook 接收密钥 | 只能向该 source 写事件，不能读账本，也不能调其他 API | Web，或 CLI（delegate） | 外部系统 |
 | 一次性表单链接 | 只回答一个决策请求 | 内核随投递生成 | 渠道消息的接收者 |
 | 模型 `api_key` | 内核外呼模型用 | Web 设置 | 内核 |
-| 来源凭据 | 来源程序自持，内核不读 | `apa source auth` | Source 程序 |
+| 来源凭据 | 来源程序或其依赖的工具自持，内核不读 | `apa source auth`，或工具自己的认证命令（§9.7） | Source 程序、外部工具 |
 
 token 与密钥只保存哈希，明文只显示一次，可随时吊销并立即生效。token 可绑定执行者 id，回执据此校验。
 
@@ -1538,7 +1595,7 @@ Event 带内核维护的链路深度，调用方不能写。规则动作、回�
 
 ### 14.12 可执行命令的登记
 
-自定义脚本 Source 的命令、webhook 转换脚本、无头运行声明，都会被外呼调用器在 APA 主机上执行。登记它们等于授予主机上的代码执行能力，且不经过 harness 的权限体系。因此这些登记**只在 Web 做**（或由本人在主机上写配置文件），CLI 和 delegate token 不能做。插件安装时可以经 `apa declare` 提交声明，由本人在 Web 确认后生效。随发行附带的拉取程序不涉及任意命令，delegate 可以登记。
+自定义脚本 Source 的命令（含邮件、日历工具的适配命令）、webhook 转换脚本、无头运行声明，都会被外呼调用器在 APA 主机上执行。登记它们等于授予主机上的代码执行能力，且不经过 harness 的权限体系。因此这些登记**只在 Web 做**（或由本人在主机上写配置文件），CLI 和 delegate token 不能做。插件安装时可以经 `apa declare` 提交声明，由本人在 Web 确认后生效。随发行附带的拉取程序不涉及任意命令，delegate 可以登记。
 
 ### 14.13 Web 入口
 
@@ -1621,12 +1678,13 @@ Web 与 `apa health` 统一呈现以下信号，由既有账本记录与外呼�
   packs/<name>/     用户能力包，同名覆盖内置
   sources/<id>/     各来源自己的配置与凭据，内核不读
   runs/<run-id>/    运行目录，默认保留 14 天
+  run-credentials/  运行凭据文件，运行结束即删（只在 harness 声明文件传递时使用，§7.7）
   logs/             诊断日志
 ```
 
 运行配置里的 `max_subprocesses`（默认 4）和 `max_short_subprocesses`（默认 2）分别限制长时运行和短任务的子进程数，语义见 §7.7。
 
-备份：整个目录可复制；运行中用存储引擎的在线备份导出账本。`sources/` 含第三方凭据，备份需按敏感数据对待。数据结构版本随发行只增，升级时自动处理。
+备份：整个目录可复制；运行中用存储引擎的在线备份导出账本。`sources/` 含第三方凭据，备份需按敏感数据对待。工具适配的来源例外：工具的配置和凭据在工具自己的目录或系统钥匙串，不在本目录，迁移主机时要单独迁移或重新认证（§9.7）。数据结构版本随发行只增，升级时自动处理。
 
 ### 16.3 可达性
 
@@ -1644,7 +1702,13 @@ Web 与 `apa health` 统一呈现以下信号，由既有账本记录与外呼�
 2. `apa serve` 启动（可注册为系统服务）。
 3. Web 中配置模型端点（可选）、签发 token、维护执行者清单。
 4. 在用到的 harness 里安装 APA 插件，填入 APA 地址和 token。
-5. `apa source auth <id>` 认证需要的来源；按需 `apa ext run <名>`。
+5. `apa source auth <id>` 认证附带的拉取程序；邮件、日历来源先安装对应工具并用它自己的命令完成认证，再在 Web 登记适配命令（§9.7）；按需 `apa ext run <名>`。
+
+**接入 dsh 时的部署说明**（不适用于首版，详见附录 A.6）：
+
+- 无人值守运行的档位上限是 `read`：dsh 的无头运行声明只声明 `read` 档。
+- 建议关闭会话日志上传。dsh 基础配置默认把会话日志随请求上传到 DeepSeek 官方端点，在 `$DSH_HOME/cordis.patch.yml` 中对 `session-log-deepseek` 设 `disabled: true`。
+- 按官方安全说明使用专用环境和最小权限；模型密钥写在 `$DSH_HOME/.env`。
 
 ---
 
@@ -1713,7 +1777,7 @@ Source 程序的退出码是另一套（§9.2）。
 
 ### 17.4 环境变量
 
-`APA_URL`、`APA_TOKEN`、`APA_PROJECT`、`APA_SESSION`、`APA_RUN`、`APA_HOME`。设置了 `APA_RUN` 时，CLI 只用环境变量里的运行凭据。
+`APA_URL`、`APA_TOKEN`、`APA_PROJECT`、`APA_SESSION`、`APA_RUN`、`APA_HOME`，以及只在 harness 声明文件传递时使用的 `APA_RUN_CREDENTIAL_FILE`（§7.7）。设置了 `APA_RUN` 时，CLI 只用运行凭据，不回退到本机凭据文件。
 
 ---
 
@@ -1730,6 +1794,7 @@ Source 程序的退出码是另一套（§9.2）。
 | 接口风格 | HTTP + JSON，事件流用 SSE，领取用长轮询 | gRPC、MCP | CLI 和 ext 任意语言都能接；MCP 需要时可在 API 上薄适配 |
 | 模型调用 | chat completions 兼容协议 + JSON Schema 结构化输出 | 各厂商 SDK | 用户只配 `base_url` + `api_key`，内核不认识厂商。不同端点的结构化输出和置信度能力有差异，需实测 |
 | 内置 Source | 独立可执行文件，只经 stdin/stdout 协议 | 内核内实现 | 可与内核同语言，也可以用其他语言 |
+| 邮件与日历来源 | 成熟开源 CLI 的薄适配（§9.7） | 自实现 IMAP/SMTP、CalDAV、MIME、OAuth | 协议和鉴权的维护成本留给工具；代价是用户要另装工具，并承受工具的版本变化（§21.2 风险 21） |
 | 分发 | 单二进制 + 系统服务示例，容器镜像可选 | 仅容器 | 个人用户优先最简安装 |
 
 **代码组织**：
@@ -1739,7 +1804,7 @@ kernel/           内核六模块与基础设施
 api/              HTTP API
 cli/              CLI 薄客户端
 web/              Web 中台
-sources/          内置 Source 程序
+sources/          内置 Source 程序与工具适配器
 packs/            内置能力包
 plugins/<harness> 各 harness 插件
 ext/              常用 ext
@@ -1752,7 +1817,7 @@ docs/             设计文档
 
 ## 19 与同类项目和商业产品对比
 
-§19.1–§19.4 对比两个开源项目，基于它们 2026-11 的公开仓库与文档，只读阅读，未运行其代码；其作者自述的性能与效果数字不作依据。§19.5 对照商业个人 agent。
+§19.1–§19.4 对比两个开源项目，基于它们 2026-11 的公开仓库与文档，只读阅读，未运行其代码；其作者自述的性能与效果数字不作依据。§19.5 对照商业个人 agent。dsh-superagent 是基于 dsh 的项目；dsh 本身是 APA 后续接入的 harness 之一（§20），这里比较的对象是 dsh-superagent 这一层，不是 dsh。
 
 | 项目 | 公开仓库 |
 |---|---|
@@ -1766,7 +1831,7 @@ docs/             设计文档
 | 一句话 | 把 CLI agent 变成后台工人的事件驱动调度中台 | 面向单个 GitHub 仓库的主动型 coding agent，研究原型 | 架在任意 harness 之上的开源个人 agent 层，让 harness 能主动感知、主动跟进、了解用户 |
 | 主体 | 事件 → 执行 | Trigger → Ticket → 执行 | 事项状态、跟进与决策 |
 | 人机界面 | 卡片、CLI、MCP，无 Web | GitHub、飞书回写加 Web 面板 | Web 中台、CLI、注入、渠道 ext |
-| 与 harness 的关系 | 自成宿主，agent 是子进程 | 绑定其宿主 harness（DSH），编排其会话 | 经插件接入任意 harness，常规执行留在 harness |
+| 与 harness 的关系 | 自成宿主，agent 是子进程 | 绑定其宿主 harness（dsh），编排其会话 | 经插件接入任意 harness，常规执行留在 harness |
 | 是否管 agent loop | 否，一轮是一次进程 | 是，主会话 + 每工单一个 worker 会话 | 否 |
 
 ### 19.2 能力对照
@@ -1775,7 +1840,7 @@ docs/             设计文档
 |---|---|---|---|---|
 | 事件入账与去重 | 有 | 有 | 有 | 共同基础 |
 | 路由 | 规则 | 确定性 gate + 常驻 LLM 会话 | 规则 + 无状态判断型 | 个人事件量低，不需要常驻路由会话 |
-| 跟进消息归属 | 同事项合并 | 订阅直通，可交回，结束释放 | 按关联键挂靠，可交回，关闭退回 | 吸收 dsh 的归属规则 |
+| 跟进消息归属 | 同事项合并 | 订阅直通，可交回，结束释放 | 按关联键挂靠，可交回，关闭退回 | 吸收 dsh-superagent 的归属规则 |
 | 问人 | 卡片，Agent 自决是否问 | Attention 结构化提问 | 决策待办流 + 打扰控制 | 打扰由内核控制，不下放给 agent |
 | 高风险拦截 | 提示词约定 | 授权凭据 + 策略版本，不拦决策语义 | web_only 由内核强制 | agent 可能被诱导，不能靠提示词 |
 | 无人值守与续接 | 有 | 有 | 有，两种运行者 | 吸收挂起零消耗与续接 |
@@ -1843,23 +1908,25 @@ docs/             设计文档
 1. **不变量不分阶段。** §6.14 的规则，以及 Event 上的链路深度和授权依据字段，从第一个里程碑起就成立。后补等于改写入路径。
 2. **控制路径从一开始就完整。** 内置能力也走 HTTP API 和命令模型，内置能力包也走加载器，不留私有旁路。
 
-**首批范围**：M2–M7 的 harness 只有 Hermes，主会话、注入、无头运行、推送与唤醒都在它上面端到端验证；渠道 ext 是 Telegram；来源是 GitHub、IMAP 邮件、CalDAV 日历、RSS/Atom、通用 HTTP JSON、本地目录监视和 webhook。Claude Code、Codex CLI 在 M8，其余 harness 在 M9。
+**首批范围**：harness 只有 Hermes，主会话、注入、无头运行、推送与唤醒都在它上面端到端验证。渠道 ext 是 Telegram。来源是 GitHub、邮件、日历、RSS/Atom、通用 HTTP JSON、本地目录监视和 webhook；邮件和日历是对成熟开源 CLI 的薄适配（§9.7），不按是否需要 OAuth 限制服务商。dsh、Claude Code、Codex CLI 及其他 harness 放后续，等 Hermes 端到端验证完成后再扩展。
+
+下表的里程碑表达能力分组、依赖和验收，不作为开发拆分依据。
 
 | 里程碑 | 交付的能力 | 依赖 | 验收 |
 |---|---|---|---|
 | **M1 账本与决策闭环** | 账本存储；Item、六阶段、Event、Actor、Project（含 repos、允许的执行者）；命令模型；三级 token；web_only 与退出码；时钟的到期处理；Web：决策待办、建议流、事项、设置、审计；CLI：`init`、`serve`、`login`、`guide`、`inbox`、`item`、`project`、`propose`、`ask`、`decide`、`accept`、`dismiss`、`why`；架构红线检查与 CI | 无 | 本人和 agent 经两入口操作同一事项；代答必须带证据；web_only 返回 20；重放 Event 得到相同投影 |
 | **M2 harness 接入与委派回收** | `apa context`（游标、指令版本）；常驻指令、会话开始注入、消息前注入、会话身份透传；执行者清单、`declare`、`delegate`、`report`（含允许的执行者校验、退出码 21）；回执捕获；Hermes 插件 | M1 | 场景二、三在 Hermes 上跑通；钩子超时放行；名单外委派被拒绝 |
 | **M3 时钟、能力包与触达** | 能力包加载器、实例；外呼调用器（模型调用、子进程、Run、`max_subprocesses` 排队）；三类专属 agent 与级联（任务型经 Hermes 无头运行）；web_only 判断型初筛（含初筛时序、退出码 22）；触达与打扰控制、投递（注入、Web 未读）；`brief`、`review`、`follow-up`、`decision-card` 包；健康视图雏形 | M1、M2 | 场景五跑通；级联可回放；规则 `observe` 不产生副作用；停机后只补最近一次；超限的运行排队不丢；初筛返回前不投递、代答返回 22，模型失败或超时按规则继续 |
-| **M4 来源流水线** | Source 执行契约与调度（含短任务额度与队列）；首批拉取程序（GitHub、IMAP、CalDAV、RSS/Atom、通用 HTTP JSON、本地目录监视）、自定义脚本；webhook 接收、校验、映射、转换、`ingests`、`replay`；跟进消息归属、交回、退回；`inbound-triage` 包（含 `accept: auto`，走观察模式）；对话候选捕获 | M3 | 场景一、七、九跑通（场景九的规范与材料在 M5 验收，渠道消息在 M6 验收）；强杀进程后不丢已回 2xx 的事件；重放不产生重复事项；长时运行占满额度时来源拉取照常执行 |
+| **M4 来源流水线** | Source 执行契约与调度（含短任务额度与队列）；首批拉取程序（GitHub、RSS/Atom、通用 HTTP JSON、本地目录监视）、自定义脚本；邮件和日历的工具适配器（himalaya、gog；vdirsyncer + khal、gog calendar），含版本声明和契约测试；webhook 接收、校验、映射、转换、`ingests`、`replay`；跟进消息归属、交回、退回；`inbound-triage` 包（含 `accept: auto`，走观察模式）；对话候选捕获 | M3 | 场景一、七、九跑通（场景九的规范与材料在 M5 验收，渠道消息在 M6 验收），邮件和日历各经一个工具适配器到达；工具未安装、版本不符、认证失败、输出无法解析都生成 `needs_input` 且游标不前进；§9.7 的实测项有结论；强杀进程后不丢已回 2xx 的事件；重放不产生重复事项；长时运行占满额度时来源拉取照常执行 |
 | **M5 项目材料与规范** | Material、Revision、blob、检索；两型材料与写入策略；托管型读取器；Guideline、AGENTS.md 渲染、`check`、`sync`、漂移；`agents-md`、`guideline-draft` 包 | M2、M3 | 场景六跑通；三种检测状态的退出码正确；托管型 `commit` 被拒绝 |
 | **M6 对外接口与 ext** | 事件订阅；投递领取协议、ext 密钥、`apa ext check`；Telegram 渠道 ext、导出 ext、webhook 转发 ext；回答回流、渠道回答人白名单、一次性表单链接；Hermes 网关插件的消息推送 | M3 | 场景八在 Telegram 上跑通；发送幂等；web_only 在渠道被拒绝；ext 密钥吊销立即生效 |
 | **M7 后台执行** | 运行凭据与运行身份过滤；转发白名单与 `unattended`；`runner=task`、`runner=main_session`（无头）；权限档位；续接；授权依据与复核；链路熔断；Hermes 网关唤醒与租约 | M2–M5；网关唤醒另依赖 M6 | 场景四两种运行者都在 Hermes 上跑通；唤醒租约期间该 delegate token 代答被拒；运行者代答被拒；非白名单消息不进入运行者和其子事项的执行者；强杀后运行按失败处理 |
-| **M8 编码型 harness** | Claude Code、Codex CLI 插件（含无头运行声明）；压缩前保存（Hermes 没有通用入口，在这里首次验证） | M2、M3、M7 | 场景二、三和无头的场景四在两个 harness 上跑通；不改内核和 HTTP API，需要改时先改设计；§21.3 中这两个 harness 的实测项有结论，并写回附录 A |
-| **M9 覆盖与加固** | 其余 harness 插件（实测后声明）；其余拉取程序；健康视图完整；物理删除；发布打包 | M1–M8 | §21.3 的实测项都有结论，并写回附录 A |
+| **M8 加固与发布** | 健康视图完整；物理删除；发布打包 | M1–M7 | §21.3 中 Hermes 的实测项都有结论，并写回附录 A；Hermes 端到端验证完成 |
+| **后续**（不进首批） | dsh、Claude Code、Codex CLI 插件（含无头运行声明）；压缩前保存（Hermes 没有通用入口，在这里首次验证）；其余 harness 插件（实测后声明）；其他来源的工具适配器 | M8 | 场景二、三和无头的场景四在新增 harness 上跑通；不改内核和 HTTP API，需要改时先改设计；§21.3 中对应 harness 的实测项有结论，并写回附录 A |
 
-**最小可用路径**：M1 + M2 已能在 Hermes 上带来日常价值（事项账本、聊天代答、委派回收）。M3 之后才开始"主动"，M7 之后才"无人值守"，M8 之后才"跨 harness"。
+**最小可用路径**：M1 + M2 已能在 Hermes 上带来日常价值（事项账本、聊天代答、委派回收）。M3 之后才开始"主动"，M7 之后才"无人值守"，接入第二个 harness 之后才"跨 harness"。
 
-**可拆分方式**：每个里程碑按"内核命令与不变量 → HTTP API → CLI → Web 页面 → 能力包或插件"的顺序拆任务，每一步都有对应的验收项。外部依赖在早期验收时用本地模拟服务替代。
+**任务依赖方向**：同一能力按"内核命令与不变量 → HTTP API → CLI → Web 页面 → 能力包或插件"的方向依赖，每一步都有对应的验收项。外部依赖在早期验收时用本地模拟服务替代。
 
 ---
 
@@ -1879,10 +1946,12 @@ docs/             设计文档
 | 6 | 来源规则自动接受 | 允许 `accept: auto`，走观察模式 | 无人值守路径需要起点；日历这类结构化事件不必逐条手动确认 | §9.3 |
 | 7 | 投影可由 Event 重建 | Event `payload` 足以重放投影，用于校验与修复 | 投影损坏时可修复，并多一个一致性校验手段。代价是每条 Event 写全变更，结构变化时要兼容旧 payload | §6.7 |
 | 8 | 唤醒模式下的代答约束 | 默认无头运行，唤醒需插件显式声明；唤醒租约期间该 delegate token 不能代答 | 否则被唤醒的会话能凭 delegate token 绕开运行身份。代价是租约期间本人在别的会话里代答也被拒，需去 Web 或稍后重试 | §13.6 |
-| 9 | 首批范围 | harness：Hermes；渠道 ext：Telegram；来源：GitHub、IMAP 邮件、CalDAV 日历、RSS/Atom、通用 HTTP JSON、本地目录监视、webhook。Claude Code、Codex CLI 放后续里程碑 | 一个带网关的 harness 能端到端验证主会话、注入、无头运行、推送与唤醒，适配面最小；邮件和日历用标准协议接入，生活事务从首批就能验证 | §20、附录 A |
+| 9 | 首批范围 | harness：Hermes；渠道 ext：Telegram；来源：GitHub、邮件、日历（对成熟 CLI 的薄适配）、RSS/Atom、通用 HTTP JSON、本地目录监视、webhook。dsh、Claude Code、Codex CLI 及其他 harness 放后续，等 Hermes 端到端验证完成后再扩展 | 一个带网关的 harness 能端到端验证主会话、注入、无头运行、推送与唤醒，适配面最小；邮件和日历经现成工具接入，生活事务从首批就能验证，服务商不受 OAuth 限制 | §9.7、§20、附录 A |
 | 10 | 可配置项的默认值 | 链路深度阈值 8；Ingest 请求体保留 30 天；运行目录保留 14 天；表单链接 24 小时；投递重试 1、3、7、15、30 分钟共 5 次；低优先级合并窗口 30 分钟；web_only 初筛超时 30 秒；Event 统计窗口 90 天 | 只影响初始体验，都可在配置里改 | §14.9、§6.15、§10.3、§7.4、§14.4、§8.4 |
 | 11 | web_only 初筛的时序 | 初筛返回前决策请求不投递、不接受代答（退出码 22，附原因与 Web 链接），只在 Web 可见，超时默认值不生效；初筛失败或超时按策略规则的结果继续，不重试、不阻塞 | 否则代答或投递可能抢在升级之前，让本该 web_only 的决策被普通方式答掉。代价是决策请求最多延后一个超时时长才能送达或代答；初筛失败时只靠策略规则，没打标签的高风险决策可能被当作普通决策，残余风险接受 | §6.7、§7.7、§14.4 |
 | 12 | "了解用户"的范围 | 指了解工作现场，不新增本人档案；个人长期记忆由 harness 负责；判断型和生成型可读接受、丢弃等 Event 的统计，不新增存储 | 避免与 harness 记忆重复或互相矛盾，让 APA 的数据都留在可查、可审计的账本里 | §1.3、§2.2、§8.4、§12.1、§19.5 |
+| 13 | 外部对接优先复用现成工具 | 能用成熟 CLI 或库就不自实现，自实现要写明理由。邮件和日历来源是成熟开源 CLI 的薄适配，走自定义脚本契约；鉴权和令牌刷新归工具，APA 只登记命令（只在 Web 或主机配置文件）；适配器声明工具版本范围并有契约测试 | 协议和鉴权的长期维护不是 APA 要解决的问题，自己实现成本高、服务商受限。代价是多一层外部依赖和版本变化（风险 21、22） | §5.2、§5.7、§9.7、§18 |
+| 14 | 接入 dsh 时的约束（不是首版约束） | 运行凭据经 0600 文件传递，运行结束删除，不改名绕过环境变量清除；无人值守档位上限 `read`，由它的无头运行声明只声明 `read` 档来实现；会话日志上传建议关闭，写进部署说明 | dsh 按名称模式清除凭据形态的变量，且处于未经安全审计的 developer preview；内核不认识具体 harness，所以差异都放在声明和部署说明里 | §7.7、§11.5、§16.4、附录 A.6 |
 
 ### 21.2 风险与治理
 
@@ -1896,16 +1965,20 @@ docs/             设计文档
 | 6 | 判断型自报的置信度不校准 | 业务规则 | 建议噪声或漏报 | 建议流隔离，不触发投递；阈值在能力包可调；`observe` 期观察；`apa why` 可查 |
 | 7 | 任务型失败直接交本人、不重试 | 业务规则 | 临时故障时打扰偏多 | 触达合并；决策请求提供一键重新运行 |
 | 8 | 渠道 ext 转达的回答人真实性依赖 ext；`sender_verified` 依赖来源程序 | 外部依赖 | 伪造回答或错误转发 | 密钥可吊销；白名单 + ref 核对 + 只认首次；无法核实的按不在白名单处理；web_only 不走渠道 |
-| 9 | Gmail、Google Drive 这类来源需要用户自备 OAuth 客户端，受限权限范围审核门槛高，测试模式下授权可能较快过期 | 外部依赖 | 上手摩擦，认证频繁失败 | 不进首批，首批用 IMAP、CalDAV 覆盖邮件和日历，只支持 OAuth 的服务留到后续来源；认证失败走 `needs_input`；需实测后写入来源文档 |
+| 9 | Gmail、Google Drive 这类服务要用户自备 OAuth 客户端，测试模式下的授权约七天过期；鉴权交给工具后，这个摩擦依然存在 | 外部依赖 | 上手摩擦，认证频繁失败 | 不因此限制服务商；配置按工具文档走，例如把 OAuth 应用发布出测试模式；认证失败走 `needs_input`；能用应用专用密码的服务也可经 IMAP 接入 |
 | 10 | harness 版本变化导致钩子或标志失效 | 外部依赖 | 注入或无头运行失败 | 钩子放行；无头运行不依赖钩子；声明集中在插件；健康视图报告外呼失败 |
 | 11 | 单进程、单 SQLite | 单点故障 | 进程或磁盘故障时不可用 | 个人规模可接受；落盘语义 + 启动恢复；数据目录备份 |
 | 12 | Event 与来源事件持续增长 | 容量瓶颈 | 查询变慢 | 投影承担读路径；Source 运行不写 Event；Ingest、运行目录限期清理；需要时按类型设保留期 |
-| 13 | 范围膨胀：多 harness、多来源、多 ext | 交付 | 首个可用版本迟迟不出 | 里程碑切片；首批范围（§21.1 决定 9）；最小可用路径 M1 + M2 |
+| 13 | 范围膨胀：多 harness、多来源、多 ext | 交付 | 首个可用版本迟迟不出 | 首批范围（§21.1 决定 9）；§20 的能力分组与依赖；最小可用路径 M1 + M2 |
 | 14 | 设计与实现漂移 | 审计缺失 | 文档失去权威 | AGENTS.md 规定权威顺序与同步要求；红线检查进 CI |
-| 15 | M8 之前只有 Hermes 一个 harness，通用接口没有第二个实现检验 | 交付 | 接口贴合单一 harness，目标 6 要到 M8 才有证据 | 接口按 §11.2 的公约数定义；红线检查禁止内核出现 harness 名；M8 验收要求不改内核和 HTTP API |
+| 15 | Hermes 端到端验证完成之前只有一个 harness，通用接口没有第二个实现检验 | 交付 | 接口贴合单一 harness，目标 6 要到后续才有证据 | 接口按 §11.2 的公约数定义；红线检查禁止内核出现 harness 名；后续 harness 的验收要求不改内核和 HTTP API |
 | 16 | harness 自身补齐定时、网关、记忆和待办等主动能力 | 产品与采纳 | 主动感知和主动跟进的差异缩小，部分用户不再需要 APA | APA 的重心放在跨 harness 的账本、内核强制的决策边界和可追溯的记录；harness 自带能力可作为插件的叫醒或送达方式，不与之重复建设；按 §19.5 定期对照。残余风险接受 |
-| 17 | 用户要自己部署服务，并配置 Web、CLI、插件、模型端点和来源认证 | 产品与采纳 | 上手门槛高于托管产品，采纳范围受限 | 单二进制和 `apa init`；本机单机形态零暴露；模型端点可选；`apa guide` 让 agent 自行上手；§19.5 写明不适合希望开箱即用的用户。残余风险接受 |
+| 17 | 用户要自己部署服务，并配置 Web、CLI、插件、模型端点和来源认证；邮件和日历还要另装工具 | 产品与采纳 | 上手门槛高于托管产品，采纳范围受限 | 单二进制和 `apa init`；本机单机形态零暴露；模型端点可选；`apa guide` 让 agent 自行上手；§19.5 写明不适合希望开箱即用的用户。残余风险接受 |
 | 18 | 邮件和日历进入首批，带来隐私内容和诱导内容 | 权限安全 | 敏感内容进入账本并发送到模型端点；邮件诱导 agent | 来源 `config` 限定邮箱文件夹和日历范围，标准事件的 `detail` 可选；模型端点由用户自选，可用本机端点；邮件正文只作资料，建议流不触发投递；资金等决策为 web_only；物理删除 |
+| 19 | 接入 dsh 时适用：dsh 处于 developer preview，官方声明会有不兼容变更，发布频繁且以预发布版本为主；官方安全说明称它未经安全审计 | 外部依赖 | 插件或无头运行声明随版本失效，可能拖慢该 harness 的接入 | 插件用 `engines.dsh` 声明支持的版本范围，版本不符时 dsh 跳过插件、自身照常启动，符合"钩子失败放行"；无头运行只依赖 `dsh --profile headless` 的文档化契约，ACP、SDK 作备用通道；主会话注入只能走 Cordis 事件，这部分监听集中在一个插件内，随 dsh 版本回归；运行不依赖钩子，失败走 §11.5 的兜底；健康视图报告外呼失败；无人值守档位上限 `read`，运行凭据经文件传递（§7.7），部署按其安全说明使用专用环境（§16.4） |
+| 20 | 接入 dsh 时适用：dsh 基础配置默认把会话日志随请求上传到 DeepSeek 官方端点，注入内容和材料摘录会进入会话日志 | 权限安全 | 账本内容离开本人自选的模型端点范围 | 部署说明默认建议关闭 `session-log-deepseek`（§16.4）；APA 插件不替用户改这项配置，是否关闭由本人决定 |
+| 21 | 邮件、日历工具的版本和输出格式变化 | 外部依赖 | 适配器解析失败或静默丢字段，来源中断 | 适配器按版本声明，运行时比对；每个声明版本有录制输出的契约测试；缺必填字段就失败，不跳过；解析失败返回退出码 2，游标不前进，生成 `needs_input`（§9.7） |
+| 22 | 工具是第三方代码，持有邮箱和日历凭据，以 APA 主机账号运行 | 权限安全 | 工具缺陷或供应链问题波及凭据和主机 | 登记只在 Web 或主机配置文件（§14.12）；优先选活跃维护的开源工具；用只读开关；版本声明限定范围，升级经契约测试；部署可用专用系统账号（§16.1）。残余风险接受 |
 
 ### 21.3 需实测的 harness 行为
 
@@ -1913,11 +1986,12 @@ docs/             设计文档
 
 | harness | 需实测 | 设计兜底 |
 |---|---|---|
-| 全部 | 无头模式下钩子是否触发；注入文本是否被 harness 判定为提示注入 | 运行不依赖钩子；注入只写事实 |
-| Hermes | 注入消息时是否触发消息前钩子；唤醒回合内的工具包装行为；无通用压缩前入口 | 优先无头运行；压缩前保存跳过 |
+| 全部 | 无头模式下钩子是否触发；注入文本是否被 harness 判定为提示注入；运行凭据能否到达模型发起的 CLI 调用 | 运行不依赖钩子；注入只写事实；到不了时走凭据文件（§7.7）或 stdout 末段回执 |
+| Hermes | 注入消息时是否触发消息前钩子；唤醒回合内的工具包装行为；无通用压缩前入口；`terminal` 子进程是否保留 `APA_TOKEN`（公开源码按具名清单清除，`APA_TOKEN` 不在清单内） | 优先无头运行；压缩前保存跳过；不保留时用 `terminal.env_passthrough` 放行 |
 | Codex CLI | `codex exec` 的退出码；钩子信任在无头模式下的行为；沙箱是否允许访问 APA 端口 | 以回执为准；stdout 末段回执兜底；不进首批 |
 | Gemini CLI | `-p` 与 `-r` 组合；子 agent 内是否触发钩子；产品后续维护状态 | 不支持续接时用新会话；不进首批 |
 | OpenCode | 退出码；JSON 事件里的会话 id 字段；V2 插件接口；子会话钩子 | 以回执为准；不进首批 |
 | Pi | 无头模式退出码；环境变量注入方式；权限控制方式 | 以回执为准；不进首批 |
 | OpenClaw | `openclaw agent --json` 是否返回会话 id；唤醒回合内的钩子与环境注入 | 用 `--session-id` 预设；优先无头运行；不进首批 |
 | Claude Code | 插件钩子在 `-p` 下的行为；运行凭据环境变量传入钩子的情况 | 运行不依赖钩子；不进首批 |
+| dsh（接入时） | `APA_RUN_CREDENTIAL_FILE` 能否到达 CLI、凭据文件在 `read-only` 沙箱内是否可读；包装工具传入 `APA_SESSION`；模型沙箱内 CLI 能否访问 APA 端口；`read` 档的自配预设（`read-only` + `never`），以及该档下能否调用执行者；关闭 `session-log-deepseek` 后请求是否不再带会话日志；`agent/pre-step`、`agent/created` 监听器的超时与失败放行；压缩后是否发出 `compact` 来源；`session/event` 观察 `compaction/start` 能否用于压缩前保存；版本不符时插件被跳过的表现；ACP、SDK 作为备用通道 | 凭据不可达时只用 stdout 末段回执，`runner=main_session` 不可用；压缩前保存跳过；注入失败放行；无头运行不依赖钩子；端口不可达时走回执兜底；不进首批 |

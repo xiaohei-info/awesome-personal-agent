@@ -46,8 +46,8 @@
 | `apa agents sync` | 写入工作区；漂移时不覆盖并返回 6，本人选择"覆盖"后才写入 | observer | 6 |
 | **来源** | | | |
 | `apa source list/show` | 来源与统计 | observer | |
-| `apa source add` | 登记附带的拉取程序或 webhook source；自定义命令只在 Web | delegate | 20 |
-| `apa source auth <id>` | 启动来源程序的认证模式 | 主机本地 | |
+| `apa source add` | 登记附带的拉取程序或 webhook source；自定义命令（含邮件、日历工具的适配命令）只在 Web | delegate | 20 |
+| `apa source auth <id>` | 启动附带拉取程序的认证模式；工具适配的来源用工具自己的认证命令（主文档 §9.7） | 主机本地 | |
 | `apa source enable/disable` | 启停 | delegate | |
 | `apa source webhook create/rotate` | 创建、轮换 webhook 接收密钥 | delegate | |
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
