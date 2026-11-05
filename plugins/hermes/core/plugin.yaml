@@ -1,0 +1,4 @@
+name: apa-core
+version: 0.1.0
+description: "APA: standing instructions (apa guide --template) and per-session frozen persona (apa persona) as Hermes system prompt sections."
+author: awesome-personal-agent
