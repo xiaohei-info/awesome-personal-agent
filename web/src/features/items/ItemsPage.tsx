@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Route, Routes, useParams } from "react-router-dom";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { AttachedMessages } from "../attached-messages";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -170,6 +171,8 @@ function ItemDetail() {
         </ul>
         <RelateForm others={d.others} onSubmit={(b) => act(() => api.post(path + "/relations", b))} />
       </section>
+
+      <AttachedMessages itemId={id} />
 
       <section aria-label="变更">
         <h3>时间线</h3>

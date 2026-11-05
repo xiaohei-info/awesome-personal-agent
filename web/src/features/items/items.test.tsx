@@ -40,6 +40,7 @@ function ledger() {
       const phase = new URL(url, "http://x").searchParams.get("phase");
       return json(200, { items: items.filter((i) => !phase || i.phase === phase) });
     }
+    if (/^\/v1\/items\/[^/]+\/messages$/.test(url)) return json(200, { messages: [] });
     const why = url.match(/^\/v1\/why\/(.+)$/);
     if (why) return json(200, { id: why[1], steps: events.filter((e) => e.object === why[1]) });
     const m = url.match(/^\/v1\/items\/([^/]+)(?:\/(transition|relations))?$/);
