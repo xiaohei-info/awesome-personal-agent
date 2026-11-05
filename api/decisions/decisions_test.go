@@ -386,3 +386,53 @@ func TestWebURLFallsBackToHost(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// ACT-DEC-05、ACT-DEC-07、ACT-WEB-03、ACT-WEB-05、ACT-PROP-07 的补充路径。
+func TestWorkerCannotAnswerFreeTextAndWebOnlyExtras(t *testing.T) {
+	e := setup(t)
+	wrk, obs, dlg := e.token(auth.Worker, "wrk1"), e.token(auth.Observer, ""), e.token(auth.Delegate, "")
+	id := e.asked("", wrk)
+	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A","evidence":"x"}`, wrk); rec.Code != 403 || errBody(t, rec).Code != domain.CodePermissionDenied {
+		t.Fatalf("worker decide = %d %s", rec.Code, rec.Body)
+	}
+
+	// 自由文本：本人在 Web 填写文本，resolution 记录文本。
+	free := e.item(`{"kind":"task","title":"f","phase":"open","assignee":"wrk1"}`)
+	ask := `{"ask":{"question":"q","free_text":true,"options":[{"id":"A","label":"a"}]}}`
+	if rec := e.do("POST", "/v1/items/"+free+"/ask", ask, wrk); rec.Code != 200 {
+		t.Fatalf("ask free_text = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/items/"+free+"/decide", `{"text":"another idea"}`, e.web); rec.Code != 200 {
+		t.Fatalf("free text = %d %s", rec.Code, rec.Body)
+	}
+	if got := e.get(free).Ask.Resolution; got == nil || got.Text != "another idea" {
+		t.Fatalf("resolution = %+v", got)
+	}
+
+	// web_only 建议：delegate 接受返回 20 并带链接；web_only 决策不允许超时默认值。
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test", func(p *policy.Policy) error {
+			p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Tag: "funds", Category: policy.CategoryFunds})
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prop := e.item(`{"kind":"task","title":"p","tags":["funds"]}`)
+	rec := e.do("POST", "/v1/items/"+prop+"/accept", `{"evidence":"owner: ok"}`, dlg)
+	if de := errBody(t, rec); rec.Code != 403 || de.Code != domain.CodeWebOnly || de.WebURL == nil || *de.WebURL != webBase+"/items/"+prop {
+		t.Fatalf("web_only accept = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/items/"+prop+"/accept", `{}`, obs); rec.Code != 403 || errBody(t, rec).Code != domain.CodePermissionDenied {
+		t.Fatalf("observer accept = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/items/"+prop+"/accept", `{}`, e.web); rec.Code != 200 {
+		t.Fatalf("owner accept = %d %s", rec.Code, rec.Body)
+	}
+	fund := e.item(`{"kind":"task","title":"m","phase":"open","assignee":"wrk1","tags":["funds"]}`)
+	withDefault := `{"ask":{"question":"q","options":[{"id":"A","label":"a"}],"default_on_timeout":"A","deadline":"2099-01-01T00:00:00Z"}}`
+	if rec := e.do("POST", "/v1/items/"+fund+"/ask", withDefault, wrk); rec.Code != 400 {
+		t.Fatalf("web_only default_on_timeout = %d %s", rec.Code, rec.Body)
+	}
+}
