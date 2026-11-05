@@ -53,6 +53,9 @@ type Caller struct {
 	Actor domain.Actor
 	Level authz.Level
 	Kind  auth.Kind // 仅凭据入口有值
+	// RunScope 只有运行凭据有值：据账本判断授权对象是否在运行范围内（目标事项及其子事项 / 目标事项所属项目）。
+	// 管线用它填 authz.Object 的 InRunScope、InRunProject，命令自己不必也无法声明。
+	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
 }
 
 // Identity 在事务内把请求携带的凭据确定为 Caller。
@@ -356,6 +359,11 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 	obj, err := spec.Object(tx, req.Input)
 	if err != nil {
 		return Result{}, Commit{}, err
+	}
+	if caller.Level == authz.LevelRun && caller.RunScope != nil {
+		if obj.InRunScope, obj.InRunProject, err = caller.RunScope(tx, obj); err != nil {
+			return Result{}, Commit{}, err
+		}
 	}
 	pv, pol, err := policy.Current(tx)
 	if err != nil {
