@@ -1,0 +1,156 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestResolveHome(t *testing.T) {
+	if got, _ := ResolveHome(func(string) string { return "/data/apa" }, "/home/u"); got != "/data/apa" {
+		t.Fatalf("APA_HOME ignored: %q", got)
+	}
+	if got, _ := ResolveHome(func(string) string { return "" }, "/home/u"); got != filepath.Join("/home/u", ".apa") {
+		t.Fatalf("default home: %q", got)
+	}
+	if _, err := ResolveHome(func(string) string { return "rel/path" }, "/home/u"); err == nil {
+		t.Fatal("relative APA_HOME must be rejected")
+	}
+	if _, err := ResolveHome(func(string) string { return "" }, ""); err == nil {
+		t.Fatal("no APA_HOME and no user home must fail")
+	}
+}
+
+func TestLayout(t *testing.T) {
+	l := LayoutOf("/h")
+	want := map[string]string{
+		l.Config: "/h/config.yaml", l.Ledger: "/h/ledger.db", l.Blobs: "/h/blobs",
+		l.Packs: "/h/packs", l.Sources: "/h/sources", l.Runs: "/h/runs",
+		l.RunCredentials: "/h/run-credentials", l.Logs: "/h/logs",
+		l.RunDir("r1"): "/h/runs/r1", l.SourceDir("s1"): "/h/sources/s1", l.PackDir("p"): "/h/packs/p",
+		l.RunCredentialFile("r1"): "/h/run-credentials/r1",
+	}
+	for got, w := range want {
+		if got != w {
+			t.Errorf("got %q want %q", got, w)
+		}
+	}
+}
+
+func TestEnsureLayoutPermissions(t *testing.T) {
+	l := LayoutOf(filepath.Join(t.TempDir(), "apa"))
+	if err := l.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Ensure(); err != nil { // 幂等
+		t.Fatal(err)
+	}
+	for _, d := range []string{l.Blobs, l.Packs, l.Sources, l.Runs, l.Logs} {
+		if st, err := os.Stat(d); err != nil || !st.IsDir() {
+			t.Fatalf("missing dir %s: %v", d, err)
+		}
+	}
+	if st, _ := os.Stat(l.RunCredentials); st.Mode().Perm() != 0o700 {
+		t.Fatalf("run-credentials perm %v", st.Mode().Perm())
+	}
+}
+
+func TestLoadDefaultsWhenMissing(t *testing.T) {
+	c, err := Load(filepath.Join(t.TempDir(), "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c != Default() {
+		t.Fatalf("got %+v", c)
+	}
+	if c.MaxSubprocesses != 4 || c.MaxShortSubprocesses != 2 {
+		t.Fatal("quota defaults")
+	}
+	if c.IngestRetention != 30*24*time.Hour || c.RunRetention != 14*24*time.Hour {
+		t.Fatal("retention defaults")
+	}
+}
+
+func TestLoadOverrides(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(p, []byte(`# comment
+listen: "0.0.0.0:9000"   # inline
+max_subprocesses: 8
+max_short_subprocesses: 1
+ingest_retention_days: 7
+run_retention_days: 3
+`), 0o600)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Listen != "0.0.0.0:9000" || c.MaxSubprocesses != 8 || c.MaxShortSubprocesses != 1 ||
+		c.IngestRetention != 7*24*time.Hour || c.RunRetention != 3*24*time.Hour {
+		t.Fatalf("got %+v", c)
+	}
+}
+
+func TestLoadPartialKeepsDefaults(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(p, []byte("max_subprocesses: 6\n"), 0o600)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MaxSubprocesses != 6 || c.MaxShortSubprocesses != 2 || c.Listen != Default().Listen {
+		t.Fatalf("got %+v", c)
+	}
+}
+
+func TestLoadRejectsBadConfig(t *testing.T) {
+	cases := map[string]string{
+		"unknown key":    "bogus: 1\n",
+		"zero quota":     "max_subprocesses: 0\n",
+		"negative quota": "max_short_subprocesses: -1\n",
+		"not a number":   "max_subprocesses: many\n",
+		"zero retention": "run_retention_days: 0\n",
+		"empty listen":   "listen: \"\"\n",
+		"bad listen":     "listen: nohostport\n",
+		"duplicate key":  "max_subprocesses: 1\nmax_subprocesses: 2\n",
+		"no colon":       "max_subprocesses 4\n",
+		"nested":         "limits:\n  a: 1\n",
+		"unterminated":   "listen: \"abc\n",
+	}
+	for name, body := range cases {
+		p := filepath.Join(t.TempDir(), "config.yaml")
+		os.WriteFile(p, []byte(body), 0o600)
+		if _, err := Load(p); err == nil {
+			t.Errorf("%s: expected error", name)
+		} else if !strings.Contains(err.Error(), "config.yaml") {
+			t.Errorf("%s: error lacks file name: %v", name, err)
+		}
+	}
+}
+
+func TestLoadUnreadableIsError(t *testing.T) {
+	if _, err := Load(t.TempDir()); err == nil { // 目录不是文件
+		t.Fatal("reading a directory must fail, not fall back to defaults")
+	}
+}
+
+func TestOpenBootstrap(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "apa")
+	env := func(k string) string {
+		if k == "APA_HOME" {
+			return home
+		}
+		return ""
+	}
+	r, err := Open(env, "/unused")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Layout.Home != home || r.Config.MaxSubprocesses != 4 {
+		t.Fatalf("%+v", r)
+	}
+	if _, err := os.Stat(r.Layout.Runs); err != nil {
+		t.Fatal("Open must create layout")
+	}
+}
