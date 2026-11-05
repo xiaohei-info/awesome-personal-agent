@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -228,13 +229,18 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	if _, err := tx.Exec(`DELETE FROM attention_held WHERE item = ? AND version < ?`, id, ver); err != nil {
 		return err
 	}
-	opts := make([]string, 0, len(ask.Options))
-	for _, o := range ask.Options {
-		opts = append(opts, o.ID+": "+o.Label)
+	content := domain.DeliveryContent{Title: it.Title, Summary: ask.Question, WebURL: a.o.WebURL(id)}
+	if authz.WebOnly(pol, authz.Object{Kind: string(it.Kind), Tags: it.Tags, Project: it.Project, Category: ask.RiskClass}) {
+		content.WebOnly = true // web_only 只给 Web 链接：不带可点选项、推荐与表单链接（§6.9、§14.4）
+	} else {
+		for _, o := range ask.Options {
+			content.Options = append(content.Options, o.ID+": "+o.Label)
+		}
+		content.Recommend = ask.Recommend
 	}
 	return a.offer(tx, pol, held{
 		id: fmt.Sprintf("decision:%s:%d", id, ver), item: id, class: domain.DeliveryDecision, priority: it.Priority, version: ver,
-		content: domain.DeliveryContent{Title: it.Title, Summary: ask.Question, Options: opts, Recommend: ask.Recommend, WebURL: a.o.WebURL(id)},
+		content: content,
 		exempt:  nearDeadline(pol, it, a.o.Now()),
 	})
 }
