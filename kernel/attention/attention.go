@@ -282,6 +282,16 @@ func (a *Attention) remindOverdue(tx *store.Tx, pol policy.Policy) error {
 	return nil
 }
 
+// Remind 让其他模块的提醒（如跟进判断的"催"）走触达这个唯一出口：同样受静默与合并约束，
+// 同一 (kind, 事项, due) 只提醒一次，所以重复调用不会重复提醒。在调用方的事务里运行。
+func (a *Attention) Remind(tx *store.Tx, it domain.Item, kind string, due time.Time, title, summary string) error {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return err
+	}
+	return a.remind(tx, pol, it, kind, due, title, summary)
+}
+
 func (a *Attention) remind(tx *store.Tx, pol policy.Policy, it domain.Item, kind string, due time.Time, title, summary string) error {
 	ver, err := command.Version(tx, it.ID)
 	if err != nil {
