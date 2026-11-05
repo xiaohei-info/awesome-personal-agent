@@ -3,6 +3,7 @@ module github.com/xiaohei-info/awesome-personal-agent
 go 1.26.0
 
 require (
+	github.com/go-telegram/bot v1.27.0
 	golang.org/x/net v0.62.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.61.1
