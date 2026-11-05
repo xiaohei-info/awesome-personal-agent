@@ -641,6 +641,17 @@ func SetDisposition(tx *store.Tx, id string, d domain.Disposition, item string) 
 	return err
 }
 
+// ProposeUnjudged 在调用方事务内把一条还是 unjudged 的来源事件改为 proposed 并关联事项（§5.6 手动转建议）。
+// 不记事件，调用方自己负责留痕。
+func ProposeUnjudged(tx *store.Tx, id, item string) error {
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND disposition = ?`,
+		string(domain.DispositionProposed), item, id, string(domain.DispositionUnjudged))
+	if err == nil && n == 0 {
+		return domain.NewError(domain.CodeConflict, "source event "+id+" is not unjudged", "re-read the source event")
+	}
+	return err
+}
+
 // 挂靠消息状态（§9.4 attach_state）。
 const (
 	AttachPending    = "pending"
@@ -706,8 +717,32 @@ type Attachment struct {
 
 // Attachments 按落盘顺序返回挂在事项上、仍是 attached 的来源事件。
 func Attachments(tx *store.Tx, item string) ([]Attachment, error) {
-	rows, err := tx.Query(`SELECT seq, `+eventCols+` FROM sources_runner_event WHERE disposition = ? AND item = ? ORDER BY seq`,
-		string(domain.DispositionAttached), item)
+	return querySeq(tx, `WHERE disposition = ? AND item = ? ORDER BY seq`, string(domain.DispositionAttached), item)
+}
+
+// EventPage 按落盘顺序返回某来源 after 之后的至多 limit 条事件，d 非空时只看该处置；还有下一页时 next 是下一次的 after，否则为 0。
+func EventPage(tx *store.Tx, sourceID string, d domain.Disposition, after int64, limit int) ([]domain.SourceEvent, int64, error) {
+	where, args := `WHERE source_id = ? AND seq > ?`, []any{sourceID, after}
+	if d != "" {
+		where, args = where+` AND disposition = ?`, append(args, string(d))
+	}
+	as, err := querySeq(tx, where+` ORDER BY seq LIMIT ?`, append(args, limit+1)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	var next int64
+	if len(as) > limit {
+		next, as = as[limit-1].Seq, as[:limit]
+	}
+	out := make([]domain.SourceEvent, len(as))
+	for i, a := range as {
+		out[i] = a.SourceEvent
+	}
+	return out, next, nil
+}
+
+func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
+	rows, err := tx.Query(`SELECT seq, `+eventCols+` FROM sources_runner_event `+tail, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -740,7 +775,7 @@ func Event(tx *store.Tx, id string) (domain.SourceEvent, error) {
 		return domain.SourceEvent{}, err
 	}
 	if len(es) == 0 {
-		return domain.SourceEvent{}, domain.NewError(domain.CodeNotFound, "source event "+id+" not found", "list the item's attached messages")
+		return domain.SourceEvent{}, domain.NewError(domain.CodeNotFound, "source event "+id+" not found", "list the source's events or the item's attached messages")
 	}
 	return es[0], nil
 }
