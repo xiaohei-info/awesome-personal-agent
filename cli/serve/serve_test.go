@@ -9,12 +9,14 @@ import (
 	"go/token"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -747,5 +749,34 @@ func TestServeRefusesBadHostFile(t *testing.T) {
 	}
 	if r := apa(t, home, "", "serve"); r.code != 2 || !strings.Contains(r.errOut, "sources.json") {
 		t.Fatalf("a bad host file must refuse to start: %+v", r)
+	}
+}
+
+// notBundled 是 sources/*/cmd/* 里有意不进 bundledPull 的程序及理由（§9.7、§14.12）；其余程序必须在 bundledPull 里。
+var notBundled = map[string]string{
+	"mail-himalaya": "邮件适配器，按 §9.7 只在 Web 或主机配置文件登记",
+	"calendar":      "日历适配器，同上",
+	"hosted-reader": "托管文档读取器，不是来源",
+}
+
+// 新增拉取程序漏登记会失败：清单取自 sources/*/cmd/* 目录，bundledPull 不能少、也不能多出目录里没有的名字。
+func TestEveryBundledPullProgramIsRegistered(t *testing.T) {
+	dirs, err := filepath.Glob("../../sources/*/cmd/*")
+	if err != nil || len(dirs) == 0 {
+		t.Fatalf("no programs found under sources/*/cmd: %v", err)
+	}
+	onDisk := map[string]bool{}
+	for _, d := range dirs {
+		name := filepath.Base(d)
+		onDisk[name] = true
+		_, exempt := notBundled[name]
+		if in := slices.Contains(bundledPull, name); in == exempt {
+			t.Errorf("%s: in bundledPull=%v, in notBundled=%v; a program belongs to exactly one of them", name, in, exempt)
+		}
+	}
+	for _, name := range append(slices.Clone(bundledPull), slices.Collect(maps.Keys(notBundled))...) {
+		if !onDisk[name] {
+			t.Errorf("%s is listed but has no sources/*/cmd/%s", name, name)
+		}
 	}
 }

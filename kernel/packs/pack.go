@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 )
 
 // Pack 是一个已通过全部校验的能力包。
@@ -394,6 +396,12 @@ func finish(p *Pack, files map[string][]byte, names []string, checkSchema func(j
 		}
 		if r.Type != "recur" && r.Type != "follow_up" && r.Type != "check" {
 			return nil, fmt.Errorf("clock_rules.%s: type %q must be recur, follow_up or check", r.ID, r.Type)
+		}
+		// 含 {instance.…} 占位符的 schedule 由实例参数提供，创建实例时再校验。
+		if r.Schedule != "" && !strings.Contains(r.Schedule, "{") {
+			if _, err := clock.ParseSchedule(r.Schedule); err != nil {
+				return nil, fmt.Errorf("clock_rules.%s: schedule: %w", r.ID, err)
+			}
 		}
 		if err := checkMode("clock_rules."+r.ID, r.Mode); err != nil {
 			return nil, err

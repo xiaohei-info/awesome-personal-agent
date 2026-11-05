@@ -549,22 +549,27 @@ func TestClockRuleFiresByMode(t *testing.T) {
 	}
 }
 
-// 无法落成 Timer 的 schedule 不被悄悄忽略：Reconcile 报错，规则状态仍登记。
-func TestUnsupportedScheduleIsReported(t *testing.T) {
-	cron := strings.Replace(clockRule, "schedule: 24h", `schedule: "0 8 * * 1-5"`, 1)
-	e := newEnv(t, nil, nil) // 空包集
-	p := filepath.Join(e.data, "tick", "pack.yaml")
-	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	_ = os.WriteFile(p, []byte(cron), 0o644)
-	if _, err := e.loads.Load(); err != nil {
+// cron 表达式的时钟规则落成周期 Timer（不再报"不支持"）。
+func TestCronScheduleCreatesTimer(t *testing.T) {
+	cron := strings.Replace(clockRule, "schedule: 24h", `schedule: "CRON_TZ=UTC 0 8 * * 1-5"`, 1)
+	e := newEnv(t, map[string]string{"tick/pack.yaml": cron}, nil)
+	if err := e.eng.Reconcile(bg); err != nil {
 		t.Fatal(err)
 	}
-	err := e.eng.Reconcile(bg)
-	if err == nil || !strings.Contains(err.Error(), "tick/clock_rules/daily") {
-		t.Fatalf("Reconcile error = %v", err)
-	}
-	if e.mode("tick/clock_rules/daily") != ModeObserve {
-		t.Fatal("rule state must still be registered")
+	var rec string
+	err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT recurrence FROM clock_timer`)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		if r.Next() {
+			return r.Scan(&rec)
+		}
+		return nil
+	})
+	if err != nil || rec != "CRON_TZ=UTC 0 8 * * 1-5" {
+		t.Fatalf("timer recurrence %q err %v", rec, err)
 	}
 }
 

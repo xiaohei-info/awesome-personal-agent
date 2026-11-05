@@ -323,7 +323,7 @@ func shortSum(s string) []byte {
 //   - 内容 hash 变化：回到 observe，记 rule.mode_changed 与一条 health.alert（原模式已是 observe 时只更新 hash）。
 //   - 周期型时钟规则（recur、check）在第一次见到或内容变化时建一个周期 Timer；schedule 含实例占位符的规则由实例建 Timer。
 //
-// 无法落成 Timer 的 schedule（如 cron）不伪装成功：规则状态仍登记，错误在返回值里逐条列出。
+// 无法落成 Timer 的 schedule（既不是时长也不是 cron）不伪装成功：规则状态仍登记，错误在返回值里逐条列出。
 func (e *Engine) Reconcile(ctx context.Context) error {
 	var problems []error
 	err := e.o.Store.Update(ctx, func(tx *store.Tx) error {
@@ -397,11 +397,11 @@ func (e *Engine) addTimer(tx *store.Tx, d ruleDef) error {
 	if strings.Contains(sched, "{") {
 		return nil // 实例参数覆盖：Timer 由实例创建
 	}
-	every, err := time.ParseDuration(sched)
-	if err != nil || every <= 0 {
-		return fmt.Errorf("rules: %s: schedule %q is not a fixed interval such as 24h; the clock does not support other forms yet", d.Key, sched)
+	at, err := clock.Start(sched, e.now())
+	if err != nil {
+		return fmt.Errorf("rules: %s: %w", d.Key, err)
 	}
-	_, err = clock.Add(tx, domain.Timer{ID: timerID(d.Key), Target: d.Key, Kind: domain.TimerRecur, At: e.now().Add(every), Recurrence: sched})
+	_, err = clock.Add(tx, domain.Timer{ID: timerID(d.Key), Target: d.Key, Kind: domain.TimerRecur, At: at, Recurrence: sched})
 	return err
 }
 

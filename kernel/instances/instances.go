@@ -164,21 +164,21 @@ func (s *svc) check(tx *store.Tx, in Instance) error {
 	return nil
 }
 
-// plan 把 params.schedule 译成 Timer 的形状：Go 时长（如 "24h"）是周期定时，从 now 起算；
+// plan 把 params.schedule 译成 Timer 的形状：Go 时长（如 "24h"）或 5 段 cron 是周期定时，从 now 起算；
 // RFC3339 时刻是一次性提醒。没有 schedule 则不落 Timer。
-// shortcut: 时钟目前只支持固定时长周期，cron 表达式被明确拒绝；时钟支持日历周期后在此扩展。
 func plan(in Instance, now time.Time) (t domain.Timer, ok bool, err error) {
 	s, ok, err := schedule(in.Params)
 	if err != nil || !ok {
 		return t, false, err
 	}
-	if d, perr := time.ParseDuration(s); perr == nil && d > 0 {
-		return domain.Timer{Kind: domain.TimerRecur, At: now.Add(d), Recurrence: s}, true, nil
-	}
 	if at, perr := time.Parse(time.RFC3339, s); perr == nil {
 		return domain.Timer{Kind: domain.TimerRemind, At: at}, true, nil
 	}
-	return t, false, invalid("schedule " + s + " must be a positive duration like 24h or an RFC3339 time")
+	at, perr := clock.Start(s, now)
+	if perr != nil {
+		return t, false, invalid("schedule " + s + " must be a positive duration like 24h, a 5-field cron expression like 0 8 * * 1-5, or an RFC3339 time")
+	}
+	return domain.Timer{Kind: domain.TimerRecur, At: at, Recurrence: s}, true, nil
 }
 
 // schedule 取 params.schedule；没有返回 ok=false，存在但不是字符串是错误（否则实例会静默没有 Timer）。
