@@ -13,15 +13,19 @@ import (
 	"strings"
 	"testing"
 
+	apictx "github.com/xiaohei-info/awesome-personal-agent/api/context"
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apimat "github.com/xiaohei-info/awesome-personal-agent/api/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/context"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
+	kdelivery "github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/hosted"
@@ -46,7 +50,7 @@ func newKernel(t *testing.T) *kernel {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, km.Module, search.Module, hosted.Module, core.Module} {
+		items.Module, kdelivery.Module, kcontext.Module, km.Module, search.Module, hosted.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -63,7 +67,7 @@ func newKernel(t *testing.T) *kernel {
 		}
 	}
 	au := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{apimat.Routes(st, x, nil)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{apimat.Routes(st, x, nil), apictx.Routes(st)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,11 +184,22 @@ func TestHostedMaterialAddShowAndCommitConflict(t *testing.T) {
 	r := k.ok(auth.Worker, "material", "add", "--repo", "git@example.com:me/doc.git", "--path", "docs/design.md", "--project", k.prj, "--kind", "design", "--title", "Design").json(t)
 	id := r["material"].(string)
 	show := k.ok(auth.Observer, "material", "show", id)
-	if strings.Contains(show.out, "content") && show.json(t)["revision"] != nil {
-		t.Fatalf("hosted show must not carry a body: %s", show.out)
+	if sj := show.json(t); sj["revision"] != nil {
+		t.Fatalf("hosted show must not carry a revision: %s", show.out)
 	}
-	if h := show.json(t)["hosted"].(map[string]any); h["path"] != "docs/design.md" {
+	if h := show.json(t)["hosted"].(map[string]any); h["path"] != "docs/design.md" || h["repo"] != "git@example.com:me/doc.git" {
 		t.Fatalf("hosted location: %v", h)
+	}
+	if m := show.json(t)["material"].(map[string]any); m["title"] != "Design" || m["kind"] != "design" {
+		t.Fatalf("hosted registration: %v", m)
+	}
+	// 托管型只索引元数据：路径片段命中并带位置，正文里才有的词不命中。
+	hits := k.ok(auth.Observer, "material", "search", "design.md").json(t)["hits"].([]any)
+	if len(hits) != 1 || hits[0].(map[string]any)["path"] != "git@example.com:me/doc.git:docs/design.md" {
+		t.Fatalf("hosted path search: %v", hits)
+	}
+	if hits := k.ok(auth.Observer, "material", "search", "zebracrossing").json(t)["hits"].([]any); len(hits) != 0 {
+		t.Fatalf("hosted body term must not hit: %v", hits)
 	}
 	if c := k.apa(auth.Worker, "material", "commit", id, "--from", write(t, "x"), "--reason", "r"); c.code != domain.ExitConflict {
 		t.Fatalf("commit on hosted: %d %s", c.code, c.errOut)
@@ -202,8 +217,11 @@ func TestBlobPutGetRoundTrip(t *testing.T) {
 	hash := hex.EncodeToString(sum[:])
 	p := filepath.Join(t.TempDir(), "a.bin")
 	_ = os.WriteFile(p, data, 0o600)
-	if put := k.ok(auth.Worker, "blob", "put", p).json(t); put["hash"] != hash {
-		t.Fatalf("put: %v", put)
+	if put := k.ok(auth.Worker, "blob", "put", p).json(t); put["hash"] != hash || put["created"] != true {
+		t.Fatalf("first put: %v", put)
+	}
+	if put := k.ok(auth.Worker, "blob", "put", p).json(t); put["hash"] != hash || put["created"] != false {
+		t.Fatalf("second put of the same bytes must dedupe: %v", put)
 	}
 	if got := k.ok(auth.Observer, "blob", "get", hash); got.out != string(data) {
 		t.Fatalf("get stdout: %q", got.out)
@@ -229,5 +247,41 @@ func TestUsageErrors(t *testing.T) {
 		if r := k.apa(auth.Observer, a...); r.code != domain.ExitUsage {
 			t.Fatalf("%v: %d", a, r.code)
 		}
+	}
+}
+
+// 提议型（guideline）提交返回 state=proposed，修订不成为当前修订；show 仍读回正文，context 不带正文（§12.4–12.5）。
+func TestGuidelineProposedShowReturnsBodyContextDoesNot(t *testing.T) {
+	k := newKernel(t)
+	const body = "distinctive-guideline-body-xyzzy"
+	r := k.ok(auth.Worker, "material", "commit", "--from", write(t, body), "--reason", "rules", "--kind", "guideline", "--title", "Rules", "--project", k.prj).json(t)
+	if r["state"] != "proposed" {
+		t.Fatalf("guideline commit must be proposed: %v", r)
+	}
+	id, rev := r["material"].(string), r["revision"].(string)
+	cur := k.ok(auth.Observer, "material", "show", id).json(t)
+	if cur["revision"] != nil || cur["material"].(map[string]any)["current_rev"] != nil && cur["material"].(map[string]any)["current_rev"] != "" {
+		t.Fatalf("proposed revision must not be current: %v", cur)
+	}
+	if got := k.ok(auth.Observer, "material", "show", id, "--rev", rev).json(t)["revision"].(map[string]any)["content"]; got != body {
+		t.Fatalf("show --rev body: %v", got)
+	}
+	for _, args := range [][]string{{"context", "--scope", "project", "--project", k.prj}, {"context", "--scope", "all"}, {"context", "--format", "inject", "--scope", "all"}} {
+		if c := k.ok(auth.Observer, args...); strings.Contains(c.out, body) {
+			t.Fatalf("%v carries the material body: %s", args, c.out)
+		}
+	}
+}
+
+// 直接生效的自有型：show 读回正文，context 不带正文。
+func TestOwnedBodyAbsentFromContext(t *testing.T) {
+	k := newKernel(t)
+	const body = "distinctive-owned-body-plugh"
+	id := k.ok(auth.Worker, "material", "commit", "--from", write(t, body), "--reason", "r", "--kind", "reference", "--title", "Ref", "--project", k.prj).json(t)["material"].(string)
+	if got := k.ok(auth.Observer, "material", "show", id).json(t)["revision"].(map[string]any)["content"]; got != body {
+		t.Fatalf("show body: %v", got)
+	}
+	if c := k.ok(auth.Observer, "context", "--scope", "project", "--project", k.prj); strings.Contains(c.out, body) {
+		t.Fatalf("context carries the material body: %s", c.out)
 	}
 }
