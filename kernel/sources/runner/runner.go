@@ -606,7 +606,32 @@ const eventCols = `id, source_id, dedupe_domain, event_id, type, subject, summar
 
 // Events 按落盘顺序返回某来源的来源事件。
 func Events(tx *store.Tx, sourceID string) ([]domain.SourceEvent, error) {
-	rows, err := tx.Query(`SELECT `+eventCols+` FROM sources_runner_event WHERE source_id = ? ORDER BY seq`, sourceID)
+	return queryEvents(tx, `WHERE source_id = ?`, sourceID)
+}
+
+// Pending 按落盘顺序返回所有还没有处置的来源事件（disposition 为 pending），供入站流水线接手。
+func Pending(tx *store.Tx) ([]domain.SourceEvent, error) {
+	return queryEvents(tx, `WHERE disposition = ?`, string(domain.DispositionPending))
+}
+
+// SetDisposition 在调用方事务内给一条还是 pending 的来源事件写处置结果与（若有）建出的事项。
+// 这两列只由入站流水线经本函数维护；不记事件，调用方自己负责留痕。
+func SetDisposition(tx *store.Tx, id string, d domain.Disposition, item string) error {
+	switch d {
+	case domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored, domain.DispositionUnjudged:
+	default:
+		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(d)+" cannot be set", "use attached, proposed, ignored or unjudged")
+	}
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND disposition = ?`,
+		string(d), item, id, string(domain.DispositionPending))
+	if err == nil && n == 0 {
+		return domain.NewError(domain.CodeConflict, "source event "+id+" is not pending", "re-read the source event")
+	}
+	return err
+}
+
+func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent, error) {
+	rows, err := tx.Query(`SELECT `+eventCols+` FROM sources_runner_event `+where+` ORDER BY seq`, args...)
 	if err != nil {
 		return nil, err
 	}
