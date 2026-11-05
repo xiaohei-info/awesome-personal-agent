@@ -8,7 +8,7 @@ import (
 )
 
 // Revise 是其他模块（决策）改事项投影的唯一入口：投影只由本包写。它在调用方事务内读出事项、
-// 交给 f 修改、校验阶段不变量（§6.14 第 3 条）、落投影并对齐 wait_until Timer，
+// 交给 f 修改、校验阶段不变量（§6.14 第 3 条）、落投影并对齐事项的 Timer，
 // 返回变更前后的事项与可直接作事件 payload 的快照（折叠按它重建投影）。
 // 事件与乐观版本由调用方负责：命令内由管线追加版本，时钟处理器里用 command.Bump。
 func Revise(tx *store.Tx, id, op string, f func(*domain.Item) error) (before, after domain.Item, snapshot json.RawMessage, err error) {
@@ -28,7 +28,7 @@ func Revise(tx *store.Tx, id, op string, f func(*domain.Item) error) (before, af
 	if err = save(tx, after); err != nil {
 		return
 	}
-	if err = syncTimer(tx, after); err != nil {
+	if err = syncTimer(tx, before, after); err != nil {
 		return
 	}
 	snapshot, err = marshalPayload(payload{Op: op, Before: &before, Item: after})

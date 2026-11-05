@@ -142,6 +142,7 @@ type ItemInput struct {
 	Tags        []string        `json:"tags,omitempty"`
 	Assignee    string          `json:"assignee,omitempty"`
 	WaitingOn   *WaitingOn      `json:"waiting_on,omitempty"`
+	Deadline    *time.Time      `json:"deadline,omitempty"`
 	Ask         *AskInput       `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
 	Spec        json.RawMessage `json:"spec,omitempty"`
@@ -170,6 +171,7 @@ type Item struct {
 	Tags        []string        `json:"tags,omitempty"`
 	Assignee    string          `json:"assignee,omitempty"`
 	WaitingOn   *WaitingOn      `json:"waiting_on,omitempty"`
+	Deadline    *time.Time      `json:"deadline,omitempty"` // 事项自身的截止，与 ask.deadline（决策超时）无关
 	Ask         *Ask            `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
 	Spec        json.RawMessage `json:"spec,omitempty"`
