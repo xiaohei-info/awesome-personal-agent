@@ -16,6 +16,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
@@ -45,7 +46,7 @@ func registry() (*store.Registry, error) {
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, runidentity.Module,
 		kprojects.Module, clock.Module, kitems.Module, core.Module, kcontext.Module, delegation.Module, executors.Module,
 		delivery.Module, attention.Module, proc.Module, direct.Module, task.Module, followup.Module, rules.Module,
-		instances.Module, sregistry.Module, runner.Module, webhook.Module} {
+		instances.Module, sregistry.Module, runner.Module, webhook.Module, channel.Module} {
 		if err := reg.Register(m); err != nil {
 			return nil, err
 		}
