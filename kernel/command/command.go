@@ -156,6 +156,9 @@ func (c *Ctx) Emit(e domain.Event) (int64, error) {
 type Spec struct {
 	Name   string
 	Action authz.Action
+	// Actions 非空时取代 Action：依调用者与对象给出需要逐一通过的授权动作（如"改自己的事项"加"校验执行者"）；
+	// 第一个被拒绝的动作决定结果。
+	Actions func(tx *store.Tx, c Caller, o authz.Object, in json.RawMessage) []authz.Action
 	// Object 在事务内据账本解析授权对象；对象的所有字段来自账本，不来自 Input。
 	Object func(tx *store.Tx, in json.RawMessage) (authz.Object, error)
 	// Validate 校验 kind 的 spec schema、阶段进入约束等；可为空。
@@ -354,9 +357,17 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 	if err != nil {
 		return Result{}, Commit{}, err
 	}
-	ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: spec.Action, Object: obj,
-		Evidence: req.Evidence, Owner: req.Owner, WebURL: req.WebURL}
-	if d := authz.Decide(pol, ar); d.Err != nil {
+	actions := []authz.Action{spec.Action}
+	if spec.Actions != nil {
+		actions = spec.Actions(tx, caller, obj, req.Input)
+	}
+	for _, act := range actions {
+		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
+			Evidence: req.Evidence, Owner: req.Owner, WebURL: req.WebURL}
+		d := authz.Decide(pol, ar)
+		if d.Err == nil {
+			continue
+		}
 		if ev, ok := authz.RejectionEvent(ar, d); ok {
 			ev.At = x.now()
 			if caller.Actor.Via == domain.ViaRule {
@@ -498,6 +509,23 @@ func loadIdem(tx *store.Tx, principal, command, key string) (idemRow, bool, erro
 	var row idemRow
 	err = r.Scan(&row.inputHash, &row.result, &row.version)
 	return row, err == nil, err
+}
+
+// Version 返回对象当前版本，没有写入过为 0。
+func Version(tx *store.Tx, object string) (int64, error) { return loadVersion(tx, object) }
+
+// Bump 把对象版本加一并返回新版本。命令管线之外在自己事务里改对象的内部入口（如时钟处理器）用它，
+// 使乐观版本仍只有一个来源；命令内部不要调用，管线已经加过。
+func Bump(tx *store.Tx, object string) (int64, error) {
+	cur, err := loadVersion(tx, object)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`INSERT INTO command_version (object, version) VALUES (?, ?)
+		ON CONFLICT(object) DO UPDATE SET version = excluded.version`, object, cur+1); err != nil {
+		return 0, err
+	}
+	return cur + 1, nil
 }
 
 func loadVersion(tx *store.Tx, object string) (int64, error) {

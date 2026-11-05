@@ -501,3 +501,54 @@ func TestRejectedAttemptDoesNotResetChainDepth(t *testing.T) {
 		}
 	}
 }
+
+// Spec.Actions 取代 Action：每个动作都要通过，第一个被拒绝的决定结果，并按该动作的规则留痕。
+func TestMultipleActionsAllMustPass(t *testing.T) {
+	e := setup(t)
+	obj := func(*store.Tx, json.RawMessage) (authz.Object, error) {
+		return authz.Object{ID: "o1", Executor: "stranger", ProjectInfo: &domain.Project{AllowedExecutors: []string{"a"}}}, nil
+	}
+	applied := 0
+	acts := func(as ...authz.Action) func(*store.Tx, Caller, authz.Object, json.RawMessage) []authz.Action {
+		return func(*store.Tx, Caller, authz.Object, json.RawMessage) []authz.Action { return as }
+	}
+	for name, as := range map[string][]authz.Action{
+		"ok":     {authz.ActionUpdateOwn, authz.ActionRead},
+		"checks": {authz.ActionRead, authz.ActionReassign},
+	} {
+		if err := e.x.Register(Spec{Name: "multi." + name, Action: authz.ActionRead, Actions: acts(as...), Object: obj,
+			Apply: func(*Ctx) (any, error) { applied++; return nil, nil }}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.x.Do(bg, Request{Identity: owner, Command: "multi.ok"}); err != nil || applied != 1 {
+		t.Fatalf("all allowed: %v applied=%d", err, applied)
+	}
+	before := len(e.events(t))
+	if _, err := e.x.Do(bg, Request{Identity: owner, Command: "multi.checks"}); exit(err) != domain.ExitExecutorNotAllowed || applied != 1 {
+		t.Fatalf("second action denies: %v applied=%d", err, applied)
+	}
+	if es := e.events(t); len(es) != before+1 || es[before].Event.Type != domain.EvCommandRejected || es[before].Event.Object != "o1" {
+		t.Fatal("a rejection of any action must be recorded")
+	}
+}
+
+// Bump 与管线共用同一版本序列。
+func TestBumpSharesVersionSequence(t *testing.T) {
+	e := setup(t)
+	e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: in(noteIn{ID: "n1", Body: "a"})})
+	var v1, v2 int64
+	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
+		if v1, err = Bump(tx, "n1"); err != nil {
+			return err
+		}
+		v2, err = Version(tx, "n1")
+		return
+	}); err != nil || v1 != 2 || v2 != 2 {
+		t.Fatalf("bump: %d %d %v", v1, v2, err)
+	}
+	res, _ := e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: in(noteIn{ID: "n1", Body: "b"})})
+	if res.Version != 3 {
+		t.Fatalf("pipeline continues after a bump: %d", res.Version)
+	}
+}
