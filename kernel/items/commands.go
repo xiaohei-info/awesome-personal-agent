@@ -1,0 +1,682 @@
+package items
+
+import (
+	"bytes"
+	"encoding/json"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+)
+
+func decode(in json.RawMessage, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(in))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return invalid("bad input: " + err.Error())
+	}
+	return nil
+}
+
+// put 把 JSON 值写进字段；null 清空为零值。
+func put[T any](raw json.RawMessage, dst *T) error {
+	var v T
+	if string(bytes.TrimSpace(raw)) != "null" {
+		if err := decode(raw, &v); err != nil {
+			return err
+		}
+	}
+	*dst = v
+	return nil
+}
+
+func blank(s string) bool { return strings.TrimSpace(s) == "" }
+
+type createIn struct {
+	domain.ItemInput
+	Phase    domain.Phase `json:"phase"` // 缺省 proposed：agent 的产出先进建议流
+	Reason   string       `json:"reason"`
+	Evidence string       `json:"evidence"`
+}
+
+type transitionIn struct {
+	ID        string            `json:"id"`
+	To        domain.Phase      `json:"to"`
+	Reason    string            `json:"reason"`
+	Evidence  string            `json:"evidence"`
+	WaitingOn *domain.WaitingOn `json:"waiting_on"`
+}
+
+// relateIn 的边读作"From <type> To"；parent 的 From 是子、To 是父（与 derived_from 同向）。
+type relateIn struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Type   string `json:"type"`
+	Remove bool   `json:"remove"`
+	Reason string `json:"reason"`
+}
+
+type revertIn struct {
+	ID     string `json:"id"`
+	Seq    int64  `json:"event"`
+	Reason string `json:"reason"`
+}
+
+type ref struct {
+	ID string `json:"id"`
+}
+
+func (c createIn) phase() domain.Phase {
+	if c.Phase == "" {
+		return domain.PhaseProposed
+	}
+	return c.Phase
+}
+
+func (c createIn) item(id string) domain.Item {
+	in := c.ItemInput
+	it := domain.Item{ID: id, Phase: c.phase(), Kind: in.Kind, Title: in.Title, Summary: in.Summary, Body: in.Body,
+		StatusLabel: in.StatusLabel, Priority: in.Priority, Project: in.Project, Tags: in.Tags, Assignee: in.Assignee,
+		WaitingOn: in.WaitingOn, Origin: in.Origin, Spec: in.Spec, Ext: in.Ext}
+	if it.Priority == "" {
+		it.Priority = domain.PriorityNormal
+	}
+	if in.Ask != nil {
+		it.Ask = &domain.Ask{AskInput: *in.Ask}
+	}
+	return it
+}
+
+// parsePatch 拆出 update 输入：id、reason 之外的键都是要写的字段。
+func parsePatch(in json.RawMessage) (id, reason string, patch map[string]json.RawMessage, err error) {
+	if err = decode(in, &patch); err != nil {
+		return
+	}
+	for key, dst := range map[string]*string{"id": &id, "reason": &reason} {
+		if raw, ok := patch[key]; ok {
+			if err = put(raw, dst); err != nil {
+				return
+			}
+			delete(patch, key)
+		}
+	}
+	if id == "" {
+		err = invalid("item id is required")
+	}
+	return
+}
+
+// applyPatch 在 cur 的副本上写入给定字段；phase、kind、id 与内核字段不在可写集合内。
+func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item, error) {
+	if len(patch) == 0 {
+		return cur, invalid("nothing to update")
+	}
+	it := cur
+	for k, raw := range patch {
+		var err error
+		switch k {
+		case "title":
+			err = put(raw, &it.Title)
+		case "summary":
+			err = put(raw, &it.Summary)
+		case "body":
+			err = put(raw, &it.Body)
+		case "status_label":
+			err = put(raw, &it.StatusLabel)
+		case "priority":
+			err = put(raw, &it.Priority)
+		case "project":
+			err = put(raw, &it.Project)
+		case "tags":
+			err = put(raw, &it.Tags)
+		case "assignee":
+			err = put(raw, &it.Assignee)
+		case "waiting_on":
+			err = put(raw, &it.WaitingOn)
+		case "origin":
+			err = put(raw, &it.Origin)
+		case "spec":
+			err = put(raw, &it.Spec)
+		case "ext":
+			err = put(raw, &it.Ext)
+		case "ask":
+			var a *domain.AskInput
+			if err = put(raw, &a); err == nil {
+				it.Ask = nil
+				if a != nil { // 内核维护的风险类别、初筛标记与决定结果不因调用方改写问题而丢
+					it.Ask = &domain.Ask{AskInput: *a}
+					if cur.Ask != nil {
+						it.Ask.AskKernelState, it.Ask.Resolution = cur.Ask.AskKernelState, cur.Ask.Resolution
+					}
+				}
+			}
+		default:
+			err = invalid("field " + k + " cannot be updated")
+		}
+		if err != nil {
+			return cur, err
+		}
+	}
+	return it, nil
+}
+
+func transit(cur domain.Item, in transitionIn) (domain.Item, error) {
+	next := cur
+	next.Phase = in.To
+	switch {
+	case in.To != domain.PhaseWaiting && in.WaitingOn != nil:
+		return cur, invalid("waiting_on only applies to the waiting phase")
+	case in.To != domain.PhaseWaiting:
+		next.WaitingOn = nil
+	case in.WaitingOn != nil:
+		next.WaitingOn = in.WaitingOn
+	}
+	return next, nil
+}
+
+type svc struct{ kinds *Kinds }
+
+// check 校验事项自身：字段、项目存在、waiting_on / ask 的形状、阶段不变量（§6.14 第 3 条）、kind 的 spec schema。
+func (s *svc) check(tx *store.Tx, it domain.Item) error {
+	switch {
+	case blank(string(it.Kind)) || strings.ContainsAny(string(it.Kind), " \t\r\n"):
+		return invalid("kind is required and must not contain whitespace")
+	case blank(it.Title):
+		return invalid("title is required")
+	case it.Priority != "" && !it.Priority.Valid():
+		return invalid("unknown priority " + string(it.Priority))
+	case slices.ContainsFunc(it.Tags, blank):
+		return invalid("tags must not be blank")
+	case it.Origin != nil && blank(it.Origin.Source):
+		return invalid("origin.source is required")
+	case it.Ask != nil && blank(it.Ask.Question):
+		return invalid("ask.question is required")
+	case it.Phase == domain.PhaseWaiting && it.WaitingOn == nil:
+		return invalid("waiting phase requires waiting_on")
+	case it.Phase == domain.PhaseNeedsInput && it.Ask == nil:
+		return invalid("needs_input phase requires ask")
+	}
+	if w := it.WaitingOn; w != nil {
+		if !w.Kind.Valid() || blank(w.Ref) {
+			return invalid("waiting_on needs a kind (human, executor, external, time) and a ref")
+		}
+		if w.Kind == domain.WaitingTime {
+			if _, err := time.Parse(time.RFC3339, w.Ref); err != nil {
+				return invalid("waiting_on.ref for kind time must be an RFC 3339 timestamp")
+			}
+		}
+	}
+	if it.Project != "" {
+		if _, err := projectOf(tx, it.Project); err != nil {
+			return err
+		}
+	}
+	return s.kinds.check(it.Kind, it.Spec)
+}
+
+// projectOf 读项目；引用不存在的项目是请求错误，不是 not_found。
+func projectOf(tx *store.Tx, id string) (domain.Project, error) {
+	p, err := projects.Get(tx, id)
+	if isNotFound(err) {
+		return p, invalid("project " + id + " does not exist")
+	}
+	return p, err
+}
+
+// object 解析授权对象。Assignee 是当前执行者（判定"自己的事项"）；Executor 与 ProjectInfo 是写入后的
+// 执行者与所属项目，交给 §14.7 的名单校验（两者都有才校验）。
+func object(tx *store.Tx, cur, next domain.Item) (authz.Object, error) {
+	o := authz.Object{ID: cur.ID, Assignee: cur.Assignee, Kind: string(cur.Kind), Tags: cur.Tags, Project: cur.Project, Executor: next.Assignee}
+	if a := cur.Ask; a != nil { // 内核维护的风险类别与初筛状态进入代答判定（§14.4）
+		o.Category, o.ScreeningPending = a.RiskClass, a.ScreeningPending
+	}
+	if next.Assignee != "" && next.Project != "" {
+		p, err := projectOf(tx, next.Project)
+		if err != nil {
+			return o, err
+		}
+		o.ProjectInfo = &p
+	}
+	return o, nil
+}
+
+// editActions：改自己的事项为 update_own，改他人的为 edit_any_item（§14.3）；
+// 写了 assignee 或 project 再加名单校验点，使 21 号拒绝走管线留痕。
+func editActions(c command.Caller, o authz.Object, wroteAssignee, wroteProject bool, first ...authz.Action) []authz.Action {
+	as := first
+	if len(as) == 0 {
+		if o.Assignee != "" && o.Assignee == c.Actor.Principal {
+			as = []authz.Action{authz.ActionUpdateOwn}
+		} else {
+			as = []authz.Action{authz.ActionEditAnyItem}
+		}
+	}
+	switch {
+	case wroteAssignee:
+		as = append(as, authz.ActionReassign)
+	case wroteProject:
+		as = append(as, authz.ActionMoveIntoProject)
+	}
+	return as
+}
+
+// marshalPayload 序列化事件 payload；版本不进快照，折叠时按事件数补上。
+func marshalPayload(p payload) (json.RawMessage, error) {
+	p.Item.Version = 0
+	if p.Before != nil {
+		b := *p.Before
+		b.Version = 0
+		p.Before = &b
+	}
+	return json.Marshal(p)
+}
+
+func emit(c *command.Ctx, typ, reason, evidence string, p payload) error {
+	b, err := marshalPayload(p)
+	if err != nil {
+		return err
+	}
+	_, err = c.Emit(domain.Event{Type: typ, Object: p.Item.ID, Reason: reason, Evidence: evidence, Payload: b})
+	return err
+}
+
+func waitTimerID(item string) string { return "wait_" + item }
+
+// syncTimer 让 wait_until Timer 与事项一致：只有等时间的 waiting 才有 Timer，改时间即重排（§6.4、§6.8）。
+func syncTimer(tx *store.Tx, it domain.Item) error {
+	id := waitTimerID(it.ID)
+	if err := clock.Cancel(tx, id); err != nil && !isNotFound(err) {
+		return err
+	}
+	if it.Phase != domain.PhaseWaiting || it.WaitingOn == nil || it.WaitingOn.Kind != domain.WaitingTime {
+		return nil
+	}
+	at, err := time.Parse(time.RFC3339, it.WaitingOn.Ref)
+	if err != nil {
+		return err
+	}
+	_, err = clock.Add(tx, domain.Timer{ID: id, Target: it.ID, Kind: domain.TimerWaitUntil, At: at})
+	return err
+}
+
+// Register 在命令执行器上登记事项命令。kinds 为 nil 表示没有登记任何 kind schema。
+//
+// 授权（§14.3）：以 proposed 新建所有级别可；其余写入改自己的事项为 update_own、改他人的为 edit_any_item；
+// 离开 proposed（接受或丢弃建议）与离开 needs_input（决定）按代答（answer_decision）判定，使 worker、
+// 运行身份不能自己确认；item.revert 只在 Web（change_settings）。assignee 与 project 的写入都过名单校验。
+func Register(x *command.Executor, kinds *Kinds) error {
+	s := &svc{kinds: kinds}
+	for _, sp := range []command.Spec{s.create(), s.update(), s.transition(), s.relate(), s.revert()} {
+		if err := x.Register(sp); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *svc) create() command.Spec {
+	parse := func(in json.RawMessage) (createIn, error) {
+		var v createIn
+		return v, decode(in, &v)
+	}
+	return command.Spec{Name: "item.create", Action: authz.ActionCreateProposed,
+		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, err := parse(in)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			id, err := newID() // 新事项的 id 先定下来，授权与拒绝事件才有对象
+			if err != nil {
+				return authz.Object{}, err
+			}
+			it := v.item(id)
+			return object(tx, it, it)
+		},
+		Actions: func(_ *store.Tx, c command.Caller, o authz.Object, in json.RawMessage) []authz.Action {
+			v, _ := parse(in)
+			if v.phase() == domain.PhaseProposed {
+				return editActions(c, o, v.Assignee != "", v.Project != "", authz.ActionCreateProposed)
+			}
+			return editActions(c, o, v.Assignee != "", v.Project != "")
+		},
+		Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
+			v, _ := parse(in)
+			it := v.item(o.ID)
+			reason := v.Reason
+			if reason == "" {
+				reason = "created"
+			}
+			if e := domain.CheckEntry(it, it.Phase, reason, !blank(v.Evidence)); e != nil {
+				return e
+			}
+			return s.check(tx, it)
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			v, _ := parse(c.Input)
+			it := v.item(c.Object.ID)
+			it.ChainDepth = c.ChainDepth
+			if err := save(c.Tx, it); err != nil {
+				return nil, err
+			}
+			if err := syncTimer(c.Tx, it); err != nil {
+				return nil, err
+			}
+			reason := v.Reason
+			if reason == "" {
+				reason = "created"
+			}
+			return ref{it.ID}, emit(c, domain.EvItemCreated, reason, v.Evidence, payload{Op: "create", Item: it})
+		}}
+}
+
+func (s *svc) update() command.Spec {
+	plan := func(tx *store.Tx, in json.RawMessage) (cur, next domain.Item, reason string, patch map[string]json.RawMessage, err error) {
+		var id string
+		if id, reason, patch, err = parsePatch(in); err != nil {
+			return
+		}
+		if cur, err = Get(tx, id); err != nil {
+			return
+		}
+		next, err = applyPatch(cur, patch)
+		return
+	}
+	return command.Spec{Name: "item.update", Action: authz.ActionUpdateOwn,
+		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
+			cur, next, _, _, err := plan(tx, in)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			return object(tx, cur, next)
+		},
+		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, in json.RawMessage) []authz.Action {
+			_, _, _, patch, _ := plan(tx, in)
+			_, a := patch["assignee"]
+			_, p := patch["project"]
+			return editActions(c, o, a, p)
+		},
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+			_, next, _, _, err := plan(tx, in)
+			if err != nil {
+				return err
+			}
+			return s.check(tx, next)
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			cur, next, reason, _, err := plan(c.Tx, c.Input)
+			if err != nil {
+				return nil, err
+			}
+			if err := save(c.Tx, next); err != nil {
+				return nil, err
+			}
+			if err := syncTimer(c.Tx, next); err != nil {
+				return nil, err
+			}
+			return ref{next.ID}, emit(c, domain.EvItemUpdated, reason, "", payload{Op: "update", Before: &cur, Item: next})
+		}}
+}
+
+func (s *svc) transition() command.Spec {
+	plan := func(tx *store.Tx, in json.RawMessage) (cur, next domain.Item, v transitionIn, err error) {
+		if err = decode(in, &v); err != nil {
+			return
+		}
+		if cur, err = Get(tx, v.ID); err != nil {
+			return
+		}
+		next, err = transit(cur, v)
+		return
+	}
+	return command.Spec{Name: "item.transition", Action: authz.ActionUpdateOwn,
+		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
+			cur, next, _, err := plan(tx, in)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			return object(tx, cur, next)
+		},
+		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, in json.RawMessage) []authz.Action {
+			cur, _, v, _ := plan(tx, in)
+			as := editActions(c, o, false, false)
+			if (cur.Phase == domain.PhaseProposed || cur.Phase == domain.PhaseNeedsInput) && v.To != cur.Phase {
+				as = append(as, authz.ActionAnswerDecision)
+			}
+			return as
+		},
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+			cur, next, v, err := plan(tx, in)
+			if err != nil {
+				return err
+			}
+			if cur.Phase == v.To {
+				return invalid("item is already in phase " + string(v.To))
+			}
+			if e := domain.CheckEntry(next, v.To, v.Reason, !blank(v.Evidence)); e != nil {
+				return e
+			}
+			return s.check(tx, next)
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			cur, next, v, err := plan(c.Tx, c.Input)
+			if err != nil {
+				return nil, err
+			}
+			if err := save(c.Tx, next); err != nil {
+				return nil, err
+			}
+			if err := syncTimer(c.Tx, next); err != nil {
+				return nil, err
+			}
+			return ref{next.ID}, emit(c, domain.EvItemPhaseChanged, v.Reason, v.Evidence, payload{Op: "transition", Before: &cur, Item: next})
+		}}
+}
+
+func (s *svc) relate() command.Spec {
+	parse := func(in json.RawMessage) (relateIn, error) {
+		var v relateIn
+		return v, decode(in, &v)
+	}
+	return command.Spec{Name: "item.relate", Action: authz.ActionUpdateOwn,
+		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, err := parse(in)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			cur, err := Get(tx, v.From)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			return object(tx, cur, cur)
+		},
+		Actions: func(_ *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) []authz.Action {
+			return editActions(c, o, false, false)
+		},
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+			v, _ := parse(in)
+			rel := domain.Relation{Type: v.Type, From: v.From, To: v.To}
+			switch {
+			case blank(v.Type) || strings.ContainsAny(v.Type, " \t\r\n"):
+				return invalid("relation type is required and must not contain whitespace")
+			case v.From == v.To:
+				return invalid("an item cannot be related to itself")
+			}
+			if _, err := Get(tx, v.To); err != nil {
+				return err
+			}
+			has, err := hasRelation(tx, rel)
+			if err != nil {
+				return err
+			}
+			switch {
+			case v.Remove && !has:
+				return domain.NewError(domain.CodeNotFound, "relation does not exist", "list the item's relations")
+			case !v.Remove && has:
+				return conflict("relation already exists", "nothing to do")
+			case !v.Remove && v.Type == domain.RelParent:
+				return noParentCycle(tx, v.From, v.To)
+			}
+			return nil
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			v, _ := parse(c.Input)
+			rel := domain.Relation{Type: v.Type, From: v.From, To: v.To}
+			cur, err := Get(c.Tx, v.From)
+			if err != nil {
+				return nil, err
+			}
+			if err := setRelation(c.Tx, rel, v.Remove); err != nil {
+				return nil, err
+			}
+			return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, "", payload{Op: "relate", Item: cur, Relation: &rel, Remove: v.Remove})
+		}}
+}
+
+// noParentCycle：把 child 挂到 parent 下，不能让 child 成为 parent 的祖先。
+func noParentCycle(tx *store.Tx, child, parent string) error {
+	for seen, cur := map[string]bool{}, parent; cur != ""; {
+		if cur == child {
+			return invalid("parent relation would create a cycle")
+		}
+		if seen[cur] {
+			return nil
+		}
+		seen[cur] = true
+		up, err := allRelations(tx, "WHERE type = ? AND from_id = ? ", domain.RelParent, cur)
+		if err != nil {
+			return err
+		}
+		cur = ""
+		if len(up) > 0 {
+			cur = up[0].To
+		}
+	}
+	return nil
+}
+
+// revertPlan 是一次撤销要做的事：恢复 next，或把一条关系变更取反。
+type revertPlan struct {
+	cur, next domain.Item
+	rel       *domain.Relation
+	remove    bool
+}
+
+// planRevert 找出要撤销的事件。只撤销 agent 做的、且是该事项最新的一次事项变更：
+// 反向命令恢复的是变更前的快照，后面还有别的改动时直接恢复会把它们一并抹掉。
+func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
+	var rp revertPlan
+	cur, err := Get(tx, in.ID)
+	if err != nil {
+		return rp, err
+	}
+	es, err := eventlog.ReadObject(tx, in.ID)
+	if err != nil {
+		return rp, err
+	}
+	var target, last *eventlog.Entry
+	for i := range es {
+		if es[i].Event.Seq == in.Seq {
+			target = &es[i]
+		}
+		if slices.Contains(itemEvents, es[i].Event.Type) {
+			last = &es[i]
+		}
+	}
+	switch {
+	case target == nil:
+		return rp, domain.NewError(domain.CodeNotFound, "event does not belong to this item", "read the item's timeline")
+	case target.Tombstone || (target.Event.Type != domain.EvItemUpdated && target.Event.Type != domain.EvItemPhaseChanged):
+		return rp, invalid("only item updates and phase changes can be reverted")
+	case target.Event.Actor.Type != domain.ActorAgent:
+		return rp, invalid("only changes made by an agent can be reverted")
+	case last == nil || last.Event.Seq != target.Event.Seq:
+		return rp, conflict("later changes exist on this item", "revert the later changes first")
+	}
+	var p payload
+	if err := json.Unmarshal(target.Event.Payload, &p); err != nil {
+		return rp, invalid("event payload cannot be reverted")
+	}
+	rp.cur, rp.next = cur, cur
+	switch {
+	case p.Op == "relate" && p.Relation != nil:
+		rp.rel, rp.remove = p.Relation, !p.Remove
+	case (p.Op == "update" || p.Op == "transition") && p.Before != nil:
+		rp.next = *p.Before
+		rp.next.ChainDepth, rp.next.Unattended = cur.ChainDepth, cur.Unattended // 内核字段不回退
+	default:
+		return rp, invalid("event payload cannot be reverted")
+	}
+	return rp, nil
+}
+
+func (s *svc) revert() command.Spec {
+	parse := func(in json.RawMessage) (revertIn, error) {
+		var v revertIn
+		return v, decode(in, &v)
+	}
+	return command.Spec{Name: "item.revert", Action: authz.ActionChangeSettings,
+		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, err := parse(in)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			rp, err := planRevert(tx, v)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			return object(tx, rp.cur, rp.next)
+		},
+		Actions: func(tx *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) []authz.Action {
+			as := []authz.Action{authz.ActionChangeSettings}
+			v, _ := parse(in)
+			if rp, err := planRevert(tx, v); err == nil {
+				switch {
+				case rp.next.Assignee != rp.cur.Assignee:
+					as = append(as, authz.ActionReassign)
+				case rp.next.Project != rp.cur.Project:
+					as = append(as, authz.ActionMoveIntoProject)
+				}
+			}
+			return as
+		},
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+			v, _ := parse(in)
+			rp, err := planRevert(tx, v)
+			if err != nil {
+				return err
+			}
+			return s.check(tx, rp.next)
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			v, _ := parse(c.Input)
+			rp, err := planRevert(c.Tx, v)
+			if err != nil {
+				return nil, err
+			}
+			if rp.rel != nil {
+				err = setRelation(c.Tx, *rp.rel, rp.remove)
+			} else if err = save(c.Tx, rp.next); err == nil {
+				err = syncTimer(c.Tx, rp.next)
+			}
+			if err != nil {
+				return nil, err
+			}
+			typ := domain.EvItemUpdated
+			if rp.next.Phase != rp.cur.Phase {
+				typ = domain.EvItemPhaseChanged
+			}
+			reason := v.Reason
+			if reason == "" {
+				reason = "revert of event " + strconv.FormatInt(v.Seq, 10)
+			}
+			return ref{rp.next.ID}, emit(c, typ, reason, "", payload{Op: "revert", Before: &rp.cur, Item: rp.next, Relation: rp.rel, Remove: rp.remove, Reverts: v.Seq})
+		}}
+}
