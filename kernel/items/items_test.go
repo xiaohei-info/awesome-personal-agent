@@ -495,6 +495,175 @@ func TestWaitUntilTimer(t *testing.T) {
 	e.verify(t)
 }
 
+// dueTimer 读事项的截止 Timer；第二个返回值表示它是否存在。
+func (e *env) dueTimer(t *testing.T, id string) (time.Time, bool) {
+	t.Helper()
+	var (
+		at    int64
+		found bool
+	)
+	err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT at FROM clock_timer WHERE id = ? AND target = ? AND kind = ?`, dueTimerID(id), id, string(domain.TimerDue))
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		if found = r.Next(); found {
+			return r.Scan(&at)
+		}
+		return r.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return time.Unix(0, at).UTC(), found
+}
+
+func (e *env) wantDue(t *testing.T, id string, want time.Time) {
+	t.Helper()
+	if at, ok := e.dueTimer(t, id); !ok || !at.Equal(want) {
+		t.Fatalf("due timer: at=%v ok=%v, want %v", at, ok, want)
+	}
+}
+
+func (e *env) wantNoDue(t *testing.T, id string) {
+	t.Helper()
+	if at, ok := e.dueTimer(t, id); ok {
+		t.Fatalf("unexpected due timer at %v", at)
+	}
+}
+
+func (e *env) passed(t *testing.T, id string) (n int) {
+	t.Helper()
+	for _, ev := range e.events(t) {
+		if ev.Type == domain.EvItemDeadlinePassed && ev.Object == id {
+			n++
+		}
+	}
+	return n
+}
+
+// 设、改、清除截止都同事务维护 due Timer。
+func TestDeadlineSetChangeClear(t *testing.T) {
+	e := setup(t)
+	d1, d2 := t0.Add(time.Hour), t0.Add(2*time.Hour)
+	id := e.create(t, owner, map[string]any{"phase": "open", "deadline": d1})
+	e.wantDue(t, id, d1)
+	if it := e.get(t, id); it.Deadline == nil || !it.Deadline.Equal(d1) {
+		t.Fatalf("deadline: %+v", it.Deadline)
+	}
+	e.must(t, owner, "item.update", map[string]any{"id": id, "deadline": d2})
+	e.wantDue(t, id, d2)
+	e.must(t, owner, "item.update", map[string]any{"id": id, "title": "unrelated"})
+	e.wantDue(t, id, d2)
+	e.must(t, owner, "item.update", map[string]any{"id": id, "deadline": nil})
+	e.wantNoDue(t, id)
+	if e.get(t, id).Deadline != nil {
+		t.Fatal("deadline must be cleared")
+	}
+	e.now = d2.Add(time.Minute)
+	if n, err := e.clk.Tick(bg); n != 0 || err != nil {
+		t.Fatalf("cleared deadline must not fire: %d %v", n, err)
+	}
+	for _, in := range []map[string]any{{"id": id, "deadline": "tomorrow"}, {"id": id, "deadline": time.Time{}}} {
+		if _, err := e.do(owner, "item.update", in); exit(err) != domain.ExitUsage {
+			t.Fatalf("bad deadline %v: %v", in["deadline"], err)
+		}
+	}
+	e.verify(t)
+}
+
+// §3.11：建议阶段只存字段，接受进 open 才计时；终态取消，重开按原值恢复；撤销连带恢复 Timer。
+func TestDeadlineFollowsPhase(t *testing.T) {
+	e := setup(t)
+	d := t0.Add(time.Hour)
+	id := e.create(t, owner, map[string]any{"deadline": d})
+	e.wantNoDue(t, id)
+	e.must(t, owner, "item.transition", map[string]any{"id": id, "to": "open", "reason": "accepted"})
+	e.wantDue(t, id, d)
+	e.must(t, owner, "item.transition", map[string]any{"id": id, "to": "waiting", "reason": "w", "waiting_on": map[string]any{"kind": "human", "ref": "x"}})
+	e.wantDue(t, id, d)
+	for _, to := range []string{"done", "dropped"} {
+		e.must(t, owner, "item.transition", map[string]any{"id": id, "to": to, "reason": "end"})
+		e.wantNoDue(t, id)
+		if it := e.get(t, id); it.Deadline == nil {
+			t.Fatalf("%s must keep the deadline field", to)
+		}
+		e.must(t, owner, "item.transition", map[string]any{"id": id, "to": "open", "reason": "reopen"})
+		e.wantDue(t, id, d)
+	}
+
+	e.must(t, agent("wrk", authz.LevelDelegate), "item.update", map[string]any{"id": id, "deadline": d.Add(time.Hour)})
+	es := e.events(t)
+	e.must(t, owner, "item.revert", map[string]any{"id": id, "event": es[len(es)-1].Seq})
+	e.wantDue(t, id, d)
+	e.verify(t)
+}
+
+// 到期只记事件：阶段、字段、版本不变，无关改动不重复触发，改到未来才重新计时。
+func TestDeadlinePassedOnlyRecordsEvent(t *testing.T) {
+	e := setup(t)
+	d := t0.Add(time.Hour)
+	id := e.create(t, owner, map[string]any{"phase": "open", "deadline": d})
+	before := e.get(t, id)
+	e.now = d.Add(time.Minute)
+	if n, err := e.clk.Tick(bg); n != 1 || err != nil {
+		t.Fatalf("due: %d %v", n, err)
+	}
+	if got := e.get(t, id); got.Phase != domain.PhaseOpen || got.Version != before.Version || !got.Deadline.Equal(d) {
+		t.Fatalf("expiry must not change the item: %+v", got)
+	}
+	es := e.events(t)
+	last := es[len(es)-1]
+	if last.Type != domain.EvItemDeadlinePassed || last.Object != id || last.Actor.Type != domain.ActorSystem || last.Actor.Via != domain.ViaClock || !last.At.Equal(d) {
+		t.Fatalf("expiry event: %+v", last)
+	}
+	e.verify(t)
+
+	e.must(t, owner, "item.update", map[string]any{"id": id, "title": "renamed"})
+	if n, _ := e.clk.Tick(bg); n != 0 || e.passed(t, id) != 1 {
+		t.Fatalf("an unrelated edit must not fire again: %d", n)
+	}
+	later := e.now.Add(time.Hour)
+	e.must(t, owner, "item.update", map[string]any{"id": id, "deadline": later})
+	e.wantDue(t, id, later)
+	e.now = later
+	if n, _ := e.clk.Tick(bg); n != 1 || e.passed(t, id) != 2 {
+		t.Fatalf("a new deadline must fire once: %d", n)
+	}
+}
+
+// 截止随事件折叠重建；重建不碰时钟里的 Timer。
+func TestDeadlineRebuiltFromEvents(t *testing.T) {
+	e := setup(t)
+	d1, d2 := t0.Add(time.Hour), t0.Add(2*time.Hour)
+	changed := e.create(t, owner, map[string]any{"phase": "open", "deadline": d1})
+	e.must(t, owner, "item.update", map[string]any{"id": changed, "deadline": d2})
+	cleared := e.create(t, owner, map[string]any{"phase": "open", "deadline": d1})
+	e.must(t, owner, "item.update", map[string]any{"id": cleared, "deadline": nil})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE items SET data = json_remove(data, '$.deadline') WHERE id = ?`, changed)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if e.st.View(bg, Verify) == nil {
+		t.Fatal("Verify must detect a lost deadline")
+	}
+	if err := e.st.Update(bg, Rebuild); err != nil {
+		t.Fatal(err)
+	}
+	e.verify(t)
+	if it := e.get(t, changed); it.Deadline == nil || !it.Deadline.Equal(d2) {
+		t.Fatalf("rebuilt deadline: %+v", it.Deadline)
+	}
+	if e.get(t, cleared).Deadline != nil {
+		t.Fatal("a cleared deadline must stay cleared after rebuild")
+	}
+	e.wantDue(t, changed, d2)
+	e.wantNoDue(t, cleared)
+}
+
 // 其他类别的 Timer 不归事项中心：处理器报错而不是吞掉。
 func TestTimerHandlerRejectsForeignKinds(t *testing.T) {
 	e := setup(t)
@@ -504,12 +673,24 @@ func TestTimerHandlerRejectsForeignKinds(t *testing.T) {
 	if err == nil {
 		t.Fatal("remind timers belong to another module")
 	}
+	err = e.st.Update(bg, func(tx *store.Tx) error {
+		return HandleTimer(tx, clock.Command{TimerID: "ask_x", Target: "x", Kind: domain.TimerDue})
+	})
+	if err == nil {
+		t.Fatal("a decision timeout belongs to the decisions module")
+	}
 	// 目标已被删除或不再等待：清掉 Timer，不报错。
 	err = e.st.Update(bg, func(tx *store.Tx) error {
 		return HandleTimer(tx, clock.Command{Target: "itm_gone", Kind: domain.TimerWaitUntil, Actor: domain.Actor{Type: domain.ActorSystem, Principal: "clock", Via: domain.ViaClock}})
 	})
 	if err != nil {
 		t.Fatalf("stale timer: %v", err)
+	}
+	err = e.st.Update(bg, func(tx *store.Tx) error {
+		return HandleTimer(tx, clock.Command{TimerID: dueTimerID("itm_gone"), Target: "itm_gone", Kind: domain.TimerDue})
+	})
+	if err != nil {
+		t.Fatalf("stale due timer: %v", err)
 	}
 }
 

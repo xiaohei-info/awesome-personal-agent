@@ -85,7 +85,7 @@ func (c createIn) item(id string) domain.Item {
 	in := c.ItemInput
 	it := domain.Item{ID: id, Phase: c.phase(), Kind: in.Kind, Title: in.Title, Summary: in.Summary, Body: in.Body,
 		StatusLabel: in.StatusLabel, Priority: in.Priority, Project: in.Project, Tags: in.Tags, Assignee: in.Assignee,
-		WaitingOn: in.WaitingOn, Origin: in.Origin, Spec: in.Spec, Ext: in.Ext}
+		WaitingOn: in.WaitingOn, Deadline: in.Deadline, Origin: in.Origin, Spec: in.Spec, Ext: in.Ext}
 	if it.Priority == "" {
 		it.Priority = domain.PriorityNormal
 	}
@@ -141,6 +141,8 @@ func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item,
 			err = put(raw, &it.Assignee)
 		case "waiting_on":
 			err = put(raw, &it.WaitingOn)
+		case "deadline":
+			err = put(raw, &it.Deadline)
 		case "origin":
 			err = put(raw, &it.Origin)
 		case "spec":
@@ -199,6 +201,8 @@ func (s *svc) check(tx *store.Tx, it domain.Item) error {
 		return invalid("origin.source is required")
 	case it.Ask != nil && blank(it.Ask.Question):
 		return invalid("ask.question is required")
+	case it.Deadline != nil && it.Deadline.IsZero():
+		return invalid("deadline must not be the zero time")
 	case it.Phase == domain.PhaseWaiting && it.WaitingOn == nil:
 		return invalid("waiting phase requires waiting_on")
 	case it.Phase == domain.PhaseNeedsInput && it.Ask == nil:
@@ -290,8 +294,41 @@ func emit(c *command.Ctx, typ, reason, evidence string, p payload) error {
 
 func waitTimerID(item string) string { return "wait_" + item }
 
-// syncTimer 让 wait_until Timer 与事项一致：只有等时间的 waiting 才有 Timer，改时间即重排（§6.4、§6.8）。
-func syncTimer(tx *store.Tx, it domain.Item) error {
+// dueTimerID 是事项截止 Timer 的 id；决策超时 Timer 另有自己的 id（decisions.TimerID），两者并存互不覆盖。
+func dueTimerID(item string) string { return "due_" + item }
+
+// dueAt 是事项此刻应有的截止 Timer 时刻：已接受且未结束才计时（§6.8），其余阶段保留 deadline 字段但不计时。
+func dueAt(it domain.Item) *time.Time {
+	switch it.Phase {
+	case domain.PhaseOpen, domain.PhaseWaiting, domain.PhaseNeedsInput:
+		return it.Deadline
+	}
+	return nil
+}
+
+// syncDueTimer 只在应有时刻变化时重排：已到期的一次性 Timer 不因无关改动重新触发。
+func syncDueTimer(tx *store.Tx, cur, next domain.Item) error {
+	was, at := dueAt(cur), dueAt(next)
+	if was == at || (was != nil && at != nil && was.Equal(*at)) {
+		return nil
+	}
+	id := dueTimerID(next.ID)
+	if err := clock.Cancel(tx, id); err != nil && !isNotFound(err) {
+		return err
+	}
+	if at == nil {
+		return nil
+	}
+	_, err := clock.Add(tx, domain.Timer{ID: id, Target: next.ID, Kind: domain.TimerDue, At: *at})
+	return err
+}
+
+// syncTimer 让事项的 Timer 与从 cur 到 next 的变更一致（新建时 cur 为零值）：wait_until 只属于等时间的
+// waiting，改时间即重排（§6.4、§6.8）；截止 Timer 见 syncDueTimer。
+func syncTimer(tx *store.Tx, cur, it domain.Item) error {
+	if err := syncDueTimer(tx, cur, it); err != nil {
+		return err
+	}
 	id := waitTimerID(it.ID)
 	if err := clock.Cancel(tx, id); err != nil && !isNotFound(err) {
 		return err
@@ -366,7 +403,7 @@ func (s *svc) create() command.Spec {
 			if err := save(c.Tx, it); err != nil {
 				return nil, err
 			}
-			if err := syncTimer(c.Tx, it); err != nil {
+			if err := syncTimer(c.Tx, domain.Item{}, it); err != nil {
 				return nil, err
 			}
 			reason := v.Reason
@@ -404,9 +441,17 @@ func (s *svc) update() command.Spec {
 			return editActions(c, o, a, p)
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
-			_, next, _, _, err := plan(tx, in)
+			cur, next, _, _, err := plan(tx, in)
 			if err != nil {
 				return err
+			}
+			if next.Project != cur.Project && cur.Kind == domain.KindDelegation {
+				// 委派子事项的 project 继承父事项，移走即可绕过允许的执行者名单（§7.5）。
+				if _, has, err := ParentOf(tx, cur.ID); err != nil {
+					return err
+				} else if has {
+					return invalid("a delegated item inherits its parent's project and cannot be moved")
+				}
 			}
 			return s.check(tx, next)
 		},
@@ -418,7 +463,7 @@ func (s *svc) update() command.Spec {
 			if err := save(c.Tx, next); err != nil {
 				return nil, err
 			}
-			if err := syncTimer(c.Tx, next); err != nil {
+			if err := syncTimer(c.Tx, cur, next); err != nil {
 				return nil, err
 			}
 			return ref{next.ID}, emit(c, domain.EvItemUpdated, reason, "", payload{Op: "update", Before: &cur, Item: next})
@@ -473,7 +518,7 @@ func (s *svc) transition() command.Spec {
 			if err := save(c.Tx, next); err != nil {
 				return nil, err
 			}
-			if err := syncTimer(c.Tx, next); err != nil {
+			if err := syncTimer(c.Tx, cur, next); err != nil {
 				return nil, err
 			}
 			return ref{next.ID}, emit(c, domain.EvItemPhaseChanged, v.Reason, v.Evidence, payload{Op: "transition", Before: &cur, Item: next})
@@ -664,7 +709,7 @@ func (s *svc) revert() command.Spec {
 			if rp.rel != nil {
 				err = setRelation(c.Tx, *rp.rel, rp.remove)
 			} else if err = save(c.Tx, rp.next); err == nil {
-				err = syncTimer(c.Tx, rp.next)
+				err = syncTimer(c.Tx, rp.cur, rp.next)
 			}
 			if err != nil {
 				return nil, err

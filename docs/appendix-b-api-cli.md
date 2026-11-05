@@ -113,6 +113,8 @@
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/purge` | 策略（含人格）、凭据、白名单、名单、命令登记、声明确认、物理删除 | 只有 Web 登录 |
 | 认证 | `POST /auth/login`、`/logout` | Web 会话 | |
 
+事项字段 `deadline`：`POST /items` 与 `PATCH /items/{id}` 可写，值为 RFC 3339 时间；`PATCH` 传 `null` 清除；`GET` 在已设置时返回。行为见主文档 §6.8。
+
 ## B.3 错误响应
 
 ```json
@@ -127,4 +129,4 @@
 
 对外事件类型只增不改。初始集合：
 
-`item.created`、`item.updated`、`item.phase_changed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`command.rejected`、`material.revised`、`material.revision_proposed`、`guideline.activated`、`project.updated`、`project.allowed_executors_changed`、`rule.mode_changed`、`allowlist.changed`、`policy.changed`、`run.started`、`run.finished`、`source.failed`、`health.alert`。
+`item.created`、`item.updated`、`item.phase_changed`、`item.deadline_passed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`command.rejected`、`material.revised`、`material.revision_proposed`、`guideline.activated`、`project.updated`、`project.allowed_executors_changed`、`rule.mode_changed`、`allowlist.changed`、`policy.changed`、`run.started`、`run.finished`、`source.failed`、`health.alert`。

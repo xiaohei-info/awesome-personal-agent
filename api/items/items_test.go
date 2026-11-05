@@ -204,6 +204,30 @@ func TestCreateGetListUpdate(t *testing.T) {
 	}
 }
 
+// deadline 经 POST 写入、GET 读出，PATCH 可改可清除；格式错误是请求错误。
+func TestDeadlineField(t *testing.T) {
+	e := setup(t)
+	w := e.create(e.web, `{"kind":"task","title":"t","phase":"open","deadline":"2030-01-02T03:04:05Z"}`)
+	if d := e.get(w.ID).Item.Deadline; d == nil || d.Format(time.RFC3339) != "2030-01-02T03:04:05Z" {
+		t.Fatalf("deadline after create = %v", d)
+	}
+	if rec := e.do("PATCH", "/v1/items/"+w.ID, `{"deadline":"2030-02-02T03:04:05Z"}`, e.web); rec.Code != 200 {
+		t.Fatalf("change = %d %s", rec.Code, rec.Body)
+	}
+	if d := e.get(w.ID).Item.Deadline; d == nil || d.Format(time.RFC3339) != "2030-02-02T03:04:05Z" {
+		t.Fatalf("deadline after change = %v", d)
+	}
+	if rec := e.do("PATCH", "/v1/items/"+w.ID, `{"deadline":"soon"}`, e.web); code(t, rec) != domain.CodeInvalidRequest {
+		t.Fatalf("bad deadline = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("PATCH", "/v1/items/"+w.ID, `{"deadline":null}`, e.web); rec.Code != 200 {
+		t.Fatalf("clear = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/v1/items/"+w.ID, "", e.web); strings.Contains(rec.Body.String(), `"deadline"`) {
+		t.Fatalf("cleared deadline must be omitted: %s", rec.Body)
+	}
+}
+
 // ACT-ITEM-09：转阶段与关联。
 func TestTransitionAndRelations(t *testing.T) {
 	e := setup(t)
