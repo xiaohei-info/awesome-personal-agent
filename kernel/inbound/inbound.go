@@ -30,6 +30,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -168,6 +169,7 @@ type snapshot struct {
 	events  []domain.SourceEvent
 	sources map[string]domain.Source
 	modes   map[string]string
+	made    map[string]string // 来源事件 id → 已为它建出的事项（上一轮中途失败留下的）
 	projs   []domain.Project
 	policy  int
 }
@@ -196,6 +198,20 @@ func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
 		if sn.projs, err = projects.List(tx); err != nil {
 			return err
 		}
+		// shortcut: 每轮扫一遍全部事项找出已建事项；事项量大到拖慢时，给事项加按来源事件的索引。
+		its, err := items.List(tx, items.Filter{})
+		if err != nil {
+			return err
+		}
+		sn.made = map[string]string{}
+		for _, it := range its {
+			var x struct {
+				SourceEvent string `json:"source_event"`
+			}
+			if len(it.Ext) > 0 && json.Unmarshal(it.Ext, &x) == nil && x.SourceEvent != "" {
+				sn.made[x.SourceEvent] = it.ID
+			}
+		}
 		sn.policy, _, err = policy.Current(tx)
 		return err
 	})
@@ -209,25 +225,33 @@ func (s *Service) Process(ctx context.Context) error {
 		s.again.Store(true)
 		return nil
 	}
-	defer s.mu.Unlock()
+	errs := s.drain(ctx)
+	s.mu.Unlock()
+	if s.again.Load() { // 释放锁前后之间到达的触发不能丢
+		errs = append(errs, s.Process(ctx))
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Service) drain(ctx context.Context) []error {
 	var errs []error
 	for {
 		s.again.Store(false)
 		sn, err := s.load(ctx)
 		if err != nil {
-			return errors.Join(append(errs, err)...)
+			return append(errs, err)
 		}
 		for _, ev := range sn.events {
 			if err := s.one(ctx, sn, ev); err != nil {
 				if ctx.Err() != nil {
-					return ctx.Err()
+					return append(errs, ctx.Err())
 				}
 				errs = append(errs, fmt.Errorf("inbound: event %s: %w", ev.ID, err))
 			}
 		}
 		// 失败的事件保持 pending，等下次触发；只有处理期间又有新的触发才再来一轮。
 		if !s.again.Load() {
-			return errors.Join(errs...)
+			return errs
 		}
 	}
 }
@@ -242,7 +266,7 @@ func (m *matched) key() string {
 	if m == nil {
 		return ""
 	}
-	return m.pack + "/source_rules/" + m.rule.ID
+	return rules.SourceKey(m.pack, m.rule.ID)
 }
 
 // match 按包名、声明顺序取第一条命中的规则；没有命中返回 nil。
@@ -307,6 +331,9 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	m, err := s.match(src, ev)
 	if err != nil {
 		return err
+	}
+	if id, ok := sn.made[ev.ID]; ok { // 上一轮建好了事项却没记完处置：接着做，不再判断、不再建
+		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure")
 	}
 	var prop proposal
 	switch {
@@ -445,7 +472,8 @@ func (s *Service) propose(ctx context.Context, sn snapshot, src domain.Source, e
 		ref = ev.ID
 	}
 	in := map[string]any{"kind": p.kind, "title": p.title, "summary": p.summary, "body": ev.Detail, "project": project,
-		"origin": domain.Origin{Source: src.ID, Actor: ev.Sender, Ref: ref}, "reason": p.reason}
+		"origin": domain.Origin{Source: src.ID, Actor: ev.Sender, Ref: ref}, "reason": p.reason,
+		"ext": map[string]string{"source_event": ev.ID}}
 	res, err := s.do(ctx, system, m.key(), "inbound:item:"+ev.ID, "item.create", in, command.Chain{})
 	if err != nil {
 		return err
@@ -456,14 +484,23 @@ func (s *Service) propose(ctx context.Context, sn snapshot, src domain.Source, e
 	if err := json.Unmarshal(res.Value, &item); err != nil {
 		return err
 	}
-	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item.ID, Rule: m.key(), Reason: p.reason}
+	return s.finish(ctx, sn, m, ev, item.ID, p.reason)
+}
+
+// finish 在事项建好之后按需自动接受，再记处置；对同一事件可重复执行。
+func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason string) error {
+	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason}
 	if m != nil && m.rule.Accept == "auto" {
-		switch sn.modes[m.key()] {
+		mode := sn.modes[m.key()]
+		if mode == "" {
+			mode = rules.ModeObserve // 规则状态还没对账：按默认的观察档，不自动接受
+		}
+		switch mode {
 		case rules.ModeAuto:
 			rule := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + m.key(), Via: domain.ViaRule, OnBehalfOf: s.o.Owner}, Level: authz.LevelDelegate}
 			if _, err := s.do(ctx, rule, m.key(), "inbound:accept:"+ev.ID, "item.transition",
-				map[string]any{"id": item.ID, "to": domain.PhaseOpen, "reason": "rule " + m.key() + " auto accept"},
-				command.Chain{Mode: command.ChainInherit, From: item.ID}); err != nil {
+				map[string]any{"id": item, "to": domain.PhaseOpen, "reason": "rule " + m.key() + " auto accept"},
+				command.Chain{Mode: command.ChainInherit, From: item}); err != nil {
 				return err
 			}
 		case rules.ModeObserve:

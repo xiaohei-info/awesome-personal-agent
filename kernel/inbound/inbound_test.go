@@ -583,3 +583,60 @@ func TestNewRequiresDependencies(t *testing.T) {
 		t.Fatal("New accepted empty options")
 	}
 }
+
+// crashJudge 模拟"事项已建好、处置没记完"：判断之后、本轮建事项之前，替上一轮补上它已经建出的事项。
+type crashJudge struct {
+	Judge
+	e    *env
+	once bool
+}
+
+func (c *crashJudge) Do(ctx context.Context, call direct.Call) (direct.Outcome, error) {
+	out, err := c.Judge.Do(ctx, call)
+	if err == nil && !c.once {
+		c.once = true
+		var pend []domain.SourceEvent
+		_ = c.e.st.View(bg, func(tx *store.Tx) (err error) { pend, err = runner.Pending(tx); return })
+		in, _ := json.Marshal(map[string]any{"kind": "task", "title": "上一轮的标题", "ext": map[string]string{"source_event": pend[0].ID}})
+		if _, err := c.e.x.Do(bg, command.Request{Identity: system, Command: "item.create", Input: in, IdemKey: "inbound:item:" + pend[0].ID}); err != nil {
+			c.e.t.Error(err)
+		}
+	}
+	return out, err
+}
+
+// 中途失败后重跑：判断输出变了也不会卡死，恰好一个事项并最终记下处置。
+func TestRerunAfterPartialFailureResumesWithoutDuplicate(t *testing.T) {
+	e := newEnv(t, true)
+	e.judge(`{"choice":"task","confidence":0.95}`)
+	e.svc.o.Judge = &crashJudge{Judge: e.svc.o.Judge, e: e}
+	var b strings.Builder
+	j, _ := json.Marshal(ev("m1", "mail.received", "合同请签字", nil))
+	b.WriteString("echo '" + string(j) + "'\necho '{\"cursor\":\"c\"}'\n")
+	e.must(registry.CmdRegisterExec, map[string]any{"id": "src_m", "type": "script", "source_type": "inbox", "command": e.script("m.sh", b.String()), "schedule": "1m", "timeout": 30})
+	e.sources++
+	e.now = e.now.Add(2 * time.Minute)
+	if err := e.r.Tick(bg, e.clk); err != nil {
+		t.Fatal(err)
+	}
+	e.waitRunsNoErr()
+	select { // 第一轮：同一事件的幂等键遇到不同输入，真实报错
+	case err := <-e.errs:
+		if !strings.Contains(err.Error(), "idempotency") {
+			t.Fatalf("unexpected error %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("no error on first pass; event %+v items %+v", e.events("src_m")[0], e.allItems())
+	}
+	if got := e.events("src_m")[0].Disposition; got != domain.DispositionPending {
+		t.Fatalf("first pass: %s", got)
+	}
+	e.judge(`{"choice":"note","confidence":0.95}`) // 重跑时判断输出已不同
+	if err := e.svc.Process(bg); err != nil {
+		t.Fatal(err)
+	}
+	evs := e.events("src_m")
+	if evs[0].Disposition != domain.DispositionProposed || len(e.allItems()) != 1 || e.allItems()[0].ID != evs[0].Item {
+		t.Fatalf("event %+v items %+v", evs[0], e.allItems())
+	}
+}
