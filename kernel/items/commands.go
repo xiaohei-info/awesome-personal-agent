@@ -404,9 +404,17 @@ func (s *svc) update() command.Spec {
 			return editActions(c, o, a, p)
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
-			_, next, _, _, err := plan(tx, in)
+			cur, next, _, _, err := plan(tx, in)
 			if err != nil {
 				return err
+			}
+			if next.Project != cur.Project && cur.Kind == domain.KindDelegation {
+				// 委派子事项的 project 继承父事项，移走即可绕过允许的执行者名单（§7.5）。
+				if _, has, err := ParentOf(tx, cur.ID); err != nil {
+					return err
+				} else if has {
+					return invalid("a delegated item inherits its parent's project and cannot be moved")
+				}
 			}
 			return s.check(tx, next)
 		},
