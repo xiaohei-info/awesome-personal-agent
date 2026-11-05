@@ -438,3 +438,22 @@ func TestHostConfigFileReloadWithoutEnabledIsIdempotent(t *testing.T) {
 		t.Fatal("later entries must be applied")
 	}
 }
+
+// 调度模块经 SetRunState 写游标与统计；来源不存在时返回 not_found，而不是静默成功。
+func TestSetRunStateWritesCursorAndRejectsUnknownSource(t *testing.T) {
+	e := setup(t)
+	if _, err := e.do(owner, CmdRegisterExec, m{"id": "src_a", "command": "run.sh", "schedule": "1m", "timeout": 30}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error { return SetRunState(tx, "src_a", "c1", json.RawMessage(`{"runs":1}`)) }); err != nil {
+		t.Fatal(err)
+	}
+	if s := e.get(t, "src_a"); s.Cursor != "c1" || string(s.Stats) != `{"runs":1}` {
+		t.Fatalf("%+v", s)
+	}
+	err := e.st.Update(bg, func(tx *store.Tx) error { return SetRunState(tx, "src_nope", "c", nil) })
+	var de *domain.Error
+	if !errors.As(err, &de) || de.Code != domain.CodeNotFound {
+		t.Fatalf("want not_found, got %v", err)
+	}
+}
