@@ -1,4 +1,4 @@
-// Package sources 是 apa 的来源命令组（附录 B.1「来源」）：list/show/add/enable/disable、webhook create|rotate、ingests、replay，
+// Package sources 是 apa 的来源命令组（附录 B.1「来源」）：list/show/add/enable/disable、webhook create|rotate|revoke、ingests、replay，
 // 以及本机的 `apa source auth <id>`（设计 §4.2：启动附带拉取程序的认证模式，凭据写入来源自己的目录，内核不读）。
 // 除 auth 外只是内核 /v1/sources 的薄客户端：授权、校验、可执行命令只 Web（退出码 20）都由内核判定。
 package sources
@@ -19,7 +19,7 @@ import (
 )
 
 const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--config JSON] [--enabled=false] | " +
-	"enable <id> | disable <id> | webhook create|rotate <id> | ingests <id> | replay <ingest-id> | auth <id>"
+	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | replay <ingest-id> | auth <id>"
 
 func init() { client.Register("source", source) }
 
@@ -55,14 +55,18 @@ func source(c *client.Ctx, args []string) error {
 		}
 		return call(c, "PATCH", "/sources/"+url.PathEscape(id), map[string]any{"enabled": sub == "enable"})
 	case "webhook":
-		if len(rest) == 0 || (rest[0] != "create" && rest[0] != "rotate") {
-			return usage("webhook needs create or rotate", usageText)
+		if len(rest) == 0 || (rest[0] != "create" && rest[0] != "rotate" && rest[0] != "revoke") {
+			return usage("webhook needs create, rotate or revoke", usageText)
 		}
 		id, err := oneID(rest[1:], "webhook "+rest[0])
 		if err != nil {
 			return err
 		}
-		return call(c, "POST", "/sources/"+url.PathEscape(id)+"/webhook", nil)
+		method := "POST"
+		if rest[0] == "revoke" {
+			method = "DELETE"
+		}
+		return call(c, method, "/sources/"+url.PathEscape(id)+"/webhook", nil)
 	case "ingests":
 		id, err := oneID(rest, "ingests")
 		if err != nil {
