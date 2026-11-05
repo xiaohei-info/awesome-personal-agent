@@ -24,6 +24,7 @@ import (
 	apifollowmsg "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
 	apiingest "github.com/xiaohei-info/awesome-personal-agent/api/ingest"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
+	apimaterials "github.com/xiaohei-info/awesome-personal-agent/api/materials"
 	apipacks "github.com/xiaohei-info/awesome-personal-agent/api/packs"
 	apiprojects "github.com/xiaohei-info/awesome-personal-agent/api/projects"
 	apiruns "github.com/xiaohei-info/awesome-personal-agent/api/runs"
@@ -49,9 +50,11 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/hosted"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	kmaterials "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -60,6 +63,7 @@ import (
 	kprojects "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	kscreening "github.com/xiaohei-info/awesome-personal-agent/kernel/screening"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -160,6 +164,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	// call_agent 按模板类别分派：任务型与生成型由任务型服务处理，判断型交委派核验。任务型服务要等调度器建好，闭包里再取。
 	var tk *task.Service
+	var hs *hosted.Service // 托管型读取器的运行结果回到它；调度器建好后再赋值
 	callAgent := func(ctx context.Context, c rules.Call) error {
 		return tk.CallAgent(task.AgentOptions{Judge: verifyAgent, Generate: judge})(ctx, c)
 	}
@@ -179,8 +184,23 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 			slog.Error("run result", "run", res.Run.ID, "err", err)
 		}
 		tk.Settle(ctx, res)
+		hs.OnResult(res)
 	}
 	k.disp = proc.New(st, cfg, proc.Options{Env: func(r domain.Run) map[string]string { return tk.Env(r) }, OnResult: k.result})
+	host, herr := os.Hostname()
+	if herr != nil {
+		host = "localhost"
+	}
+	// 读取器随发行附带，与拉取程序一样按名字解析（PATH）；它是只读的子进程，凭据由 git 自身配置持有。
+	if hs, err = hosted.New(x, hosted.Options{Reader: []string{"hosted-reader"}, Host: host, Owner: owner,
+		Kick: func() {
+			if err := k.disp.Dispatch(context.Background()); err != nil {
+				slog.Error("hosted reader dispatch", "err", err)
+			}
+		},
+		OnError: func(material string, err error) { slog.Error("hosted material", "material", material, "err", err) }}); err != nil {
+		return nil, err
+	}
 	k.rn.Attach(k.disp)
 	k.wh.Attach(k.disp)
 	if tk, err = task.New(task.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL,
@@ -204,6 +224,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		rules.Register(x),
 		instances.Register(x, ld),
 		blobs.Register(x, l.Blobs),
+		kmaterials.Register(x),
+		hosted.Register(x),
+		search.Register(x),
 		k.fu.Register(),
 	); err != nil {
 		return nil, err
@@ -233,7 +256,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), sources, apiwhy.Routes(st), apiagentsmd.Routes(x, agmSvc)}}); err != nil {
+		apiexec.Routes(st, x), sources, apiwhy.Routes(st), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, agmSvc)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)

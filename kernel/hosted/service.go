@@ -268,6 +268,12 @@ type ChangeIn struct {
 	Request  string `json:"request"` // 修改要求，必填
 	Parent   string `json:"parent,omitempty"`
 	Reason   string `json:"reason,omitempty"`
+
+	// 请求元数据，不是请求体字段。IdemKey 给两步命令（item.create、delegate.create）各用一次——幂等按命令名分键，
+	// 重放返回首次的父事项和子事项；Evidence 是 delegate 代答所需的本人原话。
+	// shortcut: 委派失败后父事项已丢弃，同键重试会重放到这个已丢弃的父事项并再次失败；换新键重试即可。
+	IdemKey  string `json:"-"`
+	Evidence string `json:"-"`
 }
 
 // ChangeOut 是生成的父事项与委派子事项。
@@ -326,7 +332,8 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 		reason := reasonOr(in.Reason, "change requested for hosted material "+e.Material.Title)
 		b, _ := json.Marshal(map[string]any{"kind": domain.KindTask, "phase": domain.PhaseOpen, "title": "修改文档：" + e.Material.Title,
 			"summary": e.Repo + ":" + e.Path, "project": e.Material.Project, "assignee": s.opt.Owner, "reason": reason})
-		r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "item.create", Input: b, Owner: s.opt.Owner, Chain: command.Chain{Mode: command.ChainNew}})
+		r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "item.create", Input: b, Owner: s.opt.Owner, Chain: command.Chain{Mode: command.ChainNew},
+			IdemKey: in.IdemKey, Evidence: in.Evidence})
 		if err != nil {
 			return out, err
 		}
@@ -344,11 +351,12 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 	if level != authz.LevelWeb {
 		chain = command.Chain{Mode: command.ChainInherit, From: out.Parent}
 	}
-	r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "delegate.create", Input: b, Owner: s.opt.Owner, Chain: chain})
+	r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "delegate.create", Input: b, Owner: s.opt.Owner, Chain: chain,
+		IdemKey: in.IdemKey, Evidence: in.Evidence})
 	if err != nil {
 		if out.ParentCreated {
 			drop, _ := json.Marshal(map[string]any{"id": out.Parent, "to": domain.PhaseDropped, "reason": "delegation failed: " + err.Error()})
-			if _, derr := s.x.Do(ctx, command.Request{Identity: who, Command: "item.transition", Input: drop, Owner: s.opt.Owner}); derr != nil {
+			if _, derr := s.x.Do(ctx, command.Request{Identity: who, Command: "item.transition", Input: drop, Owner: s.opt.Owner, Evidence: in.Evidence}); derr != nil {
 				err = errors.Join(err, derr)
 			}
 		}
