@@ -212,6 +212,8 @@ Markdown 模板，占位符由连接模块提供。`agents-md` 包的 `templates
 | JSON Schema 不合法 | 拒绝 |
 | 提示词出现未知占位符 | 拒绝 |
 
+加载器另外拒绝：包目录里 `pack.yaml`、`prompts/*.md`、`views/*.yaml`、`templates/*.md` 之外的文件；`command`、`script`、`policy` 等命令与策略字段，以及形如可执行文件路径的值；`do[]` 里动作不允许的字段；动作引用的提示词不存在；`when`、`match` 里的非平铺条件。同一内容的拒绝只产出一次健康投递。
+
 被拒绝时保留该包上一有效版本，进健康视图并产出一条健康类投递。`apa pack validate <目录>` 可在本地预检。
 
 ## C.12 示例：后台执行规则

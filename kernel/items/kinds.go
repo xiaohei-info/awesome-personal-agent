@@ -45,6 +45,15 @@ func (k *Kinds) Register(kind domain.Kind, schema json.RawMessage) error {
 	return nil
 }
 
+// CheckSchema 只检查 schema 是否在受支持的子集内，不登记；能力包加载器用它在登记前整体预检。
+func (k *Kinds) CheckSchema(schema json.RawMessage) error {
+	var s map[string]any
+	if err := json.Unmarshal(schema, &s); err != nil || s == nil {
+		return fmt.Errorf("items: schema is not a JSON object")
+	}
+	return checkSchema(s, "schema")
+}
+
 func checkSchema(s map[string]any, path string) error {
 	for key, v := range s {
 		switch key {
