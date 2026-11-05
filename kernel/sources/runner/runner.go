@@ -414,8 +414,8 @@ func (r *Runner) Handle(ctx context.Context, res proc.Result) error {
 		p := parse(res.Stdout)
 		in.Events, in.Rejects = p.events, p.rejects
 		switch {
-		case p.truncated:
-			in.Class, in.Reason = clsTransient, fmt.Sprintf("output exceeds the %d bytes retained, earlier events were lost; cursor held", retainedLimit)
+		case res.Overflow: // 末行不是真正的末行，哪怕它长得像游标也不认
+			in.Class, in.Reason = clsTransient, "output exceeds max_source_output_mb; events before the limit were kept, cursor held"
 		case !p.cursorOK:
 			in.Class, in.Reason = clsTransient, "last line is not a valid cursor"
 		default:

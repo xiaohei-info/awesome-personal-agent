@@ -80,6 +80,7 @@ func TestLoadOverrides(t *testing.T) {
 listen: "0.0.0.0:9000"   # inline
 max_subprocesses: 8
 max_short_subprocesses: 1
+max_source_output_mb: 5
 ingest_retention_days: 7
 run_retention_days: 3
 `), 0o600)
@@ -87,7 +88,7 @@ run_retention_days: 3
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Listen != "0.0.0.0:9000" || c.MaxSubprocesses != 8 || c.MaxShortSubprocesses != 1 ||
+	if c.Listen != "0.0.0.0:9000" || c.MaxSubprocesses != 8 || c.MaxShortSubprocesses != 1 || c.MaxSourceOutput != 5<<20 ||
 		c.IngestRetention != 7*24*time.Hour || c.RunRetention != 3*24*time.Hour {
 		t.Fatalf("got %+v", c)
 	}

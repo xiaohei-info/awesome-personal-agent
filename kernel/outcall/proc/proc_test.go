@@ -537,3 +537,34 @@ func TestOutputKeepsOnlyTail(t *testing.T) {
 		t.Fatalf("len=%d", len(res.Stdout))
 	}
 }
+
+// 来源与转换脚本的 stdout 是事件流：超过末段大小也全部交回。
+func TestEventStreamKeepsWholeOutput(t *testing.T) {
+	h := newHarness(t, 1, 2, Options{})
+	script := `echo FIRST; head -c 200000 /dev/zero | tr '\0' a; echo; echo END`
+	h.enqueue(domain.RunSource, "s", false, script)
+	h.enqueue(domain.RunTransform, "t", false, script)
+	h.dispatch()
+	for range 2 {
+		res := h.next()
+		if res.Overflow || !strings.HasPrefix(string(res.Stdout), "FIRST\n") || !strings.HasSuffix(string(res.Stdout), "END\n") {
+			t.Fatalf("%s overflow=%v len=%d", res.Run.Category, res.Overflow, len(res.Stdout))
+		}
+	}
+}
+
+// 超过总上限：只交回上限内的完整行并标明 overflow；后面的输出照常读走，子进程能正常退出。
+func TestEventStreamOverLimitKeepsCompleteLinesAndDrains(t *testing.T) {
+	h := &harness{t: t, st: openStore(t, t.TempDir()), results: make(chan Result, 64)}
+	cfg := config.Default()
+	cfg.MaxSourceOutput = 100
+	h.d = New(h.st, cfg, Options{OnResult: func(r Result) { h.results <- r }})
+	t.Cleanup(h.d.Close)
+	h.enqueue(domain.RunSource, "s", false, `i=0; while [ $i -lt 20 ]; do echo "line-$i-xxxxxxxxxx"; i=$((i+1)); done; head -c 200000 /dev/zero | tr '\0' a`)
+	h.dispatch()
+	res := h.next()
+	got := string(res.Stdout)
+	if !res.Overflow || res.Run.State != domain.RunSucceeded || len(got) > 100 || !strings.HasPrefix(got, "line-0-") || !strings.HasSuffix(got, "\n") {
+		t.Fatalf("overflow=%v state=%s stdout=%q", res.Overflow, res.Run.State, got)
+	}
+}
