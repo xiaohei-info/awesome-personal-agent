@@ -14,6 +14,7 @@ class Kernel:
     def __init__(self):
         self.deliveries = []   # queued deliveries (dicts as domain.Delivery JSON)
         self.reports = []      # (kind, id, body)
+        self.cli_posts = []    # (path, bearer, body) of POSTs made under a run credential
         self.cli_calls = []    # (run header, bearer) seen on run-identity requests
         self.exchanges = 0
         self.fail_exchange = False
@@ -45,6 +46,9 @@ class Kernel:
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}")
+                if self.headers.get("Authorization", "").startswith("Bearer apa_run_"):
+                    k.cli_posts.append((self.path, self.headers["Authorization"], body))
+                    return self._send(200, {"id": "it1", "phase": "needs_input"})
                 if not self._auth():
                     return self._send(401, {"error": "bad token"})
                 parts = self.path.split("/")  # "", v1, runs|deliveries, id, credential|ack|fail
