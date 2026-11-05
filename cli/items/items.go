@@ -144,8 +144,9 @@ func add(c *client.Ctx, args []string, name string) error {
 	fields := itemFields
 	if name == "item add" {
 		fields = append([]string{"phase"}, fields...)
-		hint += " [--phase <phase> --evidence <text>]"
+		hint += " [--phase <phase>]"
 	}
+	hint += " [--evidence <text>]"
 	f, _ := newForm(name, fields, []string{"evidence", "idempotency-key"}, nil)
 	if _, err := f.parse(args, false, hint); err != nil {
 		return err
@@ -174,7 +175,7 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <text> --version <n>]"
 	case "relate":
 		fields, bools = []string{"to", "type", "reason"}, []string{"remove"}
-		hint = "usage: apa item relate <from> --to <id> --type <parent|blocks|derived_from|supersedes|relates> [--remove] [--reason <r>]"
+		hint = "usage: apa item relate <from> --to <id> --type <parent|blocks|derived_from|supersedes|relates> [--remove] [--reason <r> --evidence <text> --version <n>]"
 	}
 	f, rm := newForm("item "+sub, fields, []string{"evidence", "version", "idempotency-key"}, bools)
 	id, err := f.parse(args, true, hint)

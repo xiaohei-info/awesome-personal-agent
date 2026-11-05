@@ -175,6 +175,9 @@ type Spec struct {
 	// ChannelAnswer 非空时（ActionChannelAnswer），管线用返回的渠道与回答人填授权请求以查回答人白名单，
 	// webURL 随 web_only 拒绝返回；渠道与回答人只能据账本与凭据得出，不来自对象之外的声明。
 	ChannelAnswer func(tx *store.Tx, c Caller, in json.RawMessage) (channel, sender, webURL string, err error)
+	// Proxy 为真时，delegate 调用须附 on_behalf_of 与证据，缺失按 invalid_request 拒绝（§14.3）。
+	// 规则只在管线判定一处，登记命令只声明自己是不是代理写操作。
+	Proxy bool
 	// RequireVersion 为真时必须带 ExpectVersion。
 	RequireVersion bool
 	// Kinds 是允许调用的 ext/webhook 凭据种类；默认这两类凭据不能调用。
@@ -392,7 +395,7 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 	}
 	for _, act := range actions {
 		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
-			Evidence: req.Evidence, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender}
+			Evidence: req.Evidence, Proxy: spec.Proxy, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender}
 		d := authz.Decide(pol, ar)
 		if d.Err == nil {
 			continue

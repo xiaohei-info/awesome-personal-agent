@@ -363,7 +363,7 @@ func (s *svc) create() command.Spec {
 		var v createIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.create", Action: authz.ActionCreateProposed,
+	return command.Spec{Name: "item.create", Action: authz.ActionCreateProposed, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -425,7 +425,7 @@ func (s *svc) update() command.Spec {
 		next, err = applyPatch(cur, patch)
 		return
 	}
-	return command.Spec{Name: "item.update", Action: authz.ActionUpdateOwn,
+	return command.Spec{Name: "item.update", Action: authz.ActionUpdateOwn, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			cur, next, _, _, err := plan(tx, in)
 			if err != nil {
@@ -481,7 +481,7 @@ func (s *svc) transition() command.Spec {
 		next, err = transit(cur, v)
 		return
 	}
-	return command.Spec{Name: "item.transition", Action: authz.ActionUpdateOwn,
+	return command.Spec{Name: "item.transition", Action: authz.ActionUpdateOwn, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			cur, next, _, err := plan(tx, in)
 			if err != nil {
@@ -531,7 +531,7 @@ func (s *svc) relate() command.Spec {
 		var v relateIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.relate", Action: authz.ActionUpdateOwn,
+	return command.Spec{Name: "item.relate", Action: authz.ActionUpdateOwn, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -586,7 +586,7 @@ func (s *svc) relate() command.Spec {
 			if err := save(c.Tx, cur); err != nil {
 				return nil, err
 			}
-			return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, "", payload{Op: "relate", Item: cur, Relation: &rel, Remove: v.Remove})
+			return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, c.Evidence, payload{Op: "relate", Item: cur, Relation: &rel, Remove: v.Remove})
 		}}
 }
 
@@ -730,6 +730,6 @@ func (s *svc) revert() command.Spec {
 			if reason == "" {
 				reason = "revert of event " + strconv.FormatInt(v.Seq, 10)
 			}
-			return ref{rp.next.ID}, emit(c, typ, reason, "", payload{Op: "revert", Before: &rp.cur, Item: rp.next, Relation: rp.rel, Remove: rp.remove, Reverts: v.Seq})
+			return ref{rp.next.ID}, emit(c, typ, reason, c.Evidence, payload{Op: "revert", Before: &rp.cur, Item: rp.next, Relation: rp.rel, Remove: rp.remove, Reverts: v.Seq})
 		}}
 }
