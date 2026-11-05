@@ -836,3 +836,8 @@ func Rejects(tx *store.Tx, sourceID string) ([]Reject, error) {
 	}
 	return out, rows.Err()
 }
+
+// Unjudged 按落盘顺序返回判断型初筛未能判定的来源事件（disposition 为 unjudged）；健康视图只读。
+func Unjudged(tx *store.Tx) ([]domain.SourceEvent, error) {
+	return queryEvents(tx, `WHERE disposition = ?`, string(domain.DispositionUnjudged))
+}
