@@ -1,0 +1,3 @@
+kind: channel
+description: Telegram 渠道 ext：领取投递、发到 Telegram、转达回答（独立进程，不依赖任何 harness）
+command: [go, run, ./cmd/telegram-ext]

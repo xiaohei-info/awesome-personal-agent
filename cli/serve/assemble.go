@@ -40,6 +40,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	kchannel "github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -233,6 +234,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	x.OnCommit(scr.OnCommit)
 	att.Attach(x, st, logErr("attention"))
+	chain.New(chain.Options{Queue: q}).Attach(x, st, logErr("chain breaker"))
 	k.fu.Attach(logErr("follow-up"))
 
 	agm, ok := ld.Get("agents-md")
