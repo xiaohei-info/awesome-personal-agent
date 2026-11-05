@@ -235,6 +235,9 @@ func projectOf(tx *store.Tx, id string) (domain.Project, error) {
 // 执行者与所属项目，交给 §14.7 的名单校验（两者都有才校验）。
 func object(tx *store.Tx, cur, next domain.Item) (authz.Object, error) {
 	o := authz.Object{ID: cur.ID, Assignee: cur.Assignee, Kind: string(cur.Kind), Tags: cur.Tags, Project: cur.Project, Executor: next.Assignee}
+	if a := cur.Ask; a != nil { // 内核维护的风险类别与初筛状态进入代答判定（§14.4）
+		o.Category, o.ScreeningPending = a.RiskClass, a.ScreeningPending
+	}
 	if next.Assignee != "" && next.Project != "" {
 		p, err := projectOf(tx, next.Project)
 		if err != nil {

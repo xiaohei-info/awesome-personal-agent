@@ -685,3 +685,35 @@ func TestSchemaValueTypes(t *testing.T) {
 		t.Fatal("nil registry accepts everything")
 	}
 }
+
+// §14.4：离开 needs_input 是决定，内核维护的风险类别与初筛状态必须进入代答判定。
+func TestLeavingNeedsInputHonoursKernelAskState(t *testing.T) {
+	e := setup(t)
+	mk := func(state domain.AskKernelState) string {
+		id := e.create(t, owner, map[string]any{"phase": "open", "ask": map[string]any{"question": "ok?"}})
+		e.must(t, owner, "item.transition", map[string]any{"id": id, "to": "needs_input", "reason": "r"})
+		it := e.get(t, id)
+		it.Ask.AskKernelState = state // 这些字段只有内核能写，测试直接落到投影
+		if err := e.st.Update(bg, func(tx *store.Tx) error { return save(tx, it) }); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	leave := func(id string) error {
+		_, err := e.do(delegate, "item.transition", map[string]any{"id": id, "to": "open", "reason": "answered"})
+		return err
+	}
+	if err := leave(mk(domain.AskKernelState{ScreeningPending: true})); exit(err) != domain.ExitScreeningPending {
+		t.Fatalf("screening pending: %v", err)
+	}
+	if err := leave(mk(domain.AskKernelState{RiskClass: policy.CategoryFunds})); exit(err) != domain.ExitWebOnly {
+		t.Fatalf("web_only risk class: %v", err)
+	}
+	plain := mk(domain.AskKernelState{RiskClass: "none"})
+	if err := leave(plain); err != nil {
+		t.Fatalf("ordinary decision with evidence: %v", err)
+	}
+	if e.get(t, plain).Phase != domain.PhaseOpen {
+		t.Fatal("allowed transition not applied")
+	}
+}
