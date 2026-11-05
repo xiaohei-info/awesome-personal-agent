@@ -132,7 +132,7 @@ func (k *kernel) project(name, host, dir string) string {
 
 func (k *kernel) item(title, projectID string) string {
 	k.t.Helper()
-	args := []string{"item", "add", "--kind", "task", "--title", title, "--reason", "r"}
+	args := []string{"item", "add", "--kind", "task", "--title", title, "--reason", "r", "--evidence", "owner: add it"}
 	if projectID != "" {
 		args = append(args, "--project", projectID)
 	}
