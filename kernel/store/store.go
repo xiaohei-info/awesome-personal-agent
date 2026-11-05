@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 )
 
 // LedgerFile 是数据目录下的账本文件名（§16.2）。
@@ -176,13 +175,19 @@ func (s *Store) backupTo(ctx context.Context, tmp string) (err error) {
 			return fmt.Errorf("store: %w", err)
 		}
 	}
-	d, err := openConn(tmp)
+	s.mu.Lock()
+	b, err := s.c.backupInit(tmp)
+	s.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if cerr := d.close(); err == nil {
-			err = cerr
+		// finish 用源连接的 TLS，必须与写事务互斥；它同时关闭目标连接。失败时清掉半成品。
+		s.mu.Lock()
+		ferr := b.finish()
+		s.mu.Unlock()
+		if err == nil {
+			err = ferr
 		}
 		if err != nil {
 			os.Remove(tmp)
@@ -190,33 +195,18 @@ func (s *Store) backupTo(ctx context.Context, tmp string) (err error) {
 			os.Remove(tmp + "-shm")
 		}
 	}()
-	s.mu.Lock()
-	b, err := s.c.backupInit(d)
-	s.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	defer b.finish()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		s.mu.Lock()
-		done, busy, err := b.step(256)
+		done, err := b.step(256)
 		s.mu.Unlock()
 		if err != nil {
 			return err
 		}
 		if done {
-			break
-		}
-		if busy {
-			time.Sleep(10 * time.Millisecond)
+			return nil
 		}
 	}
-	// 备份文件按普通单文件交付：回到 DELETE 日志模式，不带 -wal/-shm 旁路文件。
-	if err := d.execScript("PRAGMA journal_mode=DELETE"); err != nil {
-		return err
-	}
-	return nil
 }
