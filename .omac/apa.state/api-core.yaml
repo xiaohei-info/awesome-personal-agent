@@ -1,3 +1,4 @@
-# sha256: a599800e8f89f0263b5b61b86d7c12a99f469d82791eb0fc6372fa5f3b831951
+# sha256: bf4dfe0215b9e1efa3132ec5d83f4a0ab0806d6aa607c865dc4bed8a01dc6c83
 work_item_id: 01a1ab47-718d-7419-837d-0ab217803d0a
-status: todo
+status: in_progress
+recovery_marker: true
