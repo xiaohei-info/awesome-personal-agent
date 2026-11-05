@@ -135,9 +135,13 @@ type Ctx struct {
 	Object     authz.Object
 	ChainDepth int
 	Basis      *domain.Basis
+	Evidence   string // 请求携带的本人原话与会话引用（已由授权校验过存在）
 	now        func() time.Time
 	seqs       []int64
 }
+
+// Now 返回命令管线使用的时钟，业务写入的时间戳取它。
+func (c *Ctx) Now() time.Time { return c.now() }
 
 // Emit 在同一事务内追加事件。Actor、ChainDepth、Basis 一律由内核覆盖，调用方写不了。
 func (c *Ctx) Emit(e domain.Event) (int64, error) {
@@ -429,7 +433,7 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 	if req.RuleID != "" || caller.Actor.Via == domain.ViaRule {
 		basis = &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID}
 	}
-	c := &Ctx{Tx: tx, Caller: caller, Input: req.Input, Object: obj, ChainDepth: depth, Basis: basis, now: x.now}
+	c := &Ctx{Tx: tx, Caller: caller, Input: req.Input, Object: obj, ChainDepth: depth, Basis: basis, Evidence: req.Evidence, now: x.now}
 	// 4 事务
 	var out Result
 	var value any
