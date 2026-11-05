@@ -686,6 +686,38 @@ func TestWebHandlerServesUIButNeverShadowsAPI(t *testing.T) {
 	}
 }
 
+// 一次性表单链接 /forms/<令牌> 既是人点开的页面又是页面自己 fetch 的 JSON 接口：按 Accept 分流。
+func TestPageRouteServesUIToNavigationAndJSONToFetch(t *testing.T) {
+	e := setup(t)
+	group := func(r *Router) {
+		r.HandleRoot(Route{Method: "GET", Path: "/forms/{token}", Auth: AuthNone, Page: true, Handler: func(w http.ResponseWriter, r *http.Request, _ *Principal) error {
+			return WriteJSON(w, 200, map[string]string{"question": "q"})
+		}})
+	}
+	web := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("UI:" + r.URL.Path)) })
+	srv, err := New(Deps{Store: e.st, Auth: e.auth, Web: web, Groups: []RouteGroup{group}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(accept string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/forms/tok", nil)
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		return w
+	}
+	if w := do("text/html,application/xhtml+xml,*/*;q=0.8"); w.Body.String() != "UI:/forms/tok" {
+		t.Fatalf("navigation must get the page: %q", w.Body)
+	}
+	for _, a := range []string{"application/json", "", "*/*"} {
+		if w := do(a); !strings.Contains(w.Body.String(), `"question":"q"`) {
+			t.Fatalf("Accept %q must get JSON: %q", a, w.Body)
+		}
+	}
+}
+
 // 长轮询不会自己结束：停止时要取消它的上下文，否则挂着的渠道 ext 会让 Serve 等满超时并报错。
 func TestServeCancelsLongPollsOnShutdown(t *testing.T) {
 	entered := make(chan struct{})

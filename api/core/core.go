@@ -64,6 +64,9 @@ type Route struct {
 	Auth    AuthMode
 	MaxBody int64 // 0 用 DefaultMaxBody
 	Handler Handler
+	// Page：该 GET 路径同时是人点开的链接。浏览器导航（Accept 含 text/html）交给 Web 的前端页面，
+	// 页面自己的 fetch（Accept: application/json）仍走 Handler。
+	Page bool
 }
 
 // RouteGroup 登记一组路由。
@@ -179,7 +182,18 @@ func New(d Deps) (*Server, error) {
 			continue
 		}
 		seen[pattern] = true
-		mux.Handle(pattern, s.wrap(route))
+		h := s.wrap(route)
+		if route.Page && route.Method == http.MethodGet && d.Web != nil {
+			api := h
+			h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.Contains(r.Header.Get("Accept"), "text/html") {
+					d.Web.ServeHTTP(w, r)
+					return
+				}
+				api.ServeHTTP(w, r)
+			})
+		}
+		mux.Handle(pattern, h)
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
