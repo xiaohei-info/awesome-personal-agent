@@ -446,6 +446,28 @@ type Forwarded struct {
 	Messages []Message `json:"messages"`
 }
 
+// MessageOf 把来源事件转成消息视图。
+func MessageOf(e domain.SourceEvent) Message {
+	return Message{ID: e.ID, Source: e.SourceID, Sender: e.Sender, SenderVerified: e.SenderVerified,
+		Subject: e.Subject, Summary: e.Summary, Detail: e.Detail, Link: e.Link, OccurredAt: e.OccurredAt}
+}
+
+// Peek 返回与 Forward 相同的消息，但不推进状态、不给确认游标：给不负责该事项的读取者（本人在场的主会话）。
+// 如果它也推进到 forwarded，未进白名单的消息可能被无人值守执行者的一次回执确认掉（§14.6）。
+func Peek(tx *store.Tx, item string, keep func(domain.SourceEvent) bool) (Forwarded, error) {
+	as, err := runner.Attachments(tx, item)
+	if err != nil {
+		return Forwarded{}, err
+	}
+	out := Forwarded{Messages: []Message{}}
+	for _, a := range as {
+		if unprocessed(a) && (keep == nil || keep(a.SourceEvent)) {
+			out.Messages = append(out.Messages, MessageOf(a.SourceEvent))
+		}
+	}
+	return out, nil
+}
+
 // Forward 返回事项上尚未确认的挂靠消息（pending 与 forwarded；已转发未确认的会再给，宁可重复也不漏），
 // 并把 pending 推进到 forwarded。keep 为空表示全部转发；keep 返回假的消息不转、状态不变、不算已处理。
 // 在调用方的写事务里执行（同 kcontext.Build 写会话游标）；不起运行、不记事件。
@@ -465,8 +487,7 @@ func Forward(tx *store.Tx, item string, keep func(domain.SourceEvent) bool) (For
 				return Forwarded{}, err
 			}
 		}
-		out.Messages = append(out.Messages, Message{ID: a.ID, Source: a.SourceID, Sender: a.Sender, SenderVerified: a.SenderVerified,
-			Subject: a.Subject, Summary: a.Summary, Detail: a.Detail, Link: a.Link, OccurredAt: a.OccurredAt})
+		out.Messages = append(out.Messages, MessageOf(a.SourceEvent))
 		last = a.Seq
 	}
 	if last > 0 {

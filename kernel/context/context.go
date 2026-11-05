@@ -1,8 +1,9 @@
 // Package kcontext 是连接模块的 `apa context`（设计 §7.6、§11.6、§14.10）：按会话游标返回账本的增量投影，
 // 是注入与运行者读取上下文的同一个接口。
 //
-// 本包只读账本（事项、项目、事件、策略），唯一自己写的是会话游标。内容只带事项 id、标题、阶段、截止、
-// 建议动作，不带事项正文与来源正文；挂靠消息、投递记录、在途运行提示由各自模块接入，不在这里。
+// 本包只读账本（事项、项目、事件、策略），自己写的只有会话游标；挂靠消息经 followmsg.Forward 推进。内容只带事项 id、
+// 标题、阶段、截止、建议动作，不带事项正文与来源正文；挂靠消息是唯一带外部正文的部分，由 kernel/allowlist 过滤（§14.6）。
+// 投递记录、在途运行提示由各自模块接入，不在这里。
 package kcontext
 
 import (
@@ -13,11 +14,14 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -38,7 +42,7 @@ var Module = store.Module{Name: "context", Migrations: []store.Migration{{
 
 // 变更会让事项进入增量的事件类型。
 var itemEvents = []string{domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvItemDeadlinePassed,
-	domain.EvDecisionRequested, domain.EvDecisionResolved, domain.EvDelegationCreated, domain.EvDelegationReported}
+	domain.EvDecisionRequested, domain.EvDecisionResolved, domain.EvDelegationCreated, domain.EvDelegationReported, followmsg.EvAttached}
 
 var projectEvents = []string{domain.EvProjectUpdated, domain.EvProjectAllowedExecutorsChanged}
 
@@ -49,6 +53,23 @@ type Request struct {
 	Instruction int            // 插件持有的指令版本；0 表示未上报
 	// All 是显式的跨项目视图（`--scope all`）。映射不出项目时默认只给无项目的事项，不猜、不串项目（§7.6）。
 	All bool
+	// ItemScope 是 `--scope item`（§7.6）：不看游标，给事项条目和未确认的挂靠消息。Item 为空时按 Reader 确定事项。
+	ItemScope bool
+	Item      string
+	Reader    Reader
+}
+
+// Reader 是读取者的身份，决定挂靠消息的白名单过滤和是否推进状态。
+type Reader struct {
+	Level     authz.Level
+	Principal string
+	Run       string
+}
+
+// ItemMessages 是一个事项转给读取者的挂靠消息。
+type ItemMessages struct {
+	Item string `json:"item"`
+	followmsg.Forwarded
 }
 
 // Entry 是增量里的一个事项，不含正文。
@@ -95,17 +116,21 @@ type Result struct {
 	Project     *ProjectContext `json:"project,omitempty"` // 无项目作用域，或项目自上次起没有变化时为空
 	Items       []Entry         `json:"items"`
 	Deliveries  []DeliveryEntry `json:"deliveries,omitempty"`
+	Messages    []ItemMessages  `json:"messages,omitempty"`
 	// WebOnlyPending：作用域内有待 Web 确认的高风险决策（§11.6 第 5 条）。
 	WebOnlyPending bool `json:"web_only_pending,omitempty"`
 }
 
 // Build 返回 req 的增量投影。带 Session 时在同一事务里把游标推进到本次读到的位置，
-// 因此调用方须用写事务；不带 Session 时只读。
+// 因此调用方须用写事务；不带 Session 时只读。ItemScope 可能推进挂靠消息，同样须用写事务。
 func Build(tx *store.Tx, req Request) (Result, error) {
 	var res Result
 	head, err := eventlog.Head(tx)
 	if err != nil {
 		return res, err
+	}
+	if req.ItemScope {
+		return buildItem(tx, req, head)
 	}
 	project, err := projects.Resolve(tx, req.Scope)
 	if err != nil {
@@ -125,12 +150,11 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 		return res, err
 	}
 
-	changed, projectChanged, err := changes(tx, after, head, project)
+	changed, attached, projectChanged, err := changes(tx, after, head, project)
 	if err != nil {
 		return res, err
 	}
-	res = Result{Cursor: head, Items: []Entry{},
-		Instruction: Instruction{Current: InstructionVersion, Stale: req.Instruction != 0 && req.Instruction != InstructionVersion}}
+	res = Result{Cursor: head, Items: []Entry{}, Instruction: instruction(req)}
 
 	for _, id := range changed {
 		it, err := items.Get(tx, id)
@@ -144,6 +168,11 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			continue
 		}
 		res.Items = append(res.Items, Entry{ID: it.ID, Title: it.Title, Phase: it.Phase, Deadline: it.Deadline, Action: action(it, pol)})
+		if req.Session != "" && attached[id] { // 不带会话时是只读事务，也不算增量
+			if res.Messages, err = appendMessages(tx, res.Messages, req.Reader, it, pol); err != nil {
+				return res, err
+			}
+		}
 	}
 
 	if project != "" && !req.All && (after == 0 || projectChanged) {
@@ -166,6 +195,88 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 		}
 	}
 	return res, nil
+}
+
+// buildItem 是 `--scope item`：不读不写游标，也不带投递与项目上下文。
+func buildItem(tx *store.Tx, req Request, head int64) (Result, error) {
+	res := Result{Cursor: head, Items: []Entry{}, Instruction: instruction(req)}
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return res, err
+	}
+	targets, err := itemTargets(tx, req)
+	if err != nil {
+		return res, err
+	}
+	for _, it := range targets {
+		if hiddenAsk(it) {
+			continue
+		}
+		res.Items = append(res.Items, Entry{ID: it.ID, Title: it.Title, Phase: it.Phase, Deadline: it.Deadline, Action: action(it, pol)})
+		if res.Messages, err = appendMessages(tx, res.Messages, req.Reader, it, pol); err != nil {
+			return res, err
+		}
+	}
+	return res, nil
+}
+
+// itemTargets：显式 Item；否则运行身份取目标事项，其他读取者取分配给自己的未关闭事项。
+func itemTargets(tx *store.Tx, req Request) ([]domain.Item, error) {
+	id := req.Item
+	if id == "" && req.Reader.Run != "" {
+		rec, err := proc.Get(tx, req.Reader.Run)
+		if err != nil {
+			return nil, err
+		}
+		id = rec.Run.Target
+	}
+	if id != "" {
+		it, err := items.Get(tx, id)
+		if err != nil {
+			return nil, err
+		}
+		return []domain.Item{it}, nil
+	}
+	if req.Reader.Principal == "" {
+		return nil, nil
+	}
+	mine, err := items.List(tx, items.Filter{Assignee: req.Reader.Principal})
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(mine, func(it domain.Item) bool {
+		return it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped
+	}), nil
+}
+
+// appendMessages 按读取者过滤并取事项的挂靠消息：负责者才推进状态并拿确认游标。没有消息时不追加。
+func appendMessages(tx *store.Tx, to []ItemMessages, r Reader, it domain.Item, pol policy.Policy) ([]ItemMessages, error) {
+	read := followmsg.Peek
+	owns, err := r.responsible(tx, it)
+	if err != nil {
+		return to, err
+	}
+	if owns {
+		read = followmsg.Forward
+	}
+	f, err := read(tx, it.ID, allowlist.Keep(pol, r.Level, it))
+	if err != nil || len(f.Messages) == 0 {
+		return to, err
+	}
+	return append(to, ItemMessages{Item: it.ID, Forwarded: f}), nil
+}
+
+// responsible：运行身份对目标事项负责（子事项有自己的执行者）；其他读取者对分配给自己的事项负责。
+func (r Reader) responsible(tx *store.Tx, it domain.Item) (bool, error) {
+	if r.Run == "" {
+		return r.Principal != "" && it.Assignee == r.Principal, nil
+	}
+	rec, err := proc.Get(tx, r.Run)
+	return err == nil && rec.Run.Target == it.ID, err
+}
+
+func instruction(req Request) Instruction {
+	return Instruction{Current: InstructionVersion, Stale: req.Instruction != 0 && req.Instruction != InstructionVersion}
 }
 
 // injected 返回作用域内待注入的投递。带 Session 时每条只给该会话一次，并记 injected_to_session；
@@ -231,13 +342,14 @@ func cursor(tx *store.Tx, key, session string, head int64) (int64, error) {
 	return seq, nil
 }
 
-// changes 读 (after, head] 的事件，返回按最近变更先后排序的去重事项 id，以及作用域项目是否有变更。
-func changes(tx *store.Tx, after, head int64, project string) (ids []string, projectChanged bool, err error) {
+// changes 读 (after, head] 的事件，返回按最近变更先后排序的去重事项 id、其中有新挂靠消息的事项，以及作用域项目是否有变更。
+func changes(tx *store.Tx, after, head int64, project string) (ids []string, attached map[string]bool, projectChanged bool, err error) {
 	last := map[string]int64{}
+	attached = map[string]bool{}
 	for after < head {
 		es, err := eventlog.Read(tx, after, 500)
 		if err != nil {
-			return nil, false, err
+			return nil, nil, false, err
 		}
 		if len(es) == 0 {
 			break
@@ -247,6 +359,7 @@ func changes(tx *store.Tx, after, head int64, project string) (ids []string, pro
 			switch t := en.Event.Type; {
 			case slices.Contains(itemEvents, t):
 				last[en.Event.Object] = en.Event.Seq
+				attached[en.Event.Object] = attached[en.Event.Object] || t == followmsg.EvAttached
 			case slices.Contains(projectEvents, t) && en.Event.Object == project:
 				projectChanged = true
 			}
@@ -256,7 +369,7 @@ func changes(tx *store.Tx, after, head int64, project string) (ids []string, pro
 		ids = append(ids, id)
 	}
 	slices.SortFunc(ids, func(a, b string) int { return int(last[a] - last[b]) })
-	return ids, projectChanged, nil
+	return ids, attached, projectChanged, nil
 }
 
 // hiddenAsk：web_only 初筛未返回的决策请求不带（§14.4）。
@@ -317,7 +430,7 @@ func oneLine(s string) string {
 
 // Inject 渲染注入文本；没有任何要说的（增量为空、指令未过期）返回空串，不注入。
 func (r Result) Inject() string {
-	if len(r.Items) == 0 && len(r.Deliveries) == 0 && r.Project == nil && !r.Instruction.Stale {
+	if len(r.Items) == 0 && len(r.Deliveries) == 0 && len(r.Messages) == 0 && r.Project == nil && !r.Instruction.Stale {
 		return ""
 	}
 	var b strings.Builder
@@ -376,6 +489,10 @@ func (r Result) Inject() string {
 		}
 	}
 	line(envelopeClose)
+	for _, m := range r.Messages { // 消息带自己的信封；事项 id 由内核生成，不是外部内容
+		line("事项 ", m.Item, " 的跟进消息：")
+		b.WriteString(m.Inject())
+	}
 	return b.String()
 }
 

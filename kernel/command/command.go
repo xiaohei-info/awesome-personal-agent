@@ -228,6 +228,9 @@ func (x *Executor) Register(s Spec) error {
 	return nil
 }
 
+// Store 返回执行器所用的账本，供只持有执行器的路由读取。
+func (x *Executor) Store() *store.Store { return x.st }
+
 // OnCommit 登记提交后的消费者；按登记顺序同步调用，重放与被拒绝的命令不触发。
 func (x *Executor) OnCommit(f func(Commit)) {
 	x.mu.Lock()

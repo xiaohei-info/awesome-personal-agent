@@ -317,3 +317,17 @@ func TestPersona(t *testing.T) {
 		t.Fatalf("blank persona must stay empty, got %q", p)
 	}
 }
+
+// item 参数只属于 scope=item；事项不存在返回 404（§7.6）。
+func TestItemParamNeedsItemScope(t *testing.T) {
+	e := setup(t)
+	if rec := e.do("GET", "/v1/context?item=itm_x", "", e.token(auth.Observer, "")); rec.Code != 400 {
+		t.Fatalf("item without scope: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/v1/context?scope=item&item=itm_x", "", e.token(auth.Observer, "")); rec.Code != 404 {
+		t.Fatalf("unknown item: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/v1/context?scope=item", "", e.token(auth.Observer, "")); rec.Code != 200 {
+		t.Fatalf("no target: %d %s", rec.Code, rec.Body)
+	}
+}
