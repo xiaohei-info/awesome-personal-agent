@@ -1,0 +1,243 @@
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { ApiError } from "../../app/api";
+import { useSession } from "../../app/session";
+
+// 形状对应 /v1/settings/{policy,allowlists,model-endpoints,access-limits}（附录 B.2）。
+// 校验、规整、人格上限（约 400 token）全部由服务端判定，本页只搬运编辑结果并原样显示拒绝原因；被拒绝时什么都没保存，草稿保留。
+const ROUTES = ["policy", "allowlists", "model-endpoints", "access-limits"] as const;
+const MASK = "***"; // 读取时代替模型端点密钥；原样回传表示保持原密钥
+const LEVELS = ["read", "edit", "full"];
+const WRITES = ["direct", "proposed"];
+
+interface Rule { kind?: string; tag?: string; project?: string; category: string }
+type Doc = Record<string, any> & { version: number };
+type Row = [string, string];
+
+const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
+const rowsOf = (m: Record<string, string>): Row[] => Object.entries(m ?? {});
+const listRowsOf = (m: Record<string, string[]>): Row[] => Object.entries(m ?? {}).map(([k, v]) => [k, v.join(", ")]);
+
+function toMap(rows: Row[], what: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of rows) {
+    if (!k.trim() && !v.trim()) continue; // 完全空白的行视为没填
+    if (k in out) throw new Error(`${what}：「${k}」重复`);
+    out[k] = v;
+  }
+  return out;
+}
+const toListMap = (rows: Row[], what: string) =>
+  Object.fromEntries(Object.entries(toMap(rows, what)).map(([k, v]) => [k, v.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean)]));
+
+function Card({ title, onSave, children }: { title: string; onSave: () => Promise<number>; children: ReactNode }) {
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    setStatus(null);
+    try {
+      setStatus({ ok: true, text: `已保存（版本 ${await onSave()}）` });
+    } catch (e) {
+      setStatus({ ok: false, text: msg(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section aria-label={title}>
+      <h3>{title}</h3>
+      {children}
+      <button type="button" disabled={busy} onClick={() => void save()} aria-label={`保存${title}`}>保存</button>
+      {status && <p role={status.ok ? "status" : "alert"}>{status.text}</p>}
+    </section>
+  );
+}
+
+function Rows({ label, rows, onChange, options, keyLabel = "名称", valueLabel = "值" }: {
+  label: string; rows: Row[]; onChange: (r: Row[]) => void; options?: string[]; keyLabel?: string; valueLabel?: string;
+}) {
+  const set = (i: number, j: 0 | 1, v: string) => onChange(rows.map((r, n) => (n === i ? (j ? [r[0], v] : [v, r[1]]) : r) as Row));
+  return (
+    <div role="group" aria-label={label}>
+      {rows.map(([k, v], i) => (
+        <div key={i}>
+          <input aria-label={`${label}${keyLabel} ${i + 1}`} value={k} onChange={(e) => set(i, 0, e.target.value)} />
+          {options ? (
+            <select aria-label={`${label}${valueLabel} ${i + 1}`} value={v} onChange={(e) => set(i, 1, e.target.value)}>
+              {options.map((o) => <option key={o}>{o}</option>)}
+            </select>
+          ) : (
+            <input aria-label={`${label}${valueLabel} ${i + 1}`} value={v} onChange={(e) => set(i, 1, e.target.value)} />
+          )}
+          <button type="button" aria-label={`删除${label} ${i + 1}`} onClick={() => onChange(rows.filter((_, n) => n !== i))}>删除</button>
+        </div>
+      ))}
+      <button type="button" onClick={() => onChange([...rows, ["", options?.[0] ?? ""]])}>添加{label}</button>
+    </div>
+  );
+}
+
+// 服务端文档变化（保存后返回规整结果、或重新加载）时，草稿重置为服务端值。
+function useDraft<T>(doc: unknown, init: () => T) {
+  const [d, setD] = useState<T>(init);
+  useEffect(() => setD(init()), [doc]); // eslint-disable-line react-hooks/exhaustive-deps
+  return [d, setD] as const;
+}
+
+type Save = (route: (typeof ROUTES)[number], body: unknown) => Promise<number>;
+
+function WebOnlyCard({ doc, save }: { doc: Doc; save: Save }) {
+  const [cats, setCats] = useDraft(doc.web_only, () => (doc.web_only.categories as string[]).join("\n"));
+  const [rules, setRules] = useDraft(doc.web_only, () => (doc.web_only.rules as Rule[]).map((r) => [r.kind ?? "", r.tag ?? "", r.project ?? "", r.category]));
+  const setRule = (i: number, j: number, v: string) => setRules(rules.map((r, n) => (n === i ? r.map((x, m) => (m === j ? v : x)) : r)));
+  return (
+    <Card title="web_only 分类" onSave={() => save("policy", {
+      web_only: {
+        categories: cats.split("\n").map((s) => s.trim()).filter(Boolean),
+        rules: rules.map(([kind, tag, project, category]) => ({ kind, tag, project, category })),
+      },
+    })}>
+      <label>类别（每行一个）<textarea value={cats} onChange={(e) => setCats(e.target.value)} /></label>
+      {rules.map((r, i) => (
+        <div key={i} role="group" aria-label={`匹配规则 ${i + 1}`}>
+          {["kind", "tag", "项目", "类别"].map((n, j) => (
+            <input key={n} aria-label={`规则${i + 1} ${n}`} placeholder={n} value={r[j]} onChange={(e) => setRule(i, j, e.target.value)} />
+          ))}
+          <button type="button" aria-label={`删除规则 ${i + 1}`} onClick={() => setRules(rules.filter((_, n) => n !== i))}>删除</button>
+        </div>
+      ))}
+      <button type="button" onClick={() => setRules([...rules, ["", "", "", ""]])}>添加匹配规则</button>
+    </Card>
+  );
+}
+
+function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: string[] }) {
+  return (
+    <label>{label}
+      <select value={value} onChange={(e) => onChange(e.target.value)}>{options.map((o) => <option key={o}>{o}</option>)}</select>
+    </label>
+  );
+}
+
+export function SettingsPolicyPage() {
+  const { api } = useSession();
+  const [docs, setDocs] = useState<Record<string, Doc> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const all = await Promise.all(ROUTES.map((r) => api.get<Doc>("/settings/" + r)));
+      setDocs(Object.fromEntries(ROUTES.map((r, i) => [r, all[i]])));
+    } catch (e) {
+      setDocs(null);
+      setError(msg(e));
+    }
+  }, [api]);
+  useEffect(() => { void load(); }, [load]);
+
+  const save: Save = async (route, body) => {
+    const next = await api.put<Doc>("/settings/" + route, body);
+    setDocs((d) => ({ ...d!, [route]: next }));
+    return next.version;
+  };
+
+  if (error)
+    return (
+      <main>
+        <h2>策略与人格</h2>
+        <p role="alert">{error}</p>
+        <button onClick={() => void load()}>重试</button>
+      </main>
+    );
+  if (!docs) return <p>加载中…</p>;
+  const p = docs["policy"], al = docs["allowlists"], me = docs["model-endpoints"], lim = docs["access-limits"];
+  return (
+    <main>
+      <h2>策略与人格</h2>
+      <p>保存的设置在下一次判定时生效；服务端拒绝时不会保存任何内容。</p>
+      <WebOnlyCard doc={p} save={save} />
+      <DisturbCard doc={p} save={save} />
+      <MaterialCard doc={p} save={save} />
+      <LimitCard doc={lim} save={save} />
+      <EndpointCard doc={me} save={save} />
+      <AllowlistCard doc={al} save={save} />
+      <PersonaCard doc={p} save={save} />
+    </main>
+  );
+}
+
+function DisturbCard({ doc, save }: { doc: Doc; save: Save }) {
+  const [rows, setRows] = useDraft(doc.disturb, () => rowsOf(doc.disturb.routes));
+  return (
+    <Card title="打扰策略" onSave={() => save("policy", { disturb: { routes: toMap(rows, "打扰策略") } })}>
+      <p>键为投递类别，或「类别:优先级」（后者优先）；值为路由。</p>
+      <Rows label="打扰路由" keyLabel="类别" valueLabel="路由" rows={rows} onChange={setRows} />
+    </Card>
+  );
+}
+
+function MaterialCard({ doc, save }: { doc: Doc; save: Save }) {
+  const [def, setDef] = useDraft(doc.material_write, () => doc.material_write.default as string);
+  const [rows, setRows] = useDraft(doc.material_write, () => rowsOf(doc.material_write.kinds));
+  return (
+    <Card title="材料写入策略" onSave={() => save("policy", { material_write: { default: def, kinds: toMap(rows, "材料写入策略") } })}>
+      <SelectField label="未登记 kind 的默认策略" value={def} onChange={setDef} options={WRITES} />
+      <Rows label="材料 kind" keyLabel="kind" valueLabel="策略" rows={rows} onChange={setRows} options={WRITES} />
+    </Card>
+  );
+}
+
+function LimitCard({ doc, save }: { doc: Doc; save: Save }) {
+  const [def, setDef] = useDraft(doc.permission_cap, () => doc.permission_cap.default as string);
+  const [rows, setRows] = useDraft(doc.permission_cap, () => rowsOf(doc.permission_cap.by_harness));
+  return (
+    <Card title="权限上限" onSave={() => save("access-limits", { permission_cap: { default: def, by_harness: toMap(rows, "权限上限") } })}>
+      <SelectField label="默认上限" value={def} onChange={setDef} options={LEVELS} />
+      <Rows label="harness 上限" keyLabel="harness" valueLabel="上限" rows={rows} onChange={setRows} options={LEVELS} />
+    </Card>
+  );
+}
+
+function EndpointCard({ doc, save }: { doc: Doc; save: Save }) {
+  const e = doc.model_endpoint;
+  const [d, setD] = useDraft(e, () => ({ url: e.url ?? "", model: e.model ?? "", api_key: e.api_key ?? "", timeout: String(e.screening_timeout_ms) }));
+  const f = (k: keyof typeof d, label: string, type = "text") => (
+    <label>{label}<input type={type} value={d[k]} onChange={(ev) => setD({ ...d, [k]: ev.target.value })} /></label>
+  );
+  return (
+    <Card title="模型端点" onSave={() => save("model-endpoints", {
+      model_endpoint: { url: d.url, model: d.model, api_key: d.api_key, screening_timeout_ms: Number(d.timeout) },
+    })}>
+      {f("url", "端点 URL")}
+      {f("model", "模型")}
+      {f("api_key", "API 密钥", "password")}
+      <small>{d.api_key === MASK ? "已设置密钥；保持不变即沿用原密钥" : "密钥只写入，保存后不再显示"}</small>
+      {f("timeout", "筛选超时（毫秒）", "number")}
+    </Card>
+  );
+}
+
+function AllowlistCard({ doc, save }: { doc: Doc; save: Save }) {
+  const [fwd, setFwd] = useDraft(doc.forward_allowlist, () => listRowsOf(doc.forward_allowlist));
+  const [ans, setAns] = useDraft(doc.channel_answerers, () => listRowsOf(doc.channel_answerers));
+  return (
+    <Card title="白名单" onSave={() => save("allowlists", {
+      forward_allowlist: toListMap(fwd, "转发白名单"),
+      channel_answerers: toListMap(ans, "渠道回答人白名单"),
+    })}>
+      <p>两份白名单相互独立；多个值用逗号分隔。</p>
+      <Rows label="转发白名单" keyLabel="来源" valueLabel="发送者" rows={fwd} onChange={setFwd} />
+      <Rows label="渠道回答人" keyLabel="渠道" valueLabel="回答人" rows={ans} onChange={setAns} />
+    </Card>
+  );
+}
+
+function PersonaCard({ doc, save }: { doc: Doc; save: Save }) {
+  const [text, setText] = useDraft(doc.persona, () => doc.persona as string);
+  return (
+    <Card title="人格" onSave={() => save("policy", { persona: text })}>
+      <label>人格（约 400 token 上限，只影响表达方式，不放宽任何权限）<textarea value={text} onChange={(e) => setText(e.target.value)} /></label>
+    </Card>
+  );
+}
