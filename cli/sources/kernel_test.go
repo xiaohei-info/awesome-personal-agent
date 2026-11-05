@@ -313,3 +313,35 @@ func TestWebhookCreateRotateIngestsReplay(t *testing.T) {
 		}
 	}
 }
+
+// 附录 B.1 `apa source webhook revoke`：delegate 吊销该来源全部接收密钥（含宽限期内的旧密钥）并记 Event，之后接收被拒；observer 得 4。
+func TestWebhookRevokeDropsEveryKey(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--config", `{"scheme":"shared"}`)
+	var k1, k2 struct{ Secret string }
+	decode(t, k.apa(dlg, "source", "webhook", "create", "src_hook"), &k1)
+	decode(t, k.apa(dlg, "source", "webhook", "rotate", "src_hook"), &k2)
+	recv := func(key, delivery string) int {
+		return k.wh.Receive(context.Background(), webhook.Request{SourceID: "src_hook",
+			Header: map[string]string{"X-Hook-Key": key, "X-Delivery": delivery}, Body: []byte(`{"n":1}`)}).Status
+	}
+	if recv(k1.Secret, "d1") != 200 || recv(k2.Secret, "d2") != 200 {
+		t.Fatal("both keys must work before revoke")
+	}
+	k.wh.Wait()
+	if r := k.apa(obs, "source", "webhook", "revoke", "src_hook"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer revoke: %+v", r)
+	}
+	var rv struct{ Revoked int }
+	decode(t, k.apa(dlg, "source", "webhook", "revoke", "src_hook"), &rv)
+	if rv.Revoked != 2 || k.events("source.webhook_key_revoked") == 0 {
+		t.Fatalf("revoke: %+v", rv)
+	}
+	if recv(k1.Secret, "d3") == 200 || recv(k2.Secret, "d4") == 200 {
+		t.Fatal("revoked keys must be rejected")
+	}
+	if r := k.apa(dlg, "source", "webhook", "revoke", "src_none"); r.code != domain.ExitNotFound {
+		t.Fatalf("revoke unknown source: %+v", r)
+	}
+}
