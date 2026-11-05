@@ -324,3 +324,46 @@ func TestHandleTimerRejectsForeignTimersAndIgnoresDeletedTarget(t *testing.T) {
 		t.Fatalf("stale timer for missing instance should be dropped quietly: %v", err)
 	}
 }
+
+func TestUnrelatedUpdateKeepsScheduleState(t *testing.T) {
+	e := setup(t)
+	// 周期：改别的参数不重置节拍。
+	rec := e.create(t, `{"schedule":"24h"}`)
+	e.now = t0.Add(20 * time.Hour)
+	e.must(t, "instance.update", map[string]any{"id": rec, "params": json.RawMessage(`{"schedule":"24h","projects":["a"]}`)})
+	if _, at := e.timers(t); !at.Equal(t0.Add(24 * time.Hour)) {
+		t.Fatalf("unrelated edit moved the next beat to %v", at)
+	}
+	// 一次性：已触发后改别的参数、停用再启用，都不再触发。
+	one := e.create(t, `{"schedule":"2026-01-01T09:00:00Z"}`)
+	e.tick(t, t0.Add(2*time.Hour))
+	before := len(e.events(t, EvFired))
+	e.must(t, "instance.update", map[string]any{"id": one, "params": json.RawMessage(`{"schedule":"2026-01-01T09:00:00Z","projects":["a"]}`)})
+	e.must(t, "instance.toggle", map[string]any{"id": one, "enabled": false})
+	e.must(t, "instance.toggle", map[string]any{"id": one, "enabled": true})
+	e.tick(t, t0.Add(5*time.Hour))
+	if got := len(e.events(t, EvFired)); got != before {
+		t.Fatalf("fired one-shot fired again: %d -> %d", before, got)
+	}
+}
+
+func TestNonStringScheduleIsRejected(t *testing.T) {
+	// 包的 schema 允许 schedule 是别的类型时，也不能得到一个没有 Timer 的启用实例。
+	if _, _, err := schedule(json.RawMessage(`{"schedule":5}`)); err == nil {
+		t.Fatal("non-string schedule accepted")
+	}
+}
+
+func TestDelegateManagesObserverDenied(t *testing.T) {
+	e := setup(t)
+	lvl := func(l authz.Level) command.Trusted {
+		return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "a", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: l}
+	}
+	in := map[string]any{"pack": "brief", "params": json.RawMessage(`{"schedule":"24h"}`)}
+	if _, err := e.do(lvl(authz.LevelObserver), "instance.create", in); err == nil {
+		t.Fatal("observer created an instance")
+	}
+	if _, err := e.do(lvl(authz.LevelDelegate), "instance.create", in); err != nil {
+		t.Fatalf("delegate denied: %v", err)
+	}
+}

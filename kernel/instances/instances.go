@@ -168,13 +168,10 @@ func (s *svc) check(tx *store.Tx, in Instance) error {
 // RFC3339 时刻是一次性提醒。没有 schedule 则不落 Timer。
 // shortcut: 时钟目前只支持固定时长周期，cron 表达式被明确拒绝；时钟支持日历周期后在此扩展。
 func plan(in Instance, now time.Time) (t domain.Timer, ok bool, err error) {
-	var p struct {
-		Schedule *string `json:"schedule"`
+	s, ok, err := schedule(in.Params)
+	if err != nil || !ok {
+		return t, false, err
 	}
-	if err = json.Unmarshal(in.Params, &p); err != nil || p.Schedule == nil {
-		return t, false, nil // params 不是对象或没有 schedule：校验另有人管
-	}
-	s := *p.Schedule
 	if d, perr := time.ParseDuration(s); perr == nil && d > 0 {
 		return domain.Timer{Kind: domain.TimerRecur, At: now.Add(d), Recurrence: s}, true, nil
 	}
@@ -184,8 +181,23 @@ func plan(in Instance, now time.Time) (t domain.Timer, ok bool, err error) {
 	return t, false, invalid("schedule " + s + " must be a positive duration like 24h or an RFC3339 time")
 }
 
+// schedule 取 params.schedule；没有返回 ok=false，存在但不是字符串是错误（否则实例会静默没有 Timer）。
+func schedule(params json.RawMessage) (s string, ok bool, err error) {
+	var p struct {
+		Schedule json.RawMessage `json:"schedule"`
+	}
+	if json.Unmarshal(params, &p) != nil || len(p.Schedule) == 0 {
+		return "", false, nil // params 不是对象或没有 schedule：校验另有人管
+	}
+	if json.Unmarshal(p.Schedule, &s) != nil {
+		return "", false, invalid("schedule must be a string")
+	}
+	return s, true, nil
+}
+
 // rearm 在 tx 内按实例当前状态重排 Timer：先撤旧的，启用且有 schedule 才建新的。
-func rearm(tx *store.Tx, in Instance, now time.Time) error {
+// fresh=false 用于重新启用：已过去的一次性时刻不再重建，否则已经触发过的提醒会再触发一次。
+func rearm(tx *store.Tx, in Instance, now time.Time, fresh bool) error {
 	if err := clock.Cancel(tx, timerID(in.ID)); err != nil && !isCode(err, domain.CodeNotFound) {
 		return err
 	}
@@ -193,7 +205,7 @@ func rearm(tx *store.Tx, in Instance, now time.Time) error {
 		return nil
 	}
 	t, ok, err := plan(in, now)
-	if err != nil || !ok {
+	if err != nil || !ok || (!fresh && t.Kind == domain.TimerRemind && !t.At.After(now)) {
 		return err
 	}
 	t.ID, t.Target = timerID(in.ID), in.ID
@@ -294,7 +306,7 @@ func (s *svc) create() command.Spec {
 			if err := save(c.Tx, in); err != nil {
 				return nil, err
 			}
-			if err := rearm(c.Tx, in, c.Now()); err != nil {
+			if err := rearm(c.Tx, in, c.Now(), true); err != nil {
 				return nil, err
 			}
 			return ref{in.ID}, emit(c, EvCreated, "created", in)
@@ -343,6 +355,10 @@ func (s *svc) update() command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
+			old, err := Get(c.Tx, v.ID)
+			if err != nil {
+				return nil, err
+			}
 			in, err := next(c.Tx, v)
 			if err != nil {
 				return nil, err
@@ -350,8 +366,13 @@ func (s *svc) update() command.Spec {
 			if err := save(c.Tx, in); err != nil {
 				return nil, err
 			}
-			if err := rearm(c.Tx, in, c.Now()); err != nil {
-				return nil, err
+			// 只有 schedule 变了才重排；改别的参数不能重置周期，也不能让已触发的一次性提醒再触发。
+			oldS, _, _ := schedule(old.Params)
+			newS, _, _ := schedule(in.Params)
+			if oldS != newS {
+				if err := rearm(c.Tx, in, c.Now(), true); err != nil {
+					return nil, err
+				}
 			}
 			return ref{in.ID}, emit(c, EvUpdated, "updated", in)
 		}}
@@ -389,7 +410,7 @@ func (s *svc) toggle() command.Spec {
 			if err := save(c.Tx, in); err != nil {
 				return nil, err
 			}
-			if err := rearm(c.Tx, in, c.Now()); err != nil {
+			if err := rearm(c.Tx, in, c.Now(), false); err != nil {
 				return nil, err
 			}
 			return ref{in.ID}, emit(c, EvToggled, "toggled", in)
