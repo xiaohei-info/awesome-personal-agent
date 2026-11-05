@@ -560,6 +560,14 @@ func nextAttempt(at time.Time, schedule string, failures int) time.Time {
 	return at.Add(min(d, max(maxBackoff, p)))
 }
 
+// AppendInternal 把内核自己产生的来源事件（不经拉取，如对话增量捕获）落盘为 pending；
+// 按 src 的去重键幂等，重复提交不产生第二条。事件 id 取 ev.ID，处置字段由入站流水线维护。
+func AppendInternal(tx *store.Tx, src domain.Source, ev domain.SourceEvent) error {
+	return insertEvent(tx, src, "", parsedEvent{ID: ev.ID, Type: ev.Type, Subject: ev.Subject, Summary: ev.Summary,
+		Detail: ev.Detail, Link: ev.Link, OccurredAt: ev.OccurredAt, CorrelationKeys: ev.CorrelationKeys,
+		Sender: ev.Sender, SenderVerified: ev.SenderVerified})
+}
+
 func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent) error {
 	key := src.DedupeKeyFor(ev.ID)
 	var rnd [8]byte
