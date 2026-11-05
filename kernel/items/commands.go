@@ -252,12 +252,12 @@ func object(tx *store.Tx, cur, next domain.Item) (authz.Object, error) {
 	return o, nil
 }
 
-// editActions：改自己的事项为 update_own，改他人的为 edit_any_item（§14.3）；
+// editActions：改自己的事项（运行凭据：范围内的事项）为 update_own，改他人的为 edit_any_item（§14.3）；
 // 写了 assignee 或 project 再加名单校验点，使 21 号拒绝走管线留痕。
 func editActions(c command.Caller, o authz.Object, wroteAssignee, wroteProject bool, first ...authz.Action) []authz.Action {
 	as := first
 	if len(as) == 0 {
-		if o.Assignee != "" && o.Assignee == c.Actor.Principal {
+		if (o.Assignee != "" && o.Assignee == c.Actor.Principal) || (c.Level == authz.LevelRun && o.InRunScope) {
 			as = []authz.Action{authz.ActionUpdateOwn}
 		} else {
 			as = []authz.Action{authz.ActionEditAnyItem}
