@@ -63,6 +63,7 @@ var (
 		sect("material_write", func(p *kpolicy.Policy) *kpolicy.MaterialWrite { return &p.MaterialWrite }),
 		sect("persona", func(p *kpolicy.Policy) *string { return &p.Persona }),
 		sect("channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
+		sect("default_harness", func(p *kpolicy.Policy) *string { return &p.DefaultHarness }),
 	}
 	allowlistSections = []section{
 		sect("forward_allowlist", func(p *kpolicy.Policy) *map[string][]string { return &p.ForwardAllowlist }),
