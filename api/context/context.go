@@ -1,6 +1,6 @@
 // Package context 是上下文与人格的 HTTP 路由（附录 B.2，设计 §7.6、§11.2）：
 //
-//	GET /context[?session&project&path&host&scope&instruction&format=inject]
+//	GET /context[?session&project&path&host&scope&item&instruction&format=inject]
 //	GET /context/persona
 //
 // 路由里没有业务规则：增量投影、游标、注入渲染在 kernel/context，人格与它的固定声明在 kernel/policy；
@@ -47,7 +47,9 @@ func invalid(why, next string) error { return domain.NewError(domain.CodeInvalid
 func (h *handlers) context(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	q := r.URL.Query()
 	req := kcontext.Request{Session: p.Caller.Actor.Session,
-		Scope: projects.Scope{Flag: q.Get("project"), Cwd: q.Get("path"), Host: q.Get("host")}}
+		Scope:  projects.Scope{Flag: q.Get("project"), Cwd: q.Get("path"), Host: q.Get("host")},
+		Item:   q.Get("item"),
+		Reader: kcontext.Reader{Level: p.Caller.Level, Principal: p.Caller.Actor.Principal, Run: p.Caller.Actor.Run}}
 	if req.Scope.Cwd != "" && req.Scope.Host == "" {
 		return invalid("host is required with path", "send the machine's host name")
 	}
@@ -55,8 +57,13 @@ func (h *handlers) context(w http.ResponseWriter, r *http.Request, p *core.Princ
 	case "", "project", "cwd":
 	case "all":
 		req.All = true
+	case "item":
+		req.ItemScope = true
 	default:
-		return invalid("scope must be project, cwd or all", "use --scope project, cwd or all")
+		return invalid("scope must be project, cwd, item or all", "use --scope project, cwd, item or all")
+	}
+	if req.Item != "" && !req.ItemScope {
+		return invalid("item is only valid with scope=item", "add --scope item or remove --item")
 	}
 	if v := q.Get("instruction"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -72,7 +79,7 @@ func (h *handlers) context(w http.ResponseWriter, r *http.Request, p *core.Princ
 	var res kcontext.Result
 	run := func(tx *store.Tx) (err error) { res, err = kcontext.Build(tx, req); return }
 	var err error
-	if req.Session != "" { // 带会话时 Build 要推进游标，需要写事务
+	if req.Session != "" || req.ItemScope { // 要推进游标或挂靠消息，需要写事务
 		err = h.st.Update(r.Context(), run)
 	} else {
 		err = h.st.View(r.Context(), run)

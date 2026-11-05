@@ -274,7 +274,7 @@ func TestContextAmbiguousDirectoryConflictsAndScopeAll(t *testing.T) {
 	if o, r := k.ctx(nil, "--scope", "all", "--project", p1); r.code != 0 || !ids(o)[i1] {
 		t.Fatalf("scope all: %+v", r)
 	}
-	if _, r := k.ctx(nil, "--scope", "item"); r.code != 2 {
+	if _, r := k.ctx(nil, "--scope", "bogus"); r.code != 2 {
 		t.Fatalf("unsupported scope must exit 2: %+v", r)
 	}
 }

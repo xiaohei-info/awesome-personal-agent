@@ -217,10 +217,19 @@ func show(c *client.Ctx, args []string) error {
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
 		return usage("exactly one item id is required", "usage: apa item show <id>")
 	}
+	id := url.PathEscape(args[0])
 	var out map[string]any
-	if err := c.Do(bg, "GET", "/items/"+url.PathEscape(args[0]), nil, &out); err != nil {
+	if err := c.Do(bg, "GET", "/items/"+id, nil, &out); err != nil {
 		return err
 	}
+	// 挂靠消息另有路由，过滤在内核（§14.6）。
+	var msgs struct {
+		Messages json.RawMessage `json:"messages"`
+	}
+	if err := c.Do(bg, "GET", "/items/"+id+"/messages", nil, &msgs); err != nil {
+		return err
+	}
+	out["messages"] = msgs.Messages
 	return c.Print(out)
 }
 

@@ -70,8 +70,11 @@ type handlers struct {
 	st *store.Store
 }
 
-// readable：读事项对 observer 及以上开放；ext 与 webhook 凭据另有用途，不能读账本。
+// readable：读事项对 observer 及以上开放；ext 与 webhook 凭据另有用途，不能读账本，只有导出 ext 例外（§10.3）。
 func readable(p *core.Principal) error {
+	if auth.IsExportExt(p.Caller.Kind, p.Caller.Actor.Principal) {
+		return nil
+	}
 	if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
 		return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read items", "use an owner or agent credential")
 	}

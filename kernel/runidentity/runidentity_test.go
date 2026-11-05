@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -372,5 +373,88 @@ func TestEnv(t *testing.T) {
 	}
 	if _, ok := Env("u", "t", r, "")["APA_PROJECT"]; ok {
 		t.Fatal("empty project must not be injected")
+	}
+}
+
+// 唤醒运行的 id 换运行凭据（§13.6）：只认 worker、delegate token，只限未结束的唤醒运行，到期或再次换取后旧凭据失效，不留明文。
+func TestExchangeForWakeRun(t *testing.T) {
+	e := setup(t)
+	target := e.newItem(t, map[string]any{})
+	other := e.newItem(t, map[string]any{})
+	update := map[string]any{"id": target, "summary": "s"}
+	enqueue := func(launch, on string) (id string) {
+		t.Helper()
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			r, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Launch: launch, Target: on, TimeoutSec: 60},
+				Spec: proc.Spec{Command: []string{"true"}}}, now)
+			id = r.ID
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	exchange := func(kind auth.Kind, run string) (secret string, exp time.Time, err error) {
+		upErr := e.st.Update(bg, func(tx *store.Tx) error {
+			secret, exp, err = Exchange(tx, command.Caller{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "gateway", Via: domain.ViaCLI}, Kind: kind}, run, now)
+			return nil
+		})
+		if upErr != nil {
+			t.Fatal(upErr)
+		}
+		return secret, exp, err
+	}
+	run := enqueue(LaunchWake, target)
+
+	for _, k := range []auth.Kind{auth.Observer, auth.Ext, auth.Webhook, ""} {
+		if _, _, err := exchange(k, run); exitOf(err) != domain.ExitPermissionDenied {
+			t.Fatalf("kind %q: %v", k, err)
+		}
+	}
+	if _, _, err := exchange(auth.Worker, "run_none"); exitOf(err) != domain.ExitNotFound {
+		t.Fatalf("unknown run: %v", err)
+	}
+	if _, _, err := exchange(auth.Worker, enqueue("headless", other)); exitOf(err) != domain.ExitConflict {
+		t.Fatalf("headless run: %v", err)
+	}
+
+	first, exp, err := exchange(auth.Delegate, run)
+	if err != nil || !IsSecret(first) || !exp.Equal(now.Add(time.Minute)) {
+		t.Fatalf("exchange: %q %v %v", first, exp, err)
+	}
+	at := func(s string, when time.Time) command.Identity {
+		return Identity{Secret: s, Now: func() time.Time { return when }}
+	}
+	e.must(t, at(first, now), "item.update", update)
+	e.want(t, domain.ExitPermissionDenied, at(first, now), "item.update", map[string]any{"id": other, "summary": "s"})
+	e.want(t, domain.ExitUnauthenticated, at(first, exp), "item.update", update)
+
+	second, _, err := exchange(auth.Worker, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.want(t, domain.ExitUnauthenticated, at(first, now), "item.update", update)
+	e.must(t, at(second, now), "item.update", update)
+	if n := e.events(t, EvExchanged); n != 2 {
+		t.Fatalf("exchanged events: %d", n)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.Read(tx, 0, 1000)
+		for _, en := range es {
+			if en.Event.Type == EvExchanged && string(en.Event.Payload) != "" && strings.Contains(string(en.Event.Payload), prefix) {
+				t.Fatalf("secret in event: %s", en.Event.Payload)
+			}
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.st.Update(bg, func(tx *store.Tx) error { return proc.Settle(tx, run, domain.RunFailed, nil, "boom", now) }); err != nil {
+		t.Fatal(err)
+	}
+	e.want(t, domain.ExitUnauthenticated, at(second, now), "item.update", update)
+	if _, _, err := exchange(auth.Worker, run); exitOf(err) != domain.ExitConflict {
+		t.Fatalf("finished run: %v", err)
 	}
 }

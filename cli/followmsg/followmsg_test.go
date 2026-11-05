@@ -10,25 +10,34 @@ import (
 	"testing"
 	"time"
 
+	apicontext "github.com/xiaohei-info/awesome-personal-agent/api/context"
 	apidel "github.com/xiaohei-info/awesome-personal-agent/api/delegation"
 	apifm "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
+	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/context"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/delegation"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/followmsg"
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
 	kdel "github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
@@ -61,7 +70,7 @@ func newWorld(t *testing.T) *world {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		kitems.Module, executors.Module, kdel.Module, runner.Module, core.Module} {
+		kitems.Module, executors.Module, kdel.Module, runner.Module, delivery.Module, kcontext.Module, proc.Module, runidentity.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -85,7 +94,7 @@ func newWorld(t *testing.T) *world {
 		}
 	}
 	a := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apidel.Routes(x), apifm.Routes(x)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apidel.Routes(x), apifm.Routes(x), apiitems.Routes(x, st), apicontext.Routes(st)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,5 +277,258 @@ func TestReportAckCursorProcessesOnlyEarlierMessages(t *testing.T) {
 	}
 	if a, b := w.state(c1), w.state(c2); a != runner.AttachProcessed || b != runner.AttachPending {
 		t.Fatalf("c1=%s c2=%s", a, b)
+	}
+}
+
+// 落四条消息（ACT-FWD-01）：alice 已核实、bob 已核实、alice 未核实、无发送者；白名单只有 alice。返回 alice 已核实这条的 id。
+func (w *world) fourMessages(item string) string {
+	w.t.Helper()
+	var alice string
+	if err := w.st.Update(bg, func(tx *store.Tx) error {
+		for _, m := range []struct {
+			id, sender string
+			verified   bool
+		}{{"m1", "alice", true}, {"m2", "bob", true}, {"m3", "alice", false}, {"m4", "", false}} {
+			ev := domain.SourceEvent{ID: m.id, Type: "pr.comment", Subject: m.id, Detail: "body " + m.id, OccurredAt: time.Now(), Sender: m.sender, SenderVerified: m.verified}
+			if err := runner.AppendInternal(tx, src, ev); err != nil {
+				return err
+			}
+			es, err := runner.Events(tx, src.ID)
+			if err != nil {
+				return err
+			}
+			id := es[len(es)-1].ID
+			if m.id == "m1" {
+				alice = id
+			}
+			if err := runner.SetAttachState(tx, id, runner.AttachPending, item); err != nil {
+				return err
+			}
+		}
+		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test", func(p *policy.Policy) error {
+			p.ForwardAllowlist = map[string][]string{src.ID: {"alice"}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		w.t.Fatal(err)
+	}
+	return alice
+}
+
+func (w *world) markUnattended(item string) {
+	w.t.Helper()
+	if err := w.st.Update(bg, func(tx *store.Tx) error {
+		_, _, _, err := kitems.Revise(tx, item, "test", time.Now(), func(it *domain.Item) error { it.Unattended = true; return nil })
+		return err
+	}); err != nil {
+		w.t.Fatal(err)
+	}
+}
+
+func (w *world) runCredential(target string) string {
+	w.t.Helper()
+	var secret string
+	if err := w.st.Update(bg, func(tx *store.Tx) error {
+		r, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Target: target, TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, time.Now())
+		if err != nil {
+			return err
+		}
+		secret, err = runidentity.Issue(tx, r.ID, time.Now())
+		return err
+	}); err != nil {
+		w.t.Fatal(err)
+	}
+	return secret
+}
+
+// messages 经路由读挂靠消息，返回 HTTP 状态和消息主题。
+func (w *world) messages(token, item string) (int, []allowlist.Attached) {
+	w.t.Helper()
+	req, _ := http.NewRequest("GET", w.ts.URL+"/v1/items/"+item+"/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out struct{ Messages []allowlist.Attached }
+	_ = json.NewDecoder(res.Body).Decode(&out)
+	return res.StatusCode, out.Messages
+}
+
+func subjects(ms []allowlist.Attached) string {
+	var s []string
+	for _, m := range ms {
+		s = append(s, m.Subject)
+	}
+	return strings.Join(s, ",")
+}
+
+// flow-forward-allowlist / ACT-FWD-01、03、04：路由给全部字段，无人值守链路只给白名单内的，且读取不推进状态。
+func TestItemMessagesRouteFiltersUnattendedReaders(t *testing.T) {
+	w := newWorld(t)
+	wrk, dlg, obs := w.token(auth.Worker, workHost), w.token(auth.Delegate, ""), w.token(auth.Observer, "")
+	item := w.delegated(wrk)
+	alice := w.fourMessages(item)
+
+	code, ms := w.messages(obs, item)
+	if code != 200 || subjects(ms) != "m1,m2,m3,m4" {
+		t.Fatalf("attended item: %d %v", code, subjects(ms))
+	}
+	if !ms[0].ForwardAllowed || ms[1].ForwardAllowed || ms[2].ForwardAllowed || ms[3].ForwardAllowed {
+		t.Fatalf("forward_allowed: %+v", ms)
+	}
+	if m := ms[0]; m.Source != src.ID || m.Sender != "alice" || !m.SenderVerified || m.AttachState != runner.AttachPending || m.Detail != "body m1" {
+		t.Fatalf("fields: %+v", m)
+	}
+
+	w.markUnattended(item)
+	for _, tok := range []string{wrk, obs, w.runCredential(item)} {
+		if code, ms := w.messages(tok, item); code != 200 || subjects(ms) != "m1" {
+			t.Fatalf("filtered reader: %d %v", code, subjects(ms))
+		}
+	}
+	if _, ms := w.messages(dlg, item); subjects(ms) != "m1,m2,m3,m4" {
+		t.Fatalf("delegate: %v", subjects(ms))
+	}
+	if !allowlist.Filtered(authz.LevelRun, domain.Item{}) || allowlist.Filtered(authz.LevelWeb, domain.Item{ItemKernelState: domain.ItemKernelState{Unattended: true}}) {
+		t.Fatal("Filtered: run must filter, Web must not")
+	}
+	if w.state(alice) != runner.AttachPending {
+		t.Fatalf("read advanced state to %s", w.state(alice))
+	}
+
+	var ext string
+	if err := w.st.Update(bg, func(tx *store.Tx) (err error) {
+		_, ext, err = w.au.Issue(tx, auth.Spec{Kind: auth.Ext, Scope: "export"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := w.messages(ext, item); code != 403 {
+		t.Fatalf("ext: %d", code)
+	}
+	if code, _ := w.messages(obs, "itm_none"); code != 404 {
+		t.Fatalf("unknown item: %d", code)
+	}
+}
+
+// ACT-FWD-02、03、04：`apa context --scope item` 与 `apa item show` 同样过滤；只有负责者推进状态，
+// 回执确认不会把没见过的消息记成已处理，在场主会话的读取也不会。
+func TestContextScopeItemAndItemShowFilter(t *testing.T) {
+	w := newWorld(t)
+	wrk, dlg := w.token(auth.Worker, workHost), w.token(auth.Delegate, "")
+	item := w.delegated(wrk)
+	alice := w.fourMessages(item)
+	w.markUnattended(item)
+
+	type ctxOut struct {
+		Items    []struct{ ID string }
+		Messages []struct {
+			Item, Cursor string
+			Messages     []struct{ Subject string }
+		}
+	}
+	read := func(tok string, args ...string) ctxOut {
+		t.Helper()
+		r := w.apa(tok, append([]string{"context", "--scope", "item"}, args...)...)
+		var o ctxOut
+		if err := json.Unmarshal([]byte(r.out), &o); err != nil || r.code != 0 {
+			t.Fatalf("context: %+v", r)
+		}
+		return o
+	}
+	got := func(o ctxOut) string {
+		var s []string
+		for _, f := range o.Messages {
+			for _, m := range f.Messages {
+				s = append(s, m.Subject)
+			}
+		}
+		return strings.Join(s, ",")
+	}
+
+	// 在场主会话看到全部，但不推进状态，也拿不到确认游标。
+	o := read(dlg, "--item", item)
+	if got(o) != "m1,m2,m3,m4" || o.Messages[0].Cursor != "" || w.state(alice) != runner.AttachPending {
+		t.Fatalf("delegate: %+v state=%s", o, w.state(alice))
+	}
+	// 运行身份不用指定事项：取目标事项，只有白名单内的，并推进。
+	o = read(w.runCredential(item))
+	if got(o) != "m1" || len(o.Items) != 1 || o.Items[0].ID != item || o.Messages[0].Cursor == "" || w.state(alice) != runner.AttachForwarded {
+		t.Fatalf("run: %+v state=%s", o, w.state(alice))
+	}
+	// worker 不指定事项：取分配给自己的未关闭事项。
+	o = read(wrk)
+	if got(o) != "m1" || o.Messages[0].Item != item {
+		t.Fatalf("worker: %+v", o)
+	}
+	r := w.apa(wrk, "context", "--scope", "item", "--format", "inject")
+	if !strings.Contains(r.out, "事项 "+item+" 的跟进消息") || !strings.Contains(r.out, "body m1") || strings.Contains(r.out, "body m2") {
+		t.Fatalf("inject: %+v", r)
+	}
+	var bob, noSender string
+	if err := w.st.View(bg, func(tx *store.Tx) error {
+		as, err := runner.Attachments(tx, item)
+		for _, a := range as {
+			switch a.Subject {
+			case "m2":
+				bob = a.ID
+			case "m4":
+				noSender = a.ID
+			}
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := w.apa(wrk, "report", item, "--outcome", "progress", "--summary", "s", "--ack-cursor", o.Messages[0].Cursor); r.code != 0 {
+		t.Fatalf("report: %+v", r)
+	}
+	if w.state(alice) != runner.AttachProcessed || w.state(bob) != runner.AttachPending || w.state(noSender) != runner.AttachPending {
+		t.Fatalf("after ack: %s %s %s", w.state(alice), w.state(bob), w.state(noSender))
+	}
+
+	// item show 走同一过滤。
+	show := func(tok string) string {
+		t.Helper()
+		r := w.apa(tok, "item", "show", item)
+		var o struct{ Messages []allowlist.Attached }
+		if err := json.Unmarshal([]byte(r.out), &o); err != nil || r.code != 0 {
+			t.Fatalf("show: %+v", r)
+		}
+		return subjects(o.Messages)
+	}
+	if s := show(wrk); s != "m1" {
+		t.Fatalf("worker show: %s", s)
+	}
+	if s := show(dlg); s != "m1,m2,m3,m4" {
+		t.Fatalf("delegate show: %s", s)
+	}
+}
+
+// 普通作用域带会话时，新挂靠的消息随增量给出一次；白名单照样过滤。
+func TestSessionContextCarriesNewlyAttachedMessages(t *testing.T) {
+	w := newWorld(t)
+	w.delegated(w.token(auth.Worker, workHost))
+	session := func() string {
+		t.Helper()
+		r := w.apa(w.token(auth.Delegate, ""), "context", "--session", "s1", "--scope", "all", "--project", w.proj)
+		if r.code != 0 {
+			t.Fatalf("context: %+v", r)
+		}
+		return r.out
+	}
+	session() // 读掉委派本身的增量
+	id := w.message("m9")
+	if out := session(); !strings.Contains(out, "review m9") {
+		t.Fatalf("attached message missing: %s", out)
+	}
+	if out := session(); strings.Contains(out, "review m9") {
+		t.Fatalf("message repeated: %s", out)
+	}
+	if w.state(id) != runner.AttachPending {
+		t.Fatalf("main session read advanced state: %s", w.state(id))
 	}
 }
