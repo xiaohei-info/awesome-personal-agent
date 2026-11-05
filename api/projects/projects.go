@@ -13,6 +13,7 @@ import (
 	"net/http"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	kp "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -33,12 +34,22 @@ type api struct {
 func Routes(st *store.Store, x *command.Executor) core.RouteGroup {
 	a := &api{st, x}
 	return func(r *core.Router) {
-		r.Handle(core.Route{Method: "GET", Path: "/projects", Handler: a.list})
+		r.Handle(core.Route{Method: "GET", Path: "/projects", Handler: readable(a.list)})
 		r.Handle(core.Route{Method: "POST", Path: "/projects", Handler: a.create})
-		r.Handle(core.Route{Method: "GET", Path: "/projects/resolve", Handler: a.resolve})
-		r.Handle(core.Route{Method: "GET", Path: "/projects/{id}", Handler: a.get})
+		r.Handle(core.Route{Method: "GET", Path: "/projects/resolve", Handler: readable(a.resolve)})
+		r.Handle(core.Route{Method: "GET", Path: "/projects/{id}", Handler: readable(a.get)})
 		r.Handle(core.Route{Method: "PATCH", Path: "/projects/{id}", Handler: a.patch})
 		r.Handle(core.Route{Method: "POST", Path: "/projects/{id}/repos", Handler: a.repos})
+	}
+}
+
+// readable：读项目对 observer 及以上开放；ext 与 webhook 凭据另有用途，不能读账本（与 api/items 一致）。
+func readable(h core.Handler) core.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+		if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
+			return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read projects", "use an owner or agent credential")
+		}
+		return h(w, r, p)
 	}
 }
 

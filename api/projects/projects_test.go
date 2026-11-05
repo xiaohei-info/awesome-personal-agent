@@ -59,8 +59,12 @@ func setup(t *testing.T) *env {
 func (e *env) token(kind auth.Kind) string {
 	e.t.Helper()
 	var secret string
+	spec := auth.Spec{Kind: kind}
+	if kind == auth.Ext || kind == auth.Webhook {
+		spec.Scope = "src_1"
+	}
 	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
-		_, s, err := e.au.Issue(tx, auth.Spec{Kind: kind})
+		_, s, err := e.au.Issue(tx, spec)
 		secret = s
 		return err
 	}); err != nil {
@@ -349,5 +353,26 @@ func TestMethodsOutsideContractAreNotRouted(t *testing.T) {
 	dlg := e.token(auth.Delegate)
 	if r := e.do(dlg, "DELETE", "/v1/projects/prj_x", ""); r.Code != http.StatusNotFound && r.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("DELETE: %d", r.Code)
+	}
+}
+
+// ext 与 webhook 凭据另有用途，不能读项目账本（与 api/items 一致）。
+func TestExtAndWebhookCredentialsCannotReadProjects(t *testing.T) {
+	e := setup(t)
+	dlg := e.token(auth.Delegate)
+	id := e.create(dlg)
+	for _, kind := range []auth.Kind{auth.Ext, auth.Webhook} {
+		tok := e.token(kind)
+		for _, path := range []string{"/v1/projects", "/v1/projects/" + id, "/v1/projects/resolve?project=" + id} {
+			r := e.do(tok, "GET", path, "")
+			if r.Code != 403 || r.code() != "permission_denied" || strings.Contains(r.Body.String(), "Work") {
+				t.Fatalf("%s GET %s: %d %s", kind, path, r.Code, r.Body)
+			}
+		}
+	}
+	for _, kind := range []auth.Kind{auth.Observer, auth.Worker, auth.Delegate} {
+		if r := e.do(e.token(kind), "GET", "/v1/projects/"+id, ""); r.Code != 200 {
+			t.Fatalf("%s must still read: %d", kind, r.Code)
+		}
 	}
 }
