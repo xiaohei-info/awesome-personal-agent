@@ -1,0 +1,7 @@
+{"events":[
+ {"id":"a1","iCalUID":"uid-insurance@google.com","status":"confirmed","summary":"保险到期日","description":"续保前联系经纪人","location":"","htmlLink":"https://calendar.google.com/event?eid=a1","created":"2026-03-01T08:00:00.000Z","updated":"2026-03-01T08:00:00.000Z","start":{"date":"2026-03-20"},"end":{"date":"2026-03-21"},"organizer":{"email":"me@example.com"}},
+ {"id":"b1","iCalUID":"uid-dentist@google.com","status":"confirmed","summary":"牙医复诊","location":"市口腔医院","htmlLink":"https://calendar.google.com/event?eid=b1","created":"2026-03-01T09:00:00.000Z","updated":"2026-03-05T10:30:00.000Z","start":{"dateTime":"2026-03-12T09:30:00+08:00"},"end":{"dateTime":"2026-03-12T10:30:00+08:00"},"organizer":{"email":"clinic@example.com"}},
+ {"id":"c1_20260310T010000Z","iCalUID":"uid-weekly@google.com","status":"confirmed","summary":"周会","created":"2026-02-01T00:00:00.000Z","updated":"2026-02-01T00:00:00.000Z","start":{"dateTime":"2026-03-10T09:00:00+08:00"},"originalStartTime":{"dateTime":"2026-03-10T09:00:00+08:00"}},
+ {"id":"c1_20260317T010000Z","iCalUID":"uid-weekly@google.com","status":"confirmed","summary":"周会","created":"2026-02-01T00:00:00.000Z","updated":"2026-02-01T00:00:00.000Z","start":{"dateTime":"2026-03-17T09:00:00+08:00"},"originalStartTime":{"dateTime":"2026-03-17T09:00:00+08:00"}},
+ {"id":"d1","iCalUID":"uid-cancelled@google.com","status":"cancelled","summary":"取消的聚餐","created":"2026-03-02T00:00:00.000Z","updated":"2026-03-06T00:00:00.000Z","start":{"dateTime":"2026-03-14T19:00:00+08:00"}}
+]}
