@@ -297,22 +297,49 @@ func TestFailConfigurableBackoffAndWrongState(t *testing.T) {
 	wantCode(t, err, domain.CodeConflict)
 }
 
-// flow-delivery-control：无人领取转 fallback_web，投递不丢失；被领取过的不受影响。
-func TestSweepUnclaimedFallsBackToWeb(t *testing.T) {
-	e := newEnv(t, Options{UnclaimedAfter: 10 * time.Minute})
-	e.create("quiet", "i1", ch, 1)
-	e.create("taken", "i2", ch, 1)
-	e.update(func(tx *store.Tx) error { _, err := e.q.Claim(tx, ch); return err }) // 按创建顺序先领走 quiet
-	e.now = e.now.Add(11 * time.Minute)
+// flow-delivery-control：无人领取、以及领取后消费者一直不回报，最终都退回 Web 未读，投递不丢失。
+func TestSweepUnclaimedAndAbandonedFallBackToWeb(t *testing.T) {
+	e := newEnv(t, Options{UnclaimedAfter: 10 * time.Minute, Lease: time.Minute})
+	e.create("abandoned", "i1", ch, 1)
+	e.create("never", "i2", "channel:dead", 1)
+	e.create("delivered", "i3", ch, 1)
+	e.claim(ch) // abandoned：之后反复领取不回报
+	e.claim(ch) // delivered
+	e.ack("delivered", 1, "m")
+	for i := 0; i < 4; i++ { // 租约内的 claimed 不受影响
+		e.now = e.now.Add(2 * time.Minute)
+		e.update(func(tx *store.Tx) error { _, err := e.q.Sweep(tx); return err })
+		if e.get("abandoned").State != domain.DeliveryClaimed {
+			t.Fatalf("未满 UnclaimedAfter 不应转 fallback: %s", e.get("abandoned").State)
+		}
+		e.claim(ch)
+	}
+	e.now = e.now.Add(2 * time.Minute)
 	e.update(func(tx *store.Tx) error {
-		n, err := e.q.Sweep(tx)
-		if n != 1 || err != nil {
+		if n, err := e.q.Sweep(tx); n != 2 || err != nil {
 			t.Fatalf("n=%d err=%v", n, err)
 		}
 		return nil
 	})
-	if e.get("quiet").State != domain.DeliveryClaimed || e.get("taken").State != domain.DeliveryFallbackWeb {
-		t.Fatalf("%s %s", e.get("quiet").State, e.get("taken").State)
+	if e.get("abandoned").State != domain.DeliveryFallbackWeb || e.get("never").State != domain.DeliveryFallbackWeb ||
+		e.get("delivered").State != domain.DeliveryDelivered {
+		t.Fatalf("%s %s %s", e.get("abandoned").State, e.get("never").State, e.get("delivered").State)
+	}
+	var unread []domain.Delivery
+	e.view(func(tx *store.Tx) (err error) { unread, err = e.q.Unread(tx); return })
+	if len(unread) != 2 {
+		t.Fatalf("Web 未读: %+v", unread)
+	}
+}
+
+func TestAckAfterConfirmRecordsRef(t *testing.T) {
+	e := newEnv(t, Options{})
+	e.create("d1", "i1", ch, 1)
+	e.claim(ch)
+	confirm(e, "d1", 1)
+	d, r, err := e.ack("d1", 1, "m1")
+	if err != nil || r != Duplicate || d.ExternalRef != "m1" || e.get("d1").ExternalRef != "m1" {
+		t.Fatalf("%+v %v %v", d, r, err)
 	}
 }
 

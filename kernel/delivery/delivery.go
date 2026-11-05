@@ -271,6 +271,13 @@ func (q *Queue) Ack(tx *store.Tx, id string, version int64, externalRef string) 
 	}
 	switch d.State {
 	case domain.DeliveryDelivered, domain.DeliveryAcknowledged:
+		if d.ExternalRef == "" { // 本人先确认、ext 后回报：消息确已发出，补记 ref
+			if _, err := tx.Exec("UPDATE delivery_delivery SET external_ref = ? WHERE id = ?", externalRef, id); err != nil {
+				return d, Applied, err
+			}
+			d.ExternalRef = externalRef
+			return d, Duplicate, nil
+		}
 		if d.ExternalRef != externalRef {
 			return d, Applied, conflict("delivery already delivered with a different external_ref")
 		}
@@ -339,10 +346,13 @@ func (q *Queue) Supersede(tx *store.Tx, item string, below int64) (int64, error)
 		WHERE item = ? AND version < ? AND state IN ('pending', 'claimed', 'delivered')`, item, below)
 }
 
-// Sweep 把无人领取的投递（创建超过 UnclaimedAfter 仍从未被领取）转 fallback_web，返回条数。
+// Sweep 把创建超过 UnclaimedAfter 仍未送达的投递转 fallback_web，返回条数：
+// 从未被领取的 pending，以及领取后租约过期仍不回报的 claimed（消费者崩溃）。
 func (q *Queue) Sweep(tx *store.Tx) (int64, error) {
-	return tx.Exec(`UPDATE delivery_delivery SET state = 'fallback_web', next_attempt_at = 0
-		WHERE state = 'pending' AND claims = 0 AND created_at <= ?`, ns(q.o.Now().Add(-q.o.UnclaimedAfter)))
+	now := ns(q.o.Now())
+	return tx.Exec(`UPDATE delivery_delivery SET state = 'fallback_web', next_attempt_at = 0, lease_until = 0
+		WHERE created_at <= ? AND ((state = 'pending' AND claims = 0) OR (state = 'claimed' AND lease_until <= ?))`,
+		ns(q.o.Now().Add(-q.o.UnclaimedAfter)), now)
 }
 
 // Inject 记录注入到某会话，只写 injections、不改状态；同一会话重复注入幂等。已作废或已确认的投递不可再注入。
