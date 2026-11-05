@@ -1,0 +1,3 @@
+kind: webhook
+description: 订阅事件，签名 POST 给外部系统（APA_WEBHOOK_URL），至少一次、退避重试，自持游标
+command: [go, run, .]
