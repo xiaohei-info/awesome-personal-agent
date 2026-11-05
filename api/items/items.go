@@ -18,6 +18,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -45,6 +46,22 @@ func Routes(x *command.Executor, st *store.Store) core.RouteGroup {
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/relations", Handler: h.write("item.relate", "from", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/revert", Handler: h.write("item.revert", "id", http.StatusOK)})
 	}
+}
+
+// ownerPrincipal 是本人的操作者标识（单用户系统，与 Web 会话的 Actor 一致）。
+const ownerPrincipal = "owner"
+
+// onBehalf 给 delegate 凭据的操作者补上 on_behalf_of：Bearer 认证只知道凭据，不知道替谁说话，
+// 而 delegate 动作（§14.3）要求声明替本人行事并附本人原话。认证与授权仍由命令管线在事务内完成。
+// shortcut: 单用户系统写死本人为 owner，引入多用户时改由凭据携带。
+type onBehalf struct{ command.Identity }
+
+func (o onBehalf) Authenticate(tx *store.Tx) (command.Caller, error) {
+	c, err := o.Identity.Authenticate(tx)
+	if err == nil && c.Level == authz.LevelDelegate && c.Actor.OnBehalfOf == "" {
+		c.Actor.OnBehalfOf = ownerPrincipal
+	}
+	return c, err
 }
 
 type handlers struct {
@@ -123,7 +140,7 @@ func (h *handlers) write(cmd, pathKey string, status int) core.Handler {
 		if err != nil {
 			return err
 		}
-		req := command.Request{Identity: p.Identity, Command: cmd, Input: in,
+		req := command.Request{Identity: onBehalf{p.Identity}, Command: cmd, Input: in,
 			IdemKey: r.Header.Get(IdempotencyHeader), Evidence: r.Header.Get(EvidenceHeader)}
 		if req.Evidence == "" {
 			_ = json.Unmarshal(body["evidence"], &req.Evidence)
