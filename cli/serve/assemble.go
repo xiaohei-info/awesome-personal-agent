@@ -68,9 +68,10 @@ const (
 	// maintainInterval 是后台补做的间隔：重试判断失败的待跟进和未处理的入站记录、清过期 payload、补派发。
 	maintainInterval = time.Minute
 	owner            = "owner"
-	// bundledPull 是随发行附带的拉取程序（sources/），delegate 可以登记。
-	bundledPull = "http-json"
 )
+
+// bundledPull 是随发行附带的拉取程序（sources/ 下走 §9.2 的），delegate 可以登记；托管型读取器不是来源，不在其中。
+var bundledPull = []string{"http-json", "dir-watch"}
 
 // hostOwner 是启动流程读主机配置文件时的身份：本人在主机上写的配置，与 Web 上的本人同级（§14.12）。
 var hostOwner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: owner, Via: domain.ViaWeb}, Level: authz.LevelWeb}
@@ -191,7 +192,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		delegation.Register(x, delegation.Options{Owner: owner, OnError: func(c command.Commit, err error) {
 			slog.Error("delegation settle", "object", c.Object, "err", err)
 		}}),
-		sregistry.Register(x, sregistry.Options{Bundled: []string{bundledPull}, Layout: l}),
+		sregistry.Register(x, sregistry.Options{Bundled: bundledPull, Layout: l}),
 		k.rn.Register(x),
 		k.in.Register(x),
 		fm.Register(x),
