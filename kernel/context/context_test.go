@@ -285,6 +285,29 @@ func TestProjectMappingAndScoping(t *testing.T) {
 		}
 	}
 
+	if r := e.build(t, Request{All: true, Scope: projects.Scope{Cwd: "/home", Host: "box"}}); !eq(ids(r), []string{io, oo, free}) || r.Project != nil {
+		t.Errorf("explicit all-scope sees every project, no project block: %v %+v", ids(r), r.Project)
+	}
+
+	// 同一会话换作用域：新作用域更早的变更不被旧作用域的游标漏掉；各作用域游标互不遮蔽。
+	scoped := func(id string) Request { return Request{Session: "sw", Scope: projects.Scope{Flag: id}} }
+	if r := e.build(t, scoped(outer)); !eq(ids(r), []string{oo}) || r.Project == nil {
+		t.Errorf("outer first read: %v", ids(r))
+	}
+	if r := e.build(t, scoped(inner)); !eq(ids(r), []string{io}) || r.Project == nil {
+		t.Errorf("switching scope starts that scope's own cursor: %v %+v", ids(r), r.Project)
+	}
+	if r := e.build(t, Request{Session: "sw", All: true}); !eq(ids(r), []string{io, oo, free}) {
+		t.Errorf("all-scope cursor is separate from scoped ones: %v", ids(r))
+	}
+	e.do(t, owner, "item.transition", map[string]any{"id": oo, "to": "done", "reason": "r"})
+	if r := e.build(t, scoped(inner)); len(r.Items) != 0 {
+		t.Errorf("inner repeat: other project's change must not appear: %v", ids(r))
+	}
+	if r := e.build(t, scoped(outer)); !eq(ids(r), []string{oo}) {
+		t.Errorf("outer repeat returns only the delta: %v", ids(r))
+	}
+
 	var de *domain.Error
 	err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := Build(tx, Request{Scope: projects.Scope{Flag: "prj_nope"}})
@@ -325,4 +348,32 @@ func TestProjectContextIsIncremental(t *testing.T) {
 	if r3.Project == nil || !strings.Contains(r3.Inject(), "允许的执行者：仅本人") {
 		t.Fatalf("project change must be resent: %+v", r3.Project)
 	}
+}
+
+// 跨项目视图里的 web_only 提示：即使 cwd 映射到另一个项目，别的项目里待 Web 确认的高风险决策也要提示。
+func TestAllScopeWebOnlyNoticeSpansProjects(t *testing.T) {
+	e := setup(t)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
+			p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Tag: "funds", Category: policy.CategoryFunds})
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := e.project(t, "A", "https://git.example/a.git", "box", "/w/a")
+	b := e.project(t, "B", "https://git.example/b.git", "box", "/w/b")
+	risky := e.item(t, map[string]any{"title": "risky", "project": b, "assignee": "wrk", "tags": []string{"funds"}})
+	e.do(t, worker, "decision.request", map[string]any{"id": risky, "ask": map[string]any{"question": "go?", "options": []map[string]any{{"id": "A", "label": "y"}}}})
+	cwdA := projects.Scope{Cwd: "/w/a", Host: "box"}
+
+	if r := e.build(t, Request{Scope: cwdA}); r.WebOnlyPending || len(r.Items) != 0 {
+		t.Fatalf("scoped to A: B's decision is out of scope: %+v", r)
+	}
+	r := e.build(t, Request{All: true, Scope: cwdA})
+	if !eq(ids(r), []string{risky}) || !r.WebOnlyPending || !strings.Contains(r.Inject(), webOnlyNotice) {
+		t.Fatalf("all-scope lists B's decision, so the notice must be given: %+v", r)
+	}
+	_ = a
 }

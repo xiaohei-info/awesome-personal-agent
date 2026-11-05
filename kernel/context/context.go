@@ -233,7 +233,11 @@ func action(it domain.Item, pol policy.Policy) string {
 }
 
 func webOnlyPending(tx *store.Tx, project string, all bool, pol policy.Policy) (bool, error) {
-	open, err := items.List(tx, items.Filter{Phase: domain.PhaseNeedsInput, Project: project})
+	f := items.Filter{Phase: domain.PhaseNeedsInput, Project: project}
+	if all {
+		f.Project = ""
+	}
+	open, err := items.List(tx, f)
 	if err != nil {
 		return false, err
 	}
