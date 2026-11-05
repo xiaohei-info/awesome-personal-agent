@@ -258,7 +258,7 @@ func checkExecutor(r Request) Decision {
 // WebOnly 按策略判断决策是否属于 web_only（§14.4）：规则按 kind、tag、项目匹配（非空字段须全部满足），
 // 或对象类别在策略的 web_only 类别内，或初筛已升级。只升不降。
 func WebOnly(p policy.Policy, o Object) bool {
-	if o.ScreenedWebOnly || (o.Category != "" && contains(p.WebOnly.Categories, o.Category)) {
+	if o.ScreenedWebOnly || o.Category == domain.RiskClassWebOnly || (o.Category != "" && contains(p.WebOnly.Categories, o.Category)) {
 		return true
 	}
 	for _, rule := range p.WebOnly.Rules {
