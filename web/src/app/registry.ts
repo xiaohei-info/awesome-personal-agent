@@ -1,0 +1,26 @@
+import type { ReactNode } from "react";
+
+// 页面按 web/src/features/<名称>/index.ts(x) 注册：导出 `feature`。新增页面只加目录，不改中心路由表。
+export interface Feature {
+  id: string;
+  title: string;
+  /** 相对根的路径，如 "decisions"。 */
+  path: string;
+  /** 导航排序，小的在前；默认 100。 */
+  order?: number;
+  element: ReactNode;
+}
+
+export function collectFeatures(modules: Record<string, { feature?: Feature }>): Feature[] {
+  const out = Object.values(modules).flatMap((m) => (m.feature ? [m.feature] : []));
+  const ids = new Set<string>();
+  for (const f of out) {
+    if (ids.has(f.id)) throw new Error(`duplicate feature id: ${f.id}`);
+    ids.add(f.id);
+  }
+  return out.sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.id.localeCompare(b.id));
+}
+
+export const features: Feature[] = collectFeatures(
+  import.meta.glob<{ feature?: Feature }>("../features/*/index.{ts,tsx}", { eager: true }),
+);
