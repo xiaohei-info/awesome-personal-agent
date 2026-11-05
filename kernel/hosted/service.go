@@ -233,10 +233,10 @@ func (s *Service) OnResult(res proc.Result) {
 	switch {
 	case res.Run.State == domain.RunSucceeded && parsed && out.Commit != "":
 		v = View{Entry: e, Status: StatusReady, Content: out.Content, Commit: out.Commit, Branch: out.Branch}
-		ttl, refresh = s.opt.TTL, refreshIn{ID: id, Commit: out.Commit}
+		ttl, refresh = s.opt.TTL, refreshIn{ID: id, Commit: out.Commit, Path: e.Path}
 	case exit == exitPathMissing:
 		v.Reason = "path not found on the default branch"
-		refresh = refreshIn{ID: id, PathMissing: true}
+		refresh = refreshIn{ID: id, PathMissing: true, Path: e.Path}
 	default:
 		v.Reason = res.Reason
 		if parsed && out.Error != nil {

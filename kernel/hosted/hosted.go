@@ -139,6 +139,7 @@ type refreshIn struct {
 	ID          string `json:"id"`
 	Commit      string `json:"commit"`
 	PathMissing bool   `json:"path_missing"`
+	Path        string `json:"path,omitempty"` // 这次读取读的路径；登记已被修正时结果作废，在事务内比对
 }
 
 type relocateIn struct {
@@ -267,6 +268,9 @@ func refresh() command.Spec {
 			if err != nil {
 				return nil, err
 			}
+			if v.Path != "" && v.Path != e.Path {
+				return Result{Material: e.Material.ID}, nil
+			}
 			if v.PathMissing {
 				return markMissing(c, e)
 			}
@@ -286,12 +290,20 @@ func refresh() command.Spec {
 
 // markMissing 在路径于默认分支消失时登记状态并生成 needs_input；上一条修正事项还在等本人时不重复生成。
 func markMissing(c *command.Ctx, e Entry) (any, error) {
-	if e.FixItem != "" {
-		if it, err := items.Get(c.Tx, e.FixItem); err != nil {
-			return nil, err
-		} else if it.Phase == domain.PhaseNeedsInput && it.Ask != nil && it.Ask.Resolution == nil {
+	if pending, err := fixPending(c, e); err != nil {
+		return nil, err
+	} else if pending {
+		if e.Missing {
 			return Result{Material: e.Material.ID, FixItem: e.FixItem}, nil
 		}
+		// 路径曾被读到又消失：沿用还在等本人的修正事项，但状态与事件要补上，索引才会重新渲染。
+		e.Missing = true
+		if _, err := c.Tx.Exec("UPDATE hosted_material SET missing = 1 WHERE material = ?", e.Material.ID); err != nil {
+			return nil, err
+		}
+		_, err := c.Emit(domain.Event{Type: domain.EvMaterialRevised, Object: e.Material.ID, Reason: "hosted path missing on default branch",
+			Payload: payload(e, map[string]any{"fix_item": e.FixItem})})
+		return Result{Material: e.Material.ID, FixItem: e.FixItem, Changed: true}, err
 	}
 	child := domain.Item{Phase: domain.PhaseNeedsInput, Kind: domain.KindTask, Priority: domain.PriorityNormal,
 		Title:   "托管文档路径已不存在：" + e.Material.Title,
@@ -322,6 +334,44 @@ func markMissing(c *command.Ctx, e Entry) (any, error) {
 	return Result{Material: e.Material.ID, FixItem: child.ID, Changed: true}, err
 }
 
+// fixPending 报告登记的修正事项是否还在等本人回答。
+func fixPending(c *command.Ctx, e Entry) (bool, error) {
+	if e.FixItem == "" {
+		return false, nil
+	}
+	it, err := items.Get(c.Tx, e.FixItem)
+	if err != nil {
+		return false, err
+	}
+	return it.Phase == domain.PhaseNeedsInput && it.Ask != nil && it.Ask.Resolution == nil, nil
+}
+
+// closeFix 在路径已被修正时收掉还在等本人的修正事项（经 items.Revise，同委派回收父事项的做法），并解除登记上的关联。
+func closeFix(c *command.Ctx, e Entry) error {
+	pending, err := fixPending(c, e)
+	if err != nil || e.FixItem == "" {
+		return err
+	}
+	if pending {
+		_, _, snap, err := items.Revise(c.Tx, e.FixItem, "material.relocate", c.Now(), func(it *domain.Item) error {
+			it.Phase = domain.PhaseDropped
+			it.Ask.Resolution = &domain.Resolution{ResolvedVia: "relocate", ResolvedAt: c.Now()}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := command.Bump(c.Tx, e.FixItem); err != nil {
+			return err
+		}
+		if _, err := c.Emit(domain.Event{Type: domain.EvItemPhaseChanged, Object: e.FixItem, Reason: "hosted path corrected", Payload: snap}); err != nil {
+			return err
+		}
+	}
+	_, err = c.Tx.Exec("UPDATE hosted_material SET fix_item = '' WHERE material = ?", e.Material.ID)
+	return err
+}
+
 func relocate() command.Spec {
 	parse := func(in json.RawMessage) (relocateIn, error) {
 		var v relocateIn
@@ -348,7 +398,10 @@ func relocate() command.Spec {
 				return nil, err
 			}
 			p, _ := cleanPath(v.Path)
-			e.Path, e.Commit, e.Missing = p, "", false
+			if err := closeFix(c, e); err != nil {
+				return nil, err
+			}
+			e.Path, e.Commit, e.Missing, e.FixItem = p, "", false, ""
 			e.Material.Location = e.Repo + ":" + p
 			// location 属 materials 的表，经它的导出写入口改；commit 待下次读取刷新。
 			if err := materials.SetLocation(c.Tx, e.Material.ID, e.Material.Location); err != nil {

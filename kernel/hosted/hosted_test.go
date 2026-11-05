@@ -493,6 +493,9 @@ func TestPathMissingCreatesNeedsInputThenRelocateRecovers(t *testing.T) {
 	// 本人修正路径：Missing 清除，下一次读取回到 ready。
 	e.must(t, e.as("WRK"), "material.relocate", map[string]any{"id": id, "path": "docs/arch.md"})
 	en = e.entry(t, id)
+	if n := len(e.needsInput(t)); n != 0 || en.FixItem != "" {
+		t.Fatalf("relocate must close the pending fix item: needs_input=%d fix=%q", n, en.FixItem)
+	}
 	if en.Missing || en.Path != "docs/arch.md" || en.Material.Location != r.remote+":docs/arch.md" {
 		t.Fatalf("after relocate: %+v", en)
 	}
@@ -640,5 +643,71 @@ func TestInFlightReadIsReused(t *testing.T) {
 	}
 	if n := e.runs(t); n != 1 {
 		t.Fatalf("want 1 queued reader run, got %d", n)
+	}
+}
+
+// 修正路径后再次消失：重新走完整流程（状态、事件、新的修正事项），不被旧事项吞掉。
+func TestPathDisappearsAgainAfterRelocate(t *testing.T) {
+	e := setup(t)
+	r := newRepo(t)
+	id := e.register(t, r, "docs/design.md")
+	r.push(t, "rm", func() { os.Remove(filepath.Join(r.work, "docs/design.md")) })
+	git(t, r.checkout, "fetch", "-q", "origin")
+	e.await(t, id, true)
+	first := e.entry(t, id).FixItem
+	if first == "" {
+		t.Fatal("no fix item")
+	}
+	r.push(t, "add", func() { os.WriteFile(filepath.Join(r.work, "docs/arch.md"), []byte("# a\n"), 0o644) })
+	git(t, r.checkout, "fetch", "-q", "origin")
+	e.must(t, e.as("WRK"), "material.relocate", map[string]any{"id": id, "path": "docs/arch.md"})
+	var closed domain.Item
+	e.st.View(bg, func(tx *store.Tx) (err error) { closed, err = items.Get(tx, first); return })
+	if closed.Phase != domain.PhaseDropped || closed.Ask.Resolution == nil || closed.Ask.Resolution.ResolvedVia != "relocate" {
+		t.Fatalf("old fix item: %+v", closed)
+	}
+	if v := e.await(t, id, true); v.Status != StatusReady {
+		t.Fatalf("relocated read: %+v", v)
+	}
+	r.push(t, "rm2", func() { os.Remove(filepath.Join(r.work, "docs/arch.md")) })
+	git(t, r.checkout, "fetch", "-q", "origin")
+	e.await(t, id, true)
+	en := e.entry(t, id)
+	its := e.needsInput(t)
+	if !en.Missing || len(its) != 1 || its[0].ID != en.FixItem || en.FixItem == first {
+		t.Fatalf("entry=%+v needs_input=%d", en, len(its))
+	}
+	var events int
+	for _, ev := range e.events(t, id) {
+		if ev.Type == domain.EvMaterialRevised && strings.Contains(string(ev.Payload), `"path_missing":true`) {
+			events++
+		}
+	}
+	if events != 2 {
+		t.Fatalf("want a path_missing event per disappearance, got %d", events)
+	}
+}
+
+// 路径被读到又消失而修正事项还在等本人：沿用该事项，但状态与事件补上。
+func TestPathReappearsThenDisappearsReusesPendingFix(t *testing.T) {
+	e := setup(t)
+	r := newRepo(t)
+	id := e.register(t, r, "docs/design.md")
+	hold := filepath.Join(r.work, "docs/design.md")
+	r.push(t, "rm", func() { os.Remove(hold) })
+	git(t, r.checkout, "fetch", "-q", "origin")
+	e.await(t, id, true)
+	fix := e.entry(t, id).FixItem
+	r.push(t, "back", func() { os.WriteFile(hold, []byte("# back\n"), 0o644) })
+	git(t, r.checkout, "fetch", "-q", "origin")
+	if v := e.await(t, id, true); v.Status != StatusReady || e.entry(t, id).Missing {
+		t.Fatalf("recovered read: %+v", v)
+	}
+	r.push(t, "rm again", func() { os.Remove(hold) })
+	git(t, r.checkout, "fetch", "-q", "origin")
+	e.await(t, id, true)
+	en := e.entry(t, id)
+	if !en.Missing || en.FixItem != fix || len(e.needsInput(t)) != 1 {
+		t.Fatalf("entry=%+v", en)
 	}
 }
