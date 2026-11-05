@@ -653,3 +653,22 @@ func SessionOf(tx *store.Tx, itemID string) (sessionID string, ok bool, err erro
 	}
 	return sessionID, true, nil
 }
+
+// Link 是某事项最近一次后台运行的关联：哪次运行、由哪个事项触发、会话 id（续接模块读它，§13.6）。
+type Link struct{ RunID, Item, SessionID string }
+
+// LastLink 返回某事项（触发事项或目标事项均可）最近一次后台运行的关联；没有则 ok 为假。
+func LastLink(tx *store.Tx, itemID string) (l Link, ok bool, err error) {
+	r, err := tx.Query(`SELECT run_id, item, session_id FROM background_run WHERE item = ? OR target = ? ORDER BY rowid DESC LIMIT 1`, itemID, itemID)
+	if err != nil {
+		return Link{}, false, err
+	}
+	defer r.Close()
+	if !r.Next() {
+		return Link{}, false, r.Err()
+	}
+	if err := r.Scan(&l.RunID, &l.Item, &l.SessionID); err != nil {
+		return Link{}, false, err
+	}
+	return l, true, nil
+}
