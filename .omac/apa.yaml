@@ -10597,7 +10597,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-env-baseline
-  worker: omac-worker-frontend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - test-doubles
   - cli-init-serve
@@ -10676,7 +10676,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-bootstrap
-  worker: omac-worker-frontend
+  worker: omac-worker-backend
   blocked_by:
   - cli-init-serve
   - web-shell
@@ -10746,7 +10746,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-ledger
-  worker: omac-worker-frontend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - web-items
   - cli-items
@@ -10848,7 +10848,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-decisions
-  worker: omac-worker-frontend
+  worker: omac-worker-backend
   blocked_by:
   - web-proposals
   - api-deliveries
@@ -10944,7 +10944,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-authz
-  worker: omac-worker-frontend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - authz-matrix-suite
   - web-settings-credentials
@@ -11108,7 +11108,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-automation
-  worker: omac-worker-frontend
+  worker: omac-worker-backend
   blocked_by:
   - cli-packs
   - kernel-pack-loader
@@ -11262,7 +11262,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-screening
-  worker: omac-worker-frontend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - api-screening-gates
   - web-decision-screening
@@ -11326,7 +11326,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-delivery
-  worker: omac-worker-frontend
+  worker: omac-worker-backend
   blocked_by:
   - api-deliveries
   - kernel-attention
@@ -11386,7 +11386,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-follow-up
-  worker: omac-worker-frontend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - pack-follow-up
   - e2e-env-baseline
@@ -11442,7 +11442,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-source-pull
-  worker: omac-worker-frontend
+  worker: omac-worker-backend
   blocked_by:
   - web-sources
   - kernel-source-runner
@@ -11532,7 +11532,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-webhook
-  worker: omac-worker-frontend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - web-sources
   - cli-sources
@@ -11600,7 +11600,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-followmsg-triage
-  worker: omac-worker-frontend
+  worker: omac-worker-backend
   blocked_by:
   - kernel-followmsg
   - cli-followmsg
@@ -11674,7 +11674,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-materials
-  worker: omac-worker-frontend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - cli-materials
   - web-materials
@@ -11826,7 +11826,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-channel-protocol
-  worker: omac-worker-frontend
+  worker: omac-worker-backend
   blocked_by:
   - api-deliveries
   - api-channel
@@ -11894,7 +11894,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-ops
-  worker: omac-worker-frontend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - web-sources
   - web-health
@@ -11984,7 +11984,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-bg-guards
-  worker: omac-worker-frontend
+  worker: omac-worker-backend
   blocked_by:
   - kernel-run-credentials
   - kernel-background
