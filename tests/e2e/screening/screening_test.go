@@ -11,7 +11,7 @@ import (
 // TestFlowScreening 对应验收文档 flow-screening（ACT-SCR-01..13）。子测试按验收顺序共用一套环境。
 //
 // ACT-SCR-05（运行凭据在初筛中仍返回 4）见 TestACTSCR05RunCredential：当前 apa serve 没有登记
-// start_background_run 动作，真实二进制拿不到运行凭据，该测试因此显式跳过并说明原因。
+// start_background_run 动作，真实二进制拿不到运行凭据，该测试因此失败（fail-closed）并说明原因。
 func TestFlowScreening(t *testing.T) {
 	f := setup(t)
 	var a string
