@@ -17,6 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -41,13 +42,22 @@ type env struct {
 	eng   *Engine
 	data  string
 	now   time.Time
+	rem   *fakeReminder
+}
+
+// fakeReminder 记录经触达的提醒；触达本身的静默、合并与去重在 kernel/attention 测试。
+type fakeReminder struct{ calls []string }
+
+func (f *fakeReminder) Remind(_ *store.Tx, it domain.Item, kind string, due time.Time, _, _ string) error {
+	f.calls = append(f.calls, kind+":"+it.ID+":"+due.Format(time.RFC3339))
+	return nil
 }
 
 // newEnv 用真实的存储、命令管线、事项中心、时钟与能力包加载器；包放在数据目录里，便于改内容后热加载。
 func newEnv(t *testing.T, files map[string]string, h map[string]Handler) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, instances.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +67,7 @@ func newEnv(t *testing.T, files map[string]string, h map[string]Handler) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	e := &env{t: t, st: st, now: t0, data: t.TempDir()}
+	e := &env{t: t, st: st, now: t0, data: t.TempDir(), rem: &fakeReminder{}}
 	e.x = command.New(st, func() time.Time { return e.now })
 	kinds := items.NewKinds()
 	for _, f := range []func(*command.Executor) error{projects.Register, Register, func(x *command.Executor) error { return items.Register(x, kinds) }} {
@@ -65,12 +75,20 @@ func newEnv(t *testing.T, files map[string]string, h map[string]Handler) *env {
 			t.Fatal(err)
 		}
 	}
-	if e.clk, err = clock.New(st, HandleTimer, func() time.Time { return e.now }); err != nil {
+	if e.clk, err = clock.New(st, func(tx *store.Tx, c clock.Command) error {
+		if instances.Owns(c) {
+			return instances.HandleTimer(tx, c)
+		}
+		return e.eng.HandleTimer(tx, c)
+	}, func() time.Time { return e.now }); err != nil {
 		t.Fatal(err)
 	}
 	e.loads = packs.New(packs.Options{Builtin: fstest.MapFS{}, DataDir: e.data, Kinds: kinds})
+	if err := instances.Register(e.x, e.loads); err != nil {
+		t.Fatal(err)
+	}
 	e.pack(files)
-	if e.eng, err = New(Options{Store: st, Exec: e.x, Packs: e.loads, Handlers: h, Owner: "owner", Now: func() time.Time { return e.now },
+	if e.eng, err = New(Options{Store: st, Exec: e.x, Packs: e.loads, Handlers: h, Owner: "owner", Now: func() time.Time { return e.now }, Reminder: e.rem,
 		OnError: func(err error) { t.Errorf("auto consume: %v", err) }}); err != nil {
 		t.Fatal(err)
 	}
@@ -609,6 +627,51 @@ event_rules:
 	if len(e.ofType(domain.EvHealthAlert)) != 0 {
 		t.Fatalf("alerts: %+v", e.ofType(domain.EvHealthAlert))
 	}
+
+	// 到期：规则模块接手，经触达对触发事项提醒一次，时钟不报错，一次性 Timer 随之清掉。
+	e.now = t0.Add(49 * time.Hour)
+	if n, err := e.clk.Tick(bg); err != nil || n != 1 {
+		t.Fatalf("tick = %d, %v", n, err)
+	}
+	if want := "rule:" + id + ":" + t0.Add(48*time.Hour).Format(time.RFC3339); len(e.rem.calls) != 1 || e.rem.calls[0] != want {
+		t.Fatalf("reminders = %v, want [%s]", e.rem.calls, want)
+	}
+	e.now = e.now.Add(time.Hour)
+	if n, err := e.clk.Tick(bg); err != nil || n != 0 || len(e.rem.calls) != 1 {
+		t.Fatalf("timer must fire once: tick = %d, %v, reminders %v", n, err, e.rem.calls)
+	}
+}
+
+// create_timer 的周期 Timer：事项结束后到期即撤销，不再提醒；proposed 事项不提醒。
+func TestRuleTimerStopsWhenItemEnds(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	id := e.newItem(map[string]any{})
+	mk := func() {
+		e.t.Helper()
+		e.must(delegate, "rule.create_timer", map[string]any{"target": id, "kind": "recur", "at": e.now.Add(time.Hour), "every": "1h"})
+	}
+	mk()
+	e.now = e.now.Add(90 * time.Minute)
+	if _, err := e.clk.Tick(bg); err != nil || len(e.rem.calls) != 0 {
+		t.Fatalf("proposed item must not be reminded: %v %v", err, e.rem.calls)
+	}
+	e.open(id)
+	e.now = e.now.Add(time.Hour)
+	if _, err := e.clk.Tick(bg); err != nil || len(e.rem.calls) != 1 {
+		t.Fatalf("open item reminded once per period: %v %v", err, e.rem.calls)
+	}
+	e.must(owner, "item.transition", map[string]any{"id": id, "to": "dropped", "reason": "done with it"})
+	e.now = e.now.Add(time.Hour)
+	if _, err := e.clk.Tick(bg); err != nil || len(e.rem.calls) != 1 {
+		t.Fatalf("ended item: %v %v", err, e.rem.calls)
+	}
+	e.now = e.now.Add(time.Hour)
+	if n, err := e.clk.Tick(bg); err != nil || n != 0 {
+		t.Fatalf("timer of an ended item must be cancelled: %d %v", n, err)
+	}
+	if _, err := e.do(delegate, "rule.create_timer", map[string]any{"target": "itm_nope", "kind": "remind", "at": e.now}); exit(err) != 5 {
+		t.Fatalf("timer on a missing item: %v", err)
+	}
 }
 
 // 条件只有相等与成员判断。
@@ -698,10 +761,73 @@ event_rules:
 	}
 }
 
+// 实例到期（附录 C.10、C.13）：instance.fired 由规则执行接手，按包的实例驱动时钟规则建 open 事项，
+// 后续动作以它为对象；不看模式。同一周期只一份（重处理同一事件不重复建），错过多个周期只补最近一次。
+func TestInstanceFiringRunsInstanceRulesOncePerPeriod(t *testing.T) {
+	files := map[string]string{"bf/pack.yaml": `name: bf
+version: 1.0.0
+description: brief
+instance_params:
+  type: object
+  required: [schedule]
+  properties:
+    schedule: {type: string}
+clock_rules:
+  - id: scheduled
+    type: recur
+    schedule: "{instance.schedule}"
+    do:
+      - action: create_item
+        kind: brief
+      - action: call_agent
+        prompt: write
+`, "bf/prompts/write.md": "---\nagent: task\n---\n写简报 {item_id}。\n"}
+	var calls []Call
+	e := newEnv(t, files, map[string]Handler{"call_agent": func(_ context.Context, c Call) error { calls = append(calls, c); return nil }})
+	var ins struct{ ID string }
+	_ = json.Unmarshal(e.must(owner, "instance.create", map[string]any{"pack": "bf", "params": map[string]any{"schedule": "24h"}}).Value, &ins)
+	briefs := func() []domain.Item {
+		var out []domain.Item
+		_ = e.st.View(bg, func(tx *store.Tx) (err error) { out, err = items.List(tx, items.Filter{Kind: "brief"}); return })
+		return out
+	}
+	fire := func(after time.Duration) {
+		e.t.Helper()
+		e.now = e.now.Add(after)
+		if _, err := e.clk.Tick(bg); err != nil {
+			e.t.Fatal(err)
+		}
+		if err := e.eng.Drain(bg); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	fire(24*time.Hour + time.Minute)
+	bs := briefs()
+	if len(calls) != 1 || len(bs) != 1 || !calls[0].Bound || calls[0].Item.ID != bs[0].ID || bs[0].Phase != domain.PhaseOpen ||
+		calls[0].Instance == nil || calls[0].Instance.ID != ins.ID || !calls[0].Instance.Due.Equal(t0.Add(24*time.Hour)) {
+		t.Fatalf("calls %+v briefs %+v", calls, bs)
+	}
+	fire(72 * time.Hour) // 错过两个周期：只补最近一次
+	if len(calls) != 2 || len(briefs()) != 2 {
+		t.Fatalf("missed periods: calls %d briefs %d", len(calls), len(briefs()))
+	}
+	// 重处理同一批事件（如崩溃后游标没推进）：事项按幂等键返回首次结果，不多建
+	if err := e.st.Update(bg, func(tx *store.Tx) error { _, err := tx.Exec(`UPDATE rules_cursor SET seq = 0`); return err }); err != nil {
+		t.Fatal(err)
+	}
+	fire(0)
+	if n := len(briefs()); n != 2 || calls[len(calls)-1].Item.ID != calls[1].Item.ID {
+		t.Fatalf("reprocessing duplicated the period: briefs %d", n)
+	}
+	if al := e.ofType(domain.EvHealthAlert); len(al) != 0 {
+		t.Fatalf("alerts: %+v", al)
+	}
+}
+
 func TestHandleTimerRejectsForeignTimers(t *testing.T) {
 	e := newEnv(t, nil, nil)
 	err := e.st.Update(bg, func(tx *store.Tx) error {
-		return HandleTimer(tx, clock.Command{TimerID: "due_x", Kind: domain.TimerDue, Target: "x"})
+		return e.eng.HandleTimer(tx, clock.Command{TimerID: "due_x", Kind: domain.TimerDue, Target: "x"})
 	})
 	if err == nil {
 		t.Fatal("foreign timer accepted")

@@ -48,7 +48,8 @@ func (f *fakePacks) List() []*packs.Pack { return []*packs.Pack{f.p} }
 
 type fakeSecrets struct{ keys [][]byte }
 
-func (f fakeSecrets) Secrets(string) ([][]byte, error) { return f.keys, nil }
+func (f fakeSecrets) Secrets(*store.Tx, string) ([][]byte, error) { return f.keys, nil }
+func (fakeSecrets) Keep(*store.Tx, string, string) error          { return nil }
 
 // failJudge：本测试里规则直接映射 kind，判断型不应被调用。
 type failJudge struct{ t *testing.T }

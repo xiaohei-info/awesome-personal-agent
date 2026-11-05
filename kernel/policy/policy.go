@@ -134,6 +134,8 @@ type Policy struct {
 	ForwardAllowlist map[string][]string `json:"forward_allowlist"`
 	ChannelAnswerers map[string][]string `json:"channel_answerers"`
 	Channels         map[string]Channel  `json:"channels"`
+	// DefaultHarness 是规则未指定 harness 时任务型与后台运行用的 harness（§13.6）；为空表示未设置，任务型转 needs_input。
+	DefaultHarness string `json:"default_harness"`
 }
 
 // Default 是版本 0 的配置：默认类别、权限上限 read、人格与白名单为空。

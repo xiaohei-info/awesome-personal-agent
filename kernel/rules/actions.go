@@ -78,9 +78,27 @@ func (e *Engine) addTag(ctx context.Context, c Call) error {
 // createItem 建一个提议阶段的事项（由本人接受后才进入工作），项目取自触发事项。
 // 动作只有 kind、assignee、parent 三个字段：标题取触发事项的标题（时钟规则取规则键）；
 // parent 为 "trigger" 表示以触发事项为父，否则是事项 id。assignee 过项目允许的执行者校验。
+// 实例驱动的规则例外：事项直接 open，项目取实例的项目，并成为后续动作的对象（附录 C.13，本人建实例即已同意）。
 func (e *Engine) createItem(_ context.Context, c Call) error {
 	title := c.Rule
 	in := map[string]any{"kind": str(c.Action, "kind"), "reason": "rule " + c.Rule}
+	if f := c.Instance; f != nil && c.Item == nil {
+		in["phase"], in["title"] = domain.PhaseOpen, f.Pack+" "+f.Due.UTC().Format("2006-01-02 15:04")
+		if f.Project != "" {
+			in["project"] = f.Project
+		}
+		res, err := c.Do("item.create", in)
+		if err != nil {
+			return err
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(res.Value, &out); err != nil {
+			return err
+		}
+		return c.bind(out.ID)
+	}
 	if c.Item != nil {
 		title = c.Item.Title
 		if c.Item.Project != "" {
@@ -116,13 +134,12 @@ func (e *Engine) createItem(_ context.Context, c Call) error {
 }
 
 // createTimer：after（时长）或 at（RFC 3339）建一次性提醒，schedule（固定间隔）建周期 Timer。
-// Timer 的目标是触发事项；时钟规则没有事项时目标是规则自己。
+// Timer 的目标是触发事项，到期经触达提醒（HandleTimer）；时钟规则没有触发事项，不能用这个动作。
 func (e *Engine) createTimer(_ context.Context, c Call) error {
-	target := objectOf(c.Rule)
-	if c.Item != nil {
-		target = c.Item.ID
+	if c.Item == nil {
+		return invalid("create_timer needs a triggering item, but this rule has none")
 	}
-	in := timerIn{Target: target, Kind: "remind", Reason: "rule " + c.Rule}
+	in := timerIn{Target: c.Item.ID, Kind: "remind", Reason: "rule " + c.Rule}
 	switch {
 	case str(c.Action, "after") != "":
 		d, err := time.ParseDuration(str(c.Action, "after"))

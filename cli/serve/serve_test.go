@@ -532,6 +532,89 @@ func declaresRouteGroup(f *ast.File) bool {
 	return found
 }
 
+// TestEveryStoreModuleIsRegistered 扫描 kernel/ 与 api/：声明了包级 `var Module = store.Module{...}` 的包，
+// 必须在 registry() 里登记。漏登记的模块没有建表，第一次写它的表时才失败（如只能发文字的渠道上的表单令牌）。
+func TestEveryStoreModuleIsRegistered(t *testing.T) {
+	const module = "github.com/xiaohei-info/awesome-personal-agent/"
+	fset := token.NewFileSet()
+	pf, err := parser.ParseFile(fset, "serve.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := map[string]string{} // 本文件里的包名 → 导入路径
+	for _, im := range pf.Imports {
+		p := strings.Trim(im.Path.Value, `"`)
+		name := path.Base(p)
+		if im.Name != nil {
+			name = im.Name.Name
+		}
+		alias[name] = p
+	}
+	registered := map[string]bool{}
+	for _, d := range pf.Decls {
+		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == "registry" {
+			ast.Inspect(fd, func(n ast.Node) bool {
+				if s, ok := n.(*ast.SelectorExpr); ok && s.Sel.Name == "Module" {
+					if x, ok := s.X.(*ast.Ident); ok {
+						registered[alias[x.Name]] = true
+					}
+				}
+				return true
+			})
+		}
+	}
+	declared := 0
+	for _, root := range []string{"../../kernel", "../../api"} {
+		err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+				return err
+			}
+			f, err := parser.ParseFile(fset, p, nil, 0)
+			if err != nil {
+				return err
+			}
+			if !declaresStoreModule(f) {
+				return nil
+			}
+			declared++
+			rel, _ := filepath.Rel("../..", filepath.Dir(p))
+			if pkg := module + filepath.ToSlash(rel); !registered[pkg] {
+				t.Errorf("%s declares a store module but cli/serve registry() does not register it", rel)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if declared == 0 {
+		t.Fatal("found no store modules; the scan is broken")
+	}
+}
+
+func declaresStoreModule(f *ast.File) bool {
+	for _, d := range f.Decls {
+		g, ok := d.(*ast.GenDecl)
+		if !ok || g.Tok != token.VAR {
+			continue
+		}
+		for _, sp := range g.Specs {
+			vs := sp.(*ast.ValueSpec)
+			for i, n := range vs.Names {
+				if n.Name != "Module" || i >= len(vs.Values) {
+					continue
+				}
+				if cl, ok := vs.Values[i].(*ast.CompositeLit); ok {
+					if s, ok := cl.Type.(*ast.SelectorExpr); ok && s.Sel.Name == "Module" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 // session 是 Web 登录后的客户端。
 type session struct {
 	t      *testing.T
@@ -578,7 +661,7 @@ func (s *session) do(method, p, body string) (int, string) {
 }
 
 // ACT-CMD-04（主机配置文件一路）：主机文件登记的脚本来源被时钟调度、经调度器拉起、事件走到入站流水线；
-// 声明文件直接生效；重启后重复登记不出错。同时跑一个实例定时：任何 Timer 分派错模块都会记 error，这里一条都不许有。
+// 声明文件直接生效；重启后重复登记不出错。同时跑一个简报实例：到期要走到任务型；任何 Timer 分派错模块都会记 error，这里一条都不许有。
 func TestServeLoadsHostFilesAndRunsKernelServices(t *testing.T) {
 	var logs bytes.Buffer
 	prev := slog.Default()
@@ -629,6 +712,17 @@ echo '{"cursor":"c1"}'
 	}
 	if code, body := s.do("GET", "/packs", ""); code != 200 || !strings.Contains(body, "inbound-triage") {
 		t.Fatalf("builtin packs not loaded: %d %s", code, body)
+	}
+	// 实例到期 → instance.fired → 规则执行建 brief 事项 → 任务型。没有设默认 harness，所以转 needs_input 交本人（§8.7）。
+	for {
+		code, body := s.do("GET", "/items?kind=brief", "")
+		if code == 200 && strings.Contains(body, `"phase":"needs_input"`) && strings.Contains(body, "默认 harness") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("instance firing never reached the task agent: %d %s; logs: %s", code, body, logs.String())
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	time.Sleep(2 * clockTicks) // 让实例与来源的 Timer 再各到期一次
 	stop()

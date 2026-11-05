@@ -119,7 +119,10 @@ type Task struct {
 	Project  string // 目标事项所属项目，可空
 	Parent   string // 目标事项的父事项，可空
 	From     string // 链路深度继承自哪个对象，可空表示新链路
-	// Harness 只来自规则与 Web 设置，不来自事件内容（§14.10）。
+	// Target 是已建好的目标事项（执行者须已是内核身份，见 CallAgent）；为空时由 Launch 新建。
+	// 给出时 Title、Project、Parent 不再使用；这个事项有过运行就不再拉起（同一触发只拉起一次）。
+	Target string
+	// Harness 只来自规则与 Web 设置，不来自事件内容（§14.10）；为空时用 Web 设置的默认 harness。
 	Harness   string
 	Materials []Material
 	Messages  []Message
@@ -156,8 +159,8 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	if !ok || pr.Meta.Agent != "task" {
 		return Outcome{}, fmt.Errorf("%w: %s/%s is not a task template", ErrBadTemplate, t.Pack, t.Template)
 	}
-	if strings.TrimSpace(t.Title) == "" || t.Harness == "" {
-		return Outcome{}, invalid("title and harness are required")
+	if t.Target == "" && strings.TrimSpace(t.Title) == "" {
+		return Outcome{}, invalid("title is required")
 	}
 	access := pr.Meta.Access
 	if access == "" {
@@ -173,33 +176,54 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	}
 
 	var hl executors.Headless
-	var declared, forwarded bool
+	var declared, forwarded, ran bool
 	var pol policy.Policy
 	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) {
-		if hl, declared, err = executors.ActiveHeadless(tx, t.Harness); err != nil {
+		if _, pol, err = policy.Current(tx); err != nil {
 			return err
 		}
-		_, pol, err = policy.Current(tx)
+		if t.Harness == "" {
+			t.Harness = pol.DefaultHarness
+		}
+		if t.Target != "" {
+			it, err := items.Get(tx, t.Target)
+			if err != nil {
+				return err
+			}
+			t.Title, t.Project = it.Title, it.Project
+			if ran, err = proc.HasRun(tx, t.Target); err != nil || ran {
+				return err
+			}
+		}
+		if t.Harness != "" {
+			hl, declared, err = executors.ActiveHeadless(tx, t.Harness)
+		}
 		return err
 	})
-	if err != nil {
-		return Outcome{}, err
+	if err != nil || ran {
+		return Outcome{Item: t.Target}, err
 	}
 	forwarded = true
 	for _, m := range t.Messages {
 		forwarded = forwarded && authz.ForwardAllowed(pol, m.Source, m.Sender, m.Verified)
 	}
 
-	itemID, err := s.createTarget(ctx, t)
-	if err != nil {
-		return Outcome{}, err
+	itemID := t.Target
+	if itemID == "" {
+		if itemID, err = s.createTarget(ctx, t); err != nil {
+			return Outcome{}, err
+		}
 	}
 	out := Outcome{Item: itemID}
 	switch {
+	case t.Harness == "":
+		out.Reason = "规则没有指定 harness，Web 设置里也没有默认 harness"
 	case !declared:
 		out.Reason = "没有已确认的无头运行声明：" + t.Harness
 	case !hasTier(hl, access):
 		out.Reason = "无头运行声明未提供权限档位：" + access
+	case !withinCap(pol, t.Harness, access):
+		out.Reason = "权限档位 " + access + " 超过 Web 设置的上限"
 	case !forwarded:
 		out.Reason = "输入含未进转发白名单的挂靠消息，不交给任务型"
 	}
@@ -246,6 +270,17 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 }
 
 func hasTier(h executors.Headless, tier string) bool { _, ok := h.Access[tier]; return ok }
+
+var tierRank = map[string]int{policy.PermRead: 1, policy.PermEdit: 2, policy.PermFull: 3}
+
+// withinCap：档位不超过本人在 Web 按 harness 设的上限，未按 harness 设置的用默认上限（§13.6）。
+func withinCap(pol policy.Policy, harness, tier string) bool {
+	limit := pol.PermissionCap.ByHarness[harness]
+	if limit == "" {
+		limit = pol.PermissionCap.Default
+	}
+	return tierRank[tier] != 0 && tierRank[tier] <= tierRank[limit]
+}
 
 // expand 对每个元素做单遍占位符替换；被替换进去的值不会再被扫描。
 func expand(in []string, pairs ...string) []string {

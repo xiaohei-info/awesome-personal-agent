@@ -43,6 +43,8 @@ func Default() Config {
 // Layout 是 <APA_HOME> 下的固定布局。
 type Layout struct {
 	Home, Config, Ledger, Blobs, Packs, Sources, Runs, RunCredentials, Logs string
+	// WebhookKeys 保管 HMAC 方案的 webhook 接收密钥明文（§14.2），每个来源一个文件。
+	WebhookKeys string
 	// HostSources 与 HostDeclarations 是本人在主机上写的登记（§14.12）；apa serve 启动时读取，不存在就跳过。
 	HostSources, HostDeclarations string
 }
@@ -51,7 +53,7 @@ func LayoutOf(home string) Layout {
 	j := func(n string) string { return filepath.Join(home, n) }
 	return Layout{Home: home, Config: j(configFile), Ledger: j("ledger.db"), Blobs: j("blobs"),
 		Packs: j("packs"), Sources: j("sources"), Runs: j("runs"),
-		RunCredentials: j("run-credentials"), Logs: j("logs"),
+		RunCredentials: j("run-credentials"), Logs: j("logs"), WebhookKeys: j("webhook-keys"),
 		HostSources: j("sources.json"), HostDeclarations: j("declarations")}
 }
 
@@ -60,13 +62,13 @@ func (l Layout) SourceDir(id string) string         { return filepath.Join(l.Sou
 func (l Layout) RunDir(id string) string            { return filepath.Join(l.Runs, id) }
 func (l Layout) RunCredentialFile(id string) string { return filepath.Join(l.RunCredentials, id) }
 
-// Ensure 幂等地建立目录；sources/ 与 run-credentials/ 含凭据，权限 0700。
+// Ensure 幂等地建立目录；sources/、run-credentials/、webhook-keys/ 含凭据，权限 0700。
 func (l Layout) Ensure() error {
 	dirs := []struct {
 		path string
 		mode os.FileMode
 	}{{l.Home, 0o755}, {l.Blobs, 0o755}, {l.Packs, 0o755}, {l.Runs, 0o755}, {l.Logs, 0o755},
-		{l.Sources, 0o700}, {l.RunCredentials, 0o700}}
+		{l.Sources, 0o700}, {l.RunCredentials, 0o700}, {l.WebhookKeys, 0o700}}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d.path, d.mode); err != nil {
 			return err

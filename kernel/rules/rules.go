@@ -11,6 +11,8 @@ package rules
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -46,6 +49,10 @@ const (
 	groupSource = "source_rules"
 	// timerPrefix 标识规则自己的周期 Timer（id = timerPrefix + 规则键的摘要）。
 	timerPrefix = "rule_"
+	// actionTimerPrefix 标识 create_timer 动作为触发事项建的 Timer（id = actionTimerPrefix + 随机串），到期经触达提醒。
+	actionTimerPrefix = "ruletm_"
+	// remindKind 是规则提醒在触达里的 kind：同一事项同一到期时刻只提醒一次。
+	remindKind = "rule"
 )
 
 // Module 是本模块在存储层登记的迁移：规则状态、事件游标、待执行的时钟规则。
@@ -231,12 +238,13 @@ func createTimer() command.Spec {
 			}
 			return authz.Object{ID: v.Target}, nil
 		},
-		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
 			if v.Target == "" || v.At.IsZero() || (v.Kind != "remind" && v.Kind != "recur") {
 				return invalid("create_timer needs a target, a time, and kind remind or recur")
 			}
-			return nil
+			_, err := items.Get(tx, v.Target) // 到期要提醒的是这个事项
+			return err
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
@@ -244,7 +252,11 @@ func createTimer() command.Spec {
 			if v.Kind == "recur" {
 				kind, every = domain.TimerRecur, v.Every
 			}
-			id, err := clock.Add(c.Tx, domain.Timer{Target: v.Target, Kind: kind, At: v.At, Recurrence: every})
+			b := make([]byte, 8)
+			if _, err := rand.Read(b); err != nil {
+				return nil, err
+			}
+			id, err := clock.Add(c.Tx, domain.Timer{ID: actionTimerPrefix + hex.EncodeToString(b), Target: v.Target, Kind: kind, At: v.At, Recurrence: every})
 			if err != nil {
 				return nil, err
 			}
@@ -398,18 +410,38 @@ func isNotFound(err error) bool {
 	return errors.As(err, &de) && de.Code == domain.CodeNotFound
 }
 
-// Owns 判断时钟交来的命令是否归本模块；组装处据它在处理器间分派。
+// Owns 判断时钟交来的命令是否归本模块：规则自己的周期 Timer，以及 create_timer 动作建的 Timer。组装处据它在处理器间分派。
 func Owns(c clock.Command) bool {
-	return c.Kind == domain.TimerRecur && strings.HasPrefix(c.TimerID, timerPrefix)
+	return (c.Kind == domain.TimerRecur && strings.HasPrefix(c.TimerID, timerPrefix)) || strings.HasPrefix(c.TimerID, actionTimerPrefix)
 }
 
-// HandleTimer 是时钟处理器里归规则的部分：周期 Timer 到期，只在同一事务里排一条待执行记录。
-// 动作要走命令模型（自己开写事务），不能在时钟的事务里嵌套执行；排好之后由 Engine.Drain 执行。
+// HandleTimer 是时钟处理器里归规则的部分，在时钟交来的事务里运行：
+//   - 规则自己的周期 Timer 到期，只排一条待执行记录。动作要走命令模型（自己开写事务），不能在时钟的事务里嵌套执行；
+//     排好之后由 Drain 执行。
+//   - create_timer 建的 Timer 到期，经触达对目标事项产出一条提醒（§7.3），受静默与合并约束，同一到期时刻只一次。
+//     事项是 proposed 时不提醒（§6.14）；事项已结束或已删除时撤销 Timer。
+//
 // 不是规则的 Timer 返回错误，由组装处分派给对应模块。
-func HandleTimer(tx *store.Tx, c clock.Command) error {
-	if !strings.HasPrefix(c.TimerID, timerPrefix) || c.Kind != domain.TimerRecur {
+func (e *Engine) HandleTimer(tx *store.Tx, c clock.Command) error {
+	if !Owns(c) {
 		return invalid("timer " + c.TimerID + " is not handled by the rules module")
 	}
-	_, err := tx.Exec(`INSERT INTO rules_fire (rule, due) VALUES (?, ?)`, c.Target, c.Due.UnixNano())
-	return err
+	if !strings.HasPrefix(c.TimerID, actionTimerPrefix) {
+		_, err := tx.Exec(`INSERT INTO rules_fire (rule, due) VALUES (?, ?)`, c.Target, c.Due.UnixNano())
+		return err
+	}
+	it, err := items.Get(tx, c.Target)
+	if isNotFound(err) || (err == nil && (it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped)) {
+		if err := clock.Cancel(tx, c.TimerID); err != nil && !isNotFound(err) {
+			return err
+		}
+		return nil
+	}
+	if err != nil || it.Phase == domain.PhaseProposed {
+		return err
+	}
+	if e.o.Reminder == nil {
+		return errors.New("rules: a create_timer timer fired but no Reminder is configured")
+	}
+	return e.o.Reminder.Remind(tx, it, remindKind, c.Due, "提醒："+it.Title, "规则设定的提醒时间已到")
 }
