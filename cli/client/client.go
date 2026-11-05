@@ -107,6 +107,11 @@ func exitOf(err error) int {
 	return domain.ExitUnclassified
 }
 
+// ExitStatus 让命令在成功输出之后仍以非零退出码结束（如 agents check 的 10、11）；它不是错误体，Main 不向 stderr 写任何东西。
+type ExitStatus int
+
+func (e ExitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+
 // Main 运行 CLI 并返回退出码。成功输出到 stdout，错误体（code/why/next）输出到 stderr。
 func Main(args []string, env Env) int {
 	c := &Ctx{Env: env}
@@ -121,6 +126,10 @@ func Main(args []string, env Env) int {
 	err := c.dispatch(rest)
 	if err == nil {
 		return domain.ExitOK
+	}
+	var xs ExitStatus
+	if errors.As(err, &xs) {
+		return int(xs)
 	}
 	var de *domain.Error
 	if !errors.As(err, &de) {
