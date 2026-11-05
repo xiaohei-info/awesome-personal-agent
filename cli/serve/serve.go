@@ -28,12 +28,15 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/guideline"
 	kprojects "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -46,7 +49,8 @@ func registry() (*store.Registry, error) {
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, runidentity.Module,
 		kprojects.Module, clock.Module, kitems.Module, core.Module, kcontext.Module, delegation.Module, executors.Module,
 		delivery.Module, attention.Module, proc.Module, direct.Module, task.Module, followup.Module, rules.Module,
-		instances.Module, sregistry.Module, runner.Module, webhook.Module, channel.Module} {
+		instances.Module, sregistry.Module, runner.Module, webhook.Module, channel.Module,
+		materials.Module, search.Module, guideline.Module} {
 		if err := reg.Register(m); err != nil {
 			return nil, err
 		}
