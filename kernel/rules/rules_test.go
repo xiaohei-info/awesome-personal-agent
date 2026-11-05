@@ -13,10 +13,13 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/health"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -57,7 +60,7 @@ func (f *fakeReminder) Remind(_ *store.Tx, it domain.Item, kind string, due time
 func newEnv(t *testing.T, files map[string]string, h map[string]Handler) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, instances.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, instances.Module, delivery.Module, chain.Module, health.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -369,7 +372,23 @@ func TestRuleActionEventsDoNotRetriggerRules(t *testing.T) {
 	}
 }
 
-// ACT-RULE-07：规则内容变化回到 observe，产出健康类事件；再次触发只记录。
+// healthDeliveries 跑一遍健康告警的投递产出，返回当前全部健康类投递。
+func (e *env) healthDeliveries() []domain.Delivery {
+	e.t.Helper()
+	q := delivery.New(delivery.Options{Now: func() time.Time { return e.now }})
+	var out []domain.Delivery
+	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
+		if err = health.NewNotifier(q).Sync(tx); err == nil {
+			out, err = q.Unread(tx)
+		}
+		return
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return out
+}
+
+// ACT-RULE-07：规则内容变化回到 observe，产出健康类事件与一条健康类投递；再次触发只记录。
 func TestContentChangeFallsBackToObserve(t *testing.T) {
 	e := newEnv(t, map[string]string{"acc/pack.yaml": tagRule}, nil)
 	if err := e.setMode(owner, tagKey, ModeAuto); err != nil {
@@ -383,6 +402,9 @@ func TestContentChangeFallsBackToObserve(t *testing.T) {
 	alerts := e.ofType(domain.EvHealthAlert)
 	if len(alerts) != 1 || alerts[0].Basis == nil || alerts[0].Basis.RuleID != tagKey {
 		t.Fatalf("health alerts = %+v", alerts)
+	}
+	if ds := e.healthDeliveries(); len(ds) != 1 || ds[0].Class != domain.DeliveryHealth || ds[0].Item != alerts[0].Object {
+		t.Fatalf("health deliveries = %+v", ds)
 	}
 	id := e.newItem(map[string]any{"tags": []string{"acc-rule"}})
 	e.open(id)
@@ -480,6 +502,9 @@ func TestUnregisteredActionFailsLoudlyAndRegisteredOneRuns(t *testing.T) {
 	al := e.ofType(domain.EvHealthAlert)
 	if len(al) != 1 || !strings.Contains(al[0].Reason, "start_background_run") {
 		t.Fatalf("alerts = %+v", al)
+	}
+	if ds := e.healthDeliveries(); len(ds) != 1 {
+		t.Fatalf("health deliveries = %+v", ds)
 	}
 
 	var got Call

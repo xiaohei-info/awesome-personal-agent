@@ -468,7 +468,7 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 	var out Result
 	var value any
 	if depth > x.MaxChainDepth {
-		// 超阈值只记录不派发（健康类投递由触达模块据该事件产出）。
+		// 超阈值只记录不派发（健康类投递由 kernel/health 据该事件统一产出）。
 		if _, err := c.Emit(domain.Event{Type: domain.EvHealthAlert, Object: objectOrCommand(obj, spec),
 			Reason:  "chain depth exceeded",
 			Payload: mustJSON(map[string]any{"command": spec.Name, "chain_depth": depth, "threshold": x.MaxChainDepth})}); err != nil {
