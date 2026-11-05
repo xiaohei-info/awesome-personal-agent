@@ -100,6 +100,8 @@
 | 来源 | `GET/POST /sources`，`GET/PATCH /sources/{id}` | 来源登记 | observer 读，delegate 写；自定义命令只有 Web |
 | | `POST /sources/{id}/webhook` | 创建或轮换接收密钥 | delegate |
 | | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | observer、delegate |
+| | `GET /sources/{id}/events?disposition&after&limit` | 来源事件 | observer；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
+| | `POST /source-events/{id}/propose` | 把未判定事件转为建议 | Web 登录、delegate |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
 | 事件 | `GET /events?cursor=` | SSE 或长轮询 | observer、导出和转发 ext 密钥 |
 | 投递 | `GET /deliveries/next?wait=` | 长轮询领取；有租约 | 渠道 ext 密钥；网关插件 token（worker 及以上，只领唤醒类投递） |
@@ -116,6 +118,10 @@
 事项字段 `deadline`：`POST /items` 与 `PATCH /items/{id}` 可写，值为 RFC 3339 时间；`PATCH` 传 `null` 清除；`GET` 在已设置时返回。行为见主文档 §6.8。
 
 事项字段 `created_at`、`updated_at`：`GET /items` 与 `GET /items/{id}` 返回，值为 RFC 3339 时间，只读。`created_at` 是该事项首条事项事件的时间（委派子事项的首条是 `delegation.created`，其余是 `item.created`）；`updated_at` 是最后一条事项事件的时间，与 `version` 同步推进（含关系变更；`item.deadline_passed` 与 `command.rejected` 不算）。
+
+`GET /sources/{id}/events` 按落盘顺序返回 `{"events": [...], "next_after": 12}`。每条事件的字段见主文档 §6.10：`id`、`source_id`、`dedupe_key`、`type`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`correlation_keys`、`sender`、`sender_verified`、`disposition`、`item`、`attach_state`，其中 `item` 是挂靠或生成的事项 id。`disposition` 可选，取值 `pending`、`attached`、`proposed`、`ignored`、`unjudged`，其他值返回 400。`limit` 缺省 100，上限 500；还有下一页时才返回 `next_after`，作为下一次的 `after`。
+
+`POST /source-events/{id}/propose` 不带请求体，成功返回 200 与更新后的来源事件（`disposition` 为 `proposed`，`item` 为新事项 id），事件不是 `unjudged` 时返回 409，不存在时返回 404。事项阶段为 `proposed`，事项的 `item.created` 与来源事件的 `inbound.disposed` 都记调用者为操作者。
 
 `GET /packs` 的每个包带 `views`，键是视图文件名去掉 `.yaml`，值只是声明性配置（附录 C.8），不含提示词正文与模板；未声明的列表返回 `[]`，没有视图的包返回 `{}`：
 

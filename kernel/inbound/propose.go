@@ -1,0 +1,102 @@
+package inbound
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+)
+
+// CmdProposeUnjudged 把 unjudged 的来源事件记为 proposed（§5.6）。输入不带 item 时只过授权与状态校验，不写入。
+const CmdProposeUnjudged = "inbound.propose_unjudged"
+
+func registerPropose(x *command.Executor) error {
+	return x.Register(command.Spec{Name: CmdProposeUnjudged, Action: authz.ActionManageSource,
+		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, err := parseDispose(in)
+			return authz.Object{ID: v.Event}, err
+		},
+		Validate: func(tx *store.Tx, o authz.Object, _ json.RawMessage) error {
+			ev, err := runner.Event(tx, o.ID)
+			if err != nil {
+				return err
+			}
+			if ev.Disposition != domain.DispositionUnjudged {
+				return domain.NewError(domain.CodeConflict, "source event "+o.ID+" is "+string(ev.Disposition)+", not unjudged", "re-read the source event")
+			}
+			return nil
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			v, _ := parseDispose(c.Input)
+			if v.Item == "" {
+				return nil, nil
+			}
+			if err := runner.ProposeUnjudged(c.Tx, v.Event, v.Item); err != nil {
+				return nil, err
+			}
+			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": domain.DispositionProposed, "item": v.Item})
+			_, err := c.Emit(domain.Event{Type: EvDisposed, Object: v.Event, Reason: v.Reason, Payload: p})
+			return nil, err
+		}})
+}
+
+// ProposeUnjudged 以 id 的身份把未判定事件转为 proposed 事项，返回更新后的来源事件。kind 与项目沿用命中的规则，
+// 缺省 task、不归项目。事项与处置是两条命令：中途失败时事件仍是 unjudged，重试接回已建事项。
+func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, event string) (domain.SourceEvent, error) {
+	s.proposing.Lock()
+	defer s.proposing.Unlock()
+	// 先过授权：item.create 对任何凭据开放，放到后面会让被拒绝的调用者留下事项。
+	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, disposeIn{Event: event}, command.Chain{}); err != nil {
+		return domain.SourceEvent{}, err
+	}
+	var (
+		sn snapshot
+		ev domain.SourceEvent
+	)
+	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) {
+		if ev, err = runner.Event(tx, event); err != nil {
+			return err
+		}
+		return sn.loadFacts(tx)
+	})
+	if err != nil {
+		return ev, err
+	}
+	item, made := sn.made[event]
+	if !made {
+		if item, err = s.proposeItem(ctx, id, sn, ev); err != nil {
+			return ev, err
+		}
+	}
+	d := disposeIn{Event: event, Item: item, Reason: "manually proposed from the source page"}
+	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
+		return ev, err
+	}
+	err = s.o.Store.View(ctx, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, event); return })
+	return ev, err
+}
+
+func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snapshot, ev domain.SourceEvent) (string, error) {
+	src, err := sn.source(ev.SourceID)
+	if err != nil {
+		return "", err
+	}
+	m, err := s.match(src, ev)
+	if err != nil {
+		return "", err
+	}
+	project, err := s.project(sn, src, ev, m)
+	if err != nil {
+		return "", err
+	}
+	kind := defaultKind
+	if m != nil && m.rule.Kind != "" {
+		kind = domain.Kind(m.rule.Kind)
+	}
+	p := proposal{kind: kind, title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: "manually proposed from the source page"}
+	return s.createItem(ctx, id, "", src, ev, p, project)
+}
