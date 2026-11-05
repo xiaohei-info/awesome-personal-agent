@@ -16,6 +16,7 @@
 | `apa declare <文件>` | 提交插件声明（无头运行、执行者），本人在 Web 确认后生效 | worker | 4 |
 | **上下文** | | | |
 | `apa context [--session] [--scope project/cwd/item/all] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息 | observer | 3、7 |
+| `apa persona` | 读取当前人格，供插件在新会话开始时注入；未设定时输出为空 | observer | 3、7 |
 | `apa inbox` | 列出待决和建议；web_only 初筛未返回的决策请求不列出 | observer | |
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建 | observer | |
@@ -93,6 +94,7 @@
 | 规范 | `GET /agents-md?repo` | 取渲染结果 | observer |
 | | `POST /agents-md/check` | 上报文件 hash，返回三态 | observer |
 | 上下文 | `GET /context` | 账本增量投影 | observer |
+| | `GET /context/persona` | 当前人格，前面带内核固定声明 | observer |
 | | `POST /capture` | 提交对话增量；运行身份下不生效 | worker |
 | 插件声明 | `POST /declarations` | 提交无头运行声明与执行者，进 Web 待确认 | worker |
 | 来源 | `GET/POST /sources`，`GET/PATCH /sources/{id}` | 来源登记 | observer 读，delegate 写；自定义命令只有 Web |
@@ -108,7 +110,7 @@
 | 回放与健康 | `GET /why/{id}`，`GET /health` | 回放、健康视图 | observer |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
-| 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/purge` | 策略、凭据、白名单、名单、命令登记、声明确认、物理删除 | 只有 Web 登录 |
+| 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/purge` | 策略（含人格）、凭据、白名单、名单、命令登记、声明确认、物理删除 | 只有 Web 登录 |
 | 认证 | `POST /auth/login`、`/logout` | Web 会话 | |
 
 ## B.3 错误响应

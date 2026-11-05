@@ -6,21 +6,11 @@ APA 是架在 agent harness 之上的开源、自部署的一层。harness 指�
 
 Harness 很能干，但只在被调用时才动：任务跑完没人看，对方不回没人催，三个 session 同时等你拍板。它是一件冷冰冰的工具，要你替它记事、替它盯着。APA 给它补上主观能动性：了解你手上的事，有条不紊地安排和推进，重复的事按你批准的规则自己处理，只在需要你决定时才来问一个具体问题。
 
-所以 APA 不是对话工具，也不是开发工具。它要做的是你的个人助手，工作和生活里的事都归它跟，工具链和模型都不用换。
+所以 APA 不是对话工具，也不是开发工具。它是你的个人助手，工作和生活里的事都归它跟，工具链和模型都不用换。
 
 harness 管 agent 怎么把活干完，APA 管事情有没有人盯、什么时候该找你。
 
-*APA is an open-source, self-hosted layer on top of an agent harness. A harness is capable but passive: it only moves when called. APA gives it initiative, so it knows what you have on your plate, keeps things moving after the session ends, handles repeat work under rules you approved, and only interrupts you when a decision is really yours. The goal is a personal assistant, not another chat tool or developer tool. Design only for now; no code yet.*
-
-## 状态
-
-设计已定稿，尚无代码。下文的命令和行为都是设计，现在还不能安装使用。
-
-首版范围：
-
-- **harness**：只有 Hermes。接口按多 harness 设计，dsh、Claude Code、Codex CLI 及其他 harness 在 Hermes 端到端验证完成后接入。
-- **聊天渠道**：Telegram。
-- **来源**：GitHub、邮件、日历、RSS/Atom、通用 HTTP JSON、本地目录监视、webhook。
+*APA is an open-source, self-hosted layer on top of an agent harness. A harness is capable but passive: it only moves when called. APA gives it initiative, so it knows what you have on your plate, keeps things moving after the session ends, handles repeat work under rules you approved, and only interrupts you when a decision is really yours. It is a personal assistant, not another chat tool or developer tool.*
 
 ## 为什么需要 APA
 
@@ -53,7 +43,11 @@ APA 只提供这一样东西：不等你开口，它自己发现事情、记着�
 
 ### 风格与人格
 
-助手用什么语气和你说话，将来也许可以经插件体系调整，比如热情一些。这只是方向，设计里还没有定义，不算 APA 现有的能力。
+助手可以热情、有人味，也可以简洁克制，由你定。你在 Web 设置里写一段人格：语气、怎么称呼你、热情到什么程度、该说和不该说的话。
+
+之后在 harness 里每开一个新会话，APA 插件都会读取当前人格，放进系统提示词，这个 harness 的所有会话都保持这个人格。改了人格，下一个新会话生效。
+
+人格只改说话方式，不改判断。权限、高风险确认和其他内核规则都不受它影响，它也只能在 Web 上改。
 
 ## 主动的边界
 
@@ -71,8 +65,6 @@ APA 只提供这一样东西：不等你开口，它自己发现事情、记着�
 它们也有范围：APA 管的是经过它流转的事项和决定。工具级权限和主机隔离仍归 harness，agent 绕开 APA 直接调用工具时，APA 拦不住，所以 harness 自己的权限要照常配好。
 
 ## 接入之后的一天
-
-下面按设计推演，不是真实运行记录。
 
 - **08:00** 简报已经写好：昨晚哪些委派有了回执，今天什么到期，还有两件事等你决定。第一个会话开始时，摘要已经带到 agent 那里。
 - **11:00** 邮箱来了一封保险续保通知，GitHub 上来了一条新 Issue。两者筛过后进了建议流，没有提醒你。你空下来时看一眼，接受前者，丢弃后者。
@@ -102,7 +94,7 @@ APA 是独立的开源项目，与上述产品及其厂商没有关联。
 
 ## 适合谁
 
-**适合：** 已经在用 harness，想要一个能替你盯事、推进事情的个人助手，同时要保留工具链、模型选择和数据归属，也愿意自己部署的人。首版只支持 Hermes，在用其他 harness 的人要等相应插件接入。
+**适合：** 已经在用 harness，想要一个能替你盯事、推进事情的个人助手，同时要保留工具链、模型选择和数据归属，也愿意自己部署的人。插件按 harness 提供，当前提供 Hermes 插件。
 
 **不适合：**
 
@@ -119,7 +111,7 @@ APA 是独立的开源项目，与上述产品及其厂商没有关联。
 
 | 能力 | 做法 |
 |---|---|
-| 主动感知 | 来源程序定时拉取邮件、日历、Issue、RSS，外部系统也可经 webhook 推送。先按规则筛，规则判不了的交给模型，筛过的才成为建议 |
+| 主动感知 | 来源程序定时拉取邮件、日历、GitHub Issue、RSS/Atom 和通用 HTTP JSON，监视本地目录，外部系统也可经 webhook 推送。先按规则筛，规则判不了的交给模型，筛过的才成为建议 |
 | 主动跟进 | 时钟跑在 APA 服务里，不依赖任何会话在线。到期后判断该催、再等还是建议放弃；委派的回执回到原事项；定期生成简报 |
 | 了解工作现场 | 账本记着事项和决定，项目带材料和规范，策略写明什么算高风险、什么时候不打扰。这些内容在每次会话时按需带给 agent |
 | 一个工作台 | 工作、生活和日常事务进一本账。Web、CLI、已接入的 harness 和渠道看到同一份状态 |
@@ -149,13 +141,13 @@ APA 是独立的开源项目，与上述产品及其厂商没有关联。
 - **内核**：常驻服务，管账本、时钟、决策和提醒。它只改账本、只提供接口，不主动向外推送，自身也没有 agent loop。轻量判断直连你配置的模型端点，只做分类和生成摘要。
 - **Web 中台**：你的首要界面，处理决策待办、建议流、事项、项目和设置。
 - **CLI（`apa`）**：agent 的入口，输出结构化结果，`apa guide` 自带使用说明。
-- **harness 插件**：把待决和相关事项注入会话，声明如何无头拉起 harness。每个 harness 一份。
-- **ext**：独立的外部程序，如聊天渠道，只经 HTTP API 接入。提醒由它们来领取并送达。
+- **harness 插件**：把待决和相关事项注入会话，声明如何无头拉起 harness。每个 harness 一份，当前提供 Hermes 插件。
+- **ext**：独立的外部程序，如聊天渠道（提供 Telegram），只经 HTTP API 接入。提醒由它们来领取并送达。
 - **能力包**：声明一类自动化怎么做的目录（yaml 和模板），不含代码，也不能改策略或把规则设成自动。
 
 扩展都不用动内核：新增自动化写能力包，新增渠道写 ext，接入 harness 写插件。外部对接优先复用成熟的 CLI 或库，放在 APA 自己的通用契约之后，可替换。
 
-## 怎么用（设计预览，尚不可用）
+## 怎么用
 
 **你：**
 
@@ -180,7 +172,7 @@ APA 是独立的开源项目，与上述产品及其厂商没有关联。
 - **数据：** APA 自身的状态都在一个目录里，默认 `~/.apa`，可以整体复制备份。外部工具的凭据由工具自己保管，换主机要重新认证。
 - **技术栈：** 单个 Go 二进制，SQLite 账本，React 前端。
 - **模型端点：** 可选，只需 chat completions 兼容协议，可以用本机端点。不配时规则仍生效，规则判不了的事件留在来源页，可以手动转成建议。
-- **额外依赖：** 邮件和日历来源要另装成熟的开源 CLI，首版是 himalaya 和 gog calendar。
+- **额外依赖：** 邮件和日历来源要另装成熟的开源 CLI：himalaya 和 gog calendar。
 - **代价：** 上手门槛高于托管产品，要自己部署、配置和认证。
 
 ## 不做什么
@@ -194,7 +186,7 @@ APA 是独立的开源项目，与上述产品及其厂商没有关联。
 
 ## 参与与许可
 
-项目还在设计阶段，欢迎对设计提意见。提交信息遵循 Conventional Commits。
+提交信息遵循 Conventional Commits。
 
 完整设计在 [`docs/`](docs/README.md)，给 coding agent 的规则在 [`AGENTS.md`](AGENTS.md)。读懂本页不需要它们。
 
