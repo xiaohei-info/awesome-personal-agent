@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/context" // 登记 context、persona 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/decisions"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/delegation" // 登记 executors、delegate、report、declare 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/guide"      // 登记 guide 子命令
