@@ -21,7 +21,7 @@
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建 | observer | |
 | `apa item show/list` | 读事项；`show` 带挂靠消息，按转发白名单过滤 | observer | 5 |
-| `apa item add/update/transition/relate` | 增改事项、转阶段、关联 | worker（自己的事项）；delegate（任意，附证据） | 4、6 |
+| `apa item add/update/transition/relate [--evidence]` | 增改事项、转阶段、关联 | worker（自己的事项）；delegate（任意，每次附 `--evidence`，含改自己的事项和以 `proposed` 新建；缺证据为退出码 2） | 2、4、6 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
 | `apa decide <id> --option --evidence` | 代答决策 | delegate | 4、6、20、22 |

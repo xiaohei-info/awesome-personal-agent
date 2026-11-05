@@ -1604,6 +1604,8 @@ Web 和 CLI 两个入口只在非高风险操作上效果一致，这是有意�
 
 delegate 代答和接受建议都必须附**本人原话**与会话引用（`--evidence`）。事项记 `resolved_via: chat`，Event 带 `on_behalf_of` 和证据，Web"agent 变更"视图供事后核对，本人可一键撤销。
 
+事项的新建、更新、转阶段和关联（`item.create`、`item.update`、`item.transition`、`item.relate`）同样是代理写操作：delegate 调用时，无论改的是不是自己的事项，缺 `on_behalf_of` 或证据都按 `invalid_request`（退出码 2）拒绝，不写入；带了则原样记进对应 Event。这条规则由命令管线在授权阶段统一判定，命令登记时只声明自己是否属于代理写操作。撤销（`item.revert`）只在 Web，由本人操作，不要求证据。
+
 内核只能校验证据存在，不能校验真伪（见 §21.2）。运行者没有本人原话，所以运行凭据根本不具备代答能力。
 
 ### 14.6 两份白名单

@@ -280,6 +280,44 @@ func TestRelateAndListFilters(t *testing.T) {
 	}
 }
 
+// delegate 经 CLI 改标题与建关系：缺 --evidence 退出码 2、账本不变；带了则 Event 记证据与 on_behalf_of。
+func TestDelegateUpdateAndRelateCarryEvidence(t *testing.T) {
+	k := newKernel(t)
+	a, b := k.openItem(), k.openItem()
+	for _, args := range [][]string{
+		{"item", "update", a, "--title", "new", "--reason", "r"},
+		{"item", "relate", a, "--to", b, "--type", "relates", "--reason", "r"},
+	} {
+		if r := k.apa(auth.Delegate, args...); r.code != 2 || k.item(a)["title"] != "t" {
+			t.Fatalf("%v without evidence: %+v", args, r)
+		}
+	}
+	k.ok(auth.Delegate, "item", "update", a, "--title", "new", "--reason", "r", "--evidence", "owner: rename it")
+	k.ok(auth.Delegate, "item", "relate", a, "--to", b, "--type", "relates", "--reason", "r", "--evidence", "owner: link them")
+	var evs []domain.Event
+	if err := k.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, a)
+		for _, e := range es {
+			evs = append(evs, e.Event)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range evs {
+		if e.Type == domain.EvItemUpdated {
+			if e.Actor.OnBehalfOf == "" {
+				t.Fatalf("event %d has no on_behalf_of", e.Seq)
+			}
+			got = append(got, e.Evidence)
+		}
+	}
+	if len(got) != 2 || got[0] != "owner: rename it" || got[1] != "owner: link them" {
+		t.Fatalf("evidence on item.updated events = %q", got)
+	}
+}
+
 // 权限与版本：observer 不能 add（4）；--version 过期返回 6；同一幂等键重放返回同一结果。
 func TestAuthorizationVersionAndIdempotency(t *testing.T) {
 	k := newKernel(t)
