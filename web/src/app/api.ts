@@ -33,8 +33,8 @@ const SAFE = new Set(["GET", "HEAD", "OPTIONS"]);
 export function createClient(o: ClientOptions) {
   const f = o.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
 
-  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const headers: Record<string, string> = {};
+  async function request<T>(method: string, path: string, body?: unknown, extra?: Record<string, string>): Promise<T> {
+    const headers: Record<string, string> = { ...extra };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (!SAFE.has(method)) {
       const t = o.getCsrf();
@@ -56,8 +56,9 @@ export function createClient(o: ClientOptions) {
 
   return {
     get: <T>(path: string) => request<T>("GET", path),
-    post: <T>(path: string, body?: unknown) => request<T>("POST", path, body ?? {}),
-    patch: <T>(path: string, body: unknown) => request<T>("PATCH", path, body),
+    /** headers 用于 If-Match / Idempotency-Key 等请求头。 */
+    post: <T>(path: string, body?: unknown, headers?: Record<string, string>) => request<T>("POST", path, body ?? {}, headers),
+    patch: <T>(path: string, body: unknown, headers?: Record<string, string>) => request<T>("PATCH", path, body, headers),
     del: <T>(path: string) => request<T>("DELETE", path),
     login: (password: string) => request<LoginResult>("POST", "/auth/login", { password: password }),
     logout: () => request<{ ok: boolean }>("POST", "/auth/logout", {}),
