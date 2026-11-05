@@ -1,0 +1,4 @@
+name: apa-tools
+version: 0.1.0
+description: "APA: the apa CLI wrapped as native Hermes tools that carry the Hermes session id (APA_SESSION), plus the executor-id to invocation mapping."
+author: awesome-personal-agent
