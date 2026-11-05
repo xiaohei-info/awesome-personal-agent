@@ -46,6 +46,14 @@ type Options struct {
 	Now   func() time.Time
 	// OnError 接收提交后自动消费失败的错误（OnCommit 回调没有返回值）；可为空。
 	OnError func(error)
+	// Reminder 是触达的提醒入口（*attention.Attention 满足它）：create_timer 建的 Timer 到期经它提醒。
+	// 只在用到 create_timer 时需要；为空时这类 Timer 到期返回错误，不静默丢弃。
+	Reminder Reminder
+}
+
+// Reminder 在调用方事务里产出一条提醒；同一 (kind, 事项, due) 只提醒一次。
+type Reminder interface {
+	Remind(tx *store.Tx, it domain.Item, kind string, due time.Time, title, summary string) error
 }
 
 // Engine 消费账本事件与到期的时钟规则，按模式执行规则。

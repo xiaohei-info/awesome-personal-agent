@@ -139,7 +139,7 @@ webhook_mappings:
 | `set_phase` | 改阶段 | 命令模型与阶段约束 |
 | `add_tag` | 打标签 | |
 | `create_item` | 建事项或子事项 | 指定 `assignee` 时校验项目允许的执行者 |
-| `create_timer` | 建 Timer | |
+| `create_timer` | 为触发事项建提醒 Timer：`after`（时长）或 `at`（RFC 3339）一次性，`schedule`（固定间隔）周期；到期经触达提醒（主文档 §6.8） | 需要触发事项，时钟规则不可用 |
 | `call_agent` | 调专属 agent，指定提示词模板 | 形态校验 |
 | `start_background_run` | 拉起后台运行：`runner`、`prompt`、`access`、`cwd`，可选 `harness`（默认用 Web 设置的默认 harness）；`runner: task` 时再加 `executor`，内核先建好子事项 | §13.6 的前置校验 |
 

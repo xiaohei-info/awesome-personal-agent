@@ -116,13 +116,12 @@ func (e *Engine) createItem(_ context.Context, c Call) error {
 }
 
 // createTimer：after（时长）或 at（RFC 3339）建一次性提醒，schedule（固定间隔）建周期 Timer。
-// Timer 的目标是触发事项；时钟规则没有事项时目标是规则自己。
+// Timer 的目标是触发事项，到期经触达提醒（HandleTimer）；时钟规则没有触发事项，不能用这个动作。
 func (e *Engine) createTimer(_ context.Context, c Call) error {
-	target := objectOf(c.Rule)
-	if c.Item != nil {
-		target = c.Item.ID
+	if c.Item == nil {
+		return invalid("create_timer needs a triggering item, but this rule has none")
 	}
-	in := timerIn{Target: target, Kind: "remind", Reason: "rule " + c.Rule}
+	in := timerIn{Target: c.Item.ID, Kind: "remind", Reason: "rule " + c.Rule}
 	switch {
 	case str(c.Action, "after") != "":
 		d, err := time.ParseDuration(str(c.Action, "after"))

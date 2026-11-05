@@ -652,6 +652,8 @@ Event 是账本的追加日志，也是对外事件流。
 | 事项截止（`deadline`） | `due_<事项 id>` | 事项中心 | 记一条 `item.deadline_passed`；不改阶段、字段和版本。是否提醒由触达决定 |
 | 决策超时（`ask.deadline`） | `ask_<事项 id>` | 决策 | 有默认值时按默认值决定（§6.4） |
 
+规则的 `create_timer` 动作建的 Timer 以 `ruletm_` 开头，target 是触发规则的事项，归主动服务的规则执行：到期经触达对该事项产出一条提醒，同一到期时刻只一次，受静默与合并约束；事项在 `proposed` 时不提醒，已结束或已删除时撤销 Timer。时钟规则没有触发事项，不能使用这个动作。
+
 事项截止 Timer 与 `deadline` 的写入在同一事务内：事项处于 `open`、`waiting`、`needs_input` 时存在，改 `deadline` 即重排，清除即取消。进入 `proposed`、`done`、`dropped` 时取消，`deadline` 字段保留，所以建议被接受或事项重开时按原值重新计时，已过期的会在下一次扫描时再触发一次。上述阶段之间的转移和无关字段的修改不重排，已到期的 Timer 不重复触发。
 
 **错过处理**：周期定时醒来只补最近一次；一次性定时醒来后全部触发，其产生的提醒由打扰控制合并。
@@ -823,7 +825,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 
 规则执行顺序：匹配条件 → 判模式（`off` 跳过；`observe` 只记 Event"本来会做什么"，不写业务状态、不外呼）→ 校验链路深度 → 执行动作（走命令模型，Event 记策略版本与规则 id）。规则动作产生的 Event 不再触发规则，防止成环；经 agent、回执或外部系统绕回的间接回环由链路深度兜底（§14.9）。
 
-observe 的"本来会做什么"和 `create_timer` 动作建出的 Timer 记为内部审计事件（`rule.observed`、`rule.timer_created`），`apa why` 可见，不在对外事件类型表里。规则以委派级身份、`via=rule` 走命令模型，执行者白名单、web_only 与链路深度照常生效；动作失败（含未登记处理器的 `start_background_run`、`call_agent`）记一条 `health.alert`，不伪造成功。
+`create_timer` 建出的 Timer 由规则执行自己处理到期：经触达对触发事项产出提醒，不经事项中心（§6.8）。observe 的"本来会做什么"和 `create_timer` 动作建出的 Timer 记为内部审计事件（`rule.observed`、`rule.timer_created`），`apa why` 可见，不在对外事件类型表里。规则以委派级身份、`via=rule` 走命令模型，执行者白名单、web_only 与链路深度照常生效；动作失败（含未登记处理器的 `start_background_run`、`call_agent`）记一条 `health.alert`，不伪造成功。
 
 ### 7.4 触达
 

@@ -153,7 +153,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	// shortcut: call_agent 只接核验；内置包里其余 call_agent 走实例定时，目前没有消费者（instance.fired），接任务型时在此按模板分派。
 	if k.eng, err = rules.New(rules.Options{Store: st, Exec: x, Packs: ld, Owner: owner,
-		Handlers: map[string]rules.Handler{"call_agent": verifyAgent}, OnError: logErr("rules")}); err != nil {
+		Handlers: map[string]rules.Handler{"call_agent": verifyAgent}, Reminder: att, OnError: logErr("rules")}); err != nil {
 		return nil, err
 	}
 	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Judge: judge, Reminder: att, Owner: owner,
@@ -236,7 +236,7 @@ func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 		return k.fu.HandleTimer(tx, c)
 	case rules.Owns(c):
 		k.drainDue.Store(true)
-		return rules.HandleTimer(tx, c)
+		return k.eng.HandleTimer(tx, c)
 	}
 	return kitems.HandleTimer(tx, c)
 }
