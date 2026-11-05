@@ -267,7 +267,7 @@ func TestNotEscalatedReleasesDeliveryAndAnswers(t *testing.T) {
 
 	e.scr.Wait()
 	e.tick(t)
-	if ds := e.injectable(t); len(ds) != 1 || ds[0].Item != id {
+	if ds := e.injectable(t); len(ds) != 1 || ds[0].Item != id || ds[0].Content.WebOnly || len(ds[0].Content.Options) == 0 {
 		t.Fatalf("after screening the decision is delivered by policy: %+v", ds)
 	}
 	it = e.get(t, id)
@@ -303,6 +303,16 @@ func TestEscalationClearsDefaultAndBlocksDelegate(t *testing.T) {
 	}
 	if err := e.delegateAnswer(id); exit(err) != domain.ExitWebOnly {
 		t.Fatalf("delegate answer must be 20, got %v", err)
+	}
+	// 初筛返回前没有投递；升级后产出的投递只带 Web 链接，不带选项与推荐。
+	var got []domain.Delivery
+	for _, d := range e.injectable(t) { // 截止已过的提醒不在此断言范围
+		if d.Class == domain.DeliveryDecision {
+			got = append(got, d)
+		}
+	}
+	if len(got) != 1 || got[0].Item != id || !got[0].Content.WebOnly || len(got[0].Content.Options) != 0 || got[0].Content.Recommend != "" || got[0].Content.FormURL != "" || got[0].Content.WebURL == "" {
+		t.Fatalf("escalated delivery must carry only the Web link: %+v", got)
 	}
 	if ups := e.events(t, id, domain.EvItemUpdated); len(ups) != 1 || !strings.Contains(ups[0].Reason, "escalated") {
 		t.Fatalf("escalation Event: %+v", ups)
