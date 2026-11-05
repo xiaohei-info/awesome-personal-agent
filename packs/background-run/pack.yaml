@@ -1,0 +1,17 @@
+name: background-run
+version: 1.0.0
+description: 无人值守运行与续接：带 agent-ok 标签的事项进入 open 时拉起后台运行（规则样例，初始 observe）
+event_rules:
+  - id: handle-labelled
+    mode: observe
+    when:
+      event: item.phase_changed
+      to_phase: open
+      kind: [task]
+      tag_any: [agent-ok]
+    do:
+      - action: start_background_run
+        runner: main_session
+        prompt: handle-item
+        access: edit
+        cwd: run_dir
