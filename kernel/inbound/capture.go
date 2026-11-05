@@ -53,6 +53,12 @@ type CaptureOut struct {
 	Project  string `json:"project,omitempty"`
 }
 
+// IsCaptureSource 报告 id 是否是对话捕获的内部来源；这种来源不进登记表，内容是对话原文（§9.3）。
+func IsCaptureSource(id string) bool {
+	_, ok := captureProject(id)
+	return ok
+}
+
 func captureProject(sourceID string) (string, bool) {
 	id, ok := strings.CutPrefix(sourceID, capturePrefix)
 	return id, ok && id != ""

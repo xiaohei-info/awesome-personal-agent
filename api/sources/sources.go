@@ -26,6 +26,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -342,7 +343,11 @@ func viewOf(g webhook.Ingest) ingestView {
 	return v
 }
 
-func (a *api) ingests(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
+func (a *api) ingests(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	// 原始请求体未经转发白名单，也无从按发送者过滤：发送者要等转换后才有（§14.3、§14.6）。
+	if p.Caller.Level == authz.LevelRun {
+		return domain.NewError(domain.CodePermissionDenied, "run credential cannot read raw ingests", "read forwarded messages from the context instead")
+	}
 	id := r.PathValue("id")
 	var gs []webhook.Ingest
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
@@ -433,8 +438,10 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		next int64
 	)
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
-		if _, err := registry.Get(tx, id); err != nil {
-			return err
+		if !(p.Web && inbound.IsCaptureSource(id)) { // 对话内容只给本人；其他凭据和登记外的来源一样是 404
+			if _, err := registry.Get(tx, id); err != nil {
+				return err
+			}
 		}
 		var err error
 		evs, next, err = runner.EventPage(tx, id, d, after, limit)

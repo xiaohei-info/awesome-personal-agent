@@ -563,14 +563,22 @@ func TestSourceEventsListFilterAndPage(t *testing.T) {
 		t.Errorf("ext: %d", r.Code)
 	}
 	// 列表是未过滤的外部内容：运行凭据不能绕过转发白名单。
+	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/events", ""); r.Code != 403 {
+		t.Errorf("run credential: %d %s", r.Code, r.Body)
+	}
+}
+
+// runCredential 建一个事项和它的后台运行，返回运行凭据明文。
+func (e *env) runCredential() string {
+	e.t.Helper()
 	res, err := e.x.Do(context.Background(), command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb},
 		Command: "item.create", Input: json.RawMessage(`{"kind":"task","title":"t"}`)})
 	if err != nil {
-		t.Fatal(err)
+		e.t.Fatal(err)
 	}
 	var it struct{ ID string }
 	if err := json.Unmarshal(res.Value, &it); err != nil {
-		t.Fatal(err)
+		e.t.Fatal(err)
 	}
 	var run string
 	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
@@ -581,11 +589,9 @@ func TestSourceEventsListFilterAndPage(t *testing.T) {
 		run, err = runidentity.Issue(tx, r.ID, e.now)
 		return err
 	}); err != nil {
-		t.Fatal(err)
+		e.t.Fatal(err)
 	}
-	if r := e.do(run, "GET", "/v1/sources/src_hook/events", ""); r.Code != 403 {
-		t.Errorf("run credential: %d %s", r.Code, r.Body)
-	}
+	return run
 }
 
 // ACT-TRI-02：Web 把未判定事件转为建议；没有来源管理权的凭据被拒绝，非 unjudged 返回冲突。
@@ -625,5 +631,43 @@ func TestProposeSourceEventRoute(t *testing.T) {
 	}
 	if r := e.web("POST", "/v1/source-events/sev_nope/propose", ""); r.Code != 404 {
 		t.Fatalf("missing: %d %s", r.Code, r.Body)
+	}
+}
+
+// 内部来源 capture:<项目> 的事件只对 Web 开放（§9.3）；运行凭据 403，其他凭据与登记外的来源一样 404。
+func TestCaptureSourceEventsAreWebOnly(t *testing.T) {
+	e := setup(t)
+	e.seedEvents("capture:prj_1", [2]string{"c1", "unjudged"})
+	path := "/v1/sources/capture:prj_1/events?disposition=unjudged"
+	var page eventPage
+	r := e.web("GET", path, "")
+	r.into(&page)
+	if r.Code != 200 || len(page.Events) != 1 || page.Events[0].Subject != "c1" {
+		t.Fatalf("web: %d %s", r.Code, r.Body)
+	}
+	for _, k := range []auth.Kind{auth.Observer, auth.Worker, auth.Delegate} {
+		if r := e.do(e.token(k), "GET", path, ""); r.Code != 404 {
+			t.Errorf("%s: %d", k, r.Code)
+		}
+	}
+	if r := e.do(e.runCredential(), "GET", path, ""); r.Code != 403 {
+		t.Errorf("run credential: %d", r.Code)
+	}
+	if r := e.web("GET", "/v1/sources/capture:/events", ""); r.Code != 404 {
+		t.Errorf("empty project: %d", r.Code)
+	}
+}
+
+// 入站记录的原始请求体未经转发白名单，运行凭据不能读（§14.3、§14.6）。
+func TestRunCredentialCannotReadIngests(t *testing.T) {
+	e := setup(t)
+	if r := e.do(e.token(auth.Delegate), "POST", "/v1/sources", hook); r.Code != 201 {
+		t.Fatalf("register: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/ingests", ""); r.Code != 403 {
+		t.Fatalf("run credential: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(e.token(auth.Observer), "GET", "/v1/sources/src_hook/ingests", ""); r.Code != 200 {
+		t.Fatalf("observer: %d %s", r.Code, r.Body)
 	}
 }
