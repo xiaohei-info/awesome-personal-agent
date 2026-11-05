@@ -427,3 +427,35 @@ func TestReclosedIssueGetsNewClosedID(t *testing.T) {
 		t.Fatal("second close deduped into the first")
 	}
 }
+
+// 同一秒的一组项被预算切开时，被丢掉的项的 updated 事件不能丢（updated 要求严格晚于游标）。
+func TestBudgetCutNeverSplitsSameSecondGroup(t *testing.T) {
+	body := strings.Repeat("x", 3900)
+	var items []string
+	// 三组、每组 6 项（约 24KB）同一秒：预算 48KB 放不下第三组，旧的按项截断会把第三组切开
+	for i := 1; i <= 18; i++ {
+		items = append(items, fmt.Sprintf(`{"number":%d,"title":"t","body":%q,"created_at":"2026-10-01T00:00:00Z","updated_at":"2026-11-01T01:00:0%dZ","user":{"login":"u"}}`, i, body, (i-1)/6))
+	}
+	api := &sinceAPI{all: items}
+	seen := map[string]bool{}
+	cursor := "2026-11-01T00:00:00Z"
+	for run := 0; run < 10; run++ {
+		var out bytes.Buffer
+		Run(context.Background(), strings.NewReader(`{"source_id":"s","config":{"repos":["o/r"]},"cursor":"`+cursor+`"}`), &out, &bytes.Buffer{}, api, now)
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		for _, l := range lines[:len(lines)-1] {
+			var ev struct{ ID string }
+			json.Unmarshal([]byte(l), &ev)
+			seen[ev.ID] = true
+		}
+		var last map[string]string
+		json.Unmarshal([]byte(lines[len(lines)-1]), &last)
+		if last["cursor"] == cursor {
+			break
+		}
+		cursor = last["cursor"]
+	}
+	if len(seen) != 18 {
+		t.Fatalf("emitted %d distinct ids, want 18", len(seen))
+	}
+}

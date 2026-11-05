@@ -222,25 +222,32 @@ type entry struct {
 	evs []event
 }
 
-// bound 按 updated_at 升序、以"项"为单位取到预算为止（至少取一项，保证有进展）。
-// 被截断时返回最后一个已输出项的时间作为游标上限：与它同一时刻的项下次重新输出，由稳定 id 去重。
-// shortcut: 同一秒内的项总量超预算时只能取到第一项，下次又从同一秒开始；GitHub 时间戳精度是秒，实际不会出现，出现了再改用 id 游标。
+// bound 按 updated_at 升序取到预算为止，只在"同一时刻的一组项"的边界上截断（第一组无论多大都整组取，保证有进展）。
+// 被截断时返回最后一个整组输出的时间作为游标上限：下次从它开始，该组已输出的事件由稳定 id 去重，
+// 被丢掉的组 updated_at 严格晚于游标，所以它们的 updated 事件（要求严格晚于游标）不会丢。
+// 同一时刻的项总量超预算时整组一起输出而超过预算，GitHub 时间戳精度是秒，实际不会到 64KB；
+// shortcut: 真遇到时需要改用带 id 的复合游标。
 func bound(entries []entry) ([]event, *time.Time) {
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].at.Before(entries[j].at) })
 	var out []event
 	size := 0
-	for i, e := range entries {
-		n := 0
-		for _, ev := range e.evs {
-			b, _ := json.Marshal(ev)
-			n += len(b) + 1
+	for i := 0; i < len(entries); {
+		j, n := i, 0
+		for ; j < len(entries) && entries[j].at.Equal(entries[i].at); j++ {
+			for _, ev := range entries[j].evs {
+				b, _ := json.Marshal(ev)
+				n += len(b) + 1
+			}
 		}
 		if i > 0 && size+n > outputBudget {
 			cut := entries[i-1].at
 			return out, &cut
 		}
 		size += n
-		out = append(out, e.evs...)
+		for _, e := range entries[i:j] {
+			out = append(out, e.evs...)
+		}
+		i = j
 	}
 	return out, nil
 }
