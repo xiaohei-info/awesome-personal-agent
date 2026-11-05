@@ -1,0 +1,5 @@
+[
+ {"id":"12","flags":["Seen"],"subject":"周报","message_id":"<old-1@example.com>","from":{"name":"Bob","addr":"bob@example.com"},"date":"2026-01-01 08:00+00:00"},
+ {"id":"13","flags":[],"subject":"发票 #42","message_id":"<inv-42@example.com>","from":{"name":"Billing","addr":"billing@example.com"},"date":"2026-01-02 09:30+08:00"},
+ {"id":"14","flags":[],"subject":"","message_id":"<empty-subj@example.com>","from":{"name":"Eve","addr":""},"date":"2026-01-03 10:00+00:00"}
+]
