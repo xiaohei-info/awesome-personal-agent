@@ -73,10 +73,20 @@ type ref struct {
 //
 // 授权（§14.3）：提交决策请求按"更新自己的事项"；回答、接受、丢弃按代答：Web 本人可，delegate 必须附本人原话，
 // web_only 得到 20、初筛未返回得到 22，观察者、worker 与运行凭据得到 4。
-func Register(x *command.Executor) error {
-	for _, s := range []command.Spec{request(), answer(), proposal("proposal.accept", domain.PhaseOpen, "proposal accepted"),
+func Register(x *command.Executor) error { return RegisterWith(x, nil) }
+
+// Screening 是 web_only 初筛模块在 decision.request 事务内的两个接入点（§14.4）。
+// 判断与模型调用都不在这里：Needed 只据账本回答"这条请求要不要初筛"，Begin 在同一事务写下判断型 Run 的起点。
+type Screening interface {
+	Needed(tx *store.Tx, it domain.Item) (bool, error)
+	Begin(c *command.Ctx, it domain.Item) error
+}
+
+// RegisterWith 同 Register；s 非空时，决策请求按 s.Needed 在同一事务置 screening_pending 并调 s.Begin。
+func RegisterWith(x *command.Executor, s Screening) error {
+	for _, sp := range []command.Spec{request(s), answer(), proposal("proposal.accept", domain.PhaseOpen, "proposal accepted"),
 		proposal("proposal.dismiss", domain.PhaseDropped, "proposal dismissed")} {
-		if err := x.Register(s); err != nil {
+		if err := x.Register(sp); err != nil {
 			return err
 		}
 	}
@@ -127,7 +137,7 @@ func riskClass(p policy.Policy, it domain.Item) string {
 	return ""
 }
 
-func request() command.Spec {
+func request(scr Screening) command.Spec {
 	parse := func(in json.RawMessage) (requestIn, error) {
 		var v requestIn
 		return v, decode(in, &v)
@@ -175,9 +185,17 @@ func request() command.Spec {
 			if err != nil {
 				return nil, err
 			}
+			screen := false
 			_, it, snap, err := items.Revise(c.Tx, v.ID, "decision.request", func(it *domain.Item) error {
 				it.Ask = &domain.Ask{AskInput: v.Ask, AskKernelState: domain.AskKernelState{RiskClass: riskClass(pol, *it)}}
 				it.Phase, it.WaitingOn = domain.PhaseNeedsInput, nil
+				if scr != nil {
+					var err error
+					if screen, err = scr.Needed(c.Tx, *it); err != nil {
+						return err
+					}
+					it.Ask.ScreeningPending = screen
+				}
 				return nil
 			})
 			if err != nil {
@@ -191,7 +209,12 @@ func request() command.Spec {
 					return nil, err
 				}
 			}
-			_, err = c.Emit(domain.Event{Type: domain.EvDecisionRequested, Object: it.ID, Reason: reasonOr(v.Reason, "decision requested"), Payload: snap})
+			if _, err = c.Emit(domain.Event{Type: domain.EvDecisionRequested, Object: it.ID, Reason: reasonOr(v.Reason, "decision requested"), Payload: snap}); err != nil {
+				return nil, err
+			}
+			if screen {
+				err = scr.Begin(c, it)
+			}
 			return ref{it.ID}, err
 		}}
 }
