@@ -36,6 +36,9 @@ coverage/
 
 # 构建产物与依赖目录
 dist/
+!/web/dist/
+/web/dist/*
+!/web/dist/.gitkeep
 build/
 /bin/
 out/

@@ -660,3 +660,28 @@ func TestServeOverRealSocketAndShutdown(t *testing.T) {
 		t.Fatal("Serve did not return after cancel")
 	}
 }
+
+// ---- 嵌入的 Web 中台 ----
+
+func TestWebHandlerServesUIButNeverShadowsAPI(t *testing.T) {
+	e := setup(t)
+	web := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("UI:" + r.URL.Path)) })
+	srv, err := New(Deps{Store: e.st, Auth: e.auth, Web: web})
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(method, path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, httptest.NewRequest(method, path, nil))
+		return w
+	}
+	if w := do("GET", "/decisions"); w.Code != 200 || w.Body.String() != "UI:/decisions" {
+		t.Fatalf("UI route: %d %q", w.Code, w.Body)
+	}
+	if w := do("GET", "/v1/nope"); w.Code != 404 || !strings.Contains(w.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("API miss must stay a JSON 404: %d %q", w.Code, w.Body)
+	}
+	if w := do("POST", "/decisions"); w.Code != 404 {
+		t.Fatalf("non-GET must not reach the UI: %d", w.Code)
+	}
+}
