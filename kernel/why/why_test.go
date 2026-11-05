@@ -200,3 +200,45 @@ func TestReplayIsReadOnly(t *testing.T) {
 		t.Fatal("replay wrote to ledger")
 	}
 }
+
+func audit(t *testing.T, s *store.Store, r AuditRequest) ([]Step, error) {
+	t.Helper()
+	var out []Step
+	err := s.View(ctx, func(tx *store.Tx) error {
+		var err error
+		out, err = Audit(tx, policy.Policy{}, r)
+		return err
+	})
+	return out, err
+}
+
+func TestAuditFilterTrimPendingAndLimits(t *testing.T) {
+	s := open(t)
+	seed(t, s)
+	all, err := audit(t, s, AuditRequest{Actor: owner, Level: authz.LevelWeb})
+	if err != nil || len(all) != 4 || all[0].Reason != "SECRET-REASON" {
+		t.Fatalf("web audit = %v %v", all, err)
+	}
+	rej, _ := audit(t, s, AuditRequest{Actor: owner, Level: authz.LevelWeb, Filter: eventlog.Filter{Type: domain.EvCommandRejected}})
+	if len(rej) != 1 || rej[0].Object != "item_1" {
+		t.Fatalf("rejected = %v", rej)
+	}
+	// 非 Web 且对象初筛未返回：该对象的事件被跳过，其余照常，且翻页能越过被跳过的行。
+	obs, _ := audit(t, s, AuditRequest{Actor: owner, Level: authz.LevelObserver, Pending: map[string]bool{"item_1": true}, Limit: 1})
+	if len(obs) != 1 || obs[0].Object != "run_1" || obs[0].Payload != nil {
+		t.Fatalf("observer = %v", obs)
+	}
+	web, _ := audit(t, s, AuditRequest{Actor: owner, Level: authz.LevelWeb, Pending: map[string]bool{"item_1": true}})
+	if len(web) != 4 {
+		t.Fatalf("web ignores pending, got %d", len(web))
+	}
+	for _, bad := range []AuditRequest{{Limit: -1}, {Limit: MaxAuditLimit + 1}, {After: -1}} {
+		bad.Actor, bad.Level = owner, authz.LevelWeb
+		if _, err := audit(t, s, bad); err == nil {
+			t.Fatalf("%+v must fail", bad)
+		}
+	}
+	if _, err := audit(t, s, AuditRequest{Actor: owner, Level: "bogus"}); err == nil {
+		t.Fatal("invalid level must be denied")
+	}
+}

@@ -315,3 +315,47 @@ func TestTombstoneRejectsEmptyObject(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestQueryFiltersByActorObjectType(t *testing.T) {
+	s := open(t)
+	a := domain.Actor{Type: domain.ActorAgent, Principal: "bot", Via: domain.ViaCLI}
+	h := domain.Actor{Type: domain.ActorHuman, Principal: "me", Via: domain.ViaWeb}
+	err := s.Update(context.Background(), func(tx *store.Tx) error {
+		for _, e := range []domain.Event{
+			{Type: "t1", Object: "o1", Actor: a, Payload: json.RawMessage(`null`)},
+			{Type: "t2", Object: "o1", Actor: h, Payload: json.RawMessage(`null`)},
+			{Type: "t1", Object: "o2", Actor: h, Payload: json.RawMessage(`null`)},
+		} {
+			if _, err := Append(tx, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := func(f Filter, after int64, limit int) []int64 {
+		var seqs []int64
+		_ = s.View(context.Background(), func(tx *store.Tx) error {
+			es, err := Query(tx, f, after, limit)
+			for _, e := range es {
+				seqs = append(seqs, e.Event.Seq)
+			}
+			return err
+		})
+		return seqs
+	}
+	for _, c := range []struct {
+		f     Filter
+		after int64
+		limit int
+		want  int
+	}{{Filter{}, 0, 10, 3}, {Filter{Actor: "me"}, 0, 10, 2}, {Filter{Object: "o1"}, 0, 10, 2},
+		{Filter{Type: "t1"}, 0, 10, 2}, {Filter{Actor: "me", Type: "t1", Object: "o2"}, 0, 10, 1},
+		{Filter{}, 1, 10, 2}, {Filter{}, 0, 1, 1}, {Filter{}, 0, 0, 0}, {Filter{Actor: "x"}, 0, 10, 0}} {
+		if got := q(c.f, c.after, c.limit); len(got) != c.want {
+			t.Errorf("%+v after=%d limit=%d: got %v want %d", c.f, c.after, c.limit, got, c.want)
+		}
+	}
+}
