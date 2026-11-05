@@ -186,7 +186,7 @@ func request(scr Screening) command.Spec {
 				return nil, err
 			}
 			screen := false
-			_, it, snap, err := items.Revise(c.Tx, v.ID, "decision.request", func(it *domain.Item) error {
+			_, it, snap, err := items.Revise(c.Tx, v.ID, "decision.request", c.Now(), func(it *domain.Item) error {
 				it.Ask = &domain.Ask{AskInput: v.Ask, AskKernelState: domain.AskKernelState{RiskClass: riskClass(pol, *it)}}
 				it.Phase, it.WaitingOn = domain.PhaseNeedsInput, nil
 				if scr != nil {
@@ -329,7 +329,7 @@ type settled struct {
 
 // settle 写入决定结果、移出 needs_input，并撤销超时 Timer。
 func settle(tx *store.Tx, v answerIn, res domain.Resolution) (settled, error) {
-	_, it, snap, err := items.Revise(tx, v.ID, "decision.answer", func(it *domain.Item) error {
+	_, it, snap, err := items.Revise(tx, v.ID, "decision.answer", res.ResolvedAt, func(it *domain.Item) error {
 		next, err := resolve(*it, v)
 		if err != nil {
 			return err
@@ -374,7 +374,7 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
-			_, it, snap, err := items.Revise(c.Tx, v.ID, name, func(it *domain.Item) error {
+			_, it, snap, err := items.Revise(c.Tx, v.ID, name, c.Now(), func(it *domain.Item) error {
 				it.Phase = to
 				return nil
 			})

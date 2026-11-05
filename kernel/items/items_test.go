@@ -1,6 +1,7 @@
 package items
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -662,6 +663,143 @@ func TestDeadlineRebuiltFromEvents(t *testing.T) {
 	}
 	e.wantDue(t, changed, d2)
 	e.wantNoDue(t, cleared)
+}
+
+// created_at、updated_at 是事项事件的时间：只有加版本的事件推进 updated_at，事件快照不带它们，坏了能由折叠重建。
+func TestTimestampsFoldFromEvents(t *testing.T) {
+	e := setup(t)
+	want := func(id string, created, updated time.Time) {
+		t.Helper()
+		if it := e.get(t, id); !it.CreatedAt.Equal(created) || !it.UpdatedAt.Equal(updated) {
+			t.Fatalf("%s: created %v updated %v, want %v %v", id, it.CreatedAt, it.UpdatedAt, created, updated)
+		}
+	}
+	at := func(h int) time.Time { return t0.Add(time.Duration(h) * time.Hour) }
+	a := e.create(t, owner, map[string]any{"phase": "open", "deadline": at(2)})
+	b := e.create(t, owner, map[string]any{"phase": "open"})
+	want(a, t0, t0)
+
+	e.now = at(1)
+	e.must(t, owner, "item.update", map[string]any{"id": a, "title": "A2"})
+	want(a, t0, at(1))
+
+	e.now = at(2) // 截止到期只记事件，不改事项
+	if n, err := e.clk.Tick(bg); n != 1 || err != nil {
+		t.Fatalf("due: %d %v", n, err)
+	}
+	want(a, t0, at(1))
+
+	e.now = at(3) // 关系变更推进起点，不碰终点
+	e.must(t, owner, "item.relate", map[string]any{"from": a, "to": b, "type": domain.RelBlocks})
+	want(a, t0, at(3))
+	want(b, t0, t0)
+
+	e.now = at(4) // 撤销恢复快照，但 created_at 不回退、updated_at 前进
+	r := e.must(t, delegate, "item.update", map[string]any{"id": a, "title": "A3"})
+	e.now = at(5)
+	e.must(t, owner, "item.revert", map[string]any{"id": a, "event": r.Seqs[0]})
+	want(a, t0, at(5))
+	e.verify(t)
+
+	for _, ev := range e.events(t) {
+		if bytes.Contains(ev.Payload, []byte("created_at")) || bytes.Contains(ev.Payload, []byte("updated_at")) {
+			t.Fatalf("event %d snapshot carries timestamps: %s", ev.Seq, ev.Payload)
+		}
+	}
+
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE items SET created_at = 0, updated_at = 0 WHERE id = ?`, a)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if e.st.View(bg, Verify) == nil {
+		t.Fatal("Verify must detect lost timestamps")
+	}
+	if err := e.st.Update(bg, Rebuild); err != nil {
+		t.Fatal(err)
+	}
+	e.verify(t)
+	want(a, t0, at(5))
+}
+
+// 真实时钟每次读数都不同：一条命令写投影与写事件仍须是同一时刻。
+func TestTimestampsMatchEventsUnderMovingClock(t *testing.T) {
+	e := setup(t)
+	tick := t0
+	e.x = command.New(e.st, func() time.Time { tick = tick.Add(time.Nanosecond); return tick })
+	if err := Register(e.x, e.kinds); err != nil {
+		t.Fatal(err)
+	}
+	a := e.create(t, owner, map[string]any{"phase": "open"})
+	b := e.create(t, owner, map[string]any{"phase": "open"})
+	e.must(t, owner, "item.update", map[string]any{"id": a, "title": "A2"})
+	e.must(t, owner, "item.relate", map[string]any{"from": a, "to": b, "type": domain.RelBlocks})
+	e.must(t, owner, "item.transition", map[string]any{"id": a, "to": "done", "reason": "shipped"})
+	e.verify(t)
+}
+
+// 迁移前已有的事项由事件日志回填，且与折叠结果一致。
+func TestTimestampsBackfilledOnMigration(t *testing.T) {
+	dir := t.TempDir()
+	open := func(m store.Module) *store.Store {
+		reg := store.NewRegistry()
+		for _, x := range []store.Module{eventlog.Module, command.Module, m} {
+			if err := reg.Register(x); err != nil {
+				t.Fatal(err)
+			}
+		}
+		st, err := store.Open(dir, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	updated := t0.Add(time.Hour)
+	it := domain.Item{ID: "itm_old", Phase: domain.PhaseOpen, Kind: domain.KindTask, Title: "old"}
+	old := open(store.Module{Name: Module.Name, Migrations: Module.Migrations[:1]})
+	if err := old.Update(bg, func(tx *store.Tx) error {
+		data, _ := json.Marshal(it)
+		if _, err := tx.Exec(`INSERT INTO items (id, phase, kind, project, assignee, data) VALUES (?, 'open', 'task', '', '', ?)`, it.ID, string(data)); err != nil {
+			return err
+		}
+		snap, _ := marshalPayload(payload{Op: "create", Item: it})
+		sys := domain.Actor{Type: domain.ActorSystem, Principal: "sys", Via: domain.ViaClock}
+		for _, ev := range []domain.Event{
+			{Type: domain.EvItemCreated, At: t0, Payload: snap},
+			{Type: domain.EvItemUpdated, At: updated, Payload: snap},
+			{Type: domain.EvItemDeadlinePassed, At: updated.Add(time.Hour), Payload: []byte(`{}`)}, // 不改事项，不算
+		} {
+			ev.Object, ev.Actor = it.ID, sys
+			if _, err := eventlog.Append(tx, ev); err != nil {
+				return err
+			}
+			if ev.Type != domain.EvItemDeadlinePassed {
+				if _, err := command.Bump(tx, it.ID); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+
+	st := open(Module)
+	defer st.Close()
+	if err := st.View(bg, func(tx *store.Tx) error {
+		got, err := Get(tx, it.ID)
+		if err != nil {
+			return err
+		}
+		if !got.CreatedAt.Equal(t0) || !got.UpdatedAt.Equal(updated) {
+			t.Fatalf("backfill: created %v updated %v", got.CreatedAt, got.UpdatedAt)
+		}
+		return Verify(tx)
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // 其他类别的 Timer 不归事项中心：处理器报错而不是吞掉。

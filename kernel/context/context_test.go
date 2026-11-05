@@ -210,7 +210,7 @@ func TestDecisionsHiddenAndWebOnlyNotice(t *testing.T) {
 		e.do(t, worker, "decision.request", map[string]any{"id": id, "ask": q})
 	}
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, _, _, err := items.Revise(tx, hidden, "test", func(it *domain.Item) error { it.Ask.ScreeningPending = true; return nil })
+		_, _, _, err := items.Revise(tx, hidden, "test", time.Now(), func(it *domain.Item) error { it.Ask.ScreeningPending = true; return nil })
 		return err
 	}); err != nil {
 		t.Fatal(err)

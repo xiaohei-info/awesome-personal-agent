@@ -472,7 +472,7 @@ func TestUnattendedInheritance(t *testing.T) {
 	e.wantExit(t, domain.ExitPermissionDenied, run, "delegate.create", map[string]any{"parent": parent, "assignee": workHost})
 
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, _, snap, err := items.Revise(tx, parent, "test", func(it *domain.Item) error { it.Unattended = true; return nil })
+		_, _, snap, err := items.Revise(tx, parent, "test", time.Now(), func(it *domain.Item) error { it.Unattended = true; return nil })
 		if err != nil {
 			return err
 		}

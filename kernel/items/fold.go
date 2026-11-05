@@ -61,8 +61,10 @@ func fold(tx *store.Tx) (folded, error) {
 			if err := json.Unmarshal(en.Event.Payload, &p); err != nil || p.Item.ID != en.Event.Object {
 				continue // 不是事项中心写的 payload
 			}
-			it := p.Item
-			it.Version = f.items[it.ID].Version + 1
+			prev := f.items[p.Item.ID]
+			p.Item.CreatedAt = prev.CreatedAt
+			it := stamped(p.Item, en.Event.At)
+			it.Version = prev.Version + 1
 			f.items[it.ID] = it
 			if p.Relation != nil {
 				if p.Remove {

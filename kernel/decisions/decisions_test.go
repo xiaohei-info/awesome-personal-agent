@@ -389,7 +389,7 @@ func TestScreeningPendingRejectsDelegate(t *testing.T) {
 	it := e.get(t, id)
 	it.Ask.ScreeningPending = true // 初筛模块的状态；本模块只读
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, _, _, err := items.Revise(tx, id, "test", func(x *domain.Item) error { x.Ask = it.Ask; return nil })
+		_, _, _, err := items.Revise(tx, id, "test", time.Now(), func(x *domain.Item) error { x.Ask = it.Ask; return nil })
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -505,7 +505,7 @@ func TestTimeoutWaitsForScreeningAndSkipsWebOnly(t *testing.T) {
 	id := e.asked(t, map[string]any{"default_on_timeout": "A", "deadline": t0.Add(time.Minute)})
 	set := func(f func(a *domain.Ask)) {
 		if err := e.st.Update(bg, func(tx *store.Tx) error {
-			_, _, _, err := items.Revise(tx, id, "test", func(x *domain.Item) error { a := *x.Ask; f(&a); x.Ask = &a; return nil })
+			_, _, _, err := items.Revise(tx, id, "test", time.Now(), func(x *domain.Item) error { a := *x.Ask; f(&a); x.Ask = &a; return nil })
 			return err
 		}); err != nil {
 			t.Fatal(err)

@@ -411,7 +411,7 @@ func TestDecisionWaitsForScreeningThenDelivers(t *testing.T) {
 	// 把另一个事项的 ask 标为初筛未返回：内核维护字段，只能直接改投影来模拟
 	other := e.asked(nil)
 	e.update(func(tx *store.Tx) error {
-		_, _, _, err := items.Revise(tx, other, "test", func(it *domain.Item) error { it.Ask.ScreeningPending = true; return nil })
+		_, _, _, err := items.Revise(tx, other, "test", time.Now(), func(it *domain.Item) error { it.Ask.ScreeningPending = true; return nil })
 		return err
 	})
 	e.update(func(tx *store.Tx) error { _, err := command.Bump(tx, other); return err })
@@ -424,7 +424,7 @@ func TestDecisionWaitsForScreeningThenDelivers(t *testing.T) {
 		t.Fatalf("delivered while screening pending: %+v", d)
 	}
 	e.update(func(tx *store.Tx) error {
-		_, _, _, err := items.Revise(tx, other, "test", func(it *domain.Item) error { it.Ask.ScreeningPending = false; return nil })
+		_, _, _, err := items.Revise(tx, other, "test", time.Now(), func(it *domain.Item) error { it.Ask.ScreeningPending = false; return nil })
 		return err
 	})
 	e.update(func(tx *store.Tx) error { _, err := command.Bump(tx, other); return err })

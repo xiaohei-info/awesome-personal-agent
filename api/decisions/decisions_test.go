@@ -279,7 +279,7 @@ func TestScreeningPendingAndPermission(t *testing.T) {
 	wrk, dlg, obs := e.token(auth.Worker, "wrk1"), e.token(auth.Delegate, ""), e.token(auth.Observer, "")
 	id := e.asked("", wrk)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, _, _, err := kitems.Revise(tx, id, "test", func(x *domain.Item) error {
+		_, _, _, err := kitems.Revise(tx, id, "test", time.Now(), func(x *domain.Item) error {
 			a := *x.Ask
 			a.ScreeningPending = true // 初筛模块的状态；本路由只读
 			x.Ask = &a

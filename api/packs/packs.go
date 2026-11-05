@@ -94,15 +94,16 @@ type packRule struct {
 
 // packView 只含包的声明性元数据；提示词正文、模板与脚本类内容不外露。
 type packView struct {
-	Name           string         `json:"name"`
-	Version        string         `json:"version"`
-	Description    string         `json:"description"`
-	Source         kp.Source      `json:"source"`
-	Hash           string         `json:"hash"`
-	Kinds          []string       `json:"kinds"`
-	InstanceParams map[string]any `json:"instance_params,omitempty"`
-	ClockRules     []packRule     `json:"clock_rules"`
-	EventRules     []packRule     `json:"event_rules"`
+	Name           string             `json:"name"`
+	Version        string             `json:"version"`
+	Description    string             `json:"description"`
+	Source         kp.Source          `json:"source"`
+	Hash           string             `json:"hash"`
+	Kinds          []string           `json:"kinds"`
+	InstanceParams map[string]any     `json:"instance_params,omitempty"`
+	ClockRules     []packRule         `json:"clock_rules"`
+	EventRules     []packRule         `json:"event_rules"`
+	Views          map[string]kp.View `json:"views"`
 }
 
 func (a *api) packs(w http.ResponseWriter, _ *http.Request, _ *core.Principal) error {
@@ -110,7 +111,7 @@ func (a *api) packs(w http.ResponseWriter, _ *http.Request, _ *core.Principal) e
 	for _, p := range a.ps.List() {
 		src, _ := a.ps.Source(p.Name)
 		v := packView{Name: p.Name, Version: p.Version, Description: p.Description, Source: src, Hash: p.Hash,
-			Kinds: []string{}, InstanceParams: p.InstanceParams, ClockRules: []packRule{}, EventRules: []packRule{}}
+			Kinds: []string{}, InstanceParams: p.InstanceParams, ClockRules: []packRule{}, EventRules: []packRule{}, Views: p.Views}
 		for _, k := range p.Kinds {
 			v.Kinds = append(v.Kinds, k.Name)
 		}

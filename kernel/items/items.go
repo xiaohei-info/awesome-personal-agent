@@ -5,6 +5,7 @@
 // 投影与事件的关系（§6.7）：每条命令在同一事务里更新投影并追加一条事件，事件 payload 带变更后的完整快照
 // （关系变更带关系本身），因此 Fold 能只靠事件重建投影；Verify 用它做一致性校验，Rebuild 用它修复。
 // 乐观版本只有一个来源（命令管线的 command_version），本包不另存。
+// created_at、updated_at 是事项事件时间的投影，存于独立列，不进 data 与事件快照，折叠时取事件的 At。
 package items
 
 import (
@@ -14,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -40,6 +42,16 @@ CREATE TABLE item_relations (
 	PRIMARY KEY (type, from_id, to_id)
 ) WITHOUT ROWID;
 CREATE INDEX item_relations_to ON item_relations(to_id);`,
+}, {
+	// 回填依赖 eventlog 的表：迁移按模块名排序，eventlog 先于 items。类型清单同 itemEvents。
+	Version: 2, Name: "add-item-timestamps",
+	SQL: `ALTER TABLE items ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE items ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+UPDATE items SET
+	created_at = COALESCE((SELECT at FROM eventlog_event WHERE object = items.id AND type IN ('item.created', 'item.updated', 'item.phase_changed',
+		'decision.requested', 'decision.resolved', 'delegation.created', 'delegation.reported') ORDER BY seq LIMIT 1), 0),
+	updated_at = COALESCE((SELECT at FROM eventlog_event WHERE object = items.id AND type IN ('item.created', 'item.updated', 'item.phase_changed',
+		'decision.requested', 'decision.resolved', 'delegation.created', 'delegation.reported') ORDER BY seq DESC LIMIT 1), 0);`,
 }}}
 
 func invalid(why string) error {
@@ -70,19 +82,23 @@ func newID() (string, error) {
 // ---- 读 ----
 
 func scanItem(r *store.Rows) (domain.Item, error) {
-	var data string
-	if err := r.Scan(&data); err != nil {
+	var (
+		data             string
+		created, updated int64
+	)
+	if err := r.Scan(&data, &created, &updated); err != nil {
 		return domain.Item{}, err
 	}
 	var it domain.Item
 	if err := json.Unmarshal([]byte(data), &it); err != nil {
 		return it, fmt.Errorf("items: corrupt row: %w", err)
 	}
+	it.CreatedAt, it.UpdatedAt = time.Unix(0, created).UTC(), time.Unix(0, updated).UTC()
 	return it, nil
 }
 
 func query(tx *store.Tx, where string, args ...any) ([]domain.Item, error) {
-	r, err := tx.Query("SELECT data FROM items "+where, args...)
+	r, err := tx.Query("SELECT data, created_at, updated_at FROM items "+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -180,14 +196,29 @@ func hasRelation(tx *store.Tx, x domain.Relation) (bool, error) {
 
 // ---- 写（投影） ----
 
+// stamped 记下一条事项事件的时刻：首条是 created_at，每条都是 updated_at。写投影与折叠共用。
+// 写投影时 at 必须等于同一事务里那条事件的 At，否则 Verify 报不一致。
+func stamped(it domain.Item, at time.Time) domain.Item {
+	if it.CreatedAt.IsZero() {
+		it.CreatedAt = at
+	}
+	it.UpdatedAt = at
+	return it
+}
+
+// bare 去掉不进 data 与事件快照的字段：版本归命令管线，时间在独立列。
+func bare(it domain.Item) domain.Item {
+	it.Version, it.CreatedAt, it.UpdatedAt = 0, time.Time{}, time.Time{}
+	return it
+}
+
 func save(tx *store.Tx, it domain.Item) error {
-	it.Version = 0 // 版本归命令管线，不进投影
-	b, err := json.Marshal(it)
+	b, err := json.Marshal(bare(it))
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT OR REPLACE INTO items (id, phase, kind, project, assignee, data) VALUES (?, ?, ?, ?, ?, ?)`,
-		it.ID, string(it.Phase), string(it.Kind), it.Project, it.Assignee, string(b))
+	_, err = tx.Exec(`INSERT OR REPLACE INTO items (id, phase, kind, project, assignee, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		it.ID, string(it.Phase), string(it.Kind), it.Project, it.Assignee, string(b), it.CreatedAt.UnixNano(), it.UpdatedAt.UnixNano())
 	return err
 }
 
