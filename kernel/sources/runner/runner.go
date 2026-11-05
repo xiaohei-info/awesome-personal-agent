@@ -563,6 +563,14 @@ func nextAttempt(at time.Time, schedule string, failures int) time.Time {
 	return at.Add(min(d, max(maxBackoff, p)))
 }
 
+// AppendInternal 把内核自己产生的来源事件（不经拉取，如对话增量捕获）落盘为 pending；
+// 按 src 的去重键幂等，重复提交不产生第二条。事件 id 取 ev.ID，处置字段由入站流水线维护。
+func AppendInternal(tx *store.Tx, src domain.Source, ev domain.SourceEvent) error {
+	return insertEvent(tx, src, "", parsedEvent{ID: ev.ID, Type: ev.Type, Subject: ev.Subject, Summary: ev.Summary,
+		Detail: ev.Detail, Link: ev.Link, OccurredAt: ev.OccurredAt, CorrelationKeys: ev.CorrelationKeys,
+		Sender: ev.Sender, SenderVerified: ev.SenderVerified})
+}
+
 func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent) error {
 	key := src.DedupeKeyFor(ev.ID)
 	var rnd [8]byte
@@ -631,6 +639,110 @@ func SetDisposition(tx *store.Tx, id string, d domain.Disposition, item string) 
 		return domain.NewError(domain.CodeConflict, "source event "+id+" is not pending", "re-read the source event")
 	}
 	return err
+}
+
+// 挂靠消息状态（§9.4 attach_state）。
+const (
+	AttachPending    = "pending"
+	AttachForwarded  = "forwarded"
+	AttachProcessed  = "processed"
+	AttachHandedBack = "handed_back"
+	AttachReleased   = "released"
+)
+
+// attachFrom 是每个目标状态允许的前一状态；"" 表示尚未挂靠。
+var attachFrom = map[string][]string{
+	AttachPending:    {""},
+	AttachForwarded:  {AttachPending},
+	AttachProcessed:  {AttachForwarded},
+	AttachHandedBack: {AttachPending, AttachForwarded},
+	AttachReleased:   {AttachPending, AttachForwarded},
+}
+
+// SetAttachState 在调用方事务内推进一条来源事件的挂靠状态，只允许 attachFrom 里的转移，否则是冲突。
+// 转入 pending 时同时把事项记为 disposition=attached；转入 handed_back、released 时把 disposition 放回 pending，
+// 让事件重新进入判断流（item 保留，作关联线索）。item 只在转入 pending 时使用。
+// 这两列只由跟进消息归属经本函数维护；不记事件，调用方自己负责留痕。
+func SetAttachState(tx *store.Tx, id, to, item string) error {
+	from, ok := attachFrom[to]
+	if !ok {
+		return domain.NewError(domain.CodeInvalidRequest, "attach state "+to+" cannot be set", "use pending, forwarded, processed, handed_back or released")
+	}
+	disp, dispFrom := "", ""
+	switch to {
+	case AttachPending:
+		disp, dispFrom = string(domain.DispositionAttached), string(domain.DispositionPending)
+	case AttachHandedBack, AttachReleased:
+		disp, dispFrom = string(domain.DispositionPending), string(domain.DispositionAttached)
+	}
+	for _, f := range from {
+		var (
+			n   int64
+			err error
+		)
+		switch {
+		case disp == "": // forwarded、processed：处置不变
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
+				to, id, f, string(domain.DispositionAttached))
+		case to == AttachPending:
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
+				to, disp, item, id, f, dispFrom)
+		default:
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
+				to, disp, id, f, dispFrom)
+		}
+		if err != nil || n > 0 {
+			return err
+		}
+	}
+	return domain.NewError(domain.CodeConflict, "source event "+id+" cannot move to attach state "+to, "re-read the source event")
+}
+
+// Attachment 是挂在某事项上的来源事件，Seq 是它的落盘顺序（跟进消息的确认游标）。
+type Attachment struct {
+	domain.SourceEvent
+	Seq int64
+}
+
+// Attachments 按落盘顺序返回挂在事项上、仍是 attached 的来源事件。
+func Attachments(tx *store.Tx, item string) ([]Attachment, error) {
+	rows, err := tx.Query(`SELECT seq, `+eventCols+` FROM sources_runner_event WHERE disposition = ? AND item = ? ORDER BY seq`,
+		string(domain.DispositionAttached), item)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Attachment
+	for rows.Next() {
+		var (
+			a            Attachment
+			at, verified int64
+			keys, disp   string
+		)
+		e := &a.SourceEvent
+		if err := rows.Scan(&a.Seq, &e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
+			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState); err != nil {
+			return nil, err
+		}
+		e.OccurredAt, e.SenderVerified, e.Disposition = time.Unix(0, at).UTC(), verified != 0, domain.Disposition(disp)
+		if err := json.Unmarshal([]byte(keys), &e.CorrelationKeys); err != nil {
+			return nil, fmt.Errorf("runner: event %s correlation_keys: %w", e.ID, err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// Event 按 id 读一条来源事件。
+func Event(tx *store.Tx, id string) (domain.SourceEvent, error) {
+	es, err := queryEvents(tx, `WHERE id = ?`, id)
+	if err != nil {
+		return domain.SourceEvent{}, err
+	}
+	if len(es) == 0 {
+		return domain.SourceEvent{}, domain.NewError(domain.CodeNotFound, "source event "+id+" not found", "list the item's attached messages")
+	}
+	return es[0], nil
 }
 
 func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent, error) {

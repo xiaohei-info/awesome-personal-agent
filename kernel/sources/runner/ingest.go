@@ -12,25 +12,25 @@ import (
 // 不动游标与统计；事件按 (去重域, 事件 id) 去重，重放不产生重复。
 const CmdIngest = "source.ingest"
 
-// Event 是标准事件（§9.2 的字段）。
-type Event = parsedEvent
+// IngestEvent 是标准事件（§9.2 的字段）。
+type IngestEvent = parsedEvent
 
 // IngestInput 是 CmdIngest 的输入；RunID 记录事件的来由（接收记录 id 或转换脚本的 Run）。
 type IngestInput struct {
-	SourceID string  `json:"source_id"`
-	RunID    string  `json:"run_id"`
-	Events   []Event `json:"events"`
+	SourceID string        `json:"source_id"`
+	RunID    string        `json:"run_id"`
+	Events   []IngestEvent `json:"events"`
 }
 
 // ParseEvents 解析转换脚本的 stdout：每行一个标准事件，不含游标行。
 // truncated 为真表示输出超出外呼调用器保留的末段，开头的事件已丢，调用方不应当作成功。
-func ParseEvents(stdout []byte) (events []Event, rejects []Reject, truncated bool) {
+func ParseEvents(stdout []byte) (events []IngestEvent, rejects []Reject, truncated bool) {
 	p := parse(stdout)
 	return p.events, p.rejects, p.truncated
 }
 
 // ValidEvent 校验事件满足必填字段（映射产出的事件与脚本输出同一标准）。
-func ValidEvent(ev Event) error {
+func ValidEvent(ev IngestEvent) error {
 	b, _ := json.Marshal(ev)
 	_, err := asEvent(b)
 	return err

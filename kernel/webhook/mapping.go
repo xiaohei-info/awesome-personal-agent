@@ -133,12 +133,12 @@ const detailLimit = 16 << 10
 
 // mapEvent 按字段映射把 payload 转成标准事件（§9.2）。
 // 缺省：id 取投递键、subject 取 type、occurred_at 取接收时间；sender_verified 只在声明 on_signature 且签名方案通过时为真。
-func mapEvent(m packs.WebhookMapping, c exprCtx, body []byte, deliveryKey string, received time.Time, signed bool) (runner.Event, error) {
+func mapEvent(m packs.WebhookMapping, c exprCtx, body []byte, deliveryKey string, received time.Time, signed bool) (runner.IngestEvent, error) {
 	f := func(name string) string {
 		s, _ := m.Fields[name].(string)
 		return c.render(s)
 	}
-	ev := runner.Event{ID: f("id"), Type: f("type"), Subject: f("subject"), Summary: f("summary"), Detail: f("detail"),
+	ev := runner.IngestEvent{ID: f("id"), Type: f("type"), Subject: f("subject"), Summary: f("summary"), Detail: f("detail"),
 		Link: f("link"), Sender: f("sender"), OccurredAt: received}
 	if ev.ID == "" {
 		ev.ID = deliveryKey

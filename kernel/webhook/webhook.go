@@ -491,7 +491,7 @@ func (s *Service) one(ctx context.Context, g Ingest) error {
 	return s.ingest(ctx, g, evs)
 }
 
-func (s *Service) mapAll(cfg sourceConfig, g Ingest) ([]runner.Event, error) {
+func (s *Service) mapAll(cfg sourceConfig, g Ingest) ([]runner.IngestEvent, error) {
 	c := newExprCtx(g.Headers, g.Body)
 	for _, id := range cfg.Mappings {
 		m, ok := s.mapping(id)
@@ -509,13 +509,13 @@ func (s *Service) mapAll(cfg sourceConfig, g Ingest) ([]runner.Event, error) {
 		if err != nil {
 			return nil, fmt.Errorf("mapping %s: %w", id, err)
 		}
-		return []runner.Event{ev}, nil
+		return []runner.IngestEvent{ev}, nil
 	}
 	return nil, errors.New("no mapping matched this payload")
 }
 
 // ingest 经命令模型把事件写进来源事件表（与拉取型同一流水线），再标记 processed。幂等键含代数，重放换新键。
-func (s *Service) ingest(ctx context.Context, g Ingest, evs []runner.Event) error {
+func (s *Service) ingest(ctx context.Context, g Ingest, evs []runner.IngestEvent) error {
 	in, err := json.Marshal(runner.IngestInput{SourceID: g.SourceID, RunID: g.ID, Events: evs})
 	if err != nil {
 		return err
