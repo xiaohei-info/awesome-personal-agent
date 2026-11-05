@@ -1,0 +1,32 @@
+name: brief
+version: 1.0.0
+description: 周期简报，按项目分节
+kinds:
+  - name: brief
+    title: 简报
+    spec_schema:
+      type: object
+      properties:
+        period: {type: string}
+        sections:
+          type: array
+          items:
+            type: object
+            properties:
+              project: {type: string}
+              body: {type: string}
+instance_params:
+  type: object
+  required: [schedule]
+  properties:
+    schedule: {type: string}
+    projects: {type: array, items: {type: string}}
+clock_rules:
+  - id: scheduled-brief
+    type: recur
+    schedule: "{instance.schedule}"
+    do:
+      - action: create_item
+        kind: brief
+      - action: call_agent
+        prompt: write-brief
