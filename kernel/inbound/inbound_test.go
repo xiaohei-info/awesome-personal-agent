@@ -3,6 +3,7 @@ package inbound
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -638,5 +639,101 @@ func TestRerunAfterPartialFailureResumesWithoutDuplicate(t *testing.T) {
 	evs := e.events("src_m")
 	if evs[0].Disposition != domain.DispositionProposed || len(e.allItems()) != 1 || e.allItems()[0].ID != evs[0].Item {
 		t.Fatalf("event %+v items %+v", evs[0], e.allItems())
+	}
+}
+
+// ACT-TRI-02：未判定事件手动转建议：进建议流，操作者是本人，处置改为 proposed 并关联事项，事项可从事件折叠重建。
+func TestProposeUnjudgedManually(t *testing.T) {
+	e := newEnv(t, false)
+	e.emit("src_m", "inbox", ev("m1", "mail.received", "合同请签字", nil))
+	id := e.events("src_m")[0].ID
+
+	got, err := e.svc.ProposeUnjudged(bg, owner, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Disposition != domain.DispositionProposed || got.Item == "" {
+		t.Fatalf("event %+v", got)
+	}
+	it := e.item(got.Item)
+	if it.Phase != domain.PhaseProposed || it.Kind != defaultKind || it.Title != "合同请签字" || it.Project != e.mail || it.Origin.Source != "src_m" {
+		t.Fatalf("item %+v", it) // kind 缺省 task，项目沿用命中规则的 fixed
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		for obj, typ := range map[string]string{id: EvDisposed, got.Item: domain.EvItemCreated} {
+			es, err := eventlog.ReadObject(tx, obj)
+			if err != nil {
+				return err
+			}
+			if last := es[len(es)-1].Event; last.Type != typ || last.Actor.Principal != "owner" || last.Actor.Type != domain.ActorHuman {
+				t.Fatalf("%s: %+v", obj, last)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM items WHERE id = ?`, got.Item); err != nil {
+			return err
+		}
+		if err := items.Rebuild(tx); err != nil {
+			return err
+		}
+		return items.Verify(tx)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if e.item(got.Item).Title != "合同请签字" {
+		t.Fatal("rebuilt item differs")
+	}
+}
+
+func code(err error) domain.Code {
+	var de *domain.Error
+	if errors.As(err, &de) {
+		return de.Code
+	}
+	return ""
+}
+
+func TestProposeUnjudgedRejections(t *testing.T) {
+	e := newEnv(t, false)
+	e.emit("src_t", "ticket", ev("t1", "ticket.opened", "规则已建议", nil))
+	e.emit("src_m", "inbox", ev("m1", "mail.received", "未判定", nil))
+	proposed, unjudged := e.events("src_t")[0], e.events("src_m")[0]
+	before := len(e.allItems())
+
+	if _, err := e.svc.ProposeUnjudged(bg, owner, proposed.ID); code(err) != domain.CodeConflict {
+		t.Fatalf("not unjudged: %v", err)
+	}
+	if _, err := e.svc.ProposeUnjudged(bg, owner, "sev_missing"); code(err) != domain.CodeNotFound {
+		t.Fatalf("missing: %v", err)
+	}
+	// item.create 对任何凭据开放：没有来源管理权的凭据不能留下事项。
+	worker := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "w", Via: domain.ViaCLI}, Level: authz.LevelWorker}
+	if _, err := e.svc.ProposeUnjudged(bg, worker, unjudged.ID); code(err) != domain.CodePermissionDenied {
+		t.Fatalf("worker: %v", err)
+	}
+	if n := len(e.allItems()); n != before {
+		t.Fatalf("rejected calls created items: %d -> %d", before, n)
+	}
+}
+
+// 上次建好事项却没记完处置：重试接回已建事项，不建第二个；换一个身份重试也一样。
+func TestProposeUnjudgedResumesAfterPartialFailure(t *testing.T) {
+	e := newEnv(t, false)
+	e.emit("src_m", "inbox", ev("m1", "mail.received", "未判定", nil))
+	id := e.events("src_m")[0].ID
+	var made struct{ ID string }
+	_ = json.Unmarshal(e.must("item.create", map[string]any{"kind": "task", "title": "t", "ext": map[string]string{"source_event": id}}), &made)
+
+	dlg := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "d", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
+	got, err := e.svc.ProposeUnjudged(bg, dlg, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Item != made.ID || len(e.allItems()) != 1 {
+		t.Fatalf("event %+v, %d items", got, len(e.allItems()))
 	}
 }

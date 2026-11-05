@@ -11,6 +11,7 @@
 //   - accept: auto 的规则：observe 档事项照常以 proposed 进入，只记一条"本来会自动接受"；auto 档（只在 Web 切换）
 //     直接进 open，Event 记策略版本与规则 id；off 档按普通规则处理。
 //   - 事项与处置都经命令模型写入，每个来源事件的写入幂等，崩溃后重跑不产生重复事项。
+//   - 留在来源页的 unjudged 事件由本人手动转建议（propose.go），只走"进入 proposed"这一步，不再判断、不自动接受。
 //
 // 跟进消息归属（§9.4）不在本包：它在判断之前拦截事件，由 kernel-followmsg 负责，经 Options.Intercept 接入；
 // 命中的挂靠后结束，没命中但有关联线索的，线索随判断输入与事项理由带走。
@@ -94,6 +95,8 @@ type Service struct {
 	o     Options
 	mu    sync.Mutex
 	again atomic.Bool
+	// proposing 串行化手动转建议；不与 mu 共用，mu 在模型调用期间一直被占着。
+	proposing sync.Mutex
 }
 
 // New 返回 Service。Store、Exec、Packs、Judge 必须给出。
@@ -121,20 +124,21 @@ type disposeIn struct {
 	WouldAccept bool `json:"would_accept,omitempty"`
 }
 
+func parseDispose(in json.RawMessage) (disposeIn, error) {
+	var v disposeIn
+	dec := json.NewDecoder(strings.NewReader(string(in)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&v); err != nil {
+		return v, invalid("bad input: " + err.Error())
+	}
+	return v, nil
+}
+
 // Register 登记本模块的命令，并在每次来源拉取结果入账后立即处理新事件。
 func (s *Service) Register(x *command.Executor) error {
-	parse := func(in json.RawMessage) (disposeIn, error) {
-		var v disposeIn
-		dec := json.NewDecoder(strings.NewReader(string(in)))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&v); err != nil {
-			return v, invalid("bad input: " + err.Error())
-		}
-		return v, nil
-	}
 	err := x.Register(command.Spec{Name: CmdDispose, Action: authz.ActionUpdateOwn,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
-			v, err := parse(in)
+			v, err := parseDispose(in)
 			if err != nil {
 				return authz.Object{}, err
 			}
@@ -142,7 +146,7 @@ func (s *Service) Register(x *command.Executor) error {
 			return authz.Object{ID: v.Event, Assignee: systemPrinc}, nil
 		},
 		Apply: func(c *command.Ctx) (any, error) {
-			v, _ := parse(c.Input)
+			v, _ := parseDispose(c.Input)
 			if err := runner.SetDisposition(c.Tx, v.Event, v.Disposition, v.Item); err != nil {
 				return nil, err
 			}
@@ -161,6 +165,9 @@ func (s *Service) Register(x *command.Executor) error {
 		return err
 	}
 	if err := s.registerCapture(x); err != nil {
+		return err
+	}
+	if err := registerPropose(x); err != nil {
 		return err
 	}
 	x.OnCommit(func(c command.Commit) {
@@ -195,43 +202,59 @@ func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
 		if sn.events, err = runner.Pending(tx); err != nil || len(sn.events) == 0 {
 			return err
 		}
-		srcs, err := registry.List(tx)
-		if err != nil {
-			return err
-		}
-		sn.sources = map[string]domain.Source{}
-		for _, x := range srcs {
-			sn.sources[x.ID] = x
-		}
-		all, err := rules.List(tx)
-		if err != nil {
-			return err
-		}
-		sn.modes = map[string]string{}
-		for _, r := range all {
-			sn.modes[r.Key] = r.Mode
-		}
-		if sn.projs, err = projects.List(tx); err != nil {
-			return err
-		}
-		// shortcut: 每轮扫一遍全部事项找出已建事项；事项量大到拖慢时，给事项加按来源事件的索引。
-		its, err := items.List(tx, items.Filter{})
-		if err != nil {
-			return err
-		}
-		sn.made = map[string]string{}
-		for _, it := range its {
-			var x struct {
-				SourceEvent string `json:"source_event"`
-			}
-			if len(it.Ext) > 0 && json.Unmarshal(it.Ext, &x) == nil && x.SourceEvent != "" {
-				sn.made[x.SourceEvent] = it.ID
-			}
-		}
-		sn.policy, _, err = policy.Current(tx)
-		return err
+		return sn.loadFacts(tx)
 	})
 	return sn, err
+}
+
+// loadFacts 读事件之外的账本事实。
+func (sn *snapshot) loadFacts(tx *store.Tx) error {
+	srcs, err := registry.List(tx)
+	if err != nil {
+		return err
+	}
+	sn.sources = map[string]domain.Source{}
+	for _, x := range srcs {
+		sn.sources[x.ID] = x
+	}
+	all, err := rules.List(tx)
+	if err != nil {
+		return err
+	}
+	sn.modes = map[string]string{}
+	for _, r := range all {
+		sn.modes[r.Key] = r.Mode
+	}
+	if sn.projs, err = projects.List(tx); err != nil {
+		return err
+	}
+	// shortcut: 每轮扫一遍全部事项找出已建事项；事项量大到拖慢时，给事项加按来源事件的索引。
+	its, err := items.List(tx, items.Filter{})
+	if err != nil {
+		return err
+	}
+	sn.made = map[string]string{}
+	for _, it := range its {
+		var x struct {
+			SourceEvent string `json:"source_event"`
+		}
+		if len(it.Ext) > 0 && json.Unmarshal(it.Ext, &x) == nil && x.SourceEvent != "" {
+			sn.made[x.SourceEvent] = it.ID
+		}
+	}
+	sn.policy, _, err = policy.Current(tx)
+	return err
+}
+
+// source 取事件所属来源；对话增量的内部来源不在登记表里。
+func (sn *snapshot) source(id string) (domain.Source, error) {
+	if src, ok := sn.sources[id]; ok {
+		return src, nil
+	}
+	if _, isCapture := captureProject(id); isCapture {
+		return captureSource(id), nil
+	}
+	return domain.Source{}, fmt.Errorf("source %s is not registered", id)
 }
 
 // Process 处理当前所有 pending 的来源事件。单个事件失败不影响其他事件，错误合并返回，失败的事件保持 pending。
@@ -340,12 +363,9 @@ type proposal struct {
 }
 
 func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) error {
-	src, ok := sn.sources[ev.SourceID]
-	if _, isCapture := captureProject(ev.SourceID); !ok && isCapture {
-		src, ok = captureSource(ev.SourceID), true
-	}
-	if !ok {
-		return fmt.Errorf("source %s is not registered", ev.SourceID)
+	src, err := sn.source(ev.SourceID)
+	if err != nil {
+		return err
 	}
 	var hint string
 	if s.o.Intercept != nil {
@@ -501,6 +521,15 @@ func under(link, remote string) bool {
 
 // propose 建 proposed 事项，按需自动接受，再记处置。每步的幂等键都含来源事件 id。
 func (s *Service) propose(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, p proposal, project string) error {
+	item, err := s.createItem(ctx, system, m.key(), src, ev, p, project)
+	if err != nil {
+		return err
+	}
+	return s.finish(ctx, sn, m, ev, item, p.reason)
+}
+
+// createItem 以 id 的身份为来源事件建 proposed 事项；ext.source_event 记下来源事件，供重入时找回已建事项。
+func (s *Service) createItem(ctx context.Context, id command.Identity, rule string, src domain.Source, ev domain.SourceEvent, p proposal, project string) (string, error) {
 	ref := ev.Link
 	if ref == "" {
 		ref = ev.ID
@@ -508,17 +537,15 @@ func (s *Service) propose(ctx context.Context, sn snapshot, src domain.Source, e
 	in := map[string]any{"kind": p.kind, "title": p.title, "summary": p.summary, "body": ev.Detail, "project": project,
 		"origin": domain.Origin{Source: src.ID, Actor: ev.Sender, Ref: ref}, "reason": p.reason,
 		"ext": map[string]string{"source_event": ev.ID}}
-	res, err := s.do(ctx, system, m.key(), "inbound:item:"+ev.ID, "item.create", in, command.Chain{})
+	res, err := s.do(ctx, id, rule, "inbound:item:"+ev.ID, "item.create", in, command.Chain{})
 	if err != nil {
-		return err
+		return "", err
 	}
 	var item struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(res.Value, &item); err != nil {
-		return err
-	}
-	return s.finish(ctx, sn, m, ev, item.ID, p.reason)
+	err = json.Unmarshal(res.Value, &item)
+	return item.ID, err
 }
 
 // finish 在事项建好之后按需自动接受，再记处置；对同一事件可重复执行。

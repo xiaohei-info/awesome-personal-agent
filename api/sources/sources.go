@@ -4,6 +4,8 @@
 //	POST /sources/{id}/webhook          创建或轮换 webhook 接收密钥
 //	GET /sources/{id}/ingests           入站记录
 //	POST /ingests/{id}/replay           重放
+//	GET /sources/{id}/events            来源事件，可按 disposition 过滤，after + limit 分页
+//	POST /source-events/{id}/propose    把未判定事件转为建议
 //
 // 路由只做传输：解码、选命令、渲染。授权与校验都在内核命令管线：可执行命令（script 来源）走只 Web 的命令，
 // delegate 得到 web_only（退出码 20，留痕）；pull 的命令须在随发行附带的清单内。/ingest/{source_id} 接收路由不在本包。
@@ -14,6 +16,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -24,6 +27,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/webhook"
 )
@@ -55,17 +59,28 @@ type Replayer interface {
 	Replay(ctx context.Context, ingestID string) error
 }
 
+// Proposer 把未判定事件转为建议（*inbound.Service 满足它）。
+type Proposer interface {
+	ProposeUnjudged(ctx context.Context, id command.Identity, event string) (domain.SourceEvent, error)
+}
+
+const (
+	defaultEventLimit = 100
+	maxEventLimit     = 500
+)
+
 type api struct {
 	st *store.Store
 	x  *command.Executor
 	rp Replayer
+	pr Proposer
 	au *auth.Auth
 }
 
 // Mount 在 x 上登记本包的两条命令并返回路由分组，挂到 core.Deps.Groups 即生效。
 // x 须已由 registry.Register 登记来源命令；au 用于签发 webhook 密钥。
-func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer) (core.RouteGroup, error) {
-	a := &api{st: st, x: x, rp: rp, au: au}
+func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr Proposer) (core.RouteGroup, error) {
+	a := &api{st: st, x: x, rp: rp, pr: pr, au: au}
 	for _, s := range []command.Spec{
 		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
 		{Name: CmdReplay, Action: authz.ActionManageSource, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
@@ -82,6 +97,8 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer) (co
 		r.Handle(core.Route{Method: "POST", Path: "/sources/{id}/webhook", MaxBody: 1 << 10, Handler: a.webhookKey})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/ingests", Handler: readable(a.ingests)})
 		r.Handle(core.Route{Method: "POST", Path: "/ingests/{id}/replay", MaxBody: 1 << 10, Handler: a.replay})
+		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/events", Handler: readable(a.events)})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
 	}, nil
 }
 
@@ -378,4 +395,64 @@ func (a *api) replay(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, viewOf(g))
+}
+
+// ---- 来源事件 ----
+
+func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	// 这里是未过滤的外部内容，运行凭据只能经转发白名单读挂靠消息（§9.4、§14.3）。
+	if p.Caller.Level == authz.LevelRun {
+		return domain.NewError(domain.CodePermissionDenied, "run credential cannot list source events", "read forwarded messages from the context instead")
+	}
+	q := r.URL.Query()
+	d := domain.Disposition(q.Get("disposition"))
+	switch d {
+	case "", domain.DispositionPending, domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored, domain.DispositionUnjudged:
+	default:
+		return invalid("disposition is not valid", "use pending, attached, proposed, ignored or unjudged")
+	}
+	var after int64
+	if s := q.Get("after"); s != "" {
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil || n < 0 {
+			return invalid("after must be a non-negative integer", "use next_after from the previous page")
+		}
+		after = n
+	}
+	limit := defaultEventLimit
+	if s := q.Get("limit"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 || n > maxEventLimit {
+			return invalid("limit is out of range", "use 1 <= limit <= "+strconv.Itoa(maxEventLimit))
+		}
+		limit = n
+	}
+	id := r.PathValue("id")
+	var (
+		evs  []domain.SourceEvent
+		next int64
+	)
+	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
+		if _, err := registry.Get(tx, id); err != nil {
+			return err
+		}
+		var err error
+		evs, next, err = runner.EventPage(tx, id, d, after, limit)
+		return err
+	}); err != nil {
+		return err
+	}
+	out := map[string]any{"events": evs}
+	if next != 0 {
+		out["next_after"] = next
+	}
+	return core.WriteJSON(w, http.StatusOK, out)
+}
+
+func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	ev, err := a.pr.ProposeUnjudged(r.Context(), p.Identity, r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, ev)
 }
