@@ -86,9 +86,18 @@ func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 		t.Fatalf("settings changed by a Bearer request: %+v → %+v", before, after)
 	}
 
-	// 被拒绝的 delegate 写命令可在审计里查到（command.rejected）：tokens、allowed-executors、purge 各一条。
-	if n := len(e.events(domain.EvCommandRejected)); n < 3 {
-		t.Fatalf("expected ≥3 command.rejected events from the delegate attempts, got %d", n)
+	// 被拒绝的 delegate 写请求都可在审计里查到（command.rejected）：policy、tokens、allowed-executors、purge 各一条；
+	// worker、observer 的退出码 4 不记账，策略读取也不是写命令。
+	got := map[string]int{}
+	for _, en := range e.events(domain.EvCommandRejected) {
+		got[en.Event.Object]++
+		if en.Event.Actor.Type != domain.ActorAgent || en.Event.Reason == "" {
+			t.Fatalf("rejection event lacks actor/reason: %+v", en.Event)
+		}
+	}
+	want := map[string]int{"settings:/settings/policy": 1, "settings:credentials": 1, prj: 1, victim: 1}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("audited rejections %v, want %v", got, want)
 	}
 
 	// 对照：同样的请求经 Web 会话成功（否则上面的拒绝可能只是请求本身无效）。
