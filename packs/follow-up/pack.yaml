@@ -1,0 +1,11 @@
+name: follow-up
+version: 1.0.0
+description: 等待到期后的跟进：跟进间隔时钟规则，判断催、再等或建议放弃，必要时逐级升级到生成型与任务型
+clock_rules:
+  - id: follow-up-interval
+    type: follow_up
+    schedule: 72h
+    mode: observe
+    do:
+      - action: call_agent
+        prompt: follow-up-judge
