@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -133,7 +134,7 @@ func (e *Engine) createItem(_ context.Context, c Call) error {
 	return err
 }
 
-// createTimer：after（时长）或 at（RFC 3339）建一次性提醒，schedule（固定间隔）建周期 Timer。
+// createTimer：after（时长）或 at（RFC 3339）建一次性提醒，schedule（时长或 cron）建周期 Timer。
 // Timer 的目标是触发事项，到期经触达提醒（HandleTimer）；时钟规则没有触发事项，不能用这个动作。
 func (e *Engine) createTimer(_ context.Context, c Call) error {
 	if c.Item == nil {
@@ -155,11 +156,11 @@ func (e *Engine) createTimer(_ context.Context, c Call) error {
 		in.At = at
 	case str(c.Action, "schedule") != "":
 		s := str(c.Action, "schedule")
-		d, err := time.ParseDuration(s)
-		if err != nil || d <= 0 {
-			return invalid(fmt.Sprintf("create_timer schedule %q must be a fixed interval such as 24h", s))
+		at, err := clock.Start(s, e.now())
+		if err != nil {
+			return invalid(fmt.Sprintf("create_timer schedule %q must be a duration such as 24h or a 5-field cron expression", s))
 		}
-		in.Kind, in.Every, in.At = "recur", s, e.now().Add(d)
+		in.Kind, in.Every, in.At = "recur", s, at
 	default:
 		return invalid("create_timer needs one of after, at, schedule")
 	}

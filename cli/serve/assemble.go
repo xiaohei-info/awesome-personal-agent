@@ -71,8 +71,10 @@ const (
 	owner            = "owner"
 )
 
-// bundledPull 是随发行附带的拉取程序（sources/ 下走 §9.2 的），delegate 可以登记；托管型读取器不是来源，不在其中。
-var bundledPull = []string{"http-json", "dir-watch"}
+// bundledPull 是随发行附带的拉取程序（设计 §9.1 定时拉取：GitHub、RSS/Atom、本地目录监视、通用 HTTP JSON），delegate 可以登记。
+// 邮件、日历适配器按 §9.7 与自定义脚本同级，只在 Web 或主机配置文件登记（§14.12）；托管型读取器不是来源，都不在其中。
+// 新增 sources/*/cmd/* 程序必须在这里登记，或在 serve_test.go:notBundled 里写明不登记的理由，否则测试失败。
+var bundledPull = []string{"http-json", "dir-watch", "github-source", "rss-source"}
 
 // hostOwner 是启动流程读主机配置文件时的身份：本人在主机上写的配置，与 Web 上的本人同级（§14.12）。
 var hostOwner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: owner, Via: domain.ViaWeb}, Level: authz.LevelWeb}

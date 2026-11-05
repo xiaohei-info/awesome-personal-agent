@@ -535,6 +535,56 @@ func TestHMACWebhookKeyIsKeptOnlyInKeyFile(t *testing.T) {
 	}
 }
 
+// 吊销接收密钥：账本里的凭据全部吊销，同一事务里删掉 HMAC 明文文件；删不掉则整体回滚，账本不变。
+func TestRevokeWebhookKeyDeletesKeyFile(t *testing.T) {
+	e := setup(t)
+	obs, dlg := e.token(auth.Observer), e.token(auth.Delegate)
+	e.do(dlg, "POST", "/v1/sources", `{"id":"src_signed","type":"webhook","source_type":"forge","config":{"scheme":"signed"}}`)
+	var k1, k2 struct{ Secret string }
+	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "").into(&k1)
+	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "").into(&k2) // 轮换：宽限期内两把都有效
+	file := filepath.Join(e.keys, "src_signed")
+
+	if r := e.do(obs, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code == 200 {
+		t.Fatal("observer must not revoke receive keys")
+	}
+	if os.Geteuid() != 0 { // root 不受目录权限限制，无法制造删除失败
+		if err := os.Chmod(e.keys, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		r := e.do(dlg, "DELETE", "/v1/sources/src_signed/webhook", "")
+		_ = os.Chmod(e.keys, 0o700)
+		if r.Code == 200 {
+			t.Fatal("revoke must fail when the key file cannot be deleted")
+		}
+		if signedReceive(e, k2.Secret, `{}`, "r0").Status != 200 {
+			t.Fatal("a failed revoke must leave the ledger untouched")
+		}
+	}
+
+	var out struct{ Revoked int }
+	if r := e.do(dlg, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 200 {
+		t.Fatalf("revoke: %d %s", r.Code, r.Body)
+	} else {
+		r.into(&out)
+	}
+	if out.Revoked != 2 {
+		t.Fatalf("revoked %d credentials, want both", out.Revoked)
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("key file must be deleted: %v", err)
+	}
+	if signedReceive(e, k1.Secret, `{}`, "r1").Status != 401 || signedReceive(e, k2.Secret, `{}`, "r2").Status != 401 {
+		t.Fatal("revoked keys must stop verifying")
+	}
+	if r := e.do(dlg, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 200 {
+		t.Fatalf("revoking again must be a no-op: %d", r.Code)
+	}
+	if strings.Contains(eventPayloads(e), k1.Secret) {
+		t.Fatal("events must not carry the key")
+	}
+}
+
 func TestIngestViewEncodesBinaryAndPurged(t *testing.T) {
 	v := viewOf(webhook.Ingest{ID: "i", Body: []byte{0xff, 0xfe}, BodySize: 2})
 	if v.Body != nil || v.BodyBase64 != "//4=" || v.Headers == nil {

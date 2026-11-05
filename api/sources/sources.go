@@ -2,6 +2,7 @@
 //
 //	GET/POST /sources        GET/PATCH /sources/{id}
 //	POST /sources/{id}/webhook          创建或轮换 webhook 接收密钥
+//	DELETE /sources/{id}/webhook        吊销该来源的全部接收密钥，并删除 HMAC 密钥文件
 //	GET /sources/{id}/ingests           入站记录
 //	POST /ingests/{id}/replay           重放
 //	GET /sources/{id}/events            来源事件，可按 disposition 过滤，after + limit 分页
@@ -35,14 +36,16 @@ import (
 
 // 本包登记的命令：内核没有对应命令的两个 delegate 级动作（§9.5），在此补成命令以得到授权与事件。
 const (
-	CmdWebhookKey = "source.webhook_key"
-	CmdReplay     = "source.replay"
+	CmdWebhookKey    = "source.webhook_key"
+	CmdWebhookRevoke = "source.webhook_revoke"
+	CmdReplay        = "source.replay"
 )
 
 // 事件类型：只记机制信息，不含密钥与 payload。
 const (
 	EvWebhookCreated = "source.webhook_key_created"
 	EvWebhookRotated = "source.webhook_key_rotated"
+	EvWebhookRevoked = "source.webhook_key_revoked"
 	EvReplayed       = "source.replay_requested"
 )
 
@@ -58,7 +61,7 @@ const IdempotencyHeader = "Idempotency-Key"
 // Replayer 重放一条入站记录，并在签发或轮换接收密钥时按校验方案保管明文（*webhook.Service 满足它）。
 type Replayer interface {
 	Replay(ctx context.Context, ingestID string) error
-	StoreKey(tx *store.Tx, sourceID, secret string) error
+	StoreKey(tx *store.Tx, sourceID, secret string) error // secret 为空：删除明文文件
 }
 
 // Proposer 把未判定事件转为建议（*inbound.Service 满足它）。
@@ -85,6 +88,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 	a := &api{st: st, x: x, rp: rp, pr: pr, au: au}
 	for _, s := range []command.Spec{
 		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
+		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
 		{Name: CmdReplay, Action: authz.ActionManageSource, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
 	} {
 		if err := x.Register(s); err != nil {
@@ -97,6 +101,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}", Handler: readable(a.get)})
 		r.Handle(core.Route{Method: "PATCH", Path: "/sources/{id}", Handler: a.patch})
 		r.Handle(core.Route{Method: "POST", Path: "/sources/{id}/webhook", MaxBody: 1 << 10, Handler: a.webhookKey})
+		r.Handle(core.Route{Method: "DELETE", Path: "/sources/{id}/webhook", MaxBody: 1, Handler: a.webhookRevoke})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/ingests", Handler: readable(a.ingests)})
 		r.Handle(core.Route{Method: "POST", Path: "/ingests/{id}/replay", MaxBody: 1 << 10, Handler: a.replay})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/events", Handler: readable(a.events)})
@@ -287,6 +292,43 @@ func (a *api) applyWebhookKey(c *command.Ctx) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"credential": cred, "secret": secret, "url": "/ingest/" + id, "rotated": current != ""}, nil
+}
+
+// applyWebhookRevoke 吊销该来源全部有效的接收密钥（含宽限期内的旧密钥），并在同一事务里删除明文密钥文件。
+// 删除失败整个命令回滚、账本不变，调用方重试；不会出现"账本已吊销、明文仍在"的半完成状态。
+func (a *api) applyWebhookRevoke(c *command.Ctx) (any, error) {
+	id := c.Object.ID
+	all, err := a.au.List(c.Tx)
+	if err != nil {
+		return nil, err
+	}
+	var revoked []string
+	for _, cr := range all {
+		if cr.Kind == auth.Webhook && cr.Scope == id && cr.RevokedAt.IsZero() {
+			if err := a.au.Revoke(c.Tx, cr.ID); err != nil {
+				return nil, err
+			}
+			revoked = append(revoked, cr.ID)
+		}
+	}
+	if err := a.rp.StoreKey(c.Tx, id, ""); err != nil {
+		return nil, err
+	}
+	payload, _ := json.Marshal(map[string][]string{"credentials": revoked})
+	if _, err := c.Emit(domain.Event{Type: EvWebhookRevoked, Object: id, Payload: payload}); err != nil {
+		return nil, err
+	}
+	return map[string]any{"revoked": len(revoked)}, nil
+}
+
+func (a *api) webhookRevoke(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	in := map[string]json.RawMessage{}
+	in["id"], _ = json.Marshal(r.PathValue("id"))
+	res, err := a.run(r, p, CmdWebhookRevoke, in, false)
+	if err != nil {
+		return err
+	}
+	return writeValue(w, http.StatusOK, res)
 }
 
 func (a *api) webhookKey(w http.ResponseWriter, r *http.Request, p *core.Principal) error {

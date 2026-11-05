@@ -297,6 +297,7 @@ func TestLoadRulesRejectWholePack(t *testing.T) {
 		{"command field", map[string]string{"pack.yaml": head + "event_rules:\n  - id: r\n    do:\n      - {action: add_tag, tag: t, command: rm -rf /}\n"}, "command"},
 		{"script field", map[string]string{"pack.yaml": head + "webhook_mappings:\n  - {id: m, script: x}\n"}, "script"},
 		{"script path value", map[string]string{"pack.yaml": head + "webhook_mappings:\n  - {id: m, sender_verified: ./convert.sh}\n"}, "executable"},
+		{"clock rule schedule neither duration nor cron", map[string]string{"pack.yaml": head + "clock_rules:\n  - {id: r, type: recur, schedule: daily}\n"}, "schedule"},
 		{"policy field", map[string]string{"pack.yaml": head + "policy:\n  trust: high\n"}, "policy"},
 		{"executor whitelist field", map[string]string{"pack.yaml": head + "event_rules:\n  - {id: r, forward_whitelist: [a]}\n"}, "forward_whitelist"},
 		{"action outside enum", map[string]string{"pack.yaml": head + "event_rules:\n  - id: r\n    do: [{action: send_mail}]\n"}, "enumeration"},
