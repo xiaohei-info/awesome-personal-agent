@@ -276,7 +276,7 @@ func TestFlowScreening(t *testing.T) {
 // 运行凭据只在内核拉起后台运行时签发（POST /runs/{id}/credential 或运行环境）。当前 apa serve 只登记了
 // call_agent，start_background_run 没有处理器（规则触发后记 health.alert "has no registered handler"），
 // 所以真实二进制里没有任何办法拿到运行凭据。这是 kernel/background 未装配的实现缺陷，不在本节点范围，
-// 因此显式跳过而不是用替身伪造运行凭据；装配完成后删除下面的 Skip 并补全断言。
+// 因此让本测试失败（fail-closed）而不是跳过或用替身伪造运行凭据；装配完成后删除下面的 Fatal 并补全断言。
 func TestACTSCR05RunCredential(t *testing.T) {
 	f := setup(t)
 	f.webOK("PUT", "/settings/policy", `{"default_harness":"acc-stub"}`, 200)
@@ -289,5 +289,5 @@ func TestACTSCR05RunCredential(t *testing.T) {
 	if runs := f.apa(f.OBS, 0, "run", "list").Stdout; strings.Contains(runs, id) {
 		t.Fatalf("后台运行已能拉起，请补全 ACT-SCR-05 断言: %s", runs)
 	}
-	t.Skip("ACT-SCR-05 未执行：apa serve 未登记 start_background_run，真实二进制拿不到运行凭据（见函数注释）")
+	t.Fatal("ACT-SCR-05 无法验证：apa serve 未登记 start_background_run，真实二进制拿不到运行凭据；上游装配修复前本 gate 保持红色（见函数注释）")
 }
