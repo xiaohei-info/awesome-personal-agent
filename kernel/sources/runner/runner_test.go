@@ -1,0 +1,639 @@
+package runner
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+)
+
+var (
+	bg    = context.Background()
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	t0    = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+)
+
+type env struct {
+	t    *testing.T
+	st   *store.Store
+	x    *command.Executor
+	clk  *clock.Clock
+	r    *Runner
+	disp *proc.Dispatcher
+	dir  string
+	done chan proc.Result
+	errs chan error
+
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (e *env) Now() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return e.now }
+func (e *env) advance(d time.Duration) {
+	e.mu.Lock()
+	e.now = e.now.Add(d)
+	e.mu.Unlock()
+}
+
+func setup(t *testing.T, cfg config.Config) *env {
+	t.Helper()
+	reg := store.NewRegistry()
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
+		items.Module, proc.Module, delivery.Module, registry.Module, Module} {
+		if err := reg.Register(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(t.TempDir(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	e := &env{t: t, st: st, dir: t.TempDir(), now: t0, done: make(chan proc.Result, 32), errs: make(chan error, 32)}
+	e.x = command.New(st, e.Now)
+	lay := config.LayoutOf(filepath.Join(e.dir, "home"))
+	if err := lay.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	for _, err := range []error{projects.Register(e.x), items.Register(e.x, items.NewKinds()),
+		registry.Register(e.x, registry.Options{Layout: lay})} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.r, err = New(Options{Store: st, Exec: e.x, Delivery: delivery.New(delivery.Options{Now: e.Now}), Layout: lay, Now: e.Now,
+		OnError: func(err error) { e.errs <- err }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.r.Register(e.x); err != nil {
+		t.Fatal(err)
+	}
+	e.disp = proc.New(st, cfg, proc.Options{Now: e.Now, OnResult: func(res proc.Result) {
+		if err := e.r.Handle(bg, res); err != nil {
+			e.errs <- err
+		}
+		e.done <- res
+	}})
+	t.Cleanup(e.disp.Close)
+	e.r.Attach(e.disp)
+	e.clk, err = clock.New(st, func(tx *store.Tx, c clock.Command) error { return e.r.HandleTimer(tx, c) }, e.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func defaults() config.Config { return config.Config{MaxSubprocesses: 2, MaxShortSubprocesses: 2} }
+
+// script 写一个可执行的来源脚本；$1 前后的 stdin 存到 <name>.stdin.<n>。
+func (e *env) script(name, body string) string {
+	e.t.Helper()
+	p := filepath.Join(e.dir, name)
+	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		e.t.Fatal(err)
+	}
+	return p
+}
+
+func js(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
+
+type m = map[string]any
+
+func (e *env) register(id, cmd string, extra m) {
+	e.t.Helper()
+	in := m{"id": id, "type": "script", "source_type": "acc", "command": cmd, "schedule": "1m", "timeout": 30}
+	for k, v := range extra {
+		in[k] = v
+	}
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: registry.CmdRegisterExec, Input: js(in)}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// tick 触发一次时钟并等 n 个来源 Run 结束（含结果入账）。
+func (e *env) tick(n int) []proc.Result {
+	e.t.Helper()
+	if err := e.r.Tick(bg, e.clk); err != nil {
+		e.t.Fatal(err)
+	}
+	return e.wait(n)
+}
+
+func (e *env) wait(n int) []proc.Result {
+	e.t.Helper()
+	var out []proc.Result
+	for i := 0; i < n; i++ {
+		select {
+		case r := <-e.done:
+			out = append(out, r)
+		case err := <-e.errs:
+			e.t.Fatalf("runner error: %v", err)
+		case <-time.After(20 * time.Second):
+			e.t.Fatalf("timed out waiting for run %d/%d", i+1, n)
+		}
+	}
+	select {
+	case err := <-e.errs:
+		e.t.Fatalf("runner error: %v", err)
+	default:
+	}
+	return out
+}
+
+func (e *env) source(id string) (s domain.Source, st Stats) {
+	e.t.Helper()
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { s, err = registry.Get(tx, id); return }); err != nil {
+		e.t.Fatal(err)
+	}
+	st, err := StatsOf(s)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return s, st
+}
+
+func (e *env) events(id string) (out []domain.SourceEvent) {
+	e.t.Helper()
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { out, err = Events(tx, id); return }); err != nil {
+		e.t.Fatal(err)
+	}
+	return
+}
+
+func (e *env) rejects(id string) (out []Reject) {
+	e.t.Helper()
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { out, err = Rejects(tx, id); return }); err != nil {
+		e.t.Fatal(err)
+	}
+	return
+}
+
+const goodEvents = `echo '{"id":"e1","type":"issue.opened","subject":"s1","occurred_at":"2026-03-01T00:00:00Z","sender":"alice","sender_verified":true,"correlation_keys":["repo#1"]}'
+echo '{"id":"e2","type":"issue.opened","subject":"s2","occurred_at":"2026-03-01T00:00:01Z"}'
+echo '{"cursor":"c1"}'
+`
+
+// ACT-SRC-02：两条标准事件落盘、游标推进、stdin 含约定字段、来源页统计更新。
+func TestNormalPullAdvancesCursorAndPassesContract(t *testing.T) {
+	e := setup(t, defaults())
+	stdin := filepath.Join(e.dir, "stdin")
+	e.register("src_a", e.script("a.sh", `cat > `+stdin+`.$$; cat `+stdin+`.$$ > `+stdin+`.last
+`+goodEvents), m{"config": m{"repo": "x/y"}})
+	if err := e.r.Sync(bg); err != nil {
+		t.Fatal(err)
+	}
+	e.tick(1)
+
+	s, st := e.source("src_a")
+	if s.Cursor != "c1" || st.ConsecutiveFailures != 0 || st.LastSuccessAt.IsZero() {
+		t.Fatalf("cursor/stats after success: %q %+v", s.Cursor, st)
+	}
+	evs := e.events("src_a")
+	if len(evs) != 2 || evs[0].DedupeKey != (domain.DedupeKey{Domain: "src_a", EventID: "e1"}) ||
+		!evs[0].TrustedSender() || evs[0].Disposition != domain.DispositionPending || evs[0].CorrelationKeys[0] != "repo#1" {
+		t.Fatalf("events: %+v", evs)
+	}
+
+	e.advance(time.Minute)
+	e.tick(1)
+	b, err := os.ReadFile(stdin + ".last")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var in struct {
+		SourceID string          `json:"source_id"`
+		Config   json.RawMessage `json:"config"`
+		Cursor   string          `json:"cursor"`
+		RunID    string          `json:"run_id"`
+		Window   struct{ From, To string }
+	}
+	if err := json.Unmarshal(b, &in); err != nil {
+		t.Fatalf("stdin %s: %v", b, err)
+	}
+	if in.SourceID != "src_a" || in.Cursor != "c1" || !strings.HasPrefix(in.RunID, "run_") || string(in.Config) != `{"repo":"x/y"}` ||
+		in.Window.From != t0.Format(time.RFC3339) || in.Window.To != t0.Add(time.Minute).Format(time.RFC3339) {
+		t.Fatalf("stdin contract: %s", b)
+	}
+}
+
+// ACT-SRC-03：同一事件 id 重复、两个来源共用去重域，都只留一条。
+func TestDedupeByDomainAndEventID(t *testing.T) {
+	e := setup(t, defaults())
+	sh := e.script("a.sh", goodEvents)
+	e.register("src_a", sh, m{"dedupe_domain": "shared"})
+	e.register("src_b", sh, m{"dedupe_domain": "shared"})
+	if err := e.r.Sync(bg); err != nil {
+		t.Fatal(err)
+	}
+	e.tick(2)
+	e.advance(time.Minute)
+	e.tick(2)
+	total := e.count(`SELECT COUNT(*) FROM sources_runner_event`)
+	if total != 2 {
+		t.Fatalf("want 2 events (e1,e2 once in shared domain), got %d", total)
+	}
+	if len(e.events("src_a"))+len(e.events("src_b")) != 2 {
+		t.Fatal("source attribution lost")
+	}
+}
+
+// ACT-SRC-04：缺必填字段的事件不入账并留原因；正常事件照常入账，游标仍推进。
+func TestInvalidEventRejectedWithReasonOthersKept(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", `echo '{"id":"bad","type":"t","occurred_at":"2026-03-01T00:00:00Z"}'
+echo 'not json'
+echo '{"id":"ok","type":"t","subject":"s","occurred_at":"2026-03-01T00:00:00Z"}'
+echo '{"cursor":"c9"}'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	evs := e.events("src_a")
+	if len(evs) != 1 || evs[0].DedupeKey.EventID != "ok" {
+		t.Fatalf("events: %+v", evs)
+	}
+	rj := e.rejects("src_a")
+	if len(rj) != 2 || !strings.Contains(rj[0].Reason, "subject") || rj[0].Line != 1 || rj[1].Line != 2 {
+		t.Fatalf("rejects: %+v", rj)
+	}
+	if s, st := e.source("src_a"); s.Cursor != "c9" || st.ConsecutiveFailures != 0 {
+		t.Fatalf("bad events must not fail the run: %q %+v", s.Cursor, st)
+	}
+}
+
+// ACT-SRC-05：末行不是合法游标时，事件留下、游标不动、按临时失败计；重复输出不产生重复。
+func TestBadCursorLineKeepsEventsHoldsCursor(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", `echo '{"id":"e1","type":"t","subject":"s","occurred_at":"2026-03-01T00:00:00Z"}'
+echo 'oops'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	s, st := e.source("src_a")
+	if s.Cursor != "" || st.ConsecutiveFailures != 1 || len(e.events("src_a")) != 1 {
+		t.Fatalf("cursor=%q stats=%+v events=%d", s.Cursor, st, len(e.events("src_a")))
+	}
+	e.advance(time.Minute)
+	e.tick(1)
+	if n := len(e.events("src_a")); n != 1 {
+		t.Fatalf("repeat output duplicated: %d", n)
+	}
+}
+
+// ACT-SRC-06：退出码 1 退避重试：游标不动、失败数可见、不停用、不打扰；连续失败时跳过中间节拍。
+func TestExit1BacksOffAndKeepsSourceEnabled(t *testing.T) {
+	e := setup(t, defaults())
+	count := filepath.Join(e.dir, "count")
+	e.register("src_a", e.script("a.sh", `echo x >> `+count+`
+exit 1
+`), nil)
+	e.r.Sync(bg)
+	runs := func() int { b, _ := os.ReadFile(count); return strings.Count(string(b), "x") }
+
+	e.tick(1) // 第 1 次失败：下一节拍照常重试
+	e.advance(time.Minute)
+	e.tick(1) // 第 2 次失败：之后跳过一个节拍
+	e.advance(time.Minute)
+	if err := e.r.Tick(bg, e.clk); err != nil { // 退避中：不应拉起
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if runs() != 2 {
+		t.Fatalf("backoff did not skip a beat: %d runs", runs())
+	}
+	e.advance(time.Minute)
+	e.tick(1)
+	s, st := e.source("src_a")
+	if runs() != 3 || st.ConsecutiveFailures != 3 || s.Cursor != "" || !s.Enabled {
+		t.Fatalf("runs=%d cursor=%q enabled=%v stats=%+v", runs(), s.Cursor, s.Enabled, st)
+	}
+	if n := e.itemCount(); n != 0 {
+		t.Fatalf("exit 1 must not bother the owner, got %d items", n)
+	}
+	if len(e.deliveries()) != 0 {
+		t.Fatal("exit 1 must not produce deliveries")
+	}
+}
+
+func (e *env) count(sql string, args ...any) (n int64) {
+	e.t.Helper()
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(sql, args...)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		r.Next()
+		return r.Scan(&n)
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return
+}
+
+func (e *env) itemCount() int64 { return e.count(`SELECT COUNT(*) FROM items`) }
+
+func (e *env) deliveries() (out []domain.Delivery) {
+	q := delivery.New(delivery.Options{Now: e.Now})
+	var ids []string
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT id FROM delivery_delivery ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			var id string
+			if err := r.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return r.Err()
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	for _, id := range ids {
+		if err := e.st.View(bg, func(tx *store.Tx) error {
+			d, err := q.Get(tx, id)
+			out = append(out, d)
+			return err
+		}); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	return
+}
+
+// ACT-SRC-07：退出码 2 生成一个 needs_input 事项；重复失败不重复建；其他来源不受影响。
+func TestExit2CreatesOneNeedsInputItemOthersUnaffected(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_bad", e.script("bad.sh", `echo 'token expired' >&2; exit 2`), nil)
+	e.register("src_ok", e.script("ok.sh", goodEvents), nil)
+	e.r.Sync(bg)
+	e.tick(2)
+	e.advance(time.Minute)
+	e.tick(2)
+
+	if n := e.itemCount(); n != 1 {
+		t.Fatalf("want exactly one needs_input item, got %d", n)
+	}
+	s, st := e.source("src_bad")
+	if s.Cursor != "" || st.NeedsInputItem == "" || st.ConsecutiveFailures != 2 || !s.Enabled {
+		t.Fatalf("bad source: %q %+v", s.Cursor, st)
+	}
+	var it domain.Item
+	e.st.View(bg, func(tx *store.Tx) (err error) { it, err = items.Get(tx, st.NeedsInputItem); return })
+	if it.Phase != domain.PhaseNeedsInput || it.Origin == nil || it.Origin.Source != "src_bad" || !strings.Contains(it.Ask.Question, "src_bad") {
+		t.Fatalf("item: %+v", it)
+	}
+	if s, st := e.source("src_ok"); s.Cursor != "c1" || st.ConsecutiveFailures != 0 {
+		t.Fatalf("healthy source affected: %q %+v", s.Cursor, st)
+	}
+}
+
+// ACT-SRC-08：退出码 3 停用来源、产出健康类投递、事件流有 source.failed，不再被调度。
+func TestExit3DisablesEmitsHealthDeliveryAndEvent(t *testing.T) {
+	e := setup(t, defaults())
+	count := filepath.Join(e.dir, "count")
+	e.register("src_a", e.script("a.sh", `echo x >> `+count+`; exit 3`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+
+	s, st := e.source("src_a")
+	if s.Enabled || st.ConsecutiveFailures != 1 {
+		t.Fatalf("enabled=%v stats=%+v", s.Enabled, st)
+	}
+	ds := e.deliveries()
+	if len(ds) != 1 || ds[0].Class != domain.DeliveryHealth || !strings.Contains(ds[0].Content.Title, "src_a") {
+		t.Fatalf("deliveries: %+v", ds)
+	}
+	failed := e.count(`SELECT COUNT(*) FROM eventlog_event WHERE type = ?`, domain.EvSourceFailed)
+	if failed != 1 {
+		t.Fatalf("source.failed events: %d", failed)
+	}
+	e.advance(5 * time.Minute)
+	if err := e.r.Tick(bg, e.clk); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if b, _ := os.ReadFile(count); strings.Count(string(b), "x") != 1 {
+		t.Fatalf("disabled source kept being scheduled: %q", b)
+	}
+}
+
+// ACT-SRC-09：超时杀进程，计超时统计，游标不动，下个节拍仍重试。
+func TestTimeoutIsTransientFailure(t *testing.T) {
+	e := setup(t, defaults())
+	count := filepath.Join(e.dir, "count")
+	e.register("src_a", e.script("a.sh", `echo x >> `+count+`; sleep 30`), m{"timeout": 1})
+	e.r.Sync(bg)
+	res := e.tick(1)
+	if res[0].Run.State != domain.RunTimeout {
+		t.Fatalf("run state %s", res[0].Run.State)
+	}
+	s, st := e.source("src_a")
+	if st.Timeouts != 1 || st.ConsecutiveFailures != 1 || s.Cursor != "" || !s.Enabled {
+		t.Fatalf("%q %+v", s.Cursor, st)
+	}
+	e.advance(time.Minute)
+	e.tick(1)
+	if b, _ := os.ReadFile(count); strings.Count(string(b), "x") != 2 {
+		t.Fatalf("not retried: %q", b)
+	}
+}
+
+// ACT-OUT-04：同一来源已有排队或运行中的 Run 时，到期不重复入队；结束后恢复。
+func TestNoDuplicateRunWhileSourceInFlight(t *testing.T) {
+	e := setup(t, defaults())
+	release := filepath.Join(e.dir, "release")
+	count := filepath.Join(e.dir, "count")
+	e.register("src_a", e.script("a.sh", `echo x >> `+count+`
+while [ ! -f `+release+` ]; do sleep 0.05; done
+echo '{"cursor":"c1"}'
+`), m{"timeout": 60})
+	e.r.Sync(bg)
+	for i := 0; i < 4; i++ { // 每分钟到期一次，而一次拉取耗时远超一分钟
+		if err := e.r.Tick(bg, e.clk); err != nil {
+			t.Fatal(err)
+		}
+		e.advance(time.Minute)
+		time.Sleep(50 * time.Millisecond)
+	}
+	runs := e.count(`SELECT COUNT(*) FROM outcall_run`)
+	if runs != 1 {
+		t.Fatalf("source piled up %d runs", runs)
+	}
+	os.WriteFile(release, nil, 0o600)
+	e.wait(1)
+	if s, _ := e.source("src_a"); s.Cursor != "c1" {
+		t.Fatalf("cursor %q", s.Cursor)
+	}
+	e.tick(1) // 结束后下一次到期照常入队
+}
+
+// ACT-OUT-02：长时队列占满时，来源拉取在短任务队列照常执行。
+func TestSourcePullNotBlockedByFullLongQueue(t *testing.T) {
+	e := setup(t, config.Config{MaxSubprocesses: 1, MaxShortSubprocesses: 1})
+	hang := e.script("hang.sh", `sleep 60`)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunTask, Target: "itm_1", TimeoutSec: 60},
+			Spec: proc.Spec{Command: []string{hang}}}, e.Now())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.disp.Dispatch(bg); err != nil {
+		t.Fatal(err)
+	}
+	e.register("src_a", e.script("a.sh", goodEvents), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	if s, _ := e.source("src_a"); s.Cursor != "c1" {
+		t.Fatalf("source blocked by long-running task: cursor %q", s.Cursor)
+	}
+}
+
+// ACT-OUT-03：短任务额度为 1 时三个慢来源不并行；本人显式触发的短任务排在定时拉取之前。
+func TestShortQuotaSerialisesSourcesAndExplicitRunsFirst(t *testing.T) {
+	e := setup(t, config.Config{MaxSubprocesses: 1, MaxShortSubprocesses: 1})
+	order := filepath.Join(e.dir, "order")
+	overlap := filepath.Join(e.dir, "overlap")
+	lock := filepath.Join(e.dir, "lock")
+	body := func(name string) string {
+		return `if [ -e ` + lock + ` ]; then echo overlap >> ` + overlap + `; fi
+touch ` + lock + `
+echo ` + name + ` >> ` + order + `
+sleep 0.4
+rm -f ` + lock + `
+echo '{"cursor":"c"}'
+`
+	}
+	for _, n := range []string{"src_a", "src_b", "src_c"} {
+		e.register(n, e.script(n+".sh", body(n)), nil)
+	}
+	e.r.Sync(bg)
+	if err := e.r.Tick(bg, e.clk); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // 第一个已在运行，另两个在排队
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := proc.Enqueue(tx, proc.Request{Explicit: true, Run: domain.Run{Category: domain.RunTransform, Target: "replay_1", TimeoutSec: 30},
+			Spec: proc.Spec{Command: []string{e.script("replay.sh", body("replay"))}}}, e.Now())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.wait(4)
+	b, _ := os.ReadFile(order)
+	lines := strings.Fields(string(b))
+	if len(lines) != 4 || lines[1] != "replay" {
+		t.Fatalf("explicit run must go before queued pulls: %v", lines)
+	}
+	if _, err := os.Stat(overlap); err == nil {
+		t.Fatal("short runs overlapped despite quota 1")
+	}
+}
+
+// 启停：停用的来源不再被调度；重新启用后恢复。
+func TestDisableStopsSchedulingEnableResumes(t *testing.T) {
+	e := setup(t, defaults())
+	count := filepath.Join(e.dir, "count")
+	e.register("src_a", e.script("a.sh", `echo x >> `+count+`
+echo '{"cursor":"c"}'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	set := func(on bool) {
+		if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: registry.CmdSetEnabled, Input: js(m{"id": "src_a", "enabled": on})}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(false)
+	e.advance(3 * time.Minute)
+	e.r.Tick(bg, e.clk)
+	time.Sleep(200 * time.Millisecond)
+	if b, _ := os.ReadFile(count); strings.Count(string(b), "x") != 1 {
+		t.Fatalf("disabled source ran: %q", b)
+	}
+	set(true)
+	e.tick(1)
+	if b, _ := os.ReadFile(count); strings.Count(string(b), "x") != 2 {
+		t.Fatalf("re-enabled source did not run: %q", b)
+	}
+}
+
+// 输出超过外呼调用器保留的末段时，不能把丢掉的事件当成已处理：游标不动。
+func TestTruncatedOutputDoesNotAdvanceCursor(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", `i=0
+while [ $i -lt 700 ]; do
+  echo "{\"id\":\"e$i\",\"type\":\"t\",\"subject\":\"s\",\"detail\":\"`+strings.Repeat("x", 120)+`\",\"occurred_at\":\"2026-03-01T00:00:00Z\"}"
+  i=$((i+1))
+done
+echo '{"cursor":"big"}'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	s, st := e.source("src_a")
+	if s.Cursor != "" || st.ConsecutiveFailures != 1 || !strings.Contains(st.LastError, "retained") {
+		t.Fatalf("%q %+v", s.Cursor, st)
+	}
+}
+
+// 非来源类别的 Run 不归本模块处置；启动恢复判失败（无退出码）的来源 Run 按临时失败计。
+func TestHandleIgnoresOtherCategoriesAndTreatsMissingExitAsTransient(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", goodEvents), nil)
+	if err := e.r.Handle(bg, proc.Result{Run: domain.Run{ID: "run_x", Category: domain.RunTask, Target: "src_a", State: domain.RunFailed}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, st := e.source("src_a"); st.Runs != 0 {
+		t.Fatal("task run was handled as a source run")
+	}
+	if err := e.r.Handle(bg, proc.Result{Run: domain.Run{ID: "run_y", Category: domain.RunSource, Target: "src_a", State: domain.RunFailed},
+		Reason: "no live process after restart"}); err != nil {
+		t.Fatal(err)
+	}
+	s, st := e.source("src_a")
+	if st.ConsecutiveFailures != 1 || st.LastError != "no live process after restart" || s.Cursor != "" {
+		t.Fatalf("%q %+v", s.Cursor, st)
+	}
+}
+
+// 同一个 Run 的结果被重复交付（重启后重放）只生效一次。
+func TestHandleIsIdempotentPerRun(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", goodEvents), nil)
+	res := proc.Result{Run: domain.Run{ID: "run_z", Category: domain.RunSource, Target: "src_a", State: domain.RunFailed,
+		ExitCode: ptr(1)}}
+	for i := 0; i < 2; i++ {
+		if err := e.r.Handle(bg, res); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, st := e.source("src_a"); st.ConsecutiveFailures != 1 {
+		t.Fatalf("replayed result counted twice: %+v", st)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

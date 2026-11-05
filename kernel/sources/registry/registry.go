@@ -334,25 +334,29 @@ func (m *mod) applyEnabled(c *command.Ctx) (any, error) {
 	if err := strict(c.Input, &e); err != nil {
 		return nil, err
 	}
-	s, err := Get(c.Tx, e.ID)
+	return SetEnabled(c, e.ID, e.Enabled)
+}
+
+// SetEnabled 在命令上下文里启停来源并记事件；状态未变不记事件（幂等）。
+// 供调度模块在自己的事务里停用永久失败的来源，与它的记账一起提交。
+func SetEnabled(c *command.Ctx, id string, enabled bool) (domain.Source, error) {
+	s, err := Get(c.Tx, id)
 	if err != nil {
-		return nil, err
+		return s, err
 	}
-	if s.Enabled == e.Enabled {
-		return s, nil // 幂等：状态未变不记事件
+	if s.Enabled == enabled {
+		return s, nil
 	}
-	s.Enabled = e.Enabled
+	s.Enabled = enabled
 	if _, err := c.Tx.Exec(`UPDATE sources_registry_source SET enabled = ? WHERE id = ?`, b2i(s.Enabled), s.ID); err != nil {
-		return nil, err
+		return s, err
 	}
 	ev := EvDisabled
 	if s.Enabled {
 		ev = EvEnabled
 	}
-	if _, err := c.Emit(domain.Event{Type: ev, Object: s.ID, Payload: snapshot(s)}); err != nil {
-		return nil, err
-	}
-	return s, nil
+	_, err = c.Emit(domain.Event{Type: ev, Object: s.ID, Payload: snapshot(s)})
+	return s, err
 }
 
 // snapshot 是事件载荷：登记内容，不含调度模块维护的游标与统计。
@@ -430,6 +434,16 @@ func Get(tx *store.Tx, id string) (domain.Source, error) {
 		return domain.Source{}, domain.NewError(domain.CodeNotFound, "source "+id+" not found", "list sources and retry")
 	}
 	return scan(r)
+}
+
+// SetRunState 在调用方事务内写游标与统计。这两列只由调度模块（kernel/sources/runner）经本函数维护，
+// 本包的命令写不了它们；不记事件，调用方自己负责留痕。
+func SetRunState(tx *store.Tx, id, cursor string, stats json.RawMessage) error {
+	n, err := tx.Exec(`UPDATE sources_registry_source SET cursor = ?, stats = ? WHERE id = ?`, cursor, string(stats), id)
+	if err == nil && n == 0 {
+		return domain.NewError(domain.CodeNotFound, "source "+id+" not found", "list sources and retry")
+	}
+	return err
 }
 
 // List 按 id 升序返回全部登记。
