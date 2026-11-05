@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { ScreeningBadge } from "../decision-screening/ScreeningBadge";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。排序之外的判定（web_only、权限、只认第一次回答）都在服务端。
 export interface AskOption {
@@ -21,6 +22,7 @@ export interface DecisionItem {
     free_text?: boolean;
     deadline?: string;
     risk_class?: string;
+    screening_pending?: boolean;
     resolution?: unknown;
   };
 }
@@ -74,6 +76,7 @@ function Card({ item, onAnswer }: { item: DecisionItem; onAnswer: (id: string, b
         {item.title}
         {item.priority && item.priority !== "normal" ? ` · ${item.priority}` : ""}
         {ask.risk_class === "web_only" && <strong> 仅限 Web 确认</strong>}
+        <ScreeningBadge pending={ask.screening_pending} />
       </p>
       {ask.deadline && <p>截止：{new Date(ask.deadline).toLocaleString()}</p>}
       <div role="group" aria-label="选项">
