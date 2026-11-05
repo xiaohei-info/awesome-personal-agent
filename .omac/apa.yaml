@@ -946,7 +946,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 80
 - id: api-core
-  worker: omac-worker-backend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - kernel-domain
   - kernel-config
