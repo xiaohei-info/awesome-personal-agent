@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 
@@ -272,8 +272,15 @@ function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: s
 
 const written = (r: Write) => (r.state === "current" ? "已生效" : "已提交，待本人确认后生效");
 
-function MaterialDetail({ id, onNotice, onError, onChanged }: { id: string; onNotice: (s: string) => void; onError: (e: unknown) => void; onChanged: () => void }) {
+function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onError: (e: unknown) => void; onChanged: () => void }) {
   const { api } = useSession();
+  const { id } = props;
+  // 回调每次父渲染都是新函数；用 ref 持有，使重载只在 id 变化或显式写入后发生，不冲掉未保存的草稿。
+  const cb = useRef(props);
+  cb.current = props;
+  const onNotice = (s: string) => cb.current.onNotice(s);
+  const onError = (e: unknown) => cb.current.onError(e);
+  const onChanged = () => cb.current.onChanged();
   const [d, setD] = useState<Detail | null>(null);
   const [hosted, setHosted] = useState(false);
   const [draft, setDraft] = useState("");
@@ -289,9 +296,9 @@ function MaterialDetail({ id, onNotice, onError, onChanged }: { id: string; onNo
       setD({ material: r.material, revision: r.revision, revisions });
       setDraft(r.revision?.content ?? "");
     } catch (e) {
-      onError(e);
+      cb.current.onError(e);
     }
-  }, [api, id, onError]);
+  }, [api, id]);
   useEffect(() => void load(), [load]);
 
   if (!d) return null;

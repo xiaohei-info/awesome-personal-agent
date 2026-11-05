@@ -197,6 +197,32 @@ describe("编辑与写入策略（ACT-MAT-11）", () => {
   });
 });
 
+describe("未保存草稿不被父组件重渲染冲掉", () => {
+  it("详情有未保存草稿时在搜索框输入、切换筛选，草稿保持", async () => {
+    mount(backend({ materials: [note()], revisions: noteRevs() }).impl);
+    const d = within(await open("周会纪要"));
+    const ed = await d.findByLabelText("Markdown 内容");
+    await userEvent.type(ed, "-草稿");
+    await userEvent.type(screen.getByLabelText("搜索材料"), "超时");
+    await userEvent.selectOptions(screen.getByLabelText("按类型筛选"), "minutes");
+    await userEvent.selectOptions(screen.getByLabelText("按项目筛选"), "acc-open");
+    expect(d.getByLabelText("Markdown 内容")).toHaveValue("a\nB\nc-草稿");
+  });
+
+  it("保存返回 409 后草稿与原因保持，并显示服务端原因", async () => {
+    const b = backend({ materials: [note()], revisions: noteRevs() });
+    mount(b.impl);
+    const d = within(await open("周会纪要"));
+    await userEvent.type(await d.findByLabelText("Markdown 内容"), "-草稿");
+    await userEvent.type(d.getByLabelText("修改原因"), "补充");
+    b.materials[0].current_rev = "r-other";
+    await userEvent.click(d.getByRole("button", { name: "保存修订" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("baseline changed");
+    expect(d.getByLabelText("Markdown 内容")).toHaveValue("a\nB\nc-草稿");
+    expect(d.getByLabelText("修改原因")).toHaveValue("补充");
+  });
+});
+
 describe("proposed 修订确认（ACT-MAT-03 / ACT-MAT-06 / ACT-AGM-01）", () => {
   const withProposed = () => {
     const p = rev("p1", "mat_design", 2, "v2", "proposed", "d1");
