@@ -242,7 +242,7 @@ func (e *env) api(name, method, path, body, evidence string) *httptest.ResponseR
 	return e.http(method, path, body, func(r *http.Request) {
 		bearer(e.secret[name])(r)
 		if evidence != "" {
-			r.Header.Set(apiitems.EvidenceHeader, evidence)
+			r.Header.Set(core.EvidenceHeader, evidence)
 		}
 	})
 }

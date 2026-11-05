@@ -292,6 +292,25 @@ func TestSessionHeaderAndProject(t *testing.T) {
 	}
 }
 
+// 全局 --evidence 在任意位置、两种写法下都进 X-APA-Evidence 头，且不传给子命令。
+func TestGlobalEvidenceFlagBecomesHeader(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("X-APA-Evidence"))
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	env := map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t"}
+	for _, args := range [][]string{{"--evidence", "owner: ok", "items"}, {"items", "--evidence=owner: ok"}, {"items"}} {
+		if r := apa(t, env, t.TempDir(), "", args...); r.code != 0 {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	if len(got) != 3 || got[0] != "owner: ok" || got[1] != "owner: ok" || got[2] != "" {
+		t.Fatalf("evidence headers: %q", got)
+	}
+}
+
 func TestCorruptSavedCredentialIs3(t *testing.T) {
 	home := t.TempDir()
 	_ = os.WriteFile(filepath.Join(home, "credentials.json"), []byte("{"), 0o600)

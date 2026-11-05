@@ -150,6 +150,7 @@ func (r resp) code() string {
 
 func (e *env) do(secret, method, path, body string, hdr ...string) resp {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set(core.EvidenceHeader, "owner: go ahead") // delegate 代理写需要证据；其他凭据不读
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
 	}

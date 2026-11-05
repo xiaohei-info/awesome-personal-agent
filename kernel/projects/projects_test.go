@@ -49,7 +49,7 @@ func setup(t *testing.T) *env {
 func (e *env) do(t *testing.T, id command.Identity, cmd string, in any) (command.Result, error) {
 	t.Helper()
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
 }
 
 func (e *env) must(t *testing.T, id command.Identity, cmd string, in any) command.Result {
