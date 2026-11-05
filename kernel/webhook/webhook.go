@@ -416,6 +416,18 @@ func Ingests(tx *store.Tx, sourceID string) ([]Ingest, error) {
 	return queryIngests(tx, "WHERE source_id = ?", sourceID)
 }
 
+// IngestByID 读取一条接收记录；不存在返回 not_found。
+func IngestByID(tx *store.Tx, id string) (Ingest, error) {
+	gs, err := queryIngests(tx, "WHERE id = ?", id)
+	if err != nil {
+		return Ingest{}, err
+	}
+	if len(gs) == 0 {
+		return Ingest{}, domain.NewError(domain.CodeNotFound, "ingest "+id+" not found", "list ingests and retry")
+	}
+	return gs[0], nil
+}
+
 // Recover 启动时调用：转换到一半丢失的记录退回 received，并重新处理所有已落盘但未处理的记录。
 func (s *Service) Recover(ctx context.Context) error {
 	if err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
