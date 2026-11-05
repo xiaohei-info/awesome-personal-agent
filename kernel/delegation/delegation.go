@@ -272,7 +272,6 @@ func report() command.Spec {
 			if err != nil {
 				return authz.Object{}, err
 			}
-			// shortcut: 运行凭据的范围（InRunScope）由运行凭据模块据账本解析，接入前运行凭据得到退出码 4；接入时在此填入。
 			return authz.Object{ID: child.ID, Assignee: child.Assignee, Kind: string(child.Kind), Tags: child.Tags, Project: child.Project}, nil
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
