@@ -22,7 +22,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -36,7 +35,6 @@ const CmdRunResult = "source.run_result"
 const (
 	timerPrefix   = "srcpull_"
 	systemPrinc   = "kernel:sources-runner"
-	healthRoute   = "web"
 	maxBackoff    = time.Hour
 	dispatchError = "dispatch"
 )
@@ -116,9 +114,8 @@ type Dispatcher interface {
 
 // Options 是调度所需的外部事实。
 type Options struct {
-	Store    *store.Store
-	Exec     *command.Executor
-	Delivery *delivery.Queue // 退出码 3 的健康类投递
+	Store *store.Store
+	Exec  *command.Executor
 	// Layout 非零时，来源子进程的工作目录是该来源自己的目录（§9.1）。
 	Layout config.Layout
 	Now    func() time.Time
@@ -135,8 +132,8 @@ type Runner struct {
 
 // New 创建 Runner。
 func New(o Options) (*Runner, error) {
-	if o.Store == nil || o.Exec == nil || o.Delivery == nil {
-		return nil, errors.New("runner: Store, Exec and Delivery are required")
+	if o.Store == nil || o.Exec == nil {
+		return nil, errors.New("runner: Store and Exec are required")
 	}
 	if o.Now == nil {
 		o.Now = time.Now
@@ -546,7 +543,7 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 			if err := r.failed(c, src, in, "permanent"); err != nil {
 				return nil, err
 			}
-			if err := r.healthDelivery(c, src, in); err != nil {
+			if err := r.healthAlert(c, src, in); err != nil {
 				return nil, err
 			}
 		}
@@ -605,14 +602,11 @@ func (r *Runner) failed(c *command.Ctx, src domain.Source, in resultIn, kind str
 	return err
 }
 
-func (r *Runner) healthDelivery(c *command.Ctx, src domain.Source, in resultIn) error {
-	_, _, err := r.o.Delivery.Create(c.Tx, domain.Delivery{
-		ID: "health_" + in.RunID, Item: src.ID, Class: domain.DeliveryHealth, Route: healthRoute, Version: 1,
-		Content: domain.DeliveryContent{
-			Title:   "来源 " + src.ID + " 已停用",
-			Summary: "拉取返回永久失败（退出码 3）：" + in.Reason + "。修复后可在来源页重新启用。",
-		},
-	})
+// healthAlert 记永久失败的 health.alert；健康类投递由 kernel/health 统一产出。
+func (r *Runner) healthAlert(c *command.Ctx, src domain.Source, in resultIn) error {
+	payload, _ := json.Marshal(map[string]any{"kind": "source", "source_id": src.ID, "run_id": in.RunID, "reason": in.Reason})
+	_, err := c.Emit(domain.Event{Type: domain.EvHealthAlert, Object: src.ID,
+		Reason: "source " + src.ID + " disabled after permanent failure (exit 3): " + in.Reason, Payload: payload})
 	return err
 }
 
