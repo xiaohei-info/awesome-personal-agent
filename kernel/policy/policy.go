@@ -118,6 +118,11 @@ type ModelEndpoint struct {
 	ScreeningTimeoutMs int    `json:"screening_timeout_ms"`
 }
 
+// Channel 是渠道的登记属性（§10.3）。TextOnly：渠道只能发文字，决策投递带一次性表单链接。
+type Channel struct {
+	TextOnly bool `json:"text_only"`
+}
+
 // Policy 是一个版本的完整配置。两份白名单相互独立：键是来源或渠道，值是发送者或回答人。
 type Policy struct {
 	WebOnly          WebOnly             `json:"web_only"`
@@ -128,6 +133,7 @@ type Policy struct {
 	Persona          string              `json:"persona"` // 只影响表达方式，不进入任何权限判定
 	ForwardAllowlist map[string][]string `json:"forward_allowlist"`
 	ChannelAnswerers map[string][]string `json:"channel_answerers"`
+	Channels         map[string]Channel  `json:"channels"`
 }
 
 // Default 是版本 0 的配置：默认类别、权限上限 read、人格与白名单为空。
@@ -152,6 +158,7 @@ func Default() Policy {
 		ModelEndpoint:    ModelEndpoint{ScreeningTimeoutMs: 30000},
 		ForwardAllowlist: map[string][]string{},
 		ChannelAnswerers: map[string][]string{},
+		Channels:         map[string]Channel{},
 	}
 }
 
@@ -310,6 +317,9 @@ func normalize(p Policy) (Policy, error) {
 	}
 	p.ForwardAllowlist = normList(p.ForwardAllowlist)
 	p.ChannelAnswerers = normList(p.ChannelAnswerers)
+	if p.Channels == nil {
+		p.Channels = map[string]Channel{}
+	}
 	return p, nil
 }
 

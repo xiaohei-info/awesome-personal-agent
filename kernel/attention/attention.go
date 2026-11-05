@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
@@ -67,8 +68,9 @@ CREATE INDEX attention_held_release ON attention_held(release_at);`,
 type Options struct {
 	Queue     *delivery.Queue
 	Now       func() time.Time
-	TickEvery time.Duration            // 周期 Timer 间隔，默认 30 秒
-	WebURL    func(item string) string // 投递里的 Web 链接，默认 /items/<id>
+	TickEvery time.Duration             // 周期 Timer 间隔，默认 30 秒
+	WebURL    func(item string) string  // 投递里的 Web 链接，默认 /items/<id>
+	FormURL   func(token string) string // 投递里的一次性表单链接，默认 /forms/<令牌>
 }
 
 // Attention 无状态，所有状态在账本里。
@@ -84,6 +86,9 @@ func New(o Options) *Attention {
 	}
 	if o.WebURL == nil {
 		o.WebURL = func(id string) string { return "/items/" + id }
+	}
+	if o.FormURL == nil {
+		o.FormURL = func(token string) string { return "/forms/" + token }
 	}
 	return &Attention{o}
 }
@@ -229,7 +234,7 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	}
 	return a.offer(tx, pol, held{
 		id: fmt.Sprintf("decision:%s:%d", id, ver), item: id, class: domain.DeliveryDecision, priority: it.Priority, version: ver,
-		content: domain.DeliveryContent{Title: it.Title, Summary: ask.Question, Options: opts, WebURL: a.o.WebURL(id)},
+		content: domain.DeliveryContent{Title: it.Title, Summary: ask.Question, Options: opts, Recommend: ask.Recommend, WebURL: a.o.WebURL(id)},
 		exempt:  nearDeadline(pol, it, a.o.Now()),
 	})
 }
@@ -450,6 +455,9 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 		d.Content = domain.DeliveryContent{Title: fmt.Sprintf("%d 条低优先级提醒", len(hs)), Summary: strings.Join(titles, "；")}
 	}
 	d.Route = a.route(pol, hs[0].class, hs[0].priority)
+	if err := a.attachForm(tx, pol, &d); err != nil {
+		return err
+	}
 	if _, _, err := a.o.Queue.Create(tx, d); err != nil {
 		return err
 	}
@@ -458,6 +466,26 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// attachForm 在写入决策投递时发放一次性表单链接（§10.3）。放在这里而不是暂存时，令牌只为真正写入的投递发放。
+func (a *Attention) attachForm(tx *store.Tx, pol policy.Policy, d *domain.Delivery) error {
+	if d.Class != domain.DeliveryDecision {
+		return nil
+	}
+	it, err := items.Get(tx, d.Item)
+	if isNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	token, err := channel.IssueForm(tx, pol, it, d.Route, d.Version, a.o.Now())
+	if err != nil || token == "" {
+		return err
+	}
+	d.Content.FormURL = a.o.FormURL(token)
 	return nil
 }
 

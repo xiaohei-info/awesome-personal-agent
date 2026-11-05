@@ -9,6 +9,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
@@ -43,7 +44,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, channel.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -620,4 +621,74 @@ func TestMergedMembersAreRememberedAndLaterRemindersGetFreshDigest(t *testing.T)
 	if d == nil || d.ID == first.ID || !strings.Contains(d.Content.Title, "new-1") || strings.Contains(d.Content.Title+d.Content.Summary, "old-") {
 		t.Fatalf("new reminder swallowed or mixed with old members: %+v", d)
 	}
+}
+
+// 决策投递带推荐（§6.9）；不给推荐时省略。
+func TestDecisionDeliveryCarriesRecommend(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.asked(map[string]any{"recommend": "A"})
+	if d := e.claim("channel:chan"); d == nil || d.Content.Recommend != "A" || len(d.Content.Options) != 2 {
+		t.Fatalf("delivery %+v", d)
+	}
+	e.asked(nil)
+	if d := e.claim("channel:chan"); d == nil || d.Content.Recommend != "" {
+		t.Fatalf("delivery without recommend: %+v", d)
+	}
+}
+
+// 表单链接只发给只能发文字的渠道上的非 web_only 决策；一次性、24 小时过期（§10.3）。
+func TestFormLinkOnlyOnTextOnlyChannels(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.asked(nil)
+	if d := e.claim("channel:chan"); d == nil || d.Content.FormURL != "" {
+		t.Fatalf("interactive channel got a form link: %+v", d)
+	}
+
+	e.policy(func(p *policy.Policy) { p.Channels = map[string]policy.Channel{"chan": {TextOnly: true}} })
+	id := e.asked(nil)
+	d := e.claim("channel:chan")
+	token, ok := strings.CutPrefix(d.Content.FormURL, "/forms/")
+	if !ok || token == "" {
+		t.Fatalf("no form link: %+v", d.Content)
+	}
+
+	e.update(func(tx *store.Tx) error {
+		f, err := channel.RedeemForm(tx, token, e.now)
+		if err != nil || f.Item != id || f.Version != d.Version {
+			t.Fatalf("redeem: %+v %v", f, err)
+		}
+		if _, err := channel.RedeemForm(tx, token, e.now); !hasCode(err, domain.CodeConflict) {
+			t.Fatalf("second redeem: %v", err)
+		}
+		if _, err := channel.RedeemForm(tx, "unknown", e.now); !hasCode(err, domain.CodeNotFound) {
+			t.Fatalf("unknown token: %v", err)
+		}
+		return nil
+	})
+
+	e.asked(nil)
+	expired := strings.TrimPrefix(e.claim("channel:chan").Content.FormURL, "/forms/")
+	e.update(func(tx *store.Tx) error {
+		if _, err := channel.RedeemForm(tx, expired, e.now.Add(channel.FormTTL)); !hasCode(err, domain.CodeConflict) {
+			t.Fatalf("expired token: %v", err)
+		}
+		return nil
+	})
+
+	// web_only 类不发表单链接。
+	e.policy(func(p *policy.Policy) {
+		p.WebOnly.Rules = []policy.WebOnlyRule{{Tag: "money", Category: policy.CategoryFunds}}
+	})
+	web := e.item(map[string]any{"tags": []string{"money"}})
+	e.ask(web, nil)
+	if d := e.claim("channel:chan"); d == nil || d.Item != web || d.Content.FormURL != "" {
+		t.Fatalf("web_only decision got a form link: %+v", d)
+	}
+}
+
+func hasCode(err error, code domain.Code) bool {
+	de, ok := err.(*domain.Error)
+	return ok && de.Code == code
 }
