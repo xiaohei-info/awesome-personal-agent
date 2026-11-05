@@ -23,10 +23,9 @@ type IngestInput struct {
 }
 
 // ParseEvents 解析转换脚本的 stdout：每行一个标准事件，不含游标行。
-// truncated 为真表示输出超出外呼调用器保留的末段，开头的事件已丢，调用方不应当作成功。
-func ParseEvents(stdout []byte) (events []IngestEvent, rejects []Reject, truncated bool) {
+func ParseEvents(stdout []byte) (events []IngestEvent, rejects []Reject) {
 	p := parse(stdout)
-	return p.events, p.rejects, p.truncated
+	return p.events, p.rejects
 }
 
 // ValidEvent 校验事件满足必填字段（映射产出的事件与脚本输出同一标准）。

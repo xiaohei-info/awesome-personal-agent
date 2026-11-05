@@ -541,6 +541,45 @@ echo '{"id":"x-2","type":"custom.created","subject":"second","occurred_at":"2026
 	}
 }
 
+// 转换脚本的输出超过 64KB 时开头的事件也要入账；超过总上限记 failed，不入账半截结果。
+func TestTransformLargeOutput(t *testing.T) {
+	big := `i=0
+while [ $i -lt 700 ]; do
+  echo "{\"id\":\"x-$i\",\"type\":\"t\",\"subject\":\"s\",\"detail\":\"` + strings.Repeat("x", 120) + `\",\"occurred_at\":\"2026-03-01T00:00:00Z\"}"
+  i=$((i+1))
+done
+`
+	e := newEnv(t, nil)
+	e.register("src_hook", m{"scheme": "hmac", "transform": m{"command": e.script("x.sh", big)}})
+	status(t, e.post("src_hook", "d-1", `{"a":1}`, nil), 200)
+	e.waitRun()
+	e.svc.Wait()
+	e.noErr()
+	if g := e.ingests()[0]; g.State != StateProcessed || g.Events != 700 {
+		t.Fatalf("ingest = %+v", g)
+	}
+
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO webhook_ingest (id, source_id, delivery_key, received_at, state, signed, gen, run_id, events, reason, headers, body, body_size, purged)
+			VALUES ('ing_over','src_hook','d-over',?,?,1,1,'run_over',0,'','{}',?,7,0)`, t0.UnixNano(), StateTransforming, []byte(`{"a":1}`))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Handle(bg, proc.Result{Overflow: true, Stdout: []byte(`{"id":"x-over","type":"t","subject":"s","occurred_at":"2026-03-01T00:00:00Z"}` + "\n"),
+		Run: domain.Run{ID: "run_over", Category: domain.RunTransform, Target: "ing_over", State: domain.RunSucceeded}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range e.ingests() {
+		if g.ID == "ing_over" && (g.State != StateFailed || !strings.Contains(g.Reason, "max_source_output_mb")) {
+			t.Fatalf("ingest = %+v", g)
+		}
+	}
+	if n := len(e.events("src_hook")); n != 700 {
+		t.Fatalf("overflowed output must not be ingested: %d events", n)
+	}
+}
+
 // 转换脚本退出码语义同拉取型：1 临时失败保持 received（启动恢复时重试）；2、3 记 failed；坏输出记 failed。
 func TestTransformExitCodes(t *testing.T) {
 	cases := []struct {

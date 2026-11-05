@@ -296,11 +296,12 @@ type stdinWindow struct {
 }
 
 type stdinDoc struct {
-	SourceID string          `json:"source_id"`
-	Config   json.RawMessage `json:"config"`
-	Cursor   string          `json:"cursor"`
-	Window   stdinWindow     `json:"window"`
-	RunID    string          `json:"run_id"`
+	SourceID        string          `json:"source_id"`
+	Config          json.RawMessage `json:"config"`
+	Cursor          string          `json:"cursor"`
+	Window          stdinWindow     `json:"window"`
+	RunID           string          `json:"run_id"`
+	CredentialsPath string          `json:"credentials_path,omitempty"` // 只传路径，内核不读内容
 }
 
 // plan 组装来源 Run 与它的 "命令 + stdin JSON"（§9.2）。
@@ -314,7 +315,7 @@ func (r *Runner) plan(s domain.Source, st Stats, now time.Time) (domain.Run, pro
 	if err != nil {
 		return domain.Run{}, proc.Spec{}, err
 	}
-	doc := stdinDoc{SourceID: s.ID, Config: s.Config, Cursor: s.Cursor, RunID: id,
+	doc := stdinDoc{SourceID: s.ID, Config: s.Config, Cursor: s.Cursor, RunID: id, CredentialsPath: s.CredentialsPath,
 		Window: stdinWindow{To: now.UTC().Format(time.RFC3339)}}
 	if len(doc.Config) == 0 {
 		doc.Config = json.RawMessage(`{}`)
@@ -414,8 +415,8 @@ func (r *Runner) Handle(ctx context.Context, res proc.Result) error {
 		p := parse(res.Stdout)
 		in.Events, in.Rejects = p.events, p.rejects
 		switch {
-		case p.truncated:
-			in.Class, in.Reason = clsTransient, fmt.Sprintf("output exceeds the %d bytes retained, earlier events were lost; cursor held", retainedLimit)
+		case res.Overflow: // 末行不是真正的末行，哪怕它长得像游标也不认
+			in.Class, in.Reason = clsTransient, "output exceeds max_source_output_mb; events before the limit were kept, cursor held"
 		case !p.cursorOK:
 			in.Class, in.Reason = clsTransient, "last line is not a valid cursor"
 		default:

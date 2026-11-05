@@ -48,7 +48,7 @@
 | **来源** | | | |
 | `apa source list/show` | 来源与统计 | observer | |
 | `apa source add` | 登记附带的拉取程序或 webhook source；自定义命令（含邮件、日历工具的适配命令）只在 Web | delegate | 20 |
-| `apa source auth <id>` | 启动附带拉取程序的认证模式（在本机运行 `<来源命令> auth <id>`，继承标准输入输出）；不是 pull 类型的来源返回 2，工具适配的来源用工具自己的认证命令（主文档 §9.7） | 主机本地，经 API 读来源登记，需 observer | 2、5 |
+| `apa source auth <id>` | 以该来源登记的 `credentials_path` 启动附带拉取程序的认证模式（在本机运行 `<来源命令> auth <credentials_path>`，继承标准输入输出），凭据写在该路径；不是 pull 类型或未登记 `credentials_path` 的来源返回 2，工具适配的来源用工具自己的认证命令（主文档 §9.7） | 主机本地，经 API 读来源登记，需 observer | 2、5 |
 | `apa source enable/disable` | 启停 | delegate | |
 | `apa source webhook create/rotate` | 创建、轮换 webhook 接收密钥 | delegate | |
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
@@ -122,6 +122,8 @@
 事项字段 `deadline`：`POST /items` 与 `PATCH /items/{id}` 可写，值为 RFC 3339 时间；`PATCH` 传 `null` 清除；`GET` 在已设置时返回。行为见主文档 §6.8。
 
 事项字段 `created_at`、`updated_at`：`GET /items` 与 `GET /items/{id}` 返回，值为 RFC 3339 时间，只读。`created_at` 是该事项首条事项事件的时间（委派子事项的首条是 `delegation.created`，其余是 `item.created`）；`updated_at` 是最后一条事项事件的时间，与 `version` 同步推进（含关系变更；`item.deadline_passed` 与 `command.rejected` 不算）。
+
+`POST /sources`、`PATCH /sources/{id}` 的 `credentials_path` 必须落在该来源自己的目录（`<APA_HOME>/sources/<id>/`）内，否则返回 400。内核只记录这个路径，不读内容；每次拉取时经 stdin JSON 的 `credentials_path` 字段原样交给来源进程（主文档 §9.2），不经环境变量传递。
 
 `GET /sources/{id}/events` 按落盘顺序返回 `{"events": [...], "next_after": 12}`。每条事件的字段见主文档 §6.10：`id`、`source_id`、`dedupe_key`、`type`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`correlation_keys`、`sender`、`sender_verified`、`disposition`、`item`、`attach_state`，其中 `item` 是挂靠或生成的事项 id。`disposition` 可选，取值 `pending`、`attached`、`proposed`、`ignored`、`unjudged`，其他值返回 400。`limit` 缺省 100，上限 500；还有下一页时才返回 `next_after`，作为下一次的 `after`。
 
