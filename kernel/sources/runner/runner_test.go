@@ -582,21 +582,80 @@ echo '{"cursor":"c"}'
 	}
 }
 
-// 输出超过外呼调用器保留的末段时，不能把丢掉的事件当成已处理：游标不动。
-func TestTruncatedOutputDoesNotAdvanceCursor(t *testing.T) {
-	e := setup(t, defaults())
-	e.register("src_a", e.script("a.sh", `i=0
+const bigEvents = `i=0
 while [ $i -lt 700 ]; do
-  echo "{\"id\":\"e$i\",\"type\":\"t\",\"subject\":\"s\",\"detail\":\"`+strings.Repeat("x", 120)+`\",\"occurred_at\":\"2026-03-01T00:00:00Z\"}"
+  echo "{\"id\":\"e$i\",\"type\":\"t\",\"subject\":\"s\",\"detail\":\"` + "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" + `\",\"occurred_at\":\"2026-03-01T00:00:00Z\"}"
   i=$((i+1))
 done
-echo '{"cursor":"big"}'
+`
+
+// 来源输出超过 64KB（约 110KB）时开头的事件也要落盘，游标照常推进。
+func TestOutputBeyondOldTailLimitPersistsEveryEvent(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", bigEvents+`echo '{"cursor":"big"}'
+`), nil)
+	e.r.Sync(bg)
+	res := e.tick(1)
+	s, st := e.source("src_a")
+	if len(res[0].Stdout) <= 64<<10 || s.Cursor != "big" || st.ConsecutiveFailures != 0 || len(e.events("src_a")) != 700 {
+		t.Fatalf("stdout=%d cursor=%q stats=%+v events=%d", len(res[0].Stdout), s.Cursor, st, len(e.events("src_a")))
+	}
+}
+
+// 超过总上限：上限内已解析的事件照常落盘，游标不动，按临时失败计并写原因；下次重试不产生重复。
+func TestOutputOverLimitKeepsEventsHoldsCursor(t *testing.T) {
+	cfg := defaults()
+	cfg.MaxSourceOutput = 32 << 10
+	e := setup(t, cfg)
+	e.register("src_a", e.script("a.sh", bigEvents+`echo '{"cursor":"big"}'
 `), nil)
 	e.r.Sync(bg)
 	e.tick(1)
 	s, st := e.source("src_a")
-	if s.Cursor != "" || st.ConsecutiveFailures != 1 || !strings.Contains(st.LastError, "retained") {
-		t.Fatalf("%q %+v", s.Cursor, st)
+	n := len(e.events("src_a"))
+	if s.Cursor != "" || st.ConsecutiveFailures != 1 || !strings.Contains(st.LastError, "max_source_output_mb") || n == 0 || n >= 700 {
+		t.Fatalf("cursor=%q stats=%+v events=%d", s.Cursor, st, n)
+	}
+	if rj := e.rejects("src_a"); len(rj) != 0 { // 上限切在行中间的半行不算坏行
+		t.Fatalf("rejects: %+v", rj)
+	}
+	e.advance(time.Minute)
+	e.tick(1)
+	if got := len(e.events("src_a")); got != n {
+		t.Fatalf("retry duplicated events: %d -> %d", n, got)
+	}
+}
+
+// 来源登记的 credentials_path 经 stdin 交给来源进程；未登记时不出现这个字段。
+func TestCredentialsPathPassedOnStdin(t *testing.T) {
+	e := setup(t, defaults())
+	cred := filepath.Join(e.dir, "home", "sources", "src_a", "gh")
+	e.register("src_a", e.script("a.sh", `cat > `+filepath.Join(e.dir, "a.stdin")+`
+`+goodEvents), m{"credentials_path": cred})
+	e.register("src_b", e.script("b.sh", `cat > `+filepath.Join(e.dir, "b.stdin")+`
+`+goodEvents), nil)
+	e.r.Sync(bg)
+	e.tick(2)
+	for name, want := range map[string]string{"a.stdin": cred, "b.stdin": ""} {
+		b, err := os.ReadFile(filepath.Join(e.dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var in map[string]any
+		if err := json.Unmarshal(b, &in); err != nil {
+			t.Fatal(err)
+		}
+		got, present := in["credentials_path"]
+		if (want != "" && got != want) || (want == "" && present) {
+			t.Fatalf("%s: %s", name, b)
+		}
+	}
+}
+
+func TestParseCapsRejectsPerRun(t *testing.T) {
+	p := parse([]byte(strings.Repeat("not json\n", maxRejects+5) + `{"cursor":"c"}`))
+	if len(p.rejects) != maxRejects || !p.cursorOK {
+		t.Fatalf("rejects=%d cursorOK=%v", len(p.rejects), p.cursorOK)
 	}
 }
 

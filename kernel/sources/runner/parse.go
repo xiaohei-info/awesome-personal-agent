@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-// retainedLimit 是外呼调用器保留的 stdout 末段大小（kernel/outcall/proc 的 tailLimit）。
-// 输出达到它说明开头已被截掉：丢掉的事件无从落盘，此时不能推进游标。
-const retainedLimit = 64 << 10
-
 // parsedEvent 是通过必填校验的标准事件（§9.2）。
 type parsedEvent struct {
 	ID              string    `json:"id"`
@@ -37,24 +33,22 @@ type Reject struct {
 }
 
 type parsed struct {
-	events    []parsedEvent
-	rejects   []Reject // SourceID、RunID、At 由落账时补
-	cursor    string
-	cursorOK  bool
-	truncated bool
+	events   []parsedEvent
+	rejects  []Reject // SourceID、RunID、At 由落账时补
+	cursor   string
+	cursorOK bool
 }
 
-const rawLimit = 512
+const (
+	rawLimit   = 512
+	maxRejects = 1000 // 单次留痕的坏行数：输出上限是几十 MB，坏行不能换算成几千万条记录
+)
 
 // parse 解析 stdout：每行一个标准事件，末个非空行是 {"cursor":"…"}。
 // 末行不是合法游标时 cursorOK 为假，其余事件照常返回。
 func parse(stdout []byte) parsed {
 	var p parsed
 	lines := bytes.Split(stdout, []byte("\n"))
-	if len(stdout) >= retainedLimit {
-		p.truncated = true
-		lines = lines[1:] // 第一行是被截断的残段
-	}
 	type numbered struct {
 		n    int
 		text []byte
@@ -74,6 +68,9 @@ func parse(stdout []byte) parsed {
 	for _, l := range ls {
 		ev, err := asEvent(l.text)
 		if err != nil {
+			if len(p.rejects) == maxRejects {
+				continue
+			}
 			raw := string(l.text)
 			if len(raw) > rawLimit {
 				raw = raw[:rawLimit]

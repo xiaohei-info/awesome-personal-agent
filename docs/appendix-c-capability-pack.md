@@ -54,6 +54,8 @@ kinds:
 
 ## C.5 source_rules、webhook_schemes、webhook_mappings
 
+能力包只声明来源事件怎样变成事项，不登记来源：来源的命令、周期、超时、`credentials_path` 都在 Source 登记里（主文档 §6.10），由内核经 stdin 交给来源进程（主文档 §9.2），能力包不能声明或改写。
+
 **source_rules**：确定性规则，能判定的不调模型。
 
 | 字段 | 语义 |

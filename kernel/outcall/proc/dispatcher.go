@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,7 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-const tailLimit = 64 << 10 // stdout/stderr 只保留末段（任务型的结构化摘要在 stdout 末段，§8.4）
+const tailLimit = 64 << 10 // 事件流以外的 stdout 与所有 stderr 只保留末段（任务型的结构化摘要在 stdout 末段，§8.4）
 
 // envWhitelist 是子进程能从内核环境继承的全部变量（§7.7）：PATH、HOME 和 XDG 目录变量及基本区域设置。
 var envWhitelist = map[string]bool{
@@ -29,9 +30,11 @@ var envWhitelist = map[string]bool{
 // Result 是一次运行结束后交回调用模块的结果；本包不据此发任何通知或事件。
 type Result struct {
 	Run    domain.Run // 已落账的终态
-	Stdout []byte     // 末段
+	Stdout []byte     // 事件流类别（eventStream）是上限内的全部完整行；其余类别是末段
 	Stderr []byte     // 末段
 	Reason string     // 失败、超时、关停的原因；成功为空
+	// Overflow 为真表示事件流类别的 stdout 超过单次总上限（max_source_output_mb），超出部分已丢弃。
+	Overflow bool
 }
 
 // Options 是调度器的依赖与扩展点；零值字段取默认。
@@ -50,9 +53,10 @@ type Options struct {
 // Dispatcher 按两个队列的额度拉起子进程。额度从账本里 running 的 Run 数得出，
 // 重启后仍存活的进程继续占额度。
 type Dispatcher struct {
-	st     *store.Store
-	limits map[Queue]int
-	opt    Options
+	st        *store.Store
+	limits    map[Queue]int
+	maxOutput int // 事件流类别单次 stdout 的总上限（字节）
+	opt       Options
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -68,8 +72,11 @@ func New(st *store.Store, cfg config.Config, opt Options) *Dispatcher {
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
+	if cfg.MaxSourceOutput == 0 {
+		cfg.MaxSourceOutput = config.Default().MaxSourceOutput
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Dispatcher{st: st, opt: opt, ctx: ctx, cancel: cancel,
+	return &Dispatcher{st: st, opt: opt, ctx: ctx, cancel: cancel, maxOutput: cfg.MaxSourceOutput,
 		limits: map[Queue]int{QueueLong: cfg.MaxSubprocesses, QueueShort: cfg.MaxShortSubprocesses}}
 }
 
@@ -178,9 +185,14 @@ func (d *Dispatcher) environ(r domain.Run) []string {
 // run 执行一条已置为 running 的 Run 并落账终态。
 func (d *Dispatcher) run(rec Record) {
 	defer d.wg.Done()
-	var out, errb tail
-	state, exit, reason := d.exec(rec, &out, &errb)
-	res := Result{Stdout: out.bytes(), Stderr: errb.bytes(), Reason: reason}
+	var errb tail
+	var out stdoutSink = &tail{}
+	if eventStream(rec.Run.Category) {
+		out = &whole{limit: d.maxOutput}
+	}
+	state, exit, reason := d.exec(rec, out, &errb)
+	stdout, overflow := out.result()
+	res := Result{Stdout: stdout, Stderr: errb.bytes(), Reason: reason, Overflow: overflow}
 	// 落账不能被关停取消，否则 Run 会卡在 running。
 	err := d.st.Update(context.Background(), func(tx *store.Tx) error {
 		if err := Settle(tx, rec.Run.ID, state, exit, reason, d.opt.Now()); err != nil {
@@ -201,7 +213,7 @@ func (d *Dispatcher) run(rec Record) {
 	}
 }
 
-func (d *Dispatcher) exec(rec Record, stdout, stderr *tail) (domain.RunState, *int, string) {
+func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState, *int, string) {
 	spec := rec.Spec
 	cmd := exec.Command(spec.Command[0], spec.Command[1:]...)
 	cmd.Dir = spec.Dir
@@ -267,6 +279,46 @@ func exitCode(err error) int {
 	return 0
 }
 
+// stdoutSink 按流接收子进程的 stdout，运行结束后交出调用模块要的内容。
+type stdoutSink interface {
+	io.Writer
+	result() (out []byte, overflow bool)
+}
+
+// eventStream 报告该类别的 stdout 是否是逐行的标准事件（§9.2、§9.5）：每一行都要交回调用模块，不能只看末段。
+func eventStream(c domain.RunCategory) bool {
+	return c == domain.RunSource || c == domain.RunTransform
+}
+
+// whole 保留 limit 字节内的全部输出；超过后只丢不存，子进程不会因管道写满而阻塞，由超时兜底它的运行时长。
+type whole struct {
+	mu    sync.Mutex
+	buf   []byte
+	limit int
+	over  bool
+}
+
+func (w *whole) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	keep := p
+	if room := w.limit - len(w.buf); len(p) > room {
+		keep, w.over = p[:max(room, 0)], true
+	}
+	w.buf = append(w.buf, keep...)
+	return len(p), nil
+}
+
+// result 超限时切掉末尾的半行，调用模块拿到的都是完整行。
+func (w *whole) result() ([]byte, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.over {
+		return append([]byte(nil), w.buf...), false
+	}
+	return append([]byte(nil), w.buf[:bytes.LastIndexByte(w.buf, '\n')+1]...), true
+}
+
 // tail 只保留最后 tailLimit 字节。
 type tail struct {
 	mu  sync.Mutex
@@ -288,3 +340,5 @@ func (t *tail) bytes() []byte {
 	defer t.mu.Unlock()
 	return append([]byte(nil), t.buf...)
 }
+
+func (t *tail) result() ([]byte, bool) { return t.bytes(), false }

@@ -22,17 +22,19 @@ type Config struct {
 	Listen               string        // 监听地址 host:port
 	MaxSubprocesses      int           // 长时运行（task、background）额度
 	MaxShortSubprocesses int           // 短任务（source、transform、reader）额度
+	MaxSourceOutput      int           // 来源、转换脚本单次 stdout 的总上限（字节）
 	IngestRetention      time.Duration // Ingest 请求体保留期
 	RunRetention         time.Duration // 运行目录保留期
 }
 
-// Default 返回设计规定的默认值：额度 4/2，Ingest 30 天，运行目录 14 天。
+// Default 返回设计规定的默认值：额度 4/2，来源输出上限 32MB，Ingest 30 天，运行目录 14 天。
 // 监听地址设计未规定，默认只绑本机回环，跨设备访问需显式改配置。
 func Default() Config {
 	return Config{
 		Listen:               "127.0.0.1:7777",
 		MaxSubprocesses:      4,
 		MaxShortSubprocesses: 2,
+		MaxSourceOutput:      32 << 20,
 		IngestRetention:      30 * day,
 		RunRetention:         14 * day,
 	}
@@ -166,6 +168,12 @@ func apply(c *Config, seen map[string]bool, raw string) error {
 		return positive(k, v, &c.MaxSubprocesses)
 	case "max_short_subprocesses":
 		return positive(k, v, &c.MaxShortSubprocesses)
+	case "max_source_output_mb":
+		var mb int
+		if err := positive(k, v, &mb); err != nil {
+			return err
+		}
+		c.MaxSourceOutput = mb << 20
 	case "ingest_retention_days":
 		return days(k, v, &c.IngestRetention)
 	case "run_retention_days":

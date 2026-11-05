@@ -621,10 +621,10 @@ func (s *Service) Handle(ctx context.Context, res proc.Result) error {
 	}
 	switch {
 	case run.State == domain.RunSucceeded:
-		evs, rejects, truncated := runner.ParseEvents(res.Stdout)
-		if truncated {
-			return s.settle(ctx, g, StateFailed, "script output exceeds the retained size; earlier events were lost", 0)
+		if res.Overflow {
+			return s.settle(ctx, g, StateFailed, "script output exceeds max_source_output_mb", 0)
 		}
+		evs, rejects := runner.ParseEvents(res.Stdout)
 		if len(rejects) > 0 && len(evs) == 0 {
 			return s.settle(ctx, g, StateFailed, fmt.Sprintf("script output line %d: %s", rejects[0].Line, rejects[0].Reason), 0)
 		}

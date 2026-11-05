@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
@@ -30,7 +29,8 @@ func source(c *client.Ctx, args []string) error {
 	return auth(c, args[1])
 }
 
-// auth 经 API 读来源登记（CLI 不碰存储），在本机运行 `<命令> auth <id>`。程序失败时退出码是 1，详情在它自己的输出里。
+// auth 经 API 读来源登记（CLI 不碰存储），在本机运行 `<命令> auth <credentials_path>`，凭据写在登记的路径里（§9.2）。
+// 程序失败时退出码是 1，详情在它自己的输出里。
 func auth(c *client.Ctx, id string) error {
 	ctx := context.Background()
 	var s domain.Source
@@ -41,17 +41,14 @@ func auth(c *client.Ctx, id string) error {
 	if s.Type != domain.SourcePull || len(argv) == 0 {
 		return usage("source "+id+" is not a bundled pull program", "tool-adapted sources use the tool's own auth command; webhook sources use `apa source webhook`")
 	}
-	home, err := config.ResolveHome(c.Env.Getenv, c.Env.UserHome)
-	if err != nil {
-		return usage("cannot locate the APA home directory", "set APA_HOME to an absolute path")
+	if s.CredentialsPath == "" {
+		return usage("source "+id+" has no credentials_path", "register the source with a credentials_path, then run `apa source auth` again")
 	}
-	dir := config.LayoutOf(home).SourceDir(id)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(s.CredentialsPath, 0o700); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, argv[0], append(argv[1:], "auth", id)...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "APA_HOME="+home)
+	cmd := exec.CommandContext(ctx, argv[0], append(argv[1:], "auth", s.CredentialsPath)...)
+	cmd.Dir = s.CredentialsPath
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.Env.Stdin, c.Env.Stdout, c.Env.Stderr
 	return cmd.Run()
 }
