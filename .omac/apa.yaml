@@ -12,7 +12,7 @@ meta:
   reconcile_audit:
     schema: omac.reconcile-audit/v1
     last_full_scan_at: '2026-11-05T21:56:39Z'
-    completed_interval_ticks: 10
+    completed_interval_ticks: 11
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
