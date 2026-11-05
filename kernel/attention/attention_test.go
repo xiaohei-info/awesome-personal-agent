@@ -549,6 +549,9 @@ func TestAnsweredDecisionLeavesWebUnread(t *testing.T) {
 			if u := e.unread(); len(u) != 0 {
 				t.Fatalf("answered decision still unread: %+v", u)
 			}
+			if got := e.get("decision:" + id + ":" + versionOf(e, id, -1)); got.State != domain.DeliverySuperseded {
+				t.Fatalf("old delivery state = %s", got.State)
+			}
 		})
 	}
 }
@@ -571,5 +574,21 @@ func TestDecisionBecomingNearDeadlineDuringQuietIsReleased(t *testing.T) {
 	d := e.claim("channel:chan")
 	if d == nil || d.Item != id {
 		t.Fatalf("decision not released when it became near its deadline: %+v", d)
+	}
+}
+
+// 静默期内才开启豁免开关：已暂存的临近截止决策随即放行。
+func TestEnablingExemptionDuringQuietReleasesHeldNearDeadlineDecision(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(quiet(e.now.Add(-time.Hour), e.now.Add(5*time.Hour)))
+	id := e.asked(map[string]any{"deadline": e.now.Add(10 * time.Minute)})
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("held decision leaked: %+v", d)
+	}
+	e.policy(func(p *policy.Policy) { p.Disturb.QuietExempt = true })
+	e.advance(time.Minute)
+	if d := e.claim("channel:chan"); d == nil || d.Item != id {
+		t.Fatalf("exemption switched on but held decision not released: %+v", d)
 	}
 }
