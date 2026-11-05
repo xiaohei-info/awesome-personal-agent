@@ -182,3 +182,15 @@ func get(dir, h string) (GetResult, error) {
 	}
 	return GetResult{Hash: h, Size: int64(len(data)), Content: data}, nil
 }
+
+// Remove 删除 dir 下哈希为 h 的 blob 文件（物理删除用）；不存在视为已删除。
+// 调用方负责先确认没有其他引用。
+func Remove(dir, h string) error {
+	if !validHash(h) {
+		return invalid("hash must be 64 lowercase hex characters")
+	}
+	if err := os.Remove(filepath.Join(dir, h)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}

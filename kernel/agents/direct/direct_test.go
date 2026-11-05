@@ -21,6 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
@@ -400,6 +401,34 @@ func TestEventStatsInMaterialNotInFingerprint(t *testing.T) {
 	}
 	if strings.Contains(e.stub.Requests()[1].BodyText, "Event 统计") {
 		t.Fatal("screening call carried stats")
+	}
+}
+
+// ACT-PRG-05：物理删除一条已丢弃的建议后，统计不再计它。
+func TestPurgedDecisionNotCounted(t *testing.T) {
+	e := setup(t, true)
+	if err := purge.Register(e.x, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	e.stub.SetDefault(modelstub.Reply{Content: `{"choice":"wait","confidence":0.95}`})
+	e.decide(t, "proposal.accept", e.proposal(t, "gh"))
+	dismissed := e.proposal(t, "gh")
+	e.decide(t, "proposal.dismiss", dismissed)
+	if out, err := e.svc.Do(bg, e.call("follow")); err != nil || out.Final().Stats.Dismissed != 1 {
+		t.Fatalf("before purge %+v %v", out.Final().Stats, err)
+	}
+	b, _ := json.Marshal(map[string]string{"object": dismissed})
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: purge.Command, Input: b}); err != nil {
+		t.Fatal(err)
+	}
+	c := e.call("follow")
+	c.Material = "purged" // 换资料段以绕开指纹复用，强制重新汇总统计
+	out, err := e.svc.Do(bg, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := out.Final().Stats; st.Dismissed != 0 || st.Accepted != 1 {
+		t.Fatalf("purged decision still counted: %+v", st)
 	}
 }
 
