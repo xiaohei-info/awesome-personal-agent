@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	apiagentsmd "github.com/xiaohei-info/awesome-personal-agent/api/agentsmd"
 	apicapture "github.com/xiaohei-info/awesome-personal-agent/api/capture"
 	apichannel "github.com/xiaohei-info/awesome-personal-agent/api/channel"
 	apicontext "github.com/xiaohei-info/awesome-personal-agent/api/context"
@@ -33,6 +34,7 @@ import (
 	apiwhy "github.com/xiaohei-info/awesome-personal-agent/api/why"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -210,6 +212,15 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	att.Attach(x, st, logErr("attention"))
 	k.fu.Attach(logErr("follow-up"))
 
+	agm, ok := ld.Get("agents-md")
+	if !ok || agm.Templates["agents"] == "" {
+		return nil, errors.New("serve: agents-md pack has no render template")
+	}
+	agmSvc, err := agentsmd.New(x, agentsmd.Options{Template: agm.Templates["agents"], OnError: logErr("agents-md render")})
+	if err != nil {
+		return nil, err
+	}
+
 	creds, err := credentials.Mount(x, a)
 	if err != nil {
 		return nil, err
@@ -222,7 +233,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), sources, apiwhy.Routes(st)}}); err != nil {
+		apiexec.Routes(st, x), sources, apiwhy.Routes(st), apiagentsmd.Routes(x, agmSvc)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)

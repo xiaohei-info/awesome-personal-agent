@@ -373,8 +373,6 @@ var notYetImplemented = map[string]bool{
 	"GET /materials/search":          true,
 	"PUT /blobs/{hash}":              true,
 	"GET /blobs/{hash}":              true,
-	"GET /agents-md":                 true,
-	"POST /agents-md/check":          true,
 	"GET /health":                    true,
 	"/settings/purge":                true,
 }
