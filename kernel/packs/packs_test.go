@@ -86,7 +86,6 @@ func briefPack() fstest.MapFS {
 	}
 }
 
-
 func newKinds() *items.Kinds { return items.NewKinds() }
 
 // recKinds 包装真实的 items.Kinds，记录登记了哪些 kind。

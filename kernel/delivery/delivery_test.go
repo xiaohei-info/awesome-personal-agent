@@ -432,3 +432,18 @@ func TestWebRouteIsUnreadImmediately(t *testing.T) {
 		t.Fatalf("unread = %+v", unread)
 	}
 }
+
+// 唤醒类投递带运行 id（§13.6）；其他投递不带。
+func TestWakeDeliveryCarriesRunID(t *testing.T) {
+	e := newEnv(t, Options{})
+	e.update(func(tx *store.Tx) error {
+		_, _, err := e.q.Create(tx, domain.Delivery{ID: "w1", Item: "i", Run: "run_1", Class: domain.DeliveryWake, Route: RouteWake, Version: 1, Content: domain.DeliveryContent{Title: "t"}})
+		return err
+	})
+	if d := e.claim(RouteWake); d == nil || d.Run != "run_1" {
+		t.Fatalf("claimed %+v", d)
+	}
+	if d := e.create("c1", "i", ChannelRoute("x"), 1); d.Run != "" {
+		t.Fatalf("channel delivery has run %q", d.Run)
+	}
+}

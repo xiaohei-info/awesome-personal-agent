@@ -398,6 +398,11 @@ func isNotFound(err error) bool {
 	return errors.As(err, &de) && de.Code == domain.CodeNotFound
 }
 
+// Owns 判断时钟交来的命令是否归本模块；组装处据它在处理器间分派。
+func Owns(c clock.Command) bool {
+	return c.Kind == domain.TimerRecur && strings.HasPrefix(c.TimerID, timerPrefix)
+}
+
 // HandleTimer 是时钟处理器里归规则的部分：周期 Timer 到期，只在同一事务里排一条待执行记录。
 // 动作要走命令模型（自己开写事务），不能在时钟的事务里嵌套执行；排好之后由 Engine.Drain 执行。
 // 不是规则的 Timer 返回错误，由组装处分派给对应模块。

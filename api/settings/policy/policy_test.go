@@ -342,3 +342,20 @@ func TestDefaultsReadable(t *testing.T) {
 		}
 	}
 }
+
+// 渠道属性（§10.3）属于 /settings/policy，只有 Web 能改，未知字段被拒绝。
+func TestChannelsSection(t *testing.T) {
+	e := setup(t)
+	if rec := e.do("PUT", routes[0], `{"channels":{"chat":{"text_only":true}}}`, e.web); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if _, p := e.current(); !p.Channels["chat"].TextOnly {
+		t.Fatalf("not saved: %+v", p.Channels)
+	}
+	if rec := e.do("PUT", routes[0], `{"channels":{"chat":{"bogus":true}}}`, e.web); rec.Code != 400 {
+		t.Fatalf("unknown field: %d", rec.Code)
+	}
+	if rec := e.do("GET", routes[0], "", e.web); !strings.Contains(rec.Body.String(), `"channels":{"chat":{"text_only":true}}`) {
+		t.Fatalf("read back: %s", rec.Body)
+	}
+}

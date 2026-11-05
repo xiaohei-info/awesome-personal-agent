@@ -395,6 +395,54 @@ func TestAuthorization(t *testing.T) {
 }
 
 // ACT-ITEM-10 / ACT-REV-03：撤销 agent 变更只接受 Web 会话，Bearer 一律 403。
+// 导出 ext 只读事项，初筛中的决策同样屏蔽；其他 ext 仍不能读（§10.3、§14.3）。
+func TestExportExtCanOnlyReadItems(t *testing.T) {
+	e := setup(t)
+	issue := func(scope string) func(*http.Request) {
+		var secret string
+		if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
+			_, secret, err = e.auth.Issue(tx, auth.Spec{Kind: auth.Ext, Scope: scope})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return hdr("Authorization", "Bearer "+secret)
+	}
+	id := e.create(e.web, `{"kind":"task","title":"secret title"}`).ID
+	exp := issue("export")
+	for _, path := range []string{"/v1/items", "/v1/items/" + id} {
+		if rec := e.do("GET", path, "", exp); rec.Code != 200 || !strings.Contains(rec.Body.String(), "secret title") {
+			t.Fatalf("export read %s: %d %s", path, rec.Code, rec.Body)
+		}
+		if rec := e.do("GET", path, "", issue("export.notes")); rec.Code != 200 {
+			t.Fatalf("named export read %s: %d", path, rec.Code)
+		}
+		for _, other := range []string{"forward", "channel.chat", "exporter"} {
+			if rec := e.do("GET", path, "", issue(other)); rec.Code != 403 {
+				t.Fatalf("%s read %s: %d", other, path, rec.Code)
+			}
+		}
+	}
+	if rec := e.do("POST", "/v1/items", `{"kind":"task","title":"x"}`, exp); rec.Code != 403 {
+		t.Fatalf("export write: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("PATCH", "/v1/items/"+id, `{"title":"x"}`, exp); rec.Code != 403 {
+		t.Fatalf("export update: %d %s", rec.Code, rec.Body)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, _, _, err := kitems.Revise(tx, id, "test", time.Now(), func(it *domain.Item) error {
+			it.Ask = &domain.Ask{AskKernelState: domain.AskKernelState{ScreeningPending: true}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do("GET", "/v1/items/"+id, "", exp); rec.Code != 200 || strings.Contains(rec.Body.String(), "secret title") {
+		t.Fatalf("screening not redacted: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestRevertIsWebOnly(t *testing.T) {
 	e := setup(t)
 	wrk, dlg, obs := e.token(auth.Worker, "wrk1"), e.token(auth.Delegate, ""), e.token(auth.Observer, "")

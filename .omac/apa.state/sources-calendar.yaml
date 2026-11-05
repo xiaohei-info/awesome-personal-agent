@@ -1,3 +1,5 @@
-# sha256: 944b1774d5037018107d57a56a7c1e77f7edda5a89fe78eeda8a562ec5009fc9
-work_item_id: null
-status: todo
+# sha256: 47905af05d5a6445d1a88a0fee3e277e80c85c5f59b8c99d35807275a824690e
+work_item_id: 01a1acfc-04b2-7953-9d06-0838ee8c6817
+status: done
+merged: true
+merged_at: '2026-11-05T18:52:40Z'

@@ -15,12 +15,12 @@
 | `apa guide [主题] [--template]` | 输出使用说明，只写机制；`--template` 输出常驻指令模板 | 无 | |
 | `apa declare <文件>` | 提交插件声明（无头运行、执行者），本人在 Web 确认后生效 | worker | 4 |
 | **上下文** | | | |
-| `apa context [--session] [--scope project/cwd/item/all] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息 | observer | 3、7 |
+| `apa context [--session] [--scope project/cwd/item/all] [--item <id>] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息；`--scope item` 见主文档 §7.6 | observer | 3、5、7 |
 | `apa persona` | 读取当前人格，供插件在新会话开始时注入；未设定时输出为空 | observer | 3、7 |
 | `apa inbox` | 列出待决和建议；web_only 初筛未返回的决策请求不列出 | observer | |
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建 | observer | |
-| `apa item show/list` | 读事项 | observer | 5 |
+| `apa item show/list` | 读事项；`show` 带挂靠消息，按转发白名单过滤 | observer | 5 |
 | `apa item add/update/transition/relate` | 增改事项、转阶段、关联 | worker（自己的事项）；delegate（任意，附证据） | 4、6 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
@@ -48,7 +48,7 @@
 | **来源** | | | |
 | `apa source list/show` | 来源与统计 | observer | |
 | `apa source add` | 登记附带的拉取程序或 webhook source；自定义命令（含邮件、日历工具的适配命令）只在 Web | delegate | 20 |
-| `apa source auth <id>` | 启动附带拉取程序的认证模式；工具适配的来源用工具自己的认证命令（主文档 §9.7） | 主机本地 | |
+| `apa source auth <id>` | 启动附带拉取程序的认证模式（在本机运行 `<来源命令> auth <id>`，继承标准输入输出）；不是 pull 类型的来源返回 2，工具适配的来源用工具自己的认证命令（主文档 §9.7） | 主机本地，经 API 读来源登记，需 observer | 2、5 |
 | `apa source enable/disable` | 启停 | delegate | |
 | `apa source webhook create/rotate` | 创建、轮换 webhook 接收密钥 | delegate | |
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
@@ -73,7 +73,8 @@
 
 | 分组 | 方法与路径 | 说明 | 凭据 |
 |---|---|---|---|
-| 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新 | 按 §14.3 |
+| 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新 | 按 §14.3；导出 ext 密钥可 `GET` |
+| | `GET /items/{id}/messages` | 事项的全部挂靠消息 | observer；运行身份和无人值守事项按转发白名单过滤；ext 密钥不可用 |
 | | `POST /items/{id}/transition`，`POST /items/{id}/relations` | 转阶段、关联 | 同上 |
 | | `POST /items/{id}/revert` | 撤销 agent 变更 | 只有 Web 登录 |
 | 决策 | `POST /items/{id}/ask` | 写入决策请求 | worker |
@@ -85,13 +86,15 @@
 | 项目 | `GET/POST /projects`，`GET/PATCH /projects/{id}` | 项目 | observer 读，delegate 写 |
 | | `POST /projects/{id}/repos` | repos 属性 | worker、delegate |
 | | `GET /projects/resolve?path&host` | 当前目录到项目的映射 | observer |
-| 材料 | `GET/POST /materials`，`GET /materials/{id}` | 材料 | observer 读，worker 写 |
-| | `GET/POST /materials/{id}/revisions` | 修订 | 同上 |
+| 材料 | `GET/POST /materials`，`GET /materials/{id}` | 材料 | observer 读，worker 写；导出 ext 密钥可 `GET` |
+| | `GET /materials/{id}/content` | 托管型正文，异步读取 | 只有 Web 登录 |
+| | `POST /materials/{id}/changes` | 对托管型发起修改，生成委派子事项 | Web 登录、delegate；worker、运行凭据须带自己范围内的 `parent` |
+| | `GET/POST /materials/{id}/revisions` | 修订 | observer 读，worker 写 |
 | | `POST /materials/{id}/revert` | 回退一次 `direct` 修订 | 只有 Web 登录 |
 | | `POST /revisions/{id}/confirm`，`/reject` | 确认或拒绝 proposed 修订 | Web 登录、delegate（规范生效只有 Web） |
 | | `GET /materials/search` | 检索 | observer |
 | | `PUT/GET /blobs/{hash}` | 附件 | worker 写，observer 读 |
-| 规范 | `GET /agents-md?repo` | 取渲染结果 | observer |
+| 规范 | `GET /agents-md?repo` | 取渲染结果，带最近一次检查状态 | observer |
 | | `POST /agents-md/check` | 上报文件 hash，返回三态 | observer |
 | 上下文 | `GET /context` | 账本增量投影 | observer |
 | | `GET /context/persona` | 当前人格，前面带内核固定声明 | observer |
@@ -99,7 +102,9 @@
 | 插件声明 | `POST /declarations` | 提交无头运行声明与执行者，进 Web 待确认 | worker |
 | 来源 | `GET/POST /sources`，`GET/PATCH /sources/{id}` | 来源登记 | observer 读，delegate 写；自定义命令只有 Web |
 | | `POST /sources/{id}/webhook` | 创建或轮换接收密钥 | delegate |
-| | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | observer、delegate |
+| | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | observer、delegate；运行凭据不能读入站记录（返回 403，原始请求体未经转发白名单） |
+| | `GET /sources/{id}/events?disposition&after&limit` | 来源事件；内部来源 `capture:<项目>` 只有 Web 登录能读 | observer；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
+| | `POST /source-events/{id}/propose` | 把未判定事件转为建议 | Web 登录、delegate |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
 | 事件 | `GET /events?cursor=` | SSE 或长轮询 | observer、导出和转发 ext 密钥 |
 | 投递 | `GET /deliveries/next?wait=` | 长轮询领取；有租约 | 渠道 ext 密钥；网关插件 token（worker 及以上，只领唤醒类投递） |
@@ -107,6 +112,7 @@
 | | `GET /deliveries/unread`，`POST /deliveries/{id}/read` | Web 未读 | Web 登录 |
 | | `GET/POST /forms/{一次性令牌}` | 一次性表单 | 令牌本身 |
 | 运行 | `GET /runs`，`GET /runs/{id}` | 运行记录 | observer |
+| | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
 | 回放与健康 | `GET /why/{id}`，`GET /health` | 回放、健康视图 | observer |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
@@ -116,6 +122,36 @@
 事项字段 `deadline`：`POST /items` 与 `PATCH /items/{id}` 可写，值为 RFC 3339 时间；`PATCH` 传 `null` 清除；`GET` 在已设置时返回。行为见主文档 §6.8。
 
 事项字段 `created_at`、`updated_at`：`GET /items` 与 `GET /items/{id}` 返回，值为 RFC 3339 时间，只读。`created_at` 是该事项首条事项事件的时间（委派子事项的首条是 `delegation.created`，其余是 `item.created`）；`updated_at` 是最后一条事项事件的时间，与 `version` 同步推进（含关系变更；`item.deadline_passed` 与 `command.rejected` 不算）。
+
+`GET /sources/{id}/events` 按落盘顺序返回 `{"events": [...], "next_after": 12}`。每条事件的字段见主文档 §6.10：`id`、`source_id`、`dedupe_key`、`type`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`correlation_keys`、`sender`、`sender_verified`、`disposition`、`item`、`attach_state`，其中 `item` 是挂靠或生成的事项 id。`disposition` 可选，取值 `pending`、`attached`、`proposed`、`ignored`、`unjudged`，其他值返回 400。`limit` 缺省 100，上限 500；还有下一页时才返回 `next_after`，作为下一次的 `after`。
+
+`capture:<项目>` 是对话捕获的内部来源（主文档 §9.3），不在 `GET /sources` 里，Web 按开启捕获的项目拼出 id。Web 登录读它返回同样的结构，其他凭据返回 404（运行凭据仍是 403）。
+
+`POST /source-events/{id}/propose` 不带请求体，成功返回 200 与更新后的来源事件（`disposition` 为 `proposed`，`item` 为新事项 id），事件不是 `unjudged` 时返回 409，不存在时返回 404。事项阶段为 `proposed`，事项的 `item.created` 与来源事件的 `inbound.disposed` 都记调用者为操作者。
+
+`GET /items/{id}/messages` 返回 `{"messages": [...]}`，按落盘顺序。每条字段：`id`、`source`、`sender`、`sender_verified`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`attach_state`、`forward_allowed`（是否进转发白名单）。只读，不推进 `attach_state`。运行身份和 `unattended` 事项的 worker、observer 只拿到 `forward_allowed` 为真的消息；Web 登录和 delegate 拿到全部。web_only 初筛中的事项对非 Web 凭据返回空列表。事项不存在返回 404。`apa item show` 把这个列表合进输出的 `messages`。
+
+`GET /context?scope=item[&item=<id>]` 在普通字段外返回 `messages`：`[{"item": "...", "cursor": "12", "messages": [...]}]`，消息字段同 §9.4 的转发内容（不含 `attach_state`、`forward_allowed`）。`cursor` 只给负责者，回执时作为 `--ack-cursor` 带回。只有 `scope=item` 接受 `item` 参数，其他作用域带它返回 400。
+
+`POST /runs/{id}/credential` 不带请求体，成功返回 200：`{"run": "...", "token": "apa_run_…", "expires_at": "<RFC 3339>"}`。`token` 只出现这一次，不进幂等结果表。运行不存在返回 404，不是未结束的 `launch: wake` 后台运行返回 409，其他凭据返回 403。
+
+`GET /deliveries/next` 返回的投递：`content.recommend` 是决策的推荐选项，未给推荐时省略；`content.form_url` 是一次性表单链接，只出现在只能发文字的渠道上的非 web_only 决策里；`run` 只出现在唤醒类投递上。
+
+`/settings/policy` 的 `channels` 段是渠道的登记属性：`{"<渠道名>": {"text_only": true}}`。
+
+`GET /materials/{id}/content` 只用于托管型，自有型返回 409（读修订）。响应 200，`state` 取三个值之一，其余字段随之变化：
+
+```json
+{"state": "reading", "run": "run_…"}
+{"state": "ready", "content": "…", "commit": "abc123", "repo": "…", "path": "docs/design.md", "read_at": "…"}
+{"state": "unavailable", "reason": "…", "repo": "…", "path": "docs/design.md"}
+```
+
+`reading` 时隔几秒再请求；同一材料的在途读取只有一个，在短任务队列内优先（主文档 §7.7）。`unavailable` 是降级结果，不是错误；再次请求会重新读取。
+
+`POST /materials/{id}/changes` 只用于托管型，自有型返回 409。请求体 `{"assignee": "<执行者 id>", "request": "<修改要求>", "parent": "<事项 id，可选>"}`，可带 `Idempotency-Key`。成功返回 201：`{"item": "<子事项 id>", "parent": "<父事项 id>"}`。子事项带材料的 project、仓库和路径；`assignee` 不在项目允许范围内返回 403（退出码 21）；`parent` 不属于材料所在项目返回 400。父事项来源见主文档 §12.3。
+
+`GET /agents-md?repo` 返回 `{"content": "…", "hash": "…", "rendered_at": "…", "last_check": {"state": "current|stale|drift", "file_hash": "…", "host": "…", "checked_at": "…"}}`。`last_check` 来自同一仓库最近一次 `POST /agents-md/check`，从未检查过时为 `null`。
 
 `GET /packs` 的每个包带 `views`，键是视图文件名去掉 `.yaml`，值只是声明性配置（附录 C.8），不含提示词正文与模板；未声明的列表返回 `[]`，没有视图的包返回 `{}`：
 

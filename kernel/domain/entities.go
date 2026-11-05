@@ -113,10 +113,12 @@ func (s DeliveryState) CanTransition(to DeliveryState) bool {
 
 // DeliveryContent 不含来源正文全文。
 type DeliveryContent struct {
-	Title   string   `json:"title"`
-	Summary string   `json:"summary,omitempty"`
-	Options []string `json:"options,omitempty"`
-	WebURL  string   `json:"web_url,omitempty"`
+	Title     string   `json:"title"`
+	Summary   string   `json:"summary,omitempty"`
+	Options   []string `json:"options,omitempty"`
+	Recommend string   `json:"recommend,omitempty"`
+	WebURL    string   `json:"web_url,omitempty"`
+	FormURL   string   `json:"form_url,omitempty"` // 一次性表单链接（§10.3）
 }
 
 // Injection 记录注入到哪个会话；注入不等于送达。
@@ -128,6 +130,7 @@ type Injection struct {
 type Delivery struct {
 	ID            string          `json:"id"` // 发送方以此为幂等键
 	Item          string          `json:"item"`
+	Run           string          `json:"run,omitempty"` // 唤醒类投递的运行 id；不带凭据明文（§13.6）
 	Class         DeliveryClass   `json:"class"`
 	Route         string          `json:"route"`
 	Content       DeliveryContent `json:"content"`
