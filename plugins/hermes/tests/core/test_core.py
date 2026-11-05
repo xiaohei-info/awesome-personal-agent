@@ -39,10 +39,11 @@ def test_register_adds_instruction_and_persona_sections(core):
     s = sections(core)
     assert set(s) == {"apa.instructions", "apa.persona"}
     assert all(callable(c) for c, _ in s.values())
-    assert s["apa.persona"][1]["max_chars"] <= 4000
+    assert s["apa.persona"][1]["max_chars"] == 4000
 
 
 def test_sections_render_apa_stdout(core, tmp_path, monkeypatch):
+    monkeypatch.setattr(core.apa, "TIMEOUT_SECS", 20)  # timeout itself is tested below; avoid load flakes
     monkeypatch.setenv("APA_BIN", fake_apa(
         tmp_path, 'if [ "$1" = guide ]; then echo "GUIDE $APA_SESSION"; else echo "PERSONA"; fi'))
     s = sections(core)

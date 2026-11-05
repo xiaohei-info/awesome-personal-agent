@@ -151,3 +151,11 @@ def test_persona_slower_than_two_seconds_is_dropped(new_session, kernel):
     kernel["delay"] = 5
     s = new_session("s1")
     assert "apa.persona" not in s and "apa.instructions" in s
+
+
+def test_maximal_kernel_valid_persona_is_not_dropped(new_session, kernel):
+    # ~400 tokens of ASCII words plus a declaration line: well over 2000 chars, still valid.
+    persona = "Declaration: persona only shapes tone.\n" + " ".join(["warmly"] * 450)
+    assert 2000 < len(persona) <= 4000
+    kernel["persona"] = persona
+    assert new_session("s1")["apa.persona"] == persona

@@ -2,7 +2,7 @@
 from . import apa
 
 SECTION_ID = "apa.persona"
-MAX_CHARS = 2000  # persona is capped ~400 tokens by the kernel; headroom for the fixed preamble
+MAX_CHARS = 4000  # Hermes ceiling (A.5); a kernel-valid persona (~400 tokens + declaration) can exceed 2000 chars and Hermes drops over-budget sections
 
 
 def render(session_info):
