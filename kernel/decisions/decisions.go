@@ -287,16 +287,22 @@ func answer() command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
-			res := domain.Resolution{Choice: v.Choice, Text: v.Text, ResolvedVia: viaOf(c), AnsweredBy: c.Caller.Actor.Principal,
-				Evidence: c.Evidence, ResolvedAt: c.Now()}
-			it, err := settle(c.Tx, v, res)
-			if err != nil {
-				return nil, err
-			}
-			_, err = c.Emit(domain.Event{Type: domain.EvDecisionResolved, Object: it.id, Reason: reasonOr(v.Reason, "decision answered"),
-				Payload: it.snap, ResolvedVia: res.ResolvedVia, Evidence: res.Evidence})
-			return ref{it.id}, err
+			return ref{v.ID}, Answer(c, v.ID, v.Choice, v.Text, viaOf(c), c.Caller.Actor.Principal, v.Reason)
 		}}
+}
+
+// Answer 在命令事务里落下决定：写结果、移出 needs_input、撤销超时 Timer、记 decision.resolved。
+// via 是决定入口（Resolution.ResolvedVia），by 是回答人。已有结果或事项不在等待决定返回退出码 6，只认第一次。
+// 授权由调用方的命令管线负责；渠道回答（channel.answer）经它落账，决策的写入仍只有本模块。
+func Answer(c *command.Ctx, id, choice, text, via, by, reason string) error {
+	res := domain.Resolution{Choice: choice, Text: text, ResolvedVia: via, AnsweredBy: by, Evidence: c.Evidence, ResolvedAt: c.Now()}
+	it, err := settle(c.Tx, answerIn{ID: id, Choice: choice, Text: text}, res)
+	if err != nil {
+		return err
+	}
+	_, err = c.Emit(domain.Event{Type: domain.EvDecisionResolved, Object: it.id, Reason: reasonOr(reason, "decision answered"),
+		Payload: it.snap, ResolvedVia: res.ResolvedVia, Evidence: res.Evidence})
+	return err
 }
 
 // resolve 校验回答并给出决定后的阶段。已有结果或事项不在等待决定：退出码 6，只认第一次回答。
