@@ -1,0 +1,4 @@
+name: apa-wake
+version: 0.1.0
+description: "APA: gateway plugin that claims class=wake deliveries, exchanges the run id for a run credential, opens a turn with ctx.inject_message and runs that turn's apa calls under the run identity."
+author: awesome-personal-agent
