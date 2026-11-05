@@ -1,0 +1,38 @@
+name: inbound-triage
+version: 1.0.0
+description: 来源事件变成建议：GitHub、邮件、日历的来源规则，webhook 校验与映射，判断型与生成型提示词
+# 邮件和日历的项目归属随用户而定（项目 id 由本机生成）：在数据目录放同名包，把 project_by 改成 "fixed:<项目 id>"。
+source_rules:
+  - id: github-issue
+    match: {source_type: github, event_type: [issue.opened, issue.labeled]}
+    project_by: repo_remote
+    then: judge
+  - id: calendar-event
+    match: {source_type: calendar, event_type: [event.created, event.updated]}
+    kind: task
+    project_by: none
+    then: proposed
+  - id: mail-received
+    match: {source_type: mail, event_type: [mail.received]}
+    project_by: none
+    then: judge
+webhook_schemes:
+  - id: hmac-sha256-header
+    signature_header: X-Hub-Signature-256
+    signature_prefix: "sha256="
+    algorithm: hmac-sha256
+    signed_payload: body
+    delivery_id_header: X-GitHub-Delivery
+webhook_mappings:
+  - id: github-issues
+    match: {header: {X-GitHub-Event: issues}}
+    fields:
+      id: "{header.X-GitHub-Delivery}"
+      type: "issue.{$.action}"
+      subject: "{$.issue.title}"
+      summary: "{$.issue.body}"
+      link: "{$.issue.html_url}"
+      occurred_at: "{$.issue.updated_at}"
+      correlation_keys: ["{$.repository.full_name}#{$.issue.number}"]
+      sender: "{$.sender.login}"
+    sender_verified: on_signature

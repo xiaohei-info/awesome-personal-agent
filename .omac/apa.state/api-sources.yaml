@@ -1,3 +1,4 @@
-# sha256: 1fe4b3b09e34638294c4ec5f878b7ee550dfe8d3bb1913bd46eca75e22856a56
-work_item_id: null
-status: blocked
+# sha256: d1aa1581e75c7745aafbda09db83c6a81a9b86ca4fe1840602ae84b50240c7f3
+work_item_id: 01a1acce-458c-718d-a0d7-0eec0c600da2
+status: in_progress
+recovery_marker: true
