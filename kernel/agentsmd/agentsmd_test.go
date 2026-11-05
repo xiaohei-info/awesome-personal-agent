@@ -681,6 +681,28 @@ func TestNewValidatesOptions(t *testing.T) {
 	}
 }
 
+// 能力包热加载后模板换新：不合格的模板被拒绝且保留旧模板；合格的下一次渲染才生效。
+func TestSetTemplateAppliesToNextRender(t *testing.T) {
+	e := setup(t)
+	before := e.view(t).Hash
+	tpl := template(t)
+	if err := e.svc.SetTemplate(strings.Replace(tpl, "{fixed_guidance}", "", 1)); err == nil {
+		t.Fatal("a template without a placeholder must be rejected")
+	}
+	e.must(t, owner, "agents.render", map[string]any{})
+	if e.view(t).Hash != before {
+		t.Fatal("a rejected template must not change rendering")
+	}
+	if err := e.svc.SetTemplate(tpl + "\n热加载新增的一行\n"); err != nil {
+		t.Fatal(err)
+	}
+	e.must(t, owner, "agents.render", map[string]any{})
+	if v := e.view(t); v.Hash == before || !strings.Contains(v.Content, "热加载新增的一行") {
+		t.Fatalf("new template not used: %+v", v)
+	}
+	e.noErrors(t)
+}
+
 func TestDropEmptySectionsKeepsOtherTextVerbatim(t *testing.T) {
 	got := dropEmptySections("前言\n\n## A\n\n内容\n\n## B\n\n  \n## C\n\n- x")
 	if want := "前言\n\n## A\n\n内容\n\n## C\n\n- x"; got != want {
