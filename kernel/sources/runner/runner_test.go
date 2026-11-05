@@ -626,6 +626,32 @@ func TestOutputOverLimitKeepsEventsHoldsCursor(t *testing.T) {
 	}
 }
 
+// 来源登记的 credentials_path 经 stdin 交给来源进程；未登记时不出现这个字段。
+func TestCredentialsPathPassedOnStdin(t *testing.T) {
+	e := setup(t, defaults())
+	cred := filepath.Join(e.dir, "home", "sources", "src_a", "gh")
+	e.register("src_a", e.script("a.sh", `cat > `+filepath.Join(e.dir, "a.stdin")+`
+`+goodEvents), m{"credentials_path": cred})
+	e.register("src_b", e.script("b.sh", `cat > `+filepath.Join(e.dir, "b.stdin")+`
+`+goodEvents), nil)
+	e.r.Sync(bg)
+	e.tick(2)
+	for name, want := range map[string]string{"a.stdin": cred, "b.stdin": ""} {
+		b, err := os.ReadFile(filepath.Join(e.dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var in map[string]any
+		if err := json.Unmarshal(b, &in); err != nil {
+			t.Fatal(err)
+		}
+		got, present := in["credentials_path"]
+		if (want != "" && got != want) || (want == "" && present) {
+			t.Fatalf("%s: %s", name, b)
+		}
+	}
+}
+
 func TestParseCapsRejectsPerRun(t *testing.T) {
 	p := parse([]byte(strings.Repeat("not json\n", maxRejects+5) + `{"cursor":"c"}`))
 	if len(p.rejects) != maxRejects || !p.cursorOK {

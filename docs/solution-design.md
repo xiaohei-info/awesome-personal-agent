@@ -676,7 +676,7 @@ Event 是账本的追加日志，也是对外事件流。
 
 ### 6.10 Source 登记、来源事件、Ingest
 
-**Source 登记**：`{id, type: pull / script / webhook, source_type?, command?, schedule?, timeout?, credentials_path?, dedupe_domain?, config, cursor, enabled, stats}`。`source_type` 是能力包规则匹配用的语义类型（如 `github`、`mail`、`calendar`），内核只当字符串比较，不随具体工具变化。
+**Source 登记**：`{id, type: pull / script / webhook, source_type?, command?, schedule?, timeout?, credentials_path?, dedupe_domain?, config, cursor, enabled, stats}`。`source_type` 是能力包规则匹配用的语义类型（如 `github`、`mail`、`calendar`），内核只当字符串比较，不随具体工具变化。`credentials_path` 是该来源的凭据文件或目录，必须在该来源自己的目录（`<APA_HOME>/sources/<id>/`）内；内核只记录路径、不读内容，拉取时经 stdin 交给来源进程（§9.2），来源程序据此找凭据，不依赖 `APA_HOME`。
 
 **来源事件**：
 
@@ -1008,8 +1008,10 @@ observe 的"本来会做什么"和 `create_timer` 动作建出的 Timer 记为�
 **输入**：stdin 一份 JSON。
 
 ```json
-{"source_id": "src_github", "config": {}, "cursor": "…", "window": {"from": "…", "to": "…"}, "run_id": "…"}
+{"source_id": "src_github", "config": {}, "cursor": "…", "window": {"from": "…", "to": "…"}, "run_id": "…", "credentials_path": "…"}
 ```
+
+`credentials_path` 是 Source 登记里的凭据路径（§6.10），未登记时不出现；内核不读它指向的内容。来源程序找凭据只用它，不依赖环境变量。`window.to` 是内核安排这次运行的时间。
 
 **输出**：stdout 标准事件 JSONL，末行是新游标。
 
