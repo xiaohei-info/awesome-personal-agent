@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -59,6 +60,17 @@ type Entry struct {
 	Action   string       `json:"action"` // 建议动作（命令行）
 }
 
+// DeliveryEntry 是一条路由为注入的投递：只带标题、摘要、选项与建议动作，不带来源正文。
+type DeliveryEntry struct {
+	ID      string   `json:"id"`
+	Item    string   `json:"item"`
+	Class   string   `json:"class"`
+	Title   string   `json:"title"`
+	Summary string   `json:"summary,omitempty"`
+	Options []string `json:"options,omitempty"`
+	Action  string   `json:"action,omitempty"`
+}
+
 // Instruction 报告常驻指令是否过期。
 type Instruction struct {
 	Current int  `json:"current"`
@@ -82,6 +94,7 @@ type Result struct {
 	Instruction Instruction     `json:"instruction"`
 	Project     *ProjectContext `json:"project,omitempty"` // 无项目作用域，或项目自上次起没有变化时为空
 	Items       []Entry         `json:"items"`
+	Deliveries  []DeliveryEntry `json:"deliveries,omitempty"`
 	// WebOnlyPending：作用域内有待 Web 确认的高风险决策（§11.6 第 5 条）。
 	WebOnlyPending bool `json:"web_only_pending,omitempty"`
 }
@@ -140,6 +153,9 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 		}
 		res.Project = &ProjectContext{ID: p.ID, Name: p.Name, Intro: p.Intro, Tags: p.Tags, Status: p.Status, Repos: p.Repos, AllowedExecutors: p.AllowedExecutors}
 	}
+	if res.Deliveries, err = injected(tx, req, project, pol); err != nil {
+		return res, err
+	}
 	if res.WebOnlyPending, err = webOnlyPending(tx, project, req.All, pol); err != nil {
 		return res, err
 	}
@@ -150,6 +166,44 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 		}
 	}
 	return res, nil
+}
+
+// injected 返回作用域内待注入的投递。带 Session 时每条只给该会话一次，并记 injected_to_session；
+// 不带 Session（运行者读取）给全部且不记录。投递的事项不在账本里（如合并摘要）时只在无项目作用域出现。
+func injected(tx *store.Tx, req Request, project string, pol policy.Policy) ([]DeliveryEntry, error) {
+	q := delivery.New(delivery.Options{})
+	ds, err := q.Injectable(tx)
+	if err != nil {
+		return nil, err
+	}
+	var out []DeliveryEntry
+	for _, d := range ds {
+		if req.Session != "" && slices.ContainsFunc(d.Injections, func(in domain.Injection) bool { return in.Session == req.Session }) {
+			continue
+		}
+		e := DeliveryEntry{ID: d.ID, Item: d.Item, Class: string(d.Class), Title: d.Content.Title, Summary: d.Content.Summary, Options: d.Content.Options}
+		it, err := items.Get(tx, d.Item)
+		switch {
+		case err == nil:
+			if (!req.All && it.Project != project) || hiddenAsk(it) {
+				continue
+			}
+			e.Action = action(it, pol)
+		case isNotFound(err):
+			if !req.All && project != "" {
+				continue
+			}
+		default:
+			return nil, err
+		}
+		if req.Session != "" {
+			if _, err := q.Inject(tx, d.ID, req.Session); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 // cursor 读会话游标。游标超过当前序号（账本被恢复到较早状态）时从头开始，宁可重复也不漏。
@@ -263,7 +317,7 @@ func oneLine(s string) string {
 
 // Inject 渲染注入文本；没有任何要说的（增量为空、指令未过期）返回空串，不注入。
 func (r Result) Inject() string {
-	if len(r.Items) == 0 && r.Project == nil && !r.Instruction.Stale {
+	if len(r.Items) == 0 && len(r.Deliveries) == 0 && r.Project == nil && !r.Instruction.Stale {
 		return ""
 	}
 	var b strings.Builder
@@ -308,6 +362,18 @@ func (r Result) Inject() string {
 			deadline = e.Deadline.UTC().Format(time.RFC3339)
 		}
 		line("- ", e.ID, " | ", oneLine(e.Title), " | 阶段 ", string(e.Phase), " | 截止 ", deadline, " | 建议：", e.Action)
+	}
+	for _, d := range r.Deliveries {
+		line("- 提醒 ", d.ID, " | ", d.Class, " | ", oneLine(d.Title))
+		if d.Summary != "" {
+			line("  摘要：", oneLine(d.Summary))
+		}
+		for _, o := range d.Options {
+			line("  选项：", oneLine(o))
+		}
+		if d.Action != "" {
+			line("  建议：", d.Action)
+		}
 	}
 	line(envelopeClose)
 	return b.String()

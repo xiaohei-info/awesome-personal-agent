@@ -307,3 +307,25 @@ func TestDefaultIsNormalized(t *testing.T) {
 		t.Fatalf("default not a fixed point:\n%s\n%s", a, b)
 	}
 }
+
+func TestDisturbQuietAndMergeWindowAreValidated(t *testing.T) {
+	if d := Default().Disturb; d.MergeWindowSec != 1800 || !d.RemindOnDeadline || d.Quiet != nil {
+		t.Fatalf("defaults: %+v", d)
+	}
+	for name, f := range map[string]func(*Policy){
+		"negative window": func(p *Policy) { p.Disturb.MergeWindowSec = -1 },
+		"empty quiet":     func(p *Policy) { p.Disturb.Quiet = &Quiet{Start: "08:00", End: "08:00"} },
+		"bad zone":        func(p *Policy) { p.Disturb.Quiet = &Quiet{Start: "22:00", End: "07:00", Zone: "Nowhere/X"} },
+	} {
+		p := Default()
+		f(&p)
+		if _, err := normalize(p); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s accepted: %v", name, err)
+		}
+	}
+	p := Default()
+	p.Disturb.Quiet = &Quiet{Start: "22:00", End: "07:00", Zone: "Asia/Shanghai"}
+	if _, err := normalize(p); err != nil {
+		t.Fatal(err)
+	}
+}
