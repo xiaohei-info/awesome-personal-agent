@@ -41,13 +41,16 @@ func Default() Config {
 // Layout 是 <APA_HOME> 下的固定布局。
 type Layout struct {
 	Home, Config, Ledger, Blobs, Packs, Sources, Runs, RunCredentials, Logs string
+	// HostSources 与 HostDeclarations 是本人在主机上写的登记（§14.12）；apa serve 启动时读取，不存在就跳过。
+	HostSources, HostDeclarations string
 }
 
 func LayoutOf(home string) Layout {
 	j := func(n string) string { return filepath.Join(home, n) }
 	return Layout{Home: home, Config: j(configFile), Ledger: j("ledger.db"), Blobs: j("blobs"),
 		Packs: j("packs"), Sources: j("sources"), Runs: j("runs"),
-		RunCredentials: j("run-credentials"), Logs: j("logs")}
+		RunCredentials: j("run-credentials"), Logs: j("logs"),
+		HostSources: j("sources.json"), HostDeclarations: j("declarations")}
 }
 
 func (l Layout) PackDir(name string) string         { return filepath.Join(l.Packs, name) }

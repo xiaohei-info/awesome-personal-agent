@@ -419,6 +419,9 @@ func (s *svc) toggle() command.Spec {
 
 // ---- 时钟 ----
 
+// Owns 判断时钟交来的命令是否归本模块；组装处据它在处理器间分派。
+func Owns(c clock.Command) bool { return c.TimerID == timerID(c.Target) }
+
 // HandleTimer 是时钟处理器里归实例的部分：到期记一条 instance.fired（事件时间取计划到期时刻），
 // 实例已删除或已停用时 Timer 已过期，返回 nil 让时钟清掉它。不是本模块的 Timer 返回错误，由组装处分派。
 // 它在时钟交来的事务里直接写事件，不经 command.Do（Do 自己开写事务，嵌套会死锁）；实例本身不变，所以不加版本。
