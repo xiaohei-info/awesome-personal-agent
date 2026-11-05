@@ -161,13 +161,13 @@ func (e *env) token(kind auth.Kind) func(*http.Request) {
 	return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
 }
 
-func (e *env) get(t *testing.T, mod func(*http.Request)) agentsmd.View {
+func (e *env) get(t *testing.T, mod func(*http.Request)) view {
 	t.Helper()
 	rec := e.do("GET", "/v1/agents-md?repo="+repo, "", mod)
 	if rec.Code != 200 {
 		t.Fatalf("get: %d %s", rec.Code, rec.Body)
 	}
-	var v agentsmd.View
+	var v view
 	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestGetThenCheckCurrent(t *testing.T) {
 	e := setup(t)
 	obs := e.token(auth.Observer)
 	v := e.get(t, obs)
-	if v.Content == "" || v.Hash != agentsmd.FileHash(v.Content) || v.LastCheck != nil {
+	if v.Content == "" || v.Hash != agentsmd.FileHash(v.Content) || v.RenderedAt == "" || v.LastCheck != nil {
 		t.Fatalf("fresh render must carry full content, its hash and no last_check: %+v", v)
 	}
 	rec := e.check(mustJSON(map[string]any{"repo": repo, "host": "m1", "file_hash": v.Hash}), obs)
@@ -201,7 +201,16 @@ func TestGetThenCheckCurrent(t *testing.T) {
 	if rec.Code != 200 || vd.State != agentsmd.StateCurrent || vd.Exit != 0 || vd.RenderHash != v.Hash {
 		t.Fatalf("check current: %d %s", rec.Code, rec.Body)
 	}
-	lc := e.get(t, obs).LastCheck
+	got := e.get(t, obs)
+	for _, ts := range []string{got.RenderedAt, got.LastCheck.CheckedAt} {
+		if _, err := time.Parse(time.RFC3339Nano, ts); err != nil {
+			t.Fatalf("timestamps must be RFC 3339 strings, got %q", ts)
+		}
+	}
+	if !strings.Contains(e.do("GET", "/v1/agents-md?repo="+repo, "", obs).Body.String(), `"rendered_at":"`) {
+		t.Fatal("rendered_at must be a JSON string on the wire")
+	}
+	lc := got.LastCheck
 	if lc == nil || lc.State != agentsmd.StateCurrent || lc.Host != "m1" || lc.FileHash != v.Hash {
 		t.Fatalf("last_check must reflect the report: %+v", lc)
 	}

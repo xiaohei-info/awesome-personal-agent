@@ -10,6 +10,7 @@ package agentsmd
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
@@ -54,7 +55,32 @@ func (a *api) get(w http.ResponseWriter, r *http.Request, _ *core.Principal) err
 	if err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, v)
+	return core.WriteJSON(w, http.StatusOK, wire(v))
+}
+
+// view 是 GET 的线上形状（附录 B.2）：时间是 RFC 3339 字符串，内核存的是 UnixNano。
+type view struct {
+	Content    string     `json:"content"`
+	Hash       string     `json:"hash"`
+	RenderedAt string     `json:"rendered_at"`
+	LastCheck  *lastCheck `json:"last_check"`
+}
+
+type lastCheck struct {
+	State     string `json:"state"`
+	FileHash  string `json:"file_hash"`
+	Host      string `json:"host"`
+	CheckedAt string `json:"checked_at"`
+}
+
+func stamp(ns int64) string { return time.Unix(0, ns).UTC().Format(time.RFC3339Nano) }
+
+func wire(v agentsmd.View) view {
+	out := view{Content: v.Content, Hash: v.Hash, RenderedAt: stamp(v.RenderedAt)}
+	if lc := v.LastCheck; lc != nil {
+		out.LastCheck = &lastCheck{State: lc.State, FileHash: lc.FileHash, Host: lc.Host, CheckedAt: stamp(lc.CheckedAt)}
+	}
+	return out
 }
 
 func (a *api) check(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
