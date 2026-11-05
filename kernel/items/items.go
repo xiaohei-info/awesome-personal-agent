@@ -1,5 +1,5 @@
 // Package items 是事项中心的事项部分（设计 §6.3、§6.4、§7.1）：事项与关系的投影、
-// item.create / update / transition / relate / revert 命令，以及 wait_until 到期处理。
+// item.create / update / transition / relate / revert 命令，以及 wait_until 与事项截止的到期处理。
 // 所有写入经命令模型登记的命令：授权与事件由管线负责，本包只给出对象、校验与投影变更。
 //
 // 投影与事件的关系（§6.7）：每条命令在同一事务里更新投影并追加一条事件，事件 payload 带变更后的完整快照

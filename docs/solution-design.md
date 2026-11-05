@@ -533,6 +533,7 @@ CLI 是同一命令模型的薄客户端，面向 agent 设计：
 | `tags[]` | 多值自由标签 |
 | `assignee` | 本人或执行者 id。设置时校验项目允许的执行者（§14.7） |
 | `waiting_on` | `{human / executor / external / time, ref}`，`waiting` 阶段必填 |
+| `deadline` | 事项截止时间，可空。`open`、`waiting`、`needs_input` 阶段带 `due` Timer（§6.8）。与 `ask.deadline`（决策超时）相互独立 |
 | `ask` | 决策请求，`needs_input` 阶段必填 |
 | `origin` | `{source, actor, ref}`，事项从哪来 |
 | `chain_depth` | 链路深度，内核维护，调用方不可写 |
@@ -641,6 +642,15 @@ Event 是账本的追加日志，也是对外事件流。
 ### 6.8 Timer
 
 `{target, kind: due / remind / follow_up / wait_until / recur, at, recurrence?}`。target 是事项或能力包实例。到期产生一条系统命令（actor 为 system，`via: clock`）。
+
+**两种 `due` Timer**：事项截止与决策超时都用 `due`，以 Timer id 区分，同一事项上可以并存，各由所属模块处理。
+
+| 用途 | Timer id | 所属模块 | 到期行为 |
+|---|---|---|---|
+| 事项截止（`deadline`） | `due_<事项 id>` | 事项中心 | 记一条 `item.deadline_passed`；不改阶段、字段和版本。是否提醒由触达决定 |
+| 决策超时（`ask.deadline`） | `ask_<事项 id>` | 决策 | 有默认值时按默认值决定（§6.4） |
+
+事项截止 Timer 与 `deadline` 的写入在同一事务内：事项处于 `open`、`waiting`、`needs_input` 时存在，改 `deadline` 即重排，清除即取消。进入 `proposed`、`done`、`dropped` 时取消，`deadline` 字段保留，所以建议被接受或事项重开时按原值重新计时，已过期的会在下一次扫描时再触发一次。上述阶段之间的转移和无关字段的修改不重排，已到期的 Timer 不重复触发。
 
 **错过处理**：周期定时醒来只补最近一次；一次性定时醒来后全部触发，其产生的提醒由打扰控制合并。
 

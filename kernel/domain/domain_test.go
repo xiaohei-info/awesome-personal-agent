@@ -145,7 +145,7 @@ func TestLedgerErrorResponseShape(t *testing.T) {
 }
 
 func TestEventSubscribeRegisteredTypes(t *testing.T) {
-	want := strings.Fields(`item.created item.updated item.phase_changed decision.requested decision.resolved
+	want := strings.Fields(`item.created item.updated item.phase_changed item.deadline_passed decision.requested decision.resolved
 delegation.created delegation.reported command.rejected material.revised material.revision_proposed
 guideline.activated project.updated project.allowed_executors_changed rule.mode_changed allowlist.changed
 policy.changed run.started run.finished source.failed health.alert`)

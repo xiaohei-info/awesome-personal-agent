@@ -556,6 +556,90 @@ func TestHandleTimerRejectsForeignTimers(t *testing.T) {
 	}
 }
 
+// 事项截止与决策超时同为 kind=due，同一事项上并存时各走各的，任一方到期或撤销都不影响另一方。
+func TestItemDeadlineAndAskTimeoutCoexist(t *testing.T) {
+	timers := func(e *env, id string) (ids []string) {
+		t.Helper()
+		if err := e.st.View(bg, func(tx *store.Tx) error {
+			r, err := tx.Query(`SELECT id FROM clock_timer WHERE target = ? AND kind = ? ORDER BY id`, id, string(domain.TimerDue))
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			for r.Next() {
+				var x string
+				if err := r.Scan(&x); err != nil {
+					return err
+				}
+				ids = append(ids, x)
+			}
+			return r.Err()
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return ids
+	}
+	early, late := t0.Add(time.Hour), t0.Add(2*time.Hour)
+	setupBoth := func(t *testing.T, itemDue, askDue time.Time) (*env, string) {
+		e := setup(t)
+		id := e.item(t, map[string]any{"deadline": itemDue})
+		e.must(t, owner, "decision.request", "", map[string]any{"id": id, "ask": ask(map[string]any{"deadline": askDue, "default_on_timeout": "A"})})
+		if got := timers(e, id); len(got) != 2 || got[0] != TimerID(id) {
+			t.Fatalf("both timers must exist: %v", got)
+		}
+		return e, id
+	}
+	tick := func(t *testing.T, e *env, at time.Time, want int) {
+		t.Helper()
+		e.now = at
+		if n, err := e.clk.Tick(bg); n != want || err != nil {
+			t.Fatalf("tick at %v: fired %d, err %v", at, n, err)
+		}
+	}
+
+	t.Run("item deadline first", func(t *testing.T) {
+		e, id := setupBoth(t, early, late)
+		tick(t, e, early, 1)
+		it := e.get(t, id)
+		if it.Phase != domain.PhaseNeedsInput || it.Ask.Resolution != nil {
+			t.Fatalf("the item deadline must not settle the decision: %+v", it)
+		}
+		if got := timers(e, id); len(got) != 1 || got[0] != TimerID(id) {
+			t.Fatalf("the decision timeout must survive: %v", got)
+		}
+		tick(t, e, late, 1)
+		if it := e.get(t, id); it.Phase != domain.PhaseOpen || it.Ask.Resolution == nil || it.Ask.Resolution.ResolvedVia != ViaTimeout {
+			t.Fatalf("timeout default: %+v", it)
+		}
+		e.verify(t)
+	})
+
+	t.Run("ask timeout first", func(t *testing.T) {
+		e, id := setupBoth(t, late, early)
+		tick(t, e, early, 1)
+		it := e.get(t, id)
+		if it.Phase != domain.PhaseOpen || it.Deadline == nil || !it.Deadline.Equal(late) {
+			t.Fatalf("settling must keep the item deadline: %+v", it)
+		}
+		if got := timers(e, id); len(got) != 1 || got[0] == TimerID(id) {
+			t.Fatalf("the item deadline timer must survive: %v", got)
+		}
+		tick(t, e, late, 1)
+		if ev := e.last(t, id, domain.EvItemDeadlinePassed); ev.Actor.Via != domain.ViaClock {
+			t.Fatalf("deadline event: %+v", ev)
+		}
+		e.verify(t)
+	})
+
+	t.Run("answer cancels only the timeout", func(t *testing.T) {
+		e, id := setupBoth(t, late, early)
+		e.must(t, owner, "decision.answer", "", map[string]any{"id": id, "choice": "A"})
+		if got := timers(e, id); len(got) != 1 || got[0] == TimerID(id) {
+			t.Fatalf("answer must cancel only the timeout: %v", got)
+		}
+	})
+}
+
 func TestIdempotentAnswerReplaysFirstResult(t *testing.T) {
 	e := setup(t)
 	id := e.asked(t, nil)
