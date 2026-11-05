@@ -8,6 +8,7 @@ import (
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/guide"    // 登记 guide 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/projects" // 登记 project 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/serve"
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/why"
 )
 
 func main() { os.Exit(client.Main(os.Args[1:], client.OSEnv())) }
