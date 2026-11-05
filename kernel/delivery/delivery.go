@@ -405,3 +405,8 @@ func (q *Queue) MarkRead(tx *store.Tx, id string) error {
 func (q *Queue) Unread(tx *store.Tx) ([]domain.Delivery, error) {
 	return q.list(tx, "WHERE state = 'fallback_web' AND read_at = 0 ORDER BY created_at, rowid")
 }
+
+// Backlog 返回还没送出的投递（pending 与 claimed），按创建顺序；健康视图只读。
+func (q *Queue) Backlog(tx *store.Tx) ([]domain.Delivery, error) {
+	return q.list(tx, "WHERE state IN ('pending','claimed') ORDER BY created_at, rowid")
+}

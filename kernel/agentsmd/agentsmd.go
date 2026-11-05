@@ -626,3 +626,23 @@ func (s *Service) Get(ctx context.Context, repo string) (View, error) {
 	})
 	return v, err
 }
+
+// OpenDrift 是一条尚未决定的漂移：哪个仓库、对应的 needs_input 事项。
+type OpenDrift struct{ Repo, Item string }
+
+// OpenDrifts 返回所有未决定的漂移，按事项 id 排序；健康视图只读。
+func OpenDrifts(tx *store.Tx) (out []OpenDrift, err error) {
+	r, err := tx.Query("SELECT repo, item FROM agentsmd_drift WHERE state = ? ORDER BY item", driftOpen)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	for r.Next() {
+		var d OpenDrift
+		if err := r.Scan(&d.Repo, &d.Item); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, r.Err()
+}
