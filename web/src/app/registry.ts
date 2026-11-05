@@ -9,6 +9,8 @@ export interface Feature {
   /** 导航排序，小的在前；默认 100。 */
   order?: number;
   element: ReactNode;
+  /** 无需登录的页面（如一次性表单）：不进导航、不经登录门，由令牌自身授权。 */
+  public?: boolean;
 }
 
 export function collectFeatures(modules: Record<string, { feature?: Feature }>): Feature[] {
