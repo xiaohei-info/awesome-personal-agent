@@ -24,13 +24,14 @@ func usage(why, usageText string) error {
 	return domain.NewError(domain.CodeInvalidRequest, why, usageText)
 }
 
-const contextUsage = "usage: apa context [--session ID] [--scope project|cwd|all] [--project ID] [--path DIR] [--host H] [--instruction N] [--format json|inject]"
+const contextUsage = "usage: apa context [--session ID] [--scope project|cwd|item|all] [--item ID] [--project ID] [--path DIR] [--host H] [--instruction N] [--format json|inject]"
 
 func run(c *client.Ctx, args []string) error {
 	fs := flag.NewFlagSet("context", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	session := fs.String("session", "", "")
 	scope := fs.String("scope", "", "")
+	item := fs.String("item", "", "")
 	project := fs.String("project", "", "")
 	path := fs.String("path", "", "")
 	host := fs.String("host", "", "")
@@ -52,14 +53,15 @@ func run(c *client.Ctx, args []string) error {
 		}
 	}
 	set("scope", *scope)
+	set("item", *item)
 	set("format", *format)
 	if *instruction > 0 {
 		q.Set("instruction", strconv.Itoa(*instruction))
 	}
-	// 项目：--project 优先，其次 APA_PROJECT；二者都没有才用当前目录交给内核映射。
+	// 项目：--project 优先，其次 APA_PROJECT；二者都没有才用当前目录交给内核映射。事项作用域不需要项目。
 	if p := firstNonEmpty(*project, c.Project()); p != "" {
 		q.Set("project", p)
-	} else {
+	} else if *scope != "item" {
 		cwd := *path
 		if cwd == "" {
 			cwd, _ = os.Getwd() // 取不到就不带目录：内核按无项目作用域处理，不猜

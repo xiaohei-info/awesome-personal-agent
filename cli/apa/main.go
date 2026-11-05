@@ -15,6 +15,7 @@ import (
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/projects"   // 登记 project 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/runs"       // 登记 run 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/serve"
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/sources" // 登记 source 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/why"
 )
 

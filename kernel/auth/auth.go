@@ -57,6 +57,11 @@ type Credential struct {
 	RevokedAt time.Time `json:"revoked_at,omitzero"`
 }
 
+// IsExportExt 报告凭据是否是导出 ext 密钥（scope 为 export 或 export.<名>，§10.3）：只读事项与材料。
+func IsExportExt(kind Kind, principal string) bool {
+	return kind == Ext && (principal == "ext:export" || strings.HasPrefix(principal, "ext:export."))
+}
+
 // Spec 是签发参数。
 type Spec struct {
 	Kind     Kind
