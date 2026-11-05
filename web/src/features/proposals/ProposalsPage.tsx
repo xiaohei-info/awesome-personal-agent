@@ -1,0 +1,106 @@
+import { useCallback, useEffect, useState } from "react";
+import { ApiError } from "../../app/api";
+import { useSession } from "../../app/session";
+
+// 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。是否可接受/丢弃、授权与只认第一次处理都在服务端。
+export interface Proposal {
+  id: string;
+  title: string;
+  summary?: string;
+  priority?: string;
+  project?: string;
+  origin?: { source: string; actor?: string };
+}
+
+const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
+
+function Card({ item, onAct }: { item: Proposal; onAct: (id: string, action: "accept" | "dismiss", body: object) => Promise<void> }) {
+  const [dismissing, setDismissing] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const act = async (action: "accept" | "dismiss", body: object) => {
+    setBusy(true);
+    try {
+      await onAct(item.id, action, body);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const meta = [item.project, item.origin && `来自 ${item.origin.actor || item.origin.source}`, item.priority && item.priority !== "normal" ? item.priority : ""].filter(Boolean).join(" · ");
+
+  return (
+    <article aria-label={item.title}>
+      <h3>{item.title}</h3>
+      {meta && <p>{meta}</p>}
+      {item.summary && <p>{item.summary}</p>}
+      <button disabled={busy} onClick={() => act("accept", {})}>接受</button>
+      {dismissing ? (
+        <div>
+          <label>
+            丢弃原因
+            <input value={reason} onChange={(e) => setReason(e.target.value)} />
+          </label>
+          <button disabled={busy || !reason.trim()} onClick={() => act("dismiss", { reason: reason.trim() })}>确认丢弃</button>
+        </div>
+      ) : (
+        <button disabled={busy} onClick={() => setDismissing(true)}>丢弃</button>
+      )}
+    </article>
+  );
+}
+
+export function ProposalsPage() {
+  const { api } = useSession();
+  const [items, setItems] = useState<Proposal[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(
+    () =>
+      api.get<{ items: Proposal[] }>("/items?phase=proposed").then(
+        (r) => setItems(r.items),
+        (e) => setError(msg(e)),
+      ),
+    [api],
+  );
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const act = async (id: string, action: "accept" | "dismiss", body: object) => {
+    setError(null);
+    try {
+      await api.post("/items/" + encodeURIComponent(id) + "/" + action, body);
+    } catch (e) {
+      setError(msg(e)); // 含 409：已有人先处理，刷新后以服务端为准
+    }
+    await load();
+  };
+
+  return (
+    <main>
+      <h2>建议流</h2>
+      {error && (
+        <div role="alert">
+          {error}{" "}
+          <button
+            onClick={() => {
+              setError(null);
+              load();
+            }}
+          >
+            重试
+          </button>
+        </div>
+      )}
+      {items === null ? (
+        !error && <p>加载中…</p>
+      ) : items.length === 0 ? (
+        <p>没有待处理的建议</p>
+      ) : (
+        items.map((i) => <Card key={i.id} item={i} onAct={act} />)
+      )}
+    </main>
+  );
+}
