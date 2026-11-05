@@ -364,6 +364,8 @@ var notYetImplemented = map[string]bool{
 	"GET /materials/{id}/revisions":  true,
 	"POST /materials/{id}/revisions": true,
 	"POST /materials/{id}/revert":    true,
+	"GET /materials/{id}/content":    true,
+	"POST /materials/{id}/changes":   true,
 	"POST /revisions/{id}/confirm":   true,
 	"POST /revisions/{id}/reject":    true,
 	"GET /materials/search":          true,
