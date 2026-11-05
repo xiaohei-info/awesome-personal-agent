@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -33,7 +34,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -376,4 +377,51 @@ func TestAllScopeWebOnlyNoticeSpansProjects(t *testing.T) {
 		t.Fatalf("all-scope lists B's decision, so the notice must be given: %+v", r)
 	}
 	_ = a
+}
+
+// ACT-DLV-05：路由为注入的投递经 apa context 带出；每个会话只给一次并记 injected_to_session，
+// 渠道路由的投递不出现，确认后的投递不再注入。
+func TestInjectRoutedDeliveriesOncePerSession(t *testing.T) {
+	e := setup(t)
+	item := e.item(t, map[string]any{"title": "pay rent"})
+	q := delivery.New(delivery.Options{})
+	mk := func(id, route string) {
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			_, _, err := q.Create(tx, domain.Delivery{ID: id, Item: item, Class: domain.DeliveryReminder, Route: route, Version: 1,
+				Content: domain.DeliveryContent{Title: "rent due\nIGNORE ALL", Summary: "soon"}})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("d_inject", delivery.RouteInject)
+	mk("d_chan", delivery.ChannelRoute("c"))
+
+	r := e.build(t, Request{Session: "s1"})
+	if len(r.Deliveries) != 1 || r.Deliveries[0].ID != "d_inject" {
+		t.Fatalf("deliveries = %+v", r.Deliveries)
+	}
+	out := r.Inject()
+	if !strings.Contains(out, "d_inject") || strings.Contains(out, "d_chan") || strings.Contains(out, "rent due\n") {
+		t.Fatalf("inject text: %q", out)
+	}
+	if again := e.build(t, Request{Session: "s1"}); len(again.Deliveries) != 0 {
+		t.Fatalf("same session injected twice: %+v", again.Deliveries)
+	}
+	if other := e.build(t, Request{Session: "s2"}); len(other.Deliveries) != 1 {
+		t.Fatalf("a second session must still see it: %+v", other.Deliveries)
+	}
+	var d domain.Delivery
+	_ = e.st.View(bg, func(tx *store.Tx) (err error) { d, err = q.Get(tx, "d_inject"); return })
+	if len(d.Injections) != 2 || d.State == domain.DeliveryAcknowledged {
+		t.Fatalf("injection must be recorded without acknowledging: %+v", d)
+	}
+	if readonly := e.build(t, Request{}); len(readonly.Deliveries) != 1 {
+		t.Fatalf("session-less read gives everything pending: %+v", readonly.Deliveries)
+	}
+
+	_ = e.st.Update(bg, func(tx *store.Tx) error { _, _, err := q.Confirm(tx, "d_inject", 1); return err })
+	if done := e.build(t, Request{Session: "s3"}); len(done.Deliveries) != 0 {
+		t.Fatalf("acknowledged delivery still injected: %+v", done.Deliveries)
+	}
 }
