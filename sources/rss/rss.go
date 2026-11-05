@@ -41,7 +41,6 @@ const (
 	maxBody        = 10 << 20
 	outputBudget   = 40 << 10 // 低于调用器保留的 64KB 并留足余量
 	cursorOverhead = 32       // {"cursor":"…"} 外壳与转义余量
-	maxSeen        = 1000     // 同一时刻最多记 1000 个 id，游标因此 ≤ ~16KB
 	maxShort       = 300      // id、subject、link、sender 的长度上限
 	fetchTimeout   = 30 * time.Second
 	epoch          = "1970-01-01T00:00:00Z"
@@ -168,21 +167,22 @@ func encode(v any) ([]byte, error) {
 	return b.Bytes(), err
 }
 
-// cursor 是已处理到的发布时间 T 加上 T 时刻已输出的 id：
-// 同一时刻的条目被预算或条数截断时，下一轮靠 seen 续上，不会漏也不会卡死。
+// cursor 是已处理到的位置：发布时间 T，加上 T 时刻已输出的最大 shortHash(id)。
+// 条目按 (发布时间, shortHash) 稳定排序输出，所以"已处理"就是排序位置不超过游标，
+// 游标大小恒定，被预算或条数截断后下一轮从断点续上，不漏也不重。
 type cursor struct {
-	T    time.Time
-	Seen []string
+	T     time.Time
+	After string
 }
 
 func parseCursor(s string) cursor {
 	var j struct {
-		T    string   `json:"t"`
-		Seen []string `json:"seen"`
+		T     string `json:"t"`
+		After string `json:"after"`
 	}
 	if json.Unmarshal([]byte(s), &j) == nil && j.T != "" {
 		if t, err := time.Parse(time.RFC3339, j.T); err == nil {
-			return cursor{t.UTC(), j.Seen}
+			return cursor{t.UTC(), j.After}
 		}
 	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil { // 纯时间戳也接受
@@ -192,45 +192,24 @@ func parseCursor(s string) cursor {
 }
 
 func (c cursor) String() string {
-	if len(c.Seen) == 0 {
+	if c.After == "" {
 		if c.T.IsZero() {
 			return epoch
 		}
 		return c.T.Format(timeLayoutOut)
 	}
-	b, _ := json.Marshal(map[string]any{"t": c.T.Format(timeLayoutOut), "seen": c.Seen})
+	b, _ := json.Marshal(map[string]string{"t": c.T.Format(timeLayoutOut), "after": c.After})
 	return string(b)
 }
 
-// has 判断条目是否已处理。shortcut: 同一时刻超过 maxSeen 个条目时，其后的同刻条目被跳过，
-// 为的是游标和输出有硬上界；需要更多时改为分页式游标。
+// has 判断条目是否排在游标之前（含）。shortcut: 之后才出现、且排序在游标之前的同刻条目会被漏掉，与"晚发布的旧条目"同类，需要时改为全量 id 对账。
 func (c cursor) has(e entry) bool {
-	if !e.at.Equal(c.T) {
-		return false
-	}
-	if len(c.Seen) >= maxSeen {
-		return true
-	}
-	h := shortHash(e.ID)
-	for _, id := range c.Seen {
-		if id == h {
-			return true
-		}
-	}
-	return false
+	return !e.at.After(c.T) && (e.at.Before(c.T) || c.After != "" && shortHash(e.ID) <= c.After)
 }
 
-func (c cursor) advance(e entry) cursor {
-	switch {
-	case e.at.After(c.T):
-		return cursor{e.at, []string{shortHash(e.ID)}}
-	case e.at.Equal(c.T):
-		return cursor{c.T, append(append([]string(nil), c.Seen...), shortHash(e.ID))}
-	}
-	return c
-}
+func (c cursor) advance(e entry) cursor { return cursor{e.at, shortHash(e.ID)} }
 
-// selectNew 取游标之后的条目（晚于 T，或等于 T 且 id 不在 seen 里），按时间从旧到新，至多 max 个。
+// selectNew 取游标之后的条目，按时间从旧到新，至多 max 个。
 // 无日期的条目每次都发（稳定 id 交给内核去重），不参与游标。
 func selectNew(all []entry, c cursor, max int) []entry {
 	var undated, dated []entry
@@ -238,11 +217,16 @@ func selectNew(all []entry, c cursor, max int) []entry {
 		switch {
 		case !e.dated:
 			undated = append(undated, e)
-		case e.at.After(c.T) || (e.at.Equal(c.T) && !c.has(e)):
+		case !c.has(e):
 			dated = append(dated, e)
 		}
 	}
-	sort.SliceStable(dated, func(i, j int) bool { return dated[i].at.Before(dated[j].at) })
+	sort.SliceStable(dated, func(i, j int) bool {
+		if !dated[i].at.Equal(dated[j].at) {
+			return dated[i].at.Before(dated[j].at)
+		}
+		return shortHash(dated[i].ID) < shortHash(dated[j].ID)
+	})
 	if len(dated) > max {
 		dated = dated[:max]
 	}

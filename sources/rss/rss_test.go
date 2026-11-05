@@ -63,12 +63,8 @@ func call(t *testing.T, in map[string]any) result {
 }
 
 // cur 构造期望的游标字符串（与实现同样的编码）。
-func cur(t string, seen ...string) string {
-	hs := []string{}
-	for _, id := range seen {
-		hs = append(hs, shortHash(id))
-	}
-	b, _ := json.Marshal(map[string]any{"t": t, "seen": hs})
+func cur(t string, id string) string {
+	b, _ := json.Marshal(map[string]string{"t": t, "after": shortHash(id)})
 	return string(b)
 }
 
@@ -278,7 +274,7 @@ func TestHugeSameTimestampGroupKeepsOutputAndCursorBounded(t *testing.T) {
 		}
 		c = r.cursor
 	}
-	if total == 0 || total > 3000 {
+	if total != 3000 { // 同刻条目再多也一条不丢
 		t.Fatalf("total=%d", total)
 	}
 }
