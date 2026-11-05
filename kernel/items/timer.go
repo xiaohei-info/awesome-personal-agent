@@ -67,6 +67,7 @@ func wakeWaiting(tx *store.Tx, c clock.Command) error {
 	}
 	next := cur
 	next.Phase, next.WaitingOn = domain.PhaseOpen, nil
+	next = stamped(next, c.Due)
 	if err := save(tx, next); err != nil {
 		return err
 	}

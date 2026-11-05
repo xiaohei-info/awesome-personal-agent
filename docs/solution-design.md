@@ -539,6 +539,7 @@ CLI 是同一命令模型的薄客户端，面向 agent 设计：
 | `chain_depth` | 链路深度，内核维护，调用方不可写 |
 | `unattended` | 无人值守链路标记，内核维护，由后台运行建立的子事项继承 |
 | `version` | 乐观并发版本号 |
+| `created_at`、`updated_at` | 该事项首条与最后一条事项事件（使 `version` 加一的事件）的时间，内核维护，调用方不可写。存于投影、可由 Event 折叠重建，不进事件快照 |
 | `spec` | kind 专属结构；kind 注册了 JSON Schema 就校验，未注册则原样存取 |
 | `ext` | 按集成命名空间的自由 JSON（如 `ext.github.pr`）；内核永不读取，Web 原样展示，CLI 原样透传 |
 

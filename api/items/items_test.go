@@ -202,6 +202,16 @@ func TestCreateGetListUpdate(t *testing.T) {
 	if rec.Code != 200 || up.Version != 2 || e.get(w.ID).Item.Title != "renamed" {
 		t.Fatalf("patch = %d %s", rec.Code, rec.Body)
 	}
+
+	// created_at、updated_at 随详情与列表返回：改动只推进 updated_at。
+	after := e.get(w.ID).Item
+	if !after.CreatedAt.Equal(g.Item.CreatedAt) || !after.UpdatedAt.After(g.Item.UpdatedAt) || !g.Item.CreatedAt.Equal(g.Item.UpdatedAt) || g.Item.CreatedAt.IsZero() {
+		t.Fatalf("timestamps: before %+v after %+v", g.Item, after)
+	}
+	_ = json.Unmarshal(e.do("GET", "/v1/items?kind=task", "", e.web).Body.Bytes(), &l)
+	if !l.Items[0].CreatedAt.Equal(after.CreatedAt) || !l.Items[0].UpdatedAt.Equal(after.UpdatedAt) {
+		t.Fatalf("list timestamps: %+v", l.Items[0])
+	}
 }
 
 // deadline 经 POST 写入、GET 读出，PATCH 可改可清除；格式错误是请求错误。
@@ -315,12 +325,14 @@ func TestKernelFieldsAndStrictInput(t *testing.T) {
 		{"POST", "/v1/items", `{"kind":"task","title":"x","chain_depth":5}`},
 		{"POST", "/v1/items", `{"kind":"task","title":"x","version":9}`},
 		{"POST", "/v1/items", `{"kind":"task","title":"x","Unattended":true}`},
+		{"POST", "/v1/items", `{"kind":"task","title":"x","created_at":"2026-01-01T00:00:00Z"}`},
 		{"POST", "/v1/items", `{"kind":"task","title":"x","ask":{"question":"q","risk_class":"money"}}`},
 		{"POST", "/v1/items", `{"kind":"task","title":"x","bogus":1}`},
 		{"POST", "/v1/items", `null`},
 		{"POST", "/v1/items", `[]`},
 		{"POST", "/v1/items", `{"kind":"task","title":"x"} {}`},
 		{"PATCH", "/v1/items/" + w.ID, `{"chain_depth":5}`},
+		{"PATCH", "/v1/items/" + w.ID, `{"updated_at":"2026-01-01T00:00:00Z"}`},
 		{"PATCH", "/v1/items/" + w.ID, `{"phase":"open"}`},
 		{"PATCH", "/v1/items/" + w.ID, `{"id":"itm_other","title":"x"}`},
 		{"PATCH", "/v1/items/" + w.ID, `{"ID":"itm_other","title":"x"}`},

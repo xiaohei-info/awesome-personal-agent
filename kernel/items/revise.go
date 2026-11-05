@@ -2,6 +2,7 @@ package items
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -10,8 +11,8 @@ import (
 // Revise 是其他模块（决策）改事项投影的唯一入口：投影只由本包写。它在调用方事务内读出事项、
 // 交给 f 修改、校验阶段不变量（§6.14 第 3 条）、落投影并对齐事项的 Timer，
 // 返回变更前后的事项与可直接作事件 payload 的快照（折叠按它重建投影）。
-// 事件与乐观版本由调用方负责：命令内由管线追加版本，时钟处理器里用 command.Bump。
-func Revise(tx *store.Tx, id, op string, f func(*domain.Item) error) (before, after domain.Item, snapshot json.RawMessage, err error) {
+// 事件与乐观版本由调用方负责：命令内由管线追加版本，时钟处理器里用 command.Bump。at 是调用方那条事件的时间。
+func Revise(tx *store.Tx, id, op string, at time.Time, f func(*domain.Item) error) (before, after domain.Item, snapshot json.RawMessage, err error) {
 	if before, err = Get(tx, id); err != nil {
 		return
 	}
@@ -25,6 +26,7 @@ func Revise(tx *store.Tx, id, op string, f func(*domain.Item) error) (before, af
 			return
 		}
 	}
+	after = stamped(after, at)
 	if err = save(tx, after); err != nil {
 		return
 	}
@@ -40,8 +42,8 @@ func ChainDepth(tx *store.Tx, id string) (int, error) { return lastDepth(tx, id)
 
 // Create 是其他模块（任务委派）新建事项的入口：分配 id、校验阶段进入约束与事项自身、落投影，
 // parent 非空时同时建 parent 关系（子 → 父）。返回的快照可直接作事件 payload（折叠按它重建投影，含关系）。
-// 事件与乐观版本由调用方负责：对新对象用 command.Bump。
-func Create(tx *store.Tx, it domain.Item, parent string) (domain.Item, json.RawMessage, error) {
+// 事件与乐观版本由调用方负责：对新对象用 command.Bump。at 是调用方那条事件的时间。
+func Create(tx *store.Tx, it domain.Item, parent string, at time.Time) (domain.Item, json.RawMessage, error) {
 	id, err := newID()
 	if err != nil {
 		return it, nil, err
@@ -60,6 +62,7 @@ func Create(tx *store.Tx, it domain.Item, parent string) (domain.Item, json.RawM
 		}
 		rel = &domain.Relation{Type: domain.RelParent, From: id, To: parent}
 	}
+	it = stamped(it, at)
 	if err := save(tx, it); err != nil {
 		return it, nil, err
 	}
