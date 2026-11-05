@@ -360,10 +360,8 @@ func appendixRoutes(t *testing.T) []appendixRoute {
 // notYetImplemented 是附录 B.2 列出、但 main 上还没有实现的路由（目标设计先于代码）。这不是路由清单，只是缺口台账，只减不增：
 // 实现并挂载后本测试会要求删掉对应条目；实现了却忘了挂，由 TestEveryRouteGroupPackageIsMounted 拦下。
 var notYetImplemented = map[string]bool{
-	"GET /agents-md":        true,
-	"POST /agents-md/check": true,
-	"GET /health":           true,
-	"/settings/purge":       true,
+	"GET /health":     true,
+	"/settings/purge": true,
 }
 
 // mounted 用未登录的真实请求探测：骨干对未挂载的路由统一回 "no such route"；已挂载的要么 401，要么进了处理器（处理器自己的 404 也算挂载）。
