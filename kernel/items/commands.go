@@ -466,7 +466,7 @@ func (s *svc) update() command.Spec {
 			if err := syncTimer(c.Tx, cur, next); err != nil {
 				return nil, err
 			}
-			return ref{next.ID}, emit(c, domain.EvItemUpdated, reason, "", payload{Op: "update", Before: &cur, Item: next})
+			return ref{next.ID}, emit(c, domain.EvItemUpdated, reason, c.Evidence, payload{Op: "update", Before: &cur, Item: next})
 		}}
 }
 
