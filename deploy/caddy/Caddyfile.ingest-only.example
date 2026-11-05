@@ -1,0 +1,9 @@
+# Caddy 样例：只转发 webhook 接收路径 /ingest/（设计 §16.3），其余路径一律 404。
+hooks.example.invalid {
+	handle /ingest/* {
+		reverse_proxy 127.0.0.1:7777
+	}
+	handle {
+		respond 404
+	}
+}
