@@ -80,22 +80,71 @@ func Replay(tx *store.Tx, p policy.Policy, r Request) (Timeline, error) {
 	if len(entries) == 0 {
 		return Timeline{}, domain.NewError(domain.CodeNotFound, "no events for this id", "check the id")
 	}
-	vis := visible(r.Level)
 	for _, en := range entries {
-		e := en.Event
-		s := Step{Seq: e.Seq, Type: e.Type, Object: e.Object, Actor: e.Actor, At: e.At.Format("2006-01-02T15:04:05.999999999Z07:00"),
-			ChainDepth: e.ChainDepth, Basis: e.Basis, ResolvedVia: e.ResolvedVia, Tombstone: en.Tombstone}
-		if vis.reason {
-			s.Reason = e.Reason
-		}
-		if vis.payload {
-			s.Payload = e.Payload
-		}
-		if vis.evidence {
-			s.Evidence = e.Evidence
-		}
-		s.Redacted = !en.Tombstone && ((e.Reason != "" && !vis.reason) || (len(e.Payload) > 0 && string(e.Payload) != "null" && !vis.payload) || (e.Evidence != "" && !vis.evidence))
-		tl.Steps = append(tl.Steps, s)
+		tl.Steps = append(tl.Steps, StepOf(en, r.Level))
 	}
 	return tl, nil
+}
+
+// StepOf 把一条 Event 按凭据级别裁剪成 Step；回放与审计共用，保证两处裁剪一致。
+func StepOf(en eventlog.Entry, l authz.Level) Step {
+	e, vis := en.Event, visible(l)
+	s := Step{Seq: e.Seq, Type: e.Type, Object: e.Object, Actor: e.Actor, At: e.At.Format("2006-01-02T15:04:05.999999999Z07:00"),
+		ChainDepth: e.ChainDepth, Basis: e.Basis, ResolvedVia: e.ResolvedVia, Tombstone: en.Tombstone}
+	if vis.reason {
+		s.Reason = e.Reason
+	}
+	if vis.payload {
+		s.Payload = e.Payload
+	}
+	if vis.evidence {
+		s.Evidence = e.Evidence
+	}
+	s.Redacted = !en.Tombstone && ((e.Reason != "" && !vis.reason) || (len(e.Payload) > 0 && string(e.Payload) != "null" && !vis.payload) || (e.Evidence != "" && !vis.evidence))
+	return s
+}
+
+// AuditRequest 是一次审计查询（§15.3）：按操作者、对象、类型筛选全量 Event（含被拒绝的命令）。
+// Pending 是有 web_only 初筛未返回的事项 id；非 Web 凭据看不到这些对象的事件，与回放一致。
+type AuditRequest struct {
+	Actor   domain.Actor
+	Level   authz.Level
+	Filter  eventlog.Filter
+	After   int64
+	Limit   int
+	Pending map[string]bool
+}
+
+// MaxAuditLimit 是单页上限。
+const MaxAuditLimit = 500
+
+// Audit 返回满足条件的 Event 页，按序号升序，内容按 r.Level 裁剪。Limit 为 0 用 100。
+func Audit(tx *store.Tx, p policy.Policy, r AuditRequest) ([]Step, error) {
+	if r.Limit < 0 || r.Limit > MaxAuditLimit || r.After < 0 {
+		return nil, domain.NewError(domain.CodeInvalidRequest, "after or limit is out of range", "use after >= 0 and 1 <= limit <= 500")
+	}
+	if r.Limit == 0 {
+		r.Limit = 100
+	}
+	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead}); d.Err != nil {
+		return nil, d.Err
+	}
+	steps := []Step{}
+	for len(steps) < r.Limit {
+		entries, err := eventlog.Query(tx, r.Filter, r.After, r.Limit)
+		if err != nil {
+			return nil, err
+		}
+		for _, en := range entries {
+			r.After = en.Event.Seq
+			if r.Level != authz.LevelWeb && r.Pending[en.Event.Object] {
+				continue
+			}
+			steps = append(steps, StepOf(en, r.Level))
+		}
+		if len(entries) < r.Limit {
+			break
+		}
+	}
+	return steps[:min(len(steps), r.Limit)], nil
 }

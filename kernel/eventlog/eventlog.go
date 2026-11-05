@@ -171,6 +171,25 @@ func ReadObject(tx *store.Tx, object string) ([]Entry, error) {
 	return collect(tx, "SELECT "+cols+" FROM eventlog_event WHERE object = ? ORDER BY seq", object)
 }
 
+// Filter 是审计查询条件；空字段不限。Actor 匹配操作者 principal。
+type Filter struct {
+	Actor, Object, Type string
+}
+
+// Query 返回序号大于 after、满足 f 的至多 limit 条事件，按序号升序（审计页用）。
+func Query(tx *store.Tx, f Filter, after int64, limit int) ([]Entry, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	sql, args := "SELECT "+cols+" FROM eventlog_event WHERE seq > ?", []any{after}
+	for _, c := range []struct{ col, val string }{{"json_extract(actor, '$.principal')", f.Actor}, {"object", f.Object}, {"type", f.Type}} {
+		if c.val != "" {
+			sql, args = sql+" AND "+c.col+" = ?", append(args, c.val)
+		}
+	}
+	return collect(tx, sql+" ORDER BY seq LIMIT ?", append(args, int64(limit))...)
+}
+
 // Head 返回当前最大序号，空日志为 0。
 func Head(tx *store.Tx) (int64, error) {
 	var head int64
