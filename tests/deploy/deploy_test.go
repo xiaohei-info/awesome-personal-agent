@@ -99,24 +99,22 @@ func filepathWalk(fn func(rel, content string)) error {
 	})
 }
 
-func TestContainerSampleRunsNonRootServeWithReachableListen(t *testing.T) {
+func TestContainerSampleRunsNonRootServeOnHostLoopback(t *testing.T) {
 	d := read(t, "container/Dockerfile")
-	has(t, "Dockerfile", d, "go build -o /out/apa ./cli/apa", "distroless/static-debian12:nonroot", "ENV APA_HOME=/data", `CMD ["serve"]`, "--chown=65532:65532 /data")
+	has(t, "Dockerfile", d, "go build -o /out/apa ./cli/apa", "distroless/static-debian12:nonroot", "ENV APA_HOME=/data", `CMD ["serve"]`,
+		"--chown=65532:65532 /data", "docker run -d --network host")
+	for _, bad := range []string{"EXPOSE", " -p ", "0.0.0.0"} {
+		if strings.Contains(d, bad) {
+			t.Errorf("容器样例不得发布端口或监听非回环（%q）：端口发布会让 apa 看不到回环来源", bad)
+		}
+	}
 	if _, err := os.Stat("../../cli/apa/main.go"); err != nil {
 		t.Errorf("Dockerfile 构建的入口不存在: %v", err)
 	}
-	cfg, err := config.Load(root + "container/config.yaml")
-	if err != nil {
-		t.Fatalf("容器配置不被 apa 接受: %v", err)
-	}
-	if cfg.Listen != "0.0.0.0:7777" {
-		t.Errorf("容器监听 = %q", cfg.Listen)
-	}
 }
 
-// 真实 apa：init 写出默认回环监听；serve 在代理样例所带的头下发 Secure 会话 Cookie，
-// 缺这个头则不发 Secure；/ingest/ 可达。
-func TestProxyContractHoldsOnRealBinary(t *testing.T) {
+func startApa(t *testing.T, host string) (addr string) {
+	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "apa")
 	if out, err := exec.Command("go", "build", "-o", bin, "../../cli/apa").CombinedOutput(); err != nil {
@@ -136,13 +134,13 @@ func TestProxyContractHoldsOnRealBinary(t *testing.T) {
 	if h, _, _ := net.SplitHostPort(def.Listen); h != "127.0.0.1" {
 		t.Fatalf("默认监听必须是回环，实际 %q", def.Listen)
 	}
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := net.Listen("tcp", host+":0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	addr := l.Addr().String()
+	_, port, _ := net.SplitHostPort(l.Addr().String())
 	l.Close()
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("listen: "+addr+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("listen: "+host+":"+port+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
@@ -152,29 +150,58 @@ func TestProxyContractHoldsOnRealBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = srv.Process.Signal(os.Interrupt); _ = srv.Wait() })
-	waitUp(t, addr, &logs)
+	waitUp(t, "127.0.0.1:"+port, &logs)
+	return "127.0.0.1:" + port
+}
 
-	login := func(forwarded string) *http.Response {
-		req, _ := http.NewRequest("POST", "http://"+addr+"/v1/auth/login", strings.NewReader(`{"password":"correct horse battery"}`))
-		req.Host = "apa.example.invalid" // 代理保留 Host
-		req.Header.Set("Origin", "https://apa.example.invalid")
-		req.Header.Set("Content-Type", "application/json")
-		if forwarded != "" {
-			req.Header.Set("X-Forwarded-Proto", forwarded)
-		}
-		r, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		io.Copy(io.Discard, r.Body)
-		r.Body.Close()
-		return r
+func login(t *testing.T, addr, forwarded string) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest("POST", "http://"+addr+"/v1/auth/login", strings.NewReader(`{"password":"correct horse battery"}`))
+	req.Host = "apa.example.invalid" // 代理保留 Host
+	req.Header.Set("Origin", "https://apa.example.invalid")
+	req.Header.Set("Content-Type", "application/json")
+	if forwarded != "" {
+		req.Header.Set("X-Forwarded-Proto", forwarded)
 	}
-	r := login("https")
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, r.Body)
+	r.Body.Close()
+	return r
+}
+
+// 容器样例不发布端口的原因：来源不是回环时，即使带 X-Forwarded-Proto: https，apa 也拒绝登录。
+func TestNonLoopbackSourceIsRefusedEvenBehindProxyHeader(t *testing.T) {
+	var ext string
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		if ip, ok := a.(*net.IPNet); ok && ip.IP.To4() != nil && !ip.IP.IsLoopback() {
+			ext = ip.IP.String()
+			break
+		}
+	}
+	if ext == "" {
+		t.Skip("没有非回环 IPv4 地址")
+	}
+	addr := startApa(t, "0.0.0.0")
+	_, port, _ := net.SplitHostPort(addr)
+	r := login(t, ext+":"+port, "https")
+	if r.StatusCode != 403 || len(r.Cookies()) != 0 {
+		t.Errorf("非回环来源应被拒绝: status=%d", r.StatusCode)
+	}
+}
+
+// 真实 apa：init 写出默认回环监听；serve 在代理样例所带的头下发 Secure 会话 Cookie，
+// 缺这个头则不发 Secure；/ingest/ 可达。
+func TestProxyContractHoldsOnRealBinary(t *testing.T) {
+	addr := startApa(t, "127.0.0.1")
+	r := login(t, addr, "https")
 	if r.StatusCode != 200 || len(r.Cookies()) != 1 || !r.Cookies()[0].Secure || !r.Cookies()[0].HttpOnly {
 		t.Errorf("经代理头登录应得 Secure Cookie: status=%d cookies=%v", r.StatusCode, r.Cookies())
 	}
-	if r := login(""); r.StatusCode != 200 || len(r.Cookies()) != 1 || r.Cookies()[0].Secure {
+	if r := login(t, addr, ""); r.StatusCode != 200 || len(r.Cookies()) != 1 || r.Cookies()[0].Secure {
 		t.Errorf("无转发头时不应标 Secure（说明 Secure 来自代理头）: status=%d", r.StatusCode)
 	}
 	resp, err := http.Post("http://"+addr+"/ingest/src_none", "application/json", strings.NewReader("{}"))

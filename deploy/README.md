@@ -7,9 +7,9 @@
 | `systemd/apa.service` | 把 `apa serve` 注册为系统服务 |
 | `nginx/apa.conf.example`、`caddy/Caddyfile.example` | Web 与 API 全部经 HTTPS |
 | `nginx/apa-ingest-only.conf.example`、`caddy/Caddyfile.ingest-only.example` | 只转发 `/ingest/`，其余 404 |
-| `container/Dockerfile`、`container/config.yaml` | 可选容器镜像及其监听配置 |
+| `container/Dockerfile` | 可选容器镜像 |
 
 要点：
-- `apa` 默认只监听回环（`config.yaml` 的 `listen`）。代理与 `apa` 同机时无需改动；容器内需监听 `0.0.0.0:7777`（见 `container/config.yaml`），并只把端口发布到宿主回环。
+- `apa` 默认只监听回环（`config.yaml` 的 `listen`）。代理与 `apa` 同机时无需改动；容器用 `--network host` 运行（Linux），不要 `-p` 发布端口：经发布端口到达的请求源地址不是回环，apa 会拒绝登录。
 - 代理必须保留 `Host`，并为 HTTPS 请求带上 `X-Forwarded-Proto: https`（apa 只信回环来源的该头）。Caddy 默认已处理。
 - 验证：`go test -count=1 ./tests/deploy/...`
