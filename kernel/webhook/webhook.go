@@ -427,31 +427,41 @@ func (s *Service) Recover(ctx context.Context) error {
 	return s.Process(ctx)
 }
 
-// Process 处理所有 received 的记录。单条失败不影响其他条，错误合并返回；并发调用只做标记，由正在运行的那次接着处理。
+// Process 处理所有 received 的记录。单条失败不影响其他条，错误合并返回。
+// 并发调用只留下"还要再扫一遍"的标记，由正在运行的那次接着处理；标记必须先于抢锁写下，
+// 持锁者释放锁之后再检查它，这样每次调用之后至少有一次完整扫描，落盘的记录不会停在 received。
 func (s *Service) Process(ctx context.Context) error {
-	if !s.mu.TryLock() {
-		s.again.Store(true)
-		return nil
-	}
 	var errs []error
+	for {
+		s.again.Store(true)
+		if !s.mu.TryLock() {
+			return errors.Join(errs...)
+		}
+		errs = append(errs, s.drain(ctx)...)
+		s.mu.Unlock()
+		if !s.again.Load() {
+			return errors.Join(errs...)
+		}
+	}
+}
+
+func (s *Service) drain(ctx context.Context) (errs []error) {
 	for {
 		s.again.Store(false)
 		var todo []Ingest
 		if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { todo, err = queryIngests(tx, "WHERE state = ?", StateReceived); return }); err != nil {
-			errs = append(errs, err)
-			break
+			return append(errs, err)
 		}
 		for _, g := range todo {
 			if err := s.one(ctx, g); err != nil {
 				errs = append(errs, fmt.Errorf("webhook: ingest %s: %w", g.ID, err))
 			}
 		}
+		// 失败的记录保持 received，等下次触发；只有处理期间又有新的触发才再扫一轮。
 		if !s.again.Load() {
-			break
+			return errs
 		}
 	}
-	s.mu.Unlock()
-	return errors.Join(errs...)
 }
 
 func (s *Service) settle(ctx context.Context, g Ingest, state, reason string, events int) error {
@@ -554,7 +564,12 @@ func (s *Service) enqueueTransform(ctx context.Context, g Ingest, src domain.Sou
 	if err != nil {
 		return err
 	}
-	runID := fmt.Sprintf("run_%s_%d", strings.TrimPrefix(g.ID, idPrefix), g.Gen)
+	// 每次入队用新的 run id：重试与崩溃恢复后的再入队不会撞上旧 Run；Handle 只认记录上当前的 run_id。
+	runID, err := newID()
+	if err != nil {
+		return err
+	}
+	runID = "run_" + strings.TrimPrefix(runID, idPrefix)
 	if err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		if _, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{ID: runID, Category: domain.RunTransform, Target: g.ID, TimeoutSec: timeout},
 			Spec: proc.Spec{Command: argv, Stdin: stdin}}, s.o.Now()); err != nil {

@@ -623,3 +623,83 @@ func TestMappingTemplates(t *testing.T) {
 		t.Fatalf("defaults: %+v %v", ev, err)
 	}
 }
+
+// 转换脚本瞬时失败（退出码 1）后记录留在 received，再次处理会用新的 Run 重试并成功产出事件。
+func TestTransientTransformFailureIsRetriedWithNewRun(t *testing.T) {
+	e := newEnv(t, nil)
+	flag := filepath.Join(e.dir, "flag")
+	cmd := e.script("flaky.sh", `cat >/dev/null
+if [ ! -e `+flag+` ]; then touch `+flag+`; exit 1; fi
+echo '{"id":"x-1","type":"t","subject":"s","occurred_at":"2026-03-01T00:00:00Z"}'
+`)
+	e.register("src_hook", m{"scheme": "hmac", "transform": m{"command": cmd}})
+	status(t, e.post("src_hook", "d-1", `{"a":1}`, nil), 200)
+	e.waitRun()
+	e.svc.Wait()
+	first := e.ingests()[0]
+	if first.State != StateReceived || len(e.events("src_hook")) != 0 {
+		t.Fatalf("after exit 1: %+v", first)
+	}
+	if err := e.svc.Process(bg); err != nil {
+		t.Fatal(err)
+	}
+	e.waitRun()
+	e.svc.Wait()
+	e.noErr()
+	if g := e.ingests()[0]; g.State != StateProcessed || g.Events != 1 || len(e.events("src_hook")) != 1 {
+		t.Fatalf("after retry: %+v", g)
+	}
+}
+
+// 转换到一半崩溃（记录是 transforming，旧 Run 已丢）：Recover 之后重新入队并完成转换。
+func TestRecoverCompletesInterruptedTransform(t *testing.T) {
+	e := newEnv(t, nil)
+	cmd := e.script("ok.sh", `cat >/dev/null
+echo '{"id":"x-1","type":"t","subject":"s","occurred_at":"2026-03-01T00:00:00Z"}'
+`)
+	e.register("src_hook", m{"scheme": "hmac", "transform": m{"command": cmd}})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO webhook_ingest (id, source_id, delivery_key, received_at, state, signed, gen, run_id, events, reason, headers, body, body_size, purged)
+			VALUES ('ing_mid','src_hook','d-mid',?,?,1,1,'run_lost',0,'','{}',?,7,0)`, t0.UnixNano(), StateTransforming, []byte(`{"a":1}`))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Recover(bg); err != nil {
+		t.Fatal(err)
+	}
+	e.waitRun()
+	e.svc.Wait()
+	e.noErr()
+	if g := e.ingests()[0]; g.State != StateProcessed || len(e.events("src_hook")) != 1 {
+		t.Fatalf("after recover: %+v", g)
+	}
+}
+
+// 并发接收：每个已回 2xx 的记录最终都被处理，不会因处理循环的收尾竞争停在 received。
+func TestConcurrentReceiveLeavesNothingUnprocessed(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.RatePerMin = 1 << 20 })
+	e.register("src_hook", m{"scheme": "hmac", "mappings": []string{"issues"}})
+	const n = 60
+	errc := make(chan Response, n)
+	for i := range n {
+		go func() {
+			body := issueBody(i, "opened")
+			errc <- e.svc.Receive(bg, Request{SourceID: "src_hook", Body: []byte(body),
+				Header: map[string]string{"X-Event": "issues", "X-Delivery": "d" + strconv.Itoa(i), "X-Sig-256": "sha256=" + sign(secret, body)}})
+		}()
+	}
+	for range n {
+		status(t, <-errc, 200)
+	}
+	e.svc.Wait()
+	e.noErr()
+	for _, g := range e.ingests() {
+		if g.State != StateProcessed {
+			t.Fatalf("stuck record: %+v", g)
+		}
+	}
+	if got := len(e.ingests()); got != n {
+		t.Fatalf("ingests = %d", got)
+	}
+}
