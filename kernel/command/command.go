@@ -68,6 +68,9 @@ type Bearer struct {
 	Auth   *auth.Auth
 	Secret string
 	Origin auth.Origin
+	// OnBehalfOf 是传输层为 delegate 凭据声明的本人：Bearer 认证只知道凭据，不知道替谁说话，
+	// 而代理操作（§14.3）要求声明替本人行事并附本人原话。
+	OnBehalfOf string
 }
 
 func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
@@ -82,7 +85,11 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	case auth.Delegate:
 		l = authz.LevelDelegate
 	}
-	return Caller{Actor: c.Actor(b.Origin), Level: l, Kind: c.Kind}, nil
+	a := c.Actor(b.Origin)
+	if l == authz.LevelDelegate {
+		a.OnBehalfOf = b.OnBehalfOf
+	}
+	return Caller{Actor: a, Level: l, Kind: c.Kind}, nil
 }
 
 // Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。

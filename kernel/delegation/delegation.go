@@ -157,7 +157,7 @@ func (o Options) create() command.Spec {
 		var v createIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "delegate.create", Action: authz.ActionDelegate,
+	return command.Spec{Name: "delegate.create", Action: authz.ActionDelegate, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -262,7 +262,7 @@ func report() command.Spec {
 		var v reportIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn,
+	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

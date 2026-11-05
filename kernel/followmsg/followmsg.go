@@ -343,7 +343,7 @@ func handback() command.Spec {
 		var v handbackIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: CmdHandback, Action: authz.ActionUpdateOwn,
+	return command.Spec{Name: CmdHandback, Action: authz.ActionUpdateOwn, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

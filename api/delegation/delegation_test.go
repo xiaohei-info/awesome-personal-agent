@@ -116,7 +116,8 @@ func js(v any) json.RawMessage {
 func (e *env) do(method, path, body string, mod func(*http.Request)) *httptest.ResponseRecorder {
 	e.t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	req.RemoteAddr = "127.0.0.1:5000" // 回环来源，明文登录才被接受
+	req.RemoteAddr = "127.0.0.1:5000"                      // 回环来源，明文登录才被接受
+	req.Header.Set(core.EvidenceHeader, "owner: go ahead") // delegate 代理写需要证据；其他凭据不读
 	if mod != nil {
 		mod(req)
 	}

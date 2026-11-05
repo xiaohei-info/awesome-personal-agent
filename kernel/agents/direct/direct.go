@@ -121,7 +121,7 @@ type Call struct {
 	// NoStats 为真时不附带统计（web_only 初筛，§8.4）。
 	NoStats bool
 
-	// Actor 是触发这次调用的入口（Via 必填；Run、Harness 等照记）。类型一律记为 agent。
+	// Actor 是触发这次调用的入口（Via 必填；Run、Harness 等照记）。类型缺省记为 agent，调用方给出的类型照记。
 	Actor      domain.Actor
 	ChainDepth int
 	Basis      *domain.Basis
@@ -507,7 +507,7 @@ func userSegment(c Call, st *Stats) string {
 
 // ---- 留痕、复用、健康 ----
 
-// record 在一个事务里写复用表（成功时）并追加 actor=agent 的 Event。
+// record 在一个事务里写复用表（成功时）并追加 Event；操作者类型取调用方的，缺省为 agent。
 func (s *Service) record(ctx context.Context, c Call, st Step, fp string, callErr error) error {
 	state := "succeeded"
 	payload := map[string]any{"run_id": st.RunID, "category": st.Category, "template": st.Template,
@@ -536,7 +536,9 @@ func (s *Service) record(ctx context.Context, c Call, st Step, fp string, callEr
 		return err
 	}
 	actor := c.Actor
-	actor.Type = domain.ActorAgent
+	if actor.Type == "" { // 调用方已给出类型就保留：系统发起的调用（如初筛）不是 agent 变更
+		actor.Type = domain.ActorAgent
+	}
 	if actor.Principal == "" {
 		actor.Principal = "agent:" + st.Category
 	}

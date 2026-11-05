@@ -89,7 +89,7 @@ func (e *env) issue(t *testing.T, name string, s auth.Spec) {
 
 // as 以真实签发的凭据发起请求：操作者与信任级由认证步骤据账本得出。
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h"}}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {

@@ -979,7 +979,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 
 ### 8.6 留痕与撤销
 
-三类的每次调用都记一条 actor 为 agent 的 Event，Web 可筛可撤销；附带了统计的，统计值记入这条 Event，`apa why` 可查。任务型另有 Run 记录。
+三类的每次调用都记一条 Event，Web 可筛可撤销。操作者类型取调用方的：规则与跟进等代表 agent 的调用记 agent；系统发起的调用（如 web_only 初筛）记 system，不进"agent 变更"视图。附带了统计的，统计值记入这条 Event，`apa why` 可查。任务型另有 Run 记录。
 
 **APA 不介入用量。** 模型与 harness 的用量由用户自己的账户和 harness 管理，APA 不统计、不限额，上述复用和批量只是为了避免重复判断。
 
@@ -1604,7 +1604,7 @@ Web 和 CLI 两个入口只在非高风险操作上效果一致，这是有意�
 
 delegate 代答和接受建议都必须附**本人原话**与会话引用（`--evidence`）。事项记 `resolved_via: chat`，Event 带 `on_behalf_of` 和证据，Web"agent 变更"视图供事后核对，本人可一键撤销。
 
-事项的新建、更新、转阶段和关联（`item.create`、`item.update`、`item.transition`、`item.relate`）同样是代理写操作：delegate 调用时，无论改的是不是自己的事项，缺 `on_behalf_of` 或证据都按 `invalid_request`（退出码 2）拒绝，不写入；带了则原样记进对应 Event。这条规则由命令管线在授权阶段统一判定，命令登记时只声明自己是否属于代理写操作。撤销（`item.revert`）只在 Web，由本人操作，不要求证据。
+代理写操作不止决策与事项：delegate 经 HTTP 路由可达、授权能放行的写命令一律登记为代理写操作（只由内核内部调用的命令不登记），delegate 调用时无论改的是不是自己的对象，缺 `on_behalf_of` 或证据都按 `invalid_request`（退出码 2）拒绝，不写入；带了则原样记进对应 Event。清单见附录 B.1。规则由命令管线在授权阶段统一判定，命令登记时只声明自己是否属于代理写操作；证据走同一条通道——CLI 全局参数 `--evidence`，HTTP 头 `X-APA-Evidence`，由 HTTP 骨干统一读取，delegate 凭据的 `on_behalf_of` 也在骨干补上。只读命令和 delegate 本就得不到放行的命令（设置类，退出码 20）不登记。撤销（`item.revert`）只在 Web，由本人操作，不要求证据。
 
 内核只能校验证据存在，不能校验真伪（见 §21.2）。运行者没有本人原话，所以运行凭据根本不具备代答能力。
 
