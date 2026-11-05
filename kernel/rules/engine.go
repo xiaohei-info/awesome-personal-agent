@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -27,6 +29,20 @@ type Call struct {
 	Item   *domain.Item // 触发事项；时钟规则或事件不涉及事项时为空
 	Seq    int64        // 触发事件的序号；时钟规则为 0
 	Do     func(cmd string, input any) (command.Result, error)
+	// Instance 是到期的能力包实例；只有实例驱动的时钟规则才有（附录 C.10）。
+	Instance *Fired
+	// Bound 为真表示 Item 是本次执行里 create_item 建的事项（实例驱动的规则），后续动作以它为对象。
+	Bound bool
+	bind  func(id string) error
+}
+
+// Fired 是一次实例到期：哪个实例、参数、项目、计划到期时刻。
+type Fired struct {
+	ID      string          `json:"id"`
+	Pack    string          `json:"pack"`
+	Project string          `json:"project,omitempty"`
+	Params  json.RawMessage `json:"params"`
+	Due     time.Time       `json:"due"`
 }
 
 // Handler 执行一个枚举动作。set_phase、add_tag、create_item、create_timer 由本包内置；
@@ -46,6 +62,14 @@ type Options struct {
 	Now   func() time.Time
 	// OnError 接收提交后自动消费失败的错误（OnCommit 回调没有返回值）；可为空。
 	OnError func(error)
+	// Reminder 是触达的提醒入口（*attention.Attention 满足它）：create_timer 建的 Timer 到期经它提醒。
+	// 只在用到 create_timer 时需要；为空时这类 Timer 到期返回错误，不静默丢弃。
+	Reminder Reminder
+}
+
+// Reminder 在调用方事务里产出一条提醒；同一 (kind, 事项, due) 只提醒一次。
+type Reminder interface {
+	Remind(tx *store.Tx, it domain.Item, kind string, due time.Time, title, summary string) error
 }
 
 // Engine 消费账本事件与到期的时钟规则，按模式执行规则。
@@ -214,15 +238,22 @@ func (e *Engine) fire(ctx context.Context, rs []ruleDef, modes map[string]string
 
 // trigger 是一次规则命中的上下文。
 type trigger struct {
-	entry  eventlog.Entry
-	item   *domain.Item
-	before *domain.Item
-	object string // 链路深度的来源对象，也是观察记录挂靠的对象
-	ref    string // 幂等键里的触发标识
-	depth  int
+	entry    eventlog.Entry
+	instance *Fired
+	bound    bool
+	item     *domain.Item
+	before   *domain.Item
+	object   string // 链路深度的来源对象，也是观察记录挂靠的对象
+	ref      string // 幂等键里的触发标识
+	depth    int
 }
 
 func (e *Engine) event(ctx context.Context, rs []ruleDef, modes map[string]string, en eventlog.Entry) error {
+	if !en.Tombstone && en.Event.Type == instances.EvFired {
+		if err := e.instance(ctx, rs, en); err != nil {
+			return err
+		}
+	}
 	// 规则动作（含其被拒绝的尝试）产生的 Event 不再触发规则（§7.3）。
 	if !en.Tombstone && en.Event.Actor.Via != domain.ViaRule {
 		var t *trigger
@@ -254,6 +285,32 @@ func (e *Engine) event(ctx context.Context, rs []ruleDef, modes map[string]strin
 		_, err := tx.Exec(`UPDATE rules_cursor SET seq = ? WHERE id = 1 AND seq < ?`, en.Event.Seq, en.Event.Seq)
 		return err
 	})
+}
+
+// instance 执行实例所属包里由实例驱动的时钟规则（schedule 含 {instance.}）。实例是本人显式建的，
+// 规则只写回自身事项，所以不走模式，直接执行（附录 C.13）。触发标识取 (实例, 到期时刻)：
+// 时钟每个周期只交来一次、错过只补最近一次，重处理同一事件时命令按幂等键返回首次结果，同周期只一份。
+func (e *Engine) instance(ctx context.Context, rs []ruleDef, en eventlog.Entry) error {
+	var f Fired
+	if err := json.Unmarshal(en.Event.Payload, &f); err != nil || f.ID == "" {
+		return fmt.Errorf("rules: instance.fired %d has no instance: %v", en.Event.Seq, err)
+	}
+	for _, d := range rs {
+		if d.Pack != f.Pack || d.Group != groupClock || !instanceDriven(d) {
+			continue
+		}
+		t := &trigger{entry: en, instance: &f, object: f.ID, depth: en.Event.ChainDepth,
+			ref: fmt.Sprintf("i%s:%d", f.ID, f.Due.UnixNano())}
+		if err := e.execute(ctx, d, t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func instanceDriven(d ruleDef) bool {
+	s, _ := d.When["schedule"].(string)
+	return strings.Contains(s, "{instance.")
 }
 
 func (e *Engine) trigger(ctx context.Context, en eventlog.Entry) (*trigger, error) {
@@ -379,11 +436,12 @@ func (e *Engine) execute(ctx context.Context, d ruleDef, t *trigger) error {
 			err = invalid("action " + name + " has no registered handler")
 		} else {
 			n := 0
-			err = h(ctx, Call{Rule: d.Key, Action: a, Item: t.item, Seq: t.entry.Event.Seq,
+			err = h(ctx, Call{Rule: d.Key, Action: a, Item: t.item, Seq: t.entry.Event.Seq, Instance: t.instance, Bound: t.bound,
 				Do: func(cmd string, input any) (command.Result, error) {
 					n++
 					return e.do(ctx, d.Key, t, fmt.Sprintf("%s:%d:%d", t.ref, i, n), cmd, input)
-				}})
+				},
+				bind: func(id string) error { return e.bind(ctx, t, id) }})
 		}
 		if err != nil {
 			if ctx.Err() != nil {
@@ -393,6 +451,15 @@ func (e *Engine) execute(ctx context.Context, d ruleDef, t *trigger) error {
 		}
 	}
 	return nil
+}
+
+// bind 让实例驱动的规则以 create_item 建的事项作为后续动作的对象。
+func (e *Engine) bind(ctx context.Context, t *trigger, id string) error {
+	return e.o.Store.View(ctx, func(tx *store.Tx) error {
+		it, err := items.Get(tx, id)
+		t.item, t.bound = &it, err == nil
+		return err
+	})
 }
 
 func (e *Engine) do(ctx context.Context, k string, t *trigger, idem, cmd string, input any) (command.Result, error) {

@@ -248,6 +248,12 @@ func InFlight(tx *store.Tx, target string) (bool, error) {
 	return len(recs) > 0, err
 }
 
+// HasRun 报告目标是否有过任何 Run（含已结束的）。
+func HasRun(tx *store.Tx, target string) (bool, error) {
+	recs, err := query(tx, "WHERE target = ? LIMIT 1", target)
+	return len(recs) > 0, err
+}
+
 // LastSuccess 返回某类别、某目标最近一次成功的结束时间；没有则 ok 为 false。
 func LastSuccess(tx *store.Tx, c domain.RunCategory, target string) (t time.Time, ok bool, err error) {
 	recs, err := query(tx, "WHERE category = ? AND target = ? AND state = 'succeeded' ORDER BY finished_at DESC LIMIT 1", string(c), target)

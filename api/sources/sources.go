@@ -55,9 +55,10 @@ const RotateGrace = time.Hour
 // IdempotencyHeader 是写请求可选的幂等键头（不用于 webhook 密钥：明文不进幂等结果表）。
 const IdempotencyHeader = "Idempotency-Key"
 
-// Replayer 重放一条入站记录（*webhook.Service 满足它）。
+// Replayer 重放一条入站记录，并在签发或轮换接收密钥时按校验方案保管明文（*webhook.Service 满足它）。
 type Replayer interface {
 	Replay(ctx context.Context, ingestID string) error
+	StoreKey(tx *store.Tx, sourceID, secret string) error
 }
 
 // Proposer 把未判定事件转为建议（*inbound.Service 满足它）。
@@ -250,7 +251,8 @@ func (a *api) validateWebhookKey(tx *store.Tx, o authz.Object, _ json.RawMessage
 	return nil
 }
 
-// applyWebhookKey：没有有效密钥就创建，有就轮换（旧的在 RotateGrace 后失效）。明文只在响应里出现一次。
+// applyWebhookKey：没有有效密钥就创建，有就轮换（旧的在 RotateGrace 后失效）。明文只在响应里出现一次；
+// HMAC 方案的来源另由 webhook 模块在同一事务里把明文写进密钥文件（§14.2），账本与事件里只有凭据 id。
 func (a *api) applyWebhookKey(c *command.Ctx) (any, error) {
 	id := c.Object.ID
 	all, err := a.au.List(c.Tx)
@@ -275,6 +277,9 @@ func (a *api) applyWebhookKey(c *command.Ctx) (any, error) {
 		cred, secret, err = a.au.Rotate(c.Tx, current, RotateGrace)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := a.rp.StoreKey(c.Tx, id, secret); err != nil {
 		return nil, err
 	}
 	payload, _ := json.Marshal(map[string]string{"credential": cred.ID})

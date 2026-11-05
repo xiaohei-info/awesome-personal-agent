@@ -124,7 +124,7 @@ func newEnvWith(t *testing.T, adjust func(*Options)) *env {
 		Owner: "owner", Now: now}); err != nil {
 		t.Fatal(err)
 	}
-	if e.clk, err = clock.New(st, rules.HandleTimer, now); err != nil {
+	if e.clk, err = clock.New(st, func(tx *store.Tx, c clock.Command) error { return e.eng.HandleTimer(tx, c) }, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.eng.Reconcile(bg); err != nil {
