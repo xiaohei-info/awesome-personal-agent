@@ -211,3 +211,7 @@ func typeMatches(t string, v any) bool {
 	}
 	return false
 }
+
+// ValidateAgainst 按同一 schema 子集校验任意 JSON 值（已解码）；能力包实例参数复用它，不再造第二份校验器。
+// schema 须已通过 CheckSchema。
+func ValidateAgainst(schema map[string]any, v any) error { return validate(schema, v, "params") }
