@@ -153,9 +153,12 @@ type ItemInput struct {
 }
 
 // ItemKernelState 只由内核维护；子事项的 Unattended 继承自后台运行。
+// CreatedAt、UpdatedAt 是该事项首条与最后一条事项事件的时间，由事项中心维护，不进事件快照。
 type ItemKernelState struct {
-	ChainDepth int  `json:"chain_depth"`
-	Unattended bool `json:"unattended,omitempty"`
+	ChainDepth int       `json:"chain_depth"`
+	Unattended bool      `json:"unattended,omitempty"`
+	CreatedAt  time.Time `json:"created_at,omitzero"`
+	UpdatedAt  time.Time `json:"updated_at,omitzero"`
 }
 
 // Item 是一切事务的统一表示（§6.3）。

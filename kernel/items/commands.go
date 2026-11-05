@@ -272,12 +272,11 @@ func editActions(c command.Caller, o authz.Object, wroteAssignee, wroteProject b
 	return as
 }
 
-// marshalPayload 序列化事件 payload；版本不进快照，折叠时按事件数补上。
+// marshalPayload 序列化事件 payload；版本与时间不进快照，折叠时按事件补上。
 func marshalPayload(p payload) (json.RawMessage, error) {
-	p.Item.Version = 0
+	p.Item = bare(p.Item)
 	if p.Before != nil {
-		b := *p.Before
-		b.Version = 0
+		b := bare(*p.Before)
 		p.Before = &b
 	}
 	return json.Marshal(p)
@@ -398,7 +397,7 @@ func (s *svc) create() command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
-			it := v.item(c.Object.ID)
+			it := stamped(v.item(c.Object.ID), c.Now())
 			it.ChainDepth = c.ChainDepth
 			if err := save(c.Tx, it); err != nil {
 				return nil, err
@@ -460,6 +459,7 @@ func (s *svc) update() command.Spec {
 			if err != nil {
 				return nil, err
 			}
+			next = stamped(next, c.Now())
 			if err := save(c.Tx, next); err != nil {
 				return nil, err
 			}
@@ -515,6 +515,7 @@ func (s *svc) transition() command.Spec {
 			if err != nil {
 				return nil, err
 			}
+			next = stamped(next, c.Now())
 			if err := save(c.Tx, next); err != nil {
 				return nil, err
 			}
@@ -579,6 +580,10 @@ func (s *svc) relate() command.Spec {
 				return nil, err
 			}
 			if err := setRelation(c.Tx, rel, v.Remove); err != nil {
+				return nil, err
+			}
+			cur = stamped(cur, c.Now()) // 关系变更也加版本、也是一条事项事件
+			if err := save(c.Tx, cur); err != nil {
 				return nil, err
 			}
 			return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, "", payload{Op: "relate", Item: cur, Relation: &rel, Remove: v.Remove})
@@ -655,7 +660,7 @@ func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
 		rp.rel, rp.remove = p.Relation, !p.Remove
 	case (p.Op == "update" || p.Op == "transition") && p.Before != nil:
 		rp.next = *p.Before
-		rp.next.ChainDepth, rp.next.Unattended = cur.ChainDepth, cur.Unattended // 内核字段不回退
+		rp.next.ItemKernelState = cur.ItemKernelState // 内核字段不回退
 	default:
 		return rp, invalid("event payload cannot be reverted")
 	}
@@ -706,10 +711,13 @@ func (s *svc) revert() command.Spec {
 			if err != nil {
 				return nil, err
 			}
-			if rp.rel != nil {
-				err = setRelation(c.Tx, *rp.rel, rp.remove)
-			} else if err = save(c.Tx, rp.next); err == nil {
-				err = syncTimer(c.Tx, rp.cur, rp.next)
+			rp.next = stamped(rp.next, c.Now())
+			if err = save(c.Tx, rp.next); err == nil {
+				if rp.rel != nil {
+					err = setRelation(c.Tx, *rp.rel, rp.remove)
+				} else {
+					err = syncTimer(c.Tx, rp.cur, rp.next)
+				}
 			}
 			if err != nil {
 				return nil, err

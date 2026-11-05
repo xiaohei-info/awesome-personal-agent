@@ -127,16 +127,16 @@ type PromptMeta struct {
 	Tools               any            `yaml:"tools"` // 只为识别并拒绝"生成型声明工具"
 }
 
-// View 是 Web 视图配置，止步于列表列、筛选、卡片字段（C.8）。
+// View 是 Web 视图配置，止步于列表列、筛选、卡片字段（C.8）。JSON 形状即 GET /packs 的 views（附录 B.2）。
 type View struct {
-	Kind string `yaml:"kind"`
+	Kind string `yaml:"kind" json:"kind"`
 	List struct {
-		Columns []string `yaml:"columns"`
-		Filters []string `yaml:"filters"`
-	} `yaml:"list"`
+		Columns []string `yaml:"columns" json:"columns"`
+		Filters []string `yaml:"filters" json:"filters"`
+	} `yaml:"list" json:"list"`
 	Card struct {
-		Fields []string `yaml:"fields"`
-	} `yaml:"card"`
+		Fields []string `yaml:"fields" json:"fields"`
+	} `yaml:"card" json:"card"`
 }
 
 var (
@@ -551,6 +551,11 @@ func loadParts(p *Pack, files map[string][]byte, names []string, schema func(str
 			}
 			if vw.Kind == "" {
 				return fmt.Errorf("%s: kind is required", n)
+			}
+			for _, l := range []*[]string{&vw.List.Columns, &vw.List.Filters, &vw.Card.Fields} {
+				if *l == nil { // 未声明的列表对外是 []，不是 null
+					*l = []string{}
+				}
 			}
 			p.Views[strings.TrimSuffix(base, ".yaml")] = vw
 		case "templates/":

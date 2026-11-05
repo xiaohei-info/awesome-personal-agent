@@ -190,6 +190,8 @@ card:
   fields: [summary, spec.period]
 ```
 
+Web 经 `GET /packs` 的 `views` 读取（附录 B.2），字段名引用事项字段，`created_at` 见 §6.3。
+
 ## C.9 templates
 
 Markdown 模板，占位符由连接模块提供。`agents-md` 包的 `templates/agents.md` 使用：`managed_header`、`global_summary`、`project_sections`、`design_doc_index`、`fixed_guidance`。

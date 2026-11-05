@@ -282,7 +282,7 @@ func TestScreeningPendingMapsTo22(t *testing.T) {
 	wrk, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, "")
 	id := w.asked("", wrk)
 	if err := w.st.Update(bg, func(tx *store.Tx) error {
-		_, _, _, err := kitems.Revise(tx, id, "test", func(x *domain.Item) error {
+		_, _, _, err := kitems.Revise(tx, id, "test", time.Now(), func(x *domain.Item) error {
 			a := *x.Ask
 			a.ScreeningPending = true
 			x.Ask = &a

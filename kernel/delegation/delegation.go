@@ -220,7 +220,7 @@ func (o Options) create() command.Spec {
 				// 后台运行建立的子事项带 unattended 并沿链路继承；本人显式重新委派开始新链路（§7.5）。
 				ItemKernelState: domain.ItemKernelState{ChainDepth: c.ChainDepth,
 					Unattended: c.Caller.Level == authz.LevelRun || (parent.Unattended && c.Caller.Level != authz.LevelWeb)}}
-			child, snap, err := items.Create(c.Tx, child, parent.ID)
+			child, snap, err := items.Create(c.Tx, child, parent.ID, c.Now())
 			if err != nil {
 				return nil, err
 			}
@@ -232,7 +232,7 @@ func (o Options) create() command.Spec {
 				return nil, err
 			}
 			// 父事项（管线的授权对象，版本由管线加）转 waiting，等这个执行者。
-			before, _, psnap, err := items.Revise(c.Tx, parent.ID, "delegate.create", func(it *domain.Item) error {
+			before, _, psnap, err := items.Revise(c.Tx, parent.ID, "delegate.create", c.Now(), func(it *domain.Item) error {
 				it.Phase, it.WaitingOn = domain.PhaseWaiting, &domain.WaitingOn{Kind: domain.WaitingExecutor, Ref: v.Assignee}
 				return nil
 			})
@@ -288,7 +288,7 @@ func report() command.Spec {
 			if v.Outcome == OutcomeBlocked {
 				label = "blocked: " + v.Summary
 			}
-			_, child, snap, err := items.Revise(c.Tx, v.ID, "delegate.report", func(it *domain.Item) error {
+			_, child, snap, err := items.Revise(c.Tx, v.ID, "delegate.report", c.Now(), func(it *domain.Item) error {
 				it.StatusLabel = label
 				if v.Outcome == OutcomeDone {
 					it.Phase, it.WaitingOn = domain.PhaseDone, nil
@@ -420,7 +420,7 @@ func reopenable(tx *store.Tx, child string) (parent string, ok bool, err error) 
 }
 
 func reopen(c *command.Ctx, parent string) error {
-	_, _, snap, err := items.Revise(c.Tx, parent, "delegate.settle", func(it *domain.Item) error {
+	_, _, snap, err := items.Revise(c.Tx, parent, "delegate.settle", c.Now(), func(it *domain.Item) error {
 		it.Phase, it.WaitingOn = domain.PhaseOpen, nil
 		return nil
 	})

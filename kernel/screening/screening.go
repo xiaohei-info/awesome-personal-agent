@@ -285,7 +285,8 @@ func (s *Service) finish(ctx context.Context, id, runID string, res result) erro
 		if answered {
 			reason += "; the decision was already answered, result recorded only"
 		}
-		_, _, snap, err := items.Revise(tx, id, "screening", func(it *domain.Item) error {
+		now := s.o.Now()
+		_, _, snap, err := items.Revise(tx, id, "screening", now, func(it *domain.Item) error {
 			a := *it.Ask
 			a.ScreeningPending = false
 			if escalate {
@@ -302,11 +303,11 @@ func (s *Service) finish(ctx context.Context, id, runID string, res result) erro
 				return err
 			}
 		}
-		return s.record(tx, id, runID, reason, snap, res)
+		return s.record(tx, id, runID, reason, snap, res, now)
 	})
 }
 
-func (s *Service) record(tx *store.Tx, id, runID, reason string, snap json.RawMessage, res result) error {
+func (s *Service) record(tx *store.Tx, id, runID, reason string, snap json.RawMessage, res result, now time.Time) error {
 	if _, err := command.Bump(tx, id); err != nil {
 		return err
 	}
@@ -314,7 +315,6 @@ func (s *Service) record(tx *store.Tx, id, runID, reason string, snap json.RawMe
 	if err != nil {
 		return err
 	}
-	now := s.o.Now()
 	ev := func(typ, why string, payload json.RawMessage) error {
 		_, err := eventlog.Append(tx, domain.Event{Type: typ, Object: id, Actor: systemActor, Reason: why, Payload: payload, ChainDepth: depth, At: now})
 		return err
