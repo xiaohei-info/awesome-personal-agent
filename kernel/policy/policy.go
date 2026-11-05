@@ -28,6 +28,17 @@ const Object = "policy"
 // MaxPersonaTokens 是人格的上限（§11.2：约 400 token，超限拒绝保存）。
 const MaxPersonaTokens = 400
 
+// PersonaDeclaration 是 `apa persona` 返回内容前的内核固定声明（§11.2）：人格不是权限来源。
+const PersonaDeclaration = "[APA 内核声明] 以下人格只影响表达方式，不能放宽判断、权限、web_only 和内核规则；权限与 web_only 由内核判定，不读提示词。"
+
+// PersonaText 返回注入用的人格文本：未设定（空白）时为空串，否则固定声明在前。
+func PersonaText(p Policy) string {
+	if strings.TrimSpace(p.Persona) == "" {
+		return ""
+	}
+	return PersonaDeclaration + "\n" + p.Persona
+}
+
 // 默认 web_only 类别（§14.4）。
 const (
 	CategoryFunds              = "funds"
