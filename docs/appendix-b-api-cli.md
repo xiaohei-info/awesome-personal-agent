@@ -114,7 +114,7 @@
 | | `GET/POST /forms/{一次性令牌}` | 一次性表单 | 令牌本身 |
 | 运行 | `GET /runs`，`GET /runs/{id}` | 运行记录 | observer |
 | | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
-| 回放与健康 | `GET /why/{id}`，`GET /health` | 回放、健康视图 | observer |
+| 回放与健康 | `GET /why/{id}`，`GET /health` | 回放、健康视图；所有健康告警都经同一处产出健康类投递（§15.2），读取走 `GET /deliveries/unread` | observer |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/purge` | 策略（含人格）、凭据、白名单、名单、命令登记、声明确认、物理删除 | 只有 Web 登录 |

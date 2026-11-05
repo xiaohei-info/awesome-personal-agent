@@ -302,7 +302,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	if f.busy {
 		return s.audit(ctx, c, f, EvSkipped, f.item.ID, "该事项已有在途运行，不重复拉起", nil)
 	}
-	if f.item.ChainDepth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由触达据该事件产出
+	if f.item.ChainDepth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
 		return s.audit(ctx, c, f, domain.EvHealthAlert, f.item.ID, "chain depth exceeded",
 			map[string]any{"chain_depth": f.item.ChainDepth, "threshold": s.o.MaxChainDepth})
 	}

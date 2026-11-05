@@ -42,7 +42,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	kchannel "github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -53,6 +52,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
+	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/hosted"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
@@ -109,6 +109,7 @@ type kernel struct {
 	fu     *followup.Service
 	scr    *kscreening.Service
 	att    *attention.Attention
+	hn     *khealth.Notifier
 
 	drainDue atomic.Bool   // 本轮时钟排了规则或跟进的待办
 	drain    chan struct{} // 唤醒后台循环：待办要调模型，不能占着时钟循环
@@ -124,7 +125,12 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	x := command.New(st, nil)
 	kinds := kitems.NewKinds()
 	ld := kpacks.New(kpacks.Options{Builtin: rootpacks.FS, DataDir: l.Packs, Kinds: kinds,
-		OnReject: func(r kpacks.Rejection) { slog.Warn("pack rejected", "pack", r.Pack, "reason", r.Reason) }})
+		OnReject: func(r kpacks.Rejection) {
+			slog.Warn("pack rejected", "pack", r.Pack, "reason", r.Reason)
+			if err := st.Update(context.Background(), func(tx *store.Tx) error { return khealth.PackRejected(tx, r) }); err != nil {
+				slog.Error("pack rejection alert", "err", err)
+			}
+		}})
 	if _, err := ld.Load(); err != nil {
 		return nil, err
 	}
@@ -144,7 +150,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 
 	q := delivery.New(delivery.Options{})
 	att := attention.New(attention.Options{Queue: q})
-	k := &kernel{st: st, x: x, layout: l, scr: scr, att: att, drain: make(chan struct{}, 1)}
+	k := &kernel{st: st, x: x, layout: l, scr: scr, att: att, hn: khealth.NewNotifier(q), drain: make(chan struct{}, 1)}
 
 	// 跟进消息归属与入站流水线互相接线：拦截在判断之前，退回后立即唤醒入站流水线。
 	fm, err := followmsg.New(followmsg.Options{Store: st, Exec: x, Owner: owner,
@@ -156,7 +162,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		Intercept: fm.Intercept, OnError: logErr("inbound")}); err != nil {
 		return nil, err
 	}
-	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Delivery: q, Layout: l, OnError: logErr("source runner")}); err != nil {
+	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner")}); err != nil {
 		return nil, err
 	}
 	a := auth.New(nil)
@@ -243,7 +249,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	x.OnCommit(scr.OnCommit)
 	att.Attach(x, st, logErr("attention"))
-	chain.New(chain.Options{Queue: q}).Attach(x, st, logErr("chain breaker"))
+	k.hn.Attach(x, st, logErr("health delivery"))
 	k.fu.Attach(logErr("follow-up"))
 
 	agm, ok := ld.Get("agents-md")
@@ -304,6 +310,9 @@ func (k *kernel) start(ctx context.Context) error {
 		slog.Error("rules reconcile", "err", err)
 	}
 	if err := k.loadHostFiles(ctx); err != nil {
+		return err
+	}
+	if err := k.st.Update(ctx, k.hn.Sync); err != nil { // 装配期的能力包拒绝与规则回退
 		return err
 	}
 	if err := k.rn.Sync(ctx); err != nil {
@@ -386,6 +395,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			report("dispatch", k.disp.Dispatch(ctx))
 			report("rules", k.eng.Drain(ctx))
 			report("follow-up", k.fu.Drain(ctx))
+			k.syncHealth(ctx, report)
 		}
 		maintain()
 		tk := time.NewTicker(maintainInterval)
@@ -397,6 +407,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			case <-k.drain:
 				report("rules", k.eng.Drain(ctx))
 				report("follow-up", k.fu.Drain(ctx))
+				k.syncHealth(ctx, report)
 			case <-tk.C:
 				maintain()
 			}
@@ -408,6 +419,11 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 		k.scr.Wait()
 		k.wh.Wait()
 	}
+}
+
+// syncHealth 追赶不经命令提交写下的健康告警（规则动作失败、跟进失败等），命令提交的由 Attach 立即追赶。
+func (k *kernel) syncHealth(ctx context.Context, report func(string, error)) {
+	report("health delivery", k.st.Update(ctx, k.hn.Sync))
 }
 
 // localURL 是本机进程访问内核的地址；监听通配地址时走回环。
