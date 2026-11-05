@@ -373,7 +373,6 @@ var notYetImplemented = map[string]bool{
 	"GET /blobs/{hash}":              true,
 	"GET /agents-md":                 true,
 	"POST /agents-md/check":          true,
-	"GET /events":                    true,
 	"POST /deliveries/{id}/answer":   true,
 	"GET /forms/{一次性令牌}":             true,
 	"POST /forms/{一次性令牌}":            true,

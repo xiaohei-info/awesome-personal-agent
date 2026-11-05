@@ -18,6 +18,7 @@ import (
 	apidecisions "github.com/xiaohei-info/awesome-personal-agent/api/decisions"
 	apidelegation "github.com/xiaohei-info/awesome-personal-agent/api/delegation"
 	apideliveries "github.com/xiaohei-info/awesome-personal-agent/api/deliveries"
+	apievents "github.com/xiaohei-info/awesome-personal-agent/api/events"
 	apifollowmsg "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
 	apiingest "github.com/xiaohei-info/awesome-personal-agent/api/ingest"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
@@ -218,7 +219,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Groups: []core.RouteGroup{
 		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0),
-		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st),
+		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st), apievents.Routes(st, 0),
 		apiexec.Routes(st, x), sources, apiwhy.Routes(st)}}); err != nil {
 		return nil, err
 	}
