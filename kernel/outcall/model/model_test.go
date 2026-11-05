@@ -224,3 +224,51 @@ func TestErrorBodyScrubbedAndTruncated(t *testing.T) {
 		t.Fatal("empty")
 	}
 }
+
+// 模型输出不可信：超范围数字不得 panic，且按 schema 违规处理。
+func TestHugeNumberIsSchemaViolationNotPanic(t *testing.T) {
+	for _, schema := range []string{
+		`{"type":"number"}`, `{"type":"integer"}`, `{"enum":[1]}`, `{"type":"number","minimum":0}`,
+		`{"type":"object","properties":{"a":{"type":"number","maximum":1}}}`,
+	} {
+		inst := `1e999999999999`
+		if strings.Contains(schema, "object") {
+			inst = `{"a":1e999999999999}`
+		}
+		s, ep := setup(t)
+		s.SetDefault(modelstub.Reply{Content: inst})
+		_, err := (&Client{}).Complete(context.Background(), ep, Request{Schema: json.RawMessage(schema)})
+		if !errors.Is(err, ErrSchema) {
+			t.Errorf("%s: err=%v", schema, err)
+		}
+	}
+}
+
+// 子集之外的关键字在发请求前被拒绝，而不是静默放过。
+func TestUnsupportedSchemaRejectedBeforeRequest(t *testing.T) {
+	for _, schema := range []string{
+		`{"pattern":"^a$"}`, `{"oneOf":[{"type":"string"}]}`, `{"$ref":"#/x"}`,
+		`{"type":"object","additionalProperties":{"type":"string"}}`,
+		`{"type":"array","items":[{"type":"string"}]}`,
+		`{"type":"object","properties":{"a":{"format":"email"}}}`,
+		`{"type":"array","items":{"uniqueItems":true}}`,
+		`{"type":"bogus"}`, `{"type":[]}`, `{"enum":1}`, `{"required":"a"}`, `{"minimum":"1"}`,
+		`{"properties":[]}`, `{"properties":{"a":1}}`,
+	} {
+		s, ep := setup(t)
+		_, err := (&Client{}).Complete(context.Background(), ep, Request{Schema: json.RawMessage(schema)})
+		if err == nil || !strings.Contains(err.Error(), "unsupported request schema") {
+			t.Errorf("%s: err=%v", schema, err)
+		}
+		if len(s.Requests()) != 0 {
+			t.Errorf("%s: request was sent", schema)
+		}
+	}
+	// 支持的形态仍可通过（含注解关键字）。
+	s, ep := setup(t)
+	s.SetDefault(modelstub.Reply{Content: `{"a":["x"]}`})
+	ok := `{"title":"t","description":"d","type":"object","additionalProperties":false,"properties":{"a":{"type":"array","items":{"type":"string"}}}}`
+	if _, err := (&Client{}).Complete(context.Background(), ep, Request{Schema: json.RawMessage(ok)}); err != nil {
+		t.Fatal(err)
+	}
+}

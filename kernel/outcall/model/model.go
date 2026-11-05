@@ -77,6 +77,9 @@ func (c *Client) Complete(ctx context.Context, ep policy.ModelEndpoint, req Requ
 		if err := json.Unmarshal(req.Schema, &schema); err != nil || schema == nil {
 			return Response{}, fmt.Errorf("model: invalid request schema: %v", err)
 		}
+		if err := checkSchema(schema, "$"); err != nil {
+			return Response{}, fmt.Errorf("model: unsupported request schema: %w", err)
+		}
 	}
 	body := map[string]any{
 		"model": ep.Model,
