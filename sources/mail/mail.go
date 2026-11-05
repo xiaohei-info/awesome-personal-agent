@@ -29,6 +29,7 @@ const (
 	tool           = "himalaya"
 	defaultTimeout = 60 * time.Second
 	defaultPage    = 50
+	maxPages       = 100
 	maxDetail      = 16 << 10
 )
 
@@ -171,31 +172,42 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 		}
 		return append(a, "-f", cfg.Folder)
 	}
-	listArgs := append(base("envelope", "list"), "--page-size", strconv.Itoa(cfg.PageSize))
-	raw, err := call(ctx, r, append(listArgs, vr.JSONFlag...))
-	if err != nil {
-		return nil, err
-	}
-	var envs []envelope
-	if err := json.Unmarshal(raw, &envs); err != nil {
-		return nil, fail(ExitConfig, "envelope 输出不是 JSON 数组: %v", err)
-	}
-
 	type item struct {
 		ev  event
 		at  time.Time
 		ref string // himalaya 的信件编号，仅用于 message read
 	}
+	// 信件按新到旧分页；翻到出现早于游标的信件、或页不满为止，否则积压会被游标越过而丢失。
 	var items []item
-	for i, e := range envs {
-		ev, at, err := e.toEvent()
+	for page := 1; ; page++ {
+		if page > maxPages {
+			// 不能推进游标：更旧的未取信件仍在游标之后。
+			return nil, fail(ExitTemporary, "积压超过 %d 页（每页 %d），本次不推进游标", maxPages, cfg.PageSize)
+		}
+		args := append(base("envelope", "list"), "--page-size", strconv.Itoa(cfg.PageSize), "--page", strconv.Itoa(page))
+		raw, err := call(ctx, r, append(args, vr.JSONFlag...))
 		if err != nil {
-			return nil, fail(ExitConfig, "第 %d 封无法解析: %v", i, err)
+			return nil, err
 		}
-		if at.Before(floor) { // 等于游标的保留，由内核按 id 去重
-			continue
+		var envs []envelope
+		if err := json.Unmarshal(raw, &envs); err != nil {
+			return nil, fail(ExitConfig, "envelope 输出不是 JSON 数组: %v", err)
 		}
-		items = append(items, item{ev, at, e.ID.String()})
+		reachedOld := false
+		for i, e := range envs {
+			ev, at, err := e.toEvent()
+			if err != nil {
+				return nil, fail(ExitConfig, "第 %d 页第 %d 封无法解析: %v", page, i, err)
+			}
+			if at.Before(floor) { // 等于游标的保留，由内核按 id 去重
+				reachedOld = true
+				continue
+			}
+			items = append(items, item{ev, at, e.ID.String()})
+		}
+		if reachedOld || len(envs) < cfg.PageSize {
+			break
+		}
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].at.Before(items[j].at) })
 
@@ -214,8 +226,9 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 			return nil, fail(ExitConfig, "message read 输出不是 JSON 字符串: %v", err)
 		}
 		it.ev.Detail = truncate(text)
-		if it.at.After(newest) {
-			newest = it.at
+		// 游标最多到当前时间：发件人控制的 Date 不可信，未来日期不能让后续邮件被永久越过。
+		if at := minTime(it.at, now()); at.After(newest) {
+			newest = at
 		}
 		_ = enc.Encode(it.ev)
 	}
@@ -230,4 +243,11 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 	}
 	_ = enc.Encode(map[string]string{"cursor": cursor})
 	return buf.Bytes(), nil
+}
+
+func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
 }

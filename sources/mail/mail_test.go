@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -106,7 +108,7 @@ func TestEveryDeclaredVersionConvertsRecordedSample(t *testing.T) {
 					t.Errorf("调用缺少该版本的 JSON 标志 %q: %v", flag, c)
 				}
 			}
-			if strings.Join(calls[1], " ") != "envelope list -a work -f INBOX --page-size 50 "+flag {
+			if strings.Join(calls[1], " ") != "envelope list -a work -f INBOX --page-size 50 --page 1 "+flag {
 				t.Errorf("list argv=%v", calls[1])
 			}
 		})
@@ -277,5 +279,85 @@ func TestFirstRunEmptyMailboxUsesWindowTo(t *testing.T) {
 func TestDetailTruncated(t *testing.T) {
 	if got := truncate(strings.Repeat("好", maxDetail)); len(got) > maxDetail {
 		t.Fatal(len(got))
+	}
+}
+
+// pagedRunner 提供 total 封新到旧的邮件（均晚于游标），按 --page/--page-size 切页。
+func pagedRunner(total int, listCalls *int) Runner {
+	return func(_ context.Context, args []string) ([]byte, []byte, error) {
+		switch args[0] {
+		case "--version":
+			return []byte("himalaya 2.0.0"), nil, nil
+		case "message":
+			return []byte(`"body"`), nil, nil
+		}
+		*listCalls++
+		var size, page int
+		for i, a := range args {
+			if a == "--page-size" {
+				size, _ = strconv.Atoi(args[i+1])
+			}
+			if a == "--page" {
+				page, _ = strconv.Atoi(args[i+1])
+			}
+		}
+		var envs []map[string]any
+		for n := (page - 1) * size; n < page*size && n < total; n++ {
+			at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(total-n) * time.Minute) // n=0 最新
+			envs = append(envs, map[string]any{"id": n + 1, "message_id": fmt.Sprintf("<m%d@x>", n), "subject": "s", "date": at.Format(time.RFC3339)})
+		}
+		b, _ := json.Marshal(envs)
+		return b, nil, nil
+	}
+}
+
+// 评审阻塞项 1：积压超过一页时翻页取全，不因游标越过而丢信。
+func TestBacklogBeyondOnePageIsFullyFetched(t *testing.T) {
+	var lists int
+	in := `{"config":{"page_size":10},"cursor":"2025-12-31T00:00:00Z"}`
+	code, out, _ := exec1(t, pagedRunner(25, &lists), in)
+	if code != ExitOK || lists != 3 {
+		t.Fatalf("code=%d lists=%d", code, lists)
+	}
+	if n := strings.Count(out, `"type":"mail.received"`); n != 25 {
+		t.Fatalf("events=%d", n)
+	}
+}
+
+// 翻到早于游标的信件即停，不多翻页。
+func TestPagingStopsAtCursor(t *testing.T) {
+	var lists int
+	in := `{"config":{"page_size":10},"cursor":"2026-01-01T01:27:00Z"}` // 最新 14 封不早于游标
+	code, out, _ := exec1(t, pagedRunner(100, &lists), in)
+	if code != ExitOK || lists != 2 || strings.Count(out, "mail.received") != 14 {
+		t.Fatalf("code=%d lists=%d out=%s", code, lists, out)
+	}
+}
+
+// 积压超过页数上限：退出 1，不输出游标。
+func TestBacklogOverCapExit1WithoutCursor(t *testing.T) {
+	var lists int
+	in := `{"config":{"page_size":1},"cursor":"2025-12-31T00:00:00Z"}`
+	code, out, errs := exec1(t, pagedRunner(maxPages+5, &lists), in)
+	if code != ExitTemporary || out != "" || !strings.Contains(errs, "不推进游标") {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+}
+
+// 评审阻塞项 2：发件人 Date 在未来时，游标不超过当前时间。
+func TestFutureDatedMailCannotPushCursorPastNow(t *testing.T) {
+	r := func(_ context.Context, args []string) ([]byte, []byte, error) {
+		switch args[0] {
+		case "--version":
+			return []byte("himalaya 2.0.0"), nil, nil
+		case "message":
+			return []byte(`"b"`), nil, nil
+		}
+		return []byte(`[{"id":1,"message_id":"<f@x>","subject":"s","date":"2099-01-01T00:00:00Z"}]`), nil, nil
+	}
+	code, out, _ := exec1(t, r, input("2026-01-01T00:00:00Z"))
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if code != ExitOK || len(lines) != 2 || lines[1] != `{"cursor":"2026-02-01T00:00:00Z"}` { // fixedNow
+		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
