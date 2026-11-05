@@ -169,13 +169,19 @@ func importWords(p string) string {
 	return p
 }
 
-// firstName 把文本拆成小写单词（驼峰、下划线、连字符、点、斜杠均为分隔），返回第一个命中的名字。
+// firstName 把文本拆成小写单词（驼峰、下划线、连字符、点、斜杠均为分隔），相邻单词拼接后也参与比较，返回第一个命中的名字。
 func firstName(s string, names []string) string {
 	s = strings.ReplaceAll(s, modulePath, "")
-	for _, w := range words(s) {
-		for _, n := range names {
-			if w == n {
-				return n
+	ws := words(s)
+	for i := range ws {
+		// 相邻单词拼接后再比较，覆盖 OpenAI、DingTalk 这类驼峰写法的单个品牌词。
+		w := ""
+		for j := i; j < len(ws) && j < i+3; j++ {
+			w += ws[j]
+			for _, n := range names {
+				if w == n {
+					return n
+				}
 			}
 		}
 	}

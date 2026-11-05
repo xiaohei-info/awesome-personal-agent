@@ -166,3 +166,13 @@ func TestOversizeFilesAreStillScanned(t *testing.T) {
 		t.Fatalf("oversize violation bypassed: %v", got)
 	}
 }
+
+func TestCamelCaseBrandNamesAreCaught(t *testing.T) {
+	for _, id := range []string{"GitHubClient", "NewOpenAI", "DingTalkBot", "WeChatPay", "OPENAIKey"} {
+		root := t.TempDir()
+		write(t, root, "kernel/m/m.go", "package m\nvar "+id+" = 1\n")
+		if got := rules(t, root); !has(got, "kernel-name kernel/m/m.go") {
+			t.Errorf("%s not caught: %v", id, got)
+		}
+	}
+}
