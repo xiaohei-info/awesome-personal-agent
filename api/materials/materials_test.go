@@ -473,6 +473,18 @@ func TestHostedMaterial(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// 请求元数据：同键重试重放首次的父事项与子事项，不再建第二套；delegate 附本人原话、不带 parent 也能发起。
+	k1 := e.do("web", "POST", changes, `{"assignee":"other.cli","request":"again"}`, IdempotencyHeader, "k-change")
+	k2 := e.do("web", "POST", changes, `{"assignee":"other.cli","request":"again"}`, IdempotencyHeader, "k-change")
+	want(t, k1, 201, "")
+	want(t, k2, 201, "")
+	if k1.Body.String() != k2.Body.String() {
+		t.Fatalf("replay must return the first parent and child: %s vs %s", k1.Body, k2.Body)
+	}
+	want(t, e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"no words"}`), 400, "invalid_request")
+	rec = e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"by delegate"}`, EvidenceHeader, "owner: please update the design doc")
+	want(t, rec, 201, "")
+
 	// 自有型材料：content 与 changes 都是冲突，让调用者去读修订。
 	own, rec := e.commit("wrk", `{"project":"`+prj+`","kind":"minutes","title":"m","content":"x","reason":"r"}`)
 	want(t, rec, 201, "")

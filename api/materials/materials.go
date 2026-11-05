@@ -310,7 +310,7 @@ func (h *handlers) changes(w http.ResponseWriter, r *http.Request, p *core.Princ
 	if in.ID != "" {
 		return invalid("field id comes from the URL and cannot be in the body", "remove it from the body")
 	}
-	in.ID = r.PathValue("id")
+	in.ID, in.IdemKey, in.Evidence = r.PathValue("id"), r.Header.Get(IdempotencyHeader), r.Header.Get(EvidenceHeader)
 	out, err := h.hs.RequestChange(context.WithoutCancel(r.Context()), onBehalf{p.Identity}, in)
 	if err != nil {
 		return err
