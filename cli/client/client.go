@@ -152,7 +152,7 @@ func commandNames() []string {
 }
 
 // Do 向内核发一次 JSON 请求（path 省略 /v1 前缀）。body 为 nil 则无请求体；
-// out 为 nil 时丢弃响应。非 2xx 按附录 B.3 还原为 *domain.Error。
+// out 为 nil 时丢弃响应；为 *[]byte 时原样返回响应体而不按 JSON 解码。非 2xx 按附录 B.3 还原为 *domain.Error。
 func (c *Ctx) Do(ctx context.Context, method, path string, body, out any) error {
 	return c.DoHeaders(ctx, nil, method, path, body, out)
 }
@@ -201,6 +201,10 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string,
 	}
 	if resp.StatusCode/100 != 2 {
 		return decodeError(resp.StatusCode, data)
+	}
+	if raw, ok := out.(*[]byte); ok { // 纯文本响应（如 format=inject）原样交回
+		*raw = data
+		return nil
 	}
 	if out == nil || len(bytes.TrimSpace(data)) == 0 {
 		return nil
