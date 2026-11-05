@@ -37,7 +37,7 @@ func login(c *Ctx, args []string) error {
 		return usage("no token given", "usage: apa login --url <url> --token <token>")
 	}
 	cr := Credentials{URL: *u, Token: *tok}
-	if err := c.doWith(context.Background(), cr, "GET", "/items", nil, nil); err != nil {
+	if err := c.doWith(context.Background(), cr, nil, "GET", "/items", nil, nil); err != nil {
 		return err
 	}
 	if err := c.saveCredentials(cr); err != nil {

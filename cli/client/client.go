@@ -154,14 +154,19 @@ func commandNames() []string {
 // Do 向内核发一次 JSON 请求（path 省略 /v1 前缀）。body 为 nil 则无请求体；
 // out 为 nil 时丢弃响应。非 2xx 按附录 B.3 还原为 *domain.Error。
 func (c *Ctx) Do(ctx context.Context, method, path string, body, out any) error {
+	return c.DoHeaders(ctx, nil, method, path, body, out)
+}
+
+// DoHeaders 同 Do，并附加请求头（如 If-Match、Idempotency-Key、X-APA-Evidence）；hdr 不能覆盖认证头。
+func (c *Ctx) DoHeaders(ctx context.Context, hdr map[string]string, method, path string, body, out any) error {
 	cr, err := c.Credentials()
 	if err != nil {
 		return err
 	}
-	return c.doWith(ctx, cr, method, path, body, out)
+	return c.doWith(ctx, cr, hdr, method, path, body, out)
 }
 
-func (c *Ctx) doWith(ctx context.Context, cr Credentials, method, path string, body, out any) error {
+func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string, method, path string, body, out any) error {
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -173,6 +178,9 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, method, path string, b
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(cr.URL, "/")+apiPrefix+path, rdr)
 	if err != nil {
 		return usage("APA_URL is not a valid URL", "set APA_URL (or run `apa login --url`) to the kernel address, e.g. http://127.0.0.1:7777")
+	}
+	for k, v := range hdr {
+		req.Header.Set(k, v)
 	}
 	req.Header.Set("Authorization", "Bearer "+cr.Token)
 	req.Header.Set("Accept", "application/json")
