@@ -1,0 +1,17 @@
+{
+  "harness": "hermes",
+  "headless": {
+    "command": ["hermes", "chat", "--oneshot", "-q", "{prompt}"],
+    "output": ["--format", "stream-json"],
+    "session": {"extract": "$.session_id"},
+    "resume": ["--resume", "{session_id}"],
+    "access": {
+      "read": ["-t", "apa,web"],
+      "edit": ["-t", "apa,web,file,terminal,delegation"],
+      "full": ["--yolo", "-t", "apa,web,file,terminal,delegation"]
+    },
+    "credential": "env",
+    "exit_codes": {"ok": [0]}
+  },
+  "main_session": {"launch": "headless"}
+}

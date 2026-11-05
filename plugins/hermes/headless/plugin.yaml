@@ -1,0 +1,4 @@
+name: apa-headless
+version: 0.1.0
+description: "APA: the Hermes headless-run declaration (hermes chat -q --oneshot: output, session id, --resume, access tiers) and a tool that submits it with apa declare."
+author: awesome-personal-agent
