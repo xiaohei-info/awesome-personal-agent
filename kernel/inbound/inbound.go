@@ -160,15 +160,24 @@ func (s *Service) Register(x *command.Executor) error {
 	if err != nil {
 		return err
 	}
+	if err := s.registerCapture(x); err != nil {
+		return err
+	}
 	x.OnCommit(func(c command.Commit) {
-		if c.Command != runner.CmdRunResult {
-			return
-		}
-		if err := s.Process(context.Background()); err != nil && s.o.OnError != nil {
-			s.o.OnError(err)
+		switch {
+		case c.Command == runner.CmdRunResult:
+			s.process()
+		case c.Command == CmdCapture && len(c.Seqs) > 0:
+			go s.process() // 捕获发生在插件钩子的时限内，模型调用不能占着请求
 		}
 	})
 	return nil
+}
+
+func (s *Service) process() {
+	if err := s.Process(context.Background()); err != nil && s.o.OnError != nil {
+		s.o.OnError(err)
+	}
 }
 
 // snapshot 是一轮处理开始时读到的账本事实。
@@ -332,6 +341,9 @@ type proposal struct {
 
 func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) error {
 	src, ok := sn.sources[ev.SourceID]
+	if _, isCapture := captureProject(ev.SourceID); !ok && isCapture {
+		src, ok = captureSource(ev.SourceID), true
+	}
 	if !ok {
 		return fmt.Errorf("source %s is not registered", ev.SourceID)
 	}
@@ -450,6 +462,10 @@ func orElse(ss ...string) string {
 
 // project 按规则的 project_by 解析归属项目；没有规则、none 或找不到仓库对应的项目时不归项目。
 func (s *Service) project(sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched) (string, error) {
+	if src.SourceKind == CaptureKind { // 对话增量属于提交它的项目，不看规则
+		id, _ := captureProject(src.ID)
+		return id, nil
+	}
 	if m == nil {
 		return "", nil
 	}
