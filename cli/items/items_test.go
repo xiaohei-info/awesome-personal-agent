@@ -71,7 +71,7 @@ func newKernel(t *testing.T) *kernel {
 	t.Cleanup(ts.Close)
 	k.url = ts.URL
 	k.restartClock()
-	for _, kind := range []auth.Kind{auth.Observer, auth.Worker} {
+	for _, kind := range []auth.Kind{auth.Observer, auth.Worker, auth.Delegate} {
 		if err := st.Update(bg, func(tx *store.Tx) error {
 			_, s, err := k.auth.Issue(tx, auth.Spec{Kind: kind, Executor: map[auth.Kind]string{auth.Worker: "wrk1"}[kind]})
 			k.tokens[kind] = s
@@ -192,14 +192,14 @@ func TestProposeCreatesProposedItemAndShowReadsItBack(t *testing.T) {
 func TestTransitionToWaitingNeedsWaitingOn(t *testing.T) {
 	k := newKernel(t)
 	id := k.openItem()
-	r := k.apa(auth.Worker, "item", "transition", id, "--to", "waiting", "--reason", "quote")
+	r := k.apa(auth.Delegate, "item", "transition", id, "--to", "waiting", "--reason", "quote", "--evidence", "owner said so")
 	if r.code == 0 || k.phase(id) != "open" {
 		t.Fatalf("waiting without waiting_on must fail and keep the phase: %+v", r)
 	}
 	if e := (map[string]any{}); json.Unmarshal([]byte(r.errOut), &e) != nil || e["code"] == nil || e["why"] == nil || e["next"] == nil {
 		t.Fatalf("error body must carry code/why/next: %q", r.errOut)
 	}
-	k.ok(auth.Worker, "item", "transition", id, "--to", "waiting", "--reason", "quote", "--waiting-on", "external:报价单")
+	k.ok(auth.Delegate, "item", "transition", id, "--to", "waiting", "--reason", "quote", "--waiting-on", "external:报价单", "--evidence", "owner said so")
 	it := k.item(id)
 	if it["phase"] != "waiting" || it["waiting_on"].(map[string]any)["ref"] != "报价单" {
 		t.Fatalf("item = %v", it)
@@ -210,11 +210,11 @@ func TestTransitionToWaitingNeedsWaitingOn(t *testing.T) {
 func TestTransitionToNeedsInputNeedsAsk(t *testing.T) {
 	k := newKernel(t)
 	id := k.openItem()
-	if r := k.apa(auth.Worker, "item", "transition", id, "--to", "needs_input", "--reason", "q"); r.code == 0 || k.phase(id) != "open" {
+	if r := k.apa(auth.Delegate, "item", "transition", id, "--to", "needs_input", "--reason", "q", "--evidence", "owner said so"); r.code == 0 || k.phase(id) != "open" {
 		t.Fatalf("needs_input without ask must fail and keep the phase: %+v", r)
 	}
-	k.ok(auth.Worker, "item", "update", id, "--ask", `{"question":"which one?"}`, "--reason", "need a choice")
-	k.ok(auth.Worker, "item", "transition", id, "--to", "needs_input", "--reason", "q")
+	k.ok(auth.Delegate, "item", "update", id, "--ask", `{"question":"which one?"}`, "--reason", "need a choice", "--evidence", "owner said so")
+	k.ok(auth.Delegate, "item", "transition", id, "--to", "needs_input", "--reason", "q", "--evidence", "owner said so")
 	it := k.item(id)
 	if it["phase"] != "needs_input" || it["ask"].(map[string]any)["question"] != "which one?" {
 		t.Fatalf("item = %v", it)
@@ -225,16 +225,16 @@ func TestTransitionToNeedsInputNeedsAsk(t *testing.T) {
 func TestDroppedNeedsReasonAndTerminalItemsReopen(t *testing.T) {
 	k := newKernel(t)
 	dropped, done := k.openItem(), k.openItem()
-	if r := k.apa(auth.Worker, "item", "transition", dropped, "--to", "dropped"); r.code == 0 || k.phase(dropped) != "open" {
+	if r := k.apa(auth.Delegate, "item", "transition", dropped, "--to", "dropped", "--evidence", "owner said so"); r.code == 0 || k.phase(dropped) != "open" {
 		t.Fatalf("dropped without reason must fail: %+v", r)
 	}
-	k.ok(auth.Worker, "item", "transition", dropped, "--to", "dropped", "--reason", "obsolete")
-	k.ok(auth.Worker, "item", "transition", done, "--to", "done", "--reason", "finished")
+	k.ok(auth.Delegate, "item", "transition", dropped, "--to", "dropped", "--reason", "obsolete", "--evidence", "owner said so")
+	k.ok(auth.Delegate, "item", "transition", done, "--to", "done", "--reason", "finished", "--evidence", "owner said so")
 	if k.phase(dropped) != "dropped" || k.phase(done) != "done" {
 		t.Fatal("terminal items must stay queryable in their terminal phase")
 	}
 	for _, id := range []string{dropped, done} {
-		k.ok(auth.Worker, "item", "transition", id, "--to", "open", "--reason", "back again")
+		k.ok(auth.Delegate, "item", "transition", id, "--to", "open", "--reason", "back again", "--evidence", "owner said so")
 		if k.phase(id) != "open" {
 			t.Fatalf("%s did not reopen", id)
 		}
@@ -342,8 +342,8 @@ func TestMovingIntoProjectWithDisallowedExecutorExits21(t *testing.T) {
 	_ = json.Unmarshal(k.own("project.create", map[string]any{"name": "acc-work"}).Value, &p)
 	k.own("project.allowed_executors.set", map[string]any{"id": p.ID, "executors": []string{"work-host.codex"}})
 
-	id := k.openItem()
-	r := k.apa(auth.Worker, "item", "update", id, "--assignee", "other-host.cli", "--project", p.ID, "--reason", "move")
+	id := k.openItem(map[string]any{"assignee": "other-host.cli"})
+	r := k.apa(auth.Delegate, "item", "update", id, "--project", p.ID, "--reason", "move", "--evidence", "owner said so")
 	if r.code != 21 || k.errCode(r) != "executor_not_allowed" {
 		t.Fatalf("%+v", r)
 	}
@@ -435,5 +435,18 @@ func TestUpdateWithoutChangesIsRejectedByKernel(t *testing.T) {
 	k := newKernel(t)
 	if r := k.apa(auth.Worker, "item", "update", k.openItem(), "--reason", "nothing"); r.code != 2 {
 		t.Fatalf("%+v", r)
+	}
+}
+
+// delegate 不带本人原话时被内核拒绝（2）；带上后同一动作成功——on_behalf_of 由 API 层补齐。
+func TestDelegateNeedsEvidence(t *testing.T) {
+	k := newKernel(t)
+	id := k.openItem(map[string]any{"assignee": "other-host.cli"})
+	if r := k.apa(auth.Delegate, "item", "update", id, "--title", "x", "--reason", "r"); r.code != 2 {
+		t.Fatalf("delegate without evidence: %+v", r)
+	}
+	k.ok(auth.Delegate, "item", "update", id, "--title", "x", "--reason", "r", "--evidence", "owner said so")
+	if k.item(id)["title"] != "x" {
+		t.Fatal("update with evidence must apply")
 	}
 }

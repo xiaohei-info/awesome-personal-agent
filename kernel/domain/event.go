@@ -63,6 +63,7 @@ const (
 	EvItemCreated                    = "item.created"
 	EvItemUpdated                    = "item.updated"
 	EvItemPhaseChanged               = "item.phase_changed"
+	EvItemDeadlinePassed             = "item.deadline_passed"
 	EvDecisionRequested              = "decision.requested"
 	EvDecisionResolved               = "decision.resolved"
 	EvDelegationCreated              = "delegation.created"
@@ -84,7 +85,7 @@ const (
 
 // RegisteredEventTypes 是对外开放的稳定事件类型表，顺序同附录 B.4。
 var RegisteredEventTypes = []string{
-	EvItemCreated, EvItemUpdated, EvItemPhaseChanged,
+	EvItemCreated, EvItemUpdated, EvItemPhaseChanged, EvItemDeadlinePassed,
 	EvDecisionRequested, EvDecisionResolved,
 	EvDelegationCreated, EvDelegationReported,
 	EvCommandRejected,
