@@ -1,0 +1,6 @@
+kind: brief
+list:
+  columns: [title, project, created_at]
+  filters: [project, tag]
+card:
+  fields: [summary, spec.period]
