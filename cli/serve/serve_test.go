@@ -360,7 +360,6 @@ func appendixRoutes(t *testing.T) []appendixRoute {
 // notYetImplemented 是附录 B.2 列出、但 main 上还没有实现的路由（目标设计先于代码）。这不是路由清单，只是缺口台账，只减不增：
 // 实现并挂载后本测试会要求删掉对应条目；实现了却忘了挂，由 TestEveryRouteGroupPackageIsMounted 拦下。
 var notYetImplemented = map[string]bool{
-	"GET /health":     true,
 	"/settings/purge": true,
 }
 
