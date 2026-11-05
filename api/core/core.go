@@ -126,6 +126,8 @@ type Deps struct {
 	Logger     *slog.Logger     // nil 用 slog.Default()
 	// Groups 是除 Register 登记外额外挂载的分组（测试与嵌入用）。
 	Groups []RouteGroup
+	// Web 非空时，未命中 API 路由的 GET/HEAD（/v1 之外）交给它——嵌入的 Web 中台。
+	Web http.Handler
 }
 
 // Server 是 HTTP 服务。
@@ -182,6 +184,10 @@ func New(d Deps) (*Server, error) {
 		return nil, err
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if d.Web != nil && (r.Method == http.MethodGet || r.Method == http.MethodHead) && !strings.HasPrefix(r.URL.Path, APIPrefix+"/") {
+			d.Web.ServeHTTP(w, r)
+			return
+		}
 		s.writeError(w, domain.NewError(domain.CodeNotFound, "no such route", "check the path and method against the API list"))
 	})
 	s.handler = s.base(mux)
