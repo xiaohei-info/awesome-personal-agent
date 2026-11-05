@@ -9,6 +9,10 @@ meta:
   - 01a1a720-f7fd-719e-91d8-f5032216143f
   - 01a1a720-fa34-79ff-9662-cdf8dac90a21
   - 01a1aa40-ef12-766f-86e2-bead6a7c7b51
+  reconcile_audit:
+    schema: omac.reconcile-audit/v1
+    last_full_scan_at: '2026-11-05T06:51:20Z'
+    completed_interval_ticks: 20
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
