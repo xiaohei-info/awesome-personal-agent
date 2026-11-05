@@ -1,3 +1,4 @@
+import { Route, Routes } from "react-router-dom";
 import { features as registered, type Feature } from "./registry";
 import { Login } from "./Login";
 import { Shell } from "./Shell";
@@ -18,8 +19,18 @@ function Gate({ features }: { features: Feature[] }) {
 
 export function App({ features = registered, fetchImpl }: { features?: Feature[]; fetchImpl?: typeof fetch }) {
   return (
-    <SessionProvider fetchImpl={fetchImpl}>
-      <Gate features={features} />
-    </SessionProvider>
+    <Routes>
+      {features.filter((f) => f.public).map((f) => (
+        <Route key={f.id} path={f.path + "/*"} element={f.element} />
+      ))}
+      <Route
+        path="*"
+        element={
+          <SessionProvider fetchImpl={fetchImpl}>
+            <Gate features={features.filter((f) => !f.public)} />
+          </SessionProvider>
+        }
+      />
+    </Routes>
   );
 }
