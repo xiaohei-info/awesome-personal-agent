@@ -1,4 +1,5 @@
-# sha256: dbf03ffe66551071eede65e1db6187fbc0bfd05c8066e6d1b480e21a8aa8466e
+# sha256: ff842cfc3485253d69a7eb1964b63eb358e21c0ff10ee3584273edb6eadab608
 work_item_id: 01a1acdb-3985-7d82-9671-7ebcfdb35449
-status: blocked
-recovery_marker: true
+status: done
+merged: true
+merged_at: '2026-11-05T19:08:46Z'
