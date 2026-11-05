@@ -58,6 +58,22 @@ describe("事项页挂靠消息（ACT-FWD-04）", () => {
     expect(within(rows[2]).getByLabelText("核实状态")).toHaveTextContent("未核实");
   });
 
+  it("来源 link 只有 http(s) 才渲染成链接；javascript: 等不产生 href", async () => {
+    const msgs = [
+      { ...MESSAGES[0], id: "l1", subject: "ok", link: "https://example.com/pr/1" },
+      { ...MESSAGES[0], id: "l2", subject: "evil", link: "javascript:alert(1)" },
+      { ...MESSAGES[0], id: "l3", subject: "junk", link: "not a url" },
+    ];
+    mount(fetchFor(msgs));
+    const rows = within(await screen.findByRole("list", { name: "挂靠消息列表" })).getAllByRole("listitem");
+    const ok = within(rows[0]).getByRole("link", { name: "来源" });
+    expect(ok).toHaveAttribute("href", "https://example.com/pr/1");
+    expect(ok).toHaveAttribute("rel", "noopener noreferrer");
+    expect(within(rows[1]).queryByRole("link")).toBeNull();
+    expect(within(rows[2]).queryByRole("link")).toBeNull();
+    expect(document.querySelector('a[href^="javascript"]')).toBeNull();
+  });
+
   it("没有挂靠消息时显示空状态", async () => {
     mount(fetchFor([]));
     expect(await screen.findByText("没有挂靠消息")).toBeInTheDocument();

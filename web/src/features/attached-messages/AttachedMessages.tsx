@@ -27,6 +27,17 @@ const STATE: Record<string, string> = {
 
 const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
+// link 来自外部来源，内核不校验协议；只放行 http(s)，防止 javascript: 等在已登录的 Web 源内执行。
+function safeHref(link?: string): string | null {
+  if (!link) return null;
+  try {
+    const u = new URL(link);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function AttachedMessages({ itemId }: { itemId: string }) {
   const { api } = useSession();
   const [list, setList] = useState<AttachedMessage[] | null>(null);
@@ -62,7 +73,7 @@ export function AttachedMessages({ itemId }: { itemId: string }) {
               {" · "}
               <span aria-label="处理状态">{STATE[m.attach_state] ?? m.attach_state}</span>
               {!m.forward_allowed && " · 仅本人可见，不进入无人值守会话，不算已处理"}
-              {m.link ? <> · <a href={m.link}>来源</a></> : null}
+              {safeHref(m.link) ? <> · <a href={safeHref(m.link)!} rel="noopener noreferrer">来源</a></> : null}
             </li>
           ))}
         </ul>
