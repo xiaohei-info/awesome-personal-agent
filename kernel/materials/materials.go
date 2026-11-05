@@ -856,7 +856,8 @@ func Purge(tx *store.Tx, id string) ([]string, error) {
 			if len(rest) < len(blobRef)+64 {
 				break
 			}
-			if ref := rest[:len(blobRef)+64]; !slices.Contains(refs, ref) {
+			// 只收录后 64 位全为小写十六进制的串；其余是普通文本，跳过。
+			if ref := rest[:len(blobRef)+64]; lowerHex(ref[len(blobRef):]) && !slices.Contains(refs, ref) {
 				refs = append(refs, ref)
 			}
 			rest = rest[len(blobRef):]
@@ -881,4 +882,13 @@ func BlobReferenced(tx *store.Tx, ref string) (bool, error) {
 	defer r.Close()
 	found := r.Next()
 	return found, r.Err()
+}
+
+func lowerHex(s string) bool {
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

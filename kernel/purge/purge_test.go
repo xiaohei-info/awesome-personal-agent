@@ -276,3 +276,15 @@ func n(v any) int {
 	l, _ := v.([]any)
 	return len(l)
 }
+
+// 正文里形如 blob 引用但哈希不合法的普通文本不能让材料删不掉；其后的合法引用照常处理。
+func TestPurgeIgnoresMalformedBlobRefText(t *testing.T) {
+	e := setup(t)
+	h := e.putBlob(t, "real")
+	bad := blobs.RefPrefix + strings.Repeat("G", 64)
+	m := e.note(t, bad+" "+blobs.RefPrefix+strings.Repeat("A", 64)+" "+blobs.Ref(h))
+	res := e.must(t, owner, Command, map[string]any{"object": m})
+	if n(res["blobs_removed"]) != 1 || e.blobFile(h) {
+		t.Fatalf("result %v", res)
+	}
+}
