@@ -32,6 +32,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
 	apiexec "github.com/xiaohei-info/awesome-personal-agent/api/settings/exec"
 	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
+	apipurge "github.com/xiaohei-info/awesome-personal-agent/api/settings/purge"
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
 	apiwhy "github.com/xiaohei-info/awesome-personal-agent/api/why"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
@@ -63,6 +64,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/verify"
 	kprojects "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	kpurge "github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	kscreening "github.com/xiaohei-info/awesome-personal-agent/kernel/screening"
@@ -232,6 +234,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		instances.Register(x, ld),
 		blobs.Register(x, l.Blobs),
 		kmaterials.Register(x),
+		kpurge.Register(x, l.Blobs),
 		hosted.Register(x),
 		search.Register(x),
 		k.fu.Register(),
@@ -264,7 +267,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), sources, apiwhy.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, agmSvc)}}); err != nil {
+		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, agmSvc)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
