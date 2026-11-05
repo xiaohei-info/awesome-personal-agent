@@ -79,7 +79,7 @@ func TestPullMapsIssuesPRsNotificationsAndAdvancesCursor(t *testing.T) {
 		{"issue-o-r#1-updated-1793527200", "issue.updated", "https://github.com/o/r/issues/1"},
 		{"issue-o-r#2-opened", "issue.opened", ""},
 		{"pr-o-r#3-merged", "pr.merged", ""},
-		{"issue-o-r#4-closed", "issue.closed", ""},
+		{"issue-o-r#4-closed-1793541600", "issue.closed", ""},
 		{"notif-77-1793545200", "notification.review_requested", "https://github.com/o/r/pull/9"},
 	}
 	if len(lines) != len(want)+1 {
@@ -173,12 +173,14 @@ func TestPaginationAndTruncationHoldsCursorBack(t *testing.T) {
 	}
 	api := &fakeAPI{pages: map[string][]string{"/repos/o/r/issues": pages}}
 	code, lines, _ := run(t, api, `{"source_id":"s","config":{"repos":["o/r"]},"cursor":"2026-11-01T00:00:00Z"}`)
-	if code != 0 || len(lines) != maxPages*perPage+1 {
+	if code != 0 || len(lines) < 2 {
 		t.Fatalf("code=%d lines=%d", code, len(lines))
 	}
-	// 被截断时游标停在已读到的最后时间，下次从这里继续，不漏
-	if got := lines[len(lines)-1]["cursor"]; got != fmt.Sprintf("2026-11-01T%02d:00:00Z", maxPages) {
-		t.Errorf("cursor = %v", got)
+	// 输出被预算截断，游标不超过页数上限能保证读全的位置，也不超过已输出的最后一项
+	got := lines[len(lines)-1]["cursor"].(string)
+	lastEv := lines[len(lines)-2]["occurred_at"].(string)
+	if got > fmt.Sprintf("2026-11-01T%02d:00:00Z", maxPages) || got > lastEv {
+		t.Errorf("cursor = %v, last event %v", got, lastEv)
 	}
 }
 
@@ -352,5 +354,76 @@ func TestPullConfigDirUsesRunnerCwdWithoutAPAHome(t *testing.T) {
 	}
 	if _, err := PullConfigDir("../x", src); err == nil {
 		t.Fatal("bad id accepted")
+	}
+}
+
+func TestLargeBacklogIsBoundedPerRunAndEventuallyEmitsEveryItemOnce(t *testing.T) {
+	body := strings.Repeat("x", 3900)
+	var items []string
+	for i := 1; i <= 30; i++ {
+		items = append(items, fmt.Sprintf(`{"number":%d,"title":"t%d","body":%q,"created_at":"2026-10-01T00:00:00Z","updated_at":"2026-11-01T00:%02d:00Z","user":{"login":"u"}}`, i, i, body, i))
+	}
+	all := "[" + strings.Join(items, ",") + "]"
+	// 假 API 按 since 过滤，和真实接口一样
+	api := &sinceAPI{all: items}
+	_ = all
+	seen := map[string]int{}
+	cursor := "2026-11-01T00:00:00Z"
+	for run := 0; run < 40; run++ {
+		var out, errb bytes.Buffer
+		in := `{"source_id":"s","config":{"repos":["o/r"]},"cursor":"` + cursor + `"}`
+		if code := Run(context.Background(), strings.NewReader(in), &out, &errb, api, now); code != 0 {
+			t.Fatalf("run %d exit %d: %s", run, code, errb.String())
+		}
+		if out.Len() >= 64<<10 {
+			t.Fatalf("run %d wrote %d bytes, kernel retains only 64KB", run, out.Len())
+		}
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		var last map[string]string
+		json.Unmarshal([]byte(lines[len(lines)-1]), &last)
+		for _, l := range lines[:len(lines)-1] {
+			var ev struct{ ID string }
+			json.Unmarshal([]byte(l), &ev)
+			seen[ev.ID]++
+		}
+		if last["cursor"] == cursor {
+			break
+		}
+		cursor = last["cursor"]
+	}
+	if len(seen) != 30 {
+		t.Fatalf("emitted %d distinct ids, want 30", len(seen))
+	}
+}
+
+type sinceAPI struct{ all []string }
+
+func (a *sinceAPI) Get(_ context.Context, path string) ([]byte, error) {
+	if strings.Contains(path, "&page=2") {
+		return []byte("[]"), nil
+	}
+	i := strings.Index(path, "since=") + 6
+	since, _ := time.Parse(time.RFC3339, path[i:i+20])
+	var out []string
+	for _, raw := range a.all {
+		var it struct {
+			UpdatedAt time.Time `json:"updated_at"`
+		}
+		json.Unmarshal([]byte(raw), &it)
+		if !it.UpdatedAt.Before(since) {
+			out = append(out, raw)
+		}
+	}
+	return []byte("[" + strings.Join(out, ",") + "]"), nil
+}
+
+func TestReclosedIssueGetsNewClosedID(t *testing.T) {
+	mk := func(closed string) string {
+		api := &fakeAPI{pages: map[string][]string{"/repos/o/r/issues": {`[{"number":7,"title":"t","created_at":"2026-10-01T00:00:00Z","updated_at":"` + closed + `","closed_at":"` + closed + `","user":{"login":"u"}}]`}}}
+		_, l, _ := run(t, api, `{"source_id":"s","config":{"repos":["o/r"]},"cursor":"2026-11-01T00:00:00Z"}`)
+		return l[0]["id"].(string)
+	}
+	if mk("2026-11-01T01:00:00Z") == mk("2026-11-01T05:00:00Z") {
+		t.Fatal("second close deduped into the first")
 	}
 }
