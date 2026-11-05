@@ -16,6 +16,8 @@ type Record struct {
 	Msg     int       `json:"msg"`
 	Options []string  `json:"options,omitempty"`
 	Stale   bool      `json:"stale,omitempty"` // 内核回过 409：版本已作废，不再对它报告任何东西
+	WebOnly bool      `json:"web_only,omitempty"`
+	WebURL  string    `json:"web_url,omitempty"` // web_only 时告诉本人去哪里处理
 	At      time.Time `json:"at"`
 }
 

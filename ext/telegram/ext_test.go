@@ -105,8 +105,8 @@ func TestAnswerByButtonAndByReplyIsForwarded(t *testing.T) {
 	})
 }
 
-// ACT-TG-04、ACT-LIF-05：web_only 决策——消息不带表单链接；回复被内核拒绝时，本人收到拒绝原因和 Web 链接，不当作已回答。
-func TestWebOnlyReplyIsRejectedWithWebLink(t *testing.T) {
+// 纵深防御：内核没标 web_only 却拒绝回答时，拒绝原因和 Web 链接原样发给本人，不当作已回答。
+func TestKernelRejectionIsRelayedWithWebLink(t *testing.T) {
 	f, fb := newFakeAPA(t), newBot(t)
 	web := "/items/item-fin"
 	f.answerFn = func(answerCall) (int, *APIError) {
@@ -280,5 +280,60 @@ func TestMainRequiresNumericChat(t *testing.T) {
 	err := Main(context.Background(), func(k string) string { return map[string]string{"TG_CHAT": "abc"}[k] }, testWriter{t}, memStore())
 	if err == nil || !strings.Contains(err.Error(), "TG_CHAT") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// webOnlyDelivery 是内核对 web_only 决策实际产出的形态（kernel/attention：只有标题、摘要、Web 链接和 web_only 标记）。
+func webOnlyDelivery() Delivery {
+	return Delivery{ID: "decision:item-fin:1", Class: "decision", Version: 1, Content: Content{
+		Title: "确认续保付款", Summary: "是否支付 3,200 元？", WebURL: "/items/item-fin", WebOnly: true}}
+}
+
+// ACT-TG-04、ACT-LIF-05：web_only 决策的消息只有标题、摘要和 Web 链接——没有选项、推荐、按钮、表单链接；
+// 本人在 Telegram 回复"同意"，ext 不转达（内核不会收到回答），回给本人 Web 链接。
+func TestWebOnlyMessageIsLinkOnlyAndReplyIsPointedToWeb(t *testing.T) {
+	f, fb := newFakeAPA(t), newBot(t)
+	d := webOnlyDelivery()
+	f.enqueue(d)
+	start(t, f, fb, memStore())
+	eventually(t, "ack", func() bool { a, _, _ := f.snapshot(); return len(a[d.ID]) == 1 })
+
+	msg := fb.Sent()[0]
+	link := f.srv.URL + "/items/item-fin"
+	for _, want := range []string{"确认续保付款", "是否支付 3,200 元？", link} {
+		if !strings.Contains(msg.Text, want) {
+			t.Errorf("web_only message lacks %q:\n%s", want, msg.Text)
+		}
+	}
+	for _, banned := range []string{"选项", "推荐", "作答链接"} {
+		if strings.Contains(msg.Text, banned) {
+			t.Errorf("web_only message must not contain %q:\n%s", banned, msg.Text)
+		}
+	}
+	if len(msg.Buttons) != 0 {
+		t.Errorf("web_only message must have no buttons: %v", msg.Buttons)
+	}
+
+	fb.Reply(chat, msg.ID, owner, "同意")
+	eventually(t, "web pointer", func() bool {
+		s := fb.Sent()
+		return len(s) == 2 && strings.Contains(s[1].Text, "不能在 Telegram 回答") && strings.Contains(s[1].Text, link)
+	})
+	if _, _, a := f.snapshot(); len(a) != 0 {
+		t.Errorf("a web_only reply must not be forwarded as an answer: %+v", a)
+	}
+}
+
+// 标了 web_only 的内容即使（被改动或出错而）带着选项和表单链接，ext 也只渲染 Web 链接。
+func TestWebOnlyFlagWinsOverStrayOptions(t *testing.T) {
+	f, fb := newFakeAPA(t), newBot(t)
+	d := webOnlyDelivery()
+	d.Content.Options, d.Content.Recommend, d.Content.FormURL = []string{"a: 同意", "b: 拒绝"}, "a", "/forms/tok"
+	f.enqueue(d)
+	start(t, f, fb, memStore())
+	eventually(t, "message", func() bool { return len(fb.Sent()) == 1 })
+	m := fb.Sent()[0]
+	if len(m.Buttons) != 0 || strings.Contains(m.Text, "同意") || strings.Contains(m.Text, "/forms/") || strings.Contains(m.Text, "推荐") {
+		t.Errorf("stray options leaked into a web_only message: %+v", m)
 	}
 }

@@ -33,6 +33,7 @@ type Content struct {
 	Recommend string   `json:"recommend"`
 	WebURL    string   `json:"web_url"`
 	FormURL   string   `json:"form_url"`
+	WebOnly   bool     `json:"web_only"` // 内核置位：只给 Web 链接，不渲染选项，不转达回答
 }
 
 // APIError 是内核的统一错误体加 HTTP 状态。

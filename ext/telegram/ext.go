@@ -165,7 +165,7 @@ func (e *Ext) render(d *Delivery) string {
 	if c.Summary != "" {
 		b.WriteString("\n" + c.Summary)
 	}
-	if len(c.Options) > 0 { // 有选项就可作答；是否接受由内核按投递类别判定
+	if !c.WebOnly && len(c.Options) > 0 { // 有选项就可作答；是否接受由内核按投递类别判定
 		b.WriteString("\n\n选项：")
 		for _, o := range c.Options {
 			b.WriteString("\n· " + o)
@@ -174,7 +174,7 @@ func (e *Ext) render(d *Delivery) string {
 			b.WriteString("\n推荐：" + c.Recommend)
 		}
 	}
-	if c.FormURL != "" {
+	if c.FormURL != "" && !c.WebOnly {
 		b.WriteString("\n\n作答链接（一次性）：" + e.webLink(c.FormURL))
 	}
 	if c.WebURL != "" {
@@ -185,7 +185,10 @@ func (e *Ext) render(d *Delivery) string {
 
 func (e *Ext) send(ctx context.Context, d *Delivery) (Record, error) {
 	p := &bot.SendMessageParams{ChatID: e.cfg.Chat, Text: e.render(d)}
-	opts := d.Content.Options
+	var opts []string
+	if !d.Content.WebOnly { // web_only 只给 Web 链接：没有选项，没有按钮
+		opts = d.Content.Options
+	}
 	var rows [][]models.InlineKeyboardButton
 	for i, o := range opts {
 		rows = append(rows, []models.InlineKeyboardButton{{Text: o, CallbackData: strconv.Itoa(i)}})
@@ -197,7 +200,7 @@ func (e *Ext) send(ctx context.Context, d *Delivery) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	return Record{Ref: fmt.Sprintf("%d:%d", e.cfg.Chat, m.ID), Chat: e.cfg.Chat, Msg: m.ID, Options: opts, At: time.Now()}, nil
+	return Record{Ref: fmt.Sprintf("%d:%d", e.cfg.Chat, m.ID), Chat: e.cfg.Chat, Msg: m.ID, Options: opts, WebOnly: d.Content.WebOnly, WebURL: d.Content.WebURL, At: time.Now()}, nil
 }
 
 // ---- 回答回流 ----
@@ -273,6 +276,13 @@ func (e *Ext) reply(ctx context.Context, chat int64, msg int, from models.User,
 	id, rec, found := e.st.Find(chat, msg)
 	if !found {
 		return "找不到这条消息对应的投递。"
+	}
+	if rec.WebOnly { // 内核已声明这是 web_only：不转达，直接指向 Web
+		note := "这是需要在 Web 确认的决策，不能在 Telegram 回答。"
+		if rec.WebURL != "" {
+			note += "\n请在 Web 处理：" + e.webLink(rec.WebURL)
+		}
+		return note
 	}
 	choice, text, ok := pick(rec)
 	if !ok {
