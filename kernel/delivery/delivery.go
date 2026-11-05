@@ -19,6 +19,8 @@ import (
 const (
 	RouteInject = "inject"
 	RouteWake   = "wake"
+	// RouteWeb 是只在 Web 未读展示的路由：入队即 fallback_web，没有消费者。
+	RouteWeb = "web"
 )
 
 // ChannelRoute 是渠道 ext 的路由；渠道由 ext 密钥确定（§10.3）。
@@ -206,10 +208,14 @@ func (q *Queue) Create(tx *store.Tx, d domain.Delivery) (domain.Delivery, bool, 
 		return d, false, err
 	}
 	now := ns(q.o.Now())
+	state := domain.DeliveryPending
+	if d.Route == RouteWeb {
+		state = domain.DeliveryFallbackWeb
+	}
 	if _, err := tx.Exec(`INSERT INTO delivery_delivery
 		(id, item, class, route, content, version, state, next_attempt_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-		d.ID, d.Item, string(d.Class), d.Route, string(content), d.Version, now, now); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.Item, string(d.Class), d.Route, string(content), d.Version, string(state), now, now); err != nil {
 		return d, false, err
 	}
 	got, err := q.Get(tx, d.ID)

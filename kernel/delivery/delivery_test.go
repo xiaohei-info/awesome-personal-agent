@@ -416,3 +416,19 @@ func TestRollback(t *testing.T) {
 		return nil
 	})
 }
+
+func TestWebRouteIsUnreadImmediately(t *testing.T) {
+	e := newEnv(t, Options{})
+	d := e.create("w1", "it", RouteWeb, 1)
+	if d.State != domain.DeliveryFallbackWeb {
+		t.Fatalf("state = %s", d.State)
+	}
+	if got := e.claim(RouteWeb); got != nil {
+		t.Fatalf("nobody claims the web route: %+v", got)
+	}
+	var unread []domain.Delivery
+	e.view(func(tx *store.Tx) (err error) { unread, err = e.q.Unread(tx); return })
+	if len(unread) != 1 || unread[0].ID != "w1" {
+		t.Fatalf("unread = %+v", unread)
+	}
+}

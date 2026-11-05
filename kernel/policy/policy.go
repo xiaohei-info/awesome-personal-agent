@@ -60,9 +60,31 @@ type WebOnly struct {
 	Rules      []WebOnlyRule `json:"rules"`
 }
 
-// Disturb 是打扰策略：键为投递类别，或「类别:优先级」（后者优先），值为路由。
+// Quiet 是每日静默时段，Start、End 为 "HH:MM"（跨午夜时 Start > End），Zone 为 IANA 时区，空取 UTC。
+type Quiet struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+	Zone  string `json:"zone,omitempty"`
+}
+
+// Disturb 是打扰策略（§7.4）。Routes 的键为投递类别，或「类别:优先级」（后者优先），值为路由。
+// Quiet 为空表示不设静默；QuietExempt 为真时，临近截止的决策不受静默限制（默认静默优先）；
+// MergeWindowSec 是低优先级提醒的合并窗口，0 表示不合并；RemindOnDeadline 为真时，截止已过仍未处理的事项再提醒一次。
 type Disturb struct {
-	Routes map[string]string `json:"routes"`
+	Routes           map[string]string `json:"routes"`
+	Quiet            *Quiet            `json:"quiet,omitempty"`
+	QuietExempt      bool              `json:"quiet_exempt,omitempty"`
+	MergeWindowSec   int               `json:"merge_window_sec"`
+	RemindOnDeadline bool              `json:"remind_on_deadline"`
+}
+
+// ParseClock 解析 "HH:MM"，返回当天的分钟数。
+func ParseClock(s string) (int, error) {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return 0, err
+	}
+	return t.Hour()*60 + t.Minute(), nil
 }
 
 // MaterialWrite 是材料 kind 到写入策略的映射；未登记的 kind 走 Default。
@@ -109,7 +131,7 @@ func Default() Policy {
 			string(domain.DeliveryDecision): "inject", string(domain.DeliveryBrief): "inject",
 			string(domain.DeliveryReminder): "inject", string(domain.DeliveryHealth): "web",
 			string(domain.DeliveryWake): "web",
-		}},
+		}, MergeWindowSec: 30 * 60, RemindOnDeadline: true}, // 合并窗口默认 30 分钟（§7.4）
 		// 规范、方案类须本人确认；纪要类直写（§12.4）。未登记的 kind 取更严的 proposed。
 		MaterialWrite: MaterialWrite{Default: WriteProposed, Kinds: map[string]string{
 			"minutes": WriteDirect, "reference": WriteDirect, "worknote": WriteDirect,
@@ -221,6 +243,20 @@ func normalize(p Policy) (Policy, error) {
 		}
 		if strings.TrimSpace(route) == "" {
 			return p, invalid("disturb key %q: route is empty", k)
+		}
+	}
+
+	if p.Disturb.MergeWindowSec < 0 {
+		return p, invalid("disturb merge_window_sec %d < 0", p.Disturb.MergeWindowSec)
+	}
+	if q := p.Disturb.Quiet; q != nil {
+		a, errA := ParseClock(q.Start)
+		b, errB := ParseClock(q.End)
+		if errA != nil || errB != nil || a == b {
+			return p, invalid("disturb quiet %q-%q must be two different HH:MM times", q.Start, q.End)
+		}
+		if _, err := time.LoadLocation(q.Zone); err != nil {
+			return p, invalid("disturb quiet zone %q", q.Zone)
 		}
 	}
 
