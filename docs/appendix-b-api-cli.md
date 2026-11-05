@@ -95,7 +95,7 @@
 | | `POST /agents-md/check` | 上报文件 hash，返回三态 | observer |
 | 上下文 | `GET /context` | 账本增量投影 | observer |
 | | `GET /context/persona` | 当前人格，前面带内核固定声明 | observer |
-| | `POST /capture` | 提交对话增量；运行身份下不生效 | worker |
+| | `POST /capture` | 提交对话增量 `{text, project?, path?, host?}`；运行身份下、项目未开启捕获时不生效，返回 200 `{"captured": false, "reason"}`；候选在提交后异步抽取 | worker |
 | 插件声明 | `POST /declarations` | 提交无头运行声明与执行者，进 Web 待确认 | worker |
 | 来源 | `GET/POST /sources`，`GET/PATCH /sources/{id}` | 来源登记 | observer 读，delegate 写；自定义命令只有 Web |
 | | `POST /sources/{id}/webhook` | 创建或轮换接收密钥 | delegate |
