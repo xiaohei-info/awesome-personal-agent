@@ -1,7 +1,7 @@
 // Package instances 是能力包实例（设计 §6.12、附录 C.10）：用户建的具体定时或提醒，一条账本记录。
 // instance.create/update/toggle 按包声明的 instance_params（JSON Schema）校验参数，
 // 并在同一事务里把 `schedule` 落为 Timer（§6.8）；到期的系统命令经 HandleTimer 记成 instance.fired 事件，
-// 规则怎么响应归主动服务。同一周期只触发一次、错过只补最近一次由时钟保证。
+// 由主动服务的规则执行消费（kernel/rules：按包里实例驱动的时钟规则执行动作）。同一周期只触发一次、错过只补最近一次由时钟保证。
 package instances
 
 import (

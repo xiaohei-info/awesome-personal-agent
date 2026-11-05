@@ -151,9 +151,13 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
-	// shortcut: call_agent 只接核验；内置包里其余 call_agent 走实例定时，目前没有消费者（instance.fired），接任务型时在此按模板分派。
+	// call_agent 按模板类别分派：任务型与生成型由任务型服务处理，判断型交委派核验。任务型服务要等调度器建好，闭包里再取。
+	var tk *task.Service
+	callAgent := func(ctx context.Context, c rules.Call) error {
+		return tk.CallAgent(task.AgentOptions{Judge: verifyAgent, Generate: judge})(ctx, c)
+	}
 	if k.eng, err = rules.New(rules.Options{Store: st, Exec: x, Packs: ld, Owner: owner,
-		Handlers: map[string]rules.Handler{"call_agent": verifyAgent}, Reminder: att, OnError: logErr("rules")}); err != nil {
+		Handlers: map[string]rules.Handler{"call_agent": callAgent}, Reminder: att, OnError: logErr("rules")}); err != nil {
 		return nil, err
 	}
 	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Judge: judge, Reminder: att, Owner: owner,
@@ -162,7 +166,6 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 
 	// 调度器的结果要回到 runner、webhook、task，而它们又要调度器：先建调度器，闭包里再取。
-	var tk *task.Service
 	k.result = func(res proc.Result) {
 		ctx := context.Background() // 关停时也要把终态落账
 		if err := errors.Join(k.rn.Handle(ctx, res), k.wh.Handle(ctx, res)); err != nil {
@@ -230,6 +233,7 @@ func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 	case k.rn.Owns(c):
 		return k.rn.HandleTimer(tx, c)
 	case instances.Owns(c):
+		k.drainDue.Store(true) // instance.fired 由规则执行消费
 		return instances.HandleTimer(tx, c)
 	case k.fu.Owns(c):
 		k.drainDue.Store(true)
