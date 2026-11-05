@@ -168,6 +168,21 @@ describe("策略与人格设置页", () => {
     expect(s.puts.at(-1)!.body).toEqual({ model_endpoint: { url: "https://m.example/v1", model: "m2", api_key: "***", screening_timeout_ms: 30000 } });
   });
 
+  it("保存同一路由下的另一张卡片，不会清掉本卡片未保存的编辑", async () => {
+    const s = server();
+    mount(s.impl);
+    const d = await card("打扰策略");
+    await userEvent.click(d.getByRole("button", { name: "添加打扰路由" }));
+    await userEvent.type(d.getByLabelText("打扰路由类别 3"), "wake");
+    const p = (await card("人格")).getByRole("textbox");
+    await userEvent.clear(p);
+    await userEvent.type(p, "直接");
+    await save("人格");
+    await (await card("人格")).findByRole("status");
+    expect(d.getByLabelText("打扰路由类别 3")).toHaveValue("wake"); // 未保存的草稿仍在
+    expect(s.doc.disturb.routes).toEqual({ decision: "inject", health: "web" });
+  });
+
   it("同一 map 内重复的键在本地提示，不发请求", async () => {
     const s = server();
     mount(s.impl);

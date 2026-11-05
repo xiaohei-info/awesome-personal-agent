@@ -77,10 +77,11 @@ function Rows({ label, rows, onChange, options, keyLabel = "名称", valueLabel 
   );
 }
 
-// 服务端文档变化（保存后返回规整结果、或重新加载）时，草稿重置为服务端值。
+// 仅当本段的服务端内容真正变化（保存后返回规整结果、或重新加载）时，草稿才重置；同路由其它段保存不影响本段草稿。
 function useDraft<T>(doc: unknown, init: () => T) {
   const [d, setD] = useState<T>(init);
-  useEffect(() => setD(init()), [doc]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sig = JSON.stringify(doc);
+  useEffect(() => setD(init()), [sig]); // eslint-disable-line react-hooks/exhaustive-deps
   return [d, setD] as const;
 }
 
