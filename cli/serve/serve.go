@@ -5,40 +5,47 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"log/slog"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
-	apidecisions "github.com/xiaohei-info/awesome-personal-agent/api/decisions"
-	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
-	apiprojects "github.com/xiaohei-info/awesome-personal-agent/api/projects"
-	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
-	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
-	kdecisions "github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
+	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
 	kprojects "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/webhook"
 )
-
-const clockInterval = time.Second
 
 // registry 登记内核当前装配的全部存储模块；init 与 serve 共用，保证建库与启动看到同一份迁移。
 func registry() (*store.Registry, error) {
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module,
-		kprojects.Module, clock.Module, kitems.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, runidentity.Module,
+		kprojects.Module, clock.Module, kitems.Module, core.Module, kcontext.Module, delegation.Module, executors.Module,
+		delivery.Module, attention.Module, proc.Module, direct.Module, task.Module, followup.Module, rules.Module,
+		instances.Module, sregistry.Module, runner.Module, webhook.Module} {
 		if err := reg.Register(m); err != nil {
 			return nil, err
 		}
@@ -94,26 +101,27 @@ func run(ctx context.Context, c *client.Ctx, ready func(net.Addr)) error {
 		return usage("no Web login password is set", "run `apa init` first")
 	}
 
-	srv, clk, err := assemble(st)
-	if err != nil {
-		return err
-	}
+	// 先占端口再动账本：第二个 serve 在这里就失败，不会把第一个正在跑的运行按崩溃恢复。
 	ln, err := core.Listen(cfg.Listen)
 	if err != nil {
 		return domain.NewError(domain.CodeConflict, "cannot listen on "+cfg.Listen, "free the port or change listen in "+l.Config)
+	}
+	defer ln.Close()
+	k, err := assemble(st, l, cfg, localURL(ln.Addr()))
+	if err != nil {
+		return err
+	}
+	if err := k.start(ctx); err != nil {
+		return err
 	}
 	ready(ln.Addr())
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	clockDone := make(chan struct{})
-	go func() {
-		defer close(clockDone)
-		_ = clk.Run(ctx, clockInterval, func(err error) { slog.Error("clock tick failed", "err", err) })
-	}()
-	err = srv.Serve(ctx, ln)
+	stopped := k.runLoops(ctx)
+	err = k.srv.Serve(ctx, ln)
 	cancel()
-	<-clockDone
+	stopped()
 	return err
 }
 
@@ -128,35 +136,4 @@ func ownerPasswordSet(ctx context.Context, st *store.Store) (set bool, err error
 		return r.Err()
 	})
 	return
-}
-
-// assemble 登记内核命令并挂载 HTTP 路由分组与时钟。
-func assemble(st *store.Store) (*core.Server, *clock.Clock, error) {
-	x := command.New(st, nil)
-	if err := kitems.Register(x, kitems.NewKinds()); err != nil {
-		return nil, nil, err
-	}
-	if err := kdecisions.Register(x); err != nil {
-		return nil, nil, err
-	}
-	if err := kprojects.Register(x); err != nil {
-		return nil, nil, err
-	}
-	a := auth.New(nil)
-	creds, err := credentials.Mount(x, a)
-	if err != nil {
-		return nil, nil, err
-	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{
-		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds}})
-	if err != nil {
-		return nil, nil, err
-	}
-	clk, err := clock.New(st, func(tx *store.Tx, c clock.Command) error {
-		if kdecisions.Owns(c) {
-			return kdecisions.HandleTimer(tx, c)
-		}
-		return kitems.HandleTimer(tx, c)
-	}, nil)
-	return srv, clk, err
 }

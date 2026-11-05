@@ -29,6 +29,7 @@ func TestLayout(t *testing.T) {
 		l.Config: "/h/config.yaml", l.Ledger: "/h/ledger.db", l.Blobs: "/h/blobs",
 		l.Packs: "/h/packs", l.Sources: "/h/sources", l.Runs: "/h/runs",
 		l.RunCredentials: "/h/run-credentials", l.Logs: "/h/logs",
+		l.HostSources: "/h/sources.json", l.HostDeclarations: "/h/declarations",
 		l.RunDir("r1"): "/h/runs/r1", l.SourceDir("s1"): "/h/sources/s1", l.PackDir("p"): "/h/packs/p",
 		l.RunCredentialFile("r1"): "/h/run-credentials/r1",
 	}

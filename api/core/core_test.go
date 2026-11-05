@@ -685,3 +685,37 @@ func TestWebHandlerServesUIButNeverShadowsAPI(t *testing.T) {
 		t.Fatalf("non-GET must not reach the UI: %d", w.Code)
 	}
 }
+
+// 长轮询不会自己结束：停止时要取消它的上下文，否则挂着的渠道 ext 会让 Serve 等满超时并报错。
+func TestServeCancelsLongPollsOnShutdown(t *testing.T) {
+	entered := make(chan struct{})
+	e := setup(t, func(r *Router) {
+		r.Handle(Route{Method: "GET", Path: "/poll", Auth: AuthNone, Handler: func(w http.ResponseWriter, r *http.Request, _ *Principal) error {
+			close(entered)
+			<-r.Context().Done()
+			return r.Context().Err()
+		}})
+	})
+	l, err := Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- e.srv.Serve(ctx, l) }()
+	go func() {
+		if res, err := http.Get("http://" + l.Addr().String() + "/v1/poll"); err == nil {
+			res.Body.Close()
+		}
+	}()
+	<-entered
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve with a long poll in flight: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("long poll held up shutdown")
+	}
+}
