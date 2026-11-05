@@ -1,32 +1,147 @@
-// Package sources 是 apa 的来源命令组（附录 B.1「来源」）。目前只有 `apa source auth <id>`（设计 §4.2）：
-// 在本机启动附带拉取程序的认证模式，凭据写入来源自己的目录，内核不读。其余子命令属于后续的来源命令组。
+// Package sources 是 apa 的来源命令组（附录 B.1「来源」）：list/show/add/enable/disable、webhook create|rotate、ingests、replay，
+// 以及本机的 `apa source auth <id>`（设计 §4.2：启动附带拉取程序的认证模式，凭据写入来源自己的目录，内核不读）。
+// 除 auth 外只是内核 /v1/sources 的薄客户端：授权、校验、可执行命令只 Web（退出码 20）都由内核判定。
 package sources
 
 import (
 	"context"
+	"encoding/json"
+	"flag"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-const usageText = "usage: apa source auth <id>"
+const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--config JSON] [--enabled=false] | " +
+	"enable <id> | disable <id> | webhook create|rotate <id> | ingests <id> | replay <ingest-id> | auth <id>"
 
 func init() { client.Register("source", source) }
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
 func source(c *client.Ctx, args []string) error {
-	if len(args) == 0 || args[0] != "auth" {
-		return usage("unknown source subcommand", usageText)
+	if len(args) == 0 {
+		return usage("no source subcommand given", usageText)
 	}
-	if len(args) != 2 || strings.HasPrefix(args[1], "-") {
-		return usage("exactly one source id is required", usageText)
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "list":
+		if len(rest) != 0 {
+			return usage("list takes no arguments", usageText)
+		}
+		return call(c, "GET", "/sources", nil)
+	case "show":
+		id, err := oneID(rest, "show")
+		if err != nil {
+			return err
+		}
+		return call(c, "GET", "/sources/"+url.PathEscape(id), nil)
+	case "add":
+		body, err := addBody(rest)
+		if err != nil {
+			return err
+		}
+		return call(c, "POST", "/sources", body)
+	case "enable", "disable":
+		id, err := oneID(rest, sub)
+		if err != nil {
+			return err
+		}
+		return call(c, "PATCH", "/sources/"+url.PathEscape(id), map[string]any{"enabled": sub == "enable"})
+	case "webhook":
+		if len(rest) == 0 || (rest[0] != "create" && rest[0] != "rotate") {
+			return usage("webhook needs create or rotate", usageText)
+		}
+		id, err := oneID(rest[1:], "webhook "+rest[0])
+		if err != nil {
+			return err
+		}
+		return call(c, "POST", "/sources/"+url.PathEscape(id)+"/webhook", nil)
+	case "ingests":
+		id, err := oneID(rest, "ingests")
+		if err != nil {
+			return err
+		}
+		return call(c, "GET", "/sources/"+url.PathEscape(id)+"/ingests", nil)
+	case "replay":
+		id, err := oneID(rest, "replay")
+		if err != nil {
+			return err
+		}
+		return call(c, "POST", "/ingests/"+url.PathEscape(id)+"/replay", nil)
+	case "auth":
+		if len(rest) != 1 || strings.HasPrefix(rest[0], "-") {
+			return usage("exactly one source id is required", usageText)
+		}
+		return auth(c, rest[0])
 	}
-	return auth(c, args[1])
+	return usage("unknown source subcommand "+sub, usageText)
+}
+
+func call(c *client.Ctx, method, path string, body any) error {
+	var out any
+	if err := c.Do(context.Background(), method, path, body, &out); err != nil {
+		return err
+	}
+	return c.Print(out)
+}
+
+func oneID(args []string, sub string) (string, error) {
+	if len(args) != 1 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+		return "", usage(sub+" takes exactly one id", usageText)
+	}
+	return args[0], nil
+}
+
+// addBody 只带命令行上出现过的字段。带 --command 而没写 --type 视为自定义命令（script）：
+// 内核对 delegate 返回 web_only（20）；附带的拉取程序要显式写 --type pull。
+func addBody(args []string) (map[string]any, error) {
+	fs := flag.NewFlagSet("source add", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	body := map[string]any{}
+	str := func(flagName, key string) {
+		fs.Func(flagName, "", func(v string) error { body[key] = v; return nil })
+	}
+	str("id", "id")
+	str("type", "type")
+	str("command", "command")
+	str("schedule", "schedule")
+	str("source-type", "source_type")
+	str("credentials-path", "credentials_path")
+	str("dedupe-domain", "dedupe_domain")
+	fs.Func("timeout", "", func(v string) error {
+		n, err := strconv.Atoi(v)
+		body["timeout"] = n
+		return err
+	})
+	fs.Func("config", "", func(v string) error {
+		if !json.Valid([]byte(v)) {
+			return strconv.ErrSyntax
+		}
+		body["config"] = json.RawMessage(v)
+		return nil
+	})
+	fs.Func("enabled", "", func(v string) error {
+		b, err := strconv.ParseBool(v)
+		body["enabled"] = b
+		return err
+	})
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return nil, usage("invalid arguments for source add", usageText)
+	}
+	if body["id"] == nil {
+		return nil, usage("source add needs --id", usageText)
+	}
+	if body["type"] == nil && body["command"] != nil {
+		body["type"] = string(domain.SourceScript)
+	}
+	return body, nil
 }
 
 // auth 经 API 读来源登记（CLI 不碰存储），在本机运行 `<命令> auth <credentials_path>`，凭据写在登记的路径里（§9.2）。

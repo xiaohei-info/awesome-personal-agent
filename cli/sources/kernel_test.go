@@ -1,0 +1,315 @@
+package sources_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
+	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/webhook"
+	_ "modernc.org/sqlite"
+)
+
+type schemes struct{}
+
+func (schemes) List() []*packs.Pack {
+	return []*packs.Pack{{Name: "hooks", WebhookSchemes: []packs.WebhookScheme{
+		{ID: "shared", SignatureHeader: "X-Hook-Key", Algorithm: "token", DeliveryIDHeader: "X-Delivery"}}}}
+}
+
+type noJudge struct{}
+
+func (noJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
+	panic("judge must not be called")
+}
+
+// kernel 是真实账本、命令管线、授权与来源路由，经 httptest 暴露；CLI 经真实 HTTP 调它。
+type kernel struct {
+	t   *testing.T
+	st  *store.Store
+	au  *auth.Auth
+	wh  *webhook.Service
+	url string
+}
+
+func newKernel(t *testing.T) *kernel {
+	t.Helper()
+	reg := store.NewRegistry()
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, core.Module, registry.Module, webhook.Module,
+		projects.Module, clock.Module, items.Module, runner.Module, rules.Module, proc.Module, runidentity.Module} {
+		if err := reg.Register(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(t.TempDir(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := command.New(st, nil)
+	au := auth.New(nil)
+	if err := registry.Register(x, registry.Options{Bundled: []string{"fetch-feed"}}); err != nil {
+		t.Fatal(err)
+	}
+	wh, err := webhook.New(webhook.Options{Store: st, Exec: x, Packs: schemes{}, Auth: au, Secrets: webhook.KeyFiles{Dir: filepath.Join(t.TempDir(), "keys"), Auth: au}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(wh.Wait)
+	if err := items.Register(x, items.NewKinds()); err != nil {
+		t.Fatal(err)
+	}
+	in, err := inbound.New(inbound.Options{Store: st, Exec: x, Packs: schemes{}, Judge: noJudge{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := in.Register(x); err != nil {
+		t.Fatal(err)
+	}
+	grp, err := apisources.Mount(st, x, au, wh, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{grp}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return &kernel{t, st, au, wh, ts.URL}
+}
+
+func (k *kernel) token(kind auth.Kind) string {
+	k.t.Helper()
+	var secret string
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) (err error) {
+		_, secret, err = k.au.Issue(tx, auth.Spec{Kind: kind})
+		return
+	}); err != nil {
+		k.t.Fatal(err)
+	}
+	return secret
+}
+
+type result struct {
+	code        int
+	out, errOut string
+}
+
+func (k *kernel) apa(token string, args ...string) result {
+	k.t.Helper()
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_HOME": k.t.TempDir()}
+	var out, errb bytes.Buffer
+	code := client.Main(args, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
+		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
+	return result{code, out.String(), errb.String()}
+}
+
+func (k *kernel) events(typ string) (n int) {
+	k.t.Helper()
+	if err := k.st.View(context.Background(), func(tx *store.Tx) error {
+		es, err := eventlog.Read(tx, 0, 1000)
+		for _, en := range es {
+			if en.Event.Type == typ {
+				n++
+			}
+		}
+		return err
+	}); err != nil {
+		k.t.Fatal(err)
+	}
+	return
+}
+
+func decode(t *testing.T, r result, v any) {
+	t.Helper()
+	if r.code != 0 || json.Unmarshal([]byte(r.out), v) != nil {
+		t.Fatalf("exit %d out=%q err=%q", r.code, r.out, r.errOut)
+	}
+}
+
+// ACT-CMD-01：delegate 带自定义命令登记来源得 20 并留痕，来源未登记；ACT-CMD-05：附带拉取程序和 webhook 可登记。
+func TestAddRejectsCustomCommandAndAcceptsBundledProgram(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+
+	for _, args := range [][]string{
+		{"source", "add", "--id", "src_evil", "--command", "/tmp/acc/evil.sh", "--schedule", "15m", "--timeout", "30"},
+		{"source", "add", "--id", "src_evil", "--type", "script", "--command", "/tmp/acc/evil.sh", "--schedule", "15m", "--timeout", "30"},
+	} {
+		if r := k.apa(dlg, args...); r.code != domain.ExitWebOnly || !strings.Contains(r.errOut, `"web_only"`) {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	if k.events(domain.EvCommandRejected) < 2 {
+		t.Fatal("web_only attempts must leave command.rejected events")
+	}
+	var list struct{ Sources []domain.Source }
+	decode(t, k.apa(obs, "source", "list"), &list)
+	if len(list.Sources) != 0 {
+		t.Fatalf("rejected source was stored: %+v", list.Sources)
+	}
+
+	var feed, hook domain.Source
+	decode(t, k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60",
+		"--config", `{"url":"http://x"}`), &feed)
+	decode(t, k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &hook)
+	if feed.Command != "fetch-feed" || !feed.Enabled || hook.Type != domain.SourceWebhook || hook.SourceKind != "forge" {
+		t.Fatalf("registered: %+v %+v", feed, hook)
+	}
+	if r := k.apa(obs, "source", "add", "--id", "src_o", "--type", "webhook"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer add: %+v", r)
+	}
+	if r := k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"); r.code != domain.ExitConflict {
+		t.Fatalf("duplicate: %+v", r)
+	}
+	for _, args := range [][]string{
+		{"source", "add"}, {"source", "add", "--id", "src_a", "--timeout", "x"}, {"source", "add", "--id", "src_a", "--config", "{"},
+		{"source", "add", "--id", "src_a", "extra"},
+	} {
+		if r := k.apa(dlg, args...); r.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+}
+
+// list/show 对 observer 开放；ACT-SRC-10：disable/enable 翻转 enabled，其余字段不动。
+func TestListShowEnableDisable(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60")
+
+	var s domain.Source
+	decode(t, k.apa(dlg, "source", "disable", "src_feed"), &s)
+	if s.Enabled || s.Schedule != "15m" {
+		t.Fatalf("disable: %+v", s)
+	}
+	decode(t, k.apa(obs, "source", "show", "src_feed"), &s)
+	if s.Enabled {
+		t.Fatalf("show after disable: %+v", s)
+	}
+	decode(t, k.apa(dlg, "source", "enable", "src_feed"), &s)
+	if !s.Enabled {
+		t.Fatalf("enable: %+v", s)
+	}
+	var list struct{ Sources []domain.Source }
+	decode(t, k.apa(obs, "source", "list"), &list)
+	if len(list.Sources) != 1 || list.Sources[0].ID != "src_feed" {
+		t.Fatalf("list: %+v", list)
+	}
+	if r := k.apa(obs, "source", "disable", "src_feed"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer disable: %+v", r)
+	}
+	for _, args := range [][]string{{"source", "show", "src_none"}, {"source", "enable", "src_none"}} {
+		if r := k.apa(dlg, args...); r.code != domain.ExitNotFound {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	for _, args := range [][]string{{"source", "show"}, {"source", "list", "x"}, {"source", "enable", "a", "b"}, {"source", "disable"}} {
+		if r := k.apa(dlg, args...); r.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+}
+
+// ACT-HOOK-01：create 返回 URL 与只显示一次的密钥并记 Event，observer 得 4；ACT-HOOK-11：rotate 换密钥，并存期内新旧都收，之后旧的失效。
+// ingests 展示原始 payload 与状态；ACT-HOOK-10：replay 重放同一条入站记录，代数加一并记 Event。
+func TestWebhookCreateRotateIngestsReplay(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--config", `{"scheme":"shared"}`)
+
+	if r := k.apa(obs, "source", "webhook", "create", "src_hook"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer create: %+v", r)
+	}
+	var k1 struct {
+		Secret, URL string
+		Rotated     bool
+	}
+	decode(t, k.apa(dlg, "source", "webhook", "create", "src_hook"), &k1)
+	if !strings.HasPrefix(k1.Secret, "apa_whk_") || k1.URL != "/ingest/src_hook" || k1.Rotated || k.events("source.webhook_key_created") != 1 {
+		t.Fatalf("create: %+v", k1)
+	}
+	recv := func(key, delivery string) int {
+		return k.wh.Receive(context.Background(), webhook.Request{SourceID: "src_hook",
+			Header: map[string]string{"X-Hook-Key": key, "X-Delivery": delivery}, Body: []byte(`{"n":1}`)}).Status
+	}
+	if recv(k1.Secret, "d1") != 200 {
+		t.Fatal("receive with created key")
+	}
+	k.wh.Wait()
+
+	var k2 struct {
+		Secret  string
+		Rotated bool
+	}
+	decode(t, k.apa(dlg, "source", "webhook", "rotate", "src_hook"), &k2)
+	if !k2.Rotated || k2.Secret == k1.Secret || k.events("source.webhook_key_rotated") != 1 {
+		t.Fatalf("rotate: %+v", k2)
+	}
+	if recv(k1.Secret, "d2") != 200 || recv(k2.Secret, "d3") != 200 {
+		t.Fatal("old and new key must both be accepted within the grace period")
+	}
+	k.wh.Wait()
+
+	var ing struct {
+		Ingests []struct {
+			ID, Body string
+			Gen      int
+		}
+	}
+	decode(t, k.apa(obs, "source", "ingests", "src_hook"), &ing)
+	if len(ing.Ingests) != 3 || ing.Ingests[0].Body != `{"n":1}` {
+		t.Fatalf("ingests: %+v", ing)
+	}
+	if r := k.apa(obs, "source", "replay", ing.Ingests[0].ID); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer replay: %+v", r)
+	}
+	var rp struct {
+		ID  string
+		Gen int
+	}
+	decode(t, k.apa(dlg, "source", "replay", ing.Ingests[0].ID), &rp)
+	if rp.ID != ing.Ingests[0].ID || rp.Gen != ing.Ingests[0].Gen+1 || k.events("source.replay_requested") != 1 {
+		t.Fatalf("replay: %+v", rp)
+	}
+	k.wh.Wait()
+	for _, args := range [][]string{{"source", "replay", "ing_none"}, {"source", "ingests", "src_none"}, {"source", "webhook", "create", "src_none"}} {
+		if r := k.apa(dlg, args...); r.code != domain.ExitNotFound {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60")
+	if r := k.apa(dlg, "source", "webhook", "create", "src_feed"); r.code != domain.ExitUsage {
+		t.Fatalf("webhook key for pull source: %+v", r)
+	}
+	for _, args := range [][]string{{"source", "webhook"}, {"source", "webhook", "bogus", "src_hook"}, {"source", "webhook", "create"}, {"source", "ingests"}, {"source", "replay"}} {
+		if r := k.apa(dlg, args...); r.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+}
