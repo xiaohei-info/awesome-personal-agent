@@ -103,6 +103,12 @@ func TestContainerSampleRunsNonRootServeOnHostLoopback(t *testing.T) {
 	d := read(t, "container/Dockerfile")
 	has(t, "Dockerfile", d, "go build -o /out/apa ./cli/apa", "distroless/static-debian12:nonroot", "ENV APA_HOME=/data", `CMD ["serve"]`,
 		"--chown=65532:65532 /data", "docker run -d --network host")
+	// Web 前端经 go:embed 进二进制：npm 构建必须先于 go build，且产物拷入 go 构建阶段。
+	npm, gob := strings.Index(d, "npm run build"), strings.Index(d, "go build")
+	if npm < 0 || gob < 0 || npm > gob {
+		t.Error("Dockerfile 必须在 go build 之前构建 Web 前端")
+	}
+	has(t, "Dockerfile", d, "COPY --from=web /src/web/dist ./web/dist")
 	for _, bad := range []string{"EXPOSE", " -p ", "0.0.0.0"} {
 		if strings.Contains(d, bad) {
 			t.Errorf("容器样例不得发布端口或监听非回环（%q）：端口发布会让 apa 看不到回环来源", bad)
