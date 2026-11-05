@@ -1,0 +1,115 @@
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { ApiError } from "../../app/api";
+import { useSession } from "../../app/session";
+
+// 形状对应 GET /v1/items?kind=brief（spec.period、spec.sections[{project,body}]）、GET/POST /v1/instances、GET /v1/packs（附录 B.2、C.10）。
+// 简报与复盘都是 brief 事项，复盘以 spec.period 的 `-review` 后缀区分（packs/review）；分节与定时校验都由服务端与包负责，本页只展示并搬运输入。
+interface Section { project: string; body: string }
+interface Brief { id: string; title: string; created_at?: string; spec?: { period?: string; sections?: Section[] } }
+interface Instance { id: string; pack: string; params: { schedule?: string; projects?: string[] }; enabled: boolean }
+interface Pack { name: string }
+
+const BRIEF_PACKS = ["brief", "review"]; // 产出 brief 事项的内置包
+const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
+const isReview = (b: Brief) => !!b.spec?.period?.endsWith("-review");
+
+function BriefCard({ b }: { b: Brief }) {
+  const sections = b.spec?.sections ?? [];
+  return (
+    <article aria-label={`简报 ${b.title}`}>
+      <h4>{b.title}</h4>
+      <p>{[b.spec?.period, b.created_at && new Date(b.created_at).toLocaleString()].filter(Boolean).join(" · ")}</p>
+      {!sections.length && <p>暂无分节内容</p>}
+      {sections.map((s, i) => (
+        <section key={i}>
+          <h5>{s.project}</h5>
+          <p>{s.body}</p>
+        </section>
+      ))}
+    </article>
+  );
+}
+
+export function BriefsPage() {
+  const { api } = useSession();
+  const [briefs, setBriefs] = useState<Brief[] | null>(null);
+  const [instances, setInstances] = useState<Instance[] | null>(null);
+  const [packs, setPacks] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [pack, setPack] = useState("");
+  const [schedule, setSchedule] = useState("");
+  const [projects, setProjects] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const [b, i, p] = await Promise.all([
+        api.get<{ items: Brief[] }>("/items?kind=brief"),
+        api.get<{ instances: Instance[] }>("/instances"),
+        api.get<{ packs: Pack[] }>("/packs"),
+      ]);
+      setBriefs(b.items);
+      setInstances(i.instances.filter((x) => BRIEF_PACKS.includes(x.pack)));
+      setPacks(p.packs.map((x) => x.name).filter((n) => BRIEF_PACKS.includes(n)));
+      setError(null);
+    } catch (e) {
+      setError(msg(e));
+    }
+  }, [api]);
+  useEffect(() => { void load(); }, [load]);
+
+  async function create(e: FormEvent) {
+    e.preventDefault();
+    if (!schedule.trim()) return setError("请填写定时");
+    const list = projects.split(",").map((s) => s.trim()).filter(Boolean);
+    try {
+      const created = await api.post<Instance>("/instances", {
+        pack: pack || packs[0],
+        params: { schedule: schedule.trim(), ...(list.length ? { projects: list } : {}) },
+      });
+      setInstances((l) => [...(l ?? []), created]);
+      setSchedule("");
+      setProjects("");
+      setError(null);
+    } catch (err) {
+      setError(msg(err));
+    }
+  }
+
+  if (!briefs || !instances) return error ? <p role="alert">{error}</p> : <p>加载中…</p>;
+  const reviews = briefs.filter(isReview);
+  const plain = briefs.filter((b) => !isReview(b));
+
+  return (
+    <main>
+      <h2>简报</h2>
+      {error && <p role="alert">{error}</p>}
+      {!briefs.length && <p>还没有简报</p>}
+      <section aria-label="简报">
+        <h3>简报</h3>
+        {plain.map((b) => <BriefCard key={b.id} b={b} />)}
+      </section>
+      <section aria-label="复盘">
+        <h3>复盘</h3>
+        {reviews.map((b) => <BriefCard key={b.id} b={b} />)}
+      </section>
+      <section aria-label="实例管理">
+        <h3>定时实例</h3>
+        <ul aria-label="实例">
+          {instances.map((i) => (
+            <li key={i.id}>{i.id} · {i.pack} · {i.params.schedule ?? "—"}{i.params.projects?.length ? ` · ${i.params.projects.join("、")}` : ""}{i.enabled ? "" : "（已停用）"}</li>
+          ))}
+        </ul>
+        <form onSubmit={(e) => void create(e)}>
+          <label>能力包
+            <select value={pack || packs[0] || ""} onChange={(e) => setPack(e.target.value)}>
+              {packs.map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </label>
+          <label>定时<input value={schedule} onChange={(e) => setSchedule(e.target.value)} placeholder="0 8 * * 1-5" /></label>
+          <label>项目（逗号分隔，可空）<input value={projects} onChange={(e) => setProjects(e.target.value)} /></label>
+          <button type="submit" disabled={!packs.length}>创建实例</button>
+        </form>
+      </section>
+    </main>
+  );
+}
