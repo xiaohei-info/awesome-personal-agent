@@ -107,6 +107,9 @@ type AskInput struct {
 	ResumeNote       string      `json:"resume_note,omitempty"`
 }
 
+// RiskClassWebOnly 是 web_only 初筛升级后写入 risk_class 的值（§14.4）；authz.WebOnly 认它。
+const RiskClassWebOnly = "web_only"
+
 // AskKernelState 只由内核维护，调用方不可写、API 输入类型不含这些字段。
 type AskKernelState struct {
 	RiskClass        string `json:"risk_class,omitempty"`        // 策略判定，只读
