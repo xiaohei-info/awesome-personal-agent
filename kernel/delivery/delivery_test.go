@@ -303,6 +303,9 @@ func TestSweepUnclaimedAndAbandonedFallBackToWeb(t *testing.T) {
 	e.create("abandoned", "i1", ch, 1)
 	e.create("never", "i2", "channel:dead", 1)
 	e.create("delivered", "i3", ch, 1)
+	e.create("failedonce", "i4", "channel:gone", 1) // 失败一次后 ext 再不回来
+	e.claim("channel:gone")
+	e.fail("failedonce", 1)
 	e.claim(ch) // abandoned：之后反复领取不回报
 	e.claim(ch) // delivered
 	e.ack("delivered", 1, "m")
@@ -314,20 +317,20 @@ func TestSweepUnclaimedAndAbandonedFallBackToWeb(t *testing.T) {
 		}
 		e.claim(ch)
 	}
-	e.now = e.now.Add(2 * time.Minute)
+	e.now = e.now.Add(3 * time.Minute)
 	e.update(func(tx *store.Tx) error {
-		if n, err := e.q.Sweep(tx); n != 2 || err != nil {
+		if n, err := e.q.Sweep(tx); n != 3 || err != nil {
 			t.Fatalf("n=%d err=%v", n, err)
 		}
 		return nil
 	})
-	if e.get("abandoned").State != domain.DeliveryFallbackWeb || e.get("never").State != domain.DeliveryFallbackWeb ||
+	if e.get("abandoned").State != domain.DeliveryFallbackWeb || e.get("never").State != domain.DeliveryFallbackWeb || e.get("failedonce").State != domain.DeliveryFallbackWeb ||
 		e.get("delivered").State != domain.DeliveryDelivered {
 		t.Fatalf("%s %s %s", e.get("abandoned").State, e.get("never").State, e.get("delivered").State)
 	}
 	var unread []domain.Delivery
 	e.view(func(tx *store.Tx) (err error) { unread, err = e.q.Unread(tx); return })
-	if len(unread) != 2 {
+	if len(unread) != 3 {
 		t.Fatalf("Web 未读: %+v", unread)
 	}
 }

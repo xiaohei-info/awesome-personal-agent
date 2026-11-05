@@ -346,13 +346,13 @@ func (q *Queue) Supersede(tx *store.Tx, item string, below int64) (int64, error)
 		WHERE item = ? AND version < ? AND state IN ('pending', 'claimed', 'delivered')`, item, below)
 }
 
-// Sweep 把创建超过 UnclaimedAfter 仍未送达的投递转 fallback_web，返回条数：
-// 从未被领取的 pending，以及领取后租约过期仍不回报的 claimed（消费者崩溃）。
+// Sweep 把可领已超过 UnclaimedAfter 仍无人领取的投递转 fallback_web，返回条数：
+// pending 的可领时间（新建为创建时间，失败后为退避到期时间）已过期太久，
+// 以及领取后租约过期仍不回报的 claimed（消费者崩溃）。
 func (q *Queue) Sweep(tx *store.Tx) (int64, error) {
-	now := ns(q.o.Now())
 	return tx.Exec(`UPDATE delivery_delivery SET state = 'fallback_web', next_attempt_at = 0, lease_until = 0
-		WHERE created_at <= ? AND ((state = 'pending' AND claims = 0) OR (state = 'claimed' AND lease_until <= ?))`,
-		ns(q.o.Now().Add(-q.o.UnclaimedAfter)), now)
+		WHERE (state = 'pending' AND next_attempt_at <= ?) OR (state = 'claimed' AND lease_until <= ? AND created_at <= ?)`,
+		ns(q.o.Now().Add(-q.o.UnclaimedAfter)), ns(q.o.Now()), ns(q.o.Now().Add(-q.o.UnclaimedAfter)))
 }
 
 // Inject 记录注入到某会话，只写 injections、不改状态；同一会话重复注入幂等。已作废或已确认的投递不可再注入。
