@@ -8,6 +8,7 @@
 package rss
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -36,6 +37,8 @@ const (
 	maxSummary     = 400
 	maxDetail      = 1500
 	maxBody        = 10 << 20
+	outputBudget   = 40 << 10 // 低于调用器保留的 64KB 并留足余量
+	maxShort       = 300      // id、subject、link、sender 的长度上限
 	fetchTimeout   = 30 * time.Second
 	epoch          = "1970-01-01T00:00:00Z"
 	timeLayoutOut  = time.RFC3339
@@ -90,14 +93,13 @@ func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		return ExitTransient
 	}
-	enc := json.NewEncoder(stdout)
 	for _, l := range lines {
-		_ = enc.Encode(l)
+		_, _ = stdout.Write(l)
 	}
 	return ExitOK
 }
 
-func pull(ctx context.Context, stdin io.Reader) ([]any, error) {
+func pull(ctx context.Context, stdin io.Reader) ([][]byte, error) {
 	var in Input
 	if err := json.NewDecoder(stdin).Decode(&in); err != nil {
 		return nil, fail(ExitBadConfig, "stdin 不是合法的 JSON: %v", err)
@@ -122,42 +124,114 @@ func pull(ctx context.Context, stdin io.Reader) ([]any, error) {
 		return nil, fail(ExitTransient, "订阅内容不是合法的 RSS/Atom: %v", err)
 	}
 
-	cursor := epoch
-	var since time.Time
-	if t, err := time.Parse(time.RFC3339, in.Cursor); err == nil { // 坏游标当作没有：重发由内核去重兜底
-		since, cursor = t.UTC(), t.UTC().Format(timeLayoutOut)
-	}
-	picked := selectNew(entries, since, max)
-	out := make([]any, 0, len(picked)+1)
+	cur := parseCursor(in.Cursor)
+	picked := selectNew(entries, cur, max)
+
+	// 调用器只保留 stdout 末 64KB，超出会丢事件且游标卡死：按已编码字节累加，到预算即停，
+	// 游标只反映已输出的条目，余下的下一轮继续。
+	var out [][]byte
+	used := 0
+	next := cur
 	for _, e := range picked {
-		out = append(out, e.event)
-		if e.dated && e.at.UTC().Format(timeLayoutOut) > cursor {
-			cursor = e.at.UTC().Format(timeLayoutOut)
+		line, err := encode(e.event)
+		if err != nil {
+			return nil, fail(ExitTransient, "编码事件失败: %v", err)
+		}
+		if used+len(line) > outputBudget && len(out) > 0 {
+			break
+		}
+		used += len(line)
+		out = append(out, line)
+		if e.dated {
+			next = next.advance(e)
 		}
 	}
-	return append(out, map[string]string{"cursor": cursor}), nil
+	cl, err := encode(map[string]string{"cursor": next.String()})
+	if err != nil {
+		return nil, fail(ExitTransient, "编码游标失败: %v", err)
+	}
+	return append(out, cl), nil
 }
 
-// selectNew 取游标之后的条目，按时间从旧到新，至多 max 个；
-// 同一时刻的条目整组发出，否则严格大于游标的下一轮会漏掉被截掉的同刻条目。
+func encode(v any) ([]byte, error) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false) // 不把 < > & 展开成 \u00XX，省字节
+	err := enc.Encode(v)
+	return b.Bytes(), err
+}
+
+// cursor 是已处理到的发布时间 T 加上 T 时刻已输出的 id：
+// 同一时刻的条目被预算或条数截断时，下一轮靠 seen 续上，不会漏也不会卡死。
+type cursor struct {
+	T    time.Time
+	Seen []string
+}
+
+func parseCursor(s string) cursor {
+	var j struct {
+		T    string   `json:"t"`
+		Seen []string `json:"seen"`
+	}
+	if json.Unmarshal([]byte(s), &j) == nil && j.T != "" {
+		if t, err := time.Parse(time.RFC3339, j.T); err == nil {
+			return cursor{t.UTC(), j.Seen}
+		}
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil { // 纯时间戳也接受
+		return cursor{T: t.UTC()}
+	}
+	return cursor{} // 空或坏游标当作没有：重发由内核去重兜底
+}
+
+func (c cursor) String() string {
+	if len(c.Seen) == 0 {
+		if c.T.IsZero() {
+			return epoch
+		}
+		return c.T.Format(timeLayoutOut)
+	}
+	b, _ := json.Marshal(map[string]any{"t": c.T.Format(timeLayoutOut), "seen": c.Seen})
+	return string(b)
+}
+
+func (c cursor) has(e entry) bool {
+	if !e.at.Equal(c.T) {
+		return false
+	}
+	for _, id := range c.Seen {
+		if id == e.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func (c cursor) advance(e entry) cursor {
+	switch {
+	case e.at.After(c.T):
+		return cursor{e.at, []string{e.ID}}
+	case e.at.Equal(c.T):
+		return cursor{c.T, append(append([]string(nil), c.Seen...), e.ID)}
+	}
+	return c
+}
+
+// selectNew 取游标之后的条目（晚于 T，或等于 T 且 id 不在 seen 里），按时间从旧到新，至多 max 个。
 // 无日期的条目每次都发（稳定 id 交给内核去重），不参与游标。
-func selectNew(all []entry, since time.Time, max int) []entry {
+func selectNew(all []entry, c cursor, max int) []entry {
 	var undated, dated []entry
 	for _, e := range all {
 		switch {
 		case !e.dated:
 			undated = append(undated, e)
-		case e.at.After(since):
+		case e.at.After(c.T) || (e.at.Equal(c.T) && !c.has(e)):
 			dated = append(dated, e)
 		}
 	}
 	sort.SliceStable(dated, func(i, j int) bool { return dated[i].at.Before(dated[j].at) })
 	if len(dated) > max {
-		cut := max
-		for cut < len(dated) && dated[cut].at.Equal(dated[cut-1].at) {
-			cut++
-		}
-		dated = dated[:cut]
+		dated = dated[:max]
 	}
 	if len(undated) > max {
 		undated = undated[:max]
@@ -238,7 +312,7 @@ func parseFeed(b []byte) ([]entry, error) {
 	switch root {
 	case "rss":
 		var d rssDoc
-		if err := xml.Unmarshal(b, &d); err != nil {
+		if err := newDecoder(b).Decode(&d); err != nil {
 			return nil, err
 		}
 		var out []entry
@@ -250,7 +324,7 @@ func parseFeed(b []byte) ([]entry, error) {
 		return compact(out), nil
 	case "feed":
 		var d atomDoc
-		if err := xml.Unmarshal(b, &d); err != nil {
+		if err := newDecoder(b).Decode(&d); err != nil {
 			return nil, err
 		}
 		var out []entry
@@ -269,8 +343,44 @@ func parseFeed(b []byte) ([]entry, error) {
 	return nil, fmt.Errorf("根元素 %q 不是 rss 或 feed", root)
 }
 
+// newDecoder 对真实订阅放宽：不严格（容忍裸 & 等）、识别 &nbsp; 等 HTML 实体、
+// 支持常见单字节字符集。shortcut: 只认 UTF-8/ASCII/ISO-8859-1/windows-1252，其余编码按非法订阅处理；需要 CJK 编码时改用 x/net/html/charset 或 gofeed。
+func newDecoder(b []byte) *xml.Decoder {
+	d := xml.NewDecoder(bytes.NewReader(b))
+	d.Strict = false
+	d.Entity = xml.HTMLEntity
+	d.CharsetReader = charsetReader
+	return d
+}
+
+// cp1252 的 0x80–0x9F 与 ISO-8859-1 不同，其余字节与 Unicode 码点一致。
+var cp1252 = [32]rune{0x20AC, 0x81, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D, 0x017D, 0x8F,
+	0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D, 0x017E, 0x0178}
+
+func charsetReader(label string, r io.Reader) (io.Reader, error) {
+	switch strings.ToLower(strings.TrimSpace(label)) {
+	case "utf-8", "utf8", "us-ascii", "ascii":
+		return r, nil
+	case "iso-8859-1", "latin1", "iso8859-1", "windows-1252", "cp1252":
+		raw, err := io.ReadAll(r)
+		if err != nil {
+			return nil, err
+		}
+		var sb strings.Builder
+		for _, c := range raw {
+			if c >= 0x80 && c < 0xA0 {
+				sb.WriteRune(cp1252[c-0x80])
+			} else {
+				sb.WriteRune(rune(c))
+			}
+		}
+		return strings.NewReader(sb.String()), nil
+	}
+	return nil, fmt.Errorf("不支持的字符集 %q", label)
+}
+
 func rootName(b []byte) (string, error) {
-	d := xml.NewDecoder(strings.NewReader(string(b)))
+	d := newDecoder(b)
 	for {
 		tok, err := d.Token()
 		if err != nil {
@@ -284,11 +394,11 @@ func rootName(b []byte) (string, error) {
 
 func build(id, title, summary, detail, link, sender, date string) entry {
 	e := entry{event: event{
-		ID: strings.TrimSpace(id), Type: EventType,
-		Subject: first(strings.TrimSpace(title), strings.TrimSpace(link), strings.TrimSpace(id)),
+		ID: clipID(strings.TrimSpace(id)), Type: EventType,
+		Subject: clip(first(strings.TrimSpace(title), strings.TrimSpace(link), strings.TrimSpace(id)), maxShort),
 		Summary: clip(strings.TrimSpace(summary), maxSummary),
 		Detail:  clip(strings.TrimSpace(detail), maxDetail),
-		Link:    strings.TrimSpace(link), Sender: strings.TrimSpace(sender),
+		Link:    clipID(strings.TrimSpace(link)), Sender: clip(strings.TrimSpace(sender), maxShort),
 	}}
 	if t, ok := parseDate(date); ok {
 		e.at, e.dated = t.UTC(), true
@@ -338,6 +448,14 @@ func first(vs ...string) string {
 func clip(s string, n int) string {
 	if r := []rune(s); len(r) > n {
 		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+// clipID 截断过长的 id/link；截断是确定的，所以 id 仍然稳定。
+func clipID(s string) string {
+	if r := []rune(s); len(r) > maxShort {
+		return string(r[:maxShort])
 	}
 	return s
 }

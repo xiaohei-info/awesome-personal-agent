@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,6 +62,12 @@ func call(t *testing.T, in map[string]any) result {
 	return r
 }
 
+// cur 构造期望的游标字符串（与实现同样的编码）。
+func cur(t string, seen ...string) string {
+	b, _ := json.Marshal(map[string]any{"t": t, "seen": seen})
+	return string(b)
+}
+
 func in(url, cursor string, cfg map[string]any) map[string]any {
 	if cfg == nil {
 		cfg = map[string]any{}
@@ -81,19 +88,19 @@ func TestRSSFirstRunEmitsAllOldestFirstAndAdvancesCursor(t *testing.T) {
 		e["type"] != "feed.entry" || e["occurred_at"] != "2023-01-03T15:04:05Z" {
 		t.Fatalf("事件映射不对: %v", e)
 	}
-	if r.cursor != "2023-01-03T15:04:05Z" {
+	if r.cursor != cur("2023-01-03T15:04:05Z", "g-2") {
 		t.Fatalf("cursor=%q", r.cursor)
 	}
 }
 
 func TestOnlyNewEntriesAfterCursor(t *testing.T) {
 	s := serve(t, 200, rssFeed)
-	r := call(t, in(s.URL, "2023-01-02T15:04:05Z", nil))
-	if r.code != 0 || len(r.events) != 1 || r.events[0]["id"] != "g-2" || r.cursor != "2023-01-03T15:04:05Z" {
+	r := call(t, in(s.URL, "2023-01-02T20:00:00Z", nil))
+	if r.code != 0 || len(r.events) != 1 || r.events[0]["id"] != "g-2" || r.cursor != cur("2023-01-03T15:04:05Z", "g-2") {
 		t.Fatalf("code=%d out=%s", r.code, r.stdout)
 	}
-	r = call(t, in(s.URL, "2023-01-03T15:04:05Z", nil))
-	if r.code != 0 || len(r.events) != 0 || r.cursor != "2023-01-03T15:04:05Z" {
+	r = call(t, in(s.URL, r.cursor, nil))
+	if r.code != 0 || len(r.events) != 0 || r.cursor != cur("2023-01-03T15:04:05Z", "g-2") {
 		t.Fatalf("没有新条目时游标应保持: %d %s", r.code, r.stdout)
 	}
 }
@@ -109,7 +116,7 @@ func TestAtomMapping(t *testing.T) {
 		a1["sender"] != "bob" || a1["occurred_at"] != "2023-02-01T10:00:00Z" {
 		t.Fatalf("atom 映射不对: %v", a1)
 	}
-	if a2["occurred_at"] != "2023-02-03T10:00:00Z" || r.cursor != "2023-02-03T10:00:00Z" {
+	if a2["occurred_at"] != "2023-02-03T10:00:00Z" || r.cursor != cur("2023-02-03T10:00:00Z", "urn:a2") {
 		t.Fatalf("a2=%v cursor=%s", a2, r.cursor)
 	}
 }
@@ -117,23 +124,69 @@ func TestAtomMapping(t *testing.T) {
 func TestMaxItemsCapsOldestFirstWithoutSkipping(t *testing.T) {
 	s := serve(t, 200, rssFeed)
 	r := call(t, in(s.URL, "", map[string]any{"max_items": 1}))
-	if r.code != 0 || len(r.events) != 1 || r.events[0]["id"] != "g-1" || r.cursor != "2023-01-02T15:04:05Z" {
+	if r.code != 0 || len(r.events) != 1 || r.events[0]["id"] != "g-1" || r.cursor != cur("2023-01-02T15:04:05Z", "g-1") {
 		t.Fatalf("code=%d out=%s", r.code, r.stdout)
 	}
 	r = call(t, in(s.URL, r.cursor, map[string]any{"max_items": 1})) // 下一轮取到被截掉的条目
-	if len(r.events) != 1 || r.events[0]["id"] != "g-2" || r.cursor != "2023-01-03T15:04:05Z" {
+	if len(r.events) != 1 || r.events[0]["id"] != "g-2" || r.cursor != cur("2023-01-03T15:04:05Z", "g-2") {
 		t.Fatalf("out=%s", r.stdout)
 	}
 }
 
-func TestCapNeverSplitsEntriesSharingATimestamp(t *testing.T) {
+func TestCapSplittingSameTimestampGroupLosesNothing(t *testing.T) {
 	item := func(g string) string {
 		return `<item><guid>` + g + `</guid><title>t</title><pubDate>Tue, 03 Jan 2023 15:04:05 +0000</pubDate></item>`
 	}
 	s := serve(t, 200, `<rss version="2.0"><channel>`+item("a")+item("b")+item("c")+`</channel></rss>`)
-	r := call(t, in(s.URL, "", map[string]any{"max_items": 1}))
-	if len(r.events) != 3 { // 同时刻整组发出，否则严格大于游标的下一轮会漏掉 b、c
-		t.Fatalf("out=%s", r.stdout)
+	c, got := "", map[string]int{}
+	for i := 0; i < 4; i++ {
+		r := call(t, in(s.URL, c, map[string]any{"max_items": 1}))
+		for _, e := range r.events {
+			got[e["id"].(string)]++
+		}
+		c = r.cursor
+	}
+	if len(got) != 3 || got["a"] != 1 || got["b"] != 1 || got["c"] != 1 {
+		t.Fatalf("每条恰好一次: %v", got)
+	}
+}
+
+func TestOutputStaysUnderRunnerRetainedLimitAndResumes(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`<rss version="2.0"><channel>`)
+	for i := 0; i < 60; i++ {
+		sb.WriteString(fmt.Sprintf(`<item><guid>g%02d</guid><title>%s</title><link>https://e.com/%d?a=1&amp;b=2</link><pubDate>Tue, 03 Jan 2023 15:%02d:05 +0000</pubDate><description>%s</description></item>`,
+			i, strings.Repeat("标", 250), i, i, strings.Repeat("<p>x</p>", 400)))
+	}
+	sb.WriteString(`</channel></rss>`)
+	s := serve(t, 200, sb.String())
+	seen, c := map[string]bool{}, ""
+	for i := 0; i < 30 && len(seen) < 60; i++ {
+		r := call(t, in(s.URL, c, map[string]any{"max_items": 200}))
+		if r.code != 0 || len(r.stdout) >= 64<<10 || len(r.events) == 0 {
+			t.Fatalf("round %d code=%d bytes=%d events=%d", i, r.code, len(r.stdout), len(r.events))
+		}
+		for _, e := range r.events {
+			seen[e["id"].(string)] = true
+		}
+		c = r.cursor
+	}
+	if len(seen) != 60 {
+		t.Fatalf("多轮后应取全: %d", len(seen))
+	}
+}
+
+func TestRealWorldFeedQuirks(t *testing.T) {
+	// ISO-8859-1 声明 + &nbsp; 实体 + 裸 &
+	body := "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><rss version=\"2.0\"><channel><item><guid>q</guid><title>caf\xe9 &nbsp;R&D & co</title><pubDate>Tue, 03 Jan 2023 15:04:05 +0000</pubDate></item></channel></rss>"
+	s := serve(t, 200, body)
+	r := call(t, in(s.URL, "", nil))
+	if r.code != 0 || len(r.events) != 1 || r.events[0]["subject"] != "café \u00a0R&D & co" {
+		t.Fatalf("code=%d out=%q", r.code, r.stdout)
+	}
+	s2 := serve(t, 200, "<?xml version=\"1.0\" encoding=\"Shift_JIS\"?><rss><channel/></rss>")
+	if r := call(t, in(s2.URL, "c", nil)); r.code != ExitTransient || r.stdout != "" {
+		t.Fatalf("不支持的字符集应失败且游标不动: %d %q", r.code, r.stdout)
 	}
 }
 
