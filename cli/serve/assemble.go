@@ -13,6 +13,7 @@ import (
 	"time"
 
 	apicapture "github.com/xiaohei-info/awesome-personal-agent/api/capture"
+	apichannel "github.com/xiaohei-info/awesome-personal-agent/api/channel"
 	apicontext "github.com/xiaohei-info/awesome-personal-agent/api/context"
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apidecisions "github.com/xiaohei-info/awesome-personal-agent/api/decisions"
@@ -37,6 +38,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
+	kchannel "github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
@@ -207,6 +209,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err := errors.Join(
 		kitems.Register(x, kinds),
 		kdecisions.RegisterWith(x, scr),
+		kchannel.Register(x, kchannel.Options{Queue: q}),
 		kprojects.Register(x),
 		executors.Register(x, executors.Options{Owner: owner, Project: kprojects.Get}),
 		delegation.Register(x, delegation.Options{Owner: owner, OnError: func(c command.Commit, err error) {
@@ -240,7 +243,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Groups: []core.RouteGroup{
 		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds,
-		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0),
+		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st), apievents.Routes(st, 0),
 		apiexec.Routes(st, x), sources, apiwhy.Routes(st), apimaterials.Routes(st, x, hs)}}); err != nil {
 		return nil, err
