@@ -242,6 +242,11 @@ func (r *Runner) Tick(ctx context.Context, c *clock.Clock) error {
 	return tickErr
 }
 
+// Owns 判断时钟交来的命令是否归本模块；组装处据它在处理器间分派。
+func (r *Runner) Owns(c clock.Command) bool {
+	return c.Kind == domain.TimerRecur && strings.HasPrefix(c.TimerID, timerPrefix)
+}
+
 // HandleTimer 处理来源的定时到期：在时钟的事务里把拉取入队。时钟只有一个处理器，
 // 装配处把它放在处理器链里；不是来源节拍的命令原样忽略。
 func (r *Runner) HandleTimer(tx *store.Tx, c clock.Command) error {

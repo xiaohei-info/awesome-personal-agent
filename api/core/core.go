@@ -360,9 +360,15 @@ func Listen(addr string) (net.Listener, error) {
 	return net.Listen("tcp", listenAddr(addr))
 }
 
+// shutdownGrace 是停止时留给在途请求自然结束的时间；之后取消请求上下文，让长轮询退出，不拖住关闭。
+const shutdownGrace = 2 * time.Second
+
 // Serve 在 l 上服务，ctx 取消后优雅关闭（最多等 10 秒）并返回 nil。
 func (s *Server) Serve(ctx context.Context, l net.Listener) error {
-	srv := &http.Server{Handler: s.handler, ReadHeaderTimeout: 10 * time.Second}
+	base, stop := context.WithCancel(context.Background())
+	defer stop()
+	srv := &http.Server{Handler: s.handler, ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(net.Listener) context.Context { return base }}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(l) }()
 	select {
@@ -372,6 +378,7 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 	}
 	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	defer time.AfterFunc(shutdownGrace, stop).Stop()
 	if err := srv.Shutdown(sctx); err != nil {
 		return err
 	}
