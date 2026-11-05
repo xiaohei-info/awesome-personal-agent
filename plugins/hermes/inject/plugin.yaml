@@ -1,0 +1,7 @@
+name: apa-inject
+version: 0.1.0
+description: "APA: session-start and pre-message context injection (apa context --format inject) via pre_llm_call."
+author: awesome-personal-agent
+provides_hooks:
+  - pre_llm_call
+  - post_compaction
