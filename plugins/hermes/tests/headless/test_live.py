@@ -76,6 +76,14 @@ def kernel():
     srv.shutdown()
 
 
+def _transcript(argv, rc, lines):
+    """APA_LIVE_TRANSCRIPT=<file>: append argv, exit code and the stream-json result line for a reviewer without Hermes."""
+    path = os.environ.get("APA_LIVE_TRANSCRIPT")
+    if path:
+        with open(path, "a") as f:
+            f.write(json.dumps({"argv": argv, "exit": rc, "last_stdout_line": lines[-1] if lines else None}, ensure_ascii=False) + "\n")
+
+
 @pytest.fixture
 def run_hermes(apa_bin, kernel):
     home = pathlib.Path(tempfile.mkdtemp())
@@ -100,6 +108,7 @@ def run_hermes(apa_bin, kernel):
         argv = kernel_argv(decl, prompt, tier, session_id)
         p = subprocess.run(argv, cwd=work, env=env, capture_output=True, text=True, timeout=280)
         lines = p.stdout.strip().splitlines()
+        _transcript(argv, p.returncode, lines)
         return p.returncode, json.loads(lines[-1]), p.stdout
 
     yield run
@@ -128,12 +137,14 @@ def test_flow_bg_main_session_and_resume_headless_run_delegates_asks_and_resumes
     assert "run_live1" in result["text"]
 
     # ACT-RES-02: --resume keeps the same session and the runner still remembers the earlier turn
+    _transcript(["kernel_request_log"], 0, [json.dumps([{**r, "auth": "<redacted>" if r["auth"] else None} for r in kernel["log"]])])
     kernel["log"].clear()
     rc2, result2, _ = run_hermes(
         "The owner answered yes. Call apa_report with id=child1 outcome=done summary=ok, then reply with the parent item id you used earlier.",
         session_id=sid)
     assert rc2 == 0 and result2["session_id"] == sid and "P1" in result2["text"]
     (rep,) = [r for r in kernel["log"] if r["path"] == "/v1/items/child1/report"]
+    _transcript(["kernel_request_log"], 0, [json.dumps([{**r, "auth": "<redacted>" if r["auth"] else None} for r in kernel["log"]])])
     assert rep["session"] == sid and rep["auth"] == "Bearer run-credential-xyz" and rep["body"]["outcome"] == "done"
 
 

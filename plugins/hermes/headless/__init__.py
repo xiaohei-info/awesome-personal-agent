@@ -22,10 +22,8 @@ def declaration():
     spec = importlib.util.spec_from_file_location("apa_headless_executors", HERE.parent / "tools" / "executors.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    try:
+    if mod.load():  # a malformed table raises ValueError to the caller; only a genuinely empty one is skipped
         body["executors"] = mod.declaration()["executors"]
-    except ValueError:
-        pass  # none configured: declare the headless part only
     return body
 
 

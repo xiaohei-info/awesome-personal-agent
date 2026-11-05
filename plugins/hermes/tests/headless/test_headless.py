@@ -54,6 +54,15 @@ def test_declare_carries_configured_executors_so_activation_does_not_drop_them(f
     assert "codex" not in json.dumps(body) and "headless" in body
 
 
+def test_malformed_executor_table_fails_the_declare_and_apa_is_not_invoked(fake_apa, monkeypatch):
+    table = fake_apa / "bad.json"
+    table.write_text('[{"id": "x"}]')
+    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(table))
+    out = json.loads(load_headless()._declare({}))
+    assert out["ok"] is False and "each entry needs id and kind" in out["error"]
+    assert not (fake_apa / "argv").exists()
+
+
 def test_declare_passes_the_kernel_verdict_through(fake_apa, monkeypatch):
     monkeypatch.setenv("FAKE_EXIT", "2")
     monkeypatch.setenv("FAKE_STDERR", "bad declaration")
