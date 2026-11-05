@@ -41,7 +41,7 @@ func Routes(x *command.Executor, st *store.Store, now func() time.Time) core.Rou
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "POST", Path: "/deliveries/{id}/answer", Handler: h.answer})
 		// 表单是人点开的链接，不带 /v1（投递里的 form_url 是 /forms/<令牌>）。
-		r.HandleRoot(core.Route{Method: "GET", Path: "/forms/{token}", Auth: core.AuthNone, Handler: h.formShow})
+		r.HandleRoot(core.Route{Method: "GET", Path: "/forms/{token}", Auth: core.AuthNone, Page: true, Handler: h.formShow})
 		r.HandleRoot(core.Route{Method: "POST", Path: "/forms/{token}", Auth: core.AuthNone, Handler: h.formAnswer})
 	}
 }
