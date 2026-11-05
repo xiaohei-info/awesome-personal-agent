@@ -151,6 +151,9 @@ func commandNames() []string {
 	return names
 }
 
+// Raw 作为 Do 的 body 时原样发送（不做 JSON 编码），用于附件上传。
+type Raw []byte
+
 // Do 向内核发一次 JSON 请求（path 省略 /v1 前缀）。body 为 nil 则无请求体；
 // out 为 nil 时丢弃响应；为 *[]byte 时原样返回响应体而不按 JSON 解码。非 2xx 按附录 B.3 还原为 *domain.Error。
 func (c *Ctx) Do(ctx context.Context, method, path string, body, out any) error {
@@ -168,7 +171,10 @@ func (c *Ctx) DoHeaders(ctx context.Context, hdr map[string]string, method, path
 
 func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string, method, path string, body, out any) error {
 	var rdr io.Reader
-	if body != nil {
+	raw, isRaw := body.(Raw)
+	if isRaw {
+		rdr = bytes.NewReader(raw)
+	} else if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return usage("request body is not encodable as JSON", "check the command arguments")
@@ -184,7 +190,9 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string,
 	}
 	req.Header.Set("Authorization", "Bearer "+cr.Token)
 	req.Header.Set("Accept", "application/json")
-	if body != nil {
+	if isRaw {
+		req.Header.Set("Content-Type", "application/octet-stream")
+	} else if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if s := c.Env.Getenv(EnvSession); s != "" {
