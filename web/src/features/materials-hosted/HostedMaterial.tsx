@@ -89,7 +89,7 @@ function ChangeForm({ material }: { material: HostedMaterialInfo }) {
   const [request, setRequest] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ item: string; parent: string } | null>(null);
-  // 同一次提交的重试复用同一个键，服务端重放首次结果而不建第二套事项；成功后换新键。
+  // 结果未知时的重试复用同一个键，服务端重放首次结果而不建第二套事项；成功或明确被拒后换新键。
   const key = useRef(crypto.randomUUID());
 
   useEffect(() => {
@@ -109,6 +109,8 @@ function ChangeForm({ material }: { material: HostedMaterialInfo }) {
       setDone(r);
       setRequest("");
     } catch (err) {
+      // 4xx 是明确被拒，服务端没有记录这个键；换新键，否则改正后重提会被当作旧请求重放。结果未知（网络错误、5xx）则保留键以便安全重试。
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) key.current = crypto.randomUUID();
       setDone(null);
       setError(msg(err));
     }

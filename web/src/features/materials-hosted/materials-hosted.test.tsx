@@ -119,6 +119,34 @@ describe("ACT-HST-06 发起修改走委派", () => {
     expect(await d.findByRole("alert")).toHaveTextContent("not an allowed executor");
     expect(d.queryByRole("link", { name: "item_child" })).not.toBeInTheDocument();
   });
+
+  it("被拒绝后改选允许的执行者重提：换新幂等键；结果未知（5xx）重试则沿用同一个键", async () => {
+    const s = server({ content: [READY], allowed: ["work-host.cli"] });
+    let fail5xx = true;
+    const keys: string[] = [];
+    const flaky = ((url: string, init?: RequestInit) => {
+      if (url.endsWith("/changes")) keys.push((init!.headers as Record<string, string>)["Idempotency-Key"]);
+      if (url.endsWith("/changes") && init?.method === "POST" && JSON.parse(init.body as string).assignee === "work-host.cli" && fail5xx) {
+        fail5xx = false;
+        return Promise.resolve(err(503, "internal", "try later"));
+      }
+      return s.impl(url, init);
+    }) as typeof fetch;
+    mount(flaky, "/materials");
+    const d = await openHosted();
+    await userEvent.type(d.getByLabelText("修改要求"), "x");
+    await userEvent.selectOptions(d.getByLabelText("执行者"), "third.cli");
+    await userEvent.click(d.getByRole("button", { name: "发起修改" }));
+    await d.findByRole("alert");
+    await userEvent.selectOptions(d.getByLabelText("执行者"), "work-host.cli");
+    await userEvent.click(d.getByRole("button", { name: "发起修改" }));
+    await waitFor(() => expect(d.getByRole("alert")).toHaveTextContent("try later"));
+    await userEvent.click(d.getByRole("button", { name: "发起修改" }));
+    expect(await d.findByRole("link", { name: "item_child" })).toBeInTheDocument();
+    expect(keys).toHaveLength(3); // 403、503、成功
+    expect(keys[1]).not.toBe(keys[0]); // 明确被拒后换新键
+    expect(keys[2]).toBe(keys[1]); // 结果未知后重试沿用
+  });
 });
 
 describe("ACT-HST-08 项目页集中查看", () => {
