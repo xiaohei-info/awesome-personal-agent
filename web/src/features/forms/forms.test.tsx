@@ -123,3 +123,14 @@ describe("一次性表单页", () => {
     expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 });
+
+describe("与 API 同路径", () => {
+  it("页面的 fetch 声明 Accept: application/json，使同一路径的浏览器导航才能拿到页面", async () => {
+    const f = vi.fn(async () => json(200, FORM));
+    vi.stubGlobal("fetch", f);
+    open();
+    await screen.findByRole("heading", { name: "是否发布 v2？" });
+    const init = (f.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect((init.headers as Record<string, string>).Accept).toBe("application/json");
+  });
+});

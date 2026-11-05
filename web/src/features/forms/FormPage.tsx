@@ -22,7 +22,8 @@ async function call(method: string, token: string, body?: unknown) {
     method,
     credentials: "omit",
     referrerPolicy: "no-referrer",
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    // Accept 让同一路径的浏览器导航拿到页面、这里的 fetch 拿到 JSON。
+    headers: { Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (res.ok) return res.json();
