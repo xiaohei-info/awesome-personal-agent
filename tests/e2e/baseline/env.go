@@ -197,9 +197,23 @@ func freePort() (string, error) {
 // StartKernel 依次执行 `apa init` 与 `apa serve`（监听改为本机空闲端口，其余为默认配置），并以口令登录 Web。
 func (e *Env) StartKernel() {
 	e.T.Helper()
-	if r := e.Apa("", Password+"\n", "init", "--password-stdin"); r.Code != 0 {
+	e.Init()
+	e.Serve()
+}
+
+// Init 在空的 APA_HOME 上运行 `apa init`，口令为 Password。
+func (e *Env) Init() Result {
+	e.T.Helper()
+	r := e.Apa("", Password+"\n", "init", "--password-stdin")
+	if r.Code != 0 {
 		e.fatal("apa init 退出码 %d: %s%s", r.Code, r.Stdout, r.Stderr)
 	}
+	return r
+}
+
+// Serve 把监听改为本机空闲端口后启动 `apa serve` 并登录 Web；须先 Init。
+func (e *Env) Serve() {
+	e.T.Helper()
 	port, err := freePort()
 	if err != nil {
 		e.fatal("%v", err)
@@ -246,6 +260,14 @@ func (e *Env) startServe(port string) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	e.webLogin()
+}
+
+// ServePID 是当前 apa serve 进程的 pid，未运行时为 0。
+func (e *Env) ServePID() int {
+	if e.srv == nil || e.srv.Process == nil {
+		return 0
+	}
+	return e.srv.Process.Pid
 }
 
 // StopKernel 停止 apa serve（可重复调用）。
