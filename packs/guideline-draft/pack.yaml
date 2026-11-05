@@ -1,0 +1,11 @@
+name: guideline-draft
+version: 1.0.0
+description: 缺规范检测与起草：项目有仓库而无规范时起草，起草结果落为待确认的修订，本人确认后下次 sync 写入工作区
+clock_rules:
+  - id: guideline-check
+    type: check
+    schedule: 24h
+    mode: observe
+    do:
+      - action: call_agent
+        prompt: draft-guideline
