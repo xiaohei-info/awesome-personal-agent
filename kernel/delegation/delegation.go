@@ -455,8 +455,14 @@ func settle() command.Spec {
 			if err != nil {
 				return authz.Object{}, err
 			}
-			if _, err := delegated(tx, v.ID); err != nil {
+			// 订阅者对每个事项命令都会来问：不是委派子事项（或已不存在）就是无事可做，不是错误。
+			if it, err := items.Get(tx, v.ID); err != nil {
+				if de, ok := err.(*domain.Error); ok && de.Code == domain.CodeNotFound {
+					return authz.Object{ID: settleNoop}, nil
+				}
 				return authz.Object{}, err
+			} else if it.Kind != domain.KindDelegation {
+				return authz.Object{ID: settleNoop}, nil
 			}
 			parent, ok, err := reopenable(tx, v.ID)
 			if err != nil {

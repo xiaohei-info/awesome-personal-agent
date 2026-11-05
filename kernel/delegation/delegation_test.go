@@ -514,3 +514,15 @@ func TestSettleIsNotABackdoor(t *testing.T) {
 	}
 	e.consistent(t)
 }
+
+// 订阅者对每个事项命令都会触发 settle：与委派无关的事项不能产生错误，也不写任何东西。
+func TestUnrelatedItemCommandsDoNotRaiseSettleErrors(t *testing.T) {
+	e := setup(t)
+	plain := e.parent(t, "")
+	e.must(t, owner, "item.transition", map[string]any{"id": plain, "to": "done", "reason": "finished"})
+	e.must(t, owner, "item.transition", map[string]any{"id": plain, "to": "open", "reason": "reopen"})
+	if len(e.errs) != 0 {
+		t.Fatalf("post-commit errors for a non-delegation item: %v", e.errs)
+	}
+	e.consistent(t)
+}
