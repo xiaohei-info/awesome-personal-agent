@@ -231,3 +231,17 @@ func setRelation(tx *store.Tx, x domain.Relation, remove bool) error {
 	}
 	return err
 }
+
+// Purge 物理删除事项投影及其关系边（设计 §6.15）；事项不存在返回 not_found。
+// 事件内容的墓碑与删除事件由 kernel/purge 在同一事务内完成。
+func Purge(tx *store.Tx, id string) error {
+	n, err := tx.Exec(`DELETE FROM items WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return notFound(id)
+	}
+	_, err = tx.Exec(`DELETE FROM item_relations WHERE from_id = ? OR to_id = ?`, id, id)
+	return err
+}
