@@ -145,7 +145,7 @@ func TestCursorBeyondHeadRestarts(t *testing.T) {
 	e := setup(t)
 	e.item(t, map[string]any{"title": "A"})
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := tx.Exec(`INSERT INTO context_cursor (session, seq) VALUES ('s', 999)`)
+		_, err := tx.Exec(`INSERT INTO context_cursor (session, seq) VALUES ('s' || char(0), 999)`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -273,7 +273,7 @@ func TestProjectMappingAndScoping(t *testing.T) {
 		{"env wins over cwd", projects.Scope{Env: outer, Cwd: "/w/app", Host: "box"}, []string{oo}, "Outer"},
 		{"longest local checkout prefix", projects.Scope{Cwd: "/w/app/src", Host: "box"}, []string{io}, "Inner"},
 		{"other host's checkout is ignored", projects.Scope{Cwd: "/w/app/x/y", Host: "box"}, []string{io}, "Inner"},
-		{"no match means no scope, not a guess", projects.Scope{Cwd: "/home", Host: "box"}, []string{io, oo, free}, ""},
+		{"no match means no scope: only project-less items, never another project's", projects.Scope{Cwd: "/home", Host: "box"}, []string{free}, ""},
 	}
 	for _, c := range cases {
 		r := e.build(t, Request{Scope: c.scope})

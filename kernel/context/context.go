@@ -46,6 +46,8 @@ type Request struct {
 	Session     string         // 空：不读不写游标，返回完整投影（运行者读取上下文）
 	Scope       projects.Scope // 当前目录到项目的映射输入（§7.6）
 	Instruction int            // 插件持有的指令版本；0 表示未上报
+	// All 是显式的跨项目视图（`--scope all`）。映射不出项目时默认只给无项目的事项，不猜、不串项目（§7.6）。
+	All bool
 }
 
 // Entry 是增量里的一个事项，不含正文。
@@ -92,11 +94,16 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	after, err := cursor(tx, req.Session, head)
+	project, err := projects.Resolve(tx, req.Scope)
 	if err != nil {
 		return res, err
 	}
-	project, err := projects.Resolve(tx, req.Scope)
+	// 游标按（会话, 作用域）保存：同一会话换作用域不会漏掉新作用域里更早的变更。
+	key := req.Session + "\x00" + project
+	if req.All {
+		key += "\x00all"
+	}
+	after, err := cursor(tx, key, req.Session, head)
 	if err != nil {
 		return res, err
 	}
@@ -120,25 +127,25 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			}
 			return res, err
 		}
-		if (project != "" && it.Project != project) || hiddenAsk(it) {
+		if (!req.All && it.Project != project) || hiddenAsk(it) {
 			continue
 		}
 		res.Items = append(res.Items, Entry{ID: it.ID, Title: it.Title, Phase: it.Phase, Deadline: it.Deadline, Action: action(it, pol)})
 	}
 
-	if project != "" && (after == 0 || projectChanged) {
+	if project != "" && !req.All && (after == 0 || projectChanged) {
 		p, err := projects.Get(tx, project)
 		if err != nil {
 			return res, err
 		}
 		res.Project = &ProjectContext{ID: p.ID, Name: p.Name, Intro: p.Intro, Tags: p.Tags, Status: p.Status, Repos: p.Repos, AllowedExecutors: p.AllowedExecutors}
 	}
-	if res.WebOnlyPending, err = webOnlyPending(tx, project, pol); err != nil {
+	if res.WebOnlyPending, err = webOnlyPending(tx, project, req.All, pol); err != nil {
 		return res, err
 	}
 
 	if req.Session != "" {
-		if _, err := tx.Exec(`INSERT OR REPLACE INTO context_cursor (session, seq) VALUES (?, ?)`, req.Session, head); err != nil {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO context_cursor (session, seq) VALUES (?, ?)`, key, head); err != nil {
 			return res, err
 		}
 	}
@@ -146,11 +153,11 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 }
 
 // cursor 读会话游标。游标超过当前序号（账本被恢复到较早状态）时从头开始，宁可重复也不漏。
-func cursor(tx *store.Tx, session string, head int64) (int64, error) {
+func cursor(tx *store.Tx, key, session string, head int64) (int64, error) {
 	if session == "" {
 		return 0, nil
 	}
-	r, err := tx.Query(`SELECT seq FROM context_cursor WHERE session = ?`, session)
+	r, err := tx.Query(`SELECT seq FROM context_cursor WHERE session = ?`, key)
 	if err != nil {
 		return 0, err
 	}
@@ -225,12 +232,14 @@ func action(it domain.Item, pol policy.Policy) string {
 	return "apa item show " + it.ID
 }
 
-func webOnlyPending(tx *store.Tx, project string, pol policy.Policy) (bool, error) {
+func webOnlyPending(tx *store.Tx, project string, all bool, pol policy.Policy) (bool, error) {
 	open, err := items.List(tx, items.Filter{Phase: domain.PhaseNeedsInput, Project: project})
 	if err != nil {
 		return false, err
 	}
-	return slices.ContainsFunc(open, func(it domain.Item) bool { return !hiddenAsk(it) && isWebOnly(it, pol) }), nil
+	return slices.ContainsFunc(open, func(it domain.Item) bool {
+		return (all || it.Project == project) && !hiddenAsk(it) && isWebOnly(it, pol)
+	}), nil
 }
 
 // ---- 注入格式 ----
