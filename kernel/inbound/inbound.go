@@ -165,7 +165,7 @@ func (s *Service) Register(x *command.Executor) error {
 	}
 	x.OnCommit(func(c command.Commit) {
 		switch {
-		case c.Command == runner.CmdRunResult:
+		case c.Command == runner.CmdRunResult || c.Command == runner.CmdIngest:
 			s.process()
 		case c.Command == CmdCapture && len(c.Seqs) > 0:
 			go s.process() // 捕获发生在插件钩子的时限内，模型调用不能占着请求

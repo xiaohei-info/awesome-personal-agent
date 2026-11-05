@@ -160,8 +160,11 @@ func (r *Runner) Register(x *command.Executor) error {
 	if err != nil {
 		return err
 	}
+	if err := x.Register(command.Spec{Name: CmdIngest, Action: authz.ActionUpdateOwn, Object: objectOf, Apply: r.applyIngest}); err != nil {
+		return err
+	}
 	x.OnCommit(func(c command.Commit) {
-		if strings.HasPrefix(c.Command, "source.") && c.Command != CmdRunResult {
+		if strings.HasPrefix(c.Command, "source.") && c.Command != CmdRunResult && c.Command != CmdIngest {
 			if err := r.Sync(context.Background()); err != nil {
 				r.fail(fmt.Errorf("runner: sync timers: %w", err))
 			}
