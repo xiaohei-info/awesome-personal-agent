@@ -15,9 +15,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -119,6 +122,18 @@ func webOnly(p *core.Principal) error {
 	return domain.NewError(domain.CodeWebOnly, "settings can only be used by the owner in the Web UI", "ask the owner to change it in the Web settings")
 }
 
+// auditRejected 与命令管线一致地记 command.rejected（§6.7）：授权判定决定是否应记账（delegate 的退出码 20 记，worker、observer 的 4 不记）。
+// 记账失败不改变拒绝结果。
+func auditRejected(st *store.Store, r *http.Request, p *core.Principal, path string) {
+	ar := authz.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, Action: authz.ActionChangeSettings, Object: authz.Object{ID: "settings:" + path}}
+	ev, ok := authz.RejectionEvent(ar, authz.Decide(kpolicy.Default(), ar))
+	if !ok {
+		return
+	}
+	ev.At = time.Now()
+	_ = st.Update(detached(r), func(tx *store.Tx) error { _, err := eventlog.Append(tx, ev); return err })
+}
+
 func render(version int, pol kpolicy.Policy, secs []section) map[string]any {
 	out := map[string]any{"version": version}
 	for _, s := range secs {
@@ -146,6 +161,7 @@ func read(st *store.Store, secs []section) core.Handler {
 func write(st *store.Store, path string, secs []section) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 		if err := webOnly(p); err != nil {
+			auditRejected(st, r, p, path)
 			return err
 		}
 		var body map[string]json.RawMessage
