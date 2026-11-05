@@ -12,7 +12,8 @@
 //     直接进 open，Event 记策略版本与规则 id；off 档按普通规则处理。
 //   - 事项与处置都经命令模型写入，每个来源事件的写入幂等，崩溃后重跑不产生重复事项。
 //
-// 跟进消息归属（§9.4）不在本包：它在判断之前拦截事件，由 kernel-followmsg 负责。
+// 跟进消息归属（§9.4）不在本包：它在判断之前拦截事件，由 kernel-followmsg 负责，经 Options.Intercept 接入；
+// 命中的挂靠后结束，没命中但有关联线索的，线索随判断输入与事项理由带走。
 // 本包不起子进程、不调网络；模型调用只经注入的 Judge。
 package inbound
 
@@ -70,6 +71,10 @@ type PackSource interface {
 	List() []*packs.Pack
 }
 
+// Intercept 在规则与判断之前看一条 pending 事件。attached 为真表示已挂靠到原事项，本流水线不再处理；
+// 否则 hint 非空时是关联线索（命中已关闭或多个未关闭事项而没有挂靠），随判断输入与事项理由带走。
+type Intercept func(ctx context.Context, ev domain.SourceEvent) (attached bool, hint string, err error)
+
 // Options 配置 Service。
 type Options struct {
 	Store *store.Store
@@ -80,6 +85,8 @@ type Options struct {
 	Owner string
 	// OnError 接收提交后自动处理失败的错误（OnCommit 回调没有返回值）；可为空。
 	OnError func(error)
+	// Intercept 是跟进消息归属（§9.4）；可为空。
+	Intercept Intercept
 }
 
 // Service 消费 pending 的来源事件。
@@ -328,6 +335,14 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	if !ok {
 		return fmt.Errorf("source %s is not registered", ev.SourceID)
 	}
+	var hint string
+	if s.o.Intercept != nil {
+		attached, h, err := s.o.Intercept(ctx, ev)
+		if err != nil || attached {
+			return err
+		}
+		hint = h
+	}
 	m, err := s.match(src, ev)
 	if err != nil {
 		return err
@@ -346,7 +361,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 		prop = proposal{kind: domain.Kind(m.rule.Kind), title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: "rule " + m.key()}
 	default: // then: judge，或没有规则命中
 		var verdict string
-		prop, verdict, err = s.judge(ctx, sn, src, ev, m)
+		prop, verdict, err = s.judge(ctx, sn, src, ev, m, hint)
 		if err != nil {
 			return err
 		}
@@ -358,6 +373,9 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 			return s.dispose(ctx, m, disposeIn{Event: ev.ID, Disposition: disp, Reason: verdict})
 		}
 	}
+	if hint != "" {
+		prop.reason += "; " + hint
+	}
 	project, err := s.project(sn, src, ev, m)
 	if err != nil {
 		return err
@@ -366,13 +384,13 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 }
 
 // judge 返回要建的事项；verdict 非空表示不建：ChoiceIgnore 是不值得，其余是未判定的原因。
-func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched) (proposal, string, error) {
+func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, hint string) (proposal, string, error) {
 	pack := DefaultPack
 	if m != nil {
 		pack = m.pack
 	}
 	in, _ := json.Marshal(map[string]any{"source": src.ID, "source_type": src.SourceKind, "event_type": ev.Type,
-		"subject": ev.Subject, "summary": ev.Summary, "link": ev.Link, "sender": ev.Sender, "sender_verified": ev.SenderVerified})
+		"subject": ev.Subject, "summary": ev.Summary, "link": ev.Link, "sender": ev.Sender, "sender_verified": ev.SenderVerified, "correlation_hint": hint})
 	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: Template, Input: in, Material: ev.Detail,
 		Scope: direct.Scope{Source: src.ID},
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource},
