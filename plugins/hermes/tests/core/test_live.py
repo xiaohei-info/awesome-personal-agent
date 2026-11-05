@@ -19,8 +19,28 @@ from conftest import ROOT, CORE
 HERMES_SRC = pathlib.Path(os.environ.get("HERMES_SRC", pathlib.Path.home() / ".hermes" / "hermes-agent"))
 HERMES_PY = HERMES_SRC / "venv" / "bin" / "python"
 
-pytestmark = pytest.mark.skipif(
-    not HERMES_PY.exists() or not shutil.which("go"), reason="needs real Hermes install and Go")
+REQUIRE_LIVE = os.environ.get("APA_REQUIRE_LIVE") == "1"  # reviewer/gate hosts: never skip silently
+NEEDS = ("render_system_prompt_sections (hermes_cli.plugins) and "
+         "PluginContext.register_system_prompt_section; tested with Hermes v0.22.5 (eefc4148cb23)")
+PROBE = ("from hermes_cli import plugins as p; "
+         "assert hasattr(p, 'render_system_prompt_sections') and "
+         "hasattr(p.PluginContext, 'register_system_prompt_section')")
+
+
+def _live_problem():
+    """Why the live gate cannot run here, or None."""
+    if not HERMES_PY.exists() or not shutil.which("go"):
+        return f"needs a Hermes install (HERMES_SRC={HERMES_SRC}) and Go"
+    r = subprocess.run([str(HERMES_PY), "-c", PROBE], cwd=HERMES_SRC, capture_output=True, timeout=120)
+    if r.returncode:
+        return f"this Hermes lacks the system prompt section API; need {NEEDS}"
+    return None
+
+
+_PROBLEM = _live_problem()
+if _PROBLEM and REQUIRE_LIVE:
+    pytest.fail("live gate required (APA_REQUIRE_LIVE=1) but cannot run: " + _PROBLEM, pytrace=False)
+pytestmark = pytest.mark.skipif(bool(_PROBLEM), reason=_PROBLEM or "")
 
 AGENT_CHILD = textwrap.dedent("""
     import json, sys
