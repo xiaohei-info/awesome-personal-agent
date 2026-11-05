@@ -41,8 +41,9 @@ const (
 )
 
 const (
-	groupClock = "clock_rules"
-	groupEvent = "event_rules"
+	groupClock  = "clock_rules"
+	groupEvent  = "event_rules"
+	groupSource = "source_rules"
 	// timerPrefix 标识规则自己的周期 Timer（id = timerPrefix + 规则键的摘要）。
 	timerPrefix = "rule_"
 )
@@ -84,6 +85,9 @@ func invalid(why string) error {
 }
 
 func key(pack, group, id string) string { return pack + "/" + group + "/" + id }
+
+// SourceKey 是 accept: auto 的来源规则的规则键，也是它在规则状态里的键。
+func SourceKey(pack, id string) string { return key(pack, groupSource, id) }
 
 func objectOf(k string) string { return "rule:" + k }
 
@@ -276,6 +280,16 @@ func defs(src PackSource) []ruleDef {
 			k := key(p.Name, groupEvent, r.ID)
 			out = append(out, ruleDef{State: State{Key: k, Pack: p.Name, Group: groupEvent, ID: r.ID, Mode: r.Mode, Hash: p.RuleHashes[groupEvent+"/"+r.ID]},
 				When: r.When, Do: r.Do})
+		}
+	}
+	// 只有 accept: auto 的来源规则会自动产生动作，需要模式；其余来源规则是确定性映射，没有模式。
+	for _, p := range src.List() {
+		for _, r := range p.SourceRules {
+			if r.Accept != "auto" {
+				continue
+			}
+			k := key(p.Name, groupSource, r.ID)
+			out = append(out, ruleDef{State: State{Key: k, Pack: p.Name, Group: groupSource, ID: r.ID, Mode: r.Mode, Hash: p.RuleHashes[groupSource+"/"+r.ID]}})
 		}
 	}
 	return out
