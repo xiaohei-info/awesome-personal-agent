@@ -162,7 +162,7 @@ func pull(ctx context.Context, stdin io.Reader, api API, now time.Time) ([]event
 		}
 		var last time.Time
 		for _, raw := range items {
-			ev, upd, ok, err := issueEvent(repo, raw, since)
+			evs, upd, err := issueEvents(repo, raw, since)
 			if err != nil {
 				return nil, "", fmt.Errorf("repo %s: %w", repo, err)
 			}
@@ -171,9 +171,7 @@ func pull(ctx context.Context, stdin io.Reader, api API, now time.Time) ([]event
 			}
 			note(upd)
 			last = upd
-			if ok {
-				events = append(events, ev)
-			}
+			events = append(events, evs...)
 		}
 		if trunc != nil {
 			truncated = append(truncated, last)
@@ -265,40 +263,50 @@ type issueRaw struct {
 	} `json:"pull_request"`
 }
 
-// issueEvent 把 issues 列表项（含 PR）映射成事件。ok 为假表示该项不产生事件但时间仍算已读。
-// 事件 id 稳定：opened/closed/merged 每个对象只有一条；updated 带更新时间。
-func issueEvent(repo string, raw json.RawMessage, since time.Time) (event, time.Time, bool, error) {
+// issueEvents 把 issues 列表项（含 PR）按各自独立的事实映射成事件，不依赖"本次游标落在哪"：
+// opened（created_at>=since）、merged 或 closed（merged_at/closed_at>=since）各有一个稳定 id，同一状态在任何一次运行里 id 都一样；
+// updated 只在没有上述事件解释这次变化、且更新时间严格晚于游标时才出（游标含端点，端点上的项已在上次处理过），
+// 所以每次变化至多一条 updated，不会每次评论都刷一条以外的噪声。时间仍算已读，由调用方推进游标。
+func issueEvents(repo string, raw json.RawMessage, since time.Time) ([]event, time.Time, error) {
 	var it issueRaw
 	if err := json.Unmarshal(raw, &it); err != nil || it.Number == 0 || it.UpdatedAt.IsZero() {
-		return event{}, time.Time{}, false, fmt.Errorf("bad issue item")
+		return nil, time.Time{}, fmt.Errorf("bad issue item")
 	}
 	kind := "issue"
 	if it.PullRequest != nil {
 		kind = "pr"
 	}
 	key := fmt.Sprintf("%s#%d", repo, it.Number)
-	typ, occurred, suffix := "updated", it.UpdatedAt, "updated-"+fmt.Sprint(it.UpdatedAt.Unix())
-	switch {
-	case !it.CreatedAt.Before(since):
-		typ, occurred, suffix = "opened", it.CreatedAt, "opened"
-	case it.PullRequest != nil && !it.PullRequest.MergedAt.IsZero() && !it.PullRequest.MergedAt.Before(since):
-		typ, occurred, suffix = "merged", it.PullRequest.MergedAt, "merged"
-	case !it.ClosedAt.IsZero() && !it.ClosedAt.Before(since):
-		typ, occurred, suffix = "closed", it.ClosedAt, "closed"
+	mk := func(typ string, at time.Time, suffix string) event {
+		return event{
+			ID:              fmt.Sprintf("%s-%s-%s", kind, strings.ReplaceAll(key, "/", "-"), suffix),
+			Type:            kind + "." + typ,
+			Subject:         it.Title,
+			Summary:         clip(it.Body, sumLimit),
+			Detail:          clip(it.Body, bodyLimit),
+			Link:            it.HTMLURL,
+			OccurredAt:      at.UTC().Format(time.RFC3339),
+			CorrelationKeys: []string{key},
+			Sender:          it.User.Login,
+			// 作者身份由 GitHub 认证过的 API 返回；能否进无人值守白名单由白名单决定，此处如实标已验证。
+			SenderVerified: it.User.Login != "",
+		}
 	}
-	return event{
-		ID:              fmt.Sprintf("%s-%s-%s", kind, strings.ReplaceAll(key, "/", "-"), suffix),
-		Type:            kind + "." + typ,
-		Subject:         it.Title,
-		Summary:         clip(it.Body, sumLimit),
-		Detail:          clip(it.Body, bodyLimit),
-		Link:            it.HTMLURL,
-		OccurredAt:      occurred.UTC().Format(time.RFC3339),
-		CorrelationKeys: []string{key},
-		Sender:          it.User.Login,
-		// 作者身份由 GitHub 认证过的 API 返回，但是否可信到能进无人值守白名单由白名单决定；此处如实标已验证。
-		SenderVerified: it.User.Login != "",
-	}, it.UpdatedAt, true, nil
+	var evs []event
+	if !it.CreatedAt.Before(since) {
+		evs = append(evs, mk("opened", it.CreatedAt, "opened"))
+	}
+	if it.PullRequest != nil && !it.PullRequest.MergedAt.IsZero() {
+		if !it.PullRequest.MergedAt.Before(since) {
+			evs = append(evs, mk("merged", it.PullRequest.MergedAt, "merged"))
+		}
+	} else if !it.ClosedAt.IsZero() && !it.ClosedAt.Before(since) {
+		evs = append(evs, mk("closed", it.ClosedAt, "closed"))
+	}
+	if len(evs) == 0 && it.UpdatedAt.After(since) {
+		evs = append(evs, mk("updated", it.UpdatedAt, "updated-"+fmt.Sprint(it.UpdatedAt.Unix())))
+	}
+	return evs, it.UpdatedAt, nil
 }
 
 type notifRaw struct {

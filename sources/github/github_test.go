@@ -307,3 +307,50 @@ func TestAuthRunsGHLoginInSourceDir(t *testing.T) {
 		t.Errorf("failed login exit %d", code)
 	}
 }
+
+func TestRerunWithSavedCursorEmitsNoNewIds(t *testing.T) {
+	mk := func(cursor string) (map[string]bool, string) {
+		api := &fakeAPI{pages: map[string][]string{"/repos/o/r/issues": {issuesJSON}}}
+		_, lines, _ := run(t, api, `{"source_id":"s","config":{"repos":["o/r"]},"cursor":"`+cursor+`"}`)
+		ids := map[string]bool{}
+		for _, l := range lines[:len(lines)-1] {
+			ids[l["id"].(string)] = true
+		}
+		return ids, lines[len(lines)-1]["cursor"].(string)
+	}
+	first, cur := mk("2026-11-01T00:00:00Z")
+	second, _ := mk(cur)
+	for id := range second {
+		if !first[id] {
+			t.Errorf("run 2 emitted new id %s from identical upstream data", id)
+		}
+	}
+	if len(second) == 0 || second["issue-o-r#1-updated-1793527200"] {
+		t.Errorf("boundary item must not re-emit updated: %v", second)
+	}
+}
+
+func TestCreatedAndMergedInOneWindowYieldsBoth(t *testing.T) {
+	pr := `[{"number":5,"title":"quick","created_at":"2026-11-01T01:00:00Z","updated_at":"2026-11-01T02:00:00Z","closed_at":"2026-11-01T02:00:00Z","user":{"login":"u"},"pull_request":{"merged_at":"2026-11-01T02:00:00Z"}}]`
+	api := &fakeAPI{pages: map[string][]string{"/repos/o/r/issues": {pr}}}
+	_, lines, _ := run(t, api, `{"source_id":"s","config":{"repos":["o/r"]},"cursor":"2026-11-01T00:00:00Z"}`)
+	if len(lines) != 3 || lines[0]["type"] != "pr.opened" || lines[1]["type"] != "pr.merged" {
+		t.Fatalf("lines=%v", lines)
+	}
+}
+
+func TestPullConfigDirUsesRunnerCwdWithoutAPAHome(t *testing.T) {
+	t.Setenv("APA_HOME", "")
+	t.Setenv("HOME", "/home/u")
+	src := filepath.Join(t.TempDir(), "sources", "src_github")
+	if d, err := PullConfigDir("src_github", src); err != nil || d != filepath.Join(src, "gh") {
+		t.Fatalf("%q %v", d, err)
+	}
+	// cwd 不是该来源目录（手工运行）时回退到 APA_HOME 规则
+	if d, _ := PullConfigDir("src_github", "/somewhere/else"); d != "/home/u/.apa/sources/src_github/gh" {
+		t.Fatalf("fallback %q", d)
+	}
+	if _, err := PullConfigDir("../x", src); err == nil {
+		t.Fatal("bad id accepted")
+	}
+}

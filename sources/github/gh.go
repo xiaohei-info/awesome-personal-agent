@@ -31,6 +31,18 @@ func ConfigDir(sourceID string) (string, error) {
 	return filepath.Join(home, "sources", sourceID, "gh"), nil
 }
 
+// PullConfigDir 是拉取模式的凭据目录。内核不向来源子进程传 APA_HOME，但保证 cwd 是 <APA_HOME>/sources/<id>，
+// 所以 cwd 的目录名等于 source_id 时凭据在 <cwd>/gh；否则（手工运行）回退到 ConfigDir。
+func PullConfigDir(sourceID, cwd string) (string, error) {
+	if !sourceIDRe.MatchString(sourceID) {
+		return "", &Error{ExitAuth, fmt.Sprintf("bad source id %q", sourceID)}
+	}
+	if cwd != "" && filepath.Base(cwd) == sourceID {
+		return filepath.Join(cwd, "gh"), nil
+	}
+	return ConfigDir(sourceID)
+}
+
 // GH 是用 gh CLI 实现的 API。凭据只来自 ConfigDir，不读环境里的 token。
 type GH struct {
 	Bin       string // 默认 "gh"
@@ -40,7 +52,7 @@ type GH struct {
 func (g GH) env() []string {
 	env := os.Environ()[:0:0]
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "GH_TOKEN=") && !strings.HasPrefix(kv, "GITHUB_TOKEN=") && !strings.HasPrefix(kv, "GH_CONFIG_DIR=") {
+		if !strings.HasPrefix(kv, "GH_TOKEN=") && !strings.HasPrefix(kv, "GITHUB_TOKEN=") && !strings.HasPrefix(kv, "GH_ENTERPRISE_TOKEN=") && !strings.HasPrefix(kv, "GITHUB_ENTERPRISE_TOKEN=") && !strings.HasPrefix(kv, "GH_CONFIG_DIR=") {
 			env = append(env, kv)
 		}
 	}

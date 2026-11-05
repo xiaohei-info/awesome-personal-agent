@@ -28,7 +28,8 @@ func main() {
 	}
 	// 来源 id 在 stdin 里，所以先解析出来再决定凭据目录。
 	os.Exit(github.RunStdin(ctx, os.Stdin, os.Stdout, os.Stderr, func(id string) (github.API, error) {
-		dir, err := github.ConfigDir(id)
+		cwd, _ := os.Getwd()
+		dir, err := github.PullConfigDir(id, cwd)
 		return github.GH{ConfigDir: dir}, err
 	}, time.Now))
 }
