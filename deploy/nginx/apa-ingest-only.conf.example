@@ -1,0 +1,20 @@
+# 反向代理样例：只向外转发 webhook 接收路径 /ingest/（设计 §16.3）。
+# Web 与其余 API 不暴露；外部系统凭来源的接收密钥调用。
+server {
+    listen 443 ssl;
+    server_name hooks.example.invalid;
+
+    ssl_certificate     /etc/ssl/apa/fullchain.pem;
+    ssl_certificate_key /etc/ssl/apa/privkey.pem;
+
+    location /ingest/ {
+        limit_except POST { deny all; }
+        proxy_pass http://127.0.0.1:7777;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location / {
+        return 404;
+    }
+}

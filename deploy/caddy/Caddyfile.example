@@ -1,0 +1,4 @@
+# Caddy 样例：Web 与 API 经 HTTPS 暴露，证书由 Caddy 自动管理（设计 §14.13）。
+apa.example.invalid {
+	reverse_proxy 127.0.0.1:7777
+}
