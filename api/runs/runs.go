@@ -1,5 +1,5 @@
 // Package runs 是运行记录分组的 HTTP 路由（附录 B.2，设计 §6.11）：
-// GET /runs（可按 state、category、target 筛选）与 GET /runs/{id}。
+// GET /runs（可按 state、category、target 筛选）、GET /runs/{id}，以及网关插件换取唤醒运行凭据的 POST /runs/{id}/credential（§13.6）。
 //
 // 路由里没有业务规则：Run 的读取在 kernel/outcall/proc，授权判定在 kernel/authz；
 // 本层只做认证后的参数校验与搬运。响应只含 §6.11 的字段（状态、执行统计、授权依据），
@@ -10,6 +10,7 @@ package runs
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
@@ -17,6 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -31,6 +33,7 @@ func Routes(st *store.Store) core.RouteGroup {
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/runs", Handler: h.list})
 		r.Handle(core.Route{Method: "GET", Path: "/runs/{id}", Handler: h.get})
+		r.Handle(core.Route{Method: "POST", Path: "/runs/{id}/credential", MaxBody: 1 << 10, Handler: h.credential})
 	}
 }
 
@@ -50,6 +53,22 @@ func authorize(tx *store.Tx, p *core.Principal) error {
 		return d.Err
 	}
 	return nil
+}
+
+// credential 只搬运：谁能换、换什么都由 runidentity.Exchange 判定。明文只在这个响应里出现一次。
+func (h *handlers) credential(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	id := r.PathValue("id")
+	var (
+		token   string
+		expires time.Time
+	)
+	if err := h.st.Update(r.Context(), func(tx *store.Tx) (err error) {
+		token, expires, err = runidentity.Exchange(tx, p.Caller, id, time.Now())
+		return err
+	}); err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"run": id, "token": token, "expires_at": expires.UTC()})
 }
 
 func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal) error {

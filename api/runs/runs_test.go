@@ -11,10 +11,16 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
 )
@@ -35,7 +41,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, proc.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, proc.Module, projects.Module, clock.Module, kitems.Module, command.Module, runidentity.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -246,5 +252,54 @@ func TestErrors(t *testing.T) {
 		if strings.Contains(rec.Body.String(), "bogus") { // why/next 只写机制，不回显输入
 			t.Fatalf("error echoes input: %s", rec.Body)
 		}
+	}
+}
+
+// POST /runs/{id}/credential（§13.6）：插件 token 换出运行凭据，换出的凭据认证为该运行；其他凭据 403。
+func TestExchangeWakeRunCredentialRoute(t *testing.T) {
+	e := setup(t)
+	x := command.New(e.st, time.Now)
+	if err := kitems.Register(x, kitems.NewKinds()); err != nil {
+		t.Fatal(err)
+	}
+	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	res, err := x.Do(bg, command.Request{Identity: owner, Command: "item.create", Input: json.RawMessage(`{"kind":"task","title":"t"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var item struct{ ID string }
+	_ = json.Unmarshal(res.Value, &item)
+	var run string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		r, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Launch: runidentity.LaunchWake, Target: item.ID, TimeoutSec: 60},
+			Spec: proc.Spec{Command: []string{"true"}}}, time.Now())
+		run = r.ID
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := "/v1/runs/" + run + "/credential"
+	for _, deny := range []func(*http.Request){e.token(auth.Observer), e.token(auth.Ext), e.token(auth.Webhook)} {
+		if rec := e.do("POST", path, "", deny); rec.Code != 403 {
+			t.Fatalf("denied credential: %d %s", rec.Code, rec.Body)
+		}
+	}
+	rec := e.do("POST", path, "", e.token(auth.Worker))
+	var out struct {
+		Run, Token string
+		ExpiresAt  time.Time `json:"expires_at"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != 200 || out.Run != run || !runidentity.IsSecret(out.Token) || out.ExpiresAt.IsZero() {
+		t.Fatalf("exchange: %d %s", rec.Code, rec.Body)
+	}
+	bearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+out.Token) }
+	if rec := e.do("GET", "/v1/runs/"+run, "", bearer); rec.Code != 200 {
+		t.Fatalf("exchanged credential cannot read: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", path, "", bearer); rec.Code != 403 {
+		t.Fatalf("run credential exchanged itself: %d", rec.Code)
+	}
+	if rec := e.do("POST", "/v1/runs/run_none/credential", "", e.token(auth.Delegate)); rec.Code != 404 {
+		t.Fatalf("unknown run: %d", rec.Code)
 	}
 }
