@@ -597,3 +597,31 @@ func TestRevisionCommandFailures(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestAddHostedAndSetLocationGuards(t *testing.T) {
+	e := setup(t)
+	var id string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		if _, err := AddHosted(tx, e.prj, "design", "t", nil, " "); err == nil {
+			t.Fatal("blank location must be rejected")
+		}
+		m, err := AddHosted(tx, e.prj, "design", " t ", nil, "r:p.md")
+		id = m.ID
+		if err != nil || m.Title != "t" || m.Location != "r:p.md" {
+			t.Fatalf("%+v %v", m, err)
+		}
+		if err := SetLocation(tx, id, "r:q.md"); err != nil {
+			t.Fatal(err)
+		}
+		code(t, SetLocation(tx, "mat_none", "x"), domain.CodeConflict)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.view(t, func(tx *store.Tx) error {
+		if m, err := Get(tx, id); err != nil || m.Location != "r:q.md" || m.CurrentRev != "" {
+			t.Fatalf("%+v %v", m, err)
+		}
+		return nil
+	})
+}
