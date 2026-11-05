@@ -331,6 +331,32 @@ func Diff(from, to string) []DiffLine {
 	return out
 }
 
+// Kinds 返回内置 kind 的副本；托管型登记（kernel/hosted）校验 kind 时用。
+func Kinds() []string { return slices.Clone(builtinKinds) }
+
+// AddHosted 登记一条托管型材料（Location 非空、无 Revision），只供 kernel/hosted 的命令在事务内调用；
+// 授权、事件由调用方的命令管线负责。返回带新 id 的登记。
+func AddHosted(tx *store.Tx, project, kind, title string, tags []string, location string) (Material, error) {
+	if blank(location) {
+		return Material{}, invalid("location is required for a hosted material")
+	}
+	id, err := newID("mat_")
+	if err != nil {
+		return Material{}, err
+	}
+	m := Material{ID: id, Project: project, Kind: kind, Title: strings.TrimSpace(title), Tags: tags, Location: location}
+	return m, insertMaterial(tx, m)
+}
+
+// SetLocation 改托管型材料登记的"仓库:路径"，只供 kernel/hosted 的命令在事务内调用。
+func SetLocation(tx *store.Tx, id, location string) error {
+	n, err := tx.Exec("UPDATE materials SET location = ? WHERE id = ? AND location <> ''", location, id)
+	if err == nil && n == 0 {
+		return conflict("material "+id+" is not hosted", "only a hosted material has a location")
+	}
+	return err
+}
+
 // ---- 写（仅限命令内部） ----
 
 func insertMaterial(tx *store.Tx, m Material) error {
