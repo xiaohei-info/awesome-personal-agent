@@ -1,0 +1,7 @@
+name: apa-capture
+version: 0.1.0
+description: "APA: asynchronous conversation-candidate capture. Buffers each finished turn and, at on_session_end, posts the delta to POST /capture. Off unless the project has capture enabled (the kernel decides)."
+author: awesome-personal-agent
+provides_hooks:
+  - post_llm_call
+  - on_session_end
