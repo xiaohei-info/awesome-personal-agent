@@ -4,10 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -285,5 +292,365 @@ func TestInitDisablesEchoWhileReadingFromTerminalAndRestoresIt(t *testing.T) {
 	client.Main([]string{"init"}, e)
 	if got, _ := os.ReadFile(logf); string(got) != "-echo\necho\n" {
 		t.Fatalf("stty calls = %q, want -echo then echo", got)
+	}
+}
+
+// ---- 装配完整性 ----
+
+// initOnFreePort 在新目录上 init，并把监听端口换成空闲端口。
+func initOnFreePort(t *testing.T) string {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "h")
+	if r := apa(t, home, pw+"\n", "init", "--password-stdin"); r.code != 0 {
+		t.Fatal(r)
+	}
+	listen := "listen: 127.0.0.1:" + strconv.Itoa(freePort(t)) + "\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(listen), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// appendixRoute 是附录 B.2 的一条路由；methods 为空表示表里只写了路径（设置组），任一方法挂载都算。
+type appendixRoute struct {
+	methods []string
+	path    string
+}
+
+// appendixRoutes 解析附录 B.2 表格第二列，它是路由清单的唯一来源。写法有三种：
+// `GET/POST /items`、接在前一条后面的 `/accept`（换掉最后一段，沿用方法）、只有路径的 `/settings/policy`。
+func appendixRoutes(t *testing.T) []appendixRoute {
+	t.Helper()
+	data, err := os.ReadFile("../../docs/appendix-b-api-cli.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, _ := strings.Cut(string(data), "## B.2")
+	section, _, _ := strings.Cut(rest, "## B.3")
+	span := regexp.MustCompile("`([^`]+)`")
+	var out []appendixRoute
+	for _, line := range strings.Split(section, "\n") {
+		cells := strings.Split(line, "|")
+		if len(cells) < 4 {
+			continue
+		}
+		var prev *appendixRoute
+		for _, m := range span.FindAllStringSubmatch(cells[2], -1) {
+			r := appendixRoute{}
+			f := strings.Fields(m[1])
+			r.path, _, _ = strings.Cut(f[len(f)-1], "?")
+			if len(f) == 2 {
+				r.methods = strings.Split(f[0], "/")
+			}
+			if len(f) == 1 && prev != nil && strings.Count(r.path, "/") == 1 {
+				r.methods, r.path = prev.methods, path.Dir(prev.path)+r.path
+			}
+			out = append(out, r)
+			prev = &r
+		}
+	}
+	if len(out) < 40 {
+		t.Fatalf("parsed only %d routes from appendix B.2; the table format changed", len(out))
+	}
+	return out
+}
+
+// notYetImplemented 是附录 B.2 列出、但 main 上还没有实现的路由（目标设计先于代码）。这不是路由清单，只是缺口台账，只减不增：
+// 实现并挂载后本测试会要求删掉对应条目；实现了却忘了挂，由 TestEveryRouteGroupPackageIsMounted 拦下。
+var notYetImplemented = map[string]bool{
+	"GET /materials":                 true,
+	"POST /materials":                true,
+	"GET /materials/{id}":            true,
+	"GET /materials/{id}/revisions":  true,
+	"POST /materials/{id}/revisions": true,
+	"POST /materials/{id}/revert":    true,
+	"POST /revisions/{id}/confirm":   true,
+	"POST /revisions/{id}/reject":    true,
+	"GET /materials/search":          true,
+	"PUT /blobs/{hash}":              true,
+	"GET /blobs/{hash}":              true,
+	"GET /agents-md":                 true,
+	"POST /agents-md/check":          true,
+	"GET /events":                    true,
+	"POST /deliveries/{id}/answer":   true,
+	"GET /forms/{一次性令牌}":             true,
+	"POST /forms/{一次性令牌}":            true,
+	"GET /health":                    true,
+	"/settings/purge":                true,
+}
+
+// mounted 用未登录的真实请求探测：骨干对未挂载的路由统一回 "no such route"；已挂载的要么 401，要么进了处理器（处理器自己的 404 也算挂载）。
+func mounted(t *testing.T, addr net.Addr, method, p string) bool {
+	t.Helper()
+	url := "http://" + addr.String() + "/v1" + p
+	if strings.HasPrefix(p, "/ingest/") { // 外部系统 URL 不带版本前缀（附录 B）
+		url = "http://" + addr.String() + p
+	}
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return !(resp.StatusCode == http.StatusNotFound && strings.Contains(string(body), "no such route"))
+}
+
+// ACT-REL-03 的路由部分：真实 serve 上，附录 B.2 的每条路由都已挂载；Web 根路径可访问，且不抢 API 路径。
+func TestServeMountsEveryAppendixRouteAndWeb(t *testing.T) {
+	addr, stop := start(t, initOnFreePort(t))
+	defer stop()
+	placeholder := regexp.MustCompile(`\{[^}]*\}`)
+	stale := map[string]bool{}
+	for k := range notYetImplemented {
+		stale[k] = true
+	}
+	for _, r := range appendixRoutes(t) {
+		probe := placeholder.ReplaceAllString(r.path, "x")
+		if len(r.methods) == 0 {
+			got := false
+			for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
+				got = got || mounted(t, addr, m, probe)
+			}
+			check(t, r.path, got, stale)
+			continue
+		}
+		for _, m := range r.methods {
+			check(t, m+" "+r.path, mounted(t, addr, m, probe), stale)
+		}
+	}
+	for k := range stale {
+		t.Errorf("%s is listed in notYetImplemented but appendix B.2 no longer has it; delete the entry", k)
+	}
+
+	resp, err := http.Get("http://" + addr.String() + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	// CI 先构建前端，这里是 200；本地没构建时 Web handler 回 503 并说明原因。两者都证明 Web 已挂载。
+	if built := resp.StatusCode == 200 && strings.Contains(string(body), "<html"); !built &&
+		!(resp.StatusCode == 503 && strings.Contains(string(body), "not built")) {
+		t.Fatalf("web root not served: %d %q", resp.StatusCode, body)
+	}
+	api, err := http.Get("http://" + addr.String() + "/v1/no-such-route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Body.Close()
+	if api.StatusCode != 404 {
+		t.Fatalf("unknown API paths must stay 404, got %d", api.StatusCode)
+	}
+}
+
+func check(t *testing.T, key string, got bool, stale map[string]bool) {
+	t.Helper()
+	delete(stale, key)
+	switch {
+	case !got && !notYetImplemented[key]:
+		t.Errorf("%s is in appendix B.2 but not mounted by apa serve", key)
+	case got && notYetImplemented[key]:
+		t.Errorf("%s is mounted now; delete it from notYetImplemented", key)
+	}
+}
+
+// api/ 下导出路由分组（返回 core.RouteGroup 的函数或 core.Register）的包都必须被 cli/serve 引入。
+// 不靠路由表：新路由组哪怕还没写进附录 B，或路由还记在 notYetImplemented 里，忘了挂载也会失败。
+func TestEveryRouteGroupPackageIsMounted(t *testing.T) {
+	const module = "github.com/xiaohei-info/awesome-personal-agent/"
+	imported := map[string]bool{}
+	fset := token.NewFileSet()
+	files, _ := filepath.Glob("*.go")
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		pf, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, im := range pf.Imports {
+			imported[strings.Trim(im.Path.Value, `"`)] = true
+		}
+	}
+	groups := 0
+	err := filepath.WalkDir("../../api", func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return err
+		}
+		rel, _ := filepath.Rel("../..", filepath.Dir(p))
+		pkg := filepath.ToSlash(rel)
+		if pkg == "api/core" { // 骨干本身
+			return nil
+		}
+		pf, err := parser.ParseFile(fset, p, nil, 0)
+		if err != nil {
+			return err
+		}
+		if declaresRouteGroup(pf) {
+			groups++
+			if !imported[module+pkg] {
+				t.Errorf("%s exports a route group but cli/serve does not mount it", pkg)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if groups == 0 {
+		t.Fatal("found no route groups; the scan is broken")
+	}
+}
+
+func declaresRouteGroup(f *ast.File) bool {
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.FuncDecl:
+			if v.Recv == nil && v.Name.IsExported() && v.Type.Results != nil {
+				for _, r := range v.Type.Results.List {
+					if s, ok := r.Type.(*ast.SelectorExpr); ok && s.Sel.Name == "RouteGroup" {
+						found = true
+					}
+				}
+			}
+		case *ast.CallExpr:
+			if s, ok := v.Fun.(*ast.SelectorExpr); ok && s.Sel.Name == "Register" {
+				if x, ok := s.X.(*ast.Ident); ok && x.Name == "core" {
+					found = true
+				}
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// session 是 Web 登录后的客户端。
+type session struct {
+	t      *testing.T
+	base   string
+	cookie []*http.Cookie
+	csrf   string
+}
+
+func webLogin(t *testing.T, addr net.Addr) *session {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"password": pw})
+	base := "http://" + addr.String() + "/v1"
+	resp, err := http.Post(base+"/auth/login", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		CSRF string `json:"csrf_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("login: %d %v", resp.StatusCode, err)
+	}
+	return &session{t, base, resp.Cookies(), out.CSRF}
+}
+
+func (s *session) do(method, p, body string) (int, string) {
+	s.t.Helper()
+	req, err := http.NewRequest(method, s.base+p, strings.NewReader(body))
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	for _, c := range s.cookie {
+		req.AddCookie(c)
+	}
+	req.Header.Set("X-CSRF-Token", s.csrf)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+// ACT-CMD-04（主机配置文件一路）：主机文件登记的脚本来源被时钟调度、经调度器拉起、事件走到入站流水线；
+// 声明文件直接生效；重启后重复登记不出错。同时跑一个实例定时：任何 Timer 分派错模块都会记 error，这里一条都不许有。
+func TestServeLoadsHostFilesAndRunsKernelServices(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelError})))
+	defer slog.SetDefault(prev)
+
+	home := initOnFreePort(t)
+	script := filepath.Join(t.TempDir(), "emit.sh")
+	emit := `#!/bin/sh
+cat >/dev/null
+echo '{"id":"e1","type":"note.created","subject":"from host file","occurred_at":"2026-01-01T00:00:00Z"}'
+echo '{"cursor":"c1"}'
+`
+	if err := os.WriteFile(script, []byte(emit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src, _ := json.Marshal(map[string]any{"sources": []any{map[string]any{"id": "src_host", "type": "script", "source_type": "note",
+		"command": script, "schedule": "1s", "timeout": 10, "dedupe_domain": "note"}}})
+	if err := os.WriteFile(filepath.Join(home, "sources.json"), src, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "declarations"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	decl := `{"harness":"acme","executors":[{"id":"acme.cli","kind":"external-cli"}]}`
+	if err := os.WriteFile(filepath.Join(home, "declarations", "acme.json"), []byte(decl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	addr, stop := start(t, home)
+	s := webLogin(t, addr)
+	if code, body := s.do("POST", "/instances", `{"pack":"brief","params":{"schedule":"1s"}}`); code >= 300 {
+		t.Fatalf("create instance: %d %s", code, body)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		code, body := s.do("GET", "/sources/src_host/events?disposition=unjudged", "")
+		if code == 200 && strings.Contains(body, "from host file") { // 未配置模型：判断型记 unjudged，留在来源页
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("source event never reached the inbound pipeline: %d %s; logs: %s", code, body, logs.String())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if code, body := s.do("GET", "/settings/executors", ""); code != 200 || !strings.Contains(body, "acme.cli") {
+		t.Fatalf("host declaration not active: %d %s", code, body)
+	}
+	if code, body := s.do("GET", "/packs", ""); code != 200 || !strings.Contains(body, "inbound-triage") {
+		t.Fatalf("builtin packs not loaded: %d %s", code, body)
+	}
+	time.Sleep(2 * clockTicks) // 让实例与来源的 Timer 再各到期一次
+	stop()
+
+	addr, stop = start(t, home)
+	s = webLogin(t, addr)
+	if code, body := s.do("GET", "/sources/src_host", ""); code != 200 || !strings.Contains(body, script) {
+		t.Fatalf("source lost after restart: %d %s", code, body)
+	}
+	stop()
+	if logs.Len() != 0 {
+		t.Fatalf("kernel services logged errors:\n%s", logs.String())
+	}
+}
+
+const clockTicks = 1100 * time.Millisecond
+
+func TestServeRefusesBadHostFile(t *testing.T) {
+	home := initOnFreePort(t)
+	if err := os.WriteFile(filepath.Join(home, "sources.json"), []byte(`{"sources":[{"id":"x","type":"bogus"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := apa(t, home, "", "serve"); r.code != 2 || !strings.Contains(r.errOut, "sources.json") {
+		t.Fatalf("a bad host file must refuse to start: %+v", r)
 	}
 }
