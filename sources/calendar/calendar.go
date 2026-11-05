@@ -184,13 +184,9 @@ func poll(ctx context.Context, stdin io.Reader, ex execFn, now func() time.Time)
 		if err != nil {
 			return nil, fail(ExitAuth, "第 %d 个日程无法解析: %v", i, err)
 		}
-		if !updated.IsZero() {
-			if updated.Before(floor) { // 等于游标的保留，由内核按事件 id 去重
-				continue
-			}
-			if updated.After(newest) {
-				newest = updated
-			}
+		// 不按游标过滤：日程可能晚于其更新时间才进入前瞻窗口，过滤会永久丢失；重复由内核按 (去重域, id) 去重。
+		if updated.After(newest) {
+			newest = updated
 		}
 		_ = enc.Encode(ev)
 	}

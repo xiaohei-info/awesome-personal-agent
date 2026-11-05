@@ -137,17 +137,21 @@ func TestContentDigestMarksUpdateWithoutUpdatedField(t *testing.T) {
 	}
 }
 
-// 游标：只输出更新时间不早于游标的日程，游标推进到最大更新时间。
-func TestCursorFiltersOlderUpdates(t *testing.T) {
+// 回归：updated 早于游标、但 start 在窗口内（刚进入前瞻窗口）的日程必须输出；游标只前进不回退。
+func TestOldUpdatedEventsInWindowAreStillEmitted(t *testing.T) {
 	version, events := recorded(t, "0.9.0")
 	input := strings.Replace(in, `"cursor":""`, `"cursor":"2026-03-05T10:30:00Z"`, 1)
 	_, lines, _ := do(t, fakeTool(version, events, nil, ""), input)
-	evs := decode(t, lines)
-	if len(evs) != 2 || evs[0].Type != "event.updated" || evs[1].Type != "event.cancelled" {
-		t.Fatalf("events %+v", evs)
+	if evs := decode(t, lines); len(evs) != 5 {
+		t.Fatalf("窗口内全部日程都应输出, got %d", len(evs))
 	}
 	if lines[len(lines)-1] != `{"cursor":"2026-03-06T00:00:00Z"}` {
 		t.Fatal(lines[len(lines)-1])
+	}
+	later := strings.Replace(in, `"cursor":""`, `"cursor":"2026-04-01T00:00:00Z"`, 1)
+	_, lines, _ = do(t, fakeTool(version, events, nil, ""), later)
+	if len(decode(t, lines)) != 5 || lines[len(lines)-1] != `{"cursor":"2026-04-01T00:00:00Z"}` {
+		t.Fatalf("游标不得回退: %v", lines[len(lines)-1])
 	}
 }
 
