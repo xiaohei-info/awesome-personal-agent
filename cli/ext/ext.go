@@ -90,17 +90,20 @@ func discover(root string) ([]Info, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, readErr(root, err)
 	}
 	var out []Info
 	for _, e := range ents {
 		dir := filepath.Join(root, e.Name())
+		if fi, err := os.Stat(dir); err != nil || !fi.IsDir() { // README、.DS_Store 等不是 ext；Stat 跟随符号链接
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(dir, "ext.yaml"))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, readErr(dir, err)
 		}
 		var m manifest
 		if err := yaml.Unmarshal(data, &m); err != nil {
@@ -118,6 +121,11 @@ func discover(root string) ([]Info, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+func readErr(path string, err error) error {
+	return domain.NewError(domain.CodeInternal, "cannot read ext directory "+filepath.ToSlash(path)+": "+err.Error(),
+		"check its permissions or set "+EnvDir)
 }
 
 func find(root, name string) (Info, error) {

@@ -100,7 +100,7 @@ func writeExt(t *testing.T, name, manifestYAML string) string {
 }
 
 func helperManifest(mode string) string {
-	return fmt.Sprintf("kind: channel\ndescription: helper\ncommand: [%q, \"-test.run=TestHelperExt\"]\n", os.Args[0]) 
+	return fmt.Sprintf("kind: channel\ndescription: helper\ncommand: [%q, \"-test.run=TestHelperExt\"]\n", os.Args[0])
 }
 
 func apa(t *testing.T, args ...string) (code int, stdout, stderr string) {
@@ -130,6 +130,22 @@ func TestListShowsExtsAndHandlesMissingDir(t *testing.T) {
 	}
 	if _, out, _ := apa(t, "ext", "list", "--pretty"); !strings.Contains(out, "no exts") {
 		t.Fatalf("pretty empty: %q", out)
+	}
+}
+
+func TestListSkipsPlainFilesInExtDir(t *testing.T) {
+	root := writeExt(t, "alpha", "kind: export\ncommand: [x]\n")
+	os.WriteFile(filepath.Join(root, "README.md"), []byte("hi"), 0o644)
+	os.WriteFile(filepath.Join(root, ".DS_Store"), nil, 0o644)
+	os.Symlink(filepath.Join(root, "alpha"), filepath.Join(root, "linked")) // 指向目录的符号链接照常识别
+	for _, args := range [][]string{{"ext", "list"}, {"ext", "check", "--timeout", "1", "alpha"}} {
+		code, out, errb := apa(t, args...)
+		if args[1] == "list" && (code != 0 || !strings.Contains(out, `"alpha"`) || !strings.Contains(out, `"linked"`)) {
+			t.Fatalf("%v: code=%d %s %s", args, code, out, errb)
+		}
+		if args[1] == "check" && code != domain.ExitUsage { // alpha 是 export，应是用法错误而不是读目录失败
+			t.Fatalf("%v: code=%d %s", args, code, errb)
+		}
 	}
 }
 
@@ -290,3 +306,19 @@ func (r *recorder) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 func (r *recorder) WriteHeader(c int) { r.code = c }
+
+func TestListNamesUnreadableExtPath(t *testing.T) {
+	root := writeExt(t, "alpha", "kind: export\ncommand: [x]\n")
+	f := filepath.Join(root, "alpha", "ext.yaml")
+	os.Remove(f)
+	os.Mkdir(f, 0o755) // ext.yaml 是目录：真实读取错误，不能被当作"没有 ext"
+	if code, _, errb := apa(t, "ext", "list"); code != domain.ExitUnclassified || !strings.Contains(errb, "alpha") {
+		t.Fatalf("code=%d %s", code, errb)
+	}
+	f2 := filepath.Join(t.TempDir(), "afile")
+	os.WriteFile(f2, nil, 0o644)
+	t.Setenv(EnvDir, f2) // 目录路径本身是文件
+	if code, _, errb := apa(t, "ext", "list"); code != domain.ExitUnclassified || !strings.Contains(errb, "afile") {
+		t.Fatalf("code=%d %s", code, errb)
+	}
+}
