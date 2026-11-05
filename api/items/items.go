@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/api/screening"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -91,6 +92,9 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	if its == nil {
 		its = []domain.Item{}
 	}
+	for i := range its {
+		its[i] = screening.Redact(its[i], p.Caller.Level)
+	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"items": its})
 }
 
@@ -111,10 +115,11 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	}); err != nil {
 		return err
 	}
-	if rels == nil {
-		rels = []domain.Relation{}
+	shown := screening.Redact(it, p.Caller.Level)
+	if rels == nil || shown.Ask != it.Ask {
+		rels = []domain.Relation{} // 初筛中的事项对非 Web 凭据不带关系
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": it, "relations": rels})
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": shown, "relations": rels})
 }
 
 // write 把请求体原样交给命令。pathKey 非空时把路径 id 写入体的该键（体里自带同名键直接拒绝）。

@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
@@ -24,6 +25,9 @@ import (
 )
 
 const prefix = "apa_run_"
+
+// IsSecret 报告 Bearer 明文是否是运行凭据的形态（入口据此选择认证方式）。
+func IsSecret(s string) bool { return strings.HasPrefix(s, prefix) }
 
 // Module 是本模块在存储层登记的迁移。一次运行一行：重新签发（续接）覆盖旧哈希，旧明文随即失效。
 var Module = store.Module{Name: "runidentity", Migrations: []store.Migration{{

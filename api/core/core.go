@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -238,8 +239,12 @@ func (s *Server) wrap(rt Route) http.Handler {
 // authenticate 先看 Authorization：带了就只按 Bearer 判（无效不回退到 Cookie）；否则看会话 Cookie。
 func (s *Server) authenticate(r *http.Request) (*Principal, error) {
 	if h := r.Header.Get("Authorization"); h != "" {
-		id := command.Bearer{Auth: s.d.Auth, Secret: auth.ParseBearer(h),
-			Origin: auth.Origin{Harness: r.Header.Get("X-APA-Harness"), Session: r.Header.Get("X-APA-Session")}}
+		secret := auth.ParseBearer(h)
+		origin := auth.Origin{Harness: r.Header.Get("X-APA-Harness"), Session: r.Header.Get("X-APA-Session")}
+		var id command.Identity = command.Bearer{Auth: s.d.Auth, Secret: secret, Origin: origin}
+		if runidentity.IsSecret(secret) { // 运行凭据：worker 级、绑定一次运行、没有代答能力
+			id = runidentity.Identity{Secret: secret, Origin: origin}
+		}
 		var caller command.Caller
 		if err := s.d.Store.View(r.Context(), func(tx *store.Tx) (err error) { caller, err = id.Authenticate(tx); return }); err != nil {
 			return nil, err
