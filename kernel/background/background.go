@@ -1,0 +1,655 @@
+// Package background 是后台运行触发（设计 §13.6、§14.11、附录 C.6）：规则动作 start_background_run 的处理器。
+// 命中后依次做前置校验——该事项已有在途运行则跳过并记 Event；链路深度超限只记录不派发；
+// 按当前策略复核（规则仍是 auto、权限档位不超过 Web 设置的上限且声明已提供、task 运行者的执行者在项目名单内）
+// 不通过则转 needs_input——通过后在同一事务写 Run（queued）和 Event（策略版本、规则 id），再经外呼调用器按无头运行声明拉起。
+// 运行结束仍 open、失败或超时，事项转 needs_input，不重试。
+//
+// 运行参数（runner、harness、access、cwd、executor）只来自规则动作、提示词模板和 Web 设置，不来自触发事件的内容（§14.10）。
+// 本包不起子进程也不发网络请求（经 kernel/outcall/proc 入队），不直写其他模块的数据：
+// 事项的创建、关联与阶段转移走命令模型，只写自己的运行关联表，并向 Event 日志追加审计记录。
+// 续接（kernel-bg-resume）与唤醒（kernel-wake-lease）不在本包。
+package background
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+)
+
+// Action 是本模块处理的规则动作名；装配处以 rules.Options.Handlers[Action] = svc.Handler() 登记。
+const Action = "start_background_run"
+
+// 本模块追加的审计记录类型。它们是内部记录，不在对外稳定的事件类型表里（`apa why` 可见）。
+const (
+	EvLaunched = "background.launched" // 写了 Run 并交给外呼调用器
+	EvSkipped  = "background.skipped"  // 该事项已有在途运行，不重复拉起
+	EvRefused  = "background.refused"  // 当前策略复核不通过，不拉起
+)
+
+// Module 是本模块在存储层登记的迁移：一次运行对应的触发事项、目标事项与会话 id（续接用，§13.6），真理源仍是账本。
+// 触发事项与目标事项不同时（runner=task 的目标是子事项）才需要这张表来判断"同一事项只有一个运行"。
+var Module = store.Module{Name: "background", Migrations: []store.Migration{{
+	Version: 1, Name: "create-run-link",
+	SQL: `CREATE TABLE background_run (
+	run_id TEXT PRIMARY KEY,
+	item TEXT NOT NULL,
+	target TEXT NOT NULL,
+	session_id TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX background_run_item ON background_run(item);`,
+}}}
+
+// PackSource 取已加载的能力包（packs.Loader 满足它）。
+type PackSource interface {
+	Get(name string) (*packs.Pack, bool)
+}
+
+// Queue 是外呼调用器的调度入口（*proc.Dispatcher 满足它）。
+type Queue interface {
+	Dispatch(ctx context.Context) error
+}
+
+// Options 配置 Service。Store、Exec、Packs、Queue、RunsDir 必须给出。
+type Options struct {
+	Store *store.Store
+	Exec  *command.Executor
+	Packs PackSource
+	Queue Queue
+	// RunsDir 是运行目录的父目录（$APA_HOME/runs），每次运行一个子目录。
+	RunsDir string
+	// APIURL 经 APA_URL 交给运行者的 CLI。
+	APIURL string
+	// Owner 是本人的标识，作为内核代为转 needs_input 时的 on_behalf_of。
+	Owner string
+	Now   func() time.Time
+	// DefaultTimeout 在模板未声明 timeout 时使用，默认 30 分钟。
+	DefaultTimeout time.Duration
+	// MaxChainDepth 是链路深度阈值，默认与命令管线一致（§14.9）。
+	MaxChainDepth int
+	// OnError 接收 Settle 里无法交给调用方的错误（落账失败等）；可为空。
+	OnError func(runID string, err error)
+}
+
+// Service 是后台运行入口，可并发使用。
+type Service struct{ o Options }
+
+// New 返回 Service。
+func New(o Options) (*Service, error) {
+	if o.Store == nil || o.Exec == nil || o.Packs == nil || o.Queue == nil || o.RunsDir == "" {
+		return nil, errors.New("background: Store, Exec, Packs, Queue and RunsDir are required")
+	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	if o.DefaultTimeout <= 0 {
+		o.DefaultTimeout = 30 * time.Minute
+	}
+	if o.MaxChainDepth <= 0 {
+		o.MaxChainDepth = command.DefaultMaxChainDepth
+	}
+	if o.Owner == "" {
+		o.Owner = "owner"
+	}
+	return &Service{o}, nil
+}
+
+const systemPrincipal = "kernel:background"
+
+// system 是内核在运行结束后替后台运行转 needs_input 的内部身份：目标事项不一定指派给它（main_session 的目标是规则选中的事项本身），
+// 所以用 delegate 级并写明代表本人，授权依据与规则动作一致。
+var system = domain.Actor{Type: domain.ActorSystem, Principal: systemPrincipal, Via: domain.ViaClock}
+
+func invalid(why string) error {
+	return domain.NewError(domain.CodeInvalidRequest, why, "fix the rule or the prompt template")
+}
+
+var tierRank = map[string]int{policy.PermRead: 1, policy.PermEdit: 2, policy.PermFull: 3}
+
+// withinCap：档位不超过本人在 Web 按 harness 设的上限，未按 harness 设置的用默认上限（§13.6）。
+func withinCap(pol policy.Policy, harness, tier string) bool {
+	limit := pol.PermissionCap.ByHarness[harness]
+	if limit == "" {
+		limit = pol.PermissionCap.Default
+	}
+	return tierRank[tier] != 0 && tierRank[tier] <= tierRank[limit]
+}
+
+func str(a map[string]any, k string) string {
+	s, _ := a[k].(string)
+	return s
+}
+
+// spec 是一次拉起的全部参数：来自规则动作、提示词模板和 Web 设置，没有任何一项来自事件内容。
+type spec struct {
+	runner, access, cwd, harness, executor string
+	prompt                                 packs.Prompt
+	timeout                                time.Duration
+}
+
+func (s *Service) parse(c rules.Call) (spec, error) {
+	pack, _, _ := strings.Cut(c.Rule, "/")
+	tmpl := str(c.Action, "prompt")
+	pk, ok := s.o.Packs.Get(pack)
+	if !ok {
+		return spec{}, invalid("pack " + pack + " is not loaded")
+	}
+	pr, ok := pk.Prompts[tmpl]
+	if !ok {
+		return spec{}, invalid("prompt " + pack + "/" + tmpl + " does not exist")
+	}
+	sp := spec{runner: str(c.Action, "runner"), access: str(c.Action, "access"), cwd: str(c.Action, "cwd"),
+		harness: str(c.Action, "harness"), executor: str(c.Action, "executor"), prompt: pr, timeout: s.o.DefaultTimeout}
+	switch {
+	case sp.runner == "task" && pr.Meta.Agent != "task":
+		return sp, invalid("runner task needs a prompt with agent: task, got " + pack + "/" + tmpl)
+	case sp.runner == "main_session" && pr.Meta.RunAs != "main_session":
+		return sp, invalid("runner main_session needs a prompt with run_as: main_session, got " + pack + "/" + tmpl)
+	case sp.runner != "task" && sp.runner != "main_session":
+		return sp, invalid("start_background_run runner must be task or main_session")
+	case sp.runner == "task" && sp.executor == "":
+		return sp, invalid("runner task needs an executor")
+	}
+	if sp.access == "" {
+		sp.access = pr.Meta.Access
+	}
+	if sp.access == "" {
+		sp.access = policy.PermRead
+	}
+	if tierRank[sp.access] == 0 {
+		return sp, invalid("access must be read, edit or full")
+	}
+	if sp.cwd == "" {
+		sp.cwd = pr.Meta.Cwd
+	}
+	if sp.cwd == "" {
+		sp.cwd = "run_dir"
+	}
+	if pr.Meta.Timeout != "" {
+		d, err := time.ParseDuration(pr.Meta.Timeout)
+		if err != nil || d <= 0 {
+			return sp, invalid("timeout " + pr.Meta.Timeout + " is not a positive duration")
+		}
+		sp.timeout = d
+	}
+	return sp, nil
+}
+
+// facts 是拉起前一次性读出的账本事实。
+type facts struct {
+	pv       int
+	pol      policy.Policy
+	mode     string
+	item     domain.Item
+	busy     bool
+	project  *domain.Project
+	rec      executors.Record
+	declared bool
+}
+
+func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err error) {
+	err = s.o.Store.View(ctx, func(tx *store.Tx) error {
+		var err error
+		if f.pv, f.pol, err = policy.Current(tx); err != nil {
+			return err
+		}
+		sts, err := rules.List(tx)
+		if err != nil {
+			return err
+		}
+		for _, st := range sts {
+			if st.Key == c.Rule {
+				f.mode = st.Mode
+			}
+		}
+		if f.item, err = items.Get(tx, c.Item.ID); err != nil {
+			return err
+		}
+		if f.busy, err = s.busy(tx, f.item.ID); err != nil {
+			return err
+		}
+		if f.item.Project != "" {
+			p, err := projects.Get(tx, f.item.Project)
+			if err != nil {
+				return err
+			}
+			f.project = &p
+		}
+		if sp.harness == "" {
+			sp.harness = f.pol.DefaultHarness
+		}
+		if sp.harness == "" {
+			return nil
+		}
+		recs, err := executors.Records(tx, executors.StateActive)
+		if err != nil {
+			return err
+		}
+		for _, r := range recs {
+			if r.Harness == sp.harness && r.Declaration.Headless != nil {
+				f.rec, f.declared = r, true
+			}
+		}
+		return nil
+	})
+	return f, err
+}
+
+// busy：触发事项自己或由它启动的运行目标（task 运行者的子事项）有排队或运行中的 Run（排队中的算在途）。
+func (s *Service) busy(tx *store.Tx, item string) (bool, error) {
+	if b, err := proc.InFlight(tx, item); err != nil || b {
+		return b, err
+	}
+	r, err := tx.Query(`SELECT target FROM background_run WHERE item = ?`, item)
+	if err != nil {
+		return false, err
+	}
+	var targets []string
+	for r.Next() {
+		var t string
+		if err := r.Scan(&t); err != nil {
+			r.Close()
+			return false, err
+		}
+		targets = append(targets, t)
+	}
+	if err := r.Close(); err != nil {
+		return false, err
+	}
+	for _, t := range targets {
+		if b, err := proc.InFlight(tx, t); err != nil || b {
+			return b, err
+		}
+	}
+	return false, nil
+}
+
+// Handler 返回 start_background_run 动作的处理器。
+func (s *Service) Handler() rules.Handler { return s.start }
+
+func (s *Service) start(ctx context.Context, c rules.Call) error {
+	if c.Item == nil {
+		return invalid("start_background_run needs a triggering item, but this rule has none")
+	}
+	sp, err := s.parse(c)
+	if err != nil {
+		return err
+	}
+	f, err := s.read(ctx, c, sp)
+	if err != nil {
+		return err
+	}
+	if f.busy {
+		return s.audit(ctx, c, f, EvSkipped, f.item.ID, "该事项已有在途运行，不重复拉起", nil)
+	}
+	if f.item.ChainDepth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由触达据该事件产出
+		return s.audit(ctx, c, f, domain.EvHealthAlert, f.item.ID, "chain depth exceeded",
+			map[string]any{"chain_depth": f.item.ChainDepth, "threshold": s.o.MaxChainDepth})
+	}
+	harness := sp.harness
+	if harness == "" {
+		harness = f.pol.DefaultHarness
+	}
+	headless, ms := executors.Headless{}, executors.MainSession{}
+	if f.declared {
+		headless = *f.rec.Declaration.Headless
+		if m := f.rec.Declaration.MainSession; m != nil {
+			ms = *m
+		}
+	}
+	checkout := ""
+	if sp.cwd == "project_checkout" && f.project != nil {
+		for _, r := range f.project.Repos {
+			for _, co := range r.Checkouts {
+				if checkout == "" {
+					checkout = co.Path
+				}
+			}
+		}
+	}
+	var reason string
+	switch {
+	case f.mode != rules.ModeAuto:
+		reason = "规则已不是 auto"
+	case harness == "":
+		reason = "规则没有指定 harness，Web 设置里也没有默认 harness"
+	case !f.declared:
+		reason = "没有已确认的无头运行声明：" + harness
+	case sp.runner == "main_session" && ms.Launch == "wake":
+		reason = "harness " + harness + " 声明了唤醒真实主会话，不是无头运行"
+	case headless.Access[sp.access] == nil:
+		reason = "无头运行声明未提供权限档位：" + sp.access
+	case !withinCap(f.pol, harness, sp.access):
+		reason = "权限档位 " + sp.access + " 超过 Web 设置的上限"
+	case sp.runner == "task" && (f.project != nil && !f.project.ExecutorAllowed(sp.executor, s.o.Owner)):
+		reason = "执行者 " + sp.executor + " 不在项目允许的执行者名单内"
+	case sp.cwd == "project_checkout" && checkout == "":
+		reason = "项目没有可用的检出目录"
+	}
+	if reason != "" {
+		return s.refuse(ctx, c, f, reason)
+	}
+
+	target := f.item.ID
+	if sp.runner == "task" { // 内核先建好子事项，运行目标是它（§13.6）
+		if target, err = s.createChild(c, f.item, sp.executor); err != nil {
+			return err
+		}
+	}
+	return s.launch(ctx, c, f, sp, harness, headless, ms, target, checkout)
+}
+
+func (s *Service) createChild(c rules.Call, parent domain.Item, executor string) (string, error) {
+	in := map[string]any{"kind": domain.KindTask, "title": parent.Title, "phase": domain.PhaseOpen,
+		"assignee": executor, "reason": "rule " + c.Rule + ": background task runner"}
+	if parent.Project != "" {
+		in["project"] = parent.Project
+	}
+	res, err := c.Do("item.create", in)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(res.Value, &out); err != nil || out.ID == "" {
+		return "", fmt.Errorf("background: item.create returned no id: %v", err)
+	}
+	_, err = c.Do("item.relate", map[string]any{"from": out.ID, "to": parent.ID, "type": domain.RelParent, "reason": "rule " + c.Rule})
+	return out.ID, err
+}
+
+func newRunID() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "run_" + hex.EncodeToString(b[:]), nil
+}
+
+func expand(in []string, pairs ...string) []string {
+	r := strings.NewReplacer(pairs...)
+	out := make([]string, len(in))
+	for i, a := range in {
+		out[i] = r.Replace(a)
+	}
+	return out
+}
+
+// renderPrompt 只代入内核给出的 id 与目录（C.7 的固定占位符），事件内容无从进入。
+func renderPrompt(body, item, run, project string) string {
+	pairs := []string{}
+	for k, v := range map[string]string{"item_id": item, "run_id": run, "project_id": project} {
+		pairs = append(pairs, "{"+k+"}", v, "{ "+k+" }", v)
+	}
+	return strings.NewReplacer(pairs...).Replace(body)
+}
+
+func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, harness string, hl executors.Headless, ms executors.MainSession, target, checkout string) error {
+	runID, err := newRunID()
+	if err != nil {
+		return err
+	}
+	runDir := filepath.Join(s.o.RunsDir, runID)
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return err
+	}
+	prompt := renderPrompt(sp.prompt.Body, target, runID, f.item.Project)
+	if err := os.WriteFile(filepath.Join(runDir, "prompt.md"), []byte(prompt), 0o600); err != nil {
+		return err
+	}
+	dir := runDir
+	if sp.cwd == "project_checkout" {
+		dir = checkout
+	}
+	argv := expand(hl.Command, "{prompt}", prompt, "{run_dir}", runDir)
+	argv = append(argv, hl.Output...)
+	if sp.runner == "main_session" {
+		argv = append(argv, ms.Args...)
+	}
+	argv = append(argv, hl.Access[sp.access]...)
+	sessionID := ""
+	if len(hl.Session.Assign) > 0 {
+		sessionID = runID
+		argv = append(argv, expand(hl.Session.Assign, "{session_id}", sessionID)...)
+	}
+
+	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}
+	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
+		Harness: harness, SessionID: sessionID, Access: sp.access, Basis: basis, ChainDepth: f.item.ChainDepth,
+		TimeoutSec: int(sp.timeout / time.Second)}
+	err = s.o.Store.Update(ctx, func(tx *store.Tx) error {
+		if target != f.item.ID {
+			it, err := items.Get(tx, target)
+			if err != nil {
+				return err
+			}
+			run.ChainDepth = it.ChainDepth
+		}
+		if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, s.o.Now()); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO background_run (run_id, item, target) VALUES (?, ?, ?)`, runID, f.item.ID, target); err != nil {
+			return err
+		}
+		body, _ := json.Marshal(map[string]any{"run_id": runID, "rule": c.Rule, "runner": sp.runner, "launch": "headless",
+			"harness": harness, "access": sp.access, "target": target})
+		_, err := eventlog.Append(tx, domain.Event{Type: EvLaunched, Object: f.item.ID, Actor: ruleActor(c.Rule), Basis: basis,
+			Reason: "rule " + c.Rule + ": background run", Payload: body, ChainDepth: f.item.ChainDepth, At: s.o.Now()})
+		return err
+	})
+	if err != nil {
+		var de *domain.Error
+		if errors.As(err, &de) && de.Code == domain.CodeConflict { // 并发下别处刚入队：按在途跳过
+			return s.audit(ctx, c, f, EvSkipped, f.item.ID, "该事项已有在途运行，不重复拉起", nil)
+		}
+		return err
+	}
+	return s.o.Queue.Dispatch(ctx)
+}
+
+func ruleActor(rule string) domain.Actor {
+	return domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + rule, Via: domain.ViaRule}
+}
+
+// audit 追加一条带策略版本和规则 id 的审计记录。
+func (s *Service) audit(ctx context.Context, c rules.Call, f facts, typ, object, reason string, extra map[string]any) error {
+	p := map[string]any{"rule": c.Rule, "reason": reason}
+	for k, v := range extra {
+		p[k] = v
+	}
+	body, _ := json.Marshal(p)
+	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
+		_, err := eventlog.Append(tx, domain.Event{Type: typ, Object: object, Actor: ruleActor(c.Rule),
+			Basis: &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}, Reason: reason, Payload: body,
+			ChainDepth: f.item.ChainDepth, At: s.o.Now()})
+		return err
+	})
+}
+
+// refuse 记拒绝记录，并把触发事项转 needs_input 交本人：附原因，选项含重新运行、改派、放弃（§8.3、§13.6）。
+func (s *Service) refuse(ctx context.Context, c rules.Call, f facts, reason string) error {
+	if err := s.audit(ctx, c, f, EvRefused, f.item.ID, reason, nil); err != nil {
+		return err
+	}
+	if f.item.Phase == domain.PhaseNeedsInput {
+		return nil
+	}
+	if _, err := c.Do("item.update", map[string]any{"id": f.item.ID, "ask": askFor(reason), "reason": reason}); err != nil {
+		return err
+	}
+	_, err := c.Do("item.transition", map[string]any{"id": f.item.ID, "to": domain.PhaseNeedsInput, "reason": reason})
+	return err
+}
+
+func askFor(reason string) map[string]any {
+	return map[string]any{"question": "后台运行未完成：" + reason, "options": []domain.AskOption{
+		{ID: "rerun", Label: "重新运行"}, {ID: "reassign", Label: "改派"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
+}
+
+// Env 供 proc.Options.Env 使用：运行启动时为后台运行签发运行凭据并注入环境变量，凭据明文不落盘、不入账本。
+// 重新签发会替换旧凭据，所以重启后重新执行的排队运行也能拿到有效凭据。签发失败返回 nil：运行者没有凭据，
+// 回执缺失，按失败处理，而不是带着空凭据假装成功。
+func (s *Service) Env(r domain.Run) map[string]string {
+	if r.Category != domain.RunBackground {
+		return nil
+	}
+	var env map[string]string
+	err := s.o.Store.Update(context.Background(), func(tx *store.Tx) error {
+		secret, err := runidentity.Issue(tx, r.ID, s.o.Now())
+		if err != nil {
+			return err
+		}
+		it, err := items.Get(tx, r.Target)
+		if err != nil {
+			return err
+		}
+		env = runidentity.Env(s.o.APIURL, secret, r, it.Project)
+		return nil
+	})
+	if err != nil {
+		s.fail(r.ID, fmt.Errorf("issue run credential: %w", err))
+		return nil
+	}
+	return env
+}
+
+func (s *Service) fail(runID string, err error) {
+	if s.o.OnError != nil {
+		s.o.OnError(runID, err)
+	}
+}
+
+// Recovered 处理内核重启时无存活进程、已被 proc.Dispatcher.Recover 按失败落账的运行（§13.6）。
+func (s *Service) Recovered(ctx context.Context, failed []domain.Run) {
+	for _, r := range failed {
+		s.Settle(ctx, proc.Result{Run: r, Reason: "no live process after restart"})
+	}
+}
+
+// sessionOf 取 stdout 末段结构化摘要里的会话 id；没有摘要返回空。
+func sessionOf(stdout []byte) string {
+	lines := strings.Split(strings.TrimRight(string(stdout), "\r\n \t"), "\n")
+	var sm struct {
+		SessionID string `json:"session_id"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(lines[len(lines)-1])), &sm) != nil {
+		return ""
+	}
+	return sm.SessionID
+}
+
+// Settle 在运行结束后收尾（供 proc.Options.OnResult 调用；非后台运行忽略）。
+// 失败、超时，或运行结束时目标事项仍是 open，都转 needs_input，不重试（§13.6）；
+// 目标事项已离开 open（done、waiting、运行者自己提了问题）则保留运行者写下的状态。
+func (s *Service) Settle(ctx context.Context, res proc.Result) {
+	run := res.Run
+	if run.Category != domain.RunBackground {
+		return
+	}
+	if err := s.settle(ctx, res); err != nil {
+		s.fail(run.ID, err)
+	}
+}
+
+func (s *Service) settle(ctx context.Context, res proc.Result) error {
+	run := res.Run
+	var it domain.Item
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { it, err = items.Get(tx, run.Target); return }); err != nil {
+		return err
+	}
+	failure := ""
+	switch {
+	case run.State != domain.RunSucceeded:
+		failure = "运行" + string(run.State) + "：" + res.Reason
+	case it.Phase == domain.PhaseOpen:
+		failure = "运行结束，事项仍是 open，没有回执"
+	}
+	if failure != "" && it.Phase != domain.PhaseNeedsInput && !it.Phase.Terminal() { // 运行者自己提了问题就保留它的问题
+		if err := s.needsInput(ctx, it.ID, failure); err != nil {
+			return err
+		}
+	}
+	return s.record(ctx, run, it.ID, sessionOf(res.Stdout), failure)
+}
+
+func (s *Service) needsInput(ctx context.Context, itemID, reason string) error {
+	for _, step := range []struct {
+		cmd string
+		in  map[string]any
+	}{
+		{"item.update", map[string]any{"id": itemID, "ask": askFor(reason), "reason": "background run failed"}},
+		{"item.transition", map[string]any{"id": itemID, "to": domain.PhaseNeedsInput, "reason": "background run: " + reason}},
+	} {
+		b, _ := json.Marshal(step.in)
+		a := system
+		a.OnBehalfOf = s.o.Owner
+		_, err := s.o.Exec.Do(ctx, command.Request{Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate},
+			Command: step.cmd, Input: b, Evidence: "background run " + itemID, Owner: s.o.Owner})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// record 记会话 id（续接用），并追加一条 actor=agent 的 Event。
+func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID, failure string) error {
+	if sessionID == "" {
+		sessionID = run.SessionID
+	}
+	state := "succeeded"
+	if failure != "" {
+		state = "failed"
+	}
+	body, err := json.Marshal(map[string]any{"run_id": run.ID, "category": "background", "runner": run.Runner, "state": state,
+		"session_id": sessionID, "error": failure})
+	if err != nil {
+		return err
+	}
+	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
+		if _, err := tx.Exec(`UPDATE background_run SET session_id = ? WHERE run_id = ?`, sessionID, run.ID); err != nil {
+			return err
+		}
+		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: itemID,
+			Actor:  domain.Actor{Type: domain.ActorAgent, Principal: "agent:background", Via: domain.ViaClock, Run: run.ID, Harness: run.Harness},
+			Reason: "background " + state, Payload: body, ChainDepth: run.ChainDepth, Basis: run.Basis, At: s.o.Now()})
+		return err
+	})
+}
+
+// SessionOf 返回某事项最近一次后台运行记下的会话 id（触发事项或目标事项均可）；没有则 ok 为假。
+func SessionOf(tx *store.Tx, itemID string) (sessionID string, ok bool, err error) {
+	r, err := tx.Query(`SELECT session_id FROM background_run WHERE (item = ? OR target = ?) AND session_id != '' ORDER BY rowid DESC LIMIT 1`, itemID, itemID)
+	if err != nil {
+		return "", false, err
+	}
+	defer r.Close()
+	if !r.Next() {
+		return "", false, r.Err()
+	}
+	if err := r.Scan(&sessionID); err != nil {
+		return "", false, err
+	}
+	return sessionID, true, nil
+}
