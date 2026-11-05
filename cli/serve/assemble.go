@@ -63,6 +63,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/verify"
 	kprojects "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	kscreening "github.com/xiaohei-info/awesome-personal-agent/kernel/screening"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
@@ -100,6 +101,7 @@ type kernel struct {
 	result func(proc.Result) // 运行终态的分派，与调度器的 OnResult 同一条路
 	rn     *runner.Runner
 	wh     *webhook.Service
+	ret    *retention.Service
 	in     *inbound.Service
 	eng    *rules.Engine
 	fu     *followup.Service
@@ -158,6 +160,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	a := auth.New(nil)
 	if k.wh, err = webhook.New(webhook.Options{Store: st, Exec: x, Packs: ld, Auth: a, Secrets: webhook.KeyFiles{Dir: l.WebhookKeys, Auth: a},
 		Retention: cfg.IngestRetention, ScriptRoot: l.Sources, OnError: logErr("webhook")}); err != nil {
+		return nil, err
+	}
+	if k.ret, err = retention.New(retention.Options{Store: st, Ingest: k.wh, Layout: l, RunRetention: cfg.RunRetention}); err != nil {
 		return nil, err
 	}
 	verifyAgent, err := verify.Handler(verify.Options{Store: st, Judge: judge})
@@ -374,7 +379,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 		maintain := func() {
 			report("inbound", k.in.Process(ctx))
 			report("webhook", k.wh.Process(ctx))
-			report("webhook expire", k.wh.Expire(ctx))
+			report("retention", k.ret.Sweep(ctx))
 			report("dispatch", k.disp.Dispatch(ctx))
 			report("rules", k.eng.Drain(ctx))
 			report("follow-up", k.fu.Drain(ctx))
