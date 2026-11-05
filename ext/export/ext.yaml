@@ -1,0 +1,3 @@
+kind: export
+description: 订阅事件，把事项与材料单向导出为本地 Markdown（APA_EXPORT_DIR），自持游标
+command: [go, run, .]
