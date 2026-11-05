@@ -21,6 +21,7 @@ from helpers import HEADLESS, ROOT, kernel_argv
 
 REAL_HOME = pathlib.Path(os.environ.get("HERMES_HOME", pathlib.Path.home() / ".hermes"))
 REQUIRE_LIVE = os.environ.get("APA_REQUIRE_LIVE") == "1"
+EXPECTED_TERMINAL_MARKER = "MARK_TOKEN_VISIBLE"  # measured on v0.22.5; change with the README row if a Hermes version differs
 
 
 def _problem():
@@ -133,7 +134,6 @@ def test_flow_bg_main_session_and_resume_headless_run_delegates_asks_and_resumes
     # ACT-RES-01: the runner submits the decision request with resume_note, then ends (process exited rc 0)
     ask = by_path["/v1/items/P1/ask"]["body"]
     assert ask["ask"]["question"] == "Renew?" and ask["ask"]["resume_note"] == "continue after answer"
-    # §21.3: does APA_TOKEN survive Hermes' terminal env scrubbing? recorded either way in the README
     assert "run_live1" in result["text"]
 
     # ACT-RES-02: --resume keeps the same session and the runner still remembers the earlier turn
@@ -156,3 +156,14 @@ def test_unknown_session_fails_with_exit_1_and_an_error_result(run_hermes):
 def test_read_tier_has_no_terminal_or_file_tools(run_hermes):
     rc, result, _ = run_hermes("Try to run the shell command `echo hi` with a terminal tool. If you have no terminal tool, reply exactly NO_TERMINAL.", tier="read")
     assert rc == 0 and "NO_TERMINAL" in result["text"]
+
+
+def test_terminal_tool_credential_visibility_is_measured(run_hermes):
+    """§21.3: does the run credential survive into Hermes' `terminal` subprocess? Asserts the marker the shell really printed."""
+    rc, result, _ = run_hermes(
+        "Use the terminal tool exactly once with this command and nothing else: "
+        "sh -c 'if [ -n \"$APA_TOKEN\" ]; then echo MARK_TOKEN_VISIBLE; else echo MARK_TOKEN_SCRUBBED; fi'. "
+        "Then reply with only the marker word it printed.")
+    assert rc == 0
+    seen = [m for m in ("MARK_TOKEN_VISIBLE", "MARK_TOKEN_SCRUBBED") if m in result["text"]]
+    assert seen == [EXPECTED_TERMINAL_MARKER], result["text"]
