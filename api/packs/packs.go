@@ -176,7 +176,7 @@ func (a *api) createInstance(w http.ResponseWriter, r *http.Request, p *core.Pri
 }
 
 // patchInstance：params、project 走 instance.update，enabled 走 instance.toggle。
-// 两类同时出现时先 update 再 toggle；toggle 的授权与 update 相同、目标已验证存在，所以第二步不会因请求本身而失败。
+// 两类同时出现时先 update 再 toggle；enabled 的形状已预先校验，toggle 的授权与 update 相同，所以第二步不会因请求本身而失败。
 func (a *api) patchInstance(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	id := r.PathValue("id")
 	in, err := body(r)
@@ -185,6 +185,11 @@ func (a *api) patchInstance(w http.ResponseWriter, r *http.Request, p *core.Prin
 	}
 	toggle := map[string]json.RawMessage{}
 	if en, ok := in["enabled"]; ok {
+		// 先于 update 校验：否则 update 已提交后 toggle 才拒绝，调用方看到错误而改动已生效。
+		var b *bool
+		if json.Unmarshal(en, &b) != nil || b == nil {
+			return invalid("enabled must be true or false", "send a JSON boolean")
+		}
 		toggle["enabled"] = en
 		delete(in, "enabled")
 	}

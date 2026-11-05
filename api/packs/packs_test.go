@@ -330,3 +330,20 @@ func TestRuleModeFailureSemantics(t *testing.T) {
 		}
 	}
 }
+
+// 评审阻塞项：非法 enabled 不能让 params 先落地再报错。
+func TestPatchInstanceBadEnabledChangesNothing(t *testing.T) {
+	e := setup(t)
+	dlg := e.bearer(auth.Delegate)
+	in := decode[instances.Instance](t, e.do("POST", "/v1/instances", `{"pack":"brief","params":{"schedule":"24h"}}`, dlg))
+	for _, bad := range []string{`"yes"`, `null`, `1`} {
+		rec := e.do("PATCH", "/v1/instances/"+in.ID, `{"params":{"schedule":"48h"},"enabled":`+bad+`}`, dlg)
+		if rec.Code != 400 {
+			t.Fatalf("enabled=%s: %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+	list := decode[struct{ Instances []instances.Instance }](t, e.do("GET", "/v1/instances", "", dlg))
+	if len(list.Instances) != 1 || !strings.Contains(string(list.Instances[0].Params), "24h") || !list.Instances[0].Enabled {
+		t.Fatalf("instance changed despite 400: %+v", list.Instances)
+	}
+}
