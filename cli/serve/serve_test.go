@@ -375,9 +375,6 @@ var notYetImplemented = map[string]bool{
 	"GET /blobs/{hash}":              true,
 	"GET /agents-md":                 true,
 	"POST /agents-md/check":          true,
-	"POST /deliveries/{id}/answer":   true,
-	"GET /forms/{一次性令牌}":             true,
-	"POST /forms/{一次性令牌}":            true,
 	"GET /health":                    true,
 	"/settings/purge":                true,
 }
@@ -386,7 +383,7 @@ var notYetImplemented = map[string]bool{
 func mounted(t *testing.T, addr net.Addr, method, p string) bool {
 	t.Helper()
 	url := "http://" + addr.String() + "/v1" + p
-	if strings.HasPrefix(p, "/ingest/") { // 外部系统 URL 不带版本前缀（附录 B）
+	if strings.HasPrefix(p, "/ingest/") || strings.HasPrefix(p, "/forms/") { // 外部系统与人点开的链接不带版本前缀（附录 B）
 		url = "http://" + addr.String() + p
 	}
 	req, err := http.NewRequest(method, url, nil)
