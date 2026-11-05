@@ -23,9 +23,12 @@ const timestampSkew = 5 * time.Minute
 
 var errUnauthenticated = errors.New("signature check failed")
 
-// SecretSource 给出某来源当前有效的签名密钥（轮换宽限期内新旧并存）。内核只存凭据哈希，HMAC 要明文，所以由宿主提供。
+// SecretSource 保管 HMAC 方案的签名密钥明文（KeyFiles 满足）。其他凭据只存哈希，HMAC 校验要明文（§14.2）。
 type SecretSource interface {
-	Secrets(sourceID string) ([][]byte, error)
+	// Secrets 给出某来源当前有效的签名密钥（轮换宽限期内新旧并存），在校验的事务里调用。
+	Secrets(tx *store.Tx, sourceID string) ([][]byte, error)
+	// Keep 在签发或轮换的事务里记下新密钥并保留仍有效的旧密钥；secret 为空表示不再保管该来源的明文。
+	Keep(tx *store.Tx, sourceID, secret string) error
 }
 
 // verify 按方案数据校验请求；signed 表示通过的是签名（HMAC）而不只是共享令牌。
@@ -44,14 +47,14 @@ func (s *Service) verify(tx *store.Tx, sc packs.WebhookScheme, sourceID string, 
 		}
 		return false, "", nil
 	case "hmac-sha256":
-		return s.hmacOK(sha256.New, sc, sourceID, got, h, body, now)
+		return s.hmacOK(tx, sha256.New, sc, sourceID, got, h, body, now)
 	case "hmac-sha1":
-		return s.hmacOK(sha1.New, sc, sourceID, got, h, body, now)
+		return s.hmacOK(tx, sha1.New, sc, sourceID, got, h, body, now)
 	}
 	return false, "unsupported algorithm " + sc.Algorithm, errUnauthenticated
 }
 
-func (s *Service) hmacOK(hf func() hash.Hash, sc packs.WebhookScheme, sourceID, got string, h map[string]string, body []byte, now time.Time) (bool, string, error) {
+func (s *Service) hmacOK(tx *store.Tx, hf func() hash.Hash, sc packs.WebhookScheme, sourceID, got string, h map[string]string, body []byte, now time.Time) (bool, string, error) {
 	sig, err := hex.DecodeString(strings.TrimSpace(got))
 	if err != nil {
 		return false, "signature is not hex", errUnauthenticated
@@ -71,7 +74,7 @@ func (s *Service) hmacOK(hf func() hash.Hash, sc packs.WebhookScheme, sourceID, 
 	if tpl := sc.SignedPayload; tpl != "" && tpl != "body" {
 		base = []byte(strings.NewReplacer("{timestamp}", ts, "{body}", string(body)).Replace(tpl))
 	}
-	secrets, err := s.o.Secrets.Secrets(sourceID)
+	secrets, err := s.o.Secrets.Secrets(tx, sourceID)
 	if err != nil {
 		return false, "", fmt.Errorf("webhook: secrets for %s: %w", sourceID, err)
 	}

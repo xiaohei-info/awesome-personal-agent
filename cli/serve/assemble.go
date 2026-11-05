@@ -76,12 +76,6 @@ var bundledPull = []string{"http-json", "dir-watch"}
 // hostOwner 是启动流程读主机配置文件时的身份：本人在主机上写的配置，与 Web 上的本人同级（§14.12）。
 var hostOwner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: owner, Via: domain.ViaWeb}, Level: authz.LevelWeb}
 
-// noSecrets：账本只存凭据哈希，HMAC 校验要的明文目前没有保管处，所以 HMAC 方案一律校验失败（401），不放行。
-// shortcut: 只有共享 token 方案可用，webhook 密钥的明文保管方案定下后换成真实来源。
-type noSecrets struct{}
-
-func (noSecrets) Secrets(string) ([][]byte, error) { return nil, nil }
-
 // kernel 是装配好的内核：assemble 只构造和登记，不写账本、不起进程，这些都在 start 与 runLoops。
 type kernel struct {
 	st     *store.Store
@@ -149,7 +143,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 	a := auth.New(nil)
-	if k.wh, err = webhook.New(webhook.Options{Store: st, Exec: x, Packs: ld, Auth: a, Secrets: noSecrets{},
+	if k.wh, err = webhook.New(webhook.Options{Store: st, Exec: x, Packs: ld, Auth: a, Secrets: webhook.KeyFiles{Dir: l.WebhookKeys, Auth: a},
 		Retention: cfg.IngestRetention, ScriptRoot: l.Sources, OnError: logErr("webhook")}); err != nil {
 		return nil, err
 	}

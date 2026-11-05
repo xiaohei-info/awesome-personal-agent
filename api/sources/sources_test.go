@@ -1,9 +1,15 @@
 package sources
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -39,6 +45,7 @@ type fakePacks struct{}
 func (fakePacks) List() []*packs.Pack {
 	return []*packs.Pack{{Name: "hooks", WebhookSchemes: []packs.WebhookScheme{
 		{ID: "shared", SignatureHeader: "X-Hook-Key", Algorithm: "token", DeliveryIDHeader: "X-Delivery"},
+		{ID: "signed", SignatureHeader: "X-Sig", SignaturePrefix: "sha256=", Algorithm: "hmac-sha256", DeliveryIDHeader: "X-Delivery"},
 	}}}
 }
 
@@ -49,18 +56,16 @@ func (noJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
 	panic("judge must not be called")
 }
 
-type noSecrets struct{}
-
-func (noSecrets) Secrets(string) ([][]byte, error) { return nil, nil }
-
 type env struct {
-	t   *testing.T
-	st  *store.Store
-	au  *auth.Auth
-	srv *core.Server
-	wh  *webhook.Service
-	x   *command.Executor
-	now time.Time
+	t    *testing.T
+	st   *store.Store
+	au   *auth.Auth
+	srv  *core.Server
+	wh   *webhook.Service
+	x    *command.Executor
+	now  time.Time
+	dir  string // 账本目录
+	keys string // HMAC 接收密钥文件目录
 }
 
 func (e *env) clock() time.Time { return e.now }
@@ -74,19 +79,20 @@ func setup(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	st, err := store.Open(t.TempDir(), reg)
+	dir := t.TempDir()
+	st, err := store.Open(dir, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	e := &env{t: t, st: st, now: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)}
+	e := &env{t: t, st: st, now: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), dir: dir, keys: filepath.Join(t.TempDir(), "webhook-keys")}
 	x := command.New(st, e.clock)
 	e.x = x
 	e.au = auth.New(e.clock)
 	if err := registry.Register(x, registry.Options{Bundled: []string{"fetch-feed"}}); err != nil {
 		t.Fatal(err)
 	}
-	e.wh, err = webhook.New(webhook.Options{Store: st, Exec: x, Packs: fakePacks{}, Auth: e.au, Secrets: noSecrets{}, Now: e.clock})
+	e.wh, err = webhook.New(webhook.Options{Store: st, Exec: x, Packs: fakePacks{}, Auth: e.au, Secrets: webhook.KeyFiles{Dir: e.keys, Auth: e.au}, Now: e.clock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,6 +446,93 @@ func TestWebhookKeyIngestsAndReplay(t *testing.T) {
 		t.Fatalf("second rotate: %d %s", r.Code, r.Body)
 	}
 	e.wh.Wait()
+}
+
+func signedReceive(e *env, key, body, delivery string) webhook.Response {
+	m := hmac.New(sha256.New, []byte(key))
+	m.Write([]byte(body))
+	return e.wh.Receive(context.Background(), webhook.Request{SourceID: "src_signed",
+		Header: map[string]string{"X-Sig": "sha256=" + hex.EncodeToString(m.Sum(nil)), "X-Delivery": delivery}, Body: []byte(body)})
+}
+
+// flow-webhook-hmac（§14.2）：HMAC 方案的接收密钥明文只在 0600 密钥文件里，签名按它校验；
+// 账本、事件和任何 API 都读不回明文；轮换后新旧并存，宽限期满旧的失效并从文件里删掉。共享 token 方案不留明文。
+func TestHMACWebhookKeyIsKeptOnlyInKeyFile(t *testing.T) {
+	e := setup(t)
+	obs, dlg := e.token(auth.Observer), e.token(auth.Delegate)
+	e.do(dlg, "POST", "/v1/sources", hook)
+	if r := e.do(dlg, "POST", "/v1/sources", `{"id":"src_signed","type":"webhook","source_type":"forge","config":{"scheme":"signed"}}`); r.Code != 201 {
+		t.Fatalf("register: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(dlg, "POST", "/v1/sources/src_hook/webhook", ""); r.Code != 201 {
+		t.Fatalf("token key: %d %s", r.Code, r.Body)
+	}
+	if _, err := os.Stat(filepath.Join(e.keys, "src_hook")); !os.IsNotExist(err) {
+		t.Fatalf("shared-token sources keep only the hash, key file: %v", err)
+	}
+
+	var k1, k2 struct{ Secret string }
+	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "").into(&k1)
+	file := filepath.Join(e.keys, "src_signed")
+	fi, err := os.Stat(file)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("key file must exist with mode 0600: %v %v", fi, err)
+	}
+	if di, _ := os.Stat(e.keys); di.Mode().Perm() != 0o700 {
+		t.Fatalf("key dir mode: %v", di.Mode())
+	}
+
+	if got := signedReceive(e, k1.Secret, `{"n":1}`, "s1"); got.Status != 200 {
+		t.Fatalf("valid signature: %d %s", got.Status, got.Body)
+	}
+	if got := signedReceive(e, "apa_whk_wrong", `{"n":2}`, "s2"); got.Status != 401 {
+		t.Fatalf("wrong key: %d", got.Status)
+	}
+	tampered := e.wh.Receive(context.Background(), webhook.Request{SourceID: "src_signed",
+		Header: map[string]string{"X-Sig": "sha256=00", "X-Delivery": "s3"}, Body: []byte(`{}`)})
+	if tampered.Status != 401 {
+		t.Fatalf("bad signature: %d", tampered.Status)
+	}
+	// 共享 token 方案的凭据不能拿来当 HMAC 密钥，反之亦然
+	if got := receive(e, "src_signed", k1.Secret, `{}`, "s4"); got.Status != 401 {
+		t.Fatalf("hmac key sent as a token: %d", got.Status)
+	}
+
+	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "").into(&k2)
+	if signedReceive(e, k1.Secret, `{"n":5}`, "s5").Status != 200 || signedReceive(e, k2.Secret, `{"n":6}`, "s6").Status != 200 {
+		t.Fatal("old and new keys must both verify within the grace period")
+	}
+	e.now = e.now.Add(RotateGrace + time.Minute)
+	if got := signedReceive(e, k1.Secret, `{"n":7}`, "s7"); got.Status != 401 {
+		t.Fatalf("old key after grace: %d", got.Status)
+	}
+	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "")
+	if b, _ := os.ReadFile(file); strings.Contains(string(b), k1.Secret) || !strings.Contains(string(b), k2.Secret) {
+		t.Fatalf("rotation must drop expired keys and keep the valid one: %q", b)
+	}
+	e.wh.Wait()
+
+	// 读不回：来源、入站记录、事件、账本文件里都没有明文
+	for _, p := range []string{"/v1/sources", "/v1/sources/src_signed", "/v1/sources/src_signed/ingests"} {
+		if r := e.do(obs, "GET", p, ""); r.Code != 200 || strings.Contains(r.Body.String(), k1.Secret) || strings.Contains(r.Body.String(), k2.Secret) {
+			t.Fatalf("%s leaks the key: %d", p, r.Code)
+		}
+	}
+	if ev := eventPayloads(e); strings.Contains(ev, k1.Secret) || strings.Contains(ev, k2.Secret) {
+		t.Fatal("events must not carry the key")
+	}
+	if err := filepath.WalkDir(e.dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		if err == nil && (bytes.Contains(b, []byte(k1.Secret)) || bytes.Contains(b, []byte(k2.Secret))) {
+			t.Errorf("ledger file %s contains the plaintext key", filepath.Base(p))
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestIngestViewEncodesBinaryAndPurged(t *testing.T) {

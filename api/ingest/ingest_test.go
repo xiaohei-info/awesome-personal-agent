@@ -54,7 +54,8 @@ func (f *fakePacks) List() []*packs.Pack { return []*packs.Pack{f.p} }
 
 type fakeSecrets struct{}
 
-func (fakeSecrets) Secrets(string) ([][]byte, error) { return [][]byte{[]byte(secret)}, nil }
+func (fakeSecrets) Secrets(*store.Tx, string) ([][]byte, error) { return [][]byte{[]byte(secret)}, nil }
+func (fakeSecrets) Keep(*store.Tx, string, string) error        { return nil }
 
 type failJudge struct{ t *testing.T }
 
