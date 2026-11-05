@@ -490,9 +490,10 @@ func apply(ctx context.Context, x *command.Executor, id command.Identity, s Sour
 	if _, err := x.Do(ctx, command.Request{Identity: id, Command: upd, Input: u}); err != nil {
 		return err
 	}
-	if s.Enabled != nil {
-		e, _ := json.Marshal(enabledInput{ID: s.ID, Enabled: *s.Enabled})
-		_, err = x.Do(ctx, command.Request{Identity: id, Command: CmdSetEnabled, Input: e})
+	if s.Enabled == nil {
+		return nil
 	}
+	e, _ := json.Marshal(enabledInput{ID: s.ID, Enabled: *s.Enabled})
+	_, err = x.Do(ctx, command.Request{Identity: id, Command: CmdSetEnabled, Input: e})
 	return err
 }

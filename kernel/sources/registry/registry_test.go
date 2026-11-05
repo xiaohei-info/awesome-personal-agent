@@ -410,3 +410,31 @@ func TestHostConfigFileRegistersAndOverridesScripts(t *testing.T) {
 		t.Fatalf("missing file: %v", err)
 	}
 }
+
+func TestHostConfigFileReloadWithoutEnabledIsIdempotent(t *testing.T) {
+	e := setup(t)
+	path := filepath.Join(t.TempDir(), "sources.json")
+	body := `{"sources":[
+		{"id":"src_a","type":"script","command":"/opt/a.sh","schedule":"1h","timeout":30},
+		{"id":"src_b","type":"script","command":"/opt/b.sh","schedule":"1h","timeout":30}]}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := LoadFile(bg, e.x, owner, path); err != nil {
+			t.Fatalf("load %d: %v", i, err)
+		}
+	}
+	// 第二次加载后，排在后面的条目也被更新。
+	body = `{"sources":[
+		{"id":"src_a","type":"script","command":"/opt/a.sh","schedule":"1h","timeout":30},
+		{"id":"src_b","type":"script","command":"/opt/b2.sh","schedule":"1h","timeout":30},
+		{"id":"src_c","type":"script","command":"/opt/c.sh","schedule":"1h","timeout":30}]}`
+	_ = os.WriteFile(path, []byte(body), 0o600)
+	if err := LoadFile(bg, e.x, owner, path); err != nil {
+		t.Fatal(err)
+	}
+	if e.get(t, "src_b").Command != "/opt/b2.sh" || e.get(t, "src_c").Command != "/opt/c.sh" {
+		t.Fatal("later entries must be applied")
+	}
+}
