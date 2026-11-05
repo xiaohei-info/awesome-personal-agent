@@ -176,3 +176,15 @@ func TestCamelCaseBrandNamesAreCaught(t *testing.T) {
 		}
 	}
 }
+
+func TestAllDesignHarnessNames(t *testing.T) {
+	for _, n := range []string{"gemini", "opencode", "openclaw", "OpenCode", "OpenClaw"} {
+		root := t.TempDir()
+		write(t, root, "packs/p/p.yaml", "target: "+n+"\n")
+		write(t, root, "kernel/m/m.go", "package m\nvar Use"+strings.ToUpper(n[:1])+n[1:]+" = 1\n")
+		got := rules(t, root)
+		if !has(got, "harness-name packs/p/p.yaml") || !has(got, "kernel-name kernel/m/m.go") {
+			t.Errorf("%s not caught: %v", n, got)
+		}
+	}
+}

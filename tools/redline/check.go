@@ -29,8 +29,9 @@ var (
 
 // 具体产品名（小写单词）。harness 名同时约束 sources/ext/packs。
 var (
-	harnessNames = []string{"hermes", "claude", "codex", "dsh"}
-	productNames = append([]string{"telegram", "openai", "anthropic", "gemini", "himalaya", "gog",
+	// 设计点名的 harness；Pi、Cursor 词太通用（cursor 还是游标），有意不列入。
+	harnessNames = []string{"hermes", "claude", "codex", "dsh", "gemini", "opencode", "openclaw"}
+	productNames = append([]string{"telegram", "openai", "anthropic", "himalaya", "gog",
 		"slack", "discord", "feishu", "dingtalk", "wechat", "github"}, harnessNames...)
 )
 
