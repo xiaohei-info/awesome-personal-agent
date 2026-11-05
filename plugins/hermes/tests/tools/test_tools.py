@@ -50,8 +50,22 @@ def tools():
     return {n: h for n, (_, h) in ctx.tools.items()}
 
 
-def test_registers_the_eight_tools(tools):
-    assert set(tools) == {"apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
+TABLE = [{"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"], "host": "work-host",
+          "command": ["codex", "exec", "{prompt}"]},
+         {"id": "hermes.sub", "kind": "native-subagent", "scenarios": ["research"]},
+         {"id": "owner", "kind": "human"}]
+
+
+@pytest.fixture
+def table(tmp_path, monkeypatch):
+    p = tmp_path / "executors.json"
+    p.write_text(json.dumps(TABLE))
+    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(p))
+    return p
+
+
+def test_registers_the_ten_tools(tools):
+    assert set(tools) == {"apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
                           "apa_report", "apa_declare_executors", "apa_executor_call"}
 
 
@@ -71,6 +85,11 @@ def test_web_only_refusal_is_returned_untouched_and_not_retried(tools, apa, monk
 
 
 @pytest.mark.parametrize("tool,args,argv", [
+    ("apa_propose", {"kind": "task", "title": "T", "tags": "a,b"}, ["propose", "--kind", "task", "--title", "T", "--tags", "a,b"]),
+    ("apa_ask", {"id": "i", "question": "Q?", "option": ["A=yes", "B=no"], "next": ["A=open"], "free_text": True,
+                 "default_on_timeout": "A"},
+     ["ask", "i", "--question", "Q?", "--option", "A=yes", "--option", "B=no", "--next", "A=open", "--free-text",
+      "--default-on-timeout", "A"]),
     ("apa_accept", {"id": "i", "evidence": "ok"}, ["accept", "i", "--evidence", "ok"]),
     ("apa_dismiss", {"id": "i", "reason": "dup"}, ["dismiss", "i", "--reason", "dup"]),
     ("apa_executors", {"project": "p1"}, ["executors", "--project", "p1"]),
@@ -96,21 +115,37 @@ def test_missing_apa_is_a_real_error_not_fake_success(tools, monkeypatch):
     assert r["ok"] is False and "cannot run apa" in r["error"]
 
 
-def test_declare_sends_ids_kinds_scenarios_but_no_call_commands(tools, apa):
+def test_declare_sends_configured_executors_without_call_commands(tools, apa, table):
     tools["apa_declare_executors"]({}, session_id="s")
     assert calls(apa) == [{"argv": ["declare", "-"], "session": "s"}]
     body = json.loads((apa / "stdin").read_text())
     assert body["harness"] == "hermes"
-    assert {e["id"] for e in body["executors"]} == {"hermes.subagent", "hermes.codex"}
-    assert all(set(e) == {"id", "kind", "scenarios"} for e in body["executors"])
-    assert "codex exec" not in json.dumps(body) and "delegate_task" not in json.dumps(body)
+    assert body["executors"] == [
+        {"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"], "host": "work-host"},
+        {"id": "hermes.sub", "kind": "native-subagent", "scenarios": ["research"]},
+        {"id": "owner", "kind": "human", "scenarios": []}]
+    assert "codex" not in json.dumps(body)
 
 
-def test_executor_call_maps_ids_to_hermes_invocations(tools):
-    sub = json.loads(tools["apa_executor_call"]({"executor": "hermes.subagent", "id": "c1", "task": "fix it"}))
-    assert sub["use_tool"] == "delegate_task" and "fix it" in sub["arguments"]["tasks"][0]["goal"]
-    assert "apa report c1" in sub["arguments"]["tasks"][0]["goal"]
-    cli = json.loads(tools["apa_executor_call"]({"executor": "hermes.codex", "id": "c1", "task": "it's ok"}))
+def test_declare_without_configured_executors_is_an_error_and_sends_nothing(tools, apa, tmp_path, monkeypatch):
+    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(tmp_path / "missing.json"))
+    r = json.loads(tools["apa_declare_executors"]({}, session_id="s"))
+    assert r["ok"] is False and "no executors configured" in r["error"]
+    assert not (apa / "log").exists()
+
+
+def test_malformed_table_is_reported(tools, tmp_path, monkeypatch):
+    p = tmp_path / "bad.json"
+    p.write_text('[{"id":"x","kind":"external-cli"}]')
+    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(p))
+    r = json.loads(tools["apa_executor_call"]({"executor": "x", "id": "c", "task": "t"}))
+    assert r["ok"] is False and "needs a command" in r["error"]
+
+
+def test_executor_call_maps_configured_ids_to_hermes_invocations(tools, table):
+    sub = json.loads(tools["apa_executor_call"]({"executor": "hermes.sub", "id": "c1", "task": "fix it"}))
+    assert sub["use_tool"] == "delegate_task" and "apa report c1" in sub["arguments"]["tasks"][0]["goal"]
+    cli = json.loads(tools["apa_executor_call"]({"executor": "work-host.cli", "id": "c1", "task": "it's ok"}))
     assert cli["use_tool"] == "terminal" and cli["arguments"]["command"].startswith("codex exec ")
-    bad = json.loads(tools["apa_executor_call"]({"executor": "x.y", "id": "c1", "task": "t"}))
-    assert "unknown executor" in bad["error"]
+    assert "unknown executor" in json.loads(tools["apa_executor_call"]({"executor": "x.y", "id": "c", "task": "t"}))["error"]
+    assert "human" in json.loads(tools["apa_executor_call"]({"executor": "owner", "id": "c", "task": "t"}))["error"]

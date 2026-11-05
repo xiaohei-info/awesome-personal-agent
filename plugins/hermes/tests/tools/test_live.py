@@ -93,7 +93,11 @@ def hermes(tmp_path, apa_bin, kernel):
     (home / "plugins").mkdir(parents=True)
     (home / "plugins" / "apa-tools").symlink_to(TOOLS)
     (home / "config.yaml").write_text("plugins:\n  enabled:\n    - apa-tools\n")
-    env = {**os.environ, "HERMES_HOME": str(home), "APA_BIN": apa_bin, "APA_URL": kernel["url"],
+    table = tmp_path / "apa-executors.json"
+    table.write_text(json.dumps([
+        {"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"], "host": "work-host", "command": ["codex", "exec", "{prompt}"]},
+        {"id": "hermes.subagent", "kind": "native-subagent", "scenarios": ["research"]}]))
+    env = {**os.environ, "APA_HERMES_EXECUTORS": str(table), "HERMES_HOME": str(home), "APA_BIN": apa_bin, "APA_URL": kernel["url"],
            "APA_TOKEN": "t", "APA_HOME": str(tmp_path / "apahome")}
 
     def run(*calls):
@@ -105,12 +109,14 @@ def hermes(tmp_path, apa_bin, kernel):
     return run
 
 
-def test_flow_hermes_context_session_identity_reaches_the_ledger(hermes, kernel):
-    out = hermes(("apa_executors", {}, "sess-A"), ("apa_report", {"id": "c1", "outcome": "progress"}, "sess-B"))
-    assert out["registered"] == sorted(["apa_accept", "apa_declare_executors", "apa_decide", "apa_delegate",
-                                        "apa_dismiss", "apa_executor_call", "apa_executors", "apa_report"])
+def test_flow_hermes_context_session_identity_reaches_propose_and_all_tools(hermes, kernel):
+    out = hermes(("apa_propose", {"kind": "task", "title": "Renew domain", "tags": "x,y"}, "sess-A"),
+                 ("apa_executors", {}, "sess-A"), ("apa_report", {"id": "c1", "outcome": "progress"}, "sess-B"))
+    assert out["registered"] == sorted(["apa_propose", "apa_ask", "apa_accept", "apa_declare_executors", "apa_decide",
+                                        "apa_delegate", "apa_dismiss", "apa_executor_call", "apa_executors", "apa_report"])
     assert [(r["path"], r["session"]) for r in kernel["log"]] == [
-        ("/v1/executors", "sess-A"), ("/v1/items/c1/report", "sess-B")]
+        ("/v1/items", "sess-A"), ("/v1/executors", "sess-A"), ("/v1/items/c1/report", "sess-B")]
+    assert kernel["log"][0]["body"]["title"] == "Renew domain" and kernel["log"][0]["body"]["kind"] == "task"
 
 
 def test_flow_chat_answer_decide_is_recorded_with_the_owners_words(hermes, kernel):
@@ -138,18 +144,35 @@ def test_flow_delegate_recover_delegate_then_report_and_disallowed_executor(herm
     assert out["results"][1]["use_tool"] == "delegate_task"
     assert kernel["log"][-1]["body"]["evidence"] == {"pr": "https://x/pr/1"} and kernel["log"][-1]["body"]["outcome"] == "done"
     kernel["replies"]["/delegations"] = (403, {"code": "executor_not_allowed", "why": "not allowed", "next": "pick another"})
-    out = hermes(("apa_delegate", {"parent": "p1", "assignee": "hermes.codex"}, "s1"))
+    out = hermes(("apa_delegate", {"parent": "p1", "assignee": "work-host.cli"}, "s1"))
     assert out["results"][0]["exit_code"] == 21
 
 
-def test_flow_first_day_declare_submits_executors_without_call_commands(hermes, kernel):
-    out = hermes(("apa_declare_executors", {}, "s1"))
+def test_flow_first_day_declare_submits_configured_executors_and_they_resolve(hermes, kernel):
+    out = hermes(("apa_declare_executors", {}, "s1"),
+                 ("apa_executor_call", {"executor": "work-host.cli", "id": "child1", "task": "build"}, "s1"))
     assert out["results"][0]["exit_code"] == 0
     (req,) = kernel["log"]
     assert req["path"] == "/v1/declarations" and req["session"] == "s1" and req["body"]["harness"] == "hermes"
-    assert all(set(e) == {"id", "kind", "scenarios"} for e in req["body"]["executors"])
+    assert req["body"]["executors"] == [
+        {"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"], "host": "work-host"},
+        {"id": "hermes.subagent", "kind": "native-subagent", "scenarios": ["research"]}]
+    assert "codex" not in json.dumps(req["body"])
+    call = out["results"][1]
+    assert call["use_tool"] == "terminal" and call["arguments"]["command"].startswith("codex exec ")
 
 
-def test_flow_life_renewal_accept_and_dismiss_carry_session(hermes, kernel):
+def test_flow_life_renewal_ask_carries_session_question_and_options(hermes, kernel):
+    out = hermes(("apa_ask", {"id": "r1", "question": "Renew?", "option": ["yes=Renew", "no=Let lapse"], "recommend": "yes",
+                              "deadline": "2030-01-02T15:04:05Z", "default_on_timeout": "no"}, "s1"))
+    assert out["results"][0]["exit_code"] == 0
+    (req,) = kernel["log"]
+    assert req["path"] == "/v1/items/r1/ask" and req["session"] == "s1"
+    ask = req["body"]["ask"]
+    assert ask["question"] == "Renew?" and ask["options"] == [{"id": "yes", "label": "Renew"}, {"id": "no", "label": "Let lapse"}]
+    assert ask["recommend"] == "yes" and ask["default_on_timeout"] == "no"
+
+
+def test_accept_and_dismiss_carry_session(hermes, kernel):
     hermes(("apa_accept", {"id": "r1", "evidence": "yes renew"}, "s1"), ("apa_dismiss", {"id": "r2", "reason": "no"}, "s1"))
     assert [(r["path"], r["session"]) for r in kernel["log"]] == [("/v1/items/r1/accept", "s1"), ("/v1/items/r2/dismiss", "s1")]

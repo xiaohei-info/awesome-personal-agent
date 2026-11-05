@@ -30,6 +30,22 @@ _CLI_TOOLS = {
     "apa_dismiss": ("Dismiss a proposed item on the owner's behalf (apa dismiss).",
                     {"id": _s("Item id"), "evidence": _EVIDENCE, "reason": _REASON}, ["id"],
                     lambda a: ["dismiss", a["id"], *_flags(a, "evidence", "reason")]),
+    "apa_propose": ("Suggest a new item for the owner (apa propose); it lands as proposed.",
+                    {"kind": _s("Item kind"), "title": _s("Title"), "summary": _s("Summary"), "body": _s("Body"),
+                     "priority": _s("Priority"), "project": _s("Project id"), "tags": _s("Comma-separated tags"),
+                     "assignee": _s("Assignee"), "reason": _REASON, "idempotency_key": _s("Idempotency key")},
+                    ["kind", "title"],
+                    lambda a: ["propose", *_flags(a, "kind", "title", "summary", "body", "priority", "project", "tags",
+                                                  "assignee", "reason", "idempotency_key")]),
+    "apa_ask": ("Ask the owner for a decision on an item (apa ask).",
+                {"id": _s("Item id"), "question": _s("The question"),
+                 "option": {"type": "array", "items": {"type": "string"}, "description": "Options, each 'id=label'"},
+                 "next": {"type": "array", "items": {"type": "string"}, "description": "Phase after an option, each 'id=phase'"},
+                 "recommend": _s("Recommended option id"), "free_text": {"type": "boolean", "description": "Allow a free-text answer"},
+                 "deadline": _s("RFC3339 deadline"), "default_on_timeout": _s("Option id applied at the deadline"),
+                 "resume_note": _s("Note for resuming after the answer"), "reason": _REASON}, ["id", "question"],
+                lambda a: ["ask", a["id"], *_flags(a, "question", "option", "next", "recommend", "free_text", "deadline",
+                                                   "default_on_timeout", "resume_note", "reason")]),
     "apa_executors": ("List the executors the project allows (apa executors).",
                       {"project": _s("Project id")}, [],
                       lambda a: ["executors", *_flags(a, "project")]),
@@ -53,8 +69,13 @@ _CLI_TOOLS = {
 def _flags(args, *names):
     out = []
     for n in names:
-        if args.get(n):
-            out += ["--" + n.replace("_", "-"), str(args[n])]
+        v, flag = args.get(n), "--" + n.replace("_", "-")
+        if v is True:
+            out.append(flag)
+        elif isinstance(v, list):
+            out += [x for item in v for x in (flag, str(item))]
+        elif v and v is not False:
+            out += [flag, str(v)]
     return out
 
 
@@ -65,18 +86,25 @@ def _cli_handler(build):
 
 
 def _declare(args, session_id=None, **_):
-    return json.dumps(cli.call(["declare", "-"], session_id, stdin=json.dumps(executors.declaration())))
+    try:
+        body = executors.declaration()
+    except ValueError as e:
+        return json.dumps({"ok": False, "error": str(e)})
+    return json.dumps(cli.call(["declare", "-"], session_id, stdin=json.dumps(body)))
 
 
 def _invoke(args, **_):
-    return json.dumps(executors.invocation(args.get("executor", ""), args.get("id", ""), args.get("task", "")))
+    try:
+        return json.dumps(executors.invocation(args.get("executor", ""), args.get("id", ""), args.get("task", "")))
+    except ValueError as e:
+        return json.dumps({"ok": False, "error": str(e)})
 
 
 def register(ctx):
     for name, (desc, props, req, build) in _CLI_TOOLS.items():
         ctx.register_tool(name=name, toolset=TOOLSET, schema=_schema(name, desc, props, req),
                           handler=_cli_handler(build), description=desc)
-    desc = "Submit this harness's executors to the ledger (apa declare); they take effect after the owner confirms in Web."
+    desc = "Submit the executors configured for this harness to the ledger (apa declare); they take effect after the owner confirms in Web."
     ctx.register_tool(name="apa_declare_executors", toolset=TOOLSET, schema=_schema("apa_declare_executors", desc, {}, []),
                       handler=_declare, description=desc)
     desc = "Map a delegated item's executor id to the Hermes tool call that runs it. Call apa_delegate first; run the returned tool call yourself."
