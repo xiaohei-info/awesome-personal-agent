@@ -89,7 +89,7 @@ func Run(args, env []string, dir string, stdout io.Writer) int {
 				return 2
 			}
 			child := exec.Command(self)
-			child.Dir, child.Env = dir, append(env, "STUB_HARNESS_CHILD=1")
+			child.Dir, child.Env = dir, append(env[:len(env):len(env)], "STUB_HARNESS_CHILD=1", "STUB_HARNESS_MODE=hang")
 			if err := child.Start(); err != nil {
 				fmt.Fprintln(os.Stderr, "stub-harness: spawn child:", err)
 				return 2

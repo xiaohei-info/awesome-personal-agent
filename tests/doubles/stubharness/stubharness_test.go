@@ -192,3 +192,39 @@ func TestHangForBoundedThenExits(t *testing.T) {
 		t.Fatalf("code=%d elapsed=%v", r.code, time.Since(start))
 	}
 }
+
+// 提示词开关 STUB_MODE=hang 时派生的子进程也必须挂起，且不得触发回执。
+func TestPromptHangChildStaysAliveAndNeverReceipts(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "receipt.txt")
+	cli := filepath.Join(dir, "cli.sh")
+	os.WriteFile(cli, []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755)
+	cmd := exec.Command(bin, "template STUB_MODE=hang item-1")
+	cmd.Dir = dir
+	cmd.Env = []string{"STUB_HARNESS_SPAWN_CHILD=1", "STUB_HARNESS_RECEIPT_CMD=" + cli}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go cmd.Wait()
+	defer syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+
+	var child int
+	for i := 0; i < 100 && child == 0; i++ {
+		if b, err := os.ReadFile(filepath.Join(dir, "stub-harness-child.pid")); err == nil {
+			child, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if child == 0 {
+		t.Fatal("no child pid")
+	}
+	time.Sleep(500 * time.Millisecond)
+	stat, err := os.ReadFile("/proc/" + strconv.Itoa(child) + "/stat")
+	if err != nil || strings.Contains(string(stat), ") Z ") {
+		t.Fatalf("child exited or is zombie: %v %s", err, stat)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("child triggered a receipt")
+	}
+}
