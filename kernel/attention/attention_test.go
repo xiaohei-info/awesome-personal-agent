@@ -592,3 +592,32 @@ func TestEnablingExemptionDuringQuietReleasesHeldNearDeadlineDecision(t *testing
 		t.Fatalf("exemption switched on but held decision not released: %+v", d)
 	}
 }
+
+// 回归：合并进摘要的提醒算已提醒；之后多个 Tick 不再重复产出，新增的逾期提醒是新的投递，且不含旧成员。
+func TestMergedMembersAreRememberedAndLaterRemindersGetFreshDigest(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(func(p *policy.Policy) { p.Disturb.MergeWindowSec = 60 })
+	e.item(map[string]any{"title": "old-1", "priority": "low", "deadline": e.now.Add(5 * time.Second)})
+	e.item(map[string]any{"title": "old-2", "priority": "low", "deadline": e.now.Add(6 * time.Second)})
+	e.advance(10 * time.Second)
+	e.advance(2 * time.Minute)
+	first := e.claim("channel:chan")
+	if first == nil || !strings.Contains(first.Content.Title, "2") {
+		t.Fatalf("expected a 2-member digest: %+v", first)
+	}
+	for i := 0; i < 6; i++ { // 多个窗口过去，旧成员不能被重新暂存和重发
+		e.advance(time.Minute)
+	}
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("merged members re-reminded: %+v", d)
+	}
+
+	e.item(map[string]any{"title": "new-1", "priority": "low", "deadline": e.now.Add(-time.Second)})
+	e.advance(time.Minute)
+	e.advance(2 * time.Minute)
+	d := e.claim("channel:chan")
+	if d == nil || d.ID == first.ID || !strings.Contains(d.Content.Title, "new-1") || strings.Contains(d.Content.Title+d.Content.Summary, "old-") {
+		t.Fatalf("new reminder swallowed or mixed with old members: %+v", d)
+	}
+}

@@ -9,8 +9,11 @@ package attention
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -53,6 +56,9 @@ CREATE TABLE attention_held (
 	mergeable INTEGER NOT NULL,
 	release_at INTEGER NOT NULL
 );
+CREATE TABLE attention_done (
+	id TEXT PRIMARY KEY
+) WITHOUT ROWID;
 CREATE INDEX attention_held_item ON attention_held(item);
 CREATE INDEX attention_held_release ON attention_held(release_at);`,
 }}}
@@ -345,6 +351,9 @@ func (a *Attention) known(tx *store.Tx, id string) (bool, error) {
 	if err := scan(tx, func(r *store.Rows) error { return r.Scan(&n) }, `SELECT COUNT(*) FROM attention_held WHERE id = ?`, id); err != nil || n > 0 {
 		return n > 0, err
 	}
+	if err := scan(tx, func(r *store.Rows) error { return r.Scan(&n) }, `SELECT COUNT(*) FROM attention_done WHERE id = ?`, id); err != nil || n > 0 {
+		return n > 0, err
+	}
 	if _, err := a.o.Queue.Get(tx, id); err != nil {
 		if isNotFound(err) {
 			return false, nil
@@ -421,12 +430,25 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 		for i, h := range hs {
 			titles[i] = h.content.Title
 		}
-		d.ID, d.Item, d.Version = "digest:"+hs[0].id, DigestItem, 1
+		ids := make([]string, len(hs))
+		for i, h := range hs {
+			ids[i] = h.id
+		}
+		sort.Strings(ids)
+		sum := sha256.Sum256([]byte(strings.Join(ids, "\n")))
+		d.ID, d.Item, d.Version = "digest:"+hex.EncodeToString(sum[:8]), DigestItem, 1
 		d.Content = domain.DeliveryContent{Title: fmt.Sprintf("%d 条低优先级提醒", len(hs)), Summary: strings.Join(titles, "；")}
 	}
 	d.Route = a.route(pol, hs[0].class, hs[0].priority)
-	_, _, err := a.o.Queue.Create(tx, d)
-	return err
+	if _, _, err := a.o.Queue.Create(tx, d); err != nil {
+		return err
+	}
+	for _, h := range hs { // 合并成员也算已提醒：不再被重新暂存，摘要 id 与成员集绑定而非与某一条绑定
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO attention_done (id) VALUES (?)`, h.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // route 是阈值：「类别:优先级」优先于「类别」；策略没给就退回 Web 未读。
