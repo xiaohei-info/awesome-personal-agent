@@ -1,0 +1,24 @@
+# 反向代理样例：Web 与 API 全部经 HTTPS 暴露（设计 §14.13、§16.3）。
+# apa 默认监听回环地址（config.yaml 的 listen），代理与 apa 同机；证书路径与域名换成自己的。
+server {
+    listen 80;
+    server_name apa.example.invalid;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name apa.example.invalid;
+
+    ssl_certificate     /etc/ssl/apa/fullchain.pem;
+    ssl_certificate_key /etc/ssl/apa/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:7777;
+        # Host 必须原样转发：登录的跨站校验比较 Origin 与 Host。
+        proxy_set_header Host $host;
+        # 带 Secure 属性的会话 Cookie 依赖这个头，apa 只信回环来源发来的它。
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+}

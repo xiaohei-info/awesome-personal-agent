@@ -1,0 +1,28 @@
+# APA 系统服务样例（设计 §16.1、§16.4）。
+# 安装：复制到 /etc/systemd/system/apa.service，按需改 User 与 APA_HOME，再 `systemctl enable --now apa`。
+# 先以同一账号和 APA_HOME 运行一次 `apa init`。
+# 用专用系统账号运行，避免运行者读到本机其他账号的 delegate token（§16.1）。
+[Unit]
+Description=Awesome Personal Agent (apa serve)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=apa
+Group=apa
+Environment=APA_HOME=/var/lib/apa
+ExecStart=/usr/local/bin/apa serve
+Restart=on-failure
+RestartSec=3
+# apa serve 收到 SIGTERM 后优雅退出。
+KillSignal=SIGTERM
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/apa
+
+[Install]
+WantedBy=multi-user.target
