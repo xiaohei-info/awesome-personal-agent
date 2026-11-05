@@ -10,9 +10,12 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix the input" });
 
 interface Exec { id: string; kind: string; host?: string; scenarios?: string[] }
-interface Rec { harness: string; rev: number; state: string; declaration: { harness: string; headless?: { command: string[] }; executors?: Exec[] } }
+interface Rec { harness: string; rev: number; state: string; declaration: { harness: string; headless?: Record<string, unknown>; main_session?: Record<string, unknown>; executors?: Exec[] } }
 
 const decl = (harness: string, cmd: string[], executors: Exec[] = []): Rec["declaration"] => ({ harness, headless: { command: cmd }, executors });
+
+// 第二个 describe 用：带 access.full / resume / main_session 的完整声明。
+const full: Rec = { harness: "deep", rev: 1, state: "pending", declaration: { harness: "deep", headless: { command: ["/opt/deep/run"], resume: ["/opt/deep/resume", "--last"], access: { read: ["--ro"], full: ["--dangerously-all"] } }, main_session: { launch: "wake", args: ["--wake-flag"] }, executors: [{ id: "deep.cli", kind: "external-cli" }] } };
 
 function server(o: { recs?: Rec[]; execs?: Exec[]; deny?: boolean } = {}) {
   let execs = o.execs ?? [];
@@ -116,7 +119,7 @@ describe("插件声明（flow-command-registration）", () => {
     mount(s.impl);
     const decls = await screen.findByRole("region", { name: "待确认声明" });
     expect(within(decls).getByText("acme")).toBeInTheDocument();
-    expect(within(decls).getByText("/opt/acme/run --go")).toBeInTheDocument();
+    expect(within(decls).getByText(/\/opt\/acme\/run/)).toBeInTheDocument();
     expect(within(section("执行者清单")).queryByText("acme.build")).not.toBeInTheDocument();
     expect(within(section("可执行命令")).queryByText("acme")).not.toBeInTheDocument();
 
@@ -127,6 +130,19 @@ describe("插件声明（flow-command-registration）", () => {
     const w = s.calls.find((c) => c.path === "/v1/settings/declarations/acme/1/confirm")!;
     expect(w.method).toBe("POST");
     expect(w.csrf).toBe("tok-1");
+  });
+
+  it("确认前完整展示声明：access.full、resume、main_session、executors 都可见", async () => {
+    mount(server({ recs: [full] }).impl);
+    const decls = await screen.findByRole("region", { name: "待确认声明" });
+    const text = within(decls).getByTestId("declaration-deep").textContent!;
+    for (const v of ["--dangerously-all", "/opt/deep/resume", "--wake-flag", "deep.cli"]) expect(text).toContain(v);
+  });
+
+  it("已登记命令同样完整展示声明", async () => {
+    mount(server({ recs: [{ ...full, state: "active" }] }).impl);
+    const sec = await screen.findByRole("region", { name: "可执行命令" });
+    expect(await within(sec).findByTestId("declaration-deep")).toHaveTextContent("--dangerously-all");
   });
 
   it("拒绝声明 → POST reject；不进入清单与命令", async () => {
@@ -159,7 +175,7 @@ describe("插件声明（flow-command-registration）", () => {
     await userEvent.paste(text);
     await userEvent.click(within(sec).getByRole("button", { name: "登记" }));
     expect(await within(sec).findByText("mine")).toBeInTheDocument();
-    expect(within(sec).getByText("/usr/local/bin/mine run")).toBeInTheDocument();
+    expect(within(sec).getByText(/\/usr\/local\/bin\/mine/)).toBeInTheDocument();
     const w = s.calls.find((c) => c.method === "POST" && c.path === "/v1/settings/commands")!;
     expect(w.csrf).toBe("tok-1");
     expect(w.body.headless.command).toEqual(["/usr/local/bin/mine", "run"]);

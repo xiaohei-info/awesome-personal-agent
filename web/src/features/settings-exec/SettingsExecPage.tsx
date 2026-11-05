@@ -12,7 +12,8 @@ interface Executor {
 }
 interface Declaration {
   harness: string;
-  headless?: { command: string[] };
+  headless?: Record<string, unknown>;
+  main_session?: Record<string, unknown>;
   executors?: Executor[];
 }
 interface Record_ {
@@ -43,7 +44,8 @@ function useList<T>(path: string, pick: (r: any) => T[]) {
   return { items, error, setError, load };
 }
 
-const command = (d: Declaration) => d.headless?.command.join(" ");
+// 完整、只读地展示整份声明：确认/登记的就是这里显示的全部内容（命令、access、resume、main_session、执行者）。
+const DeclarationView = ({ d }: { d: Declaration }) => <pre data-testid={`declaration-${d.harness}`}>{JSON.stringify(d, null, 2)}</pre>;
 
 function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
   const { api } = useSession();
@@ -153,7 +155,7 @@ function PendingSection({ onChanged }: { onChanged: () => void }) {
   return (
     <section role="region" aria-labelledby="h-pending">
       <h3 id="h-pending">待确认声明</h3>
-      <p>确认前声明不生效；确认意味着允许在本机执行下列命令。</p>
+      <p>确认前声明不生效；确认意味着接受下列声明的全部内容，其中的命令将可在本机执行。</p>
       {error && <div role="alert">{error}</div>}
       {items === null ? (
         !error && <p>加载中…</p>
@@ -164,8 +166,7 @@ function PendingSection({ onChanged }: { onChanged: () => void }) {
           {items.map((r) => (
             <li key={`${r.harness}/${r.rev}`}>
               <span>{r.harness}</span> · rev {r.rev}
-              {command(r.declaration) && <> · <code>{command(r.declaration)}</code></>}
-              {r.declaration.executors?.length ? ` · 执行者：${r.declaration.executors.map((e) => e.id).join(", ")}` : ""}{" "}
+              <DeclarationView d={r.declaration} />
               <button onClick={() => decide(r, "confirm")}>确认</button> <button onClick={() => decide(r, "reject")}>拒绝</button>
             </li>
           ))}
@@ -227,7 +228,7 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
           {items.map((r) => (
             <li key={`${r.harness}/${r.rev}`}>
               <span>{r.harness}</span> · rev {r.rev}
-              {command(r.declaration) && <> · <code>{command(r.declaration)}</code></>}
+              <DeclarationView d={r.declaration} />
             </li>
           ))}
         </ul>
