@@ -22,6 +22,7 @@ import (
 	apideliveries "github.com/xiaohei-info/awesome-personal-agent/api/deliveries"
 	apievents "github.com/xiaohei-info/awesome-personal-agent/api/events"
 	apifollowmsg "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
+	apihealth "github.com/xiaohei-info/awesome-personal-agent/api/health"
 	apiingest "github.com/xiaohei-info/awesome-personal-agent/api/ingest"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
 	apimaterials "github.com/xiaohei-info/awesome-personal-agent/api/materials"
@@ -258,7 +259,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), sources, apiwhy.Routes(st), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, agmSvc)}}); err != nil {
+		apiexec.Routes(st, x), sources, apiwhy.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, agmSvc)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
