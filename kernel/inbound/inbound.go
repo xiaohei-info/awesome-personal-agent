@@ -154,7 +154,7 @@ func (s *Service) Register(x *command.Executor) error {
 		return err
 	}
 	x.OnCommit(func(c command.Commit) {
-		if c.Command != runner.CmdRunResult {
+		if c.Command != runner.CmdRunResult && c.Command != runner.CmdIngest {
 			return
 		}
 		if err := s.Process(context.Background()); err != nil && s.o.OnError != nil {
