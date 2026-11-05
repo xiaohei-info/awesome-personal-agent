@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -73,36 +74,75 @@ func TestNewAndModifiedFilesBecomeEvents(t *testing.T) {
 	if first.exit != 0 || len(first.events) != 2 {
 		t.Fatalf("first run: %+v", first)
 	}
-	if first.events[0]["type"] != "file.created" || first.events[0]["subject"] != "a.txt" || first.events[1]["subject"] != "sub/b.txt" {
+	if first.events[0]["type"] != "file.changed" || first.events[0]["subject"] != "a.txt" || first.events[1]["subject"] != "sub/b.txt" {
 		t.Fatalf("unexpected events: %v", first.events)
 	}
 	if first.events[0]["occurred_at"] != "2026-01-01T00:00:00Z" {
 		t.Fatalf("occurred_at should be mtime: %v", first.events[0])
 	}
-
-	if again := run(t, dir, first.cursor); len(again.events) != 0 || again.exit != 0 {
-		t.Fatalf("unchanged dir must be silent: %+v", again)
+	if again := run(t, dir, first.cursor); len(again.events) != 0 || again.exit != 0 || again.cursor != first.cursor {
+		t.Fatalf("unchanged dir must be silent with same cursor: %+v", again)
 	}
 
 	write(t, filepath.Join(dir, "a.txt"), "a2", t0.Add(time.Hour))
-	write(t, filepath.Join(dir, "c.txt"), "c", t0.Add(time.Hour))
+	write(t, filepath.Join(dir, "c.txt"), "c", t0.Add(2*time.Hour))
 	os.Remove(filepath.Join(dir, "sub/b.txt"))
 	third := run(t, dir, first.cursor)
-	if len(third.events) != 2 || third.events[0]["type"] != "file.modified" || third.events[0]["subject"] != "a.txt" ||
-		third.events[1]["type"] != "file.created" || third.events[1]["subject"] != "c.txt" {
+	if len(third.events) != 2 || third.events[0]["subject"] != "a.txt" || third.events[1]["subject"] != "c.txt" {
 		t.Fatalf("modified/created: %v", third.events)
 	}
 	if third.events[0]["id"] == first.events[0]["id"] {
 		t.Fatal("modification must have a distinct stable id")
 	}
-	// 同一游标重跑得到相同 id（稳定，内核据此去重）。
 	if rerun := run(t, dir, first.cursor); rerun.events[0]["id"] != third.events[0]["id"] {
 		t.Fatal("event id not stable")
 	}
-	// 被删除的文件重新出现算新建。
-	write(t, filepath.Join(dir, "sub/b.txt"), "b", t0)
-	if back := run(t, dir, third.cursor); len(back.events) != 1 || back.events[0]["type"] != "file.created" {
-		t.Fatalf("recreated: %v", back.events)
+}
+
+// 数百个文件：每次 stdout 与游标都有界，多轮后每个文件恰好出现一次（含同一 mtime 的并列文件）。
+func TestBoundedOutputAcrossRuns(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const n = 600
+	for i := 0; i < n; i++ {
+		// 每 3 个文件共用一个 mtime，覆盖水位线上的并列。
+		write(t, filepath.Join(dir, "d", strings.Repeat("x", 60)+"-"+strconv.Itoa(i)+".txt"), "x", t0.Add(time.Duration(i/3)*time.Second))
+	}
+	seen := map[string]int{}
+	cursor, rounds := "", 0
+	for ; rounds < 50; rounds++ {
+		var in Input
+		in.Cursor, in.Config.Dir = cursor, dir
+		b, _ := json.Marshal(in)
+		var so, se bytes.Buffer
+		if code := Run(bytes.NewReader(b), &so, &se); code != 0 {
+			t.Fatalf("exit %d: %s", code, se.String())
+		}
+		if so.Len() >= 48<<10+1024 {
+			t.Fatalf("stdout %d bytes exceeds budget", so.Len())
+		}
+		o := run(t, dir, cursor)
+		if len(o.cursor) > 512 {
+			t.Fatalf("cursor grows: %d", len(o.cursor))
+		}
+		if len(o.events) == 0 {
+			break
+		}
+		for _, e := range o.events {
+			seen[e["subject"].(string)]++
+		}
+		cursor = o.cursor
+	}
+	if rounds < 2 {
+		t.Fatalf("expected output to be split across runs, took %d", rounds)
+	}
+	if len(seen) != n {
+		t.Fatalf("saw %d of %d files", len(seen), n)
+	}
+	for f, c := range seen {
+		if c != 1 {
+			t.Fatalf("%s emitted %d times", f, c)
+		}
 	}
 }
 
