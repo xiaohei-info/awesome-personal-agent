@@ -276,7 +276,7 @@ func ForwardAllowed(p policy.Policy, source, sender string, verified bool) bool 
 	return sender != "" && verified && contains(p.ForwardAllowlist[source], sender)
 }
 
-// RejectionEvent 构造应记账的拒绝事件（§6.7）：退出码 20、21、22，以及运行身份被拒绝的决策命令。
+// RejectionEvent 构造应记账的拒绝事件（§6.7）：退出码 20、21、22，以及运行身份被拒绝的决策命令、回答人不在白名单的渠道回答。
 // 判定本身无副作用，由调用方在自己的事务里追加。
 func RejectionEvent(r Request, d Decision) (domain.Event, bool) {
 	if d.Err == nil {
@@ -285,7 +285,7 @@ func RejectionEvent(r Request, d Decision) (domain.Event, bool) {
 	switch d.ExitCode() {
 	case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending:
 	case domain.ExitPermissionDenied:
-		if r.Level != LevelRun || r.Action != ActionAnswerDecision {
+		if (r.Level != LevelRun || r.Action != ActionAnswerDecision) && r.Action != ActionChannelAnswer {
 			return domain.Event{}, false
 		}
 	default:

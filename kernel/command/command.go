@@ -172,6 +172,9 @@ type Spec struct {
 	Validate func(tx *store.Tx, o authz.Object, in json.RawMessage) error
 	// Apply 更新投影并经 Emit 追加事件；返回值序列化为结果，幂等重放时原样返回。
 	Apply func(c *Ctx) (any, error)
+	// ChannelAnswer 非空时（ActionChannelAnswer），管线用返回的渠道与回答人填授权请求以查回答人白名单，
+	// webURL 随 web_only 拒绝返回；渠道与回答人只能据账本与凭据得出，不来自对象之外的声明。
+	ChannelAnswer func(tx *store.Tx, c Caller, in json.RawMessage) (channel, sender, webURL string, err error)
 	// RequireVersion 为真时必须带 ExpectVersion。
 	RequireVersion bool
 	// Kinds 是允许调用的 ext/webhook 凭据种类；默认这两类凭据不能调用。
@@ -376,9 +379,20 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 	if spec.Actions != nil {
 		actions = spec.Actions(tx, caller, obj, req.Input)
 	}
+	var channel, sender string
+	webURL := req.WebURL
+	if spec.ChannelAnswer != nil {
+		var w string
+		if channel, sender, w, err = spec.ChannelAnswer(tx, caller, req.Input); err != nil {
+			return Result{}, Commit{}, err
+		}
+		if w != "" {
+			webURL = w
+		}
+	}
 	for _, act := range actions {
 		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
-			Evidence: req.Evidence, Owner: req.Owner, WebURL: req.WebURL}
+			Evidence: req.Evidence, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender}
 		d := authz.Decide(pol, ar)
 		if d.Err == nil {
 			continue
