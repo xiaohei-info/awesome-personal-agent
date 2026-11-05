@@ -1,0 +1,198 @@
+//go:build e2e
+
+package automation
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
+)
+
+const head = "name: %s\nversion: 1.0.0\ndescription: acc\n"
+
+func pack(name, rest string) map[string]string {
+	return map[string]string{"pack.yaml": strings.Replace(head, "%s", name, 1) + rest}
+}
+
+func prompt(front string) string { return "---\n" + front + "---\n事项 {item_id}\n" }
+
+func TestFlowPackLoader(t *testing.T) {
+	e := baseline.New(t)
+	e.StartKernel()
+	e.IssueCredentials()
+	packsDir := filepath.Join(e.Home, "packs")
+
+	step(t, "ACT-PACK-01 列出内置包", func(t *testing.T) {
+		got := packList(t, e)
+		for _, n := range []string{"brief", "review", "follow-up", "decision-card", "background-run", "guideline-draft", "agents-md", "inbound-triage", "delegation-verify"} {
+			if p, ok := got[n]; !ok || p.Source != "builtin" {
+				t.Errorf("缺内置包 %s: %+v", n, p)
+			}
+		}
+	})
+
+	step(t, "ACT-PACK-02 本地校验拒绝不合规的包", func(t *testing.T) {
+		scratch := t.TempDir()
+		bad := []struct {
+			name, why string
+			files     map[string]string
+		}{
+			{"bad-auto", "auto", pack("bad-auto", "event_rules:\n  - id: r\n    mode: auto\n    when: {event: item.created}\n    do:\n      - {action: add_tag, tag: x}\n")},
+			{"bad-policy", "policy", pack("bad-policy", "policy: {web_only: false}\n")},
+			{"bad-script", "executable path", pack("bad-script", "kinds:\n  - {name: bad-script-kind, title: ./run.sh}\n")},
+			{"bad-action", "enumeration", pack("bad-action", "event_rules:\n  - id: r\n    mode: observe\n    when: {event: item.created}\n    do:\n      - {action: delete_everything}\n")},
+			{"bad-judge-output", "output_schema", map[string]string{
+				"pack.yaml":        strings.Replace(head, "%s", "bad-judge-output", 1),
+				"prompts/judge.md": prompt("agent: judge\nquestion_type: yes_no\noutput_schema: {type: object}\n"),
+			}},
+			{"bad-gen-tools", "tools", map[string]string{
+				"pack.yaml":      strings.Replace(head, "%s", "bad-gen-tools", 1),
+				"prompts/gen.md": prompt("agent: generate\noutput_schema: {type: object}\ntools: [shell]\n"),
+			}},
+			{"bad-placeholder", "unknown placeholder", map[string]string{
+				"pack.yaml":    strings.Replace(head, "%s", "bad-placeholder", 1),
+				"prompts/p.md": "---\nagent: task\n---\n读取 {secret_path}\n",
+			}},
+			{"bad-stats", "event_stats", map[string]string{
+				"pack.yaml":    strings.Replace(head, "%s", "bad-stats", 1),
+				"prompts/j.md": prompt("agent: judge\nquestion_type: yes_no\nevent_stats: everything\n"),
+			}},
+			{"bad-main-escalate", "escalate_to", map[string]string{
+				"pack.yaml":    strings.Replace(head, "%s", "bad-main-escalate", 1),
+				"prompts/m.md": prompt("run_as: main_session\nescalate_to: other\n"),
+			}},
+		}
+		for _, b := range bad {
+			dir := writePack(t, scratch, b.name, b.files)
+			r := e.Apa(e.OBS, "", "pack", "validate", dir)
+			if r.Code != 2 || !contains(r.Stderr, "pack rejected", b.why) {
+				t.Errorf("坏包 %s 应被拒绝（退出码 2，原因含 %q），实际 %d: %s", b.name, b.why, r.Code, r.Stderr)
+			}
+		}
+		good := writePack(t, scratch, "good-pack", map[string]string{
+			"pack.yaml":    strings.Replace(head, "%s", "good-pack", 1) + "kinds:\n  - {name: good-kind, spec_schema: {type: object}}\n",
+			"prompts/j.md": prompt("agent: judge\nquestion_type: yes_no\nevent_stats: proposal_outcome\n"),
+		})
+		if r := e.Apa(e.OBS, "", "pack", "validate", good); r.Code != 0 || !strings.Contains(r.Stdout, `"ok":true`) {
+			t.Errorf("合规包应通过: %d %s %s", r.Code, r.Stdout, r.Stderr)
+		}
+	})
+
+	var original string
+	step(t, "ACT-PACK-03 同名目录覆盖内置包", func(t *testing.T) {
+		original = packList(t, e)["brief"].Description
+		src := filepath.Join("..", "..", "..", "packs", "brief")
+		dst := filepath.Join(packsDir, "brief")
+		if err := os.CopyFS(dst, os.DirFS(src)); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(filepath.Join(dst, "pack.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		edited := strings.Replace(string(b), "description: "+original, "description: acc-overridden", 1)
+		if edited == string(b) {
+			t.Fatalf("没找到可改的说明字段: %s", b)
+		}
+		if err := os.WriteFile(filepath.Join(dst, "pack.yaml"), []byte(edited), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		reload(e)
+		if p := packList(t, e)["brief"]; p.Description != "acc-overridden" || p.Source != "data" {
+			t.Errorf("应显示覆盖后的说明: %+v", p)
+		}
+	})
+
+	step(t, "ACT-PACK-04 加载失败时保留可用的包并报健康", func(t *testing.T) {
+		p := filepath.Join(packsDir, "brief", "pack.yaml")
+		b, _ := os.ReadFile(p)
+		bad := strings.Replace(string(b), "    type: recur\n", "    type: recur\n    mode: auto\n", 1)
+		if bad == string(b) {
+			t.Fatalf("没找到可改的规则: %s", b)
+		}
+		if err := os.WriteFile(p, []byte(bad), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		reload(e)
+		got, ok := packList(t, e)["brief"]
+		if !ok || got.Description == "acc-overridden" {
+			t.Errorf("坏包不得生效，brief 也不得消失: %+v", got)
+		}
+		if got.Source != "builtin" {
+			t.Errorf("退回的应是可用的内置版本: %+v", got)
+		}
+		h := e.APIRaw("GET", "/v1/health", "", e.OBS)
+		if h.Code != 200 || !contains(h.Body, "pack_rejections", "brief") {
+			t.Errorf("apa health 应显示能力包加载失败: %d %s", h.Code, h.Body)
+		}
+		if r := e.Apa(e.OBS, "", "health"); r.Code != 0 || !contains(r.Stdout, "pack_rejections") {
+			t.Errorf("apa health: %d %s %s", r.Code, r.Stdout, r.Stderr)
+		}
+		d := e.Web("GET", "/v1/deliveries/unread", "")
+		if d.Code != 200 || !strings.Contains(d.Body, "health") {
+			t.Errorf("应产出一条健康类投递: %d %s", d.Code, d.Body)
+		}
+	})
+
+	step(t, "ACT-PACK-05 新增自动化只写能力包", func(t *testing.T) {
+		os.RemoveAll(filepath.Join(packsDir, "brief")) // 清掉上一步的坏包，只留内置
+		writePack(t, packsDir, "acc-pack", map[string]string{
+			"pack.yaml": strings.Replace(head, "%s", "acc-pack", 1) + `kinds:
+  - name: acc-kind
+    title: 验收类型
+    spec_schema:
+      type: object
+      required: [score]
+      properties:
+        score: {type: integer}
+event_rules:
+  - id: acc-rule-1
+    mode: observe
+    when: {event: item.phase_changed, to_phase: open, kind: acc-kind}
+    do:
+      - {action: add_tag, tag: acc-seen}
+`,
+			"views/acc-kind.yaml": "kind: acc-kind\nlist:\n  columns: [title, spec.score]\n  filters: [tag]\ncard:\n  fields: [summary, spec.score]\n",
+		})
+		reload(e)
+		p, ok := packList(t, e)["acc-pack"]
+		if !ok || p.Source != "data" || len(p.Kinds) != 0 && p.Kinds[0] != "acc-kind" {
+			t.Fatalf("pack list 应看到 acc-pack: %+v", p)
+		}
+		v, ok := p.Views["acc-kind"]
+		if !ok || strings.Join(v.List.Columns, ",") != "title,spec.score" || strings.Join(v.Card.Fields, ",") != "summary,spec.score" {
+			t.Errorf("视图配置应原样给 Web: %+v", p.Views)
+		}
+		add := func(spec string) baseline.Result {
+			return e.Apa(e.DEL, "", "item", "add", "--kind", "acc-kind", "--title", "acc", "--spec", spec, "--reason", "pack e2e")
+		}
+		if r := add(`{"score":"high"}`); r.Code == 0 {
+			t.Errorf("不符合 schema 的 spec 应被拒绝: %s", r.Stdout)
+		}
+		if r := add(`{"score":5}`); r.Code != 0 {
+			t.Errorf("符合 schema 的 spec 应通过: %d %s", r.Code, r.Stderr)
+		}
+		if got := rules(t, e)["acc-rule-1"]; got.Mode != "observe" {
+			t.Errorf("包里的规则应已登记为 observe: %+v", got)
+		}
+	})
+
+	step(t, "ACT-PACK-06 建能力包实例", func(t *testing.T) {
+		r := e.Apa(e.DEL, "", "instance", "add", "brief", "--param", "schedule=0 8 * * 1-5")
+		if r.Code != 0 {
+			t.Fatalf("建实例退出码 %d: %s", r.Code, r.Stderr)
+		}
+		if l := e.Apa(e.DEL, "", "instance", "list"); l.Code != 0 || !contains(l.Stdout, "brief", "0 8 * * 1-5") {
+			t.Errorf("list 应可见实例: %d %s", l.Code, l.Stdout)
+		}
+		if r := e.Apa(e.DEL, "", "instance", "add", "brief"); r.Code == 0 || !strings.Contains(r.Stderr, "schedule") {
+			t.Errorf("缺 schedule 应按 instance_params 被拒绝: %d %s", r.Code, r.Stderr)
+		}
+		if r := e.Apa(e.OBS, "", "instance", "add", "brief", "--param", "schedule=0 8 * * 1-5"); r.Code != 4 {
+			t.Errorf("OBS 退出码应为 4，实际 %d: %s", r.Code, r.Stderr)
+		}
+	})
+}
