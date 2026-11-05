@@ -369,6 +369,10 @@ func TestPackDeclarations(t *testing.T) {
 	if k := p.Prompts["follow-up-research"].Meta; k.Agent != "task" {
 		t.Fatalf("follow-up-research: %+v", k)
 	}
+	// 任务型提示词只能引用已发行 CLI 支持的命令（apa context 没有 item scope）。
+	if b := p.Prompts["follow-up-research"].Body; strings.Contains(b, "--scope item") || !strings.Contains(b, "apa item show {item_id}") {
+		t.Errorf("follow-up-research references unsupported CLI usage: %s", b)
+	}
 	if len(p.EventRules) != 0 || len(p.SourceRules) != 0 {
 		t.Error("follow-up declares a clock rule only")
 	}
