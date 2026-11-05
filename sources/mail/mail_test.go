@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-var fixedNow = func() time.Time { return time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC) }
+var fixedNow = func() time.Time { return time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC) }
 
 // replay 按版本样本目录回放录制输出（测试边界替身，不连真实账号），并断言只读、argv 形态正确。
 func replay(t *testing.T, dir string, calls *[][]string) Runner {
@@ -271,7 +271,7 @@ func TestFirstRunEmptyMailboxUsesWindowTo(t *testing.T) {
 		t.Fatalf("code=%d out=%q", code, out)
 	}
 	_, out, _ = exec1(t, r, `{"config":{}}`)
-	if !strings.Contains(out, "2026-02-01T00:00:00Z") {
+	if !strings.Contains(out, "2026-01-04T00:00:00Z") {
 		t.Fatalf("out=%q", out)
 	}
 }
@@ -314,7 +314,7 @@ func pagedRunner(total int, listCalls *int) Runner {
 // 评审阻塞项 1：积压超过一页时翻页取全，不因游标越过而丢信。
 func TestBacklogBeyondOnePageIsFullyFetched(t *testing.T) {
 	var lists int
-	in := `{"config":{"page_size":10},"cursor":"2025-12-31T00:00:00Z"}`
+	in := `{"config":{"page_size":10,"max_messages":1000},"cursor":"2025-12-31T00:00:00Z"}`
 	code, out, _ := exec1(t, pagedRunner(25, &lists), in)
 	if code != ExitOK || lists != 3 {
 		t.Fatalf("code=%d lists=%d", code, lists)
@@ -334,12 +334,12 @@ func TestPagingStopsAtCursor(t *testing.T) {
 	}
 }
 
-// 积压超过页数上限：退出 1，不输出游标。
+// 带游标时积压超过页数上限：退出 2（needs_input，提示调大 page_size），不输出游标。
 func TestBacklogOverCapExit1WithoutCursor(t *testing.T) {
 	var lists int
-	in := `{"config":{"page_size":1},"cursor":"2025-12-31T00:00:00Z"}`
+	in := `{"config":{"page_size":1,"max_messages":1000},"cursor":"2025-12-31T00:00:00Z"}`
 	code, out, errs := exec1(t, pagedRunner(maxPages+5, &lists), in)
-	if code != ExitTemporary || out != "" || !strings.Contains(errs, "不推进游标") {
+	if code != ExitConfig || out != "" || !strings.Contains(errs, "page_size") {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
 	}
 }
@@ -357,7 +357,87 @@ func TestFutureDatedMailCannotPushCursorPastNow(t *testing.T) {
 	}
 	code, out, _ := exec1(t, r, input("2026-01-01T00:00:00Z"))
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if code != ExitOK || len(lines) != 2 || lines[1] != `{"cursor":"2026-02-01T00:00:00Z"}` { // fixedNow
+	if code != ExitOK || len(lines) != 2 || lines[1] != `{"cursor":"2026-01-04T00:00:00Z"}` { // fixedNow
 		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
+// 评审阻塞项 3：空游标 + 超大邮箱必须 exit 0、只取最新一批、游标推进到最新邮件，且不翻遍全部页。
+func TestFirstRunHugeMailboxIsBoundedAndAdvances(t *testing.T) {
+	var lists int
+	code, out, errs := exec1(t, pagedRunner(6000, &lists), `{"config":{"max_messages":100}}`)
+	if code != ExitOK {
+		t.Fatalf("code=%d %s", code, errs)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 101 || lists != 2 { // 100 封 + 游标；每页 50 → 只翻 2 页
+		t.Fatalf("lines=%d lists=%d", len(lines), lists)
+	}
+	if lines[100] != `{"cursor":"2026-01-04T00:00:00Z"}` { // 最新邮件在 now 之后被截到 now
+		t.Fatalf("cursor=%s", lines[100])
+	}
+}
+
+// 首次拉取不回溯 lookback 之外的邮件；window.from 优先。
+func TestFirstRunLookbackAndWindowFrom(t *testing.T) {
+	var calls [][]string
+	_, out, _ := exec1(t, replay(t, "2.0.0", &calls), `{"config":{"lookback_days":1}}`) // now=1/4 → 1/3 之后：两封都更早
+	if strings.Contains(out, "mail.received") {
+		t.Fatalf("不应有事件: %s", out)
+	}
+	_, out, _ = exec1(t, replay(t, "2.0.0", &calls), `{"config":{"lookback_days":1},"window":{"from":"2026-01-02T00:00:00Z"}}`)
+	if strings.Count(out, "mail.received") != 1 || !strings.Contains(out, "inv-42") {
+		t.Fatalf("window.from 未生效: %s", out)
+	}
+}
+
+// 带游标的积压超过 max_messages：从最旧的接着读，游标只推进到已读部分，多次运行收敛。
+func TestBudgetConvergesAcrossRuns(t *testing.T) {
+	cursor, seen := "2025-12-31T00:00:00Z", map[string]bool{}
+	for run := 0; run < 10 && len(seen) < 25; run++ {
+		var lists int
+		in := `{"config":{"page_size":10,"max_messages":10},"cursor":"` + cursor + `"}`
+		code, out, errs := exec1(t, pagedRunner(25, &lists), in)
+		if code != ExitOK {
+			t.Fatalf("run %d code=%d %s", run, code, errs)
+		}
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		for _, l := range lines[:len(lines)-1] {
+			var ev event
+			_ = json.Unmarshal([]byte(l), &ev)
+			seen[ev.ID] = true
+		}
+		var c map[string]string
+		_ = json.Unmarshal([]byte(lines[len(lines)-1]), &c)
+		if c["cursor"] <= cursor && len(seen) < 25 {
+			t.Fatalf("游标未前进: %s -> %s", cursor, c["cursor"])
+		}
+		cursor = c["cursor"]
+	}
+	if len(seen) != 25 {
+		t.Fatalf("seen=%d", len(seen))
+	}
+}
+
+// 单次运行超时：已读部分输出，游标只到已读部分，退出 0。
+func TestTimeoutMidRunKeepsReadPart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	reads := 0
+	var lists int
+	pr := pagedRunner(5, &lists)
+	r := func(c context.Context, args []string) ([]byte, []byte, error) {
+		if args[0] == "message" {
+			if reads++; reads == 2 {
+				cancel()
+				return nil, nil, c.Err()
+			}
+		}
+		return pr(c, args)
+	}
+	var o, e bytes.Buffer
+	code := run(ctx, strings.NewReader(`{"config":{},"cursor":"2025-12-31T00:00:00Z"}`), &o, &e, r, fixedNow)
+	lines := strings.Split(strings.TrimSpace(o.String()), "\n")
+	if code != ExitOK || len(lines) != 2 { // 1 封 + 游标
+		t.Fatalf("code=%d out=%q err=%q", code, o.String(), e.String())
 	}
 }

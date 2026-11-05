@@ -29,6 +29,8 @@ const (
 	tool           = "himalaya"
 	defaultTimeout = 60 * time.Second
 	defaultPage    = 50
+	defaultMax     = 100
+	defaultDays    = 7
 	maxPages       = 100
 	maxDetail      = 16 << 10
 )
@@ -65,16 +67,21 @@ type Input struct {
 	Config   Config `json:"config"`
 	Cursor   string `json:"cursor"`
 	Window   struct {
-		To string `json:"to"`
+		From string `json:"from"`
+		To   string `json:"to"`
 	} `json:"window"`
 }
 
 // Config 是适配器配置，全部可选。
 type Config struct {
-	Account    string `json:"account,omitempty"`
-	Folder     string `json:"folder,omitempty"` // 默认 INBOX
-	PageSize   int    `json:"page_size,omitempty"`
-	TimeoutSec int    `json:"timeout_sec,omitempty"`
+	Account  string `json:"account,omitempty"`
+	Folder   string `json:"folder,omitempty"` // 默认 INBOX
+	PageSize int    `json:"page_size,omitempty"`
+	// MaxMessages 是单次运行最多读取正文的邮件数（默认 100），保证单次运行有界、多次运行收敛。
+	MaxMessages int `json:"max_messages,omitempty"`
+	// LookbackDays 只用于首次拉取（游标为空且无 window.from）：只看最近 N 天（默认 7）。
+	LookbackDays int `json:"lookback_days,omitempty"`
+	TimeoutSec   int `json:"timeout_sec,omitempty"`
 }
 
 type event struct {
@@ -143,6 +150,12 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 	if cfg.Folder == "" {
 		cfg.Folder = "INBOX"
 	}
+	if cfg.MaxMessages <= 0 {
+		cfg.MaxMessages = defaultMax
+	}
+	if cfg.LookbackDays <= 0 {
+		cfg.LookbackDays = defaultDays
+	}
 	if cfg.PageSize <= 0 {
 		cfg.PageSize = defaultPage
 	}
@@ -153,8 +166,16 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var floor time.Time
-	if in.Cursor != "" {
+	// floor 是只读取不早于它的邮件。首次拉取（无游标）用 window.from，否则回看 LookbackDays 天，
+	// 且只取最新 MaxMessages 封，以 now 为游标起点；更早的邮件按设计不回填。
+	first := in.Cursor == ""
+	floor := now().Add(-time.Duration(cfg.LookbackDays) * 24 * time.Hour)
+	if in.Window.From != "" {
+		if w, err := time.Parse(time.RFC3339Nano, in.Window.From); err == nil {
+			floor = w
+		}
+	}
+	if !first {
 		var err error
 		if floor, err = time.Parse(time.RFC3339Nano, in.Cursor); err != nil {
 			return nil, fail(ExitConfig, "游标不是 RFC3339 时间: %q", in.Cursor)
@@ -180,9 +201,12 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 	// 信件按新到旧分页；翻到出现早于游标的信件、或页不满为止，否则积压会被游标越过而丢失。
 	var items []item
 	for page := 1; ; page++ {
+		if first && len(items) >= cfg.MaxMessages {
+			break // 首次拉取只要最新的一批
+		}
 		if page > maxPages {
-			// 不能推进游标：更旧的未取信件仍在游标之后。
-			return nil, fail(ExitTemporary, "积压超过 %d 页（每页 %d），本次不推进游标", maxPages, cfg.PageSize)
+			// 不能推进游标：更旧的未取信件仍在游标之后；重试不会收敛，需要本人调大 page_size。
+			return nil, fail(ExitConfig, "游标之后的新邮件超过 %d 页（每页 %d），请调大 config.page_size", maxPages, cfg.PageSize)
 		}
 		args := append(base("envelope", "list"), "--page-size", strconv.Itoa(cfg.PageSize), "--page", strconv.Itoa(page))
 		raw, err := call(ctx, r, append(args, vr.JSONFlag...))
@@ -210,15 +234,31 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 		}
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].at.Before(items[j].at) })
+	if len(items) > cfg.MaxMessages {
+		if first {
+			items = items[len(items)-cfg.MaxMessages:] // 首次：保留最新的
+		} else {
+			items = items[:cfg.MaxMessages] // 之后：从最旧的接着读，游标只推进到已读部分，多次运行收敛
+		}
+	}
 
-	newest := floor
+	var newest time.Time
+	if !first {
+		newest = floor
+	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	for _, it := range items {
+	for n, it := range items {
+		if n > 0 && ctx.Err() != nil {
+			break // 单次运行超时：已读部分照常输出，游标只到已读部分，下次接着读
+		}
 		// --preview：不把邮件标为已读（§9.7 只读）。
 		body, err := call(ctx, r, append(append(base("message", "read"), "--preview", it.ref), vr.JSONFlag...))
 		if err != nil {
+			if n > 0 && ctx.Err() != nil {
+				break
+			}
 			return nil, err
 		}
 		var text string
