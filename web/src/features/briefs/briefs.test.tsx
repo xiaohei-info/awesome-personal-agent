@@ -51,14 +51,13 @@ describe("简报页", () => {
     expect(a.getByText(/2030-W01/)).toBeInTheDocument();
   });
 
-  it("flow-brief: 复盘（period 以 -review 结尾）与简报分开列出", async () => {
+  it("简报与复盘（同为 brief 事项）合并在同一列表，不按猜测的后缀分栏", async () => {
     mount(server());
-    const briefs = within(await screen.findByRole("region", { name: "简报" }));
-    const reviews = within(screen.getByRole("region", { name: "复盘" }));
-    expect(briefs.getByLabelText("简报 周一简报")).toBeInTheDocument();
-    expect(briefs.queryByLabelText("简报 周复盘")).not.toBeInTheDocument();
-    expect(reviews.getByLabelText("简报 周复盘")).toBeInTheDocument();
-    expect(reviews.getByText("复盘工作")).toBeInTheDocument();
+    const list = within(await screen.findByRole("region", { name: "简报" }));
+    expect(list.getByLabelText("简报 周一简报")).toBeInTheDocument();
+    expect(list.getByLabelText("简报 周复盘")).toBeInTheDocument();
+    expect(list.getByText("复盘工作")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "复盘" })).not.toBeInTheDocument();
   });
 
   it("没有分节内容的简报显示空状态", async () => {
