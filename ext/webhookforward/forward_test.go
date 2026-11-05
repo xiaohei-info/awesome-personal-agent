@@ -260,3 +260,37 @@ func TestCorruptCursorRefusesToStart(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// 接收方回 3xx 不是确认：不跟随重定向，游标不前进，终点收不到任何请求。
+func TestRedirectIsNotAnAcknowledgement(t *testing.T) {
+	k, _, cfg := setup(t, 0)
+	var hits int
+	var mu sync.Mutex
+	end := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+	}))
+	defer end.Close()
+	var tries int
+	redir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		tries++
+		mu.Unlock()
+		http.Redirect(w, r, end.URL, http.StatusFound)
+	}))
+	defer redir.Close()
+	cfg.Target = redir.URL
+	k.add(1, "item.created", "a")
+	stop := runBG(t, cfg)
+	waitFor(t, "repeated attempts", func() bool { mu.Lock(); defer mu.Unlock(); return tries >= 3 })
+	stop()
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 0 {
+		t.Fatalf("redirect target was contacted %d times", hits)
+	}
+	if _, err := os.Stat(cfg.State); err == nil {
+		t.Fatal("cursor advanced on a redirect")
+	}
+}

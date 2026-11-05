@@ -59,7 +59,11 @@ type forwarder struct {
 // Run 订阅并转发，直到 ctx 取消（返回 nil）或遇到不可恢复的错误（凭据被拒等内核 4xx、游标文件损坏）。
 // 内核网络错误与 5xx 退避重试。
 func Run(ctx context.Context, cfg Config) error {
-	f := &forwarder{Config: cfg, http: &http.Client{Timeout: time.Duration(cfg.Wait+30) * time.Second}}
+	f := &forwarder{Config: cfg, http: &http.Client{
+		Timeout: time.Duration(cfg.Wait+30) * time.Second,
+		// 3xx 不是确认：跟随会把 POST 改成 GET，终点的 2xx 会被误当作送达。
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}
 	cursor, err := readCursor(cfg.State)
 	if err != nil {
 		return err
