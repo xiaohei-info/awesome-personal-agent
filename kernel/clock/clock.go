@@ -47,15 +47,6 @@ func invalid(format string, a ...any) error {
 	return domain.NewError(domain.CodeInvalidRequest, fmt.Sprintf(format, a...), "fix the timer fields")
 }
 
-// period 解析周期；shortcut: 周期只支持固定时长（如 "24h"），日历周期（每月）需要时再扩展。
-func period(s string) (time.Duration, error) {
-	d, err := time.ParseDuration(s)
-	if err != nil || d <= 0 {
-		return 0, invalid("recurrence %q is not a positive duration", s)
-	}
-	return d, nil
-}
-
 // Add 在 tx 内登记 Timer 并返回其 id（t.ID 为空时生成）。
 func Add(tx *store.Tx, t domain.Timer) (string, error) {
 	switch t.Kind {
@@ -69,7 +60,7 @@ func Add(tx *store.Tx, t domain.Timer) (string, error) {
 	case t.At.IsZero():
 		return "", invalid("timer at is zero")
 	case t.Kind == domain.TimerRecur:
-		if _, err := period(t.Recurrence); err != nil {
+		if _, err := ParseSchedule(t.Recurrence); err != nil {
 			return "", err
 		}
 	case t.Recurrence != "":
@@ -181,13 +172,14 @@ func (c *Clock) fire(ctx context.Context, id string, now time.Time) (bool, error
 		t.Kind, t.At = domain.TimerKind(kind), time.Unix(0, at).UTC()
 		due, next := t.At, time.Time{}
 		if t.Kind == domain.TimerRecur {
-			d, err := period(rec)
+			sc, err := ParseSchedule(rec)
 			if err != nil {
 				return err
 			}
-			missed := now.Sub(t.At) / d // 已错过的整节拍数；只补最近一次，下一次落在原节拍上
-			due = t.At.Add(missed * d)
-			next = due.Add(d)
+			if due, next = sc.latest(t.At, now); next.IsZero() {
+				return invalid("recurrence %q never fires again", rec)
+			}
+			due, next = due.UTC(), next.UTC()
 		}
 		if err := c.handler(tx, Command{TimerID: id, Target: t.Target, Kind: t.Kind, Due: due, Actor: systemActor}); err != nil {
 			return err

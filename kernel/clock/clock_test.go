@@ -219,3 +219,76 @@ func TestRunScansUntilCancelled(t *testing.T) {
 		t.Fatalf("run returned %v", err)
 	}
 }
+
+func TestScheduleNext(t *testing.T) {
+	at := func(y int, m time.Month, d, h, mi int) time.Time { return time.Date(y, m, d, h, mi, 0, 0, time.UTC) }
+	for _, c := range []struct {
+		spec  string
+		after time.Time
+		want  time.Time
+	}{
+		{"CRON_TZ=UTC 0 8 * * 1-5", at(2026, 1, 1, 8, 0), at(2026, 1, 2, 8, 0)}, // 周四 08:00 之后是周五
+		{"CRON_TZ=UTC 0 8 * * 1-5", at(2026, 1, 2, 9, 0), at(2026, 1, 5, 8, 0)}, // 周五之后跳过周末
+		{"CRON_TZ=UTC */15 * * * *", at(2026, 1, 1, 8, 7), at(2026, 1, 1, 8, 15)},
+		{"CRON_TZ=UTC 30 9,17 * * *", at(2026, 1, 1, 9, 30), at(2026, 1, 1, 17, 30)},
+		{"CRON_TZ=UTC 5-10/5 0 * * *", at(2026, 1, 1, 0, 5), at(2026, 1, 1, 0, 10)},
+		{"CRON_TZ=UTC 0 0 1 * *", at(2026, 1, 31, 12, 0), at(2026, 2, 1, 0, 0)},
+		{"CRON_TZ=UTC 0 0 29 2 *", at(2026, 3, 1, 0, 0), at(2028, 2, 29, 0, 0)},
+		{"CRON_TZ=UTC 0 0 * * 7", at(2026, 1, 1, 0, 0), at(2026, 1, 4, 0, 0)},           // 7 即周日
+		{"CRON_TZ=UTC 0 0 13 * 5", at(2026, 2, 1, 0, 0), at(2026, 2, 6, 0, 0)},          // 日与周都限定：并集，先到者（周五 6 日）
+		{"CRON_TZ=Asia/Shanghai 0 8 * * *", at(2026, 1, 1, 0, 0), at(2026, 1, 2, 0, 0)}, // 上海 08:00 = UTC 00:00，严格晚于
+		{"24h", at(2026, 1, 1, 8, 0), at(2026, 1, 2, 8, 0)},
+	} {
+		s, err := ParseSchedule(c.spec)
+		if err != nil {
+			t.Fatalf("%q: %v", c.spec, err)
+		}
+		if got := s.Next(c.after); !got.Equal(c.want) {
+			t.Errorf("%q after %v = %v, want %v", c.spec, c.after, got, c.want)
+		}
+	}
+	// 缺省时区是本机时区：不带前缀的 cron 在 time.Local 的墙上时间触发。
+	at0, err := Start("0 8 * * 1-5", t0)
+	if err != nil || at0.In(time.Local).Hour() != 8 || at0.In(time.Local).Minute() != 0 || at0.In(time.Local).Weekday() == time.Saturday || at0.In(time.Local).Weekday() == time.Sunday || !at0.After(t0) {
+		t.Fatalf("local default: %v %v", at0, err)
+	}
+}
+
+func TestScheduleRejectsBadSpecs(t *testing.T) {
+	for _, s := range []string{"", "0s", "-1h", "daily", "* * * *", "* * * * * *", "60 * * * *", "* 24 * * *", "* * 0 * *", "* * * 13 *",
+		"*/0 * * * *", "5-1 * * * *", "a * * * *", "CRON_TZ=Nowhere/Land * * * * *", "CRON_TZ= * * * * *"} {
+		if _, err := ParseSchedule(s); err == nil {
+			t.Errorf("%q accepted", s)
+		}
+	}
+	if _, err := Start("0 0 31 2 *", t0); err == nil {
+		t.Error("an expression that never fires must be rejected at creation")
+	}
+}
+
+// cron 的周期定时与时长一样：同一节拍只触发一次，停机错过多个节拍只补最近一次，下一次落回原节拍。
+func TestRecurCronCatchesUpOnlyLatestMissed(t *testing.T) {
+	f := newFixture(t)
+	const spec = "CRON_TZ=UTC 0 8 * * 1-5"
+	first, err := Start(spec, t0) // t0 = 2026-01-01 周四 00:00
+	if err != nil || !first.Equal(t0.Add(8*time.Hour)) {
+		t.Fatalf("first %v %v", first, err)
+	}
+	f.add(t, domain.Timer{Target: "pack-1", Kind: domain.TimerRecur, At: first, Recurrence: spec})
+	f.now = first
+	if f.tick(t) != 1 || f.tick(t) != 0 {
+		t.Fatal("one beat must fire once")
+	}
+	// 停机跨过周五、周一、周二、周三，周三 12:00 醒来：只补周三 08:00。
+	f.now = time.Date(2026, 1, 7, 12, 0, 0, 0, time.UTC)
+	if f.tick(t) != 1 || len(f.got) != 2 {
+		t.Fatalf("catch-up fired %d", len(f.got))
+	}
+	if want := time.Date(2026, 1, 7, 8, 0, 0, 0, time.UTC); !f.got[1].Due.Equal(want) {
+		t.Fatalf("due %v want %v", f.got[1].Due, want)
+	}
+	f.now = time.Date(2026, 1, 8, 8, 0, 0, 0, time.UTC) // 下一拍：周四
+	if f.tick(t) != 1 || !f.got[2].Due.Equal(f.now) {
+		t.Fatalf("next beat %+v", f.got)
+	}
+}

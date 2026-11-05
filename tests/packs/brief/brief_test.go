@@ -228,6 +228,31 @@ func TestInstanceParamsValidatedAndBecomeRecurringTimer(t *testing.T) {
 	}
 }
 
+// 附录 C.13 的示例 `0 8 * * 1-5`（工作日 8 点）建得了实例，Timer 落在工作日 8 点。
+func TestInstanceAcceptsCronSchedule(t *testing.T) {
+	e := newEnv(t, "")
+	if _, err := e.do("instance.create", map[string]any{"pack": "brief", "params": json.RawMessage(`{"schedule":"0 8 * * 1-5"}`)}); err != nil {
+		t.Fatalf("cron instance rejected: %v", err)
+	}
+	var ns int64
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT at FROM clock_timer`)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		if r.Next() {
+			return r.Scan(&ns)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if at := time.Unix(0, ns).In(time.Local); at.Hour() != 8 || at.Weekday() == time.Saturday || at.Weekday() == time.Sunday || !at.After(t0) {
+		t.Fatalf("first beat %v", at)
+	}
+}
+
 // ACT-BRF-03 / ACT-BRF-04：同一周期只触发一次；停机错过多个周期，醒来只补最近一次。
 func TestOneBriefPerPeriodAndCatchUpOnlyLatest(t *testing.T) {
 	e := newEnv(t, "")

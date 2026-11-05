@@ -172,7 +172,8 @@ func TestCreateValidatesParamsAgainstPackSchema(t *testing.T) {
 		{"nested item type", "brief", `{"schedule":"24h","projects":[1]}`},
 		{"pack without instance_params", "plain", `{}`},
 		{"pack not loaded", "ghost", `{}`},
-		{"cron is not supported by the clock", "brief", `{"schedule":"0 8 * * 1-5"}`},
+		{"cron with a wrong field count", "brief", `{"schedule":"0 8 * *"}`},
+		{"cron out of range", "brief", `{"schedule":"0 25 * * *"}`},
 	}
 	for _, c := range bad {
 		if _, err := e.do(owner, "instance.create", map[string]any{"pack": c.pack, "params": json.RawMessage(c.params)}); err == nil {
@@ -184,6 +185,21 @@ func TestCreateValidatesParamsAgainstPackSchema(t *testing.T) {
 	}
 	if got := e.events(t, EvCreated); len(got) != 0 {
 		t.Fatalf("rejected creates left events: %v", got)
+	}
+}
+
+// 附录 C.13 的简报示例 `0 8 * * 1-5`（本机时区的工作日 8 点）能建实例；CRON_TZ 前缀指定时区。
+func TestCreateAcceptsCronSchedule(t *testing.T) {
+	e := setup(t)
+	e.create(t, `{"schedule":"0 8 * * 1-5"}`)
+	_, at := e.timers(t)
+	if l := at.In(time.Local); l.Hour() != 8 || l.Minute() != 0 || l.Weekday() == time.Saturday || l.Weekday() == time.Sunday || !at.After(t0) {
+		t.Fatalf("first beat %v", l)
+	}
+	e = setup(t)
+	e.create(t, `{"schedule":"CRON_TZ=UTC 0 8 * * 1-5"}`)
+	if _, at := e.timers(t); !at.Equal(t0.AddDate(0, 0, 1)) { // t0 是周四 08:00，下一拍是周五 08:00
+		t.Fatalf("first beat %v", at)
 	}
 }
 
