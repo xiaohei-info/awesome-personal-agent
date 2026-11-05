@@ -22,7 +22,7 @@ type payload struct {
 	Reverts  int64            `json:"reverts,omitempty"`
 }
 
-var itemEvents = []string{domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged}
+var itemEvents = []string{domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvDecisionRequested, domain.EvDecisionResolved}
 
 type folded struct {
 	items map[string]domain.Item
