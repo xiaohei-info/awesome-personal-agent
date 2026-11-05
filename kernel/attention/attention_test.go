@@ -533,3 +533,43 @@ func TestOvernightQuietWrapsPastMidnight(t *testing.T) {
 		t.Error("midday must not be quiet")
 	}
 }
+
+// 回归：已退回 Web 未读的投递，事项被回答后不再展示。
+func TestAnsweredDecisionLeavesWebUnread(t *testing.T) {
+	for name, route := range map[string]string{"web route": "web", "unclaimed channel": "chan"} {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t)
+			e.policy(func(p *policy.Policy) { p.Disturb.Routes["decision"] = route })
+			id := e.asked(nil)
+			e.advance(10 * time.Minute) // 渠道无人领取，清扫后退回 Web
+			if len(e.unread()) != 1 {
+				t.Fatalf("setup: expected one unread, got %+v", e.unread())
+			}
+			e.do(owner, "decision.answer", map[string]any{"id": id, "choice": "A"})
+			if u := e.unread(); len(u) != 0 {
+				t.Fatalf("answered decision still unread: %+v", u)
+			}
+		})
+	}
+}
+
+// 回归：静默期内决策从远截止推进到临近截止，豁免生效，不必等静默结束。
+func TestDecisionBecomingNearDeadlineDuringQuietIsReleased(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(quiet(e.now.Add(-time.Hour), e.now.Add(5*time.Hour)))
+	e.policy(func(p *policy.Policy) { p.Disturb.QuietExempt = true })
+	id := e.asked(map[string]any{"deadline": e.now.Add(2 * time.Hour)})
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("far deadline bypassed quiet: %+v", d)
+	}
+	e.advance(time.Hour) // 距截止 1h，仍不临近
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("not near yet: %+v", d)
+	}
+	e.advance(40 * time.Minute) // 距截止 20 分钟，进入临近窗口
+	d := e.claim("channel:chan")
+	if d == nil || d.Item != id {
+		t.Fatalf("decision not released when it became near its deadline: %+v", d)
+	}
+}

@@ -346,10 +346,10 @@ func (q *Queue) Confirm(tx *store.Tx, id string, version int64) (domain.Delivery
 	return q.reload(tx, id)
 }
 
-// Supersede 作废该事项中版本小于 below 的未终结投递（事项变化的命令在同一事务调用）。
+// Supersede 作废该事项中版本小于 below 的未终结投递（含退回 Web 未读的：已变化的事项不再展示旧提醒；事项变化的命令在同一事务调用）。
 func (q *Queue) Supersede(tx *store.Tx, item string, below int64) (int64, error) {
 	return tx.Exec(`UPDATE delivery_delivery SET state = 'superseded', lease_until = 0
-		WHERE item = ? AND version < ? AND state IN ('pending', 'claimed', 'delivered')`, item, below)
+		WHERE item = ? AND version < ? AND state IN ('pending', 'claimed', 'delivered', 'fallback_web')`, item, below)
 }
 
 // Sweep 把可领已超过 UnclaimedAfter 仍无人领取的投递转 fallback_web，返回条数：

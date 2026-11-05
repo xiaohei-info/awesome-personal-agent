@@ -224,8 +224,13 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	return a.offer(tx, pol, held{
 		id: fmt.Sprintf("decision:%s:%d", id, ver), item: id, class: domain.DeliveryDecision, priority: it.Priority, version: ver,
 		content: domain.DeliveryContent{Title: it.Title, Summary: ask.Question, Options: opts, WebURL: a.o.WebURL(id)},
-		exempt:  ask.Deadline != nil && ask.Deadline.Sub(a.o.Now()) <= NearDeadline,
+		exempt:  nearDeadline(pol, it, a.o.Now()),
 	})
+}
+
+// nearDeadline：本人开启了豁免，且事项的决策截止距 now 不超过 NearDeadline（已过也算）。
+func nearDeadline(pol policy.Policy, it domain.Item, now time.Time) bool {
+	return pol.Disturb.QuietExempt && it.Ask != nil && it.Ask.Deadline != nil && it.Ask.Deadline.Sub(now) <= NearDeadline
 }
 
 // drop 作废事项的全部未终结投递并清掉它被拦住的提醒。
@@ -303,7 +308,6 @@ func (a *Attention) offer(tx *store.Tx, pol policy.Policy, h held) error {
 		return err
 	}
 	now := a.o.Now()
-	h.exempt = h.exempt && pol.Disturb.QuietExempt
 	h.release = now
 	if end, ok := quietEnd(pol, now); ok && !h.exempt {
 		h.release = end
@@ -367,12 +371,22 @@ func (a *Attention) flush(tx *store.Tx, pol policy.Policy) error {
 		h.class, h.priority, h.exempt, h.mergeable, h.release = domain.DeliveryClass(class), domain.Priority(prio), exempt == 1, merge == 1, time.Unix(0, rel)
 		due = append(due, h)
 		return json.Unmarshal([]byte(body), &due[len(due)-1].content)
-	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at FROM attention_held WHERE release_at <= ? ORDER BY release_at, rowid`, now.UnixNano())
+	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at FROM attention_held WHERE release_at <= ? OR class = 'decision' ORDER BY release_at, rowid`, now.UnixNano())
 	if err != nil {
 		return err
 	}
 	var go_, merged []held
 	for _, h := range due {
+		if h.class == domain.DeliveryDecision { // 豁免按当前时间与策略重算：静默期内决策可能刚变得临近截止
+			it, err := items.Get(tx, h.item)
+			if err != nil && !isNotFound(err) {
+				return err
+			}
+			h.exempt = err == nil && nearDeadline(pol, it, now)
+			if !h.exempt && h.release.After(now) {
+				continue
+			}
+		}
 		if end, ok := quietEnd(pol, now); ok && !h.exempt {
 			if _, err := tx.Exec(`UPDATE attention_held SET release_at = ? WHERE id = ?`, end.UnixNano(), h.id); err != nil {
 				return err
