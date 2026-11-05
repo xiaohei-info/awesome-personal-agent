@@ -64,7 +64,11 @@ func call(t *testing.T, in map[string]any) result {
 
 // cur 构造期望的游标字符串（与实现同样的编码）。
 func cur(t string, seen ...string) string {
-	b, _ := json.Marshal(map[string]any{"t": t, "seen": seen})
+	hs := []string{}
+	for _, id := range seen {
+		hs = append(hs, shortHash(id))
+	}
+	b, _ := json.Marshal(map[string]any{"t": t, "seen": hs})
 	return string(b)
 }
 
@@ -251,5 +255,30 @@ func TestLongSummaryAndDetailAreTruncated(t *testing.T) {
 	r := call(t, in(s.URL, "", nil))
 	if got := []rune(r.events[0]["summary"].(string)); len(got) > maxSummary+1 {
 		t.Fatalf("summary 未截断: %d", len(got))
+	}
+}
+
+func TestHugeSameTimestampGroupKeepsOutputAndCursorBounded(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`<rss version="2.0"><channel>`)
+	for i := 0; i < 3000; i++ {
+		sb.WriteString(fmt.Sprintf(`<item><guid>%s-%d</guid><title>t</title><pubDate>Tue, 03 Jan 2023 00:00:00 +0000</pubDate></item>`, strings.Repeat("长", 250), i))
+	}
+	sb.WriteString(`</channel></rss>`)
+	s := serve(t, 200, sb.String())
+	c, total := "", 0
+	for i := 0; i < 200; i++ {
+		r := call(t, in(s.URL, c, map[string]any{"max_items": 200}))
+		if r.code != 0 || len(r.stdout) >= 64<<10 || r.cursor == "" {
+			t.Fatalf("round %d code=%d bytes=%d", i, r.code, len(r.stdout))
+		}
+		total += len(r.events)
+		if len(r.events) == 0 {
+			break
+		}
+		c = r.cursor
+	}
+	if total == 0 || total > 3000 {
+		t.Fatalf("total=%d", total)
 	}
 }

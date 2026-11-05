@@ -10,6 +10,8 @@ package rss
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -38,6 +40,8 @@ const (
 	maxDetail      = 1500
 	maxBody        = 10 << 20
 	outputBudget   = 40 << 10 // 低于调用器保留的 64KB 并留足余量
+	cursorOverhead = 32       // {"cursor":"…"} 外壳与转义余量
+	maxSeen        = 1000     // 同一时刻最多记 1000 个 id，游标因此 ≤ ~16KB
 	maxShort       = 300      // id、subject、link、sender 的长度上限
 	fetchTimeout   = 30 * time.Second
 	epoch          = "1970-01-01T00:00:00Z"
@@ -137,14 +141,17 @@ func pull(ctx context.Context, stdin io.Reader) ([][]byte, error) {
 		if err != nil {
 			return nil, fail(ExitTransient, "编码事件失败: %v", err)
 		}
-		if used+len(line) > outputBudget && len(out) > 0 {
+		trial := next
+		if e.dated {
+			trial = next.advance(e)
+		}
+		// 预算含游标行：同刻条目多时游标会变长，不能只数事件行。
+		if used+len(line)+len(trial.String())+cursorOverhead > outputBudget && len(out) > 0 {
 			break
 		}
 		used += len(line)
 		out = append(out, line)
-		if e.dated {
-			next = next.advance(e)
-		}
+		next = trial
 	}
 	cl, err := encode(map[string]string{"cursor": next.String()})
 	if err != nil {
@@ -195,12 +202,18 @@ func (c cursor) String() string {
 	return string(b)
 }
 
+// has 判断条目是否已处理。shortcut: 同一时刻超过 maxSeen 个条目时，其后的同刻条目被跳过，
+// 为的是游标和输出有硬上界；需要更多时改为分页式游标。
 func (c cursor) has(e entry) bool {
 	if !e.at.Equal(c.T) {
 		return false
 	}
+	if len(c.Seen) >= maxSeen {
+		return true
+	}
+	h := shortHash(e.ID)
 	for _, id := range c.Seen {
-		if id == e.ID {
+		if id == h {
 			return true
 		}
 	}
@@ -210,9 +223,9 @@ func (c cursor) has(e entry) bool {
 func (c cursor) advance(e entry) cursor {
 	switch {
 	case e.at.After(c.T):
-		return cursor{e.at, []string{e.ID}}
+		return cursor{e.at, []string{shortHash(e.ID)}}
 	case e.at.Equal(c.T):
-		return cursor{c.T, append(append([]string(nil), c.Seen...), e.ID)}
+		return cursor{c.T, append(append([]string(nil), c.Seen...), shortHash(e.ID))}
 	}
 	return c
 }
@@ -450,6 +463,12 @@ func clip(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
+}
+
+// shortHash 把 id 压成 12 位十六进制，让游标体积与 id 长度无关。
+func shortHash(id string) string {
+	h := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(h[:6])
 }
 
 // clipID 截断过长的 id/link；截断是确定的，所以 id 仍然稳定。
