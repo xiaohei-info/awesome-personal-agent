@@ -115,7 +115,7 @@ func run(url, token string, args ...string) result {
 	var out, errb bytes.Buffer
 	env := client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: "/nonexistent",
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient}
-	return result{client.Main(args, env), out.String(), errb.String()}
+	return result{client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), env), out.String(), errb.String()}
 }
 
 func (k *kernel) apa(token string, args ...string) result { return run(k.url, token, args...) }

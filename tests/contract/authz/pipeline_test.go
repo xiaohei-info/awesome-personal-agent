@@ -2,6 +2,7 @@ package authz_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -97,5 +98,42 @@ func TestDelegateEditsAnyItemOnlyWithEvidence(t *testing.T) {
 			t.Logf("%+v ev=%q", en.Event.Actor, en.Event.Evidence)
 		}
 		t.Fatal("update Event lacks on_behalf_of and the owner's words")
+	}
+}
+
+// 设计 §14.3/§14.5：delegate 的每个代理写操作都须附 on_behalf_of 与证据，不止事项命令。
+// 逐条经 HTTP 登记的写路由：缺证据退出码 2 且账本不变，带证据放行；owner 不带证据照常写。
+func TestDelegateProxyWritesNeedEvidenceAcrossModules(t *testing.T) {
+	e := setup(t)
+	n := 0
+	fresh := func(tmpl string) string { // 每次用新项目名与新项目，写入互不依赖
+		n++
+		rec := e.web("POST", "/v1/projects", fmt.Sprintf(`{"name":"base%d"}`, n))
+		var out struct{ ID string }
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return strings.NewReplacer("{p}", out.ID, "{n}", fmt.Sprint(n)).Replace(tmpl)
+	}
+	parent := e.item("", "parent")
+	writes := []struct{ name, method, path, body string }{
+		{"project.create", "POST", "/v1/projects", `{"name":"new{n}"}`},
+		{"project.update", "PATCH", "/v1/projects/{p}", `{"intro":"s"}`},
+		{"project.repo.add", "POST", "/v1/projects/{p}/repos", `{"op":"add_remote","remote":"https://example.com/r{n}.git"}`},
+		{"delegate.create", "POST", "/v1/delegations", `{"parent":"` + parent + `","assignee":"` + workHost + `","title":"t"}`},
+	}
+	for _, w := range writes {
+		path, body := fresh(w.path), fresh(w.body)
+		head := e.head()
+		for _, ev := range []string{"", "  "} {
+			wantReject(t, e.api("DEL", w.method, path, body, ev), domain.ExitUsage)
+		}
+		if e.head() != head {
+			t.Fatalf("%s: rejected delegate write appended events", w.name)
+		}
+		if rec := e.api("DEL", w.method, path, fresh(w.body), "owner: go ahead (session s1)"); rec.Code >= 300 {
+			t.Fatalf("%s with evidence: %d %s", w.name, rec.Code, rec.Body)
+		}
+		if rec := e.web(w.method, fresh(w.path), fresh(w.body)); rec.Code >= 300 {
+			t.Fatalf("%s as owner without evidence: %d %s", w.name, rec.Code, rec.Body)
+		}
 	}
 }

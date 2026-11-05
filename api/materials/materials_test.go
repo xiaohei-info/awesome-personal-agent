@@ -256,7 +256,7 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 	revert := "/v1/materials/" + r1.Material + "/revert"
 	revBody := `{"to":"` + r1.Revision + `","reason":"undo"}`
 	want(t, e.do("wrk", "POST", revert, revBody), 403, "permission_denied")
-	want(t, e.do("dlg", "POST", revert, revBody, EvidenceHeader, "owner: undo it"), 403, "web_only")
+	want(t, e.do("dlg", "POST", revert, revBody, core.EvidenceHeader, "owner: undo it"), 403, "web_only")
 	rec = e.do("web", "POST", revert, revBody)
 	want(t, rec, 200, "")
 	into(t, e.do("obs", "GET", rev, ""), &hist)
@@ -279,7 +279,7 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 	confirm := "/v1/revisions/" + p1.Revision + "/confirm"
 	want(t, e.do("wrk", "POST", confirm, `{}`), 403, "permission_denied")
 	want(t, e.do("dlg", "POST", confirm, `{}`), 400, "invalid_request") // delegate 必须附本人原话
-	want(t, e.do("dlg", "POST", confirm, `{}`, EvidenceHeader, "owner: yes, adopt the design"), 200, "")
+	want(t, e.do("dlg", "POST", confirm, `{}`, core.EvidenceHeader, "owner: yes, adopt the design"), 200, "")
 	want(t, e.do("web", "POST", confirm, `{}`), 409, "conflict")
 
 	// 拒绝：被拒绝的修订不生效，再拒绝是冲突。
@@ -299,7 +299,7 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 	g, rec := e.commit("wrk", `{"project":"`+prj+`","kind":"guideline","title":"Rules","content":"be kind","reason":"new"}`)
 	want(t, rec, 201, "")
 	gc := "/v1/revisions/" + g.Revision + "/confirm"
-	want(t, e.do("dlg", "POST", gc, `{}`, EvidenceHeader, "owner: activate it"), 403, "web_only")
+	want(t, e.do("dlg", "POST", gc, `{}`, core.EvidenceHeader, "owner: activate it"), 403, "web_only")
 	want(t, e.do("web", "POST", gc, `{}`), 200, "")
 	into(t, e.do("obs", "GET", "/v1/materials/"+g.Material, ""), &shown)
 	if shown.Revision == nil || shown.Revision.Content != "be kind" {
@@ -482,7 +482,7 @@ func TestHostedMaterial(t *testing.T) {
 		t.Fatalf("replay must return the first parent and child: %s vs %s", k1.Body, k2.Body)
 	}
 	want(t, e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"no words"}`), 400, "invalid_request")
-	rec = e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"by delegate"}`, EvidenceHeader, "owner: please update the design doc")
+	rec = e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"by delegate"}`, core.EvidenceHeader, "owner: please update the design doc")
 	want(t, rec, 201, "")
 
 	// 自有型材料：content 与 changes 都是冲突，让调用者去读修订。

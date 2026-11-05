@@ -64,7 +64,9 @@ func Register(name string, cmd Command) {
 type Ctx struct {
 	Env    Env
 	Pretty bool
-	creds  *Credentials // 懒解析
+	// Evidence 是全局 --evidence：delegate 代理操作的本人原话，随每个请求以 X-APA-Evidence 头发出（§14.3）。
+	Evidence string
+	creds    *Credentials // 懒解析
 }
 
 // Project 返回 APA_PROJECT。
@@ -116,10 +118,16 @@ func (e ExitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)
 func Main(args []string, env Env) int {
 	c := &Ctx{Env: env}
 	rest := make([]string, 0, len(args))
-	for _, a := range args {
-		if a == "--pretty" {
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--pretty":
 			c.Pretty = true
-		} else {
+		case a == "--evidence" && i+1 < len(args):
+			i++
+			c.Evidence = args[i]
+		case strings.HasPrefix(a, "--evidence="):
+			c.Evidence = strings.TrimPrefix(a, "--evidence=")
+		default:
 			rest = append(rest, a)
 		}
 	}
@@ -193,6 +201,9 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string,
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(cr.URL, "/")+apiPrefix+path, rdr)
 	if err != nil {
 		return usage("APA_URL is not a valid URL", "set APA_URL (or run `apa login --url`) to the kernel address, e.g. http://127.0.0.1:7777")
+	}
+	if c.Evidence != "" {
+		req.Header.Set("X-APA-Evidence", c.Evidence)
 	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)

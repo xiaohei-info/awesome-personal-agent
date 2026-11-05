@@ -19,10 +19,8 @@ import (
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
 const (
@@ -30,8 +28,6 @@ const (
 	IdempotencyHeader = "Idempotency-Key"
 	// IfMatchHeader 携带期望的对象版本（整数，可带引号）；不符返回 conflict。
 	IfMatchHeader = "If-Match"
-	// EvidenceHeader 携带代答的本人原话。
-	EvidenceHeader = "X-APA-Evidence"
 )
 
 // Routes 返回决策路由分组，交给 core.Deps.Groups。x 须已经 decisions.Register 与 items.Register。
@@ -52,22 +48,6 @@ func Routes(x *command.Executor, webBase string) core.RouteGroup {
 type handlers struct {
 	x       *command.Executor
 	webBase string
-}
-
-// ownerPrincipal 是本人的操作者标识（单用户系统，与 Web 会话的 Actor 一致）。
-const ownerPrincipal = "owner"
-
-// onBehalf 给 delegate 凭据的操作者补上 on_behalf_of：Bearer 认证只知道凭据，不知道替谁说话，
-// 而代答授权（§14.5）要求 delegate 声明替本人行事并附本人原话。认证与授权仍由命令管线在事务内完成。
-// shortcut: 单用户系统写死本人为 owner，引入多用户时改由凭据携带。
-type onBehalf struct{ command.Identity }
-
-func (o onBehalf) Authenticate(tx *store.Tx) (command.Caller, error) {
-	c, err := o.Identity.Authenticate(tx)
-	if err == nil && c.Level == authz.LevelDelegate && c.Actor.OnBehalfOf == "" {
-		c.Actor.OnBehalfOf = ownerPrincipal
-	}
-	return c, err
 }
 
 func (h *handlers) webURL(r *http.Request) string {
@@ -92,8 +72,8 @@ func (h *handlers) write(cmd string) core.Handler {
 				return domain.NewError(domain.CodeInvalidRequest, "field "+k+" comes from the URL and cannot be in the body", "remove it from the body")
 			}
 		}
-		req := command.Request{Identity: onBehalf{p.Identity}, Command: cmd, WebURL: h.webURL(r),
-			IdemKey: r.Header.Get(IdempotencyHeader), Evidence: r.Header.Get(EvidenceHeader)}
+		req := command.Request{Identity: p.Identity, Command: cmd, WebURL: h.webURL(r),
+			IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence}
 		// evidence 是请求元数据，不是命令输入；命令对未知字段严格拒绝，所以从体里取出。
 		if raw, ok := body["evidence"]; ok {
 			delete(body, "evidence")

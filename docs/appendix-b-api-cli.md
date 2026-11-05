@@ -69,6 +69,18 @@
 
 **只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、执行者清单、规则切 `auto`、运行权限上限、模型端点、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
 
+**代理写命令清单**：delegate 调用下列命令必须附 `on_behalf_of` 与证据（CLI 全局参数 `--evidence`，HTTP 头 `X-APA-Evidence`），缺失为退出码 2，不写入；其他凭据与 Web 本人不受影响（主文档 §14.5）。只读命令、只在 Web 的命令（设置类，delegate 为退出码 20）不在清单内。
+
+| 模块 | 命令 |
+|---|---|
+| 事项 | `item.create`、`item.update`、`item.transition`、`item.relate` |
+| 对话捕获 | `inbound.capture` |
+| 决策 | `decision.request`、`decision.answer`、`proposal.accept`、`proposal.dismiss` |
+| 材料 | `material.commit`、`material.add`、`revision.confirm`、`revision.reject`、`blob.put` |
+| 委派 | `delegate.create`、`delegate.report`、`executor.declare`、`followmsg.handback` |
+| 项目 | `project.create`、`project.update`、`project.repo.add`、`project.repo.remove`、`project.checkout.set`、`project.checkout.remove` |
+| 来源与能力包 | `source.register`、`source.update`、`source.set_enabled`、`source.webhook_key`、`source.webhook_revoke`、`source.replay`、`instance.create`、`instance.update`、`instance.toggle` |
+
 ## B.2 HTTP API
 
 | 分组 | 方法与路径 | 说明 | 凭据 |

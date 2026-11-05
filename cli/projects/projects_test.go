@@ -82,7 +82,7 @@ func (k *kernel) apa(token string, args ...string) result {
 	var out, errb bytes.Buffer
 	env := client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient}
-	code := client.Main(args, env)
+	code := client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), env)
 	return result{code, out.String(), errb.String()}
 }
 

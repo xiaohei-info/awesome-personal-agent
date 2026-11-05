@@ -530,7 +530,7 @@ func hostedConflict(m Material) error {
 
 func commit(kinds []string) command.Spec {
 	return command.Spec{
-		Name: "material.commit", Action: authz.ActionReviseMaterial,
+		Name: "material.commit", Action: authz.ActionReviseMaterial, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v commitIn
 			if err := decode(in, &v); err != nil {
@@ -659,7 +659,7 @@ func orNone(s string) string {
 
 func confirm() command.Spec {
 	return command.Spec{
-		Name: "revision.confirm", Action: authz.ActionAnswerDecision,
+		Name: "revision.confirm", Action: authz.ActionAnswerDecision, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v confirmIn
 			if err := decode(in, &v); err != nil {
@@ -728,7 +728,7 @@ func confirm() command.Spec {
 
 func reject() command.Spec {
 	return command.Spec{
-		Name: "revision.reject", Action: authz.ActionAnswerDecision,
+		Name: "revision.reject", Action: authz.ActionAnswerDecision, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v rejectIn
 			if err := decode(in, &v); err != nil {
