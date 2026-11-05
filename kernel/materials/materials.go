@@ -834,3 +834,51 @@ func revert() command.Spec {
 		},
 	}
 }
+
+// Purge 物理删除材料及其全部修订（设计 §6.15），返回这些修订正文引用过的 blob 引用串（apa://blob/<hash>，已去重）。
+// 材料不存在返回 not_found。事件墓碑与 blob 清理由 kernel/purge 在同一事务内完成。
+func Purge(tx *store.Tx, id string) ([]string, error) {
+	if _, err := Get(tx, id); err != nil {
+		return nil, err
+	}
+	revs, err := History(tx, id)
+	if err != nil {
+		return nil, err
+	}
+	var refs []string
+	for _, v := range revs {
+		for rest := v.Content; ; {
+			i := strings.Index(rest, blobRef)
+			if i < 0 {
+				break
+			}
+			rest = rest[i:]
+			if len(rest) < len(blobRef)+64 {
+				break
+			}
+			if ref := rest[:len(blobRef)+64]; !slices.Contains(refs, ref) {
+				refs = append(refs, ref)
+			}
+			rest = rest[len(blobRef):]
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM revisions WHERE material = ?`, id); err != nil {
+		return nil, err
+	}
+	_, err = tx.Exec(`DELETE FROM materials WHERE id = ?`, id)
+	return refs, err
+}
+
+// blobRef 与 kernel/blobs.RefPrefix 一致；本包不依赖 blobs，引用格式是正文里的稳定约定。
+const blobRef = "apa://blob/"
+
+// BlobReferenced 报告是否仍有修订正文引用 ref（apa://blob/<hash>）。
+func BlobReferenced(tx *store.Tx, ref string) (bool, error) {
+	r, err := tx.Query(`SELECT 1 FROM revisions WHERE instr(content, ?) > 0 LIMIT 1`, ref)
+	if err != nil {
+		return false, err
+	}
+	defer r.Close()
+	found := r.Next()
+	return found, r.Err()
+}
