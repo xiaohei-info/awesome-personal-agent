@@ -1,0 +1,545 @@
+// Package command 是所有写入的统一路径（设计 §7.0）：认证 → 授权 → 校验 → 事务 → 提交后。
+// 本包只提供管线与登记表，不含任何业务命令；业务模块登记 Spec，经 Do 执行，不直写对方的数据。
+//
+// 管线保证：乐观版本与幂等键、链路深度由内核继承（调用方只能指明"继承自哪个对象"，写不了数值，
+// 输入里出现内核维护字段直接拒绝）、被拒绝的高风险命令在独立事务里留痕。
+package command
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+)
+
+// DefaultMaxChainDepth 是链路深度阈值（§14.9）。
+const DefaultMaxChainDepth = 8
+
+// Module 是本模块在存储层登记的迁移：对象乐观版本与幂等结果。
+var Module = store.Module{Name: "command", Migrations: []store.Migration{{
+	Version: 1, Name: "create-version-and-idempotency",
+	SQL: `CREATE TABLE command_version (
+	object TEXT PRIMARY KEY,
+	version INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE command_idem (
+	principal TEXT NOT NULL,
+	command TEXT NOT NULL,
+	key TEXT NOT NULL,
+	input_hash TEXT NOT NULL,
+	result TEXT NOT NULL,
+	version INTEGER NOT NULL,
+	created_at INTEGER NOT NULL,
+	PRIMARY KEY (principal, command, key)
+) WITHOUT ROWID;`,
+}}}
+
+// ---- 第 1 步：认证 ----
+
+// Caller 是认证的结果：操作者与信任级。
+type Caller struct {
+	Actor domain.Actor
+	Level authz.Level
+	Kind  auth.Kind // 仅凭据入口有值
+}
+
+// Identity 在事务内把请求携带的凭据确定为 Caller。
+type Identity interface {
+	Authenticate(tx *store.Tx) (Caller, error)
+}
+
+// Bearer 是长期凭据入口（token、ext 密钥、webhook 密钥）。
+type Bearer struct {
+	Auth   *auth.Auth
+	Secret string
+	Origin auth.Origin
+}
+
+func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
+	c, err := b.Auth.Resolve(tx, b.Secret)
+	if err != nil {
+		return Caller{}, err
+	}
+	l := authz.LevelWorker
+	switch c.Kind {
+	case auth.Observer:
+		l = authz.LevelObserver
+	case auth.Delegate:
+		l = authz.LevelDelegate
+	}
+	return Caller{Actor: c.Actor(b.Origin), Level: l, Kind: c.Kind}, nil
+}
+
+// Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。
+// 构造者负责先完成它自己的校验；本包只拒绝没有操作者的情况。
+type Trusted Caller
+
+func (t Trusted) Authenticate(*store.Tx) (Caller, error) {
+	if t.Actor.Principal == "" {
+		return Caller{}, domain.NewError(domain.CodeUnauthenticated, "caller has no principal", "authenticate and retry")
+	}
+	return Caller(t), nil
+}
+
+// ---- 链路深度（§14.9） ----
+
+// ChainMode 说明本命令如何得到链路深度。
+type ChainMode int
+
+const (
+	ChainNew     ChainMode = iota // 新链路，深度 0（本人显式发起）
+	ChainInherit                  // 规则动作、回执、任务委派：继承并加一
+	ChainKeep                     // 提问、定时、挂靠消息：继承不加
+)
+
+// Chain 指明深度来源对象；深度数值只由内核从账本里该对象最近一条事件读取。
+type Chain struct {
+	Mode ChainMode
+	From string
+}
+
+// ---- 请求与登记 ----
+
+// Request 是一次命令调用。Input 是调用方可写的 JSON；Chain 只给进程内的调用方（规则、时钟、回执处理），
+// 对外传输层不应把它暴露给请求体。
+type Request struct {
+	Identity      Identity
+	Command       string
+	Input         json.RawMessage
+	IdemKey       string // 空表示不要求幂等
+	ExpectVersion *int64 // 空表示不检查
+	Chain         Chain
+	RuleID        string // 自动动作（规则）的授权依据
+	Evidence      string
+	Owner         string
+	WebURL        string
+}
+
+// Ctx 是 Apply 的上下文。
+type Ctx struct {
+	Tx         *store.Tx
+	Caller     Caller
+	Input      json.RawMessage
+	Object     authz.Object
+	ChainDepth int
+	Basis      *domain.Basis
+	now        func() time.Time
+	seqs       []int64
+}
+
+// Emit 在同一事务内追加事件。Actor、ChainDepth、Basis 一律由内核覆盖，调用方写不了。
+func (c *Ctx) Emit(e domain.Event) (int64, error) {
+	e.Actor, e.ChainDepth, e.Basis = c.Caller.Actor, c.ChainDepth, c.Basis
+	if e.At.IsZero() {
+		e.At = c.now()
+	}
+	seq, err := eventlog.Append(c.Tx, e)
+	if err == nil {
+		c.seqs = append(c.seqs, seq)
+	}
+	return seq, err
+}
+
+// Spec 登记一个命令。
+type Spec struct {
+	Name   string
+	Action authz.Action
+	// Object 在事务内据账本解析授权对象；对象的所有字段来自账本，不来自 Input。
+	Object func(tx *store.Tx, in json.RawMessage) (authz.Object, error)
+	// Validate 校验 kind 的 spec schema、阶段进入约束等；可为空。
+	Validate func(tx *store.Tx, o authz.Object, in json.RawMessage) error
+	// Apply 更新投影并经 Emit 追加事件；返回值序列化为结果，幂等重放时原样返回。
+	Apply func(c *Ctx) (any, error)
+	// RequireVersion 为真时必须带 ExpectVersion。
+	RequireVersion bool
+	// Kinds 是允许调用的 ext/webhook 凭据种类；默认这两类凭据不能调用。
+	Kinds []auth.Kind
+}
+
+// Result 是命令结果。
+type Result struct {
+	Value      json.RawMessage
+	Version    int64 // 对象写入后的版本；无对象为 0
+	Seqs       []int64
+	Replayed   bool // 幂等键命中，返回首次结果，未重复写入
+	Suppressed bool // 链路深度超阈值：只记录不派发
+}
+
+// Commit 在提交后交给内部消费者（事件规则、触达、订阅等待方）。
+type Commit struct {
+	Command string
+	Actor   domain.Actor
+	Object  string
+	Seqs    []int64
+}
+
+// Executor 持有登记表与存储。
+type Executor struct {
+	st            *store.Store
+	now           func() time.Time
+	MaxChainDepth int
+
+	mu    sync.RWMutex
+	specs map[string]Spec
+	subs  []func(Commit)
+}
+
+// New 返回 Executor；now 为 nil 时用系统时钟。
+func New(st *store.Store, now func() time.Time) *Executor {
+	if now == nil {
+		now = time.Now
+	}
+	return &Executor{st: st, now: now, MaxChainDepth: DefaultMaxChainDepth, specs: map[string]Spec{}}
+}
+
+// Register 登记命令；名称重复或缺 Apply/Object 会被拒绝。
+func (x *Executor) Register(s Spec) error {
+	if s.Name == "" || s.Apply == nil || s.Object == nil {
+		return fmt.Errorf("command: spec %q needs name, Object and Apply", s.Name)
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if _, ok := x.specs[s.Name]; ok {
+		return fmt.Errorf("command: %q already registered", s.Name)
+	}
+	x.specs[s.Name] = s
+	return nil
+}
+
+// OnCommit 登记提交后的消费者；按登记顺序同步调用，重放与被拒绝的命令不触发。
+func (x *Executor) OnCommit(f func(Commit)) {
+	x.mu.Lock()
+	x.subs = append(x.subs, f)
+	x.mu.Unlock()
+}
+
+func invalid(why string) error {
+	return domain.NewError(domain.CodeInvalidRequest, why, "fix the request and retry")
+}
+
+// 内核维护字段：任何层级出现都拒绝。ext 与 spec 子树是用户数据，不扫描。
+var kernelFields = []string{"chain_depth", "version", "seq", "unattended", "risk_class", "screening_pending", "basis"}
+
+// foldIn 与 encoding/json 的键匹配一致（大小写不敏感，含 Kelvin 符号等 Unicode 折叠），否则变体键能绕过防写。
+func foldIn(k string, set ...string) bool {
+	for _, f := range set {
+		if strings.EqualFold(k, f) {
+			return true
+		}
+	}
+	return false
+}
+
+func scanKernelFields(v any) string {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, c := range t {
+			if foldIn(k, kernelFields...) {
+				return k
+			}
+			if foldIn(k, "ext", "spec") {
+				continue
+			}
+			if f := scanKernelFields(c); f != "" {
+				return f
+			}
+		}
+	case []any:
+		for _, c := range t {
+			if f := scanKernelFields(c); f != "" {
+				return f
+			}
+		}
+	}
+	return ""
+}
+
+func checkInput(in json.RawMessage) error {
+	if len(bytes.TrimSpace(in)) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(in, &v); err != nil {
+		return invalid("input is not valid JSON")
+	}
+	if f := scanKernelFields(v); f != "" {
+		return invalid("field " + f + " is maintained by the kernel and cannot be written")
+	}
+	return nil
+}
+
+// rejected 携带需要在独立事务里留痕的拒绝事件。
+type rejected struct {
+	err error
+	ev  domain.Event
+}
+
+func (r *rejected) Error() string { return r.err.Error() }
+func (r *rejected) Unwrap() error { return r.err }
+
+// Do 执行一次命令：五步在同一写事务里完成（提交后消费者除外）。失败整体回滚；
+// 退出码 20/21/22 与运行身份被拒绝的决策命令另开事务记 command.rejected。
+func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
+	x.mu.RLock()
+	spec, ok := x.specs[req.Command]
+	x.mu.RUnlock()
+	if !ok {
+		return Result{}, invalid("unknown command " + req.Command)
+	}
+	if req.Identity == nil {
+		return Result{}, domain.NewError(domain.CodeUnauthenticated, "no credential", "authenticate and retry")
+	}
+	var (
+		res    Result
+		commit Commit
+	)
+	err := x.st.Update(ctx, func(tx *store.Tx) error {
+		var err error
+		res, commit, err = x.pipeline(tx, spec, req)
+		return err
+	})
+	if err != nil {
+		if rj, ok := err.(*rejected); ok {
+			if rerr := x.st.Update(ctx, func(tx *store.Tx) error {
+				_, e := eventlog.Append(tx, rj.ev)
+				return e
+			}); rerr != nil {
+				return Result{}, fmt.Errorf("command: record rejection: %w (original: %v)", rerr, rj.err)
+			}
+			return Result{}, rj.err
+		}
+		return Result{}, err
+	}
+	if !res.Replayed {
+		x.mu.RLock()
+		subs := append([]func(Commit){}, x.subs...)
+		x.mu.RUnlock()
+		for _, f := range subs {
+			f(commit)
+		}
+	}
+	return res, nil
+}
+
+func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commit, error) {
+	// 1 认证
+	caller, err := req.Identity.Authenticate(tx)
+	if err != nil {
+		return Result{}, Commit{}, err
+	}
+	if (caller.Kind == auth.Ext || caller.Kind == auth.Webhook) && !kindAllowed(spec, caller.Kind) {
+		return Result{}, Commit{}, domain.NewError(domain.CodePermissionDenied, "credential kind cannot call this command", "use an owner or agent credential")
+	}
+	// 2 授权
+	if err := checkInput(req.Input); err != nil {
+		return Result{}, Commit{}, err
+	}
+	obj, err := spec.Object(tx, req.Input)
+	if err != nil {
+		return Result{}, Commit{}, err
+	}
+	pv, pol, err := policy.Current(tx)
+	if err != nil {
+		return Result{}, Commit{}, err
+	}
+	ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: spec.Action, Object: obj,
+		Evidence: req.Evidence, Owner: req.Owner, WebURL: req.WebURL}
+	if d := authz.Decide(pol, ar); d.Err != nil {
+		if ev, ok := authz.RejectionEvent(ar, d); ok {
+			ev.At = x.now()
+			if caller.Actor.Via == domain.ViaRule {
+				ev.Basis = &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID}
+			}
+			return Result{}, Commit{}, &rejected{err: d.Err, ev: ev}
+		}
+		return Result{}, Commit{}, d.Err
+	}
+	// 3 校验：幂等 → 乐观版本 → 命令自身约束
+	hash := sha256.Sum256(req.Input)
+	inHash := hex.EncodeToString(hash[:])
+	if req.IdemKey != "" {
+		if prev, ok, err := loadIdem(tx, caller.Actor.Principal, spec.Name, req.IdemKey); err != nil {
+			return Result{}, Commit{}, err
+		} else if ok {
+			if prev.inputHash != inHash {
+				return Result{}, Commit{}, domain.NewError(domain.CodeConflict, "idempotency key was used with different input", "use a new key for a different request")
+			}
+			return Result{Value: json.RawMessage(prev.result), Version: prev.version, Replayed: true}, Commit{}, nil
+		}
+	}
+	var cur int64
+	if obj.ID != "" {
+		if cur, err = loadVersion(tx, obj.ID); err != nil {
+			return Result{}, Commit{}, err
+		}
+	}
+	if spec.RequireVersion && req.ExpectVersion == nil {
+		return Result{}, Commit{}, invalid("expected version is required")
+	}
+	if req.ExpectVersion != nil {
+		if obj.ID == "" {
+			return Result{}, Commit{}, invalid("expected version needs an object")
+		}
+		if *req.ExpectVersion != cur {
+			return Result{}, Commit{}, domain.NewError(domain.CodeConflict, fmt.Sprintf("object is at version %d, not %d", cur, *req.ExpectVersion), "re-read the object and retry")
+		}
+	}
+	if spec.Validate != nil {
+		if err := spec.Validate(tx, obj, req.Input); err != nil {
+			return Result{}, Commit{}, err
+		}
+	}
+	// 规则动作必须继承（§14.9）；只有本人显式发起才开新链路。
+	if caller.Actor.Via == domain.ViaRule && req.Chain.Mode == ChainNew {
+		return Result{}, Commit{}, invalid("rule action must inherit chain depth from a source object")
+	}
+	depth, err := chainDepth(tx, req.Chain)
+	if err != nil {
+		return Result{}, Commit{}, err
+	}
+	var basis *domain.Basis
+	if caller.Actor.Via == domain.ViaRule {
+		if req.RuleID == "" {
+			return Result{}, Commit{}, invalid("rule action requires a rule id")
+		}
+	}
+	if req.RuleID != "" || caller.Actor.Via == domain.ViaRule {
+		basis = &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID}
+	}
+	c := &Ctx{Tx: tx, Caller: caller, Input: req.Input, Object: obj, ChainDepth: depth, Basis: basis, now: x.now}
+	// 4 事务
+	var out Result
+	var value any
+	if depth > x.MaxChainDepth {
+		// 超阈值只记录不派发（健康类投递由触达模块据该事件产出）。
+		if _, err := c.Emit(domain.Event{Type: domain.EvHealthAlert, Object: objectOrCommand(obj, spec),
+			Reason:  "chain depth exceeded",
+			Payload: mustJSON(map[string]any{"command": spec.Name, "chain_depth": depth, "threshold": x.MaxChainDepth})}); err != nil {
+			return Result{}, Commit{}, err
+		}
+		out.Suppressed = true
+		out.Version = cur
+	} else {
+		if value, err = spec.Apply(c); err != nil {
+			return Result{}, Commit{}, err
+		}
+		out.Version = cur
+		if obj.ID != "" {
+			out.Version = cur + 1
+			if _, err := tx.Exec(`INSERT INTO command_version (object, version) VALUES (?, ?)
+				ON CONFLICT(object) DO UPDATE SET version = excluded.version`, obj.ID, out.Version); err != nil {
+				return Result{}, Commit{}, err
+			}
+		}
+	}
+	if out.Value, err = json.Marshal(value); err != nil {
+		return Result{}, Commit{}, err
+	}
+	out.Seqs = c.seqs
+	if req.IdemKey != "" {
+		if _, err := tx.Exec(`INSERT INTO command_idem (principal, command, key, input_hash, result, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			caller.Actor.Principal, spec.Name, req.IdemKey, inHash, string(out.Value), out.Version, x.now().UnixNano()); err != nil {
+			return Result{}, Commit{}, err
+		}
+	}
+	return out, Commit{Command: spec.Name, Actor: caller.Actor, Object: obj.ID, Seqs: out.Seqs}, nil
+}
+
+func objectOrCommand(o authz.Object, s Spec) string {
+	if o.ID != "" {
+		return o.ID
+	}
+	return s.Name
+}
+
+func mustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err) // 只用于固定结构，不会失败
+	}
+	return b
+}
+
+func kindAllowed(s Spec, k auth.Kind) bool {
+	for _, a := range s.Kinds {
+		if a == k {
+			return true
+		}
+	}
+	return false
+}
+
+type idemRow struct {
+	inputHash, result string
+	version           int64
+}
+
+func loadIdem(tx *store.Tx, principal, command, key string) (idemRow, bool, error) {
+	r, err := tx.Query("SELECT input_hash, result, version FROM command_idem WHERE principal = ? AND command = ? AND key = ?", principal, command, key)
+	if err != nil {
+		return idemRow{}, false, err
+	}
+	defer r.Close()
+	if !r.Next() {
+		return idemRow{}, false, r.Err()
+	}
+	var row idemRow
+	err = r.Scan(&row.inputHash, &row.result, &row.version)
+	return row, err == nil, err
+}
+
+func loadVersion(tx *store.Tx, object string) (int64, error) {
+	r, err := tx.Query("SELECT version FROM command_version WHERE object = ?", object)
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+	var v int64
+	if r.Next() {
+		err = r.Scan(&v)
+	} else {
+		err = r.Err()
+	}
+	return v, err
+}
+
+// chainDepth 从账本读取来源对象最近一条事件的深度（shortcut: 读全部事件取末条，事件量大时给 eventlog 加按对象取末条的接口）。
+func chainDepth(tx *store.Tx, c Chain) (int, error) {
+	if c.Mode == ChainNew {
+		return 0, nil
+	}
+	if c.Mode != ChainInherit && c.Mode != ChainKeep {
+		return 0, invalid("unknown chain mode")
+	}
+	if c.From == "" {
+		return 0, invalid("chain source object is required")
+	}
+	es, err := eventlog.ReadObject(tx, c.From)
+	if err != nil {
+		return 0, err
+	}
+	// 拒绝事件不带来源深度（记为 0），不能让一次被拒绝的尝试把链路清零。
+	d := 0
+	for i := len(es) - 1; i >= 0; i-- {
+		if es[i].Event.Type != domain.EvCommandRejected {
+			d = es[i].Event.ChainDepth
+			break
+		}
+	}
+	if c.Mode == ChainInherit {
+		d++
+	}
+	return d, nil
+}
