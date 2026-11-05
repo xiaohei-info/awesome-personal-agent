@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -229,19 +230,26 @@ func invalid(why string) error {
 }
 
 // 内核维护字段：任何层级出现都拒绝。ext 与 spec 子树是用户数据，不扫描。
-var kernelFields = map[string]bool{
-	"chain_depth": true, "version": true, "seq": true, "unattended": true,
-	"risk_class": true, "screening_pending": true, "basis": true,
+var kernelFields = []string{"chain_depth", "version", "seq", "unattended", "risk_class", "screening_pending", "basis"}
+
+// foldIn 与 encoding/json 的键匹配一致（大小写不敏感，含 Kelvin 符号等 Unicode 折叠），否则变体键能绕过防写。
+func foldIn(k string, set ...string) bool {
+	for _, f := range set {
+		if strings.EqualFold(k, f) {
+			return true
+		}
+	}
+	return false
 }
 
 func scanKernelFields(v any) string {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, c := range t {
-			if kernelFields[k] {
+			if foldIn(k, kernelFields...) {
 				return k
 			}
-			if k == "ext" || k == "spec" {
+			if foldIn(k, "ext", "spec") {
 				continue
 			}
 			if f := scanKernelFields(c); f != "" {
@@ -393,6 +401,10 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 			return Result{}, Commit{}, err
 		}
 	}
+	// 规则动作必须继承（§14.9）；只有本人显式发起才开新链路。
+	if caller.Actor.Via == domain.ViaRule && req.Chain.Mode == ChainNew {
+		return Result{}, Commit{}, invalid("rule action must inherit chain depth from a source object")
+	}
 	depth, err := chainDepth(tx, req.Chain)
 	if err != nil {
 		return Result{}, Commit{}, err
@@ -518,9 +530,13 @@ func chainDepth(tx *store.Tx, c Chain) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// 拒绝事件不带来源深度（记为 0），不能让一次被拒绝的尝试把链路清零。
 	d := 0
-	if len(es) > 0 {
-		d = es[len(es)-1].Event.ChainDepth
+	for i := len(es) - 1; i >= 0; i-- {
+		if es[i].Event.Type != domain.EvCommandRejected {
+			d = es[i].Event.ChainDepth
+			break
+		}
 	}
 	if c.Mode == ChainInherit {
 		d++

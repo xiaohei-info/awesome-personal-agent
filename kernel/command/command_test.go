@@ -347,6 +347,13 @@ func TestKernelFieldsCannotBeWritten(t *testing.T) {
 		`{"id":"n","body":"b","version":9}`,
 		`{"id":"n","body":"b","ask":{"risk_class":"low","screening_pending":false}}`,
 		`{"id":"n","body":"b","basis":{}}`,
+		`{"id":"n","body":"b","Chain_Depth":0}`,
+		`{"id":"n","body":"b","VERSION":9}`,
+		`{"id":"n","body":"b","SEQ":1}`,
+		`{"id":"n","body":"b","Unattended":true}`,
+		`{"id":"n","body":"b","ask":{"RISK_CLASS":"x","Screening_Pending":true}}`,
+		`{"id":"n","body":"b","x":[{"y":{"BASIS":{}}}]}`,
+		`{"id":"n","body":"b","spec":{},"EXT":{},"Ext2":{"Chain_depth":1}}`,
 	} {
 		if _, err := e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: json.RawMessage(body)}); exit(err) != domain.ExitUsage {
 			t.Fatalf("%s: %v", body, err)
@@ -400,6 +407,10 @@ func TestChainDepthInheritance(t *testing.T) {
 	}
 	if _, err := write("x", Chain{Mode: 9, From: "c1"}, owner, ""); exit(err) != domain.ExitUsage {
 		t.Fatalf("bad mode: %v", err)
+	}
+	// 规则动作不能省略 Chain 而悄悄开新链路。
+	if _, err := write("n0", Chain{}, rule, "r-1"); exit(err) != domain.ExitUsage {
+		t.Fatalf("rule action with new chain: %v", err)
 	}
 	// 自动动作必须带规则 id，事件记策略版本与规则 id。
 	if _, err := write("a", Chain{}, rule, ""); exit(err) != domain.ExitUsage {
@@ -460,5 +471,33 @@ func TestRegisterValidationAndTrustedLevel(t *testing.T) {
 	fake := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "x", Via: domain.ViaCLI}, Level: authz.LevelWeb}
 	if _, err := e.x.Do(bg, Request{Identity: fake, Command: "note.write", Input: in(noteIn{ID: "n", Body: "b"})}); exit(err) != domain.ExitPermissionDenied {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestRejectedAttemptDoesNotResetChainDepth(t *testing.T) {
+	e := setup(t)
+	if _, err := e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: in(noteIn{ID: "root", Body: "b"})}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: in(noteIn{ID: "deep", Body: "b"}), Chain: Chain{Mode: ChainInherit, From: "root"}}); err != nil {
+		t.Fatal(err)
+	}
+	// 在 deep（深度 1）上被拒绝的尝试会追加 depth 0 的 command.rejected。
+	dlg := e.bearer(t, auth.Spec{Kind: auth.Delegate})
+	if _, err := e.x.Do(bg, Request{Identity: dlg, Command: "decision.answer", Input: in(noteIn{ID: "deep"}), Evidence: "x"}); exit(err) != domain.ExitWebOnly {
+		t.Fatalf("setup rejection: %v", err)
+	}
+	es := e.events(t)
+	if es[len(es)-1].Event.Type != domain.EvCommandRejected {
+		t.Fatal("rejection event expected last")
+	}
+	r, err := e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: in(noteIn{ID: "next", Body: "b"}), Chain: Chain{Mode: ChainInherit, From: "deep"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, en := range e.events(t) {
+		if en.Event.Seq == r.Seqs[0] && en.Event.ChainDepth != 2 {
+			t.Fatalf("want depth 2, got %d", en.Event.ChainDepth)
+		}
 	}
 }
