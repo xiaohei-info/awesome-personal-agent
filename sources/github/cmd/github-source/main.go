@@ -1,35 +1,30 @@
 // github-source 是 GitHub 拉取程序的可执行文件。
-// 无参数：Source 契约（stdin JSON → stdout 事件 JSONL，退出码见 §9.2）；
-// `auth <source_id>`：认证模式，凭据写入该来源自己的目录。
+// 无参数：Source 契约（stdin JSON → stdout 事件 JSONL，退出码见 §9.2），凭据目录是 stdin 里的 credentials_path；
+// `auth <credentials_path>`：认证模式，凭据写入该目录（`apa source auth <id>` 传入登记的路径）。
 package main
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/sources/github"
 )
 
 func main() {
-	ctx := context.Background()
-	if len(os.Args) == 3 && os.Args[1] == "auth" {
-		dir, err := github.ConfigDir(os.Args[2])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "github source:", err)
-			os.Exit(github.ExitAuth)
-		}
-		os.Exit(github.Auth(ctx, github.GH{ConfigDir: dir}, os.Stdin, os.Stdout, os.Stderr))
+	os.Exit(run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	switch {
+	case len(args) == 0:
+		return github.RunStdin(ctx, stdin, stdout, stderr, func(dir string) github.API { return github.GH{ConfigDir: dir} }, time.Now)
+	case len(args) == 2 && args[0] == "auth" && filepath.IsAbs(args[1]):
+		return github.Auth(ctx, github.GH{ConfigDir: args[1]}, stdin, stdout, stderr)
 	}
-	if len(os.Args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: github-source            (Source contract on stdin)\n       github-source auth <source_id>")
-		os.Exit(github.ExitAuth)
-	}
-	// 来源 id 在 stdin 里，所以先解析出来再决定凭据目录。
-	os.Exit(github.RunStdin(ctx, os.Stdin, os.Stdout, os.Stderr, func(id string) (github.API, error) {
-		cwd, _ := os.Getwd()
-		dir, err := github.PullConfigDir(id, cwd)
-		return github.GH{ConfigDir: dir}, err
-	}, time.Now))
+	fmt.Fprintln(stderr, "usage: github-source                            (Source contract on stdin)\n       github-source auth <absolute credentials_path>")
+	return github.ExitAuth
 }

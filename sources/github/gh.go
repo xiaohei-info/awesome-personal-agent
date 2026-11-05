@@ -5,45 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-var sourceIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-
-// ConfigDir 是该来源自己的凭据目录 <APA_HOME>/sources/<id>/gh（APA_HOME 默认 ~/.apa）；内核不读。
-func ConfigDir(sourceID string) (string, error) {
-	if !sourceIDRe.MatchString(sourceID) {
-		return "", &Error{ExitAuth, fmt.Sprintf("bad source id %q", sourceID)}
-	}
-	home := os.Getenv("APA_HOME")
-	if home == "" {
-		h, err := os.UserHomeDir()
-		if err != nil {
-			return "", &Error{ExitAuth, "no APA_HOME and no home dir"}
-		}
-		home = filepath.Join(h, ".apa")
-	}
-	return filepath.Join(home, "sources", sourceID, "gh"), nil
-}
-
-// PullConfigDir 是拉取模式的凭据目录。内核不向来源子进程传 APA_HOME，但保证 cwd 是 <APA_HOME>/sources/<id>，
-// 所以 cwd 的目录名等于 source_id 时凭据在 <cwd>/gh；否则（手工运行）回退到 ConfigDir。
-func PullConfigDir(sourceID, cwd string) (string, error) {
-	if !sourceIDRe.MatchString(sourceID) {
-		return "", &Error{ExitAuth, fmt.Sprintf("bad source id %q", sourceID)}
-	}
-	if cwd != "" && filepath.Base(cwd) == sourceID {
-		return filepath.Join(cwd, "gh"), nil
-	}
-	return ConfigDir(sourceID)
-}
-
-// GH 是用 gh CLI 实现的 API。凭据只来自 ConfigDir，不读环境里的 token。
+// GH 是用 gh CLI 实现的 API。凭据只来自 ConfigDir（来源登记的 credentials_path），不读环境里的 token 和主机设置。
 type GH struct {
 	Bin       string // 默认 "gh"
 	ConfigDir string
@@ -52,7 +22,9 @@ type GH struct {
 func (g GH) env() []string {
 	env := os.Environ()[:0:0]
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "GH_TOKEN=") && !strings.HasPrefix(kv, "GITHUB_TOKEN=") && !strings.HasPrefix(kv, "GH_ENTERPRISE_TOKEN=") && !strings.HasPrefix(kv, "GITHUB_ENTERPRISE_TOKEN=") && !strings.HasPrefix(kv, "GH_CONFIG_DIR=") {
+		switch k, _, _ := strings.Cut(kv, "="); k {
+		case "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_CONFIG_DIR", "GH_HOST":
+		default:
 			env = append(env, kv)
 		}
 	}
@@ -109,7 +81,7 @@ func classify(msg string) *Error {
 
 // Auth 启动 gh 的交互认证，凭据写入该来源自己的目录（`apa source auth <id>` 的落点）。
 // --insecure-storage 让 token 落在配置目录而非系统钥匙串，这样凭据跟着来源目录走。
-func Auth(ctx context.Context, g GH, stdin, stdout, stderr *os.File) int {
+func Auth(ctx context.Context, g GH, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := os.MkdirAll(g.ConfigDir, 0o700); err != nil {
 		fmt.Fprintln(stderr, "github source:", err)
 		return ExitAuth
