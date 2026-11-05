@@ -1,0 +1,436 @@
+package rules
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+)
+
+// Call 是交给动作处理器的一次执行。Do 以该规则的身份走命令模型：授权依据、链路深度继承与幂等键都已带好。
+type Call struct {
+	Rule   string
+	Action packs.Action
+	Item   *domain.Item // 触发事项；时钟规则或事件不涉及事项时为空
+	Seq    int64        // 触发事件的序号；时钟规则为 0
+	Do     func(cmd string, input any) (command.Result, error)
+}
+
+// Handler 执行一个枚举动作。set_phase、add_tag、create_item、create_timer 由本包内置；
+// start_background_run 由后台运行模块、call_agent 由专属 agent 的装配处登记。没有登记的动作按未知动作失败，
+// 不伪造成功。
+type Handler func(ctx context.Context, c Call) error
+
+// Options 配置 Engine。
+type Options struct {
+	Store *store.Store
+	Exec  *command.Executor
+	Packs PackSource
+	// Handlers 登记内置之外的动作处理器，键是动作名。
+	Handlers map[string]Handler
+	// Owner 是本人的标识，作为规则动作的 on_behalf_of 与执行者校验的主人。
+	Owner string
+	Now   func() time.Time
+	// OnError 接收提交后自动消费失败的错误（OnCommit 回调没有返回值）；可为空。
+	OnError func(error)
+}
+
+// Engine 消费账本事件与到期的时钟规则，按模式执行规则。
+type Engine struct {
+	o     Options
+	mu    sync.Mutex
+	again atomic.Bool
+}
+
+// New 返回 Engine 并登记为命令提交后的消费者：每条命令提交后立即处理新事件。
+func New(o Options) (*Engine, error) {
+	if o.Store == nil || o.Exec == nil || o.Packs == nil {
+		return nil, errors.New("rules: Store, Exec and Packs are required")
+	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	e := &Engine{o: o}
+	o.Exec.OnCommit(func(command.Commit) {
+		if err := e.Drain(context.Background()); err != nil && e.o.OnError != nil {
+			e.o.OnError(err)
+		}
+	})
+	return e, nil
+}
+
+func (e *Engine) now() time.Time { return e.o.Now() }
+
+// cursor 返回已处理到的事件序号；第一次使用时定在账本头部，不回放历史事件（历史上的事件不应让 auto 规则补做动作）。
+func (e *Engine) cursor(tx *store.Tx) (int64, error) {
+	r, err := tx.Query(`SELECT seq FROM rules_cursor WHERE id = 1`)
+	if err != nil {
+		return 0, err
+	}
+	var seq int64
+	found := r.Next()
+	if found {
+		err = r.Scan(&seq)
+	} else {
+		err = r.Err()
+	}
+	if cerr := r.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil || found {
+		return seq, err
+	}
+	if seq, err = eventlog.Head(tx); err != nil {
+		return 0, err
+	}
+	_, err = tx.Exec(`INSERT INTO rules_cursor (id, seq) VALUES (1, ?)`, seq)
+	return seq, err
+}
+
+// Drain 处理待执行的时钟规则和新事件，直到没有新的为止。重入（动作的提交又触发消费）与并发调用只做标记，
+// 由正在运行的那次循环接着处理，保证规则动作串行。
+func (e *Engine) Drain(ctx context.Context) error {
+	if !e.mu.TryLock() {
+		e.again.Store(true)
+		return nil
+	}
+	defer e.mu.Unlock()
+	for {
+		e.again.Store(false)
+		n, err := e.pass(ctx)
+		if err != nil {
+			return err
+		}
+		if n == 0 && !e.again.Load() {
+			return nil
+		}
+	}
+}
+
+const batch = 200
+
+func (e *Engine) pass(ctx context.Context) (int, error) {
+	var (
+		fires  []fire
+		events []eventlog.Entry
+		modes  map[string]string
+	)
+	err := e.o.Store.Update(ctx, func(tx *store.Tx) error {
+		cur, err := e.cursor(tx)
+		if err != nil {
+			return err
+		}
+		if events, err = eventlog.Read(tx, cur, batch); err != nil {
+			return err
+		}
+		if fires, err = loadFires(tx); err != nil {
+			return err
+		}
+		all, err := List(tx)
+		if err != nil {
+			return err
+		}
+		modes = map[string]string{}
+		for _, s := range all {
+			modes[s.Key] = s.Mode
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	rs := defs(e.o.Packs)
+	for _, f := range fires {
+		if err := e.fire(ctx, rs, modes, f); err != nil {
+			return 0, err
+		}
+	}
+	for _, en := range events {
+		if err := e.event(ctx, rs, modes, en); err != nil {
+			return 0, err
+		}
+	}
+	return len(fires) + len(events), nil
+}
+
+type fire struct {
+	id   int64
+	rule string
+	due  time.Time
+}
+
+func loadFires(tx *store.Tx) ([]fire, error) {
+	r, err := tx.Query(`SELECT id, rule, due FROM rules_fire ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	var out []fire
+	for r.Next() {
+		var f fire
+		var due int64
+		if err := r.Scan(&f.id, &f.rule, &due); err != nil {
+			return nil, err
+		}
+		f.due = time.Unix(0, due).UTC()
+		out = append(out, f)
+	}
+	return out, r.Err()
+}
+
+// ---- 到期的时钟规则 ----
+
+func (e *Engine) fire(ctx context.Context, rs []ruleDef, modes map[string]string, f fire) error {
+	for _, d := range rs {
+		if d.Key != f.rule || d.Group != groupClock {
+			continue
+		}
+		t := &trigger{object: objectOf(d.Key), ref: fmt.Sprintf("f%d", f.id)}
+		if err := e.run(ctx, d, modes[d.Key], t); err != nil {
+			return err
+		}
+	}
+	// 包已被删除的规则也清掉待执行记录。
+	return e.o.Store.Update(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(`DELETE FROM rules_fire WHERE id = ?`, f.id)
+		return err
+	})
+}
+
+// ---- 事件 ----
+
+// trigger 是一次规则命中的上下文。
+type trigger struct {
+	entry  eventlog.Entry
+	item   *domain.Item
+	before *domain.Item
+	object string // 链路深度的来源对象，也是观察记录挂靠的对象
+	ref    string // 幂等键里的触发标识
+	depth  int
+}
+
+func (e *Engine) event(ctx context.Context, rs []ruleDef, modes map[string]string, en eventlog.Entry) error {
+	// 规则动作（含其被拒绝的尝试）产生的 Event 不再触发规则（§7.3）。
+	if !en.Tombstone && en.Event.Actor.Via != domain.ViaRule {
+		var t *trigger
+		for _, d := range rs {
+			if d.Group != groupEvent || modes[d.Key] == "" || modes[d.Key] == ModeOff {
+				continue
+			}
+			if t == nil {
+				var err error
+				if t, err = e.trigger(ctx, en); err != nil {
+					return err
+				}
+			}
+			ok, err := match(d.When, t)
+			if err != nil {
+				if err := e.fail(ctx, d, t, "match", err); err != nil {
+					return err
+				}
+				continue
+			}
+			if ok {
+				if err := e.run(ctx, d, modes[d.Key], t); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return e.o.Store.Update(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE rules_cursor SET seq = ? WHERE id = 1 AND seq < ?`, en.Event.Seq, en.Event.Seq)
+		return err
+	})
+}
+
+func (e *Engine) trigger(ctx context.Context, en eventlog.Entry) (*trigger, error) {
+	t := &trigger{entry: en, object: en.Event.Object, ref: fmt.Sprintf("e%d", en.Event.Seq), depth: en.Event.ChainDepth}
+	var p struct {
+		Item   domain.Item  `json:"item"`
+		Before *domain.Item `json:"before"`
+	}
+	if json.Unmarshal(en.Event.Payload, &p) == nil && p.Item.ID != "" {
+		t.item, t.before = &p.Item, p.Before
+		return t, nil
+	}
+	// 非事项事件：对象若是事项，用它当前的状态匹配 kind、tag 等条件。
+	err := e.o.Store.View(ctx, func(tx *store.Tx) error {
+		it, err := items.Get(tx, en.Event.Object)
+		if err == nil {
+			t.item = &it
+		}
+		if isNotFound(err) {
+			return nil
+		}
+		return err
+	})
+	return t, err
+}
+
+// match 判断平铺条件：每个键的值是标量（相等）或标量列表（成员）；全部满足才命中。不支持表达式。
+// 条件键：event、kind、phase、to_phase、from_phase、tag、tag_any、project、assignee、source。
+func match(when map[string]any, t *trigger) (bool, error) {
+	for k, v := range when {
+		want := scalars(v)
+		var got []string
+		switch k {
+		case "event":
+			got = []string{t.entry.Event.Type}
+		case "kind", "phase", "to_phase", "project", "assignee", "source":
+			if t.item == nil {
+				return false, nil
+			}
+			got = []string{itemField(*t.item, k)}
+		case "from_phase":
+			if t.before == nil {
+				return false, nil
+			}
+			got = []string{string(t.before.Phase)}
+		case "tag", "tag_any":
+			if t.item == nil {
+				return false, nil
+			}
+			got = t.item.Tags
+		default:
+			return false, fmt.Errorf("condition %q is not supported (event, kind, phase, to_phase, from_phase, tag, tag_any, project, assignee, source)", k)
+		}
+		if !slices.ContainsFunc(got, func(g string) bool { return slices.Contains(want, g) }) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func itemField(it domain.Item, k string) string {
+	switch k {
+	case "kind":
+		return string(it.Kind)
+	case "phase", "to_phase":
+		return string(it.Phase)
+	case "project":
+		return it.Project
+	case "assignee":
+		return it.Assignee
+	}
+	if it.Origin != nil {
+		return it.Origin.Source
+	}
+	return ""
+}
+
+func scalars(v any) []string {
+	if l, ok := v.([]any); ok {
+		out := make([]string, 0, len(l))
+		for _, x := range l {
+			out = append(out, fmt.Sprint(x))
+		}
+		return out
+	}
+	return []string{fmt.Sprint(v)}
+}
+
+// ---- 按模式执行 ----
+
+func (e *Engine) run(ctx context.Context, d ruleDef, mode string, t *trigger) error {
+	switch mode {
+	case ModeObserve:
+		return e.observe(ctx, d, t)
+	case ModeAuto:
+		return e.execute(ctx, d, t)
+	}
+	return nil // off 或未登记：跳过，也不留观察记录
+}
+
+// observe 只追加一条"本来会做什么"的记录；不写业务状态，不外呼。
+func (e *Engine) observe(ctx context.Context, d ruleDef, t *trigger) error {
+	return e.o.Store.Update(ctx, func(tx *store.Tx) error {
+		pv, _, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		p, _ := json.Marshal(map[string]any{"rule": d.Key, "trigger_seq": t.entry.Event.Seq, "would_do": d.Do})
+		_, err = eventlog.Append(tx, domain.Event{Type: EvObserved, Object: t.object, Actor: ruleActor(d.Key),
+			Basis: &domain.Basis{PolicyVersion: pv, RuleID: d.Key}, Reason: "observe: would run " + d.Key,
+			Payload: p, ChainDepth: t.depth, At: e.now()})
+		return err
+	})
+}
+
+// execute 依次执行 do[]；某个动作失败就停止，失败记 health.alert（授权类拒绝已由命令管线留痕，不重复记）。
+func (e *Engine) execute(ctx context.Context, d ruleDef, t *trigger) error {
+	for i, a := range d.Do {
+		name, _ := a["action"].(string)
+		h, ok := e.handler(name)
+		var err error
+		if !ok {
+			err = invalid("action " + name + " has no registered handler")
+		} else {
+			n := 0
+			err = h(ctx, Call{Rule: d.Key, Action: a, Item: t.item, Seq: t.entry.Event.Seq,
+				Do: func(cmd string, input any) (command.Result, error) {
+					n++
+					return e.do(ctx, d.Key, t, fmt.Sprintf("%s:%d:%d", t.ref, i, n), cmd, input)
+				}})
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return e.fail(ctx, d, t, name, err)
+		}
+	}
+	return nil
+}
+
+func (e *Engine) do(ctx context.Context, k string, t *trigger, idem, cmd string, input any) (command.Result, error) {
+	b, err := json.Marshal(input)
+	if err != nil {
+		return command.Result{}, err
+	}
+	owner := e.o.Owner
+	if owner == "" {
+		owner = "owner"
+	}
+	a := ruleActor(k)
+	a.OnBehalfOf = owner
+	return e.o.Exec.Do(ctx, command.Request{
+		Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate},
+		Command:  cmd, Input: b, IdemKey: "rule:" + k + ":" + idem,
+		Chain:  command.Chain{Mode: command.ChainInherit, From: t.object},
+		RuleID: k, Evidence: "rule " + k, Owner: owner,
+	})
+}
+
+func (e *Engine) fail(ctx context.Context, d ruleDef, t *trigger, action string, cause error) error {
+	var de *domain.Error
+	if errors.As(cause, &de) {
+		switch de.ExitCode() {
+		case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending:
+			return nil // 命令管线已经记了 command.rejected
+		}
+	}
+	return e.o.Store.Update(ctx, func(tx *store.Tx) error {
+		pv, _, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		p, _ := json.Marshal(map[string]string{"rule": d.Key, "action": action, "error": cause.Error()})
+		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: t.object, Actor: ruleActor(d.Key),
+			Basis: &domain.Basis{PolicyVersion: pv, RuleID: d.Key}, Reason: "rule action failed: " + cause.Error(),
+			Payload: p, ChainDepth: t.depth, At: e.now()})
+		return err
+	})
+}
