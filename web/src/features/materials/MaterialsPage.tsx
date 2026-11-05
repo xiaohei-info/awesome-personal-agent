@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { HostedMaterial } from "../materials-hosted/HostedMaterial";
 
 // 形状对应 GET/POST /v1/materials、GET /v1/materials/{id}[/revisions]、POST /v1/materials/{id}/revisions|revert、
 // POST /v1/revisions/{id}/confirm|reject、GET /v1/materials/search（附录 B.2）。
 // 写入策略（direct/proposed）、基线冲突、规范生效只认 Web、授权都在服务端；本页只提交并如实展示服务端的回答。
-// 自有型 only：托管型只显示登记信息（只读展示由 web-materials-hosted 负责）。
+// 托管型的只读展示与发起修改由 features/materials-hosted 负责。
 interface Material {
   id: string;
   project: string;
@@ -318,13 +319,7 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
     }
   };
 
-  if (hosted)
-    return (
-      <section role="region" aria-label="材料详情">
-        <h3>{m.title}</h3>
-        <p>托管型材料：{m.location}。此处只显示登记信息。</p>
-      </section>
-    );
+  if (hosted) return <HostedMaterial material={m} />;
 
   const save = async () => {
     try {

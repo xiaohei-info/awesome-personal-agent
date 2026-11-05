@@ -292,8 +292,8 @@ func TestChannelAnswerFirstOneWins(t *testing.T) {
 func TestChannelAnswerWebOnlyRefusedWithWebLink(t *testing.T) {
 	e := setup(t)
 	id, d, token := e.sent("money")
-	if token != "" {
-		t.Fatalf("web_only decision got a form link: %q", d.Content.FormURL)
+	if token != "" || !d.Content.WebOnly || len(d.Content.Options) != 0 {
+		t.Fatalf("web_only decision content must carry only the Web link: %+v", d.Content)
 	}
 	err := e.answer(chanKey, d, "alice", "msg-"+id, "A")
 	de, ok := err.(*domain.Error)

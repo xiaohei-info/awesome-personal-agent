@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, Route, Routes, useParams } from "react-router-dom";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { ProjectMaterials } from "../materials-hosted/ProjectMaterials";
 import type { Item } from "../items/ItemsPage";
 
 // 形状对应 GET/POST /v1/projects、GET/PATCH /v1/projects/{id}、POST /v1/projects/{id}/repos、
@@ -109,6 +110,7 @@ function ProjectDetail() {
       <Repos p={p} onChange={setP} />
       <Executors p={p} onSaved={setP} />
       <ProjectItems id={p.id} />
+      <ProjectMaterials project={p.id} />
     </main>
   );
 }

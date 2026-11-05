@@ -119,6 +119,9 @@ type DeliveryContent struct {
 	Recommend string   `json:"recommend,omitempty"`
 	WebURL    string   `json:"web_url,omitempty"`
 	FormURL   string   `json:"form_url,omitempty"` // 一次性表单链接（§10.3）
+	// WebOnly 由触达在写入决策投递时按事项现状填写，只读。为真时本内容不含 options、recommend、form_url，
+	// 只给标题、摘要与 Web 链接，渠道不得渲染可点选项（§14.4）。
+	WebOnly bool `json:"web_only,omitempty"`
 }
 
 // Injection 记录注入到哪个会话；注入不等于送达。

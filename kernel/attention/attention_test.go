@@ -3,6 +3,7 @@ package attention
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -685,6 +686,30 @@ func TestFormLinkOnlyOnTextOnlyChannels(t *testing.T) {
 	e.ask(web, nil)
 	if d := e.claim("channel:chan"); d == nil || d.Item != web || d.Content.FormURL != "" {
 		t.Fatalf("web_only decision got a form link: %+v", d)
+	}
+}
+
+// web_only 决策的投递内容只给标题、摘要与 Web 链接，不带选项、推荐、表单链接；普通决策不变（§6.9、§14.4）。
+func TestWebOnlyDecisionDeliveryCarriesOnlyWebLink(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(func(p *policy.Policy) {
+		p.Channels = map[string]policy.Channel{"chan": {TextOnly: true}}
+		p.WebOnly.Rules = []policy.WebOnlyRule{{Tag: "money", Category: policy.CategoryFunds}}
+	})
+	web := e.item(map[string]any{"tags": []string{"money"}})
+	e.ask(web, map[string]any{"recommend": "A"})
+	d := e.claim("channel:chan")
+	c := domain.DeliveryContent{Title: "t", Summary: "ship it?", WebURL: "/items/" + web, WebOnly: true}
+	if d == nil || d.Item != web || !reflect.DeepEqual(d.Content, c) {
+		t.Fatalf("web_only content %+v, want %+v", d, c)
+	}
+
+	plain := e.item(nil)
+	e.ask(plain, map[string]any{"recommend": "A"})
+	d = e.claim("channel:chan")
+	if d == nil || d.Item != plain || d.Content.WebOnly || len(d.Content.Options) != 2 || d.Content.Recommend != "A" || d.Content.FormURL == "" {
+		t.Fatalf("plain decision content: %+v", d)
 	}
 }
 
