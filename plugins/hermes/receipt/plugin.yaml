@@ -1,0 +1,7 @@
+name: apa-receipt
+version: 0.1.0
+description: "APA: asynchronous receipt capture (apa report) after executor-class tool calls and sub-agent stops, only when the arguments carry an item id."
+author: awesome-personal-agent
+provides_hooks:
+  - post_tool_call
+  - subagent_stop
