@@ -155,3 +155,14 @@ func TestRunExitCodes(t *testing.T) {
 		t.Fatalf("missing root: code %d", code)
 	}
 }
+
+func TestOversizeFilesAreStillScanned(t *testing.T) {
+	pad := strings.Repeat("// pad\n", 400000) // > 2 MiB
+	root := t.TempDir()
+	write(t, root, "kernel/m/big.go", "package m\n"+pad+"import _ \"os/exec\"\n")
+	write(t, root, "packs/p/big.yaml", pad+"x: hermes\n")
+	got := rules(t, root)
+	if !has(got, "kernel-import kernel/m/big.go") || !has(got, "harness-name packs/p/big.yaml") {
+		t.Fatalf("oversize violation bypassed: %v", got)
+	}
+}

@@ -18,7 +18,6 @@ import (
 const (
 	modulePath = "github.com/xiaohei-info/awesome-personal-agent"
 	outcallDir = "kernel/outcall" // 唯一外呼出口
-	maxTextLen = 1 << 20
 )
 
 // 内核（外呼调用器除外）禁止的网络与子进程库；net/url 等纯解析包不发起外呼，放行。
@@ -96,10 +95,6 @@ func walk(root, dir string, fn func(rel string, data []byte) error) error {
 	}
 	return filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
-			return err
-		}
-		info, err := d.Info()
-		if err != nil || info.Size() > maxTextLen {
 			return err
 		}
 		data, err := os.ReadFile(p)
