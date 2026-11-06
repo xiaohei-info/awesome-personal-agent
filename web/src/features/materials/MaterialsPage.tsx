@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../../app/api";
+import { MATERIAL_RELATION_LABELS } from "../../app/relations";
 import { useSession } from "../../app/session";
 import { HostedMaterial } from "../materials-hosted/HostedMaterial";
 
@@ -36,8 +38,15 @@ interface Hit {
   snippet?: string;
   path?: string;
 }
+interface Relation {
+  type: string;
+  from: string;
+  to: string;
+}
 interface Detail {
   material: Material;
+  relations: Relation[];
+  titles: Record<string, string>;
   revision: Revision | null;
   revisions: Revision[];
 }
@@ -96,7 +105,8 @@ export function MaterialsPage() {
   const [item, setItem] = useState("");
   const [materials, setMaterials] = useState<Material[] | null>(null);
   const [hits, setHits] = useState<Hit[] | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  // ?id= 让事项页的材料链接直达详情。
+  const [selected, setSelected] = useState<string | null>(useSearchParams()[0].get("id"));
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -290,11 +300,15 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
 
   const load = useCallback(async () => {
     try {
-      const r = await api.get<{ material: Material; revision: Revision | null }>(`/materials/${encodeURIComponent(id)}`);
-      if (r.material.location) return setHosted(true), setD({ material: r.material, revision: null, revisions: [] });
+      const r = await api.get<{ material: Material; revision: Revision | null; relations?: Relation[] }>(`/materials/${encodeURIComponent(id)}`);
+      // 关联事项只取以本材料为终点的边（事项 → 材料）；标题读不到时退回 id。
+      const relations = (r.relations ?? []).filter((x) => x.to === id);
+      const titles: Record<string, string> = {};
+      if (relations.length) await api.get<{ items: { id: string; title: string }[] }>("/items").then((l) => l.items.forEach((i) => (titles[i.id] = i.title)), () => {});
+      if (r.material.location) return setHosted(true), setD({ material: r.material, relations, titles, revision: null, revisions: [] });
       const h = await api.get<{ revisions: Revision[] }>(`/materials/${encodeURIComponent(id)}/revisions`);
       const revisions = [...h.revisions].sort((a, b) => b.seq - a.seq);
-      setD({ material: r.material, revision: r.revision, revisions });
+      setD({ material: r.material, relations, titles, revision: r.revision, revisions });
       setDraft(r.revision?.content ?? "");
     } catch (e) {
       cb.current.onError(e);
@@ -319,7 +333,26 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
     }
   };
 
-  if (hosted) return <HostedMaterial material={m} />;
+  const related = d.relations.length > 0 && (
+    <section role="region" aria-label="关联事项">
+      <h4>关联事项</h4>
+      <ul>
+        {d.relations.map((r) => (
+          <li key={r.type + r.from}>
+            {MATERIAL_RELATION_LABELS[r.type] ?? r.type} · <Link to={"/items/" + encodeURIComponent(r.from)}>{d.titles[r.from] ?? r.from}</Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+
+  if (hosted)
+    return (
+      <>
+        <HostedMaterial material={m} />
+        {related}
+      </>
+    );
 
   const save = async () => {
     try {
@@ -340,6 +373,8 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
       <h3>
         {m.title} <small>{m.kind} · {m.project || "全局"}</small>
       </h3>
+
+      {related}
 
       {pending.length > 0 && (
         <section role="region" aria-label="待确认修订">

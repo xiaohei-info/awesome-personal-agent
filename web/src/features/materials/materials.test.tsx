@@ -18,7 +18,7 @@ const rev = (id: string, material: string, seq: number, content: string, state: 
   id, material, seq, content, state, based_on, reason, actor: { type: seq % 2 ? "agent" : "human", principal: seq % 2 ? "bot" : "owner" }, at: "2030-01-0" + seq + "T00:00:00Z",
 });
 
-function backend(o: { materials?: Mat[]; revisions?: Rev[]; hits?: any[]; proposedKinds?: string[] } = {}) {
+function backend(o: { materials?: Mat[]; revisions?: Rev[]; hits?: any[]; proposedKinds?: string[]; relations?: { type: string; from: string; to: string }[] } = {}) {
   const materials = o.materials ?? [];
   const revisions = o.revisions ?? [];
   const proposedKinds = o.proposedKinds ?? ["requirement", "design", "guideline"];
@@ -34,6 +34,7 @@ function backend(o: { materials?: Mat[]; revisions?: Rev[]; hits?: any[]; propos
       const p = u.searchParams.get("project");
       return json(200, { materials: materials.filter((m) => p === null || p === "" || m.project === p) });
     }
+    if (q === "/v1/items") return json(200, { items: [{ id: "item_1", title: "登录改造" }] });
     if (q === "/v1/materials/search") return json(200, { hits: o.hits ?? [], ...{ _q: u.search } });
     if (q === "/v1/materials" && method === "POST") {
       const id = "mat_new" + materials.length;
@@ -50,7 +51,7 @@ function backend(o: { materials?: Mat[]; revisions?: Rev[]; hits?: any[]; propos
       if (!m[2]) {
         if (mat.location) return json(200, { material: mat, hosted: { repo: "r", path: "p" } });
         const cur = revs.find((r) => r.id === mat.current_rev);
-        return json(200, { material: mat, revision: cur ?? null });
+        return json(200, { material: mat, revision: cur ?? null, relations: (o.relations ?? []).filter((r) => r.to === mat.id) });
       }
       if (m[2] === "/revisions" && method === "GET") return json(200, { revisions: revs });
       if (m[2] === "/revisions" && method === "POST") {
@@ -344,6 +345,16 @@ describe("回退（ACT-MAT-07）", () => {
     expect(b.revisions[3].content).toBe("a\nb");
     expect(b.revisions[0].content).toBe("a\nb");
     expect(b.revisions[2].content).toBe("a\nB\nc");
+  });
+});
+
+describe("关联事项（ACT-MAT-13）", () => {
+  it("材料详情显示中文关系类型与事项标题，点击进事项页；无关联不显示该区块", async () => {
+    mount(backend({ materials: [note(), design], revisions: noteRevs(), relations: [{ type: "basis", from: "item_1", to: "mat_note" }] }).impl);
+    const r = within(within(await open("周会纪要")).getByRole("region", { name: "关联事项" }));
+    expect(await r.findByText(/依据/)).toBeInTheDocument();
+    expect(r.getByRole("link", { name: "登录改造" })).toHaveAttribute("href", "/items/item_1");
+    expect(within(await open("登录方案")).queryByRole("region", { name: "关联事项" })).not.toBeInTheDocument();
   });
 });
 
