@@ -4,6 +4,7 @@ package injection
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestFlowDataNotInstructions(t *testing.T) {
 			defer func() { f.t, f.Env.T = parent, parent }()
 			fn(t)
 		})
-		f.evidence[strings.Fields(name)[0]] = map[string]any{"step": name, "passed": ok}
+		f.evidence[strings.Fields(name)[0]+"-result"] = map[string]any{"step": name, "passed": ok}
 		if !ok {
 			t.Fatalf("%s 未通过，后续流程不得开始", name)
 		}
@@ -176,7 +177,7 @@ func TestFlowDataNotInstructions(t *testing.T) {
 			args []string
 			tok  string
 		}{6, []string{"item", "update", parent, "--summary", "stale", "--reason", "r", "--evidence", "x", "--version", "1"}, f.DEL})
-		seen := map[string]int{}
+		seen := map[string]int{} // "子命令:退出码" → 退出码（4 与 6 都是 item update，不能只用子命令作键）
 		for _, c := range cases {
 			r := f.Apa(c.tok, "", c.args...)
 			if r.Code != c.code {
@@ -189,7 +190,7 @@ func TestFlowDataNotInstructions(t *testing.T) {
 			if !strings.Contains(r.Stderr, `"why"`) || !strings.Contains(r.Stderr, `"next"`) {
 				t.Errorf("退出码 %d 的错误应含 why 与 next: %s", c.code, r.Stderr)
 			}
-			seen[c.args[0]] = r.Code
+			seen[c.args[0]+":"+strconv.Itoa(r.Code)] = r.Code
 		}
 		g := f.Apa("", "", "guide")
 		if g.Code != 0 || g.Stdout == "" || strings.Contains(g.Stdout+g.Stderr, titleMark) {

@@ -14,3 +14,6 @@ go test -tags=live -count=1 -timeout=120m ./tests/live/injection/...
 - `APA_LIVE_EVIDENCE_DIR`：证据输出目录（设置时写 `injection-evidence.json` 与各次 Hermes 会话输出，令牌已脱敏）。
 
 所有状态（APA_HOME、HERMES_HOME）都在 `os.MkdirTemp` 的临时目录，测后删除；不读写 `~/.hermes`。
+
+说明：ACT-INJ-05 中退出码 20 的内核兜底由测试自己调用 `apa decide` 触发（Hermes 会话是否尝试过 decide 取决于模型，不作断言）；
+会话输出见 `evidence/act-inj-05-*.txt`。
