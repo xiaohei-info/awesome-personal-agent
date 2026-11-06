@@ -165,6 +165,7 @@ func newEnv(t *testing.T, configured bool) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(e.svc.captures.Wait) // 晚于 st.Close 注册，所以先执行
 	if err := e.svc.Register(e.x); err != nil {
 		t.Fatal(err)
 	}

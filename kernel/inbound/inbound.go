@@ -97,6 +97,8 @@ type Service struct {
 	again atomic.Bool
 	// proposing 串行化手动转建议；不与 mu 共用，mu 在模型调用期间一直被占着。
 	proposing sync.Mutex
+	// captures 跟踪捕获触发的后台处理；测试在关账本前等它们退出，否则提交后钩子会撞上已关闭的连接。
+	captures sync.WaitGroup
 }
 
 // New 返回 Service。Store、Exec、Packs、Judge 必须给出。
@@ -175,7 +177,11 @@ func (s *Service) Register(x *command.Executor) error {
 		case c.Command == runner.CmdRunResult || c.Command == runner.CmdIngest:
 			s.process()
 		case c.Command == CmdCapture && len(c.Seqs) > 0:
-			go s.process() // 捕获发生在插件钩子的时限内，模型调用不能占着请求
+			s.captures.Add(1)
+			go func() { // 捕获发生在插件钩子的时限内，模型调用不能占着请求
+				defer s.captures.Done()
+				s.process()
+			}()
 		}
 	})
 	return nil
