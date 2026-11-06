@@ -136,8 +136,9 @@ func TestFlowChainDepth(t *testing.T) {
 
 	f.step("ACT-DEP-03 本人重新委派才清零", func(t *testing.T) {
 		// 本人在 Web 重新委派被熔断的事项：新链路从头开始。
-		if d := f.depth(looped); d <= threshold {
-			t.Errorf("被熔断事项的深度应超过阈值 %d: %d", threshold, d)
+		steps := f.why(looped)
+		if d := steps[len(steps)-1].ChainDepth; d <= threshold {
+			t.Errorf("被熔断事项最近一条事件的深度应超过阈值 %d: %d", threshold, d)
 		}
 		f.mode("summary-only", "")
 		body, _ := json.Marshal(map[string]string{"parent": looped, "assignee": "work-host.cli", "title": "dep-redelegated"})

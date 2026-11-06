@@ -76,8 +76,8 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		f.waitFor("跳过并记 Event", 20*time.Second, func() bool { return len(f.events(id, "background.skipped")) == 1 })
 		eq(t, "Run 数", len(f.runsOf(id)), 1)
 		ctx := f.apa(f.OBS, 0, "context", "--scope", "item", "--item", id).Stdout
-		if !strings.Contains(strings.ToLower(ctx), "run_") || !strings.Contains(ctx, "in_flight") && !strings.Contains(ctx, "running") && !strings.Contains(ctx, "在途") {
-			t.Errorf("apa context 应提示在途运行: %s", ctx)
+		if !strings.Contains(ctx, `"running":true`) {
+			t.Errorf("apa context 应提示在途运行（running）: %s", ctx)
 		}
 		f.setMode("hang-b", "observe") // 运行结束时内核改事项，不应再触发
 		f.mode("summary-only", "")
