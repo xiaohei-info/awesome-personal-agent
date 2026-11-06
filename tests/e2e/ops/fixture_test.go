@@ -62,7 +62,7 @@ ACCHANG STUB_MODE=hang 事项 {item_id}：挂起直到超时。
 	"prompts/acc-hold.md": `---
 agent: task
 access: read
-timeout: 10m
+timeout: 2h
 ---
 ACCHOLD STUB_MODE=hang 事项 {item_id}：长时间占用长时运行额度。
 `,

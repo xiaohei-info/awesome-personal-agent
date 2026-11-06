@@ -49,11 +49,7 @@ func (f *fx) itemExists(id string) bool {
 func (f *fx) blobPut(content string) string {
 	f.t.Helper()
 	r := f.apa(f.WRK, 0, "blob", "put", f.file("blob.bin", content))
-	var out struct {
-		Hash   string `json:"hash"`
-		Sha256 string `json:"sha256"`
-	}
-	out = decode[struct {
+	out := decode[struct {
 		Hash   string `json:"hash"`
 		Sha256 string `json:"sha256"`
 	}](f.t, r.Stdout)

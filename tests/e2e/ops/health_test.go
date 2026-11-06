@@ -59,8 +59,9 @@ func (s signal) outcall(t *testing.T) outcallDetail {
 // the eight signal ids, in design §15.2 order.
 var signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "rule_fallbacks"}
 
-// quietWindow 是 ACT-HLT-02 里"不做任何修复操作"的观察时长。验收文档为 10 分钟；默认按 30 秒缩放，
-// 设置 APA_E2E_HEALTH_QUIET=10m 即按原文执行。
+// quietWindow 是 ACT-HLT-02 里"不做任何修复操作"的观察时长。验收文档为 10 分钟；默认按 30 秒缩放
+// （合约命令不带 -timeout，go test 默认 10 分钟超时放不下 10 分钟窗口加造数），
+// 设置 APA_E2E_HEALTH_QUIET=10m 并加 -timeout 30m 即按原文执行，窗口内占用型运行与来源的超时都长于 10 分钟。
 func quietWindow(t *testing.T) time.Duration {
 	if v := os.Getenv("APA_E2E_HEALTH_QUIET"); v != "" {
 		d, err := time.ParseDuration(v)
@@ -69,7 +70,7 @@ func quietWindow(t *testing.T) time.Duration {
 		}
 		return d
 	}
-	return 30 * time.Second
+	return 30 * time.Second // shortcut: go test 默认 10 分钟超时容不下完整 10 分钟窗口，见上方说明
 }
 
 // TestFlowHealth 对应验收文档 flow-health（ACT-HLT-01、ACT-HLT-02）。
@@ -179,7 +180,7 @@ event_rules:
 			time.Sleep(200 * time.Millisecond)
 		}
 		for _, n := range []string{"a", "b", "c"} {
-			f.addScriptSource("src_acc_slow_"+n, f.script("slow-"+n+".sh", "cat >/dev/null\nsleep 600\n"), "1s", 900)
+			f.addScriptSource("src_acc_slow_"+n, f.script("slow-"+n+".sh", "cat >/dev/null\nsleep 7000\n"), "1s", 7200)
 		}
 		f.waitFor("长时运行 1 个在跑、2 个排队，短任务 1 个在跑、至少 1 个排队", 60*time.Second, func() bool {
 			o := f.health().sig("outcall").outcall(t)
@@ -257,6 +258,9 @@ event_rules:
 		window0 := f.eventsAfter(seq0)
 		t.Logf("安静期间共 %d 条 Event", len(window0))
 		for _, e := range window0 {
+			if e.Actor.Type == "system" { // 内核后台（时钟、运行回执等）的 Event 不是健康视图发起的
+				continue
+			}
 			switch e.Type {
 			case "rule.mode_changed", "item.created", "item.updated", "item.phase_changed", "delegation.created",
 				"source.updated", "source.enabled", "source.disabled", "source.registered", "policy.changed", "allowlist.changed":
