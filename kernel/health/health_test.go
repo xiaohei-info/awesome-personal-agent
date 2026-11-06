@@ -112,7 +112,7 @@ func (e *env) event(typ, object, reason string, payload any) {
 	})
 }
 
-// 全新账本：八类信号都正常，两个队列都是零。
+// 全新账本：九类信号都正常，两个队列都是零。
 func TestEmptyLedgerIsHealthy(t *testing.T) {
 	v := setup(t).collect(nil)
 	if !v.Healthy() || v.Outcall.Long != (QueueHealth{}) || v.Outcall.Short != (QueueHealth{}) {
@@ -211,7 +211,9 @@ func TestEventBackedSignals(t *testing.T) {
 	e.event(domain.EvHealthAlert, "item_1", chain.ExceededReason, map[string]any{"chain_depth": 4, "threshold": 3})
 	e.event(domain.EvHealthAlert, "item_2", "web_only screening did not complete: model timeout", map[string]any{"kind": "screening", "reason": "model timeout"})
 	e.event(domain.EvHealthAlert, "rule:inbound/x", RuleFallbackReason, map[string]string{"rule": "inbound/x"})
-	e.event(domain.EvHealthAlert, "src_1", "something else", map[string]string{"kind": "other"})
+	e.event(domain.EvHealthAlert, "src_1", "source src_1 disabled", map[string]string{"kind": "source"})
+	e.event(domain.EvHealthAlert, "pack:work", "capability pack work rejected", map[string]string{"kind": "pack"})
+	e.event(domain.EvHealthAlert, "item_4", "rule action failed: boom", map[string]string{"rule": "r/x", "action": "create_timer", "error": "boom"})
 	v := e.collect(nil)
 	if len(v.ChainTrips) != 1 || v.ChainTrips[0].Object != "item_1" || v.ChainTrips[0].Depth != 4 {
 		t.Fatalf("trips %+v", v.ChainTrips)
@@ -221,6 +223,62 @@ func TestEventBackedSignals(t *testing.T) {
 	}
 	if len(v.RuleFallbacks) != 1 || v.RuleFallbacks[0].Rule != "inbound/x" {
 		t.Fatalf("rules %+v", v.RuleFallbacks)
+	}
+	// 来源与能力包告警各有专属信号，不重复进通用列表；规则动作失败进通用列表并使视图不健康。
+	if len(v.OtherAlerts) != 1 || v.OtherAlerts[0].Object != "item_4" || v.Healthy() {
+		t.Fatalf("other %+v healthy=%v", v.OtherAlerts, v.Healthy())
+	}
+}
+
+// flow-follow-up / ACT-FUP-06：跟进判断失败进"模型不可用"并使视图不健康；同一事项之后同模板成功即清除。
+func TestFollowupFailureSurfacesAndRecovers(t *testing.T) {
+	e := setup(t)
+	fail := func(item string) {
+		e.event(domain.EvHealthAlert, item, "follow-up judgement failed, will retry: model 500",
+			map[string]string{"kind": FollowupKind, "template": "judge-follow", "item": item})
+	}
+	ok := func(item, state string, reused bool) {
+		e.event(domain.EvRunFinished, item, "judge "+state, map[string]any{"template": "judge-follow", "state": state, "reused": reused})
+	}
+	ok("item_1", "succeeded", false) // 失败之前的成功不算恢复
+	fail("item_1")
+	fail("item_2")
+	v := e.collect(nil)
+	if v.Healthy() || len(v.ModelUnavailable) != 2 || v.ModelUnavailable[0].Kind != FollowupKind {
+		t.Fatalf("not surfaced: %+v", v.ModelUnavailable)
+	}
+	ok("item_1", "failed", false)
+	ok("item_1", "succeeded", true) // 复用缓存没有真实调用
+	if v = e.collect(nil); len(v.ModelUnavailable) != 2 {
+		t.Fatalf("failed/reused call cleared the signal: %+v", v.ModelUnavailable)
+	}
+	ok("item_1", "succeeded", false)
+	// item_1 恢复；item_2 仍在失败，不能被 item_1 的成功盖住。
+	if v = e.collect(nil); len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Object != "item_2" || v.Healthy() {
+		t.Fatalf("after item_1 recovered: %+v", v.ModelUnavailable)
+	}
+	ok("item_2", "succeeded", false)
+	if v = e.collect(nil); !v.Healthy() {
+		t.Fatalf("not cleared after recovery: %+v", v)
+	}
+	// 再次失败重新出现。
+	fail("item_1")
+	if v = e.collect(nil); len(v.ModelUnavailable) != 1 {
+		t.Fatalf("new failure hidden: %+v", v.ModelUnavailable)
+	}
+}
+
+// 初筛不重试：任一事项之后同模板成功即算恢复；模板不同的成功不算。
+func TestScreeningRecoversOnLaterSuccessOfSameTemplate(t *testing.T) {
+	e := setup(t)
+	e.event(domain.EvHealthAlert, "item_1", "web_only screening did not complete: timeout", map[string]any{"kind": ScreeningKind, "template": "screen"})
+	e.event(domain.EvRunFinished, "item_9", "judge succeeded", map[string]any{"template": "other", "state": "succeeded"})
+	if v := e.collect(nil); len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Kind != ScreeningKind {
+		t.Fatalf("%+v", v.ModelUnavailable)
+	}
+	e.event(domain.EvRunFinished, "item_2", "judge succeeded", map[string]any{"template": "screen", "state": "succeeded"})
+	if v := e.collect(nil); !v.Healthy() {
+		t.Fatalf("%+v", v.ModelUnavailable)
 	}
 }
 
@@ -295,9 +353,10 @@ func TestEveryAlertYieldsOneHealthDeliveryExceptScreening(t *testing.T) {
 	e.event(domain.EvHealthAlert, "item_2", "web_only screening did not complete: model timeout", map[string]any{"kind": ScreeningKind})
 	e.event(domain.EvHealthAlert, "rule:inbound/x", RuleFallbackReason, map[string]string{"rule": "inbound/x"})
 	e.event(domain.EvHealthAlert, "item_1", chain.ExceededReason, map[string]any{"command": "item.create", "chain_depth": 5, "threshold": 3})
+	e.event(domain.EvHealthAlert, "item_3", "follow-up judgement failed, will retry: model 500", map[string]any{"kind": FollowupKind})
 
 	first := e.sync()
-	if len(first) != 4 {
+	if len(first) != 5 {
 		t.Fatalf("deliveries = %+v", first)
 	}
 	byItem := map[string][]domain.Delivery{}
@@ -307,7 +366,7 @@ func TestEveryAlertYieldsOneHealthDeliveryExceptScreening(t *testing.T) {
 		}
 		byItem[d.Item] = append(byItem[d.Item], d)
 	}
-	if len(byItem["item_1"]) != 2 || len(byItem["src_a"]) != 1 || len(byItem["rule:inbound/x"]) != 1 || len(byItem["item_2"]) != 0 {
+	if len(byItem["item_1"]) != 2 || len(byItem["src_a"]) != 1 || len(byItem["rule:inbound/x"]) != 1 || len(byItem["item_2"]) != 0 || len(byItem["item_3"]) != 1 {
 		t.Fatalf("by item = %+v", byItem)
 	}
 	if d := byItem["item_1"][0]; !strings.Contains(d.Content.Summary, "超过阈值 3") || d.Content.WebURL != "/items/item_1" {
@@ -316,7 +375,7 @@ func TestEveryAlertYieldsOneHealthDeliveryExceptScreening(t *testing.T) {
 	if d := byItem["src_a"][0]; !strings.Contains(d.Content.Summary, "bad token") || d.Content.WebURL != "/health" {
 		t.Fatalf("source delivery = %+v", d)
 	}
-	if again := e.sync(); len(again) != 4 {
+	if again := e.sync(); len(again) != 5 {
 		t.Fatalf("repeat sync changed deliveries: %+v", again)
 	}
 }

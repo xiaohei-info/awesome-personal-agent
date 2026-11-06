@@ -335,7 +335,7 @@ func (s *Service) record(tx *store.Tx, id, runID, reason string, snap json.RawMe
 		return nil
 	}
 	return ev(domain.EvHealthAlert, "web_only screening did not complete: "+res.failure,
-		mustJSON(map[string]any{"kind": "screening", "run_id": runID, "reason": res.failure}))
+		mustJSON(map[string]any{"kind": "screening", "template": Template, "run_id": runID, "reason": res.failure}))
 }
 
 // ---- 重启恢复 ----

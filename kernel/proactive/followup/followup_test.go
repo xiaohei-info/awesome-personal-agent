@@ -419,6 +419,23 @@ func TestModelUnavailableKeepsFollowUpAndRetries(t *testing.T) {
 	if e.pending() != 0 || len(e.reminders(id)) != 1 {
 		t.Fatalf("retry did not complete: pending=%d reminders=%d", e.pending(), len(e.reminders(id)))
 	}
+	// 健康视图的归类与恢复依赖：告警带 kind/template，重试成功的 run.finished 与它同模板、同事项。
+	var alert, done struct{ Kind, Template, State string }
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		es, _ := eventlog.ReadObject(tx, id)
+		for _, x := range es {
+			switch x.Event.Type {
+			case domain.EvHealthAlert:
+				_ = json.Unmarshal(x.Event.Payload, &alert)
+			case domain.EvRunFinished:
+				_ = json.Unmarshal(x.Event.Payload, &done)
+			}
+		}
+		return nil
+	})
+	if alert.Kind != "followup" || alert.Template == "" || done.State != "succeeded" || done.Template != alert.Template {
+		t.Fatalf("alert=%+v run.finished=%+v", alert, done)
+	}
 }
 
 // 到期前事项已离开 waiting：跟进作废，不调模型、不产出提醒。

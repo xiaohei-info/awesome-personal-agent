@@ -1,4 +1,4 @@
-// Package health 是 GET /health 路由（附录 B.2，设计 §15.2）：把 kernel/health 汇总出的八类信号
+// Package health 是 GET /health 路由（附录 B.2，设计 §15.2）：把 kernel/health 汇总出的九类信号
 // 连同修复入口原样给出，`apa health` 与 Web 读同一份。
 //
 // 路由里没有业务规则：是否异常由 kernel/health 判定，这里只做格式搬运。
@@ -20,7 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// Signal 是八类信号之一。OK 为假时 Why 说明触发机制，Next 指向修复入口（只报不修）。
+// Signal 是九类信号之一。OK 为假时 Why 说明触发机制，Next 指向修复入口（只报不修）。
 type Signal struct {
 	ID     string `json:"id"`
 	OK     bool   `json:"ok"`
@@ -30,7 +30,7 @@ type Signal struct {
 	Detail any    `json:"detail,omitempty"`
 }
 
-// Report 是 GET /health 的响应；Signals 恒为八项且顺序固定（与设计 §15.2 表一致）。
+// Report 是 GET /health 的响应；Signals 恒为九项且顺序固定（与设计 §15.2 表一致）。
 type Report struct {
 	Healthy bool     `json:"healthy"`
 	Signals []Signal `json:"signals"`
@@ -95,9 +95,17 @@ func build(v khealth.View) Report {
 	}
 	outcall := map[string]any{"long": queue(v.Outcall.Long), "short": queue(v.Outcall.Short),
 		"timeouts": ids(v.Outcall.Timeouts, func(r domain.Run) string { return r.ID })}
-	model := make([]string, 0, len(v.ModelUnavailable)+len(v.Unjudged))
+	type modelDetail struct {
+		Kind   string `json:"kind"`
+		Object string `json:"object"`
+	}
+	screening, judgements := []string{}, []modelDetail{}
 	for _, m := range v.ModelUnavailable {
-		model = append(model, m.Object)
+		if m.Kind == khealth.ScreeningKind {
+			screening = append(screening, m.Object)
+		} else {
+			judgements = append(judgements, modelDetail{m.Kind, m.Object})
+		}
 	}
 	unjudged := ids(v.Unjudged, func(e domain.SourceEvent) string { return e.ID })
 
@@ -114,10 +122,12 @@ func build(v khealth.View) Report {
 			"project page", ids(v.AgentsMDDrift, func(d agentsmd.OpenDrift) string { return d.Item })),
 		sig("pack_rejections", len(v.PackRejections), "a pack failed to load; the last valid version is kept",
 			"fix the pack, then hot-reload", ids(v.PackRejections, func(r packs.Rejection) string { return r.Pack })),
-		sig("model_unavailable", len(model)+len(unjudged), "a judge run failed or timed out, or source events remain unjudged",
-			"settings page and source page", map[string]any{"screening": model, "unjudged": unjudged}),
+		sig("model_unavailable", len(v.ModelUnavailable)+len(unjudged), "a judge call failed or timed out and has not succeeded since, or source events remain unjudged",
+			"settings page and source page", map[string]any{"screening": screening, "judgements": judgements, "unjudged": unjudged}),
 		sig("rule_fallbacks", len(v.RuleFallbacks), "a rule fell back to observe after its content changed",
 			"re-review the rule in Web", ids(v.RuleFallbacks, func(f khealth.RuleFallback) string { return f.Rule })),
+		sig("other_alerts", len(v.OtherAlerts), "a health alert without a dedicated signal was recorded, such as a failed rule action",
+			"audit page; open the object named in detail", ids(v.OtherAlerts, func(a khealth.OtherAlert) string { return a.Object })),
 	}}
 	return rep
 }
