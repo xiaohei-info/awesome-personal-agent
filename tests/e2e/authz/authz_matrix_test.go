@@ -188,7 +188,7 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		home := k.Projects["acc-home"]
 		const remote = "https://example.invalid/acc/home.git"
 		// 本机检出挂在已登记的远程地址上，先由 DEL 登记远程地址（建项目、改远程地址属 delegate）。
-		k.expect("DEL 增加远程地址", k.Apa(k.DEL, "", "project", "repos", "add", home, "--remote", remote), 0)
+		k.expect("DEL 增加远程地址", k.Apa(k.DEL, "", "project", "repos", "add", home, "--remote", remote, "--evidence", "owner asked"), 0)
 		k.expect("WRK 增加本机检出", k.Apa(k.WRK, "", "project", "repos", "add", home, "--remote", remote, "--path", "/srv/acc/home", "--host", "work-host"), 0)
 		k.expect("WRK 增加新的远程地址", k.Apa(k.WRK, "", "project", "repos", "add", home, "--remote", "https://example.invalid/acc/other.git"), exitDenied)
 		show := k.Apa(k.OBS, "", "project", "show", home).Stdout
