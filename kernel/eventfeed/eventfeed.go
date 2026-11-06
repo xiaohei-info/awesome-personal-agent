@@ -30,15 +30,29 @@ type Page struct {
 	Next      int64      `json:"next"`
 }
 
-// titleOf 取载荷里的 title 字符串；缺失、非字符串或已墓碑化时为空。
-func titleOf(payload json.RawMessage) string {
+// titleOf 按事件类型从载荷里取对象标题（载荷格式由各模块定，规则只收在这里）：
+// 事项、决策、委派类取 item.title；材料与规范类取 material.title；项目更新取 project.name。
+// 其余类型没有标题概念（含 item.deadline_passed：载荷只有截止与阶段），返回空；墓碑化后载荷为 null，也为空。
+func titleOf(typ string, payload json.RawMessage) string {
 	var p struct {
-		Title string `json:"title"`
+		Item     struct{ Title string } `json:"item"`
+		Material struct{ Title string } `json:"material"`
+		Project  struct{ Name string }  `json:"project"`
 	}
 	if json.Unmarshal(payload, &p) != nil {
 		return ""
 	}
-	return p.Title
+	switch typ {
+	case domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged,
+		domain.EvDecisionRequested, domain.EvDecisionResolved,
+		domain.EvDelegationCreated, domain.EvDelegationReported:
+		return p.Item.Title
+	case domain.EvMaterialRevised, domain.EvMaterialRevisionProposed, domain.EvGuidelineActivated:
+		return p.Material.Title
+	case domain.EvProjectUpdated:
+		return p.Project.Name
+	}
+	return ""
 }
 
 // Read 返回序号大于 after 的至多 limit 个已登记类型信封，按序号升序。
@@ -59,7 +73,7 @@ func Read(tx *store.Tx, after int64, limit int) (Page, error) {
 				continue
 			}
 			page.Envelopes = append(page.Envelopes, Envelope{
-				Seq: e.Seq, Type: e.Type, Object: e.Object, Title: titleOf(e.Payload), Actor: e.Actor, At: e.At,
+				Seq: e.Seq, Type: e.Type, Object: e.Object, Title: titleOf(e.Type, e.Payload), Actor: e.Actor, At: e.At,
 			})
 			if len(page.Envelopes) == limit {
 				return page, nil
