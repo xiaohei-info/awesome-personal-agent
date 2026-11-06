@@ -200,8 +200,8 @@ func TestFlowScreening(t *testing.T) {
 		d := f.task("scr-d", "acc-finance")
 		f.ask(d)
 		time.Sleep(2 * time.Second)
-		if n := len(f.ModelStub.Requests()); n != 0 {
-			t.Errorf("规则已判 web_only 时不应初筛，MODEL_STUB 收到 %d 次请求", n)
+		if n := f.screeningRequests(); n != 0 {
+			t.Errorf("规则已判 web_only 时不应初筛，MODEL_STUB 收到 %d 次初筛请求", n)
 		}
 		eq(t, "screening_pending", f.pending(d), false)
 		eq(t, "risk_class", f.askOf(d)["risk_class"], "funds")

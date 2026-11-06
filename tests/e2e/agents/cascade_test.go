@@ -94,7 +94,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		if rs := f.runs(); len(rs) != 0 {
 			t.Errorf("判断型不应有子进程 Run: %+v", rs)
 		}
-		if n := len(f.ModelStub.Requests()); n != 1 {
+		if n := len(f.modelRequests(judgeMark)); n != 1 {
 			t.Errorf("模型请求数 = %d，期望 1", n)
 		}
 	})
@@ -175,7 +175,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		if r.Target == trig {
 			t.Error("任务型应在新建的目标事项上运行")
 		}
-		eq(t, "生成型已先行调用", len(f.agentCalls(trig, "generate")), 1)
+		eq(t, "生成型已先行调用", len(f.templateCalls(trig, "generate", "acc-gen")), 1)
 		call := taskCall(r.Target)
 		eq(t, "目标事项经 CLI 回执转 done", f.phase(r.Target), "done")
 		eq(t, "转 done 的次数（回执不重复生效）", phaseChanges(r.Target, "done"), 1)
@@ -215,8 +215,8 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.When("ACCGEN", reply(`{"note":"缺少必填的 insufficient_info"}`))
 		f.mode("receipt")
 		trig := f.task("CAS05 不合规", "acc-gen")
-		f.waitFor("生成型失败记录", 20*time.Second, func() bool { return len(f.agentCalls(trig, "generate")) == 1 })
-		calls := f.agentCalls(trig, "generate")
+		f.waitFor("生成型失败记录", 20*time.Second, func() bool { return len(f.templateCalls(trig, "generate", "acc-gen")) == 1 })
+		calls := f.templateCalls(trig, "generate", "acc-gen")
 		eq(t, "state", calls[0].Payload["state"], "failed")
 		eq(t, "error", calls[0].Payload["error"], "schema")
 		if _, has := calls[0].Payload["result"]; has {
@@ -229,7 +229,7 @@ func TestFlowAgentCascade(t *testing.T) {
 			t.Errorf("不合规内容被写进 spec: %v", it["spec"])
 		}
 		eq(t, "任务型 Run 总数（未升级）", len(f.taskRuns()), 2)
-		eq(t, "模型请求数（不合规不重试）", len(f.ModelStub.Requests()), 1)
+		eq(t, "模型请求数（不合规不重试）", len(f.modelRequests("ACCGEN")), 1)
 	})
 
 	step("ACT-CAS-06 stdout 末段兜底回执", func(t *testing.T) {
@@ -279,7 +279,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		}
 		eq(t, "第一次是否复用", judge[len(judge)-2].Payload["reused"], false)
 		eq(t, "第二次是否复用", judge[len(judge)-1].Payload["reused"], true)
-		eq(t, "模型请求数", len(f.ModelStub.Requests()), 1)
+		eq(t, "模型请求数", len(f.modelRequests(judgeMark)), 1)
 	})
 
 	step("ACT-CAS-08 Event 统计进资料段，且不进指纹", func(t *testing.T) {
@@ -296,7 +296,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.Reset()
 		f.ModelStub.When(judgeMark, reply(`{"choice":"task","confidence":0.9}`))
 		newProposal("CAS08 E", "s1")
-		reqs := f.ModelStub.Requests()
+		reqs := f.modelRequests(judgeMark)
 		if len(reqs) != 1 || !strings.Contains(reqs[0].BodyText, "accepted: 2") || !strings.Contains(reqs[0].BodyText, "dismissed: 1") {
 			t.Fatalf("资料段应含 accepted: 2 与 dismissed: 1（规则自动接受不计）: %+v", reqs)
 		}
@@ -311,7 +311,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		judge = f.agentCalls("", "judge")
 		last := judge[len(judge)-1].Payload
 		eq(t, "统计变化后是否复用", last["reused"], true)
-		eq(t, "模型请求数（没有重新判断）", len(f.ModelStub.Requests()), 1)
+		eq(t, "模型请求数（没有重新判断）", len(f.modelRequests(judgeMark)), 1)
 		eq(t, "新统计记入调用 Event", last["stats"].(map[string]any)["dismissed"], float64(2))
 	})
 
@@ -341,8 +341,13 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.Reset()
 		f.ModelStub.SetDefault(modelstub.Reply{Status: 500})
 		f.capture("acc-open", "CAS09 模型端点故障时提交", "s1")
-		f.waitFor("健康视图出现模型不可用", 40*time.Second, func() bool { ok, _ := signal("model_unavailable"); return !ok })
-		eq(t, "退避重试的模型请求数（首次 + 3 次重试）", len(f.ModelStub.Requests()), 4)
+		// 卡片起草失败也计入 model_unavailable，信号可能早于判断型的重试结束；以该来源事件进入未判定为准。
+		f.waitFor("健康视图出现模型不可用且来源事件未判定", 40*time.Second, func() bool {
+			ok, d := signal("model_unavailable")
+			u, _ := d["unjudged"].([]any)
+			return !ok && len(u) > 0
+		})
+		eq(t, "退避重试的模型请求数（首次 + 3 次重试）", len(f.modelRequests(judgeMark)), 4)
 		_, detail := signal("model_unavailable")
 		unjudged, _ := detail["unjudged"].([]any)
 		if len(unjudged) != 1 {
@@ -354,8 +359,10 @@ func TestFlowAgentCascade(t *testing.T) {
 		id := newProposal("CAS09 模型恢复后提交", "s1")
 		eq(t, "恢复后判断完成的建议阶段", f.phase(id), "proposed")
 		f.webOK("POST", "/source-events/"+unjudged[0].(string)+"/propose", "", 200)
-		ok, _ := signal("model_unavailable")
-		eq(t, "转建议后健康视图恢复", ok, true)
+		// 起草失败的告警要等同一模板之后的真实成功调用才清除（见 kernel/health 测试），本步骤只验判断型：恢复后未判定清单清空。
+		_, detail = signal("model_unavailable")
+		unjudged, _ = detail["unjudged"].([]any)
+		eq(t, "转建议后未判定清单清空", len(unjudged), 0)
 	})
 
 	step("ACT-CAS-10 harness 不可用时账本照常", func(t *testing.T) {

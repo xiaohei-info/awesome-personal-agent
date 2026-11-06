@@ -67,6 +67,17 @@ func (f *fx) stub(content string, delay time.Duration, status int) {
 	f.ModelStub.SetDefault(modelstub.Reply{Content: content, Delay: delay, Status: status})
 }
 
+// screeningRequests 只数初筛（web-only-screening 提示词）的请求：决策卡片文案、一句话摘要是系统发起的另类调用，不属初筛。
+func (f *fx) screeningRequests() int {
+	n := 0
+	for _, r := range f.ModelStub.Requests() {
+		if strings.Contains(r.BodyText, "应只允许本人在 Web 回答") {
+			n++
+		}
+	}
+	return n
+}
+
 // task 用 DEL 代本人建一个 open 的任务事项（assignee 为 work-host.cli）。
 func (f *fx) task(title string, tags ...string) string {
 	f.t.Helper()
