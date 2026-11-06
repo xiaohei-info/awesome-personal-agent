@@ -50,8 +50,11 @@ func TestFlowEventSubscribe(t *testing.T) {
 			}
 		}
 		es := lines(out)
-		// 已知缺口（不在本节点修）：item.* 信封目前没有 title——eventfeed 读载荷顶层 title，而事项事件把标题放在 item.title 下。
-		// 验收的失败判据是"带正文或序号乱"，所以这里只断言信封不多不少地只含登记字段。
+		for _, typ := range []string{"item.created", "item.phase_changed"} {
+			if e := find(es, typ, id); e.Title != "evt-01 标题可见" {
+				t.Errorf("%s 信封标题 = %q，期望事项标题", typ, e.Title)
+			}
+		}
 		for i, l := range strings.Split(strings.TrimSpace(out), "\n") {
 			var m map[string]json.RawMessage
 			if err := json.Unmarshal([]byte(l), &m); err != nil {
