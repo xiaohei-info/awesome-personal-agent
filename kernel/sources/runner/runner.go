@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -811,24 +812,41 @@ func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent,
 
 // Rejects 按发生顺序返回某来源没有入账的输出行及原因。
 func Rejects(tx *store.Tx, sourceID string) ([]Reject, error) {
-	rows, err := tx.Query(`SELECT source_id, run_id, line, reason, raw, at FROM sources_runner_reject WHERE source_id = ? ORDER BY seq`, sourceID)
+	out, _, err := RejectPage(tx, sourceID, 0, math.MaxInt32)
+	return out, err
+}
+
+// RejectPage 按发生顺序返回某来源 after 之后的至多 limit 条拒收记录；还有下一页时 next 是下一次的 after，否则为 0（与 EventPage 同一约定）。
+func RejectPage(tx *store.Tx, sourceID string, after int64, limit int) ([]Reject, int64, error) {
+	rows, err := tx.Query(`SELECT seq, source_id, run_id, line, reason, raw, at FROM sources_runner_reject WHERE source_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
+		sourceID, after, limit+1)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []Reject
+	var (
+		out  []Reject
+		seqs []int64
+	)
 	for rows.Next() {
 		var (
-			j        Reject
-			line, at int64
+			j             Reject
+			seq, line, at int64
 		)
-		if err := rows.Scan(&j.SourceID, &j.RunID, &line, &j.Reason, &j.Raw, &at); err != nil {
-			return nil, err
+		if err := rows.Scan(&seq, &j.SourceID, &j.RunID, &line, &j.Reason, &j.Raw, &at); err != nil {
+			return nil, 0, err
 		}
 		j.Line, j.At = int(line), time.Unix(0, at).UTC()
-		out = append(out, j)
+		out, seqs = append(out, j), append(seqs, seq)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var next int64
+	if len(out) > limit {
+		next, out = seqs[limit-1], out[:limit]
+	}
+	return out, next, nil
 }
 
 // Unjudged 按落盘顺序返回判断型初筛未能判定的来源事件（disposition 为 unjudged）；健康视图只读。
