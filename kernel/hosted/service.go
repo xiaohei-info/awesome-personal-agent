@@ -176,7 +176,7 @@ func (s *Service) read(ctx context.Context, id string, force bool) (View, error)
 		_, err = proc.Enqueue(tx, proc.Request{
 			Run:      domain.Run{Category: domain.RunReader, Target: id, TimeoutSec: s.opt.Timeout, Fingerprint: fingerprint(e)},
 			Spec:     proc.Spec{Command: s.opt.Reader, Stdin: stdin},
-			Explicit: force,
+			Explicit: true, // 读取只由本人在 Web 打开或刷新触发，在短任务队列内优先（§6.9）
 		}, s.opt.Now())
 		return err
 	})

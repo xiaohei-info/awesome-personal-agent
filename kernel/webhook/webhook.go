@@ -584,7 +584,7 @@ func (s *Service) enqueueTransform(ctx context.Context, g Ingest, src domain.Sou
 	runID = "run_" + strings.TrimPrefix(runID, idPrefix)
 	if err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		if _, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{ID: runID, Category: domain.RunTransform, Target: g.ID, TimeoutSec: timeout},
-			Spec: proc.Spec{Command: argv, Stdin: stdin}}, s.o.Now()); err != nil {
+			Spec: proc.Spec{Command: argv, Stdin: stdin}, Explicit: g.Gen > 1}, s.o.Now()); err != nil { // Gen 首次为 1，Replay 才会加；本人重放在短任务队列内优先（§6.9）
 			return err
 		}
 		_, err := tx.Exec(`UPDATE webhook_ingest SET state = ?, run_id = ? WHERE id = ? AND gen = ?`, StateTransforming, runID, g.ID, int64(g.Gen))
