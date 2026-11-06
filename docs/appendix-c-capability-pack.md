@@ -20,7 +20,7 @@ packs/<name>/
 |---|---|---|
 | `name`、`version`、`description` | 是 | 包名、版本、说明 |
 | `kinds[]` | 否 | 注册 kind 与 spec 的 JSON Schema |
-| `material_kinds[]` | 否 | 扩展材料 kind，并给出默认写入策略 |
+| `material_kinds[]` | 否 | 扩展材料 kind，并给出默认写入策略（`direct` 或 `proposed`）；本人在 Web 按 kind 设置的策略优先，未设置时用包声明的，再退到 Web 的总默认。自有型提交与托管型登记都接受这些 kind |
 | `instance_params` | 否 | 实例参数的 JSON Schema |
 | `clock_rules[]` | 否 | 时钟规则 |
 | `source_rules[]` | 否 | 来源到事项规则 |

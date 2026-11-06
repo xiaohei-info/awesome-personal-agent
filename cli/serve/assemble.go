@@ -280,9 +280,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		rules.Register(x),
 		instances.Register(x, ld),
 		blobs.Register(x, l.Blobs),
-		kmaterials.Register(x),
+		kmaterials.RegisterWith(x, ld), // 能力包声明的 material_kinds 与默认写入策略，提交时从加载器读
 		kpurge.Register(x, l.Blobs),
-		hosted.Register(x),
+		hosted.RegisterWith(x, ld),
 		k.fu.Register(),
 	); err != nil {
 		return nil, err
