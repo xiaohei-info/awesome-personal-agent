@@ -1144,6 +1144,14 @@ SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6�
 - 审计日志即事件流，以 Event 序号为游标，游标由订阅方自持。接口 `GET /events?cursor=`（SSE 或长轮询），CLI `apa events --follow`（observer token）。
 - **只开放登记的稳定类型**，类型只增不改：`item.created`、`item.phase_changed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`material.revised`、`guideline.activated`、`project.updated`、`run.finished`、`source.failed` 等。
 - **信封只带类型、对象 id、标题、actor、时间**。正文、reason 与证据按权限经 API 另取。
+- **标题由事件载荷按类型取**（取法收在 `kernel/eventfeed`，各模块的载荷格式不变）：
+
+  | 类型 | title 来源 |
+  |---|---|
+  | `item.created`、`item.updated`、`item.phase_changed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported` | 事项标题 |
+  | `material.revised`、`material.revision_proposed`、`guideline.activated` | 材料标题 |
+  | `project.updated` | 项目名称 |
+  | 其余登记类型（含 `item.deadline_passed`） | 无标题概念，`title` 缺省 |
 - 语义是至少一次：订阅方处理成功后才推进自己的游标（命令写账本 → 追加 Event → 订阅方读信封 → 需要正文时按权限读 API → 推进游标）。
 
 ### 10.2 投递队列
