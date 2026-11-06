@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
@@ -650,7 +652,7 @@ type fakeGen struct {
 
 func (f fakeGen) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
 	err := f.st.Update(ctx, func(tx *store.Tx) error {
-		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: c.Target, Actor: c.Actor, Basis: c.Basis, Payload: json.RawMessage(`{}`), At: t0})
+		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: c.Target, Actor: c.Actor, Basis: c.Basis, ChainDepth: c.ChainDepth, Payload: json.RawMessage(`{}`), At: t0})
 		return err
 	})
 	return f.out, err
@@ -707,4 +709,93 @@ func TestEnvOnlyForLiveTaskRuns(t *testing.T) {
 	if ok {
 		t.Fatal("session for unknown item")
 	}
+}
+
+// 规则→任务型运行→运行者写回→规则的回环：规则拉起加一、运行凭据的写回加一、结束记录沿用，逐轮上升，
+// 到阈值后只记录不派发并留下熔断告警；直接调用（生成型）取同一深度。
+func TestRuleTaskLoopTripsAtThreshold(t *testing.T) {
+	e := setup(t)
+	e.x.MaxChainDepth = 4
+	e.harness("hx", "receipt")
+	e.setDefaultHarness("hx")
+	h := e.svc.CallAgent(AgentOptions{})
+	trigger := e.openItem()
+	seen := map[string]bool{}
+	var depths []int
+	for round := 0; round < 4; round++ {
+		it := e.item(trigger)
+		var depth int
+		_ = e.st.View(bg, func(tx *store.Tx) (err error) { depth, err = items.ChainDepth(tx, trigger); return })
+		call := rules.Call{Rule: "tk/event_rules/r", Action: packs.Action{"action": "call_agent", "prompt": "brief"}, Item: &it, Depth: depth,
+			Do: func(cmd string, in any) (command.Result, error) { return e.do(owner, cmd, in) }}
+		if err := h(bg, call); err != nil {
+			t.Fatal(err)
+		}
+		var r *domain.Run
+		for _, rec := range e.runList() {
+			if !seen[rec.Run.ID] {
+				r = &rec.Run
+			}
+		}
+		if r == nil {
+			break
+		}
+		seen[r.ID] = true
+		depths = append(depths, r.ChainDepth)
+		dir := filepath.Join(e.runs, r.ID)
+		e.must(runidentity.Identity{Secret: waitFile(t, filepath.Join(dir, "token"))}, "item.update", map[string]any{"id": r.Target, "summary": "brief", "reason": "write back"})
+		if err := os.WriteFile(filepath.Join(dir, "go"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		e.waitResult()
+		trigger = r.Target
+	}
+	if fmt.Sprint(depths) != "[1 3]" {
+		t.Fatalf("run depths %v", depths)
+	}
+	var trip *domain.Event
+	for _, a := range e.eventsOfType(domain.EvHealthAlert) {
+		if a.Object == trigger && a.Reason == chain.ExceededReason {
+			trip = &a
+		}
+	}
+	if trip == nil || trip.ChainDepth != 5 || trip.Basis == nil || trip.Basis.RuleID != "tk/event_rules/r" {
+		t.Fatalf("trip = %+v", trip)
+	}
+}
+
+// 直接调用取规则拉起的同一深度：触发深度加一，记在目标事项上，不把链路清零。
+func TestCallAgentGenerateUsesLaunchDepth(t *testing.T) {
+	e := setup(t)
+	ok := fakeGen{direct.Outcome{Settled: true, Steps: []direct.Step{{RunID: "run_g", Result: json.RawMessage(`{"insufficient_info":false}`)}}}, e.st}
+	id := e.openItem()
+	c := e.call("gen", id)
+	c.Depth = 2
+	if err := e.svc.CallAgent(AgentOptions{Generate: ok})(bg, c); err != nil {
+		t.Fatal(err)
+	}
+	var got int
+	for _, a := range e.eventsOfType(domain.EvRunFinished) {
+		if a.Object == id {
+			got = a.ChainDepth
+		}
+	}
+	if got != 3 {
+		t.Fatalf("generate run depth = %d, want 3", got)
+	}
+}
+
+func (e *env) eventsOfType(typ string) []domain.Event {
+	e.t.Helper()
+	var out []domain.Event
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.Query(tx, eventlog.Filter{Type: typ}, 0, 500)
+		for _, x := range es {
+			out = append(out, x.Event)
+		}
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return out
 }
