@@ -362,11 +362,68 @@ func TestFlowSourceGitHub(t *testing.T) {
 		if calls < 2 {
 			t.Errorf("应有判断型 + 生成型两级调用，实际 %d 次", calls)
 		}
-		r := l.Apa(l.DEL, "", "why", ev.Item)
-		if r.Code != 0 {
-			t.Fatalf("apa why: %d %s", r.Code, r.Stderr)
+		// 两级调用的权威记录是审计流里的 run.finished（Web 审计页同源）：判断型低置信，紧接着生成型，
+		// 然后才是该事件的 inbound.disposed 和事项创建。apa why <事项> 只列事项自己的步骤，不含这两次调用。
+		type auditEv struct {
+			Seq     int64          `json:"seq"`
+			Type    string         `json:"type"`
+			Object  string         `json:"object"`
+			Reason  string         `json:"reason"`
+			Payload map[string]any `json:"payload"`
 		}
-		l.record("ACT-GH-03-why-has-two-model-calls", strings.Count(r.Stdout, "outcall") >= 2 || strings.Count(r.Stdout, "model") >= 2)
+		audit := func(typ string) []auditEv {
+			var out struct {
+				Events []auditEv `json:"events"`
+			}
+			if err := json.Unmarshal([]byte(l.webOK("GET", "/v1/audit/events?limit=500&type="+typ, "", 200)), &out); err != nil {
+				t.Fatal(err)
+			}
+			return out.Events
+		}
+		ext, _ := l.item(ev.Item)["ext"].(map[string]any)
+		sev := str(ext, "source_event")
+		var disposed *auditEv
+		for _, e := range audit("inbound.disposed") {
+			if e.Object == sev {
+				e := e
+				disposed = &e
+			}
+		}
+		if disposed == nil {
+			t.Fatalf("审计里没有事件 %s 的 inbound.disposed", sev)
+		}
+		var judge, gen *auditEv // 取 disposed 之前最近的一次判断型和一次生成型
+		for _, e := range audit("run.finished") {
+			e := e
+			if e.Seq >= disposed.Seq {
+				continue
+			}
+			switch e.Payload["category"] {
+			case "judge":
+				judge = &e
+			case "generate":
+				gen = &e
+			}
+		}
+		if judge == nil || gen == nil {
+			t.Fatalf("事件 %s 之前应各有一次判断型和生成型 run.finished: judge=%v gen=%v", sev, judge != nil, gen != nil)
+		}
+		if conf, _ := judge.Payload["confidence"].(float64); judge.Payload["choice"] != "task" || conf != 0.4 || judge.Payload["template"] != "triage" || judge.Payload["state"] != "succeeded" {
+			t.Errorf("判断型应为低置信 task: %v", judge.Payload)
+		}
+		res, _ := gen.Payload["result"].(map[string]any)
+		if gen.Payload["template"] != "triage-title" || gen.Payload["state"] != "succeeded" || str(res, "title") != "修复登录 500" {
+			t.Errorf("生成型应产出标题: %v", gen.Payload)
+		}
+		if !(judge.Seq < gen.Seq && gen.Seq < disposed.Seq) || judge.Object == gen.Object {
+			t.Errorf("应为判断型 → 生成型 → 处置，实际 seq %d/%d/%d", judge.Seq, gen.Seq, disposed.Seq)
+		}
+		// 事项自己的时间线记录了判断结果和命中规则。
+		r := l.Apa(l.DEL, "", "why", ev.Item)
+		if r.Code != 0 || !strings.Contains(r.Stdout, "judged task (confidence 0.40)") || !strings.Contains(r.Stdout, "github-issue") {
+			t.Errorf("apa why 应带判断结果与规则: code=%d %.300s", r.Code, r.Stdout)
+		}
+		l.record("ACT-GH-03-runs", []string{judge.Object, gen.Object})
 	})
 
 	step("ACT-GH-04 判断为不值得时只记录", func(t *testing.T) {
