@@ -387,7 +387,13 @@ func (s *Service) skip(ctx context.Context, p pending, r rule, ok bool, m string
 
 func (s *Service) handle(ctx context.Context, p pending, r rule, pv int) error {
 	var it domain.Item
-	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { it, err = items.Get(tx, p.item); return })
+	var depth int
+	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) {
+		if it, err = items.Get(tx, p.item); err == nil {
+			depth, err = items.ChainDepth(tx, p.item)
+		}
+		return
+	})
 	if isNotFound(err) || (err == nil && !following(it)) {
 		return s.clear(ctx, p.id) // 事项已不在等待：跟进作废
 	}
@@ -400,7 +406,7 @@ func (s *Service) handle(ctx context.Context, p pending, r rule, pv int) error {
 		material = it.Summary
 	}
 	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: s.o.Pack, Template: r.template, Input: in, Material: material,
-		Target: it.ID, Project: it.Project,
+		Target: it.ID, Project: it.Project, ChainDepth: depth, // 定时触发：沿用事项深度，不能让判断记录把链路清零
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + r.key, Via: domain.ViaRule},
 		Basis: &domain.Basis{PolicyVersion: pv, RuleID: r.key}})
 	if err != nil {

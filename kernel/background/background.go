@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -301,13 +302,12 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	if err != nil {
 		return err
 	}
-	f.depth = c.Depth + 1
+	f.depth = chain.Next(c.Depth)
 	if f.busy {
 		return s.audit(ctx, c, f, EvSkipped, f.item.ID, "该事项已有在途运行，不重复拉起", nil)
 	}
 	if f.depth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
-		return s.audit(ctx, c, f, domain.EvHealthAlert, f.item.ID, "chain depth exceeded",
-			map[string]any{"chain_depth": f.depth, "threshold": s.o.MaxChainDepth})
+		return chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, f.item.ID, f.depth, s.o.MaxChainDepth)
 	}
 	harness := sp.harness
 	if harness == "" {
