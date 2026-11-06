@@ -1,5 +1,4 @@
-# sha256: c965f3e54d4a6c2abd74ffeb231b9ab254c12afdb43aa0e5d923bd4421083678
-work_item_id: null
-status: todo
-held: true
-hold_reason: live e2e：等测试邮箱、测试 Telegram bot、独立 Hermes profile
+# sha256: 75797606b7649baf4343f44b9f0ddcf79d1764133ade5bf2d59175954d91bd53
+work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
+status: in_progress
+recovery_marker: true
