@@ -1,6 +1,8 @@
-# sha256: 920f30e66fdd2502f88959e3fbd31ec15b70eb15516c930c4de0ef200f39de2a
+# sha256: 17340cc9240c3a32f4c244867767074466e4abd5b83079c601dbad6e3be0f01f
 work_item_id: 01a1afc0-6b41-72b0-b323-80bae672c374
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-06T10:09:35Z'
 recovery_marker: true
 retry_note: '上游缺陷已修：PR #197（39a0e5c）让 sources/github 按契约接受空 window.from。请复用你上轮推送的分支
   agent/omac-worker-frontend/c153d77f4fbe（提交 5fa57aa）里的 tests/live/github/github_live_test.go，在最新
