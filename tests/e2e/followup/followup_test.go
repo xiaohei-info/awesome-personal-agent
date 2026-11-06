@@ -102,9 +102,23 @@ func (f *fx) waiting(title string) string {
 	return i
 }
 
+// summaryMark 是一句话摘要提示词的固定片段。
+const summaryMark = "一句话摘要"
+
 func (f *fx) judge(item, choice string) {
 	b, _ := json.Marshal(map[string]any{"choice": choice, "confidence": 0.9})
 	f.ModelStub.When(item, modelstub.Reply{Content: string(b)})
+}
+
+// judgeRequests 统计跟进判断的模型请求：事项创建时的一句话摘要（decision-card 包）不是本包要验的外呼。
+func (f *fx) judgeRequests() int {
+	n := 0
+	for _, r := range f.ModelStub.Requests() {
+		if !strings.Contains(r.BodyText, summaryMark) {
+			n++
+		}
+	}
+	return n
 }
 
 func (f *fx) show(item string) map[string]any {
@@ -252,11 +266,11 @@ func TestFlowFollowUp(t *testing.T) {
 
 	t.Run("规则非 auto 时不外呼不提醒", func(t *testing.T) {
 		f.webOK("PATCH", "/rules/"+ruleKey+"/mode", `{"mode":"observe"}`, 200)
-		before := len(f.ModelStub.Requests())
+		before := f.judgeRequests()
 		quiet := f.waiting("fup-observe")
 		f.judge(quiet, "remind")
 		time.Sleep(100 * time.Second)
-		if n := len(f.ModelStub.Requests()); n != before {
+		if n := f.judgeRequests(); n != before {
 			t.Errorf("observe 下仍外呼模型: %d -> %d", before, n)
 		}
 		if hasUnread(quiet) {
@@ -270,13 +284,15 @@ func TestFlowFollowUpModelDown(t *testing.T) {
 	t.Parallel()
 	f := setupShort(t)
 	f.StartModelStub()
+	// 事项创建时的摘要照常成功：decision-card 起草逐事项只做一次、不重试，失败的告警要等同一模板的下一次成功才清除（设计文档「告警归类与清除」），这里只验跟进判断的失败与恢复。
+	f.ModelStub.When(summaryMark, modelstub.Reply{Content: `{"insufficient_info":true}`})
 	f.ModelStub.SetDefault(modelstub.Reply{Status: 500})
 	item := f.waiting("fup-down")
 
-	if !f.until(2*time.Minute+20*time.Second, func() bool { return len(f.ModelStub.Requests()) > 0 }) {
+	if !f.until(2*time.Minute+20*time.Second, func() bool { return f.judgeRequests() > 0 }) {
 		t.Fatal("跟进到期后没有调用模型")
 	}
-	if !f.until(90*time.Second, func() bool { return len(f.ModelStub.Requests()) > 1 }) {
+	if !f.until(90*time.Second, func() bool { return f.judgeRequests() > 1 }) {
 		t.Error("模型不可用时没有退避重试")
 	}
 	if got := f.phase(item); got != "waiting" {
