@@ -32,8 +32,8 @@ import (
 var (
 	bg    = context.Background()
 	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
-	// 八类信号的固定顺序（设计 §15.2 表）。
-	signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "rule_fallbacks"}
+	// 九类信号的固定顺序（设计 §15.2 表）。
+	signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "rule_fallbacks", "other_alerts"}
 )
 
 type fakePacks []packs.Rejection
@@ -139,8 +139,8 @@ func (e *env) alert(object, reason string, payload any) {
 	}
 }
 
-// flow-health：全新账本返回固定顺序的八类信号，全部正常，且每类都带修复入口。
-func TestEmptyLedgerReportsEightHealthySignals(t *testing.T) {
+// flow-health：全新账本返回固定顺序的九类信号，全部正常，且每类都带修复入口。
+func TestEmptyLedgerReportsNineHealthySignals(t *testing.T) {
 	r := setup(t, nil).report(auth.Observer)
 	if !r.Healthy || len(r.Signals) != len(signalIDs) {
 		t.Fatalf("%+v", r)
@@ -166,6 +166,8 @@ func TestProblemsSurfaceWithRepairEntryAndNoLedgerContent(t *testing.T) {
 	e.alert("item_1", chain.ExceededReason, map[string]any{"chain_depth": 4, "threshold": 3})
 	e.alert("item_2", "SECRET-SCREEN-REASON", map[string]any{"kind": "screening"})
 	e.alert("rule:inbound/x", khealth.RuleFallbackReason, map[string]string{"rule": "inbound/x"})
+	e.alert("item_3", "SECRET-FOLLOWUP-REASON", map[string]any{"kind": khealth.FollowupKind})
+	e.alert("item_4", "SECRET-RULE-ACTION-REASON", map[string]any{"rule": "r/x", "action": "create_timer"})
 
 	rec := e.get(auth.Observer)
 	var r Report
@@ -176,9 +178,15 @@ func TestProblemsSurfaceWithRepairEntryAndNoLedgerContent(t *testing.T) {
 		t.Fatal("must be unhealthy")
 	}
 	for id, want := range map[string]string{"source_failures": "src_flaky", "chain_trips": "item_1", "pack_rejections": "work",
-		"model_unavailable": "item_2", "rule_fallbacks": "inbound/x"} {
+		"model_unavailable": "item_2", "rule_fallbacks": "inbound/x", "other_alerts": "item_4"} {
 		s := r.byID(id)
 		raw, _ := json.Marshal(s.Detail)
+		if id == "model_unavailable" { // 初筛 1 + 跟进判断 1
+			if s.Count != 2 || !strings.Contains(string(raw), "item_3") {
+				t.Fatalf("%s = %+v (%s)", id, s, raw)
+			}
+			continue
+		}
 		if s.OK || s.Count != 1 || s.Why == "" || s.Next == "" || !strings.Contains(string(raw), want) {
 			t.Fatalf("%s = %+v (%s)", id, s, raw)
 		}
@@ -188,7 +196,7 @@ func TestProblemsSurfaceWithRepairEntryAndNoLedgerContent(t *testing.T) {
 			t.Fatalf("%s should be ok: %+v", id, s)
 		}
 	}
-	for _, secret := range []string{"SECRET-SOURCE-ERROR", "SECRET-PACK-REASON", "SECRET-SCREEN-REASON"} {
+	for _, secret := range []string{"SECRET-SOURCE-ERROR", "SECRET-PACK-REASON", "SECRET-SCREEN-REASON", "SECRET-FOLLOWUP-REASON", "SECRET-RULE-ACTION-REASON"} {
 		if strings.Contains(rec.Body.String(), secret) {
 			t.Fatalf("response leaks %s: %s", secret, rec.Body)
 		}
