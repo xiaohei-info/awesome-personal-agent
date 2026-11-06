@@ -1,7 +1,8 @@
-# sha256: dbf046036f2c1cdaa6004e3603b5dc38a2854a72bff869a1feef9417ec87e65a
+# sha256: b44a8f8414047878d71210b5b8733b4036af60ed393f24dc1accb5a20baf36e5
 work_item_id: 01a1b076-1f2c-74dd-859f-6168f5535ddd
-status: in_review
-recovery_marker: true
+status: done
+merged: true
+merged_at: '2026-11-06T12:34:16Z'
 retry_note: '上游已修：PR #200（gog 认证/去 --readonly）和 PR #201（同一来源对象的更新经关联键 UID|RECURRENCE-ID
   写回原事项，不再新建；新建日程判为 event.created）。上轮你写的 tests/live/calendar/calendar_live_test.go
   没有提交，需要重新写并这次提交到分支。ACT-CAL-03 保持严格断言，不放宽。每次运行用全新 APA_HOME。日历红线不变：只建 [APA-LIVE-TEST]
