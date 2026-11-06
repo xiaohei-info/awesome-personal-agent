@@ -2,8 +2,8 @@
 
 // Package automation 按验收文档 flow-pack-loader（ACT-PACK-01..06）与 flow-rule-modes（ACT-RULE-01..07）
 // 用真实 apa 二进制验证"能力包是声明式数据、不合规的包不生效；规则默认只观察，切 auto 只在 Web"。
-// 环境来自 flow-env-baseline 的共用脚本。内核没有常驻文件监视，数据目录变化经重启 apa serve 重新加载
-// （验收文档允许"触发热加载或重启"）；Web 步骤经与页面相同的 HTTP API 驱动，页面渲染由 web/ 组件测试覆盖。
+// 环境来自 flow-env-baseline 的共用脚本。数据目录变化经重启 apa serve 确定性地重新加载
+// （验收文档允许"触发热加载或重启"，避免依赖轮询间隔）；Web 步骤经与页面相同的 HTTP API 驱动，页面渲染由 web/ 组件测试覆盖。
 package automation
 
 import (

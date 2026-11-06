@@ -167,7 +167,7 @@ event_rules:
 			t.Errorf("视图配置应原样给 Web: %+v", p.Views)
 		}
 		add := func(spec string) baseline.Result {
-			return e.Apa(e.DEL, "", "item", "add", "--kind", "acc-kind", "--title", "acc", "--spec", spec, "--reason", "pack e2e")
+			return e.Apa(e.DEL, "", "item", "add", "--kind", "acc-kind", "--title", "acc", "--spec", spec, "--reason", "pack e2e", "--evidence", "pack e2e")
 		}
 		if r := add(`{"score":"high"}`); r.Code == 0 {
 			t.Errorf("不符合 schema 的 spec 应被拒绝: %s", r.Stdout)
@@ -181,17 +181,17 @@ event_rules:
 	})
 
 	step(t, "ACT-PACK-06 建能力包实例", func(t *testing.T) {
-		r := e.Apa(e.DEL, "", "instance", "add", "brief", "--param", "schedule=0 8 * * 1-5")
+		r := e.Apa(e.DEL, "", "--evidence", "owner: 建简报实例", "instance", "add", "brief", "--param", "schedule=0 8 * * 1-5")
 		if r.Code != 0 {
 			t.Fatalf("建实例退出码 %d: %s", r.Code, r.Stderr)
 		}
 		if l := e.Apa(e.DEL, "", "instance", "list"); l.Code != 0 || !contains(l.Stdout, "brief", "0 8 * * 1-5") {
 			t.Errorf("list 应可见实例: %d %s", l.Code, l.Stdout)
 		}
-		if r := e.Apa(e.DEL, "", "instance", "add", "brief"); r.Code == 0 || !strings.Contains(r.Stderr, "schedule") {
+		if r := e.Apa(e.DEL, "", "--evidence", "owner: 建简报实例", "instance", "add", "brief"); r.Code == 0 || !strings.Contains(r.Stderr, "schedule") {
 			t.Errorf("缺 schedule 应按 instance_params 被拒绝: %d %s", r.Code, r.Stderr)
 		}
-		if r := e.Apa(e.OBS, "", "instance", "add", "brief", "--param", "schedule=0 8 * * 1-5"); r.Code != 4 {
+		if r := e.Apa(e.OBS, "", "--evidence", "owner: 建简报实例", "instance", "add", "brief", "--param", "schedule=0 8 * * 1-5"); r.Code != 4 {
 			t.Errorf("OBS 退出码应为 4，实际 %d: %s", r.Code, r.Stderr)
 		}
 	})
