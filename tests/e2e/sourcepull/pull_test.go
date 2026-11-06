@@ -82,7 +82,7 @@ func (f *fx) addPull(id, program, sourceType string, config any) {
 	f.t.Helper()
 	cfg, _ := json.Marshal(config)
 	f.apa(f.DEL, 0, "source", "add", "--id", id, "--type", "pull", "--command", program,
-		"--schedule", "1s", "--timeout", "20", "--source-type", sourceType, "--config", string(cfg))
+		"--schedule", "1s", "--timeout", "20", "--source-type", sourceType, "--config", string(cfg), "--evidence", "登记附带的拉取程序")
 }
 
 // patchConfig 在 Web 改来源的 config。
@@ -146,12 +146,12 @@ func TestFlowSourceRSS(t *testing.T) {
 			if f.show(c.id).Stats.LastSuccessAt == "" {
 				t.Errorf("%s 应有最近成功时间", c.id)
 			}
-			f.apa(f.DEL, 0, "source", "disable", c.id)
+			f.apa(f.DEL, 0, "source", "disable", c.id, "--evidence", "启停来源")
 		}
 	})
 
 	step("ACT-RSS-02 格式错误或不可达时不丢游标", func(t *testing.T) {
-		f.apa(f.DEL, 0, "source", "enable", "src_rss")
+		f.apa(f.DEL, 0, "source", "enable", "src_rss", "--evidence", "启停来源")
 		srv.set(200, "application/rss+xml", rssFeed("a", "b", "c"))
 		f.settle("src_rss", 1)
 		before := f.show("src_rss")

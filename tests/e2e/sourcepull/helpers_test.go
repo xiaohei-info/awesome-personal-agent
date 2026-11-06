@@ -8,7 +8,6 @@
 package sourcepull
 
 import (
-	"database/sql"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -19,7 +18,6 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
-	_ "modernc.org/sqlite"
 )
 
 // 步骤等待上限：周期 1 秒，退避最多隔几个节拍。
@@ -188,29 +186,24 @@ type reject struct {
 	Reason, Raw string
 }
 
-// rejects 读某来源没有入账的输出行及原因。内核目前没有经 HTTP 暴露这张表（见交付说明），
-// 这里只读打开账本，证明原因已留存。
+// rejects 经 `apa source rejects` 读某来源没有入账的输出行及原因（与来源页同一接口）。
 func (f *fx) rejects(id string) []reject {
 	f.t.Helper()
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(f.Home, "ledger.db")+"?mode=ro")
-	if err != nil {
-		f.t.Fatal(err)
+	var out struct {
+		Rejects []struct {
+			Reason string `json:"reason"`
+			Raw    string `json:"raw"`
+		} `json:"rejects"`
 	}
-	defer db.Close()
-	rows, err := db.Query(`SELECT reason, raw FROM sources_runner_reject WHERE source_id = ? ORDER BY seq`, id)
-	if err != nil {
-		f.t.Fatal(err)
+	r := f.apa(f.OBS, 0, "source", "rejects", id)
+	if err := json.Unmarshal([]byte(r.Stdout), &out); err != nil {
+		f.t.Fatalf("source rejects 输出不是 JSON: %q", r.Stdout)
 	}
-	defer rows.Close()
-	var out []reject
-	for rows.Next() {
-		var r reject
-		if err := rows.Scan(&r.Reason, &r.Raw); err != nil {
-			f.t.Fatal(err)
-		}
-		out = append(out, r)
+	var rs []reject
+	for _, x := range out.Rejects {
+		rs = append(rs, reject{x.Reason, x.Raw})
 	}
-	return out
+	return rs
 }
 
 func (f *fx) get(path string) string {

@@ -245,14 +245,14 @@ func TestFlowSourceContract(t *testing.T) {
 	step("ACT-SRC-10 启停来源", func(t *testing.T) {
 		b.out(lines(cursorLine("b2")), 0)
 		f.until("b 在运行", func() bool { return f.show("src_accb").Cursor == "b2" })
-		f.apa(f.DEL, 0, "source", "disable", "src_accb")
+		f.apa(f.DEL, 0, "source", "disable", "src_accb", "--evidence", "启停来源")
 		runs := f.settle0("src_accb")
 		time.Sleep(4 * time.Second)
 		if got := f.show("src_accb").Stats.Runs; got != runs {
 			t.Fatalf("停用期间不应有 Run：%d → %d", runs, got)
 		}
 		b.out(lines(ev("e9", "停用期间产生"), cursorLine("b3")), 0)
-		f.apa(f.DEL, 0, "source", "enable", "src_accb")
+		f.apa(f.DEL, 0, "source", "enable", "src_accb", "--evidence", "启停来源")
 		f.until("启用后恢复且事件不漏", func() bool { return f.show("src_accb").Cursor == "b3" && contains(ids(f.events("src_accb")), "e9") })
 	})
 }
