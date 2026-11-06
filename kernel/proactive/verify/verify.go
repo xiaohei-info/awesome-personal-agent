@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -126,7 +127,7 @@ func (o Options) run(ctx context.Context, c rules.Call) error {
 	in, _ := json.Marshal(map[string]any{"item": s.child.ID, "parent": s.parent.ID, "outcome": s.report.Outcome, "evidence": s.report.Evidence})
 	pack, _, _ := strings.Cut(c.Rule, "/")
 	out, err := o.Judge.Do(ctx, direct.Call{Pack: pack, Template: tmpl, Input: in, Material: s.report.Summary,
-		Target: s.child.ID, Project: s.child.Project,
+		Target: s.child.ID, Project: s.child.Project, ChainDepth: chain.Next(c.Depth), // 判断本身不写业务状态，熔断由随后的 decision.request 命令管线执行
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule},
 		Basis: &domain.Basis{PolicyVersion: s.policyVersion, RuleID: c.Rule}})
 	if err != nil {

@@ -119,6 +119,8 @@ type Task struct {
 	Project  string // 目标事项所属项目，可空
 	Parent   string // 目标事项的父事项，可空
 	From     string // 链路深度继承自哪个对象，可空表示新链路
+	// Depth 是规则拉起的运行深度（触发事件深度加一，chain.Next）；0 表示不是规则拉起，运行沿用目标事项当前深度。
+	Depth int
 	// Target 是已建好的目标事项（执行者须已是内核身份，见 CallAgent）；为空时由 Launch 新建。
 	// 给出时 Title、Project、Parent 不再使用；这个事项有过运行就不再拉起（同一触发只拉起一次）。
 	Target string
@@ -259,6 +261,9 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 			return err
 		}
 		run.ChainDepth = it.ChainDepth
+		if t.Depth > 0 {
+			run.ChainDepth = t.Depth
+		}
 		_, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: runDir}}, s.o.Now())
 		return err
 	})
@@ -496,9 +501,13 @@ func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID,
 				return err
 			}
 		}
-		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: itemID,
+		depth, err := items.ChainDepth(tx, itemID) // 沿用事项当前深度：运行者的写入已在运行深度上加一，结束记录不能把它拉回去
+		if err != nil {
+			return err
+		}
+		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: itemID,
 			Actor:  domain.Actor{Type: domain.ActorAgent, Principal: "agent:task", Via: domain.ViaClock, Run: run.ID, Harness: run.Harness},
-			Reason: "task " + state, Payload: body, ChainDepth: run.ChainDepth, At: s.o.Now()})
+			Reason: "task " + state, Payload: body, ChainDepth: depth, At: s.o.Now()})
 		return err
 	})
 }
