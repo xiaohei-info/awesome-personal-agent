@@ -27,7 +27,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee] | add | update <id> | transition <id> --to <phase> --reason <r> | relate <from> --to <id> --type <t>"
+const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee] | add | update <id> | transition <id> --to <phase> --reason <r> | relate <from> --to <item or material id> --type <t>"
 
 func item(c *client.Ctx, args []string) error {
 	if len(args) == 0 {
@@ -175,7 +175,7 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <text> --version <n>]"
 	case "relate":
 		fields, bools = []string{"to", "type", "reason"}, []string{"remove"}
-		hint = "usage: apa item relate <from> --to <id> --type <parent|blocks|derived_from|supersedes|relates> [--remove] [--reason <r> --evidence <text> --version <n>]"
+		hint = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --evidence <text> --version <n>]"
 	}
 	f, rm := newForm("item "+sub, fields, []string{"version", "idempotency-key"}, bools)
 	id, err := f.parse(args, true, hint)

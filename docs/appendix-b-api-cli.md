@@ -21,7 +21,7 @@
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建 | observer | |
 | `apa item show/list` | 读事项；`show` 带挂靠消息，按转发白名单过滤 | observer | 5 |
-| `apa item add/update/transition/relate [--evidence]` | 增改事项、转阶段、关联 | worker（自己的事项）；delegate（任意，每次附 `--evidence`，含改自己的事项和以 `proposed` 新建；缺证据为退出码 2） | 2、4、6 |
+| `apa item add/update/transition/relate [--evidence]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料） | worker（自己的事项）；delegate（任意，每次附 `--evidence`，含改自己的事项和以 `proposed` 新建；缺证据为退出码 2） | 2、4、6 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
 | `apa decide <id> --option --evidence` | 代答决策 | delegate | 4、6、20、22 |
@@ -37,7 +37,7 @@
 | `apa project create/update` | 建项目、改基本信息。`allowed_executors` 不能改 | delegate | 20 |
 | `apa project repos add/remove` | 增改本机检出（worker）或远程地址（delegate） | worker | 4 |
 | **材料与规范** | | | |
-| `apa material add --repo --path` | 登记托管型 | worker | |
+| `apa material add --repo --path [--project] [--kind]` | 登记托管型；project 缺省取登记了该仓库的项目，kind 缺省 `design` | worker | |
 | `apa material commit <id> --from --reason [--kind]` | 提交自有型修订 | worker | 6 |
 | `apa material list` | 列出材料，可按项目、kind、标签筛选 | observer | |
 | `apa material show <id> [--rev]` | 读当前或指定修订；托管型只回位置 | observer | 5 |
@@ -99,7 +99,7 @@
 | 项目 | `GET/POST /projects`，`GET/PATCH /projects/{id}` | 项目 | observer 读，delegate 写 |
 | | `POST /projects/{id}/repos` | repos 属性 | worker、delegate |
 | | `GET /projects/resolve?path&host` | 当前目录到项目的映射 | observer |
-| 材料 | `GET/POST /materials`，`GET /materials/{id}` | 材料 | observer 读，worker 写；导出 ext 密钥可 `GET` |
+| 材料 | `GET/POST /materials`，`GET /materials/{id}` | 材料；单个材料带与事项的类型化关系 `relations` | observer 读，worker 写；导出 ext 密钥可 `GET` |
 | | `GET /materials/{id}/content` | 托管型正文，异步读取 | 只有 Web 登录 |
 | | `POST /materials/{id}/changes` | 对托管型发起修改，生成委派子事项 | Web 登录、delegate；worker、运行凭据须带自己范围内的 `parent` |
 | | `GET/POST /materials/{id}/revisions` | 修订 | observer 读，worker 写 |
@@ -171,7 +171,7 @@
 
 `reading` 时隔几秒再请求；同一材料的在途读取只有一个，在短任务队列内优先（主文档 §7.7）。`unavailable` 是降级结果，不是错误；再次请求会重新读取。
 
-`POST /materials/{id}/changes` 只用于托管型，自有型返回 409。请求体 `{"assignee": "<执行者 id>", "request": "<修改要求>", "parent": "<事项 id，可选>"}`，可带 `Idempotency-Key`。成功返回 201：`{"item": "<子事项 id>", "parent": "<父事项 id>"}`。子事项带材料的 project、仓库和路径；`assignee` 不在项目允许范围内返回 403（退出码 21）；`parent` 不属于材料所在项目返回 400。父事项来源见主文档 §12.3。
+`POST /materials/{id}/changes` 只用于托管型，自有型返回 409。请求体 `{"assignee": "<执行者 id>", "request": "<修改要求>", "parent": "<事项 id，可选>"}`，可带 `Idempotency-Key`。成功返回 201：`{"item": "<子事项 id>", "parent": "<父事项 id>"}`。子事项带材料的 project、仓库和路径，委派成功后父事项以 `output` 关联该材料；`assignee` 不在项目允许范围内返回 403（退出码 21）；`parent` 不属于材料所在项目返回 400。父事项来源见主文档 §12.3。
 
 `GET /agents-md?repo` 返回 `{"content": "…", "hash": "…", "rendered_at": "…", "last_check": {"state": "current|stale|drift", "file_hash": "…", "host": "…", "checked_at": "…"}}`。`last_check` 来自同一仓库最近一次 `POST /agents-md/check`，从未检查过时为 `null`。
 

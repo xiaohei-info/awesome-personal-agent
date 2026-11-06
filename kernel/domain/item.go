@@ -72,9 +72,14 @@ const (
 	RelDerivedFrom = "derived_from"
 	RelSupersedes  = "supersedes"
 	RelRelates     = "relates"
+
+	// 事项与材料之间的内置类型（§6.3）：依据、产出、纪要。边读作"事项 <type> 材料"。
+	RelBasis   = "basis"
+	RelOutput  = "output"
+	RelMinutes = "minutes"
 )
 
-// Relation 是事项之间带类型的边。
+// Relation 是事项之间、或事项到材料的带类型的边。
 type Relation struct {
 	Type string `json:"type"`
 	From string `json:"from"`
