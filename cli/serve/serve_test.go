@@ -1016,9 +1016,23 @@ func TestServeFollowUpUsesPackScheduleAndMode(t *testing.T) {
 // ---- 规则动作与后台运行的装配 ----
 
 // assembled 在新目录上 init 后直接装配并启动内核（不起循环、不监听），供需要构造账本状态的装配测试使用。
-func assembled(t *testing.T) *kernel {
+// extra 是追加到 config.yaml 的配置行。
+func assembled(t *testing.T, extra ...string) *kernel {
 	t.Helper()
 	l := config.LayoutOf(initOnFreePort(t))
+	if len(extra) > 0 {
+		f, err := os.OpenFile(l.Config, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = f.WriteString(strings.Join(extra, ""))
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	cfg, err := config.Load(l.Config)
 	if err != nil {
 		t.Fatal(err)
@@ -1120,6 +1134,28 @@ func TestBackgroundChainDepthAlertIsDelivered(t *testing.T) {
 	k.do(t, command.Chain{}, "rule.set_mode", map[string]string{"rule": labelledRule, "mode": "auto"})
 	id := k.deepItem(t)
 	k.do(t, command.Chain{}, "proposal.accept", map[string]string{"id": id}) // 转 open，规则命中
+	k.healthAlertDelivered(t, id)
+}
+
+// config.yaml 的 chain_depth_threshold 交给命令管线与后台运行（§14.9、§16.2）：深度 2 的事项转 open，
+// 规则拉起的运行深度 3 已超阈值 2，只记录并产出健康类投递。
+func TestChainDepthThresholdFromConfig(t *testing.T) {
+	k := assembled(t, "chain_depth_threshold: 2\n")
+	if k.x.MaxChainDepth != 2 {
+		t.Fatalf("executor threshold = %d", k.x.MaxChainDepth)
+	}
+	k.do(t, command.Chain{}, "rule.set_mode", map[string]string{"rule": labelledRule, "mode": "auto"})
+	var id string
+	for i := 0; i < 3; i++ { // 深度 0、1、2
+		chain := command.Chain{Mode: command.ChainInherit, From: id}
+		if id == "" {
+			chain = command.Chain{}
+		}
+		var o struct{ ID string }
+		_ = json.Unmarshal(k.do(t, chain, "item.create", map[string]any{"title": "deep", "kind": "task", "phase": "proposed", "tags": []string{"agent-ok"}}), &o)
+		id = o.ID
+	}
+	k.do(t, command.Chain{}, "proposal.accept", map[string]string{"id": id})
 	k.healthAlertDelivered(t, id)
 }
 

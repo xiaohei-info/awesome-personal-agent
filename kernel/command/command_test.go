@@ -458,6 +458,7 @@ func TestChainDepthInheritance(t *testing.T) {
 func TestChainDepthOverThresholdOnlyRecords(t *testing.T) {
 	e := setup(t)
 	e.x.MaxChainDepth = 2
+	agent := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
 	prev := "o0"
 	var last Result
 	for i := 0; i < 4; i++ {
@@ -466,7 +467,7 @@ func TestChainDepthOverThresholdOnlyRecords(t *testing.T) {
 		if i > 0 {
 			ch = Chain{Mode: ChainInherit, From: prev}
 		}
-		r, err := e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: in(noteIn{ID: id, Body: "b"}), Chain: ch})
+		r, err := e.x.Do(bg, Request{Identity: agent, Command: "note.write", Input: in(noteIn{ID: id, Body: "b"}), Chain: ch})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -484,6 +485,64 @@ func TestChainDepthOverThresholdOnlyRecords(t *testing.T) {
 	ev := e.events(t)
 	if got := ev[len(ev)-1].Event; got.Type != domain.EvHealthAlert || got.ChainDepth != 3 || last.Seqs[0] != got.Seq {
 		t.Fatalf("health alert expected: %+v", got)
+	}
+}
+
+// 链路深度的推定（§14.9）：运行凭据继承运行记录的深度加一；未指明来源时沿用对象当前深度，不清零；
+// 只有本人在 Web 委派开始新链路；本人在 Web 的操作超阈值也照常生效。
+func TestChainDepthResolvedByCaller(t *testing.T) {
+	e := setup(t)
+	e.x.MaxChainDepth = 4
+	if err := e.x.Register(Spec{Name: "note.delegate", Action: authz.ActionDelegate,
+		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+			return authz.Object{ID: parse(in).ID}, nil
+		},
+		Apply: func(c *Ctx) (any, error) {
+			_, err := c.Emit(domain.Event{Type: "note.delegated", Object: parse(c.Input).ID, Payload: json.RawMessage(`{}`)})
+			return nil, err
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	inScope := func(*store.Tx, authz.Object) (bool, bool, error) { return true, false, nil }
+	run := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:r1", Via: domain.ViaCLI, Run: "r1"},
+		Level: authz.LevelRun, RunScope: inScope, RunDepth: 2}
+	agent := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
+	depthOf := func(who Trusted, cmd, id string) (int, Result) {
+		t.Helper()
+		r, err := e.x.Do(bg, Request{Identity: who, Command: cmd, Input: in(noteIn{ID: id, Body: "b"})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ev := e.events(t)
+		return ev[len(ev)-1].Event.ChainDepth, r
+	}
+	// 运行凭据连写两次都是运行深度加一，不在同一运行里自己累加。
+	for i := 0; i < 2; i++ {
+		if d, _ := depthOf(run, "note.write", "n"); d != 3 {
+			t.Fatalf("run write %d depth = %d, want 3", i, d)
+		}
+	}
+	if d, _ := depthOf(agent, "note.write", "n"); d != 3 {
+		t.Fatalf("agent write keeps object depth: %d", d)
+	}
+	if d, _ := depthOf(owner, "note.write", "n"); d != 3 {
+		t.Fatalf("owner edit keeps object depth: %d", d)
+	}
+	if d, _ := depthOf(agent, "note.delegate", "n"); d != 3 {
+		t.Fatalf("agent delegation keeps object depth: %d", d)
+	}
+	if d, _ := depthOf(owner, "note.delegate", "n"); d != 0 {
+		t.Fatalf("owner delegation in Web starts a new chain: %d", d)
+	}
+	// 超阈值：自动方被拦下，本人照常生效且深度不清零。
+	deep := Trusted(run)
+	deep.RunDepth = 4
+	if d, r := depthOf(deep, "note.write", "m"); !r.Suppressed || d != 5 {
+		t.Fatal("run over threshold must be suppressed")
+	}
+	// 熔断记录本身带着超限深度（5），本人沿用它且照常生效。
+	if d, r := depthOf(owner, "note.write", "m"); r.Suppressed || d != 5 {
+		t.Fatalf("owner write over threshold: depth %d suppressed %v", d, r.Suppressed)
 	}
 }
 

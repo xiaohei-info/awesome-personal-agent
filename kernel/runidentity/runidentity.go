@@ -196,6 +196,7 @@ func (i Identity) Authenticate(tx *store.Tx) (command.Caller, error) {
 			Harness: harness, Session: i.Origin.Session, Run: runID},
 		Level:    authz.LevelRun,
 		RunScope: scope(target),
+		RunDepth: rec.Run.ChainDepth,
 	}, nil
 }
 

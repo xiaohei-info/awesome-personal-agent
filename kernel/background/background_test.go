@@ -3,6 +3,7 @@ package background
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
@@ -114,7 +116,7 @@ func setup(t *testing.T, maxDepth int) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, instances.Module,
-		items.Module, executors.Module, proc.Module, runidentity.Module, rules.Module, Module} {
+		items.Module, executors.Module, proc.Module, runidentity.Module, rules.Module, delegation.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -128,7 +130,8 @@ func setup(t *testing.T, maxDepth int) *env {
 		done: make(chan proc.Result, 16), errs: make(chan error, 16)}
 	e.x = command.New(st, func() time.Time { return t0 })
 	kinds := items.NewKinds()
-	for _, err := range []error{projects.Register(e.x), items.Register(e.x, kinds), executors.Register(e.x, executors.Options{Owner: "owner"}), rules.Register(e.x)} {
+	for _, err := range []error{projects.Register(e.x), items.Register(e.x, kinds), executors.Register(e.x, executors.Options{Owner: "owner"}), rules.Register(e.x),
+		delegation.Register(e.x, delegation.Options{Owner: "owner", OnError: func(_ command.Commit, err error) { t.Errorf("delegation: %v", err) }})} {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -155,6 +158,7 @@ func setup(t *testing.T, maxDepth int) *env {
 		t.Fatal(err)
 	}
 	e.svc = svc
+	e.must(owner, "executor.put", map[string]any{"id": "work-host.cli", "kind": "external-cli"})
 	eng, err := rules.New(rules.Options{Store: st, Exec: e.x, Packs: ld, Owner: "owner", Now: func() time.Time { return t0 },
 		Handlers: map[string]rules.Handler{Action: svc.Handler()}, OnError: func(err error) { t.Errorf("rules: %v", err) }})
 	if err != nil {
@@ -633,7 +637,8 @@ func (e *env) project(execs ...string) string {
 	return p.ID
 }
 
-// ACT-BGT-01：runner=task 内核先建子事项（assignee 为声明的执行者，挂在触发事项下），Run 目标是子事项，回执写回子事项。
+// ACT-BGT-01：runner=task 内核先把子事项委派给声明的执行者（挂在触发事项下，父事项等它），Run 目标是子事项，
+// 运行者按委派回执写回子事项。
 func TestTaskRunnerWorksOnChildItem(t *testing.T) {
 	e := setup(t, 0)
 	e.configure("receipt")
@@ -647,8 +652,11 @@ func TestTaskRunnerWorksOnChildItem(t *testing.T) {
 		t.Fatalf("runs = %+v", rs)
 	}
 	child := e.item(rs[0].Run.Target)
-	if child.Assignee != "work-host.cli" || child.Project != proj || child.Phase != domain.PhaseOpen {
+	if child.Assignee != "work-host.cli" || child.Project != proj || child.Phase != domain.PhaseOpen || child.Kind != domain.KindDelegation {
 		t.Fatalf("child = %+v", child)
+	}
+	if got := e.item(parent); got.Phase != domain.PhaseWaiting {
+		t.Fatalf("parent phase while delegated = %s", got.Phase)
 	}
 	if p, ok := e.parentOf(child.ID); !ok || p != parent {
 		t.Fatalf("parent of child = %q %v", p, ok)
@@ -663,7 +671,8 @@ func TestTaskRunnerWorksOnChildItem(t *testing.T) {
 	}
 	runDir := filepath.Join(e.runs, rs[0].Run.ID)
 	secret := waitFile(t, filepath.Join(runDir, "token"))
-	e.must(runidentity.Identity{Secret: secret}, "item.transition", map[string]any{"id": child.ID, "to": "done", "reason": "done", "evidence": "pr#1"})
+	e.must(runidentity.Identity{Secret: secret}, "delegate.report", map[string]any{"id": child.ID, "outcome": "done", "summary": "fixed",
+		"evidence": map[string]any{"pr": "https://example.invalid/pr/1"}})
 	if err := os.WriteFile(filepath.Join(runDir, "go"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -807,4 +816,67 @@ func TestNewRequiresDependencies(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("New accepted empty options")
 	}
+}
+
+// ACT-DEP-01/02：规则→运行→委派→回执→规则的回环里深度逐轮上升（规则拉起加一、运行凭据的委派加一、回执沿用），
+// 到阈值后只记录不派发；运行凭据与执行者的回执都不把深度清零。
+func TestLoopThroughRunCredentialTripsAtThreshold(t *testing.T) {
+	e := setup(t, 4)
+	e.configure("receipt")
+	e.auto("main")
+	worker := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "work-host.cli", Via: domain.ViaCLI}, Level: authz.LevelWorker}
+	x := e.newItem("loop", []string{"agent-ok"}, nil)
+	e.open(x)
+	seen := map[string]bool{}
+	var depths, childDepths []int
+	for round := 0; round < 6; round++ {
+		var r *domain.Run
+		for _, rec := range e.runList() {
+			if !seen[rec.Run.ID] {
+				r = &rec.Run
+			}
+		}
+		if r == nil {
+			break
+		}
+		seen[r.ID] = true
+		depths = append(depths, r.ChainDepth)
+		dir := filepath.Join(e.runs, r.ID)
+		run := runidentity.Identity{Secret: waitFile(t, filepath.Join(dir, "token"))}
+		var c struct{ ID string }
+		_ = json.Unmarshal(e.must(run, "delegate.create", map[string]any{"parent": x, "assignee": "work-host.cli"}).Value, &c)
+		childDepths = append(childDepths, e.item(c.ID).ChainDepth)
+		if err := os.WriteFile(filepath.Join(dir, "go"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		e.waitResult()
+		e.must(worker, "delegate.report", map[string]any{"id": c.ID, "outcome": "done", "summary": "s",
+			"evidence": map[string]any{"pr": "https://example.invalid/pr/" + c.ID}})
+	}
+	if fmt.Sprint(depths) != "[1 3]" || fmt.Sprint(childDepths) != "[2 4]" {
+		t.Fatalf("run depths %v, child depths %v", depths, childDepths)
+	}
+	var trip *domain.Event
+	for _, a := range e.ofType(domain.EvHealthAlert) {
+		if a.Object == x && a.Reason == "chain depth exceeded" {
+			trip = &a
+		}
+	}
+	if trip == nil || trip.ChainDepth != 5 || trip.Basis == nil || trip.Basis.RuleID != "bgr/event_rules/main" {
+		t.Fatalf("trip = %+v", trip)
+	}
+	if got := e.item(x).Phase; got != domain.PhaseOpen {
+		t.Fatalf("tripped item phase = %s", got)
+	}
+	prev := 0
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, x)
+		for _, en := range es {
+			if en.Event.ChainDepth < prev {
+				t.Fatalf("depth fell from %d to %d at %s", prev, en.Event.ChainDepth, en.Event.Type)
+			}
+			prev = en.Event.ChainDepth
+		}
+		return err
+	})
 }
