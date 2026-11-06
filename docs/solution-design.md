@@ -1102,8 +1102,8 @@ APA 不实现 IMAP/SMTP、CalDAV、MIME 解析和 OAuth。邮件和日历来源�
 | 类别 | 范围 | 工具 | 取数方式 | 鉴权（归工具） |
 |---|---|---|---|---|
 | 邮件 | 首版 | himalaya（IMAP、JMAP、Gmail 等） | `himalaya envelope search`、`message read`，加 `--json` | 密码经 `password.command` 取得；OAuth 由外部令牌工具（如 ortie）经 `token.command` 提供，himalaya 2.x 不含 OAuth 流程 |
-| 日历（Google） | 首版 | gog calendar | `gog --readonly --no-input --json calendar events` | `gog auth`，自行刷新令牌；无桌面环境用它的加密文件后端 |
-| 邮件（Google） | 后续 | gog | `gog --readonly --gmail-no-send --no-input --json gmail search` | 同 gog calendar |
+| 日历（Google） | 首版 | gog calendar | `gog --no-input --json --enable-commands=calendar --account=<账号> calendar events` | `gog auth`，自行刷新令牌；无桌面环境用它的加密文件后端，口令经 `credentials_path` 交给适配器（见下表“鉴权”） |
+| 邮件（Google） | 后续 | gog | `gog --no-input --json --enable-commands=gmail --account=<账号> gmail search` | 同 gog calendar |
 | 日历（CalDAV 等） | 后续 | vdirsyncer + khal | `vdirsyncer sync` 同步到本地，再 `khal list --json <字段>` | vdirsyncer 配置（密码命令或 OAuth） |
 
 首版每类只做一个适配。首版日历只覆盖 Google 日历；其他日历服务等后续适配器，或由用户按 §9.2 自写脚本接入，能力包规则和内核都不用改。
@@ -1112,19 +1112,23 @@ SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6�
 
 | 约定 | 内容 |
 |---|---|
-| 鉴权 | 认证和令牌刷新都用工具自己的命令，`apa source auth` 不用于这类来源。APA 不读、不存这些凭据 |
+| 鉴权 | 认证和令牌刷新都用工具自己的命令，`apa source auth` 不用于这类来源。APA 不读、不存这些凭据。工具运行要用的本地口令（如 gog 文件 keyring 的口令）走 Source 登记的 `credentials_path`（§9.2）：内核只经 stdin 传路径，由适配器读文件，只注入给它拉起的工具子进程，不打印、不写日志，报错不带文件内容 |
+| gog 凭据文件 | `credentials_path` 指向一个 `KEY=VALUE` 文本文件（0600），写法与 gog 的 `keyring.env` 兼容：允许空行、`#` 注释、`export` 前缀和成对引号。适配器只取 `GOG_KEYRING_PASSWORD`（必填）和 `GOG_KEYRING_BACKEND`（缺省 `file`），其余键忽略。文件由本人放在该来源目录内，可以是指向 gog 自己 `keyring.env` 的符号链接。未登记 `credentials_path` 时不注入，适合 gog 用系统钥匙串的桌面环境；文件不可读、缺口令或格式错误返回 2 |
+| 账号 | gog 的账号是非机密配置，登记在来源 `config.account`（gog 已登录的邮箱，见 `gog auth list`），适配器以 `--account` 传入；缺失时不调用工具，返回 2 并提示补填 |
 | 登记 | 只登记命令，只在 Web 或主机配置文件（§14.12）。适配器随发行附带，登记方式与自定义脚本相同，delegate 不能登记 |
 | 语义类型 | 登记时填 `source_type: mail` 或 `calendar`。能力包规则按它匹配，换工具不用改规则 |
 | 换工具 | 在 `sources/` 加一个走 §9.2 的适配器，在 Web 或主机配置文件改登记命令，沿用 `source_type` 和 `dedupe_domain`；能力包规则、内核和 HTTP API 不变 |
-| 只读 | 能用工具的只读开关就用；不发信，不改已读标记。邮件内容不拼进命令行，参数一律按 argv 传递 |
+| 只读 | 能用工具的只读开关就用；没有时由适配器保证只调用读命令。不发信，不改已读标记。邮件内容不拼进命令行，参数一律按 argv 传递。gog v0.9 没有只读开关，`--enable-commands` 只能限制到顶层命令（如 `calendar`，其下的 `create`、`delete` 仍可用），所以日历适配器带 `--enable-commands=calendar` 挡住其他服务，只读由适配器只调用 `calendar events` 保证 |
 | 事件 id | 与工具无关：邮件用 Message-ID；日历用 UID 加 RECURRENCE-ID，再加更新时间或内容摘要以区分更新。换工具时沿用同一 `dedupe_domain`，不产生重复事项 |
 | 发件人 | 工具不给出可核实的结论时不设 `sender_verified: true`，按不在转发白名单处理（§14.6） |
 | 退出码 | 工具未安装、版本不在声明范围、认证失败、输出无法解析返回 2（生成 `needs_input`）；网络等临时错误返回 1。解析失败时不输出新游标，已输出事件靠去重保证安全（§9.2） |
 | 版本声明 | 每个适配器声明支持的工具版本范围，运行时比对 `--version`。工具的参数和输出会变：himalaya 的 JSON 标志在不同版本是 `--output json` 和 `--json` |
 | 契约测试 | 每个声明的版本保留一份录制的工具输出，测试其转换结果和退出码映射。升级工具版本时先加录制样本，再放宽声明；CI 不连真实账号 |
-| 环境 | 子进程环境白名单含 `PATH`、`HOME` 和 XDG 目录变量（§7.7）。工具的配置和凭据在工具自己的目录，不在 APA 数据目录，换主机需重新认证（§16.2） |
+| 环境 | 子进程环境白名单含 `PATH`、`HOME` 和 XDG 目录变量（§7.7），内核不为具体工具放宽；适配器拉起工具时同样只放行这份白名单，另加从 `credentials_path` 读出的变量。工具的配置和令牌在工具自己的目录，不在 APA 数据目录，换主机需重新认证（§16.2） |
 
 **himalaya 实测结论（v1.1.0）**：`envelope list` / 搜索的 JSON 不带 Message-ID；用 `message read --preview -H Message-ID` 取，输出为 `"Message-ID: <…>\n\n正文"`，与读正文是同一次调用；`--preview` 前后已读标记不变。2.x 未实测。
+
+**gog 实测结论（v0.9.0）**：没有 `--readonly`，传入即以 `unknown flag` 失败；`--enable-commands` 只认顶层命令，写成 `calendar.events` 之类的子命令会连 `calendar` 一起禁用。API 命令要 `--account`（或 gog 自己的缺省账号），使用文件 keyring 时还要 `GOG_KEYRING_PASSWORD`；没有该账号的令牌时以退出码 1 失败，stderr 为 `No auth for calendar <账号>`，适配器据此按认证失败返回 2。
 
 **需实测，结论写回本节**。首版工具：gog calendar 的增量查询方式，JSON 中是否带 UID、RECURRENCE-ID 和更新时间，以及重复事件的展开；这两个工具的认证失败能否从退出码或 stderr 可靠识别。后续适配器接入时：gog 邮件结果的粒度（线程或消息）及其增量查询方式；`khal list --json` 没有更新时间字段时如何识别更新，以及重复事件的展开。
 

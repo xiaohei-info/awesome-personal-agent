@@ -17,7 +17,7 @@ var fixedNow = func() time.Time { return time.Date(2026, 3, 8, 0, 0, 0, 0, time.
 
 // fakeTool 返回录制输出；--version 与 events 分别应答。
 func fakeTool(version, events string, evErr error, evStderr string) execFn {
-	return func(_ context.Context, args ...string) ([]byte, []byte, error) {
+	return func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
 		if len(args) == 1 && args[0] == "--version" {
 			return []byte(version), nil, nil
 		}
@@ -62,7 +62,7 @@ func decode(t *testing.T, lines []string) []event {
 	return evs
 }
 
-const in = `{"source_id":"src_cal","run_id":"r1","config":{},"cursor":"","window":{"to":"2026-03-08T00:00:00Z"}}`
+const in = `{"source_id":"src_cal","run_id":"r1","config":{"account":"me@example.com"},"cursor":"","window":{"to":"2026-03-08T00:00:00Z"}}`
 
 // ACT-CAL-05：每个声明的版本都有录制输出，转换结果有断言。
 func TestRecordedSamplesCoverEveryDeclaredVersionAndConvert(t *testing.T) {
@@ -155,19 +155,19 @@ func TestOldUpdatedEventsInWindowAreStillEmitted(t *testing.T) {
 	}
 }
 
-// 只读调用：参数全部按 argv 传递，带只读与免交互开关。
+// 只读调用：只调 calendar events，参数全部按 argv 传递，带免交互、顶层命令限制和账号；gog v0.9 没有 --readonly。
 func TestInvokesToolReadOnlyWithArgv(t *testing.T) {
 	var got []string
-	ex := func(_ context.Context, args ...string) ([]byte, []byte, error) {
+	ex := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
 		if args[0] == "--version" {
 			return []byte("0.9.1"), nil, nil
 		}
 		got = args
 		return []byte(`[]`), nil, nil
 	}
-	input := `{"config":{"calendar_id":"a b; rm -rf /","horizon_days":7},"window":{"to":"2026-03-08T00:00:00Z"}}`
+	input := `{"config":{"account":"me@example.com","calendar_id":"a b; rm -rf /","horizon_days":7},"window":{"to":"2026-03-08T00:00:00Z"}}`
 	code, lines, _ := do(t, ex, input)
-	want := "--readonly --no-input --json calendar events a b; rm -rf / --from 2026-03-08T00:00:00Z --to 2026-03-15T00:00:00Z"
+	want := "--no-input --json --enable-commands=calendar --account=me@example.com calendar events a b; rm -rf / --from 2026-03-08T00:00:00Z --to 2026-03-15T00:00:00Z"
 	if code != ExitOK || strings.Join(got, " ") != want || len(lines) != 1 || lines[0] != `{"cursor":"2026-03-08T00:00:00Z"}` {
 		t.Fatalf("code=%d args=%q lines=%v", code, got, lines)
 	}
@@ -182,7 +182,7 @@ func TestToolFailuresMapToExitCodesWithoutCursor(t *testing.T) {
 		ex   execFn
 		want int
 	}{
-		{"not installed", func(context.Context, ...string) ([]byte, []byte, error) { return nil, nil, exec.ErrNotFound }, ExitAuth},
+		{"not installed", func(context.Context, []string, ...string) ([]byte, []byte, error) { return nil, nil, exec.ErrNotFound }, ExitAuth},
 		{"version too new", fakeTool("v0.10.0", events, nil, ""), ExitAuth},
 		{"version too old", fakeTool("v0.8.9", events, nil, ""), ExitAuth},
 		{"version unrecognised", fakeTool("gog dev", events, nil, ""), ExitAuth},
@@ -230,6 +230,51 @@ func TestRealSubprocessPath(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"id":"u||2026-03-01T00:00:00Z"`) {
 		t.Fatalf("out=%s", out.String())
+	}
+}
+
+// 缺 account 时不调用工具，按配置失败返回 2（needs_input），提示里说明要填什么。
+func TestMissingAccountNeedsInput(t *testing.T) {
+	called := false
+	ex := func(context.Context, []string, ...string) ([]byte, []byte, error) {
+		called = true
+		return nil, nil, nil
+	}
+	code, lines, stderr := do(t, ex, `{"config":{},"window":{"to":"2026-03-08T00:00:00Z"}}`)
+	if code != ExitAuth || len(lines) != 0 || called || !strings.Contains(stderr, "account") {
+		t.Fatalf("code=%d called=%v stderr=%q", code, called, stderr)
+	}
+}
+
+// credentials_path 的 keyring 口令只注入给 gog 子进程（真实子进程路径），父进程同名变量不透传；
+// 成功与凭据文件格式错误时，输出里都不出现口令。
+func TestKeyringFromCredentialsFileReachesOnlyTool(t *testing.T) {
+	const pw = "pw-s3cret-123"
+	dir := t.TempDir()
+	cred := filepath.Join(dir, "keyring.env")
+	if err := os.WriteFile(cred, []byte("# gog keyring\nexport GOG_KEYRING_BACKEND=file\nexport GOG_KEYRING_PASSWORD='"+pw+"'\nOTHER=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n[ \"$GOG_KEYRING_PASSWORD\" = '" + pw + "' ] && [ \"$GOG_KEYRING_BACKEND\" = file ] && [ -z \"$OTHER\" ] || { echo bad keyring env >&2; exit 9; }\n" +
+		"if [ \"$1\" = \"--version\" ]; then echo 'gog v0.9.0'; exit 0; fi\necho '[]'\n"
+	if err := os.WriteFile(filepath.Join(dir, "gog"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":/bin:/usr/bin")
+	t.Setenv("GOG_KEYRING_PASSWORD", "from-parent")
+	input := `{"config":{"account":"me@example.com"},"credentials_path":"` + cred + `","window":{"to":"2026-03-08T00:00:00Z"}}`
+	var out, errb bytes.Buffer
+	if code := Run(context.Background(), strings.NewReader(input), &out, &errb); code != ExitOK || strings.Contains(out.String()+errb.String(), pw) {
+		t.Fatalf("code=%d out=%q stderr=%q", code, out.String(), errb.String())
+	}
+
+	if err := os.WriteFile(cred, []byte("GOG_KEYRING_PASSWORD "+pw+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errb.Reset()
+	if code := Run(context.Background(), strings.NewReader(input), &out, &errb); code != ExitAuth || out.Len() != 0 || strings.Contains(errb.String(), pw) {
+		t.Fatalf("malformed: code=%d out=%q stderr=%q", code, out.String(), errb.String())
 	}
 }
 
