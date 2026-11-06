@@ -670,3 +670,21 @@ func TestAuthRunsGHLoginInCredentialDir(t *testing.T) {
 		t.Errorf("failed login exit %d", code)
 	}
 }
+
+// 内核首次运行的真实 stdin：window.from 为空串（runner.stdinWindow 无 omitempty）。
+func TestFirstRunWithKernelEmptyWindowFrom(t *testing.T) {
+	api := &upstream{}
+	in := `{"source_id":"s","config":{"repos":["o/r"]},"cursor":"","window":{"from":"","to":"2026-11-03T00:00:00Z"},"run_id":"r"}`
+	var out, errb bytes.Buffer
+	if code := Run(context.Background(), strings.NewReader(in), &out, &errb, api, now); code != ExitOK {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if !strings.Contains(api.calls[0], "since=2026-11-03T00:00:00Z") {
+		t.Errorf("empty from should start at window.to: %s", api.calls[0])
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	var last map[string]string
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil || last["cursor"] == "" {
+		t.Fatalf("no cursor in last line %q", lines[len(lines)-1])
+	}
+}
