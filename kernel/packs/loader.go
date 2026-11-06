@@ -209,6 +209,17 @@ func (l *Loader) List() []*Pack {
 	return out
 }
 
+// MaterialKinds 返回生效的包声明的材料 kind 及其默认写入策略（C.2）；材料模块经它读，不依赖本包的类型。
+func (l *Loader) MaterialKinds() map[string]string {
+	out := map[string]string{}
+	for _, p := range l.List() {
+		for _, m := range p.MaterialKinds {
+			out[m.Name] = m.WritePolicy
+		}
+	}
+	return out
+}
+
 // Health 返回仍未修复的拒绝，按包名排序，供健康视图展示。
 func (l *Loader) Health() []Rejection {
 	l.mu.RLock()

@@ -93,6 +93,9 @@ func invalid(why string) error {
 
 func key(pack, group, id string) string { return pack + "/" + group + "/" + id }
 
+// ClockKey 是时钟规则的规则键：自己消费时钟规则的模块（如承接跟进）据它读当前模式。
+func ClockKey(pack, id string) string { return key(pack, groupClock, id) }
+
 // SourceKey 是 accept: auto 的来源规则的规则键，也是它在规则状态里的键。
 func SourceKey(pack, id string) string { return key(pack, groupSource, id) }
 

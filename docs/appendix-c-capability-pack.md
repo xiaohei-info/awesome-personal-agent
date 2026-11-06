@@ -20,7 +20,7 @@ packs/<name>/
 |---|---|---|
 | `name`、`version`、`description` | 是 | 包名、版本、说明 |
 | `kinds[]` | 否 | 注册 kind 与 spec 的 JSON Schema |
-| `material_kinds[]` | 否 | 扩展材料 kind，并给出默认写入策略 |
+| `material_kinds[]` | 否 | 扩展材料 kind，并给出默认写入策略（`direct` 或 `proposed`）；本人在 Web 按 kind 设置的策略优先，未设置时用包声明的，再退到 Web 的总默认。自有型提交与托管型登记都接受这些 kind |
 | `instance_params` | 否 | 实例参数的 JSON Schema |
 | `clock_rules[]` | 否 | 时钟规则 |
 | `source_rules[]` | 否 | 来源到事项规则 |
@@ -47,7 +47,7 @@ kinds:
 | 字段 | 语义 |
 |---|---|
 | `id` | 规则 id，包内唯一 |
-| `type` | `recur`（周期）、`follow_up`（跟进间隔）、`check`（周期检测，如缺规范） |
+| `type` | `recur`（周期）、`follow_up`（跟进间隔）、`check`（周期检测，如缺规范）。`follow_up` 不建周期 Timer：事项进入等待后按 `schedule` 排第一轮，每轮"催"或"再等"之后按同一间隔再排；到期执行 `do[]` 里 `call_agent` 的判断型模板，受规则模式约束（主文档 §7.3） |
 | `schedule` | 固定时长（如 `72h`）或标准 5 段 cron（如 `0 8 * * 1-5`，默认本机时区，`CRON_TZ=<时区> ` 前缀指定时区，见主文档 §6.8）；可由实例参数覆盖。加载器校验：不含 `{instance.…}` 占位符的 schedule 必须是其中之一，含占位符的在创建实例时校验 |
 | `mode` | 初始模式，只能是 `off` 或 `observe`；由实例驱动、只写回自身事项的规则可省略 |
 | `do[]` | 枚举动作，见 C.6 |

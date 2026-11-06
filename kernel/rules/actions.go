@@ -30,6 +30,12 @@ func (e *Engine) handler(name string) (Handler, bool) {
 	return nil, false
 }
 
+// Handles 报告动作是否有处理器（内置或装配处登记）；装配测试据它核对动作枚举都已登记。
+func (e *Engine) Handles(action string) bool {
+	_, ok := e.handler(action)
+	return ok
+}
+
 func str(a map[string]any, k string) string {
 	s, _ := a[k].(string)
 	return s
