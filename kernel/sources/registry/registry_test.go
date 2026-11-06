@@ -59,7 +59,7 @@ func (e *env) bearer(t *testing.T, k auth.Kind) command.Bearer {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return command.Bearer{Auth: e.au, Secret: secret}
+	return command.Bearer{Auth: e.au, Secret: secret, OnBehalfOf: "owner"}
 }
 
 func js(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
@@ -67,7 +67,7 @@ func js(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 type m = map[string]any
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: js(in)})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: js(in), Evidence: "owner said so"})
 }
 
 func (e *env) get(t *testing.T, id string) domain.Source {

@@ -128,43 +128,40 @@ func ask(c *client.Ctx, args []string) error {
 const decideUsage = `apa decide <id> (--option <id> | --text <t>) [--evidence <owner's words>] [--reason <t>]`
 
 func decide(c *client.Ctx, args []string) error {
-	var opt, text, ev, reason string
+	var opt, text, reason string
 	id, err := parse("decide", decideUsage, args, func(fs *flag.FlagSet) {
 		fs.StringVar(&opt, "option", "", "")
 		fs.StringVar(&text, "text", "", "")
-		fs.StringVar(&ev, "evidence", "", "")
 		fs.StringVar(&reason, "reason", "", "")
 	})
 	if err != nil {
 		return err
 	}
-	return post(c, id, "decide", map[string]any{"choice": opt, "text": text, "evidence": ev, "reason": reason})
+	return post(c, id, "decide", map[string]any{"choice": opt, "text": text, "reason": reason})
 }
 
 const acceptUsage = `apa accept <id> [--evidence <owner's words>] [--reason <t>]`
 
 func accept(c *client.Ctx, args []string) error {
-	var ev, reason string
+	var reason string
 	id, err := parse("accept", acceptUsage, args, func(fs *flag.FlagSet) {
-		fs.StringVar(&ev, "evidence", "", "")
 		fs.StringVar(&reason, "reason", "", "")
 	})
 	if err != nil {
 		return err
 	}
-	return post(c, id, "accept", map[string]any{"evidence": ev, "reason": reason})
+	return post(c, id, "accept", map[string]any{"reason": reason})
 }
 
 const dismissUsage = `apa dismiss <id> [--reason <t>] [--evidence <owner's words>]`
 
 func dismiss(c *client.Ctx, args []string) error {
-	var ev, reason string
+	var reason string
 	id, err := parse("dismiss", dismissUsage, args, func(fs *flag.FlagSet) {
-		fs.StringVar(&ev, "evidence", "", "")
 		fs.StringVar(&reason, "reason", "", "")
 	})
 	if err != nil {
 		return err
 	}
-	return post(c, id, "dismiss", map[string]any{"evidence": ev, "reason": reason})
+	return post(c, id, "dismiss", map[string]any{"reason": reason})
 }

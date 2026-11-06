@@ -141,7 +141,7 @@ func Register(x *command.Executor, o Options) error {
 		// ActionChangeSettings：delegate 得 web_only（退出码 20 并留痕），worker/observer 得 4。
 		m.spec(CmdRegisterExec, authz.ActionChangeSettings, opRegister, true),
 		m.spec(CmdUpdateExec, authz.ActionChangeSettings, opUpdate, true),
-		{Name: CmdSetEnabled, Action: authz.ActionManageSource, Object: objectOf,
+		{Name: CmdSetEnabled, Action: authz.ActionManageSource, Proxy: true, Object: objectOf,
 			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var e enabledInput
 				if err := strict(in, &e); err != nil {
@@ -173,7 +173,7 @@ const (
 )
 
 func (m *mod) spec(name string, a authz.Action, o op, exec bool) command.Spec {
-	return command.Spec{Name: name, Action: a, Object: objectOf,
+	return command.Spec{Name: name, Action: a, Proxy: !exec, Object: objectOf,
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			_, _, err := m.plan(tx, o, exec, in)
 			return err

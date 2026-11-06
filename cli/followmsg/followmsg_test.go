@@ -141,7 +141,7 @@ func (w *world) apa(token string, args ...string) result {
 	w.t.Helper()
 	var out, errb bytes.Buffer
 	vars := map[string]string{"APA_URL": w.ts.URL, "APA_TOKEN": token, "APA_HOME": w.t.TempDir()}
-	code := client.Main(args, client.Env{Getenv: func(k string) string { return vars[k] }, UserHome: w.t.TempDir(),
+	code := client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), client.Env{Getenv: func(k string) string { return vars[k] }, UserHome: w.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return result{code, out.String(), errb.String()}
 }

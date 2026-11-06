@@ -128,6 +128,7 @@ func (e *env) do(method, path, body string, mod func(*http.Request)) *httptest.R
 	e.t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:5000"
+	req.Header.Set(core.EvidenceHeader, "owner: go ahead") // delegate 代理写需要证据；其他凭据不读
 	if mod != nil {
 		mod(req)
 	}

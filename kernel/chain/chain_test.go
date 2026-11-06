@@ -3,7 +3,6 @@ package chain
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
@@ -35,8 +33,6 @@ type env struct {
 	t      *testing.T
 	st     *store.Store
 	x      *command.Executor
-	q      *delivery.Queue
-	b      *Breaker
 	au     *auth.Auth
 	clk    *clock.Clock
 	now    time.Time
@@ -47,7 +43,7 @@ func setup(t *testing.T, max int) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, executors.Module, delegation.Module, delivery.Module, Module} {
+		items.Module, executors.Module, delegation.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -69,9 +65,6 @@ func setup(t *testing.T, max int) *env {
 			t.Fatal(err)
 		}
 	}
-	e.q = delivery.New(delivery.Options{Now: func() time.Time { return e.now }})
-	e.b = New(Options{Queue: e.q})
-	e.b.Attach(e.x, st, func(err error) { t.Errorf("chain: %v", err) })
 	if e.clk, err = clock.New(st, items.HandleTimer, func() time.Time { return e.now }); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +82,7 @@ func setup(t *testing.T, max int) *env {
 }
 
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h"}}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) try(id command.Identity, cmd string, in any, chain command.Chain) (command.Result, error) {
@@ -143,33 +136,6 @@ func (e *env) trips() []Trip {
 		e.t.Fatal(err)
 	}
 	return ts
-}
-
-func (e *env) delivery(id string) (domain.Delivery, bool) {
-	e.t.Helper()
-	var d domain.Delivery
-	err := e.st.View(bg, func(tx *store.Tx) (err error) { d, err = e.q.Get(tx, id); return })
-	if err != nil {
-		var de *domain.Error
-		if asNotFound(err, &de) {
-			return d, false
-		}
-		e.t.Fatal(err)
-	}
-	return d, true
-}
-
-func asNotFound(err error, de **domain.Error) bool {
-	e, ok := err.(*domain.Error)
-	*de = e
-	return ok && e.Code == domain.CodeNotFound
-}
-
-func (e *env) sync() {
-	e.t.Helper()
-	if err := e.st.Update(bg, e.b.Sync); err != nil {
-		e.t.Fatal(err)
-	}
 }
 
 // 一轮自动链路：委派（任务委派继承加一）→ 执行者回执（继承加一）→ 父事项回 open。
@@ -226,8 +192,8 @@ func TestDepthRisesAlongDelegationAndReceipt(t *testing.T) {
 	})
 }
 
-// ACT-DEP-02：超阈值只记录不派发，产出健康投递，健康视图能列出熔断。
-func TestTripRecordsOnlyAndProducesHealthDelivery(t *testing.T) {
+// ACT-DEP-02：超阈值只记录不派发，健康视图能列出熔断（健康投递见 kernel/health）。
+func TestTripRecordsOnly(t *testing.T) {
 	e := setup(t, 2)
 	parent := e.newID(e.do(owner, "item.create", map[string]any{"kind": "task", "title": "loop", "phase": "open"}, command.Chain{}))
 	var tripped command.Result
@@ -249,26 +215,13 @@ func TestTripRecordsOnlyAndProducesHealthDelivery(t *testing.T) {
 	if len(ts) != 1 || ts[0].Object != parent || ts[0].Command != "delegate.create" || ts[0].Threshold != 2 || ts[0].Depth <= 2 {
 		t.Fatalf("trips = %+v", ts)
 	}
-	// 提交后立即产出（Attach），且是健康类、Web 路由。
-	d, ok := e.delivery("chain_trip:" + itoa(ts[0].Seq))
-	if !ok || d.Class != domain.DeliveryHealth || d.Item != parent || d.Route != delivery.RouteWeb ||
-		!strings.Contains(d.Content.Summary, "超过阈值 2") || d.Content.WebURL != "/items/"+parent {
-		t.Fatalf("delivery = %+v %v", d, ok)
-	}
-	// 再来一次也只记录；Sync 重复处理不重复投递。
+	// 再来一次也只记录。
 	if _, res := e.round(parent); !res.Suppressed {
 		t.Fatal("still-over-threshold chain dispatched")
 	}
-	e.sync()
-	e.sync()
 	ts = e.trips()
 	if len(ts) != 2 {
 		t.Fatalf("trips = %+v", ts)
-	}
-	var unread []domain.Delivery
-	_ = e.st.View(bg, func(tx *store.Tx) (err error) { unread, err = e.q.Unread(tx); return })
-	if len(unread) != 2 {
-		t.Fatalf("health deliveries = %d, want one per trip", len(unread))
 	}
 	_ = e.st.View(bg, func(tx *store.Tx) error {
 		cs, _ := items.List(tx, items.Filter{Kind: domain.KindDelegation})
@@ -279,9 +232,7 @@ func TestTripRecordsOnlyAndProducesHealthDelivery(t *testing.T) {
 	})
 }
 
-func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
-
-// 后台运行拦下时写的事件（带规则 id，无命令名）同样被识别，投递不带命令式链接。
+// 后台运行拦下时写的事件（带规则 id，无命令名）同样被识别。
 func TestBackgroundShapedTripIsRecognised(t *testing.T) {
 	e := setup(t, 8)
 	it := e.newID(e.do(owner, "item.create", map[string]any{"kind": "task", "title": "t", "phase": "open"}, command.Chain{}))
@@ -301,47 +252,9 @@ func TestBackgroundShapedTripIsRecognised(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	e.sync()
 	ts := e.trips()
 	if len(ts) != 1 || ts[0].Rule != "pack/event_rules/r" || ts[0].Depth != 9 || ts[0].Threshold != 8 {
 		t.Fatalf("trips = %+v", ts)
-	}
-	d, ok := e.delivery("chain_trip:" + itoa(ts[0].Seq))
-	if !ok || d.Class != domain.DeliveryHealth || d.Item != it {
-		t.Fatalf("delivery = %+v %v", d, ok)
-	}
-}
-
-// 没有对象的命令被拦下时 Object 是命令名，投递不带指向它的链接。
-func TestObjectlessCommandTripHasNoItemLink(t *testing.T) {
-	e := setup(t, 8)
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: "item.create", Actor: owner.Actor, Reason: ExceededReason,
-			Payload: json.RawMessage(`{"command":"item.create","chain_depth":9,"threshold":8}`), ChainDepth: 9, At: t0})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	e.sync()
-	ts := e.trips()
-	if len(ts) != 1 || ts[0].Object != "item.create" {
-		t.Fatalf("trips = %+v", ts)
-	}
-	d, ok := e.delivery("chain_trip:" + itoa(ts[0].Seq))
-	if !ok || d.Content.WebURL != "" {
-		t.Fatalf("delivery = %+v %v", d, ok)
-	}
-}
-
-// 路由取策略里健康类的配置。
-func TestHealthRouteFollowsPolicy(t *testing.T) {
-	for in, want := range map[string]string{"": delivery.RouteWeb, "web": delivery.RouteWeb, "inject": delivery.RouteInject,
-		"channel:tg": "channel:tg", "tg": delivery.ChannelRoute("tg")} {
-		p := policy.Default()
-		p.Disturb.Routes = map[string]string{"health": in}
-		if got := route(p); got != want {
-			t.Errorf("route(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 
@@ -405,27 +318,5 @@ func TestCallerCannotWriteDepth(t *testing.T) {
 	}
 	if got := e.depth(id); got != 0 {
 		t.Fatalf("depth = %d", got)
-	}
-}
-
-// 游标：账本回到较早状态时从头重算，投递幂等。
-func TestSyncRestartsWhenLedgerRewinds(t *testing.T) {
-	e := setup(t, 8)
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		if _, err := tx.Exec(`INSERT INTO chain_cursor (id, seq) VALUES (1, 9999) ON CONFLICT(id) DO UPDATE SET seq = excluded.seq`); err != nil {
-			return err
-		}
-		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: "itm_x", Actor: owner.Actor, Reason: ExceededReason,
-			Payload: json.RawMessage(`{"chain_depth":3,"threshold":2}`), ChainDepth: 3, At: t0})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	e.sync()
-	if ts := e.trips(); len(ts) != 1 {
-		t.Fatalf("trips = %+v", ts)
-	}
-	if _, ok := e.delivery("chain_trip:" + itoa(e.trips()[0].Seq)); !ok {
-		t.Fatal("no delivery after cursor reset")
 	}
 }

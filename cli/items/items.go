@@ -125,10 +125,10 @@ func (f *form) body(hint string) (map[string]any, error) {
 	return m, bad
 }
 
-// headers：--version → If-Match，--idempotency-key → Idempotency-Key，--evidence → X-APA-Evidence（update 的体不收 evidence）。
+// headers：--version → If-Match，--idempotency-key → Idempotency-Key（--evidence 是全局参数，由 client 以 X-APA-Evidence 头发出）。
 func (f *form) headers() map[string]string {
 	h := map[string]string{}
-	for flagName, header := range map[string]string{"version": "If-Match", "idempotency-key": "Idempotency-Key", "evidence": "X-APA-Evidence"} {
+	for flagName, header := range map[string]string{"version": "If-Match", "idempotency-key": "Idempotency-Key"} {
 		if p, ok := f.hdr[flagName]; ok && *p != "" {
 			h[header] = *p
 		}
@@ -144,9 +144,10 @@ func add(c *client.Ctx, args []string, name string) error {
 	fields := itemFields
 	if name == "item add" {
 		fields = append([]string{"phase"}, fields...)
-		hint += " [--phase <phase> --evidence <text>]"
+		hint += " [--phase <phase>]"
 	}
-	f, _ := newForm(name, fields, []string{"evidence", "idempotency-key"}, nil)
+	hint += " [--evidence <text>]"
+	f, _ := newForm(name, fields, []string{"idempotency-key"}, nil)
 	if _, err := f.parse(args, false, hint); err != nil {
 		return err
 	}
@@ -154,8 +155,8 @@ func add(c *client.Ctx, args []string, name string) error {
 	if err != nil {
 		return err
 	}
-	if ev := *f.hdr["evidence"]; ev != "" {
-		body["evidence"] = ev // 创建的体收 evidence；头同样有效
+	if c.Evidence != "" {
+		body["evidence"] = c.Evidence // 创建的体收 evidence；头同样有效
 	}
 	return send(c, f, "POST", "/items", body)
 }
@@ -174,9 +175,9 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <text> --version <n>]"
 	case "relate":
 		fields, bools = []string{"to", "type", "reason"}, []string{"remove"}
-		hint = "usage: apa item relate <from> --to <id> --type <parent|blocks|derived_from|supersedes|relates> [--remove] [--reason <r>]"
+		hint = "usage: apa item relate <from> --to <id> --type <parent|blocks|derived_from|supersedes|relates> [--remove] [--reason <r> --evidence <text> --version <n>]"
 	}
-	f, rm := newForm("item "+sub, fields, []string{"evidence", "version", "idempotency-key"}, bools)
+	f, rm := newForm("item "+sub, fields, []string{"version", "idempotency-key"}, bools)
 	id, err := f.parse(args, true, hint)
 	if err != nil {
 		return err
@@ -190,8 +191,8 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	}
 	if sub == "transition" {
 		// 转阶段的体收 evidence（头同样有效）；update 只走头。
-		if ev := f.hdr["evidence"]; *ev != "" {
-			body["evidence"] = *ev
+		if c.Evidence != "" {
+			body["evidence"] = c.Evidence
 		}
 	}
 	if sub == "relate" {

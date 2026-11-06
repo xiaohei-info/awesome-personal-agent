@@ -77,6 +77,7 @@ type Request struct {
 	Action   Action
 	Object   Object
 	Evidence string // delegate 代答与改任意事项必须附本人原话与会话引用
+	Proxy    bool   // 命令登记为代理写操作：delegate 调用时无论动作都须附 on_behalf_of 与证据（§14.3）
 	Owner    string // 本人的执行者 id，指派给本人始终允许
 	WebURL   string // 对象在 Web 的链接，随 20/22 拒绝返回
 	Channel  string // ActionChannelAnswer：渠道
@@ -161,6 +162,9 @@ func Decide(p policy.Policy, r Request) Decision {
 		d = allow // 这些只是 §14.7 的校验点，权限本身由发起它们的命令判定
 	default:
 		return deny(domain.CodeInvalidRequest, "unknown action "+string(r.Action), "see apa guide")
+	}
+	if d.Verdict == Allow && r.Proxy && r.Level == LevelDelegate {
+		d = needEvidence(r)
 	}
 	if d.Verdict != Allow {
 		return d

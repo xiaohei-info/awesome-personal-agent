@@ -193,7 +193,7 @@ func add(kinds []string) command.Spec {
 		return v, decode(in, &v)
 	}
 	return command.Spec{
-		Name: "material.add", Action: authz.ActionReviseMaterial,
+		Name: "material.add", Action: authz.ActionReviseMaterial, Proxy: true,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return authz.Object{Kind: v.Kind, Project: v.Project, Tags: v.Tags}, err

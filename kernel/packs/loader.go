@@ -41,7 +41,7 @@ type Options struct {
 	Builtin fs.FS
 	DataDir string
 	Kinds   KindRegistry
-	// OnReject 在出现新的拒绝时调用一次（同一包的同一内容不重复），由调用方经命令模型产出健康类投递；
+	// OnReject 在出现新的拒绝时调用一次（同一包的同一内容不重复），由调用方记一条 health.alert（kernel/health 据此统一产出健康类投递）；
 	// 加载器自己不写别的模块的数据。
 	OnReject func(Rejection)
 }

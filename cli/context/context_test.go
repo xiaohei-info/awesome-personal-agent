@@ -102,7 +102,7 @@ func (k *kernel) apaTok(token string, vars map[string]string, args ...string) re
 	var out, errb bytes.Buffer
 	env := client.Env{Getenv: func(s string) string { return v[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient}
-	return result{client.Main(args, env), out.String(), errb.String()}
+	return result{client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), env), out.String(), errb.String()}
 }
 
 func (k *kernel) apa(args ...string) result { return k.apaTok(k.tok, nil, args...) }
@@ -132,7 +132,7 @@ func (k *kernel) project(name, host, dir string) string {
 
 func (k *kernel) item(title, projectID string) string {
 	k.t.Helper()
-	args := []string{"item", "add", "--kind", "task", "--title", title, "--reason", "r"}
+	args := []string{"item", "add", "--kind", "task", "--title", title, "--reason", "r", "--evidence", "owner: add it"}
 	if projectID != "" {
 		args = append(args, "--project", projectID)
 	}

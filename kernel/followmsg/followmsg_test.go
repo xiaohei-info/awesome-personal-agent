@@ -180,7 +180,7 @@ func newEnv(t *testing.T) *env {
 	if err := fm.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
-	e.r, err = runner.New(runner.Options{Store: st, Exec: e.x, Delivery: delivery.New(delivery.Options{Now: e.Now}), Layout: lay, Now: e.Now,
+	e.r, err = runner.New(runner.Options{Store: st, Exec: e.x, Layout: lay, Now: e.Now,
 		OnError: func(err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +215,7 @@ func (e *env) issue(name string, s auth.Spec) {
 }
 
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h"}}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
