@@ -3,6 +3,9 @@
 package screening
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -90,6 +93,47 @@ func TestFlowScreening(t *testing.T) {
 		}
 		if !rejected {
 			t.Error("没有退出码 22 的拒绝记录")
+		}
+	})
+
+	t.Run("ACT-SCR-05 初筛中运行凭据仍返回 4", func(t *testing.T) {
+		f.t = t
+		decl, _ := json.Marshal(map[string]any{"harness": "acc-hang", "headless": map[string]any{
+			"command": []string{"env", "STUB_HARNESS_MODE=hang", "STUB_HARNESS_HANG_FOR=3m", f.Bin["stub-harness"], "{prompt}"},
+			"session": map[string]any{"extract": "$.session_id"},
+			"access":  map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}}}})
+		if r := f.Apa(f.DEL, string(decl), "declare", "-", "--evidence", "声明挂住的 harness 以取得运行凭据"); r.Code != 0 {
+			t.Fatalf("apa declare acc-hang: %d %s%s", r.Code, r.Stdout, r.Stderr)
+		}
+		f.webOK("POST", "/settings/declarations/acc-hang/1/confirm", "", 200)
+		f.webOK("PUT", "/settings/policy", `{"default_harness":"acc-hang"}`, 200)
+		f.webOK("PUT", "/settings/access-limits", `{"permission_cap":{"default":"edit","by_harness":{}}}`, 200)
+		f.webOK("PATCH", "/rules/background-run%2Fevent_rules%2Fhandle-labelled/mode", `{"mode":"auto"}`, 200)
+		out := f.apa(f.OBS, 0, "propose", "--kind", "task", "--title", "bg", "--project", f.Projects["acc-open"], "--tags", "agent-ok").Stdout
+		f.webOK("POST", "/items/"+out[strings.Index(out, "itm_"):][:20]+"/accept", `{}`, 200)
+		var token string
+		stop := time.Now().Add(20 * time.Second)
+		for token == "" && time.Now().Before(stop) {
+			envs, _ := filepath.Glob(filepath.Join(f.Home, "runs", "*", "stub-harness-env.json"))
+			for _, p := range envs {
+				var e map[string]string
+				if b, err := os.ReadFile(p); err == nil && json.Unmarshal(b, &e) == nil {
+					token = e["APA_TOKEN"]
+					if token == "" && e["APA_RUN_CREDENTIAL_FILE"] != "" {
+						b, _ := os.ReadFile(e["APA_RUN_CREDENTIAL_FILE"])
+						token = strings.TrimSpace(string(b))
+					}
+				}
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		if token == "" {
+			t.Fatal("后台运行没有拿到运行凭据")
+		}
+		eq(t, "前置：事项仍在初筛中", f.pending(a), true)
+		f.apa(token, 4, "decide", a, "--option", "A", "--evidence", "x")
+		if f.resolution(a) != nil {
+			t.Error("运行凭据的决策不应生效")
 		}
 	})
 
@@ -270,24 +314,4 @@ func TestFlowScreening(t *testing.T) {
 		}
 		eq(t, "阶段", f.phase(k), "needs_input")
 	})
-}
-
-// TestACTSCR05RunCredential 对应 ACT-SCR-05：初筛中由后台运行的运行凭据运行 `apa decide`，应返回 4。
-// 运行凭据只在内核拉起后台运行时签发（POST /runs/{id}/credential 或运行环境）。当前 apa serve 只登记了
-// call_agent，start_background_run 没有处理器（规则触发后记 health.alert "has no registered handler"），
-// 所以真实二进制里没有任何办法拿到运行凭据。这是 kernel/background 未装配的实现缺陷，不在本节点范围，
-// 因此让本测试失败（fail-closed）而不是跳过或用替身伪造运行凭据；装配完成后删除下面的 Fatal 并补全断言。
-func TestACTSCR05RunCredential(t *testing.T) {
-	f := setup(t)
-	f.webOK("PUT", "/settings/policy", `{"default_harness":"acc-stub"}`, 200)
-	f.webOK("PUT", "/settings/access-limits", `{"permission_cap":{"default":"edit","by_harness":{}}}`, 200)
-	f.webOK("PATCH", "/rules/background-run%2Fevent_rules%2Fhandle-labelled/mode", `{"mode":"auto"}`, 200)
-	out := f.apa(f.OBS, 0, "propose", "--kind", "task", "--title", "bg", "--project", f.Projects["acc-open"], "--tags", "agent-ok").Stdout
-	id := out[strings.Index(out, "itm_"):][:20]
-	f.webOK("POST", "/items/"+id+"/accept", `{}`, 200)
-	time.Sleep(2 * time.Second)
-	if runs := f.apa(f.OBS, 0, "run", "list").Stdout; strings.Contains(runs, id) {
-		t.Fatalf("后台运行已能拉起，请补全 ACT-SCR-05 断言: %s", runs)
-	}
-	t.Fatal("ACT-SCR-05 无法验证：apa serve 未登记 start_background_run，真实二进制拿不到运行凭据；上游装配修复前本 gate 保持红色（见函数注释）")
 }
