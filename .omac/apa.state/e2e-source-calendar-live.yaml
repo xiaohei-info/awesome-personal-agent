@@ -1,6 +1,6 @@
-# sha256: f0811d776bc2a8d326132e21a8699e80221cd91ed7bbba9eeadcc854cad82905
+# sha256: dbf046036f2c1cdaa6004e3603b5dc38a2854a72bff869a1feef9417ec87e65a
 work_item_id: 01a1b076-1f2c-74dd-859f-6168f5535ddd
-status: in_progress
+status: in_review
 recovery_marker: true
 retry_note: '上游已修：PR #200（gog 认证/去 --readonly）和 PR #201（同一来源对象的更新经关联键 UID|RECURRENCE-ID
   写回原事项，不再新建；新建日程判为 event.created）。上轮你写的 tests/live/calendar/calendar_live_test.go
