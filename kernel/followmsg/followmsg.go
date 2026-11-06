@@ -1,5 +1,5 @@
 // Package followmsg 是跟进消息归属（设计 §9.4）：事项已委派后，PR 评论、群内追问等后续来源事件
-// 经关联键回到原事项，交给负责的执行者，而不是再生成一个重复事项。
+// 经关联键回到原事项，交给负责的执行者；同一来源对象的更新写回它建出的事项。两者都不再生成重复事项。
 //
 //	Intercept       入站流水线在规则与判断之前调用：按关联键挂靠、或不猜并给出关联线索
 //	followmsg.attach / ack / handback / release   写命令，状态在来源事件的 attach_state 上
@@ -8,7 +8,9 @@
 // attach_state：pending → forwarded → processed；交回转 handed_back，关闭退回转 released，
 // 后两者让事件重新进入判断流（disposition 回 pending），且不再被挂靠。
 //
-//   - 挂靠只认 delegation 登记的关联键（回执里的 PR），命中恰好一个"已委派的未关闭事项"才挂靠；
+//   - 先看 delegation 登记的关联键（回执里的 PR），命中恰好一个"已委派的未关闭事项"就挂靠待转发；
+//     关联键都未经委派登记时，再看同一去重域里带同一关联键的来源事件建出的事项（含 proposed），
+//     命中恰好一个未关闭的就经 item.update 刷新它，消息直接记为 processed（不转发、不交回、关闭时不退回）。
 //     只命中已关闭、或命中多个未关闭事项时不猜，走普通判断流并附线索。
 //   - 挂靠本身不拉起运行：本包不起运行、不调模型；挂靠命令继承所挂事项的链路深度，不加一。
 //   - 回执确认游标（delegate.report 的 cursor）之前已转发的消息算已处理；游标是消息的落盘序号。
@@ -101,8 +103,13 @@ func closed(it domain.Item) bool {
 	return it.Phase == domain.PhaseDone || it.Phase == domain.PhaseDropped
 }
 
-// live：已委派的未关闭事项，才是挂靠的对象。
+// live：已委派的未关闭事项，才是挂靠待转发的对象。
 func live(it domain.Item) bool { return it.Kind == domain.KindDelegation && !closed(it) }
+
+func notFound(err error) bool {
+	var de *domain.Error
+	return errors.As(err, &de) && de.Code == domain.CodeNotFound
+}
 
 func unprocessed(a runner.Attachment) bool {
 	return a.AttachState == runner.AttachPending || a.AttachState == runner.AttachForwarded
@@ -110,61 +117,116 @@ func unprocessed(a runner.Attachment) bool {
 
 // ---- 挂靠 ----
 
-// resolve 按关联键找事项。attach 非空表示恰好命中一个未关闭的委派事项；否则 hint 说明为什么不猜（可为空）。
-func resolve(tx *store.Tx, ev domain.SourceEvent) (attach, hint string, err error) {
+// resolve 按关联键找事项。attach 非空表示恰好命中一个未关闭事项：update 为假是委派事项（挂靠待转发），
+// 为真是同一来源对象建出的事项（用新事件刷新）。否则 hint 说明为什么不猜（可为空）。
+// 已删除的事项按不存在处理。
+func resolve(tx *store.Tx, ev domain.SourceEvent) (attach string, update bool, hint string, err error) {
 	if ev.AttachState == runner.AttachHandedBack || ev.AttachState == runner.AttachReleased {
-		return "", fmt.Sprintf("correlation: message was %s from item %s and is not attached again", ev.AttachState, ev.Item), nil
+		return "", false, fmt.Sprintf("correlation: message was %s from item %s and is not attached again", ev.AttachState, ev.Item), nil
 	}
 	var open, shut []string
 	seen := map[string]bool{}
+	classify := func(ids []string, ok func(domain.Item) bool) error {
+		for _, id := range ids {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			it, err := items.Get(tx, id)
+			switch {
+			case notFound(err):
+			case err != nil:
+				return err
+			case ok(it):
+				open = append(open, id)
+			default:
+				shut = append(shut, id)
+			}
+		}
+		return nil
+	}
 	for _, k := range ev.CorrelationKeys {
 		id, ok, err := delegation.Lookup(tx, k)
 		if err != nil {
-			return "", "", err
+			return "", false, "", err
 		}
-		if !ok || seen[id] {
-			continue
+		if ok {
+			if err := classify([]string{id}, live); err != nil {
+				return "", false, "", err
+			}
 		}
-		seen[id] = true
-		it, err := items.Get(tx, id)
-		if err != nil {
-			return "", "", err
+	}
+	// 关联键已由委派登记的（事项未关闭或已关闭）只按委派语义；都未登记才看同一来源对象建出的事项。
+	if len(open)+len(shut) == 0 {
+		for _, k := range ev.CorrelationKeys {
+			ids, err := runner.Origins(tx, ev.DedupeKey.Domain, k)
+			if err != nil {
+				return "", false, "", err
+			}
+			if err := classify(ids, func(it domain.Item) bool { return !closed(it) }); err != nil {
+				return "", false, "", err
+			}
 		}
-		if live(it) {
-			open = append(open, id)
-		} else {
-			shut = append(shut, id)
-		}
+		update = true
 	}
 	switch {
 	case len(open) == 1:
-		return open[0], "", nil
+		return open[0], update, "", nil
 	case len(open) > 1:
-		return "", "correlation: matches several open items (" + strings.Join(open, ", ") + "), not guessing", nil
+		return "", false, "correlation: matches several open items (" + strings.Join(open, ", ") + "), not guessing", nil
 	case len(shut) > 0:
-		return "", "correlation: matches only closed items (" + strings.Join(shut, ", ") + "), not reopening", nil
+		return "", false, "correlation: matches only closed items (" + strings.Join(shut, ", ") + "), not reopening", nil
 	}
-	return "", "", nil
+	return "", false, "", nil
 }
 
 // Intercept 满足 inbound.Intercept。
 func (s *Service) Intercept(ctx context.Context, ev domain.SourceEvent) (bool, string, error) {
-	var item, hint string
-	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { item, hint, err = resolve(tx, ev); return }); err != nil {
+	var (
+		item, hint string
+		update     bool
+	)
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { item, update, hint, err = resolve(tx, ev); return }); err != nil {
 		return false, "", err
 	}
 	if item == "" {
 		return false, hint, nil
 	}
-	in, _ := json.Marshal(attachIn{Event: ev.ID, Item: item})
+	if update {
+		if err := s.refresh(ctx, item, ev); err != nil {
+			return false, "", err
+		}
+	}
+	in, _ := json.Marshal(attachIn{Event: ev.ID, Item: item, Applied: update})
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: CmdAttach, Input: in, IdemKey: "followmsg:attach:" + ev.ID,
 		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Evidence: "followmsg", Owner: s.o.Owner})
 	return err == nil, "", err
 }
 
+// refresh 用同一来源对象的新事件刷新它建出的事项（字段同入站建事项时的映射，只写非空的）。
+// 这些事项没有执行者，写入以本人登记该来源为依据，代本人执行（同入站规则的自动接受）。
+func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEvent) error {
+	patch := map[string]string{"id": item, "reason": "source object updated by " + ev.Type + " " + ev.ID}
+	for k, v := range map[string]string{"title": ev.Subject, "summary": ev.Summary, "body": ev.Detail} {
+		if v != "" {
+			patch[k] = v
+		}
+	}
+	if _, ok := patch["title"]; !ok {
+		patch["title"] = ev.Type
+	}
+	in, _ := json.Marshal(patch)
+	id := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: systemPrinc, Via: domain.ViaSource, OnBehalfOf: s.o.Owner}, Level: authz.LevelDelegate}
+	_, err := s.o.Exec.Do(ctx, command.Request{Identity: id, Command: "item.update", Input: in, IdemKey: "followmsg:update:" + ev.ID,
+		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Evidence: "followmsg", Owner: s.o.Owner})
+	return err
+}
+
 type attachIn struct {
 	Event string `json:"event"`
 	Item  string `json:"item"`
+	// Applied 表示这是同一来源对象的更新，已写回事项：消息直接记为 processed。
+	Applied bool `json:"applied,omitempty"`
 }
 
 type ackIn struct {
@@ -293,15 +355,26 @@ func attach() command.Spec {
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
-			_, err := liveItem(tx, v.Item)
+			if !v.Applied {
+				_, err := liveItem(tx, v.Item)
+				return err
+			}
+			it, err := items.Get(tx, v.Item)
+			if err == nil && closed(it) {
+				err = conflict("item "+v.Item+" is closed", "re-read the item")
+			}
 			return err
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
-			if err := runner.SetAttachState(c.Tx, v.Event, runner.AttachPending, v.Item); err != nil {
+			state, reason := runner.AttachPending, "follow-up message attached"
+			if v.Applied {
+				state, reason = runner.AttachProcessed, "source object update applied to the item"
+			}
+			if err := runner.SetAttachState(c.Tx, v.Event, state, v.Item); err != nil {
 				return nil, err
 			}
-			return nil, emit(c, EvAttached, v.Item, "follow-up message attached", map[string]string{"message": v.Event})
+			return nil, emit(c, EvAttached, v.Item, reason, map[string]string{"message": v.Event})
 		}}
 }
 

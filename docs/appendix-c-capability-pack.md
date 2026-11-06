@@ -56,7 +56,7 @@ kinds:
 
 能力包只声明来源事件怎样变成事项，不登记来源：来源的命令、周期、超时、`credentials_path` 都在 Source 登记里（主文档 §6.10），由内核经 stdin 交给来源进程（主文档 §9.2），能力包不能声明或改写。
 
-**source_rules**：确定性规则，能判定的不调模型。
+**source_rules**：确定性规则，能判定的不调模型。规则只处理没有被跟进消息归属挂靠的事件：同一来源对象的更新（如日程改标题）在规则之前写回它建出、仍未关闭的事项（主文档 §9.4），规则不必为更新写特例。
 
 | 字段 | 语义 |
 |---|---|
@@ -65,7 +65,7 @@ kinds:
 | `kind` | 直接映射的 kind |
 | `project_by` | `repo_remote`（按仓库远程地址归项目）、`fixed:<项目>`、`none` |
 | `then` | `proposed`（默认）、`ignore`、`judge`（交判断型） |
-| `correlation_keys` | 从事件字段得到关联键的模板；来源程序已给出时可省略 |
+| `correlation_keys` | 从事件字段得到关联键的模板；来源程序已给出时可省略。关联键标识来源对象，同一对象的各版本应得到同一个键 |
 | `accept` | 接受方式，默认 `manual`。声明 `auto` 时必须带 `mode` |
 | `mode` | 只有 `accept: auto` 的规则需要。初始只能是 `off` 或 `observe`；`observe` 时事项仍以 `proposed` 进入，只记录"本来会自动接受"，在 Web 切 `auto` 后才生效 |
 
