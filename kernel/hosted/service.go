@@ -72,6 +72,9 @@ type Service struct {
 	opt Options
 	mu  sync.Mutex
 	hit map[string]cached
+	// pending 是已入队、结果还没被 OnResult 处理完的材料。Run 在 OnResult 之前就已是终态，
+	// 这段空窗里账本不报在途、缓存也还没有，不拦住的话轮询会多拉起一次读取。
+	pending map[string]bool
 }
 
 // New 创建服务。Reader 与 OnError 必填。
@@ -94,7 +97,7 @@ func New(x *command.Executor, o Options) (*Service, error) {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	s := &Service{x: x, opt: o, hit: map[string]cached{}}
+	s := &Service{x: x, opt: o, hit: map[string]cached{}, pending: map[string]bool{}}
 	x.OnCommit(s.onCommit)
 	return s, nil
 }
@@ -237,22 +240,27 @@ func (s *Service) lookup(e Entry) (View, bool) {
 
 func (s *Service) read(ctx context.Context, id string, force bool) (View, error) {
 	var v View
+	var queued bool
 	err := s.x.Store().Update(ctx, func(tx *store.Tx) error {
 		e, err := Get(tx, id)
 		if err != nil {
 			return err
 		}
 		v = View{Entry: e, Status: StatusReading}
+		s.mu.Lock()
+		applying := s.pending[id] // 必须先于查缓存：OnResult 先放缓存、后清 pending
 		if force {
-			s.mu.Lock()
 			delete(s.hit, id) // 刷新信号：旧结果作废，页面轮询到新结果前显示"读取中"
-			s.mu.Unlock()
-		} else if c, ok := s.lookup(e); ok {
-			v = c
-			return nil
+		}
+		s.mu.Unlock()
+		if !force {
+			if c, ok := s.lookup(e); ok {
+				v = c
+				return nil
+			}
 		}
 		busy, err := proc.InFlight(tx, id)
-		if err != nil || busy {
+		if err != nil || busy || applying {
 			return err
 		}
 		co, err := s.checkout(tx, e)
@@ -265,8 +273,19 @@ func (s *Service) read(ctx context.Context, id string, force bool) (View, error)
 			Spec:     proc.Spec{Command: s.opt.Reader, Stdin: stdin},
 			Explicit: !force, // 本人在 Web 打开是显式读取，在短任务队列内优先（§6.9）；登记、回执、agents check 的刷新不是
 		}, s.opt.Now())
+		if err == nil {
+			s.mu.Lock() // 在事务内置位：提交后 Run 才可能被派发，OnResult 不会先于它清除
+			s.pending[id] = true
+			s.mu.Unlock()
+			queued = true
+		}
 		return err
 	})
+	if err != nil && queued { // 提交失败：没有 Run，不能留着 pending
+		s.mu.Lock()
+		delete(s.pending, id)
+		s.mu.Unlock()
+	}
 	if err == nil && v.Status == StatusReading && s.opt.Kick != nil {
 		s.opt.Kick()
 	}
@@ -302,6 +321,11 @@ func (s *Service) OnResult(res proc.Result) {
 		return
 	}
 	id := res.Run.Target
+	defer func() { // 放在缓存写入之后（defer 最后执行），见 pending 注释
+		s.mu.Lock()
+		delete(s.pending, id)
+		s.mu.Unlock()
+	}()
 	var e Entry
 	if err := s.x.Store().View(context.Background(), func(tx *store.Tx) (err error) { e, err = Get(tx, id); return }); err != nil {
 		s.opt.OnError(id, err)
