@@ -29,6 +29,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/hosted"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -42,7 +43,7 @@ const (
 	MaxBlob int64 = 32 << 20
 )
 
-// Routes 返回材料路由分组，交给 core.Deps.Groups。x 须已登记 materials、hosted、search、blobs 的命令；
+// Routes 返回材料路由分组，交给 core.Deps.Groups。x 须已登记 materials、hosted、blobs 的命令；
 // hs 是托管型读取与修改服务（生产装配必须给；nil 时不挂 /content 与 /changes）。
 func Routes(st *store.Store, x *command.Executor, hs *hosted.Service) core.RouteGroup {
 	h := &handlers{st: st, x: x, hs: hs}
@@ -177,7 +178,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"materials": ms})
 }
 
-// get 返回登记，加上自有型的修订（默认当前修订，?rev= 指定）或托管型的登记详情。
+// get 返回登记与关联事项（relations），加上自有型的修订（默认当前修订，?rev= 指定）或托管型的登记详情。
 func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if err := readable(p); err != nil {
 		return err
@@ -190,6 +191,10 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 			return err
 		}
 		out["material"] = m
+		// 事项与材料的类型化关系（item.relate 以材料为终点的边），材料一侧同样可见。
+		if out["relations"], err = items.Relations(tx, id); err != nil {
+			return err
+		}
 		switch {
 		case m.Location != "":
 			e, err := hosted.Get(tx, id)

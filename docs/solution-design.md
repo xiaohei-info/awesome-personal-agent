@@ -558,7 +558,7 @@ CLI 是同一命令模型的薄客户端，面向 agent 设计：
 | `screening_pending` | web_only 初筛未返回时为真，内核维护，只读（§14.4） |
 | `resolution` | 决定结果：选项或文本、`resolved_via`（`web`、`chat`、渠道名、`timeout`）、回答人、证据 |
 
-**关系（relation）**：事项之间是带类型的边，类型字符串开放。内置 `parent`、`blocks`、`derived_from`、`supersedes`、`relates`。事项与材料之间同样用类型化关系：依据、产出、纪要。
+**关系（relation）**：事项之间是带类型的边，类型字符串开放。内置 `parent`、`blocks`、`derived_from`、`supersedes`、`relates`。事项与材料之间同样用类型化关系，内置 `basis`（依据）、`output`（产出）、`minutes`（纪要）：边从事项指向材料，经同一个 `item.relate` 建立和移除，记事项的 `item.updated`，事项与材料两侧都能读到；材料不能作 `parent` 的终点。
 
 **kind 的行为差异只有两处**：`delegation` 进入 `done` 必须带证据（内核只校验存在，真实性由可选的核验负责）；`brief` 由简报包写入并按项目分节展示。
 

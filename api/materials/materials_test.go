@@ -67,7 +67,7 @@ func setup(t *testing.T) *env {
 	x := command.New(st, nil)
 	for _, err := range []error{
 		projects.Register(x), items.Register(x, items.NewKinds()), executors.Register(x, executors.Options{Owner: "owner"}),
-		km.Register(x), hosted.Register(x), search.Register(x), blobs.Register(x, blobDir),
+		km.Register(x), hosted.Register(x), blobs.Register(x, blobDir),
 		delegation.Register(x, delegation.Options{Owner: "owner", OnError: func(_ command.Commit, err error) { t.Error(err) }}),
 	} {
 		if err != nil {

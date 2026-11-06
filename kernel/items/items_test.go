@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -48,7 +50,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, materials.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -932,6 +934,38 @@ func TestRelate(t *testing.T) {
 	if _, err := e.do(observer, "item.relate", map[string]any{"from": a, "to": b, "type": "relates"}); exit(err) != domain.ExitPermissionDenied {
 		t.Fatalf("observer relate: %v", err)
 	}
+	e.verify(t)
+}
+
+// §6.3：事项与材料用类型化关系关联，经 item.relate（记 item.updated），两边都能从关系表读到；材料不能当父事项。
+func TestRelateMaterial(t *testing.T) {
+	e := setup(t)
+	if err := materials.Register(e.x); err != nil {
+		t.Fatal(err)
+	}
+	p := e.project(t, nil)
+	var m materials.Result
+	_ = json.Unmarshal(e.must(t, owner, "material.commit", map[string]any{"project": p, "kind": "minutes", "title": "纪要", "content": "x", "reason": "r"}).Value, &m)
+	a := e.create(t, owner, map[string]any{"phase": "open", "project": p})
+	e.must(t, owner, "item.relate", map[string]any{"from": a, "to": m.Material, "type": domain.RelBasis, "reason": "依据"})
+	if evs := e.events(t); evs[len(evs)-1].Type != domain.EvItemUpdated || evs[len(evs)-1].Object != a {
+		t.Fatalf("relate must record item.updated on the item: %+v", evs[len(evs)-1])
+	}
+	want := []domain.Relation{{Type: domain.RelBasis, From: a, To: m.Material}}
+	for _, id := range []string{a, m.Material} {
+		var rels []domain.Relation
+		_ = e.st.View(bg, func(tx *store.Tx) (err error) { rels, err = Relations(tx, id); return })
+		if !reflect.DeepEqual(rels, want) {
+			t.Fatalf("relations of %s: %+v", id, rels)
+		}
+	}
+	if _, err := e.do(owner, "item.relate", map[string]any{"from": a, "to": m.Material, "type": domain.RelParent}); exit(err) != domain.ExitUsage {
+		t.Fatalf("material as parent: %v", err)
+	}
+	if _, err := e.do(owner, "item.relate", map[string]any{"from": a, "to": "mat_nope", "type": domain.RelBasis}); exit(err) != domain.ExitNotFound {
+		t.Fatalf("unknown target: %v", err)
+	}
+	e.must(t, owner, "item.relate", map[string]any{"from": a, "to": m.Material, "type": domain.RelBasis, "remove": true})
 	e.verify(t)
 }
 

@@ -69,7 +69,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	kscreening "github.com/xiaohei-info/awesome-personal-agent/kernel/screening"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -247,7 +246,6 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		kmaterials.Register(x),
 		kpurge.Register(x, l.Blobs),
 		hosted.Register(x),
-		search.Register(x),
 		k.fu.Register(),
 	); err != nil {
 		return nil, err
