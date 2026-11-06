@@ -284,6 +284,8 @@ func TestFlowSourceGitHub(t *testing.T) {
 		if !l.show().Enabled {
 			t.Fatal("来源应为 enabled")
 		}
+		// 首次拉取只记游标起点；等它成功后再建 Issue，否则先建的 Issue 会落在起点之前被漏掉。
+		l.until("首次拉取成功", func() bool { st := l.show(); return st.Cursor != "" && st.Stats.LastError == "" })
 		if fi, err := os.Stat(l.cred); err != nil || !fi.IsDir() {
 			t.Fatalf("凭据目录不存在: %v", err)
 		}
@@ -391,7 +393,7 @@ func TestFlowSourceGitHub(t *testing.T) {
 		if p := str(l.item(acceptedItem), "phase"); p != "open" {
 			t.Fatalf("接受后应为 open，实际 %s", p)
 		}
-		r := l.Apa(l.WRK, "", "ask", acceptedItem, "--question", "这个 Issue 先处理哪部分", "--option", "A=先排查", "--option", "B=先回复", "--recommend", "A", "--free-text")
+		r := l.Apa(l.DEL, "", "ask", acceptedItem, "--evidence", "请本人决定", "--question", "这个 Issue 先处理哪部分", "--option", "A=先排查", "--option", "B=先回复", "--next", "A=done", "--recommend", "A", "--free-text")
 		if r.Code != 0 {
 			t.Fatalf("apa ask: %d %s %s", r.Code, r.Stdout, r.Stderr)
 		}
@@ -464,7 +466,10 @@ func TestFlowSourceGitHub(t *testing.T) {
 		stub.Reset()
 		stub.SetDefault(modelstub.Reply{Content: `{"choice":"task","confidence":0.95}`})
 		title, _ := l.newIssue("authfail")
-		l.until("生成 needs_input", func() bool { return l.show().Stats.NeedsInputItem != "" })
+		l.until("以退出码 2 失败并生成 needs_input", func() bool {
+			st := l.show()
+			return st.Stats.NeedsInputItem != "" && strings.Contains(st.Stats.LastError, "exit status 2")
+		})
 		st := l.show()
 		if !strings.Contains(st.Stats.LastError, "exit status 2") {
 			t.Errorf("拉取程序应以退出码 2 失败: last_error=%q", st.Stats.LastError)
