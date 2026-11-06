@@ -473,6 +473,13 @@ func TestHostedMaterial(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// 材料一侧看得到带类型的关联：修改的父事项以 output 关联材料。
+	var linked struct{ Relations []domain.Relation }
+	into(t, e.do("obs", "GET", "/v1/materials/"+id, ""), &linked)
+	if len(linked.Relations) != 1 || linked.Relations[0] != (domain.Relation{Type: domain.RelOutput, From: ch.Parent, To: id}) {
+		t.Fatalf("material relations: %+v", linked.Relations)
+	}
+
 	// 请求元数据：同键重试重放首次的父事项与子事项，不再建第二套；delegate 附本人原话、不带 parent 也能发起。
 	k1 := e.do("web", "POST", changes, `{"assignee":"other.cli","request":"again"}`, IdempotencyHeader, "k-change")
 	k2 := e.do("web", "POST", changes, `{"assignee":"other.cli","request":"again"}`, IdempotencyHeader, "k-change")
