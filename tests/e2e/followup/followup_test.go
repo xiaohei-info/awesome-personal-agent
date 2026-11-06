@@ -122,8 +122,31 @@ func (f *fx) phase(item string) string { s, _ := f.show(item)["phase"].(string);
 
 func (f *fx) unread() string { return f.webOK("GET", "/deliveries/unread", "", 200) }
 
+// modelSignalOK 读 apa health 里 model_unavailable 信号是否正常。
+func (f *fx) modelSignalOK() bool {
+	var out struct {
+		Signals []struct {
+			ID string `json:"id"`
+			OK bool   `json:"ok"`
+		} `json:"signals"`
+	}
+	if err := json.Unmarshal([]byte(f.apa(f.OBS, 0, "health").Stdout), &out); err != nil {
+		f.t.Fatal(err)
+	}
+	for _, s := range out.Signals {
+		if s.ID == "model_unavailable" {
+			return s.OK
+		}
+	}
+	f.t.Fatal("健康视图没有 model_unavailable 信号")
+	return false
+}
+
 // healthDelivery 判断 Web 未读里是否有该事项的 class=health 投递。
-func (f *fx) healthDelivery(item string) bool {
+func (f *fx) healthDelivery(item string) bool { return f.deliveryOf(item, "health") }
+
+// deliveryOf 判断 Web 未读里是否有该事项指定 class 的投递。
+func (f *fx) deliveryOf(item, class string) bool {
 	var out struct {
 		Deliveries []struct{ Class, Item string }
 	}
@@ -131,7 +154,7 @@ func (f *fx) healthDelivery(item string) bool {
 		f.t.Fatal(err)
 	}
 	for _, d := range out.Deliveries {
-		if d.Class == "health" && d.Item == item {
+		if d.Class == class && d.Item == item {
 			return true
 		}
 	}
@@ -259,20 +282,25 @@ func TestFlowFollowUpModelDown(t *testing.T) {
 	if got := f.phase(item); got != "waiting" {
 		t.Errorf("事项阶段 = %s，期望 waiting（不丢）", got)
 	}
-	if strings.Contains(f.unread(), item) {
+	if f.deliveryOf(item, "reminder") {
 		t.Error("模型不可用时不应有提醒")
 	}
-	// 健康信号：跟进失败记 health.alert，触达统一产出一条 class=health 的投递；用户可见的是 Web 未读里的这条（web_url 指向健康视图）。
-	// 解读：验收文档 ACT-FUP-06 的"健康视图有信号"在此取 Web 未读里的健康类投递；GET /v1/health 目前不统计跟进失败（见 PR 说明）。
-	if !f.until(60*time.Second, func() bool { return f.healthDelivery(item) }) {
-		t.Errorf("模型不可用时 Web 未读没有该事项的健康类投递: %s", f.unread())
+	// 健康视图（apa health）：跟进判断失败进"模型不可用"，整体不再是 healthy；健康类投递同时出现在 Web 未读。
+	if !f.until(60*time.Second, func() bool { return !f.modelSignalOK() }) {
+		t.Errorf("模型不可用时健康视图没有信号: %s", f.apa(f.OBS, 0, "health").Stdout)
 	}
-	if f.events(item, "health.alert") == 0 {
-		t.Error("没有 health.alert 审计事件")
+	if h := f.apa(f.OBS, 0, "health").Stdout; !strings.Contains(h, `"healthy":false`) {
+		t.Errorf("健康视图仍报 healthy: %s", h)
+	}
+	if !f.until(30*time.Second, func() bool { return f.healthDelivery(item) }) {
+		t.Errorf("Web 未读没有该事项的健康类投递: %s", f.unread())
 	}
 
 	f.ModelStub.SetDefault(modelstub.Reply{Content: `{"choice":"remind","confidence":0.9}`})
-	if !f.until(3*time.Minute, func() bool { return strings.Contains(f.unread(), item) }) {
+	if !f.until(3*time.Minute, func() bool { return f.deliveryOf(item, "reminder") }) {
 		t.Fatalf("恢复后没有得到判断结果（提醒）: %s", f.unread())
+	}
+	if !f.until(30*time.Second, f.modelSignalOK) {
+		t.Errorf("恢复后健康视图的模型不可用信号没有清除: item=%s %s", item, f.apa(f.OBS, 0, "health").Stdout)
 	}
 }
