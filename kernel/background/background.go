@@ -225,7 +225,7 @@ func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err
 		if f.item, err = items.Get(tx, c.Item.ID); err != nil {
 			return err
 		}
-		if f.busy, err = s.busy(tx, f.item.ID); err != nil {
+		if f.busy, err = InFlight(tx, f.item.ID); err != nil {
 			return err
 		}
 		if f.item.Project != "" {
@@ -255,8 +255,9 @@ func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err
 	return f, err
 }
 
-// busy：触发事项自己或由它启动的运行目标（task 运行者的子事项）有排队或运行中的 Run（排队中的算在途）。
-func (s *Service) busy(tx *store.Tx, item string) (bool, error) {
+// InFlight：事项自己或由它启动的运行目标（task 运行者的子事项）有排队或运行中的 Run（排队中的算在途，§7.7）。
+// 拉起前的"同一事项只有一个运行"与 `apa context` 的在途运行提示用同一口径。
+func InFlight(tx *store.Tx, item string) (bool, error) {
 	if b, err := proc.InFlight(tx, item); err != nil || b {
 		return b, err
 	}

@@ -3,7 +3,7 @@
 //
 // 本包只读账本（事项、项目、材料登记、事件、策略），自己写的只有会话游标；挂靠消息经 followmsg.Forward 推进。内容只带事项 id、
 // 标题、阶段、截止、建议动作，材料只带标题与变更摘要，不带事项正文、材料正文与来源正文；挂靠消息是唯一带外部正文的部分，由 kernel/allowlist 过滤（§14.6）。
-// 投递记录、在途运行提示由各自模块接入，不在这里。
+// 投递记录与在途运行提示读各自模块的公开查询（kernel/delivery、kernel/background），口径只在那里定义。
 package kcontext
 
 import (
@@ -16,6 +16,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/background"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -80,6 +81,8 @@ type Entry struct {
 	Phase    domain.Phase `json:"phase"`
 	Deadline *time.Time   `json:"deadline,omitempty"`
 	Action   string       `json:"action"` // 建议动作（命令行）
+	// Running：事项上有排队或运行中的运行（§7.6），主会话与运行者据此避免重复处理。
+	Running bool `json:"running,omitempty"`
 }
 
 // DeliveryEntry 是一条路由为注入的投递：只带标题、摘要、选项与建议动作，不带来源正文。
@@ -178,7 +181,11 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 		if (!req.All && it.Project != project) || hiddenAsk(it) {
 			continue
 		}
-		res.Items = append(res.Items, Entry{ID: it.ID, Title: it.Title, Phase: it.Phase, Deadline: it.Deadline, Action: action(it, pol)})
+		e, err := entry(tx, it, pol)
+		if err != nil {
+			return res, err
+		}
+		res.Items = append(res.Items, e)
 		if req.Session != "" && attached[id] { // 不带会话时是只读事务，也不算增量
 			if res.Messages, err = appendMessages(tx, res.Messages, req.Reader, it, pol); err != nil {
 				return res, err
@@ -235,12 +242,21 @@ func buildItem(tx *store.Tx, req Request, head int64) (Result, error) {
 		if hiddenAsk(it) {
 			continue
 		}
-		res.Items = append(res.Items, Entry{ID: it.ID, Title: it.Title, Phase: it.Phase, Deadline: it.Deadline, Action: action(it, pol)})
+		e, err := entry(tx, it, pol)
+		if err != nil {
+			return res, err
+		}
+		res.Items = append(res.Items, e)
 		if res.Messages, err = appendMessages(tx, res.Messages, req.Reader, it, pol); err != nil {
 			return res, err
 		}
 	}
 	return res, nil
+}
+
+func entry(tx *store.Tx, it domain.Item, pol policy.Policy) (Entry, error) {
+	running, err := background.InFlight(tx, it.ID)
+	return Entry{ID: it.ID, Title: it.Title, Phase: it.Phase, Deadline: it.Deadline, Action: action(it, pol), Running: running}, err
 }
 
 // itemTargets：显式 Item；否则运行身份取目标事项，其他读取者取分配给自己的未关闭事项。
@@ -459,6 +475,7 @@ const (
 	envelopeClose  = "[资料结束]"
 	truthStatement = "账本是唯一真理源，事项状态以 `apa` 查询为准。"
 	webOnlyNotice  = "本会话有待 Web 确认的高风险决策，不要替本人执行。"
+	runningNotice  = "在途运行：该事项有排队或运行中的运行，不要重复处理。"
 )
 
 // oneLine 把用户写的文本压成一行：换行与控制字符会让资料伪装成信封结构。
@@ -513,6 +530,9 @@ func (r Result) Inject() string {
 			deadline = e.Deadline.UTC().Format(time.RFC3339)
 		}
 		line("- ", e.ID, " | ", oneLine(e.Title), " | 阶段 ", string(e.Phase), " | 截止 ", deadline, " | 建议：", e.Action)
+		if e.Running {
+			line("  ", runningNotice)
+		}
 	}
 	for _, m := range r.Materials {
 		line("- 材料 ", m.ID, " | ", oneLine(m.Title), " | ", m.Kind, " | 变更：", oneLine(m.Summary))
