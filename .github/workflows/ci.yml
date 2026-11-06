@@ -3,7 +3,9 @@ name: ci
 on:
   push:
     branches: [main]
+    paths-ignore: ['.omac/**']
   pull_request:
+    paths-ignore: ['.omac/**']
 
 permissions:
   contents: read

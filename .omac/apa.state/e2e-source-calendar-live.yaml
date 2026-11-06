@@ -1,4 +1,6 @@
-# sha256: 383e91e942b808d588bf35372bdcee974378bef5e4523fba7ced0154b93ff439
-work_item_id: null
-status: todo
-held: true
+# sha256: 498222a7f28740b317af743aab739941943988f1cc4a1ad0efe69dd4af0a239a
+work_item_id: 01a1b076-1f2c-74dd-859f-6168f5535ddd
+status: blocked
+recovery_marker: true
+retry_note: 真实日历红线（必须遵守）：只在本机用 gog calendar；只创建标题以 [APA-LIVE-TEST] 开头、日期在 2027-01、无提醒的测试事件；测试结束删除全部测试事件并回读确认已删；不读取或输出真实日程内容和数量，真实日历数据不得进入仓库、PR、CI
+  日志或证据；凭据只从 *_FILE 路径读取、不打印。环境变量来源的路径禁止 rm -rf，临时目录只用 /tmp/apa-live.*。

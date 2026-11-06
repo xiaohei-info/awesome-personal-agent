@@ -4,12 +4,14 @@
 package crash_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +27,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-const childEnv = "APA_CRASH_CHILD_HOME"
+const (
+	childEnv  = "APA_CRASH_CHILD_HOME"
+	readyLine = "ready"
+)
 
 var bg = context.Background()
 
@@ -70,6 +75,9 @@ func writeForever(home string) error {
 		}
 		var out struct{ ID string }
 		_ = json.Unmarshal(raw, &out)
+		if i == 0 {
+			fmt.Println(readyLine) // 第一个事项已落账：父进程从这里起算杀进程的随机延时
+		}
 		for j, n := 0, 1+rand.Intn(4); j < n; j++ {
 			if _, err := run("item.update", map[string]any{"id": out.ID, "title": fmt.Sprintf("item %d rev %d", i, j)}); err != nil {
 				return err
@@ -165,8 +173,18 @@ func TestKillDuringWriteLoopKeepsVersionAndEventsAligned(t *testing.T) {
 		cmd := exec.Command(exe)
 		cmd.Env = append(os.Environ(), childEnv+"="+home)
 		cmd.Stderr = os.Stderr
+		out, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
+		}
+		// 等子进程真正开始写：CI 上进程启动与开库的耗时不定，固定睡眠可能在它写第一条之前就杀了，实验就什么也没证明。
+		if line, _ := bufio.NewReader(out).ReadString('\n'); strings.TrimSpace(line) != readyLine {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			t.Fatalf("round %d: child never started writing (see stderr above)", round)
 		}
 		time.Sleep(time.Duration(300+rng.Intn(500)) * time.Millisecond)
 		if err := cmd.Process.Kill(); err != nil {

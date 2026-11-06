@@ -1,7 +1,8 @@
-# sha256: 920f30e66fdd2502f88959e3fbd31ec15b70eb15516c930c4de0ef200f39de2a
+# sha256: 290464e629aa203e07bcaecee1d2b686084d9bad4ef8d3a0a0851edddd4bbc6d
 work_item_id: 01a1afc0-6b41-72b0-b323-80bae672c374
-status: in_review
-recovery_marker: true
+status: done
+merged: true
+merged_at: '2026-11-06T10:09:35Z'
 retry_note: '上游缺陷已修：PR #197（39a0e5c）让 sources/github 按契约接受空 window.from。请复用你上轮推送的分支
   agent/omac-worker-frontend/c153d77f4fbe（提交 5fa57aa）里的 tests/live/github/github_live_test.go，在最新
   main 上重跑 ACT-GH-01..07，并删掉上轮为诊断加的重跑 stderr 代码（如仍保留）。'
