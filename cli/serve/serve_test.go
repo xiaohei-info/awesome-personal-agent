@@ -24,10 +24,15 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
+	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 )
@@ -1005,5 +1010,298 @@ func TestServeFollowUpUsesPackScheduleAndMode(t *testing.T) {
 			t.Fatalf("follow-up did not run on the pack's 1s interval: %d %s", code, b)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// ---- 规则动作与后台运行的装配 ----
+
+// assembled 在新目录上 init 后直接装配并启动内核（不起循环、不监听），供需要构造账本状态的装配测试使用。
+func assembled(t *testing.T) *kernel {
+	t.Helper()
+	l := config.LayoutOf(initOnFreePort(t))
+	cfg, err := config.Load(l.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(l.Home, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	k, err := assemble(st, l, cfg, "http://localhost:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { k.disp.Close(); k.scr.Wait(); k.wh.Wait() })
+	if err := k.start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// 能力包动作枚举（附录 C.6，取自 packs.Actions）里的每个动作都要有处理器：新增动作漏登记会失败。
+func TestEveryPackActionHasHandler(t *testing.T) {
+	k := assembled(t)
+	for _, a := range kpacks.Actions() {
+		if !k.eng.Handles(a) {
+			t.Errorf("rule action %s has no handler in cli/serve assemble", a)
+		}
+	}
+}
+
+const labelledRule = "background-run/event_rules/handle-labelled"
+
+func (k *kernel) do(t *testing.T, chain command.Chain, cmd string, in any) json.RawMessage {
+	t.Helper()
+	b, _ := json.Marshal(in)
+	r, err := k.x.Do(context.Background(), command.Request{Identity: hostOwner, Command: cmd, Input: b, Chain: chain, Owner: owner})
+	if err != nil {
+		t.Fatalf("%s: %v", cmd, err)
+	}
+	return r.Value
+}
+
+// deepItem 建一个链路深度超过阈值的待处理建议：账本里本不会有（命令管线拦着），测试临时放宽执行器阈值来构造。
+func (k *kernel) deepItem(t *testing.T) string {
+	t.Helper()
+	k.x.MaxChainDepth = 100
+	defer func() { k.x.MaxChainDepth = command.DefaultMaxChainDepth }()
+	var id string
+	for i := 0; i <= command.DefaultMaxChainDepth+1; i++ { // 首个深度 0，末个深度 = 阈值 + 1
+		chain := command.Chain{Mode: command.ChainInherit, From: id}
+		if id == "" {
+			chain = command.Chain{}
+		}
+		var o struct{ ID string }
+		_ = json.Unmarshal(k.do(t, chain, "item.create", map[string]any{"title": "deep", "kind": "task", "phase": "proposed", "tags": []string{"agent-ok"}}), &o)
+		id = o.ID
+	}
+	return id
+}
+
+// healthAlertDelivered 断言该事项有一条链路超限的 health.alert（带规则 id），且已产出对应的健康类投递。
+func (k *kernel) healthAlertDelivered(t *testing.T, item string) {
+	t.Helper()
+	err := k.st.View(context.Background(), func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, item)
+		if err != nil {
+			return err
+		}
+		for _, en := range es {
+			e := en.Event
+			if e.Type != domain.EvHealthAlert || e.Reason != chain.ExceededReason || e.Basis == nil || e.Basis.RuleID != labelledRule {
+				continue
+			}
+			r, err := tx.Query(`SELECT 1 FROM delivery_delivery WHERE class = 'health' AND id = ?`, "health:"+strconv.FormatInt(e.Seq, 10))
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			if !r.Next() {
+				t.Fatalf("health.alert %d (%s) produced no health delivery", e.Seq, e.Reason)
+			}
+			return nil
+		}
+		t.Fatalf("no chain-depth health.alert on %s", item)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// start_background_run 已登记：规则命中链路超限的事项时只记 health.alert，装配处把它追赶成健康类投递（§14.9）。
+func TestBackgroundChainDepthAlertIsDelivered(t *testing.T) {
+	k := assembled(t)
+	k.do(t, command.Chain{}, "rule.set_mode", map[string]string{"rule": labelledRule, "mode": "auto"})
+	id := k.deepItem(t)
+	k.do(t, command.Chain{}, "proposal.accept", map[string]string{"id": id}) // 转 open，规则命中
+	k.healthAlertDelivered(t, id)
+}
+
+// 回答一提交就续接：链路超限的事项不拉起续接，只记 health.alert，并产出健康类投递。
+func TestResumeChainDepthAlertIsDelivered(t *testing.T) {
+	k := assembled(t)
+	id := k.deepItem(t)
+	k.do(t, command.Chain{}, "proposal.accept", map[string]string{"id": id})
+	// 构造"后台运行提了决策请求后结束"：运行与它的关联由后台运行模块写，这里按它的表结构直接落账。
+	err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		run, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Runner: "main_session", Launch: "headless",
+			Target: id, Harness: "acme", Access: "read", Basis: &domain.Basis{RuleID: labelledRule}, TimeoutSec: 60},
+			Spec: proc.Spec{Command: []string{"true"}}}, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := proc.Settle(tx, run.ID, domain.RunFailed, nil, "fixture", time.Now()); err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO background_run (run_id, item, target) VALUES (?, ?, ?)`, run.ID, id, id)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.do(t, command.Chain{}, "decision.request", map[string]any{"id": id, "reason": "need owner",
+		"ask": map[string]any{"question": "继续吗", "options": []map[string]string{{"id": "go", "label": "继续"}}, "resume_note": "从第二步继续"}})
+	k.do(t, command.Chain{}, "decision.answer", map[string]string{"id": id, "choice": "go"})
+	k.healthAlertDelivered(t, id)
+}
+
+// ACT-SCR-05 / §13.6 端到端：真实 serve 上，auto 规则命中 → 后台运行拉起并带运行凭据（能读目标事项、不能代答，退出码 4 即 403）
+// → 运行者提决策请求后结束 → 本人回答 → 续接运行用新凭据拉起 → 结束仍 open 转 needs_input；
+// 重启时无存活进程的后台运行按失败收尾，事项转 needs_input。
+func TestServeRunsBackgroundRunsAndResumesAfterAnswer(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelError})))
+	defer slog.SetDefault(prev)
+
+	home := initOnFreePort(t)
+	out := t.TempDir()
+	// 运行者替身：记下凭据与两次 API 调用的状态码；第一次提决策请求（带 resume_note）后结束，续接那次停一会儿再不回执结束。
+	script := filepath.Join(t.TempDir(), "runner.sh")
+	body := `#!/bin/sh
+d='` + out + `'
+item=$(cat "$d/item")
+printf '%s' "$APA_TOKEN" > "$d/$APA_RUN.token"
+curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $APA_TOKEN" "$APA_URL/v1/items/$item" > "$d/$APA_RUN.read"
+curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"choice":"go"}' "$APA_URL/v1/items/$item/decide" > "$d/$APA_RUN.decide"
+if [ -f "$d/asked" ]; then sleep 1; exit 0; fi
+touch "$d/asked"
+curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"reason":"need owner","ask":{"question":"继续吗","options":[{"id":"go","label":"继续"}],"resume_note":"从第二步继续"}}' \
+  "$APA_URL/v1/items/$item/ask" > "$d/$APA_RUN.ask"
+`
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "declarations"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	decl, _ := json.Marshal(map[string]any{"harness": "acme", "headless": map[string]any{"command": []string{"/bin/sh", script},
+		"session": map[string]string{"extract": "session_id"}, "access": map[string][]string{"read": {}, "edit": {}}}})
+	if err := os.WriteFile(filepath.Join(home, "declarations", "acme.json"), decl, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	addr, stop := start(t, home)
+	s := webLogin(t, addr)
+	for _, c := range []struct{ method, path, body string }{
+		{"PUT", "/settings/policy", `{"default_harness":"acme"}`},
+		{"PUT", "/settings/access-limits", `{"permission_cap":{"default":"edit"}}`},
+		{"PATCH", "/rules/" + strings.ReplaceAll(labelledRule, "/", "%2F") + "/mode", `{"mode":"auto"}`},
+	} {
+		if code, b := s.do(c.method, c.path, c.body); code >= 300 {
+			t.Fatalf("%s %s: %d %s", c.method, c.path, code, b)
+		}
+	}
+	code, b := s.do("POST", "/items", `{"title":"labelled","kind":"task","phase":"proposed","tags":["agent-ok"]}`)
+	var it struct{ ID string }
+	if json.Unmarshal([]byte(b), &it); code != 201 || it.ID == "" {
+		t.Fatalf("create item: %d %s", code, b)
+	}
+	if err := os.WriteFile(filepath.Join(out, "item"), []byte(it.ID), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := s.do("POST", "/items/"+it.ID+"/accept", `{}`); code >= 300 {
+		t.Fatalf("accept: %d %s", code, b)
+	}
+
+	waitItem := func(what string, ok func(domain.Item) bool) domain.Item {
+		t.Helper()
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			code, b := s.do("GET", "/items/"+it.ID, "")
+			var got struct{ Item domain.Item }
+			if code == 200 && json.Unmarshal([]byte(b), &got) == nil && ok(got.Item) {
+				return got.Item
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: %d %s; logs: %s", what, code, b, logs.String())
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	runs := func() []string {
+		ms, _ := filepath.Glob(filepath.Join(out, "*.token"))
+		return ms
+	}
+	asked := waitItem("runner's decision request never landed", func(i domain.Item) bool {
+		return i.Phase == domain.PhaseNeedsInput && i.Ask != nil && i.Ask.ResumeNote != ""
+	})
+	time.Sleep(clockTicks) // 等第一次运行收尾：运行者自己提了问题，收尾保留它
+	if got := waitItem("first run settled", func(i domain.Item) bool { return true }); got.Ask.Question != asked.Ask.Question {
+		t.Fatalf("settle replaced the runner's own question: %+v", got.Ask)
+	}
+	first := runs()
+	if len(first) != 1 {
+		t.Fatalf("runs after trigger: %v", first)
+	}
+	tok, _ := os.ReadFile(first[0])
+	if !runidentity.IsSecret(string(tok)) {
+		t.Fatalf("APA_TOKEN is not a run credential: %q", tok)
+	}
+	for suffix, want := range map[string]string{".read": "200", ".decide": "403", ".ask": "200"} {
+		got, _ := os.ReadFile(strings.TrimSuffix(first[0], ".token") + suffix)
+		if string(got) != want {
+			t.Fatalf("run credential %s: got %q, want %s", suffix, got, want)
+		}
+	}
+
+	if code, b := s.do("POST", "/items/"+it.ID+"/decide", `{"choice":"go"}`); code >= 300 {
+		t.Fatalf("owner answer: %d %s", code, b)
+	}
+	final := waitItem("resumed run never settled to needs_input", func(i domain.Item) bool {
+		return i.Phase == domain.PhaseNeedsInput && i.Ask != nil && strings.Contains(i.Ask.Question, "没有回执")
+	})
+	if rs := runs(); len(rs) != 2 {
+		t.Fatalf("want the first run plus exactly one resume run (the event rule must skip), got %v; ask %+v", rs, final.Ask)
+	}
+	if code, b := s.do("GET", "/why/"+it.ID, ""); code != 200 || !strings.Contains(b, "resume.launched") {
+		t.Fatalf("resume not recorded: %d %s", code, b)
+	}
+
+	// 内核崩溃遗留：一条 running 的后台运行，进程已不在。
+	code, b = s.do("POST", "/items", `{"title":"crashed","kind":"task","phase":"open"}`)
+	var crashed struct{ ID string }
+	if json.Unmarshal([]byte(b), &crashed); code != 201 {
+		t.Fatalf("create item: %d %s", code, b)
+	}
+	stop()
+	reg, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(home, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = st.Update(context.Background(), func(tx *store.Tx) error {
+		run, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Runner: "main_session", Launch: "headless",
+			Target: crashed.ID, Harness: "acme", Access: "read", TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, time.Now())
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`UPDATE outcall_run SET state = 'running', started_at = ? WHERE id = ?`, time.Now().UnixNano(), run.ID)
+		return err
+	})
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr, stop = start(t, home)
+	s = webLogin(t, addr)
+	it.ID = crashed.ID
+	waitItem("recovered run did not settle the item", func(i domain.Item) bool {
+		return i.Phase == domain.PhaseNeedsInput && i.Ask != nil && strings.Contains(i.Ask.Question, "no live process after restart")
+	})
+	stop()
+	if logs.Len() != 0 {
+		t.Fatalf("kernel services logged errors:\n%s", logs.String())
 	}
 }
