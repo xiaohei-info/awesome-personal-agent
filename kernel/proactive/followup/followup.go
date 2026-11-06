@@ -485,7 +485,8 @@ func (s *Service) failed(ctx context.Context, p pending, r rule, cause error) er
 		if err != nil {
 			return err
 		}
-		body, _ := json.Marshal(map[string]string{"rule": r.key, "item": p.item, "error": cause.Error()})
+		// kind 与 template 供健康视图归类（模型不可用）并在同一模板之后成功调用时清除，字面值见 kernel/health.FollowupKind。
+		body, _ := json.Marshal(map[string]string{"kind": "followup", "template": r.template, "rule": r.key, "item": p.item, "error": cause.Error()})
 		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: p.item, Actor: r.actor(),
 			Basis: &domain.Basis{PolicyVersion: pv, RuleID: r.key}, Reason: "follow-up judgement failed, will retry: " + cause.Error(),
 			Payload: body, At: s.o.Now()})
