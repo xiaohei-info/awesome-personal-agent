@@ -4,7 +4,8 @@
 // 工作方式是电平触发：事项一变（Sync）就按事项现状重算它该有什么投递——proposed 与初筛未返回的不产出，
 // 待决的决策产出一条（版本取事项版本），事项变化后旧版本投递作废（Supersede）；时间相关的（截止已过再提醒、
 // 静默结束补发、合并窗口到期、无人领取退回 Web 未读）由一个周期 Timer 驱动的 Tick 处理。
-// 本包只写自己的游标与暂存表，投递表经 delivery.Queue 写入，事项与策略只读。
+// 配了 Drafter 且策略配了模型端点时，决策投递先经 decision-card 包起草卡片文案（及可选的投递阈值判定），见 draft.go。
+// 本包只写自己的游标、暂存与起草表，投递表经 delivery.Queue 写入，事项与策略只读。
 package attention
 
 import (
@@ -15,6 +16,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -63,6 +65,16 @@ CREATE TABLE attention_done (
 ) WITHOUT ROWID;
 CREATE INDEX attention_held_item ON attention_held(item);
 CREATE INDEX attention_held_release ON attention_held(release_at);`,
+}, {
+	Version: 2, Name: "create-attention-draft",
+	// 每个待决决策一行：哪个版本起草到了哪一步（pending 未返回时不投递）、卡片文案与阈值判定。
+	SQL: `CREATE TABLE attention_draft (
+	item TEXT PRIMARY KEY,
+	version INTEGER NOT NULL,
+	state TEXT NOT NULL,
+	card TEXT NOT NULL DEFAULT '',
+	verdict TEXT NOT NULL DEFAULT ''
+) WITHOUT ROWID;`,
 }}}
 
 // Options 配置触达；Queue 必填。
@@ -72,10 +84,15 @@ type Options struct {
 	TickEvery time.Duration             // 周期 Timer 间隔，默认 30 秒
 	WebURL    func(item string) string  // 投递里的 Web 链接，默认 /items/<id>
 	FormURL   func(token string) string // 投递里的一次性表单链接，默认 /forms/<令牌>
+	// Drafter 起草决策卡片文案与做投递阈值判定；为空时投递内容与路由只按规则。
+	Drafter Drafter
 }
 
-// Attention 无状态，所有状态在账本里。
-type Attention struct{ o Options }
+// Attention 的状态都在账本里；draftDue 只是"有待起草"的唤醒信号。
+type Attention struct {
+	o        Options
+	draftDue atomic.Bool
+}
 
 // New 返回触达模块。
 func New(o Options) *Attention {
@@ -91,7 +108,7 @@ func New(o Options) *Attention {
 	if o.FormURL == nil {
 		o.FormURL = func(token string) string { return "/forms/" + token }
 	}
-	return &Attention{o}
+	return &Attention{o: o}
 }
 
 // ---- 接入 ----
@@ -229,20 +246,23 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	if _, err := tx.Exec(`DELETE FROM attention_held WHERE item = ? AND version < ?`, id, ver); err != nil {
 		return err
 	}
-	content := domain.DeliveryContent{Title: it.Title, Summary: ask.Question, WebURL: a.o.WebURL(id)}
-	if authz.WebOnly(pol, authz.Object{Kind: string(it.Kind), Tags: it.Tags, Project: it.Project, Category: ask.RiskClass}) {
-		content.WebOnly = true // web_only 只给 Web 链接：不带可点选项、推荐与表单链接（§6.9、§14.4）
-	} else {
-		for _, o := range ask.Options {
-			content.Options = append(content.Options, o.ID+": "+o.Label)
-		}
-		content.Recommend = ask.Recommend
+	dr, ready, err := a.draft(tx, pol, it, ver)
+	if err != nil || !ready {
+		return err // 起草未返回前不投递；返回后 Drafts 会再重算这个事项
 	}
-	return a.offer(tx, pol, held{
+	webOnly := authz.WebOnly(pol, authz.Object{Kind: string(it.Kind), Tags: it.Tags, Project: it.Project, Category: ask.RiskClass})
+	content := dr.content(it, webOnly)
+	content.WebURL = a.o.WebURL(id)
+	h := held{
 		id: fmt.Sprintf("decision:%s:%d", id, ver), item: id, class: domain.DeliveryDecision, priority: it.Priority, version: ver,
 		content: content,
 		exempt:  nearDeadline(pol, it, a.o.Now()),
-	})
+	}
+	if dr.Verdict == VerdictDigest && pol.Disturb.MergeWindowSec > 0 {
+		// 带选项的决策不并入摘要（§7.4）：推迟到合并窗口结束后单独投递。
+		h.notBefore = a.o.Now().Add(time.Duration(pol.Disturb.MergeWindowSec) * time.Second)
+	}
+	return a.offer(tx, pol, h)
 }
 
 // nearDeadline：本人开启了豁免，且事项的决策截止距 now 不超过 NearDeadline（已过也算）。
@@ -253,6 +273,9 @@ func nearDeadline(pol policy.Policy, it domain.Item, now time.Time) bool {
 // drop 作废事项的全部未终结投递并清掉它被拦住的提醒。
 func (a *Attention) drop(tx *store.Tx, id string) error {
 	if _, err := a.o.Queue.Supersede(tx, id, delivery.AllVersions); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM attention_draft WHERE item = ?`, id); err != nil {
 		return err
 	}
 	_, err := tx.Exec(`DELETE FROM attention_held WHERE item = ?`, id)
@@ -326,6 +349,7 @@ type held struct {
 	exempt    bool // 豁免静默
 	mergeable bool
 	release   time.Time
+	notBefore time.Time // 阈值判定为并入摘要时的最早放行时刻
 }
 
 // offer 决定一条提醒现在投还是先拦住：静默中拦到静默结束；低优先级提醒进合并窗口。
@@ -353,6 +377,9 @@ func (a *Attention) offer(tx *store.Tx, pol policy.Policy, h held) error {
 		if window.After(h.release) {
 			h.release = window
 		}
+	}
+	if h.notBefore.After(h.release) {
+		h.release = h.notBefore
 	}
 	if !h.release.After(now) {
 		return a.deliver(tx, pol, []held{h})
@@ -461,6 +488,15 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 		d.Content = domain.DeliveryContent{Title: fmt.Sprintf("%d 条低优先级提醒", len(hs)), Summary: strings.Join(titles, "；")}
 	}
 	d.Route = a.route(pol, hs[0].class, hs[0].priority)
+	if d.Class == domain.DeliveryDecision {
+		v, err := a.verdict(tx, d.Item, d.Version)
+		if err != nil {
+			return err
+		}
+		if v == VerdictWebUnread { // 阈值判定只能降低打扰：留在 Web 未读
+			d.Route = delivery.RouteWeb
+		}
+	}
 	if err := a.attachForm(tx, pol, &d); err != nil {
 		return err
 	}

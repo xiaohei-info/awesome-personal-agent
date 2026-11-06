@@ -383,9 +383,15 @@ func TestProjectMaterialsTitleAndSummaryOnly(t *testing.T) {
 	if r2 := e.build(t, req); len(r2.Materials) != 0 {
 		t.Fatalf("unchanged material must not be resent: %+v", r2.Materials)
 	}
-	commit(map[string]any{"id": m.Material, "content": "v2", "reason": "补充结论", "based_on": m.Revision})
+	v2 := commit(map[string]any{"id": m.Material, "content": "v2", "reason": "补充结论", "based_on": m.Revision})
 	if r3 := e.build(t, req); len(r3.Materials) != 1 || r3.Materials[0].Summary != "补充结论" {
 		t.Fatalf("changed material must be resent with its summary: %+v", r3.Materials)
+	}
+	// 生成型起草了变更摘要的修订，变更摘要取它，不再取修订理由。
+	v3 := commit(map[string]any{"id": m.Material, "content": "v3", "reason": "改结论", "based_on": v2.Revision})
+	e.do(t, worker, "revision.summarize", map[string]any{"id": v3.Revision, "summary": "结论由 A 改为 B"})
+	if r4 := e.build(t, req); len(r4.Materials) != 1 || r4.Materials[0].Summary != "结论由 A 改为 B" {
+		t.Fatalf("drafted revision summary not used: %+v", r4.Materials)
 	}
 }
 

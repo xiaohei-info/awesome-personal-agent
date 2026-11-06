@@ -7,6 +7,7 @@
 package kcontext
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"strconv"
@@ -119,7 +120,7 @@ type MaterialEntry struct {
 	Title   string `json:"title"`
 	Kind    string `json:"kind"`
 	Path    string `json:"path,omitempty"` // 托管型的"仓库:路径"
-	Summary string `json:"summary"`        // 最近一次变更的理由（修订理由、托管文档 commit 刷新或路径消失）
+	Summary string `json:"summary"`        // 最近一次变更的摘要：生成型起草的修订变更摘要，没有时取变更理由（修订理由、托管文档 commit 刷新或路径消失）
 }
 
 // Result 是增量投影。Cursor 是本次读到的事件序号。
@@ -209,7 +210,15 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			return res, err
 		}
 		if req.All || m.Project == project || m.Project == "" { // 全局规范对每个作用域都有效
-			res.Materials = append(res.Materials, MaterialEntry{ID: m.ID, Title: m.Title, Kind: m.Kind, Path: m.Location, Summary: mc.reason})
+			sum := mc.reason
+			if mc.rev != "" {
+				if v, err := materials.GetRevision(tx, mc.rev); err == nil && v.Summary != "" {
+					sum = v.Summary
+				} else if err != nil && !isNotFound(err) {
+					return res, err
+				}
+			}
+			res.Materials = append(res.Materials, MaterialEntry{ID: m.ID, Title: m.Title, Kind: m.Kind, Path: m.Location, Summary: sum})
 		}
 	}
 	if res.Deliveries, err = injected(tx, req, project, pol); err != nil {
@@ -386,6 +395,7 @@ type matChange struct {
 	id     string
 	seq    int64
 	reason string
+	rev    string // 生效的修订；托管型刷新没有
 }
 
 // changes 读 (after, head] 的事件，返回按最近变更先后排序的去重事项 id、其中有新挂靠消息的事项、作用域项目是否有变更，
@@ -411,7 +421,13 @@ func changes(tx *store.Tx, after, head int64, project string) (ids []string, att
 			case slices.Contains(projectEvents, t) && en.Event.Object == project:
 				projectChanged = true
 			case t == domain.EvMaterialRevised && !en.Tombstone:
-				byMat[en.Event.Object] = matChange{id: en.Event.Object, seq: en.Event.Seq, reason: en.Event.Reason}
+				var p struct {
+					Revision struct {
+						ID string `json:"id"`
+					} `json:"revision"`
+				}
+				_ = json.Unmarshal(en.Event.Payload, &p) // 托管型刷新的 payload 没有修订
+				byMat[en.Event.Object] = matChange{id: en.Event.Object, seq: en.Event.Seq, reason: en.Event.Reason, rev: p.Revision.ID}
 			}
 		}
 	}

@@ -74,6 +74,7 @@ import (
 	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/webhook"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/web"
@@ -115,15 +116,19 @@ type kernel struct {
 	att    *attention.Attention
 	hn     *khealth.Notifier
 	rs     *resume.Service
+	sum    *summaries.Service
 	packs  *kpacks.Loader
 	agm    *agentsmd.Service
 
 	resumeMu  sync.Mutex
 	resumeDue []string // 决策到期按默认值决定的事项：时钟事务提交后再续接
 
-	drainDue atomic.Bool   // 本轮时钟排了规则或跟进的待办
-	drain    chan struct{} // 唤醒后台循环：待办要调模型，不能占着时钟循环
-	failed   []domain.Run  // 上次进程遗留、已按失败落账的运行，由后台循环交给各模块
+	drainDue  atomic.Bool   // 本轮时钟排了规则或跟进的待办
+	drain     chan struct{} // 唤醒后台循环：待办要调模型，不能占着时钟循环
+	sumDue    atomic.Bool   // 有命令提交：摘要服务要追赶事件
+	draft     chan struct{} // 唤醒决策卡片起草
+	summarize chan struct{} // 唤醒摘要起草
+	failed    []domain.Run  // 上次进程遗留、已按失败落账的运行，由后台循环交给各模块
 }
 
 func logErr(what string) func(error) {
@@ -149,7 +154,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
-	// 初筛失败不重试（§14.4），要单独一个 Attempts=1 的实例。
+	// 初筛失败不重试（§14.4），要单独一个 Attempts=1 的实例；决策卡片文案与投递阈值挡在投递前，同样不重试。
 	screenJudge, err := direct.New(direct.Options{Store: st, Packs: ld, Model: &model.Client{}, Attempts: 1})
 	if err != nil {
 		return nil, err
@@ -160,8 +165,13 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 
 	q := delivery.New(delivery.Options{UnclaimedAfter: cfg.DeliveryUnclaimedAfter, Backoff: cfg.DeliveryBackoff})
-	att := attention.New(attention.Options{Queue: q})
-	k := &kernel{st: st, x: x, layout: l, scr: scr, att: att, hn: khealth.NewNotifier(q), packs: ld, drain: make(chan struct{}, 1)}
+	att := attention.New(attention.Options{Queue: q, Drafter: screenJudge})
+	sum, err := summaries.New(summaries.Options{Store: st, Exec: x, Gen: judge, Owner: owner})
+	if err != nil {
+		return nil, err
+	}
+	k := &kernel{st: st, x: x, layout: l, scr: scr, att: att, sum: sum, hn: khealth.NewNotifier(q), packs: ld,
+		drain: make(chan struct{}, 1), draft: make(chan struct{}, 1), summarize: make(chan struct{}, 1)}
 
 	// 跟进消息归属与入站流水线互相接线：拦截在判断之前，退回后立即唤醒入站流水线。
 	fm, err := followmsg.New(followmsg.Options{Store: st, Exec: x, Owner: owner,
@@ -281,6 +291,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	x.OnCommit(scr.OnCommit)
 	att.Attach(x, st, logErr("attention"))
+	x.OnCommit(func(command.Commit) { k.sumDue.Store(true) })
 	k.hn.Attach(x, st, logErr("health delivery"))
 	k.fu.Attach(logErr("follow-up"))
 
@@ -425,12 +436,9 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 				nextReload = now.Add(packReloadInterval)
 				k.reloadPacks(ctx, report)
 			}
-			if k.drainDue.Swap(false) {
-				select {
-				case k.drain <- struct{}{}:
-				default:
-				}
-			}
+			nudge(k.drainDue.Swap(false), k.drain)
+			nudge(k.att.DraftDue(), k.draft)
+			nudge(k.sumDue.Swap(false), k.summarize)
 			select {
 			case <-ctx.Done():
 				return
@@ -469,6 +477,16 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			}
 		}
 	}()
+	// decision-card 包的起草要调模型，各用一个循环：模型慢或不可用时不挡规则与跟进，摘要积压也不拖住决策投递。
+	// 启动时与每个维护间隔各做一次，补上重启前未完成的起草。
+	k.worker(ctx, &wg, k.draft, func() {
+		report("decision drafts", k.att.Drafts(ctx, k.st))
+		k.syncHealth(ctx, report)
+	})
+	k.worker(ctx, &wg, k.summarize, func() {
+		report("summaries", k.sum.Drain(ctx))
+		k.syncHealth(ctx, report)
+	})
 	return func() {
 		wg.Wait()
 		k.disp.Close()
@@ -517,6 +535,38 @@ func (k *kernel) resume(item string) {
 	if err := k.st.Update(ctx, k.hn.Sync); err != nil {
 		slog.Error("health delivery", "err", err)
 	}
+}
+
+// nudge 在 due 时非阻塞地唤醒一个循环；已有未处理的唤醒就合并。
+func nudge(due bool, ch chan struct{}) {
+	if !due {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+// worker 起一个循环：启动时、被唤醒时、每个维护间隔各跑一次 f，直到 ctx 取消。
+func (k *kernel) worker(ctx context.Context, wg *sync.WaitGroup, wakeUp <-chan struct{}, f func()) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		f()
+		tk := time.NewTicker(maintainInterval)
+		defer tk.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-wakeUp:
+				f()
+			case <-tk.C:
+				f()
+			}
+		}
+	}()
 }
 
 // syncHealth 追赶不经命令提交写下的健康告警（规则动作失败、跟进失败等），命令提交的由 Attach 立即追赶。
