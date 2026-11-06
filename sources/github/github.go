@@ -78,8 +78,8 @@ type Input struct {
 	Config   Config `json:"config"`
 	Cursor   string `json:"cursor"`
 	Window   struct {
-		From time.Time `json:"from"`
-		To   time.Time `json:"to"`
+		From string `json:"from"` // 空串：没有下界（首次运行，内核传 ""）
+		To   string `json:"to"`
 	} `json:"window"`
 	CredentialsPath string `json:"credentials_path"`
 }
@@ -145,6 +145,18 @@ func RunStdin(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, ne
 	return Run(ctx, bytes.NewReader(raw), stdout, stderr, newAPI(in.CredentialsPath), now)
 }
 
+// parseWindow 解析 window 的一端：空串返回零值（表示未给），否则必须是 RFC3339。
+func parseWindow(name, v string) (time.Time, error) {
+	if v == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}, &Error{ExitAuth, fmt.Sprintf("bad window.%s %q, want RFC3339: %v", name, v, err)}
+	}
+	return t, nil
+}
+
 // stream 是一个流的续传位置。游标是流名（owner/name 或 notifications）到 stream 的 JSON。
 type stream struct {
 	// At 之前的对象都已处理；updated_at 正好等于 At 的对象可能只处理了一部分（同秒对象、拉取之后才出现的同秒更新）。
@@ -197,14 +209,21 @@ func pull(ctx context.Context, stdin io.Reader, api API, now time.Time) ([]event
 	}
 	// to 是内核安排本次运行的时间，早于所有读取。只处理不晚于它的对象：读取途中发生的更新留给下次，
 	// 这样不会出现"先读到旧状态的对象、再读到更晚的对象、游标越过前者的新状态"。
-	to := in.Window.To
+	to, err := parseWindow("to", in.Window.To)
+	if err != nil {
+		return nil, "", err
+	}
 	if to.IsZero() {
 		to = now
 	}
 	to = to.UTC().Truncate(time.Second) // 上游时间戳精度是秒
 	// 新流从窗口起点开始；没有窗口时从现在起算，避免首次把历史全灌进建议流。
-	start := in.Window.From.UTC().Truncate(time.Second)
-	if in.Window.From.IsZero() {
+	from, err := parseWindow("from", in.Window.From)
+	if err != nil {
+		return nil, "", err
+	}
+	start := from.UTC().Truncate(time.Second)
+	if from.IsZero() {
 		start = to
 	}
 	streamOf := func(name string) *stream {
