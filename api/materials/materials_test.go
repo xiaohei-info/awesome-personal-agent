@@ -67,7 +67,7 @@ func setup(t *testing.T) *env {
 	x := command.New(st, nil)
 	for _, err := range []error{
 		projects.Register(x), items.Register(x, items.NewKinds()), executors.Register(x, executors.Options{Owner: "owner"}),
-		km.Register(x), hosted.Register(x), search.Register(x), blobs.Register(x, blobDir),
+		km.Register(x), hosted.Register(x), blobs.Register(x, blobDir),
 		delegation.Register(x, delegation.Options{Owner: "owner", OnError: func(_ command.Commit, err error) { t.Error(err) }}),
 	} {
 		if err != nil {
@@ -471,6 +471,13 @@ func TestHostedMaterial(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+
+	// 材料一侧看得到带类型的关联：修改的父事项以 output 关联材料。
+	var linked struct{ Relations []domain.Relation }
+	into(t, e.do("obs", "GET", "/v1/materials/"+id, ""), &linked)
+	if len(linked.Relations) != 1 || linked.Relations[0] != (domain.Relation{Type: domain.RelOutput, From: ch.Parent, To: id}) {
+		t.Fatalf("material relations: %+v", linked.Relations)
 	}
 
 	// 请求元数据：同键重试重放首次的父事项与子事项，不再建第二套；delegate 附本人原话、不带 parent 也能发起。

@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -556,7 +557,16 @@ func (s *svc) relate() command.Spec {
 				return invalid("an item cannot be related to itself")
 			}
 			if _, err := Get(tx, v.To); err != nil {
-				return err
+				// 事项与材料同样用类型化关系（§6.3）：终点可以是材料，但材料不能当父事项。
+				if !isNotFound(err) {
+					return err
+				}
+				if _, merr := materials.Get(tx, v.To); merr != nil {
+					return domain.NewError(domain.CodeNotFound, v.To+" is neither an item nor a material", "list items or materials and retry")
+				}
+				if v.Type == domain.RelParent {
+					return invalid("a material cannot be a parent; use basis, output or minutes")
+				}
 			}
 			has, err := hasRelation(tx, rel)
 			if err != nil {

@@ -61,7 +61,7 @@ func newKernel(t *testing.T) *kernel {
 	}
 	t.Cleanup(func() { st.Close() })
 	x := command.New(st, nil)
-	for _, err := range []error{projects.Register(x), items.Register(x, items.NewKinds()), km.Register(x), hosted.Register(x), search.Register(x), blobs.Register(x, t.TempDir())} {
+	for _, err := range []error{projects.Register(x), items.Register(x, items.NewKinds()), km.Register(x), hosted.Register(x), blobs.Register(x, t.TempDir())} {
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -206,6 +206,8 @@ type Commit struct {
 	Actor   domain.Actor
 	Object  string
 	Seqs    []int64
+	Input   json.RawMessage // 命令输入与结果：没有对象 id 的命令（新建、按仓库检查）靠它定位
+	Value   json.RawMessage
 }
 
 // Executor 持有登记表与存储。
@@ -506,7 +508,7 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 			return Result{}, Commit{}, err
 		}
 	}
-	return out, Commit{Command: spec.Name, Actor: caller.Actor, Object: obj.ID, Seqs: out.Seqs}, nil
+	return out, Commit{Command: spec.Name, Actor: caller.Actor, Object: obj.ID, Seqs: out.Seqs, Input: req.Input, Value: out.Value}, nil
 }
 
 func objectOrCommand(o authz.Object, s Spec) string {

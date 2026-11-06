@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -93,7 +94,93 @@ func New(x *command.Executor, o Options) (*Service, error) {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	return &Service{x: x, opt: o, hit: map[string]cached{}}, nil
+	s := &Service{x: x, opt: o, hit: map[string]cached{}}
+	x.OnCommit(s.onCommit)
+	return s, nil
+}
+
+// onCommit 是最近 commit 的刷新时机（§12.3）：登记后读一次；apa agents check 刷新该仓库登记的全部托管文档；
+// 委派回执 done 时刷新子事项及其父事项以 output 关联的托管文档（修改托管文档走委派，见 RequestChange）。
+// 刷新是异步读取，读到的 commit 或"路径已消失"经 material.refresh 落账。
+func (s *Service) onCommit(c command.Commit) {
+	var ids []string
+	err := s.x.Store().View(context.Background(), func(tx *store.Tx) (err error) {
+		ids, err = refreshTargets(tx, c)
+		return
+	})
+	if err != nil {
+		s.opt.OnError(c.Object, err)
+		return
+	}
+	for _, id := range ids {
+		if _, err := s.Refresh(context.Background(), id); err != nil {
+			s.opt.OnError(id, err)
+		}
+	}
+}
+
+func refreshTargets(tx *store.Tx, c command.Commit) ([]string, error) {
+	switch c.Command {
+	case "material.add":
+		var r Result
+		if json.Unmarshal(c.Value, &r) != nil || r.Material == "" { // 链路超限只记录不执行，没有结果
+			return nil, nil
+		}
+		return []string{r.Material}, nil
+	case "agents.check":
+		var in struct {
+			Repo string `json:"repo"`
+		}
+		_ = json.Unmarshal(c.Input, &in) // 管线已按同一结构解析过
+		es, err := List(tx, "")
+		var ids []string
+		for _, e := range es {
+			if e.Repo == in.Repo {
+				ids = append(ids, e.Material.ID)
+			}
+		}
+		return ids, err
+	case "delegate.report":
+		child, err := items.Get(tx, c.Object)
+		if err != nil || child.Phase != domain.PhaseDone {
+			return nil, err
+		}
+		from := []string{child.ID}
+		if p, ok, err := items.ParentOf(tx, child.ID); err != nil {
+			return nil, err
+		} else if ok {
+			from = append(from, p)
+		}
+		var ids []string
+		for _, f := range from {
+			rels, err := items.Relations(tx, f)
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range rels {
+				if r.From != f || r.Type != domain.RelOutput || slices.Contains(ids, r.To) {
+					continue
+				}
+				if ok, err := isHosted(tx, r.To); err != nil {
+					return nil, err
+				} else if ok {
+					ids = append(ids, r.To)
+				}
+			}
+		}
+		return ids, nil
+	}
+	return nil, nil
+}
+
+func isHosted(tx *store.Tx, id string) (bool, error) {
+	r, err := tx.Query("SELECT 1 FROM hosted_material WHERE material = ?", id)
+	if err != nil {
+		return false, err
+	}
+	defer r.Close()
+	found := r.Next()
+	return found, r.Err()
 }
 
 // system 是读取结果回写登记时的内部身份。
@@ -176,7 +263,7 @@ func (s *Service) read(ctx context.Context, id string, force bool) (View, error)
 		_, err = proc.Enqueue(tx, proc.Request{
 			Run:      domain.Run{Category: domain.RunReader, Target: id, TimeoutSec: s.opt.Timeout, Fingerprint: fingerprint(e)},
 			Spec:     proc.Spec{Command: s.opt.Reader, Stdin: stdin},
-			Explicit: true, // 读取只由本人在 Web 打开或刷新触发，在短任务队列内优先（§6.9）
+			Explicit: !force, // 本人在 Web 打开是显式读取，在短任务队列内优先（§6.9）；登记、回执、agents check 的刷新不是
 		}, s.opt.Now())
 		return err
 	})
@@ -289,7 +376,8 @@ type id struct {
 
 // RequestChange 为托管文档的修改生成委派子事项（带 project、仓库、路径、修改要求；允许的执行者由 delegate.create 校验）。
 // 父事项来源：带 parent 时须属于材料所在项目；不带时内核先建一个 task 事项（open，归本人）。不带 parent 只对 Web 登录和
-// delegate 开放，worker 与运行凭据必须带自己权限范围内的 parent。委派失败时丢弃刚建的父事项，不留孤儿。
+// delegate 开放，worker 与运行凭据必须带自己权限范围内的 parent。委派失败时丢弃刚建的父事项，不留孤儿；
+// 委派成功后父事项以 output 关联材料（以调用者身份经 item.relate）。
 func (s *Service) RequestChange(ctx context.Context, who command.Identity, in ChangeIn) (ChangeOut, error) {
 	if blank(in.Request) {
 		return ChangeOut{}, invalid("request is required: say what to change")
@@ -347,9 +435,10 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 		"\n\n在仓库开分支提 PR，评审在 PR；合并后回执附 PR 作证据。"
 	b, _ := json.Marshal(map[string]any{"parent": out.Parent, "assignee": in.Assignee, "title": "修改文档：" + e.Material.Title,
 		"summary": e.Repo + ":" + e.Path, "body": body, "project": e.Material.Project, "reason": reasonOr(in.Reason, "change hosted material")})
-	chain := command.Chain{Mode: command.ChainNew}
+	chain, keep := command.Chain{Mode: command.ChainNew}, command.Chain{Mode: command.ChainNew}
 	if level != authz.LevelWeb {
 		chain = command.Chain{Mode: command.ChainInherit, From: out.Parent}
+		keep = command.Chain{Mode: command.ChainKeep, From: out.Parent} // 关系事件不能把父事项的链路深度归零
 	}
 	r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "delegate.create", Input: b, Owner: s.opt.Owner, Chain: chain,
 		IdemKey: in.IdemKey, Evidence: in.Evidence})
@@ -367,7 +456,18 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 		return out, err
 	}
 	out.Child = child.ID
-	return out, nil
+	// 委派成功后父事项以 output 关联材料（§6.3）：两边可见，子事项回执 done 时据此刷新最近 commit。
+	output := domain.Relation{Type: domain.RelOutput, From: out.Parent, To: e.Material.ID}
+	var rels []domain.Relation
+	if err := s.x.Store().View(ctx, func(tx *store.Tx) (err error) { rels, err = items.Relations(tx, out.Parent); return }); err != nil {
+		return out, err
+	}
+	if !slices.Contains(rels, output) {
+		rel, _ := json.Marshal(map[string]any{"from": output.From, "to": output.To, "type": output.Type, "reason": "change hosted material"})
+		_, err = s.x.Do(ctx, command.Request{Identity: who, Command: "item.relate", Input: rel, Owner: s.opt.Owner, Chain: keep,
+			IdemKey: in.IdemKey, Evidence: in.Evidence})
+	}
+	return out, err
 }
 
 func reasonOr(r, def string) string {
