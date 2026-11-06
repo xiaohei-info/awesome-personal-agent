@@ -46,6 +46,7 @@ import (
 	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/wake"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/webhook"
 )
@@ -57,7 +58,7 @@ func registry() (*store.Registry, error) {
 		kprojects.Module, clock.Module, kitems.Module, core.Module, kcontext.Module, delegation.Module, executors.Module,
 		delivery.Module, attention.Module, proc.Module, direct.Module, task.Module, followup.Module, rules.Module,
 		instances.Module, sregistry.Module, runner.Module, webhook.Module, channel.Module,
-		materials.Module, hosted.Module, search.Module, guideline.Module, agentsmd.Module, background.Module, chain.Module, khealth.Module, resume.Module, wake.Module} {
+		materials.Module, hosted.Module, search.Module, guideline.Module, agentsmd.Module, background.Module, chain.Module, khealth.Module, resume.Module, wake.Module, summaries.Module} {
 		if err := reg.Register(m); err != nil {
 			return nil, err
 		}

@@ -3,11 +3,13 @@ package attention
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/background"
@@ -44,7 +46,8 @@ type env struct {
 	now time.Time
 }
 
-func setup(t *testing.T) *env {
+// setup 搭好触达；给了 drafter 时决策投递先经它起草卡片文案与阈值判定。
+func setup(t *testing.T, drafter ...Drafter) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, proc.Module, background.Module, channel.Module, Module} {
@@ -68,6 +71,9 @@ func setup(t *testing.T) *env {
 	}
 	e.q = delivery.New(delivery.Options{Now: now, UnclaimedAfter: 5 * time.Minute, Lease: 24 * time.Hour})
 	e.a = New(Options{Queue: e.q, Now: now})
+	if len(drafter) > 0 {
+		e.a = New(Options{Queue: e.q, Now: now, Drafter: drafter[0]})
+	}
 	e.a.Attach(e.x, st, func(err error) { t.Errorf("attention: %v", err) })
 	e.clk, err = clock.New(st, func(tx *store.Tx, c clock.Command) error {
 		switch {
@@ -718,4 +724,119 @@ func TestWebOnlyDecisionDeliveryCarriesOnlyWebLink(t *testing.T) {
 func hasCode(err error, code domain.Code) bool {
 	de, ok := err.(*domain.Error)
 	return ok && de.Code == code
+}
+
+// fakeDrafter 按模板回固定结果；err 非空时每次调用都失败。
+type fakeDrafter struct {
+	card, verdict string
+	err           error
+	calls         []direct.Call
+}
+
+func (f *fakeDrafter) Do(_ context.Context, c direct.Call) (direct.Outcome, error) {
+	f.calls = append(f.calls, c)
+	if f.err != nil {
+		return direct.Outcome{}, f.err
+	}
+	res := f.card
+	if c.Template == TemplateThreshold {
+		res = `{"choice":"` + f.verdict + `","confidence":0.9}`
+	}
+	return direct.Outcome{Settled: true, Steps: []direct.Step{{Result: json.RawMessage(res)}}}, nil
+}
+
+func (e *env) withModel() {
+	e.policy(func(p *policy.Policy) {
+		p.ModelEndpoint = policy.ModelEndpoint{URL: "http://model.invalid", Model: "m", ScreeningTimeoutMs: 1000}
+	})
+}
+
+func (e *env) drafts() {
+	e.t.Helper()
+	if !e.a.DraftDue() {
+		e.t.Fatal("no draft was registered")
+	}
+	if err := e.a.Drafts(bg, e.st); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// 决策卡片文案由生成型起草：起草返回前不投递，返回后标题、摘要、选项说明、推荐取卡片，选项 id 与回答不变；
+// 阈值判定开启时判断型只能降低打扰：web_unread_only 留在 Web 未读（§7.4、§6.9）。
+func TestDecisionCardDraftShapesContentAndThresholdKeepsItInWeb(t *testing.T) {
+	f := &fakeDrafter{card: `{"insufficient_info":false,"title":"要不要发版","question":"今天发 1.2 吗？",
+		"options":[{"id":"A","label":"发","consequence":"用户今晚拿到修复"},{"id":"B","label":"不发"}],
+		"recommendation":"先发，回滚成本低","why_now":"窗口今晚关闭"}`, verdict: VerdictWebUnread}
+	e := setup(t, f)
+	e.toChannel()
+	e.withModel()
+	id := e.asked(map[string]any{"recommend": "A"})
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("delivered before the card draft returned: %+v", d)
+	}
+	e.drafts()
+	d := e.claim("channel:chan")
+	want := domain.DeliveryContent{Title: "要不要发版", Summary: "今天发 1.2 吗？\n为什么现在：窗口今晚关闭",
+		Options: []string{"A: 发（用户今晚拿到修复）", "B: 不发"}, Recommend: "A: 先发，回滚成本低", WebURL: "/items/" + id}
+	if d == nil || !reflect.DeepEqual(d.Content, want) {
+		t.Fatalf("card content %+v, want %+v", d, want)
+	}
+	if len(f.calls) != 1 || f.calls[0].Actor.Type != domain.ActorSystem || f.calls[0].Basis == nil || f.calls[0].Template != TemplateCard {
+		t.Fatalf("threshold judged while off, or call not recorded as system with basis: %+v", f.calls)
+	}
+
+	e.policy(func(p *policy.Policy) { p.Disturb.ThresholdJudge = true })
+	web := e.asked(nil)
+	e.drafts()
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("threshold web_unread_only still reached the channel: %+v", d)
+	}
+	if ds := e.unread(); len(ds) != 1 || ds[0].Item != web || ds[0].Route != "web" {
+		t.Fatalf("web unread %+v", ds)
+	}
+}
+
+// 模型未配置时不等待起草，按规则内容与路由立即投递，不调用模型（§5.6）。
+func TestDecisionCardWithoutModelFallsBackToRules(t *testing.T) {
+	f := &fakeDrafter{}
+	e := setup(t, f)
+	e.toChannel()
+	e.asked(nil)
+	d := e.claim("channel:chan")
+	if d == nil || d.Content.Title != "t" || d.Content.Summary != "ship it?" || len(d.Content.Options) != 2 || len(f.calls) != 0 {
+		t.Fatalf("rule delivery %+v, calls %d", d, len(f.calls))
+	}
+}
+
+// 起草失败按规则投递，不阻塞；失败记 kind=decision-card 的 health.alert，进健康视图（§5.6）。
+func TestDecisionCardFailureFallsBackToRulesAndAlerts(t *testing.T) {
+	f := &fakeDrafter{err: errors.New("direct: model unavailable")}
+	e := setup(t, f)
+	e.toChannel()
+	e.withModel()
+	e.policy(func(p *policy.Policy) { p.Disturb.ThresholdJudge = true })
+	id := e.asked(nil)
+	e.drafts()
+	d := e.claim("channel:chan")
+	if d == nil || d.Content.Title != "t" || d.Content.Summary != "ship it?" || len(d.Content.Options) != 2 || d.Route != "channel:chan" {
+		t.Fatalf("fallback delivery %+v", d)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvHealthAlert}, 0, 10)
+		if err != nil {
+			return err
+		}
+		// 卡片文案与阈值判定各失败一次：各记一条，带 kind 与所用模板，健康视图据此归类并按模板清除。
+		if len(es) != 2 || es[0].Event.Object != id || es[1].Event.Object != id {
+			t.Fatalf("health alerts %+v", es)
+		}
+		for i, tmpl := range []string{"decision-card-copy", "delivery-threshold"} {
+			if p := string(es[i].Event.Payload); !strings.Contains(p, `"kind":"decision-card"`) || !strings.Contains(p, `"template":"`+tmpl+`"`) {
+				t.Fatalf("alert %d payload %s", i, p)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -28,7 +28,17 @@ type fx struct {
 	t *testing.T
 }
 
-func setup(t *testing.T) *fx { t.Helper(); return &fx{baseline.Setup(t), t} }
+// setup 同 baseline.Setup，但不配置模型端点：这里验的是事件订阅与导出，序号、游标与"内核不主动外发"都不该被
+// 系统发起的摘要、卡片起草调用（异步写 run.finished、health.alert，并连模型端点）干扰。
+func setup(t *testing.T) *fx {
+	t.Helper()
+	e := baseline.New(t)
+	e.StartKernel()
+	e.IssueCredentials()
+	e.CreateProjects()
+	e.DeclareStubHarness()
+	return &fx{e, t}
+}
 
 func (f *fx) apa(token string, want int, args ...string) baseline.Result {
 	f.t.Helper()

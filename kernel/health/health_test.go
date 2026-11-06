@@ -214,11 +214,12 @@ func TestEventBackedSignals(t *testing.T) {
 	e.event(domain.EvHealthAlert, "src_1", "source src_1 disabled", map[string]string{"kind": "source"})
 	e.event(domain.EvHealthAlert, "pack:work", "capability pack work rejected", map[string]string{"kind": "pack"})
 	e.event(domain.EvHealthAlert, "item_4", "rule action failed: boom", map[string]string{"rule": "r/x", "action": "create_timer", "error": "boom"})
+	e.event(domain.EvHealthAlert, "item_3", "decision-card-copy draft failed", map[string]string{"kind": DraftKind, "template": "decision-card-copy"})
 	v := e.collect(nil)
 	if len(v.ChainTrips) != 1 || v.ChainTrips[0].Object != "item_1" || v.ChainTrips[0].Depth != 4 {
 		t.Fatalf("trips %+v", v.ChainTrips)
 	}
-	if len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Object != "item_2" {
+	if len(v.ModelUnavailable) != 2 || v.ModelUnavailable[0].Object != "item_2" || v.ModelUnavailable[1].Object != "item_3" {
 		t.Fatalf("model %+v", v.ModelUnavailable)
 	}
 	if len(v.RuleFallbacks) != 1 || v.RuleFallbacks[0].Rule != "inbound/x" {
@@ -279,6 +280,34 @@ func TestScreeningRecoversOnLaterSuccessOfSameTemplate(t *testing.T) {
 	e.event(domain.EvRunFinished, "item_2", "judge succeeded", map[string]any{"template": "screen", "state": "succeeded"})
 	if v := e.collect(nil); !v.Healthy() {
 		t.Fatalf("%+v", v.ModelUnavailable)
+	}
+}
+
+// decision-card 起草失败进"模型不可用"并使视图不健康；起草逐事项一次、不重试，之后任一事项同模板的真实成功调用即清除，
+// 复用缓存、失败或别的模板（卡片文案与阈值判定各自恢复）都不算。
+func TestDraftFailureSurfacesAndRecoversOnSameTemplate(t *testing.T) {
+	e := setup(t)
+	e.event(domain.EvHealthAlert, "item_1", "decision-card-copy draft failed", map[string]string{"kind": DraftKind, "template": "decision-card-copy"})
+	e.event(domain.EvHealthAlert, "item_1", "delivery-threshold draft failed", map[string]string{"kind": DraftKind, "template": "delivery-threshold"})
+	if v := e.collect(nil); v.Healthy() || len(v.ModelUnavailable) != 2 || v.ModelUnavailable[0].Kind != DraftKind {
+		t.Fatalf("not surfaced: %+v", v.ModelUnavailable)
+	}
+	run := func(item, tmpl, state string, reused bool) {
+		e.event(domain.EvRunFinished, item, "generate "+state, map[string]any{"template": tmpl, "state": state, "reused": reused})
+	}
+	run("item_2", "decision-card-copy", "failed", false)
+	run("item_2", "decision-card-copy", "succeeded", true)
+	run("item_2", "one-line-summary", "succeeded", false)
+	if v := e.collect(nil); len(v.ModelUnavailable) != 2 {
+		t.Fatalf("failed/reused/other-template call cleared the signal: %+v", v.ModelUnavailable)
+	}
+	run("item_2", "decision-card-copy", "succeeded", false)
+	if v := e.collect(nil); len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Reason != "delivery-threshold draft failed" || v.Healthy() {
+		t.Fatalf("after card recovered: %+v", v.ModelUnavailable)
+	}
+	run("item_3", "delivery-threshold", "succeeded", false)
+	if v := e.collect(nil); !v.Healthy() {
+		t.Fatalf("not cleared after recovery: %+v", v.ModelUnavailable)
 	}
 }
 
@@ -345,12 +374,13 @@ func (e *env) sync() []domain.Delivery {
 	return out
 }
 
-// 所有健康告警经同一处产出健康类投递：链路熔断与来源失败各一条、不重复；初筛失败只进健康视图；重复消费幂等。
+// 所有健康告警经同一处产出健康类投递：链路熔断与来源失败各一条、不重复；初筛与起草失败只进健康视图；重复消费幂等。
 func TestEveryAlertYieldsOneHealthDeliveryExceptScreening(t *testing.T) {
 	e := setup(t)
 	e.event(domain.EvHealthAlert, "item_1", chain.ExceededReason, map[string]any{"command": "delegate.create", "chain_depth": 4, "threshold": 3})
 	e.event(domain.EvHealthAlert, "src_a", "source src_a disabled after permanent failure (exit 3): bad token", map[string]any{"kind": "source", "source_id": "src_a"})
 	e.event(domain.EvHealthAlert, "item_2", "web_only screening did not complete: model timeout", map[string]any{"kind": ScreeningKind})
+	e.event(domain.EvHealthAlert, "item_2", "decision card draft failed", map[string]any{"kind": DraftKind, "template": "decision-card-copy"})
 	e.event(domain.EvHealthAlert, "rule:inbound/x", RuleFallbackReason, map[string]string{"rule": "inbound/x"})
 	e.event(domain.EvHealthAlert, "item_1", chain.ExceededReason, map[string]any{"command": "item.create", "chain_depth": 5, "threshold": 3})
 	e.event(domain.EvHealthAlert, "item_3", "follow-up judgement failed, will retry: model 500", map[string]any{"kind": FollowupKind})

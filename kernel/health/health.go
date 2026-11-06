@@ -185,7 +185,7 @@ func queueHealth(s proc.QueueStat) QueueHealth {
 }
 
 // alerts 一遍读完 health.alert 并按来源分到各信号，分类只在这里（熔断由 chain.Trips 读，来源与能力包各有专属信号）：
-// 模型调用失败（kind=screening、followup）→ 模型不可用，之后恢复的清除；规则回退 observe；其余 → 通用告警。
+// 模型调用失败（kind=screening、followup、decision-card）→ 模型不可用，之后恢复的清除；规则回退 observe；其余 → 通用告警。
 // shortcut: 每次读全部健康事件，事件很多时加游标或时间窗。
 func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, other []OtherAlert, err error) {
 	var after int64
@@ -212,7 +212,7 @@ func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, other []Oth
 			_ = json.Unmarshal(e.Payload, &p)
 			switch {
 			case e.Reason == chain.ExceededReason || p.Kind == "source" || p.Kind == "pack":
-			case p.Kind == ScreeningKind || p.Kind == FollowupKind:
+			case p.Kind == ScreeningKind || p.Kind == FollowupKind || p.Kind == DraftKind:
 				model = append(model, ModelIssue{Seq: e.Seq, Kind: p.Kind, Object: e.Object, Reason: e.Reason, template: p.Template})
 			case e.Reason == RuleFallbackReason:
 				rules = append(rules, RuleFallback{Seq: e.Seq, Rule: p.Rule, At: e.At})
@@ -224,7 +224,7 @@ func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, other []Oth
 }
 
 // recovered 去掉已恢复的模型告警：告警之后同一模板有成功的真实调用（run.finished，非复用）即清除。
-// 初筛逐事项只做一次、不重试，所以任一事项的成功即算恢复；其余（跟进判断会对同一事项重试）要求同一事项成功，
+// 初筛与起草逐事项只做一次、不重试，所以任一事项的成功即算恢复；其余（跟进判断会对同一事项重试）要求同一事项成功，
 // 否则别的事项成功会盖住仍在失败的事项。model 按序号升序。
 // shortcut: 扫告警之后全部 run.finished，Run 很多时加游标或按模板查询。
 func recovered(tx *store.Tx, model []ModelIssue) ([]ModelIssue, error) {
@@ -257,7 +257,7 @@ func recovered(tx *store.Tx, model []ModelIssue) ([]ModelIssue, error) {
 	var open []ModelIssue
 	for _, m := range model {
 		ok := byObject[[2]string{m.template, m.Object}]
-		if m.Kind == ScreeningKind {
+		if m.Kind == ScreeningKind || m.Kind == DraftKind {
 			ok = byTemplate[m.template]
 		}
 		if m.template == "" || ok < m.Seq {

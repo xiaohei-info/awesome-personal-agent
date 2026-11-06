@@ -108,7 +108,7 @@ func (f *fx) apa(token string, want int, args ...string) baseline.Result {
 
 func (f *fx) addSource(id, sourceType, config, dedupe string) {
 	f.t.Helper()
-	args := []string{"source", "add", "--id", id, "--type", "webhook", "--source-type", sourceType, "--config", config}
+	args := []string{"source", "add", "--id", id, "--type", "webhook", "--source-type", sourceType, "--config", config, "--evidence", "owner asked"}
 	if dedupe != "" {
 		args = append(args, "--dedupe-domain", dedupe)
 	}
@@ -124,7 +124,7 @@ type keyOut struct {
 
 func (f *fx) webhookKey(op, id string) keyOut {
 	f.t.Helper()
-	r := f.apa(f.DEL, 0, "source", "webhook", op, id)
+	r := f.apa(f.DEL, 0, "source", "webhook", op, id, "--evidence", "owner asked")
 	var k keyOut
 	if err := json.Unmarshal([]byte(r.Stdout), &k); err != nil || k.Secret == "" || k.URL != "/ingest/"+id {
 		f.t.Fatalf("webhook %s 输出不对: %q %v", op, r.Stdout, err)
@@ -730,7 +730,7 @@ func TestFlowWebhook(t *testing.T) {
 		f.StopKernel()
 		f.StartKernelAgain()
 		before := len(f.items("proposed"))
-		f.apa(f.DEL, 0, "source", "replay", rec.ID)
+		f.apa(f.DEL, 0, "source", "replay", rec.ID, "--evidence", "owner asked")
 		f.waitFor("重放后生成事项", 30*time.Second, func() bool {
 			evs := f.events(id)
 			return len(evs) == 1 && evs[0].Disposition == "proposed" && evs[0].Item != ""
@@ -738,7 +738,7 @@ func TestFlowWebhook(t *testing.T) {
 		eq(t, "第一次重放后新增事项数", len(f.items("proposed")), before+1)
 		first := f.events(id)[0].Item
 
-		f.apa(f.DEL, 0, "source", "replay", rec.ID)
+		f.apa(f.DEL, 0, "source", "replay", rec.ID, "--evidence", "owner asked")
 		f.waitFor("第二次重放处理完成", 30*time.Second, func() bool {
 			g, _ := f.ingestBy(id, rec.DeliveryKey)
 			return g.State == "processed" && g.Events == 1

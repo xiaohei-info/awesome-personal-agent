@@ -43,6 +43,9 @@ const KindGuideline = "guideline"
 // EvRevisionRejected 记 proposed 修订被拒绝。它不在对外稳定类型表内（§10.1），只供审计与回放。
 const EvRevisionRejected = "material.revision_rejected"
 
+// EvRevisionSummarized 记一条修订写入了变更摘要。同样不在对外稳定类型表内，只供审计。
+const EvRevisionSummarized = "material.revision_summarized"
+
 // builtinKinds 是内置 kind；能力包的 material_kinds 经 RegisterWith 的 PackSource 扩展。
 var builtinKinds = []string{"minutes", "reference", "worknote", "requirement", "design", KindGuideline}
 
@@ -79,6 +82,10 @@ CREATE TABLE revisions (
 ) WITHOUT ROWID;
 CREATE TRIGGER revisions_append_only BEFORE UPDATE OF id, material, seq, content, actor, reason, based_on, created_at ON revisions
 BEGIN SELECT RAISE(ABORT, 'revision content is append-only'); END;`,
+}, {
+	Version: 2, Name: "add-revision-summary",
+	// 变更摘要由生成型在修订写入后起草，写入一次；不在追加不改的列里。
+	SQL: `ALTER TABLE revisions ADD COLUMN summary TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Material 是材料登记。Location 非空表示托管型（"仓库:路径"），无 Revision。
@@ -103,6 +110,7 @@ type Revision struct {
 	BasedOn  string       `json:"based_on"`
 	State    string       `json:"state"`
 	At       time.Time    `json:"at"`
+	Summary  string       `json:"summary,omitempty"` // 生成型起草的变更摘要；未起草或起草失败为空（§12.4）
 }
 
 // Pending 是一条待确认的 proposed 修订；BaselineChanged 为真时确认界面要提示"基线已变化"。
@@ -144,7 +152,7 @@ func newID(prefix string) (string, error) {
 // ---- 读 ----
 
 const matCols = "id, project, kind, title, tags, location, current_rev"
-const revCols = "id, material, seq, content, actor, reason, based_on, state, created_at"
+const revCols = "id, material, seq, content, actor, reason, based_on, state, created_at, summary"
 
 func scanMaterial(r *store.Rows) (Material, error) {
 	var m Material
@@ -162,7 +170,7 @@ func scanRevision(r *store.Rows) (Revision, error) {
 	var v Revision
 	var actor string
 	var seq, at int64
-	if err := r.Scan(&v.ID, &v.Material, &seq, &v.Content, &actor, &v.Reason, &v.BasedOn, &v.State, &at); err != nil {
+	if err := r.Scan(&v.ID, &v.Material, &seq, &v.Content, &actor, &v.Reason, &v.BasedOn, &v.State, &at, &v.Summary); err != nil {
 		return v, err
 	}
 	v.Seq = int(seq)
@@ -418,8 +426,8 @@ func addRevision(c *command.Ctx, material, content, reason, basedOn, state strin
 	v := Revision{ID: id, Material: material, Seq: int(seq), Content: content, Actor: c.Caller.Actor, Reason: reason,
 		BasedOn: basedOn, State: state, At: c.Now().UTC()}
 	actor, _ := json.Marshal(v.Actor)
-	_, err = c.Tx.Exec("INSERT INTO revisions ("+revCols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		v.ID, v.Material, v.Seq, v.Content, string(actor), v.Reason, v.BasedOn, v.State, v.At.UnixNano())
+	_, err = c.Tx.Exec("INSERT INTO revisions ("+revCols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		v.ID, v.Material, v.Seq, v.Content, string(actor), v.Reason, v.BasedOn, v.State, v.At.UnixNano(), "")
 	return v, err
 }
 
@@ -495,7 +503,7 @@ type Result struct {
 	State    string `json:"state"`
 }
 
-// Register 登记 material.commit、revision.confirm、revision.reject、material.revert，kind 只接受内置集合。
+// Register 登记 material.commit、revision.confirm、revision.reject、material.revert、revision.summarize，kind 只接受内置集合。
 func Register(x *command.Executor) error { return RegisterWith(x, nil) }
 
 // RegisterWith 同 Register；src 里能力包声明的 material_kinds 也接受，默认写入策略取包声明（Web 按 kind 设置的优先）。
@@ -503,7 +511,7 @@ func Register(x *command.Executor) error { return RegisterWith(x, nil) }
 // 授权（§14.3）：commit 按"修订材料"（observer 得到 4）；confirm 与 reject 按代答（Web 本人可；delegate 必须附本人原话；
 // 规范属 spec_activation，delegate 得到 20；observer、worker、运行凭据得到 4）；revert 只在 Web（delegate 得到 20，其余得到 4）。
 func RegisterWith(x *command.Executor, src PackSource) error {
-	for _, sp := range []command.Spec{commit(src), confirm(), reject(), revert()} {
+	for _, sp := range []command.Spec{commit(src), confirm(), reject(), revert(), summarize()} {
 		if err := x.Register(sp); err != nil {
 			return err
 		}
@@ -854,6 +862,67 @@ func revert() command.Spec {
 				return nil, err
 			}
 			return Result{m.ID, nv.ID, StateCurrent}, nil
+		},
+	}
+}
+
+type summarizeIn struct {
+	ID      string `json:"id"` // 修订 id
+	Summary string `json:"summary"`
+}
+
+// summarize 写入修订的变更摘要（内核起草后以 system 身份调用，没有 HTTP 入口）。只写一次：已有摘要返回冲突。
+// 摘要不改修订内容与状态，也不触发生效。
+func summarize() command.Spec {
+	parse := func(in json.RawMessage) (summarizeIn, error) {
+		var v summarizeIn
+		return v, decode(in, &v)
+	}
+	return command.Spec{
+		Name: "revision.summarize", Action: authz.ActionReviseMaterial,
+		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, err := parse(in)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			o, _, _, err := revisionObject(tx, v.ID)
+			return o, err
+		},
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+			v, err := parse(in)
+			if err != nil {
+				return err
+			}
+			if blank(v.Summary) {
+				return invalid("summary is required")
+			}
+			_, _, r, err := revisionObject(tx, v.ID)
+			if err != nil {
+				return err
+			}
+			if r.Summary != "" {
+				return conflict("revision already has a summary", "nothing to do")
+			}
+			return nil
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			v, err := parse(c.Input)
+			if err != nil {
+				return nil, err
+			}
+			_, m, r, err := revisionObject(c.Tx, v.ID)
+			if err != nil {
+				return nil, err
+			}
+			r.Summary = strings.TrimSpace(v.Summary)
+			if _, err := c.Tx.Exec("UPDATE revisions SET summary = ? WHERE id = ?", r.Summary, r.ID); err != nil {
+				return nil, err
+			}
+			if _, err := c.Emit(domain.Event{Type: EvRevisionSummarized, Object: m.ID, Reason: "revision summary drafted",
+				Payload: snapshot(m, r, nil)}); err != nil {
+				return nil, err
+			}
+			return Result{m.ID, r.ID, r.State}, nil
 		},
 	}
 }
