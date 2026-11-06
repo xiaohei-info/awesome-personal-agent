@@ -377,6 +377,13 @@ func TestContentReadsViaReaderAndCaches(t *testing.T) {
 	if got := e.entry(t, id).Commit; got != r.commit {
 		t.Fatalf("latest commit not recorded: %q", got)
 	}
+	e.st.View(bg, func(tx *store.Tx) error {
+		rs, err := proc.List(tx)
+		if len(rs) != 1 || !rs[0].Explicit {
+			t.Fatalf("opening a hosted doc must be an explicit run: %+v", rs)
+		}
+		return err
+	})
 	runs := e.runs(t)
 	if v2, _ := e.svc.Content(bg, id); v2.Status != StatusReady || e.runs(t) != runs {
 		t.Fatalf("cache hit must not start another run: %+v runs=%d", v2, e.runs(t))
