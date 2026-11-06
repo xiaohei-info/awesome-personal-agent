@@ -1,5 +1,5 @@
-# sha256: c1a54589c1fc93e3f213b31b155323bbf738d61fb07471fca0f6677802311858
+# sha256: 95a8c609da2a305c0dfe902a510644811b6f6c2cb3b9d0e540ac1a1caacb1db8
 reconcile_audit:
   schema: omac.reconcile-audit/v1
   last_full_scan_at: '2026-11-06T10:07:07Z'
-  completed_interval_ticks: 3
+  completed_interval_ticks: 4
