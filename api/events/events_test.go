@@ -117,7 +117,7 @@ func codeOf(t *testing.T, rec *httptest.ResponseRecorder) domain.Code {
 // ACT-EVT-03：observer 读到事件，信封不含正文/reason/证据；无凭据 401。
 func TestObserverReadsEnvelopesAndAnonymousIsRefused(t *testing.T) {
 	e := setup(t, 0)
-	e.emit("item.created", "item_1", `{"title":"T1","body":"SECRET-BODY"}`)
+	e.emit("item.created", "item_1", `{"item":{"title":"T1","summary":"SECRET-BODY"}}`)
 	e.emit("item.phase_changed", "item_1", `{}`)
 	obs := e.token(auth.Observer, "")
 

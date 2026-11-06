@@ -81,7 +81,7 @@ func (r *rig) emit(typ, obj, title string) {
 	r.t.Helper()
 	err := r.st.Update(bg, func(tx *store.Tx) error {
 		_, err := eventlog.Append(tx, domain.Event{Type: typ, Object: obj, Actor: human, Reason: "SECRET-REASON",
-			Evidence: "SECRET-EVIDENCE", Payload: json.RawMessage(`{"title":"` + title + `"}`)})
+			Evidence: "SECRET-EVIDENCE", Payload: json.RawMessage(`{"item":{"title":"` + title + `"}}`)})
 		return err
 	})
 	if err != nil {
