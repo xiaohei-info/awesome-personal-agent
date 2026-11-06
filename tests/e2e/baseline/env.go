@@ -212,14 +212,17 @@ func (e *Env) Init() Result {
 }
 
 // Serve 把监听改为本机空闲端口后启动 `apa serve` 并登录 Web；须先 Init。
-func (e *Env) Serve() {
+func (e *Env) Serve() { e.T.Helper(); e.ServeWith("") }
+
+// ServeWith 同 Serve，并把 extra（config.yaml 的附加行，如验收时调小的投递时限）追加到配置里。
+func (e *Env) ServeWith(extra string) {
 	e.T.Helper()
 	port, err := freePort()
 	if err != nil {
 		e.fatal("%v", err)
 	}
 	cfg := filepath.Join(e.Home, "config.yaml")
-	if err := os.WriteFile(cfg, []byte("listen: "+loopback+":"+port+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfg, []byte("listen: "+loopback+":"+port+"\n"+extra), 0o644); err != nil {
 		e.fatal("%v", err)
 	}
 	e.startServe(port)
