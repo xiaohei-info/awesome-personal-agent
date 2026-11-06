@@ -9,6 +9,80 @@ meta:
   - 01a1a720-f7fd-719e-91d8-f5032216143f
   - 01a1a720-fa34-79ff-9662-cdf8dac90a21
   - 01a1aa40-ef12-766f-86e2-bead6a7c7b51
+  amendment_revision: 1
+  amendment_apply:
+    schema: omac.amendment-apply/v1
+    amendment_id: amend-3ac49b74800d
+    amendment_file: .omac/apa.system-amendment.yaml
+    nodes:
+      fix.hermes-plugin-headless.27e69d:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-3cdd2a8c75244df71b85431a
+      e2e-bg-main-live:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1b0fd-e3f3-792b-bd58-f37ff4797f33
+        baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: null
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 1dd66b464ec96f9b62a55f348826515eb645045d74d6e71d569bbe943efd7c5a
+          worker_handoff_pending: true
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+        expected_contract_sha256: 1dd66b464ec96f9b62a55f348826515eb645045d74d6e71d569bbe943efd7c5a
+        expected_review_generation: amendment-84e21c00589018611f3fc36e
+        attempt_baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: null
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 1dd66b464ec96f9b62a55f348826515eb645045d74d6e71d569bbe943efd7c5a
+          worker_handoff_pending: true
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-84e21c00589018611f3fc36e
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 1dd66b464ec96f9b62a55f348826515eb645045d74d6e71d569bbe943efd7c5a
+          worker_handoff_pending: false
+    system: true
+  last_amendment_id: amend-3ac49b74800d
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
@@ -12719,6 +12793,7 @@ nodes:
   - kernel-bg-resume
   - e2e-env-baseline
   - cli-init-serve
+  - fix.hermes-plugin-headless.27e69d
   title: 真实 Hermes：后台主会话与续接
   description: 产出 e2e-bg-main-live-live-evidence。是 flow-bg-main-session、flow-bg-resume
     的唯一全流程 owner。 派给 omac-worker-frontend 是因为它运行在 Mac mini 上，该主机有真实 Hermes 和 ego-browser。
@@ -13465,3 +13540,89 @@ nodes:
       producer: repo-ci-redline
       evidence_mode: artifact
     coverage_gate: 0
+- id: fix.hermes-plugin-headless.27e69d
+  worker: omac-worker-frontend
+  blocked_by:
+  - hermes-plugin-tools
+  - kernel-bg-resume
+  - pack-background-run
+  - web-settings-exec
+  - cli-why
+  title: 'Fix hermes-plugin-headless: dfx-27e69d9e5716'
+  description: "Automatic fix for upstream defect(s) reported by e2e-bg-main-live.\n\n-
+    [design-gap] anchors flow-bg-resume/ACT-RES-04 (docs/solution-design.md#136-后台执行无人值守与会话续接)\n
+    \ expected: Design 13.6: when the session is invalid, continue with a new session
+    plus item context (ACT-RES-04: switch to a new session, item continues).\n  observed:
+    Real Hermes: resume of a deleted session exits 1 and the item is sent to needs_input;
+    resume.session_lost never fires because the Hermes declaration has no session_missing
+    exit code and the kernel cannot recognise the error otherwise.\n  where: plugins/hermes/headless/declaration.json:exit_codes;
+    kernel/resume/resume.go:session_missing detection\n  repro: `tests/live/background/run-on-taiyi.sh
+    -run SessionLost -v` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-27e69d9e5716 in hermes-plugin-headless:
+      Design 13.6: when the session is invalid, continue with a new session plus item
+      context (ACT-RES-04: switch to a new session, item continues).'
+    non_goals:
+    - 不依赖钩子提供上下文
+    - 标志按版本实测，不照抄附录示例
+    - 插件只做"读 stdin、调内核、写 stdout"，不含判断逻辑
+    - 钩子失败必须放行，不影响 Hermes
+    verification_commands:
+    - python3 -m pytest -q plugins/hermes/tests/headless
+    - tests/live/background/run-on-taiyi.sh -run SessionLost -v
+    integration_gates:
+    - name: hermes-plugin-headless-gate
+      layer: L3
+      source_of_truth:
+      - docs/solution-design.md#115-无头运行与续接
+      - docs/appendix-a-harness.md#a2-无头运行声明
+      - docs/appendix-a-harness.md#a3-各-harness-的无头运行细节
+      - docs/appendix-a-harness.md#a5-插件组合参考
+      - docs/solution-design.md#213-需实测的-harness-行为
+      delivery_goal: 插件声明 `hermes chat -q --oneshot` 的无头运行、权限档位、session 取法和 --resume，主会话角色运行能读上下文、委派、回执并续接
+      covers:
+      - ACT-BGM-04
+      - ACT-BGM-06
+      - ACT-BGM-07
+      - ACT-RES-01
+      - ACT-RES-02
+      acceptance_refs:
+      - flow-bg-main-session
+      - flow-bg-resume
+      commands:
+      - python3 -m pytest -q plugins/hermes/tests/headless/test_live.py
+    pr_base: main
+    acceptance_refs:
+    - flow-bg-resume
+    source_of_truth:
+    - docs/solution-design.md#115-无头运行与续接
+    - docs/appendix-a-harness.md#a2-无头运行声明
+    - docs/appendix-a-harness.md#a3-各-harness-的无头运行细节
+    - docs/appendix-a-harness.md#a5-插件组合参考
+    - docs/solution-design.md#213-需实测的-harness-行为
+    scope_paths:
+    - plugins/hermes/headless/**
+    evidence_mode: live
+    consumes:
+    - artifact_id: hermes-plugin-tools-plugin
+      producer: hermes-plugin-tools
+      evidence_mode: artifact
+    - artifact_id: kernel-bg-resume-module
+      producer: kernel-bg-resume
+      evidence_mode: artifact
+    - artifact_id: pack-background-run-pack
+      producer: pack-background-run
+      evidence_mode: artifact
+    - artifact_id: web-settings-exec-page
+      producer: web-settings-exec
+      evidence_mode: artifact
+    - artifact_id: cli-why-commands
+      producer: cli-why
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-27e69d9e5716
+    coverage_gate: 70

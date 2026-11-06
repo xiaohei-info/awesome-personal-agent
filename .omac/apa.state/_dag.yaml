@@ -1,12 +1,13 @@
-# sha256: 6cce953dbfcfb7934aca600518b50305ecc197731ec4ea70c1d0e5cd2621c867
+# sha256: 10d03d29c5519a57574c9e80ded9836d46249f187df5b1871745e9cba84b043c
 reconcile_audit:
   schema: omac.reconcile-audit/v1
   last_full_scan_at: '2026-11-06T15:05:21Z'
-  completed_interval_ticks: 18
+  completed_interval_ticks: 19
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 0
-  used_by_reporter: {}
+  used_global: 1
+  used_by_reporter:
+    e2e-bg-main-live: 1
   granted_by_reporter: {}
   entries:
     dfx-5dd4c0c9998f:
@@ -23,4 +24,12 @@ defects:
       reporters:
       - e2e-source-calendar-live
       state: needs-owner
+    dfx-27e69d9e5716:
+      suspected: hermes-plugin-headless
+      anchors:
+      - flow-bg-resume/ACT-RES-04
+      reporters:
+      - e2e-bg-main-live
+      state: fixing
+      fix_node: fix.hermes-plugin-headless.27e69d
   inbox: []
