@@ -71,7 +71,7 @@ func classify(ctx context.Context, err error, stderr []byte) error {
 	return fail(ExitTemporary, "%s 失败: %v: %s", tool, err, msg)
 }
 
-// envelope 是 `envelope list` 输出的一项；message_id 缺失视为输出无法解析。
+// envelope 是 `envelope list` 输出的一项；需要 message_id 的版本范围里缺失视为输出无法解析。
 type envelope struct {
 	ID        flexString `json:"id"`
 	MessageID string     `json:"message_id"`
@@ -104,9 +104,9 @@ func (f flexString) String() string { return string(f) }
 
 var dateLayouts = []string{time.RFC3339Nano, "2006-01-02 15:04Z07:00", "2006-01-02 15:04:05Z07:00"}
 
-func (e envelope) toEvent() (event, time.Time, error) {
+func (e envelope) toEvent(needID bool) (event, time.Time, error) {
 	id := strings.TrimSpace(e.MessageID)
-	if id == "" {
+	if needID && id == "" {
 		return event{}, time.Time{}, errors.New("缺少 Message-ID")
 	}
 	if e.ID == "" {
@@ -131,6 +131,16 @@ func (e envelope) toEvent() (event, time.Time, error) {
 		subj = "(无主题)" // subject 是标准事件必填字段
 	}
 	return event{ID: id, Type: "mail.received", Subject: subj, OccurredAt: at.UTC().Format(time.RFC3339Nano), Sender: sender}, at, nil
+}
+
+// splitMessageID 拆开 `message read -H Message-ID` 的输出："Message-ID: <id>\n\n正文"。
+func splitMessageID(s string) (id, body string, err error) {
+	head, body, _ := strings.Cut(s, "\n\n")
+	v, ok := strings.CutPrefix(head, "Message-ID:")
+	if id = strings.Join(strings.Fields(v), ""); !ok || id == "" {
+		return "", "", errors.New("缺少 Message-ID")
+	}
+	return id, body, nil
 }
 
 func truncate(s string) string {

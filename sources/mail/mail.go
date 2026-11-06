@@ -37,8 +37,10 @@ const (
 
 // Supported 声明支持的工具版本范围 [Min, Max) 及该范围内的 JSON 标志（参数在不同版本不同，§9.7）。
 // Sample 是 testdata/ 下对应录制样本目录；放宽范围前必须先加样本（契约测试会检查）。
+// IDFromRead：envelope JSON 不带 message_id（1.1.0 实测），改从 `message read -H Message-ID` 取；
+// 2.x 范围未实测，样本沿用 envelope 带 message_id 的假设，拿到真实输出后再核对。
 var Supported = []VersionRange{
-	{Min: ver{1, 0, 0}, Max: ver{2, 0, 0}, JSONFlag: []string{"--output", "json"}, Sample: "1.1.0"},
+	{Min: ver{1, 0, 0}, Max: ver{2, 0, 0}, JSONFlag: []string{"--output", "json"}, Sample: "1.1.0", IDFromRead: true},
 	{Min: ver{2, 0, 0}, Max: ver{3, 0, 0}, JSONFlag: []string{"--json"}, Sample: "2.0.0"},
 }
 
@@ -58,6 +60,8 @@ type VersionRange struct {
 	Min, Max ver
 	JSONFlag []string
 	Sample   string
+	// IDFromRead 为真时 Message-ID 经 message read 的头部取得，而非 envelope JSON。
+	IDFromRead bool
 }
 
 // Input 是 stdin 的 Source 契约输入。
@@ -219,7 +223,7 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 		}
 		reachedOld := false
 		for i, e := range envs {
-			ev, at, err := e.toEvent()
+			ev, at, err := e.toEvent(!vr.IDFromRead)
 			if err != nil {
 				return nil, fail(ExitConfig, "第 %d 页第 %d 封无法解析: %v", page, i, err)
 			}
@@ -254,7 +258,11 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 			break // 单次运行超时：已读部分照常输出，游标只到已读部分，下次接着读
 		}
 		// --preview：不把邮件标为已读（§9.7 只读）。
-		body, err := call(ctx, r, append(append(base("message", "read"), "--preview", it.ref), vr.JSONFlag...))
+		read := append(base("message", "read"), "--preview")
+		if vr.IDFromRead {
+			read = append(read, "-H", "Message-ID") // 与读正文同一次调用，不增加往返
+		}
+		body, err := call(ctx, r, append(append(read, it.ref), vr.JSONFlag...))
 		if err != nil {
 			if n > 0 && ctx.Err() != nil {
 				break
@@ -264,6 +272,11 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 		var text string
 		if err := json.Unmarshal(body, &text); err != nil {
 			return nil, fail(ExitConfig, "message read 输出不是 JSON 字符串: %v", err)
+		}
+		if vr.IDFromRead {
+			if it.ev.ID, text, err = splitMessageID(text); err != nil {
+				return nil, fail(ExitConfig, "message read 输出无法解析: %v", err)
+			}
 		}
 		it.ev.Detail = truncate(text)
 		// 游标最多到当前时间：发件人控制的 Date 不可信，未来日期不能让后续邮件被永久越过。
