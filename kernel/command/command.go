@@ -56,6 +56,8 @@ type Caller struct {
 	// RunScope 只有运行凭据有值：据账本判断授权对象是否在运行范围内（目标事项及其子事项 / 目标事项所属项目）。
 	// 管线用它填 authz.Object 的 InRunScope、InRunProject，命令自己不必也无法声明。
 	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
+	// RunDepth 只有运行凭据有值：运行记录的链路深度，本运行发出的命令据它继承（§14.9）。
+	RunDepth int
 }
 
 // Identity 在事务内把请求携带的凭据确定为 Caller。
@@ -109,12 +111,13 @@ func (t Trusted) Authenticate(*store.Tx) (Caller, error) {
 type ChainMode int
 
 const (
-	ChainNew     ChainMode = iota // 新链路，深度 0（本人显式发起）
-	ChainInherit                  // 规则动作、回执、任务委派：继承并加一
+	ChainAuto    ChainMode = iota // 零值：调用方未指明，由管线按调用者与命令推定（resolveDepth）
+	ChainInherit                  // 规则动作：继承来源对象并加一
 	ChainKeep                     // 提问、定时、挂靠消息：继承不加
 )
 
 // Chain 指明深度来源对象；深度数值只由内核从账本里该对象最近一条事件读取。
+// 对外入口不填它，深度由 resolveDepth 按调用者与命令推定。
 type Chain struct {
 	Mode ChainMode
 	From string
@@ -470,10 +473,10 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 		}
 	}
 	// 规则动作必须继承（§14.9）；只有本人显式发起才开新链路。
-	if caller.Actor.Via == domain.ViaRule && req.Chain.Mode == ChainNew {
+	if caller.Actor.Via == domain.ViaRule && req.Chain.Mode == ChainAuto {
 		return Result{}, Commit{}, invalid("rule action must inherit chain depth from a source object")
 	}
-	depth, err := chainDepth(tx, req.Chain)
+	depth, err := resolveDepth(tx, spec, caller, obj, req.Chain)
 	if err != nil {
 		return Result{}, Commit{}, err
 	}
@@ -492,8 +495,9 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 	// 4 事务
 	var out Result
 	var value any
-	if depth > x.MaxChainDepth {
-		// 超阈值只记录不派发（健康类投递由 kernel/health 据该事件统一产出）。
+	// 超阈值只记录不派发（健康类投递由 kernel/health 据该事件统一产出）。本人在 Web 的操作照常生效：深度照样沿用，
+	// 但本人就是熔断后的处理者，拦下他会让被熔断的事项既改不了也放弃不了。
+	if depth > x.MaxChainDepth && caller.Level != authz.LevelWeb {
 		if _, err := c.Emit(domain.Event{Type: domain.EvHealthAlert, Object: objectOrCommand(obj, spec),
 			Reason:  "chain depth exceeded",
 			Payload: mustJSON(map[string]any{"command": spec.Name, "chain_depth": depth, "threshold": x.MaxChainDepth})}); err != nil {
@@ -615,11 +619,27 @@ func loadVersion(tx *store.Tx, object string) (int64, error) {
 	return v, err
 }
 
+// resolveDepth 得出本命令的链路深度（§14.9）。继承规则只在这里：
+//   - 运行凭据发出的命令一律继承自本次运行并加一。基数取运行记录的深度（拉起时已按规则加过一），
+//     不取目标事项最近一条事件，否则同一运行连写几次就把深度推高；
+//   - 进程内调用方指明了来源（规则、时钟、挂靠消息）：按来源对象最近一条事件；
+//   - 未指明（对外入口都如此）：本人在 Web 显式委派开始新链路；其余命令沿用对象当前深度，
+//     回执、委派、提问与回答都不清零。新建的对象还没有事件，从 0 开始。
+func resolveDepth(tx *store.Tx, spec Spec, caller Caller, obj authz.Object, c Chain) (int, error) {
+	if caller.Level == authz.LevelRun {
+		return caller.RunDepth + 1, nil
+	}
+	if c.Mode == ChainAuto {
+		if obj.ID == "" || (spec.Action == authz.ActionDelegate && caller.Level == authz.LevelWeb) {
+			return 0, nil
+		}
+		c = Chain{Mode: ChainKeep, From: obj.ID}
+	}
+	return chainDepth(tx, c)
+}
+
 // chainDepth 从账本读取来源对象最近一条事件的深度（shortcut: 读全部事件取末条，事件量大时给 eventlog 加按对象取末条的接口）。
 func chainDepth(tx *store.Tx, c Chain) (int, error) {
-	if c.Mode == ChainNew {
-		return 0, nil
-	}
 	if c.Mode != ChainInherit && c.Mode != ChainKeep {
 		return 0, invalid("unknown chain mode")
 	}
