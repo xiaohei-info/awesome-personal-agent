@@ -624,6 +624,54 @@ func TestAttachKeepsItemChainDepth(t *testing.T) {
 	}
 }
 
+// ACT-CAL-03：同一来源对象的更新（同去重域、同关联键）写回它建出的 proposed 事项，不新建、不进判断。
+func TestSourceObjectUpdateRefreshesProposedItem(t *testing.T) {
+	e := newEnv(t)
+	e.emit(comment("u1", "obj#1"))
+	item := e.msg("u1").Item
+	before, calls := e.itemCount(), len(e.stub.Requests())
+
+	e.emit(comment("u2", "obj#1"))
+
+	m := e.msg("u2")
+	if m.Disposition != domain.DispositionAttached || m.AttachState != runner.AttachProcessed || m.Item != item {
+		t.Fatalf("update %+v", m)
+	}
+	if e.itemCount() != before || len(e.stub.Requests()) != calls {
+		t.Fatalf("update created an item or reached triage: items %d -> %d", before, e.itemCount())
+	}
+	if it := e.item(item); it.Title != "review u2" || it.Phase != domain.PhaseProposed {
+		t.Fatalf("item not refreshed: %+v", it)
+	}
+	if f := e.forward(item, nil); len(f.Messages) != 0 {
+		t.Fatalf("applied update must not be forwarded: %+v", f)
+	}
+}
+
+// 已关闭的事项不挂靠：之后同一对象的更新按新事件处理；已写回的更新在关闭时也不退回判断流。
+func TestSourceObjectUpdateSkipsClosedItem(t *testing.T) {
+	e := newEnv(t)
+	e.emit(comment("u1", "obj#1"))
+	item := e.msg("u1").Item
+	e.emit(comment("u2", "obj#1"))
+	e.must(owner, "item.transition", map[string]any{"id": item, "to": "dropped", "reason": "不要了"})
+	e.noErrs()
+	if got := e.msg("u2").AttachState; got != runner.AttachProcessed {
+		t.Fatalf("applied update moved to %s on close", got)
+	}
+	before := e.itemCount()
+
+	e.emit(comment("u3", "obj#1"))
+
+	m := e.msg("u3")
+	if m.Disposition != domain.DispositionProposed || m.AttachState != "" || m.Item == item || e.itemCount() != before+1 {
+		t.Fatalf("event after close %+v, items %d -> %d", m, before, e.itemCount())
+	}
+	if it := e.item(item); it.Title != "review u2" || it.Phase != domain.PhaseDropped {
+		t.Fatalf("closed item touched: %+v", it)
+	}
+}
+
 func TestNewRequiresStoreAndExec(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("New without Store and Exec must fail")

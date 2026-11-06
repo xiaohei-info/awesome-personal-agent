@@ -81,7 +81,7 @@ func TestRecordedSamplesCoverEveryDeclaredVersionAndConvert(t *testing.T) {
 	want := event{
 		ID: "uid-insurance@google.com||2026-03-01T08:00:00.000Z", Type: "event.created", Subject: "保险到期日",
 		Summary: "2026-03-20", Detail: "续保前联系经纪人", Link: "https://calendar.google.com/event?eid=a1",
-		OccurredAt: "2026-03-20T00:00:00Z", CorrelationKeys: []string{"cal:uid-insurance@google.com"}, Sender: "me@example.com",
+		OccurredAt: "2026-03-20T00:00:00Z", CorrelationKeys: []string{"uid-insurance@google.com|"}, Sender: "me@example.com",
 	}
 	if g := evs[0]; g.ID != want.ID || g.Type != want.Type || g.Subject != want.Subject || g.Summary != want.Summary ||
 		g.Detail != want.Detail || g.Link != want.Link || g.OccurredAt != want.OccurredAt || g.Sender != want.Sender ||
@@ -119,6 +119,22 @@ func TestEventIDDistinguishesInstancesAndUpdates(t *testing.T) {
 	_, after, _ := do(t, fakeTool(version, bumped, nil, ""), in)
 	if g := decode(t, after)[1]; g.ID == evs[1].ID || !strings.HasPrefix(g.ID, "uid-dentist@google.com||") {
 		t.Fatalf("更新应产生同 UID 的新 id: %q", g.ID)
+	}
+}
+
+// ACT-CAL-03：新建日程的 created 只到秒、updated 带毫秒，仍判为 event.created；改过之后才是 event.updated。
+// 关联键是 UID|RECURRENCE-ID，同一日程的各版本共用。
+func TestNewEventWithMillisecondUpdatedIsCreated(t *testing.T) {
+	mk := func(updated string) event {
+		_, lines, _ := do(t, fakeTool("0.9.2", `[{"id":"x","iCalUID":"u1","summary":"s","created":"2026-03-07T10:00:00.000Z","updated":"`+updated+`","start":{"dateTime":"2026-03-12T09:30:00Z"}}]`, nil, ""), in)
+		return decode(t, lines)[0]
+	}
+	fresh, edited := mk("2026-03-07T10:00:00.537Z"), mk("2026-03-07T10:05:12.204Z")
+	if fresh.Type != "event.created" || edited.Type != "event.updated" {
+		t.Fatalf("fresh=%s edited=%s", fresh.Type, edited.Type)
+	}
+	if fresh.ID == edited.ID || len(fresh.CorrelationKeys) != 1 || fresh.CorrelationKeys[0] != "u1|" || edited.CorrelationKeys[0] != "u1|" {
+		t.Fatalf("ids %q %q keys %v %v", fresh.ID, edited.ID, fresh.CorrelationKeys, edited.CorrelationKeys)
 	}
 }
 
