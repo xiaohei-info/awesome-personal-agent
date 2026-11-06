@@ -1132,7 +1132,9 @@ SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6�
 
 **gog 实测结论（v0.9.0）**：没有 `--readonly`，传入即以 `unknown flag` 失败；`--enable-commands` 只认顶层命令，写成 `calendar.events` 之类的子命令会连 `calendar` 一起禁用。API 命令要 `--account`（或 gog 自己的缺省账号），使用文件 keyring 时还要 `GOG_KEYRING_PASSWORD`；没有该账号的令牌时以退出码 1 失败，stderr 为 `No auth for calendar <账号>`，适配器据此按认证失败返回 2。
 
-**需实测，结论写回本节**。首版工具：gog calendar 的增量查询方式，JSON 中是否带 UID、RECURRENCE-ID 和更新时间，以及重复事件的展开；这两个工具的认证失败能否从退出码或 stderr 可靠识别。后续适配器接入时：gog 邮件结果的粒度（线程或消息）及其增量查询方式；`khal list --json` 没有更新时间字段时如何识别更新，以及重复事件的展开。
+**gog calendar 实测结论（v0.9.0，真实 Google 日历）**：`calendar events --from/--to` 返回窗口内的日程，没有增量查询，靠适配器每次取前瞻窗口、内核按事件 id 去重。每个日程带 `iCalUID`、`updated`、`created`；重复日程默认展开为实例，每个实例有自己的 `id`（主日程 id 加 `_<开始时间>`）、同一个 `iCalUID` 和 `originalStartTime`，所以 UID 加 RECURRENCE-ID 能区分实例。已被删除的日程不再出现在列表里。创建命令无法关闭日历默认提醒。认证失败：账号没有令牌（`No auth for calendar`）和 keyring 口令不对（`integrity check failed`）都能从 stderr 识别，适配器按认证失败返回 2。
+
+**需实测，结论写回本节**。首版工具：gog calendar 的增量查询方式，JSON 中是否带 UID、RECURRENCE-ID 和更新时间；gog 的认证失败识别已实测（见上）。后续适配器接入时：gog 邮件结果的粒度（线程或消息）及其增量查询方式；`khal list --json` 没有更新时间字段时如何识别更新，以及重复事件的展开。
 
 ---
 
