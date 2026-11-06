@@ -3,7 +3,7 @@
 //   - 自有型材料索引标题、当前修订正文、标签；托管型只索引标题、路径、标签，正文永不进索引。
 //   - 索引是 materials 表的派生数据，本包只读 materials，只写自己的表；每次检索前按签名增量同步，
 //     所以修订、回退、确认都不需要通知本包，索引也可以随时丢弃重建。
-//   - 事项关联由本包的 material.link 命令维护（走命令模型，授权同修订材料）。
+//   - 关联事项筛选读事项中心的类型化关系（item.relate 以材料为终点的边，§6.3）；本包不另存关联。
 //   - 结果只回 id、标题、片段（托管型回路径）。
 package search
 
@@ -17,8 +17,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -30,6 +28,10 @@ var Module = store.Module{Name: "search", Migrations: []store.Migration{{
 CREATE TABLE material_search_state (material TEXT PRIMARY KEY, sig TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE material_links (material TEXT NOT NULL, item TEXT NOT NULL, PRIMARY KEY (material, item)) WITHOUT ROWID;
 CREATE INDEX material_links_item ON material_links (item);`,
+}, {
+	// 关联并入 item.relate（带类型、记 Event）；旧表没有事件来源，无法折叠重建，直接丢弃。
+	Version: 2, Name: "drop-material-links",
+	SQL: `DROP TABLE material_links;`,
 }}}
 
 // 默认与上限结果数。
@@ -246,7 +248,7 @@ func Find(tx *store.Tx, q Query) ([]Hit, error) {
 		args = append(args, t)
 	}
 	if q.Item != "" {
-		where = append(where, "EXISTS (SELECT 1 FROM material_links l WHERE l.material = m.id AND l.item = ?)")
+		where = append(where, "EXISTS (SELECT 1 FROM item_relations l WHERE l.to_id = m.id AND l.from_id = ?)")
 		args = append(args, q.Item)
 	}
 	if !q.After.IsZero() {
@@ -321,65 +323,4 @@ func indexRunes(s, sub []rune) int {
 		}
 	}
 	return -1
-}
-
-// ---- 事项关联 ----
-
-type linkIn struct {
-	Material string `json:"material"`
-	Item     string `json:"item"`
-	Remove   bool   `json:"remove,omitempty"`
-}
-
-// Register 登记 material.link：建立或移除材料与事项的关联，授权同修订材料；重复建立与移除不存在的关联都是空操作。
-func Register(x *command.Executor) error {
-	parse := func(in json.RawMessage) (linkIn, error) {
-		var v linkIn
-		if err := json.Unmarshal(in, &v); err != nil {
-			return v, domain.NewError(domain.CodeInvalidRequest, "bad input: "+err.Error(), "fix the request and retry")
-		}
-		return v, nil
-	}
-	return x.Register(command.Spec{
-		Name: "material.link", Action: authz.ActionReviseMaterial,
-		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
-			v, err := parse(in)
-			if err != nil {
-				return authz.Object{}, err
-			}
-			r, err := tx.Query("SELECT kind, project, tags FROM materials WHERE id = ?", v.Material)
-			if err != nil {
-				return authz.Object{}, err
-			}
-			defer r.Close()
-			if !r.Next() {
-				return authz.Object{}, domain.NewError(domain.CodeNotFound, "material "+v.Material+" does not exist", "list materials and retry")
-			}
-			o := authz.Object{ID: v.Material}
-			var tags string
-			if err := r.Scan(&o.Kind, &o.Project, &tags); err != nil {
-				return o, err
-			}
-			return o, json.Unmarshal([]byte(tags), &o.Tags)
-		},
-		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
-			v, err := parse(in)
-			if err == nil && strings.TrimSpace(v.Item) == "" {
-				err = domain.NewError(domain.CodeInvalidRequest, "item is required", "pass the item id")
-			}
-			return err
-		},
-		Apply: func(c *command.Ctx) (any, error) {
-			v, err := parse(c.Input)
-			if err != nil {
-				return nil, err
-			}
-			if v.Remove {
-				_, err = c.Tx.Exec("DELETE FROM material_links WHERE material = ? AND item = ?", v.Material, v.Item)
-			} else {
-				_, err = c.Tx.Exec("INSERT OR IGNORE INTO material_links (material, item) VALUES (?, ?)", v.Material, v.Item)
-			}
-			return v, err
-		},
-	})
 }

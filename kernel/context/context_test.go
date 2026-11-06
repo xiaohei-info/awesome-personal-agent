@@ -17,6 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -34,7 +35,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, materials.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -52,6 +53,9 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	if err := decisions.Register(x); err != nil {
+		t.Fatal(err)
+	}
+	if err := materials.Register(x); err != nil {
 		t.Fatal(err)
 	}
 	return &env{st: st, x: x}
@@ -348,6 +352,37 @@ func TestProjectContextIsIncremental(t *testing.T) {
 	r3 := e.build(t, req)
 	if r3.Project == nil || !strings.Contains(r3.Inject(), "允许的执行者：仅本人") {
 		t.Fatalf("project change must be resent: %+v", r3.Project)
+	}
+}
+
+// ACT-MAT-10：项目上下文带作用域内材料的标题与变更摘要，不带正文；按游标增量，别的项目的材料不出现。
+func TestProjectMaterialsTitleAndSummaryOnly(t *testing.T) {
+	e := setup(t)
+	pid := e.project(t, "P", "https://git.example/p.git", "box", "/w/p")
+	other := e.project(t, "O", "https://git.example/o.git", "box", "/w/o")
+	commit := func(in map[string]any) materials.Result {
+		var r materials.Result
+		_ = json.Unmarshal(e.do(t, worker, "material.commit", in), &r)
+		return r
+	}
+	m := commit(map[string]any{"project": pid, "kind": "minutes", "title": "周会纪要", "content": "SECRET-MATERIAL-BODY", "reason": "首版纪要"})
+	commit(map[string]any{"project": other, "kind": "minutes", "title": "别的项目", "content": "x", "reason": "r"})
+	req := Request{Session: "s", Scope: projects.Scope{Flag: pid}}
+
+	r := e.build(t, req)
+	if len(r.Materials) != 1 || r.Materials[0] != (MaterialEntry{ID: m.Material, Title: "周会纪要", Kind: "minutes", Summary: "首版纪要"}) {
+		t.Fatalf("materials: %+v", r.Materials)
+	}
+	out := r.Inject()
+	if !strings.Contains(out, "周会纪要") || !strings.Contains(out, "首版纪要") || strings.Contains(out, "SECRET-MATERIAL-BODY") {
+		t.Fatalf("inject must carry title and summary only:\n%s", out)
+	}
+	if r2 := e.build(t, req); len(r2.Materials) != 0 {
+		t.Fatalf("unchanged material must not be resent: %+v", r2.Materials)
+	}
+	commit(map[string]any{"id": m.Material, "content": "v2", "reason": "补充结论", "based_on": m.Revision})
+	if r3 := e.build(t, req); len(r3.Materials) != 1 || r3.Materials[0].Summary != "补充结论" {
+		t.Fatalf("changed material must be resent with its summary: %+v", r3.Materials)
 	}
 }
 

@@ -3,7 +3,9 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
@@ -13,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -42,7 +45,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, policy.Module, command.Module, proc.Module, delivery.Module,
-		registry.Module, runner.Module, agentsmd.Module} {
+		registry.Module, runner.Module, agentsmd.Module, chain.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -268,5 +271,144 @@ func TestCollectRequiresDeliveries(t *testing.T) {
 	e := setup(t)
 	if err := e.st.View(bg, func(tx *store.Tx) error { _, err := Collect(tx, Options{}); return err }); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+// sync 跑一遍健康告警的投递产出，返回全部健康类投递（按产出顺序）。
+func (e *env) sync() []domain.Delivery {
+	e.t.Helper()
+	var out []domain.Delivery
+	e.update(func(tx *store.Tx) (err error) {
+		if err = NewNotifier(e.q).Sync(tx); err == nil {
+			out, err = e.q.Unread(tx)
+		}
+		return
+	})
+	return out
+}
+
+// 所有健康告警经同一处产出健康类投递：链路熔断与来源失败各一条、不重复；初筛失败只进健康视图；重复消费幂等。
+func TestEveryAlertYieldsOneHealthDeliveryExceptScreening(t *testing.T) {
+	e := setup(t)
+	e.event(domain.EvHealthAlert, "item_1", chain.ExceededReason, map[string]any{"command": "delegate.create", "chain_depth": 4, "threshold": 3})
+	e.event(domain.EvHealthAlert, "src_a", "source src_a disabled after permanent failure (exit 3): bad token", map[string]any{"kind": "source", "source_id": "src_a"})
+	e.event(domain.EvHealthAlert, "item_2", "web_only screening did not complete: model timeout", map[string]any{"kind": ScreeningKind})
+	e.event(domain.EvHealthAlert, "rule:inbound/x", RuleFallbackReason, map[string]string{"rule": "inbound/x"})
+	e.event(domain.EvHealthAlert, "item_1", chain.ExceededReason, map[string]any{"command": "item.create", "chain_depth": 5, "threshold": 3})
+
+	first := e.sync()
+	if len(first) != 4 {
+		t.Fatalf("deliveries = %+v", first)
+	}
+	byItem := map[string][]domain.Delivery{}
+	for _, d := range first {
+		if d.Class != domain.DeliveryHealth || d.Route != delivery.RouteWeb || !strings.HasPrefix(d.ID, "health:") {
+			t.Fatalf("delivery = %+v", d)
+		}
+		byItem[d.Item] = append(byItem[d.Item], d)
+	}
+	if len(byItem["item_1"]) != 2 || len(byItem["src_a"]) != 1 || len(byItem["rule:inbound/x"]) != 1 || len(byItem["item_2"]) != 0 {
+		t.Fatalf("by item = %+v", byItem)
+	}
+	if d := byItem["item_1"][0]; !strings.Contains(d.Content.Summary, "超过阈值 3") || d.Content.WebURL != "/items/item_1" {
+		t.Fatalf("trip delivery = %+v", d)
+	}
+	if d := byItem["src_a"][0]; !strings.Contains(d.Content.Summary, "bad token") || d.Content.WebURL != "/health" {
+		t.Fatalf("source delivery = %+v", d)
+	}
+	if again := e.sync(); len(again) != 4 {
+		t.Fatalf("repeat sync changed deliveries: %+v", again)
+	}
+}
+
+// 没有对象的命令被拦下时 Object 是命令名，投递不带指向它的链接。
+func TestObjectlessTripHasNoItemLink(t *testing.T) {
+	e := setup(t)
+	e.event(domain.EvHealthAlert, "item.create", chain.ExceededReason, map[string]any{"command": "item.create", "chain_depth": 9, "threshold": 8})
+	if ds := e.sync(); len(ds) != 1 || ds[0].Content.WebURL != "/health" {
+		t.Fatalf("deliveries = %+v", ds)
+	}
+}
+
+// ACT-PACK-04：能力包加载失败经加载器的 OnReject 记 health.alert，产出一条健康类投递；同一内容再加载不重复。
+func TestPackRejectionYieldsOneHealthDelivery(t *testing.T) {
+	e := setup(t)
+	l := packs.New(packs.Options{Builtin: fstest.MapFS{"brief/pack.yaml": {Data: []byte("name: brief\nversion: [\n")}}, Kinds: items.NewKinds(),
+		OnReject: func(r packs.Rejection) { e.update(func(tx *store.Tx) error { return PackRejected(tx, r) }) }})
+	for i := 0; i < 2; i++ {
+		if _, err := l.Load(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ds := e.sync()
+	if len(ds) != 1 || ds[0].Item != "pack:brief" || ds[0].Class != domain.DeliveryHealth {
+		t.Fatalf("deliveries = %+v", ds)
+	}
+}
+
+// 路由取策略里健康类的配置。
+func TestHealthRouteFollowsPolicy(t *testing.T) {
+	for in, want := range map[string]string{"": delivery.RouteWeb, "web": delivery.RouteWeb, "inject": delivery.RouteInject,
+		"channel:tg": "channel:tg", "tg": delivery.ChannelRoute("tg")} {
+		p := policy.Default()
+		p.Disturb.Routes = map[string]string{"health": in}
+		if got := route(p); got != want {
+			t.Errorf("route(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// 游标：账本回到较早状态时从头重算，投递幂等。
+func TestSyncRestartsWhenLedgerRewinds(t *testing.T) {
+	e := setup(t)
+	e.update(func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO health_cursor (id, seq) VALUES (1, 9999) ON CONFLICT(id) DO UPDATE SET seq = excluded.seq`)
+		return err
+	})
+	e.event(domain.EvHealthAlert, "src_a", "x", map[string]string{"kind": "source"})
+	if ds := e.sync(); len(ds) != 1 {
+		t.Fatalf("deliveries = %+v", ds)
+	}
+}
+
+// 已有账本升级：健康游标接手 chain 的旧游标，历史告警不被补发。
+func TestCursorInheritedFromChainOnUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	open := func(mods ...store.Module) *store.Store {
+		reg := store.NewRegistry()
+		for _, m := range mods {
+			if err := reg.Register(m); err != nil {
+				t.Fatal(err)
+			}
+		}
+		st, err := store.Open(dir, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	old := open(chain.Module)
+	if err := old.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO chain_cursor (id, seq) VALUES (1, 7)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+	st := open(chain.Module, Module)
+	defer st.Close()
+	var seq int64
+	if err := st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT seq FROM health_cursor WHERE id = 1`)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		if r.Next() {
+			err = r.Scan(&seq)
+		}
+		return err
+	}); err != nil || seq != 7 {
+		t.Fatalf("cursor = %d, %v", seq, err)
 	}
 }

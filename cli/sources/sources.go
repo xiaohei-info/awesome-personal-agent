@@ -1,4 +1,4 @@
-// Package sources 是 apa 的来源命令组（附录 B.1「来源」）：list/show/add/enable/disable、webhook create|rotate|revoke、ingests、replay，
+// Package sources 是 apa 的来源命令组（附录 B.1「来源」）：list/show/add/enable/disable、webhook create|rotate|revoke、ingests、rejects、replay，
 // 以及本机的 `apa source auth <id>`（设计 §4.2：启动附带拉取程序的认证模式，凭据写入来源自己的目录，内核不读）。
 // 除 auth 外只是内核 /v1/sources 的薄客户端：授权、校验、可执行命令只 Web（退出码 20）都由内核判定。
 package sources
@@ -19,7 +19,7 @@ import (
 )
 
 const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--config JSON] [--enabled=false] | " +
-	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | replay <ingest-id> | auth <id>"
+	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | auth <id>"
 
 func init() { client.Register("source", source) }
 
@@ -73,6 +73,12 @@ func source(c *client.Ctx, args []string) error {
 			return err
 		}
 		return call(c, "GET", "/sources/"+url.PathEscape(id)+"/ingests", nil)
+	case "rejects":
+		path, err := rejectsPath(rest)
+		if err != nil {
+			return err
+		}
+		return call(c, "GET", path, nil)
 	case "replay":
 		id, err := oneID(rest, "replay")
 		if err != nil {
@@ -101,6 +107,27 @@ func oneID(args []string, sub string) (string, error) {
 		return "", usage(sub+" takes exactly one id", usageText)
 	}
 	return args[0], nil
+}
+
+// rejectsPath 解析 `rejects <id> [--after N] [--limit N]`；分页取值由内核校验，next_after 原样给下一次的 --after。
+func rejectsPath(args []string) (string, error) {
+	if len(args) == 0 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+		return "", usage("rejects takes an id first", usageText)
+	}
+	fs := flag.NewFlagSet("source rejects", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	q := url.Values{}
+	for _, k := range []string{"after", "limit"} {
+		fs.Func(k, "", func(v string) error { q.Set(k, v); return nil })
+	}
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+		return "", usage("invalid arguments for source rejects", usageText)
+	}
+	path := "/sources/" + url.PathEscape(args[0]) + "/rejects"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	return path, nil
 }
 
 // addBody 只带命令行上出现过的字段。带 --command 而没写 --type 视为自定义命令（script）：

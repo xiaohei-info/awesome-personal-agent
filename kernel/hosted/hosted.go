@@ -187,24 +187,45 @@ func payload(e Entry, extra map[string]any) json.RawMessage {
 	return b
 }
 
+// kindDefault 是托管型缺省的 kind：留在仓库的是架构设计、模块边界、接口契约、ADR 这类设计文档（§12.2）。
+const kindDefault = "design"
+
+// fill 补上可推断的字段（§12.3）：kind 缺省 design；project 缺省取登记了该仓库远程地址的项目（远程地址全局唯一）。
+func (v *addIn) fill(tx *store.Tx) error {
+	if blank(v.Kind) {
+		v.Kind = kindDefault
+	}
+	if !blank(v.Project) || blank(v.Repo) {
+		return nil
+	}
+	p, ok, err := projects.ByRemote(tx, strings.TrimSpace(v.Repo))
+	if ok {
+		v.Project = p.ID
+	}
+	return err
+}
+
 func add(kinds []string) command.Spec {
-	parse := func(in json.RawMessage) (addIn, error) {
+	parse := func(tx *store.Tx, in json.RawMessage) (addIn, error) {
 		var v addIn
-		return v, decode(in, &v)
+		if err := decode(in, &v); err != nil {
+			return v, err
+		}
+		return v, v.fill(tx)
 	}
 	return command.Spec{
-		Name: "material.add", Action: authz.ActionReviseMaterial,
-		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
-			v, err := parse(in)
+		Name: "material.add", Action: authz.ActionReviseMaterial, Proxy: true,
+		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, err := parse(tx, in)
 			return authz.Object{Kind: v.Kind, Project: v.Project, Tags: v.Tags}, err
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
-			v, _ := parse(in)
+			v, _ := parse(tx, in)
 			if !slices.Contains(kinds, v.Kind) {
 				return invalid("unknown material kind " + v.Kind)
 			}
 			if blank(v.Project) {
-				return invalid("project is required")
+				return invalid("project is required: the repository is not registered in any project")
 			}
 			if _, err := projects.Get(tx, v.Project); err != nil {
 				return err
@@ -216,7 +237,7 @@ func add(kinds []string) command.Spec {
 			return err
 		},
 		Apply: func(c *command.Ctx) (any, error) {
-			v, _ := parse(c.Input)
+			v, _ := parse(c.Tx, c.Input)
 			p, _ := cleanPath(v.Path)
 			repo := strings.TrimSpace(v.Repo)
 			title := strings.TrimSpace(v.Title)
@@ -283,7 +304,7 @@ func refresh() command.Spec {
 			if _, err := c.Tx.Exec("UPDATE hosted_material SET last_commit = ?, missing = 0 WHERE material = ?", commit, e.Material.ID); err != nil {
 				return nil, err
 			}
-			_, err = c.Emit(domain.Event{Type: domain.EvMaterialRevised, Object: e.Material.ID, Reason: "hosted commit refreshed", Payload: payload(e, nil)})
+			_, err = c.Emit(domain.Event{Type: domain.EvMaterialRevised, Object: e.Material.ID, Reason: "hosted commit refreshed to " + commit, Payload: payload(e, nil)})
 			return Result{Material: e.Material.ID, Changed: true}, err
 		}}
 }

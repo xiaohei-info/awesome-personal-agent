@@ -11,9 +11,11 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -42,7 +44,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, materials.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, materials.Module, clock.Module, items.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -60,7 +62,7 @@ func setup(t *testing.T) *env {
 	if err := materials.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
-	if err := Register(e.x); err != nil {
+	if err := items.Register(e.x, nil); err != nil {
 		t.Fatal(err)
 	}
 	e.prj = e.newProject(t, "acc-open")
@@ -280,22 +282,18 @@ func TestStructuredFilters(t *testing.T) {
 	check("tags AND", Query{Tags: []string{"x", "y"}}, a.Material)
 	check("project+kind", Query{Project: e.prj, Kind: "minutes"}, a.Material)
 
-	// 关联事项：经命令建立，可移除；重复建立无副作用；observer 不能写。
-	e.must(t, worker, "material.link", map[string]any{"material": a.Material, "item": "item-1"})
-	e.must(t, worker, "material.link", map[string]any{"material": a.Material, "item": "item-1"})
-	e.must(t, worker, "material.link", map[string]any{"material": b.Material, "item": "item-2"})
-	check("item", Query{Item: "item-1"}, a.Material)
-	if _, err := e.do(t, observer, "material.link", map[string]any{"material": c.Material, "item": "item-1"}); err == nil {
-		t.Fatal("observer must not link")
+	// 关联事项：读 item.relate 以材料为终点的类型化关系，移除后不再命中。
+	item := func(title string) string {
+		var r struct{ ID string }
+		json.Unmarshal(e.must(t, owner, "item.create", map[string]any{"kind": "task", "phase": "open", "title": title, "project": e.prj}), &r)
+		return r.ID
 	}
-	if _, err := e.do(t, worker, "material.link", map[string]any{"material": "nope", "item": "item-1"}); err == nil {
-		t.Fatal("unknown material must fail")
-	}
-	if _, err := e.do(t, worker, "material.link", map[string]any{"material": a.Material, "item": " "}); err == nil {
-		t.Fatal("blank item must fail")
-	}
-	e.must(t, worker, "material.link", map[string]any{"material": a.Material, "item": "item-1", "remove": true})
-	check("item removed", Query{Item: "item-1"})
+	i1, i2 := item("item-1"), item("item-2")
+	e.must(t, owner, "item.relate", map[string]any{"from": i1, "to": a.Material, "type": domain.RelBasis})
+	e.must(t, owner, "item.relate", map[string]any{"from": i2, "to": b.Material, "type": domain.RelBasis})
+	check("item", Query{Item: i1}, a.Material)
+	e.must(t, owner, "item.relate", map[string]any{"from": i1, "to": a.Material, "type": domain.RelBasis, "remove": true})
+	check("item removed", Query{Item: i1})
 
 	// 修订时间：甲先于乙提交（测试时钟每个命令前进一小时）。
 	var ra, rb materials.Revision

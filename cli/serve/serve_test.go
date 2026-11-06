@@ -23,6 +23,11 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
 type result struct {
@@ -250,6 +255,56 @@ func TestServeRejectsInvalidConfig(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(home, "config.yaml"), []byte("bogus: 1\n"), 0o644)
 	if r := apa(t, home, "", "serve"); r.code != 2 {
 		t.Fatalf("invalid config must fail with exit 2: %+v", r)
+	}
+}
+
+// 配置里的 delivery_unclaimed_after 经装配传给投递队列：无人领取超过它就转 fallback_web（ACT-DLV-06）。
+func TestAssemblePassesDeliveryUnclaimedAfter(t *testing.T) {
+	l := config.LayoutOf(filepath.Join(t.TempDir(), "h"))
+	if err := l.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(l.Home, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg := config.Default()
+	cfg.DeliveryUnclaimedAfter = 300 * time.Millisecond
+	k, err := assemble(st, l, cfg, "http://127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := func() domain.DeliveryState {
+		var d domain.Delivery
+		if err := st.Update(context.Background(), func(tx *store.Tx) (err error) {
+			if err = k.att.Tick(tx); err != nil {
+				return err
+			}
+			d, err = delivery.New(delivery.Options{}).Get(tx, "d1")
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return d.State
+	}
+	if err := st.Update(context.Background(), func(tx *store.Tx) error {
+		_, _, err := delivery.New(delivery.Options{}).Create(tx, domain.Delivery{ID: "d1", Item: "it_1", Class: domain.DeliveryBrief,
+			Route: "chan", Version: 1, Content: domain.DeliveryContent{Title: "t"}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := state(); got != domain.DeliveryPending {
+		t.Fatalf("must not fall back before the configured time, got %s", got)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if got := state(); got != domain.DeliveryFallbackWeb {
+		t.Fatalf("configured unclaimed_after ignored, state %s (default would be 30m)", got)
 	}
 }
 
@@ -757,5 +812,148 @@ func TestEveryBundledPullProgramIsRegistered(t *testing.T) {
 		if !onDisk[name] {
 			t.Errorf("%s is listed but has no sources/*/cmd/%s", name, name)
 		}
+	}
+}
+
+// ACT-PACK-04、ACT-RULE-07：数据目录里的包内容变化后，热加载在下一轮生效；改坏整体拒绝、保留上一有效版本，
+// 同一坏内容只产出一条健康投递；规则内容变了回到 observe 并产出一条健康投递；内容没变什么都不重做。
+func TestReloadPacksFollowsDataDirectory(t *testing.T) {
+	home := initOnFreePort(t)
+	l := config.LayoutOf(home)
+	pack := filepath.Join(l.Packs, "brief")
+	if err := os.CopyFS(pack, os.DirFS("../../packs/brief")); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(home, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg, err := config.Load(l.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := assemble(st, l, cfg, "http://127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := k.start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	report := func(what string, err error) {
+		if err != nil {
+			t.Errorf("%s: %v", what, err)
+		}
+	}
+	count := func(q string, args ...any) (n int64) {
+		t.Helper()
+		if err := st.View(ctx, func(tx *store.Tx) error {
+			r, err := tx.Query(q, args...)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			if r.Next() {
+				err = r.Scan(&n)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	healthDeliveries := func() int64 { return count(`SELECT COUNT(*) FROM delivery_delivery WHERE class = 'health'`) }
+	ruleMode := func() (mode string) {
+		t.Helper()
+		if err := st.View(ctx, func(tx *store.Tx) error {
+			r, err := tx.Query(`SELECT mode FROM rules_state WHERE pack = 'brief'`)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			if r.Next() {
+				err = r.Scan(&mode)
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return mode
+	}
+	edit := func(old, repl string) {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(pack, "pack.yaml"))
+		if err != nil || !strings.Contains(string(b), old) {
+			t.Fatalf("pack.yaml: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(pack, "pack.yaml"), []byte(strings.Replace(string(b), old, repl, 1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	version := func() string { p, _ := k.packs.Get("brief"); return p.Version }
+
+	var key string
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT key FROM rules_state WHERE pack = 'brief'`)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		if r.Next() {
+			err = r.Scan(&key)
+		}
+		return err
+	}); err != nil || key == "" {
+		t.Fatalf("brief rule not registered: %v", err)
+	}
+	in, _ := json.Marshal(map[string]string{"rule": key, "mode": "auto"})
+	if _, err := k.x.Do(ctx, command.Request{Identity: hostOwner, Command: "rule.set_mode", Input: in, Owner: owner}); err != nil {
+		t.Fatal(err)
+	}
+	base := healthDeliveries()
+
+	k.reloadPacks(ctx, report) // 内容没变：不重装，规则不动，没有投递
+	if ruleMode() != "auto" || healthDeliveries() != base || version() != "1.0.0" {
+		t.Fatal("an unchanged data directory must change nothing")
+	}
+
+	edit("version: 1.0.0", "version: 1.0.1") // 不改规则的内容变化：下一轮生效，auto 保持
+	k.reloadPacks(ctx, report)
+	if version() != "1.0.1" || ruleMode() != "auto" || healthDeliveries() != base {
+		t.Fatalf("edited pack not reloaded cleanly: %s %s", version(), ruleMode())
+	}
+
+	edit("version: 1.0.1", "version: [") // 改坏：整体拒绝，保留 1.0.1，同一坏内容重复轮询只报一次
+	for range 3 {
+		k.reloadPacks(ctx, report)
+	}
+	if version() != "1.0.1" || len(k.packs.Health()) != 1 || healthDeliveries() != base+1 {
+		t.Fatalf("bad pack: version %s, health %v, deliveries %d", version(), k.packs.Health(), healthDeliveries())
+	}
+	edit("version: [", "version: [[") // 坏内容变了：再报一次
+	k.reloadPacks(ctx, report)
+	if healthDeliveries() != base+2 {
+		t.Fatalf("a changed bad content must be reported again: %d", healthDeliveries())
+	}
+
+	edit("version: [[", "version: 1.0.2") // 修好：健康视图清空，新版本生效
+	k.reloadPacks(ctx, report)
+	if version() != "1.0.2" || len(k.packs.Health()) != 0 || healthDeliveries() != base+2 {
+		t.Fatalf("fixed pack: version %s, health %v", version(), k.packs.Health())
+	}
+
+	edit("        kind: brief\n", "        kind: brief\n      - action: create_item\n        kind: brief\n") // 规则内容变化：回到 observe 并产出一条健康投递
+	k.reloadPacks(ctx, report)
+	if ruleMode() != "observe" || healthDeliveries() != base+3 {
+		t.Fatalf("changed rule: mode %s, deliveries %d", ruleMode(), healthDeliveries())
+	}
+	k.reloadPacks(ctx, report)
+	if healthDeliveries() != base+3 {
+		t.Fatal("the rule fallback must be reported once")
 	}
 }

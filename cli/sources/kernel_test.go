@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -124,7 +125,7 @@ func (k *kernel) apa(token string, args ...string) result {
 	k.t.Helper()
 	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_HOME": k.t.TempDir()}
 	var out, errb bytes.Buffer
-	code := client.Main(args, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
+	code := client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return result{code, out.String(), errb.String()}
 }
@@ -343,5 +344,50 @@ func TestWebhookRevokeDropsEveryKey(t *testing.T) {
 	}
 	if r := k.apa(dlg, "source", "webhook", "revoke", "src_none"); r.code != domain.ExitNotFound {
 		t.Fatalf("revoke unknown source: %+v", r)
+	}
+}
+
+// `apa source rejects <id>`：observer 可读被拒收的输出行，--after/--limit 翻页；未登记来源得 3，缺 id 或多余参数得 2。
+func TestRejectsListsAndPages(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60")
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		for i, why := range []string{"invalid JSON", "missing type"} {
+			if _, err := tx.Exec(`INSERT INTO sources_runner_reject (source_id, run_id, line, reason, raw, at) VALUES (?,?,?,?,?,?)`, "src_feed", "run_1", i+1, why, "raw"+why, 1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var p1, p2 struct {
+		Rejects []struct {
+			RunID  string `json:"run_id"`
+			Reason string
+			Raw    string
+		}
+		NextAfter int64 `json:"next_after"`
+	}
+	decode(t, k.apa(obs, "source", "rejects", "src_feed", "--limit", "1"), &p1)
+	if len(p1.Rejects) != 1 || p1.Rejects[0].Reason != "invalid JSON" || p1.Rejects[0].RunID != "run_1" || p1.Rejects[0].Raw != "rawinvalid JSON" || p1.NextAfter == 0 {
+		t.Fatalf("page 1: %+v", p1)
+	}
+	decode(t, k.apa(obs, "source", "rejects", "src_feed", "--limit", "1", "--after", strconv.FormatInt(p1.NextAfter, 10)), &p2)
+	if len(p2.Rejects) != 1 || p2.Rejects[0].Reason != "missing type" || p2.NextAfter != 0 {
+		t.Fatalf("page 2: %+v", p2)
+	}
+	if r := k.apa(obs, "source", "rejects", "src_none"); r.code != domain.ExitNotFound {
+		t.Fatalf("unknown source: %+v", r)
+	}
+	if r := k.apa(obs, "source", "rejects", "src_feed", "--limit", "0"); r.code != domain.ExitUsage {
+		t.Fatalf("bad limit: %+v", r)
+	}
+	for _, args := range [][]string{{"source", "rejects"}, {"source", "rejects", "--limit", "1"}, {"source", "rejects", "src_feed", "extra"}, {"source", "rejects", "src_feed", "--bogus", "1"}} {
+		if r := k.apa(obs, args...); r.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, r)
+		}
 	}
 }

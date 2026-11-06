@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,7 +43,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	kchannel "github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -53,6 +53,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
+	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/hosted"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
@@ -68,7 +69,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	kscreening "github.com/xiaohei-info/awesome-personal-agent/kernel/screening"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -79,6 +79,8 @@ import (
 
 const (
 	clockInterval = time.Second
+	// packReloadInterval 是能力包热加载的检查间隔（§7.7），由时钟循环驱动；内容没变时只读文件算 hash，不写账本。
+	packReloadInterval = 5 * time.Second
 	// maintainInterval 是后台补做的间隔：重试判断失败的待跟进和未处理的入站记录、清过期 payload、补派发。
 	maintainInterval = time.Minute
 	owner            = "owner"
@@ -109,6 +111,9 @@ type kernel struct {
 	fu     *followup.Service
 	scr    *kscreening.Service
 	att    *attention.Attention
+	hn     *khealth.Notifier
+	packs  *kpacks.Loader
+	agm    *agentsmd.Service
 
 	drainDue atomic.Bool   // 本轮时钟排了规则或跟进的待办
 	drain    chan struct{} // 唤醒后台循环：待办要调模型，不能占着时钟循环
@@ -124,7 +129,12 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	x := command.New(st, nil)
 	kinds := kitems.NewKinds()
 	ld := kpacks.New(kpacks.Options{Builtin: rootpacks.FS, DataDir: l.Packs, Kinds: kinds,
-		OnReject: func(r kpacks.Rejection) { slog.Warn("pack rejected", "pack", r.Pack, "reason", r.Reason) }})
+		OnReject: func(r kpacks.Rejection) {
+			slog.Warn("pack rejected", "pack", r.Pack, "reason", r.Reason)
+			if err := st.Update(context.Background(), func(tx *store.Tx) error { return khealth.PackRejected(tx, r) }); err != nil {
+				slog.Error("pack rejection alert", "err", err)
+			}
+		}})
 	if _, err := ld.Load(); err != nil {
 		return nil, err
 	}
@@ -142,9 +152,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 
-	q := delivery.New(delivery.Options{})
+	q := delivery.New(delivery.Options{UnclaimedAfter: cfg.DeliveryUnclaimedAfter, Backoff: cfg.DeliveryBackoff})
 	att := attention.New(attention.Options{Queue: q})
-	k := &kernel{st: st, x: x, layout: l, scr: scr, att: att, drain: make(chan struct{}, 1)}
+	k := &kernel{st: st, x: x, layout: l, scr: scr, att: att, hn: khealth.NewNotifier(q), packs: ld, drain: make(chan struct{}, 1)}
 
 	// 跟进消息归属与入站流水线互相接线：拦截在判断之前，退回后立即唤醒入站流水线。
 	fm, err := followmsg.New(followmsg.Options{Store: st, Exec: x, Owner: owner,
@@ -156,7 +166,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		Intercept: fm.Intercept, OnError: logErr("inbound")}); err != nil {
 		return nil, err
 	}
-	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Delivery: q, Layout: l, OnError: logErr("source runner")}); err != nil {
+	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner")}); err != nil {
 		return nil, err
 	}
 	a := auth.New(nil)
@@ -236,14 +246,13 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		kmaterials.Register(x),
 		kpurge.Register(x, l.Blobs),
 		hosted.Register(x),
-		search.Register(x),
 		k.fu.Register(),
 	); err != nil {
 		return nil, err
 	}
 	x.OnCommit(scr.OnCommit)
 	att.Attach(x, st, logErr("attention"))
-	chain.New(chain.Options{Queue: q}).Attach(x, st, logErr("chain breaker"))
+	k.hn.Attach(x, st, logErr("health delivery"))
 	k.fu.Attach(logErr("follow-up"))
 
 	agm, ok := ld.Get("agents-md")
@@ -254,6 +263,8 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
+
+	k.agm = agmSvc
 
 	creds, err := credentials.Mount(x, a)
 	if err != nil {
@@ -267,7 +278,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, agmSvc)}}); err != nil {
+		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
@@ -304,6 +315,9 @@ func (k *kernel) start(ctx context.Context) error {
 		slog.Error("rules reconcile", "err", err)
 	}
 	if err := k.loadHostFiles(ctx); err != nil {
+		return err
+	}
+	if err := k.st.Update(ctx, k.hn.Sync); err != nil { // 装配期的能力包拒绝与规则回退
 		return err
 	}
 	if err := k.rn.Sync(ctx); err != nil {
@@ -358,8 +372,13 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 		defer wg.Done()
 		tk := time.NewTicker(clockInterval)
 		defer tk.Stop()
+		var nextReload time.Time
 		for {
 			report("clock tick failed", k.rn.Tick(ctx, k.clk))
+			if now := time.Now(); !now.Before(nextReload) {
+				nextReload = now.Add(packReloadInterval)
+				k.reloadPacks(ctx, report)
+			}
 			if k.drainDue.Swap(false) {
 				select {
 				case k.drain <- struct{}{}:
@@ -386,6 +405,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			report("dispatch", k.disp.Dispatch(ctx))
 			report("rules", k.eng.Drain(ctx))
 			report("follow-up", k.fu.Drain(ctx))
+			k.syncHealth(ctx, report)
 		}
 		maintain()
 		tk := time.NewTicker(maintainInterval)
@@ -397,6 +417,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			case <-k.drain:
 				report("rules", k.eng.Drain(ctx))
 				report("follow-up", k.fu.Drain(ctx))
+				k.syncHealth(ctx, report)
 			case <-tk.C:
 				maintain()
 			}
@@ -408,6 +429,41 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 		k.scr.Wait()
 		k.wh.Wait()
 	}
+}
+
+// reloadPacks 是能力包热加载（§7.7）：重新扫描内置与数据目录，加载器按内容 hash 只重装变化的包。
+// 生效的包有变化时，把持有包内容的下游对齐到新版本：规则状态（内容变了的规则回到 observe 并产出健康告警，由 rules.Reconcile 负责）、agents-md 渲染模板；
+// 其余模块每次使用时从加载器取包，不需要通知。新的拒绝已由 OnReject 记账，这里把它们追赶成健康类投递。
+func (k *kernel) reloadPacks(ctx context.Context, report func(string, error)) {
+	before := k.packSig()
+	fresh, err := k.packs.Load()
+	report("pack reload", err)
+	if err != nil {
+		return
+	}
+	if k.packSig() != before {
+		report("rules reconcile", k.eng.Reconcile(ctx))
+		if p, ok := k.packs.Get("agents-md"); ok {
+			report("agents-md template", k.agm.SetTemplate(p.Templates["agents"]))
+		}
+	}
+	if len(fresh) > 0 || k.packSig() != before {
+		k.syncHealth(ctx, report)
+	}
+}
+
+// packSig 是生效包的名字与内容 hash，用来判断热加载有没有换掉什么。
+func (k *kernel) packSig() string {
+	var b strings.Builder
+	for _, p := range k.packs.List() {
+		b.WriteString(p.Name + "@" + p.Hash + "\n")
+	}
+	return b.String()
+}
+
+// syncHealth 追赶不经命令提交写下的健康告警（规则动作失败、跟进失败等），命令提交的由 Attach 立即追赶。
+func (k *kernel) syncHealth(ctx context.Context, report func(string, error)) {
+	report("health delivery", k.st.Update(ctx, k.hn.Sync))
 }
 
 // localURL 是本机进程访问内核的地址；监听通配地址时走回环。

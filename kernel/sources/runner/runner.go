@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -22,7 +23,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -36,7 +36,6 @@ const CmdRunResult = "source.run_result"
 const (
 	timerPrefix   = "srcpull_"
 	systemPrinc   = "kernel:sources-runner"
-	healthRoute   = "web"
 	maxBackoff    = time.Hour
 	dispatchError = "dispatch"
 )
@@ -116,9 +115,8 @@ type Dispatcher interface {
 
 // Options 是调度所需的外部事实。
 type Options struct {
-	Store    *store.Store
-	Exec     *command.Executor
-	Delivery *delivery.Queue // 退出码 3 的健康类投递
+	Store *store.Store
+	Exec  *command.Executor
 	// Layout 非零时，来源子进程的工作目录是该来源自己的目录（§9.1）。
 	Layout config.Layout
 	Now    func() time.Time
@@ -135,8 +133,8 @@ type Runner struct {
 
 // New 创建 Runner。
 func New(o Options) (*Runner, error) {
-	if o.Store == nil || o.Exec == nil || o.Delivery == nil {
-		return nil, errors.New("runner: Store, Exec and Delivery are required")
+	if o.Store == nil || o.Exec == nil {
+		return nil, errors.New("runner: Store and Exec are required")
 	}
 	if o.Now == nil {
 		o.Now = time.Now
@@ -546,7 +544,7 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 			if err := r.failed(c, src, in, "permanent"); err != nil {
 				return nil, err
 			}
-			if err := r.healthDelivery(c, src, in); err != nil {
+			if err := r.healthAlert(c, src, in); err != nil {
 				return nil, err
 			}
 		}
@@ -605,14 +603,11 @@ func (r *Runner) failed(c *command.Ctx, src domain.Source, in resultIn, kind str
 	return err
 }
 
-func (r *Runner) healthDelivery(c *command.Ctx, src domain.Source, in resultIn) error {
-	_, _, err := r.o.Delivery.Create(c.Tx, domain.Delivery{
-		ID: "health_" + in.RunID, Item: src.ID, Class: domain.DeliveryHealth, Route: healthRoute, Version: 1,
-		Content: domain.DeliveryContent{
-			Title:   "来源 " + src.ID + " 已停用",
-			Summary: "拉取返回永久失败（退出码 3）：" + in.Reason + "。修复后可在来源页重新启用。",
-		},
-	})
+// healthAlert 记永久失败的 health.alert；健康类投递由 kernel/health 统一产出。
+func (r *Runner) healthAlert(c *command.Ctx, src domain.Source, in resultIn) error {
+	payload, _ := json.Marshal(map[string]any{"kind": "source", "source_id": src.ID, "run_id": in.RunID, "reason": in.Reason})
+	_, err := c.Emit(domain.Event{Type: domain.EvHealthAlert, Object: src.ID,
+		Reason: "source " + src.ID + " disabled after permanent failure (exit 3): " + in.Reason, Payload: payload})
 	return err
 }
 
@@ -817,24 +812,41 @@ func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent,
 
 // Rejects 按发生顺序返回某来源没有入账的输出行及原因。
 func Rejects(tx *store.Tx, sourceID string) ([]Reject, error) {
-	rows, err := tx.Query(`SELECT source_id, run_id, line, reason, raw, at FROM sources_runner_reject WHERE source_id = ? ORDER BY seq`, sourceID)
+	out, _, err := RejectPage(tx, sourceID, 0, math.MaxInt32)
+	return out, err
+}
+
+// RejectPage 按发生顺序返回某来源 after 之后的至多 limit 条拒收记录；还有下一页时 next 是下一次的 after，否则为 0（与 EventPage 同一约定）。
+func RejectPage(tx *store.Tx, sourceID string, after int64, limit int) ([]Reject, int64, error) {
+	rows, err := tx.Query(`SELECT seq, source_id, run_id, line, reason, raw, at FROM sources_runner_reject WHERE source_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
+		sourceID, after, limit+1)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []Reject
+	var (
+		out  []Reject
+		seqs []int64
+	)
 	for rows.Next() {
 		var (
-			j        Reject
-			line, at int64
+			j             Reject
+			seq, line, at int64
 		)
-		if err := rows.Scan(&j.SourceID, &j.RunID, &line, &j.Reason, &j.Raw, &at); err != nil {
-			return nil, err
+		if err := rows.Scan(&seq, &j.SourceID, &j.RunID, &line, &j.Reason, &j.Raw, &at); err != nil {
+			return nil, 0, err
 		}
 		j.Line, j.At = int(line), time.Unix(0, at).UTC()
-		out = append(out, j)
+		out, seqs = append(out, j), append(seqs, seq)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var next int64
+	if len(out) > limit {
+		next, out = seqs[limit-1], out[:limit]
+	}
+	return out, next, nil
 }
 
 // Unjudged 按落盘顺序返回判断型初筛未能判定的来源事件（disposition 为 unjudged）；健康视图只读。

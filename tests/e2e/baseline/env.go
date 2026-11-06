@@ -212,14 +212,17 @@ func (e *Env) Init() Result {
 }
 
 // Serve 把监听改为本机空闲端口后启动 `apa serve` 并登录 Web；须先 Init。
-func (e *Env) Serve() {
+func (e *Env) Serve() { e.T.Helper(); e.ServeWith("") }
+
+// ServeWith 同 Serve，并把 extra（config.yaml 的附加行，如验收时调小的投递时限）追加到配置里。
+func (e *Env) ServeWith(extra string) {
 	e.T.Helper()
 	port, err := freePort()
 	if err != nil {
 		e.fatal("%v", err)
 	}
 	cfg := filepath.Join(e.Home, "config.yaml")
-	if err := os.WriteFile(cfg, []byte("listen: "+loopback+":"+port+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfg, []byte("listen: "+loopback+":"+port+"\n"+extra), 0o644); err != nil {
 		e.fatal("%v", err)
 	}
 	e.startServe(port)
@@ -440,7 +443,7 @@ func (e *Env) DeclareStubHarness() {
 		return string(b)
 	}
 	for harness, resume := range map[string]bool{"acc-stub": true, "acc-stub-noresume": false} {
-		if r := e.Apa(e.DEL, decl(harness, resume), "declare", "-"); r.Code != 0 {
+		if r := e.Apa(e.DEL, decl(harness, resume), "declare", "-", "--evidence", "环境基线声明替身"); r.Code != 0 {
 			e.fatal("apa declare %s 退出码 %d: %s%s", harness, r.Code, r.Stdout, r.Stderr)
 		}
 		e.webOK("POST", "/v1/settings/declarations/"+harness+"/1/confirm", "", 200)

@@ -150,6 +150,7 @@ func (r resp) code() string {
 
 func (e *env) do(secret, method, path, body string, hdr ...string) resp {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set(core.EvidenceHeader, "owner: go ahead") // delegate 代理写需要证据；其他凭据不读
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
 	}
@@ -707,6 +708,73 @@ func TestSourceEventsListFilterAndPage(t *testing.T) {
 	}
 	// 列表是未过滤的外部内容：运行凭据不能绕过转发白名单。
 	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/events", ""); r.Code != 403 {
+		t.Errorf("run credential: %d %s", r.Code, r.Body)
+	}
+}
+
+// seedRejects 直接落盘拒收记录（表由 runner 模块拥有，这里只造数据）；每项是 {原始行, 原因}。
+func (e *env) seedRejects(source string, rs ...[2]string) {
+	e.t.Helper()
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
+		for i, x := range rs {
+			if _, err := tx.Exec(`INSERT INTO sources_runner_reject (source_id, run_id, line, reason, raw, at) VALUES (?,?,?,?,?,?)`,
+				source, "run_1", i+1, x[1], x[0], e.now.UnixNano()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+type rejectPage struct {
+	Rejects   []runner.Reject `json:"rejects"`
+	NextAfter int64           `json:"next_after"`
+}
+
+// ACT-SRC-04：坏事件不入账，原因在来源页可查：分页、字段、接收密钥遮蔽，运行凭据与 ext 不可读。
+func TestSourceRejectsListPageAndAccess(t *testing.T) {
+	e := setup(t)
+	dlg, obs := e.token(auth.Delegate), e.token(auth.Observer)
+	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 201 {
+		t.Fatalf("register: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(obs, "GET", "/v1/sources/src_hook/rejects", ""); r.Code != 200 || !strings.Contains(r.Body.String(), `"rejects":[]`) {
+		t.Fatalf("empty list: %d %s", r.Code, r.Body)
+	}
+	e.seedRejects("src_hook", [2]string{"{bad", "invalid JSON"}, [2]string{"token apa_whk_SECRET", "missing subject"}, [2]string{"{}", "missing type"})
+	e.seedRejects("src_other", [2]string{"x", "other source"})
+
+	var p1, p2 rejectPage
+	e.do(obs, "GET", "/v1/sources/src_hook/rejects?limit=2", "").into(&p1)
+	if len(p1.Rejects) != 2 || p1.NextAfter == 0 {
+		t.Fatalf("page 1: %+v", p1)
+	}
+	if a := p1.Rejects[0]; a.SourceID != "src_hook" || a.RunID != "run_1" || a.Line != 1 || a.Reason != "invalid JSON" || a.Raw != "{bad" || !a.At.Equal(e.now) {
+		t.Fatalf("fields: %+v", a)
+	}
+	if p1.Rejects[1].Raw != "[redacted]" || p1.Rejects[1].Reason != "missing subject" {
+		t.Fatalf("receive key must not be shown: %+v", p1.Rejects[1])
+	}
+	e.do(obs, "GET", "/v1/sources/src_hook/rejects?limit=2&after="+strconv.FormatInt(p1.NextAfter, 10), "").into(&p2)
+	if len(p2.Rejects) != 1 || p2.Rejects[0].Reason != "missing type" || p2.NextAfter != 0 {
+		t.Fatalf("page 2: %+v", p2)
+	}
+
+	for _, q := range []string{"limit=0", "limit=501", "after=-1", "after=x"} {
+		if r := e.do(obs, "GET", "/v1/sources/src_hook/rejects?"+q, ""); r.Code != 400 {
+			t.Errorf("%s: %d", q, r.Code)
+		}
+	}
+	if r := e.do(obs, "GET", "/v1/sources/src_nope/rejects", ""); r.Code != 404 {
+		t.Errorf("unknown source: %d", r.Code)
+	}
+	if r := e.do(e.token(auth.Ext), "GET", "/v1/sources/src_hook/rejects", ""); r.Code != 403 {
+		t.Errorf("ext: %d", r.Code)
+	}
+	// 原始行是未过滤的外部输出：运行凭据不能绕过转发白名单。
+	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/rejects", ""); r.Code != 403 {
 		t.Errorf("run credential: %d %s", r.Code, r.Body)
 	}
 }

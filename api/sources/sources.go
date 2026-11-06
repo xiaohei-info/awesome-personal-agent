@@ -6,6 +6,7 @@
 //	GET /sources/{id}/ingests           入站记录
 //	POST /ingests/{id}/replay           重放
 //	GET /sources/{id}/events            来源事件，可按 disposition 过滤，after + limit 分页
+//	GET /sources/{id}/rejects           没有入账的输出行及原因，after + limit 分页
 //	POST /source-events/{id}/propose    把未判定事件转为建议
 //
 // 路由只做传输：解码、选命令、渲染。授权与校验都在内核命令管线：可执行命令（script 来源）走只 Web 的命令，
@@ -17,6 +18,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -87,9 +89,9 @@ type api struct {
 func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr Proposer) (core.RouteGroup, error) {
 	a := &api{st: st, x: x, rp: rp, pr: pr, au: au}
 	for _, s := range []command.Spec{
-		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
-		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
-		{Name: CmdReplay, Action: authz.ActionManageSource, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
+		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Proxy: true, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
+		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Proxy: true, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
+		{Name: CmdReplay, Action: authz.ActionManageSource, Proxy: true, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
 	} {
 		if err := x.Register(s); err != nil {
 			return nil, err
@@ -105,6 +107,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/ingests", Handler: readable(a.ingests)})
 		r.Handle(core.Route{Method: "POST", Path: "/ingests/{id}/replay", MaxBody: 1 << 10, Handler: a.replay})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/events", Handler: readable(a.events)})
+		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/rejects", Handler: readable(a.rejects)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
 	}, nil
 }
@@ -147,7 +150,7 @@ func (a *api) run(r *http.Request, p *core.Principal, cmd string, in map[string]
 	if err != nil {
 		return command.Result{}, err
 	}
-	req := command.Request{Identity: p.Identity, Command: cmd, Input: raw}
+	req := command.Request{Identity: p.Identity, Command: cmd, Input: raw, Evidence: p.Evidence}
 	if idem {
 		req.IdemKey = r.Header.Get(IdempotencyHeader)
 	}
@@ -451,6 +454,26 @@ func (a *api) replay(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 
 // ---- 来源事件 ----
 
+// pageParams 解析 after + limit 分页参数（来源事件与拒收记录共用）。
+func pageParams(q url.Values) (after int64, limit int, err error) {
+	if s := q.Get("after"); s != "" {
+		n, e := strconv.ParseInt(s, 10, 64)
+		if e != nil || n < 0 {
+			return 0, 0, invalid("after must be a non-negative integer", "use next_after from the previous page")
+		}
+		after = n
+	}
+	limit = defaultEventLimit
+	if s := q.Get("limit"); s != "" {
+		n, e := strconv.Atoi(s)
+		if e != nil || n < 1 || n > maxEventLimit {
+			return 0, 0, invalid("limit is out of range", "use 1 <= limit <= "+strconv.Itoa(maxEventLimit))
+		}
+		limit = n
+	}
+	return after, limit, nil
+}
+
 func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	// 这里是未过滤的外部内容，运行凭据只能经转发白名单读挂靠消息（§9.4、§14.3）。
 	if p.Caller.Level == authz.LevelRun {
@@ -463,21 +486,9 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 	default:
 		return invalid("disposition is not valid", "use pending, attached, proposed, ignored or unjudged")
 	}
-	var after int64
-	if s := q.Get("after"); s != "" {
-		n, err := strconv.ParseInt(s, 10, 64)
-		if err != nil || n < 0 {
-			return invalid("after must be a non-negative integer", "use next_after from the previous page")
-		}
-		after = n
-	}
-	limit := defaultEventLimit
-	if s := q.Get("limit"); s != "" {
-		n, err := strconv.Atoi(s)
-		if err != nil || n < 1 || n > maxEventLimit {
-			return invalid("limit is out of range", "use 1 <= limit <= "+strconv.Itoa(maxEventLimit))
-		}
-		limit = n
+	after, limit, err := pageParams(q)
+	if err != nil {
+		return err
 	}
 	id := r.PathValue("id")
 	var (
@@ -509,4 +520,44 @@ func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal)
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, ev)
+}
+
+// rejects 返回来源没有入账的输出行及原因。原始行在落账时已截断到 512 字节；与入站记录的请求头同一规则，含接收密钥明文前缀的整行遮蔽。
+// 原始行是未过滤的外部输出，运行凭据不能读（与 events、ingests 一致）。
+func (a *api) rejects(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if p.Caller.Level == authz.LevelRun {
+		return domain.NewError(domain.CodePermissionDenied, "run credential cannot list source rejects", "read forwarded messages from the context instead")
+	}
+	after, limit, err := pageParams(r.URL.Query())
+	if err != nil {
+		return err
+	}
+	id := r.PathValue("id")
+	var (
+		rs   []runner.Reject
+		next int64
+	)
+	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
+		if _, err := registry.Get(tx, id); err != nil {
+			return err
+		}
+		var err error
+		rs, next, err = runner.RejectPage(tx, id, after, limit)
+		return err
+	}); err != nil {
+		return err
+	}
+	if rs == nil {
+		rs = []runner.Reject{}
+	}
+	for i := range rs {
+		if strings.Contains(rs[i].Raw, webhookKeyPrefix) {
+			rs[i].Raw = "[redacted]"
+		}
+	}
+	out := map[string]any{"rejects": rs}
+	if next != 0 {
+		out["next_after"] = next
+	}
+	return core.WriteJSON(w, http.StatusOK, out)
 }

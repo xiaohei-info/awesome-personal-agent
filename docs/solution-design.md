@@ -355,7 +355,7 @@ Web 中台是本人工作台的首要视图，登录即本人身份。
 | 材料 | 自有型：Markdown 编辑器、版本列表与 diff、proposed 修订确认；托管型：只读展示并标明 commit，读不到时只显示登记信息和"暂不可读" | 编辑、确认、发起修改 |
 | 任务委派 | 谁在干、干到哪、证据、跟进状态、运行记录 | 改派、重新委派 |
 | 简报 | 简报与复盘，按项目分节 | 查看、建实例 |
-| 来源 | 来源登记、游标、最近成功、连续失败、入站记录、未判定事件（含对话捕获的内部来源，§9.3） | 启停、管理 webhook 密钥、重放、把未判定事件转为建议 |
+| 来源 | 来源登记、游标、最近成功、连续失败、入站记录、被拒收的事件及原因（§9.2）、未判定事件（含对话捕获的内部来源，§9.3） | 启停、管理 webhook 密钥、重放、把未判定事件转为建议 |
 | 健康 | 来源失败、外呼超时、投递积压、链路熔断、AGENTS.md 漂移（§15.2） | 只报不修，链接到修复入口 |
 | agent 变更 | 自上次访问以来 agent 做的变更、经聊天代答的决定、观察记录 | 一键撤销或回退 |
 | 设置 | 策略与 web_only 分类、人格、token、ext 密钥、转发白名单、渠道回答人白名单、材料写入策略、打扰策略、规则模式、运行权限上限、模型端点、执行者清单、可执行命令登记、物理删除 | 这些操作只在 Web |
@@ -558,7 +558,7 @@ CLI 是同一命令模型的薄客户端，面向 agent 设计：
 | `screening_pending` | web_only 初筛未返回时为真，内核维护，只读（§14.4） |
 | `resolution` | 决定结果：选项或文本、`resolved_via`（`web`、`chat`、渠道名、`timeout`）、回答人、证据 |
 
-**关系（relation）**：事项之间是带类型的边，类型字符串开放。内置 `parent`、`blocks`、`derived_from`、`supersedes`、`relates`。事项与材料之间同样用类型化关系：依据、产出、纪要。
+**关系（relation）**：事项之间是带类型的边，类型字符串开放。内置 `parent`、`blocks`、`derived_from`、`supersedes`、`relates`。事项与材料之间同样用类型化关系，内置 `basis`（依据）、`output`（产出）、`minutes`（纪要）：边从事项指向材料，经同一个 `item.relate` 建立和移除，记事项的 `item.updated`，事项与材料两侧都能读到；材料不能作 `parent` 的终点。
 
 **kind 的行为差异只有两处**：`delegation` 进入 `done` 必须带证据（内核只校验存在，真实性由可选的核验负责）；`brief` 由简报包写入并按项目分节展示。
 
@@ -672,7 +672,7 @@ Event 是账本的追加日志，也是对外事件流。
 | `run` | 唤醒类投递的运行 id（§13.6）；不带凭据明文 |
 | `version` | 版本号。事项变化后旧版本作废，送达回报必须带版本号 |
 | `state` | `pending` → `claimed` → `delivered` → `acknowledged`；失败超限或无人领取转 `fallback_web`；事项状态变化导致作废转 `superseded` |
-| `attempts`、`next_attempt_at` | 重试计数与退避时间 |
+| `attempts`、`next_attempt_at` | 重试计数与退避时间。无人领取转 `fallback_web` 的时限默认 30 分钟，失败退避默认 1、3、7、15、30 分钟；两者在运行配置里改（`delivery_unclaimed_after`、`delivery_backoff`，§16.2） |
 | `external_ref` | 外部消息 ref，渠道回答时据此核对 |
 | `injections[]` | 注入到哪些会话（`injected_to_session`） |
 
@@ -914,7 +914,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 
 **策略与授权**：统一判定接口，输入 Actor、动作、对象，输出允许、拒绝（带退出码与原因）、需要 Web。信任级与 web_only 判定不来自事项创建者（web_only 的识别见 §14.4）。决策请求的 web_only 初筛未返回时，代答判定为拒绝，退出码 22（§14.4）。
 
-**能力包加载器**：启动或热加载时读取 yaml 与模板，注册 kind、时钟规则、提示词、视图；不执行代码。校验失败时保留上一有效版本，并在健康视图报告（附录 C）。
+**能力包加载器**：启动或热加载时读取 yaml 与模板，注册 kind、时钟规则、提示词、视图；不执行代码。校验失败时保留上一有效版本，并在健康视图报告（附录 C）。热加载由时钟循环每 5 秒触发一次：重新扫描数据目录，只重装内容 hash 变化的包，随后让规则状态与 agents-md 渲染模板对齐新版本；同一坏内容只报告一次，内容再变才再报。没有对应的 API 或 CLI。
 
 **外呼调用器**：内核唯一外呼出口。
 
@@ -979,7 +979,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 
 ### 8.6 留痕与撤销
 
-三类的每次调用都记一条 actor 为 agent 的 Event，Web 可筛可撤销；附带了统计的，统计值记入这条 Event，`apa why` 可查。任务型另有 Run 记录。
+三类的每次调用都记一条 Event，Web 可筛可撤销。操作者类型取调用方的：规则与跟进等代表 agent 的调用记 agent；系统发起的调用（如 web_only 初筛）记 system，不进"agent 变更"视图。附带了统计的，统计值记入这条 Event，`apa why` 可查。任务型另有 Run 记录。
 
 **APA 不介入用量。** 模型与 harness 的用量由用户自己的账户和 harness 管理，APA 不统计、不限额，上述复用和批量只是为了避免重复判断。
 
@@ -1039,7 +1039,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 
 - 内核按 `(去重域, 事件 id)` 去重，**事件落盘后才推进游标**。末行不是合法游标时，已输出的事件照常落盘（去重保证安全），游标不动，本次按临时失败计。
 - stdout 的每一行都处理，不只看末段。单次输出超过总上限 `max_source_output_mb`（默认 32，§16.2）时同样处理：上限内已解析的事件照常落盘，末尾的半行丢弃，游标不动，本次按临时失败计，原因写明超限。积压多的来源应自己分批（每次只取一部分并用游标续传），否则每次都会超限。
-- 不合法的行连同原因留在来源页可查，单次运行至多留 1000 条，超出的不再记录。
+- 不合法的行连同原因留在来源页可查，单次运行至多留 1000 条，超出的不再记录。来源页的“被拒收的事件”按序分页列出时间、运行、行号、原因与原始行（`GET /sources/{id}/rejects`、`apa source rejects`）；原始行落账时截断到 512 字节，含接收密钥明文的行遮蔽，运行凭据不可读。
 - 超时按临时失败处理。超时、连续失败次数、最近成功时间在来源页可见。
 - 同一来源已有排队或运行中的 Run 时，到期的定时拉取不重复入队；游标未推进，下次拉取不漏事件（§7.7）。
 
@@ -1351,10 +1351,10 @@ SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6�
 
 ### 12.3 托管型材料
 
-- **登记**：`apa material add --repo <远程地址> --path <相对路径>`。
+- **登记**：`apa material add --repo <远程地址> --path <相对路径>`。可推断的不必填：kind 缺省 `design`；project 缺省取 repos 属性里登记了该远程地址的项目（远程地址全局唯一），仓库不属于任何项目时必须显式给出。登记后内核读取一次，记下最近 commit。
 - **读取**：Web 读取一律经外呼调用器拉起只读读取器（按 Source 契约登记的子进程），凭据由读取器自持，内核不读。APA 主机有检出时读默认分支内容，不读工作区，避免展示未提交的改动；否则读远程仓库；都读不到时只显示登记信息和"暂不可读"。
 - **读取是异步的**：`GET /materials/{id}/content` 不阻塞等子进程。没有可用结果时入队一个 `reader` Run 并返回"读取中"，同一材料已有在途读取时复用；页面轮询到结果后展示内容和 commit。结果只在内核进程内短期缓存（默认 5 分钟），不进账本，内核重启后重新读取，所以不产生正文副本。读取失败不算错误，响应状态为"暂不可读"并附原因，页面照常显示登记信息。
-- **刷新**：最近 commit 由来源事件、回执或 `apa agents check` 刷新，变化时 `apa context` 提示文档已更新。路径在默认分支已不存在时，生成 `needs_input` 修正登记，AGENTS.md 索引随之重新渲染。
+- **刷新**：最近 commit 由来源事件、回执或 `apa agents check` 刷新，变化时 `apa context` 提示文档已更新。`apa agents check` 刷新该仓库登记的全部托管文档；修改流程的父事项以 `output` 关联材料，子事项回执 `done` 时刷新它关联的托管文档。路径在默认分支已不存在时，生成 `needs_input` 修正登记，AGENTS.md 索引随之重新渲染。
 - **修改流程**：Web 或 agent 发起修改 → 委派子事项（带 project、仓库、路径、修改要求，同样校验允许的执行者）→ 执行者开分支提 PR → PR 评审合并 → 回执或来源事件刷新最近 commit → 子事项 `done`。
 - **父事项来源**：委派必须有父事项，而材料页没有。`POST /materials/{id}/changes` 可以带 `parent`，修改挂在该事项下，父事项须属于材料所在项目；不带时，内核在同一流程里先建一个 `task` 事项（阶段 `open`，标题写明修改的文档，项目取材料所在项目，`assignee` 为本人，操作者为调用者），再把委派子事项挂到它下面。子事项回收后父事项按普通委派规则推进。不带 `parent` 只对 Web 登录和 delegate 开放；worker 和运行凭据必须带自己权限范围内的 `parent`（§14.3 的 `apa delegate` 行）。
 
@@ -1604,7 +1604,7 @@ Web 和 CLI 两个入口只在非高风险操作上效果一致，这是有意�
 
 delegate 代答和接受建议都必须附**本人原话**与会话引用（`--evidence`）。事项记 `resolved_via: chat`，Event 带 `on_behalf_of` 和证据，Web"agent 变更"视图供事后核对，本人可一键撤销。
 
-事项的新建、更新、转阶段和关联（`item.create`、`item.update`、`item.transition`、`item.relate`）同样是代理写操作：delegate 调用时，无论改的是不是自己的事项，缺 `on_behalf_of` 或证据都按 `invalid_request`（退出码 2）拒绝，不写入；带了则原样记进对应 Event。这条规则由命令管线在授权阶段统一判定，命令登记时只声明自己是否属于代理写操作。撤销（`item.revert`）只在 Web，由本人操作，不要求证据。
+代理写操作不止决策与事项：delegate 经 HTTP 路由可达、授权能放行的写命令一律登记为代理写操作（只由内核内部调用的命令不登记），delegate 调用时无论改的是不是自己的对象，缺 `on_behalf_of` 或证据都按 `invalid_request`（退出码 2）拒绝，不写入；带了则原样记进对应 Event。清单见附录 B.1。规则由命令管线在授权阶段统一判定，命令登记时只声明自己是否属于代理写操作；证据走同一条通道——CLI 全局参数 `--evidence`，HTTP 头 `X-APA-Evidence`，由 HTTP 骨干统一读取，delegate 凭据的 `on_behalf_of` 也在骨干补上。只读命令和 delegate 本就得不到放行的命令（设置类，退出码 20）不登记。撤销（`item.revert`）只在 Web，由本人操作，不要求证据。
 
 内核只能校验证据存在，不能校验真伪（见 §21.2）。运行者没有本人原话，所以运行凭据根本不具备代答能力。
 
@@ -1730,6 +1730,8 @@ Web 与 `apa health` 统一呈现以下信号，由既有账本记录与外呼�
 | 模型不可用（含 web_only 初筛失败或超时）、未判定积压 | Run、来源事件 | 设置页、来源页 |
 | 规则回退 `observe` | Event | Web 重新审阅 |
 
+所有健康告警（`health.alert`）都经同一处产出健康类投递：每条告警按事件序号幂等产出一条 `class=health` 的投递，路由取打扰策略中健康类的配置（默认 Web 未读），带 Web 修复入口链接。唯一例外是 web_only 初筛失败（§14.4）：它按策略规则继续、逐事项发生，只进健康视图，不产出投递。
+
 ### 15.3 审计与变更视图
 
 - 每条命令都带 Actor；Web 上每个变更显示操作者徽章。
@@ -1763,7 +1765,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
 
 ```text
 <APA_HOME>/
-  config.yaml       运行配置（监听地址、max_subprocesses、max_short_subprocesses、max_source_output_mb 等）
+  config.yaml       运行配置（监听地址、max_subprocesses、max_short_subprocesses、max_source_output_mb、delivery_unclaimed_after、delivery_backoff 等）
   sources.json      本人在主机上写的来源登记，可选（§14.12）
   declarations/     本人在主机上写的无头运行声明，可选（§14.12）
   ledger.db         账本（事项、Event、投递、运行记录……；存储选型见 §18）
@@ -1776,7 +1778,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
   logs/             诊断日志
 ```
 
-运行配置里的 `max_subprocesses`（默认 4）和 `max_short_subprocesses`（默认 2）分别限制长时运行和短任务的子进程数，语义见 §7.7。`max_source_output_mb`（默认 32）是 Source 拉取与转换脚本单次 stdout 的总上限，超限的处理见 §9.2。
+运行配置里的 `max_subprocesses`（默认 4）和 `max_short_subprocesses`（默认 2）分别限制长时运行和短任务的子进程数，语义见 §7.7。`max_source_output_mb`（默认 32）是 Source 拉取与转换脚本单次 stdout 的总上限，超限的处理见 §9.2。`delivery_unclaimed_after`（默认 `30m`）是投递无人领取多久转 `fallback_web`，`delivery_backoff`（默认 `1m,3m,7m,15m,30m`）是失败后的逐次退避，写法都是带单位的时长（`90s`、`30m`），退避表用逗号分隔；非正值或写不出时长的取值使 `apa serve` 拒绝启动。语义见 §6.9、§10.3。
 
 备份：整个目录可复制；运行中用存储引擎的在线备份导出账本。`sources/` 含附带拉取程序的第三方凭据，`webhook-keys/` 含 HMAC 接收密钥明文，备份需按敏感数据对待。外部工具的配置和凭据不在本目录：工具适配的来源（§9.7）用工具自己的目录或系统钥匙串，harness 的登录归 harness，渠道 ext 的外部系统凭据由 ext 自持（§10.3），换主机时都需重新认证。数据结构版本随发行只增，升级时自动处理。
 
@@ -1844,7 +1846,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
 | 决策 | `apa ask`、`apa decide`、`apa accept`、`apa dismiss` |
 | 委派 | `apa executors`、`apa delegate`、`apa report`、`apa handback` |
 | 项目与材料 | `apa project`、`apa material`、`apa blob`、`apa agents sync/check` |
-| 来源 | `apa source`（含 `auth`、`webhook create/rotate`、`ingests`、`replay`） |
+| 来源 | `apa source`（含 `auth`、`webhook create/rotate`、`ingests`、`rejects`、`replay`） |
 | 对外 | `apa events --follow`、`apa ext run/check` |
 | 自动化 | `apa instance`、`apa pack` |
 | 可观测 | `apa why`、`apa health`、`apa run` |

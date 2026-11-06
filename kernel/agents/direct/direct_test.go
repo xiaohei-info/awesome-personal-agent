@@ -160,6 +160,41 @@ func (e *env) agentEvents(t *testing.T, obj string) []domain.Event {
 	return out
 }
 
+// 操作者类型由调用方决定：系统发起（如初筛）记 system，不进「agent 变更」；没有身份才补 agent。
+func TestActorTypeFollowsCaller(t *testing.T) {
+	sys := domain.Actor{Type: domain.ActorSystem, Principal: "system:screening", Via: domain.ViaClock}
+	for _, tc := range []struct {
+		name  string
+		actor domain.Actor
+		want  domain.ActorType
+	}{{"system", sys, domain.ActorSystem}, {"no identity", domain.Actor{Via: domain.ViaRule}, domain.ActorAgent}} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := setup(t, true)
+			e.stub.SetDefault(modelstub.Reply{Content: `{"choice":"remind","confidence":0.9}`})
+			c := e.call("follow")
+			c.Actor = tc.actor
+			if _, err := e.svc.Do(bg, c); err != nil {
+				t.Fatal(err)
+			}
+			var got []domain.Actor
+			if err := e.st.View(bg, func(tx *store.Tx) error {
+				es, err := eventlog.ReadObject(tx, "it1")
+				for _, x := range es {
+					if x.Event.Type == domain.EvRunFinished {
+						got = append(got, x.Event.Actor)
+					}
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 1 || got[0].Type != tc.want {
+				t.Fatalf("run.finished actors = %+v, want type %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func payload(t *testing.T, ev domain.Event) map[string]any {
 	t.Helper()
 	var m map[string]any

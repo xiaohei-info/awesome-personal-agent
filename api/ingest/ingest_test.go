@@ -136,7 +136,7 @@ func (e *env) wire(st *store.Store, x *command.Executor) {
 			t.Fatal(err)
 		}
 	}
-	rn, err := runner.New(runner.Options{Store: st, Exec: x, Delivery: delivery.New(delivery.Options{Now: func() time.Time { return t0 }}), Layout: e.lay, Now: func() time.Time { return t0 }})
+	rn, err := runner.New(runner.Options{Store: st, Exec: x, Layout: e.lay, Now: func() time.Time { return t0 }})
 	if err != nil {
 		t.Fatal(err)
 	}

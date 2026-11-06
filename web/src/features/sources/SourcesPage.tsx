@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 
-// 形状对应 GET /v1/sources（domain.Source，stats 为 runner.Stats）、/sources/{id}/ingests、/sources/{id}/events。
+// 形状对应 GET /v1/sources（domain.Source，stats 为 runner.Stats）、/sources/{id}/ingests、/sources/{id}/events、/sources/{id}/rejects。
 // 授权（自定义命令只 Web）、命令校验、转建议的规则都在服务端；本页只调用并如实展示服务端的回答。
 interface Stats {
   runs?: number;
@@ -41,6 +41,13 @@ interface SourceEvent {
   occurred_at: string;
   disposition: string;
   item?: string;
+}
+interface Reject {
+  run_id: string;
+  line: number;
+  reason: string;
+  raw: string;
+  at: string;
 }
 interface Secret {
   secret: string;
@@ -257,6 +264,54 @@ function Events({ source }: { source: Source }) {
   );
 }
 
+function Rejects({ source }: { source: Source }) {
+  const { api } = useSession();
+  const [items, setItems] = useState<Reject[] | null>(null);
+  const [next, setNext] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const base = `/sources/${encodeURIComponent(source.id)}/rejects`;
+
+  const load = useCallback(
+    (after?: number) =>
+      api.get<{ rejects: Reject[]; next_after?: number }>(base + (after ? `?after=${after}` : "")).then(
+        (r) => {
+          setItems((cur) => (after && cur ? [...cur, ...r.rejects] : r.rejects));
+          setNext(r.next_after ?? null);
+        },
+        (e) => setError(msg(e)),
+      ),
+    [api, base],
+  );
+  useEffect(() => {
+    setItems(null);
+    setNext(null);
+    setError(null);
+    load();
+  }, [load]);
+
+  return (
+    <section role="region" aria-label="被拒收的事件">
+      <h4>被拒收的事件</h4>
+      {error && <div role="alert">{error}</div>}
+      {items === null ? (
+        !error && <p>加载中…</p>
+      ) : items.length === 0 ? (
+        <p>没有被拒收的事件</p>
+      ) : (
+        <ul>
+          {items.map((j, i) => (
+            <li key={i}>
+              {j.at} · 运行 {j.run_id} · 第 {j.line} 行 · {j.reason}
+              <pre>{j.raw}</pre>
+            </li>
+          ))}
+        </ul>
+      )}
+      {next !== null && <button onClick={() => load(next)}>加载更多</button>}
+    </section>
+  );
+}
+
 function Detail({ source }: { source: Source }) {
   return (
     <section role="region" aria-label={`来源 ${source.id}`}>
@@ -264,6 +319,7 @@ function Detail({ source }: { source: Source }) {
       {source.type === "webhook" && <WebhookKey source={source} />}
       {source.type === "webhook" && <Ingests source={source} />}
       <Events source={source} />
+      <Rejects source={source} />
     </section>
   );
 }

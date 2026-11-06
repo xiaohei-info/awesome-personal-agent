@@ -15,7 +15,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -58,7 +57,7 @@ func setup(t *testing.T, cfg config.Config) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, proc.Module, delivery.Module, registry.Module, Module} {
+		items.Module, proc.Module, registry.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +79,7 @@ func setup(t *testing.T, cfg config.Config) *env {
 			t.Fatal(err)
 		}
 	}
-	e.r, err = New(Options{Store: st, Exec: e.x, Delivery: delivery.New(delivery.Options{Now: e.Now}), Layout: lay, Now: e.Now,
+	e.r, err = New(Options{Store: st, Exec: e.x, Layout: lay, Now: e.Now,
 		OnError: func(err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
@@ -329,8 +328,8 @@ exit 1
 	if n := e.itemCount(); n != 0 {
 		t.Fatalf("exit 1 must not bother the owner, got %d items", n)
 	}
-	if len(e.deliveries()) != 0 {
-		t.Fatal("exit 1 must not produce deliveries")
+	if n := e.count(`SELECT COUNT(*) FROM eventlog_event WHERE type = ?`, domain.EvHealthAlert); n != 0 {
+		t.Fatalf("exit 1 must not raise health alerts, got %d", n)
 	}
 }
 
@@ -351,38 +350,6 @@ func (e *env) count(sql string, args ...any) (n int64) {
 }
 
 func (e *env) itemCount() int64 { return e.count(`SELECT COUNT(*) FROM items`) }
-
-func (e *env) deliveries() (out []domain.Delivery) {
-	q := delivery.New(delivery.Options{Now: e.Now})
-	var ids []string
-	if err := e.st.View(bg, func(tx *store.Tx) error {
-		r, err := tx.Query(`SELECT id FROM delivery_delivery ORDER BY id`)
-		if err != nil {
-			return err
-		}
-		defer r.Close()
-		for r.Next() {
-			var id string
-			if err := r.Scan(&id); err != nil {
-				return err
-			}
-			ids = append(ids, id)
-		}
-		return r.Err()
-	}); err != nil {
-		e.t.Fatal(err)
-	}
-	for _, id := range ids {
-		if err := e.st.View(bg, func(tx *store.Tx) error {
-			d, err := q.Get(tx, id)
-			out = append(out, d)
-			return err
-		}); err != nil {
-			e.t.Fatal(err)
-		}
-	}
-	return
-}
 
 // ACT-SRC-07：退出码 2 生成一个 needs_input 事项；重复失败不重复建；其他来源不受影响。
 func TestExit2CreatesOneNeedsInputItemOthersUnaffected(t *testing.T) {
@@ -411,7 +378,7 @@ func TestExit2CreatesOneNeedsInputItemOthersUnaffected(t *testing.T) {
 	}
 }
 
-// ACT-SRC-08：退出码 3 停用来源、产出健康类投递、事件流有 source.failed，不再被调度。
+// ACT-SRC-08：退出码 3 停用来源、记 health.alert、事件流有 source.failed，不再被调度。
 func TestExit3DisablesEmitsHealthDeliveryAndEvent(t *testing.T) {
 	e := setup(t, defaults())
 	count := filepath.Join(e.dir, "count")
@@ -423,9 +390,9 @@ func TestExit3DisablesEmitsHealthDeliveryAndEvent(t *testing.T) {
 	if s.Enabled || st.ConsecutiveFailures != 1 {
 		t.Fatalf("enabled=%v stats=%+v", s.Enabled, st)
 	}
-	ds := e.deliveries()
-	if len(ds) != 1 || ds[0].Class != domain.DeliveryHealth || !strings.Contains(ds[0].Content.Title, "src_a") {
-		t.Fatalf("deliveries: %+v", ds)
+	// 健康类投递由 kernel/health 据 health.alert 统一产出，这里只验证告警事件。
+	if n := e.count(`SELECT COUNT(*) FROM eventlog_event WHERE type = ? AND object = ?`, domain.EvHealthAlert, "src_a"); n != 1 {
+		t.Fatalf("health.alert events: %d", n)
 	}
 	failed := e.count(`SELECT COUNT(*) FROM eventlog_event WHERE type = ?`, domain.EvSourceFailed)
 	if failed != 1 {

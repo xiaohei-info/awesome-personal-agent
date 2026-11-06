@@ -202,7 +202,7 @@ func (e *env) wantExit(t *testing.T, want int, id command.Identity, cmd string, 
 	}
 }
 
-// register 登记仓库并给项目设置本机检出；返回材料 id。
+// register 登记仓库并给项目设置本机检出；返回材料 id。登记后内核读一次记下最近 commit，这里等它读完，后续断言不与之竞争。
 func (e *env) register(t *testing.T, r repo, path string) string {
 	t.Helper()
 	e.must(t, owner, "project.repo.add", map[string]any{"id": e.prj, "remote": r.remote})
@@ -210,7 +210,18 @@ func (e *env) register(t *testing.T, r repo, path string) string {
 	res := e.must(t, e.as("WRK"), "material.add", map[string]any{"project": e.prj, "kind": "design", "title": "Design", "tags": []string{"arch"}, "repo": r.remote, "path": path})
 	var out Result
 	json.Unmarshal(res.Value, &out)
+	e.await(t, out.Material, false)
 	return out.Material
+}
+
+// commitOf 轮询登记的最近 commit 直到等于 want（刷新是异步读取）。
+func (e *env) commitOf(t *testing.T, id, want string) {
+	t.Helper()
+	for deadline := time.Now().Add(20 * time.Second); e.entry(t, id).Commit != want; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("latest commit stayed %q, want %q", e.entry(t, id).Commit, want)
+		}
+	}
 }
 
 func (e *env) entry(t *testing.T, id string) Entry {
@@ -278,7 +289,7 @@ func (e *env) needsInput(t *testing.T) []domain.Item {
 	return its
 }
 
-// ACT-HST-01/02：登记只记位置，无 Revision，commit 被拒绝（退出码 6）。
+// ACT-HST-01/02：登记只记位置与最近 commit（登记后读一次），无 Revision，commit 被拒绝（退出码 6）。
 func TestAddRegistersLocationOnlyAndCommitIsRefused(t *testing.T) {
 	e := setup(t)
 	r := newRepo(t)
@@ -286,7 +297,7 @@ func TestAddRegistersLocationOnlyAndCommitIsRefused(t *testing.T) {
 
 	en := e.entry(t, id)
 	if en.Repo != r.remote || en.Path != "docs/design.md" || en.Material.Location != r.remote+":docs/design.md" ||
-		en.Material.Title != "Design" || en.Material.Kind != "design" || en.Commit != "" {
+		en.Material.Title != "Design" || en.Material.Kind != "design" || en.Commit != r.commit {
 		t.Fatalf("entry: %+v", en)
 	}
 	e.st.View(bg, func(tx *store.Tx) error {
@@ -340,6 +351,14 @@ func TestAddValidationAndAuthz(t *testing.T) {
 		}
 	}
 	e.wantExit(t, 5, e.as("WRK"), "material.add", with("project", "prj_missing"))
+	// kind 缺省 design；project 缺省取登记了该仓库的项目，仓库不属于任何项目时仍要求 project。
+	e.must(t, owner, "project.repo.add", map[string]any{"id": e.prj, "remote": "git@example.com:o/known.git"})
+	var inferred Result
+	json.Unmarshal(e.must(t, e.as("WRK"), "material.add", map[string]any{"repo": "git@example.com:o/known.git", "path": "docs/design.md"}).Value, &inferred)
+	if en := e.entry(t, inferred.Material); en.Material.Project != e.prj || en.Material.Kind != "design" || en.Material.Title != "design.md" {
+		t.Fatalf("inferred: %+v", en.Material)
+	}
+	e.wantExit(t, 2, e.as("WRK"), "material.add", map[string]any{"repo": "git@example.com:o/stray.git", "path": "docs/design.md"})
 	// 标题缺省取文件名。
 	var added Result
 	json.Unmarshal(e.must(t, e.as("WRK"), "material.add", good).Value, &added)
@@ -366,6 +385,9 @@ func TestContentReadsViaReaderAndCaches(t *testing.T) {
 	id := e.register(t, r, "docs/design.md")
 	os.WriteFile(filepath.Join(r.checkout, "docs/design.md"), []byte("# uncommitted edit\n"), 0o644)
 
+	e.svc.mu.Lock()
+	delete(e.svc.hit, id) // 登记时那次读取的缓存过期，本人再在 Web 打开
+	e.svc.mu.Unlock()
 	first, err := e.svc.Content(bg, id)
 	if err != nil || first.Status != StatusReading {
 		t.Fatalf("first read is async: %+v %v", first, err)
@@ -377,6 +399,14 @@ func TestContentReadsViaReaderAndCaches(t *testing.T) {
 	if got := e.entry(t, id).Commit; got != r.commit {
 		t.Fatalf("latest commit not recorded: %q", got)
 	}
+	e.st.View(bg, func(tx *store.Tx) error {
+		rs, err := proc.List(tx)
+		// 登记后的刷新不是本人触发；本人打开才是显式读取。
+		if len(rs) != 2 || rs[0].Explicit == rs[1].Explicit {
+			t.Fatalf("opening a hosted doc must be an explicit run, the registration read must not: %+v", rs)
+		}
+		return err
+	})
 	runs := e.runs(t)
 	if v2, _ := e.svc.Content(bg, id); v2.Status != StatusReady || e.runs(t) != runs {
 		t.Fatalf("cache hit must not start another run: %+v runs=%d", v2, e.runs(t))
@@ -555,6 +585,53 @@ func TestChangeCreatesParentAndDelegation(t *testing.T) {
 	}
 }
 
+// ACT-HST-06：修改的父事项以 output 关联材料；子事项回执 done 后刷新最近 commit。
+func TestReportDoneRefreshesCommit(t *testing.T) {
+	e := setup(t)
+	r := newRepo(t)
+	id := e.register(t, r, "docs/design.md")
+	out, err := e.svc.RequestChange(bg, owner, ChangeIn{ID: id, Assignee: workHost, Request: "补充鉴权章节"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.st.View(bg, func(tx *store.Tx) error {
+		rels, err := items.Relations(tx, id)
+		if err != nil || len(rels) != 1 || rels[0] != (domain.Relation{Type: domain.RelOutput, From: out.Parent, To: id}) {
+			t.Fatalf("material relations: %+v %v", rels, err)
+		}
+		return nil
+	})
+	merged := r.push(t, "pr merged", func() { os.WriteFile(filepath.Join(r.work, "docs/design.md"), []byte("# design v2\n"), 0o644) })
+	git(t, r.checkout, "fetch", "-q", "origin")
+	e.must(t, e.as("WRK"), "delegate.report", map[string]any{"id": out.Child, "outcome": "done", "summary": "merged",
+		"evidence": map[string]any{"pr": "https://example.com/pr/1"}})
+	e.commitOf(t, id, merged)
+}
+
+// ACT-HST-05：apa agents check 刷新该仓库登记的托管文档；路径消失时生成 needs_input。
+// agents.check 属连接模块（它依赖本包），这里登记一个同名替身命令，只验证本包对提交的订阅。
+func TestAgentsCheckRefreshesRepo(t *testing.T) {
+	e := setup(t)
+	if err := e.x.Register(command.Spec{Name: "agents.check", Action: authz.ActionRead,
+		Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil },
+		Apply:  func(*command.Ctx) (any, error) { return nil, nil }}); err != nil {
+		t.Fatal(err)
+	}
+	r := newRepo(t)
+	id := e.register(t, r, "docs/design.md")
+	r.push(t, "rm", func() { os.Remove(filepath.Join(r.work, "docs/design.md")) })
+	git(t, r.checkout, "fetch", "-q", "origin")
+	e.must(t, e.as("OBS"), "agents.check", map[string]any{"repo": r.remote})
+	for deadline := time.Now().Add(20 * time.Second); !e.entry(t, id).Missing; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("agents check did not refresh the hosted material")
+		}
+	}
+	if its := e.needsInput(t); len(its) != 1 || its[0].ID != e.entry(t, id).FixItem {
+		t.Fatalf("needs_input: %+v", its)
+	}
+}
+
 func TestChangeRules(t *testing.T) {
 	e := setup(t)
 	id := e.register(t, newRepo(t), "docs/design.md")
@@ -636,12 +713,17 @@ func TestInFlightReadIsReused(t *testing.T) {
 	e := setup(t)
 	id := e.register(t, newRepo(t), "docs/design.md")
 	e.svc.opt.Kick = nil
+	before := e.runs(t) // 登记时的那次读取
 	for i := 0; i < 3; i++ {
-		if v, err := e.svc.Content(bg, id); err != nil || v.Status != StatusReading {
+		read := e.svc.Content
+		if i == 0 {
+			read = e.svc.Refresh
+		}
+		if v, err := read(bg, id); err != nil || v.Status != StatusReading {
 			t.Fatalf("read %d: %+v %v", i, v, err)
 		}
 	}
-	if n := e.runs(t); n != 1 {
+	if n := e.runs(t) - before; n != 1 {
 		t.Fatalf("want 1 queued reader run, got %d", n)
 	}
 }

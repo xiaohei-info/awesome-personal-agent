@@ -21,7 +21,7 @@
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建 | observer | |
 | `apa item show/list` | 读事项；`show` 带挂靠消息，按转发白名单过滤 | observer | 5 |
-| `apa item add/update/transition/relate [--evidence]` | 增改事项、转阶段、关联 | worker（自己的事项）；delegate（任意，每次附 `--evidence`，含改自己的事项和以 `proposed` 新建；缺证据为退出码 2） | 2、4、6 |
+| `apa item add/update/transition/relate [--evidence]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料） | worker（自己的事项）；delegate（任意，每次附 `--evidence`，含改自己的事项和以 `proposed` 新建；缺证据为退出码 2） | 2、4、6 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
 | `apa decide <id> --option --evidence` | 代答决策 | delegate | 4、6、20、22 |
@@ -37,7 +37,7 @@
 | `apa project create/update` | 建项目、改基本信息。`allowed_executors` 不能改 | delegate | 20 |
 | `apa project repos add/remove` | 增改本机检出（worker）或远程地址（delegate） | worker | 4 |
 | **材料与规范** | | | |
-| `apa material add --repo --path` | 登记托管型 | worker | |
+| `apa material add --repo --path [--project] [--kind]` | 登记托管型；project 缺省取登记了该仓库的项目，kind 缺省 `design` | worker | |
 | `apa material commit <id> --from --reason [--kind]` | 提交自有型修订 | worker | 6 |
 | `apa material list` | 列出材料，可按项目、kind、标签筛选 | observer | |
 | `apa material show <id> [--rev]` | 读当前或指定修订；托管型只回位置 | observer | 5 |
@@ -52,6 +52,7 @@
 | `apa source enable/disable` | 启停 | delegate | |
 | `apa source webhook create/rotate/revoke` | 创建、轮换、吊销 webhook 接收密钥 | delegate | |
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
+| `apa source rejects <id> [--after N] [--limit N]` | 查看没有入账的输出行及原因（`next_after` 作为下一次的 `--after`） | observer | |
 | `apa source replay <入站记录>` | 重放 | delegate | |
 | **对外** | | | |
 | `apa events --follow [--cursor]` | 跟随事件流 | observer | |
@@ -68,6 +69,18 @@
 | `apa run list/show` | 运行记录 | observer | |
 
 **只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、执行者清单、规则切 `auto`、运行权限上限、模型端点、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
+
+**代理写命令清单**：delegate 调用下列命令必须附 `on_behalf_of` 与证据（CLI 全局参数 `--evidence`，HTTP 头 `X-APA-Evidence`），缺失为退出码 2，不写入；其他凭据与 Web 本人不受影响（主文档 §14.5）。只读命令、只在 Web 的命令（设置类，delegate 为退出码 20）不在清单内。
+
+| 模块 | 命令 |
+|---|---|
+| 事项 | `item.create`、`item.update`、`item.transition`、`item.relate` |
+| 对话捕获 | `inbound.capture` |
+| 决策 | `decision.request`、`decision.answer`、`proposal.accept`、`proposal.dismiss` |
+| 材料 | `material.commit`、`material.add`、`revision.confirm`、`revision.reject`、`blob.put` |
+| 委派 | `delegate.create`、`delegate.report`、`executor.declare`、`followmsg.handback` |
+| 项目 | `project.create`、`project.update`、`project.repo.add`、`project.repo.remove`、`project.checkout.set`、`project.checkout.remove` |
+| 来源与能力包 | `source.register`、`source.update`、`source.set_enabled`、`source.webhook_key`、`source.webhook_revoke`、`source.replay`、`instance.create`、`instance.update`、`instance.toggle` |
 
 ## B.2 HTTP API
 
@@ -86,7 +99,7 @@
 | 项目 | `GET/POST /projects`，`GET/PATCH /projects/{id}` | 项目 | observer 读，delegate 写 |
 | | `POST /projects/{id}/repos` | repos 属性 | worker、delegate |
 | | `GET /projects/resolve?path&host` | 当前目录到项目的映射 | observer |
-| 材料 | `GET/POST /materials`，`GET /materials/{id}` | 材料 | observer 读，worker 写；导出 ext 密钥可 `GET` |
+| 材料 | `GET/POST /materials`，`GET /materials/{id}` | 材料；单个材料带与事项的类型化关系 `relations` | observer 读，worker 写；导出 ext 密钥可 `GET` |
 | | `GET /materials/{id}/content` | 托管型正文，异步读取 | 只有 Web 登录 |
 | | `POST /materials/{id}/changes` | 对托管型发起修改，生成委派子事项 | Web 登录、delegate；worker、运行凭据须带自己范围内的 `parent` |
 | | `GET/POST /materials/{id}/revisions` | 修订 | observer 读，worker 写 |
@@ -105,6 +118,7 @@
 | | `DELETE /sources/{id}/webhook` | 吊销该来源全部接收密钥，同时删除 HMAC 密钥文件 | delegate |
 | | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | observer、delegate；运行凭据不能读入站记录（返回 403，原始请求体未经转发白名单） |
 | | `GET /sources/{id}/events?disposition&after&limit` | 来源事件；内部来源 `capture:<项目>` 只有 Web 登录能读 | observer；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
+| | `GET /sources/{id}/rejects?after&limit` | 被拒收的输出行及原因 | observer；运行凭据不可用（返回 403，原始行是未过滤的外部输出） |
 | | `POST /source-events/{id}/propose` | 把未判定事件转为建议 | Web 登录、delegate |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
 | 事件 | `GET /events?cursor=` | SSE 或长轮询 | observer、导出和转发 ext 密钥 |
@@ -114,7 +128,7 @@
 | | `GET/POST /forms/{一次性令牌}` | 一次性表单 | 令牌本身 |
 | 运行 | `GET /runs`，`GET /runs/{id}` | 运行记录 | observer |
 | | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
-| 回放与健康 | `GET /why/{id}`，`GET /health` | 回放、健康视图 | observer |
+| 回放与健康 | `GET /why/{id}`，`GET /health` | 回放、健康视图；所有健康告警都经同一处产出健康类投递（§15.2），读取走 `GET /deliveries/unread` | observer |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/purge` | 策略（含人格）、凭据、白名单、名单、命令登记、声明确认、物理删除 | 只有 Web 登录 |
@@ -132,6 +146,7 @@
 
 `GET /sources/{id}/events` 按落盘顺序返回 `{"events": [...], "next_after": 12}`。每条事件的字段见主文档 §6.10：`id`、`source_id`、`dedupe_key`、`type`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`correlation_keys`、`sender`、`sender_verified`、`disposition`、`item`、`attach_state`，其中 `item` 是挂靠或生成的事项 id。`disposition` 可选，取值 `pending`、`attached`、`proposed`、`ignored`、`unjudged`，其他值返回 400。`limit` 缺省 100，上限 500；还有下一页时才返回 `next_after`，作为下一次的 `after`。
 
+`GET /sources/{id}/rejects` 按发生顺序返回 `{"rejects": [...], "next_after": 12}`，分页参数与 `events` 相同。每条含 `source_id`、`run_id`、`line`（输出中的行号）、`reason`、`raw`（原始行）、`at`。`raw` 在落账时已截断到 512 字节；含接收密钥明文前缀的行返回 `[redacted]`（与入站记录的请求头同一规则）。来源未登记返回 404。
 `capture:<项目>` 是对话捕获的内部来源（主文档 §9.3），不在 `GET /sources` 里，Web 按开启捕获的项目拼出 id。Web 登录读它返回同样的结构，其他凭据返回 404（运行凭据仍是 403）。
 
 `POST /source-events/{id}/propose` 不带请求体，成功返回 200 与更新后的来源事件（`disposition` 为 `proposed`，`item` 为新事项 id），事件不是 `unjudged` 时返回 409，不存在时返回 404。事项阶段为 `proposed`，事项的 `item.created` 与来源事件的 `inbound.disposed` 都记调用者为操作者。
@@ -156,7 +171,7 @@
 
 `reading` 时隔几秒再请求；同一材料的在途读取只有一个，在短任务队列内优先（主文档 §7.7）。`unavailable` 是降级结果，不是错误；再次请求会重新读取。
 
-`POST /materials/{id}/changes` 只用于托管型，自有型返回 409。请求体 `{"assignee": "<执行者 id>", "request": "<修改要求>", "parent": "<事项 id，可选>"}`，可带 `Idempotency-Key`。成功返回 201：`{"item": "<子事项 id>", "parent": "<父事项 id>"}`。子事项带材料的 project、仓库和路径；`assignee` 不在项目允许范围内返回 403（退出码 21）；`parent` 不属于材料所在项目返回 400。父事项来源见主文档 §12.3。
+`POST /materials/{id}/changes` 只用于托管型，自有型返回 409。请求体 `{"assignee": "<执行者 id>", "request": "<修改要求>", "parent": "<事项 id，可选>"}`，可带 `Idempotency-Key`。成功返回 201：`{"item": "<子事项 id>", "parent": "<父事项 id>"}`。子事项带材料的 project、仓库和路径，委派成功后父事项以 `output` 关联该材料；`assignee` 不在项目允许范围内返回 403（退出码 21）；`parent` 不属于材料所在项目返回 400。父事项来源见主文档 §12.3。
 
 `GET /agents-md?repo` 返回 `{"content": "…", "hash": "…", "rendered_at": "…", "last_check": {"state": "current|stale|drift", "file_hash": "…", "host": "…", "checked_at": "…"}}`。`last_check` 来自同一仓库最近一次 `POST /agents-md/check`，从未检查过时为 `null`。
 

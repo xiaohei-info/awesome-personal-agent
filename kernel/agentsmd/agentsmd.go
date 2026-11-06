@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -46,7 +47,7 @@ var rerenderOn = []string{"revision.confirm", "material.add", "material.refresh"
 
 // Options 注入本模块读取但不拥有的东西。
 type Options struct {
-	// Template 是 agents-md 包的 templates/agents.md，必须含五个占位符。
+	// Template 是 agents-md 包的 templates/agents.md，必须含五个占位符；能力包热加载后用 SetTemplate 换新。
 	Template string
 	// Fetch 读仓库默认分支上的 AGENTS.md（经外呼调用器拉起的只读读取器）；仅 Trigger 用，可空。
 	Fetch func(ctx context.Context, repo string) (content string, exists bool, err error)
@@ -58,6 +59,25 @@ type Options struct {
 type Service struct {
 	x   *command.Executor
 	opt Options
+	tpl atomic.Pointer[string]
+}
+
+func checkTemplate(tpl string) error {
+	for _, ph := range placeholders {
+		if strings.Count(tpl, "{"+ph+"}") != 1 {
+			return fmt.Errorf("agentsmd: template must use {%s} exactly once", ph)
+		}
+	}
+	return nil
+}
+
+// SetTemplate 换用新的渲染模板（能力包热加载）；不合格时拒绝并保留当前模板。已有渲染记录不动，下一次渲染才按新模板。
+func (s *Service) SetTemplate(tpl string) error {
+	if err := checkTemplate(tpl); err != nil {
+		return err
+	}
+	s.tpl.Store(&tpl)
+	return nil
 }
 
 var system = command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:agentsmd", Via: domain.ViaSource}, Level: authz.LevelWorker}
@@ -89,15 +109,14 @@ func decode(in json.RawMessage, v any) error {
 // 授权（§14.3）：render 按"修订材料"（worker 以上）；check 与 sync 是 observer 即可的读取加记录；
 // resolve 按代答（Web 本人可；delegate 必须附本人原话；observer、worker、运行凭据得到 4）。
 func New(x *command.Executor, o Options) (*Service, error) {
-	for _, ph := range placeholders {
-		if strings.Count(o.Template, "{"+ph+"}") != 1 {
-			return nil, fmt.Errorf("agentsmd: template must use {%s} exactly once", ph)
-		}
+	if err := checkTemplate(o.Template); err != nil {
+		return nil, err
 	}
 	if o.OnError == nil {
 		return nil, errors.New("agentsmd: Options.OnError is required")
 	}
 	s := &Service{x: x, opt: o}
+	s.tpl.Store(&o.Template)
 	for _, sp := range []command.Spec{s.renderCmd(), s.checkCmd("agents.check", false), s.checkCmd("agents.sync", true), s.resolveCmd()} {
 		if err := x.Register(sp); err != nil {
 			return nil, err
@@ -142,7 +161,7 @@ func (s *Service) renderCmd() command.Spec {
 			out := RenderOut{Renders: []RenderResult{}}
 			for _, p := range ps {
 				for _, r := range p.Repos {
-					rec, changed, err := renderRepo(c, s.opt.Template, p.ID, r.Remote)
+					rec, changed, err := renderRepo(c, *s.tpl.Load(), p.ID, r.Remote)
 					if err != nil {
 						return nil, err
 					}
@@ -258,7 +277,7 @@ func (s *Service) evaluate(c *command.Ctx, in checkIn) (Verdict, Render, string,
 	if !ok {
 		return Verdict{}, Render{}, "", notFound("repository", in.Repo)
 	}
-	rec, _, err := renderRepo(c, s.opt.Template, p.ID, in.Repo)
+	rec, _, err := renderRepo(c, *s.tpl.Load(), p.ID, in.Repo)
 	if err != nil {
 		return Verdict{}, rec, "", err
 	}

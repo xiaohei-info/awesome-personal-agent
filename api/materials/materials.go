@@ -25,11 +25,11 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/hosted"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -38,14 +38,12 @@ import (
 const (
 	// IdempotencyHeader 携带幂等键；同键同输入重放首次结果，同键异输入返回 conflict。
 	IdempotencyHeader = "Idempotency-Key"
-	// EvidenceHeader 携带 delegate 代答的本人原话。
-	EvidenceHeader = "X-APA-Evidence"
 	// MaxBlob 是单个附件的上限。
 	// shortcut: 整块读入内存再 base64 进命令输入，所以设上限；要传更大的文件时改成流式落盘。
 	MaxBlob int64 = 32 << 20
 )
 
-// Routes 返回材料路由分组，交给 core.Deps.Groups。x 须已登记 materials、hosted、search、blobs 的命令；
+// Routes 返回材料路由分组，交给 core.Deps.Groups。x 须已登记 materials、hosted、blobs 的命令；
 // hs 是托管型读取与修改服务（生产装配必须给；nil 时不挂 /content 与 /changes）。
 func Routes(st *store.Store, x *command.Executor, hs *hosted.Service) core.RouteGroup {
 	h := &handlers{st: st, x: x, hs: hs}
@@ -72,22 +70,6 @@ type handlers struct {
 	st *store.Store
 	x  *command.Executor
 	hs *hosted.Service
-}
-
-// ownerPrincipal 是本人的操作者标识（单用户系统，与 Web 会话的 Actor 一致）。
-const ownerPrincipal = "owner"
-
-// onBehalf 给 delegate 凭据的操作者补上 on_behalf_of：确认或拒绝修订是代答（§14.5），要求 delegate 声明替本人行事。
-// 认证与授权仍由命令管线在事务内完成。
-// shortcut: 单用户系统写死本人为 owner，引入多用户时改由凭据携带（与 api/items、api/decisions 一致）。
-type onBehalf struct{ command.Identity }
-
-func (o onBehalf) Authenticate(tx *store.Tx) (command.Caller, error) {
-	c, err := o.Identity.Authenticate(tx)
-	if err == nil && c.Level == authz.LevelDelegate && c.Actor.OnBehalfOf == "" {
-		c.Actor.OnBehalfOf = ownerPrincipal
-	}
-	return c, err
 }
 
 // readable：读材料对 observer 及以上开放；ext 与 webhook 凭据另有用途，不能读账本，只有导出 ext 例外（§10.3）。
@@ -117,7 +99,7 @@ func object(r *http.Request) (map[string]json.RawMessage, error) {
 
 // run 以请求的凭据执行一条内核命令。evidence 是请求元数据，不是命令输入（命令对未知字段严格拒绝），所以从体里取出。
 func (h *handlers) run(r *http.Request, p *core.Principal, cmd string, in map[string]json.RawMessage) (command.Result, error) {
-	req := command.Request{Identity: onBehalf{p.Identity}, Command: cmd, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: r.Header.Get(EvidenceHeader)}
+	req := command.Request{Identity: p.Identity, Command: cmd, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence}
 	if raw, ok := in["evidence"]; ok {
 		delete(in, "evidence")
 		if req.Evidence == "" {
@@ -196,7 +178,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"materials": ms})
 }
 
-// get 返回登记，加上自有型的修订（默认当前修订，?rev= 指定）或托管型的登记详情。
+// get 返回登记与关联事项（relations），加上自有型的修订（默认当前修订，?rev= 指定）或托管型的登记详情。
 func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if err := readable(p); err != nil {
 		return err
@@ -209,6 +191,10 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 			return err
 		}
 		out["material"] = m
+		// 事项与材料的类型化关系（item.relate 以材料为终点的边），材料一侧同样可见。
+		if out["relations"], err = items.Relations(tx, id); err != nil {
+			return err
+		}
 		switch {
 		case m.Location != "":
 			e, err := hosted.Get(tx, id)
@@ -310,8 +296,8 @@ func (h *handlers) changes(w http.ResponseWriter, r *http.Request, p *core.Princ
 	if in.ID != "" {
 		return invalid("field id comes from the URL and cannot be in the body", "remove it from the body")
 	}
-	in.ID, in.IdemKey, in.Evidence = r.PathValue("id"), r.Header.Get(IdempotencyHeader), r.Header.Get(EvidenceHeader)
-	out, err := h.hs.RequestChange(context.WithoutCancel(r.Context()), onBehalf{p.Identity}, in)
+	in.ID, in.IdemKey, in.Evidence = r.PathValue("id"), r.Header.Get(IdempotencyHeader), p.Evidence
+	out, err := h.hs.RequestChange(context.WithoutCancel(r.Context()), p.Identity, in)
 	if err != nil {
 		return err
 	}
@@ -328,7 +314,7 @@ func (h *handlers) putBlob(w http.ResponseWriter, r *http.Request, p *core.Princ
 		return invalid("the body does not hash to the sha256 in the URL", "put the file at /blobs/<sha256 of its content>")
 	}
 	in, _ := json.Marshal(map[string]any{"content": data})
-	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "blob.put", Input: in, IdemKey: r.Header.Get(IdempotencyHeader)})
+	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "blob.put", Input: in, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence})
 	if err != nil {
 		return err
 	}
