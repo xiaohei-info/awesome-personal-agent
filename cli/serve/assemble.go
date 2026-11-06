@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,7 +52,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
@@ -189,14 +187,6 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
-	// 回答一提交就续接（§13.6），要排在规则引擎之前登记：同一次提交里续接先写下在途 Run，
-	// 随后命中的事件规则（如回答把事项转回 open）看到在途运行而跳过，不会另起一次后台运行。
-	// shortcut: 设计要求续接 Run 与回答同一事务写入，这里是提交后同步续接；另一条 Drain 恰在并发时仍可能先拉起，后到者按在途跳过。
-	x.OnCommit(func(c command.Commit) {
-		for _, id := range resolvedItems(st, c.Seqs) {
-			k.resume(id)
-		}
-	})
 	// call_agent 按模板类别分派：任务型与生成型由任务型服务处理，判断型交委派核验。任务型服务要等调度器建好，闭包里再取。
 	var tk *task.Service
 	var hs *hosted.Service // 托管型读取器的运行结果回到它；调度器建好后再赋值
@@ -259,10 +249,11 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("background run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}
-	if k.rs, err = resume.New(resume.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, Owner: owner,
+	if k.rs, err = resume.New(resume.Options{Store: st, Packs: ld, Queue: k.disp, RunsDir: l.Runs, Owner: owner,
 		MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("resume run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}
+	k.rs.Attach(x) // 回答与续接 Run 入队同一事务（§13.6）；事件规则随后命中时看到在途运行而跳过
 
 	if err := errors.Join(
 		kitems.Register(x, kinds),
@@ -328,10 +319,17 @@ func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 	case k.att.Owns(c):
 		return k.att.HandleTimer(tx, c)
 	case kdecisions.Owns(c):
-		k.resumeMu.Lock() // 到期按默认值决定也是回答；事务提交后由时钟循环续接，未决定的由 Resume 自己跳过
+		// 到期按默认值决定也是回答：同一个时钟事务里入队续接（未决定的由续接自己跳过），提交后由时钟循环拉起进程
+		if err := kdecisions.HandleTimer(tx, c); err != nil {
+			return err
+		}
+		if _, err := k.rs.ResumeIn(tx, c.Target); err != nil {
+			return err
+		}
+		k.resumeMu.Lock()
 		k.resumeDue = append(k.resumeDue, c.Target)
 		k.resumeMu.Unlock()
-		return kdecisions.HandleTimer(tx, c)
+		return nil
 	case k.rn.Owns(c):
 		return k.rn.HandleTimer(tx, c)
 	case instances.Owns(c):
@@ -508,7 +506,7 @@ func (k *kernel) packSig() string {
 	return b.String()
 }
 
-// resume 在决策回答后续接该事项的后台会话（§13.6）；不是等待续接的事项由 Resume 跳过。
+// resume 在到期按默认值决定后收尾（§13.6）：续接已在时钟事务里入队，这里拉起进程；不是等待续接的事项由 Resume 跳过。
 // 拒绝与链路超限写下的健康告警不经命令提交，这里追赶成健康类投递。
 func (k *kernel) resume(item string) {
 	ctx := context.Background()
@@ -518,26 +516,6 @@ func (k *kernel) resume(item string) {
 	if err := k.st.Update(ctx, k.hn.Sync); err != nil {
 		slog.Error("health delivery", "err", err)
 	}
-}
-
-// resolvedItems 取一次提交里被决定的事项：decision.answer、渠道回答、表单回答都落 decision.resolved。
-func resolvedItems(st *store.Store, seqs []int64) (ids []string) {
-	if len(seqs) == 0 {
-		return nil
-	}
-	err := st.View(context.Background(), func(tx *store.Tx) error {
-		es, err := eventlog.Read(tx, slices.Min(seqs)-1, int(slices.Max(seqs)-slices.Min(seqs))+1)
-		for _, en := range es {
-			if en.Event.Type == domain.EvDecisionResolved && slices.Contains(seqs, en.Event.Seq) {
-				ids = append(ids, en.Event.Object)
-			}
-		}
-		return err
-	})
-	if err != nil {
-		slog.Error("read resolved decisions", "err", err)
-	}
-	return ids
 }
 
 // syncHealth 追赶不经命令提交写下的健康告警（规则动作失败、跟进失败等），命令提交的由 Attach 立即追赶。
