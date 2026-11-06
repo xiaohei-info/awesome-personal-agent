@@ -153,7 +153,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 
-	q := delivery.New(delivery.Options{})
+	q := delivery.New(delivery.Options{UnclaimedAfter: cfg.DeliveryUnclaimedAfter, Backoff: cfg.DeliveryBackoff})
 	att := attention.New(attention.Options{Queue: q})
 	k := &kernel{st: st, x: x, layout: l, scr: scr, att: att, hn: khealth.NewNotifier(q), packs: ld, drain: make(chan struct{}, 1)}
 

@@ -25,6 +25,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -253,6 +255,56 @@ func TestServeRejectsInvalidConfig(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(home, "config.yaml"), []byte("bogus: 1\n"), 0o644)
 	if r := apa(t, home, "", "serve"); r.code != 2 {
 		t.Fatalf("invalid config must fail with exit 2: %+v", r)
+	}
+}
+
+// 配置里的 delivery_unclaimed_after 经装配传给投递队列：无人领取超过它就转 fallback_web（ACT-DLV-06）。
+func TestAssemblePassesDeliveryUnclaimedAfter(t *testing.T) {
+	l := config.LayoutOf(filepath.Join(t.TempDir(), "h"))
+	if err := l.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(l.Home, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg := config.Default()
+	cfg.DeliveryUnclaimedAfter = 300 * time.Millisecond
+	k, err := assemble(st, l, cfg, "http://127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := func() domain.DeliveryState {
+		var d domain.Delivery
+		if err := st.Update(context.Background(), func(tx *store.Tx) (err error) {
+			if err = k.att.Tick(tx); err != nil {
+				return err
+			}
+			d, err = delivery.New(delivery.Options{}).Get(tx, "d1")
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return d.State
+	}
+	if err := st.Update(context.Background(), func(tx *store.Tx) error {
+		_, _, err := delivery.New(delivery.Options{}).Create(tx, domain.Delivery{ID: "d1", Item: "it_1", Class: domain.DeliveryBrief,
+			Route: "chan", Version: 1, Content: domain.DeliveryContent{Title: "t"}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := state(); got != domain.DeliveryPending {
+		t.Fatalf("must not fall back before the configured time, got %s", got)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if got := state(); got != domain.DeliveryFallbackWeb {
+		t.Fatalf("configured unclaimed_after ignored, state %s (default would be 30m)", got)
 	}
 }
 

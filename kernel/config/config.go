@@ -25,9 +25,13 @@ type Config struct {
 	MaxSourceOutput      int           // 来源、转换脚本单次 stdout 的总上限（字节）
 	IngestRetention      time.Duration // Ingest 请求体保留期
 	RunRetention         time.Duration // 运行目录保留期
+	// 投递：无人领取多久转 fallback_web，以及失败后的逐次退避（§6.9）。
+	DeliveryUnclaimedAfter time.Duration
+	DeliveryBackoff        []time.Duration
 }
 
-// Default 返回设计规定的默认值：额度 4/2，来源输出上限 32MB，Ingest 30 天，运行目录 14 天。
+// Default 返回设计规定的默认值：额度 4/2，来源输出上限 32MB，Ingest 30 天，运行目录 14 天，
+// 投递无人领取 30 分钟、失败退避 1/3/7/15/30 分钟。
 // 监听地址设计未规定，默认只绑本机回环，跨设备访问需显式改配置。
 func Default() Config {
 	return Config{
@@ -37,6 +41,9 @@ func Default() Config {
 		MaxSourceOutput:      32 << 20,
 		IngestRetention:      30 * day,
 		RunRetention:         14 * day,
+
+		DeliveryUnclaimedAfter: 30 * time.Minute,
+		DeliveryBackoff:        []time.Duration{time.Minute, 3 * time.Minute, 7 * time.Minute, 15 * time.Minute, 30 * time.Minute},
 	}
 }
 
@@ -180,6 +187,18 @@ func apply(c *Config, seen map[string]bool, raw string) error {
 		return days(k, v, &c.IngestRetention)
 	case "run_retention_days":
 		return days(k, v, &c.RunRetention)
+	case "delivery_unclaimed_after":
+		return duration(k, v, &c.DeliveryUnclaimedAfter)
+	case "delivery_backoff": // 逗号分隔的时长表，第 n 次失败后等第 n 项
+		var bo []time.Duration
+		for _, part := range strings.Split(v, ",") {
+			var d time.Duration
+			if err := duration(k, strings.TrimSpace(part), &d); err != nil {
+				return err
+			}
+			bo = append(bo, d)
+		}
+		c.DeliveryBackoff = bo
 	default:
 		return fmt.Errorf("未知配置项 %q", k)
 	}
@@ -231,5 +250,15 @@ func days(k, v string, dst *time.Duration) error {
 		return err
 	}
 	*dst = time.Duration(n) * day
+	return nil
+}
+
+// duration 解析 Go 时长写法（30m、90s），必须为正。
+func duration(k, v string, dst *time.Duration) error {
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return fmt.Errorf("%s 必须是正时长（如 30m、90s）: %q", k, v)
+	}
+	*dst = d
 	return nil
 }

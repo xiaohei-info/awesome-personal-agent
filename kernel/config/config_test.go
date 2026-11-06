@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestLoadDefaultsWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c != Default() {
+	if !reflect.DeepEqual(c, Default()) {
 		t.Fatalf("got %+v", c)
 	}
 	if c.MaxSubprocesses != 4 || c.MaxShortSubprocesses != 2 {
@@ -71,6 +72,11 @@ func TestLoadDefaultsWhenMissing(t *testing.T) {
 	}
 	if c.IngestRetention != 30*24*time.Hour || c.RunRetention != 14*24*time.Hour {
 		t.Fatal("retention defaults")
+	}
+	// 设计 §6.9：无人领取 30 分钟；失败退避 1、3、7、15、30 分钟。
+	if c.DeliveryUnclaimedAfter != 30*time.Minute ||
+		!reflect.DeepEqual(c.DeliveryBackoff, []time.Duration{time.Minute, 3 * time.Minute, 7 * time.Minute, 15 * time.Minute, 30 * time.Minute}) {
+		t.Fatalf("delivery defaults: %v %v", c.DeliveryUnclaimedAfter, c.DeliveryBackoff)
 	}
 }
 
@@ -83,13 +89,16 @@ max_short_subprocesses: 1
 max_source_output_mb: 5
 ingest_retention_days: 7
 run_retention_days: 3
+delivery_unclaimed_after: 20s
+delivery_backoff: 1s, 2s,3s
 `), 0o600)
 	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.Listen != "0.0.0.0:9000" || c.MaxSubprocesses != 8 || c.MaxShortSubprocesses != 1 || c.MaxSourceOutput != 5<<20 ||
-		c.IngestRetention != 7*24*time.Hour || c.RunRetention != 3*24*time.Hour {
+		c.IngestRetention != 7*24*time.Hour || c.RunRetention != 3*24*time.Hour ||
+		c.DeliveryUnclaimedAfter != 20*time.Second || !reflect.DeepEqual(c.DeliveryBackoff, []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}) {
 		t.Fatalf("got %+v", c)
 	}
 }
@@ -119,6 +128,11 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 		"no colon":       "max_subprocesses 4\n",
 		"nested":         "limits:\n  a: 1\n",
 		"unterminated":   "listen: \"abc\n",
+		"zero unclaimed": "delivery_unclaimed_after: 0s\n",
+		"unit missing":   "delivery_unclaimed_after: 30\n",
+		"bad backoff":    "delivery_backoff: 1m,soon\n",
+		"empty backoff":  "delivery_backoff: \n",
+		"negative step":  "delivery_backoff: 1m,-3m\n",
 	}
 	for name, body := range cases {
 		p := filepath.Join(t.TempDir(), "config.yaml")
