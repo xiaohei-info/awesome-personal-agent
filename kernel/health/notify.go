@@ -31,6 +31,10 @@ INSERT INTO health_cursor (id, seq) SELECT id, seq FROM chain_cursor;`,
 // 设计（§14.4）只要求进健康视图，不产出投递；这是唯一不出投递的健康告警。
 const ScreeningKind = "screening"
 
+// DraftKind 是 decision-card 包的卡片文案、阈值判定与摘要起草失败的 payload.kind。与初筛失败同理：
+// 逐事项发生、按规则继续，只进健康视图（"模型不可用"），不出投递。
+const DraftKind = "decision-card"
+
 // Notifier 是"健康告警 → 健康类投递"的唯一出口（设计 §15.2）：按游标读 health.alert，
 // 每条以事件序号为幂等键产出一条 class=health 的投递，重复处理不会重复投递。
 // 各模块只记 health.alert，不自建健康投递；本包只写自己的游标与投递队列。
@@ -90,7 +94,7 @@ func (n *Notifier) Sync(tx *store.Tx) error {
 	return err
 }
 
-// alertDelivery 把一条 health.alert 格式化成健康类投递；初筛失败不出投递。
+// alertDelivery 把一条 health.alert 格式化成健康类投递；初筛与起草失败不出投递。
 func alertDelivery(en eventlog.Entry, route string) (domain.Delivery, bool) {
 	e := en.Event
 	var p struct {
@@ -99,7 +103,7 @@ func alertDelivery(en eventlog.Entry, route string) (domain.Delivery, bool) {
 	if len(e.Payload) > 0 {
 		_ = json.Unmarshal(e.Payload, &p) // 墓碑化后没有内容：按通用格式出投递
 	}
-	if p.Kind == ScreeningKind {
+	if p.Kind == ScreeningKind || p.Kind == DraftKind {
 		return domain.Delivery{}, false
 	}
 	d := domain.Delivery{

@@ -30,11 +30,15 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	kmaterials "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
 type result struct {
@@ -1339,5 +1343,81 @@ curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TO
 	stop()
 	if logs.Len() != 0 {
 		t.Fatalf("kernel services logged errors:\n%s", logs.String())
+	}
+}
+
+// decision-card 包的生成型与判断型都已装配：命令提交后摘要循环起草事项一句话摘要与材料修订摘要，
+// 待投递的决策等初筛与卡片文案起草返回后才投递，内容取卡片文案（§7.4、§8.1、§12.4）。
+func TestServeDraftsDecisionCardAndSummaries(t *testing.T) {
+	k := assembled(t)
+	stub := modelstub.New()
+	t.Cleanup(stub.Close)
+	stub.SetDefault(modelstub.Reply{Content: `{"probability":0.05,"confidence":0.95}`}) // web_only 初筛：不升级
+	stub.When("写一句话摘要", modelstub.Reply{Content: `{"insufficient_info":false,"summary":"等供应商报价"}`})
+	stub.When("概述修订", modelstub.Reply{Content: `{"insufficient_info":false,"summary":"新增结论"}`})
+	stub.When("写一张决策卡片", modelstub.Reply{Content: `{"insufficient_info":false,"title":"卡片标题","question":"现在下单吗？"}`})
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := policy.Update(tx, hostOwner.Actor, "model", func(p *policy.Policy) error {
+			p.ModelEndpoint = policy.ModelEndpoint{URL: stub.URL(), Model: "m", ScreeningTimeoutMs: 5000}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	report := func(what string, err error) {
+		if err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+	}
+	var it struct{ ID string }
+	_ = json.Unmarshal(k.do(t, command.Chain{}, "item.create", map[string]any{"title": "采购服务器", "kind": "task", "phase": "open", "assignee": owner}), &it)
+	var pr struct{ ID string }
+	_ = json.Unmarshal(k.do(t, command.Chain{}, "project.create", map[string]any{"name": "P"}), &pr)
+	var mr kmaterials.Result
+	_ = json.Unmarshal(k.do(t, command.Chain{}, "material.commit", map[string]any{"project": pr.ID, "kind": "minutes", "title": "周会", "content": "结论", "reason": "r"}), &mr)
+	if !k.sumDue.Load() {
+		t.Fatal("commits did not wake the summary loop")
+	}
+	report("summaries", k.sum.Drain(ctx))
+
+	k.do(t, command.Chain{}, "decision.request", map[string]any{"id": it.ID,
+		"ask": map[string]any{"question": "下单？", "options": []map[string]any{{"id": "A", "label": "下单"}, {"id": "B", "label": "再等"}}}})
+	k.scr.Wait()
+	report("attention sync", k.st.Update(ctx, k.att.Sync)) // 初筛写回不经命令，下一次追赶才看到
+	if !k.att.DraftDue() {
+		t.Fatal("decision did not wait for its card draft")
+	}
+	report("decision drafts", k.att.Drafts(ctx, k.st))
+
+	err := k.st.View(ctx, func(tx *store.Tx) error {
+		got, err := kitems.Get(tx, it.ID)
+		if err != nil || got.Summary != "等供应商报价" {
+			t.Errorf("item summary %q %v", got.Summary, err)
+		}
+		v, err := kmaterials.GetRevision(tx, mr.Revision)
+		if err != nil || v.Summary != "新增结论" {
+			t.Errorf("revision summary %q %v", v.Summary, err)
+		}
+		r, err := tx.Query(`SELECT content FROM delivery_delivery WHERE item = ? AND class = 'decision'`, it.ID)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		var content string
+		if !r.Next() {
+			t.Fatal("no decision delivery after the card draft")
+		}
+		if err := r.Scan(&content); err != nil {
+			return err
+		}
+		if !strings.Contains(content, `"title":"卡片标题"`) || !strings.Contains(content, "现在下单吗？") || !strings.Contains(content, "A: 下单") {
+			t.Errorf("delivery content not drafted from the card: %s", content)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

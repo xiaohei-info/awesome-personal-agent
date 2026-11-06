@@ -276,6 +276,29 @@ func (f *fx) agentCalls(object, category string) []event {
 	return out
 }
 
+// templateCalls 只留指定提示词模板的调用：系统发起的摘要、卡片文案同属 generate，但模板不同。
+func (f *fx) templateCalls(object, category, template string) []event {
+	f.t.Helper()
+	var out []event
+	for _, e := range f.agentCalls(object, category) {
+		if e.Payload["template"] == template {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// modelRequests 只留正文含 mark 的模型请求：系统发起的摘要、卡片文案也走同一个端点，不属被验收的调用。
+func (f *fx) modelRequests(mark string) []modelstub.Request {
+	var out []modelstub.Request
+	for _, r := range f.ModelStub.Requests() {
+		if strings.Contains(r.BodyText, mark) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (f *fx) item(id string) map[string]any {
 	f.t.Helper()
 	var out struct {
