@@ -1,40 +1,26 @@
-# sha256: 422b1f7e2b88cf0406e3643e18a1bcf30f773fb640ec51e826a60795744464d5
+# sha256: 3161bea50ed1d4d5a1faa3f3eb37f8f89aeafddff2a3017768448dfd80f050b1
 reconcile_audit:
   schema: omac.reconcile-audit/v1
   last_full_scan_at: '2026-11-06T11:28:17Z'
-  completed_interval_ticks: 1
+  completed_interval_ticks: 2
 defects:
   schema: omac.defect-ledger/v1
   used_global: 0
   used_by_reporter: {}
   granted_by_reporter: {}
-  entries: {}
-  inbox:
-  - id: a70d67d64d92
-    reporter: e2e-source-calendar-live
-    defects:
-    - class: contract-gap
-      suspected_node: kernel-followmsg
+  entries:
+    dfx-5dd4c0c9998f:
+      suspected: kernel-followmsg
       anchors:
       - flow-source-calendar/ACT-CAL-03
-      design_ref: docs/solution-design.md#94-跟进消息归属
-      expected: 负责人决定保持 ACT-CAL-03 严格：同一来源对象的更新事件不产生重复事项。机制：来源事件带关联键（日历为 UID+RECURRENCE-ID），
-        §9.4 的挂靠从“已委派的未关闭事项”扩展为“由同一来源关联键创建、仍未关闭的事项”（含 proposed）：命中时更新该事项（标题/时间等随事件刷新，记事项事件），
-        不进规则与判断、不新建事项；已关闭的不挂靠，按新事件处理。改动收敛在内核挂靠一处并同步改写 §9.4、§9.3 第 2 步说明，日历适配器为事件填
-        correlation_keys，能力包不加特例。
-      observed: 'live 运行：修改测试日程标题后，同一 iCalUID 的更新事件生成了第二个 proposed 事项（itm_5f663a3d6784fde3
-        与 itm_14158cd8547e4868）。 kernel/followmsg resolve() 只匹配 Kind==delegation 的事项，inbound-triage
-        的 calendar-event 规则 then: proposed 没有更新合并路径。'
-      locations:
-      - kernel/followmsg/followmsg.go:resolve
-      - packs/inbound-triage/pack.yaml:calendar-event
-      - sources/calendar/calendar.go:convert
-    - class: design-gap
-      suspected_node: sources-calendar
+      reporters:
+      - e2e-source-calendar-live
+      state: needs-owner
+    dfx-1699a21c5f70:
+      suspected: sources-calendar
       anchors:
       - flow-source-calendar/ACT-CAL-02
-      design_ref: docs/solution-design.md#97-工具适配邮件与日历
-      expected: 新建日程映射为 event.created，只有真实更新才是 event.updated；created/updated 时间比较按秒或规范化后比较。
-      observed: Google 返回 created 以 .000Z 结尾而 updated 带真实毫秒，convert 把新建日程判成 event.updated。
-      locations:
-      - sources/calendar/calendar.go:convert
+      reporters:
+      - e2e-source-calendar-live
+      state: needs-owner
+  inbox: []
