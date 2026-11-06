@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -255,15 +256,19 @@ func (f *fx) ingestRecord(src, secret, body, delivery string) string {
 func (f *fx) runDir(id string) string { return filepath.Join(f.Home, "runs", id) }
 
 // procsIn 返回当前目录在 dir 之下的存活进程（运行目录是任务型子进程及其子孙的工作目录）。
+// 用 lsof 取各进程 cwd，Linux 与 macOS 通用；lsof 报告真实路径，所以 dir 先解符号链接。
 func procsIn(dir string) []int {
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	out, _ := exec.Command("lsof", "-a", "-d", "cwd", "-Fpn").Output() // 部分进程无权访问时 lsof 退出码非 0，输出仍有效
 	var pids []int
-	ents, _ := os.ReadDir("/proc")
-	for _, e := range ents {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil {
-			continue
-		}
-		if cwd, err := os.Readlink("/proc/" + e.Name() + "/cwd"); err == nil && strings.HasPrefix(cwd, dir) {
+	pid := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "p"):
+			pid, _ = strconv.Atoi(line[1:])
+		case strings.HasPrefix(line, "n") && pid > 0 && strings.HasPrefix(line[1:], dir):
 			pids = append(pids, pid)
 		}
 	}
@@ -271,12 +276,10 @@ func procsIn(dir string) []int {
 }
 
 func alive(pid int) bool {
-	// 僵尸进程不算存活：父进程已被杀，由 init 收养后很快回收，这里只看 /proc 状态。
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		return false
-	}
-	return !strings.Contains(string(b), ") Z ")
+	// 僵尸进程不算存活：父进程已被杀，由 init 收养后很快回收。
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	st := strings.TrimSpace(string(out))
+	return err == nil && st != "" && !strings.HasPrefix(st, "Z")
 }
 
 // TestFlowOutcallShort 对应 ACT-OUT-03、ACT-OUT-04：短任务额度为 1（max_short_subprocesses=1）。
