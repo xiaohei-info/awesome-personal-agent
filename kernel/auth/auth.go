@@ -200,7 +200,8 @@ func (a *Auth) Revoke(tx *store.Tx, id string) error {
 }
 
 // Rotate 为同种类、同绑定签发新密钥，旧密钥在 grace 后失效（新旧短期并存）。
-// grace 为 0 时旧密钥立即失效。已吊销的凭据不能轮换。
+// grace 为 0 时旧密钥立即失效。已吊销或已轮换过（expires_at 非零，宽限期中或已过期）的凭据不能再轮换，
+// 否则会复活过期密钥、重复签发有效密钥，并让 expires_at 被推迟。
 func (a *Auth) Rotate(tx *store.Tx, id string, grace time.Duration) (Credential, string, error) {
 	old, ok, err := one(tx, "id = ?", id)
 	if err != nil {
@@ -211,6 +212,9 @@ func (a *Auth) Rotate(tx *store.Tx, id string, grace time.Duration) (Credential,
 	}
 	if !old.RevokedAt.IsZero() {
 		return Credential{}, "", domain.NewError(domain.CodeConflict, "credential is revoked", "issue a new credential")
+	}
+	if !old.ExpiresAt.IsZero() {
+		return Credential{}, "", domain.NewError(domain.CodeConflict, "credential is already rotated", "rotate the current valid credential or issue a new one")
 	}
 	if grace < 0 {
 		return Credential{}, "", invalid("grace must not be negative")

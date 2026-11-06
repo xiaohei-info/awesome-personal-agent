@@ -226,6 +226,35 @@ func TestRotateErrors(t *testing.T) {
 	}
 }
 
+// 已轮换的凭据（宽限期中或已过期）不能再轮换：不签发新密钥，expires_at 不变，旧密钥不会复活。
+func TestRotateRejectsRotatedCredential(t *testing.T) {
+	e := setup(t)
+	old, oldSecret := e.issue(t, Spec{Kind: Webhook, Scope: "src-1"})
+	if err := e.s.Update(ctx, func(tx *store.Tx) error { _, _, err := e.a.Rotate(tx, old.ID, 10*time.Minute); return err }); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []time.Duration{time.Minute, 10 * time.Minute} { // 宽限期中、已过期
+		e.now = e.now.Add(step)
+		err := e.s.Update(ctx, func(tx *store.Tx) error { _, _, err := e.a.Rotate(tx, old.ID, time.Hour); return err })
+		if code(err) != domain.CodeConflict {
+			t.Fatalf("+%v: rotating rotated credential: %v", step, err)
+		}
+	}
+	var all []Credential
+	_ = e.s.View(ctx, func(tx *store.Tx) (err error) { all, err = e.a.List(tx); return })
+	if len(all) != 2 {
+		t.Fatalf("new key issued: %+v", all)
+	}
+	for _, c := range all {
+		if c.ID == old.ID && !c.ExpiresAt.Equal(time.Unix(1_700_000_000, 0).Add(10*time.Minute)) {
+			t.Fatalf("expires_at moved: %v", c.ExpiresAt)
+		}
+	}
+	if _, err := e.resolve(oldSecret); code(err) != domain.CodeUnauthenticated {
+		t.Fatalf("expired key revived: %v", err)
+	}
+}
+
 // 请求凭据解析成 Actor，Actor 能直接写入 Event 日志（同一事务，经 eventlog 校验）。
 func TestActorResolution(t *testing.T) {
 	e := setup(t)
