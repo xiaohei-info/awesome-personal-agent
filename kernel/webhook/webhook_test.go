@@ -526,6 +526,9 @@ echo '{"id":"x-2","type":"custom.created","subject":"second","occurred_at":"2026
 	if err := json.Unmarshal(b, &stdin); err != nil || stdin.Body != body || stdin.SourceID != "src_hook" || stdin.Payload != nil {
 		t.Fatalf("stdin = %s (%v)", b, err)
 	}
+	if got := e.transformExplicit(); len(got) != 1 || got[0] {
+		t.Fatalf("webhook arrival must not be explicit: %v", got)
+	}
 	evs := e.events("src_hook")
 	if len(evs) != 2 || evs[0].Subject != "from script" || evs[0].Disposition != domain.DispositionProposed || e.itemCount() != 2 {
 		t.Fatalf("events = %+v items=%d", evs, e.itemCount())
@@ -540,6 +543,24 @@ echo '{"id":"x-2","type":"custom.created","subject":"second","occurred_at":"2026
 	if len(e.events("src_hook")) != 2 || e.itemCount() != 2 || e.ingests()[0].Gen != 2 {
 		t.Fatalf("replay duplicated: events=%d items=%d", len(e.events("src_hook")), e.itemCount())
 	}
+	if got := e.transformExplicit(); len(got) != 2 || got[0] || !got[1] {
+		t.Fatalf("only the replay run is explicit: %v", got)
+	}
+}
+
+// transformExplicit 按入队顺序列出转换 Run 的 Explicit。
+func (e *env) transformExplicit() (out []bool) {
+	e.t.Helper()
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		rs, err := proc.List(tx)
+		for _, r := range rs {
+			if r.Run.Category == domain.RunTransform {
+				out = append(out, r.Explicit)
+			}
+		}
+		return err
+	})
+	return out
 }
 
 // 转换脚本的输出超过 64KB 时开头的事件也要入账；超过总上限记 failed，不入账半截结果。
