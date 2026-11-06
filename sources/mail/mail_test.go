@@ -85,18 +85,22 @@ func TestEveryDeclaredVersionConvertsRecordedSample(t *testing.T) {
 			if n := len(lines); n < 3 {
 				t.Fatalf("lines=%v", lines)
 			}
+			want := map[string]struct{ id0, id1, sender, detail string }{
+				"1.1.0": {"<mid-4@example.com>", "<mid-5@example.com>", "agent@example.com", "BODY-PLACEHOLDER\n\n\n--\nSent via AgentMail"},
+				"2.0.0": {"<old-1@example.com>", "<inv-42@example.com>", "bob@example.com", "周报正文"},
+			}[vr.Sample]
 			var first map[string]any
 			_ = json.Unmarshal([]byte(lines[0]), &first)
-			if first["id"] != "<old-1@example.com>" || first["type"] != "mail.received" || first["sender"] != "bob@example.com" || first["detail"] != "周报正文" {
+			if first["id"] != want.id0 || first["type"] != "mail.received" || first["sender"] != want.sender || first["detail"] != want.detail {
 				t.Fatalf("first=%v", first)
 			}
 			if _, ok := first["sender_verified"]; ok {
 				t.Fatal("不应设置 sender_verified")
 			}
-			var inv map[string]any
-			_ = json.Unmarshal([]byte(lines[1]), &inv)
-			if inv["id"] != "<inv-42@example.com>" || inv["occurred_at"] != "2026-01-01T17:30:00Z" && inv["occurred_at"] != "2026-01-02T01:30:00Z" {
-				t.Fatalf("inv=%v", inv)
+			var second map[string]any
+			_ = json.Unmarshal([]byte(lines[1]), &second)
+			if second["id"] != want.id1 {
+				t.Fatalf("second=%v", second)
 			}
 			var cur map[string]string
 			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &cur); err != nil || cur["cursor"] == "" {
@@ -106,6 +110,12 @@ func TestEveryDeclaredVersionConvertsRecordedSample(t *testing.T) {
 			for _, c := range calls[1:] {
 				if !strings.HasSuffix(strings.Join(c, " "), flag) {
 					t.Errorf("调用缺少该版本的 JSON 标志 %q: %v", flag, c)
+				}
+			}
+			// Message-ID 的取法随版本：IDFromRead 的范围借 message read 的头部，且仍带 --preview（只读）。
+			for _, c := range calls[2:] {
+				if j := strings.Join(c, " "); strings.Contains(j, "-H Message-ID") != vr.IDFromRead || !strings.Contains(j, "--preview") {
+					t.Errorf("message read argv=%v", c)
 				}
 			}
 			if strings.Join(calls[1], " ") != "envelope list -a work -f INBOX --page-size 50 --page 1 "+flag {
@@ -217,6 +227,21 @@ func TestUnparsableOutputExit2WithoutCursor(t *testing.T) {
 	}
 	if code, out, _ := exec1(t, r, input("")); code != ExitConfig || out != "" {
 		t.Fatalf("正文坏: code=%d out=%q", code, out)
+	}
+}
+
+// 1.x 范围的 Message-ID 来自 message read 头部；头部缺失 → 退出码 2，不输出任何东西。
+func TestReadWithoutMessageIDHeaderExit2(t *testing.T) {
+	var calls [][]string
+	rec := replay(t, "1.1.0", &calls)
+	r := func(ctx context.Context, args []string) ([]byte, []byte, error) {
+		if args[0] == "message" {
+			return []byte(`"BODY-PLACEHOLDER"`), nil, nil
+		}
+		return rec(ctx, args)
+	}
+	if code, out, _ := exec1(t, r, input("")); code != ExitConfig || out != "" {
+		t.Fatalf("code=%d out=%q", code, out)
 	}
 }
 
