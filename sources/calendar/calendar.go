@@ -1,6 +1,7 @@
 // Package calendar 是日历来源的薄适配器（设计 §9.7）：按 Source 执行契约（§9.2）读 stdin，
-// 只读调用 gog calendar 取日程，转成标准事件 JSONL，末行是新游标。
+// 只调用 gog calendar events 这一个读命令取日程，转成标准事件 JSONL，末行是新游标。
 // 不实现 CalDAV 和 OAuth（鉴权归工具自己），不写账本、不访问内核存储。
+// gog 文件 keyring 的口令来自 stdin 的 credentials_path 指向的文件，只注入给 gog 子进程。
 package calendar
 
 import (
@@ -43,7 +44,9 @@ type Input struct {
 	RunID    string `json:"run_id"`
 	Config   Config `json:"config"`
 	Cursor   string `json:"cursor"`
-	Window   struct {
+	// CredentialsPath 是 KEY=VALUE 文件（与 gog 的 keyring.env 写法兼容），未登记时为空。
+	CredentialsPath string `json:"credentials_path"`
+	Window          struct {
 		From string `json:"from"`
 		To   string `json:"to"`
 	} `json:"window"`
@@ -51,6 +54,7 @@ type Input struct {
 
 // Config 是登记时填的配置。
 type Config struct {
+	Account     string `json:"account"`                // gog 已登录的账号邮箱，必填
 	CalendarID  string `json:"calendar_id,omitempty"`  // 缺省 primary
 	HorizonDays int    `json:"horizon_days,omitempty"` // 向前看多少天，缺省 30
 	TimeoutSec  int    `json:"timeout_sec,omitempty"`
@@ -107,8 +111,8 @@ func (e *runErr) Error() string { return e.msg }
 
 func fail(exit int, f string, a ...any) error { return &runErr{exit, fmt.Sprintf(f, a...)} }
 
-// execFn 运行一次工具并返回 stdout、stderr；非零退出以 *exec.ExitError 返回。
-type execFn func(ctx context.Context, args ...string) (stdout, stderr []byte, err error)
+// execFn 运行一次工具并返回 stdout、stderr；env 是白名单之外只给这个子进程的变量；非零退出以 *exec.ExitError 返回。
+type execFn func(ctx context.Context, env []string, args ...string) (stdout, stderr []byte, err error)
 
 // Run 执行一次拉取并返回退出码；失败时 stdout 无内容。
 func Run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -135,6 +139,16 @@ func poll(ctx context.Context, stdin io.Reader, ex execFn, now func() time.Time)
 		return nil, fail(ExitAuth, "stdin 不是合法的 JSON: %v", err)
 	}
 	cfg := in.Config
+	if cfg.Account == "" {
+		return nil, fail(ExitAuth, "日历来源配置缺少 account：填 gog 已登录的账号邮箱（gog auth list 第一列）")
+	}
+	var env []string
+	if in.CredentialsPath != "" {
+		var err error
+		if env, err = keyringEnv(in.CredentialsPath); err != nil {
+			return nil, err
+		}
+	}
 	if cfg.CalendarID == "" {
 		cfg.CalendarID = "primary"
 	}
@@ -155,7 +169,7 @@ func poll(ctx context.Context, stdin io.Reader, ex execFn, now func() time.Time)
 			return nil, fail(ExitAuth, "游标不是 RFC3339 时间: %q", in.Cursor)
 		}
 	}
-	if err := checkVersion(ctx, ex); err != nil {
+	if err := checkVersion(ctx, ex, env); err != nil {
 		return nil, err
 	}
 
@@ -165,7 +179,9 @@ func poll(ctx context.Context, stdin io.Reader, ex execFn, now func() time.Time)
 		from = t.UTC()
 	}
 	to := from.AddDate(0, 0, cfg.HorizonDays)
-	stdout, stderr, err := ex(ctx, "--readonly", "--no-input", "--json", "calendar", "events", cfg.CalendarID,
+	// gog 没有只读开关；--enable-commands 只能限到顶层命令 calendar，只读靠这里只调用 events 保证（§9.7）。
+	stdout, stderr, err := ex(ctx, env, "--no-input", "--json", "--enable-commands=calendar", "--account="+cfg.Account,
+		"calendar", "events", cfg.CalendarID,
 		"--from", from.Format(time.RFC3339), "--to", to.Format(time.RFC3339))
 	if err != nil {
 		return nil, toolErr(ctx, err, stderr)
@@ -202,8 +218,8 @@ func poll(ctx context.Context, stdin io.Reader, ex execFn, now func() time.Time)
 
 var versionRe = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 
-func checkVersion(ctx context.Context, ex execFn) error {
-	out, stderr, err := ex(ctx, "--version")
+func checkVersion(ctx context.Context, ex execFn, env []string) error {
+	out, stderr, err := ex(ctx, env, "--version")
 	if err != nil {
 		return toolErr(ctx, err, stderr)
 	}
@@ -335,14 +351,45 @@ func parseStart(s string) (time.Time, error) {
 }
 
 // execTool 以 argv 方式运行 gog，子进程环境只放行白名单（§9.7）。
-func execTool(ctx context.Context, args ...string) ([]byte, []byte, error) {
+func execTool(ctx context.Context, env []string, args ...string) ([]byte, []byte, error) {
 	cmd := exec.CommandContext(ctx, tool, args...)
-	cmd.Env = whitelistEnv(os.Environ())
+	cmd.Env = append(whitelistEnv(os.Environ()), env...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &limitWriter{w: &out, n: maxOutput}
 	cmd.Stderr = &errb
 	err := cmd.Run()
 	return out.Bytes(), errb.Bytes(), err
+}
+
+// keyringEnv 读凭据文件，只取 gog 文件 keyring 的两个变量；缺省后端为 file。
+// 接受空行、# 注释、export 前缀和成对引号。报错不带行内容，避免口令进 stderr 和日志。
+func keyringEnv(path string) ([]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fail(ExitAuth, "无法读取凭据文件 credentials_path: %v", err)
+	}
+	vals := map[string]string{"GOG_KEYRING_BACKEND": "file"}
+	for i, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		if !ok {
+			return nil, fail(ExitAuth, "凭据文件第 %d 行不是 KEY=VALUE", i+1)
+		}
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+			v = v[1 : len(v)-1]
+		}
+		if k == "GOG_KEYRING_BACKEND" || k == "GOG_KEYRING_PASSWORD" {
+			vals[k] = v
+		}
+	}
+	if vals["GOG_KEYRING_PASSWORD"] == "" {
+		return nil, fail(ExitAuth, "凭据文件缺少 GOG_KEYRING_PASSWORD")
+	}
+	return []string{"GOG_KEYRING_BACKEND=" + vals["GOG_KEYRING_BACKEND"], "GOG_KEYRING_PASSWORD=" + vals["GOG_KEYRING_PASSWORD"]}, nil
 }
 
 func whitelistEnv(env []string) []string {
