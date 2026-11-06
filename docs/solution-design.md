@@ -1788,7 +1788,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
 
 ```text
 <APA_HOME>/
-  config.yaml       运行配置（监听地址、max_subprocesses、max_short_subprocesses、max_source_output_mb、delivery_unclaimed_after、delivery_backoff 等）
+  config.yaml       运行配置（监听地址、max_subprocesses、max_short_subprocesses、max_source_output_mb、delivery_unclaimed_after、delivery_backoff、chain_depth_threshold 等）
   sources.json      本人在主机上写的来源登记，可选（§14.12）
   declarations/     本人在主机上写的无头运行声明，可选（§14.12）
   ledger.db         账本（事项、Event、投递、运行记录……；存储选型见 §18）
@@ -1801,7 +1801,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
   logs/             诊断日志
 ```
 
-运行配置里的 `max_subprocesses`（默认 4）和 `max_short_subprocesses`（默认 2）分别限制长时运行和短任务的子进程数，语义见 §7.7。`max_source_output_mb`（默认 32）是 Source 拉取与转换脚本单次 stdout 的总上限，超限的处理见 §9.2。`delivery_unclaimed_after`（默认 `30m`）是投递无人领取多久转 `fallback_web`，`delivery_backoff`（默认 `1m,3m,7m,15m,30m`）是失败后的逐次退避，写法都是带单位的时长（`90s`、`30m`），退避表用逗号分隔；非正值或写不出时长的取值使 `apa serve` 拒绝启动。语义见 §6.9、§10.3。
+运行配置里的 `max_subprocesses`（默认 4）和 `max_short_subprocesses`（默认 2）分别限制长时运行和短任务的子进程数，语义见 §7.7。`max_source_output_mb`（默认 32）是 Source 拉取与转换脚本单次 stdout 的总上限，超限的处理见 §9.2。`delivery_unclaimed_after`（默认 `30m`）是投递无人领取多久转 `fallback_web`，`delivery_backoff`（默认 `1m,3m,7m,15m,30m`）是失败后的逐次退避，写法都是带单位的时长（`90s`、`30m`），退避表用逗号分隔；非正值或写不出时长的取值使 `apa serve` 拒绝启动。语义见 §6.9、§10.3。`chain_depth_threshold`（默认 8）是链路深度阈值，命令管线、后台运行与续接共用，必须是正整数，否则 `apa serve` 拒绝启动；语义见 §14.9。
 
 备份：整个目录可复制；运行中用存储引擎的在线备份导出账本。`sources/` 含附带拉取程序的第三方凭据，`webhook-keys/` 含 HMAC 接收密钥明文，备份需按敏感数据对待。外部工具的配置和凭据不在本目录：工具适配的来源（§9.7）用工具自己的目录或系统钥匙串，harness 的登录归 harness，渠道 ext 的外部系统凭据由 ext 自持（§10.3），换主机时都需重新认证。数据结构版本随发行只增，升级时自动处理。
 
