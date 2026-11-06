@@ -1,7 +1,8 @@
-# sha256: 50e901e07882f573bb935c15296f2b7056d0b7673d403021ad6bdcbecf77bdb3
+# sha256: f0811d776bc2a8d326132e21a8699e80221cd91ed7bbba9eeadcc854cad82905
 work_item_id: 01a1b076-1f2c-74dd-859f-6168f5535ddd
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: '上游已修：PR #200 去掉 --readonly，凭据走 credentials_path（指向 gog keyring.env 的文件路径），日历来源
-  config 需填 account。live.env 已有 APA_LIVE_CALENDAR_ACCOUNT 与 APA_LIVE_CALENDAR_KEYRING_FILE。日历红线不变：只建
-  [APA-LIVE-TEST] 开头、2027-01、无提醒的测试事件，结束全部删除并回读；不读取或输出真实日程；凭据不打印；临时目录只用 /tmp/apa-live.*。'
+retry_note: '上游已修：PR #200（gog 认证/去 --readonly）和 PR #201（同一来源对象的更新经关联键 UID|RECURRENCE-ID
+  写回原事项，不再新建；新建日程判为 event.created）。上轮你写的 tests/live/calendar/calendar_live_test.go
+  没有提交，需要重新写并这次提交到分支。ACT-CAL-03 保持严格断言，不放宽。每次运行用全新 APA_HOME。日历红线不变：只建 [APA-LIVE-TEST]
+  开头、2027-01、无提醒的测试事件，结束全部删除并回读；不读取或输出真实日程；凭据不打印；临时目录只用 /tmp/apa-live.*。'
