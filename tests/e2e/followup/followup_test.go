@@ -68,8 +68,8 @@ func setupShort(t *testing.T) *fx {
 	}
 	f.StopKernel()
 	f.StartKernelAgain()
-	if body := f.webOK("GET", "/packs", "", 200); !strings.Contains(body, `"name":"follow-up"`) {
-		t.Fatalf("follow-up 包不可见: %s", body)
+	if body := f.webOK("GET", "/packs", "", 200); !strings.Contains(body, `"name":"follow-up"`) || !strings.Contains(body, `"schedule":"1m"`) {
+		t.Fatalf("follow-up 包没有按 1m 覆盖生效: %s", body)
 	}
 	f.webOK("PATCH", "/rules/"+ruleKey+"/mode", `{"mode":"auto"}`, 200)
 	rules := f.webOK("GET", "/rules", "", 200)
@@ -122,6 +122,22 @@ func (f *fx) phase(item string) string { s, _ := f.show(item)["phase"].(string);
 
 func (f *fx) unread() string { return f.webOK("GET", "/deliveries/unread", "", 200) }
 
+// healthDelivery 判断 Web 未读里是否有该事项的 class=health 投递。
+func (f *fx) healthDelivery(item string) bool {
+	var out struct {
+		Deliveries []struct{ Class, Item string }
+	}
+	if err := json.Unmarshal([]byte(f.unread()), &out); err != nil {
+		f.t.Fatal(err)
+	}
+	for _, d := range out.Deliveries {
+		if d.Class == "health" && d.Item == item {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *fx) events(item, typ string) int {
 	f.t.Helper()
 	var out struct {
@@ -163,9 +179,11 @@ func TestFlowFollowUp(t *testing.T) {
 
 	hasUnread := func(item string) bool { return strings.Contains(f.unread(), item) }
 	// 在 2 分钟内等所有判断落地：remind/parent 出提醒，wait 记延长，drop 转 needs_input。
-	f.until(2*time.Minute+20*time.Second, func() bool {
+	if !f.until(2*time.Minute+20*time.Second, func() bool {
 		return hasUnread(remind) && hasUnread(parent) && f.events(wait, "followup.extended") > 0 && f.phase(drop) == "needs_input"
-	})
+	}) {
+		t.Log("等待窗口内判断结果未全部落地，由下列子测试逐项报告")
+	}
 
 	t.Run("ACT-FUP-02 判断催时产出提醒", func(t *testing.T) {
 		if !hasUnread(remind) {
@@ -244,9 +262,13 @@ func TestFlowFollowUpModelDown(t *testing.T) {
 	if strings.Contains(f.unread(), item) {
 		t.Error("模型不可用时不应有提醒")
 	}
-	// 健康信号：跟进失败记 health.alert（健康类投递由触达统一产出，走 Web 未读）。
-	if !f.until(30*time.Second, func() bool { return f.events(item, "health.alert") > 0 }) {
-		t.Error("模型不可用时没有 health.alert 信号")
+	// 健康信号：跟进失败记 health.alert，触达统一产出一条 class=health 的投递；用户可见的是 Web 未读里的这条（web_url 指向健康视图）。
+	// 解读：验收文档 ACT-FUP-06 的"健康视图有信号"在此取 Web 未读里的健康类投递；GET /v1/health 目前不统计跟进失败（见 PR 说明）。
+	if !f.until(60*time.Second, func() bool { return f.healthDelivery(item) }) {
+		t.Errorf("模型不可用时 Web 未读没有该事项的健康类投递: %s", f.unread())
+	}
+	if f.events(item, "health.alert") == 0 {
+		t.Error("没有 health.alert 审计事件")
 	}
 
 	f.ModelStub.SetDefault(modelstub.Reply{Content: `{"choice":"remind","confidence":0.9}`})
