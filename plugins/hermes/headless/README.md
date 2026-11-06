@@ -11,7 +11,7 @@ Measured on Hermes v0.22.5 (not copied from appendix A):
 |---|---|
 | `-q {prompt} --format stream-json` | stdout is JSONL; the **last line** is `{"type":"result","session_id":…,"exit_code":…}`, which is what the kernel reads. The `init` event's `session_id` is empty, so `extract` is `$.session_id` of the final event |
 | `--resume {session_id}` | same session id comes back; the model remembers earlier turns |
-| unknown session | exit 1 (same as any failure) with `error: No session found…`; `exit_codes.session_missing` is therefore **not** declared, a failed resume goes to `needs_input` |
+| unknown session | exit 1 (same as any failure) with `error: No session found…`; Hermes has no distinct code, so `exit_codes.session_missing` is declared as `[1]`: a failed *resume* continues in a new session (`resume.session_lost`); a failed fresh run is unaffected (kernel only checks resumed runs) |
 | `access.read` = `-t apa,web` | no terminal/file toolset: Hermes has no read-only file toolset, so `read` cannot read local files |
 | `access.edit` / `full` | adds `file,terminal,delegation`; `full` adds `--yolo` |
 | credential `env` | `APA_RUN`/`APA_TOKEN`/`APA_URL` reach the `apa_*` tools (live test: delegate/ask/report carry `Bearer <run credential>`) **and** the `terminal` subprocess (live test `test_terminal_tool_credential_visibility_is_measured` asserts the shell printed `MARK_TOKEN_VISIBLE`), so a bare `apa` in `terminal` works with the edit/full tiers; no `env_passthrough` needed on this host config |

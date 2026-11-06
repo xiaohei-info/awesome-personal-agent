@@ -11,7 +11,7 @@
       "full": ["--yolo", "-t", "apa,web,file,terminal,delegation"]
     },
     "credential": "env",
-    "exit_codes": {"ok": [0]}
+    "exit_codes": {"ok": [0], "session_missing": [1]}
   },
   "main_session": {"launch": "headless"}
 }

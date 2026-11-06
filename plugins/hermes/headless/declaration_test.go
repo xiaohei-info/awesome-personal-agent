@@ -26,6 +26,9 @@ func TestDeclarationIsAcceptedByKernel(t *testing.T) {
 			t.Errorf("tier %s missing", tier)
 		}
 	}
+	if got := h.ExitCodes["session_missing"]; len(got) != 1 || got[0] != 1 {
+		t.Errorf("session_missing must be [1] (measured: deleted session resume exits 1): %v", h.ExitCodes)
+	}
 	if d.MainSession == nil || d.MainSession.Launch != "headless" {
 		t.Fatalf("main_session must be headless: %+v", d.MainSession)
 	}
