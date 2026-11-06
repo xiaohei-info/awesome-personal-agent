@@ -66,7 +66,7 @@ func TestFlowAllowedExecutors(t *testing.T) {
 	k.step("ACT-ALW-01 委派给名单外执行者返回 21", func(t *testing.T) {
 		parent := k.addItem("acc-work", "")
 		before, pv := k.childrenCount("acc-work"), k.version(parent)
-		r := k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", otherHost)
+		r := k.delegate("--parent", parent, "--assignee", otherHost)
 		k.expect("DEL delegate other-host.cli", r, exitNotAllow)
 		var e struct {
 			Allowed []string `json:"allowed"`
@@ -89,7 +89,7 @@ func TestFlowAllowedExecutors(t *testing.T) {
 	k.step("ACT-ALW-02 指派给清单外 id 返回 5", func(t *testing.T) {
 		parent := k.addItem("acc-open", "")
 		before := k.childrenCount("acc-open")
-		k.expect("delegate ghost.cli", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", "ghost.cli"), exitNotFound)
+		k.expect("delegate ghost.cli", k.delegate("--parent", parent, "--assignee", "ghost.cli"), exitNotFound)
 		if got := k.childrenCount("acc-open"); got != before {
 			t.Errorf("不应建出子事项: %d → %d", before, got)
 		}
@@ -97,7 +97,7 @@ func TestFlowAllowedExecutors(t *testing.T) {
 
 	k.step("ACT-ALW-03 未设置时不限制", func(t *testing.T) {
 		parent := k.addItem("acc-open", "")
-		child := k.idOf("delegate other-host.cli", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", otherHost))
+		child := k.idOf("delegate other-host.cli", k.delegate("--parent", parent, "--assignee", otherHost))
 		if got := k.item(child)["assignee"]; got != otherHost {
 			t.Errorf("子事项 assignee = %v", got)
 		}
@@ -106,11 +106,11 @@ func TestFlowAllowedExecutors(t *testing.T) {
 	k.step("ACT-ALW-04 空名单只能指派给本人", func(t *testing.T) {
 		parent := k.addItem("acc-empty", "")
 		before := k.childrenCount("acc-empty")
-		k.expect("空名单委派给 work-host.cli", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", workHost), exitNotAllow)
+		k.expect("空名单委派给 work-host.cli", k.delegate("--parent", parent, "--assignee", workHost), exitNotAllow)
 		if got := k.childrenCount("acc-empty"); got != before {
 			t.Errorf("被拒绝的委派不应建出子事项")
 		}
-		child := k.idOf("委派给本人", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", ownerExecutor))
+		child := k.idOf("委派给本人", k.delegate("--parent", parent, "--assignee", ownerExecutor))
 		if got := k.item(child)["assignee"]; got != ownerExecutor {
 			t.Errorf("子事项 assignee = %v", got)
 		}
@@ -142,11 +142,11 @@ func TestFlowAllowedExecutors(t *testing.T) {
 
 	k.step("ACT-ALW-07 子事项不能换项目", func(t *testing.T) {
 		parent := k.addItem("acc-work", "")
-		r := k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", workHost, "--project", open)
+		r := k.delegate("--parent", parent, "--assignee", workHost, "--project", open)
 		if r.Code == 0 {
 			t.Fatal("委派时指定别的项目不应成功")
 		}
-		child := k.idOf("正常委派", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", workHost))
+		child := k.idOf("正常委派", k.delegate("--parent", parent, "--assignee", workHost))
 		if got := k.item(child)["project"]; got != work {
 			t.Fatalf("子事项应继承父事项的项目，实际 %v", got)
 		}
@@ -165,7 +165,7 @@ func TestFlowAllowedExecutors(t *testing.T) {
 
 	k.step("ACT-ALW-08 只在 Web 改名单", func(t *testing.T) {
 		listBefore := k.allowed("acc-work")
-		r := k.Apa(k.DEL, "", "project", "update", work, "--allowed-executors", otherHost)
+		r := k.Apa(k.DEL, "", "project", "update", work, "--allowed-executors", otherHost, "--evidence", "owner asked")
 		k.expect("CLI 改名单", r, exitWebOnly)
 		w := k.APIRaw("PATCH", "/v1/projects/"+work, `{"allowed_executors":["`+otherHost+`"]}`, k.DEL)
 		if w.Code != http.StatusForbidden {
@@ -230,7 +230,7 @@ func TestFlowAllowedExecutors(t *testing.T) {
 
 	k.step("ACT-ALW-10 名单变更不撤销在途工作", func(t *testing.T) {
 		parent := k.addItem("acc-work", "")
-		child := k.idOf("在途子事项", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", workHost))
+		child := k.idOf("在途子事项", k.delegate("--parent", parent, "--assignee", workHost))
 		n := len(k.audit(url.Values{"type": {"project.allowed_executors_changed"}, "object": {work}}))
 		k.webOK("PUT", "/v1/settings/projects/"+work+"/allowed-executors", `{"executors":["`+otherHost+`"]}`, 200) // 名单不再含 work-host.cli
 		if got := len(k.audit(url.Values{"type": {"project.allowed_executors_changed"}, "object": {work}})); got != n+1 {
@@ -243,6 +243,6 @@ func TestFlowAllowedExecutors(t *testing.T) {
 		if got := k.item(child)["phase"]; got != "done" {
 			t.Errorf("回执应有效，阶段 = %v", got)
 		}
-		k.expect("再次委派给 work-host.cli", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", workHost), exitNotAllow)
+		k.expect("再次委派给 work-host.cli", k.delegate("--parent", parent, "--assignee", workHost), exitNotAllow)
 	})
 }

@@ -107,7 +107,7 @@ func TestFlowProjectMapping(t *testing.T) {
 	// 每个项目一条事项：作用域里该出现谁的事项，一眼可辨；另有一条无项目事项。
 	items := map[string]string{}
 	for name, proj := range map[string]string{"acc-work": work, "acc-open": open, "acc-home": home, "free": ""} {
-		args := []string{"item", "add", "--kind", "task", "--title", "mapping-" + name, "--reason", "mapping e2e"}
+		args := []string{"item", "add", "--kind", "task", "--title", "mapping-" + name, "--reason", "mapping e2e", "--evidence", "mapping e2e"}
 		if proj != "" {
 			args = append(args, "--project", proj)
 		}
@@ -133,7 +133,7 @@ func TestFlowProjectMapping(t *testing.T) {
 	remotes := map[string]string{work: e.TestRepo}
 	for name, proj := range map[string]string{"acc-open": open, "acc-home": home} {
 		remotes[proj] = "https://example.invalid/acc/" + name + ".git"
-		if _, errOut, code := apaIn(t, e, e.Root, e.DEL, nil, "project", "repos", "add", proj, "--remote", remotes[proj]); code != 0 {
+		if _, errOut, code := apaIn(t, e, e.Root, e.DEL, nil, "project", "repos", "add", proj, "--remote", remotes[proj], "--evidence", "mapping e2e"); code != 0 {
 			t.Fatalf("登记 %s 远程地址退出码 %d: %s", name, code, errOut)
 		}
 	}

@@ -440,7 +440,7 @@ func (e *Env) DeclareStubHarness() {
 		return string(b)
 	}
 	for harness, resume := range map[string]bool{"acc-stub": true, "acc-stub-noresume": false} {
-		if r := e.Apa(e.DEL, decl(harness, resume), "declare", "-"); r.Code != 0 {
+		if r := e.Apa(e.DEL, decl(harness, resume), "declare", "-", "--evidence", "环境基线声明替身"); r.Code != 0 {
 			e.fatal("apa declare %s 退出码 %d: %s%s", harness, r.Code, r.Stdout, r.Stderr)
 		}
 		e.webOK("POST", "/v1/settings/declarations/"+harness+"/1/confirm", "", 200)
