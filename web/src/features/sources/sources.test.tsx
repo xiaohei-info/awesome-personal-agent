@@ -6,17 +6,19 @@ import { App } from "../../app/App";
 import { feature } from "./index";
 
 // 测试边界替身：按 api/sources 的契约应答（/sources、PATCH enabled、webhook 密钥、ingests、replay、
-// 来源事件按 disposition 分页、转建议；错误体见附录 B.3）。业务规则在服务端，这里只复现它的可观察行为。
+// 来源事件按 disposition 分页、拒收记录分页、转建议；错误体见附录 B.3）。业务规则在服务端，这里只复现它的可观察行为。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix the request" });
 
 interface Src { id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
+interface Rj { run_id: string; line: number; reason: string; raw: string; at: string }
 interface Ev { id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string }
 
-function backend(o: { sources?: Src[]; events?: Ev[]; ingests?: any[]; webOnly?: boolean } = {}) {
+function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean } = {}) {
   const sources = o.sources ?? [];
   const events = o.events ?? [];
   const ingests = o.ingests ?? [];
+  const rejects = o.rejects ?? [];
   let keyed = false;
   const calls: { method: string; path: string; body?: any; csrf: string | null }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
@@ -45,6 +47,11 @@ function backend(o: { sources?: Src[]; events?: Ev[]; ingests?: any[]; webOnly?:
         return json(rotated ? 200 : 201, { secret: "apa_whk_SECRET123", url: "/ingest/" + s.id, rotated });
       }
       if (p[2] === "/ingests") return json(200, { ingests });
+      if (p[2] === "/rejects") {
+        const after = Number(u.searchParams.get("after") ?? 0);
+        const page = rejects.slice(after, after + 2);
+        return json(200, after + 2 < rejects.length ? { rejects: page, next_after: after + 2 } : { rejects: page });
+      }
       if (p[2] === "/events") {
         const d = u.searchParams.get("disposition");
         const after = Number(u.searchParams.get("after") ?? 0);
@@ -206,6 +213,31 @@ describe("未判定事件转建议（flow-triage-failure / ACT-TRI-02）", () =>
     mount(backend({ sources: [rss] }).impl);
     await userEvent.click((await row("src_rss")).getByRole("button", { name: "详情" }));
     expect(await screen.findByText("没有未判定事件")).toBeInTheDocument();
+  });
+});
+
+describe("被拒收的事件（ACT-SRC-04）", () => {
+  const rj = (n: number): Rj => ({ run_id: "run_1", line: n, reason: "reason-" + n, raw: "{bad-" + n, at: "2030-01-01T00:00:00Z" });
+
+  it("列出原因与原始行；分页用 next_after 加载更多", async () => {
+    const b = backend({ sources: [rss], rejects: [rj(1), rj(2), rj(3)] });
+    mount(b.impl);
+    await userEvent.click((await row("src_rss")).getByRole("button", { name: "详情" }));
+    const region = within(await screen.findByRole("region", { name: "被拒收的事件" }));
+    expect(await region.findByText(/reason-1/)).toBeInTheDocument();
+    expect(region.getByText("{bad-1")).toBeInTheDocument();
+    expect(region.getByText(/运行 run_1 · 第 2 行/)).toBeInTheDocument();
+    expect(region.queryByText(/reason-3/)).not.toBeInTheDocument();
+    await userEvent.click(region.getByRole("button", { name: "加载更多" }));
+    expect(await region.findByText(/reason-3/)).toBeInTheDocument();
+    expect(b.calls.some((c) => c.path === "/v1/sources/src_rss/rejects?after=2")).toBe(true);
+    expect(region.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
+  });
+
+  it("没有拒收记录时显示空状态", async () => {
+    mount(backend({ sources: [rss] }).impl);
+    await userEvent.click((await row("src_rss")).getByRole("button", { name: "详情" }));
+    expect(await screen.findByText("没有被拒收的事件")).toBeInTheDocument();
   });
 });
 
