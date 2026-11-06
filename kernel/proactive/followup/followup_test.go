@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
@@ -24,6 +26,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
@@ -35,10 +38,22 @@ var (
 )
 
 const (
-	first  = 48 * time.Hour
-	extend = 24 * time.Hour
+	first = 48 * time.Hour // 包里 follow_up 规则的 schedule，每一轮都按它
 
-	packYAML = "name: fu\nversion: 1.0.0\ndescription: follow up\n"
+	// packYAML 的 %s 是 schedule；规则初始 observe，setup 再按 Web 本人的方式切到 auto。
+	packYAML = `name: fu
+version: 1.0.0
+description: follow up
+clock_rules:
+  - id: interval
+    type: follow_up
+    schedule: %s
+    mode: observe
+    do:
+      - action: call_agent
+        prompt: follow
+`
+	ruleKey = "fu/clock_rules/interval"
 	// 判断型：催、再等、建议放弃；置信度不足时不级联（escalate_to 为空），由本模块交本人。
 	followMD = `---
 agent: judge
@@ -65,6 +80,9 @@ type env struct {
 	clk  *clock.Clock
 	a    *attention.Attention
 	q    *delivery.Queue
+	ld   *packs.Loader
+	eng  *rules.Engine
+	dir  string // 能力包数据目录
 	now  time.Time
 }
 
@@ -72,7 +90,7 @@ func setup(t *testing.T, configured bool, tmpl string) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, delivery.Module, attention.Module, direct.Module, Module} {
+		items.Module, delivery.Module, attention.Module, direct.Module, rules.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -89,17 +107,22 @@ func setup(t *testing.T, configured bool, tmpl string) *env {
 	if err := items.Register(e.x, items.NewKinds()); err != nil {
 		t.Fatal(err)
 	}
-	if err := decisions.Register(e.x); err != nil {
+	if err := errors.Join(decisions.Register(e.x), rules.Register(e.x)); err != nil {
 		t.Fatal(err)
 	}
 	if configured {
 		e.configure()
 	}
-	ld := packs.New(packs.Options{Builtin: fstest.MapFS{"fu/pack.yaml": {Data: []byte(packYAML)}, "fu/prompts/follow.md": {Data: []byte(tmpl)}},
-		Kinds: items.NewKinds()})
-	if rej, err := ld.Load(); err != nil || len(rej) != 0 {
-		t.Fatalf("load: %v %+v", err, rej)
+	e.dir = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(e.dir, "fu", "prompts"), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(e.dir, "fu", "prompts", "follow.md"), []byte(tmpl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.ld = packs.New(packs.Options{DataDir: e.dir, Kinds: items.NewKinds()})
+	e.schedule(first.String())
+	ld := e.ld
 	judge, err := direct.New(direct.Options{Store: st, Packs: ld, Model: &model.Client{}, Now: now,
 		Sleep: func(context.Context, time.Duration) error { return nil }, Attempts: 1})
 	if err != nil {
@@ -107,11 +130,17 @@ func setup(t *testing.T, configured bool, tmpl string) *env {
 	}
 	e.q = delivery.New(delivery.Options{Now: now})
 	e.a = attention.New(attention.Options{Queue: e.q, Now: now})
-	e.svc, err = New(Options{Store: st, Exec: e.x, Judge: judge, Reminder: e.a, Pack: "fu", Template: "follow", Owner: "owner",
-		First: first, Extend: extend, Now: now})
+	e.svc, err = New(Options{Store: st, Exec: e.x, Judge: judge, Reminder: e.a, Packs: ld, Pack: "fu", Owner: "owner", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if e.eng, err = rules.New(rules.Options{Store: st, Exec: e.x, Packs: ld, Now: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.eng.Reconcile(bg); err != nil {
+		t.Fatal(err)
+	}
+	e.mode(rules.ModeAuto)
 	if err := e.svc.Register(); err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +158,23 @@ func setup(t *testing.T, configured bool, tmpl string) *env {
 		t.Fatal(err)
 	}
 	return e
+}
+
+// schedule 改写包里 follow_up 规则的间隔并重新加载（热加载同一条路）。
+func (e *env) schedule(s string) {
+	e.t.Helper()
+	if err := os.WriteFile(filepath.Join(e.dir, "fu", "pack.yaml"), []byte(fmt.Sprintf(packYAML, s)), 0o644); err != nil {
+		e.t.Fatal(err)
+	}
+	if rej, err := e.ld.Load(); err != nil || len(rej) != 0 {
+		e.t.Fatalf("load: %v %+v", err, rej)
+	}
+}
+
+// mode 以 Web 本人的身份切换跟进规则的模式。
+func (e *env) mode(m string) {
+	e.t.Helper()
+	e.do("rule.set_mode", map[string]string{"rule": ruleKey, "mode": m})
 }
 
 func (e *env) configure() {
@@ -278,8 +324,8 @@ func TestRemindProducesReminderAndKeepsWaiting(t *testing.T) {
 	if e.pending() != 0 || len(e.stub.Requests()) != 1 {
 		t.Fatalf("pending=%d calls=%d", e.pending(), len(e.stub.Requests()))
 	}
-	// 再排了一轮：extend 之后又会到期，再跟进一次。
-	e.advance(extend)
+	// 再排了一轮：同一间隔之后又会到期，再跟进一次。
+	e.advance(first)
 	if err := e.svc.Drain(bg); err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +348,7 @@ func TestWaitMoreExtendsTimerWithoutReminder(t *testing.T) {
 	if e.get(id).Phase != domain.PhaseWaiting || len(e.reminders(id)) != 0 || e.events(id, EvExtended) != 1 {
 		t.Fatalf("phase=%s reminders=%d extended=%d", e.get(id).Phase, len(e.reminders(id)), e.events(id, EvExtended))
 	}
-	e.advance(extend - time.Minute)
+	e.advance(first - time.Minute)
 	_ = e.svc.Drain(bg)
 	if len(e.stub.Requests()) != 1 {
 		t.Fatal("timer was not extended: judged again too early")
@@ -438,11 +484,11 @@ func TestOptionValidation(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("missing deps accepted")
 	}
-	ok := Options{Store: &store.Store{}, Exec: &command.Executor{}, Judge: &direct.Service{}, Reminder: &attention.Attention{}, Pack: "p", Template: "t"}
+	ok := Options{Store: &store.Store{}, Exec: &command.Executor{}, Judge: &direct.Service{}, Reminder: &attention.Attention{}, Packs: packs.New(packs.Options{}), Pack: "p"}
 	bad := ok
-	bad.First = -1
+	bad.Packs = nil
 	if _, err := New(bad); err == nil {
-		t.Fatal("negative First accepted")
+		t.Fatal("missing Packs accepted")
 	}
 	if _, err := New(ok); err != nil {
 		t.Fatal(err)
@@ -456,5 +502,55 @@ func TestHandleTimerRejectsForeignTimers(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("foreign timer accepted")
+	}
+}
+
+// ACT-FUP：间隔取自包里 follow_up 规则的 schedule；包改短并重新加载后，新进入等待的事项按新间隔到期。
+func TestScheduleComesFromPackAndFollowsReload(t *testing.T) {
+	e := setup(t, true, followMD)
+	e.reply("remind", 0.9)
+	e.schedule("1m")
+	id := e.waiting(domain.WaitingHuman, "小王")
+	e.advance(time.Minute)
+	if err := e.svc.Drain(bg); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.reminders(id)) != 1 {
+		t.Fatalf("not followed up after the pack's 1m interval: reminders=%d", len(e.reminders(id)))
+	}
+	e.advance(time.Minute) // 下一轮同样按包的间隔
+	if err := e.svc.Drain(bg); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.stub.Requests()) != 2 {
+		t.Fatalf("second round not on the pack interval: calls=%d", len(e.stub.Requests()))
+	}
+}
+
+// ACT-FUP：observe 只记 rule.observed，不调模型、不提醒，并按间隔再排下一轮；off 什么都不做；切回 auto 后照常判断。
+func TestRuleModeGatesFollowUp(t *testing.T) {
+	e := setup(t, true, followMD)
+	e.reply("remind", 0.9)
+	e.mode(rules.ModeObserve)
+	id := e.waiting(domain.WaitingHuman, "小王")
+	if err := e.due(); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.stub.Requests()) != 0 || len(e.reminders(id)) != 0 || e.pending() != 0 || e.events(id, rules.EvObserved) != 1 {
+		t.Fatalf("observe: calls=%d reminders=%d pending=%d observed=%d", len(e.stub.Requests()), len(e.reminders(id)), e.pending(), e.events(id, rules.EvObserved))
+	}
+	e.mode(rules.ModeOff)
+	if err := e.due(); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.stub.Requests()) != 0 || e.events(id, rules.EvObserved) != 1 || e.pending() != 0 {
+		t.Fatalf("off must not run or record: calls=%d observed=%d", len(e.stub.Requests()), e.events(id, rules.EvObserved))
+	}
+	e.mode(rules.ModeAuto)
+	if err := e.due(); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.stub.Requests()) != 1 || len(e.reminders(id)) != 1 {
+		t.Fatalf("auto: calls=%d reminders=%d", len(e.stub.Requests()), len(e.reminders(id)))
 	}
 }

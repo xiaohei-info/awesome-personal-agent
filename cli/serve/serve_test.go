@@ -8,6 +8,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"net"
@@ -28,6 +29,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 )
 
 type result struct {
@@ -955,5 +957,53 @@ func TestReloadPacksFollowsDataDirectory(t *testing.T) {
 	k.reloadPacks(ctx, report)
 	if healthDeliveries() != base+3 {
 		t.Fatal("the rule fallback must be reported once")
+	}
+}
+
+// ACT-FUP：跟进服务用的是已加载能力包里 follow_up 规则的 schedule 与当前模式。serve 运行中在数据目录覆盖内置包、
+// 把间隔改成 1s，热加载后新进入等待的事项按 1s 跟进；规则保持包声明的 observe：到期只记 rule.observed，
+// 不调模型（未配置模型时 auto 会记 health.alert）、不提醒。
+func TestServeFollowUpUsesPackScheduleAndMode(t *testing.T) {
+	home := initOnFreePort(t)
+	dst := filepath.Join(home, "packs", "follow-up")
+	sub, err := fs.Sub(rootpacks.FS, "follow-up")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.CopyFS(dst, sub); err != nil {
+		t.Fatal(err)
+	}
+	y, err := os.ReadFile(filepath.Join(dst, "pack.yaml"))
+	if err != nil || !strings.Contains(string(y), "schedule: 72h") || !strings.Contains(string(y), "mode: observe") {
+		t.Fatalf("follow-up pack changed shape: %v\n%s", err, y)
+	}
+	addr, stop := start(t, home)
+	defer stop()
+	s := webLogin(t, addr)
+	if err := os.WriteFile(filepath.Join(dst, "pack.yaml"), []byte(strings.Replace(string(y), "schedule: 72h", "schedule: 1s", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(packReloadInterval + clockTicks) // 等时钟循环热加载到新内容
+	code, b := s.do("POST", "/items", `{"title":"等回复","kind":"task","phase":"open"}`)
+	var it struct{ ID string }
+	if json.Unmarshal([]byte(b), &it); code != 201 {
+		t.Fatalf("create item: %d %s", code, b)
+	}
+	if code, b := s.do("POST", "/items/"+it.ID+"/transition", `{"to":"waiting","reason":"sent","waiting_on":{"kind":"human","ref":"someone"}}`); code >= 300 {
+		t.Fatalf("transition: %d %s", code, b)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		code, b := s.do("GET", "/why/"+it.ID, "")
+		if code == 200 && strings.Count(b, `"rule.observed"`) >= 2 { // 每 1s 一轮，observe 也照常再排下一轮
+			if strings.Contains(b, "health.alert") || strings.Contains(b, "followup.reminded") {
+				t.Fatalf("observe must not call the model or remind: %s", b)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("follow-up did not run on the pack's 1s interval: %d %s", code, b)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }
