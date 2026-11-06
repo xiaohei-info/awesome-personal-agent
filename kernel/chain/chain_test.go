@@ -320,3 +320,44 @@ func TestCallerCannotWriteDepth(t *testing.T) {
 		t.Fatalf("depth = %d", got)
 	}
 }
+
+// 对外入口不指明来源（Chain 零值）时由管线推定：委派、回执、提问、Web 回答都沿用当前深度不清零，
+// 只有本人在 Web 重新委派开始新链路（ACT-DEP-03）。
+func TestDefaultChainKeepsDepthUntilOwnerRedelegates(t *testing.T) {
+	e := setup(t, 8)
+	root := e.newID(e.do(owner, "item.create", map[string]any{"kind": "task", "title": "r", "phase": "open"}, command.Chain{}))
+	sub := e.newID(e.do(e.as("DEL"), "delegate.create", map[string]any{"parent": root, "assignee": workHost}, inherit(root)))
+	want := e.depth(sub)
+	if want == 0 {
+		t.Fatal("setup: child depth 0")
+	}
+	ask := map[string]any{"question": "ship it?", "options": []map[string]any{{"id": "A", "label": "yes"}, {"id": "B", "label": "no"}}}
+	e.do(e.as("WRK"), "decision.request", map[string]any{"id": sub, "ask": ask}, command.Chain{})
+	e.do(owner, "decision.answer", map[string]any{"id": sub, "choice": "A"}, command.Chain{})
+	resolved := -1
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, sub)
+		for _, en := range es {
+			if en.Event.Type == domain.EvDecisionResolved {
+				resolved = en.Event.ChainDepth
+			}
+		}
+		return err
+	})
+	if resolved != want {
+		t.Fatalf("decision.resolved depth = %d, want %d", resolved, want)
+	}
+	e.do(e.as("WRK"), "delegate.report", map[string]any{"id": sub, "outcome": "done", "summary": "s",
+		"evidence": map[string]any{"pr": "https://x/pr/" + sub}}, command.Chain{})
+	if got := e.depth(sub); got != want {
+		t.Fatalf("report depth = %d, want %d", got, want)
+	}
+	again := e.newID(e.do(e.as("DEL"), "delegate.create", map[string]any{"parent": root, "assignee": workHost}, command.Chain{}))
+	if got := e.depth(again); got != e.depth(root) || got == 0 {
+		t.Fatalf("main-session delegation depth = %d, parent %d", got, e.depth(root))
+	}
+	fresh := e.newID(e.do(owner, "delegate.create", map[string]any{"parent": root, "assignee": workHost}, command.Chain{}))
+	if got := e.depth(fresh); got != 0 {
+		t.Fatalf("owner redelegation depth = %d, want 0", got)
+	}
+}

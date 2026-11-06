@@ -16,6 +16,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
@@ -69,7 +70,7 @@ func newEnv(t *testing.T, taskExecutor string) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, instances.Module,
-		items.Module, executors.Module, proc.Module, runidentity.Module, rules.Module, background.Module} {
+		items.Module, executors.Module, proc.Module, runidentity.Module, rules.Module, background.Module, delegation.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +83,8 @@ func newEnv(t *testing.T, taskExecutor string) *env {
 	e := &env{t: t, st: st, runs: filepath.Join(t.TempDir(), "runs"), done: make(chan proc.Result, 8)}
 	e.x = command.New(st, func() time.Time { return t0 })
 	kinds := items.NewKinds()
-	for _, err := range []error{projects.Register(e.x), items.Register(e.x, kinds), executors.Register(e.x, executors.Options{Owner: "owner"}), rules.Register(e.x)} {
+	for _, err := range []error{projects.Register(e.x), items.Register(e.x, kinds), executors.Register(e.x, executors.Options{Owner: "owner"}), rules.Register(e.x),
+		delegation.Register(e.x, delegation.Options{Owner: "owner", OnError: func(_ command.Commit, err error) { t.Errorf("delegation: %v", err) }})} {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,6 +114,7 @@ func newEnv(t *testing.T, taskExecutor string) *env {
 		t.Fatal(err)
 	}
 	// harness：Web 默认 harness，权限上限 edit。
+	e.must(owner, "executor.put", map[string]any{"id": "work-host.cli", "kind": "external-cli"})
 	sh := filepath.Join(t.TempDir(), "h.sh")
 	if err := os.WriteFile(sh, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -359,7 +362,7 @@ func TestUnlabelledItemIsNotLaunched(t *testing.T) {
 }
 
 // flow-bg-task-runner（ACT-BGT-01）：包里的任务型提示词驱动 runner=task：内核先建子事项（assignee=执行者），
-// Run 目标是子事项，运行者在子事项上回执 done 带证据，父事项不动。
+// Run 目标是子事项，运行者按提示词 `apa report` 在子事项上回执 done 带证据，父事项随之回 open。
 func TestTaskRunnerPromptWorksOnChild(t *testing.T) {
 	e := newEnv(t, "work-host.cli")
 	e.auto(taskRule)
@@ -380,7 +383,8 @@ func TestTaskRunnerPromptWorksOnChild(t *testing.T) {
 		t.Fatalf("prompt = %q", prompt)
 	}
 	secret := waitFile(t, filepath.Join(e.runs, rs[0].Run.ID, "token"))
-	e.must(runidentity.Identity{Secret: secret}, "item.transition", map[string]any{"id": child.ID, "to": "done", "reason": "done", "evidence": "pr#1"})
+	e.must(runidentity.Identity{Secret: secret}, "delegate.report", map[string]any{"id": child.ID, "outcome": "done", "summary": "fixed",
+		"evidence": map[string]any{"pr": "https://example.invalid/pr/1"}})
 	e.finish(rs[0].Run.ID)
 	if got := e.item(child.ID).Phase; got != domain.PhaseDone {
 		t.Fatalf("child phase = %s", got)

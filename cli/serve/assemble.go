@@ -133,6 +133,7 @@ func logErr(what string) func(error) {
 // assemble 构造全部内核服务、登记命令并挂载路由与 Web。apiURL 经运行凭据交给任务型运行者。
 func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string) (*kernel, error) {
 	x := command.New(st, nil)
+	x.MaxChainDepth = cfg.ChainDepthThreshold // 后台运行与续接沿用同一阈值（下方传入）
 	kinds := kitems.NewKinds()
 	ld := kpacks.New(kpacks.Options{Builtin: rootpacks.FS, DataDir: l.Packs, Kinds: kinds,
 		OnReject: func(r kpacks.Rejection) {

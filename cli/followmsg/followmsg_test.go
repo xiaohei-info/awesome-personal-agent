@@ -14,6 +14,7 @@ import (
 	apidel "github.com/xiaohei-info/awesome-personal-agent/api/delegation"
 	apifm "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/background"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
@@ -70,7 +71,7 @@ func newWorld(t *testing.T) *world {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		kitems.Module, executors.Module, kdel.Module, runner.Module, delivery.Module, kcontext.Module, proc.Module, runidentity.Module, core.Module} {
+		kitems.Module, executors.Module, kdel.Module, runner.Module, delivery.Module, kcontext.Module, proc.Module, background.Module, runidentity.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

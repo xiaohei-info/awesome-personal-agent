@@ -420,7 +420,7 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 		reason := reasonOr(in.Reason, "change requested for hosted material "+e.Material.Title)
 		b, _ := json.Marshal(map[string]any{"kind": domain.KindTask, "phase": domain.PhaseOpen, "title": "修改文档：" + e.Material.Title,
 			"summary": e.Repo + ":" + e.Path, "project": e.Material.Project, "assignee": s.opt.Owner, "reason": reason})
-		r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "item.create", Input: b, Owner: s.opt.Owner, Chain: command.Chain{Mode: command.ChainNew},
+		r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "item.create", Input: b, Owner: s.opt.Owner,
 			IdemKey: in.IdemKey, Evidence: in.Evidence})
 		if err != nil {
 			return out, err
@@ -435,12 +435,8 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 		"\n\n在仓库开分支提 PR，评审在 PR；合并后回执附 PR 作证据。"
 	b, _ := json.Marshal(map[string]any{"parent": out.Parent, "assignee": in.Assignee, "title": "修改文档：" + e.Material.Title,
 		"summary": e.Repo + ":" + e.Path, "body": body, "project": e.Material.Project, "reason": reasonOr(in.Reason, "change hosted material")})
-	chain, keep := command.Chain{Mode: command.ChainNew}, command.Chain{Mode: command.ChainNew}
-	if level != authz.LevelWeb {
-		chain = command.Chain{Mode: command.ChainInherit, From: out.Parent}
-		keep = command.Chain{Mode: command.ChainKeep, From: out.Parent} // 关系事件不能把父事项的链路深度归零
-	}
-	r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "delegate.create", Input: b, Owner: s.opt.Owner, Chain: chain,
+	// 链路深度由命令管线按调用者推定（§14.9）：本人在 Web 委派开始新链路，其余继承父事项。
+	r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "delegate.create", Input: b, Owner: s.opt.Owner,
 		IdemKey: in.IdemKey, Evidence: in.Evidence})
 	if err != nil {
 		if out.ParentCreated {
@@ -464,7 +460,7 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 	}
 	if !slices.Contains(rels, output) {
 		rel, _ := json.Marshal(map[string]any{"from": output.From, "to": output.To, "type": output.Type, "reason": "change hosted material"})
-		_, err = s.x.Do(ctx, command.Request{Identity: who, Command: "item.relate", Input: rel, Owner: s.opt.Owner, Chain: keep,
+		_, err = s.x.Do(ctx, command.Request{Identity: who, Command: "item.relate", Input: rel, Owner: s.opt.Owner,
 			IdemKey: in.IdemKey, Evidence: in.Evidence})
 	}
 	return out, err

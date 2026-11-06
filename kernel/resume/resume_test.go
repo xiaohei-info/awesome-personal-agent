@@ -18,6 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
@@ -80,7 +81,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, instances.Module,
-		items.Module, executors.Module, proc.Module, runidentity.Module, rules.Module, runner.Module, background.Module, Module} {
+		items.Module, executors.Module, proc.Module, runidentity.Module, rules.Module, runner.Module, background.Module, delegation.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +95,7 @@ func setup(t *testing.T) *env {
 	e.x = command.New(st, func() time.Time { return t0 })
 	kinds := items.NewKinds()
 	for _, err := range []error{projects.Register(e.x), items.Register(e.x, kinds), executors.Register(e.x, executors.Options{Owner: "owner"}),
-		rules.Register(e.x), decisions.Register(e.x)} {
+		rules.Register(e.x), decisions.Register(e.x), delegation.Register(e.x, delegation.Options{Owner: "owner", OnError: func(_ command.Commit, err error) { t.Errorf("delegation: %v", err) }})} {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,6 +109,7 @@ func setup(t *testing.T) *env {
 		t.Fatalf("load: %v %+v", err, rej)
 	}
 	onErr := func(_ string, err error) { e.errs <- err }
+	e.must(owner, "executor.put", map[string]any{"id": "work-host.cli", "kind": "external-cli"})
 	var bgs *background.Service
 	e.disp = proc.New(st, config.Config{MaxSubprocesses: 4, MaxShortSubprocesses: 1}, proc.Options{
 		Env: func(r domain.Run) map[string]string { return bgs.Env(r) },

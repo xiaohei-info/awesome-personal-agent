@@ -147,6 +147,7 @@ type facts struct {
 	declared bool
 	session  string
 	msgs     []allowlist.Attached
+	depth    int  // 事项当前的链路深度（最近一条事件）：续接经提问而来，沿用不加（§14.9）
 	handled  bool // 同一回答已经续接过
 	ready    bool // 是等待续接的已回答决策，且无需跳过
 }
@@ -190,6 +191,9 @@ func (s *Service) read(tx *store.Tx, itemID string, retry bool) (f facts, err er
 	}
 	if !waiting(f.it) {
 		return f, nil
+	}
+	if f.depth, err = items.ChainDepth(tx, itemID); err != nil {
+		return f, err
 	}
 	var linked bool
 	if f.link, linked, err = background.LastLink(tx, itemID); err != nil || !linked {
@@ -330,9 +334,9 @@ func (s *Service) decide(tx *store.Tx, itemID string, sessionLost bool) (Outcome
 		return Skipped, err
 	}
 	rule := f.base.Run.Basis.RuleID
-	if f.it.ChainDepth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发（§14.9）
+	if f.depth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发（§14.9）
 		return Skipped, s.audit(tx, f, domain.EvHealthAlert, "chain depth exceeded",
-			map[string]any{"chain_depth": f.it.ChainDepth, "threshold": s.o.MaxChainDepth})
+			map[string]any{"chain_depth": f.depth, "threshold": s.o.MaxChainDepth})
 	}
 	harness := s.harnessOf(rule, f.pol)
 	var hl executors.Headless
@@ -449,7 +453,7 @@ func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Hea
 	}
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: base.Run.Basis.RuleID}
 	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: base.Run.Runner, Launch: "headless", Target: f.it.ID,
-		Harness: harness, SessionID: sid, Access: base.Run.Access, Basis: basis, ChainDepth: f.it.ChainDepth, TimeoutSec: timeout}
+		Harness: harness, SessionID: sid, Access: base.Run.Access, Basis: basis, ChainDepth: f.depth, TimeoutSec: timeout}
 	if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, s.o.Now()); err != nil {
 		return Skipped, err
 	}
@@ -459,7 +463,7 @@ func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Hea
 	}
 	body, _ := json.Marshal(map[string]any{"run_id": runID, "rule": basis.RuleID, "mode": mode, "session_id": sid, "harness": harness})
 	if _, err := eventlog.Append(tx, domain.Event{Type: EvResumed, Object: f.it.ID, Actor: ruleActor(basis.RuleID), Basis: basis,
-		Reason: "rule " + basis.RuleID + ": resume after answer", Payload: body, ChainDepth: f.it.ChainDepth, At: s.o.Now()}); err != nil {
+		Reason: "rule " + basis.RuleID + ": resume after answer", Payload: body, ChainDepth: f.depth, At: s.o.Now()}); err != nil {
 		return Skipped, err
 	}
 	s.queued.Store(true)
@@ -478,7 +482,7 @@ func (s *Service) audit(tx *store.Tx, f facts, typ, reason string, extra map[str
 	}
 	body, _ := json.Marshal(p)
 	_, err := eventlog.Append(tx, domain.Event{Type: typ, Object: f.it.ID, Actor: ruleActor(rule),
-		Basis: &domain.Basis{PolicyVersion: f.pv, RuleID: rule}, Reason: reason, Payload: body, ChainDepth: f.it.ChainDepth, At: s.o.Now()})
+		Basis: &domain.Basis{PolicyVersion: f.pv, RuleID: rule}, Reason: reason, Payload: body, ChainDepth: f.depth, At: s.o.Now()})
 	return err
 }
 
@@ -504,7 +508,7 @@ func (s *Service) refuse(tx *store.Tx, f facts, reason string) error {
 	a := system
 	a.OnBehalfOf = s.o.Owner
 	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvItemPhaseChanged, Object: f.it.ID, Actor: a, Reason: "resume: " + reason,
-		Payload: snap, ChainDepth: f.it.ChainDepth, At: now})
+		Payload: snap, ChainDepth: f.depth, At: now})
 	return err
 }
 

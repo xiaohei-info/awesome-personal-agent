@@ -28,10 +28,12 @@ type Config struct {
 	// 投递：无人领取多久转 fallback_web，以及失败后的逐次退避（§6.9）。
 	DeliveryUnclaimedAfter time.Duration
 	DeliveryBackoff        []time.Duration
+	// ChainDepthThreshold 是链路深度阈值：超过只记录不派发（§14.9）。
+	ChainDepthThreshold int
 }
 
 // Default 返回设计规定的默认值：额度 4/2，来源输出上限 32MB，Ingest 30 天，运行目录 14 天，
-// 投递无人领取 30 分钟、失败退避 1/3/7/15/30 分钟。
+// 投递无人领取 30 分钟、失败退避 1/3/7/15/30 分钟，链路深度阈值 8。
 // 监听地址设计未规定，默认只绑本机回环，跨设备访问需显式改配置。
 func Default() Config {
 	return Config{
@@ -44,6 +46,7 @@ func Default() Config {
 
 		DeliveryUnclaimedAfter: 30 * time.Minute,
 		DeliveryBackoff:        []time.Duration{time.Minute, 3 * time.Minute, 7 * time.Minute, 15 * time.Minute, 30 * time.Minute},
+		ChainDepthThreshold:    8,
 	}
 }
 
@@ -199,6 +202,8 @@ func apply(c *Config, seen map[string]bool, raw string) error {
 			bo = append(bo, d)
 		}
 		c.DeliveryBackoff = bo
+	case "chain_depth_threshold":
+		return positive(k, v, &c.ChainDepthThreshold)
 	default:
 		return fmt.Errorf("未知配置项 %q", k)
 	}

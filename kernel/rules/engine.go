@@ -28,6 +28,7 @@ type Call struct {
 	Action packs.Action
 	Item   *domain.Item // 触发事项；时钟规则或事件不涉及事项时为空
 	Seq    int64        // 触发事件的序号；时钟规则为 0
+	Depth  int          // 触发事件的链路深度；拉起新运行的动作据此加一（§14.9）
 	Do     func(cmd string, input any) (command.Result, error)
 	// Instance 是到期的能力包实例；只有实例驱动的时钟规则才有（附录 C.10）。
 	Instance *Fired
@@ -436,7 +437,7 @@ func (e *Engine) execute(ctx context.Context, d ruleDef, t *trigger) error {
 			err = invalid("action " + name + " has no registered handler")
 		} else {
 			n := 0
-			err = h(ctx, Call{Rule: d.Key, Action: a, Item: t.item, Seq: t.entry.Event.Seq, Instance: t.instance, Bound: t.bound,
+			err = h(ctx, Call{Rule: d.Key, Action: a, Item: t.item, Seq: t.entry.Event.Seq, Depth: t.depth, Instance: t.instance, Bound: t.bound,
 				Do: func(cmd string, input any) (command.Result, error) {
 					n++
 					return e.do(ctx, d.Key, t, fmt.Sprintf("%s:%d:%d", t.ref, i, n), cmd, input)

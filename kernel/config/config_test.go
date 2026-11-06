@@ -78,6 +78,9 @@ func TestLoadDefaultsWhenMissing(t *testing.T) {
 		!reflect.DeepEqual(c.DeliveryBackoff, []time.Duration{time.Minute, 3 * time.Minute, 7 * time.Minute, 15 * time.Minute, 30 * time.Minute}) {
 		t.Fatalf("delivery defaults: %v %v", c.DeliveryUnclaimedAfter, c.DeliveryBackoff)
 	}
+	if c.ChainDepthThreshold != 8 { // §14.9
+		t.Fatalf("chain depth threshold default = %d", c.ChainDepthThreshold)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -91,6 +94,7 @@ ingest_retention_days: 7
 run_retention_days: 3
 delivery_unclaimed_after: 20s
 delivery_backoff: 1s, 2s,3s
+chain_depth_threshold: 2
 `), 0o600)
 	c, err := Load(p)
 	if err != nil {
@@ -98,7 +102,8 @@ delivery_backoff: 1s, 2s,3s
 	}
 	if c.Listen != "0.0.0.0:9000" || c.MaxSubprocesses != 8 || c.MaxShortSubprocesses != 1 || c.MaxSourceOutput != 5<<20 ||
 		c.IngestRetention != 7*24*time.Hour || c.RunRetention != 3*24*time.Hour ||
-		c.DeliveryUnclaimedAfter != 20*time.Second || !reflect.DeepEqual(c.DeliveryBackoff, []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}) {
+		c.DeliveryUnclaimedAfter != 20*time.Second || !reflect.DeepEqual(c.DeliveryBackoff, []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}) ||
+		c.ChainDepthThreshold != 2 {
 		t.Fatalf("got %+v", c)
 	}
 }
@@ -133,6 +138,8 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 		"bad backoff":    "delivery_backoff: 1m,soon\n",
 		"empty backoff":  "delivery_backoff: \n",
 		"negative step":  "delivery_backoff: 1m,-3m\n",
+		"zero chain":     "chain_depth_threshold: 0\n",
+		"chain not int":  "chain_depth_threshold: deep\n",
 	}
 	for name, body := range cases {
 		p := filepath.Join(t.TempDir(), "config.yaml")

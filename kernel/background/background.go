@@ -6,7 +6,7 @@
 //
 // 运行参数（runner、harness、access、cwd、executor）只来自规则动作、提示词模板和 Web 设置，不来自触发事件的内容（§14.10）。
 // 本包不起子进程也不发网络请求（经 kernel/outcall/proc 入队），不直写其他模块的数据：
-// 事项的创建、关联与阶段转移走命令模型，只写自己的运行关联表，并向 Event 日志追加审计记录。
+// 子事项的委派与阶段转移走命令模型，只写自己的运行关联表，并向 Event 日志追加审计记录。
 // 续接（kernel-bg-resume）与唤醒（kernel-wake-lease）不在本包。
 package background
 
@@ -205,6 +205,7 @@ type facts struct {
 	project  *domain.Project
 	rec      executors.Record
 	declared bool
+	depth    int // 本次拉起的链路深度：触发事件的深度加一（规则拉起新运行，§14.9）
 }
 
 func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err error) {
@@ -225,7 +226,7 @@ func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err
 		if f.item, err = items.Get(tx, c.Item.ID); err != nil {
 			return err
 		}
-		if f.busy, err = s.busy(tx, f.item.ID); err != nil {
+		if f.busy, err = InFlight(tx, f.item.ID); err != nil {
 			return err
 		}
 		if f.item.Project != "" {
@@ -255,8 +256,9 @@ func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err
 	return f, err
 }
 
-// busy：触发事项自己或由它启动的运行目标（task 运行者的子事项）有排队或运行中的 Run（排队中的算在途）。
-func (s *Service) busy(tx *store.Tx, item string) (bool, error) {
+// InFlight：事项自己或由它启动的运行目标（task 运行者的子事项）有排队或运行中的 Run（排队中的算在途，§7.7）。
+// 拉起前的"同一事项只有一个运行"与 `apa context` 的在途运行提示用同一口径。
+func InFlight(tx *store.Tx, item string) (bool, error) {
 	if b, err := proc.InFlight(tx, item); err != nil || b {
 		return b, err
 	}
@@ -299,12 +301,13 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	if err != nil {
 		return err
 	}
+	f.depth = c.Depth + 1
 	if f.busy {
 		return s.audit(ctx, c, f, EvSkipped, f.item.ID, "该事项已有在途运行，不重复拉起", nil)
 	}
-	if f.item.ChainDepth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
+	if f.depth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
 		return s.audit(ctx, c, f, domain.EvHealthAlert, f.item.ID, "chain depth exceeded",
-			map[string]any{"chain_depth": f.item.ChainDepth, "threshold": s.o.MaxChainDepth})
+			map[string]any{"chain_depth": f.depth, "threshold": s.o.MaxChainDepth})
 	}
 	harness := sp.harness
 	if harness == "" {
@@ -351,7 +354,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	}
 
 	target := f.item.ID
-	if sp.runner == "task" { // 内核先建好子事项，运行目标是它（§13.6）
+	if sp.runner == "task" { // 内核先把子事项委派给执行者，运行目标是它（§13.6）
 		if target, err = s.createChild(c, f.item, sp.executor); err != nil {
 			return err
 		}
@@ -359,13 +362,11 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	return s.launch(ctx, c, f, sp, harness, headless, ms, target, checkout)
 }
 
+// createChild 经 delegate.create 建委派子事项（与 `apa delegate` 同一路径：项目名单校验、父事项转 waiting），
+// 运行者因此能按委派回执写回它。
 func (s *Service) createChild(c rules.Call, parent domain.Item, executor string) (string, error) {
-	in := map[string]any{"kind": domain.KindTask, "title": parent.Title, "phase": domain.PhaseOpen,
-		"assignee": executor, "reason": "rule " + c.Rule + ": background task runner"}
-	if parent.Project != "" {
-		in["project"] = parent.Project
-	}
-	res, err := c.Do("item.create", in)
+	res, err := c.Do("delegate.create", map[string]any{"parent": parent.ID, "assignee": executor,
+		"reason": "rule " + c.Rule + ": background task runner"})
 	if err != nil {
 		return "", err
 	}
@@ -373,10 +374,9 @@ func (s *Service) createChild(c rules.Call, parent domain.Item, executor string)
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(res.Value, &out); err != nil || out.ID == "" {
-		return "", fmt.Errorf("background: item.create returned no id: %v", err)
+		return "", fmt.Errorf("background: delegate.create returned no id (suppressed=%v): %v", res.Suppressed, err)
 	}
-	_, err = c.Do("item.relate", map[string]any{"from": out.ID, "to": parent.ID, "type": domain.RelParent, "reason": "rule " + c.Rule})
-	return out.ID, err
+	return out.ID, nil
 }
 
 func newRunID() (string, error) {
@@ -436,16 +436,9 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}
 	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
-		Harness: harness, SessionID: sessionID, Access: sp.access, Basis: basis, ChainDepth: f.item.ChainDepth,
+		Harness: harness, SessionID: sessionID, Access: sp.access, Basis: basis, ChainDepth: f.depth,
 		TimeoutSec: int(sp.timeout / time.Second)}
 	err = s.o.Store.Update(ctx, func(tx *store.Tx) error {
-		if target != f.item.ID {
-			it, err := items.Get(tx, target)
-			if err != nil {
-				return err
-			}
-			run.ChainDepth = it.ChainDepth
-		}
 		if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, s.o.Now()); err != nil {
 			return err
 		}
@@ -455,7 +448,7 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 		body, _ := json.Marshal(map[string]any{"run_id": runID, "rule": c.Rule, "runner": sp.runner, "launch": "headless",
 			"harness": harness, "access": sp.access, "target": target})
 		_, err := eventlog.Append(tx, domain.Event{Type: EvLaunched, Object: f.item.ID, Actor: ruleActor(c.Rule), Basis: basis,
-			Reason: "rule " + c.Rule + ": background run", Payload: body, ChainDepth: f.item.ChainDepth, At: s.o.Now()})
+			Reason: "rule " + c.Rule + ": background run", Payload: body, ChainDepth: f.depth, At: s.o.Now()})
 		return err
 	})
 	if err != nil {
@@ -482,7 +475,7 @@ func (s *Service) audit(ctx context.Context, c rules.Call, f facts, typ, object,
 	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		_, err := eventlog.Append(tx, domain.Event{Type: typ, Object: object, Actor: ruleActor(c.Rule),
 			Basis: &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}, Reason: reason, Payload: body,
-			ChainDepth: f.item.ChainDepth, At: s.o.Now()})
+			ChainDepth: f.depth, At: s.o.Now()})
 		return err
 	})
 }
@@ -631,9 +624,13 @@ func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID,
 		if _, err := tx.Exec(`UPDATE background_run SET session_id = ? WHERE run_id = ?`, sessionID, run.ID); err != nil {
 			return err
 		}
-		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: itemID,
+		depth, err := items.ChainDepth(tx, itemID) // 沿用事项当前深度：运行者的写入已在运行深度上加一，结束记录不能把它拉回去
+		if err != nil {
+			return err
+		}
+		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: itemID,
 			Actor:  domain.Actor{Type: domain.ActorAgent, Principal: "agent:background", Via: domain.ViaClock, Run: run.ID, Harness: run.Harness},
-			Reason: "background " + state, Payload: body, ChainDepth: run.ChainDepth, Basis: run.Basis, At: s.o.Now()})
+			Reason: "background " + state, Payload: body, ChainDepth: depth, Basis: run.Basis, At: s.o.Now()})
 		return err
 	})
 }

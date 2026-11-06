@@ -10,6 +10,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/background"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
@@ -18,8 +19,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -35,7 +38,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, materials.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, materials.Module, proc.Module, runner.Module, background.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -458,5 +461,38 @@ func TestInjectRoutedDeliveriesOncePerSession(t *testing.T) {
 	_ = e.st.Update(bg, func(tx *store.Tx) error { _, _, err := q.Confirm(tx, "d_inject", 1); return err })
 	if done := e.build(t, Request{Session: "s3"}); len(done.Deliveries) != 0 {
 		t.Fatalf("acknowledged delivery still injected: %+v", done.Deliveries)
+	}
+}
+
+// ACT-BGG-03：事项上有排队中（算在途）的运行时，context 的事项条目与注入文本都给出在途运行提示。
+func TestInFlightRunIsHinted(t *testing.T) {
+	e := setup(t)
+	busy := e.item(t, map[string]any{"title": "busy"})
+	idle := e.item(t, map[string]any{"title": "idle"})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Runner: "main_session", Launch: "headless",
+			Target: busy, Harness: "h", Access: "read", TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, time.Now())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	running := func(r Result) map[string]bool {
+		m := map[string]bool{}
+		for _, it := range r.Items {
+			m[it.ID] = it.Running
+		}
+		return m
+	}
+	for name, req := range map[string]Request{"item scope": {ItemScope: true, Item: busy}, "session": {Session: "s1"}} {
+		r := e.build(t, req)
+		if m := running(r); !m[busy] || m[idle] {
+			t.Fatalf("%s: running = %v", name, m)
+		}
+		if !strings.Contains(r.Inject(), runningNotice) {
+			t.Fatalf("%s: inject lacks the in-flight notice: %q", name, r.Inject())
+		}
+	}
+	if r := e.build(t, Request{ItemScope: true, Item: idle}); strings.Contains(r.Inject(), runningNotice) {
+		t.Fatalf("idle item hinted: %q", r.Inject())
 	}
 }
