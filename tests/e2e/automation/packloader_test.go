@@ -3,6 +3,7 @@
 package automation
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,9 +101,9 @@ func TestFlowPackLoader(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dst, "pack.yaml"), []byte(edited), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		reload(e)
-		if p := packList(t, e)["brief"]; p.Description != "acc-overridden" || p.Source != "data" {
-			t.Errorf("应显示覆盖后的说明: %+v", p)
+		waitUntil(t, "pack list 应显示覆盖后的说明", func() bool { return packList(t, e)["brief"].Description == "acc-overridden" })
+		if p := packList(t, e)["brief"]; p.Source != "data" {
+			t.Errorf("覆盖后的包应来自数据目录: %+v", p)
 		}
 	})
 
@@ -116,25 +117,34 @@ func TestFlowPackLoader(t *testing.T) {
 		if err := os.WriteFile(p, []byte(bad), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		reload(e)
+		// 热加载拒绝坏包后，健康视图出现 pack_rejections；此时再看 brief 是否仍是上一有效版本。
+		waitUntil(t, "apa health 应显示能力包加载失败", func() bool {
+			r := e.Apa(e.OBS, "", "health")
+			var h struct {
+				Signals []struct {
+					ID     string          `json:"id"`
+					Count  int             `json:"count"`
+					Detail json.RawMessage `json:"detail"`
+				} `json:"signals"`
+			}
+			if r.Code != 0 || json.Unmarshal([]byte(r.Stdout), &h) != nil {
+				return false
+			}
+			for _, s := range h.Signals {
+				if s.ID == "pack_rejections" {
+					return s.Count == 1 && string(s.Detail) == `["brief"]`
+				}
+			}
+			return false
+		})
 		got, ok := packList(t, e)["brief"]
-		if !ok || got.Description == "acc-overridden" {
-			t.Errorf("坏包不得生效，brief 也不得消失: %+v", got)
+		if !ok || got.Description != "acc-overridden" || got.Source != "data" {
+			t.Errorf("应继续以上一有效版本（acc-overridden，data）工作，brief 不得消失: %+v", got)
 		}
-		if got.Source != "builtin" {
-			t.Errorf("退回的应是可用的内置版本: %+v", got)
-		}
-		h := e.APIRaw("GET", "/v1/health", "", e.OBS)
-		if h.Code != 200 || !contains(h.Body, "pack_rejections", "brief") {
-			t.Errorf("apa health 应显示能力包加载失败: %d %s", h.Code, h.Body)
-		}
-		if r := e.Apa(e.OBS, "", "health"); r.Code != 0 || !contains(r.Stdout, "pack_rejections") {
-			t.Errorf("apa health: %d %s %s", r.Code, r.Stdout, r.Stderr)
-		}
-		d := e.Web("GET", "/v1/deliveries/unread", "")
-		if d.Code != 200 || !strings.Contains(d.Body, "health") {
-			t.Errorf("应产出一条健康类投递: %d %s", d.Code, d.Body)
-		}
+		waitUntil(t, "应产出一条健康类投递", func() bool {
+			d := e.Web("GET", "/v1/deliveries/unread", "")
+			return d.Code == 200 && strings.Contains(d.Body, "health")
+		})
 	})
 
 	step(t, "ACT-PACK-05 新增自动化只写能力包", func(t *testing.T) {
@@ -157,9 +167,9 @@ event_rules:
 `,
 			"views/acc-kind.yaml": "kind: acc-kind\nlist:\n  columns: [title, spec.score]\n  filters: [tag]\ncard:\n  fields: [summary, spec.score]\n",
 		})
-		reload(e)
-		p, ok := packList(t, e)["acc-pack"]
-		if !ok || p.Source != "data" || len(p.Kinds) != 0 && p.Kinds[0] != "acc-kind" {
+		waitUntil(t, "pack list 应看到 acc-pack", func() bool { _, ok := packList(t, e)["acc-pack"]; return ok })
+		p := packList(t, e)["acc-pack"]
+		if p.Source != "data" || len(p.Kinds) != 1 || p.Kinds[0] != "acc-kind" {
 			t.Fatalf("pack list 应看到 acc-pack: %+v", p)
 		}
 		v, ok := p.Views["acc-kind"]

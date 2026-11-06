@@ -2,8 +2,8 @@
 
 // Package automation 按验收文档 flow-pack-loader（ACT-PACK-01..06）与 flow-rule-modes（ACT-RULE-01..07）
 // 用真实 apa 二进制验证"能力包是声明式数据、不合规的包不生效；规则默认只观察，切 auto 只在 Web"。
-// 环境来自 flow-env-baseline 的共用脚本。数据目录变化经重启 apa serve 确定性地重新加载
-// （验收文档允许"触发热加载或重启"，避免依赖轮询间隔）；Web 步骤经与页面相同的 HTTP API 驱动，页面渲染由 web/ 组件测试覆盖。
+// 环境来自 flow-env-baseline 的共用脚本。数据目录变化靠内核的定时热加载生效，
+// 测试不重启 apa serve，只轮询可观察结果；Web 步骤经与页面相同的 HTTP API 驱动，页面渲染由 web/ 组件测试覆盖。
 package automation
 
 import (
@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
@@ -35,11 +36,19 @@ func writePack(t *testing.T, dir, name string, files map[string]string) string {
 	return root
 }
 
-// reload 重启 apa serve，让数据目录里的包重新加载。
-func reload(e *baseline.Env) {
-	e.T.Helper()
-	e.StopKernel()
-	e.StartKernelAgain()
+// wait 是等待"应当发生"的上限；内核每 5 秒热加载一次数据目录里的能力包。
+const wait = 30 * time.Second
+
+func waitUntil(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for end := time.Now().Add(wait); ; time.Sleep(200 * time.Millisecond) {
+		if ok() {
+			return
+		}
+		if time.Now().After(end) {
+			t.Fatalf("%s（等待 %s 仍未出现）", what, wait)
+		}
+	}
 }
 
 func step(t *testing.T, name string, f func(t *testing.T)) {

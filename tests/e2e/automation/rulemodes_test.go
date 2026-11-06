@@ -109,8 +109,8 @@ func TestFlowRuleModes(t *testing.T) {
 
 	step(t, "ACT-RULE-01 准备规则", func(t *testing.T) {
 		writePack(t, packsDir, "acc-rule", map[string]string{"pack.yaml": accTagPack})
-		reload(e)
-		if s, ok := rules(t, e)["acc-tag"]; !ok || s.Mode != "observe" || s.Key != tagKey {
+		waitUntil(t, "GET /v1/rules 应显示 acc-tag", func() bool { _, ok := rules(t, e)["acc-tag"]; return ok })
+		if s := rules(t, e)["acc-tag"]; s.Mode != "observe" || s.Key != tagKey {
 			t.Fatalf("GET /v1/rules 应显示 acc-tag 为 observe: %+v", s)
 		}
 	})
@@ -192,7 +192,7 @@ func TestFlowRuleModes(t *testing.T) {
 
 	step(t, "ACT-RULE-06 规则动作不再触发规则", func(t *testing.T) {
 		writePack(t, packsDir, "acc-loop", map[string]string{"pack.yaml": accLoopPack})
-		reload(e)
+		waitUntil(t, "两条规则应已热加载", func() bool { r := rules(t, e); _, a := r["loop-a"]; _, b := r["loop-b"]; return a && b })
 		for _, k := range []string{"acc-loop/event_rules/loop-a", "acc-loop/event_rules/loop-b"} {
 			if r := e.Web("PATCH", modePath(k), `{"mode":"auto"}`); r.Code != 200 {
 				t.Fatalf("Web 切 %s 为 auto: %d %s", k, r.Code, r.Body)
@@ -222,14 +222,11 @@ func TestFlowRuleModes(t *testing.T) {
 		if err := os.WriteFile(p, []byte(strings.Replace(accTagPack, "tag: acc-hit", "tag: acc-hit-v2", 1)), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		reload(e)
-		if s := rules(t, e)["acc-tag"]; s.Mode != "observe" {
-			t.Fatalf("内容变化后应回到 observe: %+v", s)
-		}
-		d := e.Web("GET", "/v1/deliveries/unread", "")
-		if d.Code != 200 || !strings.Contains(d.Body, "health") {
-			t.Errorf("应产出健康类投递: %d %s", d.Code, d.Body)
-		}
+		waitUntil(t, "热加载后内容变化的规则应回到 observe", func() bool { return rules(t, e)["acc-tag"].Mode == "observe" })
+		waitUntil(t, "应产出健康类投递", func() bool {
+			d := e.Web("GET", "/v1/deliveries/unread", "")
+			return d.Code == 200 && strings.Contains(d.Body, "health")
+		})
 		id := newItem("acc-rule")
 		open(id)
 		waitWhy(t, why, id, "rule.observed")
@@ -240,23 +237,8 @@ func TestFlowRuleModes(t *testing.T) {
 	})
 }
 
-// settle 是"确认没有发生某事"前给异步规则执行的等待；wait 是等待"应当发生"的上限。
-const (
-	settle = 3 * time.Second
-	wait   = 20 * time.Second
-)
-
-func waitUntil(t *testing.T, what string, ok func() bool) {
-	t.Helper()
-	for end := time.Now().Add(wait); ; time.Sleep(200 * time.Millisecond) {
-		if ok() {
-			return
-		}
-		if time.Now().After(end) {
-			t.Fatalf("%s（等待 %s 仍未出现）", what, wait)
-		}
-	}
-}
+// settle 是"确认没有发生某事"前给异步规则执行的等待。
+const settle = 3 * time.Second
 
 func waitWhy(t *testing.T, why func(string) string, id, sub string) (out string) {
 	t.Helper()
