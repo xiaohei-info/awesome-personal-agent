@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Route, Routes, useParams } from "react-router-dom";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { MATERIAL_RELATION_LABELS, isMaterialId } from "../../app/relations";
 import { AttachedMessages } from "../attached-messages";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
@@ -166,7 +167,9 @@ function ItemDetail() {
           {d.relations.map((r, n) => {
             const out = r.from === item.id;
             const other = out ? r.to : r.from;
-            return <li key={n}>{out ? `${r.type} →` : `← ${r.type}`} <Link to={"../" + encodeURIComponent(other)}>{other}</Link></li>;
+            const type = MATERIAL_RELATION_LABELS[r.type] ?? r.type;
+            const to = isMaterialId(other) ? "/materials?id=" + encodeURIComponent(other) : "../" + encodeURIComponent(other);
+            return <li key={n}>{out ? `${type} →` : `← ${type}`} <Link to={to}>{other}</Link></li>;
           })}
         </ul>
         <RelateForm others={d.others} onSubmit={(b) => act(() => api.post(path + "/relations", b))} />
