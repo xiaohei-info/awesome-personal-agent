@@ -1,8 +1,8 @@
 // Package kcontext 是连接模块的 `apa context`（设计 §7.6、§11.6、§14.10）：按会话游标返回账本的增量投影，
 // 是注入与运行者读取上下文的同一个接口。
 //
-// 本包只读账本（事项、项目、事件、策略），自己写的只有会话游标；挂靠消息经 followmsg.Forward 推进。内容只带事项 id、
-// 标题、阶段、截止、建议动作，不带事项正文与来源正文；挂靠消息是唯一带外部正文的部分，由 kernel/allowlist 过滤（§14.6）。
+// 本包只读账本（事项、项目、材料登记、事件、策略），自己写的只有会话游标；挂靠消息经 followmsg.Forward 推进。内容只带事项 id、
+// 标题、阶段、截止、建议动作，材料只带标题与变更摘要，不带事项正文、材料正文与来源正文；挂靠消息是唯一带外部正文的部分，由 kernel/allowlist 过滤（§14.6）。
 // 投递记录、在途运行提示由各自模块接入，不在这里。
 package kcontext
 
@@ -21,6 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -109,12 +110,22 @@ type ProjectContext struct {
 	AllowedExecutors []string             `json:"allowed_executors"` // nil 不限制；空切片只能指派给本人
 }
 
+// MaterialEntry 是作用域内自上次以来有变更的材料：只带标题与变更摘要（托管型另带路径），不带正文（§11.6、§12.4）。
+type MaterialEntry struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Kind    string `json:"kind"`
+	Path    string `json:"path,omitempty"` // 托管型的"仓库:路径"
+	Summary string `json:"summary"`        // 最近一次变更的理由（修订理由、托管文档 commit 刷新或路径消失）
+}
+
 // Result 是增量投影。Cursor 是本次读到的事件序号。
 type Result struct {
 	Cursor      int64           `json:"cursor"`
 	Instruction Instruction     `json:"instruction"`
 	Project     *ProjectContext `json:"project,omitempty"` // 无项目作用域，或项目自上次起没有变化时为空
 	Items       []Entry         `json:"items"`
+	Materials   []MaterialEntry `json:"materials,omitempty"`
 	Deliveries  []DeliveryEntry `json:"deliveries,omitempty"`
 	Messages    []ItemMessages  `json:"messages,omitempty"`
 	// WebOnlyPending：作用域内有待 Web 确认的高风险决策（§11.6 第 5 条）。
@@ -150,7 +161,7 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 		return res, err
 	}
 
-	changed, attached, projectChanged, err := changes(tx, after, head, project)
+	changed, attached, projectChanged, mats, err := changes(tx, after, head, project)
 	if err != nil {
 		return res, err
 	}
@@ -181,6 +192,18 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 			return res, err
 		}
 		res.Project = &ProjectContext{ID: p.ID, Name: p.Name, Intro: p.Intro, Tags: p.Tags, Status: p.Status, Repos: p.Repos, AllowedExecutors: p.AllowedExecutors}
+	}
+	for _, mc := range mats {
+		m, err := materials.Get(tx, mc.id)
+		if err != nil {
+			if isNotFound(err) { // 已物理删除
+				continue
+			}
+			return res, err
+		}
+		if req.All || m.Project == project || m.Project == "" { // 全局规范对每个作用域都有效
+			res.Materials = append(res.Materials, MaterialEntry{ID: m.ID, Title: m.Title, Kind: m.Kind, Path: m.Location, Summary: mc.reason})
+		}
 	}
 	if res.Deliveries, err = injected(tx, req, project, pol); err != nil {
 		return res, err
@@ -342,14 +365,23 @@ func cursor(tx *store.Tx, key, session string, head int64) (int64, error) {
 	return seq, nil
 }
 
-// changes 读 (after, head] 的事件，返回按最近变更先后排序的去重事项 id、其中有新挂靠消息的事项，以及作用域项目是否有变更。
-func changes(tx *store.Tx, after, head int64, project string) (ids []string, attached map[string]bool, projectChanged bool, err error) {
+// matChange 是一份材料在增量里的最近一次变更。
+type matChange struct {
+	id     string
+	seq    int64
+	reason string
+}
+
+// changes 读 (after, head] 的事件，返回按最近变更先后排序的去重事项 id、其中有新挂靠消息的事项、作用域项目是否有变更，
+// 以及有生效变更（material.revised）的材料，同样按最近变更先后排序。
+func changes(tx *store.Tx, after, head int64, project string) (ids []string, attached map[string]bool, projectChanged bool, mats []matChange, err error) {
 	last := map[string]int64{}
 	attached = map[string]bool{}
+	byMat := map[string]matChange{}
 	for after < head {
 		es, err := eventlog.Read(tx, after, 500)
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, nil, err
 		}
 		if len(es) == 0 {
 			break
@@ -362,6 +394,8 @@ func changes(tx *store.Tx, after, head int64, project string) (ids []string, att
 				attached[en.Event.Object] = attached[en.Event.Object] || t == followmsg.EvAttached
 			case slices.Contains(projectEvents, t) && en.Event.Object == project:
 				projectChanged = true
+			case t == domain.EvMaterialRevised && !en.Tombstone:
+				byMat[en.Event.Object] = matChange{id: en.Event.Object, seq: en.Event.Seq, reason: en.Event.Reason}
 			}
 		}
 	}
@@ -369,7 +403,11 @@ func changes(tx *store.Tx, after, head int64, project string) (ids []string, att
 		ids = append(ids, id)
 	}
 	slices.SortFunc(ids, func(a, b string) int { return int(last[a] - last[b]) })
-	return ids, attached, projectChanged, nil
+	for _, mc := range byMat {
+		mats = append(mats, mc)
+	}
+	slices.SortFunc(mats, func(a, b matChange) int { return int(a.seq - b.seq) })
+	return ids, attached, projectChanged, mats, nil
 }
 
 // hiddenAsk：web_only 初筛未返回的决策请求不带（§14.4）。
@@ -430,7 +468,7 @@ func oneLine(s string) string {
 
 // Inject 渲染注入文本；没有任何要说的（增量为空、指令未过期）返回空串，不注入。
 func (r Result) Inject() string {
-	if len(r.Items) == 0 && len(r.Deliveries) == 0 && len(r.Messages) == 0 && r.Project == nil && !r.Instruction.Stale {
+	if len(r.Items) == 0 && len(r.Materials) == 0 && len(r.Deliveries) == 0 && len(r.Messages) == 0 && r.Project == nil && !r.Instruction.Stale {
 		return ""
 	}
 	var b strings.Builder
@@ -475,6 +513,15 @@ func (r Result) Inject() string {
 			deadline = e.Deadline.UTC().Format(time.RFC3339)
 		}
 		line("- ", e.ID, " | ", oneLine(e.Title), " | 阶段 ", string(e.Phase), " | 截止 ", deadline, " | 建议：", e.Action)
+	}
+	for _, m := range r.Materials {
+		line("- 材料 ", m.ID, " | ", oneLine(m.Title), " | ", m.Kind, " | 变更：", oneLine(m.Summary))
+		if m.Path != "" {
+			line("  位置：", oneLine(m.Path))
+		}
+	}
+	if len(r.Materials) > 0 {
+		line("  材料正文用 `apa material show <id>` 读取。")
 	}
 	for _, d := range r.Deliveries {
 		line("- 提醒 ", d.ID, " | ", d.Class, " | ", oneLine(d.Title))
