@@ -9,6 +9,10 @@
 //     再等：延长 Timer，不产出提醒。
 //     建议放弃：经 decision.request 把事项转 needs_input 交本人，选项由本人回答；不静默丢弃，也不自己 dropped。
 //     置信度不足、需要升级到任务型等"判断未定"同样交本人，不替本人决定。
+//   - 间隔、提示词与模式都取自能力包的 follow_up 时钟规则，每次使用时从加载器读（热加载后立即生效）：
+//     schedule 是每一轮的跟进间隔，call_agent 的 prompt 是判断型模板；模式是该规则在规则状态里的当前模式，
+//     与 kernel/rules 同一语义——auto 才判断与提醒，observe 只记 rule.observed（不外呼、不提醒），off 不运行。
+//     不是 auto 的到期轮次照常再排下一轮，切到 auto 后在途的等待事项不会漏掉。
 //   - 写入一律经命令模型（自己的 followup.settle 与决策模块的 decision.request）；本包不起子进程、不调网络，
 //     只读事项，不直写其他模块的数据。
 package followup
@@ -28,7 +32,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -52,13 +58,10 @@ const (
 )
 
 const (
-	// DefaultFirst 是进入 waiting 到第一次跟进的间隔；DefaultExtend 是每轮"催"或"再等"之后的间隔。
-	DefaultFirst  = 72 * time.Hour
-	DefaultExtend = 24 * time.Hour
-
 	timerPrefix = "followup_"
-	ruleID      = "followup"
 	remindKind  = "followup"
+	// ruleType 是能力包里跟进间隔时钟规则的类型（C.4）。
+	ruleType = "follow_up"
 )
 
 // Module 登记事件游标与待跟进表。
@@ -86,17 +89,22 @@ type Reminder interface {
 	Remind(tx *store.Tx, it domain.Item, kind string, due time.Time, title, summary string) error
 }
 
-// Options 配置跟进。除时间与 Owner 外都必填。
+// PackSource 取已加载的能力包（packs.Loader 满足它）。
+type PackSource interface {
+	Get(name string) (*packs.Pack, bool)
+}
+
+// Options 配置跟进。除 Now 与 Owner 外都必填。
 type Options struct {
 	Store    *store.Store
 	Exec     *command.Executor
 	Judge    Judge
 	Reminder Reminder
-	// Pack 与 Template 指向能力包里的 choice 判断型提示词。
-	Pack, Template string
-	Owner          string // 规则式动作的 on_behalf_of，默认 "owner"
-	First, Extend  time.Duration
-	Now            func() time.Time
+	Packs    PackSource
+	// Pack 是声明 follow_up 时钟规则的能力包名；间隔、判断型模板与模式都从该规则取。
+	Pack  string
+	Owner string // 规则式动作的 on_behalf_of，默认 "owner"
+	Now   func() time.Time
 }
 
 // Service 无内存状态，所有状态在账本里。
@@ -104,17 +112,8 @@ type Service struct{ o Options }
 
 // New 校验配置并返回服务。
 func New(o Options) (*Service, error) {
-	if o.Store == nil || o.Exec == nil || o.Judge == nil || o.Reminder == nil || o.Pack == "" || o.Template == "" {
-		return nil, errors.New("followup: Store, Exec, Judge, Reminder, Pack and Template are required")
-	}
-	if o.First < 0 || o.Extend < 0 {
-		return nil, errors.New("followup: First and Extend must not be negative")
-	}
-	if o.First == 0 {
-		o.First = DefaultFirst
-	}
-	if o.Extend == 0 {
-		o.Extend = DefaultExtend
+	if o.Store == nil || o.Exec == nil || o.Judge == nil || o.Reminder == nil || o.Packs == nil || o.Pack == "" {
+		return nil, errors.New("followup: Store, Exec, Judge, Reminder, Packs and Pack are required")
 	}
 	if o.Owner == "" {
 		o.Owner = "owner"
@@ -123,6 +122,48 @@ func New(o Options) (*Service, error) {
 		o.Now = time.Now
 	}
 	return &Service{o}, nil
+}
+
+// rule 是跟进间隔时钟规则的当前声明。
+type rule struct {
+	key, schedule, template string
+}
+
+// rule 从加载器取当前生效的 follow_up 规则；包未加载或没有这类规则时 ok 为假，跟进不运行。
+func (s *Service) rule() (r rule, ok bool) {
+	p, ok := s.o.Packs.Get(s.o.Pack)
+	if !ok {
+		return rule{}, false
+	}
+	for _, cr := range p.ClockRules {
+		if cr.Type != ruleType {
+			continue
+		}
+		for _, a := range cr.Do {
+			if t, _ := a["prompt"].(string); a["action"] == "call_agent" && t != "" {
+				return rule{key: rules.ClockKey(p.Name, cr.ID), schedule: cr.Schedule, template: t}, true
+			}
+		}
+	}
+	return rule{}, false
+}
+
+// next 是从 now 起的下一轮跟进时刻（schedule 是时长或 cron，加载器已校验）。
+func (r rule) next(now time.Time) (time.Time, error) { return clock.Start(r.schedule, now) }
+
+func (r rule) actor() domain.Actor {
+	return domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + r.key, Via: domain.ViaRule}
+}
+
+// mode 是规则状态里的当前模式；未登记按 off。
+func mode(tx *store.Tx, key string) (string, error) {
+	sts, err := rules.List(tx)
+	for _, st := range sts {
+		if st.Key == key {
+			return st.Mode, err
+		}
+	}
+	return rules.ModeOff, err
 }
 
 func invalid(why string) error {
@@ -177,6 +218,7 @@ func (s *Service) Sync(tx *store.Tx) error {
 			}
 		}
 	}
+	r, ok := s.rule()
 	for _, id := range order {
 		it, err := items.Get(tx, id)
 		if err != nil && !isNotFound(err) {
@@ -185,13 +227,27 @@ func (s *Service) Sync(tx *store.Tx) error {
 		if err := cancel(tx, id); err != nil {
 			return err
 		}
-		if err == nil && following(it) {
-			if _, err := clock.Add(tx, domain.Timer{ID: timerID(id), Target: id, Kind: domain.TimerFollowUp, At: s.o.Now().Add(s.o.First)}); err != nil {
+		if err == nil && ok && following(it) {
+			if err := arm(tx, r, id, s.o.Now()); err != nil {
 				return err
 			}
 		}
 	}
 	_, err = tx.Exec(`INSERT INTO followup_cursor (id, seq) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET seq = excluded.seq`, after)
+	return err
+}
+
+// arm 按规则当前间隔排（或重排）下一轮跟进。
+// shortcut: 间隔改了只影响之后排的轮次，已排的 Timer 按原到期；需要即时生效时在热加载里重排在途 Timer。
+func arm(tx *store.Tx, r rule, item string, now time.Time) error {
+	at, err := r.next(now)
+	if err != nil {
+		return err
+	}
+	if err := cancel(tx, item); err != nil {
+		return err
+	}
+	_, err = clock.Add(tx, domain.Timer{ID: timerID(item), Target: item, Kind: domain.TimerFollowUp, At: at})
 	return err
 }
 
@@ -253,9 +309,12 @@ type pending struct {
 	attempts int64
 }
 
-func (s *Service) load(ctx context.Context) (ps []pending, pv int, err error) {
+func (s *Service) load(ctx context.Context, key string) (ps []pending, pv int, m string, err error) {
 	err = s.o.Store.View(ctx, func(tx *store.Tx) error {
 		if pv, _, err = policy.Current(tx); err != nil {
+			return err
+		}
+		if m, err = mode(tx, key); err != nil {
 			return err
 		}
 		r, err := tx.Query(`SELECT id, item, due, attempts FROM followup_pending ORDER BY id`)
@@ -280,21 +339,53 @@ func (s *Service) load(ctx context.Context) (ps []pending, pv int, err error) {
 // Drain 处理所有待跟进。某条失败不影响其余：失败的保留待重试，错误汇总返回。
 // 组装处在每次时钟 Tick 之后调用，并按固定间隔再调（重试）。
 // shortcut: 失败的待跟进在每次 Drain 都重试，没有退避；模型持续不可用时调用间隔即重试间隔。
+// 规则不是 auto 时不判断：observe 记一条 rule.observed，off 什么都不记，两者都清掉这条待跟进并再排下一轮。
 func (s *Service) Drain(ctx context.Context) error {
-	ps, pv, err := s.load(ctx)
+	r, ok := s.rule()
+	ps, pv, m, err := s.load(ctx, r.key)
 	if err != nil {
 		return err
 	}
 	var errs []error
 	for _, p := range ps {
-		if err := s.handle(ctx, p, pv); err != nil {
+		if !ok || m != rules.ModeAuto {
+			err = s.skip(ctx, p, r, ok, m, pv)
+		} else {
+			err = s.handle(ctx, p, r, pv)
+		}
+		if err != nil {
 			errs = append(errs, fmt.Errorf("followup: %s: %w", p.item, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (s *Service) handle(ctx context.Context, p pending, pv int) error {
+// skip 处理不是 auto 的一轮：同一事务里清掉待跟进、observe 时记录本来会做什么、事项仍在等待就再排下一轮。
+func (s *Service) skip(ctx context.Context, p pending, r rule, ok bool, m string, pv int) error {
+	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM followup_pending WHERE id = ?`, p.id); err != nil || !ok {
+			return err
+		}
+		it, err := items.Get(tx, p.item)
+		if isNotFound(err) || (err == nil && !following(it)) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if m == rules.ModeObserve {
+			body, _ := json.Marshal(map[string]any{"rule": r.key, "due": p.due, "would_do": "follow-up judgement " + s.o.Pack + "/" + r.template})
+			if _, err := eventlog.Append(tx, domain.Event{Type: rules.EvObserved, Object: it.ID, Actor: r.actor(),
+				Basis: &domain.Basis{PolicyVersion: pv, RuleID: r.key}, Reason: "observe: would run " + r.key,
+				Payload: body, ChainDepth: it.ChainDepth, At: s.o.Now()}); err != nil {
+				return err
+			}
+		}
+		return arm(tx, r, it.ID, s.o.Now())
+	})
+}
+
+func (s *Service) handle(ctx context.Context, p pending, r rule, pv int) error {
 	var it domain.Item
 	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { it, err = items.Get(tx, p.item); return })
 	if isNotFound(err) || (err == nil && !following(it)) {
@@ -308,26 +399,26 @@ func (s *Service) handle(ctx context.Context, p pending, pv int) error {
 	if material == "" {
 		material = it.Summary
 	}
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: s.o.Pack, Template: s.o.Template, Input: in, Material: material,
+	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: s.o.Pack, Template: r.template, Input: in, Material: material,
 		Target: it.ID, Project: it.Project,
-		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + ruleID, Via: domain.ViaRule},
-		Basis: &domain.Basis{PolicyVersion: pv, RuleID: ruleID}})
+		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + r.key, Via: domain.ViaRule},
+		Basis: &domain.Basis{PolicyVersion: pv, RuleID: r.key}})
 	if err != nil {
-		return errors.Join(err, s.failed(ctx, p, err))
+		return errors.Join(err, s.failed(ctx, p, r, err))
 	}
 	choice, err := decide(out)
 	if err != nil {
-		return errors.Join(err, s.failed(ctx, p, err))
+		return errors.Join(err, s.failed(ctx, p, r, err))
 	}
 	key := fmt.Sprintf("followup:%s:%d", it.ID, p.due.UnixNano())
 	switch choice {
 	case ChoiceRemind, ChoiceWait:
-		_, err = s.run(ctx, it.ID, key, "followup.settle", map[string]any{"id": it.ID, "pending": p.id, "remind": choice == ChoiceRemind, "due": p.due})
+		_, err = s.run(ctx, r, it.ID, key, "followup.settle", map[string]any{"id": it.ID, "pending": p.id, "remind": choice == ChoiceRemind, "due": p.due})
 		return err
 	case ChoiceAbandon:
-		err = s.ask(ctx, it, key, "跟进判断建议放弃", fmt.Sprintf("「%s」等待已久仍无进展，建议放弃。是否放弃这件事？", it.Title), OptDrop)
+		err = s.ask(ctx, r, it, key, "跟进判断建议放弃", fmt.Sprintf("「%s」等待已久仍无进展，建议放弃。是否放弃这件事？", it.Title), OptDrop)
 	default: // 判断未定
-		err = s.ask(ctx, it, key, "跟进判断未定", fmt.Sprintf("「%s」到了跟进时间，但无法自动判断该催、再等还是放弃，请你决定。", it.Title), OptReopen)
+		err = s.ask(ctx, r, it, key, "跟进判断未定", fmt.Sprintf("「%s」到了跟进时间，但无法自动判断该催、再等还是放弃，请你决定。", it.Title), OptReopen)
 	}
 	if err != nil {
 		return err
@@ -353,8 +444,8 @@ func decide(out direct.Outcome) (string, error) {
 	return "", invalid("follow-up judge answered " + j.Choice + "; choices must be remind, wait, abandon")
 }
 
-func (s *Service) ask(ctx context.Context, it domain.Item, key, reason, question, recommend string) error {
-	_, err := s.run(ctx, it.ID, key+":ask", "decision.request", map[string]any{"id": it.ID, "reason": reason, "ask": domain.AskInput{
+func (s *Service) ask(ctx context.Context, r rule, it domain.Item, key, reason, question, recommend string) error {
+	_, err := s.run(ctx, r, it.ID, key+":ask", "decision.request", map[string]any{"id": it.ID, "reason": reason, "ask": domain.AskInput{
 		Question: question,
 		Options: []domain.AskOption{
 			{ID: OptDrop, Label: "放弃", Next: domain.PhaseDropped},
@@ -366,14 +457,15 @@ func (s *Service) ask(ctx context.Context, it domain.Item, key, reason, question
 }
 
 // run 以跟进自己的规则式身份走命令模型；授权依据（策略版本与规则 id）记入 Event。
-func (s *Service) run(ctx context.Context, item, idem, cmd string, input any) (command.Result, error) {
+func (s *Service) run(ctx context.Context, r rule, item, idem, cmd string, input any) (command.Result, error) {
 	b, err := json.Marshal(input)
 	if err != nil {
 		return command.Result{}, err
 	}
-	a := domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + ruleID, Via: domain.ViaRule, OnBehalfOf: s.o.Owner}
+	a := r.actor()
+	a.OnBehalfOf = s.o.Owner
 	return s.o.Exec.Do(ctx, command.Request{Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate}, Command: cmd, Input: b,
-		IdemKey: idem, Chain: command.Chain{Mode: command.ChainInherit, From: item}, RuleID: ruleID, Evidence: "rule " + ruleID, Owner: s.o.Owner})
+		IdemKey: idem, Chain: command.Chain{Mode: command.ChainInherit, From: item}, RuleID: r.key, Evidence: "rule " + r.key, Owner: s.o.Owner})
 }
 
 func (s *Service) clear(ctx context.Context, id int64) error {
@@ -384,7 +476,7 @@ func (s *Service) clear(ctx context.Context, id int64) error {
 }
 
 // failed 记下一次失败；只在第一次失败时追加 health.alert，重试不刷屏。待跟进保留。
-func (s *Service) failed(ctx context.Context, p pending, cause error) error {
+func (s *Service) failed(ctx context.Context, p pending, r rule, cause error) error {
 	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		if _, err := tx.Exec(`UPDATE followup_pending SET attempts = attempts + 1 WHERE id = ?`, p.id); err != nil || p.attempts > 0 {
 			return err
@@ -393,10 +485,9 @@ func (s *Service) failed(ctx context.Context, p pending, cause error) error {
 		if err != nil {
 			return err
 		}
-		body, _ := json.Marshal(map[string]string{"rule": ruleID, "item": p.item, "error": cause.Error()})
-		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: p.item,
-			Actor: domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + ruleID, Via: domain.ViaRule},
-			Basis: &domain.Basis{PolicyVersion: pv, RuleID: ruleID}, Reason: "follow-up judgement failed, will retry: " + cause.Error(),
+		body, _ := json.Marshal(map[string]string{"rule": r.key, "item": p.item, "error": cause.Error()})
+		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: p.item, Actor: r.actor(),
+			Basis: &domain.Basis{PolicyVersion: pv, RuleID: r.key}, Reason: "follow-up judgement failed, will retry: " + cause.Error(),
 			Payload: body, At: s.o.Now()})
 		return err
 	})
@@ -458,11 +549,15 @@ func (s *Service) Register() error {
 					return nil, err
 				}
 			}
-			next := c.Now().Add(s.o.Extend)
-			if err := cancel(c.Tx, it.ID); err != nil {
+			r, ok := s.rule()
+			if !ok {
+				return nil, invalid("pack " + s.o.Pack + " has no follow_up clock rule")
+			}
+			next, err := r.next(c.Now())
+			if err != nil {
 				return nil, err
 			}
-			if _, err := clock.Add(c.Tx, domain.Timer{ID: timerID(it.ID), Target: it.ID, Kind: domain.TimerFollowUp, At: next}); err != nil {
+			if err := arm(c.Tx, r, it.ID, c.Now()); err != nil {
 				return nil, err
 			}
 			p, _ := json.Marshal(map[string]any{"outcome": outcome, "next": next})

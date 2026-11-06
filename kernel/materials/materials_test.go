@@ -468,11 +468,21 @@ func TestCommitValidation(t *testing.T) {
 	// 能力包扩展的 kind。
 	e2 := setup(t)
 	e2.x = command.New(e2.st, nil)
-	if err := RegisterWith(e2.x, []string{"retro"}); err != nil {
+	if err := RegisterWith(e2.x, retroPack{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e2.do(worker, "", "material.commit", commitIn{Project: e2.prj, Kind: "retro", Title: "t", Content: "c", Reason: "r"}); err != nil {
-		t.Errorf("extended kind: %v", err)
+	// 能力包声明的 kind 与默认写入策略：Web 总默认是 proposed，这里用 direct 的总默认验证包声明的 proposed 生效。
+	if err := e2.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "material_write", func(p *policy.Policy) error {
+			p.MaterialWrite.Default = policy.WriteDirect
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := e2.do(worker, "", "material.commit", commitIn{Project: e2.prj, Kind: "retro", Title: "t", Content: "c", Reason: "r"}); err != nil || r.State != StateProposed {
+		t.Errorf("extended kind: state %q err %v", r.State, err)
 	}
 }
 
@@ -624,4 +634,11 @@ func TestAddHostedAndSetLocationGuards(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// retroPack 是一个声明了 material_kinds 的能力包来源（retro 默认 proposed）。
+type retroPack struct{}
+
+func (retroPack) MaterialKinds() map[string]string {
+	return map[string]string{"retro": policy.WriteProposed}
 }

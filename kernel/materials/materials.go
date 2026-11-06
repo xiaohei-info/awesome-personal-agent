@@ -43,7 +43,7 @@ const KindGuideline = "guideline"
 // EvRevisionRejected 记 proposed 修订被拒绝。它不在对外稳定类型表内（§10.1），只供审计与回放。
 const EvRevisionRejected = "material.revision_rejected"
 
-// builtinKinds 是内置 kind；能力包经 RegisterWith 扩展。
+// builtinKinds 是内置 kind；能力包的 material_kinds 经 RegisterWith 的 PackSource 扩展。
 var builtinKinds = []string{"minutes", "reference", "worknote", "requirement", "design", KindGuideline}
 
 // 确认 proposed 修订时对"基线已变化"的取舍。
@@ -331,8 +331,29 @@ func Diff(from, to string) []DiffLine {
 	return out
 }
 
-// Kinds 返回内置 kind 的副本；托管型登记（kernel/hosted）校验 kind 时用。
-func Kinds() []string { return slices.Clone(builtinKinds) }
+// PackSource 取已加载能力包声明的材料 kind 及其默认写入策略（packs.Loader 满足它）；为 nil 表示只有内置 kind。
+type PackSource interface {
+	MaterialKinds() map[string]string
+}
+
+// packKinds 是已加载能力包声明的材料 kind 及其默认写入策略（C.2 material_kinds）。
+func packKinds(src PackSource) map[string]string {
+	if src == nil {
+		return map[string]string{}
+	}
+	return src.MaterialKinds()
+}
+
+// Kinds 返回内置 kind 加 src 里能力包声明的 kind；每次调用从加载器读，热加载后立即生效。托管型登记（kernel/hosted）也用它。
+func Kinds(src PackSource) []string {
+	out := slices.Clone(builtinKinds)
+	for k := range packKinds(src) {
+		if !slices.Contains(out, k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
 
 // AddHosted 登记一条托管型材料（Location 非空、无 Revision），只供 kernel/hosted 的命令在事务内调用；
 // 授权、事件由调用方的命令管线负责。返回带新 id 的登记。
@@ -477,13 +498,12 @@ type Result struct {
 // Register 登记 material.commit、revision.confirm、revision.reject、material.revert，kind 只接受内置集合。
 func Register(x *command.Executor) error { return RegisterWith(x, nil) }
 
-// RegisterWith 同 Register；extra 是能力包扩展的 kind。
+// RegisterWith 同 Register；src 里能力包声明的 material_kinds 也接受，默认写入策略取包声明（Web 按 kind 设置的优先）。
 //
 // 授权（§14.3）：commit 按"修订材料"（observer 得到 4）；confirm 与 reject 按代答（Web 本人可；delegate 必须附本人原话；
 // 规范属 spec_activation，delegate 得到 20；observer、worker、运行凭据得到 4）；revert 只在 Web（delegate 得到 20，其余得到 4）。
-func RegisterWith(x *command.Executor, extra []string) error {
-	kinds := append(slices.Clone(builtinKinds), extra...)
-	for _, sp := range []command.Spec{commit(kinds), confirm(), reject(), revert()} {
+func RegisterWith(x *command.Executor, src PackSource) error {
+	for _, sp := range []command.Spec{commit(src), confirm(), reject(), revert()} {
 		if err := x.Register(sp); err != nil {
 			return err
 		}
@@ -491,13 +511,16 @@ func RegisterWith(x *command.Executor, extra []string) error {
 	return nil
 }
 
-// writeMode 返回 kind 的写入策略；规范恒为 proposed。
-func writeMode(p policy.Policy, kind string) string {
+// writeMode 返回 kind 的写入策略：规范恒为 proposed；其次 Web 按 kind 的设置、能力包声明的默认、Web 的总默认。
+func writeMode(p policy.Policy, kind, packDefault string) string {
 	if kind == KindGuideline {
 		return policy.WriteProposed
 	}
 	if m, ok := p.MaterialWrite.Kinds[kind]; ok {
 		return m
+	}
+	if packDefault != "" {
+		return packDefault
 	}
 	return p.MaterialWrite.Default
 }
@@ -528,7 +551,7 @@ func hostedConflict(m Material) error {
 		"change it through a pull request in that repository")
 }
 
-func commit(kinds []string) command.Spec {
+func commit(src PackSource) command.Spec {
 	return command.Spec{
 		Name: "material.commit", Action: authz.ActionReviseMaterial, Proxy: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
@@ -566,7 +589,7 @@ func commit(kinds []string) command.Spec {
 				}
 				return nil
 			}
-			if !slices.Contains(kinds, v.Kind) {
+			if !slices.Contains(Kinds(src), v.Kind) {
 				return invalid("unknown material kind " + v.Kind)
 			}
 			if blank(v.Title) {
@@ -617,7 +640,7 @@ func commit(kinds []string) command.Spec {
 			if err != nil {
 				return nil, err
 			}
-			mode := writeMode(pol, m.Kind)
+			mode := writeMode(pol, m.Kind, packKinds(src)[m.Kind])
 			extra := map[string]any{"write_policy": mode, "policy_version": pv}
 			if mode == policy.WriteDirect {
 				if in.BasedOn != m.CurrentRev {

@@ -67,7 +67,7 @@ function ledger() {
     push("item.updated", it.id);
     return json(200, { id: it.id, version: it.version });
   }) as unknown as typeof fetch;
-  return { impl, items, calls, events, bump: (id: string) => items.find((i) => i.id === id)!.version++ };
+  return { impl, items, rels, calls, events, bump: (id: string) => items.find((i) => i.id === id)!.version++ };
 }
 
 function mount(fetchImpl: typeof fetch, path = "/items") {
@@ -180,6 +180,18 @@ describe("关联与按 tag 筛选（ACT-ITEM-12）", () => {
     expect(rels.getByRole("link", { name: "item_b" })).toHaveAttribute("href", "/items/item_b");
     expect(screen.getByRole("link", { name: /事项列表/ })).toHaveAttribute("href", "/items");
     expect(l.calls.find((c) => c.path.endsWith("/relations"))!.body).toEqual({ to: "item_b", type: "relates" });
+  });
+
+  it("材料作为关系终点：显示中文类型，链接指向材料页而不是事项页", async () => {
+    const l = ledger();
+    mount(l.impl, "/items/item_a");
+    await screen.findByRole("list", { name: "关系" });
+    l.rels.push({ type: "basis", from: "item_a", to: "mat_x" });
+    await userEvent.selectOptions(screen.getByLabelText("关联事项"), "item_b");
+    await userEvent.click(screen.getByRole("button", { name: "建立关联" }));
+    const rels = within(await screen.findByRole("list", { name: "关系" }));
+    expect(rels.getByText(/依据/)).toBeInTheDocument();
+    expect(rels.getByRole("link", { name: "mat_x" })).toHaveAttribute("href", "/materials?id=mat_x");
   });
 
   it("按 tag 筛选只留下带该 tag 的事项；按阶段筛选走服务端", async () => {

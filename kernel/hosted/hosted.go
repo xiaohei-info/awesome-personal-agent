@@ -155,11 +155,13 @@ type Result struct {
 	Changed  bool   `json:"changed"`
 }
 
-// Register 登记 material.add、material.refresh、material.relocate。kind 取内置集合加 extra（能力包扩展），规范除外。
+// Register 登记 material.add、material.refresh、material.relocate，kind 只接受内置集合（规范除外）。
+func Register(x *command.Executor) error { return RegisterWith(x, nil) }
+
+// RegisterWith 同 Register；kind 另接受 src 里能力包声明的 material_kinds，每次登记时从加载器读。
 // 授权按"修订材料"（§14.3）：observer 得到 4。
-func Register(x *command.Executor, extra ...string) error {
-	kinds := slices.DeleteFunc(append(materials.Kinds(), extra...), func(k string) bool { return k == materials.KindGuideline })
-	for _, sp := range []command.Spec{add(kinds), refresh(), relocate()} {
+func RegisterWith(x *command.Executor, src materials.PackSource) error {
+	for _, sp := range []command.Spec{add(src), refresh(), relocate()} {
 		if err := x.Register(sp); err != nil {
 			return err
 		}
@@ -205,7 +207,7 @@ func (v *addIn) fill(tx *store.Tx) error {
 	return err
 }
 
-func add(kinds []string) command.Spec {
+func add(src materials.PackSource) command.Spec {
 	parse := func(tx *store.Tx, in json.RawMessage) (addIn, error) {
 		var v addIn
 		if err := decode(in, &v); err != nil {
@@ -221,7 +223,7 @@ func add(kinds []string) command.Spec {
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(tx, in)
-			if !slices.Contains(kinds, v.Kind) {
+			if k := v.Kind; k == materials.KindGuideline || !slices.Contains(materials.Kinds(src), k) {
 				return invalid("unknown material kind " + v.Kind)
 			}
 			if blank(v.Project) {
