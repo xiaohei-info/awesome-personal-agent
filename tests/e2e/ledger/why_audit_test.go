@@ -23,7 +23,7 @@ func decidedItem(t *testing.T, e *baseline.Env, title string) string {
 
 // TestFlowWhyAudit 按验收文档 flow-why-audit 顺序执行 ACT-WHY-01..03。
 func TestFlowWhyAudit(t *testing.T) {
-	e := baseline.Setup(t)
+	e := setup(t)
 	id := decidedItem(t, e, "why-item")
 
 	t.Run("ACT-WHY-01 回放一个事项", func(t *testing.T) {

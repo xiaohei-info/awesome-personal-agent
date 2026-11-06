@@ -39,7 +39,7 @@ func deadlineEvents(t *testing.T, e *baseline.Env, id string) []step {
 // TestFlowClockDue 按验收文档 flow-clock-due 执行 ACT-CLK-01、ACT-CLK-02。
 func TestFlowClockDue(t *testing.T) {
 	t.Run("ACT-CLK-01 事项到期由时钟触发", func(t *testing.T) {
-		e := baseline.Setup(t)
+		e := setup(t)
 		id := addTask(t, e, "due-soon")
 		setDeadline(t, e, id, time.Now().Add(3*time.Second))
 		if n := len(deadlineEvents(t, e, id)); n != 0 {
@@ -71,7 +71,7 @@ func TestFlowClockDue(t *testing.T) {
 	})
 
 	t.Run("ACT-CLK-02 错过的一次性定时醒来全部触发", func(t *testing.T) {
-		e := baseline.Setup(t)
+		e := setup(t)
 		// 缩短合并窗口并让提醒走 Web 未读，才能从外面数出"发了几次打扰"。
 		pol, _ := json.Marshal(map[string]any{"disturb": map[string]any{
 			"routes":             map[string]string{"brief": "inject", "decision": "inject", "health": "web", "reminder": "web", "wake": "web"},

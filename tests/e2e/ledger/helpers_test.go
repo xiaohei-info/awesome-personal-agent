@@ -191,3 +191,15 @@ func toAny(v any) any {
 	_ = json.Unmarshal(b, &out)
 	return out
 }
+
+// setup 复用 baseline 的环境步骤，但不声明 stub-harness：本组流程不拉起任何无头运行，
+// 且 baseline 的 `apa declare` 以 DEL 提交、不带本人原话，被内核的 delegate 证据规则拒绝（属于 baseline 节点）。
+func setup(t testing.TB) *baseline.Env {
+	t.Helper()
+	e := baseline.New(t)
+	e.StartKernel()
+	e.IssueCredentials()
+	e.CreateProjects()
+	e.StartModelStub()
+	return e
+}

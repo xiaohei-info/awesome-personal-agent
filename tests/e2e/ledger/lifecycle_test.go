@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"sync"
 	"testing"
-
-	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
 // TestFlowItemLifecycle 按验收文档 flow-item-lifecycle 顺序执行 ACT-ITEM-01..13：
 // 本人（Web 会话）和 agent（CLI/HTTP 凭据）经两个入口操作同一事项，阶段约束由内核强制。
 func TestFlowItemLifecycle(t *testing.T) {
-	e := baseline.Setup(t)
+	e := setup(t)
 	var a, dg, dropped string // item-a、委派事项、被丢弃的事项
 
 	t.Run("ACT-ITEM-01 CLI 建的事项在 Web 可见", func(t *testing.T) {

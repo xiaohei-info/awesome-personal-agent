@@ -7,13 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
 // TestFlowAgentRevert 按验收文档 flow-agent-revert 顺序执行 ACT-REV-01..03。
 func TestFlowAgentRevert(t *testing.T) {
-	e := baseline.Setup(t)
+	e := setup(t)
 	target := addTask(t, e, "original-title")
 	decided := addTask(t, e, "needs-a-call", "--assignee", "work-host.cli")
 	ok(t, e.Apa(e.WRK, "", "ask", decided, "--question", "ship it?", "--option", "yes=Yes", "--option", "no=No"), "ask")
