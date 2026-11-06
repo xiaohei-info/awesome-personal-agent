@@ -93,6 +93,12 @@ func (k *kit) addItem(project, assignee string) string {
 	return k.idOf("item add", k.Apa(k.DEL, "", args...))
 }
 
+// delegate 以 DEL 运行 `apa delegate`（delegate.create 属代理写命令，须附本人原话）。
+func (k *kit) delegate(args ...string) baseline.Result {
+	k.t.Helper()
+	return k.Apa(k.DEL, "", append([]string{"delegate"}, append(args, "--evidence", "owner asked")...)...)
+}
+
 // item 以 OBS 读事项。
 func (k *kit) item(id string) map[string]any {
 	k.t.Helper()
