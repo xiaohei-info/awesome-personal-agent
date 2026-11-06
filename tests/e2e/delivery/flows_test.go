@@ -180,3 +180,37 @@ func TestDLV07(t *testing.T) {
 		t.Errorf("作废的投递不应出现在 Web 未读: %+v", got)
 	}
 }
+
+// TestDLV06 对应 ACT-DLV-06：路由指向没有运行的渠道，无人领取超限后退回 Web 未读（fallback_web）。
+// 按验收文档把时限调小：config.yaml 的 delivery_unclaimed_after 取 20 秒（默认 30 分钟）。
+func TestDLV06(t *testing.T) {
+	t.Parallel()
+	e := baselineNew(t)
+	f := &fx{e, t}
+	e.Init()
+	e.ServeWith("delivery_unclaimed_after: 20s\ndelivery_backoff: 1s,2s\n")
+	e.IssueCredentials()
+	e.CreateProjects()
+	e.StartModelStub()
+	e.DeclareStubHarness()
+	f.setDisturb(disturb{Routes: route(map[string]string{"decision": "acc-dead"})})
+
+	id := f.task("dlv-06")
+	f.ask(id)
+
+	var got *delivery
+	for end := time.Now().Add(2 * time.Minute); got == nil && time.Now().Before(end); time.Sleep(2 * time.Second) {
+		for _, d := range f.unread() {
+			if d.Item == id {
+				d := d
+				got = &d
+			}
+		}
+	}
+	if got == nil {
+		t.Fatal("无人领取超限后，投递没有出现在 Web 未读：投递消失")
+	}
+	if got.State != "fallback_web" || got.Class != "decision" || got.Content.Title != "dlv-06" {
+		t.Errorf("退回 Web 未读的投递不对: %+v", got)
+	}
+}

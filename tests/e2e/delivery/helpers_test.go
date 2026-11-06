@@ -191,3 +191,5 @@ func (f *fx) waitBacklog(prefix string) string {
 	f.t.Fatalf("%s 内投递积压里没有 %s*", settle, prefix)
 	return ""
 }
+
+func baselineNew(t *testing.T) *baseline.Env { t.Helper(); return baseline.New(t) }
