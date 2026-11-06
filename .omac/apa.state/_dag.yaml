@@ -1,5 +1,26 @@
-# sha256: 41aed33ea64ff9bb655ea5dd47a54724c38297eff9a7eae30fcd814500b389a5
+# sha256: 3161bea50ed1d4d5a1faa3f3eb37f8f89aeafddff2a3017768448dfd80f050b1
 reconcile_audit:
   schema: omac.reconcile-audit/v1
-  last_full_scan_at: '2026-11-06T10:46:11Z'
-  completed_interval_ticks: 17
+  last_full_scan_at: '2026-11-06T11:28:17Z'
+  completed_interval_ticks: 2
+defects:
+  schema: omac.defect-ledger/v1
+  used_global: 0
+  used_by_reporter: {}
+  granted_by_reporter: {}
+  entries:
+    dfx-5dd4c0c9998f:
+      suspected: kernel-followmsg
+      anchors:
+      - flow-source-calendar/ACT-CAL-03
+      reporters:
+      - e2e-source-calendar-live
+      state: needs-owner
+    dfx-1699a21c5f70:
+      suspected: sources-calendar
+      anchors:
+      - flow-source-calendar/ACT-CAL-02
+      reporters:
+      - e2e-source-calendar-live
+      state: needs-owner
+  inbox: []

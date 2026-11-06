@@ -289,6 +289,7 @@ func parseEvents(b []byte) ([]gogEvent, error) {
 
 // convert 把一个日程转成标准事件，并返回其更新时间（缺失为零值）。
 // 事件 id = UID | RECURRENCE-ID | 更新标识：同一日程的新版本得到新 id，换工具沿用同一规则。
+// 关联键 = UID | RECURRENCE-ID（id 去掉更新标识）：同一日程实例的各版本共用，内核据此把更新写回原事项（§9.4）。
 func convert(g gogEvent) (event, time.Time, error) {
 	uid := g.ICalUID
 	if uid == "" {
@@ -316,11 +317,13 @@ func convert(g gogEvent) (event, time.Time, error) {
 	if g.OriginalStartTime != nil {
 		recurrence = g.OriginalStartTime.String()
 	}
+	// 新建日程的 created 只到秒（.000Z）、updated 带毫秒，按秒比较才不会把新建判成更新。
+	created, cerr := time.Parse(time.RFC3339Nano, g.Created)
 	typ := "event.created"
 	switch {
 	case g.Status == "cancelled":
 		typ = "event.cancelled"
-	case g.Updated != "" && g.Created != "" && g.Updated != g.Created:
+	case g.Updated != "" && cerr == nil && updated.Truncate(time.Second).After(created.Truncate(time.Second)):
 		typ = "event.updated"
 	}
 	subject := strings.TrimSpace(g.Summary)
@@ -334,7 +337,7 @@ func convert(g gogEvent) (event, time.Time, error) {
 	ev := event{
 		ID: uid + "|" + recurrence + "|" + marker, Type: typ, Subject: subject, Summary: summary,
 		Detail: g.Description, Link: g.HTMLLink, OccurredAt: at.UTC().Format(time.RFC3339Nano),
-		CorrelationKeys: []string{"cal:" + uid}, Sender: g.Organizer.Email,
+		CorrelationKeys: []string{uid + "|" + recurrence}, Sender: g.Organizer.Email,
 	}
 	return ev, updated, nil // 工具不给可核实的结论，不设 sender_verified
 }

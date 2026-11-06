@@ -663,29 +663,23 @@ const (
 )
 
 // attachFrom 是每个目标状态允许的前一状态；"" 表示尚未挂靠。
+// "" → processed 是来源对象的更新：内容已直接写回事项，无需转发（§9.4）。
 var attachFrom = map[string][]string{
 	AttachPending:    {""},
 	AttachForwarded:  {AttachPending},
-	AttachProcessed:  {AttachForwarded},
+	AttachProcessed:  {AttachForwarded, ""},
 	AttachHandedBack: {AttachPending, AttachForwarded},
 	AttachReleased:   {AttachPending, AttachForwarded},
 }
 
 // SetAttachState 在调用方事务内推进一条来源事件的挂靠状态，只允许 attachFrom 里的转移，否则是冲突。
-// 转入 pending 时同时把事项记为 disposition=attached；转入 handed_back、released 时把 disposition 放回 pending，
-// 让事件重新进入判断流（item 保留，作关联线索）。item 只在转入 pending 时使用。
+// 从未挂靠（""）转入时同时把事项记为 disposition=attached；转入 handed_back、released 时把 disposition 放回 pending，
+// 让事件重新进入判断流（item 保留，作关联线索）。item 只在从未挂靠转入时使用。
 // 这两列只由跟进消息归属经本函数维护；不记事件，调用方自己负责留痕。
 func SetAttachState(tx *store.Tx, id, to, item string) error {
 	from, ok := attachFrom[to]
 	if !ok {
 		return domain.NewError(domain.CodeInvalidRequest, "attach state "+to+" cannot be set", "use pending, forwarded, processed, handed_back or released")
-	}
-	disp, dispFrom := "", ""
-	switch to {
-	case AttachPending:
-		disp, dispFrom = string(domain.DispositionAttached), string(domain.DispositionPending)
-	case AttachHandedBack, AttachReleased:
-		disp, dispFrom = string(domain.DispositionPending), string(domain.DispositionAttached)
 	}
 	for _, f := range from {
 		var (
@@ -693,21 +687,43 @@ func SetAttachState(tx *store.Tx, id, to, item string) error {
 			err error
 		)
 		switch {
-		case disp == "": // forwarded、processed：处置不变
+		case f == "": // 首次挂靠
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
+				to, string(domain.DispositionAttached), item, id, f, string(domain.DispositionPending))
+		case to == AttachHandedBack || to == AttachReleased:
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
+				to, string(domain.DispositionPending), id, f, string(domain.DispositionAttached))
+		default: // forwarded、processed：处置不变
 			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
 				to, id, f, string(domain.DispositionAttached))
-		case to == AttachPending:
-			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
-				to, disp, item, id, f, dispFrom)
-		default:
-			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
-				to, disp, id, f, dispFrom)
 		}
 		if err != nil || n > 0 {
 			return err
 		}
 	}
 	return domain.NewError(domain.CodeConflict, "source event "+id+" cannot move to attach state "+to, "re-read the source event")
+}
+
+// Origins 返回去重域 dedupeDomain 里带关联键 key 的来源事件建出的事项（disposition=proposed），按 id 排序、不重复。
+// 关联键只在同一去重域内比较：不同来源的同名键不互相命中。
+func Origins(tx *store.Tx, dedupeDomain, key string) ([]string, error) {
+	rows, err := tx.Query(`SELECT DISTINCT item FROM sources_runner_event
+		WHERE dedupe_domain = ? AND disposition = ? AND item != ''
+		AND EXISTS (SELECT 1 FROM json_each(correlation_keys) WHERE value = ?) ORDER BY item`,
+		dedupeDomain, string(domain.DispositionProposed), key)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // Attachment 是挂在某事项上的来源事件，Seq 是它的落盘顺序（跟进消息的确认游标）。
