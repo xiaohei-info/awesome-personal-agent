@@ -1,6 +1,6 @@
-# sha256: b2842372cb90265fba54a0d63ae73374664b319048846c8679f0f2e7981c62af
+# sha256: 50e901e07882f573bb935c15296f2b7056d0b7673d403021ad6bdcbecf77bdb3
 work_item_id: 01a1b076-1f2c-74dd-859f-6168f5535ddd
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: '上游已修：PR #200 去掉 --readonly，凭据走 credentials_path（指向 gog keyring.env 的文件路径），日历来源
   config 需填 account。live.env 已有 APA_LIVE_CALENDAR_ACCOUNT 与 APA_LIVE_CALENDAR_KEYRING_FILE。日历红线不变：只建
