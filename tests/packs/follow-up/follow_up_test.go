@@ -24,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	fu "github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
@@ -33,11 +34,6 @@ var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
-)
-
-const (
-	first  = 48 * time.Hour
-	extend = 24 * time.Hour
 )
 
 func loadPack(t *testing.T) (*packs.Loader, *packs.Pack) {
@@ -59,6 +55,11 @@ func loadPack(t *testing.T) (*packs.Loader, *packs.Pack) {
 	return ld, p
 }
 
+// onlyPack 让规则引擎只登记 follow-up 包的规则：其他内置包的周期 Timer 不归这里的时钟处理器。
+type onlyPack struct{ p *packs.Pack }
+
+func (o onlyPack) List() []*packs.Pack { return []*packs.Pack{o.p} }
+
 // 真实内置包 + 真实内核跟进模块 + 模型替身（唯一的外部边界）。
 type env struct {
 	t    *testing.T
@@ -69,13 +70,15 @@ type env struct {
 	clk  *clock.Clock
 	q    *delivery.Queue
 	now  time.Time
+	// every 是包里 follow_up 规则声明的跟进间隔，每一轮都按它。
+	every time.Duration
 }
 
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, delivery.Module, attention.Module, direct.Module, fu.Module} {
+		items.Module, delivery.Module, attention.Module, direct.Module, rules.Module, fu.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -92,11 +95,23 @@ func setup(t *testing.T) *env {
 	if err := items.Register(e.x, items.NewKinds()); err != nil {
 		t.Fatal(err)
 	}
-	if err := decisions.Register(e.x); err != nil {
+	if err := errors.Join(decisions.Register(e.x), rules.Register(e.x)); err != nil {
 		t.Fatal(err)
 	}
 	e.configure()
-	ld, _ := loadPack(t)
+	ld, p := loadPack(t)
+	var key string
+	for _, r := range p.ClockRules {
+		if r.Type == "follow_up" {
+			key = rules.ClockKey(p.Name, r.ID)
+			if e.every, err = time.ParseDuration(r.Schedule); err != nil {
+				t.Fatalf("follow_up schedule %q: %v", r.Schedule, err)
+			}
+		}
+	}
+	if key == "" {
+		t.Fatal("follow-up pack declares no follow_up clock rule")
+	}
 	judge, err := direct.New(direct.Options{Store: st, Packs: ld, Model: &model.Client{}, Now: now,
 		Sleep: func(context.Context, time.Duration) error { return nil }, Attempts: 1})
 	if err != nil {
@@ -104,11 +119,19 @@ func setup(t *testing.T) *env {
 	}
 	e.q = delivery.New(delivery.Options{Now: now})
 	a := attention.New(attention.Options{Queue: e.q, Now: now})
-	e.svc, err = fu.New(fu.Options{Store: st, Exec: e.x, Judge: judge, Reminder: a, Pack: "follow-up", Template: "follow-up-judge",
-		Owner: "owner", First: first, Extend: extend, Now: now})
+	e.svc, err = fu.New(fu.Options{Store: st, Exec: e.x, Judge: judge, Reminder: a, Packs: ld, Pack: "follow-up", Owner: "owner", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 包声明 observe（只记录）；这里验的是判断与提醒，按本人在 Web 的方式切到 auto。
+	eng, err := rules.New(rules.Options{Store: st, Exec: e.x, Packs: onlyPack{p}, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Reconcile(bg); err != nil {
+		t.Fatal(err)
+	}
+	e.do("rule.set_mode", map[string]string{"rule": key, "mode": rules.ModeAuto})
 	if err := e.svc.Register(); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +210,7 @@ func (e *env) judged(choice string) {
 
 func (e *env) due() error {
 	e.t.Helper()
-	e.now = e.now.Add(first)
+	e.now = e.now.Add(e.every)
 	if _, err := e.clk.Tick(bg); err != nil {
 		e.t.Fatal(err)
 	}

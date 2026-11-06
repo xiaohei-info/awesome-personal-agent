@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/background"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
 	kchannel "github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
@@ -51,6 +53,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
@@ -66,6 +69,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/verify"
 	kprojects "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	kpurge "github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/resume"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	kscreening "github.com/xiaohei-info/awesome-personal-agent/kernel/screening"
@@ -112,8 +116,12 @@ type kernel struct {
 	scr    *kscreening.Service
 	att    *attention.Attention
 	hn     *khealth.Notifier
+	rs     *resume.Service
 	packs  *kpacks.Loader
 	agm    *agentsmd.Service
+
+	resumeMu  sync.Mutex
+	resumeDue []string // 决策到期按默认值决定的事项：时钟事务提交后再续接
 
 	drainDue atomic.Bool   // 本轮时钟排了规则或跟进的待办
 	drain    chan struct{} // 唤醒后台循环：待办要调模型，不能占着时钟循环
@@ -181,18 +189,29 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
+	// 回答一提交就续接（§13.6），要排在规则引擎之前登记：同一次提交里续接先写下在途 Run，
+	// 随后命中的事件规则（如回答把事项转回 open）看到在途运行而跳过，不会另起一次后台运行。
+	// shortcut: 设计要求续接 Run 与回答同一事务写入，这里是提交后同步续接；另一条 Drain 恰在并发时仍可能先拉起，后到者按在途跳过。
+	x.OnCommit(func(c command.Commit) {
+		for _, id := range resolvedItems(st, c.Seqs) {
+			k.resume(id)
+		}
+	})
 	// call_agent 按模板类别分派：任务型与生成型由任务型服务处理，判断型交委派核验。任务型服务要等调度器建好，闭包里再取。
 	var tk *task.Service
 	var hs *hosted.Service // 托管型读取器的运行结果回到它；调度器建好后再赋值
 	callAgent := func(ctx context.Context, c rules.Call) error {
 		return tk.CallAgent(task.AgentOptions{Judge: verifyAgent, Generate: judge})(ctx, c)
 	}
+	var bg *background.Service // start_background_run 的处理器；调度器建好后再赋值
+	startBackground := func(ctx context.Context, c rules.Call) error { return bg.Handler()(ctx, c) }
 	if k.eng, err = rules.New(rules.Options{Store: st, Exec: x, Packs: ld, Owner: owner,
-		Handlers: map[string]rules.Handler{"call_agent": callAgent}, Reminder: att, OnError: logErr("rules")}); err != nil {
+		Handlers: map[string]rules.Handler{"call_agent": callAgent, background.Action: startBackground}, Reminder: att, OnError: logErr("rules")}); err != nil {
 		return nil, err
 	}
-	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Judge: judge, Reminder: att, Owner: owner,
-		Pack: "follow-up", Template: "follow-up-judge"}); err != nil {
+	// 间隔、模板与模式取自 follow-up 包的 follow_up 时钟规则，跟进服务每次使用时从加载器读。
+	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Judge: judge, Reminder: att, Packs: ld, Owner: owner,
+		Pack: "follow-up"}); err != nil {
 		return nil, err
 	}
 
@@ -203,9 +222,19 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 			slog.Error("run result", "run", res.Run.ID, "err", err)
 		}
 		tk.Settle(ctx, res)
+		if !k.rs.Settle(ctx, res) { // 续接因会话失效已改用新会话重新拉起时，不再按失败收尾
+			bg.Settle(ctx, res)
+		}
 		hs.OnResult(res)
 	}
-	k.disp = proc.New(st, cfg, proc.Options{Env: func(r domain.Run) map[string]string { return tk.Env(r) }, OnResult: k.result})
+	// 运行凭据在启动时签发并注入（§7.7）：任务型与后台运行各自签发，其他类别没有凭据。
+	env := func(r domain.Run) map[string]string {
+		if r.Category == domain.RunBackground {
+			return bg.Env(r)
+		}
+		return tk.Env(r)
+	}
+	k.disp = proc.New(st, cfg, proc.Options{Env: env, OnResult: k.result})
 	host, herr := os.Hostname()
 	if herr != nil {
 		host = "localhost"
@@ -226,6 +255,14 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		OnError: func(run string, err error) { slog.Error("task run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}
+	if bg, err = background.New(background.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, Owner: owner,
+		MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("background run", "run", run, "err", err) }}); err != nil {
+		return nil, err
+	}
+	if k.rs, err = resume.New(resume.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, Owner: owner,
+		MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("resume run", "run", run, "err", err) }}); err != nil {
+		return nil, err
+	}
 
 	if err := errors.Join(
 		kitems.Register(x, kinds),
@@ -243,9 +280,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		rules.Register(x),
 		instances.Register(x, ld),
 		blobs.Register(x, l.Blobs),
-		kmaterials.Register(x),
+		kmaterials.RegisterWith(x, ld), // 能力包声明的 material_kinds 与默认写入策略，提交时从加载器读
 		kpurge.Register(x, l.Blobs),
-		hosted.Register(x),
+		hosted.RegisterWith(x, ld),
 		k.fu.Register(),
 	); err != nil {
 		return nil, err
@@ -291,6 +328,9 @@ func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 	case k.att.Owns(c):
 		return k.att.HandleTimer(tx, c)
 	case kdecisions.Owns(c):
+		k.resumeMu.Lock() // 到期按默认值决定也是回答；事务提交后由时钟循环续接，未决定的由 Resume 自己跳过
+		k.resumeDue = append(k.resumeDue, c.Target)
+		k.resumeMu.Unlock()
 		return kdecisions.HandleTimer(tx, c)
 	case k.rn.Owns(c):
 		return k.rn.HandleTimer(tx, c)
@@ -375,6 +415,13 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 		var nextReload time.Time
 		for {
 			report("clock tick failed", k.rn.Tick(ctx, k.clk))
+			k.resumeMu.Lock()
+			due := k.resumeDue
+			k.resumeDue = nil
+			k.resumeMu.Unlock()
+			for _, id := range due {
+				k.resume(id)
+			}
 			if now := time.Now(); !now.Before(nextReload) {
 				nextReload = now.Add(packReloadInterval)
 				k.reloadPacks(ctx, report)
@@ -459,6 +506,38 @@ func (k *kernel) packSig() string {
 		b.WriteString(p.Name + "@" + p.Hash + "\n")
 	}
 	return b.String()
+}
+
+// resume 在决策回答后续接该事项的后台会话（§13.6）；不是等待续接的事项由 Resume 跳过。
+// 拒绝与链路超限写下的健康告警不经命令提交，这里追赶成健康类投递。
+func (k *kernel) resume(item string) {
+	ctx := context.Background()
+	if _, err := k.rs.Resume(ctx, item); err != nil {
+		slog.Error("resume", "item", item, "err", err)
+	}
+	if err := k.st.Update(ctx, k.hn.Sync); err != nil {
+		slog.Error("health delivery", "err", err)
+	}
+}
+
+// resolvedItems 取一次提交里被决定的事项：decision.answer、渠道回答、表单回答都落 decision.resolved。
+func resolvedItems(st *store.Store, seqs []int64) (ids []string) {
+	if len(seqs) == 0 {
+		return nil
+	}
+	err := st.View(context.Background(), func(tx *store.Tx) error {
+		es, err := eventlog.Read(tx, slices.Min(seqs)-1, int(slices.Max(seqs)-slices.Min(seqs))+1)
+		for _, en := range es {
+			if en.Event.Type == domain.EvDecisionResolved && slices.Contains(seqs, en.Event.Seq) {
+				ids = append(ids, en.Event.Object)
+			}
+		}
+		return err
+	})
+	if err != nil {
+		slog.Error("read resolved decisions", "err", err)
+	}
+	return ids
 }
 
 // syncHealth 追赶不经命令提交写下的健康告警（规则动作失败、跟进失败等），命令提交的由 Attach 立即追赶。

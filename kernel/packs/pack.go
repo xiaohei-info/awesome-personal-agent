@@ -169,6 +169,16 @@ var (
 	}
 )
 
+// Actions 返回动作枚举（C.6），按名字排序；装配测试据它核对每个动作都有处理器。
+func Actions() []string {
+	out := make([]string, 0, len(actionKeys))
+	for a := range actionKeys {
+		out = append(out, a)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // parsePack 读取并校验 root 下的一个包目录（C.11）。dir 是目录名，必须等于包名。
 // 任何一项不通过都拒绝整个包。返回的 hash 在校验失败时也有值（有文件可读时），供调用方去重。
 func parsePack(fsys fs.FS, dir string, checkSchema func(json.RawMessage) error) (*Pack, string, error) {
