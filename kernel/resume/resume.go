@@ -8,8 +8,10 @@
 // 真理源是账本，harness 会话只是可丢失的优化。续接运行是普通后台运行（kernel/background 的运行凭据与收尾照常适用，
 // 每次续接重新签发凭据）。会话失效的识别：续接运行失败且退出码在无头声明 exit_codes["session_missing"] 里。
 //
-// 本包不起子进程也不发网络请求（经 kernel/outcall/proc 入队），不直写其他模块的数据：事项状态变化走命令模型，
-// 只写自己的关联表并向 Event 日志追加审计记录。续接 Run 与回答同事务写入不在本包：调用方在回答提交后调用 Resume。
+// 本包不起子进程也不发网络请求（经 kernel/outcall/proc 入队）。续接 Run 与回答在同一事务写入：Attach 把复核与入队挂在
+// 命令的同事务回调上，不依赖 decisions 的具体实现；复核不通过时同事务经 items.Revise 转 needs_input，
+// 其余只写自己的关联表并向 Event 日志追加审计记录。进程在提交之后才拉起。回答之外的决定（到期默认值）在时钟事务里调
+// ResumeIn，或事后调 Resume。
 package resume
 
 import (
@@ -22,6 +24,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
@@ -85,10 +88,9 @@ type Queue interface {
 	Dispatch(ctx context.Context) error
 }
 
-// Options 配置 Service。Store、Exec、Packs、Queue、RunsDir 必须给出。
+// Options 配置 Service。Store、Packs、Queue、RunsDir 必须给出。
 type Options struct {
 	Store   *store.Store
-	Exec    *command.Executor
 	Packs   PackSource
 	Queue   Queue
 	RunsDir string // 运行目录的父目录，与 background 一致
@@ -103,12 +105,15 @@ type Options struct {
 }
 
 // Service 是续接入口，可并发使用。
-type Service struct{ o Options }
+type Service struct {
+	o      Options
+	queued atomic.Bool // 有入队未调度的续接运行
+}
 
 // New 返回 Service。
 func New(o Options) (*Service, error) {
-	if o.Store == nil || o.Exec == nil || o.Packs == nil || o.Queue == nil || o.RunsDir == "" {
-		return nil, errors.New("resume: Store, Exec, Packs, Queue and RunsDir are required")
+	if o.Store == nil || o.Packs == nil || o.Queue == nil || o.RunsDir == "" {
+		return nil, errors.New("resume: Store, Packs, Queue and RunsDir are required")
 	}
 	if o.Now == nil {
 		o.Now = time.Now
@@ -122,7 +127,7 @@ func New(o Options) (*Service, error) {
 	if o.DefaultTimeout <= 0 {
 		o.DefaultTimeout = 30 * time.Minute
 	}
-	return &Service{o}, nil
+	return &Service{o: o}, nil
 }
 
 var system = domain.Actor{Type: domain.ActorSystem, Principal: "kernel:resume", Via: domain.ViaClock}
@@ -179,84 +184,80 @@ func (s *Service) harnessOf(rule string, pol policy.Policy) string {
 	return pol.DefaultHarness
 }
 
-func (s *Service) read(ctx context.Context, itemID string, retry bool) (f facts, err error) {
-	err = s.o.Store.View(ctx, func(tx *store.Tx) error {
-		var err error
-		if f.it, err = items.Get(tx, itemID); err != nil {
-			return err
+func (s *Service) read(tx *store.Tx, itemID string, retry bool) (f facts, err error) {
+	if f.it, err = items.Get(tx, itemID); err != nil {
+		return f, err
+	}
+	if !waiting(f.it) {
+		return f, nil
+	}
+	var linked bool
+	if f.link, linked, err = background.LastLink(tx, itemID); err != nil || !linked {
+		return f, err
+	}
+	if f.base, err = proc.Get(tx, f.link.RunID); err != nil {
+		return f, err
+	}
+	if f.base.Run.Target != itemID || f.base.Run.Basis == nil {
+		return f, nil
+	}
+	if busy, err := proc.InFlight(tx, itemID); err != nil || busy {
+		return f, err
+	}
+	if f.session, err = s.session(tx, itemID, f.link); err != nil {
+		return f, err
+	}
+	at := f.it.Ask.Resolution.ResolvedAt.UnixNano()
+	r, err := tx.Query(`SELECT 1 FROM resume_run WHERE item = ? AND answer_at = ? LIMIT 1`, itemID, at)
+	if err != nil {
+		return f, err
+	}
+	f.handled = r.Next()
+	if err := r.Close(); err != nil {
+		return f, err
+	}
+	if f.handled && !retry {
+		return f, nil
+	}
+	if f.pv, f.pol, err = policy.Current(tx); err != nil {
+		return f, err
+	}
+	sts, err := rules.List(tx)
+	if err != nil {
+		return f, err
+	}
+	for _, st := range sts {
+		if st.Key == f.base.Run.Basis.RuleID {
+			f.mode = st.Mode
 		}
-		if !waiting(f.it) {
-			return nil
-		}
-		var linked bool
-		if f.link, linked, err = background.LastLink(tx, itemID); err != nil || !linked {
-			return err
-		}
-		if f.base, err = proc.Get(tx, f.link.RunID); err != nil {
-			return err
-		}
-		if f.base.Run.Target != itemID || f.base.Run.Basis == nil {
-			return nil
-		}
-		if busy, err := proc.InFlight(tx, itemID); err != nil || busy {
-			return err
-		}
-		if f.session, err = s.session(tx, itemID, f.link); err != nil {
-			return err
-		}
-		at := f.it.Ask.Resolution.ResolvedAt.UnixNano()
-		r, err := tx.Query(`SELECT 1 FROM resume_run WHERE item = ? AND answer_at = ? LIMIT 1`, itemID, at)
+	}
+	if f.it.Project != "" {
+		p, err := projects.Get(tx, f.it.Project)
 		if err != nil {
-			return err
+			return f, err
 		}
-		f.handled = r.Next()
-		if err := r.Close(); err != nil {
-			return err
+		f.project = &p
+	}
+	harness := s.harnessOf(f.base.Run.Basis.RuleID, f.pol)
+	recs, err := executors.Records(tx, executors.StateActive)
+	if err != nil {
+		return f, err
+	}
+	for _, rc := range recs {
+		if rc.Harness == harness && rc.Declaration.Headless != nil {
+			f.rec, f.declared = rc, true
 		}
-		if f.handled && !retry {
-			return nil
-		}
-		if f.pv, f.pol, err = policy.Current(tx); err != nil {
-			return err
-		}
-		sts, err := rules.List(tx)
+	}
+	// 挂靠消息按运行身份过滤：只有白名单内的发送者进入新会话的上下文。
+	for _, id := range slices.Compact([]string{itemID, f.link.Item}) {
+		ms, err := allowlist.Messages(tx, id, authz.LevelRun)
 		if err != nil {
-			return err
+			return f, err
 		}
-		for _, st := range sts {
-			if st.Key == f.base.Run.Basis.RuleID {
-				f.mode = st.Mode
-			}
-		}
-		if f.it.Project != "" {
-			p, err := projects.Get(tx, f.it.Project)
-			if err != nil {
-				return err
-			}
-			f.project = &p
-		}
-		harness := s.harnessOf(f.base.Run.Basis.RuleID, f.pol)
-		recs, err := executors.Records(tx, executors.StateActive)
-		if err != nil {
-			return err
-		}
-		for _, rc := range recs {
-			if rc.Harness == harness && rc.Declaration.Headless != nil {
-				f.rec, f.declared = rc, true
-			}
-		}
-		// 挂靠消息按运行身份过滤：只有白名单内的发送者进入新会话的上下文。
-		for _, id := range slices.Compact([]string{itemID, f.link.Item}) {
-			ms, err := allowlist.Messages(tx, id, authz.LevelRun)
-			if err != nil {
-				return err
-			}
-			f.msgs = append(f.msgs, ms...)
-		}
-		f.ready = true
-		return nil
-	})
-	return f, err
+		f.msgs = append(f.msgs, ms...)
+	}
+	f.ready = true
+	return f, nil
 }
 
 // session 返回可用于续接的最近会话 id：本模块的续接运行基于最近一次后台运行时，以它的为准，否则用后台运行记下的。
@@ -273,19 +274,64 @@ func (s *Service) session(tx *store.Tx, itemID string, link background.Link) (si
 	return link.SessionID, r.Err()
 }
 
-// Resume 在本人回答后调用：对该事项按当前策略与名单复核并拉起续接运行。幂等：同一次回答只续接一次。
+// Attach 把续接接到命令模型上：任何命令只要在事务里落了 decision.resolved（Web、CLI、渠道、表单回答都经 decisions.Answer），
+// 续接就在同一事务里复核并写入队记录（续接 Run、关联行、审计），复核不通过则同事务转 needs_input；
+// 命令提交后再拉起进程（§6.14 第 7 条、§13.6）。要登记在事件规则的提交消费者之前，
+// 这样随后命中的规则看到的是已在途的续接。同事务回调出错会让回答整体回滚。
+func (s *Service) Attach(x *command.Executor) {
+	x.InTx(func(c *command.Ctx) error {
+		for _, e := range c.Events() {
+			if e.Type == domain.EvDecisionResolved {
+				if _, err := s.ResumeIn(c.Tx, e.Object); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	x.OnCommit(func(command.Commit) {
+		if err := s.flush(context.Background()); err != nil && s.o.OnError != nil {
+			s.o.OnError("", err)
+		}
+	})
+}
+
+// Resume 在回答之外的决定（如到期按默认值）之后调用：自开事务复核并入队，提交后拉起。幂等：同一次回答只续接一次。
 func (s *Service) Resume(ctx context.Context, itemID string) (Outcome, error) {
 	return s.resume(ctx, itemID, false)
 }
 
-func (s *Service) resume(ctx context.Context, itemID string, sessionLost bool) (Outcome, error) {
-	f, err := s.read(ctx, itemID, sessionLost)
+func (s *Service) resume(ctx context.Context, itemID string, sessionLost bool) (out Outcome, err error) {
+	if err = s.o.Store.Update(ctx, func(tx *store.Tx) (err error) {
+		out, err = s.decide(tx, itemID, sessionLost)
+		return err
+	}); err != nil {
+		return Skipped, err
+	}
+	return out, s.flush(ctx)
+}
+
+// ResumeIn 在调用方已有的写事务里复核并入队续接；真正拉起进程在调用方提交之后（Attach 的提交消费者或 Resume 的 flush）。
+func (s *Service) ResumeIn(tx *store.Tx, itemID string) (Outcome, error) {
+	return s.decide(tx, itemID, false)
+}
+
+// flush 拉起已入队的续接运行；没有新入队的不调度。
+func (s *Service) flush(ctx context.Context) error {
+	if s.queued.Swap(false) {
+		return s.o.Queue.Dispatch(ctx)
+	}
+	return nil
+}
+
+func (s *Service) decide(tx *store.Tx, itemID string, sessionLost bool) (Outcome, error) {
+	f, err := s.read(tx, itemID, sessionLost)
 	if err != nil || !f.ready {
 		return Skipped, err
 	}
 	rule := f.base.Run.Basis.RuleID
 	if f.it.ChainDepth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发（§14.9）
-		return Skipped, s.audit(ctx, f, domain.EvHealthAlert, "chain depth exceeded",
+		return Skipped, s.audit(tx, f, domain.EvHealthAlert, "chain depth exceeded",
 			map[string]any{"chain_depth": f.it.ChainDepth, "threshold": s.o.MaxChainDepth})
 	}
 	harness := s.harnessOf(rule, f.pol)
@@ -316,9 +362,9 @@ func (s *Service) resume(ctx context.Context, itemID string, sessionLost bool) (
 		reason = "执行者 " + f.it.Assignee + " 不在项目允许的执行者名单内"
 	}
 	if reason != "" {
-		return Refused, s.refuse(ctx, f, reason)
+		return Refused, s.refuse(tx, f, reason)
 	}
-	return s.launch(ctx, f, harness, hl, sessionLost)
+	return s.launch(tx, f, harness, hl, sessionLost)
 }
 
 func expand(in []string, pairs ...string) []string {
@@ -362,7 +408,7 @@ func materials(f facts, runDir string) (prompt, file string) {
 	return prompt, b.String()
 }
 
-func (s *Service) launch(ctx context.Context, f facts, harness string, hl executors.Headless, sessionLost bool) (Outcome, error) {
+func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Headless, sessionLost bool) (Outcome, error) {
 	base := f.base
 	runID, err := newRunID()
 	if err != nil {
@@ -404,29 +450,19 @@ func (s *Service) launch(ctx context.Context, f facts, harness string, hl execut
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: base.Run.Basis.RuleID}
 	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: base.Run.Runner, Launch: "headless", Target: f.it.ID,
 		Harness: harness, SessionID: sid, Access: base.Run.Access, Basis: basis, ChainDepth: f.it.ChainDepth, TimeoutSec: timeout}
-	err = s.o.Store.Update(ctx, func(tx *store.Tx) error {
-		if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, s.o.Now()); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`INSERT INTO resume_run (run_id, item, base_run, answer_at, mode, session_id) VALUES (?,?,?,?,?,?)`,
-			runID, f.it.ID, f.link.RunID, f.it.Ask.Resolution.ResolvedAt.UnixNano(), mode, sid); err != nil {
-			return err
-		}
-		body, _ := json.Marshal(map[string]any{"run_id": runID, "rule": basis.RuleID, "mode": mode, "session_id": sid, "harness": harness})
-		_, err := eventlog.Append(tx, domain.Event{Type: EvResumed, Object: f.it.ID, Actor: ruleActor(basis.RuleID), Basis: basis,
-			Reason: "rule " + basis.RuleID + ": resume after answer", Payload: body, ChainDepth: f.it.ChainDepth, At: s.o.Now()})
-		return err
-	})
-	if err != nil {
-		var de *domain.Error
-		if errors.As(err, &de) && de.Code == domain.CodeConflict { // 并发下别处刚入队：按在途跳过
-			return Skipped, nil
-		}
+	if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, s.o.Now()); err != nil {
 		return Skipped, err
 	}
-	if err := s.o.Queue.Dispatch(ctx); err != nil {
+	if _, err := tx.Exec(`INSERT INTO resume_run (run_id, item, base_run, answer_at, mode, session_id) VALUES (?,?,?,?,?,?)`,
+		runID, f.it.ID, f.link.RunID, f.it.Ask.Resolution.ResolvedAt.UnixNano(), mode, sid); err != nil {
 		return Skipped, err
 	}
+	body, _ := json.Marshal(map[string]any{"run_id": runID, "rule": basis.RuleID, "mode": mode, "session_id": sid, "harness": harness})
+	if _, err := eventlog.Append(tx, domain.Event{Type: EvResumed, Object: f.it.ID, Actor: ruleActor(basis.RuleID), Basis: basis,
+		Reason: "rule " + basis.RuleID + ": resume after answer", Payload: body, ChainDepth: f.it.ChainDepth, At: s.o.Now()}); err != nil {
+		return Skipped, err
+	}
+	s.queued.Store(true)
 	return Outcome(mode), nil
 }
 
@@ -434,45 +470,42 @@ func ruleActor(rule string) domain.Actor {
 	return domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + rule, Via: domain.ViaRule}
 }
 
-func (s *Service) audit(ctx context.Context, f facts, typ, reason string, extra map[string]any) error {
+func (s *Service) audit(tx *store.Tx, f facts, typ, reason string, extra map[string]any) error {
 	rule := f.base.Run.Basis.RuleID
 	p := map[string]any{"rule": rule, "reason": reason}
 	for k, v := range extra {
 		p[k] = v
 	}
 	body, _ := json.Marshal(p)
-	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
-		_, err := eventlog.Append(tx, domain.Event{Type: typ, Object: f.it.ID, Actor: ruleActor(rule),
-			Basis: &domain.Basis{PolicyVersion: f.pv, RuleID: rule}, Reason: reason, Payload: body, ChainDepth: f.it.ChainDepth, At: s.o.Now()})
-		return err
-	})
+	_, err := eventlog.Append(tx, domain.Event{Type: typ, Object: f.it.ID, Actor: ruleActor(rule),
+		Basis: &domain.Basis{PolicyVersion: f.pv, RuleID: rule}, Reason: reason, Payload: body, ChainDepth: f.it.ChainDepth, At: s.o.Now()})
+	return err
 }
 
 // refuse 记拒绝记录，并把事项转 needs_input 交本人：附原因，选项含重新运行、改派、放弃（§13.6、§14.7）。
-func (s *Service) refuse(ctx context.Context, f facts, reason string) error {
-	if err := s.audit(ctx, f, EvRefused, reason, nil); err != nil {
+// 在调用方的事务里经 items.Revise 写入（同回答一起提交）；新问题整体替换已回答的旧请求，本人才答得了新问题。
+func (s *Service) refuse(tx *store.Tx, f facts, reason string) error {
+	if err := s.audit(tx, f, EvRefused, reason, nil); err != nil {
 		return err
 	}
-	ask := map[string]any{"question": "续接未执行：" + reason, "options": []domain.AskOption{
+	ask := domain.AskInput{Question: "续接未执行：" + reason, Options: []domain.AskOption{
 		{ID: "rerun", Label: "重新运行"}, {ID: "reassign", Label: "改派"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
-	for _, step := range []struct {
-		cmd string
-		in  map[string]any
-	}{
-		// 先清掉已回答的旧请求：更新 ask 会保留旧的决定结果，本人就答不了新问题。
-		{"item.update", map[string]any{"id": f.it.ID, "ask": nil, "reason": reason}},
-		{"item.update", map[string]any{"id": f.it.ID, "ask": ask, "reason": reason}},
-		{"item.transition", map[string]any{"id": f.it.ID, "to": domain.PhaseNeedsInput, "reason": "resume: " + reason}},
-	} {
-		b, _ := json.Marshal(step.in)
-		a := system
-		a.OnBehalfOf = s.o.Owner
-		if _, err := s.o.Exec.Do(ctx, command.Request{Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate},
-			Command: step.cmd, Input: b, Evidence: "resume " + f.it.ID, Owner: s.o.Owner}); err != nil {
-			return err
-		}
+	now := s.o.Now()
+	_, _, snap, err := items.Revise(tx, f.it.ID, "transition", now, func(it *domain.Item) error {
+		it.Ask, it.Phase, it.WaitingOn = &domain.Ask{AskInput: ask}, domain.PhaseNeedsInput, nil
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	return nil
+	if _, err := command.Bump(tx, f.it.ID); err != nil {
+		return err
+	}
+	a := system
+	a.OnBehalfOf = s.o.Owner
+	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvItemPhaseChanged, Object: f.it.ID, Actor: a, Reason: "resume: " + reason,
+		Payload: snap, ChainDepth: f.it.ChainDepth, At: now})
+	return err
 }
 
 // Settle 在运行结束后调用（先于 background.Settle，供 proc.Options.OnResult 链式使用）。

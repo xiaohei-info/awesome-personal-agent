@@ -68,6 +68,7 @@ type env struct {
 	x    *command.Executor
 	bgs  *background.Service
 	svc  *Service
+	eng  *rules.Engine
 	disp *proc.Dispatcher
 	runs string
 	dir  string
@@ -124,7 +125,7 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e.bgs = bgs
-	e.svc, err = New(Options{Store: st, Exec: e.x, Packs: ld, Queue: e.disp, RunsDir: e.runs, Owner: "owner", Now: func() time.Time { return t0 }, OnError: onErr})
+	e.svc, err = New(Options{Store: st, Packs: ld, Queue: e.disp, RunsDir: e.runs, Owner: "owner", Now: func() time.Time { return t0 }, OnError: onErr})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +134,7 @@ func setup(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.eng = eng
 	if err := eng.Reconcile(bg); err != nil {
 		t.Fatal(err)
 	}
@@ -272,8 +274,15 @@ func (e *env) project(execs ...string) string {
 }
 
 // asked 走完"后台运行 → 运行者提带 resume_note 的决策请求 → 运行结束 → 本人回答"，返回被问的事项 id。
-// 运行者的目标是该事项：main_session 就是事项本身，task 是内核建的子事项。
 func (e *env) asked(tag string, extra map[string]any) (target string) {
+	e.t.Helper()
+	target = e.pending(tag, extra)
+	e.must(owner, "decision.answer", map[string]any{"id": target, "choice": "B"})
+	return target
+}
+
+// pending 走到本人回答之前：运行者的目标是该事项（main_session 就是事项本身，task 是内核建的子事项）。
+func (e *env) pending(tag string, extra map[string]any) (target string) {
 	e.t.Helper()
 	root := e.newItem([]string{tag}, extra)
 	e.must(owner, "item.transition", map[string]any{"id": root, "to": "open", "reason": "go"})
@@ -287,7 +296,6 @@ func (e *env) asked(tag string, extra map[string]any) (target string) {
 	if it := e.item(target); it.Phase != domain.PhaseNeedsInput {
 		e.t.Fatalf("after the run: %+v", it)
 	}
-	e.must(owner, "decision.answer", map[string]any{"id": target, "choice": "B"})
 	return target
 }
 
@@ -532,6 +540,68 @@ func TestNotResumableIsSkipped(t *testing.T) {
 	if out, err := e.svc.Resume(bg, root); err != nil || out != Skipped || len(e.runList()) != 1 {
 		t.Fatalf("no resume_note: %s %v runs=%d", out, err, len(e.runList()))
 	}
+}
+
+// 回答与续接 Run 同一事务：回答提交后的第一个消费者（并发的规则轮次看到的正是这个状态）就已经看到在途的续接 Run，
+// 事件规则随后命中也不会另起普通后台运行；账本里有 resume.launched；同一回答不会再续接第二次。
+func TestAnswerEnqueuesTheResumeRunInTheSameTransaction(t *testing.T) {
+	e := setup(t)
+	e.harness(true, false)
+	e.auto("main")
+	id := e.pending("agent-ok", nil)
+	e.svc.Attach(e.x)
+	var inflight bool
+	e.x.OnCommit(func(command.Commit) {
+		if err := e.st.View(bg, func(tx *store.Tx) (err error) { inflight, err = proc.InFlight(tx, id); return }); err != nil {
+			t.Error(err)
+		}
+	})
+	e.must(owner, "decision.answer", map[string]any{"id": id, "choice": "B"})
+	if !inflight {
+		t.Fatal("the resume run was not visible right after the answer committed")
+	}
+	rs := e.runList()
+	if len(rs) != 2 || lastRun(rs).Run.Target != id || lastRun(rs).Run.Basis.RuleID != "bgr/event_rules/main" || len(e.ofType(EvResumed)) != 1 {
+		t.Fatalf("runs = %d, resumed events = %d", len(rs), len(e.ofType(EvResumed)))
+	}
+	// 并发的一轮规则（事项转回 open 命中 auto 规则）看到在途运行而跳过。
+	e.must(owner, "item.transition", map[string]any{"id": id, "to": "waiting", "waiting_on": map[string]any{"kind": "external", "ref": "x"}, "reason": "park"})
+	e.must(owner, "item.transition", map[string]any{"id": id, "to": "open", "reason": "back"})
+	if err := e.eng.Drain(bg); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.runList()); n != 2 {
+		t.Fatalf("a rule round started another run: %d", n)
+	}
+	if out, err := e.svc.Resume(bg, id); err != nil || out != Skipped {
+		t.Fatalf("the same answer resumed twice: %s %v", out, err)
+	}
+	e.release(lastRun(rs).Run.ID)
+	e.waitResult()
+}
+
+// 复核不通过：同一事务里转 needs_input，回答提交后的第一个消费者就看到新问题；没有入队任何 Run。
+func TestRefusedAnswerTurnsNeedsInputInTheSameTransaction(t *testing.T) {
+	e := setup(t)
+	e.harness(true, false)
+	e.auto("main")
+	id := e.pending("agent-ok", nil)
+	e.must(owner, "rule.set_mode", map[string]string{"rule": "bgr/event_rules/main", "mode": "observe"})
+	e.svc.Attach(e.x)
+	var phase domain.Phase
+	e.x.OnCommit(func(command.Commit) { phase = e.item(id).Phase })
+	e.must(owner, "decision.answer", map[string]any{"id": id, "choice": "B"})
+	if it := e.item(id); phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "auto") || it.Ask.Resolution != nil {
+		t.Fatalf("phase right after commit = %s, item = %+v", phase, it)
+	}
+	if n := len(e.runList()); n != 1 {
+		t.Fatalf("runs = %d", n)
+	}
+	if ev := e.ofType(EvRefused); len(ev) != 1 || ev[0].Object != id {
+		t.Fatalf("refused = %+v", ev)
+	}
+	// 本人能回答新问题（版本没有被回调打乱）。
+	e.must(owner, "decision.answer", map[string]any{"id": id, "choice": "rerun"})
 }
 
 func TestNewRequiresDependencies(t *testing.T) {

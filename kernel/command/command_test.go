@@ -292,6 +292,34 @@ func TestValidationFailureAndApplyErrorRollBackEverything(t *testing.T) {
 	}
 }
 
+// 同事务回调与命令同一个事务：看得到命令刚追加的事件（含序号），写入随命令一起提交；返回错误则整个命令回滚。
+func TestInTxHookSharesTheCommandTransaction(t *testing.T) {
+	e := setup(t)
+	var seen []int64
+	e.x.InTx(func(c *Ctx) error {
+		for _, ev := range c.Events() {
+			seen = append(seen, ev.Seq)
+		}
+		if _, err := c.Tx.Exec(`INSERT INTO tnote (id, body) VALUES (?, ?)`, "hook-"+parse(c.Input).ID, "from hook"); err != nil {
+			return err
+		}
+		if parse(c.Input).Body == "veto" {
+			return errors.New("hook says no")
+		}
+		return nil
+	})
+	res, err := e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: in(noteIn{ID: "n1", Body: "hi"})})
+	if err != nil || len(seen) != 1 || seen[0] != res.Seqs[0] || e.noteCount(t) != 2 {
+		t.Fatalf("res=%+v err=%v seen=%v notes=%d", res, err, seen, e.noteCount(t))
+	}
+	if _, err := e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: in(noteIn{ID: "n2", Body: "veto"})}); err == nil {
+		t.Fatal("a failing hook must fail the command")
+	}
+	if e.noteCount(t) != 2 || len(e.events(t)) != 1 || len(e.commits) != 1 {
+		t.Fatal("the command and the hook's writes must roll back together")
+	}
+}
+
 func TestOptimisticVersion(t *testing.T) {
 	e := setup(t)
 	v := func(n int64) *int64 { return &n }

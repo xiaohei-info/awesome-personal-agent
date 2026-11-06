@@ -148,10 +148,14 @@ type Ctx struct {
 	Evidence   string // 请求携带的本人原话与会话引用（已由授权校验过存在）
 	now        func() time.Time
 	seqs       []int64
+	events     []domain.Event
 }
 
 // Now 返回本次命令的时刻，业务写入的时间戳取它；一条命令内恒定，所以与 Emit 缺省的事件时间相同。
 func (c *Ctx) Now() time.Time { return c.now() }
+
+// Events 返回本次命令到目前为止追加的事件（含序号），供同事务回调识别发生了什么。
+func (c *Ctx) Events() []domain.Event { return c.events }
 
 // Emit 在同一事务内追加事件。Actor、ChainDepth、Basis 一律由内核覆盖，调用方写不了。
 func (c *Ctx) Emit(e domain.Event) (int64, error) {
@@ -161,7 +165,9 @@ func (c *Ctx) Emit(e domain.Event) (int64, error) {
 	}
 	seq, err := eventlog.Append(c.Tx, e)
 	if err == nil {
+		e.Seq = seq
 		c.seqs = append(c.seqs, seq)
+		c.events = append(c.events, e)
 	}
 	return seq, err
 }
@@ -219,6 +225,7 @@ type Executor struct {
 	mu    sync.RWMutex
 	specs map[string]Spec
 	subs  []func(Commit)
+	inTx  []func(*Ctx) error
 }
 
 // New 返回 Executor；now 为 nil 时用系统时钟。
@@ -250,6 +257,15 @@ func (x *Executor) Store() *store.Store { return x.st }
 func (x *Executor) OnCommit(f func(Commit)) {
 	x.mu.Lock()
 	x.subs = append(x.subs, f)
+	x.mu.Unlock()
+}
+
+// InTx 登记同事务回调：命令的 Apply 成功后、提交前，按登记顺序在同一写事务里调用；
+// 返回错误则整个命令回滚。供需要与命令原子落账的模块使用（如回答与续接 Run 入队）；
+// 链路超限只记录不派发的命令、重放与被拒绝的命令不触发。回调不得另开事务，也不得发起外呼。
+func (x *Executor) InTx(f func(*Ctx) error) {
+	x.mu.Lock()
+	x.inTx = append(x.inTx, f)
 	x.mu.Unlock()
 }
 
@@ -494,6 +510,19 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 			out.Version = cur + 1
 			if _, err := tx.Exec(`INSERT INTO command_version (object, version) VALUES (?, ?)
 				ON CONFLICT(object) DO UPDATE SET version = excluded.version`, obj.ID, out.Version); err != nil {
+				return Result{}, Commit{}, err
+			}
+		}
+		x.mu.RLock()
+		hooks := append([]func(*Ctx) error{}, x.inTx...)
+		x.mu.RUnlock()
+		for _, f := range hooks {
+			if err := f(c); err != nil {
+				return Result{}, Commit{}, err
+			}
+		}
+		if len(hooks) > 0 && obj.ID != "" { // 回调可能又改了对象（Bump），返回给调用方的版本取最新
+			if out.Version, err = loadVersion(tx, obj.ID); err != nil {
 				return Result{}, Commit{}, err
 			}
 		}
