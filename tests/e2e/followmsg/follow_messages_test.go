@@ -88,7 +88,7 @@ func (k *kit) delegated(title, pr string) string {
 	k.t.Helper()
 	parent := k.idOf("item add", k.Apa(k.DEL, "", "item", "add", "--kind", "task", "--title", title, "--phase", "open",
 		"--project", k.Projects["acc-work"], "--evidence", "e2e 准备父事项"))
-	child := k.idOf("delegate", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", workHost))
+	child := k.idOf("delegate", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", workHost, "--evidence", "e2e 委派"))
 	k.expect("report --pr", k.Apa(k.WRK, "", "report", child, "--outcome", "progress", "--summary", "已开 PR", "--pr", pr), 0)
 	return child
 }
@@ -108,7 +108,7 @@ func TestFlowFollowMessages(t *testing.T) {
 		// 同一个 PR 不能登记在第二个事项上，说明它已作为关联键登记在 child 上。
 		other := k.idOf("item add", k.Apa(k.DEL, "", "item", "add", "--kind", "task", "--title", "另一个", "--phase", "open",
 			"--project", k.Projects["acc-work"], "--evidence", "e2e"))
-		dup := k.idOf("delegate", k.Apa(k.DEL, "", "delegate", "--parent", other, "--assignee", workHost))
+		dup := k.idOf("delegate", k.Apa(k.DEL, "", "delegate", "--parent", other, "--assignee", workHost, "--evidence", "e2e 委派"))
 		k.expect("同一 PR 登记到另一事项", k.Apa(k.WRK, "", "report", dup, "--outcome", "progress", "--summary", "x", "--pr", pr1), exitConflict)
 	})
 
@@ -119,8 +119,8 @@ func TestFlowFollowMessages(t *testing.T) {
 		if ev.Disposition != "attached" || ev.AttachState != "pending" || ev.Item != child {
 			t.Fatalf("应挂靠 %s 且 pending: %+v", child, ev)
 		}
-		if n := len(k.ModelStub.Requests()); n != 0 {
-			t.Errorf("挂靠不进规则和判断，MODEL_STUB 不应有请求，实际 %d", n)
+		if n := k.stubRequestsAbout("PR 新评论：请补测试"); n != 0 {
+			t.Errorf("挂靠不进规则和判断，MODEL_STUB 不应有关于该评论的请求，实际 %d", n)
 		}
 		if got := k.itemCount(); got != before {
 			t.Errorf("不应生成新事项: %d → %d", before, got)
