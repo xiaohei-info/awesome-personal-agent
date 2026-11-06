@@ -8,7 +8,9 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
 // Generator 是生成型入口（*direct.Service 满足它）。
@@ -96,8 +98,13 @@ func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, p
 		return err
 	}
 	in, _ := json.Marshal(map[string]string{"item_id": it.ID, "project_id": it.Project})
+	var pv int
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { pv, _, err = policy.Current(tx); return }); err != nil {
+		return err
+	}
 	out, err := g.Do(ctx, direct.Call{Pack: pack, Template: tmpl, Input: in, Material: string(snap), Target: it.ID, Project: it.Project,
-		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}, ChainDepth: it.ChainDepth})
+		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule},
+		Basis: &domain.Basis{PolicyVersion: pv, RuleID: c.Rule}, ChainDepth: it.ChainDepth})
 	switch {
 	case err != nil:
 		return err

@@ -642,14 +642,24 @@ func TestCallAgentRunsTaskOnRuleItemOnce(t *testing.T) {
 	}
 }
 
-type fakeGen struct{ out direct.Outcome }
+// fakeGen 像 direct.Service 一样用调用方给的 Actor 与 Basis 写一条账本事件，Basis 缺失时账本拒写。
+type fakeGen struct {
+	out direct.Outcome
+	st  *store.Store
+}
 
-func (f fakeGen) Do(context.Context, direct.Call) (direct.Outcome, error) { return f.out, nil }
+func (f fakeGen) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
+	err := f.st.Update(ctx, func(tx *store.Tx) error {
+		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: c.Target, Actor: c.Actor, Basis: c.Basis, Payload: json.RawMessage(`{}`), At: t0})
+		return err
+	})
+	return f.out, err
+}
 
 // 包被覆盖为生成型（§8.7）：结果写进 spec 并转 done；没有可用结果转 needs_input。
 func TestCallAgentGenerateOverride(t *testing.T) {
 	e := setup(t)
-	ok := fakeGen{direct.Outcome{Settled: true, Steps: []direct.Step{{RunID: "run_g", Result: json.RawMessage(`{"insufficient_info":false,"period":"2026-W09"}`)}}}}
+	ok := fakeGen{direct.Outcome{Settled: true, Steps: []direct.Step{{RunID: "run_g", Result: json.RawMessage(`{"insufficient_info":false,"period":"2026-W09"}`)}}}, e.st}
 	id := e.openItem()
 	if err := e.svc.CallAgent(AgentOptions{Generate: ok})(bg, e.call("gen", id)); err != nil {
 		t.Fatal(err)
@@ -657,8 +667,21 @@ func TestCallAgentGenerateOverride(t *testing.T) {
 	if it := e.item(id); it.Phase != domain.PhaseDone || !strings.Contains(string(it.Spec), "2026-W09") {
 		t.Fatalf("item %+v", it)
 	}
+	var found bool
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, id)
+		for _, en := range es {
+			if en.Event.Type == domain.EvRunFinished && en.Event.Basis != nil && en.Event.Basis.RuleID == "tk/clock_rules/r" {
+				found = true
+			}
+		}
+		return err
+	})
+	if !found {
+		t.Fatal("generate call left no ledger event carrying the rule basis")
+	}
 	id = e.openItem()
-	bad := fakeGen{direct.Outcome{Reason: "insufficient_info", Steps: []direct.Step{{RunID: "run_h"}}}}
+	bad := fakeGen{direct.Outcome{Reason: "insufficient_info", Steps: []direct.Step{{RunID: "run_h"}}}, e.st}
 	if err := e.svc.CallAgent(AgentOptions{Generate: bad})(bg, e.call("gen", id)); err != nil || e.item(id).Phase != domain.PhaseNeedsInput {
 		t.Fatalf("unsettled: %v %+v", err, e.item(id))
 	}
