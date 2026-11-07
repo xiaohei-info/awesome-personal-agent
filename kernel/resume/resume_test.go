@@ -53,12 +53,12 @@ event_rules:
 const handleMD = "---\nrun_as: main_session\ntimeout: 30s\n---\n处理事项 {item_id}。\n"
 const workMD = "---\nagent: task\naccess: read\ntimeout: 30s\n---\n在事项 {item_id} 上完成工作。\n"
 
-// 无头运行替身：记下提示词、参数与运行凭据；带 --resume 且 gone 文件存在时模拟"会话不存在"（退出码 7）；
+// 无头运行替身：记下提示词、参数与运行凭据；带 --resume 且 gone 文件存在时把其内容写到 stderr 并以退出码 7 失败；
 // 否则等测试放行后在 stdout 末段写会话摘要。
 const script = `printf '%s' "$1" > "$2/prompt.seen"
 printf '%s ' "$@" > "$2/args"
 printf '%s' "$APA_TOKEN" > "$2/token"
-case " $* " in *" --resume "*) if [ -f @DIR@/gone ]; then exit 7; fi;; esac
+case " $* " in *" --resume "*) if [ -f @DIR@/gone ]; then cat @DIR@/gone >&2; exit 7; fi;; esac
 while [ ! -f "$2/go" ]; do sleep 0.05; done
 echo '{"session_id":"sess-1"}'
 `
@@ -153,7 +153,7 @@ func (e *env) must(id command.Identity, cmd string, in any) command.Result {
 	return r
 }
 
-// harness 登记 hx：三档权限；resume 为真时声明续接；gone 为真时声明退出码 7 表示会话不存在。
+// harness 登记 hx：三档权限；resume 为真时声明续接；gone 为真时声明退出码 7 且输出含 "no such session" 表示会话不存在。
 func (e *env) harness(resume, gone bool) {
 	e.t.Helper()
 	path := filepath.Join(e.dir, "hx.sh")
@@ -167,6 +167,7 @@ func (e *env) harness(resume, gone bool) {
 	}
 	if gone {
 		h["exit_codes"] = map[string][]int{SessionMissing: {7}}
+		h["exit_output"] = map[string][]string{SessionMissing: {"no such session"}}
 	}
 	e.must(owner, "executor.register", map[string]any{"harness": "hx", "headless": h})
 	e.setPolicy(func(p *policy.Policy) { p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx" })
@@ -398,13 +399,13 @@ func TestNoResumeDeclarationStartsNewSessionWithContext(t *testing.T) {
 	e.waitResult()
 }
 
-// ACT-RES-04：续接命令报会话不存在（声明的退出码）：改用新会话，事项继续而不是卡在 needs_input；只退一次，不循环。
+// ACT-RES-04：续接命令报会话不存在（声明的退出码加输出片段）：改用新会话，事项继续而不是卡在 needs_input；只退一次，不循环。
 func TestSessionGoneFallsBackToNewSession(t *testing.T) {
 	e := setup(t)
 	e.harness(true, true)
 	e.auto("main")
 	id := e.asked("agent-ok", nil)
-	if err := os.WriteFile(filepath.Join(e.dir, "gone"), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(e.dir, "gone"), []byte("error: no such session sess-1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := e.svc.Resume(bg, id); err != nil || out != Resumed {
@@ -434,13 +435,13 @@ func TestSessionGoneFallsBackToNewSession(t *testing.T) {
 	e.waitResult()
 }
 
-// 其他失败（退出码不是声明的"会话不存在"）不重试：按后台运行的收尾转 needs_input。
+// 其他失败（同一退出码但输出不含声明的片段，如模型端点不可达）不当作会话失效、不重试：按后台运行的收尾转 needs_input。
 func TestOtherResumeFailureIsNotRetried(t *testing.T) {
 	e := setup(t)
-	e.harness(true, false) // 没声明 session_missing
+	e.harness(true, true)
 	e.auto("main")
 	id := e.asked("agent-ok", nil)
-	if err := os.WriteFile(filepath.Join(e.dir, "gone"), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(e.dir, "gone"), []byte("error: connection refused\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.svc.Resume(bg, id); err != nil {
@@ -452,6 +453,9 @@ func TestOtherResumeFailureIsNotRetried(t *testing.T) {
 	}
 	if it := e.item(id); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "failed") {
 		t.Fatalf("item = %+v", it)
+	}
+	if n := len(e.ofType(EvSessionLost)); n != 0 {
+		t.Fatalf("session lost events = %d", n)
 	}
 }
 
