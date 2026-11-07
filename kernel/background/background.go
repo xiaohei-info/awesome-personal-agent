@@ -1,13 +1,15 @@
 // Package background 是后台运行触发（设计 §13.6、§14.11、附录 C.6）：规则动作 start_background_run 的处理器。
 // 命中后依次做前置校验——该事项已有在途运行则跳过并记 Event；链路深度超限只记录不派发；
 // 按当前策略复核（规则仍是 auto、权限档位不超过 Web 设置的上限且声明已提供、task 运行者的执行者在项目名单内）
-// 不通过则转 needs_input——通过后在同一事务写 Run（queued）和 Event（策略版本、规则 id），再经外呼调用器按无头运行声明拉起。
+// 不通过则转 needs_input——通过后在同一事务写 Run 和 Event（策略版本、规则 id），再按声明的拉起方式启动：
+// 无头运行经外呼调用器拉起（Run 为 queued）；main_session 落到声明了 launch: wake 的 harness 时，Run 写为外部运行（running，
+// 不占额度、不起进程），同一事务交唤醒模块产出 class=wake 投递，由网关插件领取。
 // 运行结束仍 open、失败或超时，事项转 needs_input，不重试。
 //
 // 运行参数（runner、harness、access、cwd、executor）只来自规则动作、提示词模板和 Web 设置，不来自触发事件的内容（§14.10）。
 // 本包不起子进程也不发网络请求（经 kernel/outcall/proc 入队），不直写其他模块的数据：
 // 子事项的委派与阶段转移走命令模型，只写自己的运行关联表，并向 Event 日志追加审计记录。
-// 续接（kernel-bg-resume）与唤醒（kernel-wake-lease）不在本包。
+// 续接（kernel-bg-resume）不在本包；唤醒投递、凭据租约与回执收尾在 kernel/wake。
 package background
 
 import (
@@ -36,6 +38,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/wake"
 )
 
 // Action 是本模块处理的规则动作名；装配处以 rules.Options.Handlers[Action] = svc.Handler() 登记。
@@ -88,6 +91,8 @@ type Options struct {
 	DefaultTimeout time.Duration
 	// MaxChainDepth 是链路深度阈值，默认与命令管线一致（§14.9）。
 	MaxChainDepth int
+	// Wake 产出唤醒投递；为空时声明了 launch: wake 的 harness 不拉起，转 needs_input。
+	Wake *wake.Service
 	// OnError 接收 Settle 里无法交给调用方的错误（落账失败等）；可为空。
 	OnError func(runID string, err error)
 }
@@ -330,6 +335,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 			}
 		}
 	}
+	wakes := sp.runner == "main_session" && ms.Launch == runidentity.LaunchWake // 拉起方式由声明决定，二者择一（§13.6）
 	var reason string
 	switch {
 	case f.mode != rules.ModeAuto:
@@ -338,8 +344,8 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 		reason = "规则没有指定 harness，Web 设置里也没有默认 harness"
 	case !f.declared:
 		reason = "没有已确认的无头运行声明：" + harness
-	case sp.runner == "main_session" && ms.Launch == "wake":
-		reason = "harness " + harness + " 声明了唤醒真实主会话，不是无头运行"
+	case wakes && s.o.Wake == nil:
+		reason = "harness " + harness + " 声明了唤醒真实主会话，但内核没有接入唤醒"
 	case headless.Access[sp.access] == nil:
 		reason = "无头运行声明未提供权限档位：" + sp.access
 	case !withinCap(f.pol, harness, sp.access):
@@ -359,7 +365,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 			return err
 		}
 	}
-	return s.launch(ctx, c, f, sp, harness, headless, ms, target, checkout)
+	return s.launch(ctx, c, f, sp, harness, headless, ms, wakes, target, checkout)
 }
 
 // createChild 经 delegate.create 建委派子事项（与 `apa delegate` 同一路径：项目名单校验、父事项转 waiting），
@@ -405,10 +411,20 @@ func renderPrompt(body, item, run, project string) string {
 	return strings.NewReplacer(pairs...).Replace(body)
 }
 
-func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, harness string, hl executors.Headless, ms executors.MainSession, target, checkout string) error {
+func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, harness string, hl executors.Headless, ms executors.MainSession, wakes bool, target, checkout string) error {
 	runID, err := newRunID()
 	if err != nil {
 		return err
+	}
+	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}
+	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
+		Harness: harness, Access: sp.access, Basis: basis, ChainDepth: f.depth, TimeoutSec: int(sp.timeout / time.Second)}
+	if wakes { // 进程在真实主会话所在处：不写运行目录与命令，凭据由网关插件换取（§13.6）
+		run.Launch = runidentity.LaunchWake
+		return s.enqueue(ctx, c, f, proc.Request{Run: run, External: true}, func(tx *store.Tx) error {
+			_, err := s.o.Wake.Open(tx, runID)
+			return err
+		})
 	}
 	runDir := filepath.Join(s.o.RunsDir, runID)
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
@@ -428,26 +444,31 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 		argv = append(argv, ms.Args...)
 	}
 	argv = append(argv, hl.Access[sp.access]...)
-	sessionID := ""
 	if len(hl.Session.Assign) > 0 {
-		sessionID = runID
-		argv = append(argv, expand(hl.Session.Assign, "{session_id}", sessionID)...)
+		run.SessionID = runID
+		argv = append(argv, expand(hl.Session.Assign, "{session_id}", run.SessionID)...)
 	}
+	return s.enqueue(ctx, c, f, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, nil)
+}
 
-	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}
-	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
-		Harness: harness, SessionID: sessionID, Access: sp.access, Basis: basis, ChainDepth: f.depth,
-		TimeoutSec: int(sp.timeout / time.Second)}
-	err = s.o.Store.Update(ctx, func(tx *store.Tx) error {
-		if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, s.o.Now()); err != nil {
+// enqueue 在一个事务里写 Run、运行关联与 launched 审计记录（与 also 一起提交），再交调度器。
+func (s *Service) enqueue(ctx context.Context, c rules.Call, f facts, req proc.Request, also func(*store.Tx) error) error {
+	run := req.Run
+	err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
+		if _, err := proc.Enqueue(tx, req, s.o.Now()); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO background_run (run_id, item, target) VALUES (?, ?, ?)`, runID, f.item.ID, target); err != nil {
+		if _, err := tx.Exec(`INSERT INTO background_run (run_id, item, target) VALUES (?, ?, ?)`, run.ID, f.item.ID, run.Target); err != nil {
 			return err
 		}
-		body, _ := json.Marshal(map[string]any{"run_id": runID, "rule": c.Rule, "runner": sp.runner, "launch": "headless",
-			"harness": harness, "access": sp.access, "target": target})
-		_, err := eventlog.Append(tx, domain.Event{Type: EvLaunched, Object: f.item.ID, Actor: ruleActor(c.Rule), Basis: basis,
+		if also != nil {
+			if err := also(tx); err != nil {
+				return err
+			}
+		}
+		body, _ := json.Marshal(map[string]any{"run_id": run.ID, "rule": c.Rule, "runner": run.Runner, "launch": run.Launch,
+			"harness": run.Harness, "access": run.Access, "target": run.Target})
+		_, err := eventlog.Append(tx, domain.Event{Type: EvLaunched, Object: f.item.ID, Actor: ruleActor(c.Rule), Basis: run.Basis,
 			Reason: "rule " + c.Rule + ": background run", Payload: body, ChainDepth: f.depth, At: s.o.Now()})
 		return err
 	})

@@ -75,6 +75,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/wake"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/webhook"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/web"
@@ -119,6 +120,7 @@ type kernel struct {
 	sum    *summaries.Service
 	packs  *kpacks.Loader
 	agm    *agentsmd.Service
+	wk     *wake.Service
 
 	resumeMu  sync.Mutex
 	resumeDue []string // 决策到期按默认值决定的事项：时钟事务提交后再续接
@@ -256,8 +258,14 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		OnError: func(run string, err error) { slog.Error("task run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}
+	// 唤醒（§13.6）：后台运行落到声明了 launch: wake 的 harness 时产出唤醒投递；换取凭据时开租约；回执后收尾，与调度器结果同一条路。
+	if k.wk, err = wake.New(wake.Options{Delivery: q}); err != nil {
+		return nil, err
+	}
+	wk := k.wk
+	wk.Attach(x, k.result, logErr("wake receipt"))
 	if bg, err = background.New(background.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, Owner: owner,
-		MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("background run", "run", run, "err", err) }}); err != nil {
+		Wake: wk, MaxChainDepth: x.MaxChainDepth, OnError: func(run string, err error) { slog.Error("background run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}
 	if k.rs, err = resume.New(resume.Options{Store: st, Packs: ld, Queue: k.disp, RunsDir: l.Runs, Owner: owner,
@@ -314,10 +322,10 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
-	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Groups: []core.RouteGroup{
+	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Guard: wk.Identity, Groups: []core.RouteGroup{
 		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
-		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st), apievents.Routes(st, 0),
+		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
 		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm)}}); err != nil {
 		return nil, err
 	}
@@ -456,6 +464,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			report("inbound", k.in.Process(ctx))
 			report("webhook", k.wh.Process(ctx))
 			report("retention", k.ret.Sweep(ctx))
+			report("wake receipts", k.wk.Settle(ctx, k.st, k.result)) // 补上重启前漏掉的回执，先于调度器的超时判定
 			report("dispatch", k.disp.Dispatch(ctx))
 			report("rules", k.eng.Drain(ctx))
 			report("follow-up", k.fu.Drain(ctx))

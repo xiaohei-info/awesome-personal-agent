@@ -3,18 +3,22 @@
 // 唤醒真实主会话时，内核只做两件事，且都不外呼、不向本人发消息：
 //  1. 产出 class=wake 的投递（路由 wake，带运行 id、不带凭据明文）。它不是提醒本人，所以不经打扰控制，
 //     直接写投递队列；网关插件领取后自行开回合。
-//  2. 为真实主会话手里的 delegate token 开租约：到运行结束（回执）或运行超时为止，该 token 的代答一律拒绝（退出码 4）。
-//     本人在 Web 的决定不受影响。
+//  2. 网关插件换取运行凭据时，为换取所用的 delegate token（即真实主会话手里的那个）开租约：
+//     到运行结束（回执）或运行超时为止，该 token 的代答一律拒绝（退出码 4）。本人在 Web 的决定不受影响。
+//
+// 唤醒运行的进程不在本机（proc.QueueExternal）：目标事项离开 open 即为回执，由 Settle 按成功落账；
+// 到期由调度器按超时落账。
 //
 // 租约不靠吊销：Identity 在每次认证时读租约与运行状态，所以运行进入终态、显式 Release、到期都立即恢复，
 // 不依赖调用方记得收尾。被租约约束的 delegate 按运行凭据级（LevelRun，范围为空）处理——决策、接受、丢弃、
 // 改任意事项都是退出码 4，且决策类拒绝由授权层记 command.rejected。
 // shortcut: 租约期间该 token 的其他 delegate 能力（如管理项目）也一并拒绝，需要按命令区分时再扩展授权层。
 //
-// Run（launch=wake）由后台触发方写入；本包以运行 id 为入口，不建 Run、不改其他模块的数据。
+// Run（launch=wake）由后台触发方写入；本包以运行 id 为入口，不建 Run，只经外呼调用器的写入接口落终态。
 package wake
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -25,6 +29,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -52,14 +57,9 @@ var Module = store.Module{Name: "wake", Migrations: []store.Migration{{
 CREATE INDEX wake_lease_credential ON wake_lease(credential);`,
 }}}
 
-// Holders 返回 harness 的真实主会话所持 delegate 凭据的 id（auth.Credential.ID）。
-// 由装配处提供：内核不认识具体 harness，凭据与 harness 的对应是登记数据。
-type Holders func(tx *store.Tx, harness string) ([]string, error)
-
-// Options 配置 Service。Delivery 与 Holders 必须给出。
+// Options 配置 Service。Delivery 必须给出。
 type Options struct {
 	Delivery *delivery.Queue
-	Holders  Holders
 	Now      func() time.Time
 }
 
@@ -68,8 +68,8 @@ type Service struct{ o Options }
 
 // New 返回 Service。
 func New(o Options) (*Service, error) {
-	if o.Delivery == nil || o.Holders == nil {
-		return nil, errors.New("wake: Delivery and Holders are required")
+	if o.Delivery == nil {
+		return nil, errors.New("wake: Delivery is required")
 	}
 	if o.Now == nil {
 		o.Now = time.Now
@@ -79,50 +79,132 @@ func New(o Options) (*Service, error) {
 
 var systemActor = domain.Actor{Type: domain.ActorSystem, Principal: "kernel:wake", Via: domain.ViaClock}
 
-// Open 在调用方事务内为一次 launch=wake 的后台运行产出唤醒投递并开租约。
-// 运行必须是未结束的 launch=wake 后台运行，否则拒绝，不写任何东西。重复调用幂等：同一投递、租约不重复。
-// 租约期限取运行超时（未设时与凭据换取一致，1 小时），投递的版本不随事项变化而作废。
-func (s *Service) Open(tx *store.Tx, runID string) (domain.Delivery, error) {
+// wakeRun 取未结束的 launch=wake 后台运行；不是则拒绝。
+func wakeRun(tx *store.Tx, runID string) (domain.Run, error) {
 	rec, err := proc.Get(tx, runID)
 	if err != nil {
-		return domain.Delivery{}, err
+		return domain.Run{}, err
 	}
 	r := rec.Run
 	switch {
 	case r.Category != domain.RunBackground || r.Launch != runidentity.LaunchWake:
-		return domain.Delivery{}, domain.NewError(domain.CodeConflict, "run "+runID+" is not a wake run", "only launch=wake background runs get a wake delivery")
+		return r, domain.NewError(domain.CodeConflict, "run "+runID+" is not a wake run", "only launch=wake background runs get a wake delivery")
 	case r.State.Terminal():
-		return domain.Delivery{}, domain.NewError(domain.CodeConflict, "run "+runID+" has already finished", "start a new run")
+		return r, domain.NewError(domain.CodeConflict, "run "+runID+" has already finished", "start a new run")
 	case r.Target == "":
-		return domain.Delivery{}, domain.NewError(domain.CodeInvalidRequest, "wake run has no target item", "fix the wake request")
+		return r, domain.NewError(domain.CodeInvalidRequest, "wake run has no target item", "fix the wake request")
 	}
-	holders, err := s.o.Holders(tx, r.Harness)
+	return r, nil
+}
+
+// Open 在调用方事务内为一次 launch=wake 的后台运行产出唤醒投递（与写 Run 同一事务，§13.6 拉起流程第 3、4 步）。
+// 运行必须是未结束的 launch=wake 后台运行，否则拒绝，不写任何东西。重复调用幂等：同一投递不重复产出。
+// 投递的版本不随事项变化而作废。租约不在这里开：要等网关插件换取凭据时才知道是哪个 token（Exchange）。
+func (s *Service) Open(tx *store.Tx, runID string) (domain.Delivery, error) {
+	r, err := wakeRun(tx, runID)
 	if err != nil {
-		return domain.Delivery{}, fmt.Errorf("wake: resolve holders of %q: %w", r.Harness, err)
+		return domain.Delivery{}, err
 	}
+	d, _, err := s.o.Delivery.Create(tx, domain.Delivery{ID: DeliveryID(runID), Item: r.Target, Run: runID,
+		Class: domain.DeliveryWake, Route: delivery.RouteWake, Version: delivery.AllVersions,
+		Content: domain.DeliveryContent{Title: "wake " + runID}})
+	return d, err
+}
+
+// Exchange 是 POST /runs/{id}/credential 的内核入口：经 runidentity.Exchange 换出运行凭据（谁能换、换什么由它判定），
+// 并在同一事务为换取所用的 delegate token 开租约。网关插件与真实主会话在同一进程、持同一 token，
+// 所以换取者就是要被约束的那个 token；worker token 本就没有代答能力，不开租约。
+// 租约期限是运行的截止时刻（开始时间加运行超时，未设时 1 小时）；同一 token 再次换取不重复开。
+func (s *Service) Exchange(tx *store.Tx, c command.Caller, runID string) (string, time.Time, error) {
 	now := s.o.Now()
+	secret, expires, err := runidentity.Exchange(tx, c, runID, now)
+	if err != nil || c.Kind != auth.Delegate {
+		return secret, expires, err
+	}
+	r, err := wakeRun(tx, runID)
+	if err != nil {
+		return "", time.Time{}, err
+	}
 	ttl := runidentity.DefaultExchangeTTL
 	if r.TimeoutSec > 0 {
 		ttl = time.Duration(r.TimeoutSec) * time.Second
 	}
-	for _, cred := range holders {
-		if _, err := tx.Exec(`INSERT INTO wake_lease (run_id, credential, expires_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
-			runID, cred, now.Add(ttl).UnixNano()); err != nil {
-			return domain.Delivery{}, err
+	start := now
+	if r.StartedAt != nil {
+		start = *r.StartedAt
+	}
+	// delegate 没有执行者绑定，auth.Credential.Actor 的 Principal 就是凭据 id（与 guard 同一口径）。
+	n, err := tx.Exec(`INSERT INTO wake_lease (run_id, credential, expires_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+		runID, c.Actor.Principal, start.Add(ttl).UnixNano())
+	if err != nil || n == 0 {
+		return secret, expires, err
+	}
+	_, err = eventlog.Append(tx, domain.Event{Type: EvOpened, Object: r.Target, Actor: systemActor,
+		Reason: "wake run " + runID, ChainDepth: r.ChainDepth, At: now,
+		Payload: []byte(fmt.Sprintf(`{"run_id":%q,"credential":%q}`, runID, c.Actor.Principal))})
+	return secret, expires, err
+}
+
+// Attach 在每次命令提交后为已有回执的唤醒运行收尾（Settle），结果交给 onEnd（与调度器的 OnResult 同一条路）。
+func (s *Service) Attach(x *command.Executor, onEnd func(proc.Result), onErr func(error)) {
+	x.OnCommit(func(command.Commit) {
+		if err := s.Settle(context.Background(), x.Store(), onEnd); err != nil && onErr != nil {
+			onErr(err)
 		}
+	})
+}
+
+// Settle 结束已有回执的唤醒运行：目标事项离开 open（done、waiting、needs_input、dropped）即为回执（§13.6），
+// 运行按成功落账并释放租约，再逐个交给 onEnd。运行超时由调度器落账，不在这里。
+// 每次重新从账本判定，所以漏掉的提交（如重启前）会在下次调用时补上；与超时落账在写事务里互斥，只结束一次。
+func (s *Service) Settle(ctx context.Context, st *store.Store, onEnd func(proc.Result)) error {
+	var has bool
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		recs, err := proc.External(tx)
+		has = len(recs) > 0
+		return err
+	}); err != nil || !has {
+		return err
 	}
-	d, created, err := s.o.Delivery.Create(tx, domain.Delivery{ID: DeliveryID(runID), Item: r.Target, Run: runID,
-		Class: domain.DeliveryWake, Route: delivery.RouteWake, Version: delivery.AllVersions,
-		Content: domain.DeliveryContent{Title: "wake " + runID}})
+	var done []proc.Result
+	err := st.Update(ctx, func(tx *store.Tx) error {
+		done = nil
+		recs, err := proc.External(tx)
+		if err != nil {
+			return err
+		}
+		for _, rec := range recs {
+			if rec.Run.Launch != runidentity.LaunchWake {
+				continue
+			}
+			it, err := items.Get(tx, rec.Run.Target)
+			if err != nil {
+				return err
+			}
+			if it.Phase == domain.PhaseOpen {
+				continue
+			}
+			if err := proc.Settle(tx, rec.Run.ID, domain.RunSucceeded, nil, "", s.o.Now()); err != nil {
+				return err
+			}
+			if err := s.Release(tx, rec.Run.ID); err != nil {
+				return err
+			}
+			got, err := proc.Get(tx, rec.Run.ID)
+			if err != nil {
+				return err
+			}
+			done = append(done, proc.Result{Run: got.Run})
+		}
+		return nil
+	})
 	if err != nil {
-		return d, err
+		return err
 	}
-	if created {
-		_, err = eventlog.Append(tx, domain.Event{Type: EvOpened, Object: r.Target, Actor: systemActor,
-			Reason: "wake run " + runID, ChainDepth: r.ChainDepth, At: now,
-			Payload: []byte(fmt.Sprintf(`{"run_id":%q,"leased":%d}`, runID, len(holders)))})
+	for _, res := range done {
+		onEnd(res)
 	}
-	return d, err
+	return nil
 }
 
 // Release 在回执时提前结束租约；运行不存在或没有租约不报错（幂等）。

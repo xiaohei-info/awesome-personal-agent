@@ -568,3 +568,55 @@ func TestEventStreamOverLimitKeepsCompleteLinesAndDrains(t *testing.T) {
 		t.Fatalf("overflow=%v state=%s stdout=%q", res.Overflow, res.Run.State, got)
 	}
 }
+
+// 外部运行（唤醒，§13.6）：不需要命令，写入即 running，不占额度、调度器不拉起，重启恢复不判失败；
+// 到运行超时由 Dispatch 按超时落账并交回调用模块，只交一次。
+func TestExternalRunIsNeverStartedAndTimesOutOnDispatch(t *testing.T) {
+	now := time.Now()
+	h := newHarness(t, 1, 1, Options{Now: func() time.Time { return now }})
+	var ext domain.Run
+	if err := h.st.Update(ctx, func(tx *store.Tx) (err error) {
+		ext, err = Enqueue(tx, Request{Run: domain.Run{Category: domain.RunBackground, Launch: "wake", Target: "item_w", TimeoutSec: 60}, External: true}, now)
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := h.get(ext.ID); rec.Run.State != domain.RunRunning || rec.Queue != QueueExternal || rec.Run.StartedAt == nil {
+		t.Fatalf("external run: %+v", rec)
+	}
+	if err := h.st.Update(ctx, func(tx *store.Tx) error {
+		_, err := Enqueue(tx, Request{Run: domain.Run{Category: domain.RunBackground, Target: "item_w", TimeoutSec: 60}, External: true}, now)
+		if de := (*domain.Error)(nil); !errors.As(err, &de) || de.Code != domain.CodeConflict {
+			t.Fatalf("same target in flight: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.enqueue(domain.RunTask, "item_t", false, "exit 0") // 唯一的长时额度仍可用
+	if err := h.d.Dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.next(); r.Run.Target != "item_t" || r.Run.State != domain.RunSucceeded {
+		t.Fatalf("long run: %+v", r.Run)
+	}
+	if failed, _, err := h.d.Recover(ctx); err != nil || len(failed) != 0 {
+		t.Fatalf("recover must leave external runs alone: %v %+v", err, failed)
+	}
+
+	now = now.Add(61 * time.Second)
+	if err := h.d.Dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.next(); r.Run.ID != ext.ID || r.Run.State != domain.RunTimeout || r.Reason == "" {
+		t.Fatalf("timeout result: %+v", r)
+	}
+	if err := h.d.Dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case r := <-h.results:
+		t.Fatalf("settled twice: %+v", r)
+	default:
+	}
+}

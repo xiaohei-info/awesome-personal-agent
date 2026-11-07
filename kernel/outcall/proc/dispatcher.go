@@ -82,10 +82,11 @@ func New(st *store.Store, cfg config.Config, opt Options) *Dispatcher {
 
 // Recover 在启动时调用一次：进程组已不存在的 running 按失败处理；仍存活的保持 running 并返回，
 // 由调用方接管（它们继续占额度）。queued 的 Run 不动，随后 Dispatch 会重新执行。
+// 外部 Run 的进程不在本机，内核重启与它无关，不在此判定。
 func (d *Dispatcher) Recover(ctx context.Context) (failed []domain.Run, alive []domain.Run, err error) {
 	err = d.st.Update(ctx, func(tx *store.Tx) error {
 		failed, alive = nil, nil
-		recs, err := query(tx, "WHERE state = 'running' ORDER BY seq")
+		recs, err := query(tx, "WHERE state = 'running' AND queue != ? ORDER BY seq", string(QueueExternal))
 		if err != nil {
 			return err
 		}
@@ -118,7 +119,11 @@ func groupAlive(pgid int) bool {
 
 // Dispatch 在额度内把 queued 的 Run 拉起：本人显式触发的先于其他，同级按入队顺序。
 // 入队事务提交后、以及每个运行结束后都要调用（结束时调度器自己会调用）。
+// 顺带把到期的外部 Run 按超时落账。
 func (d *Dispatcher) Dispatch(ctx context.Context) error {
+	if err := d.expire(ctx); err != nil {
+		return err
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for _, q := range []Queue{QueueLong, QueueShort} {
@@ -132,6 +137,43 @@ func (d *Dispatcher) Dispatch(ctx context.Context) error {
 			}
 			d.wg.Add(1)
 			go d.run(rec)
+		}
+	}
+	return nil
+}
+
+// expire 把超过运行超时的外部 Run 按超时落账并交回调用模块；没有进程可杀。在锁外调用 OnResult，
+// 调用模块收尾时可以再入队、再 Dispatch。
+// shortcut: 只在 Dispatch 时检查，落账最多晚一个维护间隔；租约与运行凭据的到期自己按时判定，不受影响。
+func (d *Dispatcher) expire(ctx context.Context) error {
+	var done []Result
+	err := d.st.Update(ctx, func(tx *store.Tx) error {
+		done = nil
+		now := d.opt.Now()
+		recs, err := query(tx, "WHERE queue = ? AND state = 'running' AND started_at + timeout * 1000000000 <= ? ORDER BY seq",
+			string(QueueExternal), now.UnixNano())
+		if err != nil {
+			return err
+		}
+		for _, rec := range recs {
+			why := fmt.Sprintf("timeout after %ds", rec.Run.TimeoutSec)
+			if err := Settle(tx, rec.Run.ID, domain.RunTimeout, nil, why, now); err != nil {
+				return err
+			}
+			got, err := Get(tx, rec.Run.ID)
+			if err != nil {
+				return err
+			}
+			done = append(done, Result{Run: got.Run, Reason: why})
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if d.opt.OnResult != nil {
+		for _, res := range done {
+			d.opt.OnResult(res)
 		}
 	}
 	return nil
