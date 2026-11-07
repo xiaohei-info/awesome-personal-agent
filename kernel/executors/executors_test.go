@@ -274,12 +274,17 @@ func TestInvalidDeclarationsAreRejectedAndStoreNothing(t *testing.T) {
 		"no access tier":      mod(func(d *Declaration) { d.Headless.Access = nil }),
 		"bad access tier":     mod(func(d *Declaration) { d.Headless.Access["root"] = nil }),
 		"bad credential":      mod(func(d *Declaration) { d.Headless.Credential = "argv" }),
-		"bad launch":          mod(func(d *Declaration) { d.MainSession = &MainSession{Launch: "daemon"} }),
-		"bad kind":            mod(func(d *Declaration) { d.Executors[0].Kind = "robot" }),
-		"empty id":            mod(func(d *Declaration) { d.Executors[0].ID = "" }),
-		"duplicate id":        mod(func(d *Declaration) { d.Executors = append(d.Executors, build) }),
-		"unknown field":       `{"harness":"acme","executors":[{"id":"a","kind":"human","invoke":"rm -rf /"}]}`,
-		"not json":            `harness: acme`,
+		"output without code": mod(func(d *Declaration) { d.Headless.ExitOutput = map[string][]string{"session_missing": {"gone"}} }),
+		"empty output mark": mod(func(d *Declaration) {
+			d.Headless.ExitCodes = map[string][]int{"session_missing": {1}}
+			d.Headless.ExitOutput = map[string][]string{"session_missing": {""}}
+		}),
+		"bad launch":    mod(func(d *Declaration) { d.MainSession = &MainSession{Launch: "daemon"} }),
+		"bad kind":      mod(func(d *Declaration) { d.Executors[0].Kind = "robot" }),
+		"empty id":      mod(func(d *Declaration) { d.Executors[0].ID = "" }),
+		"duplicate id":  mod(func(d *Declaration) { d.Executors = append(d.Executors, build) }),
+		"unknown field": `{"harness":"acme","executors":[{"id":"a","kind":"human","invoke":"rm -rf /"}]}`,
+		"not json":      `harness: acme`,
 	}
 	for name, in := range cases {
 		if _, err := e.do(worker, "executor.declare", in); exit(err) != domain.ExitUsage {

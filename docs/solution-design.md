@@ -1322,6 +1322,7 @@ SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6�
 - **CLI 凭据优先级**：设置了 `APA_RUN` 时，CLI 只使用运行凭据（`APA_TOKEN`，或 `APA_RUN_CREDENTIAL_FILE` 指向的文件），不回退到本机凭据文件。
 - **运行凭据要能到达 CLI**：Hermes 按具名清单清除环境变量，`APA_TOKEN` 不在清单内，首版经环境变量传递（需实测，§21.3）。接入按名称模式清除的 harness（如 dsh）时，插件声明 `headless.credential: file`，改用凭据文件（§7.7）；文件也不可读时，该 harness 不能用于需要写账本的运行，只能靠 stdout 末段回执（§8.4）。
 - **续接是可丢失的优化**：真理源是账本，harness 会话可丢失。插件未声明续接或会话已失效时，用新会话加事项上下文（含问题、回答、白名单内的挂靠消息）。
+- **会话失效的判定**：只看续接运行（带 `--resume` 一类标志的那次运行）。运行失败，退出码在声明的 `exit_codes.session_missing` 里，并且声明了 `exit_output.session_missing` 时 stdout 或 stderr 含其中任一片段，才判为会话失效：记 `resume.session_lost`，改用新会话续接，且只改一次。其他失败，包括同一退出码但输出不匹配的情况（如模型端点不可达、额度不足），按普通失败收尾，事项转 `needs_input`，不静默换会话。各种失败共用一个退出码的 harness（如 Hermes 一律返回 1）必须声明 `exit_output`，片段取自实测原文。内核只按声明匹配，不认识具体 harness（附录 A.2）。
 
 ### 11.6 注入规则
 

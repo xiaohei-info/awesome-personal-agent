@@ -6,7 +6,8 @@
 //     在途工作不撤销，转 needs_input 即是通知。
 //
 // 真理源是账本，harness 会话只是可丢失的优化。续接运行是普通后台运行（kernel/background 的运行凭据与收尾照常适用，
-// 每次续接重新签发凭据）。会话失效的识别：续接运行失败且退出码在无头声明 exit_codes["session_missing"] 里。
+// 每次续接重新签发凭据）。会话失效的识别：续接运行失败，退出码在无头声明 exit_codes["session_missing"] 里，
+// 且声明了 exit_output["session_missing"] 时 stdout 或 stderr 含其中任一片段（executors.Headless.Means）。
 //
 // 本包不起子进程也不发网络请求（经 kernel/outcall/proc 入队）。续接 Run 与回答在同一事务写入：Attach 把复核与入队挂在
 // 命令的同事务回调上，不依赖 decisions 的具体实现；复核不通过时同事务经 items.Revise 转 needs_input，
@@ -551,7 +552,7 @@ func (s *Service) settle(ctx context.Context, res proc.Result) (bool, error) {
 		}
 		for _, rc := range recs {
 			if rc.Harness == run.Harness && rc.Declaration.Headless != nil && run.ExitCode != nil && run.State == domain.RunFailed {
-				lost = slices.Contains(rc.Declaration.Headless.ExitCodes[SessionMissing], *run.ExitCode)
+				lost = rc.Declaration.Headless.Means(SessionMissing, *run.ExitCode, res.Stdout, res.Stderr)
 			}
 		}
 		return nil
