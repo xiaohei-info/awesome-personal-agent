@@ -42,6 +42,7 @@
 | `headless.access` | 权限档位到标志的映射：`read`、`edit`、`full`；可只声明部分档位，未声明的档位不会被拉起（§13.6） |
 | `headless.credential` | 运行凭据的传递方式：`env`（默认）或 `file`（§7.7） |
 | `headless.exit_codes` | 已文档化的退出码语义；未文档化时以回执为准 |
+| `headless.exit_output` | 可选。按语义键收窄 `exit_codes`：声明后，退出码命中且 stdout 或 stderr 含所列任一片段，才算该语义。用于多种失败共用一个退出码的 harness，片段以实测原文为准；未声明时只看退出码 |
 | `main_session.launch` | `headless` 或 `wake`，二者择一；只有带网关的 harness 可声明 `wake`；默认 `headless` |
 | `main_session.args` | 可选。让无头运行加载主会话同一份指令与技能所需的额外标志，未声明时沿用 `headless.command` |
 | `executors[]` | 可选。本 harness 可用的执行者，字段同 §6.13；调用映射留在插件内，不提交 |
@@ -60,7 +61,8 @@ headless:
     read: ["-t", "<只读工具集>"]
     edit: ["-t", "<可写工具集>"]
     full: ["--yolo"]
-  exit_codes: {ok: [0]}
+  exit_codes: {ok: [0], session_missing: [1]}
+  exit_output: {session_missing: ["No session found matching"]}
 main_session:
   launch: headless
 ```
@@ -77,7 +79,7 @@ main_session:
 | OpenCode | `--auto`，配合配置中的拒绝规则 | `--continue`；`--fork` | 未文档化，以回执为准 |
 | Pi | 无统一权限标志，需实测 | `--continue` | 未文档化，以回执为准 |
 | OpenClaw | 配置层面，需实测 | `--local`；`agent exec --json` 返回 `sessionId` | 0 成功，1 错误或超时，130、143 信号；`agent exec` 超时为 2 |
-| Hermes | `--yolo` 跳过危险命令确认；`-t` 启用指定工具集 | `-Q`；`--continue`；`hermes -z` 的 `--usage-file` | `chat` 一次性运行：0 完成，1 失败，130 中断。`-z`：0 完成，1 完成但无文本，2 失败，130 中断 |
+| Hermes | `--yolo` 跳过危险命令确认；`-t` 启用指定工具集 | `-Q`；`--continue`；`hermes -z` 的 `--usage-file` | `chat` 一次性运行：0 完成，1 失败，130 中断；续接不存在的会话也是 1，输出含 `No session found matching`，所以声明 `exit_output` 区分。`-z`：0 完成，1 完成但无文本，2 失败，130 中断 |
 | dsh（后续） | `--permission-mode <预设>`，`--approval-policy ask / never`，`--add-dir <目录>`；只读档需自配预设 | `-` 从 stdin 读任务；`--patch` 叠加配置 | 0 完成，1 中止、错误或用法错误；同时检查 `final.reason.kind` |
 
 ## A.4 官方钩子全表

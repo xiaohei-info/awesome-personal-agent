@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -55,6 +56,26 @@ type Headless struct {
 	Access     map[string][]string `json:"access"`
 	Credential string              `json:"credential,omitempty"`
 	ExitCodes  map[string][]int    `json:"exit_codes,omitempty"`
+	// ExitOutput 收窄 exit_codes 的同名语义：声明后，还要求 stdout 或 stderr 含其中任一片段（附录 A.2）。
+	ExitOutput map[string][]string `json:"exit_output,omitempty"`
+}
+
+// Means 判断一次运行的退出是否符合声明里 key 的语义：退出码在 exit_codes[key] 里，
+// 且声明了 exit_output[key] 时 stdout 或 stderr 含其中任一片段（区分分享同一退出码的失败）。
+func (h Headless) Means(key string, code int, stdout, stderr []byte) bool {
+	if !slices.Contains(h.ExitCodes[key], code) {
+		return false
+	}
+	marks, ok := h.ExitOutput[key]
+	if !ok {
+		return true
+	}
+	for _, m := range marks {
+		if bytes.Contains(stdout, []byte(m)) || bytes.Contains(stderr, []byte(m)) {
+			return true
+		}
+	}
+	return false
 }
 
 type MainSession struct {
@@ -208,6 +229,14 @@ func (h *Headless) validate() error {
 	}
 	if h.Credential != "" && h.Credential != "env" && h.Credential != "file" {
 		return invalid("headless.credential must be env or file")
+	}
+	for key, marks := range h.ExitOutput {
+		if len(h.ExitCodes[key]) == 0 {
+			return invalid("headless.exit_output.%s needs exit_codes.%s", key, key)
+		}
+		if len(marks) == 0 || slices.Contains(marks, "") {
+			return invalid("headless.exit_output.%s must list non-empty strings", key)
+		}
 	}
 	return nil
 }
