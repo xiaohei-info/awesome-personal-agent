@@ -19,6 +19,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
@@ -31,6 +32,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/wake"
 )
 
 var (
@@ -105,6 +107,7 @@ type env struct {
 	st   *store.Store
 	x    *command.Executor
 	svc  *Service
+	wake *wake.Service
 	disp *proc.Dispatcher
 	runs string
 	dir  string
@@ -116,7 +119,7 @@ func setup(t *testing.T, maxDepth int) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, instances.Module,
-		items.Module, executors.Module, proc.Module, runidentity.Module, rules.Module, delegation.Module, Module} {
+		items.Module, executors.Module, proc.Module, runidentity.Module, rules.Module, delegation.Module, delivery.Module, wake.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -152,7 +155,11 @@ func setup(t *testing.T, maxDepth int) *env {
 	})
 	t.Cleanup(e.disp.Close)
 	e.gate = &gate{d: e.disp}
-	svc, err = New(Options{Store: st, Exec: e.x, Packs: ld, Queue: e.gate, RunsDir: e.runs, APIURL: "http://apa.local", Owner: "owner",
+	e.wake, err = wake.New(wake.Options{Delivery: delivery.New(delivery.Options{}), Now: func() time.Time { return t0 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err = New(Options{Store: st, Exec: e.x, Packs: ld, Queue: e.gate, RunsDir: e.runs, APIURL: "http://apa.local", Owner: "owner", Wake: e.wake,
 		Now: func() time.Time { return t0 }, MaxChainDepth: maxDepth, OnError: func(_ string, err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
@@ -796,19 +803,61 @@ func TestProjectCheckoutCwd(t *testing.T) {
 	}
 }
 
-// 声明了唤醒真实主会话的 harness：本模块只做无头运行，不伪装成功，转 needs_input 说明原因（唤醒由 kernel-wake-lease 负责）。
-func TestWakeDeclarationIsNotLaunchedHeadless(t *testing.T) {
+// ACT-WAK-01/02：main_session 落到声明了 launch: wake 的 harness 时按唤醒拉起：Run launch=wake、写入即 running、
+// 不起进程不写运行目录；同一事务产出 class=wake 投递（带运行 id、不带凭据）。运行超时后按失败收尾，事项转 needs_input。
+func TestWakeDeclarationLaunchesWakeRun(t *testing.T) {
 	e := setup(t, 0)
 	e.setPolicy(func(p *policy.Policy) { p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx" })
 	path := filepath.Join(e.dir, "hx.sh")
-	_ = os.WriteFile(path, []byte("true\n"), 0o700)
+	_ = os.WriteFile(path, []byte("touch \"$2/ran\"\n"), 0o700)
 	e.must(owner, "executor.register", map[string]any{"harness": "hx", "main_session": map[string]any{"launch": "wake"},
-		"headless": map[string]any{"command": []string{"sh", path}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string]any{"edit": []string{}}}})
+		"headless": map[string]any{"command": []string{"sh", path, "{prompt}", "{run_dir}"}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string]any{"edit": []string{}}}})
 	e.auto("main")
+	e.gate.paused.Store(true) // 停住调度：先看拉起时的状态，再看超时
 	id := e.newItem("a", []string{"agent-ok"}, nil)
 	e.open(id)
-	if it := e.item(id); len(e.runList()) != 0 || it.Phase != domain.PhaseNeedsInput {
-		t.Fatalf("runs=%d item=%+v", len(e.runList()), it)
+
+	rs := e.runList()
+	if len(rs) != 1 {
+		t.Fatalf("runs = %d", len(rs))
+	}
+	r := rs[0]
+	if r.Run.Launch != runidentity.LaunchWake || r.Run.State != domain.RunRunning || r.Queue != proc.QueueExternal || r.Run.Target != id || len(r.Spec.Command) != 0 {
+		t.Fatalf("wake run: %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(e.runs, r.Run.ID)); !os.IsNotExist(err) {
+		t.Fatalf("wake run must not get a run dir: %v", err)
+	}
+	var d *domain.Delivery
+	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
+		d, err = delivery.New(delivery.Options{}).Claim(tx, delivery.RouteWake)
+		return
+	}); err != nil || d == nil {
+		t.Fatalf("wake delivery: %v", err)
+	}
+	if b, _ := json.Marshal(d); d.Class != domain.DeliveryWake || d.Run != r.Run.ID || d.Item != id || strings.Contains(string(b), "apa_run_") {
+		t.Fatalf("delivery: %s", b)
+	}
+	if ev := e.ofType(EvLaunched); len(ev) != 1 || !strings.Contains(string(ev[0].Payload), `"launch":"wake"`) {
+		t.Fatalf("launched: %+v", ev)
+	}
+	if it := e.item(id); it.Phase != domain.PhaseOpen {
+		t.Fatalf("item = %s", it.Phase)
+	}
+
+	e.gate.paused.Store(false)
+	if err := e.gate.Dispatch(bg); err != nil { // 调度器时钟是真实时间，早已过了 t0+30s：按超时落账
+		t.Fatal(err)
+	}
+	res := e.waitResult()
+	if res.Run.ID != r.Run.ID || res.Run.State != domain.RunTimeout {
+		t.Fatalf("result: %+v", res.Run)
+	}
+	if it := e.item(id); it.Phase != domain.PhaseNeedsInput {
+		t.Fatalf("timed out wake run: item = %s", it.Phase)
+	}
+	if _, err := os.Stat(filepath.Join(e.runs, r.Run.ID, "ran")); !os.IsNotExist(err) {
+		t.Fatal("wake run started a process")
 	}
 }
 

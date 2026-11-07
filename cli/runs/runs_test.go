@@ -14,11 +14,13 @@ import (
 	apiruns "github.com/xiaohei-info/awesome-personal-agent/api/runs"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/wake"
 	_ "modernc.org/sqlite"
 )
 
@@ -55,7 +57,11 @@ func newRig(t *testing.T) *rig {
 	}
 	t.Cleanup(func() { st.Close() })
 	a := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apiruns.Routes(st)}})
+	wk, err := wake.New(wake.Options{Delivery: delivery.New(delivery.Options{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apiruns.Routes(st, wk)}})
 	if err != nil {
 		t.Fatal(err)
 	}

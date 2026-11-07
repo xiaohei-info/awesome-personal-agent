@@ -14,6 +14,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -22,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/wake"
 	_ "modernc.org/sqlite"
 )
 
@@ -41,7 +43,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, proc.Module, projects.Module, clock.Module, kitems.Module, command.Module, runidentity.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, proc.Module, projects.Module, clock.Module, kitems.Module, command.Module, runidentity.Module, wake.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +57,17 @@ func setup(t *testing.T) *env {
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st)}})
+	wk, err := wake.New(wake.Options{Delivery: delivery.New(delivery.Options{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// whoami 回显认证出的级别，用来证明 Bearer 认证经过了唤醒租约的包装。
+	whoami := func(r *core.Router) {
+		r.Handle(core.Route{Method: "GET", Path: "/whoami", Handler: func(w http.ResponseWriter, _ *http.Request, p *core.Principal) error {
+			return core.WriteJSON(w, 200, map[string]string{"level": string(p.Caller.Level)})
+		}})
+	}
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Guard: wk.Identity, Groups: []core.RouteGroup{Routes(st, wk), whoami}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,19 +100,26 @@ func (e *env) web(r *http.Request) { r.AddCookie(e.cookie) }
 
 func (e *env) token(kind auth.Kind) func(*http.Request) {
 	e.t.Helper()
+	_, set := e.credential(kind)
+	return set
+}
+
+// credential 签发一个凭据，返回凭据 id 与设置 Bearer 的请求修改器。
+func (e *env) credential(kind auth.Kind) (string, func(*http.Request)) {
+	e.t.Helper()
 	scope := ""
 	if kind == auth.Ext || kind == auth.Webhook {
 		scope = "x"
 	}
-	var secret string
+	var id, secret string
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, s, err := e.auth.Issue(tx, auth.Spec{Kind: kind, Scope: scope})
-		secret = s
+		c, s, err := e.auth.Issue(tx, auth.Spec{Kind: kind, Scope: scope})
+		id, secret = c.ID, s
 		return err
 	}); err != nil {
 		e.t.Fatal(err)
 	}
-	return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
+	return id, func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
 }
 
 // enqueue 经内核入口写一条 queued 的 Run；命令规格里放一个秘密标记，用来证明响应不外泄它。
@@ -301,5 +320,29 @@ func TestExchangeWakeRunCredentialRoute(t *testing.T) {
 	}
 	if rec := e.do("POST", "/v1/runs/run_none/credential", "", e.token(auth.Delegate)); rec.Code != 404 {
 		t.Fatalf("unknown run: %d", rec.Code)
+	}
+
+	// delegate 换取即为它开唤醒租约：此后它的 Bearer 认证降为运行级（不能代答）；worker 换取不开租约。
+	level := func(set func(*http.Request)) string {
+		var out struct{ Level string }
+		rec := e.do("GET", "/v1/whoami", "", set)
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return out.Level
+	}
+	_, dlg := e.credential(auth.Delegate)
+	if got := level(dlg); got != string(authz.LevelDelegate) {
+		t.Fatalf("delegate before exchange: %q", got)
+	}
+	if rec := e.do("POST", path, "", dlg); rec.Code != 200 {
+		t.Fatalf("delegate exchange: %d %s", rec.Code, rec.Body)
+	}
+	if got := level(dlg); got != string(authz.LevelRun) {
+		t.Fatalf("leased delegate: %q", got)
+	}
+	if rec := e.do("POST", path, "", dlg); rec.Code != 200 { // 租约内仍能再换（插件续期）
+		t.Fatalf("leased delegate re-exchange: %d %s", rec.Code, rec.Body)
+	}
+	if got := level(e.token(auth.Delegate)); got != string(authz.LevelDelegate) {
+		t.Fatal("lease must hold only the exchanging token")
 	}
 }
