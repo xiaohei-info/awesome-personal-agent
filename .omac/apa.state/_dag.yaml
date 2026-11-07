@@ -1,8 +1,8 @@
-# sha256: 2b4aea12eac1942fd4961f08923a644e0069af1f9e37a9d067de230a6d77df58
+# sha256: ecae63aba61dbc24b0be57926de22aadb3a6fd52b74c5a753998b173f9013bb0
 reconcile_audit:
   schema: omac.reconcile-audit/v1
   last_full_scan_at: '2026-11-07T09:36:06Z'
-  completed_interval_ticks: 11
+  completed_interval_ticks: 12
 defects:
   schema: omac.defect-ledger/v1
   used_global: 1
