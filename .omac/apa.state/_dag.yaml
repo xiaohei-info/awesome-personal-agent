@@ -1,8 +1,8 @@
-# sha256: b7dec94465fc925433671c6c17dee710db8a3014df874a82c262f4bbd7f78422
+# sha256: 858e8b14941e225fcba558eb35d7c1bad4698f7a9be640196da868f4d67ca78f
 reconcile_audit:
   schema: omac.reconcile-audit/v1
   last_full_scan_at: '2026-11-07T08:54:02Z'
-  completed_interval_ticks: 0
+  completed_interval_ticks: 1
 defects:
   schema: omac.defect-ledger/v1
   used_global: 1
@@ -32,25 +32,12 @@ defects:
       - e2e-bg-main-live
       state: fixing
       fix_node: fix.hermes-plugin-headless.27e69d
-  inbox:
-  - id: de7615277f57
-    reporter: e2e-wake-live
-    defects:
-    - class: design-gap
-      suspected_node: kernel-wake-lease
+    dfx-5410a4c832ad:
+      suspected: kernel-wake-lease
       anchors:
       - flow-wake-lease/ACT-WAK-01
       - flow-wake-lease/ACT-WAK-04
-      design_ref: docs/solution-design.md#136-后台执行无人值守与会话续接
-      expected: '按 §13.6：main_session 规则命中声明 `launch: wake` 的 harness 时，内核创建后台运行并产出
-        `class: wake` 的投递（带运行 id）， 网关插件领取后调 harness 唤醒入口，内核本身不外呼；只有 `launch: wake`
-        且未结束的运行可换取委托凭据，凭据限该运行、到期或运行结束即失效， 超期再换时旧凭据立即作废，每次换取记 Event（不含明文）。生产路径要真正调用
-        kernel/wake 的 New/Open/Release，鉴权路径读取 wake_lease。'
-      observed: 'live 运行：main_session 规则落在 launch: wake 的 hermes harness 上被拒（kernel/background/background.go:341
-        “harness hermes 声明了唤醒真实主会话，不是无头运行”），不建 Run、无 class=wake 投递；kernel/wake 只在
-        cli/serve/serve.go:61 注册为 DB 模块， 生产代码没有调用 wake.New/Open/Release，鉴权不读 wake_lease，ACT-WAK-04
-        的委托凭据租约无法成立。'
-      locations:
-      - kernel/background/background.go:341
-      - cli/serve/serve.go:61
-      - kernel/wake
+      reporters:
+      - e2e-wake-live
+      state: needs-owner
+  inbox: []
