@@ -21,6 +21,9 @@ type Queue string
 const (
 	QueueLong  Queue = "long"  // task、background，受 max_subprocesses 限制
 	QueueShort Queue = "short" // source、transform、reader，受 max_short_subprocesses 限制
+	// QueueExternal 是进程不在本机的 Run（唤醒真实主会话，§13.6）：不占额度、调度器不拉起，写入即 running；
+	// 由调用模块按回执 Settle，到期由调度器按超时落账，重启恢复不判失败。
+	QueueExternal Queue = "external"
 )
 
 // QueueOf 返回类别所属队列；judge、generate 走 HTTP，不起子进程，ok 为 false。
@@ -79,6 +82,7 @@ type Request struct {
 	Run      domain.Run
 	Spec     Spec
 	Explicit bool // 本人显式触发：在所在队列内优先
+	External bool // 进程不在本机（QueueExternal）：不需要 Spec.Command
 }
 
 // Record 是账本里的一条 Run 及其执行附注。
@@ -114,10 +118,13 @@ func newID() (string, error) {
 func Enqueue(tx *store.Tx, req Request, now time.Time) (domain.Run, error) {
 	r := req.Run
 	q, ok := QueueOf(r.Category)
+	if req.External {
+		q = QueueExternal
+	}
 	switch {
 	case !ok:
 		return domain.Run{}, invalid(fmt.Sprintf("category %q does not start a subprocess", r.Category))
-	case len(req.Spec.Command) == 0 || req.Spec.Command[0] == "":
+	case !req.External && (len(req.Spec.Command) == 0 || req.Spec.Command[0] == ""):
 		return domain.Run{}, invalid("command is empty")
 	case r.TimeoutSec <= 0:
 		return domain.Run{}, invalid("timeout must be positive")
@@ -143,6 +150,10 @@ func Enqueue(tx *store.Tx, req Request, now time.Time) (domain.Run, error) {
 		r.ID = id
 	}
 	r.State, r.ExitCode, r.StartedAt, r.FinishedAt = domain.RunQueued, nil, nil, nil
+	var started int64
+	if req.External {
+		r.State, r.StartedAt, started = domain.RunRunning, &now, now.UnixNano()
+	}
 	spec := req.Spec
 	if len(spec.Stdin) == 0 {
 		spec.Stdin = json.RawMessage(`{}`)
@@ -150,11 +161,11 @@ func Enqueue(tx *store.Tx, req Request, now time.Time) (domain.Run, error) {
 	specJSON, _ := json.Marshal(spec)
 	basis, _ := json.Marshal(r.Basis)
 	_, err := tx.Exec(`INSERT INTO outcall_run (id, queue, category, runner, launch, target, harness, session_id, access,
-		basis, chain_depth, state, timeout, fingerprint, spec, explicit, enqueued_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		basis, chain_depth, state, timeout, fingerprint, spec, explicit, enqueued_at, started_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, string(q), string(r.Category), r.Runner, r.Launch, r.Target, r.Harness, r.SessionID, r.Access,
-		string(basis), int64(r.ChainDepth), string(domain.RunQueued), int64(r.TimeoutSec), r.Fingerprint,
-		string(specJSON), b2i(req.Explicit), now.UnixNano())
+		string(basis), int64(r.ChainDepth), string(r.State), int64(r.TimeoutSec), r.Fingerprint,
+		string(specJSON), b2i(req.Explicit), now.UnixNano(), started)
 	if err != nil {
 		return domain.Run{}, err
 	}
@@ -246,6 +257,11 @@ func List(tx *store.Tx) ([]Record, error) { return query(tx, "ORDER BY seq") }
 func InFlight(tx *store.Tx, target string) (bool, error) {
 	recs, err := query(tx, "WHERE target = ? AND state IN ('queued','running') LIMIT 1", target)
 	return len(recs) > 0, err
+}
+
+// External 返回运行中的外部 Run（QueueExternal），供调用模块按回执收尾。
+func External(tx *store.Tx) ([]Record, error) {
+	return query(tx, "WHERE queue = ? AND state = 'running' ORDER BY seq", string(QueueExternal))
 }
 
 // HasRun 报告目标是否有过任何 Run（含已结束的）。

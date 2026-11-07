@@ -18,8 +18,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/wake"
 )
 
 const (
@@ -27,9 +27,9 @@ const (
 	maxLimit     = 500
 )
 
-// Routes 返回运行记录路由分组，交给 core.Deps.Groups。
-func Routes(st *store.Store) core.RouteGroup {
-	h := &handlers{st: st}
+// Routes 返回运行记录路由分组，交给 core.Deps.Groups。wk 是唤醒模块：换取凭据时顺带为换取的 delegate 开租约。
+func Routes(st *store.Store, wk *wake.Service) core.RouteGroup {
+	h := &handlers{st: st, wk: wk}
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/runs", Handler: h.list})
 		r.Handle(core.Route{Method: "GET", Path: "/runs/{id}", Handler: h.get})
@@ -37,7 +37,10 @@ func Routes(st *store.Store) core.RouteGroup {
 	}
 }
 
-type handlers struct{ st *store.Store }
+type handlers struct {
+	st *store.Store
+	wk *wake.Service
+}
 
 // authorize：observer 及以上可读；ext 与 webhook 凭据另有用途，不能读账本。判定交给 authz。
 func authorize(tx *store.Tx, p *core.Principal) error {
@@ -55,7 +58,7 @@ func authorize(tx *store.Tx, p *core.Principal) error {
 	return nil
 }
 
-// credential 只搬运：谁能换、换什么都由 runidentity.Exchange 判定。明文只在这个响应里出现一次。
+// credential 只搬运：谁能换、换什么都由 runidentity.Exchange 判定，租约由 wake.Exchange 开。明文只在这个响应里出现一次。
 func (h *handlers) credential(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	id := r.PathValue("id")
 	var (
@@ -63,7 +66,7 @@ func (h *handlers) credential(w http.ResponseWriter, r *http.Request, p *core.Pr
 		expires time.Time
 	)
 	if err := h.st.Update(r.Context(), func(tx *store.Tx) (err error) {
-		token, expires, err = runidentity.Exchange(tx, p.Caller, id, time.Now())
+		token, expires, err = h.wk.Exchange(tx, p.Caller, id)
 		return err
 	}); err != nil {
 		return err

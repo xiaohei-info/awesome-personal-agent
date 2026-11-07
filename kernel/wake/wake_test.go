@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -29,19 +31,18 @@ var (
 )
 
 type env struct {
-	st      *store.Store
-	x       *command.Executor
-	svc     *Service
-	au      *auth.Auth
-	now     time.Time
-	holders map[string][]string
+	st  *store.Store
+	x   *command.Executor
+	svc *Service
+	au  *auth.Auth
+	now time.Time
 }
 
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, proc.Module, delivery.Module, Module} {
+		items.Module, proc.Module, delivery.Module, runidentity.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -51,7 +52,7 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	e := &env{st: st, now: t0, holders: map[string][]string{}}
+	e := &env{st: st, now: t0}
 	clk := func() time.Time { return e.now }
 	e.x = command.New(st, clk)
 	e.au = auth.New(clk)
@@ -60,8 +61,7 @@ func setup(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	e.svc, err = New(Options{Delivery: delivery.New(delivery.Options{Now: clk}), Now: clk,
-		Holders: func(_ *store.Tx, h string) ([]string, error) { return e.holders[h], nil }})
+	e.svc, err = New(Options{Delivery: delivery.New(delivery.Options{Now: clk}), Now: clk})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,16 +92,21 @@ func exitOf(err error) int {
 
 // delegate 签发一个 delegate token，返回凭据 id 与走租约包装的认证入口。
 func (e *env) delegate(t *testing.T) (credID string, id command.Identity) {
+	credID, _, id = e.token(t, auth.Delegate)
+	return
+}
+
+// token 签发一个 token，返回凭据 id、明文与走租约包装的认证入口（与 HTTP 入口同一层次）。
+func (e *env) token(t *testing.T, kind auth.Kind) (credID, secret string, id command.Identity) {
 	t.Helper()
-	var secret string
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		c, s, err := e.au.Issue(tx, auth.Spec{Kind: auth.Delegate, Label: "main"})
+		c, s, err := e.au.Issue(tx, auth.Spec{Kind: kind, Label: "main"})
 		credID, secret = c.ID, s
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return credID, e.svc.Identity(onBehalf{command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Harness: "h", Session: "other"}}})
+	return credID, secret, e.svc.Identity(onBehalf{command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Harness: "h", Session: "other"}}})
 }
 
 // onBehalf 补上传输层为 delegate 填的 on_behalf_of。
@@ -123,13 +128,18 @@ func (e *env) asked(t *testing.T) string {
 	return out.ID
 }
 
+// wakeRun 像后台触发方那样写一条运行：launch=wake 是外部运行（写入即 running），headless 是普通排队运行。
 func (e *env) wakeRun(t *testing.T, launch string, timeout int) (runID, target string) {
 	t.Helper()
 	var out struct{ ID string }
 	_ = json.Unmarshal(e.must(t, owner, "item.create", map[string]any{"kind": "task", "title": "wake target", "phase": "open"}), &out)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		r, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Runner: "main_session", Launch: launch,
-			Harness: "gw", Target: out.ID, TimeoutSec: timeout}, Spec: proc.Spec{Command: []string{"true"}}}, e.now)
+		req := proc.Request{Run: domain.Run{Category: domain.RunBackground, Runner: "main_session", Launch: launch,
+			Harness: "gw", Target: out.ID, TimeoutSec: timeout}, External: launch == runidentity.LaunchWake}
+		if !req.External {
+			req.Spec = proc.Spec{Command: []string{"true"}}
+		}
+		r, err := proc.Enqueue(tx, req, e.now)
 		runID = r.ID
 		return err
 	}); err != nil {
@@ -146,6 +156,22 @@ func (e *env) open(t *testing.T, runID string) (d domain.Delivery, err error) {
 	return d, err
 }
 
+// exchange 以 id 认证出的调用者换取凭据（与 POST /runs/{id}/credential 同一路径：先过租约包装，再交 Exchange）。
+func (e *env) exchange(t *testing.T, id command.Identity, runID string) (secret string, err error) {
+	t.Helper()
+	if uerr := e.st.Update(bg, func(tx *store.Tx) error {
+		c, aerr := id.Authenticate(tx)
+		if aerr != nil {
+			t.Fatal(aerr)
+		}
+		secret, _, err = e.svc.Exchange(tx, c, runID)
+		return err
+	}); uerr != nil && err == nil {
+		t.Fatal(uerr)
+	}
+	return secret, err
+}
+
 func (e *env) fail(t *testing.T, runID string) {
 	t.Helper()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
@@ -155,11 +181,20 @@ func (e *env) fail(t *testing.T, runID string) {
 	}
 }
 
-// ACT-WAK-04：租约期间同一 DEL 的另一会话代答是退出码 4，本人在 Web 仍可决定；回执后恢复代答。
+func (e *env) state(t *testing.T, runID string) domain.RunState {
+	t.Helper()
+	var rec proc.Record
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { rec, err = proc.Get(tx, runID); return }); err != nil {
+		t.Fatal(err)
+	}
+	return rec.Run.State
+}
+
+// ACT-WAK-04：网关插件用 delegate 换取凭据即为该 token 开租约；租约期间同一 DEL 的另一会话代答是退出码 4，
+// 本人在 Web 仍可决定；回执（目标事项离开 open）后运行按成功结束、租约释放，DEL 恢复代答。
 func TestLeaseBlocksDelegateAnswerUntilReceipt(t *testing.T) {
 	e := setup(t)
-	cred, dlg := e.delegate(t)
-	e.holders["gw"] = []string{cred}
+	_, dlg := e.delegate(t)
 	answer := func(id command.Identity, item string) error {
 		_, err := e.do(id, "decision.answer", map[string]any{"id": item, "choice": "A"})
 		return err
@@ -170,9 +205,16 @@ func TestLeaseBlocksDelegateAnswerUntilReceipt(t *testing.T) {
 		t.Fatalf("answer before lease: %v", err)
 	}
 
-	runID, _ := e.wakeRun(t, "wake", 600)
+	runID, target := e.wakeRun(t, "wake", 600)
 	if _, err := e.open(t, runID); err != nil {
 		t.Fatal(err)
+	}
+	if err := answer(dlg, e.asked(t)); err != nil { // 投递产出但还没人换取：没有租约
+		t.Fatalf("answer before exchange: %v", err)
+	}
+	secret, err := e.exchange(t, dlg, runID)
+	if err != nil || !runidentity.IsSecret(secret) {
+		t.Fatalf("exchange: %q %v", secret, err)
 	}
 	other := e.asked(t)
 	if err := answer(dlg, other); exitOf(err) != domain.ExitPermissionDenied {
@@ -181,14 +223,43 @@ func TestLeaseBlocksDelegateAnswerUntilReceipt(t *testing.T) {
 	if _, err := e.do(dlg, "proposal.accept", map[string]any{"id": other}); exitOf(err) != domain.ExitPermissionDenied {
 		t.Fatalf("accept during lease: %v", err)
 	}
+	renewed, err := e.exchange(t, dlg, runID) // 租约内插件仍可续换，旧凭据随即作废
+	if err != nil {
+		t.Fatalf("re-exchange during lease: %v", err)
+	}
+	if _, err := e.do(runidentity.Identity{Secret: secret, Now: func() time.Time { return e.now }}, "item.update",
+		map[string]any{"id": target, "summary": "s"}); exitOf(err) != domain.ExitUnauthenticated {
+		t.Fatalf("old credential after re-exchange: %v", err)
+	}
 	e.must(t, owner, "decision.answer", map[string]any{"id": other, "choice": "A"}) // 本人仍可在 Web 决定
 
-	third := e.asked(t)
-	if err := e.st.Update(bg, func(tx *store.Tx) error { return e.svc.Release(tx, runID) }); err != nil {
-		t.Fatal(err)
+	var ended []proc.Result
+	settle := func() {
+		t.Helper()
+		if err := e.svc.Settle(bg, e.st, func(r proc.Result) { ended = append(ended, r) }); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := answer(dlg, third); err != nil {
+	settle()
+	if len(ended) != 0 || e.state(t, runID) != domain.RunRunning {
+		t.Fatalf("target still open must not end the run: %+v", ended)
+	}
+	// 运行者以运行凭据回执：目标事项转 done
+	e.must(t, runidentity.Identity{Secret: renewed, Now: func() time.Time { return e.now }}, "item.transition",
+		map[string]any{"id": target, "to": "done", "reason": "handled"})
+	settle()
+	if len(ended) != 1 || ended[0].Run.ID != runID || ended[0].Run.State != domain.RunSucceeded {
+		t.Fatalf("receipt must end the run once: %+v", ended)
+	}
+	settle()
+	if len(ended) != 1 {
+		t.Fatal("settle must not end a run twice")
+	}
+	if err := answer(dlg, e.asked(t)); err != nil {
 		t.Fatalf("answer after receipt: %v", err)
+	}
+	if n := countEvents(t, e, EvOpened); n != 1 {
+		t.Fatalf("opened events: %d", n)
 	}
 	if n := countEvents(t, e, EvReleased); n != 1 {
 		t.Fatalf("released events: %d", n)
@@ -198,15 +269,32 @@ func TestLeaseBlocksDelegateAnswerUntilReceipt(t *testing.T) {
 	}
 }
 
-// 租约在运行结束或运行超时后自动恢复，不依赖调用方收尾；只约束持有租约的那个 token。
+// Attach 把回执收尾挂在命令提交后：运行者一回执，运行即结束并交回 onEnd。
+func TestAttachSettlesOnCommit(t *testing.T) {
+	e := setup(t)
+	var ended []proc.Result
+	e.svc.Attach(e.x, func(r proc.Result) { ended = append(ended, r) }, func(err error) { t.Error(err) })
+	runID, target := e.wakeRun(t, "wake", 600)
+	e.must(t, owner, "item.create", map[string]any{"kind": "task", "title": "unrelated", "phase": "open"})
+	if len(ended) != 0 {
+		t.Fatal("unrelated commit ended the run")
+	}
+	e.must(t, owner, "item.transition", map[string]any{"id": target, "to": "waiting", "reason": "delegated",
+		"waiting_on": map[string]any{"kind": "external", "ref": "someone"}})
+	if len(ended) != 1 || ended[0].Run.ID != runID || e.state(t, runID) != domain.RunSucceeded {
+		t.Fatalf("ended: %+v", ended)
+	}
+}
+
+// 租约在运行结束或运行超时后自动恢复，不依赖调用方收尾；只约束换取凭据的那个 token；worker 换取不开租约。
 func TestLeaseEndsWithRunOrTimeoutAndIsPerToken(t *testing.T) {
 	e := setup(t)
 	cred, dlg := e.delegate(t)
 	_, bystander := e.delegate(t)
-	e.holders["gw"] = []string{cred}
-	leased := func() bool {
+	workerID, _, worker := e.token(t, auth.Worker)
+	leased := func(c string) bool {
 		var l bool
-		if err := e.st.View(bg, func(tx *store.Tx) (err error) { l, err = e.svc.Leased(tx, cred); return }); err != nil {
+		if err := e.st.View(bg, func(tx *store.Tx) (err error) { l, err = e.svc.Leased(tx, c); return }); err != nil {
 			t.Fatal(err)
 		}
 		return l
@@ -218,21 +306,28 @@ func TestLeaseEndsWithRunOrTimeoutAndIsPerToken(t *testing.T) {
 
 	byRun, _ := e.wakeRun(t, "wake", 600)
 	e.open(t, byRun)
-	if !leased() || !denied(dlg) || denied(bystander) {
-		t.Fatal("lease must hold exactly the wake token")
+	if _, err := e.exchange(t, worker, byRun); err != nil || leased(workerID) {
+		t.Fatalf("worker exchange: %v leased=%v", err, leased(workerID))
+	}
+	if _, err := e.exchange(t, dlg, byRun); err != nil {
+		t.Fatal(err)
+	}
+	if !leased(cred) || !denied(dlg) || denied(bystander) {
+		t.Fatal("lease must hold exactly the exchanging token")
 	}
 	e.fail(t, byRun)
-	if leased() || denied(dlg) {
+	if leased(cred) || denied(dlg) {
 		t.Fatal("run end must end the lease")
 	}
 
 	byTime, _ := e.wakeRun(t, "wake", 60)
 	e.open(t, byTime)
-	if !leased() {
-		t.Fatal("new wake run must lease again")
+	e.now = e.now.Add(30 * time.Second)
+	if _, err := e.exchange(t, dlg, byTime); err != nil || !leased(cred) {
+		t.Fatalf("new wake run must lease again: %v", err)
 	}
-	e.now = e.now.Add(61 * time.Second)
-	if leased() || denied(dlg) {
+	e.now = e.now.Add(31 * time.Second) // 租约截止取运行开始加超时，不是换取时刻加超时
+	if leased(cred) || denied(dlg) {
 		t.Fatal("run timeout must end the lease")
 	}
 }
@@ -248,6 +343,9 @@ func TestOpenProducesWakeDeliveryOnly(t *testing.T) {
 	if d.Class != domain.DeliveryWake || d.Route != delivery.RouteWake || d.Run != runID || d.Item != target || d.State != domain.DeliveryPending {
 		t.Fatalf("delivery: %+v", d)
 	}
+	if b, _ := json.Marshal(d); strings.Contains(string(b), "apa_run_") {
+		t.Fatalf("delivery carries a credential: %s", b)
+	}
 	if again, err := e.open(t, runID); err != nil || again.ID != d.ID {
 		t.Fatalf("reopen: %+v %v", again, err)
 	}
@@ -255,9 +353,6 @@ func TestOpenProducesWakeDeliveryOnly(t *testing.T) {
 	q := delivery.New(delivery.Options{Now: func() time.Time { return e.now }})
 	if err := e.st.Update(bg, func(tx *store.Tx) (err error) { claimed, err = q.Claim(tx, delivery.RouteWake); return }); err != nil || claimed == nil || claimed.Run != runID {
 		t.Fatalf("gateway claim: %+v %v", claimed, err)
-	}
-	if n := countEvents(t, e, EvOpened); n != 1 {
-		t.Fatalf("opened events: %d", n)
 	}
 
 	headless, _ := e.wakeRun(t, "headless", 600)
@@ -287,6 +382,9 @@ func countEvents(t *testing.T, e *env, typ string) (n int) {
 			if x.Event.Type == typ {
 				n++
 			}
+			if strings.Contains(string(x.Event.Payload), "apa_run_") {
+				t.Fatalf("secret in event %s: %s", x.Event.Type, x.Event.Payload)
+			}
 		}
 		return err
 	}); err != nil {
@@ -295,13 +393,12 @@ func countEvents(t *testing.T, e *env, typ string) (n int) {
 	return
 }
 
-// 失败路径：没有目标事项的运行、凭据对应查询失败、未知凭据、非 delegate 调用者都不被租约改变。
+// 失败路径：没有目标事项的运行、未知凭据、非 delegate 调用者都不被租约改变；没有租约的 Release 是空操作。
 func TestFailureAndPassthroughPaths(t *testing.T) {
 	e := setup(t)
 	noTarget := func() (id string) {
 		if err := e.st.Update(bg, func(tx *store.Tx) error {
-			r, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Launch: "wake", TimeoutSec: 60},
-				Spec: proc.Spec{Command: []string{"true"}}}, e.now)
+			r, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Launch: "wake", TimeoutSec: 60}, External: true}, e.now)
 			id = r.ID
 			return err
 		}); err != nil {
@@ -312,16 +409,6 @@ func TestFailureAndPassthroughPaths(t *testing.T) {
 	if _, err := e.open(t, noTarget); exitOf(err) != domain.ExitUsage {
 		t.Fatalf("no target: %v", err)
 	}
-
-	boom := errors.New("boom")
-	failing, _ := New(Options{Delivery: delivery.New(delivery.Options{}), Holders: func(*store.Tx, string) ([]string, error) { return nil, boom }})
-	runID, _ := e.wakeRun(t, "wake", 60)
-	_ = e.st.Update(bg, func(tx *store.Tx) error {
-		if _, err := failing.Open(tx, runID); !errors.Is(err, boom) {
-			t.Fatalf("holders error must surface: %v", err)
-		}
-		return nil
-	})
 
 	bad := e.svc.Identity(command.Bearer{Auth: e.au, Secret: "apa_dlg_unknown"})
 	if _, err := e.do(bad, "item.create", map[string]any{"kind": "task", "title": "t", "phase": "open"}); exitOf(err) != domain.ExitUnauthenticated {
