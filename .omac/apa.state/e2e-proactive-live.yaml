@@ -1,6 +1,6 @@
-# sha256: 4ba231e8a26dd5db370cdf8d10509940f56ba313275d509dce81dbee63384dc8
+# sha256: 7a65f72d11ac2078fda0db5828e013f8a5d4f485a962f05532b91aed4dea9055
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: '负责人说明（覆盖你上次的阻塞判断）：这个节点要在 taiyi 上跑，不在 Mac mini 上跑。Mac mini 的红线指的是"不在 mini
   上启动或调用 hermes、不碰 mini 的 ~/.hermes"，并没有禁止这个节点。所有 hermes 相关命令一律用 `ssh taiyi ''<命令>''`
