@@ -84,7 +84,7 @@ func (h *handlers) write(cmd string, withID bool, status int) core.Handler {
 		if err != nil {
 			return err
 		}
-		req := command.Request{Identity: p.Identity, Command: cmd, Input: in, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence}
+		req := command.Request{Identity: p.Identity, Command: cmd, Input: in, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
 		if v := r.Header.Get(IfMatchHeader); v != "" {
 			n, err := strconv.ParseInt(strings.Trim(v, `"`), 10, 64)
 			if err != nil || n < 0 {

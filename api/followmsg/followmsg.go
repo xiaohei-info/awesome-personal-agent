@@ -57,7 +57,7 @@ func Routes(x *command.Executor) core.RouteGroup {
 			if err != nil {
 				return err
 			}
-			res, err := x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "followmsg.handback", Input: in, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence})
+			res, err := x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "followmsg.handback", Input: in, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL})
 			if err != nil {
 				return err
 			}

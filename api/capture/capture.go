@@ -38,7 +38,7 @@ func Routes(x *command.Executor) core.RouteGroup {
 				return err
 			}
 			res, err := x.Do(context.WithoutCancel(req.Context()), command.Request{Identity: p.Identity, Command: inbound.CmdCapture,
-				Input: in, IdemKey: req.Header.Get(IdempotencyHeader), Evidence: p.Evidence})
+				Input: in, IdemKey: req.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL})
 			if err != nil {
 				return err
 			}

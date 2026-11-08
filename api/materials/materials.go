@@ -99,7 +99,7 @@ func object(r *http.Request) (map[string]json.RawMessage, error) {
 
 // run 以请求的凭据执行一条内核命令。evidence 是请求元数据，不是命令输入（命令对未知字段严格拒绝），所以从体里取出。
 func (h *handlers) run(r *http.Request, p *core.Principal, cmd string, in map[string]json.RawMessage) (command.Result, error) {
-	req := command.Request{Identity: p.Identity, Command: cmd, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence}
+	req := command.Request{Identity: p.Identity, Command: cmd, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
 	if raw, ok := in["evidence"]; ok {
 		delete(in, "evidence")
 		if req.Evidence == "" {
@@ -314,7 +314,7 @@ func (h *handlers) putBlob(w http.ResponseWriter, r *http.Request, p *core.Princ
 		return invalid("the body does not hash to the sha256 in the URL", "put the file at /blobs/<sha256 of its content>")
 	}
 	in, _ := json.Marshal(map[string]any{"content": data})
-	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "blob.put", Input: in, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence})
+	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "blob.put", Input: in, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL})
 	if err != nil {
 		return err
 	}

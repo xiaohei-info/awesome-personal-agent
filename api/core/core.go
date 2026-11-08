@@ -36,6 +36,8 @@ const (
 	CSRFHeader = "X-CSRF-Token"
 	// EvidenceHeader 携带 delegate 代理操作的本人原话（§14.3、§14.5）；骨干统一读入 Principal.Evidence。
 	EvidenceHeader = "X-APA-Evidence"
+	// GrantHeader 携带 delegate 代理操作的授权单 id，与 EvidenceHeader 二选一（§14.5）；骨干统一读入 Principal.Grant。
+	GrantHeader = "X-APA-Grant"
 	// ownerPrincipal 是本人的操作者标识（单用户系统，与 Web 会话的 Actor 一致），delegate 凭据代其行事。
 	// shortcut: 单用户系统写死本人为 owner，引入多用户时改由凭据携带。
 	ownerPrincipal = "owner"
@@ -57,6 +59,8 @@ type Principal struct {
 	Caller   command.Caller
 	Web      bool   // 来自 Web 会话 Cookie
 	Evidence string // EvidenceHeader 的值；写命令的 command.Request.Evidence 取自这里
+	Grant    string // GrantHeader 的值；写命令的 command.Request.Grant 取自这里，二选一与同时携带的判定都在内核
+	WebURL   string // 请求对象在 Web 的链接；写命令的 command.Request.WebURL 取自这里，随 20/22/23 拒绝返回
 	csrf     string
 }
 
@@ -251,12 +255,28 @@ func (s *Server) wrap(rt Route) http.Handler {
 			}
 		}
 		if p != nil {
-			p.Evidence = r.Header.Get(EvidenceHeader)
+			p.Evidence, p.Grant, p.WebURL = r.Header.Get(EvidenceHeader), r.Header.Get(GrantHeader), webLink(r)
 		}
 		if err := rt.Handler(w, r, p); err != nil {
 			s.writeError(w, err)
 		}
 	})
+}
+
+// webLink 是请求对象在 Web 的页面：/{分组}/{id}，没有 id 的路由取分组页。
+func webLink(r *http.Request) string {
+	scheme := "http"
+	if secureTransport(r) {
+		scheme = "https"
+	}
+	link := scheme + "://" + r.Host
+	if seg, _, _ := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, APIPrefix), "/"), "/"); seg != "" {
+		link += "/" + seg
+		if id := r.PathValue("id"); id != "" {
+			link += "/" + url.PathEscape(id)
+		}
+	}
+	return link
 }
 
 // ---- 认证 ----
