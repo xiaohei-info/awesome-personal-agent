@@ -1,4 +1,4 @@
-# sha256: d257bf760e21cddfbf1f0925b29c005e8fa02d9c30e0e801ce5d78891dd58318
+# sha256: b2ccad24dd0819ed1d4b279d19aab955f036cf92e9856a256a350dc1892fbb96
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
 status: blocked
 recovery_marker: true
@@ -10,3 +10,4 @@ retry_note: '真实 Hermes 只能在 taiyi /opt/apa-live/ 隔离环境运行；�
   上保持 apa serve 运行并在证据里给出 Web 端口与要看的页面，由 Mac mini 上的 Ego Lite 访问 taiyi 的 APA Web 端口完成（只看页面，Hermes
   仍只在 taiyi 跑）；数据类断言用 HTTP 接口。仍不改产品代码；修复合并后仍失败按 upstream-defect 或 owner-decision-required
   报告。'
+defect_pending: true

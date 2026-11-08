@@ -1,4 +1,4 @@
-# sha256: f023b2283382f77259d6862915b9f1435e30ec8889443089b65033b903923cdd
+# sha256: f6ba6c17621b413f4a318a1e7315a104fbe7f4265d5fedc9854ebc92f2a1087b
 defects:
   schema: omac.defect-ledger/v1
   used_global: 9
@@ -10,7 +10,7 @@ defects:
   granted_by_reporter:
     e2e-guideline-live: 2
     e2e-hermes-session: 2
-    e2e-proactive-live: 2
+    e2e-proactive-live: 3
   entries:
     dfx-5dd4c0c9998f:
       suspected: kernel-followmsg
@@ -126,7 +126,25 @@ defects:
       reporters:
       - e2e-proactive-live
       state: needs-owner
-  inbox: []
+  inbox:
+  - id: 280a4a707a1e
+    reporter: e2e-proactive-live
+    defects:
+    - class: design-gap
+      suspected_node: kernel-task-agent
+      anchors:
+      - flow-brief/ACT-BRF-01
+      design_ref: docs/solution-design.md#36-场景五简报
+      expected: §3.6 第 2 步与 §10 任务型的输入：内核建好目标事项后，把账本快照（已按运行身份过滤）作为资料文件放进运行目录，与 instance_params
+        并列。快照至少含运行身份可见的项目及其事项（id、标题、阶段、更新时间等摘要字段），简报包据此按项目分节。这是所有任务型运行的通用输入（简报、复盘、跟进判断、委派核验、规范起草共用），在
+        callTask 组装 Materials 的同一处实现，不为简报单开分支；过滤沿用运行身份的既有读权限，不新增信任级。生成型改用模板时同一份快照作资料附带（§10
+        同段）。
+      observed: taiyi 真实 Hermes 跑简报：run 成功、spec.period 已写，但 spec.sections 为空，ACT-BRF-01
+        失败，ACT-BRF-02..06 依赖它。运行目录 materials.json 只有 instance_params，没有项目与事项；agent
+        输出也说明快照缺项目和事项，无从分节。
+      locations:
+      - kernel/agents/task/callagent.go:instanceMaterials
+      - kernel/agents/task/callagent.go:callTask
 pending_human_amendment:
   amendment_id: amend-a4657a0582f6
   file: /Volumes/SSD1T/apps/hermes/home/workspace/reports/apa-omac-plan/auth-redesign-20261108.amendment.yaml
