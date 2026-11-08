@@ -1,7 +1,8 @@
-# sha256: 5d90a42b6944096811958efb2b6c3e2a5064b02b9c4035569e6bdfc1988a0c57
+# sha256: d0bd853e0d5547cc2dbc15b6364fb454c914dd025022bdce4222be016ef10759
 work_item_id: 01a1b0fd-e96f-7652-bb90-9887f4d5d514
-status: in_review
-recovery_marker: true
+status: done
+merged: true
+merged_at: '2026-11-08T03:01:45Z'
 retry_note: '负责人说明：缺陷 dfx-5410a4c832ad 已由 PR #205（合并提交 0a04b35e）修复，launch: wake 已接入生产路径，鉴权读
   wake_lease。请基于最新 main 重跑。
 
