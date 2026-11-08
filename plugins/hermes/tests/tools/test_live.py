@@ -107,6 +107,7 @@ def hermes(tmp_path, apa_bin, kernel):
         line = next(l for l in p.stdout.splitlines() if l.startswith("RESULT"))
         return json.loads(line[len("RESULT"):])
 
+    run.env = env  # tests may adjust the child's environment
     return run
 
 
@@ -192,3 +193,21 @@ def test_flow_brief_and_guideline_read_tier_run_reads_materials_and_writes_back_
     assert upd["body"]["spec"] == {"period": "2026-W45", "sections": [{"project": "p", "text": "ok"}]}
     assert com["path"] == "/v1/materials" and com["body"]["content"].startswith("# 规范")
     assert com["body"]["kind"] == "guideline" and com["body"]["project"] == "p"
+
+
+def test_read_tier_file_tools_work_under_the_kernel_env_contract(hermes, tmp_path):
+    """Kernel env for a run: APA_RUN set, no APA_HOME, cwd = a checkout (not the run dir)."""
+    runs = tmp_path / "apahome" / "runs"
+    (runs / "run1").mkdir(parents=True)
+    (runs / "run2").mkdir()
+    (runs / "run1" / "materials.json").write_text('{"target":"i1"}')
+    (runs / "run2" / "materials.json").write_text("other")
+    hermes.env.pop("APA_HOME")
+    hermes.env["APA_RUN"] = "run1"
+    out = hermes(("apa_read_file", {"path": str(runs / "run1" / "materials.json")}, "s1"),
+                 ("apa_read_file", {"path": "README.md"}, "s1"),
+                 ("apa_read_file", {"path": str(runs / "run2" / "materials.json")}, "s1"))
+    own, repo, sibling = out["results"]
+    assert own["ok"] is True and "i1" in own["content"]
+    assert repo["ok"] is True  # cwd (HERMES_SRC) is readable
+    assert sibling["ok"] is False and "outside" in sibling["error"]

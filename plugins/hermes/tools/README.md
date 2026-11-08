@@ -24,6 +24,6 @@ Hermes has no read-only file toolset, and task runs with `access: read` (brief, 
 `{materials_path}` and write their result back. The `apa` toolset covers that without `file` or `terminal`:
 
 - `apa_read_file` / `apa_list_dir`: read-only, confined (symlinks resolved) to the working directory (the run directory, or
-  the project checkout for `cwd: project_checkout`) and `$APA_HOME/runs/$APA_RUN`. Anything else is refused; files over 200 KB come back truncated and flagged. There is no write tool.
+  the project checkout for `cwd: project_checkout`) and `runs/$APA_RUN` (the kernel passes no APA_HOME, so the layout `<home>/runs/<run id>/` is matched; sibling runs stay refused). Anything else is refused; files over 200 KB come back truncated and flagged. There is no write tool.
 - `apa_item_update`: `apa item update <id> --spec <json> --reason ...`; the kernel's run identity still limits it to the run's own item.
 - `apa_material_commit`: `apa material commit [<id>] --from - --reason ... [--kind --title --project]`; the text travels on stdin, never in a shell. It only creates a pending revision the owner confirms.

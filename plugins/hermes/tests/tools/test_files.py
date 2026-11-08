@@ -20,7 +20,7 @@ def env(tmp_path, monkeypatch):
     (tmp_path / "secret.txt").write_text("nope")
     (cwd / "link").symlink_to(tmp_path / "secret.txt")
     monkeypatch.chdir(cwd)
-    monkeypatch.setenv("APA_HOME", str(home))
+    monkeypatch.delenv("APA_HOME", raising=False)  # the kernel never gives a run APA_HOME
     monkeypatch.setenv("APA_RUN", "run1")
     return tmp_path
 
@@ -80,3 +80,12 @@ def test_missing_file_reports_the_real_error(tools, env):
 
 def test_no_write_tool_exists(tools):
     assert not [n for n in tools if "write" in n]
+
+
+def test_checkout_cwd_run_reads_materials_and_repo_file_but_not_a_sibling_run(tools, env):
+    runs = env / "home" / "runs"
+    (runs / "run2").mkdir()
+    (runs / "run2" / "materials.json").write_text("other")
+    assert read(tools, str(runs / "run1" / "materials.json"))["ok"] is True
+    assert read(tools, "README.md")["content"] == "hello"
+    assert read(tools, str(runs / "run2" / "materials.json"))["ok"] is False
