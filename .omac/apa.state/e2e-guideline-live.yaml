@@ -1,8 +1,6 @@
-# sha256: 8b244bf1421fa21322bef92bf67fc31f8305131a39c7452d7078976fd13b65c1
+# sha256: d9bfed0a3253ed8cdb55d75b3deabefbe51720d5597c8acc75f0f5683cd4736f
 work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
 status: todo
-held: true
-hold_reason: 等缺陷路由出修复节点；主会话在修复节点出现在 blocked_by 后 release
 retry_note: '负责人说明：这个节点改派到 taiyi 上的 worker（omac-worker-frontend-taiyi），本机就是 taiyi，可以直接在本机运行
   hermes，不需要 ssh。
 

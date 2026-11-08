@@ -13710,7 +13710,7 @@ nodes:
     - dfx-27e69d9e5716
     coverage_gate: 70
 - id: fix.hermes-plugin-tools.ea87a6
-  worker: omac-worker-frontend
+  worker: omac-worker-frontend-taiyi
   blocked_by:
   - hermes-plugin-core
   - cli-delegation

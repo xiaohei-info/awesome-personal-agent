@@ -1,4 +1,4 @@
-# sha256: a6246b912356c186e3a9e0728faa5a6f87a11bd5e51590084aa9e5029f637d71
+# sha256: 2873bbe70f986b5b8ba35ec65d6863822905a50f94527aa37775f0c785c79f4b
 defects:
   schema: omac.defect-ledger/v1
   used_global: 4
@@ -6,7 +6,8 @@ defects:
     e2e-bg-main-live: 1
     e2e-proactive-live: 2
     e2e-guideline-live: 1
-  granted_by_reporter: {}
+  granted_by_reporter:
+    e2e-guideline-live: 2
   entries:
     dfx-5dd4c0c9998f:
       suspected: kernel-followmsg

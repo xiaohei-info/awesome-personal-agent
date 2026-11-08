@@ -1,8 +1,6 @@
-# sha256: 94ca34c4dfcde6dabd00d0ce4fcd5669618355782cd4a187c1e0f619b3039114
+# sha256: 485976956203a3b14944cd67fe41f83abb9759639ada0e4d9a814676df80aa22
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
 status: todo
-held: true
-hold_reason: 等缺陷路由出修复节点；主会话在修复节点出现在 blocked_by 后 release
 retry_note: '真实 Hermes 只能在 taiyi /opt/apa-live/ 隔离环境运行；不要在 Mac mini 启动或调用 Hermes。
 
 
