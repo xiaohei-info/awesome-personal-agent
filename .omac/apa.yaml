@@ -12160,7 +12160,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-hermes-session
-  worker: omac-worker-frontend
+  worker: omac-worker-frontend-taiyi
   blocked_by:
   - hermes-plugin-core
   - hermes-plugin-inject
@@ -12276,7 +12276,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-proactive-live
-  worker: omac-worker-frontend
+  worker: omac-worker-frontend-taiyi
   blocked_by:
   - hermes-plugin-headless
   - hermes-plugin-inject
@@ -13541,7 +13541,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: fix.hermes-plugin-headless.27e69d
-  worker: omac-worker-frontend
+  worker: omac-worker-frontend-taiyi
   blocked_by:
   - hermes-plugin-tools
   - kernel-bg-resume

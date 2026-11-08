@@ -1,0 +1,15 @@
+=== RUN   TestWakeLease
+=== RUN   TestWakeLease/ACT-WAK-01_显式声明唤醒：带网关的主会话启动；未声明前走_headless，确认_launch=wake_后规则走唤醒
+=== RUN   TestWakeLease/ACT-WAK-02_产出唤醒投递并开一个回合
+=== RUN   TestWakeLease/ACT-WAK-03_运行身份透传：Event_带运行_id，decide_退出码_4
+=== RUN   TestWakeLease/ACT-WAK-04_唤醒租约内_delegate_不能代答，回执后恢复
+=== RUN   TestWakeLease/ACT-WAK-05_需要本人时转_needs_input，不直接打扰
+--- PASS: TestWakeLease (48.73s)
+    --- PASS: TestWakeLease/ACT-WAK-01_显式声明唤醒：带网关的主会话启动；未声明前走_headless，确认_launch=wake_后规则走唤醒 (15.70s)
+    --- PASS: TestWakeLease/ACT-WAK-02_产出唤醒投递并开一个回合 (2.15s)
+    --- PASS: TestWakeLease/ACT-WAK-03_运行身份透传：Event_带运行_id，decide_退出码_4 (28.76s)
+    --- PASS: TestWakeLease/ACT-WAK-04_唤醒租约内_delegate_不能代答，回执后恢复 (0.34s)
+    --- PASS: TestWakeLease/ACT-WAK-05_需要本人时转_needs_input，不直接打扰 (0.02s)
+PASS
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/live/wake	48.736s
+exit=0
