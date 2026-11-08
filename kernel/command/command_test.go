@@ -713,3 +713,114 @@ func TestProxyTiersAreDecidedInThePipeline(t *testing.T) {
 		t.Fatalf("claimed binding: %v", err)
 	}
 }
+
+func TestOnRejectRunsInTheRejectionTransaction(t *testing.T) {
+	e := setup(t)
+	if err := e.x.Register(Spec{Name: "tier.decide", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Receipt: true,
+		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+			return authz.Object{ID: parse(in).ID}, nil
+		},
+		Apply: func(c *Ctx) (any, error) { return nil, nil }}); err != nil {
+		t.Fatal(err)
+	}
+	var got []Rejection
+	var hookErr error
+	e.x.OnReject(func(tx *store.Tx, r Rejection) error {
+		got = append(got, r)
+		_, err := tx.Exec(`INSERT INTO tnote (id, body) VALUES ('hooked', 'x')`)
+		if err != nil {
+			return err
+		}
+		return hookErr
+	})
+	c := e.bearer(t, auth.Spec{Kind: auth.Delegate})
+	c.Origin = auth.Origin{Session: "s1"}
+	do := func() error {
+		_, err := e.x.Do(bg, Request{Identity: c, Command: "tier.decide", Input: in(noteIn{ID: "o1"})})
+		return err
+	}
+	if exit(do()) != domain.ExitBasisRequired || len(got) != 1 || got[0].Object != "o1" || got[0].Exit != domain.ExitBasisRequired {
+		t.Fatalf("hook not called with the rejection: %+v", got)
+	}
+	types := map[string]int{}
+	for _, en := range e.events(t) {
+		types[en.Event.Type]++
+	}
+	if types[domain.EvCommandRejected] != 1 || types[domain.EvHealthAlert] != 1 || e.noteCount(t) != 1 {
+		t.Fatalf("rejection, alert and hook write must land together: %v notes=%d", types, e.noteCount(t))
+	}
+	// 回调失败：拒绝留痕、告警、回调写入一并回滚。
+	hookErr = errors.New("boom")
+	if err := do(); err == nil || exit(err) == domain.ExitBasisRequired {
+		t.Fatalf("hook failure must surface, got %v", err)
+	}
+	n := 0
+	for _, en := range e.events(t) {
+		if en.Event.Type == domain.EvCommandRejected || en.Event.Type == domain.EvHealthAlert {
+			n++
+		}
+	}
+	if n != 2 || e.noteCount(t) != 1 {
+		t.Fatalf("failed rejection transaction leaked: events=%d notes=%d", n, e.noteCount(t))
+	}
+}
+
+func TestReceiptCommandRejectionsRecordHealthAlert(t *testing.T) {
+	e := setup(t)
+	reg := func(name string, receipt bool) {
+		if err := e.x.Register(Spec{Name: name, Action: authz.ActionUpdateOwn, Receipt: receipt,
+			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+				return authz.Object{ID: parse(in).ID}, nil
+			},
+			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
+				if parse(in).Body == "" {
+					return domain.NewError(domain.CodeInvalidRequest, "body required", "add body")
+				}
+				return nil
+			},
+			Apply: func(c *Ctx) (any, error) { return nil, nil }}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg("rcpt.write", true)
+	reg("plain.write", false)
+	alerts := func() (out []domain.Event) {
+		for _, en := range e.events(t) {
+			if en.Event.Type == domain.EvHealthAlert {
+				out = append(out, en.Event)
+			}
+		}
+		return
+	}
+	del := e.bearer(t, auth.Spec{Kind: auth.Delegate})
+	obs := e.bearer(t, auth.Spec{Kind: auth.Observer})
+	run := func(id Identity, cmd string, n noteIn) error {
+		_, err := e.x.Do(bg, Request{Identity: id, Command: cmd, Input: in(n)})
+		return err
+	}
+	// 2：校验失败；4：越权。回执类命令各记一条，对象为被写的事项，操作者为发起者。
+	if exit(run(del, "rcpt.write", noteIn{ID: "o1"})) != domain.ExitUsage || exit(run(obs, "rcpt.write", noteIn{ID: "o2", Body: "x"})) != domain.ExitPermissionDenied {
+		t.Fatal("expected 2 and 4")
+	}
+	as := alerts()
+	if len(as) != 2 || as[0].Object != "o1" || as[1].Object != "o2" || as[0].Actor.Type != domain.ActorAgent {
+		t.Fatalf("alerts = %+v", as)
+	}
+	var p struct {
+		Kind, Command string
+		Exit          int
+	}
+	_ = json.Unmarshal(as[0].Payload, &p)
+	if p.Kind != ReceiptKind || p.Command != "rcpt.write" || p.Exit != domain.ExitUsage {
+		t.Fatalf("payload = %+v", p)
+	}
+	// 非回执命令、以及不属于 2/4/23 的失败（冲突 6、未找到）不记告警；成功也不记。
+	_ = run(del, "plain.write", noteIn{ID: "o3"})
+	_ = run(obs, "plain.write", noteIn{ID: "o4", Body: "x"})
+	if err := run(del, "rcpt.write", noteIn{ID: "o5", Body: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(alerts()) != 2 {
+		t.Fatalf("unexpected alerts: %+v", alerts())
+	}
+}

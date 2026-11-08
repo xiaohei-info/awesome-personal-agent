@@ -84,6 +84,7 @@ type Screening interface {
 
 // RegisterWith 同 Register；s 非空时，决策请求按 s.Needed 在同一事务置 screening_pending 并调 s.Begin。
 func RegisterWith(x *command.Executor, s Screening) error {
+	x.OnReject(onReject)
 	for _, sp := range []command.Spec{request(s), answer(), proposal("proposal.accept", domain.PhaseOpen, "proposal accepted"),
 		proposal("proposal.dismiss", domain.PhaseDropped, "proposal dismissed")} {
 		if err := x.Register(sp); err != nil {
@@ -391,6 +392,54 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 				Payload: snap, ResolvedVia: viaOf(c), Evidence: c.Evidence})
 			return ref{it.ID}, err
 		}}
+}
+
+// ---- 依据不足不静默（§14.5） ----
+
+// rejectActor 是内核代写 ask 的操作者。
+var rejectActor = domain.Actor{Type: domain.ActorSystem, Principal: "system:proxy-rejection", Via: domain.ViaClock}
+
+// onReject 在记 command.rejected 的同一事务里处理退出码 23：open、waiting 的事项转 needs_input 并附内核生成的 ask；
+// needs_input、proposed、已终结的事项与不对应事项的命令不变。ask 只写操作者、命令名和拒绝原因，不带 agent 自述的内容，
+// risk_class 固定 web_only（不初筛，只有本人在 Web 能答），选项只有"继续"，回答后回 open，不重放被拒绝的修改。
+func onReject(tx *store.Tx, r command.Rejection) error {
+	if r.Exit != domain.ExitBasisRequired || r.Object == "" {
+		return nil
+	}
+	it, err := items.Get(tx, r.Object)
+	var de *domain.Error
+	if errors.As(err, &de) && de.Code == domain.CodeNotFound {
+		return nil // 对象不是事项（项目、来源、实例）
+	}
+	if err != nil {
+		return err
+	}
+	if it.Phase != domain.PhaseOpen && it.Phase != domain.PhaseWaiting {
+		return nil
+	}
+	depth, err := items.ChainDepth(tx, it.ID)
+	if err != nil {
+		return err
+	}
+	q := "代理 " + r.Actor.Principal + " 执行 " + r.Command + " 被拒绝：" + r.Why + "。同意请在 Web 直接修改，或签发授权单后让代理重试。"
+	_, _, snap, err := items.Revise(tx, it.ID, "decision.request", r.At, func(it *domain.Item) error {
+		it.Ask = &domain.Ask{AskInput: domain.AskInput{Question: q, Options: []domain.AskOption{{ID: "continue", Label: "继续"}}},
+			AskKernelState: domain.AskKernelState{RiskClass: domain.RiskClassWebOnly}}
+		it.Phase, it.WaitingOn = domain.PhaseNeedsInput, nil
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if err := cancelTimer(tx, it.ID); err != nil {
+		return err
+	}
+	if _, err := command.Bump(tx, it.ID); err != nil {
+		return err
+	}
+	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvDecisionRequested, Object: it.ID, Actor: rejectActor, ChainDepth: depth,
+		Reason: "proxy write rejected: basis required", Payload: snap, At: r.At})
+	return err
 }
 
 // ---- 超时默认值 ----

@@ -12,6 +12,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
@@ -636,4 +637,40 @@ func TestReportDoneNeedsResultEvidenceForAnyKind(t *testing.T) {
 	if got := e.item(t, task); got.Phase != domain.PhaseDone {
 		t.Fatalf("task with result evidence: %+v", got)
 	}
+}
+
+// §14.5 失败可见：绑定不成立的回执既让子事项转 needs_input 又记 health.alert（同一事务）；
+// 报 done 缺结果证据（退出码 2）只记 health.alert，事项不变。
+func TestRejectedReceiptTurnsChildToNeedsInputAndAlerts(t *testing.T) {
+	e := setup(t)
+	if err := decisions.Register(e.x); err != nil {
+		t.Fatal(err)
+	}
+	e.issue(t, "DEL2", auth.Spec{Kind: auth.Delegate})
+	child := e.id(t, e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": e.parent(t, ""), "assignee": workHost}))
+	alerts := func() (out []domain.Event) {
+		for _, ev := range e.events(t) {
+			if ev.Type == domain.EvHealthAlert && ev.Object == child {
+				out = append(out, ev)
+			}
+		}
+		return
+	}
+
+	e.wantExit(t, domain.ExitUsage, e.as("DEL"), "delegate.report", rep(child, "done", Evidence{}))
+	if got := e.item(t, child); got.Phase != domain.PhaseOpen || len(alerts()) != 1 {
+		t.Fatalf("done without evidence: phase=%s alerts=%d", got.Phase, len(alerts()))
+	}
+
+	if _, err := e.doBare(e.as("DEL2"), "delegate.report", rep(child, "progress", Evidence{})); exitOf(err) != domain.ExitBasisRequired {
+		t.Fatalf("unbound receipt: %v", err)
+	}
+	got := e.item(t, child)
+	if got.Phase != domain.PhaseNeedsInput || got.Ask == nil || got.Ask.RiskClass != domain.RiskClassWebOnly || got.StatusLabel != "" {
+		t.Fatalf("child after rejected receipt: %+v", got)
+	}
+	if as := alerts(); len(as) != 2 || as[1].Actor.Principal == "" {
+		t.Fatalf("alerts = %+v", as)
+	}
+	e.consistent(t)
 }

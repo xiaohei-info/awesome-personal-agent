@@ -262,7 +262,7 @@ func report() command.Spec {
 		var v reportIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound,
+	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound, Receipt: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
