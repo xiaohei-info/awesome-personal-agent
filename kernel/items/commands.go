@@ -633,6 +633,22 @@ type revertPlan struct {
 // 外部副作用（已发出的消息等）不在账本里，撤销不碰。
 var revertible = []string{domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvDecisionResolved}
 
+// rearmAskTimeout：撤销把已回答的决定恢复成未回答时，补回回答时被撤掉的超时 Timer，
+// 否则带 default_on_timeout 的请求永不自动决定。id 与 kind 必须同 decisions.TimerID（"ask_"+事项）；
+// 不能 import decisions（它依赖本包），Timer 到期仍由 decisions 处理。
+func rearmAskTimeout(tx *store.Tx, it domain.Item) error {
+	a := it.Ask
+	if it.Phase != domain.PhaseNeedsInput || a == nil || a.Resolution != nil || a.DefaultOnTimeout == "" || a.Deadline == nil {
+		return nil
+	}
+	id := "ask_" + it.ID
+	if err := clock.Cancel(tx, id); err != nil && !isNotFound(err) {
+		return err
+	}
+	_, err := clock.Add(tx, domain.Timer{ID: id, Target: it.ID, Kind: domain.TimerDue, At: *a.Deadline})
+	return err
+}
+
 // planRevert 找出要撤销的事件。只撤销 agent 做的、且是该事项最新的一次事项变更：
 // 反向命令恢复的是变更前的快照，后面还有别的改动时直接恢复会把它们一并抹掉。
 func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
@@ -731,6 +747,9 @@ func (s *svc) revert() command.Spec {
 					err = setRelation(c.Tx, *rp.rel, rp.remove)
 				} else {
 					err = syncTimer(c.Tx, rp.cur, rp.next)
+				}
+				if err == nil {
+					err = rearmAskTimeout(c.Tx, rp.next)
 				}
 			}
 			if err != nil {

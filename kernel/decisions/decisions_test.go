@@ -687,3 +687,20 @@ func TestRevertChatAnswer(t *testing.T) {
 	}
 	e.verify(t)
 }
+
+// 撤销聊天代答后，带 default_on_timeout 的请求要重新按截止时间自动决定。
+func TestRevertChatAnswerRearmsTimeout(t *testing.T) {
+	e := setup(t)
+	id := e.asked(t, map[string]any{"default_on_timeout": "B", "deadline": t0.Add(time.Minute)})
+	e.must(t, delegate, "decision.answer", `owner: "选 A"`, map[string]any{"id": id, "choice": "A"})
+	e.must(t, owner, "item.revert", "", map[string]any{"id": id, "event": e.last(t, id, domain.EvDecisionResolved).Seq})
+
+	e.now = t0.Add(2 * time.Minute)
+	if n, err := e.clk.Tick(bg); n != 1 || err != nil {
+		t.Fatalf("tick: %d %v", n, err)
+	}
+	if r := e.get(t, id).Ask.Resolution; r == nil || r.Choice != "B" || r.ResolvedVia != "timeout" {
+		t.Fatalf("default must apply after revert: %+v", r)
+	}
+	e.verify(t)
+}
