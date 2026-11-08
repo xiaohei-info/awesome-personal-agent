@@ -11,6 +11,7 @@ Candidate capture (design §11.2, appendix A.5): at `on_session_end` (turn level
   and answers 200 `captured: false` otherwise. Under a run identity (`APA_RUN`) the kernel never captures either, and
   the plugin only ever uses the run credential.
 - Asynchronous and invisible: the POST runs in a detached helper process with all output discarded.
+- The turn's own user words go as `X-APA-Evidence` (a delegate credential needs it); failures are written to `$HERMES_HOME/apa-capture.log`.
 - No forced continuation (`inject_message`, `continue`, ...); no judgment logic; any failure is swallowed.
 
 ## Live gate

@@ -49,7 +49,7 @@ def apa(tmp_path, monkeypatch):
     table = tmp_path / "executors.json"
     table.write_text(json.dumps([{"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"],
                                   "command": ["/usr/bin/codex", "exec", "{prompt}"]}]))
-    for k, v in {"APA_BIN": str(p), "APA_LOG": str(tmp_path / "log"), "APA_HERMES_EXECUTORS": str(table)}.items():
+    for k, v in {"HERMES_HOME": str(tmp_path), "APA_BIN": str(p), "APA_LOG": str(tmp_path / "log"), "APA_HERMES_EXECUTORS": str(table)}.items():
         monkeypatch.setenv(k, v)
     return tmp_path
 
@@ -118,9 +118,36 @@ def test_non_executor_tools_are_ignored_even_with_an_item_id(apa, hooks):
 def test_terminal_running_a_configured_executor_reports_by_exit_code(apa, hooks):
     cmd = f"codex exec 'work on it. Ledger item: {ITEM}'"
     hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": cmd},
+                            result=json.dumps({"output": "all green, commit 1a2b3c4d pushed", "exit_code": 0, "error": None}))
+    (c,) = calls(apa, 1)
+    assert c["argv"][:2] == ["report", ITEM] and flag(c["argv"], "--outcome") == "done"
+    assert flag(c["argv"], "--summary") == "all green, commit 1a2b3c4d pushed"
+    assert flag(c["argv"], "--evidence") == f"插件捕获：terminal 对 {ITEM} 的调用结果，会话 s；commit 1a2b3c4d"
+
+
+# Defect dfx-992917373ac0: a success with no PR / commit / link is only progress; done needs evidence the kernel can keep.
+def test_success_without_a_reference_reports_progress_not_done(apa, hooks):
+    hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": f"codex exec 'x {ITEM}'"},
                             result=json.dumps({"output": "all green", "exit_code": 0, "error": None}))
     (c,) = calls(apa, 1)
-    assert c["argv"][:2] == ["report", ITEM] and flag(c["argv"], "--outcome") == "done" and flag(c["argv"], "--summary") == "all green"
+    assert flag(c["argv"], "--outcome") == "progress" and flag(c["argv"], "--summary") == "all green"
+    assert flag(c["argv"], "--evidence") == f"插件捕获：terminal 对 {ITEM} 的调用结果，会话 s"
+
+
+def test_every_report_carries_plugin_capture_evidence_and_links_are_extracted(apa, hooks):
+    hooks["post_tool_call"](tool_name="delegate_task", session_id="main-1", args={"goal": f"go {ITEM}"},
+                            result=json.dumps({"results": [{"task_index": 0, "status": "completed",
+                                                            "summary": "opened https://github.com/o/r/pull/7 on branch fix/x"}]}))
+    (c,) = calls(apa, 1)
+    assert flag(c["argv"], "--outcome") == "done"
+    assert flag(c["argv"], "--evidence") == (f"插件捕获：delegate_task 对 {ITEM} 的调用结果，会话 main-1；"
+                                            "https://github.com/o/r/pull/7；branch fix/x")
+
+
+def test_a_failed_report_is_written_to_the_local_log_only(apa, hooks, monkeypatch):
+    monkeypatch.setenv("APA_BIN", "/nonexistent/apa")
+    assert hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} PR #3", child_status="completed") is None
+    assert "subagent_stop" in (apa / "apa-receipt.log").read_text()
 
 
 def test_terminal_failure_reports_blocked(apa, hooks):

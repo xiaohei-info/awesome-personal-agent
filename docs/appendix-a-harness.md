@@ -20,8 +20,8 @@
 | 会话开始注入 | `apa context --session <id> --scope cwd --format inject`，再跑 `apa agents check` | 不超过 2 秒，任何非零退出都放行；压缩、恢复后重新注入 |
 | 人格注入 | `apa persona` | 新会话开始时读取，不超过 2 秒，失败放行；写入最顶层的系统提示词并按会话冻结；不支持系统提示词段的 harness 退化为会话开始注入（§11.2） |
 | 消息前注入 | `apa context --session <id> --scope cwd --format inject` | 同上；不阻断用户消息；增量为空时不输出 |
-| 回执捕获 | `apa report`，异步 | 只匹配执行者类工具且参数含事项 id；无事项 id 不捕获；对模型无可见输出 |
-| 候选捕获 | `POST /capture`，异步 | 只在开启捕获的项目；不用强制续跑；运行身份下不生效 |
+| 回执捕获 | `apa report`，异步 | 只匹配执行者类工具且参数含事项 id；无事项 id 不捕获；对模型无可见输出。沿用会话凭据，带 `--evidence "插件捕获：<工具名> 对 <事项 id> 的调用结果，会话 <id>"`，并附从执行者输出提取的 PR、commit、分支或链接；提取不到时报 `progress`，不报 `done`；失败写入插件本地日志 |
+| 候选捕获 | `POST /capture`，异步 | 只在开启捕获的项目；不用强制续跑；运行身份下不生效；带本回合本人原话作为 `X-APA-Evidence`（候选仍只落 `proposed`）；失败写入插件本地日志 |
 | 压缩前保存 | 同候选捕获 | 只保存，不阻止压缩 |
 | 会话唤醒 | 领取 `class: wake` 的投递，用插件自己的 token 经 `POST /runs/{id}/credential` 把运行 id 换成运行凭据，调 harness 的唤醒入口，并把 `APA_RUN` 与运行凭据透传到该回合的 CLI 调用（主文档 §13.6） | 网关插件才有 |
 | 执行者清单 | 经 `apa declare` 提交本 harness 可用的执行者，并在插件内实现从执行者 id 到调用方式的映射 | 不把调用命令写进账本；本人在 Web 确认后才进入清单 |

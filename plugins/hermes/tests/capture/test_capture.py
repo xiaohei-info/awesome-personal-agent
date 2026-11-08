@@ -3,6 +3,7 @@ import importlib.util
 import os
 import pathlib
 import sys
+import time
 
 import pytest
 
@@ -37,6 +38,7 @@ def env(kernel, tmp_path, monkeypatch):
     monkeypatch.setenv("APA_URL", kernel["url"])
     monkeypatch.setenv("APA_TOKEN", "tok-1")
     monkeypatch.setenv("APA_HOME", str(tmp_path / "apahome"))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     return monkeypatch
 
 
@@ -64,6 +66,23 @@ def test_turn_end_posts_the_delta_with_session_credential_and_location(hooks, ke
     assert r["body"]["text"] == "user: we should renew the passport before March\nassistant: Noted, I can add that as a task."
     assert r["body"]["path"] == os.getcwd() and r["body"]["host"]
     assert "session" not in r["body"]
+
+
+# Defect dfx-992917373ac0: a delegate credential needs the owner's own words; they ride as X-APA-Evidence (UTF-8 intact).
+def test_the_turns_own_user_words_are_sent_as_evidence_and_failures_go_to_the_local_log(hooks, kernel, tmp_path):
+    turn(hooks, "s1", "请帮我\n续一下护照", "好的")
+    hooks["on_session_end"](session_id="s1", completed=True)
+    (r,) = posts(kernel, 1)
+    assert r["evidence"] == "请帮我 续一下护照"
+    kernel["status"] = 400
+    turn(hooks, "s2", "again", "ok")
+    hooks["on_session_end"](session_id="s2", completed=True)
+    posts(kernel, 2)
+    log = tmp_path / "apa-capture.log"
+    end = time.time() + 5
+    while time.time() < end and not (log.exists() and "400" in log.read_text()):
+        time.sleep(0.05)
+    assert "400" in log.read_text()
 
 
 # ACT-CAP-01: the cursor is per session; a turn is sent once, later turns send only what is new.

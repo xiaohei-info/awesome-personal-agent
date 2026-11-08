@@ -15,7 +15,8 @@ def kernel():
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
             state["log"].append({"path": self.path, "session": self.headers.get("X-APA-Session"),
-                                 "auth": self.headers.get("Authorization"), "body": json.loads(self.rfile.read(n) or b"null")})
+                                 "auth": self.headers.get("Authorization"),
+                                 "evidence": (self.headers.get("X-APA-Evidence") or "").encode("latin-1").decode("utf-8") or None, "body": json.loads(self.rfile.read(n) or b"null")})
             data = json.dumps(state["reply"]).encode()
             self.send_response(state["status"])
             self.send_header("Content-Type", "application/json")

@@ -9,11 +9,11 @@ Fallback for executors that do not run `apa report` themselves. Captured only wh
   starts with an `external-cli` executor from the owner's table (`$APA_HERMES_EXECUTORS`).
 - `subagent_stop` when the child summary names an item id (the hook carries no arguments).
 
-`completed` / exit 0 reports `done` with the result as summary; anything else reports `blocked` with the error.
+`completed` / exit 0 reports `done` with the result as summary only when it names a PR, commit, branch or link; otherwise `progress` (item stays open). Anything else reports `blocked` with the error. Every report carries `--evidence "插件捕获：<tool> 对 <item> 的调用结果，会话 <id>"` plus the extracted refs.
 The same item and outcome is reported once per process; the kernel also gets an idempotency key.
 
 No item id, no capture. The `apa report` runs detached with all output discarded, so the model sees nothing;
-any failure, missing binary or exception is swallowed. The kernel judges the receipt (credential binding, exit 4 ...).
+any failure, missing binary or exception is swallowed and written to `$HERMES_HOME/apa-receipt.log`. The kernel judges the receipt (credential binding, exit 4 ...).
 
 ## Live gate
 

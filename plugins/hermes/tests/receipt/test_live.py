@@ -64,6 +64,7 @@ def kernel():
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
             state["log"].append({"path": self.path, "session": self.headers.get("X-APA-Session"),
+                                 "evidence": (self.headers.get("X-APA-Evidence") or "").encode("latin-1").decode("utf-8"),
                                  "body": json.loads(self.rfile.read(n) or b"null")})
             data = b'{"ok": true}'
             self.send_response(200)
@@ -123,17 +124,25 @@ def test_flow_delegate_recover_receipt_reaches_the_child_item_and_is_invisible_t
     (r,) = reports(kernel, 1)
     assert r["path"] == f"/v1/items/{ITEM}/report" and r["session"] == "main-1"
     assert r["body"]["outcome"] == "done" and r["body"]["summary"] == "PR #12 opened"
+    assert r["evidence"] == f"插件捕获：delegate_task 对 {ITEM} 的调用结果，会话 main-1；PR #12"  # kernel needs it under a delegate credential
 
 
 def test_flow_delegate_recover_subagent_stop_and_terminal_executor_are_captured(hermes, kernel):
     other = "itm_ffee00112233"
-    hermes(("subagent_stop", {"parent_session_id": "main-2", "child_summary": f"{ITEM} finished", "child_status": "completed",
+    hermes(("subagent_stop", {"parent_session_id": "main-2", "child_summary": f"{ITEM} finished, PR #3", "child_status": "completed",
                               "child_role": None, "tool_call_history": [], "duration_ms": 1}),
            ("post_tool_call", {"tool_name": "terminal", "session_id": "main-2", "args": {"command": f"codex exec 'x {other}'"},
                                "result": json.dumps({"output": "", "exit_code": 1, "error": "crashed"})}))
     got = {r["path"]: r for r in reports(kernel, 2)}
     assert got[f"/v1/items/{ITEM}/report"]["body"]["outcome"] == "done"
+    assert got[f"/v1/items/{ITEM}/report"]["evidence"].startswith("插件捕获：subagent_stop")
     assert got[f"/v1/items/{other}/report"]["body"]["outcome"] == "blocked" and got[f"/v1/items/{other}/report"]["session"] == "main-2"
+
+
+def test_flow_delegate_recover_success_without_a_reference_stays_progress(hermes, kernel):
+    hermes(delegate(f"go {ITEM}", "looks fine"))
+    (r,) = reports(kernel, 1)
+    assert r["body"]["outcome"] == "progress" and r["body"]["summary"] == "looks fine"
 
 
 def test_flow_delegate_recover_no_item_id_no_report_and_hermes_unaffected(hermes, kernel):
