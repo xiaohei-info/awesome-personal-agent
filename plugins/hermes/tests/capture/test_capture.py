@@ -37,6 +37,7 @@ def env(kernel, tmp_path, monkeypatch):
     monkeypatch.setenv("APA_URL", kernel["url"])
     monkeypatch.setenv("APA_TOKEN", "tok-1")
     monkeypatch.setenv("APA_HOME", str(tmp_path / "apahome"))
+    monkeypatch.setenv("APA_HERMES_CAPTURE_DIR", str(tmp_path / "state"))
     return monkeypatch
 
 
@@ -64,6 +65,95 @@ def test_turn_end_posts_the_delta_with_session_credential_and_location(hooks, ke
     assert r["body"]["text"] == "user: we should renew the passport before March\nassistant: Noted, I can add that as a task."
     assert r["body"]["path"] == os.getcwd() and r["body"]["host"]
     assert "session" not in r["body"]
+
+
+# ACT-CAP-01: audit identity. Session + harness + idempotency key, never an evidence (本人原话) header.
+def test_request_carries_harness_session_and_idempotency_key_but_no_evidence(hooks, kernel):
+    turn(hooks, "s1", "hello", "hi")
+    hooks["on_session_end"](session_id="s1")
+    (r,) = posts(kernel, 1)
+    assert r["harness"] == "hermes" and r["session"] == "s1" and r["key"].startswith("hermes-capture-")
+    assert r["evidence"] is None
+
+
+def state(tmp_path):
+    return tmp_path / "state"
+
+
+def log_text(tmp_path):
+    f = state(tmp_path) / "capture.log"
+    return f.read_text() if f.exists() else ""
+
+
+def wait_for(cond, wait=15):
+    import time
+    end = time.time() + wait
+    while time.time() < end and not cond():
+        time.sleep(0.05)
+    return cond()
+
+
+# ACT-CAP-04: kernel answers but refuses (4xx): logged without text or credentials, kept nowhere, never re-sent.
+def test_rejection_is_logged_not_resent_and_the_log_has_no_secrets(hooks, kernel, tmp_path):
+    kernel["status"] = 403
+    turn(hooks, "s", "secret conversation words", "reply")
+    hooks["on_session_end"](session_id="s")
+    assert len(posts(kernel, 1)) == 1
+    assert wait_for(lambda: "status=403" in log_text(tmp_path))
+    kernel["status"] = 200
+    turn(hooks, "s", "next", "turn")
+    hooks["on_session_end"](session_id="s")
+    assert len(posts(kernel, 2)) == 2  # only the new turn; the refused one is not repeated
+    assert [r["body"]["text"] for r in kernel["log"]] == ["user: secret conversation words\nassistant: reply", "user: next\nassistant: turn"]
+    log = log_text(tmp_path)
+    assert "POST /v1/capture" in log and "secret conversation" not in log and "tok-1" not in log
+    assert not list((state(tmp_path) / "pending").glob("*"))
+
+
+# ACT-CAP-04: unreachable kernel: request kept, logged; the next hook after recovery re-sends it once, same key.
+def test_unreachable_kernel_keeps_request_and_resends_once_with_the_original_key(hooks, kernel, env, tmp_path):
+    env.setenv("APA_URL", "http://127.0.0.1:9")
+    turn(hooks, "s", "keep me", "ok")
+    hooks["on_session_end"](session_id="s")
+    assert wait_for(lambda: "unreachable" in log_text(tmp_path))
+    kept = list((state(tmp_path) / "pending").glob("*.json"))
+    assert len(kept) == 1
+    key = kept[0].stem
+    assert posts(kernel, 1, wait=0.5) == []
+    env.setenv("APA_URL", kernel["url"])  # kernel recovered; next hook (a plain turn end) triggers the re-send
+    turn(hooks, "s", "later", "turn")
+    hooks["on_session_end"](session_id="s")
+    got = posts(kernel, 2)
+    assert sorted(r["body"]["text"] for r in got) == ["user: keep me\nassistant: ok", "user: later\nassistant: turn"]
+    assert {r["key"] for r in got if "keep me" in r["body"]["text"]} == {key}
+    hooks["post_llm_call"](session_id="s", user_message="x", assistant_response="y")  # no third send of the kept one
+    assert len(posts(kernel, 3, wait=1)) == 2
+    assert not list((state(tmp_path) / "pending").glob("*"))
+
+
+# ACT-CAP-04: a re-send the kernel refuses is handled like any refusal: logged, dropped, not retried.
+def test_refused_resend_is_logged_and_dropped(hooks, kernel, env, tmp_path):
+    env.setenv("APA_URL", "http://127.0.0.1:9")
+    turn(hooks, "s", "kept", "x")
+    hooks["on_session_end"](session_id="s")
+    assert wait_for(lambda: list((state(tmp_path) / "pending").glob("*.json")))
+    env.setenv("APA_URL", kernel["url"])
+    kernel["status"] = 400
+    hooks["post_llm_call"](session_id="s", user_message="", assistant_response="")  # a hook with nothing new still re-sends
+    assert len(posts(kernel, 1)) == 1
+    assert wait_for(lambda: "status=400" in log_text(tmp_path))
+    hooks["post_llm_call"](session_id="s", user_message="", assistant_response="")
+    assert len(posts(kernel, 2, wait=1)) == 1
+
+
+# Hook budget: handing off to the detached helper stays far below the 2s limit even with a dead kernel.
+def test_hook_returns_fast(hooks, env):
+    import time
+    env.setenv("APA_URL", "http://10.255.255.1:9")
+    turn(hooks, "s", "x", "y")
+    t = time.time()
+    hooks["on_session_end"](session_id="s")
+    assert time.time() - t < 2
 
 
 # ACT-CAP-01: the cursor is per session; a turn is sent once, later turns send only what is new.
@@ -130,15 +220,16 @@ def test_saved_credentials_are_used_without_env(hooks, kernel, env, tmp_path):
 
 
 # ACT-CAP-04: fail open. Dead kernel, 5xx, no credentials: hooks return None, raise nothing.
-def test_kernel_down_or_failing_never_raises(hooks, kernel, env):
+def test_kernel_down_or_failing_never_raises(hooks, kernel, env, tmp_path):
     env.setenv("APA_URL", "http://127.0.0.1:9")
     turn(hooks, "s", "x", "y")
     assert hooks["on_session_end"](session_id="s") is None
+    assert wait_for(lambda: list((tmp_path / "state" / "pending").glob("*.json")))
     env.setenv("APA_URL", kernel["url"])
     kernel["status"] = 500
     turn(hooks, "t", "x", "y")
     assert hooks["on_session_end"](session_id="t") is None
-    assert len(posts(kernel, 1)) == 1
+    assert len(posts(kernel, 2)) == 2  # the new turn plus the kept one, both refused with 500
 
 
 def test_malformed_hook_arguments_are_swallowed(hooks):
@@ -154,10 +245,12 @@ def test_oversized_delta_keeps_the_most_recent_text(hooks, kernel):
 
 
 # The detached helper runs in another process; these exercise its code in-process so coverage sees it.
-def test_helper_sends_and_skips_without_credentials(kernel, env):
+def test_helper_sends_and_skips_without_credentials(kernel, env, tmp_path):
     mod = load()
-    mod._send({"text": "t", "session": "s9", "path": "/p", "host": "h"}, {"APA_URL": kernel["url"], "APA_TOKEN": "k"})
-    mod._send({"text": "t", "session": "s9"}, {"APA_RUN": "1", "APA_URL": kernel["url"]})  # run without a credential: no send
+    e = {"APA_HERMES_CAPTURE_DIR": str(tmp_path / "state")}
+    mod._send({"text": "t", "session": "s9", "path": "/p", "host": "h"}, dict(e, APA_URL=kernel["url"], APA_TOKEN="k"))
+    mod._send({"text": "t2", "session": "s9"}, dict(e, APA_RUN="1", APA_URL=kernel["url"]))  # run without a credential: no send, logged
+    assert "no usable credentials" in log_text(tmp_path)
     (r,) = posts(kernel, 1)
     assert r["session"] == "s9" and r["auth"] == "Bearer k" and r["body"] == {"text": "t", "path": "/p", "host": "h"}
 
@@ -169,4 +262,5 @@ def test_helper_main_reads_stdin_and_swallows_errors(kernel, env, monkeypatch):
     runpy.run_path(str(CAPTURE / "__init__.py"), run_name="__main__")
     assert posts(kernel, 1)[0]["session"] == "m"
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
-    runpy.run_path(str(CAPTURE / "__init__.py"), run_name="__main__")  # must not raise
+    runpy.run_path(str(CAPTURE / "__init__.py"), run_name="__main__")  # must not raise, but is logged
+    assert "helper failed" in (pathlib.Path(os.environ["APA_HERMES_CAPTURE_DIR"]) / "capture.log").read_text()

@@ -6,17 +6,26 @@ all belong to the kernel (it answers 200 `captured: false` otherwise).
 end hook flushes that buffer (the per-session cursor: a turn is sent once). The POST runs in a detached
 helper process (`python capture/__init__.py`, JSON on stdin), prints nothing and never uses forced
 continuation; any failure is swallowed and never reaches Hermes.
+
+Failures are not silent: every one is appended to the plugin-local log (command, status/reason; never credentials
+or conversation text). A kernel that answers but refuses is only logged. An unreachable kernel keeps the request
+(with its Idempotency-Key) in the state dir; the next hook re-sends it once the kernel is back (A.1).
 """
+import hashlib
 import json
 import os
 import pathlib
 import socket
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 
 TEXT_MAX = 20000
 TIMEOUT_SECS = 10
+
+HARNESS = "hermes"
 
 _pending = {}  # session id -> [turn text, ...] not yet sent
 
@@ -30,11 +39,44 @@ def _turn_text(user_message, assistant_response):
     return "\n".join(parts)
 
 
+def _state_dir(env):
+    d = env.get("APA_HERMES_CAPTURE_DIR") or str(pathlib.Path(env.get("HERMES_HOME") or pathlib.Path.home() / ".hermes") / "apa-capture")
+    return pathlib.Path(d)
+
+
+def _log(env, reason):
+    """One line: command and reason only (no credentials, no conversation text)."""
+    try:
+        d = _state_dir(env)
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "capture.log", "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} POST /v1/capture {reason}\n")
+    except OSError:
+        pass
+
+
+def _spawn(payload):
+    """Hand the payload (or None: only re-send what is kept) to a detached helper; returns at once."""
+    p = subprocess.Popen([sys.executable, "-I", str(pathlib.Path(__file__).resolve())], stdin=subprocess.PIPE,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    p.stdin.write(json.dumps(payload).encode())
+    p.stdin.close()
+
+
+def _has_kept():
+    try:
+        return any(_state_dir(os.environ).joinpath("pending").glob("*.json"))
+    except OSError:
+        return False
+
+
 def post_llm_call(session_id="", user_message=None, assistant_response=None, **_):
     try:
         text = _turn_text(user_message, assistant_response)
         if session_id and text:
             _pending.setdefault(str(session_id), []).append(text)
+        if _has_kept():
+            _spawn(None)
     except Exception:
         pass
 
@@ -43,13 +85,11 @@ def on_session_end(session_id="", **_):
     try:
         turns = _pending.pop(str(session_id), None)
         if not turns:
+            if _has_kept():
+                _spawn(None)
             return
         text = "\n\n".join(turns)[-TEXT_MAX:]
-        payload = {"text": text, "session": str(session_id), "path": os.getcwd(), "host": socket.gethostname()}
-        p = subprocess.Popen([sys.executable, "-I", str(pathlib.Path(__file__).resolve())], stdin=subprocess.PIPE,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        p.stdin.write(json.dumps(payload).encode())
-        p.stdin.close()
+        _spawn({"text": text, "session": str(session_id), "path": os.getcwd(), "host": socket.gethostname()})
     except Exception:
         pass  # fail open: capture problems must never reach the conversation
 
@@ -69,15 +109,56 @@ def _credentials(env):
     return url, token
 
 
-def _send(payload, env):
-    url, token = _credentials(env)
+def _post(item, env):
+    """One POST. Returns None when delivered or refused (refusal is logged), "unreachable" when it should be kept."""
+    try:
+        url, token = _credentials(env)
+    except (OSError, ValueError) as e:
+        _log(env, "no usable credentials: " + type(e).__name__)
+        return None
     if not (url and token):
-        return
-    session = payload.pop("session")
-    req = urllib.request.Request(url.rstrip("/") + "/v1/capture", data=json.dumps(payload).encode(), method="POST",
+        _log(env, "no usable credentials")
+        return None
+    req = urllib.request.Request(url.rstrip("/") + "/v1/capture", data=json.dumps(item["body"]).encode(), method="POST",
                                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json",
-                                          "X-APA-Session": session})
-    urllib.request.urlopen(req, timeout=TIMEOUT_SECS).read()
+                                          "X-APA-Session": item["session"], "X-APA-Harness": HARNESS,
+                                          "Idempotency-Key": item["key"]})
+    try:
+        urllib.request.urlopen(req, timeout=TIMEOUT_SECS).read()
+    except urllib.error.HTTPError as e:  # kernel reachable but refused: logged by us, health view by the kernel; no resend
+        _log(env, f"status={e.code} reason={e.reason}")
+    except (urllib.error.URLError, OSError) as e:  # URLError, refused connection, timeout
+        _log(env, "kernel unreachable: " + str(getattr(e, "reason", e) or type(e).__name__))
+        return "unreachable"
+    return None
+
+
+def _send(payload, env):
+    """Keep the request first (so a crash or dead kernel loses nothing), then send everything kept, oldest first."""
+    pend = _state_dir(env) / "pending"
+    pend.mkdir(parents=True, exist_ok=True)
+    if payload:
+        session = payload.pop("session")
+        key = "hermes-capture-" + hashlib.sha1(f"{session}|{payload.get('text')}".encode()).hexdigest()[:16]
+        f = pend / (key + ".json")
+        f.write_text(json.dumps({"session": session, "key": key, "body": payload}))
+        f.chmod(0o600)
+    for f in sorted(pend.glob("*.json"), key=lambda p: p.stat().st_mtime):
+        claimed = f.with_suffix(".sending")
+        try:
+            f.rename(claimed)  # atomic claim: two helpers never send the same kept request
+        except OSError:
+            continue
+        try:
+            item = json.loads(claimed.read_text())
+            outcome = _post(item, env)
+        except (OSError, ValueError, KeyError) as e:
+            _log(env, "unusable kept request: " + type(e).__name__)
+            outcome = None
+        if outcome == "unreachable":
+            claimed.rename(f)
+            return  # the kernel is down: no point trying the rest
+        claimed.unlink()
 
 
 def register(ctx):
@@ -88,5 +169,5 @@ def register(ctx):
 if __name__ == "__main__":
     try:
         _send(json.load(sys.stdin), dict(os.environ))
-    except Exception:
-        pass
+    except Exception as e:
+        _log(dict(os.environ), "helper failed: " + type(e).__name__)

@@ -14,7 +14,8 @@ def kernel():
     class H(BaseHTTPRequestHandler):
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
-            state["log"].append({"path": self.path, "session": self.headers.get("X-APA-Session"),
+            state["log"].append({"path": self.path, "session": self.headers.get("X-APA-Session"), "harness": self.headers.get("X-APA-Harness"),
+                                 "key": self.headers.get("Idempotency-Key"), "evidence": self.headers.get("X-APA-Evidence"),
                                  "auth": self.headers.get("Authorization"), "body": json.loads(self.rfile.read(n) or b"null")})
             data = json.dumps(state["reply"]).encode()
             self.send_response(state["status"])
