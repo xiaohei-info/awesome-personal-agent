@@ -4,6 +4,7 @@ package ops
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,8 +57,8 @@ func (s signal) outcall(t *testing.T) outcallDetail {
 	return decode[outcallDetail](t, string(s.Detail))
 }
 
-// the eight signal ids, in design §15.2 order.
-var signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "rule_fallbacks"}
+// the ten signal ids, in design §15.2 order.
+var signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "rule_fallbacks", "receipt_failures", "other_alerts"}
 
 // quietWindow 是 ACT-HLT-02 里"不做任何修复操作"的观察时长。验收文档为 10 分钟；默认按 30 秒缩放
 // （合约命令不带 -timeout，go test 默认 10 分钟超时放不下 10 分钟窗口加造数），
@@ -80,10 +81,10 @@ func TestFlowHealth(t *testing.T) {
 	open := f.Projects["acc-open"]
 	var driftItem, tripItem string
 
-	step(t, "全新环境八类信号都正常", func(t *testing.T) {
+	step(t, "全新环境十类信号都正常", func(t *testing.T) {
 		h := f.health()
 		if !h.Healthy || len(h.Signals) != len(signalIDs) {
-			t.Fatalf("全新环境应健康且有八类信号: %+v", h)
+			t.Fatalf("全新环境应健康且有十类信号: %+v", h)
 		}
 		for i, id := range signalIDs {
 			if h.Signals[i].ID != id || !h.Signals[i].OK {
@@ -120,6 +121,21 @@ event_rules:
 		}
 		writeFile(t, p, edited)
 		f.waitFor("规则内容变化后回退 observe 进入健康视图", 30*time.Second, func() bool { return !f.health().sig("rule_fallbacks").OK })
+	})
+
+	step(t, "造出：回执与捕获失败", func(t *testing.T) {
+		// 只读凭据提交捕获：内核可达但拒绝（退出码 4），同一事务记 health.alert。
+		body, _ := json.Marshal(map[string]string{"text": "HLT 只读凭据的捕获", "project": f.Projects["acc-open"]})
+		if r := f.APIRaw("POST", "/v1/capture", string(body), f.OBS); r.Code != http.StatusForbidden {
+			t.Fatalf("只读凭据的捕获应被拒绝: %d %s", r.Code, r.Body)
+		}
+		f.waitFor("回执与捕获失败进入健康视图", 30*time.Second, func() bool { return !f.health().sig("receipt_failures").OK })
+	})
+
+	step(t, "造出：其他健康告警", func(t *testing.T) {
+		f.auto("bad-action")
+		f.task("HLT 规则动作失败", "acc-bad")
+		f.waitFor("规则动作失败进入健康视图", 30*time.Second, func() bool { return !f.health().sig("other_alerts").OK })
 	})
 
 	step(t, "造出：AGENTS.md 漂移", func(t *testing.T) {
@@ -190,14 +206,14 @@ event_rules:
 	})
 
 	var cli healthView
-	step(t, "ACT-HLT-01 八类信号都显示，两端一致，每类有修复入口", func(t *testing.T) {
+	step(t, "ACT-HLT-01 十类信号都显示，两端一致，每类有修复入口", func(t *testing.T) {
 		cli = f.health()
 		web := f.webHealth()
 		if cli.Healthy {
-			t.Fatal("八类问题都在时不应报健康")
+			t.Fatal("十类问题都在时不应报健康")
 		}
 		if len(cli.Signals) != len(signalIDs) {
-			t.Fatalf("应恒有八类信号: %+v", cli.Signals)
+			t.Fatalf("应恒有十类信号: %+v", cli.Signals)
 		}
 		for i, id := range signalIDs {
 			s := cli.Signals[i]
@@ -230,8 +246,8 @@ event_rules:
 	step(t, "ACT-HLT-02 只报不修：健康视图本身不改任何事项、规则或来源", func(t *testing.T) {
 		rulesBefore := f.rulesText()
 		srcBefore := f.apa(f.OBS, 0, "source", "show", "src_acc_fail").Stdout
-		whyBefore := f.apa(f.OBS, 0, "why", tripItem).Stdout
-		driftWhyBefore := f.apa(f.OBS, 0, "why", driftItem).Stdout
+		whyBefore := userSteps(t, f.apa(f.OBS, 0, "why", tripItem).Stdout)
+		driftWhyBefore := userSteps(t, f.apa(f.OBS, 0, "why", driftItem).Stdout)
 		start := time.Now()
 		seq0 := f.lastSeq()
 
@@ -242,8 +258,8 @@ event_rules:
 		}
 
 		eq(t, "规则模式（GET /v1/rules）", f.rulesText(), rulesBefore)
-		eq(t, "触发链路熔断的事项回放（apa why）", f.apa(f.OBS, 0, "why", tripItem).Stdout, whyBefore)
-		eq(t, "漂移事项回放（apa why）", f.apa(f.OBS, 0, "why", driftItem).Stdout, driftWhyBefore)
+		eq(t, "触发链路熔断的事项回放（apa why）", userSteps(t, f.apa(f.OBS, 0, "why", tripItem).Stdout), whyBefore)
+		eq(t, "漂移事项回放（apa why）", userSteps(t, f.apa(f.OBS, 0, "why", driftItem).Stdout), driftWhyBefore)
 		var srcAfter, srcPrev struct {
 			Source struct{ Enabled bool } `json:"source"`
 		}
@@ -267,13 +283,36 @@ event_rules:
 				t.Errorf("安静期间出现修复类 Event: seq=%d type=%s object=%s actor=%+v", e.Seq, e.Type, e.Object, e.Actor)
 			}
 		}
-		// 八类问题仍在：没有任何一类被自动修好。
+		// 十类问题仍在：没有任何一类被自动修好。
 		for _, id := range signalIDs {
 			if f.health().sig(id).OK {
 				t.Errorf("信号 %s 在没有人修复的情况下变正常了（健康视图不得自行修复）", id)
 			}
 		}
 	})
+}
+
+// userSteps 去掉 apa why 回放里内核后台（system 操作者）的步骤：模型替身故障下的卡片摘要起草会在安静期内
+// 异步追加 run.finished 与 health.alert，它们不是健康视图发起的（与下方审计事件检查同一口径）。
+func userSteps(t *testing.T, out string) string {
+	t.Helper()
+	var r struct {
+		Steps []struct {
+			Actor struct{ Type string } `json:"actor"`
+			Seq   int64                 `json:"seq"`
+			Type  string                `json:"type"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Fatalf("apa why 输出不是 JSON: %v\n%s", err, out)
+	}
+	var kept []string
+	for _, s := range r.Steps {
+		if s.Actor.Type != "system" {
+			kept = append(kept, fmt.Sprintf("%d:%s", s.Seq, s.Type))
+		}
+	}
+	return strings.Join(kept, ",")
 }
 
 func writeFile(t *testing.T, path, content string) {

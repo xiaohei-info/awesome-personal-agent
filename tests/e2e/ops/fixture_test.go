@@ -36,6 +36,10 @@ event_rules:
     mode: observe
     when: {event: item.created, kind: task, tag_any: [acc-probe]}
     do: [{action: call_agent, prompt: acc-loop}]
+  - id: bad-action
+    mode: observe
+    when: {event: item.created, kind: task, tag_any: [acc-bad]}
+    do: [{action: create_timer, after: 0s}]
   - id: loop
     mode: observe
     when: {event: item.created, kind: task}

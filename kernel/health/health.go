@@ -1,4 +1,4 @@
-// Package health 是健康视图的汇总（设计 §15.2）：由既有账本记录与外呼统计读出九类信号，
+// Package health 是健康视图的汇总（设计 §15.2）：由既有账本记录与外呼统计读出十类信号，
 // 长时与短任务两个队列分开给出排队数和最长等待时间。只读、只报不修；不新增存储，不写任何模块的数据。
 // 每个信号的修复入口由展示层链接（来源页、运行详情、项目页等），本包不触发任何修复。
 package health
@@ -10,6 +10,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -81,7 +82,17 @@ type RuleFallback struct {
 	At   time.Time
 }
 
-// View 是九类信号。空切片/零值表示该信号当前正常。
+// ReceiptFailure 是一次回执或捕获被内核拒绝（退出码 2、4、23）的告警；Credential 是被拒绝的操作者（凭据）。
+type ReceiptFailure struct {
+	Seq        int64
+	Object     string
+	Command    string
+	Exit       int
+	Credential string
+	at         time.Time
+}
+
+// View 是十类信号。空切片/零值表示该信号当前正常。
 type View struct {
 	SourceFailures   []SourceFailure
 	Outcall          Outcall
@@ -92,14 +103,15 @@ type View struct {
 	ModelUnavailable []ModelIssue
 	Unjudged         []domain.SourceEvent
 	RuleFallbacks    []RuleFallback
+	ReceiptFailures  []ReceiptFailure
 	OtherAlerts      []OtherAlert
 }
 
-// Healthy 为真表示九类信号都正常。
+// Healthy 为真表示十类信号都正常。
 func (v View) Healthy() bool {
 	return len(v.SourceFailures) == 0 && len(v.Outcall.Timeouts) == 0 && len(v.DeliveryBacklog) == 0 &&
 		len(v.ChainTrips) == 0 && len(v.AgentsMDDrift) == 0 && len(v.PackRejections) == 0 &&
-		len(v.ModelUnavailable) == 0 && len(v.Unjudged) == 0 && len(v.RuleFallbacks) == 0 && len(v.OtherAlerts) == 0
+		len(v.ModelUnavailable) == 0 && len(v.Unjudged) == 0 && len(v.RuleFallbacks) == 0 && len(v.ReceiptFailures) == 0 && len(v.OtherAlerts) == 0
 }
 
 // Collect 在调用方的只读事务内汇总。任一来源读取失败都原样返回，不给出残缺的"健康"。
@@ -136,7 +148,7 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	if v.Unjudged, err = runner.Unjudged(tx); err != nil {
 		return View{}, err
 	}
-	if v.ModelUnavailable, v.RuleFallbacks, v.OtherAlerts, err = alerts(tx); err != nil {
+	if v.ModelUnavailable, v.RuleFallbacks, v.ReceiptFailures, v.OtherAlerts, err = alerts(tx); err != nil {
 		return View{}, err
 	}
 	return v, nil
@@ -185,18 +197,20 @@ func queueHealth(s proc.QueueStat) QueueHealth {
 }
 
 // alerts 一遍读完 health.alert 并按来源分到各信号，分类只在这里（熔断由 chain.Trips 读，来源与能力包各有专属信号）：
-// 模型调用失败（kind=screening、followup、decision-card）→ 模型不可用，之后恢复的清除；规则回退 observe；其余 → 通用告警。
+// 模型调用失败（kind=screening、followup、decision-card）→ 模型不可用，之后恢复的清除；规则回退 observe；回执与捕获被拒（kind=receipt）→ 回执与捕获失败，同凭据同命令成功即清除；其余 → 通用告警。
 // shortcut: 每次读全部健康事件，事件很多时加游标或时间窗。
-func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, other []OtherAlert, err error) {
+func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, receipts []ReceiptFailure, other []OtherAlert, err error) {
 	var after int64
 	for {
 		es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvHealthAlert}, after, 500)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		if len(es) == 0 {
-			model, err = recovered(tx, model)
-			return model, rules, other, err
+			if model, err = recovered(tx, model); err == nil {
+				receipts, err = receiptsOpen(tx, receipts)
+			}
+			return model, rules, receipts, other, err
 		}
 		for _, en := range es {
 			e := en.Event
@@ -208,12 +222,16 @@ func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, other []Oth
 				Kind     string `json:"kind"`
 				Rule     string `json:"rule"`
 				Template string `json:"template"`
+				Command  string `json:"command"`
+				Exit     int    `json:"exit"`
 			}
 			_ = json.Unmarshal(e.Payload, &p)
 			switch {
 			case e.Reason == chain.ExceededReason || p.Kind == "source" || p.Kind == "pack":
 			case p.Kind == ScreeningKind || p.Kind == FollowupKind || p.Kind == DraftKind:
 				model = append(model, ModelIssue{Seq: e.Seq, Kind: p.Kind, Object: e.Object, Reason: e.Reason, template: p.Template})
+			case p.Kind == command.ReceiptKind:
+				receipts = append(receipts, ReceiptFailure{Seq: e.Seq, Object: e.Object, Command: p.Command, Exit: p.Exit, Credential: e.Actor.Principal, at: e.At})
 			case e.Reason == RuleFallbackReason:
 				rules = append(rules, RuleFallback{Seq: e.Seq, Rule: p.Rule, At: e.At})
 			default:
@@ -221,6 +239,23 @@ func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, other []Oth
 			}
 		}
 	}
+}
+
+// receiptsOpen 去掉已清除的回执与捕获告警：告警之后同一凭据又成功执行过同一命令（一次即清除）。
+// 另一凭据或另一命令的成功不算。成功以命令管线为 Receipt 命令留下的最近成功标记为凭，调用方带不带幂等键都一样。
+// shortcut: 每条告警一次查询，告警很多时按凭据与命令合并查询。
+func receiptsOpen(tx *store.Tx, rs []ReceiptFailure) ([]ReceiptFailure, error) {
+	var open []ReceiptFailure
+	for _, r := range rs {
+		ok, err := command.SucceededSince(tx, r.Credential, r.Command, r.at)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			open = append(open, r)
+		}
+	}
+	return open, nil
 }
 
 // recovered 去掉已恢复的模型告警：告警之后同一模板有成功的真实调用（run.finished，非复用）即清除。
