@@ -242,7 +242,7 @@ func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, receipts []
 }
 
 // receiptsOpen 去掉已清除的回执与捕获告警：告警之后同一凭据又成功执行过同一命令（一次即清除）。
-// 另一凭据或另一命令的成功不算。成功以带幂等键的调用留下的幂等记录为凭，插件的回执与捕获都带幂等键（附录 A）。
+// 另一凭据或另一命令的成功不算。成功以命令管线为 Receipt 命令留下的最近成功标记为凭，调用方带不带幂等键都一样。
 // shortcut: 每条告警一次查询，告警很多时按凭据与命令合并查询。
 func receiptsOpen(tx *store.Tx, rs []ReceiptFailure) ([]ReceiptFailure, error) {
 	var open []ReceiptFailure

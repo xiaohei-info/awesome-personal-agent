@@ -86,7 +86,7 @@ func TestReceiptClearsOnlyOnSameCredentialAndCommandSuccess(t *testing.T) {
 		// k2 被同凭据同命令的 k4 清除，k1 仍在
 		t.Fatalf("after unrelated successes: %+v", v.ReceiptFailures)
 	}
-	e.call("dlg", "delegate.report", 0, "k5")
+	e.call("dlg", "delegate.report", 0, "") // 不带幂等键的成功同样清除
 	if v := e.collect(nil); len(v.ReceiptFailures) != 0 || !v.Healthy() {
 		t.Fatalf("not cleared: %+v", v.ReceiptFailures)
 	}

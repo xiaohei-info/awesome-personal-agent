@@ -650,8 +650,18 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 			return Result{}, Commit{}, err
 		}
 	}
+	if spec.Receipt { // 每次成功都留一个"最近成功"标记，供回执与捕获告警清除（不依赖调用方带幂等键）
+		if _, err := tx.Exec(`INSERT INTO command_idem (principal, command, key, input_hash, result, version, created_at) VALUES (?, ?, ?, '', '', 0, ?)
+			ON CONFLICT(principal, command, key) DO UPDATE SET created_at = excluded.created_at`,
+			caller.Actor.Principal, spec.Name, lastOKKey, x.now().UnixNano()); err != nil {
+			return Result{}, Commit{}, err
+		}
+	}
 	return out, Commit{Command: spec.Name, Actor: caller.Actor, Object: obj.ID, Seqs: out.Seqs, Input: req.Input, Value: out.Value}, nil
 }
+
+// lastOKKey 是 Receipt 命令"最近成功"标记的键；含 NUL，HTTP 头与 CLI 参数都带不出来，不会与调用方的幂等键冲突。
+const lastOKKey = "\x00last-ok"
 
 func objectOrCommand(o authz.Object, s Spec) string {
 	if o.ID != "" {
@@ -696,7 +706,7 @@ func loadIdem(tx *store.Tx, principal, command, key string) (idemRow, bool, erro
 	return row, err == nil, err
 }
 
-// SucceededSince 报告 principal 是否在 at 及之后成功执行过 command（以带幂等键的成功留下的幂等记录为凭，不新增存储）。
+// SucceededSince 报告 principal 是否在 at 及之后成功执行过 command（Receipt 命令每次成功都更新一条标记，与调用方是否带幂等键无关；复用 command_idem，不新增存储）。
 // 回执与捕获被拒绝的健康告警据此清除（§15.2）。
 func SucceededSince(tx *store.Tx, principal, command string, at time.Time) (bool, error) {
 	r, err := tx.Query("SELECT 1 FROM command_idem WHERE principal = ? AND command = ? AND created_at >= ? LIMIT 1", principal, command, at.UnixNano())
