@@ -1,0 +1,14 @@
+{
+  "ACT-BRF-01": {
+    "brief": "itm_abf49e1964d25978",
+    "period": "",
+    "phase": "waiting",
+    "run": "run_5481945b7da5e14c",
+    "run_state": "succeeded",
+    "sections": 0
+  },
+  "ACT-BRF-01-result": {
+    "passed": false,
+    "step": "ACT-BRF-01 到期生成简报"
+  }
+}
