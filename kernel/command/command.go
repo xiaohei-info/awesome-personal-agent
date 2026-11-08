@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -196,6 +197,9 @@ type Spec struct {
 	// Bound 非空时，delegate 调用满足它则按第一档（agent 自己的工作）：对象绑定只据账本与凭据得出。
 	// 不满足时按 Tier。Tier 为第二档的命令用它声明"绑定时降到第一档"。
 	Bound func(tx *store.Tx, c Caller, o authz.Object, in json.RawMessage) (bool, error)
+	// Receipt 标记回执与捕获类命令（§14.5 失败可见）：它们多由插件异步发起、对模型不可见，
+	// 内核可达但拒绝（退出码 2、4、23）时，管线在独立事务里另记 health.alert。
+	Receipt bool
 	// RequireVersion 为真时必须带 ExpectVersion。
 	RequireVersion bool
 	// Kinds 是允许调用的 ext/webhook 凭据种类；默认这两类凭据不能调用。
@@ -221,6 +225,19 @@ type Commit struct {
 	Value   json.RawMessage
 }
 
+// ReceiptKind 是回执与捕获被拒绝的 health.alert 的 payload.kind。
+const ReceiptKind = "receipt"
+
+// Rejection 是一次被拒绝的命令，交给 OnReject 回调在记 command.rejected 的同一事务里处理。
+type Rejection struct {
+	Command string
+	Actor   domain.Actor
+	Object  string // 授权对象的 id；新建类命令没有对象为空
+	Exit    int
+	Why     string
+	At      time.Time
+}
+
 // Executor 持有登记表与存储。
 type Executor struct {
 	st            *store.Store
@@ -231,6 +248,7 @@ type Executor struct {
 	specs map[string]Spec
 	subs  []func(Commit)
 	inTx  []func(*Ctx) error
+	onRej []func(*store.Tx, Rejection) error
 }
 
 // New 返回 Executor；now 为 nil 时用系统时钟。
@@ -279,6 +297,15 @@ func (x *Executor) OnCommit(f func(Commit)) {
 func (x *Executor) InTx(f func(*Ctx) error) {
 	x.mu.Lock()
 	x.inTx = append(x.inTx, f)
+	x.mu.Unlock()
+}
+
+// OnReject 登记拒绝回调：被拒绝的命令（退出码 20、21、22、23 与运行身份被拒绝的决策命令）在记 command.rejected 之后、
+// 同一事务里按登记顺序调用，返回错误则拒绝留痕一并回滚。供事项转 needs_input 等"依据不足不静默"的处理（§14.5）。
+// 回调不得另开事务，也不得发起外呼。
+func (x *Executor) OnReject(f func(*store.Tx, Rejection) error) {
+	x.mu.Lock()
+	x.onRej = append(x.onRej, f)
 	x.mu.Unlock()
 }
 
@@ -343,6 +370,20 @@ type rejected struct {
 	ev  domain.Event
 }
 
+// trace 记下管线走到哪一步得到的操作者与对象，供失败后的留痕使用。
+type trace struct {
+	actor domain.Actor
+	obj   string
+}
+
+func exitOf(err error) int {
+	var de *domain.Error
+	if errors.As(err, &de) {
+		return de.ExitCode()
+	}
+	return domain.ExitUnclassified
+}
+
 func (r *rejected) Error() string { return r.err.Error() }
 func (r *rejected) Unwrap() error { return r.err }
 
@@ -361,23 +402,28 @@ func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
 	var (
 		res    Result
 		commit Commit
+		tr     trace
 	)
 	err := x.st.Update(ctx, func(tx *store.Tx) error {
 		var err error
-		res, commit, err = x.pipeline(tx, spec, req)
+		res, commit, err = x.pipeline(tx, spec, req, &tr)
 		return err
 	})
 	if err != nil {
-		if rj, ok := err.(*rejected); ok {
-			if rerr := x.st.Update(ctx, func(tx *store.Tx) error {
-				_, e := eventlog.Append(tx, rj.ev)
-				return e
-			}); rerr != nil {
-				return Result{}, fmt.Errorf("command: record rejection: %w (original: %v)", rerr, rj.err)
-			}
-			return Result{}, rj.err
+		rj, isRej := err.(*rejected)
+		orig := err
+		if isRej {
+			orig = rj.err
 		}
-		return Result{}, err
+		code := exitOf(orig)
+		alert := spec.Receipt && (code == domain.ExitUsage || code == domain.ExitPermissionDenied || code == domain.ExitBasisRequired)
+		if !isRej && !alert {
+			return Result{}, err
+		}
+		if rerr := x.st.Update(ctx, func(tx *store.Tx) error { return x.recordRejection(tx, spec, tr, rj, orig, alert) }); rerr != nil {
+			return Result{}, fmt.Errorf("command: record rejection: %w (original: %v)", rerr, orig)
+		}
+		return Result{}, orig
 	}
 	if !res.Replayed {
 		x.mu.RLock()
@@ -390,12 +436,47 @@ func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
 	return res, nil
 }
 
-func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commit, error) {
+// recordRejection 在同一事务里写 command.rejected、跑拒绝回调、记回执与捕获的 health.alert（§14.5）。
+func (x *Executor) recordRejection(tx *store.Tx, spec Spec, tr trace, rj *rejected, orig error, alert bool) error {
+	why := orig.Error()
+	var de *domain.Error
+	if errors.As(orig, &de) {
+		why = de.Why
+	}
+	code, at := exitOf(orig), x.now()
+	if rj != nil {
+		if _, err := eventlog.Append(tx, rj.ev); err != nil {
+			return err
+		}
+		x.mu.RLock()
+		hooks := append([]func(*store.Tx, Rejection) error{}, x.onRej...)
+		x.mu.RUnlock()
+		for _, f := range hooks {
+			if err := f(tx, Rejection{Command: spec.Name, Actor: rj.ev.Actor, Object: tr.obj, Exit: code, Why: why, At: at}); err != nil {
+				return err
+			}
+		}
+	}
+	if !alert {
+		return nil
+	}
+	obj := tr.obj
+	if obj == "" {
+		obj = spec.Name
+	}
+	_, err := eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: obj, Actor: tr.actor, At: at,
+		Reason:  spec.Name + " rejected: " + why,
+		Payload: mustJSON(map[string]any{"kind": ReceiptKind, "command": spec.Name, "exit": code, "why": why})})
+	return err
+}
+
+func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Result, Commit, error) {
 	// 1 认证
 	caller, err := req.Identity.Authenticate(tx)
 	if err != nil {
 		return Result{}, Commit{}, err
 	}
+	tr.actor = caller.Actor
 	if (caller.Kind == auth.Ext || caller.Kind == auth.Webhook) && !kindAllowed(spec, caller.Kind) {
 		return Result{}, Commit{}, domain.NewError(domain.CodePermissionDenied, "credential kind cannot call this command", "use an owner or agent credential")
 	}
@@ -407,6 +488,7 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 	if err != nil {
 		return Result{}, Commit{}, err
 	}
+	tr.obj = obj.ID
 	if caller.Level == authz.LevelRun && caller.RunScope != nil {
 		if obj.InRunScope, obj.InRunProject, err = caller.RunScope(tx, obj); err != nil {
 			return Result{}, Commit{}, err

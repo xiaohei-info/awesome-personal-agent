@@ -9,6 +9,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
@@ -134,3 +136,34 @@ func TestCaptureSameDeltaIsIdempotent(t *testing.T) {
 
 func jsonMarshal(v any) ([]byte, error)   { return json.Marshal(v) }
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+// §14.5 失败可见：捕获被内核拒绝（退出码 2、4）时记 health.alert，对象为命令名（捕获不对应事项）。
+func TestRejectedCaptureRecordsHealthAlert(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	if _, err := e.capture(caller(authz.LevelObserver, "s1"), map[string]any{"project": e.web, "text": "x"}); err == nil {
+		t.Fatal("observer capture must be rejected")
+	}
+	if _, err := e.capture(caller(authz.LevelWorker, "s1"), map[string]any{"project": e.web, "text": "  "}); err == nil {
+		t.Fatal("blank capture must be rejected")
+	}
+	var alerts []domain.Event
+	err := e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvHealthAlert}, 0, 100)
+		for _, en := range es {
+			alerts = append(alerts, en.Event)
+		}
+		return err
+	})
+	if err != nil || len(alerts) != 2 || alerts[0].Object != CmdCapture {
+		t.Fatalf("alerts %+v err %v", alerts, err)
+	}
+	var p struct {
+		Kind string
+		Exit int
+	}
+	_ = json.Unmarshal(alerts[0].Payload, &p)
+	if p.Kind != command.ReceiptKind || p.Exit != domain.ExitPermissionDenied {
+		t.Fatalf("payload %+v", p)
+	}
+}
