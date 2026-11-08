@@ -5,7 +5,7 @@
 //
 // 项目允许的执行者是硬约束：名单外的 assignee 在命令管线的授权步骤被拒绝（退出码 21，带允许的 id 列表，
 // 不写任何子事项，管线记 command.rejected）；assignee 不在执行者清单里是退出码 5。
-// 回执只接受子事项 assignee 绑定的 worker 凭据、delegate 凭据或 Web 本人（运行凭据待运行凭据模块接入范围解析，见 delegate.report 的 Object），
+// 回执只接受事项 assignee 绑定的 worker 凭据、delegate 凭据、Web 本人，或范围内的运行凭据（任务型运行对自己的目标事项回执，附录 C.13），
 // 其他 worker 凭据是退出码 4（授权行"更新自己的事项"：绑定了执行者的凭据，其操作者就是执行者 id）。
 //
 // 父事项回 open：全部委派子事项进入终态（done、dropped）才回；子事项 needs_input 时父事项保持 waiting。
@@ -268,7 +268,7 @@ func report() command.Spec {
 			if err != nil {
 				return authz.Object{}, err
 			}
-			child, err := delegated(tx, v.ID)
+			child, err := reportable(tx, v.ID)
 			if err != nil {
 				return authz.Object{}, err
 			}
@@ -276,7 +276,7 @@ func report() command.Spec {
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
-			child, err := delegated(tx, v.ID)
+			child, err := reportable(tx, v.ID)
 			if err != nil {
 				return err
 			}
@@ -307,12 +307,19 @@ func report() command.Spec {
 				}
 			}
 			ev, _ := json.Marshal(v.Evidence)
+			// 只有委派子事项的回执是 delegation.reported（委派核验等规则按它触发）；运行目标事项走通用事项事件。
 			typ := domain.EvDelegationReported
+			if child.Kind != domain.KindDelegation {
+				typ = domain.EvItemUpdated
+				if v.Outcome == OutcomeDone {
+					typ = domain.EvItemPhaseChanged
+				}
+			}
 			if _, err := c.Emit(domain.Event{Type: typ, Object: child.ID, Reason: reasonOr(v.Reason, "reported "+v.Outcome),
 				Evidence: string(ev), Payload: snap}); err != nil {
 				return nil, err
 			}
-			if v.Outcome == OutcomeDone {
+			if v.Outcome == OutcomeDone && child.Kind == domain.KindDelegation {
 				if parent, ok, err := reopenable(c.Tx, child.ID); err != nil {
 					return nil, err
 				} else if ok {
@@ -328,21 +335,13 @@ func report() command.Spec {
 		}}
 }
 
-// delegated 读出委派子事项；不是委派子事项（kind 或 parent 关系不对）是请求错误。
-func delegated(tx *store.Tx, id string) (domain.Item, error) {
+// reportable 读出回执的目标事项：委派子事项，或任务型运行的目标事项（附录 C.13 的"写回事项"）。
+// 谁能写回由授权决定：绑定的执行者凭据改自己的事项，运行凭据改范围内的事项；这里不再限定 kind。
+func reportable(tx *store.Tx, id string) (domain.Item, error) {
 	if blank(id) {
 		return domain.Item{}, invalid("item id is required")
 	}
-	it, err := items.Get(tx, id)
-	if err != nil {
-		return it, err
-	}
-	if _, has, err := items.ParentOf(tx, id); err != nil {
-		return it, err
-	} else if it.Kind != domain.KindDelegation || !has {
-		return it, invalid("item " + id + " is not a delegated child item")
-	}
-	return it, nil
+	return items.Get(tx, id)
 }
 
 func checkReport(tx *store.Tx, child domain.Item, v reportIn) error {
