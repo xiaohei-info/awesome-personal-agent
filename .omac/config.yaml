@@ -9,6 +9,7 @@ roles:
   - omac-worker-backend
   - omac-worker-backend-oracle
   - omac-worker-frontend
+  - omac-worker-frontend-taiyi
   reviewers:
   - omac-reviewer
   acceptor: omac-acceptor

@@ -12864,7 +12864,7 @@ nodes:
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-wake-live
-  worker: omac-worker-frontend
+  worker: omac-worker-frontend-taiyi
   blocked_by:
   - hermes-plugin-wake
   - kernel-wake-lease

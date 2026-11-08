@@ -1,14 +1,19 @@
-# sha256: 2361ac014bcb8ffc359f655a8c67e4417796c0bf4d30b3a568a163cc5b7da30e
+# sha256: 23fa1ab4fe3dcc623911e6b0c98a1fc4cd7d1a382c980360299b82aabae95708
 work_item_id: 01a1b0fd-e96f-7652-bb90-9887f4d5d514
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 需要 Hermes 的部分一律在 taiyi 上跑（ssh taiyi，root），Mac mini 不启动、不调用 hermes，不读写
-  ~/.hermes。taiyi 隔离环境在 /opt/apa-live/，先读 /opt/apa-live/README.md：hermes 只用 /opt/apa-live/venv/bin/hermes
-  或 bin/hermes；凭据 set -a; . /opt/apa-live/creds/live.env; set +a，不打印。不碰 /root/.hermes、taiyi
-  的 Hermes 容器、aiteam-*、nginx，不重启 taiyi 上任何服务或容器。多个节点会并行：每次运行在 taiyi 上用 T=$(mktemp
-  -d /tmp/apa-live.XXXXXX) 得到的字面路径做工作目录，把 /opt/apa-live/hermes-home 的 config.yaml
-  和 .env 复制进 $T/hermes-home（权限 0600），用 HERMES_HOME=$T/hermes-home 直接调 venv 里的 hermes，不要共用
-  /opt/apa-live/hermes-home；APA_HOME 也放在 $T 下。代码用 rsync/scp 从你在 mini 的工作区同步到 $T/src
-  再在 taiyi 上 go build / go test（taiyi 有 go；访问 GitHub 只经现有 tunnel，不改代理）。测试文件和证据在 mini
-  工作区提交到分支。删除只删以 /tmp/apa-live. 开头的字面路径，禁止对 /opt/apa-live、hermes-home 或任何环境变量路径 rm
-  -rf；每条 shell 命令独立，export 不跨命令。发现产品缺陷按 upstream-defect / design-gap 报告，不放宽验收。
+retry_note: '负责人说明：缺陷 dfx-5410a4c832ad 已由 PR #205（合并提交 0a04b35e）修复，launch: wake 已接入生产路径，鉴权读
+  wake_lease。请基于最新 main 重跑。
+
+  - 本节点改派到 taiyi 上的 worker（omac-worker-frontend-taiyi），本机就是 taiyi，直接在本机运行 hermes，不需要
+  ssh。hermes 只用 /opt/apa-live/bin/hermes，先读 /opt/apa-live/README.md；每次运行用 mktemp -d
+  /tmp/apa-live.XXXXXX 的字面路径做独立 HERMES_HOME，从 /opt/apa-live/hermes-home 复制 config.yaml
+  和 .env（模型凭据在里面，不需要 hermes pm repair）；凭据用 set -a; . /opt/apa-live/creds/live.env;
+  set +a 加载，不打印。
+
+  - 注意：Hermes 插件换取运行凭据时，必须用和主会话相同的 delegate token。插件的 APA_TOKEN 如果配成 worker token，内核不会开租约，ACT-WAK-04
+  会失败。
+
+  - 红线：不碰 /root/.hermes、taiyi 上的容器、aiteam-*、nginx，不重启服务；只允许删除 /tmp/apa-live.* 下的目录。
+
+  - 验收标准不放宽，发现产品缺陷照常上报。'
