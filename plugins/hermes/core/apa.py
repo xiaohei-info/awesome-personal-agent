@@ -6,7 +6,7 @@ TIMEOUT_SECS = 2
 
 
 def run(args, session_id=None):
-    env = dict(os.environ)
+    env = dict(os.environ, APA_HARNESS="hermes")
     if session_id:
         env["APA_SESSION"] = str(session_id)
     try:

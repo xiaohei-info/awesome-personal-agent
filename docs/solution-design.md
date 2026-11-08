@@ -1910,7 +1910,7 @@ Source 程序的退出码是另一套（§9.2）。
 
 ### 17.4 环境变量
 
-`APA_URL`、`APA_TOKEN`、`APA_PROJECT`、`APA_SESSION`、`APA_RUN`、`APA_HOME`，以及只在 harness 声明文件传递时使用的 `APA_RUN_CREDENTIAL_FILE`（§7.7）。设置了 `APA_RUN` 时，CLI 只用运行凭据，不回退到本机凭据文件。
+`APA_URL`、`APA_TOKEN`、`APA_PROJECT`、`APA_SESSION`、`APA_HARNESS`、`APA_RUN`、`APA_HOME`，以及只在 harness 声明文件传递时使用的 `APA_RUN_CREDENTIAL_FILE`（§7.7）。`APA_HARNESS` 是接入方（harness 插件）设置的 harness 名，CLI 随每次请求以 `X-APA-Harness` 发出，与 `APA_SESSION`/`X-APA-Session` 一起把 Event actor 审计到会话粒度（§11.2）；CLI 与内核不内置具体 harness 名。设置了 `APA_RUN` 时，CLI 只用运行凭据，不回退到本机凭据文件。
 
 ---
 

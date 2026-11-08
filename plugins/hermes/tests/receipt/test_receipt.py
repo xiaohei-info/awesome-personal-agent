@@ -35,6 +35,7 @@ FAKE = """#!/bin/sh
 python3 - "$@" <<'PY' >> "$APA_LOG"
 import json, os, sys
 print(json.dumps({"argv": sys.argv[1:], "session": os.environ.get("APA_SESSION")}))
+open(os.environ["APA_LOG"] + ".harness", "a").write(os.environ.get("APA_HARNESS", "") + "\\n")
 PY
 echo "model must never see this"
 exit ${FAKE_EXIT:-0}
@@ -95,6 +96,14 @@ def test_delegate_task_with_item_id_reports_each_task_to_its_own_item(apa, hooks
     assert flag(by[ITEM]["argv"], "--outcome") == "done" and flag(by[ITEM]["argv"], "--summary") == "PR #12 opened"
     assert flag(by[other]["argv"], "--outcome") == "blocked" and flag(by[other]["argv"], "--summary") == "tests red"
     assert by[ITEM]["session"] == "main-1" and flag(by[ITEM]["argv"], "--idempotency-key").startswith("hermes-receipt-")
+
+
+def test_receipt_report_carries_harness_hermes(apa, hooks):
+    hooks["post_tool_call"](tool_name="delegate_task", session_id="main-1",
+                            result=json.dumps({"results": [{"task_index": 0, "status": "completed", "summary": "ok"}]}),
+                            args={"tasks": [{"goal": f"x\n\nLedger item: {ITEM}"}]})
+    assert len(calls(apa, 1)) == 1
+    assert (apa / "log.harness").read_text().split() == ["hermes"]
 
 
 def test_no_item_id_means_no_capture(apa, hooks):

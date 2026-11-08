@@ -16,7 +16,7 @@ _reinject = set()   # session ids whose next turn must inject the full summary a
 
 
 def _run(args, session_key, out, slot):
-    env = dict(os.environ, APA_SESSION=session_key)
+    env = dict(os.environ, APA_SESSION=session_key, APA_HARNESS="hermes")
     try:
         p = subprocess.run([os.environ.get("APA_BIN", "apa"), *args], capture_output=True, text=True,
                            timeout=TIMEOUT_SECS, env=env)

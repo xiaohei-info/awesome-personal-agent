@@ -41,7 +41,7 @@ def _report(item, outcome, summary, session_id):
     _sent.add((item, outcome))
     summary = (summary or "").strip()[-SUMMARY_MAX:]
     key = "hermes-receipt-" + hashlib.sha1(f"{item}|{outcome}|{summary}".encode()).hexdigest()[:16]
-    env = dict(os.environ)
+    env = dict(os.environ, APA_HARNESS="hermes")
     if session_id:
         env["APA_SESSION"] = str(session_id)
     args = [os.environ.get("APA_BIN", "apa"), "report", item, "--outcome", outcome, "--idempotency-key", key]
