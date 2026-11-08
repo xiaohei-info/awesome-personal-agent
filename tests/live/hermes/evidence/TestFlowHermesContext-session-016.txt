@@ -1,0 +1,13 @@
+USER: 先别用任何命令：我现在有哪些待决事项？写出标题关键词。
+TOOLS: []
+FINAL: 不执行命令，只依据上面账本增量中的 needs_input（待决）读出来。标题关键词如下：
+
+- itm_807c0c6341323731 — HCTX3-PEND-QZK，本周发布用方案 A 还是 B
+- itm_6c83e3b09d9bb28c — HCTX4-NEW-QZK，Web 新建待输入
+- itm_95074767a460f3f8 — HCTX6-INJ-QZK，注入路由的决策
+- itm_501c3f4dcb9ffb91 — HCTX7-BACK-QZK，重启后的待决
+- itm_99419156f66c96bb — HCTX11-PEND-QZK，恢复后仍要知道的待决（是否继续：A 继续；B 停止）
+
+另外，itm_95e9ab7be8fd4a4c（HCTX9-PROP-QZK）处于 proposed 阶段，尚待接受或驳回，严格来说并不属于 needs_input 待决。open 阶段的事项（HCTX3-PARENT、HCTX5-ENV、HCTX6-ACK）不在待决范围内。
+
+提示：这只是备注，可能不全；需要精确清单时，我会用 `apa` 查询。

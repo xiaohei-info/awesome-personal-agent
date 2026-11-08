@@ -1,0 +1,18 @@
+{
+  "ACT-CHAT-01-result": {
+    "passed": true,
+    "step": "ACT-CHAT-01 开启 delegate token 并准备决策"
+  },
+  "ACT-CHAT-02-result": {
+    "passed": true,
+    "step": "ACT-CHAT-02 决策经消息前注入带到会话"
+  },
+  "ACT-CHAT-03-result": {
+    "passed": false,
+    "step": "ACT-CHAT-03 聊天表态后代答"
+  },
+  "ACT-CHAT-04-result": {
+    "passed": true,
+    "step": "ACT-CHAT-04 web_only 决策在聊天中被拒绝"
+  }
+}

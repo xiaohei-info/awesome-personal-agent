@@ -1,0 +1,32 @@
+{
+  "ACT-CAP-00-del-probe": {
+    "body": "{\"code\":\"invalid_request\",\"why\":\"delegate actions must carry on_behalf_of and the owner's own words as evidence\",\"next\":\"retry with --evidence\",\"web_url\":null}\n",
+    "status": 400
+  },
+  "ACT-CAP-00-result": {
+    "passed": true,
+    "step": "ACT-CAP-00 探测：DEL 作插件凭据时 POST /v1/capture"
+  },
+  "ACT-CAP-01-result": {
+    "passed": true,
+    "step": "ACT-CAP-01 默认关闭时不捕获"
+  },
+  "ACT-CAP-02": {
+    "extraction_requests": 1,
+    "proposals": {
+      "itm_89138ac39643c8e5": "conversation delta"
+    }
+  },
+  "ACT-CAP-02-result": {
+    "passed": true,
+    "step": "ACT-CAP-02 开启后抽取候选"
+  },
+  "ACT-CAP-03-result": {
+    "passed": true,
+    "step": "ACT-CAP-03 运行身份下不生效"
+  },
+  "ACT-CAP-04-result": {
+    "passed": true,
+    "step": "ACT-CAP-04 不强制续跑"
+  }
+}

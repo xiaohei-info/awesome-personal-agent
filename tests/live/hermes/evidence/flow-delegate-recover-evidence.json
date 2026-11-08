@@ -1,0 +1,53 @@
+{
+  "ACT-DLG-01": {
+    "after_confirm": "{\"executors\":[{\"allowed\":false,\"host\":\"iZbp1emwt7rmgciek2uasqZ\",\"id\":\"hermes-coder.cli\",\"kind\":\"external-cli\",\"scenarios\":[\"coding\"]},{\"allowed\":false,\"id\":\"other-host.cli\",\"kind\":\"external-cli\"},{\"allowed\":true,\"id\":\"work-host.cli\",\"kind\":\"external-cli\"}]}\n",
+    "before_confirm_lists_it": false
+  },
+  "ACT-DLG-01-result": {
+    "passed": true,
+    "step": "ACT-DLG-01 声明执行者"
+  },
+  "ACT-DLG-02-result": {
+    "passed": true,
+    "step": "ACT-DLG-02 建立委派子事项"
+  },
+  "ACT-DLG-03-result": {
+    "passed": true,
+    "step": "ACT-DLG-03 执行者拿到项目上下文"
+  },
+  "ACT-DLG-04-result": {
+    "passed": true,
+    "step": "ACT-DLG-04 执行者回执并附证据"
+  },
+  "ACT-DLG-05": {
+    "first_answer_had_evidence": true
+  },
+  "ACT-DLG-05-result": {
+    "passed": true,
+    "step": "ACT-DLG-05 回收结果注入主会话"
+  },
+  "ACT-DLG-06-result": {
+    "passed": false,
+    "step": "ACT-DLG-06 插件捕获回执"
+  },
+  "ACT-DLG-07-result": {
+    "passed": true,
+    "step": "ACT-DLG-07 其他凭据不能回执"
+  },
+  "ACT-DLG-08-result": {
+    "passed": true,
+    "step": "ACT-DLG-08 全部子事项终态后父事项才回 open"
+  },
+  "ACT-DLG-09-result": {
+    "passed": true,
+    "step": "ACT-DLG-09 回执阻塞"
+  },
+  "ACT-DLG-10-result": {
+    "passed": true,
+    "step": "ACT-DLG-10 Web 查看和改派"
+  },
+  "ACT-DLG-11-result": {
+    "passed": true,
+    "step": "ACT-DLG-11 回执后可选核验"
+  }
+}

@@ -1,0 +1,8 @@
+USER: 把「DLG2-PARENT-QZK 修复登录超时」这件事交给 work-host.cli。现在只在账本里委派，先不要启动执行者。
+TOOLS: [{terminal {"command": "apa guide 2>&1 | head -80; echo \"---\"; apa item show itm_dd2b57c5d859d6cb 2>&1 | head -60"}} {terminal {"command": "apa executors 2>&1 | head -40; echo \"---\"; apa delegate --help 2>&1 | head -40"}} {terminal {"command": "apa delegate --parent itm_dd2b57c5d859d6cb --assignee work-host.cli --title \"DLG2-PARENT-QZK 修复登录超时\" --summary \"修复登录超时问题；仅账本委派，暂不启动执行者\" --reason \"交给 work-host.cli 处理\" --idempotency-key \"dlg2-parent-qzk-work-host-cli\" 2>&1"}} {terminal {"command": "apa delegate --parent itm_dd2b57c5d859d6cb --assignee work-host.cli --title \"DLG2-PARENT-QZK 修复登录超时\" --summary \"修复登录超时问题；仅账本委派，暂不启动执行者\" --reason \"交给 work-host.cli 处理\" --idempotency-key \"dlg2-parent-qzk-work-host-cli\" --evidence \"把「DLG2-PARENT-QZK 修复登录超时」这件事交给 work-host.cli。现在只在账本里委派，先不要启动执行者。\" 2>&1"}} {terminal {"command": "apa item show itm_dd2b57c5d859d6cb --pretty 2>&1 | head -60; echo \"=== CHILD ===\"; apa item show itm_e75514c6c9e68f67 --pretty 2>&1 | head -60"}}]
+FINAL: 已完成：只在账本里完成了委派，没有启动执行者。
+
+- 父事项 itm_dd2b57c5d859d6cb（DLG2-PARENT-QZK 修复登录超时）：阶段由 open 变为 waiting；它正在等待的执行者是 work-host.cli，并新增了一条指向子事项的 parent 关系。
+- 子事项 itm_e75514c6c9e68f67：kind 为 delegation，assignee 为 work-host.cli，阶段仍为 open，其标题与父事项相同。
+
+子事项停在 open 状态，等待后续手动启动；如果你需要启动执行者，请告诉我。
