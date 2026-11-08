@@ -799,3 +799,142 @@ func (e *env) eventsOfType(typ string) []domain.Event {
 	}
 	return out
 }
+
+// snapshotEnv 建两个活跃项目、一个归档项目，各挂事项，外加一个初筛未返回的待决事项。
+func (e *env) snapshotEnv() (alpha, beta string) {
+	e.t.Helper()
+	proj := func(name string) string {
+		var ref struct{ ID string }
+		_ = json.Unmarshal(e.must(owner, "project.create", map[string]any{"name": name}).Value, &ref)
+		return ref.ID
+	}
+	alpha, beta = proj("alpha"), proj("beta")
+	old := proj("old")
+	e.must(owner, "project.update", map[string]any{"id": old, "status": "archived"})
+	mk := func(project, title string) string {
+		var ref struct{ ID string }
+		_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "task", "title": title, "phase": "open", "project": project}).Value, &ref)
+		return ref.ID
+	}
+	mk(alpha, "alpha-事项")
+	mk(beta, "beta-事项")
+	mk(old, "归档项目事项")
+	return alpha, beta
+}
+
+type snapshotView struct {
+	Projects []struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Items []struct {
+			ID        string `json:"id"`
+			Title     string `json:"title"`
+			Phase     string `json:"phase"`
+			UpdatedAt string `json:"updated_at"`
+		} `json:"items"`
+	} `json:"projects"`
+}
+
+func snapshotOf(t *testing.T, materials string) snapshotView {
+	t.Helper()
+	var f struct {
+		Materials []Material `json:"materials"`
+	}
+	if err := json.Unmarshal([]byte(materials), &f); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range f.Materials {
+		if m.Name == "ledger_snapshot" {
+			var v snapshotView
+			if err := json.Unmarshal([]byte(m.Body), &v); err != nil {
+				t.Fatal(err)
+			}
+			return v
+		}
+	}
+	t.Fatalf("no ledger_snapshot material: %s", materials)
+	return snapshotView{}
+}
+
+// ACT-BRF-01：任务型运行的资料文件里，与 instance_params 并列放账本快照：运行身份可见的项目及其事项摘要，
+// 简报包据此按项目分节；归档项目不进快照。
+func TestTaskRunMaterialsCarryLedgerSnapshot(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "summary")
+	e.setDefaultHarness("hx")
+	alpha, beta := e.snapshotEnv()
+	id := e.openItem()
+	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("brief", id)); err != nil {
+		t.Fatal(err)
+	}
+	res := e.waitResult()
+	raw := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json"))
+	if !strings.Contains(raw, "instance_params") {
+		t.Fatalf("instance_params lost: %s", raw)
+	}
+	snap := snapshotOf(t, raw)
+	got := map[string]string{}
+	for _, p := range snap.Projects {
+		for _, it := range p.Items {
+			if it.ID == "" || it.Phase == "" || it.UpdatedAt == "" {
+				t.Fatalf("item summary incomplete: %+v", it)
+			}
+			got[p.ID] = it.Title
+		}
+	}
+	// 三节：无项目事项（规则建的简报事项）加两个活跃项目
+	if len(snap.Projects) != 3 || got[""] != "tk 2026-03-01" || got[alpha] != "alpha-事项" || got[beta] != "beta-事项" || strings.Contains(raw, "归档项目事项") {
+		t.Fatalf("snapshot %+v", snap)
+	}
+}
+
+// 屏蔽：初筛未返回的待决事项不进快照（与账本读取同一过滤，§14.4）。
+func TestLedgerSnapshotHidesScreeningPendingAsk(t *testing.T) {
+	e := setup(t)
+	alpha, _ := e.snapshotEnv()
+	var ref struct{ ID string }
+	_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "task", "title": "待初筛决策", "phase": "open", "project": alpha}).Value, &ref)
+	e.st.Update(bg, func(tx *store.Tx) error { // 直接置位内核维护的标记以模拟初筛未返回
+		_, _, _, err := items.Revise(tx, ref.ID, "test", t0, func(it *domain.Item) error {
+			it.Phase = domain.PhaseNeedsInput
+			it.Ask = &domain.Ask{AskInput: domain.AskInput{Question: "q"}, AskKernelState: domain.AskKernelState{ScreeningPending: true}}
+			return nil
+		})
+		return err
+	})
+	b, err := e.svc.ledgerSnapshot(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(b, "待初筛决策") || !strings.Contains(b, "alpha-事项") {
+		t.Fatalf("snapshot %s", b)
+	}
+}
+
+// 生成型改用模板时同一份快照作资料附带（§8.7、§10）。
+func TestGenerateMaterialCarriesSameSnapshot(t *testing.T) {
+	e := setup(t)
+	e.snapshotEnv()
+	var seen string
+	g := captureGen{fakeGen{direct.Outcome{Settled: true, Steps: []direct.Step{{RunID: "run_g", Result: json.RawMessage(`{"insufficient_info":false}`)}}}, e.st}, &seen}
+	if err := e.svc.CallAgent(AgentOptions{Generate: g})(bg, e.call("gen", e.openItem())); err != nil {
+		t.Fatal(err)
+	}
+	var f struct{ Materials []Material }
+	if err := json.Unmarshal([]byte(seen), &f); err != nil {
+		t.Fatal(err)
+	}
+	if v := snapshotOf(t, seen); len(v.Projects) != 3 {
+		t.Fatalf("generate snapshot %+v", v)
+	}
+}
+
+type captureGen struct {
+	fakeGen
+	seen *string
+}
+
+func (c captureGen) Do(ctx context.Context, d direct.Call) (direct.Outcome, error) {
+	*c.seen = d.Material
+	return c.fakeGen.Do(ctx, d)
+}
