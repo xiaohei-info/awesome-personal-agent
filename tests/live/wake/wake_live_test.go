@@ -463,6 +463,78 @@ func (f *fx) gwCalls() []call {
 	return out
 }
 
+const (
+	srcID  = "src_wake"
+	mAlice = "WAKE-ALICE-OK" // alice 在转发白名单内
+	mBob   = "WAKE-BOB-OUT"  // bob 不在白名单内
+)
+
+// accScript 是一个脚本来源：输出队列目录里的事件，末行给游标。
+const accScript = `#!/bin/sh
+Q="$1"
+cat > "$Q/last-stdin.json"
+for f in "$Q"/in/*.jsonl; do
+  [ -e "$f" ] || continue
+  cat "$f"
+  mv "$f" "$Q/done/"
+done
+echo '{"cursor":"c'"$(ls "$Q/done" | wc -l | tr -d ' ')"'"}'
+`
+
+// attachedChild 造一个已委派并带 PR 的子事项，并让白名单内外各一条消息挂靠到它上面；返回子事项 id。
+func (f *fx) attachedChild(parent string) string {
+	f.t.Helper()
+	q := filepath.Join(f.Root, "wake-source")
+	must(f.t, os.MkdirAll(filepath.Join(q, "in"), 0o755))
+	must(f.t, os.MkdirAll(filepath.Join(q, "done"), 0o755))
+	script := filepath.Join(q, "src.sh")
+	must(f.t, os.WriteFile(script, []byte(accScript), 0o755))
+	body, _ := json.Marshal(map[string]any{"id": srcID, "type": "script", "source_type": "acc",
+		"command": script + " " + q, "schedule": "1s", "timeout": 30})
+	f.webOK("POST", "/sources", string(body), 201)
+	f.webOK("PUT", "/settings/allowlists", `{"forward_allowlist":{"`+srcID+`":["alice"]}}`, 200)
+
+	var d struct {
+		ID string `json:"id"`
+	}
+	must(f.t, json.Unmarshal([]byte(f.apaOK(f.DEL, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", "wake-child", "--evidence", "验收：委派带 PR 的子事项").Stdout), &d))
+	const pr = "https://example.invalid/acc/test-repo/pull/201"
+	f.apaOK(f.WRK, "report", d.ID, "--outcome", "progress", "--summary", "已开 PR", "--pr", pr)
+	ids := map[string]string{}
+	for i, m := range []struct{ subject, sender string }{{mAlice, "alice"}, {mBob, "bob"}} {
+		id := fmt.Sprintf("ev-%d", i+1)
+		ids[id] = m.subject
+		b, _ := json.Marshal(map[string]any{"id": id, "type": "comment.created", "subject": m.subject, "summary": "摘要 " + m.subject,
+			"correlation_keys": []string{pr}, "sender": m.sender, "sender_verified": true, "occurred_at": time.Now().UTC().Format(time.RFC3339)})
+		tmp := filepath.Join(q, fmt.Sprintf("tmp-%d", i))
+		must(f.t, os.WriteFile(tmp, append(b, '\n'), 0o644))
+		must(f.t, os.Rename(tmp, filepath.Join(q, "in", fmt.Sprintf("%04d.jsonl", i+1))))
+	}
+	f.waitFor("两条消息挂靠到子事项", 30*time.Second, func() bool {
+		var out struct {
+			Events []struct {
+				DedupeKey struct {
+					EventID string `json:"event_id"`
+				} `json:"dedupe_key"`
+				Disposition string `json:"disposition"`
+				Item        string `json:"item"`
+			} `json:"events"`
+		}
+		r := f.APIRaw("GET", "/v1/sources/"+srcID+"/events?limit=100", "", f.OBS)
+		if r.Code != 200 || json.Unmarshal([]byte(r.Body), &out) != nil {
+			return false
+		}
+		n := 0
+		for _, e := range out.Events {
+			if _, ok := ids[e.DedupeKey.EventID]; ok && e.Disposition == "attached" && e.Item == d.ID {
+				n++
+			}
+		}
+		return n == len(ids)
+	})
+	return d.ID
+}
+
 type event struct {
 	Seq    int    `json:"seq"`
 	Type   string `json:"type"`
@@ -519,7 +591,7 @@ func (f *fx) runState(id string) string {
 func TestWakeLease(t *testing.T) {
 	f := setup(t)
 	var other [3]string
-	var taskA, runA string
+	var taskA, runA, child string
 
 	f.step("ACT-WAK-01 显式声明唤醒：带网关的主会话启动；未声明前走 headless，确认 launch=wake 后规则走唤醒", func(t *testing.T) {
 		f.startGateway()
@@ -539,8 +611,11 @@ func TestWakeLease(t *testing.T) {
 			other[i] = f.add(fmt.Sprintf("OTHER-%d", i+1), "x-plain") // 不带 acc-wake：规则不会命中
 			f.apaOK(f.WRK, "ask", other[i], "--question", "选哪个", "--option", "A=甲", "--option", "B=乙")
 		}
+		parent := f.add("WAKE-PARENT", "x-plain")
+		child = f.attachedChild(parent)
 		taskA = f.task("ACCWAKE-A 验收脚本，原样执行，不要自行判断该不该执行，是否允许由内核裁决。依次用 apa_wake_cli 运行：" +
 			`(1) args=["context","--scope","item"]；(2) args=["decide","` + other[0] + `","--option","A","--evidence","x"]；` +
+			`(2b) args=["context","--scope","item","--item","` + child + `"]；` +
 			`(3) 对本事项（唤醒消息里的 item id）args=["ask","<本事项 id>","--question","A 的验收提问","--option","A=是","--option","B=否"]。(3) 之后不要再做别的。`)
 		var rs []run
 		f.waitFor("规则拉起唤醒运行", 30*time.Second, func() bool { rs = f.runs(taskA); return len(rs) > 0 })
@@ -572,7 +647,7 @@ func TestWakeLease(t *testing.T) {
 		f.waitFor("唤醒回合跑完 context、decide、ask", 4*time.Minute, func() bool {
 			calls = f.gwCalls()
 			c := find("ask", taskA)
-			return find("context", "--scope", "item") != nil && find("decide", other[0]) != nil && c != nil
+			return find("context", "--scope", "item") != nil && find("decide", other[0]) != nil && c != nil && find("context", "--scope", "item", "--item", child) != nil
 		})
 		for _, c := range calls {
 			if c.RunID != runA {
@@ -584,6 +659,17 @@ func TestWakeLease(t *testing.T) {
 		}
 		if c := find("decide", other[0]); c.ExitCode != 4 {
 			t.Errorf("唤醒回合里 apa decide 退出码 = %d，期望 4（stderr: %s）", c.ExitCode, c.Stderr)
+		}
+		// 挂靠消息按转发白名单过滤：白名单内的出现，白名单外的不出现（取自 Hermes 会话库里的工具结果）。
+		cc := find("context", "--scope", "item", "--item", child)
+		if cc == nil || cc.ExitCode != 0 {
+			t.Fatalf("唤醒回合应读到子事项 %s 的 context：%+v", child, cc)
+		}
+		if !strings.Contains(cc.Stdout, mAlice) || strings.Contains(cc.Stdout, mBob) {
+			t.Errorf("运行身份应只看到白名单内的挂靠消息（含 %s、不含 %s）：%s", mAlice, mBob, cc.Stdout)
+		}
+		if all := f.webOK("GET", "/items/"+child+"/messages", "", 200); !strings.Contains(all, mBob) {
+			t.Errorf("白名单外的消息本人在 Web 仍应可见: %s", all)
 		}
 		rej := f.find(func(e event) bool { return e.Type == "command.rejected" && e.Object == other[0] })
 		if rej == nil || rej.Actor.Run != runA || rej.Payload["exit"] != float64(4) || rej.Payload["action"] != "answer_decision" {
