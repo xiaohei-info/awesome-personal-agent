@@ -1,4 +1,4 @@
-# sha256: 74b296ea178777b6cdbdc58bfac88fed24815ffc795b939b9e57d1a4e4f91d12
+# sha256: 0ccc5883e7afcccd476e9afd344ab8a5fd25b32403a0a75a57c8c1b7e712f863
 defects:
   schema: omac.defect-ledger/v1
   used_global: 6
@@ -30,7 +30,7 @@ defects:
       - flow-bg-resume/ACT-RES-04
       reporters:
       - e2e-bg-main-live
-      state: fixing
+      state: fixed
       fix_node: fix.hermes-plugin-headless.27e69d
     dfx-5410a4c832ad:
       suspected: kernel-wake-lease
@@ -85,6 +85,34 @@ defects:
       - e2e-guideline-live
       state: fixing
       fix_node: fix.sources-github.85016b
+    dfx-1785cf62dba4:
+      suspected: kernel-items
+      anchors:
+      - flow-chat-answer/ACT-CHAT-03
+      reporters:
+      - e2e-hermes-session
+      state: queued
+    dfx-35de8528ebe3:
+      suspected: cli-client
+      anchors:
+      - flow-hermes-context/ACT-HCTX-09
+      reporters:
+      - e2e-hermes-session
+      state: queued
+    dfx-80defa39c0dd:
+      suspected: hermes-plugin-tools
+      anchors:
+      - flow-hermes-context/ACT-HCTX-09
+      reporters:
+      - e2e-hermes-session
+      state: queued
+    dfx-992917373ac0:
+      suspected: hermes-plugin-receipt
+      anchors:
+      - flow-delegate-recover/ACT-DLG-06
+      reporters:
+      - e2e-hermes-session
+      state: queued
   inbox:
   - id: 6575fb8d1ddf
     reporter: e2e-hermes-session
