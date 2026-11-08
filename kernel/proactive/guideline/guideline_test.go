@@ -365,8 +365,8 @@ func TestDrafterFailureIsReportedAndRetried(t *testing.T) {
 func TestHandlerValidation(t *testing.T) {
 	e := newEnv(t)
 	for name, o := range map[string]Options{"no store": {Drafter: e.opt.Drafter, Host: "h", Harness: "x", Executor: "e"},
-		"no host":     {Store: e.st, Drafter: e.opt.Drafter, Harness: "x", Executor: "e"},
-		"no executor": {Store: e.st, Drafter: e.opt.Drafter, Host: "h", Harness: "x"}} {
+		"no host":    {Store: e.st, Drafter: e.opt.Drafter, Harness: "x", Executor: "e"},
+		"no drafter": {Store: e.st, Host: "h"}} {
 		if _, err := Handler(o); err == nil {
 			t.Errorf("%s: want error", name)
 		}
@@ -378,5 +378,34 @@ func TestHandlerValidation(t *testing.T) {
 	it := domain.Item{ID: "x"}
 	if err := h(bg, rules.Call{Rule: ruleKey, Action: packs.Action{"prompt": "draft"}, Item: &it}); err == nil {
 		t.Error("event-triggered call must fail")
+	}
+}
+
+// 未配置委派执行者且无本机检出：起草事项转 needs_input 并写明原因，不建委派，不每轮重复建。
+func TestNoExecutorConfiguredHandsOffToOwner(t *testing.T) {
+	e := newEnvWith(t, func(o *Options) { o.Executor = "" })
+	p := e.project("beta", "git.example/beta", false)
+	e.tick()
+	e.tick()
+	its := e.items(p)
+	if len(its) != 1 || its[0].Phase != domain.PhaseNeedsInput || its[0].Ask == nil ||
+		!strings.Contains(its[0].Ask.Question, "guideline_draft_executor") {
+		t.Fatalf("want one needs_input item naming the config key, got %+v", its)
+	}
+}
+
+// 未指定 harness：本机起草用 Web 设置的默认 harness。
+func TestEmptyHarnessUsesWebDefault(t *testing.T) {
+	e := newEnvWith(t, func(o *Options) { o.Harness = "" })
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "harness", func(p *policy.Policy) error { p.DefaultHarness = "local-h"; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.project("alpha", "git.example/alpha", true)
+	e.tick()
+	if rs := e.runs(); len(rs) != 1 || rs[0].Run.Harness != "local-h" {
+		t.Fatalf("want one run on the default harness, got %+v", rs)
 	}
 }

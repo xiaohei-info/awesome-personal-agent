@@ -1428,6 +1428,13 @@ GitHub 来源看到 AGENTS.md 相关提交时也触发同一检测。已有手�
 
 内置 `guideline-draft` 包：项目有 repos 而无 Guideline → Timer → APA 主机有检出时任务型专属 agent 在本机起草，否则建委派子事项交执行者起草 → `apa material commit --kind guideline` 落为 proposed → 本人确认生效 → 下次 sync 写入工作区。无仓库项目不做缺规范检测，规范由本人按需编写，也可由 agent 提交修订后经本人确认。
 
+执行规则：
+
+- 检测由包内 `guideline-check` 时钟规则（`check` 类，默认 24h，受规则模式约束；周期可用数据目录同名覆盖包改写）到期触发，其 `call_agent` 由缺规范检测处理器接管，不走通用任务型分派。
+- 本机起草：检出的 Host 等于 APA 主机名即为"本机有检出"。harness 取规则指定的，未指定则用 Web 设置的默认 harness（与 §13.6 任务型同一规则）；无可用声明时起草事项转 `needs_input` 交本人。
+- 委派起草：执行者 id 取运行配置 `guideline_draft_executor`（§16.2）；委派照常校验项目允许的执行者，不允许则返回真实错误并记 `health.alert`。未配置该项时，起草事项直接转 `needs_input` 并写明原因，不建委派。
+- 不重复起草：项目已有任何状态的 Guideline、或上一次起草事项仍未结束，都不再起草；起草事项被本人丢弃则不再打扰；起草事项做完而仍无规范，下一轮重新起草。
+
 ### 12.7 模块归属
 
 | 内容 | 模块 |
@@ -1802,7 +1809,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
 
 ```text
 <APA_HOME>/
-  config.yaml       运行配置（监听地址、max_subprocesses、max_short_subprocesses、max_source_output_mb、delivery_unclaimed_after、delivery_backoff、chain_depth_threshold 等）
+  config.yaml       运行配置（监听地址、max_subprocesses、max_short_subprocesses、max_source_output_mb、delivery_unclaimed_after、delivery_backoff、chain_depth_threshold、guideline_draft_executor 等）
   sources.json      本人在主机上写的来源登记，可选（§14.12）
   declarations/     本人在主机上写的无头运行声明，可选（§14.12）
   ledger.db         账本（事项、Event、投递、运行记录……；存储选型见 §18）
@@ -1815,7 +1822,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
   logs/             诊断日志
 ```
 
-运行配置里的 `max_subprocesses`（默认 4）和 `max_short_subprocesses`（默认 2）分别限制长时运行和短任务的子进程数，语义见 §7.7。`max_source_output_mb`（默认 32）是 Source 拉取与转换脚本单次 stdout 的总上限，超限的处理见 §9.2。`delivery_unclaimed_after`（默认 `30m`）是投递无人领取多久转 `fallback_web`，`delivery_backoff`（默认 `1m,3m,7m,15m,30m`）是失败后的逐次退避，写法都是带单位的时长（`90s`、`30m`），退避表用逗号分隔；非正值或写不出时长的取值使 `apa serve` 拒绝启动。语义见 §6.9、§10.3。`chain_depth_threshold`（默认 8）是链路深度阈值，命令管线、后台运行、任务型运行与续接共用，必须是正整数，否则 `apa serve` 拒绝启动；语义见 §14.9。
+运行配置里的 `max_subprocesses`（默认 4）和 `max_short_subprocesses`（默认 2）分别限制长时运行和短任务的子进程数，语义见 §7.7。`max_source_output_mb`（默认 32）是 Source 拉取与转换脚本单次 stdout 的总上限，超限的处理见 §9.2。`delivery_unclaimed_after`（默认 `30m`）是投递无人领取多久转 `fallback_web`，`delivery_backoff`（默认 `1m,3m,7m,15m,30m`）是失败后的逐次退避，写法都是带单位的时长（`90s`、`30m`），退避表用逗号分隔；非正值或写不出时长的取值使 `apa serve` 拒绝启动。语义见 §6.9、§10.3。`chain_depth_threshold`（默认 8）是链路深度阈值，命令管线、后台运行、任务型运行与续接共用，必须是正整数，否则 `apa serve` 拒绝启动；语义见 §14.9。`guideline_draft_executor`（默认不配置）是缺规范且本机无检出时受托起草规范的执行者 id，必须是非空字符串；未配置时该类起草事项转 `needs_input`，语义见 §12.6。
 
 备份：整个目录可复制；运行中用存储引擎的在线备份导出账本。`sources/` 含附带拉取程序的第三方凭据，`webhook-keys/` 含 HMAC 接收密钥明文，备份需按敏感数据对待。外部工具的配置和凭据不在本目录：工具适配的来源（§9.7）用工具自己的目录或系统钥匙串，harness 的登录归 harness，渠道 ext 的外部系统凭据由 ext 自持（§10.3），换主机时都需重新认证。数据结构版本随发行只增，升级时自动处理。
 

@@ -1421,3 +1421,98 @@ func TestServeDraftsDecisionCardAndSummaries(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// serveGuidelineCheck 起一个 apa serve：数据目录同名覆盖包把 guideline-check 的周期改成 1s（真实周期是 24h，
+// 这里只为让测试能等到一轮），Web 只做规则切 auto；建一个有仓库、无检出、无规范的项目，返回该项目的事项。
+// extra 是追加到 config.yaml 的配置行；setup 在检测前做 Web 侧准备。
+func serveGuidelineCheck(t *testing.T, extra string, setup func(s *session, project string)) []domain.Item {
+	t.Helper()
+	home := initOnFreePort(t)
+	if extra != "" {
+		f, err := os.OpenFile(filepath.Join(home, "config.yaml"), os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = f.WriteString(extra)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	dst := filepath.Join(home, "packs", "guideline-draft")
+	sub, err := fs.Sub(rootpacks.FS, "guideline-draft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.CopyFS(dst, sub); err != nil {
+		t.Fatal(err)
+	}
+	y, err := os.ReadFile(filepath.Join(dst, "pack.yaml"))
+	if err != nil || !strings.Contains(string(y), "schedule: 24h") {
+		t.Fatalf("guideline-draft pack changed shape: %v\n%s", err, y)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "pack.yaml"), []byte(strings.Replace(string(y), "schedule: 24h", "schedule: 1s", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	addr, stop := start(t, home)
+	defer stop()
+	s := webLogin(t, addr)
+	code, b := s.do("POST", "/projects", `{"name":"gamma"}`)
+	var p struct{ ID string }
+	if json.Unmarshal([]byte(b), &p); code != 201 || p.ID == "" {
+		t.Fatalf("create project: %d %s", code, b)
+	}
+	if code, b := s.do("POST", "/projects/"+p.ID+"/repos", `{"op":"add_remote","remote":"git.example/gamma"}`); code >= 300 {
+		t.Fatalf("add repo: %d %s", code, b)
+	}
+	if setup != nil {
+		setup(s, p.ID)
+	}
+	time.Sleep(packReloadInterval + clockTicks) // 等时钟循环热加载到 1s 的周期
+	if code, b := s.do("PATCH", "/rules/guideline-draft%2Fclock_rules%2Fguideline-check/mode", `{"mode":"auto"}`); code >= 300 {
+		t.Fatalf("set mode: %d %s", code, b)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		code, b := s.do("GET", "/items?project="+p.ID, "")
+		var got struct{ Items []domain.Item }
+		if json.Unmarshal([]byte(b), &got); code == 200 && len(got.Items) > 0 {
+			time.Sleep(3 * time.Second) // 再过几轮，确认不重复起草
+			_, b = s.do("GET", "/items?project="+p.ID, "")
+			json.Unmarshal([]byte(b), &got)
+			return got.Items
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("guideline check never drafted: %d %s", code, b)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// flow-guideline-draft：未配置 guideline_draft_executor 且本机无检出 → 起草事项转 needs_input 写明原因，且不重复建。
+func TestServeGuidelineCheckWithoutExecutorHandsOffToOwner(t *testing.T) {
+	its := serveGuidelineCheck(t, "", nil)
+	if len(its) != 1 || its[0].Phase != domain.PhaseNeedsInput || its[0].Ask == nil || !strings.Contains(its[0].Ask.Question, "guideline_draft_executor") {
+		t.Fatalf("want one needs_input draft item naming the config key, got %+v", its)
+	}
+}
+
+// flow-guideline-draft：配置了 guideline_draft_executor → 建父事项并委派子事项给该执行者，且不重复建。
+func TestServeGuidelineCheckDelegatesToConfiguredExecutor(t *testing.T) {
+	its := serveGuidelineCheck(t, "guideline_draft_executor: wk.cli\n", func(s *session, _ string) {
+		if code, b := s.do("POST", "/settings/executors", `{"id":"wk.cli","kind":"external-cli"}`); code >= 300 {
+			t.Fatalf("executor put: %d %s", code, b)
+		}
+	})
+	var child *domain.Item
+	for i := range its {
+		if its[i].Kind == domain.KindDelegation {
+			child = &its[i]
+		}
+	}
+	if len(its) != 2 || child == nil || child.Assignee != "wk.cli" {
+		t.Fatalf("want parent + one delegation to wk.cli, got %+v", its)
+	}
+}
