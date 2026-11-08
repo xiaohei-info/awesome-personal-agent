@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -60,6 +61,9 @@ type Service struct {
 	x   *command.Executor
 	opt Options
 	tpl atomic.Pointer[string]
+	// merging 是已在事务里选了"合回"、等提交后补提 proposed 修订的漂移事项。
+	mu      sync.Mutex
+	merging []string
 }
 
 func checkTemplate(tpl string) error {
@@ -122,6 +126,8 @@ func New(x *command.Executor, o Options) (*Service, error) {
 			return nil, err
 		}
 	}
+	x.InTx(s.onDecision)
+	x.OnCommit(func(command.Commit) { s.flushMerges() })
 	x.OnCommit(func(c command.Commit) {
 		if !slices.Contains(rerenderOn, c.Command) {
 			return
@@ -361,7 +367,7 @@ func (s *Service) raiseDrift(c *command.Ctx, p domain.Project, rec Render, fileH
 	}
 	if ok {
 		if d.state == driftOpen {
-			// 事项被别的入口（普通决策回答）关掉了：按"本次忽略"处理，什么也不写、不丢手改内容。
+			// 事项被决策回答以外的途径关掉了（回答本身由 onDecision 落实所选项）：按"本次忽略"处理，什么也不写、不丢手改内容。
 			it, err := items.Get(c.Tx, d.item)
 			if err != nil {
 				return "", "", err
@@ -475,19 +481,150 @@ type driftRow struct {
 	repo, fileHash, renderHash, content string
 }
 
-func driftByItem(tx *store.Tx, item string) (d driftRow, err error) {
+func findDrift(tx *store.Tx, item string) (d driftRow, ok bool, err error) {
 	r, err := tx.Query("SELECT item, state, repo, file_hash, render_hash, content FROM agentsmd_drift WHERE item = ?", item)
 	if err != nil {
-		return d, err
+		return d, false, err
 	}
 	defer r.Close()
 	if !r.Next() {
-		if err := r.Err(); err != nil {
-			return d, err
-		}
-		return d, domain.NewError(domain.CodeNotFound, "item "+item+" is not an AGENTS.md drift", "pass the item from the check result")
+		return d, false, r.Err()
 	}
-	return d, r.Scan(&d.item, &d.state, &d.repo, &d.fileHash, &d.renderHash, &d.content)
+	return d, true, r.Scan(&d.item, &d.state, &d.repo, &d.fileHash, &d.renderHash, &d.content)
+}
+
+func driftByItem(tx *store.Tx, item string) (driftRow, error) {
+	d, ok, err := findDrift(tx, item)
+	if err == nil && !ok {
+		err = domain.NewError(domain.CodeNotFound, "item "+item+" is not an AGENTS.md drift", "pass the item from the check result")
+	}
+	return d, err
+}
+
+// mergePlan 是合回要提交的修订：内容，以及落在哪份项目规范上（material.ID 为空表示项目还没有规范，新建）。
+type mergePlan struct {
+	content  string
+	material materials.Material
+	project  domain.Project
+}
+
+// planMerge 只读：算出合回内容并校验。漂移还是 open 时才拒绝"手改在项目规范之外"；已选合回后重试不再拒绝。
+func planMerge(tx *store.Tx, d driftRow) (p mergePlan, err error) {
+	rec, ok, err := renderByHash(tx, d.repo, d.renderHash)
+	if err != nil || !ok {
+		return p, errors.Join(err, notFoundIf(!ok, "render", d.renderHash))
+	}
+	if p.project, _, err = projects.ByRemote(tx, d.repo); err != nil {
+		return p, err
+	}
+	if p.content, err = mergedProject(rec, d.content); err != nil {
+		return p, err
+	}
+	if strings.TrimSpace(p.content) == "" {
+		return p, invalid("nothing to merge back: the edited file has no project guideline content")
+	}
+	ms, err := materials.List(tx, p.project.ID)
+	if err != nil {
+		return p, err
+	}
+	for _, m := range ms {
+		if m.Kind == materials.KindGuideline && m.Project == p.project.ID && m.Location == "" {
+			p.material = m
+		}
+	}
+	if d.state == driftOpen && p.material.ID != "" && p.material.CurrentRev != "" {
+		if _, cur, err := materials.Show(tx, p.material.ID, ""); err != nil {
+			return p, err
+		} else if normalize(cur.Content) == normalize(p.content) {
+			return p, invalid("the hand edit is outside the project guideline (global rules or generated sections): change it in the guideline it comes from")
+		}
+	}
+	return p, nil
+}
+
+// commitMerge 经 material.commit 提交 proposed 修订。始终以内核身份提交（幂等键按主体计，Resolve 与回答后补提必须同主体才不重复）；
+// 谁做的选择已记在决策结果里，授权在回答命令里已过。
+func (s *Service) commitMerge(ctx context.Context, item string, p mergePlan) (materials.Result, error) {
+	commit := map[string]any{"content": p.content, "reason": "合回 AGENTS.md 手改内容（" + item + "）"}
+	if p.material.ID != "" {
+		commit["id"], commit["based_on"] = p.material.ID, p.material.CurrentRev
+	} else {
+		commit["project"], commit["kind"], commit["title"] = p.project.ID, materials.KindGuideline, p.project.Name+" 规范"
+	}
+	b, _ := json.Marshal(commit)
+	var r materials.Result
+	res, err := s.x.Do(ctx, command.Request{Identity: system, Command: "material.commit", Input: b, IdemKey: "agentsmd-merge:" + item})
+	if err != nil {
+		return r, err
+	}
+	return r, json.Unmarshal(res.Value, &r)
+}
+
+// onDecision 在决策回答的同一事务里落实漂移事项的所选项（Web 回答、POST /items/{id}/decide、delegate 代答都经 decisions.Answer）：
+// 覆盖与忽略记下选择；合回先校验（不合格则整个回答回滚），提交后由 flushMerges 补提 proposed 修订。
+func (s *Service) onDecision(c *command.Ctx) error {
+	for _, e := range c.Events() {
+		if e.Type != domain.EvDecisionResolved {
+			continue
+		}
+		d, ok, err := findDrift(c.Tx, e.Object)
+		if err != nil || !ok || d.state != driftOpen {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		it, err := items.Get(c.Tx, e.Object)
+		if err != nil {
+			return err
+		}
+		if it.Ask == nil || it.Ask.Resolution == nil || !slices.Contains([]string{ChoiceMerge, ChoiceOverride, ChoiceIgnore}, it.Ask.Resolution.Choice) {
+			continue
+		}
+		choice := it.Ask.Resolution.Choice
+		if choice == ChoiceMerge {
+			if _, err := planMerge(c.Tx, d); err != nil {
+				return err
+			}
+			s.mu.Lock()
+			s.merging = append(s.merging, d.item)
+			s.mu.Unlock()
+		}
+		if _, err := c.Tx.Exec("UPDATE agentsmd_drift SET state = ? WHERE item = ?", choice, d.item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// flushMerges 在命令提交后为已选"合回"的漂移补提修订。失败交给 OnError：重新用同样的选择调用 Resolve 可重试，幂等键保证不重复。
+func (s *Service) flushMerges() {
+	s.mu.Lock()
+	pending := s.merging
+	s.merging = nil
+	s.mu.Unlock()
+	for _, item := range pending {
+		var (
+			d driftRow
+			p mergePlan
+		)
+		err := s.x.Store().View(context.Background(), func(tx *store.Tx) (err error) {
+			if d, err = driftByItem(tx, item); err != nil {
+				return err
+			}
+			if d.state != driftMerged { // 回答所在事务回滚了
+				return nil
+			}
+			p, err = planMerge(tx, d)
+			return err
+		})
+		if err == nil && d.state == driftMerged {
+			_, err = s.commitMerge(context.Background(), item, p)
+		}
+		if err != nil {
+			s.opt.OnError(fmt.Errorf("agentsmd: merge back drift %s: %w", item, err))
+		}
+	}
 }
 
 // Resolve 落实本人对漂移的选择。覆盖与忽略一条命令完成；合回先在项目规范上提 proposed 修订，
@@ -495,51 +632,18 @@ func driftByItem(tx *store.Tx, item string) (d driftRow, err error) {
 // 合回的修订经 material.commit 提交，用漂移事项 id 作幂等键：中途失败后用同样的选择重试，不会重复提交。
 func (s *Service) Resolve(ctx context.Context, who command.Identity, in ResolveIn) (ResolveOut, error) {
 	var (
-		d        driftRow
-		content  string
-		material materials.Material
-		project  domain.Project
+		d    driftRow
+		plan mergePlan
 	)
 	err := s.x.Store().View(ctx, func(tx *store.Tx) (err error) {
-		if d, err = driftByItem(tx, in.Item); err != nil {
+		if d, err = driftByItem(tx, in.Item); err != nil || in.Choice != ChoiceMerge {
 			return err
 		}
-		if in.Choice != ChoiceMerge {
-			return nil
-		}
-		rec, ok, err := renderByHash(tx, d.repo, d.renderHash)
-		if err != nil || !ok {
-			return errors.Join(err, notFoundIf(!ok, "render", d.renderHash))
-		}
-		if project, _, err = projects.ByRemote(tx, d.repo); err != nil {
-			return err
-		}
-		if content, err = mergedProject(rec, d.content); err != nil {
-			return err
-		}
-		ms, err := materials.List(tx, project.ID)
-		if err != nil {
-			return err
-		}
-		for _, m := range ms {
-			if m.Kind == materials.KindGuideline && m.Project == project.ID && m.Location == "" {
-				material = m
-			}
-		}
-		if d.state == driftOpen && material.ID != "" && material.CurrentRev != "" {
-			if _, cur, err := materials.Show(tx, material.ID, ""); err != nil {
-				return err
-			} else if normalize(cur.Content) == normalize(content) {
-				return invalid("the hand edit is outside the project guideline (global rules or generated sections): change it in the guideline it comes from")
-			}
-		}
-		return nil
+		plan, err = planMerge(tx, d)
+		return err
 	})
 	if err != nil {
 		return ResolveOut{}, err
-	}
-	if in.Choice == ChoiceMerge && strings.TrimSpace(content) == "" {
-		return ResolveOut{}, invalid("nothing to merge back: the edited file has no project guideline content")
 	}
 	if d.state == driftOpen {
 		b, _ := json.Marshal(in)
@@ -553,19 +657,8 @@ func (s *Service) Resolve(ctx context.Context, who command.Identity, in ResolveI
 	if in.Choice != ChoiceMerge {
 		return out, nil
 	}
-	commit := map[string]any{"content": content, "reason": "合回 " + d.repo + " 的 AGENTS.md 手改内容"}
-	if material.ID != "" {
-		commit["id"], commit["based_on"] = material.ID, material.CurrentRev
-	} else {
-		commit["project"], commit["kind"], commit["title"] = project.ID, materials.KindGuideline, project.Name+" 规范"
-	}
-	b, _ := json.Marshal(commit)
-	res, err := s.x.Do(ctx, command.Request{Identity: who, Command: "material.commit", Input: b, IdemKey: "agentsmd-merge:" + in.Item})
+	r, err := s.commitMerge(ctx, in.Item, plan)
 	if err != nil {
-		return out, err
-	}
-	var r materials.Result
-	if err := json.Unmarshal(res.Value, &r); err != nil {
 		return out, err
 	}
 	out.Material, out.Revision = r.Material, r.Revision
