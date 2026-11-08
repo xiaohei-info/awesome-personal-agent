@@ -1,11 +1,12 @@
-# sha256: 0ccc5883e7afcccd476e9afd344ab8a5fd25b32403a0a75a57c8c1b7e712f863
+# sha256: 217ad49829fcfbf2d9df99887de7ffc46cc010195a1b07b0390b46b9df596684
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 6
+  used_global: 9
   used_by_reporter:
     e2e-bg-main-live: 1
     e2e-proactive-live: 2
     e2e-guideline-live: 3
+    e2e-hermes-session: 3
   granted_by_reporter:
     e2e-guideline-live: 2
     e2e-hermes-session: 2
@@ -91,14 +92,16 @@ defects:
       - flow-chat-answer/ACT-CHAT-03
       reporters:
       - e2e-hermes-session
-      state: queued
+      state: fixing
+      fix_node: fix.kernel-items.1785cf
     dfx-35de8528ebe3:
       suspected: cli-client
       anchors:
       - flow-hermes-context/ACT-HCTX-09
       reporters:
       - e2e-hermes-session
-      state: queued
+      state: fixing
+      fix_node: fix.cli-client.35de85
     dfx-80defa39c0dd:
       suspected: hermes-plugin-tools
       anchors:
@@ -106,77 +109,13 @@ defects:
       reporters:
       - e2e-hermes-session
       state: queued
+      retried: true
     dfx-992917373ac0:
       suspected: hermes-plugin-receipt
       anchors:
       - flow-delegate-recover/ACT-DLG-06
       reporters:
       - e2e-hermes-session
-      state: queued
-  inbox:
-  - id: 6575fb8d1ddf
-    reporter: e2e-hermes-session
-    defects:
-    - class: design-gap
-      suspected_node: kernel-items
-      anchors:
-      - flow-chat-answer/ACT-CHAT-03
-      design_ref: docs/solution-design.md#33-场景二聊天代答
-      expected: §3.3 第 4 步、§14.5、§4.1 与 §15.3：经聊天代答的普通决策（resolved_via=chat，actor=agent，带
-        on_behalf_of 与原话）出现在 Web“agent 变更”视图并可一键撤销；§6.4 回退：写一条反向命令恢复账本状态（恢复 ask 未回答、阶段回
-        needs_input，外部副作用不撤销并在界面提示）。item.revert 仍只在 Web、不要求证据，“有更晚变更须先撤销更晚的”等既有规则照旧。Web
-        agent-changes 页对 decision.resolved 同样给出撤销按钮。
-      observed: taiyi 真实 Hermes：apa decide --option B --evidence 就选方案 B 成功，只产生 decision.resolved；POST
-        /v1/items/{id}/revert 回 400 only item updates and phase changes can be reverted。planRevert
-        只接受 item.updated/item.phase_changed；Web REVERTIBLE 也只含这两类。
-      locations:
-      - kernel/items/commands.go:planRevert
-      - kernel/decisions/decisions.go:Answer
-      - web/src/features/agent-changes/AgentChangesPage.tsx:REVERTIBLE
-    - class: design-gap
-      suspected_node: cli-client
-      anchors:
-      - flow-hermes-context/ACT-HCTX-09
-      design_ref: docs/solution-design.md#112-接入能力
-      expected: §11.2 会话身份透传：CLI 调用带 session 和 harness，Event actor 审计到会话粒度（含 harness
-        与 session）。CLI 从环境变量 APA_HARNESS 读 harness 名并随每次请求发 X-APA-Harness（与 APA_SESSION/X-APA-Session
-        同一处）；Hermes 插件里调用 apa 的地方（tools、core、inject、receipt）设 APA_HARNESS=hermes。同一次改动在
-        §17.4 环境变量与附录 B 登记 APA_HARNESS 与 X-APA-Harness；内核和 cli/ 不出现具体 harness 名（只在
-        plugins/hermes）。
-      observed: 真实 Hermes 用 WRK 调 apa_propose 后 apa why：actor 有 session，harness 为空。api/core
-        的 authenticate 读 X-APA-Harness，但 cli/client 只设 X-APA-Session，仓库里没有任何地方发 X-APA-Harness；§17.4
-        也没有对应环境变量。
-      locations:
-      - cli/client/client.go:do
-      - api/core/core.go:authenticate
-      - plugins/hermes/tools/cli.py
-    - class: design-gap
-      suspected_node: hermes-plugin-tools
-      anchors:
-      - flow-hermes-context/ACT-HCTX-09
-      design_ref: docs/solution-design.md#112-接入能力
-      expected: §14.2：主会话 agent 持 delegate token；§14.5 与附录 B.1：delegate 调用代理写命令（item.create、decision.request、delegate.create、delegate.report、executor.declare
-        等）必须带证据，经 CLI 全局参数 --evidence 传递，缺失为退出码 2。把 CLI 包成原生工具的 apa_* 工具（apa_propose、apa_ask、apa_delegate、apa_report、apa_declare_executors
-        等）都要带 evidence 参数（工具描述写明：本人原话与会话引用），原样作为 --evidence 交给 apa；只读工具不带。
-      observed: 只有 apa_decide/apa_accept/apa_dismiss 有 evidence；主会话按 §14.2 用 DEL 调
-        apa_propose 回 exit 2 delegate actions must carry on_behalf_of and the owner's
-        own words as evidence；同理 ask/delegate/report/declare。
-      locations:
-      - plugins/hermes/tools/__init__.py:_CLI_TOOLS
-      - plugins/hermes/tools/README.md
-      - kernel/authz/authz.go:needEvidence
-    - class: design-gap
-      suspected_node: hermes-plugin-receipt
-      anchors:
-      - flow-delegate-recover/ACT-DLG-06
-      design_ref: docs/solution-design.md#75-回执
-      expected: 主会话已定方案 A（内核不改，只改插件与文档）。receipt 插件沿用会话凭据，带 --evidence "插件捕获：<工具名>
-        对 <事项 id> 的调用结果，会话 <id>"，并从执行者输出提取 PR、commit、分支或链接写入证据；提取不到时报 progress（摘要写入、子事项保持
-        open），不报 done。capture 插件把本回合本人原话作为 X-APA-Evidence 发送（候选仍只落 proposed）。两个插件的失败写入插件本地日志，对模型仍不可见。同一次改动修订
-        §7.5、§14.5、附录 A.1，写明"插件捕获"的证据来源。不新增信任级，不放宽 §14.5 代理写清单。
-      observed: 真实 Hermes：receipt 插件以 DEL 调 apa report 无 evidence 被拒（needEvidence；delegation
-        进入 done 需证据），失败被丢弃不可见；capture 插件配 DEL 时 inbound.capture 回 400。
-      locations:
-      - plugins/hermes/receipt
-      - plugins/hermes/capture
-      - docs/solution-design.md
+      state: fixing
+      fix_node: fix.hermes-plugin-receipt.992917
+  inbox: []

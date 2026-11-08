@@ -9,76 +9,75 @@ meta:
   - 01a1a720-f7fd-719e-91d8-f5032216143f
   - 01a1a720-fa34-79ff-9662-cdf8dac90a21
   - 01a1aa40-ef12-766f-86e2-bead6a7c7b51
-  amendment_revision: 3
+  amendment_revision: 4
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-af8c76d4b610
+    amendment_id: amend-9593edfc1b3c
     amendment_file: .omac/apa.system-amendment.yaml
     nodes:
-      fix.kernel-guideline-check.61130e:
+      fix.cli-client.35de85:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-5e5a230ae4e8bc4a35067d16
-      fix.sources-github.85016b:
+        expected_review_generation: amendment-423b3222ee065ae0a8c10259
+      fix.hermes-plugin-receipt.992917:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-41d87320d6d0023bdb277254
-      e2e-guideline-live:
+        expected_review_generation: amendment-cd7c990f0eecdd5cc509575e
+      fix.kernel-items.1785cf:
         stage: authoring
         state: synced
-        work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
+        reason: no existing work item side effect
+        expected_review_generation: amendment-e0404ae0daca30ce44123872
+      e2e-hermes-session:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
         baseline:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-696bf72d4c031990a769296f
+          review_generation: authoring-84dbc5a9eb26cf2c7658ae35
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
+          bounce_baseline: null
           decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
           worker_handoff_pending: false
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
-        expected_review_generation: amendment-2a1255743ee97ba8c8c4e1e8
+        expected_contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
+        expected_review_generation: amendment-204d99c1ad27ca563dc7c467
         attempt_baseline:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-696bf72d4c031990a769296f
+          review_generation: authoring-84dbc5a9eb26cf2c7658ae35
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
+          bounce_baseline: null
           decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
           worker_handoff_pending: false
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-2a1255743ee97ba8c8c4e1e8
+          review_generation: amendment-204d99c1ad27ca563dc7c467
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -90,7 +89,7 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-bg-main-live:
@@ -109,8 +108,16 @@ meta:
           merge: 0
           review: 0
           worker: 0
+      e2e-guideline-live:
+        amendment_id: amend-af8c76d4b610
+        work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
+        contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
     system: true
-  last_amendment_id: amend-af8c76d4b610
+  last_amendment_id: amend-9593edfc1b3c
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
@@ -12203,6 +12210,10 @@ nodes:
   - api-capture
   - e2e-env-baseline
   - cli-init-serve
+  - fix.hermes-plugin-tools.ea87a6
+  - fix.cli-client.35de85
+  - fix.hermes-plugin-receipt.992917
+  - fix.kernel-items.1785cf
   title: 真实 Hermes：会话、代答与委派
   description: 产出 e2e-hermes-session-live-evidence。是 flow-hermes-context、flow-chat-answer、flow-delegate-recover、flow-capture
     的唯一全流程 owner。要点：需 Mac mini 上的真实 Hermes；不可用时用 `omac work block` 上报，不得用替身冒充。 派给
@@ -14072,3 +14083,218 @@ nodes:
     defect_refs:
     - dfx-85016be0054e
     coverage_gate: 75
+- id: fix.cli-client.35de85
+  worker: omac-worker-backend
+  blocked_by:
+  - kernel-domain
+  - api-core
+  title: 'Fix cli-client: dfx-35de8528ebe3'
+  description: "Automatic fix for upstream defect(s) reported by e2e-hermes-session.\n\n-
+    [design-gap] anchors flow-hermes-context/ACT-HCTX-09 (docs/solution-design.md#112-接入能力)\n
+    \ expected: §11.2 会话身份透传：CLI 调用带 session 和 harness，Event actor 审计到会话粒度（含 harness
+    与 session）。CLI 从环境变量 APA_HARNESS 读 harness 名并随每次请求发 X-APA-Harness（与 APA_SESSION/X-APA-Session
+    同一处）；Hermes 插件里调用 apa 的地方（tools、core、inject、receipt）设 APA_HARNESS=hermes。同一次改动在
+    §17.4 环境变量与附录 B 登记 APA_HARNESS 与 X-APA-Harness；内核和 cli/ 不出现具体 harness 名（只在 plugins/hermes）。\n
+    \ observed: 真实 Hermes 用 WRK 调 apa_propose 后 apa why：actor 有 session，harness 为空。api/core
+    的 authenticate 读 X-APA-Harness，但 cli/client 只设 X-APA-Session，仓库里没有任何地方发 X-APA-Harness；§17.4
+    也没有对应环境变量。\n  where: cli/client/client.go:do; api/core/core.go:authenticate; plugins/hermes/tools/cli.py"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-35de8528ebe3 in cli-client: §11.2 会话身份透传：CLI
+      调用带 session 和 harness，Event actor 审计到会话粒度（含 harness 与 session）。CLI 从环境变量 APA_HARNESS
+      读 harness 名并随每次请求发 X-APA-Harness（与 APA_SESSION/X-APA-Session 同一处）；Hermes 插件里调用
+      apa 的地方（tools、core、inject、receipt）设 APA_HARNESS=hermes。同一次改动在 §17.4 环境变量与附录
+      B 登记 APA_HARNESS 与 X-APA-Harness；内核和 cli/ 不出现具体 harness 名（只在 plugins/hermes）。'
+    non_goals:
+    - 不含业务逻辑
+    - 错误输出不含账本用户内容
+    - CLI 不含业务逻辑，不直接访问存储
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./cli/client/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: cli-client-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#42-cli
+      - docs/solution-design.md#173-退出码
+      - docs/solution-design.md#174-环境变量
+      - docs/solution-design.md#115-无头运行与续接
+      - docs/appendix-b-api-cli.md#b3-错误响应
+      delivery_goal: 二进制入口 ./cli/apa 和 `apa login` 可用，CLI 默认输出 JSON、--pretty 人读，稳定映射退出码
+        1 到 7、20 到 22，设置 APA_RUN 时只用运行凭据不回退本机凭据文件
+      covers:
+      - ACT-BOOT-06
+      - ACT-BOOT-07
+      - ACT-BGT-04
+      acceptance_refs:
+      - flow-bootstrap
+      - flow-bg-task-runner
+      commands:
+      - go test -count=1 ./cli/client/...
+    pr_base: main
+    acceptance_refs:
+    - flow-hermes-context
+    source_of_truth:
+    - docs/solution-design.md#42-cli
+    - docs/solution-design.md#173-退出码
+    - docs/solution-design.md#174-环境变量
+    - docs/solution-design.md#115-无头运行与续接
+    - docs/appendix-b-api-cli.md#b3-错误响应
+    scope_paths:
+    - cli/client/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: kernel-domain-module
+      producer: kernel-domain
+      evidence_mode: artifact
+    - artifact_id: api-core-routes
+      producer: api-core
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-35de8528ebe3
+    coverage_gate: 80
+- id: fix.hermes-plugin-receipt.992917
+  worker: omac-worker-frontend
+  blocked_by:
+  - hermes-plugin-tools
+  title: 'Fix hermes-plugin-receipt: dfx-992917373ac0'
+  description: "Automatic fix for upstream defect(s) reported by e2e-hermes-session.\n\n-
+    [design-gap] anchors flow-delegate-recover/ACT-DLG-06 (docs/solution-design.md#75-回执)\n
+    \ expected: 主会话已定方案 A（内核不改，只改插件与文档）。receipt 插件沿用会话凭据，带 --evidence \"插件捕获：<工具名>
+    对 <事项 id> 的调用结果，会话 <id>\"，并从执行者输出提取 PR、commit、分支或链接写入证据；提取不到时报 progress（摘要写入、子事项保持
+    open），不报 done。capture 插件把本回合本人原话作为 X-APA-Evidence 发送（候选仍只落 proposed）。两个插件的失败写入插件本地日志，对模型仍不可见。同一次改动修订
+    §7.5、§14.5、附录 A.1，写明\"插件捕获\"的证据来源。不新增信任级，不放宽 §14.5 代理写清单。\n  observed: 真实 Hermes：receipt
+    插件以 DEL 调 apa report 无 evidence 被拒（needEvidence；delegation 进入 done 需证据），失败被丢弃不可见；capture
+    插件配 DEL 时 inbound.capture 回 400。\n  where: plugins/hermes/receipt; plugins/hermes/capture;
+    docs/solution-design.md"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-992917373ac0 in hermes-plugin-receipt:
+      主会话已定方案 A（内核不改，只改插件与文档）。receipt 插件沿用会话凭据，带 --evidence "插件捕获：<工具名> 对 <事项 id>
+      的调用结果，会话 <id>"，并从执行者输出提取 PR、commit、分支或链接写入证据；提取不到时报 progress（摘要写入、子事项保持 open），不报
+      done。capture 插件把本回合本人原话作为 X-APA-Evidence 发送（候选仍只落 proposed）。两个插件的失败写入插件本地日志，对模型仍不可见。同一次改动修订
+      §7.5、§14.5、附录 A.1，写明"插件捕获"的证据来源。不新增信任级，不放宽 §14.5 代理写清单。'
+    non_goals:
+    - 无事项 id 时不捕获
+    - 不实现候选捕获
+    - 插件只做"读 stdin、调内核、写 stdout"，不含判断逻辑
+    - 钩子失败必须放行，不影响 Hermes
+    verification_commands:
+    - python3 -m pytest -q plugins/hermes/tests/receipt
+    integration_gates:
+    - name: hermes-plugin-receipt-gate
+      layer: L3
+      source_of_truth:
+      - docs/appendix-a-harness.md#a1-插件实现约定
+      - docs/solution-design.md#112-接入能力
+      delivery_goal: post_tool_call、subagent_stop 只对参数含事项 id 的执行者类工具异步回执，对模型不可见
+      covers:
+      - ACT-DLG-06
+      acceptance_refs:
+      - flow-delegate-recover
+      commands:
+      - python3 -m pytest -q plugins/hermes/tests/receipt/test_live.py
+    pr_base: main
+    acceptance_refs:
+    - flow-delegate-recover
+    source_of_truth:
+    - docs/appendix-a-harness.md#a1-插件实现约定
+    - docs/solution-design.md#112-接入能力
+    scope_paths:
+    - plugins/hermes/receipt/**
+    evidence_mode: live
+    consumes:
+    - artifact_id: hermes-plugin-tools-plugin
+      producer: hermes-plugin-tools
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-992917373ac0
+    coverage_gate: 70
+- id: fix.kernel-items.1785cf
+  worker: omac-worker-backend
+  blocked_by:
+  - kernel-domain
+  - kernel-command
+  - kernel-projects
+  - kernel-clock
+  title: 'Fix kernel-items: dfx-1785cf62dba4'
+  description: "Automatic fix for upstream defect(s) reported by e2e-hermes-session.\n\n-
+    [design-gap] anchors flow-chat-answer/ACT-CHAT-03 (docs/solution-design.md#33-场景二聊天代答)\n
+    \ expected: §3.3 第 4 步、§14.5、§4.1 与 §15.3：经聊天代答的普通决策（resolved_via=chat，actor=agent，带
+    on_behalf_of 与原话）出现在 Web“agent 变更”视图并可一键撤销；§6.4 回退：写一条反向命令恢复账本状态（恢复 ask 未回答、阶段回
+    needs_input，外部副作用不撤销并在界面提示）。item.revert 仍只在 Web、不要求证据，“有更晚变更须先撤销更晚的”等既有规则照旧。Web
+    agent-changes 页对 decision.resolved 同样给出撤销按钮。\n  observed: taiyi 真实 Hermes：apa
+    decide --option B --evidence 就选方案 B 成功，只产生 decision.resolved；POST /v1/items/{id}/revert
+    回 400 only item updates and phase changes can be reverted。planRevert 只接受 item.updated/item.phase_changed；Web
+    REVERTIBLE 也只含这两类。\n  where: kernel/items/commands.go:planRevert; kernel/decisions/decisions.go:Answer;
+    web/src/features/agent-changes/AgentChangesPage.tsx:REVERTIBLE"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-1785cf62dba4 in kernel-items: §3.3
+      第 4 步、§14.5、§4.1 与 §15.3：经聊天代答的普通决策（resolved_via=chat，actor=agent，带 on_behalf_of
+      与原话）出现在 Web“agent 变更”视图并可一键撤销；§6.4 回退：写一条反向命令恢复账本状态（恢复 ask 未回答、阶段回 needs_input，外部副作用不撤销并在界面提示）。item.revert
+      仍只在 Web、不要求证据，“有更晚变更须先撤销更晚的”等既有规则照旧。Web agent-changes 页对 decision.resolved 同样给出撤销按钮。'
+    non_goals:
+    - 不实现决策和建议处理（kernel-decisions 负责）
+    - 不实现委派子事项（kernel-delegation 负责）
+    - 除外呼调用器外不 import 网络或子进程库，不出现具体 harness、渠道、厂商名
+    - 不直写其他模块的数据，模块协作经命令模型
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/items/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: kernel-items-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#63-item事项
+      - docs/solution-design.md#64-生命周期六个固定阶段
+      - docs/solution-design.md#614-不变量
+      - docs/solution-design.md#71-事项中心
+      delivery_goal: item.create、update、transition、relate 强制六阶段进入约束、kind schema、allowed_executors
+        写入校验和到期 Timer，并能由 Event 折叠重建投影
+      covers:
+      - ACT-LED-01
+      acceptance_refs:
+      - flow-ledger-integrity
+      commands:
+      - go test -count=1 ./kernel/items/... ./kernel/domain/... ./kernel/command/...
+        ./kernel/projects/...
+    pr_base: main
+    acceptance_refs:
+    - flow-chat-answer
+    source_of_truth:
+    - docs/solution-design.md#63-item事项
+    - docs/solution-design.md#64-生命周期六个固定阶段
+    - docs/solution-design.md#614-不变量
+    - docs/solution-design.md#71-事项中心
+    scope_paths:
+    - kernel/items/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: kernel-domain-module
+      producer: kernel-domain
+      evidence_mode: artifact
+    - artifact_id: kernel-command-module
+      producer: kernel-command
+      evidence_mode: artifact
+    - artifact_id: kernel-projects-module
+      producer: kernel-projects
+      evidence_mode: artifact
+    - artifact_id: kernel-clock-module
+      producer: kernel-clock
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-1785cf62dba4
+    coverage_gate: 80
