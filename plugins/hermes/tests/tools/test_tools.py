@@ -21,6 +21,7 @@ FAKE = """#!/bin/sh
 python3 - "$@" <<'PY' >> "$APA_LOG"
 import json, os, sys
 print(json.dumps({"argv": sys.argv[1:], "session": os.environ.get("APA_SESSION")}))
+open(os.environ["APA_LOG"] + ".harness", "a").write(os.environ.get("APA_HARNESS", "") + "\\n")
 PY
 cat > "$APA_STDIN" 2>/dev/null || true
 echo "$FAKE_OUT"
@@ -67,6 +68,11 @@ def table(tmp_path, monkeypatch):
 def test_registers_the_apa_tools(tools):
     assert set(tools) == {"apa_read_file", "apa_list_dir", "apa_item_update", "apa_material_commit", "apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
                           "apa_report", "apa_declare_executors", "apa_executor_call"}
+
+
+def test_cli_calls_carry_harness_hermes(tools, apa):
+    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s")
+    assert (apa / "log.harness").read_text().split() == ["hermes"]
 
 
 def test_decide_carries_hermes_session_and_evidence(tools, apa, monkeypatch):

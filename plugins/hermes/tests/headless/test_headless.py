@@ -28,7 +28,7 @@ def test_kernel_argv_per_tier_and_resume():
 def fake_apa(tmp_path, monkeypatch):
     out = tmp_path / "stdin.json"
     exe = tmp_path / "apa"
-    exe.write_text(f"#!/bin/sh\necho \"$@\" > {tmp_path}/argv\ncat > {out}\necho \"$FAKE_STDERR\" >&2\nexit ${{FAKE_EXIT:-0}}\n")
+    exe.write_text(f"#!/bin/sh\necho \"$@\" > {tmp_path}/argv\necho \"$APA_HARNESS\" > {tmp_path}/harness\ncat > {out}\necho \"$FAKE_STDERR\" >&2\nexit ${{FAKE_EXIT:-0}}\n")
     exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("APA_BIN", str(exe))
     monkeypatch.setenv("APA_HERMES_EXECUTORS", str(tmp_path / "none.json"))
@@ -38,6 +38,7 @@ def fake_apa(tmp_path, monkeypatch):
 def test_declare_submits_headless_part_via_apa_declare_stdin(fake_apa):
     out = json.loads(load_headless()._declare({}, session_id="s1"))
     assert out["ok"] and (fake_apa / "argv").read_text().strip() == "declare -"
+    assert (fake_apa / "harness").read_text().strip() == "hermes"  # X-APA-Harness source for the kernel audit
     body = json.loads((fake_apa / "stdin.json").read_text())
     assert body["harness"] == "hermes" and "executors" not in body
     assert body["headless"]["session"] == {"extract": "$.session_id"}

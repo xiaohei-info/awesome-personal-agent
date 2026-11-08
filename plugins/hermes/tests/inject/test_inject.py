@@ -39,7 +39,7 @@ def fake_apa(tmp_path, body):
 
 
 # Logs every call to $LOG; `context` prints $CTX_OUT (unset -> nothing); `agents check` prints nothing.
-LOGGING = 'echo "$APA_SESSION|$*" >> "$LOG"; if [ "$1" = context ]; then printf "%s" "$CTX_OUT"; fi'
+LOGGING = 'echo "$APA_SESSION|$*" >> "$LOG"; echo "$APA_HARNESS" >> "$LOG.harness"; if [ "$1" = context ]; then printf "%s" "$CTX_OUT"; fi'
 
 
 @pytest.fixture
@@ -70,6 +70,13 @@ def test_first_turn_injects_summary_into_user_message_and_runs_agents_check(inj,
     calls = inj.calls()
     assert "s1|context --session s1 --scope cwd --format inject --instruction 1" in calls
     assert "s1|agents check" in calls
+
+
+def test_every_apa_call_carries_harness_hermes(inj, monkeypatch):
+    inj.hook(session_id="s1", is_first_turn=True)
+    import os
+    got = open(os.environ["LOG"] + ".harness").read().split()
+    assert len(got) >= 2 and set(got) == {"hermes"}
 
 
 def test_later_turn_asks_for_increment_only_and_skips_agents_check(inj, monkeypatch):
