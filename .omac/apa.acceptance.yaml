@@ -267,11 +267,11 @@ flows:
           通过：只有第一条成功，其余退出码 4。失败：worker 改了别人的事项或建了项目。
       - id: ACT-AUTH-03
         kind: business-action
-        step: delegate 改任意事项必须附证据
+        step: delegate 改别人的事项须本人原话加会话引用，或授权单
         how: |-
-          用 DEL 对 assignee 为 other-host.cli 的事项运行 `apa item update`：先不带证据，再带证据和 on_behalf_of。
+          用 DEL 对 assignee 为 other-host.cli 的事项运行 `apa item update`（第二档）：先不带 `--evidence` 也不带 `--grant`；再设置 `APA_SESSION=<会话引用>` 带 `--evidence <本人原话>`；再同时带 `--evidence` 和 `--grant <id>`。
         expected: |-
-          通过：不带证据被拒绝且事项不变；带证据成功，Event 含 on_behalf_of 和证据。失败：无证据也能改。
+          通过：两者都不带退出码 23、不写入，事项为 open 或 waiting 时转 needs_input；原话加会话引用成功，Event 含 on_behalf_of、原话和会话引用；同时带两者退出码 2。失败：无依据也能改，或两种依据同时携带仍生效。
       - id: ACT-AUTH-04
         kind: business-action
         step: 吊销立即生效
@@ -661,7 +661,7 @@ flows:
         how: |-
           在 Hermes 回复"就选方案 B"。
         expected: |-
-          通过：agent 调 `apa decide <id> --option B --evidence "就选方案 B"`；resolved_via=chat，Event 带 on_behalf_of 和原话，可一键撤销。失败：未调用，或证据不是本人原话。
+          通过：agent 带 `APA_SESSION`（由 Hermes 插件设置）调 `apa decide <id> --option B --evidence "就选方案 B"`（第二档，不带 `--grant`）；resolved_via=chat，Event 带 on_behalf_of、原话和会话引用，可一键撤销。失败：未调用，或证据不是本人原话，或缺会话引用却生效。
       - id: ACT-CHAT-04
         kind: business-action
         step: web_only 决策在聊天中被拒绝
@@ -698,9 +698,9 @@ flows:
         kind: business-action
         step: 执行者回执并附证据
         how: |-
-          运行 `APA_TOKEN=$WRK apa report <子事项> --outcome <完成> --summary 已修复 --evidence <PR 链接>`。
+          运行 `APA_TOKEN=$WRK apa report <子事项> --outcome <完成> --summary 已修复 --pr <PR 链接>`（第一档，不带 `--evidence`，不需要 `APA_SESSION`）；再对另一个子事项不带任何结果证据运行 `--outcome <完成>`。
         expected: |-
-          通过：子事项 done 并带证据；父事项回 open；事件流有 delegation.reported。失败：父事项未回 open。
+          通过：带 `--pr` 的回执使子事项 done 并带结果证据，父事项回 open，事件流有 delegation.reported；不带结果证据的完成回执退出码 2，子事项不变。失败：父事项未回 open，或无结果证据的完成回执生效。
       - id: ACT-DLG-05
         kind: business-action
         step: 回收结果注入主会话
@@ -726,7 +726,7 @@ flows:
         kind: business-action
         step: 全部子事项终态后父事项才回 open
         how: |-
-          父事项建两个子事项。一个 `apa report --outcome <完成>`；另一个 `apa ask` 进 needs_input，看父事项；再把它转 dropped，看父事项。
+          父事项建两个子事项。一个 `apa report --outcome <完成> --pr <PR 链接>`；另一个 `apa ask` 进 needs_input，看父事项；再把它转 dropped，看父事项。
         expected: |-
           通过：一个 done 一个 needs_input 时父事项仍是 waiting；两者都到终态后回 open。失败：提前回 open，或不回。
       - id: ACT-DLG-09
