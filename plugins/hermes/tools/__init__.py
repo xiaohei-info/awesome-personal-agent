@@ -15,21 +15,23 @@ def _schema(name, desc, props, required):
             "parameters": {"type": "object", "properties": props, "required": required}}
 
 
-_EVIDENCE = _s("The owner's own words that justify acting for them; required for chat answers.")
+_EVIDENCE = _s("The owner's own words, quoted verbatim, that justify acting for them. They must come from this turn: never paraphrase, "
+               "reword or invent them. Give this or grant, not both.")
+_GRANT = _s("Id of a grant the owner issued in Web (apa grant list) for when they are absent. Give this or evidence, not both.")
 _REASON = _s("Short reason, recorded in the ledger event.")
 
 # name -> (description, properties, required, argv builder)
 _CLI_TOOLS = {
     "apa_decide": ("Answer a decision on the owner's behalf (apa decide). Exit 20 = web_only: give the owner the Web link and stop.",
                    {"id": _s("Item id"), "option": _s("Chosen option id"), "text": _s("Free-text answer"),
-                    "evidence": _EVIDENCE, "reason": _REASON}, ["id"],
-                   lambda a: ["decide", a["id"], *_flags(a, "option", "text", "evidence", "reason")]),
+                    "evidence": _EVIDENCE, "grant": _GRANT, "reason": _REASON}, ["id"],
+                   lambda a: ["decide", a["id"], *_flags(a, "option", "text", "evidence", "reason", "grant")]),
     "apa_accept": ("Accept a proposed item on the owner's behalf (apa accept).",
-                   {"id": _s("Item id"), "evidence": _EVIDENCE, "reason": _REASON}, ["id"],
-                   lambda a: ["accept", a["id"], *_flags(a, "evidence", "reason")]),
+                   {"id": _s("Item id"), "evidence": _EVIDENCE, "grant": _GRANT, "reason": _REASON}, ["id"],
+                   lambda a: ["accept", a["id"], *_flags(a, "evidence", "reason", "grant")]),
     "apa_dismiss": ("Dismiss a proposed item on the owner's behalf (apa dismiss).",
-                    {"id": _s("Item id"), "evidence": _EVIDENCE, "reason": _REASON}, ["id"],
-                    lambda a: ["dismiss", a["id"], *_flags(a, "evidence", "reason")]),
+                    {"id": _s("Item id"), "evidence": _EVIDENCE, "grant": _GRANT, "reason": _REASON}, ["id"],
+                    lambda a: ["dismiss", a["id"], *_flags(a, "evidence", "reason", "grant")]),
     "apa_propose": ("Suggest a new item for the owner (apa propose); it lands as proposed.",
                     {"kind": _s("Item kind"), "title": _s("Title"), "summary": _s("Summary"), "body": _s("Body"),
                      "priority": _s("Priority"), "project": _s("Project id"), "tags": _s("Comma-separated tags"),
@@ -67,9 +69,9 @@ _CLI_TOOLS = {
                         {"id": _s("Item id"), "spec": {"type": "object", "description": "Structured result, e.g. period and sections"},
                          "title": _s("Title"), "summary": _s("Summary"), "body": _s("Body"),
                          "status_label": _s("Status label"), "priority": _s("Priority"), "tags": _s("Comma-separated tags"),
-                         "reason": _s("Short reason, recorded in the ledger event"), "evidence": _EVIDENCE}, ["id", "reason"],
+                         "reason": _s("Short reason, recorded in the ledger event"), "evidence": _EVIDENCE, "grant": _GRANT}, ["id", "reason"],
                         lambda a: ["item", "update", a["id"], *_flags(a, "title", "summary", "body", "status_label", "priority",
-                                                                      "tags", "spec", "reason", "evidence")]),
+                                                                      "tags", "spec", "reason", "evidence", "grant")]),
 }
 
 
