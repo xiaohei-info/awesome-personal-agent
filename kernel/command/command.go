@@ -696,6 +696,18 @@ func loadIdem(tx *store.Tx, principal, command, key string) (idemRow, bool, erro
 	return row, err == nil, err
 }
 
+// SucceededSince 报告 principal 是否在 at 及之后成功执行过 command（以带幂等键的成功留下的幂等记录为凭，不新增存储）。
+// 回执与捕获被拒绝的健康告警据此清除（§15.2）。
+func SucceededSince(tx *store.Tx, principal, command string, at time.Time) (bool, error) {
+	r, err := tx.Query("SELECT 1 FROM command_idem WHERE principal = ? AND command = ? AND created_at >= ? LIMIT 1", principal, command, at.UnixNano())
+	if err != nil {
+		return false, err
+	}
+	defer r.Close()
+	ok := r.Next()
+	return ok, r.Err()
+}
+
 // Version 返回对象当前版本，没有写入过为 0。
 func Version(tx *store.Tx, object string) (int64, error) { return loadVersion(tx, object) }
 

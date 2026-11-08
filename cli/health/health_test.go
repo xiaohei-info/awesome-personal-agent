@@ -112,7 +112,7 @@ func canon(t *testing.T, s string) string {
 	return string(b)
 }
 
-// flow-health：`apa health` 与 GET /health 是同一份九类信号（含修复入口），observer 凭据即可读。
+// flow-health：`apa health` 与 GET /health 是同一份十类信号（含修复入口），observer 凭据即可读。
 func TestApaHealthPrintsTheSameReportAsTheAPI(t *testing.T) {
 	r := newRig(t, fakePacks{{Pack: "work", Source: "user", Reason: "bad schema"}})
 	code, out, errOut := r.apa("health")
@@ -127,8 +127,8 @@ func TestApaHealthPrintsTheSameReportAsTheAPI(t *testing.T) {
 		Signals []struct{ ID, Next string }
 	}
 	_ = json.Unmarshal([]byte(out), &rep)
-	if rep.Healthy || len(rep.Signals) != 9 {
-		t.Fatalf("want 9 signals and unhealthy: %s", out)
+	if rep.Healthy || len(rep.Signals) != 10 {
+		t.Fatalf("want 10 signals and unhealthy: %s", out)
 	}
 	for _, s := range rep.Signals {
 		if s.Next == "" {
@@ -140,7 +140,7 @@ func TestApaHealthPrintsTheSameReportAsTheAPI(t *testing.T) {
 // --pretty：失败的信号带 why 与 next，正常的只标 ok；干净账本显示 healthy。
 func TestApaHealthPretty(t *testing.T) {
 	_, out, _ := newRig(t, nil).apa("health", "--pretty")
-	if !strings.HasPrefix(out, "healthy\n") || strings.Contains(out, "FAIL") || strings.Count(out, "  ok    ") != 9 {
+	if !strings.HasPrefix(out, "healthy\n") || strings.Contains(out, "FAIL") || strings.Count(out, "  ok    ") != 10 {
 		t.Fatalf("clean: %q", out)
 	}
 	_, out, _ = newRig(t, fakePacks{{Pack: "work", Reason: "bad"}}).apa("health", "--pretty")

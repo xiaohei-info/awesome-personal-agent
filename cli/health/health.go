@@ -1,4 +1,4 @@
-// Package health 实现 `apa health`（设计 §15.2、附录 B.1）：只读，打印 GET /v1/health 的九类信号与修复入口。
+// Package health 实现 `apa health`（设计 §15.2、附录 B.1）：只读，打印 GET /v1/health 的十类信号与修复入口。
 // 薄客户端：判定在内核，这里不重算、不过滤；默认输出就是 API 响应本身，与 Web 读到的是同一份。
 package health
 
