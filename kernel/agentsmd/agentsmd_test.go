@@ -484,19 +484,84 @@ func TestOverrideAllowsSyncIgnoreWritesNothing(t *testing.T) {
 	e.noErrors(t)
 }
 
-// 事项被普通决策回答（绕过 agents.resolve）：按本次忽略处理，不写文件也不重复提。
-func TestItemAnsweredElsewhereCountsAsIgnore(t *testing.T) {
+// ACT-AGM-06/07：本人经普通决策回答（decision.answer，Web 与 POST /items/{id}/decide 同一命令）选的结果必须生效。
+func TestPlainDecisionAnswerAppliesOverride(t *testing.T) {
 	e := setup(t)
 	e.guideline(t, e.prj, projGuideline)
 	file := edited(e.view(t))
 	v := e.check(t, observer, file)
-	e.must(t, owner, "decision.answer", map[string]any{"id": v.Item, "choice": "override"})
+	e.must(t, owner, "decision.answer", map[string]any{"id": v.Item, "choice": ChoiceOverride})
+	again := e.check(t, observer, file)
+	if again.Decision != driftOverride || again.Item != v.Item || len(e.needsInput(t)) != 0 {
+		t.Fatalf("%+v", again)
+	}
+	if s := e.sync(t, file); !s.Write || s.Blocked || s.Content != e.view(t).Content {
+		t.Fatalf("override chosen through a plain answer must let sync write: %+v", s)
+	}
+}
+
+func TestPlainDecisionAnswerAppliesIgnore(t *testing.T) {
+	e := setup(t)
+	e.guideline(t, e.prj, projGuideline)
+	file := edited(e.view(t))
+	v := e.check(t, observer, file)
+	e.must(t, owner, "decision.answer", map[string]any{"id": v.Item, "choice": ChoiceIgnore})
 	again := e.check(t, observer, file)
 	if again.Decision != driftIgnored || again.Item != v.Item || len(e.needsInput(t)) != 0 {
 		t.Fatalf("%+v", again)
 	}
-	if s := e.sync(t, file); s.Write {
-		t.Fatal("a plain decision answer must not authorize overwriting")
+	if s := e.sync(t, file); s.Write || !s.Blocked {
+		t.Fatalf("ignore must not write: %+v", s)
+	}
+}
+
+func TestPlainDecisionAnswerAppliesMerge(t *testing.T) {
+	e := setup(t)
+	mat := e.guideline(t, e.prj, projGuideline)
+	file := edited(e.view(t))
+	v := e.check(t, observer, file)
+	e.must(t, owner, "decision.answer", map[string]any{"id": v.Item, "choice": ChoiceMerge})
+	e.noErrors(t)
+	var rev materials.Revision
+	e.st.View(bg, func(tx *store.Tx) error {
+		_, cur, _ := materials.Show(tx, mat, "")
+		revs, err := materials.History(tx, mat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range revs {
+			if r.State == materials.StateProposed {
+				rev = r
+			}
+		}
+		if strings.Contains(cur.Content, "手改") {
+			t.Fatal("the guideline must not change before the owner confirms")
+		}
+		return nil
+	})
+	if rev.ID == "" || !strings.Contains(rev.Content, "- 手改：发布前先跑冒烟") {
+		t.Fatalf("merge through a plain answer must propose a revision holding the edit: %+v", rev)
+	}
+	// 同一选择经 Resolve 重试：重放同一修订，不重复提交。
+	again, err := e.svc.Resolve(bg, owner, ResolveIn{Item: v.Item, Choice: ChoiceMerge})
+	if err != nil || again.Revision != rev.ID {
+		t.Fatalf("retry must replay the same revision: %+v %v", again, err)
+	}
+	e.must(t, owner, "revision.confirm", map[string]any{"id": rev.ID})
+	if s := e.sync(t, file); s.State != StateCurrent {
+		t.Fatalf("after confirm the edit is the rendering: %+v", s)
+	}
+}
+
+// 不合格的合回（手改不在项目规范里）经普通回答也被拒，且回答整体回滚，事项仍在等本人决定。
+func TestPlainDecisionAnswerRejectsInvalidMerge(t *testing.T) {
+	e := setup(t)
+	e.guideline(t, "", "## 全局\n\n- 说中文")
+	e.guideline(t, e.prj, projGuideline)
+	v := e.check(t, observer, strings.Replace(e.view(t).Content, "- 说中文", "- 说英文", 1))
+	e.wantExit(t, domain.ExitUsage, owner, "decision.answer", map[string]any{"id": v.Item, "choice": ChoiceMerge})
+	if it := e.item(t, v.Item); it.Phase != domain.PhaseNeedsInput {
+		t.Fatal("a refused merge must leave the drift undecided")
 	}
 }
 
