@@ -110,7 +110,7 @@ main_session:
 
 ## A.5 插件组合参考
 
-**Hermes**：`plugin.yaml` 声明钩子；`register(ctx)` 里 `register_system_prompt_section` 承担常驻指令（不超过 4000 字，新会话冻结）；另注册一个内容为 callable 的段承担人格注入，新会话渲染时经 `apa persona` 读取，按会话冻结；`pre_llm_call` 承担会话开始注入和消息前注入（上下文进用户消息，插件内自设不超过 2 秒的超时）；`post_tool_call`、`subagent_stop` 承担回执捕获；`on_session_end` 承担候选捕获（回合级）；`register_tool` 把 CLI 包成原生工具并带上 `session_id`；`ctx.inject_message`（需开启 `allow_gateway_injection`）或 webhook 路由承担会话唤醒。
+**Hermes**：`plugin.yaml` 声明钩子；`register(ctx)` 里 `register_system_prompt_section` 承担常驻指令（不超过 4000 字，新会话冻结）；另注册一个内容为 callable 的段承担人格注入，新会话渲染时经 `apa persona` 读取，按会话冻结；`pre_llm_call` 承担会话开始注入和消息前注入（上下文进用户消息，插件内自设不超过 2 秒的超时）；`post_tool_call`、`subagent_stop` 承担回执捕获；`on_session_end` 承担候选捕获（回合级）；`register_tool` 把 CLI 包成原生工具并带上 `session_id`，并为 `read` 档补最小工具（Hermes 没有只读文件工具集）：`apa_read_file`、`apa_list_dir`（只读，限运行目录与工作目录）、`apa_item_update`（写自己事项的 spec 等字段）、`apa_material_commit`（正文经 stdin 交给 `apa material commit`），写回一律走 apa 工具，不给 `file` 或 `terminal`；`ctx.inject_message`（需开启 `allow_gateway_injection`）或 webhook 路由承担会话唤醒。
 
 **dsh**（后续）：npm 包声明 `dsh.bundle` 与 `engines.dsh`，`cordis.patch.yml` 插入插件行，按用到的 profile 分别安装；`ctx.systemPrompt.section` 承担常驻指令；`agent/created` 承担会话开始注入和 `apa agents check`（插件捕获全部错误，自设不超过 2 秒的超时）；`agent/pre-step` 承担消息前注入（按 `turn` 去重，失败时 `next()`）；`tools/result`、`subagent/end` 承担回执捕获；`agent/turn-stopping` 承担候选捕获（不调用 `steer`）；`session/event` 观察 `compaction/start` 承担压缩前保存（需实测）；`ctx.tools.register` 把 CLI 包成原生工具，显式传入 `APA_SESSION`；运行凭据经文件传递；不声明会话唤醒。各接入面的依据与实测状态见 A.6。
 

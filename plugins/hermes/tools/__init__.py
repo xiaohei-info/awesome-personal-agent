@@ -1,7 +1,7 @@
 """APA tools plugin for Hermes: the apa CLI as native tools that carry the Hermes session id."""
 import json
 
-from . import cli, executors
+from . import cli, executors, files
 
 TOOLSET = "apa"
 
@@ -63,6 +63,13 @@ _CLI_TOOLS = {
                     "idempotency_key": _s("Idempotency key")}, ["id", "outcome"],
                    lambda a: ["report", a["id"], *_flags(a, "outcome", "summary", "pr", "commit", "branch", "link",
                                                          "ack_cursor", "reason", "idempotency_key")]),
+    "apa_item_update": ("Write fields on your own item, e.g. the result in spec (apa item update). spec is a JSON object.",
+                        {"id": _s("Item id"), "spec": {"type": "object", "description": "Structured result, e.g. period and sections"},
+                         "title": _s("Title"), "summary": _s("Summary"), "body": _s("Body"),
+                         "status_label": _s("Status label"), "priority": _s("Priority"), "tags": _s("Comma-separated tags"),
+                         "reason": _s("Short reason, recorded in the ledger event"), "evidence": _EVIDENCE}, ["id", "reason"],
+                        lambda a: ["item", "update", a["id"], *_flags(a, "title", "summary", "body", "status_label", "priority",
+                                                                      "tags", "spec", "reason", "evidence")]),
 }
 
 
@@ -74,6 +81,8 @@ def _flags(args, *names):
             out.append(flag)
         elif isinstance(v, list):
             out += [x for item in v for x in (flag, str(item))]
+        elif isinstance(v, dict):
+            out += [flag, json.dumps(v, ensure_ascii=False)]
         elif v and v is not False:
             out += [flag, str(v)]
     return out
@@ -83,6 +92,18 @@ def _cli_handler(build):
     def handle(args, session_id=None, **_):
         return json.dumps(cli.call(build(args), session_id))
     return handle
+
+
+def _material_commit(args, session_id=None, **_):
+    content = args.get("content") or ""
+    for need, ok in (("content", content), ("reason", args.get("reason"))):
+        if not ok:
+            return json.dumps({"ok": False, "error": f"{need} is required"})
+    if not args.get("id") and not (args.get("kind") and args.get("title")):
+        return json.dumps({"ok": False, "error": "a new material needs kind and title"})
+    argv = ["material", "commit", *([args["id"]] if args.get("id") else []), "--from", "-",
+            *_flags(args, "reason", "kind", "title", "project", "based_on", "tag")]
+    return json.dumps(cli.call(argv, session_id, stdin=content))
 
 
 def _declare(args, session_id=None, **_):
@@ -101,6 +122,20 @@ def _invoke(args, **_):
 
 
 def register(ctx):
+    desc = "Read a text file under the run directory (e.g. the {materials_path} file) or the working directory. Read-only."
+    ctx.register_tool(name="apa_read_file", toolset=TOOLSET, schema=_schema("apa_read_file", desc, {"path": _s("File path")}, ["path"]),
+                      handler=lambda args, **_: json.dumps(files.read_file(args.get("path"))), description=desc)
+    desc = "List a directory under the run directory or the working directory. Read-only."
+    ctx.register_tool(name="apa_list_dir", toolset=TOOLSET, schema=_schema("apa_list_dir", desc, {"path": _s("Directory, default '.'")}, []),
+                      handler=lambda args, **_: json.dumps(files.list_dir(args.get("path"))), description=desc)
+    desc = ("Commit a draft as a pending revision the owner must confirm (apa material commit --from -). The text goes in content, "
+            "never in a shell. New material: kind and title (e.g. kind=guideline); revision: id.")
+    ctx.register_tool(name="apa_material_commit", toolset=TOOLSET, handler=_material_commit, description=desc,
+                      schema=_schema("apa_material_commit", desc, {
+                          "content": _s("Full text of the draft"), "reason": _REASON, "id": _s("Existing material id (revision)"),
+                          "kind": _s("Material kind, e.g. guideline"), "title": _s("Title of a new material"),
+                          "project": _s("Project id"), "based_on": _s("Revision this is based on"),
+                          "tag": {"type": "array", "items": {"type": "string"}, "description": "Tags"}}, ["content", "reason"]))
     for name, (desc, props, req, build) in _CLI_TOOLS.items():
         ctx.register_tool(name=name, toolset=TOOLSET, schema=_schema(name, desc, props, req),
                           handler=_cli_handler(build), description=desc)
