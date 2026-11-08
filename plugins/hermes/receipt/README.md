@@ -9,10 +9,16 @@ Fallback for executors that do not run `apa report` themselves. Captured only wh
   starts with an `external-cli` executor from the owner's table (`$APA_HERMES_EXECUTORS`).
 - `subagent_stop` when the child summary names an item id (the hook carries no arguments).
 
-`completed` / exit 0 reports `done` with the result as summary; anything else reports `blocked` with the error.
+`completed` / exit 0 reports `done` with the result as summary and the evidence found in it (`--pr`, `--commit`, `--branch`, `--link`);
+with none found it reports `progress` instead. Anything else reports `blocked` with the error.
 The same item and outcome is reported once per process; the kernel also gets an idempotency key.
 
-No item id, no capture. The `apa report` runs detached with all output discarded, so the model sees nothing;
+Failures: every non-zero `apa report` exit is written to `$APA_RECEIPT_LOG` (default `$APA_HOME/hermes-receipt.log`): command, item id,
+exit code, reason; no credentials or conversation text. Exit 7 (kernel unreachable) keeps the request and its idempotency key and re-sends
+it at later hooks until the kernel answers (at most 5 re-sends, 50 pending); a refusal (2, 4, 23 ...) is only logged and not retried, also on a re-send.
+A success is never repeated. Pending requests live in memory.
+
+No item id, no capture. The `apa report` runs in its own session on a background thread with all output discarded, so the model sees nothing;
 any failure, missing binary or exception is swallowed. The kernel judges the receipt (credential binding, exit 4 ...).
 
 ## Live gate

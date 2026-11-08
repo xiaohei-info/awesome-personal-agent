@@ -38,7 +38,9 @@ print(json.dumps({"argv": sys.argv[1:], "session": os.environ.get("APA_SESSION")
 open(os.environ["APA_LOG"] + ".harness", "a").write(os.environ.get("APA_HARNESS", "") + "\\n")
 PY
 echo "model must never see this"
-exit ${FAKE_EXIT:-0}
+# exit codes queued in $APA_LOG.codes are consumed one per call
+if [ -s "$APA_LOG.codes" ]; then c=$(head -n1 "$APA_LOG.codes"); tail -n +2 "$APA_LOG.codes" > "$APA_LOG.codes.t"; mv "$APA_LOG.codes.t" "$APA_LOG.codes"; exit $c; fi
+exit 0
 """
 
 
@@ -50,7 +52,7 @@ def apa(tmp_path, monkeypatch):
     table = tmp_path / "executors.json"
     table.write_text(json.dumps([{"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"],
                                   "command": ["/usr/bin/codex", "exec", "{prompt}"]}]))
-    for k, v in {"APA_BIN": str(p), "APA_LOG": str(tmp_path / "log"), "APA_HERMES_EXECUTORS": str(table)}.items():
+    for k, v in {"APA_BIN": str(p), "APA_LOG": str(tmp_path / "log"), "APA_RECEIPT_LOG": str(tmp_path / "receipt.log"), "APA_HERMES_EXECUTORS": str(table)}.items():
         monkeypatch.setenv(k, v)
     return tmp_path
 
@@ -127,9 +129,9 @@ def test_non_executor_tools_are_ignored_even_with_an_item_id(apa, hooks):
 def test_terminal_running_a_configured_executor_reports_by_exit_code(apa, hooks):
     cmd = f"codex exec 'work on it. Ledger item: {ITEM}'"
     hooks["post_tool_call"](tool_name="terminal", session_id="s", args={"command": cmd},
-                            result=json.dumps({"output": "all green", "exit_code": 0, "error": None}))
+                            result=json.dumps({"output": "all green, PR #7", "exit_code": 0, "error": None}))
     (c,) = calls(apa, 1)
-    assert c["argv"][:2] == ["report", ITEM] and flag(c["argv"], "--outcome") == "done" and flag(c["argv"], "--summary") == "all green"
+    assert c["argv"][:2] == ["report", ITEM] and flag(c["argv"], "--outcome") == "done" and flag(c["argv"], "--summary") == "all green, PR #7"
 
 
 def test_terminal_failure_reports_blocked(apa, hooks):
@@ -171,3 +173,125 @@ def test_hook_returns_without_waiting_for_apa(apa, hooks, monkeypatch):
     t = time.monotonic()
     hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} done", child_status="completed")
     assert time.monotonic() - t < 1
+
+
+def report_of(tmp, summary):
+    ctx = Ctx()
+    load_receipt().register(ctx)
+    ctx.hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} {summary}", child_status="completed")
+    (c,) = calls(tmp, 1)
+    return c["argv"]
+
+
+@pytest.mark.parametrize("summary,flag_name,value", [
+    ("opened https://github.com/o/r/pull/9", "--pr", "https://github.com/o/r/pull/9"),
+    ("pushed commit 3f2a9c1d", "--commit", "3f2a9c1d"),
+    ("work is on branch feat/receipt-x.", "--branch", "feat/receipt-x"),
+    ("see https://example.com/report/1", "--link", "https://example.com/report/1"),
+])
+def test_done_carries_the_extracted_result_evidence(apa, summary, flag_name, value):
+    argv = report_of(apa, summary)
+    assert flag(argv, "--outcome") == "done" and flag(argv, flag_name) == value
+
+
+def test_done_without_any_result_is_reported_as_progress(apa):
+    argv = report_of(apa, "finished, everything looks good")
+    assert flag(argv, "--outcome") == "progress"
+    assert not {"--pr", "--commit", "--branch", "--link"} & set(argv)
+
+
+def test_failed_executor_is_blocked_without_evidence(apa):
+    ctx = Ctx()
+    load_receipt().register(ctx)
+    ctx.hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} crashed, see PR #1", child_status="failed")
+    (c,) = calls(apa, 1)
+    assert flag(c["argv"], "--outcome") == "blocked" and "--pr" not in c["argv"]
+
+
+def log_lines(tmp, n, wait=5):
+    f = tmp / "receipt.log"
+    end = time.time() + wait
+    while time.time() < end:
+        if f.exists() and len(f.read_text().splitlines()) >= n:
+            return f.read_text().splitlines()
+        time.sleep(0.05)
+    return f.read_text().splitlines() if f.exists() else []
+
+
+@pytest.mark.parametrize("code", [2, 4, 23])
+def test_kernel_rejection_is_logged_and_never_resent(apa, hooks, code):
+    (apa / "log.codes").write_text(f"{code}\n")
+    hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} PR #1", child_status="completed")
+    (line,) = log_lines(apa, 1)
+    assert f"item={ITEM}" in line and f"exit={code}" in line and "report" in line
+    assert "PR #1" not in line and "TOKEN" not in line  # no conversation text
+    hooks["subagent_stop"](parent_session_id="s", child_summary="nothing", child_status="completed")
+    assert len(calls(apa, 2, wait=1)) == 1
+
+
+def test_unreachable_kernel_keeps_the_request_and_resends_once_with_the_same_key(apa, hooks):
+    (apa / "log.codes").write_text("7\n")
+    hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} PR #1", child_status="completed")
+    log_lines(apa, 1)
+    other = "itm_00aa00bb00cc"
+    hooks["subagent_stop"](parent_session_id="s", child_summary=f"{other} PR #2", child_status="completed")  # next hook
+    got = calls(apa, 3)
+    assert len(got) == 3
+    by_item = [c for c in got if c["argv"][1] == ITEM]
+    assert len(by_item) == 2 and flag(by_item[0]["argv"], "--idempotency-key") == flag(by_item[1]["argv"], "--idempotency-key")
+    hooks["subagent_stop"](parent_session_id="s", child_summary="nothing", child_status="completed")
+    assert len(calls(apa, 4, wait=1)) == 3  # never a second re-send
+
+
+def test_resend_survives_a_still_down_kernel_and_stops_after_success(apa, hooks):
+    (apa / "log.codes").write_text("7\n7\n0\n")
+    hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} PR #1", child_status="completed")
+    log_lines(apa, 1)
+    for n in (2, 3):  # second hook: still down; third hook: kernel is back
+        hooks["subagent_stop"](parent_session_id="s", child_summary="nothing", child_status="completed")
+        assert len(calls(apa, n)) == n
+    got = calls(apa, 3)
+    assert len({flag(c["argv"], "--idempotency-key") for c in got}) == 1
+    assert len(log_lines(apa, 1, wait=0.5)) == 1  # logged once, not per failed re-send
+    hooks["subagent_stop"](parent_session_id="s", child_summary="nothing", child_status="completed")
+    assert len(calls(apa, 4, wait=1)) == 3  # delivered once, never again
+
+
+def test_resend_gives_up_after_a_bounded_number_of_tries(apa, hooks):
+    (apa / "log.codes").write_text("7\n" * 50)
+    hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} PR #1", child_status="completed")
+    for n in range(2, 8):
+        log_lines(apa, 1)
+        calls(apa, n - 1)
+        hooks["subagent_stop"](parent_session_id="s", child_summary="nothing", child_status="completed")
+    time.sleep(1)
+    assert len(calls(apa, 99, wait=0.5)) == 6  # 1 send + 5 re-sends
+    assert "gave up" in (apa / "receipt.log").read_text()
+
+
+@pytest.mark.parametrize("prose", [
+    "I could not create a branch because tests failed",
+    "nothing changed; no branch was created",
+    "see the commit decade-old notes",
+    "the commit added nothing",
+    "no PR yet",
+])
+def test_prose_mentioning_branch_commit_or_pr_stays_progress(apa, prose):
+    assert flag(report_of(apa, prose), "--outcome") == "progress"
+
+
+@pytest.mark.parametrize("prose,value", [
+    ("pushed to branch `feat-x`", "feat-x"),
+    ("on branch: fix_y", "fix_y"),
+    ("branch named hotfix", "hotfix"),
+    ("changes are on branch agent/x1", "agent/x1"),
+])
+def test_recognisable_branch_forms_are_extracted(apa, prose, value):
+    assert flag(report_of(apa, prose), "--branch") == value
+
+
+def test_missing_binary_is_logged(apa, hooks, monkeypatch):
+    monkeypatch.setenv("APA_BIN", "/nonexistent/apa")
+    hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} PR #1", child_status="completed")
+    (line,) = log_lines(apa, 1)
+    assert f"item={ITEM}" in line and "cannot run apa" in line
