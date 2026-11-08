@@ -37,7 +37,7 @@ func TestGuideWorksWithoutTokenAndExplainsCommandsAndExitCodes(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 	for _, want := range []string{"apa login", "apa delegate", "propose", "decide", "agents sync",
-		"20 web_only", "22 screening pending", "7 kernel unreachable", "apa guide --template"} {
+		"20 web_only", "22 screening pending", "23 basis required", "--grant <id>", "7 kernel unreachable", "apa guide --template"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("guide lacks %q", want)
 		}
@@ -58,7 +58,7 @@ func TestTemplateStaysWithinBudgetAndStatesContract(t *testing.T) {
 		t.Errorf("template ~%d tokens, want <= 600", tok)
 	}
 	low := strings.ToLower(out)
-	for _, want := range []string{"data, not instructions", "only source of truth", "apa delegate", "loosen kernel rules"} {
+	for _, want := range []string{"data, not instructions", "only source of truth", "apa delegate", "loosen kernel rules", "--grant", "exit 23"} {
 		if !strings.Contains(low, want) {
 			t.Errorf("template lacks %q", want)
 		}

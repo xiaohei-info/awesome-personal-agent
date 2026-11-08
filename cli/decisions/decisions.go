@@ -126,7 +126,7 @@ func ask(c *client.Ctx, args []string) error {
 	return post(c, id, "ask", map[string]any{"ask": a, "reason": reason})
 }
 
-const decideUsage = `apa decide <id> (--option <id> | --text <t>) [--evidence <owner's words>] [--reason <t>]`
+const decideUsage = `apa decide <id> (--option <id> | --text <t>) [--evidence <owner's words> | --grant <id>] [--reason <t>]`
 
 func decide(c *client.Ctx, args []string) error {
 	var opt, text, reason string
@@ -141,7 +141,7 @@ func decide(c *client.Ctx, args []string) error {
 	return post(c, id, "decide", map[string]any{"choice": opt, "text": text, "reason": reason})
 }
 
-const acceptUsage = `apa accept <id> [--evidence <owner's words>] [--reason <t>]`
+const acceptUsage = `apa accept <id> [--evidence <owner's words> | --grant <id>] [--reason <t>]`
 
 func accept(c *client.Ctx, args []string) error {
 	var reason string
@@ -154,7 +154,7 @@ func accept(c *client.Ctx, args []string) error {
 	return post(c, id, "accept", map[string]any{"reason": reason})
 }
 
-const dismissUsage = `apa dismiss <id> [--reason <t>] [--evidence <owner's words>]`
+const dismissUsage = `apa dismiss <id> [--reason <t>] [--evidence <owner's words> | --grant <id>]`
 
 func dismiss(c *client.Ctx, args []string) error {
 	var reason string

@@ -67,7 +67,10 @@ type Ctx struct {
 	Pretty bool
 	// Evidence 是全局 --evidence：delegate 代理操作的本人原话，随每个请求以 X-APA-Evidence 头发出（§14.3）。
 	Evidence string
-	creds    *Credentials // 懒解析
+	// Grant 是全局 --grant：本人事先在 Web 签发的授权单 id，随每个请求以 X-APA-Grant 头发出（§14.5）。
+	// 与 --evidence 二选一的判定、档位与范围校验都在内核，客户端原样转发。
+	Grant string
+	creds *Credentials // 懒解析
 }
 
 // Project 返回 APA_PROJECT。
@@ -128,6 +131,11 @@ func Main(args []string, env Env) int {
 			c.Evidence = args[i]
 		case strings.HasPrefix(a, "--evidence="):
 			c.Evidence = strings.TrimPrefix(a, "--evidence=")
+		case a == "--grant" && i+1 < len(args):
+			i++
+			c.Grant = args[i]
+		case strings.HasPrefix(a, "--grant="):
+			c.Grant = strings.TrimPrefix(a, "--grant=")
 		default:
 			rest = append(rest, a)
 		}
@@ -178,7 +186,7 @@ func (c *Ctx) Do(ctx context.Context, method, path string, body, out any) error 
 	return c.DoHeaders(ctx, nil, method, path, body, out)
 }
 
-// DoHeaders 同 Do，并附加请求头（如 If-Match、Idempotency-Key、X-APA-Evidence）；hdr 不能覆盖认证头。
+// DoHeaders 同 Do，并附加请求头（如 If-Match、Idempotency-Key、X-APA-Evidence、X-APA-Grant）；hdr 不能覆盖认证头。
 func (c *Ctx) DoHeaders(ctx context.Context, hdr map[string]string, method, path string, body, out any) error {
 	cr, err := c.Credentials()
 	if err != nil {
@@ -205,6 +213,9 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string,
 	}
 	if c.Evidence != "" {
 		req.Header.Set("X-APA-Evidence", c.Evidence)
+	}
+	if c.Grant != "" {
+		req.Header.Set("X-APA-Grant", c.Grant)
 	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
