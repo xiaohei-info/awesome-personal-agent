@@ -1,11 +1,11 @@
-# sha256: 2873bbe70f986b5b8ba35ec65d6863822905a50f94527aa37775f0c785c79f4b
+# sha256: fcdf47127567b054814932fb3f56379f4b7659464fb43e6b056aeea13786cceb
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 4
+  used_global: 6
   used_by_reporter:
     e2e-bg-main-live: 1
     e2e-proactive-live: 2
-    e2e-guideline-live: 1
+    e2e-guideline-live: 3
   granted_by_reporter:
     e2e-guideline-live: 2
   entries:
@@ -66,66 +66,22 @@ defects:
       - e2e-proactive-live
       state: fixing
       fix_node: fix.hermes-plugin-tools.ea87a6
-  inbox:
-  - id: 55213986451f
-    reporter: e2e-guideline-live
-    defects:
-    - class: design-gap
-      suspected_node: hermes-plugin-tools
-      anchors:
-      - flow-brief/ACT-BRF-01
-      - flow-brief/ACT-BRF-06
-      - flow-guideline-draft/ACT-DRF-01
-      design_ref: docs/appendix-a-harness.md#a5-插件组合参考
-      expected: '主会话已定（2026-11-08 M1）：保留 read 档（§21.1 决定 5、§13.6 默认上限 read）。任务型模板
-        brief/write-brief、review、guideline-draft/draft-guideline 都是 access: read，按
-        §8.4 运行者要读运行目录里的资料文件 {materials_path}，draft-guideline 还要读 cwd=project_checkout
-        下的仓库，结果写回事项 spec 并经 CLI 回执。Hermes 插件的 apa 工具集补最小工具：只读文件工具（读/列 {materials_path}
-        与本次运行的工作目录，不写、不越出这两处），apa_item_update（写自己事项的 spec 等字段），apa_material_commit（正文作参数经
-        stdin 或临时文件交给 apa material commit --kind guideline）；写回一律走 apa 工具，不给通用文件写权限或
-        terminal。同步更新 plugins/hermes/tools/README.md、附录 A.5 与相关模板说明。'
-      observed: declaration.json 的 read 档是 -t apa,web，headless/README.md 实测 Hermes
-        没有只读文件工具集，read 档读不到本地文件；tools/__init__.py:_CLI_TOOLS 只有 propose/ask/decide/accept/dismiss/executors/delegate/report，没有写
-        spec 和 material commit 的工具。真实 Hermes 在 taiyi 上跑 brief：Run succeeded 但 spec
-        为 null（无 period/sections），4 次复现。
-      locations:
-      - plugins/hermes/tools/__init__.py:_CLI_TOOLS
-      - plugins/hermes/headless/declaration.json:access.read
-      - packs/brief/prompts/write-brief.md
-      - packs/review/prompts
-      - packs/guideline-draft/prompts/draft-guideline.md
-    - class: design-gap
-      suspected_node: kernel-guideline-check
+    dfx-61130e7b6c25:
+      suspected: kernel-guideline-check
       anchors:
       - flow-guideline-draft/ACT-DRF-01
       - flow-guideline-draft/ACT-DRF-02
       - flow-guideline-draft/ACT-DRF-04
-      design_ref: docs/solution-design.md#126-缺规范时
-      expected: §12.6：有 repos 无 Guideline 的项目，本机有检出时任务型本机起草，否则建委派子事项交执行者起草，不重复起草。主会话已定（M2）：guideline-draft
-        的 call_agent 交给 guideline.Handler 并在 cli/serve 接线；harness 运行时取规则指定或 Web 默认
-        harness（与 §13.6 任务型同一规则），Host 取 APA 主机名；委派起草的执行者 id 由一个配置项指定（§16.2 运行配置），未配置时起草事项转
-        needs_input 并写明原因，委派照常校验项目允许的执行者。把上述规则补进 §12.6 与 §16.2（同一次改动）。测试写法：ACT-DRF-01
-        在 Web 只切规则模式为 auto，检测周期用数据目录同名覆盖包改为 1 分钟（附录 C 开头），不要求 Web 改周期。
-      observed: cli/serve/serve.go 只登记 guideline.Module；cli/serve/assemble.go 的 call_agent
-        全部交给 task.CallAgent，guideline.Handler 无调用方，check 规则不扫描项目、不委派、不去重；Handler 要求静态
-        Harness/Executor 但设计没有对应配置项。
-      locations:
-      - kernel/proactive/guideline/guideline.go:Handler
-      - cli/serve/assemble.go:callAgent
-      - cli/serve/serve.go
-    - class: design-gap
-      suspected_node: sources-github
+      reporters:
+      - e2e-guideline-live
+      state: fixing
+      fix_node: fix.kernel-guideline-check.61130e
+    dfx-85016be0054e:
+      suspected: sources-github
       anchors:
       - flow-agents-md/ACT-AGM-09
-      design_ref: docs/solution-design.md#91-三种类型
-      expected: §12.5：GitHub 来源看到 AGENTS.md 相关变化时触发与 apa agents check 同一检测，漂移则生成同样的
-        needs_input 事项。主会话已定（M3）：不用提交事件；GitHub 拉取程序每次拉取时比对仓库默认分支根目录 AGENTS.md 的 blob
-        sha（存入游标），变化即产出一条事件，内核据此调用 agentsmd.Trigger（serve 为它配置 Options.Fetch，经托管型只读读取器取默认分支内容）。§9.1
-        的 GitHub 拉取范围补一句；若新增事件类型，按 AGENTS.md 文档对应表同步 §17 与附录 B。sources/ 不出现 harness
-        名。ACT-AGM-09 保留。
-      observed: sources/github/github.go 只产出 issue、PR、通知事件，不看 AGENTS.md；kernel/agentsmd/agentsmd.go:Trigger
-        无调用方，cli/serve/assemble.go 调 agentsmd.New 时未传 Options.Fetch。
-      locations:
-      - sources/github/github.go:pull
-      - kernel/agentsmd/agentsmd.go:Trigger
-      - cli/serve/assemble.go:agentsmd.New
+      reporters:
+      - e2e-guideline-live
+      state: fixing
+      fix_node: fix.sources-github.85016b
+  inbox: []

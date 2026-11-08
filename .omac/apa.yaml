@@ -9,70 +9,27 @@ meta:
   - 01a1a720-f7fd-719e-91d8-f5032216143f
   - 01a1a720-fa34-79ff-9662-cdf8dac90a21
   - 01a1aa40-ef12-766f-86e2-bead6a7c7b51
-  amendment_revision: 2
+  amendment_revision: 3
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-4d1bfdbe2d71
+    amendment_id: amend-af8c76d4b610
     amendment_file: .omac/apa.system-amendment.yaml
     nodes:
-      fix.hermes-plugin-tools.ea87a6:
+      fix.kernel-guideline-check.61130e:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-77d121211406834df2158b3b
-      fix.kernel-agentsmd.f93c43:
+        expected_review_generation: amendment-5e5a230ae4e8bc4a35067d16
+      fix.sources-github.85016b:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-36bd1ea6c4a5ca49f8419bf5
-      fix.kernel-delegation.0bdd78:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-95c3821166d4f3281a3fb45f
+        expected_review_generation: amendment-41d87320d6d0023bdb277254
       e2e-guideline-live:
         stage: authoring
         state: synced
         work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
         baseline:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: authoring-26dfe95cf252c013ec16ab27
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
-          worker_handoff_pending: false
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-        expected_contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
-        expected_review_generation: amendment-696bf72d4c031990a769296f
-        attempt_baseline:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: authoring-26dfe95cf252c013ec16ab27
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
-          worker_handoff_pending: false
-        observed:
           status: todo
           phase: authoring
           review_verdict: null
@@ -91,54 +48,18 @@ meta:
           delivery_identity_pending: false
           contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
           worker_handoff_pending: false
-      e2e-proactive-live:
-        stage: authoring
-        state: synced
-        work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-        baseline:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: authoring-3e385720023e405e132d178a
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
-          worker_handoff_pending: false
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
-        expected_review_generation: amendment-e1a748deb22c1263b01eb476
+        expected_contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+        expected_review_generation: amendment-2a1255743ee97ba8c8c4e1e8
         attempt_baseline:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: authoring-3e385720023e405e132d178a
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
-          worker_handoff_pending: false
-        observed:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-e1a748deb22c1263b01eb476
+          review_generation: amendment-696bf72d4c031990a769296f
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -150,7 +71,26 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
+          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          worker_handoff_pending: false
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-2a1255743ee97ba8c8c4e1e8
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-bg-main-live:
@@ -161,8 +101,16 @@ meta:
           merge: 0
           review: 0
           worker: 0
+      e2e-proactive-live:
+        amendment_id: amend-4d1bfdbe2d71
+        work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
+        contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
     system: true
-  last_amendment_id: amend-4d1bfdbe2d71
+  last_amendment_id: amend-af8c76d4b610
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
@@ -12523,6 +12471,9 @@ nodes:
   - e2e-env-baseline
   - cli-init-serve
   - fix.kernel-agentsmd.f93c43
+  - fix.hermes-plugin-tools.ea87a6
+  - fix.kernel-guideline-check.61130e
+  - fix.sources-github.85016b
   title: 真实 Hermes 与仓库：规范与 AGENTS.md
   description: 产出 e2e-guideline-live-live-evidence。是 flow-agents-md、flow-no-repo-guideline、flow-guideline-draft
     的唯一全流程 owner。 派给 omac-worker-frontend 是因为它运行在 Mac mini 上，该主机有真实 Hermes 和 ego-browser。
@@ -13971,3 +13922,153 @@ nodes:
     defect_refs:
     - dfx-0bdd78ac2371
     coverage_gate: 80
+- id: fix.kernel-guideline-check.61130e
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - kernel-rules
+  - kernel-materials
+  - kernel-delegation
+  - kernel-task-agent
+  title: 'Fix kernel-guideline-check: dfx-61130e7b6c25'
+  description: "Automatic fix for upstream defect(s) reported by e2e-guideline-live.\n\n-
+    [design-gap] anchors flow-guideline-draft/ACT-DRF-01, flow-guideline-draft/ACT-DRF-02,
+    flow-guideline-draft/ACT-DRF-04 (docs/solution-design.md#126-缺规范时)\n  expected:
+    §12.6：有 repos 无 Guideline 的项目，本机有检出时任务型本机起草，否则建委派子事项交执行者起草，不重复起草。主会话已定（M2）：guideline-draft
+    的 call_agent 交给 guideline.Handler 并在 cli/serve 接线；harness 运行时取规则指定或 Web 默认 harness（与
+    §13.6 任务型同一规则），Host 取 APA 主机名；委派起草的执行者 id 由一个配置项指定（§16.2 运行配置），未配置时起草事项转 needs_input
+    并写明原因，委派照常校验项目允许的执行者。把上述规则补进 §12.6 与 §16.2（同一次改动）。测试写法：ACT-DRF-01 在 Web 只切规则模式为
+    auto，检测周期用数据目录同名覆盖包改为 1 分钟（附录 C 开头），不要求 Web 改周期。\n  observed: cli/serve/serve.go
+    只登记 guideline.Module；cli/serve/assemble.go 的 call_agent 全部交给 task.CallAgent，guideline.Handler
+    无调用方，check 规则不扫描项目、不委派、不去重；Handler 要求静态 Harness/Executor 但设计没有对应配置项。\n  where:
+    kernel/proactive/guideline/guideline.go:Handler; cli/serve/assemble.go:callAgent;
+    cli/serve/serve.go"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-61130e7b6c25 in kernel-guideline-check:
+      §12.6：有 repos 无 Guideline 的项目，本机有检出时任务型本机起草，否则建委派子事项交执行者起草，不重复起草。主会话已定（M2）：guideline-draft
+      的 call_agent 交给 guideline.Handler 并在 cli/serve 接线；harness 运行时取规则指定或 Web 默认 harness（与
+      §13.6 任务型同一规则），Host 取 APA 主机名；委派起草的执行者 id 由一个配置项指定（§16.2 运行配置），未配置时起草事项转 needs_input
+      并写明原因，委派照常校验项目允许的执行者。把上述规则补进 §12.6 与 §16.2（同一次改动）。测试写法：ACT-DRF-01 在 Web 只切规则模式为
+      auto，检测周期用数据目录同名覆盖包改为 1 分钟（附录 C 开头），不要求 Web 改周期。'
+    non_goals:
+    - 无仓库项目不检测
+    - 起草结果只进 proposed
+    - 除外呼调用器外不 import 网络或子进程库，不出现具体 harness、渠道、厂商名
+    - 不直写其他模块的数据，模块协作经命令模型
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/proactive/guideline/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: kernel-guideline-check-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#126-缺规范时
+      - docs/solution-design.md#73-主动服务
+      delivery_goal: check 类时钟规则发现有 repos 无 Guideline 的项目，本机有检出时拉起任务型起草，否则建委派子事项，已有规范时不重复
+      covers:
+      - 缺规范检测
+      acceptance_refs:
+      - flow-guideline-draft
+      commands:
+      - go test -count=1 ./kernel/proactive/guideline/... ./kernel/rules/... ./kernel/materials/...
+        ./kernel/delegation/...
+    pr_base: main
+    acceptance_refs:
+    - flow-guideline-draft
+    source_of_truth:
+    - docs/solution-design.md#126-缺规范时
+    - docs/solution-design.md#73-主动服务
+    scope_paths:
+    - kernel/proactive/guideline/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: kernel-rules-module
+      producer: kernel-rules
+      evidence_mode: artifact
+    - artifact_id: kernel-materials-module
+      producer: kernel-materials
+      evidence_mode: artifact
+    - artifact_id: kernel-delegation-module
+      producer: kernel-delegation
+      evidence_mode: artifact
+    - artifact_id: kernel-task-agent-module
+      producer: kernel-task-agent
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    - artifact_id: kernel-domain-module
+      producer: kernel-domain
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-61130e7b6c25
+    coverage_gate: 80
+- id: fix.sources-github.85016b
+  worker: omac-worker-backend
+  blocked_by:
+  - kernel-domain
+  - kernel-source-runner
+  title: 'Fix sources-github: dfx-85016be0054e'
+  description: "Automatic fix for upstream defect(s) reported by e2e-guideline-live.\n\n-
+    [design-gap] anchors flow-agents-md/ACT-AGM-09 (docs/solution-design.md#91-三种类型)\n
+    \ expected: §12.5：GitHub 来源看到 AGENTS.md 相关变化时触发与 apa agents check 同一检测，漂移则生成同样的
+    needs_input 事项。主会话已定（M3）：不用提交事件；GitHub 拉取程序每次拉取时比对仓库默认分支根目录 AGENTS.md 的 blob sha（存入游标），变化即产出一条事件，内核据此调用
+    agentsmd.Trigger（serve 为它配置 Options.Fetch，经托管型只读读取器取默认分支内容）。§9.1 的 GitHub 拉取范围补一句；若新增事件类型，按
+    AGENTS.md 文档对应表同步 §17 与附录 B。sources/ 不出现 harness 名。ACT-AGM-09 保留。\n  observed:
+    sources/github/github.go 只产出 issue、PR、通知事件，不看 AGENTS.md；kernel/agentsmd/agentsmd.go:Trigger
+    无调用方，cli/serve/assemble.go 调 agentsmd.New 时未传 Options.Fetch。\n  where: sources/github/github.go:pull;
+    kernel/agentsmd/agentsmd.go:Trigger; cli/serve/assemble.go:agentsmd.New"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-85016be0054e in sources-github: §12.5：GitHub
+      来源看到 AGENTS.md 相关变化时触发与 apa agents check 同一检测，漂移则生成同样的 needs_input 事项。主会话已定（M3）：不用提交事件；GitHub
+      拉取程序每次拉取时比对仓库默认分支根目录 AGENTS.md 的 blob sha（存入游标），变化即产出一条事件，内核据此调用 agentsmd.Trigger（serve
+      为它配置 Options.Fetch，经托管型只读读取器取默认分支内容）。§9.1 的 GitHub 拉取范围补一句；若新增事件类型，按 AGENTS.md
+      文档对应表同步 §17 与附录 B。sources/ 不出现 harness 名。ACT-AGM-09 保留。'
+    non_goals:
+    - 不写 harness 名
+    - 凭据存来源自己的目录，内核不读
+    - 不进入内核代码
+    - 来源程序只经 stdin/stdout 契约，不写账本、不访问内核存储
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./sources/github/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: sources-github-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#91-三种类型
+      - docs/solution-design.md#92-执行契约
+      - docs/solution-design.md#57-复用判断
+      delivery_goal: 附带的 GitHub 拉取程序按 §9.2 把 issue、PR、通知转成标准事件并维护游标，认证失败返回 2
+      covers:
+      - ACT-GH-07
+      acceptance_refs:
+      - flow-source-github
+      commands:
+      - go test -count=1 ./sources/github/... ./kernel/domain/... ./kernel/sources/runner/...
+    pr_base: main
+    acceptance_refs:
+    - flow-agents-md
+    source_of_truth:
+    - docs/solution-design.md#91-三种类型
+    - docs/solution-design.md#92-执行契约
+    - docs/solution-design.md#57-复用判断
+    scope_paths:
+    - sources/github/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: kernel-domain-module
+      producer: kernel-domain
+      evidence_mode: artifact
+    - artifact_id: kernel-source-runner-module
+      producer: kernel-source-runner
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-85016be0054e
+    coverage_gate: 75
