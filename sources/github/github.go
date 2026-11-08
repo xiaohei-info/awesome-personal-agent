@@ -1,5 +1,5 @@
 // Package github 是随发行附带的 GitHub 拉取程序（设计 §9.1、§9.2）：
-// 按 Source 执行契约（stdin JSON → 标准事件 JSONL + 末行游标 + 退出码）拉取仓库的 issue、PR 与通知。
+// 按 Source 执行契约（stdin JSON → 标准事件 JSONL + 末行游标 + 退出码）拉取仓库的 issue、PR 与通知，并在仓库默认分支根目录 AGENTS.md 变化时发 repo.agents_md_changed。
 //
 // 复用 gh CLI（§5.7）：本包只做游标与事件映射，经 API 接口取数据。
 // 换掉 gh（改用官方 API 库或别的工具）只需另写一个实现 API 的类型并在 cmd/github-source 里替换，
@@ -65,8 +65,9 @@ type API interface {
 
 // Error 是带退出码的取数失败。
 type Error struct {
-	Exit int
-	Msg  string
+	Exit     int
+	Msg      string
+	NotFound bool // 上游回 404：对象不存在（用于区分"仓库没有 AGENTS.md"与认证失败）
 }
 
 func (e *Error) Error() string { return e.Msg }
@@ -152,7 +153,7 @@ func parseWindow(name, v string) (time.Time, error) {
 	}
 	t, err := time.Parse(time.RFC3339, v)
 	if err != nil {
-		return time.Time{}, &Error{ExitAuth, fmt.Sprintf("bad window.%s %q, want RFC3339: %v", name, v, err)}
+		return time.Time{}, &Error{Exit: ExitAuth, Msg: fmt.Sprintf("bad window.%s %q, want RFC3339: %v", name, v, err)}
 	}
 	return t, nil
 }
@@ -168,6 +169,9 @@ type stream struct {
 	// 积压分多次运行扫描时，排在后面的对象的 opened、closed 可能早于已推进的 At，用 At 判断就丢了。
 	// 这种情况下对象再次更新时可能重发同 id 的事件，由内核去重。
 	Floor time.Time `json:"floor,omitzero"`
+	// AgentsSHA 是仓库默认分支根目录 AGENTS.md 上次看到的 blob sha（空串：当时没有该文件；nil：从未看过）。
+	// 只用于仓库流，见 agentsEvent。
+	AgentsSHA *string `json:"agents_sha,omitempty"`
 }
 
 // admit 把 updated_at 为 at 的对象的事件并入续传位置，返回其中没发过的。
@@ -191,20 +195,20 @@ func (s *stream) admit(at time.Time, evs []event) []event {
 func pull(ctx context.Context, stdin io.Reader, api API, now time.Time) ([]event, string, error) {
 	var in Input
 	if err := json.NewDecoder(stdin).Decode(&in); err != nil {
-		return nil, "", &Error{ExitAuth, "bad input: " + err.Error()}
+		return nil, "", &Error{Exit: ExitAuth, Msg: "bad input: " + err.Error()}
 	}
 	if len(in.Config.Repos) == 0 && !in.Config.Notifications {
-		return nil, "", &Error{ExitAuth, "config needs repos or notifications"}
+		return nil, "", &Error{Exit: ExitAuth, Msg: "config needs repos or notifications"}
 	}
 	for _, r := range in.Config.Repos {
 		if !repoRe.MatchString(r) || strings.Contains(r, "..") {
-			return nil, "", &Error{ExitAuth, fmt.Sprintf("bad repo %q, want owner/name", r)}
+			return nil, "", &Error{Exit: ExitAuth, Msg: fmt.Sprintf("bad repo %q, want owner/name", r)}
 		}
 	}
 	saved := map[string]*stream{}
 	if in.Cursor != "" {
 		if err := json.Unmarshal([]byte(in.Cursor), &saved); err != nil {
-			return nil, "", &Error{ExitAuth, "bad cursor: " + err.Error()}
+			return nil, "", &Error{Exit: ExitAuth, Msg: "bad cursor: " + err.Error()}
 		}
 	}
 	// to 是内核安排本次运行的时间，早于所有读取。只处理不晚于它的对象：读取途中发生的更新留给下次，
@@ -248,6 +252,11 @@ func pull(ctx context.Context, stdin io.Reader, api API, now time.Time) ([]event
 		}
 		out = append(out, evs...)
 		budget -= used
+		ev, err := agentsEvent(ctx, api, repo, s, to)
+		if err != nil {
+			return nil, "", fmt.Errorf("repo %s: %w", repo, err)
+		}
+		out = append(out, ev...)
 	}
 	if in.Config.Notifications {
 		s := streamOf(notifStream)
@@ -308,6 +317,50 @@ func sweepIssues(ctx context.Context, api API, repo string, s *stream, to time.T
 			page++
 		}
 	}
+}
+
+// agentsEvent 比对仓库默认分支根目录 AGENTS.md 的 blob sha 与游标里的上一次，变化（含新建、删除）就发一条
+// repo.agents_md_changed，内核据此做与 apa agents check 同一检测（§12.5）。
+// 首次看到文件也发：已有手写 AGENTS.md 的仓库首次检查本就落入漂移；首次没有文件则只记下，不发。
+// 读取失败不推进 sha，下次重试；id 含新 sha 与本次 window.to：sha 回到历史值（aaa→bbb→aaa）也是新的一次变化，id 不会撞上内核已去重的旧 id；
+// 同一游标、同一 window.to 重放，id 不变。
+func agentsEvent(ctx context.Context, api API, repo string, s *stream, to time.Time) ([]event, error) {
+	sha, link := "", ""
+	body, err := api.Get(ctx, "/repos/"+repo+"/contents/AGENTS.md")
+	var apiErr *Error
+	switch {
+	case errors.As(err, &apiErr) && apiErr.NotFound: // 仓库本身已能读（issue 扫描成功），404 就是没有该文件
+	case err != nil:
+		return nil, err
+	default:
+		var f struct {
+			Type    string `json:"type"`
+			SHA     string `json:"sha"`
+			HTMLURL string `json:"html_url"`
+		}
+		if err := json.Unmarshal(body, &f); err != nil || f.Type != "file" || f.SHA == "" {
+			return nil, fmt.Errorf("unexpected AGENTS.md response")
+		}
+		sha, link = f.SHA, f.HTMLURL
+	}
+	prev := s.AgentsSHA
+	s.AgentsSHA = &sha
+	if sha == "" && prev == nil || prev != nil && *prev == sha {
+		return nil, nil
+	}
+	suffix, summary := fmt.Sprintf("%s-%d", sha, to.Unix()), "AGENTS.md changed on the default branch"
+	if sha == "" {
+		suffix, summary = fmt.Sprintf("removed-%d", to.Unix()), "AGENTS.md was removed from the default branch"
+	}
+	return []event{{
+		ID:              fmt.Sprintf("repo-%s-agents-md-%s", strings.ReplaceAll(repo, "/", "-"), suffix),
+		Type:            "repo.agents_md_changed",
+		Subject:         repo + " AGENTS.md",
+		Summary:         summary,
+		Link:            link,
+		OccurredAt:      to.UTC().Format(time.RFC3339),
+		CorrelationKeys: []string{repo},
+	}}, nil
 }
 
 type issueRaw struct {

@@ -1001,7 +1001,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 
 | 类型 | 是什么 | 放在哪 | 驱动 |
 |---|---|---|---|
-| **定时拉取** | 随发行附带的通用拉取程序：GitHub（issue、PR、通知）、RSS/Atom、本地目录监视、通用 HTTP JSON 轮询 | 安装即登记；`apa source auth <id>` 一次认证，凭据存在该来源自己的目录，内核不读 | 外呼调用器按时钟拉起 |
+| **定时拉取** | 随发行附带的通用拉取程序：GitHub（issue、PR、通知，并比对默认分支根目录 AGENTS.md 的 blob sha，变化即产出 `repo.agents_md_changed`，§12.5）、RSS/Atom、本地目录监视、通用 HTTP JSON 轮询 | 安装即登记；`apa source auth <id>` 一次认证，凭据存在该来源自己的目录，内核不读 | 外呼调用器按时钟拉起 |
 | **自定义脚本** | 用户自写脚本（内部系统、自建巡检），以及对现成工具的薄适配（邮件、日历，§9.7） | 在 Source 登记里填命令、周期、超时、凭据路径；登记命令只在 Web 或主机配置文件（§14.12） | 同上 |
 | **webhook 推送** | 外部系统主动 POST，无游标、无常驻进程 | HTTP API 的接收路由 `POST /ingest/{source_id}`，每个 source 独立 URL + 密钥 | 外部系统推送 |
 
@@ -1422,7 +1422,7 @@ SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6�
 | 过期 | 文件 hash 命中历史渲染 hash | `sync` 可直接覆盖工作区；同一仓库同一渲染 hash 只提示一次，已有未完成的同步子事项时不提示，其余时间只在 Web 项目页显示状态（Web 没有工作区文件，状态取自 `GET /agents-md?repo` 带回的最近一次检查） | 10 |
 | 漂移 | 都不命中 | 不覆盖，生成 `needs_input` 事项附 diff，选项：合回（diff 变成 Guideline 的 proposed 修订，确认后重新渲染）、覆盖、本次忽略 | 11 |
 
-GitHub 来源看到 AGENTS.md 相关提交时也触发同一检测。已有手写 AGENTS.md 的仓库首次检查会落入漂移，走同一流程合回。
+GitHub 拉取程序每次拉取比对仓库默认分支根目录 AGENTS.md 的 blob sha（存在游标里），变化（含新建、删除）就产出一条 `repo.agents_md_changed` 事件，内核据此经连接模块的 `Trigger` 触发同一检测，托管型只读读取器读取默认分支上的内容；不依赖提交事件。已有手写 AGENTS.md 的仓库首次检查会落入漂移，走同一流程合回。
 
 ### 12.6 缺规范时
 
