@@ -316,7 +316,7 @@ func TestReportValidation(t *testing.T) {
 	bad := rep(child, "progress", Evidence{})
 	bad["summary"] = " "
 	e.wantExit(t, domain.ExitUsage, e.as("WRK"), "delegate.report", bad)
-	e.wantExit(t, domain.ExitUsage, e.as("WRK"), "delegate.report", rep(parent, "progress", Evidence{})) // 不是委派子事项
+	e.wantExit(t, domain.ExitPermissionDenied, e.as("WRK"), "delegate.report", rep(parent, "progress", Evidence{})) // 不是它的事项
 	e.wantExit(t, domain.ExitNotFound, e.as("WRK"), "delegate.report", rep("itm_nope", "progress", Evidence{}))
 	if got := e.item(t, child); got.Phase != domain.PhaseOpen {
 		t.Fatalf("child = %+v", got)
@@ -523,6 +523,29 @@ func TestUnrelatedItemCommandsDoNotRaiseSettleErrors(t *testing.T) {
 	e.must(t, owner, "item.transition", map[string]any{"id": plain, "to": "open", "reason": "reopen"})
 	if len(e.errs) != 0 {
 		t.Fatalf("post-commit errors for a non-delegation item: %v", e.errs)
+	}
+	e.consistent(t)
+}
+
+// flow-brief：任务型运行持运行凭据，对本次运行的目标事项（不是委派子事项）apa report 生效；范围外的事项仍被拒绝。
+func TestRunCredentialReportsOnRunTarget(t *testing.T) {
+	e := setup(t)
+	target := e.parent(t, "")
+	other := e.parent(t, "")
+	run := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:r1", Via: domain.ViaCLI, Run: "r1"}, Level: authz.LevelRun,
+		RunScope: func(_ *store.Tx, o authz.Object) (bool, bool, error) { return o.ID == target, false, nil }}
+
+	e.must(t, run, "delegate.report", rep(target, "progress", Evidence{}))
+	if got := e.item(t, target); got.Phase != domain.PhaseOpen || got.StatusLabel != "s" {
+		t.Fatalf("progress not recorded on run target: %+v", got)
+	}
+	e.must(t, run, "delegate.report", rep(target, "done", Evidence{Link: "run output"}))
+	if got := e.item(t, target); got.Phase != domain.PhaseDone {
+		t.Fatalf("done must take the target out of open: %+v", got)
+	}
+	e.wantExit(t, domain.ExitPermissionDenied, run, "delegate.report", rep(other, "done", Evidence{Link: "x"}))
+	if got := e.item(t, other); got.Phase != domain.PhaseOpen {
+		t.Fatalf("out-of-scope item changed: %+v", got)
 	}
 	e.consistent(t)
 }
