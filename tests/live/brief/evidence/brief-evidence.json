@@ -1,11 +1,11 @@
 {
   "ACT-BRF-01": {
-    "brief": "itm_96c508f3e436fdd5",
-    "period": "2026-11-08 05:15",
-    "phase": "done",
-    "run": "run_6e3d90f83eed7cd2",
+    "brief": "itm_e654a42c0eff9cb0",
+    "period": "2026-11-08 15:00",
+    "phase": "needs_input",
+    "run": "run_25a62b96675fbbda",
     "run_state": "succeeded",
-    "sections": 0
+    "sections": 4
   },
   "ACT-BRF-01-result": {
     "passed": false,
