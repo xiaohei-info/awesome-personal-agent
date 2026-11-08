@@ -629,6 +629,10 @@ type revertPlan struct {
 	remove    bool
 }
 
+// revertible 是可撤销的事件类型；decision.resolved 的快照带变更前的事项，恢复它即恢复未回答的 ask（§6.4）。
+// 外部副作用（已发出的消息等）不在账本里，撤销不碰。
+var revertible = []string{domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvDecisionResolved}
+
 // planRevert 找出要撤销的事件。只撤销 agent 做的、且是该事项最新的一次事项变更：
 // 反向命令恢复的是变更前的快照，后面还有别的改动时直接恢复会把它们一并抹掉。
 func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
@@ -653,8 +657,8 @@ func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
 	switch {
 	case target == nil:
 		return rp, domain.NewError(domain.CodeNotFound, "event does not belong to this item", "read the item's timeline")
-	case target.Tombstone || (target.Event.Type != domain.EvItemUpdated && target.Event.Type != domain.EvItemPhaseChanged):
-		return rp, invalid("only item updates and phase changes can be reverted")
+	case target.Tombstone || !slices.Contains(revertible, target.Event.Type):
+		return rp, invalid("only item updates, phase changes and decisions can be reverted")
 	case target.Event.Actor.Type != domain.ActorAgent:
 		return rp, invalid("only changes made by an agent can be reverted")
 	case last == nil || last.Event.Seq != target.Event.Seq:
@@ -668,7 +672,7 @@ func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
 	switch {
 	case p.Op == "relate" && p.Relation != nil:
 		rp.rel, rp.remove = p.Relation, !p.Remove
-	case (p.Op == "update" || p.Op == "transition") && p.Before != nil:
+	case (p.Op == "update" || p.Op == "transition" || p.Op == "decision.answer") && p.Before != nil:
 		rp.next = *p.Before
 		rp.next.ItemKernelState = cur.ItemKernelState // 内核字段不回退
 	default:

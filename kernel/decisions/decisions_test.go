@@ -653,3 +653,37 @@ func TestIdempotentAnswerReplaysFirstResult(t *testing.T) {
 		t.Fatalf("same key must replay the first result: %v %+v", err, r)
 	}
 }
+
+// §3.3 第 4 步、§6.4 回退：聊天代答（actor=agent）的 decision.resolved 可在 Web 一键撤销，
+// 撤销写一条反向事件：ask 回到未回答、阶段回 needs_input，原事件保留；之后可重新回答。
+func TestRevertChatAnswer(t *testing.T) {
+	e := setup(t)
+	id := e.asked(t, nil)
+	e.must(t, delegate, "decision.answer", `owner: "就选 A"`, map[string]any{"id": id, "choice": "A"})
+	seq := e.last(t, id, domain.EvDecisionResolved).Seq
+
+	if _, err := e.do(delegate, "item.revert", "", map[string]any{"id": id, "event": seq}); exit(err) != domain.ExitWebOnly {
+		t.Fatalf("revert is web-only: %v", err)
+	}
+	e.must(t, owner, "item.revert", "", map[string]any{"id": id, "event": seq})
+	it := e.get(t, id)
+	if it.Phase != domain.PhaseNeedsInput || it.Ask == nil || it.Ask.Resolution != nil {
+		t.Fatalf("revert must restore the unanswered ask: %+v", it)
+	}
+	if got := e.last(t, id, domain.EvItemPhaseChanged); got.Actor.Principal != "owner" {
+		t.Fatalf("revert is a forward event by the owner: %+v", got)
+	}
+	e.verify(t)
+
+	e.must(t, delegate, "decision.answer", `owner: "改选 B"`, map[string]any{"id": id, "choice": "B"})
+	if it := e.get(t, id); it.Ask.Resolution == nil || it.Ask.Resolution.Choice != "B" {
+		t.Fatalf("re-answer after revert: %+v", it.Ask)
+	}
+	// 人在 Web 上的回答不是 agent 变更，不能撤销。
+	h := e.asked(t, nil)
+	e.must(t, owner, "decision.answer", "", map[string]any{"id": h, "choice": "A"})
+	if _, err := e.do(owner, "item.revert", "", map[string]any{"id": h, "event": e.last(t, h, domain.EvDecisionResolved).Seq}); exit(err) != domain.ExitUsage {
+		t.Fatalf("human answer: %v", err)
+	}
+	e.verify(t)
+}

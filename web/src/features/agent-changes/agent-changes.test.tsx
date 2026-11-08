@@ -62,7 +62,7 @@ describe("agent 变更视图（flow-agent-revert）", () => {
     const d = screen.getByRole("heading", { name: /要不要上线/ }).closest("article")!;
     expect(within(d).getByText(/聊天代答/)).toBeInTheDocument();
     expect(within(d).getByText(/本人说：选 A/)).toBeInTheDocument();
-    expect(within(d).queryByRole("button", { name: "撤销" })).not.toBeInTheDocument(); // 决策不是可撤销的事项变更
+    expect(within(d).getByRole("button", { name: "撤销" })).toBeEnabled(); // 聊天代答的决策可撤销（§6.4）
     expect(screen.queryByText("人改的")).not.toBeInTheDocument();
     expect(screen.queryByText("被拒")).not.toBeInTheDocument();
     expect(screen.getAllByRole("article")).toHaveLength(2);

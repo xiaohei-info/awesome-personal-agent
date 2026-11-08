@@ -17,7 +17,7 @@ interface Step {
 
 const VISIT_KEY = "apa.agentChanges.lastVisit";
 const PAGE = 500;
-const REVERTIBLE = new Set(["item.updated", "item.phase_changed"]);
+const REVERTIBLE = new Set(["item.updated", "item.phase_changed", "decision.resolved"]);
 const TYPE_LABEL: Record<string, string> = { "item.updated": "修改事项", "item.phase_changed": "变更阶段", "item.created": "新建事项", "decision.resolved": "决定" };
 
 const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
