@@ -725,7 +725,7 @@ func TestAgentsMDChangeEmitsOneEventPerChange(t *testing.T) {
 	api.agents = sha("aaa")
 	o = pullOnce(t, api, repoCfg, o.cursor)
 	evs := agentsEvents(o)
-	if len(evs) != 1 || evs[0]["id"] != "repo-o-r-agents-md-aaa" || evs[0]["correlation_keys"].([]any)[0] != "o/r" ||
+	if len(evs) != 1 || evs[0]["id"] != "repo-o-r-agents-md-aaa-"+fmt.Sprint(now().Unix()) || evs[0]["correlation_keys"].([]any)[0] != "o/r" ||
 		evs[0]["link"] != "https://github.com/o/r/blob/main/AGENTS.md" || evs[0]["subject"] == "" {
 		t.Fatalf("created: %v", o.events)
 	}
@@ -737,7 +737,7 @@ func TestAgentsMDChangeEmitsOneEventPerChange(t *testing.T) {
 	// 修改
 	api.agents = sha("bbb")
 	o2 := pullOnce(t, api, repoCfg, o.cursor)
-	if evs := agentsEvents(o2); len(evs) != 1 || evs[0]["id"] != "repo-o-r-agents-md-bbb" {
+	if evs := agentsEvents(o2); len(evs) != 1 || evs[0]["id"] != "repo-o-r-agents-md-bbb-"+fmt.Sprint(now().Unix()) {
 		t.Fatalf("changed: %v", o2.events)
 	}
 	if again := pullOnce(t, api, repoCfg, o.cursor); !slices.Equal(again.ids(), o2.ids()) {
@@ -795,5 +795,59 @@ func TestGHClassifiesNotFound(t *testing.T) {
 	}
 	if e := classify("gh: Bad credentials (HTTP 401)"); e.NotFound || e.Exit != ExitAuth {
 		t.Errorf("401: %+v", e)
+	}
+}
+
+// sha 回到历史值（aaa→bbb→aaa、aaa→删除→aaa）是新的变化，id 不能与旧的相同，否则被内核去重而漏报；
+// 同一游标、同一 window.to 重放 id 不变。每次运行用不同的 window.to，与内核按时钟逐次安排一致。
+func TestAgentsMDIDsDistinctWhenShaReturnsToHistory(t *testing.T) {
+	api := &upstream{}
+	cursor := ""
+	run := func(step int, a *string) output {
+		api.agents = a
+		in, _ := json.Marshal(map[string]any{"source_id": "s", "config": json.RawMessage(repoCfg), "cursor": cursor,
+			"window": map[string]string{"from": at(0), "to": at(time.Duration(step) * time.Hour)}})
+		var out bytes.Buffer
+		if code := Run(context.Background(), bytes.NewReader(in), &out, &bytes.Buffer{}, api, now); code != ExitOK {
+			t.Fatalf("exit %d", code)
+		}
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		var last map[string]string
+		_ = json.Unmarshal([]byte(lines[len(lines)-1]), &last)
+		prev := cursor
+		cursor = last["cursor"]
+		var ids []string
+		for _, l := range lines[:len(lines)-1] {
+			var ev map[string]any
+			_ = json.Unmarshal([]byte(l), &ev)
+			ids = append(ids, ev["id"].(string))
+		}
+		return output{cursor: prev, events: func() []map[string]any {
+			var m []map[string]any
+			for _, id := range ids {
+				m = append(m, map[string]any{"id": id, "type": "repo.agents_md_changed"})
+			}
+			return m
+		}()}
+	}
+	var ids []string
+	for i, a := range []*string{sha("aaa"), sha("bbb"), sha("aaa"), nil, sha("aaa")} {
+		o := run(i+1, a)
+		if len(o.events) != 1 {
+			t.Fatalf("step %d: %v", i, o.ids())
+		}
+		ids = append(ids, o.ids()...)
+		if i == 4 { // 同一旧游标、同一 window.to 重放
+			saved := cursor
+			cursor = o.cursor
+			if again := run(i+1, a); !slices.Equal(again.ids(), o.ids()) {
+				t.Errorf("replay changed ids: %v vs %v", again.ids(), o.ids())
+			}
+			cursor = saved
+		}
+	}
+	slices.Sort(ids)
+	if len(slices.Compact(slices.Clone(ids))) != len(ids) {
+		t.Errorf("duplicate ids: %v", ids)
 	}
 }

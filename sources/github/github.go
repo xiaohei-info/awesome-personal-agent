@@ -322,7 +322,8 @@ func sweepIssues(ctx context.Context, api API, repo string, s *stream, to time.T
 // agentsEvent 比对仓库默认分支根目录 AGENTS.md 的 blob sha 与游标里的上一次，变化（含新建、删除）就发一条
 // repo.agents_md_changed，内核据此做与 apa agents check 同一检测（§12.5）。
 // 首次看到文件也发：已有手写 AGENTS.md 的仓库首次检查本就落入漂移；首次没有文件则只记下，不发。
-// 读取失败不推进 sha，下次重试；id 含新 sha（删除时含时间），同一状态重放 id 不变。
+// 读取失败不推进 sha，下次重试；id 含新 sha 与本次 window.to：sha 回到历史值（aaa→bbb→aaa）也是新的一次变化，id 不会撞上内核已去重的旧 id；
+// 同一游标、同一 window.to 重放，id 不变。
 func agentsEvent(ctx context.Context, api API, repo string, s *stream, to time.Time) ([]event, error) {
 	sha, link := "", ""
 	body, err := api.Get(ctx, "/repos/"+repo+"/contents/AGENTS.md")
@@ -347,7 +348,7 @@ func agentsEvent(ctx context.Context, api API, repo string, s *stream, to time.T
 	if sha == "" && prev == nil || prev != nil && *prev == sha {
 		return nil, nil
 	}
-	suffix, summary := sha, "AGENTS.md changed on the default branch"
+	suffix, summary := fmt.Sprintf("%s-%d", sha, to.Unix()), "AGENTS.md changed on the default branch"
 	if sha == "" {
 		suffix, summary = fmt.Sprintf("removed-%d", to.Unix()), "AGENTS.md was removed from the default branch"
 	}
