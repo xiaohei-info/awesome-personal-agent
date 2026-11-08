@@ -1,4 +1,5 @@
-# sha256: 523ce15a9e86518b3a239012ca2622dcf3c91ac175c819f6551d760e64802c36
+# sha256: 9c8ad006e821824a66cf05072262c2bb0ca234e87202ac5b5eeb9cf1a1a71393
 work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
-status: todo
+status: in_progress
+recovery_marker: true
 retry_note: 真实 Hermes 只能在 taiyi /opt/apa-live/ 隔离环境运行；不要在 Mac mini 启动或调用 Hermes。

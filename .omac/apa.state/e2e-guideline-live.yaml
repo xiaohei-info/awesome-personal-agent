@@ -1,6 +1,7 @@
-# sha256: 2d49d8bccf5d0df67d17d62e366f12290f9c297ae42bcd8732ba65a216f07ed8
+# sha256: 0c636d7ba16cde5c48dab6aea96572b1bef845a04743121937a8f8ab6059809c
 work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
-status: todo
+status: in_progress
+recovery_marker: true
 retry_note: '负责人说明：这个节点改派到 taiyi 上的 worker（omac-worker-frontend-taiyi），本机就是 taiyi，可以直接在本机运行
   hermes，不需要 ssh。
 
