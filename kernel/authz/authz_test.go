@@ -23,7 +23,7 @@ func req(l Level, a Action, o Object) Request {
 		actor = domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}
 	}
 	if l == LevelDelegate {
-		actor.OnBehalfOf = "owner"
+		actor.OnBehalfOf, actor.Session = "owner", "s1"
 	}
 	return Request{Actor: actor, Level: l, Action: a, Object: o, WebURL: web}
 }
@@ -75,20 +75,59 @@ func TestMatrix(t *testing.T) {
 	}
 }
 
-func TestDelegateEvidence(t *testing.T) {
-	for _, a := range []Action{ActionEditAnyItem, ActionAnswerDecision} {
-		r := req(LevelDelegate, a, Object{})
-		if d := Decide(pol(), r); d.Verdict != Deny || d.Err.Code != domain.CodeInvalidRequest {
+// §14.5：第二档要本人原话加会话引用，缺一不可，缺失为 23；第一档不要。
+func TestDelegateTiers(t *testing.T) {
+	decide := []Action{ActionEditAnyItem, ActionAnswerDecision}
+	for _, a := range decide { // 动作本身属于第二档，命令登记成第一档也不能绕过
+		for _, tier := range []Tier{TierNone, TierWork, TierDecide, TierWords} {
+			r := req(LevelDelegate, a, Object{})
+			r.Tier = tier
+			if d := Decide(pol(), r); d.ExitCode() != domain.ExitBasisRequired {
+				t.Errorf("%s tier %d without evidence: %+v", a, tier, d)
+			}
+		}
+	}
+	for _, a := range append(decide, ActionManageProject, ActionManageSource, ActionUpdateOwn) {
+		r := req(LevelDelegate, a, Object{Assignee: "me"})
+		r.Tier = TierDecide
+		if a == ActionManageProject || a == ActionManageSource {
+			r.Tier = TierWords
+		}
+		if d := Decide(pol(), r); d.ExitCode() != domain.ExitBasisRequired || d.Err.WebURL == nil {
 			t.Errorf("%s without evidence: %+v", a, d)
 		}
-		r.Evidence = "quote"
-		r.Actor.OnBehalfOf = ""
-		if d := Decide(pol(), r); d.Verdict != Deny || d.Err.Code != domain.CodeInvalidRequest {
-			t.Errorf("%s without on_behalf_of: %+v", a, d)
+		r.Evidence = "  "
+		if d := Decide(pol(), r); d.ExitCode() != domain.ExitBasisRequired {
+			t.Errorf("%s with blank evidence: %+v", a, d)
 		}
-		r.Actor.OnBehalfOf = "owner"
+		r.Evidence = "quote"
+		r.Actor.Session = ""
+		if d := Decide(pol(), r); d.ExitCode() != domain.ExitBasisRequired {
+			t.Errorf("%s evidence without session: %+v", a, d)
+		}
+		r.Actor.Session = "s1"
 		if d := Decide(pol(), r); d.Verdict != Allow {
-			t.Errorf("%s with evidence: %+v", a, d)
+			t.Errorf("%s with evidence and session: %+v", a, d)
+		}
+		r.Actor.Type, r.Actor.Session = domain.ActorSystem, "" // 规则与内核服务没有 harness 会话，依据是自己带的证据
+		if d := Decide(pol(), r); d.Verdict != Allow {
+			t.Errorf("%s by a system actor with evidence: %+v", a, d)
+		}
+	}
+	// 第一档：agent 自己的工作不要原话；不论带不带都放行。
+	for _, tier := range []Tier{TierNone, TierWork} {
+		r := req(LevelDelegate, ActionUpdateOwn, Object{Assignee: "me"})
+		r.Tier = tier
+		if d := Decide(pol(), r); d.Verdict != Allow {
+			t.Errorf("tier %d own work: %+v", tier, d)
+		}
+	}
+	// 其他凭据与 Web 不经三档；运行凭据带证据也没有代答能力。
+	for _, l := range []Level{LevelWeb, LevelRun, LevelWorker} {
+		r := req(l, ActionUpdateOwn, Object{Assignee: "me", InRunScope: true})
+		r.Tier = TierDecide
+		if d := Decide(pol(), r); d.Verdict != Allow {
+			t.Errorf("%s ignores tiers: %+v", l, d)
 		}
 	}
 }
@@ -266,6 +305,11 @@ func TestRejectionEvent(t *testing.T) {
 	ev, ok := RejectionEvent(r, d)
 	if !ok || ev.Type != domain.EvCommandRejected || ev.Object != "d1" || ev.Actor.Principal != "me" || len(ev.Payload) == 0 {
 		t.Fatalf("bad event: %+v ok=%v", ev, ok)
+	}
+	// 第二档依据不足（退出码 23）要留痕。
+	r = req(LevelDelegate, ActionAnswerDecision, Object{ID: "d2"})
+	if ev, ok := RejectionEvent(r, Decide(pol(), r)); !ok || ev.Object != "d2" {
+		t.Errorf("basis rejection must be recorded: %+v ok=%v", ev, ok)
 	}
 	// 运行身份被拒绝的决策命令也要记。
 	r = req(LevelRun, ActionAnswerDecision, Object{ID: "d1"})

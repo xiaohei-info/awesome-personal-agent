@@ -82,7 +82,7 @@ func setup(t *testing.T, max int) *env {
 }
 
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) try(id command.Identity, cmd string, in any, chain command.Chain) (command.Result, error) {

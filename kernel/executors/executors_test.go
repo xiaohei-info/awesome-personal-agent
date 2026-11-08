@@ -65,7 +65,7 @@ func (e *env) bearer(t *testing.T, s auth.Spec) command.Bearer {
 	if err := e.st.Update(bg, func(tx *store.Tx) (err error) { _, secret, err = e.au.Issue(tx, s); return }); err != nil {
 		t.Fatal(err)
 	}
-	return command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Session: "s1"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {

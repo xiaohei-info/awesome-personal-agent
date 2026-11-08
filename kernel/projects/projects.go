@@ -334,7 +334,7 @@ func repoIndex(p *domain.Project, remote string) int {
 // （Web 本人）；delegate 得到退出码 20 并留拒绝事件，其余级别得到退出码 4（§14.7）。
 func Register(x *command.Executor) error {
 	specs := []command.Spec{
-		{Name: "project.create", Action: authz.ActionManageProject, Proxy: true,
+		{Name: "project.create", Action: authz.ActionManageProject, Tier: authz.TierWords,
 			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 				var v createIn
 				return authz.Object{}, decode(in, &v)
@@ -369,7 +369,7 @@ func Register(x *command.Executor) error {
 				}
 				return ref{id}, nil
 			}},
-		{Name: "project.update", Action: authz.ActionManageProject, Proxy: true,
+		{Name: "project.update", Action: authz.ActionManageProject, Tier: authz.TierWords,
 			Object: objectOf(func(v updateIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var v updateIn
@@ -412,7 +412,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.repo.add", Action: authz.ActionManageProject, Proxy: true,
+		{Name: "project.repo.add", Action: authz.ActionManageProject, Tier: authz.TierWords,
 			Object: objectOf(func(v repoIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var v repoIn
@@ -432,7 +432,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.repo.remove", Action: authz.ActionManageProject, Proxy: true,
+		{Name: "project.repo.remove", Action: authz.ActionManageProject, Tier: authz.TierWords,
 			Object: objectOf(func(v repoIn) string { return v.ID }),
 			Apply: func(c *command.Ctx) (any, error) {
 				var v repoIn
@@ -446,7 +446,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.checkout.set", Action: authz.ActionEditCheckout, Proxy: true,
+		{Name: "project.checkout.set", Action: authz.ActionEditCheckout, Tier: authz.TierWork,
 			Object: objectOf(func(v checkoutIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var v checkoutIn
@@ -468,7 +468,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.checkout.remove", Action: authz.ActionEditCheckout, Proxy: true,
+		{Name: "project.checkout.remove", Action: authz.ActionEditCheckout, Tier: authz.TierWork,
 			Object: objectOf(func(v checkoutIn) string { return v.ID }),
 			Apply: func(c *command.Ctx) (any, error) {
 				var v checkoutIn

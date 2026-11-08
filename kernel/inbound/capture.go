@@ -67,7 +67,7 @@ func captureProject(sourceID string) (string, bool) {
 func captureSource(id string) domain.Source { return domain.Source{ID: id, SourceKind: CaptureKind} }
 
 func (s *Service) registerCapture(x *command.Executor) error {
-	return x.Register(command.Spec{Name: CmdCapture, Action: authz.ActionCreateProposed, Proxy: true,
+	return x.Register(command.Spec{Name: CmdCapture, Action: authz.ActionCreateProposed, Tier: authz.TierWork,
 		Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil },
 		Apply: func(c *command.Ctx) (any, error) {
 			var in captureIn

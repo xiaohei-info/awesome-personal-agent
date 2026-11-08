@@ -78,9 +78,13 @@ func TestFlowProposalTriage(t *testing.T) {
 
 	t.Run("ACT-PROP-06 / 07 无证据代答和低级别凭据被拒绝", func(t *testing.T) {
 		d := f.proposal("prop-d")
-		f.apa(f.DEL, 2, "accept", d)
-		f.apa(f.DEL, 2, "dismiss", d, "--reason", "重复")
+		f.apa(f.DEL, 23, "accept", d)
+		f.apa(f.DEL, 23, "dismiss", d, "--reason", "重复")
 		eq(t, "无证据后阶段", f.phase(d), "proposed")
+		f.NoSession = true // 只带原话、不带会话引用，同样是 23
+		f.apa(f.DEL, 23, "accept", d, "--evidence", "本人说接受")
+		f.NoSession = false
+		eq(t, "无会话后阶段", f.phase(d), "proposed")
 		for name, tok := range map[string]string{"OBS": f.OBS, "WRK": f.WRK} {
 			f.apa(tok, 4, "accept", d, "--evidence", "x")
 			f.apa(tok, 4, "dismiss", d, "--reason", "x", "--evidence", "x")
@@ -154,8 +158,12 @@ func TestFlowDecisionAnswer(t *testing.T) {
 	t.Run("ACT-DEC-04/05 无证据代答与 worker 回答被拒绝", func(t *testing.T) {
 		id := f.task("dec-4", "acc-work")
 		f.ask(id)
-		f.apa(f.DEL, 2, "decide", id, "--option", "A")
+		f.apa(f.DEL, 23, "decide", id, "--option", "A")
 		eq(t, "无证据后阶段", f.phase(id), "needs_input")
+		f.NoSession = true // 只带原话、不带会话引用，同样是 23
+		f.apa(f.DEL, 23, "decide", id, "--option", "A", "--evidence", "本人说选 A")
+		f.NoSession = false
+		eq(t, "无会话后阶段", f.phase(id), "needs_input")
 		f.apa(f.WRK, 4, "decide", id, "--option", "A", "--evidence", "x")
 		eq(t, "worker 回答后阶段", f.phase(id), "needs_input")
 		if f.resolution(id) != nil {

@@ -15,7 +15,7 @@ import (
 // 列：§14.3 表的五个调用者。
 var columns = []authz.Level{authz.LevelObserver, authz.LevelWorker, authz.LevelDelegate, authz.LevelRun, authz.LevelWeb}
 
-// 期望结果：允许 / 各退出码。exitEvidence 是"附证据"：不附被拒（退出码 2），附了允许。
+// 期望结果：允许 / 各退出码。exitEvidence 是"第二档"：不附本人原话或会话引用被拒（退出码 23），都附了允许。
 const (
 	ok           = 0
 	denied       = domain.ExitPermissionDenied
@@ -53,10 +53,10 @@ var rows = []row{
 	{"增改 repos 的本机检出（目标事项所属项目内）", authz.ActionEditCheckout, inScope(), [5]int{denied, ok, ok, ok, ok}},
 	{"增改 repos 的本机检出（项目外）", authz.ActionEditCheckout, authz.Object{ID: "x"}, [5]int{denied, ok, ok, denied, ok}},
 	{"提交插件声明", authz.ActionSubmitPlugin, notMine(), [5]int{denied, ok, ok, denied, ok}},
-	{"改任意事项（附证据）", authz.ActionEditAnyItem, notMine(), [5]int{denied, denied, ok, denied, ok}},
-	{"改任意事项（不附证据）", authz.ActionEditAnyItem, notMine(), [5]int{denied, denied, exitEvidence, denied, ok}},
-	{"代答决策、接受或丢弃建议（附证据）", authz.ActionAnswerDecision, decisionObj(), [5]int{denied, denied, ok, denied, ok}},
-	{"代答决策、接受或丢弃建议（不附证据）", authz.ActionAnswerDecision, decisionObj(), [5]int{denied, denied, exitEvidence, denied, ok}},
+	{"改任意事项（附原话与会话）", authz.ActionEditAnyItem, notMine(), [5]int{denied, denied, ok, denied, ok}},
+	{"改任意事项（缺原话或会话）", authz.ActionEditAnyItem, notMine(), [5]int{denied, denied, exitEvidence, denied, ok}},
+	{"代答决策、接受或丢弃建议（附原话与会话）", authz.ActionAnswerDecision, decisionObj(), [5]int{denied, denied, ok, denied, ok}},
+	{"代答决策、接受或丢弃建议（缺原话或会话）", authz.ActionAnswerDecision, decisionObj(), [5]int{denied, denied, exitEvidence, denied, ok}},
 	{"回答 web_only 决策", authz.ActionAnswerDecision, authz.Object{ID: "x", ScreenedWebOnly: true}, [5]int{denied, denied, web, denied, ok}},
 	{"回答 web_only 初筛未返回的决策", authz.ActionAnswerDecision, authz.Object{ID: "x", ScreeningPending: true}, [5]int{denied, denied, screening, denied, ok}},
 	{"建项目、改项目信息、增删 repos 的远程地址", authz.ActionManageProject, notMine(), [5]int{denied, denied, ok, denied, ok}},
@@ -76,15 +76,19 @@ func TestMatrixEveryRowAndColumn(t *testing.T) {
 					Owner: "owner", WebURL: "https://apa.example/items/x"}
 				want := r.want[i]
 				if want == exitEvidence {
-					// 不附证据：被拒；下面附了证据与 on_behalf_of 才允许。
+					// 缺原话、缺会话引用：被拒；下面都附了才允许。
 					d := authz.Decide(pol, req)
-					if d.Verdict != authz.Deny || d.ExitCode() != domain.ExitUsage {
+					if d.Verdict != authz.Deny || d.ExitCode() != domain.ExitBasisRequired {
 						t.Fatalf("without evidence: %+v", d)
+					}
+					req.Evidence = "owner said so (chat#1)"
+					if d = authz.Decide(pol, req); d.ExitCode() != domain.ExitBasisRequired {
+						t.Fatalf("evidence without session: %+v", d)
 					}
 					want = ok
 				}
 				req.Evidence = "owner said so (chat#1)"
-				req.Actor.OnBehalfOf = "owner"
+				req.Actor.OnBehalfOf, req.Actor.Session = "owner", "s1"
 				d := authz.Decide(pol, req)
 				if d.ExitCode() != want {
 					t.Fatalf("exit %d, want %d (%+v)", d.ExitCode(), want, d)

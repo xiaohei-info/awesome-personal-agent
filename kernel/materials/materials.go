@@ -561,7 +561,7 @@ func hostedConflict(m Material) error {
 
 func commit(src PackSource) command.Spec {
 	return command.Spec{
-		Name: "material.commit", Action: authz.ActionReviseMaterial, Proxy: true,
+		Name: "material.commit", Action: authz.ActionReviseMaterial, Tier: authz.TierWork,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v commitIn
 			if err := decode(in, &v); err != nil {
@@ -690,7 +690,7 @@ func orNone(s string) string {
 
 func confirm() command.Spec {
 	return command.Spec{
-		Name: "revision.confirm", Action: authz.ActionAnswerDecision, Proxy: true,
+		Name: "revision.confirm", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v confirmIn
 			if err := decode(in, &v); err != nil {
@@ -759,7 +759,7 @@ func confirm() command.Spec {
 
 func reject() command.Spec {
 	return command.Spec{
-		Name: "revision.reject", Action: authz.ActionAnswerDecision, Proxy: true,
+		Name: "revision.reject", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v rejectIn
 			if err := decode(in, &v); err != nil {

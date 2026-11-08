@@ -157,7 +157,7 @@ func (o Options) create() command.Spec {
 		var v createIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "delegate.create", Action: authz.ActionDelegate, Proxy: true,
+	return command.Spec{Name: "delegate.create", Action: authz.ActionDelegate, Tier: authz.TierWork,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -262,7 +262,7 @@ func report() command.Spec {
 		var v reportIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Proxy: true,
+	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -335,6 +335,10 @@ func report() command.Spec {
 		}}
 }
 
+func bound(tx *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) (bool, error) {
+	return items.BoundTo(tx, c.Actor.Principal, o)
+}
+
 // reportable 读出回执的目标事项：委派子事项，或任务型运行的目标事项（附录 C.13 的"写回事项"）。
 // 谁能写回由授权决定：绑定的执行者凭据改自己的事项，运行凭据改范围内的事项；这里不再限定 kind。
 func reportable(tx *store.Tx, id string) (domain.Item, error) {
@@ -365,6 +369,9 @@ func checkReport(tx *store.Tx, child domain.Item, v reportIn) error {
 	if v.Outcome == OutcomeDone {
 		if e := domain.CheckEntry(child, domain.PhaseDone, "reported done", !v.Evidence.empty()); e != nil {
 			return e
+		}
+		if v.Evidence.empty() { // 任何 kind 报 done 都要结果证据（§6.14 第 3 条）；CheckEntry 只管 delegation 的进入约束
+			return domain.NewError(domain.CodeInvalidRequest, "reporting done needs result evidence (pr, commit, branch or link)", "report progress or blocked instead, or attach the result")
 		}
 	}
 	if pr := strings.TrimSpace(v.Evidence.PR); pr != "" {

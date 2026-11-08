@@ -89,7 +89,7 @@ func (e *env) issue(t *testing.T, name string, s auth.Spec) {
 
 // as 以真实签发的凭据发起请求：操作者与信任级由认证步骤据账本得出。
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
@@ -401,7 +401,7 @@ func TestAllowedExecutorsCannotBeBypassed(t *testing.T) {
 	parent := e.parent(t, work)
 	child := e.delegate(t, e.as("DEL"), parent, workHost)
 	// 代本人操作的 delegate（改他人事项须带 on_behalf_of 与原话）。
-	proxy := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	proxy := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
 
 	// 改派到名单外。
 	e.wantExit(t, domain.ExitExecutorNotAllowed, proxy, "item.update", map[string]any{"id": child, "assignee": otherHost})
@@ -565,5 +565,75 @@ func TestChildReceiptStillEmitsDelegationReported(t *testing.T) {
 	e.must(t, e.as("WRK"), "delegate.report", rep(child, "progress", Evidence{}))
 	if n := countType(e.events(t), domain.EvDelegationReported); n != 1 {
 		t.Fatalf("delegation.reported = %d", n)
+	}
+}
+
+// doBare 不带本人原话地发请求：第一档的动作本来就不该需要它。
+func (e *env) doBare(id command.Identity, cmd string, in any) (command.Result, error) {
+	b, _ := json.Marshal(in)
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"})
+}
+
+func (e *env) eventAt(t *testing.T, seq int64) domain.Event {
+	t.Helper()
+	for _, ev := range e.events(t) {
+		if ev.Seq == seq {
+			return ev
+		}
+	}
+	t.Fatalf("no event %d", seq)
+	return domain.Event{}
+}
+
+// §14.5 第一档：发起委派的 delegate 凭据回执自己派出去的活不要本人原话，Event 不带 on_behalf_of；
+// 别的 delegate 凭据（绑定不成立）按第二档，缺依据为 23、记 command.rejected、子事项不变。
+func TestDelegateReceiptBindsToInitiatorOnly(t *testing.T) {
+	e := setup(t)
+	e.issue(t, "DEL2", auth.Spec{Kind: auth.Delegate})
+	parent := e.parent(t, "")
+	child := e.id(t, e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": parent, "assignee": workHost}))
+
+	before := countType(e.events(t), domain.EvCommandRejected)
+	_, err := e.doBare(e.as("DEL2"), "delegate.report", rep(child, "progress", Evidence{}))
+	if exitOf(err) != domain.ExitBasisRequired {
+		t.Fatalf("foreign delegate without basis: %v", err)
+	}
+	if got := countType(e.events(t), domain.EvCommandRejected) - before; got != 1 {
+		t.Fatalf("command.rejected recorded %d times", got)
+	}
+	if got := e.item(t, child); got.StatusLabel != "" {
+		t.Fatalf("rejected receipt changed the child: %+v", got)
+	}
+
+	r, err := e.doBare(e.as("DEL"), "delegate.report", rep(child, "progress", Evidence{}))
+	if err != nil {
+		t.Fatalf("initiator receipt without words: %v", err)
+	}
+	if ev := e.eventAt(t, r.Seqs[0]); ev.Actor.OnBehalfOf != "" || ev.Actor.Principal == "" {
+		t.Fatalf("tier one event must not carry on_behalf_of: %+v", ev.Actor)
+	}
+
+	// 第二档：别的凭据带原话与会话照常放行，Event 带 on_behalf_of。
+	r = e.must(t, e.as("DEL2"), "delegate.report", rep(child, "blocked", Evidence{}))
+	if ev := e.eventAt(t, r.Seqs[0]); ev.Actor.OnBehalfOf != "owner" || ev.Evidence == "" {
+		t.Fatalf("tier two event: %+v", ev)
+	}
+}
+
+// §6.14 第 3 条：报 done 对任何 kind 都必须带结果证据，缺失为 2 且事项不变。
+func TestReportDoneNeedsResultEvidenceForAnyKind(t *testing.T) {
+	e := setup(t)
+	task := e.id(t, e.must(t, owner, "item.create", map[string]any{"kind": "task", "title": "t", "phase": "open", "assignee": workHost}))
+	for _, id := range []string{task, e.delegate(t, e.as("DEL"), e.parent(t, ""), workHost)} {
+		who := e.as("DEL")
+		e.wantExit(t, domain.ExitUsage, who, "delegate.report", rep(id, "done", Evidence{}))
+		e.wantExit(t, domain.ExitUsage, who, "delegate.report", rep(id, "done", Evidence{PR: "  "}))
+		if got := e.item(t, id); got.Phase != domain.PhaseOpen {
+			t.Fatalf("done without result moved the item: %+v", got)
+		}
+	}
+	e.must(t, e.as("DEL"), "delegate.report", rep(task, "done", Evidence{Branch: "fix/x"}))
+	if got := e.item(t, task); got.Phase != domain.PhaseDone {
+		t.Fatalf("task with result evidence: %+v", got)
 	}
 }

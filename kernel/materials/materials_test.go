@@ -21,7 +21,7 @@ import (
 var bg = context.Background()
 
 func agent(p string, lvl authz.Level) command.Trusted {
-	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: lvl}
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: lvl}
 }
 
 var (
@@ -416,7 +416,7 @@ func TestDelegateConfirmsNonGuidelineWithEvidenceOnly(t *testing.T) {
 	e := setup(t)
 	r := e.must(t, worker, "", "material.commit", commitIn{Project: e.prj, Kind: "requirement", Title: "需求", Content: "x", Reason: "r"})
 	_, err := e.do(delegate, "", "revision.confirm", confirmIn{ID: r.Revision})
-	code(t, err, domain.CodeInvalidRequest)
+	code(t, err, domain.CodeBasisRequired)
 	e.must(t, delegate, "本人原话：同意", "revision.confirm", confirmIn{ID: r.Revision})
 	if m, _ := e.show(t, r.Material, ""); m.CurrentRev != r.Revision {
 		t.Fatal("not confirmed")

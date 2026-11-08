@@ -23,7 +23,7 @@ var bg = context.Background()
 var t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func agent(p string, lvl authz.Level) command.Trusted {
-	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: lvl}
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: lvl}
 }
 
 var (
@@ -299,7 +299,7 @@ func TestOptionNextPhaseAndFreeText(t *testing.T) {
 func TestDelegateAnswerNeedsEvidence(t *testing.T) {
 	e := setup(t)
 	id := e.asked(t, nil)
-	if _, err := e.do(delegate, "decision.answer", "", map[string]any{"id": id, "choice": "A"}); exit(err) != domain.ExitUsage {
+	if _, err := e.do(delegate, "decision.answer", "", map[string]any{"id": id, "choice": "A"}); exit(err) != domain.ExitBasisRequired {
 		t.Fatalf("no evidence: %v", err)
 	}
 	if e.get(t, id).Phase != domain.PhaseNeedsInput {
@@ -407,7 +407,7 @@ func TestProposalAcceptAndDismiss(t *testing.T) {
 	e := setup(t)
 	a := e.item(t, map[string]any{"phase": "proposed"})
 	d := e.item(t, map[string]any{"phase": "proposed"})
-	if _, err := e.do(delegate, "proposal.accept", "", map[string]any{"id": a}); exit(err) != domain.ExitUsage {
+	if _, err := e.do(delegate, "proposal.accept", "", map[string]any{"id": a}); exit(err) != domain.ExitBasisRequired {
 		t.Fatalf("delegate needs the owner's words: %v", err)
 	}
 	if _, err := e.do(worker, "proposal.accept", "x", map[string]any{"id": a}); exit(err) != domain.ExitPermissionDenied {

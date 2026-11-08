@@ -172,7 +172,10 @@ func (e *env) web(r *http.Request) {
 }
 
 func bearer(secret string) func(*http.Request) {
-	return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
+	return func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+secret)
+		r.Header.Set("X-APA-Session", "s1")
+	}
 }
 
 func (e *env) issue(spec auth.Spec) func(*http.Request) {

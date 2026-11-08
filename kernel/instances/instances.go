@@ -285,7 +285,7 @@ func (s *svc) create() command.Spec {
 	instance := func(id string, v createIn) Instance {
 		return Instance{ID: id, Pack: v.Pack, Project: v.Project, Params: v.Params, Enabled: v.Enabled == nil || *v.Enabled}
 	}
-	return command.Spec{Name: "instance.create", Action: authz.ActionManageSource, Proxy: true,
+	return command.Spec{Name: "instance.create", Action: authz.ActionManageSource, Tier: authz.TierWords,
 		Object: func(_ *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			if _, err := parse(raw); err != nil {
 				return authz.Object{}, err
@@ -337,7 +337,7 @@ func (s *svc) update() command.Spec {
 		}
 		return in, nil
 	}
-	return command.Spec{Name: "instance.update", Action: authz.ActionManageSource, Proxy: true,
+	return command.Spec{Name: "instance.update", Action: authz.ActionManageSource, Tier: authz.TierWords,
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {
@@ -389,7 +389,7 @@ func (s *svc) toggle() command.Spec {
 		}
 		return v, nil
 	}
-	return command.Spec{Name: "instance.toggle", Action: authz.ActionManageSource, Proxy: true,
+	return command.Spec{Name: "instance.toggle", Action: authz.ActionManageSource, Tier: authz.TierWords,
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {

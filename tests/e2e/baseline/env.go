@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -33,12 +34,13 @@ const (
 
 // Env 是一套验收环境。字段名对应验收文档里的环境变量。
 type Env struct {
-	T        testing.TB
-	Root     string            // 测试专用根目录，APA_HOME 在其内
-	Home     string            // APA_HOME
-	URL      string            // APA_URL
-	Bin      map[string]string // apa、stub-harness 的可执行文件
-	TestRepo string            // <TEST_REPO>
+	T         testing.TB
+	Root      string            // 测试专用根目录，APA_HOME 在其内
+	Home      string            // APA_HOME
+	URL       string            // APA_URL
+	NoSession bool              // 为真时带 --evidence 的命令也不设 APA_SESSION
+	Bin       map[string]string // apa、stub-harness 的可执行文件
+	TestRepo  string            // <TEST_REPO>
 
 	OBS, WRK, WRK2, DEL, CHAN string
 
@@ -154,10 +156,15 @@ func (e *Env) fatal(format string, a ...any) {
 	e.T.Fatalf(format, a...)
 }
 
-func (e *Env) env(token string) []string {
+func (e *Env) env(token string, args []string) []string {
 	env := append(os.Environ(), "APA_HOME="+e.Home, "APA_URL="+e.URL)
 	if token != "" {
 		env = append(env, "APA_TOKEN="+token)
+	}
+	// 带本人原话（--evidence）的第二档命令还要会话引用；harness 插件会设 APA_SESSION，这里替身。
+	// NoSession 供要验证"只带原话不带会话"的用例关掉它。
+	if !e.NoSession && slices.ContainsFunc(args, func(a string) bool { return a == "--evidence" || strings.HasPrefix(a, "--evidence=") }) {
+		env = append(env, "APA_SESSION=e2e-session")
 	}
 	return env
 }
@@ -168,7 +175,7 @@ func (e *Env) Apa(token, stdin string, args ...string) Result {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, e.Bin["apa"], args...)
-	cmd.Env = e.env(token)
+	cmd.Env = e.env(token, args)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -239,7 +246,7 @@ func (e *Env) startServe(port string) {
 	e.T.Helper()
 	e.logs = &syncBuf{}
 	e.srv = exec.Command(e.Bin["apa"], "serve")
-	e.srv.Env = e.env("")
+	e.srv.Env = e.env("", nil)
 	e.srv.Stdout, e.srv.Stderr = e.logs, e.logs
 	if err := e.srv.Start(); err != nil {
 		e.fatal("apa serve: %v", err)

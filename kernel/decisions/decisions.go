@@ -142,7 +142,7 @@ func request(scr Screening) command.Spec {
 		var v requestIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "decision.request", Action: authz.ActionUpdateOwn, Proxy: true,
+	return command.Spec{Name: "decision.request", Action: authz.ActionUpdateOwn, Tier: authz.TierWork,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -267,7 +267,7 @@ func answer() command.Spec {
 		var v answerIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision, Proxy: true,
+	return command.Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -358,7 +358,7 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 		var v proposalIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: name, Action: authz.ActionAnswerDecision, Proxy: true,
+	return command.Spec{Name: name, Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

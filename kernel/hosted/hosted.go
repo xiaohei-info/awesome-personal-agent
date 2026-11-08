@@ -216,7 +216,7 @@ func add(src materials.PackSource) command.Spec {
 		return v, v.fill(tx)
 	}
 	return command.Spec{
-		Name: "material.add", Action: authz.ActionReviseMaterial, Proxy: true,
+		Name: "material.add", Action: authz.ActionReviseMaterial, Tier: authz.TierWork,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(tx, in)
 			return authz.Object{Kind: v.Kind, Project: v.Project, Tags: v.Tags}, err

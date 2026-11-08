@@ -132,7 +132,7 @@ func (e *env) token(kind auth.Kind, executor string) func(*http.Request) {
 	}); err != nil {
 		e.t.Fatal(err)
 	}
-	return hdr("Authorization", "Bearer "+secret)
+	return hdr("Authorization", "Bearer "+secret, "X-APA-Session", "s1")
 }
 
 // item 以本人身份创建一个事项并返回 id。
@@ -182,8 +182,8 @@ func TestAskAndDecide(t *testing.T) {
 		t.Fatalf("after ask: %+v", it)
 	}
 
-	// 代答没有本人原话：400。
-	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, dlg); rec.Code != 400 {
+	// 代答没有本人原话：403 basis_required（退出码 23）。
+	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, dlg); rec.Code != 403 {
 		t.Fatalf("decide without evidence = %d %s", rec.Code, rec.Body)
 	}
 	rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A","evidence":"owner: yes ship it"}`, dlg)
@@ -337,7 +337,7 @@ func TestAcceptAndDismissProposal(t *testing.T) {
 	if e.get(a).Phase != domain.PhaseProposed {
 		t.Fatal("setup: items start as proposals")
 	}
-	if rec := e.do("POST", "/v1/items/"+a+"/accept", `{}`, dlg); rec.Code != 400 {
+	if rec := e.do("POST", "/v1/items/"+a+"/accept", `{}`, dlg); rec.Code != 403 {
 		t.Fatalf("accept without evidence = %d %s", rec.Code, rec.Body)
 	}
 	if rec := e.do("POST", "/v1/items/"+a+"/accept", `{"evidence":"x"}`, wrk); rec.Code != 403 {

@@ -264,3 +264,23 @@ func TestCaptureEndpointErrors(t *testing.T) {
 		t.Fatal("rejected requests must not capture")
 	}
 }
+
+// ACT-CAP-01 / §14.5 第一档：delegate 凭据提交候选捕获是 agent 自己的工作，不带本人原话也放行，候选只进 proposed。
+func TestCaptureByDelegateNeedsNoWords(t *testing.T) {
+	e := setup(t)
+	e.stub.SetDefault(modelstub.Reply{Content: `{"choice":"task","confidence":0.95}`})
+	m := e.body(e.post(e.token(auth.Delegate, ""), `{"project":"`+e.proj+`","text":"用户：周五前把发布脚本补上"}`), 200)
+	if m["captured"] != true {
+		t.Fatalf("response %v", m)
+	}
+	for end := time.Now().Add(20 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		if evs := e.events(); len(evs) == 1 && evs[0].Disposition == domain.DispositionProposed {
+			var it domain.Item
+			if err := e.st.View(bg, func(tx *store.Tx) (err error) { it, err = items.Get(tx, evs[0].Item); return }); err != nil || it.Phase != domain.PhaseProposed {
+				t.Fatalf("candidate = %+v %v", it, err)
+			}
+			return
+		}
+	}
+	t.Fatalf("no candidate proposed: %+v", e.events())
+}

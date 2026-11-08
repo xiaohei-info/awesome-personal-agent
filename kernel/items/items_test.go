@@ -29,7 +29,7 @@ func human(p string, lvl authz.Level, via domain.Via) command.Trusted {
 }
 
 func agent(p string, lvl authz.Level) command.Trusted {
-	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: lvl}
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: lvl}
 }
 
 var (
@@ -342,7 +342,7 @@ func TestAuthorizationLevels(t *testing.T) {
 		t.Fatalf("worker on others' item: %v", err)
 	}
 	b, _ := json.Marshal(map[string]any{"id": other, "summary": "s"})
-	if _, err := e.x.Do(bg, command.Request{Identity: delegate, Command: "item.update", Input: b, Owner: "owner"}); exit(err) != domain.ExitUsage {
+	if _, err := e.x.Do(bg, command.Request{Identity: delegate, Command: "item.update", Input: b, Owner: "owner"}); exit(err) != domain.ExitBasisRequired {
 		t.Fatalf("delegate without evidence: %v", err)
 	}
 	e.must(t, delegate, "item.update", map[string]any{"id": other, "summary": "s"})
@@ -354,60 +354,80 @@ func TestAuthorizationLevels(t *testing.T) {
 }
 
 // §14.7 / §6.14 第 5 条：写 assignee 与写 project 都校验名单，拒绝留痕。
-// delegate 的每个代理写操作都带 on_behalf_of 与证据，包括改自己的事项（update_own 本不要求证据）；
-// 证据原样记进事件；其他身份的行为不变。
-func TestDelegateWritesCarryEvidence(t *testing.T) {
+// §14.5：delegate 写自己绑定的事项是第一档（不要原话，Event 不带 on_behalf_of）；
+// 写其他事项、以非 proposed 新建是第二档（要本人原话加会话引用，缺一为 23，记 command.rejected，事项不变）。
+func TestDelegateWritesFollowTiers(t *testing.T) {
 	e := setup(t)
-	a := e.create(t, owner, map[string]any{"title": "A", "phase": "open", "assignee": "dlg"}) // delegate 自己的事项
-	b := e.create(t, owner, map[string]any{"title": "B", "phase": "open"})
+	a := e.create(t, owner, map[string]any{"title": "A", "phase": "open", "assignee": "dlg"}) // 绑定 delegate 的事项
+	b := e.create(t, owner, map[string]any{"title": "B", "phase": "open"})                    // 他人的事项
 	call := func(id command.Identity, ev, cmd string, in any) (command.Result, error) {
 		raw, _ := json.Marshal(in)
 		return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: raw, Owner: "owner", Evidence: ev})
 	}
-	writes := map[string]any{
-		"item.create":     map[string]any{"kind": "task", "title": "x"},
-		"item.update":     map[string]any{"id": a, "title": "A2"},
-		"item.transition": map[string]any{"id": a, "to": "waiting", "waiting_on": map[string]any{"kind": "external", "ref": "x"}, "reason": "r"},
-		"item.relate":     map[string]any{"from": a, "to": b, "type": domain.RelRelates},
-	}
-	for cmd, in := range writes {
-		for _, ev := range []string{"", "  "} {
-			if _, err := call(delegate, ev, cmd, in); exit(err) != domain.ExitUsage {
-				t.Fatalf("%s without evidence %q: %v", cmd, ev, err)
+	event := func(r command.Result) domain.Event {
+		for _, ev := range e.events(t) {
+			if ev.Seq == r.Seqs[0] {
+				return ev
 			}
 		}
-		noOwner := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
-		if _, err := call(noOwner, "owner said so", cmd, in); exit(err) != domain.ExitUsage {
-			t.Fatalf("%s without on_behalf_of: %v", cmd, err)
+		t.Fatal("event not found")
+		return domain.Event{}
+	}
+	wait := map[string]any{"kind": "external", "ref": "x"}
+	first := map[string]map[string]any{ // 第一档：绑定的事项，以 proposed 新建
+		"item.create":     {"kind": "task", "title": "x", "phase": "proposed"},
+		"item.update":     {"id": a, "title": "A2"},
+		"item.transition": {"id": a, "to": "waiting", "waiting_on": wait, "reason": "r"},
+		"item.relate":     {"from": a, "to": b, "type": domain.RelRelates},
+	}
+	for cmd, in := range first {
+		r, err := call(delegate, "", cmd, in)
+		if err != nil {
+			t.Fatalf("%s on own work without evidence: %v", cmd, err)
 		}
+		if ev := event(r); ev.Actor.Principal != "dlg" || ev.Actor.OnBehalfOf != "" {
+			t.Fatalf("%s: tier one acts as the agent itself, got %+v", cmd, ev.Actor)
+		}
+	}
+	rejectedBefore := rejections(e.events(t))
+	second := map[string]map[string]any{ // 第二档：他人的事项，其他阶段新建
+		"item.create":     {"kind": "task", "title": "y", "phase": "open"},
+		"item.update":     {"id": b, "title": "B2"},
+		"item.transition": {"id": b, "to": "waiting", "waiting_on": wait, "reason": "r"},
+		"item.relate":     {"from": b, "to": a, "type": domain.RelRelates},
+	}
+	noSession := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	n := 0
+	for cmd, in := range second {
+		for _, c := range []struct {
+			id command.Identity
+			ev string
+		}{{delegate, ""}, {delegate, "  "}, {noSession, "owner said so"}} {
+			if _, err := call(c.id, c.ev, cmd, in); exit(err) != domain.ExitBasisRequired {
+				t.Fatalf("%s without full basis %q: %v", cmd, c.ev, err)
+			}
+			n++
+		}
+		r, err := call(delegate, "owner: go ahead", cmd, in)
+		if err != nil {
+			t.Fatalf("%s with evidence and session: %v", cmd, err)
+		}
+		if ev := event(r); ev.Evidence != "owner: go ahead" || ev.Actor.Principal != "dlg" || ev.Actor.OnBehalfOf != "owner" || ev.Actor.Session != "s1" {
+			t.Fatalf("%s event lost evidence, session or on_behalf_of: %+v", cmd, ev)
+		}
+	}
+	if got := rejections(e.events(t)) - rejectedBefore; got != n {
+		t.Fatalf("every 23 must record command.rejected: %d of %d", got, n)
+	}
+	if e.get(t, b).Title != "B2" {
+		t.Fatal("authorized write must take effect")
 	}
 	// 本人与 worker 不受影响：不带证据照常写。
 	if _, err := call(worker, "", "item.update", map[string]any{"id": a, "title": "A1"}); exit(err) != domain.ExitPermissionDenied {
-		t.Fatalf("worker on others' item stays denied, not an evidence error: %v", err)
+		t.Fatalf("worker on others' item stays denied: %v", err)
 	}
-	if _, err := call(owner, "", "item.update", writes["item.update"]); err != nil {
+	if _, err := call(owner, "", "item.update", second["item.update"]); err != nil {
 		t.Fatalf("owner update without evidence: %v", err)
-	}
-	if _, err := call(owner, "", "item.create", writes["item.create"]); err != nil {
-		t.Fatalf("owner create without evidence: %v", err)
-	}
-	for _, c := range []string{"item.update", "item.relate"} {
-		r, err := call(delegate, "owner: go ahead", c, writes[c])
-		if err != nil {
-			t.Fatalf("%s with evidence: %v", c, err)
-		}
-		var got *domain.Event
-		for _, ev := range e.events(t) {
-			if ev.Seq == r.Seqs[0] {
-				got = &ev
-			}
-		}
-		if got == nil || got.Evidence != "owner: go ahead" || got.Actor.Principal != "dlg" || got.Actor.OnBehalfOf != "owner" {
-			t.Fatalf("%s event lost evidence or operator: %+v", c, got)
-		}
-	}
-	if e.get(t, a).Title != "A2" {
-		t.Fatal("rejected writes must not change the item")
 	}
 }
 
