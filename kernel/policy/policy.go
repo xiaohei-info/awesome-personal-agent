@@ -174,6 +174,19 @@ var Module = store.Module{Name: "policy", Migrations: []store.Migration{{
 	doc TEXT NOT NULL,
 	at INTEGER NOT NULL
 );`,
+}, {
+	// 授权单（§6.13）：doc 是不可变内容，撤销状态是唯一会变的列。
+	Version: 2, Name: "create-policy-grant",
+	SQL: `CREATE TABLE policy_grant (
+	id TEXT PRIMARY KEY,
+	credential TEXT NOT NULL,
+	doc TEXT NOT NULL,
+	expires_at INTEGER NOT NULL,
+	created_at INTEGER NOT NULL,
+	revoked_at INTEGER NOT NULL DEFAULT 0,
+	revoked_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX policy_grant_credential ON policy_grant(credential);`,
 }}}
 
 func invalid(format string, a ...any) error {

@@ -10,6 +10,7 @@ const (
 	CodeWebOnly              Code = "web_only"               // 403 → 20
 	CodeExecutorNotAllowed   Code = "executor_not_allowed"   // 403 → 21
 	CodeRiskScreeningPending Code = "risk_screening_pending" // 403 → 22
+	CodeBasisRequired        Code = "basis_required"         // 403 → 23：替本人做决定的依据不足（§14.5）
 	CodeNotFound             Code = "not_found"              // 404 → 5
 	CodeConflict             Code = "conflict"               // 409 → 6
 	CodeInternal             Code = "internal"               // 其余 → 1
@@ -30,6 +31,7 @@ const (
 	ExitWebOnly            = 20
 	ExitExecutorNotAllowed = 21
 	ExitScreeningPending   = 22
+	ExitBasisRequired      = 23
 )
 
 var codeHTTP = map[Code]int{
@@ -39,6 +41,7 @@ var codeHTTP = map[Code]int{
 	CodeWebOnly:              403,
 	CodeExecutorNotAllowed:   403,
 	CodeRiskScreeningPending: 403,
+	CodeBasisRequired:        403,
 	CodeNotFound:             404,
 	CodeConflict:             409,
 	CodeInternal:             500,
@@ -51,6 +54,7 @@ var codeExit = map[Code]int{
 	CodeWebOnly:              ExitWebOnly,
 	CodeExecutorNotAllowed:   ExitExecutorNotAllowed,
 	CodeRiskScreeningPending: ExitScreeningPending,
+	CodeBasisRequired:        ExitBasisRequired,
 	CodeNotFound:             ExitNotFound,
 	CodeConflict:             ExitConflict,
 	CodeInternal:             ExitUnclassified,
@@ -72,7 +76,7 @@ func (c Code) ExitCode() int {
 	return ExitUnclassified
 }
 
-// CodeFromHTTP 由 HTTP 状态反推码类（403 无法区分 4/20/21/22，须由 code 字段决定，这里取 4）。
+// CodeFromHTTP 由 HTTP 状态反推码类（403 无法区分 4/20/21/22/23，须由 code 字段决定，这里取 4）。
 func CodeFromHTTP(status int) Code {
 	switch status {
 	case 400:

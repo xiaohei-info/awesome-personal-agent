@@ -35,6 +35,9 @@ var Module = store.Module{Name: "eventlog", Migrations: []store.Migration{{
 	tombstone INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX eventlog_event_object ON eventlog_event(object, seq);`,
+}, {
+	Version: 2, Name: "add-event-grant",
+	SQL: `ALTER TABLE eventlog_event ADD COLUMN grant_id TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Entry 是读出的事件；Tombstone 为真表示内容字段已被物理删除抹除。
@@ -98,10 +101,10 @@ func Append(tx *store.Tx, e domain.Event) (int64, error) {
 		}
 	}
 	if _, err := tx.Exec(`INSERT INTO eventlog_event
-		(type, object, actor, reason, payload, chain_depth, basis, resolved_via, evidence, at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(type, object, actor, reason, payload, chain_depth, basis, resolved_via, evidence, grant_id, at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.Type, e.Object, string(actor), e.Reason, string(e.Payload), int64(e.ChainDepth),
-		string(basis), e.ResolvedVia, e.Evidence, at.UnixNano()); err != nil {
+		string(basis), e.ResolvedVia, e.Evidence, e.Grant, at.UnixNano()); err != nil {
 		return 0, err
 	}
 	var seq int64
@@ -111,7 +114,7 @@ func Append(tx *store.Tx, e domain.Event) (int64, error) {
 	return seq, nil
 }
 
-const cols = "seq, type, object, actor, reason, payload, chain_depth, basis, resolved_via, evidence, at, tombstone"
+const cols = "seq, type, object, actor, reason, payload, chain_depth, basis, resolved_via, evidence, grant_id, at, tombstone"
 
 func queryRows(tx *store.Tx, each func(*store.Rows) error, sql string, args ...any) error {
 	r, err := tx.Query(sql, args...)
@@ -136,7 +139,7 @@ func collect(tx *store.Tx, sql string, args ...any) ([]Entry, error) {
 			depth, at, tomb    int64
 		)
 		if err := r.Scan(&e.Event.Seq, &e.Event.Type, &e.Event.Object, &actor, &e.Event.Reason, &payload,
-			&depth, &bs, &e.Event.ResolvedVia, &e.Event.Evidence, &at, &tomb); err != nil {
+			&depth, &bs, &e.Event.ResolvedVia, &e.Event.Evidence, &e.Event.Grant, &at, &tomb); err != nil {
 			return err
 		}
 		if err := json.Unmarshal([]byte(actor), &e.Event.Actor); err != nil {

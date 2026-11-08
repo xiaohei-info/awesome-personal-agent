@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apidecisions "github.com/xiaohei-info/awesome-personal-agent/api/decisions"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
+	apigrants "github.com/xiaohei-info/awesome-personal-agent/api/settings/grants"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
@@ -66,7 +67,11 @@ func newWorld(t *testing.T) *world {
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apiitems.Routes(x, st), apidecisions.Routes(x, "http://apa.example")}})
+	gr, err := apigrants.Mount(x, a, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apiitems.Routes(x, st), apidecisions.Routes(x, "http://apa.example"), gr}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,5 +363,57 @@ func TestAskWithDeadlineAndDefault(t *testing.T) {
 	}
 	if a := w.get(id).Ask; a == nil || a.DefaultOnTimeout != "A" || a.Deadline == nil || a.ResumeNote != "n" {
 		t.Fatalf("ask = %+v", a)
+	}
+}
+
+// 授权单（§14.5）：本人在 Web 签发后，delegate 凭据经 apa grant list 只读到自己名下有效的授权单；
+// 其他凭据为退出码 4，撤销后不再列出。
+func TestGrantListShowsOnlyOwnLiveGrants(t *testing.T) {
+	w := newWorld(t)
+	var d1, d2 auth.Credential
+	var s1 string
+	if err := w.st.Update(bg, func(tx *store.Tx) (err error) {
+		if d1, s1, err = w.auth.Issue(tx, auth.Spec{Kind: auth.Delegate}); err != nil {
+			return
+		}
+		d2, _, err = w.auth.Issue(tx, auth.Spec{Kind: auth.Delegate})
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	issue := func(cred string) string {
+		exp := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+		r := w.raw("POST", "/v1/settings/grants", `{"grantee":{"credential":"`+cred+`"},"scope":{"items":["it1"]},"actions":["decision.answer"],"expires_at":"`+exp+`"}`,
+			func(r *http.Request) { r.AddCookie(w.cookie); r.Header.Set(core.CSRFHeader, w.csrf) })
+		var g struct{ ID string }
+		if r.code != 201 || json.Unmarshal(r.body, &g) != nil {
+			t.Fatalf("issue: %d %s", r.code, r.body)
+		}
+		return g.ID
+	}
+	mine, _ := issue(d1.ID), issue(d2.ID)
+
+	r := w.apa(s1, "grant", "list")
+	var out struct{ Grants []policy.Grant }
+	if err := json.Unmarshal([]byte(r.out), &out); r.code != 0 || err != nil || len(out.Grants) != 1 || out.Grants[0].ID != mine ||
+		out.Grants[0].Actions[0] != "decision.answer" || out.Grants[0].ExpiresAt.IsZero() {
+		t.Fatalf("grant list: %+v (%v)", r, err)
+	}
+
+	for _, tok := range []string{w.token(auth.Worker, "wrk1"), w.token(auth.Observer, "")} {
+		if r := w.apa(tok, "grant", "list"); r.code != domain.ExitPermissionDenied {
+			t.Errorf("non-delegate: %+v", r)
+		}
+	}
+	if r := w.apa(s1, "grant"); r.code != domain.ExitUsage || !strings.Contains(errOf(t, r).Next, "usage: apa grant list") {
+		t.Errorf("no subcommand: %+v", r)
+	}
+	if r := w.apa(s1, "grant", "list", "extra"); r.code != domain.ExitUsage {
+		t.Errorf("extra arg: %+v", r)
+	}
+
+	w.raw("POST", "/v1/settings/grants/"+mine+"/revoke", `{}`, func(r *http.Request) { r.AddCookie(w.cookie); r.Header.Set(core.CSRFHeader, w.csrf) })
+	if r := w.apa(s1, "grant", "list"); r.code != 0 || !strings.Contains(r.out, `"grants": []`) && !strings.Contains(r.out, `"grants":[]`) {
+		t.Errorf("revoked grant must not be listed: %+v", r)
 	}
 }

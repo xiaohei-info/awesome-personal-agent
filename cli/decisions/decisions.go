@@ -1,4 +1,4 @@
-// Package decisions 是 apa 的决策与建议命令（附录 B.1、设计 §7.2、§14.5）：ask、decide、accept、dismiss。
+// Package decisions 是 apa 的决策与建议命令（附录 B.1、设计 §7.2、§14.5）：ask、decide、accept、dismiss、grant list。
 //
 // 本包只把命令行参数搬成 POST /v1/items/{id}/{ask|decide|accept|dismiss} 的请求体：
 // 授权（web_only 20、初筛未返回 22、运行身份 4）、代答证据与"只认第一次回答"（6）都由内核判定，
@@ -22,6 +22,7 @@ func init() {
 	client.Register("decide", decide)
 	client.Register("accept", accept)
 	client.Register("dismiss", dismiss)
+	client.Register("grant", grant)
 }
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
@@ -164,4 +165,18 @@ func dismiss(c *client.Ctx, args []string) error {
 		return err
 	}
 	return post(c, id, "dismiss", map[string]any{"reason": reason})
+}
+
+const grantUsage = "usage: apa grant list"
+
+// grant list 只读：列出该凭据名下未撤销、未过期的授权单。签发和撤销只在 Web，这里没有对应的写命令。
+func grant(c *client.Ctx, args []string) error {
+	if len(args) != 1 || args[0] != "list" {
+		return usage("apa grant takes the subcommand list", grantUsage)
+	}
+	var out any
+	if err := c.Do(context.Background(), "GET", "/grants", nil, &out); err != nil {
+		return err
+	}
+	return c.Print(out)
 }

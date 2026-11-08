@@ -108,6 +108,7 @@ func TestLedgerErrorContractMapping(t *testing.T) {
 		{CodeWebOnly, 403, 20},
 		{CodeExecutorNotAllowed, 403, 21},
 		{CodeRiskScreeningPending, 403, 22},
+		{CodeBasisRequired, 403, 23},
 		{CodeInternal, 500, 1},
 		{Code("never_registered"), 500, 1},
 	}
@@ -148,7 +149,7 @@ func TestEventSubscribeRegisteredTypes(t *testing.T) {
 	want := strings.Fields(`item.created item.updated item.phase_changed item.deadline_passed decision.requested decision.resolved
 delegation.created delegation.reported command.rejected material.revised material.revision_proposed
 guideline.activated project.updated project.allowed_executors_changed rule.mode_changed allowlist.changed
-policy.changed run.started run.finished source.failed health.alert`)
+policy.changed grant.issued grant.revoked run.started run.finished source.failed health.alert`)
 	if strings.Join(RegisteredEventTypes, " ") != strings.Join(want, " ") {
 		t.Fatalf("登记事件类型与附录 B.4 不一致: %v", RegisteredEventTypes)
 	}

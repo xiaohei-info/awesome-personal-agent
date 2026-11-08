@@ -55,6 +55,7 @@ type Event struct {
 	Basis       *Basis          `json:"basis,omitempty"`
 	ResolvedVia string          `json:"resolved_via,omitempty"`
 	Evidence    string          `json:"evidence,omitempty"`
+	Grant       string          `json:"grant,omitempty"` // 依据授权单写入时的授权单 id（§6.7、§14.5）
 	At          time.Time       `json:"at"`
 }
 
@@ -77,6 +78,8 @@ const (
 	EvRuleModeChanged                = "rule.mode_changed"
 	EvAllowlistChanged               = "allowlist.changed"
 	EvPolicyChanged                  = "policy.changed"
+	EvGrantIssued                    = "grant.issued"
+	EvGrantRevoked                   = "grant.revoked"
 	EvRunStarted                     = "run.started"
 	EvRunFinished                    = "run.finished"
 	EvSourceFailed                   = "source.failed"
@@ -91,7 +94,7 @@ var RegisteredEventTypes = []string{
 	EvCommandRejected,
 	EvMaterialRevised, EvMaterialRevisionProposed, EvGuidelineActivated,
 	EvProjectUpdated, EvProjectAllowedExecutorsChanged,
-	EvRuleModeChanged, EvAllowlistChanged, EvPolicyChanged,
+	EvRuleModeChanged, EvAllowlistChanged, EvPolicyChanged, EvGrantIssued, EvGrantRevoked,
 	EvRunStarted, EvRunFinished, EvSourceFailed, EvHealthAlert,
 }
 

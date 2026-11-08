@@ -121,13 +121,17 @@ type AskKernelState struct {
 	ScreeningPending bool   `json:"screening_pending,omitempty"` // web_only 初筛未返回时为真
 }
 
+// ResolvedViaGrant 是依据授权单代答的决定入口（§14.5）；与渠道名共用 Resolution.ResolvedVia，渠道不能取这个名字。
+const ResolvedViaGrant = "grant"
+
 // Resolution 是决定结果。
 type Resolution struct {
 	Choice      string    `json:"choice,omitempty"`
 	Text        string    `json:"text,omitempty"`
-	ResolvedVia string    `json:"resolved_via"` // web、chat、渠道名、timeout
+	ResolvedVia string    `json:"resolved_via"` // web、chat、grant、渠道名、timeout
 	AnsweredBy  string    `json:"answered_by,omitempty"`
 	Evidence    string    `json:"evidence,omitempty"`
+	Grant       string    `json:"grant,omitempty"` // resolved_via 为 grant 时的授权单 id
 	ResolvedAt  time.Time `json:"resolved_at"`
 }
 
