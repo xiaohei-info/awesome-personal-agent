@@ -156,7 +156,10 @@ func (e *env) bearer(kind auth.Kind) func(*http.Request) {
 	}); err != nil {
 		e.t.Fatal(err)
 	}
-	return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
+	return func(r *http.Request) {
+		r.Header.Set("Authorization", "Bearer "+secret)
+		r.Header.Set("X-APA-Session", "s1")
+	}
 }
 
 func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {

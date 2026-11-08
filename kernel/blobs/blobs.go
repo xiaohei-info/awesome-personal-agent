@@ -91,7 +91,7 @@ type putIn struct {
 func Register(x *command.Executor, dir string) error {
 	noObject := func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil }
 	if err := x.Register(command.Spec{
-		Name: "blob.put", Action: authz.ActionReviseMaterial, Proxy: true, Object: noObject,
+		Name: "blob.put", Action: authz.ActionReviseMaterial, Tier: authz.TierWork, Object: noObject,
 		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 			var p putIn
 			if err := json.Unmarshal(in, &p); err != nil {

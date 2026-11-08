@@ -118,16 +118,27 @@ func (k *kernel) must(args ...string) result {
 	return r
 }
 
+// mustAsOwner 建项目、加 repos 是替本人做决定的第二档：除了本人原话（apaTok 已带）还要会话引用。
+// 不放进 apa：APA_SESSION 会让 context 记游标，改变那些测试要看的完整投影。
+func (k *kernel) mustAsOwner(args ...string) result {
+	k.t.Helper()
+	r := k.apaTok(k.tok, map[string]string{"APA_SESSION": "setup"}, args...)
+	if r.code != 0 {
+		k.t.Fatalf("%v: %+v", args, r)
+	}
+	return r
+}
+
 func (k *kernel) project(name, host, dir string) string {
 	k.t.Helper()
 	var p domain.Project
-	if err := json.Unmarshal([]byte(k.must("project", "create", "--name", name).out), &p); err != nil {
+	if err := json.Unmarshal([]byte(k.mustAsOwner("project", "create", "--name", name).out), &p); err != nil {
 		k.t.Fatal(err)
 	}
 	if dir != "" {
 		remote := "https://example.com/" + name + ".git"
-		k.must("project", "repos", "add", p.ID, "--remote", remote)
-		k.must("project", "repos", "add", p.ID, "--remote", remote, "--host", host, "--path", dir)
+		k.mustAsOwner("project", "repos", "add", p.ID, "--remote", remote)
+		k.mustAsOwner("project", "repos", "add", p.ID, "--remote", remote, "--host", host, "--path", dir)
 	}
 	return p.ID
 }

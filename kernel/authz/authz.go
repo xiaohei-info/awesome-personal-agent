@@ -45,6 +45,16 @@ const (
 	ActionRunnerTask      Action = "runner_task"
 )
 
+// Tier 是 delegate 凭据代理写入的档位（§14.5）。第三档（高风险与设置类）由动作本身判定，不在这里。
+type Tier int
+
+const (
+	TierNone   Tier = iota // 不是代理写命令
+	TierWork               // 一：agent 自己的工作，凭身份和对象绑定放行
+	TierDecide             // 二：替本人做决定，要本人原话加会话引用
+	TierWords              // 二中只接受本人原话的管理命令（项目、来源、能力包实例）
+)
+
 // Object 是动作的对象。全部字段来自账本或内核，没有任何字段可由事项创建者声明来降低门槛。
 type Object struct {
 	ID       string
@@ -76,8 +86,8 @@ type Request struct {
 	Level    Level
 	Action   Action
 	Object   Object
-	Evidence string // delegate 代答与改任意事项必须附本人原话与会话引用
-	Proxy    bool   // 命令登记为代理写操作：delegate 调用时无论动作都须附 on_behalf_of 与证据（§14.3）
+	Evidence string // 第二档的本人原话；会话引用取 Actor.Session
+	Tier     Tier   // 命令管线据命令登记与对象绑定定出的代理写档位（§14.5）；零值不是代理写
 	Owner    string // 本人的执行者 id，指派给本人始终允许
 	WebURL   string // 对象在 Web 的链接，随 20/22 拒绝返回
 	Channel  string // ActionChannelAnswer：渠道
@@ -146,9 +156,6 @@ func Decide(p policy.Policy, r Request) Decision {
 		d = byLevel(r, own(r), true, r.Object.InRunScope)
 	case ActionEditAnyItem:
 		d = byLevel(r, false, true, false)
-		if d.Verdict == Allow && r.Level == LevelDelegate {
-			d = needEvidence(r)
-		}
 	case ActionAnswerDecision:
 		d = answerDecision(p, r)
 	case ActionManageProject, ActionManageSource:
@@ -163,8 +170,8 @@ func Decide(p policy.Policy, r Request) Decision {
 	default:
 		return deny(domain.CodeInvalidRequest, "unknown action "+string(r.Action), "see apa guide")
 	}
-	if d.Verdict == Allow && r.Proxy && r.Level == LevelDelegate {
-		d = needEvidence(r)
+	if d.Verdict == Allow && r.Level == LevelDelegate && TierOf(r) >= TierDecide {
+		d = needBasis(r)
 	}
 	if d.Verdict != Allow {
 		return d
@@ -203,11 +210,29 @@ func byLevel(r Request, worker, delegate, run bool) Decision {
 	return allow
 }
 
-func needEvidence(r Request) Decision {
-	if strings.TrimSpace(r.Evidence) == "" || r.Actor.OnBehalfOf == "" {
-		return deny(domain.CodeInvalidRequest, "delegate actions must carry on_behalf_of and the owner's own words as evidence", "retry with --evidence")
+// TierOf 是本次判定实际适用的档位：代答与改他人事项的动作本身属于第二档，不论命令登记了什么，
+// 所以绑定的执行者借 item.transition 把 proposed、needs_input 事项推出去也要本人原话。
+func TierOf(r Request) Tier {
+	if r.Action == ActionAnswerDecision || r.Action == ActionEditAnyItem {
+		return max(r.Tier, TierDecide)
+	}
+	return r.Tier
+}
+
+// needBasis 校验第二档的依据：本人原话与会话引用都非空（内核不能校验真伪，§21.2）。
+func needBasis(r Request) Decision {
+	switch {
+	case strings.TrimSpace(r.Evidence) == "":
+		return basisMissing(r, "this action decides for the owner and needs the owner's own words as evidence")
+	// 会话引用是 harness 里的 agent 才有的；规则与内核服务（system）的依据是自己带的证据与规则登记。
+	case r.Actor.Type == domain.ActorAgent && strings.TrimSpace(r.Actor.Session) == "":
+		return basisMissing(r, "the owner's own words need a session reference (APA_SESSION)")
 	}
 	return allow
+}
+
+func basisMissing(r Request, why string) Decision {
+	return Decision{Verdict: Deny, Err: withLink(domain.CodeBasisRequired, why, "do not retry with other wording; give the Web link to the owner and wait", r.WebURL)}
 }
 
 func needWeb(r Request, why string) Decision {
@@ -227,7 +252,7 @@ func answerDecision(p policy.Policy, r Request) Decision {
 	if r.Object.ScreeningPending {
 		return Decision{Verdict: Deny, Err: withLink(domain.CodeRiskScreeningPending, "web_only screening has not returned; delegate answers are not accepted yet", "do not treat the answer as in effect; retry later or hand the Web link to the owner", r.WebURL)}
 	}
-	return needEvidence(r)
+	return allow
 }
 
 func decideChannel(p policy.Policy, r Request) Decision {
@@ -280,14 +305,14 @@ func ForwardAllowed(p policy.Policy, source, sender string, verified bool) bool 
 	return sender != "" && verified && contains(p.ForwardAllowlist[source], sender)
 }
 
-// RejectionEvent 构造应记账的拒绝事件（§6.7）：退出码 20、21、22，以及运行身份被拒绝的决策命令、回答人不在白名单的渠道回答。
+// RejectionEvent 构造应记账的拒绝事件（§6.7）：退出码 20、21、22、23，以及运行身份被拒绝的决策命令、回答人不在白名单的渠道回答。
 // 判定本身无副作用，由调用方在自己的事务里追加。
 func RejectionEvent(r Request, d Decision) (domain.Event, bool) {
 	if d.Err == nil {
 		return domain.Event{}, false
 	}
 	switch d.ExitCode() {
-	case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending:
+	case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending, domain.ExitBasisRequired:
 	case domain.ExitPermissionDenied:
 		if (r.Level != LevelRun || r.Action != ActionAnswerDecision) && r.Action != ActionChannelAnswer {
 			return domain.Event{}, false

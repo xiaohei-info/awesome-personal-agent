@@ -215,7 +215,7 @@ func (e *env) issue(name string, s auth.Spec) {
 }
 
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
@@ -676,4 +676,41 @@ func TestNewRequiresStoreAndExec(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("New without Store and Exec must fail")
 	}
+}
+
+// §14.5 第一档：发起委派的 delegate 凭据交回自己派出去的活的挂靠消息不要本人原话，Event 不带 on_behalf_of；
+// 别的 delegate 凭据绑定不成立，按第二档，缺依据为 23、消息状态不变。
+func TestHandbackBindsToDelegationInitiator(t *testing.T) {
+	e := newEnv(t)
+	e.issue("DEL2", auth.Spec{Kind: auth.Delegate})
+	child := e.delegated() // 由 DEL 发起
+	e.report("WRK", child, "progress", pr1, "")
+	e.emit(comment("c1", pr1))
+	id := e.msg("c1").ID
+	bare := func(who string) (command.Result, error) {
+		b, _ := json.Marshal(map[string]string{"message": id, "reason": "不归我"})
+		return e.x.Do(bg, command.Request{Identity: e.as(who), Command: CmdHandback, Input: b, Owner: "owner"})
+	}
+	if _, err := bare("DEL2"); exitOf(err) != domain.ExitBasisRequired {
+		t.Fatalf("foreign delegate without words: %v", err)
+	}
+	if got := e.msg("c1").AttachState; got != runner.AttachPending {
+		t.Fatalf("rejected handback changed the state to %s", got)
+	}
+	r, err := bare("DEL")
+	if err != nil {
+		t.Fatalf("initiator handback without words: %v", err)
+	}
+	var ev domain.Event
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.Read(tx, r.Seqs[0]-1, 1)
+		if len(es) > 0 {
+			ev = es[0].Event
+		}
+		return err
+	})
+	if ev.Seq != r.Seqs[0] || ev.Actor.OnBehalfOf != "" || ev.Actor.Principal == "" {
+		t.Fatalf("tier one event must not carry on_behalf_of: %+v", ev)
+	}
+	e.noErrs()
 }

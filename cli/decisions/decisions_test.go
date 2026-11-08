@@ -168,7 +168,7 @@ type result struct {
 func (w *world) apa(token string, args ...string) result {
 	w.t.Helper()
 	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": w.ts.URL, "APA_TOKEN": token, "APA_HOME": w.t.TempDir()}
+	vars := map[string]string{"APA_URL": w.ts.URL, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_HOME": w.t.TempDir()}
 	code := client.Main(args, client.Env{Getenv: func(k string) string { return vars[k] }, UserHome: w.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return result{code, out.String(), errb.String()}
@@ -206,9 +206,9 @@ func TestAskDecideAndFirstAnswerWins(t *testing.T) {
 	if r := w.apa(wrk, "ask", id, "--question", "again?"); r.code != 6 {
 		t.Fatalf("second ask want 6: %+v", r)
 	}
-	// 代答没有本人原话：用法错误 2，状态不变。
-	if r := w.apa(dlg, "decide", id, "--option", "A"); r.code != 2 {
-		t.Fatalf("decide without evidence want 2: %+v", r)
+	// 代答没有本人原话：退出码 23，状态不变。
+	if r := w.apa(dlg, "decide", id, "--option", "A"); r.code != 23 {
+		t.Fatalf("decide without evidence want 23: %+v", r)
 	}
 	r := w.apa(dlg, "decide", id, "--option", "A", "--evidence", "owner: yes ship it")
 	if r.code != 0 || !strings.Contains(r.out, `"id":"`+id+`"`) {
@@ -309,8 +309,8 @@ func TestAcceptDismissProposal(t *testing.T) {
 	wrk, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, "")
 	a := w.item(`{"kind":"task","title":"a"}`)
 	d := w.item(`{"kind":"task","title":"d"}`)
-	if r := w.apa(dlg, "accept", a); r.code != 2 {
-		t.Fatalf("accept without evidence want 2: %+v", r)
+	if r := w.apa(dlg, "accept", a); r.code != 23 {
+		t.Fatalf("accept without evidence want 23: %+v", r)
 	}
 	if r := w.apa(wrk, "accept", a, "--evidence", "x"); r.code != 4 {
 		t.Fatalf("worker accept want 4: %+v", r)

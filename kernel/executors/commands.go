@@ -42,7 +42,7 @@ type Options struct {
 func Register(x *command.Executor, o Options) error {
 	for _, s := range []command.Spec{
 		{Name: "executor.list", Action: authz.ActionRead, Object: noObject, Apply: o.list},
-		{Name: "executor.declare", Action: authz.ActionSubmitPlugin, Proxy: true, Object: declObject, Apply: apply(declare)},
+		{Name: "executor.declare", Action: authz.ActionSubmitPlugin, Tier: authz.TierWork, Object: declObject, Apply: apply(declare)},
 		{Name: "executor.pending", Action: authz.ActionSubmitPlugin, Object: noObject, Apply: pending},
 		{Name: "executor.confirm", Action: authz.ActionChangeSettings, Object: refObject, Apply: apply2(confirm)},
 		{Name: "executor.reject", Action: authz.ActionChangeSettings, Object: refObject, Apply: apply2(reject)},

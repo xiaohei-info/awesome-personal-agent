@@ -59,7 +59,7 @@ func (e *env) bearer(t *testing.T, k auth.Kind) command.Bearer {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return command.Bearer{Auth: e.au, Secret: secret, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Session: "s1"}, OnBehalfOf: "owner"}
 }
 
 func js(v any) json.RawMessage { b, _ := json.Marshal(v); return b }

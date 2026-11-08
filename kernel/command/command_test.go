@@ -639,3 +639,77 @@ func TestBumpSharesVersionSequence(t *testing.T) {
 		t.Fatalf("pipeline continues after a bump: %d", res.Version)
 	}
 }
+
+// §14.5：档位只在管线一处判定。命令只声明 Tier，对象绑定（Bound，据账本）把第二档降到第一档；
+// 第一档的 Event 不带 on_behalf_of，第二档要原话加会话，缺失为 23 并记 command.rejected。
+func TestProxyTiersAreDecidedInThePipeline(t *testing.T) {
+	e := setup(t)
+	object := func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
+		n := parse(in)
+		return authz.Object{ID: n.ID, Assignee: n.Assign}, nil
+	}
+	apply := func(c *Ctx) (any, error) {
+		_, err := c.Emit(domain.Event{Type: domain.EvItemUpdated, Object: c.Object.ID, Payload: json.RawMessage(`{}`), Evidence: c.Evidence})
+		return nil, err
+	}
+	for _, s := range []Spec{
+		{Name: "tier.work", Action: authz.ActionUpdateOwn, Tier: authz.TierWork, Object: object, Apply: apply},
+		{Name: "tier.decide", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Object: object, Apply: apply},
+		{Name: "tier.bound", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Object: object, Apply: apply,
+			Bound: func(_ *store.Tx, c Caller, o authz.Object, _ json.RawMessage) (bool, error) {
+				return o.Assignee == c.Actor.Principal, nil
+			}},
+	} {
+		if err := e.x.Register(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tier, ok := e.x.Tier("tier.bound"); !ok || tier != authz.TierDecide {
+		t.Fatalf("declared tier = %v %v", tier, ok)
+	}
+	c := e.token(t, auth.Spec{Kind: auth.Delegate})
+	me := Bearer{Auth: e.au, Secret: c.Label, Origin: auth.Origin{Session: "s1"}, OnBehalfOf: "owner"}
+	noSession := Bearer{Auth: e.au, Secret: c.Label, OnBehalfOf: "owner"}
+	lastActor := func() domain.Actor { es := e.events(t); return es[len(es)-1].Event.Actor }
+	do := func(id Identity, cmd, ev string, n noteIn) error {
+		_, err := e.x.Do(bg, Request{Identity: id, Command: cmd, Input: in(n), Evidence: ev})
+		return err
+	}
+
+	// 第一档：不要原话，actor 是 agent 本身。
+	if err := do(me, "tier.work", "", noteIn{ID: "a"}); err != nil || lastActor().OnBehalfOf != "" {
+		t.Fatalf("tier one: %v %+v", err, lastActor())
+	}
+	// 第二档：缺原话、缺会话都是 23，各记一条 command.rejected，不执行。
+	before, applied := len(e.events(t)), e.applied
+	for _, id := range []Identity{me, noSession} {
+		ev := ""
+		if id == Identity(noSession) {
+			ev = "owner: ok"
+		}
+		if err := do(id, "tier.decide", ev, noteIn{ID: "b"}); exit(err) != domain.ExitBasisRequired {
+			t.Fatalf("tier two without full basis: %v", err)
+		}
+	}
+	rej := e.events(t)[before:]
+	if len(rej) != 2 || rej[0].Event.Type != domain.EvCommandRejected || rej[0].Event.Object != "b" || e.applied != applied {
+		t.Fatalf("rejections = %+v", rej)
+	}
+	if err := do(me, "tier.decide", "owner: ok", noteIn{ID: "b"}); err != nil {
+		t.Fatalf("tier two with words and session: %v", err)
+	}
+	if a := lastActor(); a.OnBehalfOf != "owner" || a.Session != "s1" {
+		t.Fatalf("tier two actor = %+v", a)
+	}
+	// 绑定降档：assignee 即该凭据时按第一档；别人的事项仍按第二档。
+	if err := do(me, "tier.bound", "", noteIn{ID: "c", Assign: c.ID}); err != nil || lastActor().OnBehalfOf != "" {
+		t.Fatalf("bound: %v %+v", err, lastActor())
+	}
+	if err := do(me, "tier.bound", "", noteIn{ID: "d", Assign: "someone"}); exit(err) != domain.ExitBasisRequired {
+		t.Fatalf("unbound: %v", err)
+	}
+	// 绑定只来自账本：输入里自称不算（assignee 不等于凭据）。
+	if err := do(me, "tier.bound", "", noteIn{ID: "e", Assign: "owner"}); exit(err) != domain.ExitBasisRequired {
+		t.Fatalf("claimed binding: %v", err)
+	}
+}

@@ -158,6 +158,7 @@ func (e *env) doBytes(who, method, path string, body []byte, hdr ...string) *htt
 		req.Header.Set(core.CSRFHeader, e.csrf)
 	default:
 		req.Header.Set("Authorization", "Bearer "+e.sec[who])
+		req.Header.Set("X-APA-Session", "s1")
 	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
@@ -278,7 +279,7 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 	}
 	confirm := "/v1/revisions/" + p1.Revision + "/confirm"
 	want(t, e.do("wrk", "POST", confirm, `{}`), 403, "permission_denied")
-	want(t, e.do("dlg", "POST", confirm, `{}`), 400, "invalid_request") // delegate 必须附本人原话
+	want(t, e.do("dlg", "POST", confirm, `{}`), 403, "basis_required") // 第二档：delegate 必须附本人原话
 	want(t, e.do("dlg", "POST", confirm, `{}`, core.EvidenceHeader, "owner: yes, adopt the design"), 200, "")
 	want(t, e.do("web", "POST", confirm, `{}`), 409, "conflict")
 
@@ -488,7 +489,7 @@ func TestHostedMaterial(t *testing.T) {
 	if k1.Body.String() != k2.Body.String() {
 		t.Fatalf("replay must return the first parent and child: %s vs %s", k1.Body, k2.Body)
 	}
-	want(t, e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"no words"}`), 400, "invalid_request")
+	want(t, e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"no words"}`), 403, "basis_required")
 	rec = e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"by delegate"}`, core.EvidenceHeader, "owner: please update the design doc")
 	want(t, rec, 201, "")
 

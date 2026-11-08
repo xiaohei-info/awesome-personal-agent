@@ -265,6 +265,6 @@ func decodeError(status int, data []byte) error {
 
 var knownCodes = map[domain.Code]struct{}{
 	domain.CodeInvalidRequest: {}, domain.CodeUnauthenticated: {}, domain.CodePermissionDenied: {},
-	domain.CodeWebOnly: {}, domain.CodeExecutorNotAllowed: {}, domain.CodeRiskScreeningPending: {},
+	domain.CodeWebOnly: {}, domain.CodeExecutorNotAllowed: {}, domain.CodeRiskScreeningPending: {}, domain.CodeBasisRequired: {},
 	domain.CodeNotFound: {}, domain.CodeConflict: {}, domain.CodeInternal: {},
 }

@@ -237,15 +237,41 @@ func (e *env) now() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UT
 
 func asErr(err error, de **domain.Error) bool { return errors.As(err, de) }
 
-// api 以名为 name 的 Bearer 凭据请求 HTTP；evidence 非空时带 X-APA-Evidence。
+// api 以名为 name 的 Bearer 凭据请求 HTTP；evidence 非空时带 X-APA-Evidence。不带会话引用。
 func (e *env) api(name, method, path, body, evidence string) *httptest.ResponseRecorder {
+	return e.apiIn(name, "", method, path, body, evidence)
+}
+
+// apiIn 同 api，另带会话引用 X-APA-Session（第二档的本人原话要与它同时携带）。
+func (e *env) apiIn(name, session, method, path, body, evidence string) *httptest.ResponseRecorder {
 	return e.http(method, path, body, func(r *http.Request) {
 		bearer(e.secret[name])(r)
 		if evidence != "" {
 			r.Header.Set(core.EvidenceHeader, evidence)
 		}
+		if session != "" {
+			r.Header.Set("X-APA-Session", session)
+		}
 	})
 }
+
+// principal 是凭据在账本里的操作者标识：事项的 assignee 等于它，就是该凭据"绑定"的事项。
+func (e *env) principal(name string) string {
+	e.t.Helper()
+	var p string
+	err := e.st.View(bg, func(tx *store.Tx) error {
+		c, err := e.as(name).Authenticate(tx)
+		p = c.Actor.Principal
+		return err
+	})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return p
+}
+
+// rejected 是账本里的 command.rejected 事件数。
+func (e *env) rejected() int { return len(e.events(domain.EvCommandRejected)) }
 
 // wantReject 断言响应是 403/400 等拒绝，错误体含 code、why、next，且退出码为 want。
 func wantReject(t *testing.T, rec *httptest.ResponseRecorder, want int) domain.Error {

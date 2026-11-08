@@ -121,7 +121,7 @@ func (r run) json(t *testing.T) map[string]any {
 func (k *kernel) apa(kind auth.Kind, args ...string) run {
 	k.t.Helper()
 	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_HOME": k.t.TempDir()}
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_SESSION": "s1", "APA_HOME": k.t.TempDir()}
 	code := client.Main(args, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return run{code, out.String(), errb.String()}
@@ -280,7 +280,7 @@ func TestRelateAndListFilters(t *testing.T) {
 	}
 }
 
-// delegate 经 CLI 改标题与建关系：缺 --evidence 退出码 2、账本不变；带了则 Event 记证据与 on_behalf_of。
+// delegate 经 CLI 改他人事项的标题与建关系是第二档：缺 --evidence 退出码 23、账本不变；带了则 Event 记证据与 on_behalf_of。
 func TestDelegateUpdateAndRelateCarryEvidence(t *testing.T) {
 	k := newKernel(t)
 	a, b := k.openItem(), k.openItem()
@@ -288,7 +288,7 @@ func TestDelegateUpdateAndRelateCarryEvidence(t *testing.T) {
 		{"item", "update", a, "--title", "new", "--reason", "r"},
 		{"item", "relate", a, "--to", b, "--type", "relates", "--reason", "r"},
 	} {
-		if r := k.apa(auth.Delegate, args...); r.code != 2 || k.item(a)["title"] != "t" {
+		if r := k.apa(auth.Delegate, args...); r.code != 23 || k.item(a)["title"] != "t" {
 			t.Fatalf("%v without evidence: %+v", args, r)
 		}
 	}
@@ -478,11 +478,11 @@ func TestUpdateWithoutChangesIsRejectedByKernel(t *testing.T) {
 	}
 }
 
-// delegate 不带本人原话时被内核拒绝（2）；带上后同一动作成功——on_behalf_of 由 API 层补齐。
+// delegate 改他人的事项不带本人原话时被内核拒绝（23）；带上后同一动作成功——on_behalf_of 由 API 层补齐。
 func TestDelegateNeedsEvidence(t *testing.T) {
 	k := newKernel(t)
 	id := k.openItem(map[string]any{"assignee": "other-host.cli"})
-	if r := k.apa(auth.Delegate, "item", "update", id, "--title", "x", "--reason", "r"); r.code != 2 {
+	if r := k.apa(auth.Delegate, "item", "update", id, "--title", "x", "--reason", "r"); r.code != 23 {
 		t.Fatalf("delegate without evidence: %+v", r)
 	}
 	k.ok(auth.Delegate, "item", "update", id, "--title", "x", "--reason", "r", "--evidence", "owner said so")

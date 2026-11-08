@@ -70,8 +70,8 @@ type Bearer struct {
 	Auth   *auth.Auth
 	Secret string
 	Origin auth.Origin
-	// OnBehalfOf 是传输层为 delegate 凭据声明的本人：Bearer 认证只知道凭据，不知道替谁说话，
-	// 而代理操作（§14.3）要求声明替本人行事并附本人原话。
+	// OnBehalfOf 是传输层为 delegate 凭据声明的本人：Bearer 认证只知道凭据，不知道替谁说话。
+	// 管线只在第二档（替本人做决定，§14.5）保留它；第一档是 agent 自己的工作，Event 不带。
 	OnBehalfOf string
 }
 
@@ -148,7 +148,7 @@ type Ctx struct {
 	Object     authz.Object
 	ChainDepth int
 	Basis      *domain.Basis
-	Evidence   string // 请求携带的本人原话与会话引用（已由授权校验过存在）
+	Evidence   string // 请求携带的本人原话（第二档已由授权校验过存在；会话引用在 Caller.Actor.Session）
 	now        func() time.Time
 	seqs       []int64
 	events     []domain.Event
@@ -191,9 +191,11 @@ type Spec struct {
 	// ChannelAnswer 非空时（ActionChannelAnswer），管线用返回的渠道与回答人填授权请求以查回答人白名单，
 	// webURL 随 web_only 拒绝返回；渠道与回答人只能据账本与凭据得出，不来自对象之外的声明。
 	ChannelAnswer func(tx *store.Tx, c Caller, in json.RawMessage) (channel, sender, webURL string, err error)
-	// Proxy 为真时，delegate 调用须附 on_behalf_of 与证据，缺失按 invalid_request 拒绝（§14.3）。
-	// 规则只在管线判定一处，登记命令只声明自己是不是代理写操作。
-	Proxy bool
+	// Tier 声明命令的代理写档位（§14.5、附录 B.1）；零值不是代理写命令。判定只在管线一处，命令体内不重复。
+	Tier authz.Tier
+	// Bound 非空时，delegate 调用满足它则按第一档（agent 自己的工作）：对象绑定只据账本与凭据得出。
+	// 不满足时按 Tier。Tier 为第二档的命令用它声明"绑定时降到第一档"。
+	Bound func(tx *store.Tx, c Caller, o authz.Object, in json.RawMessage) (bool, error)
 	// RequireVersion 为真时必须带 ExpectVersion。
 	RequireVersion bool
 	// Kinds 是允许调用的 ext/webhook 凭据种类；默认这两类凭据不能调用。
@@ -251,6 +253,14 @@ func (x *Executor) Register(s Spec) error {
 	}
 	x.specs[s.Name] = s
 	return nil
+}
+
+// Tier 返回已登记命令声明的代理写档位，供契约测试对照附录 B.1 的清单。
+func (x *Executor) Tier(name string) (authz.Tier, bool) {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	s, ok := x.specs[name]
+	return s.Tier, ok
 }
 
 // Store 返回执行器所用的账本，供只持有执行器的路由读取。
@@ -421,21 +431,38 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 			webURL = w
 		}
 	}
+	tier := spec.Tier
+	if spec.Bound != nil && caller.Level == authz.LevelDelegate {
+		if bound, err := spec.Bound(tx, caller, obj, req.Input); err != nil {
+			return Result{}, Commit{}, err
+		} else if bound {
+			tier = authz.TierWork
+		}
+	}
+	decided := authz.TierNone
 	for _, act := range actions {
 		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
-			Evidence: req.Evidence, Proxy: spec.Proxy, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender}
+			Evidence: req.Evidence, Tier: tier, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender}
 		d := authz.Decide(pol, ar)
 		if d.Err == nil {
+			decided = max(decided, authz.TierOf(ar))
 			continue
 		}
 		if ev, ok := authz.RejectionEvent(ar, d); ok {
 			ev.At = x.now()
+			if ev.Object == "" { // 新建类命令没有对象：拒绝事件记在命令名下
+				ev.Object = spec.Name
+			}
 			if caller.Actor.Via == domain.ViaRule {
 				ev.Basis = &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID}
 			}
 			return Result{}, Commit{}, &rejected{err: d.Err, ev: ev}
 		}
 		return Result{}, Commit{}, d.Err
+	}
+	// 第一档的 Event 不带 on_behalf_of（§14.5）：Bearer 认证只知道凭据，替本人说话要由第二档的依据来换。
+	if caller.Level == authz.LevelDelegate && caller.Actor.Type == domain.ActorAgent && decided < authz.TierDecide {
+		caller.Actor.OnBehalfOf = ""
 	}
 	// 3 校验：幂等 → 乐观版本 → 命令自身约束
 	hash := sha256.Sum256(req.Input)

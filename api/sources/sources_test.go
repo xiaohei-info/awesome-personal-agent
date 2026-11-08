@@ -153,6 +153,7 @@ func (e *env) do(secret, method, path, body string, hdr ...string) resp {
 	req.Header.Set(core.EvidenceHeader, "owner: go ahead") // delegate 代理写需要证据；其他凭据不读
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
+		req.Header.Set("X-APA-Session", "s1")
 	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
