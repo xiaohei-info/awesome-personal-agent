@@ -192,3 +192,47 @@ def test_material_commit_revision_of_existing_id(tools, apa):
 def test_material_commit_rejects_incomplete_calls_without_running_apa(tools, apa, args, why):
     r = json.loads(tools["apa_material_commit"](args, session_id="s"))
     assert r["ok"] is False and why in r["error"] and not (apa / "log").exists()
+
+
+TIER2 = ["apa_decide", "apa_accept", "apa_dismiss", "apa_item_update"]
+TIER1 = ["apa_propose", "apa_ask", "apa_delegate", "apa_report", "apa_declare_executors", "apa_executors", "apa_material_commit"]
+
+
+@pytest.fixture
+def schemas():
+    ctx = Ctx()
+    load_tools().register(ctx)
+    return {n: s for n, (s, _) in ctx.tools.items()}
+
+
+@pytest.mark.parametrize("tool", TIER2)
+def test_second_tier_tools_offer_optional_evidence_and_grant(schemas, tool):
+    sc = schemas[tool]
+    assert {"evidence", "grant"} <= set(sc["parameters"]["properties"])
+    assert not {"evidence", "grant"} & set(sc["parameters"]["required"])
+    assert "this turn" in sc["parameters"]["properties"]["evidence"]["description"]
+    assert "never" in sc["parameters"]["properties"]["evidence"]["description"].lower()
+
+
+@pytest.mark.parametrize("tool", TIER1)
+def test_first_tier_tools_have_no_evidence_or_grant(schemas, tool):
+    assert not {"evidence", "grant"} & set(schemas[tool]["parameters"]["properties"])
+
+
+@pytest.mark.parametrize("tool,args,argv", [
+    ("apa_decide", {"id": "i", "option": "B", "grant": "g1"}, ["decide", "i", "--option", "B", "--grant", "g1"]),
+    ("apa_accept", {"id": "i", "grant": "g1"}, ["accept", "i", "--grant", "g1"]),
+    ("apa_dismiss", {"id": "i", "grant": "g1", "reason": "dup"}, ["dismiss", "i", "--reason", "dup", "--grant", "g1"]),
+    ("apa_item_update", {"id": "i", "reason": "r", "grant": "g1"}, ["item", "update", "i", "--reason", "r", "--grant", "g1"]),
+    ("apa_item_update", {"id": "i", "reason": "r", "evidence": "原话"}, ["item", "update", "i", "--reason", "r", "--evidence", "原话"]),
+])
+def test_second_tier_passes_grant_and_evidence_through_with_session(tools, apa, tool, args, argv):
+    tools[tool](args, session_id="s7")
+    assert calls(apa) == [{"argv": argv, "session": "s7"}]
+    assert (apa / "log.harness").read_text().split() == ["hermes"]
+
+
+def test_grant_refusal_exit_23_is_exposed(tools, apa, monkeypatch):
+    monkeypatch.setenv("FAKE_EXIT", "23")
+    r = json.loads(tools["apa_decide"]({"id": "i", "option": "B", "grant": "g"}, session_id="s"))
+    assert r["exit_code"] == 23 and r["ok"] is False

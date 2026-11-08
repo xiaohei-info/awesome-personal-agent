@@ -14,6 +14,8 @@ No file = nothing configured and nothing declared. `apa_executor_call` maps a co
 (`delegate_task` for native-subagent, `terminal` for external-cli; human has none). `apa_declare_executors` submits only
 `{id, kind, scenarios, host?}`; the command never reaches the ledger.
 
+Only the on-behalf tools (`apa_decide`, `apa_accept`, `apa_dismiss`, `apa_item_update`) take optional `evidence` (the owner's own words from this turn, never reworded) or `grant`, passed verbatim to `--evidence` / `--grant`; propose, ask, delegate, report and declare tools have neither.
+
 ## Live gate
 
 `APA_REQUIRE_LIVE=1 HERMES_SRC=<hermes checkout> python3 -m pytest -q plugins/hermes/tests/tools/test_live.py`
