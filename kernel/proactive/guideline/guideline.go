@@ -40,13 +40,14 @@ type Drafter interface {
 	Launch(ctx context.Context, t task.Task) (task.Outcome, error)
 }
 
-// Options 配置处理器。除 Now 外都必填。
+// Options 配置处理器。Store、Drafter、Host 必填。
 type Options struct {
 	Store   *store.Store
 	Drafter Drafter
 	// Host 是本机主机名：仓库有 Host 等于它的检出才算"本机有检出"。
 	Host string
-	// Harness 是本机起草用的无头运行声明名；Executor 是无本机检出时受托起草的执行者 id。两者只来自本人的配置。
+	// Harness 是本机起草用的无头运行声明名，空则用 Web 设置的默认 harness（与任务型同一规则，§13.6）。
+	// Executor 是无本机检出时受托起草的执行者 id（运行配置 guideline_draft_executor，§16.2），空则起草事项转 needs_input。
 	Harness, Executor string
 }
 
@@ -57,8 +58,8 @@ func invalid(why string) error {
 // Handler 返回 call_agent 动作的处理器：动作的 prompt 字段是任务型起草模板名，能力包取规则键的包名。
 // 它只服务时钟规则（没有触发事项）。
 func Handler(o Options) (rules.Handler, error) {
-	if o.Store == nil || o.Drafter == nil || o.Host == "" || o.Harness == "" || o.Executor == "" {
-		return nil, errors.New("guideline: Store, Drafter, Host, Harness and Executor are required")
+	if o.Store == nil || o.Drafter == nil || o.Host == "" {
+		return nil, errors.New("guideline: Store, Drafter and Host are required")
 	}
 	return func(ctx context.Context, c rules.Call) error { return o.run(ctx, c) }, nil
 }
@@ -219,7 +220,29 @@ func (o Options) local(ctx context.Context, c rules.Call, pack, tmpl string, m m
 	return out.Item, err
 }
 
+// noExecutor 是未配置委派执行者时的起草事项：转 needs_input 写明原因，交本人处理，之后不会每轮重复建。
+func (o Options) noExecutor(c rules.Call, m missing) (string, error) {
+	ask := map[string]any{"question": "无法委派起草项目规范：运行配置没有 guideline_draft_executor，且本机没有该项目的检出",
+		"options": []domain.AskOption{{ID: "retry", Label: "已配置，下次检测重新起草", Next: domain.PhaseDone},
+			{ID: "drop", Label: "不需要起草", Next: domain.PhaseDropped}}}
+	res, err := c.Do("item.create", map[string]any{"kind": domain.KindTask, "title": title(m.project), "phase": domain.PhaseNeedsInput,
+		"project": m.project.ID, "ask": ask, "reason": "rule " + c.Rule + ": guideline_draft_executor is not configured"})
+	if err != nil {
+		return "", err
+	}
+	var it struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(res.Value, &it); err != nil || it.ID == "" {
+		return "", fmt.Errorf("item.create returned no id: %v", err)
+	}
+	return it.ID, nil
+}
+
 func (o Options) delegate(c rules.Call, m missing) (string, error) {
+	if o.Executor == "" {
+		return o.noExecutor(c, m)
+	}
 	res, err := c.Do("item.create", map[string]any{"kind": domain.KindTask, "title": title(m.project), "phase": domain.PhaseOpen,
 		"project": m.project.ID, "reason": "rule " + c.Rule})
 	if err != nil {

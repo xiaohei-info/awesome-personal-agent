@@ -65,6 +65,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/guideline"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/verify"
 	kprojects "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	kpurge "github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
@@ -203,8 +204,12 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	// call_agent 按模板类别分派：任务型与生成型由任务型服务处理，判断型交委派核验。任务型服务要等调度器建好，闭包里再取。
 	var tk *task.Service
-	var hs *hosted.Service // 托管型读取器的运行结果回到它；调度器建好后再赋值
+	var hs *hosted.Service           // 托管型读取器的运行结果回到它；调度器建好后再赋值
+	var draftGuideline rules.Handler // 缺规范检测（§12.6）：guideline-draft 包的 call_agent 交给它；任务型服务建好后再赋值
 	callAgent := func(ctx context.Context, c rules.Call) error {
+		if pack, _, _ := strings.Cut(c.Rule, "/"); pack == "guideline-draft" {
+			return draftGuideline(ctx, c)
+		}
 		return tk.CallAgent(task.AgentOptions{Judge: verifyAgent, Generate: judge})(ctx, c)
 	}
 	var bg *background.Service // start_background_run 的处理器；调度器建好后再赋值
@@ -257,6 +262,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	k.wh.Attach(k.disp)
 	if tk, err = task.New(task.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL,
 		OnError: func(run string, err error) { slog.Error("task run", "run", run, "err", err) }}); err != nil {
+		return nil, err
+	}
+	if draftGuideline, err = guideline.Handler(guideline.Options{Store: st, Drafter: tk, Host: host, Executor: cfg.GuidelineDraftExecutor}); err != nil {
 		return nil, err
 	}
 	// 唤醒（§13.6）：后台运行落到声明了 launch: wake 的 harness 时产出唤醒投递；换取凭据时开租约；回执后收尾，与调度器结果同一条路。

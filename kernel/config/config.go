@@ -30,6 +30,8 @@ type Config struct {
 	DeliveryBackoff        []time.Duration
 	// ChainDepthThreshold 是链路深度阈值：超过只记录不派发（§14.9）。
 	ChainDepthThreshold int
+	// GuidelineDraftExecutor 是缺规范且本机无检出时受托起草的执行者 id（§12.6）；空表示未配置，起草事项转 needs_input。
+	GuidelineDraftExecutor string
 }
 
 // Default 返回设计规定的默认值：额度 4/2，来源输出上限 32MB，Ingest 30 天，运行目录 14 天，
@@ -204,6 +206,11 @@ func apply(c *Config, seen map[string]bool, raw string) error {
 		c.DeliveryBackoff = bo
 	case "chain_depth_threshold":
 		return positive(k, v, &c.ChainDepthThreshold)
+	case "guideline_draft_executor":
+		if v == "" {
+			return fmt.Errorf("%s 不能为空；不配置就删掉这一行", k)
+		}
+		c.GuidelineDraftExecutor = v
 	default:
 		return fmt.Errorf("未知配置项 %q", k)
 	}

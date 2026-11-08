@@ -95,6 +95,7 @@ run_retention_days: 3
 delivery_unclaimed_after: 20s
 delivery_backoff: 1s, 2s,3s
 chain_depth_threshold: 2
+guideline_draft_executor: wk.cli
 `), 0o600)
 	c, err := Load(p)
 	if err != nil {
@@ -103,7 +104,7 @@ chain_depth_threshold: 2
 	if c.Listen != "0.0.0.0:9000" || c.MaxSubprocesses != 8 || c.MaxShortSubprocesses != 1 || c.MaxSourceOutput != 5<<20 ||
 		c.IngestRetention != 7*24*time.Hour || c.RunRetention != 3*24*time.Hour ||
 		c.DeliveryUnclaimedAfter != 20*time.Second || !reflect.DeepEqual(c.DeliveryBackoff, []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}) ||
-		c.ChainDepthThreshold != 2 {
+		c.ChainDepthThreshold != 2 || c.GuidelineDraftExecutor != "wk.cli" {
 		t.Fatalf("got %+v", c)
 	}
 }
@@ -140,6 +141,7 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 		"negative step":  "delivery_backoff: 1m,-3m\n",
 		"zero chain":     "chain_depth_threshold: 0\n",
 		"chain not int":  "chain_depth_threshold: deep\n",
+		"empty executor": "guideline_draft_executor:\n",
 	}
 	for name, body := range cases {
 		p := filepath.Join(t.TempDir(), "config.yaml")
