@@ -1,4 +1,4 @@
-# sha256: 217ad49829fcfbf2d9df99887de7ffc46cc010195a1b07b0390b46b9df596684
+# sha256: 5f40017f0092329e0393139d43ce2e08c83bc3a90b8aa56d1a02422f0bb404fa
 defects:
   schema: omac.defect-ledger/v1
   used_global: 9
@@ -119,3 +119,6 @@ defects:
       state: fixing
       fix_node: fix.hermes-plugin-receipt.992917
   inbox: []
+pending_human_amendment:
+  amendment_id: amend-a4657a0582f6
+  file: /Volumes/SSD1T/apps/hermes/home/workspace/reports/apa-omac-plan/auth-redesign-20261108.amendment.yaml

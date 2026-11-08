@@ -9,70 +9,77 @@ meta:
   - 01a1a720-f7fd-719e-91d8-f5032216143f
   - 01a1a720-fa34-79ff-9662-cdf8dac90a21
   - 01a1aa40-ef12-766f-86e2-bead6a7c7b51
-  amendment_revision: 4
+  amendment_revision: 5
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-9593edfc1b3c
-    amendment_file: .omac/apa.system-amendment.yaml
+    amendment_id: amend-a4657a0582f6
+    amendment_file: /Volumes/SSD1T/apps/hermes/home/workspace/reports/apa-omac-plan/auth-redesign-20261108.amendment.yaml
     nodes:
-      fix.cli-client.35de85:
+      proxy-grant-surface:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-423b3222ee065ae0a8c10259
-      fix.hermes-plugin-receipt.992917:
+        expected_review_generation: amendment-62062a50923d537fb2dcda1b
+      kernel-proxy-tiers:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-cd7c990f0eecdd5cc509575e
-      fix.kernel-items.1785cf:
+        expected_review_generation: amendment-d00c2c0b5c28dd5d139a05ec
+      kernel-proxy-grant-basis:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-e0404ae0daca30ce44123872
+        expected_review_generation: amendment-050ed8508c45c9c221569736
+      kernel-proxy-rejection:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-747056fc095fc55457f7364a
+      kernel-health-proxy-signal:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-322998be85fb97d3d02c5a10
+      api-proxy-basis:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-61a85b7d5e5ea6c8de4f1048
+      cli-proxy-basis:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-714b404dfccd1d283c53d096
+      web-settings-grants:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-4b6c6a01e44532ca33d12c57
+      web-proxy-visibility:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-3b52bbd767655864c0d97724
+      hermes-plugin-tools-basis:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-b1d9caa59eb19509db0473cb
+      hermes-plugin-receipt-evidence:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-86a822148174a4f92b8c8674
+      hermes-plugin-capture-failure:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-88732f09e291c5eee6c9194f
       e2e-hermes-session:
         stage: authoring
         state: synced
         work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
         baseline:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: authoring-84dbc5a9eb26cf2c7658ae35
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
-          worker_handoff_pending: false
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-        expected_contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
-        expected_review_generation: amendment-204d99c1ad27ca563dc7c467
-        attempt_baseline:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: authoring-84dbc5a9eb26cf2c7658ae35
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
-          worker_handoff_pending: false
-        observed:
           status: todo
           phase: authoring
           review_verdict: null
@@ -90,6 +97,50 @@ meta:
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
           contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
+          worker_handoff_pending: false
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+        expected_contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
+        expected_review_generation: amendment-2b462bc735947598b216c8c3
+        attempt_baseline:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-204d99c1ad27ca563dc7c467
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
+          worker_handoff_pending: false
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-2b462bc735947598b216c8c3
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-bg-main-live:
@@ -116,8 +167,7 @@ meta:
           merge: 0
           review: 0
           worker: 0
-    system: true
-  last_amendment_id: amend-9593edfc1b3c
+  last_amendment_id: amend-a4657a0582f6
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
@@ -12214,6 +12264,18 @@ nodes:
   - fix.cli-client.35de85
   - fix.hermes-plugin-receipt.992917
   - fix.kernel-items.1785cf
+  - proxy-grant-surface
+  - kernel-proxy-tiers
+  - kernel-proxy-grant-basis
+  - kernel-proxy-rejection
+  - kernel-health-proxy-signal
+  - api-proxy-basis
+  - cli-proxy-basis
+  - web-settings-grants
+  - web-proxy-visibility
+  - hermes-plugin-tools-basis
+  - hermes-plugin-receipt-evidence
+  - hermes-plugin-capture-failure
   title: 真实 Hermes：会话、代答与委派
   description: 产出 e2e-hermes-session-live-evidence。是 flow-hermes-context、flow-chat-answer、flow-delegate-recover、flow-capture
     的唯一全流程 owner。要点：需 Mac mini 上的真实 Hermes；不可用时用 `omac work block` 上报，不得用替身冒充。 派给
@@ -12226,6 +12288,9 @@ nodes:
     - 不用替身冒充真实依赖
     - 不引入 Playwright；Web 步骤用项目规定的 ego-browser
     - 只用专用测试账号，不用个人主账号，不把凭据写入仓库或日志
+    - 不按已撤销的旧规则构造步骤：ACT 文字与 §14.5、附录 B.1 有出入时以设计为准，$DEL 附证据的步骤同时设置 APA_SESSION，回执的结果证据用
+      --pr、--commit、--branch、--link，差异写入验证报告
+    - dfx-80defa39c0dd、dfx-992917373ac0 的旧期望已作废，不按它们上报缺陷
     verification_commands:
     - go test -tags=live -count=1 -timeout=120m ./tests/live/hermes/...
     integration_gates:
@@ -12236,6 +12301,9 @@ nodes:
       - docs/solution-design.md#34-场景三委派与回收
       - docs/solution-design.md#112-接入能力
       - docs/solution-design.md#213-需实测的-harness-行为
+      - docs/solution-design.md#145-代理授权
+      - docs/appendix-a-harness.md#a1-插件实现约定
+      - docs/appendix-b-api-cli.md#b1-cli
       delivery_goal: 用真实外部依赖独立执行并证明完整流程：flow-hermes-context、flow-chat-answer、flow-delegate-recover、flow-capture
       covers:
       - flow-hermes-context
@@ -12265,6 +12333,9 @@ nodes:
     - docs/solution-design.md#34-场景三委派与回收
     - docs/solution-design.md#112-接入能力
     - docs/solution-design.md#213-需实测的-harness-行为
+    - docs/solution-design.md#145-代理授权
+    - docs/appendix-a-harness.md#a1-插件实现约定
+    - docs/appendix-b-api-cli.md#b1-cli
     scope_paths:
     - tests/live/hermes/**
     evidence_mode: live
@@ -12312,6 +12383,24 @@ nodes:
       evidence_mode: artifact
     - artifact_id: repo-ci-redline-tooling
       producer: repo-ci-redline
+      evidence_mode: artifact
+    - artifact_id: hermes-plugin-tools-basis-plugin
+      producer: hermes-plugin-tools-basis
+      evidence_mode: artifact
+    - artifact_id: hermes-plugin-receipt-evidence-plugin
+      producer: hermes-plugin-receipt-evidence
+      evidence_mode: artifact
+    - artifact_id: hermes-plugin-capture-failure-plugin
+      producer: hermes-plugin-capture-failure
+      evidence_mode: artifact
+    - artifact_id: cli-proxy-basis-commands
+      producer: cli-proxy-basis
+      evidence_mode: artifact
+    - artifact_id: api-proxy-basis-routes
+      producer: api-proxy-basis
+      evidence_mode: artifact
+    - artifact_id: web-proxy-visibility-page
+      producer: web-proxy-visibility
       evidence_mode: artifact
     coverage_gate: 0
 - id: e2e-proactive-live
@@ -14298,3 +14387,1120 @@ nodes:
     defect_refs:
     - dfx-1785cf62dba4
     coverage_gate: 80
+- id: proxy-grant-surface
+  worker: omac-worker-backend
+  blocked_by:
+  - kernel-domain
+  - kernel-policy
+  - kernel-credentials
+  - kernel-command
+  - api-core
+  - api-settings-policy
+  - cli-client
+  - cli-decisions
+  - cli-init-serve
+  - docs-conformance
+  title: 授权单记录与接口（同时恢复主干 CI）
+  description: 设计提交 2bf2dc277 后主干 CI 已红：tests/conformance 与 cli/serve 要求退出码 23、grant.issued/grant.revoked、/settings/grants、GET
+    /grants、apa grant list 已存在，且 conformance 的 tableRows 把附录 B.1 里的转义竖线当成列分隔。OMAC
+    的 CI 门会把红 PR 退回 Worker，所以这组对外契约必须在一个 PR 内跨 kernel、api、cli 一次落地，后续节点才能合并。这是内核判定节点之前唯一的
+    API/CLI 改动，只管授权单记录本身，不改任何命令的放行规则。辅助路径：kernel/domain、api/settings、cli/decisions、cli/serve、cli/client、tests/conformance。
+  reviewer: omac-reviewer
+  contract:
+    objective: 本人可经 Web 登录调用接口签发、撤销、查看授权单，delegate 凭据可经 GET /grants 与 apa grant list
+      读取自己名下的有效授权单，退出码 23、授权单事件、Event.grant 与 resolved_via=grant 进入 domain 契约，主干 go
+      test ./... 恢复全绿
+    non_goals:
+    - 不改 kernel/authz 的放行规则，不改任何命令的 Proxy 声明；授权单在这个节点还不放行任何命令（kernel-proxy-grant-basis
+      负责）
+    - 不读 X-APA-Grant，不加全局 --grant（api-proxy-basis、cli-proxy-basis 负责）
+    - 不做 Web 页面（web-settings-grants 负责）
+    - 不把路由加进 cli/serve 的 notYetImplemented，不给 conformance 加白名单或放宽比对；只修 tableRows 对
+      Markdown 转义竖线的解析
+    - 授权单内容不可改，agent 与能力包不能创建、修改、延长；签发和撤销只有 Web 登录能调用
+    - 内核和 cli/ 不出现具体 harness 名；不新增第七个业务模块；运行凭据不能代答；三级 token 不改
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./...
+    - go run ./tools/redline
+    integration_gates:
+    - name: proxy-grant-surface-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#613-配置记录
+      - docs/solution-design.md#67-event-与-actor
+      - docs/solution-design.md#142-身份与凭据
+      - docs/solution-design.md#143-操作分级
+      - docs/solution-design.md#171-http-api-分组
+      - docs/solution-design.md#172-cli-分组
+      - docs/solution-design.md#173-退出码
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/appendix-b-api-cli.md#b4-标准事件类型
+      delivery_goal: 授权单按 §6.13 校验（scope 至少一项非空；actions 只能取附录 B.1「可用授权单」一列且无通配符；risk_ceiling
+        只有 normal；expires_at 必填且不超过 90 天；grantee.credential 必须是 delegate token），签发和撤销各记
+        grant.issued、grant.revoked，撤销与吊销 token 后不再出现在 GET /grants；非 delegate 调用 GET
+        /grants 与 apa grant list 为退出码 4；go test ./... 全绿
+      covers:
+      - TestCLIMatchesAppendixB1
+      - TestHTTPRoutesMatchAppendixB2
+      - TestEventTypesMatchAppendixB4
+      - TestExitCodesMatchSection173
+      - TestServeMountsEveryAppendixRouteAndWeb
+      - 授权单签发与撤销
+      acceptance_refs:
+      - flow-authz-matrix
+      - flow-decision-answer
+      commands:
+      - go test -count=1 ./kernel/policy/... ./kernel/domain/... ./api/settings/...
+        ./cli/decisions/... ./cli/serve/... ./tests/conformance/...
+    pr_base: main
+    acceptance_refs:
+    - flow-authz-matrix
+    - flow-decision-answer
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#613-配置记录
+    - docs/solution-design.md#67-event-与-actor
+    - docs/solution-design.md#142-身份与凭据
+    - docs/solution-design.md#143-操作分级
+    - docs/solution-design.md#171-http-api-分组
+    - docs/solution-design.md#172-cli-分组
+    - docs/solution-design.md#173-退出码
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b4-标准事件类型
+    scope_paths:
+    - kernel/policy/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: proxy-grant-surface-contract
+    consumes:
+    - artifact_id: kernel-domain-module
+      producer: kernel-domain
+      evidence_mode: artifact
+    - artifact_id: kernel-policy-module
+      producer: kernel-policy
+      evidence_mode: artifact
+    - artifact_id: kernel-credentials-module
+      producer: kernel-credentials
+      evidence_mode: artifact
+    - artifact_id: kernel-command-module
+      producer: kernel-command
+      evidence_mode: artifact
+    - artifact_id: api-core-routes
+      producer: api-core
+      evidence_mode: artifact
+    - artifact_id: api-settings-policy-routes
+      producer: api-settings-policy
+      evidence_mode: artifact
+    - artifact_id: cli-client-commands
+      producer: cli-client
+      evidence_mode: artifact
+    - artifact_id: cli-decisions-commands
+      producer: cli-decisions
+      evidence_mode: artifact
+    - artifact_id: cli-init-serve-commands
+      producer: cli-init-serve
+      evidence_mode: artifact
+    - artifact_id: docs-conformance-suite
+      producer: docs-conformance
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 80
+- id: kernel-proxy-tiers
+  worker: omac-worker-backend
+  blocked_by:
+  - proxy-grant-surface
+  - kernel-authz
+  - kernel-command
+  - kernel-items
+  - kernel-decisions
+  - kernel-delegation
+  - kernel-materials
+  - kernel-hosted
+  - kernel-blobs
+  - kernel-projects
+  - kernel-executors
+  - kernel-followmsg
+  - kernel-inbound
+  - kernel-instances
+  - kernel-sources
+  - api-sources
+  - authz-matrix-suite
+  - kernel-invariant-suite
+  - e2e-authz
+  - e2e-decisions
+  - e2e-ledger
+  title: 代理写入三档判定（第一档放行、第二档原话加会话、退出码 23）
+  description: 替换 kernel/authz.Decide 的 needEvidence、Request.Proxy 与 answerDecision
+    判定点，kernel/command 的 Spec.Proxy 换成档位声明，各命令按附录 B.1 代理写命令清单登记。Proxy 到档位是跨所有命令登记的一次性替换，且
+    CI 要求同一 PR 内测试全绿，不再拆分。旧规则的测试在这里同步更新：kernel、api、cli 单测，tests/contract/authz，tests/e2e
+    下断言「delegate 无证据退出码 2」或依赖 $DEL 附证据的场景；第二档场景要同时设置 APA_SESSION。tests/e2e/ops、tests/e2e/sourcepull
+    与 TestFlowChainDepth 在基线已红且原因与授权无关，不是本节点的通过条件，但其中依赖旧规则的步骤同样要改。辅助路径：kernel/command、kernel/domain、kernel/delegation、kernel/{items,decisions,materials,hosted,blobs,projects,executors,followmsg,inbound,instances,sources/registry}、api/sources、kernel/invariants、tests/contract/authz、tests/e2e。
+  reviewer: omac-reviewer
+  contract:
+    objective: delegate 写命令按 §14.5 三档判定且只在命令管线一处判定：第一档凭身份和对象绑定放行且 Event 不带 on_behalf_of，第二档要本人原话加会话引用否则退出码
+      23 并记 command.rejected，delegate.report 报 done 对任何 kind 都必须带结果证据
+    non_goals:
+    - 不实现授权单放行、resolved_via=grant 的写入与撤销验证（kernel-proxy-grant-basis 负责）
+    - 不实现退出码 23 后的 needs_input 转换、内核生成 ask 与 health.alert（kernel-proxy-rejection 负责）
+    - 不改 HTTP 请求头与 CLI 参数（api-proxy-basis、cli-proxy-basis 负责）；on_behalf_of 是否写入由管线按档位决定，api/core
+      不判定档位
+    - 绑定只来自账本：assignee 等于该凭据，或委派子事项由该凭据发起（delegate.create 记录的发起凭据），不接受输入里的声明
+    - 不放宽第三档：web_only 仍 20、初筛未返回仍 22、允许的执行者仍 21、运行凭据代答仍 4、唤醒租约仍 4
+    - 项目、来源、能力包实例管理命令只接受本人原话
+    - 规则只在一处判定，命令体内不重复校验；不新增测试体系
+    - 内核和 cli/ 不出现具体 harness 名；不新增第七个业务模块；运行凭据不能代答；三级 token 不改
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./...
+    - go run ./tools/redline
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 -skip TestFlowChainDepth ./tests/e2e/agents/... ./tests/e2e/authz/...
+      ./tests/e2e/automation/... ./tests/e2e/baseline/... ./tests/e2e/bgguards/...
+      ./tests/e2e/bootstrap/... ./tests/e2e/channel/... ./tests/e2e/decisions/...
+      ./tests/e2e/delivery/... ./tests/e2e/events/... ./tests/e2e/followmsg/... ./tests/e2e/followup/...
+      ./tests/e2e/ledger/... ./tests/e2e/mapping/... ./tests/e2e/materials/... ./tests/e2e/screening/...
+      ./tests/e2e/webhook/...
+    integration_gates:
+    - name: kernel-proxy-tiers-gate
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#143-操作分级
+      - docs/solution-design.md#142-身份与凭据
+      - docs/solution-design.md#614-不变量
+      - docs/solution-design.md#67-event-与-actor
+      - docs/solution-design.md#70-命令模型所有写入的统一路径
+      - docs/solution-design.md#72-决策
+      - docs/solution-design.md#75-任务委派
+      - docs/solution-design.md#77-内核基础设施
+      - docs/solution-design.md#173-退出码
+      - docs/solution-design.md#211-已定决定
+      - docs/solution-design.md#212-风险与治理
+      - docs/appendix-b-api-cli.md#b1-cli
+      delivery_goal: 'tests/contract/authz 逐条覆盖附录 B.1 代理写命令清单的档位：第一档无原话成功且 Event 无
+        on_behalf_of；绑定不成立的回执、交回、改事项按第二档；第二档只带原话不带会话、不带原话均为 23 并记 command.rejected；报
+        done 无结果证据为 2 且事项不变，任何 kind 都如此；不变量 #3、#11 进入 kernel/invariants'
+      covers:
+      - ACT-AUTH-03
+      - ACT-PROP-05
+      - ACT-DEC-03
+      - ACT-ITEM-01
+      - ACT-DLG-04
+      - ACT-DLG-06
+      - ACT-CAP-01
+      acceptance_refs:
+      - flow-authz-matrix
+      - flow-decision-answer
+      - flow-proposal-triage
+      - flow-item-lifecycle
+      - flow-delegate-recover
+      - flow-capture
+      commands:
+      - go test -count=1 ./kernel/authz/... ./kernel/command/... ./kernel/delegation/...
+        ./kernel/items/... ./kernel/decisions/... ./kernel/invariants/... ./tests/contract/authz/...
+      - npm --prefix web ci
+      - npm --prefix web run build
+      - go test -tags=e2e -count=1 ./tests/e2e/authz/... ./tests/e2e/decisions/...
+        ./tests/e2e/ledger/...
+    pr_base: main
+    acceptance_refs:
+    - flow-authz-matrix
+    - flow-decision-answer
+    - flow-proposal-triage
+    - flow-item-lifecycle
+    - flow-delegate-recover
+    - flow-capture
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#143-操作分级
+    - docs/solution-design.md#142-身份与凭据
+    - docs/solution-design.md#614-不变量
+    - docs/solution-design.md#67-event-与-actor
+    - docs/solution-design.md#70-命令模型所有写入的统一路径
+    - docs/solution-design.md#72-决策
+    - docs/solution-design.md#75-任务委派
+    - docs/solution-design.md#77-内核基础设施
+    - docs/solution-design.md#173-退出码
+    - docs/solution-design.md#211-已定决定
+    - docs/solution-design.md#212-风险与治理
+    - docs/appendix-b-api-cli.md#b1-cli
+    scope_paths:
+    - kernel/authz/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: kernel-proxy-tiers-module
+    consumes:
+    - artifact_id: proxy-grant-surface-contract
+      producer: proxy-grant-surface
+      evidence_mode: artifact
+    - artifact_id: kernel-authz-module
+      producer: kernel-authz
+      evidence_mode: artifact
+    - artifact_id: kernel-command-module
+      producer: kernel-command
+      evidence_mode: artifact
+    - artifact_id: kernel-items-module
+      producer: kernel-items
+      evidence_mode: artifact
+    - artifact_id: kernel-decisions-module
+      producer: kernel-decisions
+      evidence_mode: artifact
+    - artifact_id: kernel-delegation-module
+      producer: kernel-delegation
+      evidence_mode: artifact
+    - artifact_id: kernel-materials-module
+      producer: kernel-materials
+      evidence_mode: artifact
+    - artifact_id: kernel-hosted-module
+      producer: kernel-hosted
+      evidence_mode: artifact
+    - artifact_id: kernel-blobs-module
+      producer: kernel-blobs
+      evidence_mode: artifact
+    - artifact_id: kernel-projects-module
+      producer: kernel-projects
+      evidence_mode: artifact
+    - artifact_id: kernel-executors-module
+      producer: kernel-executors
+      evidence_mode: artifact
+    - artifact_id: kernel-followmsg-module
+      producer: kernel-followmsg
+      evidence_mode: artifact
+    - artifact_id: kernel-inbound-module
+      producer: kernel-inbound
+      evidence_mode: artifact
+    - artifact_id: kernel-instances-module
+      producer: kernel-instances
+      evidence_mode: artifact
+    - artifact_id: kernel-sources-module
+      producer: kernel-sources
+      evidence_mode: artifact
+    - artifact_id: api-sources-routes
+      producer: api-sources
+      evidence_mode: artifact
+    - artifact_id: authz-matrix-suite-suite
+      producer: authz-matrix-suite
+      evidence_mode: artifact
+    - artifact_id: kernel-invariant-suite-suite
+      producer: kernel-invariant-suite
+      evidence_mode: artifact
+    - artifact_id: e2e-authz-flow-evidence
+      producer: e2e-authz
+      evidence_mode: artifact
+    - artifact_id: e2e-decisions-flow-evidence
+      producer: e2e-decisions
+      evidence_mode: artifact
+    - artifact_id: e2e-ledger-flow-evidence
+      producer: e2e-ledger
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 80
+- id: kernel-proxy-grant-basis
+  worker: omac-worker-backend
+  blocked_by:
+  - kernel-proxy-tiers
+  - fix.kernel-items.1785cf
+  - kernel-wake-lease
+  - kernel-why
+  title: 授权单作为第二档依据（校验顺序、留痕、可撤销）
+  description: '在 kernel-proxy-tiers 的第二档判定点加入授权单依据，经 command.Request 传入，读取 proxy-grant-surface
+    的记录，不新增业务模块。覆盖 dfx-1785cf62dba4 的遗留验证：PR #213 已支持撤销 decision.resolved，这里验证 resolved_via=grant
+    同样可撤销。辅助路径：kernel/command、kernel/decisions、kernel/items、kernel/why、kernel/wake、tests/contract/authz。'
+  reviewer: omac-reviewer
+  contract:
+    objective: delegate 凭据附有效授权单时第二档放行并记 resolved_via=grant 与 Event.grant，授权单不符时退出码
+      23，原话与授权单同时携带时退出码 2，经授权单的代答可在 Web 撤销回 needs_input
+    non_goals:
+    - 不读 X-APA-Grant，不加 --grant（api-proxy-basis、cli-proxy-basis 负责）
+    - 不实现依据不足后的阶段转换（kernel-proxy-rejection 负责）
+    - 授权单不扩散：不继承到子事项，不从一个动作推及另一个动作，移动事项时来源和目标都要在范围内
+    - 项目、来源、能力包实例管理命令不接受授权单
+    - 不放宽硬约束：web_only 仍 20、初筛未返回仍 22、允许的执行者仍 21，与是否持有授权单无关
+    - 运行凭据带授权单仍为 4；唤醒租约期间该 token 带授权单仍为 4
+    - 内核和 cli/ 不出现具体 harness 名；不新增第七个业务模块；运行凭据不能代答；三级 token 不改
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./...
+    - go run ./tools/redline
+    integration_gates:
+    - name: kernel-proxy-grant-basis-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#613-配置记录
+      - docs/solution-design.md#614-不变量
+      - docs/solution-design.md#63-item事项
+      - docs/solution-design.md#67-event-与-actor
+      - docs/solution-design.md#72-决策
+      - docs/solution-design.md#136-后台执行无人值守与会话续接
+      - docs/solution-design.md#153-审计与变更视图
+      - docs/appendix-b-api-cli.md#b1-cli
+      delivery_goal: 按 §14.5 校验顺序逐项给出失败用例（凭据、harness、已撤销、已过期、动作、范围、风险上限）；每次使用的对象 Event
+        记 grant，apa why 可见；resolved_via=grant 的决定经 item.revert 恢复 ask 未回答、事项回 needs_input；吊销
+        token 后授权单同时失效
+      covers:
+      - ACT-AUTH-03
+      - ACT-CHAT-03
+      - ACT-REV-01
+      - ACT-REV-02
+      acceptance_refs:
+      - flow-authz-matrix
+      - flow-chat-answer
+      - flow-agent-revert
+      - flow-bg-guards
+      - flow-wake-lease
+      - flow-why-audit
+      commands:
+      - go test -count=1 ./kernel/authz/... ./kernel/decisions/... ./kernel/items/...
+        ./kernel/why/... ./kernel/wake/... ./tests/contract/authz/...
+    pr_base: main
+    acceptance_refs:
+    - flow-authz-matrix
+    - flow-chat-answer
+    - flow-agent-revert
+    - flow-bg-guards
+    - flow-wake-lease
+    - flow-why-audit
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#613-配置记录
+    - docs/solution-design.md#614-不变量
+    - docs/solution-design.md#63-item事项
+    - docs/solution-design.md#67-event-与-actor
+    - docs/solution-design.md#72-决策
+    - docs/solution-design.md#136-后台执行无人值守与会话续接
+    - docs/solution-design.md#153-审计与变更视图
+    - docs/appendix-b-api-cli.md#b1-cli
+    scope_paths:
+    - kernel/authz/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: kernel-proxy-grant-basis-module
+    consumes:
+    - artifact_id: kernel-proxy-tiers-module
+      producer: kernel-proxy-tiers
+      evidence_mode: artifact
+    - artifact_id: kernel-wake-lease-module
+      producer: kernel-wake-lease
+      evidence_mode: artifact
+    - artifact_id: kernel-why-module
+      producer: kernel-why
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 80
+- id: kernel-proxy-rejection
+  worker: omac-worker-backend
+  blocked_by:
+  - kernel-proxy-tiers
+  - kernel-attention
+  - kernel-screening
+  title: 依据不足不静默（转 needs_input、内核生成 ask、回执与捕获告警）
+  description: kernel/command 的拒绝路径目前只写拒绝事件，这里改为同一事务完成 §14.5 的处理表与失败可见。辅助路径：kernel/authz（RejectionEvent）、kernel/decisions、kernel/items、kernel/delegation、kernel/inbound。
+  reviewer: omac-reviewer
+  contract:
+    objective: 第二档依据不足时事项按所处阶段处理：open、waiting 转 needs_input 并附内核生成的 ask，needs_input
+      与 proposed 阶段不变，终态或无对象只拒绝和记录；delegate.report、inbound.capture 被拒（2、4、23）同一事务记
+      health.alert
+    non_goals:
+    - 不新增事件类型：拒绝记 command.rejected，告警记 health.alert
+    - 内核生成的 ask 只写操作者、命令名和拒绝原因，不带 agent 自述内容；risk_class 固定 web_only，不做初筛，选项只有「继续」，回答后回
+      open，不重放被拒绝的修改
+    - proposed 事项不转 needs_input、不产生投递
+    - 不做健康视图的信号归类与清除（kernel-health-proxy-signal 负责），不做 Web 标注（web-proxy-visibility
+      负责）
+    - 被拒绝的命令本身不得部分生效；报 done 缺结果证据时事项不变
+    - 内核和 cli/ 不出现具体 harness 名；不新增第七个业务模块；运行凭据不能代答；三级 token 不改
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./...
+    - go run ./tools/redline
+    integration_gates:
+    - name: kernel-proxy-rejection-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#64-生命周期六个固定阶段
+      - docs/solution-design.md#614-不变量
+      - docs/solution-design.md#67-event-与-actor
+      - docs/solution-design.md#70-命令模型所有写入的统一路径
+      - docs/solution-design.md#72-决策
+      - docs/solution-design.md#152-健康视图
+      - docs/solution-design.md#173-退出码
+      delivery_goal: 四类对象各有用例，且断言转换、ask、command.rejected、health.alert 与拒绝在同一事务；内核生成的
+        ask 经 CLI 代答为 20，经 Web 回答后事项回 open；绑定不成立的回执既转 needs_input 又记 health.alert；proposed
+        被拒时无投递
+      covers:
+      - ACT-AUTH-03
+      - ACT-PROP-05
+      - ACT-DLG-06
+      - ACT-CAP-01
+      - ACT-DEC-03
+      acceptance_refs:
+      - flow-authz-matrix
+      - flow-decision-answer
+      - flow-proposal-triage
+      - flow-delegate-recover
+      - flow-capture
+      - flow-health
+      commands:
+      - go test -count=1 ./kernel/command/... ./kernel/authz/... ./kernel/decisions/...
+        ./kernel/delegation/... ./kernel/inbound/... ./kernel/invariants/... ./tests/contract/authz/...
+    pr_base: main
+    acceptance_refs:
+    - flow-authz-matrix
+    - flow-decision-answer
+    - flow-proposal-triage
+    - flow-delegate-recover
+    - flow-capture
+    - flow-health
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#64-生命周期六个固定阶段
+    - docs/solution-design.md#614-不变量
+    - docs/solution-design.md#67-event-与-actor
+    - docs/solution-design.md#70-命令模型所有写入的统一路径
+    - docs/solution-design.md#72-决策
+    - docs/solution-design.md#152-健康视图
+    - docs/solution-design.md#173-退出码
+    scope_paths:
+    - kernel/command/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: kernel-proxy-rejection-module
+    consumes:
+    - artifact_id: kernel-proxy-tiers-module
+      producer: kernel-proxy-tiers
+      evidence_mode: artifact
+    - artifact_id: kernel-attention-module
+      producer: kernel-attention
+      evidence_mode: artifact
+    - artifact_id: kernel-screening-module
+      producer: kernel-screening
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 80
+- id: kernel-health-proxy-signal
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - kernel-proxy-rejection
+  - kernel-health
+  - api-health
+  - e2e-ops
+  title: 健康视图新增「回执与捕获失败」信号
+  description: kernel/health 与 api/health 当前固定九类信号，§15.2 现为十类，顺序按设计表。tests/e2e/ops
+    的 TestFlowHealth 在基线已红（仍断言八类信号），信号数量由这里一并更新。辅助路径：api/health、tests/e2e/ops。
+  reviewer: omac-reviewer
+  contract:
+    objective: kernel-proxy-rejection 记下的 health.alert 在 GET /health 与 apa health
+      中归入「回执与捕获失败」信号，同一凭据的同一命令之后成功一次即清除
+    non_goals:
+    - 只报不修，不新增存储或模块；告警归类仍只在一处判定
+    - 不改其他信号的归类与清除规则
+    - 不做 Web 展示（web-proxy-visibility 负责）
+    - 内核和 cli/ 不出现具体 harness 名；不新增第七个业务模块；运行凭据不能代答；三级 token 不改
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./...
+    - go run ./tools/redline
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 -run TestFlowHealth ./tests/e2e/ops/...
+    integration_gates:
+    - name: kernel-health-proxy-signal-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#152-健康视图
+      - docs/solution-design.md#145-代理授权
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 信号恒为十项且顺序与 §15.2 一致；2、4、23 三种拒绝都计入；一次成功后清除，另一凭据或另一命令的成功不清除；这类告警之外的
+        health.alert 归类不变
+      covers:
+      - ACT-HLT-01
+      - ACT-HLT-02
+      acceptance_refs:
+      - flow-health
+      - flow-delegate-recover
+      - flow-capture
+      commands:
+      - go test -count=1 ./kernel/health/... ./api/health/...
+    pr_base: main
+    acceptance_refs:
+    - flow-health
+    - flow-delegate-recover
+    - flow-capture
+    source_of_truth:
+    - docs/solution-design.md#152-健康视图
+    - docs/solution-design.md#145-代理授权
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - kernel/health/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: kernel-health-proxy-signal-module
+    consumes:
+    - artifact_id: kernel-proxy-rejection-module
+      producer: kernel-proxy-rejection
+      evidence_mode: artifact
+    - artifact_id: kernel-health-module
+      producer: kernel-health
+      evidence_mode: artifact
+    - artifact_id: api-health-routes
+      producer: api-health
+      evidence_mode: artifact
+    - artifact_id: e2e-ops-flow-evidence
+      producer: e2e-ops
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 80
+- id: api-proxy-basis
+  worker: omac-worker-backend
+  blocked_by:
+  - kernel-proxy-grant-basis
+  - kernel-proxy-rejection
+  - api-decisions
+  - api-items
+  - api-materials
+  - api-delegation
+  - api-capture
+  - api-why
+  title: HTTP 骨干读取授权单依据并暴露被拒绝的代答
+  description: api/core 统一读 X-APA-Grant，与 X-APA-Evidence 走同一条通道，各路由传入命令请求。辅助路径：api/{decisions,items,materials,delegation,followmsg,capture,projects,sources}、审计与事件读接口。
+  reviewer: omac-reviewer
+  contract:
+    objective: delegate 请求可经 X-APA-Grant 或 X-APA-Evidence 加 X-APA-Session 携带第二档依据，退出码
+      23 的错误体带原因与 Web 链接，决策待办与建议流的读接口返回最近一次被拒绝的代答或处理，审计读接口可按授权单 id 查使用记录
+    non_goals:
+    - 判定不在 API 层：不在路由里判断档位、绑定或授权单有效性
+    - 不新增未在附录 B.2 列出的路由；使用记录用已有审计或事件读接口的过滤条件
+    - 两种依据的读取只在骨干一处，路由不重复读头
+    - 错误信息只写机制，不含账本用户内容
+    - 内核和 cli/ 不出现具体 harness 名；不新增第七个业务模块；运行凭据不能代答；三级 token 不改
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./...
+    - go run ./tools/redline
+    integration_gates:
+    - name: api-proxy-basis-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#171-http-api-分组
+      - docs/solution-design.md#153-审计与变更视图
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/appendix-b-api-cli.md#b3-错误响应
+      delivery_goal: 真实 HTTP 用例：X-APA-Grant 代答成功且记 grant；两种依据同时携带对应退出码 2；缺依据的错误体符合
+        B.3 且带 web_url；待办与建议流读接口带被拒绝信息；delegate 第一档写入的 Event 没有 on_behalf_of
+      covers:
+      - ACT-AUTH-03
+      - ACT-CHAT-01
+      - ACT-DEC-03
+      - ACT-PROP-05
+      acceptance_refs:
+      - flow-authz-matrix
+      - flow-chat-answer
+      - flow-decision-answer
+      - flow-proposal-triage
+      commands:
+      - go test -count=1 ./api/core/... ./api/decisions/... ./api/items/... ./api/delegation/...
+        ./api/capture/...
+    pr_base: main
+    acceptance_refs:
+    - flow-authz-matrix
+    - flow-chat-answer
+    - flow-decision-answer
+    - flow-proposal-triage
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#171-http-api-分组
+    - docs/solution-design.md#153-审计与变更视图
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b3-错误响应
+    scope_paths:
+    - api/core/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: api-proxy-basis-routes
+    consumes:
+    - artifact_id: kernel-proxy-grant-basis-module
+      producer: kernel-proxy-grant-basis
+      evidence_mode: artifact
+    - artifact_id: kernel-proxy-rejection-module
+      producer: kernel-proxy-rejection
+      evidence_mode: artifact
+    - artifact_id: api-decisions-routes
+      producer: api-decisions
+      evidence_mode: artifact
+    - artifact_id: api-items-routes
+      producer: api-items
+      evidence_mode: artifact
+    - artifact_id: api-materials-routes
+      producer: api-materials
+      evidence_mode: artifact
+    - artifact_id: api-delegation-routes
+      producer: api-delegation
+      evidence_mode: artifact
+    - artifact_id: api-capture-routes
+      producer: api-capture
+      evidence_mode: artifact
+    - artifact_id: api-why-routes
+      producer: api-why
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 80
+- id: cli-proxy-basis
+  worker: omac-worker-backend
+  blocked_by:
+  - api-proxy-basis
+  - cli-items
+  - cli-guide
+  - cli-delegation
+  title: CLI 全局 --grant 与退出码 23 指引
+  description: cli/client 加全局 --grant，发 X-APA-Grant；apa guide 与错误指引按新模型更新。授权单的端到端行为不改验收文档，在已有
+    tests/e2e 套件内加场景，不新增测试体系。辅助路径：cli/guide、cli/decisions、cli/items、tests/e2e/{authz,decisions,ledger}。
+  reviewer: omac-reviewer
+  contract:
+    objective: agent 可用 apa decide、accept、dismiss、item 等命令加 --grant 走授权单依据，退出码 23
+      时得到不换说法重试、告知本人的指引，授权单的全流程在已有 e2e 套件内可复现
+    non_goals:
+    - CLI 不含判定逻辑：不在客户端判断档位或绑定
+    - 没有签发和撤销授权单的 CLI 写命令（只在 Web）
+    - 不给 propose、ask、delegate、report、declare 增加依据要求；report 的结果证据仍是 --pr、--commit、--branch、--link
+    - 不为迎合 ACT 文字绕开设计：ACT 文字与 §14.5、附录 B.1 有出入时以设计为准
+    - 内核和 cli/ 不出现具体 harness 名；不新增第七个业务模块；运行凭据不能代答；三级 token 不改
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./...
+    - go run ./tools/redline
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 ./tests/e2e/authz/... ./tests/e2e/decisions/... ./tests/e2e/ledger/...
+    integration_gates:
+    - name: cli-proxy-basis-gate
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#172-cli-分组
+      - docs/solution-design.md#173-退出码
+      - docs/solution-design.md#174-环境变量
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b3-错误响应
+      delivery_goal: e2e 场景：Web 接口签发授权单后 apa decide --grant 成功且 resolved_via=grant，apa
+        why 可见，Web 撤销后回 needs_input；已撤销、已过期、范围不符为 23；--evidence 与 --grant 同带为 2；授权单碰
+        web_only 为 20；运行凭据带 --grant 为 4
+      covers:
+      - ACT-AUTH-03
+      - ACT-CHAT-01
+      - ACT-CHAT-03
+      - ACT-REV-01
+      - ACT-DEC-03
+      acceptance_refs:
+      - flow-authz-matrix
+      - flow-chat-answer
+      - flow-agent-revert
+      - flow-decision-answer
+      commands:
+      - go test -count=1 ./cli/client/... ./cli/decisions/... ./cli/items/...
+      - npm --prefix web ci
+      - npm --prefix web run build
+      - go test -tags=e2e -count=1 ./tests/e2e/authz/... ./tests/e2e/decisions/...
+        ./tests/e2e/ledger/...
+    pr_base: main
+    acceptance_refs:
+    - flow-authz-matrix
+    - flow-chat-answer
+    - flow-agent-revert
+    - flow-decision-answer
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#172-cli-分组
+    - docs/solution-design.md#173-退出码
+    - docs/solution-design.md#174-环境变量
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b3-错误响应
+    scope_paths:
+    - cli/client/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: cli-proxy-basis-commands
+    consumes:
+    - artifact_id: api-proxy-basis-routes
+      producer: api-proxy-basis
+      evidence_mode: artifact
+    - artifact_id: cli-items-commands
+      producer: cli-items
+      evidence_mode: artifact
+    - artifact_id: cli-guide-commands
+      producer: cli-guide
+      evidence_mode: artifact
+    - artifact_id: cli-delegation-commands
+      producer: cli-delegation
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 80
+- id: web-settings-grants
+  worker: omac-worker-frontend
+  blocked_by:
+  - api-proxy-basis
+  - web-shell
+  - web-settings-credentials
+  title: Web 设置：授权单页（签发、撤销、使用记录）
+  description: 按 web/src/app/registry.ts 的约定新增 feature 目录，路由 settings/grants，不改中心路由表。
+  reviewer: omac-reviewer
+  contract:
+    objective: 本人可在 /settings/grants 签发授权单（默认 7 天、最长 90 天）、撤销并填写原因、查看每张单的使用记录
+    non_goals:
+    - 页面不承载业务规则：校验失败以服务端返回为准
+    - 授权单内容不可改，要改就撤销后重签，页面不提供编辑或延长
+    - 动作只能逐条勾选附录 B.1「可用授权单」一列，没有全选通配；web_only 不可授权
+    - 不引入 Playwright，不做真实浏览器验收
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - npm --prefix web run test -- --run src/features/settings-grants
+    integration_gates:
+    - name: web-settings-grants-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#613-配置记录
+      - docs/solution-design.md#153-审计与变更视图
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 组件测试按 api 契约覆盖签发表单、默认与最长有效期、撤销、已撤销与已过期的展示、使用记录列表和服务端拒绝的错误展示
+      covers:
+      - 授权单签发
+      - 授权单撤销
+      - 授权单使用记录
+      acceptance_refs:
+      - flow-authz-matrix
+      commands:
+      - npm --prefix web run test -- --run src/features/settings-grants
+    pr_base: main
+    acceptance_refs:
+    - flow-authz-matrix
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#613-配置记录
+    - docs/solution-design.md#153-审计与变更视图
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - web/src/features/settings-grants/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-settings-grants-page
+    consumes:
+    - artifact_id: api-proxy-basis-routes
+      producer: api-proxy-basis
+      evidence_mode: artifact
+    - artifact_id: web-shell-page
+      producer: web-shell
+      evidence_mode: artifact
+    - artifact_id: web-settings-credentials-page
+      producer: web-settings-credentials
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 70
+- id: web-proxy-visibility
+  worker: omac-worker-frontend
+  blocked_by:
+  - api-proxy-basis
+  - kernel-health-proxy-signal
+  - web-decisions
+  - web-proposals
+  - web-agent-changes
+  - web-audit
+  - web-health
+  title: Web 标明被拒绝的代答、授权单代答与新健康信号
+  description: 同一能力在几个已有页面的展示，共用同一份被拒绝信息与授权单字段。辅助路径：web/src/features/{proposals,agent-changes,audit,health}。
+  reviewer: omac-reviewer
+  contract:
+    objective: 决策待办与建议流标明被拒绝的代答或处理，agent 变更与审计页展示授权单 id 且授权单代答可撤销，健康页展示「回执与捕获失败」信号
+    non_goals:
+    - 不新增页面（授权单页归 web-settings-grants）
+    - 不承载业务规则，内核生成的 ask 按普通 web_only 决策展示
+    - 撤销提示沿用「外部已发生的副作用不撤销」的既有文案
+    - 不引入 Playwright，不做真实浏览器验收
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - npm --prefix web run test -- --run src/features/decisions src/features/proposals
+      src/features/agent-changes src/features/audit src/features/health
+    integration_gates:
+    - name: web-proxy-visibility-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#152-健康视图
+      - docs/solution-design.md#153-审计与变更视图
+      - docs/solution-design.md#41-web-中台
+      delivery_goal: 组件测试覆盖：待办卡片与建议条目的被拒绝标注；resolved_via=grant 的决定带撤销按钮并显示授权单 id；审计页显示
+        grant；健康页十项信号且顺序与服务端一致
+      covers:
+      - ACT-AUTH-03
+      - ACT-PROP-05
+      - ACT-REV-01
+      - ACT-HLT-01
+      acceptance_refs:
+      - flow-decision-answer
+      - flow-proposal-triage
+      - flow-agent-revert
+      - flow-why-audit
+      - flow-health
+      commands:
+      - npm --prefix web run test -- --run src/features/decisions src/features/proposals
+        src/features/agent-changes src/features/audit src/features/health
+    pr_base: main
+    acceptance_refs:
+    - flow-decision-answer
+    - flow-proposal-triage
+    - flow-agent-revert
+    - flow-why-audit
+    - flow-health
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#152-健康视图
+    - docs/solution-design.md#153-审计与变更视图
+    - docs/solution-design.md#41-web-中台
+    scope_paths:
+    - web/src/features/decisions/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-proxy-visibility-page
+    consumes:
+    - artifact_id: api-proxy-basis-routes
+      producer: api-proxy-basis
+      evidence_mode: artifact
+    - artifact_id: kernel-health-proxy-signal-module
+      producer: kernel-health-proxy-signal
+      evidence_mode: artifact
+    - artifact_id: web-decisions-page
+      producer: web-decisions
+      evidence_mode: artifact
+    - artifact_id: web-proposals-page
+      producer: web-proposals
+      evidence_mode: artifact
+    - artifact_id: web-agent-changes-page
+      producer: web-agent-changes
+      evidence_mode: artifact
+    - artifact_id: web-audit-page
+      producer: web-audit
+      evidence_mode: artifact
+    - artifact_id: web-health-page
+      producer: web-health
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 70
+- id: hermes-plugin-tools-basis
+  worker: omac-worker-frontend
+  blocked_by:
+  - cli-proxy-basis
+  - hermes-plugin-tools
+  - fix.hermes-plugin-tools.ea87a6
+  title: Hermes 工具按档位收窄依据参数
+  description: 取代缺陷 dfx-80defa39c0dd 的旧期望（所有工具加 evidence），该期望已作废，不实现。
+  reviewer: omac-reviewer
+  contract:
+    objective: 只有代答、接受、丢弃和改事项类工具带可选 evidence、grant 并原样交给 --evidence、--grant，提议、提问、委派、回执、声明类工具不带，工具描述写明本人原话只能来自本回合、不能改写或编造
+    non_goals:
+    - 不跑真实 Hermes：实测由 e2e-hermes-session 负责，test_live.py 不是本节点的验证命令
+    - 插件不含判断逻辑，钩子失败必须放行，单次钩子不超过 2 秒
+    - 不给 apa_propose、ask、delegate、report、declare 加 evidence 或 grant
+    verification_commands:
+    - python3 -m pytest -q plugins/hermes/tests/tools/test_tools.py plugins/hermes/tests/tools/test_files.py
+    - go run ./tools/redline
+    integration_gates:
+    - name: hermes-plugin-tools-basis-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-a-harness.md#a1-插件实现约定
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#112-接入能力
+      - docs/appendix-b-api-cli.md#b1-cli
+      delivery_goal: 替身 apa 上逐个工具断言参数表与实际 argv：第二档工具透传 --evidence、--grant，第一档工具的参数表没有这两项；会话身份透传
+        APA_SESSION、APA_HARNESS 不变
+      covers:
+      - ACT-HCTX-09
+      - ACT-CHAT-01
+      acceptance_refs:
+      - flow-hermes-context
+      - flow-chat-answer
+      commands:
+      - python3 -m pytest -q plugins/hermes/tests/tools/test_tools.py plugins/hermes/tests/tools/test_files.py
+    pr_base: main
+    acceptance_refs:
+    - flow-hermes-context
+    - flow-chat-answer
+    source_of_truth:
+    - docs/appendix-a-harness.md#a1-插件实现约定
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#112-接入能力
+    - docs/appendix-b-api-cli.md#b1-cli
+    scope_paths:
+    - plugins/hermes/tools/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: hermes-plugin-tools-basis-plugin
+    consumes:
+    - artifact_id: cli-proxy-basis-commands
+      producer: cli-proxy-basis
+      evidence_mode: artifact
+    - artifact_id: hermes-plugin-tools-plugin
+      producer: hermes-plugin-tools
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 70
+- id: hermes-plugin-receipt-evidence
+  worker: omac-worker-frontend
+  blocked_by:
+  - cli-proxy-basis
+  - hermes-plugin-receipt
+  title: Hermes 回执：提取结果证据，失败可见并补发
+  description: '取代 dfx-992917373ac0 的方案 A：不复用 PR #214，回执不带 --evidence，内核不为回执放宽任何判定。当前
+    _report 分离进程后丢弃退出码，没有结果证据，失败全部吞掉。'
+  reviewer: omac-reviewer
+  contract:
+    objective: 回执捕获从执行者输出提取 PR、commit、分支或链接后报 done，提取不到只报 progress，失败写插件本地日志，内核不可达时保留请求并在恢复后的下一次钩子带原幂等键补发一次
+    non_goals:
+    - 不跑真实 Hermes：实测由 e2e-hermes-session 负责，test_live.py 不是本节点的验证命令
+    - 插件不含判断逻辑，钩子失败必须放行，单次钩子不超过 2 秒
+    - 不带 --evidence；回执不要求本人原话
+    - 只匹配执行者类工具且参数含事项 id，无事项 id 不捕获，对模型不可见
+    - 内核可达但拒绝时只记日志、不重发；补发被拒绝时按同样处理
+    - 日志只写命令、事项 id、退出码、原因，不写凭据和对话正文
+    - 不实现候选捕获（hermes-plugin-capture-failure 负责）
+    verification_commands:
+    - python3 -m pytest -q plugins/hermes/tests/receipt/test_receipt.py
+    - go run ./tools/redline
+    integration_gates:
+    - name: hermes-plugin-receipt-evidence-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-a-harness.md#a1-插件实现约定
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#75-任务委派
+      - docs/solution-design.md#112-接入能力
+      - docs/solution-design.md#34-场景三委派与回收
+      - docs/appendix-b-api-cli.md#b1-cli
+      delivery_goal: 替身 apa 上覆盖：含 PR、commit、分支、链接各报 done 且带对应参数；无结果只报 progress；执行失败报
+        blocked；退出码 2、4、23 写日志不重发；退出码 7 保留后下一次钩子带原幂等键补发且只补发一次；钩子不阻塞也不向模型输出
+      covers:
+      - ACT-DLG-04
+      - ACT-DLG-06
+      acceptance_refs:
+      - flow-delegate-recover
+      commands:
+      - python3 -m pytest -q plugins/hermes/tests/receipt/test_receipt.py
+    pr_base: main
+    acceptance_refs:
+    - flow-delegate-recover
+    source_of_truth:
+    - docs/appendix-a-harness.md#a1-插件实现约定
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#75-任务委派
+    - docs/solution-design.md#112-接入能力
+    - docs/solution-design.md#34-场景三委派与回收
+    - docs/appendix-b-api-cli.md#b1-cli
+    scope_paths:
+    - plugins/hermes/receipt/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: hermes-plugin-receipt-evidence-plugin
+    consumes:
+    - artifact_id: cli-proxy-basis-commands
+      producer: cli-proxy-basis
+      evidence_mode: artifact
+    - artifact_id: hermes-plugin-receipt-plugin
+      producer: hermes-plugin-receipt
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 70
+- id: hermes-plugin-capture-failure
+  worker: omac-worker-frontend
+  blocked_by:
+  - cli-proxy-basis
+  - hermes-plugin-capture
+  title: Hermes 候选捕获：带 harness 身份，失败可见并补发
+  description: POST /capture 目前只发 X-APA-Session，缺 X-APA-Harness，审计 actor 看不出 harness（dfx-35de8528ebe3
+    未覆盖的一处）；失败被吞掉。取代 dfx-992917373ac0 中「capture 发本人原话」的旧期望：候选不带本人原话。
+  reviewer: omac-reviewer
+  contract:
+    objective: 候选捕获请求带 X-APA-Harness 且不带本人原话，配 delegate 凭据时落 proposed，失败写插件本地日志，内核不可达时保留请求并在恢复后的下一次钩子带原幂等键补发一次
+    non_goals:
+    - 不跑真实 Hermes：实测由 e2e-hermes-session 负责，test_live.py 不是本节点的验证命令
+    - 插件不含判断逻辑，钩子失败必须放行，单次钩子不超过 2 秒
+    - 不发 X-APA-Evidence；候选只落 proposed
+    - 只在开启捕获的项目生效，运行身份下不生效，不使用强制续跑
+    - 内核可达但拒绝时只记日志、不重发；补发被拒绝时按同样处理
+    - 日志只写命令、状态或退出码、原因，不写凭据和对话正文
+    verification_commands:
+    - python3 -m pytest -q plugins/hermes/tests/capture/test_capture.py
+    - go run ./tools/redline
+    integration_gates:
+    - name: hermes-plugin-capture-failure-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-a-harness.md#a1-插件实现约定
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#112-接入能力
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 替身服务上断言请求头含 X-APA-Session、X-APA-Harness、Idempotency-Key 且无 X-APA-Evidence；4xx
+        写日志不重发；连接失败保留后下一次钩子带原幂等键补发且只补发一次；钩子失败不影响 Hermes
+      covers:
+      - ACT-CAP-01
+      - ACT-HCTX-09
+      acceptance_refs:
+      - flow-capture
+      - flow-hermes-context
+      commands:
+      - python3 -m pytest -q plugins/hermes/tests/capture/test_capture.py
+    pr_base: main
+    acceptance_refs:
+    - flow-capture
+    - flow-hermes-context
+    source_of_truth:
+    - docs/appendix-a-harness.md#a1-插件实现约定
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#112-接入能力
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - plugins/hermes/capture/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: hermes-plugin-capture-failure-plugin
+    consumes:
+    - artifact_id: cli-proxy-basis-commands
+      producer: cli-proxy-basis
+      evidence_mode: artifact
+    - artifact_id: hermes-plugin-capture-plugin
+      producer: hermes-plugin-capture
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    coverage_gate: 70
