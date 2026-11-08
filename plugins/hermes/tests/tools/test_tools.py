@@ -64,8 +64,8 @@ def table(tmp_path, monkeypatch):
     return p
 
 
-def test_registers_the_ten_tools(tools):
-    assert set(tools) == {"apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
+def test_registers_the_apa_tools(tools):
+    assert set(tools) == {"apa_read_file", "apa_list_dir", "apa_item_update", "apa_material_commit", "apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
                           "apa_report", "apa_declare_executors", "apa_executor_call"}
 
 
@@ -149,3 +149,40 @@ def test_executor_call_maps_configured_ids_to_hermes_invocations(tools, table):
     assert cli["use_tool"] == "terminal" and cli["arguments"]["command"].startswith("codex exec ")
     assert "unknown executor" in json.loads(tools["apa_executor_call"]({"executor": "x.y", "id": "c", "task": "t"}))["error"]
     assert "human" in json.loads(tools["apa_executor_call"]({"executor": "owner", "id": "c", "task": "t"}))["error"]
+
+
+def test_item_update_writes_spec_json_with_session(tools, apa):
+    spec = {"period": "2026-W45", "sections": [{"project": "p", "text": "ok"}]}
+    tools["apa_item_update"]({"id": "i1", "spec": spec, "reason": "brief done"}, session_id="s3")
+    [c] = calls(apa)
+    assert c["session"] == "s3" and c["argv"][:2] == ["item", "update"] and c["argv"][2] == "i1"
+    assert json.loads(c["argv"][c["argv"].index("--spec") + 1]) == spec
+    assert c["argv"][-2:] == ["--reason", "brief done"]
+
+
+def test_item_update_kernel_refusal_is_exposed(tools, apa, monkeypatch):
+    monkeypatch.setenv("FAKE_EXIT", "4")
+    monkeypatch.setenv("FAKE_ERR", '{"code":"forbidden"}')
+    r = json.loads(tools["apa_item_update"]({"id": "other", "spec": {}, "reason": "x"}, session_id="s"))
+    assert r["exit_code"] == 4 and r["ok"] is False and r["stderr"] == {"code": "forbidden"}
+
+
+def test_material_commit_passes_body_on_stdin_not_argv(tools, apa):
+    body = "# 规范\n- 用 make test; $(rm -rf /) 只是文字\n"
+    tools["apa_material_commit"]({"kind": "guideline", "title": "G", "project": "p1", "reason": "draft", "content": body},
+                                 session_id="s4")
+    assert calls(apa) == [{"argv": ["material", "commit", "--from", "-", "--reason", "draft", "--kind", "guideline",
+                                    "--title", "G", "--project", "p1"], "session": "s4"}]
+    assert (apa / "stdin").read_text() == body
+
+
+def test_material_commit_revision_of_existing_id(tools, apa):
+    tools["apa_material_commit"]({"id": "m1", "reason": "r", "content": "x"}, session_id="s")
+    assert calls(apa)[0]["argv"] == ["material", "commit", "m1", "--from", "-", "--reason", "r"]
+
+
+@pytest.mark.parametrize("args,why", [({"reason": "r"}, "content"), ({"content": "x"}, "reason"),
+                                      ({"reason": "r", "content": "x"}, "kind and title")])
+def test_material_commit_rejects_incomplete_calls_without_running_apa(tools, apa, args, why):
+    r = json.loads(tools["apa_material_commit"](args, session_id="s"))
+    assert r["ok"] is False and why in r["error"] and not (apa / "log").exists()

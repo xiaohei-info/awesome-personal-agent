@@ -65,7 +65,8 @@ def kernel():
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n) or b"null")
             state["log"].append({"method": self.command, "path": self.path,
-                                 "session": self.headers.get("X-APA-Session"), "body": body})
+                                 "session": self.headers.get("X-APA-Session"),
+                                 "evidence": (self.headers.get("X-APA-Evidence") or "").encode("latin-1").decode("utf-8"), "body": body})
             status, out = next((r for k, r in state["replies"].items() if self.path.split("?")[0].endswith(k)),
                                (200, {"ok": True}))
             data = json.dumps(out).encode()
@@ -75,7 +76,7 @@ def kernel():
             self.end_headers()
             self.wfile.write(data)
 
-        do_GET = do_POST = _serve
+        do_GET = do_POST = do_PATCH = _serve
 
         def log_message(self, *a):
             pass
@@ -113,7 +114,8 @@ def test_flow_hermes_context_session_identity_reaches_propose_and_all_tools(herm
     out = hermes(("apa_propose", {"kind": "task", "title": "Renew domain", "tags": "x,y"}, "sess-A"),
                  ("apa_executors", {}, "sess-A"), ("apa_report", {"id": "c1", "outcome": "progress"}, "sess-B"))
     assert out["registered"] == sorted(["apa_propose", "apa_ask", "apa_accept", "apa_declare_executors", "apa_decide",
-                                        "apa_delegate", "apa_dismiss", "apa_executor_call", "apa_executors", "apa_report"])
+                                        "apa_delegate", "apa_dismiss", "apa_executor_call", "apa_executors", "apa_report", "apa_read_file",
+                                        "apa_list_dir", "apa_item_update", "apa_material_commit"])
     assert [(r["path"], r["session"]) for r in kernel["log"]] == [
         ("/v1/items", "sess-A"), ("/v1/executors", "sess-A"), ("/v1/items/c1/report", "sess-B")]
     assert kernel["log"][0]["body"]["title"] == "Renew domain" and kernel["log"][0]["body"]["kind"] == "task"
@@ -124,7 +126,7 @@ def test_flow_chat_answer_decide_is_recorded_with_the_owners_words(hermes, kerne
     assert out["results"][0]["exit_code"] == 0
     (req,) = kernel["log"]
     assert req["path"] == "/v1/items/i1/decide" and req["session"] == "s1"
-    assert req["body"]["choice"] == "B" and req["body"]["evidence"] == "就选方案 B"
+    assert req["body"]["choice"] == "B" and req["evidence"] == "就选方案 B"  # evidence travels as X-APA-Evidence
 
 
 def test_flow_chat_answer_web_only_refusal_stops_and_nothing_else_is_sent(hermes, kernel):
@@ -176,3 +178,17 @@ def test_flow_life_renewal_ask_carries_session_question_and_options(hermes, kern
 def test_accept_and_dismiss_carry_session(hermes, kernel):
     hermes(("apa_accept", {"id": "r1", "evidence": "yes renew"}, "s1"), ("apa_dismiss", {"id": "r2", "reason": "no"}, "s1"))
     assert [(r["path"], r["session"]) for r in kernel["log"]] == [("/v1/items/r1/accept", "s1"), ("/v1/items/r2/dismiss", "s1")]
+
+
+def test_flow_brief_and_guideline_read_tier_run_reads_materials_and_writes_back_via_apa_tools(hermes, kernel):
+    out = hermes(("apa_list_dir", {"path": "."}, "s1"),
+                 ("apa_item_update", {"id": "i1", "spec": {"period": "2026-W45", "sections": [{"project": "p", "text": "ok"}]},
+                                      "reason": "brief"}, "s1"),
+                 ("apa_material_commit", {"kind": "guideline", "title": "G", "project": "p", "reason": "draft",
+                                          "content": "# 规范\n只写仓库里看得到的事实"}, "s1"))
+    assert out["results"][0]["ok"] is True  # file tools are registered and dispatched by Hermes (cwd is HERMES_SRC)
+    upd, com = kernel["log"]
+    assert upd["method"] == "PATCH" and upd["path"] == "/v1/items/i1" and upd["session"] == "s1"
+    assert upd["body"]["spec"] == {"period": "2026-W45", "sections": [{"project": "p", "text": "ok"}]}
+    assert com["path"] == "/v1/materials" and com["body"]["content"].startswith("# 规范")
+    assert com["body"]["kind"] == "guideline" and com["body"]["project"] == "p"
