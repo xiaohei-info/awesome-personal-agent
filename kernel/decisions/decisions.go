@@ -28,6 +28,7 @@ const (
 	ViaWeb     = "web"
 	ViaChat    = "chat"
 	ViaTimeout = "timeout"
+	ViaGrant   = domain.ResolvedViaGrant
 )
 
 func invalid(why string) error {
@@ -109,10 +110,13 @@ func object(tx *store.Tx, id string) (authz.Object, domain.Item, error) {
 	return o, it, nil
 }
 
-// viaOf：Web 上的本人记 web，其余（只可能是附证据的 delegate）记 chat（§14.5）。
+// viaOf：Web 上的本人记 web，依据授权单的记 grant，其余（附证据的 delegate）记 chat（§14.5）。
 func viaOf(c *command.Ctx) string {
 	if c.Caller.Level == authz.LevelWeb {
 		return ViaWeb
+	}
+	if c.Grant != "" {
+		return ViaGrant
 	}
 	return ViaChat
 }
@@ -295,7 +299,7 @@ func answer() command.Spec {
 // via 是决定入口（Resolution.ResolvedVia），by 是回答人。已有结果或事项不在等待决定返回退出码 6，只认第一次。
 // 授权由调用方的命令管线负责；渠道回答（channel.answer）经它落账，决策的写入仍只有本模块。
 func Answer(c *command.Ctx, id, choice, text, via, by, reason string) error {
-	res := domain.Resolution{Choice: choice, Text: text, ResolvedVia: via, AnsweredBy: by, Evidence: c.Evidence, ResolvedAt: c.Now()}
+	res := domain.Resolution{Choice: choice, Text: text, ResolvedVia: via, AnsweredBy: by, Evidence: c.Evidence, Grant: c.Grant, ResolvedAt: c.Now()}
 	it, err := settle(c.Tx, answerIn{ID: id, Choice: choice, Text: text}, res)
 	if err != nil {
 		return err

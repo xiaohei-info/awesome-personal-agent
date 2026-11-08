@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -53,6 +54,8 @@ type Caller struct {
 	Actor domain.Actor
 	Level authz.Level
 	Kind  auth.Kind // 仅凭据入口有值
+	// Credential 是凭据 id，仅凭据入口有值；授权单按它认人（Actor.Principal 在绑定执行者时是执行者 id）。
+	Credential string
 	// RunScope 只有运行凭据有值：据账本判断授权对象是否在运行范围内（目标事项及其子事项 / 目标事项所属项目）。
 	// 管线用它填 authz.Object 的 InRunScope、InRunProject，命令自己不必也无法声明。
 	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
@@ -91,7 +94,7 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	if l == authz.LevelDelegate {
 		a.OnBehalfOf = b.OnBehalfOf
 	}
-	return Caller{Actor: a, Level: l, Kind: c.Kind}, nil
+	return Caller{Actor: a, Level: l, Kind: c.Kind, Credential: c.ID}, nil
 }
 
 // Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。
@@ -136,6 +139,7 @@ type Request struct {
 	Chain         Chain
 	RuleID        string // 自动动作（规则）的授权依据
 	Evidence      string
+	Grant         string // 第二档的另一条依据：授权单 id；与 Evidence 不能同时携带
 	Owner         string
 	WebURL        string
 }
@@ -148,6 +152,7 @@ type Ctx struct {
 	Object     authz.Object
 	ChainDepth int
 	Basis      *domain.Basis
+	Grant      string // 本次放行所依据的授权单 id；只有第二档且依据授权单时非空，Emit 的每条事件都记它
 	Evidence   string // 请求携带的本人原话（第二档已由授权校验过存在；会话引用在 Caller.Actor.Session）
 	now        func() time.Time
 	seqs       []int64
@@ -163,6 +168,9 @@ func (c *Ctx) Events() []domain.Event { return c.events }
 // Emit 在同一事务内追加事件。Actor、ChainDepth、Basis 一律由内核覆盖，调用方写不了。
 func (c *Ctx) Emit(e domain.Event) (int64, error) {
 	e.Actor, e.ChainDepth, e.Basis = c.Caller.Actor, c.ChainDepth, c.Basis
+	if c.Grant != "" {
+		e.Grant = c.Grant
+	}
 	if e.At.IsZero() {
 		e.At = c.now()
 	}
@@ -439,10 +447,24 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 			tier = authz.TierWork
 		}
 	}
+	var grant *policy.Grant
+	if req.Grant != "" && caller.Level == authz.LevelDelegate {
+		g, err := policy.GetGrant(tx, req.Grant)
+		var de *domain.Error
+		if errors.As(err, &de) && de.Code == domain.CodeNotFound {
+			err = nil // 授权判定按"授权单不存在"返回退出码 23
+		} else if err == nil {
+			grant = &g
+		}
+		if err != nil {
+			return Result{}, Commit{}, err
+		}
+	}
 	decided := authz.TierNone
 	for _, act := range actions {
 		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
-			Evidence: req.Evidence, Tier: tier, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender}
+			Evidence: req.Evidence, Tier: tier, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender,
+			Command: spec.Name, GrantID: req.Grant, Grant: grant, Credential: caller.Credential, Now: x.now()}
 		d := authz.Decide(pol, ar)
 		if d.Err == nil {
 			decided = max(decided, authz.TierOf(ar))
@@ -463,6 +485,10 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 	// 第一档的 Event 不带 on_behalf_of（§14.5）：Bearer 认证只知道凭据，替本人说话要由第二档的依据来换。
 	if caller.Level == authz.LevelDelegate && caller.Actor.Type == domain.ActorAgent && decided < authz.TierDecide {
 		caller.Actor.OnBehalfOf = ""
+	}
+	usedGrant := ""
+	if req.Grant != "" && caller.Level == authz.LevelDelegate && decided >= authz.TierDecide {
+		usedGrant = req.Grant
 	}
 	// 3 校验：幂等 → 乐观版本 → 命令自身约束
 	hash := sha256.Sum256(req.Input)
@@ -517,7 +543,7 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request) (Result, Commi
 		basis = &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID}
 	}
 	at := x.now()
-	c := &Ctx{Tx: tx, Caller: caller, Input: req.Input, Object: obj, ChainDepth: depth, Basis: basis, Evidence: req.Evidence,
+	c := &Ctx{Tx: tx, Caller: caller, Input: req.Input, Object: obj, ChainDepth: depth, Basis: basis, Evidence: req.Evidence, Grant: usedGrant,
 		now: func() time.Time { return at }}
 	// 4 事务
 	var out Result

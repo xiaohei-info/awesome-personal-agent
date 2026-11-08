@@ -54,6 +54,9 @@ func render(tl kwhy.Timeline) string {
 		if s.ResolvedVia != "" {
 			fmt.Fprintf(&b, "  resolved via %s", s.ResolvedVia)
 		}
+		if s.Grant != "" {
+			fmt.Fprintf(&b, "  grant %s", s.Grant)
+		}
 		if s.Tombstone {
 			b.WriteString("  [erased]")
 		}
