@@ -243,14 +243,51 @@ def test_unreachable_kernel_keeps_the_request_and_resends_once_with_the_same_key
     assert len(calls(apa, 4, wait=1)) == 3  # never a second re-send
 
 
-def test_resend_that_is_unreachable_again_is_logged_and_dropped(apa, hooks):
-    (apa / "log.codes").write_text("7\n7\n")
+def test_resend_survives_a_still_down_kernel_and_stops_after_success(apa, hooks):
+    (apa / "log.codes").write_text("7\n7\n0\n")
     hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} PR #1", child_status="completed")
     log_lines(apa, 1)
+    for n in (2, 3):  # second hook: still down; third hook: kernel is back
+        hooks["subagent_stop"](parent_session_id="s", child_summary="nothing", child_status="completed")
+        assert len(calls(apa, n)) == n
+    got = calls(apa, 3)
+    assert len({flag(c["argv"], "--idempotency-key") for c in got}) == 1
+    assert len(log_lines(apa, 1, wait=0.5)) == 1  # logged once, not per failed re-send
     hooks["subagent_stop"](parent_session_id="s", child_summary="nothing", child_status="completed")
-    assert len(log_lines(apa, 2)) == 2
-    hooks["subagent_stop"](parent_session_id="s", child_summary="nothing", child_status="completed")
-    assert len(calls(apa, 3, wait=1)) == 2
+    assert len(calls(apa, 4, wait=1)) == 3  # delivered once, never again
+
+
+def test_resend_gives_up_after_a_bounded_number_of_tries(apa, hooks):
+    (apa / "log.codes").write_text("7\n" * 50)
+    hooks["subagent_stop"](parent_session_id="s", child_summary=f"{ITEM} PR #1", child_status="completed")
+    for n in range(2, 8):
+        log_lines(apa, 1)
+        calls(apa, n - 1)
+        hooks["subagent_stop"](parent_session_id="s", child_summary="nothing", child_status="completed")
+    time.sleep(1)
+    assert len(calls(apa, 99, wait=0.5)) == 6  # 1 send + 5 re-sends
+    assert "gave up" in (apa / "receipt.log").read_text()
+
+
+@pytest.mark.parametrize("prose", [
+    "I could not create a branch because tests failed",
+    "nothing changed; no branch was created",
+    "see the commit decade-old notes",
+    "the commit added nothing",
+    "no PR yet",
+])
+def test_prose_mentioning_branch_commit_or_pr_stays_progress(apa, prose):
+    assert flag(report_of(apa, prose), "--outcome") == "progress"
+
+
+@pytest.mark.parametrize("prose,value", [
+    ("pushed to branch `feat-x`", "feat-x"),
+    ("on branch: fix_y", "fix_y"),
+    ("branch named hotfix", "hotfix"),
+    ("changes are on branch agent/x1", "agent/x1"),
+])
+def test_recognisable_branch_forms_are_extracted(apa, prose, value):
+    assert flag(report_of(apa, prose), "--branch") == value
 
 
 def test_missing_binary_is_logged(apa, hooks, monkeypatch):

@@ -15,9 +15,10 @@ The same item and outcome is reported once per process; the kernel also gets an 
 
 Failures: every non-zero `apa report` exit is written to `$APA_RECEIPT_LOG` (default `$APA_HOME/hermes-receipt.log`): command, item id,
 exit code, reason; no credentials or conversation text. Exit 7 (kernel unreachable) keeps the request and its idempotency key and re-sends
-it once at the next hook; a refusal (2, 4, 23 ...) is only logged, and so is a refused re-send. Pending requests live in memory.
+it at later hooks until the kernel answers (at most 5 re-sends, 50 pending); a refusal (2, 4, 23 ...) is only logged and not retried, also on a re-send.
+A success is never repeated. Pending requests live in memory.
 
-No item id, no capture. The `apa report` runs detached with all output discarded, so the model sees nothing;
+No item id, no capture. The `apa report` runs in its own session on a background thread with all output discarded, so the model sees nothing;
 any failure, missing binary or exception is swallowed. The kernel judges the receipt (credential binding, exit 4 ...).
 
 ## Live gate

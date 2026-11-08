@@ -8,8 +8,8 @@ the model never sees it; any failure is swallowed and never reaches Hermes.
 `done` needs result evidence (PR, commit, branch or link) taken from the executor's output; without any it is
 reported as `progress`. The exit code of `apa report` is watched off the hook thread: every failure goes to a
 plugin-local log (command, item id, exit code, reason; no credentials, no conversation text). Exit 7 (kernel
-unreachable) keeps the request and its idempotency key and re-sends it once at the next hook; any other
-non-zero exit (kernel reachable but refused) is only logged.
+unreachable) keeps the request and its idempotency key and re-sends it at later hooks until the kernel answers
+(success, or a refusal which is only logged); it is given up after MAX_RESENDS tries. Once sent successfully it is never sent again.
 """
 import hashlib
 import json
@@ -26,14 +26,17 @@ SUMMARY_MAX = 2000
 
 PR_URL = re.compile(r"https?://[^\s)>\]]+/pull/\d+")
 PR_REF = re.compile(r"\bPR\s*(#\d+)", re.I)
-COMMIT = re.compile(r"\bcommit\s+`?([0-9a-f]{7,40})\b", re.I)
-BRANCH = re.compile(r"\bbranch\s+[`'\"]?([\w][\w./-]*)", re.I)
+COMMIT = re.compile(r"\bcommit\s+`?((?=[0-9a-f]*\d)[0-9a-f]{7,40})\b", re.I)  # needs a digit: "commit decade" is prose
+# a branch only when it is recognisably a ref: quoted, after "branch:" / "branch named", or containing "/"
+BRANCH = re.compile(r"\bbranch\s*(?::\s*|named\s+|\s)(?:[`'\"]([\w./-]+)[`'\"]|(?:(?<=:\s)|(?<=named\s))([\w][\w./-]*)|([\w.-]+/[\w./-]*))", re.I)
 LINK = re.compile(r"https?://[^\s)>\]]+")
 UNREACHABLE = 7
+MAX_RESENDS = 5  # hooks that may find the kernel still down before the request is given up
+MAX_PENDING = 50
 RUN_TIMEOUT = 60  # off the hook thread; only bounds a hung apa
 
 _lock = threading.Lock()
-_pending = []  # (item, args, env) kept after exit 7 for one re-send; in memory: lost when Hermes exits
+_pending = []  # (item, args, env, attempts) kept after exit 7 until the kernel answers; in memory: lost when Hermes exits
 _sent = set()  # (item, outcome): delegate_task fires subagent_stop and then post_tool_call for the same result
 
 
@@ -63,7 +66,7 @@ def _evidence(text):
         ev["--commit"] = m.group(1)
     m = BRANCH.search(text)
     if m:
-        ev["--branch"] = m.group(1).rstrip(".")
+        ev["--branch"] = next(g for g in m.groups() if g).rstrip(".")
     links = [u for u in LINK.findall(text) if not PR_URL.fullmatch(u)]
     if links:
         ev["--link"] = links[0]
@@ -82,10 +85,10 @@ def _log(item, args, code, reason):
         pass
 
 
-def _run(item, args, env, retry):
+def _run(item, args, env, attempts):
     try:
         code = subprocess.run(args, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL, timeout=RUN_TIMEOUT).returncode
+                              stderr=subprocess.DEVNULL, timeout=RUN_TIMEOUT, start_new_session=True).returncode
         reason = "kernel unreachable" if code == UNREACHABLE else "rejected by kernel"
     except subprocess.TimeoutExpired:
         code, reason = "-", "apa timed out"
@@ -93,24 +96,28 @@ def _run(item, args, env, retry):
         code, reason = "-", f"cannot run apa: {e.__class__.__name__}"
     if code == 0:
         return
-    if retry:
-        reason += " (re-send, not retried again)"
-    elif code == UNREACHABLE:
+    if code == UNREACHABLE:
         with _lock:
-            _pending.append((item, args, env))
-        reason += " (kept for one re-send)"
-    _log(item, args, code, reason)
+            keep = attempts < MAX_RESENDS and len(_pending) < MAX_PENDING
+            if keep:
+                _pending.append((item, args, env, attempts + 1))
+        if not keep:
+            _log(item, args, code, reason + " (gave up)")
+        elif attempts == 0:  # logged once, not on every failed re-send
+            _log(item, args, code, reason + " (kept, re-sent at later hooks until the kernel answers)")
+        return
+    _log(item, args, code, reason + (" (re-send)" if attempts else ""))
 
 
-def _spawn(item, args, env, retry=False):
-    threading.Thread(target=_run, args=(item, args, env, retry), daemon=True).start()
+def _spawn(item, args, env, attempts=0):
+    threading.Thread(target=_run, args=(item, args, env, attempts), daemon=True).start()
 
 
 def _resend():
     with _lock:
         todo, _pending[:] = list(_pending), []
-    for item, args, env in todo:
-        _spawn(item, args, env, retry=True)  # same args, so the same idempotency key
+    for item, args, env, attempts in todo:
+        _spawn(item, args, env, attempts)  # same args, so the same idempotency key
 
 
 def _report(item, outcome, summary, session_id):
