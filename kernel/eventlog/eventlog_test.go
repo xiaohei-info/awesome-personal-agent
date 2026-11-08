@@ -75,7 +75,7 @@ func TestAppendAssignsMonotonicSeqAndRoundTripsAllFields(t *testing.T) {
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "a1", Via: domain.ViaRule,
 			Harness: "h", Session: "s", Run: "r", OnBehalfOf: "me"},
 		Reason: "auto", Payload: json.RawMessage(`{"answer":"yes"}`), ChainDepth: 3,
-		Basis: &domain.Basis{PolicyVersion: 7, RuleID: "rule-9"}, ResolvedVia: "web", Evidence: "ev", At: at,
+		Basis: &domain.Basis{PolicyVersion: 7, RuleID: "rule-9"}, ResolvedVia: "grant", Evidence: "ev", Grant: "grt_1", At: at,
 	}
 	seqs := appendAll(t, s, ev(domain.EvItemCreated, "i1"), full, ev(domain.EvItemUpdated, "i1"))
 	if seqs[0] != 1 || seqs[1] != 2 || seqs[2] != 3 {
@@ -89,7 +89,7 @@ func TestAppendAssignsMonotonicSeqAndRoundTripsAllFields(t *testing.T) {
 	full.Seq = 2
 	if g.Seq != 2 || g.Type != full.Type || g.Object != full.Object || g.Actor != full.Actor ||
 		g.Reason != full.Reason || string(g.Payload) != string(full.Payload) || g.ChainDepth != 3 ||
-		*g.Basis != *full.Basis || g.ResolvedVia != "web" || g.Evidence != "ev" || !g.At.Equal(at) {
+		*g.Basis != *full.Basis || g.ResolvedVia != "grant" || g.Grant != "grt_1" || g.Evidence != "ev" || !g.At.Equal(at) {
 		t.Fatalf("round trip mismatch: %+v", g)
 	}
 	if got[0].Event.Basis != nil || got[0].Tombstone {

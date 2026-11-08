@@ -155,7 +155,9 @@ func (a *answerer) answer() command.Spec {
 }
 
 // reserved 挡住渠道名冒充其他决定入口（Resolution.ResolvedVia 与渠道名共用一个字段）。
-func reserved(name string) bool { return name == "web" || name == "chat" || name == "timeout" }
+func reserved(name string) bool {
+	return name == "web" || name == "chat" || name == "timeout" || name == domain.ResolvedViaGrant
+}
 
 // formAnswer：令牌本身就是凭据，只对发放时的那一个决策、那一个版本有效；web_only 与初筛未返回在作答时重新判定
 // （策略可能在发放后变了）。校验失败整体回滚，令牌不算用过。

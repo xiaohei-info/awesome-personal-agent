@@ -229,6 +229,15 @@ func (a *Auth) Rotate(tx *store.Tx, id string, grace time.Duration) (Credential,
 	return c, secret, nil
 }
 
+// Get 按 id 取凭据登记（含已吊销）；不存在返回 not_found。
+func (a *Auth) Get(tx *store.Tx, id string) (Credential, error) {
+	c, ok, err := one(tx, "id = ?", id)
+	if err == nil && !ok {
+		err = domain.NewError(domain.CodeNotFound, "credential not found", "list credentials and retry")
+	}
+	return c, err
+}
+
 // List 按签发顺序列出凭据登记（含已吊销，便于审计）。
 func (a *Auth) List(tx *store.Tx) ([]Credential, error) {
 	r, err := tx.Query("SELECT " + cols + " FROM auth_credential ORDER BY created_at, id")

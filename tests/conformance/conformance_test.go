@@ -63,15 +63,17 @@ func between(t *testing.T, s, from, to string) string {
 }
 
 // tableRows 返回 Markdown 表格各行的单元格（去掉首尾空格），跳过表头分隔行。
+// 单元格内转义的竖线 `\|` 不是列分隔，还原为 `|`。
 func tableRows(section string) [][]string {
 	var out [][]string
 	for _, line := range strings.Split(section, "\n") {
 		if !strings.HasPrefix(line, "|") {
 			continue
 		}
-		cells := strings.Split(strings.Trim(line, "|"), "|")
+		const esc = "\x00"
+		cells := strings.Split(strings.Replace(strings.Trim(line, "|"), `\|`, esc, -1), "|")
 		for i := range cells {
-			cells[i] = strings.TrimSpace(cells[i])
+			cells[i] = strings.TrimSpace(strings.ReplaceAll(cells[i], esc, "|"))
 		}
 		if strings.Trim(strings.Join(cells, ""), "-: ") == "" {
 			continue // 分隔行
