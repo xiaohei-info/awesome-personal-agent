@@ -307,7 +307,14 @@ func report() command.Spec {
 				}
 			}
 			ev, _ := json.Marshal(v.Evidence)
+			// 只有委派子事项的回执是 delegation.reported（委派核验等规则按它触发）；运行目标事项走通用事项事件。
 			typ := domain.EvDelegationReported
+			if child.Kind != domain.KindDelegation {
+				typ = domain.EvItemUpdated
+				if v.Outcome == OutcomeDone {
+					typ = domain.EvItemPhaseChanged
+				}
+			}
 			if _, err := c.Emit(domain.Event{Type: typ, Object: child.ID, Reason: reasonOr(v.Reason, "reported "+v.Outcome),
 				Evidence: string(ev), Payload: snap}); err != nil {
 				return nil, err

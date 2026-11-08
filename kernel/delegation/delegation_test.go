@@ -539,13 +539,31 @@ func TestRunCredentialReportsOnRunTarget(t *testing.T) {
 	if got := e.item(t, target); got.Phase != domain.PhaseOpen || got.StatusLabel != "s" {
 		t.Fatalf("progress not recorded on run target: %+v", got)
 	}
+	e.must(t, run, "delegate.report", rep(target, "blocked", Evidence{}))
+	if got := e.item(t, target); got.StatusLabel != "blocked: s" || got.Phase != domain.PhaseOpen {
+		t.Fatalf("blocked not recorded: %+v", got)
+	}
 	e.must(t, run, "delegate.report", rep(target, "done", Evidence{Link: "run output"}))
 	if got := e.item(t, target); got.Phase != domain.PhaseDone {
 		t.Fatalf("done must take the target out of open: %+v", got)
+	}
+	// 运行目标事项的回执不是委派回执：不产生 delegation.reported（否则委派核验规则会把它当子事项处理）。
+	if n := countType(e.events(t), domain.EvDelegationReported); n != 0 {
+		t.Fatalf("run-target receipts emitted %d delegation.reported", n)
 	}
 	e.wantExit(t, domain.ExitPermissionDenied, run, "delegate.report", rep(other, "done", Evidence{Link: "x"}))
 	if got := e.item(t, other); got.Phase != domain.PhaseOpen {
 		t.Fatalf("out-of-scope item changed: %+v", got)
 	}
 	e.consistent(t)
+}
+
+// 委派子事项的回执仍是 delegation.reported。
+func TestChildReceiptStillEmitsDelegationReported(t *testing.T) {
+	e := setup(t)
+	child := e.delegate(t, e.as("DEL"), e.parent(t, ""), workHost)
+	e.must(t, e.as("WRK"), "delegate.report", rep(child, "progress", Evidence{}))
+	if n := countType(e.events(t), domain.EvDelegationReported); n != 1 {
+		t.Fatalf("delegation.reported = %d", n)
+	}
 }
