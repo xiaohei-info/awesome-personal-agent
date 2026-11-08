@@ -316,6 +316,39 @@ func TestGlobalEvidenceFlagBecomesHeader(t *testing.T) {
 	}
 }
 
+// 全局 --grant 两种写法都进 X-APA-Grant 头且不传给子命令；与 --evidence 同带时两个头都发，二选一由内核判定（退出码 2）。
+func TestGlobalGrantFlagBecomesHeader(t *testing.T) {
+	var got [][2]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, [2]string{r.Header.Get("X-APA-Grant"), r.Header.Get("X-APA-Evidence")})
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	env := map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t"}
+	for _, args := range [][]string{{"--grant", "grt_1", "items"}, {"items", "--grant=grt_2"}, {"items"}, {"--grant", "grt_3", "--evidence", "ok", "items"}} {
+		if r := apa(t, env, t.TempDir(), "", args...); r.code != 0 {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	want := [][2]string{{"grt_1", ""}, {"grt_2", ""}, {"", ""}, {"grt_3", "ok"}}
+	if len(got) != 4 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
+		t.Fatalf("grant/evidence headers: %q", got)
+	}
+}
+
+// 内核的 403 basis_required 还原为退出码 23，why/next 原样交给 stderr。
+func TestBasisRequiredIsExit23(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		_, _ = w.Write([]byte(`{"code":"basis_required","why":"grant revoked","next":"ask the owner"}`))
+	}))
+	defer srv.Close()
+	r := apa(t, map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t"}, t.TempDir(), "", "--grant", "g", "items")
+	if r.code != 23 || !strings.Contains(r.errOut, "grant revoked") {
+		t.Fatalf("%+v", r)
+	}
+}
+
 func TestCorruptSavedCredentialIs3(t *testing.T) {
 	home := t.TempDir()
 	_ = os.WriteFile(filepath.Join(home, "credentials.json"), []byte("{"), 0o600)

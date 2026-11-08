@@ -146,7 +146,7 @@ func add(c *client.Ctx, args []string, name string) error {
 		fields = append([]string{"phase"}, fields...)
 		hint += " [--phase <phase>]"
 	}
-	hint += " [--evidence <text>]"
+	hint += " [--evidence <text> | --grant <id>]"
 	f, _ := newForm(name, fields, []string{"idempotency-key"}, nil)
 	if _, err := f.parse(args, false, hint); err != nil {
 		return err
@@ -169,13 +169,13 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	switch sub {
 	case "update":
 		fields = itemFields[1:]
-		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec] --reason <r> [--evidence <text> --version <n>]"
+		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec] --reason <r> [--evidence <text> | --grant <id> --version <n>]"
 	case "transition":
 		fields = []string{"to", "reason", "waiting-on"}
-		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <text> --version <n>]"
+		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <text> | --grant <id> --version <n>]"
 	case "relate":
 		fields, bools = []string{"to", "type", "reason"}, []string{"remove"}
-		hint = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --evidence <text> --version <n>]"
+		hint = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --evidence <text> | --grant <id> --version <n>]"
 	}
 	f, rm := newForm("item "+sub, fields, []string{"version", "idempotency-key"}, bools)
 	id, err := f.parse(args, true, hint)

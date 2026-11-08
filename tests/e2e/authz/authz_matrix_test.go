@@ -62,13 +62,13 @@ func TestFlowAuthzMatrix(t *testing.T) {
 
 	k.step("ACT-AUTH-03 delegate 改任意事项必须附证据", func(t *testing.T) {
 		target := k.addItem("", otherHost)
-		before := k.version(target)
 		r := k.Apa(k.DEL, "", "item", "update", target, "--title", "no-evidence", "--reason", "x")
 		if r.Code == 0 {
 			t.Fatal("delegate 不带证据也能改事项")
 		}
-		if k.version(target) != before || k.item(target)["title"] == "no-evidence" {
-			t.Error("不带证据被拒绝后事项应不变")
+		// §14.5：依据不足的修改不生效；open 的事项转 needs_input（版本随阶段变），内容不变。
+		if k.item(target)["title"] == "no-evidence" || k.item(target)["phase"] != "needs_input" {
+			t.Error("不带证据被拒绝后修改不应生效，事项应转 needs_input")
 		}
 		const words = "把标题改成 with-evidence"
 		k.expect("DEL 带证据", k.Apa(k.DEL, "", "item", "update", target, "--title", "with-evidence", "--reason", "owner asked", "--evidence", words), 0)
