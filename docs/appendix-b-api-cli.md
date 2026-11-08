@@ -21,16 +21,17 @@
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建 | observer | |
 | `apa item show/list` | 读事项；`show` 带挂靠消息，按转发白名单过滤 | observer | 5 |
-| `apa item add/update/transition/relate [--evidence]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料） | worker（自己的事项）；delegate（任意，每次附 `--evidence`，含改自己的事项和以 `proposed` 新建；缺证据为退出码 2） | 2、4、6 |
+| `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料） | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
-| `apa decide <id> --option --evidence` | 代答决策 | delegate | 4、6、20、22 |
-| `apa accept <id> --evidence` | 接受建议 | delegate | 4、20 |
-| `apa dismiss <id> --reason --evidence` | 丢弃建议 | delegate | 4 |
+| `apa decide <id> --option [--evidence \| --grant]` | 代答决策；本人原话或授权单二选一 | delegate | 2、4、6、20、22、23 |
+| `apa accept <id> [--evidence \| --grant]` | 接受建议；依据同上 | delegate | 2、4、20、23 |
+| `apa dismiss <id> --reason [--evidence \| --grant]` | 丢弃建议；依据同上 | delegate | 2、4、23 |
+| `apa grant list` | 列出该凭据名下未撤销、未过期的授权单：id、范围、动作、有效期；签发和撤销只在 Web | delegate | 4 |
 | **委派** | | | |
 | `apa executors [--project]` | 列出执行者，带项目时标明是否允许 | observer | |
 | `apa delegate --parent --assignee` | 建子事项，校验项目允许的执行者 | worker（自己的事项）；delegate（任意） | 4、5、21 |
-| `apa report <id> --outcome --summary --evidence --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息 | 绑定该 assignee 的 worker、该运行的运行凭据或 delegate | 4、6 |
+| `apa report <id> --outcome --summary [--pr --commit --branch --link] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`done` 必须带结果证据（`--pr`、`--commit`、`--branch`、`--link` 至少一项），附不出只能报 `progress` 或 `blocked` | 绑定该 assignee 的 worker、该运行的运行凭据、发起该委派的 delegate；其他 delegate 附 `--evidence` 或 `--grant` | 2、4、6、23 |
 | `apa handback <消息> --reason` | 把挂靠消息交回一次 | 同上 | 4、6 |
 | **项目** | | | |
 | `apa project list/show` | 读项目，含 repos 与允许的执行者 | observer | |
@@ -68,19 +69,27 @@
 | `apa health` | 健康视图 | observer | |
 | `apa run list/show` | 运行记录 | observer | |
 
-**只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、执行者清单、规则切 `auto`、运行权限上限、模型端点、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
+**只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、执行者清单、规则切 `auto`、运行权限上限、模型端点、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效、签发和撤销授权单。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
 
-**代理写命令清单**：delegate 调用下列命令必须附 `on_behalf_of` 与证据（CLI 全局参数 `--evidence`，HTTP 头 `X-APA-Evidence`），缺失为退出码 2，不写入；其他凭据与 Web 本人不受影响（主文档 §14.5）。只读命令、只在 Web 的命令（设置类，delegate 为退出码 20）不在清单内。
+**代理写命令清单**：delegate 调用写命令时按动作归属分三档（主文档 §14.5）。其他凭据与 Web 本人不经这张表；只读命令不在清单内。
 
-| 模块 | 命令 |
-|---|---|
-| 事项 | `item.create`、`item.update`、`item.transition`、`item.relate` |
-| 对话捕获 | `inbound.capture` |
-| 决策 | `decision.request`、`decision.answer`、`proposal.accept`、`proposal.dismiss` |
-| 材料 | `material.commit`、`material.add`、`revision.confirm`、`revision.reject`、`blob.put` |
-| 委派 | `delegate.create`、`delegate.report`、`executor.declare`、`followmsg.handback` |
-| 项目 | `project.create`、`project.update`、`project.repo.add`、`project.repo.remove`、`project.checkout.set`、`project.checkout.remove` |
-| 来源与能力包 | `source.register`、`source.update`、`source.set_enabled`、`source.webhook_key`、`source.webhook_revoke`、`source.replay`、`instance.create`、`instance.update`、`instance.toggle` |
+| 档 | 依据 | 缺失时 |
+|---|---|---|
+| 一：agent 自己的工作 | 凭据身份 + 对象绑定，不要求本人原话；带了 `--evidence` 照常记录 | 绑定不成立的回执、交回和事项修改按第二档判定；`delegate.report` 报 `done` 缺结果证据为退出码 2 |
+| 二：替本人做决定 | 二选一：`--evidence`（`X-APA-Evidence`）本人原话 + `APA_SESSION`（`X-APA-Session`）会话引用；或 `--grant <id>`（`X-APA-Grant`）授权单。同时携带为退出码 2 | 退出码 23，不写入；`open`、`waiting` 的事项转 `needs_input`，其余阶段不变；见主文档 §14.5 |
+| 三：高风险与设置类 | 只在 Web，见上文"只在 Web"；web_only 决策同样在这一档 | 退出码 20 |
+
+| 模块 | 第一档 | 第二档（可用授权单） | 第二档（只接受本人原话） |
+|---|---|---|---|
+| 事项 | `item.create`（以 `proposed` 新建）；`item.update`、`item.transition`、`item.relate`（绑定的事项） | `item.create`（其他阶段）；`item.update`、`item.transition`、`item.relate`（其他事项） | |
+| 对话捕获 | `inbound.capture` | | |
+| 决策 | `decision.request` | `decision.answer`、`proposal.accept`、`proposal.dismiss` | |
+| 材料 | `material.commit`、`material.add`、`blob.put` | `revision.confirm`、`revision.reject` | |
+| 委派 | `delegate.create`；`delegate.report`、`followmsg.handback`（绑定的事项）；`executor.declare` | `delegate.report`、`followmsg.handback`（其他事项） | |
+| 项目 | `project.checkout.set`、`project.checkout.remove` | | `project.create`、`project.update`、`project.repo.add`、`project.repo.remove` |
+| 来源与能力包 | | | `source.register`、`source.update`、`source.set_enabled`、`source.webhook_key`、`source.webhook_revoke`、`source.replay`、`instance.create`、`instance.update`、`instance.toggle` |
+
+授权单的 `actions` 只能取"可用授权单"一列的命令。
 
 **会话身份**：环境变量 `APA_SESSION`、`APA_HARNESS` 由接入方（harness 插件）设置，CLI 随每次请求以 HTTP 头 `X-APA-Session`、`X-APA-Harness` 发出，Event actor 据此审计到会话粒度（主文档 §11.2、§17.4）。
 
@@ -93,7 +102,8 @@
 | | `POST /items/{id}/transition`，`POST /items/{id}/relations` | 转阶段、关联 | 同上 |
 | | `POST /items/{id}/revert` | 撤销 agent 变更 | 只有 Web 登录 |
 | 决策 | `POST /items/{id}/ask` | 写入决策请求 | worker |
-| | `POST /items/{id}/decide`，`/accept`，`/dismiss` | 回答或处理建议 | Web 登录、delegate |
+| | `POST /items/{id}/decide`，`/accept`，`/dismiss` | 回答或处理建议；delegate 带 `X-APA-Evidence` 或 `X-APA-Grant`，二选一 | Web 登录、delegate |
+| | `GET /grants` | 该凭据名下未撤销、未过期的授权单 | delegate |
 | 委派 | `GET /executors` | 执行者清单 | observer |
 | | `POST /delegations` | 建子事项 | worker |
 | | `POST /items/{id}/report` | 回执 | worker |
@@ -133,7 +143,7 @@
 | 回放与健康 | `GET /why/{id}`，`GET /health` | 回放、健康视图；所有健康告警都经同一处产出健康类投递（§15.2），读取走 `GET /deliveries/unread` | observer |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
-| 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/purge` | 策略（含人格）、凭据、白名单、名单、命令登记、声明确认、物理删除 | 只有 Web 登录 |
+| 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/grants`、`/settings/purge` | 策略（含人格）、凭据、白名单、名单、命令登记、声明确认、授权单签发与撤销（`POST /settings/grants`、`POST /settings/grants/{id}/revoke`）、物理删除 | 只有 Web 登录 |
 | 认证 | `POST /auth/login`、`/logout` | Web 会话 | |
 
 事项字段 `deadline`：`POST /items` 与 `PATCH /items/{id}` 可写，值为 RFC 3339 时间；`PATCH` 传 `null` 清除；`GET` 在已设置时返回。行为见主文档 §6.8。
@@ -197,4 +207,4 @@
 
 对外事件类型只增不改。初始集合：
 
-`item.created`、`item.updated`、`item.phase_changed`、`item.deadline_passed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`command.rejected`、`material.revised`、`material.revision_proposed`、`guideline.activated`、`project.updated`、`project.allowed_executors_changed`、`rule.mode_changed`、`allowlist.changed`、`policy.changed`、`run.started`、`run.finished`、`source.failed`、`health.alert`。
+`item.created`、`item.updated`、`item.phase_changed`、`item.deadline_passed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`command.rejected`、`material.revised`、`material.revision_proposed`、`guideline.activated`、`project.updated`、`project.allowed_executors_changed`、`rule.mode_changed`、`allowlist.changed`、`policy.changed`、`grant.issued`、`grant.revoked`、`run.started`、`run.finished`、`source.failed`、`health.alert`。
