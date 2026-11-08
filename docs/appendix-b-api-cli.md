@@ -82,6 +82,8 @@
 | 项目 | `project.create`、`project.update`、`project.repo.add`、`project.repo.remove`、`project.checkout.set`、`project.checkout.remove` |
 | 来源与能力包 | `source.register`、`source.update`、`source.set_enabled`、`source.webhook_key`、`source.webhook_revoke`、`source.replay`、`instance.create`、`instance.update`、`instance.toggle` |
 
+**会话身份**：环境变量 `APA_SESSION`、`APA_HARNESS` 由接入方（harness 插件）设置，CLI 随每次请求以 HTTP 头 `X-APA-Session`、`X-APA-Harness` 发出，Event actor 据此审计到会话粒度（主文档 §11.2、§17.4）。
+
 ## B.2 HTTP API
 
 | 分组 | 方法与路径 | 说明 | 凭据 |

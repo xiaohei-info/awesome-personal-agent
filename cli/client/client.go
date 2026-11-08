@@ -24,6 +24,7 @@ const (
 	EnvToken          = "APA_TOKEN"
 	EnvProject        = "APA_PROJECT"
 	EnvSession        = "APA_SESSION"
+	EnvHarness        = "APA_HARNESS"
 	EnvRun            = "APA_RUN"
 	EnvRunCredentials = "APA_RUN_CREDENTIAL_FILE"
 
@@ -217,6 +218,9 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string,
 	}
 	if s := c.Env.Getenv(EnvSession); s != "" {
 		req.Header.Set("X-APA-Session", s)
+	}
+	if h := c.Env.Getenv(EnvHarness); h != "" {
+		req.Header.Set("X-APA-Harness", h)
 	}
 	resp, err := c.Env.HTTP.Do(req)
 	if err != nil {

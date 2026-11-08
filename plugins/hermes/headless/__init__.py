@@ -32,7 +32,7 @@ def _declare(args, session_id=None, **_):
         body = declaration()
     except (OSError, ValueError) as e:
         return json.dumps({"ok": False, "error": str(e)})
-    env = dict(os.environ)
+    env = dict(os.environ, APA_HARNESS="hermes")
     if session_id:
         env["APA_SESSION"] = str(session_id)
     try:

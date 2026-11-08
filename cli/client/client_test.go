@@ -277,15 +277,20 @@ func TestRunModeNeverFallsBackToSavedCredentials(t *testing.T) {
 }
 
 func TestSessionHeaderAndProject(t *testing.T) {
-	var gotSession string
+	var gotSession, gotHarness string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSession = r.Header.Get("X-APA-Session")
+		gotHarness = r.Header.Get("X-APA-Harness")
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
-	apa(t, map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t", "APA_SESSION": "s1"}, t.TempDir(), "", "items")
-	if gotSession != "s1" {
-		t.Fatalf("session header: %q", gotSession)
+	apa(t, map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t", "APA_SESSION": "s1", "APA_HARNESS": "h1"}, t.TempDir(), "", "items")
+	if gotSession != "s1" || gotHarness != "h1" {
+		t.Fatalf("session/harness headers: %q %q", gotSession, gotHarness)
+	}
+	apa(t, map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t"}, t.TempDir(), "", "items")
+	if gotHarness != "" {
+		t.Fatalf("harness header sent without APA_HARNESS: %q", gotHarness)
 	}
 	if (&Ctx{Env: Env{Getenv: func(string) string { return "p" }}}).Project() != "p" {
 		t.Fatal("project")
