@@ -1,9 +1,11 @@
-# sha256: 21cb11da01609022c69137c4128307f450a9f86514ccb1013b8808b32119e21f
+# sha256: a6246b912356c186e3a9e0728faa5a6f87a11bd5e51590084aa9e5029f637d71
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 1
+  used_global: 4
   used_by_reporter:
     e2e-bg-main-live: 1
+    e2e-proactive-live: 2
+    e2e-guideline-live: 1
   granted_by_reporter: {}
   entries:
     dfx-5dd4c0c9998f:
@@ -36,75 +38,34 @@ defects:
       reporters:
       - e2e-wake-live
       state: needs-owner
-  inbox:
-  - id: 73d90401be96
-    reporter: e2e-proactive-live
-    defects:
-    - class: design-gap
-      suspected_node: kernel-delegation
+    dfx-0bdd78ac2371:
+      suspected: kernel-delegation
       anchors:
       - flow-brief/ACT-BRF-01
-      design_ref: docs/solution-design.md#36-场景五简报
-      expected: 设计 §3.6 第 3 步、§8.4（任务型回执优先经 CLI、运行凭据写回）、附录 B.1（apa report 授权含"该运行的运行凭据"）
-        与附录 C.13 的 write-brief 模板（"写回事项 {item_id} … 用 apa report 写回结果"）要求：任务型运行持运行凭据，
-        对本次运行的目标事项（brief 事项本身，不是委派子事项）执行 apa report 能生效（progress/done/blocked 与摘要落到该事项，
-        done 让事项离开 open，Settle 按"已有 CLI 回执"处理）。
-      observed: 真实 Hermes 在 taiyi 上跑 brief 实例：运行者对 brief 事项 apa report 返回 exit 2 "item
-        <id> is not a delegated child item"；delegate.report 只接受 kind=delegation 且有父事项的子事项，
-        运行的目标事项无法经 CLI 回执，Settle 只能落到 stdout 兜底或 needs_input。
-      locations:
-      - kernel/delegation/delegation.go:delegated
-      - kernel/delegation/delegation.go:report
-      - kernel/agents/task/callagent.go:callTask
-      - packs/brief/prompts/write-brief.md
-  - id: e213fc0928d3
-    reporter: e2e-guideline-live
-    defects:
-    - class: design-gap
-      suspected_node: kernel-agentsmd
+      reporters:
+      - e2e-proactive-live
+      state: fixing
+      fix_node: fix.kernel-delegation.0bdd78
+    dfx-f93c43b158a3:
+      suspected: kernel-agentsmd
       anchors:
       - flow-agents-md/ACT-AGM-06
       - flow-agents-md/ACT-AGM-07
-      design_ref: docs/solution-design.md#125-agentsmd唯一源渲染漂移
-      expected: 设计 §12.5 漂移表：漂移生成 needs_input 事项，选项合回（diff 成为 Guideline 的 proposed
-        修订，确认后重新渲染）、 覆盖（之后 sync 才写入）、本次忽略。本人对该事项的选择经已有的决策回答入口生效：Web 决策回答与 POST /items/{id}/decide（附录
-        B.2，delegate 代答同样带证据）。设计与附录 B 没有另设漂移专用路由， 修复不新增 HTTP/CLI/Web 专用入口，只让决策回答落实所选项。
-      observed: kernel/agentsmd 的 agents.resolve / Service.Resolve 只有测试调用方，api/agentsmd
-        只登记 GET /agents-md 与 POST /agents-md/check；经普通决策回答关掉漂移事项时，raiseDrift 把它按"本次忽略"处理（注释即如此），
-        选"合回"不产生 proposed 修订、选"覆盖"后 sync 仍返回 6。真实 apa serve 上 POST /v1/agents-md/resolve
-        为 404。
-      locations:
-      - kernel/agentsmd/agentsmd.go:raiseDrift
-      - kernel/agentsmd/agentsmd.go:resolveCmd
-      - kernel/agentsmd/agentsmd.go:Resolve
-      - api/agentsmd/agentsmd.go:Routes
-  - id: 2c4968e34af9
-    reporter: e2e-proactive-live
-    defects:
-    - class: design-gap
-      suspected_node: hermes-plugin-tools
+      reporters:
+      - e2e-guideline-live
+      state: fixing
+      fix_node: fix.kernel-agentsmd.f93c43
+    dfx-ea87a6fe5df8:
+      suspected: hermes-plugin-tools
       anchors:
       - flow-brief/ACT-BRF-01
       - flow-brief/ACT-BRF-06
       - flow-guideline-draft/ACT-DRF-01
-      design_ref: docs/appendix-a-harness.md#a5-插件组合参考
-      expected: '主会话已定（2026-11-08 M1）：保留 read 档（§21.1 决定 5、§13.6 默认上限 read）。任务型模板
-        brief/write-brief、review、guideline-draft/draft-guideline 都是 access: read，按
-        §8.4 运行者要读运行目录里的资料文件 {materials_path}，draft-guideline 还要读 cwd=project_checkout
-        下的仓库，结果写回事项 spec 并经 CLI 回执。Hermes 插件的 apa 工具集补最小工具：只读文件工具（读/列 {materials_path}
-        与本次运行的工作目录，不写、不越出这两处），apa_item_update（写自己事项的 spec 等字段），apa_material_commit（正文作参数经
-        stdin 或临时文件交给 apa material commit --kind guideline）；写回一律走 apa 工具，不给通用文件写权限或
-        terminal。同步更新 plugins/hermes/tools/README.md、附录 A.5 与相关模板说明。'
-      observed: declaration.json 的 read 档是 -t apa,web，headless/README.md 实测 Hermes
-        没有只读文件工具集，read 档读不到本地文件；tools/__init__.py:_CLI_TOOLS 只有 propose/ask/decide/accept/dismiss/executors/delegate/report，没有写
-        spec 和 material commit 的工具。真实 Hermes 在 taiyi 上跑 brief：Run succeeded 但 spec
-        为 null（无 period/sections），4 次复现。
-      locations:
-      - plugins/hermes/tools/__init__.py:_CLI_TOOLS
-      - plugins/hermes/headless/declaration.json:access.read
-      - packs/brief/prompts/write-brief.md
-      - packs/review/prompts
-      - packs/guideline-draft/prompts/draft-guideline.md
+      reporters:
+      - e2e-proactive-live
+      state: fixing
+      fix_node: fix.hermes-plugin-tools.ea87a6
+  inbox:
   - id: 55213986451f
     reporter: e2e-guideline-live
     defects:
