@@ -1,0 +1,3 @@
+USER: 收到请只回复数字 2
+TOOLS: []
+FINAL: 2

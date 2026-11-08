@@ -1,0 +1,29 @@
+{
+  "ACT-CHAT-01-result": {
+    "passed": true,
+    "step": "ACT-CHAT-01 开启 delegate token 并准备决策"
+  },
+  "ACT-CHAT-02-result": {
+    "passed": true,
+    "step": "ACT-CHAT-02 决策经消息前注入带到会话"
+  },
+  "ACT-CHAT-03": {
+    "decide_args": "decide itm_d8322367ae4e9a53 --option B --evidence 就选方案 B --reason Owner chose option B in chat",
+    "evidence": "就选方案 B",
+    "resolved_via": "chat",
+    "reverted": true
+  },
+  "ACT-CHAT-03-result": {
+    "passed": true,
+    "step": "ACT-CHAT-03 聊天表态后代答"
+  },
+  "ACT-CHAT-04": {
+    "agent_attempted_decide": true,
+    "final": "付款确认（itm_835a9a41f242ec73）这条决策只能在 Web 端由你本人答复，我这边无法代你提交，返回的提示是 web_only。请打开：\n\nhttp://127.0.0.1:45261/items/itm_835a9a41f242ec73\n\n另一条“CHAT1-DEC-QZK 方案选择”需要选 A 还是 B，“同意”答不了它，所以我没有动它。",
+    "kernel_decide_exit": 20
+  },
+  "ACT-CHAT-04-result": {
+    "passed": true,
+    "step": "ACT-CHAT-04 web_only 决策在聊天中被拒绝"
+  }
+}

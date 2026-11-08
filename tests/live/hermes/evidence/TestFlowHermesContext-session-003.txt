@@ -1,0 +1,16 @@
+USER: 先别用任何命令。直接告诉我：我现在有哪几个待决事项（写出标题关键词）？委派出去的事现在是什么状态（写出事项 id 和阶段）？
+TOOLS: []
+FINAL: 先按你给的账本增量回答，不运行任何命令：
+
+待决事项（需要你决定）—— 1 个
+- itm_bd7ac902c771a3e2 ｜ HCTX3-PEND-QZK 本周发布用方案 A 还是 B ｜ 阶段 needs_input
+  选项：A 方案 A ／ B 方案 B；对应提醒 decision:itm_bd7ac902c771a3e2:3
+
+委派出去的事
+- 这份增量里看不出哪条是委派子事项：三条记录都没有标注 parent/child 关系或执行者。
+- 两条同标题「HCTX3-PARENT-QZK 修复登录」：
+  - itm_f381e98e73c34a0f → done
+  - itm_ea4abaf3b2206394 → open
+  同名一 done 一 open，很像是父项 + 委派子项，但这只是形态推断，增量没有给出依据。
+
+所以严格讲：待决事项能确定（就那一条，needs_input）；委派事项的 id→阶段对应关系我不能凭这份快照下结论，需要 `apa item show itm_f381e98e73c34a0f` / `itm_ea4abaf3b2206394` 才能确认谁是委派、委派给谁、当前在哪个阶段。要我现在查吗？

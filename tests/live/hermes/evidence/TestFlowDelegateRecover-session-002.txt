@@ -1,0 +1,18 @@
+USER: 刚才委派的事怎么样了
+TOOLS: [{terminal {"command": "apa item show itm_98c86fe33897a92a --pretty; echo \"=== parent ===\"; apa item show itm_ad295393a900dd2a --pretty"}} {terminal {"command": "apa why itm_98c86fe33897a92a --pretty 2>&1 | head -60; echo \"=== events ===\"; apa events --follow 2>&1 | tail -5"}}]
+FINAL: 委派的子事项已经回来了：
+
+  子事项 itm_98c86fe33897a92a  阶段 done（version 2）
+    assignee: work-host.cli，status_label 已修复
+    报告：outcome=done，summary「已修复」，evidence: PR https://example.invalid/acc/pr/42
+    事件 #24 delegation.reported，由 agent/work-host.cli 通过 cli 提交（15:43:32）
+
+  父事项 itm_ad295393a900dd2a  阶段 open（version 3）
+    waiting_on 已清空（原先等 work-host.cli），现在等你验收关闭
+
+两点说明：
+
+- 执行者不是我启动的。我在账本里只创建了委派（事件 #20），随后 work-host.cli 自己认领并上报了 done，所以它是自行执行并回报的。
+- 账本里有一条规则观察记录（事件 #26，delegation-verify/verify-report，会触发 call_agent delegation-screen），只是"would run"的观察，没有实际执行，也没有拦住这次上报。
+
+我没有去核对那个 PR 的内容，也没有把父事项标成完成——关闭父事项需要你确认。要我把 itm_ad295393a900dd2a 结掉吗？（顺便说一句，你要是不信 work-host.cli 自报的"已修复"，我可以先去看那个 PR 再决定。）

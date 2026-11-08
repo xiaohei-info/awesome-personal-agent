@@ -1,0 +1,15 @@
+USER: 再用 work-host.cli 执行一件和账本无关的小事（没有事项 id）：随便打个招呼。用 <redacted> 取调用方式，再用终端执行。
+TOOLS: [{tool_call {"calls": [{"arguments": {"executor": "work-host.cli", "task": "打个招呼（与账本无关，无事项 id）"}, "name": "<redacted>"}]}} {read_file {"path": "/tmp/apa-live.sDnPsJ/apa-e2e-863517594/work-host-cli.sh"}}]
+FINAL: 这一步我没有照做，原因说明如下。
+
+<redacted> 要求 id（Child item id）是硬性的——我刚试了不带 id 调用，工具的 schema 直接拒绝，报错说 “missing required argument(s): id … The tool was NOT invoked”。也就是说，执行者调用在插件里必须挂到一条已委派的子事项上，回执才有落点。没有事项 id 的 “账本无关任务” 在 <redacted> 这一层不存在合法映射。
+
+绕过它、直接用终端跑那个脚本我也可以做到，但那样会：
+- 往 apa-calls.log 写一条没有 item、没有 session 的调用记录，属于审计里的幽灵调用；
+- 脚本固定输出 “work-host.cli 已处理 PR https://example.invalid/acc/pr/6”，一句问候会变成一条假回执，而回执是插件写账本的输入。
+
+所以我不手工执行脚本去伪造一条无主回执。
+
+可选做法（你说一句我就做）：
+1. 只是打招呼——我在这里直接回你，不经过执行者：你好，我是 Hermes。
+2. 想要它真的走 work-host.cli——我先用 apa delegate 建一条小事项（如 “DLG-HELLO 冒烟问候”），再按你上一轮的流程取调用方式并执行，回执由插件写回那条事项。

@@ -1,0 +1,10 @@
+USER: 把「DLG2-PARENT-QZK 修复登录超时」这件事交给 work-host.cli。现在只在账本里委派，先不要启动执行者。
+TOOLS: [{terminal {"command": "apa guide; echo \"---\"; apa item show itm_ad295393a900dd2a"}} {tool_describe {"names": ["apa_delegate", "apa_executors", "<redacted>"]}} {tool_call {"calls": [{"name": "apa_executors", "arguments": {"project": "prj_8eb47210751d6a82"}}]}} {tool_call {"calls": [{"arguments": {"assignee": "work-host.cli", "parent": "itm_ad295393a900dd2a", "project": "prj_8eb47210751d6a82", "reason": "把「DLG2-PARENT-QZK 修复登录超时」交给 work-host.cli；仅入账，暂不启动执行者", "title": "DLG2-PARENT-QZK 修复登录超时"}, "name": "apa_delegate"}]}} {terminal {"command": "apa item show itm_ad295393a900dd2a --pretty; echo \"=== child ===\"; apa item show itm_98c86fe33897a92a --pretty"}}]
+FINAL: 已在账本里完成委派，执行者未启动。
+
+  父事项 itm_ad295393a900dd2a「DLG2-PARENT-QZK 修复登录超时」
+    阶段：open → waiting（waiting_on: executor / work-host.cli），version 2
+  子事项 itm_98c86fe33897a92a（kind: delegation）
+    assignee: work-host.cli，阶段 open，version 1，父关系已建立
+
+work-host.cli 在本项目允许的执行者列表中（唯一 allowed）。按你的要求没有调用执行者，只写入了账本。需要启动时告诉我，我会用 apa executor call 把子事项交给 work-host.cli 执行。

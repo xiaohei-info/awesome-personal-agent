@@ -1,0 +1,3 @@
+USER: 先别用任何命令：现在有哪些待我确认的事？一句话说说。
+TOOLS: []
+FINAL: 两件事待你确认：CHAT1-DEC-QZK 方案选择（选方案 A 还是 B）和 CHAT4-FIN-QZK 付款确认（是否同意付款），两项都处于 needs_input 阶段。

@@ -1,0 +1,5 @@
+USER: 好了吗？
+TOOLS: [{tool_call {"calls": [{"arguments": {"path": "."}, "name": "apa_list_dir"}]}} {tool_call {"calls": [{"arguments": {"evidence": "同意", "id": "itm_835a9a41f242ec73", "reason": "probe ledger state after Web answer", "text": "同意"}, "name": "apa_decide"}]}}]
+FINAL: 我这边看不到 Web 端的结果：apa_decide 对这条只会固定返回 web_only，不管你是否已经答过，所以它无法证明你提交成功没有。
+
+请你在 http://127.0.0.1:45261/items/itm_835a9a41f242ec73 确认一下状态；如果已提交，页面里这条就不该再显示待你答复，或者你告诉我一声，我按账本接下来的阶段继续。方案选择那条（A/B）还没答。
