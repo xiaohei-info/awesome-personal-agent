@@ -1,4 +1,6 @@
-# sha256: ec35a82433d4fbdc4f6bdc7fd71b2fa09b7989ded40f85970f82da9c5226cc76
+# sha256: dde00f89920d47bc6aa35b9d3254ff53e6db7a5c4c36213a0077566c8e348725
 work_item_id: 01a1ba2c-8293-75cd-8d80-c7a19a373b34
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-08T08:48:53Z'
 recovery_marker: true
