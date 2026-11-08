@@ -73,7 +73,7 @@ func (h *handlers) write(cmd string) core.Handler {
 			}
 		}
 		req := command.Request{Identity: p.Identity, Command: cmd, WebURL: h.webURL(r),
-			IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence}
+			IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant}
 		// evidence 是请求元数据，不是命令输入；命令对未知字段严格拒绝，所以从体里取出。
 		if raw, ok := body["evidence"]; ok {
 			delete(body, "evidence")

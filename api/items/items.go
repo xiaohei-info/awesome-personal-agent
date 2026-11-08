@@ -15,12 +15,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/api/screening"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -69,8 +71,23 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	q := r.URL.Query()
 	f := kitems.Filter{Phase: domain.Phase(q.Get("phase")), Kind: domain.Kind(q.Get("kind")),
 		Project: q.Get("project"), Assignee: q.Get("assignee")}
-	var its []domain.Item
-	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) { its, err = kitems.List(tx, f); return }); err != nil {
+	var (
+		its  []domain.Item
+		rejs = map[string]Rejection{}
+	)
+	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
+		if its, err = kitems.List(tx, f); err != nil {
+			return err
+		}
+		for _, it := range its {
+			if rj, err := LastRejection(tx, it); err != nil {
+				return err
+			} else if rj != nil {
+				rejs[it.ID] = *rj
+			}
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	if its == nil {
@@ -79,7 +96,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	for i := range its {
 		its[i] = screening.Redact(its[i], p.Caller.Level)
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"items": its})
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"items": its, "last_rejections": rejs})
 }
 
 func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
@@ -89,12 +106,16 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	var (
 		it   domain.Item
 		rels []domain.Relation
+		rej  *Rejection
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if it, err = kitems.Get(tx, r.PathValue("id")); err != nil {
 			return err
 		}
-		rels, err = kitems.Relations(tx, it.ID)
+		if rels, err = kitems.Relations(tx, it.ID); err != nil {
+			return err
+		}
+		rej, err = LastRejection(tx, it)
 		return err
 	}); err != nil {
 		return err
@@ -103,7 +124,7 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	if rels == nil || shown.Ask != it.Ask {
 		rels = []domain.Relation{} // 初筛中的事项对非 Web 凭据不带关系
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": shown, "relations": rels})
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": shown, "relations": rels, "last_rejection": rej})
 }
 
 // write 把请求体原样交给命令。pathKey 非空时把路径 id 写入体的该键（体里自带同名键直接拒绝）。
@@ -130,7 +151,7 @@ func (h *handlers) write(cmd, pathKey string, status int) core.Handler {
 			return err
 		}
 		req := command.Request{Identity: p.Identity, Command: cmd, Input: in,
-			IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence}
+			IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
 		if req.Evidence == "" {
 			_ = json.Unmarshal(body["evidence"], &req.Evidence)
 		}
@@ -156,4 +177,46 @@ func (h *handlers) write(cmd, pathKey string, status int) core.Handler {
 		}
 		return core.WriteJSON(w, status, map[string]any{"id": out.ID, "version": res.Version, "replayed": res.Replayed})
 	}
+}
+
+// Rejection 是事项上最近一次被拒绝的代理操作（退出码 23，§14.5）：决策待办与建议流据此标明"这次被拒绝的代答/处理"。
+// 只带机制（操作者、原因、授权单 id），不含账本用户内容。
+type Rejection struct {
+	Seq   int64        `json:"seq"`
+	At    time.Time    `json:"at"`
+	Actor domain.Actor `json:"actor"`
+	Code  domain.Code  `json:"code"`
+	Why   string       `json:"why"`
+	Grant string       `json:"grant,omitempty"`
+}
+
+// LastRejection 返回 needs_input、proposed 事项上仍未被处理的最近一次 23 拒绝；其后若有回答或阶段变化则视为已处理，返回 nil。
+// 读的是内核已记的 command.rejected，不重新判定。
+func LastRejection(tx *store.Tx, it domain.Item) (*Rejection, error) {
+	if it.Phase != domain.PhaseNeedsInput && it.Phase != domain.PhaseProposed {
+		return nil, nil
+	}
+	es, err := eventlog.ReadObject(tx, it.ID)
+	if err != nil {
+		return nil, err
+	}
+	for i := len(es) - 1; i >= 0; i-- {
+		e := es[i].Event
+		switch e.Type {
+		case domain.EvDecisionResolved, domain.EvItemPhaseChanged:
+			return nil, nil
+		case domain.EvCommandRejected:
+			var pl struct {
+				Code  domain.Code `json:"code"`
+				Exit  int         `json:"exit"`
+				Why   string      `json:"why"`
+				Grant string      `json:"grant"`
+			}
+			if json.Unmarshal(e.Payload, &pl) != nil || pl.Exit != domain.ExitBasisRequired {
+				continue
+			}
+			return &Rejection{Seq: e.Seq, At: e.At, Actor: e.Actor, Code: pl.Code, Why: pl.Why, Grant: pl.Grant}, nil
+		}
+	}
+	return nil, nil
 }

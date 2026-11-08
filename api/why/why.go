@@ -93,7 +93,7 @@ func (h *handlers) audit(w http.ResponseWriter, r *http.Request, p *core.Princip
 		return err
 	}
 	req := kwhy.AuditRequest{Actor: p.Caller.Actor, Level: p.Caller.Level, After: after, Limit: int(limit),
-		Filter: eventlog.Filter{Actor: q.Get("actor"), Object: q.Get("object"), Type: q.Get("type")}}
+		Filter: eventlog.Filter{Actor: q.Get("actor"), Object: q.Get("object"), Type: q.Get("type"), Grant: q.Get("grant")}}
 	var steps []kwhy.Step
 	if err := h.st.View(r.Context(), func(tx *store.Tx) error {
 		_, pol, err := policy.Current(tx)

@@ -150,7 +150,7 @@ func (a *api) run(r *http.Request, p *core.Principal, cmd string, in map[string]
 	if err != nil {
 		return command.Result{}, err
 	}
-	req := command.Request{Identity: p.Identity, Command: cmd, Input: raw, Evidence: p.Evidence}
+	req := command.Request{Identity: p.Identity, Command: cmd, Input: raw, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
 	if idem {
 		req.IdemKey = r.Header.Get(IdempotencyHeader)
 	}
