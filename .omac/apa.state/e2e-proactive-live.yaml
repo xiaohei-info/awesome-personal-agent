@@ -1,21 +1,4 @@
-# sha256: 0c7ed80d9eb62ba28dc5e1ffa09910eb83cf29c6b070c31bbc0a19303fc59c3a
+# sha256: cd595e189069382df5551d491795f7ce98be92fc95db123496c24767dab0ada7
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_progress
-recovery_marker: true
-retry_note: '负责人说明（覆盖你上次的阻塞判断）：这个节点要在 taiyi 上跑，不在 Mac mini 上跑。Mac mini 的红线指的是"不在 mini
-  上启动或调用 hermes、不碰 mini 的 ~/.hermes"，并没有禁止这个节点。所有 hermes 相关命令一律用 `ssh taiyi ''<命令>''`
-  在 taiyi 上执行：
-
-  - hermes 用 /opt/apa-live/bin/hermes 或 /opt/apa-live/venv/bin/hermes，先读 /opt/apa-live/README.md；
-
-  - 每次运行用 `mktemp -d /tmp/apa-live.XXXXXX` 得到的字面路径做独立 HERMES_HOME，把 /opt/apa-live/hermes-home
-  的 config.yaml 和 .env 复制进去。模型凭据就在这两个文件里，所以不缺模型凭据，也不需要 hermes pm repair；
-
-  - 业务凭据用 `set -a; . /opt/apa-live/creds/live.env; set +a` 加载，不打印；
-
-  - 只允许删除 /tmp/apa-live.* 下的目录。不碰 /root/.hermes、taiyi 的容器、aiteam-*、nginx，不重启任何服务。
-
-  e2e-bg-main-live 和 e2e-data-not-instructions 就是这样在 taiyi 上跑通的（后者已通过），照着做就行。
-
-  本节点要新建的 tests/live 目录和测试由你创建并提交。验收标准不放宽，发现产品缺陷照常上报。Mac mini 本机任何时候都不运行 hermes。 补充：~/.config/apa-live/README.md
-  已经按这个意思更新，请重新读一遍。'
+status: todo
+retry_note: 真实 Hermes 只能在 taiyi /opt/apa-live/ 隔离环境运行；不要在 Mac mini 启动或调用 Hermes。

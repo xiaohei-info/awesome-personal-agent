@@ -1,15 +1,4 @@
-# sha256: 1862221af020cf7caf61c535ccdfa65cc6ad2c56c2e0e1b5403a148a6dce7ed2
+# sha256: bc907a927ac50da4fd5ab1fffdf4373ada3257816a08549580a6b4d7c6918b4b
 work_item_id: 01a1b165-9155-7c6b-953c-98b6790e3ad3
-status: blocked
-recovery_marker: true
-retry_note: "负责人决定（PR #204 需要返工，不能豁免 live 验证）：\n1. 不能只凭退出码 1 就判定会话丢失。Hermes 对所有失败都返回
-  1，那样网络错误、额度错误也会被当成会话丢失，然后静默开一个新会话。改成：退出码是 1，并且 stderr 或 stdout 里有真实 Hermes v0.22.6
-  的\"会话不存在\"特征（实测原文是 \"No session found\"）时，才映射为 session_missing。机制放在 headless 声明或插件里（比如声明里配一个
-  session_missing 的输出匹配），不要在内核里给 hermes 加特例；其余的退出码 1 仍然按普通失败处理。同步更新 README 和 declaration
-  测试，并在 docs/solution-design.md 相关段落说明这条判定规则。\n2. live 验证在 taiyi 上跑，不在 Mac mini 上跑：所有
-  hermes 命令用 `ssh taiyi '<命令>'`，hermes 用 /opt/apa-live/bin/hermes，每次用 mktemp -d /tmp/apa-live.XXXXXX
-  得到的独立 HERMES_HOME（从 /opt/apa-live/hermes-home 复制 config.yaml 和 .env），凭据用 `set -a;
-  . /opt/apa-live/creds/live.env; set +a` 加载，不打印。要求：ACT-RES-04 在真实 Hermes 上通过，并补一个反例，证明普通失败（比如模型端点不可达）不会被当成会话丢失。\n
-  \  run-on-taiyi.sh 不在检出里就由你补上并提交。test_live.py 在 mini 上失败的用例改到 taiyi 上跑；在干净的 main
-  上也会失败的，写明是既有问题。\n3. 只允许删除 /tmp/apa-live.*。不碰 taiyi 的容器、aiteam-*、nginx，不重启服务。Mac
-  mini 本机不运行 hermes。"
+status: todo
+retry_note: 'PR #204 已于 2026-11-07 合并（退出码 1 + No session found 双重判定），请按已合并事实收敛。'
