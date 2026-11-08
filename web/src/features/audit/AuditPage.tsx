@@ -6,7 +6,7 @@ import { ActorBadge, type Step } from "../items/ItemsPage";
 // 形状对应 GET /v1/audit/events（附录 B.2，§15.3）。筛选、裁剪、分页都在服务端，本页只搬运条件并显示结果；只读，不提供撤销。
 const PAGE = 100;
 const REJECTED = "command.rejected"; // §6.7：被拒绝的高风险命令记这一类 Event
-interface AuditEvent extends Step { object: string; chain_depth: number; redacted?: boolean; tombstone?: boolean }
+interface AuditEvent extends Step { object: string; chain_depth: number; grant?: string; redacted?: boolean; tombstone?: boolean }
 interface Filter { actor: string; object: string; type: string }
 const EMPTY: Filter = { actor: "", object: "", type: "" };
 
@@ -74,6 +74,7 @@ export function AuditPage() {
           {events.map((e) => (
             <li key={e.seq}>
               #{e.seq} · {e.type} · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString()}
+              {e.grant ? ` · 授权单 ${e.grant}` : ""}
               {e.reason ? ` · ${e.reason}` : ""}
               {e.redacted || e.tombstone ? " · （内容已隐藏）" : ""}
             </li>

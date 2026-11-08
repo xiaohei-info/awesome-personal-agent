@@ -6,7 +6,7 @@ import { App } from "../../app/App";
 import { feature } from "./index";
 import type { HealthReport, Signal } from "./HealthPage";
 
-// 测试边界替身：按 api/health 的契约应答 GET /v1/health（八项信号、顺序固定，错误体见附录 B.3）。
+// 测试边界替身：按 api/health 的契约应答 GET /v1/health（十项信号、顺序固定，错误体见附录 B.3）。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 const NEXT: Record<string, string> = {
@@ -18,6 +18,8 @@ const NEXT: Record<string, string> = {
   pack_rejections: "fix the pack, then hot-reload",
   model_unavailable: "settings page and source page",
   rule_fallbacks: "re-review the rule in Web",
+  receipt_failures: "audit page; credential or basis problems go to settings, a receipt turned needs_input is handled in decision todos",
+  other_alerts: "audit page; open the object named in detail",
 };
 const ORDER = Object.keys(NEXT);
 
@@ -49,11 +51,11 @@ function serve(get: () => Response) {
 beforeEach(() => sessionStorage.clear());
 
 describe("健康页（flow-health / ACT-HLT-01）", () => {
-  it("全部正常：八类信号都显示，且不出现修复链接以外的写请求", async () => {
+  it("全部正常：十类信号都显示且顺序与服务端一致，且不出现修复链接以外的写请求", async () => {
     const s = serve(() => json(200, report()));
     mount(s.impl);
     expect(await screen.findByText("一切正常")).toBeInTheDocument();
-    for (const t of ["来源失败", "外呼超时与排队", "投递积压", "链路熔断", "AGENTS.md 漂移", "能力包加载失败", "模型不可用与未判定积压", "规则回退 observe"])
+    for (const t of ["来源失败", "外呼超时与排队", "投递积压", "链路熔断", "AGENTS.md 漂移", "能力包加载失败", "模型不可用与未判定积压", "规则回退 observe", "回执与捕获失败", "其他健康告警"])
       expect(screen.getByRole("article", { name: t })).toBeInTheDocument();
     expect(s.calls.filter((c) => !c.startsWith("GET"))).toEqual([]);
   });
@@ -68,6 +70,8 @@ describe("健康页（flow-health / ACT-HLT-01）", () => {
       pack_rejections: { ok: false, count: 1, why: "a pack failed to load", detail: ["pk"] },
       model_unavailable: { ok: false, count: 3, why: "a judge run failed", detail: { screening: ["x"], unjudged: ["e1", "e2"] } },
       rule_fallbacks: { ok: false, count: 1, why: "fell back to observe", detail: ["rule-1"] },
+      receipt_failures: { ok: false, count: 2, why: "a receipt or capture was rejected by the kernel", detail: ["it-7", "it-8"] },
+      other_alerts: { ok: false, count: 1, why: "a health alert without a dedicated signal", detail: ["rule-2"] },
     };
     mount(serve(() => json(200, report(bad))).impl);
     const src = await screen.findByRole("article", { name: "来源失败" });
@@ -86,8 +90,13 @@ describe("健康页（flow-health / ACT-HLT-01）", () => {
     expect(within(m).getByRole("link", { name: "策略与人格" })).toHaveAttribute("href", "/settings");
     expect(within(m).getByRole("link", { name: "来源" })).toHaveAttribute("href", "/sources");
     expect(within(screen.getByRole("article", { name: "规则回退 observe" })).getByRole("link", { name: "规则模式" })).toHaveAttribute("href", "/rules");
+    const rc = screen.getByRole("article", { name: "回执与捕获失败" });
+    expect(within(rc).getByText(/it-7、it-8/)).toBeInTheDocument();
+    expect(within(rc).getByRole("link", { name: "审计" })).toHaveAttribute("href", "/audit");
+    expect(within(rc).getByRole("link", { name: "决策待办" })).toHaveAttribute("href", "/decisions");
+    expect(within(screen.getByRole("article", { name: "其他健康告警" })).getByRole("link", { name: "审计" })).toHaveAttribute("href", "/audit");
     expect(screen.queryByText("一切正常")).not.toBeInTheDocument();
-    expect(screen.getByText("存在 8 类异常")).toBeInTheDocument();
+    expect(screen.getByText("存在 10 类异常")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /修复|重试|fix/i })).not.toBeInTheDocument();
   });
 

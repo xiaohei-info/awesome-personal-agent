@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 
-// 形状对应 GET /v1/health（api/health.Report）：八项信号、顺序固定，判定全在服务端；这里只呈现。
+// 形状对应 GET /v1/health（api/health.Report）：十项信号、顺序固定，判定全在服务端；这里只呈现。
 export interface Signal {
   id: string;
   ok: boolean;
@@ -27,6 +27,8 @@ const META: Record<string, { title: string; links: { to: string; label: string }
   pack_rejections: { title: "能力包加载失败", links: [] },
   model_unavailable: { title: "模型不可用与未判定积压", links: [{ to: "/settings", label: "策略与人格" }, { to: "/sources", label: "来源" }] },
   rule_fallbacks: { title: "规则回退 observe", links: [{ to: "/rules", label: "规则模式" }] },
+  receipt_failures: { title: "回执与捕获失败", links: [{ to: "/audit", label: "审计" }, { to: "/settings", label: "策略与人格" }, { to: "/decisions", label: "决策待办" }] },
+  other_alerts: { title: "其他健康告警", links: [{ to: "/audit", label: "审计" }] },
 };
 
 const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");

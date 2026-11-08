@@ -18,7 +18,7 @@ function item(id: string, over: Partial<Omit<DecisionItem, "ask">> & { ask?: Par
   };
 }
 
-function server(initial: DecisionItem[], decide?: (id: string, body: any) => Response) {
+function server(initial: DecisionItem[], decide?: (id: string, body: any) => Response, rejections: Record<string, unknown> = {}) {
   let items = initial;
   const calls: { method: string; path: string; body?: any; csrf: string | null }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
@@ -27,7 +27,7 @@ function server(initial: DecisionItem[], decide?: (id: string, body: any) => Res
     const csrf = (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null;
     calls.push({ method, path: url, body, csrf });
     if (url === "/v1/projects") return json(200, { projects: [] });
-    if (url === "/v1/items?phase=needs_input") return json(200, { items });
+    if (url === "/v1/items?phase=needs_input") return json(200, { items, last_rejections: rejections });
     const why = url.match(/^\/v1\/why\/(.+)$/);
     if (why) return json(200, { id: why[1], steps: [{ seq: 1, type: "decision.requested", reason: "合并前需要本人确认", actor: {}, at: "", object: why[1], chain_depth: 0 }] });
     const d = url.match(/^\/v1\/items\/(.+)\/decide$/);
@@ -52,6 +52,8 @@ function mount(fetchImpl: typeof fetch) {
 }
 
 beforeEach(() => sessionStorage.clear());
+
+const rej = (over: object = {}) => ({ seq: 9, at: "2030-01-01T00:00:00Z", actor: { type: "agent", principal: "DEL", via: "cli" }, code: "basis_required", why: "the grant does not cover this action", grant: "grt_bad", ...over });
 
 describe("排序", () => {
   it("先按截止（无截止最后），再按优先级", () => {
@@ -153,5 +155,23 @@ describe("web_only 决策（flow-web-only、flow-life-renewal、flow-first-day�
     mount(server([item("a")]).impl);
     await screen.findByText("问题 a");
     expect(screen.queryByText("仅限 Web 确认")).not.toBeInTheDocument();
+  });
+});
+
+describe("被拒绝的代答（ACT-AUTH-03、flow-decision-answer）", () => {
+  it("标明被拒绝的代答：操作者、原因与授权单 id；没有拒绝的卡片不带标注", async () => {
+    mount(server([item("a"), item("b")], undefined, { a: rej() }).impl);
+    const a = (await screen.findByRole("article", { name: "事项 a" }));
+    const note = within(a).getByRole("note", { name: "被拒绝的代答" });
+    expect(note).toHaveTextContent("DEL");
+    expect(note).toHaveTextContent("the grant does not cover this action");
+    expect(note).toHaveTextContent("授权单 grt_bad");
+    expect(within(screen.getByRole("article", { name: "事项 b" })).queryByRole("note")).toBeNull();
+  });
+
+  it("没有授权单时不显示授权单 id", async () => {
+    mount(server([item("a")], undefined, { a: rej({ grant: undefined }) }).impl);
+    const note = await screen.findByRole("note", { name: "被拒绝的代答" });
+    expect(note).not.toHaveTextContent("授权单");
   });
 });

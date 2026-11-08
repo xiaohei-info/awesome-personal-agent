@@ -8,7 +8,7 @@ import { feature } from "./index";
 // 测试边界替身：按 api/why 的 GET /v1/audit/events 契约应答（actor/object/type 精确匹配，after/limit 分页，升序，错误体见附录 B.3）。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const A = (type: string, principal: string, via: string) => ({ type, principal, via });
-interface Ev { seq: number; type: string; object: string; actor: ReturnType<typeof A>; at: string; reason?: string; chain_depth: number; redacted?: boolean }
+interface Ev { seq: number; type: string; object: string; actor: ReturnType<typeof A>; at: string; reason?: string; chain_depth: number; redacted?: boolean; grant?: string }
 
 const ev = (seq: number, type: string, object: string, actor: Ev["actor"], reason?: string): Ev =>
   ({ seq, type, object, actor, at: "2030-01-01T00:00:00Z", reason, chain_depth: 0 });
@@ -124,5 +124,15 @@ describe("审计页", () => {
     await userEvent.click(screen.getByRole("button", { name: "筛选" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("after or limit is out of range");
     expect(screen.queryByRole("list", { name: "审计事件" })).toBeNull();
+  });
+});
+
+describe("授权单依据（ACT-AUTH-03、flow-why-audit）", () => {
+  it("依据授权单的变更显示授权单 id；其他事件不带", async () => {
+    const l = ledger([{ ...ev(4, "decision.resolved", "item_g", A("agent", "del-1", "cli")), grant: "grt_ok" }]);
+    mount(l.impl);
+    const row = (await screen.findByText(/#4 ·/)).closest("li")!;
+    expect(row).toHaveTextContent("授权单 grt_ok");
+    expect(screen.getByText(/#1 ·/).closest("li")).not.toHaveTextContent("授权单");
   });
 });

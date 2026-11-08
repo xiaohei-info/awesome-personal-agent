@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。是否可接受/丢弃、授权与只认第一次处理都在服务端。
 export interface Proposal {
@@ -14,7 +15,7 @@ export interface Proposal {
 
 const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
-function Card({ item, onAct }: { item: Proposal; onAct: (id: string, action: "accept" | "dismiss", body: object) => Promise<void> }) {
+function Card({ item, rejection, onAct }: { item: Proposal; rejection?: Rejection; onAct: (id: string, action: "accept" | "dismiss", body: object) => Promise<void> }) {
   const [dismissing, setDismissing] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,6 +35,7 @@ function Card({ item, onAct }: { item: Proposal; onAct: (id: string, action: "ac
       <h3>{item.title}</h3>
       {meta && <p>{meta}</p>}
       {item.summary && <p>{item.summary}</p>}
+      <RejectionNote rejection={rejection} what="处理" />
       <button disabled={busy} onClick={() => act("accept", {})}>接受</button>
       {dismissing ? (
         <div>
@@ -53,12 +55,16 @@ function Card({ item, onAct }: { item: Proposal; onAct: (id: string, action: "ac
 export function ProposalsPage() {
   const { api } = useSession();
   const [items, setItems] = useState<Proposal[] | null>(null);
+  const [rejections, setRejections] = useState<Record<string, Rejection>>({});
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
     () =>
-      api.get<{ items: Proposal[] }>("/items?phase=proposed").then(
-        (r) => setItems(r.items),
+      api.get<{ items: Proposal[]; last_rejections?: Record<string, Rejection> }>("/items?phase=proposed").then(
+        (r) => {
+          setRejections(r.last_rejections ?? {});
+          setItems(r.items);
+        },
         (e) => setError(msg(e)),
       ),
     [api],
@@ -99,7 +105,7 @@ export function ProposalsPage() {
       ) : items.length === 0 ? (
         <p>没有待处理的建议</p>
       ) : (
-        items.map((i) => <Card key={i.id} item={i} onAct={act} />)
+        items.map((i) => <Card key={i.id} item={i} rejection={rejections[i.id]} onAct={act} />)
       )}
     </main>
   );

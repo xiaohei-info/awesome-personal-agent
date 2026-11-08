@@ -8,7 +8,7 @@ import { feature } from "./index";
 // 测试边界替身：按 api/why（GET /v1/audit/events，序号升序分页）与 api/items（POST /items/{id}/revert）的契约应答。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-interface Step { seq: number; type: string; object: string; actor: { type: string; principal: string; via: string; on_behalf_of?: string }; at: string; reason?: string; evidence?: string; resolved_via?: string; payload?: any }
+interface Step { seq: number; type: string; object: string; actor: { type: string; principal: string; via: string; on_behalf_of?: string }; at: string; reason?: string; evidence?: string; resolved_via?: string; grant?: string; payload?: any }
 const agent = { type: "agent", principal: "DEL", via: "cli", on_behalf_of: "owner" };
 const owner = { type: "human", principal: "owner", via: "web" };
 const upd = (seq: number, at: string, over: Partial<Step> = {}): Step => ({ seq, type: "item.updated", object: "i1", actor: agent, at, reason: "改标题", evidence: "本人说：改成新标题", payload: { op: "update", before: { title: "旧标题" }, item: { title: "新标题" } }, ...over });
@@ -134,5 +134,20 @@ describe("agent 变更视图（flow-agent-revert）", () => {
     mount(s.impl);
     await screen.findByText("r500");
     expect(s.calls.filter((c) => c.path.startsWith("/v1/audit")).map((c) => c.path)).toEqual(["/v1/audit/events?after=0&limit=500", "/v1/audit/events?after=500&limit=500"]);
+  });
+});
+
+describe("授权单代答（ACT-AUTH-03、flow-agent-revert）", () => {
+  const viaGrant = (seq: number): Step => ({ seq, type: "decision.resolved", object: "i3", actor: agent, at: "2030-01-01T00:05:00Z", resolved_via: "grant", grant: "grt_ok", payload: { item: { title: "要不要发布" } } });
+
+  it("显示授权单 id 并可撤销；撤销后标记已撤销，且仍提示外部副作用不撤销", async () => {
+    const s = server([viaGrant(1)]);
+    mount(s.impl);
+    const a = (await screen.findByRole("heading", { name: /要不要发布/ })).closest("article")!;
+    expect(within(a).getByText(/授权单代答 · 授权单 grt_ok/)).toBeInTheDocument();
+    expect(screen.getByText(/外部已发生的副作用不会被撤销/)).toBeInTheDocument();
+    await userEvent.click(within(a).getByRole("button", { name: "撤销" }));
+    expect(await within(a).findByText(/已撤销/)).toBeInTheDocument();
+    expect(s.calls.find((c) => c.method === "POST")).toMatchObject({ path: "/v1/items/i3/revert", body: { event: 1 }, csrf: "tok-1" });
   });
 });

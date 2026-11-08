@@ -12,6 +12,7 @@ interface Step {
   reason?: string;
   evidence?: string;
   resolved_via?: string;
+  grant?: string;
   payload?: { op?: string; reverts?: number; before?: { title?: string }; item?: { title?: string } };
 }
 
@@ -25,7 +26,7 @@ const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.n
 function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: (s: Step) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const title = s.payload?.item?.title;
-  const who = [s.actor.principal, s.actor.on_behalf_of && `代 ${s.actor.on_behalf_of}`, s.resolved_via === "chat" && "聊天代答"].filter(Boolean).join(" · ");
+  const who = [s.actor.principal, s.actor.on_behalf_of && `代 ${s.actor.on_behalf_of}`, s.resolved_via === "chat" && "聊天代答", s.grant && `授权单代答 · 授权单 ${s.grant}`].filter(Boolean).join(" · ");
   const canRevert = REVERTIBLE.has(s.type) && !reverted;
 
   return (

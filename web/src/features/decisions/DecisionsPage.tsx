@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { ScreeningBadge } from "../decision-screening/ScreeningBadge";
+import { RejectionNote, type Rejection } from "./RejectionNote";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。排序之外的判定（web_only、权限、只认第一次回答）都在服务端。
 export interface AskOption {
@@ -42,7 +43,7 @@ interface WhyResp {
   steps: { type: string; reason?: string }[];
 }
 
-function Card({ item, onAnswer }: { item: DecisionItem; onAnswer: (id: string, body: { choice: string } | { text: string }) => Promise<void> }) {
+function Card({ item, rejection, onAnswer }: { item: DecisionItem; rejection?: Rejection; onAnswer: (id: string, body: { choice: string } | { text: string }) => Promise<void> }) {
   const { api } = useSession();
   const ask = item.ask!;
   const [text, setText] = useState("");
@@ -78,6 +79,7 @@ function Card({ item, onAnswer }: { item: DecisionItem; onAnswer: (id: string, b
         {ask.risk_class === "web_only" && <strong> 仅限 Web 确认</strong>}
         <ScreeningBadge pending={ask.screening_pending} />
       </p>
+      <RejectionNote rejection={rejection} what="代答" />
       {ask.deadline && <p>截止：{new Date(ask.deadline).toLocaleString()}</p>}
       <div role="group" aria-label="选项">
         {(ask.options ?? []).map((o) => (
@@ -108,12 +110,14 @@ function Card({ item, onAnswer }: { item: DecisionItem; onAnswer: (id: string, b
 export function DecisionsPage() {
   const { api } = useSession();
   const [items, setItems] = useState<DecisionItem[] | null>(null);
+  const [rejections, setRejections] = useState<Record<string, Rejection>>({});
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
     () =>
-      api.get<{ items: DecisionItem[] }>("/items?phase=needs_input").then(
+      api.get<{ items: DecisionItem[]; last_rejections?: Record<string, Rejection> }>("/items?phase=needs_input").then(
         (r) => {
+          setRejections(r.last_rejections ?? {});
           setItems(sortDecisions(r.items.filter((i) => i.ask && !i.ask.resolution)));
         },
         (e) => setError(msg(e)),
@@ -156,7 +160,7 @@ export function DecisionsPage() {
       ) : items.length === 0 ? (
         <p>没有待办决策</p>
       ) : (
-        items.map((i) => <Card key={i.id} item={i} onAnswer={answer} />)
+        items.map((i) => <Card key={i.id} item={i} rejection={rejections[i.id]} onAnswer={answer} />)
       )}
     </main>
   );

@@ -12,7 +12,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 interface P { id: string; phase: string; title: string; summary?: string; project?: string; priority?: string; origin?: { source: string; actor?: string }; ask?: unknown }
 const prop = (id: string, over: Partial<P> = {}): P => ({ id, phase: "proposed", title: "建议 " + id, ...over });
 
-function server(initial: P[], write?: (path: string, body: any) => Response | undefined) {
+function server(initial: P[], write?: (path: string, body: any) => Response | undefined, rejections: Record<string, unknown> = {}) {
   let items = initial;
   const calls: { method: string; path: string; body?: any; csrf: string | null }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
@@ -21,7 +21,7 @@ function server(initial: P[], write?: (path: string, body: any) => Response | un
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
     if (url === "/v1/projects") return json(200, { projects: [] });
     const q = url.match(/^\/v1\/items\?phase=(\w+)$/);
-    if (q) return json(200, { items: items.filter((i) => i.phase === q[1]) });
+    if (q) return json(200, { items: items.filter((i) => i.phase === q[1]), last_rejections: rejections });
     const w = url.match(/^\/v1\/items\/(.+)\/(accept|dismiss)$/);
     if (w && method === "POST") {
       const res = write?.(url, body);
@@ -44,6 +44,9 @@ function mount(fetchImpl: typeof fetch, path = "/proposals") {
 }
 
 beforeEach(() => sessionStorage.clear());
+
+const rej = (over: object = {}) => ({ seq: 9, at: "2030-01-01T00:00:00Z", actor: { type: "agent", principal: "DEL", via: "cli" }, code: "basis_required", why: "the grant does not cover this action", grant: "grt_bad", ...over });
+
 
 describe("建议流页（flow-proposal-triage）", () => {
   it("ACT-PROP-01：只列 proposed 事项，请求 phase=proposed，不与决策待办混在一起", async () => {
@@ -116,5 +119,18 @@ describe("建议流页（flow-proposal-triage）", () => {
     fail = false;
     await userEvent.click(screen.getByRole("button", { name: "重试" }));
     expect(await screen.findByText("建议 a")).toBeInTheDocument();
+  });
+});
+
+describe("被拒绝的处理（ACT-PROP-05、flow-proposal-triage）", () => {
+  it("标明这次被拒绝的处理与原因；阶段不变仍可由本人接受", async () => {
+    const s = server([prop("a"), prop("b")], undefined, { a: rej({ why: "no basis for dismiss" }) });
+    mount(s.impl);
+    const a = await screen.findByRole("article", { name: "建议 a" });
+    const note = within(a).getByRole("note", { name: "被拒绝的处理" });
+    expect(note).toHaveTextContent("no basis for dismiss");
+    expect(note).toHaveTextContent("授权单 grt_bad");
+    expect(within(screen.getByRole("article", { name: "建议 b" })).queryByRole("note")).toBeNull();
+    expect(within(a).getByRole("button", { name: "接受" })).toBeEnabled();
   });
 });
