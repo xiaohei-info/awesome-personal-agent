@@ -194,7 +194,7 @@ func (e *env) state(t *testing.T, runID string) domain.RunState {
 // 本人在 Web 仍可决定；回执（目标事项离开 open）后运行按成功结束、租约释放，DEL 恢复代答。
 func TestLeaseBlocksDelegateAnswerUntilReceipt(t *testing.T) {
 	e := setup(t)
-	_, dlg := e.delegate(t)
+	credID, dlg := e.delegate(t)
 	answer := func(id command.Identity, item string) error {
 		_, err := e.do(id, "decision.answer", map[string]any{"id": item, "choice": "A"})
 		return err
@@ -222,6 +222,19 @@ func TestLeaseBlocksDelegateAnswerUntilReceipt(t *testing.T) {
 	}
 	if _, err := e.do(dlg, "proposal.accept", map[string]any{"id": other}); exitOf(err) != domain.ExitPermissionDenied {
 		t.Fatalf("accept during lease: %v", err)
+	}
+	// 授权单对租约期间的 token 同样无效：仍是退出码 4，不是 23。
+	var g policy.Grant
+	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
+		g, err = policy.IssueGrant(tx, e.au, owner.Actor, e.now, policy.GrantInput{Grantee: policy.Grantee{Credential: credID},
+			Scope: policy.Scope{Kinds: []string{"task"}}, Actions: []string{"decision.answer"}, ExpiresAt: e.now.Add(time.Hour)})
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	in, _ := json.Marshal(map[string]any{"id": other, "choice": "A"})
+	if _, err := e.x.Do(bg, command.Request{Identity: dlg, Command: "decision.answer", Input: in, Grant: g.ID}); exitOf(err) != domain.ExitPermissionDenied {
+		t.Fatalf("grant during lease: want exit 4, got %v", err)
 	}
 	renewed, err := e.exchange(t, dlg, runID) // 租约内插件仍可续换，旧凭据随即作废
 	if err != nil {

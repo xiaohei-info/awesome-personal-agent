@@ -6,6 +6,7 @@ package authz
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -76,6 +77,9 @@ type Object struct {
 	ProjectInfo *domain.Project
 	Executor    string
 
+	// ToProject 非 nil 表示命令要把对象移入该项目（空串为移出）：授权单要求来源和目标都在范围内（§14.5）。
+	ToProject *string
+
 	// Creator 仅供调用方留痕；判定从不读取它（§14.4 判定不来自事项创建者）。
 	Creator domain.Actor
 }
@@ -92,6 +96,14 @@ type Request struct {
 	WebURL   string // 对象在 Web 的链接，随 20/22 拒绝返回
 	Channel  string // ActionChannelAnswer：渠道
 	Sender   string // ActionChannelAnswer：回答人
+
+	// 授权单依据（§14.5 第二档的另一条路）：管线据账本填。GrantID 是请求携带的授权单 id；
+	// Grant 为 nil 表示账本里没有这张单。Command 是授权单 actions 里的命令名，Credential 是调用者的凭据 id。
+	Command    string
+	GrantID    string
+	Grant      *policy.Grant
+	Credential string
+	Now        time.Time
 }
 
 type Verdict string
@@ -142,6 +154,17 @@ func Decide(p policy.Policy, r Request) Decision {
 	if r.Action == ActionChannelAnswer {
 		return decideChannel(p, r)
 	}
+	if r.GrantID != "" {
+		switch r.Level {
+		case LevelDelegate:
+			if strings.TrimSpace(r.Evidence) != "" {
+				return deny(domain.CodeInvalidRequest, "give either the owner's words or a grant, not both", "resend with only one basis")
+			}
+		case LevelWeb: // 本人在 Web 不需要授权单，忽略
+		default:
+			return denied() // 授权单只对 delegate 凭据生效；运行凭据（含唤醒租约期间的 token）没有代答能力
+		}
+	}
 	var d Decision
 	switch r.Action {
 	case ActionRead, ActionCreateProposed:
@@ -171,7 +194,7 @@ func Decide(p policy.Policy, r Request) Decision {
 		return deny(domain.CodeInvalidRequest, "unknown action "+string(r.Action), "see apa guide")
 	}
 	if d.Verdict == Allow && r.Level == LevelDelegate && TierOf(r) >= TierDecide {
-		d = needBasis(r)
+		d = needBasis(p, r)
 	}
 	if d.Verdict != Allow {
 		return d
@@ -220,7 +243,13 @@ func TierOf(r Request) Tier {
 }
 
 // needBasis 校验第二档的依据：本人原话与会话引用都非空（内核不能校验真伪，§21.2）。
-func needBasis(r Request) Decision {
+func needBasis(p policy.Policy, r Request) Decision {
+	if r.GrantID != "" {
+		if why := grantMismatch(p, r); why != "" {
+			return Decision{Verdict: Deny, Err: withLink(domain.CodeBasisRequired, why, "do not retry; give the Web link to the owner so they can decide or issue a grant", r.WebURL)}
+		}
+		return allow // 授权单是本人事先划定的，不需要会话引用
+	}
 	switch {
 	case strings.TrimSpace(r.Evidence) == "":
 		return basisMissing(r, "this action decides for the owner and needs the owner's own words as evidence")
@@ -229,6 +258,37 @@ func needBasis(r Request) Decision {
 		return basisMissing(r, "the owner's own words need a session reference (APA_SESSION)")
 	}
 	return allow
+}
+
+// grantMismatch 按 §14.5 的顺序逐项校验授权单，返回第一个不符的原因；空串表示放行。
+func grantMismatch(p policy.Policy, r Request) string {
+	g, o := r.Grant, r.Object
+	switch {
+	case g == nil:
+		return "grant " + r.GrantID + " does not exist"
+	case g.Grantee.Credential != r.Credential:
+		return "grant was issued to another credential"
+	case g.Grantee.Harness != "" && g.Grantee.Harness != r.Actor.Harness:
+		return "grant is limited to another harness"
+	case !g.RevokedAt.IsZero():
+		return "grant was revoked"
+	case !r.Now.Before(g.ExpiresAt):
+		return "grant has expired"
+	case !contains(g.Actions, r.Command):
+		return "grant does not cover " + r.Command
+	case !inScope(g.Scope, o.Kind, o.Project, o.ID) || (o.ToProject != nil && !inScope(g.Scope, o.Kind, *o.ToProject, o.ID)):
+		return "object is outside the grant scope"
+	case g.RiskCeiling == policy.RiskNormal && (WebOnly(p, o) || o.ScreeningPending):
+		return "object risk exceeds the grant's risk ceiling"
+	}
+	return ""
+}
+
+// inScope：scope 的非空项都命中才算在范围内。授权单不继承到子事项，所以只比对象自己的字段。
+func inScope(s policy.Scope, kind, project, id string) bool {
+	return (len(s.Projects) == 0 || contains(s.Projects, project)) &&
+		(len(s.Kinds) == 0 || contains(s.Kinds, kind)) &&
+		(len(s.Items) == 0 || contains(s.Items, id))
 }
 
 func basisMissing(r Request, why string) Decision {
@@ -314,13 +374,13 @@ func RejectionEvent(r Request, d Decision) (domain.Event, bool) {
 	switch d.ExitCode() {
 	case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending, domain.ExitBasisRequired:
 	case domain.ExitPermissionDenied:
-		if (r.Level != LevelRun || r.Action != ActionAnswerDecision) && r.Action != ActionChannelAnswer {
+		if (r.Level != LevelRun || r.Action != ActionAnswerDecision) && r.Action != ActionChannelAnswer && r.GrantID == "" {
 			return domain.Event{}, false
 		}
 	default:
 		return domain.Event{}, false
 	}
-	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "code": d.Err.Code, "exit": d.ExitCode(), "why": d.Err.Why})
+	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "code": d.Err.Code, "exit": d.ExitCode(), "why": d.Err.Why, "grant": r.GrantID})
 	return domain.Event{Type: domain.EvCommandRejected, Object: r.Object.ID, Actor: r.Actor, Reason: d.Err.Why, Payload: payload}, true
 }
 

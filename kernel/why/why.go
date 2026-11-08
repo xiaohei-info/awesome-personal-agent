@@ -33,6 +33,7 @@ type Step struct {
 	ChainDepth  int             `json:"chain_depth"`
 	Basis       *domain.Basis   `json:"basis,omitempty"`
 	ResolvedVia string          `json:"resolved_via,omitempty"`
+	Grant       string          `json:"grant,omitempty"` // 依据授权单写入时的授权单 id，属授权依据，各级可见
 	Reason      string          `json:"reason,omitempty"`
 	Payload     json.RawMessage `json:"payload,omitempty"`
 	Evidence    string          `json:"evidence,omitempty"`
@@ -90,7 +91,7 @@ func Replay(tx *store.Tx, p policy.Policy, r Request) (Timeline, error) {
 func StepOf(en eventlog.Entry, l authz.Level) Step {
 	e, vis := en.Event, visible(l)
 	s := Step{Seq: e.Seq, Type: e.Type, Object: e.Object, Actor: e.Actor, At: e.At.Format("2006-01-02T15:04:05.999999999Z07:00"),
-		ChainDepth: e.ChainDepth, Basis: e.Basis, ResolvedVia: e.ResolvedVia, Tombstone: en.Tombstone}
+		ChainDepth: e.ChainDepth, Basis: e.Basis, ResolvedVia: e.ResolvedVia, Grant: e.Grant, Tombstone: en.Tombstone}
 	if vis.reason {
 		s.Reason = e.Reason
 	}

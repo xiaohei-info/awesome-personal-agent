@@ -243,6 +243,9 @@ func object(tx *store.Tx, cur, next domain.Item) (authz.Object, error) {
 	if a := cur.Ask; a != nil { // 内核维护的风险类别与初筛状态进入代答判定（§14.4）
 		o.Category, o.ScreeningPending = a.RiskClass, a.ScreeningPending
 	}
+	if next.Project != cur.Project {
+		o.ToProject = &next.Project
+	}
 	if next.Assignee != "" && next.Project != "" {
 		p, err := projectOf(tx, next.Project)
 		if err != nil {
