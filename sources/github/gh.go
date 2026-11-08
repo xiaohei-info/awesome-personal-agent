@@ -49,7 +49,7 @@ func (g GH) Get(ctx context.Context, path string) ([]byte, error) {
 		return out.Bytes(), nil
 	}
 	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
-		return nil, &Error{ExitAuth, "gh not found in PATH"}
+		return nil, &Error{Exit: ExitAuth, Msg: "gh not found in PATH"}
 	}
 	return nil, classify(errb.String() + out.String())
 }
@@ -63,20 +63,22 @@ var (
 func classify(msg string) *Error {
 	msg = strings.TrimSpace(msg)
 	if rateRe.MatchString(msg) {
-		return &Error{ExitTemporary, msg}
+		return &Error{Exit: ExitTemporary, Msg: msg}
 	}
 	if strings.Contains(msg, "gh auth login") || strings.Contains(strings.ToLower(msg), "not logged in") {
-		return &Error{ExitAuth, msg}
+		return &Error{Exit: ExitAuth, Msg: msg}
 	}
 	if m := httpRe.FindStringSubmatch(msg); m != nil {
 		switch m[1] {
-		case "401", "403", "404":
-			return &Error{ExitAuth, msg}
+		case "401", "403":
+			return &Error{Exit: ExitAuth, Msg: msg}
+		case "404":
+			return &Error{Exit: ExitAuth, Msg: msg, NotFound: true}
 		case "410":
-			return &Error{ExitPermanent, msg}
+			return &Error{Exit: ExitPermanent, Msg: msg}
 		}
 	}
-	return &Error{ExitTemporary, msg}
+	return &Error{Exit: ExitTemporary, Msg: msg}
 }
 
 // Auth 启动 gh 的交互认证，凭据写入该来源自己的目录（`apa source auth <id>` 的落点）。

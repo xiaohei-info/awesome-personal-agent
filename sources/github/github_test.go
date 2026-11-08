@@ -23,6 +23,12 @@ type upstream struct {
 	err    error
 	calls  []string
 	onGet  func(call int) // 每次请求前调用，用来模拟读取途中的上游变化
+	agents *string        // 默认分支根目录 AGENTS.md 的 blob sha；nil 表示没有该文件（404）
+}
+
+// issueCalls 是对 issue 列表的请求（AGENTS.md 读取不算）。
+func (u *upstream) issueCalls() []string {
+	return slices.DeleteFunc(slices.Clone(u.calls), func(c string) bool { return strings.Contains(c, "/contents/") })
 }
 
 func (u *upstream) set(n int, raw string) {
@@ -43,6 +49,12 @@ func (u *upstream) Get(_ context.Context, path string) ([]byte, error) {
 	p, err := url.Parse(path)
 	if err != nil {
 		return nil, err
+	}
+	if strings.HasSuffix(p.Path, "/contents/AGENTS.md") {
+		if u.agents == nil {
+			return nil, &Error{Exit: ExitAuth, Msg: "gh: Not Found (HTTP 404)", NotFound: true}
+		}
+		return []byte(fmt.Sprintf(`{"type":"file","sha":%q,"html_url":"https://github.com/o/r/blob/main/AGENTS.md"}`, *u.agents)), nil
 	}
 	q := p.Query()
 	var all []string
@@ -537,11 +549,11 @@ func TestFirstRunStartsFromWindowThenNow(t *testing.T) {
 		return out.String()
 	}
 	run(`{"source_id":"s","config":{"repos":["o/r"]},"window":{"from":"2026-10-30T00:00:00Z"}}`)
-	if !strings.Contains(api.calls[0], "since=2026-10-30T00:00:00Z") {
+	if !strings.Contains(api.issueCalls()[0], "since=2026-10-30T00:00:00Z") {
 		t.Errorf("window.from ignored: %s", api.calls[0])
 	}
 	run(`{"source_id":"s","config":{"repos":["o/r"]}}`)
-	if !strings.Contains(api.calls[1], "since=2026-11-03T00:00:00Z") {
+	if !strings.Contains(api.issueCalls()[1], "since=2026-11-03T00:00:00Z") {
 		t.Errorf("first run without window should start now: %s", api.calls[1])
 	}
 }
@@ -679,12 +691,109 @@ func TestFirstRunWithKernelEmptyWindowFrom(t *testing.T) {
 	if code := Run(context.Background(), strings.NewReader(in), &out, &errb, api, now); code != ExitOK {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
-	if !strings.Contains(api.calls[0], "since=2026-11-03T00:00:00Z") {
+	if !strings.Contains(api.issueCalls()[0], "since=2026-11-03T00:00:00Z") {
 		t.Errorf("empty from should start at window.to: %s", api.calls[0])
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	var last map[string]string
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil || last["cursor"] == "" {
 		t.Fatalf("no cursor in last line %q", lines[len(lines)-1])
+	}
+}
+
+func sha(s string) *string { return &s }
+
+func agentsEvents(o output) []map[string]any {
+	var evs []map[string]any
+	for _, ev := range o.events {
+		if ev["type"] == "repo.agents_md_changed" {
+			evs = append(evs, ev)
+		}
+	}
+	return evs
+}
+
+// §12.5：默认分支根目录 AGENTS.md 的 blob sha 变化（含新建、删除）才发事件；游标记住 sha，同一状态重放不再发。
+func TestAgentsMDChangeEmitsOneEventPerChange(t *testing.T) {
+	api := &upstream{}
+	// 首次没有文件：只记下，不发
+	o := pullOnce(t, api, repoCfg, "")
+	if len(agentsEvents(o)) != 0 {
+		t.Fatalf("absent file on first run emitted %v", o.ids())
+	}
+	// 新建
+	api.agents = sha("aaa")
+	o = pullOnce(t, api, repoCfg, o.cursor)
+	evs := agentsEvents(o)
+	if len(evs) != 1 || evs[0]["id"] != "repo-o-r-agents-md-aaa" || evs[0]["correlation_keys"].([]any)[0] != "o/r" ||
+		evs[0]["link"] != "https://github.com/o/r/blob/main/AGENTS.md" || evs[0]["subject"] == "" {
+		t.Fatalf("created: %v", o.events)
+	}
+	// 不变：不发；同一游标重放：输出相同
+	same := pullOnce(t, api, repoCfg, o.cursor)
+	if len(agentsEvents(same)) != 0 || same.cursor != o.cursor {
+		t.Fatalf("unchanged emitted %v", same.ids())
+	}
+	// 修改
+	api.agents = sha("bbb")
+	o2 := pullOnce(t, api, repoCfg, o.cursor)
+	if evs := agentsEvents(o2); len(evs) != 1 || evs[0]["id"] != "repo-o-r-agents-md-bbb" {
+		t.Fatalf("changed: %v", o2.events)
+	}
+	if again := pullOnce(t, api, repoCfg, o.cursor); !slices.Equal(again.ids(), o2.ids()) {
+		t.Errorf("replay differs: %v vs %v", again.ids(), o2.ids())
+	}
+	// 删除
+	api.agents = nil
+	o3 := pullOnce(t, api, repoCfg, o2.cursor)
+	if evs := agentsEvents(o3); len(evs) != 1 || !strings.HasPrefix(evs[0]["id"].(string), "repo-o-r-agents-md-removed-") {
+		t.Fatalf("removed: %v", o3.events)
+	}
+	if len(agentsEvents(pullOnce(t, api, repoCfg, o3.cursor))) != 0 {
+		t.Error("removal emitted twice")
+	}
+}
+
+// 首次就有文件：发一条（已有手写 AGENTS.md 的仓库首次检查落入漂移，§12.5）。
+func TestAgentsMDExistingOnFirstRunEmits(t *testing.T) {
+	api := &upstream{agents: sha("abc")}
+	if evs := agentsEvents(pullOnce(t, api, repoCfg, "")); len(evs) != 1 {
+		t.Fatalf("want one event, got %d", len(evs))
+	}
+}
+
+// 读 AGENTS.md 失败（非 404）按取数失败处理：不输出、不推进游标；认证类仍是退出码 2。
+func TestAgentsMDReadFailureIsNotMissingFile(t *testing.T) {
+	api := &failContents{upstream: &upstream{}, err: &Error{Exit: ExitTemporary, Msg: "HTTP 502"}}
+	in := `{"source_id":"s","config":{"repos":["o/r"]},"window":{"from":"2026-10-30T00:00:00Z"}}`
+	var out, errb bytes.Buffer
+	if code := Run(context.Background(), strings.NewReader(in), &out, &errb, api, now); code != ExitTemporary || out.Len() != 0 {
+		t.Fatalf("exit %d, stdout %q", code, out.String())
+	}
+	api.err = &Error{Exit: ExitAuth, Msg: "HTTP 403"}
+	if code := Run(context.Background(), strings.NewReader(in), &out, &errb, api, now); code != ExitAuth {
+		t.Fatalf("exit %d", code)
+	}
+}
+
+type failContents struct {
+	*upstream
+	err error
+}
+
+func (f *failContents) Get(ctx context.Context, path string) ([]byte, error) {
+	if strings.Contains(path, "/contents/") {
+		return nil, f.err
+	}
+	return f.upstream.Get(ctx, path)
+}
+
+// gh 的 404 输出被标成 NotFound（仍是退出码 2），其他认证类错误不是。
+func TestGHClassifiesNotFound(t *testing.T) {
+	if e := classify("gh: Not Found (HTTP 404)"); !e.NotFound || e.Exit != ExitAuth {
+		t.Errorf("404: %+v", e)
+	}
+	if e := classify("gh: Bad credentials (HTTP 401)"); e.NotFound || e.Exit != ExitAuth {
+		t.Errorf("401: %+v", e)
 	}
 }

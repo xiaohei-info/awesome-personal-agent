@@ -16,7 +16,7 @@ func fakeGH(t *testing.T) (rec string) {
 	t.Helper()
 	dir := t.TempDir()
 	rec = filepath.Join(dir, "rec")
-	script := "#!/bin/sh\necho \"$1 $GH_CONFIG_DIR\" >> " + rec + "\n[ \"$1\" = auth ] || echo '[]'\n"
+	script := "#!/bin/sh\necho \"$1 $GH_CONFIG_DIR\" >> " + rec + "\n[ \"$1\" = auth ] && exit 0\ncase \"$4\" in */contents/*) echo 'gh: Not Found (HTTP 404)' >&2; exit 1;; esac\necho '[]'\n"
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestPullUsesCredentialsPathFromStdin(t *testing.T) {
 	if code := run(context.Background(), nil, strings.NewReader(in), &out, &bytes.Buffer{}); code != github.ExitOK {
 		t.Fatalf("exit %d", code)
 	}
-	if b, _ := os.ReadFile(rec); strings.TrimSpace(string(b)) != "api /data/sources/src_gh/gh" || !strings.Contains(out.String(), `"cursor"`) {
+	if b, _ := os.ReadFile(rec); strings.TrimSpace(string(b)) != "api /data/sources/src_gh/gh\napi /data/sources/src_gh/gh" || !strings.Contains(out.String(), `"cursor"`) {
 		t.Fatalf("gh called as %q, out %q", b, out.String())
 	}
 }
