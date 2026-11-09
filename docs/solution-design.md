@@ -1162,7 +1162,19 @@ SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6�
 
 **gog calendar 实测结论（v0.9.0，真实 Google 日历）**：`calendar events --from/--to` 返回窗口内的日程，没有增量查询，靠适配器每次取前瞻窗口、内核按事件 id 去重。每个日程带 `iCalUID`、`updated`、`created`；重复日程默认展开为实例，每个实例有自己的 `id`（主日程 id 加 `_<开始时间>`）、同一个 `iCalUID` 和 `originalStartTime`，所以 UID 加 RECURRENCE-ID 能区分实例。已被删除的日程不再出现在列表里。创建命令无法关闭日历默认提醒。认证失败：账号没有令牌（`No auth for calendar`）和 keyring 口令不对（`integrity check failed`）都能从 stderr 识别，适配器按认证失败返回 2。
 
-**需实测，结论写回本节**。首版工具：gog calendar 的增量查询方式，JSON 中是否带 UID、RECURRENCE-ID 和更新时间；gog 的认证失败识别已实测（见上）。后续适配器接入时：gog 邮件结果的粒度（线程或消息）及其增量查询方式；`khal list --json` 没有更新时间字段时如何识别更新，以及重复事件的展开。
+**首版工具实测结论（§9.7 的实测项）**。版本：himalaya v1.1.0（对测试 IMAP 邮箱）、gog v0.9.0（真实 Google 日历，只动 `[APA-LIVE-TEST]` 前缀的临时事件，测后删除）。每行先写被测命题。
+
+| 项 | 结论 | 说明与实测版本 |
+|---|---|---|
+| MEAS-MAIL-SEEN | 有条件成立 | 命题：读正文不改已读标记。`message read --preview` 前后标记不变；不加 `--preview` 的 `message read` 在该测试邮箱上标记也没变，但其他 IMAP 服务器可能在非预览读取时置已读，所以适配器一律带 `--preview`。himalaya v1.1.0，仅一个邮箱服务实测 |
+| MEAS-MAIL-MSGID | 不成立 | 命题：`envelope list` 的 JSON 带 Message-ID。字段只有 `id`（IMAP 序号）、`flags`、`subject`、`from`、`to`、`date`、`has_attachment`，没有 Message-ID；用 `message read --preview -H Message-ID <id>` 取，输出 `Message-ID: <…>` 后接空行和正文。himalaya v1.1.0 |
+| MEAS-MAIL-AUTH | 成立 | 命题：认证失败可识别。错误口令与服务不可达都以退出码 1 失败，没有专用退出码，区别只在 stderr：前者含 `Invalid credentials`，后者含 `Connection refused`。适配器按 stderr 文本识别并返回 2。himalaya v1.1.0 |
+| MEAS-CAL-INCR | 不成立 | 命题：gog 有增量查询。`calendar events` 只有 `--from/--to`、`--days`、`--query`、`--max`、`--page` 一类窗口与分页参数，没有按更新时间或同步令牌取增量的选项；返回的 `nextPageToken` 只用于分页。做法是每次取前瞻窗口，内核按事件 id 去重。gog v0.9.0 |
+| MEAS-CAL-IDS | 成立 | 命题：JSON 带 UID、RECURRENCE-ID 和更新时间。每个日程带 `iCalUID`、`updated`、`created`、`etag`；重复事件的实例另带 `recurringEventId` 和 `originalStartTime`，后者即 RECURRENCE-ID。gog v0.9.0 |
+| MEAS-CAL-RECUR | 成立 | 命题：重复事件按窗口展开为实例。`FREQ=DAILY;COUNT=3` 的日程在窗口内列出 3 个实例，id 为主日程 id 加 `_<开始时间>`，`iCalUID` 相同，`originalStartTime` 各异；删除后窗口内不再出现。gog v0.9.0 |
+| MEAS-CAL-AUTH | 成立 | 命题：认证失败可识别。账号没有令牌：退出码 1，stderr `No auth for calendar <账号>`；keyring 口令不对：退出码 1，stderr 含 `integrity check failed`。没有专用退出码，适配器按 stderr 识别并返回 2。gog v0.9.0 |
+
+后续适配器接入时仍需实测：gog 邮件结果的粒度（线程或消息）及其增量查询方式；`khal list --json` 没有更新时间字段时如何识别更新，以及重复事件的展开。
 
 ---
 
