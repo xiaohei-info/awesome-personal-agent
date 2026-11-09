@@ -1,11 +1,8 @@
-# sha256: c0152002c9245bf6c5bb9fd23c1828a53760d61f3477eb092093683dcdb106c0
+# sha256: 4220bd52df76e3a94334c17aba54feaa9e9d798cbdb989678661faa5bd7b8411
 work_item_id: 01a1bf86-17c4-7dfd-a1de-a502c2c4aeec
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 本节点不依赖 Hermes（ACT-TG-01：APA + Telegram ext 单独跑）。在本机跑，先读 $APA_LIVE_README（~/.config/apa-live/README.md）。测试
-  bot、token 文件、本人测试账号 chat id 都已就绪：~/.config/apa-live/live.env 的 APA_LIVE_TELEGRAM_BOT
-  / APA_LIVE_TELEGRAM_BOT_TOKEN_FILE / APA_LIVE_TELEGRAM_CHAT_ID，只读文件路径，不打印 token。ACT-TG-01
-  的『停用 Hermes 插件、停止 Hermes』指本次测试用的 APA 实例不接任何 Hermes：本机上已有的 Hermes 一律不碰、不停、不读写 ~/.hermes。ACT-TG-03
-  需要本人在 Telegram 里回复选项：卡片发出后在报告/评论里写明『请在 Telegram 回复』并等待（至少 30 分钟），不要用 bot 自己伪造回复；ACT-TG-05
-  只需核对配置与依赖。APA_HOME 和临时目录只用 mktemp -d /tmp/apa-live.XXXXXX 的字面路径，禁止对环境变量来源路径 rm -rf。验收不放宽，失败把原文（投递
-  state、external_ref、事件）写进报告。
+retry_note: 本人现在已守在 Telegram（@guanti_github_bot）。按上一轮做法重跑 ACT-TG-01..06：卡片发出后立刻在 issue
+  评论写一句『卡片已发出，请在 Telegram 点选项 A』，web_only 卡片发出后再评论『请回复同意（预期被拒）』，每一步等待上限 30 分钟。不要伪造回复，验收不放宽；本机
+  Hermes 不碰、不读写 ~/.hermes；临时目录只用 mktemp -d /tmp/apa-live.XXXXXX，禁止对环境变量来源路径 rm -rf。失败把投递
+  state、external_ref、事件原文写进报告。
