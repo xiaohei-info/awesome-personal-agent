@@ -97,6 +97,9 @@ const (
 // 新增 sources/*/cmd/* 程序必须在这里登记，或在 serve_test.go:notBundled 里写明不登记的理由，否则测试失败。
 var bundledPull = []string{"http-json", "dir-watch", "github-source", "rss-source"}
 
+// hostedReader 是只读读取器的 argv；托管文档与 AGENTS.md 触发共用，按名字解析（PATH）。
+var hostedReader = []string{"hosted-reader"}
+
 // hostOwner 是启动流程读主机配置文件时的身份：本人在主机上写的配置，与 Web 上的本人同级（§14.12）。
 var hostOwner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: owner, Via: domain.ViaWeb}, Level: authz.LevelWeb}
 
@@ -122,6 +125,7 @@ type kernel struct {
 	sum    *summaries.Service
 	packs  *kpacks.Loader
 	agm    *agentsmd.Service
+	agmWG  sync.WaitGroup // 事件触发的 AGENTS.md 检测；测试收尾时等它们结束
 	wk     *wake.Service
 
 	resumeMu  sync.Mutex
@@ -225,7 +229,11 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 
 	// 调度器的结果要回到 runner、webhook、task，而它们又要调度器：先建调度器，闭包里再取。
+	var agmFetch agentsFetcher
 	k.result = func(res proc.Result) {
+		if agmFetch.deliver(res) { // AGENTS.md 读取的结果交给等待的 Fetch，不属于其他模块
+			return
+		}
 		ctx := context.Background() // 关停时也要把终态落账
 		if err := errors.Join(k.rn.Handle(ctx, res), k.wh.Handle(ctx, res)); err != nil {
 			slog.Error("run result", "run", res.Run.ID, "err", err)
@@ -244,12 +252,13 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return tk.Env(r)
 	}
 	k.disp = proc.New(st, cfg, proc.Options{Env: env, OnResult: k.result})
+	agmFetch.st, agmFetch.disp, agmFetch.reader = st, k.disp, hostedReader
 	host, herr := os.Hostname()
 	if herr != nil {
 		host = "localhost"
 	}
 	// 读取器随发行附带，与拉取程序一样按名字解析（PATH）；它是只读的子进程，凭据由 git 自身配置持有。
-	if hs, err = hosted.New(x, hosted.Options{Reader: []string{"hosted-reader"}, Host: host, Owner: owner,
+	if hs, err = hosted.New(x, hosted.Options{Reader: hostedReader, Host: host, Owner: owner,
 		Kick: func() {
 			if err := k.disp.Dispatch(context.Background()); err != nil {
 				slog.Error("hosted reader dispatch", "err", err)
@@ -316,12 +325,13 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if !ok || agm.Templates["agents"] == "" {
 		return nil, errors.New("serve: agents-md pack has no render template")
 	}
-	agmSvc, err := agentsmd.New(x, agentsmd.Options{Template: agm.Templates["agents"], OnError: logErr("agents-md render")})
+	agmSvc, err := agentsmd.New(x, agentsmd.Options{Template: agm.Templates["agents"], Fetch: agmFetch.Fetch, OnError: logErr("agents-md render")})
 	if err != nil {
 		return nil, err
 	}
 
 	k.agm = agmSvc
+	x.OnCommit(triggerAgentsMD(agmSvc, &k.agmWG)) // 来源报告默认分支 AGENTS.md 变化 → 同一检测（§12.5）
 
 	creds, err := credentials.Mount(x, a)
 	if err != nil {
