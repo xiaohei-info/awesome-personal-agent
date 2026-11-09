@@ -122,6 +122,8 @@ func (f *fx) newHermesHome(name string) string {
 			if strings.HasPrefix(name, "main-") { // 主会话才有会话开始的 check 注入；无头运行不挂 inject
 				enabled += "    - apa-inject\n"
 			}
+			// 插件按运行上下文取身份与目录，要求 Hermes 档案放行 APA_RUN_CONTEXT（plugins/hermes/headless/README.md）。
+			enabled += "terminal:\n  client_env_passthrough: [APA_RUN_CONTEXT]\n"
 			b = append(b, []byte(enabled)...)
 		}
 		must(t, os.WriteFile(filepath.Join(home, n), b, 0o600))
