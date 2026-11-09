@@ -1,4 +1,9 @@
-# sha256: 383e91e942b808d588bf35372bdcee974378bef5e4523fba7ced0154b93ff439
+# sha256: 7d36624584cd7139530c744d1c6f603d29a7bc230ab93e94eb4f45a8648ed883
 work_item_id: null
 status: todo
-held: true
+retry_note: 范围调整（本人已定）：ACT-DPL-04『中心 APA 加多台 harness 主机』首批不验，报告里如实写『未执行：无第二台可跑 Hermes
+  的主机』，不得记为通过，也不要为它找替身；其余 DPL-01/02/03/05/06 照常验收、不放宽。在本机跑，先读 $APA_LIVE_README。APA
+  与反向代理（测试证书）都在 mktemp -d /tmp/apa-live.XXXXXX 的临时目录里起，监听本机 Tailscale 地址；DPL-01『从另一台机器访问』用
+  ssh taiyi 'curl ...' 访问本机地址。不得改动本机已有服务、Tailscale Serve 条目或任何系统配置，不碰本机 Hermes、不读写
+  ~/.hermes。DPL-03 走 Telegram 主路径，凭据见 ~/.config/apa-live/live.env（只用文件路径，不打印 token），需要本人回复时在评论写明并等待。DPL-06
+  用上一发行版本（无正式发行版时用 main 上最早一个可构建的发布提交并在报告注明）建数据目录。禁止对环境变量来源路径 rm -rf。失败把原文写进报告。
