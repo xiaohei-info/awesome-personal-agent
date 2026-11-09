@@ -1,4 +1,4 @@
-# sha256: 647ba59cc351a13869f4676f6f378c694921ccea79ebe6b9cf06eeec2ae5f948
+# sha256: 493295ef89d09287f86acfcfb3be64e11234dbbf04a04ed40511feeb818b0a8c
 defects:
   schema: omac.defect-ledger/v1
   used_global: 13
@@ -168,7 +168,7 @@ defects:
       - flow-hermes-context/ACT-HCTX-06
       reporters:
       - e2e-hermes-session
-      state: fixing
+      state: fixed
       fix_node: fix.kernel-delivery.a428ef
   inbox: []
 pending_human_amendment:
