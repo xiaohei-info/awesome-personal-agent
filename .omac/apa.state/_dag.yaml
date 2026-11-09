@@ -1,4 +1,4 @@
-# sha256: a319fbf1f5db461d56a19e79e63973ba4d06bea2579c2c90cebad82c28c11391
+# sha256: 85107d0f66830420cbc9666d0a6dda0cb7eb278c1bd9535283146b4570bb2a40
 defects:
   schema: omac.defect-ledger/v1
   used_global: 12
@@ -141,7 +141,7 @@ defects:
       - flow-agents-md/ACT-AGM-09
       reporters:
       - e2e-guideline-live
-      state: fixing
+      state: fixed
       fix_node: fix.cli-init-serve.1e737a
     dfx-f0964f5465b2:
       suspected: kernel-task-agent
