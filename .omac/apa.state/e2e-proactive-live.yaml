@@ -1,6 +1,6 @@
-# sha256: 1c44fe56c5d250da2db769985299714b8cee2c2690e640dd30083ee16915be44
+# sha256: 295034bb90d325219b2ddf0d808947fa4708300312f06aaa3adc608a1faf9fad
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 'ACT-BRF-06 失败的根因已在 PR #242（merge 61267141e）修复：kernel task.settle 现在以运行凭据写回
   spec/材料修订作为回执，并给出具体缺失原因；brief/review 模板的 spec.period 改为取到期时刻。请在 taiyi /opt/apa-live
