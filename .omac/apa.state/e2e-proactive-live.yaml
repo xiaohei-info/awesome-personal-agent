@@ -1,12 +1,8 @@
-# sha256: 64f066a8acae0f902bd020995f75bf7cdadadbab3a56b5f5413c618f8b4da74a
+# sha256: 1c44fe56c5d250da2db769985299714b8cee2c2690e640dd30083ee16915be44
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 'ACT-BRF-05 现在进 needs_input，说明 #235 生效；失败原因很可能在测试模板，不在产品：内核调用模型固定 strict:
-  true（kernel/outcall/model/model.go:94），而 tests/live/brief/flow_test.go:148 手写的 output_schema
-  没有 additionalProperties: false、summary 也不在 required，strict 端点会拒绝。本轮做：1) 不要手写 schema，覆盖时沿用内置
-  packs/brief 的 write-brief output_schema，只把 agent 改为 generate；若内置 schema 本身不满足 strict（每层
-  object 都要 additionalProperties: false 且全部属性进 required），按 upstream-defect 报告并附原文；2)
-  无论成败，用 apa item list --kind brief 读 ask.question、apa events 读该事项的 run.finished，原文写进报告和证据，不得再写原因未知；3)
-  05 通过后恢复 harness 再跑 06。验收不放宽；运行方式与红线不变：本机就是隔离主机，用 /opt/apa-live 的 wrapper，临时目录只用
-  mktemp -d /tmp/apa-live.XXXXXX，禁止对环境变量路径 rm -rf。'
+retry_note: 'ACT-BRF-06 失败的根因已在 PR #242（merge 61267141e）修复：kernel task.settle 现在以运行凭据写回
+  spec/材料修订作为回执，并给出具体缺失原因；brief/review 模板的 spec.period 改为取到期时刻。请在 taiyi /opt/apa-live
+  用包含 61267141e 的 main 重新构建部署，新开会话重跑 ACT-BRF-01..06；旧运行结果不能复用。若 06 仍不过，在评论里写明每次 review
+  run 的耗时、phase 和 runTrace 给出的缺失原因，不要改产品代码。'
