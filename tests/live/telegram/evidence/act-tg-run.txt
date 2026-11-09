@@ -1,0 +1,25 @@
+=== RUN   TestFlowChannelTelegram
+=== RUN   TestFlowChannelTelegram/ACT-TG-01_启动_Telegram_渠道_ext，不依赖_Hermes
+=== RUN   TestFlowChannelTelegram/ACT-TG-02_决策请求送达_Telegram
+    telegram_live_test.go:430: delivery=decision:itm_194c6517145c957a:2 state=delivered external_ref=5801746488:653 bot=guanti_github_bot
+=== RUN   TestFlowChannelTelegram/ACT-TG-03_本人在_Telegram_回答（请在_Telegram_点选项_A）
+    telegram_live_test.go:434: 等待本人在 Telegram（@guanti_github_bot）点选项 A，最多 30m0s
+=== RUN   TestFlowChannelTelegram/ACT-TG-04_web_only_只给_Web_链接（请在_Telegram_回复「同意」）
+    telegram_live_test.go:468: 等待本人在 Telegram 回复「同意」，最多 30m0s
+=== RUN   TestFlowChannelTelegram/ACT-TG-05_ext_不用_harness_网关，Bot_独立配置
+    telegram_live_test.go:505: ext 的依赖闭包里没有 plugins/ 或 hermes；红线检查通过；本次独立 Bot=@guanti_github_bot
+=== RUN   TestFlowChannelTelegram/ACT-TG-06_ext_崩溃重启后不重复发送
+2026/11/09 17:57:51 http: proxy error: context canceled
+    telegram_live_test.go:539: delivery=decision:itm_d7f46856723b88cd:2 state=acknowledged external_ref=5801746488:657 claims=2
+2026/11/09 17:59:01 http: proxy error: context canceled
+2026/11/09 17:59:01 http: proxy error: context canceled
+--- PASS: TestFlowChannelTelegram (426.82s)
+    --- PASS: TestFlowChannelTelegram/ACT-TG-01_启动_Telegram_渠道_ext，不依赖_Hermes (3.01s)
+    --- PASS: TestFlowChannelTelegram/ACT-TG-02_决策请求送达_Telegram (1.06s)
+    --- PASS: TestFlowChannelTelegram/ACT-TG-03_本人在_Telegram_回答（请在_Telegram_点选项_A） (333.65s)
+    --- PASS: TestFlowChannelTelegram/ACT-TG-04_web_only_只给_Web_链接（请在_Telegram_回复「同意」） (15.09s)
+    --- PASS: TestFlowChannelTelegram/ACT-TG-05_ext_不用_harness_网关，Bot_独立配置 (0.58s)
+    --- PASS: TestFlowChannelTelegram/ACT-TG-06_ext_崩溃重启后不重复发送 (70.82s)
+PASS
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/live/telegram	427.574s
+exit=0

@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -233,6 +234,12 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 		return err
 	}
 	ask := it.Ask
+	if ask != nil && ask.Resolution != nil && answeredByPerson(ask.Resolution) {
+		// 本人直接回答的那条投递记 acknowledged，而不是被随后的作废盖成 superseded
+		if _, err := a.o.Queue.ConfirmAnswered(tx, id); err != nil {
+			return err
+		}
+	}
 	if it.Phase != domain.PhaseNeedsInput || ask == nil || ask.Resolution != nil || ask.ScreeningPending {
 		return a.drop(tx, id) // proposed 不产生投递（§6.14.2）；初筛返回前决策不投递（§14.4）；阶段离开则作废
 	}
@@ -263,6 +270,12 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 		h.notBefore = a.o.Now().Add(time.Duration(pol.Disturb.MergeWindowSec) * time.Second)
 	}
 	return a.offer(tx, pol, h)
+}
+
+// answeredByPerson：只有本人在 Web 或聊天里给出了真实回答才算（渠道回答自己已经 Confirm 过）。
+// 用白名单：超时默认值、授权单代答、relocate 等系统收口都不是本人确认。
+func answeredByPerson(r *domain.Resolution) bool {
+	return (r.ResolvedVia == decisions.ViaWeb || r.ResolvedVia == decisions.ViaChat) && (r.Choice != "" || r.Text != "")
 }
 
 // nearDeadline：本人开启了豁免，且事项的决策截止距 now 不超过 NearDeadline（已过也算）。
