@@ -1,4 +1,4 @@
-# sha256: 0a9c429914196ee085d27c711cda44f862ec4daeeb53d95a9fb31608fc11a0a7
+# sha256: 29e60fac51fa947403eeba004c0272b5b02e840c43732a312a17367bcfe33f09
 defects:
   schema: omac.defect-ledger/v1
   used_global: 11
@@ -135,7 +135,61 @@ defects:
       - e2e-proactive-live
       state: fixed
       fix_node: fix.pack-brief.9ddec2
-  inbox: []
+  inbox:
+  - id: 6168ccadc910
+    reporter: e2e-guideline-live
+    defects:
+    - class: design-gap
+      suspected_node: cli-init-serve
+      anchors:
+      - flow-agents-md/ACT-AGM-09
+      design_ref: docs/solution-design.md#125-agentsmd唯一源渲染漂移
+      expected: §12.5：仓库默认分支 AGENTS.md 变化时，github 来源发出的 repo.agents_md_changed 事件由内核消费，
+        调 agentsmd.Service.Trigger（经外呼调用器拉起的只读读取器作为 Options.Fetch）做与 apa agents check
+        同一检测并产出结论。 这是组装层接线：在 serve 组装处注入 Fetch，并把该事件类型路由到 Trigger；kernel/agentsmd
+        内部逻辑已具备，不应再改。
+      observed: 上一轮 fix.kernel-agentsmd 合并后 live 仍失败。原因是改错层：cli/serve/assemble.go:319
+        构造 agentsmd.New 时未传 Fetch （Trigger 在 kernel/agentsmd/agentsmd.go:683 直接报 Options.Fetch
+        is not configured），全仓库生产代码没有任何地方消费 repo.agents_md_changed（仅 sources/github/github.go:357
+        产出）。
+      locations:
+      - cli/serve/assemble.go:319
+      - kernel/agentsmd/agentsmd.go:679
+      - sources/github/github.go:357
+    - class: design-gap
+      suspected_node: kernel-task-agent
+      anchors:
+      - flow-guideline-draft/ACT-DRF-01
+      - flow-guideline-draft/ACT-DRF-03
+      - flow-guideline-draft/ACT-DRF-04
+      design_ref: docs/solution-design.md#12-项目管理与-agentsmd
+      expected: '模板声明 cwd: project_checkout 的任务型运行，必须在项目检出目录启动；无检出目录时按 kernel/background
+        已有规则拒绝并说明原因。 cwd 的解析只能有一处权威实现（kernel/background 已有 project_checkout 解析），task
+        启动器复用它，不另写一套。'
+      observed: '上一轮 fix.kernel-task-agent 合并后 live 仍失败：task 启动器不遵从模板 cwd: project_checkout，DRF-01
+        失败并连带 DRF-03/04。 修复前须从模板解析 → 规则/后台运行 → 执行器拉起端到端追清 cwd 在哪一层丢失（含 cli/serve 组装），在丢失的那一层修，
+        报告写明 file:function 依据；不得在 kernel-task-agent 内重复实现 cwd 解析绕过问题。'
+      locations:
+      - kernel/background/background.go:329
+      - kernel/background/background.go:438
+      - kernel/packs/pack.go:638
+  - id: 6ce411dcfa60
+    reporter: e2e-proactive-live
+    defects:
+    - class: design-gap
+      suspected_node: pack-brief
+      anchors:
+      - flow-brief/ACT-BRF-05
+      - flow-brief/ACT-BRF-06
+      design_ref: docs/solution-design.md#36-场景五简报
+      expected: 'packs/brief 覆盖为 agent: generate（harness 关闭、真实模型端点已配、实例启用）时，新建简报应启动
+        Run 产出内容， 或在缺条件时进入 needs_input 并说明缺什么；任何情况下不得静默停在 open。'
+      observed: 上一轮 fix.pack-brief 合并后 live：BRF-01..04 通过，BRF-05 新简报 phase open 停留
+        5 分钟，无 Run、无 needs_input；06 未跑。 根因未定位。修复前须查清这条路径在哪一层被丢弃（pack 规则匹配、kernel/background
+        refuse 路径是否记录了原因、组装层是否接线）， 在根因所在层修；若是被静默拒绝，拒绝原因必须可见（Event 或 needs_input）。
+      locations:
+      - packs/brief
+      - kernel/background/background.go:refuse
 pending_human_amendment:
   amendment_id: amend-a4657a0582f6
   file: /Volumes/SSD1T/apps/hermes/home/workspace/reports/apa-omac-plan/auth-redesign-20261108.amendment.yaml
