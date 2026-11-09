@@ -1,9 +1,10 @@
-# sha256: ed42cc649bd2eb8cb308d5522cdb68f8cffdfbb7358ab47582fdc5919ac78715
+# sha256: 6e92fbeffd0f5cf233546a312e36fb9aff553b8d5188ec464d5640f0aa260bb9
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 'ACT-BRF-01 回归已由 PR #245（merge 881d69fae）修复：任务型模板声明结果字段（brief/review 为
-  period、sections[].project、sections[].body），写全才代转 done，缺字段进 needs_input 并写明缺哪个。请在
-  taiyi /opt/apa-live 用含 881d69fae 的 main 重新构建部署，新开会话重跑 ACT-BRF-01..06，旧运行结果不能复用。每次
-  brief/review 运行都要保留 output.txt，并在评论里记录 phase、ask.question 和耗时；ACT-BRF-01 需断言事项 phase
-  为 done 而不是 needs_input。06 若仍不过，写明每次 review run 的耗时和缺失原因，不要改产品代码。'
+retry_note: '上轮失败原因是测试环境配置缺失：/opt/apa-live/hermes-home/config.yaml 没有 terminal.client_env_passthrough，APA
+  工具拿不到 APA_RUN_CONTEXT。主会话已补上 client_env_passthrough: [APA_RUN_CONTEXT]（备份 config.yaml.bak-20261109-221946-before-env-passthrough）。重跑前：先停掉
+  /opt/apa-live 下残留的测试 gateway 进程（只限 /opt/apa-live/venv 启动的那些），确认 config 里仍有这项，重新部署时不要覆盖
+  hermes-home/config.yaml；然后用含 881d69fae 的 main 新开会话重跑 ACT-BRF-01..06。每次 brief/review
+  运行保留 output.txt，评论里记录 phase、ask.question、耗时；ACT-BRF-01 断言 phase=done。若工具仍报缺运行上下文，先在一次
+  apa 工具调用里核对环境变量是否到达，再停下报告，不要改产品代码。'
