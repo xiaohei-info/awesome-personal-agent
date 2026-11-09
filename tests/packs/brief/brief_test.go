@@ -145,6 +145,15 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 	if !strings.Contains(w.Body, "{item_id}") || !strings.Contains(w.Body, "{materials_path}") || !strings.Contains(w.Body, "按项目分节") {
 		t.Fatalf("write-brief body: %s", w.Body)
 	}
+	// spec_schema 的分节键名必须写进提示词，否则运行者会自行发明键（progress/due/decisions），Web 简报页读 body 会显示空分节。
+	for _, k := range []string{"spec.sections", "project", "body", "进展", "到期事项", "待本人决定的事"} {
+		if !strings.Contains(w.Body, k) {
+			t.Fatalf("write-brief must name %q for spec.sections[].{project, body}: %s", k, w.Body)
+		}
+	}
+	if !strings.Contains(w.Body, "spec.sections[].{project, body}") {
+		t.Fatalf("write-brief must spell out spec.sections[].{project, body}: %s", w.Body)
+	}
 	v, ok := p.Views["brief"]
 	if !ok || v.Kind != "brief" || len(v.List.Columns) == 0 || len(v.Card.Fields) == 0 {
 		t.Fatalf("brief view: %+v", v)
