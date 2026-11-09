@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -271,9 +272,10 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	return a.offer(tx, pol, h)
 }
 
-// answeredByPerson：超时默认值是内核代决，授权单代答不是本人当面确认，其余入口（Web、聊天、渠道）都算本人确认。
+// answeredByPerson：只有本人在 Web 或聊天里给出了真实回答才算（渠道回答自己已经 Confirm 过）。
+// 用白名单：超时默认值、授权单代答、relocate 等系统收口都不是本人确认。
 func answeredByPerson(r *domain.Resolution) bool {
-	return r.ResolvedVia != "timeout" && r.ResolvedVia != domain.ResolvedViaGrant
+	return (r.ResolvedVia == decisions.ViaWeb || r.ResolvedVia == decisions.ViaChat) && (r.Choice != "" || r.Text != "")
 }
 
 // nearDeadline：本人开启了豁免，且事项的决策截止距 now 不超过 NearDeadline（已过也算）。

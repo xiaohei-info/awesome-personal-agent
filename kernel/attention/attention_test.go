@@ -841,3 +841,47 @@ func TestDecisionCardFailureFallsBackToRulesAndAlerts(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// 只有本人在 Web/聊天给出真实回答才算确认；超时默认值、授权单代答、relocate 之类系统收口都不是。
+func TestAnsweredByPersonIsAnAllowlistOfRealAnswers(t *testing.T) {
+	for _, c := range []struct {
+		r    domain.Resolution
+		want bool
+	}{
+		{domain.Resolution{ResolvedVia: decisions.ViaWeb, Choice: "A"}, true},
+		{domain.Resolution{ResolvedVia: decisions.ViaChat, Text: "ok"}, true},
+		{domain.Resolution{ResolvedVia: decisions.ViaTimeout, Choice: "A"}, false},
+		{domain.Resolution{ResolvedVia: decisions.ViaGrant, Choice: "A"}, false},
+		{domain.Resolution{ResolvedVia: "relocate"}, false},
+		{domain.Resolution{ResolvedVia: decisions.ViaWeb}, false},
+	} {
+		if got := answeredByPerson(&c.r); got != c.want {
+			t.Errorf("%+v = %v, want %v", c.r, got, c.want)
+		}
+	}
+}
+
+// 系统收口（无回答、via=relocate）把待决事项关掉：投递作废而不是被记成本人确认。
+func TestSystemCloseSupersedesInsteadOfAcknowledging(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	id := e.asked(nil)
+	e.update(func(tx *store.Tx) error {
+		_, _, _, err := items.Revise(tx, id, "material.relocate", e.now, func(it *domain.Item) error {
+			it.Phase = domain.PhaseDropped
+			it.Ask.Resolution = &domain.Resolution{ResolvedVia: "relocate", ResolvedAt: e.now}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		_, pol, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		return e.a.reconcile(tx, pol, id)
+	})
+	if got := e.get("decision:" + id + ":" + versionOf(e, id, 0)); got.State != domain.DeliverySuperseded {
+		t.Fatalf("system close state = %s, want superseded", got.State)
+	}
+}
