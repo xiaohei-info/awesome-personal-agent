@@ -1,12 +1,12 @@
-# sha256: d257bf760e21cddfbf1f0925b29c005e8fa02d9c30e0e801ce5d78891dd58318
+# sha256: 5c472f4e683ed353849c4899f9887208f7f7bf0e9b1c0f106e1fbcbdc89afb67
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: '真实 Hermes 只能在 taiyi /opt/apa-live/ 隔离环境运行；不要在 Mac mini 启动或调用 Hermes。
-
-
-  2026-11-08 主会话决定：本节点等修复合并：dfx-0bdd78ac2371（kernel-delegation：apa report 接受运行目标事项）、dfx-ea87a6fe5df8（hermes-plugin-tools：read
-  档补只读资料工具与 spec/material 写回工具，不给通用文件写权限）。Web 页面可见类断言：不在 taiyi 装 ego-browser；在 taiyi
-  上保持 apa serve 运行并在证据里给出 Web 端口与要看的页面，由 Mac mini 上的 Ego Lite 访问 taiyi 的 APA Web 端口完成（只看页面，Hermes
-  仍只在 taiyi 跑）；数据类断言用 HTTP 接口。仍不改产品代码；修复合并后仍失败按 upstream-defect 或 owner-decision-required
-  报告。'
+retry_note: 'ACT-BRF-05 现在进 needs_input，说明 #235 生效；失败原因很可能在测试模板，不在产品：内核调用模型固定 strict:
+  true（kernel/outcall/model/model.go:94），而 tests/live/brief/flow_test.go:148 手写的 output_schema
+  没有 additionalProperties: false、summary 也不在 required，strict 端点会拒绝。本轮做：1) 不要手写 schema，覆盖时沿用内置
+  packs/brief 的 write-brief output_schema，只把 agent 改为 generate；若内置 schema 本身不满足 strict（每层
+  object 都要 additionalProperties: false 且全部属性进 required），按 upstream-defect 报告并附原文；2)
+  无论成败，用 apa item list --kind brief 读 ask.question、apa events 读该事项的 run.finished，原文写进报告和证据，不得再写原因未知；3)
+  05 通过后恢复 harness 再跑 06。验收不放宽；运行方式与红线不变：本机就是隔离主机，用 /opt/apa-live 的 wrapper，临时目录只用
+  mktemp -d /tmp/apa-live.XXXXXX，禁止对环境变量路径 rm -rf。'

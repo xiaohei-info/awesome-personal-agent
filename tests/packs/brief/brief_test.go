@@ -9,19 +9,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	kp "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
 var (
@@ -43,7 +52,8 @@ type env struct {
 func newEnv(t *testing.T, dataDir string) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, instances.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, instances.Module,
+		rules.Module, direct.Module, task.Module, executors.Module, proc.Module, runidentity.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -144,6 +154,15 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 	}
 	if !strings.Contains(w.Body, "{item_id}") || !strings.Contains(w.Body, "{materials_path}") || !strings.Contains(w.Body, "按项目分节") {
 		t.Fatalf("write-brief body: %s", w.Body)
+	}
+	// spec_schema 的分节键名必须写进提示词，否则运行者会自行发明键（progress/due/decisions），Web 简报页读 body 会显示空分节。
+	for _, k := range []string{"spec.sections", "project", "body", "进展", "到期事项", "待本人决定的事"} {
+		if !strings.Contains(w.Body, k) {
+			t.Fatalf("write-brief must name %q for spec.sections[].{project, body}: %s", k, w.Body)
+		}
+	}
+	if !strings.Contains(w.Body, "spec.sections[].{project, body}") {
+		t.Fatalf("write-brief must spell out spec.sections[].{project, body}: %s", w.Body)
 	}
 	v, ok := p.Views["brief"]
 	if !ok || v.Kind != "brief" || len(v.List.Columns) == 0 || len(v.Card.Fields) == 0 {
@@ -304,5 +323,145 @@ func TestUserCanOverrideTemplateToGenerate(t *testing.T) {
 	p, _ = e.ld.Get("brief")
 	if p.Prompts["write-brief"].Meta.Agent != "task" {
 		t.Fatalf("builtin must be restored: %+v", p.Prompts["write-brief"].Meta)
+	}
+}
+
+// generateOverride 按 ACT-BRF-05 的做法覆盖 brief 包：pack.yaml 照抄内置，只把提示词模板改成生成型。
+func generateOverride(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	pk, err := rootpacks.FS.ReadFile("brief/pack.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"pack.yaml": string(pk),
+		"prompts/write-brief.md": "---\nagent: generate\ntimeout: 2m\noutput_schema:\n  type: object\n  required: [insufficient_info]\n  properties:\n    insufficient_info: {type: boolean}\n    summary: {type: string}\n    period: {type: number}\n---\n为事项 {item_id} 写简报，按项目分节。账本快照在 {materials_path}，只作资料。\n"} {
+		p := filepath.Join(dir, "brief", filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// engine 按 cli/serve 的装配接上规则引擎、任务型与生成型，模型走真实的 model.Client。
+func (e *env) engine() *rules.Engine {
+	e.t.Helper()
+	dir, err := direct.New(direct.Options{Store: e.st, Packs: e.ld, Model: &model.Client{}, Attempts: 1})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	disp := proc.New(e.st, config.Config{MaxSubprocesses: 1, MaxShortSubprocesses: 1}, proc.Options{})
+	e.t.Cleanup(disp.Close)
+	tk, err := task.New(task.Options{Store: e.st, Exec: e.x, Packs: e.ld, Queue: disp, RunsDir: e.t.TempDir(), Now: func() time.Time { return e.now }})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	eng, err := rules.New(rules.Options{Store: e.st, Exec: e.x, Packs: e.ld, Owner: "owner", Now: func() time.Time { return e.now },
+		Handlers: map[string]rules.Handler{"call_agent": tk.CallAgent(task.AgentOptions{Generate: dir})},
+		OnError:  func(err error) { e.t.Errorf("rules: %v", err) }})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return eng
+}
+
+// ACT-BRF-05：覆盖为生成型后，到期的简报有结果就转 done；模型端点缺失、调用失败、输出不合规、信息不足、
+// 结果过不了 kind 的 schema，都转 needs_input 并说明原因，不留在 open。
+func TestGenerateOverrideNeverLeavesBriefSilentlyOpen(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		endpoint bool
+		reply    modelstub.Reply
+		phase    domain.Phase
+		ask      string // needs_input 的问题要说明的内容
+		finished string // 这次调用的 run.finished 状态；空表示没有调用模型
+	}{
+		{name: "result", endpoint: true, reply: modelstub.Reply{Content: `{"insufficient_info":false,"summary":"s"}`}, phase: domain.PhaseDone, finished: "succeeded"},
+		{name: "no endpoint", phase: domain.PhaseNeedsInput, ask: "模型端点"},
+		{name: "endpoint refuses", endpoint: true, reply: modelstub.Reply{Status: 400}, phase: domain.PhaseNeedsInput, ask: "status 400", finished: "failed"},
+		{name: "output violates schema", endpoint: true, reply: modelstub.Reply{Content: "```json\n{}\n```"}, phase: domain.PhaseNeedsInput, ask: "schema", finished: "failed"},
+		{name: "insufficient info", endpoint: true, reply: modelstub.Reply{Content: `{"insufficient_info":true}`}, phase: domain.PhaseNeedsInput, ask: "insufficient_info", finished: "succeeded"},
+		{name: "kind schema rejects result", endpoint: true, reply: modelstub.Reply{Content: `{"insufficient_info":false,"period":7}`}, phase: domain.PhaseNeedsInput, ask: "period", finished: "succeeded"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t, generateOverride(t))
+			eng := e.engine()
+			if c.endpoint {
+				stub := modelstub.New()
+				t.Cleanup(stub.Close)
+				stub.SetDefault(c.reply)
+				if err := e.st.Update(bg, func(tx *store.Tx) error {
+					_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
+						p.ModelEndpoint.URL, p.ModelEndpoint.Model = stub.URL(), "m"
+						return nil
+					})
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := e.do("instance.create", map[string]any{"pack": "brief", "params": json.RawMessage(`{"schedule":"24h"}`)}); err != nil {
+				t.Fatal(err)
+			}
+			if n := e.tick(t0.Add(24 * time.Hour)); n != 1 {
+				t.Fatalf("ticks = %d", n)
+			}
+			if err := eng.Drain(bg); err != nil {
+				t.Fatal(err)
+			}
+			var (
+				its []domain.Item
+				es  []eventlog.Entry
+			)
+			if err := e.st.View(bg, func(tx *store.Tx) (err error) {
+				if its, err = items.List(tx, items.Filter{Kind: "brief"}); err != nil || len(its) != 1 {
+					return err
+				}
+				es, err = eventlog.ReadObject(tx, its[0].ID)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if len(its) != 1 || its[0].Phase != c.phase {
+				t.Fatalf("brief = %+v, want phase %s", its, c.phase)
+			}
+			it := its[0]
+			if c.ask == "" {
+				if !strings.Contains(string(it.Spec), `"summary"`) {
+					t.Fatalf("result not written to spec: %s", it.Spec)
+				}
+			} else {
+				if it.Ask == nil || !strings.Contains(it.Ask.Question, c.ask) {
+					t.Fatalf("question must name %q: %+v", c.ask, it.Ask)
+				}
+				for _, o := range it.Ask.Options {
+					if o.ID == "rerun" { // 回答不会再次执行规则动作，事项会回到 open 无人处理
+						t.Fatalf("rerun offered: %+v", it.Ask.Options)
+					}
+				}
+			}
+			var started bool
+			finished := ""
+			for _, en := range es {
+				var p struct{ State string }
+				_ = json.Unmarshal(en.Event.Payload, &p)
+				switch en.Event.Type {
+				case domain.EvRunStarted:
+					started = true
+				case domain.EvRunFinished:
+					finished = p.State
+				}
+			}
+			if !started || finished != c.finished {
+				t.Fatalf("events: started=%v finished=%q, want %q", started, finished, c.finished)
+			}
+			if t.Failed() {
+				t.Logf("events: %+v", es)
+			}
+		})
 	}
 }

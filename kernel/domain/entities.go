@@ -39,6 +39,18 @@ type Project struct {
 	Capture          bool     `json:"capture,omitempty"`
 }
 
+// LocalCheckout 返回项目在 host 上的第一个检出（§12.6：Host 等于该机主机名才算本机有检出）；没有时返回 nil。
+func (p Project) LocalCheckout(host string) *Checkout {
+	for _, r := range p.Repos {
+		for i := range r.Checkouts {
+			if r.Checkouts[i].Host == host {
+				return &r.Checkouts[i]
+			}
+		}
+	}
+	return nil
+}
+
 // ExecutorAllowed 按 §6.14 第 5 条判断指派是否在项目允许范围内。
 func (p Project) ExecutorAllowed(executor, self string) bool {
 	if p.AllowedExecutors == nil || executor == self {

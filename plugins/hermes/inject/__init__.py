@@ -3,10 +3,16 @@ user message. No decisions here: the kernel owns increments, cursors and the env
 
 Fails open: any apa failure, missing binary or >2 s yields no injection and never blocks the message.
 """
+import importlib.util
 import os
+import pathlib
 import subprocess
 import threading
 import time
+
+_spec = importlib.util.spec_from_file_location("apa_run_context", pathlib.Path(__file__).resolve().parents[1] / "tools" / "run_context.py")
+run_context = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(run_context)
 
 TIMEOUT_SECS = 2
 INSTRUCTION_VERSION = 1  # version of the standing instructions this plugin ships (kernel compares)
@@ -15,11 +21,10 @@ _keys = {}          # Hermes session id -> session key whose kernel cursor this 
 _reinject = set()   # session ids whose next turn must inject the full summary again (after compaction)
 
 
-def _run(args, session_key, out, slot):
-    env = dict(os.environ, APA_SESSION=session_key, APA_HARNESS="hermes")
+def _run(args, session_key, out, slot, env, cwd):
     try:
         p = subprocess.run([os.environ.get("APA_BIN", "apa"), *args], capture_output=True, text=True,
-                           timeout=TIMEOUT_SECS, env=env)
+                           timeout=TIMEOUT_SECS, env=env, cwd=cwd)
         out[slot] = p.stdout.strip() if p.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
         out[slot] = ""
@@ -50,7 +55,12 @@ def pre_llm_call(session_id="", is_first_turn=False, **_):
         ctx_args += ["--instruction", str(_instruction_version())]
         jobs.append(["agents", "check"])
     out = [""] * len(jobs)
-    threads = [threading.Thread(target=_run, args=(a, key, out, i), daemon=True) for i, a in enumerate(jobs)]
+    # bare threads start with an empty context: read the session's scope here, on the hook's thread
+    try:
+        env, cwd = run_context.apa_env(APA_SESSION=key), run_context.session_cwd()
+    except ValueError:  # a run without its context: no injection rather than one under the gateway's credential
+        return None
+    threads = [threading.Thread(target=_run, args=(a, key, out, i, env, cwd), daemon=True) for i, a in enumerate(jobs)]
     for t in threads:
         t.start()
     for t in threads:

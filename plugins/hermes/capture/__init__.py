@@ -12,6 +12,7 @@ or conversation text). A kernel that answers but refuses is only logged. An unre
 (with its Idempotency-Key) in the state dir; the next hook re-sends it once the kernel is back (A.1).
 """
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -21,6 +22,10 @@ import sys
 import time
 import urllib.error
 import urllib.request
+
+_spec = importlib.util.spec_from_file_location("apa_run_context", pathlib.Path(__file__).resolve().parents[1] / "tools" / "run_context.py")
+run_context = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(run_context)
 
 TEXT_MAX = 20000
 TIMEOUT_SECS = 10
@@ -58,7 +63,7 @@ def _log(env, reason):
 def _spawn(payload):
     """Hand the payload (or None: only re-send what is kept) to a detached helper; returns at once."""
     p = subprocess.Popen([sys.executable, "-I", str(pathlib.Path(__file__).resolve())], stdin=subprocess.PIPE,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, env=run_context.apa_env())
     p.stdin.write(json.dumps(payload).encode())
     p.stdin.close()
 
@@ -89,13 +94,20 @@ def on_session_end(session_id="", **_):
                 _spawn(None)
             return
         text = "\n\n".join(turns)[-TEXT_MAX:]
-        _spawn({"text": text, "session": str(session_id), "path": os.getcwd(), "host": socket.gethostname()})
+        _spawn({"text": text, "session": str(session_id), "path": run_context.session_cwd() or "", "host": socket.gethostname(),
+                "context": run_context.context_file()})
+    except ValueError as e:  # a run without its context: nothing goes out under the gateway's credential
+        _log(os.environ, str(e).splitlines()[0])
     except Exception:
         pass  # fail open: capture problems must never reach the conversation
 
 
-def _credentials(env):
-    """Same rule as the apa CLI: a run (APA_RUN) uses only its run credential and never the saved file."""
+def _credentials(env, context=None):
+    """Same rule as the apa CLI: a run uses only its run credential and never the saved file. A session bound to a run
+    context uses that run's; once the run has ended the file is gone and the request is refused here, as the kernel would."""
+    if context:
+        ctx = json.loads(pathlib.Path(context).read_text())
+        return ctx["url"], ctx["token"]
     url, token = env.get("APA_URL", ""), env.get("APA_TOKEN", "")
     if env.get("APA_RUN"):
         f = env.get("APA_RUN_CREDENTIAL_FILE")
@@ -112,7 +124,7 @@ def _credentials(env):
 def _post(item, env):
     """One POST. Returns None when delivered or refused (refusal is logged), "unreachable" when it should be kept."""
     try:
-        url, token = _credentials(env)
+        url, token = _credentials(env, item.get("context"))
     except (OSError, ValueError) as e:
         _log(env, "no usable credentials: " + type(e).__name__)
         return None
@@ -138,10 +150,10 @@ def _send(payload, env):
     pend = _state_dir(env) / "pending"
     pend.mkdir(parents=True, exist_ok=True)
     if payload:
-        session = payload.pop("session")
+        session, context = payload.pop("session"), payload.pop("context", None)
         key = "hermes-capture-" + hashlib.sha1(f"{session}|{payload.get('text')}".encode()).hexdigest()[:16]
         f = pend / (key + ".json")
-        f.write_text(json.dumps({"session": session, "key": key, "body": payload}))
+        f.write_text(json.dumps({"session": session, "key": key, "body": payload, "context": context}))
         f.chmod(0o600)
     for f in sorted(pend.glob("*.json"), key=lambda p: p.stat().st_mtime):
         claimed = f.with_suffix(".sending")

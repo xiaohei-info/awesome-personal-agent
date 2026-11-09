@@ -159,7 +159,7 @@ func setup(t *testing.T, maxDepth int) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err = New(Options{Store: st, Exec: e.x, Packs: ld, Queue: e.gate, RunsDir: e.runs, APIURL: "http://apa.local", Owner: "owner", Wake: e.wake,
+	svc, err = New(Options{Store: st, Exec: e.x, Packs: ld, Queue: e.gate, RunsDir: e.runs, APIURL: "http://apa.local", Owner: "owner", Host: "h", Wake: e.wake,
 		Now: func() time.Time { return t0 }, MaxChainDepth: maxDepth, OnError: func(_ string, err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
@@ -777,7 +777,7 @@ func TestRunnerQuestionIsKept(t *testing.T) {
 	}
 }
 
-// cwd=project_checkout：运行目录取项目的检出路径；没有检出时拒绝。
+// cwd=project_checkout：运行目录取项目在本机的检出路径；没有检出、或检出都在别的机器时拒绝。
 func TestProjectCheckoutCwd(t *testing.T) {
 	e := setup(t, 0)
 	e.configure("pwd")
@@ -794,12 +794,22 @@ func TestProjectCheckoutCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.must(owner, "project.repo.add", map[string]any{"id": proj, "remote": "https://example.com/r.git"})
+	e.must(owner, "project.checkout.set", map[string]any{"id": proj, "remote": "https://example.com/r.git", "host": "other", "path": "/elsewhere/r"})
+	remote := e.newItem("c", []string{"co"}, map[string]any{"project": proj})
+	e.open(remote)
+	if it := e.item(remote); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "检出") {
+		t.Fatalf("checkout on another host only: %+v", it)
+	}
 	e.must(owner, "project.checkout.set", map[string]any{"id": proj, "remote": "https://example.com/r.git", "host": "h", "path": co})
 	ok := e.newItem("b", []string{"co"}, map[string]any{"project": proj})
 	e.open(ok)
 	res := e.waitResult()
 	if got := strings.TrimSpace(waitFile(t, filepath.Join(e.runs, res.Run.ID, "pwd"))); got != co {
 		t.Fatalf("cwd = %q, want %q", got, co)
+	}
+	rs := e.runList()
+	if sp := rs[len(rs)-1].Spec; sp.Dir != co || sp.RunDir != filepath.Join(e.runs, res.Run.ID) {
+		t.Fatalf("spec = %+v, want work dir %s and its own run dir", sp, co)
 	}
 }
 

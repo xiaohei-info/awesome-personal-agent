@@ -9,126 +9,71 @@ meta:
   - 01a1a720-f7fd-719e-91d8-f5032216143f
   - 01a1a720-fa34-79ff-9662-cdf8dac90a21
   - 01a1aa40-ef12-766f-86e2-bead6a7c7b51
-  amendment_revision: 5
+  amendment_revision: 8
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-a4657a0582f6
-    amendment_file: /Volumes/SSD1T/apps/hermes/home/workspace/reports/apa-omac-plan/auth-redesign-20261108.amendment.yaml
+    amendment_id: amend-f11d476e11d0
+    amendment_file: .omac/apa.system-amendment.yaml
     nodes:
-      proxy-grant-surface:
+      fix.cli-init-serve.1e737a:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-62062a50923d537fb2dcda1b
-      kernel-proxy-tiers:
+        expected_review_generation: amendment-c241ac17d45a158339b95878
+      e2e-guideline-live:
         stage: authoring
         state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-d00c2c0b5c28dd5d139a05ec
-      kernel-proxy-grant-basis:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-050ed8508c45c9c221569736
-      kernel-proxy-rejection:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-747056fc095fc55457f7364a
-      kernel-health-proxy-signal:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-322998be85fb97d3d02c5a10
-      api-proxy-basis:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-61a85b7d5e5ea6c8de4f1048
-      cli-proxy-basis:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-714b404dfccd1d283c53d096
-      web-settings-grants:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-4b6c6a01e44532ca33d12c57
-      web-proxy-visibility:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-3b52bbd767655864c0d97724
-      hermes-plugin-tools-basis:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-b1d9caa59eb19509db0473cb
-      hermes-plugin-receipt-evidence:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-86a822148174a4f92b8c8674
-      hermes-plugin-capture-failure:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-88732f09e291c5eee6c9194f
-      e2e-hermes-session:
-        stage: authoring
-        state: synced
-        work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
+        work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
         baseline:
-          status: todo
+          status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-204d99c1ad27ca563dc7c467
+          review_generation: amendment-2a1255743ee97ba8c8c4e1e8
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
             merge: 0
             review: 0
             worker: 0
-          decision_required_pending: false
+          decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
-          worker_handoff_pending: false
+          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
-        expected_review_generation: amendment-2b462bc735947598b216c8c3
+        expected_contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+        expected_review_generation: amendment-cdf04fc0ef32c90d2701f40d
         attempt_baseline:
-          status: todo
+          status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-204d99c1ad27ca563dc7c467
+          review_generation: amendment-2a1255743ee97ba8c8c4e1e8
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
             merge: 0
             review: 0
             worker: 0
-          decision_required_pending: false
+          decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 81ac42471eba72dfaa7e7dd9c830053d08dfab78051fdead305b534bc3ea0309
-          worker_handoff_pending: false
+          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-2b462bc735947598b216c8c3
+          review_generation: amendment-cdf04fc0ef32c90d2701f40d
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -140,7 +85,74 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
+          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          worker_handoff_pending: false
+      e2e-proactive-live:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
+        baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-fc97b5bcaec15b4017259da6
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
+          worker_handoff_pending: true
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+        expected_contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
+        expected_review_generation: amendment-f91414051e117e961e7b2ba7
+        attempt_baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-fc97b5bcaec15b4017259da6
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
+          worker_handoff_pending: true
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-f91414051e117e961e7b2ba7
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-bg-main-live:
@@ -151,23 +163,16 @@ meta:
           merge: 0
           review: 0
           worker: 0
-      e2e-proactive-live:
-        amendment_id: amend-4d1bfdbe2d71
-        work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-        contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
+      e2e-hermes-session:
+        amendment_id: amend-a4657a0582f6
+        work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
+        contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-      e2e-guideline-live:
-        amendment_id: amend-af8c76d4b610
-        work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
-        contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-  last_amendment_id: amend-a4657a0582f6
+    system: true
+  last_amendment_id: amend-f11d476e11d0
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
@@ -12415,6 +12420,8 @@ nodes:
   - cli-init-serve
   - fix.hermes-plugin-tools.ea87a6
   - fix.kernel-delegation.0bdd78
+  - fix.kernel-task-agent.ee5850
+  - fix.pack-brief.9ddec2
   title: 真实 Hermes：简报
   description: 产出 e2e-proactive-live-live-evidence。是 flow-brief 的唯一全流程 owner。要点：默认
     harness 用真实 Hermes。 派给 omac-worker-frontend 是因为它运行在 Mac mini 上，该主机有真实 Hermes 和
@@ -12574,6 +12581,8 @@ nodes:
   - fix.hermes-plugin-tools.ea87a6
   - fix.kernel-guideline-check.61130e
   - fix.sources-github.85016b
+  - fix.kernel-task-agent.ee5850
+  - fix.cli-init-serve.1e737a
   title: 真实 Hermes 与仓库：规范与 AGENTS.md
   description: 产出 e2e-guideline-live-live-evidence。是 flow-agents-md、flow-no-repo-guideline、flow-guideline-draft
     的唯一全流程 owner。 派给 omac-worker-frontend 是因为它运行在 Mac mini 上，该主机有真实 Hermes 和 ego-browser。
@@ -15504,3 +15513,278 @@ nodes:
       producer: repo-ci-redline
       evidence_mode: artifact
     coverage_gate: 70
+- id: fix.kernel-task-agent.ee5850
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - kernel-judge-generate
+  - kernel-run-credentials
+  - kernel-executors
+  - kernel-items
+  - test-doubles
+  title: 'Fix kernel-task-agent: dfx-ee585068bf8d'
+  description: "Automatic fix for upstream defect(s) reported by e2e-proactive-live.\n\n-
+    [design-gap] anchors flow-brief/ACT-BRF-01 (docs/solution-design.md#36-场景五简报)\n
+    \ expected: §3.6 第 2 步与 §10 任务型的输入：内核建好目标事项后，把账本快照（已按运行身份过滤）作为资料文件放进运行目录，与 instance_params
+    并列。快照至少含运行身份可见的项目及其事项（id、标题、阶段、更新时间等摘要字段），简报包据此按项目分节。这是所有任务型运行的通用输入（简报、复盘、跟进判断、委派核验、规范起草共用），在
+    callTask 组装 Materials 的同一处实现，不为简报单开分支；过滤沿用运行身份的既有读权限，不新增信任级。生成型改用模板时同一份快照作资料附带（§10
+    同段）。\n  observed: taiyi 真实 Hermes 跑简报：run 成功、spec.period 已写，但 spec.sections 为空，ACT-BRF-01
+    失败，ACT-BRF-02..06 依赖它。运行目录 materials.json 只有 instance_params，没有项目与事项；agent 输出也说明快照缺项目和事项，无从分节。\n
+    \ where: kernel/agents/task/callagent.go:instanceMaterials; kernel/agents/task/callagent.go:callTask"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-ee585068bf8d in kernel-task-agent:
+      §3.6 第 2 步与 §10 任务型的输入：内核建好目标事项后，把账本快照（已按运行身份过滤）作为资料文件放进运行目录，与 instance_params
+      并列。快照至少含运行身份可见的项目及其事项（id、标题、阶段、更新时间等摘要字段），简报包据此按项目分节。这是所有任务型运行的通用输入（简报、复盘、跟进判断、委派核验、规范起草共用），在
+      callTask 组装 Materials 的同一处实现，不为简报单开分支；过滤沿用运行身份的既有读权限，不新增信任级。生成型改用模板时同一份快照作资料附带（§10
+      同段）。'
+    non_goals:
+    - 外部正文不进提示词指令段
+    - 未确认的声明不得执行
+    - 内核代码不出现具体 harness 名
+    - 除外呼调用器外不 import 网络或子进程库，不出现具体 harness、渠道、厂商名
+    - 不直写其他模块的数据，模块协作经命令模型
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/agents/task/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: kernel-task-agent-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#81-三类
+      - docs/solution-design.md#83-级联
+      - docs/solution-design.md#84-输入输出契约
+      - docs/solution-design.md#87-不可用时
+      - docs/solution-design.md#1410-资料不是指令
+      - docs/solution-design.md#56-外部依赖与降级
+      delivery_goal: 内核先建目标事项，把固定模板和资料文件放进运行目录后按已确认声明拉起无头运行，CLI 回执优先、stdout 末段兜底一次，失败或不可用转
+        needs_input 不重试
+      covers:
+      - ACT-CAS-03
+      - ACT-CAS-04
+      - ACT-CAS-06
+      - ACT-CAS-10
+      - ACT-OUT-08
+      - ACT-CMD-02
+      - ACT-INJ-01
+      acceptance_refs:
+      - flow-agent-cascade
+      - flow-outcall-limits
+      - flow-command-registration
+      - flow-data-not-instructions
+      commands:
+      - go test -count=1 ./kernel/agents/task/... ./kernel/agents/direct/... ./kernel/runidentity/...
+        ./kernel/executors/...
+    pr_base: main
+    acceptance_refs:
+    - flow-brief
+    source_of_truth:
+    - docs/solution-design.md#81-三类
+    - docs/solution-design.md#83-级联
+    - docs/solution-design.md#84-输入输出契约
+    - docs/solution-design.md#87-不可用时
+    - docs/solution-design.md#1410-资料不是指令
+    - docs/solution-design.md#56-外部依赖与降级
+    scope_paths:
+    - kernel/agents/task/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: kernel-judge-generate-module
+      producer: kernel-judge-generate
+      evidence_mode: artifact
+    - artifact_id: kernel-run-credentials-module
+      producer: kernel-run-credentials
+      evidence_mode: artifact
+    - artifact_id: kernel-executors-module
+      producer: kernel-executors
+      evidence_mode: artifact
+    - artifact_id: kernel-items-module
+      producer: kernel-items
+      evidence_mode: artifact
+    - artifact_id: test-doubles-tooling
+      producer: test-doubles
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    - artifact_id: kernel-domain-module
+      producer: kernel-domain
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-ee585068bf8d
+    coverage_gate: 80
+- id: fix.pack-brief.9ddec2
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - kernel-instances
+  - kernel-rules
+  - kernel-task-agent
+  - kernel-attention
+  - cli-packs
+  - cli-items
+  - cli-context
+  - api-deliveries
+  title: 'Fix pack-brief: dfx-9ddec2e28ae4'
+  description: "Automatic fix for upstream defect(s) reported by e2e-proactive-live.\n\n-
+    [design-gap] anchors flow-brief/ACT-BRF-01 (docs/solution-design.md#36-场景五简报)\n
+    \ expected: 简报包 spec_schema 规定 spec.sections 是 [{project, body}]，Web 简报页读 body。write-brief.md
+    必须明确要求逐项目写入 spec.sections[].{project, body}（body 内含进展、到期事项、待本人决定的事），不得让运行者自行发明分节字段。\n
+    \ observed: dfx-ee585068bf8d 修复合并后，taiyi 真实 Hermes 跑简报（run 01a1bbaa-e7a7-7507-ac67-adffa565c49e）已写
+    spec.period 和 4 个项目分节，但每节用 progress/due/decisions 键，没有 body；Web 简报页会显示空分节，brief
+    以 needs_input 结束，ACT-BRF-01 失败。原因是提示词只说“每节写清楚：进展、到期事项、待本人决定的事”，没有给出 sections 的键名。\n
+    \ where: packs/brief/prompts/write-brief.md; packs/brief/pack.yaml:kinds.brief.spec_schema"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-9ddec2e28ae4 in pack-brief: 简报包 spec_schema
+      规定 spec.sections 是 [{project, body}]，Web 简报页读 body。write-brief.md 必须明确要求逐项目写入
+      spec.sections[].{project, body}（body 内含进展、到期事项、待本人决定的事），不得让运行者自行发明分节字段。'
+    non_goals:
+    - 节点测试用 STUB_HARNESS；真实 Hermes 由 e2e-proactive-live 证明
+    - 包内不出现 harness 名
+    - 能力包不含代码、命令和策略字段，mode 不能声明 auto
+    verification_commands:
+    - go run ./cli/apa pack validate packs/brief
+    - go test -count=1 ./tests/packs/brief/...
+    integration_gates:
+    - name: pack-brief-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-c-capability-pack.md#c13-示例简报包
+      - docs/appendix-c-capability-pack.md#c14-内置包声明的内容
+      - docs/solution-design.md#36-场景五简报
+      - docs/solution-design.md#87-不可用时
+      delivery_goal: brief 包按 C.13 声明 kind、实例参数、周期规则、任务型提示词和视图，周期生成并送达简报，同周期只有一份，可被用户覆盖为生成型
+      covers:
+      - ACT-ITEM-11
+      - ACT-BRF-01
+      - ACT-BRF-02
+      - ACT-BRF-03
+      - ACT-BRF-04
+      - ACT-BRF-05
+      - ACT-DAY-02
+      acceptance_refs:
+      - flow-item-lifecycle
+      - flow-brief
+      - flow-first-day
+      commands:
+      - go test -count=1 ./tests/packs/brief/...
+    pr_base: main
+    acceptance_refs:
+    - flow-brief
+    source_of_truth:
+    - docs/appendix-c-capability-pack.md#c13-示例简报包
+    - docs/appendix-c-capability-pack.md#c14-内置包声明的内容
+    - docs/solution-design.md#36-场景五简报
+    - docs/solution-design.md#87-不可用时
+    scope_paths:
+    - packs/brief/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: kernel-instances-module
+      producer: kernel-instances
+      evidence_mode: artifact
+    - artifact_id: kernel-rules-module
+      producer: kernel-rules
+      evidence_mode: artifact
+    - artifact_id: kernel-task-agent-module
+      producer: kernel-task-agent
+      evidence_mode: artifact
+    - artifact_id: kernel-attention-module
+      producer: kernel-attention
+      evidence_mode: artifact
+    - artifact_id: cli-packs-commands
+      producer: cli-packs
+      evidence_mode: artifact
+    - artifact_id: cli-items-commands
+      producer: cli-items
+      evidence_mode: artifact
+    - artifact_id: cli-context-commands
+      producer: cli-context
+      evidence_mode: artifact
+    - artifact_id: api-deliveries-routes
+      producer: api-deliveries
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-9ddec2e28ae4
+    coverage_gate: 0
+- id: fix.cli-init-serve.1e737a
+  worker: omac-worker-backend
+  blocked_by:
+  - cli-client
+  - kernel-config
+  - kernel-store
+  - api-core
+  title: 'Fix cli-init-serve: dfx-1e737aebe6e3'
+  description: "Automatic fix for upstream defect(s) reported by e2e-guideline-live.\n\n-
+    [design-gap] anchors flow-agents-md/ACT-AGM-09 (docs/solution-design.md#125-agentsmd唯一源渲染漂移)\n
+    \ expected: §12.5：仓库默认分支 AGENTS.md 变化时，github 来源发出的 repo.agents_md_changed 事件由内核消费，
+    调 agentsmd.Service.Trigger（经外呼调用器拉起的只读读取器作为 Options.Fetch）做与 apa agents check
+    同一检测并产出结论。 这是组装层接线：在 serve 组装处注入 Fetch，并把该事件类型路由到 Trigger；kernel/agentsmd 内部逻辑已具备，不应再改。\n
+    \ observed: 上一轮 fix.kernel-agentsmd 合并后 live 仍失败。原因是改错层：cli/serve/assemble.go:319
+    构造 agentsmd.New 时未传 Fetch （Trigger 在 kernel/agentsmd/agentsmd.go:683 直接报 Options.Fetch
+    is not configured），全仓库生产代码没有任何地方消费 repo.agents_md_changed（仅 sources/github/github.go:357
+    产出）。\n  where: cli/serve/assemble.go:319; kernel/agentsmd/agentsmd.go:679; sources/github/github.go:357"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-1e737aebe6e3 in cli-init-serve: §12.5：仓库默认分支
+      AGENTS.md 变化时，github 来源发出的 repo.agents_md_changed 事件由内核消费， 调 agentsmd.Service.Trigger（经外呼调用器拉起的只读读取器作为
+      Options.Fetch）做与 apa agents check 同一检测并产出结论。 这是组装层接线：在 serve 组装处注入 Fetch，并把该事件类型路由到
+      Trigger；kernel/agentsmd 内部逻辑已具备，不应再改。'
+    non_goals:
+    - 不实现发布打包（release-packaging 负责）
+    - 数据不写到 APA_HOME 之外
+    - CLI 不含业务逻辑，不直接访问存储
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./cli/serve/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: cli-init-serve-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#162-数据目录
+      - docs/solution-design.md#164-安装路径用户视角
+      - docs/solution-design.md#1413-web-入口
+      delivery_goal: '`apa init` 在空目录建立完整数据目录并设置 Web 登录，`apa serve` 启动内核并默认只监听本机'
+      covers:
+      - ACT-BOOT-01
+      - ACT-BOOT-02
+      acceptance_refs:
+      - flow-bootstrap
+      commands:
+      - go test -count=1 ./cli/serve/...
+    pr_base: main
+    acceptance_refs:
+    - flow-agents-md
+    source_of_truth:
+    - docs/solution-design.md#162-数据目录
+    - docs/solution-design.md#164-安装路径用户视角
+    - docs/solution-design.md#1413-web-入口
+    scope_paths:
+    - cli/serve/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: cli-client-commands
+      producer: cli-client
+      evidence_mode: artifact
+    - artifact_id: kernel-config-module
+      producer: kernel-config
+      evidence_mode: artifact
+    - artifact_id: kernel-store-module
+      producer: kernel-store
+      evidence_mode: artifact
+    - artifact_id: api-core-routes
+      producer: api-core
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    - artifact_id: kernel-domain-module
+      producer: kernel-domain
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-1e737aebe6e3
+    coverage_gate: 80

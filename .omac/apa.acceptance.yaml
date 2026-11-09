@@ -142,7 +142,7 @@ flows:
         kind: business-action
         step: delegation 进 done 必须带证据
         how: |-
-          新建 kind=delegation 的事项，用 `apa item transition` 转 done，不带证据；再用 `apa report --outcome <完成> --evidence <PR 链接>`。
+          新建 kind=delegation 的事项，用 `apa item transition` 转 done，不带证据；再用 `apa report --outcome <完成> --pr <PR 链接>`。
         expected: |-
           通过：无证据时非 0 且阶段不变；带证据后进入 done。失败：无证据可完成。
       - id: ACT-ITEM-07
@@ -230,16 +230,16 @@ flows:
         kind: business-action
         step: delegate 附本人原话代为接受
         how: |-
-          新建 prop-c，运行 `APA_TOKEN=$DEL apa accept <id> --evidence "这个接了"`。
+          新建 prop-c，运行 `APA_SESSION=<会话引用> APA_TOKEN=$DEL apa accept <id> --evidence "这个接了"`。
         expected: |-
           通过：阶段变为 open，Event 带 on_behalf_of 和证据，并出现在 Web 的"agent 变更"视图。失败：Event 缺证据。
       - id: ACT-PROP-06
         kind: business-action
-        step: 不带证据的代答被拒绝
+        step: 无本人原话也无授权单的代答被拒绝
         how: |-
-          新建 prop-d，分别运行不带 `--evidence` 的 `apa accept <id>` 和 `apa dismiss <id> --reason 重复`，都用 DEL。
+          新建 prop-d，分别运行不带 `--evidence` 也不带 `--grant` 的 `apa accept <id>` 和 `apa dismiss <id> --reason 重复`，都用 DEL。
         expected: |-
-          通过：两次都非 0，阶段保持 proposed。失败：无证据也生效。
+          通过：两次都退出码 23，阶段保持 proposed。失败：无依据也生效。
       - id: ACT-PROP-07
         kind: business-action
         step: observer 和 worker 不能处理建议
@@ -322,16 +322,16 @@ flows:
         kind: business-action
         step: delegate 附证据代答
         how: |-
-          新建同样的决策请求，运行 `APA_TOKEN=$DEL apa decide <id> --option B --evidence "就选方案 B"`。
+          新建同样的决策请求，运行 `APA_SESSION=<会话引用> APA_TOKEN=$DEL apa decide <id> --option B --evidence "就选方案 B"`。
         expected: |-
           通过：resolved_via=chat，Event 带 on_behalf_of 和证据，可在"agent 变更"视图看到。失败：Event 缺字段。
       - id: ACT-DEC-04
         kind: business-action
-        step: 不带证据的代答被拒绝
+        step: 无本人原话也无授权单的代答被拒绝
         how: |-
-          新建决策请求，运行 `APA_TOKEN=$DEL apa decide <id> --option A`。
+          新建决策请求，运行 `APA_TOKEN=$DEL apa decide <id> --option A`，不带 `--evidence` 也不带 `--grant`。
         expected: |-
-          通过：非 0，事项停在 needs_input。失败：决策生效。
+          通过：退出码 23，不写入，事项转 needs_input。失败：决策生效。
       - id: ACT-DEC-05
         kind: business-action
         step: worker 不能回答决策
@@ -343,7 +343,7 @@ flows:
         kind: business-action
         step: 只认第一次回答
         how: |-
-          事项已被回答后，运行 `APA_TOKEN=$DEL apa decide <id> --option B --evidence x`；同时对新决策请求并发提交两次不同选项的代答。
+          事项已被回答后，运行 `APA_SESSION=<会话引用> APA_TOKEN=$DEL apa decide <id> --option B --evidence x`；同时对新决策请求并发提交两次不同选项的代答。
         expected: |-
           通过：后到者退出码 6 并返回已有结果；并发时恰好一个成功。失败：结果被覆盖，或两次都成功。
       - id: ACT-DEC-07
@@ -368,14 +368,14 @@ flows:
         kind: business-action
         step: CLI 代答 web_only 决策返回 20
         how: |-
-          建 tag=acc-finance 的事项，`apa ask` 写入决策请求，再运行 `APA_TOKEN=$DEL apa decide <id> --option A --evidence "同意"`。
+          建 tag=acc-finance 的事项，`apa ask` 写入决策请求，再运行 `APA_SESSION=<会话引用> APA_TOKEN=$DEL apa decide <id> --option A --evidence "同意"`。
         expected: |-
           通过：退出码 20，输出含结构化说明和 Web 链接；事项停在 needs_input，risk_class 为资金类。失败：决策生效，或没有 Web 链接。
       - id: ACT-WEB-03
         kind: business-action
         step: 接受 web_only 建议同样返回 20
         how: |-
-          用 `apa propose` 建 tag=acc-finance 的建议，运行 `APA_TOKEN=$DEL apa accept <id> --evidence "同意"`。
+          用 `apa propose` 建 tag=acc-finance 的建议，运行 `APA_SESSION=<会话引用> APA_TOKEN=$DEL apa accept <id> --evidence "同意"`。
         expected: |-
           通过：退出码 20，阶段仍为 proposed。失败：建议被接受。
       - id: ACT-WEB-04
@@ -1125,7 +1125,7 @@ flows:
         kind: business-action
         step: 初筛中代答返回 22
         how: |-
-          初筛未返回时运行 `APA_TOKEN=$DEL apa decide <id> --option A --evidence "选 A"`。
+          初筛未返回时运行 `APA_SESSION=<会话引用> APA_TOKEN=$DEL apa decide <id> --option A --evidence "选 A"`。
         expected: |-
           通过：退出码 22，code=risk_screening_pending，why 说明原因，web_url 有值；事项停在 needs_input；留有拒绝记录。失败：决策生效，或退出码不是 22。
       - id: ACT-SCR-05
@@ -1726,7 +1726,7 @@ flows:
         kind: flow-step
         step: 准备已委派事项和关联键
         how: |-
-          负责人：验收执行者。在 acc-work 建委派子事项（assignee=work-host.cli），用 `apa report --evidence <PR 链接>` 回执进展，使 PR 登记为关联键。来源用 ACC_SOURCE，发送者 alice，sender_verified=true。
+          负责人：验收执行者。在 acc-work 建委派子事项（assignee=work-host.cli），用 `apa report --pr <PR 链接>` 回执进展，使 PR 登记为关联键。来源用 ACC_SOURCE，发送者 alice，sender_verified=true。
         expected: |-
           通过：`apa item show` 显示关联键。失败：未登记。
       - id: ACT-MSG-02
@@ -2026,7 +2026,7 @@ flows:
         kind: business-action
         step: 发起修改走委派和 PR
         how: |-
-          在 Web 材料页发起修改，要求填写修改内容，assignee 选 work-host.cli；执行者开分支提 PR，合并后 `apa report --evidence <PR>`。
+          在 Web 材料页发起修改，要求填写修改内容，assignee 选 work-host.cli；执行者开分支提 PR，合并后 `apa report --pr <PR>`。
         expected: |-
           通过：生成带 project、仓库、路径的子事项，并校验允许的执行者；合并后最近 commit 刷新，子事项 done。失败：能绕过名单，或 commit 未刷新。
       - id: ACT-HST-07
@@ -2408,7 +2408,7 @@ flows:
         kind: business-action
         step: 回执后下一次运行接续
         how: |-
-          用 WRK 对子事项 `apa report --outcome <完成> --evidence <PR 链接>`。
+          用 WRK 对子事项 `apa report --outcome <完成> --pr <PR 链接>`。
         expected: |-
           通过：子事项 done，父事项回 open；规则再次命中，新 Run 的 chain_depth 加一；`apa why` 可回放。失败：链路深度不增加，或没有接续。
       - id: ACT-BGM-07
@@ -2691,7 +2691,7 @@ flows:
         kind: business-action
         step: 唤醒租约内 delegate 不能代答
         how: |-
-          运行未结束时，从另一个持同一 DEL 的会话运行 `apa decide <其他事项> --option A --evidence x`。
+          运行未结束时，从另一个持同一 DEL 的会话，设置 `APA_SESSION=<另一会话引用>` 运行 `apa decide <其他事项> --option A --evidence x`。
         expected: |-
           通过：退出码 4；本人在 Web 仍可决定；回执或运行超时后，DEL 恢复代答。失败：租约期间代答成功，或租约结束后未恢复。
       - id: ACT-WAK-05

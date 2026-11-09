@@ -4,7 +4,7 @@
 //
 // 凭据明文只在签发时返回一次，账本只存 SHA-256 哈希。凭据随运行结束失效：每次认证都读运行状态，
 // 终态（成功、失败、超时）即拒绝，所以失效与 proc.Settle 在同一事务生效，不依赖调用方记得吊销；
-// Revoke 提供显式吊销。首版只经环境变量传递（Env）；凭据文件传递不在本包（§7.7，接入 dsh 时再做）。
+// Revoke 提供显式吊销。首版经环境变量（Env）和运行上下文文件（kernel/outcall/proc）传递；只传凭据的文件方式不在本包（§7.7，接入 dsh 时再做）。
 // 唤醒回合的投递不带明文，由网关插件用自己的 token 经 Exchange 换取，这样换出的凭据另有过期时间（§13.6）。
 package runidentity
 
@@ -237,7 +237,7 @@ func scope(target domain.Item) func(*store.Tx, authz.Object) (bool, bool, error)
 	}
 }
 
-// Env 是运行凭据的环境变量传递（§7.7）：供 proc.Options.Env 在启动时注入，凭据因此不落盘。
+// Env 是运行凭据的环境变量传递（§7.7）：供 proc.Options.Env 在启动时注入，不入账本。
 // project 是目标事项所属项目，为空则不注入 APA_PROJECT。
 func Env(apiURL, secret string, run domain.Run, project string) map[string]string {
 	env := map[string]string{"APA_URL": apiURL, "APA_TOKEN": secret, "APA_RUN": run.ID}

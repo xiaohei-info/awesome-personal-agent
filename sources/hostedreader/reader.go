@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -162,7 +163,7 @@ func readRemote(ctx context.Context, c Config) (*Output, error) {
 	}
 	defer os.RemoveAll(tmp)
 	// 只取默认分支最新一个提交的元数据，不检出文件；blob 按需拉取。
-	if _, err := (git{}).run(ctx, "clone", "--quiet", "--depth=1", "--no-checkout", "--filter=blob:none", "--", c.Repo, tmp); err != nil {
+	if _, err := (git{}).run(ctx, "clone", "--quiet", "--depth=1", "--no-checkout", "--filter=blob:none", "--", cloneURL(c.Repo), tmp); err != nil {
 		return nil, unreadable("远程不可读: %v", err)
 	}
 	g := git{dir: tmp}
@@ -192,6 +193,17 @@ func showFile(ctx context.Context, g git, ref, branch, p, origin string) (*Outpu
 func isPathMissing(err error) bool {
 	var re *readErr
 	return errors.As(err, &re) && re.code == CodePathMissing
+}
+
+// ownerRepo 是来源事件用的 owner/name 简写。
+var ownerRepo = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*/[A-Za-z0-9_-][A-Za-z0-9_.-]*$`)
+
+// cloneURL 把简写展开成可克隆的地址，否则 git 会把它当本地相对路径。简写的默认站点只在这里认定，内核不认识具体站点。
+func cloneURL(repo string) string {
+	if ownerRepo.MatchString(repo) && !strings.Contains(repo, "..") {
+		return "https://github.com/" + repo
+	}
+	return repo
 }
 
 func normalizeRepo(s string) string {

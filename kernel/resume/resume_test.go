@@ -326,6 +326,10 @@ func TestResumesWithTheSameSession(t *testing.T) {
 		t.Fatalf("resume run = %+v", r)
 	}
 	dir := filepath.Join(e.runs, r.ID)
+	// 会话的客户端环境在建会话时冻结：续接同一会话要沿用原来的运行上下文路径，目录是自己的。
+	if sp := lastRun(rs).Spec; sp.RunDir != dir || sp.ContextName != first.ID {
+		t.Fatalf("resume spec = %+v, want run dir %s, context %s", sp, dir, first.ID)
+	}
 	if args := waitFile(t, filepath.Join(dir, "args")); !strings.Contains(args, "--resume sess-1") {
 		t.Fatalf("args = %q", args)
 	}
@@ -419,6 +423,9 @@ func TestSessionGoneFallsBackToNewSession(t *testing.T) {
 		t.Fatalf("runs = %d, want original + failed resume + fresh", len(rs))
 	}
 	fresh := lastRun(rs).Run
+	if sp := lastRun(rs).Spec; sp.ContextName != "" || sp.RunDir != filepath.Join(e.runs, fresh.ID) {
+		t.Fatalf("a new session has its own run context: %+v", sp)
+	}
 	if args := waitFile(t, filepath.Join(e.runs, fresh.ID, "args")); strings.Contains(args, "--resume") {
 		t.Fatalf("fallback still resumed: %q", args)
 	}

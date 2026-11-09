@@ -19,14 +19,15 @@ from helpers import ROOT, TOOLS
 HERMES_SRC = pathlib.Path(os.environ.get("HERMES_SRC", pathlib.Path.home() / ".hermes" / "hermes-agent"))
 HERMES_PY = HERMES_SRC / "venv" / "bin" / "python"
 REQUIRE_LIVE = os.environ.get("APA_REQUIRE_LIVE") == "1"  # reviewer/gate hosts: never skip silently
-PROBE = "from model_tools import handle_function_call; from hermes_cli import plugins as p; assert hasattr(p.PluginContext, 'register_tool')"
+PROBE = ("from model_tools import handle_function_call; from hermes_cli import plugins as p; assert hasattr(p.PluginContext, 'register_tool'); "
+         "from agent.session_client_env import client_env_scope; from agent.runtime_cwd import set_session_cwd")
 
 
 def _live_problem():
     if not HERMES_PY.exists() or not shutil.which("go"):
         return f"needs a Hermes install (HERMES_SRC={HERMES_SRC}) and Go"
     r = subprocess.run([str(HERMES_PY), "-c", PROBE], cwd=HERMES_SRC, capture_output=True, timeout=120)
-    return None if r.returncode == 0 else "this Hermes lacks PluginContext.register_tool / model_tools.handle_function_call"
+    return None if r.returncode == 0 else "this Hermes lacks PluginContext.register_tool / model_tools.handle_function_call / the per-session client environment"
 
 
 _PROBLEM = _live_problem()
@@ -35,16 +36,22 @@ if _PROBLEM and REQUIRE_LIVE:
 pytestmark = pytest.mark.skipif(bool(_PROBLEM), reason=_PROBLEM or "")
 
 # One Hermes process: load the plugin the normal way, then call tools through Hermes' own dispatcher
-# with a session id, exactly as an agent turn would. stdin: JSON [[tool, args, session_id], ...].
+# with a session id inside the session's own scope, the way gateway/session_policy.py:policy_scope binds a turn.
+# stdin: JSON {"client_env": {...} or null, "cwd": "...", "calls": [[tool, args, session_id], ...]}.
 CHILD = textwrap.dedent("""
     import json, sys
     from hermes_cli import plugins
     plugins.discover_plugins()
+    from agent.runtime_cwd import set_session_cwd
+    from agent.session_client_env import client_env_scope
     from model_tools import handle_function_call
     from tools.registry import registry
+    req = json.load(sys.stdin)
+    set_session_cwd(req["cwd"])
     out = {"registered": sorted(n for n in registry.get_all_tool_names() if n.startswith("apa_")), "results": []}
-    for tool, args, sid in json.load(sys.stdin):
-        out["results"].append(json.loads(handle_function_call(tool, args, task_id="t", session_id=sid)))
+    with client_env_scope(req["client_env"]):
+        for tool, args, sid in req["calls"]:
+            out["results"].append(json.loads(handle_function_call(tool, args, task_id="t", session_id=sid)))
     print("RESULT" + json.dumps(out))
 """)
 
@@ -65,7 +72,7 @@ def kernel():
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n) or b"null")
             state["log"].append({"method": self.command, "path": self.path,
-                                 "session": self.headers.get("X-APA-Session"),
+                                 "session": self.headers.get("X-APA-Session"), "auth": self.headers.get("Authorization"),
                                  "evidence": (self.headers.get("X-APA-Evidence") or "").encode("latin-1").decode("utf-8"), "body": body})
             status, out = next((r for k, r in state["replies"].items() if self.path.split("?")[0].endswith(k)),
                                (200, {"ok": True}))
@@ -102,13 +109,29 @@ def hermes(tmp_path, apa_bin, kernel):
            "APA_TOKEN": "t", "APA_HOME": str(tmp_path / "apahome")}
 
     def run(*calls):
-        p = subprocess.run([str(HERMES_PY), "-c", CHILD], cwd=HERMES_SRC, env=env, input=json.dumps(calls),
+        req = {"client_env": run.client_env, "cwd": run.cwd, "calls": calls}
+        p = subprocess.run([str(HERMES_PY), "-c", CHILD], cwd=HERMES_SRC, env=env, input=json.dumps(req),
                            capture_output=True, text=True, timeout=120, check=True)
         line = next(l for l in p.stdout.splitlines() if l.startswith("RESULT"))
         return json.loads(line[len("RESULT"):])
 
-    run.env = env  # tests may adjust the child's environment
+    run.env, run.client_env, run.cwd = env, None, ""  # tests may adjust the gateway's environment and the session's scope
     return run
+
+
+@pytest.fixture
+def run_session(hermes, kernel, tmp_path):
+    """A session of a kernel-launched run: the context file the kernel writes, bound the way Hermes binds client_env."""
+    checkout, runs = tmp_path / "checkout", tmp_path / "apahome" / "runs"
+    checkout.mkdir()
+    (checkout / "README.md").write_text("the task's repo")
+    for name in ("run1", "run2"):
+        (runs / name).mkdir(parents=True)
+        (runs / name / "materials.json").write_text(json.dumps({"target": name}))
+    context = tmp_path / "run1.context"
+    context.write_text(json.dumps({"run": "run1", "url": kernel["url"], "token": "apa_run_live", "run_dir": str(runs / "run1"), "work_dir": str(checkout)}))
+    hermes.client_env, hermes.cwd = {"APA_RUN_CONTEXT": str(context)}, str(checkout)
+    return {"checkout": checkout, "runs": runs, "context": context}
 
 
 def test_flow_hermes_context_session_identity_reaches_propose_and_all_tools(hermes, kernel):
@@ -181,13 +204,13 @@ def test_accept_and_dismiss_carry_session(hermes, kernel):
     assert [(r["path"], r["session"]) for r in kernel["log"]] == [("/v1/items/r1/accept", "s1"), ("/v1/items/r2/dismiss", "s1")]
 
 
-def test_flow_brief_and_guideline_read_tier_run_reads_materials_and_writes_back_via_apa_tools(hermes, kernel):
+def test_flow_brief_and_guideline_read_tier_run_reads_materials_and_writes_back_via_apa_tools(hermes, kernel, run_session):
     out = hermes(("apa_list_dir", {"path": "."}, "s1"),
                  ("apa_item_update", {"id": "i1", "spec": {"period": "2026-W45", "sections": [{"project": "p", "text": "ok"}]},
                                       "reason": "brief"}, "s1"),
                  ("apa_material_commit", {"kind": "guideline", "title": "G", "project": "p", "reason": "draft",
                                           "content": "# 规范\n只写仓库里看得到的事实"}, "s1"))
-    assert out["results"][0]["ok"] is True  # file tools are registered and dispatched by Hermes (cwd is HERMES_SRC)
+    assert out["results"][0]["ok"] is True and "README.md" in out["results"][0]["entries"]  # the task's directory, though cwd is HERMES_SRC
     upd, com = kernel["log"]
     assert upd["method"] == "PATCH" and upd["path"] == "/v1/items/i1" and upd["session"] == "s1"
     assert upd["body"]["spec"] == {"period": "2026-W45", "sections": [{"project": "p", "text": "ok"}]}
@@ -195,19 +218,53 @@ def test_flow_brief_and_guideline_read_tier_run_reads_materials_and_writes_back_
     assert com["body"]["kind"] == "guideline" and com["body"]["project"] == "p"
 
 
-def test_read_tier_file_tools_work_under_the_kernel_env_contract(hermes, tmp_path):
-    """Kernel env for a run: APA_RUN set, no APA_HOME, cwd = a checkout (not the run dir)."""
-    runs = tmp_path / "apahome" / "runs"
-    (runs / "run1").mkdir(parents=True)
-    (runs / "run2").mkdir()
-    (runs / "run1" / "materials.json").write_text('{"target":"i1"}')
-    (runs / "run2" / "materials.json").write_text("other")
-    hermes.env.pop("APA_HOME")
-    hermes.env["APA_RUN"] = "run1"
+def test_read_tier_file_tools_use_the_runs_directories_not_the_gateways(hermes, kernel, run_session):
+    """ACT-DRF-01: the process cwd is the Hermes source tree and its env names another run; the session's run context decides."""
+    hermes.env["APA_RUN"] = "run2"
+    runs, checkout = run_session["runs"], run_session["checkout"]
     out = hermes(("apa_read_file", {"path": str(runs / "run1" / "materials.json")}, "s1"),
                  ("apa_read_file", {"path": "README.md"}, "s1"),
-                 ("apa_read_file", {"path": str(runs / "run2" / "materials.json")}, "s1"))
-    own, repo, sibling = out["results"]
-    assert own["ok"] is True and "i1" in own["content"]
-    assert repo["ok"] is True  # cwd (HERMES_SRC) is readable
+                 ("apa_read_file", {"path": str(HERMES_SRC / "README.md")}, "s1"),
+                 ("apa_read_file", {"path": str(runs / "run2" / "materials.json")}, "s1"),
+                 ("apa_propose", {"kind": "task", "title": "t"}, "s1"))
+    own, repo, gateway, sibling, cli = out["results"]
+    assert own["ok"] is True and "run1" in own["content"]
+    assert repo["ok"] is True and repo["content"] == "the task's repo"
+    assert gateway["ok"] is False and "outside" in gateway["error"]
     assert sibling["ok"] is False and "outside" in sibling["error"]
+    assert cli["exit_code"] == 0 and kernel["log"][-1]["auth"] == "Bearer apa_run_live"  # the real apa, as the run
+
+
+def test_session_without_a_run_context_is_refused(hermes, kernel):
+    out = hermes(("apa_read_file", {"path": "README.md"}, "s1"))
+    assert out["results"][0]["ok"] is False and "client_env_passthrough" in out["results"][0]["error"]
+
+
+def test_run_whose_context_did_not_arrive_errors_and_sends_nothing(hermes, kernel):
+    """The passthrough line is missing: only PATH travels, and it carries the kernel's run marker."""
+    hermes.client_env = {"PATH": "/usr/bin:/somewhere/run-credentials/.apa-run"}
+    out = hermes(("apa_read_file", {"path": "README.md"}, "s1"), ("apa_propose", {"kind": "task", "title": "t"}, "s1"))
+    assert out["results"][0]["ok"] is False and "did not reach Hermes" in out["results"][0]["error"]
+    assert out["results"][1]["ok"] is False and "client_env_passthrough: [APA_RUN_CONTEXT]" in out["results"][1]["error"]
+    assert not kernel["log"]
+
+
+def test_passthrough_check_reads_the_real_profile_config(hermes, tmp_path):
+    """Hermes' own config layer and configured_names, against the profile the fixture wrote."""
+    check = ("import importlib.util, sys; s = importlib.util.spec_from_file_location('rc', sys.argv[1]); "
+             "m = importlib.util.module_from_spec(s); s.loader.exec_module(m); m.require_passthrough()")
+    run = lambda: subprocess.run([str(HERMES_PY), "-c", check, str(TOOLS / "run_context.py")], cwd=HERMES_SRC, env=hermes.env,
+                                 capture_output=True, text=True, timeout=120)
+    missing = run()
+    assert missing.returncode != 0 and "client_env_passthrough: [APA_RUN_CONTEXT]" in missing.stderr
+    config = tmp_path / "hermes_home" / "config.yaml"
+    config.write_text(config.read_text() + "terminal:\n  client_env_passthrough: [APA_RUN_CONTEXT]\n")
+    allowed = run()
+    assert allowed.returncode == 0, allowed.stderr
+
+
+def test_ended_run_is_refused_and_the_cli_never_falls_back(hermes, kernel, run_session):
+    run_session["context"].unlink()
+    out = hermes(("apa_read_file", {"path": "README.md"}, "s1"), ("apa_propose", {"kind": "task", "title": "t"}, "s1"))
+    assert out["results"][0]["ok"] is False and "ended" in out["results"][0]["error"]
+    assert out["results"][1]["exit_code"] == 3 and not kernel["log"]

@@ -1,7 +1,20 @@
 # apa-tools (Hermes plugin)
 
 Install: `ln -s "$PWD" ~/.hermes/plugins/apa-tools`, then `hermes plugins enable apa-tools`.
-Needs `apa` on PATH (or `APA_BIN`) plus `APA_URL` / `APA_TOKEN`.
+Needs `apa` on PATH (or `APA_BIN`) plus `APA_URL` / `APA_TOKEN`, Hermes v0.23.0 or later, and in the profile's `config.yaml`:
+
+```yaml
+terminal:
+  client_env_passthrough: [APA_RUN_CONTEXT]
+```
+
+Without that line `apa_declare_headless` refuses to declare. If runs start anyway (the line removed later, a session created before it, `apa declare` run by hand), the run's PATH marker gives them away: file tools, CLI tools, hooks and a bare `apa` in `terminal` all error instead of using the gateway's credential. A new run is needed after adding the line, because Hermes freezes the client environment with the session.
+
+A session without the marker cannot be told from an ordinary one and keeps the gateway's credential, by design: that is the owner's chat. The check reads the profile the tool call runs in, and `apa declare` run by hand bypasses it.
+
+## Run identity
+
+Tools and hooks run in Hermes' shared gateway process, so its cwd and environment say nothing about the run (a gateway started by a run's client even keeps that run's `APA_RUN` / `APA_TOKEN`). `run_context.py` is the single source: the session's bound `APA_RUN_CONTEXT` (Hermes freezes it from the client's environment and binds it for that session's turns) names the file the kernel wrote at launch with the run's id, credential, `run_dir` and `work_dir` (design §7.7). Every `apa` call in these plugins gets that path and never the inherited run variables; a session with no run uses the gateway's own credential. A session whose client PATH has the kernel's marker (`.apa-run`) but no context is a run that lost it, and gets an error.
 
 Registers toolset `apa`: `apa_propose`, `apa_ask`, `apa_decide`, `apa_accept`, `apa_dismiss`, `apa_executors`, `apa_delegate`, `apa_report`,
 `apa_declare_executors`, `apa_executor_call`, and the read-tier set `apa_read_file`, `apa_list_dir`, `apa_item_update`, `apa_material_commit`. Every CLI tool runs `apa` with `APA_SESSION=<Hermes session_id>`,
@@ -25,7 +38,7 @@ Only the on-behalf tools (`apa_decide`, `apa_accept`, `apa_dismiss`, `apa_item_u
 Hermes has no read-only file toolset, and task runs with `access: read` (brief, review, guideline-draft) must still read
 `{materials_path}` and write their result back. The `apa` toolset covers that without `file` or `terminal`:
 
-- `apa_read_file` / `apa_list_dir`: read-only, confined (symlinks resolved) to the working directory (the run directory, or
-  the project checkout for `cwd: project_checkout`) and `runs/$APA_RUN` (the kernel passes no APA_HOME, so the layout `<home>/runs/<run id>/` is matched; sibling runs stay refused). Anything else is refused; files over 200 KB come back truncated and flagged. There is no write tool.
+- `apa_read_file` / `apa_list_dir`: read-only, confined (symlinks resolved) to this run's `work_dir` (the run directory, or
+  the project checkout for `cwd: project_checkout`) and `run_dir`; relative paths start at `work_dir`. Sibling runs and anything else are refused. With no run context (not a run, the config line above missing, the run ended) they refuse and say why, and never fall back to the process cwd. Files over 200 KB come back truncated and flagged. There is no write tool.
 - `apa_item_update`: `apa item update <id> --spec <json> --reason ...`; the kernel's run identity still limits it to the run's own item.
 - `apa_material_commit`: `apa material commit [<id>] --from - --reason ... [--kind --title --project]`; the text travels on stdin, never in a shell. It only creates a pending revision the owner confirms.

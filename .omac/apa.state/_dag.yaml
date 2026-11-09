@@ -1,16 +1,16 @@
-# sha256: f023b2283382f77259d6862915b9f1435e30ec8889443089b65033b903923cdd
+# sha256: 85107d0f66830420cbc9666d0a6dda0cb7eb278c1bd9535283146b4570bb2a40
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 9
+  used_global: 12
   used_by_reporter:
     e2e-bg-main-live: 1
-    e2e-proactive-live: 2
-    e2e-guideline-live: 3
+    e2e-proactive-live: 4
+    e2e-guideline-live: 4
     e2e-hermes-session: 3
   granted_by_reporter:
     e2e-guideline-live: 2
     e2e-hermes-session: 2
-    e2e-proactive-live: 2
+    e2e-proactive-live: 3
   entries:
     dfx-5dd4c0c9998f:
       suspected: kernel-followmsg
@@ -77,7 +77,7 @@ defects:
       - flow-guideline-draft/ACT-DRF-04
       reporters:
       - e2e-guideline-live
-      state: fixing
+      state: fixed
       fix_node: fix.kernel-guideline-check.61130e
     dfx-85016be0054e:
       suspected: sources-github
@@ -125,7 +125,41 @@ defects:
       - flow-brief/ACT-BRF-01
       reporters:
       - e2e-proactive-live
-      state: needs-owner
+      state: fixed
+      fix_node: fix.kernel-task-agent.ee5850
+    dfx-9ddec2e28ae4:
+      suspected: pack-brief
+      anchors:
+      - flow-brief/ACT-BRF-01
+      reporters:
+      - e2e-proactive-live
+      state: fixed
+      fix_node: fix.pack-brief.9ddec2
+    dfx-1e737aebe6e3:
+      suspected: cli-init-serve
+      anchors:
+      - flow-agents-md/ACT-AGM-09
+      reporters:
+      - e2e-guideline-live
+      state: fixed
+      fix_node: fix.cli-init-serve.1e737a
+    dfx-f0964f5465b2:
+      suspected: kernel-task-agent
+      anchors:
+      - flow-guideline-draft/ACT-DRF-01
+      - flow-guideline-draft/ACT-DRF-03
+      - flow-guideline-draft/ACT-DRF-04
+      reporters: []
+      state: queued
+      retried: true
+    dfx-bb651fb7e5d2:
+      suspected: pack-brief
+      anchors:
+      - flow-brief/ACT-BRF-05
+      - flow-brief/ACT-BRF-06
+      reporters: []
+      state: queued
+      retried: true
   inbox: []
 pending_human_amendment:
   amendment_id: amend-a4657a0582f6

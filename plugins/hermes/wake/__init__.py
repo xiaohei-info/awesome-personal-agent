@@ -12,15 +12,21 @@ Explicit opt-in: nothing starts unless APA_WAKE_SESSION_KEY (the main session to
 with plugins.entries.apa-wake.allow_gateway_injection: true. Without that the harness stays headless-only.
 Any failure leaves Hermes untouched: the loop logs, backs off, and the kernel retries a failed delivery.
 """
+import importlib.util
 import json
 import logging
 import os
+import pathlib
 import subprocess
 import threading
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+
+_spec = importlib.util.spec_from_file_location("apa_run_context", pathlib.Path(__file__).resolve().parents[1] / "tools" / "run_context.py")
+run_context = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(run_context)
 
 log = logging.getLogger("apa.wake")
 
@@ -145,7 +151,8 @@ def _cli(params, **_):
             if len(ids) != 1:
                 raise WakeError("pass run_id: " + (f"{len(ids)} wake runs are active" if ids else "no wake run is active"))
             run_id = ids[0]
-        env = dict(os.environ, APA_RUN=run_id, APA_TOKEN=_credential(run_id))
+        env = run_context.gateway_env(APA_RUN=run_id, APA_TOKEN=_credential(run_id))
+        env.pop(run_context.VAR, None)  # the identity is explicit; the CLI would prefer an inherited context
         p = subprocess.run([os.environ.get("APA_BIN", "apa"), *args], capture_output=True, text=True,
                            timeout=CLI_TIMEOUT_SECS, env=env)
     except (WakeError, OSError, subprocess.SubprocessError) as e:

@@ -422,3 +422,129 @@ func TestListOrdersByName(t *testing.T) {
 		t.Fatalf("list: %+v", ps)
 	}
 }
+
+func TestRepoKeyAndSameRepo(t *testing.T) {
+	const key = "example.com/acme/app"
+	for _, s := range []string{
+		"https://example.com/acme/app",
+		"https://example.com/acme/app.git",
+		"https://example.com/acme/app/",
+		"HTTPS://Example.com/Acme/App.git",
+		"https://user:secret@example.com/acme/app.git",
+		"https://example.com:8443/acme/app.git",
+		"http://example.com/acme/app",
+		"ssh://git@example.com/acme/app.git",
+		"ssh://git@example.com:2222/acme/app.git",
+		"git@example.com:acme/app.git",
+		"git@example.com:Acme/App",
+		"example.com:acme/app",
+		"example.com/acme/app",
+	} {
+		if got := RepoKey(s); got != key {
+			t.Errorf("RepoKey(%q) = %q, want %q", s, got, key)
+		}
+	}
+	// 简写没有 host，规范写法不虚构 host，但与任一站点的同路径仓库是同一身份。
+	if got := RepoKey(" Acme/App.git/ "); got != "acme/app" {
+		t.Errorf("short form key = %q", got)
+	}
+	// 本地路径与 file:// 没有站点，大小写有意义，原样保留。
+	for _, s := range []string{"/tmp/Acme/app.git", "./acme/app", "../a/b", "~/a/b", "file:///tmp/Acme/app.git", "app"} {
+		if got := RepoKey(s); got != s {
+			t.Errorf("RepoKey(%q) = %q, want it unchanged", s, got)
+		}
+	}
+
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"https://example.com/acme/app.git", "git@example.com:ACME/app", true},
+		{"acme/app", "https://example.com/acme/app.git", true},
+		{"git@example.com:acme/app.git", "acme/app", true},
+		{"acme/app", "ACME/APP.git", true},
+		{"https://example.com/group/sub/app.git", "git@example.com:group/sub/app", true},
+		{"/tmp/a/b.git", "/tmp/a/b.git", true},
+
+		{"https://example.com/acme/app", "https://example.com/other/app", false}, // 不同 owner
+		{"acme/app", "other/app", false},                                         // 不同 owner，简写
+		{"acme/app", "acme/app2", false},                                         // 不同仓库
+		{"https://example.com/acme/app", "https://example.org/acme/app", false},  // 不同站点
+		{"acme/app", "https://example.com/group/acme/app", false},                // 路径段数不同
+		{"/tmp/a/b", "/tmp/A/b", false},                                          // 本地路径区分大小写
+		{"/tmp/a/b", "a/b", false},                                               // 本地路径不是简写
+		{"", "", false},
+		{"", "acme/app", false},
+	} {
+		if got := SameRepo(c.a, c.b); got != c.want {
+			t.Errorf("SameRepo(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestRepoHasLinkMatchesWholePathSegments(t *testing.T) {
+	const link = "https://h/org/web/issues/1"
+	for _, c := range []struct {
+		remote, link string
+		want         bool
+	}{
+		{"https://h/org/web.git", "https://h/org/web", true},
+		{"https://h/org/web.git", link, true},
+		{"git@h:org/web.git", link, true},
+		{"org/web", link, true},
+		{"https://h/org/web.git", "https://h/org/web2/x", false},
+		{"https://h/org/web.git", "https://other/org/web/x", false},
+		{"https://h/org/web.git", "", false},
+		{"org/web", "org/web#1", false},
+	} {
+		if got := RepoHasLink(c.remote, c.link); got != c.want {
+			t.Errorf("RepoHasLink(%q, %q) = %v, want %v", c.remote, c.link, got, c.want)
+		}
+	}
+}
+
+func TestFindDoesNotGuessBetweenHosts(t *testing.T) {
+	ps := []domain.Project{
+		{ID: "a", Repos: []domain.Repo{{Remote: "https://a.example/acme/app.git"}}},
+		{ID: "b", Repos: []domain.Repo{{Remote: "git@b.example:acme/app.git"}}},
+		{ID: "c", Repos: []domain.Repo{{Remote: "https://a.example/acme/solo.git"}}},
+	}
+	for remote, want := range map[string]string{
+		"acme/solo":                  "c",
+		"ACME/solo.git":              "c",
+		"git@b.example:acme/app":     "b",
+		"https://a.example/acme/app": "a",
+		"acme/app":                   "", // 两个站点都有，不猜
+		"other/solo":                 "",
+		"":                           "",
+	} {
+		p, _, ok := Find(ps, remote)
+		if ok != (want != "") || p.ID != want {
+			t.Errorf("Find(%q) = %q %v, want %q", remote, p.ID, ok, want)
+		}
+	}
+}
+
+// 同一仓库的不同写法：不能重复登记，检出与移除也都认得；账本里保留登记时的写法。
+func TestRepoCommandsAcceptAnySpelling(t *testing.T) {
+	e := setup(t)
+	id, other := e.create(t, "P"), e.create(t, "Q")
+	const remote = "https://example.com/acme/app.git"
+	e.must(t, owner, "project.repo.add", map[string]any{"id": id, "remote": remote})
+
+	for _, spelling := range []string{"git@example.com:ACME/app.git", "acme/app", "https://example.com/acme/app"} {
+		if _, err := e.do(t, owner, "project.repo.add", map[string]any{"id": other, "remote": spelling}); exit(err) != domain.ExitConflict {
+			t.Fatalf("%s must conflict with %s: %v", spelling, remote, err)
+		}
+	}
+	e.must(t, owner, "project.repo.add", map[string]any{"id": other, "remote": "https://example.com/other/app.git"})
+
+	e.must(t, worker, "project.checkout.set", map[string]any{"id": id, "remote": "git@example.com:acme/app.git", "host": "box", "path": "/w/app"})
+	if p := e.get(t, id); len(p.Repos) != 1 || p.Repos[0].Remote != remote || len(p.Repos[0].Checkouts) != 1 {
+		t.Fatalf("%+v", p.Repos)
+	}
+	e.must(t, delegate, "project.repo.remove", map[string]any{"id": id, "remote": "acme/app"})
+	if p := e.get(t, id); len(p.Repos) != 0 {
+		t.Fatalf("%+v", p.Repos)
+	}
+}

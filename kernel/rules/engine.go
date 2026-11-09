@@ -37,6 +37,20 @@ type Call struct {
 	bind  func(id string) error
 }
 
+// Ask 以规则的身份把事项转 needs_input 交本人（级联终止于 needs_input，§8.7）。
+func (c Call) Ask(itemID, reason string) error { return askOwner(c.Do, itemID, reason) }
+
+// askOwner 的选项不含"重新运行"：回答不会再次执行规则动作，给这个选项只会让事项回到 open 后无人处理。
+func askOwner(do func(string, any) (command.Result, error), itemID, reason string) error {
+	q := map[string]any{"question": reason, "options": []domain.AskOption{
+		{ID: "handle", Label: "我来处理"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
+	if _, err := do("item.update", map[string]any{"id": itemID, "ask": q, "reason": reason}); err != nil {
+		return err
+	}
+	_, err := do("item.transition", map[string]any{"id": itemID, "to": domain.PhaseNeedsInput, "reason": reason})
+	return err
+}
+
 // Fired 是一次实例到期：哪个实例、参数、项目、计划到期时刻。
 type Fired struct {
 	ID      string          `json:"id"`
@@ -296,17 +310,24 @@ func (e *Engine) instance(ctx context.Context, rs []ruleDef, en eventlog.Entry) 
 	if err := json.Unmarshal(en.Event.Payload, &f); err != nil || f.ID == "" {
 		return fmt.Errorf("rules: instance.fired %d has no instance: %v", en.Event.Seq, err)
 	}
+	ran := false
 	for _, d := range rs {
 		if d.Pack != f.Pack || d.Group != groupClock || !instanceDriven(d) {
 			continue
 		}
+		ran = true
 		t := &trigger{entry: en, instance: &f, object: f.ID, depth: en.Event.ChainDepth,
 			ref: fmt.Sprintf("i%s:%d", f.ID, f.Due.UnixNano())}
 		if err := e.execute(ctx, d, t); err != nil {
 			return err
 		}
 	}
-	return nil
+	if ran {
+		return nil
+	}
+	// 包被删除或覆盖后不再有实例驱动的规则：实例还在到期，不能什么都不留。
+	return e.fail(ctx, ruleDef{State: State{Key: f.Pack + "/" + groupClock}}, &trigger{entry: en, object: f.ID, depth: en.Event.ChainDepth},
+		"instance", invalid("instance "+f.ID+" fired, but pack "+f.Pack+" has no instance-driven clock rule"))
 }
 
 func instanceDriven(d ruleDef) bool {
@@ -427,7 +448,8 @@ func (e *Engine) observe(ctx context.Context, d ruleDef, t *trigger) error {
 	})
 }
 
-// execute 依次执行 do[]；某个动作失败就停止，失败记 health.alert（授权类拒绝已由命令管线留痕，不重复记）。
+// execute 依次执行 do[]；某个动作失败就停止，失败记 health.alert（授权类拒绝已由命令管线留痕，不重复记）；
+// create_item 已建好事项时，事项同时转 needs_input（fail）。
 func (e *Engine) execute(ctx context.Context, d ruleDef, t *trigger) error {
 	for i, a := range d.Do {
 		name, _ := a["action"].(string)
@@ -483,8 +505,15 @@ func (e *Engine) do(ctx context.Context, k string, t *trigger, idem, cmd string,
 }
 
 func (e *Engine) fail(ctx context.Context, d ruleDef, t *trigger, action string, cause error) error {
+	handed := true
+	if t.bound { // 这个事项只有规则知道：规则停在这里，就没有人会再推进它（§8.7）
+		if err := e.handBack(ctx, d, t, action, cause); err != nil {
+			handed = false
+			cause = fmt.Errorf("%w; item %s stays open, needs_input failed: %v", cause, t.item.ID, err)
+		}
+	}
 	var de *domain.Error
-	if errors.As(cause, &de) {
+	if handed && errors.As(cause, &de) {
 		switch de.ExitCode() {
 		case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending:
 			return nil // 命令管线已经记了 command.rejected
@@ -501,4 +530,20 @@ func (e *Engine) fail(ctx context.Context, d ruleDef, t *trigger, action string,
 			Payload: p, ChainDepth: t.depth, At: e.now()})
 		return err
 	})
+}
+
+// handBack 把规则建的事项转 needs_input 并写明原因；动作已自行让事项离开 open（如任务型转 needs_input、回执转 done）时不动它。
+func (e *Engine) handBack(ctx context.Context, d ruleDef, t *trigger, action string, cause error) error {
+	var it domain.Item
+	if err := e.o.Store.View(ctx, func(tx *store.Tx) (err error) { it, err = items.Get(tx, t.item.ID); return }); err != nil {
+		return err
+	}
+	if it.Phase != domain.PhaseOpen {
+		return nil
+	}
+	n := 0
+	return askOwner(func(cmd string, input any) (command.Result, error) {
+		n++
+		return e.do(ctx, d.Key, t, fmt.Sprintf("%s:fail:%d", t.ref, n), cmd, input)
+	}, it.ID, "规则动作 "+action+" 没有完成："+cause.Error())
 }

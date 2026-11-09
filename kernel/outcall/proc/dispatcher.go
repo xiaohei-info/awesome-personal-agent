@@ -3,11 +3,13 @@ package proc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,6 +29,15 @@ var envWhitelist = map[string]bool{
 	"XDG_RUNTIME_DIR": true, "XDG_CONFIG_DIRS": true, "XDG_DATA_DIRS": true,
 }
 
+// EnvRunContext 是运行上下文文件路径的环境变量（§7.7）。路径不是凭据；名字里不含凭据字样，
+// 否则按名称过滤环境的 harness 不会把它带到工具侧（附录 A.5）。
+const EnvRunContext = "APA_RUN_CONTEXT"
+
+// RunMark 是追加在运行 PATH 末尾的标记条目的文件名，只用来判定"这是 APA 拉起的运行"（§7.7）：harness 不放行
+// APA_RUN_CONTEXT 时路径到不了工具侧，PATH 却总会带到，CLI 和插件据此拒绝，不退回常驻进程自己的凭据。
+// 目录不存在，放在末尾，也不会影响命令查找。
+const RunMark = ".apa-run"
+
 // Result 是一次运行结束后交回调用模块的结果；本包不据此发任何通知或事件。
 type Result struct {
 	Run    domain.Run // 已落账的终态
@@ -42,8 +53,10 @@ type Options struct {
 	// Environ 返回内核环境，默认 os.Environ；只有白名单变量会传给子进程。
 	Environ func() []string
 	// Env 返回某次运行额外注入的变量（APA_URL、APA_TOKEN、APA_PROJECT 等）。
-	// 在启动时调用而不入账本，运行凭据因此不落盘。
+	// 在启动时调用而不入账本；运行凭据只落在运行上下文文件里（ContextDir），随运行删除。
 	Env func(domain.Run) map[string]string
+	// ContextDir 是运行上下文文件的目录（权限 0700，§7.7）；空表示不写。
+	ContextDir string
 	// OnResult 在终态提交后被调用（可并发）。
 	OnResult func(Result)
 	// Now 默认 time.Now。
@@ -84,8 +97,9 @@ func New(st *store.Store, cfg config.Config, opt Options) *Dispatcher {
 // 由调用方接管（它们继续占额度）。queued 的 Run 不动，随后 Dispatch 会重新执行。
 // 外部 Run 的进程不在本机，内核重启与它无关，不在此判定。
 func (d *Dispatcher) Recover(ctx context.Context) (failed []domain.Run, alive []domain.Run, err error) {
+	var gone []Record
 	err = d.st.Update(ctx, func(tx *store.Tx) error {
-		failed, alive = nil, nil
+		failed, alive, gone = nil, nil, nil
 		recs, err := query(tx, "WHERE state = 'running' AND queue != ? ORDER BY seq", string(QueueExternal))
 		if err != nil {
 			return err
@@ -103,11 +117,15 @@ func (d *Dispatcher) Recover(ctx context.Context) (failed []domain.Run, alive []
 				return err
 			}
 			failed = append(failed, got.Run)
+			gone = append(gone, rec)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+	for _, rec := range gone {
+		d.removeContext(rec)
 	}
 	return failed, alive, nil
 }
@@ -208,20 +226,81 @@ func (d *Dispatcher) Close() {
 	d.wg.Wait()
 }
 
-func (d *Dispatcher) environ(r domain.Run) []string {
+func (d *Dispatcher) environ(rec Record) ([]string, error) {
 	var env []string
 	for _, kv := range d.opt.Environ() {
 		if k, _, ok := strings.Cut(kv, "="); ok && envWhitelist[k] {
 			env = append(env, kv)
 		}
 	}
-	env = append(env, "APA_RUN="+r.ID)
+	env = append(env, "APA_RUN="+rec.Run.ID)
+	var extra map[string]string
 	if d.opt.Env != nil {
-		for k, v := range d.opt.Env(r) {
-			env = append(env, k+"="+v)
+		extra = d.opt.Env(rec.Run)
+	}
+	for k, v := range extra {
+		env = append(env, k+"="+v)
+	}
+	if rec.Spec.RunDir != "" && d.opt.ContextDir != "" && extra["APA_TOKEN"] != "" { // 没签出凭据就没有运行身份，工具侧按取不到拒绝
+		path, err := d.writeContext(rec, extra)
+		if err != nil {
+			return nil, err
+		}
+		env = append(env, EnvRunContext+"="+path)
+		env = markRun(env, filepath.Join(d.opt.ContextDir, RunMark))
+	}
+	return env, nil
+}
+
+func markRun(env []string, mark string) []string {
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			env[i] = kv + string(os.PathListSeparator) + mark
+			return env
 		}
 	}
-	return env
+	return append(env, "PATH="+mark)
+}
+
+// runContext 是运行上下文文件的内容（§7.7）：harness 的工具若不在内核拉起的进程里执行，拿不到这个进程的环境和
+// 工作目录，靠它知道本次运行的身份与目录。这两个目录只有这一个来源。
+type runContext struct {
+	Run     string `json:"run"`
+	URL     string `json:"url"`
+	Token   string `json:"token"`
+	Project string `json:"project,omitempty"`
+	RunDir  string `json:"run_dir"`
+	WorkDir string `json:"work_dir"`
+}
+
+// writeContext 原子写入（续接覆盖时读方看不到半个文件），CreateTemp 已是 0600；返回路径。
+func (d *Dispatcher) writeContext(rec Record, env map[string]string) (string, error) {
+	b, err := json.Marshal(runContext{Run: rec.Run.ID, URL: env["APA_URL"], Token: env["APA_TOKEN"], Project: env["APA_PROJECT"],
+		RunDir: rec.Spec.RunDir, WorkDir: rec.Spec.Dir})
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(d.opt.ContextDir, ".context-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	path := filepath.Join(d.opt.ContextDir, rec.ContextName())
+	return path, os.Rename(tmp.Name(), path)
+}
+
+// removeContext 在运行结束时删文件；文件里的凭据此时已随运行失效，删不掉也只是留下一份废凭据。
+func (d *Dispatcher) removeContext(rec Record) {
+	if rec.Spec.RunDir != "" && d.opt.ContextDir != "" {
+		os.Remove(filepath.Join(d.opt.ContextDir, rec.ContextName()))
+	}
 }
 
 // run 执行一条已置为 running 的 Run 并落账终态。
@@ -233,6 +312,7 @@ func (d *Dispatcher) run(rec Record) {
 		out = &whole{limit: d.maxOutput}
 	}
 	state, exit, reason := d.exec(rec, out, &errb)
+	d.removeContext(rec)
 	stdout, overflow := out.result()
 	res := Result{Stdout: stdout, Stderr: errb.bytes(), Reason: reason, Overflow: overflow}
 	// 落账不能被关停取消，否则 Run 会卡在 running。
@@ -257,9 +337,18 @@ func (d *Dispatcher) run(rec Record) {
 
 func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState, *int, string) {
 	spec := rec.Spec
+	if spec.Dir != "" { // 工作目录不存在时 Start 只报命令 no such file，原因要指向目录
+		if _, err := os.Stat(spec.Dir); err != nil {
+			return domain.RunFailed, nil, "start: work dir: " + err.Error()
+		}
+	}
+	env, err := d.environ(rec)
+	if err != nil {
+		return domain.RunFailed, nil, "start: run context: " + err.Error()
+	}
 	cmd := exec.Command(spec.Command[0], spec.Command[1:]...)
 	cmd.Dir = spec.Dir
-	cmd.Env = d.environ(rec.Run)
+	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // 自成进程组，超时才能连子孙一起杀

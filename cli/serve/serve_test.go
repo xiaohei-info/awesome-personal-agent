@@ -1208,6 +1208,9 @@ func TestServeRunsBackgroundRunsAndResumesAfterAnswer(t *testing.T) {
 d='` + out + `'
 item=$(cat "$d/item")
 printf '%s' "$APA_TOKEN" > "$d/$APA_RUN.token"
+printf '%s' "$APA_RUN_CONTEXT" > "$d/$APA_RUN.context-path"
+cat "$APA_RUN_CONTEXT" > "$d/$APA_RUN.context"
+printf '%s' "$PATH" > "$d/$APA_RUN.path"
 curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $APA_TOKEN" "$APA_URL/v1/items/$item" > "$d/$APA_RUN.read"
 curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TOKEN" -H 'Content-Type: application/json' \
   -d '{"choice":"go"}' "$APA_URL/v1/items/$item/decide" > "$d/$APA_RUN.decide"
@@ -1291,6 +1294,28 @@ curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TO
 		if string(got) != want {
 			t.Fatalf("run credential %s: got %q, want %s", suffix, got, want)
 		}
+	}
+
+	// 运行上下文文件（§7.7）：放在 0700 的目录里，身份和目录与这次运行一致，运行结束即删。
+	firstID := strings.TrimSuffix(filepath.Base(first[0]), ".token")
+	ctxPath, _ := os.ReadFile(filepath.Join(out, firstID+".context-path"))
+	if want := filepath.Join(home, "run-credentials", firstID); string(ctxPath) != want {
+		t.Fatalf("APA_RUN_CONTEXT = %q, want %q", ctxPath, want)
+	}
+	if _, err := os.Stat(string(ctxPath)); !os.IsNotExist(err) {
+		t.Fatalf("run context survived the run: %v", err)
+	}
+	ctxBody, _ := os.ReadFile(filepath.Join(out, firstID+".context"))
+	var runCtx struct{ Run, Token, URL, Run_Dir, Work_Dir string }
+	if err := json.Unmarshal(ctxBody, &runCtx); err != nil {
+		t.Fatalf("run context %s: %v", firstID, err)
+	}
+	if p, _ := os.ReadFile(filepath.Join(out, firstID+".path")); !strings.HasSuffix(string(p), ":"+filepath.Join(home, "run-credentials", proc.RunMark)) {
+		t.Fatalf("run PATH has no marker: %q", p)
+	}
+	wantDir := filepath.Join(home, "runs", firstID)
+	if runCtx.Run != firstID || runCtx.Token != string(tok) || runCtx.URL == "" || runCtx.Run_Dir != wantDir || runCtx.Work_Dir != wantDir {
+		t.Fatalf("run context = %+v, want run %s in %s", runCtx, firstID, wantDir)
 	}
 
 	if code, b := s.do("POST", "/items/"+it.ID+"/decide", `{"choice":"go"}`); code >= 300 {

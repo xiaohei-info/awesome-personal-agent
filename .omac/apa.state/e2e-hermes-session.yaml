@@ -1,4 +1,12 @@
-# sha256: 4706fcfbc1eac96e533d69e4e539c163bd02268895801fcf7466528191b5735d
+# sha256: 4237798ea0a1633a95876e1dada0cf645e8c35dcb43e9e241cb42755426fcf0f
 work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
 status: in_progress
 recovery_marker: true
+retry_note: 'HCTX-11 报的缺陷（apa-inject 的 apa 子进程 cwd 是 Hermes 安装目录）已由 PR #237（f2b0b299c）修复，在你上一轮之后才合并：Hermes
+  ≥v0.23 钩子跑在共享网关进程，plugins/hermes/inject/__init__.py 现在在钩子线程取 run_context.session_cwd()（Hermes
+  的 scoped_session_cwd，会话冻结的真实工作目录，不再是网关 cwd）传给 apa 子进程。本轮：1) rsync 最新 main 重建并重新部署
+  apa 与插件；2) 隔离 Hermes home（/opt/apa-live 下）config.yaml 加 terminal.client_env_passthrough:
+  [APA_RUN_CONTEXT]（运行会话需要；本人会话不受影响）；3) 改配置后新开会话再测 hermes chat --resume，不续接旧会话；4)
+  测试代码无需改，复用本节点已提交的 live 测试，CAP-03/CHAT-03/DLG-01/DLG-04 的补断言保留；5) 失败时把 apa context
+  的实际 cwd、事件和错误原文写进报告。验收不放宽；红线不变：本机就是隔离主机，用 /opt/apa-live 的 wrapper，临时目录只用 mktemp
+  -d /tmp/apa-live.XXXXXX，禁止对环境变量路径 rm -rf。'

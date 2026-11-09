@@ -161,7 +161,7 @@ front matter 二选一：`agent` 声明专属 agent 类别，或 `run_as` 声明
 | `event_stats` | 判断型、生成型可选。要附带的 Event 统计，当前只有 `proposal_outcome`：同一来源、kind、项目下，建议被本人接受和丢弃的次数，默认统计最近 90 天（主文档 §8.4）。web_only 初筛不附带统计 |
 | `timeout` | 超时 |
 | `access` | 经 `call_agent` 调用任务型时需要的权限档位。后台运行以规则动作里的声明为准 |
-| `cwd` | 经 `call_agent` 调用任务型时的工作目录：`run_dir`（默认）或 `project_checkout`（本机有检出时使用）。后台运行同样以规则动作为准 |
+| `cwd` | 任务型运行的工作目录：`run_dir`（默认）或 `project_checkout`（项目在 APA 主机上的检出，即检出的 Host 等于 APA 主机名）。没有这样的检出时不拉起，事项转 `needs_input` 并写明原因。后台运行同样解析，规则动作的 `cwd` 优先 |
 
 示例：
 
@@ -200,7 +200,7 @@ Markdown 模板，占位符由连接模块提供。`agents-md` 包的 `templates
 
 ## C.10 实例
 
-实例是账本记录，不写 yaml。Web 或 `apa instance add <包> --param k=v` 创建，参数按 `instance_params` 校验，到期落为 Timer。到期后由主动服务执行该包里 `schedule` 含 `{instance.…}` 的时钟规则，不看模式；`create_item` 建的事项直接 `open`、项目取实例的项目，并作为后续动作的对象，同一周期只一份（主文档 §7.3）。
+实例是账本记录，不写 yaml。Web 或 `apa instance add <包> --param k=v` 创建，参数按 `instance_params` 校验，到期落为 Timer。到期后由主动服务执行该包里 `schedule` 含 `{instance.…}` 的时钟规则，不看模式；`create_item` 建的事项直接 `open`、项目取实例的项目，并作为后续动作的对象，同一周期只一份（主文档 §7.3）。后续动作失败时事项转 `needs_input` 并写明原因（主文档 §8.7）。
 
 ## C.11 加载与校验
 

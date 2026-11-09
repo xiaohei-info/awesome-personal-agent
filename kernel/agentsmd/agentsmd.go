@@ -276,13 +276,14 @@ func (s *Service) checkCmd(name string, sync bool) command.Spec {
 
 // evaluate 是 check 与 sync 共用的判定：确保渲染记录最新，比对文件，登记最近一次检查，漂移时生成事项。
 func (s *Service) evaluate(c *command.Ctx, in checkIn) (Verdict, Render, string, error) {
-	p, ok, err := projects.ByRemote(c.Tx, in.Repo)
+	p, reg, ok, err := projects.RepoOf(c.Tx, in.Repo)
 	if err != nil {
 		return Verdict{}, Render{}, "", err
 	}
 	if !ok {
 		return Verdict{}, Render{}, "", notFound("repository", in.Repo)
 	}
+	in.Repo = reg.Remote // 渲染、检查、漂移三张表都按登记写法记账，调用方用哪种写法都落到同一行
 	rec, _, err := renderRepo(c, *s.tpl.Load(), p.ID, in.Repo)
 	if err != nil {
 		return Verdict{}, rec, "", err
@@ -683,11 +684,22 @@ func (s *Service) Trigger(ctx context.Context, repo string, changed []string) (*
 	if s.opt.Fetch == nil {
 		return nil, errors.New("agentsmd: Options.Fetch is not configured")
 	}
-	content, exists, err := s.opt.Fetch(ctx, repo)
-	if err != nil {
-		return nil, fmt.Errorf("agentsmd: read %s on the default branch of %s: %w", FileName, repo, err)
+	var reg domain.Repo
+	if err := s.x.Store().View(ctx, func(tx *store.Tx) error {
+		_, r, ok, err := projects.RepoOf(tx, repo)
+		if err == nil && !ok {
+			err = notFound("repository", repo)
+		}
+		reg = r
+		return err
+	}); err != nil {
+		return nil, err
 	}
-	in := checkIn{Repo: repo, Host: "default-branch", Content: &content, Missing: !exists}
+	content, exists, err := s.opt.Fetch(ctx, reg.Remote)
+	if err != nil {
+		return nil, fmt.Errorf("agentsmd: read %s on the default branch of %s: %w", FileName, reg.Remote, err)
+	}
+	in := checkIn{Repo: reg.Remote, Host: "default-branch", Content: &content, Missing: !exists}
 	if !exists {
 		in.Content = nil
 	}
@@ -720,6 +732,12 @@ type LastCheck struct {
 func (s *Service) Get(ctx context.Context, repo string) (View, error) {
 	var v View
 	err := s.x.Store().View(ctx, func(tx *store.Tx) error {
+		// 查不到登记项时按原写法读：仓库从项目移除后，历史渲染仍可查。
+		if _, reg, ok, err := projects.RepoOf(tx, repo); err != nil {
+			return err
+		} else if ok {
+			repo = reg.Remote
+		}
 		rec, ok, err := latestRender(tx, repo)
 		if err != nil || !ok {
 			return errors.Join(err, notFoundIf(!ok, "render of repository", repo))

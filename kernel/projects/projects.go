@@ -104,18 +104,20 @@ func List(tx *store.Tx) ([]domain.Project, error) {
 	return query(tx, "ORDER BY name, id")
 }
 
-// ByRemote 按远程地址找到所属项目（来源事件归属，§6.5）。远程地址全局唯一，所以至多一个。
+// ByRemote 按仓库身份找到所属项目（来源事件归属，§6.5）。仓库全局唯一，所以至多一个。
 func ByRemote(tx *store.Tx, remote string) (domain.Project, bool, error) {
+	p, _, ok, err := RepoOf(tx, remote)
+	return p, ok, err
+}
+
+// RepoOf 按仓库身份找到所属项目与登记项。登记项的 Remote 是这个仓库在账本里的唯一写法。
+func RepoOf(tx *store.Tx, remote string) (domain.Project, domain.Repo, bool, error) {
 	ps, err := List(tx)
 	if err != nil {
-		return domain.Project{}, false, err
+		return domain.Project{}, domain.Repo{}, false, err
 	}
-	for _, p := range ps {
-		if slices.ContainsFunc(p.Repos, func(r domain.Repo) bool { return r.Remote == remote }) {
-			return p, true, nil
-		}
-	}
-	return domain.Project{}, false, nil
+	p, r, ok := Find(ps, remote)
+	return p, r, ok, nil
 }
 
 func save(tx *store.Tx, p domain.Project, insert bool) error {
@@ -127,6 +129,22 @@ func save(tx *store.Tx, p domain.Project, insert bool) error {
 	_, err := tx.Exec(verb+" INTO projects ("+cols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		p.ID, p.Name, p.Intro, enc(p.Tags), string(p.Status), enc(p.Repos), enc(p.AllowedExecutors), p.Capture)
 	return err
+}
+
+// ---- 运行的工作目录（附录 C.7 的 cwd） ----
+
+// WorkDir 是运行 cwd 取值的唯一解析，任务型与后台运行共用。cwd=project_checkout 时返回项目在 host 上的检出路径，
+// 没有时 refuse 给出不拉起的原因；其他取值 dir 为空，运行在自己的运行目录。
+func WorkDir(cwd string, p *domain.Project, host string) (dir, refuse string) {
+	if cwd != "project_checkout" {
+		return "", ""
+	}
+	if p != nil {
+		if c := p.LocalCheckout(host); c != nil {
+			return c.Path, ""
+		}
+	}
+	return "", "项目在本机（" + host + "）没有可用的检出目录"
 }
 
 // ---- 当前目录到项目的映射（§7.6） ----
@@ -325,7 +343,25 @@ func edit(c *command.Ctx, op string, fn func(*domain.Project) error) (any, error
 }
 
 func repoIndex(p *domain.Project, remote string) int {
-	return slices.IndexFunc(p.Repos, func(r domain.Repo) bool { return r.Remote == remote })
+	_, r, ok := Find([]domain.Project{*p}, remote)
+	if !ok {
+		return -1
+	}
+	return slices.IndexFunc(p.Repos, func(x domain.Repo) bool { return x.Remote == r.Remote })
+}
+
+// repoOwner 返回已登记了同一仓库的项目。比 Find 严：简写同时对上多个站点时，新增也算冲突。
+func repoOwner(tx *store.Tx, remote string) (string, error) {
+	ps, err := List(tx)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range ps {
+		if slices.ContainsFunc(p.Repos, func(r domain.Repo) bool { return SameRepo(r.Remote, remote) }) {
+			return p.ID, nil
+		}
+	}
+	return "", nil
 }
 
 // Register 在命令执行器上登记本模块的全部命令。
@@ -422,10 +458,10 @@ func Register(x *command.Executor) error {
 			Apply: func(c *command.Ctx) (any, error) {
 				var v repoIn
 				_ = decode(c.Input, &v)
-				if owner, ok, err := ByRemote(c.Tx, v.Remote); err != nil {
+				if owner, err := repoOwner(c.Tx, v.Remote); err != nil {
 					return nil, err
-				} else if ok {
-					return nil, conflict("remote is already registered in project " + owner.ID)
+				} else if owner != "" {
+					return nil, conflict("remote is already registered in project " + owner)
 				}
 				return edit(c, "repo.add", func(p *domain.Project) error {
 					p.Repos = append(p.Repos, domain.Repo{Remote: v.Remote})
