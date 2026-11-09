@@ -1,6 +1,6 @@
-# sha256: 6e92fbeffd0f5cf233546a312e36fb9aff553b8d5188ec464d5640f0aa260bb9
+# sha256: 34b4289ac1f4ce9425688c03eadf956369af71d28e5240221467937db0215b15
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: '上轮失败原因是测试环境配置缺失：/opt/apa-live/hermes-home/config.yaml 没有 terminal.client_env_passthrough，APA
   工具拿不到 APA_RUN_CONTEXT。主会话已补上 client_env_passthrough: [APA_RUN_CONTEXT]（备份 config.yaml.bak-20261109-221946-before-env-passthrough）。重跑前：先停掉
