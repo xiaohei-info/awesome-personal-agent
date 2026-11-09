@@ -1,0 +1,25 @@
+# 2026-11-09T11:11:44Z go test -tags=live -count=1 -timeout=120m ./tests/live/deploy/...
+=== RUN   TestFlowDeployExposure
+=== RUN   TestFlowDeployExposure/ACT-DPL-01_经_HTTPS_反向代理暴露，另一台机器访问_Web_与_API
+    deploy_live_test.go:329: 代理 https://100.127.255.10:58094 → apa http://127.0.0.1:58087；另一台机器 oracle
+    deploy_live_test.go:360: Set-Cookie 属性: apa_session=<redacted>; Path=/; Expires=Mon, 16 Nov 2026 11:11:56 GMT; HttpOnly; Secure; SameSite=Strict
+=== RUN   TestFlowDeployExposure/ACT-DPL-02_只暴露_/ingest/_也能工作
+=== RUN   TestFlowDeployExposure/ACT-DPL-03_渠道_ext_不需要公网地址（Telegram_主路径）
+    deploy_live_test.go:549: 等待本人在 Telegram（@guanti_github_bot）点选项 A，最多 30m0s
+    deploy_live_test.go:567: delivery external_ref=5801746488:660 resolved_via=acc-chan bot=@guanti_github_bot（无入站连接、无公网地址）
+=== RUN   TestFlowDeployExposure/ACT-DPL-04_中心_APA_加多台_harness_主机
+    deploy_live_test.go:571: 未执行：无第二台可跑 Hermes 的主机（首批范围调整，本人已定）；不记为通过
+--- PASS: TestFlowDeployExposure (47.20s)
+    --- PASS: TestFlowDeployExposure/ACT-DPL-01_经_HTTPS_反向代理暴露，另一台机器访问_Web_与_API (14.45s)
+    --- PASS: TestFlowDeployExposure/ACT-DPL-02_只暴露_/ingest/_也能工作 (13.85s)
+    --- PASS: TestFlowDeployExposure/ACT-DPL-03_渠道_ext_不需要公网地址（Telegram_主路径） (17.29s)
+    --- SKIP: TestFlowDeployExposure/ACT-DPL-04_中心_APA_加多台_harness_主机 (0.00s)
+=== RUN   TestDeployBackupRestore
+    deploy_live_test.go:838: 恢复后事件 17 条（备份前 14 条），材料 mat_1ca456a3e7ae0292、blob 9e94602e…、事项 itm_ffd12f9a48662eb9 都在；工具来源认证失效 → needs_input
+--- PASS: TestDeployBackupRestore (2.35s)
+=== RUN   TestDeployUpgradeMigratesSchema
+    deploy_live_test.go:917: 上一版本 36adbe4f6：Event 11 条、迁移 24 条；新版本启动后 Event 前缀不变、迁移 44 条，旧事项可读
+--- PASS: TestDeployUpgradeMigratesSchema (2.89s)
+PASS
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/live/deploy	53.936s
+exit=0
