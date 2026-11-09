@@ -1,0 +1,31 @@
+{
+  "ACT-CHAT-01-result": {
+    "passed": true,
+    "step": "ACT-CHAT-01 开启 delegate token 并准备决策"
+  },
+  "ACT-CHAT-02-result": {
+    "passed": true,
+    "step": "ACT-CHAT-02 决策经消息前注入带到会话"
+  },
+  "ACT-CHAT-03": {
+    "decide_args": "decide itm_3b97cba3dc80d1a9 --option B --evidence 就选方案 B --reason 所有者本回合直接指定选择方案 B",
+    "decide_call_session": "20261109_200139_3c0ef6",
+    "evidence": "就选方案 B",
+    "resolved_via": "chat",
+    "reverted": true,
+    "session": "20261109_200139_3c0ef6"
+  },
+  "ACT-CHAT-03-result": {
+    "passed": true,
+    "step": "ACT-CHAT-03 聊天表态后代答"
+  },
+  "ACT-CHAT-04": {
+    "agent_attempted_decide": true,
+    "final": "付款确认这条不能由我代答：它是 web_only 的高风险决策，只能由你本人在 Web 界面点击确认：\n\nhttp://127.0.0.1:40501/items/itm_859be8bf60a1a43f\n\n另外，CHAT1-DEC-QZK（itm_3b97cba3dc80d1a9）是方案 A / 方案 B 的选择题，“同意”没指定选哪个，你确认一下要 A 还是 B，我再处理。",
+    "kernel_decide_exit": 20
+  },
+  "ACT-CHAT-04-result": {
+    "passed": true,
+    "step": "ACT-CHAT-04 web_only 决策在聊天中被拒绝"
+  }
+}

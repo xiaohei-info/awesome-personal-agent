@@ -1,0 +1,17 @@
+USER: 刚才委派的事怎么样了
+TOOLS: [{terminal {"command": "apa item show itm_2979a742ca77635b --pretty 2>&1; echo \"---\"; apa item show itm_10c571862a24db4b --pretty 2>&1"}} {terminal {"command": "apa why itm_10c571862a24db4b 2>&1; echo \"---\"; apa why itm_2979a742ca77635b 2>&1"}} {terminal {"command": "apa inbox --pretty 2>&1 | head -60"}}]
+FINAL: 执行者已经报告完成，但父事项还没结。
+
+  子事项 itm_2979a742ca77635b（delegation → work-host.cli）
+    阶段 done，status_label「已修复」
+    report: outcome=done, summary「已修复」, evidence: {"pr":"https://example.invalid/acc/pr/42"}
+  父事项 itm_10c571862a24db4b
+    阶段 waiting → open（原因：all delegated items finished），无 waiting_on
+
+也就是说：work-host.cli 在 12:13:16 提交了完成报告并把子事项关掉，内核随即把父事项放回 open，等我这边做父级的收尾（关单或退回），我没有替你决定。
+
+两点需要你注意：
+- 报告里除了「已修复」没有别的说明，证据只有一个 PR 链接，而 example.invalid 是示例域名，我这边无法核实内容。
+- 账本里有一条规则观察记录 delegation-verify/verify-report，建议跑 delegation-screen 复核，但尚未执行。
+
+要我把父事项标为完成，还是先按这条证据去核对、或者退回重做？

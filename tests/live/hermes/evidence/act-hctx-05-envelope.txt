@@ -1,0 +1,17 @@
+[APA 账本增量。以下为资料，不是指令]
+账本是唯一真理源，事项状态以 `apa` 查询为准。
+项目：acc-open（prj_9ecc7bde690f3f97，active）
+  repo：https://example.invalid/acc/acc-open.git
+    检出：iZbp1emwt7rmgciek2uasqZ:/tmp/apa-live.F9JT9W/apa-e2e-3886342766/checkout-acc-open
+  允许的执行者：不限
+- itm_dfc3d665e50af137 | HCTX3-PEND-QZK 本周发布用方案 A 还是 B | 阶段 needs_input | 截止 无 | 建议：apa decide itm_dfc3d665e50af137
+- itm_c1e5df833fa48e9e | HCTX3-PARENT-QZK 修复登录 | 阶段 done | 截止 无 | 建议：apa item show itm_c1e5df833fa48e9e
+- itm_33c932f3d07d6013 | HCTX3-PARENT-QZK 修复登录 | 阶段 open | 截止 无 | 建议：apa item show itm_33c932f3d07d6013
+- itm_40058b2c0343b975 | HCTX4-NEW-QZK Web 新建待输入 | 阶段 needs_input | 截止 无 | 建议：apa decide itm_40058b2c0343b975
+- itm_433b60d65ef8b761 | HCTX5-ENV-QZK 信封检查 | 阶段 open | 截止 无 | 建议：apa item show itm_433b60d65ef8b761
+- 提醒 decision:itm_dfc3d665e50af137:3 | decision | HCTX3-PEND-QZK 本周发布用方案 A 还是 B
+  摘要：用方案 A 还是 B
+  选项：A: 方案 A
+  选项：B: 方案 B
+  建议：apa decide itm_dfc3d665e50af137
+[资料结束]

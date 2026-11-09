@@ -1,0 +1,17 @@
+USER: 再用 work-host.cli 执行一件和账本无关的小事（没有事项 id）：随便打个招呼。用 <redacted> 取调用方式，再用终端执行。
+TOOLS: [{tool_call {"calls": [{"arguments": {"executor": "work-host.cli", "task": "打个招呼：你好"}, "name": "<redacted>"}]}} {terminal {"command": "apa executors 2>&1; echo ---; apa guide 2>&1 | head -60"}} {terminal {"command": "/tmp/apa-live.F9JT9W/apa-e2e-3723752701/work-host-cli.sh '打个招呼：你好，工作机。'", "timeout": 120}} {terminal {"command": "apa item show itm_6fcd9206c79f5116 2>&1; echo ---; apa inbox 2>&1 | head -40"}}]
+FINAL: 没能按你说的路径走通，原因和实际结果如下：
+
+1. <redacted> 强校验 id（schema required: executor, id, task），不传 id 直接被拒：
+   "tool_call to '<redacted>' is missing required argument(s): id. The tool was NOT invoked."
+   这个工具本质是"把某个子事项的 executor 映射成命令"，没有事项就没有可映射的对象；我也没有拿 itm_6fcd9206c79f5116 之类的现有 id 去顶替。
+
+2. 于是我按同一机制直接在终端跑了执行者脚本（没有 cd、没有前缀）：
+   /tmp/apa-live.F9JT9W/apa-e2e-3723752701/work-host-cli.sh '打个招呼：你好，工作机。'
+   输出：work-host.cli 已处理 PR https://example.invalid/acc/pr/6（退出码 0）
+
+   注意：输出和上次那条补测试的回执一字不差，说明这个执行者是个桩，并没有真的处理问候文本。
+
+3. 账本没有被影响：itm_6fcd9206c79f5116 仍是 phase=done、version=2、updated_at 未变；apa inbox 无新条目。我没有执行 apa report。
+
+如果你的目的是验证"无事项 id 时执行者能否被调用"，结论是：不能，<redacted> 只服务于已委派的子事项。

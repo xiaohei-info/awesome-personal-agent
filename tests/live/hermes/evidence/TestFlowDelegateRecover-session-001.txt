@@ -1,0 +1,9 @@
+USER: 把「DLG2-PARENT-QZK 修复登录超时」这件事交给 work-host.cli。现在只在账本里委派，先不要启动执行者。
+TOOLS: [{terminal {"command": "apa guide; echo \"---\"; apa item show itm_10c571862a24db4b"}} {tool_describe {"names": ["apa_delegate", "apa_executors", "<redacted>", "apa_item_update"]}} {terminal {"command": "apa executors --project prj_b715f7fe824e34c2 2>&1; echo \"---\"; apa delegate --help 2>&1 | head -40"}} {terminal {"command": "apa delegate --parent itm_10c571862a24db4b --assignee work-host.cli --title \"DLG2-PARENT-QZK 修复登录超时\" --summary \"委派 work-host.cli 修复登录超时；当前仅在账本登记委派，不启动执行者。\" --reason \"用户指示：把该事项交给 work-host.cli，先在账本里委派，不启动执行\" --evidence \"把「DLG2-PARENT-QZK 修复登录超时」这件事交给 work-host.cli。现在只在账本里委派，先不要启动执行者。\" 2>&1"}} {terminal {"command": "apa item show itm_10c571862a24db4b --pretty 2>&1; echo \"---\"; apa item show itm_2979a742ca77635b --pretty 2>&1"}}]
+FINAL: 委派已登记，未启动执行者。
+
+  父事项  itm_10c571862a24db4b  DLG2-PARENT-QZK 修复登录超时
+          阶段 open → waiting，waiting_on = executor/work-host.cli
+  子事项  itm_2979a742ca77635b  kind=delegation，assignee=work-host.cli，阶段 open
+
+只调用了 apa delegate，没有调用 apa executor call，因此执行者尚未启动。要开始执行时告诉我，我再跑对应的执行器调用。
