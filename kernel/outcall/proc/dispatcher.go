@@ -257,6 +257,11 @@ func (d *Dispatcher) run(rec Record) {
 
 func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState, *int, string) {
 	spec := rec.Spec
+	if spec.Dir != "" { // 工作目录不存在时 Start 只报命令 no such file，原因要指向目录
+		if _, err := os.Stat(spec.Dir); err != nil {
+			return domain.RunFailed, nil, "start: work dir: " + err.Error()
+		}
+	}
 	cmd := exec.Command(spec.Command[0], spec.Command[1:]...)
 	cmd.Dir = spec.Dir
 	cmd.Env = d.environ(rec.Run)

@@ -86,7 +86,9 @@ type Options struct {
 	APIURL string
 	// Owner 是本人的标识，作为内核代为转 needs_input 时的 on_behalf_of。
 	Owner string
-	Now   func() time.Time
+	// Host 是 APA 主机名，用来判断项目在本机有没有检出；空时取 os.Hostname()，取不到按没有本机检出拒绝。
+	Host string
+	Now  func() time.Time
 	// DefaultTimeout 在模板未声明 timeout 时使用，默认 30 分钟。
 	DefaultTimeout time.Duration
 	// MaxChainDepth 是链路深度阈值，默认与命令管线一致（§14.9）。
@@ -116,6 +118,9 @@ func New(o Options) (*Service, error) {
 	}
 	if o.Owner == "" {
 		o.Owner = "owner"
+	}
+	if o.Host == "" {
+		o.Host, _ = os.Hostname()
 	}
 	return &Service{o}, nil
 }
@@ -325,16 +330,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 			ms = *m
 		}
 	}
-	checkout := ""
-	if sp.cwd == "project_checkout" && f.project != nil {
-		for _, r := range f.project.Repos {
-			for _, co := range r.Checkouts {
-				if checkout == "" {
-					checkout = co.Path
-				}
-			}
-		}
-	}
+	workDir, noCheckout := projects.WorkDir(sp.cwd, f.project, s.o.Host)
 	wakes := sp.runner == "main_session" && ms.Launch == runidentity.LaunchWake // 拉起方式由声明决定，二者择一（§13.6）
 	var reason string
 	switch {
@@ -352,8 +348,8 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 		reason = "权限档位 " + sp.access + " 超过 Web 设置的上限"
 	case sp.runner == "task" && (f.project != nil && !f.project.ExecutorAllowed(sp.executor, s.o.Owner)):
 		reason = "执行者 " + sp.executor + " 不在项目允许的执行者名单内"
-	case sp.cwd == "project_checkout" && checkout == "":
-		reason = "项目没有可用的检出目录"
+	case noCheckout != "":
+		reason = noCheckout
 	}
 	if reason != "" {
 		return s.refuse(ctx, c, f, reason)
@@ -365,7 +361,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 			return err
 		}
 	}
-	return s.launch(ctx, c, f, sp, harness, headless, ms, wakes, target, checkout)
+	return s.launch(ctx, c, f, sp, harness, headless, ms, wakes, target, workDir)
 }
 
 // createChild 经 delegate.create 建委派子事项（与 `apa delegate` 同一路径：项目名单校验、父事项转 waiting），
@@ -411,7 +407,7 @@ func renderPrompt(body, item, run, project string) string {
 	return strings.NewReplacer(pairs...).Replace(body)
 }
 
-func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, harness string, hl executors.Headless, ms executors.MainSession, wakes bool, target, checkout string) error {
+func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, harness string, hl executors.Headless, ms executors.MainSession, wakes bool, target, workDir string) error {
 	runID, err := newRunID()
 	if err != nil {
 		return err
@@ -435,8 +431,8 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 		return err
 	}
 	dir := runDir
-	if sp.cwd == "project_checkout" {
-		dir = checkout
+	if workDir != "" {
+		dir = workDir
 	}
 	argv := expand(hl.Command, "{prompt}", prompt, "{run_dir}", runDir)
 	argv = append(argv, hl.Output...)

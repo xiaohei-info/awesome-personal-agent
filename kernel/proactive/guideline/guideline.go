@@ -130,15 +130,9 @@ func (o Options) scan(ctx context.Context) (out []missing, err error) {
 }
 
 func (o Options) plan(p domain.Project) missing {
-	m := missing{project: p}
+	m := missing{project: p, checkout: p.LocalCheckout(o.Host)}
 	for _, r := range p.Repos {
 		m.repos = append(m.repos, r.Remote)
-		for _, ck := range r.Checkouts {
-			if m.checkout == nil && ck.Host == o.Host {
-				ck := ck
-				m.checkout = &ck
-			}
-		}
 	}
 	return m
 }

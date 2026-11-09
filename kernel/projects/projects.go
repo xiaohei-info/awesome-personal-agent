@@ -129,6 +129,22 @@ func save(tx *store.Tx, p domain.Project, insert bool) error {
 	return err
 }
 
+// ---- 运行的工作目录（附录 C.7 的 cwd） ----
+
+// WorkDir 是运行 cwd 取值的唯一解析，任务型与后台运行共用。cwd=project_checkout 时返回项目在 host 上的检出路径，
+// 没有时 refuse 给出不拉起的原因；其他取值 dir 为空，运行在自己的运行目录。
+func WorkDir(cwd string, p *domain.Project, host string) (dir, refuse string) {
+	if cwd != "project_checkout" {
+		return "", ""
+	}
+	if p != nil {
+		if c := p.LocalCheckout(host); c != nil {
+			return c.Path, ""
+		}
+	}
+	return "", "项目在本机（" + host + "）没有可用的检出目录"
+}
+
 // ---- 当前目录到项目的映射（§7.6） ----
 
 // Scope 是映射的输入。Host 是本机主机名，由调用方提供。

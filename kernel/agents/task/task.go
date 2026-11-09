@@ -29,6 +29,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -68,7 +69,9 @@ type Options struct {
 	RunsDir string
 	// APIURL 经 APA_URL 交给运行者的 CLI。
 	APIURL string
-	Now    func() time.Time
+	// Host 是 APA 主机名，用来判断项目在本机有没有检出；空时取 os.Hostname()，取不到按没有本机检出拒绝。
+	Host string
+	Now  func() time.Time
 	// DefaultTimeout 在模板未声明 timeout 时使用，默认 30 分钟。
 	DefaultTimeout time.Duration
 	// OnError 接收 Settle 里无法交给调用方的错误（落账失败等）；可为空。
@@ -88,6 +91,9 @@ func New(o Options) (*Service, error) {
 	}
 	if o.DefaultTimeout <= 0 {
 		o.DefaultTimeout = 30 * time.Minute
+	}
+	if o.Host == "" {
+		o.Host, _ = os.Hostname()
 	}
 	return &Service{o}, nil
 }
@@ -180,6 +186,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	var hl executors.Headless
 	var declared, forwarded, ran bool
 	var pol policy.Policy
+	var project *domain.Project
 	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) {
 		if _, pol, err = policy.Current(tx); err != nil {
 			return err
@@ -196,6 +203,13 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 			if ran, err = proc.HasRun(tx, t.Target); err != nil || ran {
 				return err
 			}
+		}
+		if t.Project != "" {
+			p, err := projects.Get(tx, t.Project)
+			if err != nil {
+				return err
+			}
+			project = &p
 		}
 		if t.Harness != "" {
 			hl, declared, err = executors.ActiveHeadless(tx, t.Harness)
@@ -217,6 +231,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		}
 	}
 	out := Outcome{Item: itemID}
+	workDir, noCheckout := projects.WorkDir(pr.Meta.Cwd, project, s.o.Host)
 	switch {
 	case t.Harness == "":
 		out.Reason = "规则没有指定 harness，Web 设置里也没有默认 harness"
@@ -228,6 +243,8 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		out.Reason = "权限档位 " + access + " 超过 Web 设置的上限"
 	case !forwarded:
 		out.Reason = "输入含未进转发白名单的挂靠消息，不交给任务型"
+	case noCheckout != "":
+		out.Reason = noCheckout
 	}
 	if out.Reason != "" {
 		return out, s.needsInput(ctx, itemID, out.Reason)
@@ -244,6 +261,10 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		return out, err
 	}
 
+	dir := runDir
+	if workDir != "" {
+		dir = workDir
+	}
 	sessionID := ""
 	argv := expand(hl.Command, "{prompt}", prompt, "{run_dir}", runDir)
 	argv = append(argv, hl.Output...)
@@ -264,7 +285,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		if t.Depth > 0 {
 			run.ChainDepth = t.Depth
 		}
-		_, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: runDir}}, s.o.Now())
+		_, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, s.o.Now())
 		return err
 	})
 	if err != nil {

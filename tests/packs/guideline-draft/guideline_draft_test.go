@@ -92,7 +92,7 @@ func newEnv(t *testing.T) *env {
 			t.Fatalf("guideline-draft rejected by loader: %s", r.Reason)
 		}
 	}
-	ts, err := task.New(task.Options{Store: st, Exec: e.x, Packs: e.ld, Queue: noQueue{}, RunsDir: filepath.Join(t.TempDir(), "runs"), Now: now})
+	ts, err := task.New(task.Options{Store: st, Exec: e.x, Packs: e.ld, Queue: noQueue{}, RunsDir: filepath.Join(t.TempDir(), "runs"), Host: host, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,8 +231,8 @@ func TestBuiltinRuleDraftsOnlyProjectsMissingGuideline(t *testing.T) {
 	e.tick()
 
 	li := e.items(local)
-	if rs := e.runs(); len(li) != 1 || len(rs) != 1 || rs[0].Run.Target != li[0].ID || rs[0].Run.Harness != "local-h" {
-		t.Fatalf("exactly the project with a local checkout is drafted locally: items=%+v runs=%+v", li, rs)
+	if rs := e.runs(); len(li) != 1 || len(rs) != 1 || rs[0].Run.Target != li[0].ID || rs[0].Run.Harness != "local-h" || rs[0].Spec.Dir != "/work/local" {
+		t.Fatalf("exactly the project with a local checkout is drafted locally, in that checkout: items=%+v runs=%+v", li, rs)
 	}
 	its := e.items(remote)
 	var parent, child int
