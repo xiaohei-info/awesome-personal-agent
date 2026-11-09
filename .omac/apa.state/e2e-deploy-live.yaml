@@ -1,6 +1,7 @@
-# sha256: 7d36624584cd7139530c744d1c6f603d29a7bc230ab93e94eb4f45a8648ed883
-work_item_id: null
-status: todo
+# sha256: 86df5fc9d2039a18a970d0f54c13b7b9588cf856597f8e397d48b3ff94821818
+work_item_id: 01a1bfaf-d267-7926-b170-b9682b290378
+status: in_progress
+recovery_marker: true
 retry_note: 范围调整（本人已定）：ACT-DPL-04『中心 APA 加多台 harness 主机』首批不验，报告里如实写『未执行：无第二台可跑 Hermes
   的主机』，不得记为通过，也不要为它找替身；其余 DPL-01/02/03/05/06 照常验收、不放宽。在本机跑，先读 $APA_LIVE_README。APA
   与反向代理（测试证书）都在 mktemp -d /tmp/apa-live.XXXXXX 的临时目录里起，监听本机 Tailscale 地址；DPL-01『从另一台机器访问』用

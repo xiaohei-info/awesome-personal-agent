@@ -1,6 +1,6 @@
-# sha256: ae8eb321b16db38c729f7a2203a8f6363fd8151d54910c4a7e6e3dbde2f5afc5
+# sha256: c0152002c9245bf6c5bb9fd23c1828a53760d61f3477eb092093683dcdb106c0
 work_item_id: 01a1bf86-17c4-7dfd-a1de-a502c2c4aeec
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 本节点不依赖 Hermes（ACT-TG-01：APA + Telegram ext 单独跑）。在本机跑，先读 $APA_LIVE_README（~/.config/apa-live/README.md）。测试
   bot、token 文件、本人测试账号 chat id 都已就绪：~/.config/apa-live/live.env 的 APA_LIVE_TELEGRAM_BOT
