@@ -1,6 +1,6 @@
-# sha256: 4326f64475d964ba25403bf3f82755621e34ef5dc95f0db9f28cc274f9bde6ca
+# sha256: 08b6c3014b789ecedfe16cefd6b06ea969300d522c89b07c8bd42a45d051701f
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 'PR #235（b1f6fe039）已合入 main：根因在 kernel/rules/engine.go:fail，规则建的事项在生成型调用失败时现在转
   needs_input 并写明原因，调用前在事项上记 run.started(category: generate)。重跑 ACT-BRF-05/06 时：1)
