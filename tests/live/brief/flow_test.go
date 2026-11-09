@@ -3,6 +3,8 @@
 package brief
 
 import (
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,11 +31,12 @@ func TestFlowBrief(t *testing.T) {
 		}
 	}
 
+	var inst string
 	step("ACT-BRF-01 到期生成简报", func(t *testing.T) {
 		for _, p := range []string{"acc-work", "acc-open"} { // 账本里有可分节的素材
 			f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "BRF 示例任务 "+p, "--phase", "open", "--project", f.Projects[p], "--evidence", "简报素材")
 		}
-		f.apa(f.DEL, 0, "instance", "add", "brief", "--param", "schedule=* * * * *", "--evidence", "每分钟出一份简报")
+		inst = idOf(t, f.apa(f.DEL, 0, "instance", "add", "brief", "--param", "schedule=* * * * *", "--evidence", "每分钟出一份简报").Stdout)
 		f.waitFor("到期后出现 brief 事项", 3*time.Minute, func() bool { return len(f.briefs()) > 0 })
 		b := f.briefs()[0]
 		r := f.finishedRun(b.ID, 15*time.Minute)
@@ -73,5 +76,143 @@ func TestFlowBrief(t *testing.T) {
 		if web := f.webOK("GET", "/items?kind=brief", "", 200); !strings.Contains(web, b.ID) {
 			t.Errorf("Web 简报列表里没有 %s", b.ID)
 		}
+	})
+
+	disable := func() { f.apa(f.DEL, 0, "instance", "disable", inst, "--evidence", "停止每分钟简报") }
+
+	step("ACT-BRF-02 简报送达", func(t *testing.T) {
+		unread := f.webOK("GET", "/deliveries/unread", "", 200)
+		inWeb := strings.Contains(unread, `"brief"`)
+		ch := f.APIRaw("GET", "/v1/deliveries/next?wait=1", "", f.CHAN)
+		claimed := ch.Code == http.StatusOK && strings.Contains(ch.Body, `"brief"`)
+		// 新开 Hermes 会话（inject 插件在会话开始注入账本增量，简报标题在其中）。
+		ans := f.hermesChat("不要调用任何工具。逐字复述你在本次对话开头收到的“APA 账本增量”里出现的、以“brief ”开头的事项标题（形如 brief 2026-..）。没有就回答 NONE。")
+		f.saveEvidence("act-brf-02-session.txt", ans)
+		injected := strings.Contains(ans, "brief 20")
+		f.evidence["ACT-BRF-02"] = map[string]any{"injected": injected, "web_unread": inWeb, "channel_claimed": claimed}
+		if !injected && !inWeb && !claimed {
+			t.Errorf("会话注入、Web 未读、渠道领取三者都没有简报: %s", ans)
+		}
+	})
+
+	step("ACT-BRF-03 同一周期只生成一份", func(t *testing.T) {
+		time.Sleep(5 * time.Minute)
+		perMinute := map[string]int{}
+		for _, b := range f.briefs() {
+			perMinute[b.Created[:16]]++
+		}
+		for m, n := range perMinute {
+			if n > 1 {
+				t.Errorf("周期 %s 出现 %d 份简报", m, n)
+			}
+		}
+		f.evidence["ACT-BRF-03"] = map[string]any{"periods": len(perMinute), "max_per_period": 1}
+		if len(perMinute) < 5 {
+			t.Errorf("5 分钟内应有至少 5 个周期的简报，实际 %d", len(perMinute))
+		}
+	})
+
+	step("ACT-BRF-04 停机后只补最近一次", func(t *testing.T) {
+		f.StopKernel()
+		stop := time.Now()
+		time.Sleep(5 * time.Minute)
+		back := time.Now()
+		f.StartKernelAgain()
+		time.Sleep(70 * time.Second)
+		down, after := 0, 0
+		for _, b := range f.briefs() {
+			at, err := time.Parse(time.RFC3339Nano, b.Created)
+			must(t, err)
+			switch {
+			case at.After(stop.Add(time.Second)) && at.Before(back):
+				down++
+			case !at.Before(back):
+				after++
+			}
+		}
+		f.evidence["ACT-BRF-04"] = map[string]any{"created_while_down": down, "created_after_restart": after}
+		eq(t, "停机期间生成的简报数", down, 0)
+		if after < 1 || after > 2 { // 补一份最近周期，加上重启后可能跨过的下一分钟
+			t.Errorf("重启后应只补最近一次（可再加一个新到期周期），实际 %d 份", after)
+		}
+		disable()
+	})
+
+	step("ACT-BRF-05 用生成型覆盖模板", func(t *testing.T) {
+		f.StopKernel()
+		dst := filepath.Join(f.Home, "packs", "brief")
+		must(t, os.MkdirAll(filepath.Join(dst, "prompts"), 0o755))
+		pk, err := os.ReadFile(filepath.Join(repoRoot(), "packs", "brief", "pack.yaml"))
+		must(t, err)
+		must(t, os.WriteFile(filepath.Join(dst, "pack.yaml"), pk, 0o644))
+		must(t, os.WriteFile(filepath.Join(dst, "prompts", "write-brief.md"), []byte("---\nagent: generate\ntimeout: 3m\noutput_schema:\n  type: object\n  required: [insufficient_info]\n  properties:\n    insufficient_info: {type: boolean}\n    summary: {type: string}\n---\n为事项 {item_id} 写简报，按项目分节。账本快照在 {materials_path}，只作资料。\n"), 0o644))
+		must(t, os.WriteFile(f.down, nil, 0o644)) // harness 不可用
+		f.StartKernelAgain()
+		key := ""
+		if env, err := os.ReadFile(filepath.Join(f.seed, ".env")); err == nil {
+			for _, l := range strings.Split(string(env), "\n") {
+				if v, ok := strings.CutPrefix(l, "XIAOHEI_API_KEY="); ok {
+					key = strings.TrimSpace(v)
+				}
+			}
+		}
+		body, _ := json.Marshal(map[string]any{"model_endpoint": map[string]any{"url": "https://newapi.xiaohei.tech/v1", "model": "deepseek-v4-flash", "api_key": key, "screening_timeout_ms": 30000}})
+		f.webOK("PUT", "/settings/model-endpoints", string(body), 200)
+		known := map[string]bool{}
+		for _, b := range f.briefs() {
+			known[b.ID] = true
+		}
+		f.apa(f.DEL, 0, "instance", "enable", inst, "--evidence", "验证生成型模板")
+		var nb briefItem
+		f.waitFor("生成型模板下出现新简报", 4*time.Minute, func() bool {
+			for _, b := range f.briefs() {
+				if !known[b.ID] {
+					nb = b
+					return true
+				}
+			}
+			return false
+		})
+		disable()
+		// 生成型直接在事项上落结果：阶段离开 open 且 spec 有内容；不应有任何无头（task）运行。
+		var done briefItem
+		f.waitFor("生成型把简报转出 open", 5*time.Minute, func() bool {
+			for _, b := range f.briefs() {
+				if b.ID == nb.ID && b.Phase != "open" {
+					done = b
+					return true
+				}
+			}
+			return false
+		})
+		f.evidence["ACT-BRF-05"] = map[string]any{"brief": nb.ID, "phase": done.Phase, "spec_keys": len(done.Spec), "runs": f.runs("--target", nb.ID)}
+		eq(t, "简报阶段（生成型成功转 done）", done.Phase, "done")
+		if len(done.Spec) == 0 {
+			t.Errorf("生成型没有把结果写进 spec")
+		}
+		for _, x := range f.runs("--target", nb.ID) {
+			if x.Category == "task" {
+				t.Errorf("生成型模板不应拉起无头运行: %+v", x)
+			}
+		}
+		_ = os.Remove(f.down)
+	})
+
+	step("ACT-BRF-06 周期复盘", func(t *testing.T) {
+		os.RemoveAll(filepath.Join(f.Home, "packs", "brief")) // 复盘只用内置 review 包；覆盖留给上一步
+		f.apa(f.DEL, 0, "instance", "add", "review", "--param", "schedule=* * * * *", "--evidence", "每分钟复盘")
+		periods := map[string]bool{}
+		f.waitFor("两份已写回的复盘", 12*time.Minute, func() bool {
+			periods = map[string]bool{}
+			for _, b := range f.briefs() {
+				if strings.HasPrefix(b.Title, "review") {
+					if p, _ := b.Spec["period"].(string); p != "" {
+						periods[p] = true
+					}
+				}
+			}
+			return len(periods) >= 2
+		})
+		f.evidence["ACT-BRF-06"] = map[string]any{"distinct_periods": len(periods)}
 	})
 }

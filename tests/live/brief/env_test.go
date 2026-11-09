@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -66,6 +67,7 @@ func setup(t *testing.T) *fx {
 	f := &fx{Env: e, t: t, evidence: map[string]any{}}
 	f.prepareHermes()
 	f.declareHermes()
+	t.Cleanup(f.stopGateways)
 	f.webOK("PUT", "/settings/policy", `{"default_harness":"`+harness+`"}`, 200)
 	// 简报是只读运行，默认档位 read 已足够；任务型读资料文件需要 file 工具集，放到 edit 上限（与 injection 一致）。
 	f.webOK("PUT", "/settings/access-limits", `{"permission_cap":{"default":"edit","by_harness":{}}}`, 200)
@@ -243,6 +245,11 @@ func (f *fx) runs(args ...string) []run {
 func (f *fx) finishedRun(target string, d time.Duration) run {
 	f.t.Helper()
 	var r run
+	defer func() {
+		if f.t.Failed() {
+			f.t.Logf("事项 %s 的运行: %+v", target, f.runs("--target", target))
+		}
+	}()
 	f.waitFor("事项 "+target+" 的运行结束", d, func() bool {
 		for _, x := range f.runs("--target", target) {
 			if x.State != "queued" && x.State != "running" {
@@ -311,4 +318,17 @@ func (f *fx) hermesChat(prompt string) string {
 		f.t.Fatalf("hermes chat 10 分钟未返回\n%s", f.redact(out.String()))
 	}
 	return f.redact(out.String())
+}
+
+// stopGateways 结束 Hermes oneshot 顺带拉起的网关：只认本测试 Root 下各隔离家目录里的 gateway.pid。
+func (f *fx) stopGateways() {
+	pids, _ := filepath.Glob(filepath.Join(f.Root, "hermes-home-*", "gateway.pid"))
+	for _, p := range pids {
+		var g struct {
+			PID int `json:"pid"`
+		}
+		if b, err := os.ReadFile(p); err == nil && json.Unmarshal(b, &g) == nil && g.PID > 1 {
+			_ = syscall.Kill(g.PID, syscall.SIGTERM)
+		}
+	}
 }
