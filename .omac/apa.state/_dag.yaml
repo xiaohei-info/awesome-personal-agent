@@ -1,12 +1,12 @@
-# sha256: 1542973ea57da8a2728d8567130b65d3594b802a9dc7151c876e12c749f84e4a
+# sha256: 647ba59cc351a13869f4676f6f378c694921ccea79ebe6b9cf06eeec2ae5f948
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 12
+  used_global: 13
   used_by_reporter:
     e2e-bg-main-live: 1
     e2e-proactive-live: 4
     e2e-guideline-live: 4
-    e2e-hermes-session: 3
+    e2e-hermes-session: 4
   granted_by_reporter:
     e2e-guideline-live: 2
     e2e-hermes-session: 2
@@ -162,30 +162,15 @@ defects:
       state: fixed
       retried: true
       external_fix: https://github.com/xiaohei-info/awesome-personal-agent/pull/235
-  inbox:
-  - id: c1ae40bd76b6
-    reporter: e2e-hermes-session
-    defects:
-    - class: design-gap
-      suspected_node: kernel-delivery
+    dfx-a428efc5406d:
+      suspected: kernel-delivery
       anchors:
       - flow-hermes-context/ACT-HCTX-06
-      design_ref: docs/solution-design.md#72-决策
-      expected: 投递状态机里"本人确认"只有一个入口：本人在 Web 点击/查看某条投递、或在 Web 回答它对应的决策时，内核调用 Confirm，
-        该投递转 acknowledged（注入会话 injected_to_session、送达 delivered 都不算确认）。fallback_web
-        只表示"渠道没送到、改在 Web 展示"， 不应挡住本人确认：本人在 Web 点击后同样转 acknowledged（可保留 read_at 作为已读时间）。回答决策导致的版本作废只作用于旧版本，
-        被本人直接回答的那条投递记为 acknowledged 而不是 superseded。 修法要求：在状态机层统一：确认入口收敛到 Confirm，允许
-        fallback_web→acknowledged；Web 点击与 Web 回答都走 Confirm； 作废只针对低于被回答版本的投递。同步更新 §7.2
-        / 投递状态表描述与单元测试，不改 .omac 下的 acceptance。
-      observed: live（taiyi /opt/apa-live，真实 Hermes）：注入路由的投递被注入后，本人在 Web 点击/read，投递仍为
-        fallback_web， 只写了 read_at；Confirm 只在渠道回答时被调用。在 Web 回答该决策后投递变为 superseded，始终没有到
-        acknowledged。 代码：kernel/delivery/delivery.go 注释把 fallback_web 定为终态、其已读走 MarkRead；Web
-        点击路径调用的是 MarkRead 而非 Confirm。
-      locations:
-      - kernel/delivery/delivery.go:Confirm
-      - kernel/delivery/delivery.go:MarkRead
-      - kernel/delivery/delivery.go:supersede 相关 UPDATE（state IN (...,'fallback_web')）
-      - Web 端投递点击/决策回答调用 delivery 的位置
+      reporters:
+      - e2e-hermes-session
+      state: fixing
+      fix_node: fix.kernel-delivery.a428ef
+  inbox: []
 pending_human_amendment:
   amendment_id: amend-a4657a0582f6
   file: /Volumes/SSD1T/apps/hermes/home/workspace/reports/apa-omac-plan/auth-redesign-20261108.amendment.yaml

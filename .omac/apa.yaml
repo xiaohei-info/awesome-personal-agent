@@ -9,151 +9,83 @@ meta:
   - 01a1a720-f7fd-719e-91d8-f5032216143f
   - 01a1a720-fa34-79ff-9662-cdf8dac90a21
   - 01a1aa40-ef12-766f-86e2-bead6a7c7b51
-  amendment_revision: 8
+  amendment_revision: 9
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-f11d476e11d0
+    amendment_id: amend-2452559ab7fa
     amendment_file: .omac/apa.system-amendment.yaml
     nodes:
-      fix.cli-init-serve.1e737a:
+      fix.kernel-delivery.a428ef:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-c241ac17d45a158339b95878
-      e2e-guideline-live:
+        expected_review_generation: amendment-3f974ff1239e8c1be5135fa7
+      e2e-hermes-session:
         stage: authoring
         state: synced
-        work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
+        work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
         baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-2a1255743ee97ba8c8c4e1e8
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
+          review_generation: authoring-78e2b4a7612a307c668b3fc9
+          review_ledger_generation: authoring-78e2b4a7612a307c668b3fc9
+          review_ledger_current: true
+          bounce_baseline: null
           decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
           worker_handoff_pending: true
         bounce_baseline:
           merge: 0
-          review: 0
-          worker: 0
-        expected_contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
-        expected_review_generation: amendment-cdf04fc0ef32c90d2701f40d
+          review: 2
+          worker: 1
+        expected_contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
+        expected_review_generation: amendment-8255cd4446eabbfc60cbeb70
         attempt_baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-2a1255743ee97ba8c8c4e1e8
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
+          review_generation: authoring-78e2b4a7612a307c668b3fc9
+          review_ledger_generation: authoring-78e2b4a7612a307c668b3fc9
+          review_ledger_current: true
+          bounce_baseline: null
           decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
           worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-cdf04fc0ef32c90d2701f40d
-          review_ledger_generation: null
+          review_generation: amendment-8255cd4446eabbfc60cbeb70
+          review_ledger_generation: authoring-78e2b4a7612a307c668b3fc9
           review_ledger_current: false
           bounce_baseline:
             merge: 0
-            review: 0
-            worker: 0
+            review: 2
+            worker: 1
           decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+          contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
           worker_handoff_pending: false
-      e2e-proactive-live:
+      e2e-first-day-live:
         stage: authoring
         state: synced
-        work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-        baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-fc97b5bcaec15b4017259da6
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
-          worker_handoff_pending: true
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-        expected_contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
-        expected_review_generation: amendment-f91414051e117e961e7b2ba7
-        attempt_baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-fc97b5bcaec15b4017259da6
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
-          worker_handoff_pending: true
-        observed:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-f91414051e117e961e7b2ba7
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
-          worker_handoff_pending: false
+        reason: no existing work item side effect
+        expected_review_generation: amendment-c41c2426360cd7b28dec0b8c
     retained_bounce_baselines:
       e2e-bg-main-live:
         amendment_id: amend-3ac49b74800d
@@ -163,16 +95,24 @@ meta:
           merge: 0
           review: 0
           worker: 0
-      e2e-hermes-session:
-        amendment_id: amend-a4657a0582f6
-        work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
-        contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
+      e2e-guideline-live:
+        amendment_id: amend-f11d476e11d0
+        work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
+        contract_sha256: a62c9bc29c0279f6cc50a26a12545aaa078cb3c643f5723bdd3826b0042714d7
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-proactive-live:
+        amendment_id: amend-f11d476e11d0
+        work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
+        contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
     system: true
-  last_amendment_id: amend-f11d476e11d0
+  last_amendment_id: amend-2452559ab7fa
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
@@ -12281,6 +12221,7 @@ nodes:
   - hermes-plugin-tools-basis
   - hermes-plugin-receipt-evidence
   - hermes-plugin-capture-failure
+  - fix.kernel-delivery.a428ef
   title: 真实 Hermes：会话、代答与委派
   description: 产出 e2e-hermes-session-live-evidence。是 flow-hermes-context、flow-chat-answer、flow-delegate-recover、flow-capture
     的唯一全流程 owner。要点：需 Mac mini 上的真实 Hermes；不可用时用 `omac work block` 上报，不得用替身冒充。 派给
@@ -15787,4 +15728,84 @@ nodes:
       evidence_mode: artifact
     defect_refs:
     - dfx-1e737aebe6e3
+    coverage_gate: 80
+- id: fix.kernel-delivery.a428ef
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - kernel-domain
+  - kernel-store
+  - kernel-eventlog
+  title: 'Fix kernel-delivery: dfx-a428efc5406d'
+  description: "Automatic fix for upstream defect(s) reported by e2e-hermes-session.\n\n-
+    [design-gap] anchors flow-hermes-context/ACT-HCTX-06 (docs/solution-design.md#72-决策)\n
+    \ expected: 投递状态机里\"本人确认\"只有一个入口：本人在 Web 点击/查看某条投递、或在 Web 回答它对应的决策时，内核调用 Confirm，
+    该投递转 acknowledged（注入会话 injected_to_session、送达 delivered 都不算确认）。fallback_web 只表示\"渠道没送到、改在
+    Web 展示\"， 不应挡住本人确认：本人在 Web 点击后同样转 acknowledged（可保留 read_at 作为已读时间）。回答决策导致的版本作废只作用于旧版本，
+    被本人直接回答的那条投递记为 acknowledged 而不是 superseded。 修法要求：在状态机层统一：确认入口收敛到 Confirm，允许 fallback_web→acknowledged；Web
+    点击与 Web 回答都走 Confirm； 作废只针对低于被回答版本的投递。同步更新 §7.2 / 投递状态表描述与单元测试，不改 .omac 下的 acceptance。\n
+    \ observed: live（taiyi /opt/apa-live，真实 Hermes）：注入路由的投递被注入后，本人在 Web 点击/read，投递仍为
+    fallback_web， 只写了 read_at；Confirm 只在渠道回答时被调用。在 Web 回答该决策后投递变为 superseded，始终没有到
+    acknowledged。 代码：kernel/delivery/delivery.go 注释把 fallback_web 定为终态、其已读走 MarkRead；Web
+    点击路径调用的是 MarkRead 而非 Confirm。\n  where: kernel/delivery/delivery.go:Confirm; kernel/delivery/delivery.go:MarkRead;
+    kernel/delivery/delivery.go:supersede 相关 UPDATE（state IN (...,'fallback_web')）;
+    Web 端投递点击/决策回答调用 delivery 的位置"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-a428efc5406d in kernel-delivery: 投递状态机里"本人确认"只有一个入口：本人在
+      Web 点击/查看某条投递、或在 Web 回答它对应的决策时，内核调用 Confirm， 该投递转 acknowledged（注入会话 injected_to_session、送达
+      delivered 都不算确认）。fallback_web 只表示"渠道没送到、改在 Web 展示"， 不应挡住本人确认：本人在 Web 点击后同样转
+      acknowledged（可保留 read_at 作为已读时间）。回答决策导致的版本作废只作用于旧版本， 被本人直接回答的那条投递记为 acknowledged
+      而不是 superseded。 修法要求：在状态机层统一：确认入口收敛到 Confirm，允许 fallback_web→acknowledged；Web
+      点击与 Web 回答都走 Confirm； 作废只针对低于被回答版本的投递。同步更新 §7.2 / 投递状态表描述与单元测试，不改 .omac 下的 acceptance。'
+    non_goals:
+    - 不决定何时提醒（kernel-attention 负责）
+    - 内核不主动推送
+    - 除外呼调用器外不 import 网络或子进程库，不出现具体 harness、渠道、厂商名
+    - 不直写其他模块的数据，模块协作经命令模型
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/delivery/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: kernel-delivery-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#69-delivery
+      - docs/solution-design.md#102-投递队列
+      - docs/solution-design.md#103-ext-契约
+      delivery_goal: Delivery 状态机支持租约领取、幂等 ack、失败退避（1、3、7、15、30 分钟）、版本作废和退回 Web 未读，注入只记
+        injections
+      covers:
+      - 投递队列
+      acceptance_refs:
+      - flow-channel-protocol
+      - flow-delivery-control
+      commands:
+      - go test -count=1 ./kernel/delivery/... ./kernel/domain/... ./kernel/store/...
+        ./kernel/eventlog/...
+    pr_base: main
+    acceptance_refs:
+    - flow-hermes-context
+    source_of_truth:
+    - docs/solution-design.md#69-delivery
+    - docs/solution-design.md#102-投递队列
+    - docs/solution-design.md#103-ext-契约
+    scope_paths:
+    - kernel/delivery/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: kernel-domain-module
+      producer: kernel-domain
+      evidence_mode: artifact
+    - artifact_id: kernel-store-module
+      producer: kernel-store
+      evidence_mode: artifact
+    - artifact_id: kernel-eventlog-module
+      producer: kernel-eventlog
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-a428efc5406d
     coverage_gate: 80
