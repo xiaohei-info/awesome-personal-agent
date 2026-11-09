@@ -1,6 +1,6 @@
-# sha256: cfc02de3e787f068c92a59b88a8466543a347ea3ae3868ec01169e2a25aae5b3
+# sha256: a62ea700fddccc7040875a369ee3d9ea2dfd003bcb8398db7345846e7fab878e
 work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: '上轮失败的两项都已在 main 修复：1) ACT-AGM-09：PR #236（e9621aae5）在 kernel/projects
   统一仓库身份，owner/repo、https、ssh 写法等价，repo.agents_md_changed 现在能匹配到按完整 URL 登记的项目；2) ACT-DRF-01/03/04：PR
