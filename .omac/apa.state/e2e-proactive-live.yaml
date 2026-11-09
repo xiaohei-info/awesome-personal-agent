@@ -1,6 +1,6 @@
-# sha256: 2a5c04be226a13e374cb618e6f095a9778b6af9677920b26a6aeb667f49e25b4
+# sha256: ed42cc649bd2eb8cb308d5522cdb68f8cffdfbb7358ab47582fdc5919ac78715
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 'ACT-BRF-01 回归已由 PR #245（merge 881d69fae）修复：任务型模板声明结果字段（brief/review 为
   period、sections[].project、sections[].body），写全才代转 done，缺字段进 needs_input 并写明缺哪个。请在
