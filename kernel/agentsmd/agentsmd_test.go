@@ -777,3 +777,67 @@ func TestDropEmptySectionsKeepsOtherTextVerbatim(t *testing.T) {
 		t.Fatal("a guideline with only empty sections renders nothing")
 	}
 }
+
+// ACT-AGM-09：登记的是完整地址，事件和 CLI 用别的写法。都落到登记写法的同一组账本行，手改才生成同一条漂移事项。
+func TestTriggerMatchesAnySpellingOfRegisteredRepo(t *testing.T) {
+	e := setup(t)
+	e.guideline(t, e.prj, projGuideline)
+	rendered := e.view(t)
+	var read []string
+	e.fetch = func(_ context.Context, r string) (string, bool, error) {
+		read = append(read, r)
+		return edited(rendered), true, nil
+	}
+
+	v, err := e.svc.Trigger(bg, "acme/app", []string{"AGENTS.md"})
+	if err != nil || v == nil || v.State != StateDrift || v.Item == "" {
+		t.Fatalf("owner/repo must reach the project registered by URL and raise the drift item: %+v %v", v, err)
+	}
+	if it := e.item(t, v.Item); it.Phase != domain.PhaseNeedsInput || it.Project != e.prj {
+		t.Fatalf("%+v", it)
+	}
+	if v2, err := e.svc.Trigger(bg, "git@example.com:ACME/app.git", []string{"AGENTS.md"}); err != nil || v2.Item != v.Item || len(e.needsInput(t)) != 1 {
+		t.Fatalf("another spelling must not raise a second item: %+v %v", v2, err)
+	}
+	if len(read) != 2 || read[0] != repo || read[1] != repo {
+		t.Fatalf("the reader must get the registered remote: %v", read)
+	}
+	for _, spelling := range []string{"acme/app", "git@example.com:acme/app", repo} {
+		got, err := e.svc.Get(bg, spelling)
+		if err != nil || got.Hash != rendered.Hash || got.LastCheck == nil || got.LastCheck.State != StateDrift {
+			t.Fatalf("%s: %+v %v", spelling, got, err)
+		}
+	}
+	// 账本只有登记写法这一个 repo 值：其他写法不能各记一份历史。
+	for _, table := range []string{"agentsmd_render", "agentsmd_check", "agentsmd_drift"} {
+		e.st.View(bg, func(tx *store.Tx) error {
+			r, err := tx.Query("SELECT DISTINCT repo FROM " + table)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			for r.Next() {
+				var got string
+				if err := r.Scan(&got); err != nil || got != repo {
+					t.Errorf("%s has repo %q (%v)", table, got, err)
+				}
+			}
+			return r.Err()
+		})
+	}
+
+	// 反例：别的 owner 不归这个项目，也不白读一次。
+	if _, err := e.svc.Trigger(bg, "other/app", []string{"AGENTS.md"}); exitOf(err) != domain.ExitNotFound || len(read) != 2 {
+		t.Fatalf("other owner must be not_found without reading: %v, reads=%v", err, read)
+	}
+}
+
+// 托管文档登记用的写法与项目 repos 不同，也要进这个仓库的设计文档索引。
+func TestDesignIndexAcceptsAnySpellingOfRepo(t *testing.T) {
+	e := setup(t)
+	e.must(t, worker, "material.add", map[string]any{"kind": "design", "repo": "git@example.com:acme/app.git", "path": "docs/arch.md", "title": "架构"})
+	e.must(t, worker, "agents.render", map[string]any{})
+	if !strings.Contains(e.view(t).Content, "docs/arch.md") {
+		t.Fatalf("hosted doc missing from the index:\n%s", e.view(t).Content)
+	}
+}
