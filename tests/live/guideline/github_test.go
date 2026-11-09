@@ -74,10 +74,13 @@ func (f *fx) githubSource(repoURL string) {
 func buildGithubSource(t *testing.T) {
 	t.Helper()
 	progDir := t.TempDir()
-	build := exec.Command("go", "build", "-o", filepath.Join(progDir, "github-source"), "./sources/github/cmd/github-source")
-	build.Dir = repoRoot()
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("构建 github-source: %v\n%s", err, out)
+	// hosted-reader 是内核读默认分支 AGENTS.md（ACT-AGM-09 的 Trigger）按名字拉起的真实读取器。
+	for name, pkg := range map[string]string{"github-source": "./sources/github/cmd/github-source", "hosted-reader": "./sources/hostedreader/cmd/hosted-reader"} {
+		build := exec.Command("go", "build", "-o", filepath.Join(progDir, name), pkg)
+		build.Dir = repoRoot()
+		if out, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("构建 %s: %v\n%s", name, err, out)
+		}
 	}
 	t.Setenv("PATH", progDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
