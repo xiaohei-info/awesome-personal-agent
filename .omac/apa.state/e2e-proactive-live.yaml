@@ -1,11 +1,12 @@
-# sha256: 08b6c3014b789ecedfe16cefd6b06ea969300d522c89b07c8bd42a45d051701f
+# sha256: 5c472f4e683ed353849c4899f9887208f7f7bf0e9b1c0f106e1fbcbdc89afb67
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 'PR #235（b1f6fe039）已合入 main：根因在 kernel/rules/engine.go:fail，规则建的事项在生成型调用失败时现在转
-  needs_input 并写明原因，调用前在事项上记 run.started(category: generate)。重跑 ACT-BRF-05/06 时：1)
-  生成型按 §8.6 没有 Run 记录，apa run list 为空是预期，看 apa events 里事项上的 run.started/run.finished；2)
-  若简报进了 needs_input，apa item list --kind brief 的 ask.question 就是真实失败原因，此时 05 未通过，按原因报缺陷（端点/schema），不放宽验收；3)
-  请求固定 strict: true，测试模板 schema 须带 additionalProperties: false 且所有属性进 required，否则部分端点会拒；模板建议产出
-  summary、period、sections；4) 跑 06 前恢复 harness。运行方式与红线不变：本机就是隔离主机，用 /opt/apa-live 的
-  wrapper，临时目录只用 mktemp -d /tmp/apa-live.XXXXXX，禁止对环境变量路径 rm -rf。'
+retry_note: 'ACT-BRF-05 现在进 needs_input，说明 #235 生效；失败原因很可能在测试模板，不在产品：内核调用模型固定 strict:
+  true（kernel/outcall/model/model.go:94），而 tests/live/brief/flow_test.go:148 手写的 output_schema
+  没有 additionalProperties: false、summary 也不在 required，strict 端点会拒绝。本轮做：1) 不要手写 schema，覆盖时沿用内置
+  packs/brief 的 write-brief output_schema，只把 agent 改为 generate；若内置 schema 本身不满足 strict（每层
+  object 都要 additionalProperties: false 且全部属性进 required），按 upstream-defect 报告并附原文；2)
+  无论成败，用 apa item list --kind brief 读 ask.question、apa events 读该事项的 run.finished，原文写进报告和证据，不得再写原因未知；3)
+  05 通过后恢复 harness 再跑 06。验收不放宽；运行方式与红线不变：本机就是隔离主机，用 /opt/apa-live 的 wrapper，临时目录只用
+  mktemp -d /tmp/apa-live.XXXXXX，禁止对环境变量路径 rm -rf。'
