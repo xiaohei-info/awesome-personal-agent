@@ -644,8 +644,8 @@ func agentEnv(domain.Run) map[string]string {
 // 指定文件名时用它（续接同一会话沿用原路径）。
 func TestRunContextFileLivesAsLongAsTheRun(t *testing.T) {
 	dir, out := t.TempDir(), t.TempDir()
-	h := newHarness(t, 1, 1, Options{ContextDir: dir, Env: agentEnv})
-	script := `stat -f %Lp "$APA_RUN_CONTEXT" > "$1/mode" 2>/dev/null || stat -c %a "$APA_RUN_CONTEXT" > "$1/mode"; printf '%s' "$APA_RUN_CONTEXT" > "$1/path"; cat "$APA_RUN_CONTEXT" > "$1/body"`
+	h := newHarness(t, 1, 1, Options{ContextDir: dir, Env: agentEnv, Environ: func() []string { return []string{"PATH=/usr/bin:/bin"} }})
+	script := `stat -f %Lp "$APA_RUN_CONTEXT" > "$1/mode" 2>/dev/null || stat -c %a "$APA_RUN_CONTEXT" > "$1/mode"; printf '%s' "$APA_RUN_CONTEXT" > "$1/path"; printf '%s' "$PATH" > "$1/searchpath"; cat "$APA_RUN_CONTEXT" > "$1/body"`
 	run := func(name string) (domain.Run, string) {
 		r := h.enqueueSpec(Spec{Command: []string{"/bin/sh", "-c", script, "sh", out}, Dir: out, RunDir: "/runs/x", ContextName: name})
 		h.dispatch()
@@ -662,6 +662,10 @@ func TestRunContextFileLivesAsLongAsTheRun(t *testing.T) {
 	}
 	if mode, _ := os.ReadFile(filepath.Join(out, "mode")); strings.TrimSpace(string(mode)) != "600" {
 		t.Fatalf("mode = %q", mode)
+	}
+	// 运行标记在 PATH 末尾，不抢命令查找；目录不存在。
+	if got, _ := os.ReadFile(filepath.Join(out, "searchpath")); string(got) != "/usr/bin:/bin:"+filepath.Join(dir, RunMark) {
+		t.Fatalf("PATH = %q", got)
 	}
 	var got runContext
 	body, _ := os.ReadFile(filepath.Join(out, "body"))
@@ -691,13 +695,13 @@ func TestRunContextOnlyForAgentRunsWithACredential(t *testing.T) {
 		t.Helper()
 		out := t.TempDir()
 		h := newHarness(t, 1, 1, opt)
-		h.enqueueSpec(Spec{Command: []string{"/bin/sh", "-c", `printf '%s' "$APA_RUN_CONTEXT" > "$1/path"`, "sh", out}, Dir: out, RunDir: runDir})
+		h.enqueueSpec(Spec{Command: []string{"/bin/sh", "-c", `printf '%s' "$APA_RUN_CONTEXT$PATH" > "$1/path"`, "sh", out}, Dir: out, RunDir: runDir})
 		h.dispatch()
 		if res := h.next(); res.Run.State != domain.RunSucceeded {
 			t.Fatalf("%s: %+v", name, res)
 		}
-		if b, _ := os.ReadFile(filepath.Join(out, "path")); len(b) != 0 {
-			t.Fatalf("%s: got a context path %q", name, b)
+		if b, _ := os.ReadFile(filepath.Join(out, "path")); string(b) != "/usr/bin" {
+			t.Fatalf("%s: context path or run marker leaked: %q", name, b)
 		}
 		if opt.ContextDir != "" {
 			if left, _ := os.ReadDir(opt.ContextDir); len(left) != 0 {
@@ -705,9 +709,10 @@ func TestRunContextOnlyForAgentRunsWithACredential(t *testing.T) {
 			}
 		}
 	}
-	check("not an agent run", Options{ContextDir: t.TempDir(), Env: agentEnv}, "")
-	check("no credential issued", Options{ContextDir: t.TempDir()}, "/runs/x")
-	check("no directory configured", Options{Env: agentEnv}, "/runs/x")
+	environ := func() []string { return []string{"PATH=/usr/bin"} }
+	check("not an agent run", Options{ContextDir: t.TempDir(), Env: agentEnv, Environ: environ}, "")
+	check("no credential issued", Options{ContextDir: t.TempDir(), Environ: environ}, "/runs/x")
+	check("no directory configured", Options{Env: agentEnv, Environ: environ}, "/runs/x")
 }
 
 // 写不出上下文文件时不拉起：工具侧取不到身份，起了也做不成事，原因要落在 Run 上。

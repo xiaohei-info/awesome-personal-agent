@@ -96,6 +96,8 @@ def on_session_end(session_id="", **_):
         text = "\n\n".join(turns)[-TEXT_MAX:]
         _spawn({"text": text, "session": str(session_id), "path": run_context.session_cwd() or "", "host": socket.gethostname(),
                 "context": run_context.context_file()})
+    except ValueError as e:  # a run without its context: nothing goes out under the gateway's credential
+        _log(os.environ, str(e).splitlines()[0])
     except Exception:
         pass  # fail open: capture problems must never reach the conversation
 

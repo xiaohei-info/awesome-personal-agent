@@ -33,6 +33,11 @@ var envWhitelist = map[string]bool{
 // 否则按名称过滤环境的 harness 不会把它带到工具侧（附录 A.5）。
 const EnvRunContext = "APA_RUN_CONTEXT"
 
+// RunMark 是追加在运行 PATH 末尾的标记条目的文件名，只用来判定"这是 APA 拉起的运行"（§7.7）：harness 不放行
+// APA_RUN_CONTEXT 时路径到不了工具侧，PATH 却总会带到，CLI 和插件据此拒绝，不退回常驻进程自己的凭据。
+// 目录不存在，放在末尾，也不会影响命令查找。
+const RunMark = ".apa-run"
+
 // Result 是一次运行结束后交回调用模块的结果；本包不据此发任何通知或事件。
 type Result struct {
 	Run    domain.Run // 已落账的终态
@@ -242,8 +247,19 @@ func (d *Dispatcher) environ(rec Record) ([]string, error) {
 			return nil, err
 		}
 		env = append(env, EnvRunContext+"="+path)
+		env = markRun(env, filepath.Join(d.opt.ContextDir, RunMark))
 	}
 	return env, nil
+}
+
+func markRun(env []string, mark string) []string {
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			env[i] = kv + string(os.PathListSeparator) + mark
+			return env
+		}
+	}
+	return append(env, "PATH="+mark)
 }
 
 // runContext 是运行上下文文件的内容（§7.7）：harness 的工具若不在内核拉起的进程里执行，拿不到这个进程的环境和

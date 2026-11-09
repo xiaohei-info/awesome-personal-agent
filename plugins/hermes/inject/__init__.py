@@ -56,7 +56,10 @@ def pre_llm_call(session_id="", is_first_turn=False, **_):
         jobs.append(["agents", "check"])
     out = [""] * len(jobs)
     # bare threads start with an empty context: read the session's scope here, on the hook's thread
-    env, cwd = run_context.apa_env(APA_SESSION=key), run_context.session_cwd()
+    try:
+        env, cwd = run_context.apa_env(APA_SESSION=key), run_context.session_cwd()
+    except ValueError:  # a run without its context: no injection rather than one under the gateway's credential
+        return None
     threads = [threading.Thread(target=_run, args=(a, key, out, i, env, cwd), daemon=True) for i, a in enumerate(jobs)]
     for t in threads:
         t.start()

@@ -1210,6 +1210,7 @@ item=$(cat "$d/item")
 printf '%s' "$APA_TOKEN" > "$d/$APA_RUN.token"
 printf '%s' "$APA_RUN_CONTEXT" > "$d/$APA_RUN.context-path"
 cat "$APA_RUN_CONTEXT" > "$d/$APA_RUN.context"
+printf '%s' "$PATH" > "$d/$APA_RUN.path"
 curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $APA_TOKEN" "$APA_URL/v1/items/$item" > "$d/$APA_RUN.read"
 curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TOKEN" -H 'Content-Type: application/json' \
   -d '{"choice":"go"}' "$APA_URL/v1/items/$item/decide" > "$d/$APA_RUN.decide"
@@ -1308,6 +1309,9 @@ curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TO
 	var runCtx struct{ Run, Token, URL, Run_Dir, Work_Dir string }
 	if err := json.Unmarshal(ctxBody, &runCtx); err != nil {
 		t.Fatalf("run context %s: %v", firstID, err)
+	}
+	if p, _ := os.ReadFile(filepath.Join(out, firstID+".path")); !strings.HasSuffix(string(p), ":"+filepath.Join(home, "run-credentials", proc.RunMark)) {
+		t.Fatalf("run PATH has no marker: %q", p)
 	}
 	wantDir := filepath.Join(home, "runs", firstID)
 	if runCtx.Run != firstID || runCtx.Token != string(tok) || runCtx.URL == "" || runCtx.Run_Dir != wantDir || runCtx.Work_Dir != wantDir {

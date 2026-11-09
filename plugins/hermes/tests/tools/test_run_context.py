@@ -13,12 +13,14 @@ from helpers import ROOT, fake_gateway, load_tools
 from test_tools import Ctx
 
 HERMES = ROOT / "plugins" / "hermes"
+STALE_MARK = "/first-run/run-credentials/.apa-run"  # the marker a gateway started by a run's client keeps in its own PATH
+RUN_PATH = "/usr/bin:/home/o/.apa/run-credentials/.apa-run"  # the PATH a kernel-launched client sends
 
 # Records what `apa` was started with, one JSON line each.
 FAKE = """#!/bin/sh
 exec python3 - "$@" <<'PY2'
 import json, os, sys
-keys = ("APA_RUN_CONTEXT", "APA_RUN", "APA_TOKEN", "APA_PROJECT", "APA_RUN_CREDENTIAL_FILE", "APA_SESSION", "APA_HARNESS")
+keys = ("APA_RUN_CONTEXT", "APA_RUN", "APA_TOKEN", "APA_PROJECT", "APA_RUN_CREDENTIAL_FILE", "APA_SESSION", "APA_HARNESS", "PATH")
 line = {"argv": sys.argv[1:], "cwd": os.getcwd(), **{k: os.environ.get(k) for k in keys}}
 open(os.environ["APA_LOG"], "a").write(json.dumps(line) + "\\n")
 PY2
@@ -35,7 +37,9 @@ def gateway(tmp_path, monkeypatch):
     fake = tmp_path / "apa"
     fake.write_text(FAKE)
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-    for k, v in {"APA_BIN": str(fake), "APA_LOG": str(tmp_path / "log"), "APA_RUN": "run_first", "APA_TOKEN": "apa_run_stale",
+    # the plugins' default paths must never reach the real home
+    for k, v in {"HERMES_HOME": str(tmp_path / "hermes-home"), "APA_HOME": str(tmp_path / "apa-home"), "APA_BIN": str(fake),
+                 "APA_LOG": str(tmp_path / "log"), "PATH": os.environ["PATH"] + os.pathsep + STALE_MARK, "APA_RUN": "run_first", "APA_TOKEN": "apa_run_stale",
                  "APA_PROJECT": "stale-project", "APA_RUN_CONTEXT": "/stale/run_first",
                  "APA_RUN_CREDENTIAL_FILE": "/stale/cred"}.items():
         monkeypatch.setenv(k, v)
@@ -51,7 +55,7 @@ def calls(gateway):
 def assert_run_identity(call, gateway):
     assert call["APA_RUN_CONTEXT"] == str(gateway["context"])
     assert (call["APA_RUN"], call["APA_TOKEN"], call["APA_PROJECT"], call["APA_RUN_CREDENTIAL_FILE"]) == (None, None, None, None)
-    assert call["APA_HARNESS"] == "hermes"
+    assert call["APA_HARNESS"] == "hermes" and ".apa-run" not in call["PATH"]
     assert os.path.realpath(call["cwd"]) == os.path.realpath(gateway["work"])
 
 
@@ -164,6 +168,7 @@ def test_wake_cli_identity_is_explicit_and_ignores_an_inherited_context(gateway)
     json.loads(wake._cli({"args": ["context"], "run_id": "run_w"}))
     [call] = calls(gateway)
     assert (call["APA_RUN"], call["APA_TOKEN"], call["APA_RUN_CONTEXT"]) == ("run_w", "wake-token", None)
+    assert ".apa-run" not in call["PATH"]  # the CLI would read an inherited marker as a run without its context
 
 
 def test_capture_uses_the_session_cwd_and_the_runs_credential_never_the_saved_file(gateway, tmp_path, monkeypatch):
@@ -200,6 +205,111 @@ def test_capture_of_a_session_without_cwd_sends_no_gateway_path(gateway, monkeyp
         capture.post_llm_call("s1", "hi", "there")
         capture.on_session_end("s1")
     assert sent[0]["path"] == "" and sent[0]["context"] is None
+
+
+# ---- the passthrough line is missing: a run must fail loudly, never use the gateway's credential
+
+def missing_line_session(gateway):
+    return gateway["session"](None, gateway["work"], client_path=RUN_PATH)
+
+
+def assert_no_apa(gateway):
+    assert not gateway["log"].exists()
+
+
+def test_cli_tool_in_a_run_without_its_context_errors_and_never_runs_apa(gateway):
+    ctx = Ctx()
+    load_tools().register(ctx)
+    with missing_line_session(gateway):
+        r = json.loads(ctx.tools["apa_decide"][1]({"id": "i1", "option": "A", "evidence": "x"}, session_id="s1"))
+    assert r["ok"] is False and "client_env_passthrough: [APA_RUN_CONTEXT]" in r["error"] and "gateway's own credential" in r["error"]
+    assert_no_apa(gateway)
+
+
+def test_file_tool_in_a_run_without_its_context_names_the_missing_line(gateway):
+    ctx = Ctx()
+    load_tools().register(ctx)
+    with missing_line_session(gateway):
+        r = json.loads(ctx.tools["apa_read_file"][1]({"path": "README.md"}))
+    assert r["ok"] is False and "did not reach Hermes" in r["error"] and "client_env_passthrough: [APA_RUN_CONTEXT]" in r["error"]
+
+
+def test_hooks_in_a_run_without_its_context_never_run_apa(gateway, tmp_path, monkeypatch):
+    monkeypatch.setenv("APA_RECEIPT_LOG", str(tmp_path / "receipt.log"))
+    monkeypatch.setenv("APA_HERMES_CAPTURE_DIR", str(tmp_path / "capture"))
+    load_plugin("core")
+    inject, receipt, capture = load_plugin("inject"), load_plugin("receipt"), load_plugin("capture")
+    popen = []
+    monkeypatch.setattr(capture.subprocess, "Popen", lambda *a, **k: popen.append(a))
+    with missing_line_session(gateway):
+        assert sys.modules["apa_test_core.apa"].run(["persona"], "s1") == ""
+        assert inject.pre_llm_call(session_id="s1", is_first_turn=True) is None
+        receipt._report("itm_1", "progress", "working", "s1")
+        capture.post_llm_call("s1", "hi", "there")
+        capture.on_session_end("s1")
+    assert_no_apa(gateway)
+    assert not popen  # capture's helper would have posted with the gateway's credential
+    assert "did not reach Hermes" in (tmp_path / "receipt.log").read_text()
+    assert "did not reach Hermes" in (tmp_path / "capture" / "capture.log").read_text()
+
+
+def test_run_with_its_context_works_normally_whatever_the_path_says(gateway):
+    ctx = Ctx()
+    load_tools().register(ctx)
+    with gateway["session"](gateway["context"], gateway["work"], client_path=RUN_PATH):
+        ctx.tools["apa_item_update"][1]({"id": "i1", "reason": "r"}, session_id="s1")
+    assert_run_identity(calls(gateway)[0], gateway)
+
+
+def test_ordinary_session_is_not_refused_because_the_gateway_inherited_a_marker(gateway):
+    """Only the session's own PATH counts; an ordinary client's has no marker, an unbound session has no PATH at all."""
+    ctx = Ctx()
+    load_tools().register(ctx)
+    for client_path in ("/usr/bin:/bin", None):
+        with gateway["session"](None, gateway["work"], client_path=client_path):
+            r = json.loads(ctx.tools["apa_executors"][1]({}, session_id="chat"))
+        assert r["ok"] is True
+    for call in calls(gateway):
+        assert (call["APA_RUN_CONTEXT"], call["APA_RUN"], call["APA_TOKEN"]) == (None, None, None)
+        assert ".apa-run" not in call["PATH"]
+
+
+# ---- declaring: the profile must allow the context
+
+def test_declaring_without_the_line_is_refused_and_says_what_to_add(gateway):
+    headless = load_plugin("headless")
+    for config in ({}, {"terminal": {}}, {"terminal": {"client_env_passthrough": ["FOO"]}}, {"terminal": {"client_env_passthrough": "APA_RUN_CONTEXT"}}):
+        gateway["session"].config = config
+        with gateway["session"](None, gateway["work"]):
+            r = json.loads(headless._declare({}, session_id="s1"))
+        assert r["ok"] is False and "terminal:\n  client_env_passthrough: [APA_RUN_CONTEXT]" in r["error"], config
+    assert_no_apa(gateway)
+
+
+def test_declaring_with_an_unreadable_config_is_refused(gateway):
+    headless = load_plugin("headless")
+    gateway["session"].config = RuntimeError("bad yaml")
+    with gateway["session"](None, gateway["work"]):
+        r = json.loads(headless._declare({}, session_id="s1"))
+    assert r["ok"] is False and "cannot confirm" in r["error"] and "RuntimeError" in r["error"]
+    assert_no_apa(gateway)
+    with pytest.raises(ValueError, match="cannot confirm"):
+        headless.declaration()
+
+
+def test_declaring_with_the_line_goes_through(gateway):
+    headless = load_plugin("headless")
+    gateway["session"].config = {"terminal": {"client_env_passthrough": ["GEM_HOME", "APA_RUN_CONTEXT"]}}
+    with gateway["session"](None, gateway["work"]):
+        r = json.loads(headless._declare({}, session_id="owner"))
+    assert r["ok"] is True
+    [call] = calls(gateway)
+    assert call["argv"] == ["declare", "-"] and call["APA_SESSION"] == "owner"
+
+
+def test_the_run_marker_name_is_the_kernels_and_the_clis():
+    assert 'RunMark = ".apa-run"' in (ROOT / "kernel" / "outcall" / "proc" / "dispatcher.go").read_text()
+    assert 'runMark = ".apa-run"' in (ROOT / "cli" / "client" / "client.go").read_text()
 
 
 def test_the_variable_name_survives_hermes_client_env_secret_filter():

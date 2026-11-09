@@ -22,6 +22,7 @@ def declaration():
     One harness holds one declaration (a new one replaces the old), so the executors must travel with it or
     activating this declaration would drop them from the list.
     """
+    run_context.require_passthrough()
     body = json.loads((HERE / "declaration.json").read_text())
     spec = importlib.util.spec_from_file_location("apa_headless_executors", HERE.parent / "tools" / "executors.py")
     mod = importlib.util.module_from_spec(spec)
@@ -34,9 +35,9 @@ def declaration():
 def _declare(args, session_id=None, **_):
     try:
         body = declaration()
+        env = run_context.apa_env()
     except (OSError, ValueError) as e:
         return json.dumps({"ok": False, "error": str(e)})
-    env = run_context.apa_env()
     if session_id:
         env["APA_SESSION"] = str(session_id)
     try:

@@ -240,6 +240,29 @@ def test_session_without_a_run_context_is_refused(hermes, kernel):
     assert out["results"][0]["ok"] is False and "client_env_passthrough" in out["results"][0]["error"]
 
 
+def test_run_whose_context_did_not_arrive_errors_and_sends_nothing(hermes, kernel):
+    """The passthrough line is missing: only PATH travels, and it carries the kernel's run marker."""
+    hermes.client_env = {"PATH": "/usr/bin:/somewhere/run-credentials/.apa-run"}
+    out = hermes(("apa_read_file", {"path": "README.md"}, "s1"), ("apa_propose", {"kind": "task", "title": "t"}, "s1"))
+    assert out["results"][0]["ok"] is False and "did not reach Hermes" in out["results"][0]["error"]
+    assert out["results"][1]["ok"] is False and "client_env_passthrough: [APA_RUN_CONTEXT]" in out["results"][1]["error"]
+    assert not kernel["log"]
+
+
+def test_passthrough_check_reads_the_real_profile_config(hermes, tmp_path):
+    """Hermes' own config layer and configured_names, against the profile the fixture wrote."""
+    check = ("import importlib.util, sys; s = importlib.util.spec_from_file_location('rc', sys.argv[1]); "
+             "m = importlib.util.module_from_spec(s); s.loader.exec_module(m); m.require_passthrough()")
+    run = lambda: subprocess.run([str(HERMES_PY), "-c", check, str(TOOLS / "run_context.py")], cwd=HERMES_SRC, env=hermes.env,
+                                 capture_output=True, text=True, timeout=120)
+    missing = run()
+    assert missing.returncode != 0 and "client_env_passthrough: [APA_RUN_CONTEXT]" in missing.stderr
+    config = tmp_path / "hermes_home" / "config.yaml"
+    config.write_text(config.read_text() + "terminal:\n  client_env_passthrough: [APA_RUN_CONTEXT]\n")
+    allowed = run()
+    assert allowed.returncode == 0, allowed.stderr
+
+
 def test_ended_run_is_refused_and_the_cli_never_falls_back(hermes, kernel, run_session):
     run_session["context"].unlink()
     out = hermes(("apa_read_file", {"path": "README.md"}, "s1"), ("apa_propose", {"kind": "task", "title": "t"}, "s1"))

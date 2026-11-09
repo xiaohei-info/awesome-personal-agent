@@ -134,10 +134,14 @@ def _report(item, outcome, summary, session_id):
     if outcome == "done" and not ev:
         outcome = "progress"  # the kernel refuses done without result evidence
     key = "hermes-receipt-" + hashlib.sha1(f"{item}|{outcome}|{summary}".encode()).hexdigest()[:16]
-    env = run_context.apa_env()
+    args = [os.environ.get("APA_BIN", "apa"), "report", item, "--outcome", outcome, "--idempotency-key", key]
+    try:
+        env = run_context.apa_env()
+    except ValueError as e:
+        _log(item, args, "-", str(e).splitlines()[0])
+        return
     if session_id:
         env["APA_SESSION"] = str(session_id)
-    args = [os.environ.get("APA_BIN", "apa"), "report", item, "--outcome", outcome, "--idempotency-key", key]
     if summary:
         args += ["--summary", summary]
     for k, v in ev.items():

@@ -8,11 +8,13 @@ terminal:
   client_env_passthrough: [APA_RUN_CONTEXT]
 ```
 
-Without that line a kernel-launched run is not recognised as a run: file tools refuse, and CLI tools run under the gateway's own credential instead of the run's, so the run-identity checks do not apply. Set it before any run.
+Without that line `apa_declare_headless` refuses to declare. If runs start anyway (the line removed later, a session created before it, `apa declare` run by hand), the run's PATH marker gives them away: file tools, CLI tools, hooks and a bare `apa` in `terminal` all error instead of using the gateway's credential. A new run is needed after adding the line, because Hermes freezes the client environment with the session.
+
+A session without the marker cannot be told from an ordinary one and keeps the gateway's credential, by design: that is the owner's chat. The check reads the profile the tool call runs in, and `apa declare` run by hand bypasses it.
 
 ## Run identity
 
-Tools and hooks run in Hermes' shared gateway process, so its cwd and environment say nothing about the run (a gateway started by a run's client even keeps that run's `APA_RUN` / `APA_TOKEN`). `run_context.py` is the single source: the session's bound `APA_RUN_CONTEXT` (Hermes freezes it from the client's environment and binds it for that session's turns) names the file the kernel wrote at launch with the run's id, credential, `run_dir` and `work_dir` (design §7.7). Every `apa` call in these plugins gets that path and never the inherited run variables; a session with no run uses the gateway's own credential.
+Tools and hooks run in Hermes' shared gateway process, so its cwd and environment say nothing about the run (a gateway started by a run's client even keeps that run's `APA_RUN` / `APA_TOKEN`). `run_context.py` is the single source: the session's bound `APA_RUN_CONTEXT` (Hermes freezes it from the client's environment and binds it for that session's turns) names the file the kernel wrote at launch with the run's id, credential, `run_dir` and `work_dir` (design §7.7). Every `apa` call in these plugins gets that path and never the inherited run variables; a session with no run uses the gateway's own credential. A session whose client PATH has the kernel's marker (`.apa-run`) but no context is a run that lost it, and gets an error.
 
 Registers toolset `apa`: `apa_propose`, `apa_ask`, `apa_decide`, `apa_accept`, `apa_dismiss`, `apa_executors`, `apa_delegate`, `apa_report`,
 `apa_declare_executors`, `apa_executor_call`, and the read-tier set `apa_read_file`, `apa_list_dir`, `apa_item_update`, `apa_material_commit`. Every CLI tool runs `apa` with `APA_SESSION=<Hermes session_id>`,

@@ -29,6 +29,8 @@ const (
 	EnvRunCredentials = "APA_RUN_CREDENTIAL_FILE"
 	EnvRunContext     = "APA_RUN_CONTEXT"
 
+	runMark = ".apa-run" // 与 kernel/outcall/proc.RunMark 同一约定（§7.7）
+
 	apiPrefix = "/v1"
 )
 

@@ -12,7 +12,10 @@ TIMEOUT_SECS = 2
 
 
 def run(args, session_id=None):
-    env = run_context.apa_env()
+    try:
+        env = run_context.apa_env()
+    except ValueError:
+        return ""
     if session_id:
         env["APA_SESSION"] = str(session_id)
     try:
