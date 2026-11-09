@@ -3,6 +3,7 @@
 package hermes
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,10 +11,13 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // TestFlowHermesContext 对应验收文档 flow-hermes-context（ACT-HCTX-01..11），真实 Hermes + 真实内核。
@@ -155,6 +159,12 @@ func TestFlowHermesContext(t *testing.T) {
 		f.evidence["ACT-HCTX-06-unread"] = mine
 		// 本人在 Web 点击后才离开未读。
 		f.webOK("POST", "/deliveries/"+mine.ID+"/read", "", 200)
+		// 设计 §7.2：本人确认（Web 点击）才算 acknowledged。HTTP 只回“未读/已读”，状态直接读内核账本（只读）取证。
+		clicked := f.deliveryState(mine.ID)
+		f.evidence["ACT-HCTX-06-state-after-click"] = clicked
+		if clicked != "acknowledged" {
+			t.Errorf("Web 点击后投递状态应为 acknowledged，实际 %q", clicked)
+		}
 		var after struct{ Deliveries []dl }
 		must(t, json.Unmarshal([]byte(f.webOK("GET", "/deliveries/unread", "", 200)), &after))
 		for _, d := range after.Deliveries {
@@ -166,6 +176,11 @@ func TestFlowHermesContext(t *testing.T) {
 		y := f.ask("acc-open", "HCTX6-ACK-QZK 回答后确认", "", "是否发布", "A=发布", "B=不发布")
 		f.waitDelivery(y)
 		f.webOK("POST", "/items/"+y+"/decide", `{"choice":"A"}`, 200)
+		ansState := f.deliveryStateOfItem(y)
+		f.evidence["ACT-HCTX-06-state-after-web-answer"] = ansState
+		if ansState != "acknowledged" {
+			t.Errorf("Web 回答决策后投递状态应为 acknowledged，实际 %q", ansState)
+		}
 		after2 := f.apa(f.OBS, 0, "context", "--scope", "project", "--project", f.Projects["acc-open"], "--format", "inject").Stdout
 		if strings.Contains(after2, "- 提醒 decision:"+y) {
 			t.Errorf("Web 回答后投递已确认，不应再被注入: %s", after2)
@@ -325,3 +340,22 @@ func (f *fx) waitDelivery(item string) {
 }
 
 var idRE = regexp.MustCompile(`itm_[0-9a-f]{16}`)
+
+// deliveryState 只读打开内核账本，返回投递当前状态（HTTP 不暴露已读投递的状态）。
+func (f *fx) deliveryState(id string) string {
+	return f.ledgerString("SELECT state FROM delivery_delivery WHERE id = ?", id)
+}
+
+func (f *fx) deliveryStateOfItem(item string) string {
+	return f.ledgerString("SELECT state FROM delivery_delivery WHERE item = ? ORDER BY version DESC, rowid DESC LIMIT 1", item)
+}
+
+func (f *fx) ledgerString(q string, arg string) string {
+	f.t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(f.Home, "ledger.db")+"?mode=ro")
+	must(f.t, err)
+	defer db.Close()
+	var v string
+	must(f.t, db.QueryRow(q, arg).Scan(&v))
+	return v
+}

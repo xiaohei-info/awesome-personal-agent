@@ -1,9 +1,0 @@
-USER: 委派子事项 itm_56591b542b36301c 已经建好（它就是要交给执行者的那一条，不要换成别的事项 id，也不要新建）。请用 <redacted>（id 填 itm_56591b542b36301c，executor 填 work-host.cli）取调用方式，再用终端直接执行那条命令，命令必须以执行者脚本开头、不要加 cd 或别的前缀。不要自己执行 apa report，回执交给插件。
-TOOLS: [{tool_describe {"names": ["<redacted>"]}} {terminal {"command": "apa item show itm_56591b542b36301c"}} {terminal {"command": "apa item show itm_e201e9ff67776b45"}} {tool_call {"calls": [{"name": "<redacted>", "arguments": {"id": "itm_56591b542b36301c", "executor": "work-host.cli", "task": "DLG6-PARENT-QZK 补测试"}}]}} {terminal {"command": "/tmp/apa-live.K0gLk4/apa-e2e-2942323353/work-host-cli.sh 'DLG6-PARENT-QZK 补测试\n\nLedger item: itm_56591b542b36301c. When done run: apa report itm_56591b542b36301c --outcome done --summary <text> [--pr <url>]'"}} {terminal {"command": "apa item show itm_56591b542b36301c"}}]
-FINAL: 委派已经执行完成，回执由插件自动写入了账本。
-
-- 调用的执行命令是：`/tmp/apa-live.K0gLk4/apa-e2e-2942323353/work-host-cli.sh 'DLG6-PARENT-QZK 补测试 …'`（该命令直接以执行者脚本开头，没有添加 cd 或任何其他前缀）
-- 执行者输出：`work-host.cli 已处理 PR https://example.invalid/acc/pr/6`
-- 账本状态（通过 apa 查询确认）：itm_56591b542b36301c 的阶段为 done，status_label 为 `work-host.cli 已处理 PR https://example.invalid/acc/pr/6`，版本为 2
-
-我没有执行 apa report，回执是插件在脚本返回后自动写入账本的。

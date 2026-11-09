@@ -16,3 +16,6 @@
 - 提示词引导（测试选择，不是产品行为）：模型在终端里直接跑 `apa decide` 时没有 `APA_SESSION`，内核按第二档返回 23；
   所以 CHAT 流程在开场消息里要求“操作账本用 apa_* 工具”；DLG-06 的消息明确子事项 id 与命令格式（命令须以执行者脚本开头，插件按首词识别）。
   观察：agent 在终端里跑的 `apa` 没有会话身份，审计只到 token 粒度。
+
+- ACT-HCTX-06（**产品缺口，测试失败**）：设计 §7.2 说本人确认（Web 点击、聊天代答、渠道回答）才算 `acknowledged`。实测：退回 Web 未读的投递，`POST /deliveries/{id}/read` 之后状态仍是 `fallback_web`（只写 `read_at`，`delivery.Queue.Confirm` 只被渠道回答调用）；Web 回答决策后该事项的投递变为 `superseded`，也不是 `acknowledged`。HTTP 不暴露已读投递的状态，所以测试只读打开 `ledger.db` 取证（证据 `ACT-HCTX-06-state-after-click`、`ACT-HCTX-06-state-after-web-answer`）。需回派 delivery / api-deliveries 实现节点：让 Web 点击确认走 `Confirm`（或修订验收对 Web 已读的表述）。
+- ACT-DLG-03：已在 acc-work 用 `apa material commit` 登记自有型材料（标题 DLG3-MAT-QZK…，正文含 MARKER-BODY-DLG3），断言项目上下文含标题、不含正文；材料与委派事项未建立关系（走项目作用域）。

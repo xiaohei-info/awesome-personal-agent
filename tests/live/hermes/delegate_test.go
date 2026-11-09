@@ -4,6 +4,8 @@ package hermes
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -96,11 +98,17 @@ func TestFlowDelegateRecover(t *testing.T) {
 	})
 
 	f.step(t, "ACT-DLG-03 执行者拿到项目上下文", func(t *testing.T) {
+		// 项目里登记一份自有型材料：标题可识别，正文带标记；上下文只能带标题，不能带正文。
+		const matTitle, matBody = "DLG3-MAT-QZK 登录超时排查纪要", "MARKER-BODY-DLG3 这是材料正文"
+		mf := filepath.Join(t.TempDir(), "m.md")
+		must(t, os.WriteFile(mf, []byte(matBody), 0o600))
+		f.apa(f.WRK, 0, "material", "commit", "--kind", "minutes", "--title", matTitle, "--project", f.Projects["acc-work"], "--from", mf, "--reason", "DLG3 登记材料")
 		item := f.apa(f.WRK, 0, "context", "--scope", "item", "--item", child).Stdout
 		contains(t, "item 作用域（子事项条目）", item, child)
 		// 项目信息、repos、允许的执行者属于项目上下文（设计 §7.6），执行者按子事项所在项目读取。
 		out := f.apa(f.WRK, 0, "context", "--scope", "project", "--project", f.Projects["acc-work"], "--format", "inject").Stdout
 		contains(t, "项目上下文", out, "acc-work", "https://example.invalid/acc/acc-work.git", "work-host.cli")
+		contains(t, "相关材料标题", out, matTitle)
 		lacks(t, "不带正文", item+out, "MARKER-BODY")
 		f.saveEvidence("act-dlg-03-context.txt", item+"\n"+out)
 	})
