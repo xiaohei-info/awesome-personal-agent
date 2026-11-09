@@ -1,8 +1,9 @@
-# sha256: 295034bb90d325219b2ddf0d808947fa4708300312f06aaa3adc608a1faf9fad
+# sha256: 2a5c04be226a13e374cb618e6f095a9778b6af9677920b26a6aeb667f49e25b4
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 'ACT-BRF-06 失败的根因已在 PR #242（merge 61267141e）修复：kernel task.settle 现在以运行凭据写回
-  spec/材料修订作为回执，并给出具体缺失原因；brief/review 模板的 spec.period 改为取到期时刻。请在 taiyi /opt/apa-live
-  用包含 61267141e 的 main 重新构建部署，新开会话重跑 ACT-BRF-01..06；旧运行结果不能复用。若 06 仍不过，在评论里写明每次 review
-  run 的耗时、phase 和 runTrace 给出的缺失原因，不要改产品代码。'
+retry_note: 'ACT-BRF-01 回归已由 PR #245（merge 881d69fae）修复：任务型模板声明结果字段（brief/review 为
+  period、sections[].project、sections[].body），写全才代转 done，缺字段进 needs_input 并写明缺哪个。请在
+  taiyi /opt/apa-live 用含 881d69fae 的 main 重新构建部署，新开会话重跑 ACT-BRF-01..06，旧运行结果不能复用。每次
+  brief/review 运行都要保留 output.txt，并在评论里记录 phase、ask.question 和耗时；ACT-BRF-01 需断言事项 phase
+  为 done 而不是 needs_input。06 若仍不过，写明每次 review run 的耗时和缺失原因，不要改产品代码。'
