@@ -1,4 +1,4 @@
-# sha256: 85107d0f66830420cbc9666d0a6dda0cb7eb278c1bd9535283146b4570bb2a40
+# sha256: e6fa49d5f1aa647e85b58d7f276f863e9eaacf1978f17f752b6b4c5ed3278cda
 defects:
   schema: omac.defect-ledger/v1
   used_global: 12
@@ -150,16 +150,18 @@ defects:
       - flow-guideline-draft/ACT-DRF-03
       - flow-guideline-draft/ACT-DRF-04
       reporters: []
-      state: queued
+      state: fixed
       retried: true
+      external_fix: https://github.com/xiaohei-info/awesome-personal-agent/pull/234
     dfx-bb651fb7e5d2:
       suspected: pack-brief
       anchors:
       - flow-brief/ACT-BRF-05
       - flow-brief/ACT-BRF-06
       reporters: []
-      state: queued
+      state: fixed
       retried: true
+      external_fix: https://github.com/xiaohei-info/awesome-personal-agent/pull/235
   inbox: []
 pending_human_amendment:
   amendment_id: amend-a4657a0582f6
