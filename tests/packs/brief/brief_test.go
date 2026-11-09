@@ -166,6 +166,9 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 			t.Fatalf("write-brief lacks %q: %s", k, w.Body)
 		}
 	}
+	if got := strings.Join(w.Meta.ResultFields, ","); got != "period,sections[].project,sections[].body" { // 内核按它判定代转 done（§8.4）
+		t.Fatalf("write-brief result_fields: %q", got)
+	}
 	if !strings.Contains(w.Body, "spec.sections[].{project, body}") {
 		t.Fatalf("write-brief must spell out spec.sections[].{project, body}: %s", w.Body)
 	}

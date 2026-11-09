@@ -59,7 +59,7 @@ _CLI_TOOLS = {
                      lambda a: ["delegate", *_flags(a, "parent", "assignee", "title", "summary", "body", "priority",
                                                     "project", "reason", "idempotency_key")]),
     "apa_report": ("Report a result on a child item or on this run's target item (apa report). outcome=done needs pr, commit, branch or link, or the kernel refuses it; "
-                    "a result written to the item's spec with apa_item_update needs no report.",
+                    "a result the prompt asks you to write to the item's spec with apa_item_update needs no report.",
                    {"id": _s("Child item id"), "outcome": _s("progress | done | blocked"), "summary": _s("Summary"),
                     "pr": _s("PR url"), "commit": _s("Commit"), "branch": _s("Branch"), "link": _s("Other link"),
                     "ack_cursor": _s("Follow-up message cursor being acknowledged"), "reason": _REASON,

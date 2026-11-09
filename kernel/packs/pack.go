@@ -126,7 +126,9 @@ type PromptMeta struct {
 	Timeout             string         `yaml:"timeout"`
 	Access              string         `yaml:"access"`
 	Cwd                 string         `yaml:"cwd"`
-	Tools               any            `yaml:"tools"` // 只为识别并拒绝"生成型声明工具"
+	ResultFields        []string       `yaml:"result_fields"`   // 任务型：spec 里要写全的字段，顶层键或 a[].b（§8.4）
+	ResultMaterial      bool           `yaml:"result_material"` // 任务型：结果是一条材料修订
+	Tools               any            `yaml:"tools"`           // 只为识别并拒绝"生成型声明工具"
 }
 
 // View 是 Web 视图配置，止步于列表列、筛选、卡片字段（C.8）。JSON 形状即 GET /packs 的 views（附录 B.2）。
@@ -144,6 +146,7 @@ type View struct {
 var (
 	packName    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	placeholder = regexp.MustCompile(`\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}`)
+	resultField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\[\]\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 
 	// 提示词正文只能用内核提供的固定占位符（C.7）。
 	promptPlaceholders = map[string]bool{"item_id": true, "run_id": true, "project_id": true, "materials_path": true}
@@ -644,6 +647,17 @@ func checkPromptMeta(m *PromptMeta, file string, schema func(string, map[string]
 	if m.OutputSchema != nil {
 		if err := schema(file+" output_schema", m.OutputSchema); err != nil {
 			return err
+		}
+	}
+	switch {
+	case m.Agent != "task" && (len(m.ResultFields) > 0 || m.ResultMaterial):
+		return errors.New("result_fields and result_material are only for task prompts")
+	case len(m.ResultFields) > 0 && m.ResultMaterial:
+		return errors.New("declare either result_fields or result_material, not both")
+	}
+	for _, f := range m.ResultFields {
+		if !resultField.MatchString(f) {
+			return fmt.Errorf("result_fields %q must be a top-level key or a[].b", f)
 		}
 	}
 	if m.RunAs != "" {
