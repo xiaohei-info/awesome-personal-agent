@@ -1,6 +1,7 @@
-# sha256: b0e76497ad519e431b56b38f4330b756d1adfde340363690b48eebd01ad8df7b
+# sha256: 242bd1439aa7dcb5cca8f145ac36b1a5bebccda81e6a77330c997c784507fbfb
 work_item_id: 01a1bfaf-d267-7926-b170-b9682b290378
-status: todo
+status: in_progress
+recovery_marker: true
 retry_note: 主会话决定（本人授权范围内）：taiyi 从本机 SSH 不通，DPL-01/02 的『另一台机器』改用 oracle：ssh oracle
   'curl ...'，访问本机 tailnet 地址 100.127.255.10 上你起的端口（已实测 oracle→本机 tailnet HTTP 可达）。只用
   curl 只读访问，不在 oracle 上安装、改配置或留文件。TLS 反向代理：优先用 Go 标准库（net/http/httputil + crypto/tls，openssl

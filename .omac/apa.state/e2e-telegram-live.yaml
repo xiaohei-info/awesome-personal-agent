@@ -1,6 +1,8 @@
-# sha256: 2d65cd70f62c9b69d1e67b3c6cef4dcd222c94274a0795545fee00463e6dd207
+# sha256: 80e61b43ac40b42ded450fc330483bfaea4990fb282152d4dc4cb7850e7fcca3
 work_item_id: 01a1bf86-17c4-7dfd-a1de-a502c2c4aeec
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-09T10:17:34Z'
 recovery_marker: true
 retry_note: 本人现在已守在 Telegram（@guanti_github_bot）。按上一轮做法重跑 ACT-TG-01..06：卡片发出后立刻在 issue
   评论写一句『卡片已发出，请在 Telegram 点选项 A』，web_only 卡片发出后再评论『请回复同意（预期被拒）』，每一步等待上限 30 分钟。不要伪造回复，验收不放宽；本机
