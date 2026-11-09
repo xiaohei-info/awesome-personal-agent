@@ -1,4 +1,4 @@
-# sha256: 3ae36c4255295e8e6d63ecb20456eab6512619b8e906e5f21dbcda763633d522
+# sha256: cb4c328ed3a3fdb6b606870b69ca845ccac1f05e4b77a326a2f57dc680883597
 defects:
   schema: omac.defect-ledger/v1
   used_global: 10
@@ -127,7 +127,24 @@ defects:
       - e2e-proactive-live
       state: fixing
       fix_node: fix.kernel-task-agent.ee5850
-  inbox: []
+  inbox:
+  - id: 8ead30d32211
+    reporter: e2e-proactive-live
+    defects:
+    - class: design-gap
+      suspected_node: pack-brief
+      anchors:
+      - flow-brief/ACT-BRF-01
+      design_ref: docs/solution-design.md#36-场景五简报
+      expected: 简报包 spec_schema 规定 spec.sections 是 [{project, body}]，Web 简报页读 body。write-brief.md
+        必须明确要求逐项目写入 spec.sections[].{project, body}（body 内含进展、到期事项、待本人决定的事），不得让运行者自行发明分节字段。
+      observed: dfx-ee585068bf8d 修复合并后，taiyi 真实 Hermes 跑简报（run 01a1bbaa-e7a7-7507-ac67-adffa565c49e）已写
+        spec.period 和 4 个项目分节，但每节用 progress/due/decisions 键，没有 body；Web 简报页会显示空分节，brief
+        以 needs_input 结束，ACT-BRF-01 失败。原因是提示词只说“每节写清楚：进展、到期事项、待本人决定的事”，没有给出 sections
+        的键名。
+      locations:
+      - packs/brief/prompts/write-brief.md
+      - packs/brief/pack.yaml:kinds.brief.spec_schema
 pending_human_amendment:
   amendment_id: amend-a4657a0582f6
   file: /Volumes/SSD1T/apps/hermes/home/workspace/reports/apa-omac-plan/auth-redesign-20261108.amendment.yaml
