@@ -145,3 +145,39 @@ func TestDirectoryPathIsNotAFile(t *testing.T) {
 		t.Fatalf("code=%d", code)
 	}
 }
+
+// owner/name 简写要读得到：git 不认它，读取器展开成 URL。insteadOf 把默认站点指回本地裸库，不走网络。
+func TestOwnerRepoShorthandReadsRemote(t *testing.T) {
+	f := newFixture(t)
+	site := filepath.Dir(f.remote)
+	if err := os.MkdirAll(filepath.Join(site, "acme"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, site, "clone", "-q", "--bare", f.remote, filepath.Join(site, "acme", "widgets"))
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "url.file://"+site+"/.insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://github.com/")
+
+	code, m := call(t, req(Config{Repo: "acme/widgets", Path: "docs/design.md"}))
+	if code != ExitOK || m["origin"] != "remote" || m["content"] != "# committed\n" {
+		t.Fatalf("code=%d out=%v", code, m)
+	}
+}
+
+func TestCloneURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"acme/widgets":                     "https://github.com/acme/widgets",
+		"acme/widgets.git":                 "https://github.com/acme/widgets.git",
+		"https://example.com/acme/app.git": "https://example.com/acme/app.git",
+		"git@example.com:acme/app.git":     "git@example.com:acme/app.git",
+		"/tmp/acme/app.git":                "/tmp/acme/app.git",
+		"./acme/app":                       "./acme/app",
+		"../app":                           "../app",
+		"a/../b":                           "a/../b",
+		"acme/../../etc":                   "acme/../../etc",
+	} {
+		if got := cloneURL(in); got != want {
+			t.Errorf("cloneURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

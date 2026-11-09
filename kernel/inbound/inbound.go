@@ -508,21 +508,18 @@ func (s *Service) project(sn snapshot, src domain.Source, ev domain.SourceEvent,
 				return "", fmt.Errorf("source %s config: %w", src.ID, err)
 			}
 		}
+		if p, _, ok := projects.Find(sn.projs, cfg.Remote); ok {
+			return p.ID, nil
+		}
 		for _, p := range sn.projs {
 			for _, r := range p.Repos {
-				if r.Remote == cfg.Remote || under(ev.Link, r.Remote) {
+				if projects.RepoHasLink(r.Remote, ev.Link) {
 					return p.ID, nil
 				}
 			}
 		}
 	}
 	return "", nil
-}
-
-// under 判断链接是否落在远程地址之下（按路径段，org/repo 不匹配 org/repo2）。
-func under(link, remote string) bool {
-	remote = strings.TrimSuffix(remote, ".git")
-	return remote != "" && (link == remote || strings.HasPrefix(link, remote+"/"))
 }
 
 // propose 建 proposed 事项，按需自动接受，再记处置。每步的幂等键都含来源事件 id。

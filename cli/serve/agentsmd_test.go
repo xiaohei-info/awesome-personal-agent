@@ -46,13 +46,15 @@ func (k *kernel) changedEvent(t *testing.T, id string) {
 	k.agmWG.Wait()
 }
 
-func agentsKernel(t *testing.T) *kernel {
+func agentsKernel(t *testing.T) *kernel { return agentsKernelFor(t, agmRepo) }
+
+func agentsKernelFor(t *testing.T, remote string) *kernel {
 	k := assembled(t)
 	k.do(t, command.Chain{}, "source.register_script", map[string]any{"id": "src_gh", "type": "script", "source_type": "repo",
 		"command": "/bin/true", "schedule": "1h", "timeout": 10, "dedupe_domain": "gh"})
 	var p struct{ ID string }
 	_ = json.Unmarshal(k.do(t, command.Chain{}, "project.create", map[string]any{"name": "widgets"}), &p)
-	k.do(t, command.Chain{}, "project.repo.add", map[string]any{"id": p.ID, "remote": agmRepo})
+	k.do(t, command.Chain{}, "project.repo.add", map[string]any{"id": p.ID, "remote": remote})
 	return k
 }
 
@@ -68,6 +70,24 @@ func TestAgentsMDChangedEventRunsSameCheckAsAgentsCheck(t *testing.T) {
 	}
 	if in, _ := os.ReadFile(stdinLog); !strings.Contains(string(in), `"repo":"`+agmRepo+`"`) || !strings.Contains(string(in), `"path":"AGENTS.md"`) {
 		t.Fatalf("reader was not asked for the repo's AGENTS.md: %s", in)
+	}
+}
+
+// ACT-AGM-09：项目登记完整地址、事件只给 owner/repo 时也要归到项目；读取器拿到的是登记的地址，不是简写。
+func TestAgentsMDChangedEventMatchesRepoRegisteredByFullURL(t *testing.T) {
+	const remote = "git@example.com:Acme/widgets.git"
+	stdinLog := fakeReader(t, `{"commit":"abc123","branch":"main","path":"AGENTS.md","origin":"remote","content":"hand written\n"}`, 0)
+	k := agentsKernelFor(t, remote)
+	k.changedEvent(t, "e4")
+
+	for _, spelling := range []string{agmRepo, remote} {
+		v, err := k.agm.Get(context.Background(), spelling)
+		if err != nil || v.LastCheck == nil || v.LastCheck.State != "drift" {
+			t.Fatalf("%s: event must produce a drift check: %+v %v", spelling, v, err)
+		}
+	}
+	if in, _ := os.ReadFile(stdinLog); !strings.Contains(string(in), `"repo":"`+remote+`"`) {
+		t.Fatalf("reader must get the registered remote: %s", in)
 	}
 }
 

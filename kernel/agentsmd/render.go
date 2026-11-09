@@ -26,6 +26,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/hosted"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -180,7 +181,7 @@ func designIndex(tx *store.Tx, project, repo string) (string, error) {
 	}
 	var rows []string
 	for _, e := range es {
-		if e.Repo == repo && !e.Missing {
+		if projects.SameRepo(e.Repo, repo) && !e.Missing {
 			rows = append(rows, fmt.Sprintf("- %s：`%s`", e.Material.Title, e.Path))
 		}
 	}

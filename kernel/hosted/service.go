@@ -138,7 +138,7 @@ func refreshTargets(tx *store.Tx, c command.Commit) ([]string, error) {
 		es, err := List(tx, "")
 		var ids []string
 		for _, e := range es {
-			if e.Repo == in.Repo {
+			if projects.SameRepo(e.Repo, in.Repo) {
 				ids = append(ids, e.Material.ID)
 			}
 		}
@@ -214,7 +214,7 @@ func (s *Service) checkout(tx *store.Tx, e Entry) (string, error) {
 		return "", err
 	}
 	for _, r := range p.Repos {
-		if r.Remote != e.Repo {
+		if !projects.SameRepo(r.Remote, e.Repo) {
 			continue
 		}
 		for _, c := range r.Checkouts {

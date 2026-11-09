@@ -567,19 +567,6 @@ func TestUnsupportedMatchConditionIsReported(t *testing.T) {
 	}
 }
 
-func TestUnderMatchesWholePathSegments(t *testing.T) {
-	for link, want := range map[string]bool{
-		"https://h/org/web":          true,
-		"https://h/org/web/issues/1": true,
-		"https://h/org/web2/x":       false,
-		"":                           false,
-	} {
-		if got := under(link, "https://h/org/web.git"); got != want {
-			t.Errorf("under(%q) = %v", link, got)
-		}
-	}
-}
-
 func TestNewRequiresDependencies(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("New accepted empty options")
