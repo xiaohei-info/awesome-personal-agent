@@ -200,7 +200,7 @@ Markdown 模板，占位符由连接模块提供。`agents-md` 包的 `templates
 
 ## C.10 实例
 
-实例是账本记录，不写 yaml。Web 或 `apa instance add <包> --param k=v` 创建，参数按 `instance_params` 校验，到期落为 Timer。到期后由主动服务执行该包里 `schedule` 含 `{instance.…}` 的时钟规则，不看模式；`create_item` 建的事项直接 `open`、项目取实例的项目，并作为后续动作的对象，同一周期只一份（主文档 §7.3）。
+实例是账本记录，不写 yaml。Web 或 `apa instance add <包> --param k=v` 创建，参数按 `instance_params` 校验，到期落为 Timer。到期后由主动服务执行该包里 `schedule` 含 `{instance.…}` 的时钟规则，不看模式；`create_item` 建的事项直接 `open`、项目取实例的项目，并作为后续动作的对象，同一周期只一份（主文档 §7.3）。后续动作失败时事项转 `needs_input` 并写明原因（主文档 §8.7）。
 
 ## C.11 加载与校验
 

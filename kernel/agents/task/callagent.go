@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
@@ -34,7 +37,7 @@ type AgentOptions struct {
 //   - task：拉起任务型。对象是本次规则执行里 create_item 建的事项（实例到期，C.13）时，就在这个事项上运行，
 //     先把它指派给内核身份，回执与失败才属于"改自己的事项"；否则按 §8.4 另建目标事项。
 //   - generate：账本快照作资料调生成型，结果写进事项 spec 并转 done；要升级到任务型时照任务型处理；
-//     没有可用结果时转 needs_input（§8.7）。
+//     没有可用结果时转 needs_input（§8.7）；调用失败返回错误，规则建的事项由规则引擎转 needs_input。
 //   - judge：交给 Judge。
 //
 // 能力包取规则键的包名；harness 用 Web 设置的默认 harness（§13.6）。
@@ -174,7 +177,10 @@ func (s *Service) launchDepth(ctx context.Context, c rules.Call) (depth int, ove
 		if c.Item != nil {
 			object = c.Item.ID
 		}
-		return depth, true, chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, object, depth, max)
+		if err := chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, object, depth, max); err != nil || !c.Bound {
+			return depth, true, err
+		}
+		return depth, true, c.Ask(c.Item.ID, fmt.Sprintf("链路深度 %d 超过阈值 %d，规则没有派发运行", depth, max))
 	}
 	return depth, false, nil
 }
@@ -198,20 +204,36 @@ func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, p
 		return err
 	}
 	in, _ := json.Marshal(map[string]string{"item_id": it.ID, "project_id": it.Project})
-	var pv int
-	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { pv, _, err = policy.Current(tx); return }); err != nil {
+	actor := domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}
+	var basis *domain.Basis
+	// 模型调用连同重试可能持续很久（模板 timeout × 尝试数），先留痕，事项在这段时间里不是静默的 open。
+	if err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
+		pv, _, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		basis = &domain.Basis{PolicyVersion: pv, RuleID: c.Rule}
+		body, err := json.Marshal(map[string]any{"category": domain.RunGenerate, "template": tmpl, "target": it.ID, "state": domain.RunRunning})
+		if err != nil {
+			return err
+		}
+		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvRunStarted, Object: it.ID, Actor: actor, Basis: basis,
+			Reason: "generate started", Payload: body, ChainDepth: depth, At: s.o.Now()})
+		return err
+	}); err != nil {
 		return err
 	}
 	out, err := g.Do(ctx, direct.Call{Pack: pack, Template: tmpl, Input: in, Material: string(snap), Target: it.ID, Project: it.Project,
-		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule},
-		Basis: &domain.Basis{PolicyVersion: pv, RuleID: c.Rule}, ChainDepth: depth})
+		Actor: actor, Basis: basis, ChainDepth: depth})
 	switch {
+	case errors.Is(err, model.ErrNotConfigured):
+		return fmt.Errorf("生成型需要模型端点，请在 Web 设置里配置: %w", err)
 	case err != nil:
-		return err
+		return fmt.Errorf("生成型调用失败: %w", err)
 	case out.HandoffTask != "":
 		return s.callTask(ctx, c, pack, out.HandoffTask)
 	case !out.Settled:
-		return ask(c, it.ID, "生成型没有给出可用结果："+out.Reason)
+		return c.Ask(it.ID, "生成型没有给出可用结果："+out.Reason)
 	}
 	if len(out.Steps) == 0 {
 		return errors.New("task: generate outcome has no steps")
@@ -222,16 +244,5 @@ func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, p
 	}
 	_, err = c.Do("item.transition", map[string]any{"id": it.ID, "to": domain.PhaseDone, "reason": "rule " + c.Rule + ": generated",
 		"evidence": "run " + final.RunID})
-	return err
-}
-
-// ask 以规则的身份把事项转 needs_input 交本人（级联终止于 needs_input，§8.7）。
-func ask(c rules.Call, itemID, reason string) error {
-	q := map[string]any{"question": reason, "options": []domain.AskOption{
-		{ID: "rerun", Label: "重新运行"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
-	if _, err := c.Do("item.update", map[string]any{"id": itemID, "ask": q, "reason": reason}); err != nil {
-		return err
-	}
-	_, err := c.Do("item.transition", map[string]any{"id": itemID, "to": domain.PhaseNeedsInput, "reason": reason})
 	return err
 }

@@ -689,6 +689,22 @@ func TestCallAgentGenerateOverride(t *testing.T) {
 	}
 }
 
+// 规则建的事项在链路熔断时不派发运行，也不留在 open：转 needs_input 写明原因。
+func TestChainTripOnRuleItemAsksOwner(t *testing.T) {
+	e := setup(t)
+	e.x.MaxChainDepth = 1
+	id := e.openItem()
+	c := e.call("gen", id)
+	c.Depth = 1
+	gen := fakeGen{direct.Outcome{Settled: true, Steps: []direct.Step{{RunID: "run_g", Result: json.RawMessage(`{}`)}}}, e.st}
+	if err := e.svc.CallAgent(AgentOptions{Generate: gen})(bg, c); err != nil {
+		t.Fatal(err)
+	}
+	if it := e.item(id); it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "链路深度") {
+		t.Fatalf("item %+v", it)
+	}
+}
+
 // 运行凭据签发失败时不注入空凭据（Env 返回 nil 并报告）；非任务型运行不签发。
 func TestEnvOnlyForLiveTaskRuns(t *testing.T) {
 	e := setup(t)

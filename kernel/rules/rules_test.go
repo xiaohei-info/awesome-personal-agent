@@ -3,6 +3,7 @@ package rules
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -788,6 +789,93 @@ event_rules:
 	}
 	if al := e.ofType(domain.EvHealthAlert); len(al) != 1 || !strings.Contains(al[0].Reason, "create_timer") {
 		t.Fatalf("alerts = %+v", al)
+	}
+}
+
+// 实例驱动的规则建好事项后动作失败：事项转 needs_input 并写明原因，告警照记；动作已让事项离开 open 时不动它；
+// 授权类拒绝同样交本人，留痕仍是命令管线的那条。包里已没有实例驱动的规则时，实例到期留告警。
+func TestBoundItemIsHandedBackWhenActionFails(t *testing.T) {
+	files := map[string]string{"bf/pack.yaml": `name: bf
+version: 1.0.0
+description: brief
+instance_params:
+  type: object
+  required: [schedule]
+  properties:
+    schedule: {type: string}
+clock_rules:
+  - id: scheduled
+    type: recur
+    schedule: "{instance.schedule}"
+    do:
+      - action: create_item
+        kind: brief
+      - action: call_agent
+        prompt: write
+`, "bf/prompts/write.md": "---\nagent: task\n---\n写简报 {item_id}。\n"}
+	var h Handler
+	e := newEnv(t, files, map[string]Handler{"call_agent": func(ctx context.Context, c Call) error { return h(ctx, c) }})
+	var ins struct{ ID string }
+	_ = json.Unmarshal(e.must(owner, "instance.create", map[string]any{"pack": "bf", "params": map[string]any{"schedule": "24h"}}).Value, &ins)
+	fire := func() domain.Item {
+		e.t.Helper()
+		e.now = e.now.Add(24 * time.Hour)
+		if _, err := e.clk.Tick(bg); err != nil {
+			e.t.Fatal(err)
+		}
+		if err := e.eng.Drain(bg); err != nil {
+			e.t.Fatal(err)
+		}
+		var out []domain.Item
+		_ = e.st.View(bg, func(tx *store.Tx) (err error) { out, err = items.List(tx, items.Filter{Kind: "brief"}); return })
+		slices.SortFunc(out, func(a, b domain.Item) int { return a.CreatedAt.Compare(b.CreatedAt) })
+		return out[len(out)-1]
+	}
+
+	h = func(context.Context, Call) error { return errors.New("no model") }
+	it := fire()
+	if it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "no model") {
+		t.Fatalf("failed action must hand the item back: %+v", it)
+	}
+	if al := e.ofType(domain.EvHealthAlert); len(al) != 1 || al[0].Object != ins.ID {
+		t.Fatalf("alerts = %+v", al)
+	}
+
+	h = func(_ context.Context, c Call) error {
+		if _, err := c.Do("item.transition", map[string]any{"id": c.Item.ID, "to": domain.PhaseDone, "reason": "r", "evidence": "x"}); err != nil {
+			return err
+		}
+		return errors.New("late failure")
+	}
+	if it = fire(); it.Phase != domain.PhaseDone {
+		t.Fatalf("an item the action already moved must stay: %+v", it)
+	}
+
+	h = func(context.Context, Call) error {
+		return domain.NewError(domain.CodeWebOnly, "web only", "use the web ui")
+	}
+	alerts := len(e.ofType(domain.EvHealthAlert))
+	if it = fire(); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "web only") {
+		t.Fatalf("a rejected action must hand the item back: %+v", it)
+	}
+	if n := len(e.ofType(domain.EvHealthAlert)); n != alerts {
+		t.Fatalf("rejection recorded twice: %d alerts, was %d", n, alerts)
+	}
+
+	e.pack(map[string]string{"bf/pack.yaml": `name: bf
+version: 1.0.1
+description: brief
+instance_params:
+  type: object
+  required: [schedule]
+  properties:
+    schedule: {type: string}
+`})
+	before := len(e.ofType(domain.EvHealthAlert))
+	fire()
+	al := e.ofType(domain.EvHealthAlert)
+	if len(al) != before+1 || al[before].Object != ins.ID || !strings.Contains(al[before].Reason, "no instance-driven") {
+		t.Fatalf("firing without a rule must leave an alert: %+v", al)
 	}
 }
 
