@@ -1,4 +1,4 @@
-# sha256: 8693f9f4b1b4b889d36dbf4153994a19689e4863961aaa3db5268e0b8fe95e3b
+# sha256: 0a9c429914196ee085d27c711cda44f862ec4daeeb53d95a9fb31608fc11a0a7
 defects:
   schema: omac.defect-ledger/v1
   used_global: 11
@@ -133,7 +133,7 @@ defects:
       - flow-brief/ACT-BRF-01
       reporters:
       - e2e-proactive-live
-      state: fixing
+      state: fixed
       fix_node: fix.pack-brief.9ddec2
   inbox: []
 pending_human_amendment:
