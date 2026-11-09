@@ -1,6 +1,8 @@
-# sha256: a410f2f79b08ac6a47f9fc856e935e69077b4bd1b50f9080125ae90668b0b651
+# sha256: fc77cff8fa078102eb96eba30956fd6b559e6e3158f27af3205d3b61a8abd252
 work_item_id: 01a1b0fd-e3f3-792b-bd58-f37ff4797f33
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-09T03:50:32Z'
 recovery_marker: true
 retry_note: 需要 Hermes 的部分一律在 taiyi 上跑（ssh taiyi，root），Mac mini 不启动、不调用 hermes，不读写
   ~/.hermes。taiyi 隔离环境在 /opt/apa-live/，先读 /opt/apa-live/README.md：hermes 只用 /opt/apa-live/venv/bin/hermes
