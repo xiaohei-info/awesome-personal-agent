@@ -8,10 +8,12 @@
     "step": "ACT-CHAT-02 决策经消息前注入带到会话"
   },
   "ACT-CHAT-03": {
-    "decide_args": "decide itm_d8322367ae4e9a53 --option B --evidence 就选方案 B --reason Owner chose option B in chat",
+    "decide_args": "decide itm_2d57caba312451f1 --option B --evidence 就选方案 B --reason owner 在对话中直接选定方案 B",
+    "decide_call_session": "20261109_150400_f08828",
     "evidence": "就选方案 B",
     "resolved_via": "chat",
-    "reverted": true
+    "reverted": true,
+    "session": "20261109_150400_f08828"
   },
   "ACT-CHAT-03-result": {
     "passed": true,
@@ -19,7 +21,7 @@
   },
   "ACT-CHAT-04": {
     "agent_attempted_decide": true,
-    "final": "付款确认（itm_835a9a41f242ec73）这条决策只能在 Web 端由你本人答复，我这边无法代你提交，返回的提示是 web_only。请打开：\n\nhttp://127.0.0.1:45261/items/itm_835a9a41f242ec73\n\n另一条“CHAT1-DEC-QZK 方案选择”需要选 A 还是 B，“同意”答不了它，所以我没有动它。",
+    "final": "“同意”我按付款确认来理解了，但这一项已在账本里被标为 web_only —— 只能由你本人在 Web 界面回答，我这边无法代答（接口返回 web_only，未做任何改动）。\n\n请在 Web 上确认：\n  http://127.0.0.1:37609/items/itm_697ab646fad99a9e   （CHAT4-FIN-QZK 付款确认）\n\n另一项同样是高风险、需你在 Web 处理：\n  http://127.0.0.1:37609/items/itm_2d57caba312451f1   （CHAT1-DEC-QZK 方案选择：A 还是 B）\n\n如果你刚才的“同意”其实是指 CHAT1，或者只是表示知道了，也请在 Web 上按真实意图处理——我不会替你在账本上落这个决定。",
     "kernel_decide_exit": 20
   },
   "ACT-CHAT-04-result": {

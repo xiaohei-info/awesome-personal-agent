@@ -251,24 +251,41 @@ func TestFlowHermesContext(t *testing.T) {
 		first.say("只回复 OK")
 		sid := first.ID
 		first.close()
-		// 恢复：与 hermes chat --resume 同一加载路径（DRIVER_RESUME），在检出目录里发一条消息。
-		// 注：直接用 `hermes chat --resume` CLI 时，钩子子进程的工作目录是 Hermes 安装目录而不是检出目录，
-		// 作用域解析不到项目（见交付说明的发现），所以这里走进程内恢复，会话与钩子仍是真实 Hermes 的。
-		res := f.session(home, open, f.DEL, "DRIVER_RESUME="+sid)
-		rr := res.say("先别用任何命令：我现在有哪些待决事项？写出标题关键词。")
-		contains(t, "恢复后的回答", rr.Final, "HCTX11-PEND-QZK")
-		contains(t, "恢复后重新注入", rr.Injected, pend, "以下为资料")
-		resumed := false
+		// 真实 CLI 恢复：hermes chat --resume <session_id>，在检出目录里发一条消息。
+		cmd := exec.Command(f.hermesBN, "chat", "--in", open, "--resume", sid, "-Q", "-q", "先别用任何命令：我现在有哪些待决事项？写出标题关键词。")
+		cmd.Dir, cmd.Env = open, f.env(home, f.DEL)
+		out, err := cmd.CombinedOutput()
+		f.saveEvidence("act-hctx-11-resume-cli.txt", string(out))
+		if err != nil {
+			t.Fatalf("hermes chat --resume %s: %v\n%s", sid, err, f.redact(string(out)))
+		}
+		var inj []call
 		for _, c := range f.calls("--format inject") {
-			resumed = resumed || strings.HasPrefix(c.Session, sid+"~") && strings.Contains(c.Out, pend)
+			if strings.HasPrefix(c.Session, sid+"~") {
+				inj = append(inj, c)
+			}
 		}
-		if !resumed {
-			t.Errorf("恢复会话应以新游标重新注入摘要（session=%s~…）", sid)
+		for _, c := range inj {
+			f.evidence["ACT-HCTX-11-resume-hook-call"] = map[string]any{"session": c.Session, "cwd": c.Cwd, "args": c.Args, "out_len": len(c.Out)}
 		}
-		// 压缩：同一会话触发 Hermes 的 post_compaction 事件后再发一条，摘要重新带上。
+		if len(inj) == 0 {
+			t.Fatalf("恢复后钩子没有以新游标（%s~…）调用 apa context", sid)
+		}
+		for _, c := range inj {
+			if c.Cwd != open || !strings.Contains(c.Out, pend) {
+				t.Errorf("恢复后应在检出目录 %s 下重新注入摘要（含 %s），实际钩子工作目录 %s，输出 %d 字节", open, pend, c.Cwd, len(c.Out))
+			}
+		}
+		contains(t, "恢复后的回答", string(out), "HCTX11-PEND-QZK")
+		// 压缩：Hermes 自己的压缩流程（会触发 post_compaction），之后再发一条，摘要重新带上。
 		cs := f.session(home, open, f.DEL)
-		cs.say("只回复 OK")
-		cs.compact()
+		for _, m := range []string{"第一件：记得周一开会", "第二件：记得周二交报告", "第三件：记得周三订机票", "第四件：记得周四回电话"} {
+			cs.say(m + "。只回复：好")
+		}
+		c := cs.compress()
+		if !c.Compacted {
+			t.Fatalf("压缩应真实执行")
+		}
 		rc := cs.say("只回复 OK")
 		contains(t, "压缩后的注入", rc.Injected, pend, "以下为资料")
 		lacks(t, "压缩后钩子不报错", cs.logb.String(), "Traceback")

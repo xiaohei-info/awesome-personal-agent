@@ -1,0 +1,15 @@
+↻ Resumed session 20261109_150844_d2b926 "只回复 OK" (1 user message, 2 total messages)
+以下内容来自账本快照，我没有运行任何命令：
+
+待决事项（needs_input）：
+1. HCTX3-PEND-QZK：本周发布用方案 A 还是 B
+2. HCTX4-NEW-QZK：Web 新建待输入
+3. HCTX6-INJ-QZK：注入路由的决策
+4. HCTX7-BACK-QZK：重启后的待决
+5. HCTX11-PEND-QZK：恢复后仍要知道的待决（摘要“是否继续”，A 继续 / B 停止）
+
+此外，还有一条待确认的建议项（proposed）：HCTX9-PROP-QZK
+
+状态以 `apa` 的实时查询为准；以上内容仅为本次提供的快照。
+
+session_id: 20261109_150844_d2b926

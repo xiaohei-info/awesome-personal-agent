@@ -1,5 +1,8 @@
 USER: 请调用 apa_propose 工具提议一个新事项（不要用终端），标题 HCTX9-PROP-QZK，理由写“验收”。完成后告诉我事项 id。
-TOOLS: [{tool_describe {"names": ["apa_propose"]}} {tool_call {"calls": [{"name": "apa_propose", "arguments": {"kind": "task", "title": "HCTX9-PROP-QZK", "reason": "验收", "project": "prj_e26bf6ce0d530af9"}}]}}]
-FINAL: 已提议成功。
+TOOLS: [{tool_describe {"names": ["apa_propose"]}} {tool_call {"calls": [{"name": "apa_propose", "arguments": {"kind": "task", "title": "HCTX9-PROP-QZK", "reason": "验收", "project": "prj_ec1984c37ccbd4c4"}}]}}]
+FINAL: 已通过 apa_propose 提议成功（exit_code 0，状态为 proposed）。
 
-事项 id：itm_48f0b29fc496454e（标题 HCTX9-PROP-QZK，阶段 proposed，版本 1）
+事项 id：itm_4e69b989e9352c27
+标题：HCTX9-PROP-QZK
+理由：验收
+项目：prj_ec1984c37ccbd4c4 (acc-open)

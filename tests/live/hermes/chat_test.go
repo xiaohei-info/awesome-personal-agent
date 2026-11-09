@@ -55,6 +55,9 @@ func TestFlowChatAnswer(t *testing.T) {
 		}
 		contains(t, "apa decide 参数", dec.Args, "--option B", "就选方案 B")
 		eq(t, "apa decide 退出码", dec.Code, 0)
+		if dec.Session == "" || dec.Session != s.ID {
+			t.Errorf("apa decide 应带本会话引用 APA_SESSION=%s，实际 %q", s.ID, dec.Session)
+		}
 		var resolved *event
 		for _, e := range f.events(id, "decision.resolved") {
 			e := e
@@ -66,6 +69,7 @@ func TestFlowChatAnswer(t *testing.T) {
 		eq(t, "resolved_via", resolved.ResolvedVia, "chat")
 		eq(t, "on_behalf_of", fmt.Sprint(resolved.Actor["on_behalf_of"]), "owner")
 		contains(t, "Event 证据（本人原话）", resolved.Evidence, "就选方案 B")
+		eq(t, "Event 的会话引用", fmt.Sprint(resolved.Actor["session"]), s.ID)
 		eq(t, "事项阶段", f.phase(id), "open")
 		// 可一键撤销：本人在 Web 撤销这次代答带来的阶段变更，事项回到 needs_input。
 		seq := resolved.Seq
@@ -78,7 +82,7 @@ func TestFlowChatAnswer(t *testing.T) {
 			t.Fatalf("代答后一键撤销失败 HTTP %d %s；该事项的事件序列 %v", rv.Code, rv.Body, types)
 		}
 		eq(t, "撤销后阶段", f.phase(id), "needs_input")
-		f.evidence["ACT-CHAT-03"] = map[string]any{"decide_args": f.redact(dec.Args), "resolved_via": resolved.ResolvedVia, "evidence": resolved.Evidence, "reverted": true}
+		f.evidence["ACT-CHAT-03"] = map[string]any{"decide_args": f.redact(dec.Args), "resolved_via": resolved.ResolvedVia, "evidence": resolved.Evidence, "session": resolved.Actor["session"], "decide_call_session": dec.Session, "reverted": true}
 	})
 
 	f.step(t, "ACT-CHAT-04 web_only 决策在聊天中被拒绝", func(t *testing.T) {

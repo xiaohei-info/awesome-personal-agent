@@ -7,8 +7,11 @@
 - 代答（ACT-CHAT-03）：`apa_decide` 工具带 `--evidence` 原话并设置 `APA_SESSION`；回执（ACT-DLG-04/06）带结果证据 `--pr/--link`，done 不带本人原话。
 - ACT-CHAT-03 的“可一键撤销”：Web 的撤销接口（`POST /v1/items/{id}/revert`）作用于该次代答带来的事项变更；断言以该接口实际行为为准（见测试）。
 - ACT-HCTX-10：内核指令版本为 1，CLI 不接受负数、0 表示不比对，造不出“更小的版本”，用版本 2 触发比对（内核按“不等于当前”判过期）。
-- ACT-HCTX-11：直接用 `hermes chat --resume` CLI 时，钩子子进程的工作目录是 Hermes 安装目录而非检出目录，`--scope cwd` 解析不到项目；
-  所以恢复走进程内同一加载路径（`DRIVER_RESUME`，与 `--resume` 同一 `_load_resume_target`），压缩用 Hermes 自己的 `fire_post_compaction` 事件。
+- ACT-HCTX-11（**产品缺陷，测试失败**）：用真实 `hermes chat --in <检出目录> --resume <session_id>` 恢复时，apa-inject 钩子拉起的 `apa` 子进程工作目录是 Hermes 安装目录（`/opt/apa-live/src/hermes-agent`），不是用户所在目录（Hermes 的 terminal 工具 pwd 正确）；
+  `apa context --scope cwd` 因此解析不到项目，注入为空。全新的 `hermes chat -q` 同样如此（用只记录 cwd 的 apa 垫片复现），所以真实 CLI 下会话开始/恢复都拿不到项目摘要；经 driver 进程内运行时目录正确，其余 HCTX 步骤因此通过。
+  测试按验收走真实 CLI 并断言钩子工作目录与注入内容，当前失败；证据：`evidence/ACT-HCTX-11-resume-hook-call`（flow-hermes-context-evidence.json）。需回派 hermes-plugin-inject（例如给 `apa context` 显式传 `--path`，取用户的 TERMINAL_CWD/真实工作目录）。
+  压缩部分已改为 Hermes 自己的 `_compress_context`（会触发 post_compaction）。
+
 - ACT-DLG-03：项目信息、repos 来自 `--scope project`（设计 §7.6）；`--scope item` 只含事项条目，也没有验收文字里的“AGENTS.md 指引”。
 - ACT-DLG-05：回执证据（PR 链接）不在注入信封里，`apa item show` 的 messages 也为空，只在 `delegation.reported` 事件里（`apa why <子事项>` 可见）；
   所以 agent 不会自发找到它，追问时明确指到 `apa why`（第一次回答是否已带证据记在 `ACT-DLG-05.first_answer_had_evidence`）。这是产品观察：若希望主会话“能说出证据”，注入或 `item show` 需要带上它。

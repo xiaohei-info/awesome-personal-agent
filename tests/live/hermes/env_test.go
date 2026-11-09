@@ -310,6 +310,8 @@ func (s *sess) say(text string) turn {
 	return r
 }
 
+func (s *sess) compress() turn { s.f.t.Helper(); return s.send(map[string]any{"op": "compress"}) }
+
 func (s *sess) compact() { s.f.t.Helper(); s.send(map[string]any{"op": "compact"}) }
 
 func (s *sess) close() {

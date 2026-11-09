@@ -117,14 +117,15 @@ func TestFlowCapture(t *testing.T) {
 		runTok := f.startRunAndGetToken(t)
 		before := len(proposals())
 		reqs := extractionRequests()
-		runs := f.apa(f.OBS, 0, "run", "list").Stdout
+		runsBefore := f.apa(f.OBS, 0, "run", "list").Stdout
 		body, _ := json.Marshal(map[string]string{"text": "user: CAP3 记得下周三交报销\nassistant: 好的", "project": f.Projects["acc-open"]})
 		resp := f.capturePost(runTok, "run-session", string(body))
 		contains(t, "运行身份下的 /v1/capture", resp, `"captured":false`)
 		time.Sleep(10 * time.Second)
 		eq(t, "候选数", len(proposals()), before)
 		eq(t, "抽取请求数", extractionRequests(), reqs)
-		_ = runs
+		eq(t, "POST 后不触发后续运行（run list 不变）", f.apa(f.OBS, 0, "run", "list").Stdout, runsBefore)
+		f.evidence["ACT-CAP-03"] = map[string]any{"captured": false, "proposals_unchanged": true, "extraction_requests_unchanged": true, "runs_unchanged": true}
 	})
 
 	f.step(t, "ACT-CAP-04 不强制续跑", func(t *testing.T) {

@@ -45,12 +45,34 @@ func TestFlowDelegateRecover(t *testing.T) {
 		if r := f.Apa(f.DEL, string(decl), "declare", "-", "--evidence", "Hermes 的执行者声明"); r.Code != 0 {
 			t.Fatalf("apa declare: %d %s%s", r.Code, r.Stdout, r.Stderr)
 		}
-		before := f.apa(f.OBS, 0, "executors", "--project", f.Projects["acc-work"]).Stdout
-		lacks(t, "确认前的 apa executors", before, "hermes-coder.cli")
+		listed := func() map[string]bool { // id -> allowed（项目 acc-work）
+			var out struct {
+				Executors []struct {
+					ID      string `json:"id"`
+					Allowed bool   `json:"allowed"`
+				} `json:"executors"`
+			}
+			must(t, json.Unmarshal([]byte(f.apa(f.OBS, 0, "executors", "--project", f.Projects["acc-work"]).Stdout), &out))
+			m := map[string]bool{}
+			for _, e := range out.Executors {
+				m[e.ID] = e.Allowed
+			}
+			return m
+		}
+		before := listed()
+		if _, ok := before["hermes-coder.cli"]; ok {
+			t.Errorf("确认前新声明的执行者不应在清单: %v", before)
+		}
 		f.webOK("POST", "/settings/declarations/"+harness+"/1/confirm", "", 200)
-		after := f.apa(f.OBS, 0, "executors", "--project", f.Projects["acc-work"]).Stdout
-		contains(t, "确认后的 apa executors", after, "hermes-coder.cli", "work-host.cli")
-		f.evidence["ACT-DLG-01"] = map[string]any{"before_confirm_lists_it": false, "after_confirm": after}
+		after := listed()
+		if allowed, ok := after["hermes-coder.cli"]; !ok || allowed {
+			t.Errorf("确认后应列出 hermes-coder.cli 且因不在 acc-work 名单而 allowed=false: %v", after)
+		}
+		if !after["work-host.cli"] {
+			t.Errorf("acc-work 的名单内执行者 work-host.cli 应标明允许: %v", after)
+		}
+		f.evidence["ACT-DLG-01"] = map[string]any{"before_confirm": before, "after_confirm": after,
+			"note": "work-host.cli 由 Web 预先登记，确认前就在清单中，无法用它验证“确认前不生效”，所以声明 hermes-coder.cli"}
 	})
 
 	f.step(t, "ACT-DLG-02 建立委派子事项", func(t *testing.T) {
@@ -87,6 +109,12 @@ func TestFlowDelegateRecover(t *testing.T) {
 		f.apa(f.WRK, 0, "report", child, "--outcome", "done", "--summary", "已修复", "--pr", "https://example.invalid/acc/pr/42")
 		eq(t, "子事项阶段", f.phase(child), "done")
 		eq(t, "父事项阶段", f.phase(parent), "open")
+		// 不带结果证据的完成回执：退出码 2，子事项不变。
+		p4 := f.add("acc-work", "DLG4-PARENT-QZK 无证据完成", "", "", "")
+		c4 := f.delegate(p4, "work-host.cli")
+		f.apa(f.WRK, 2, "report", c4, "--outcome", "done", "--summary", "已修复")
+		eq(t, "无证据完成回执后的子事项阶段", f.phase(c4), "open")
+		eq(t, "无证据完成回执后的回执事件数", len(f.events(c4, "delegation.reported")), 0)
 		reps := f.events(child, "delegation.reported")
 		if len(reps) != 1 || !strings.Contains(toJSON(reps[0].Payload), "pr/42") {
 			t.Errorf("事件流应有带 PR 证据的 delegation.reported: %+v", reps)

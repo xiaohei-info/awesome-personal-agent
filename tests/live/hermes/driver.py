@@ -96,6 +96,11 @@ def main():
                                  after_tokens=1, messages_removed=3)
             emit({"session_id": agent.session_id, "compacted": True})
             continue
+        if cmd["op"] == "compress":  # Hermes' own manual-compression path; it fires post_compaction itself
+            before_n = len(history)
+            history, _ = agent._compress_context(history, None, force=True)
+            emit({"session_id": agent.session_id, "compacted": True, "before": before_n, "after": len(history)})
+            continue
         t = time.monotonic()
         before = len(history)
         result = agent.run_conversation(cmd["text"], conversation_history=history or None)

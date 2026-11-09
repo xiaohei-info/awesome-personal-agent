@@ -1,7 +1,15 @@
 {
   "ACT-DLG-01": {
-    "after_confirm": "{\"executors\":[{\"allowed\":false,\"host\":\"iZbp1emwt7rmgciek2uasqZ\",\"id\":\"hermes-coder.cli\",\"kind\":\"external-cli\",\"scenarios\":[\"coding\"]},{\"allowed\":false,\"id\":\"other-host.cli\",\"kind\":\"external-cli\"},{\"allowed\":true,\"id\":\"work-host.cli\",\"kind\":\"external-cli\"}]}\n",
-    "before_confirm_lists_it": false
+    "after_confirm": {
+      "hermes-coder.cli": false,
+      "other-host.cli": false,
+      "work-host.cli": true
+    },
+    "before_confirm": {
+      "other-host.cli": false,
+      "work-host.cli": true
+    },
+    "note": "work-host.cli 由 Web 预先登记，确认前就在清单中，无法用它验证“确认前不生效”，所以声明 hermes-coder.cli"
   },
   "ACT-DLG-01-result": {
     "passed": true,
