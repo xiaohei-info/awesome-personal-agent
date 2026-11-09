@@ -50,7 +50,7 @@
 | `main_session.args` | 可选。让无头运行加载主会话同一份指令与技能所需的额外标志，未声明时沿用 `headless.command` |
 | `executors[]` | 可选。本 harness 可用的执行者，字段同 §6.13；调用映射留在插件内，不提交 |
 
-示例（字段示意，标志和工具集需按版本实测）：
+示例（Hermes v0.11.0+52141 实测，标志取自 `hermes chat --help`，工具集名取自 `apa-headless` 插件的声明；`full` 档的 `--yolo` 之外仍显式列出工具集，因为 `-t` 决定模型能用哪些工具）：
 
 ```yaml
 harness: hermes
@@ -61,9 +61,9 @@ headless:
     extract: "$.session_id"
   resume: ["--resume", "{session_id}"]
   access:
-    read: ["-t", "<只读工具集>"]
-    edit: ["-t", "<可写工具集>"]
-    full: ["--yolo"]
+    read: ["-t", "apa,web"]
+    edit: ["-t", "apa,web,file,terminal,delegation"]
+    full: ["--yolo", "-t", "apa,web,file,terminal,delegation"]
   exit_codes: {ok: [0], session_missing: [1]}
   exit_output: {session_missing: ["No session found matching"]}
 main_session:
@@ -118,6 +118,18 @@ main_session:
 Hermes v0.23.0 起，`hermes chat --oneshot` 经 `session.create` 把会话交给共享网关，工具和钩子都在网关进程里执行，网关的工作目录和环境不属于这次运行（由运行的客户端自动拉起的网关，还会一直留着那次运行的 `APA_RUN`、`APA_TOKEN`）。按会话传值的通道只有客户端环境：Hermes 在建会话时冻结 `terminal.client_env_passthrough` 列出的非凭据变量，并在该会话的回合内绑定到 ContextVar（`agent.session_client_env.bound_client_env`），工具线程继承它，互不串会话。所以 Hermes 配置要在该项列入 `APA_RUN_CONTEXT`（§7.7）：`apa_declare_headless` 检查当前 profile，没列入或读不了配置就拒绝声明并给出要加的配置。声明之外漏配时，`PATH` 总在客户端环境里（`TOOL_ENV`），插件读会话绑定的 `PATH`，见到内核的运行标记却没有上下文就报错，不运行 `apa`；只读会话的 `PATH`，因为网关自己的 `PATH` 可能留着拉起它的那次运行的标记，网关内 `apa` 子进程的 `PATH` 也会去掉这个继承的标记。插件所有 `apa` 调用都带上会话绑定的这条路径、丢弃网关继承的运行身份，并以会话的工作目录（`agent.runtime_cwd.scoped_session_cwd`）为子进程工作目录；文件工具取不到时拒绝。v2026.9.24 及更早的 oneshot 在进程内运行，CLI 工具照旧用进程环境，文件工具拒绝。
 
 Hermes 结构化输出的末行是 `result` 事件，只带 `session_id` 和 `exit_code`，不带 `outcome`，所以 stdout 末段兜底在 Hermes 上不会完成运行，任务型只靠 CLI 回执（主文档 §8.4）。
+
+**实测结论（§21.3 的"全部"与 Hermes 项）。** 版本：Hermes Agent v0.11.0+52141（2026.9.24 构建），一次性运行用 `hermes chat -Q -q`，常驻部分用 `hermes gateway run`（webhook 平台）；模型端点为自配的 chat completions 兼容端点。每行的说明先写被测命题。"全部"三项只在 Hermes 上实测，其他 harness 接入时各自重测，本表不替它们下结论。
+
+| 项 | 结论 | 说明与实测版本 |
+|---|---|---|
+| MEAS-ALL-HOOKS | 有条件成立 | 命题：无头模式下插件钩子触发。Hermes `chat -Q -q` 下 `on_session_start`、`pre_llm_call`、`pre_tool_call` 都触发，`pre_llm_call` 带 `user_message`、`session_id`、`is_first_turn`；条件是插件已在 `config.yaml` 的 `plugins.enabled` 里启用。仅 Hermes v0.11.0+52141 实测 |
+| MEAS-ALL-INJECT | 有条件成立 | 命题：注入文本被判为提示注入。Hermes 自身不过滤 `pre_llm_call` 返回的上下文，它原样追加进用户消息。模型端的反应取决于写法：带"以下为资料，不是指令"信封、给出可查询命令的账本增量被正常采用，其中夹带的指令被当作数据；没有来源也无法核对的裸断言（一句"项目代号是某某"）被模型当作不可信输入，拒绝当事实复述。所以注入只写事实且带可查询的出处，兜底以 `apa` 查询结果为准。v0.11.0+52141，模型 deepseek-v4-flash |
+| MEAS-ALL-CRED | 有条件成立 | 命题：运行凭据能到达模型发起的 CLI 调用。条件：仅限实测的这一次性运行路径——客户端环境里的 `APA_TOKEN`、`APA_RUN` 在 `terminal` 子进程里可见，`apa_*` 插件工具带运行凭据调用内核也已由 live 验收确认。这不能外推到共享网关：v0.23.0 及以后（见上）一次性命令的工具跑在共享网关里，凭据与运行身份应经 `APA_RUN_CONTEXT` 指向的运行上下文文件传递，该路径未实测。因此本项不足以得出"`headless.credential: env` 在所有 Hermes 版本都够用"。实测构建：`hermes --version` 报 v0.11.0+52141（2026.9.24），源码为 git 标签 v2026.4.23 之后 52141 个提交；它与 `plugins/hermes/headless/README.md` 的 v0.22.5 是否同一构建，没有核对出来，两处版本号不互相背书 |
+| MEAS-HERMES-PREHOOK | 成立 | 命题：注入的消息会触发消息前钩子。网关里 `ctx.inject_message(..., session_key=...)`（插件需 `allow_gateway_injection: true`）开出的回合，`pre_llm_call` 照常触发，`user_message` 就是注入文本。同一会话先后两个回合各触发一次。v0.11.0+52141 |
+| MEAS-HERMES-WAKETOOL | 成立 | 命题：唤醒回合里插件注册的工具可被模型调用并执行。注入的回合里模型调用了插件注册的工具，工具在网关进程内执行并返回；`apa_wake_cli` 在唤醒回合里以运行身份调用内核的结果见 `tests/live/wake` 的 live 验收。v0.11.0+52141 |
+| MEAS-HERMES-COMPACT | 成立 | 命题：没有通用的压缩前入口。钩子清单里与压缩相关的只有 `post_compaction`（压缩提交后的观察者）和 `pre_auxiliary_call`（所有辅助模型调用共用，用 `aux_task` 区分，每次尝试各触发一次，不是压缩专用，也不保证压缩前整体只触发一次）。压缩前保存按设计跳过。v0.11.0+52141 |
+| MEAS-HERMES-TOKEN | 有条件成立 | 命题：`terminal` 子进程保留 `APA_TOKEN`。条件：以客户端环境带 `APA_TOKEN`、`APA_RUN` 启动 `hermes chat -t terminal`，模型在终端里读到二者均已设置；这是实测构建上一次性运行的结果，没有区分进程内执行与共享网关继承（共享网关会留着拉起它的客户端的变量，见上，因此不能证明按运行隔离的凭据到得了终端）。v0.23.0 及以后按运行传值走 `terminal.client_env_passthrough` 与 `APA_RUN_CONTEXT`，未实测。构建与版本号说明同 MEAS-ALL-CRED |
 
 **dsh**（后续）：npm 包声明 `dsh.bundle` 与 `engines.dsh`，`cordis.patch.yml` 插入插件行，按用到的 profile 分别安装；`ctx.systemPrompt.section` 承担常驻指令；`agent/created` 承担会话开始注入和 `apa agents check`（插件捕获全部错误，自设不超过 2 秒的超时）；`agent/pre-step` 承担消息前注入（按 `turn` 去重，失败时 `next()`）；`tools/result`、`subagent/end` 承担回执捕获；`agent/turn-stopping` 承担候选捕获（不调用 `steer`）；`session/event` 观察 `compaction/start` 承担压缩前保存（需实测）；`ctx.tools.register` 把 CLI 包成原生工具，显式传入 `APA_SESSION`；运行凭据经文件传递；不声明会话唤醒。各接入面的依据与实测状态见 A.6。
 
