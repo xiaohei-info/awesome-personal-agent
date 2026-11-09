@@ -111,9 +111,11 @@ var deliveryNext = map[DeliveryState][]DeliveryState{
 	DeliveryPending:   {DeliveryClaimed, DeliveryFallbackWeb, DeliverySuperseded},
 	DeliveryClaimed:   {DeliveryDelivered, DeliveryPending, DeliveryFallbackWeb, DeliverySuperseded}, // 回 pending：租约到期重试
 	DeliveryDelivered: {DeliveryAcknowledged, DeliverySuperseded},
+	// 退回 Web 只是渠道没送到，不挡本人确认
+	DeliveryFallbackWeb: {DeliveryAcknowledged, DeliverySuperseded},
 }
 
-// CanTransition 判断投递状态能否由 s 转到 to；acknowledged、fallback_web、superseded 为终态。
+// CanTransition 判断投递状态能否由 s 转到 to；acknowledged、superseded 为终态；fallback_web 只剩确认或作废。
 func (s DeliveryState) CanTransition(to DeliveryState) bool {
 	for _, n := range deliveryNext[s] {
 		if n == to {

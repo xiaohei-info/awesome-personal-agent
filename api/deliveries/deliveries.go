@@ -4,7 +4,7 @@
 //	POST /deliveries/{id}/ack        送达回报（带版本号与外部消息 ref）
 //	POST /deliveries/{id}/fail       失败回报（内核退避重试，超限退回 Web 未读）
 //	GET  /deliveries/unread          Web 未读
-//	POST /deliveries/{id}/read       标记已读
+//	POST /deliveries/{id}/read       本人在 Web 点击：确认（acknowledged）
 //
 // 路由里没有业务规则：租约、幂等、版本冲突、退避都在 kernel/delivery。本层只决定"这把凭据能碰哪条路由"：
 //   - 渠道 ext 密钥（scope 为 channel.<名>）只碰路由 channel:<名>，渠道由密钥确定，请求里没有渠道参数；
@@ -197,7 +197,18 @@ func (h *handlers) read(w http.ResponseWriter, r *http.Request, p *core.Principa
 		return err
 	}
 	id := r.PathValue("id")
-	if err := h.st.Update(r.Context(), func(tx *store.Tx) error { return h.q.MarkRead(tx, id) }); err != nil {
+	err := h.st.Update(r.Context(), func(tx *store.Tx) error {
+		d, err := h.q.Get(tx, id)
+		if err != nil {
+			return err
+		}
+		_, res, err := h.q.Confirm(tx, id, d.Version)
+		if err == nil && res == delivery.Stale {
+			err = domain.NewError(domain.CodeConflict, "delivery "+id+" is superseded", "re-read the unread list")
+		}
+		return err
+	})
+	if err != nil {
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]string{"id": id})

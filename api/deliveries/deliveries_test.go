@@ -371,7 +371,7 @@ func TestUnreadAndReadAreWebOnly(t *testing.T) {
 	if u := unread(); len(u) != 0 {
 		t.Fatalf("after read: %+v", u)
 	}
-	if rec := e.do("POST", "/v1/deliveries/p1/read", "", e.web); rec.Code != 409 {
+	if rec := e.do("POST", "/v1/deliveries/p1/read", "", e.web); rec.Code != 200 { // 点击即确认，不论投递处于哪个未作废状态
 		t.Fatalf("read of a pending delivery: %d", rec.Code)
 	}
 	if rec := e.do("POST", "/v1/deliveries/nope/read", "", e.web); rec.Code != 404 {

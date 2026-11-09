@@ -362,7 +362,8 @@ func TestUnclaimedChannelFallsBackToWebUnread(t *testing.T) {
 
 // ---- ACT-DLV-07 ----
 
-func TestAnsweringSupersedesOldDelivery(t *testing.T) {
+// 本人直接回答的那条投递记 acknowledged（不是 superseded），且不再可领。
+func TestAnsweringAcknowledgesAnsweredDelivery(t *testing.T) {
 	e := setup(t)
 	e.toChannel()
 	id := e.asked(nil)
@@ -371,8 +372,8 @@ func TestAnsweringSupersedesOldDelivery(t *testing.T) {
 	if d := e.claim("channel:chan"); d != nil {
 		t.Fatalf("stale delivery still claimable: %+v", d)
 	}
-	if got := e.get("decision:" + id + ":" + versionOf(e, id, -1)); got.State != domain.DeliverySuperseded {
-		t.Fatalf("old delivery state = %s", got.State)
+	if got := e.get("decision:" + id + ":" + versionOf(e, id, -1)); got.State != domain.DeliveryAcknowledged {
+		t.Fatalf("answered delivery state = %s", got.State)
 	}
 }
 
@@ -559,8 +560,8 @@ func TestAnsweredDecisionLeavesWebUnread(t *testing.T) {
 			if u := e.unread(); len(u) != 0 {
 				t.Fatalf("answered decision still unread: %+v", u)
 			}
-			if got := e.get("decision:" + id + ":" + versionOf(e, id, -1)); got.State != domain.DeliverySuperseded {
-				t.Fatalf("old delivery state = %s", got.State)
+			if got := e.get("decision:" + id + ":" + versionOf(e, id, -1)); got.State != domain.DeliveryAcknowledged {
+				t.Fatalf("answered delivery state = %s (fallback_web must still be confirmable)", got.State)
 			}
 		})
 	}

@@ -1,7 +1,8 @@
 // Package delivery 是投递队列（设计 §6.9、§10.2、§10.3）：触达产出投递，消费方来取。
 // 状态机：pending → claimed（租约）→ delivered（ext 回报送达）→ acknowledged（本人确认）；
 // 失败按退避重试（默认 1、3、7、15、30 分钟共 5 次），超限或无人领取转 fallback_web（Web 未读）；
-// 事项变化后旧版本转 superseded。注入只记 injections，不改状态。
+// 本人确认只有 Confirm 一个入口（Web 点击、Web/聊天/渠道回答），任何未作废的状态都能转 acknowledged，包括退回 Web 的 fallback_web；
+// 事项变化后旧版本转 superseded，被本人直接回答的那条记 acknowledged。注入只记 injections，不改状态。
 // 本包只管投递表，在调用方事务内读写；内核不主动推送，何时产出投递由触达决定。
 package delivery
 
@@ -330,23 +331,35 @@ func (q *Queue) Fail(tx *store.Tx, id string, version int64, reason string) (dom
 	return q.reload(tx, id)
 }
 
-// Confirm 是本人确认（Web 点击、聊天代答、渠道回答）：未送达的投递按 pending→claimed→delivered 补齐后转 acknowledged。
-// 重复确认幂等；版本已作废返回 Stale；fallback_web 是终态，其已读用 MarkRead。
+// Confirm 是本人确认的唯一入口（Web 点击、聊天代答、Web 或渠道回答）：未送达与退回 Web 的投递都直接转 acknowledged，
+// 已读时间保留（没有则记现在）。重复确认幂等；版本已作废返回 Stale。
 func (q *Queue) Confirm(tx *store.Tx, id string, version int64) (domain.Delivery, Result, error) {
 	d, stale, err := q.check(tx, id, version)
 	if err != nil || stale {
 		return d, Stale, err
 	}
-	switch d.State {
-	case domain.DeliveryAcknowledged:
+	if d.State == domain.DeliveryAcknowledged {
 		return d, Duplicate, nil
-	case domain.DeliveryFallbackWeb:
-		return d, Applied, conflict("delivery fell back to web; use MarkRead")
 	}
-	if _, err := tx.Exec("UPDATE delivery_delivery SET state = 'acknowledged', lease_until = 0 WHERE id = ?", id); err != nil {
+	if _, err := tx.Exec("UPDATE delivery_delivery SET state = 'acknowledged', lease_until = 0, read_at = CASE WHEN read_at = 0 THEN ? ELSE read_at END WHERE id = ?",
+		ns(q.o.Now()), id); err != nil {
 		return d, Applied, err
 	}
 	return q.reload(tx, id)
+}
+
+// ConfirmAnswered 确认事项上被本人回答的那条决策投递：未终结的决策投递中版本最高的一条（回答针对的是当时最新的版本）。
+// 回答之后的作废只针对更低版本，所以要在 Supersede 之前调用；没有可确认的投递是正常情况，返回 false。
+func (q *Queue) ConfirmAnswered(tx *store.Tx, item string) (bool, error) {
+	var id string
+	var ver int64
+	if err := query(tx, func(r *store.Rows) error { return r.Scan(&id, &ver) },
+		`SELECT id, version FROM delivery_delivery WHERE item = ? AND class = 'decision'
+		AND state IN ('pending', 'claimed', 'delivered', 'fallback_web') ORDER BY version DESC, rowid DESC LIMIT 1`, item); err != nil || id == "" {
+		return false, err
+	}
+	_, _, err := q.Confirm(tx, id, ver)
+	return err == nil, err
 }
 
 // Supersede 作废该事项中版本小于 below 的未终结投递（含退回 Web 未读的：已变化的事项不再展示旧提醒；事项变化的命令在同一事务调用）。
@@ -388,20 +401,7 @@ func (q *Queue) Injectable(tx *store.Tx) ([]domain.Delivery, error) {
 	return q.list(tx, "WHERE route = ? AND state IN ('pending', 'claimed', 'delivered') ORDER BY created_at, rowid", RouteInject)
 }
 
-// MarkRead 记录 fallback_web 投递已在 Web 读过；幂等。
-func (q *Queue) MarkRead(tx *store.Tx, id string) error {
-	d, err := q.Get(tx, id)
-	if err != nil {
-		return err
-	}
-	if d.State != domain.DeliveryFallbackWeb {
-		return conflict(fmt.Sprintf("delivery %s is %s, not an unread web item", id, d.State))
-	}
-	_, err = tx.Exec("UPDATE delivery_delivery SET read_at = ? WHERE id = ? AND read_at = 0", ns(q.o.Now()), id)
-	return err
-}
-
-// Unread 返回 Web 未读：退回 Web 且未读过的投递，按创建顺序。
+// Unread 返回 Web 未读：退回 Web 且本人还没确认的投递，按创建顺序。
 func (q *Queue) Unread(tx *store.Tx) ([]domain.Delivery, error) {
 	return q.list(tx, "WHERE state = 'fallback_web' AND read_at = 0 ORDER BY created_at, rowid")
 }
