@@ -1,0 +1,9 @@
+USER: 就选方案 B
+TOOLS: [{tool_describe {"names": ["apa_decide", "apa_executors"]}} {tool_call {"calls": [{"name": "apa_decide", "arguments": {"id": "itm_3b97cba3dc80d1a9", "option": "B", "evidence": "就选方案 B", "reason": "所有者本回合直接指定选择方案 B"}}]}}]
+FINAL: 已记下方案 B。
+
+- 事项：itm_3b97cba3dc80d1a9（CHAT1-DEC-QZK 方案选择）
+- 选择：B
+- 结果：exit 0，已写入账本，版本升到 v4（非重放）
+
+用的是 apa_decide，没有碰终端。

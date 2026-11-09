@@ -1,0 +1,30 @@
+{
+  "ACT-CAP-01-result": {
+    "passed": true,
+    "step": "ACT-CAP-01 默认关闭时不捕获"
+  },
+  "ACT-CAP-02": {
+    "extraction_requests": 1,
+    "proposals": {
+      "itm_1858b626dd367b04": "conversation delta"
+    }
+  },
+  "ACT-CAP-02-result": {
+    "passed": true,
+    "step": "ACT-CAP-02 开启后抽取候选"
+  },
+  "ACT-CAP-03": {
+    "captured": false,
+    "extraction_requests_unchanged": true,
+    "proposals_unchanged": true,
+    "runs_unchanged": true
+  },
+  "ACT-CAP-03-result": {
+    "passed": true,
+    "step": "ACT-CAP-03 运行身份下不生效"
+  },
+  "ACT-CAP-04-result": {
+    "passed": true,
+    "step": "ACT-CAP-04 不强制续跑"
+  }
+}

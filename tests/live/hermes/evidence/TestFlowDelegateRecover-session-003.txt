@@ -1,0 +1,10 @@
+USER: 委派子事项 itm_6fcd9206c79f5116 已经建好（它就是要交给执行者的那一条，不要换成别的事项 id，也不要新建）。请用 <redacted>（id 填 itm_6fcd9206c79f5116，executor 填 work-host.cli）取调用方式，再用终端直接执行那条命令，命令必须以执行者脚本开头、不要加 cd 或别的前缀。不要自己执行 apa report，回执交给插件。
+TOOLS: [{tool_describe {"names": ["<redacted>"]}} {terminal {"command": "apa item show itm_6fcd9206c79f5116"}} {tool_call {"calls": [{"name": "<redacted>", "arguments": {"executor": "work-host.cli", "id": "itm_6fcd9206c79f5116", "task": "DLG6-PARENT-QZK 补测试"}}]}} {terminal {"command": "/tmp/apa-live.F9JT9W/apa-e2e-3723752701/work-host-cli.sh 'DLG6-PARENT-QZK 补测试\n\nLedger item: itm_6fcd9206c79f5116. When done run: apa report itm_6fcd9206c79f5116 --outcome done --summary <text> [--pr <url>]'", "timeout": 600}} {terminal {"command": "apa item show itm_6fcd9206c79f5116"}}]
+FINAL: 已执行完成。
+
+执行者命令（原样，无前缀）：
+/tmp/apa-live.F9JT9W/apa-e2e-3723752701/work-host-cli.sh 'DLG6-PARENT-QZK 补测试 ... Ledger item: itm_6fcd9206c79f5116 ...'
+
+输出：work-host.cli 已处理 PR https://example.invalid/acc/pr/6（退出码 0）
+
+账本状态：itm_6fcd9206c79f5116 已变为 phase=done，version=2，status_label 为该 PR。未自行执行 apa report，回执由插件写入。

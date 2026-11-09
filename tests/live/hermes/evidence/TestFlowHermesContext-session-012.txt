@@ -1,10 +1,8 @@
 USER: 请调用 apa_propose 工具提议一个新事项（不要用终端），标题 HCTX9-PROP-QZK，理由写“验收”。完成后告诉我事项 id。
-TOOLS: [{tool_describe {"names": ["apa_propose"]}} {tool_call {"calls": [{"name": "apa_propose", "arguments": {"kind": "task", "title": "HCTX9-PROP-QZK", "reason": "验收", "project": "prj_7bc6d1259bfb9fa1"}}]}}]
-FINAL: 已提议成功。
+TOOLS: [{tool_describe {"names": ["apa_propose"]}} {tool_call {"calls": [{"name": "apa_propose", "arguments": {"kind": "task", "title": "HCTX9-PROP-QZK", "reason": "验收", "project": "prj_9ecc7bde690f3f97"}}]}}]
+FINAL: 已提议，事项 id：itm_299982ad6525ee9d
 
-事项 id：itm_a9050fc93b0039df
-标题：HCTX9-PROP-QZK
-原因：验收（已记入账本事件）
-状态：proposed，version 1
-
-如果你需要我把它升级为正式事项（accept），告诉我即可。
+- 标题：HCTX9-PROP-QZK
+- 阶段：proposed（等待你确认）
+- 项目：acc-open（prj_9ecc7bde690f3f97）
+- 理由：验收
