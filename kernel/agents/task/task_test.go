@@ -586,6 +586,9 @@ func TestTemplateCheckoutCwd(t *testing.T) {
 	}
 	read(t, filepath.Join(e.runs, out.Run, "materials.json"))
 	read(t, filepath.Join(e.runs, out.Run, "output.txt"))
+	if sp := e.runList()[0].Spec; sp.Dir != co || sp.RunDir != filepath.Join(e.runs, out.Run) {
+		t.Fatalf("spec = %+v, want work dir %s and run dir under %s", sp, co, e.runs)
+	}
 	if it := e.item(out.Item); it.Phase != domain.PhaseDone {
 		t.Fatalf("item: %+v", it)
 	}

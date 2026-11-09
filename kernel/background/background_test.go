@@ -807,6 +807,10 @@ func TestProjectCheckoutCwd(t *testing.T) {
 	if got := strings.TrimSpace(waitFile(t, filepath.Join(e.runs, res.Run.ID, "pwd"))); got != co {
 		t.Fatalf("cwd = %q, want %q", got, co)
 	}
+	rs := e.runList()
+	if sp := rs[len(rs)-1].Spec; sp.Dir != co || sp.RunDir != filepath.Join(e.runs, res.Run.ID) {
+		t.Fatalf("spec = %+v, want work dir %s and its own run dir", sp, co)
+	}
 }
 
 // ACT-WAK-01/02：main_session 落到声明了 launch: wake 的 harness 时按唤醒拉起：Run launch=wake、写入即 running、

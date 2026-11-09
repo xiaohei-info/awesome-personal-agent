@@ -27,6 +27,9 @@ const (
 	EnvHarness        = "APA_HARNESS"
 	EnvRun            = "APA_RUN"
 	EnvRunCredentials = "APA_RUN_CREDENTIAL_FILE"
+	EnvRunContext     = "APA_RUN_CONTEXT"
+
+	runMark = ".apa-run" // 与 kernel/outcall/proc.RunMark 同一约定（§7.7）
 
 	apiPrefix = "/v1"
 )
@@ -120,7 +123,7 @@ func (e ExitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)
 
 // Main 运行 CLI 并返回退出码。成功输出到 stdout，错误体（code/why/next）输出到 stderr。
 func Main(args []string, env Env) int {
-	c := &Ctx{Env: env}
+	c := &Ctx{Env: withRunContext(env)}
 	rest := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {

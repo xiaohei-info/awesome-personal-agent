@@ -74,7 +74,12 @@ CREATE INDEX outcall_run_target ON outcall_run(target, state);`,
 type Spec struct {
 	Command []string        `json:"command"` // argv，Command[0] 是可执行文件
 	Stdin   json.RawMessage `json:"stdin"`   // 必须是合法 JSON；空则传 {}
-	Dir     string          `json:"dir"`     // 工作目录（agent 运行的运行目录）
+	Dir     string          `json:"dir"`     // 工作目录：运行目录，或模板声明的项目检出（projects.WorkDir）
+	// RunDir 是 agent 运行的运行目录，非空才写运行上下文文件（§7.7）。
+	RunDir string `json:"run_dir,omitempty"`
+	// ContextName 是运行上下文文件名，默认运行 id。续接同一会话时沿用上一次运行的（Record.ContextName）：
+	// harness 在建会话时冻结客户端环境，续接后工具侧拿到的还是原来那条路径。
+	ContextName string `json:"context_name,omitempty"`
 }
 
 // Request 是入队请求。Run.ID 为空时自动生成；State 总是被置为 queued。
@@ -93,6 +98,14 @@ type Record struct {
 	Explicit bool
 	Reason   string // 失败、超时、恢复的原因；成功为空
 	PGID     int    // 运行中子进程的进程组，0 表示尚未拉起
+}
+
+// ContextName 返回这条 Run 的运行上下文文件名。
+func (r Record) ContextName() string {
+	if r.Spec.ContextName != "" {
+		return r.Spec.ContextName
+	}
+	return r.Run.ID
 }
 
 func invalid(why string) error {

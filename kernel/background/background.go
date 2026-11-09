@@ -444,7 +444,7 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 		run.SessionID = runID
 		argv = append(argv, expand(hl.Session.Assign, "{session_id}", run.SessionID)...)
 	}
-	return s.enqueue(ctx, c, f, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, nil)
+	return s.enqueue(ctx, c, f, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, nil)
 }
 
 // enqueue 在一个事务里写 Run、运行关联与 launched 审计记录（与 also 一起提交），再交调度器。
@@ -517,7 +517,7 @@ func askFor(reason string) map[string]any {
 		{ID: "rerun", Label: "重新运行"}, {ID: "reassign", Label: "改派"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
 }
 
-// Env 供 proc.Options.Env 使用：运行启动时为后台运行签发运行凭据并注入环境变量，凭据明文不落盘、不入账本。
+// Env 供 proc.Options.Env 使用：运行启动时为后台运行签发运行凭据并注入环境变量，凭据明文不入账本（落盘只在运行上下文文件，§7.7）。
 // 重新签发会替换旧凭据，所以重启后重新执行的排队运行也能拿到有效凭据。签发失败返回 nil：运行者没有凭据，
 // 回执缺失，按失败处理，而不是带着空凭据假装成功。
 func (s *Service) Env(r domain.Run) map[string]string {

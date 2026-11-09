@@ -285,7 +285,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		if t.Depth > 0 {
 			run.ChainDepth = t.Depth
 		}
-		_, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, s.o.Now())
+		_, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, s.o.Now())
 		return err
 	})
 	if err != nil {
@@ -389,7 +389,7 @@ func (s *Service) stage(runDir, matPath, prompt, itemID string, t Task) error {
 	return os.WriteFile(filepath.Join(runDir, "prompt.md"), []byte(prompt), 0o600)
 }
 
-// Env 供 proc.Options.Env 使用：运行启动时为任务型运行签发运行凭据并注入环境变量，凭据明文不落盘、不入账本。
+// Env 供 proc.Options.Env 使用：运行启动时为任务型运行签发运行凭据并注入环境变量，凭据明文不入账本（落盘只在运行上下文文件，§7.7）。
 // 重新签发会替换旧凭据，所以重启后重新执行的排队运行也能拿到有效凭据。签发失败返回 nil：运行者没有凭据，
 // 回执缺失，按失败处理，而不是带着空凭据假装成功。
 func (s *Service) Env(r domain.Run) map[string]string {

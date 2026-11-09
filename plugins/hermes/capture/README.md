@@ -8,7 +8,7 @@ Candidate capture (design §11.2, appendix A.5): at `on_session_end` (turn level
 `post_llm_call` buffers each finished turn (`user:` / `assistant:`) per session; each turn is sent once.
 
 - Off by default: the kernel only accepts it for projects with `capture` on (`apa project update <id> --capture`),
-  and answers 200 `captured: false` otherwise. Under a run identity (`APA_RUN`) the kernel never captures either, and
+  and answers 200 `captured: false` otherwise. Under a run identity (`APA_RUN`, or the session's run context, see `tools/README.md`) the kernel never captures either, and
   the plugin only ever uses the run credential.
 - Asynchronous and invisible: the POST runs in a detached helper process with all output discarded.
 - No forced continuation (`inject_message`, `continue`, ...); no judgment logic; any failure is swallowed.

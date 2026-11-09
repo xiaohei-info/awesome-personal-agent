@@ -11,6 +11,10 @@ import subprocess
 HERE = pathlib.Path(__file__).resolve().parent
 TIMEOUT_SECS = 30
 
+_spec = importlib.util.spec_from_file_location("apa_run_context", HERE.parent / "tools" / "run_context.py")
+run_context = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(run_context)
+
 
 def declaration():
     """declaration.json plus the executors the tools plugin has configured.
@@ -18,6 +22,7 @@ def declaration():
     One harness holds one declaration (a new one replaces the old), so the executors must travel with it or
     activating this declaration would drop them from the list.
     """
+    run_context.require_passthrough()
     body = json.loads((HERE / "declaration.json").read_text())
     spec = importlib.util.spec_from_file_location("apa_headless_executors", HERE.parent / "tools" / "executors.py")
     mod = importlib.util.module_from_spec(spec)
@@ -30,9 +35,9 @@ def declaration():
 def _declare(args, session_id=None, **_):
     try:
         body = declaration()
+        env = run_context.apa_env()
     except (OSError, ValueError) as e:
         return json.dumps({"ok": False, "error": str(e)})
-    env = dict(os.environ, APA_HARNESS="hermes")
     if session_id:
         env["APA_SESSION"] = str(session_id)
     try:
