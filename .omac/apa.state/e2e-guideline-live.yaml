@@ -1,6 +1,8 @@
-# sha256: a71c31c246389cb29264232b3d80dac0a97e984b24d189a9d9088fa8a82aab0e
+# sha256: b3e364552eb7db60eaf5770a099ff6817dc2ca5d39e991919fe48e4a4b7e37fb
 work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-09T10:28:55Z'
 recovery_marker: true
 retry_note: 'DRF-01 根因已修：PR #237（f2b0b299c）——Hermes ≥v0.23 工具在共享网关进程运行，插件原按网关 cwd/环境判定运行目录与凭据。现由内核写运行上下文文件（0600，运行结束即删），经
   APA_RUN_CONTEXT 随会话 client_env 传到工具与 CLI，缺上下文时拒绝、不回退网关凭据。本轮先做部署再验收：1) 在隔离 Hermes
