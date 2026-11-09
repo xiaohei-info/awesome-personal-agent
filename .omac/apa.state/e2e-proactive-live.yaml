@@ -1,6 +1,6 @@
-# sha256: 5c472f4e683ed353849c4899f9887208f7f7bf0e9b1c0f106e1fbcbdc89afb67
+# sha256: 64f066a8acae0f902bd020995f75bf7cdadadbab3a56b5f5413c618f8b4da74a
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 'ACT-BRF-05 现在进 needs_input，说明 #235 生效；失败原因很可能在测试模板，不在产品：内核调用模型固定 strict:
   true（kernel/outcall/model/model.go:94），而 tests/live/brief/flow_test.go:148 手写的 output_schema
