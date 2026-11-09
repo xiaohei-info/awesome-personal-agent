@@ -1,6 +1,8 @@
-# sha256: 79ad037183c47349df9d7d6d631b792290f2e290602387906c417905af1a52e2
+# sha256: 851d11226ea4ff55b4eec5ddf000a340a5aa473050d056a313770c9c775a4182
 work_item_id: 01a1bfaf-d267-7926-b170-b9682b290378
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-09T11:17:55Z'
 recovery_marker: true
 retry_note: 主会话决定（本人授权范围内）：taiyi 从本机 SSH 不通，DPL-01/02 的『另一台机器』改用 oracle：ssh oracle
   'curl ...'，访问本机 tailnet 地址 100.127.255.10 上你起的端口（已实测 oracle→本机 tailnet HTTP 可达）。只用
