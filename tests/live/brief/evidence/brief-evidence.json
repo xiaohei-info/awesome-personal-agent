@@ -1,9 +1,9 @@
 {
   "ACT-BRF-01": {
-    "brief": "itm_17b80bd5a91af175",
-    "period": "2026-11-09 03:38",
+    "brief": "itm_c01c18eddc4f0f72",
+    "period": "2026-11-09 06:44",
     "phase": "done",
-    "run": "run_db4b4fe83f424b67",
+    "run": "run_b33dba5583d37aca",
     "run_state": "succeeded",
     "sections": 4
   },
@@ -35,6 +35,12 @@
   "ACT-BRF-04-result": {
     "passed": true,
     "step": "ACT-BRF-04 停机后只补最近一次"
+  },
+  "ACT-BRF-05": {
+    "brief": "itm_c7ccbd531e744b97",
+    "phase": "needs_input",
+    "runs": [],
+    "spec_keys": 0
   },
   "ACT-BRF-05-result": {
     "passed": false,
