@@ -9,17 +9,17 @@ meta:
   - 01a1a720-f7fd-719e-91d8-f5032216143f
   - 01a1a720-fa34-79ff-9662-cdf8dac90a21
   - 01a1aa40-ef12-766f-86e2-bead6a7c7b51
-  amendment_revision: 6
+  amendment_revision: 7
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-ad1ec275e470
+    amendment_id: amend-c47dc2ebebc4
     amendment_file: .omac/apa.system-amendment.yaml
     nodes:
-      fix.kernel-task-agent.ee5850:
+      fix.pack-brief.9ddec2:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-3d7cb48cd878714d8f1df540
+        expected_review_generation: amendment-22ad8263f0339316de97d34b
       e2e-proactive-live:
         stage: authoring
         state: synced
@@ -29,7 +29,7 @@ meta:
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-e1a748deb22c1263b01eb476
+          review_generation: amendment-6a9dd8d176a115a4c6f6e2e8
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -48,13 +48,13 @@ meta:
           review: 0
           worker: 0
         expected_contract_sha256: 3b30d8c39b2b4dde2935f6ced2b1d51e07ba5b77234ee1977efe674a0234a3bc
-        expected_review_generation: amendment-6a9dd8d176a115a4c6f6e2e8
+        expected_review_generation: amendment-fc97b5bcaec15b4017259da6
         attempt_baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-e1a748deb22c1263b01eb476
+          review_generation: amendment-6a9dd8d176a115a4c6f6e2e8
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -73,7 +73,7 @@ meta:
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-6a9dd8d176a115a4c6f6e2e8
+          review_generation: amendment-fc97b5bcaec15b4017259da6
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -113,7 +113,7 @@ meta:
           review: 0
           worker: 0
     system: true
-  last_amendment_id: amend-ad1ec275e470
+  last_amendment_id: amend-c47dc2ebebc4
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
@@ -12362,6 +12362,7 @@ nodes:
   - fix.hermes-plugin-tools.ea87a6
   - fix.kernel-delegation.0bdd78
   - fix.kernel-task-agent.ee5850
+  - fix.pack-brief.9ddec2
   title: 真实 Hermes：简报
   description: 产出 e2e-proactive-live-live-evidence。是 flow-brief 的唯一全流程 owner。要点：默认
     harness 用真实 Hermes。 派给 omac-worker-frontend 是因为它运行在 Mac mini 上，该主机有真实 Hermes 和
@@ -15551,3 +15552,100 @@ nodes:
     defect_refs:
     - dfx-ee585068bf8d
     coverage_gate: 80
+- id: fix.pack-brief.9ddec2
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - kernel-instances
+  - kernel-rules
+  - kernel-task-agent
+  - kernel-attention
+  - cli-packs
+  - cli-items
+  - cli-context
+  - api-deliveries
+  title: 'Fix pack-brief: dfx-9ddec2e28ae4'
+  description: "Automatic fix for upstream defect(s) reported by e2e-proactive-live.\n\n-
+    [design-gap] anchors flow-brief/ACT-BRF-01 (docs/solution-design.md#36-场景五简报)\n
+    \ expected: 简报包 spec_schema 规定 spec.sections 是 [{project, body}]，Web 简报页读 body。write-brief.md
+    必须明确要求逐项目写入 spec.sections[].{project, body}（body 内含进展、到期事项、待本人决定的事），不得让运行者自行发明分节字段。\n
+    \ observed: dfx-ee585068bf8d 修复合并后，taiyi 真实 Hermes 跑简报（run 01a1bbaa-e7a7-7507-ac67-adffa565c49e）已写
+    spec.period 和 4 个项目分节，但每节用 progress/due/decisions 键，没有 body；Web 简报页会显示空分节，brief
+    以 needs_input 结束，ACT-BRF-01 失败。原因是提示词只说“每节写清楚：进展、到期事项、待本人决定的事”，没有给出 sections 的键名。\n
+    \ where: packs/brief/prompts/write-brief.md; packs/brief/pack.yaml:kinds.brief.spec_schema"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-9ddec2e28ae4 in pack-brief: 简报包 spec_schema
+      规定 spec.sections 是 [{project, body}]，Web 简报页读 body。write-brief.md 必须明确要求逐项目写入
+      spec.sections[].{project, body}（body 内含进展、到期事项、待本人决定的事），不得让运行者自行发明分节字段。'
+    non_goals:
+    - 节点测试用 STUB_HARNESS；真实 Hermes 由 e2e-proactive-live 证明
+    - 包内不出现 harness 名
+    - 能力包不含代码、命令和策略字段，mode 不能声明 auto
+    verification_commands:
+    - go run ./cli/apa pack validate packs/brief
+    - go test -count=1 ./tests/packs/brief/...
+    integration_gates:
+    - name: pack-brief-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-c-capability-pack.md#c13-示例简报包
+      - docs/appendix-c-capability-pack.md#c14-内置包声明的内容
+      - docs/solution-design.md#36-场景五简报
+      - docs/solution-design.md#87-不可用时
+      delivery_goal: brief 包按 C.13 声明 kind、实例参数、周期规则、任务型提示词和视图，周期生成并送达简报，同周期只有一份，可被用户覆盖为生成型
+      covers:
+      - ACT-ITEM-11
+      - ACT-BRF-01
+      - ACT-BRF-02
+      - ACT-BRF-03
+      - ACT-BRF-04
+      - ACT-BRF-05
+      - ACT-DAY-02
+      acceptance_refs:
+      - flow-item-lifecycle
+      - flow-brief
+      - flow-first-day
+      commands:
+      - go test -count=1 ./tests/packs/brief/...
+    pr_base: main
+    acceptance_refs:
+    - flow-brief
+    source_of_truth:
+    - docs/appendix-c-capability-pack.md#c13-示例简报包
+    - docs/appendix-c-capability-pack.md#c14-内置包声明的内容
+    - docs/solution-design.md#36-场景五简报
+    - docs/solution-design.md#87-不可用时
+    scope_paths:
+    - packs/brief/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: kernel-instances-module
+      producer: kernel-instances
+      evidence_mode: artifact
+    - artifact_id: kernel-rules-module
+      producer: kernel-rules
+      evidence_mode: artifact
+    - artifact_id: kernel-task-agent-module
+      producer: kernel-task-agent
+      evidence_mode: artifact
+    - artifact_id: kernel-attention-module
+      producer: kernel-attention
+      evidence_mode: artifact
+    - artifact_id: cli-packs-commands
+      producer: cli-packs
+      evidence_mode: artifact
+    - artifact_id: cli-items-commands
+      producer: cli-items
+      evidence_mode: artifact
+    - artifact_id: cli-context-commands
+      producer: cli-context
+      evidence_mode: artifact
+    - artifact_id: api-deliveries-routes
+      producer: api-deliveries
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-9ddec2e28ae4
+    coverage_gate: 0
