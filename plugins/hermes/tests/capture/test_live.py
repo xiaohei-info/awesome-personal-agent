@@ -81,7 +81,7 @@ def test_flow_capture_turn_end_submits_the_delta_and_the_model_sees_nothing(herm
     (r,) = posts(kernel, 1)
     assert r["path"] == "/v1/capture" and r["session"] == "main-1" and r["auth"] == "Bearer t"
     assert r["body"]["text"] == "user: remind me to file taxes by April\nassistant: Added to your list."
-    assert r["body"]["path"] and r["body"]["host"]
+    assert r["body"]["path"] == "" and r["body"]["host"]  # no session cwd is bound here, and the process cwd is never sent
 
 
 def test_flow_capture_project_without_capture_is_a_quiet_no_op(hermes, kernel):

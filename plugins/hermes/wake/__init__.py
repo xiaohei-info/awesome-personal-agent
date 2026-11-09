@@ -146,6 +146,7 @@ def _cli(params, **_):
                 raise WakeError("pass run_id: " + (f"{len(ids)} wake runs are active" if ids else "no wake run is active"))
             run_id = ids[0]
         env = dict(os.environ, APA_RUN=run_id, APA_TOKEN=_credential(run_id))
+        env.pop("APA_RUN_CONTEXT", None)  # the gateway may have inherited another run's; the CLI would prefer it
         p = subprocess.run([os.environ.get("APA_BIN", "apa"), *args], capture_output=True, text=True,
                            timeout=CLI_TIMEOUT_SECS, env=env)
     except (WakeError, OSError, subprocess.SubprocessError) as e:

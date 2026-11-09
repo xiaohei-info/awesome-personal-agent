@@ -12,6 +12,7 @@ unreachable) keeps the request and its idempotency key and re-sends it at later 
 (success, or a refusal which is only logged); it is given up after MAX_RESENDS tries. Once sent successfully it is never sent again.
 """
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -20,6 +21,10 @@ import shlex
 import subprocess
 import threading
 import time
+
+_spec = importlib.util.spec_from_file_location("apa_run_context", pathlib.Path(__file__).resolve().parents[1] / "tools" / "run_context.py")
+run_context = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(run_context)
 
 ITEM_ID = re.compile(r"\bitm_[0-9a-f]+\b")
 SUMMARY_MAX = 2000
@@ -129,7 +134,7 @@ def _report(item, outcome, summary, session_id):
     if outcome == "done" and not ev:
         outcome = "progress"  # the kernel refuses done without result evidence
     key = "hermes-receipt-" + hashlib.sha1(f"{item}|{outcome}|{summary}".encode()).hexdigest()[:16]
-    env = dict(os.environ, APA_HARNESS="hermes")
+    env = run_context.apa_env()
     if session_id:
         env["APA_SESSION"] = str(session_id)
     args = [os.environ.get("APA_BIN", "apa"), "report", item, "--outcome", outcome, "--idempotency-key", key]

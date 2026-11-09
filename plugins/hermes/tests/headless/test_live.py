@@ -98,11 +98,14 @@ def run_hermes(apa_bin, kernel):
             (home / name).symlink_to(REAL_HOME / name)
     cfg = yaml.safe_load((REAL_HOME / "config.yaml").read_text())
     cfg.setdefault("plugins", {}).setdefault("enabled", []).extend(["apa-tools", "apa-headless"])
+    cfg.setdefault("terminal", {}).setdefault("client_env_passthrough", []).append("APA_RUN_CONTEXT")
     (home / "config.yaml").write_text(yaml.safe_dump(cfg))
     work = home / "run_dir"
     work.mkdir()
+    context = home / "run_live1.context"  # what the kernel writes at launch: tools run in the gateway, not this process
+    context.write_text(json.dumps({"run": "run_live1", "url": kernel["url"], "token": "run-credential-xyz", "run_dir": str(work), "work_dir": str(work)}))
     env = {**os.environ, "HERMES_HOME": str(home), "APA_BIN": apa_bin, "APA_URL": kernel["url"], "APA_RUN": "run_live1",
-           "APA_TOKEN": "run-credential-xyz", "APA_HOME": str(home / "apahome")}
+           "APA_TOKEN": "run-credential-xyz", "APA_HOME": str(home / "apahome"), "APA_RUN_CONTEXT": str(context)}
     decl = json.loads((HEADLESS / "declaration.json").read_text())
 
     def run(prompt, tier="edit", session_id=None):

@@ -620,3 +620,130 @@ func TestExternalRunIsNeverStartedAndTimesOutOnDispatch(t *testing.T) {
 	default:
 	}
 }
+
+// enqueueSpec 写一条带规格的 agent 运行。
+func (h *harness) enqueueSpec(spec Spec) domain.Run {
+	h.t.Helper()
+	var r domain.Run
+	err := h.st.Update(ctx, func(tx *store.Tx) error {
+		var err error
+		r, err = Enqueue(tx, Request{Run: domain.Run{Category: domain.RunTask, Target: "it", TimeoutSec: 30}, Spec: spec}, time.Now())
+		return err
+	})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return r
+}
+
+func agentEnv(domain.Run) map[string]string {
+	return map[string]string{"APA_URL": "http://k", "APA_TOKEN": "secret", "APA_PROJECT": "p1"}
+}
+
+// 运行上下文文件（§7.7）：只有本次运行能看到路径，0600，内容来自入队时定下的目录，运行结束即删；
+// 指定文件名时用它（续接同一会话沿用原路径）。
+func TestRunContextFileLivesAsLongAsTheRun(t *testing.T) {
+	dir, out := t.TempDir(), t.TempDir()
+	h := newHarness(t, 1, 1, Options{ContextDir: dir, Env: agentEnv})
+	script := `stat -f %Lp "$APA_RUN_CONTEXT" > "$1/mode" 2>/dev/null || stat -c %a "$APA_RUN_CONTEXT" > "$1/mode"; printf '%s' "$APA_RUN_CONTEXT" > "$1/path"; cat "$APA_RUN_CONTEXT" > "$1/body"`
+	run := func(name string) (domain.Run, string) {
+		r := h.enqueueSpec(Spec{Command: []string{"/bin/sh", "-c", script, "sh", out}, Dir: out, RunDir: "/runs/x", ContextName: name})
+		h.dispatch()
+		if res := h.next(); res.Run.State != domain.RunSucceeded {
+			t.Fatalf("%+v", res)
+		}
+		b, _ := os.ReadFile(filepath.Join(out, "path"))
+		return r, string(b)
+	}
+
+	r, path := run("")
+	if want := filepath.Join(dir, r.ID); path != want {
+		t.Fatalf("path = %q, want %q", path, want)
+	}
+	if mode, _ := os.ReadFile(filepath.Join(out, "mode")); strings.TrimSpace(string(mode)) != "600" {
+		t.Fatalf("mode = %q", mode)
+	}
+	var got runContext
+	body, _ := os.ReadFile(filepath.Join(out, "body"))
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := runContext{Run: r.ID, URL: "http://k", Token: "secret", Project: "p1", RunDir: "/runs/x", WorkDir: out}
+	if got != want {
+		t.Fatalf("context = %+v, want %+v", got, want)
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 0 {
+		t.Fatalf("left behind: %v", left)
+	}
+
+	if r, path = run("run_first"); path != filepath.Join(dir, "run_first") {
+		t.Fatalf("named context path = %q", path)
+	}
+	body, _ = os.ReadFile(filepath.Join(out, "body"))
+	if err := json.Unmarshal(body, &got); err != nil || got.Run != r.ID {
+		t.Fatalf("named context holds the current run: %+v %v", got, err)
+	}
+}
+
+// 不是 agent 运行、没签出凭据、没配置目录：都不写文件，也不给路径。
+func TestRunContextOnlyForAgentRunsWithACredential(t *testing.T) {
+	check := func(name string, opt Options, runDir string) {
+		t.Helper()
+		out := t.TempDir()
+		h := newHarness(t, 1, 1, opt)
+		h.enqueueSpec(Spec{Command: []string{"/bin/sh", "-c", `printf '%s' "$APA_RUN_CONTEXT" > "$1/path"`, "sh", out}, Dir: out, RunDir: runDir})
+		h.dispatch()
+		if res := h.next(); res.Run.State != domain.RunSucceeded {
+			t.Fatalf("%s: %+v", name, res)
+		}
+		if b, _ := os.ReadFile(filepath.Join(out, "path")); len(b) != 0 {
+			t.Fatalf("%s: got a context path %q", name, b)
+		}
+		if opt.ContextDir != "" {
+			if left, _ := os.ReadDir(opt.ContextDir); len(left) != 0 {
+				t.Fatalf("%s: wrote %v", name, left)
+			}
+		}
+	}
+	check("not an agent run", Options{ContextDir: t.TempDir(), Env: agentEnv}, "")
+	check("no credential issued", Options{ContextDir: t.TempDir()}, "/runs/x")
+	check("no directory configured", Options{Env: agentEnv}, "/runs/x")
+}
+
+// 写不出上下文文件时不拉起：工具侧取不到身份，起了也做不成事，原因要落在 Run 上。
+func TestRunContextWriteFailureFailsTheRun(t *testing.T) {
+	out := t.TempDir()
+	h := newHarness(t, 1, 1, Options{ContextDir: filepath.Join(out, "missing"), Env: agentEnv})
+	h.enqueueSpec(Spec{Command: []string{"/bin/sh", "-c", `touch "$1/ran"`, "sh", out}, Dir: out, RunDir: "/runs/x"})
+	h.dispatch()
+	res := h.next()
+	if res.Run.State != domain.RunFailed || !strings.Contains(res.Reason, "run context") {
+		t.Fatalf("%+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(out, "ran")); !os.IsNotExist(err) {
+		t.Fatal("the process started anyway")
+	}
+}
+
+// 重启时进程已不在的运行：按失败落账时一并清掉它留下的文件（里面的凭据已随之失效）。
+func TestRecoverRemovesTheContextFileOfADeadRun(t *testing.T) {
+	dir, out := t.TempDir(), t.TempDir()
+	h := newHarness(t, 1, 1, Options{ContextDir: dir, Env: agentEnv})
+	r := h.enqueueSpec(Spec{Command: []string{"/bin/sh", "-c", "exit 0"}, Dir: out, RunDir: "/runs/x"})
+	if err := h.st.Update(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec("UPDATE outcall_run SET state = 'running', started_at = 1 WHERE id = ?", r.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	left := filepath.Join(dir, r.ID)
+	if err := os.WriteFile(left, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if failed, _, err := h.d.Recover(ctx); err != nil || len(failed) != 1 {
+		t.Fatalf("failed=%v err=%v", failed, err)
+	}
+	if _, err := os.Stat(left); !os.IsNotExist(err) {
+		t.Fatalf("context file survived recovery: %v", err)
+	}
+}

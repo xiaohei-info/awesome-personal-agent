@@ -11,6 +11,10 @@ import subprocess
 HERE = pathlib.Path(__file__).resolve().parent
 TIMEOUT_SECS = 30
 
+_spec = importlib.util.spec_from_file_location("apa_run_context", HERE.parent / "tools" / "run_context.py")
+run_context = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(run_context)
+
 
 def declaration():
     """declaration.json plus the executors the tools plugin has configured.
@@ -32,7 +36,7 @@ def _declare(args, session_id=None, **_):
         body = declaration()
     except (OSError, ValueError) as e:
         return json.dumps({"ok": False, "error": str(e)})
-    env = dict(os.environ, APA_HARNESS="hermes")
+    env = run_context.apa_env()
     if session_id:
         env["APA_SESSION"] = str(session_id)
     try:

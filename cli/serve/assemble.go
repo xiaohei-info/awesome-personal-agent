@@ -251,7 +251,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		}
 		return tk.Env(r)
 	}
-	k.disp = proc.New(st, cfg, proc.Options{Env: env, OnResult: k.result})
+	k.disp = proc.New(st, cfg, proc.Options{Env: env, ContextDir: l.RunCredentials, OnResult: k.result})
 	agmFetch.st, agmFetch.disp, agmFetch.reader = st, k.disp, hostedReader
 	host, herr := os.Hostname()
 	if herr != nil {

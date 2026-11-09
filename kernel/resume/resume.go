@@ -440,9 +440,9 @@ func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Hea
 		argv = append(argv, ms.Args...)
 	}
 	argv = append(argv, hl.Access[base.Run.Access]...)
-	mode, sid := string(Fresh), ""
+	mode, sid, contextName := string(Fresh), "", ""
 	if !sessionLost && len(hl.Resume) > 0 && f.session != "" && base.Run.Harness == harness {
-		mode, sid = string(Resumed), f.session
+		mode, sid, contextName = string(Resumed), f.session, base.ContextName()
 		argv = append(argv, expand(hl.Resume, "{session_id}", sid)...)
 	} else if len(hl.Session.Assign) > 0 {
 		sid = runID
@@ -455,7 +455,7 @@ func (s *Service) launch(tx *store.Tx, f facts, harness string, hl executors.Hea
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: base.Run.Basis.RuleID}
 	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: base.Run.Runner, Launch: "headless", Target: f.it.ID,
 		Harness: harness, SessionID: sid, Access: base.Run.Access, Basis: basis, ChainDepth: f.depth, TimeoutSec: timeout}
-	if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir}}, s.o.Now()); err != nil {
+	if _, err := proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir, ContextName: contextName}}, s.o.Now()); err != nil {
 		return Skipped, err
 	}
 	if _, err := tx.Exec(`INSERT INTO resume_run (run_id, item, base_run, answer_at, mode, session_id) VALUES (?,?,?,?,?,?)`,

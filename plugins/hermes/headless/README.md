@@ -5,7 +5,7 @@ Submit: the `apa_declare_headless` tool runs `apa declare -` with `declaration.j
 tools plugin, because one harness holds one declaration). It takes effect after the owner confirms it in Web.
 **Use it instead of `apa_declare_executors`**: a later executors-only declaration replaces this one and drops `headless`.
 
-Measured on Hermes v0.22.5 (not copied from appendix A):
+Measured on Hermes v0.22.5 (not copied from appendix A). From v0.23.0 `--oneshot` is a client of the shared gateway; the `credential env` row no longer holds there, see `tools/README.md` (Run identity):
 
 | Declared | Observed |
 |---|---|

@@ -365,3 +365,45 @@ func TestDuplicateRegisterPanics(t *testing.T) {
 	}()
 	Register("login", login)
 }
+
+// 运行上下文文件盖过环境：工具在 harness 的常驻进程里执行时，环境是拉起那个进程的运行留下的（§7.7）。
+func TestRunContextFileDecidesTheRunIdentity(t *testing.T) {
+	f := newFake(t, "saved", "ctx-token", "stale-token")
+	home := t.TempDir()
+	if r := apa(t, map[string]string{}, home, "", "login", "--url", f.URL, "--token", "saved"); r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	stale := map[string]string{"APA_RUN": "run_stale", "APA_TOKEN": "stale-token", "APA_URL": "http://127.0.0.1:1"}
+	with := func(path string) map[string]string {
+		env := map[string]string{"APA_RUN_CONTEXT": path}
+		for k, v := range stale {
+			env[k] = v
+		}
+		return env
+	}
+
+	file := filepath.Join(t.TempDir(), "run_1")
+	body := `{"run":"run_1","url":"` + f.URL + `","token":"ctx-token","run_dir":"/r","work_dir":"/w"}`
+	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := apa(t, with(file), home, "", "items"); r.code != 0 {
+		t.Fatalf("%+v", r)
+	}
+	seen := f.tokens()
+	if seen[len(seen)-1] != "Bearer ctx-token" {
+		t.Fatalf("tokens = %v", seen)
+	}
+
+	// 运行已结束（文件已删）或文件损坏：退出 3，不发请求，既不用环境里的旧凭据，也不回退到本机凭据。
+	n := len(seen)
+	if err := os.WriteFile(file, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(home, "missing"), file} {
+		r := apa(t, with(path), home, "", "items")
+		if r.code != 3 || len(f.tokens()) != n || !strings.Contains(r.errOut, "run context") {
+			t.Fatalf("%s: %+v seen=%v", path, r, f.tokens())
+		}
+	}
+}

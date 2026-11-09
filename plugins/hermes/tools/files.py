@@ -1,27 +1,19 @@
-"""Read-only file access for read-tier runs: only the run directory and the working directory, never writes."""
+"""Read-only file access for read-tier runs: only this run's working and run directories, never writes."""
 import os
+
+from . import run_context
 
 MAX_BYTES = 200_000
 
 
-def _roots():
-    return [os.path.realpath(os.getcwd())]
-
-
-def _in_run_dir(real):
-    """The kernel runs a task in <APA_HOME>/runs/<APA_RUN> but passes the child neither APA_HOME nor the dir,
-    so match the layout: a path under .../runs/<this run's id>/. Sibling runs have another id and stay refused."""
-    run = os.environ.get("APA_RUN")
-    parts = real.split(os.sep)
-    return bool(run) and any(parts[i] == "runs" and parts[i + 1] == run for i in range(len(parts) - 2))
-
-
 def _resolve(path):
-    """Real path (symlinks followed) inside the working directory or this run's directory, else ValueError."""
+    """Real path (symlinks followed) inside this run's directories, else ValueError. Relative paths start at its working directory."""
     if not path:
         raise ValueError("path is required")
-    real = os.path.realpath(os.path.expanduser(path))
-    if not (any(real == r or real.startswith(r + os.sep) for r in _roots()) or _in_run_dir(real)):
+    ctx = run_context.load()
+    work, run = os.path.realpath(ctx["work_dir"]), os.path.realpath(ctx["run_dir"])
+    real = os.path.realpath(os.path.join(work, os.path.expanduser(path)))
+    if not any(real == r or real.startswith(r + os.sep) for r in (work, run)):
         raise ValueError(f"{path} is outside the run directory and the working directory")
     return real
 

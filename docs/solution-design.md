@@ -941,7 +941,8 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 | 两种外呼 | HTTP 模型调用（判断型、生成型）；子进程（Source 执行器含托管文档只读读取器、webhook 转换脚本、任务型与后台运行及其续接） |
 | 统一契约 | 子进程一律"命令 + stdin JSON → 退出码 + stdout" |
 | 运行位置 | 子进程只在 APA 所在主机运行。这是对运行者进程本身的约束，实际工作经委派可以在任何主机 |
-| 环境 | 子进程不继承内核环境，只拿白名单变量（含 `PATH`、`HOME` 和 XDG 目录变量）；agent 运行另外注入 `APA_URL`、`APA_TOKEN`（运行凭据）、`APA_RUN`、`APA_PROJECT` |
+| 环境 | 子进程不继承内核环境，只拿白名单变量（含 `PATH`、`HOME` 和 XDG 目录变量）；agent 运行另外注入 `APA_URL`、`APA_TOKEN`（运行凭据）、`APA_RUN`、`APA_PROJECT`、`APA_RUN_CONTEXT`（运行上下文文件路径） |
+| 运行上下文文件 | harness 的工具不一定在内核拉起的进程里执行：网关型 harness 的一次性命令只是客户端，工具和钩子跑在共享的常驻进程里，进程的工作目录和环境都不属于这次运行。所以 agent 运行启动时，内核把运行 id、`APA_URL`、运行凭据、`APA_PROJECT`、运行目录（`run_dir`）和工作目录（`work_dir`，即 `projects.WorkDir` 的结果）写入 `<APA_HOME>/run-credentials/<名称>`（目录 0700，文件 0600），经 `APA_RUN_CONTEXT` 把路径交给运行。这是本次运行身份与目录的唯一来源：工具按所属会话取这条路径，相对路径从 `work_dir` 解析，不看常驻进程的工作目录和环境，取不到就拒绝并说明原因；CLI 设了 `APA_RUN_CONTEXT` 时以文件为准，盖过环境里的 `APA_RUN`、`APA_URL`、`APA_TOKEN`、`APA_PROJECT`，读不到时报未认证，不回退到本机凭据。名称默认是运行 id；续接同一会话时沿用上一次运行的名称，因为 harness 在建会话时冻结客户端环境，内核覆盖写入新运行的内容。运行结束（含超时和失败）时删除，重启恢复时清理已判失败运行的文件；写不出时运行按失败落账，不拉起。路径不是凭据，名字里也不含凭据字样，否则按名称过滤的 harness 带不过去；文件对运行内的模型可读（`read` 档的文件工具限定在两个目录内，读不到），暴露面与环境变量相同，由运行凭据的 worker 级绑定和运行结束失效兜底 |
 | 运行凭据的文件传递（接入 dsh 时适用，不是首版约束） | 有的 harness 会从工具环境清除名称像凭据的变量（dsh 清除名称含 `KEY`、`PASSWORD`、`SECRET`、`TOKEN` 的变量），`APA_TOKEN` 到不了 CLI。无头运行声明了 `headless.credential: file` 时，内核把运行凭据写入 `<APA_HOME>/run-credentials/<run-id>`（目录 0700，文件 0600），只注入路径变量 `APA_RUN_CREDENTIAL_FILE`，不再注入 `APA_TOKEN`。运行结束（含超时和失败）时删除文件并使凭据失效，重启恢复时清理没有存活进程的文件，续接时生成新凭据。不靠改变量名绕过清除：路径不是凭据，凭据本身仍不进环境。文件对运行内的模型可读，暴露面与环境变量相同，由运行凭据的 worker 级绑定和运行结束失效兜底。需实测（§21.3） |
 | 并发额度 | 子进程分长时运行和短任务两类，各有额度和队列，互不挤占。长时运行（`task`、`background`：harness 无头运行，含任务型、主会话角色运行及其续接）受 `max_subprocesses` 限制，默认 4；短任务（`source`、`transform`、`reader`：Source 拉取、转换脚本、托管文档读取）受 `max_short_subprocesses` 限制，默认 2。模型 HTTP 调用和网关唤醒不起子进程，不占额度。额度是保护主机的运行配置，不是预算，不按费用或用量判断 |
 | 排队 | 超限的 Run 留在 `queued`，不丢、不降级；带目标事项的排队运行算作在途运行。定时拉取到期时，同一来源已有排队或运行中的 Run 就不重复入队。本人显式触发的运行在所在队列内优先，例如在 Web 打开托管文档或重放入站记录，在短任务队列内排在定时拉取之前 |
@@ -1342,6 +1343,7 @@ SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6�
 
 - **不依赖钩子**：运行者需要的上下文由提示词、资料文件和 `apa context` 提供，因为各 harness 在无头模式下是否触发钩子并不一致（Claude Code 的 `--bare` 会跳过钩子）。钩子如果触发，CLI 一律使用运行凭据；候选捕获在运行身份下不生效，防止回环。
 - **CLI 凭据优先级**：设置了 `APA_RUN` 时，CLI 只使用运行凭据（`APA_TOKEN`，或 `APA_RUN_CREDENTIAL_FILE` 指向的文件），不回退到本机凭据文件。
+- **工具不在运行进程里时**：Hermes 的一次性命令只是客户端，工具跑在共享网关里，运行身份和目录经运行上下文文件到达工具（§7.7、附录 A.5）。
 - **运行凭据要能到达 CLI**：Hermes 按具名清单清除环境变量，`APA_TOKEN` 不在清单内，首版经环境变量传递（需实测，§21.3）。接入按名称模式清除的 harness（如 dsh）时，插件声明 `headless.credential: file`，改用凭据文件（§7.7）；文件也不可读时，该 harness 不能用于需要写账本的运行，只能靠 stdout 末段回执（§8.4）。
 - **续接是可丢失的优化**：真理源是账本，harness 会话可丢失。插件未声明续接或会话已失效时，用新会话加事项上下文（含问题、回答、白名单内的挂靠消息）。
 - **会话失效的判定**：只看续接运行（带 `--resume` 一类标志的那次运行）。运行失败，退出码在声明的 `exit_codes.session_missing` 里，并且声明了 `exit_output.session_missing` 时 stdout 或 stderr 含其中任一片段，才判为会话失效：记 `resume.session_lost`，改用新会话续接，且只改一次。其他失败，包括同一退出码但输出不匹配的情况（如模型端点不可达、额度不足），按普通失败收尾，事项转 `needs_input`，不静默换会话。各种失败共用一个退出码的 harness（如 Hermes 一律返回 1）必须声明 `exit_output`，片段取自实测原文。内核只按声明匹配，不认识具体 harness（附录 A.2）。
@@ -1888,7 +1890,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
   packs/<name>/     用户能力包，同名覆盖内置
   sources/<id>/     各来源自己的配置与凭据，内核不读；webhook 转换脚本也放在 sources/ 之下
   runs/<run-id>/    运行目录，默认保留 14 天
-  run-credentials/  运行凭据文件，运行结束即删（只在 harness 声明文件传递时使用，§7.7）
+  run-credentials/  运行上下文文件（每次 agent 运行）与运行凭据文件（只在 harness 声明文件传递时），运行结束即删（§7.7）
   webhook-keys/     HMAC 方案的 webhook 接收密钥明文，每个来源一个文件（§14.2）
   logs/             诊断日志
 ```
@@ -1990,7 +1992,7 @@ Source 程序的退出码是另一套（§9.2）。
 
 ### 17.4 环境变量
 
-`APA_URL`、`APA_TOKEN`、`APA_PROJECT`、`APA_SESSION`、`APA_HARNESS`、`APA_RUN`、`APA_HOME`，以及只在 harness 声明文件传递时使用的 `APA_RUN_CREDENTIAL_FILE`（§7.7）。`APA_HARNESS` 是接入方（harness 插件）设置的 harness 名，CLI 随每次请求以 `X-APA-Harness` 发出，与 `APA_SESSION`/`X-APA-Session` 一起把 Event actor 审计到会话粒度（§11.2）；CLI 与内核不内置具体 harness 名。设置了 `APA_RUN` 时，CLI 只用运行凭据，不回退到本机凭据文件。
+`APA_URL`、`APA_TOKEN`、`APA_PROJECT`、`APA_SESSION`、`APA_HARNESS`、`APA_RUN`、`APA_HOME`、指向运行上下文文件的 `APA_RUN_CONTEXT`，以及只在 harness 声明文件传递时使用的 `APA_RUN_CREDENTIAL_FILE`（§7.7）。`APA_HARNESS` 是接入方（harness 插件）设置的 harness 名，CLI 随每次请求以 `X-APA-Harness` 发出，与 `APA_SESSION`/`X-APA-Session` 一起把 Event actor 审计到会话粒度（§11.2）；CLI 与内核不内置具体 harness 名。设置了 `APA_RUN` 时，CLI 只用运行凭据，不回退到本机凭据文件；设置了 `APA_RUN_CONTEXT` 时运行身份、地址、凭据和项目都以它指向的文件为准。
 
 ---
 
@@ -2177,6 +2179,7 @@ docs/             设计文档
 | 23 | 接收密钥的吊销 | `DELETE /sources/{id}/webhook` 吊销该来源全部接收密钥，同事务删除明文密钥文件 | 吊销按账本立即生效，明文文件不应再留在主机上；失败回滚而不是留下"已吊销、明文仍在"的半完成状态 | §14.2、附录 B.2 |
 | 24 | `decision-card` 包的起草时序与退化 | 配置了模型端点时，决策投递等卡片文案（及开启时的投递阈值判定）起草返回后才产出；起草失败不重试，按规则的内容与路由投递。投递阈值判定默认关闭，只能降低打扰。一句话摘要只给 `open`、`waiting` 的事项起草；修订变更摘要逐条修订起草一次。四项都以 system 身份调用和写回，失败只进健康视图 | 先投规则文案再换卡片文案会让同一决策送达两次；起草挡在投递前，重试会把"按规则继续"拖成延迟。判断型只能降低打扰，打扰的上限仍由本人在策略里定。代价是配了模型时决策送达多一次模型调用的延迟；模型给出的卡片说明可能与事项原文措辞不同，回答仍按事项上的选项 id | §5.6、§6.3、§6.9、§7.4、§12.4、§15.2 |
 | 25 | 代理写入的授权模型 | 按动作归属分三档：agent 自己的工作凭身份和对象绑定放行，完成须带结果证据；替本人做决定要本人原话加会话引用，或本人在 Web 签发的授权单；高风险与设置类只在 Web。依据不足返回退出码 23，事项转 `needs_input`（`proposed` 事项不转） | 一律要原话既挡不住恶意 agent（内核不能校验真伪），又让后台回执和捕获只能失败或回头打扰本人。授权单让本人不在场时也能划定范围，留痕可撤销。代价是多一类配置和一个退出码；授权单只给 delegate token，运行身份没有代答能力的边界不变 | §14.5、§6.13、附录 B.1 |
+| 26 | 本次运行的身份与目录怎样到达工具 | 内核在拉起时写 0600 的运行上下文文件，只把路径经 `APA_RUN_CONTEXT` 交给运行；工具按所属会话取路径，CLI 以文件为准，都不看常驻进程的工作目录和环境，取不到就拒绝 | 网关型 harness 的工具跑在共享进程里，环境和工作目录都属于别的运行或 harness 自身，取错来源会读错目录，还让运行绕过运行身份。扩展 `POST /runs/{id}/credential` 需要插件另持 token，也解决不了续接沿用旧会话。代价是运行凭据落盘（与环境变量暴露面相同），并且 Hermes 配置要多一行 `terminal.client_env_passthrough`；漏配时文件工具拒绝，CLI 工具按网关自己的凭据运行，运行身份失效，所以这一行是部署要求 | §7.7、§11.5、§17.4、附录 A.5 |
 
 ### 21.2 风险与治理
 
@@ -2214,7 +2217,7 @@ docs/             设计文档
 | harness | 需实测 | 设计兜底 |
 |---|---|---|
 | 全部 | 无头模式下钩子是否触发；注入文本是否被 harness 判定为提示注入；运行凭据能否到达模型发起的 CLI 调用 | 运行不依赖钩子；注入只写事实；到不了时走凭据文件（§7.7）或 stdout 末段回执 |
-| Hermes | 注入消息时是否触发消息前钩子；唤醒回合内的工具包装行为；无通用压缩前入口；`terminal` 子进程是否保留 `APA_TOKEN`（公开源码按具名清单清除，`APA_TOKEN` 不在清单内） | 优先无头运行；压缩前保存跳过；不保留时用 `terminal.env_passthrough` 放行 |
+| Hermes | 注入消息时是否触发消息前钩子；唤醒回合内的工具包装行为；无通用压缩前入口；v0.23.0 起一次性命令的工具跑在共享网关里，`APA_RUN_CONTEXT` 经 `terminal.client_env_passthrough` 到达工具与 `terminal` 子进程（读源码确认，待 live 实测）；`terminal` 子进程是否保留 `APA_TOKEN`（公开源码按具名清单清除，`APA_TOKEN` 不在清单内） | 优先无头运行；压缩前保存跳过；不保留时用 `terminal.env_passthrough` 放行 |
 | Codex CLI | `codex exec` 的退出码；钩子信任在无头模式下的行为；沙箱是否允许访问 APA 端口 | 以回执为准；stdout 末段回执兜底；不进首批 |
 | Gemini CLI | `-p` 与 `-r` 组合；子 agent 内是否触发钩子；产品后续维护状态 | 不支持续接时用新会话；不进首批 |
 | OpenCode | 退出码；JSON 事件里的会话 id 字段；V2 插件接口；子会话钩子 | 以回执为准；不进首批 |

@@ -19,6 +19,46 @@ type Credentials struct {
 	Token string `json:"token"`
 }
 
+// withRunContext 让运行上下文文件（APA_RUN_CONTEXT，§7.7）决定运行身份，盖过环境里的 APA_RUN、APA_URL、APA_TOKEN、
+// APA_PROJECT：工具若在 harness 的常驻进程里执行，这些变量是拉起那个进程的运行留下的，不是这次运行的。
+// 文件读不到（运行已结束）时身份留空但仍是运行模式：请求一律未认证，绝不回退到本机凭据。
+func withRunContext(env Env) Env {
+	path := env.Getenv(EnvRunContext)
+	if path == "" {
+		return env
+	}
+	var rc struct {
+		Run     string `json:"run"`
+		URL     string `json:"url"`
+		Token   string `json:"token"`
+		Project string `json:"project"`
+	}
+	b, err := os.ReadFile(path)
+	if err == nil {
+		err = json.Unmarshal(b, &rc)
+	}
+	if err != nil || rc.Run == "" {
+		rc.Run, rc.Token = filepath.Base(path), ""
+	}
+	base := env.Getenv
+	env.Getenv = func(k string) string {
+		switch k {
+		case EnvRun:
+			return rc.Run
+		case EnvURL:
+			return rc.URL
+		case EnvToken:
+			return rc.Token
+		case EnvProject:
+			return rc.Project
+		case EnvRunCredentials:
+			return ""
+		}
+		return base(k)
+	}
+	return env
+}
+
 // RunMode 报告是否处于运行身份（设置了 APA_RUN，§11.5）。
 func (c *Ctx) RunMode() bool { return c.Env.Getenv(EnvRun) != "" }
 
@@ -56,6 +96,9 @@ func (c *Ctx) resolveCredentials() (Credentials, error) {
 				}
 				cr.Token = strings.TrimSpace(string(b))
 			}
+		}
+		if cr.Token == "" && c.Env.Getenv(EnvRunContext) != "" {
+			return cr, domain.NewError(domain.CodeUnauthenticated, "the run context file cannot be read", "the run has ended or never started; do not retry. A run never falls back to the local credential file")
 		}
 		if cr.Token == "" {
 			return cr, domain.NewError(domain.CodeUnauthenticated, "APA_RUN is set but no run credential was provided", "provide APA_TOKEN or APA_RUN_CREDENTIAL_FILE; a run never falls back to the local credential file")
