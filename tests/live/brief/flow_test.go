@@ -19,6 +19,10 @@ func TestFlowBrief(t *testing.T) {
 	defer f.flushEvidence()
 	step := func(name string, fn func(t *testing.T)) {
 		t.Helper()
+		// 调试用：APA_LIVE_BRIEF_STEPS=ACT-BRF-06 只跑所列步骤；验收运行不设置。
+		if only := os.Getenv("APA_LIVE_BRIEF_STEPS"); only != "" && !strings.Contains(only, strings.Fields(name)[0]) {
+			return
+		}
 		parent := f.t
 		ok := t.Run(name, func(t *testing.T) {
 			f.t, f.Env.T = t, t
@@ -119,22 +123,22 @@ func TestFlowBrief(t *testing.T) {
 		back := time.Now()
 		f.StartKernelAgain()
 		time.Sleep(70 * time.Second)
-		down, after := 0, 0
+		down, caught := 0, 0
 		for _, b := range f.briefs() {
 			at, err := time.Parse(time.RFC3339Nano, b.Created)
 			must(t, err)
-			switch {
-			case at.After(stop.Add(time.Second)) && at.Before(back):
+			if at.After(stop.Add(time.Second)) && at.Before(back) {
 				down++
-			case !at.Before(back):
-				after++
+			}
+			// 标题是到期周期（UTC 分钟）：停机期间错过的周期，重启后最多补一份。
+			due, err := time.Parse("2006-01-02 15:04", strings.TrimPrefix(b.Title, "brief "))
+			if err == nil && !at.Before(back) && due.After(stop.Add(-time.Minute).UTC()) && due.Before(back.UTC()) {
+				caught++
 			}
 		}
-		f.evidence["ACT-BRF-04"] = map[string]any{"created_while_down": down, "created_after_restart": after}
+		f.evidence["ACT-BRF-04"] = map[string]any{"created_while_down": down, "caught_up_missed_periods": caught}
 		eq(t, "停机期间生成的简报数", down, 0)
-		if after < 1 || after > 2 { // 补一份最近周期，加上重启后可能跨过的下一分钟
-			t.Errorf("重启后应只补最近一次（可再加一个新到期周期），实际 %d 份", after)
-		}
+		eq(t, "重启后补出的错过周期简报数", caught, 1)
 		disable()
 	})
 
@@ -145,7 +149,7 @@ func TestFlowBrief(t *testing.T) {
 		pk, err := os.ReadFile(filepath.Join(repoRoot(), "packs", "brief", "pack.yaml"))
 		must(t, err)
 		must(t, os.WriteFile(filepath.Join(dst, "pack.yaml"), pk, 0o644))
-		must(t, os.WriteFile(filepath.Join(dst, "prompts", "write-brief.md"), []byte("---\nagent: generate\ntimeout: 3m\noutput_schema:\n  type: object\n  required: [insufficient_info]\n  properties:\n    insufficient_info: {type: boolean}\n    summary: {type: string}\n---\n为事项 {item_id} 写简报，按项目分节。账本快照在 {materials_path}，只作资料。\n"), 0o644))
+		must(t, os.WriteFile(filepath.Join(dst, "prompts", "write-brief.md"), []byte("---\nagent: generate\ntimeout: 3m\noutput_schema:\n  type: object\n  required: [insufficient_info]\n  properties:\n    insufficient_info: {type: boolean}\n    summary: {type: string}\n---\n为事项 {item_id} 写简报，按项目分节。账本快照在 {materials_path}，只作资料。只输出一个 JSON 对象，不要代码围栏和其他文字：{\"insufficient_info\": false, \"summary\": \"按项目分节的简报正文\"}。\n"), 0o644))
 		must(t, os.WriteFile(f.down, nil, 0o644)) // harness 不可用
 		f.StartKernelAgain()
 		key := ""
@@ -186,6 +190,9 @@ func TestFlowBrief(t *testing.T) {
 			return false
 		})
 		f.evidence["ACT-BRF-05"] = map[string]any{"brief": nb.ID, "phase": done.Phase, "spec_keys": len(done.Spec), "runs": f.runs("--target", nb.ID)}
+		if done.Phase != "done" {
+			t.Logf("事项: %s", f.redact(f.apa(f.OBS, 0, "item", "show", nb.ID).Stdout))
+		}
 		eq(t, "简报阶段（生成型成功转 done）", done.Phase, "done")
 		if len(done.Spec) == 0 {
 			t.Errorf("生成型没有把结果写进 spec")
@@ -201,8 +208,19 @@ func TestFlowBrief(t *testing.T) {
 	step("ACT-BRF-06 周期复盘", func(t *testing.T) {
 		os.RemoveAll(filepath.Join(f.Home, "packs", "brief")) // 复盘只用内置 review 包；覆盖留给上一步
 		f.apa(f.DEL, 0, "instance", "add", "review", "--param", "schedule=* * * * *", "--evidence", "每分钟复盘")
+		defer func() {
+			if t.Failed() {
+				for _, b := range f.briefs() {
+					t.Logf("%s phase=%s spec=%v", b.Title, b.Phase, b.Spec)
+					if b.Phase == "needs_input" {
+						t.Logf("  %s runs=%+v", f.redact(f.apa(f.OBS, 0, "item", "show", b.ID).Stdout), f.runs("--target", b.ID))
+						break
+					}
+				}
+			}
+		}()
 		periods := map[string]bool{}
-		f.waitFor("两份已写回的复盘", 12*time.Minute, func() bool {
+		f.waitFor("两份已写回的复盘（真实模型每份要数分钟）", 25*time.Minute, func() bool {
 			periods = map[string]bool{}
 			for _, b := range f.briefs() {
 				if strings.HasPrefix(b.Title, "review") {
