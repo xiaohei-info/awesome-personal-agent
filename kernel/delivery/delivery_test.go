@@ -260,24 +260,61 @@ func TestFailBackoffThenFallbackWeb(t *testing.T) {
 	if len(unread) != 1 || unread[0].ID != "d1" {
 		t.Fatalf("Web 未读: %+v", unread)
 	}
-	e.update(func(tx *store.Tx) error {
-		if err := e.q.MarkRead(tx, "d1"); err != nil {
-			t.Fatal(err)
+	if _, r, _ := e.fail("d1", 1); r != Duplicate {
+		t.Fatal("fallback 后重复 fail 幂等")
+	}
+	e.update(func(tx *store.Tx) error { // Web 点击 = Confirm：fallback_web → acknowledged，幂等
+		if d, r, err := e.q.Confirm(tx, "d1", 1); err != nil || r != Applied || d.State != domain.DeliveryAcknowledged {
+			t.Fatalf("%+v %v %v", d, r, err)
 		}
-		return e.q.MarkRead(tx, "d1")
+		_, r, err := e.q.Confirm(tx, "d1", 1)
+		if err != nil || r != Duplicate {
+			t.Fatalf("重复确认应幂等: %v %v", r, err)
+		}
+		return nil
 	})
 	e.view(func(tx *store.Tx) (err error) { unread, err = e.q.Unread(tx); return })
 	if len(unread) != 0 {
 		t.Fatal("已读后不应在未读里")
 	}
-	if _, r, _ := e.fail("d1", 1); r != Duplicate {
-		t.Fatal("fallback 后重复 fail 幂等")
+	if d, _, err := e.fail("d1", 1); err == nil || d.State != domain.DeliveryAcknowledged {
+		t.Fatalf("确认后 fail 不应推进: %+v %v", d, err)
 	}
-	e.create("d2", "i2", ch, 1)
-	e.view(func(tx *store.Tx) error {
-		wantCode(t, e.q.MarkRead(tx, "d2"), domain.CodeConflict)
-		return nil
+}
+
+// 回答导致的作废只针对低版本：被回答的最新决策投递（含 fallback_web、已注入的）记 acknowledged。
+func TestConfirmAnsweredSparesAnsweredVersionAndSupersedesOlder(t *testing.T) {
+	e := newEnv(t, Options{})
+	mk := func(id string, v int64, class domain.DeliveryClass, route string) {
+		e.update(func(tx *store.Tx) error {
+			_, _, err := e.q.Create(tx, domain.Delivery{ID: id, Item: "i1", Class: class, Route: route, Version: v, Content: domain.DeliveryContent{Title: "t"}})
+			return err
+		})
+	}
+	mk("old", 1, domain.DeliveryDecision, ch)
+	mk("cur", 2, domain.DeliveryDecision, RouteWeb) // fallback_web
+	mk("rem", 3, domain.DeliveryReminder, ch)       // 非决策类不被当作被回答的那条
+	e.update(func(tx *store.Tx) error {
+		ok, err := e.q.ConfirmAnswered(tx, "i1")
+		if err != nil || !ok {
+			t.Fatalf("%v %v", ok, err)
+		}
+		_, err = e.q.Supersede(tx, "i1", AllVersions)
+		return err
 	})
+	for id, want := range map[string]domain.DeliveryState{"old": domain.DeliverySuperseded, "cur": domain.DeliveryAcknowledged, "rem": domain.DeliverySuperseded} {
+		if got := e.get(id); got.State != want {
+			t.Errorf("%s = %s, want %s", id, got.State, want)
+		}
+	}
+	if d := e.get("cur"); d.State == domain.DeliveryAcknowledged {
+		e.view(func(tx *store.Tx) error { // 无可确认的投递是正常情况
+			if ok, err := e.q.ConfirmAnswered(tx, "i1"); ok || err != nil {
+				t.Fatalf("%v %v", ok, err)
+			}
+			return nil
+		})
+	}
 }
 
 func TestFailConfigurableBackoffAndWrongState(t *testing.T) {
@@ -391,8 +428,8 @@ func TestInjectDoesNotAcknowledge(t *testing.T) {
 	e.create("d5", "i5", ch, 1)
 	e.now = e.now.Add(time.Hour)
 	e.update(func(tx *store.Tx) error { _, err := e.q.Sweep(tx); return err })
-	if _, _, err := confirm(e, "d5", 1); err == nil {
-		t.Fatal("fallback_web 终态不可 confirm")
+	if d, r, err := confirm(e, "d5", 1); err != nil || r != Applied || d.State != domain.DeliveryAcknowledged {
+		t.Fatalf("fallback_web 也可由本人确认: %+v %v %v", d, r, err)
 	}
 }
 

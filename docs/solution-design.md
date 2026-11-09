@@ -678,12 +678,12 @@ Event 是账本的追加日志，也是对外事件流。
 | `content` | 标题、摘要、选项、推荐、Web 链接；决策投递的标题、摘要（问题与"为什么现在"）、选项说明与推荐说明由 `decision-card` 包的生成型起草，选项仍按事项上的选项 id，起草不可用时取事项标题、问题、选项标签与推荐（§7.4）；只能发文字的渠道上的非 web_only 决策另带一次性表单链接（§10.3）；web_only 决策的内容带只读标记 `web_only: true`，只有标题、摘要（含问题）与 Web 链接，不带选项、推荐、表单链接；不含来源正文全文 |
 | `run` | 唤醒类投递的运行 id（§13.6）；不带凭据明文 |
 | `version` | 版本号。事项变化后旧版本作废，送达回报必须带版本号 |
-| `state` | `pending` → `claimed` → `delivered` → `acknowledged`；失败超限或无人领取转 `fallback_web`；事项状态变化导致作废转 `superseded` |
+| `state` | `pending` → `claimed` → `delivered` → `acknowledged`；失败超限或无人领取转 `fallback_web`（只表示渠道没送到、改在 Web 展示，不挡本人确认：`fallback_web` 同样可转 `acknowledged`，`read_at` 保留为已读时间）；事项状态变化导致作废转 `superseded`，只作用于低于被回答版本的旧投递 |
 | `attempts`、`next_attempt_at` | 重试计数与退避时间。无人领取转 `fallback_web` 的时限默认 30 分钟，失败退避默认 1、3、7、15、30 分钟；两者在运行配置里改（`delivery_unclaimed_after`、`delivery_backoff`，§16.2） |
 | `external_ref` | 外部消息 ref，渠道回答时据此核对 |
 | `injections[]` | 注入到哪些会话（`injected_to_session`） |
 
-**注入不等于送达。** 注入只记录到 `injections`，本人确认（Web 点击、聊天代答、渠道回答）才算 `acknowledged`。多个会话并发不会重复确认，也不会误以为本人已看到。
+**注入不等于送达。** 注入只记录到 `injections`，本人确认只有一个入口，内核的 `Confirm`：Web 点击或查看某条投递、在 Web 回答它对应的决策、聊天代答、渠道回答，都调用它，投递转 `acknowledged`；送达 `delivered` 和注入都不算确认。多个会话并发不会重复确认，也不会误以为本人已看到。
 
 ### 6.10 Source 登记、来源事件、Ingest
 
@@ -825,6 +825,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 - **web_only 类**（资金、对外承诺、不可逆、权限变更、规范生效）：CLI 回答返回退出码 20 和结构化报告、Web 链接，事项停在 `needs_input`；渠道回答同样拒绝（§14.4）。
 - **初筛未返回时**：决策请求不投递、不接受代答（退出码 22），只在 Web 可见；初筛失败或超时按策略规则的结果继续（§14.4）。
 - **只认第一次回答**：后到的回答返回退出码 6 和已有结果。
+- **回答即确认**：本人回答（Web、聊天、渠道）时，被回答的那条决策投递（含已退回 Web 的）转 `acknowledged`，不记 `superseded`；随回答发生的作废只作用于更低版本的旧投递。超时默认值与授权单代答不是本人确认，投递仍随事项离开待决而作废。
 - **超时默认值**：时钟到期时由内核按默认值决定，`resolved_via: timeout`，actor 为 system；web_only 类不允许设置默认值。
 - **规范生效**属 web_only；其他材料的 proposed 修订按普通决策规则，delegate 可附本人原话或授权单代答，但 diff 只在 Web 可见，默认确认处是 Web。
 - **运行身份不能回答**：`decision.answer`、`proposal.accept`、`proposal.dismiss` 对运行凭据一律返回退出码 4。
