@@ -1,10 +1,13 @@
-# sha256: a62ea700fddccc7040875a369ee3d9ea2dfd003bcb8398db7345846e7fab878e
+# sha256: 87f495fb4983fa00fabe2d62345343e386dd272b56ba4a08f7ef2c58937b4c65
 work_item_id: 01a1aecf-849e-7f1d-b47a-8f5f1623b8b4
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: '上轮失败的两项都已在 main 修复：1) ACT-AGM-09：PR #236（e9621aae5）在 kernel/projects
-  统一仓库身份，owner/repo、https、ssh 写法等价，repo.agents_md_changed 现在能匹配到按完整 URL 登记的项目；2) ACT-DRF-01/03/04：PR
-  #234（0db3640d8）任务型运行遵从模板 cwd: project_checkout，只认检出 Host 等于本机主机名的检出（测试项目的检出 Host
-  必须写本机 hostname）。上一轮派发早于 #234 合并，跑的是旧代码。本轮先 rsync 最新 main 再构建，复用分支 agent/omac-worker-frontend-taiyi/4222f03e830b
-  里已写的 live 测试，重跑 agents-md、guideline-draft 全部用例；失败时把事件、needs_input 原因原文写进报告。验收不放宽；运行方式与红线不变：本机就是隔离主机，用
-  /opt/apa-live 的 wrapper，临时目录只用 mktemp -d /tmp/apa-live.XXXXXX，禁止对环境变量路径 rm -rf。'
+retry_note: 'DRF-01 根因已修：PR #237（f2b0b299c）——Hermes ≥v0.23 工具在共享网关进程运行，插件原按网关 cwd/环境判定运行目录与凭据。现由内核写运行上下文文件（0600，运行结束即删），经
+  APA_RUN_CONTEXT 随会话 client_env 传到工具与 CLI，缺上下文时拒绝、不回退网关凭据。本轮先做部署再验收：1) 在隔离 Hermes
+  home（/opt/apa-live 下，不碰该机原有 Hermes）的 config.yaml 加 terminal.client_env_passthrough:
+  [APA_RUN_CONTEXT]；2) rsync 最新 main 重建并重新部署 apa（内核、CLI、插件都改了；声明不用重做）；3) 改配置后用新会话/新运行，不续接旧会话；4)
+  先跑门禁 APA_REQUIRE_LIVE=1 HERMES_SRC=<检出> python3 -m pytest -q plugins/hermes/tests/tools/test_live.py，以及
+  headless、capture 的 test_live.py；5) 再跑 guideline-draft 全部用例（DRF-01..04），成功判据：相对路径读到检出目录内容、事项写回
+  actor 为 run:<id>；6) 出现 no run context 时把错误原文写进报告。AGM-09 已通过，可复用分支 agent/omac-worker-frontend-taiyi/4222f03e830b
+  的测试。验收不放宽；红线不变：本机就是隔离主机，用 /opt/apa-live 的 wrapper，临时目录只用 mktemp -d /tmp/apa-live.XXXXXX，禁止对环境变量路径
+  rm -rf。'
