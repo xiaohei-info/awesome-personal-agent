@@ -1,10 +1,10 @@
-# sha256: 8e1cf969d50f3f68d65c4a71249988bf9b27e7469b8691f87d15de282f862c37
+# sha256: b0e76497ad519e431b56b38f4330b756d1adfde340363690b48eebd01ad8df7b
 work_item_id: 01a1bfaf-d267-7926-b170-b9682b290378
-status: blocked
-recovery_marker: true
-retry_note: 范围调整（本人已定）：ACT-DPL-04『中心 APA 加多台 harness 主机』首批不验，报告里如实写『未执行：无第二台可跑 Hermes
-  的主机』，不得记为通过，也不要为它找替身；其余 DPL-01/02/03/05/06 照常验收、不放宽。在本机跑，先读 $APA_LIVE_README。APA
-  与反向代理（测试证书）都在 mktemp -d /tmp/apa-live.XXXXXX 的临时目录里起，监听本机 Tailscale 地址；DPL-01『从另一台机器访问』用
-  ssh taiyi 'curl ...' 访问本机地址。不得改动本机已有服务、Tailscale Serve 条目或任何系统配置，不碰本机 Hermes、不读写
-  ~/.hermes。DPL-03 走 Telegram 主路径，凭据见 ~/.config/apa-live/live.env（只用文件路径，不打印 token），需要本人回复时在评论写明并等待。DPL-06
-  用上一发行版本（无正式发行版时用 main 上最早一个可构建的发布提交并在报告注明）建数据目录。禁止对环境变量来源路径 rm -rf。失败把原文写进报告。
+status: todo
+retry_note: 主会话决定（本人授权范围内）：taiyi 从本机 SSH 不通，DPL-01/02 的『另一台机器』改用 oracle：ssh oracle
+  'curl ...'，访问本机 tailnet 地址 100.127.255.10 上你起的端口（已实测 oracle→本机 tailnet HTTP 可达）。只用
+  curl 只读访问，不在 oracle 上安装、改配置或留文件。TLS 反向代理：优先用 Go 标准库（net/http/httputil + crypto/tls，openssl
+  生成测试证书）在 mktemp -d /tmp/apa-live.XXXXXX 里写一个最小代理；若确需 caddy，只允许把官方发布的二进制下载到该临时目录、校验
+  sha256、测完删除，不装进系统。ACT-DPL-04 仍按首批未执行记录。其余要求不变：其他 DPL 验收不放宽；本机已有服务、Tailscale Serve
+  条目、系统配置都不动，不碰本机 Hermes、不读写 ~/.hermes；禁止对环境变量来源路径 rm -rf；与 e2e-telegram-live 共用 bot，若它还在跑，DPL-03
+  等它结束再做；失败把原文写进报告。
