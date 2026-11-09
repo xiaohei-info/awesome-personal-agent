@@ -1,9 +1,8 @@
-# sha256: 61753d72904cd20062d1a31584e8d158ce3eaf06eddfea18f4e554e96fb1ffb4
+# sha256: 08582ee6a1cfadefc01e5ef03d9e0fb46ba7ecd52046d3edcaec9145885fb5fc
 work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
 status: done
 merged: true
 merged_at: '2026-11-09T12:21:57Z'
-recovery_marker: true
 retry_note: 'HCTX-11 报的缺陷（apa-inject 的 apa 子进程 cwd 是 Hermes 安装目录）已由 PR #237（f2b0b299c）修复，在你上一轮之后才合并：Hermes
   ≥v0.23 钩子跑在共享网关进程，plugins/hermes/inject/__init__.py 现在在钩子线程取 run_context.session_cwd()（Hermes
   的 scoped_session_cwd，会话冻结的真实工作目录，不再是网关 cwd）传给 apa 子进程。本轮：1) rsync 最新 main 重建并重新部署
