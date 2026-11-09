@@ -19,10 +19,12 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -109,6 +111,11 @@ echo '{"session_id":"sess-cli","outcome":"done"}'
 	"exit1":    "exit 1\n",
 	"hang":     "sleep 30\n",
 	"declined": `echo '{"session_id":"s","outcome":"needs_review"}'` + "\n",
+	// 等测试以运行凭据写完账本再退出；末行只带会话 id，不带 outcome（有的 harness 的结果事件就是这样）。
+	"noOutcome": `printf '%s' "$APA_TOKEN" > "$2/token"
+while [ ! -f "$2/go" ]; do sleep 0.05; done
+echo '{"type":"result","session_id":"sess-x","exit_code":0}'
+`,
 }
 
 type env struct {
@@ -127,7 +134,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, executors.Module, proc.Module, runidentity.Module, Module} {
+		items.Module, executors.Module, proc.Module, runidentity.Module, delegation.Module, materials.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +147,8 @@ func setup(t *testing.T) *env {
 	e := &env{t: t, st: st, runs: filepath.Join(t.TempDir(), "runs"), dir: t.TempDir(),
 		done: make(chan proc.Result, 8), errs: make(chan error, 8)}
 	e.x = command.New(st, func() time.Time { return t0 })
-	for _, err := range []error{projects.Register(e.x), items.Register(e.x, items.NewKinds()), executors.Register(e.x, executors.Options{Owner: "owner"})} {
+	for _, err := range []error{projects.Register(e.x), items.Register(e.x, items.NewKinds()), executors.Register(e.x, executors.Options{Owner: "owner"}),
+		delegation.Register(e.x, delegation.Options{OnError: func(command.Commit, error) {}}), materials.Register(e.x)} {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -407,6 +415,134 @@ func TestNoReceiptIsFailure(t *testing.T) {
 	}
 }
 
+// runWithCredential 拉起 noOutcome 替身，让 act 持这次运行的凭据写账本，再让运行正常退出。
+func (e *env) runWithCredential(t Task, act func(id runidentity.Identity, item string)) string {
+	e.t.Helper()
+	out, err := e.svc.Launch(bg, t)
+	if err != nil || out.Run == "" {
+		e.t.Fatalf("launch: %+v %v", out, err)
+	}
+	runDir := filepath.Join(e.runs, out.Run)
+	act(runidentity.Identity{Secret: waitFile(e.t, filepath.Join(runDir, "token"))}, out.Item)
+	if err := os.WriteFile(filepath.Join(runDir, "go"), nil, 0o600); err != nil {
+		e.t.Fatal(err)
+	}
+	e.waitResult()
+	return out.Item
+}
+
+var (
+	specIn = func(item string) map[string]any {
+		return map[string]any{"id": item, "spec": map[string]any{"period": "p"}, "reason": "write"}
+	}
+	doneNoEvidence = func(item string) map[string]any {
+		return map[string]any{"id": item, "outcome": "done", "summary": "s"}
+	}
+	reportIn = func(item, outcome string) map[string]any {
+		return map[string]any{"id": item, "outcome": outcome, "summary": "s"}
+	}
+)
+
+// §8.4：结果在账本里的任务没有 PR 可附，报 done 会被拒绝，运行者只好报 progress；stdout 又没有 outcome。
+// 结果已经用运行凭据写回，内核代为转 done，证据指向这次运行，会话 id 仍从末行取。
+func TestRunWriteBackIsTheReceipt(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "noOutcome")
+	item := e.runWithCredential(e.task("hx", "brief"), func(id runidentity.Identity, item string) {
+		e.must(id, "item.update", specIn(item))
+		if _, err := e.do(id, "delegate.report", doneNoEvidence(item)); err == nil {
+			t.Fatal("done without evidence must stay refused (§6.14)")
+		}
+		e.must(id, "delegate.report", reportIn(item, "progress"))
+	})
+	if it := e.item(item); it.Phase != domain.PhaseDone {
+		t.Fatalf("item: %+v %+v", it, it.Ask)
+	}
+	if got := e.session(item); got != "sess-x" {
+		t.Fatalf("session %q", got)
+	}
+	var evidence string
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		es, _ := eventlog.ReadObject(tx, item)
+		for _, x := range es {
+			if x.Event.Type == domain.EvItemPhaseChanged {
+				evidence = x.Event.Evidence
+			}
+		}
+		return nil
+	})
+	if !strings.Contains(evidence, "wrote spec") {
+		t.Fatalf("evidence %q", evidence)
+	}
+	if evs := e.agentEvents(item); len(evs) != 1 || !strings.Contains(string(evs[0].Payload), `"via":"cli"`) {
+		t.Fatalf("run.finished: %+v", evs)
+	}
+}
+
+// §8.4：规范起草的结果是材料修订，不在事项上，同样算回执。
+func TestRunMaterialCommitIsTheReceipt(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "noOutcome")
+	var ref struct{ ID string }
+	_ = json.Unmarshal(e.must(owner, "project.create", map[string]any{"name": "p"}).Value, &ref)
+	tk := e.task("hx", "brief")
+	tk.Project = ref.ID
+	item := e.runWithCredential(tk, func(id runidentity.Identity, _ string) {
+		e.must(id, "material.commit", map[string]any{"kind": "guideline", "title": "g", "project": ref.ID, "content": "c", "reason": "draft"})
+	})
+	if it := e.item(item); it.Phase != domain.PhaseDone {
+		t.Fatalf("item: %+v %+v", it, it.Ask)
+	}
+}
+
+// §8.4：拿不到回执时，needs_input 的问题要写明运行实际留下了什么；报过 blocked 的不代转。
+func TestMissingReceiptSaysWhatTheRunDid(t *testing.T) {
+	for name, tc := range map[string]struct {
+		act  func(e *env, id runidentity.Identity, item string)
+		want string
+	}{
+		"nothing": {func(*env, runidentity.Identity, string) {}, "没有用运行凭据写过账本"},
+		"progress": {func(e *env, id runidentity.Identity, item string) {
+			e.must(id, "delegate.report", reportIn(item, "progress"))
+		}, "只报了进展"},
+		"rejected": {func(e *env, id runidentity.Identity, item string) {
+			_, _ = e.do(id, "delegate.report", doneNoEvidence(item))
+		}, "reporting done needs result evidence"},
+		"blocked after writing": {func(e *env, id runidentity.Identity, item string) {
+			e.must(id, "item.update", specIn(item))
+			e.must(id, "delegate.report", reportIn(item, "blocked"))
+		}, "报告受阻"},
+		"spec cleared": {func(e *env, id runidentity.Identity, item string) {
+			e.must(id, "item.update", specIn(item))
+			e.must(id, "item.update", map[string]any{"id": item, "spec": map[string]any{}, "reason": "clear"})
+		}, "没有写回结果"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t)
+			e.harness("hx", "noOutcome")
+			item := e.runWithCredential(e.task("hx", "brief"), func(id runidentity.Identity, item string) { tc.act(e, id, item) })
+			it := e.item(item)
+			if it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, tc.want) {
+				t.Fatalf("want %q in: %+v %+v", tc.want, it.Phase, it.Ask)
+			}
+		})
+	}
+}
+
+// §6.14 第 3 条：委派子事项的 done 只认 delegate.report，写 spec 不代转。
+func TestDelegationChildIsNotClosedByWriteBack(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "noOutcome")
+	var ref struct{ ID string }
+	_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "delegation", "title": "c", "phase": "open", "assignee": systemPrincipal, "reason": "r"}).Value, &ref)
+	tk := e.task("hx", "brief")
+	tk.Target = ref.ID
+	item := e.runWithCredential(tk, func(id runidentity.Identity, item string) { e.must(id, "item.update", specIn(item)) })
+	if it := e.item(item); it.Phase != domain.PhaseNeedsInput {
+		t.Fatalf("phase %s", it.Phase)
+	}
+}
+
 // ACT-CAS-04：退出码 1 → Run failed，事项进 needs_input，选项含重新运行、改派、放弃；只有一次 Run，不重试。
 func TestFailureGoesToOwnerWithoutRetry(t *testing.T) {
 	e := setup(t)
@@ -547,6 +683,9 @@ func TestParseSummary(t *testing.T) {
 		if _, ok := parseSummary([]byte(in)); ok != want {
 			t.Errorf("%q: got %v", in, ok)
 		}
+	}
+	if sm, ok := parseSummary([]byte(`{"type":"result","session_id":"a"}`)); ok || sm.SessionID != "a" {
+		t.Errorf("a final line without outcome still carries the session id: %+v %v", sm, ok)
 	}
 }
 
