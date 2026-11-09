@@ -1,12 +1,11 @@
-# sha256: d257bf760e21cddfbf1f0925b29c005e8fa02d9c30e0e801ce5d78891dd58318
+# sha256: 4326f64475d964ba25403bf3f82755621e34ef5dc95f0db9f28cc274f9bde6ca
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: '真实 Hermes 只能在 taiyi /opt/apa-live/ 隔离环境运行；不要在 Mac mini 启动或调用 Hermes。
-
-
-  2026-11-08 主会话决定：本节点等修复合并：dfx-0bdd78ac2371（kernel-delegation：apa report 接受运行目标事项）、dfx-ea87a6fe5df8（hermes-plugin-tools：read
-  档补只读资料工具与 spec/material 写回工具，不给通用文件写权限）。Web 页面可见类断言：不在 taiyi 装 ego-browser；在 taiyi
-  上保持 apa serve 运行并在证据里给出 Web 端口与要看的页面，由 Mac mini 上的 Ego Lite 访问 taiyi 的 APA Web 端口完成（只看页面，Hermes
-  仍只在 taiyi 跑）；数据类断言用 HTTP 接口。仍不改产品代码；修复合并后仍失败按 upstream-defect 或 owner-decision-required
-  报告。'
+retry_note: 'PR #235（b1f6fe039）已合入 main：根因在 kernel/rules/engine.go:fail，规则建的事项在生成型调用失败时现在转
+  needs_input 并写明原因，调用前在事项上记 run.started(category: generate)。重跑 ACT-BRF-05/06 时：1)
+  生成型按 §8.6 没有 Run 记录，apa run list 为空是预期，看 apa events 里事项上的 run.started/run.finished；2)
+  若简报进了 needs_input，apa item list --kind brief 的 ask.question 就是真实失败原因，此时 05 未通过，按原因报缺陷（端点/schema），不放宽验收；3)
+  请求固定 strict: true，测试模板 schema 须带 additionalProperties: false 且所有属性进 required，否则部分端点会拒；模板建议产出
+  summary、period、sections；4) 跑 06 前恢复 harness。运行方式与红线不变：本机就是隔离主机，用 /opt/apa-live 的
+  wrapper，临时目录只用 mktemp -d /tmp/apa-live.XXXXXX，禁止对环境变量路径 rm -rf。'
