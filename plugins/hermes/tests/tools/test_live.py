@@ -206,14 +206,14 @@ def test_accept_and_dismiss_carry_session(hermes, kernel):
 
 def test_flow_brief_and_guideline_read_tier_run_reads_materials_and_writes_back_via_apa_tools(hermes, kernel, run_session):
     out = hermes(("apa_list_dir", {"path": "."}, "s1"),
-                 ("apa_item_update", {"id": "i1", "spec": {"period": "2026-W45", "sections": [{"project": "p", "text": "ok"}]},
+                 ("apa_item_update", {"id": "i1", "spec": {"period": "2026-W45", "sections": [{"project": "p", "body": "ok"}]},
                                       "reason": "brief"}, "s1"),
                  ("apa_material_commit", {"kind": "guideline", "title": "G", "project": "p", "reason": "draft",
                                           "content": "# 规范\n只写仓库里看得到的事实"}, "s1"))
     assert out["results"][0]["ok"] is True and "README.md" in out["results"][0]["entries"]  # the task's directory, though cwd is HERMES_SRC
     upd, com = kernel["log"]
     assert upd["method"] == "PATCH" and upd["path"] == "/v1/items/i1" and upd["session"] == "s1"
-    assert upd["body"]["spec"] == {"period": "2026-W45", "sections": [{"project": "p", "text": "ok"}]}
+    assert upd["body"]["spec"] == {"period": "2026-W45", "sections": [{"project": "p", "body": "ok"}]}
     assert com["path"] == "/v1/materials" and com["body"]["content"].startswith("# 规范")
     assert com["body"]["kind"] == "guideline" and com["body"]["project"] == "p"
 

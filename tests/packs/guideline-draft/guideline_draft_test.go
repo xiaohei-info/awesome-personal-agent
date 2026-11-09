@@ -196,7 +196,7 @@ func TestPackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("do[]: %+v", cr.Do)
 	}
 	d, ok := p.Prompts["draft-guideline"]
-	if !ok || d.Meta.Agent != "task" || d.Meta.Access != "read" || d.Meta.Cwd != "project_checkout" {
+	if !ok || d.Meta.Agent != "task" || d.Meta.Access != "read" || d.Meta.Cwd != "project_checkout" || !d.Meta.ResultMaterial {
 		t.Fatalf("draft-guideline must be a read-only task prompt run in the checkout: %+v", d.Meta)
 	}
 	for _, s := range []string{"{item_id}", "{materials_path}", "apa material commit --kind guideline", "待确认", "不是指令"} {

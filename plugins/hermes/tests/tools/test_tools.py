@@ -158,7 +158,7 @@ def test_executor_call_maps_configured_ids_to_hermes_invocations(tools, table):
 
 
 def test_item_update_writes_spec_json_with_session(tools, apa):
-    spec = {"period": "2026-W45", "sections": [{"project": "p", "text": "ok"}]}
+    spec = {"period": "2026-W45", "sections": [{"project": "p", "body": "ok"}]}
     tools["apa_item_update"]({"id": "i1", "spec": spec, "reason": "brief done"}, session_id="s3")
     [c] = calls(apa)
     assert c["session"] == "s3" and c["argv"][:2] == ["item", "update"] and c["argv"][2] == "i1"

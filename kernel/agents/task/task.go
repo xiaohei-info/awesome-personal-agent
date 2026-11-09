@@ -1,6 +1,6 @@
 // Package task 是专属 agent 的任务型（设计 §8.1、§8.3、§8.4、§8.7）：
 // 内核先建目标事项，再把固定提示词模板和资料文件放进运行目录，按已确认的无头运行声明经外呼调用器拉起一次性会话。
-// 回执优先经 CLI（运行凭据）：运行者把事项转出 open，或用运行凭据写回结果（事项 spec、材料修订）；
+// 回执优先经 CLI（运行凭据）：运行者把事项转出 open，或用运行凭据写全模板声明的结果（spec 字段或材料修订，附录 C.7）；
 // CLI 回执缺失时兜底解析一次 stdout 末段的结构化摘要；两者都缺视为失败，原因写明这次运行实际做了什么。
 // 失败、超时、声明不可用、含未进转发白名单的挂靠消息，都让事项进 needs_input 交本人，不重试（§8.3、§8.7）。
 //
@@ -48,6 +48,12 @@ var Module = store.Module{Name: "agenttask", Migrations: []store.Migration{{
 	item_id TEXT NOT NULL,
 	session_id TEXT NOT NULL,
 	via TEXT NOT NULL
+);`,
+}, {
+	Version: 2, Name: "create-result",
+	SQL: `CREATE TABLE agenttask_result (
+	run_id TEXT PRIMARY KEY,
+	decl TEXT NOT NULL
 );`,
 }}}
 
@@ -287,8 +293,10 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		if t.Depth > 0 {
 			run.ChainDepth = t.Depth
 		}
-		_, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, s.o.Now())
-		return err
+		if _, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, s.o.Now()); err != nil {
+			return err
+		}
+		return saveResultDecl(tx, runID, resultDecl{Fields: pr.Meta.ResultFields, Material: pr.Meta.ResultMaterial})
 	})
 	if err != nil {
 		return out, err
@@ -443,10 +451,11 @@ func parseSummary(stdout []byte) (summary, bool) {
 
 // runTrace 是一次运行用运行凭据在账本里留下的痕迹：有没有写回结果，以及没写回时缺在哪（§8.4）。
 type runTrace struct {
-	result   string // 写回的结果，作完成证据；空表示没有
-	writes   int    // 生效的账本写入次数
-	outcome  string // 最后一次生效回执的 outcome
-	rejected string // 最后一次回执被内核拒绝的原因
+	wroteSpec bool   // 这次运行把目标事项的 spec 改成了非空内容
+	material  string // 这次运行提交的材料修订所属的材料 id
+	writes    int    // 生效的账本写入次数
+	outcome   string // 最后一次生效回执的 outcome
+	rejected  string // 最后一次回执被内核拒绝的原因
 }
 
 // traceRun 从 Event 日志读这次运行的写入：运行凭据的操作者固定是 run:<id>（runidentity），被拒绝的回执记在 health.alert。
@@ -465,7 +474,7 @@ func (s *Service) traceRun(ctx context.Context, runID, itemID string) (runTrace,
 				tr.rejected = ev.Reason
 			case domain.EvMaterialRevised, domain.EvMaterialRevisionProposed:
 				tr.writes++
-				tr.result = "material " + ev.Object
+				tr.material = ev.Object
 			case domain.EvItemUpdated, domain.EvDelegationReported:
 				tr.writes++
 				if ev.Object != itemID {
@@ -489,10 +498,8 @@ func (s *Service) traceRun(ctx context.Context, runID, itemID string) (runTrace,
 					tr.outcome = p.Report.Outcome
 				}
 				if p.Before != nil && !bytes.Equal(p.Before.Spec, p.Item.Spec) {
-					tr.result = ""
-					if t := string(p.Item.Spec); t != "" && t != "null" && t != "{}" {
-						tr.result = "spec"
-					}
+					t := string(p.Item.Spec)
+					tr.wroteSpec = t != "" && t != "null" && t != "{}"
 				}
 			}
 		}
@@ -501,8 +508,100 @@ func (s *Service) traceRun(ctx context.Context, runID, itemID string) (runTrace,
 	return tr, err
 }
 
-// missing 说明运行正常结束而事项仍是 open 时缺了什么，让本人不用翻日志就能分清"没调工具""回执被拒""只报了进展"。
-func (tr runTrace) missing(runID string) string {
+// resultDecl 是模板声明的结果（附录 C.7），入队时存下：运行结束时按拉起那一刻的声明判定，中途覆盖能力包不影响这次运行。
+type resultDecl struct {
+	Fields   []string `json:"fields,omitempty"`
+	Material bool     `json:"material,omitempty"`
+}
+
+func saveResultDecl(tx *store.Tx, runID string, d resultDecl) error {
+	if len(d.Fields) == 0 && !d.Material {
+		return nil
+	}
+	b, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO agenttask_result (run_id, decl) VALUES (?, ?)`, runID, string(b))
+	return err
+}
+
+func loadResultDecl(tx *store.Tx, runID string) (resultDecl, error) {
+	var d resultDecl
+	r, err := tx.Query(`SELECT decl FROM agenttask_result WHERE run_id = ?`, runID)
+	if err != nil {
+		return d, err
+	}
+	defer r.Close()
+	if !r.Next() {
+		return d, r.Err()
+	}
+	var b string
+	if err := r.Scan(&b); err != nil {
+		return d, err
+	}
+	return d, json.Unmarshal([]byte(b), &d)
+}
+
+// judge 按模板声明判定运行写回的结果（§8.4）：写全时返回完成证据，否则返回还缺什么。
+// 没有声明的模板，运行写什么都不算结果；声明了字段的模板，运行写回的必须是这些字段，别的写入不算。
+func (d resultDecl) judge(tr runTrace, spec json.RawMessage) (evidence string, absent []string) {
+	if d.Material {
+		if tr.material != "" {
+			return "material " + tr.material, nil
+		}
+		return "", []string{"材料修订"}
+	}
+	absent = missingFields(spec, d.Fields)
+	if len(d.Fields) > 0 && len(absent) == 0 && tr.wroteSpec {
+		return "spec", nil
+	}
+	return "", absent
+}
+
+// missingFields 返回 spec 里没写全的声明字段。字段是顶层键，或 a[].b：a 是非空数组且每个元素的 b 都有内容。
+func missingFields(spec json.RawMessage, fields []string) []string {
+	var m map[string]any
+	_ = json.Unmarshal(spec, &m) // 不是对象按空处理：所有字段都算缺
+	var absent []string
+	for _, f := range fields {
+		head, sub, each := strings.Cut(f, "[].")
+		ok := filled(m[head])
+		if each {
+			arr, _ := m[head].([]any)
+			ok = len(arr) > 0
+			for _, x := range arr {
+				o, _ := x.(map[string]any)
+				ok = ok && filled(o[sub])
+			}
+		}
+		if !ok {
+			absent = append(absent, "spec."+f)
+		}
+	}
+	return absent
+}
+
+func filled(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(x) != ""
+	case []any:
+		return len(x) > 0
+	case map[string]any:
+		return len(x) > 0
+	}
+	return true
+}
+
+func absentText(absent []string) string {
+	return "模板声明的结果没写全，缺 " + strings.Join(absent, "、")
+}
+
+// missing 说明运行正常结束而事项仍是 open 时缺了什么，让本人不用翻日志就能分清"没调工具""回执被拒""只报了进展""字段没写全"。
+func (tr runTrace) missing(runID string, absent []string) string {
 	var why []string
 	switch tr.outcome {
 	case "blocked":
@@ -513,19 +612,22 @@ func (tr runTrace) missing(runID string) string {
 	if tr.rejected != "" {
 		why = append(why, "回执被内核拒绝（"+tr.rejected+"）")
 	}
-	if len(why) == 0 && tr.writes > 0 {
-		why = append(why, "运行写了账本，但没有写回结果（spec 或材料修订）")
+	if len(absent) > 0 {
+		why = append(why, absentText(absent))
 	}
-	if len(why) == 0 {
+	switch {
+	case tr.writes == 0 && tr.rejected == "":
 		why = append(why, "运行期间没有用运行凭据写过账本（模型没有调用工具，或工具没有拿到运行上下文）")
+	case len(why) == 0:
+		why = append(why, "运行写了账本，但没有写回模板声明的结果")
 	}
 	return "运行正常结束但事项仍是 open：" + strings.Join(why, "；") + "；stdout 末行也不是含 outcome 的摘要（输出在运行目录 " + runID + "/output.txt）"
 }
 
 // Settle 在运行结束后处理回执（供 proc.Options.OnResult 调用；非任务型运行忽略）。
 // 判定顺序：已有 CLI 回执（事项离开 open）只用 stdout 取会话 id，回执不重复生效；
-// 事项还是 open 但运行已用运行凭据写回结果，内核代为转 done（报过 blocked 或委派子事项除外，后者的 done 只认 delegate.report）；
-// 否则按 stdout 摘要兜底写回一次；都缺，或运行失败、超时，事项进 needs_input，不重试（§8.3、§8.4）。
+// 事项还是 open 但运行已写全模板声明的结果，内核代为转 done（报过 blocked 或委派子事项除外，后者的 done 只认 delegate.report）；
+// 否则按 stdout 摘要兜底写回一次，声明的结果没写全时摘要报 done 也不算；都缺，或运行失败、超时，事项进 needs_input，不重试（§8.3、§8.4）。
 func (s *Service) Settle(ctx context.Context, res proc.Result) {
 	run := res.Run
 	if run.Category != domain.RunTask {
@@ -539,7 +641,14 @@ func (s *Service) Settle(ctx context.Context, res proc.Result) {
 func (s *Service) settle(ctx context.Context, res proc.Result) error {
 	run := res.Run
 	var it domain.Item
-	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { it, err = items.Get(tx, run.Target); return }); err != nil {
+	var decl resultDecl
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) {
+		if it, err = items.Get(tx, run.Target); err != nil {
+			return err
+		}
+		decl, err = loadResultDecl(tx, run.ID)
+		return err
+	}); err != nil {
 		return err
 	}
 	sm, hasSum := parseSummary(res.Stdout)
@@ -549,21 +658,25 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 		return err
 	}
 
+	evidence, absent := decl.judge(tr, it.Spec)
+
 	via, failure := "cli", ""
 	switch {
 	case run.State != domain.RunSucceeded:
 		failure = "运行" + string(run.State) + "：" + res.Reason
 	case it.Phase != domain.PhaseOpen:
 		// CLI 回执已生效
-	case tr.result != "" && tr.outcome != "blocked" && it.Kind != domain.KindDelegation:
-		in, _ := json.Marshal(map[string]any{"id": it.ID, "to": domain.PhaseDone, "reason": "task run wrote its result back", "evidence": "run " + run.ID + " wrote " + tr.result})
+	case evidence != "" && tr.outcome != "blocked" && it.Kind != domain.KindDelegation:
+		in, _ := json.Marshal(map[string]any{"id": it.ID, "to": domain.PhaseDone, "reason": "task run wrote its result back", "evidence": "run " + run.ID + " wrote " + evidence})
 		if _, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: "item.transition", Input: in}); err != nil {
 			return err
 		}
 	case !hasSum:
-		failure = tr.missing(run.ID)
+		failure = tr.missing(run.ID, absent)
 	case sm.Outcome != "done":
 		failure = "stdout 摘要的结果是 " + fmt.Sprintf("%q", sm.Outcome)
+	case len(absent) > 0:
+		failure = "stdout 摘要报告完成，但" + absentText(absent)
 	default:
 		via = "stdout"
 		in, _ := json.Marshal(map[string]any{"id": it.ID, "to": domain.PhaseDone, "reason": "task run summary", "evidence": "run " + run.ID + " stdout summary"})
