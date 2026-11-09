@@ -161,6 +161,11 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 			t.Fatalf("write-brief must name %q for spec.sections[].{project, body}: %s", k, w.Body)
 		}
 	}
+	for _, k := range []string{"item.title", "写回成功就是回执"} { // 周期分得开、写回即回执（§8.4）
+		if !strings.Contains(w.Body, k) {
+			t.Fatalf("write-brief lacks %q: %s", k, w.Body)
+		}
+	}
 	if !strings.Contains(w.Body, "spec.sections[].{project, body}") {
 		t.Fatalf("write-brief must spell out spec.sections[].{project, body}: %s", w.Body)
 	}

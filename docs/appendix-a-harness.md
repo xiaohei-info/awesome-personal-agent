@@ -117,6 +117,8 @@ main_session:
 
 Hermes v0.23.0 起，`hermes chat --oneshot` 经 `session.create` 把会话交给共享网关，工具和钩子都在网关进程里执行，网关的工作目录和环境不属于这次运行（由运行的客户端自动拉起的网关，还会一直留着那次运行的 `APA_RUN`、`APA_TOKEN`）。按会话传值的通道只有客户端环境：Hermes 在建会话时冻结 `terminal.client_env_passthrough` 列出的非凭据变量，并在该会话的回合内绑定到 ContextVar（`agent.session_client_env.bound_client_env`），工具线程继承它，互不串会话。所以 Hermes 配置要在该项列入 `APA_RUN_CONTEXT`（§7.7）：`apa_declare_headless` 检查当前 profile，没列入或读不了配置就拒绝声明并给出要加的配置。声明之外漏配时，`PATH` 总在客户端环境里（`TOOL_ENV`），插件读会话绑定的 `PATH`，见到内核的运行标记却没有上下文就报错，不运行 `apa`；只读会话的 `PATH`，因为网关自己的 `PATH` 可能留着拉起它的那次运行的标记，网关内 `apa` 子进程的 `PATH` 也会去掉这个继承的标记。插件所有 `apa` 调用都带上会话绑定的这条路径、丢弃网关继承的运行身份，并以会话的工作目录（`agent.runtime_cwd.scoped_session_cwd`）为子进程工作目录；文件工具取不到时拒绝。v2026.9.24 及更早的 oneshot 在进程内运行，CLI 工具照旧用进程环境，文件工具拒绝。
 
+Hermes 结构化输出的末行是 `result` 事件，只带 `session_id` 和 `exit_code`，不带 `outcome`，所以 stdout 末段兜底在 Hermes 上不会完成运行，任务型只靠 CLI 回执（主文档 §8.4）。
+
 **dsh**（后续）：npm 包声明 `dsh.bundle` 与 `engines.dsh`，`cordis.patch.yml` 插入插件行，按用到的 profile 分别安装；`ctx.systemPrompt.section` 承担常驻指令；`agent/created` 承担会话开始注入和 `apa agents check`（插件捕获全部错误，自设不超过 2 秒的超时）；`agent/pre-step` 承担消息前注入（按 `turn` 去重，失败时 `next()`）；`tools/result`、`subagent/end` 承担回执捕获；`agent/turn-stopping` 承担候选捕获（不调用 `steer`）；`session/event` 观察 `compaction/start` 承担压缩前保存（需实测）；`ctx.tools.register` 把 CLI 包成原生工具，显式传入 `APA_SESSION`；运行凭据经文件传递；不声明会话唤醒。各接入面的依据与实测状态见 A.6。
 
 **Claude Code**：常驻指令写成 skill；`SessionStart` 负责会话开始注入、`apa agents check`，并写 `$CLAUDE_ENV_FILE` 导出 `APA_SESSION`；`UserPromptSubmit` 负责消息前注入；`PostToolUse`、`SubagentStop` 负责回执捕获；`Stop` 负责候选捕获（用 `last_assistant_message`）；`PreCompact` 负责压缩前保存；执行者走 `Agent` 工具或 Bash。

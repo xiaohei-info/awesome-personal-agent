@@ -143,7 +143,8 @@ func TestReviewPackDeclaresWhatC14Lists(t *testing.T) {
 	if !ok || w.Meta.Agent != "task" || w.Meta.Access != "read" {
 		t.Fatalf("write-review must be a read-only task prompt: %+v", w.Meta)
 	}
-	for _, s := range []string{"{item_id}", "{materials_path}", "spec.period", "spec.sections", "按项目分节"} {
+	// spec.period 取到期时刻才分得开周期；分节键名与简报同一 schema；写回即回执，提示词不能再让运行者报 done（附不出证据，§8.4）。
+	for _, s := range []string{"{item_id}", "{materials_path}", "spec.period", "item.title", "spec.sections[].{project, body}", "按项目分节", "写回成功就是回执"} {
 		if !strings.Contains(w.Body, s) {
 			t.Errorf("write-review body lacks %q: %s", s, w.Body)
 		}
