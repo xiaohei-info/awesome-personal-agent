@@ -9,9 +9,9 @@
     "step": "ACT-HCTX-02 常驻指令让 agent 知道接入契约"
   },
   "ACT-HCTX-03-items": {
-    "delegated_child": "itm_6f246d020204319b",
-    "other_project": "itm_0102f9fa3ace9dd8",
-    "pending": "itm_7eda28c4852359f3"
+    "delegated_child": "itm_4e934edde6e83bc7",
+    "other_project": "itm_567a619b72307aa2",
+    "pending": "itm_cf6fb300c77a1189"
   },
   "ACT-HCTX-03-result": {
     "passed": true,
@@ -19,7 +19,7 @@
   },
   "ACT-HCTX-04": {
     "first_message_injected_it": true,
-    "item": "itm_88c0f51e5c051178",
+    "item": "itm_5d444e9760578328",
     "second_message_injected": ""
   },
   "ACT-HCTX-04-result": {
@@ -35,15 +35,15 @@
     "step": "ACT-HCTX-06 注入不等于送达"
   },
   "ACT-HCTX-06-unread": {
-    "id": "decision:itm_05c14c23a7cd1b27:3",
-    "item": "itm_05c14c23a7cd1b27",
+    "id": "decision:itm_288548d237b30876:3",
+    "item": "itm_288548d237b30876",
     "state": "fallback_web",
     "injections": [
       {
-        "injected_to_session": "20261109_150629_d25c72"
+        "injected_to_session": "20261109_184728_22823e"
       },
       {
-        "injected_to_session": "20261109_150629_2ab9e2"
+        "injected_to_session": "20261109_184728_ec62de"
       },
       {
         "injected_to_session": "s-hctx6-c"
@@ -51,7 +51,7 @@
     ]
   },
   "ACT-HCTX-07": {
-    "hook_secs_when_down": 0.006332916673272848,
+    "hook_secs_when_down": 0.006067933049052954,
     "injection_resumed": true
   },
   "ACT-HCTX-07-result": {
@@ -59,7 +59,7 @@
     "step": "ACT-HCTX-07 内核不可达时钩子放行"
   },
   "ACT-HCTX-08": {
-    "hook_secs_with_10s_kernel": 2.004590218886733
+    "hook_secs_with_10s_kernel": 2.0055614658631384
   },
   "ACT-HCTX-08-result": {
     "passed": true,
@@ -74,13 +74,13 @@
     "step": "ACT-HCTX-10 常驻指令过期时提示更新"
   },
   "ACT-HCTX-11-result": {
-    "passed": false,
+    "passed": true,
     "step": "ACT-HCTX-11 恢复会话后重新注入"
   },
   "ACT-HCTX-11-resume-hook-call": {
-    "args": "context --session 20261109_150844_d2b926~1794208144447924373 --scope cwd --format inject --instruction 1",
-    "cwd": "/opt/apa-live/src/hermes-agent",
-    "out_len": 0,
-    "session": "20261109_150844_d2b926~1794208144447924373"
+    "args": "context --session 20261109_185005_bbf330~1794221425835360599 --scope cwd --format inject --instruction 1",
+    "cwd": "/tmp/apa-live.K0gLk4/apa-e2e-4253773687/checkout-acc-open",
+    "out_len": 1936,
+    "session": "20261109_185005_bbf330~1794221425835360599"
   }
 }

@@ -1,9 +1,10 @@
 USER: 刚才委派的事怎么样了
-TOOLS: [{terminal {"command": "apa item show itm_cdec9ff2c164c547; echo \"---PARENT---\"; apa item show itm_2d088cc7445045f5"}} {terminal {"command": "apa why itm_2d088cc7445045f5 2>&1; echo \"---WHY CHILD---\"; apa why itm_cdec9ff2c164c547 2>&1"}}]
-FINAL: 委派已由执行者回报完成，父事项自动回到待处理：
+TOOLS: [{terminal {"command": "apa item show itm_a2911bac131adf63 2>&1; echo \"---PARENT---\"; apa item show itm_60c1a40d5e65fd14 2>&1"}} {terminal {"command": "apa events --item itm_a2911bac131adf63 2>&1 | tail -30; echo \"---WHY---\"; apa why itm_60c1a40d5e65fd14 2>&1"}} {terminal {"command": "apa why itm_a2911bac131adf63 2>&1"}} {terminal {"command": "apa inbox 2>&1 | head -20"}}]
+FINAL: 状态：执行者报告完成，但父项还没有结案，也还没有人验证。
 
-- 子事项 itm_cdec9ff2c164c547：open → done，status_label「已修复」，执行者 work-host.cli，回报 outcome=done，证据为 PR https://example.invalid/acc/pr/42
-- 父事项 itm_2d088cc7445045f5：waiting → open（账本事件 delegate.settle，原因「all delegated items finished」），version 3，当前没有 waiting_on
-- 账本另有规则 delegation-verify/verify-report 记录为「would run」观察态，未实际触发校验
+- 子项 itm_a2911bac131adf63：phase = done，status_label「已修复」；由 work-host.cli 在 10:56:50 通过 delegate.report 报告，并给出证据 {"pr":"https://example.invalid/acc/pr/42"}
+- 父项 itm_60c1a40d5e65fd14：由于「所有委派项已完成」，phase 从 waiting 回落到 open，等待你验收
 
-也就是说：委派链路跑通了，执行者说修好了并给了 PR 链接，但父事项还没关闭。该 PR 域名是 example.invalid，我这边没法打开核实。要我把父事项标记为完成，还是先做验收？
+需要说明：报告里的 PR 链接位于 example.invalid 这个域名下，我无法打开核实，也没看到代码改动、测试结果或提交记录。因此，现在只能说「执行者自称已修复」，还不能确认修复真的生效。
+
+下一步有两种做法：要我按这条证据把父项标记为完成吗，还是先让 work-host.cli 补齐可核实的证据（提交 SHA、测试输出或真实 PR）？在没有你的确认、也没有可核实证据的情况下，我不会自行结案。

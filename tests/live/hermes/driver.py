@@ -42,6 +42,9 @@ def build_agent():
     sid, history, _ = _load_resume_target(db, os.environ.get("DRIVER_RESUME") or None)
     runtime, _fb = resolve_runtime_with_fallback(cfg, requested=choice.provider, target_model=choice.model or None,
                                                  explicit_base_url=choice.base_url, explicit_api_key=choice.api_key)
+    # What a gateway does for a client session: freeze the client's cwd on the session (the plugins read it from here).
+    from agent.runtime_cwd import set_session_cwd
+    set_session_cwd(os.getcwd())
     agent = AIAgent(
         api_key=runtime.get("api_key"), base_url=runtime.get("base_url"), provider=runtime.get("provider"),
         requested_provider=runtime.get("requested_provider"), api_mode=runtime.get("api_mode"), model=choice.model,

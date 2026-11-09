@@ -218,6 +218,8 @@ type turn struct {
 	HookSecs  float64 `json:"hook_secs"`
 	Injected  string  `json:"injected"`
 	Compacted bool    `json:"compacted"`
+	Before    int     `json:"before"`
+	After     int     `json:"after"`
 }
 
 // toolCalls 返回本回合里名字包含 sub 的工具调用数。

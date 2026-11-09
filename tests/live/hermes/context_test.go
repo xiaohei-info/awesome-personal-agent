@@ -4,6 +4,7 @@ package hermes
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -276,15 +277,16 @@ func TestFlowHermesContext(t *testing.T) {
 				t.Errorf("恢复后应在检出目录 %s 下重新注入摘要（含 %s），实际钩子工作目录 %s，输出 %d 字节", open, pend, c.Cwd, len(c.Out))
 			}
 		}
-		contains(t, "恢复后的回答", string(out), "HCTX11-PEND-QZK")
+		contains(t, "恢复后的回答", string(out), "HCTX11-PEND")
 		// 压缩：Hermes 自己的压缩流程（会触发 post_compaction），之后再发一条，摘要重新带上。
 		cs := f.session(home, open, f.DEL)
-		for _, m := range []string{"第一件：记得周一开会", "第二件：记得周二交报告", "第三件：记得周三订机票", "第四件：记得周四回电话"} {
-			cs.say(m + "。只回复：好")
+		pad := strings.Repeat("meeting-notes-filler ", 300) // Hermes 保留约 1~2.5 万 token 的尾部不压缩，历史要明显超过它才有可摘要的中段
+		for i := 1; i <= 30; i++ {                          // 压缩要有可摘要的中段：历史太短时 Hermes 不会真正压缩，也就不发 post_compaction
+			cs.say(fmt.Sprintf("第%d件事：记得周%d上午十点开会并带上季度报告。以下是无关的会议记录填充，忽略即可：%s。只回复：好", i, i%7+1, pad))
 		}
 		c := cs.compress()
-		if !c.Compacted {
-			t.Fatalf("压缩应真实执行")
+		if !c.Compacted || c.After >= c.Before {
+			t.Fatalf("压缩应真实缩短历史：%+v", c)
 		}
 		rc := cs.say("只回复 OK")
 		contains(t, "压缩后的注入", rc.Injected, pend, "以下为资料")

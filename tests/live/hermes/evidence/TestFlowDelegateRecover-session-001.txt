@@ -1,8 +1,7 @@
 USER: 把「DLG2-PARENT-QZK 修复登录超时」这件事交给 work-host.cli。现在只在账本里委派，先不要启动执行者。
-TOOLS: [{terminal {"command": "apa guide; echo \"---EXECUTORS---\"; apa executors; echo \"---ITEM---\"; apa item show itm_2d088cc7445045f5"}} {terminal {"command": "apa delegate --help; echo \"---\"; apa project show prj_dbbc1d8157f0c960 2>&1 | head -50"}} {terminal {"command": "cd /tmp/apa-live.eZ5fK3/apa-e2e-842395993/checkout-acc-work && apa delegate --parent itm_2d088cc7445045f5 --assignee work-host.cli --title \"修复 DLG2-PARENT-QZK 登录超时\" --summary \"修复登录超时问题\" --idempotency-key dlg2-parent-qzk-work-host-cli"}} {terminal {"command": "apa item show itm_cdec9ff2c164c547; echo \"---PARENT---\"; apa item show itm_2d088cc7445045f5"}}]
-FINAL: 已在账本内完成委派，未启动执行者。
+TOOLS: [{terminal {"command": "apa item show itm_60c1a40d5e65fd14"}} {terminal {"command": "apa delegates --help 2>&1 | head -40; echo \"---\"; apa delegate --help 2>&1 | head -60"}} {terminal {"command": "apa executors 2>&1; echo \"---\"; apa delegate --parent itm_60c1a40d5e65fd14 --assignee work-host.cli --title \"DLG2-PARENT-QZK 修复登录超时\" --reason \"由用户在会话中指定交给 work-host.cli，仅入账委派，暂不启动执行者\" 2>&1"}} {terminal {"command": "apa item show itm_60c1a40d5e65fd14 2>&1; echo \"---\"; apa item show itm_a2911bac131adf63 2>&1"}}]
+FINAL: 已在账本中完成委派，没有启动执行者。
 
-- 父事项 itm_2d088cc7445045f5「DLG2-PARENT-QZK 修复登录超时」：阶段 open → waiting，waiting_on = executor / work-host.cli（version 2）
-- 新建子事项 itm_cdec9ff2c164c547（kind=delegation，assignee=work-host.cli，阶段 open），与父事项建立 parent 关系
-
-执行者没有被启动；要等执行时再单独触发。
+- 父项 itm_60c1a40d5e65fd14「DLG2-PARENT-QZK 修复登录超时」阶段变为 waiting，waiting_on = work-host.cli
+- 新建委派子项 itm_a2911bac131adf63，kind=delegation，assignee=work-host.cli，阶段 open
+- work-host.cli 是项目允许的执行者之一（另两个为 hermes-coder.cli、other-host.cli）

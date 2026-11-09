@@ -1,11 +1,10 @@
 USER: 再用 work-host.cli 执行一件和账本无关的小事（没有事项 id）：随便打个招呼。用 <redacted> 取调用方式，再用终端执行。
-TOOLS: [{tool_call {"calls": [{"arguments": {"executor": "work-host.cli", "task": "随便打个招呼"}, "name": "<redacted>"}]}} {tool_call {"calls": [{"arguments": {"executor": "work-host.cli", "id": "", "task": "随便打个招呼"}, "name": "<redacted>"}]}} {terminal {"command": "/tmp/apa-live.eZ5fK3/apa-e2e-842395993/work-host-cli.sh '随便打个招呼\n\nLedger item: . When done run: apa report  --outcome done --summary <text> [--pr <url>]'", "timeout": 300}} {read_file {"path": "/tmp/apa-live.eZ5fK3/apa-e2e-842395993/work-host-cli.sh"}} {terminal {"command": "tail -n 6 /tmp/apa-live.eZ5fK3/apa-live.shim.4191754731/apa-calls.log"}}]
-FINAL: 命令已执行，但结果需要说明：
+TOOLS: [{tool_call {"calls": [{"arguments": {"executor": "work-host.cli", "id": "", "task": "随便打个招呼"}, "name": "<redacted>"}]}} {terminal {"command": "/tmp/apa-live.K0gLk4/apa-e2e-2942323353/work-host-cli.sh '随便打个招呼\n\nLedger item: . When done run: apa report  --outcome done --summary <text> [--pr <url>]'"}} {terminal {"command": "apa item show itm_56591b542b36301c; apa item show itm_e201e9ff67776b45"}} {read_file {"path": "/tmp/apa-live.K0gLk4/apa-e2e-2942323353/work-host-cli.sh"}}]
+FINAL: 执行了，但结果需要说明：`work-host.cli` 是个固定回显的桩脚本，并不会真的“打招呼”。
 
-- <redacted> 的 id 是必填参数，传空字符串才能取到调用方式，生成的命令里带了一段残缺的账本尾巴：`Ledger item: . When done run: apa report  --outcome done ...`（id 为空）
-- 我原样执行了该命令（以 work-host-cli.sh 开头，无前缀），退出码 0
-- 实际输出：`work-host.cli 已处理 PR https://example.invalid/acc/pr/6` —— 和上一条事项的输出一模一样
+- `<redacted>` 必须带事项 id，这次没有，我传了空 id，它返回的命令是：
+  `/tmp/apa-live.K0gLk4/apa-e2e-2942323353/work-host-cli.sh '随便打个招呼 … Ledger item: . When done run: apa report  --outcome done …'`
+- 终端执行该命令：exit 0，输出 `work-host.cli 已处理 PR https://example.invalid/acc/pr/6`（和上次一字不差）。
+- 查过脚本本身（/tmp/.../work-host-cli.sh，共 3 行）：它只是把参数追加到调用日志，然后无条件 echo 那句 PR 文本。所以没有问候内容产出，也没有账本条目可挂回执，账本状态未变（itm_56591b542b36301c 仍 done，父项 itm_e201e9ff67776b45 仍 open）。
 
-检查了脚本本身（work-host-cli.sh 共 3 行）：它只把参数追加到 apa-calls.log，然后无条件 echo 那一行固定文字。也就是说这个"执行者"是个 shim，并没有真的打招呼，也不会真的做事。
-
-调用日志已确认记录到 `随便打个招呼\n\nLedger item: . ...`。所以：这条命令跑通了、退出了 0，但"打招呼"这件小事实际上没有被执行；同时这段输出里的 PR 链接对本次任务没有意义，不要当成真实回执。
+要真正的“打招呼”，得给这个执行者换个能处理自由任务的脚本，或者带上一个合法事项 id 让回执有处可落。

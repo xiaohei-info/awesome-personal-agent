@@ -1,3 +1,3 @@
 USER: 就选方案 B
-TOOLS: [{tool_describe {"names": ["apa_decide", "apa_ask", "apa_list_dir"]}} {tool_call {"calls": [{"name": "apa_decide", "arguments": {"id": "itm_2d57caba312451f1", "option": "B", "evidence": "就选方案 B", "reason": "owner 在对话中直接选定方案 B"}}]}}]
-FINAL: 已记录：CHAT1-DEC-QZK（itm_2d57caba312451f1）选 B — 方案 B，版本 4。
+TOOLS: [{tool_describe {"names": ["apa_decide", "apa_ask"]}} {tool_call {"calls": [{"name": "apa_decide", "arguments": {"id": "itm_2125f2c1f6532f46", "option": "B", "evidence": "就选方案 B", "reason": "owner selected option B in chat"}}]}}]
+FINAL: 已记录：itm_2125f2c1f6532f46 选择选项 B（方案 B），账本版本已到 v4。
