@@ -232,6 +232,15 @@ func TestFlowBrief(t *testing.T) {
 			}
 			return len(periods) >= 2
 		})
+		// 已写回 spec 的复盘，其运行可能还在收尾：等它们都离开 open 再断言最终阶段。
+		f.waitFor("复盘运行收尾", 10*time.Minute, func() bool {
+			for _, b := range f.briefs() {
+				if p, _ := b.Spec["period"].(string); strings.HasPrefix(b.Title, "review") && p != "" && b.Phase == "open" {
+					return false
+				}
+			}
+			return true
+		})
 		final := map[string]string{}
 		for _, b := range f.briefs() {
 			if p, _ := b.Spec["period"].(string); strings.HasPrefix(b.Title, "review") && p != "" {
