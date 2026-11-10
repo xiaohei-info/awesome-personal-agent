@@ -1,9 +1,9 @@
 {
   "ACT-BRF-01": {
-    "brief": "itm_aaa368c0f83a68aa",
-    "period": "2026-11-09",
-    "phase": "needs_input",
-    "run": "run_b036eae57dacc78a",
+    "brief": "itm_d881e40701639a25",
+    "period": "2026-11-10 14:08",
+    "phase": "done",
+    "run": "run_0864a2d68bc6e0e0",
     "run_state": "succeeded",
     "sections": 4
   },
@@ -37,7 +37,7 @@
     "step": "ACT-BRF-04 停机后只补最近一次"
   },
   "ACT-BRF-05": {
-    "brief": "itm_cc38124125b52227",
+    "brief": "itm_8fc6e09c24f0b39a",
     "phase": "done",
     "runs": [],
     "spec_keys": 2
@@ -46,8 +46,15 @@
     "passed": true,
     "step": "ACT-BRF-05 用生成型覆盖模板"
   },
+  "ACT-BRF-06": {
+    "distinct_periods": 2,
+    "final_phase": {
+      "review 2026-11-10 14:22": "done",
+      "review 2026-11-10 14:23": "done"
+    }
+  },
   "ACT-BRF-06-result": {
-    "passed": false,
+    "passed": true,
     "step": "ACT-BRF-06 周期复盘"
   }
 }
