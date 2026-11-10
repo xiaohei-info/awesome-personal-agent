@@ -1,16 +1,15 @@
-# sha256: 7ff6751b81e29f33d6728499973cae40d6b178bc9ffc819fae83502b16a70566
+# sha256: dcf7657f9dadebceaa5a7eb16c968c60daa71c0e2b6703e5eef421df2035a752
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 'OWNER ANSWER to blocker handoff-a3cb8d02893d60d5: the owner chose your
-  option 2, "authorize me to add terminal.client_env_passthrough to the test HERMES_HOME".
-  You are authorized. This is not a product defect. plugins/hermes/tools/README.md
-  lines 4-9 make that line an install requirement, so no product commit and no fix.*
-  node will come. Do not block again because main has no new commit. Also, the seed
-  /opt/apa-live/hermes-home/config.yaml on taiyi already has terminal.client_env_passthrough:
-  [APA_RUN_CONTEXT] (lines 10-12, changed 2026-11-09 22:20). Your last live run is
-  older than that change. Do this now: in newHermesHome, after you copy the seed,
-  make sure the copied config.yaml has that entry. Add it only if it is missing, and
-  only in the test code. Do not change plugins/ or kernel/. Then rerun ACT-BRF-01..06
-  live, keep each run''s output.txt, and assert the final phase of each item. If spec
-  is still empty with the entry present, report a design-gap with that run''s evidence.'
+retry_note: 'OWNER ANSWER to blocker handoff-b2c05ae76d45c76b: The owner chose your
+  option 2. You are authorized to add terminal.client_env_passthrough: [APA_RUN_CONTEXT]
+  to the test HERMES_HOME config. This is not a product defect: plugins/hermes/tools/README.md
+  lines 4-9 make that line an install requirement, so no product commit or fix.* node
+  will come. Do not block again because main has no new commit. The seed /opt/apa-live/hermes-home/config.yaml
+  on taiyi already has the line (lines 10-12, changed 2026-11-09 22:20); your last
+  live run is older than that. In newHermesHome, after copying the seed, ensure the
+  entry is present (add it only if missing, only in test code; do not change plugins/
+  or kernel/). Then rerun ACT-BRF-01..06 live, keep each run''s output.txt, and assert
+  each item''s final phase. If spec is still empty with the entry present, report
+  a design-gap with that run''s evidence.'
