@@ -1,6 +1,6 @@
-# sha256: fc1df486fcc1870b530445a035c5c5ab635f037087c44305d2c2274ea079fd1d
+# sha256: 51e3020784bcce87dad3a9f6328238256ce0c410cd325700e765c8ab4deca437
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-00dcc27651c0e9a1 (reason_code owner-decision-required):
   your option 2 is chosen and ALREADY DONE by the owner. /opt/apa-live/hermes-home/config.yaml
