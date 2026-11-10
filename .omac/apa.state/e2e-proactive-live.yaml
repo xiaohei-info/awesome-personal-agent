@@ -1,13 +1,5 @@
-# sha256: 51e3020784bcce87dad3a9f6328238256ce0c410cd325700e765c8ab4deca437
+# sha256: 2b54005d7158fe888cba098efa8df65e0be6e44c63306f6381fb8502a83cc63f
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 'OWNER ANSWER to blocker handoff-00dcc27651c0e9a1 (reason_code owner-decision-required):
-  your option 2 is chosen and ALREADY DONE by the owner. /opt/apa-live/hermes-home/config.yaml
-  on taiyi now contains terminal.client_env_passthrough: [APA_RUN_CONTEXT] (lines
-  11-12; backup config.yaml.bak-20261109-221946-before-env-passthrough). This was
-  a test-environment config gap, not a product defect, so NO product commit and NO
-  new fix node is expected; origin/main 881d69fae is the correct code. Do not block
-  again on ''no new commit''. Action now: start a fresh Hermes session in /opt/apa-live
-  and rerun ACT-BRF-01..06 live; do not overwrite that config. If a run still fails,
-  report the new failure evidence instead of this blocker.'
+retry_note: 上次失败是执行机 multica daemon 在服务器重启后未拉起（runtime unavailable），已恢复，非代码问题
