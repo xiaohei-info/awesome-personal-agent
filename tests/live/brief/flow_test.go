@@ -61,6 +61,7 @@ func TestFlowBrief(t *testing.T) {
 		period, _ := done.Spec["period"].(string)
 		sections, _ := done.Spec["sections"].([]any)
 		f.evidence["ACT-BRF-01"] = map[string]any{"brief": b.ID, "run": r.ID, "run_state": r.State, "period": period, "sections": len(sections), "phase": done.Phase}
+		eq(t, "简报最终阶段", done.Phase, "done")
 		if period == "" {
 			t.Errorf("spec.period 为空：任务型运行没有把本期标识写回简报事项 %s", b.ID)
 		}
@@ -231,6 +232,17 @@ func TestFlowBrief(t *testing.T) {
 			}
 			return len(periods) >= 2
 		})
-		f.evidence["ACT-BRF-06"] = map[string]any{"distinct_periods": len(periods)}
+		final := map[string]string{}
+		for _, b := range f.briefs() {
+			if p, _ := b.Spec["period"].(string); strings.HasPrefix(b.Title, "review") && p != "" {
+				final[b.Title] = b.Phase
+				for _, r := range f.runs("--target", b.ID) {
+					out, _ := os.ReadFile(filepath.Join(f.Home, "runs", r.ID, "output.txt"))
+					f.saveEvidence("act-brf-06-"+r.ID+"-output.txt", string(out))
+				}
+				eq(t, "复盘 "+b.Title+" 最终阶段", b.Phase, "done")
+			}
+		}
+		f.evidence["ACT-BRF-06"] = map[string]any{"distinct_periods": len(periods), "final_phase": final}
 	})
 }

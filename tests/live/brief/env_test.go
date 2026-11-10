@@ -111,6 +111,13 @@ func (f *fx) newHermesHome(name string) string {
 			if strings.Contains("\n"+string(b), "\nplugins:") {
 				f.t.Fatal("种子 config.yaml 已有 plugins 段，请改为无插件的全新种子")
 			}
+			// plugins/hermes/tools/README.md 要求的安装项；种子已有则不重复写（只在测试代码里补，缺失才加）。
+			if !strings.Contains(string(b), "client_env_passthrough") {
+				if strings.Contains("\n"+string(b), "\nterminal:") {
+					f.t.Fatal("种子 config.yaml 已有 terminal 段但缺 client_env_passthrough，请修正种子")
+				}
+				b = append(b, []byte("\nterminal:\n  client_env_passthrough:\n    - APA_RUN_CONTEXT\n")...)
+			}
 			b = append(b, []byte("\nplugins:\n  enabled:\n    - apa-core\n    - apa-tools\n    - apa-headless\n    - apa-inject\n")...)
 		}
 		must(f.t, os.WriteFile(filepath.Join(home, n), b, 0o600))
