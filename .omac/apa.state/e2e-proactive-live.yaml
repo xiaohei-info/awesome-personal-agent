@@ -1,6 +1,8 @@
-# sha256: 3aa3fc4fb8bc618a573b5da62808b5040f81fa77db5d839b91f954be39b8f97c
+# sha256: 91387143cd7bbabedcdd05388c099589bda351104ced223dac54e7aa32ed379f
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-10T14:30:41Z'
 recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-b2c05ae76d45c76b: The owner chose your
   option 2. You are authorized to add terminal.client_env_passthrough: [APA_RUN_CONTEXT]
