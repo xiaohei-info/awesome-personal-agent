@@ -1,0 +1,60 @@
+{
+  "ACT-BRF-01": {
+    "brief": "itm_d881e40701639a25",
+    "period": "2026-11-10 14:08",
+    "phase": "done",
+    "run": "run_0864a2d68bc6e0e0",
+    "run_state": "succeeded",
+    "sections": 4
+  },
+  "ACT-BRF-01-result": {
+    "passed": true,
+    "step": "ACT-BRF-01 到期生成简报"
+  },
+  "ACT-BRF-02": {
+    "channel_claimed": false,
+    "injected": true,
+    "web_unread": false
+  },
+  "ACT-BRF-02-result": {
+    "passed": true,
+    "step": "ACT-BRF-02 简报送达"
+  },
+  "ACT-BRF-03": {
+    "max_per_period": 1,
+    "periods": 7
+  },
+  "ACT-BRF-03-result": {
+    "passed": true,
+    "step": "ACT-BRF-03 同一周期只生成一份"
+  },
+  "ACT-BRF-04": {
+    "caught_up_missed_periods": 1,
+    "created_while_down": 0
+  },
+  "ACT-BRF-04-result": {
+    "passed": true,
+    "step": "ACT-BRF-04 停机后只补最近一次"
+  },
+  "ACT-BRF-05": {
+    "brief": "itm_8fc6e09c24f0b39a",
+    "phase": "done",
+    "runs": [],
+    "spec_keys": 2
+  },
+  "ACT-BRF-05-result": {
+    "passed": true,
+    "step": "ACT-BRF-05 用生成型覆盖模板"
+  },
+  "ACT-BRF-06": {
+    "distinct_periods": 2,
+    "final_phase": {
+      "review 2026-11-10 14:22": "done",
+      "review 2026-11-10 14:23": "done"
+    }
+  },
+  "ACT-BRF-06-result": {
+    "passed": true,
+    "step": "ACT-BRF-06 周期复盘"
+  }
+}
