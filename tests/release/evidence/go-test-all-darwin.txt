@@ -1,0 +1,5 @@
+# darwin/arm64（Mac mini），go test ./...：唯一失败来自 Linux-only 的 /proc 断言，CI 为 ubuntu
+--- FAIL: TestPromptHangChildStaysAliveAndNeverReceipts
+    stubharness_test.go:225: child exited or is zombie: open /proc/<pid>/stat: no such file or directory
+FAIL	github.com/xiaohei-info/awesome-personal-agent/tests/doubles/stubharness
+（其余包 ok；同一提交在 linux/amd64 上 go test ./... 退出码 0，见 go-test-all-linux.txt）

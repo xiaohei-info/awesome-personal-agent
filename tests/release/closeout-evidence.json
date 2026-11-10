@@ -1,0 +1,575 @@
+{
+ "base_commit": "d977c1bd09a9cf27b459a273104a76a045cb48c6",
+ "verdict": "blocked",
+ "flows": [
+  {
+   "id": "flow-env-baseline",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/baseline 通过"
+  },
+  {
+   "id": "flow-bootstrap",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/bootstrap 通过"
+  },
+  {
+   "id": "flow-item-lifecycle",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/ledger 通过"
+  },
+  {
+   "id": "flow-proposal-triage",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/decisions 通过"
+  },
+  {
+   "id": "flow-authz-matrix",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/authz 通过"
+  },
+  {
+   "id": "flow-decision-answer",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/decisions 通过"
+  },
+  {
+   "id": "flow-web-only",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/decisions 通过"
+  },
+  {
+   "id": "flow-decision-timeout",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/decisions 通过"
+  },
+  {
+   "id": "flow-agent-revert",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/ledger 通过"
+  },
+  {
+   "id": "flow-why-audit",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/ledger 通过"
+  },
+  {
+   "id": "flow-clock-due",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/ledger 通过"
+  },
+  {
+   "id": "flow-ledger-integrity",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/go-test-all-linux.txt"
+   ],
+   "note": "tests/crash 与内核不变量套件包含在 linux/amd64 go test ./... 中，退出码 0"
+  },
+  {
+   "id": "flow-hermes-context",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/hermes/evidence/flow-hermes-context-evidence.json"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-project-mapping",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/mapping 通过"
+  },
+  {
+   "id": "flow-chat-answer",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/hermes/evidence/flow-chat-answer-evidence.json"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-delegate-recover",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/hermes/evidence/flow-delegate-recover-evidence.json"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-allowed-executors",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/authz 通过"
+  },
+  {
+   "id": "flow-command-registration",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/authz 通过"
+  },
+  {
+   "id": "flow-pack-loader",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/automation 通过"
+  },
+  {
+   "id": "flow-rule-modes",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/automation 通过"
+  },
+  {
+   "id": "flow-agent-cascade",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/agents 通过"
+  },
+  {
+   "id": "flow-outcall-limits",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/agents 通过"
+  },
+  {
+   "id": "flow-screening",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/screening 通过"
+  },
+  {
+   "id": "flow-delivery-control",
+   "mode": "hermetic",
+   "status": "fail",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "TestDLV07：确认旧版本投递期望 409，实际 400 external_ref is required；kernel/delivery 的 ack 现要求 external_ref，e2e 用例未带，两者不一致"
+  },
+  {
+   "id": "flow-brief",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/brief/evidence/brief-evidence.json"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-follow-up",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/followup 通过"
+  },
+  {
+   "id": "flow-source-contract",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/sourcepull 通过"
+  },
+  {
+   "id": "flow-source-github",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [],
+   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+  },
+  {
+   "id": "flow-source-rss",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/sourcepull 通过"
+  },
+  {
+   "id": "flow-source-http-json",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/sourcepull 通过"
+  },
+  {
+   "id": "flow-source-dir-watch",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/sourcepull 通过"
+  },
+  {
+   "id": "flow-source-mail",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [],
+   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+  },
+  {
+   "id": "flow-source-calendar",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [],
+   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+  },
+  {
+   "id": "flow-webhook",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/webhook 通过"
+  },
+  {
+   "id": "flow-follow-messages",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/followmsg 通过"
+  },
+  {
+   "id": "flow-triage-failure",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/followmsg 通过"
+  },
+  {
+   "id": "flow-capture",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/hermes/evidence/flow-capture-evidence.json"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-data-not-instructions",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/injection/evidence/injection-evidence.json"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-material-owned",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/materials 通过"
+  },
+  {
+   "id": "flow-material-hosted",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/materials 通过"
+  },
+  {
+   "id": "flow-agents-md",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [],
+   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+  },
+  {
+   "id": "flow-no-repo-guideline",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [],
+   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+  },
+  {
+   "id": "flow-guideline-draft",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [],
+   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+  },
+  {
+   "id": "flow-event-subscribe",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/events 通过"
+  },
+  {
+   "id": "flow-export-ext",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/events 通过"
+  },
+  {
+   "id": "flow-channel-telegram",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/telegram/evidence/act-tg-run.txt"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-channel-protocol",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/channel 通过"
+  },
+  {
+   "id": "flow-bg-main-session",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/background/evidence/run-2026-11-09.txt"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-bg-task-runner",
+   "mode": "hermetic",
+   "status": "fail",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "ACT-BGT-04：设了 APA_RUN 且无 APA_TOKEN 的 apa inbox 退出码为 0，期望 3；TestFlowBgTaskRunner 此后步骤未执行"
+  },
+  {
+   "id": "flow-bg-guards",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/bgguards 通过"
+  },
+  {
+   "id": "flow-bg-resume",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/background/evidence/run-2026-11-09.txt"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-forward-allowlist",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/bgguards 通过"
+  },
+  {
+   "id": "flow-chain-depth",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/bgguards 通过"
+  },
+  {
+   "id": "flow-wake-lease",
+   "mode": "live",
+   "status": "pass",
+   "evidence": [
+    "tests/live/wake/evidence/act-wak-run.txt"
+   ],
+   "note": "留存的真实运行证据，全部步骤通过（收口未重跑 live）"
+  },
+  {
+   "id": "flow-health",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/ops 通过"
+  },
+  {
+   "id": "flow-purge",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/ops 通过"
+  },
+  {
+   "id": "flow-retention",
+   "mode": "hermetic",
+   "status": "pass",
+   "evidence": [
+    "tests/release/evidence/e2e-linux.txt"
+   ],
+   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/ops 通过"
+  },
+  {
+   "id": "flow-deploy-exposure",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [
+    "tests/live/deploy/evidence/act-dpl-run.txt"
+   ],
+   "note": "留存证据中 ACT-DPL-04（中心 APA 加多台 harness 主机）SKIP，首批未执行；其余步骤通过"
+  },
+  {
+   "id": "flow-life-renewal",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [],
+   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+  },
+  {
+   "id": "flow-first-day",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [],
+   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+  },
+  {
+   "id": "flow-release",
+   "mode": "live",
+   "status": "not-run",
+   "evidence": [],
+   "note": "本节点自身：ACT-REL-01、02、03 不在本节点，ACT-REL-04/05 见 tests/release；因上面各项未通过而不记为通过"
+  }
+ ],
+ "open_findings": [
+  {
+   "path_prefix": ".omac/",
+   "rule": "机器名或个人名",
+   "reason": ".omac/ 下的编排状态与配置含主机名（chore(omac): manifest sync 提交写入）",
+   "owner_decision": "发布前由本人决定：从发布内容中移出 .omac/，或脱敏后再发布"
+  },
+  {
+   "path_prefix": ".omac/",
+   "rule": "内网地址",
+   "reason": ".omac/apa.state 含 tailnet 内网地址",
+   "owner_decision": "同上"
+  },
+  {
+   "path_prefix": ".omac/",
+   "rule": "本机路径",
+   "reason": ".omac/apa.state/_dag.yaml 含本机绝对路径",
+   "owner_decision": "同上"
+  },
+  {
+   "path_prefix": "tests/live/",
+   "rule": "机器名或个人名",
+   "reason": "live 测试、README、证据与脚本文件名写了真实主机名（测试靠它 ssh 到远端）",
+   "owner_decision": "本人决定：改成环境变量或占位符（需同时改各 live 节点的脚本与说明），或接受其为公开信息"
+  },
+  {
+   "path_prefix": "tests/live/deploy/evidence/",
+   "rule": "内网地址",
+   "reason": "deploy live 证据保留了 tailnet 内网地址",
+   "owner_decision": "本人决定：脱敏该证据文件"
+  },
+  {
+   "path_prefix": "tests/live/github/github_live_test.go",
+   "rule": "凭据",
+   "reason": "ACT-GH-07 用形似真实 GitHub token 的无效夹具，会触发 secret scanning",
+   "owner_decision": "本人决定：改为运行时拼接，让源码里不出现 token 形态"
+  }
+ ]
+}

@@ -1,0 +1,31 @@
+# linux/amd64, go test -tags e2e -count=1 -p 2 ./tests/e2e/... (退出码见末行)
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/agents	84.429s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/authz	13.036s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/automation	94.274s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline	3.580s
+--- FAIL: TestFlowBgTaskRunner (1.43s)
+    --- FAIL: TestFlowBgTaskRunner/ACT-BGT-04_不回退到本机凭据 (0.29s)
+        taskrunner_test.go:108: 设了 APA_RUN 且无 APA_TOKEN 的 apa inbox 退出码 = 0，期望 3
+    helpers_test.go:362: ACT-BGT-04 不回退到本机凭据 未通过，后续流程不得开始
+FAIL
+FAIL	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/bgguards	243.351s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/bootstrap	1.360s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/channel	122.024s
+?   	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/channel/badext	[no test files]
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/decisions	68.319s
+--- FAIL: TestDLV07 (76.57s)
+    flows_test.go:177: 确认旧版本投递应为 409，实际 400 {"code":"invalid_request","why":"external_ref is required","next":"fix the request","web_url":null}
+FAIL
+FAIL	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/delivery	252.548s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/events	14.589s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/followmsg	19.854s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/followup	163.616s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/ledger	52.329s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/mapping	1.215s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/materials	3.200s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/ops	171.826s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/screening	79.477s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/sourcepull	69.505s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/webhook	69.858s
+FAIL
+EXIT=1
