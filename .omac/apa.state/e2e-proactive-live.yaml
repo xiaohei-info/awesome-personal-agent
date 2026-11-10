@@ -1,5 +1,5 @@
-# sha256: 2b54005d7158fe888cba098efa8df65e0be6e44c63306f6381fb8502a83cc63f
+# sha256: 90a709ad44bb0db9e9e00cb4aa446bbdecb797268c9df689b52fce44ea4e5074
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 上次失败是执行机 multica daemon 在服务器重启后未拉起（runtime unavailable），已恢复，非代码问题
