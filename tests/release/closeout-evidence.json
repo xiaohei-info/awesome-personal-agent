@@ -531,7 +531,7 @@
    "mode": "live",
    "status": "not-run",
    "evidence": [],
-   "note": "本节点自身：ACT-REL-01、02、03 不在本节点，ACT-REL-04/05 见 tests/release；因上面各项未通过而不记为通过"
+   "note": "本节点自身：ACT-REL-01、02、03 由其他节点负责、收口未重跑；ACT-REL-04/05 见 tests/release；因上面各项未通过而不记为通过"
   }
  ],
  "open_findings": [
