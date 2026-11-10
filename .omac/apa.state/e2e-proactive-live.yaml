@@ -1,9 +1,8 @@
-# sha256: 91387143cd7bbabedcdd05388c099589bda351104ced223dac54e7aa32ed379f
+# sha256: 36833a3f5ee5dcbbd791b5b4279f366b73f287f4403024599e661b885ccb3e37
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
 status: done
 merged: true
 merged_at: '2026-11-10T14:30:41Z'
-recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-b2c05ae76d45c76b: The owner chose your
   option 2. You are authorized to add terminal.client_env_passthrough: [APA_RUN_CONTEXT]
   to the test HERMES_HOME config. This is not a product defect: plugins/hermes/tools/README.md
