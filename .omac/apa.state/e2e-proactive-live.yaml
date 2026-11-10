@@ -1,9 +1,16 @@
-# sha256: 5887f5488c5d97dc9973ff62e618111865a94c7a1d4acce8fae80cb6fba53b7d
+# sha256: 1cba1311c88aff2c45298396a73bbfe6eddf1bfa4bafea3642c46999bdd96db2
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: '主会话决定：这不是产品缺陷，不需要修复节点。plugins/hermes/tools/README.md 把 terminal.client_env_passthrough:
-  [APA_RUN_CONTEXT] 定为安装前提，插件缺这行时按设计拒绝声明。1) 种子配置 /opt/apa-live/hermes-home/config.yaml
-  已在 11-09 22:20 加上这行，你上次失败的 live 运行早于这个时间，所以先直接重跑 ACT-BRF-01..06。2) 授权：newHermesHome
-  复制种子后，如果 terminal.client_env_passthrough 不含 APA_RUN_CONTEXT，就按 README 的安装要求补上。这是测试环境按文档做安装配置，不是产品修复，不要改
-  plugins/ 或 kernel/。3) 补上这行后，如果 spec 仍然为空，再带证据报 design-gap。'
+retry_note: 'OWNER ANSWER to blocker handoff-a3cb8d02893d60d5: the owner chose your
+  option 2, "authorize me to add terminal.client_env_passthrough to the test HERMES_HOME".
+  You are authorized. This is not a product defect. plugins/hermes/tools/README.md
+  lines 4-9 make that line an install requirement, so no product commit and no fix.*
+  node will come. Do not block again because main has no new commit. Also, the seed
+  /opt/apa-live/hermes-home/config.yaml on taiyi already has terminal.client_env_passthrough:
+  [APA_RUN_CONTEXT] (lines 10-12, changed 2026-11-09 22:20). Your last live run is
+  older than that change. Do this now: in newHermesHome, after you copy the seed,
+  make sure the copied config.yaml has that entry. Add it only if it is missing, and
+  only in the test code. Do not change plugins/ or kernel/. Then rerun ACT-BRF-01..06
+  live, keep each run''s output.txt, and assert the final phase of each item. If spec
+  is still empty with the entry present, report a design-gap with that run''s evidence.'
