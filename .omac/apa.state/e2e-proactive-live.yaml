@@ -1,10 +1,13 @@
-# sha256: 3dd35195ba6629cd96492d7e5699b2c2f0fc932fd2bea2f9e6c4b91cdf6fe854
+# sha256: fc1df486fcc1870b530445a035c5c5ab635f037087c44305d2c2274ea079fd1d
 work_item_id: 01a1aecf-7179-74d7-be7a-d6ecdb3928ad
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: '负责人决定：直接重跑，不需要新的修复节点或代码修复。上轮失败的根因是测试环境配置，不是产品代码：/opt/apa-live/hermes-home/config.yaml
-  原先缺 terminal.client_env_passthrough。主会话已补上 client_env_passthrough: [APA_RUN_CONTEXT]，并读回确认；该
-  Hermes 版本支持此配置（agent/session_client_env.py）。origin/main 仍是 881d69fae 是正确的，就用它。步骤：1)
-  只停掉 /opt/apa-live/venv 启动的残留测试 gateway 进程，让新配置生效；2) 重新部署时不要覆盖 hermes-home/config.yaml，部署后再读回确认这项还在；3)
-  新开会话重跑 ACT-BRF-01..06，每次运行保留 output.txt，评论里记 phase、ask.question、耗时，ACT-BRF-01 断言
-  phase=done；4) 如果 apa 工具仍报缺运行上下文，先在一次工具调用里打印 APA_RUN_CONTEXT 是否存在（不打印内容），再停下报告。不要以''没有新修复''为由跳过重跑。'
+retry_note: 'OWNER ANSWER to blocker handoff-00dcc27651c0e9a1 (reason_code owner-decision-required):
+  your option 2 is chosen and ALREADY DONE by the owner. /opt/apa-live/hermes-home/config.yaml
+  on taiyi now contains terminal.client_env_passthrough: [APA_RUN_CONTEXT] (lines
+  11-12; backup config.yaml.bak-20261109-221946-before-env-passthrough). This was
+  a test-environment config gap, not a product defect, so NO product commit and NO
+  new fix node is expected; origin/main 881d69fae is the correct code. Do not block
+  again on ''no new commit''. Action now: start a fresh Hermes session in /opt/apa-live
+  and rerun ACT-BRF-01..06 live; do not overwrite that config. If a run still fails,
+  report the new failure evidence instead of this blocker.'
