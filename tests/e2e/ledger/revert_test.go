@@ -15,7 +15,7 @@ func TestFlowAgentRevert(t *testing.T) {
 	target := addTask(t, e, "original-title")
 	decided := addTask(t, e, "needs-a-call", "--assignee", "work-host.cli")
 	ok(t, e.Apa(e.WRK, "", "ask", decided, "--question", "ship it?", "--option", "yes=Yes", "--option", "no=No"), "ask")
-	before := audit(t, e, "") // 只取一次：异步事件可能在两次读取之间追加，分别取长度和元素会越界
+	before := audit(t, e, "")           // 只取一次：异步事件可能在两次读取之间追加，分别取长度和元素会越界
 	cursor := before[len(before)-1].Seq // 上次访问：此后才是"新变更"
 
 	var renameSeq int64
