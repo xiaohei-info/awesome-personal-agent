@@ -594,23 +594,26 @@ type Health struct {
 
 // Health 供健康视图读取（§15.2「模型不可用」）。
 func (s *Service) Health(ctx context.Context) (h Health, err error) {
-	err = s.o.Store.View(ctx, func(tx *store.Tx) error {
-		r, err := tx.Query(`SELECT since, last_error FROM direct_health WHERE id = 1`)
-		if err != nil {
-			return err
-		}
-		defer r.Close()
-		if !r.Next() {
-			return r.Err()
-		}
-		var since int64
-		if err := r.Scan(&since, &h.LastError); err != nil {
-			return err
-		}
-		h.Unavailable, h.Since = true, time.Unix(0, since)
-		return nil
-	})
+	err = s.o.Store.View(ctx, func(tx *store.Tx) (err error) { h, err = HealthIn(tx); return })
 	return
+}
+
+// HealthIn 在调用方事务内读模型可用性（健康视图在自己的只读事务里汇总）。
+func HealthIn(tx *store.Tx) (h Health, err error) {
+	r, err := tx.Query(`SELECT since, last_error FROM direct_health WHERE id = 1`)
+	if err != nil {
+		return h, err
+	}
+	defer r.Close()
+	if !r.Next() {
+		return h, r.Err()
+	}
+	var since int64
+	if err := r.Scan(&since, &h.LastError); err != nil {
+		return h, err
+	}
+	h.Unavailable, h.Since = true, time.Unix(0, since)
+	return h, nil
 }
 
 // setHealth 记下不可用（errMsg 非空，保留最早的 since）或清除。

@@ -42,6 +42,8 @@ interface SourceEvent {
   occurred_at: string;
   disposition: string;
   item?: string;
+  unjudged_reason?: string;
+  rejudges?: number;
 }
 interface Reject {
   run_id: string;
@@ -58,6 +60,36 @@ interface Secret {
 
 const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 const at = (s?: string) => (s && !s.startsWith("0001") ? s : "—");
+
+// 积压事件的状态（§9.3）：只显示中文，不露出内部值。
+const backlogState = (v: SourceEvent): { label: string; cls: string } =>
+  v.disposition === "expired"
+    ? { label: "已过期，不再自动重判", cls: "badge plain" }
+    : v.unjudged_reason === "undecided"
+      ? { label: "判断未定，等你处理", cls: "badge" }
+      : { label: "等模型恢复后自动重判", cls: "badge warn" };
+
+// 两步确认的批量忽略：第一次点击只展开确认，避免误触一次忽略整批。
+function IgnoreAll({ label, body, onDone }: { label: string; body: Record<string, unknown>; onDone: (err: string | null, n: number) => void }) {
+  const { api } = useSession();
+  const [confirming, setConfirming] = useState(false);
+  const go = async () => {
+    setConfirming(false);
+    try {
+      const r = await api.post<{ ignored: number }>("/source-events/ignore", body);
+      onDone(null, r.ignored);
+    } catch (e) {
+      onDone(msg(e), 0);
+    }
+  };
+  return confirming ? (
+    <span role="group" aria-label={label}>
+      <button className="danger" onClick={go}>确认{label}</button> <button className="quiet" onClick={() => setConfirming(false)}>取消</button>
+    </span>
+  ) : (
+    <button onClick={() => setConfirming(true)}>{label}</button>
+  );
+}
 
 function Registration({ onDone }: { onDone: () => void }) {
   const { api } = useSession();
@@ -215,7 +247,8 @@ function Events({ source }: { source: Source }) {
   const [items, setItems] = useState<SourceEvent[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const base = `/sources/${encodeURIComponent(source.id)}/events?disposition=unjudged`;
+  const [notice, setNotice] = useState<string | null>(null);
+  const base = `/sources/${encodeURIComponent(source.id)}/events?disposition=unjudged,expired`;
 
   const load = useCallback(
     (after?: number) =>
@@ -235,33 +268,53 @@ function Events({ source }: { source: Source }) {
     load();
   }, [load]);
 
-  const propose = async (id: string) => {
+  const act = async (id: string, what: "propose" | "ignore") => {
     setError(null);
+    setNotice(null);
     try {
-      await api.post(`/source-events/${encodeURIComponent(id)}/propose`);
+      await api.post(`/source-events/${encodeURIComponent(id)}/${what}`);
     } catch (e) {
       setError(msg(e));
     }
-    await load(); // 以服务端状态为准：转成功的不再是 unjudged
+    await load(); // 以服务端状态为准：处理成功的不再留在积压里
   };
 
   return (
     <section role="region" aria-label="未判定事件">
       <h4>未判定事件</h4>
+      <p className="sub">因模型不可用而未判定的，模型恢复后会自动重判；发生在 7 天之前的标为已过期，不再自动重判。都可以手动转为建议或忽略。</p>
       {error && <div role="alert">{error}</div>}
+      {notice && <p role="status">{notice}</p>}
       {items === null ? (
         !error && <p role="status">加载中…</p>
       ) : items.length === 0 ? (
         <p className="sub">没有未判定事件</p>
       ) : (
-        <ul className="rows">
-          {items.map((v) => (
-            <li key={v.id}>
-              <span>{v.subject || v.id}</span> · {v.type} · {v.occurred_at}
-              {v.summary && <p>{v.summary}</p>} <button onClick={() => propose(v.id)}>转为建议</button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="rows">
+            {items.map((v) => {
+              const st = backlogState(v);
+              return (
+                <li key={v.id}>
+                  <span>{v.subject || v.id}</span> · {v.type} · {v.occurred_at} <span className={st.cls}>{st.label}</span>
+                  {v.summary && <p>{v.summary}</p>}
+                  <div role="group" aria-label={`处理 ${v.id}`}>
+                    <button onClick={() => act(v.id, "propose")}>转为建议</button> <button onClick={() => act(v.id, "ignore")}>忽略</button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <IgnoreAll
+            label="忽略本来源的全部未判定事件"
+            body={{ source: source.id }}
+            onDone={async (err, n) => {
+              setError(err);
+              if (!err) setNotice(`已忽略 ${n} 条`);
+              await load();
+            }}
+          />
+        </>
       )}
       {next !== null && <button onClick={() => load(next)}>加载更多</button>}
     </section>
@@ -333,6 +386,7 @@ export function SourcesPage() {
   const [sources, setSources] = useState<Source[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(
     () =>
@@ -361,8 +415,21 @@ export function SourcesPage() {
     <main>
       <PageHead lede="APA 从这些地方读你的事。读到的内容先筛查，再决定要不要打扰你。">来源</PageHead>
       {error && <div role="alert">{error}</div>}
+      {notice && <p role="status">{notice}</p>}
       <section role="region" aria-labelledby="h-list">
         <h2 id="h-list">来源登记</h2>
+        <p className="sub">
+          未判定事件在各来源的详情里处理；也可以一次忽略所有来源的未判定事件。{" "}
+          <IgnoreAll
+            label="忽略所有来源的未判定事件"
+            body={{ all: true }}
+            onDone={(err, n) => {
+              setError(err);
+              setNotice(err ? null : `已忽略 ${n} 条未判定事件`);
+              setSelected(null); // 打开的详情列表已过时
+            }}
+          />
+        </p>
         {sources === null ? (
           !error && <p role="status">加载中…</p>
         ) : sources.length === 0 ? (

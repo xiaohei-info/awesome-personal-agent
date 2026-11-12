@@ -22,8 +22,8 @@ func (k *kit) setModel(endpoint string) {
 	k.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
 }
 
-// unjudgedBacklog 是健康视图 model_unavailable 信号里的未判定事件 id（`apa health`）。
-func (k *kit) unjudgedBacklog() []string {
+// unjudgedBacklog 是健康视图 unjudged_backlog 信号里因模型不可用而未判定的条数（`apa health`）。
+func (k *kit) unjudgedBacklog() int {
 	k.t.Helper()
 	r := k.Apa(k.OBS, "", "health")
 	k.expect("apa health", r, 0)
@@ -38,21 +38,21 @@ func (k *kit) unjudgedBacklog() []string {
 		k.t.Fatalf("health 输出不是 JSON: %q", r.Stdout)
 	}
 	for _, s := range h.Signals {
-		if s.ID == "model_unavailable" {
+		if s.ID == "unjudged_backlog" {
 			if s.OK {
-				return nil
+				return 0
 			}
 			var d struct {
-				Unjudged []string `json:"unjudged"`
+				ModelUnavailable int `json:"model_unavailable"`
 			}
 			if err := json.Unmarshal(s.Detail, &d); err != nil {
 				k.t.Fatal(err)
 			}
-			return d.Unjudged
+			return d.ModelUnavailable
 		}
 	}
-	k.t.Fatal("健康视图没有 model_unavailable 信号")
-	return nil
+	k.t.Fatal("健康视图没有 unjudged_backlog 信号")
+	return 0
 }
 
 func (k *kit) stubRequestsAbout(subject string) int {
@@ -135,9 +135,8 @@ func TestFlowTriageFailure(t *testing.T) {
 		}
 		k.waitFor("退避重试：同一事件再次调用模型", 30*time.Second, func() bool { return k.stubRequestsAbout("模型返回500时的评论") >= 2 })
 
-		backlog := strings.Join(k.unjudgedBacklog(), ",")
-		if !strings.Contains(backlog, noModel.ID) || !strings.Contains(backlog, model500.ID) {
-			t.Errorf("健康视图应显示两条未判定积压: %q", backlog)
+		if n := k.unjudgedBacklog(); n != 2 {
+			t.Errorf("健康视图应显示两条因模型不可用的未判定积压: %d", n)
 		}
 		if got := k.itemCount(); got != before {
 			t.Errorf("未判定事件不应进建议流: %d → %d", before, got)

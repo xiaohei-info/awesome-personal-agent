@@ -252,6 +252,14 @@ const (
 	DispositionProposed Disposition = "proposed"
 	DispositionIgnored  Disposition = "ignored"
 	DispositionUnjudged Disposition = "unjudged"
+	// DispositionExpired 是超出自动重判时限的未判定事件：不再自动重判、不计入积压，本人仍可转建议或忽略（§9.3）。
+	DispositionExpired Disposition = "expired"
+)
+
+// 未判定的原因（§6.10 unjudged_reason）。
+const (
+	UnjudgedModelUnavailable = "model_unavailable" // 模型未配置或持续不可用：模型恢复后自动重判
+	UnjudgedUndecided        = "undecided"         // 判断型级联后仍未定：不自动重判，等本人处理
 )
 
 // DedupeKey 是 (去重域, 事件 id)。
@@ -285,6 +293,8 @@ type SourceEvent struct {
 	Disposition     Disposition `json:"disposition"`
 	Item            string      `json:"item,omitempty"`
 	AttachState     string      `json:"attach_state,omitempty"`
+	UnjudgedReason  string      `json:"unjudged_reason,omitempty"`
+	Rejudges        int         `json:"rejudges,omitempty"`
 }
 
 // TrustedSender：缺失或未核实按不在白名单处理（§6.10）。

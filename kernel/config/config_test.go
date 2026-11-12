@@ -96,6 +96,7 @@ delivery_unclaimed_after: 20s
 delivery_backoff: 1s, 2s,3s
 chain_depth_threshold: 2
 guideline_draft_executor: wk.cli
+unjudged_rejudge_days: 0
 `), 0o600)
 	c, err := Load(p)
 	if err != nil {
@@ -104,7 +105,7 @@ guideline_draft_executor: wk.cli
 	if c.Listen != "0.0.0.0:9000" || c.MaxSubprocesses != 8 || c.MaxShortSubprocesses != 1 || c.MaxSourceOutput != 5<<20 ||
 		c.IngestRetention != 7*24*time.Hour || c.RunRetention != 3*24*time.Hour ||
 		c.DeliveryUnclaimedAfter != 20*time.Second || !reflect.DeepEqual(c.DeliveryBackoff, []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}) ||
-		c.ChainDepthThreshold != 2 || c.GuidelineDraftExecutor != "wk.cli" {
+		c.ChainDepthThreshold != 2 || c.GuidelineDraftExecutor != "wk.cli" || c.UnjudgedRejudgeWindow != 0 {
 		t.Fatalf("got %+v", c)
 	}
 }
@@ -123,25 +124,26 @@ func TestLoadPartialKeepsDefaults(t *testing.T) {
 
 func TestLoadRejectsBadConfig(t *testing.T) {
 	cases := map[string]string{
-		"unknown key":    "bogus: 1\n",
-		"zero quota":     "max_subprocesses: 0\n",
-		"negative quota": "max_short_subprocesses: -1\n",
-		"not a number":   "max_subprocesses: many\n",
-		"zero retention": "run_retention_days: 0\n",
-		"empty listen":   "listen: \"\"\n",
-		"bad listen":     "listen: nohostport\n",
-		"duplicate key":  "max_subprocesses: 1\nmax_subprocesses: 2\n",
-		"no colon":       "max_subprocesses 4\n",
-		"nested":         "limits:\n  a: 1\n",
-		"unterminated":   "listen: \"abc\n",
-		"zero unclaimed": "delivery_unclaimed_after: 0s\n",
-		"unit missing":   "delivery_unclaimed_after: 30\n",
-		"bad backoff":    "delivery_backoff: 1m,soon\n",
-		"empty backoff":  "delivery_backoff: \n",
-		"negative step":  "delivery_backoff: 1m,-3m\n",
-		"zero chain":     "chain_depth_threshold: 0\n",
-		"chain not int":  "chain_depth_threshold: deep\n",
-		"empty executor": "guideline_draft_executor:\n",
+		"unknown key":      "bogus: 1\n",
+		"zero quota":       "max_subprocesses: 0\n",
+		"negative quota":   "max_short_subprocesses: -1\n",
+		"not a number":     "max_subprocesses: many\n",
+		"zero retention":   "run_retention_days: 0\n",
+		"empty listen":     "listen: \"\"\n",
+		"bad listen":       "listen: nohostport\n",
+		"duplicate key":    "max_subprocesses: 1\nmax_subprocesses: 2\n",
+		"no colon":         "max_subprocesses 4\n",
+		"nested":           "limits:\n  a: 1\n",
+		"unterminated":     "listen: \"abc\n",
+		"zero unclaimed":   "delivery_unclaimed_after: 0s\n",
+		"unit missing":     "delivery_unclaimed_after: 30\n",
+		"bad backoff":      "delivery_backoff: 1m,soon\n",
+		"empty backoff":    "delivery_backoff: \n",
+		"negative step":    "delivery_backoff: 1m,-3m\n",
+		"zero chain":       "chain_depth_threshold: 0\n",
+		"chain not int":    "chain_depth_threshold: deep\n",
+		"empty executor":   "guideline_draft_executor:\n",
+		"negative rejudge": "unjudged_rejudge_days: -1\n",
 	}
 	for name, body := range cases {
 		p := filepath.Join(t.TempDir(), "config.yaml")

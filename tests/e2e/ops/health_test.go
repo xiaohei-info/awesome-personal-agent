@@ -58,7 +58,7 @@ func (s signal) outcall(t *testing.T) outcallDetail {
 }
 
 // the ten signal ids, in design §15.2 order.
-var signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "rule_fallbacks", "receipt_failures", "other_alerts"}
+var signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts"}
 
 // quietWindow 是 ACT-HLT-02 里"不做任何修复操作"的观察时长。验收文档为 10 分钟；默认按 30 秒缩放
 // （合约命令不带 -timeout，go test 默认 10 分钟超时放不下 10 分钟窗口加造数），
@@ -206,14 +206,14 @@ event_rules:
 	})
 
 	var cli healthView
-	step(t, "ACT-HLT-01 十类信号都显示，两端一致，每类有修复入口", func(t *testing.T) {
+	step(t, "ACT-HLT-01 十一类信号都显示，两端一致，每类有修复入口", func(t *testing.T) {
 		cli = f.health()
 		web := f.webHealth()
 		if cli.Healthy {
-			t.Fatal("十类问题都在时不应报健康")
+			t.Fatal("十一类问题都在时不应报健康")
 		}
 		if len(cli.Signals) != len(signalIDs) {
-			t.Fatalf("应恒有十类信号: %+v", cli.Signals)
+			t.Fatalf("应恒有十一类信号: %+v", cli.Signals)
 		}
 		for i, id := range signalIDs {
 			s := cli.Signals[i]
@@ -283,7 +283,7 @@ event_rules:
 				t.Errorf("安静期间出现修复类 Event: seq=%d type=%s object=%s actor=%+v", e.Seq, e.Type, e.Object, e.Actor)
 			}
 		}
-		// 十类问题仍在：没有任何一类被自动修好。
+		// 十一类问题仍在：没有任何一类被自动修好。
 		for _, id := range signalIDs {
 			if f.health().sig(id).OK {
 				t.Errorf("信号 %s 在没有人修复的情况下变正常了（健康视图不得自行修复）", id)

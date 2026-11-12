@@ -341,28 +341,29 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.Reset()
 		f.ModelStub.SetDefault(modelstub.Reply{Status: 500})
 		f.capture("acc-open", "CAS09 模型端点故障时提交", "s1")
-		// 卡片起草失败也计入 model_unavailable，信号可能早于判断型的重试结束；以该来源事件进入未判定为准。
+		// 卡片起草失败也计入 model_unavailable，信号可能早于判断型的重试结束；以该来源事件进入未判定积压为准。
+		backlog := func() float64 {
+			ok, d := signal("unjudged_backlog")
+			n, _ := d["model_unavailable"].(float64)
+			if ok {
+				return 0
+			}
+			return n
+		}
 		f.waitFor("健康视图出现模型不可用且来源事件未判定", 40*time.Second, func() bool {
-			ok, d := signal("model_unavailable")
-			u, _ := d["unjudged"].([]any)
-			return !ok && len(u) > 0
+			ok, _ := signal("model_unavailable")
+			return !ok && backlog() > 0
 		})
 		eq(t, "退避重试的模型请求数（首次 + 3 次重试）", len(f.modelRequests(judgeMark)), 4)
-		_, detail := signal("model_unavailable")
-		unjudged, _ := detail["unjudged"].([]any)
-		if len(unjudged) != 1 {
-			t.Fatalf("故障期间的来源事件应留在未判定里: %v", detail)
-		}
-		// 恢复后：新的判断照常完成；故障期间的事件按设计不自动重判，留给本人转建议（§5.6）。
+		eq(t, "故障期间的来源事件留在未判定积压里", backlog(), 1.0)
+		// 恢复后：新的判断照常完成；故障期间的事件由后台自动重判（§9.3），本人也可以直接忽略积压，两条路都让积压清空。
 		f.ModelStub.Reset()
 		f.ModelStub.When(judgeMark, reply(`{"choice":"task","confidence":0.9}`))
 		id := newProposal("CAS09 模型恢复后提交", "s1")
 		eq(t, "恢复后判断完成的建议阶段", f.phase(id), "proposed")
-		f.webOK("POST", "/source-events/"+unjudged[0].(string)+"/propose", "", 200)
-		// 起草失败的告警要等同一模板之后的真实成功调用才清除（见 kernel/health 测试），本步骤只验判断型：恢复后未判定清单清空。
-		_, detail = signal("model_unavailable")
-		unjudged, _ = detail["unjudged"].([]any)
-		eq(t, "转建议后未判定清单清空", len(unjudged), 0)
+		f.webOK("POST", "/source-events/ignore", `{"all":true}`, 200)
+		// 起草失败的告警要等同一模板之后的真实成功调用才清除（见 kernel/health 测试），本步骤只验判断型：积压清空。
+		eq(t, "处理后未判定积压清空", backlog(), 0.0)
 	})
 
 	step("ACT-CAS-10 harness 不可用时账本照常", func(t *testing.T) {

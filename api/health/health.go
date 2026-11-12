@@ -1,4 +1,4 @@
-// Package health 是 GET /health 路由（附录 B.2，设计 §15.2）：把 kernel/health 汇总出的十类信号
+// Package health 是 GET /health 路由（附录 B.2，设计 §15.2）：把 kernel/health 汇总出的十一类信号
 // 连同修复入口原样给出，`apa health` 与 Web 读同一份。
 //
 // 路由里没有业务规则：是否异常由 kernel/health 判定，这里只做格式搬运。
@@ -20,17 +20,25 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// Signal 是十类信号之一。OK 为假时 Why 说明触发机制，Next 指向修复入口（只报不修）。
+// Signal 是十一类信号之一。OK 为假时 Why 说明触发机制，Next 指向修复入口（只报不修），
+// Severity 是 error（异常）或 warning（待本人处理的提醒，不影响 healthy）。
 type Signal struct {
-	ID     string `json:"id"`
-	OK     bool   `json:"ok"`
-	Count  int    `json:"count"`
-	Why    string `json:"why,omitempty"`
-	Next   string `json:"next"`
-	Detail any    `json:"detail,omitempty"`
+	ID       string `json:"id"`
+	OK       bool   `json:"ok"`
+	Count    int    `json:"count"`
+	Severity string `json:"severity,omitempty"`
+	Why      string `json:"why,omitempty"`
+	Next     string `json:"next"`
+	Detail   any    `json:"detail,omitempty"`
 }
 
-// Report 是 GET /health 的响应；Signals 恒为十项且顺序固定（与设计 §15.2 表一致）。
+// Severity 的取值。
+const (
+	SeverityError   = "error"
+	SeverityWarning = "warning"
+)
+
+// Report 是 GET /health 的响应；Signals 恒为十一项且顺序固定（与设计 §15.2 表一致）。
 type Report struct {
 	Healthy bool     `json:"healthy"`
 	Signals []Signal `json:"signals"`
@@ -76,7 +84,7 @@ func build(v khealth.View) Report {
 	sig := func(id string, n int, why, next string, detail any) Signal {
 		s := Signal{ID: id, OK: n == 0, Count: n, Next: next, Detail: detail}
 		if n > 0 {
-			s.Why = why
+			s.Why, s.Severity = why, SeverityError
 		}
 		return s
 	}
@@ -107,7 +115,35 @@ func build(v khealth.View) Report {
 			judgements = append(judgements, modelDetail{m.Kind, m.Object})
 		}
 	}
-	unjudged := ids(v.Unjudged, func(e domain.SourceEvent) string { return e.ID })
+	endpointDown := 0
+	if v.Endpoint != "" {
+		endpointDown = 1
+	}
+	type sourceCount struct {
+		Source string `json:"source"`
+		Count  int    `json:"count"`
+	}
+	backlog := map[string]any{"model_unavailable": 0, "undecided": 0, "expired": v.Expired}
+	bySource, at := []sourceCount{}, map[string]int{}
+	for _, e := range v.Unjudged {
+		reason := domain.UnjudgedModelUnavailable // 原因为空是迁移前留下的，按模型不可用对待（同自动重判）
+		if e.UnjudgedReason == domain.UnjudgedUndecided {
+			reason = domain.UnjudgedUndecided
+		}
+		backlog[reason] = backlog[reason].(int) + 1
+		i, ok := at[e.SourceID]
+		if !ok {
+			i, at[e.SourceID] = len(bySource), len(bySource)
+			bySource = append(bySource, sourceCount{Source: e.SourceID})
+		}
+		bySource[i].Count++
+	}
+	backlog["sources"] = bySource
+	backlogSig := sig("unjudged_backlog", len(v.Unjudged), "source events are still waiting for a judgement; those held back for lack of a model are judged again automatically once it answers, the rest wait for the owner",
+		"source page: propose or ignore, one by one or per source", backlog)
+	if !backlogSig.OK {
+		backlogSig.Severity = SeverityWarning
+	}
 
 	rep := Report{Healthy: v.Healthy(), Signals: []Signal{
 		sig("source_failures", len(v.SourceFailures), "a source has consecutive pull failures, is disabled, or needs input",
@@ -122,8 +158,9 @@ func build(v khealth.View) Report {
 			"project page", ids(v.AgentsMDDrift, func(d agentsmd.OpenDrift) string { return d.Item })),
 		sig("pack_rejections", len(v.PackRejections), "a pack failed to load; the last valid version is kept",
 			"fix the pack, then hot-reload", ids(v.PackRejections, func(r packs.Rejection) string { return r.Pack })),
-		sig("model_unavailable", len(v.ModelUnavailable)+len(unjudged), "a judge call failed or timed out and has not succeeded since, or source events remain unjudged",
-			"settings page and source page", map[string]any{"screening": screening, "judgements": judgements, "unjudged": unjudged}),
+		sig("model_unavailable", len(v.ModelUnavailable)+endpointDown, "the model endpoint is not configured while events wait for it, keeps failing, or a judge call failed and has not succeeded since",
+			"settings page: model endpoint", map[string]any{"endpoint": v.Endpoint, "screening": screening, "judgements": judgements}),
+		backlogSig,
 		sig("rule_fallbacks", len(v.RuleFallbacks), "a rule fell back to observe after its content changed",
 			"re-review the rule in Web", ids(v.RuleFallbacks, func(f khealth.RuleFallback) string { return f.Rule })),
 		sig("receipt_failures", len(v.ReceiptFailures), "a receipt or capture was rejected by the kernel (exit 2, 4 or 23) and has not succeeded since for that credential and command",

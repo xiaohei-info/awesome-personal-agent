@@ -77,6 +77,12 @@ CREATE TABLE sources_runner_reject (
 	at INTEGER NOT NULL
 );
 CREATE INDEX sources_runner_reject_source ON sources_runner_reject(source_id, seq);`,
+}, {
+	// 未判定的原因与自动重判次数（§9.3）：模型恢复后只重判因模型不可用而未判定的事件；次数进处置的幂等键，重判不撞上次的结果。
+	Version: 2, Name: "add-event-unjudged-reason",
+	SQL: `ALTER TABLE sources_runner_event ADD COLUMN unjudged_reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN rejudges INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX sources_runner_event_disposition ON sources_runner_event(disposition, seq);`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。
@@ -614,7 +620,7 @@ func (r *Runner) healthAlert(c *command.Ctx, src domain.Source, in resultIn) err
 // ---- 读取（来源页与入站流水线使用；只读） ----
 
 const eventCols = `id, source_id, dedupe_domain, event_id, type, subject, summary, detail, link, occurred_at,
-	correlation_keys, sender, sender_verified, disposition, item, attach_state`
+	correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges`
 
 // Events 按落盘顺序返回某来源的来源事件。
 func Events(tx *store.Tx, sourceID string) ([]domain.SourceEvent, error) {
@@ -626,31 +632,116 @@ func Pending(tx *store.Tx) ([]domain.SourceEvent, error) {
 	return queryEvents(tx, `WHERE disposition = ?`, string(domain.DispositionPending))
 }
 
-// SetDisposition 在调用方事务内给一条还是 pending 的来源事件写处置结果与（若有）建出的事项。
-// 这两列只由入站流水线经本函数维护；不记事件，调用方自己负责留痕。
-func SetDisposition(tx *store.Tx, id string, d domain.Disposition, item string) error {
+// SetDisposition 在调用方事务内给一条还是 pending 的来源事件写处置结果与（若有）建出的事项；
+// d 为 unjudged 时 reason 是未判定的原因（domain.Unjudged*），其余处置忽略 reason。
+// 这些列只由入站流水线经本函数与下面的积压函数维护；不记事件，调用方自己负责留痕。
+func SetDisposition(tx *store.Tx, id string, d domain.Disposition, item, reason string) error {
 	switch d {
 	case domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored, domain.DispositionUnjudged:
 	default:
 		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(d)+" cannot be set", "use attached, proposed, ignored or unjudged")
 	}
-	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND disposition = ?`,
-		string(d), item, id, string(domain.DispositionPending))
+	if d != domain.DispositionUnjudged {
+		reason = ""
+	}
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ?, unjudged_reason = ? WHERE id = ? AND disposition = ?`,
+		string(d), item, reason, id, string(domain.DispositionPending))
 	if err == nil && n == 0 {
 		return domain.NewError(domain.CodeConflict, "source event "+id+" is not pending", "re-read the source event")
 	}
 	return err
 }
 
-// ProposeUnjudged 在调用方事务内把一条还是 unjudged 的来源事件改为 proposed 并关联事项（§5.6 手动转建议）。
-// 不记事件，调用方自己负责留痕。
-func ProposeUnjudged(tx *store.Tx, id, item string) error {
-	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND disposition = ?`,
-		string(domain.DispositionProposed), item, id, string(domain.DispositionUnjudged))
+// ---- 未判定积压（§9.3）：unjudged 与 expired 合称积压，expired 不再自动重判 ----
+
+// rejudgeable 是自动重判的对象：因模型不可用而未判定的；原因为空是迁移前留下的，同样按模型不可用对待。
+const rejudgeable = `disposition = 'unjudged' AND unjudged_reason IN ('', 'model_unavailable')`
+
+// Requeue 在调用方事务内把一条可重判的 unjudged 事件放回 pending，重判次数加一并返回新次数。不记事件。
+func Requeue(tx *store.Tx, id string) (int, error) {
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = 'pending', unjudged_reason = '', rejudges = rejudges + 1
+		WHERE id = ? AND `+rejudgeable, id)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		return 0, domain.NewError(domain.CodeConflict, "source event "+id+" is not unjudged for lack of a model", "re-read the source event")
+	}
+	ev, err := Event(tx, id)
+	return ev.Rejudges, err
+}
+
+// Resolve 在调用方事务内结清一条积压事件：to 为 expired 时只接受 unjudged；为 proposed、ignored 时接受 unjudged 与 expired
+// （本人处理），proposed 同时关联事项。不记事件，调用方自己负责留痕。
+func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error {
+	from := `disposition IN ('unjudged', 'expired')`
+	switch to {
+	case domain.DispositionExpired:
+		from = `disposition = 'unjudged'`
+	case domain.DispositionProposed, domain.DispositionIgnored:
+	default:
+		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored or expired")
+	}
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND `+from, string(to), item, id)
 	if err == nil && n == 0 {
-		return domain.NewError(domain.CodeConflict, "source event "+id+" is not unjudged", "re-read the source event")
+		return domain.NewError(domain.CodeConflict, "source event "+id+" is not in the unjudged backlog", "re-read the source event")
 	}
 	return err
+}
+
+// RejudgeCandidates 返回 since 之后发生、可自动重判的 unjudged 事件，至多 limit 条；重判次数少的在前，同次数按落盘顺序，
+// 一条总是失败的事件不会一直挡在队首。
+func RejudgeCandidates(tx *store.Tx, since time.Time, limit int) ([]domain.SourceEvent, error) {
+	as, err := querySeq(tx, `WHERE `+rejudgeable+` AND occurred_at >= ? ORDER BY rejudges, seq LIMIT ?`, since.UnixNano(), limit)
+	out := make([]domain.SourceEvent, len(as))
+	for i, a := range as {
+		out[i] = a.SourceEvent
+	}
+	return out, err
+}
+
+// StaleUnjudged 返回 before 之前发生、仍是 unjudged 的事件 id（到期转 expired）。
+func StaleUnjudged(tx *store.Tx, before time.Time) ([]string, error) {
+	return ids(tx, `WHERE disposition = 'unjudged' AND occurred_at < ? ORDER BY seq`, before.UnixNano())
+}
+
+// Backlog 返回积压事件（unjudged 与 expired）的 id；source 非空时只看该来源。
+func Backlog(tx *store.Tx, source string) ([]string, error) {
+	if source == "" {
+		return ids(tx, `WHERE disposition IN ('unjudged', 'expired') ORDER BY seq`)
+	}
+	return ids(tx, `WHERE disposition IN ('unjudged', 'expired') AND source_id = ? ORDER BY seq`, source)
+}
+
+// CountExpired 返回已过期的积压事件数（健康视图只给计数）。
+func CountExpired(tx *store.Tx) (int, error) {
+	r, err := tx.Query(`SELECT COUNT(*) FROM sources_runner_event WHERE disposition = 'expired'`)
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+	var n int64
+	if r.Next() {
+		err = r.Scan(&n)
+	}
+	return int(n), errors.Join(err, r.Err())
+}
+
+func ids(tx *store.Tx, tail string, args ...any) ([]string, error) {
+	rows, err := tx.Query(`SELECT id FROM sources_runner_event `+tail, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // 挂靠消息状态（§9.4 attach_state）。
@@ -737,11 +828,14 @@ func Attachments(tx *store.Tx, item string) ([]Attachment, error) {
 	return querySeq(tx, `WHERE disposition = ? AND item = ? ORDER BY seq`, string(domain.DispositionAttached), item)
 }
 
-// EventPage 按落盘顺序返回某来源 after 之后的至多 limit 条事件，d 非空时只看该处置；还有下一页时 next 是下一次的 after，否则为 0。
-func EventPage(tx *store.Tx, sourceID string, d domain.Disposition, after int64, limit int) ([]domain.SourceEvent, int64, error) {
+// EventPage 按落盘顺序返回某来源 after 之后的至多 limit 条事件，ds 非空时只看这些处置；还有下一页时 next 是下一次的 after，否则为 0。
+func EventPage(tx *store.Tx, sourceID string, ds []domain.Disposition, after int64, limit int) ([]domain.SourceEvent, int64, error) {
 	where, args := `WHERE source_id = ? AND seq > ?`, []any{sourceID, after}
-	if d != "" {
-		where, args = where+` AND disposition = ?`, append(args, string(d))
+	if len(ds) > 0 {
+		where += ` AND disposition IN (?` + strings.Repeat(`,?`, len(ds)-1) + `)`
+		for _, d := range ds {
+			args = append(args, string(d))
+		}
 	}
 	as, err := querySeq(tx, where+` ORDER BY seq LIMIT ?`, append(args, limit+1)...)
 	if err != nil {
@@ -767,16 +861,17 @@ func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
 	var out []Attachment
 	for rows.Next() {
 		var (
-			a            Attachment
-			at, verified int64
-			keys, disp   string
+			a                      Attachment
+			at, verified, rejudges int64
+			keys, disp             string
 		)
 		e := &a.SourceEvent
 		if err := rows.Scan(&a.Seq, &e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
-			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState); err != nil {
+			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges); err != nil {
 			return nil, err
 		}
 		e.OccurredAt, e.SenderVerified, e.Disposition = time.Unix(0, at).UTC(), verified != 0, domain.Disposition(disp)
+		e.Rejudges = int(rejudges)
 		if err := json.Unmarshal([]byte(keys), &e.CorrelationKeys); err != nil {
 			return nil, fmt.Errorf("runner: event %s correlation_keys: %w", e.ID, err)
 		}
@@ -806,15 +901,16 @@ func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent,
 	var out []domain.SourceEvent
 	for rows.Next() {
 		var (
-			e            domain.SourceEvent
-			at, verified int64
-			keys, disp   string
+			e                      domain.SourceEvent
+			at, verified, rejudges int64
+			keys, disp             string
 		)
 		if err := rows.Scan(&e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
-			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState); err != nil {
+			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges); err != nil {
 			return nil, err
 		}
 		e.OccurredAt, e.SenderVerified, e.Disposition = time.Unix(0, at).UTC(), verified != 0, domain.Disposition(disp)
+		e.Rejudges = int(rejudges)
 		if err := json.Unmarshal([]byte(keys), &e.CorrelationKeys); err != nil {
 			return nil, fmt.Errorf("runner: event %s correlation_keys: %w", e.ID, err)
 		}
