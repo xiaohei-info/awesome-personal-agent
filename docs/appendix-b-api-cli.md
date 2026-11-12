@@ -16,7 +16,7 @@
 | `apa login` | 保存 APA 地址与 token | 任意 token | 3 |
 | `apa guide [主题] [--template]` | 输出使用说明，只写机制；`--template` 输出常驻指令模板 | 无 | |
 | `apa declare <文件>` | 提交插件声明（无头运行、执行者），本人在 Web 确认后生效 | worker | 4 |
-| `apa version` | 【规划中（v0.2.0）】版本号、构建提交、各模块数据结构版本与各协议版本 | 无 | |
+| `apa version` | 版本号、构建提交、各模块数据结构版本与各协议版本 | 无 | |
 | `apa doctor [--json] [--upgrade-check]` | 【规划中（v0.2.0）】自检（主文档 §15.5）；`--upgrade-check` 是升级前的只读预检（主文档 §16.5） | 主机本地；内核一侧的检查需 observer | 1 |
 | `apa backup create/verify/restore` | `create [--out <目录>] [--no-secrets]` 备份；`verify <备份>` 校验；`restore <备份> --home <目录>` 恢复到空目录（主文档 §16.5） | 主机本地 | 1、6 |
 | **上下文** | | | |
@@ -170,7 +170,8 @@
 | 运行 | `GET /runs`，`GET /runs/{id}` | 运行记录 | observer |
 | | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
 | 回放与健康 | `GET /why/{id}`，`GET /health` | 回放、健康视图；所有健康告警都经同一处产出健康类投递（§15.2），读取走 `GET /deliveries/unread` | observer |
-| | `GET /doctor`，`GET /version` | 【规划中（v0.2.0）】内核一侧的自检结果（主文档 §15.5）；版本与各协议版本 | `doctor` 需 observer；`version` 不需要凭据 |
+| | `GET /doctor` | 【规划中（v0.2.0）】内核一侧的自检结果（主文档 §15.5） | observer |
+| | `GET /version` | 版本与各协议版本（B.5） | 不需要凭据 |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/grants`、`/settings/purge` | 策略（含人格、打扰上限与静音）、两个模型端点、凭据、白名单、名单、命令登记、声明确认、授权单签发与撤销（`POST /settings/grants`、`POST /settings/grants/{id}/revoke`）、物理删除 | 只有 Web 登录 |
@@ -294,10 +295,10 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 `apa version` 与 `GET /version` 返回同一份内容：
 
 ```json
-{"version": "0.2.0", "commit": "…", "schema": {"ledger": 3}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "probability_judgment": "probability-judgment/1"}}
+{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 3}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "probability_judgment": "probability-judgment/1"}}
 ```
 
-`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本，可能大于上例中的 3。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
+`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本，可能大于上例中的 3。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
 
 ## B.6 v0.2.0 对已有契约的改动
 

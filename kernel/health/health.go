@@ -11,6 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -131,7 +132,7 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	if o.Deliveries == nil {
 		return View{}, errors.New("health: Deliveries is required")
 	}
-	now := time.Now()
+	now := clock.Now()
 	if o.Now != nil {
 		now = o.Now()
 	}

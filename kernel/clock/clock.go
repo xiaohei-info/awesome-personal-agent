@@ -117,13 +117,13 @@ type Clock struct {
 	now     func() time.Time
 }
 
-// New 创建时钟；now 为 nil 取系统时间。handler 必填：到期处理经它交回，本包不认识业务。
+// New 创建时钟；now 为 nil 取本包的 Now。handler 必填：到期处理经它交回，本包不认识业务。
 func New(st *store.Store, h Handler, now func() time.Time) (*Clock, error) {
 	if h == nil {
 		return nil, errors.New("clock: handler is required")
 	}
 	if now == nil {
-		now = time.Now
+		now = Now
 	}
 	return &Clock{st: st, handler: h, now: now}, nil
 }
@@ -228,6 +228,7 @@ func (c *Clock) Run(ctx context.Context, interval time.Duration, onErr ...func(e
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-tk.C:
+		case <-Changed(): // 测试构建：偏移前进后立即重算到期
 		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -72,15 +73,21 @@ type ClockRule struct {
 }
 
 type SourceRule struct {
-	ID              string         `yaml:"id"`
-	Match           map[string]any `yaml:"match"`
-	Kind            string         `yaml:"kind"`
-	ProjectBy       string         `yaml:"project_by"`
-	Then            string         `yaml:"then"`
-	CorrelationKeys []string       `yaml:"correlation_keys"`
-	OnUpdate        string         `yaml:"on_update"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
-	Accept          string         `yaml:"accept"`
-	Mode            string         `yaml:"mode"`
+	ID        string         `yaml:"id"`
+	Match     map[string]any `yaml:"match"`
+	Where     []Condition    `yaml:"where"`
+	Kind      string         `yaml:"kind"`
+	ProjectBy string         `yaml:"project_by"`
+	Then      string         `yaml:"then"`
+	// 各步所用的提示词模板名（C.5）；省略时取内置模板。
+	Screen          string   `yaml:"screen"`
+	Draft           string   `yaml:"draft"`
+	Prescreen       string   `yaml:"prescreen"`
+	Extract         string   `yaml:"extract"`
+	CorrelationKeys []string `yaml:"correlation_keys"`
+	OnUpdate        string   `yaml:"on_update"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
+	Accept          string   `yaml:"accept"`
+	Mode            string   `yaml:"mode"`
 }
 
 type WebhookScheme struct {
@@ -535,8 +542,8 @@ func checkSourceRule(r SourceRule) error {
 	if err := flat(where+".match", r.Match); err != nil {
 		return err
 	}
-	if r.ProjectBy != "" && r.ProjectBy != "repo_remote" && r.ProjectBy != "none" && !strings.HasPrefix(r.ProjectBy, "fixed:") {
-		return fmt.Errorf("%s: project_by %q must be repo_remote, fixed:<project> or none", where, r.ProjectBy)
+	if r.ProjectBy != "" && r.ProjectBy != "repo_remote" && r.ProjectBy != "none" && r.ProjectBy != "draft" && !strings.HasPrefix(r.ProjectBy, "fixed:") {
+		return fmt.Errorf("%s: project_by %q must be repo_remote, fixed:<project>, draft or none", where, r.ProjectBy)
 	}
 	switch r.OnUpdate {
 	case "", "refresh", "attach":
@@ -544,9 +551,17 @@ func checkSourceRule(r SourceRule) error {
 		return fmt.Errorf("%s: on_update %q must be refresh or attach", where, r.OnUpdate)
 	}
 	switch r.Then {
-	case "", "proposed", "ignore", "judge":
+	case "", "proposed", "ignore", "screen", "judge", "extract", "digest", "alert":
 	default:
-		return fmt.Errorf("%s: then %q must be proposed, ignore or judge", where, r.Then)
+		return fmt.Errorf("%s: then %q must be proposed, ignore, screen, extract, digest or alert (judge is the old name of screen)", where, r.Then)
+	}
+	if r.Then == "alert" && len(r.Where) == 0 {
+		return fmt.Errorf("%s: an alert rule must carry where[]: alert cannot hang on every event", where)
+	}
+	for i, c := range r.Where {
+		if err := c.check(fmt.Sprintf("%s.where[%d]", where, i)); err != nil {
+			return err
+		}
 	}
 	switch r.Accept {
 	case "", "manual":
@@ -929,6 +944,72 @@ func checkOnUndecided(m *PromptMeta) error {
 		default:
 			return fmt.Errorf("on_undecided %v must be a number for a score question", m.OnUndecided)
 		}
+	}
+	return nil
+}
+
+// Condition 是来源规则 where[] 里的一条字段条件（C.5）：平铺的比较，不是表达式。
+type Condition struct {
+	Field string `yaml:"field"`
+	Op    string `yaml:"op"`
+	Value any    `yaml:"value"`
+}
+
+// EventFields 是 where[] 可引用的标准事件顶层字段；此外还有 metrics.<指标名>。
+var EventFields = []string{"type", "subject", "summary", "detail", "link", "sender", "sender_verified", "merge_key", "source"}
+
+// MetricName 返回 field 是 metrics.<名> 时的指标名。
+func MetricName(field string) (string, bool) {
+	n, ok := strings.CutPrefix(field, "metrics.")
+	return n, ok && n != ""
+}
+
+// IsChangeOp 报告 op 是否是与同一序列上一次取值比较的变化类条件。
+func IsChangeOp(op string) bool {
+	return op == "changed" || op == "crosses_above" || op == "crosses_below"
+}
+
+func (c Condition) check(where string) error {
+	_, isMetric := MetricName(c.Field)
+	if !isMetric && !slices.Contains(EventFields, c.Field) {
+		return fmt.Errorf("%s: field %q must be a standard event field (%s) or metrics.<name>", where, c.Field, strings.Join(EventFields, ", "))
+	}
+	_, isInt := c.Value.(int)
+	_, isFloat := c.Value.(float64)
+	numeric := isInt || isFloat
+	switch c.Op {
+	case "eq", "ne":
+		switch c.Value.(type) {
+		case string, bool, int, float64:
+			return nil
+		}
+		return fmt.Errorf("%s: op %s needs a scalar value", where, c.Op)
+	case "in":
+		l, ok := c.Value.([]any)
+		if !ok || len(l) == 0 {
+			return fmt.Errorf("%s: op in needs a non-empty list value", where)
+		}
+		return nil
+	case "gt", "gte", "lt", "lte":
+		if !isMetric || !numeric {
+			return fmt.Errorf("%s: op %s compares a number and can only be used on metrics.<name>", where, c.Op)
+		}
+	case "changed":
+		if !isMetric {
+			return fmt.Errorf("%s: op changed can only be used on metrics.<name>", where)
+		}
+		if c.Value != nil {
+			return fmt.Errorf("%s: op changed takes no value", where)
+		}
+	case "crosses_above", "crosses_below":
+		if !isMetric {
+			return fmt.Errorf("%s: op %s can only be used on metrics.<name>", where, c.Op)
+		}
+		if !numeric {
+			return fmt.Errorf("%s: op %s needs a numeric value", where, c.Op)
+		}
+	default:
+		return fmt.Errorf("%s: op %q must be eq, ne, in, gt, gte, lt, lte, changed, crosses_above or crosses_below", where, c.Op)
 	}
 	return nil
 }

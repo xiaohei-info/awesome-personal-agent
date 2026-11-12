@@ -19,6 +19,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -261,7 +262,7 @@ type Executor struct {
 // New 返回 Executor；now 为 nil 时用系统时钟。
 func New(st *store.Store, now func() time.Time) *Executor {
 	if now == nil {
-		now = time.Now
+		now = clock.Now
 	}
 	return &Executor{st: st, now: now, MaxChainDepth: DefaultMaxChainDepth, specs: map[string]Spec{}}
 }
