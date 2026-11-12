@@ -13,6 +13,7 @@ const (
 	CodeBasisRequired        Code = "basis_required"         // 403 → 23：替本人做决定的依据不足（§14.5）
 	CodeNotFound             Code = "not_found"              // 404 → 5
 	CodeConflict             Code = "conflict"               // 409 → 6
+	CodeLoginLocked          Code = "login_locked"           // 429 → 1：登录被限速或锁定（§14.13），带 Retry-After
 	CodeInternal             Code = "internal"               // 其余 → 1
 )
 
@@ -44,6 +45,7 @@ var codeHTTP = map[Code]int{
 	CodeBasisRequired:        403,
 	CodeNotFound:             404,
 	CodeConflict:             409,
+	CodeLoginLocked:          429,
 	CodeInternal:             500,
 }
 
@@ -57,6 +59,7 @@ var codeExit = map[Code]int{
 	CodeBasisRequired:        ExitBasisRequired,
 	CodeNotFound:             ExitNotFound,
 	CodeConflict:             ExitConflict,
+	CodeLoginLocked:          ExitUnclassified,
 	CodeInternal:             ExitUnclassified,
 }
 

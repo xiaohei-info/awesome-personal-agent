@@ -133,6 +133,9 @@ func (e *env) eventTypes() []string {
 	if err := e.st.View(bg, func(tx *store.Tx) error {
 		es, err := eventlog.Read(tx, 0, 100)
 		for _, x := range es {
+			if strings.HasPrefix(x.Event.Type, "auth.") { // 登录本身的审计事件，与被测的设置变更无关
+				continue
+			}
 			out = append(out, string(x.Event.Type))
 		}
 		return err

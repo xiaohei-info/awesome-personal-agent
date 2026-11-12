@@ -97,6 +97,9 @@ func run(ctx context.Context, c *client.Ctx, ready func(net.Addr)) error {
 	if err != nil {
 		return usage(err.Error(), "fix "+l.Config)
 	}
+	if err := cfg.CheckExposure(); err != nil { // 先于开库与监听：拒绝启动时什么都不动
+		return usage(err.Error(), "set `public_url: https://<your domain>` in "+l.Config+", or listen on 127.0.0.1")
+	}
 	reg, err := registry()
 	if err != nil {
 		return err

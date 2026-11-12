@@ -4,6 +4,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,6 +36,8 @@ type Config struct {
 	GuidelineDraftExecutor string
 	// UnjudgedRejudgeWindow 是未判定积压自动重判的年龄窗口（§9.3）：更早的转 expired。0 表示关闭，既不重判也不转 expired。
 	UnjudgedRejudgeWindow time.Duration
+	// PublicURL 是本人访问 Web 的外部地址，必须是 https；监听非本机地址时必须配置（§14.13）。空表示未配置。
+	PublicURL string
 }
 
 // Default 返回设计规定的默认值：额度 4/2，来源输出上限 32MB，Ingest 30 天，运行目录 14 天，
@@ -220,6 +224,11 @@ func apply(c *Config, seen map[string]bool, raw string) error {
 			return fmt.Errorf("%s 不能为空；不配置就删掉这一行", k)
 		}
 		c.GuidelineDraftExecutor = v
+	case "public_url":
+		if err := checkPublicURL(v); err != nil {
+			return err
+		}
+		c.PublicURL = v
 	default:
 		return fmt.Errorf("未知配置项 %q", k)
 	}
@@ -243,6 +252,36 @@ func scalar(v string) (string, error) {
 		v = v[:i]
 	}
 	return strings.TrimSpace(v), nil
+}
+
+func checkPublicURL(v string) error {
+	u, err := url.Parse(v)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("public_url 必须是 https 地址（https://host[:port]）: %q", v)
+	}
+	return nil
+}
+
+// CheckExposure 校验暴露面（§14.13）：监听非本机地址而没有 https 的 public_url 时返回错误，apa serve 据此拒绝启动。
+func (c Config) CheckExposure() error {
+	if c.PublicURL == "" && !isLocalListen(c.Listen) {
+		return fmt.Errorf("listen %s 不是本机地址，必须在 config.yaml 配置 https 的 public_url", c.Listen)
+	}
+	return nil
+}
+
+// isLocalListen：host 是回环 IP 或 localhost 才算本机；空 host、0.0.0.0、:: 绑定全部网卡，不算。
+func isLocalListen(listen string) bool {
+	i := strings.LastIndexByte(listen, ':')
+	if i < 0 {
+		return false
+	}
+	host := strings.Trim(listen[:i], "[]")
+	if host == "localhost" {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
 }
 
 func checkListen(v string) error {
