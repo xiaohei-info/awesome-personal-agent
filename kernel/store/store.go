@@ -21,10 +21,14 @@ var ErrReadOnly = errors.New("store: write in read-only transaction")
 
 // Store 持有唯一一条写连接；所有事务经互斥锁串行，即单写者。
 type Store struct {
-	mu   sync.Mutex
-	c    *conn
-	path string
+	mu     sync.Mutex
+	c      *conn
+	path   string
+	ledger int
 }
+
+// SchemaLedger 是本账本的结构版本（`schema.ledger`，附录 B.5）：Open 成功后即登记的最高账本结构版本。
+func (s *Store) SchemaLedger() int { return s.ledger }
 
 // Open 打开（必要时创建）<home>/ledger.db，设置 WAL + 同步落盘，并按 reg 自动升级到最新版本。
 // reg 为 nil 表示没有模块迁移。任何一步失败都不返回半开的 Store。
@@ -37,12 +41,24 @@ func Open(home string, reg *Registry) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{c: c, path: path}
+	if reg == nil {
+		reg = NewRegistry()
+	}
+	// 版本闸先于任何写入（含 WAL 切换与迁移表）：被拒绝的账本保持原样，旧版本二进制仍能打开。
+	applied, err := c.readApplied()
+	if err == nil {
+		err = reg.gate(applied)
+	}
+	if err != nil {
+		c.close()
+		return nil, err
+	}
+	s := &Store{c: c, path: path, ledger: reg.SchemaLedger()}
 	if err := s.setup(); err != nil {
 		c.close()
 		return nil, err
 	}
-	if err := s.migrate(reg); err != nil {
+	if err := s.migrate(reg, applied); err != nil {
 		c.close()
 		return nil, err
 	}

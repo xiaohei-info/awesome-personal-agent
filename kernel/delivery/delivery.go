@@ -61,6 +61,12 @@ CREATE TABLE delivery_injection (
 }, {
 	Version: 2, Name: "add-delivery-run",
 	SQL: `ALTER TABLE delivery_delivery ADD COLUMN run TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 3（§6.9、§7.4）：规则 alert 出口的提醒没有事项，记触发它的来源事件与规则（origin）；
+	// 被日上限或静音压成“只留 Web 未读”的投递记原因（suppressed：daily_cap 或 muted）。
+	Version: 3, Ledger: 3, Name: "ledger-v3-origin-suppressed",
+	SQL: `ALTER TABLE delivery_delivery ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+ALTER TABLE delivery_delivery ADD COLUMN suppressed TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // DefaultBackoff 是失败退避：第 n 次失败后 Backoff[n-1] 再可领；第 len+1 次失败转 fallback_web。
