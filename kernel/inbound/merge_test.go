@@ -18,6 +18,16 @@ func mergeEnv(t *testing.T) *env {
 	return e
 }
 
+// sev 是来源事件（来源给的 id）在账本里的 id，proposal.sources 记的就是它。
+func (e *env) sev(source string, eventIDs ...string) (out []string) {
+	e.t.Helper()
+	all := e.byID(source)
+	for _, id := range eventIDs {
+		out = append(out, all[id].ID)
+	}
+	return
+}
+
 func (e *env) transition(id string, to domain.Phase) {
 	e.t.Helper()
 	e.must("item.transition", map[string]any{"id": id, "to": to, "reason": "test"})
@@ -43,7 +53,7 @@ func TestSameLinkFromTwoSourcesIsOneProposal(t *testing.T) {
 		t.Fatalf("want one proposal, got %d of %d items", len(ps), len(e.allItems()))
 	}
 	p := ps[0].Proposal
-	if p == nil || !slices.Equal(p.Sources, []string{"prh-link-a", "prh-link-b"}) {
+	if p == nil || !slices.Equal(p.Sources, append(e.sev("src_a", "prh-link-a"), e.sev("src_b", "prh-link-b")...)) {
 		t.Fatalf("proposal %+v", p)
 	}
 	a, b := e.events("src_a")[0], e.events("src_b")[0]
@@ -72,7 +82,8 @@ func TestNoLinkMergesByTitleAndSender(t *testing.T) {
 	for _, p := range ps {
 		byFirst[p.Proposal.Sources[0]] = p.Proposal.Sources
 	}
-	if !slices.Equal(byFirst["prh-title-a"], []string{"prh-title-a", "prh-title-b"}) || !slices.Equal(byFirst["prh-title-c"], []string{"prh-title-c"}) {
+	a, b, c := e.sev("src_a", "prh-title-a")[0], e.sev("src_b", "prh-title-b")[0], e.sev("src_b", "prh-title-c")[0]
+	if !slices.Equal(byFirst[a], []string{a, b}) || !slices.Equal(byFirst[c], []string{c}) {
 		t.Fatalf("sources %+v", byFirst)
 	}
 }
@@ -113,10 +124,10 @@ func TestAcceptedItemIsRecommendedNotMerged(t *testing.T) {
 		t.Fatalf("want a new proposal, got %+v", ps)
 	}
 	p := ps[0].Proposal
-	if p.Recommend != "attach" || p.AttachTo != m1 || !slices.Equal(p.Sources, []string{"prh-link-c"}) {
+	if p.Recommend != "attach" || p.AttachTo != m1 || !slices.Equal(p.Sources, e.sev("src_a", "prh-link-c")) {
 		t.Fatalf("proposal %+v", p)
 	}
-	if got := e.item(m1); got.Phase != domain.PhaseOpen || got.Proposal == nil || !slices.Equal(got.Proposal.Sources, []string{"prh-link-a"}) || len(e.eventsOf(m1)) != before {
+	if got := e.item(m1); got.Phase != domain.PhaseOpen || got.Proposal == nil || !slices.Equal(got.Proposal.Sources, e.sev("src_a", "prh-link-a")) || len(e.eventsOf(m1)) != before {
 		t.Fatalf("accepted item must not change: %+v", got)
 	}
 	e.verify()
@@ -132,7 +143,7 @@ func TestDroppedProposalDoesNotMerge(t *testing.T) {
 
 	e.emit("src_a", "ticket", ev("prh-title-d", "ticket.opened", "prh 报销单待签", bob))
 	ps := e.proposed()
-	if len(ps) != 1 || ps[0].ID == c || !slices.Equal(ps[0].Proposal.Sources, []string{"prh-title-d"}) || ps[0].Proposal.Recommend != "" {
+	if len(ps) != 1 || ps[0].ID == c || !slices.Equal(ps[0].Proposal.Sources, e.sev("src_a", "prh-title-d")) || ps[0].Proposal.Recommend != "" {
 		t.Fatalf("proposed %+v", ps)
 	}
 	if got := e.item(c); got.Phase != domain.PhaseDropped || len(got.Proposal.Sources) != 1 {
@@ -149,7 +160,7 @@ func TestOldProposalDoesNotMerge(t *testing.T) {
 	e.now = e.now.Add(8 * 24 * time.Hour)
 	e.emit("src_b", "ticket", ev("prh-old-b", "ticket.opened", "旧事", link))
 
-	if got := e.item(old); got.Phase != domain.PhaseProposed || !slices.Equal(got.Proposal.Sources, []string{"prh-old-a"}) {
+	if got := e.item(old); got.Phase != domain.PhaseProposed || !slices.Equal(got.Proposal.Sources, e.sev("src_a", "prh-old-a")) {
 		t.Fatalf("old proposal %+v", got.Proposal)
 	}
 	if len(e.proposed()) != 2 {

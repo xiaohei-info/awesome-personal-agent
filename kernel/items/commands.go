@@ -89,7 +89,7 @@ func (c createIn) item(id string) domain.Item {
 	in := c.ItemInput
 	it := domain.Item{ID: id, Phase: c.phase(), Kind: in.Kind, Title: in.Title, Summary: in.Summary, Body: in.Body,
 		StatusLabel: in.StatusLabel, Priority: in.Priority, Project: in.Project, Tags: in.Tags, Assignee: in.Assignee,
-		WaitingOn: in.WaitingOn, Deadline: in.Deadline, PlannedFor: in.PlannedFor, Origin: in.Origin, Spec: in.Spec, Ext: in.Ext}
+		WaitingOn: in.WaitingOn, Deadline: in.Deadline, PlannedFor: in.PlannedFor, Origin: in.Origin, Proposal: in.Proposal, Spec: in.Spec, Ext: in.Ext}
 	if it.Priority == "" {
 		it.Priority = domain.PriorityNormal
 	}
@@ -450,6 +450,10 @@ func (s *svc) create() command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
+			// proposal 对外只读，只有入站流水线（内核身份）能写（附录 B.2）。
+			if v.Proposal != nil && c.Caller.Actor.Type != domain.ActorSystem {
+				return nil, invalid("proposal is written by the inbound pipeline only")
+			}
 			it := stamped(v.item(c.Object.ID), c.Now())
 			it.ChainDepth = c.ChainDepth
 			if err := save(c.Tx, it); err != nil {

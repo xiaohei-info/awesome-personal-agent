@@ -145,12 +145,23 @@ func applyMerge(c *command.Ctx, event, item string, m mergeFields) error {
 	var w items.Write
 	if m.Merge {
 		var changed bool
-		if w, changed, err = items.AddProposalSource(c.Tx, item, ev.DedupeKey.EventID, c.Now()); err != nil || !changed {
+		if w, changed, err = items.AddProposalSource(c.Tx, item, ev.ID, c.Now()); err != nil || !changed {
 			return err
 		}
 	} else {
-		p := domain.Proposal{Sources: []string{ev.DedupeKey.EventID}, MergeKey: m.MergeKey}
-		if m.AttachTo != "" {
+		cur, err := items.Get(c.Tx, item)
+		if err != nil {
+			return err
+		}
+		p := domain.Proposal{} // 起草（W2）可能已随事项写入推荐，保留
+		if cur.Proposal != nil {
+			p = *cur.Proposal
+		}
+		if !slices.Contains(p.Sources, ev.ID) {
+			p.Sources = append(p.Sources, ev.ID)
+		}
+		p.MergeKey = m.MergeKey
+		if m.AttachTo != "" { // 命中已接受事项：推荐固定为补到它，覆盖起草的推荐
 			if _, err := items.Get(c.Tx, m.AttachTo); err != nil {
 				return err
 			}
@@ -163,7 +174,7 @@ func applyMerge(c *command.Ctx, event, item string, m mergeFields) error {
 	if _, err := command.Bump(c.Tx, w.Object); err != nil {
 		return err
 	}
-	_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "merged source event " + ev.DedupeKey.EventID, Evidence: c.Evidence})
+	_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "merged source event " + ev.ID, Evidence: c.Evidence})
 	return err
 }
 

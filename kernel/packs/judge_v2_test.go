@@ -182,12 +182,12 @@ func TestReminderRulesRejectDo(t *testing.T) {
 // 同名内置包生效，健康视图逐字段列出；修正后重新生效，拒绝信号消失。
 func TestV01OverridePackRejectedBuiltinWinsThenRepaired(t *testing.T) {
 	data := t.TempDir()
-	v01 := "---\nagent: judge\nquestion_type: yes_no\nconfidence_threshold: 0.7\nescalate_to: triage-title\n---\n这条值得看吗 {item_id}\n"
+	v01 := "---\nagent: judge\nquestion_type: yes_no\nconfidence_threshold: 0.7\nescalate_to: triage-draft\n---\n这条值得看吗 {item_id}\n"
 	writePack(t, data, map[string]string{
-		"inbound-triage/pack.yaml":                    mustBuiltin(t, "inbound-triage/pack.yaml"),
-		"inbound-triage/prompts/triage.md":            v01,
-		"inbound-triage/prompts/triage-title.md":      mustBuiltin(t, "inbound-triage/prompts/triage-title.md"),
-		"inbound-triage/prompts/triage-candidates.md": mustBuiltin(t, "inbound-triage/prompts/triage-candidates.md"),
+		"inbound-triage/pack.yaml":                 mustBuiltin(t, "inbound-triage/pack.yaml"),
+		"inbound-triage/prompts/triage.md":         v01,
+		"inbound-triage/prompts/triage-draft.md":   mustBuiltin(t, "inbound-triage/prompts/triage-draft.md"),
+		"inbound-triage/prompts/triage-extract.md": mustBuiltin(t, "inbound-triage/prompts/triage-extract.md"),
 	})
 	var reported []Rejection
 	l, rej := load(t, Options{Builtin: rootpacks.FS, DataDir: data, Kinds: newKinds(), OnReject: func(r Rejection) { reported = append(reported, r) }})

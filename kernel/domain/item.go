@@ -158,8 +158,20 @@ type ItemInput struct {
 	PlannedFor  string          `json:"planned_for,omitempty"` // 计划日期 YYYY-MM-DD（§6.3），不带定时
 	Ask         *AskInput       `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
+	Proposal    *Proposal       `json:"proposal,omitempty"` // 建议信息，由入站流水线写入（§6.3）
 	Spec        json.RawMessage `json:"spec,omitempty"`
 	Ext         json.RawMessage `json:"ext,omitempty"` // 内核永不读取
+}
+
+// Proposal 是 proposed 事项上的建议信息（§6.3、附录 B.2）：起草给出的推荐处置、是否把握低、来自哪些来源事件。
+// 推荐只是建议流里的默认选项，不触发任何处置。
+type Proposal struct {
+	Recommend     string   `json:"recommend,omitempty"` // accept、attach、dismiss；空表示没有推荐
+	AttachTo      string   `json:"attach_to,omitempty"` // Recommend 为 attach 时的目标事项
+	Reason        string   `json:"reason,omitempty"`
+	LowConfidence bool     `json:"low_confidence"`
+	Sources       []string `json:"sources,omitempty"`   // 来源事件 id
+	MergeKey      string   `json:"merge_key,omitempty"` // 合并键（§9.3）：同一件事的后续事件凭它找到这条建议
 }
 
 // ItemKernelState 只由内核维护；子事项的 Unattended 继承自后台运行。
@@ -169,17 +181,6 @@ type ItemKernelState struct {
 	Unattended bool      `json:"unattended,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitzero"`
 	UpdatedAt  time.Time `json:"updated_at,omitzero"`
-}
-
-// Proposal 是建议信息（§6.3 proposal），由入站流水线写入，只在 proposed 阶段起作用，处置后保留作记录。
-// Sources 是并入这条建议的来源事件（来源给的事件 id）；MergeKey 是合并键（§9.3），供同一件事的后续事件找到这条建议。
-type Proposal struct {
-	Recommend     string   `json:"recommend,omitempty"` // accept | attach | dismiss
-	AttachTo      string   `json:"attach_to,omitempty"`
-	Reason        string   `json:"reason,omitempty"`
-	LowConfidence bool     `json:"low_confidence"`
-	Sources       []string `json:"sources"`
-	MergeKey      string   `json:"merge_key,omitempty"`
 }
 
 // Item 是一切事务的统一表示（§6.3）。
@@ -202,9 +203,9 @@ type Item struct {
 	PlannedFor  string          `json:"planned_for,omitempty"` // 计划日期 YYYY-MM-DD（§6.3），不带定时、不产生提醒
 	Ask         *Ask            `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
+	Proposal    *Proposal       `json:"proposal,omitempty"`
 	Spec        json.RawMessage `json:"spec,omitempty"`
 	Ext         json.RawMessage `json:"ext,omitempty"`
-	Proposal    *Proposal       `json:"proposal,omitempty"` // 只读：入站流水线写入
 }
 
 // CheckEntry 校验 item 以 to 阶段（附 reason、证据）的进入约束（§6.4、§6.14 第 3 条）。

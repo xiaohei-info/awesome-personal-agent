@@ -1182,3 +1182,22 @@ func TestCorrelationKeysFoldAndRebuild(t *testing.T) {
 		return Verify(tx)
 	})
 }
+
+// proposal 对外只读：任何外部身份经 item.create 带 proposal 都被拒绝；内核身份（入站流水线）可以写。
+func TestProposalIsWritableOnlyByTheKernel(t *testing.T) {
+	e := setup(t)
+	in := map[string]any{"kind": "task", "title": "t", "proposal": map[string]any{"recommend": "accept", "low_confidence": true}}
+	for _, id := range []command.Identity{owner, worker, delegate} {
+		_, err := e.do(id, "item.create", in)
+		var de *domain.Error
+		if !errors.As(err, &de) || de.Code != domain.CodeInvalidRequest {
+			t.Fatalf("%v: want invalid_request, got %v", id, err)
+		}
+	}
+	sys := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:inbound", Via: domain.ViaSource}, Level: authz.LevelWorker}
+	id := e.create(t, sys, in)
+	if p := e.get(t, id).Proposal; p == nil || p.Recommend != "accept" || !p.LowConfidence {
+		t.Fatalf("proposal %+v", p)
+	}
+	e.verify(t)
+}
