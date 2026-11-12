@@ -1,9 +1,8 @@
-# sha256: 2d98559cfb6537b42f2645e6ef9c16fe544162cc552eebe403ffbcba4c483582
+# sha256: e79829ca27f45128da418d0da3dee42a77f7b259759f0e9a33b18c03a5e7374f
 work_item_id: 01a1d09a-4734-7c35-97ea-55e486a8024d
 status: done
 merged: true
 merged_at: '2026-11-12T20:43:21Z'
-recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-c72a650c51be9a20: 选 (a)。设计 §14.13 已规定登录成功、失败锁定、改口令、吊销会话各记一条
   Event，本人应能在事件接口里看到；缺的是附录 B.4 没登记这四个类型，属于设计遗漏，由负责人在此授权补登。请在同一个 PR 里把四个类型加入附录 B.4（不加规划中标记）和
   domain.RegisteredEventTypes，类型名沿用现有 auth.* 前缀、与 B.4 现有命名风格一致，载荷不含口令；对照测试保持双向严格通过。ACT-LGN-13
