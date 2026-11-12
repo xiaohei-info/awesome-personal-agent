@@ -19,6 +19,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -173,7 +174,7 @@ func (i Identity) Authenticate(tx *store.Tx) (command.Caller, error) {
 	if err != nil {
 		return command.Caller{}, err
 	}
-	now := time.Now
+	now := clock.Now
 	if i.Now != nil {
 		now = i.Now
 	}

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
@@ -82,7 +83,7 @@ func New(o Options) (*Service, error) {
 		return nil, errors.New("direct: Store, Packs and Model are required")
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	if o.Sleep == nil {
 		o.Sleep = sleep

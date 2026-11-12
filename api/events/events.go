@@ -17,6 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventfeed"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -104,7 +105,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(time.Duration(min(wait, MaxWait)) * time.Second)
+	deadline := clock.Now().Add(time.Duration(min(wait, MaxWait)) * time.Second)
 	for {
 		var page eventfeed.Page
 		if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
@@ -115,7 +116,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		}
 		// 只有不可见事件时 Next 前进但没有信封：带着前进的游标继续等，不卡在原地。
 		cursor = page.Next
-		left := time.Until(deadline)
+		left := deadline.Sub(clock.Now())
 		if len(page.Envelopes) > 0 || left <= 0 {
 			if page.Envelopes == nil {
 				page.Envelopes = []eventfeed.Envelope{}

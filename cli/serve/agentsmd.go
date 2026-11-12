@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -64,7 +64,7 @@ func (f *agentsFetcher) Fetch(ctx context.Context, repo string) (string, bool, e
 		_, err := proc.Enqueue(tx, proc.Request{
 			Run:  domain.Run{Category: domain.RunReader, Target: f.want, TimeoutSec: agentsFetchTimeout},
 			Spec: proc.Spec{Command: f.reader, Stdin: stdin},
-		}, time.Now())
+		}, clock.Now())
 		return err
 	})
 	if err != nil {

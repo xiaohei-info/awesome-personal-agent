@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -158,7 +159,7 @@ func New(d Deps) (*Server, error) {
 		return nil, errors.New("core: Store and Auth are required")
 	}
 	if d.Now == nil {
-		d.Now = time.Now
+		d.Now = clock.Now
 	}
 	if d.SessionTTL <= 0 {
 		d.SessionTTL = DefaultSessionTTL

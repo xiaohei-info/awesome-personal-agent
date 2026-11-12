@@ -4,9 +4,9 @@ import (
 	"context"
 	"flag"
 	"io"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -70,7 +70,7 @@ func backupCmd(c *client.Ctx, args []string) error {
 		if err != nil {
 			return usage("cannot locate the APA home directory", "set APA_HOME to an absolute path")
 		}
-		m, err := Create(context.Background(), home, Options{Out: out, NoSecrets: noSecrets}, reg, time.Now())
+		m, err := Create(context.Background(), home, Options{Out: out, NoSecrets: noSecrets}, reg, clock.Now())
 		if err != nil {
 			return err
 		}

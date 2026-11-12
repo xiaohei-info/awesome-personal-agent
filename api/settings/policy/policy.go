@@ -15,10 +15,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -219,7 +219,7 @@ func auditRejected(st *store.Store, r *http.Request, p *core.Principal, path str
 	if !ok {
 		return
 	}
-	ev.At = time.Now()
+	ev.At = clock.Now()
 	_ = st.Update(detached(r), func(tx *store.Tx) error { _, err := eventlog.Append(tx, ev); return err })
 }
 

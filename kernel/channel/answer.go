@@ -8,6 +8,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
@@ -29,7 +30,7 @@ const extScope = "ext:channel."
 // Options 配置回答命令。
 type Options struct {
 	Queue  *delivery.Queue
-	Now    func() time.Time         // 默认 time.Now；须与命令执行器用同一个时钟
+	Now    func() time.Time         // 默认 clock.Now；须与命令执行器用同一个时钟
 	WebURL func(item string) string // 被拒绝时回给调用方的 Web 链接，默认 /items/<id>
 }
 
@@ -82,7 +83,7 @@ func Register(x *command.Executor, o Options) error {
 		o.WebURL = func(id string) string { return "/items/" + id }
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	a := &answerer{o}
 	for _, s := range []command.Spec{a.answer(), a.formAnswer()} {

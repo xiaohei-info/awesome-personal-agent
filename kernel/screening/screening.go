@@ -71,7 +71,7 @@ func New(o Options) (*Service, error) {
 		return nil, errors.New("screening: Store and Judge are required")
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	return &Service{o: o, inflight: map[string]bool{}}, nil
 }

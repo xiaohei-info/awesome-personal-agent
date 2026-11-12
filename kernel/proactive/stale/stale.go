@@ -63,7 +63,7 @@ func New(o Options) (*Service, error) {
 		return nil, errors.New("stale: Packs, Pack and Reminder are required")
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	return &Service{o}, nil
 }

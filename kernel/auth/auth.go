@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -76,7 +77,7 @@ type Auth struct{ now func() time.Time }
 // New 返回 Auth；now 为 nil 时用系统时钟。
 func New(now func() time.Time) *Auth {
 	if now == nil {
-		now = time.Now
+		now = clock.Now
 	}
 	return &Auth{now: now}
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -56,7 +57,7 @@ type Options struct {
 	TTL, FailTTL time.Duration
 	// Timeout 是单次读取的秒数上限，默认 30。
 	Timeout int
-	// Now 默认 time.Now。
+	// Now 默认 clock.Now。
 	Now func() time.Time
 }
 
@@ -95,7 +96,7 @@ func New(x *command.Executor, o Options) (*Service, error) {
 		o.Timeout = 30
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	s := &Service{x: x, opt: o, hit: map[string]cached{}, pending: map[string]bool{}}
 	x.OnCommit(s.onCommit)

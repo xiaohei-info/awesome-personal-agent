@@ -15,11 +15,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -130,7 +130,7 @@ func mine(a *auth.Auth, st *store.Store) core.Handler {
 			if err != nil {
 				return err
 			}
-			out, err = policy.ActiveGrants(tx, a, cred.ID, time.Now())
+			out, err = policy.ActiveGrants(tx, a, cred.ID, clock.Now())
 			return err
 		})
 		if err != nil {
