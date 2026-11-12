@@ -1,11 +1,11 @@
 // Package bands 把策略的判断设置（不确定带覆盖、影子模式，设计 §8.9、§8.10）落到一道判断题上。
 //
 // 设置本身只在 Web 写、记 policy.changed、校验下限不大于上限，都由 kernel/policy 与 /settings/judgment 负责；
-// 本包只读：给定策略快照、模板与来源，决定这道题用哪条带、是否只记分。
+// 本包只读、只依赖 policy 与 record：给定策略快照、模板与来源，决定这道题用哪条带、是否只记分；
+// 由判断级联（kernel/agents/direct）在 prepare 里调用。
 package bands
 
 import (
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
@@ -36,12 +36,4 @@ func Shadow(p policy.Policy, template string) bool {
 		}
 	}
 	return false
-}
-
-// Apply 把策略的带与影子开关写进判断题。调用方已显式给了带时不覆盖；影子只能打开，不会被它关掉。
-func Apply(p policy.Policy, c *direct.JudgeCall) {
-	if c.Band == nil {
-		c.Band = Resolve(p, c.Template, c.Source)
-	}
-	c.Shadow = c.Shadow || Shadow(p, c.Template)
 }

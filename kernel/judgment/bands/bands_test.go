@@ -3,7 +3,6 @@ package bands
 import (
 	"testing"
 
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
@@ -38,24 +37,10 @@ func TestResolvePrefersSourceOverride(t *testing.T) {
 	}
 }
 
-// Apply 把策略的带与影子开关写进判断题；影子只看模板名。
-func TestApplyFillsBandAndShadow(t *testing.T) {
+// 影子只看模板名，且只出现在 shadow 列表里的模板才开。
+func TestShadow(t *testing.T) {
 	p := pol()
-	c := direct.JudgeCall{Template: "triage-screen", Source: "src_a"}
-	Apply(p, &c)
-	if c.Band == nil || *c.Band != (record.Band{Low: 0.1, High: 0.3}) || c.Shadow {
-		t.Fatalf("triage: %+v", c)
-	}
-	c = direct.JudgeCall{Template: "capture-prescreen"}
-	Apply(p, &c)
-	if c.Band != nil || !c.Shadow {
-		t.Fatalf("capture: %+v", c)
-	}
-	// 调用方已显式给带时不覆盖。
-	own := &record.Band{Low: 0.9, High: 0.95}
-	c = direct.JudgeCall{Template: "triage-screen", Band: own}
-	Apply(p, &c)
-	if c.Band != own {
-		t.Fatal("explicit band overwritten")
+	if !Shadow(p, "capture-prescreen") || Shadow(p, "triage-screen") {
+		t.Fatal("shadow list not honoured")
 	}
 }
