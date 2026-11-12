@@ -82,7 +82,7 @@
 | `apa why <id>` | 回放事项或运行 | observer，按权限裁剪 | 5 |
 | `apa health` | 健康视图 | observer | |
 | `apa run list/show` | 运行记录 | observer | |
-| `apa judgment stats [--use] [--template] [--source] [--since]` | 【规划中（v0.2.0）】各级调用次数与升级率、未定率、接受率、误丢率（主文档 §8.10） | observer | |
+| `apa judgment stats [--use] [--template] [--source] [--since]` | 各级调用次数与升级率、未定率、接受率、误丢率（主文档 §8.10） | observer | |
 | `apa judgment show <id>` | 一条判断记录的逐级结果 | observer，按权限裁剪 | 5 |
 | `apa judgment spot-check` | 列出待抽检的条目；抽检结论只在 Web 填 | observer | |
 
@@ -161,7 +161,7 @@
 | | `GET /source-events/restorable?from&to&source` | 【规划中（v0.2.0）】预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer；运行凭据不可用 |
 | | `POST /source-events/restore` | 【规划中（v0.2.0）】把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate（附本人原话） |
 | 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |
-| | `GET /judgments/stats?use&template&source&since` | 【规划中（v0.2.0）】各级调用次数与四项指标（主文档 §8.10） | observer |
+| | `GET /judgments/stats?use&template&source&since` | 各级调用次数与四项指标（主文档 §8.10） | observer |
 | | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
 | 事件 | `GET /events?cursor=` | SSE 或长轮询 | observer、导出和转发 ext 密钥 |

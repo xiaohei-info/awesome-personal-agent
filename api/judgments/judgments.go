@@ -7,7 +7,8 @@
 // 路由里没有业务规则：记录的读取与分页在 kernel/judgment/record。本层只决定哪把凭据能读：
 // observer 及以上读全部（记录不含资料正文）；运行凭据只读目标事项范围内的记录，
 // 范围外按不存在处理（404，退出码 5），不泄露记录是否存在；ext、webhook 凭据不能读。
-// stats（校准节点，尚未挂载）与没有传入抽检服务时的 spot-check：这些路径不能被 {id} 通配吃掉，否则对照测试会把它们当成已挂载。
+// GET /judgments/stats?use&template&source&since 是计数与四项指标（设计 §8.10，见 stats.go）。
+// 没有传入抽检服务时的 spot-check 不能被 {id} 通配吃掉，否则对照测试会把它当成已挂载。
 package judgments
 
 import (
@@ -30,7 +31,8 @@ func Routes(st *store.Store, sc *spotcheck.Service) core.RouteGroup {
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/judgments", Handler: h.list})
 		r.Handle(core.Route{Method: "GET", Path: "/judgments/{id}", Handler: h.get})
-		reserved := []string{"/judgments/stats"} // 校准节点挂载 stats 时删掉这一行（重复登记会让启动失败，不会悄悄覆盖）
+		r.Handle(core.Route{Method: "GET", Path: "/judgments/stats", Handler: h.stats})
+		var reserved []string
 		if sc != nil {
 			r.Handle(core.Route{Method: "GET", Path: "/judgments/spot-check", Page: true, Handler: h.spotCheck})
 			r.Handle(core.Route{Method: "POST", Path: "/judgments/{id}/review", MaxBody: 4 << 10, Handler: h.review})
