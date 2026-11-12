@@ -15,6 +15,7 @@ const (
 
 type addrState struct {
 	fails  int       // 连续失败次数；成功或锁定即清零
+	flight int       // 已放行、结果未定的尝试数
 	last   time.Time // 最近一次失败
 	locked time.Time // 锁定到何时；零值未锁定
 }
@@ -28,14 +29,34 @@ type limiter struct {
 
 func newLimiter() *limiter { return &limiter{addrs: map[string]*addrState{}} }
 
-// lockedFor 返回 addr 还要锁多久；未锁定返回 0。
-func (l *limiter) lockedFor(addr string, now time.Time) time.Duration {
+// begin 在校验口令之前预留一次尝试，检查与计数在同一把锁里，并发请求无法绕过：
+// 地址仍在锁定期，或「已失败 + 在途」已达上限（在途的若都失败即会触发锁定），返回需要等待的时长，不放行；
+// 放行时返回 0，调用方必须在结果记完后调用 end。
+func (l *limiter) begin(addr string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if a := l.addrs[addr]; a != nil && now.Before(a.locked) {
+	a := l.addrs[addr]
+	if a == nil {
+		a = &addrState{}
+		l.addrs[addr] = a
+	}
+	if now.Before(a.locked) {
 		return a.locked.Sub(now)
 	}
+	if a.fails+a.flight >= lockAfterFails {
+		return time.Second
+	}
+	a.flight++
 	return 0
+}
+
+// end 释放 begin 预留的名额。
+func (l *limiter) end(addr string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if a := l.addrs[addr]; a != nil && a.flight > 0 {
+		a.flight--
+	}
 }
 
 // flooded 报告窗口内全部地址的失败是否已超过阈值。
@@ -96,7 +117,7 @@ func (l *limiter) prune(now time.Time) {
 		return
 	}
 	for k, a := range l.addrs {
-		if !now.Before(a.locked) && now.Sub(a.last) >= floodWindow {
+		if a.flight == 0 && !now.Before(a.locked) && now.Sub(a.last) >= floodWindow {
 			delete(l.addrs, k)
 		}
 	}

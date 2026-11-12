@@ -155,30 +155,31 @@ func (s *Server) resolveSession(ctx context.Context, id string) (*Principal, err
 		return nil, errUnauthenticated()
 	}
 	var csrf string
+	var used int64
 	found := false
 	now := s.d.Now()
-	err := s.d.Store.Update(ctx, func(tx *store.Tx) error {
+	err := s.d.Store.View(ctx, func(tx *store.Tx) error {
 		rows, err := tx.Query("SELECT csrf, expires_at, last_used_at FROM apicore_session WHERE id_hash = ?", hashID(id))
 		if err != nil {
 			return err
 		}
-		var expires, used int64
+		defer rows.Close()
+		var expires int64
 		if rows.Next() {
 			if err := rows.Scan(&csrf, &expires, &used); err != nil {
-				rows.Close()
 				return err
 			}
 			// 绝对有效期与空闲有效期任一到期即失效；升级前的会话 expires_at 为 0，永远过期。
 			found = now.Before(time.Unix(0, expires)) && now.Before(time.Unix(0, used).Add(s.d.SessionIdle))
 		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil || !found || now.Sub(time.Unix(0, used)) < touchEvery {
-			return err
-		}
-		_, err = tx.Exec("UPDATE apicore_session SET last_used_at = ? WHERE id_hash = ?", now.UnixNano(), hashID(id))
-		return err
+		return rows.Err()
 	})
+	if err == nil && found && now.Sub(time.Unix(0, used)) >= touchEvery { // 读多写少：至多每分钟写一次
+		err = s.d.Store.Update(ctx, func(tx *store.Tx) error {
+			_, err := tx.Exec("UPDATE apicore_session SET last_used_at = ? WHERE id_hash = ?", now.UnixNano(), hashID(id))
+			return err
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +209,7 @@ const (
 )
 
 // clientAddr 是请求的来源地址（不含端口）。经本机反向代理时取代理追加的最后一个 X-Forwarded-For；
-// 非本机来源自称的 X-Forwarded-For 不可信，忽略。
+// 非本机来源自称的 X-Forwarded-For 不可信，忽略。部署要求：本机反向代理必须追加（而不是透传）客户端的 X-Forwarded-For。
 func clientAddr(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -225,24 +226,27 @@ func clientAddr(r *http.Request) string {
 	return host
 }
 
-// guardAttempt 在校验口令之前调用：来源地址处于锁定期则返回 429（login_locked，带 Retry-After）；
+// guardAttempt 在校验口令之前调用，成功时返回的 release 必须在这次尝试的结果（含失败计数）记完后调用。
+// 来源地址处于锁定期，或并发的未决尝试已用满名额，返回 429（login_locked，带 Retry-After）；
 // 全部地址失败过多时延迟应答，正确口令也一样。
-func (s *Server) guardAttempt(w http.ResponseWriter, r *http.Request, addr string) error {
+func (s *Server) guardAttempt(w http.ResponseWriter, r *http.Request, addr string) (release func(), err error) {
 	now := s.d.Now()
-	if left := s.lim.lockedFor(addr, now); left > 0 {
+	if left := s.lim.begin(addr, now); left > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(left.Seconds())+1))
-		return domain.NewError(domain.CodeLoginLocked, "too many failed attempts from this address", "wait for the lock to expire and try again")
+		return nil, domain.NewError(domain.CodeLoginLocked, "too many failed attempts from this address", "wait for the lock to expire and try again")
 	}
+	release = func() { s.lim.end(addr) }
 	if s.lim.flooded(now) {
 		t := time.NewTimer(s.d.LoginDelay)
 		defer t.Stop()
 		select {
 		case <-t.C:
 		case <-r.Context().Done():
-			return r.Context().Err()
+			release()
+			return nil, r.Context().Err()
 		}
 	}
-	return nil
+	return release, nil
 }
 
 // attemptFailed 记一次失败的口令校验：计数、必要时锁定并记审计 Event，窗口内失败过多时记一条 health.alert。
@@ -295,9 +299,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, _ *Principal) err
 		return err
 	}
 	addr := clientAddr(r)
-	if err := s.guardAttempt(w, r, addr); err != nil {
+	release, err := s.guardAttempt(w, r, addr)
+	if err != nil {
 		return err
 	}
+	defer release()
 	id, err := randomToken()
 	if err != nil {
 		return err
@@ -320,7 +326,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, _ *Principal) err
 		}
 		agent := r.UserAgent()
 		if len(agent) > 256 {
-			agent = agent[:256]
+			agent = strings.ToValidUTF8(agent[:256], "")
 		}
 		if _, err := tx.Exec("INSERT INTO apicore_session (id_hash, csrf, created_at, expires_at, last_used_at, addr, agent) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			hashID(id), csrf, now.UnixNano(), expires.UnixNano(), now.UnixNano(), addr, agent); err != nil {
@@ -364,11 +370,13 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, p *Princ
 		return err
 	}
 	addr := clientAddr(r)
-	if err := s.guardAttempt(w, r, addr); err != nil {
+	release, err := s.guardAttempt(w, r, addr)
+	if err != nil {
 		return err
 	}
+	defer release()
 	wrong := false
-	err := s.d.Store.Update(r.Context(), func(tx *store.Tx) error {
+	err = s.d.Store.Update(r.Context(), func(tx *store.Tx) error {
 		ok, err := checkPassword(tx, in.Current)
 		if err != nil {
 			return err

@@ -401,3 +401,32 @@ func TestAuditEventsCoverLoginLockChangeRevokeWithoutSecrets(t *testing.T) {
 		}
 	}
 }
+
+// 并发的错误口令尝试不能绕过锁：检查与计数是原子的，从同一地址只有 5 次会真正去校验口令。
+func TestConcurrentWrongAttemptsCannotOutrunTheLock(t *testing.T) {
+	const n = 30
+	for name, attempt := range map[string]func(e *env, c *http.Cookie, tok string) resp{
+		"login": func(e *env, _ *http.Cookie, _ string) resp { return e.loginFrom("198.51.100.1", "wrong-wrong-wrong") },
+		"change-password": func(e *env, c *http.Cookie, tok string) resp {
+			return e.webDo("POST", "/v1/auth/password", `{"current":"wrong-wrong-wrong","new":"a-brand-new-passphrase"}`, c, tok)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t)
+			c, tok := e.login()
+			codes := make(chan int, n)
+			start := make(chan struct{})
+			for i := 0; i < n; i++ {
+				go func() { <-start; codes <- attempt(e, c, tok).Code }()
+			}
+			close(start)
+			got := map[int]int{}
+			for i := 0; i < n; i++ {
+				got[<-codes]++
+			}
+			if got[429] != n-lockAfterFails || got[429]+got[401]+got[403] != n {
+				t.Fatalf("want %d evaluated and %d locked out, got %v", lockAfterFails, n-lockAfterFails, got)
+			}
+		})
+	}
+}
