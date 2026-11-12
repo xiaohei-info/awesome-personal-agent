@@ -45,6 +45,14 @@ CREATE TABLE apicore_session (
 	created_at INTEGER NOT NULL,
 	expires_at INTEGER NOT NULL
 ) WITHOUT ROWID;`,
+}, {
+	// 账本结构版本 3（§14.13）：会话带最近使用时间（空闲有效期）、来源地址与浏览器标识。
+	// 升级前的会话没有这些信息，按设计整体失效：expires_at 置 0（已过期），行保留不删。
+	Version: 2, Ledger: 3, Name: "ledger-v3-session-validity",
+	SQL: `ALTER TABLE apicore_session ADD COLUMN last_used_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE apicore_session ADD COLUMN addr TEXT NOT NULL DEFAULT '';
+ALTER TABLE apicore_session ADD COLUMN agent TEXT NOT NULL DEFAULT '';
+UPDATE apicore_session SET expires_at = 0;`,
 }}}
 
 func iterations() int {

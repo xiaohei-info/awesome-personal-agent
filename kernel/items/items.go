@@ -52,6 +52,33 @@ UPDATE items SET
 		'decision.requested', 'decision.resolved', 'delegation.created', 'delegation.reported') ORDER BY seq LIMIT 1), 0),
 	updated_at = COALESCE((SELECT at FROM eventlog_event WHERE object = items.id AND type IN ('item.created', 'item.updated', 'item.phase_changed',
 		'decision.requested', 'decision.resolved', 'delegation.created', 'delegation.reported') ORDER BY seq DESC LIMIT 1), 0);`,
+}, {
+	// 账本结构版本 3（v0.2.0）：计划日期（§6.3 planned_for，只到日）、建议信息与合并键（proposal、merge_key）、
+	// 进展条目（item_progress）、事项登记的关联键域（item_correlation，§9.4）。只增不改，已有行取空值。
+	Version: 3, Ledger: 3, Name: "ledger-v3-items",
+	SQL: `ALTER TABLE items ADD COLUMN planned_for TEXT NOT NULL DEFAULT '';
+ALTER TABLE items ADD COLUMN proposal TEXT NOT NULL DEFAULT '';
+ALTER TABLE items ADD COLUMN proposal_attach_to TEXT NOT NULL DEFAULT '';
+ALTER TABLE items ADD COLUMN merge_key TEXT NOT NULL DEFAULT '';
+CREATE INDEX items_planned_for ON items(planned_for) WHERE planned_for <> '';
+CREATE INDEX items_merge_key ON items(merge_key) WHERE merge_key <> '';
+CREATE INDEX items_proposal_attach_to ON items(proposal_attach_to) WHERE proposal_attach_to <> '';
+CREATE TABLE item_progress (
+	id TEXT PRIMARY KEY,
+	item TEXT NOT NULL,
+	text TEXT NOT NULL,
+	on_date TEXT NOT NULL DEFAULT '',
+	actor TEXT NOT NULL,
+	at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX item_progress_item ON item_progress(item, at);
+CREATE TABLE item_correlation (
+	item TEXT NOT NULL,
+	domain TEXT NOT NULL,
+	key TEXT NOT NULL,
+	PRIMARY KEY (item, domain, key)
+) WITHOUT ROWID;
+CREATE INDEX item_correlation_key ON item_correlation(domain, key);`,
 }}}
 
 func invalid(why string) error {

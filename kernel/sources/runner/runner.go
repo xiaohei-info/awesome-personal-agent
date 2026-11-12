@@ -83,6 +83,23 @@ CREATE INDEX sources_runner_reject_source ON sources_runner_reject(source_id, se
 	SQL: `ALTER TABLE sources_runner_event ADD COLUMN unjudged_reason TEXT NOT NULL DEFAULT '';
 ALTER TABLE sources_runner_event ADD COLUMN rejudges INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX sources_runner_event_disposition ON sources_runner_event(disposition, seq);`,
+}, {
+	// 账本结构版本 3（§6.10）：来源事件的指标、合并键、多事项、最近一次判断记录 id；
+	// 来源指标取值（按来源、关联键、指标名保存上一次取值，条件规则比较“变了、上穿、下穿”用）。
+	Version: 3, Ledger: 3, Name: "ledger-v3-event-metrics-merge-judgment",
+	SQL: `ALTER TABLE sources_runner_event ADD COLUMN metrics TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN merge_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN items TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_runner_event ADD COLUMN judgment TEXT NOT NULL DEFAULT '';
+CREATE INDEX sources_runner_event_merge_key ON sources_runner_event(merge_key, seq) WHERE merge_key <> '';
+CREATE TABLE sources_runner_metric (
+	source_id TEXT NOT NULL,
+	correlation_key TEXT NOT NULL,
+	name TEXT NOT NULL,
+	value REAL NOT NULL,
+	at INTEGER NOT NULL,
+	PRIMARY KEY (source_id, correlation_key, name)
+) WITHOUT ROWID;`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。

@@ -34,6 +34,10 @@ var Module = store.Module{Name: "projects", Migrations: []store.Migration{{
 	allowed_executors TEXT NOT NULL,
 	capture INTEGER NOT NULL
 ) WITHOUT ROWID;`,
+}, {
+	// 账本结构版本 3（§6.5）：对话捕获送外部端点的范围；空串即未选择，已有项目升级后都是未选择（§14.14）。
+	Version: 2, Ledger: 3, Name: "ledger-v3-capture-outbound",
+	SQL: `ALTER TABLE projects ADD COLUMN capture_outbound TEXT NOT NULL DEFAULT '';`,
 }}}
 
 func invalid(why string) error {

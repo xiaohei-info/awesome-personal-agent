@@ -58,6 +58,12 @@ var Module = store.Module{Name: "sources_registry", Migrations: []store.Migratio
 	enabled INTEGER NOT NULL,
 	stats TEXT NOT NULL
 ) WITHOUT ROWID`,
+}, {
+	// 账本结构版本 3（§6.10）：默认项目与外发范围。external 缺省为空即“未选择”，v0.1 登记的来源升级后都是未选择（§14.14）。
+	Version: 2, Ledger: 3, Name: "ledger-v3-source-scope",
+	SQL: `ALTER TABLE sources_registry_source ADD COLUMN default_project TEXT NOT NULL DEFAULT '';
+ALTER TABLE sources_registry_source ADD COLUMN outbound_local TEXT NOT NULL DEFAULT 'full';
+ALTER TABLE sources_registry_source ADD COLUMN outbound_external TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Options 是登记所需的外部事实。
