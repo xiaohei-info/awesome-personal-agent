@@ -9,83 +9,83 @@ meta:
   - 01a1a720-f7fd-719e-91d8-f5032216143f
   - 01a1a720-fa34-79ff-9662-cdf8dac90a21
   - 01a1aa40-ef12-766f-86e2-bead6a7c7b51
-  amendment_revision: 9
+  amendment_revision: 10
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-2452559ab7fa
+    amendment_id: amend-2716f9599cec
     amendment_file: .omac/apa.system-amendment.yaml
     nodes:
-      fix.kernel-delivery.a428ef:
+      fix.e2e-bg-guards.40f4fd:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-3f974ff1239e8c1be5135fa7
-      e2e-hermes-session:
+        expected_review_generation: amendment-d8e79b210db1671c0d07b041
+      fix.e2e-delivery.56a54b:
         stage: authoring
         state: synced
-        work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
+        reason: no existing work item side effect
+        expected_review_generation: amendment-75e99068f6188e0fc9facc4f
+      release-closeout:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1c5de-54fa-7564-b09d-e0fe3f06c24a
         baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: authoring-78e2b4a7612a307c668b3fc9
-          review_ledger_generation: authoring-78e2b4a7612a307c668b3fc9
-          review_ledger_current: true
+          review_generation: null
+          review_ledger_generation: null
+          review_ledger_current: false
           bounce_baseline: null
-          decision_required_pending: true
+          decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
-          worker_handoff_pending: true
+          delivery_identity_pending: true
+          contract_sha256: 0a08773e1530ba72d124c7b21eff078d45b4cdbe1c29fbb687b01f7e8cc3640b
+          worker_handoff_pending: false
         bounce_baseline:
           merge: 0
-          review: 2
-          worker: 1
-        expected_contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
-        expected_review_generation: amendment-8255cd4446eabbfc60cbeb70
+          review: 0
+          worker: 0
+        expected_contract_sha256: 0a08773e1530ba72d124c7b21eff078d45b4cdbe1c29fbb687b01f7e8cc3640b
+        expected_review_generation: amendment-0b3023e437f86246e96587c7
         attempt_baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: authoring-78e2b4a7612a307c668b3fc9
-          review_ledger_generation: authoring-78e2b4a7612a307c668b3fc9
-          review_ledger_current: true
+          review_generation: null
+          review_ledger_generation: null
+          review_ledger_current: false
           bounce_baseline: null
-          decision_required_pending: true
+          decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
-          worker_handoff_pending: true
+          delivery_identity_pending: true
+          contract_sha256: 0a08773e1530ba72d124c7b21eff078d45b4cdbe1c29fbb687b01f7e8cc3640b
+          worker_handoff_pending: false
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-8255cd4446eabbfc60cbeb70
-          review_ledger_generation: authoring-78e2b4a7612a307c668b3fc9
+          review_generation: amendment-0b3023e437f86246e96587c7
+          review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
             merge: 0
-            review: 2
-            worker: 1
+            review: 0
+            worker: 0
           decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
+          contract_sha256: 0a08773e1530ba72d124c7b21eff078d45b4cdbe1c29fbb687b01f7e8cc3640b
           worker_handoff_pending: false
-      e2e-first-day-live:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-c41c2426360cd7b28dec0b8c
     retained_bounce_baselines:
       e2e-bg-main-live:
         amendment_id: amend-3ac49b74800d
@@ -111,8 +111,16 @@ meta:
           merge: 0
           review: 0
           worker: 0
+      e2e-hermes-session:
+        amendment_id: amend-2452559ab7fa
+        work_item_id: 01a1aecf-689c-790f-87e5-0ab4152db28a
+        contract_sha256: 6258c44bbc4a2d2c9542a475557b58196b26fbaef4eed067d0daf393ac3410d0
+        bounce_baseline:
+          merge: 0
+          review: 2
+          worker: 1
     system: true
-  last_amendment_id: amend-2452559ab7fa
+  last_amendment_id: amend-2716f9599cec
 nodes:
 - id: repo-ci-redline
   worker: omac-worker-backend
@@ -13457,6 +13465,8 @@ nodes:
   - docs-measured-results
   - deploy-samples
   - release-packaging
+  - fix.e2e-bg-guards.40f4fd
+  - fix.e2e-delivery.56a54b
   title: 首批发布收口
   description: 产出 release-closeout-closeout-evidence。负责 2 个 business-action（flow-release）。是
     flow-release 的唯一全流程 owner。要点：依赖全部 Wave 2 节点；任一 live 流程未执行时如实记录，不记为通过。 派给 omac-worker-frontend
@@ -15809,3 +15819,186 @@ nodes:
     defect_refs:
     - dfx-a428efc5406d
     coverage_gate: 80
+- id: fix.e2e-bg-guards.40f4fd
+  worker: omac-worker-backend
+  blocked_by:
+  - kernel-run-credentials
+  - kernel-background
+  - web-settings-policy
+  - kernel-bg-resume
+  - cli-client
+  - kernel-forward-allowlist
+  - web-attached-messages
+  - kernel-chain-breaker
+  - e2e-env-baseline
+  - cli-init-serve
+  title: 'Fix e2e-bg-guards: dfx-40f4fd84b7bb'
+  description: "Automatic fix for upstream defect(s) reported by release-closeout.\n\n-
+    [design-gap] anchors flow-bg-task-runner/ACT-BGT-04 (docs/solution-design.md#77-内核基础设施)\n
+    \ expected: 按 §7.7 运行上下文文件与 §17.4（PR #237 之后）：CLI 设了 APA_RUN_CONTEXT 时以文件为准，盖过环境里的
+    APA_RUN/APA_URL/APA_TOKEN； PATH 带运行标记却没有 APA_RUN_CONTEXT 时报未认证；设了 APA_RUN 时绝不回退本机凭据文件。ACT-BGT-04
+    要证明的是\"运行内拿不到运行凭据时 不回退到 apa login 保存的本机凭据、退出码 3\"，用例必须把运行凭据的所有来源都去掉（APA_TOKEN、APA_RUN_CONTEXT、APA_RUN_CREDENTIAL_FILE），
+    保留 APA_RUN 与本机凭据文件，再断言 apa inbox 退出码 3；对照组（去掉 APA_RUN 等运行变量）仍为 0。只改 tests/e2e/bgguards，
+    不改 cli/ 实现，不改 .omac 下的验收文档。\n  observed: release-closeout（PR #247）在 linux/amd64
+    跑 go test -tags e2e ./tests/e2e/bgguards：TestFlowBgTaskRunner/ACT-BGT-04 的 `env
+    -u APA_TOKEN $APA inbox` 退出码 0，期望 3。原因：PR #237 之后内核给运行注入 APA_RUN_CONTEXT，cli/client/credentials.go:withRunContext
+    从上下文文件取运行凭据，用例只清 APA_TOKEN，CLI 用的是运行凭据而不是本机凭据，属于用例未跟上设计。用例写于 PR #192，早于 #237。\n
+    \ where: tests/e2e/bgguards/taskrunner_test.go:TestFlowBgTaskRunner（ACT-BGT-04
+    步骤）; cli/client/credentials.go:withRunContext（只读参考，不改）"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-40f4fd84b7bb in e2e-bg-guards: 按 §7.7
+      运行上下文文件与 §17.4（PR #237 之后）：CLI 设了 APA_RUN_CONTEXT 时以文件为准，盖过环境里的 APA_RUN/APA_URL/APA_TOKEN；
+      PATH 带运行标记却没有 APA_RUN_CONTEXT 时报未认证；设了 APA_RUN 时绝不回退本机凭据文件。ACT-BGT-04 要证明的是"运行内拿不到运行凭据时
+      不回退到 apa login 保存的本机凭据、退出码 3"，用例必须把运行凭据的所有来源都去掉（APA_TOKEN、APA_RUN_CONTEXT、APA_RUN_CREDENTIAL_FILE），
+      保留 APA_RUN 与本机凭据文件，再断言 apa inbox 退出码 3；对照组（去掉 APA_RUN 等运行变量）仍为 0。只改 tests/e2e/bgguards，
+      不改 cli/ 实现，不改 .omac 下的验收文档。'
+    non_goals:
+    - 不实现或修改产品功能，发现缺陷回到对应实现节点
+    - 不把节点级测试当作全流程证据
+    - 不引入 Playwright；Web 步骤用项目规定的 ego-browser
+    verification_commands:
+    - go test -tags=e2e -count=1 ./tests/e2e/bgguards/...
+    integration_gates:
+    - name: e2e-bg-guards-gate
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#136-后台执行无人值守与会话续接
+      - docs/solution-design.md#146-两份白名单
+      - docs/solution-design.md#149-链路深度
+      - docs/solution-design.md#1411-后台执行的安全边界
+      delivery_goal: 用替身和真实二进制独立执行并证明完整流程：flow-bg-guards、flow-bg-task-runner、flow-forward-allowlist、flow-chain-depth
+      covers:
+      - flow-bg-guards
+      - flow-bg-task-runner
+      - flow-forward-allowlist
+      - flow-chain-depth
+      acceptance_refs:
+      - flow-bg-guards
+      - flow-bg-task-runner
+      - flow-forward-allowlist
+      - flow-chain-depth
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/bgguards/...
+    pr_base: main
+    acceptance_refs:
+    - flow-bg-task-runner
+    source_of_truth:
+    - docs/solution-design.md#136-后台执行无人值守与会话续接
+    - docs/solution-design.md#146-两份白名单
+    - docs/solution-design.md#149-链路深度
+    - docs/solution-design.md#1411-后台执行的安全边界
+    scope_paths:
+    - tests/e2e/bgguards/**
+    evidence_mode: artifact
+    consumes:
+    - artifact_id: kernel-run-credentials-module
+      producer: kernel-run-credentials
+      evidence_mode: artifact
+    - artifact_id: kernel-background-module
+      producer: kernel-background
+      evidence_mode: artifact
+    - artifact_id: web-settings-policy-page
+      producer: web-settings-policy
+      evidence_mode: artifact
+    - artifact_id: kernel-bg-resume-module
+      producer: kernel-bg-resume
+      evidence_mode: artifact
+    - artifact_id: cli-client-commands
+      producer: cli-client
+      evidence_mode: artifact
+    - artifact_id: kernel-forward-allowlist-module
+      producer: kernel-forward-allowlist
+      evidence_mode: artifact
+    - artifact_id: web-attached-messages-page
+      producer: web-attached-messages
+      evidence_mode: artifact
+    - artifact_id: kernel-chain-breaker-module
+      producer: kernel-chain-breaker
+      evidence_mode: artifact
+    - artifact_id: e2e-env-baseline-flow-evidence
+      producer: e2e-env-baseline
+      evidence_mode: artifact
+    - artifact_id: cli-init-serve-commands
+      producer: cli-init-serve
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-40f4fd84b7bb
+    coverage_gate: 0
+- id: fix.e2e-delivery.56a54b
+  worker: omac-worker-backend
+  blocked_by:
+  - api-deliveries
+  - kernel-attention
+  - e2e-env-baseline
+  - cli-init-serve
+  title: 'Fix e2e-delivery: dfx-56a54bae658c'
+  description: "Automatic fix for upstream defect(s) reported by release-closeout.\n\n-
+    [design-gap] anchors flow-delivery-control/ACT-DLV-07 (docs/solution-design.md#69-delivery)\n
+    \ expected: 按 §6.9 投递状态表与\"回答即确认\"（PR #243 之后的权威设计）：本人在 Web 回答时，被回答的那条决策投递转 acknowledged，不记
+    superseded；作废只作用于低于被回答版本的旧投递，旧版本的 ack 返回 409（kernel Stale → api/deliveries 409）。TestDLV07
+    要验证的是\"事项变化后旧投递作废、领取不到旧版本、旧版本 ack 为 409、不进 Web 未读\"，用例必须构造出真正的旧版本：先让事项产生一条投递 （版本
+    v），再让事项变化产生更高版本（例如再次 ask 产生新的决策请求版本，或用非本人确认的变化：超时默认值），使 v 成为低于当前版本的旧投递， 再对 v 断言
+    superseded / 领不到 / ack 409 / 不在未读。被本人回答的那条投递应断言为 acknowledged（不是 superseded）。
+    只改 tests/e2e/delivery，不改内核实现，不改 .omac 下的验收文档。\n  observed: release-closeout（PR
+    #247）在 linux/amd64 跑 go test -tags e2e ./tests/e2e/delivery：TestDLV07 对已在 Web
+    回答的同一版本 POST /v1/deliveries/{id}/ack {\"version\":v}（未带 external_ref）期望 409，实际
+    400 \"external_ref is required\"。原因：PR #243 之后被回答的投递转 acknowledged 而非 superseded，Queue.check
+    不判 Stale，走到 Ack 的 external_ref 校验。用例写于 PR #178，早于 #243 的设计变更，没有同步。\n  where: tests/e2e/delivery/flows_test.go:TestDLV07;
+    kernel/delivery/delivery.go:Queue.Ack（只读参考，不改）"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-56a54bae658c in e2e-delivery: 按 §6.9
+      投递状态表与"回答即确认"（PR #243 之后的权威设计）：本人在 Web 回答时，被回答的那条决策投递转 acknowledged，不记 superseded；作废只作用于低于被回答版本的旧投递，旧版本的
+      ack 返回 409（kernel Stale → api/deliveries 409）。TestDLV07 要验证的是"事项变化后旧投递作废、领取不到旧版本、旧版本
+      ack 为 409、不进 Web 未读"，用例必须构造出真正的旧版本：先让事项产生一条投递 （版本 v），再让事项变化产生更高版本（例如再次 ask 产生新的决策请求版本，或用非本人确认的变化：超时默认值），使
+      v 成为低于当前版本的旧投递， 再对 v 断言 superseded / 领不到 / ack 409 / 不在未读。被本人回答的那条投递应断言为 acknowledged（不是
+      superseded）。 只改 tests/e2e/delivery，不改内核实现，不改 .omac 下的验收文档。'
+    non_goals:
+    - 不实现或修改产品功能，发现缺陷回到对应实现节点
+    - 不把节点级测试当作全流程证据
+    - 不引入 Playwright；Web 步骤用项目规定的 ego-browser
+    verification_commands:
+    - go test -tags=e2e -count=1 ./tests/e2e/delivery/...
+    integration_gates:
+    - name: e2e-delivery-gate
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#74-触达
+      delivery_goal: 用替身和真实二进制独立执行并证明完整流程：flow-delivery-control
+      covers:
+      - flow-delivery-control
+      acceptance_refs:
+      - flow-delivery-control
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/delivery/...
+    pr_base: main
+    acceptance_refs:
+    - flow-delivery-control
+    source_of_truth:
+    - docs/solution-design.md#74-触达
+    scope_paths:
+    - tests/e2e/delivery/**
+    evidence_mode: artifact
+    consumes:
+    - artifact_id: api-deliveries-routes
+      producer: api-deliveries
+      evidence_mode: artifact
+    - artifact_id: kernel-attention-module
+      producer: kernel-attention
+      evidence_mode: artifact
+    - artifact_id: e2e-env-baseline-flow-evidence
+      producer: e2e-env-baseline
+      evidence_mode: artifact
+    - artifact_id: cli-init-serve-commands
+      producer: cli-init-serve
+      evidence_mode: artifact
+    - artifact_id: repo-ci-redline-tooling
+      producer: repo-ci-redline
+      evidence_mode: artifact
+    defect_refs:
+    - dfx-56a54bae658c
+    coverage_gate: 0
