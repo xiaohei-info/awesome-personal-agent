@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/cli/judgment"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	kwhy "github.com/xiaohei-info/awesome-personal-agent/kernel/why"
 )
@@ -73,6 +74,22 @@ func render(tl kwhy.Timeline) string {
 		if s.Evidence != "" {
 			fmt.Fprintf(&b, "      evidence: %s\n", s.Evidence)
 		}
+		if j := s.Judgment; j != nil {
+			renderJudgment(&b, j)
+		}
 	}
 	return b.String()
+}
+
+// renderJudgment 写"判断"一行：记录在就逐级列出；过了保留期只写命令 Event 里的结论。
+func renderJudgment(b *strings.Builder, j *kwhy.Judgment) {
+	if j.Record == nil {
+		fmt.Fprintf(b, "      judgment %s: %s, decided by %s (record past retention, only the event's conclusion remains)\n", j.ID, j.Answer, j.DecidedBy)
+		return
+	}
+	r := j.Record
+	fmt.Fprintf(b, "      judgment %s: %s → %s, decided by %s\n", r.ID, r.Template, r.Answer, r.DecidedBy)
+	for i, l := range r.Levels {
+		fmt.Fprintf(b, "        %d. %s\n", i+1, judgment.LevelLine(l, r.Band))
+	}
 }
