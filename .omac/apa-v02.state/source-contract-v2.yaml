@@ -1,9 +1,8 @@
-# sha256: 6c34867581ff89cd525d638436898e9d04efee79c4136b2456ffbe090ac072c6
+# sha256: f46b1b85340bcbebefc4f3623ff273facf0d7f8bfcc62bb83c37a3c63c607b34
 work_item_id: 01a1d069-f012-7432-805a-ba22dfbf5d57
 status: done
 merged: true
 merged_at: '2026-11-12T18:41:45Z'
-recovery_marker: true
 retry_note: 推送 403 的原因已修：Oracle 上 multica daemon 继承了 environment.d 里另一个工具的 GH_TOKEN（guantik-gm
   只读），daemon 已去掉该变量重启，git/gh 现在走 hosts.yml 的 xiaohei-info，push --dry-run 已验证可写。不要申请权限、不要用
   fork。先在原工作区找你上一轮已提交的本地分支和提交（评论里写过），核对后 rebase 到最新 origin/main，重跑合约命令，再 push、开 PR、submit；已做的不要重做。
