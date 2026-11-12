@@ -737,6 +737,28 @@ func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error 
 	return err
 }
 
+// Reattach 在调用方事务内把建议 from 的来源事件（disposition=proposed）改挂到事项 to，记为 attached，挂靠状态取 state
+// （补到自己的事项用 AttachProcessed；补到委派事项用 AttachPending 让它被转发，§9.4）。返回被改挂的事件，按落盘顺序。
+// 不记事件，调用方自己负责留痕。
+func Reattach(tx *store.Tx, from, to, state string) ([]domain.SourceEvent, error) {
+	if state != AttachProcessed && state != AttachPending {
+		return nil, domain.NewError(domain.CodeInvalidRequest, "attach state "+state+" cannot be set on reattach", "use pending or processed")
+	}
+	as, err := querySeq(tx, `WHERE disposition = ? AND item = ? ORDER BY seq`, string(domain.DispositionProposed), from)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.SourceEvent, len(as))
+	for i, a := range as {
+		if _, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ?, attach_state = ? WHERE id = ?`,
+			string(domain.DispositionAttached), to, state, a.ID); err != nil {
+			return nil, err
+		}
+		out[i] = a.SourceEvent
+	}
+	return out, nil
+}
+
 // RejudgeCandidates 返回 since 之后发生、可自动重判的 unjudged 事件，至多 limit 条；重判次数少的在前，同次数按落盘顺序，
 // 一条总是失败的事件不会一直挡在队首。
 func RejudgeCandidates(tx *store.Tx, since time.Time, limit int) ([]domain.SourceEvent, error) {

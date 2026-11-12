@@ -200,6 +200,9 @@ func (s *Service) Register(x *command.Executor) error {
 	if err := registerPropose(x); err != nil {
 		return err
 	}
+	if err := RegisterAttach(x); err != nil {
+		return err
+	}
 	if err := registerBacklog(x); err != nil {
 		return err
 	}

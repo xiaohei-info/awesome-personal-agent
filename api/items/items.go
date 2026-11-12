@@ -24,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -52,6 +53,8 @@ func Routes(x *command.Executor, st *store.Store, staleAfter ...func() time.Dura
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
 		r.Handle(core.Route{Method: "DELETE", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/progress", Handler: h.write("item.progress", "id", http.StatusCreated, h.withProgress)})
+		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/attach", Handler: h.write(inbound.CmdAttach, "id", http.StatusOK)})
+		r.Handle(core.Route{Method: "POST", Path: "/proposals/batch", Handler: h.batch})
 		r.Handle(core.Route{Method: "GET", Path: "/today", Handler: h.today})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/revert", Handler: h.write("item.revert", "id", http.StatusOK)})
 	}
@@ -285,4 +288,24 @@ func LastRejection(tx *store.Tx, it domain.Item) (*Rejection, error) {
 		}
 	}
 	return nil, nil
+}
+
+// batch 处理 POST /proposals/batch（§7.2、附录 B.2）：请求体 {"mode":"recommended","filter":{…}} 或
+// {"mode":"explicit","actions":[…]}；每条建议各自成败、各记一条 Event，依据与身份校验对整批一视同仁。
+func (h *handlers) batch(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var b inbound.BatchRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&b); err != nil {
+		return domain.NewError(domain.CodeInvalidRequest, "request body is not a valid batch", "send {\"mode\":\"recommended\"|\"explicit\", …}")
+	}
+	req := command.Request{Identity: p.Identity, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
+	res, err := inbound.Batch(context.WithoutCancel(r.Context()), h.x, h.st, req, b)
+	if err != nil {
+		return err
+	}
+	if res == nil {
+		res = []inbound.BatchResult{}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"results": res})
 }

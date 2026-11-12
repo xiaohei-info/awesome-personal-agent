@@ -22,10 +22,13 @@ type payload struct {
 	Key      *Correlation     `json:"key,omitempty"`      // 关联键登记或移除（§9.4）
 	Remove   bool             `json:"remove,omitempty"`   // 关系或关联键变更：为真是删
 	Reverts  int64            `json:"reverts,omitempty"`
+	To       string           `json:"to,omitempty"`       // proposal.attach：并入的目标事项
+	Proposal string           `json:"proposal,omitempty"` // proposal.attached：被并入的建议
+	Messages []string         `json:"messages,omitempty"` // proposal.attach：改挂到目标的来源事件
 }
 
 var itemEvents = []string{domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvDecisionRequested, domain.EvDecisionResolved,
-	domain.EvDelegationCreated, domain.EvDelegationReported, domain.EvItemProgressAdded}
+	domain.EvDelegationCreated, domain.EvDelegationReported, domain.EvItemProgressAdded, domain.EvProposalAttached}
 
 type folded struct {
 	items map[string]domain.Item
