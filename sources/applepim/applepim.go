@@ -57,7 +57,7 @@ type Config struct {
 	// BinDir 是 mail-cli 等所在目录，缺省按 PATH 查找。
 	BinDir string `json:"bin_dir,omitempty"`
 	// HelperApp 是辅助应用（.app）路径。工具读日历、提醒事项需要系统授权，授权归"启动它的应用"；
-	// 来源由后台服务拉起时没有这个应用，填上后经 `open -W -a` 让辅助应用成为授权主体。缺省直接拉起工具。
+	// 来源由后台服务拉起时没有这个应用，填上后经 `open -W -n -a` 让辅助应用成为授权主体。缺省直接拉起工具。
 	HelperApp string `json:"helper_app,omitempty"`
 
 	Account      string `json:"account,omitempty"` // mail：邮件应用里的账户名，必填
@@ -495,7 +495,8 @@ func execRunner(cfg Config) Runner {
 		}
 		defer os.RemoveAll(dir)
 		outF, errF := filepath.Join(dir, "out"), filepath.Join(dir, "err")
-		oa := []string{"-W", "-a", cfg.HelperApp}
+		// -n：多个来源同时拉取时，已在运行的辅助应用不会再收到 --args，必须各开一个实例。
+		oa := []string{"-W", "-n", "-a", cfg.HelperApp}
 		if cfg.BinDir != "" {
 			oa = append(oa, "--env", "APPLE_PIM_BIN_DIR="+cfg.BinDir)
 		}
