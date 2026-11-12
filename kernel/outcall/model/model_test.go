@@ -17,11 +17,11 @@ import (
 const judgeSchema = `{"type":"object","required":["choice","confidence"],"additionalProperties":false,
 "properties":{"choice":{"type":"string","enum":["remind","wait"]},"confidence":{"type":"number","minimum":0,"maximum":1}}}`
 
-func setup(t *testing.T) (*modelstub.Stub, policy.ModelEndpoint) {
+func setup(t *testing.T) (*modelstub.Stub, policy.GenerateEndpoint) {
 	t.Helper()
 	s := modelstub.New()
 	t.Cleanup(s.Close)
-	return s, policy.ModelEndpoint{URL: s.URL(), Model: "m1", APIKey: "sekret-key"}
+	return s, policy.GenerateEndpoint{URL: s.URL(), Model: "m1", APIKey: "sekret-key"}
 }
 
 // ACT-CAS-01：判断型按 schema 返回枚举与置信度；请求带上 schema、模型名与 key。
@@ -146,7 +146,7 @@ func TestFailuresAreReportedHonestly(t *testing.T) {
 	}
 
 	s.Reset()
-	for _, bad := range []policy.ModelEndpoint{{}, {URL: ep.URL}, {Model: "m"}} {
+	for _, bad := range []policy.GenerateEndpoint{{}, {URL: ep.URL}, {Model: "m"}} {
 		if _, err := (&Client{}).Complete(context.Background(), bad, Request{}); !errors.Is(err, ErrNotConfigured) {
 			t.Fatalf("err=%v", err)
 		}
@@ -185,7 +185,7 @@ func TestBadResponsesAndTransport(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			srv := httptest.NewServer(h)
 			defer srv.Close()
-			_, err := (&Client{}).Complete(context.Background(), policy.ModelEndpoint{URL: srv.URL, Model: "m"}, Request{})
+			_, err := (&Client{}).Complete(context.Background(), policy.GenerateEndpoint{URL: srv.URL, Model: "m"}, Request{})
 			if !errors.Is(err, ErrBadResponse) {
 				t.Fatalf("err=%v", err)
 			}
@@ -196,15 +196,15 @@ func TestBadResponsesAndTransport(t *testing.T) {
 	srv := httptest.NewServer(nil)
 	url := srv.URL
 	srv.Close()
-	_, err := (&Client{}).Complete(context.Background(), policy.ModelEndpoint{URL: url + "/sekret-key", Model: "m", APIKey: "sekret-key"}, Request{})
+	_, err := (&Client{}).Complete(context.Background(), policy.GenerateEndpoint{URL: url + "/sekret-key", Model: "m", APIKey: "sekret-key"}, Request{})
 	if err == nil || strings.Contains(err.Error(), "sekret-key") {
 		t.Fatalf("err=%v", err)
 	}
-	_, err = (&Client{}).Complete(context.Background(), policy.ModelEndpoint{URL: "http://\x7f", Model: "m"}, Request{})
+	_, err = (&Client{}).Complete(context.Background(), policy.GenerateEndpoint{URL: "http://\x7f", Model: "m"}, Request{})
 	if err == nil {
 		t.Fatal("want error for bad url")
 	}
-	if _, err := (&Client{}).Complete(context.Background(), policy.ModelEndpoint{URL: url, Model: "m"}, Request{Schema: json.RawMessage(`[`)}); err == nil {
+	if _, err := (&Client{}).Complete(context.Background(), policy.GenerateEndpoint{URL: url, Model: "m"}, Request{Schema: json.RawMessage(`[`)}); err == nil {
 		t.Fatal("want error for bad schema")
 	}
 }
@@ -215,7 +215,7 @@ func TestErrorBodyScrubbedAndTruncated(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"message": "bad key sekret-key " + strings.Repeat("z", 500)}})
 	}))
 	defer srv.Close()
-	_, err := (&Client{}).Complete(context.Background(), policy.ModelEndpoint{URL: srv.URL + "/", Model: "m", APIKey: "sekret-key"}, Request{})
+	_, err := (&Client{}).Complete(context.Background(), policy.GenerateEndpoint{URL: srv.URL + "/", Model: "m", APIKey: "sekret-key"}, Request{})
 	var se *StatusError
 	if !errors.As(err, &se) || se.Code != 401 || strings.Contains(se.Message, "sekret-key") || len([]rune(se.Message)) != maxMessage {
 		t.Fatalf("err=%v", err)

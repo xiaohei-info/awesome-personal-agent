@@ -113,9 +113,9 @@ func newLedger(t *testing.T) *ledger {
 	if err := st.Update(bg, e.att.Start); err != nil {
 		t.Fatal(err)
 	}
-	ep := policy.ModelEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", ScreeningTimeoutMs: 5000}
+	ep := policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}
 	if err := st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.ModelEndpoint = ep; return nil })
+		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.GenerateEndpoint, p.ScreeningTimeoutMs = ep, 5000; return nil })
 		return err
 	}); err != nil {
 		t.Fatal(err)

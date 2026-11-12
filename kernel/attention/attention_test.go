@@ -751,7 +751,7 @@ func (f *fakeDrafter) Do(_ context.Context, c direct.Call) (direct.Outcome, erro
 
 func (e *env) withModel() {
 	e.policy(func(p *policy.Policy) {
-		p.ModelEndpoint = policy.ModelEndpoint{URL: "http://model.invalid", Model: "m", ScreeningTimeoutMs: 1000}
+		p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: "http://model.invalid", Model: "m"}, 1000
 	})
 }
 

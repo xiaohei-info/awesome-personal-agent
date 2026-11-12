@@ -81,6 +81,23 @@ func TestLoadDefaultsWhenMissing(t *testing.T) {
 	if c.ChainDepthThreshold != 8 { // §14.9
 		t.Fatalf("chain depth threshold default = %d", c.ChainDepthThreshold)
 	}
+	// v0.2.0 新键的默认值（§16.2、决定 10）。
+	if c.BacklogReleasePerDay != 40 || c.JudgmentRetention != 180*24*time.Hour || c.DelegationStallAfter != 24*time.Hour {
+		t.Fatalf("v0.2.0 defaults: %d %v %v", c.BacklogReleasePerDay, c.JudgmentRetention, c.DelegationStallAfter)
+	}
+}
+
+func TestLoadV020Keys(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(p, []byte("backlog_release_per_day: 0\njudgment_retention_days: 0\ndelegation_stall_after: 6h\n"), 0o600)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 0 表示不限 / 不清理。
+	if c.BacklogReleasePerDay != 0 || c.JudgmentRetention != 0 || c.DelegationStallAfter != 6*time.Hour {
+		t.Fatalf("got %+v", c)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -144,6 +161,11 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 		"chain not int":    "chain_depth_threshold: deep\n",
 		"empty executor":   "guideline_draft_executor:\n",
 		"negative rejudge": "unjudged_rejudge_days: -1\n",
+		"negative release": "backlog_release_per_day: -1\n",
+		"release not int":  "backlog_release_per_day: many\n",
+		"negative retain":  "judgment_retention_days: -1\n",
+		"stall no unit":    "delegation_stall_after: 24\n",
+		"zero stall":       "delegation_stall_after: 0s\n",
 	}
 	for name, body := range cases {
 		p := filepath.Join(t.TempDir(), "config.yaml")
