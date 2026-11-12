@@ -364,7 +364,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
+		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
@@ -373,6 +373,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 
 // handleTimer 把到期 Timer 分派给所属模块；规则与跟进只在事务里排待办，执行要调模型，由后台循环做。
 func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
+	if err := khealth.RecordClockLag(tx, c, clock.Now()); err != nil { // 迟到只报不修，照常触发
+		return err
+	}
 	switch {
 	case k.att.Owns(c):
 		return k.att.HandleTimer(tx, c)

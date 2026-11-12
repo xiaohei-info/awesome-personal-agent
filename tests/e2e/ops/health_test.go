@@ -212,8 +212,8 @@ event_rules:
 		if cli.Healthy {
 			t.Fatal("十一类问题都在时不应报健康")
 		}
-		if len(cli.Signals) != len(signalIDs) {
-			t.Fatalf("应恒有十一类信号: %+v", cli.Signals)
+		if len(cli.Signals) != len(signalIDs)+2 { // 前十一项 + stalled_delegations、clock_lag(提醒级,另测)
+			t.Fatalf("应恒有十三项信号(前十一类已造出): %+v", cli.Signals)
 		}
 		for i, id := range signalIDs {
 			s := cli.Signals[i]

@@ -292,3 +292,24 @@ func TestRecurCronCatchesUpOnlyLatestMissed(t *testing.T) {
 		t.Fatalf("next beat %+v", f.got)
 	}
 }
+
+// Command.Late 是实际触发比 Timer 登记时刻晚多久；周期定时按第一个错过的节拍算，而不是补发的最近一拍。
+func TestCommandLateIsMeasuredFromScheduledTime(t *testing.T) {
+	f := newFixture(t)
+	if err := f.st.Update(context.Background(), func(tx *store.Tx) error {
+		if _, err := Add(tx, domain.Timer{ID: "once", Target: "a", Kind: domain.TimerDue, At: t0}); err != nil {
+			return err
+		}
+		_, err := Add(tx, domain.Timer{ID: "rec", Target: "b", Kind: domain.TimerRecur, At: t0, Recurrence: "1m"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.now = t0.Add(8 * time.Minute)
+	if _, err := f.c.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.got) != 2 || f.got[0].Late != 8*time.Minute || f.got[1].Late != 8*time.Minute {
+		t.Fatalf("late: %+v", f.got)
+	}
+}
