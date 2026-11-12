@@ -1,13 +1,22 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"testing"
 
+	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/cli/backup"
+	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -300,4 +309,101 @@ func TestOldBuildRefusesUpgradedLedger(t *testing.T) {
 	if _, err := store.Open(home, v01Registry(t)); !errors.Is(err, store.ErrSchemaTooNew) {
 		t.Fatalf("v0.1-shaped build opened a ledger structure version 3 ledger: %v", err)
 	}
+}
+
+// ACT-UPG-04、ACT-UPG-17：`apa serve` 在迁移前自动留一份只含账本与配置的快照（结构版本 2、可校验）；
+// 迁移后快照不变；旧二进制的迁移链加该快照恢复出的目录与升级前一致，且旧二进制可打开它。
+func TestServeSnapshotsBeforeMigratingAndSnapshotRestoresBack(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "h")
+	l := config.LayoutOf(home)
+	if err := l.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	listen := "listen: 127.0.0.1:" + strconv.Itoa(freePort(t)) + "\n"
+	if err := os.WriteFile(l.Config, []byte(listen), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old, err := store.Open(home, v01Registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedV2(t, old)
+	// seedV2 的 actor 不是 serve 重放时要求的 JSON；本测试要真的启动 serve，所以改成合法写法（不改变行数与序号）。
+	seedExec(t, old, `UPDATE eventlog_event SET actor = '{"type":"human","principal":"owner","via":"web"}'`)
+	if err := old.Update(context.Background(), func(tx *store.Tx) error { return core.SetOwnerPassword(tx, pw) }); err != nil {
+		t.Fatal(err)
+	}
+	before := take(t, old)
+	old.Close()
+
+	_, stop := start(t, home)
+	stop()
+
+	snaps, err := filepath.Glob(filepath.Join(home, "backups", "*"))
+	if err != nil || len(snaps) != 1 {
+		t.Fatalf("want exactly one pre-upgrade snapshot, got %v (%v)", snaps, err)
+	}
+	reg, _ := registry()
+	rep, err := backup.Verify(snaps[0], reg)
+	if err != nil {
+		t.Fatalf("snapshot does not verify: %v", err)
+	}
+	if rep.Manifest.Schema.Ledger != 2 {
+		t.Errorf("snapshot ledger structure version = %d, want 2", rep.Manifest.Schema.Ledger)
+	}
+	if _, err := os.Stat(filepath.Join(snaps[0], "config.yaml")); err != nil {
+		t.Errorf("snapshot lacks config: %v", err)
+	}
+
+	// 再启动一次：账本已是最新，不再留快照。
+	_, stop = start(t, home)
+	stop()
+	if again, _ := filepath.Glob(filepath.Join(home, "backups", "*")); len(again) != 1 {
+		t.Errorf("restart with nothing to migrate left another snapshot: %v", again)
+	}
+
+	rb := filepath.Join(t.TempDir(), "rb")
+	if _, err := backup.Restore(snaps[0], rb, v01Registry(t)); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(rb, v01Registry(t))
+	if err != nil {
+		t.Fatalf("old binary cannot open the rolled-back ledger: %v", err)
+	}
+	defer s.Close()
+	got := take(t, s)
+	for n, rows := range before.rows {
+		if got.rows[n] != rows {
+			t.Errorf("rolled-back table %s = %d rows, want %d", n, got.rows[n], rows)
+		}
+	}
+	if len(got.payload) != len(before.payload) {
+		t.Errorf("rolled-back events = %d, want %d", len(got.payload), len(before.payload))
+	}
+}
+
+// 快照留不下来（backups 路径被占成文件）时拒绝启动，账本保持升级前的结构版本。
+func TestServeRefusesToMigrateWithoutSnapshot(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "h")
+	if err := config.LayoutOf(home).Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	old, err := store.Open(home, v01Registry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+	if err := os.WriteFile(filepath.Join(home, "backups"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	c := &client.Ctx{Env: envOf(home, t.TempDir(), "", &out, &errb)}
+	if err := run(context.Background(), c, func(net.Addr) {}); err == nil {
+		t.Fatal("serve migrated without a snapshot")
+	}
+	s, err := store.Open(home, v01Registry(t))
+	if err != nil {
+		t.Fatalf("ledger was touched: %v", err)
+	}
+	s.Close()
 }
