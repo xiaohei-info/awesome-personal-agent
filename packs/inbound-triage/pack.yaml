@@ -17,6 +17,18 @@ source_rules:
     project_by: none
     then: judge
     on_update: attach
+  # 结构化规则：不调模型。PR 的合并、关闭与更新能按关联键挂靠的，已在规则之前挂靠；走到这里的没有事项登记过关联键。
+  - id: reminder-due
+    match: {source_type: reminder, event_type: [reminder.due]}
+    kind: task
+    project_by: none
+    then: proposed
+  - id: agents-md-changed
+    match: {source_type: github, event_type: [repo.agents_md_changed]}
+    then: ignore
+  - id: pr-activity
+    match: {source_type: github, event_type: [pr.merged, pr.closed, pr.updated]}
+    then: ignore
 webhook_schemes:
   - id: hmac-sha256-header
     signature_header: X-Hub-Signature-256
