@@ -62,16 +62,22 @@ function ItemList() {
   const { api } = useSession();
   const [phase, setPhase] = useState("");
   const [tag, setTag] = useState("");
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState("");
+  const [plannedFor, setPlannedFor] = useState("");
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setError(null);
-    api.get<{ items: Item[] }>("/items" + (phase ? "?phase=" + encodeURIComponent(phase) : "")).then(
+    // 全文、排序与计划日期都在服务端做，Web 与 CLI、HTTP 的结果因此一致。
+    const qs = new URLSearchParams();
+    for (const [k, v] of [["phase", phase], ["q", q.trim()], ["sort", sort], ["planned_for", plannedFor]]) if (v) qs.set(k, v);
+    api.get<{ items: Item[] }>("/items" + (qs.size ? "?" + qs : "")).then(
       (r) => setItems(r.items),
       (e) => setError(msg(e)),
     );
-  }, [api, phase]);
+  }, [api, phase, q, sort, plannedFor]);
 
   const tags = [...new Set((items ?? []).flatMap((i) => i.tags ?? []))].sort();
   const shown = (items ?? []).filter((i) => !tag || i.tags?.includes(tag));
@@ -94,6 +100,24 @@ function ItemList() {
           <option value="">全部</option>
           {tags.map((t) => <option key={t}>{t}</option>)}
         </select>
+      </label>
+      <label>
+        搜索
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="标题、摘要、正文、进展" />
+      </label>
+      <label>
+        排序
+        <select value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="">默认</option>
+          <option value="updated">更新时间</option>
+          <option value="deadline">截止</option>
+          <option value="planned_for">计划日期</option>
+          <option value="priority">优先级</option>
+        </select>
+      </label>
+      <label>
+        计划日期
+        <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} />
       </label>
       </div>
       {error && <p role="alert">{error}</p>}
