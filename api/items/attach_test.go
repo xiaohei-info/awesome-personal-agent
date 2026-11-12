@@ -83,6 +83,11 @@ func TestBatchRoute(t *testing.T) {
 	if rec := e.do("POST", "/v1/proposals/batch", `{"mode":"explicit","actions":[`+strings.Join(many, ",")+`]}`, e.web); rec.Code != 400 {
 		t.Fatalf("over the limit: %d %s", rec.Code, rec.Body)
 	}
+	// 缺依据：第一条是不存在的 id 也不影响整批的 403 basis_required。
+	first := fmt.Sprintf(`{"mode":"explicit","actions":[{"id":"itm-not-exist","do":"accept"},{"id":"%s","do":"accept"}]}`, a)
+	if rec := e.do("POST", "/v1/proposals/batch", first, dlg); rec.Code != 403 || code(t, rec) != domain.CodeBasisRequired {
+		t.Fatalf("invalid first entry, no evidence: %d %s", rec.Code, rec.Body)
+	}
 	for _, bad := range []string{`{}`, `{"mode":"nope"}`, `not json`, `{"mode":"explicit","actions":[],"x":1}`} {
 		if rec := e.do("POST", "/v1/proposals/batch", bad, e.web); rec.Code != 400 {
 			t.Errorf("%s: %d", bad, rec.Code)

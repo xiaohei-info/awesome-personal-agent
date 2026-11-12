@@ -209,7 +209,7 @@ func usage(why string) error {
 	return domain.NewError(domain.CodeInvalidRequest, why, "see the batch format in the API reference")
 }
 
-// Batch 逐条处理建议。形态错误、超过 MaxBatch、身份不能代答（4）或缺依据（23）时整批不生效；
+// Batch 逐条处理建议。形态错误、超过 MaxBatch、身份不能代答（4）或缺依据（23）时整批不生效（身份与依据先过一道门，与第一条无关）；
 // 其余按条各自成败，每条成功的处置各是一条命令、各记一条 Event、可逐条撤销。req 带调用者身份与依据，
 // Command、Input 由本函数按每条填写；req.IdemKey 非空时每条派生自己的幂等键。
 func Batch(ctx context.Context, x *command.Executor, st *store.Store, req command.Request, b BatchRequest) ([]BatchResult, error) {
@@ -217,7 +217,9 @@ func Batch(ctx context.Context, x *command.Executor, st *store.Store, req comman
 	if err != nil {
 		return nil, err
 	}
-	if len(acts) == 0 {
+	// 身份与本人依据对整批一视同仁，先于逐条处理一次判定（运行身份 4、缺依据 23、会话不是直接对话）。
+	// 授权单按对象校验范围且只列具体命令，不能过这道门：授权单请求的失败全部落到各条结果里。
+	if req.Grant == "" {
 		gate := req
 		gate.Command, gate.Input, gate.IdemKey = CmdBatch, json.RawMessage(`{}`), ""
 		if _, err := x.Do(ctx, gate); err != nil {
@@ -225,7 +227,8 @@ func Batch(ctx context.Context, x *command.Executor, st *store.Store, req comman
 		}
 	}
 	out := make([]BatchResult, 0, len(acts))
-	for i, a := range acts {
+	var denied error
+	for _, a := range acts {
 		r := req
 		r.Command, r.Input = batchCommand(a)
 		if req.IdemKey != "" {
@@ -240,11 +243,14 @@ func Batch(ctx context.Context, x *command.Executor, st *store.Store, req comman
 		if !errors.As(err, &de) {
 			return out, err
 		}
-		// 身份与依据对整批一视同仁：第一条就被拒绝，说明整批都不会生效。
-		if i == 0 && (de.Code == domain.CodePermissionDenied || de.Code == domain.CodeBasisRequired || de.Code == domain.CodeSessionNotDirect) {
-			return nil, err
+		if de.Code == domain.CodePermissionDenied && denied == nil {
+			denied = err
 		}
 		out = append(out, BatchResult{ID: a.ID, Do: a.Do, Code: de.Code, Why: de.Why})
+	}
+	// 凭据级别不够（授权单路径上没有门）：每一条都被拒绝说明整批都不会生效。
+	if denied != nil && !slices.ContainsFunc(out, func(r BatchResult) bool { return r.Code != domain.CodePermissionDenied }) {
+		return nil, denied
 	}
 	return out, nil
 }

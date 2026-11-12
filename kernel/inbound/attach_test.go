@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
@@ -15,6 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -439,4 +442,46 @@ func TestBatchRecommendedSourceFilterAndRepeatedKey(t *testing.T) {
 		}
 	})
 	e.verify()
+}
+
+// 授权单逐条校验范围：范围外的一条只是它自己失败，与它排在第几位无关；缺依据的整批 23，与第一条是否有效无关。
+func TestBatchGrantScopeIsPerEntryAndBasisIsPerBatch(t *testing.T) {
+	e := attachEnv(t)
+	a, b := e.proposalOf("g-a", "范围外"), e.proposalOf("g-b", "范围内")
+	au := auth.New(nil)
+	var cred auth.Credential
+	var secret string
+	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
+		cred, secret, err = au.Issue(tx, auth.Spec{Kind: auth.Delegate})
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var g policy.Grant
+	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
+		g, err = policy.IssueGrant(tx, au, owner.Actor, e.now, policy.GrantInput{Grantee: policy.Grantee{Credential: cred.ID},
+			Scope: policy.Scope{Items: []string{b}}, Actions: []string{"proposal.accept"}, ExpiresAt: e.now.Add(time.Hour)})
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	who := command.Bearer{Auth: au, Secret: secret, Origin: auth.Origin{Session: "s1", SessionKind: "direct"}}
+	plan := BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: a, Do: "accept"}, {ID: b, Do: "accept"}}}
+
+	res, err := Batch(bg, e.x, e.st, command.Request{Identity: who, Grant: g.ID, Owner: "owner"}, plan)
+	if err != nil || len(res) != 2 || res[0].OK || !res[1].OK {
+		t.Fatalf("out-of-scope entry must fail alone: %+v %v", res, err)
+	}
+	if e.item(a).Phase != domain.PhaseProposed || e.item(b).Phase != domain.PhaseOpen {
+		t.Fatal("only the in-scope entry may be processed")
+	}
+	// 缺依据：第一条是不存在的 id 也不影响整批的 23。
+	c := e.proposalOf("g-c", "另一条")
+	bad := BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: "itm-not-exist", Do: "accept"}, {ID: c, Do: "accept"}}}
+	if _, err := Batch(bg, e.x, e.st, command.Request{Identity: delegate, Owner: "owner"}, bad); exitOf(err) != domain.ExitBasisRequired {
+		t.Fatalf("missing basis with an invalid first entry: %v", err)
+	}
+	if e.item(c).Phase != domain.PhaseProposed {
+		t.Fatal("rejected batch processed an entry")
+	}
 }
