@@ -9,7 +9,7 @@
 | 首批宿主 | Hermes | `plugins/hermes` | harness 插件接口（主文档 §11.2、附录 A） |
 | 即时通讯渠道 ext | Telegram，用成熟的 Bot SDK | `ext/telegram` | 渠道 ext 协议（主文档 §10.3） |
 | 导出 ext | Markdown 目录 | `ext/export` | 事件订阅与只读 API（主文档 §10.3） |
-| webhook 转发 ext | 通用的签名 POST | `ext/webhookforward` | 事件订阅（主文档 §10.3） |
+| webhook 转发 ext | 通用的签名 POST | `ext/webhookforward` | 事件订阅（主文档 §10.3）；可选 `APA_WEBHOOK_TYPES`（逗号分隔的事件类型）只转发所列类型，缺省转发全部，未选中的事件不投递但游标照常推进 |
 | 代码托管平台来源 | GitHub（`source_type: github`） | `sources/` | Source 执行契约（主文档 §9.2） |
 | 邮件 CLI | himalaya | `sources/` | Source 执行契约，自定义脚本（主文档 §9.7） |
 | 日历 CLI | gog calendar（Google 日历） | `sources/` | 同上 |

@@ -43,7 +43,7 @@ func titleOf(typ string, payload json.RawMessage) string {
 		return ""
 	}
 	switch typ {
-	case domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvItemProgressAdded,
+	case domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvItemProgressAdded, domain.EvProposalAttached,
 		domain.EvDecisionRequested, domain.EvDecisionResolved,
 		domain.EvDelegationCreated, domain.EvDelegationReported:
 		return p.Item.Title

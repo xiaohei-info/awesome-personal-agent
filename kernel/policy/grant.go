@@ -26,7 +26,7 @@ const MaxGrantTTL = 90 * 24 * time.Hour
 // 项目、来源、能力包实例管理只接受本人原话，不在其中。
 var GrantableActions = []string{
 	"item.create", "item.update", "item.transition", "item.relate",
-	"decision.answer", "proposal.accept", "proposal.dismiss",
+	"decision.answer", "proposal.accept", "proposal.dismiss", "proposal.attach",
 	"revision.confirm", "revision.reject",
 	"delegate.report", "followmsg.handback",
 }

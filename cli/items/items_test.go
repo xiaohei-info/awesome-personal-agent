@@ -19,8 +19,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -63,6 +65,12 @@ func newKernel(t *testing.T) *kernel {
 		t.Fatal(err)
 	}
 	if err := kitems.Register(k.x, kitems.NewKinds()); err != nil {
+		t.Fatal(err)
+	}
+	if err := decisions.Register(k.x); err != nil {
+		t.Fatal(err)
+	}
+	if err := inbound.RegisterAttach(k.x); err != nil {
 		t.Fatal(err)
 	}
 	srv, err := core.New(core.Deps{Store: st, Auth: k.auth, Groups: []core.RouteGroup{apiitems.Routes(k.x, st), apifm.Routes(k.x)}})

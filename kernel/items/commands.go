@@ -775,7 +775,7 @@ func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
 	switch {
 	case p.Op == "relate" && p.Relation != nil:
 		rp.rel, rp.remove = p.Relation, !p.Remove
-	case (p.Op == "update" || p.Op == "transition" || p.Op == "decision.answer") && p.Before != nil:
+	case (p.Op == "update" || p.Op == "transition" || p.Op == "decision.answer" || p.Op == "proposal.accept" || p.Op == "proposal.dismiss") && p.Before != nil:
 		rp.next = *p.Before
 		rp.next.ItemKernelState = cur.ItemKernelState // 内核字段不回退
 	default:
