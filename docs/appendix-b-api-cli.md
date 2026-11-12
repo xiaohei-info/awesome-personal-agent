@@ -64,9 +64,9 @@
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
 | `apa source rejects <id> [--after N] [--limit N]` | 查看没有入账的输出行及原因（`next_after` 作为下一次的 `--after`） | observer | |
 | `apa source replay <入站记录>` | 重放 | delegate | |
-| `apa source backlog list [--source]` | 列出积压（未判定与已到期），旧原因 `undecided`、空原样返回；按影子分数排序（`--sort score`）随影子打分一并交付 | observer | |
+| `apa source backlog list [--source] [--sort score]` | 列出积压（未判定与已到期），旧原因 `undecided`、空原样返回；`--sort score` 按影子分数从高到低排（各来源合并后统一排序，同分保持来源顺序），每条带 `score`，没有分数的排最后 | observer | |
 | `apa source backlog rules [--source] --evidence` | 积压只跑规则：重走归属与确定性规则，能挂靠的挂靠、规则有明确出口的按出口处置，其余原样；不调模型，不受 `unjudged_rejudge_days` 限制，输出 `attached`、`disposed`、`remaining`（主文档 §9.3） | delegate | 23 |
-| `apa source backlog score [--source] --evidence` | 【规划中（v0.2.0）】影子打分：只写判断记录，不改处置 | delegate | 23 |
+| `apa source backlog score [--source] --evidence` | 影子打分：用判断端点给积压按批（每批不超过判断端点的 `max_batch`）打分，只写带 `shadow` 的判断记录，不改处置、不建事项、不问对话端点；输出 `scored`、`skipped`（外发范围不允许送出的，或判断端点没有给出概率的）；没有判断端点时返回 6（说明没有判断端点），不写记录（主文档 §9.3） | delegate | 23 |
 | `apa source backlog rejudge [--source] [--limit N] --evidence` | 【规划中（v0.2.0）】放开重判：按分数从高到低走完整流水线，受每日上限约束 | delegate | 23 |
 | `apa source backlog restore --from <时间> --to <时间> [--source] [--dry-run] --evidence` | 【规划中（v0.2.0）】把时间段内被旧级联的判断忽略、没有判断记录的事件放回积压（未判定原因 `restored`），之后只经上面三步重判（主文档 §9.3）；`--dry-run` 只返回命中条数与按来源的分布，不写入，不需要 `--evidence` | delegate（`--dry-run` 为 observer） | 23 |
 | **对外** | | | |
@@ -84,7 +84,7 @@
 | `apa run list/show` | 运行记录 | observer | |
 | `apa judgment stats [--use] [--template] [--source] [--since]` | 【规划中（v0.2.0）】各级调用次数与升级率、未定率、接受率、误丢率（主文档 §8.10） | observer | |
 | `apa judgment show <id>` | 一条判断记录的逐级结果 | observer，按权限裁剪 | 5 |
-| `apa judgment spot-check` | 【规划中（v0.2.0）】列出待抽检的条目；抽检结论只在 Web 填 | observer | |
+| `apa judgment spot-check` | 列出待抽检的条目；抽检结论只在 Web 填 | observer | |
 
 **只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、执行者清单、规则切 `auto`、运行权限上限、判断端点与生成端点、不确定带与影子模式、抽检结论、打扰上限与静音、来源与对话捕获的外发范围、登录口令与在线会话、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效、签发和撤销授权单。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
 
@@ -151,17 +151,18 @@
 | | `POST /sources/{id}/webhook` | 创建或轮换接收密钥 | delegate |
 | | `DELETE /sources/{id}/webhook` | 吊销该来源全部接收密钥，同时删除 HMAC 密钥文件 | delegate |
 | | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | observer、delegate；运行凭据不能读入站记录（返回 403，原始请求体未经转发白名单） |
-| | `GET /sources/{id}/events?disposition&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 只有 Web 登录能读 | observer；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
+| | `GET /sources/{id}/events?disposition&sort&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 只有 Web 登录能读 | observer；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
 | | `GET /sources/{id}/rejects?after&limit` | 被拒收的输出行及原因 | observer；运行凭据不可用（返回 403，原始行是未过滤的外部输出） |
 | | `POST /source-events/{id}/propose` | 把未判定事件转为建议 | Web 登录、delegate |
 | | `POST /source-events/{id}/ignore`，`POST /source-events/ignore` | 忽略未判定事件：单条；或批量，请求体 `{"source"}` 按来源、`{"all": true}` 全部 | Web 登录、delegate（附本人原话） |
 | | `POST /source-events/rules` | 积压放开第 1 步：只跑规则，返回 `{"attached", "disposed", "remaining"}`；请求体 `{"source"?}` | Web 登录、delegate（附本人原话） |
-| | `POST /source-events/score`，`/rejudge` | 【规划中（v0.2.0）】积压放开的后两步：影子打分、放开重判；请求体 `{"source"?, "limit"?}` | Web 登录、delegate（附本人原话） |
+| | `POST /source-events/score` | 积压放开第 2 步：影子打分，返回 `{"scored", "skipped"}`；请求体 `{"source"?}`；没有判断端点是 409 | Web 登录、delegate（附本人原话） |
+| | `POST /source-events/rejudge` | 【规划中（v0.2.0）】积压放开第 4 步：放开重判；请求体 `{"source"?, "limit"?}` | Web 登录、delegate（附本人原话） |
 | | `GET /source-events/restorable?from&to&source` | 【规划中（v0.2.0）】预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer；运行凭据不可用 |
 | | `POST /source-events/restore` | 【规划中（v0.2.0）】把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate（附本人原话） |
 | 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |
 | | `GET /judgments/stats?use&template&source&since` | 【规划中（v0.2.0）】各级调用次数与四项指标（主文档 §8.10） | observer |
-| | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 【规划中（v0.2.0）】抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
+| | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
 | 事件 | `GET /events?cursor=` | SSE 或长轮询 | observer、导出和转发 ext 密钥 |
 | 投递 | `GET /deliveries/next?wait=` | 长轮询领取；有租约 | 渠道 ext 密钥；网关插件 token（worker 及以上，只领唤醒类投递） |
@@ -201,7 +202,7 @@
 
 `DELETE /sources/{id}/webhook` 不带请求体，吊销该来源全部有效的接收密钥（含宽限期内的旧密钥）并在同一事务里删除密钥文件，返回 200 `{"revoked": n}`，已无有效密钥时 `n` 为 0。文件删除失败时整个命令回滚、账本不变，返回错误，重试即可。Event 为 `source.webhook_key_revoked`，只记凭据 id。
 
-`GET /sources/{id}/events` 按落盘顺序返回 `{"events": [...], "next_after": 12}`；带 `sort=score` 时按最近一次判断记录的概率从高到低返回，没有分数的排在最后。每条事件的字段见主文档 §6.10：`id`、`source_id`、`dedupe_key`、`type`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`correlation_keys`、`sender`、`sender_verified`、`disposition`、`item`、`attach_state`、`unjudged_reason`、`rejudges`，以及 v0.2.0 新增的 `metrics`、`merge_key`、`items`、`judgment`、`score`（最近一次判断的概率，没有时省略）。其中 `item` 是挂靠或生成的事项 id，`items` 是一条事件抽出多条候选时的全部事项 id。`disposition` 可选，取值 `pending`、`attached`、`proposed`、`ignored`、`digest`、`alerted`、`unjudged`、`expired`，可逗号分隔多个（来源页的积压用 `unjudged,expired`），其他值返回 400。`unjudged_reason` 取 `model_unavailable`、`outbound_unset`、`restored`；v0.1 留下的 `undecided` 与空值原样返回，内核按 `model_unavailable` 对待。`limit` 缺省 100，上限 500；还有下一页时才返回 `next_after`，作为下一次的 `after`。
+`GET /sources/{id}/events` 按落盘顺序返回 `{"events": [...], "next_after": 12}`；带 `sort=score` 时按最近一次判断记录的概率从高到低返回（同分保持落盘顺序），没有分数的排在最后；此时 `after`、`next_after` 是已返回的条数（偏移），不是落盘序号；其他 `sort` 值返回 400。每条事件的字段见主文档 §6.10：`id`、`source_id`、`dedupe_key`、`type`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`correlation_keys`、`sender`、`sender_verified`、`disposition`、`item`、`attach_state`、`unjudged_reason`、`rejudges`，以及 v0.2.0 新增的 `metrics`、`merge_key`、`items`、`judgment`、`score`（最近一次判断的概率，没有时省略）。其中 `item` 是挂靠或生成的事项 id，`items` 是一条事件抽出多条候选时的全部事项 id。`disposition` 可选，取值 `pending`、`attached`、`proposed`、`ignored`、`digest`、`alerted`、`unjudged`、`expired`，可逗号分隔多个（来源页的积压用 `unjudged,expired`），其他值返回 400。`unjudged_reason` 取 `model_unavailable`、`outbound_unset`、`restored`；v0.1 留下的 `undecided` 与空值原样返回，内核按 `model_unavailable` 对待。`limit` 缺省 100，上限 500；还有下一页时才返回 `next_after`，作为下一次的 `after`。
 
 `GET /sources/{id}/rejects` 按发生顺序返回 `{"rejects": [...], "next_after": 12}`，分页参数与 `events` 相同。每条含 `source_id`、`run_id`、`line`（输出中的行号）、`reason`、`raw`（原始行）、`at`。`raw` 在落账时已截断到 512 字节；含接收密钥明文前缀的行返回 `[redacted]`（与入站记录的请求头同一规则）。来源未登记返回 404。
 `capture:<项目>` 是对话捕获的内部来源（主文档 §9.3），不在 `GET /sources` 里，Web 按开启捕获的项目拼出 id。Web 登录读它返回同样的结构，其他凭据返回 404（运行凭据仍是 403）。

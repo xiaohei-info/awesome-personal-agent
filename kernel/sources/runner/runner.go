@@ -743,6 +743,17 @@ func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error 
 	return err
 }
 
+// ProposeIgnored 在调用方事务内把一条被忽略的来源事件改为 proposed 并关联事项（抽检"该看"，§8.10）。
+// 只接受 ignored；不记事件，调用方自己负责留痕。
+func ProposeIgnored(tx *store.Tx, id, item string) error {
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND disposition = ?`,
+		string(domain.DispositionProposed), item, id, string(domain.DispositionIgnored))
+	if err == nil && n == 0 {
+		return domain.NewError(domain.CodeConflict, "source event "+id+" is not ignored", "re-read the source event")
+	}
+	return err
+}
+
 // Reattach 在调用方事务内把建议 from 的来源事件（disposition=proposed）改挂到事项 to，记为 attached，挂靠状态取 state
 // （补到自己的事项用 AttachProcessed；补到委派事项用 AttachPending 让它被转发，§9.4）。返回被改挂的事件，按落盘顺序。
 // 不记事件，调用方自己负责留痕。

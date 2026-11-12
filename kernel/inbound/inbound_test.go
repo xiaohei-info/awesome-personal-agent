@@ -1006,3 +1006,25 @@ func TestProposeUnjudgedResumesAfterPartialFailure(t *testing.T) {
 		t.Fatalf("event %+v, %d items", got, len(e.allItems()))
 	}
 }
+
+// 抽检"该看"依赖的起草：给被忽略的事件建 proposed 事项，不改事件处置；重试沿用已建事项，不重复建。
+func TestDraftProposalIsIdempotentAndLeavesDispositionAlone(t *testing.T) {
+	e := newEnv(t, false)
+	e.emit("src_m", "inbox", ev("m1", "mail.received", "合同请签字", nil))
+	before := e.events("src_m")[0]
+	id := before.ID
+	first, err := e.svc.DraftProposal(bg, owner, id)
+	if err != nil || first == "" {
+		t.Fatalf("draft: %q %v", first, err)
+	}
+	if it := e.item(first); it.Phase != domain.PhaseProposed || it.Title != "合同请签字" {
+		t.Fatalf("item %+v", it)
+	}
+	if got := e.events("src_m")[0]; got.Disposition != before.Disposition || got.Item != "" {
+		t.Fatalf("drafting changed the disposition: %+v", got)
+	}
+	n := len(e.allItems())
+	if again, err := e.svc.DraftProposal(bg, owner, id); err != nil || again != first || len(e.allItems()) != n {
+		t.Fatalf("retry: %q %v items %d→%d", again, err, n, len(e.allItems()))
+	}
+}

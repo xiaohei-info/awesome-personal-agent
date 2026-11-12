@@ -63,6 +63,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/spotcheck"
 	kmaterials "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -315,6 +316,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		sregistry.Register(x, sregistry.Options{Bundled: bundledPull, Layout: l}),
 		k.rn.Register(x),
 		k.in.Register(x),
+		spotcheck.Register(x),
 		fm.Register(x),
 		rules.Register(x),
 		instances.Register(x, ld),
@@ -364,7 +366,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
+		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)

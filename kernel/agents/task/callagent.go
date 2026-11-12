@@ -15,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/spotcheck"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -166,6 +167,17 @@ func (s *Service) ledgerSnapshot(ctx context.Context) (string, error) {
 	return string(b), err
 }
 
+// spotCheckMaterial 是简报的抽检条目：只含 id、来源与标题和 Web 入口，结论只能在 Web 提交。
+func (s *Service) spotCheckMaterial(ctx context.Context) (Material, error) {
+	var es []spotcheck.Entry
+	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { es, err = spotcheck.ForBrief(tx, s.o.Now()); return })
+	if err != nil {
+		return Material{}, err
+	}
+	b, err := json.Marshal(map[string]any{"spot_check": es})
+	return Material{Name: "spot_check", Body: string(b)}, err
+}
+
 // callTask 拉起任务型；prior 是接力时上一步的定案结果（结构化输入，§8.3），msgs 是接力时事项上的挂靠消息。
 func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string, msgs []Message, prior json.RawMessage) error {
 	depth, over, err := s.launchDepth(ctx, c)
@@ -178,6 +190,13 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 	}
 	if len(prior) > 0 {
 		mats = append(mats, Material{Name: "relay_input", Body: string(prior)})
+	}
+	if c.Item != nil && c.Item.Kind == domain.KindBrief { // 每份简报带抽检条目（§8.10）
+		sc, err := s.spotCheckMaterial(ctx)
+		if err != nil {
+			return err
+		}
+		mats = append(mats, sc)
 	}
 	ip := instanceParams(c)
 	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs,

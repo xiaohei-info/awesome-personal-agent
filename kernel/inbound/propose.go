@@ -61,6 +61,31 @@ func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, even
 	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, disposeIn{Event: event}, command.Chain{}); err != nil {
 		return domain.SourceEvent{}, err
 	}
+	item, mf, err := s.draftProposal(ctx, id, event, true)
+	var ev domain.SourceEvent
+	if err != nil {
+		return ev, err
+	}
+	d := disposeIn{Event: event, Item: item, Reason: "manually proposed from the source page", mergeFields: mf}
+	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
+		return ev, err
+	}
+	err = s.o.Store.View(ctx, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, event); return })
+	return ev, err
+}
+
+// DraftProposal 为来源事件建 proposed 事项并返回它的 id；这个事件已经建过就沿用，重试不会重复建。
+// 只建事项，不改事件的处置：处置由调用方的命令落账（积压转建议、抽检"该看"）。
+func (s *Service) DraftProposal(ctx context.Context, id command.Identity, event string) (string, error) {
+	s.proposing.Lock()
+	defer s.proposing.Unlock()
+	// 调用方的命令不带合并信息，所以这里不并入已有建议，只新建。
+	item, _, err := s.draftProposal(ctx, id, event, false)
+	return item, err
+}
+
+// draftProposal 的 merge 为真时按合并键找已有建议（§9.3），返回的 mergeFields 由调用方带进处置命令。
+func (s *Service) draftProposal(ctx context.Context, id command.Identity, event string, merge bool) (string, mergeFields, error) {
 	var (
 		sn snapshot
 		ev domain.SourceEvent
@@ -72,26 +97,15 @@ func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, even
 		return sn.loadFacts(tx)
 	})
 	if err != nil {
-		return ev, err
+		return "", mergeFields{}, err
 	}
-	item, made := sn.made[event]
-	var mf mergeFields
-	if made {
-		mf = s.resumeFields(ctx, ev)
-	} else {
-		if item, mf, err = s.proposeItem(ctx, id, sn, ev); err != nil {
-			return ev, err
-		}
+	if item, made := sn.made[event]; made {
+		return item, s.resumeFields(ctx, ev), nil
 	}
-	d := disposeIn{Event: event, Item: item, Reason: "manually proposed from the source page", mergeFields: mf}
-	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
-		return ev, err
-	}
-	err = s.o.Store.View(ctx, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, event); return })
-	return ev, err
+	return s.proposeItem(ctx, id, sn, ev, merge)
 }
 
-func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snapshot, ev domain.SourceEvent) (string, mergeFields, error) {
+func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snapshot, ev domain.SourceEvent, merge bool) (string, mergeFields, error) {
 	src, err := sn.source(ev.SourceID)
 	if err != nil {
 		return "", mergeFields{}, err
@@ -109,6 +123,10 @@ func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snaps
 		kind = domain.Kind(m.rule.Kind)
 	}
 	p := proposal{kind: kind, title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: "manually proposed from the source page"}
+	if !merge {
+		item, err := s.createItem(ctx, id, "", src, ev, p, project)
+		return item, mergeFields{}, err
+	}
 	return s.place(ctx, id, "", src, ev, p, project)
 }
 

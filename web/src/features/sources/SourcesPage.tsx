@@ -44,6 +44,7 @@ interface SourceEvent {
   item?: string;
   unjudged_reason?: string;
   rejudges?: number;
+  score?: number; // 影子打分的初筛分数（§9.3）；没打过分时没有
 }
 interface Reject {
   run_id: string;
@@ -248,7 +249,8 @@ function Events({ source }: { source: Source }) {
   const [next, setNext] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const base = `/sources/${encodeURIComponent(source.id)}/events?disposition=unjudged,expired`;
+  const [byScore, setByScore] = useState(false);
+  const base = `/sources/${encodeURIComponent(source.id)}/events?disposition=unjudged,expired${byScore ? "&sort=score" : ""}`;
 
   const load = useCallback(
     (after?: number) =>
@@ -283,6 +285,9 @@ function Events({ source }: { source: Source }) {
     <section role="region" aria-label="未判定事件">
       <h4>未判定事件</h4>
       <p className="sub">因模型不可用而未判定的，模型恢复后会自动重判；发生在 7 天之前的标为已过期，不再自动重判。都可以手动转为建议或忽略。</p>
+      <label>
+        <input type="checkbox" checked={byScore} onChange={(e) => setByScore(e.target.checked)} /> 按分数排序
+      </label>
       {error && <div role="alert">{error}</div>}
       {notice && <p role="status">{notice}</p>}
       {items === null ? (
@@ -297,6 +302,7 @@ function Events({ source }: { source: Source }) {
               return (
                 <li key={v.id}>
                   <span>{v.subject || v.id}</span> · {v.type} · {v.occurred_at} <span className={st.cls}>{st.label}</span>
+                  {v.score !== undefined && <span className="badge plain">分数 {v.score.toFixed(2)}</span>}
                   {v.summary && <p>{v.summary}</p>}
                   <div role="group" aria-label={`处理 ${v.id}`}>
                     <button onClick={() => act(v.id, "propose")}>转为建议</button> <button onClick={() => act(v.id, "ignore")}>忽略</button>

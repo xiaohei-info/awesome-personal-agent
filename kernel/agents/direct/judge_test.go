@@ -609,3 +609,27 @@ func TestBuiltinBandStartingValues(t *testing.T) {
 }
 
 var _ = fmt.Sprint
+
+// 积压影子打分（§9.3 第 2 步）：ScoreOnly 只问分类端点、写带 shadow 的记录，不问对话端点；分类端点答不出来时不写记录。
+func TestScoreOnlyAsksClassifierOnly(t *testing.T) {
+	e := setupJudge(t, true, true)
+	e.cls.PYes(modelstub.Key{Contains: "so-ok"}, 0.40) // 带内：没有 ScoreOnly 时会升级到对话端点
+	e.chat("so-ok", "no", true)
+	c := jc("screen", "so-ok")
+	c.ScoreOnly = true
+	v := e.judge(t, c)
+	r := e.saved(t, v.Record.ID)
+	if !v.Written || !r.Shadow || len(r.Levels) != 1 || r.Levels[0].Backend != "classifier" || r.Levels[0].PYes == nil || *r.Levels[0].PYes != 0.40 {
+		t.Fatalf("%+v %+v", v, r)
+	}
+	if n := len(e.stub.Requests()); n != 0 {
+		t.Fatalf("chat endpoint was called %d times", n)
+	}
+
+	e.cls.SetFault(modelstub.ClsFault{Status: 503})
+	c = jc("screen", "so-down")
+	c.ScoreOnly = true
+	if v := e.judge(t, c); !v.Unavailable || v.Written {
+		t.Fatalf("a failed score must not leave a record: %+v", v)
+	}
+}

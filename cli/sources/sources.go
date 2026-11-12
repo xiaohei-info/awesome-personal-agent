@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -19,7 +20,7 @@ import (
 )
 
 const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
-	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] | backlog rules [--source ID] --evidence <words> | auth <id>"
+	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] --evidence <words> | auth <id>"
 
 func init() { client.Register("source", source) }
 
@@ -202,23 +203,25 @@ func auth(c *client.Ctx, id string) error {
 	return cmd.Run()
 }
 
-// backlog 是积压放开的入口（附录 B.1）：list 读积压（未判定与已到期），rules 是第 1 步只跑规则（需本人原话，授权在内核）。
+// backlog 是积压放开的入口（附录 B.1）：list 读积压（未判定与已到期），rules、score 是第 1、2 步（只跑规则、影子打分；
+// 需本人原话，授权在内核）。
 func backlog(c *client.Ctx, args []string) error {
-	if len(args) == 0 || (args[0] != "list" && args[0] != "rules") {
-		return usage("backlog needs list or rules", usageText)
+	if len(args) == 0 || (args[0] != "list" && args[0] != "rules" && args[0] != "score") {
+		return usage("backlog needs list, rules or score", usageText)
 	}
 	fs := flag.NewFlagSet("source backlog "+args[0], flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	src := fs.String("source", "", "")
-	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+	sortBy := fs.String("sort", "", "")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*sortBy != "" && (args[0] != "list" || *sortBy != "score")) {
 		return usage("invalid arguments for source backlog "+args[0], usageText)
 	}
-	if args[0] == "rules" {
+	if args[0] != "list" {
 		body := map[string]any{}
 		if *src != "" {
 			body["source"] = *src
 		}
-		return call(c, "POST", "/source-events/rules", body)
+		return call(c, "POST", "/source-events/"+args[0], body)
 	}
 	ids := []string{*src}
 	if *src == "" {
@@ -243,6 +246,9 @@ func backlog(c *client.Ctx, args []string) error {
 				NextAfter int64             `json:"next_after"`
 			}
 			path := "/sources/" + url.PathEscape(id) + "/events?disposition=unjudged,expired&limit=500" + after
+			if *sortBy != "" {
+				path += "&sort=" + *sortBy
+			}
 			if err := c.Do(context.Background(), "GET", path, nil, &page); err != nil {
 				return err
 			}
@@ -252,6 +258,19 @@ func backlog(c *client.Ctx, args []string) error {
 			}
 			after = "&after=" + strconv.FormatInt(page.NextAfter, 10)
 		}
+	}
+	if *sortBy == "score" { // 各来源各自有序：合起来再按分数排一次（同分保持来源顺序），没有分数的在最后
+		score := func(e json.RawMessage) *float64 {
+			var v struct {
+				Score *float64 `json:"score"`
+			}
+			_ = json.Unmarshal(e, &v)
+			return v.Score
+		}
+		sort.SliceStable(out, func(i, j int) bool {
+			a, b := score(out[i]), score(out[j])
+			return a != nil && (b == nil || *a > *b)
+		})
 	}
 	return c.Print(map[string]any{"events": out, "total": len(out)})
 }

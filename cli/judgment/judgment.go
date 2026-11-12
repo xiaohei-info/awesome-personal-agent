@@ -6,6 +6,7 @@ package judgment
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -17,7 +18,7 @@ import (
 
 func init() { client.Register("judgment", run) }
 
-const usageHint = "usage: apa judgment show <id> [--pretty]"
+const usageHint = "usage: apa judgment show <id> [--pretty] | spot-check"
 
 func usage(why string) error { return domain.NewError(domain.CodeInvalidRequest, why, usageHint) }
 
@@ -28,8 +29,22 @@ func run(c *client.Ctx, args []string) error {
 	switch args[0] {
 	case "show":
 		return show(c, args[1:])
+	case "spot-check":
+		return spotCheck(c, args[1:])
 	}
 	return usage("unknown judgment subcommand " + args[0])
+}
+
+// spotCheck 只读列出抽检池；抽检结论只在 Web 填（设计 §8.10），这里没有写子命令。
+func spotCheck(c *client.Ctx, args []string) error {
+	if len(args) != 0 {
+		return usage("apa judgment spot-check takes no arguments; results are submitted in the Web UI only")
+	}
+	var out json.RawMessage
+	if err := c.Do(context.Background(), "GET", "/judgments/spot-check", nil, &out); err != nil {
+		return err
+	}
+	return c.Print(out)
 }
 
 func show(c *client.Ctx, args []string) error {
