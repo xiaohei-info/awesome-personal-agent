@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/backup"
@@ -176,7 +177,7 @@ const selfcheckTimeout = 5 * time.Second
 func runSelfcheck(ctx context.Context, argv, env []string) (out selfcheckOut, err error) {
 	ctx, cancel := context.WithTimeout(ctx, selfcheckTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := bounded(ctx, argv[0], argv[1:]...)
 	cmd.Env = env
 	var buf bytes.Buffer
 	cmd.Stdout = &limitWriter{w: &buf, n: 1 << 20}
@@ -190,6 +191,15 @@ func runSelfcheck(ctx context.Context, argv, env []string) (out selfcheckOut, er
 		return out, errors.New("its output is not the JSON of appendix A.1")
 	}
 	return out, nil
+}
+
+// bounded 让时限真正生效：命令放进自己的进程组，到时整组杀掉；管道被孙进程占着时 1 秒后也放弃等待。
+func bounded(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = time.Second
+	return cmd
 }
 
 type limitWriter struct {
@@ -334,7 +344,7 @@ func probeOne(ctx context.Context, in Input, s domain.Source) (problem, next str
 	now := in.Now.UTC().Format(time.RFC3339)
 	stdin, _ := json.Marshal(map[string]any{"source_id": s.ID, "config": cfg, "cursor": "", "run_id": "doctor-probe",
 		"credentials_path": s.CredentialsPath, "window": map[string]string{"from": now, "to": now}})
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := bounded(ctx, argv[0], argv[1:]...)
 	cmd.Stdin = bytes.NewReader(stdin)
 	var errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = io.Discard, &limitWriter{w: &errOut, n: 64 << 10}

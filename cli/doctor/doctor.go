@@ -59,9 +59,12 @@ func doctorCmd(c *client.Ctx, args []string) error {
 		return domain.NewError(domain.CodeInvalidRequest, "cannot locate the APA home directory", "set APA_HOME to an absolute path")
 	}
 	in := Input{Home: home, Reg: reg, Model: &model.Client{}, Now: clock.Now()}
-	rep := Run(context.Background(), in)
+	// 升级预检不执行任何来源适配器、插件自检命令，也不探测模型端点：它只读文件与账本副本。
+	var rep kdoctor.Report
 	if upgrade {
 		rep = UpgradeCheck(context.Background(), in)
+	} else {
+		rep = Run(context.Background(), in)
 	}
 	if asJSON {
 		err = c.Print(rep)

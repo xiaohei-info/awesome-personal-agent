@@ -476,7 +476,7 @@ func (s *Server) noteSeen(ctx context.Context, c command.Caller, o auth.Origin) 
 	if c.Kind == auth.Ext {
 		note(kdoctor.SubjectExt + strings.TrimPrefix(c.Actor.Principal, "ext:"))
 	}
-	if o.Harness != "" {
-		note(kdoctor.SubjectHarness + o.Harness)
+	if h := o.Harness; h != "" && len(h) <= 64 { // 长度设限：任意请求头值不能无限撑大记录
+		note(kdoctor.SubjectHarness + h)
 	}
 }
