@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 GET /v1/packs 的 views 与 GET /v1/items（附录 B.2、C.8）。
 // 列、筛选、卡片字段全部来自能力包声明；本页只按字段路径取值，不含任何包专属逻辑，新增包不改这里。
@@ -45,11 +46,11 @@ export function PackViewsPage() {
     );
   }, [api]);
 
-  if (error) return <p role="alert">{error}</p>;
-  if (!packs || !items) return <p>加载中…</p>;
+  if (error) return <main><p role="alert">{error}</p></main>;
+  if (!packs || !items) return <main><p role="status">加载中…</p></main>;
 
   const views = packs.flatMap((p) => Object.entries(p.views ?? {}).map(([name, v]) => ({ key: `${p.name}/${name}`, v })));
-  if (!views.length) return <main><h2>能力包视图</h2><p>没有能力包声明视图</p></main>;
+  if (!views.length) return <main><PageHead>能力包视图</PageHead><p className="empty">没有能力包声明视图</p></main>;
   const cur = views.find((x) => x.key === sel) ?? views[0];
   const { v } = cur;
   const rows = items.filter((i) => i.kind === v.kind);
@@ -57,7 +58,8 @@ export function PackViewsPage() {
 
   return (
     <main>
-      <h2>能力包视图</h2>
+      <PageHead>能力包视图</PageHead>
+      <div className="filters">
       <label>
         视图
         <select value={cur.key} onChange={(e) => { setSel(e.target.value); setFilters({}); }}>
@@ -76,14 +78,17 @@ export function PackViewsPage() {
           </label>
         );
       })}
-      {!shown.length && <p>没有符合条件的事项</p>}
+      </div>
+      {!shown.length && <p className="empty">没有符合条件的事项</p>}
       {!!shown.length && (
+        <div className="panel flush">
         <table aria-label="视图列表">
           <thead><tr>{v.list.columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
           <tbody>
             {shown.map((i) => <tr key={i.id}>{v.list.columns.map((c) => <td key={c}>{show(pick(i, c))}</td>)}</tr>)}
           </tbody>
         </table>
+        </div>
       )}
       <section aria-label="视图卡片">
         {shown.map((i) => (

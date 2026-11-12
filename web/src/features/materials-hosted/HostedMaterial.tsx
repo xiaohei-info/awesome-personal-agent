@@ -59,11 +59,11 @@ export function HostedMaterial({ material, pollMs = 3000 }: { material: HostedMa
   const commit = content?.state === "ready" ? content.commit : reg?.commit;
 
   return (
-    <section role="region" aria-label="材料详情">
+    <section role="region" aria-label="材料详情" className="panel">
       <h3>
         {material.title} <small>{material.kind} · {material.project || "全局"} · 托管型（只读）</small>
       </h3>
-      <p>
+      <p className="sub">
         登记信息：{repo ?? material.location ?? ""}
         {path ? ` · ${path}` : ""}
         {commit ? ` · 最近 commit ${commit}` : ""}
@@ -73,7 +73,7 @@ export function HostedMaterial({ material, pollMs = 3000 }: { material: HostedMa
       {content?.state === "unavailable" && <p role="status">暂不可读：{content.reason}</p>}
       {content?.state === "ready" && (
         <>
-          <p>默认分支内容 · commit {content.commit}</p>
+          <p className="sub">默认分支内容 · commit {content.commit}</p>
           <pre data-testid="hosted-content">{content.content}</pre>
         </>
       )}
@@ -119,7 +119,7 @@ function ChangeForm({ material }: { material: HostedMaterialInfo }) {
   return (
     <form aria-label="发起修改" onSubmit={submit}>
       <h4>发起修改</h4>
-      <p>文档在仓库里改：这会生成委派子事项，由执行者开分支提 PR。</p>
+      <p className="sub">文档在仓库里改：这会生成委派子事项，由执行者开分支提 PR。</p>
       <label>
         执行者
         <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>

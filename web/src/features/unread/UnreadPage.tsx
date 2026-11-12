@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 GET /v1/deliveries/unread 返回的 domain.Delivery。未读 = 退回 Web 且本人没点过；是否未读由服务端判定。
 export interface UnreadDelivery {
@@ -49,7 +50,7 @@ export function UnreadPage() {
 
   return (
     <main>
-      <h2>Web 未读</h2>
+      <PageHead lede="退回 Web、你还没看过的通知。">Web 未读</PageHead>
       {error && (
         <div role="alert">
           {error}{" "}
@@ -64,23 +65,25 @@ export function UnreadPage() {
         </div>
       )}
       {items === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : items.length === 0 ? (
-        <p>没有未读</p>
+        <p className="empty">没有未读</p>
       ) : (
         items.map((d) => (
           <article key={d.id} aria-label={d.content.title}>
             <h3>{d.content.title}</h3>
-            <p>{d.class}</p>
+            <p className="meta"><span className="badge plain">{d.class}</span></p>
             {d.content.summary && <p>{d.content.summary}</p>}
             {d.content.options && d.content.options.length > 0 && <p>选项：{d.content.options.join(" / ")}</p>}
             {d.content.web_url && <a href={d.content.web_url}>打开</a>}
             {d.injections && d.injections.length > 0 && (
               <p>已注入 {d.injections.length} 个会话（注入不算确认，仍需你本人确认）</p>
             )}
-            <button disabled={busy === d.id} onClick={() => markRead(d.id)}>
-              标记已读
-            </button>
+            <div className="actions">
+              <button disabled={busy === d.id} onClick={() => markRead(d.id)}>
+                标记已读
+              </button>
+            </div>
           </article>
         ))
       )}

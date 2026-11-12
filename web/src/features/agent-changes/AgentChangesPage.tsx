@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 GET /v1/audit/events 返回的 Step。哪些能撤销、是否最新、授权都由服务端的 item.revert 判定。
 interface Step {
@@ -34,7 +35,7 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
       <h3>
         {TYPE_LABEL[s.type] ?? s.type}：{title ?? s.object}
       </h3>
-      <p>
+      <p className="meta">
         {who} · {new Date(s.at).toLocaleString()}
         {reverted && " · 已撤销"}
       </p>
@@ -104,8 +105,7 @@ export function AgentChangesPage() {
 
   return (
     <main>
-      <h2>agent 变更</h2>
-      <p>撤销只会写一条反向命令恢复账本状态，原记录保留；外部已发生的副作用不会被撤销。</p>
+      <PageHead lede="撤销只会写一条反向命令恢复账本状态，原记录保留；外部已发生的副作用不会被撤销。">agent 变更</PageHead>
       {since && (
         <label>
           <input type="checkbox" checked={showOlder} onChange={(e) => setShowOlder(e.target.checked)} />
@@ -126,9 +126,9 @@ export function AgentChangesPage() {
         </div>
       )}
       {steps === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : shown.length === 0 ? (
-        <p>没有 agent 变更</p>
+        <p className="empty">没有 agent 变更</p>
       ) : (
         shown.map((s) => <Row key={s.seq} s={s} reverted={reverted.has(s.seq)} onRevert={revert} />)
       )}

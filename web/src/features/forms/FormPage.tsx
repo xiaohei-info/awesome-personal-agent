@@ -87,24 +87,24 @@ export function FormPage() {
 
   switch (st.k) {
     case "loading":
-      return <p>加载中…</p>;
+      return <main className="form-page"><p role="status">加载中…</p></main>;
     case "done":
       return (
-        <main>
+        <main className="form-page">
           <h1>已提交</h1>
           <p>你的回答已记录，此链接已失效，可以关闭本页。</p>
         </main>
       );
     case "dead":
       return (
-        <main>
+        <main className="form-page">
           <h1>链接已失效</h1>
           <p role="alert">此链接已被使用、已过期或对应事项已变化（{st.why}）。请使用最新消息中的链接，或在 Web 中作答。</p>
         </main>
       );
     case "web":
       return (
-        <main>
+        <main className="form-page">
           <h1>请在 Web 中作答</h1>
           <p role="alert">{st.why}</p>
           {st.url && <a href={st.url}>前往 Web 登录并作答</a>}
@@ -112,7 +112,7 @@ export function FormPage() {
       );
     case "error":
       return (
-        <main>
+        <main className="form-page">
           <p role="alert">无法加载表单：{st.why}</p>
           <button onClick={() => location.reload()}>重试</button>
         </main>
@@ -122,8 +122,8 @@ export function FormPage() {
   const { form } = st;
   const canSubmit = !busy && (choice !== "" || (form.free_text && text.trim() !== ""));
   return (
-    <main>
-      <form onSubmit={submit}>
+    <main className="form-page">
+      <form className="panel" onSubmit={submit}>
         <h1>{form.question}</h1>
         {form.options.length > 0 && (
           <fieldset>
@@ -146,10 +146,12 @@ export function FormPage() {
           <input value={reason} onChange={(e) => setReason(e.target.value)} />
         </label>
         {err && <p role="alert">{err}</p>}
-        <button type="submit" disabled={!canSubmit}>
-          提交
-        </button>
-        <p>此链接只能提交一次。</p>
+        <div>
+          <button type="submit" disabled={!canSubmit}>
+            提交
+          </button>
+        </div>
+        <p className="sub">此链接只能提交一次。</p>
       </form>
     </main>
   );

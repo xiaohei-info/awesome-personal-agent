@@ -56,7 +56,8 @@ describe("建议流页（flow-proposal-triage）", () => {
     expect(within(card).getByText(/acc-open/)).toBeInTheDocument();
     expect(screen.queryByText("决策 n")).not.toBeInTheDocument();
     expect(s.calls.some((c) => c.path === "/v1/items?phase=proposed")).toBe(true);
-    expect(s.calls.some((c) => c.path === "/v1/items?phase=needs_input")).toBe(false);
+    // 导航上的待决数会读一次 needs_input；建议流页自己不读
+    expect(s.calls.filter((c) => c.path === "/v1/items?phase=needs_input").length).toBeLessThanOrEqual(1);
   });
 
   it("ACT-PROP-01：决策待办页不出现建议", async () => {

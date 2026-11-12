@@ -1,4 +1,4 @@
 import type { Feature } from "../../app/registry";
 import { RulesPage } from "./RulesPage";
 
-export const feature: Feature = { id: "rules", title: "规则模式", path: "rules", order: 85, element: <RulesPage /> };
+export const feature: Feature = { id: "rules", title: "规则模式", path: "rules", order: 31, group: "规则", element: <RulesPage /> };

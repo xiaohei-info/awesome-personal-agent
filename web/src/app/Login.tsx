@@ -21,16 +21,35 @@ export function Login() {
   }
 
   return (
-    <main>
-      <h1>登录 APA 中台</h1>
-      <form onSubmit={submit}>
-        <label>
-          口令
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required autoFocus />
-        </label>
-        <button type="submit" disabled={busy}>登录</button>
-        {error && <p role="alert">{error}</p>}
-      </form>
+    <main className="login">
+      <div className="pitch">
+        <div className="brand">
+          <span className="mark" aria-hidden="true">决</span>
+          <div>
+            <b>APA</b>
+            <small>awesome personal agent</small>
+          </div>
+        </div>
+        <p className="big">
+          事情交给 agent，
+          <br />
+          <em>决定</em>留给你。
+        </p>
+        <p className="sub">agent 替你读邮件、看日历、推进事项。遇到该你拍板的事，它会停下来，在这里等你一句话。</p>
+      </div>
+      <div className="gate">
+        <h1>登录</h1>
+        <form onSubmit={submit}>
+          <label>
+            口令
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required autoFocus />
+          </label>
+          <div>
+            <button type="submit" disabled={busy}>登录</button>
+          </div>
+          {error && <p role="alert">{error}</p>}
+        </form>
+      </div>
     </main>
   );
 }

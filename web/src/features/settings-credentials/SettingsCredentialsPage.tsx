@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 /v1/settings/{tokens,ext-keys} 返回的 auth.Credential。授权（仅 Web 会话）、
 // 种类与分组校验、明文只出现一次都在服务端；本页只负责调用并如实展示服务端的回答。
@@ -80,9 +81,10 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
   const heading = `heading-${group.path}`;
   return (
     <section role="region" aria-labelledby={heading}>
-      <h3 id={heading}>{group.title}</h3>
+      <h2 id={heading}>{group.title}</h2>
       {error && <div role="alert">{error}</div>}
       <form
+        className="panel"
         onSubmit={(e) => {
           e.preventDefault();
           issue();
@@ -113,20 +115,22 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
             <input value={executor} onChange={(e) => setExecutor(e.target.value)} />
           </label>
         )}
-        <button type="submit" disabled={busy || (isExt && !scope.trim())}>签发</button>
+        <div>
+          <button type="submit" disabled={busy || (isExt && !scope.trim())}>签发</button>
+        </div>
       </form>
       {creds === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : creds.length === 0 ? (
-        <p>还没有凭据</p>
+        <p className="sub">还没有凭据</p>
       ) : (
-        <ul>
+        <ul className="rows">
           {creds.map((c) => (
             <li key={c.id}>
-              <span>{c.label || c.id}</span> · {c.kind}
-              {c.scope && ` · ${c.scope}`}
-              {c.executor && ` · ${c.executor}`}
-              {c.revoked_at ? " · 已吊销" : <> <button onClick={() => revoke(c.id)}>吊销</button></>}
+              <strong>{c.label || c.id}</strong> <span className="badge plain">{c.kind}</span>
+              {c.scope && <code>{c.scope}</code>}
+              {c.executor && <code>{c.executor}</code>}
+              {c.revoked_at ? <span className="badge">已吊销</span> : <button className="danger" onClick={() => revoke(c.id)}>吊销</button>}
             </li>
           ))}
         </ul>
@@ -140,12 +144,14 @@ export function SettingsCredentialsPage() {
   const [secret, setSecret] = useState<string | null>(null);
   return (
     <main>
-      <h2>凭据</h2>
+      <PageHead lede="harness、agent 与 ext 接入 APA 用的令牌和密钥。明文只在签发时显示一次。">凭据</PageHead>
       {secret && (
-        <div role="alert">
+        <div role="alert" className="secret">
           <p>明文只显示这一次，请立即保存：</p>
           <code>{secret}</code>
-          <button onClick={() => setSecret(null)}>我已保存</button>
+          <div>
+            <button onClick={() => setSecret(null)}>我已保存</button>
+          </div>
         </div>
       )}
       <CredentialSection group={{ path: "tokens", title: "令牌" }} onSecret={setSecret} />

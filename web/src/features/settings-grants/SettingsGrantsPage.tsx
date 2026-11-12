@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 import { ActorBadge, type Step } from "../items/ItemsPage";
 
 // 形状对应 /v1/settings/grants（policy.Grant）与 /v1/audit/events?grant=。有效期上限、动作白名单、凭据与范围校验都在服务端，
@@ -64,9 +65,9 @@ function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | n
 
   return (
     <li>
-      <span>{g.id}</span> · {st}
-      {g.revoked_at && g.revoked_reason ? `（${g.revoked_reason}）` : ""}
-      <div>
+      <strong>{g.id}</strong> <span className={"badge" + (st === "有效" ? " ok" : st === "已过期" ? " warn" : "")}>{st}</span>
+      {g.revoked_at && g.revoked_reason ? <span className="sub">（{g.revoked_reason}）</span> : ""}
+      <div className="sub full">
         凭据 {g.grantee.credential}
         {g.grantee.harness ? ` · harness ${g.grantee.harness}` : ""} · 动作 {g.actions.join("、")} · 范围
         {g.scope.projects.length ? ` 项目 ${g.scope.projects.join("、")}` : ""}
@@ -74,18 +75,20 @@ function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | n
         {g.scope.items.length ? ` 事项 ${g.scope.items.join("、")}` : ""} · 到期 {new Date(g.expires_at).toLocaleString()}
         {g.reason ? ` · ${g.reason}` : ""}
       </div>
-      {st === "有效" && (
-        <>
-          <label>
-            撤销原因
-            <input value={reason} onChange={(e) => setReason(e.target.value)} />
-          </label>
-          <button disabled={!reason.trim()} onClick={revoke}>撤销</button>
-        </>
-      )}
-      <button onClick={showUsage}>使用记录</button>
-      {usage && (usage.length === 0 ? <p>还没有使用记录</p> : (
-        <ul aria-label="使用记录">
+      <div className="actions full">
+        {st === "有效" && (
+          <>
+            <label>
+              撤销原因
+              <input value={reason} onChange={(e) => setReason(e.target.value)} />
+            </label>
+            <button className="danger" disabled={!reason.trim()} onClick={revoke}>撤销</button>
+          </>
+        )}
+        <button onClick={showUsage}>使用记录</button>
+      </div>
+      {usage && (usage.length === 0 ? <p className="sub full">还没有使用记录</p> : (
+        <ul aria-label="使用记录" className="plain">
           {usage.map((e) => (
             <li key={e.seq}>
               #{e.seq} · {e.type} · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString()}
@@ -165,10 +168,11 @@ export function SettingsGrantsPage() {
 
   return (
     <main>
-      <h2>授权单</h2>
+      <PageHead lede="让某个 agent 凭据在限定范围、限定期限内替你做决定。只在这里签发和撤销。">授权单</PageHead>
       {error && <div role="alert">{error}</div>}
       {/* noValidate：有效期等校验以服务端为准，max 只是提示 */}
-      <form aria-label="签发授权单" noValidate onSubmit={issue}>
+      <h2>签发授权单</h2>
+      <form className="panel" aria-label="签发授权单" noValidate onSubmit={issue}>
         <label>
           被授权凭据
           <select value={chosen} onChange={(e) => setCredential(e.target.value)}>
@@ -193,7 +197,7 @@ export function SettingsGrantsPage() {
           事项范围
           <input value={items} onChange={(e) => setItems(e.target.value)} />
         </label>
-        <fieldset>
+        <fieldset className="checks">
           <legend>动作</legend>
           {GRANTABLE_ACTIONS.map((a) => (
             <label key={a}>
@@ -210,14 +214,16 @@ export function SettingsGrantsPage() {
           原因
           <input value={reason} onChange={(e) => setReason(e.target.value)} />
         </label>
-        <button type="submit" disabled={busy || !chosen || actions.length === 0}>签发</button>
+        <div>
+          <button type="submit" disabled={busy || !chosen || actions.length === 0}>签发</button>
+        </div>
       </form>
       {grants === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : grants.length === 0 ? (
-        <p>还没有授权单</p>
+        <p className="empty">还没有授权单</p>
       ) : (
-        <ul aria-label="授权单列表">
+        <ul aria-label="授权单列表" className="rows">
           {grants.map((g) => (
             <GrantRow key={g.id} g={g} onError={setError} onChanged={load} />
           ))}

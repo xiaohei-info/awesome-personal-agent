@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 import { ActorBadge, type Step } from "../items/ItemsPage";
 
 // 形状对应 GET /v1/audit/events（附录 B.2，§15.3）。筛选、裁剪、分页都在服务端，本页只搬运条件并显示结果；只读，不提供撤销。
@@ -57,26 +58,30 @@ export function AuditPage() {
 
   return (
     <main>
-      <h2>审计</h2>
-      <form onSubmit={submit}>
+      <PageHead lede="账本里的每一条事件：谁、从哪个入口、对什么做了什么。只读。">审计</PageHead>
+      <form className="panel inline" onSubmit={submit}>
         {field("actor", "操作者筛选")}
         {field("object", "对象筛选")}
         {field("type", "事件类型筛选")}
-        <button type="submit">筛选</button>
-        <button type="button" onClick={() => apply({ ...EMPTY, type: REJECTED })}>只看被拒绝的命令</button>
-        <button type="button" onClick={() => apply(EMPTY)}>清除</button>
+        <div className="actions">
+          <button type="submit">筛选</button>
+          <button type="button" onClick={() => apply({ ...EMPTY, type: REJECTED })}>只看被拒绝的命令</button>
+          <button type="button" onClick={() => apply(EMPTY)}>清除</button>
+        </div>
       </form>
       {error && <p role="alert">{error}</p>}
-      {!events && !error && <p>加载中…</p>}
-      {events && !events.length && <p>没有符合条件的事件</p>}
+      {!events && !error && <p role="status">加载中…</p>}
+      {events && !events.length && <p className="empty">没有符合条件的事件</p>}
       {events && events.length > 0 && (
-        <ul aria-label="审计事件">
+        <ul aria-label="审计事件" className="rows">
           {events.map((e) => (
             <li key={e.seq}>
-              #{e.seq} · {e.type} · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString()}
-              {e.grant ? ` · 授权单 ${e.grant}` : ""}
-              {e.reason ? ` · ${e.reason}` : ""}
-              {e.redacted || e.tombstone ? " · （内容已隐藏）" : ""}
+              <span>
+                #{e.seq} · {e.type} · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString()}
+                {e.grant ? ` · 授权单 ${e.grant}` : ""}
+                {e.reason ? ` · ${e.reason}` : ""}
+                {e.redacted || e.tombstone ? " · （内容已隐藏）" : ""}
+              </span>
             </li>
           ))}
         </ul>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 /v1/settings/{policy,allowlists,model-endpoints,access-limits}（附录 B.2）。
 // 校验、规整、人格上限（约 400 token）全部由服务端判定，本页只搬运编辑结果并原样显示拒绝原因；被拒绝时什么都没保存，草稿保留。
@@ -44,10 +45,12 @@ function Card({ title, onSave, children }: { title: string; onSave: () => Promis
     }
   }
   return (
-    <section aria-label={title}>
-      <h3>{title}</h3>
+    <section aria-label={title} className="panel stack">
+      <h2>{title}</h2>
       {children}
-      <button type="button" disabled={busy} onClick={() => void save()} aria-label={`保存${title}`}>保存</button>
+      <div>
+        <button type="button" className="primary" disabled={busy} onClick={() => void save()} aria-label={`保存${title}`}>保存</button>
+      </div>
       {status && <p role={status.ok ? "status" : "alert"}>{status.text}</p>}
     </section>
   );
@@ -58,7 +61,7 @@ function Rows({ label, rows, onChange, options, keyLabel = "名称", valueLabel 
 }) {
   const set = (i: number, j: 0 | 1, v: string) => onChange(rows.map((r, n) => (n === i ? (j ? [r[0], v] : [v, r[1]]) : r) as Row));
   return (
-    <div role="group" aria-label={label}>
+    <div role="group" aria-label={label} className="kv">
       {rows.map(([k, v], i) => (
         <div key={i}>
           <input aria-label={`${label}${keyLabel} ${i + 1}`} value={k} onChange={(e) => set(i, 0, e.target.value)} />
@@ -100,7 +103,7 @@ function WebOnlyCard({ doc, save }: { doc: Doc; save: Save }) {
     })}>
       <label>类别（每行一个）<textarea value={cats} onChange={(e) => setCats(e.target.value)} /></label>
       {rules.map((r, i) => (
-        <div key={i} role="group" aria-label={`匹配规则 ${i + 1}`}>
+        <div key={i} role="group" aria-label={`匹配规则 ${i + 1}`} className="kv-row">
           {["kind", "tag", "项目", "类别"].map((n, j) => (
             <input key={n} aria-label={`规则${i + 1} ${n}`} placeholder={n} value={r[j]} onChange={(e) => setRule(i, j, e.target.value)} />
           ))}
@@ -146,17 +149,16 @@ export function SettingsPolicyPage() {
   if (error)
     return (
       <main>
-        <h2>策略与人格</h2>
+        <PageHead>策略与人格</PageHead>
         <p role="alert">{error}</p>
         <button onClick={() => void load()}>重试</button>
       </main>
     );
-  if (!docs) return <p>加载中…</p>;
+  if (!docs) return <main><p role="status">加载中…</p></main>;
   const p = docs["policy"], al = docs["allowlists"], me = docs["model-endpoints"], lim = docs["access-limits"];
   return (
     <main>
-      <h2>策略与人格</h2>
-      <p>保存的设置在下一次判定时生效；服务端拒绝时不会保存任何内容。</p>
+      <PageHead lede="保存的设置在下一次判定时生效；服务端拒绝时不会保存任何内容。">策略与人格</PageHead>
       <WebOnlyCard doc={p} save={save} />
       <DisturbCard doc={p} save={save} />
       <MaterialCard doc={p} save={save} />
@@ -172,7 +174,7 @@ function DisturbCard({ doc, save }: { doc: Doc; save: Save }) {
   const [rows, setRows] = useDraft(doc.disturb, () => rowsOf(doc.disturb.routes));
   return (
     <Card title="打扰策略" onSave={() => save("policy", { disturb: { routes: toMap(rows, "打扰策略") } })}>
-      <p>键为投递类别，或「类别:优先级」（后者优先）；值为路由。</p>
+      <p className="sub">键为投递类别，或「类别:优先级」（后者优先）；值为路由。</p>
       <Rows label="打扰路由" keyLabel="类别" valueLabel="路由" rows={rows} onChange={setRows} />
     </Card>
   );
@@ -213,7 +215,7 @@ function EndpointCard({ doc, save }: { doc: Doc; save: Save }) {
       {f("url", "端点 URL")}
       {f("model", "模型")}
       {f("api_key", "API 密钥", "password")}
-      <small>{d.api_key === MASK ? "已设置密钥；保持不变即沿用原密钥" : "密钥只写入，保存后不再显示"}</small>
+      <small className="sub">{d.api_key === MASK ? "已设置密钥；保持不变即沿用原密钥" : "密钥只写入，保存后不再显示"}</small>
       {f("timeout", "筛选超时（毫秒）", "number")}
     </Card>
   );
@@ -227,7 +229,7 @@ function AllowlistCard({ doc, save }: { doc: Doc; save: Save }) {
       forward_allowlist: toListMap(fwd, "转发白名单"),
       channel_answerers: toListMap(ans, "渠道回答人白名单"),
     })}>
-      <p>两份白名单相互独立；多个值用逗号分隔。</p>
+      <p className="sub">两份白名单相互独立；多个值用逗号分隔。</p>
       <Rows label="转发白名单" keyLabel="来源" valueLabel="发送者" rows={fwd} onChange={setFwd} />
       <Rows label="渠道回答人" keyLabel="渠道" valueLabel="回答人" rows={ans} onChange={setAns} />
     </Card>

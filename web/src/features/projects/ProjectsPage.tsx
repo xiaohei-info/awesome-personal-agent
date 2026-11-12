@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, Route, Routes, useParams } from "react-router-dom";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 import { ProjectMaterials } from "../materials-hosted/ProjectMaterials";
 import type { Item } from "../items/ItemsPage";
 
@@ -63,18 +64,21 @@ function ProjectList() {
 
   return (
     <main>
-      <h1>项目</h1>
+      <PageHead>项目</PageHead>
       {error && <p role="alert">{error}</p>}
-      {projects && !projects.length && !error && <p>还没有项目</p>}
-      <ul aria-label="项目列表">
-        {projects?.map((p) => (
-          <li key={p.id}>
-            <Link to={p.id}>{p.name}</Link> · {p.status}
-            {p.tags?.length ? ` · ${p.tags.map((t) => "#" + t).join(" ")}` : ""}
-          </li>
-        ))}
-      </ul>
-      <form onSubmit={create}>
+      {projects && !projects.length && !error && <p className="empty">还没有项目</p>}
+      {!!projects?.length && (
+        <ul aria-label="项目列表" className="rows">
+          {projects.map((p) => (
+            <li key={p.id}>
+              <Link to={p.id}>{p.name}</Link> <span className={"badge" + (p.status === "active" ? " ok" : "")}>{p.status}</span>
+              {p.tags?.length ? <span className="sub">{p.tags.map((t) => "#" + t).join(" ")}</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      <h2>新建项目</h2>
+      <form className="panel" onSubmit={create}>
         <label>名称 <input value={name} onChange={(e) => setName(e.target.value)} /></label>
         <label>简介 <input value={intro} onChange={(e) => setIntro(e.target.value)} /></label>
         <label>标签（逗号分隔） <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
@@ -101,10 +105,10 @@ function ProjectDetail() {
   }, [load]);
 
   if (loadErr) return <main><p role="alert">{loadErr}</p><Link to="/projects">返回项目列表</Link></main>;
-  if (!p) return <p>加载中…</p>;
+  if (!p) return <main><p role="status">加载中…</p></main>;
   return (
     <main>
-      <Link to="/projects">返回项目列表</Link>
+      <p className="eyebrow"><Link to="/projects">返回项目列表</Link></p>
       <h1>{p.name}</h1>
       <EditForm key={p.id + p.name} p={p} onSaved={setP} />
       <Repos p={p} onChange={setP} />
@@ -144,7 +148,7 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
     return run(async () => onSaved(await api.patch<Project>("/projects/" + p.id, { name, intro, tags: splitTags(tags), status, capture })));
   };
   return (
-    <form onSubmit={save} aria-label="项目属性">
+    <form className="panel" onSubmit={save} aria-label="项目属性">
       <label>名称 <input value={name} onChange={(e) => setName(e.target.value)} /></label>
       <label>简介 <input value={intro} onChange={(e) => setIntro(e.target.value)} /></label>
       <label>标签（逗号分隔） <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
@@ -171,11 +175,15 @@ function Repos({ p, onChange }: { p: Project; onChange: (p: Project) => void }) 
     <section aria-label="仓库">
       <h2>仓库</h2>
       {error && <p role="alert">{error}</p>}
-      <ul>
-        {p.repos?.map((r) => <RepoRow key={r.remote} r={r} op={op} />)}
-      </ul>
-      <label>远程地址 <input value={remote} onChange={(e) => setRemote(e.target.value)} /></label>
-      <button onClick={() => op({ op: "add_remote", remote }).then(() => setRemote(""))}>添加仓库</button>
+      {!!p.repos?.length && (
+        <ul className="rows">
+          {p.repos.map((r) => <RepoRow key={r.remote} r={r} op={op} />)}
+        </ul>
+      )}
+      <div className="actions">
+        <label>远程地址 <input value={remote} onChange={(e) => setRemote(e.target.value)} /></label>
+        <button onClick={() => op({ op: "add_remote", remote }).then(() => setRemote(""))}>添加仓库</button>
+      </div>
     </section>
   );
 }
@@ -185,19 +193,23 @@ function RepoRow({ r, op }: { r: Repo; op: (b: Record<string, string>) => Promis
   const [path, setPath] = useState("");
   return (
     <li>
-      <span>{r.remote}</span>
-      <ul>
-        {r.checkouts?.map((c) => (
-          <li key={c.host + c.path}>
-            <span>{c.host}:{c.path}</span>{" "}
-            <button onClick={() => op({ op: "remove_checkout", remote: r.remote, host: c.host, path: c.path })}>移除检出</button>
-          </li>
-        ))}
-      </ul>
-      <label>主机名 <input value={host} onChange={(e) => setHost(e.target.value)} /></label>
-      <label>路径 <input value={path} onChange={(e) => setPath(e.target.value)} /></label>
-      <button onClick={() => op({ op: "set_checkout", remote: r.remote, host, path })}>设置检出</button>
-      <button onClick={() => op({ op: "remove_remote", remote: r.remote })}>删除仓库</button>
+      <code>{r.remote}</code>
+      <button className="danger" onClick={() => op({ op: "remove_remote", remote: r.remote })}>删除仓库</button>
+      {!!r.checkouts?.length && (
+        <ul className="plain">
+          {r.checkouts.map((c) => (
+            <li key={c.host + c.path}>
+              <span>{c.host}:{c.path}</span>{" "}
+              <button className="quiet" onClick={() => op({ op: "remove_checkout", remote: r.remote, host: c.host, path: c.path })}>移除检出</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="actions">
+        <label>主机名 <input value={host} onChange={(e) => setHost(e.target.value)} /></label>
+        <label>路径 <input value={path} onChange={(e) => setPath(e.target.value)} /></label>
+        <button onClick={() => op({ op: "set_checkout", remote: r.remote, host, path })}>设置检出</button>
+      </div>
     </li>
   );
 }
@@ -229,16 +241,18 @@ function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }
     <section aria-label="允许的执行者">
       <h2>允许的执行者</h2>
       {loadErr && <p role="alert">{loadErr}</p>}
+      <div className="panel">
       <label><input type="radio" name="lim" checked={!limited} onChange={() => setLimited(false)} />不限制</label>
       <label><input type="radio" name="lim" checked={limited} onChange={() => setLimited(true)} />限制为所选（不选则只能指派给本人）</label>
       {limited && (
-        <ul>
+        <ul className="plain">
           {ids.map((id) => (
             <li key={id}><label><input type="checkbox" checked={sel.includes(id)} onChange={() => toggle(id)} />{id}</label></li>
           ))}
         </ul>
       )}
-      <button onClick={save}>保存执行者</button>
+      <div><button className="primary" onClick={save}>保存执行者</button></div>
+      </div>
       {error && <p role="alert">{error}</p>}
     </section>
   );
@@ -255,12 +269,14 @@ function ProjectItems({ id }: { id: string }) {
     <section aria-label="事项">
       <h2>事项</h2>
       {error && <p role="alert">{error}</p>}
-      {items && !items.length && <p>该项目下没有事项</p>}
-      <ul>
-        {items?.map((i) => (
-          <li key={i.id}><Link to={"/items/" + i.id}>{i.title}</Link> · {i.phase}</li>
-        ))}
-      </ul>
+      {items && !items.length && <p className="sub">该项目下没有事项</p>}
+      {!!items?.length && (
+        <ul className="rows">
+          {items.map((i) => (
+            <li key={i.id}><Link to={"/items/" + i.id}>{i.title}</Link> <span className="badge plain">{i.phase}</span></li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

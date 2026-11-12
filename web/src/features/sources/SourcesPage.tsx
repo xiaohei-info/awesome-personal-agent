@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 GET /v1/sources（domain.Source，stats 为 runner.Stats）、/sources/{id}/ingests、/sources/{id}/events、/sources/{id}/rejects。
 // 授权（自定义命令只 Web）、命令校验、转建议的规则都在服务端；本页只调用并如实展示服务端的回答。
@@ -80,10 +81,11 @@ function Registration({ onDone }: { onDone: () => void }) {
 
   return (
     <section role="region" aria-labelledby="h-register">
-      <h3 id="h-register">登记自定义命令来源</h3>
-      <p>登记的命令会在本机按周期执行，只能在 Web 登记。</p>
+      <h2 id="h-register">登记自定义命令来源</h2>
+      <p className="sub">登记的命令会在本机按周期执行，只能在 Web 登记。</p>
       {error && <div role="alert">{error}</div>}
       <form
+        className="panel"
         onSubmit={(e) => {
           e.preventDefault();
           submit();
@@ -109,7 +111,9 @@ function Registration({ onDone }: { onDone: () => void }) {
           凭据路径
           <input value={f.credentials_path} onChange={set("credentials_path")} />
         </label>
-        <button type="submit" disabled={!f.id.trim() || !f.command.trim() || !f.schedule.trim()}>登记</button>
+        <div>
+          <button type="submit" disabled={!f.id.trim() || !f.command.trim() || !f.schedule.trim()}>登记</button>
+        </div>
       </form>
     </section>
   );
@@ -187,11 +191,11 @@ function Ingests({ source }: { source: Source }) {
       {error && <div role="alert">{error}</div>}
       {notice && <p role="status">{notice}</p>}
       {items === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : items.length === 0 ? (
-        <p>还没有入站记录</p>
+        <p className="sub">还没有入站记录</p>
       ) : (
-        <ul>
+        <ul className="rows">
           {items.map((g) => (
             <li key={g.id}>
               <span>{g.id}</span> · {g.received_at} · {g.state} · {g.signed ? "已验签" : "未验签"} · {g.events} 个事件
@@ -246,11 +250,11 @@ function Events({ source }: { source: Source }) {
       <h4>未判定事件</h4>
       {error && <div role="alert">{error}</div>}
       {items === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : items.length === 0 ? (
-        <p>没有未判定事件</p>
+        <p className="sub">没有未判定事件</p>
       ) : (
-        <ul>
+        <ul className="rows">
           {items.map((v) => (
             <li key={v.id}>
               <span>{v.subject || v.id}</span> · {v.type} · {v.occurred_at}
@@ -294,11 +298,11 @@ function Rejects({ source }: { source: Source }) {
       <h4>被拒收的事件</h4>
       {error && <div role="alert">{error}</div>}
       {items === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : items.length === 0 ? (
-        <p>没有被拒收的事件</p>
+        <p className="sub">没有被拒收的事件</p>
       ) : (
-        <ul>
+        <ul className="rows">
           {items.map((j, i) => (
             <li key={i}>
               {j.at} · 运行 {j.run_id} · 第 {j.line} 行 · {j.reason}
@@ -314,7 +318,7 @@ function Rejects({ source }: { source: Source }) {
 
 function Detail({ source }: { source: Source }) {
   return (
-    <section role="region" aria-label={`来源 ${source.id}`}>
+    <section role="region" aria-label={`来源 ${source.id}`} className="panel">
       <h3>{source.id}</h3>
       {source.type === "webhook" && <WebhookKey source={source} />}
       {source.type === "webhook" && <Ingests source={source} />}
@@ -355,26 +359,29 @@ export function SourcesPage() {
   const current = sources?.find((s) => s.id === selected);
   return (
     <main>
-      <h2>来源</h2>
+      <PageHead lede="APA 从这些地方读你的事。读到的内容先筛查，再决定要不要打扰你。">来源</PageHead>
       {error && <div role="alert">{error}</div>}
       <section role="region" aria-labelledby="h-list">
-        <h3 id="h-list">来源登记</h3>
+        <h2 id="h-list">来源登记</h2>
         {sources === null ? (
-          !error && <p>加载中…</p>
+          !error && <p role="status">加载中…</p>
         ) : sources.length === 0 ? (
-          <p>还没有来源</p>
+          <p className="empty">还没有来源</p>
         ) : (
-          <ul>
+          <ul className="rows">
             {sources.map((s) => (
               <li key={s.id} aria-label={s.id}>
-                <span>{s.id}</span> · {s.type}
-                {s.command && ` · ${s.command}`}
-                {s.schedule && ` · 每 ${s.schedule}`} · {s.enabled ? "已启用" : "已停用"}
-                <br />
-                游标 {s.cursor || "—"} · 最近成功 {at(s.stats?.last_success_at)} · 连续失败 {s.stats?.consecutive_failures ?? 0} · 超时 {s.stats?.timeouts ?? 0}
-                {s.stats?.last_error && ` · 最近错误 ${s.stats.last_error}`}
-                <br />
-                <button onClick={() => toggle(s)}>{s.enabled ? "停用" : "启用"}</button> <button onClick={() => setSelected(s.id)}>详情</button>
+                <strong>{s.id}</strong> <span className="sub">{s.type}</span>
+                {s.command && <code>{s.command}</code>}
+                {s.schedule && <span className="sub">每 {s.schedule}</span>}
+                <span className={"badge" + (s.enabled ? " ok" : "")}>{s.enabled ? "已启用" : "已停用"}</span>
+                <div className="sub full">
+                  游标 {s.cursor || "—"} · 最近成功 {at(s.stats?.last_success_at)} · 连续失败 {s.stats?.consecutive_failures ?? 0} · 超时 {s.stats?.timeouts ?? 0}
+                  {s.stats?.last_error && ` · 最近错误 ${s.stats.last_error}`}
+                </div>
+                <div role="group" aria-label={`操作 ${s.id}`}>
+                  <button onClick={() => toggle(s)}>{s.enabled ? "停用" : "启用"}</button> <button onClick={() => setSelected(s.id)}>详情</button>
+                </div>
               </li>
             ))}
           </ul>
