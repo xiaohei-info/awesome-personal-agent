@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,7 +24,9 @@ import (
 type Config struct {
 	URL, Key, Target, Secret, State string
 	Wait                            int // 长轮询秒数
-	Idle, Backoff, MaxBackoff       time.Duration
+	// Types 非空时只转发这些事件类型；其余事件不投递，但游标照常越过并落盘。空表示转发全部登记类型（缺省）。
+	Types                     []string
+	Idle, Backoff, MaxBackoff time.Duration
 }
 
 // ConfigFromEnv 读取环境变量；缺任何一项都是配置错误。
@@ -31,6 +34,11 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	c := Config{URL: getenv("APA_URL"), Key: getenv("APA_EXT_KEY"), Target: getenv("APA_WEBHOOK_URL"),
 		Secret: getenv("APA_WEBHOOK_SECRET"), State: getenv("APA_WEBHOOK_STATE"),
 		Wait: 50, Idle: time.Second, Backoff: time.Second, MaxBackoff: 5 * time.Minute}
+	for _, t := range strings.Split(getenv("APA_WEBHOOK_TYPES"), ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			c.Types = append(c.Types, t)
+		}
+	}
 	for _, p := range [][2]string{{"APA_URL", c.URL}, {"APA_EXT_KEY", c.Key}, {"APA_WEBHOOK_URL", c.Target},
 		{"APA_WEBHOOK_SECRET", c.Secret}, {"APA_WEBHOOK_STATE", c.State}} {
 		if p[1] == "" {
@@ -125,7 +133,8 @@ func (f *forwarder) step(ctx context.Context, cursor int64) (int64, int, error) 
 	}
 	for _, raw := range page.Events {
 		var e struct {
-			Seq int64 `json:"seq"`
+			Seq  int64  `json:"seq"`
+			Type string `json:"type"`
 		}
 		if err := json.Unmarshal(raw, &e); err != nil || e.Seq <= 0 {
 			return cursor, 0, fmt.Errorf("event without a valid seq: %.200s", raw)
@@ -133,8 +142,10 @@ func (f *forwarder) step(ctx context.Context, cursor int64) (int64, int, error) 
 		if e.Seq <= cursor {
 			continue
 		}
-		if err := f.deliver(ctx, e.Seq, raw); err != nil {
-			return cursor, 0, &deliveryError{err}
+		if len(f.Types) == 0 || slices.Contains(f.Types, e.Type) {
+			if err := f.deliver(ctx, e.Seq, raw); err != nil {
+				return cursor, 0, &deliveryError{err}
+			}
 		}
 		if err := writeFileAtomic(f.State, []byte(strconv.FormatInt(e.Seq, 10)+"\n")); err != nil {
 			return cursor, 0, err

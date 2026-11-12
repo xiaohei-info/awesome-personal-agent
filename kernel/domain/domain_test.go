@@ -150,7 +150,7 @@ func TestEventSubscribeRegisteredTypes(t *testing.T) {
 delegation.created delegation.reported command.rejected material.revised material.revision_proposed
 guideline.activated project.updated project.allowed_executors_changed rule.mode_changed allowlist.changed
 policy.changed grant.issued grant.revoked run.started run.finished source.failed health.alert
-auth.login auth.login_locked auth.password_changed auth.session_revoked item.progress_added`)
+auth.login auth.login_locked auth.password_changed auth.session_revoked item.progress_added proposal.attached`)
 	if strings.Join(RegisteredEventTypes, " ") != strings.Join(want, " ") {
 		t.Fatalf("登记事件类型与附录 B.4 不一致: %v", RegisteredEventTypes)
 	}

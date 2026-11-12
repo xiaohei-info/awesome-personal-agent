@@ -34,8 +34,8 @@
 | `apa decide <id> --option [--evidence \| --grant]` | 代答决策；本人原话或授权单二选一 | delegate | 2、4、6、20、22、23 |
 | `apa accept <id> [--evidence \| --grant]` | 接受建议；依据同上 | delegate | 2、4、20、23 |
 | `apa dismiss <id> --reason [--evidence \| --grant]` | 丢弃建议；依据同上 | delegate | 2、4、23 |
-| `apa attach <id> --to <事项> [--evidence \| --grant]` | 【规划中（v0.2.0）】把建议补到已有事项；依据同上 | delegate | 2、4、5、6、23 |
-| `apa proposals apply (--recommended \| --file <处置清单>) [--source] [--project] [--evidence \| --grant]` | 【规划中（v0.2.0）】批量处理建议：按推荐，或逐条给出处置；每条各自成败，输出逐条结果 | delegate | 2、4、23 |
+| `apa attach <id> --to <事项> [--reason] [--evidence \| --grant]` | 把建议补到已有事项；依据同上；补到之后不能逐条撤销（来源事件已改挂） | delegate | 2、4、5、6、23 |
+| `apa proposals apply (--recommended \| --file <处置清单>) [--source] [--project] [--evidence \| --grant]` | 批量处理建议：按推荐，或逐条给出处置；每条各自成败，输出逐条结果 | delegate | 2、4、23 |
 | `apa grant list` | 列出该凭据名下未撤销、未过期的授权单：id、范围、动作、有效期；签发和撤销只在 Web | delegate | 4 |
 | **委派** | | | |
 | `apa executors [--project]` | 列出执行者，带项目时标明是否允许 | observer | |
@@ -123,8 +123,8 @@
 | | `POST /items/{id}/revert` | 撤销 agent 变更 | 只有 Web 登录 |
 | 决策 | `POST /items/{id}/ask` | 写入决策请求 | worker |
 | | `POST /items/{id}/decide`，`/accept`，`/dismiss` | 回答或处理建议；delegate 带 `X-APA-Evidence` 或 `X-APA-Grant`，二选一 | Web 登录、delegate |
-| | `POST /items/{id}/attach` | 【规划中（v0.2.0）】把建议补到已有事项，请求体 `{to}`；依据同上 | Web 登录、delegate |
-| | `POST /proposals/batch` | 【规划中（v0.2.0）】批量处理建议，见下 | Web 登录、delegate |
+| | `POST /items/{id}/attach` | 把建议补到已有事项，请求体 `{to, reason?}`；依据同上 | Web 登录、delegate |
+| | `POST /proposals/batch` | 批量处理建议，见下 | Web 登录、delegate |
 | | `GET /grants` | 该凭据名下未撤销、未过期的授权单 | delegate |
 | 委派 | `GET /executors` | 执行者清单 | observer |
 | | `POST /delegations` | 建子事项 | worker |
@@ -217,7 +217,7 @@
 
 `POST /proposals/batch` 的请求体二选一：`{"mode": "recommended", "filter": {"source"?, "project"?, "ids"?}}` 按推荐处理范围内带推荐的建议；或 `{"mode": "explicit", "actions": [{"id", "do": "accept" \| "attach" \| "dismiss", "to"?, "reason"?}]}`。响应 200 `{"results": [{"id", "do", "ok", "code"?, "why"?}]}`，每条各自成败、各记一条 Event；一次至多 200 条。delegate 调用时依据作用于整批，授权单逐条校验范围。
 
-`POST /items/{id}/attach` 的请求体 `{"to": "<事项 id>"}`：建议转 `dropped`，它的来源事件改挂到目标事项，Event 为 `proposal.attached`；目标已终结返回 409，不存在返回 404（主文档 §7.2）。
+`POST /items/{id}/attach` 的请求体 `{"to": "<事项 id>", "reason"?: "…"}`：建议转 `dropped`，它的来源事件改挂到目标事项，Event 为 `proposal.attached`；目标已终结返回 409，不存在返回 404（主文档 §7.2）。
 
 `GET /judgments` 返回 `{"judgments": [...], "next_after": "<记录 id>"}`，按判断时刻升序；`after` 是上一页最后一条的 id，有下一页时才返回 `next_after`，`limit` 缺省 100、上限 500，`after` 不是已知记录 id 或 `limit` 越界返回 400。运行凭据列表必须带 `subject`，且只读目标事项范围内的记录：`GET /judgments/{id}` 读范围外的记录返回 404（CLI 退出码 5），列表返回空；ext、webhook 凭据返回 403。记录过了保留期（`judgment_retention_days`，缺省 180 天）被清理后返回 404，引用它的命令 Event 与事项不受影响。`GET /judgments/{id}` 返回主文档 §6.16 的字段。`GET /judgments/stats` 返回 `{"rows": [{"use", "template", "source"?, "backend", "calls", "decided", "uncertain", "errors", "reused"}], "rates": [{"use", "template", "source"?, "escalation", "undecided", "acceptance", "false_drop", "reviewed"}], "histogram": [...]}`；`since` 缺省 30 天。
 
@@ -293,7 +293,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 `item.progress_added`
 
-【规划中（v0.2.0）】`proposal.attached`。
+`proposal.attached`。
 
 已有类型的信封不变；`item.updated` 的载荷新增可选的 `planned_for`，入站处置类事件的载荷新增可选的 `judgment`（判断记录 id）。v0.1 写下的 `run.finished`（`category: judge`）仍可回放，新的判断不再产生它（主文档 §8.6）。
 
