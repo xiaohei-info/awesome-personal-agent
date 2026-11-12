@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
@@ -22,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -96,6 +98,15 @@ source_rules:
     where: [{field: metrics.value, op: crosses_above, value: 90}]
     then: alert
     mode: observe
+  - id: x-quiet
+    match: {source_type: exits, event_type: x.metric}
+    then: ignore
+  - id: x-level
+    match: {source_type: exits, event_type: x.level}
+    where: [{field: metrics.level, op: changed}]
+  - id: x-temp
+    match: {source_type: exits, event_type: x.temp}
+    where: [{field: metrics.temp, op: crosses_below, value: 5}]
 `
 	autoKey = "inbound-triage/source_rules/auto-pr"
 )
@@ -116,6 +127,8 @@ type env struct {
 	loadr     *packs.Loader
 	web, mail string
 	sources   int
+	queue     *delivery.Queue
+	att       *attention.Attention
 	// wantErr 为真时，拉取期间的流水线错误留在 errs 里，不让 waitRuns 失败。
 	wantErr bool
 }
@@ -127,7 +140,7 @@ func newEnv(t *testing.T, configured bool) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, proc.Module, delivery.Module, registry.Module, runner.Module, rules.Module, direct.Module, delegation.Module} {
+		items.Module, proc.Module, delivery.Module, attention.Module, registry.Module, runner.Module, rules.Module, direct.Module, delegation.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -188,7 +201,10 @@ func newEnv(t *testing.T, configured bool) *env {
 	if err := eng.Reconcile(bg); err != nil {
 		t.Fatal(err)
 	}
-	e.svc, err = New(Options{Store: st, Exec: e.x, Packs: e.loadr, Judge: judge, Owner: "owner", OnError: func(err error) { e.errs <- err }})
+	e.queue = delivery.New(delivery.Options{Now: e.Now})
+	e.att = attention.New(attention.Options{Queue: e.queue, Now: e.Now})
+	e.svc, err = New(Options{Store: st, Exec: e.x, Packs: e.loadr, Judge: judge, Owner: "owner", OnError: func(err error) { e.errs <- err },
+		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: e.att}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -929,7 +945,7 @@ func TestProposeUnjudgedManually(t *testing.T) {
 		t.Fatalf("item %+v", it) // kind 缺省 task，项目沿用命中规则的 fixed
 	}
 	if err := e.st.View(bg, func(tx *store.Tx) error {
-		for obj, typ := range map[string]string{id: EvDisposed, got.Item: domain.EvItemCreated} {
+		for obj, typ := range map[string]string{id: EvDisposed, got.Item: domain.EvItemUpdated} {
 			es, err := eventlog.ReadObject(tx, obj)
 			if err != nil {
 				return err

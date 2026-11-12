@@ -114,6 +114,22 @@ func (s *Service) JudgeBatch(ctx context.Context, calls []JudgeCall) ([]Verdict,
 	return vs, errs
 }
 
+// Prefetch 把这些题的分类端点一级合并成批先问掉（不超过 max_batch），结果进复用表，不写判断记录、不问对话端点；
+// 之后同样的题经 Judge 作答时复用（§8.5）。积压放开用它把初筛按批提交。题的准备失败或端点没问成的，留给 Judge 自己处理。
+func (s *Service) Prefetch(ctx context.Context, calls []JudgeCall) {
+	var pol policy.Policy
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { _, pol, err = policy.Current(tx); return }); err != nil {
+		return
+	}
+	ps := make([]*pending, len(calls))
+	for i, c := range calls {
+		if p, err := s.prepare(ctx, c, pol); err == nil {
+			ps[i] = p
+		}
+	}
+	s.prefetch(ctx, ps, pol)
+}
+
 // pending 是一道题在级联里的运行状态。
 type pending struct {
 	c       JudgeCall

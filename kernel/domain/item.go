@@ -170,7 +170,8 @@ type Proposal struct {
 	AttachTo      string   `json:"attach_to,omitempty"` // Recommend 为 attach 时的目标事项
 	Reason        string   `json:"reason,omitempty"`
 	LowConfidence bool     `json:"low_confidence"`
-	Sources       []string `json:"sources,omitempty"` // 来源事件 id
+	Sources       []string `json:"sources,omitempty"`   // 来源事件 id
+	MergeKey      string   `json:"merge_key,omitempty"` // 合并键（§9.3）：同一件事的后续事件凭它找到这条建议
 }
 
 // ItemKernelState 只由内核维护；子事项的 Unattended 继承自后台运行。

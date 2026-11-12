@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -161,6 +162,29 @@ func TestReminderHasNoButtons(t *testing.T) {
 	if s := fb.Sent()[0]; len(s.Buttons) != 0 || !strings.Contains(s.Text, "https://web.example/items/1") {
 		t.Errorf("unexpected reminder message: %+v", s)
 	}
+}
+
+// ACT-DGA-11：规则 alert 出口的提醒没有事项（item 为空）、带 origin；ext 照常发送并回报送达，不报错、不跳过，后续投递继续领取。
+func TestAlertReminderWithoutItemIsSentAndAcked(t *testing.T) {
+	var alert Delivery
+	wire := `{"id":"alert:sev_1","item":"","origin":{"source_event":"sev_1","rule":"p/source_rules/over","source":"src_m"},"class":"reminder","route":"channel:acc","version":1,` +
+		`"state":"claimed","content":{"title":"磁盘","summary":"用量 96%","web_url":"https://mon.example/disk-a"}}`
+	if err := json.Unmarshal([]byte(wire), &alert); err != nil {
+		t.Fatal(err)
+	}
+	f, fb := newFakeAPA(t), newBot(t)
+	f.enqueue(alert)
+	f.enqueue(Delivery{ID: "remind:2", Class: "reminder", Version: 1, Content: Content{Title: "下一条"}})
+	start(t, f, fb, memStore())
+	eventually(t, "both messages", func() bool { return len(fb.Sent()) == 2 })
+	s := fb.Sent()[0]
+	if len(s.Buttons) != 0 || !strings.Contains(s.Text, "磁盘") || !strings.Contains(s.Text, "用量 96%") || !strings.Contains(s.Text, "https://mon.example/disk-a") {
+		t.Errorf("alert message: %+v", s)
+	}
+	eventually(t, "acks", func() bool {
+		acks, fails, _ := f.snapshot()
+		return len(acks["alert:sev_1"]) == 1 && len(acks["remind:2"]) == 1 && len(fails) == 0
+	})
 }
 
 // ACT-TG-06：发送后、回报 ack 前进程被杀。新进程（同一状态文件）在租约到期重领后只补报 ack，不再发第二条。

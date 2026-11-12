@@ -167,6 +167,14 @@ func Get(tx *store.Tx, id string) (domain.Item, error) {
 	return its[0], nil
 }
 
+// ByMergeKey 返回合并键为 key 的事项（§9.3），按 id 排序；key 为空时没有结果。
+func ByMergeKey(tx *store.Tx, key string) ([]domain.Item, error) {
+	if key == "" {
+		return nil, nil
+	}
+	return query(tx, "WHERE merge_key = ? ORDER BY id", key)
+}
+
 // Filter 的非空字段全部满足才命中。
 type Filter struct {
 	Phase    domain.Phase
@@ -244,8 +252,18 @@ func save(tx *store.Tx, it domain.Item) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT OR REPLACE INTO items (id, phase, kind, project, assignee, planned_for, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		it.ID, string(it.Phase), string(it.Kind), it.Project, it.Assignee, it.PlannedFor, string(b), it.CreatedAt.UnixNano(), it.UpdatedAt.UnixNano())
+	// proposal、proposal_attach_to、merge_key 三列是 Item.Proposal 的索引副本，随每次写入重算。
+	var prop, attachTo, mergeKey string
+	if p := it.Proposal; p != nil {
+		pb, err := json.Marshal(p)
+		if err != nil {
+			return err
+		}
+		prop, attachTo, mergeKey = string(pb), p.AttachTo, p.MergeKey
+	}
+	_, err = tx.Exec(`INSERT OR REPLACE INTO items (id, phase, kind, project, assignee, planned_for, data, created_at, updated_at, proposal, proposal_attach_to, merge_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		it.ID, string(it.Phase), string(it.Kind), it.Project, it.Assignee, it.PlannedFor, string(b), it.CreatedAt.UnixNano(), it.UpdatedAt.UnixNano(), prop, attachTo, mergeKey)
 	return err
 }
 

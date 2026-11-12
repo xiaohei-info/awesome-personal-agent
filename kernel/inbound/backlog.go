@@ -93,6 +93,7 @@ func (s *Service) registerBacklog(x *command.Executor) error {
 			}}),
 		x.Register(rulesSpec()),
 		x.Register(scoreSpec(s)),
+		x.Register(rejudgeSpec()),
 		x.Register(command.Spec{Name: CmdExpire, Action: authz.ActionUpdateOwn, Object: ownObject,
 			Apply: func(c *command.Ctx) (any, error) {
 				v, _ := parseBacklog(c.Input)
@@ -278,6 +279,7 @@ type rulesIn struct {
 	Item        string             `json:"item,omitempty"`
 	Rule        string             `json:"rule,omitempty"`
 	Reason      string             `json:"reason,omitempty"`
+	mergeFields
 }
 
 func parseRules(in json.RawMessage) (rulesIn, error) {
@@ -317,7 +319,10 @@ func rulesSpec() command.Spec {
 			if err := runner.Resolve(c.Tx, v.Event, v.Disposition, v.Item); err != nil {
 				return nil, err
 			}
-			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule})
+			if err := applyMerge(c, v.Event, v.Item, v.mergeFields); err != nil {
+				return nil, err
+			}
+			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule, "merged": v.Merge})
 			_, err := c.Emit(domain.Event{Type: EvDisposed, Object: v.Event, Reason: v.Reason, Payload: p})
 			return nil, err
 		}}
@@ -414,7 +419,9 @@ func (s *Service) rulesOne(ctx context.Context, id command.Identity, sn snapshot
 	case rules.ExitProposed:
 		d.Disposition = domain.DispositionProposed
 		d.Item = sn.made[ev.ID] // 上次中途失败留下的事项：接上，不重建
-		if d.Item == "" {
+		if d.Item != "" {
+			d.mergeFields = s.resumeFields(ctx, ev)
+		} else {
 			project, err := s.project(sn, src, ev, m)
 			if err != nil {
 				return false, false, err
@@ -424,7 +431,7 @@ func (s *Service) rulesOne(ctx context.Context, id command.Identity, sn snapshot
 				kind = domain.Kind(m.rule.Kind)
 			}
 			p := proposal{kind: kind, title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: d.Reason}
-			if d.Item, err = s.createItem(ctx, id, m.key(), src, ev, p, project); err != nil {
+			if d.Item, d.mergeFields, err = s.place(ctx, id, m.key(), src, ev, p, project); err != nil {
 				return false, false, err
 			}
 		}

@@ -75,6 +75,8 @@ type Proposer interface {
 	BacklogRules(ctx context.Context, req command.Request, source string) (inbound.RulesResult, error)
 	// BacklogScore 是积压放开第 2 步：影子打分，只写判断记录，不改处置（§9.3）。没有判断端点时是 409。
 	BacklogScore(ctx context.Context, req command.Request, source string) (inbound.ScoreResult, error)
+	// BacklogRejudge 是积压放开第 4 步：放开重判，进入建议流的数量受每日上限约束（§9.3）。limit 大于 0 时本次至多放这么多条进入建议流。
+	BacklogRejudge(ctx context.Context, req command.Request, source string, limit int) (inbound.ReleaseResult, error)
 }
 
 const (
@@ -118,6 +120,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rules", MaxBody: 1 << 10, Handler: a.backlogRules})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/score", MaxBody: 1 << 10, Handler: a.backlogScore})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/rejudge", MaxBody: 1 << 10, Handler: a.backlogRejudge})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/ignore", MaxBody: 1 << 10, Handler: a.ignoreBatch})
 	}, nil
 }
@@ -665,6 +668,25 @@ func (a *api) backlogScore(w http.ResponseWriter, r *http.Request, p *core.Princ
 		return err
 	}
 	res, err := a.pr.BacklogScore(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, res)
+}
+
+// backlogRejudge 积压放开重判：请求体 {"source"?, "limit"?}；返回 {"requeued","deferred"}。授权同 backlogRules。
+func (a *api) backlogRejudge(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		Source string `json:"source,omitempty"`
+		Limit  int    `json:"limit,omitempty"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	if in.Limit < 0 {
+		return invalid("limit must not be negative", "leave limit out, or give a positive number")
+	}
+	res, err := a.pr.BacklogRejudge(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source, in.Limit)
 	if err != nil {
 		return err
 	}
