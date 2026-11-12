@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,15 +19,28 @@ import (
 )
 
 // Config 是导出配置。Idle 是无事件时两次轮询的间隔（内核长轮询之外的保险），Backoff 是可重试错误后的等待。
+// Opts 是目录导出的版式配置（§10.3），来自 APA_EXPORT_CONFIG。
 type Config struct {
 	URL, Key, Dir string
 	Wait          int // 长轮询秒数
 	Idle, Backoff time.Duration
+	Opts          Options
 }
 
-// ConfigFromEnv 读取环境变量；缺任何一项都是配置错误。
+// ConfigFromEnv 读取环境变量；缺任何一项都是配置错误。目录取 APA_EXPORT_DIR，缺省取配置文件里的 root；
+// public_url 取配置文件，缺省取 APA_PUBLIC_URL。
 func ConfigFromEnv(getenv func(string) string) (Config, error) {
-	c := Config{URL: getenv("APA_URL"), Key: getenv("APA_EXT_KEY"), Dir: getenv("APA_EXPORT_DIR"), Wait: 50, Idle: time.Second, Backoff: 5 * time.Second}
+	o, err := loadOptions(getenv("APA_EXPORT_CONFIG"))
+	if err != nil {
+		return Config{}, err
+	}
+	c := Config{URL: getenv("APA_URL"), Key: getenv("APA_EXT_KEY"), Dir: getenv("APA_EXPORT_DIR"), Wait: 50, Idle: time.Second, Backoff: 5 * time.Second, Opts: o}
+	if c.Dir == "" {
+		c.Dir = o.Root
+	}
+	if c.Opts.PublicURL == "" {
+		c.Opts.PublicURL = strings.TrimRight(getenv("APA_PUBLIC_URL"), "/")
+	}
 	for name, v := range map[string]string{"APA_URL": c.URL, "APA_EXT_KEY": c.Key, "APA_EXPORT_DIR": c.Dir} {
 		if v == "" {
 			return Config{}, errors.New(name + " is required")
@@ -60,23 +72,37 @@ type envelope struct {
 
 type exporter struct {
 	Config
-	http *http.Client
+	http  *http.Client
+	state *state
+	sig   string // 版式配置的签名：配置变了，已导出的文件要按新版式重写
 }
 
-// Run 订阅并导出，直到 ctx 取消（返回 nil）或遇到不可恢复的错误。网络错误与 5xx 退避重试；
-// 凭据被拒（401/403）等其他 4xx 与不安全的对象 id 直接返回，不静默吞掉。
+// Run 订阅并导出，直到 ctx 取消（返回 nil）或遇到不可恢复的错误。启动时先按事项列表对账一次
+// （配置、select 变了，或停机期间有事项被删除，都靠它补上）；之后按事件增量导出。
+// 网络错误与 5xx 退避重试；凭据被拒（401/403）等其他 4xx 与不安全的对象 id 直接返回，不静默吞掉。
 func Run(ctx context.Context, cfg Config) error {
-	x := &exporter{Config: cfg, http: &http.Client{Timeout: time.Duration(cfg.Wait+30) * time.Second}}
+	st, err := loadState(cfg.Dir)
+	if err != nil {
+		return err
+	}
+	sig, _ := json.Marshal(cfg.Opts)
+	x := &exporter{Config: cfg, http: &http.Client{Timeout: time.Duration(cfg.Wait+30) * time.Second}, state: st, sig: contentHash(string(sig))}
 	cursor, err := readCursor(cfg.Dir)
 	if err != nil {
 		return err
 	}
+	synced := false
 	for ctx.Err() == nil {
-		next, n, err := x.step(ctx, cursor)
+		var n int
+		if !synced {
+			err = x.sync(ctx)
+			synced = err == nil
+		} else {
+			cursor, n, err = x.stepFrom(ctx, cursor)
+		}
 		switch {
 		case err == nil:
-			cursor = next
-			if n == 0 {
+			if n == 0 && synced {
 				sleep(ctx, cfg.Idle)
 			}
 		case ctx.Err() != nil:
@@ -106,8 +132,8 @@ func retryable(err error) bool {
 	return errors.As(err, &ue) // 连接失败、超时
 }
 
-// step 读一页事件、导出其中的对象、再落盘游标；返回新游标和本页信封数。
-func (x *exporter) step(ctx context.Context, cursor int64) (int64, int, error) {
+// stepFrom 读一页事件、导出其中的对象、再落盘游标；返回新游标和本页信封数。出错时游标不前进。
+func (x *exporter) stepFrom(ctx context.Context, cursor int64) (int64, int, error) {
 	var page struct {
 		Events []envelope `json:"events"`
 		Next   int64      `json:"next"`
@@ -118,24 +144,35 @@ func (x *exporter) step(ctx context.Context, cursor int64) (int64, int, error) {
 	}
 	done := map[string]bool{}
 	for _, e := range page.Events {
-		base := ""
+		var bases []string
 		switch {
 		case strings.HasPrefix(e.Type, "item."):
-			base = "items"
+			bases = []string{"items"}
 		case strings.HasPrefix(e.Type, "material."):
-			base = "materials"
+			bases = []string{"materials"}
+		case e.Type == "purge.executed": // 物理删除（§6.15）：对象读不到了，导出文件随之删除
+			bases = []string{"items", "materials"}
 		default:
 			continue
 		}
 		if !safeID.MatchString(e.Object) {
 			return cursor, 0, fmt.Errorf("event %d has an unsafe object id %q", e.Seq, e.Object)
 		}
-		if done[base+"/"+e.Object] {
-			continue
-		}
-		done[base+"/"+e.Object] = true
-		if err := x.export(ctx, base, e.Object); err != nil {
-			return cursor, 0, err
+		for _, base := range bases {
+			key := base + "/" + e.Object
+			if done[key] || (e.Type == "purge.executed" && x.state.Files[key] == nil) {
+				continue
+			}
+			done[key] = true
+			var err error
+			if base == "items" {
+				err = x.exportItem(ctx, e.Object)
+			} else {
+				err = x.exportMaterial(ctx, e.Object)
+			}
+			if err != nil {
+				return cursor, 0, err
+			}
 		}
 	}
 	if page.Next > cursor {
@@ -145,6 +182,42 @@ func (x *exporter) step(ctx context.Context, cursor int64) (int64, int, error) {
 		cursor = page.Next
 	}
 	return cursor, len(page.Events), nil
+}
+
+// sync 按 GET /items 对账：版本、版式、归档状态都没变的跳过，其余重写；列表里没有的已导出事项再确认一次（读不到才删）。
+func (x *exporter) sync(ctx context.Context) error {
+	var list struct {
+		Items []item `json:"items"`
+	}
+	if err := x.get(ctx, "/items", &list); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	now := time.Now()
+	for i := range list.Items {
+		it := list.Items[i]
+		if !safeID.MatchString(it.ID) {
+			return fmt.Errorf("GET /items: unsafe item id %q", it.ID)
+		}
+		seen[it.ID] = true
+		if it.screening() {
+			continue
+		}
+		if e := x.state.Files["items/"+it.ID]; e != nil && e.Version == it.Version && e.Sig == x.sig && e.Archived == !x.Opts.Select.matches(it, now) {
+			continue
+		}
+		if err := x.exportItem(ctx, it.ID); err != nil {
+			return err
+		}
+	}
+	for key := range x.state.Files {
+		if id, ok := strings.CutPrefix(key, "items/"); ok && !seen[id] {
+			if err := x.exportItem(ctx, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (x *exporter) get(ctx context.Context, path string, out any) error {
@@ -169,43 +242,77 @@ func (x *exporter) get(ctx context.Context, path string, out any) error {
 	return json.Unmarshal(data, out)
 }
 
-// 只导出这些字段：账本里的 ask、spec、ext 等内部结构不外流。
-var (
-	itemFields     = []string{"id", "kind", "phase", "title", "summary", "status_label", "priority", "project", "tags", "assignee", "deadline", "version"}
-	materialFields = []string{"id", "kind", "title", "project", "tags", "location", "current_rev"}
-)
-
-// export 取一个对象并覆盖写它的 Markdown。对象已不存在（404）则跳过，不让游标卡在它身上。
-func (x *exporter) export(ctx context.Context, base, id string) error {
-	var doc map[string]any
-	if err := x.get(ctx, "/"+base+"/"+id, &doc); err != nil {
+// exportItem 取一个事项并写它的 Markdown。读不到（404）说明已被物理删除，删除对应文件；
+// web_only 初筛未返回的事项没有内容可导出，跳过，初筛返回后的更新事件会再触发。
+func (x *exporter) exportItem(ctx context.Context, id string) error {
+	key := "items/" + id
+	var doc struct {
+		Item      item       `json:"item"`
+		Relations []relation `json:"relations"`
+		Progress  []progress `json:"progress"`
+	}
+	if err := x.get(ctx, "/items/"+id, &doc); err != nil {
 		var se *statusError
 		if errors.As(err, &se) && se.code == http.StatusNotFound {
-			return nil
+			return x.drop(key)
 		}
 		return err
 	}
-	var meta map[string]any
-	var body string
-	if base == "items" {
-		meta, _ = doc["item"].(map[string]any)
-		body, _ = meta["body"].(string)
-	} else {
-		meta, _ = doc["material"].(map[string]any)
-		// 托管型材料只回位置（有 location），正文不由内核提供；其余取当前修订的全文。
-		if rev, ok := doc["revision"].(map[string]any); ok && meta["location"] == nil {
-			body, _ = rev["content"].(string)
+	it := doc.Item
+	if it.ID == "" {
+		return fmt.Errorf("GET /items/%s: unexpected response shape", id)
+	}
+	if it.screening() {
+		return nil
+	}
+	o := x.Opts
+	if it.Kind == "brief" && !o.briefs() {
+		return x.drop(key)
+	}
+	archived := !o.Select.matches(it, time.Now())
+	rel, err := o.itemPath(it)
+	if err != nil {
+		return err
+	}
+	if archived {
+		rel = filepath.Join(archiveDir, rel)
+	}
+	rel = x.uniquePath(key, id, rel)
+	head, rest, err := o.renderItem(it, doc.Relations, doc.Progress, rel, func(c string) string {
+		if e := x.state.Files["items/"+c]; e != nil {
+			return e.Path
 		}
+		return ""
+	})
+	if err != nil {
+		return err
 	}
+	return x.write(key, id, strconv.FormatInt(it.Version, 10), it.Version, rel, head, rest, archived)
+}
+
+// 材料只导出这些字段：托管型只回位置，其余取当前修订的全文。
+var materialFields = []string{"id", "kind", "title", "project", "tags", "location", "current_rev"}
+
+func (x *exporter) exportMaterial(ctx context.Context, id string) error {
+	key := "materials/" + id
+	var doc map[string]any
+	if err := x.get(ctx, "/materials/"+id, &doc); err != nil {
+		var se *statusError
+		if errors.As(err, &se) && se.code == http.StatusNotFound {
+			return x.drop(key)
+		}
+		return err
+	}
+	meta, _ := doc["material"].(map[string]any)
 	if meta == nil {
-		return fmt.Errorf("GET /%s/%s: unexpected response shape", base, id)
+		return fmt.Errorf("GET /materials/%s: unexpected response shape", id)
 	}
-	fields := itemFields
-	if base == "materials" {
-		fields = materialFields
+	var body string
+	if rev, ok := doc["revision"].(map[string]any); ok && meta["location"] == nil {
+		body, _ = rev["content"].(string)
 	}
 	front := yaml.Node{Kind: yaml.MappingNode}
-	for _, f := range fields {
+	for _, f := range materialFields {
 		v, ok := meta[f]
 		if !ok || v == nil {
 			continue
@@ -220,14 +327,12 @@ func (x *exporter) export(ctx context.Context, base, id string) error {
 	if err != nil {
 		return err
 	}
-	var buf bytes.Buffer
-	buf.WriteString("---\n")
-	buf.Write(fm)
-	buf.WriteString("---\n")
+	rest := ""
 	if body != "" {
-		buf.WriteString("\n" + strings.TrimRight(body, "\n") + "\n")
+		rest = "\n" + strings.TrimRight(body, "\n") + "\n"
 	}
-	return writeFileAtomic(filepath.Join(x.Dir, base, id+".md"), buf.Bytes())
+	rev, _ := meta["current_rev"].(string)
+	return x.write(key, id, rev, 0, materialPath(id), "---\n"+string(fm)+"---\n", rest, false)
 }
 
 func readCursor(dir string) (int64, error) {
