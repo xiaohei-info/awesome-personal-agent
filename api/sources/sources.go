@@ -121,6 +121,8 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rules", MaxBody: 1 << 10, Handler: a.backlogRules})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/score", MaxBody: 1 << 10, Handler: a.backlogScore})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rejudge", MaxBody: 1 << 10, Handler: a.backlogRejudge})
+		r.Handle(core.Route{Method: "GET", Path: "/source-events/restorable", Handler: readable(a.restorable)})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/restore", MaxBody: 1 << 10, Handler: a.restore})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/ignore", MaxBody: 1 << 10, Handler: a.ignoreBatch})
 	}, nil
 }
@@ -691,6 +693,58 @@ func (a *api) backlogRejudge(w http.ResponseWriter, r *http.Request, p *core.Pri
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, res)
+}
+
+// restorable 预览可放回积压的旧判断忽略事件：from、to 必填（RFC 3339），source 可选；只读。命中的是未过滤的外部事件，运行凭据不能预览。
+func (a *api) restorable(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if p.Caller.Level == authz.LevelRun {
+		return domain.NewError(domain.CodePermissionDenied, "run credential cannot preview restorable source events", "ask the owner to preview from the source page or the CLI")
+	}
+	q := r.URL.Query()
+	var t [2]time.Time
+	for i, k := range []string{"from", "to"} {
+		if q.Get(k) == "" {
+			return invalid(k+" is required", "give from and to as RFC 3339 times")
+		}
+		var err error
+		if t[i], err = time.Parse(time.RFC3339, q.Get(k)); err != nil {
+			return invalid(k+" is not an RFC 3339 time", "for example 2026-01-02T15:04:05Z")
+		}
+	}
+	var out inbound.RestorePreview
+	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) {
+		if err = inbound.RestoreWindow(tx, t[0], t[1], q.Get("source")); err != nil {
+			return err
+		}
+		out, err = inbound.PreviewRestore(tx, t[0], t[1], q.Get("source"))
+		return err
+	}); err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, out)
+}
+
+// restore 把旧级联忽略的事件放回积压：请求体 {"from","to","source"?}；返回 {"restored": n}。授权（本人原话或 Web，不接受授权单）由命令管线判定；可带 Idempotency-Key。
+func (a *api) restore(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		From   time.Time `json:"from"`
+		To     time.Time `json:"to"`
+		Source string    `json:"source,omitempty"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	m := map[string]json.RawMessage{}
+	m["from"], _ = json.Marshal(in.From)
+	m["to"], _ = json.Marshal(in.To)
+	if in.Source != "" {
+		m["source"], _ = json.Marshal(in.Source)
+	}
+	res, err := a.run(r, p, inbound.CmdBacklogRestore, m, true)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, res.Value)
 }
 
 // rejects 返回来源没有入账的输出行及原因。原始行在落账时已截断到 512 字节；与入站记录的请求头同一规则，含接收密钥明文前缀的整行遮蔽。

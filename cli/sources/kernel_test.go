@@ -552,3 +552,70 @@ func TestBacklogListSortsByScoreAcrossSources(t *testing.T) {
 }
 
 func ptr(f float64) *float64 { return &f }
+
+// ACT-RST-03、05、06、09：`apa source backlog restore --dry-run` 是 observer 可用的只读预览；执行缺本人原话得 23、observer 得 4；
+// 带原话放回 1 条旧级联忽略的事件，再放回得 0 条。
+func TestBacklogRestoreCommand(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	decode(t, k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &domain.Source{})
+	at := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
+			correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges)
+			VALUES ('dd', 'old', 'old', 'src_hook', 'r', 't', 's', '', '', '', ?, '[]', '', 0, 'ignored', '', '', '', 0)`, at.UnixNano()); err != nil {
+			return err
+		}
+		_, err := eventlog.Append(tx, domain.Event{Type: inbound.EvDisposed, Object: "old", At: at, Payload: json.RawMessage(`{"event":"old","disposition":"ignored","rule":""}`),
+			Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:inbound", Via: domain.ViaSource}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	win := []string{"--from", "2026-02-10T00:00:00Z", "--to", "2026-02-20T00:00:00Z"}
+	restore := func(token string, extra ...string) result {
+		return k.apa(token, append(append([]string{"source", "backlog", "restore"}, win...), extra...)...)
+	}
+	noWords := func(token string) int {
+		vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": t.TempDir()}
+		return client.Main(append([]string{"source", "backlog", "restore"}, win...), client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
+			Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, HTTP: http.DefaultClient})
+	}
+
+	var pv inbound.RestorePreview
+	decode(t, restore(obs, "--dry-run"), &pv)
+	if pv.Matched != 1 || len(pv.Sources) != 1 || pv.Sources[0].Source != "src_hook" {
+		t.Fatalf("dry run: %+v", pv)
+	}
+	decode(t, restore(obs, "--dry-run", "--source", "src_hook"), &pv)
+	if pv.Matched != 1 {
+		t.Fatalf("dry run, one source: %+v", pv)
+	}
+	if r := restore(obs, "--dry-run", "--source", "nope"); r.code != domain.ExitNotFound {
+		t.Fatalf("unknown source: %+v", r)
+	}
+	if code := noWords(dlg); code != domain.ExitBasisRequired {
+		t.Fatalf("without words: %d", code)
+	}
+	if r := restore(obs); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer: %+v", r)
+	}
+	if n := k.events(inbound.EvDisposed); n != 1 {
+		t.Fatalf("a refused restore wrote events: %d", n)
+	}
+	for _, args := range [][]string{{"source", "backlog", "restore"}, {"source", "backlog", "restore", "--from", win[1]}, {"source", "backlog", "rules", "--from", win[1]},
+		{"source", "backlog", "rules", "--dry-run"}, {"source", "backlog", "restore", "--limit", "3", "--from", win[1], "--to", win[3]}} {
+		if r := k.apa(obs, args...); r.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	var res struct{ Restored int }
+	decode(t, restore(dlg, "--source", "src_hook"), &res)
+	if res.Restored != 1 || k.events(inbound.EvDisposed) != 2 {
+		t.Fatalf("restore: %+v", res)
+	}
+	decode(t, restore(dlg), &res)
+	if res.Restored != 0 || k.events(inbound.EvDisposed) != 2 {
+		t.Fatalf("second restore: %+v", res)
+	}
+}
