@@ -4,6 +4,7 @@ package baseline
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -215,49 +216,93 @@ func TestFlowEnvBaseline(t *testing.T) {
 		if p := e.Web("GET", "/v1/settings/declarations", ""); strings.Contains(p.Body, "acc-stub") {
 			t.Errorf("声明仍在待确认: %s", p.Body)
 		}
-		// 声明的命令真能跑：no-receipt 模式退出 0；exit1 模式退出 1；运行目录里留下环境变量记录。
-		for mode, want := range map[string]int{"no-receipt": 0, "exit1": 1} {
-			dir := t.TempDir()
-			cmd := exec.Command(e.Bin["stub-harness"], "STUB_MODE="+mode)
-			cmd.Dir = dir
-			err := cmd.Run()
-			got := 0
-			if ee, ok := err.(*exec.ExitError); ok {
-				got = ee.ExitCode()
-			} else if err != nil {
-				t.Fatal(err)
+		// 声明真的生效：经内核触发 acc-stub 运行，运行目录里有运行进程收到的环境变量记录，且含 APA_RUN_CONTEXT。
+		e.EnableStubRuns()
+		for _, mode := range StubModes {
+			item, dir, env := e.StubRun(mode)
+			if env["APA_RUN_CONTEXT"] == "" || env["APA_TOKEN"] == "" || env["APA_RUN"] == "" {
+				t.Errorf("%s: 运行环境记录应含 APA_RUN_CONTEXT、APA_TOKEN、APA_RUN: %v", mode, env)
 			}
-			if got != want {
-				t.Errorf("STUB_HARNESS %s 退出码 %d，期望 %d", mode, got, want)
+			if _, err := os.Stat(dir); err != nil || !strings.HasPrefix(dir, filepath.Join(e.Home, "runs")) {
+				t.Errorf("%s: 运行目录应在 APA_HOME/runs 下: %s", mode, dir)
 			}
-			if _, err := os.Stat(filepath.Join(dir, "stub-harness-env.json")); err != nil {
-				t.Errorf("STUB_HARNESS %s 没有留下环境变量记录: %v", mode, err)
+			// 各模式的可观察差别：摘要（output.txt 里的 outcome）只在 receipt（回执命令成功后）与 summary-only 写出。
+			var wantSummary = map[string]bool{"receipt": true, "summary-only": true}[mode]
+			if wantSummary {
+				if !e.WaitFor(30*time.Second, func() bool {
+					b, err := os.ReadFile(filepath.Join(dir, "output.txt"))
+					return err == nil && strings.Contains(string(b), `"outcome":"done"`)
+				}) {
+					t.Errorf("%s: 运行目录应有摘要 output.txt（事项 %s）", mode, item)
+				}
+			} else {
+				time.Sleep(time.Second) // 给误写摘要留出时间
+				if b, _ := os.ReadFile(filepath.Join(dir, "output.txt")); strings.Contains(string(b), `"outcome"`) {
+					t.Errorf("%s: 不应有摘要: %s", mode, b)
+				}
 			}
 		}
 	})
 
 	step("ACT-ENV-07 来源工具替身与渠道替身", func(t *testing.T) {
 		e.InstallToolStub()
-		e.SetToolCase("mail-1.1.0")
-		out, code := e.RunTool("himalaya", "envelope", "list", "--page-size", "50", "--page", "1", "--output", "json")
-		want, err := os.ReadFile(filepath.Join(repoRoot(), "sources", "mail", "testdata", "1.1.0", "list.json"))
-		if err != nil {
-			t.Fatal(err)
+		// 内核真的拉起来源程序：脚本按裸命令名运行工具，解析结果必须是 TOOL_STUB_BIN 下的替身，输出与录制样本一致，TOOL_LOG 新增该次调用。
+		jsonEq := func(got, want string) bool {
+			var g, w any
+			return json.Unmarshal([]byte(got), &g) == nil && json.Unmarshal([]byte(want), &w) == nil && fmt.Sprint(g) == fmt.Sprint(w)
 		}
-		if code != 0 || strings.TrimSpace(out) != strings.TrimSpace(string(want)) {
-			t.Errorf("邮件 CLI 替身输出应与录制样本一致: exit=%d\n%s", code, out)
+		sample := func(rel ...string) string {
+			b, err := os.ReadFile(filepath.Join(append([]string{repoRoot()}, rel...)...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(b)
 		}
-		e.SetToolCase("mail-thread")
-		if _, code := e.RunTool("himalaya", "envelope", "list", "--output", "json"); code != 0 {
-			t.Errorf("case mail-thread 退出码 %d", code)
-		}
-		log := e.ToolLog()
-		if len(log) != 2 || log[0].Tool != "himalaya" || log[0].Case != "mail-1.1.0" || log[1].Case != "mail-thread" {
-			t.Errorf("TOOL_LOG 每次调用应新增一条: %+v", log)
-		}
-		// 来源程序用得上：重启后的内核进程 PATH 以 TOOL_STUB_BIN 开头。
-		if !strings.HasPrefix(e.ServeEnvValue("PATH"), e.ToolBin+string(os.PathListSeparator)) {
-			t.Errorf("内核的 PATH 应以 TOOL_STUB_BIN 开头: %s", e.ServeEnvValue("PATH"))
+		for _, c := range []struct {
+			id, tool, name string
+			args           []string
+			want           string
+			raw            bool // 逐字比对（否则按 JSON 语义比对）
+		}{
+			{"src_env_mail", "himalaya", "mail-1.1.0", []string{"envelope", "list", "--page-size", "50", "--page", "1", "--output", "json"},
+				sample("sources", "mail", "testdata", "1.1.0", "list.json"), true},
+			{"src_env_cal", "gog", "cal-base", []string{"calendar", "events", "--account=acc@example.com", "--json"},
+				sample("sources", "calendar", "testdata", "0.9.0", "events.json"), false},
+			{"src_env_gh", "gh", "gh-issue-opened", []string{"api", "repos/acc-org/acc-repo/issues?since=1970-01-01T00:00:00Z&per_page=100&page=1"}, "", false},
+		} {
+			before := len(e.ToolLog())
+			resolved, out := e.ReplayThroughKernel(c.id, c.tool, c.name, c.args...)
+			if resolved != filepath.Join(e.ToolBin, c.tool) {
+				t.Errorf("%s: 来源程序应解析到替身 %s，实际 %q", c.tool, filepath.Join(e.ToolBin, c.tool), resolved)
+			}
+			switch {
+			case c.tool == "gh": // 样本是 {agents_sha, issues}：输出的 issue 列表应与录制的一致
+				var rec struct {
+					Issues json.RawMessage `json:"issues"`
+				}
+				if err := json.Unmarshal([]byte(sample("tests", "doubles", "tools", "testdata", "gh", c.name+".json")), &rec); err != nil || !jsonEq(out, string(rec.Issues)) {
+					t.Errorf("%s/%s 输出应与录制样本一致: %s", c.tool, c.name, out)
+				}
+			case c.raw:
+				if strings.TrimSpace(out) != strings.TrimSpace(c.want) {
+					t.Errorf("%s/%s 输出应与录制样本逐字一致:\n%s", c.tool, c.name, out)
+				}
+			default:
+				if !jsonEq(out, c.want) {
+					t.Errorf("%s/%s 输出应与录制样本一致:\n%s", c.tool, c.name, out)
+				}
+			}
+			log := e.ToolLog()
+			if len(log) <= before {
+				t.Fatalf("%s: TOOL_LOG 应多出内核拉起的这次调用", c.tool)
+			}
+			hit := false
+			for _, le := range log[before:] {
+				hit = hit || (le.Tool == c.tool && le.Case == c.name)
+			}
+			if !hit {
+				t.Errorf("%s: TOOL_LOG 新增条目应含 tool=%s case=%s: %+v", c.tool, c.tool, c.name, log[before:])
+			}
 		}
 		// 渠道：CHAN 领取投递，经随包 ext 发到机器人替身。
 		bot := e.StartChannelExt()
@@ -289,6 +334,9 @@ func TestFlowEnvBaseline(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(fx.Source, "scratch")); err == nil {
 			t.Error("夹具副本应与夹具目录隔离")
+		}
+		if _, err := os.Stat(e.V01Plugin()); err != nil {
+			t.Errorf("APA_V01_PLUGIN 应指向旧版本宿主插件包: %v", err)
 		}
 		srv := fx.ServeV01(e.V01Bin())
 		var h struct {
@@ -340,7 +388,9 @@ func TestFlowEnvBaseline(t *testing.T) {
 		if got := e.clsBatch(t, [][2]string{{"q1", "ACC-INV-HI"}}); got["q1"] != 0.91 {
 			t.Errorf("CLS_STUB 不可达: %v", got)
 		}
-		if e.chatContent(t, e.genChat("ping")) == "" && len(e.ModelStub.Requests()) == 0 {
+		n := len(e.ModelStub.Requests())
+		e.chatContent(t, e.genChat("ping"))
+		if len(e.ModelStub.Requests()) != n+1 {
 			t.Error("MODEL_STUB 不可达")
 		}
 	})
@@ -371,9 +421,9 @@ func TestFlowEnvBaseline(t *testing.T) {
 		if !e.WaitFor(10*time.Second, func() bool { return passed(a) }) {
 			t.Fatalf("推进一天后 10 秒内应触发到期（内核时钟应立即重算）\n%s", e.ServiceLog())
 		}
-		// 实现记的是 "test clock: offset advanced ... to=24h0m0s"；验收文档写的是 `test-clock offset` 与 86400，措辞不一致，见交付说明。
-		if log := e.ServiceLog(); !strings.Contains(log, "offset advanced") || !strings.Contains(log, "24h0m0s") {
-			t.Errorf("服务日志应记一行推进: %s", log)
+		// 验收契约：每次生效的调整在服务日志记一行，含 `test-clock offset` 与新值（秒）。
+		if log := e.ServiceLog(); !logLine(log, "test-clock offset", "86400") {
+			t.Errorf("服务日志应有一行同时含 `test-clock offset` 与 86400:\n%s", log)
 		}
 		// 只进不退：写回更小的值被忽略并记一行，时间仍停在 +1 天。
 		e.TCSet(0)
@@ -417,4 +467,18 @@ func TestSetupSurvivesKernelRestart(t *testing.T) {
 	if r := e.Apa(e.WRK, "", "executors"); r.Code != 0 || !strings.Contains(r.Stdout, "work-host.cli") {
 		t.Fatalf("重启后环境数据丢失: %d %s %s", r.Code, r.Stdout, r.Stderr)
 	}
+}
+
+// logLine 报告日志里是否有一行同时含全部 parts。
+func logLine(log string, parts ...string) bool {
+next:
+	for _, l := range strings.Split(log, "\n") {
+		for _, p := range parts {
+			if !strings.Contains(l, p) {
+				continue next
+			}
+		}
+		return true
+	}
+	return false
 }

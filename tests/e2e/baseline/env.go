@@ -36,14 +36,16 @@ const (
 // Env 是一套验收环境。字段名对应验收文档里的环境变量。
 type Env struct {
 	T         testing.TB
-	Root      string            // 测试专用根目录，APA_HOME 在其内
-	Home      string            // APA_HOME
-	URL       string            // APA_URL
-	NoSession bool              // 为真时带 --evidence 的命令也不设 APA_SESSION
-	Bin       map[string]string // apa（-tags apa_testclock 测试构建）、stub-harness、tool-stub、telegram-ext 的可执行文件
-	TestRepo  string            // <TEST_REPO>
-	LocalRepo string            // LOCAL_REPO：file:// 本地 git 仓库（已提交一次），acc-work 的 repos
-	ToolBin   string            // TOOL_STUB_BIN，InstallToolStub 之后非空；之后启动的内核 PATH 以它开头
+	Root      string // 测试专用根目录，APA_HOME 在其内
+	Home      string // APA_HOME
+	URL       string // APA_URL
+	NoSession bool   // 为真时带 --evidence 的命令也不设 APA_SESSION
+	// SessionKind 非空时作为 APA_SESSION_KIND 传给 apa 子命令（验收文档默认 direct；缺省留空以保持已交付流程的行为）。
+	SessionKind string
+	Bin         map[string]string // apa（-tags apa_testclock 测试构建）、stub-harness、tool-stub、telegram-ext 的可执行文件
+	TestRepo    string            // <TEST_REPO>
+	LocalRepo   string            // LOCAL_REPO：file:// 本地 git 仓库（已提交一次），acc-work 的 repos
+	ToolBin     string            // TOOL_STUB_BIN，InstallToolStub 之后非空；之后启动的内核 PATH 以它开头
 
 	OBS, WRK, WRK2, DEL, CHAN string
 
@@ -172,7 +174,7 @@ func (e *Env) newLocalRepo() string {
 	return "file://" + dir
 }
 
-// Setup 一次建好全部环境。
+// Setup 一次建好全部环境（单端点的 legacy 接线）。需要判断/生成两个端点的流程在其后调用 WireEndpoints。
 func Setup(t testing.TB) *Env {
 	t.Helper()
 	e := New(t)
@@ -193,6 +195,9 @@ func (e *Env) env(token string, args []string) []string {
 	env := append(os.Environ(), "APA_HOME="+e.Home, "APA_URL="+e.URL)
 	if token != "" {
 		env = append(env, "APA_TOKEN="+token)
+	}
+	if e.SessionKind != "" {
+		env = append(env, "APA_SESSION_KIND="+e.SessionKind)
 	}
 	// 带本人原话（--evidence）的第二档命令还要会话引用；harness 插件会设 APA_SESSION，这里替身。
 	// NoSession 供要验证"只带原话不带会话"的用例关掉它。

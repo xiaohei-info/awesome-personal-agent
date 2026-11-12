@@ -307,6 +307,20 @@ func (e *Env) V01Bin() string {
 	return v01Bin
 }
 
+// V01Plugin 是旧版本宿主插件包路径（APA_V01_PLUGIN）：优先用同名环境变量，否则取 V01Bin 同目录里 fetch-v01.sh 的产物。
+func (e *Env) V01Plugin() string {
+	e.T.Helper()
+	if p := os.Getenv("APA_V01_PLUGIN"); p != "" {
+		return p
+	}
+	bin := e.V01Bin()
+	p := filepath.Join(filepath.Dir(bin), "apa-hermes-plugin-"+strings.TrimPrefix(filepath.Base(bin), "apa-")+".tar.gz")
+	if _, err := os.Stat(p); err != nil {
+		e.fatal("旧版本插件包不存在: %v", err)
+	}
+	return p
+}
+
 // V01Server 是旧版本二进制在夹具副本上运行的 `apa serve`。
 type V01Server struct {
 	Base string
