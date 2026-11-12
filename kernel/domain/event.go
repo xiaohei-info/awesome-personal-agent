@@ -65,6 +65,7 @@ const (
 	EvItemUpdated                    = "item.updated"
 	EvItemPhaseChanged               = "item.phase_changed"
 	EvItemDeadlinePassed             = "item.deadline_passed"
+	EvItemProgressAdded              = "item.progress_added"
 	EvDecisionRequested              = "decision.requested"
 	EvDecisionResolved               = "decision.resolved"
 	EvDelegationCreated              = "delegation.created"
@@ -96,6 +97,7 @@ var RegisteredEventTypes = []string{
 	EvProjectUpdated, EvProjectAllowedExecutorsChanged,
 	EvRuleModeChanged, EvAllowlistChanged, EvPolicyChanged, EvGrantIssued, EvGrantRevoked,
 	EvRunStarted, EvRunFinished, EvSourceFailed, EvHealthAlert,
+	EvItemProgressAdded,
 }
 
 var registered = func() map[string]bool {

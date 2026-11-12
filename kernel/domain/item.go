@@ -155,6 +155,7 @@ type ItemInput struct {
 	Assignee    string          `json:"assignee,omitempty"`
 	WaitingOn   *WaitingOn      `json:"waiting_on,omitempty"`
 	Deadline    *time.Time      `json:"deadline,omitempty"`
+	PlannedFor  string          `json:"planned_for,omitempty"` // 计划日期 YYYY-MM-DD（§6.3），不带定时
 	Ask         *AskInput       `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
 	Spec        json.RawMessage `json:"spec,omitempty"`
@@ -186,7 +187,8 @@ type Item struct {
 	Tags        []string        `json:"tags,omitempty"`
 	Assignee    string          `json:"assignee,omitempty"`
 	WaitingOn   *WaitingOn      `json:"waiting_on,omitempty"`
-	Deadline    *time.Time      `json:"deadline,omitempty"` // 事项自身的截止，与 ask.deadline（决策超时）无关
+	Deadline    *time.Time      `json:"deadline,omitempty"`    // 事项自身的截止，与 ask.deadline（决策超时）无关
+	PlannedFor  string          `json:"planned_for,omitempty"` // 计划日期 YYYY-MM-DD（§6.3），不带定时、不产生提醒
 	Ask         *Ask            `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
 	Spec        json.RawMessage `json:"spec,omitempty"`
@@ -209,4 +211,13 @@ func CheckEntry(it Item, to Phase, reason string, hasEvidence bool) *Error {
 		return NewError(CodeInvalidRequest, "delegation 进入 done 必须带证据", "随回执提交证据")
 	}
 	return nil
+}
+
+// Progress 是事项上一条追加不改的进展（§6.3）：文字、所指日期（可空，不晚于记录当天）、记录时刻与操作者。
+type Progress struct {
+	ID    string    `json:"id"`
+	Text  string    `json:"text"`
+	On    string    `json:"on,omitempty"`
+	Actor string    `json:"actor"`
+	At    time.Time `json:"at"`
 }

@@ -491,3 +491,89 @@ func TestRevertIsWebOnly(t *testing.T) {
 }
 
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
+
+// ACT-WBN-05/06：PATCH 写与清计划日期；非法值 400 且不写入。
+func TestPlannedForOverHTTP(t *testing.T) {
+	e := setup(t)
+	wrk := e.token(auth.Worker, "wrk1")
+	tmrw := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	w := e.create(e.web, `{"kind":"task","title":"f","phase":"open","assignee":"wrk1","planned_for":"`+tmrw+`"}`)
+	if got := e.get(w.ID).Item.PlannedFor; got != tmrw {
+		t.Fatalf("planned_for on create = %q", got)
+	}
+	for _, bad := range []string{"2026-13-40", "2026-11-12T10:00:00Z"} {
+		if rec := e.do("PATCH", "/v1/items/"+w.ID, `{"planned_for":"`+bad+`"}`, wrk); rec.Code != 400 || !strings.Contains(rec.Body.String(), "YYYY-MM-DD") {
+			t.Fatalf("%s = %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+	if g := e.get(w.ID); g.Item.PlannedFor != tmrw || g.Item.Version != 1 {
+		t.Fatalf("rejected writes changed the item: %+v", g.Item)
+	}
+	if rec := e.do("PATCH", "/v1/items/"+w.ID, `{"planned_for":null}`, wrk); rec.Code != 200 {
+		t.Fatalf("clear = %d %s", rec.Code, rec.Body)
+	}
+	rec := e.do("GET", "/v1/items/"+w.ID, "", e.web)
+	if strings.Contains(rec.Body.String(), "planned_for") {
+		t.Fatalf("cleared planned_for must not be returned: %s", rec.Body)
+	}
+}
+
+// ACT-WBN-09/10/11：POST progress 追加、GET 带 progress[]、未来日期 400、越权 403。
+func TestProgressOverHTTP(t *testing.T) {
+	e := setup(t)
+	wrk, wrk2 := e.token(auth.Worker, "wrk1"), e.token(auth.Worker, "wrk2")
+	w := e.create(e.web, `{"kind":"task","title":"f","phase":"open","assignee":"wrk1"}`)
+	yday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	tmrw := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	rec := e.do("POST", "/v1/items/"+w.ID+"/progress", `{"text":"联系了供应商","on":"`+yday+`"}`, wrk)
+	var created struct {
+		Progress domain.Progress `json:"progress"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if rec.Code != 201 || created.Progress.Text != "联系了供应商" || created.Progress.On != yday {
+		t.Fatalf("progress must return 201 with the entry: %d %s", rec.Code, rec.Body)
+	}
+	var g struct {
+		Item     domain.Item
+		Progress []domain.Progress `json:"progress"`
+	}
+	rec = e.do("GET", "/v1/items/"+w.ID, "", e.web)
+	_ = json.Unmarshal(rec.Body.Bytes(), &g)
+	if g.Item.Phase != domain.PhaseOpen || len(g.Progress) != 1 || g.Progress[0].Text != "联系了供应商" || g.Progress[0].On != yday || g.Progress[0].Actor != "wrk1" || g.Progress[0].At.IsZero() {
+		t.Fatalf("progress[] = %+v (%s)", g.Progress, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/items/"+w.ID+"/progress", `{"text":"未来","on":"`+tmrw+`"}`, wrk); rec.Code != 400 {
+		t.Fatalf("future on = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/items/"+w.ID+"/progress", `{"text":"x"}`, wrk2); rec.Code != 403 {
+		t.Fatalf("another worker = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/v1/items/"+w.ID, "", e.web); strings.Count(rec.Body.String(), `"text"`) != 1 {
+		t.Fatalf("rejected progress must not be stored: %s", rec.Body)
+	}
+}
+
+// ACT-WBN-07：GET /today 四组，observer 可读。
+func TestTodayOverHTTP(t *testing.T) {
+	e := setup(t)
+	obs := e.token(auth.Observer, "")
+	yday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	tmrw := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	a := e.create(e.web, `{"kind":"task","title":"A","phase":"open","planned_for":"`+yday+`"}`)
+	e.create(e.web, `{"kind":"task","title":"C","phase":"open","planned_for":"`+tmrw+`"}`)
+	g := e.create(e.web, `{"kind":"decision","title":"G","phase":"needs_input","ask":{"question":"q?"}}`)
+	rec := e.do("GET", "/v1/today", "", obs)
+	var l map[string][]domain.Item
+	_ = json.Unmarshal(rec.Body.Bytes(), &l)
+	for _, k := range []string{"planned", "due", "pending", "stale"} {
+		if l[k] == nil {
+			t.Fatalf("group %s missing: %s", k, rec.Body)
+		}
+	}
+	if len(l["planned"]) != 1 || l["planned"][0].ID != a.ID || l["planned"][0].PlannedFor != yday || len(l["pending"]) != 1 || l["pending"][0].ID != g.ID {
+		t.Fatalf("today = %s", rec.Body)
+	}
+	if rec := e.do("GET", "/v1/today", "", nil); rec.Code != 401 {
+		t.Fatalf("anonymous = %d", rec.Code)
+	}
+}
