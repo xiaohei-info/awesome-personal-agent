@@ -51,12 +51,12 @@ var bg = context.Background()
 // gateJudge 是模型边界的替身：在 release 之前一直阻塞，之后返回失败（按规则继续，初筛标记清除）。
 type gateJudge struct{ release chan struct{} }
 
-func (j gateJudge) Do(ctx context.Context, _ direct.Call) (direct.Outcome, error) {
+func (j gateJudge) Judge(ctx context.Context, _ direct.JudgeCall) (direct.Verdict, error) {
 	select {
 	case <-j.release:
 	case <-ctx.Done():
 	}
-	return direct.Outcome{}, errors.New("screening stub: released")
+	return direct.Verdict{}, errors.New("screening stub: released")
 }
 
 type env struct {
