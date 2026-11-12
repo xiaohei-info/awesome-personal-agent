@@ -37,6 +37,7 @@ import (
 	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	apipurge "github.com/xiaohei-info/awesome-personal-agent/api/settings/purge"
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
+	apiversion "github.com/xiaohei-info/awesome-personal-agent/api/version"
 	apiwhy "github.com/xiaohei-info/awesome-personal-agent/api/why"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
@@ -354,11 +355,15 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
+	ledger, err := schemaLedger()
+	if err != nil {
+		return nil, err
+	}
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Guard: wk.Identity, Groups: []core.RouteGroup{
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm)}}); err != nil {
+		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
