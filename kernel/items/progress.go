@@ -140,6 +140,11 @@ func active(it domain.Item) bool {
 // TodayItems 取材：planned = 计划今天或更早且未完成（过期不自动改期）；due = 今天到期且未结束；
 // pending = 等本人决定的事项（初筛中的不列）；stale = open 的任务与承诺超过 StaleAfter 无任何变更，且没有未来的计划日期。
 func TodayItems(tx *store.Tx, now time.Time) (TodayList, error) {
+	return TodayItemsAfter(tx, now, StaleAfter)
+}
+
+// TodayItemsAfter 同 TodayItems，久未推进的阈值由调用方给（能力包 stale 规则的 stale_after）。
+func TodayItemsAfter(tx *store.Tx, now time.Time, staleAfter time.Duration) (TodayList, error) {
 	l := TodayList{Planned: []domain.Item{}, Due: []domain.Item{}, Pending: []domain.Item{}, Stale: []domain.Item{}}
 	all, err := List(tx, Filter{})
 	if err != nil {
@@ -157,7 +162,7 @@ func TodayItems(tx *store.Tx, now time.Time) (TodayList, error) {
 			l.Pending = append(l.Pending, it)
 		}
 		if it.Phase == domain.PhaseOpen && (it.Kind == domain.KindTask || it.Kind == domain.KindCommitment) &&
-			now.Sub(it.UpdatedAt) > StaleAfter && it.PlannedFor <= today {
+			now.Sub(it.UpdatedAt) > staleAfter && it.PlannedFor <= today {
 			l.Stale = append(l.Stale, it)
 		}
 	}

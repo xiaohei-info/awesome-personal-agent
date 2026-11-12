@@ -66,6 +66,7 @@ import (
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/guideline"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/stale"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/verify"
 	kprojects "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	kpurge "github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
@@ -118,6 +119,7 @@ type kernel struct {
 	in     *inbound.Service
 	eng    *rules.Engine
 	fu     *followup.Service
+	stale  *stale.Service
 	scr    *kscreening.Service
 	att    *attention.Attention
 	hn     *khealth.Notifier
@@ -227,6 +229,10 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	// 间隔、模板与模式取自 follow-up 包的 follow_up 时钟规则，跟进服务每次使用时从加载器读。
 	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Judge: judge, Reminder: att, Packs: ld, Owner: owner,
 		Pack: "follow-up"}); err != nil {
+		return nil, err
+	}
+	// 久未推进检查：阈值、周期与模式取自 follow-up 包的 stale 规则；"今天"取材用同一个阈值。
+	if k.stale, err = stale.New(stale.Options{Packs: ld, Pack: "follow-up", Reminder: att}); err != nil {
 		return nil, err
 	}
 
@@ -348,7 +354,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Guard: wk.Identity, Groups: []core.RouteGroup{
-		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
+		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
 		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm)}}); err != nil {
@@ -380,6 +386,8 @@ func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 	case instances.Owns(c):
 		k.drainDue.Store(true) // instance.fired 由规则执行消费
 		return instances.HandleTimer(tx, c)
+	case k.stale.Owns(c):
+		return k.stale.HandleTimer(tx, c)
 	case k.fu.Owns(c):
 		k.drainDue.Store(true)
 		return k.fu.HandleTimer(tx, c)
@@ -410,6 +418,9 @@ func (k *kernel) start(ctx context.Context) error {
 		return err
 	}
 	if err := k.st.Update(ctx, k.fu.Sync); err != nil {
+		return err
+	}
+	if err := k.st.Update(ctx, k.stale.Sync); err != nil {
 		return err
 	}
 	failed, alive, err := k.disp.Recover(ctx)
@@ -542,6 +553,7 @@ func (k *kernel) reloadPacks(ctx context.Context, report func(string, error)) {
 	}
 	if k.packSig() != before {
 		report("rules reconcile", k.eng.Reconcile(ctx))
+		report("stale check", k.st.Update(ctx, k.stale.Sync))
 		if p, ok := k.packs.Get("agents-md"); ok {
 			report("agents-md template", k.agm.SetTemplate(p.Templates["agents"]))
 		}
