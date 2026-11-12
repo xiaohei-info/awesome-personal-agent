@@ -86,7 +86,7 @@ func (c createIn) item(id string) domain.Item {
 	in := c.ItemInput
 	it := domain.Item{ID: id, Phase: c.phase(), Kind: in.Kind, Title: in.Title, Summary: in.Summary, Body: in.Body,
 		StatusLabel: in.StatusLabel, Priority: in.Priority, Project: in.Project, Tags: in.Tags, Assignee: in.Assignee,
-		WaitingOn: in.WaitingOn, Deadline: in.Deadline, Origin: in.Origin, Spec: in.Spec, Ext: in.Ext}
+		WaitingOn: in.WaitingOn, Deadline: in.Deadline, PlannedFor: in.PlannedFor, Origin: in.Origin, Spec: in.Spec, Ext: in.Ext}
 	if it.Priority == "" {
 		it.Priority = domain.PriorityNormal
 	}
@@ -144,6 +144,8 @@ func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item,
 			err = put(raw, &it.WaitingOn)
 		case "deadline":
 			err = put(raw, &it.Deadline)
+		case "planned_for":
+			err = put(raw, &it.PlannedFor)
 		case "origin":
 			err = put(raw, &it.Origin)
 		case "spec":
@@ -204,6 +206,10 @@ func (s *svc) check(tx *store.Tx, it domain.Item) error {
 		return invalid("ask.question is required")
 	case it.Deadline != nil && it.Deadline.IsZero():
 		return invalid("deadline must not be the zero time")
+	case it.PlannedFor != "":
+		if err := checkDate("planned_for", it.PlannedFor); err != nil {
+			return err
+		}
 	case it.Phase == domain.PhaseWaiting && it.WaitingOn == nil:
 		return invalid("waiting phase requires waiting_on")
 	case it.Phase == domain.PhaseNeedsInput && it.Ask == nil:
@@ -388,7 +394,7 @@ func syncTimer(tx *store.Tx, cur, it domain.Item) error {
 // 运行身份不能自己确认；item.revert 只在 Web（change_settings）。assignee 与 project 的写入都过名单校验。
 func Register(x *command.Executor, kinds *Kinds) error {
 	s := &svc{kinds: kinds}
-	for _, sp := range []command.Spec{s.create(), s.update(), s.transition(), s.relate(), s.revert()} {
+	for _, sp := range []command.Spec{s.create(), s.update(), s.transition(), s.relate(), s.revert(), s.progress()} {
 		if err := x.Register(sp); err != nil {
 			return err
 		}

@@ -19,6 +19,7 @@ import (
 
 func init() {
 	client.Register("item", item)
+	client.Register("today", today)
 	client.Register("propose", propose)
 	client.Register("inbox", inbox)
 }
@@ -27,7 +28,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee] | add | update <id> | transition <id> --to <phase> --reason <r> | relate <from> --to <item or material id> --type <t>"
+const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> --to <item or material id> --type <t>"
 
 func item(c *client.Ctx, args []string) error {
 	if len(args) == 0 {
@@ -43,6 +44,8 @@ func item(c *client.Ctx, args []string) error {
 		return add(c, args, "item add")
 	case "update":
 		return write(c, args, "update", "PATCH", "")
+	case "progress":
+		return write(c, args, "progress", "POST", "/progress")
 	case "transition":
 		return write(c, args, "transition", "POST", "/transition")
 	case "relate":
@@ -136,11 +139,11 @@ func (f *form) headers() map[string]string {
 	return h
 }
 
-var itemFields = []string{"kind", "title", "summary", "body", "status-label", "priority", "project", "tags", "assignee", "waiting-on", "ask", "spec", "reason"}
+var itemFields = []string{"kind", "title", "summary", "body", "status-label", "priority", "project", "tags", "assignee", "waiting-on", "ask", "spec", "planned-for", "reason"}
 
 // add 实现 item add 与 propose：POST /items。propose 不带 --phase，由内核缺省为 proposed。
 func add(c *client.Ctx, args []string, name string) error {
-	hint := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --reason]"
+	hint := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --reason]"
 	fields := itemFields
 	if name == "item add" {
 		fields = append([]string{"phase"}, fields...)
@@ -169,7 +172,10 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	switch sub {
 	case "update":
 		fields = itemFields[1:]
-		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec] --reason <r> [--evidence <text> | --grant <id> --version <n>]"
+		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD>] --reason <r> [--evidence <text> | --grant <id> --version <n>]"
+	case "progress":
+		fields = []string{"text", "on"}
+		hint = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>] [--evidence <text> | --grant <id>]"
 	case "transition":
 		fields = []string{"to", "reason", "waiting-on"}
 		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <text> | --grant <id> --version <n>]"
@@ -185,6 +191,9 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	body, err := f.body(hint)
 	if err != nil {
 		return err
+	}
+	if sub == "progress" && body["text"] == nil {
+		return usage("--text is required", hint)
 	}
 	if sub == "transition" && body["to"] == nil {
 		return usage("--to is required", hint)
@@ -247,6 +256,18 @@ func list(c *client.Ctx, args []string) error {
 	}
 	var out map[string]any
 	if err := c.Do(bg, "GET", "/items?"+q.Encode(), nil, &out); err != nil {
+		return err
+	}
+	return c.Print(out)
+}
+
+// today：GET /today 原样输出四组（planned、due、pending、stale）。
+func today(c *client.Ctx, args []string) error {
+	if len(args) != 0 {
+		return usage("today takes no arguments", "usage: apa today")
+	}
+	var out map[string]any
+	if err := c.Do(bg, "GET", "/today", nil, &out); err != nil {
 		return err
 	}
 	return c.Print(out)
