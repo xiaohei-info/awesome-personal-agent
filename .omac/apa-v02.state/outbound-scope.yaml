@@ -1,9 +1,8 @@
-# sha256: 710618b598d450c9488ff7affb01ebf5565a2be3b923c2959776e5cba828556b
+# sha256: 67682b2feeae819e5935e2706dff726d649f20ae72fb4d432c6cb83608eb997d
 work_item_id: 01a1d111-0707-7bb8-80fa-3bdcc6f5d9cd
 status: done
 merged: true
 merged_at: '2026-11-12T19:52:03Z'
-recovery_marker: true
 retry_note: 上一轮 submit 封存的是 3a04709，之后你又推了一次合入 main（832c6f6），PR HEAD 与封存不一致，编排器拒收。代码不用改：确认
   832c6f6 合入 main 无冲突、重跑合约命令，以当前 HEAD 重新 submit。submit 之后不要再往 PR 分支推任何提交；若之后 main
   又变，等评审打回或编排器要求再合。
