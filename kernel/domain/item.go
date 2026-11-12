@@ -171,6 +171,17 @@ type ItemKernelState struct {
 	UpdatedAt  time.Time `json:"updated_at,omitzero"`
 }
 
+// Proposal 是建议信息（§6.3 proposal），由入站流水线写入，只在 proposed 阶段起作用，处置后保留作记录。
+// Sources 是并入这条建议的来源事件（来源给的事件 id）；MergeKey 是合并键（§9.3），供同一件事的后续事件找到这条建议。
+type Proposal struct {
+	Recommend     string   `json:"recommend,omitempty"` // accept | attach | dismiss
+	AttachTo      string   `json:"attach_to,omitempty"`
+	Reason        string   `json:"reason,omitempty"`
+	LowConfidence bool     `json:"low_confidence"`
+	Sources       []string `json:"sources"`
+	MergeKey      string   `json:"merge_key,omitempty"`
+}
+
 // Item 是一切事务的统一表示（§6.3）。
 type Item struct {
 	ID    string `json:"id"`
@@ -193,6 +204,7 @@ type Item struct {
 	Origin      *Origin         `json:"origin,omitempty"`
 	Spec        json.RawMessage `json:"spec,omitempty"`
 	Ext         json.RawMessage `json:"ext,omitempty"`
+	Proposal    *Proposal       `json:"proposal,omitempty"` // 只读：入站流水线写入
 }
 
 // CheckEntry 校验 item 以 to 阶段（附 reason、证据）的进入约束（§6.4、§6.14 第 3 条）。

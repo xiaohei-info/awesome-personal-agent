@@ -149,6 +149,7 @@ type disposeIn struct {
 	Reason      string             `json:"reason,omitempty"`
 	// WouldAccept 为真表示 accept: auto 的规则在 observe 档，只记录本来会自动接受。
 	WouldAccept bool `json:"would_accept,omitempty"`
+	mergeFields
 	// UnjudgedReason 是 unjudged 的原因（domain.Unjudged*）。
 	UnjudgedReason string `json:"unjudged_reason,omitempty"`
 }
@@ -179,8 +180,11 @@ func (s *Service) Register(x *command.Executor) error {
 			if err := runner.SetDisposition(c.Tx, v.Event, v.Disposition, v.Item, v.UnjudgedReason); err != nil {
 				return nil, err
 			}
+			if err := applyMerge(c, v.Event, v.Item, v.mergeFields); err != nil {
+				return nil, err
+			}
 			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule,
-				"unjudged_reason": v.UnjudgedReason})
+				"unjudged_reason": v.UnjudgedReason, "merged": v.Merge})
 			if _, err := c.Emit(domain.Event{Type: EvDisposed, Object: v.Event, Reason: v.Reason, Payload: p}); err != nil {
 				return nil, err
 			}
@@ -408,6 +412,8 @@ type proposal struct {
 	kind           domain.Kind
 	title, summary string
 	reason         string
+	// mergeKey、attachTo 是合并键（§9.3）：新建的建议带着它，供后来同一件事的事件找到；命中已接受事项时推荐补到 attachTo。
+	mergeKey, attachTo string
 }
 
 func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) error {
@@ -432,7 +438,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 		return merr
 	}
 	if id, ok := sn.made[ev.ID]; ok { // 上一轮建好了事项却没记完处置：接着做，不再判断、不再建
-		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure")
+		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure", mergeFields{MergeKey: mergeKeyOf(ev)})
 	}
 	var prop proposal
 	exit := rules.ExitScreen // 没有规则命中按 screen 处理
@@ -695,11 +701,11 @@ func (s *Service) repoProject(sn snapshot, src domain.Source, ev domain.SourceEv
 
 // propose 建 proposed 事项，按需自动接受，再记处置。每步的幂等键都含来源事件 id。
 func (s *Service) propose(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, p proposal, project string) error {
-	item, err := s.createItem(ctx, system, m.key(), src, ev, p, project)
+	item, mf, err := s.place(ctx, system, m.key(), src, ev, p, project)
 	if err != nil {
 		return err
 	}
-	return s.finish(ctx, sn, m, ev, item, p.reason)
+	return s.finish(ctx, sn, m, ev, item, p.reason, mf)
 }
 
 // createItem 以 id 的身份为来源事件建 proposed 事项；ext.source_event 记下来源事件，供重入时找回已建事项。
@@ -708,9 +714,13 @@ func (s *Service) createItem(ctx context.Context, id command.Identity, rule stri
 	if ref == "" {
 		ref = ev.ID
 	}
+	prop := domain.Proposal{Sources: []string{ev.DedupeKey.EventID}, MergeKey: p.mergeKey}
+	if p.attachTo != "" {
+		prop.Recommend, prop.AttachTo = "attach", p.attachTo
+	}
 	in := map[string]any{"kind": p.kind, "title": p.title, "summary": p.summary, "body": ev.Detail, "project": project,
 		"origin": domain.Origin{Source: src.ID, Actor: ev.Sender, Ref: ref}, "reason": p.reason,
-		"ext": map[string]string{"source_event": ev.ID}}
+		"ext": map[string]string{"source_event": ev.ID}, "proposal": prop}
 	res, err := s.do(ctx, id, rule, "inbound:item:"+ev.ID, "item.create", in, command.Chain{})
 	if err != nil {
 		return "", err
@@ -723,9 +733,9 @@ func (s *Service) createItem(ctx context.Context, id command.Identity, rule stri
 }
 
 // finish 在事项建好之后按需自动接受，再记处置；对同一事件可重复执行。
-func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason string) error {
-	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason}
-	if m != nil && m.rule.Accept == "auto" {
+func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason string, mf mergeFields) error {
+	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason, mergeFields: mf}
+	if m != nil && m.rule.Accept == "auto" && !mf.Merge { // 并入已有建议：它的处置早已定过，不再替它自动接受
 		mode := sn.modes[m.key()]
 		if mode == "" {
 			mode = rules.ModeObserve // 规则状态还没对账：按默认的观察档，不自动接受

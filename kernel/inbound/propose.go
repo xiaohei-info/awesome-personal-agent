@@ -3,10 +3,15 @@ package inbound
 import (
 	"context"
 	"encoding/json"
+	"net/url"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -38,7 +43,10 @@ func registerPropose(x *command.Executor) error {
 			if err := runner.Resolve(c.Tx, v.Event, domain.DispositionProposed, v.Item); err != nil {
 				return nil, err
 			}
-			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": domain.DispositionProposed, "item": v.Item})
+			if err := applyMerge(c, v.Event, v.Item, v.mergeFields); err != nil {
+				return nil, err
+			}
+			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": domain.DispositionProposed, "item": v.Item, "merged": v.Merge})
 			_, err := c.Emit(domain.Event{Type: EvDisposed, Object: v.Event, Reason: v.Reason, Payload: p})
 			return nil, err
 		}})
@@ -67,12 +75,13 @@ func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, even
 		return ev, err
 	}
 	item, made := sn.made[event]
+	var mf mergeFields
 	if !made {
-		if item, err = s.proposeItem(ctx, id, sn, ev); err != nil {
+		if item, mf, err = s.proposeItem(ctx, id, sn, ev); err != nil {
 			return ev, err
 		}
 	}
-	d := disposeIn{Event: event, Item: item, Reason: "manually proposed from the source page"}
+	d := disposeIn{Event: event, Item: item, Reason: "manually proposed from the source page", mergeFields: mf}
 	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
 		return ev, err
 	}
@@ -80,23 +89,137 @@ func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, even
 	return ev, err
 }
 
-func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snapshot, ev domain.SourceEvent) (string, error) {
+func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snapshot, ev domain.SourceEvent) (string, mergeFields, error) {
 	src, err := sn.source(ev.SourceID)
 	if err != nil {
-		return "", err
+		return "", mergeFields{}, err
 	}
 	m, err := s.match(src, ev)
 	if err != nil {
-		return "", err
+		return "", mergeFields{}, err
 	}
 	project, err := s.project(sn, src, ev, m)
 	if err != nil {
-		return "", err
+		return "", mergeFields{}, err
 	}
 	kind := defaultKind
 	if m != nil && m.rule.Kind != "" {
 		kind = domain.Kind(m.rule.Kind)
 	}
 	p := proposal{kind: kind, title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: "manually proposed from the source page"}
-	return s.createItem(ctx, id, "", src, ev, p, project)
+	return s.place(ctx, id, "", src, ev, p, project)
+}
+
+// ---- 合并键（§9.3 第 6 步）：同一件事从两个来源来时只成为一条建议 ----
+
+// mergeWindow 是建议接收合并的期限：从建议创建起算。
+const mergeWindow = 7 * 24 * time.Hour
+
+// mergeFields 附在会把来源事件记为 proposed 的命令输入上：MergeKey 记到来源事件；Merge 为真时事项 Item 是已有建议，
+// 事件并入它（记入 proposal.sources），而不是新建。
+type mergeFields struct {
+	MergeKey string `json:"merge_key,omitempty"`
+	Merge    bool   `json:"merge,omitempty"`
+}
+
+// applyMerge 在处置命令的事务里落下合并：来源事件记合并键，并入时把事件记进建议的来源并追加 item.updated。
+func applyMerge(c *command.Ctx, event, item string, m mergeFields) error {
+	if m.MergeKey != "" {
+		if err := runner.SetMergeKey(c.Tx, event, m.MergeKey); err != nil {
+			return err
+		}
+	}
+	if !m.Merge {
+		return nil
+	}
+	ev, err := runner.Event(c.Tx, event)
+	if err != nil {
+		return err
+	}
+	w, changed, err := items.AddProposalSource(c.Tx, item, ev.DedupeKey.EventID, c.Now())
+	if err != nil || !changed {
+		return err
+	}
+	if _, err := command.Bump(c.Tx, w.Object); err != nil {
+		return err
+	}
+	_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "merged source event " + ev.DedupeKey.EventID, Evidence: c.Evidence})
+	return err
+}
+
+// mergeKeyOf 算来源事件的合并键：来源自带的优先；否则取规范化后的链接；没有链接取规范化后的标题加发送者。
+// 链接与标题都没有时没有可靠的键，返回空：宁可多一条建议，也不把不相干的事件并成一条。
+func mergeKeyOf(ev domain.SourceEvent) string {
+	if ev.MergeKey != "" {
+		return ev.MergeKey
+	}
+	if l := normalizeLink(ev.Link); l != "" {
+		return "link:" + l
+	}
+	if t := normalizeText(ev.Subject); t != "" {
+		return "title:" + t + "\x1f" + normalizeText(ev.Sender)
+	}
+	return ""
+}
+
+func normalizeText(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
+
+// normalizeLink 小写 scheme 与主机、去掉片段与路径末尾的斜杠；解析不了的链接按规范化文本比较。
+func normalizeLink(l string) string {
+	l = strings.TrimSpace(l)
+	u, err := url.Parse(l)
+	if err != nil || u.Host == "" {
+		return normalizeText(l)
+	}
+	u.Scheme, u.Host, u.Fragment = strings.ToLower(u.Scheme), strings.ToLower(u.Host), ""
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = ""
+	return u.String()
+}
+
+// planMerge 找合并键命中的事项：7 天内仍在 proposed 的建议（into，取最新的一条）接收合并；
+// 否则命中已接受、未关闭的事项（attachTo，取最新的一条）只用于推荐"补到该事项"，内核不自动并入。
+// proposed 以外的已处置建议（dropped 等）与已关闭的事项都不参与。
+func (s *Service) planMerge(ctx context.Context, key string) (into, attachTo string, err error) {
+	if key == "" {
+		return "", "", nil
+	}
+	var hit []domain.Item
+	if err = s.o.Store.View(ctx, func(tx *store.Tx) (err error) { hit, err = items.ByMergeKey(tx, key); return }); err != nil {
+		return "", "", err
+	}
+	slices.SortStableFunc(hit, func(a, b domain.Item) int { return b.CreatedAt.Compare(a.CreatedAt) }) // 新的在前
+	now := s.o.Now()
+	for _, it := range hit {
+		switch it.Phase {
+		case domain.PhaseProposed:
+			if into == "" && now.Sub(it.CreatedAt) <= mergeWindow {
+				into = it.ID
+			}
+		case domain.PhaseOpen, domain.PhaseWaiting, domain.PhaseNeedsInput:
+			if attachTo == "" {
+				attachTo = it.ID
+			}
+		}
+	}
+	if into != "" {
+		attachTo = ""
+	}
+	return into, attachTo, nil
+}
+
+// place 为来源事件找到它的建议：合并键命中可并入的建议就返回那条（并标记 Merge），否则新建，
+// 命中已接受事项时新建的建议推荐补到它。调用方把返回的 mergeFields 带进处置命令。
+func (s *Service) place(ctx context.Context, id command.Identity, rule string, src domain.Source, ev domain.SourceEvent, p proposal, project string) (string, mergeFields, error) {
+	key := mergeKeyOf(ev)
+	into, attachTo, err := s.planMerge(ctx, key)
+	if err != nil {
+		return "", mergeFields{}, err
+	}
+	if into != "" {
+		return into, mergeFields{MergeKey: key, Merge: true}, nil
+	}
+	p.mergeKey, p.attachTo = key, attachTo
+	item, err := s.createItem(ctx, id, rule, src, ev, p, project)
+	return item, mergeFields{MergeKey: key}, err
 }

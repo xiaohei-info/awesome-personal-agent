@@ -719,6 +719,12 @@ func requeue(tx *store.Tx, id, where string) (int, error) {
 	return ev.Rejudges, err
 }
 
+// SetMergeKey 记下内核算出的合并键（§9.3）；来源自带键时写入的是同一个值。不记事件，调用方自己负责留痕。
+func SetMergeKey(tx *store.Tx, id, key string) error {
+	_, err := tx.Exec(`UPDATE sources_runner_event SET merge_key = ? WHERE id = ?`, key, id)
+	return err
+}
+
 // Resolve 在调用方事务内结清一条积压事件：to 为 expired 时只接受 unjudged；为 proposed、ignored、digest 时接受 unjudged 与 expired
 // （本人处理、只跑规则），proposed 同时关联事项。不记事件，调用方自己负责留痕。
 func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error {

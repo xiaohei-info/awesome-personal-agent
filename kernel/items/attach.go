@@ -3,6 +3,7 @@ package items
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -152,4 +153,32 @@ func RecommendationOf(tx *store.Tx, id string) (rec Recommendation, ok bool, err
 		return rec, rec.AttachTo != "", nil
 	}
 	return rec, false, nil
+}
+
+// AddProposalSource 在调用方事务内把来源事件 source 记入建议 id 的 proposal.sources（§9.3 合并键命中）。
+// 建议必须仍在 proposed；已经记过该来源时什么都不改，返回 false。调用方追加返回的事件并为 id 做一次 command.Bump。
+func AddProposalSource(tx *store.Tx, id, source string, at time.Time) (w Write, changed bool, err error) {
+	cur, err := Get(tx, id)
+	if err != nil {
+		return w, false, err
+	}
+	if cur.Phase != domain.PhaseProposed {
+		return w, false, domain.NewError(domain.CodeConflict, "item "+id+" is "+string(cur.Phase)+", not proposed", "re-read the item")
+	}
+	if cur.Proposal != nil && slices.Contains(cur.Proposal.Sources, source) {
+		return w, false, nil
+	}
+	next := cur
+	p := domain.Proposal{}
+	if cur.Proposal != nil {
+		p = *cur.Proposal
+	}
+	p.Sources = append(slices.Clone(p.Sources), source)
+	next.Proposal = &p
+	next = stamped(next, at)
+	if err := save(tx, next); err != nil {
+		return w, false, err
+	}
+	w, err = write(domain.EvItemUpdated, id, payload{Op: "update", Before: &cur, Item: next})
+	return w, err == nil, err
 }
