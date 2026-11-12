@@ -240,6 +240,7 @@ type Source struct {
 	Timeout         int             `json:"timeout,omitempty"`
 	CredentialsPath string          `json:"credentials_path,omitempty"`
 	DedupeDomain    string          `json:"dedupe_domain,omitempty"`
+	DefaultProject  string          `json:"default_project"`
 	Config          json.RawMessage `json:"config,omitempty"`
 	Cursor          string          `json:"cursor,omitempty"`
 	Enabled         bool            `json:"enabled"`
