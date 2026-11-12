@@ -89,6 +89,28 @@ type Disturb struct {
 	MergeWindowSec   int               `json:"merge_window_sec"`
 	RemindOnDeadline bool              `json:"remind_on_deadline"`
 	ThresholdJudge   bool              `json:"threshold_judge,omitempty"`
+	// DailyCap 是每个自然日经渠道推到本人面前的提醒上限，0 不限（§7.4）；DefaultDailyCap 是缺省，旧版本策略文档没有此键时也取它。
+	DailyCap int `json:"daily_cap"`
+	// Mutes 按来源、项目或事项静音；到期（Until）后自动恢复。只在 Web 改。
+	Mutes         []Mute `json:"mutes"`
+	FollowupDefer bool   `json:"followup_defer"`
+}
+
+// DefaultDailyCap 是日上限缺省值（§7.4）。
+const DefaultDailyCap = 20
+
+// Mute 的 Scope 取值。
+const (
+	MuteSource  = "source"
+	MuteProject = "project"
+	MuteItem    = "item"
+)
+
+// Mute 是一条静音：ID 为来源、项目或事项 id；Until 为空表示不到期。
+type Mute struct {
+	Scope string     `json:"scope"`
+	ID    string     `json:"id"`
+	Until *time.Time `json:"until,omitempty"`
 }
 
 // ParseClock 解析 "HH:MM"，返回当天的分钟数。
@@ -152,7 +174,7 @@ func Default() Policy {
 			string(domain.DeliveryDecision): "inject", string(domain.DeliveryBrief): "inject",
 			string(domain.DeliveryReminder): "inject", string(domain.DeliveryHealth): "web",
 			string(domain.DeliveryWake): "web",
-		}, MergeWindowSec: 30 * 60, RemindOnDeadline: true}, // 合并窗口默认 30 分钟（§7.4）
+		}, MergeWindowSec: 30 * 60, RemindOnDeadline: true, DailyCap: DefaultDailyCap, Mutes: []Mute{}}, // 合并窗口默认 30 分钟（§7.4）
 		// 规范、方案类须本人确认；纪要类直写（§12.4）。未登记的 kind 取更严的 proposed。
 		MaterialWrite: MaterialWrite{Default: WriteProposed, Kinds: map[string]string{
 			"minutes": WriteDirect, "reference": WriteDirect, "worknote": WriteDirect,
@@ -281,6 +303,17 @@ func normalize(p Policy) (Policy, error) {
 		}
 	}
 
+	if p.Disturb.DailyCap < 0 {
+		return p, invalid("disturb daily_cap %d < 0", p.Disturb.DailyCap)
+	}
+	if p.Disturb.Mutes == nil {
+		p.Disturb.Mutes = []Mute{}
+	}
+	for i, m := range p.Disturb.Mutes {
+		if !oneOf(m.Scope, MuteSource, MuteProject, MuteItem) || strings.TrimSpace(m.ID) == "" {
+			return p, invalid("disturb mute %d needs scope source|project|item and a non-empty id", i)
+		}
+	}
 	if p.Disturb.MergeWindowSec < 0 {
 		return p, invalid("disturb merge_window_sec %d < 0", p.Disturb.MergeWindowSec)
 	}
@@ -349,7 +382,7 @@ func clone(p Policy) Policy {
 }
 
 func decode(doc string) (Policy, error) {
-	var p Policy
+	p := Policy{Disturb: Disturb{DailyCap: DefaultDailyCap}} // 旧文档没有 daily_cap：升级后日上限即生效
 	if err := json.Unmarshal([]byte(doc), &p); err != nil {
 		return Policy{}, fmt.Errorf("policy: stored document: %w", err)
 	}

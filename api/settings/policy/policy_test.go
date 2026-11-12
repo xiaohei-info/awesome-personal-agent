@@ -359,3 +359,63 @@ func TestChannelsSection(t *testing.T) {
 		t.Fatalf("read back: %s", rec.Body)
 	}
 }
+
+// ACT-DLV-15：缺省日上限 20、静音为空、followup_defer 为 false。
+func TestDisturbDefaultsCapAndMutes(t *testing.T) {
+	e := setup(t)
+	rec := e.do("GET", routes[0], "", e.web)
+	var got struct {
+		Disturb map[string]json.RawMessage `json:"disturb"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if string(got.Disturb["daily_cap"]) != "20" || string(got.Disturb["mutes"]) != "[]" || string(got.Disturb["followup_defer"]) != "false" {
+		t.Fatalf("disturb defaults: %s", rec.Body)
+	}
+}
+
+// ACT-DLV-16：日上限与静音只能 Web 改（委派级请求被拒、策略不变）；Web 改产生新版本与 policy.changed。
+func TestDailyCapAndMutesAreWebOnly(t *testing.T) {
+	e := setup(t)
+	body := `{"disturb":{"routes":{"decision":"web","brief":"web","reminder":"web","health":"web","wake":"web"},"merge_window_sec":0,"remind_on_deadline":true,"daily_cap":0,"mutes":[{"scope":"project","id":"p"}],"followup_defer":false}}`
+	rec := e.do("PUT", routes[0], body, e.bearer(auth.Delegate))
+	if rec.Code != 403 || errCode(t, rec) != domain.CodeWebOnly {
+		t.Fatalf("delegate PUT: %d %s", rec.Code, rec.Body)
+	}
+	if v, p := e.current(); v != 0 || p.Disturb.DailyCap != 20 || len(p.Disturb.Mutes) != 0 {
+		t.Fatalf("policy changed by a rejected call: v%d %+v", v, p.Disturb)
+	}
+	until := "2030-01-01T00:00:00Z"
+	rec = e.do("PUT", routes[0], `{"disturb":{"routes":{"decision":"inject","brief":"inject","reminder":"inject","health":"web","wake":"web"},"merge_window_sec":1800,"remind_on_deadline":true,"daily_cap":3,"mutes":[{"scope":"item","id":"x","until":"`+until+`"}]}}`, e.web)
+	if rec.Code != 200 {
+		t.Fatalf("web PUT: %d %s", rec.Code, rec.Body)
+	}
+	v, p := e.current()
+	if v != 1 || p.Disturb.DailyCap != 3 || len(p.Disturb.Mutes) != 1 || p.Disturb.Mutes[0].Until == nil {
+		t.Fatalf("stored v%d %+v", v, p.Disturb)
+	}
+	if ev := e.eventTypes(); len(ev) != 2 || ev[0] != string(domain.EvCommandRejected) || ev[1] != string(domain.EvPolicyChanged) {
+		t.Fatalf("events %v", ev)
+	}
+}
+
+// 请求体缺 daily_cap 取缺省 20 而不是"不限"；显式 0 才是不限；非法静音与负数被拒。
+func TestDisturbPutDefaultsAndValidation(t *testing.T) {
+	e := setup(t)
+	routes := `"routes":{"decision":"inject","brief":"inject","reminder":"inject","health":"web","wake":"web"}`
+	if rec := e.do("PUT", "/v1/settings/policy", `{"disturb":{`+routes+`,"merge_window_sec":60}}`, e.web); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if _, p := e.current(); p.Disturb.DailyCap != 20 {
+		t.Fatalf("missing daily_cap must default to 20, got %d", p.Disturb.DailyCap)
+	}
+	e.do("PUT", "/v1/settings/policy", `{"disturb":{`+routes+`,"merge_window_sec":60,"daily_cap":0}}`, e.web)
+	if _, p := e.current(); p.Disturb.DailyCap != 0 {
+		t.Fatalf("explicit 0 must mean unlimited, got %d", p.Disturb.DailyCap)
+	}
+	for _, bad := range []string{`"daily_cap":-1`, `"mutes":[{"scope":"team","id":"x"}]`, `"mutes":[{"scope":"item","id":""}]`} {
+		rec := e.do("PUT", "/v1/settings/policy", `{"disturb":{`+routes+`,"merge_window_sec":60,`+bad+`}}`, e.web)
+		if rec.Code != 400 || errCode(t, rec) != domain.CodeInvalidRequest {
+			t.Fatalf("%s: %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+}
