@@ -1,4 +1,4 @@
-# sha256: 28e524af623789294d603d0d3e63bc92376510982909a2fd231bbbb80077d825
+# sha256: 83e1ada607794217527d9a2e620a377f565e5feb2f494ba277722099b926f075
 defects:
   schema: omac.defect-ledger/v1
   used_global: 13
@@ -170,4 +170,42 @@ defects:
       - e2e-hermes-session
       state: fixed
       fix_node: fix.kernel-delivery.a428ef
-  inbox: []
+  inbox:
+  - id: 2fd2396fbb88
+    reporter: release-closeout
+    defects:
+    - class: design-gap
+      suspected_node: e2e-delivery
+      anchors:
+      - flow-delivery-control/ACT-DLV-07
+      design_ref: docs/solution-design.md#69-delivery
+      expected: '按 §6.9 投递状态表与"回答即确认"（PR #243 之后的权威设计）：本人在 Web 回答时，被回答的那条决策投递转 acknowledged，不记
+        superseded；作废只作用于低于被回答版本的旧投递，旧版本的 ack 返回 409（kernel Stale → api/deliveries
+        409）。TestDLV07 要验证的是"事项变化后旧投递作废、领取不到旧版本、旧版本 ack 为 409、不进 Web 未读"，用例必须构造出真正的旧版本：先让事项产生一条投递
+        （版本 v），再让事项变化产生更高版本（例如再次 ask 产生新的决策请求版本，或用非本人确认的变化：超时默认值），使 v 成为低于当前版本的旧投递，
+        再对 v 断言 superseded / 领不到 / ack 409 / 不在未读。被本人回答的那条投递应断言为 acknowledged（不是 superseded）。
+        只改 tests/e2e/delivery，不改内核实现，不改 .omac 下的验收文档。'
+      observed: 'release-closeout（PR #247）在 linux/amd64 跑 go test -tags e2e ./tests/e2e/delivery：TestDLV07
+        对已在 Web 回答的同一版本 POST /v1/deliveries/{id}/ack {"version":v}（未带 external_ref）期望
+        409，实际 400 "external_ref is required"。原因：PR #243 之后被回答的投递转 acknowledged 而非
+        superseded，Queue.check 不判 Stale，走到 Ack 的 external_ref 校验。用例写于 PR #178，早于 #243
+        的设计变更，没有同步。'
+      locations:
+      - tests/e2e/delivery/flows_test.go:TestDLV07
+      - kernel/delivery/delivery.go:Queue.Ack（只读参考，不改）
+    - class: design-gap
+      suspected_node: e2e-bg-guards
+      anchors:
+      - flow-bg-task-runner/ACT-BGT-04
+      design_ref: docs/solution-design.md#77-内核基础设施
+      expected: '按 §7.7 运行上下文文件与 §17.4（PR #237 之后）：CLI 设了 APA_RUN_CONTEXT 时以文件为准，盖过环境里的
+        APA_RUN/APA_URL/APA_TOKEN； PATH 带运行标记却没有 APA_RUN_CONTEXT 时报未认证；设了 APA_RUN
+        时绝不回退本机凭据文件。ACT-BGT-04 要证明的是"运行内拿不到运行凭据时 不回退到 apa login 保存的本机凭据、退出码 3"，用例必须把运行凭据的所有来源都去掉（APA_TOKEN、APA_RUN_CONTEXT、APA_RUN_CREDENTIAL_FILE），
+        保留 APA_RUN 与本机凭据文件，再断言 apa inbox 退出码 3；对照组（去掉 APA_RUN 等运行变量）仍为 0。只改 tests/e2e/bgguards，
+        不改 cli/ 实现，不改 .omac 下的验收文档。'
+      observed: 'release-closeout（PR #247）在 linux/amd64 跑 go test -tags e2e ./tests/e2e/bgguards：TestFlowBgTaskRunner/ACT-BGT-04
+        的 `env -u APA_TOKEN $APA inbox` 退出码 0，期望 3。原因：PR #237 之后内核给运行注入 APA_RUN_CONTEXT，cli/client/credentials.go:withRunContext
+        从上下文文件取运行凭据，用例只清 APA_TOKEN，CLI 用的是运行凭据而不是本机凭据，属于用例未跟上设计。用例写于 PR #192，早于 #237。'
+      locations:
+      - tests/e2e/bgguards/taskrunner_test.go:TestFlowBgTaskRunner（ACT-BGT-04 步骤）
+      - cli/client/credentials.go:withRunContext（只读参考，不改）
