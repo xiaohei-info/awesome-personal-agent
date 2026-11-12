@@ -107,6 +107,8 @@ type Options struct {
 	Now func() time.Time
 	// Rejudge 是自动重判的上限与节流，零值取 DefaultRejudge。
 	Rejudge RejudgeLimits
+	// BacklogReleasePerDay 是积压放开重判时每天最多进入建议流的条数（backlog_release_per_day，§9.3）；0 不限。
+	BacklogReleasePerDay int
 	// Series 是变化类字段条件（changed、crosses_*）取同一序列上一次取值的来源；可为空（此时这类条件恒不成立）。
 	Series rules.Series
 	// Extract 可替换 then: extract 的内置处理（测试用）；Alert 产出 then: alert 的提醒（kernel/metrics）。

@@ -749,6 +749,11 @@ const rejudgeable = `disposition = 'unjudged' AND unjudged_reason IN ('', 'model
 // Requeue 在调用方事务内把一条可重判的 unjudged 事件放回 pending，重判次数加一并返回新次数。不记事件。
 func Requeue(tx *store.Tx, id string) (int, error) { return requeue(tx, id, rejudgeable) }
 
+// RequeueBacklog 同 Requeue，对象是整个积压：unjudged（任何原因，含旧原因与 restored）与 expired。积压放开用（§9.3）。
+func RequeueBacklog(tx *store.Tx, id string) (int, error) {
+	return requeue(tx, id, `disposition IN ('unjudged', 'expired')`)
+}
+
 // RequeueOutbound 同 Requeue，对象是因外发范围未选择而未判定的事件；调用方先确认范围已选定（§14.14）。
 func RequeueOutbound(tx *store.Tx, id string) (int, error) {
 	return requeue(tx, id, `disposition = 'unjudged' AND unjudged_reason = 'outbound_unset'`)
