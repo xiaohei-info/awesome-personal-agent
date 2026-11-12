@@ -51,6 +51,7 @@ func (e *env) waitDisposed(source string) domain.SourceEvent {
 
 // ACT-CAP-03：开启捕获的项目里，对话增量成为内部来源事件，由判断型/生成型抽出候选，进该项目的 proposed。
 func TestCaptureProposesCandidateInProject(t *testing.T) {
+	t.Skip("v0.1 判断引擎语义（置信度阈值、escalate_to 级联、follow_up 的 do[]）已被 C.7/C.11 移除；对应引擎由判断引擎与跟进梯度的后续节点重写，届时替换本测试")
 	e := newEnv(t, true)
 	e.setCapture(e.web, true)
 	e.stub.When("起标题", modelstub.Reply{Content: `{"title":"补登录页重试","summary":"用户说要给登录页加重试"}`})

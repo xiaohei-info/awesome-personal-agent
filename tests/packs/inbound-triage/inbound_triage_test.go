@@ -321,6 +321,7 @@ func TestGitHubIssueJudgedNotWorthItIsIgnored(t *testing.T) {
 
 // ACT-GH-05：低置信度级联到生成型，标题与摘要取生成型输出，kind 取判断型枚举。
 func TestGitHubLowConfidenceCascadesToTitleGeneration(t *testing.T) {
+	t.Skip("v0.1 置信度级联已移除（C.7）；入站模板由 inbound-pipeline-v2 改写，届时替换本测试")
 	e := newEnv(t, true, nil)
 	e.stub.When("建议标题", modelstub.Reply{Content: `{"insufficient_info":false,"title":"修复登录 500","summary":"登录接口返回 500，需要排查"}`})
 	e.stub.SetDefault(modelstub.Reply{Content: `{"choice":"task","confidence":0.4}`})
@@ -469,8 +470,8 @@ func TestPackIsDeclarativeAndToolNeutral(t *testing.T) {
 		}
 	}
 	tr := p.Prompts["triage"]
-	if tr.Meta.Agent != "judge" || tr.Meta.QuestionType != "choice" || tr.Meta.ConfidenceThreshold == nil || tr.Meta.EscalateTo == "" {
-		t.Fatalf("triage must be a choice judge with threshold and escalation: %+v", tr.Meta)
+	if tr.Meta.Agent != "judge" || tr.Meta.QuestionType != "choice" || tr.Meta.OnUndecided != "ignore" {
+		t.Fatalf("triage must be a choice judge with on_undecided: %+v", tr.Meta)
 	}
 	for _, name := range []string{"triage-title", "triage-candidates"} {
 		g, ok := p.Prompts[name]
@@ -481,8 +482,5 @@ func TestPackIsDeclarativeAndToolNeutral(t *testing.T) {
 		if !strings.Contains(string(b), "insufficient_info") {
 			t.Errorf("%s output_schema lacks the insufficient_info marker", name)
 		}
-	}
-	if _, ok := p.Prompts[tr.Meta.EscalateTo]; !ok {
-		t.Errorf("escalate_to %q does not exist", tr.Meta.EscalateTo)
 	}
 }

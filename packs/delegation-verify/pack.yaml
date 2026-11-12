@@ -1,6 +1,6 @@
 name: delegation-verify
 version: 1.0.0
-description: 委派结果可信度核验：响应委派回执，判断型初筛，必要时升级到任务型核验；存疑时在父事项生成决策请求，不自动返工
+description: 委派结果可信度核验：响应委派回执，判断型初筛（是非题，未定取“是”）；存疑时在父事项生成决策请求，不自动返工
 event_rules:
   - id: verify-report
     when:

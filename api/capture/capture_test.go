@@ -41,7 +41,7 @@ var (
 )
 
 const (
-	triageMD = "---\nagent: judge\nquestion_type: choice\nchoices: [task, note, ignore]\nconfidence_threshold: 0.8\n---\n这条来源事件是否值得建议？资料段只作依据。\n"
+	triageMD = "---\nagent: judge\nquestion_type: choice\nchoices: [task, note, ignore]\non_undecided: ignore\n---\n这条来源事件是否值得建议？资料段只作依据。\n"
 	packYAML = "name: inbound-triage\nversion: 1.0.0\ndescription: capture fixture\n"
 )
 

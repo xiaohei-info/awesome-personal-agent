@@ -65,6 +65,10 @@ type ClockRule struct {
 	Schedule string   `yaml:"schedule"`
 	Mode     string   `yaml:"mode"`
 	Do       []Action `yaml:"do"`
+	// 提醒类规则的参数（C.4）；到期行为由内核固定，不写 do[]。
+	RemindRounds *int   `yaml:"remind_rounds"` // 只用于 follow_up，默认 2
+	DeferWith    string `yaml:"defer_with"`    // 只用于 follow_up：yes_no 判断型模板名
+	StaleAfter   string `yaml:"stale_after"`   // 只用于 stale，默认 14d
 }
 
 type SourceRule struct {
@@ -115,13 +119,20 @@ type Prompt struct {
 }
 
 type PromptMeta struct {
-	Agent               string         `yaml:"agent"`
-	RunAs               string         `yaml:"run_as"`
-	QuestionType        string         `yaml:"question_type"`
-	Choices             []any          `yaml:"choices"`
+	Agent        string `yaml:"agent"`
+	RunAs        string `yaml:"run_as"`
+	QuestionType string `yaml:"question_type"`
+	Choices      []any  `yaml:"choices"`
+	// ConfidenceThreshold 与 EscalateTo 是 v0.1 已移除的字段：只为识别并拒绝（C.7、C.11），通过校验的模板恒为空。
 	ConfidenceThreshold *float64       `yaml:"confidence_threshold"`
-	OutputSchema        map[string]any `yaml:"output_schema"`
 	EscalateTo          string         `yaml:"escalate_to"`
+	OutputSchema        map[string]any `yaml:"output_schema"`
+	AnswerBy            []string       `yaml:"answer_by"`    // 判断型：答题顺序；校验后缺省已按题型补全
+	Band                *Band          `yaml:"band"`         // yes_no 且含 classifier：不确定带；校验后两端都有值
+	OnUndecided         any            `yaml:"on_undecided"` // 判断型必填
+	SingleShot          bool           `yaml:"single_shot"`
+	Criteria            string         `yaml:"criteria"`
+	RelayTo             string         `yaml:"relay_to"` // 生成型：信息不足时接力的任务型模板
 	EventStats          string         `yaml:"event_stats"`
 	Timeout             string         `yaml:"timeout"`
 	Access              string         `yaml:"access"`
@@ -129,6 +140,12 @@ type PromptMeta struct {
 	ResultFields        []string       `yaml:"result_fields"`   // 任务型：spec 里要写全的字段，顶层键或 a[].b（§8.4）
 	ResultMaterial      bool           `yaml:"result_material"` // 任务型：结果是一条材料修订
 	Tools               any            `yaml:"tools"`           // 只为识别并拒绝"生成型声明工具"
+}
+
+// Band 是不确定带 {low, high}（C.7）；只写一端时另一端取相同的值。
+type Band struct {
+	Low  *float64 `yaml:"low"`
+	High *float64 `yaml:"high"`
 }
 
 // View 是 Web 视图配置，止步于列表列、筛选、卡片字段（C.8）。JSON 形状即 GET /packs 的 views（附录 B.2）。
@@ -146,6 +163,7 @@ type View struct {
 var (
 	packName    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 	placeholder = regexp.MustCompile(`\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}`)
+	staleAfter  = regexp.MustCompile(`^[1-9][0-9]*d$`)
 	resultField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\[\]\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 
 	// 提示词正文只能用内核提供的固定占位符（C.7）。
@@ -155,7 +173,10 @@ var (
 	forbiddenKeys = map[string]bool{"command": true, "commands": true, "cmd": true, "exec": true, "script": true,
 		"scripts": true, "shell": true, "run": true, "args": true, "argv": true, "hook": true, "hooks": true,
 		"policy": true, "trust": true, "trust_level": true, "web_only": true, "forward_whitelist": true,
-		"whitelist": true, "allowed_executors": true}
+		"whitelist": true, "allowed_executors": true,
+		// 自报规则类别、不确定带的策略覆盖、外发范围、打扰上限都是策略（C.11）。
+		"category": true, "judgment": true, "bands": true, "outbound": true, "capture_outbound": true,
+		"disturb": true, "daily_cap": true}
 	// 这些键的值是用户自定义的 JSON Schema，里面的属性名不受上面的限制。
 	schemaKeys = map[string]bool{"spec_schema": true, "instance_params": true, "output_schema": true}
 
@@ -407,8 +428,11 @@ func finish(p *Pack, files map[string][]byte, names []string, checkSchema func(j
 		if err := add("clock_rules", r.ID, r); err != nil {
 			return nil, err
 		}
-		if r.Type != "recur" && r.Type != "follow_up" && r.Type != "check" {
-			return nil, fmt.Errorf("clock_rules.%s: type %q must be recur, follow_up or check", r.ID, r.Type)
+		if r.Type != "recur" && r.Type != "follow_up" && r.Type != "stale" && r.Type != "check" {
+			return nil, fmt.Errorf("clock_rules.%s: type %q must be recur, follow_up, stale or check", r.ID, r.Type)
+		}
+		if err := checkReminderRule(r); err != nil {
+			return nil, err
 		}
 		// 含 {instance.…} 占位符的 schedule 由实例参数提供，创建实例时再校验。
 		if r.Schedule != "" && !strings.Contains(r.Schedule, "{") {
@@ -468,6 +492,30 @@ func finish(p *Pack, files map[string][]byte, names []string, checkSchema func(j
 		}
 	}
 	return p, nil
+}
+
+// checkReminderRule 校验提醒类规则的专属字段（C.4、C.11）。
+func checkReminderRule(r ClockRule) error {
+	where := "clock_rules." + r.ID
+	reminder := r.Type == "follow_up" || r.Type == "stale"
+	if reminder && len(r.Do) > 0 {
+		return fmt.Errorf("%s: a %s rule cannot carry do[] (v0.1 used it to call a judge): delete do[]; expiry behaviour is fixed by the kernel (C.4)", where, r.Type)
+	}
+	if r.Type != "follow_up" && (r.RemindRounds != nil || r.DeferWith != "") {
+		return fmt.Errorf("%s: remind_rounds and defer_with are only for follow_up rules", where)
+	}
+	if r.Type == "follow_up" && r.RemindRounds != nil && *r.RemindRounds < 1 {
+		return fmt.Errorf("%s: remind_rounds must be at least 1", where)
+	}
+	if r.Type != "stale" && r.StaleAfter != "" {
+		return fmt.Errorf("%s: stale_after is only for stale rules", where)
+	}
+	if r.StaleAfter != "" && !staleAfter.MatchString(r.StaleAfter) {
+		if d, err := time.ParseDuration(r.StaleAfter); err != nil || d <= 0 {
+			return fmt.Errorf("%s: stale_after %q must be a positive duration such as 14d or 72h", where, r.StaleAfter)
+		}
+	}
+	return nil
 }
 
 func checkMode(where, mode string) error {
@@ -555,6 +603,7 @@ func loadParts(p *Pack, files map[string][]byte, names []string, schema func(str
 	p.Prompts = map[string]Prompt{}
 	p.Views = map[string]View{}
 	p.Templates = map[string]string{}
+	var bad []string // 提示词的问题一次列全，健康视图才能逐字段说明
 	for _, n := range names {
 		dir, base := path.Split(n)
 		switch dir {
@@ -562,7 +611,8 @@ func loadParts(p *Pack, files map[string][]byte, names []string, schema func(str
 			name := strings.TrimSuffix(base, ".md")
 			pr, err := parsePrompt(files[n], n, schema)
 			if err != nil {
-				return fmt.Errorf("%s: %w", n, err)
+				bad = append(bad, fmt.Sprintf("%s: %v", n, err))
+				continue
 			}
 			p.Prompts[name] = pr
 		case "views/":
@@ -581,6 +631,40 @@ func loadParts(p *Pack, files map[string][]byte, names []string, schema func(str
 			p.Views[strings.TrimSuffix(base, ".yaml")] = vw
 		case "templates/":
 			p.Templates[strings.TrimSuffix(base, ".md")] = string(files[n])
+		}
+	}
+	if len(bad) > 0 {
+		return errors.New(strings.Join(bad, "; "))
+	}
+	return checkPromptRefs(p)
+}
+
+// checkPromptRefs 校验跨模板的引用：relay_to 只能由生成型指向本包的任务型模板，defer_with 指向本包的 yes_no 判断型模板。
+func checkPromptRefs(p *Pack) error {
+	names := make([]string, 0, len(p.Prompts))
+	for n := range p.Prompts {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		to := p.Prompts[n].Meta.RelayTo
+		if to == "" {
+			continue
+		}
+		t, ok := p.Prompts[to]
+		switch {
+		case !ok:
+			return fmt.Errorf("prompts/%s.md: relay_to %q does not exist in prompts/", n, to)
+		case t.Meta.Agent != "task":
+			return fmt.Errorf("prompts/%s.md: relay_to %q must be a task prompt (generate relays to task only)", n, to)
+		}
+	}
+	for _, r := range p.ClockRules {
+		if r.DeferWith == "" {
+			continue
+		}
+		if t, ok := p.Prompts[r.DeferWith]; !ok || t.Meta.Agent != "judge" || t.Meta.QuestionType != "yes_no" {
+			return fmt.Errorf("clock_rules.%s: defer_with %q must be a yes_no judge prompt in prompts/", r.ID, r.DeferWith)
 		}
 	}
 	return nil
@@ -641,8 +725,8 @@ func checkPromptMeta(m *PromptMeta, file string, schema func(string, map[string]
 	if m.Cwd != "" && m.Cwd != "run_dir" && m.Cwd != "project_checkout" {
 		return fmt.Errorf("cwd %q must be run_dir or project_checkout", m.Cwd)
 	}
-	if m.ConfidenceThreshold != nil && (*m.ConfidenceThreshold < 0 || *m.ConfidenceThreshold > 1) {
-		return errors.New("confidence_threshold must be within 0..1")
+	if err := removedFields(m); err != nil {
+		return err
 	}
 	if m.OutputSchema != nil {
 		if err := schema(file+" output_schema", m.OutputSchema); err != nil {
@@ -664,11 +748,11 @@ func checkPromptMeta(m *PromptMeta, file string, schema func(string, map[string]
 		if m.RunAs != "main_session" {
 			return fmt.Errorf("run_as %q must be main_session", m.RunAs)
 		}
-		if m.EscalateTo != "" {
-			return errors.New("run_as main_session cannot have escalate_to")
-		}
 		if m.EventStats != "" {
 			return errors.New("event_stats is only allowed on judge and generate prompts")
+		}
+		if m.hasJudgeFields() || m.OutputSchema != nil || m.RelayTo != "" {
+			return errors.New("run_as main_session cannot carry judge or generate fields")
 		}
 		return nil
 	}
@@ -680,6 +764,9 @@ func checkPromptMeta(m *PromptMeta, file string, schema func(string, map[string]
 		if m.Tools != nil {
 			return errors.New("a judge prompt cannot declare tools")
 		}
+		if m.RelayTo != "" {
+			return errors.New("relay_to is only for generate prompts")
+		}
 		switch m.QuestionType {
 		case "yes_no", "score":
 		case "choice":
@@ -689,6 +776,9 @@ func checkPromptMeta(m *PromptMeta, file string, schema func(string, map[string]
 		default:
 			return fmt.Errorf("a judge prompt needs question_type yes_no, choice or score, got %q", m.QuestionType)
 		}
+		if err := checkJudge(m); err != nil {
+			return err
+		}
 	case "generate":
 		if m.OutputSchema == nil {
 			return errors.New("a generate prompt requires output_schema")
@@ -696,18 +786,123 @@ func checkPromptMeta(m *PromptMeta, file string, schema func(string, map[string]
 		if m.Tools != nil {
 			return errors.New("a generate prompt cannot declare tools")
 		}
-		if m.QuestionType != "" || m.Choices != nil || m.ConfidenceThreshold != nil {
-			return errors.New("question_type, choices and confidence_threshold are for judge prompts")
+		if m.hasJudgeFields() {
+			return errors.New("question_type, choices, answer_by, band, on_undecided, single_shot and criteria are for judge prompts")
 		}
 	case "task":
-		if m.QuestionType != "" || m.Choices != nil || m.ConfidenceThreshold != nil || m.EventStats != "" {
-			return errors.New("question_type, choices, confidence_threshold and event_stats are not for task prompts")
+		if m.hasJudgeFields() || m.EventStats != "" || m.RelayTo != "" {
+			return errors.New("judge fields, event_stats and relay_to are not for task prompts")
 		}
 	default:
 		return fmt.Errorf("agent %q must be judge, generate or task", m.Agent)
 	}
 	if m.Agent != "task" && (m.Access != "" || m.Cwd != "") {
 		return errors.New("access and cwd are only for task prompts")
+	}
+	return nil
+}
+
+func (m *PromptMeta) hasJudgeFields() bool {
+	return m.QuestionType != "" || m.Choices != nil || m.AnswerBy != nil || m.Band != nil ||
+		m.OnUndecided != nil || m.SingleShot || m.Criteria != ""
+}
+
+// removedFields 拒绝 v0.1 的写法并给出 C.7 的对应写法。所有问题一次列全。
+func removedFields(m *PromptMeta) error {
+	var bad []string
+	if m.ConfidenceThreshold != nil {
+		bad = append(bad, "confidence_threshold is removed: for yes_no questions use band and answer_by (the kernel no longer reads the model's self-reported confidence)")
+	}
+	if m.EscalateTo != "" {
+		switch m.Agent {
+		case "generate":
+			bad = append(bad, "escalate_to is removed on generate prompts: use relay_to: <task prompt>")
+		default:
+			bad = append(bad, "escalate_to is removed on judge prompts: write escalation of the same question in answer_by; write the next step after a verdict in the rule that uses it (source rule draft/extract, rule do[])")
+		}
+	}
+	for _, c := range m.Choices {
+		if s := fmt.Sprint(c); s == "需要解释" || s == "need_explanation" {
+			bad = append(bad, fmt.Sprintf("choices option %q is removed: delete it; express \"cannot answer\" with on_undecided and chain a generate prompt in the rule when an explanation is needed", s))
+		}
+	}
+	if m.Agent == "judge" && m.OnUndecided == nil {
+		bad = append(bad, "on_undecided is required on judge prompts: set the more conservative answer used when no level decides (yes/no, one of choices, or a number)")
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(bad, "; "))
+}
+
+// checkJudge 校验判断型新字段的组合（C.7、C.11），并补全 answer_by 缺省与 band 的单端写法。
+func checkJudge(m *PromptMeta) error {
+	hasClassifier := m.QuestionType == "yes_no" && m.AnswerBy == nil // 缺省的 yes_no 含 classifier
+	for _, b := range m.AnswerBy {
+		switch b {
+		case "classifier":
+			if m.QuestionType != "yes_no" {
+				return fmt.Errorf("answer_by classifier is only for yes_no questions, not %s", m.QuestionType)
+			}
+			hasClassifier = true
+		case "chat":
+		default:
+			return fmt.Errorf("answer_by %q must be classifier or chat", b)
+		}
+	}
+	if m.AnswerBy != nil && len(m.AnswerBy) == 0 {
+		return errors.New("answer_by cannot be empty")
+	}
+	if m.AnswerBy == nil {
+		m.AnswerBy = []string{"chat"}
+		if m.QuestionType == "yes_no" {
+			m.AnswerBy = []string{"classifier", "chat"}
+		}
+	}
+	if !hasClassifier && (m.Band != nil || m.SingleShot) {
+		return errors.New("band and single_shot need classifier in answer_by")
+	}
+	if m.Band != nil {
+		lo, hi := m.Band.Low, m.Band.High
+		if lo == nil && hi == nil {
+			return errors.New("band needs low or high")
+		}
+		if lo == nil {
+			lo = hi
+		}
+		if hi == nil {
+			hi = lo
+		}
+		if *lo < 0 || *lo > 1 || *hi < 0 || *hi > 1 {
+			return errors.New("band low and high must be within 0..1")
+		}
+		if *lo > *hi {
+			return errors.New("band low must not exceed high")
+		}
+		m.Band = &Band{Low: lo, High: hi}
+	}
+	return checkOnUndecided(m)
+}
+
+func checkOnUndecided(m *PromptMeta) error {
+	switch m.QuestionType {
+	case "yes_no":
+		if v, _ := m.OnUndecided.(string); v != "yes" && v != "no" {
+			return fmt.Errorf("on_undecided %v must be yes or no for a yes_no question", m.OnUndecided)
+		}
+	case "choice":
+		for _, c := range m.Choices {
+			if fmt.Sprint(c) == fmt.Sprint(m.OnUndecided) {
+				return nil
+			}
+		}
+		return fmt.Errorf("on_undecided %v must be one of choices", m.OnUndecided)
+	case "score":
+		switch m.OnUndecided.(type) {
+		case int, int64, float64:
+		default:
+			return fmt.Errorf("on_undecided %v must be a number for a score question", m.OnUndecided)
+		}
 	}
 	return nil
 }

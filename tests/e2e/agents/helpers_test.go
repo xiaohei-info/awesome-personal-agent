@@ -59,7 +59,6 @@ ACCTIMEOUT 事项 {item_id}：本模板超时 1 分钟。
 	"prompts/acc-gen.md": `---
 agent: generate
 timeout: 30s
-escalate_to: acc-task
 output_schema:
   type: object
   required: [insufficient_info]

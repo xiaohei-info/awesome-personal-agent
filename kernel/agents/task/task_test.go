@@ -104,6 +104,7 @@ output_schema:
 const judgeMD = `---
 agent: judge
 question_type: yes_no
+on_undecided: "no"
 ---
 判断。
 `
