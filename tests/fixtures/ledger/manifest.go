@@ -42,9 +42,12 @@ type Manifest struct {
 	WaitingItems      []string          `json:"waiting_items"`
 	Proposed          []string          `json:"proposed_events"`
 	FrozenCommit      string            `json:"frozen_commit,omitempty"`
-	MigrationFiles    []string          `json:"migration_files,omitempty"`
-	Binary            string            `json:"binary,omitempty"` // 回退用的旧版本主程序：环境变量名
-	Plugin            string            `json:"plugin,omitempty"`
+	MigrationFiles    []string          `json:"migration_files,omitempty"` // 迁移所在源文件（定位用；整文件会随后续版本的迁移追加而变，不能逐字节比对）
+	// MigrationChecksums 是冻结版本含有的每一步迁移的校验和（module/version/checksum）。迁移 SQL 一经冻结不再变，
+	// 这才是可核对的冻结证据：从当前源码重算必须逐条相等（见 TestManifestMigrationChecksumsMatchSource）。
+	MigrationChecksums []string `json:"migration_checksums,omitempty"`
+	Binary             string   `json:"binary,omitempty"` // 回退用的旧版本主程序：环境变量名
+	Plugin             string   `json:"plugin,omitempty"`
 }
 
 type Backlog struct {

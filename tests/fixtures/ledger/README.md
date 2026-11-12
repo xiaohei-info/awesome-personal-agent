@@ -18,3 +18,4 @@ eval "$(tests/fixtures/ledger/fetch-v01.sh /tmp/apa-v01)"
 - `config.yaml` 带 `unjudged_rejudge_days: 0`：夹具的时间固定在过去，不冻结的话任何一次启动都会按真实时钟把积压转成 `expired`。
 - 夹具只用结构版本 2 就有的列写入；`Generate` 在内核当前迁移上建库，所以结构演进后夹具自动随之派生。
 - 迁移失败注入（`APA_TEST_MIGRATION_FAIL_AFTER`）只在 `-tags apa_testclock` 的测试构建里生效：`go test -tags apa_testclock ./tests/fixtures/...`。
+- **冻结证据**：清单的 `migration_checksums` 列出冻结版本每一步迁移的校验和，`TestManifestMigrationChecksumsMatchSource` 从当前源码重算并与冻结时的摘要比对。`migration_files` 只用于定位源文件：这些文件会随后续版本的迁移追加而变，所以验收文档 ACT-UPG-19 的整文件 `diff` 对它们不成立，应改为核对 `migration_checksums`（需走验收文档修订）。

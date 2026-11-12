@@ -33,7 +33,7 @@ func TestManifestHasEveryAcceptanceKey(t *testing.T) {
 	}
 	for _, k := range []string{"schema_ledger", "tables", "event_max_seq", "event_payload_sha256", "payload_hash_method", "backlog",
 		"structured_rule_hits", "attachable", "score_markers", "old_cascade_ignored", "rule_ignored", "user_ignored", "outside_window",
-		"policy_versions", "rule_modes", "tokens", "web_password", "session_cookie", "frozen_commit", "migration_files", "binary"} {
+		"policy_versions", "rule_modes", "tokens", "web_password", "session_cookie", "frozen_commit", "migration_files", "migration_checksums", "binary"} {
 		if v, ok := m[k]; !ok || string(v) == "null" || string(v) == "{}" || string(v) == "[]" || string(v) == `""` || string(v) == "0" {
 			t.Errorf("manifest.json 缺键或为空: %s = %s", k, v)
 		}
@@ -334,7 +334,7 @@ func TestGenerateRejectsUnknownVersionAndDirtyDir(t *testing.T) {
 
 // 冻结的迁移不可改：版本 ≤ n 的迁移的校验和摘要与冻结时一致（字面值取自冻结提交的二进制写出的账本）。
 func TestFrozenMigrationsAreUnchanged(t *testing.T) {
-	want := map[int]string{2: "31ac079af2c9a4b100c52c40cffcfd5bd90a3fd23a5c94bf20ad62c9102e2a24"}
+	want := frozenDigest
 	for v := range Frozen {
 		reg, err := RegistryAt(v)
 		if err != nil {
@@ -531,3 +531,28 @@ func failUpgrade(t *testing.T, home string, latest int) {
 		t.Errorf("错误应指出失败的迁移: %v", err)
 	}
 }
+
+// ACT-UPG-19 的消费端检查，对生成出的清单真正执行：清单里每个冻结版本的迁移校验和，
+// 从当前源码重算必须逐条相等；并且与冻结时（真实旧二进制写出的账本）的摘要一致。
+func TestManifestMigrationChecksumsMatchSource(t *testing.T) {
+	for v, commit := range Frozen {
+		_, m := gen(t, v)
+		if m.FrozenCommit != commit || len(m.MigrationChecksums) == 0 {
+			t.Fatalf("V%d 清单缺 frozen_commit 或 migration_checksums", v)
+		}
+		reg, err := RegistryAt(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := migrationChecksums(reg); strings.Join(got, "\n") != strings.Join(m.MigrationChecksums, "\n") {
+			t.Errorf("V%d 清单里的迁移校验和与当前源码不一致", v)
+		}
+		h := sha256.Sum256([]byte(strings.Join(m.MigrationChecksums, "\n")))
+		if got := hex.EncodeToString(h[:]); got != frozenDigest[v] {
+			t.Errorf("V%d 清单迁移校验和摘要 %s != 冻结时 %s", v, got, frozenDigest[v])
+		}
+	}
+}
+
+// frozenDigest：冻结版本的迁移校验和摘要，取自冻结提交的二进制 init 出的账本（store_migrations 按 module/version/checksum 排序后的 sha256）。
+var frozenDigest = map[int]string{2: "31ac079af2c9a4b100c52c40cffcfd5bd90a3fd23a5c94bf20ad62c9102e2a24"}
