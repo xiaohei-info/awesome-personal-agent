@@ -799,9 +799,10 @@ func TestServeRefusesBadHostFile(t *testing.T) {
 
 // notBundled 是 sources/*/cmd/* 里有意不进 bundledPull 的程序及理由（§9.7、§14.12）；其余程序必须在 bundledPull 里。
 var notBundled = map[string]string{
-	"mail-himalaya": "邮件适配器，按 §9.7 只在 Web 或主机配置文件登记",
-	"calendar":      "日历适配器，同上",
-	"hosted-reader": "托管文档读取器，不是来源",
+	"mail-himalaya":    "邮件适配器，按 §9.7 只在 Web 或主机配置文件登记",
+	"calendar":         "日历适配器，同上",
+	"apple-pim-source": "macOS 邮件、日历、提醒事项适配器，同上",
+	"hosted-reader":    "托管文档读取器，不是来源",
 }
 
 // 新增拉取程序漏登记会失败：清单取自 sources/*/cmd/* 目录，bundledPull 不能少、也不能多出目录里没有的名字。
