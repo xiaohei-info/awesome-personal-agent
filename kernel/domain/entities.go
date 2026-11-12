@@ -161,6 +161,15 @@ type Delivery struct {
 	Injections    []Injection     `json:"injections,omitempty"`
 	// Suppressed 记被日上限（daily_cap）或静音（muted）压成"只留 Web 未读"的原因；为空表示没被压。
 	Suppressed string `json:"suppressed,omitempty"`
+	// Origin 只在没有事项（Item 为空）时出现：规则 alert 出口的提醒记触发它的来源事件与规则（§6.9）。
+	Origin *DeliveryOrigin `json:"origin,omitempty"`
+}
+
+// DeliveryOrigin 是没有事项的提醒的出处：来源事件 id、规则 id（包/组/id）与来源 id（静音按来源对照）。
+type DeliveryOrigin struct {
+	SourceEvent string `json:"source_event"`
+	Rule        string `json:"rule"`
+	Source      string `json:"source,omitempty"`
 }
 
 // ---- Run（§6.11） ----
@@ -328,6 +337,9 @@ type SourceEvent struct {
 	Items    []string           `json:"items,omitempty"`
 	Judgment string             `json:"judgment,omitempty"`
 	Messages []EventMessage     `json:"-"`
+	// PrevMetrics 是入账那一刻同一序列（来源，第一个关联键，指标名）上一次的取值；序列第一次出现的指标没有条目。
+	// 变化类字段条件（changed、crosses_*）据此判断，重启、重判和重放都得到同一结果（§9.2）。
+	PrevMetrics map[string]float64 `json:"-"`
 }
 
 // EventMessage 是聚合事件 items[] 里的一条消息（§9.2）。

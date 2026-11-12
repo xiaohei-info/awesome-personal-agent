@@ -4,6 +4,7 @@ package why
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -76,6 +77,26 @@ func render(tl kwhy.Timeline) string {
 		}
 		if j := s.Judgment; j != nil {
 			renderJudgment(&b, j)
+		}
+	}
+	for _, a := range tl.Alerts {
+		fmt.Fprintf(&b, "  alert rule %s → %s\n", a.Rule, a.Disposition)
+		var cs []struct {
+			Condition string   `json:"condition"`
+			Previous  *float64 `json:"previous"`
+			Current   float64  `json:"current"`
+		}
+		if json.Unmarshal(a.Conditions, &cs) == nil {
+			for _, c := range cs {
+				prev := "none (first appearance of the series)"
+				if c.Previous != nil {
+					prev = fmt.Sprint(*c.Previous)
+				}
+				fmt.Fprintf(&b, "      condition %s: previous %s, current %v\n", c.Condition, prev, c.Current)
+			}
+		}
+		if d := a.Delivery; d != nil {
+			fmt.Fprintf(&b, "      delivery %s (%s via %s): %s\n", d.ID, d.Class, d.Route, d.State)
 		}
 	}
 	return b.String()

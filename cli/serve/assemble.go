@@ -65,6 +65,7 @@ import (
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/spotcheck"
 	kmaterials "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -196,7 +197,8 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	rejudge := inbound.DefaultRejudge
 	rejudge.Window = cfg.UnjudgedRejudgeWindow
 	if k.in, err = inbound.New(inbound.Options{Store: st, Exec: x, Packs: ld, Judge: judge, Owner: owner,
-		Intercept: fm.Intercept, OnError: logErr("inbound"), Rejudge: rejudge}); err != nil {
+		Intercept: fm.Intercept, OnError: logErr("inbound"), Rejudge: rejudge,
+		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: att}}); err != nil {
 		return nil, err
 	}
 	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner")}); err != nil {

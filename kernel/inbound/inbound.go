@@ -39,7 +39,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -107,9 +109,10 @@ type Options struct {
 	Rejudge RejudgeLimits
 	// Series 是变化类字段条件（changed、crosses_*）取同一序列上一次取值的来源；可为空（此时这类条件恒不成立）。
 	Series rules.Series
-	// Extract 与 Alert 处理 then: extract、then: alert 的出口，由各自的模块注入；没注入时命中这两种出口的事件保持 pending 并报错，不假装处理。
+	// Extract 可替换 then: extract 的内置处理（测试用）；Alert 产出 then: alert 的提醒（kernel/metrics）。
+	// Alert 没注入时命中 alert 出口的事件保持 pending 并报错，不假装处理。
 	Extract Exit
-	Alert   Exit
+	Alert   *metrics.Alerter
 }
 
 // Exit 处理一个出口：命中规则 m 的事件 ev 由它写完处置（经命令模型）。
@@ -163,6 +166,11 @@ type disposeIn struct {
 	// Judgment 是这次处置依据的初筛判断记录 id；Items 是 extract 出口一次生成的全部事项（Item 为其中第一个）。
 	Judgment string   `json:"judgment,omitempty"`
 	Items    []string `json:"items,omitempty"`
+	// alert 出口（§9.3）：Conditions 是命中的数值条件及两次取值，回放用；Alert 为真时在同一事务内产出提醒投递；
+	// WouldAlert 为真表示规则在 observe 档，只记 rule.observed“本来会提醒”。
+	Conditions []metrics.Condition `json:"conditions,omitempty"`
+	Alert      bool                `json:"alert,omitempty"`
+	WouldAlert bool                `json:"would_alert,omitempty"`
 }
 
 func parseDispose(in json.RawMessage) (disposeIn, error) {
@@ -194,10 +202,26 @@ func (s *Service) Register(x *command.Executor) error {
 			if err := runner.SetOutcome(c.Tx, v.Event, v.Judgment, v.Items); err != nil {
 				return nil, err
 			}
-			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule,
-				"unjudged_reason": v.UnjudgedReason, "judgment": v.Judgment})
+			payload := map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule,
+				"unjudged_reason": v.UnjudgedReason, "judgment": v.Judgment}
+			if len(v.Conditions) > 0 {
+				payload["conditions"] = v.Conditions
+			}
+			if v.Alert {
+				ev, err := runner.Event(c.Tx, v.Event)
+				if err != nil {
+					return nil, err
+				}
+				if payload["delivery"], err = s.o.Alert.Deliver(c.Tx, ev, v.Rule); err != nil {
+					return nil, err
+				}
+			}
+			p, _ := json.Marshal(payload)
 			if _, err := c.Emit(domain.Event{Type: EvDisposed, Object: v.Event, Reason: v.Reason, Payload: p}); err != nil {
 				return nil, err
+			}
+			if v.WouldAlert {
+				return nil, s.observeAlert(c, v)
 			}
 			if v.WouldAccept {
 				p, _ := json.Marshal(map[string]any{"rule": v.Rule, "item": v.Item, "would_do": "accept"})
@@ -485,10 +509,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	case rules.ExitDigest:
 		return s.dispose(ctx, m, ev, disposeIn{Event: ev.ID, Disposition: domain.DispositionDigest, Reason: "rule " + m.key() + " digests this event"})
 	case rules.ExitAlert:
-		if s.o.Alert == nil {
-			return fmt.Errorf("source rule %s uses the %s exit but no handler is configured", m.key(), exit)
-		}
-		return s.o.Alert(ctx, src, ev, m.key())
+		return s.alert(ctx, sn, ev, m)
 	case rules.ExitExtract:
 		if s.o.Extract != nil {
 			return s.o.Extract(ctx, src, ev, m.key())
@@ -536,6 +557,33 @@ func withdrawn(ev domain.SourceEvent, prop proposal, verdict string) disposeIn {
 		d.Disposition, d.UnjudgedReason = domain.DispositionDigest, ""
 	}
 	return d
+}
+
+// alert 处理 then: alert 的出口（§9.3、§14.8）：auto 档产出没有事项的提醒并记 alerted；
+// observe 档（含规则状态还没对账）只记 rule.observed“本来会提醒”，处置为 ignored；off 档什么都不做，处置为 ignored。
+// 不调用任何模型。
+func (s *Service) alert(ctx context.Context, sn snapshot, ev domain.SourceEvent, m *matched) error {
+	if s.o.Alert == nil {
+		return fmt.Errorf("source rule %s uses the %s exit but no handler is configured", m.key(), rules.ExitAlert)
+	}
+	d := disposeIn{Event: ev.ID, Rule: m.key(), Conditions: metrics.Explain(m.rule, ev)}
+	switch sn.modes[m.key()] {
+	case rules.ModeAuto:
+		d.Disposition, d.Alert, d.Reason = domain.DispositionAlerted, true, "rule "+m.key()+" alerts"
+	case rules.ModeOff:
+		d.Disposition, d.Reason = domain.DispositionIgnored, "rule "+m.key()+" is off"
+	default:
+		d.Disposition, d.WouldAlert, d.Reason = domain.DispositionIgnored, true, "rule "+m.key()+" is observing: would alert"
+	}
+	return s.dispose(ctx, m, ev, d)
+}
+
+// observeAlert 记 observe 档 alert 规则“本来会提醒”：对象是来源事件，操作者是规则本身，Web 规则设置页按它筛选观察记录。
+func (s *Service) observeAlert(c *command.Ctx, v disposeIn) error {
+	p, _ := json.Marshal(map[string]any{"rule": v.Rule, "event": v.Event, "would_do": "alert", "conditions": v.Conditions})
+	_, err := eventlog.Append(c.Tx, domain.Event{Type: rules.EvObserved, Object: v.Event, Actor: domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + v.Rule, Via: domain.ViaRule},
+		Basis: c.Basis, ChainDepth: c.ChainDepth, Reason: "observe: would alert by " + v.Rule, Payload: p, At: s.o.Now()})
+	return err
 }
 
 // verdict 的前缀：模型不可用而未判定（自动重判）；外发范围未选而未判定（选定后自动重判）；外发范围对可用端点都是 none（改走摘要出口）。

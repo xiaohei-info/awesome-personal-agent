@@ -133,31 +133,17 @@ func TestProjectByFixedNoneAndSourceDefault(t *testing.T) {
 	}
 }
 
-// extract、alert 出口交给注入的处理器；alert 的变化条件按注入的序列上一次取值判断，没有序列时不成立。
-func TestExtractAndAlertExitsRouteToHandlers(t *testing.T) {
+// extract 出口交给注入的处理器。
+func TestExtractExitRoutesToHandler(t *testing.T) {
 	e := newEnv(t, true)
-	e.judge(`{"choice":"ignore","confidence":0.95}`)
 	var routed []string
-	handler := func(ctx context.Context, src domain.Source, ev domain.SourceEvent, rule string) error {
+	e.svc.o.Extract = func(ctx context.Context, src domain.Source, ev domain.SourceEvent, rule string) error {
 		routed = append(routed, ev.ID+"@"+rule)
-		return e.svc.dispose(ctx, nil, ev, disposeIn{Event: ev.ID, Rule: rule, Disposition: domain.DispositionAlerted})
+		return e.svc.dispose(ctx, nil, ev, disposeIn{Event: ev.ID, Rule: rule, Disposition: domain.DispositionIgnored})
 	}
-	e.svc.o.Extract, e.svc.o.Alert = handler, handler
-	e.svc.o.Series = fixedSeries{prev: 80}
-	e.emit("src_x", "exits",
-		ev("c1", "x.chat", "群聊", nil),
-		ev("m1", "x.metric", "磁盘", map[string]any{"metrics": map[string]float64{"value": 92}}),
-		ev("m2", "x.metric", "磁盘", map[string]any{"metrics": map[string]float64{"value": 85}}))
-	x := "inbound-triage/source_rules/"
-	got := map[string]bool{}
-	for _, r := range routed {
-		got[r[strings.Index(r, "@")+1:]] = true
-	}
-	if len(routed) != 2 || !got[x+"x-chat"] || !got[x+"x-alert"] {
+	e.emit("src_x", "exits", ev("c1", "x.chat", "群聊", nil))
+	if len(routed) != 1 || !strings.HasSuffix(routed[0], "@inbound-triage/source_rules/x-chat") {
 		t.Fatalf("routed %v", routed)
-	}
-	if got := e.disposition("src_x", "m2").Disposition; got != domain.DispositionIgnored {
-		t.Fatalf("m2 (80→85 does not cross 90) %s", got)
 	}
 }
 
@@ -165,8 +151,11 @@ func TestExtractAndAlertExitsRouteToHandlers(t *testing.T) {
 func TestExitWithoutHandlerFailsLoudly(t *testing.T) {
 	e := newEnv(t, true)
 	e.wantErr = true
-	e.svc.o.Series = fixedSeries{prev: 80}
-	e.emitRaw("src_x", "exits", ev("c1", "x.metric", "磁盘", map[string]any{"metrics": map[string]float64{"value": 92}}))
+	e.svc.o.Alert = nil
+	sample := func(id string, v float64) map[string]any {
+		return ev(id, "x.metric", "磁盘", map[string]any{"correlation_keys": []string{"d"}, "metrics": map[string]float64{"value": v}})
+	}
+	e.emitRaw("src_x", "exits", sample("c0", 80), sample("c1", 92))
 	select {
 	case err := <-e.errs:
 		if !strings.Contains(err.Error(), "no handler is configured") {
@@ -192,13 +181,6 @@ func (r recorder) Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict
 
 func (r recorder) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
 	return r.inner.Do(ctx, c)
-}
-
-// fixedSeries 让每个序列的上一次取值都是 prev。
-type fixedSeries struct{ prev float64 }
-
-func (f fixedSeries) Previous(domain.SourceEvent, string) (float64, bool, error) {
-	return f.prev, true, nil
 }
 
 func questions(e *env) (n int) {
