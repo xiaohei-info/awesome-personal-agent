@@ -503,3 +503,25 @@ func TestPhysicalDeleteOfMaterialIsReconciledWhileRunning(t *testing.T) {
 		until("removed", func() bool { _, err := os.Stat(p); return err != nil })
 	})
 }
+
+// select 是筛选：从没满足过 select 的事项不产生任何文件（包括 _archive）；导出后才被收窄的才归档。
+func TestSelectFiltersNeverSelectedItemsInsteadOfArchivingThem(t *testing.T) {
+	k, dir := newKernel(), t.TempDir()
+	k.setItem(it("itm_1", "a", doc{"project": "p1"}))
+	k.setItem(it("itm_2", "b", doc{"project": "p2"}))
+	k.add(1, "item.created", "itm_1")
+	k.add(2, "item.created", "itm_2")
+	o := accOpts()
+	o.Select.Projects = []string{"p1"}
+	run(t, k, dir, o)
+	if got := files(t, dir); len(got) != 1 || got[0] != "p1/task/a.md" {
+		t.Fatalf("files = %v, want only p1/task/a.md", got)
+	}
+	// 事件路径同样不写。
+	k.setItem(it("itm_2", "b2", doc{"project": "p2", "version": 2}))
+	k.event("item.updated", "itm_2")
+	run(t, k, dir, o)
+	if got := files(t, dir); len(got) != 1 {
+		t.Errorf("event for an unselected item wrote %v", got)
+	}
+}

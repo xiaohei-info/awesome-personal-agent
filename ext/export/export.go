@@ -205,7 +205,11 @@ func (x *exporter) sync(ctx context.Context) error {
 		if it.screening() {
 			continue
 		}
-		if e := x.state.Files["items/"+it.ID]; e != nil && e.Version == it.Version && e.Sig == x.sig && e.Archived == !x.Opts.Select.matches(it, now) {
+		e := x.state.Files["items/"+it.ID]
+		if e == nil && !x.Opts.Select.matches(it, now) {
+			continue
+		}
+		if e != nil && e.Version == it.Version && e.Sig == x.sig && e.Archived == !x.Opts.Select.matches(it, now) {
 			continue
 		}
 		if err := x.exportItem(ctx, it.ID); err != nil {
@@ -289,6 +293,9 @@ func (x *exporter) exportItem(ctx context.Context, id string) error {
 		return x.drop(key)
 	}
 	archived := !o.Select.matches(it, time.Now())
+	if archived && x.state.Files[key] == nil {
+		return nil // select 是筛选：从没导出过的不满足者不写，只有已导出的才归档
+	}
 	rel, err := o.itemPath(it)
 	if err != nil {
 		return err
