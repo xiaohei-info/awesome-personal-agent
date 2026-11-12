@@ -28,7 +28,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee --tag --q --sort --planned-for] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
 
 func item(c *client.Ctx, args []string) error {
 	if len(args) == 0 {
@@ -257,14 +257,14 @@ func show(c *client.Ctx, args []string) error {
 }
 
 func list(c *client.Ctx, args []string) error {
-	f, _ := newForm("item list", []string{"phase", "kind", "project", "assignee"}, nil, nil)
-	if _, err := f.parse(args, false, "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>]"); err != nil {
+	f, _ := newForm("item list", []string{"phase", "kind", "project", "assignee", "tag", "q", "sort", "planned-for"}, nil, nil)
+	if _, err := f.parse(args, false, "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>] [--tag <t>] [--q <text>] [--sort updated|deadline|planned_for|priority] [--planned-for <YYYY-MM-DD>]"); err != nil {
 		return err
 	}
 	q := url.Values{}
 	for n, v := range f.vals {
 		if *v != "" {
-			q.Set(n, *v)
+			q.Set(strings.ReplaceAll(n, "-", "_"), *v)
 		}
 	}
 	var out map[string]any

@@ -37,8 +37,9 @@ function ledger() {
     calls.push({ method, path: url, body, csrf: h["X-CSRF-Token"] ?? null, ifMatch: h["If-Match"] ?? null });
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/items" || url.startsWith("/v1/items?")) {
-      const phase = new URL(url, "http://x").searchParams.get("phase");
-      return json(200, { items: items.filter((i) => !phase || i.phase === phase) });
+      const sp = new URL(url, "http://x").searchParams;
+      const phase = sp.get("phase"), q = sp.get("q");
+      return json(200, { items: items.filter((i) => (!phase || i.phase === phase) && (!q || i.title.includes(q))) });
     }
     if (/^\/v1\/items\/[^/]+\/messages$/.test(url)) return json(200, { messages: [] });
     const why = url.match(/^\/v1\/why\/(.+)$/);
@@ -208,5 +209,17 @@ describe("关联与按 tag 筛选（ACT-ITEM-12）", () => {
     await waitFor(() => expect(screen.queryByRole("link", { name: "item-a" })).not.toBeInTheDocument());
     expect(screen.getByRole("link", { name: "item-b" })).toBeInTheDocument();
     expect(l.calls.some((c) => c.path === "/v1/items?phase=done")).toBe(true);
+  });
+
+  it("搜索框、排序与计划日期筛选都走服务端参数", async () => {
+    const l = ledger();
+    mount(l.impl);
+    await screen.findByRole("link", { name: "item-b" });
+    await userEvent.type(screen.getByLabelText("搜索"), "item-a");
+    await waitFor(() => expect(screen.queryByRole("link", { name: "item-b" })).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "item-a" })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("排序"), "planned_for");
+    await userEvent.type(screen.getByLabelText("计划日期"), "2026-05-01");
+    await waitFor(() => expect(l.calls.some((c) => c.path === "/v1/items?q=item-a&sort=planned_for&planned_for=2026-05-01")).toBe(true));
   });
 });

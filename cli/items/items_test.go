@@ -282,6 +282,20 @@ func TestRelateAndListFilters(t *testing.T) {
 	if n := len(list("--phase", "open")); n != 2 {
 		t.Fatalf("phase filter = %d", n)
 	}
+	// ACT-WBN-12/13/14：新参数 --q/--sort/--planned-for/--tag 与旧参数共存。
+	k.ok(auth.Worker, "item", "update", child, "--planned-for", "2026-05-01", "--tags", "t1", "--body", "护照续签", "--reason", "plan")
+	if l := list("--q", "护照"); len(l) != 1 || l[0].(map[string]any)["id"] != child {
+		t.Fatalf("--q = %v", l)
+	}
+	if l := list("--planned-for", "2026-05-01", "--phase", "open", "--tag", "t1"); len(l) != 1 {
+		t.Fatalf("--planned-for/--tag = %v", l)
+	}
+	if l := list("--sort", "planned_for", "--phase", "open"); len(l) != 2 || l[0].(map[string]any)["id"] != child {
+		t.Fatalf("--sort planned_for = %v", l)
+	}
+	if r := k.apa(auth.Observer, "item", "list", "--sort", "bogus"); r.code == 0 {
+		t.Fatal("unknown sort must fail")
+	}
 	k.ok(auth.Worker, "item", "relate", child, "--to", parent, "--type", "parent", "--remove", "--reason", "undo")
 	if rels := k.ok(auth.Observer, "item", "show", child).json(t)["relations"].([]any); len(rels) != 0 {
 		t.Fatalf("relation not removed: %v", rels)

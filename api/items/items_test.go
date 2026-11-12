@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -608,3 +610,54 @@ func TestTodayStaleUsesRuleThreshold(t *testing.T) {
 		t.Fatalf("stale group = %+v, want the item", got)
 	}
 }
+
+// ACT-WBN-12/13/14：全文覆盖标题、正文与进展且不改版本；排序单调；计划日期与标签筛选；非法参数 400。
+func TestListSearchSortFilterOverHTTP(t *testing.T) {
+	e := setup(t)
+	obs := e.token(auth.Observer, "")
+	c := e.create(e.web, `{"kind":"task","title":"C","phase":"open","body":"护照续签","planned_for":"2026-05-02","priority":"low","tags":["t1"]}`)
+	d := e.create(e.web, `{"kind":"task","title":"D","phase":"open","planned_for":"2026-05-01","priority":"urgent"}`)
+	n := e.create(e.web, `{"kind":"task","title":"护照照片","phase":"open"}`)
+	e.create(e.web, `{"kind":"task","title":"other","phase":"open","planned_for":"2026-05-02"}`)
+	if rec := e.do("POST", "/v1/items/"+d.ID+"/progress", `{"text":"等护照照片"}`, e.web); rec.Code != 201 {
+		t.Fatalf("progress = %d %s", rec.Code, rec.Body)
+	}
+	list := func(query string) []string {
+		rec := e.do("GET", "/v1/items?"+query, "", obs)
+		if rec.Code != 200 {
+			t.Fatalf("%s = %d %s", query, rec.Code, rec.Body)
+		}
+		var r struct{ Items []domain.Item }
+		_ = json.Unmarshal(rec.Body.Bytes(), &r)
+		var out []string
+		for _, it := range r.Items {
+			out = append(out, it.ID)
+		}
+		return out
+	}
+	if got := list("q=" + url.QueryEscape("护照")); len(got) != 3 || strings.Join(got, ",") != strings.Join(sorted(c.ID, d.ID, n.ID), ",") {
+		t.Fatalf("q=护照 = %v", got)
+	}
+	if e.get(d.ID).Item.Version != 2 { // create(1) + progress(2)；搜索不能再改
+		t.Fatalf("search changed a version: %d", e.get(d.ID).Item.Version)
+	}
+	if got := list("sort=planned_for"); got[0] != d.ID || got[len(got)-1] != n.ID { // 05-01 在前，未设计划日期的在末
+		t.Fatalf("sort=planned_for = %v", got)
+	}
+	if got := list("sort=priority"); got[0] != d.ID || got[len(got)-1] != c.ID { // urgent 在前，low 在末
+		t.Fatalf("sort=priority = %v", got)
+	}
+	if got := list("planned_for=2026-05-02"); len(got) != 2 {
+		t.Fatalf("planned_for filter = %v", got)
+	}
+	if got := list("tag=t1&phase=open"); len(got) != 1 || got[0] != c.ID { // v0.1 参数语义不变
+		t.Fatalf("tag+phase = %v", got)
+	}
+	for _, bad := range []string{"sort=nope", "planned_for=tomorrow", "q=!!"} {
+		if rec := e.do("GET", "/v1/items?"+bad, "", obs); rec.Code != 400 {
+			t.Fatalf("%s = %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+}
+
+func sorted(s ...string) []string { sort.Strings(s); return s }

@@ -27,6 +27,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -85,13 +86,20 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	q := r.URL.Query()
 	f := kitems.Filter{Phase: domain.Phase(q.Get("phase")), Kind: domain.Kind(q.Get("kind")),
 		Project: q.Get("project"), Assignee: q.Get("assignee")}
+	sq := search.ItemQuery{Text: q.Get("q"), Tag: q.Get("tag"), PlannedFor: q.Get("planned_for"), Sort: q.Get("sort")}
 	var (
 		its  []domain.Item
+		prog map[string]string
 		rejs = map[string]Rejection{}
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if its, err = kitems.List(tx, f); err != nil {
 			return err
+		}
+		if sq.Text != "" {
+			if prog, err = search.ItemProgressText(tx); err != nil {
+				return err
+			}
 		}
 		for _, it := range its {
 			if rj, err := LastRejection(tx, it); err != nil {
@@ -104,11 +112,20 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	}); err != nil {
 		return err
 	}
+	// 先脱敏再检索：初筛中的事项对低级凭据不带标题与正文，也就不能被全文、标签或日期命中；它的进展同样不参与。
+	for i := range its {
+		shown := screening.Redact(its[i], p.Caller.Level)
+		if shown.Title != its[i].Title {
+			delete(prog, its[i].ID)
+		}
+		its[i] = shown
+	}
+	its, err := search.FilterItems(its, prog, sq)
+	if err != nil {
+		return err
+	}
 	if its == nil {
 		its = []domain.Item{}
-	}
-	for i := range its {
-		its[i] = screening.Redact(its[i], p.Caller.Level)
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"items": its, "last_rejections": rejs})
 }
