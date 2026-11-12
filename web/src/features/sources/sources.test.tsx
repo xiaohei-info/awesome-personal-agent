@@ -12,7 +12,7 @@ const err = (status: number, code: string, why: string) => json(status, { code, 
 
 interface Src { id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
 interface Rj { run_id: string; line: number; reason: string; raw: string; at: string }
-interface Ev { id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string; unjudged_reason?: string }
+interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string; unjudged_reason?: string }
 
 function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean } = {}) {
   const sources = o.sources ?? [];
@@ -56,6 +56,7 @@ function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: 
         const d = u.searchParams.get("disposition");
         const after = Number(u.searchParams.get("after") ?? 0);
         const all = events.filter((e) => (d ?? "").split(",").includes(e.disposition));
+        if (u.searchParams.get("sort") === "score") all.sort((a, b) => (b.score ?? -1) - (a.score ?? -1)); // 没有分数的排最后
         const page = all.slice(after, after + 2);
         return json(200, after + 2 < all.length ? { events: page, next_after: after + 2 } : { events: page });
       }
@@ -220,6 +221,21 @@ describe("未判定事件转建议（flow-triage-failure / ACT-TRI-02）", () =>
     b.events[0].disposition = "ignored"; // 别处已处置
     await userEvent.click(region.getByRole("button", { name: "转为建议" }));
     expect(await region.findByRole("alert")).toHaveTextContent("event is ignored, not unjudged");
+  });
+
+  it("勾选按分数排序：请求带 sort=score，列表按服务端顺序显示每条的分数", async () => {
+    const b = backend({ sources: [rss], events: [ev("e1"), { ...ev("e2"), score: 0.05 }, { ...ev("e3"), score: 0.9 }] });
+    mount(b.impl);
+    await userEvent.click((await row("src_rss")).getByRole("button", { name: "详情" }));
+    const region = within(await screen.findByRole("region", { name: "未判定事件" }));
+    await region.findByText(/subject-e1/);
+    expect(b.calls.some((c) => c.path.includes("sort=score"))).toBe(false);
+    await userEvent.click(region.getByRole("checkbox", { name: "按分数排序" }));
+    await region.findByText("分数 0.90");
+    expect(b.calls.some((c) => c.path.includes("sort=score"))).toBe(true);
+    const subjects = region.getAllByText(/^subject-/).map((x) => x.textContent);
+    expect(subjects).toEqual(["subject-e3", "subject-e2"]); // 第一页两条：0.90、0.05；没有分数的 e1 在后面
+    expect(region.getByText("分数 0.05")).toBeInTheDocument();
   });
 
   it("状态显示中文；可逐条忽略，也可两步确认后忽略本来源全部（含已过期的）", async () => {
