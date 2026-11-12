@@ -73,7 +73,7 @@
     
     svg {
       width: 100%;
-      min-width: 1440px;
+      min-width: 1480px;
       display: block;
     }
     
@@ -196,12 +196,12 @@
           <button class="toolbar-toggle" onclick="this.parentElement.classList.toggle('expanded')" title="Export options" aria-label="Export options">⋯</button>
         </div>
       </div>
-      <p class="subtitle">账本实体、运行记录、入站记录与配置之间的关系</p>
+      <p class="subtitle">账本实体、运行记录、判断记录、入站记录与配置之间的关系</p>
     </div>
 
     <!-- Main Diagram -->
     <div class="diagram-container">
-      <svg viewBox="0 0 1440 806" role="img" aria-label="APA 领域模型">
+      <svg viewBox="0 0 1480 848" role="img" aria-label="APA 领域模型">
 <defs>
 <marker id="arrow-sync" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#cbd5e1"/></marker><marker id="arrow-event" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#38bdf8"/></marker><marker id="arrow-opt" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#cbd5e1"/></marker><marker id="arrow-bg" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#fde047"/></marker><marker id="arrow-deny" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="8" refX="10" refY="4" orient="auto-start-reverse"><polygon points="0 0, 11 4, 0 8" fill="#fb7185"/></marker>
 <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
@@ -211,32 +211,35 @@
 <text x="32" y="144" fill="#22d3ee" font-size="14" font-weight="700">项目与材料</text>
 <rect class="frame" x="490" y="124" width="350" height="296" rx="10" fill="rgba(15,23,42,0.55)" stroke="#34d399" stroke-width="1.5"/>
 <text x="502" y="144" fill="#34d399" font-size="14" font-weight="700">事项与时间</text>
-<rect class="frame" x="960" y="124" width="460" height="226" rx="10" fill="rgba(15,23,42,0.55)" stroke="#a78bfa" stroke-width="1.5"/>
+<rect class="frame" x="960" y="124" width="460" height="336" rx="10" fill="rgba(15,23,42,0.55)" stroke="#a78bfa" stroke-width="1.5"/>
 <text x="972" y="144" fill="#a78bfa" font-size="14" font-weight="700">运行与投递</text>
-<rect class="frame" x="590" y="452" width="830" height="142" rx="10" fill="rgba(15,23,42,0.55)" stroke="#fbbf24" stroke-width="1.5"/>
-<text x="602" y="472" fill="#fbbf24" font-size="14" font-weight="700">配置 · 以 Web 设置为主</text>
-<rect class="frame" x="20" y="620" width="730" height="166" rx="10" fill="rgba(15,23,42,0.55)" stroke="#f97316" stroke-width="1.5"/>
-<text x="32" y="640" fill="#f97316" font-size="14" font-weight="700">入站</text>
+<rect class="frame" x="590" y="494" width="830" height="142" rx="10" fill="rgba(15,23,42,0.55)" stroke="#fbbf24" stroke-width="1.5"/>
+<text x="602" y="514" fill="#fbbf24" font-size="14" font-weight="700">配置 · 以 Web 设置为主</text>
+<rect class="frame" x="20" y="662" width="730" height="166" rx="10" fill="rgba(15,23,42,0.55)" stroke="#f97316" stroke-width="1.5"/>
+<text x="32" y="682" fill="#f97316" font-size="14" font-weight="700">入站</text>
 <path class="conn" d="M 660 124 L 660 88" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
-<path class="conn" d="M 940 58 L 1060 58" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 900 58 L 1060 58" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
 <path class="conn" d="M 394 190 L 506 190" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
 <path class="conn" d="M 215 222 L 215 300" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
 <path class="conn" d="M 124 364 L 124 450" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
 <path class="conn" d="M 310 450 L 310 364" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
 <path class="conn" d="M 506 262 L 440 262 L 440 332 L 394 332" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-start="url(#arrow-sync)" marker-end="url(#arrow-sync)"/>
 <path class="conn" d="M 710 280 L 710 332" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
-<path class="conn" d="M 790 490 L 790 396" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 790 532 L 790 396" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
 <path class="conn" d="M 820 182 L 980 182" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
 <path class="conn" d="M 820 226 L 930 226 L 930 294 L 980 294" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
-<path class="conn" d="M 820 266 L 880 266 L 880 490" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
-<path class="conn" d="M 560 652 L 560 280" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
-<path class="conn" d="M 236 684 L 280 684" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
-<path class="conn" d="M 480 684 L 524 684" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
-<path class="conn" d="M 136 716 L 136 748 L 620 748 L 620 716" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
-<rect x="380" y="28" width="560" height="60" rx="6" fill="#0f172a"/>
-<rect class="box" x="380" y="28" width="560" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-<text x="660.0" y="53.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Event · 账本事件</text>
-<text x="660.0" y="72.0" fill="#e2e8f0" font-size="13" text-anchor="middle">追加不改 · 操作者 · 原因 · 链路深度 · 授权依据 · 序号即订阅游标</text>
+<path class="conn" d="M 820 266 L 880 266 L 880 532" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 560 694 L 560 280" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 236 726 L 280 726" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 480 726 L 524 726" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 136 758 L 136 790 L 620 790 L 620 758" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 820 246 L 910 246 L 910 400 L 980 400" fill="none" stroke="#cbd5e1" stroke-width="1.8" marker-end="url(#arrow-sync)"/>
+<path class="conn" d="M 734 726 L 1466 726 L 1466 420 L 1400 420" fill="none" stroke="#38bdf8" stroke-width="1.8" marker-end="url(#arrow-event)"/>
+<path class="conn" d="M 885 88 L 885 104 L 1452 104 L 1452 380 L 1400 380" fill="none" stroke="#cbd5e1" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#arrow-opt)"/>
+<rect x="380" y="28" width="520" height="60" rx="6" fill="#0f172a"/>
+<rect class="box" x="380" y="28" width="520" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+<text x="640.0" y="53.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Event · 账本事件</text>
+<text x="640.0" y="72.0" fill="#e2e8f0" font-size="13" text-anchor="middle">追加不改 · 操作者 · 原因 · 链路深度 · 授权依据 · 序号即订阅游标</text>
 <rect x="1060" y="28" width="360" height="60" rx="6" fill="#0f172a"/>
 <rect class="box" x="1060" y="28" width="360" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
 <text x="1240.0" y="53.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Actor · 操作者</text>
@@ -274,46 +277,54 @@
 <rect class="box" x="980" y="262" width="420" height="64" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
 <text x="1190.0" y="289.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Run · 运行记录</text>
 <text x="1190.0" y="308.0" fill="#e2e8f0" font-size="13" text-anchor="middle">类别 · runner · 运行凭据 · 会话 id · 超时 · 退出码</text>
-<rect x="610" y="490" width="220" height="76" rx="6" fill="#0f172a"/>
-<rect class="box" x="610" y="490" width="220" height="76" rx="6" fill="rgba(113, 80, 15, 0.28)" stroke="#fbbf24" stroke-width="1.5"/>
-<text x="720.0" y="523.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">能力包实例</text>
-<text x="720.0" y="542.0" fill="#e2e8f0" font-size="13" text-anchor="middle">所属包 · 参数 · 启停</text>
-<rect x="850" y="490" width="220" height="76" rx="6" fill="#0f172a"/>
-<rect class="box" x="850" y="490" width="220" height="76" rx="6" fill="rgba(113, 80, 15, 0.28)" stroke="#fbbf24" stroke-width="1.5"/>
-<text x="960.0" y="523.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">执行者清单</text>
-<text x="960.0" y="542.0" fill="#e2e8f0" font-size="13" text-anchor="middle">id · 类别 · 场景 · 主机</text>
-<rect x="1090" y="490" width="310" height="76" rx="6" fill="#0f172a"/>
-<rect class="box" x="1090" y="490" width="310" height="76" rx="6" fill="rgba(113, 80, 15, 0.28)" stroke="#fbbf24" stroke-width="1.5"/>
-<text x="1245.0" y="523.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Policy · 凭据 · 白名单</text>
-<text x="1245.0" y="542.0" fill="#e2e8f0" font-size="13" text-anchor="middle">策略版本 · token · ext 密钥 · 转发白名单</text>
-<rect x="36" y="652" width="200" height="64" rx="6" fill="#0f172a"/>
-<rect class="box" x="36" y="652" width="200" height="64" rx="6" fill="rgba(154, 52, 18, 0.45)" stroke="#f97316" stroke-width="1.5"/>
-<text x="136.0" y="679.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Source · 来源登记</text>
-<text x="136.0" y="698.0" fill="#e2e8f0" font-size="13" text-anchor="middle">三种类型 · 去重域</text>
-<rect x="280" y="652" width="200" height="64" rx="6" fill="#0f172a"/>
-<rect class="box" x="280" y="652" width="200" height="64" rx="6" fill="rgba(154, 52, 18, 0.45)" stroke="#f97316" stroke-width="1.5"/>
-<text x="380.0" y="679.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Ingest · 原始载荷</text>
-<text x="380.0" y="698.0" fill="#e2e8f0" font-size="13" text-anchor="middle">Webhook · 限期保留</text>
-<rect x="524" y="652" width="210" height="64" rx="6" fill="#0f172a"/>
-<rect class="box" x="524" y="652" width="210" height="64" rx="6" fill="rgba(154, 52, 18, 0.45)" stroke="#f97316" stroke-width="1.5"/>
-<text x="629.0" y="679.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">来源事件</text>
-<text x="629.0" y="698.0" fill="#e2e8f0" font-size="13" text-anchor="middle">去重键 · 关联键 · 发送者</text>
+<rect x="980" y="360" width="420" height="80" rx="6" fill="#0f172a"/>
+<rect class="box" x="980" y="360" width="420" height="80" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+<text x="1190.0" y="386.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">判断记录</text>
+<text x="1190.0" y="406.0" fill="#e2e8f0" font-size="13" text-anchor="middle">用途 · 模板 · 不确定带 · 逐级结果 · 定案者</text>
+<text x="1190.0" y="425.0" fill="#e2e8f0" font-size="13" text-anchor="middle">外呼调用器写入 · 影子 · 抽检 · 默认保留 180 天</text>
+<rect x="610" y="532" width="220" height="76" rx="6" fill="#0f172a"/>
+<rect class="box" x="610" y="532" width="220" height="76" rx="6" fill="rgba(113, 80, 15, 0.28)" stroke="#fbbf24" stroke-width="1.5"/>
+<text x="720.0" y="565.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">能力包实例</text>
+<text x="720.0" y="584.0" fill="#e2e8f0" font-size="13" text-anchor="middle">所属包 · 参数 · 启停</text>
+<rect x="850" y="532" width="220" height="76" rx="6" fill="#0f172a"/>
+<rect class="box" x="850" y="532" width="220" height="76" rx="6" fill="rgba(113, 80, 15, 0.28)" stroke="#fbbf24" stroke-width="1.5"/>
+<text x="960.0" y="565.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">执行者清单</text>
+<text x="960.0" y="584.0" fill="#e2e8f0" font-size="13" text-anchor="middle">id · 类别 · 场景 · 主机</text>
+<rect x="1090" y="532" width="310" height="76" rx="6" fill="#0f172a"/>
+<rect class="box" x="1090" y="532" width="310" height="76" rx="6" fill="rgba(113, 80, 15, 0.28)" stroke="#fbbf24" stroke-width="1.5"/>
+<text x="1245.0" y="565.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Policy · 凭据 · 白名单</text>
+<text x="1245.0" y="584.0" fill="#e2e8f0" font-size="13" text-anchor="middle">策略版本 · token · ext 密钥 · 转发白名单</text>
+<rect x="36" y="694" width="200" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="36" y="694" width="200" height="64" rx="6" fill="rgba(154, 52, 18, 0.45)" stroke="#f97316" stroke-width="1.5"/>
+<text x="136.0" y="721.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Source · 来源登记</text>
+<text x="136.0" y="740.0" fill="#e2e8f0" font-size="13" text-anchor="middle">三种类型 · 去重域</text>
+<rect x="280" y="694" width="200" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="280" y="694" width="200" height="64" rx="6" fill="rgba(154, 52, 18, 0.45)" stroke="#f97316" stroke-width="1.5"/>
+<text x="380.0" y="721.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">Ingest · 原始载荷</text>
+<text x="380.0" y="740.0" fill="#e2e8f0" font-size="13" text-anchor="middle">Webhook · 限期保留</text>
+<rect x="524" y="694" width="210" height="64" rx="6" fill="#0f172a"/>
+<rect class="box" x="524" y="694" width="210" height="64" rx="6" fill="rgba(154, 52, 18, 0.45)" stroke="#f97316" stroke-width="1.5"/>
+<text x="629.0" y="721.0" fill="white" font-size="14" font-weight="600" text-anchor="middle">来源事件</text>
+<text x="629.0" y="740.0" fill="#e2e8f0" font-size="13" text-anchor="middle">去重键 · 关联键 · 发送者</text>
 <text class="lab" x="668" y="112" fill="#cbd5e1" font-size="13" text-anchor="start">每次状态变更在同一事务追加一条</text>
-<text class="lab" x="1000" y="48" fill="#cbd5e1" font-size="13" text-anchor="middle">记录</text>
+<text class="lab" x="980" y="48" fill="#cbd5e1" font-size="13" text-anchor="middle">记录</text>
 <text class="lab" x="444" y="182" fill="#cbd5e1" font-size="13" text-anchor="middle">1 : N</text>
 <text class="lab" x="225" y="268" fill="#cbd5e1" font-size="13" text-anchor="start">1 : N</text>
 <text class="lab" x="134" y="412" fill="#cbd5e1" font-size="13" text-anchor="start">1 : N</text>
 <text class="lab" x="320" y="412" fill="#cbd5e1" font-size="13" text-anchor="start">是一种</text>
 <text class="lab" x="446" y="302" fill="#cbd5e1" font-size="13" text-anchor="start">N : N</text>
 <text class="lab" x="720" y="312" fill="#cbd5e1" font-size="13" text-anchor="start">1 : N</text>
-<text class="lab" x="780" y="440" fill="#cbd5e1" font-size="13" text-anchor="end">到期落为</text>
+<text class="lab" x="780" y="470" fill="#cbd5e1" font-size="13" text-anchor="end">到期落为</text>
 <text class="lab" x="900" y="174" fill="#cbd5e1" font-size="13" text-anchor="middle">1 : N</text>
 <text class="lab" x="990" y="244" fill="#cbd5e1" font-size="13" text-anchor="start">1 : N 外呼运行</text>
-<text class="lab" x="890" y="400" fill="#cbd5e1" font-size="13" text-anchor="start">assignee 受项目允许名单校验</text>
-<text class="lab" x="550" y="440" fill="#38bdf8" font-size="13" text-anchor="end">挂靠或生成</text>
-<text class="lab" x="258" y="676" fill="#38bdf8" font-size="13" text-anchor="middle">推送</text>
-<text class="lab" x="502" y="676" fill="#38bdf8" font-size="13" text-anchor="middle">转换</text>
-<text class="lab" x="378" y="768" fill="#38bdf8" font-size="13" text-anchor="middle">拉取直接产出</text>
+<text class="lab" x="888" y="482" fill="#cbd5e1" font-size="13" text-anchor="start">assignee 受项目允许名单校验</text>
+<text class="lab" x="550" y="470" fill="#38bdf8" font-size="13" text-anchor="end">挂靠或生成</text>
+<text class="lab" x="258" y="718" fill="#38bdf8" font-size="13" text-anchor="middle">推送</text>
+<text class="lab" x="502" y="718" fill="#38bdf8" font-size="13" text-anchor="middle">转换</text>
+<text class="lab" x="378" y="810" fill="#38bdf8" font-size="13" text-anchor="middle">拉取直接产出</text>
+<text class="lab" x="916" y="330" fill="#cbd5e1" font-size="13" text-anchor="start">1 : N</text>
+<text class="lab" x="980" y="99" fill="#cbd5e1" font-size="13" text-anchor="middle">载荷引用 id</text>
+<text class="lab" x="1100" y="718" fill="#38bdf8" font-size="13" text-anchor="middle">1 : N 初筛 · 影子打分 · 抽检</text>
 </svg>
     </div>
 
@@ -322,9 +333,9 @@
       <div class="card"><div class="card-header"><div class="card-dot emerald"></div><h3>建模原则</h3></div>
         <ul><li>• 任务、承诺、决策、委派、简报都是 Item，用 kind 区分</li><li>• 扩展走 kind + spec + ext + tag + relation，不加字段设计器</li><li>• 事项与材料的关联是类型化 relation：依据、产出、纪要</li><li>• 每类数据只有一个写入模块，其他模块经命令模型调用</li></ul></div>
       <div class="card"><div class="card-header"><div class="card-dot violet"></div><h3>两类记录</h3></div>
-        <ul><li>• 账本事实：Item、Project、Material、Revision、Timer、实例，变更都写 Event</li><li>• 运行队列：Delivery、Run、来源事件、Ingest，有自己的状态字段，只把关键结果写 Event</li><li>• 账本事件与来源事件是两个概念，不能混用</li></ul></div>
+        <ul><li>• 账本事实：Item、Project、Material、Revision、Guideline、Timer、实例，变更都写 Event</li><li>• 运行队列：Delivery、Run、来源事件、判断记录、Ingest，有自己的状态字段，只把关键结果写 Event</li><li>• 判断记录不进 Event 日志：用到这次判断的命令在自己的 Event 载荷里引用它的 id（虚线）</li><li>• 账本事件与来源事件是两个概念，不能混用</li></ul></div>
       <div class="card"><div class="card-header"><div class="card-dot amber"></div><h3>只在 Web 设置</h3></div>
-        <ul><li>• 策略、信任级、token、ext 密钥、转发白名单</li><li>• 项目允许的执行者、规则 observe 与 auto 切换</li><li>• 能力包不能修改以上任何一项</li></ul></div>
+        <ul><li>• 策略、信任级、token、ext 密钥、转发白名单</li><li>• 项目允许的执行者、规则 observe 与 auto 切换</li><li>• 判断端点与生成端点、不确定带与影子模式、抽检结论、外发范围</li><li>• 能力包不能修改以上任何一项</li></ul></div>
     </div>
 
     <!-- Footer -->

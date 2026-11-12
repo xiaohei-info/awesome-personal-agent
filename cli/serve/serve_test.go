@@ -383,7 +383,11 @@ func initOnFreePort(t *testing.T) string {
 type appendixRoute struct {
 	methods []string
 	path    string
+	planned bool // 所在行带规划标记（附录 B 开头）：允许还没挂载，挂载后必须去掉标记
 }
+
+// plannedMark 与 tests/conformance 的写法相同；APA_CONFORMANCE_STRICT=1 时不放行（发布前，主文档 §20.4 门槛 1）。
+var plannedMark = regexp.MustCompile(`【规划中（v\d+\.\d+\.\d+）】`)
 
 // appendixRoutes 解析附录 B.2 表格第二列，它是路由清单的唯一来源。写法有三种：
 // `GET/POST /items`、接在前一条后面的 `/accept`（换掉最后一段，沿用方法）、只有路径的 `/settings/policy`。
@@ -403,8 +407,9 @@ func appendixRoutes(t *testing.T) []appendixRoute {
 			continue
 		}
 		var prev *appendixRoute
+		plan := os.Getenv("APA_CONFORMANCE_STRICT") != "1" && plannedMark.MatchString(line)
 		for _, m := range span.FindAllStringSubmatch(cells[2], -1) {
-			r := appendixRoute{}
+			r := appendixRoute{planned: plan}
 			f := strings.Fields(m[1])
 			r.path, _, _ = strings.Cut(f[len(f)-1], "?")
 			if len(f) == 2 {
@@ -422,10 +427,6 @@ func appendixRoutes(t *testing.T) []appendixRoute {
 	}
 	return out
 }
-
-// notYetImplemented 是附录 B.2 列出、但 main 上还没有实现的路由（目标设计先于代码）。这不是路由清单，只是缺口台账，只减不增：
-// 实现并挂载后本测试会要求删掉对应条目；实现了却忘了挂，由 TestEveryRouteGroupPackageIsMounted 拦下。
-var notYetImplemented = map[string]bool{}
 
 // mounted 用未登录的真实请求探测：骨干对未挂载的路由统一回 "no such route"；已挂载的要么 401，要么进了处理器（处理器自己的 404 也算挂载）。
 func mounted(t *testing.T, addr net.Addr, method, p string) bool {
@@ -452,10 +453,6 @@ func TestServeMountsEveryAppendixRouteAndWeb(t *testing.T) {
 	addr, stop := start(t, initOnFreePort(t))
 	defer stop()
 	placeholder := regexp.MustCompile(`\{[^}]*\}`)
-	stale := map[string]bool{}
-	for k := range notYetImplemented {
-		stale[k] = true
-	}
 	for _, r := range appendixRoutes(t) {
 		probe := placeholder.ReplaceAllString(r.path, "x")
 		if len(r.methods) == 0 {
@@ -463,15 +460,12 @@ func TestServeMountsEveryAppendixRouteAndWeb(t *testing.T) {
 			for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
 				got = got || mounted(t, addr, m, probe)
 			}
-			check(t, r.path, got, stale)
+			check(t, r.path, got, r.planned)
 			continue
 		}
 		for _, m := range r.methods {
-			check(t, m+" "+r.path, mounted(t, addr, m, probe), stale)
+			check(t, m+" "+r.path, mounted(t, addr, m, probe), r.planned)
 		}
-	}
-	for k := range stale {
-		t.Errorf("%s is listed in notYetImplemented but appendix B.2 no longer has it; delete the entry", k)
 	}
 
 	resp, err := http.Get("http://" + addr.String() + "/")
@@ -495,19 +489,18 @@ func TestServeMountsEveryAppendixRouteAndWeb(t *testing.T) {
 	}
 }
 
-func check(t *testing.T, key string, got bool, stale map[string]bool) {
+func check(t *testing.T, key string, got, planned bool) {
 	t.Helper()
-	delete(stale, key)
 	switch {
-	case !got && !notYetImplemented[key]:
+	case !got && !planned:
 		t.Errorf("%s is in appendix B.2 but not mounted by apa serve", key)
-	case got && notYetImplemented[key]:
-		t.Errorf("%s is mounted now; delete it from notYetImplemented", key)
+	case got && planned:
+		t.Errorf("%s is mounted but still marked as planned in appendix B.2; remove the marker", key)
 	}
 }
 
 // api/ 下导出路由分组（返回 core.RouteGroup 的函数或 core.Register）的包都必须被 cli/serve 引入。
-// 不靠路由表：新路由组哪怕还没写进附录 B，或路由还记在 notYetImplemented 里，忘了挂载也会失败。
+// 不靠路由表：新路由组哪怕还没写进附录 B，或路由在附录里还带规划标记，忘了挂载也会失败。
 func TestEveryRouteGroupPackageIsMounted(t *testing.T) {
 	const module = "github.com/xiaohei-info/awesome-personal-agent/"
 	imported := map[string]bool{}
