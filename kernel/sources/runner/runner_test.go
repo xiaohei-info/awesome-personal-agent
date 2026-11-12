@@ -663,3 +663,142 @@ func TestHandleIsIdempotentPerRun(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// ACT-IRL-20（来源侧）：标准事件的 metrics、merge_key、items[] 随事件落盘并可读回；items 列里的事项 id 与判断记录 id 一并读出。
+func TestV2EventFieldsPersistAndReadBack(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", `echo '{"id":"k1","type":"acc.proposed","subject":"带新字段","occurred_at":"2026-03-01T00:00:00Z","metrics":{"size":3},"merge_key":"mk-k1","items":[{"sender":"bob","text":"hi","at":"2026-03-01T00:00:00Z"}]}'
+echo '{"cursor":"c1"}'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	evs := e.events("src_a")
+	if len(evs) != 1 || evs[0].Metrics["size"] != 3 || evs[0].MergeKey != "mk-k1" || len(evs[0].Messages) != 1 || evs[0].Messages[0].Text != "hi" {
+		t.Fatalf("v2 fields lost: %+v", evs)
+	}
+	if n := len(e.rejects("src_a")); n != 0 {
+		t.Fatalf("valid v2 event rejected: %d", n)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE sources_runner_event SET items = ?, judgment = 'jdg_1'`, `["itm_1","itm_2"]`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.events("src_a")[0]; len(got.Items) != 2 || got.Items[1] != "itm_2" || got.Judgment != "jdg_1" {
+		t.Fatalf("items/judgment: %+v", got)
+	}
+}
+
+// ACT-IRL-21：只含 v0.1 字段的旧来源程序照常入账、不被拒收，也没有 v2 字段。
+func TestV01EventStillAcceptedWithoutNewFields(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", `echo '{"id":"old1","type":"acc.proposed","subject":"旧格式","occurred_at":"2026-03-01T00:00:00Z","correlation_keys":["old-1"],"sender":"alice"}'
+echo '{"cursor":"c1"}'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	evs := e.events("src_a")
+	if len(evs) != 1 || evs[0].Metrics != nil || evs[0].MergeKey != "" || evs[0].Items != nil || evs[0].Messages != nil || evs[0].Disposition != domain.DispositionPending {
+		t.Fatalf("old-format event: %+v", evs)
+	}
+	if n := len(e.rejects("src_a")); n != 0 {
+		t.Fatalf("old-format event rejected: %d", n)
+	}
+}
+
+func TestInvalidV2FieldsAreRejectedWithReason(t *testing.T) {
+	base := `{"id":"x","type":"t","subject":"s","occurred_at":"2026-03-01T00:00:00Z",`
+	many := strings.Repeat(`{"sender":"a","text":"t","at":"2026-03-01T00:00:00Z"},`, maxItems) + `{"sender":"a","text":"t","at":"2026-03-01T00:00:00Z"}`
+	for name, tc := range map[string]struct{ line, want string }{
+		"metric not a number":  {base + `"metrics":{"size":"big"}}`, "bad field"},
+		"metric name too long": {base + `"metrics":{"` + strings.Repeat("n", 65) + `":1}}`, "metrics name"},
+		"metric name empty":    {base + `"metrics":{"":1}}`, "metrics name"},
+		"items over 200":       {base + `"items":[` + many + `]}`, "at most 200"},
+		"item without text":    {base + `"items":[{"sender":"a","text":" ","at":"2026-03-01T00:00:00Z"}]}`, "items[0].text"},
+	} {
+		p := parse([]byte(tc.line + "\n"))
+		if len(p.events) != 0 || len(p.rejects) != 1 || !strings.Contains(p.rejects[0].Reason, tc.want) {
+			t.Errorf("%s: events=%d rejects=%+v", name, len(p.events), p.rejects)
+		}
+	}
+	ok := parse([]byte(base + `"metrics":{"` + strings.Repeat("n", 64) + `":1.5}}` + "\n"))
+	if len(ok.events) != 1 {
+		t.Fatalf("64-char metric name must pass: %+v", ok.rejects)
+	}
+}
+
+// 新处置 digest、alerted 与新的未判定原因 outbound_unset、restored 可写入并读回。
+func TestNewDispositionsAndUnjudgedReasons(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", `for i in 1 2 3 4; do echo '{"id":"e'$i'","type":"t","subject":"s","occurred_at":"2026-03-01T00:00:00Z"}'; done
+echo '{"cursor":"c1"}'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	evs := e.events("src_a")
+	if len(evs) != 4 {
+		t.Fatalf("events: %d", len(evs))
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for i, s := range []struct {
+			d      domain.Disposition
+			reason string
+		}{{domain.DispositionDigest, ""}, {domain.DispositionAlerted, ""},
+			{domain.DispositionUnjudged, domain.UnjudgedOutboundUnset}, {domain.DispositionUnjudged, domain.UnjudgedRestored}} {
+			if err := SetDisposition(tx, evs[i].ID, s.d, "", s.reason); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := e.events("src_a")
+	want := []struct {
+		d      domain.Disposition
+		reason string
+	}{{domain.DispositionDigest, ""}, {domain.DispositionAlerted, ""},
+		{domain.DispositionUnjudged, "outbound_unset"}, {domain.DispositionUnjudged, "restored"}}
+	for i, w := range want {
+		if got[i].Disposition != w.d || got[i].UnjudgedReason != w.reason {
+			t.Errorf("event %d: %s/%q, want %s/%q", i, got[i].Disposition, got[i].UnjudgedReason, w.d, w.reason)
+		}
+	}
+	// restored 与 outbound_unset 不参与后台自动重判（restored 只经积压放开，outbound_unset 等外发范围选定）。
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for _, id := range []string{got[2].ID, got[3].ID} {
+			if _, err := Requeue(tx, id); err == nil {
+				t.Errorf("%s must not be auto-requeued", id)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 列里的 JSON 被写坏时读取暴露真实错误，不返回残缺事件；不可设置的处置被拒。
+func TestCorruptV2ColumnSurfacesErrorAndBadDispositionRejected(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", goodEvents), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	id := e.events("src_a")[0].ID
+	err := e.st.Update(bg, func(tx *store.Tx) error {
+		if err := SetDisposition(tx, id, domain.DispositionExpired, "", ""); err == nil {
+			t.Error("expired must not be settable via SetDisposition")
+		}
+		_, err := tx.Exec(`UPDATE sources_runner_event SET metrics = 'not json' WHERE id = ?`, id)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error { _, err := Events(tx, "src_a"); return err }); err == nil || !strings.Contains(err.Error(), "metrics") {
+		t.Fatalf("corrupt metrics must surface: %v", err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error { _, _, err := EventPage(tx, "src_a", nil, 0, 10); return err }); err == nil {
+		t.Fatal("EventPage must surface corrupt column")
+	}
+}

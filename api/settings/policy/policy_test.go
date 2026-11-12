@@ -305,18 +305,19 @@ func TestAccessLimitsAndModelEndpointSecret(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 
-	rec = e.do("PUT", routes[2], `{"model_endpoint":{"url":"https://m.example/v1","model":"m","api_key":"sk-secret","screening_timeout_ms":5000}}`, e.web)
+	rec = e.do("PUT", routes[2], `{"generate_endpoint":{"url":"https://m.example/v1","model":"m","api_key":"sk-secret"},"screening_timeout_ms":5000}`, e.web)
 	if rec.Code != 200 || strings.Contains(rec.Body.String(), "sk-secret") {
 		t.Fatalf("PUT leaked key: %d %s", rec.Code, rec.Body)
 	}
 	rec = e.do("GET", routes[2], "", e.web)
-	if strings.Contains(rec.Body.String(), "sk-secret") || !strings.Contains(rec.Body.String(), `"api_key":"***"`) {
+	if strings.Contains(rec.Body.String(), "sk-secret") || !strings.Contains(rec.Body.String(), `"api_key_set":true`) {
 		t.Fatalf("GET: %s", rec.Body)
 	}
-	// 回传占位保持原密钥，只改模型名。
-	e.do("PUT", routes[2], `{"model_endpoint":{"url":"https://m.example/v1","model":"m2","api_key":"***","screening_timeout_ms":5000}}`, e.web)
-	if _, p := e.current(); p.ModelEndpoint.APIKey != "sk-secret" || p.ModelEndpoint.Model != "m2" {
-		t.Fatalf("endpoint %+v", p.ModelEndpoint)
+	// 不带 api_key 或回传占位保持原密钥，只改模型名。
+	e.do("PUT", routes[2], `{"generate_endpoint":{"url":"https://m.example/v1","model":"m2"}}`, e.web)
+	e.do("PUT", routes[2], `{"generate_endpoint":{"url":"https://m.example/v1","model":"m2","api_key":"***"}}`, e.web)
+	if _, p := e.current(); p.GenerateEndpoint.APIKey != "sk-secret" || p.GenerateEndpoint.Model != "m2" {
+		t.Fatalf("endpoint %+v", p.GenerateEndpoint)
 	}
 	// 事件载荷里没有明文密钥。
 	if err := e.st.View(bg, func(tx *store.Tx) error {
@@ -357,5 +358,193 @@ func TestChannelsSection(t *testing.T) {
 	}
 	if rec := e.do("GET", routes[0], "", e.web); !strings.Contains(rec.Body.String(), `"channels":{"chat":{"text_only":true}}`) {
 		t.Fatalf("read back: %s", rec.Body)
+	}
+}
+
+// ACT-DLV-15：缺省日上限 20、静音为空、followup_defer 为 false。
+func TestDisturbDefaultsCapAndMutes(t *testing.T) {
+	e := setup(t)
+	rec := e.do("GET", routes[0], "", e.web)
+	var got struct {
+		Disturb map[string]json.RawMessage `json:"disturb"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if string(got.Disturb["daily_cap"]) != "20" || string(got.Disturb["mutes"]) != "[]" || string(got.Disturb["followup_defer"]) != "false" {
+		t.Fatalf("disturb defaults: %s", rec.Body)
+	}
+}
+
+// ACT-DLV-16：日上限与静音只能 Web 改（委派级请求被拒、策略不变）；Web 改产生新版本与 policy.changed。
+func TestDailyCapAndMutesAreWebOnly(t *testing.T) {
+	e := setup(t)
+	body := `{"disturb":{"routes":{"decision":"web","brief":"web","reminder":"web","health":"web","wake":"web"},"merge_window_sec":0,"remind_on_deadline":true,"daily_cap":0,"mutes":[{"scope":"project","id":"p"}],"followup_defer":false}}`
+	rec := e.do("PUT", routes[0], body, e.bearer(auth.Delegate))
+	if rec.Code != 403 || errCode(t, rec) != domain.CodeWebOnly {
+		t.Fatalf("delegate PUT: %d %s", rec.Code, rec.Body)
+	}
+	if v, p := e.current(); v != 0 || p.Disturb.DailyCap != 20 || len(p.Disturb.Mutes) != 0 {
+		t.Fatalf("policy changed by a rejected call: v%d %+v", v, p.Disturb)
+	}
+	until := "2030-01-01T00:00:00Z"
+	rec = e.do("PUT", routes[0], `{"disturb":{"routes":{"decision":"inject","brief":"inject","reminder":"inject","health":"web","wake":"web"},"merge_window_sec":1800,"remind_on_deadline":true,"daily_cap":3,"mutes":[{"scope":"item","id":"x","until":"`+until+`"}]}}`, e.web)
+	if rec.Code != 200 {
+		t.Fatalf("web PUT: %d %s", rec.Code, rec.Body)
+	}
+	v, p := e.current()
+	if v != 1 || p.Disturb.DailyCap != 3 || len(p.Disturb.Mutes) != 1 || p.Disturb.Mutes[0].Until == nil {
+		t.Fatalf("stored v%d %+v", v, p.Disturb)
+	}
+	if ev := e.eventTypes(); len(ev) != 2 || ev[0] != string(domain.EvCommandRejected) || ev[1] != string(domain.EvPolicyChanged) {
+		t.Fatalf("events %v", ev)
+	}
+}
+
+// 请求体缺 daily_cap 取缺省 20 而不是"不限"；显式 0 才是不限；非法静音与负数被拒。
+func TestDisturbPutDefaultsAndValidation(t *testing.T) {
+	e := setup(t)
+	routes := `"routes":{"decision":"inject","brief":"inject","reminder":"inject","health":"web","wake":"web"}`
+	if rec := e.do("PUT", "/v1/settings/policy", `{"disturb":{`+routes+`,"merge_window_sec":60}}`, e.web); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if _, p := e.current(); p.Disturb.DailyCap != 20 {
+		t.Fatalf("missing daily_cap must default to 20, got %d", p.Disturb.DailyCap)
+	}
+	e.do("PUT", "/v1/settings/policy", `{"disturb":{`+routes+`,"merge_window_sec":60,"daily_cap":0}}`, e.web)
+	if _, p := e.current(); p.Disturb.DailyCap != 0 {
+		t.Fatalf("explicit 0 must mean unlimited, got %d", p.Disturb.DailyCap)
+	}
+	for _, bad := range []string{`"daily_cap":-1`, `"mutes":[{"scope":"team","id":"x"}]`, `"mutes":[{"scope":"item","id":""}]`} {
+		rec := e.do("PUT", "/v1/settings/policy", `{"disturb":{`+routes+`,"merge_window_sec":60,`+bad+`}}`, e.web)
+		if rec.Code != 400 || errCode(t, rec) != domain.CodeInvalidRequest {
+			t.Fatalf("%s: %d %s", bad, rec.Code, rec.Body)
+		}
+	}
+}
+
+func (e *env) endpoints(body string) map[string]json.RawMessage {
+	e.t.Helper()
+	rec := e.do("PUT", routes[2], body, e.web)
+	if rec.Code != 200 {
+		e.t.Fatalf("PUT %s: %d %s", body, rec.Code, rec.Body)
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		e.t.Fatal(err)
+	}
+	return out
+}
+
+// flow-endpoint-config / flow-outbound-scope：两个端点分别配置，未声明的位置返回 external，缺省字段取默认值，两者都可清空为 null。
+func TestSplitEndpointsDefaultsAndNull(t *testing.T) {
+	e := setup(t)
+	out := e.endpoints(`{"judge_endpoint":{"url":"http://cls.example/j","protocol":"probability-judgment/1"},"generate_endpoint":{"url":"http://gen.example/v1","model":"m"}}`)
+	var j, g map[string]any
+	_ = json.Unmarshal(out["judge_endpoint"], &j)
+	_ = json.Unmarshal(out["generate_endpoint"], &g)
+	if j["locality"] != "external" || g["locality"] != "external" || j["timeout_ms"] != 10000.0 || j["max_batch"] != 32.0 ||
+		j["max_material_chars"] != 8000.0 || string(out["screening_timeout_ms"]) != "30000" {
+		t.Fatalf("judge=%v generate=%v out=%s", j, g, out["screening_timeout_ms"])
+	}
+	out = e.endpoints(`{"judge_endpoint":null,"generate_endpoint":null}`)
+	if string(out["judge_endpoint"]) != "null" || string(out["generate_endpoint"]) != "null" {
+		t.Fatalf("not cleared: %s %s", out["judge_endpoint"], out["generate_endpoint"])
+	}
+	for _, bad := range []string{`{"judge_endpoint":{"url":""}}`, `{"generate_endpoint":{"url":"ftp://x"}}`, `{"judge_endpoint":{"url":"http://x","locality":"near"}}`,
+		`{"generate_endpoint":{"url":"http://x","bogus":1}}`} {
+		if rec := e.do("PUT", routes[2], bad, e.web); rec.Code != 400 {
+			t.Errorf("%s accepted: %d", bad, rec.Code)
+		}
+	}
+}
+
+// flow-endpoint-config / flow-upgrade-rollback：旧账本里的 model_endpoint 读作生成端点；旧形状 PUT 仍接受且不动判断端点；
+// 本人保存后写成新字段，旧版本逐字节不变。
+func TestLegacyShapeReadAndPut(t *testing.T) {
+	e := setup(t)
+	const legacy = `{"web_only":{"categories":["funds"],"rules":[]},"disturb":{"routes":{"decision":"inject"},"merge_window_sec":0,"remind_on_deadline":true},` +
+		`"material_write":{"default":"proposed","kinds":{}},"permission_cap":{"default":"read","by_harness":{}},` +
+		`"model_endpoint":{"url":"http://old.example/v1","model":"old-m","api_key":"sk-old","screening_timeout_ms":45000},"persona":""}`
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec("INSERT INTO policy_version (version, doc, at) VALUES (1, ?, 1)", legacy)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.do("GET", routes[2], "", e.web)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"url":"http://old.example/v1"`) || !strings.Contains(rec.Body.String(), `"locality":"external"`) ||
+		!strings.Contains(rec.Body.String(), `"judge_endpoint":null`) || !strings.Contains(rec.Body.String(), `"screening_timeout_ms":45000`) ||
+		strings.Contains(rec.Body.String(), "model_endpoint") || strings.Contains(rec.Body.String(), "sk-old") {
+		t.Fatalf("GET: %d %s", rec.Code, rec.Body)
+	}
+	if v, _ := e.current(); v != 1 {
+		t.Fatalf("read created a version: %d", v)
+	}
+
+	// 先设判断端点 J，再用旧形状 PUT：生成端点按所给值（external），超时提到顶层，J 不变，旧密钥可经占位保留。
+	e.endpoints(`{"judge_endpoint":{"url":"http://cls.example/j","api_key":"sk-j"}}`)
+	out := e.endpoints(`{"model_endpoint":{"url":"http://stub.example/v1","model":"acc-model","api_key":"k1","screening_timeout_ms":45000}}`)
+	var g map[string]any
+	_ = json.Unmarshal(out["generate_endpoint"], &g)
+	if g["url"] != "http://stub.example/v1" || g["model"] != "acc-model" || g["locality"] != "external" || string(out["screening_timeout_ms"]) != "45000" ||
+		!strings.Contains(string(out["judge_endpoint"]), "http://cls.example/j") {
+		t.Fatalf("generate=%v out=%v", g, out)
+	}
+	if _, p := e.current(); p.GenerateEndpoint.APIKey != "k1" || p.JudgeEndpoint.APIKey != "sk-j" {
+		t.Fatalf("policy %+v", p)
+	}
+	// 旧形状与新段混用有歧义，拒绝。
+	if rec := e.do("PUT", routes[2], `{"model_endpoint":{"url":"","model":"","api_key":"","screening_timeout_ms":1},"judge_endpoint":null}`, e.web); rec.Code != 400 {
+		t.Fatalf("mixed shapes accepted: %d", rec.Code)
+	}
+	// 旧版本文档逐字节不变，新版本里没有 model_endpoint。
+	var docs []string
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query("SELECT doc FROM policy_version ORDER BY version")
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			var d string
+			if err := r.Scan(&d); err != nil {
+				return err
+			}
+			docs = append(docs, d)
+		}
+		return r.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 3 || docs[0] != legacy || strings.Contains(docs[1], "model_endpoint") || strings.Contains(docs[2], "model_endpoint") {
+		t.Fatalf("docs = %v", docs)
+	}
+}
+
+// flow-endpoint-config：本人在设置页不改任何值直接保存旧账本，仍追加一个新版本（新字段、密钥保留）；再保存一次无变化不加版本。
+func TestSaveUnchangedOverLegacyWritesNewVersion(t *testing.T) {
+	e := setup(t)
+	const legacy = `{"web_only":{"categories":["funds"],"rules":[]},"disturb":{"routes":{"decision":"inject"},"merge_window_sec":0,"remind_on_deadline":true},` +
+		`"material_write":{"default":"proposed","kinds":{}},"permission_cap":{"default":"read","by_harness":{}},` +
+		`"model_endpoint":{"url":"http://old.example/v1","model":"old-m","api_key":"sk-old","screening_timeout_ms":45000},"persona":""}`
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec("INSERT INTO policy_version (version, doc, at) VALUES (1, ?, 1)", legacy)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	same := `{"judge_endpoint":null,"generate_endpoint":{"url":"http://old.example/v1","model":"old-m","locality":"external"},"screening_timeout_ms":45000}`
+	var out map[string]json.RawMessage
+	for i, want := range []string{"2", "2"} {
+		rec := e.do("PUT", routes[2], same, e.web)
+		if rec.Code != 200 {
+			t.Fatalf("save %d: %d %s", i, rec.Code, rec.Body)
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		if string(out["version"]) != want {
+			t.Fatalf("save %d: version %s, want %s", i, out["version"], want)
+		}
+	}
+	if _, p := e.current(); p.GenerateEndpoint.APIKey != "sk-old" {
+		t.Fatalf("api key lost: %+v", p.GenerateEndpoint)
 	}
 }

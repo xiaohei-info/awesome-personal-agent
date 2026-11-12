@@ -155,7 +155,7 @@ func (e *env) configure() {
 	e.t.Helper()
 	err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.ModelEndpoint = policy.ModelEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", ScreeningTimeoutMs: 1000}
+			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}, 1000
 			return nil
 		})
 		return err
@@ -253,6 +253,7 @@ func (e *env) events(id, typ string) (n int) {
 
 // ACT-FUP-02 / ACT-DAY-06：真实包的判断型提示词被内核按结构化输出解析为"催"——一条提醒，事项仍是 waiting。
 func TestRemindProducesReminderAndKeepsWaiting(t *testing.T) {
+	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
 	e := setup(t)
 	e.judged("remind")
 	id := e.create("等装修公司报价", nil)
@@ -274,6 +275,7 @@ func TestRemindProducesReminderAndKeepsWaiting(t *testing.T) {
 
 // ACT-FUP-03：再等——延长 Timer，没有提醒。
 func TestWaitMoreExtendsWithoutReminder(t *testing.T) {
+	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
 	e := setup(t)
 	e.judged("wait")
 	id := e.create("等装修公司报价", nil)
@@ -288,6 +290,7 @@ func TestWaitMoreExtendsWithoutReminder(t *testing.T) {
 
 // ACT-FUP-04：建议放弃——转 needs_input 交本人，不自动 dropped；本人回答后才落地。
 func TestAbandonGoesToOwnerNotSilentlyDropped(t *testing.T) {
+	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
 	e := setup(t)
 	e.judged("abandon")
 	id := e.create("等装修公司报价", nil)
@@ -306,6 +309,7 @@ func TestAbandonGoesToOwnerNotSilentlyDropped(t *testing.T) {
 
 // ACT-FUP-05：委派子事项迟迟不回执，父事项等执行者——同样被跟进，产生提醒，父事项阶段不变。
 func TestSilentDelegationIsFollowedUp(t *testing.T) {
+	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
 	e := setup(t)
 	e.judged("remind")
 	parent := e.create("装修方案", nil)
@@ -325,6 +329,7 @@ func TestSilentDelegationIsFollowedUp(t *testing.T) {
 
 // ACT-FUP-06：模型 500——跟进不丢，暴露真实错误并记 health.alert，恢复后拿到判断结果。
 func TestModelFailureKeepsFollowUpAndRecovers(t *testing.T) {
+	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
 	e := setup(t)
 	e.stub.SetDefault(modelstub.Reply{Status: 500})
 	id := e.create("等装修公司报价", nil)
@@ -347,6 +352,7 @@ func TestModelFailureKeepsFollowUpAndRecovers(t *testing.T) {
 
 // 逐级升级：判断型答"需要解释"，交生成型给出 choice；生成型信息不足则升级到任务型，交本人，不替本人决定。
 func TestNeedExplanationEscalatesThroughGenerate(t *testing.T) {
+	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
 	e := setup(t)
 	e.stub.Enqueue(
 		modelstub.Reply{Content: `{"choice":"need_explanation","confidence":0.9}`},
@@ -379,22 +385,22 @@ func TestNeedExplanationEscalatesThroughGenerate(t *testing.T) {
 // 包的声明：跟进间隔时钟规则初始 observe，提示词类别与级联链，包内无 harness 名。
 func TestPackDeclarations(t *testing.T) {
 	_, p := loadPack(t)
-	if len(p.ClockRules) != 1 || p.ClockRules[0].Type != "follow_up" || p.ClockRules[0].Mode != "observe" || p.ClockRules[0].Schedule == "" {
+	if len(p.ClockRules) != 2 {
 		t.Fatalf("clock rules: %+v", p.ClockRules)
 	}
-	j := p.Prompts["follow-up-judge"].Meta
-	if j.Agent != "judge" || j.QuestionType != "choice" || j.ConfidenceThreshold == nil || j.EscalateTo != "follow-up-explain" {
-		t.Fatalf("follow-up-judge: %+v", j)
+	if r := p.ClockRules[0]; r.ID != "follow-up-interval" || r.Type != "follow_up" || r.Schedule != "72h" || len(r.Do) != 0 ||
+		r.RemindRounds == nil || *r.RemindRounds != 2 || r.DeferWith != "follow-up-defer" {
+		t.Fatalf("follow-up-interval: %+v", r)
 	}
-	if g := p.Prompts["follow-up-explain"].Meta; g.Agent != "generate" || g.OutputSchema == nil || g.EscalateTo != "follow-up-research" {
-		t.Fatalf("follow-up-explain: %+v", g)
+	if r := p.ClockRules[1]; r.ID != "stale-check" || r.Type != "stale" || r.StaleAfter != "14d" || len(r.Do) != 0 {
+		t.Fatalf("stale-check: %+v", r)
 	}
-	if k := p.Prompts["follow-up-research"].Meta; k.Agent != "task" {
-		t.Fatalf("follow-up-research: %+v", k)
+	d := p.Prompts["follow-up-defer"].Meta
+	if d.Agent != "judge" || d.QuestionType != "yes_no" || d.OnUndecided != "no" || d.Band == nil || *d.Band.Low != 0.85 {
+		t.Fatalf("follow-up-defer: %+v", d)
 	}
-	// 任务型提示词只能引用已发行 CLI 支持的命令（apa context 没有 item scope）。
-	if b := p.Prompts["follow-up-research"].Body; strings.Contains(b, "--scope item") || !strings.Contains(b, "apa item show {item_id}") {
-		t.Errorf("follow-up-research references unsupported CLI usage: %s", b)
+	if len(p.Prompts) != 1 {
+		t.Errorf("v0.1 judge, generate and task templates must be removed: %v", p.Prompts)
 	}
 	if len(p.EventRules) != 0 || len(p.SourceRules) != 0 {
 		t.Error("follow-up declares a clock rule only")

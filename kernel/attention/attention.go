@@ -339,6 +339,23 @@ func (a *Attention) Remind(tx *store.Tx, it domain.Item, kind string, due time.T
 	return a.remind(tx, pol, it, kind, due, title, summary)
 }
 
+// RemindGroup 把一批事项合成一条提醒（如久未推进），挂在 anchor 事项上；同一 key 只提醒一次。
+// 内容里的 webURL 指向批的入口，不是 anchor。在调用方的事务里运行。
+func (a *Attention) RemindGroup(tx *store.Tx, anchor domain.Item, key, title, summary, webURL string) error {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return err
+	}
+	ver, err := command.Version(tx, anchor.ID)
+	if err != nil {
+		return err
+	}
+	return a.offer(tx, pol, held{
+		id: "remind:" + key, item: anchor.ID, class: domain.DeliveryReminder, priority: anchor.Priority, version: ver,
+		content: domain.DeliveryContent{Title: title, Summary: summary, WebURL: webURL},
+	})
+}
+
 func (a *Attention) remind(tx *store.Tx, pol policy.Policy, it domain.Item, kind string, due time.Time, title, summary string) error {
 	ver, err := command.Version(tx, it.ID)
 	if err != nil {
@@ -485,6 +502,28 @@ func (a *Attention) flush(tx *store.Tx, pol policy.Policy) error {
 
 // deliver 把一条或一批（合并）提醒写成投递。一批多条时合成摘要；摘要不属于任何单个事项。
 func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
+	if len(hs) > 1 { // 被静音的成员不并入摘要：各自走 Web 未读
+		var rest []held
+		for _, h := range hs {
+			t, err := a.target(tx, h)
+			if err != nil {
+				return err
+			}
+			if a.o.Queue.Muted(pol, h.item, t) {
+				if err := a.deliver(tx, pol, []held{h}); err != nil {
+					return err
+				}
+				continue
+			}
+			rest = append(rest, h)
+		}
+		if len(rest) != len(hs) {
+			if len(rest) == 0 {
+				return nil
+			}
+			return a.deliver(tx, pol, rest)
+		}
+	}
 	d := domain.Delivery{ID: hs[0].id, Item: hs[0].item, Class: hs[0].class, Version: hs[0].version, Content: hs[0].content}
 	if len(hs) > 1 {
 		titles := make([]string, len(hs))
@@ -513,7 +552,14 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 	if err := a.attachForm(tx, pol, &d); err != nil {
 		return err
 	}
-	if _, _, err := a.o.Queue.Create(tx, d); err != nil {
+	t, err := a.target(tx, hs[0])
+	if err != nil {
+		return err
+	}
+	if len(hs) > 1 {
+		t = delivery.Target{} // 摘要不属于任何事项，成员已逐个对照过静音
+	}
+	if _, _, err := a.o.Queue.CreateGated(tx, pol, d, t); err != nil {
 		return err
 	}
 	for _, h := range hs { // 合并成员也算已提醒：不再被重新暂存，摘要 id 与成员集绑定而非与某一条绑定
@@ -522,6 +568,23 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 		}
 	}
 	return nil
+}
+
+// target 取一条提醒对应事项的项目与来源，供日上限与静音对照；事项已不存在时只剩事项 id。
+func (a *Attention) target(tx *store.Tx, h held) (delivery.Target, error) {
+	t := delivery.Target{Exempt: h.exempt}
+	it, err := items.Get(tx, h.item)
+	if isNotFound(err) {
+		return t, nil
+	}
+	if err != nil {
+		return t, err
+	}
+	t.Project = it.Project
+	if it.Origin != nil {
+		t.Source = it.Origin.Source
+	}
+	return t, nil
 }
 
 // attachForm 在写入决策投递时发放一次性表单链接（§10.3）。放在这里而不是暂存时，令牌只为真正写入的投递发放。

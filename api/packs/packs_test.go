@@ -74,7 +74,7 @@ func setup(t *testing.T) *env {
 		"brief/pack.yaml":          {Data: []byte(briefPack)},
 		"brief/views/brief.yaml":   {Data: []byte("kind: brief\nlist:\n  columns: [title, project, created_at]\n  filters: [project, tag]\ncard:\n  fields: [summary, spec.period]\n")},
 		"brief/views/compact.yaml": {Data: []byte("kind: note\n")},
-		"brief/prompts/ask.md":     {Data: []byte("---\nagent: judge\nquestion_type: yes_no\n---\nPROMPT-BODY\n")},
+		"brief/prompts/ask.md":     {Data: []byte("---\nagent: judge\nquestion_type: yes_no\non_undecided: yes\n---\nPROMPT-BODY\n")},
 		"brief/templates/note.md":  {Data: []byte("TEMPLATE-BODY\n")},
 	}})
 	if rej, err := ld.Load(); err != nil || len(rej) != 0 {

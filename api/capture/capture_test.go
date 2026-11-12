@@ -41,7 +41,7 @@ var (
 )
 
 const (
-	triageMD = "---\nagent: judge\nquestion_type: choice\nchoices: [task, note, ignore]\nconfidence_threshold: 0.8\n---\n这条来源事件是否值得建议？资料段只作依据。\n"
+	triageMD = "---\nagent: judge\nquestion_type: choice\nchoices: [task, note, ignore]\non_undecided: ignore\n---\n这条来源事件是否值得建议？资料段只作依据。\n"
 	packYAML = "name: inbound-triage\nversion: 1.0.0\ndescription: capture fixture\n"
 )
 
@@ -81,7 +81,7 @@ func setup(t *testing.T) *env {
 	}
 	if err := st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.ModelEndpoint = policy.ModelEndpoint{URL: stub.URL(), Model: "m1", APIKey: "k", ScreeningTimeoutMs: 1000}
+			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: stub.URL(), Model: "m1", APIKey: "k"}, 1000
 			return nil
 		})
 		return err

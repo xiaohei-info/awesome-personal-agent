@@ -30,6 +30,15 @@ type Signal struct {
 	Why      string `json:"why,omitempty"`
 	Next     string `json:"next"`
 	Detail   any    `json:"detail,omitempty"`
+	// Rejections 只有 pack_rejections 给：逐个列出被拒的包、来源与原因（要改的字段和 C.7 的新写法）。detail 仍是包名列表。
+	Rejections []PackRejection `json:"rejections,omitempty"`
+}
+
+// PackRejection 是 pack_rejections 的一条。
+type PackRejection struct {
+	Pack   string `json:"pack"`
+	Source string `json:"source"`
+	Reason string `json:"reason"`
 }
 
 // Severity 的取值。
@@ -169,5 +178,18 @@ func build(v khealth.View) Report {
 		sig("other_alerts", len(v.OtherAlerts), "a health alert without a dedicated signal was recorded, such as a failed rule action",
 			"audit page; open the object named in detail", ids(v.OtherAlerts, func(a khealth.OtherAlert) string { return a.Object })),
 	}}
+	return withRejections(rep, v.PackRejections)
+}
+
+// withRejections 给 pack_rejections 补上逐字段的原因（C.11）；本人据此就能修。
+func withRejections(rep Report, rs []packs.Rejection) Report {
+	for i := range rep.Signals {
+		if rep.Signals[i].ID != "pack_rejections" {
+			continue
+		}
+		for _, r := range rs {
+			rep.Signals[i].Rejections = append(rep.Signals[i].Rejections, PackRejection{r.Pack, string(r.Source), r.Reason})
+		}
+	}
 	return rep
 }

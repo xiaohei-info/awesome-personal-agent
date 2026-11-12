@@ -57,11 +57,11 @@ func one(t *testing.T, s *Store, sql string, args ...any) (v any) {
 }
 
 var items = Module{Name: "items", Migrations: []Migration{
-	{1, "create", "CREATE TABLE items_item (id INTEGER PRIMARY KEY, title TEXT NOT NULL)"},
-	{2, "add-note", "ALTER TABLE items_item ADD COLUMN note TEXT; CREATE INDEX items_item_title ON items_item(title)"},
+	{Version: 1, Name: "create", SQL: "CREATE TABLE items_item (id INTEGER PRIMARY KEY, title TEXT NOT NULL)"},
+	{Version: 2, Name: "add-note", SQL: "ALTER TABLE items_item ADD COLUMN note TEXT; CREATE INDEX items_item_title ON items_item(title)"},
 }}
 var events = Module{Name: "events", Migrations: []Migration{
-	{1, "create", "CREATE TABLE events_event (id INTEGER PRIMARY KEY, item_id INTEGER, body BLOB)"},
+	{Version: 1, Name: "create", SQL: "CREATE TABLE events_event (id INTEGER PRIMARY KEY, item_id INTEGER, body BLOB)"},
 }}
 
 // ACT-DPL-05：落盘语义（WAL + 同步落盘），重启后数据仍在。
@@ -265,7 +265,7 @@ func TestMigrationHistoryIsAppendOnly(t *testing.T) {
 	home := t.TempDir()
 	open(t, home, mustReg(t, items, events)).Close()
 
-	edited := Module{Name: "items", Migrations: append([]Migration{{1, "create", "CREATE TABLE items_item (id INTEGER PRIMARY KEY)"}}, items.Migrations[1:]...)}
+	edited := Module{Name: "items", Migrations: append([]Migration{{Version: 1, Name: "create", SQL: "CREATE TABLE items_item (id INTEGER PRIMARY KEY)"}}, items.Migrations[1:]...)}
 	if _, err := Open(home, mustReg(t, edited, events)); !errors.Is(err, ErrMigrationChanged) {
 		t.Fatalf("edited migration: %v", err)
 	}
@@ -280,15 +280,15 @@ func TestMigrationHistoryIsAppendOnly(t *testing.T) {
 func TestFailedMigrationRollsBackAtomically(t *testing.T) {
 	home := t.TempDir()
 	bad := Module{Name: "bad", Migrations: []Migration{
-		{1, "ok", "CREATE TABLE bad_a (id INTEGER)"},
-		{2, "half", "CREATE TABLE bad_b (id INTEGER); INSERT INTO nope VALUES (1)"},
+		{Version: 1, Name: "ok", SQL: "CREATE TABLE bad_a (id INTEGER)"},
+		{Version: 2, Name: "half", SQL: "CREATE TABLE bad_b (id INTEGER); INSERT INTO nope VALUES (1)"},
 	}}
 	_, err := Open(home, mustReg(t, bad))
 	if err == nil || !strings.Contains(err.Error(), "bad/2") {
 		t.Fatalf("err = %v", err)
 	}
-	// 第 1 步已提交，第 2 步整体回滚（bad_b 不存在）；修复后同版本号可再次应用。
-	fixed := Module{Name: "bad", Migrations: []Migration{bad.Migrations[0], {2, "half", "CREATE TABLE bad_b (id INTEGER)"}}}
+	// 整个升级在一个事务里：第 2 步失败，第 1 步也一起回滚；修复后同版本号可再次应用。
+	fixed := Module{Name: "bad", Migrations: []Migration{bad.Migrations[0], {Version: 2, Name: "half", SQL: "CREATE TABLE bad_b (id INTEGER)"}}}
 	s := open(t, home, mustReg(t, fixed))
 	if n := one(t, s, "SELECT count(*) FROM store_migrations"); n != int64(2) {
 		t.Fatalf("applied = %v", n)
@@ -299,8 +299,8 @@ func TestRegistryRejectsBadModules(t *testing.T) {
 	r := NewRegistry()
 	for name, m := range map[string]Module{
 		"bad name":  {Name: "Items"},
-		"gap":       {Name: "a", Migrations: []Migration{{2, "x", "SELECT 1"}}},
-		"empty sql": {Name: "b", Migrations: []Migration{{1, "x", ""}}},
+		"gap":       {Name: "a", Migrations: []Migration{{Version: 2, Name: "x", SQL: "SELECT 1"}}},
+		"empty sql": {Name: "b", Migrations: []Migration{{Version: 1, Name: "x", SQL: ""}}},
 	} {
 		if r.Register(m) == nil {
 			t.Errorf("%s accepted", name)

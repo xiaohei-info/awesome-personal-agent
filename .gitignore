@@ -47,3 +47,6 @@ vendor/
 __pycache__/
 *.py[cod]
 .venv/
+
+# 本地构建产物
+/ext/export/export

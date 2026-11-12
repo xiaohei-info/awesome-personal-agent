@@ -2,9 +2,8 @@
 agent: judge
 question_type: choice
 choices: [task, note, ignore]
-confidence_threshold: 0.7
+on_undecided: ignore
 event_stats: proposal_outcome
-escalate_to: triage-title
 timeout: 30s
 ---
 这条来源事件是否值得成为建议？属于哪个 kind：task（要本人做或决定的事）、note（只需记下的信息）、ignore（不值得）。

@@ -68,7 +68,7 @@ type Client struct {
 }
 
 // Complete 发起一次调用。端点未配置时不发请求，返回 ErrNotConfigured。
-func (c *Client) Complete(ctx context.Context, ep policy.ModelEndpoint, req Request) (Response, error) {
+func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req Request) (Response, error) {
 	if ep.URL == "" || ep.Model == "" {
 		return Response{}, ErrNotConfigured
 	}

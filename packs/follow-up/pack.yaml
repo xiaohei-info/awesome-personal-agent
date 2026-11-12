@@ -1,11 +1,13 @@
 name: follow-up
-version: 1.0.0
-description: 等待到期后的跟进：跟进间隔时钟规则，判断催、再等或建议放弃，必要时逐级升级到生成型与任务型
+version: 2.0.0
+description: 等待到期后的跟进梯度与久未推进检查：到期行为由内核固定（已催、再等、放弃），每轮提醒前可由是非题判断能否晚点提
 clock_rules:
   - id: follow-up-interval
     type: follow_up
     schedule: 72h
-    mode: observe
-    do:
-      - action: call_agent
-        prompt: follow-up-judge
+    remind_rounds: 2
+    defer_with: follow-up-defer
+  - id: stale-check
+    type: stale
+    schedule: 24h
+    stale_after: 14d

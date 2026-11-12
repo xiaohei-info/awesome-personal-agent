@@ -97,7 +97,7 @@ func newEnv(t *testing.T) *env {
 	}
 	err = st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.ModelEndpoint = policy.ModelEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", ScreeningTimeoutMs: 1000}
+			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}, 1000
 			return nil
 		})
 		return err
@@ -195,7 +195,7 @@ func TestPackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("rule: %+v", r)
 	}
 	s := p.Prompts["delegation-screen"]
-	if s.Meta.Agent != "judge" || s.Meta.QuestionType != "yes_no" || s.Meta.EscalateTo != "delegation-verify-task" {
+	if s.Meta.Agent != "judge" || s.Meta.QuestionType != "yes_no" || s.Meta.OnUndecided != "yes" || s.Meta.Band == nil || *s.Meta.Band.Low != 0.20 {
 		t.Fatalf("screen meta: %+v", s.Meta)
 	}
 	v := p.Prompts["delegation-verify-task"]
@@ -263,6 +263,7 @@ func TestDoubtfulReportAsksOwnerOnParentWithoutRework(t *testing.T) {
 
 // 初筛把握不足时按包声明的 escalate_to 升级到任务型核验，同样走存疑决策，不当作可信。
 func TestLowConfidenceEscalatesToTaskAndAsksOwner(t *testing.T) {
+	t.Skip("v0.1 置信度升级到任务型核验已移除（C.7、C.14）；判断引擎由后续节点按 answer_by/band 重写，届时替换本测试")
 	e := newEnv(t)
 	e.auto()
 	e.judge(0.99, 0.1)

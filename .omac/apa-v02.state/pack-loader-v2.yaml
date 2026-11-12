@@ -1,4 +1,5 @@
-# sha256: f46861cb756469fb5a1aefec1e9d38c4ec9584ac9c107abbb2625f5e833428de
+# sha256: 7ade4a988341db12c7cfe709715fbe2cb3d6990bb611b1659e84ae876538f702
 work_item_id: 01a1d03e-c4ee-7692-b269-bc43fcd39379
-status: in_progress
-recovery_marker: true
+status: done
+merged: true
+merged_at: '2026-11-12T15:59:45Z'

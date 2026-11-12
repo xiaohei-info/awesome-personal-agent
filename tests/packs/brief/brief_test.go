@@ -404,7 +404,7 @@ func TestGenerateOverrideNeverLeavesBriefSilentlyOpen(t *testing.T) {
 				stub.SetDefault(c.reply)
 				if err := e.st.Update(bg, func(tx *store.Tx) error {
 					_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-						p.ModelEndpoint.URL, p.ModelEndpoint.Model = stub.URL(), "m"
+						p.GenerateEndpoint.URL, p.GenerateEndpoint.Model = stub.URL(), "m"
 						return nil
 					})
 					return err

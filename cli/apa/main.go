@@ -5,6 +5,7 @@ import (
 	"os"
 
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/agents" // 登记 agents 子命令
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/backup" // 登记 backup 子命令
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/context" // 登记 context、persona 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/decisions"

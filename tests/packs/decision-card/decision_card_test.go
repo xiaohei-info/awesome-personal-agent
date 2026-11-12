@@ -50,16 +50,19 @@ func TestGenerativePromptsCarryInsufficientInfoMarker(t *testing.T) {
 // flow-screening：投递阈值与 web_only 初筛是判断型，初筛不声明 event_stats（C.7、§8.4）。
 func TestJudgePromptsAndScreeningHasNoEventStats(t *testing.T) {
 	p := loadPack(t)
-	th, ok := p.Prompts["delivery-threshold"]
-	if !ok || th.Meta.Agent != "judge" || th.Meta.ConfidenceThreshold == nil {
-		t.Fatalf("delivery-threshold must be a judge prompt with confidence_threshold: %+v", th.Meta)
+	dd, ok := p.Prompts["delivery-defer"]
+	if !ok || dd.Meta.Agent != "judge" || dd.Meta.QuestionType != "yes_no" || !dd.Meta.SingleShot || dd.Meta.OnUndecided != "no" || dd.Meta.Band == nil {
+		t.Fatalf("delivery-defer must be a single_shot yes_no judge with on_undecided no: %+v", dd.Meta)
+	}
+	if _, old := p.Prompts["delivery-threshold"]; old {
+		t.Error("v0.1 delivery-threshold must be removed")
 	}
 	sc, ok := p.Prompts["web-only-screening"]
 	if !ok {
 		t.Fatal("missing web-only-screening prompt")
 	}
-	if sc.Meta.Agent != "judge" || sc.Meta.QuestionType != "yes_no" || sc.Meta.ConfidenceThreshold == nil {
-		t.Fatalf("web-only-screening must be a yes_no judge with a threshold: %+v", sc.Meta)
+	if sc.Meta.Agent != "judge" || sc.Meta.QuestionType != "yes_no" || !sc.Meta.SingleShot || sc.Meta.OnUndecided != "yes" || sc.Meta.Band == nil {
+		t.Fatalf("web-only-screening must be a single_shot yes_no judge with on_undecided yes: %+v", sc.Meta)
 	}
 	if sc.Meta.EventStats != "" {
 		t.Errorf("web-only-screening must not declare event_stats, got %q", sc.Meta.EventStats)

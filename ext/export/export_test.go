@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,6 +40,40 @@ func (k *fakeKernel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(code)
 		fmt.Fprint(w, `{"why":"forced","code":"internal"}`)
 		return
+	}
+	if p == "/items" {
+		if _, ok := k.objects["/items"]; !ok { // 没有显式给列表就由各事项对象拼出
+			list := []json.RawMessage{}
+			paths := make([]string, 0, len(k.objects))
+			for path := range k.objects {
+				paths = append(paths, path)
+			}
+			sort.Strings(paths) // 与内核一致：按 id 排序
+			for _, path := range paths {
+				b := k.objects[path]
+				if strings.HasPrefix(path, "/items/") && strings.Count(path, "/") == 2 {
+					var d struct {
+						Item json.RawMessage `json:"item"`
+					}
+					json.Unmarshal([]byte(b), &d)
+					list = append(list, d.Item)
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"items": list})
+			return
+		}
+	}
+	if p == "/materials" {
+		if _, ok := k.objects["/materials"]; !ok {
+			list := []map[string]string{}
+			for path := range k.objects {
+				if strings.HasPrefix(path, "/materials/") && strings.Count(path, "/") == 2 {
+					list = append(list, map[string]string{"id": strings.TrimPrefix(path, "/materials/")})
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"materials": list})
+			return
+		}
 	}
 	if p == "/events" {
 		cur, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
@@ -82,12 +117,21 @@ const hostedJSON = `{"material":{"id":"mat_cc","kind":"doc","title":"托管","lo
 // runUntil 运行导出直到 cond 成立（或超时失败），再取消。
 func runUntil(t *testing.T, k *fakeKernel, dir string, cond func() bool) {
 	t.Helper()
+	o, err := loadOptions("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runUntilOpts(t, k, dir, o, cond)
+}
+
+func runUntilOpts(t *testing.T, k *fakeKernel, dir string, o Options, cond func() bool) {
+	t.Helper()
 	srv := httptest.NewServer(k)
 	defer srv.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Config{URL: srv.URL, Key: "ext-key", Dir: dir, Wait: 0, Idle: 5 * time.Millisecond, Backoff: 5 * time.Millisecond})
+		done <- Run(ctx, Config{URL: srv.URL, Key: "ext-key", Dir: dir, Wait: 0, Idle: 5 * time.Millisecond, Backoff: 5 * time.Millisecond, Opts: o})
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for !cond() && time.Now().Before(deadline) {
@@ -100,6 +144,15 @@ func runUntil(t *testing.T, k *fakeKernel, dir string, cond func() bool) {
 	if !cond() {
 		t.Fatal("condition not reached")
 	}
+}
+
+func defaultOpts(t *testing.T) Options {
+	t.Helper()
+	o, err := loadOptions("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return o
 }
 
 func read(t *testing.T, path string) string {
@@ -147,8 +200,9 @@ func TestExportsItemsAndMaterialsOneWayWithCursor(t *testing.T) {
 	if got := strings.TrimSpace(read(t, filepath.Join(dir, ".apa-export-cursor"))); got != "5" {
 		t.Errorf("cursor = %q, want 5", got)
 	}
-	if n := k.count("GET /v1/items/itm_aa"); n != 1 {
-		t.Errorf("item fetched %d times in one page, want 1", n)
+	// 启动对账取一次；同一页里两条 itm_aa 事件合并成一次。
+	if n := k.count("GET /v1/items/itm_aa"); n != 2 {
+		t.Errorf("item fetched %d times, want 2 (sync + one deduplicated page)", n)
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -168,6 +222,7 @@ func TestResumesFromPersistedCursor(t *testing.T) {
 	k.add(1, "item.created", "itm_aa")
 	k.objects["/items/itm_aa"] = itemJSON
 	dir := t.TempDir()
+	k.objects["/items"] = `{"items":[]}` // 账本列表里没有它：只有重放事件才会去取
 	os.WriteFile(filepath.Join(dir, ".apa-export-cursor"), []byte("1\n"), 0o600)
 	runUntil(t, k, dir, func() bool { return k.count("GET /v1/events?cursor=1") > 0 })
 	if k.count("/items/") != 0 {
@@ -190,9 +245,9 @@ func TestCursorHoldsOnFetchFailureThenRetries(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Config{URL: srv.URL, Key: "k", Dir: dir, Idle: 5 * time.Millisecond, Backoff: 5 * time.Millisecond})
+		done <- Run(ctx, Config{URL: srv.URL, Key: "k", Dir: dir, Idle: 5 * time.Millisecond, Backoff: 5 * time.Millisecond, Opts: defaultOpts(t)})
 	}()
-	for k.count("GET /v1/items/itm_aa") < 2 {
+	for i := 0; k.count("GET /v1/items/itm_aa") < 2 && i < 1000; i++ {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".apa-export-cursor")); err == nil {
@@ -201,11 +256,14 @@ func TestCursorHoldsOnFetchFailureThenRetries(t *testing.T) {
 	k.mu.Lock()
 	delete(k.status, "/items/itm_aa")
 	k.mu.Unlock()
-	for {
+	for i := 0; i < 1000; i++ {
 		if _, err := os.Stat(filepath.Join(dir, "items", "itm_aa.md")); err == nil {
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "items", "itm_aa.md")); err != nil {
+		t.Error("item never exported after the failure cleared")
 	}
 	cancel()
 	<-done
@@ -225,7 +283,7 @@ func TestMissingObjectSkippedButRevokedKeyIsFatal(t *testing.T) {
 	k2.status["/events"] = 401
 	srv := httptest.NewServer(k2)
 	defer srv.Close()
-	err := Run(context.Background(), Config{URL: srv.URL, Key: "revoked", Dir: t.TempDir(), Idle: time.Millisecond, Backoff: time.Millisecond})
+	err := Run(context.Background(), Config{URL: srv.URL, Key: "revoked", Dir: t.TempDir(), Idle: time.Millisecond, Backoff: time.Millisecond, Opts: defaultOpts(t)})
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("err = %v, want fatal 401", err)
 	}
@@ -238,7 +296,7 @@ func TestHostileObjectIDCannotEscapeDir(t *testing.T) {
 	dir := t.TempDir()
 	srv := httptest.NewServer(k)
 	defer srv.Close()
-	err := Run(context.Background(), Config{URL: srv.URL, Key: "k", Dir: dir, Idle: time.Millisecond, Backoff: time.Millisecond})
+	err := Run(context.Background(), Config{URL: srv.URL, Key: "k", Dir: dir, Idle: time.Millisecond, Backoff: time.Millisecond, Opts: defaultOpts(t)})
 	if err == nil {
 		t.Fatal("expected error for unsafe id")
 	}

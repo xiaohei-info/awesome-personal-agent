@@ -68,6 +68,30 @@ var Module = store.Module{Name: "outcall_proc", Migrations: []store.Migration{{
 );
 CREATE INDEX outcall_run_state ON outcall_run(queue, state, explicit, seq);
 CREATE INDEX outcall_run_target ON outcall_run(target, state);`,
+}, {
+	// 账本结构版本 3：判断记录（§6.16）。不含资料正文；levels 是逐级结果的 JSON；
+	// review 为空表示未抽检，否则 should_see 或 correct。物理删除来源事件或事项时按 subject 一并删除。
+	Version: 2, Ledger: 3, Name: "ledger-v3-judgment",
+	SQL: `CREATE TABLE outcall_judgment (
+	id TEXT PRIMARY KEY,
+	use TEXT NOT NULL,
+	template TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	source TEXT NOT NULL DEFAULT '',
+	fingerprint TEXT NOT NULL,
+	band TEXT NOT NULL,
+	levels TEXT NOT NULL,
+	decided_by TEXT NOT NULL,
+	answer TEXT NOT NULL,
+	low_confidence INTEGER NOT NULL DEFAULT 0,
+	shadow INTEGER NOT NULL DEFAULT 0,
+	review TEXT NOT NULL DEFAULT '',
+	reviewed_at INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX outcall_judgment_subject ON outcall_judgment(subject);
+CREATE INDEX outcall_judgment_use ON outcall_judgment(use, created_at);
+CREATE INDEX outcall_judgment_source ON outcall_judgment(source, created_at) WHERE source <> '';`,
 }}}
 
 // Spec 是子进程的统一契约："命令 + stdin JSON → 退出码 + stdout"。

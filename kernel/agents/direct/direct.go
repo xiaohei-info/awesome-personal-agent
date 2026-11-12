@@ -52,7 +52,7 @@ CREATE TABLE direct_health (
 
 // Completer 是外呼调用器的模型 HTTP（model.Client 满足它）。
 type Completer interface {
-	Complete(ctx context.Context, ep policy.ModelEndpoint, req model.Request) (model.Response, error)
+	Complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request) (model.Response, error)
 }
 
 // PackSource 取已加载的能力包（packs.Loader 满足它）。
@@ -307,7 +307,7 @@ func judgeSchema(m packs.PromptMeta) (json.RawMessage, error) {
 }
 
 // fingerprint = 模板版本（包内容 hash + 模板名）+ 结构化输入 + 资料正文 + 模型。统计不在其中（§8.5）。
-func fingerprint(pk *packs.Pack, tmpl string, input json.RawMessage, material string, ep policy.ModelEndpoint) (string, error) {
+func fingerprint(pk *packs.Pack, tmpl string, input json.RawMessage, material string, ep policy.GenerateEndpoint) (string, error) {
 	var in any = map[string]any{}
 	if len(bytes.TrimSpace(input)) > 0 {
 		dec := json.NewDecoder(bytes.NewReader(input))
@@ -336,7 +336,7 @@ func newRunID() (string, error) {
 }
 
 type prepared struct {
-	ep     policy.ModelEndpoint
+	ep     policy.GenerateEndpoint
 	fp     string
 	cached json.RawMessage
 	stats  *Stats
@@ -374,7 +374,7 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		if err != nil {
 			return err
 		}
-		p.ep = pol.ModelEndpoint
+		p.ep = pol.GenerateEndpoint
 		if p.ep.URL == "" || p.ep.Model == "" {
 			return model.ErrNotConfigured
 		}
@@ -440,7 +440,7 @@ func normalizeJudgement(raw json.RawMessage) json.RawMessage {
 }
 
 // complete 带退避重试地调用模型。只重试端点侧的暂时性失败；模型已答复但不合 schema、请求本身不对都如实返回。
-func (s *Service) complete(ctx context.Context, ep policy.ModelEndpoint, req model.Request) (model.Response, error) {
+func (s *Service) complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request) (model.Response, error) {
 	wait := s.o.Backoff
 	var last error
 	for i := 0; i < s.o.Attempts; i++ {
