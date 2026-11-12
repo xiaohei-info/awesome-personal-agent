@@ -31,6 +31,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 )
@@ -146,7 +147,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, executors.Module, proc.Module, runidentity.Module, delegation.Module, materials.Module, Module} {
+		items.Module, executors.Module, runner.Module, proc.Module, runidentity.Module, delegation.Module, materials.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -1327,4 +1328,62 @@ type captureGen struct {
 func (c captureGen) Do(ctx context.Context, d direct.Call) (direct.Outcome, error) {
 	*c.seen = d.Material
 	return c.fakeGen.Do(ctx, d)
+}
+
+// attach 给事项挂上一条来源事件（pending）。
+func (e *env) attach(item, id, sender string, verified bool) {
+	e.t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		ev := domain.SourceEvent{ID: id, Type: "mail", Subject: "s-" + id, Sender: sender, SenderVerified: verified, OccurredAt: t0}
+		if err := runner.AppendInternal(tx, domain.Source{ID: "mail"}, ev); err != nil {
+			return err
+		}
+		evs, err := runner.Pending(tx) // 刚追加的是唯一一条待判断的
+		if err != nil || len(evs) != 1 {
+			return fmt.Errorf("pending events: %d %v", len(evs), err)
+		}
+		return runner.SetAttachState(tx, evs[0].ID, runner.AttachPending, item)
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// ACT-CAS-20：生成型信息不足接力到任务型时，事项上含未进转发白名单的挂靠消息就不拉起任务型，事项转 needs_input 并写明原因；
+// 白名单内的消息照常作为资料交给任务型。
+func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "summary")
+	e.setDefaultHarness("hx")
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "fwd", func(p *policy.Policy) error {
+			p.ForwardAllowlist = map[string][]string{"mail": {"boss@example.com"}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	relay := fakeGen{direct.Outcome{HandoffTask: "brief", Reason: "insufficient_info", Steps: []direct.Step{{RunID: "run_g", Result: json.RawMessage(`{"insufficient_info":true,"seen":"relay-marker"}`)}}}, e.st}
+	h := e.svc.CallAgent(AgentOptions{Generate: relay})
+
+	blocked := e.openItem()
+	e.attach(blocked, "m1", "boss@example.com", true)
+	e.attach(blocked, "m2", "stranger@example.com", true)
+	if err := h(bg, e.call("gen", blocked)); err != nil {
+		t.Fatal(err)
+	}
+	it := e.item(blocked)
+	if len(e.runList()) != 0 || it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "白名单") {
+		t.Fatalf("task agent must not run: runs %d item %+v", len(e.runList()), it)
+	}
+
+	ok := e.openItem()
+	e.attach(ok, "m3", "boss@example.com", true)
+	if err := h(bg, e.call("gen", ok)); err != nil {
+		t.Fatal(err)
+	}
+	res := e.waitResult()
+	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); res.Run.Target != ok || !strings.Contains(m, "boss@example.com") || !strings.Contains(m, "relay_input") || !strings.Contains(m, "relay-marker") {
+		t.Fatalf("listed message and the generate step's verdict must reach the task agent: %s", m)
+	}
 }

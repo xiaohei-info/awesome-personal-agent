@@ -11,12 +11,15 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/backup"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -32,7 +35,8 @@ func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRe
 func defaultConfig() string {
 	d := config.Default()
 	return "# APA 运行配置。listen 默认只绑本机回环；跨设备访问需改成非回环地址，并经 HTTPS 暴露（设计 §14.13）。\n" +
-		"listen: " + d.Listen + "\n"
+		"listen: " + d.Listen + "\n" +
+		"# 监听非本机地址时必须再配置 https 的 public_url，否则 apa serve 拒绝启动：\n# public_url: https://apa.example.com\n"
 }
 
 // initCmd 建立数据目录、账本与 config.yaml，并设置 Web 登录口令。
@@ -41,18 +45,27 @@ func initCmd(c *client.Ctx, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fromStdin := fs.Bool("password-stdin", false, "")
+	reset := fs.Bool("reset-password", false, "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
-		return usage("invalid arguments for init", "usage: apa init [--password-stdin]")
+		return usage("invalid arguments for init", "usage: apa init [--reset-password] [--password-stdin]")
 	}
 	home, err := config.ResolveHome(c.Env.Getenv, c.Env.UserHome)
 	if err != nil {
 		return usage("cannot locate the APA home directory", "set APA_HOME to an absolute path")
 	}
+	l := config.LayoutOf(home)
+	if *reset { // 只重设口令：没有账本就没有可重设的，不隐式建库
+		if _, err := os.Stat(l.Ledger); err != nil {
+			return usage("the APA home has not been initialized", "run `apa init` first")
+		}
+	}
 	pw, err := readPassword(c, *fromStdin)
 	if err != nil {
 		return err
 	}
-	l := config.LayoutOf(home)
+	if utf8.RuneCountInString(pw) < core.MinPasswordLen { // 先于建目录与开库：被拒时不写入任何东西
+		return usage("password is too short", "use at least 12 characters")
+	}
 	if err := l.Ensure(); err != nil {
 		return err
 	}
@@ -68,7 +81,19 @@ func initCmd(c *client.Ctx, args []string) error {
 		return err
 	}
 	defer st.Close()
-	if err := st.Update(context.Background(), func(tx *store.Tx) error { return core.SetOwnerPassword(tx, pw) }); err != nil {
+	if err := st.Update(context.Background(), func(tx *store.Tx) error {
+		if err := core.SetOwnerPassword(tx, pw); err != nil {
+			return err
+		}
+		if !*reset {
+			return nil
+		}
+		// 重设是追加一条审计 Event，账本其余内容不动；载荷不含口令。
+		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvAuthPasswordChanged, Object: "owner", Reason: "login password reset on the host; sessions revoked",
+			Payload: []byte(`{"via":"apa init --reset-password"}`), At: clock.Now(),
+			Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaCLI}})
+		return err
+	}); err != nil {
 		return err
 	}
 	return c.Print(map[string]any{"ok": true, "home": home})
@@ -95,7 +120,7 @@ func readPassword(c *client.Ctx, fromStdin bool) (string, error) {
 	line := func() (string, error) {
 		s, err := r.ReadString('\n')
 		if err != nil && !(errors.Is(err, io.EOF) && s != "") {
-			return "", usage("no password given", "type a password (at least 8 characters), or pipe it to `apa init --password-stdin`")
+			return "", usage("no password given", "type a password (at least 12 characters), or pipe it to `apa init --password-stdin`")
 		}
 		return strings.TrimRight(s, "\r\n"), nil
 	}
@@ -111,7 +136,7 @@ func readPassword(c *client.Ctx, fromStdin bool) (string, error) {
 			}
 		}
 	}
-	io.WriteString(c.Env.Stderr, "Web login password (at least 8 characters): ")
+	io.WriteString(c.Env.Stderr, "Web login password (at least 12 characters): ")
 	a, err := line()
 	if err != nil {
 		return "", err
