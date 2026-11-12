@@ -238,3 +238,40 @@ func TestExtCredentialAndAnonymousAreRejected(t *testing.T) {
 		t.Fatalf("anonymous: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// 验收 ACT-OBD-13：外发范围未选而未判定的事件计入 unjudged_backlog 的 outbound_unset，信号是提醒级（不影响 healthy），
+// next 指向来源页去选范围；它们与模型端点没配置无关，不会让 model_unavailable 报警。
+func TestUnjudgedBacklogCountsOutboundUnset(t *testing.T) {
+	e := setup(t, fakePacks(nil))
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for id, reason := range map[string]string{"ev1": "outbound_unset", "ev2": "outbound_unset", "ev3": "undecided"} {
+			if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link,
+				occurred_at, correlation_keys, sender, sender_verified, disposition, unjudged_reason) VALUES ('d', ?, ?, 'src_rss', 'run', 't', 's', '', '', '', 0, '[]', '', 0, 'unjudged', ?)`,
+				id, id, reason); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report(auth.Observer)
+	var sig Signal
+	for _, s := range r.Signals {
+		switch s.ID {
+		case "unjudged_backlog":
+			sig = s
+		case "model_unavailable":
+			if !s.OK {
+				t.Errorf("held-back events must not blame the model endpoint: %+v", s)
+			}
+		}
+	}
+	d, _ := sig.Detail.(map[string]any)
+	if sig.OK || sig.Severity != SeverityWarning || !r.Healthy || sig.Count != 3 || d["outbound_unset"] != float64(2) || d["undecided"] != float64(1) || d["model_unavailable"] != float64(0) {
+		t.Fatalf("signal %+v healthy=%v", sig, r.Healthy)
+	}
+	if !strings.Contains(sig.Next, "outbound scope") {
+		t.Fatalf("next does not point to choosing the scope: %q", sig.Next)
+	}
+}

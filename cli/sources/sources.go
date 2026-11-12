@@ -18,7 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--config JSON] [--enabled=false] | " +
+const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
 	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | auth <id>"
 
 func init() { client.Register("source", source) }
@@ -146,6 +146,7 @@ func addBody(args []string) (map[string]any, error) {
 	str("source-type", "source_type")
 	str("credentials-path", "credentials_path")
 	str("dedupe-domain", "dedupe_domain")
+	str("default-project", "default_project")
 	fs.Func("timeout", "", func(v string) error {
 		n, err := strconv.Atoi(v)
 		body["timeout"] = n

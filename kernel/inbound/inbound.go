@@ -222,6 +222,7 @@ type snapshot struct {
 	made    map[string]string // 来源事件 id → 已为它建出的事项（上一轮中途失败留下的）
 	projs   []domain.Project
 	policy  int
+	gen     policy.GenerateEndpoint // 入站判断与起草实际调用的端点：外发范围按它的位置取
 }
 
 func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
@@ -269,7 +270,9 @@ func (sn *snapshot) loadFacts(tx *store.Tx) error {
 			sn.made[x.SourceEvent] = it.ID
 		}
 	}
-	sn.policy, _, err = policy.Current(tx)
+	var pol policy.Policy
+	sn.policy, pol, err = policy.Current(tx)
+	sn.gen = pol.GenerateEndpoint
 	return err
 }
 
@@ -278,8 +281,10 @@ func (sn *snapshot) source(id string) (domain.Source, error) {
 	if src, ok := sn.sources[id]; ok {
 		return src, nil
 	}
-	if _, isCapture := captureProject(id); isCapture {
-		return captureSource(id), nil
+	if proj, isCapture := captureProject(id); isCapture {
+		src := captureSource(id)
+		src.Outbound = captureOutbound(sn.projs, proj)
+		return src, nil
 	}
 	return domain.Source{}, fmt.Errorf("source %s is not registered", id)
 }
@@ -428,8 +433,13 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 			d := disposeIn{Event: ev.ID, Disposition: domain.DispositionIgnored, Reason: verdict}
 			if verdict != ChoiceIgnore {
 				d.Disposition, d.UnjudgedReason = domain.DispositionUnjudged, domain.UnjudgedUndecided
-				if strings.HasPrefix(verdict, unavailablePrefix) {
+				switch {
+				case strings.HasPrefix(verdict, unavailablePrefix):
 					d.UnjudgedReason = domain.UnjudgedModelUnavailable
+				case strings.HasPrefix(verdict, outboundUnsetPrefix):
+					d.UnjudgedReason = domain.UnjudgedOutboundUnset
+				case strings.HasPrefix(verdict, outboundNonePrefix):
+					d.Disposition, d.UnjudgedReason = domain.DispositionDigest, ""
 				}
 			}
 			return s.dispose(ctx, m, ev, d)
@@ -445,8 +455,37 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	return s.propose(ctx, sn, src, ev, m, prop, project)
 }
 
-// unavailablePrefix 开头的 verdict 表示因模型不可用而未判定（会自动重判），其余未判定是判断未定。
-const unavailablePrefix = "model unavailable: "
+// verdict 的前缀：模型不可用而未判定（自动重判）；外发范围未选而未判定（选定后自动重判）；外发范围对可用端点都是 none（改走摘要出口）。
+// 其余未判定是判断未定。
+const (
+	unavailablePrefix   = "model unavailable: "
+	outboundUnsetPrefix = "outbound scope not chosen: "
+	outboundNonePrefix  = "outbound scope is none: "
+)
+
+// localities 是入站流水线此刻实际会调用的端点的位置；端点未配置时为空（调用方自己报不可用，不会发出请求）。
+func (sn *snapshot) localities() []string {
+	if sn.gen.URL == "" || sn.gen.Model == "" {
+		return nil
+	}
+	return []string{sn.gen.Locality}
+}
+
+// outboundBlock 报告外发控制此刻是否拦下这个来源的内容（registry.BlockUnset、BlockNone 或空）。
+func (sn *snapshot) outboundBlock(src domain.Source) string {
+	return registry.Decide(src.Outbound, sn.localities()...).Block
+}
+
+// captureOutbound 是项目对话捕获的外发范围：本机端点收全文，外部范围取项目的 capture_outbound，未选择则外部端点不送（§6.5、§14.14）。
+func captureOutbound(projs []domain.Project, project string) domain.Outbound {
+	o := domain.Outbound{Local: registry.ScopeFull}
+	for _, p := range projs {
+		if p.ID == project {
+			o.External = p.CaptureOutbound
+		}
+	}
+	return o
+}
 
 // judge 返回要建的事项；verdict 非空表示不建：ChoiceIgnore 是不值得，其余是未判定的原因。
 func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, hint string) (proposal, string, error) {
@@ -454,9 +493,23 @@ func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev 
 	if m != nil {
 		pack = m.pack
 	}
-	in, _ := json.Marshal(map[string]any{"source": src.ID, "source_type": src.SourceKind, "event_type": ev.Type,
-		"subject": ev.Subject, "summary": ev.Summary, "link": ev.Link, "sender": ev.Sender, "sender_verified": ev.SenderVerified, "correlation_hint": hint})
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: Template, Input: in, Material: ev.Detail,
+	// 外发控制（§14.14）：先按端点位置取范围，再裁剪；裁剪后的内容才进请求与输入指纹。端点未配置时不会发出请求，Judge 自己报不可用。
+	dec := registry.Decide(src.Outbound, sn.localities()...)
+	switch dec.Block {
+	case registry.BlockUnset:
+		return proposal{}, outboundUnsetPrefix + "the external endpoint has no outbound scope for source " + src.ID, nil
+	case registry.BlockNone:
+		return proposal{}, outboundNonePrefix + "no endpoint may receive content from source " + src.ID, nil
+	}
+	scope := registry.ScopeMeta
+	if len(dec.Scopes) > 0 {
+		scope = dec.Scopes[0]
+	}
+	t, _ := registry.Trim(ev, scope)
+	in, _ := json.Marshal(map[string]any{"source": src.ID, "source_type": src.SourceKind, "event_type": t.Type,
+		"subject": t.Subject, "summary": t.Summary, "link": t.Link, "sender": t.Sender, "sender_verified": ev.SenderVerified,
+		"occurred_at": t.OccurredAt, "correlation_hint": hint})
+	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: Template, Input: in, Material: t.Detail,
 		Scope: direct.Scope{Source: src.ID},
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource},
 		Basis: &domain.Basis{PolicyVersion: sn.policy, RuleID: m.key()}})
