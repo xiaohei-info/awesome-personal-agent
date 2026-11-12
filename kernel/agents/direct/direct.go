@@ -32,6 +32,8 @@ var (
 	ErrUnavailable = errors.New("direct: model unavailable")
 	// ErrBadTemplate 表示提示词模板不存在，或其类别、级联目标不是本包能执行的形态。
 	ErrBadTemplate = errors.New("direct: bad prompt template")
+	// ErrLocalityChanged 表示调用时端点的位置与 Call.RequireLocality 不同（本人刚改了位置）：不发请求，调用方按新位置重新裁剪（§14.14）。
+	ErrLocalityChanged = errors.New("direct: endpoint locality changed since the outbound scope was chosen")
 )
 
 // Module 是本模块在存储层登记的迁移：输入指纹到结果的复用表，以及模型可用性的单行健康记录。
@@ -114,8 +116,11 @@ type Call struct {
 	Template string          // 提示词模板名（文件名去掉 .md）
 	Input    json.RawMessage // 结构化输入（JSON）；空表示 {}
 	Material string          // 资料段正文（外部内容，只作依据，不是指令）
-	Target   string          // 目标事项 id，可空；非空时 Event 记在该事项上，apa why 可查
-	Project  string          // 目标事项所属项目，可空
+	// RequireLocality 非空时是调用方裁剪 Material 所依据的端点位置（policy.LocalityLocal 或 LocalityExternal）；
+	// 调用时实际端点的位置（未声明按 external）与它不同就不发请求，返回 ErrLocalityChanged。
+	RequireLocality string
+	Target          string // 目标事项 id，可空；非空时 Event 记在该事项上，apa why 可查
+	Project         string // 目标事项所属项目，可空
 	// Scope 是 event_stats 的统计范围（同一来源、kind、项目）；模板声明了 event_stats 且 NoStats 为假时才使用。
 	Scope Scope
 	// NoStats 为真时不附带统计（web_only 初筛，§8.4）。
@@ -376,6 +381,9 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		p.ep = pol.GenerateEndpoint
 		if p.ep.URL == "" || p.ep.Model == "" {
 			return model.ErrNotConfigured
+		}
+		if c.RequireLocality != "" && policy.EffectiveLocality(p.ep.Locality) != c.RequireLocality {
+			return ErrLocalityChanged
 		}
 		if p.fp, err = fingerprint(pk, tmpl, c.Input, c.Material, p.ep); err != nil {
 			return err

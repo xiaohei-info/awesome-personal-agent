@@ -1,6 +1,8 @@
 package inbound
 
 import (
+	"context"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -271,5 +273,77 @@ func TestCaptureRejudgedAfterProjectScopeChosen(t *testing.T) {
 	}
 	if !strings.Contains(e.sent(0), "CAP-MARK") {
 		t.Fatal("rejudge did not reach the model")
+	}
+}
+
+// hookJudge 在第一次调用模型时先执行 before（模拟本人在一批事件处理中途改设置），再交给真实的判断型。
+type hookJudge struct {
+	Judge
+	before func()
+	calls  int
+}
+
+func (h *hookJudge) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
+	h.calls++
+	if h.calls == 1 {
+		h.before()
+	}
+	return h.Judge.Do(ctx, c)
+}
+
+// 评审阻断项：外发范围与端点位置按事件重读，而不是整批快照。同一批两条事件，处理第一条时本人把范围改成 meta / none /
+// 把本机端点改成外部：第二条只送新范围（或不送）。
+func TestScopeChangeMidBatchAppliesToNextEvent(t *testing.T) {
+	cases := []struct {
+		name    string
+		change  func(e *env)
+		has     []string
+		missing []string
+		reqs    int // 第二条事件产生的请求数
+		disp    domain.Disposition
+	}{
+		{"scope full→meta", func(e *env) { e.outbound(obdSrc, "full", "meta") }, []string{"docs.example.org"}, []string{"HEAD-MARK", "TAIL-MARK", "SUM-MARK"}, 1, domain.DispositionProposed},
+		{"scope full→none", func(e *env) { e.outbound(obdSrc, "full", "none") }, nil, nil, 0, domain.DispositionDigest},
+		{"locality local→external", func(e *env) { e.locality("external") }, []string{"docs.example.org"}, []string{"HEAD-MARK", "TAIL-MARK"}, 1, domain.DispositionProposed},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t, true)
+			e.judge(`{"choice":"task","confidence":0.95}`)
+			e.locality("external")
+			e.registerObd("full", "full")
+			if c.name == "locality local→external" {
+				e.outbound(obdSrc, "full", "meta") // 外部范围更窄；本机端点仍收全文
+			}
+			if c.name == "locality local→external" {
+				e.locality("local")
+			}
+			e.svc.o.Judge = &hookJudge{Judge: e.svc.o.Judge, before: func() { c.change(e) }}
+			e.emit(obdSrc, "inbox", obdEvent("o1", "OBD-1 外发测试"), obdEvent("o2", "OBD-2 外发测试"))
+			rs := e.stub.Requests()
+			if len(rs) != 1+c.reqs {
+				t.Fatalf("requests = %d, want %d", len(rs), 1+c.reqs)
+			}
+			// 位置在 Judge 调用时才变：Judge 拒绝按旧位置发送，第一条按新位置重新裁剪，同样不得带全文
+			if strings.Contains(c.name, "locality") == strings.Contains(rs[0].BodyText, "TAIL-MARK") {
+				t.Fatalf("first request has the wrong scope (locality case must be re-trimmed, others keep the starting scope): %.120s", rs[0].BodyText)
+			}
+			if c.reqs == 1 {
+				second := rs[1].BodyText
+				for _, w := range c.has {
+					if !strings.Contains(second, w) {
+						t.Errorf("%q missing from the second request", w)
+					}
+				}
+				for _, w := range c.missing {
+					if strings.Contains(second, w) {
+						t.Errorf("%q leaked after the scope changed", w)
+					}
+				}
+			}
+			if got := e.byID(obdSrc)["o2"]; got.Disposition != c.disp {
+				t.Fatalf("second event: %+v", got)
+			}
+		})
 	}
 }

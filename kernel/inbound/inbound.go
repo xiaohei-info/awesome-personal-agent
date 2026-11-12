@@ -494,7 +494,52 @@ func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev 
 		pack = m.pack
 	}
 	// 外发控制（§14.14）：先按端点位置取范围，再裁剪；裁剪后的内容才进请求与输入指纹。端点未配置时不会发出请求，Judge 自己报不可用。
-	dec := registry.Decide(src.Outbound, sn.localities()...)
+	// 范围与端点位置在每次调用前重读（不用整轮的快照：积压很多时本人中途改的范围必须立即生效）；
+	// 调用时位置又变了，Judge 拒绝发送，这里按新位置重来。
+	for attempt := 0; ; attempt++ {
+		prop, verdict, err := s.judgeOnce(ctx, sn, src, ev, m, hint, pack)
+		if errors.Is(err, direct.ErrLocalityChanged) && attempt < 3 {
+			continue
+		}
+		return prop, verdict, err
+	}
+}
+
+// freshOutbound 读此刻的外发范围与生成端点（不走整轮快照）。
+func (s *Service) freshOutbound(ctx context.Context, src domain.Source) (domain.Outbound, policy.GenerateEndpoint, error) {
+	var (
+		o   = src.Outbound
+		gen policy.GenerateEndpoint
+	)
+	err := s.o.Store.View(ctx, func(tx *store.Tx) error {
+		_, pol, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		gen = pol.GenerateEndpoint
+		if proj, isCapture := captureProject(src.ID); isCapture {
+			p, err := projects.Get(tx, proj)
+			if err != nil {
+				return err
+			}
+			o = captureOutbound([]domain.Project{p}, proj)
+			return nil
+		}
+		cur, err := registry.Get(tx, src.ID)
+		o = cur.Outbound
+		return err
+	})
+	return o, gen, err
+}
+
+func (s *Service) judgeOnce(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, hint, pack string) (proposal, string, error) {
+	outbound, ep, err := s.freshOutbound(ctx, src)
+	if err != nil {
+		return proposal{}, "", err
+	}
+	fresh := snapshot{gen: ep}
+	locs := fresh.localities()
+	dec := registry.Decide(outbound, locs...)
 	switch dec.Block {
 	case registry.BlockUnset:
 		return proposal{}, outboundUnsetPrefix + "the external endpoint has no outbound scope for source " + src.ID, nil
@@ -509,7 +554,11 @@ func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev 
 	in, _ := json.Marshal(map[string]any{"source": src.ID, "source_type": src.SourceKind, "event_type": t.Type,
 		"subject": t.Subject, "summary": t.Summary, "link": t.Link, "sender": t.Sender, "sender_verified": ev.SenderVerified,
 		"occurred_at": t.OccurredAt, "correlation_hint": hint})
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: Template, Input: in, Material: t.Detail,
+	require := ""
+	if len(locs) > 0 {
+		require = policy.EffectiveLocality(locs[0])
+	}
+	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: Template, Input: in, Material: t.Detail, RequireLocality: require,
 		Scope: direct.Scope{Source: src.ID},
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource},
 		Basis: &domain.Basis{PolicyVersion: sn.policy, RuleID: m.key()}})

@@ -151,6 +151,14 @@ const (
 	DefaultScreeningTimeoutMs    = 30000
 )
 
+// EffectiveLocality 是端点位置的实际取值：未声明按 external（§14.14）。
+func EffectiveLocality(l string) string {
+	if l == LocalityLocal {
+		return LocalityLocal
+	}
+	return LocalityExternal
+}
+
 // GenerateEndpoint 是对话补全兼容的生成端点；空 URL 表示未配置。APIKey 只存账本，不进 Event。
 // Locality 由本人声明端点是否在自己可控的主机上，未声明按 external（§14.14）。
 type GenerateEndpoint struct {
