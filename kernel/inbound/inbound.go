@@ -94,7 +94,15 @@ type Options struct {
 	Now func() time.Time
 	// Rejudge 是自动重判的上限与节流，零值取 DefaultRejudge。
 	Rejudge RejudgeLimits
+	// Series 是变化类字段条件（changed、crosses_*）取同一序列上一次取值的来源；可为空（此时这类条件恒不成立）。
+	Series rules.Series
+	// Extract 与 Alert 处理 then: extract、then: alert 的出口，由各自的模块注入；没注入时命中这两种出口的事件保持 pending 并报错，不假装处理。
+	Extract Exit
+	Alert   Exit
 }
+
+// Exit 处理一个出口：命中规则 m 的事件 ev 由它写完处置（经命令模型）。
+type Exit func(ctx context.Context, src domain.Source, ev domain.SourceEvent, rule string) error
 
 // Service 消费 pending 的来源事件。
 type Service struct {
@@ -340,6 +348,9 @@ func (s *Service) match(src domain.Source, ev domain.SourceEvent) (*matched, err
 	for _, p := range s.o.Packs.List() {
 		for _, r := range p.SourceRules {
 			ok, err := matchFlat(r.Match, src, ev)
+			if err == nil && ok {
+				ok, err = rules.Where(r.Where, src, ev, s.o.Series)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("source rule %s/%s: %w", p.Name, r.ID, err)
 			}
@@ -410,15 +421,30 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure")
 	}
 	var prop proposal
-	switch {
-	case m != nil && m.rule.Then == "ignore":
+	exit := rules.ExitScreen // 没有规则命中按 screen 处理
+	if m != nil {
+		exit = rules.Exit(m.rule)
+	}
+	switch exit {
+	case rules.ExitIgnore:
 		return s.dispose(ctx, m, ev, disposeIn{Event: ev.ID, Disposition: domain.DispositionIgnored, Reason: "rule " + m.key() + " ignores this event"})
-	case m != nil && (m.rule.Then == "" || m.rule.Then == "proposed"):
-		if m.rule.Kind == "" {
-			return invalid("source rule " + m.key() + " maps directly but declares no kind")
+	case rules.ExitDigest:
+		return s.dispose(ctx, m, ev, disposeIn{Event: ev.ID, Disposition: domain.DispositionDigest, Reason: "rule " + m.key() + " digests this event"})
+	case rules.ExitExtract, rules.ExitAlert:
+		h := s.o.Extract
+		if exit == rules.ExitAlert {
+			h = s.o.Alert
 		}
-		prop = proposal{kind: domain.Kind(m.rule.Kind), title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: "rule " + m.key()}
-	default: // then: judge，或没有规则命中
+		if h == nil {
+			return fmt.Errorf("source rule %s uses the %s exit but no handler is configured", m.key(), exit)
+		}
+		return h(ctx, src, ev, m.key())
+	case rules.ExitProposed:
+		prop = proposal{kind: defaultKind, title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: "rule " + m.key()}
+		if m.rule.Kind != "" {
+			prop.kind = domain.Kind(m.rule.Kind)
+		}
+	default: // screen（含旧名 judge），或没有规则命中
 		var verdict string
 		prop, verdict, err = s.judge(ctx, sn, src, ev, m, hint)
 		if err != nil {
@@ -456,7 +482,11 @@ func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev 
 	}
 	in, _ := json.Marshal(map[string]any{"source": src.ID, "source_type": src.SourceKind, "event_type": ev.Type,
 		"subject": ev.Subject, "summary": ev.Summary, "link": ev.Link, "sender": ev.Sender, "sender_verified": ev.SenderVerified, "correlation_hint": hint})
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: Template, Input: in, Material: ev.Detail,
+	tmpl := Template
+	if m != nil && m.rule.Screen != "" { // 规则按条覆盖初筛模板名
+		tmpl = m.rule.Screen
+	}
+	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: tmpl, Input: in, Material: ev.Detail,
 		Scope: direct.Scope{Source: src.ID},
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource},
 		Basis: &domain.Basis{PolicyVersion: sn.policy, RuleID: m.key()}})
@@ -513,36 +543,39 @@ func orElse(ss ...string) string {
 	return ""
 }
 
-// project 按规则的 project_by 解析归属项目；没有规则、none 或找不到仓库对应的项目时不归项目。
+// project 按 rules.Project 的优先级解析归属项目：规则的 project_by，其次来源的默认项目，都没有则不归项目。
 func (s *Service) project(sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched) (string, error) {
 	if src.SourceKind == CaptureKind { // 对话增量属于提交它的项目，不看规则
 		id, _ := captureProject(src.ID)
 		return id, nil
 	}
 	if m == nil {
+		return src.DefaultProject, nil
+	}
+	repo, err := s.repoProject(sn, src, ev, m.rule.ProjectBy)
+	return rules.Project(m.rule.ProjectBy, repo, src.DefaultProject), err
+}
+
+// repoProject 按 repo_remote 解析项目：远程地址取来源登记 config 里的 remote，否则看事件链接落在哪个项目的仓库之下。
+func (s *Service) repoProject(sn snapshot, src domain.Source, ev domain.SourceEvent, by string) (string, error) {
+	if by != "repo_remote" {
 		return "", nil
 	}
-	switch by := m.rule.ProjectBy; {
-	case strings.HasPrefix(by, "fixed:"):
-		return strings.TrimPrefix(by, "fixed:"), nil
-	case by == "repo_remote":
-		// 远程地址取来源登记 config 里的 remote，否则看事件链接落在哪个项目的仓库之下。
-		var cfg struct {
-			Remote string `json:"remote"`
+	var cfg struct {
+		Remote string `json:"remote"`
+	}
+	if len(src.Config) > 0 {
+		if err := json.Unmarshal(src.Config, &cfg); err != nil {
+			return "", fmt.Errorf("source %s config: %w", src.ID, err)
 		}
-		if len(src.Config) > 0 {
-			if err := json.Unmarshal(src.Config, &cfg); err != nil {
-				return "", fmt.Errorf("source %s config: %w", src.ID, err)
-			}
-		}
-		if p, _, ok := projects.Find(sn.projs, cfg.Remote); ok {
-			return p.ID, nil
-		}
-		for _, p := range sn.projs {
-			for _, r := range p.Repos {
-				if projects.RepoHasLink(r.Remote, ev.Link) {
-					return p.ID, nil
-				}
+	}
+	if p, _, ok := projects.Find(sn.projs, cfg.Remote); ok {
+		return p.ID, nil
+	}
+	for _, p := range sn.projs {
+		for _, r := range p.Repos {
+			if projects.RepoHasLink(r.Remote, ev.Link) {
+				return p.ID, nil
 			}
 		}
 	}
