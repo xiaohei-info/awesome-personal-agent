@@ -10,6 +10,7 @@
 package items
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -294,7 +295,11 @@ func LastRejection(tx *store.Tx, it domain.Item) (*Rejection, error) {
 // {"mode":"explicit","actions":[…]}；每条建议各自成败、各记一条 Event，依据与身份校验对整批一视同仁。
 func (h *handlers) batch(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	var b inbound.BatchRequest
-	dec := json.NewDecoder(r.Body)
+	var raw json.RawMessage
+	if err := core.DecodeJSON(r, &raw); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&b); err != nil {
 		return domain.NewError(domain.CodeInvalidRequest, "request body is not a valid batch", "send {\"mode\":\"recommended\"|\"explicit\", …}")

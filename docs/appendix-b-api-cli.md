@@ -215,7 +215,7 @@
 
 `POST /proposals/batch` 的请求体二选一：`{"mode": "recommended", "filter": {"source"?, "project"?, "ids"?}}` 按推荐处理范围内带推荐的建议；或 `{"mode": "explicit", "actions": [{"id", "do": "accept" \| "attach" \| "dismiss", "to"?, "reason"?}]}`。响应 200 `{"results": [{"id", "do", "ok", "code"?, "why"?}]}`，每条各自成败、各记一条 Event；一次至多 200 条。delegate 调用时依据作用于整批，授权单逐条校验范围。
 
-`POST /items/{id}/attach` 的请求体 `{"to": "<事项 id>"}`：建议转 `dropped`，它的来源事件改挂到目标事项，Event 为 `proposal.attached`；目标已终结返回 409，不存在返回 404（主文档 §7.2）。
+`POST /items/{id}/attach` 的请求体 `{"to": "<事项 id>", "reason"?: "…"}`：建议转 `dropped`，它的来源事件改挂到目标事项，Event 为 `proposal.attached`；目标已终结返回 409，不存在返回 404（主文档 §7.2）。
 
 `GET /judgments` 返回 `{"judgments": [...], "next_after": "<记录 id>"}`，按判断时刻升序；`after` 是上一页最后一条的 id，有下一页时才返回 `next_after`，`limit` 缺省 100、上限 500，`after` 不是已知记录 id 或 `limit` 越界返回 400。运行凭据列表必须带 `subject`，且只读目标事项范围内的记录：`GET /judgments/{id}` 读范围外的记录返回 404（CLI 退出码 5），列表返回空；ext、webhook 凭据返回 403。记录过了保留期（`judgment_retention_days`，缺省 180 天）被清理后返回 404，引用它的命令 Event 与事项不受影响。`GET /judgments/{id}` 返回主文档 §6.16 的字段。`GET /judgments/stats` 返回 `{"rows": [{"use", "template", "source"?, "backend", "calls", "decided", "uncertain", "errors", "reused"}], "rates": [{"use", "template", "source"?, "escalation", "undecided", "acceptance", "false_drop", "reviewed"}], "histogram": [...]}`；`since` 缺省 30 天。
 
