@@ -50,8 +50,8 @@ func TestSameLinkFromTwoSourcesIsOneProposal(t *testing.T) {
 	if a.MergeKey == "" || a.MergeKey != b.MergeKey || a.Item != ps[0].ID || b.Item != ps[0].ID || b.Disposition != domain.DispositionProposed {
 		t.Fatalf("events %+v %+v", a, b)
 	}
-	if es := e.eventsOf(ps[0].ID); countType(es, domain.EvItemUpdated) != 1 {
-		t.Fatalf("merge should leave one item.updated: %+v", es)
+	if es := e.eventsOf(ps[0].ID); countType(es, domain.EvItemUpdated) != 2 { // 写入建议信息一条，并入第二个来源一条
+		t.Fatalf("want item.updated for the proposal and for the merge: %+v", es)
 	}
 	e.verify() // 合并后的事项仍可从事件日志折叠重建
 }
@@ -152,7 +152,7 @@ func TestOldProposalDoesNotMerge(t *testing.T) {
 	if got := e.item(old); got.Phase != domain.PhaseProposed || !slices.Equal(got.Proposal.Sources, []string{"prh-old-a"}) {
 		t.Fatalf("old proposal %+v", got.Proposal)
 	}
-	t.Logf("evs %+v", e.events("src_a")); if len(e.proposed()) != 2 {
+	if len(e.proposed()) != 2 {
 		t.Fatalf("want a second proposal, got %+v", e.allItems())
 	}
 }
@@ -195,4 +195,14 @@ func TestManualProposeMerges(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.verify()
+}
+
+// 建议信息只由入站流水线写入：任何凭据经 item.create 带 proposal 都被拒绝，没有事项被建出。
+func TestItemCreateRejectsProposal(t *testing.T) {
+	e := mergeEnv(t)
+	_, err := e.do(owner, "item.create", "owner said so", map[string]any{"kind": "task", "title": "伪造",
+		"proposal": map[string]any{"recommend": "attach", "attach_to": "itm_nope", "sources": []string{"x"}, "merge_key": "link:https://forged.invalid"}})
+	if code(err) != domain.CodeInvalidRequest || len(e.allItems()) != 0 {
+		t.Fatalf("err %v items %+v", err, e.allItems())
+	}
 }

@@ -693,7 +693,7 @@ func TestProposeUnjudgedManually(t *testing.T) {
 		t.Fatalf("item %+v", it) // kind 缺省 task，项目沿用命中规则的 fixed
 	}
 	if err := e.st.View(bg, func(tx *store.Tx) error {
-		for obj, typ := range map[string]string{id: EvDisposed, got.Item: domain.EvItemCreated} {
+		for obj, typ := range map[string]string{id: EvDisposed, got.Item: domain.EvItemUpdated} {
 			es, err := eventlog.ReadObject(tx, obj)
 			if err != nil {
 				return err

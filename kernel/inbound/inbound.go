@@ -412,8 +412,6 @@ type proposal struct {
 	kind           domain.Kind
 	title, summary string
 	reason         string
-	// mergeKey、attachTo 是合并键（§9.3）：新建的建议带着它，供后来同一件事的事件找到；命中已接受事项时推荐补到 attachTo。
-	mergeKey, attachTo string
 }
 
 func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) error {
@@ -438,7 +436,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 		return merr
 	}
 	if id, ok := sn.made[ev.ID]; ok { // 上一轮建好了事项却没记完处置：接着做，不再判断、不再建
-		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure", mergeFields{MergeKey: mergeKeyOf(ev)})
+		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure", s.resumeFields(ctx, ev))
 	}
 	var prop proposal
 	exit := rules.ExitScreen // 没有规则命中按 screen 处理
@@ -714,13 +712,9 @@ func (s *Service) createItem(ctx context.Context, id command.Identity, rule stri
 	if ref == "" {
 		ref = ev.ID
 	}
-	prop := domain.Proposal{Sources: []string{ev.DedupeKey.EventID}, MergeKey: p.mergeKey}
-	if p.attachTo != "" {
-		prop.Recommend, prop.AttachTo = "attach", p.attachTo
-	}
 	in := map[string]any{"kind": p.kind, "title": p.title, "summary": p.summary, "body": ev.Detail, "project": project,
 		"origin": domain.Origin{Source: src.ID, Actor: ev.Sender, Ref: ref}, "reason": p.reason,
-		"ext": map[string]string{"source_event": ev.ID}, "proposal": prop}
+		"ext": map[string]string{"source_event": ev.ID}}
 	res, err := s.do(ctx, id, rule, "inbound:item:"+ev.ID, "item.create", in, command.Chain{})
 	if err != nil {
 		return "", err

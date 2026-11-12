@@ -76,7 +76,9 @@ func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, even
 	}
 	item, made := sn.made[event]
 	var mf mergeFields
-	if !made {
+	if made {
+		mf = s.resumeFields(ctx, ev)
+	} else {
 		if item, mf, err = s.proposeItem(ctx, id, sn, ev); err != nil {
 			return ev, err
 		}
@@ -115,30 +117,48 @@ func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snaps
 // mergeWindow 是建议接收合并的期限：从建议创建起算。
 const mergeWindow = 7 * 24 * time.Hour
 
-// mergeFields 附在会把来源事件记为 proposed 的命令输入上：MergeKey 记到来源事件；Merge 为真时事项 Item 是已有建议，
-// 事件并入它（记入 proposal.sources），而不是新建。
+// mergeFields 附在会把来源事件记为 proposed 的命令输入上，让建议信息（proposal）只经入站的处置命令写入，
+// 不开放给 item.create（附录 B：proposal 只读）：MergeKey 记到来源事件；
+// Merge 为真时事项 Item 是已有建议，事件并入它（记入 proposal.sources）；
+// New 为真时 Item 是刚为该事件建出的建议，写入它的 proposal（来源、合并键，命中已接受事项时 AttachTo 推荐补到它）。
 type mergeFields struct {
 	MergeKey string `json:"merge_key,omitempty"`
 	Merge    bool   `json:"merge,omitempty"`
+	New      bool   `json:"new,omitempty"`
+	AttachTo string `json:"attach_to,omitempty"`
 }
 
-// applyMerge 在处置命令的事务里落下合并：来源事件记合并键，并入时把事件记进建议的来源并追加 item.updated。
+// applyMerge 在处置命令的事务里落下合并键与建议信息，并追加对应的 item.updated。
 func applyMerge(c *command.Ctx, event, item string, m mergeFields) error {
 	if m.MergeKey != "" {
 		if err := runner.SetMergeKey(c.Tx, event, m.MergeKey); err != nil {
 			return err
 		}
 	}
-	if !m.Merge {
+	if !m.Merge && !m.New {
 		return nil
 	}
 	ev, err := runner.Event(c.Tx, event)
 	if err != nil {
 		return err
 	}
-	w, changed, err := items.AddProposalSource(c.Tx, item, ev.DedupeKey.EventID, c.Now())
-	if err != nil || !changed {
-		return err
+	var w items.Write
+	if m.Merge {
+		var changed bool
+		if w, changed, err = items.AddProposalSource(c.Tx, item, ev.DedupeKey.EventID, c.Now()); err != nil || !changed {
+			return err
+		}
+	} else {
+		p := domain.Proposal{Sources: []string{ev.DedupeKey.EventID}, MergeKey: m.MergeKey}
+		if m.AttachTo != "" {
+			if _, err := items.Get(c.Tx, m.AttachTo); err != nil {
+				return err
+			}
+			p.Recommend, p.AttachTo = "attach", m.AttachTo
+		}
+		if w, err = items.SetProposal(c.Tx, item, p, c.Now()); err != nil {
+			return err
+		}
 	}
 	if _, err := command.Bump(c.Tx, w.Object); err != nil {
 		return err
@@ -219,7 +239,13 @@ func (s *Service) place(ctx context.Context, id command.Identity, rule string, s
 	if into != "" {
 		return into, mergeFields{MergeKey: key, Merge: true}, nil
 	}
-	p.mergeKey, p.attachTo = key, attachTo
 	item, err := s.createItem(ctx, id, rule, src, ev, p, project)
-	return item, mergeFields{MergeKey: key}, err
+	return item, mergeFields{MergeKey: key, New: true, AttachTo: attachTo}, err
+}
+
+// resumeFields 是上一轮建好事项却没记完处置时的合并信息：接着写建议信息；推荐补到哪里按当前账本重新找。
+func (s *Service) resumeFields(ctx context.Context, ev domain.SourceEvent) mergeFields {
+	key := mergeKeyOf(ev)
+	_, attachTo, _ := s.planMerge(ctx, key) // 读不到时只是少一条推荐，不影响处置
+	return mergeFields{MergeKey: key, New: true, AttachTo: attachTo}
 }

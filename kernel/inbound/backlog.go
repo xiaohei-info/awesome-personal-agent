@@ -413,7 +413,9 @@ func (s *Service) rulesOne(ctx context.Context, id command.Identity, sn snapshot
 	case rules.ExitProposed:
 		d.Disposition = domain.DispositionProposed
 		d.Item = sn.made[ev.ID] // 上次中途失败留下的事项：接上，不重建
-		if d.Item == "" {
+		if d.Item != "" {
+			d.mergeFields = s.resumeFields(ctx, ev)
+		} else {
 			project, err := s.project(sn, src, ev, m)
 			if err != nil {
 				return false, false, err

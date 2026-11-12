@@ -43,11 +43,9 @@ func blank(s string) bool { return strings.TrimSpace(s) == "" }
 
 type createIn struct {
 	domain.ItemInput
-	Phase domain.Phase `json:"phase"` // 缺省 proposed：agent 的产出先进建议流
-	// Proposal 由入站流水线写入建议信息；HTTP 与 CLI 的创建入口按 ItemInput 解码，不会带它。
-	Proposal *domain.Proposal `json:"proposal,omitempty"`
-	Reason   string           `json:"reason"`
-	Evidence string           `json:"evidence"`
+	Phase    domain.Phase `json:"phase"` // 缺省 proposed：agent 的产出先进建议流
+	Reason   string       `json:"reason"`
+	Evidence string       `json:"evidence"`
 }
 
 type transitionIn struct {
@@ -95,7 +93,6 @@ func (c createIn) item(id string) domain.Item {
 	if it.Priority == "" {
 		it.Priority = domain.PriorityNormal
 	}
-	it.Proposal = c.Proposal
 	if in.Ask != nil {
 		it.Ask = &domain.Ask{AskInput: *in.Ask}
 	}
