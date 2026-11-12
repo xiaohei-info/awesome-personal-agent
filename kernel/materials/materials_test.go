@@ -21,7 +21,7 @@ import (
 var bg = context.Background()
 
 func agent(p string, lvl authz.Level) command.Trusted {
-	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: lvl}
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: lvl}
 }
 
 var (

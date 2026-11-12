@@ -34,7 +34,7 @@ var (
 	t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
-	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
 )
 
 type env struct {

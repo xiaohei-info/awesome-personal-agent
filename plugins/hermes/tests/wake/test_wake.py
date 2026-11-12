@@ -165,3 +165,15 @@ def test_cli_rejects_malformed_args(wake):
     ctx = Ctx()
     wake.register(ctx)
     assert "list of strings" in json.loads(ctx.tools["apa_wake_cli"]({"args": "context"}))["error"]
+
+
+# 唤醒回合的 apa 调用用运行凭据，没有代答能力，不带会话类型，也不继承网关环境里的旧值（附录 A.5）。
+def test_wake_cli_does_not_report_or_inherit_a_session_kind(wake, kernel, tmp_path, monkeypatch):
+    monkeypatch.setenv("APA_SESSION_KIND", "direct")
+    fake_apa(tmp_path, monkeypatch, body='echo "kind=[$APA_SESSION_KIND]"')
+    kernel.wake()
+    ctx = Ctx()
+    wake.register(ctx)
+    wake.poll_once(ctx, SESSION, wait=0)
+    out = json.loads(ctx.tools["apa_wake_cli"]({"args": ["context"], "run_id": "r1"}))
+    assert out["stdout"] == "kind=[]"

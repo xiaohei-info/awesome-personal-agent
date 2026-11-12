@@ -4,7 +4,7 @@ import stat
 
 import pytest
 
-from helpers import load_tools
+from helpers import fake_session_context, load_tools
 
 
 class Ctx:
@@ -22,6 +22,7 @@ python3 - "$@" <<'PY' >> "$APA_LOG"
 import json, os, sys
 print(json.dumps({"argv": sys.argv[1:], "session": os.environ.get("APA_SESSION")}))
 open(os.environ["APA_LOG"] + ".harness", "a").write(os.environ.get("APA_HARNESS", "") + "\\n")
+open(os.environ["APA_LOG"] + ".kind", "a").write(os.environ.get("APA_SESSION_KIND", "-") + "\\n")
 PY
 cat > "$APA_STDIN" 2>/dev/null || true
 echo "$FAKE_OUT"
@@ -236,3 +237,68 @@ def test_grant_refusal_exit_23_is_exposed(tools, apa, monkeypatch):
     monkeypatch.setenv("FAKE_EXIT", "23")
     r = json.loads(tools["apa_decide"]({"id": "i", "option": "B", "grant": "g"}, session_id="s"))
     assert r["exit_code"] == 23 and r["ok"] is False
+
+
+def kinds(tmp):
+    return (tmp / "log.kind").read_text().split()
+
+
+# ACT-HCTX-12：终端会话的 apa 调用带 APA_SESSION_KIND=direct（附录 A.5，SPIKE-SESSION-KIND）。
+@pytest.mark.parametrize("bound", [{}, {"source": "cli"}, {"source": "tui"}, {"platform": "local", "source": "local"}])
+def test_terminal_session_calls_carry_session_kind_direct(tools, apa, monkeypatch, bound):
+    fake_session_context(monkeypatch, **bound)
+    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "就选方案 B"}, session_id="s1")
+    assert kinds(apa) == ["direct"]
+    assert calls(apa)[0]["session"] == "s1" and (apa / "log.harness").read_text().split() == ["hermes"]
+
+
+# ACT-HCTX-13：网关会话按平台给出的会话来源报：私聊 direct、群/频道/话题 group，取不到 unknown。
+@pytest.mark.parametrize("bound,want", [
+    ({"platform": "telegram", "chat_type": "dm", "user_id": "42"}, "direct"),
+    ({"platform": "telegram", "chat_type": "group", "user_id": "42"}, "group"),
+    ({"platform": "slack", "chat_type": "channel", "user_id": "U1"}, "group"),
+    ({"platform": "discord", "chat_type": "thread", "user_id": "U1"}, "group"),
+    ({"platform": "telegram", "chat_type": "dm"}, "unknown"),          # 私聊却没有发送者：看不出是谁
+    ({"platform": "telegram", "chat_type": "weird", "user_id": "42"}, "unknown"),
+    ({"platform": "telegram", "user_id": "42"}, "unknown"),            # 没有会话类型
+    ({"platform": "api_server", "chat_type": "dm", "user_id": "42"}, "unknown"),  # 非聊天入口：不替它说话
+    ({"platform": "webhook", "chat_type": "group", "user_id": "42"}, "unknown"),
+    ({"source": "gateway"}, "unknown"),
+])
+def test_gateway_session_kind_follows_the_platform(tools, apa, monkeypatch, bound, want):
+    fake_session_context(monkeypatch, **bound)
+    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s1")
+    assert kinds(apa) == [want]
+
+
+def test_unreadable_gateway_binding_is_unknown(tools, apa, monkeypatch):
+    import sys
+    import types
+    mod = types.ModuleType("gateway.session_context")
+    mod.get_session_env = lambda *a, **k: 1 / 0
+    monkeypatch.setitem(sys.modules, "gateway", types.ModuleType("gateway"))
+    monkeypatch.setitem(sys.modules, "gateway.session_context", mod)
+    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s1")
+    assert kinds(apa) == ["unknown"]
+
+
+def test_no_hermes_session_module_is_unknown(tools, apa, monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "gateway", None)  # import raises ImportError
+    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s1")
+    assert kinds(apa) == ["unknown"]
+
+
+def test_session_kind_is_not_inherited_from_the_gateway_environment(tools, apa, monkeypatch):
+    monkeypatch.setenv("APA_SESSION_KIND", "direct")  # what a gateway started from a terminal would carry
+    fake_session_context(monkeypatch, platform="telegram", chat_type="group", user_id="42")
+    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s1")
+    assert kinds(apa) == ["group"]
+
+
+def test_every_tool_schema_has_no_session_kind_parameter():
+    ctx = Ctx()
+    load_tools().register(ctx)
+    for name, (schema, _) in ctx.tools.items():
+        assert not any("kind" in p and "session" in p for p in schema["parameters"]["properties"]), name
+    assert "session_kind" not in json.dumps([s for s, _ in ctx.tools.values()])

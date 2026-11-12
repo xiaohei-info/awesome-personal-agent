@@ -106,7 +106,7 @@ func (e *env) token(t *testing.T, kind auth.Kind) (credID, secret string, id com
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return credID, secret, e.svc.Identity(onBehalf{command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Harness: "h", Session: "other"}}})
+	return credID, secret, e.svc.Identity(onBehalf{command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Harness: "h", Session: "other", SessionKind: "direct"}}})
 }
 
 // onBehalf 补上传输层为 delegate 填的 on_behalf_of。
