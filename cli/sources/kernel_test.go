@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
@@ -22,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -48,6 +51,10 @@ func (noJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
 	panic("judge must not be called")
 }
 
+func (noJudge) JudgeBatch(context.Context, []direct.JudgeCall) ([]direct.Verdict, []error) {
+	panic("judge must not be called")
+}
+
 // kernel 是真实账本、命令管线、授权与来源路由，经 httptest 暴露；CLI 经真实 HTTP 调它。
 type kernel struct {
 	t   *testing.T
@@ -61,7 +68,7 @@ func newKernel(t *testing.T) *kernel {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, core.Module, registry.Module, webhook.Module,
-		projects.Module, clock.Module, items.Module, runner.Module, rules.Module, proc.Module, runidentity.Module} {
+		projects.Module, clock.Module, items.Module, runner.Module, rules.Module, proc.Module, runidentity.Module, direct.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -471,9 +478,66 @@ func TestBacklogListAndRulesCommands(t *testing.T) {
 	if res.Attached != 0 || res.Disposed != 0 || res.Remaining != 3 {
 		t.Fatalf("rules: %+v", res)
 	}
-	for _, args := range [][]string{{"source", "backlog"}, {"source", "backlog", "score"}, {"source", "backlog", "list", "extra"}} {
+	// ACT-BKL-16：影子打分同样需要本人原话；没有判断端点时被拒，退出码 6，不外呼（noJudge 一调就 panic）。
+	if r := k.apa(obs, "source", "backlog", "score"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer score: %+v", r)
+	}
+	if r := k.apa(dlg, "source", "backlog", "score"); r.code != domain.ExitConflict || !strings.Contains(r.out+r.errOut, "judge endpoint") {
+		t.Fatalf("score without a judge endpoint: %+v", r)
+	}
+	for _, args := range [][]string{{"source", "backlog"}, {"source", "backlog", "rejudge"}, {"source", "backlog", "list", "extra"}, {"source", "backlog", "score", "--sort", "score"},
+		{"source", "backlog", "list", "--sort", "name"}} {
 		if r := k.apa(obs, args...); r.code != domain.ExitUsage {
 			t.Fatalf("%v: %+v", args, r)
 		}
 	}
 }
+
+// ACT-BKL-06：`backlog list --sort score` 把各来源的积压合起来按分数从高到低排，每条带分数，没有分数的在最后。
+func TestBacklogListSortsByScoreAcrossSources(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	for _, id := range []string{"src_a", "src_b"} {
+		decode(t, k.apa(dlg, "source", "add", "--id", id, "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &domain.Source{})
+	}
+	scores := map[string]*float64{"a1": ptr(0.40), "a2": nil, "b1": ptr(0.90), "b2": ptr(0.05)}
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		for _, e := range []struct{ src, id string }{{"src_a", "a1"}, {"src_a", "a2"}, {"src_b", "b1"}, {"src_b", "b2"}} {
+			if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
+				correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges)
+				VALUES ('dd', ?, ?, ?, 'r', 't', 's', '', '', '', 1, '[]', '', 0, 'unjudged', '', '', '', 0)`, e.id, e.id, e.src); err != nil {
+				return err
+			}
+			if p := scores[e.id]; p != nil {
+				err := record.Put(tx, record.Record{ID: "jdg_" + e.id, Use: "inbound_screen", Template: "p/triage-screen@h", Subject: e.id, Source: e.src, Fingerprint: "f" + e.id,
+					Band: record.Band{Low: 0.15, High: 0.6}, DecidedBy: record.DecidedDefault, Answer: "yes", LowConfidence: true, Shadow: true, CreatedAt: time.Unix(1, 0).UTC(),
+					Levels: []record.Level{{Backend: record.BackendClassifier, PYes: p, Outcome: record.OutcomeSkipped, ErrorCode: "shadow"}}})
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Events []struct {
+			ID    string
+			Score *float64
+		}
+	}
+	decode(t, k.apa(obs, "source", "backlog", "list", "--sort", "score"), &list)
+	var got []string
+	for _, e := range list.Events {
+		got = append(got, e.ID)
+		if (e.Score == nil) != (e.ID == "a2") {
+			t.Fatalf("%s: score %v", e.ID, e.Score)
+		}
+	}
+	if fmt.Sprint(got) != "[b1 a1 b2 a2]" {
+		t.Fatalf("order %v", got)
+	}
+}
+
+func ptr(f float64) *float64 { return &f }

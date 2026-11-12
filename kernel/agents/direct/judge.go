@@ -55,6 +55,8 @@ type JudgeCall struct {
 	Band *record.Band
 	// Shadow 为真时分类端点只记分、不定案：级联按没有它继续，记录标 shadow（§8.3）。
 	Shadow bool
+	// ScoreOnly 为真时只问分类端点、只记分（隐含 Shadow）：不问对话端点，分类端点没给出概率就不写记录（积压影子打分，§9.3）。
+	ScoreOnly bool
 	// UnjudgedOnUnavailable 为真时，没有任何一级给出可用答复就不取保守默认、不写记录，Verdict.Unavailable 为真：
 	// 入站事件记未判定，恢复后重判（§8.7）。single_shot 模板不受此项影响，照取 on_undecided。
 	UnjudgedOnUnavailable bool
@@ -162,7 +164,7 @@ func (s *Service) prepare(ctx context.Context, c JudgeCall, pol policy.Policy) (
 		p.band = *c.Band
 	}
 	// 影子只能由策略或调用方打开，这里不会把它关掉。
-	p.c.Shadow = p.c.Shadow || bands.Shadow(pol, c.Template)
+	p.c.Shadow = p.c.Shadow || p.c.ScoreOnly || bands.Shadow(pol, c.Template)
 	in := c.Input
 	if len(strings.TrimSpace(string(in))) == 0 {
 		in = json.RawMessage(`{}`)
@@ -364,6 +366,9 @@ func (s *Service) walk(ctx context.Context, p *pending, pol policy.Policy) (Verd
 	for _, b := range p.meta.AnswerBy {
 		var lv level
 		var err error
+		if p.c.ScoreOnly && b != "classifier" {
+			continue
+		}
 		if b == "classifier" {
 			lv, err = s.classLevel(ctx, p, pol, &v)
 			shadowed = shadowed || lv.ErrorCode == "shadow"
@@ -389,6 +394,13 @@ func (s *Service) walk(ctx context.Context, p *pending, pol policy.Policy) (Verd
 		v.DecidedBy, v.LowConfidence, v.Answer = record.DecidedDefault, true, onUndecided(p.meta)
 	}
 	v.Unavailable = !answeredAny
+	if p.c.ScoreOnly { // 影子下 answered 恒为假：能不能记分看有没有概率
+		v.Unavailable = len(levels) == 0 || levels[0].PYes == nil
+		if v.Unavailable {
+			v.Record = record.Record{Levels: levels}
+			return v, nil
+		}
+	}
 	if v.Unavailable && p.c.UnjudgedOnUnavailable && !p.meta.SingleShot {
 		v.Record = record.Record{Levels: levels}
 		return v, nil

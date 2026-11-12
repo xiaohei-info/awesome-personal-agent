@@ -73,6 +73,8 @@ type Proposer interface {
 	ProposeUnjudged(ctx context.Context, id command.Identity, event string) (domain.SourceEvent, error)
 	// BacklogRules 是积压放开第 1 步：只跑规则，不调模型（§9.3）。req 带调用者身份与本人原话。
 	BacklogRules(ctx context.Context, req command.Request, source string) (inbound.RulesResult, error)
+	// BacklogScore 是积压放开第 2 步：影子打分，只写判断记录，不改处置（§9.3）。没有判断端点时是 409。
+	BacklogScore(ctx context.Context, req command.Request, source string) (inbound.ScoreResult, error)
 }
 
 const (
@@ -115,6 +117,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rules", MaxBody: 1 << 10, Handler: a.backlogRules})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/score", MaxBody: 1 << 10, Handler: a.backlogScore})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/ignore", MaxBody: 1 << 10, Handler: a.ignoreBatch})
 	}, nil
 }
@@ -504,6 +507,35 @@ func pageParams(q url.Values) (after int64, limit int, err error) {
 	return after, limit, nil
 }
 
+// scoredPage 按影子分数从高到低返回一页，没有分数的排最后。顺序是整体的，所以 after/next_after 在这里是已返回的条数（偏移），
+// 不是落盘序号。shortcut: 每次翻页都重读并重排该来源的全部匹配事件；积压到数万条时再给分数建索引。
+func scoredPage(tx *store.Tx, source string, ds []domain.Disposition, after int64, limit int) ([]inbound.Scored, int64, error) {
+	var all []domain.SourceEvent
+	for cur := int64(0); ; {
+		page, next, err := runner.EventPage(tx, source, ds, cur, maxEventLimit)
+		if err != nil {
+			return nil, 0, err
+		}
+		all = append(all, page...)
+		if next == 0 {
+			break
+		}
+		cur = next
+	}
+	sorted, err := inbound.SortByScore(tx, all)
+	if err != nil {
+		return nil, 0, err
+	}
+	if int64(len(sorted)) <= after {
+		return []inbound.Scored{}, 0, nil
+	}
+	sorted = sorted[after:]
+	if len(sorted) > limit {
+		return sorted[:limit], after + int64(limit), nil
+	}
+	return sorted, 0, nil
+}
+
 func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	// 这里是未过滤的外部内容，运行凭据只能经转发白名单读挂靠消息（§9.4、§14.3）。
 	if p.Caller.Level == authz.LevelRun {
@@ -527,10 +559,15 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 	if err != nil {
 		return err
 	}
+	bySort := q.Get("sort")
+	if bySort != "" && bySort != "score" {
+		return invalid("sort is not valid", "use sort=score, or leave it out for the order the events arrived in")
+	}
 	id := r.PathValue("id")
 	var (
 		evs  []domain.SourceEvent
 		next int64
+		scrd []inbound.Scored
 	)
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
 		if !(p.Web && inbound.IsCaptureSource(id)) { // 对话内容只给本人；其他凭据和登记外的来源一样是 404
@@ -539,12 +576,19 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 			}
 		}
 		var err error
+		if bySort == "score" {
+			scrd, next, err = scoredPage(tx, id, ds, after, limit)
+			return err
+		}
 		evs, next, err = runner.EventPage(tx, id, ds, after, limit)
 		return err
 	}); err != nil {
 		return err
 	}
 	out := map[string]any{"events": evs}
+	if bySort == "score" {
+		out["events"] = scrd
+	}
 	if next != 0 {
 		out["next_after"] = next
 	}
@@ -606,6 +650,21 @@ func (a *api) backlogRules(w http.ResponseWriter, r *http.Request, p *core.Princ
 		return err
 	}
 	res, err := a.pr.BacklogRules(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, res)
+}
+
+// backlogScore 积压影子打分：请求体 {"source"?}；返回 {"scored","skipped"}。授权同 backlogRules；没有判断端点是 409。
+func (a *api) backlogScore(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		Source string `json:"source,omitempty"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	res, err := a.pr.BacklogScore(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source)
 	if err != nil {
 		return err
 	}
