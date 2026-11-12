@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock/wall"
 )
 
 // Migration 是模块的一步只增迁移。Version 从 1 起连续；已发布的迁移不可修改（校验和保护）。
@@ -186,7 +187,7 @@ func (s *Store) migrate(reg *Registry, applied map[string]map[int]string) error 
 					return fmt.Errorf("store: migrate %s/%d %s: %w", m.Name, mg.Version, mg.Name, err)
 				}
 				if _, err := tx.Exec("INSERT INTO store_migrations (module, version, name, checksum, applied_at) VALUES (?, ?, ?, ?, ?)",
-					m.Name, mg.Version, mg.Name, checksum(mg), time.Now().Unix()); err != nil {
+					m.Name, mg.Version, mg.Name, checksum(mg), wall.Now().Unix()); err != nil {
 					return fmt.Errorf("store: migrate %s/%d %s: %w", m.Name, mg.Version, mg.Name, err)
 				}
 				steps++

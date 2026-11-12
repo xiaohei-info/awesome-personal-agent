@@ -33,8 +33,8 @@ var (
 	bg       = context.Background()
 	t0       = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
-	worker   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelWorker}
-	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	worker   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelWorker}
+	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
 )
 
 func exit(err error) int {
@@ -113,9 +113,9 @@ func newLedger(t *testing.T) *ledger {
 	if err := st.Update(bg, e.att.Start); err != nil {
 		t.Fatal(err)
 	}
-	ep := policy.ModelEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", ScreeningTimeoutMs: 5000}
+	ep := policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}
 	if err := st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.ModelEndpoint = ep; return nil })
+		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.GenerateEndpoint, p.ScreeningTimeoutMs = ep, 5000; return nil })
 		return err
 	}); err != nil {
 		t.Fatal(err)

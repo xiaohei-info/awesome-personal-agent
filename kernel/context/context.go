@@ -44,7 +44,7 @@ var Module = store.Module{Name: "context", Migrations: []store.Migration{{
 }}}
 
 // 变更会让事项进入增量的事件类型。
-var itemEvents = []string{domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvItemDeadlinePassed,
+var itemEvents = []string{domain.EvItemCreated, domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvItemDeadlinePassed, domain.EvItemProgressAdded,
 	domain.EvDecisionRequested, domain.EvDecisionResolved, domain.EvDelegationCreated, domain.EvDelegationReported, followmsg.EvAttached}
 
 var projectEvents = []string{domain.EvProjectUpdated, domain.EvProjectAllowedExecutorsChanged}

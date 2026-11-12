@@ -15,10 +15,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -59,10 +59,24 @@ func sect[T any](key string, field func(*kpolicy.Policy) *T) section {
 	}
 }
 
+// disturbSection 与 sect 相同，但请求体缺 daily_cap 时取缺省 20，而不是被当成"不限"。
+var disturbSection = section{
+	key: "disturb",
+	get: func(p *kpolicy.Policy) any { return p.Disturb },
+	set: func(p *kpolicy.Policy, raw json.RawMessage) error {
+		v := kpolicy.Disturb{DailyCap: kpolicy.DefaultDailyCap}
+		if err := strictDecode(raw, &v); err != nil {
+			return err
+		}
+		p.Disturb = v
+		return nil
+	},
+}
+
 var (
 	policySections = []section{
 		sect("web_only", func(p *kpolicy.Policy) *kpolicy.WebOnly { return &p.WebOnly }),
-		sect("disturb", func(p *kpolicy.Policy) *kpolicy.Disturb { return &p.Disturb }),
+		disturbSection,
 		sect("material_write", func(p *kpolicy.Policy) *kpolicy.MaterialWrite { return &p.MaterialWrite }),
 		sect("persona", func(p *kpolicy.Policy) *string { return &p.Persona }),
 		sect("channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
@@ -75,29 +89,104 @@ var (
 	accessLimitSections = []section{
 		sect("permission_cap", func(p *kpolicy.Policy) *kpolicy.PermissionCap { return &p.PermissionCap }),
 	}
-	modelEndpointSections = []section{{
-		key: "model_endpoint",
-		// 密钥只进账本：读取时只暴露是否已设置。
-		get: func(p *kpolicy.Policy) any {
-			e := p.ModelEndpoint
-			if e.APIKey != "" {
-				e.APIKey = maskedKey
-			}
-			return e
-		},
-		set: func(p *kpolicy.Policy, raw json.RawMessage) error {
-			var e kpolicy.ModelEndpoint
-			if err := strictDecode(raw, &e); err != nil {
-				return err
-			}
-			if e.APIKey == maskedKey {
-				e.APIKey = p.ModelEndpoint.APIKey
-			}
-			p.ModelEndpoint = e
-			return nil
-		},
-	}}
+	modelEndpointSections = []section{
+		{key: "judge_endpoint", get: getJudge, set: setJudge},
+		{key: "generate_endpoint", get: getGenerate, set: setGenerate},
+		sect("screening_timeout_ms", func(p *kpolicy.Policy) *int { return &p.ScreeningTimeoutMs }),
+		// v0.1 的请求形状：只在 PUT 里被接受（等同只设生成端点，位置 external），响应一律是新形状（附录 B.2）。
+		{key: legacyKey, set: setLegacy},
+	}
 )
+
+// legacyKey 是 v0.1 的 PUT 体里的段名；它没有 get，不会出现在响应里。
+const legacyKey = "model_endpoint"
+
+// 端点请求体里 api_key 为 nil 或占位 "***" 表示保持原密钥，显式 "" 表示清除；读取时只给 api_key_set。
+type endpointReq struct {
+	URL              string  `json:"url"`
+	APIKey           *string `json:"api_key"`
+	Protocol         string  `json:"protocol"`
+	Model            string  `json:"model"`
+	Locality         string  `json:"locality"`
+	TimeoutMs        int     `json:"timeout_ms"`
+	MaxBatch         int     `json:"max_batch"`
+	MaxMaterialChars int     `json:"max_material_chars"`
+}
+
+type generateReq struct {
+	URL      string  `json:"url"`
+	APIKey   *string `json:"api_key"`
+	Model    string  `json:"model"`
+	Locality string  `json:"locality"`
+}
+
+func keepKey(in *string, old string) string {
+	if in == nil || *in == maskedKey {
+		return old
+	}
+	return *in
+}
+
+func getJudge(p *kpolicy.Policy) any {
+	j := p.JudgeEndpoint
+	if j == nil {
+		return nil
+	}
+	return map[string]any{"url": j.URL, "api_key_set": j.APIKey != "", "protocol": j.Protocol, "model": j.Model, "locality": j.Locality,
+		"timeout_ms": j.TimeoutMs, "max_batch": j.MaxBatch, "max_material_chars": j.MaxMaterialChars}
+}
+
+func setJudge(p *kpolicy.Policy, raw json.RawMessage) error {
+	var r *endpointReq
+	if err := strictDecode(raw, &r); err != nil {
+		return err
+	}
+	if r == nil {
+		p.JudgeEndpoint = nil
+		return nil
+	}
+	old := ""
+	if p.JudgeEndpoint != nil {
+		old = p.JudgeEndpoint.APIKey
+	}
+	p.JudgeEndpoint = &kpolicy.JudgeEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, old), Protocol: r.Protocol, Model: r.Model,
+		Locality: r.Locality, TimeoutMs: r.TimeoutMs, MaxBatch: r.MaxBatch, MaxMaterialChars: r.MaxMaterialChars}
+	return nil
+}
+
+func getGenerate(p *kpolicy.Policy) any {
+	g := p.GenerateEndpoint
+	if g.URL == "" {
+		return nil
+	}
+	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "model": g.Model, "locality": g.Locality}
+}
+
+func setGenerate(p *kpolicy.Policy, raw json.RawMessage) error {
+	var r *generateReq
+	if err := strictDecode(raw, &r); err != nil {
+		return err
+	}
+	if r == nil {
+		p.GenerateEndpoint = kpolicy.GenerateEndpoint{}
+		return nil
+	}
+	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: r.Locality}
+	return nil
+}
+
+func setLegacy(p *kpolicy.Policy, raw json.RawMessage) error {
+	var r struct {
+		generateReq
+		ScreeningTimeoutMs int `json:"screening_timeout_ms"`
+	}
+	if err := strictDecode(raw, &r); err != nil {
+		return err
+	}
+	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: kpolicy.LocalityExternal}
+	p.ScreeningTimeoutMs = r.ScreeningTimeoutMs
+	return nil
+}
 
 // Routes 返回策略设置路由分组，交给 core.Deps.Groups。
 func Routes(st *store.Store) core.RouteGroup {
@@ -130,14 +219,16 @@ func auditRejected(st *store.Store, r *http.Request, p *core.Principal, path str
 	if !ok {
 		return
 	}
-	ev.At = time.Now()
+	ev.At = clock.Now()
 	_ = st.Update(detached(r), func(tx *store.Tx) error { _, err := eventlog.Append(tx, ev); return err })
 }
 
 func render(version int, pol kpolicy.Policy, secs []section) map[string]any {
 	out := map[string]any{"version": version}
 	for _, s := range secs {
-		out[s.key] = s.get(&pol)
+		if s.get != nil {
+			out[s.key] = s.get(&pol)
+		}
 	}
 	return out
 }
@@ -174,6 +265,9 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 		known := map[string]section{}
 		for _, s := range secs {
 			known[s.key] = s
+		}
+		if _, old := body[legacyKey]; old && len(body) > 1 && known[legacyKey].set != nil {
+			return domain.NewError(domain.CodeInvalidRequest, "model_endpoint (v0.1 shape) cannot be combined with the new sections", "send either the old shape or the new one")
 		}
 		for k := range body {
 			if _, ok := known[k]; !ok {

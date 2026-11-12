@@ -26,6 +26,7 @@ import (
 	apihealth "github.com/xiaohei-info/awesome-personal-agent/api/health"
 	apiingest "github.com/xiaohei-info/awesome-personal-agent/api/ingest"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
+	apijudgments "github.com/xiaohei-info/awesome-personal-agent/api/judgments"
 	apimaterials "github.com/xiaohei-info/awesome-personal-agent/api/materials"
 	apipacks "github.com/xiaohei-info/awesome-personal-agent/api/packs"
 	apiprojects "github.com/xiaohei-info/awesome-personal-agent/api/projects"
@@ -33,9 +34,11 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
 	apiexec "github.com/xiaohei-info/awesome-personal-agent/api/settings/exec"
 	apigrants "github.com/xiaohei-info/awesome-personal-agent/api/settings/grants"
+	apioutbound "github.com/xiaohei-info/awesome-personal-agent/api/settings/outbound"
 	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	apipurge "github.com/xiaohei-info/awesome-personal-agent/api/settings/purge"
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
+	apiversion "github.com/xiaohei-info/awesome-personal-agent/api/version"
 	apiwhy "github.com/xiaohei-info/awesome-personal-agent/api/why"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
@@ -66,6 +69,7 @@ import (
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/followup"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/guideline"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/stale"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/verify"
 	kprojects "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	kpurge "github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
@@ -118,6 +122,7 @@ type kernel struct {
 	in     *inbound.Service
 	eng    *rules.Engine
 	fu     *followup.Service
+	stale  *stale.Service
 	scr    *kscreening.Service
 	att    *attention.Attention
 	hn     *khealth.Notifier
@@ -201,7 +206,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		Retention: cfg.IngestRetention, ScriptRoot: l.Sources, OnError: logErr("webhook")}); err != nil {
 		return nil, err
 	}
-	if k.ret, err = retention.New(retention.Options{Store: st, Ingest: k.wh, Layout: l, RunRetention: cfg.RunRetention}); err != nil {
+	if k.ret, err = retention.New(retention.Options{Store: st, Ingest: k.wh, Layout: l, RunRetention: cfg.RunRetention, JudgmentRetention: cfg.JudgmentRetention, KeepJudgments: cfg.JudgmentRetention == 0}); err != nil {
 		return nil, err
 	}
 	verifyAgent, err := verify.Handler(verify.Options{Store: st, Judge: judge})
@@ -227,6 +232,10 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	// 间隔、模板与模式取自 follow-up 包的 follow_up 时钟规则，跟进服务每次使用时从加载器读。
 	if k.fu, err = followup.New(followup.Options{Store: st, Exec: x, Judge: judge, Reminder: att, Packs: ld, Owner: owner,
 		Pack: "follow-up"}); err != nil {
+		return nil, err
+	}
+	// 久未推进检查：阈值、周期与模式取自 follow-up 包的 stale 规则；"今天"取材用同一个阈值。
+	if k.stale, err = stale.New(stale.Options{Packs: ld, Pack: "follow-up", Reminder: att}); err != nil {
 		return nil, err
 	}
 
@@ -347,11 +356,15 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
+	ledger, err := schemaLedger()
+	if err != nil {
+		return nil, err
+	}
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Guard: wk.Identity, Groups: []core.RouteGroup{
-		apiitems.Routes(x, st), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
+		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm)}}); err != nil {
+		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
@@ -380,6 +393,8 @@ func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 	case instances.Owns(c):
 		k.drainDue.Store(true) // instance.fired 由规则执行消费
 		return instances.HandleTimer(tx, c)
+	case k.stale.Owns(c):
+		return k.stale.HandleTimer(tx, c)
 	case k.fu.Owns(c):
 		k.drainDue.Store(true)
 		return k.fu.HandleTimer(tx, c)
@@ -410,6 +425,9 @@ func (k *kernel) start(ctx context.Context) error {
 		return err
 	}
 	if err := k.st.Update(ctx, k.fu.Sync); err != nil {
+		return err
+	}
+	if err := k.st.Update(ctx, k.stale.Sync); err != nil {
 		return err
 	}
 	failed, alive, err := k.disp.Recover(ctx)
@@ -465,7 +483,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			for _, id := range due {
 				k.resume(id)
 			}
-			if now := time.Now(); !now.Before(nextReload) {
+			if now := clock.Now(); !now.Before(nextReload) {
 				nextReload = now.Add(packReloadInterval)
 				k.reloadPacks(ctx, report)
 			}
@@ -476,6 +494,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			case <-ctx.Done():
 				return
 			case <-tk.C:
+			case <-clock.Changed(): // 测试构建：偏移前进后不等下一个 tick
 			}
 		}
 	}()
@@ -542,6 +561,7 @@ func (k *kernel) reloadPacks(ctx context.Context, report func(string, error)) {
 	}
 	if k.packSig() != before {
 		report("rules reconcile", k.eng.Reconcile(ctx))
+		report("stale check", k.st.Update(ctx, k.stale.Sync))
 		if p, ok := k.packs.Get("agents-md"); ok {
 			report("agents-md template", k.agm.SetTemplate(p.Templates["agents"]))
 		}

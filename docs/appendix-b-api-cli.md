@@ -16,19 +16,19 @@
 | `apa login` | 保存 APA 地址与 token | 任意 token | 3 |
 | `apa guide [主题] [--template]` | 输出使用说明，只写机制；`--template` 输出常驻指令模板 | 无 | |
 | `apa declare <文件>` | 提交插件声明（无头运行、执行者），本人在 Web 确认后生效 | worker | 4 |
-| `apa version` | 【规划中（v0.2.0）】版本号、构建提交、各模块数据结构版本与各协议版本 | 无 | |
+| `apa version` | 版本号、构建提交、各模块数据结构版本与各协议版本 | 无 | |
 | `apa doctor [--json] [--upgrade-check]` | 【规划中（v0.2.0）】自检（主文档 §15.5）；`--upgrade-check` 是升级前的只读预检（主文档 §16.5） | 主机本地；内核一侧的检查需 observer | 1 |
-| `apa backup create [--out] [--no-secrets]` / `verify <备份>` / `restore <备份> --home <目录>` | 【规划中（v0.2.0）】备份、校验、恢复到空目录（主文档 §16.5） | 主机本地 | 1、6 |
+| `apa backup create/verify/restore` | `create [--out <目录>] [--no-secrets]` 备份；`verify <备份>` 校验；`restore <备份> --home <目录>` 恢复到空目录（主文档 §16.5） | 主机本地 | 1、6 |
 | **上下文** | | | |
 | `apa context [--session] [--scope project/cwd/item/all] [--item <id>] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息；`--scope item` 见主文档 §7.6 | observer | 3、5、7 |
 | `apa persona` | 读取当前人格，供插件在新会话开始时注入；未设定时输出为空 | observer | 3、7 |
 | `apa inbox` | 列出待决和建议；web_only 初筛未返回的决策请求不列出 | observer | |
-| `apa today` | 【规划中（v0.2.0）】今天的清单：计划今天或更早且未完成的、今天到期的、待决的、久未推进的（主文档 §4.1） | observer | |
+| `apa today` | 今天的清单：计划今天或更早且未完成的、今天到期的、待决的、久未推进的（主文档 §4.1） | observer | |
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建 | observer | |
 | `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>` | observer | 5 |
 | `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
-| `apa item progress <id> --text [--on <日期>]` | 【规划中（v0.2.0）】追加一条进展，不改阶段 | worker（自己的事项）；delegate（绑定的事项不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、23 |
+| `apa item progress <id> --text [--on <日期>]` | 追加一条进展，不改阶段；`--on` 不能晚于今天 | worker（自己的事项）；delegate（绑定的事项不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、23 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
 | `apa decide <id> --option [--evidence \| --grant]` | 代答决策；本人原话或授权单二选一 | delegate | 2、4、6、20、22、23 |
@@ -83,7 +83,7 @@
 | `apa health` | 健康视图 | observer | |
 | `apa run list/show` | 运行记录 | observer | |
 | `apa judgment stats [--use] [--template] [--source] [--since]` | 【规划中（v0.2.0）】各级调用次数与升级率、未定率、接受率、误丢率（主文档 §8.10） | observer | |
-| `apa judgment show <id>` | 【规划中（v0.2.0）】一条判断记录的逐级结果 | observer，按权限裁剪 | 5 |
+| `apa judgment show <id>` | 一条判断记录的逐级结果 | observer，按权限裁剪 | 5 |
 | `apa judgment spot-check` | 【规划中（v0.2.0）】列出待抽检的条目；抽检结论只在 Web 填 | observer | |
 
 **只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、执行者清单、规则切 `auto`、运行权限上限、判断端点与生成端点、不确定带与影子模式、抽检结论、打扰上限与静音、来源与对话捕获的外发范围、登录口令与在线会话、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效、签发和撤销授权单。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
@@ -115,9 +115,9 @@
 | 分组 | 方法与路径 | 说明 | 凭据 |
 |---|---|---|---|
 | 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for` | 按 §14.3；导出 ext 密钥可 `GET` |
-| | `GET /today` | 【规划中（v0.2.0）】今天的清单，四组：`planned`、`due`、`pending`、`stale` | observer |
-| | `POST /items/{id}/progress` | 【规划中（v0.2.0）】追加进展 `{text, on?}`；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate 按 §14.5 |
-| | `POST /items/{id}/correlation-keys`，`DELETE /items/{id}/correlation-keys` | 【规划中（v0.2.0）】登记或移除关联键 `{key, domain?}` | 同 `relations` |
+| | `GET /today` | 今天的清单，四组：`planned`、`due`、`pending`、`stale` | observer |
+| | `POST /items/{id}/progress` | 追加进展 `{text, on?}`；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate 按 §14.5 |
+| | `POST /items/{id}/correlation-keys`，`DELETE /items/{id}/correlation-keys` | 登记或移除关联键 `{key, domain?}`（经 `item.relate`；`GET /items/{id}` 返回 `correlation_keys[]`） | 同 `relations` |
 | | `GET /items/{id}/messages` | 事项的全部挂靠消息 | observer；运行身份和无人值守事项按转发白名单过滤；ext 密钥不可用 |
 | | `POST /items/{id}/transition`，`POST /items/{id}/relations` | 转阶段、关联 | 同上 |
 | | `POST /items/{id}/revert` | 撤销 agent 变更 | 只有 Web 登录 |
@@ -158,7 +158,7 @@
 | | `POST /source-events/rules`，`/score`，`/rejudge` | 【规划中（v0.2.0）】积压放开的三步：只跑规则、影子打分、放开重判；请求体 `{"source"?, "limit"?}` | Web 登录、delegate（附本人原话） |
 | | `GET /source-events/restorable?from&to&source` | 【规划中（v0.2.0）】预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer；运行凭据不可用 |
 | | `POST /source-events/restore` | 【规划中（v0.2.0）】把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate（附本人原话） |
-| 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 【规划中（v0.2.0）】判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |
+| 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |
 | | `GET /judgments/stats?use&template&source&since` | 【规划中（v0.2.0）】各级调用次数与四项指标（主文档 §8.10） | observer |
 | | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 【规划中（v0.2.0）】抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
@@ -170,11 +170,13 @@
 | 运行 | `GET /runs`，`GET /runs/{id}` | 运行记录 | observer |
 | | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
 | 回放与健康 | `GET /why/{id}`，`GET /health` | 回放、健康视图；所有健康告警都经同一处产出健康类投递（§15.2），读取走 `GET /deliveries/unread` | observer |
-| | `GET /doctor`，`GET /version` | 【规划中（v0.2.0）】内核一侧的自检结果（主文档 §15.5）；版本与各协议版本 | `doctor` 需 observer；`version` 不需要凭据 |
+| | `GET /doctor` | 【规划中（v0.2.0）】内核一侧的自检结果（主文档 §15.5） | observer |
+| | `GET /version` | 版本与各协议版本（B.5） | 不需要凭据 |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/grants`、`/settings/purge` | 策略（含人格、打扰上限与静音）、两个模型端点、凭据、白名单、名单、命令登记、声明确认、授权单签发与撤销（`POST /settings/grants`、`POST /settings/grants/{id}/revoke`）、物理删除 | 只有 Web 登录 |
-| | `/settings/judgment`、`/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 【规划中（v0.2.0）】不确定带与影子模式；来源与对话捕获的外发范围 | 只有 Web 登录 |
+| | `/settings/judgment` | 【规划中（v0.2.0）】不确定带与影子模式 | 只有 Web 登录 |
+| | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围 | 只有 Web 登录 |
 | 认证 | `POST /auth/login`、`/logout` | Web 会话。连续失败的限速与锁定见主文档 §14.13，锁定期间返回 429 | |
 | | `POST /auth/password` | 改口令 `{current, new}`；新口令少于 12 个字符返回 400；成功后其他会话全部失效 | 只有 Web 登录 |
 | | `GET /auth/sessions`，`DELETE /auth/sessions/{id}`，`DELETE /auth/sessions` | 在线会话与吊销 | 只有 Web 登录 |
@@ -215,7 +217,7 @@
 
 `POST /items/{id}/attach` 的请求体 `{"to": "<事项 id>"}`：建议转 `dropped`，它的来源事件改挂到目标事项，Event 为 `proposal.attached`；目标已终结返回 409，不存在返回 404（主文档 §7.2）。
 
-`GET /judgments/{id}` 返回主文档 §6.16 的字段。`GET /judgments/stats` 返回 `{"rows": [{"use", "template", "source"?, "backend", "calls", "decided", "uncertain", "errors", "reused"}], "rates": [{"use", "template", "source"?, "escalation", "undecided", "acceptance", "false_drop", "reviewed"}], "histogram": [...]}`；`since` 缺省 30 天。
+`GET /judgments` 返回 `{"judgments": [...], "next_after": "<记录 id>"}`，按判断时刻升序；`after` 是上一页最后一条的 id，有下一页时才返回 `next_after`，`limit` 缺省 100、上限 500，`after` 不是已知记录 id 或 `limit` 越界返回 400。运行凭据列表必须带 `subject`，且只读目标事项范围内的记录：`GET /judgments/{id}` 读范围外的记录返回 404（CLI 退出码 5），列表返回空；ext、webhook 凭据返回 403。记录过了保留期（`judgment_retention_days`，缺省 180 天）被清理后返回 404，引用它的命令 Event 与事项不受影响。`GET /judgments/{id}` 返回主文档 §6.16 的字段。`GET /judgments/stats` 返回 `{"rows": [{"use", "template", "source"?, "backend", "calls", "decided", "uncertain", "errors", "reused"}], "rates": [{"use", "template", "source"?, "escalation", "undecided", "acceptance", "false_drop", "reviewed"}], "histogram": [...]}`；`since` 缺省 30 天。
 
 `GET /health` 返回 `{"healthy": bool, "signals": [...]}`，信号恒为十三项且顺序固定（主文档 §15.2）：`source_failures`、`outcall`、`delivery_backlog`、`chain_trips`、`agentsmd_drift`、`pack_rejections`、`model_unavailable`、`unjudged_backlog`、`rule_fallbacks`、`receipt_failures`、`other_alerts`、`stalled_delegations`、`clock_lag`。前十一项的 id 与顺序同 v0.1，后两项是 v0.2.0 追加的，都是 `warning`，不影响 `healthy`。每项 `{id, ok, count, severity?, why?, next, detail?}`；`severity` 只在异常时给出，取 `error` 或 `warning`。`unjudged_backlog` 是 `warning`，不影响 `healthy`；它的 `detail` 为 `{"model_unavailable": n, "outbound_unset": n, "undecided": n, "restored": n, "expired": n, "sources": [{"source", "count"}]}`，`undecided` 只统计 v0.1 留下的事件，`expired` 只作参考、不计入 `count`。`model_unavailable` 的 `detail` 为 `{"judge": s, "generate": s, "endpoint": s}`，各取空、`not_configured` 或 `failing`；`endpoint` 是 v0.1 的字段，保留，取两者中较差的一个。
 
@@ -241,7 +243,7 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 `/settings/judgment`：`{"bands": [{"template", "source"?, "low", "high"}], "shadow": ["<模板>"], "spot_check": {"per_brief": 5}}`。`bands` 覆盖能力包声明的不确定带，带 `source` 的条目优先；`low` 大于 `high` 返回 400。每次修改是一次策略变更，记 `policy.changed`（主文档 §8.10）。
 
-`/settings/sources/{id}/outbound`：`{"local": "full", "external": "excerpt"}`，各取 `full`、`excerpt`、`meta`、`none`；`external` 可为 `null`（未选择）。`/settings/projects/{id}/capture-outbound` 同理，只有一个值。`POST /sources`、`PATCH /sources/{id}` 可写 `default_project`，不能写 `outbound`（返回 403，退出码 20）。
+`/settings/sources/{id}/outbound`：`{"local": "full", "external": "excerpt"}`，各取 `full`、`excerpt`、`meta`、`none`；`external` 可为 `null`（未选择）。`/settings/projects/{id}/capture-outbound` 同理，请求体与响应只有一个值：`{"value": "excerpt"}`，`value` 可为 `null`。两者读写都只有 Web 登录；写入记账本事件（来源是内部的 `source.updated`，项目是 `project.updated`），未变不记。`POST /sources`、`PATCH /sources/{id}` 可写 `default_project`，不能写 `outbound`（返回 403，退出码 20）。
 
 `GET /materials/{id}/content` 只用于托管型，自有型返回 409（读修订）。响应 200，`state` 取三个值之一，其余字段随之变化：
 
@@ -287,7 +289,9 @@ v0.2.0 新增四个登录审计类型（主文档 §14.13），对象是 `owner`
 
 v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表示事项追加了一条进展；后者表示建议被补到已有事项，对象是被补到的事项。
 
-【规划中（v0.2.0）】`item.progress_added`、`proposal.attached`。
+`item.progress_added`
+
+【规划中（v0.2.0）】`proposal.attached`。
 
 已有类型的信封不变；`item.updated` 的载荷新增可选的 `planned_for`，入站处置类事件的载荷新增可选的 `judgment`（判断记录 id）。v0.1 写下的 `run.finished`（`category: judge`）仍可回放，新的判断不再产生它（主文档 §8.6）。
 
@@ -296,10 +300,10 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 `apa version` 与 `GET /version` 返回同一份内容：
 
 ```json
-{"version": "0.2.0", "commit": "…", "schema": {"ledger": 3}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "probability_judgment": "probability-judgment/1"}}
+{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 3}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "probability_judgment": "probability-judgment/1"}}
 ```
 
-`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本，可能大于上例中的 3。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
+`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本，可能大于上例中的 3。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
 
 ## B.6 v0.2.0 对已有契约的改动
 

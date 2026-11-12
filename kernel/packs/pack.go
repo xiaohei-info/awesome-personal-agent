@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -72,14 +73,21 @@ type ClockRule struct {
 }
 
 type SourceRule struct {
-	ID              string         `yaml:"id"`
-	Match           map[string]any `yaml:"match"`
-	Kind            string         `yaml:"kind"`
-	ProjectBy       string         `yaml:"project_by"`
-	Then            string         `yaml:"then"`
-	CorrelationKeys []string       `yaml:"correlation_keys"`
-	Accept          string         `yaml:"accept"`
-	Mode            string         `yaml:"mode"`
+	ID        string         `yaml:"id"`
+	Match     map[string]any `yaml:"match"`
+	Where     []Condition    `yaml:"where"`
+	Kind      string         `yaml:"kind"`
+	ProjectBy string         `yaml:"project_by"`
+	Then      string         `yaml:"then"`
+	// 各步所用的提示词模板名（C.5）；省略时取内置模板。
+	Screen          string   `yaml:"screen"`
+	Draft           string   `yaml:"draft"`
+	Prescreen       string   `yaml:"prescreen"`
+	Extract         string   `yaml:"extract"`
+	CorrelationKeys []string `yaml:"correlation_keys"`
+	OnUpdate        string   `yaml:"on_update"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
+	Accept          string   `yaml:"accept"`
+	Mode            string   `yaml:"mode"`
 }
 
 type WebhookScheme struct {
@@ -167,7 +175,8 @@ var (
 	resultField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\[\]\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 
 	// 提示词正文只能用内核提供的固定占位符（C.7）。
-	promptPlaceholders = map[string]bool{"item_id": true, "run_id": true, "project_id": true, "materials_path": true}
+	promptPlaceholders = map[string]bool{"item_id": true, "run_id": true, "project_id": true, "materials_path": true,
+		"instruction_path": true}
 
 	// 能力包不能携带命令、脚本或策略字段（§13.3）；这些键出现在 schema 之外的任何位置都拒绝整个包。
 	forbiddenKeys = map[string]bool{"command": true, "commands": true, "cmd": true, "exec": true, "script": true,
@@ -533,21 +542,31 @@ func checkSourceRule(r SourceRule) error {
 	if err := flat(where+".match", r.Match); err != nil {
 		return err
 	}
-	if r.ProjectBy != "" && r.ProjectBy != "repo_remote" && r.ProjectBy != "none" && !strings.HasPrefix(r.ProjectBy, "fixed:") {
-		return fmt.Errorf("%s: project_by %q must be repo_remote, fixed:<project> or none", where, r.ProjectBy)
+	if r.ProjectBy != "" && r.ProjectBy != "repo_remote" && r.ProjectBy != "none" && r.ProjectBy != "draft" && !strings.HasPrefix(r.ProjectBy, "fixed:") {
+		return fmt.Errorf("%s: project_by %q must be repo_remote, fixed:<project>, draft or none", where, r.ProjectBy)
+	}
+	switch r.OnUpdate {
+	case "", "refresh", "attach":
+	default:
+		return fmt.Errorf("%s: on_update %q must be refresh or attach", where, r.OnUpdate)
 	}
 	switch r.Then {
-	case "", "proposed", "ignore", "judge":
+	case "", "proposed", "ignore", "screen", "judge", "extract", "digest", "alert":
 	default:
-		return fmt.Errorf("%s: then %q must be proposed, ignore or judge", where, r.Then)
+		return fmt.Errorf("%s: then %q must be proposed, ignore, screen, extract, digest or alert (judge is the old name of screen)", where, r.Then)
+	}
+	if r.Then == "alert" && len(r.Where) == 0 {
+		return fmt.Errorf("%s: an alert rule must carry where[]: alert cannot hang on every event", where)
+	}
+	for i, c := range r.Where {
+		if err := c.check(fmt.Sprintf("%s.where[%d]", where, i)); err != nil {
+			return err
+		}
 	}
 	switch r.Accept {
 	case "", "manual":
 		return checkMode(where, r.Mode)
-	case "auto":
-		if r.Mode == "" {
-			return fmt.Errorf("%s: accept auto requires an initial mode", where)
-		}
+	case "auto": // 动作类规则：省略 mode 即初始 observe（C.4）
 		return checkMode(where, r.Mode)
 	}
 	return fmt.Errorf("%s: accept %q must be manual or auto", where, r.Accept)
@@ -647,6 +666,10 @@ func checkPromptRefs(p *Pack) error {
 	}
 	sort.Strings(names)
 	for _, n := range names {
+		// instruction_path 只在由带 instruction 参数的实例驱动的运行里有值（C.7）；包没有这个参数，占位符永远是空的。
+		if usesPlaceholder(p.Prompts[n].Body, "instruction_path") && !declaresInstruction(p.InstanceParams) {
+			return fmt.Errorf("prompts/%s.md: {instruction_path} needs a string parameter %q in instance_params", n, "instruction")
+		}
 		to := p.Prompts[n].Meta.RelayTo
 		if to == "" {
 			continue
@@ -670,6 +693,24 @@ func checkPromptRefs(p *Pack) error {
 	return nil
 }
 
+// UsesPlaceholder 报告提示词正文是否含占位符 {name}（括号内允许空白）。
+func UsesPlaceholder(body, name string) bool { return usesPlaceholder(body, name) }
+
+func usesPlaceholder(body, name string) bool {
+	for _, mt := range placeholder.FindAllStringSubmatch(body, -1) {
+		if mt[1] == name {
+			return true
+		}
+	}
+	return false
+}
+
+func declaresInstruction(params map[string]any) bool {
+	props, _ := params["properties"].(map[string]any)
+	ins, _ := props["instruction"].(map[string]any)
+	return ins["type"] == "string"
+}
+
 func parsePrompt(data []byte, file string, schema func(string, map[string]any) error) (Prompt, error) {
 	head, body, ok := splitFrontMatter(data)
 	if !ok {
@@ -681,7 +722,7 @@ func parsePrompt(data []byte, file string, schema func(string, map[string]any) e
 	}
 	for _, mt := range placeholder.FindAllStringSubmatch(body, -1) {
 		if !promptPlaceholders[mt[1]] {
-			return Prompt{}, fmt.Errorf("unknown placeholder {%s}; allowed: item_id, run_id, project_id, materials_path", mt[1])
+			return Prompt{}, fmt.Errorf("unknown placeholder {%s}; allowed: item_id, run_id, project_id, materials_path, instruction_path", mt[1])
 		}
 	}
 	if err := checkPromptMeta(&m, file, schema); err != nil {
@@ -903,6 +944,72 @@ func checkOnUndecided(m *PromptMeta) error {
 		default:
 			return fmt.Errorf("on_undecided %v must be a number for a score question", m.OnUndecided)
 		}
+	}
+	return nil
+}
+
+// Condition 是来源规则 where[] 里的一条字段条件（C.5）：平铺的比较，不是表达式。
+type Condition struct {
+	Field string `yaml:"field"`
+	Op    string `yaml:"op"`
+	Value any    `yaml:"value"`
+}
+
+// EventFields 是 where[] 可引用的标准事件顶层字段；此外还有 metrics.<指标名>。
+var EventFields = []string{"type", "subject", "summary", "detail", "link", "sender", "sender_verified", "merge_key", "source"}
+
+// MetricName 返回 field 是 metrics.<名> 时的指标名。
+func MetricName(field string) (string, bool) {
+	n, ok := strings.CutPrefix(field, "metrics.")
+	return n, ok && n != ""
+}
+
+// IsChangeOp 报告 op 是否是与同一序列上一次取值比较的变化类条件。
+func IsChangeOp(op string) bool {
+	return op == "changed" || op == "crosses_above" || op == "crosses_below"
+}
+
+func (c Condition) check(where string) error {
+	_, isMetric := MetricName(c.Field)
+	if !isMetric && !slices.Contains(EventFields, c.Field) {
+		return fmt.Errorf("%s: field %q must be a standard event field (%s) or metrics.<name>", where, c.Field, strings.Join(EventFields, ", "))
+	}
+	_, isInt := c.Value.(int)
+	_, isFloat := c.Value.(float64)
+	numeric := isInt || isFloat
+	switch c.Op {
+	case "eq", "ne":
+		switch c.Value.(type) {
+		case string, bool, int, float64:
+			return nil
+		}
+		return fmt.Errorf("%s: op %s needs a scalar value", where, c.Op)
+	case "in":
+		l, ok := c.Value.([]any)
+		if !ok || len(l) == 0 {
+			return fmt.Errorf("%s: op in needs a non-empty list value", where)
+		}
+		return nil
+	case "gt", "gte", "lt", "lte":
+		if !isMetric || !numeric {
+			return fmt.Errorf("%s: op %s compares a number and can only be used on metrics.<name>", where, c.Op)
+		}
+	case "changed":
+		if !isMetric {
+			return fmt.Errorf("%s: op changed can only be used on metrics.<name>", where)
+		}
+		if c.Value != nil {
+			return fmt.Errorf("%s: op changed takes no value", where)
+		}
+	case "crosses_above", "crosses_below":
+		if !isMetric {
+			return fmt.Errorf("%s: op %s can only be used on metrics.<name>", where, c.Op)
+		}
+		if !numeric {
+			return fmt.Errorf("%s: op %s needs a numeric value", where, c.Op)
+		}
+	default:
+		return fmt.Errorf("%s: op %q must be eq, ne, in, gt, gte, lt, lte, changed, crosses_above or crosses_below", where, c.Op)
 	}
 	return nil
 }

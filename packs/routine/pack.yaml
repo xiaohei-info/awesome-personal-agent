@@ -1,0 +1,30 @@
+name: routine
+version: 1.0.0
+description: 例行任务：按日程只建事项，或由任务型按本人写的任务说明执行
+kinds:
+  - name: routine
+    title: 例行任务
+    spec_schema:
+      type: object
+      properties:
+        result: {type: string}
+instance_params:
+  type: object
+  required: [schedule, mode]
+  additionalProperties: false
+  properties:
+    schedule: {type: string}
+    mode: {type: string, enum: [run, create_item]}
+    title: {type: string}
+    instruction: {type: string}
+    access: {type: string, enum: [read, edit, full]}
+    output: {type: string, enum: [item, item_and_material]}
+clock_rules:
+  - id: scheduled-routine
+    type: recur
+    schedule: "{instance.schedule}"
+    do:
+      - action: create_item
+        kind: routine
+      - action: call_agent
+        prompt: run-routine

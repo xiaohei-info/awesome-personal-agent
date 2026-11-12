@@ -71,7 +71,7 @@ func New(o Options) (*Service, error) {
 		return nil, errors.New("screening: Store and Judge are required")
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	return &Service{o: o, inflight: map[string]bool{}}, nil
 }
@@ -102,7 +102,7 @@ func (s *Service) Needed(tx *store.Tx, it domain.Item) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	ep := pol.ModelEndpoint
+	ep := pol.GenerateEndpoint
 	if ep.URL == "" || ep.Model == "" {
 		return false, nil
 	}
@@ -178,7 +178,7 @@ func (s *Service) prepare(ctx context.Context, id string) (p prepared, err error
 		actor := systemActor
 		actor.Run = p.runID
 		p.pending = true
-		p.timeout = time.Duration(pol.ModelEndpoint.ScreeningTimeoutMs) * time.Millisecond
+		p.timeout = time.Duration(pol.ScreeningTimeoutMs) * time.Millisecond
 		// 事项正文是外部内容，只进资料段；初筛不附带 event_stats（NoStats）。
 		p.call = direct.Call{Pack: Pack, Template: Template, Input: input, Material: it.Body, Target: id, Project: it.Project,
 			NoStats: true, Actor: actor, ChainDepth: depth}

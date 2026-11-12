@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -86,7 +87,7 @@ type env struct {
 func setup(t *testing.T, configured bool) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, proc.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +109,7 @@ func setup(t *testing.T, configured bool) *env {
 	if configured {
 		err = st.Update(bg, func(tx *store.Tx) error {
 			_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-				p.ModelEndpoint = policy.ModelEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", ScreeningTimeoutMs: 1000}
+				p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}, 1000
 				return nil
 			})
 			return err

@@ -53,6 +53,9 @@ func (s *Service) CallAgent(o AgentOptions) rules.Handler {
 		if !ok {
 			return invalid("prompt " + pack + "/" + tmpl + " does not exist")
 		}
+		if instanceParams(c).Mode == modeCreateItem {
+			return nil // 只建事项：不调任何模型，也不需要宿主（§13.5）
+		}
 		switch pr.Meta.Agent {
 		case "task":
 			return s.callTask(ctx, c, pack, tmpl)
@@ -67,6 +70,23 @@ func (s *Service) CallAgent(o AgentOptions) rules.Handler {
 		}
 		return invalid("call_agent has no handler for " + pr.Meta.Agent + " template " + pack + "/" + tmpl)
 	}
+}
+
+// modeCreateItem 是实例参数 mode 的取值之一：实例到期只建事项，call_agent 不执行（§13.5）。
+const modeCreateItem = "create_item"
+
+// instParams 是实例参数里内核认的三个：mode、instruction（本人写的任务说明）、access（权限档位）。其余参数只作资料。
+type instParams struct {
+	Mode        string `json:"mode"`
+	Instruction string `json:"instruction"`
+	Access      string `json:"access"`
+}
+
+func instanceParams(c rules.Call) (p instParams) {
+	if c.Instance != nil {
+		_ = json.Unmarshal(c.Instance.Params, &p) // 参数已按包的 instance_params 校验；类型不符的字段取空
+	}
+	return p
 }
 
 // callMaterials 是 call_agent 给任务型与生成型的通用资料：实例参数加账本快照（§8.4、§10），同一处组装。
@@ -152,7 +172,8 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string)
 	if err != nil {
 		return err
 	}
-	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth,
+	ip := instanceParams(c)
+	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction,
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
 	switch {
 	case c.Bound:

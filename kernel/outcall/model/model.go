@@ -65,10 +65,12 @@ type Response struct {
 // Client 向配置的端点发起调用。HTTP 为空时用独立的 http.Client（不走全局 DefaultClient）。
 type Client struct {
 	HTTP *http.Client
+	// Sleep 是 Judge 退避与等待 Retry-After 用的等待函数；为空用真实计时。测试注入以免真等。
+	Sleep func(ctx context.Context, d time.Duration) error
 }
 
 // Complete 发起一次调用。端点未配置时不发请求，返回 ErrNotConfigured。
-func (c *Client) Complete(ctx context.Context, ep policy.ModelEndpoint, req Request) (Response, error) {
+func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req Request) (Response, error) {
 	if ep.URL == "" || ep.Model == "" {
 		return Response{}, ErrNotConfigured
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -100,7 +101,7 @@ func New(o Options) (*Engine, error) {
 		return nil, errors.New("rules: Store, Exec and Packs are required")
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	e := &Engine{o: o}
 	o.Exec.OnCommit(func(command.Commit) {

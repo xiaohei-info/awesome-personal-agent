@@ -21,6 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -31,6 +32,7 @@ const (
 	CmdRegisterExec = "source.register_script" // script，只 Web
 	CmdUpdateExec   = "source.update_script"   // script，只 Web
 	CmdSetEnabled   = "source.set_enabled"     // 任意类型启停
+	CmdSetOutbound  = "source.set_outbound"    // 外发范围，只 Web（§14.14）
 )
 
 // 事件类型是本模块内部的账本记录，不在对外稳定表里。
@@ -95,6 +97,7 @@ type SourceInput struct {
 	Timeout         int               `json:"timeout,omitempty"`
 	CredentialsPath string            `json:"credentials_path,omitempty"`
 	DedupeDomain    string            `json:"dedupe_domain,omitempty"`
+	DefaultProject  string            `json:"default_project,omitempty"`
 	Config          json.RawMessage   `json:"config,omitempty"`
 	Enabled         *bool             `json:"enabled,omitempty"` // 缺省启用
 }
@@ -108,7 +111,15 @@ type UpdateInput struct {
 	Timeout         *int             `json:"timeout,omitempty"`
 	CredentialsPath *string          `json:"credentials_path,omitempty"`
 	DedupeDomain    *string          `json:"dedupe_domain,omitempty"`
+	DefaultProject  *string          `json:"default_project,omitempty"` // 空串清除
 	Config          *json.RawMessage `json:"config,omitempty"`
+}
+
+// OutboundInput 设置外发范围。Local 缺省保持；External 缺省保持，null 表示改回未选择。
+type OutboundInput struct {
+	ID       string          `json:"id"`
+	Local    json.RawMessage `json:"local,omitempty"`
+	External json.RawMessage `json:"external,omitempty"`
 }
 
 type enabledInput struct {
@@ -147,6 +158,13 @@ func Register(x *command.Executor, o Options) error {
 		// ActionChangeSettings：delegate 得 web_only（退出码 20 并留痕），worker/observer 得 4。
 		m.spec(CmdRegisterExec, authz.ActionChangeSettings, opRegister, true),
 		m.spec(CmdUpdateExec, authz.ActionChangeSettings, opUpdate, true),
+		// ActionChangeSettings、不带代理写档位：外发范围只在 Web，delegate 得 web_only（退出码 20 并留痕）。
+		{Name: CmdSetOutbound, Action: authz.ActionChangeSettings, Tier: authz.TierNone, Object: objectOf,
+			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+				_, err := planOutbound(tx, in)
+				return err
+			},
+			Apply: m.applyOutbound},
 		{Name: CmdSetEnabled, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: objectOf,
 			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var e enabledInput
@@ -231,7 +249,8 @@ func (m *mod) plan(tx *store.Tx, o op, exec bool, in json.RawMessage) (domain.So
 			return s, "", err
 		}
 		s = domain.Source{ID: r.ID, Type: r.Type, SourceKind: r.SourceKind, Command: r.Command, Schedule: r.Schedule,
-			Timeout: r.Timeout, CredentialsPath: r.CredentialsPath, DedupeDomain: r.DedupeDomain, Config: r.Config, Enabled: true}
+			Timeout: r.Timeout, CredentialsPath: r.CredentialsPath, DedupeDomain: r.DedupeDomain, DefaultProject: r.DefaultProject,
+			Outbound: domain.Outbound{Local: ScopeFull}, Config: r.Config, Enabled: true}
 		if r.Enabled != nil {
 			s.Enabled = *r.Enabled
 		}
@@ -266,12 +285,20 @@ func (m *mod) plan(tx *store.Tx, o op, exec bool, in json.RawMessage) (domain.So
 		if u.DedupeDomain != nil {
 			s.DedupeDomain = *u.DedupeDomain
 		}
+		if u.DefaultProject != nil {
+			s.DefaultProject = *u.DefaultProject
+		}
 		if u.Config != nil {
 			s.Config = *u.Config
 		}
 	}
 	if err := m.check(s, exec); err != nil {
 		return s, "", err
+	}
+	if s.DefaultProject != "" {
+		if _, err := projects.Get(tx, s.DefaultProject); err != nil {
+			return s, "", err
+		}
 	}
 	if o == opRegister {
 		return s, EvRegistered, nil
@@ -339,6 +366,63 @@ func (m *mod) checkCredentials(s domain.Source) error {
 	return nil
 }
 
+// planOutbound 解出外发范围的设置并套在现有登记上；取值非法返回 invalid_request。
+func planOutbound(tx *store.Tx, in json.RawMessage) (domain.Source, error) {
+	var o OutboundInput
+	if err := strict(in, &o); err != nil {
+		return domain.Source{}, err
+	}
+	s, err := Get(tx, o.ID)
+	if err != nil {
+		return s, err
+	}
+	if o.Local != nil {
+		var l string
+		if json.Unmarshal(o.Local, &l) != nil || !ValidScope(l) {
+			return s, invalid("outbound.local must be full, excerpt, meta or none", "fix local")
+		}
+		s.Outbound.Local = l
+	}
+	if o.External != nil {
+		var ext *string
+		if err := json.Unmarshal(o.External, &ext); err != nil || (ext != nil && !ValidScope(*ext)) {
+			return s, invalid("outbound.external must be full, excerpt, meta, none or null", "fix external")
+		}
+		s.Outbound.External = ext
+	}
+	return s, nil
+}
+
+func (m *mod) applyOutbound(c *command.Ctx) (any, error) {
+	s, err := planOutbound(c.Tx, c.Input)
+	if err != nil {
+		return nil, err
+	}
+	cur, _ := Get(c.Tx, s.ID)
+	if sameOutbound(cur.Outbound, s.Outbound) { // 未变不记事件（幂等）
+		return s, nil
+	}
+	if _, err := c.Tx.Exec(`UPDATE sources_registry_source SET outbound_local = ?, outbound_external = ? WHERE id = ?`,
+		s.Outbound.Local, derefOr(s.Outbound.External, ""), s.ID); err != nil {
+		return nil, err
+	}
+	if _, err := c.Emit(domain.Event{Type: EvUpdated, Object: s.ID, Payload: snapshot(s)}); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func sameOutbound(a, b domain.Outbound) bool {
+	return a.Local == b.Local && derefOr(a.External, "-") == derefOr(b.External, "-")
+}
+
+func derefOr(p *string, d string) string {
+	if p == nil {
+		return d
+	}
+	return *p
+}
+
 func (m *mod) applyEnabled(c *command.Ctx) (any, error) {
 	var e enabledInput
 	if err := strict(c.Input, &e); err != nil {
@@ -390,30 +474,35 @@ func save(tx *store.Tx, s domain.Source, insert bool) error {
 	cfg := string(s.Config)
 	if insert {
 		_, err := tx.Exec(`INSERT INTO sources_registry_source
-			(id, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, config, cursor, enabled, stats)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '')`,
-			s.ID, string(s.Type), s.SourceKind, s.Command, s.Schedule, s.Timeout, s.CredentialsPath, s.DedupeDomain, cfg, b2i(s.Enabled))
+			(id, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '')`,
+			s.ID, string(s.Type), s.SourceKind, s.Command, s.Schedule, s.Timeout, s.CredentialsPath, s.DedupeDomain,
+			s.DefaultProject, s.Outbound.Local, derefOr(s.Outbound.External, ""), cfg, b2i(s.Enabled))
 		return err
 	}
 	_, err := tx.Exec(`UPDATE sources_registry_source SET source_type = ?, command = ?, schedule = ?, timeout = ?,
-		credentials_path = ?, dedupe_domain = ?, config = ? WHERE id = ?`,
-		s.SourceKind, s.Command, s.Schedule, s.Timeout, s.CredentialsPath, s.DedupeDomain, cfg, s.ID)
+		credentials_path = ?, dedupe_domain = ?, default_project = ?, config = ? WHERE id = ?`,
+		s.SourceKind, s.Command, s.Schedule, s.Timeout, s.CredentialsPath, s.DedupeDomain, s.DefaultProject, cfg, s.ID)
 	return err
 }
 
 // ---- 读取（供调度、Ingest 等模块使用；只读） ----
 
-const cols = `id, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, config, cursor, enabled, stats`
+const cols = `id, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats`
 
 func scan(r *store.Rows) (domain.Source, error) {
 	var (
 		s                domain.Source
 		typ, cfg, stats  string
+		ext              string
 		timeout, enabled int64
 	)
 	if err := r.Scan(&s.ID, &typ, &s.SourceKind, &s.Command, &s.Schedule, &timeout, &s.CredentialsPath,
-		&s.DedupeDomain, &cfg, &s.Cursor, &enabled, &stats); err != nil {
+		&s.DedupeDomain, &s.DefaultProject, &s.Outbound.Local, &ext, &cfg, &s.Cursor, &enabled, &stats); err != nil {
 		return s, err
+	}
+	if ext != "" { // 空串即未选择
+		s.Outbound.External = &ext
 	}
 	s.Type, s.Timeout, s.Enabled = domain.SourceType(typ), int(timeout), enabled != 0
 	if cfg != "" {
@@ -510,7 +599,7 @@ func apply(ctx context.Context, x *command.Executor, id command.Identity, s Sour
 	}
 	cfg := s.Config
 	u, _ := json.Marshal(UpdateInput{ID: s.ID, SourceKind: &s.SourceKind, Command: &s.Command, Schedule: &s.Schedule,
-		Timeout: &s.Timeout, CredentialsPath: &s.CredentialsPath, DedupeDomain: &s.DedupeDomain, Config: &cfg})
+		Timeout: &s.Timeout, CredentialsPath: &s.CredentialsPath, DedupeDomain: &s.DedupeDomain, DefaultProject: &s.DefaultProject, Config: &cfg})
 	if _, err := x.Do(ctx, command.Request{Identity: id, Command: upd, Input: u}); err != nil {
 		return err
 	}

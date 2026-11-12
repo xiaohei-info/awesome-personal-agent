@@ -73,7 +73,7 @@ kinds:
 | `correlation_keys` | 从事件字段得到关联键的模板；来源程序已给出时可省略。关联键标识来源对象，同一对象的各版本应得到同一个键 |
 | `merge_key` | 合并键模板；省略时内核按链接或"标题加发送者"推导（主文档 §9.3） |
 | `screen`、`draft`、`prescreen`、`extract` | 各步所用的提示词模板名，省略时依次取内置的 `triage-screen`、`triage-draft`、`capture-prescreen`、`triage-extract` |
-| `accept` | 接受方式，默认 `manual`。声明 `auto` 时必须带 `mode` |
+| `accept` | 接受方式，默认 `manual`。声明 `auto` 的规则是动作类，`mode` 可省略（初始 `observe`） |
 | `mode` | `accept: auto` 与 `then: alert` 的规则需要：它们是动作类规则，初始只能是 `off` 或 `observe`（缺省 `observe`）。`observe` 时只记录"本来会自动接受"或"本来会提醒"，在 Web 切 `auto` 后才生效。`alert` 规则必须带 `where[]` |
 
 ```yaml
@@ -160,7 +160,7 @@ webhook_mappings:
 | `add_tag` | 打标签 | |
 | `create_item` | 建事项或子事项 | 指定 `assignee` 时校验项目允许的执行者 |
 | `create_timer` | 为触发事项建提醒 Timer：`after`（时长）或 `at`（RFC 3339）一次性，`schedule`（固定间隔）周期；到期经触达提醒（主文档 §6.8） | 需要触发事项，时钟规则不可用 |
-| `call_agent` | 调专属 agent，指定提示词模板。判断型的答案由发起它的内置处理器使用（如回执核实门控，主文档 §7.5）；通用规则里判断型的答案只留痕，不单独改状态 | 形态校验 |
+| `call_agent` | 调专属 agent，指定提示词模板。实例驱动的规则里，实例参数 `mode` 为 `create_item` 时不执行（只建事项，不调模型、不需要宿主，主文档 §13.5）。判断型的答案由发起它的内置处理器使用（如回执核实门控，主文档 §7.5）；通用规则里判断型的答案只留痕，不单独改状态 | 形态校验 |
 | `start_background_run` | 拉起后台运行：`runner`、`prompt`、`access`、`cwd`，可选 `harness`（默认用 Web 设置的默认 harness）；`runner: task` 时再加 `executor`，内核先把子事项委派给该执行者（与 `apa delegate` 同一路径），运行者在子事项上回执 | §13.6 的前置校验 |
 
 规则动作产生的 Event 不再触发规则。规则内容 hash 记入账本，动作类规则内容变化后回到 `observe`，提醒类规则保持本人上一次的选择（主文档 §14.8）。
@@ -224,6 +224,8 @@ criteria: 涉及真实资金、对外承诺、不可逆操作或权限变更的�
 ```
 
 正文只写固定模板和占位符。占位符只有内核提供的固定集合：`item_id`、`run_id`、`project_id`、`materials_path`（资料文件路径）、`instruction_path`（实例里本人写的任务说明所在的文件路径，只在由带 `instruction` 参数的实例驱动的任务型运行里可用，主文档 §13.5）。外部内容经资料段或资料文件附带，由内核组织，模板不能把外部字段插到指令段。
+
+`instruction_path` 的文件由任务型在拉起时写进这次运行的运行目录（文件名 `instruction.txt`，权限 0600），不进提示词正文；包的 `instance_params` 没有字符串参数 `instruction` 时，用了这个占位符的包加载时拒绝；实例没有任务说明时不拉起，事项转 `needs_input`（`SPIKE-ROUTINE`，主文档 §13.5）。
 
 **已移除的字段**（v0.1 的写法，加载时拒绝，见 C.11）：
 
@@ -402,4 +404,4 @@ result_fields:
 | `agents-md` | AGENTS.md 渲染模板 |
 | `inbound-triage` | 【规划中（v0.2.0）】来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`screen`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`screen`，`project_by: draft`，`on_update: attach`）。新增的结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`：能按关联键挂靠的已在规则之前挂靠）。webhook 校验方案与字段映射。判断型提示词 `triage-screen`（是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`）与 `capture-prescreen`（是非题，下限 0.10，未定取"是"）；生成型提示词 `triage-draft`（标题、摘要、kind、项目、日期、推荐处置）与 `triage-extract`（一段内容抽出零到多条候选）。v0.1 的 `triage`（三选一）与 `triage-title` 模板移除 |
 | `delegation-verify` | 响应 `delegation.reported` 的事件规则，初始 `observe`；判断型提示词 `delegation-screen`（是非题"这份回执需要本人核实吗"，下限 0.20，未定取"是"）。命中后在父事项上生成决策请求交本人；拉起任务型用工具查证不在本版（主文档 §20.5） |
-| `routine` | 【规划中（v0.2.0）】kind `routine`；实例参数（`schedule`、`mode`、`title`、`instruction`、`project`、`access`、`output`）；实例驱动的时钟规则（建事项，`mode: run` 时再调任务型）；任务型提示词 `run-routine`（正文只有固定模板，任务说明经 `instruction_path` 读取，声明 `result_fields`） |
+| `routine` | kind `routine`（`spec.result`）；实例参数（`schedule`、`mode`、`title`、`instruction`、`access`、`output`；归属项目是实例自己的字段，见 C.10）；实例驱动的时钟规则（建事项，`mode: run` 时再调任务型；`mode: create_item` 时 `call_agent` 不执行）；任务型提示词 `run-routine`（正文只有固定模板，任务说明经 `instruction_path` 读取，声明 `result_fields`）；列表与卡片视图 |

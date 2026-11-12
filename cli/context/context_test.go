@@ -122,7 +122,7 @@ func (k *kernel) must(args ...string) result {
 // 不放进 apa：APA_SESSION 会让 context 记游标，改变那些测试要看的完整投影。
 func (k *kernel) mustAsOwner(args ...string) result {
 	k.t.Helper()
-	r := k.apaTok(k.tok, map[string]string{"APA_SESSION": "setup"}, args...)
+	r := k.apaTok(k.tok, map[string]string{"APA_SESSION": "setup", "APA_SESSION_KIND": "direct"}, args...)
 	if r.code != 0 {
 		k.t.Fatalf("%v: %+v", args, r)
 	}

@@ -193,6 +193,11 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 	if err != nil {
 		return err
 	}
+	var newID string
+	_ = json.Unmarshal(in["id"], &newID)
+	if err := a.rejectOutbound(r, p, newID, in); err != nil {
+		return err
+	}
 	cmd := registry.CmdRegister
 	var typ string
 	if raw, ok := in["type"]; ok && json.Unmarshal(raw, &typ) == nil && domain.SourceType(typ) == domain.SourceScript {
@@ -214,6 +219,9 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 	}
 	cur, err := a.source(r, id)
 	if err != nil {
+		return err
+	}
+	if err := a.rejectOutbound(r, p, id, in); err != nil {
 		return err
 	}
 	enabled, hasEnabled := in["enabled"]
@@ -244,6 +252,21 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 		}
 	}
 	return writeValue(w, http.StatusOK, res)
+}
+
+// rejectOutbound：这两条路由从不写 outbound（§14.14）。非 Web 调用者的尝试交给内核的设置命令判定，
+// 以得到规定的退出码（delegate 20 并留拒绝事件，其余 4）；Web 本人则被指向 settings 路由。
+func (a *api) rejectOutbound(r *http.Request, p *core.Principal, id string, in map[string]json.RawMessage) error {
+	if _, ok := in["outbound"]; !ok {
+		return nil
+	}
+	if !p.Web {
+		raw, _ := json.Marshal(id)
+		if _, err := a.run(r, p, registry.CmdSetOutbound, map[string]json.RawMessage{"id": raw}, false); err != nil {
+			return err
+		}
+	}
+	return domain.NewError(domain.CodeWebOnly, "outbound is not part of the source registration or update", "set it in the Web UI (PUT /v1/settings/sources/{id}/outbound)")
 }
 
 func writeValue(w http.ResponseWriter, status int, res command.Result) error {
@@ -490,9 +513,9 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 			d := domain.Disposition(x)
 			switch d {
 			case domain.DispositionPending, domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored,
-				domain.DispositionUnjudged, domain.DispositionExpired:
+				domain.DispositionUnjudged, domain.DispositionExpired, domain.DispositionDigest, domain.DispositionAlerted:
 			default:
-				return invalid("disposition is not valid", "use pending, attached, proposed, ignored, unjudged or expired, comma separated")
+				return invalid("disposition is not valid", "use pending, attached, proposed, ignored, digest, alerted, unjudged or expired, comma separated")
 			}
 			ds = append(ds, d)
 		}

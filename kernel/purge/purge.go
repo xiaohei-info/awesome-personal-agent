@@ -20,6 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -94,6 +95,10 @@ func apply(c *command.Ctx, blobDir, id string) (any, error) {
 	case err == nil:
 		kind = KindItem
 		if err := items.Purge(c.Tx, id); err != nil {
+			return nil, err
+		}
+		// 判断记录只含结构化摘要，但指向被删对象的一并删除（§6.16）。
+		if _, err := record.DeleteBySubject(c.Tx, id); err != nil {
 			return nil, err
 		}
 	case isNotFound(err):

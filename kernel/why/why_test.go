@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -24,8 +27,10 @@ var (
 func open(t *testing.T) *store.Store {
 	t.Helper()
 	reg := store.NewRegistry()
-	if err := reg.Register(eventlog.Module); err != nil {
-		t.Fatal(err)
+	for _, m := range []store.Module{eventlog.Module, proc.Module} {
+		if err := reg.Register(m); err != nil {
+			t.Fatal(err)
+		}
 	}
 	s, err := store.Open(t.TempDir(), reg)
 	if err != nil {
@@ -240,5 +245,97 @@ func TestAuditFilterTrimPendingAndLimits(t *testing.T) {
 	}
 	if _, err := audit(t, s, AuditRequest{Actor: owner, Level: "bogus"}); err == nil {
 		t.Fatal("invalid level must be denied")
+	}
+}
+
+func f64(v float64) *float64 { return &v }
+
+// seedJudged 写一条判断记录（JRC-MID：两级，对话端点定案）和三条 Event：
+// 引用该记录的处置、v0.1 的 run.finished（category: judge）、不带 judgment 的普通 Event。
+func seedJudged(t *testing.T, s *store.Store) record.Record {
+	t.Helper()
+	yes := true
+	rec := record.Record{ID: "jd_mid", Use: "inbound_screen", Template: "triage/triage-screen@abc", Subject: "evt_1", Source: "src_1",
+		Fingerprint: "fp", Band: record.Band{Low: 0.15, High: 0.60}, DecidedBy: record.DecidedChat, Answer: "yes",
+		CreatedAt: time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC),
+		Levels: []record.Level{
+			{Backend: record.BackendClassifier, Model: "cls", PYes: f64(0.30), Outcome: record.OutcomeUncertain, DurationMs: 5},
+			{Backend: record.BackendChat, Model: "chat", Answer: "yes", Sufficient: &yes, Outcome: record.OutcomeDecided, DurationMs: 90}}}
+	ref, _ := json.Marshal(record.RefOf(rec))
+	err := s.Update(ctx, func(tx *store.Tx) error {
+		if err := record.Put(tx, rec); err != nil {
+			return err
+		}
+		for _, e := range []domain.Event{
+			{Type: "inbound.disposed", Object: "item_j", Actor: rule, Basis: &domain.Basis{PolicyVersion: 1, RuleID: "inbound-triage"}, Payload: ref},
+			{Type: domain.EvRunFinished, Object: "item_j", Actor: agent, Payload: json.RawMessage(`{"category":"judge","probability":0.82,"confidence":0.9}`)},
+			{Type: domain.EvItemCreated, Object: "item_j", Actor: rule, Basis: &domain.Basis{PolicyVersion: 1, RuleID: "inbound-triage"}, Payload: json.RawMessage(`{"title":"t"}`)},
+		} {
+			if _, err := eventlog.Append(tx, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+func TestReplayExpandsJudgmentLevelsForEveryCredentialLevel(t *testing.T) {
+	s := open(t)
+	seedJudged(t, s)
+	for _, l := range []authz.Level{authz.LevelWeb, authz.LevelObserver, authz.LevelRun} {
+		who := agent
+		if l == authz.LevelWeb {
+			who = owner
+		}
+		tl, err := replay(t, s, Request{Actor: who, Level: l, ID: "item_j"})
+		if err != nil {
+			t.Fatalf("%s: %v", l, err)
+		}
+		j := tl.Steps[0].Judgment
+		if j == nil || j.Expired || j.ID != "jd_mid" || j.DecidedBy != "chat" || j.Answer != "yes" || j.Record == nil || len(j.Record.Levels) != 2 {
+			t.Fatalf("%s: judgment not expanded: %+v", l, j)
+		}
+		if lv := j.Record.Levels; *lv[0].PYes != 0.30 || lv[0].Outcome != "uncertain" || lv[1].Outcome != "decided" {
+			t.Fatalf("%s: levels: %+v", l, lv)
+		}
+	}
+}
+
+func TestReplayAfterRetentionKeepsOnlyEventConclusion(t *testing.T) {
+	s := open(t)
+	seedJudged(t, s)
+	if err := s.Update(ctx, func(tx *store.Tx) error { _, err := record.DeleteBefore(tx, time.Now()); return err }); err != nil {
+		t.Fatal(err)
+	}
+	tl, err := replay(t, s, Request{Actor: agent, Level: authz.LevelObserver, ID: "item_j"})
+	if err != nil {
+		t.Fatalf("expired record must not break why: %v", err)
+	}
+	j := tl.Steps[0].Judgment
+	if j == nil || !j.Expired || j.Record != nil || j.ID != "jd_mid" || j.Answer != "yes" || j.DecidedBy != "chat" {
+		t.Fatalf("want conclusion from the Event only: %+v", j)
+	}
+	if len(tl.Steps) != 3 {
+		t.Fatalf("events must stay: %d", len(tl.Steps))
+	}
+}
+
+func TestV01JudgeEventReplaysUntouched(t *testing.T) {
+	s := open(t)
+	seedJudged(t, s)
+	tl, err := replay(t, s, Request{Actor: owner, Level: authz.LevelWeb, ID: "item_j"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := tl.Steps[1]
+	if old.Type != domain.EvRunFinished || old.Judgment != nil || string(old.Payload) != `{"category":"judge","probability":0.82,"confidence":0.9}` {
+		t.Fatalf("v0.1 judge event must replay as is: %+v", old)
+	}
+	if tl.Steps[2].Judgment != nil {
+		t.Fatal("event without judgment field must have no judgment line")
 	}
 }

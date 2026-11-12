@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
@@ -90,7 +91,7 @@ func (e *Engine) createItem(_ context.Context, c Call) error {
 	title := c.Rule
 	in := map[string]any{"kind": str(c.Action, "kind"), "reason": "rule " + c.Rule}
 	if f := c.Instance; f != nil && c.Item == nil {
-		in["phase"], in["title"] = domain.PhaseOpen, f.Pack+" "+f.Due.UTC().Format("2006-01-02 15:04")
+		in["phase"], in["title"] = domain.PhaseOpen, instanceTitle(f)
 		if f.Project != "" {
 			in["project"] = f.Project
 		}
@@ -138,6 +139,18 @@ func (e *Engine) createItem(_ context.Context, c Call) error {
 	}
 	_, err = c.Do("item.relate", map[string]any{"from": out.ID, "to": parent, "type": domain.RelParent, "reason": "rule " + c.Rule})
 	return err
+}
+
+// instanceTitle 是实例到期建的事项的标题：实例参数 title 是模板，{date} 换成到期日（本机时区，与 cron 同一时区）；
+// 没有 title 参数时取包名加到期时刻。
+func instanceTitle(f *Fired) string {
+	var p struct {
+		Title string `json:"title"`
+	}
+	if json.Unmarshal(f.Params, &p) == nil && strings.TrimSpace(p.Title) != "" {
+		return strings.ReplaceAll(p.Title, "{date}", f.Due.In(time.Local).Format("2006-01-02"))
+	}
+	return f.Pack + " " + f.Due.UTC().Format("2006-01-02 15:04")
 }
 
 // createTimer：after（时长）或 at（RFC 3339）建一次性提醒，schedule（时长或 cron）建周期 Timer。

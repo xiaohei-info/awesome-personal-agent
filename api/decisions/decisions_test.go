@@ -132,7 +132,7 @@ func (e *env) token(kind auth.Kind, executor string) func(*http.Request) {
 	}); err != nil {
 		e.t.Fatal(err)
 	}
-	return hdr("Authorization", "Bearer "+secret, "X-APA-Session", "s1")
+	return hdr("Authorization", "Bearer "+secret, "X-APA-Session", "s1", "X-APA-Session-Kind", "direct")
 }
 
 // item 以本人身份创建一个事项并返回 id。

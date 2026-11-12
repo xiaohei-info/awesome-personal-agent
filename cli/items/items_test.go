@@ -121,7 +121,7 @@ func (r run) json(t *testing.T) map[string]any {
 func (k *kernel) apa(kind auth.Kind, args ...string) run {
 	k.t.Helper()
 	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_SESSION": "s1", "APA_HOME": k.t.TempDir()}
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": k.t.TempDir()}
 	code := client.Main(args, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return run{code, out.String(), errb.String()}
@@ -488,5 +488,135 @@ func TestDelegateNeedsEvidence(t *testing.T) {
 	k.ok(auth.Delegate, "item", "update", id, "--title", "x", "--reason", "r", "--evidence", "owner said so")
 	if k.item(id)["title"] != "x" {
 		t.Fatal("update with evidence must apply")
+	}
+}
+
+func (k *kernel) progress(id string) []any {
+	k.t.Helper()
+	return k.ok(auth.Observer, "item", "show", id).json(k.t)["progress"].([]any)
+}
+
+func ymd(d time.Time) string { return d.In(time.Local).Format("2006-01-02") }
+
+// ACT-WBN-05/06：--planned-for 写、清；非法值退出码 2 且事项不变。
+func TestItemPlannedFor(t *testing.T) {
+	k := newKernel(t)
+	id := k.openItem()
+	tmrw := ymd(k.now.AddDate(0, 0, 1))
+	k.ok(auth.Worker, "item", "update", id, "--planned-for", tmrw)
+	if got := k.item(id)["planned_for"]; got != tmrw {
+		t.Fatalf("planned_for = %v", got)
+	}
+	v := k.item(id)["version"]
+	for _, bad := range []string{"2026-13-40", "2026-11-12T10:00:00Z"} {
+		r := k.apa(auth.Worker, "item", "update", id, "--planned-for", bad)
+		if r.code != 2 || !strings.Contains(r.errOut, "YYYY-MM-DD") {
+			t.Fatalf("%s: exit %d %s", bad, r.code, r.errOut)
+		}
+	}
+	if k.item(id)["planned_for"] != tmrw || k.item(id)["version"] != v {
+		t.Fatal("rejected updates changed the item")
+	}
+	k.ok(auth.Worker, "item", "update", id, "--planned-for", "")
+	if _, has := k.item(id)["planned_for"]; has {
+		t.Fatal("empty --planned-for must clear")
+	}
+	n := k.idOf(k.ok(auth.Worker, "item", "add", "--kind", "task", "--title", "WB-F2", "--planned-for", tmrw, "--phase", "proposed"))
+	if k.item(n)["planned_for"] != tmrw {
+		t.Fatal("item add --planned-for")
+	}
+}
+
+// ACT-WBN-09/10/11：progress 追加、未来日期退出码 2、越权 4、delegate 缺依据 23。
+func TestItemProgress(t *testing.T) {
+	k := newKernel(t)
+	id := k.openItem()
+	yday, tmrw := ymd(k.now.AddDate(0, 0, -1)), ymd(k.now.AddDate(0, 0, 1))
+	k.ok(auth.Worker, "item", "progress", id, "--text", "联系了供应商", "--on", yday)
+	ps := k.progress(id)
+	p := ps[len(ps)-1].(map[string]any)
+	if k.phase(id) != "open" || len(ps) != 1 || p["text"] != "联系了供应商" || p["on"] != yday || p["actor"] != "wrk1" {
+		t.Fatalf("progress = %+v phase=%s", ps, k.phase(id))
+	}
+	if r := k.apa(auth.Worker, "item", "progress", id, "--text", "未来", "--on", tmrw); r.code != 2 || len(k.progress(id)) != 1 {
+		t.Fatalf("future on: exit %d %s", r.code, r.errOut)
+	}
+	if r := k.apa(auth.Worker, "item", "progress", id); r.code != 2 {
+		t.Fatalf("missing --text: exit %d", r.code)
+	}
+	other := k.openItem(map[string]any{"assignee": "someone-else"})
+	if r := k.apa(auth.Worker, "item", "progress", other, "--text", "x"); r.code != 4 {
+		t.Fatalf("worker on another's item: exit %d %s", r.code, r.errOut)
+	}
+	if r := k.apa(auth.Delegate, "item", "progress", other, "--text", "x"); r.code != 23 {
+		t.Fatalf("delegate without basis: exit %d %s", r.code, r.errOut)
+	}
+	k.ok(auth.Delegate, "item", "progress", other, "--text", "本人说已订", "--evidence", "已订好了")
+	if len(k.progress(other)) != 1 {
+		t.Fatal("authorized progress missing")
+	}
+	var seen bool
+	_ = k.st.View(bg, func(tx *store.Tx) error {
+		es, _ := eventlog.ReadObject(tx, id)
+		for _, e := range es {
+			seen = seen || e.Event.Type == domain.EvItemProgressAdded
+		}
+		return nil
+	})
+	if !seen {
+		t.Fatal("no item.progress_added event")
+	}
+}
+
+// ACT-WBN-07：apa today 输出四组，内容同 GET /today。
+func TestToday(t *testing.T) {
+	k := newKernel(t)
+	now := time.Now()
+	a := k.openItem(map[string]any{"planned_for": ymd(now.AddDate(0, 0, -1))})
+	k.openItem(map[string]any{"planned_for": ymd(now.AddDate(0, 0, 1))})
+	out := k.ok(auth.Observer, "today").json(t)
+	for _, g := range []string{"planned", "due", "pending", "stale"} {
+		if _, ok := out[g].([]any); !ok {
+			t.Fatalf("group %s missing: %v", g, out)
+		}
+	}
+	pl := out["planned"].([]any)
+	if len(pl) != 1 || pl[0].(map[string]any)["id"] != a {
+		t.Fatalf("planned = %v", pl)
+	}
+	if r := k.apa(auth.Observer, "today", "x"); r.code != 2 {
+		t.Fatalf("today with args: exit %d", r.code)
+	}
+}
+
+// ACT-MSG-14/17：apa item relate --key 登记与移除关联键，show 看到；观察者退出码 4，delegate 缺依据退出码 23，账本不变。
+func TestRelateKeyRegistersAndRemoves(t *testing.T) {
+	k := newKernel(t)
+	id := k.openItem()
+	keys := func() []any { return k.ok(auth.Observer, "item", "show", id).json(t)["correlation_keys"].([]any) }
+
+	if r := k.apa(auth.Observer, "item", "relate", id, "--key", "fm-x"); r.code != 4 {
+		t.Fatalf("observer: %+v", r)
+	}
+	if r := k.apa(auth.Delegate, "item", "relate", id, "--key", "fm-y"); r.code != 23 {
+		t.Fatalf("delegate without evidence: %+v", r)
+	}
+	if len(keys()) != 0 {
+		t.Fatalf("rejected registrations left keys: %v", keys())
+	}
+	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm", "--evidence", "本人原话：归到这件事")
+	got := keys()
+	if len(got) != 1 || got[0].(map[string]any)["key"] != "fm-thread-1" || got[0].(map[string]any)["domain"] != "acc-fm" {
+		t.Fatalf("keys = %v", got)
+	}
+	if r := k.apa(auth.Worker, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm"); r.code != 6 {
+		t.Fatalf("duplicate: %+v", r)
+	}
+	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm", "--remove", "--evidence", "本人原话：解除关联")
+	if len(keys()) != 0 {
+		t.Fatalf("key not removed: %v", keys())
+	}
+	if r := k.apa(auth.Worker, "item", "relate", id, "--key", "k", "--to", id, "--type", "relates"); r.code != 2 {
+		t.Fatalf("key with --to: %+v", r)
 	}
 }

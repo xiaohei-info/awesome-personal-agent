@@ -244,8 +244,8 @@ func save(tx *store.Tx, it domain.Item) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT OR REPLACE INTO items (id, phase, kind, project, assignee, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		it.ID, string(it.Phase), string(it.Kind), it.Project, it.Assignee, string(b), it.CreatedAt.UnixNano(), it.UpdatedAt.UnixNano())
+	_, err = tx.Exec(`INSERT OR REPLACE INTO items (id, phase, kind, project, assignee, planned_for, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		it.ID, string(it.Phase), string(it.Kind), it.Project, it.Assignee, it.PlannedFor, string(b), it.CreatedAt.UnixNano(), it.UpdatedAt.UnixNano())
 	return err
 }
 
@@ -268,6 +268,11 @@ func Purge(tx *store.Tx, id string) error {
 	}
 	if n == 0 {
 		return notFound(id)
+	}
+	for _, t := range []string{"item_progress", "item_correlation"} {
+		if _, err = tx.Exec(`DELETE FROM `+t+` WHERE item = ?`, id); err != nil {
+			return err
+		}
 	}
 	_, err = tx.Exec(`DELETE FROM item_relations WHERE from_id = ? OR to_id = ?`, id, id)
 	return err

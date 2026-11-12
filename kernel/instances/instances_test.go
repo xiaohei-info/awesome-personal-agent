@@ -319,7 +319,7 @@ func TestProjectMustExist(t *testing.T) {
 
 func TestOnlyOwnerLevelCallersManageInstances(t *testing.T) {
 	e := setup(t)
-	worker := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelWorker}
+	worker := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelWorker}
 	if _, err := e.do(worker, "instance.create", map[string]any{"pack": "brief", "params": json.RawMessage(`{"schedule":"24h"}`)}); err == nil {
 		t.Fatal("worker created an instance")
 	}
@@ -373,7 +373,7 @@ func TestNonStringScheduleIsRejected(t *testing.T) {
 func TestDelegateManagesObserverDenied(t *testing.T) {
 	e := setup(t)
 	lvl := func(l authz.Level) command.Trusted {
-		return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "a", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: l}
+		return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "a", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: l}
 	}
 	in := map[string]any{"pack": "brief", "params": json.RawMessage(`{"schedule":"24h"}`)}
 	if _, err := e.do(lvl(authz.LevelObserver), "instance.create", in); err == nil {

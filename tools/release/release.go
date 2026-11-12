@@ -83,7 +83,7 @@ func Build(c Config) error {
 
 // builtinPacks 是随发行嵌入的内置能力包（附录 C.1）；Verify 要求它们全部被加载。
 var builtinPacks = []string{"brief", "review", "follow-up", "decision-card", "delegation-verify",
-	"inbound-triage", "agents-md", "guideline-draft", "background-run"}
+	"inbound-triage", "agents-md", "guideline-draft", "background-run", "routine"}
 
 const verifyPassword = "release-verify-pw"
 

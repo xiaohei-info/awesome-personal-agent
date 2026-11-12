@@ -32,6 +32,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -76,7 +77,8 @@ type PackSource interface {
 
 // Intercept 在规则与判断之前看一条 pending 事件。attached 为真表示已挂靠到原事项，本流水线不再处理；
 // 否则 hint 非空时是关联线索（命中已关闭或多个未关闭事项而没有挂靠），随判断输入与事项理由带走。
-type Intercept func(ctx context.Context, ev domain.SourceEvent) (attached bool, hint string, err error)
+// onUpdate 是命中该事件的来源规则声明的 on_update（refresh、attach 或空），没有规则命中时为空。
+type Intercept func(ctx context.Context, ev domain.SourceEvent, onUpdate string) (attached bool, hint string, err error)
 
 // Options 配置 Service。
 type Options struct {
@@ -90,11 +92,19 @@ type Options struct {
 	OnError func(error)
 	// Intercept 是跟进消息归属（§9.4）；可为空。
 	Intercept Intercept
-	// Now 是时钟，缺省 time.Now；自动重判按它算事件年龄与退避。
+	// Now 是时钟，缺省 clock.Now；自动重判按它算事件年龄与退避。
 	Now func() time.Time
 	// Rejudge 是自动重判的上限与节流，零值取 DefaultRejudge。
 	Rejudge RejudgeLimits
+	// Series 是变化类字段条件（changed、crosses_*）取同一序列上一次取值的来源；可为空（此时这类条件恒不成立）。
+	Series rules.Series
+	// Extract 与 Alert 处理 then: extract、then: alert 的出口，由各自的模块注入；没注入时命中这两种出口的事件保持 pending 并报错，不假装处理。
+	Extract Exit
+	Alert   Exit
 }
+
+// Exit 处理一个出口：命中规则 m 的事件 ev 由它写完处置（经命令模型）。
+type Exit func(ctx context.Context, src domain.Source, ev domain.SourceEvent, rule string) error
 
 // Service 消费 pending 的来源事件。
 type Service struct {
@@ -119,7 +129,7 @@ func New(o Options) (*Service, error) {
 		o.Owner = "owner"
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	if o.Rejudge == (RejudgeLimits{}) {
 		o.Rejudge = DefaultRejudge
@@ -222,6 +232,7 @@ type snapshot struct {
 	made    map[string]string // 来源事件 id → 已为它建出的事项（上一轮中途失败留下的）
 	projs   []domain.Project
 	policy  int
+	gen     policy.GenerateEndpoint // 入站判断与起草实际调用的端点：外发范围按它的位置取
 }
 
 func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
@@ -269,7 +280,9 @@ func (sn *snapshot) loadFacts(tx *store.Tx) error {
 			sn.made[x.SourceEvent] = it.ID
 		}
 	}
-	sn.policy, _, err = policy.Current(tx)
+	var pol policy.Policy
+	sn.policy, pol, err = policy.Current(tx)
+	sn.gen = pol.GenerateEndpoint
 	return err
 }
 
@@ -278,8 +291,10 @@ func (sn *snapshot) source(id string) (domain.Source, error) {
 	if src, ok := sn.sources[id]; ok {
 		return src, nil
 	}
-	if _, isCapture := captureProject(id); isCapture {
-		return captureSource(id), nil
+	if proj, isCapture := captureProject(id); isCapture {
+		src := captureSource(id)
+		src.Outbound = captureOutbound(sn.projs, proj)
+		return src, nil
 	}
 	return domain.Source{}, fmt.Errorf("source %s is not registered", id)
 }
@@ -340,6 +355,9 @@ func (s *Service) match(src domain.Source, ev domain.SourceEvent) (*matched, err
 	for _, p := range s.o.Packs.List() {
 		for _, r := range p.SourceRules {
 			ok, err := matchFlat(r.Match, src, ev)
+			if err == nil && ok {
+				ok, err = rules.Where(r.Where, src, ev, s.o.Series)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("source rule %s/%s: %w", p.Name, r.ID, err)
 			}
@@ -395,30 +413,49 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 		return err
 	}
 	var hint string
+	m, merr := s.match(src, ev)
 	if s.o.Intercept != nil {
-		attached, h, err := s.o.Intercept(ctx, ev)
+		onUpdate := ""
+		if m != nil {
+			onUpdate = m.rule.OnUpdate
+		}
+		attached, h, err := s.o.Intercept(ctx, ev, onUpdate)
 		if err != nil || attached {
 			return err
 		}
 		hint = h
 	}
-	m, err := s.match(src, ev)
-	if err != nil {
-		return err
+	if merr != nil {
+		return merr
 	}
 	if id, ok := sn.made[ev.ID]; ok { // 上一轮建好了事项却没记完处置：接着做，不再判断、不再建
 		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure")
 	}
 	var prop proposal
-	switch {
-	case m != nil && m.rule.Then == "ignore":
+	exit := rules.ExitScreen // 没有规则命中按 screen 处理
+	if m != nil {
+		exit = rules.Exit(m.rule)
+	}
+	switch exit {
+	case rules.ExitIgnore:
 		return s.dispose(ctx, m, ev, disposeIn{Event: ev.ID, Disposition: domain.DispositionIgnored, Reason: "rule " + m.key() + " ignores this event"})
-	case m != nil && (m.rule.Then == "" || m.rule.Then == "proposed"):
-		if m.rule.Kind == "" {
-			return invalid("source rule " + m.key() + " maps directly but declares no kind")
+	case rules.ExitDigest:
+		return s.dispose(ctx, m, ev, disposeIn{Event: ev.ID, Disposition: domain.DispositionDigest, Reason: "rule " + m.key() + " digests this event"})
+	case rules.ExitExtract, rules.ExitAlert:
+		h := s.o.Extract
+		if exit == rules.ExitAlert {
+			h = s.o.Alert
 		}
-		prop = proposal{kind: domain.Kind(m.rule.Kind), title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: "rule " + m.key()}
-	default: // then: judge，或没有规则命中
+		if h == nil {
+			return fmt.Errorf("source rule %s uses the %s exit but no handler is configured", m.key(), exit)
+		}
+		return h(ctx, src, ev, m.key())
+	case rules.ExitProposed:
+		prop = proposal{kind: defaultKind, title: orElse(ev.Subject, ev.Type), summary: ev.Summary, reason: "rule " + m.key()}
+		if m.rule.Kind != "" {
+			prop.kind = domain.Kind(m.rule.Kind)
+		}
+	default: // screen（含旧名 judge），或没有规则命中
 		var verdict string
 		prop, verdict, err = s.judge(ctx, sn, src, ev, m, hint)
 		if err != nil {
@@ -428,8 +465,13 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 			d := disposeIn{Event: ev.ID, Disposition: domain.DispositionIgnored, Reason: verdict}
 			if verdict != ChoiceIgnore {
 				d.Disposition, d.UnjudgedReason = domain.DispositionUnjudged, domain.UnjudgedUndecided
-				if strings.HasPrefix(verdict, unavailablePrefix) {
+				switch {
+				case strings.HasPrefix(verdict, unavailablePrefix):
 					d.UnjudgedReason = domain.UnjudgedModelUnavailable
+				case strings.HasPrefix(verdict, outboundUnsetPrefix):
+					d.UnjudgedReason = domain.UnjudgedOutboundUnset
+				case strings.HasPrefix(verdict, outboundNonePrefix):
+					d.Disposition, d.UnjudgedReason = domain.DispositionDigest, ""
 				}
 			}
 			return s.dispose(ctx, m, ev, d)
@@ -445,8 +487,37 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	return s.propose(ctx, sn, src, ev, m, prop, project)
 }
 
-// unavailablePrefix 开头的 verdict 表示因模型不可用而未判定（会自动重判），其余未判定是判断未定。
-const unavailablePrefix = "model unavailable: "
+// verdict 的前缀：模型不可用而未判定（自动重判）；外发范围未选而未判定（选定后自动重判）；外发范围对可用端点都是 none（改走摘要出口）。
+// 其余未判定是判断未定。
+const (
+	unavailablePrefix   = "model unavailable: "
+	outboundUnsetPrefix = "outbound scope not chosen: "
+	outboundNonePrefix  = "outbound scope is none: "
+)
+
+// localities 是入站流水线此刻实际会调用的端点的位置；端点未配置时为空（调用方自己报不可用，不会发出请求）。
+func (sn *snapshot) localities() []string {
+	if sn.gen.URL == "" || sn.gen.Model == "" {
+		return nil
+	}
+	return []string{sn.gen.Locality}
+}
+
+// outboundBlock 报告外发控制此刻是否拦下这个来源的内容（registry.BlockUnset、BlockNone 或空）。
+func (sn *snapshot) outboundBlock(src domain.Source) string {
+	return registry.Decide(src.Outbound, sn.localities()...).Block
+}
+
+// captureOutbound 是项目对话捕获的外发范围：本机端点收全文，外部范围取项目的 capture_outbound，未选择则外部端点不送（§6.5、§14.14）。
+func captureOutbound(projs []domain.Project, project string) domain.Outbound {
+	o := domain.Outbound{Local: registry.ScopeFull}
+	for _, p := range projs {
+		if p.ID == project {
+			o.External = p.CaptureOutbound
+		}
+	}
+	return o
+}
 
 // judge 返回要建的事项；verdict 非空表示不建：ChoiceIgnore 是不值得，其余是未判定的原因。
 func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, hint string) (proposal, string, error) {
@@ -454,9 +525,76 @@ func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev 
 	if m != nil {
 		pack = m.pack
 	}
-	in, _ := json.Marshal(map[string]any{"source": src.ID, "source_type": src.SourceKind, "event_type": ev.Type,
-		"subject": ev.Subject, "summary": ev.Summary, "link": ev.Link, "sender": ev.Sender, "sender_verified": ev.SenderVerified, "correlation_hint": hint})
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: Template, Input: in, Material: ev.Detail,
+	// 外发控制（§14.14）：先按端点位置取范围，再裁剪；裁剪后的内容才进请求与输入指纹。端点未配置时不会发出请求，Judge 自己报不可用。
+	// 范围与端点位置在每次调用前重读（不用整轮的快照：积压很多时本人中途改的范围必须立即生效）；
+	// 调用时位置又变了，Judge 拒绝发送，这里按新位置重来。
+	for attempt := 0; ; attempt++ {
+		prop, verdict, err := s.judgeOnce(ctx, sn, src, ev, m, hint, pack)
+		if errors.Is(err, direct.ErrLocalityChanged) && attempt < 3 {
+			continue
+		}
+		return prop, verdict, err
+	}
+}
+
+// freshOutbound 读此刻的外发范围与生成端点（不走整轮快照）。
+func (s *Service) freshOutbound(ctx context.Context, src domain.Source) (domain.Outbound, policy.GenerateEndpoint, error) {
+	var (
+		o   = src.Outbound
+		gen policy.GenerateEndpoint
+	)
+	err := s.o.Store.View(ctx, func(tx *store.Tx) error {
+		_, pol, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		gen = pol.GenerateEndpoint
+		if proj, isCapture := captureProject(src.ID); isCapture {
+			p, err := projects.Get(tx, proj)
+			if err != nil {
+				return err
+			}
+			o = captureOutbound([]domain.Project{p}, proj)
+			return nil
+		}
+		cur, err := registry.Get(tx, src.ID)
+		o = cur.Outbound
+		return err
+	})
+	return o, gen, err
+}
+
+func (s *Service) judgeOnce(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, hint, pack string) (proposal, string, error) {
+	outbound, ep, err := s.freshOutbound(ctx, src)
+	if err != nil {
+		return proposal{}, "", err
+	}
+	fresh := snapshot{gen: ep}
+	locs := fresh.localities()
+	dec := registry.Decide(outbound, locs...)
+	switch dec.Block {
+	case registry.BlockUnset:
+		return proposal{}, outboundUnsetPrefix + "the external endpoint has no outbound scope for source " + src.ID, nil
+	case registry.BlockNone:
+		return proposal{}, outboundNonePrefix + "no endpoint may receive content from source " + src.ID, nil
+	}
+	scope := registry.ScopeMeta
+	if len(dec.Scopes) > 0 {
+		scope = dec.Scopes[0]
+	}
+	t, _ := registry.Trim(ev, scope)
+	in, _ := json.Marshal(map[string]any{"source": src.ID, "source_type": src.SourceKind, "event_type": t.Type,
+		"subject": t.Subject, "summary": t.Summary, "link": t.Link, "sender": t.Sender, "sender_verified": ev.SenderVerified,
+		"occurred_at": t.OccurredAt, "correlation_hint": hint})
+	require := ""
+	if len(locs) > 0 {
+		require = policy.EffectiveLocality(locs[0])
+	}
+	tmpl := Template
+	if m != nil && m.rule.Screen != "" { // 规则按条覆盖初筛模板名
+		tmpl = m.rule.Screen
+	}
+	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: tmpl, Input: in, Material: t.Detail, RequireLocality: require,
 		Scope: direct.Scope{Source: src.ID},
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource},
 		Basis: &domain.Basis{PolicyVersion: sn.policy, RuleID: m.key()}})
@@ -513,36 +651,39 @@ func orElse(ss ...string) string {
 	return ""
 }
 
-// project 按规则的 project_by 解析归属项目；没有规则、none 或找不到仓库对应的项目时不归项目。
+// project 按 rules.Project 的优先级解析归属项目：规则的 project_by，其次来源的默认项目，都没有则不归项目。
 func (s *Service) project(sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched) (string, error) {
 	if src.SourceKind == CaptureKind { // 对话增量属于提交它的项目，不看规则
 		id, _ := captureProject(src.ID)
 		return id, nil
 	}
 	if m == nil {
+		return src.DefaultProject, nil
+	}
+	repo, err := s.repoProject(sn, src, ev, m.rule.ProjectBy)
+	return rules.Project(m.rule.ProjectBy, repo, src.DefaultProject), err
+}
+
+// repoProject 按 repo_remote 解析项目：远程地址取来源登记 config 里的 remote，否则看事件链接落在哪个项目的仓库之下。
+func (s *Service) repoProject(sn snapshot, src domain.Source, ev domain.SourceEvent, by string) (string, error) {
+	if by != "repo_remote" {
 		return "", nil
 	}
-	switch by := m.rule.ProjectBy; {
-	case strings.HasPrefix(by, "fixed:"):
-		return strings.TrimPrefix(by, "fixed:"), nil
-	case by == "repo_remote":
-		// 远程地址取来源登记 config 里的 remote，否则看事件链接落在哪个项目的仓库之下。
-		var cfg struct {
-			Remote string `json:"remote"`
+	var cfg struct {
+		Remote string `json:"remote"`
+	}
+	if len(src.Config) > 0 {
+		if err := json.Unmarshal(src.Config, &cfg); err != nil {
+			return "", fmt.Errorf("source %s config: %w", src.ID, err)
 		}
-		if len(src.Config) > 0 {
-			if err := json.Unmarshal(src.Config, &cfg); err != nil {
-				return "", fmt.Errorf("source %s config: %w", src.ID, err)
-			}
-		}
-		if p, _, ok := projects.Find(sn.projs, cfg.Remote); ok {
-			return p.ID, nil
-		}
-		for _, p := range sn.projs {
-			for _, r := range p.Repos {
-				if projects.RepoHasLink(r.Remote, ev.Link) {
-					return p.ID, nil
-				}
+	}
+	if p, _, ok := projects.Find(sn.projs, cfg.Remote); ok {
+		return p.ID, nil
+	}
+	for _, p := range sn.projs {
+		for _, r := range p.Repos {
+			if projects.RepoHasLink(r.Remote, ev.Link) {
+				return p.ID, nil
 			}
 		}
 	}

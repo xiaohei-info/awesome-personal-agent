@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
@@ -32,6 +33,8 @@ var (
 	ErrUnavailable = errors.New("direct: model unavailable")
 	// ErrBadTemplate 表示提示词模板不存在，或其类别、级联目标不是本包能执行的形态。
 	ErrBadTemplate = errors.New("direct: bad prompt template")
+	// ErrLocalityChanged 表示调用时端点的位置与 Call.RequireLocality 不同（本人刚改了位置）：不发请求，调用方按新位置重新裁剪（§14.14）。
+	ErrLocalityChanged = errors.New("direct: endpoint locality changed since the outbound scope was chosen")
 )
 
 // Module 是本模块在存储层登记的迁移：输入指纹到结果的复用表，以及模型可用性的单行健康记录。
@@ -51,7 +54,7 @@ CREATE TABLE direct_health (
 
 // Completer 是外呼调用器的模型 HTTP（model.Client 满足它）。
 type Completer interface {
-	Complete(ctx context.Context, ep policy.ModelEndpoint, req model.Request) (model.Response, error)
+	Complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request) (model.Response, error)
 }
 
 // PackSource 取已加载的能力包（packs.Loader 满足它）。
@@ -80,7 +83,7 @@ func New(o Options) (*Service, error) {
 		return nil, errors.New("direct: Store, Packs and Model are required")
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	if o.Sleep == nil {
 		o.Sleep = sleep
@@ -114,8 +117,11 @@ type Call struct {
 	Template string          // 提示词模板名（文件名去掉 .md）
 	Input    json.RawMessage // 结构化输入（JSON）；空表示 {}
 	Material string          // 资料段正文（外部内容，只作依据，不是指令）
-	Target   string          // 目标事项 id，可空；非空时 Event 记在该事项上，apa why 可查
-	Project  string          // 目标事项所属项目，可空
+	// RequireLocality 非空时是调用方裁剪 Material 所依据的端点位置（policy.LocalityLocal 或 LocalityExternal）；
+	// 调用时实际端点的位置（未声明按 external）与它不同就不发请求，返回 ErrLocalityChanged。
+	RequireLocality string
+	Target          string // 目标事项 id，可空；非空时 Event 记在该事项上，apa why 可查
+	Project         string // 目标事项所属项目，可空
 	// Scope 是 event_stats 的统计范围（同一来源、kind、项目）；模板声明了 event_stats 且 NoStats 为假时才使用。
 	Scope Scope
 	// NoStats 为真时不附带统计（web_only 初筛，§8.4）。
@@ -306,7 +312,7 @@ func judgeSchema(m packs.PromptMeta) (json.RawMessage, error) {
 }
 
 // fingerprint = 模板版本（包内容 hash + 模板名）+ 结构化输入 + 资料正文 + 模型。统计不在其中（§8.5）。
-func fingerprint(pk *packs.Pack, tmpl string, input json.RawMessage, material string, ep policy.ModelEndpoint) (string, error) {
+func fingerprint(pk *packs.Pack, tmpl string, input json.RawMessage, material string, ep policy.GenerateEndpoint) (string, error) {
 	var in any = map[string]any{}
 	if len(bytes.TrimSpace(input)) > 0 {
 		dec := json.NewDecoder(bytes.NewReader(input))
@@ -335,7 +341,7 @@ func newRunID() (string, error) {
 }
 
 type prepared struct {
-	ep     policy.ModelEndpoint
+	ep     policy.GenerateEndpoint
 	fp     string
 	cached json.RawMessage
 	stats  *Stats
@@ -373,9 +379,12 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		if err != nil {
 			return err
 		}
-		p.ep = pol.ModelEndpoint
+		p.ep = pol.GenerateEndpoint
 		if p.ep.URL == "" || p.ep.Model == "" {
 			return model.ErrNotConfigured
+		}
+		if c.RequireLocality != "" && policy.EffectiveLocality(p.ep.Locality) != c.RequireLocality {
+			return ErrLocalityChanged
 		}
 		if p.fp, err = fingerprint(pk, tmpl, c.Input, c.Material, p.ep); err != nil {
 			return err
@@ -439,7 +448,7 @@ func normalizeJudgement(raw json.RawMessage) json.RawMessage {
 }
 
 // complete 带退避重试地调用模型。只重试端点侧的暂时性失败；模型已答复但不合 schema、请求本身不对都如实返回。
-func (s *Service) complete(ctx context.Context, ep policy.ModelEndpoint, req model.Request) (model.Response, error) {
+func (s *Service) complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request) (model.Response, error) {
 	wait := s.o.Backoff
 	var last error
 	for i := 0; i < s.o.Attempts; i++ {

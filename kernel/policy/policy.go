@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -89,6 +90,28 @@ type Disturb struct {
 	MergeWindowSec   int               `json:"merge_window_sec"`
 	RemindOnDeadline bool              `json:"remind_on_deadline"`
 	ThresholdJudge   bool              `json:"threshold_judge,omitempty"`
+	// DailyCap 是每个自然日经渠道推到本人面前的提醒上限，0 不限（§7.4）；DefaultDailyCap 是缺省，旧版本策略文档没有此键时也取它。
+	DailyCap int `json:"daily_cap"`
+	// Mutes 按来源、项目或事项静音；到期（Until）后自动恢复。只在 Web 改。
+	Mutes         []Mute `json:"mutes"`
+	FollowupDefer bool   `json:"followup_defer"`
+}
+
+// DefaultDailyCap 是日上限缺省值（§7.4）。
+const DefaultDailyCap = 20
+
+// Mute 的 Scope 取值。
+const (
+	MuteSource  = "source"
+	MuteProject = "project"
+	MuteItem    = "item"
+)
+
+// Mute 是一条静音：ID 为来源、项目或事项 id；Until 为空表示不到期。
+type Mute struct {
+	Scope string     `json:"scope"`
+	ID    string     `json:"id"`
+	Until *time.Time `json:"until,omitempty"`
 }
 
 // ParseClock 解析 "HH:MM"，返回当天的分钟数。
@@ -112,11 +135,57 @@ type PermissionCap struct {
 	ByHarness map[string]string `json:"by_harness"`
 }
 
-// ModelEndpoint 为空 URL 表示未配置。APIKey 只存账本，不进 Event。
-type ModelEndpoint struct {
-	URL                string `json:"url,omitempty"`
-	Model              string `json:"model,omitempty"`
-	APIKey             string `json:"api_key,omitempty"`
+// 端点位置与判断协议（§6.13、§8.8）。
+const (
+	LocalityLocal    = "local"
+	LocalityExternal = "external"
+
+	ProtocolProbability  = "probability-judgment/1"
+	ProtocolChatLogprobs = "chat-logprobs"
+)
+
+// 判断端点的默认值（附录 B.2、§8.8）。
+const (
+	DefaultJudgeTimeoutMs        = 10000
+	DefaultJudgeMaxBatch         = 32
+	DefaultJudgeMaxMaterialChars = 8000
+	DefaultScreeningTimeoutMs    = 30000
+)
+
+// EffectiveLocality 是端点位置的实际取值：未声明按 external（§14.14）。
+func EffectiveLocality(l string) string {
+	if l == LocalityLocal {
+		return LocalityLocal
+	}
+	return LocalityExternal
+}
+
+// GenerateEndpoint 是对话补全兼容的生成端点；空 URL 表示未配置。APIKey 只存账本，不进 Event。
+// Locality 由本人声明端点是否在自己可控的主机上，未声明按 external（§14.14）。
+type GenerateEndpoint struct {
+	URL      string `json:"url,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Locality string `json:"locality,omitempty"`
+}
+
+// JudgeEndpoint 是分类（判断）端点；Policy 里为 nil 表示未配置。
+type JudgeEndpoint struct {
+	URL              string `json:"url"`
+	APIKey           string `json:"api_key,omitempty"`
+	Protocol         string `json:"protocol"`
+	Model            string `json:"model,omitempty"`
+	Locality         string `json:"locality"`
+	TimeoutMs        int    `json:"timeout_ms"`
+	MaxBatch         int    `json:"max_batch"`
+	MaxMaterialChars int    `json:"max_material_chars"`
+}
+
+// legacyModelEndpoint 是 v0.1 策略文档里的单一 model_endpoint，只在读取旧版本时出现（§16.5）。
+type legacyModelEndpoint struct {
+	URL                string `json:"url"`
+	Model              string `json:"model"`
+	APIKey             string `json:"api_key"`
 	ScreeningTimeoutMs int    `json:"screening_timeout_ms"`
 }
 
@@ -127,15 +196,18 @@ type Channel struct {
 
 // Policy 是一个版本的完整配置。两份白名单相互独立：键是来源或渠道，值是发送者或回答人。
 type Policy struct {
-	WebOnly          WebOnly             `json:"web_only"`
-	Disturb          Disturb             `json:"disturb"`
-	MaterialWrite    MaterialWrite       `json:"material_write"`
-	PermissionCap    PermissionCap       `json:"permission_cap"`
-	ModelEndpoint    ModelEndpoint       `json:"model_endpoint"`
-	Persona          string              `json:"persona"` // 只影响表达方式，不进入任何权限判定
-	ForwardAllowlist map[string][]string `json:"forward_allowlist"`
-	ChannelAnswerers map[string][]string `json:"channel_answerers"`
-	Channels         map[string]Channel  `json:"channels"`
+	WebOnly          WebOnly          `json:"web_only"`
+	Disturb          Disturb          `json:"disturb"`
+	MaterialWrite    MaterialWrite    `json:"material_write"`
+	PermissionCap    PermissionCap    `json:"permission_cap"`
+	JudgeEndpoint    *JudgeEndpoint   `json:"judge_endpoint"`
+	GenerateEndpoint GenerateEndpoint `json:"generate_endpoint"`
+	// ScreeningTimeoutMs 是 web_only 初筛的超时（v0.1 时在 model_endpoint 里）。
+	ScreeningTimeoutMs int                 `json:"screening_timeout_ms"`
+	Persona            string              `json:"persona"` // 只影响表达方式，不进入任何权限判定
+	ForwardAllowlist   map[string][]string `json:"forward_allowlist"`
+	ChannelAnswerers   map[string][]string `json:"channel_answerers"`
+	Channels           map[string]Channel  `json:"channels"`
 	// DefaultHarness 是规则未指定 harness 时任务型与后台运行用的 harness（§13.6）；为空表示未设置，任务型转 needs_input。
 	DefaultHarness string `json:"default_harness"`
 }
@@ -152,17 +224,17 @@ func Default() Policy {
 			string(domain.DeliveryDecision): "inject", string(domain.DeliveryBrief): "inject",
 			string(domain.DeliveryReminder): "inject", string(domain.DeliveryHealth): "web",
 			string(domain.DeliveryWake): "web",
-		}, MergeWindowSec: 30 * 60, RemindOnDeadline: true}, // 合并窗口默认 30 分钟（§7.4）
+		}, MergeWindowSec: 30 * 60, RemindOnDeadline: true, DailyCap: DefaultDailyCap, Mutes: []Mute{}}, // 合并窗口默认 30 分钟（§7.4）
 		// 规范、方案类须本人确认；纪要类直写（§12.4）。未登记的 kind 取更严的 proposed。
 		MaterialWrite: MaterialWrite{Default: WriteProposed, Kinds: map[string]string{
 			"minutes": WriteDirect, "reference": WriteDirect, "worknote": WriteDirect,
 			"requirement": WriteProposed, "design": WriteProposed, "guideline": WriteProposed,
 		}},
-		PermissionCap:    PermissionCap{Default: PermRead, ByHarness: map[string]string{}},
-		ModelEndpoint:    ModelEndpoint{ScreeningTimeoutMs: 30000},
-		ForwardAllowlist: map[string][]string{},
-		ChannelAnswerers: map[string][]string{},
-		Channels:         map[string]Channel{},
+		PermissionCap:      PermissionCap{Default: PermRead, ByHarness: map[string]string{}},
+		ScreeningTimeoutMs: DefaultScreeningTimeoutMs,
+		ForwardAllowlist:   map[string][]string{},
+		ChannelAnswerers:   map[string][]string{},
+		Channels:           map[string]Channel{},
 	}
 }
 
@@ -281,6 +353,17 @@ func normalize(p Policy) (Policy, error) {
 		}
 	}
 
+	if p.Disturb.DailyCap < 0 {
+		return p, invalid("disturb daily_cap %d < 0", p.Disturb.DailyCap)
+	}
+	if p.Disturb.Mutes == nil {
+		p.Disturb.Mutes = []Mute{}
+	}
+	for i, m := range p.Disturb.Mutes {
+		if !oneOf(m.Scope, MuteSource, MuteProject, MuteItem) || strings.TrimSpace(m.ID) == "" {
+			return p, invalid("disturb mute %d needs scope source|project|item and a non-empty id", i)
+		}
+	}
 	if p.Disturb.MergeWindowSec < 0 {
 		return p, invalid("disturb merge_window_sec %d < 0", p.Disturb.MergeWindowSec)
 	}
@@ -319,14 +402,11 @@ func normalize(p Policy) (Policy, error) {
 		p.PermissionCap.ByHarness = map[string]string{}
 	}
 
-	if p.ModelEndpoint.ScreeningTimeoutMs <= 0 {
-		return p, invalid("model_endpoint screening_timeout_ms %d <= 0", p.ModelEndpoint.ScreeningTimeoutMs)
+	if p.ScreeningTimeoutMs <= 0 {
+		return p, invalid("screening_timeout_ms %d <= 0", p.ScreeningTimeoutMs)
 	}
-	if p.ModelEndpoint.URL != "" {
-		u, err := url.Parse(p.ModelEndpoint.URL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return p, invalid("model_endpoint url %q is not an http(s) URL", p.ModelEndpoint.URL)
-		}
+	if err := normalizeEndpoints(&p); err != nil {
+		return p, err
 	}
 
 	if n := EstimateTokens(p.Persona); n > MaxPersonaTokens {
@@ -340,6 +420,73 @@ func normalize(p Policy) (Policy, error) {
 	return p, nil
 }
 
+func checkURL(field, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return invalid("%s url %q is not an http(s) URL", field, raw)
+	}
+	return nil
+}
+
+// locality 未声明按 external（§14.14）。
+func normLocality(field, v string) (string, error) {
+	switch v {
+	case "":
+		return LocalityExternal, nil
+	case LocalityLocal, LocalityExternal:
+		return v, nil
+	}
+	return "", invalid("%s locality %q must be local or external", field, v)
+}
+
+// normalizeEndpoints 校验两个端点并补全默认值；生成端点的 URL 为空时整个视为未配置。
+func normalizeEndpoints(p *Policy) (err error) {
+	if g := &p.GenerateEndpoint; g.URL == "" {
+		*g = GenerateEndpoint{}
+	} else {
+		if err = checkURL("generate_endpoint", g.URL); err != nil {
+			return err
+		}
+		if g.Locality, err = normLocality("generate_endpoint", g.Locality); err != nil {
+			return err
+		}
+	}
+	j := p.JudgeEndpoint
+	if j == nil {
+		return nil
+	}
+	if err = checkURL("judge_endpoint", j.URL); err != nil {
+		return err
+	}
+	if j.Locality, err = normLocality("judge_endpoint", j.Locality); err != nil {
+		return err
+	}
+	switch j.Protocol {
+	case "":
+		j.Protocol = ProtocolProbability
+	case ProtocolProbability:
+	case ProtocolChatLogprobs:
+		if j.Model == "" {
+			return invalid("judge_endpoint model is required for protocol %s", ProtocolChatLogprobs)
+		}
+	default:
+		return invalid("judge_endpoint protocol %q", j.Protocol)
+	}
+	for _, f := range []struct {
+		name string
+		v    *int
+		def  int
+	}{{"timeout_ms", &j.TimeoutMs, DefaultJudgeTimeoutMs}, {"max_batch", &j.MaxBatch, DefaultJudgeMaxBatch}, {"max_material_chars", &j.MaxMaterialChars, DefaultJudgeMaxMaterialChars}} {
+		if *f.v < 0 {
+			return invalid("judge_endpoint %s %d < 0", f.name, *f.v)
+		}
+		if *f.v == 0 {
+			*f.v = f.def
+		}
+	}
+	return nil
+}
+
 // clone 经 JSON 深拷贝，使变更函数不会污染调用方持有的快照。
 func clone(p Policy) Policy {
 	b, _ := json.Marshal(p)
@@ -348,33 +495,49 @@ func clone(p Policy) Policy {
 	return out
 }
 
-func decode(doc string) (Policy, error) {
-	var p Policy
-	if err := json.Unmarshal([]byte(doc), &p); err != nil {
-		return Policy{}, fmt.Errorf("policy: stored document: %w", err)
+// decode 读一个存储的版本；legacy 为真表示它还是 v0.1 的 model_endpoint 形状（读作生成端点，不改写存储）。
+func decode(doc string) (p Policy, legacy bool, err error) {
+	w := struct {
+		Policy
+		Legacy *legacyModelEndpoint `json:"model_endpoint"`
+	}{Policy: Policy{Disturb: Disturb{DailyCap: DefaultDailyCap}}} // 旧文档没有 daily_cap：升级后日上限即生效
+	if err := json.Unmarshal([]byte(doc), &w); err != nil {
+		return Policy{}, false, fmt.Errorf("policy: stored document: %w", err)
 	}
-	return normalize(p)
+	p = w.Policy
+	if l := w.Legacy; l != nil {
+		legacy = true
+		p.GenerateEndpoint = GenerateEndpoint{URL: l.URL, Model: l.Model, APIKey: l.APIKey}
+		p.ScreeningTimeoutMs = l.ScreeningTimeoutMs
+	}
+	p, err = normalize(p)
+	return p, legacy, err
 }
 
 // Current 返回最新版本号与配置；尚无版本时为 (0, Default())。
 func Current(tx *store.Tx) (int, Policy, error) {
+	v, p, _, err := latest(tx)
+	return v, p, err
+}
+
+func latest(tx *store.Tx) (int, Policy, bool, error) {
 	r, err := tx.Query("SELECT version, doc FROM policy_version ORDER BY version DESC LIMIT 1")
 	if err != nil {
-		return 0, Policy{}, err
+		return 0, Policy{}, false, err
 	}
 	defer r.Close()
 	if !r.Next() {
-		return 0, Default(), r.Err()
+		return 0, Default(), false, r.Err()
 	}
 	var (
 		v   int64
 		doc string
 	)
 	if err := r.Scan(&v, &doc); err != nil {
-		return 0, Policy{}, err
+		return 0, Policy{}, false, err
 	}
-	p, err := decode(doc)
-	return int(v), p, err
+	p, legacy, err := decode(doc)
+	return int(v), p, legacy, err
 }
 
 // sections 把配置拆成顶层段，用于判断哪些段变了。
@@ -394,7 +557,7 @@ func Update(tx *store.Tx, actor domain.Actor, reason string, mutate func(*Policy
 	if actor.Type != domain.ActorHuman || actor.Via != domain.ViaWeb {
 		return 0, domain.NewError(domain.CodeWebOnly, "policy can only be changed by the owner in the Web UI", "ask the owner to change it in the Web settings")
 	}
-	cur, old, err := Current(tx)
+	cur, old, legacy, err := latest(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -419,6 +582,9 @@ func Update(tx *store.Tx, actor domain.Actor, reason string, mutate func(*Policy
 			changed = append(changed, k)
 		}
 	}
+	if legacy { // 最新版本还是旧形状：本人保存即写成新字段，哪怕值没变（§16.5）
+		changed = append(changed, "model_endpoint")
+	}
 	if len(changed) == 0 {
 		return cur, nil
 	}
@@ -429,14 +595,17 @@ func Update(tx *store.Tx, actor domain.Actor, reason string, mutate func(*Policy
 		return 0, err
 	}
 	version := cur + 1
-	at := time.Now()
+	at := clock.Now()
 	if _, err := tx.Exec("INSERT INTO policy_version (version, doc, at) VALUES (?, ?, ?)", int64(version), string(doc), at.UnixNano()); err != nil {
 		return 0, err
 	}
 
 	shown := clone(next)
-	if shown.ModelEndpoint.APIKey != "" {
-		shown.ModelEndpoint.APIKey = "***"
+	if shown.GenerateEndpoint.APIKey != "" {
+		shown.GenerateEndpoint.APIKey = "***"
+	}
+	if shown.JudgeEndpoint != nil && shown.JudgeEndpoint.APIKey != "" {
+		shown.JudgeEndpoint.APIKey = "***"
 	}
 	payload, err := json.Marshal(map[string]any{"version": version, "previous": cur, "sections": changed, "policy": shown})
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -36,6 +37,8 @@ const (
 	CSRFHeader = "X-CSRF-Token"
 	// EvidenceHeader 携带 delegate 代理操作的本人原话（§14.3、§14.5）；骨干统一读入 Principal.Evidence。
 	EvidenceHeader = "X-APA-Evidence"
+	// SessionKindHeader 携带接入方自报的会话类型（direct、group、unknown；§14.5）；缺失即未上报。
+	SessionKindHeader = "X-APA-Session-Kind"
 	// GrantHeader 携带 delegate 代理操作的授权单 id，与 EvidenceHeader 二选一（§14.5）；骨干统一读入 Principal.Grant。
 	GrantHeader = "X-APA-Grant"
 	// ownerPrincipal 是本人的操作者标识（单用户系统，与 Web 会话的 Actor 一致），delegate 凭据代其行事。
@@ -164,7 +167,7 @@ func New(d Deps) (*Server, error) {
 		return nil, errors.New("core: Store and Auth are required")
 	}
 	if d.Now == nil {
-		d.Now = time.Now
+		d.Now = clock.Now
 	}
 	if d.SessionTTL <= 0 {
 		d.SessionTTL = DefaultSessionTTL
@@ -291,13 +294,24 @@ func webLink(r *http.Request) string {
 	return link
 }
 
+// sessionKind 把头的值收成三个枚举之一：缺失为空（未上报），其余不认识的值按 unknown。
+func sessionKind(v string) string {
+	switch v = strings.ToLower(strings.TrimSpace(v)); v {
+	case "":
+		return ""
+	case domain.SessionDirect, domain.SessionGroup:
+		return v
+	}
+	return domain.SessionUnknown
+}
+
 // ---- 认证 ----
 
 // authenticate 先看 Authorization：带了就只按 Bearer 判（无效不回退到 Cookie）；否则看会话 Cookie。
 func (s *Server) authenticate(r *http.Request) (*Principal, error) {
 	if h := r.Header.Get("Authorization"); h != "" {
 		secret := auth.ParseBearer(h)
-		origin := auth.Origin{Harness: r.Header.Get("X-APA-Harness"), Session: r.Header.Get("X-APA-Session")}
+		origin := auth.Origin{Harness: r.Header.Get("X-APA-Harness"), Session: r.Header.Get("X-APA-Session"), SessionKind: sessionKind(r.Header.Get(SessionKindHeader))}
 		var id command.Identity = command.Bearer{Auth: s.d.Auth, Secret: secret, Origin: origin, OnBehalfOf: ownerPrincipal}
 		if runidentity.IsSecret(secret) { // 运行凭据：worker 级、绑定一次运行、没有代答能力
 			id = runidentity.Identity{Secret: secret, Origin: origin}

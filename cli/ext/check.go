@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
@@ -78,7 +79,7 @@ type sim struct {
 }
 
 func newSim() *sim {
-	s := &sim{key: "sim-" + strconv.FormatInt(time.Now().UnixNano(), 36)}
+	s := &sim{key: "sim-" + strconv.FormatInt(clock.Now().UnixNano(), 36)}
 	add := func(id, title string, opts []string) {
 		s.ds = append(s.ds, &obs{state: "queued", deliv: domain.Delivery{ID: id, Item: "item-" + id, Class: "notify",
 			Route: "channel:check", Version: 1, Content: domain.DeliveryContent{Title: title, Options: opts}}})
@@ -139,11 +140,11 @@ func (s *sim) next(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	deadline := time.Now().Add(min(time.Duration(wait)*time.Second, maxWait))
+	deadline := clock.Now().Add(min(time.Duration(wait)*time.Second, maxWait))
 	for {
 		s.mu.Lock()
 		for _, o := range s.ds {
-			if o.state == "leased" && time.Since(o.leasedAt) > leaseTime { // 租约超时重新可领
+			if o.state == "leased" && clock.Now().Sub(o.leasedAt) > leaseTime { // 租约超时重新可领
 				o.state = "queued"
 			}
 		}
@@ -151,7 +152,7 @@ func (s *sim) next(w http.ResponseWriter, r *http.Request) {
 			if o.state != "queued" {
 				continue
 			}
-			o.state, o.leasedAt, o.claimed = "leased", time.Now(), true
+			o.state, o.leasedAt, o.claimed = "leased", clock.Now(), true
 			claimed := o.deliv
 			if claimed.ID == dStale {
 				o.deliv.Version++ // 领取后事项变化，旧版本作废
@@ -161,7 +162,7 @@ func (s *sim) next(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.mu.Unlock()
-		if time.Until(deadline) <= 0 {
+		if deadline.Sub(clock.Now()) <= 0 {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

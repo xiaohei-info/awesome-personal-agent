@@ -3,7 +3,7 @@ import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 
-// 形状对应 /v1/settings/{policy,allowlists,model-endpoints,access-limits}（附录 B.2）。
+// 形状对应 /v1/settings/{policy,allowlists,model-endpoints,access-limits}（附录 B.2）；模型端点为 judge_endpoint / generate_endpoint 两组与顶层 screening_timeout_ms。
 // 校验、规整、人格上限（约 400 token）全部由服务端判定，本页只搬运编辑结果并原样显示拒绝原因；被拒绝时什么都没保存，草稿保留。
 const ROUTES = ["policy", "allowlists", "model-endpoints", "access-limits"] as const;
 const MASK = "***"; // 读取时代替模型端点密钥；原样回传表示保持原密钥
@@ -163,19 +163,56 @@ export function SettingsPolicyPage() {
       <DisturbCard doc={p} save={save} />
       <MaterialCard doc={p} save={save} />
       <LimitCard doc={lim} save={save} />
-      <EndpointCard doc={me} save={save} />
+      <JudgeEndpointCard doc={me} save={save} />
+      <GenerateEndpointCard doc={me} save={save} />
+      <ScreeningTimeoutCard doc={me} save={save} />
       <AllowlistCard doc={al} save={save} />
       <PersonaCard doc={p} save={save} />
     </main>
   );
 }
 
+interface Mute { scope: string; id: string; until?: string }
+const MUTE_SCOPES = ["source", "project", "item"];
+const pad = (n: number) => String(n).padStart(2, "0");
+const toLocalInput = (iso?: string) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+// 保存时带上整段 disturb：PUT 替换整段，只发 routes 会抹掉静默、合并窗口、豁免和推迟判定。
 function DisturbCard({ doc, save }: { doc: Doc; save: Save }) {
   const [rows, setRows] = useDraft(doc.disturb, () => rowsOf(doc.disturb.routes));
+  const [cap, setCap] = useDraft(doc.disturb, () => String(doc.disturb.daily_cap ?? 20));
+  const [mutes, setMutes] = useDraft(doc.disturb, () => ((doc.disturb.mutes ?? []) as Mute[]).map((m) => [m.scope, m.id, toLocalInput(m.until)]));
+  const setMute = (i: number, j: number, v: string) => setMutes(mutes.map((r, n) => (n === i ? r.map((x, m) => (m === j ? v : x)) : r)));
   return (
-    <Card title="打扰策略" onSave={() => save("policy", { disturb: { routes: toMap(rows, "打扰策略") } })}>
+    <Card title="打扰策略" onSave={() => {
+      const n = Number(cap);
+      if (cap.trim() === "" || !Number.isInteger(n) || n < 0) return Promise.reject(new Error("日上限必须是不小于 0 的整数（0 表示不限）"));
+      const list: Mute[] = mutes
+        .filter(([, id]) => id.trim())
+        .map(([scope, id, until]) => ({ scope, id: id.trim(), ...(until ? { until: new Date(until).toISOString() } : {}) }));
+      return save("policy", { disturb: { ...doc.disturb, routes: toMap(rows, "打扰策略"), daily_cap: n, mutes: list } });
+    }}>
       <p className="sub">键为投递类别，或「类别:优先级」（后者优先）；值为路由。</p>
       <Rows label="打扰路由" keyLabel="类别" valueLabel="路由" rows={rows} onChange={setRows} />
+      <label>日上限（每个自然日经渠道推送的提醒条数，0 表示不限）
+        <input type="number" min={0} aria-label="日上限" value={cap} onChange={(e) => setCap(e.target.value)} />
+      </label>
+      <p className="sub">静音：被静音的来源、项目或事项的提醒只留 Web 未读，决策仍进待办；到期时间为空表示一直静音。</p>
+      {mutes.map((m, i) => (
+        <div key={i} role="group" aria-label={`静音 ${i + 1}`} className="kv-row">
+          <select aria-label={`静音${i + 1} 范围`} value={m[0]} onChange={(e) => setMute(i, 0, e.target.value)}>
+            {MUTE_SCOPES.map((o) => <option key={o}>{o}</option>)}
+          </select>
+          <input aria-label={`静音${i + 1} id`} placeholder="id" value={m[1]} onChange={(e) => setMute(i, 1, e.target.value)} />
+          <input type="datetime-local" aria-label={`静音${i + 1} 到期`} value={m[2]} onChange={(e) => setMute(i, 2, e.target.value)} />
+          <button type="button" aria-label={`删除静音 ${i + 1}`} onClick={() => setMutes(mutes.filter((_, n) => n !== i))}>删除</button>
+        </div>
+      ))}
+      <button type="button" onClick={() => setMutes([...mutes, [MUTE_SCOPES[0], "", ""]])}>添加静音</button>
     </Card>
   );
 }
@@ -202,21 +239,86 @@ function LimitCard({ doc, save }: { doc: Doc; save: Save }) {
   );
 }
 
-function EndpointCard({ doc, save }: { doc: Doc; save: Save }) {
-  const e = doc.model_endpoint;
-  const [d, setD] = useDraft(e, () => ({ url: e.url ?? "", model: e.model ?? "", api_key: e.api_key ?? "", timeout: String(e.screening_timeout_ms) }));
-  const f = (k: keyof typeof d, label: string, type = "text") => (
+const LOCALITIES = ["local", "external"];
+const JUDGE_PROTOCOLS = ["probability-judgment/1"]; // chat-logprobs 待 SPIKE-LOGPROB（§21.3）结论后再开放，此前不提供。
+// 新建判断端点的默认值取自附录 B.2；位置默认 external（未声明按外部处理，外发范围最保守）。
+const JUDGE_NEW = { url: "", api_key: "", protocol: JUDGE_PROTOCOLS[0], model: "", locality: "external", timeout_ms: "10000", max_batch: "32", max_material_chars: "8000" };
+
+function posInt(v: string, what: string) {
+  const n = Number(v);
+  if (v.trim() === "" || !Number.isInteger(n) || n <= 0) throw new Error(`${what}必须是正整数`);
+  return n;
+}
+
+// 端点位置与密钥：密钥只写不读，已设置时显示占位 ***，原样回传表示保持原密钥。
+function EndpointCard({ title, toggle, doc, init, build, save, fields }: {
+  title: string; toggle: string; doc: unknown; init: (e: any) => Record<string, string>;
+  build: (d: Record<string, string>) => unknown; save: (body: unknown) => Promise<number>;
+  fields: (d: Record<string, string>, f: (k: string, label: string, type?: string) => ReactNode, sel: (k: string, label: string, options: string[]) => ReactNode) => ReactNode;
+}) {
+  const [on, setOn] = useDraft(doc, () => doc != null);
+  const [d, setD] = useDraft(doc, () => (doc ? init(doc) : { ...JUDGE_NEW }));
+  const f = (k: string, label: string, type = "text") => (
     <label>{label}<input type={type} value={d[k]} onChange={(ev) => setD({ ...d, [k]: ev.target.value })} /></label>
   );
+  const sel = (k: string, label: string, options: string[]) => <SelectField label={label} value={d[k]} onChange={(v) => setD({ ...d, [k]: v })} options={options} />;
   return (
-    <Card title="模型端点" onSave={() => save("model-endpoints", {
-      model_endpoint: { url: d.url, model: d.model, api_key: d.api_key, screening_timeout_ms: Number(d.timeout) },
-    })}>
-      {f("url", "端点 URL")}
-      {f("model", "模型")}
-      {f("api_key", "API 密钥", "password")}
-      <small className="sub">{d.api_key === MASK ? "已设置密钥；保持不变即沿用原密钥" : "密钥只写入，保存后不再显示"}</small>
-      {f("timeout", "筛选超时（毫秒）", "number")}
+    <Card title={title} onSave={() => save(on ? build(d) : null)}>
+      <label><input type="checkbox" checked={on} aria-label={toggle} onChange={(e) => setOn(e.target.checked)} />{toggle}</label>
+      {on && fields(d, f, sel)}
+    </Card>
+  );
+}
+
+const keyHint = (k: string) => <small className="sub">{k === MASK ? "已设置密钥；保持不变即沿用原密钥" : "密钥只写入，保存后不再显示"}</small>;
+
+function JudgeEndpointCard({ doc, save }: { doc: Doc; save: Save }) {
+  return (
+    <EndpointCard
+      title="判断端点" toggle="配置判断端点" doc={doc.judge_endpoint}
+      save={(judge_endpoint) => save("model-endpoints", { judge_endpoint })}
+      init={(e) => ({ url: e.url ?? "", api_key: e.api_key_set ? MASK : "", protocol: e.protocol, model: e.model ?? "", locality: e.locality,
+        timeout_ms: String(e.timeout_ms), max_batch: String(e.max_batch), max_material_chars: String(e.max_material_chars) })}
+      build={(d) => ({ url: d.url, api_key: d.api_key, protocol: d.protocol, model: d.model, locality: d.locality,
+        timeout_ms: posInt(d.timeout_ms, "超时（毫秒）"), max_batch: posInt(d.max_batch, "批量上限"), max_material_chars: posInt(d.max_material_chars, "资料字数上限") })}
+      fields={(d, f, sel) => <>
+        {f("url", "端点 URL")}
+        {f("api_key", "API 密钥", "password")}
+        {keyHint(d.api_key)}
+        {sel("protocol", "协议", JUDGE_PROTOCOLS)}
+        {f("model", "模型（可留空）")}
+        {sel("locality", "位置（locality）", LOCALITIES)}
+        {f("timeout_ms", "超时（毫秒）", "number")}
+        {f("max_batch", "批量上限", "number")}
+        {f("max_material_chars", "资料字数上限", "number")}
+      </>}
+    />
+  );
+}
+
+function GenerateEndpointCard({ doc, save }: { doc: Doc; save: Save }) {
+  return (
+    <EndpointCard
+      title="生成端点" toggle="配置生成端点" doc={doc.generate_endpoint}
+      save={(generate_endpoint) => save("model-endpoints", { generate_endpoint })}
+      init={(e) => ({ url: e.url ?? "", api_key: e.api_key_set ? MASK : "", model: e.model ?? "", locality: e.locality })}
+      build={(d) => ({ url: d.url, api_key: d.api_key, model: d.model, locality: d.locality })}
+      fields={(d, f, sel) => <>
+        {f("url", "端点 URL")}
+        {f("model", "模型")}
+        {f("api_key", "API 密钥", "password")}
+        {keyHint(d.api_key)}
+        {sel("locality", "位置（locality）", LOCALITIES)}
+      </>}
+    />
+  );
+}
+
+function ScreeningTimeoutCard({ doc, save }: { doc: Doc; save: Save }) {
+  const [t, setT] = useDraft(doc.screening_timeout_ms, () => String(doc.screening_timeout_ms));
+  return (
+    <Card title="筛选超时" onSave={() => save("model-endpoints", { screening_timeout_ms: posInt(t, "筛选超时") })}>
+      <label>筛选超时（毫秒）<input type="number" value={t} onChange={(ev) => setT(ev.target.value)} /></label>
     </Card>
   );
 }

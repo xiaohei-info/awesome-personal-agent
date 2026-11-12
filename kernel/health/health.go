@@ -11,6 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -131,7 +132,7 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	if o.Deliveries == nil {
 		return View{}, errors.New("health: Deliveries is required")
 	}
-	now := time.Now()
+	now := clock.Now()
 	if o.Now != nil {
 		now = o.Now()
 	}
@@ -179,11 +180,12 @@ func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (string, error) {
 		return EndpointFailing, err
 	}
 	_, pol, err := policy.Current(tx)
-	if err != nil || (pol.ModelEndpoint.URL != "" && pol.ModelEndpoint.Model != "") {
+	if err != nil || (pol.GenerateEndpoint.URL != "" && pol.GenerateEndpoint.Model != "") {
 		return "", err
 	}
 	for _, e := range backlog {
-		if e.UnjudgedReason != domain.UnjudgedUndecided {
+		// 判断未定、外发范围未选择、放回积压的事件与端点有没有配置无关
+		if e.UnjudgedReason != domain.UnjudgedUndecided && e.UnjudgedReason != domain.UnjudgedOutboundUnset && e.UnjudgedReason != domain.UnjudgedRestored {
 			return EndpointNotConfigured, nil
 		}
 	}

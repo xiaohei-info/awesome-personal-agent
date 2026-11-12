@@ -38,6 +38,12 @@ type Config struct {
 	UnjudgedRejudgeWindow time.Duration
 	// PublicURL 是本人访问 Web 的外部地址，必须是 https；监听非本机地址时必须配置（§14.13）。空表示未配置。
 	PublicURL string
+	// BacklogReleasePerDay 是积压放开重判时每天最多进入建议流的条数，0 不限（§9.3）。
+	BacklogReleasePerDay int
+	// JudgmentRetention 是判断记录的保留期，0 不清理（§6.16）。
+	JudgmentRetention time.Duration
+	// DelegationStallAfter 是委派给执行者的事项多久没有回执就进健康视图（§15.2）。
+	DelegationStallAfter time.Duration
 }
 
 // Default 返回设计规定的默认值：额度 4/2，来源输出上限 32MB，Ingest 30 天，运行目录 14 天，
@@ -56,6 +62,9 @@ func Default() Config {
 		DeliveryBackoff:        []time.Duration{time.Minute, 3 * time.Minute, 7 * time.Minute, 15 * time.Minute, 30 * time.Minute},
 		ChainDepthThreshold:    8,
 		UnjudgedRejudgeWindow:  7 * day,
+		BacklogReleasePerDay:   40,
+		JudgmentRetention:      180 * day,
+		DelegationStallAfter:   day,
 	}
 }
 
@@ -212,11 +221,19 @@ func apply(c *Config, seen map[string]bool, raw string) error {
 		}
 		c.DeliveryBackoff = bo
 	case "unjudged_rejudge_days": // 0 关闭自动重判与到期
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			return fmt.Errorf("%s 必须是非负整数: %q", k, v)
-		}
+		n, err := nonNegative(k, v)
 		c.UnjudgedRejudgeWindow = time.Duration(n) * day
+		return err
+	case "backlog_release_per_day": // 0 不限
+		n, err := nonNegative(k, v)
+		c.BacklogReleasePerDay = n
+		return err
+	case "judgment_retention_days": // 0 不清理
+		n, err := nonNegative(k, v)
+		c.JudgmentRetention = time.Duration(n) * day
+		return err
+	case "delegation_stall_after":
+		return duration(k, v, &c.DelegationStallAfter)
 	case "chain_depth_threshold":
 		return positive(k, v, &c.ChainDepthThreshold)
 	case "guideline_draft_executor":
@@ -302,6 +319,14 @@ func positive(k, v string, dst *int) error {
 	}
 	*dst = n
 	return nil
+}
+
+func nonNegative(k, v string) (int, error) {
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%s 必须是非负整数: %q", k, v)
+	}
+	return n, nil
 }
 
 func days(k, v string, dst *time.Duration) error {

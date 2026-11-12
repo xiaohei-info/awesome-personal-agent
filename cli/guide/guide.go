@@ -15,7 +15,7 @@ func init() { client.Register("guide", run) }
 // 含义与退出码表以设计 §17.3 为准。
 const guideText = `APA: personal agent ledger. The ledger is the only source of truth; this CLI is a thin client of the kernel.
 
-Setup: apa login --url <url> --token <token|->   (env: APA_URL APA_TOKEN APA_PROJECT APA_SESSION APA_RUN APA_HOME)
+Setup: apa login --url <url> --token <token|->   (env: APA_URL APA_TOKEN APA_PROJECT APA_SESSION APA_SESSION_KIND APA_RUN APA_HOME)
 Output: JSON on stdout (--pretty to indent). Errors: JSON {code, why, next} on stderr; follow "next".
 
 Commands:
@@ -47,7 +47,7 @@ Exit codes:
   23 basis required: not applied. Do not retry with other wording; tell the user why and give the Web link, then wait for them to act or issue a grant
 
 Deciding for the user (decide, accept, dismiss, item update/transition, ...) needs exactly one basis:
-  --evidence <the user's own words> (with APA_SESSION), or --grant <id> (a grant the user issued in the Web UI; see apa grant list).
+  --evidence <the user's own words> (with APA_SESSION, and APA_SESSION_KIND=direct: a private chat with the user; group/unknown/unset is refused with exit 23), or --grant <id> (a grant the user issued in the Web UI; see apa grant list).
   Passing both is exit 2. Grants are issued and revoked only in the Web UI.
 
 Print the standing-instruction template: apa guide --template

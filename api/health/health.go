@@ -132,12 +132,13 @@ func build(v khealth.View) Report {
 		Source string `json:"source"`
 		Count  int    `json:"count"`
 	}
-	backlog := map[string]any{"model_unavailable": 0, "undecided": 0, "expired": v.Expired}
+	backlog := map[string]any{"model_unavailable": 0, "outbound_unset": 0, "undecided": 0, "restored": 0, "expired": v.Expired}
 	bySource, at := []sourceCount{}, map[string]int{}
 	for _, e := range v.Unjudged {
 		reason := domain.UnjudgedModelUnavailable // 原因为空是迁移前留下的，按模型不可用对待（同自动重判）
-		if e.UnjudgedReason == domain.UnjudgedUndecided {
-			reason = domain.UnjudgedUndecided
+		switch e.UnjudgedReason {
+		case domain.UnjudgedUndecided, domain.UnjudgedOutboundUnset, domain.UnjudgedRestored:
+			reason = e.UnjudgedReason
 		}
 		backlog[reason] = backlog[reason].(int) + 1
 		i, ok := at[e.SourceID]
@@ -148,8 +149,12 @@ func build(v khealth.View) Report {
 		bySource[i].Count++
 	}
 	backlog["sources"] = bySource
-	backlogSig := sig("unjudged_backlog", len(v.Unjudged), "source events are still waiting for a judgement; those held back for lack of a model are judged again automatically once it answers, the rest wait for the owner",
-		"source page: propose or ignore, one by one or per source", backlog)
+	next := "source page: propose or ignore, one by one or per source"
+	if backlog[domain.UnjudgedOutboundUnset].(int) > 0 {
+		next = "source page: choose the external outbound scope of the sources in detail (held events are judged again once chosen); " + next
+	}
+	backlogSig := sig("unjudged_backlog", len(v.Unjudged), "source events are still waiting for a judgement; those held back for lack of a model or of a chosen outbound scope are judged again automatically once it is fixed, the rest wait for the owner",
+		next, backlog)
 	if !backlogSig.OK {
 		backlogSig.Severity = SeverityWarning
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -76,7 +77,7 @@ type Auth struct{ now func() time.Time }
 // New 返回 Auth；now 为 nil 时用系统时钟。
 func New(now func() time.Time) *Auth {
 	if now == nil {
-		now = time.Now
+		now = clock.Now
 	}
 	return &Auth{now: now}
 }
@@ -257,7 +258,7 @@ func (a *Auth) List(tx *store.Tx) ([]Credential, error) {
 }
 
 // Origin 是请求携带的会话信息，审计到会话粒度。
-type Origin struct{ Harness, Session string }
+type Origin struct{ Harness, Session, SessionKind string }
 
 // Actor 把凭据解析成变更的操作者（§6.7）。token 是 agent 经 CLI；ext 与 webhook 是系统侧入口。
 // Principal 优先用绑定的执行者 id，否则用凭据 id，保证操作者至少到 token 粒度。
@@ -272,7 +273,7 @@ func (c Credential) Actor(o Origin) domain.Actor {
 	if p == "" {
 		p = c.ID
 	}
-	return domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Harness: o.Harness, Session: o.Session}
+	return domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Harness: o.Harness, Session: o.Session, SessionKind: o.SessionKind}
 }
 
 // CanReceiptFor 判断凭据能否为 executor 的事项回执（§14.3 回执）：delegate 可以；

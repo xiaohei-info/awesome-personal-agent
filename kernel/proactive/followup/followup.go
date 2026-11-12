@@ -119,7 +119,7 @@ func New(o Options) (*Service, error) {
 		o.Owner = "owner"
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	return &Service{o}, nil
 }

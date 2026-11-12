@@ -33,8 +33,8 @@ var (
 	bg       = context.Background()
 	t0       = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
-	worker   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelWorker}
-	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	worker   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelWorker}
+	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
 )
 
 const (
@@ -114,15 +114,15 @@ func setup(t *testing.T, configured bool, timeoutMs int) *env {
 		t.Fatal(err)
 	}
 	if configured {
-		e.setModel(t, policy.ModelEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", ScreeningTimeoutMs: timeoutMs})
+		e.setModel(t, policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}, timeoutMs)
 	}
 	return e
 }
 
-func (e *env) setModel(t *testing.T, ep policy.ModelEndpoint) {
+func (e *env) setModel(t *testing.T, ep policy.GenerateEndpoint, timeoutMs int) {
 	t.Helper()
 	err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.ModelEndpoint = ep; return nil })
+		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.GenerateEndpoint, p.ScreeningTimeoutMs = ep, timeoutMs; return nil })
 		return err
 	})
 	if err != nil {

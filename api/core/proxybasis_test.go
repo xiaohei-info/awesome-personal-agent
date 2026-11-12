@@ -130,7 +130,7 @@ func hdrs(kv ...string) func(*http.Request) {
 
 // as 带 delegate（或其他）密钥与会话引用。
 func as(secret string) func(*http.Request) {
-	return hdrs("Authorization", "Bearer "+secret, "X-APA-Session", "s1")
+	return hdrs("Authorization", "Bearer "+secret, "X-APA-Session", "s1", "X-APA-Session-Kind", "direct")
 }
 
 func (e *pbEnv) newItem(body string) string {

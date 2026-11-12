@@ -91,7 +91,7 @@ func newEnv(t *testing.T, configured bool, override map[string]string) *env {
 	if configured {
 		err := st.Update(bg, func(tx *store.Tx) error {
 			_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-				p.ModelEndpoint = policy.ModelEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", ScreeningTimeoutMs: 1000}
+				p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}, 1000
 				return nil
 			})
 			return err
@@ -199,6 +199,7 @@ func (e *env) must(cmd string, in any) json.RawMessage {
 // emit 登记来源（若尚未登记，source_type 是语义类型），让脚本输出事件，跑一次拉取并等入站流水线处理完。
 func (e *env) emit(source, sourceType string, events ...map[string]any) {
 	e.t.Helper()
+
 	var body strings.Builder
 	for _, ev := range events {
 		b, _ := json.Marshal(ev)
@@ -405,23 +406,6 @@ func TestBuiltinMailWithoutOverrideIsProposedUnassigned(t *testing.T) {
 	}
 }
 
-// flow-source-calendar / ACT-CAL-02：日历事件由确定性规则直接成为事项，不调模型。
-func TestCalendarEventMapsDeterministicallyWithoutModel(t *testing.T) {
-	e := newEnv(t, false, map[string]string{"project_by: none\n    then: proposed": "project_by: \"fixed:{home}\"\n    then: proposed"})
-	e.emit("src_cal", "calendar", ev("c1", "event.created", "保险到期日", map[string]any{"summary": "3 月 20 日"}))
-	evs := e.events("src_cal")
-	if evs[0].Disposition != domain.DispositionProposed {
-		t.Fatalf("event %+v", evs[0])
-	}
-	it := e.item(evs[0].Item)
-	if it.Phase != domain.PhaseProposed || it.Kind != "task" || it.Project != e.home || it.Title != "保险到期日" || it.Summary != "3 月 20 日" {
-		t.Fatalf("item %+v", it)
-	}
-	if n := len(e.stub.Requests()); n != 0 {
-		t.Fatalf("model was called %d times", n)
-	}
-}
-
 // flow-first-day / ACT-DAY-04：装好内置包、登记来源后的第一批事件，当天就以 proposed 出现在建议流，不产生接受。
 func TestFirstDayEventsLandInSuggestionStreamNotAccepted(t *testing.T) {
 	e := newEnv(t, true, nil)
@@ -482,5 +466,89 @@ func TestPackIsDeclarativeAndToolNeutral(t *testing.T) {
 		if !strings.Contains(string(b), "insufficient_info") {
 			t.Errorf("%s output_schema lacks the insufficient_info marker", name)
 		}
+	}
+}
+
+// flow-source-calendar / ACT-CAL-02（复验 dfx-1699a21c5f70）：日历事件由确定性规则直接成为 task 建议，不调模型；
+// calendar-event 不指定项目（project_by: none），项目取来源默认项目——来源没有默认项目时不归项目。
+func TestCalendarEventsBecomeProposedTasksWithoutModelUsingSourceDefaultProject(t *testing.T) {
+	for _, r := range loadBuiltin(t).SourceRules {
+		if r.ID == "calendar-event" && (r.ProjectBy != "none" || r.Then != "proposed") {
+			t.Fatalf("calendar-event must leave the project to the source default: %+v", r)
+		}
+	}
+	e := newEnv(t, false, nil)
+	e.emit("src_cal", "calendar", ev("a1", "event.created", "保险到期日", map[string]any{"summary": "3 月 20 日", "correlation_keys": []string{"uid-a1|"}}),
+		ev("b1", "event.updated", "体检", map[string]any{"correlation_keys": []string{"uid-b1|"}}))
+	evs := e.events("src_cal")
+	if len(evs) != 2 {
+		t.Fatalf("events %+v", evs)
+	}
+	for _, x := range evs {
+		if x.Disposition != domain.DispositionProposed {
+			t.Fatalf("event %+v", x)
+		}
+		if it := e.item(x.Item); it.Kind != "task" || it.Phase != domain.PhaseProposed || it.Project != "" {
+			t.Fatalf("item %+v", it)
+		}
+	}
+	if n := len(e.stub.Requests()); n != 0 {
+		t.Fatalf("model was called %d times", n)
+	}
+}
+
+// flow-inbound-rules / ACT-IRL-23、flow-source-calendar / ACT-CAL-11：到期的提醒事项由 reminder-due 直接成为建议，不调模型。
+func TestReminderDueBecomesProposedTaskWithoutModel(t *testing.T) {
+	e := newEnv(t, false, nil)
+	e.emit("src_rem", "reminder", ev("rem1", "reminder.due", "交水费", map[string]any{"correlation_keys": []string{"rem-1"}}))
+	evs := e.events("src_rem")
+	if len(evs) != 1 || evs[0].Disposition != domain.DispositionProposed {
+		t.Fatalf("events %+v", evs)
+	}
+	if it := e.item(evs[0].Item); it.Kind != "task" || it.Project != "" || it.Title != "交水费" || it.Phase != domain.PhaseProposed {
+		t.Fatalf("item %+v", it)
+	}
+	if n := len(e.stub.Requests()); n != 0 {
+		t.Fatalf("model was called %d times", n)
+	}
+}
+
+// ACT-IRL-24、ACT-GH-08、ACT-GH-10：没有事项登记过关联键的 PR 状态变化与规范文件变化只记 ignored，不调模型，不进建议流。
+func TestPRActivityAndAgentsMDChangeAreIgnoredByRules(t *testing.T) {
+	e := newEnv(t, true, nil)
+	e.emit("src_gh", "github",
+		ev("pr1", "pr.closed", "修复登录", map[string]any{"correlation_keys": []string{"acc-org/acc-repo#7"}}),
+		ev("pr2", "pr.merged", "修复注册", map[string]any{"correlation_keys": []string{"acc-org/acc-repo#8"}}),
+		ev("pr3", "pr.updated", "改动", map[string]any{"correlation_keys": []string{"acc-org/acc-repo#9"}}),
+		ev("agm1", "repo.agents_md_changed", "AGENTS.md 变化", nil))
+	evs := e.events("src_gh")
+	if len(evs) != 4 {
+		t.Fatalf("events %+v", evs)
+	}
+	for _, x := range evs {
+		if x.Disposition != domain.DispositionIgnored || x.Item != "" {
+			t.Fatalf("event %+v", x)
+		}
+	}
+	if n := len(e.stub.Requests()); n != 0 {
+		t.Fatalf("model was called %d times", n)
+	}
+}
+
+// 规则 id 是对外契约：why 与来源页按它显示命中规则。
+func TestStructuredRulesDeclareExitsAndSemanticTypes(t *testing.T) {
+	want := map[string]struct{ typ, then string }{
+		"reminder-due": {"reminder", "proposed"}, "agents-md-changed": {"github", "ignore"}, "pr-activity": {"github", "ignore"}}
+	got := 0
+	for _, r := range loadBuiltin(t).SourceRules {
+		if w, ok := want[r.ID]; ok {
+			got++
+			if r.Match["source_type"] != w.typ || r.Then != w.then {
+				t.Errorf("rule %s = %+v", r.ID, r)
+			}
+		}
+	}
+	if got != len(want) {
+		t.Fatalf("found %d of %d structured rules", got, len(want))
 	}
 }

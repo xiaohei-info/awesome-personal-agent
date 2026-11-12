@@ -11,11 +11,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/cli/backup"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -25,6 +26,7 @@ import (
 func init() {
 	client.Register("init", initCmd)
 	client.Register("serve", serveCmd)
+	backup.UseRegistry(registry) // `apa backup` 与启动时的升级前快照认同一份迁移链
 }
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
@@ -88,7 +90,7 @@ func initCmd(c *client.Ctx, args []string) error {
 		}
 		// 重设是追加一条审计 Event，账本其余内容不动；载荷不含口令。
 		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvAuthPasswordChanged, Object: "owner", Reason: "login password reset on the host; sessions revoked",
-			Payload: []byte(`{"via":"apa init --reset-password"}`), At: time.Now(),
+			Payload: []byte(`{"via":"apa init --reset-password"}`), At: clock.Now(),
 			Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaCLI}})
 		return err
 	}); err != nil {

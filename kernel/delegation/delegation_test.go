@@ -90,7 +90,7 @@ func (e *env) issue(t *testing.T, name string, s auth.Spec) {
 
 // as 以真实签发的凭据发起请求：操作者与信任级由认证步骤据账本得出。
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
@@ -402,7 +402,7 @@ func TestAllowedExecutorsCannotBeBypassed(t *testing.T) {
 	parent := e.parent(t, work)
 	child := e.delegate(t, e.as("DEL"), parent, workHost)
 	// 代本人操作的 delegate（改他人事项须带 on_behalf_of 与原话）。
-	proxy := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	proxy := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
 
 	// 改派到名单外。
 	e.wantExit(t, domain.ExitExecutorNotAllowed, proxy, "item.update", map[string]any{"id": child, "assignee": otherHost})

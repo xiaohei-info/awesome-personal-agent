@@ -252,6 +252,24 @@ func (e *env) apiIn(name, session, method, path, body, evidence string) *httptes
 		if session != "" {
 			r.Header.Set("X-APA-Session", session)
 		}
+		r.Header.Set(core.SessionKindHeader, "direct") // 这个助手代表与本人的私聊
+	})
+}
+
+// apiKind 同 apiIn，另带会话类型头；kind 为空则不带（未上报）。
+func (e *env) apiKind(name, session, kind, method, path, body, evidence string) *httptest.ResponseRecorder {
+	return e.http(method, path, body, func(r *http.Request) {
+		bearer(e.secret[name])(r)
+		if evidence != "" {
+			r.Header.Set(core.EvidenceHeader, evidence)
+		}
+		if session != "" {
+			r.Header.Set("X-APA-Session", session)
+		}
+		r.Header.Set("X-APA-Harness", "acc-stub")
+		if kind != "" {
+			r.Header.Set(core.SessionKindHeader, kind)
+		}
 	})
 }
 

@@ -105,6 +105,8 @@ func ruleActor(k string) domain.Actor {
 	return domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + k, Via: domain.ViaRule}
 }
 
+var systemActor = domain.Actor{Type: domain.ActorSystem, Principal: "system", Via: domain.ViaClock}
+
 func scanState(r *store.Rows) (State, error) {
 	var s State
 	err := r.Scan(&s.Key, &s.Pack, &s.Group, &s.ID, &s.Mode, &s.Hash)
@@ -278,9 +280,11 @@ type PackSource interface {
 
 type ruleDef struct {
 	State
-	Type string // 时钟规则类型
-	When map[string]any
-	Do   []packs.Action
+	// State.Mode 在这里是包里写的 mode（可能为空）；初始模式由类别决定（sync）。
+	Reminder bool   // 提醒类：follow_up、stale 时钟规则（§14.8）；类别由规则类型推定，包不能自报
+	Type     string // 时钟规则类型
+	When     map[string]any
+	Do       []packs.Action
 }
 
 func defs(src PackSource) []ruleDef {
@@ -289,7 +293,7 @@ func defs(src PackSource) []ruleDef {
 		for _, r := range p.ClockRules {
 			k := key(p.Name, groupClock, r.ID)
 			out = append(out, ruleDef{State: State{Key: k, Pack: p.Name, Group: groupClock, ID: r.ID, Mode: r.Mode, Hash: p.RuleHashes[groupClock+"/"+r.ID]},
-				Type: r.Type, Do: r.Do, When: map[string]any{"schedule": r.Schedule}})
+				Reminder: r.Type == "follow_up" || r.Type == "stale", Type: r.Type, Do: r.Do, When: map[string]any{"schedule": r.Schedule}})
 		}
 		for _, r := range p.EventRules {
 			k := key(p.Name, groupEvent, r.ID)
@@ -297,10 +301,10 @@ func defs(src PackSource) []ruleDef {
 				When: r.When, Do: r.Do})
 		}
 	}
-	// 只有 accept: auto 的来源规则会自动产生动作，需要模式；其余来源规则是确定性映射，没有模式。
+	// 只有 accept: auto 与 then: alert 的来源规则会自动产生动作，需要模式；其余来源规则是确定性映射，没有模式。
 	for _, p := range src.List() {
 		for _, r := range p.SourceRules {
-			if r.Accept != "auto" {
+			if r.Accept != "auto" && r.Then != "alert" {
 				continue
 			}
 			k := key(p.Name, groupSource, r.ID)
@@ -322,8 +326,9 @@ func shortSum(s string) []byte {
 }
 
 // Reconcile 让规则状态与当前生效的能力包一致；启动时调一次，之后每次能力包重新加载（热加载）都调。
-//   - 第一次见到的规则：取包声明的初始模式（省略按 off）。
-//   - 内容 hash 变化：回到 observe，记 rule.mode_changed 与一条 health.alert（原模式已是 observe 时只更新 hash）。
+//   - 第一次见到的规则：取包声明的初始模式；省略时提醒类为 auto，动作类为 observe（§14.8）。
+//   - 内容 hash 变化：动作类回到 observe，记 rule.mode_changed 与一条 health.alert（原模式已是 observe 时只更新 hash）；提醒类保持本人上一次的选择。
+//   - v0.1 升级：未动过的内置提醒类规则切到 auto（upgradeReminders）。
 //   - 周期型时钟规则（recur、check）在第一次见到或内容变化时建一个周期 Timer；schedule 含实例占位符的规则由实例建 Timer。
 //
 // 无法落成 Timer 的 schedule（既不是时长也不是 cron）不伪装成功：规则状态仍登记，错误在返回值里逐条列出。
@@ -335,7 +340,11 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		for _, d := range defs(e.o.Packs) {
+		ds := defs(e.o.Packs)
+		if err := e.upgradeReminders(tx, pv, ds); err != nil {
+			return err
+		}
+		for _, d := range ds {
 			if err := e.sync(tx, pv, d, &problems); err != nil {
 				return err
 			}
@@ -359,12 +368,19 @@ func (e *Engine) sync(tx *store.Tx, pv int, d ruleDef, problems *[]error) error 
 	}
 	mode := d.Mode
 	if mode == "" {
-		mode = ModeOff
+		mode = ModeObserve
+		if d.Reminder {
+			mode = ModeAuto
+		}
 	}
 	basis := &domain.Basis{PolicyVersion: pv, RuleID: d.Key}
 	if !ok {
 		if _, err := tx.Exec(`INSERT INTO rules_state (key, pack, grp, id, mode, hash) VALUES (?, ?, ?, ?, ?, ?)`,
 			d.Key, d.Pack, d.Group, d.ID, mode, d.Hash); err != nil {
+			return err
+		}
+	} else if d.Reminder {
+		if _, err := tx.Exec(`UPDATE rules_state SET hash = ? WHERE key = ?`, d.Hash, d.Key); err != nil {
 			return err
 		}
 	} else {
@@ -393,6 +409,49 @@ func (e *Engine) sync(tx *store.Tx, pv int, d ruleDef, problems *[]error) error 
 		}
 	}
 	return nil
+}
+
+// upgradeReminders 是 v0.1 → v0.2.0 的规则模式迁移（§16.5）：账本里仍是初始 observe、包里没写 mode、
+// 且从没有过 rule.mode_changed（本人没切过）的提醒类规则切到 auto，逐条记 rule.mode_changed（操作者 system），
+// 并合并成一条健康类说明。包里显式写 observe/off 的、本人切换过的不动；切完即是 auto，再次对账不重复。
+func (e *Engine) upgradeReminders(tx *store.Tx, pv int, ds []ruleDef) error {
+	var switched []string
+	for _, d := range ds {
+		if !d.Reminder || d.Mode != "" {
+			continue
+		}
+		cur, ok, err := loadState(tx, d.Key)
+		if err != nil {
+			return err
+		}
+		if !ok || cur.Mode != ModeObserve {
+			continue
+		}
+		prior, err := eventlog.Query(tx, eventlog.Filter{Object: objectOf(d.Key), Type: domain.EvRuleModeChanged}, 0, 1)
+		if err != nil {
+			return err
+		}
+		if len(prior) > 0 {
+			continue
+		}
+		if _, err := tx.Exec(`UPDATE rules_state SET mode = ? WHERE key = ?`, ModeAuto, d.Key); err != nil {
+			return err
+		}
+		p, _ := json.Marshal(map[string]string{"rule": d.Key, "from": ModeObserve, "to": ModeAuto, "why": "reminder rules default to auto"})
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvRuleModeChanged, Object: objectOf(d.Key), Actor: systemActor,
+			Basis: &domain.Basis{PolicyVersion: pv, RuleID: d.Key}, Reason: "upgrade: reminder rule default is now auto", Payload: p, At: e.now()}); err != nil {
+			return err
+		}
+		switched = append(switched, d.Key)
+	}
+	if len(switched) == 0 {
+		return nil
+	}
+	p, _ := json.Marshal(map[string]any{"kind": "rules_upgrade", "rules": switched})
+	_, err := eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: "rules:upgrade", Actor: systemActor,
+		Reason:  fmt.Sprintf("升级：%d 条提醒类规则按新默认值切到 auto（%s）；不想要时在 Web 设回 observe 或 off", len(switched), strings.Join(switched, "、")),
+		Payload: p, At: e.now()})
+	return err
 }
 
 func (e *Engine) addTimer(tx *store.Tx, d ruleDef) error {

@@ -29,7 +29,7 @@ func human(p string, lvl authz.Level, via domain.Via) command.Trusted {
 }
 
 func agent(p string, lvl authz.Level) command.Trusted {
-	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: lvl}
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: lvl}
 }
 
 var (
@@ -1146,4 +1146,39 @@ func TestLeavingNeedsInputHonoursKernelAskState(t *testing.T) {
 	if e.get(t, plain).Phase != domain.PhaseOpen {
 		t.Fatal("allowed transition not applied")
 	}
+}
+
+// 关联键（§9.4）：登记与移除记进事件，折叠结果与投影一致；投影丢失后可重建。
+func TestCorrelationKeysFoldAndRebuild(t *testing.T) {
+	e := setup(t)
+	a := e.create(t, owner, map[string]any{"phase": "open"})
+	e.must(t, owner, "item.relate", map[string]any{"from": a, "key": "k1", "domain": "d1"})
+	e.must(t, owner, "item.relate", map[string]any{"from": a, "key": "k2"})
+	e.must(t, owner, "item.relate", map[string]any{"from": a, "key": "k2", "remove": true})
+	if err := e.st.View(bg, func(tx *store.Tx) error { return Verify(tx) }); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM item_correlation`); err != nil {
+			return err
+		}
+		if Verify(tx) == nil {
+			t.Fatal("Verify must notice the missing key projection")
+		}
+		return Rebuild(tx)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.st.View(bg, func(tx *store.Tx) error {
+		ks, err := Correlations(tx, a)
+		if err != nil || len(ks) != 1 || ks[0] != (Correlation{Domain: "d1", Key: "k1"}) {
+			t.Fatalf("rebuilt keys %+v (%v)", ks, err)
+		}
+		ids, _ := Correlated(tx, "d1", "k1")
+		other, _ := Correlated(tx, "d2", "k1")
+		if len(ids) != 1 || len(other) != 0 {
+			t.Fatalf("domain scoping: %v / %v", ids, other)
+		}
+		return Verify(tx)
+	})
 }

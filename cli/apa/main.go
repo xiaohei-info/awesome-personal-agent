@@ -5,6 +5,7 @@ import (
 	"os"
 
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/agents" // 登记 agents 子命令
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/backup" // 登记 backup 子命令
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/context" // 登记 context、persona 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/decisions"
@@ -15,6 +16,7 @@ import (
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/guide"      // 登记 guide 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/health"     // 登记 health 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/items"      // 登记 item、propose、inbox 子命令
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/judgment"   // 登记 judgment 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/materials"  // 登记 material、blob 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/packs"      // 登记 pack、instance 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/projects"   // 登记 project 子命令
