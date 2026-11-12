@@ -1,5 +1,5 @@
 // Package policy 是策略设置分组的 HTTP 路由（附录 B.2，设计 §14.3、§14.4、§11.2）：
-// /settings/policy、/settings/allowlists、/settings/model-endpoints、/settings/access-limits。
+// /settings/policy、/settings/allowlists、/settings/model-endpoints、/settings/access-limits、/settings/judgment。
 //
 // 路由里没有业务规则：校验、规整、人格长度、新版本与事件全部由内核 kernel/policy.Update 判定。
 // 本层只做两件事：只放行 Web 会话（任何 Bearer 凭据，无论级别，一律 web_only，退出码 20），
@@ -88,6 +88,11 @@ var (
 	}
 	accessLimitSections = []section{
 		sect("permission_cap", func(p *kpolicy.Policy) *kpolicy.PermissionCap { return &p.PermissionCap }),
+	}
+	judgmentSections = []section{
+		sect("bands", func(p *kpolicy.Policy) *[]kpolicy.JudgmentBand { return &p.Judgment.Bands }),
+		sect("shadow", func(p *kpolicy.Policy) *[]string { return &p.Judgment.Shadow }),
+		sect("spot_check", func(p *kpolicy.Policy) *kpolicy.SpotCheck { return &p.Judgment.SpotCheck }),
 	}
 	modelEndpointSections = []section{
 		{key: "judge_endpoint", get: getJudge, set: setJudge},
@@ -196,6 +201,7 @@ func Routes(st *store.Store) core.RouteGroup {
 			"/settings/allowlists":      allowlistSections,
 			"/settings/model-endpoints": modelEndpointSections,
 			"/settings/access-limits":   accessLimitSections,
+			"/settings/judgment":        judgmentSections,
 		} {
 			r.Handle(core.Route{Method: "GET", Path: path, Handler: read(st, secs)})
 			r.Handle(core.Route{Method: "PUT", Path: path, Handler: write(st, path, secs)})
