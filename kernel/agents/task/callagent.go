@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -17,6 +19,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -58,7 +61,7 @@ func (s *Service) CallAgent(o AgentOptions) rules.Handler {
 		}
 		switch pr.Meta.Agent {
 		case "task":
-			return s.callTask(ctx, c, pack, tmpl)
+			return s.callTask(ctx, c, pack, tmpl, nil)
 		case "generate":
 			if o.Generate != nil {
 				return s.callGenerate(ctx, o.Generate, c, pack, tmpl)
@@ -163,7 +166,7 @@ func (s *Service) ledgerSnapshot(ctx context.Context) (string, error) {
 	return string(b), err
 }
 
-func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string) error {
+func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string, msgs []Message) error {
 	depth, over, err := s.launchDepth(ctx, c)
 	if err != nil || over {
 		return err
@@ -173,7 +176,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string)
 		return err
 	}
 	ip := instanceParams(c)
-	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction,
+	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs,
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
 	switch {
 	case c.Bound:
@@ -204,6 +207,21 @@ func (s *Service) launchDepth(ctx context.Context, c rules.Call) (depth int, ove
 		return depth, true, c.Ask(c.Item.ID, fmt.Sprintf("链路深度 %d 超过阈值 %d，规则没有派发运行", depth, max))
 	}
 	return depth, false, nil
+}
+
+// attachedMessages 是事项上尚未处理的挂靠消息（pending、forwarded），不推进 attach_state；是否进白名单由 Launch 判定。
+func (s *Service) attachedMessages(ctx context.Context, item string) ([]Message, error) {
+	var out []Message
+	err := s.o.Store.View(ctx, func(tx *store.Tx) error {
+		as, err := allowlist.Messages(tx, item, authz.LevelWeb)
+		for _, a := range as {
+			if a.AttachState == runner.AttachPending || a.AttachState == runner.AttachForwarded {
+				out = append(out, Message{Source: a.Source, Sender: a.Sender, Verified: a.SenderVerified, Body: a.Detail})
+			}
+		}
+		return err
+	})
+	return out, err
 }
 
 func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, pack, tmpl string) error {
@@ -252,7 +270,12 @@ func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, p
 	case err != nil:
 		return fmt.Errorf("生成型调用失败: %w", err)
 	case out.HandoffTask != "":
-		return s.callTask(ctx, c, pack, out.HandoffTask)
+		// 接力到任务型：事项上还没处理的挂靠消息一并带上，含未进转发白名单的则 Launch 转 needs_input 交本人（§8.3 末行）。
+		msgs, err := s.attachedMessages(ctx, it.ID)
+		if err != nil {
+			return err
+		}
+		return s.callTask(ctx, c, pack, out.HandoffTask, msgs)
 	case !out.Settled:
 		return c.Ask(it.ID, "生成型没有给出可用结果："+out.Reason)
 	}
