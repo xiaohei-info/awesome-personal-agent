@@ -423,7 +423,12 @@ func (e *Env) StartModelStub() {
 	body, _ := json.Marshal(map[string]any{"generate_endpoint": map[string]any{
 		"url": e.ModelStub.URL(), "model": "acc-model", "api_key": "stub-key", "locality": "local"}, "screening_timeout_ms": 2000})
 	e.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
+	// 只有生成端点时 web_only 初筛由它回答；默认回"否、资料足够"，其他流程不被升级为 web_only（初筛用例自己覆盖）。
+	e.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: ScreeningPhrase}, Answer: "no"})
 }
+
+// ScreeningPhrase 出现在 web_only 初筛的提问里（decision-card/web-only-screening），用来在替身上匹配这道题。
+const ScreeningPhrase = "是否应当只由本人在 Web 回答"
 
 func (e *Env) chatCompletion(t *testing.T, prompt string) string {
 	t.Helper()
