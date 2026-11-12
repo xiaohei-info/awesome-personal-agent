@@ -117,7 +117,7 @@ func (d drafted) content(it domain.Item, webOnly bool) domain.DeliveryContent {
 
 // draft 返回事项这个版本的起草结果；ready 为假表示起草未返回（已登记 pending），调用方暂不投递。
 func (a *Attention) draft(tx *store.Tx, pol policy.Policy, it domain.Item, ver int64) (drafted, bool, error) {
-	if a.o.Drafter == nil || pol.ModelEndpoint.URL == "" || pol.ModelEndpoint.Model == "" {
+	if a.o.Drafter == nil || pol.GenerateEndpoint.URL == "" || pol.GenerateEndpoint.Model == "" {
 		return drafted{}, true, nil // 未配置：按规则（§5.6）
 	}
 	var (

@@ -179,7 +179,7 @@ func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (string, error) {
 		return EndpointFailing, err
 	}
 	_, pol, err := policy.Current(tx)
-	if err != nil || (pol.ModelEndpoint.URL != "" && pol.ModelEndpoint.Model != "") {
+	if err != nil || (pol.GenerateEndpoint.URL != "" && pol.GenerateEndpoint.Model != "") {
 		return "", err
 	}
 	for _, e := range backlog {

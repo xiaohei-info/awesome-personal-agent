@@ -168,7 +168,7 @@ func (s *Service) Rejudge(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if ep := pol.ModelEndpoint; ep.URL != "" && ep.Model != "" {
+		if ep := pol.GenerateEndpoint; ep.URL != "" && ep.Model != "" {
 			endpoint = ep.URL + "\n" + ep.Model
 		}
 		cands, err = runner.RejudgeCandidates(tx, since, lim.Batch)

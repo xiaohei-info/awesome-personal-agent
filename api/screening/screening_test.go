@@ -124,7 +124,7 @@ func setup(t *testing.T) *env {
 		}
 		// 配置了模型端点，决策请求才会进入初筛；端点本身由 gateJudge 替身承接。
 		_, err := policy.Update(tx, owner, "model", func(p *policy.Policy) error {
-			p.ModelEndpoint = policy.ModelEndpoint{URL: "http://model.invalid", Model: "m1", APIKey: "k", ScreeningTimeoutMs: 120000}
+			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: "http://model.invalid", Model: "m1", APIKey: "k"}, 120000
 			return nil
 		})
 		return err

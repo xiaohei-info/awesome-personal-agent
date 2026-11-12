@@ -108,7 +108,7 @@ func setup(t *testing.T, configured bool) *env {
 	if configured {
 		err = st.Update(bg, func(tx *store.Tx) error {
 			_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-				p.ModelEndpoint = policy.ModelEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", ScreeningTimeoutMs: 1000}
+				p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}, 1000
 				return nil
 			})
 			return err

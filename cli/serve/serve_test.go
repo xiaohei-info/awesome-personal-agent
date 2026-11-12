@@ -1371,7 +1371,7 @@ func TestServeDraftsDecisionCardAndSummaries(t *testing.T) {
 	stub.When("写一张决策卡片", modelstub.Reply{Content: `{"insufficient_info":false,"title":"卡片标题","question":"现在下单吗？"}`})
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
 		_, err := policy.Update(tx, hostOwner.Actor, "model", func(p *policy.Policy) error {
-			p.ModelEndpoint = policy.ModelEndpoint{URL: stub.URL(), Model: "m", ScreeningTimeoutMs: 5000}
+			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: stub.URL(), Model: "m"}, 5000
 			return nil
 		})
 		return err

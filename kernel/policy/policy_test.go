@@ -172,7 +172,7 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 		func(p *Policy) error { p.MaterialWrite.Kinds["minutes"] = WriteProposed; return nil },
 		func(p *Policy) error { p.PermissionCap.ByHarness["h1"] = PermEdit; return nil },
 		func(p *Policy) error {
-			p.ModelEndpoint = ModelEndpoint{URL: "http://127.0.0.1:9/v1", Model: "m", APIKey: "sk-secret", ScreeningTimeoutMs: 5000}
+			p.GenerateEndpoint = GenerateEndpoint{URL: "http://127.0.0.1:9/v1", Model: "m", APIKey: "sk-secret"}
 			return nil
 		},
 	}
@@ -183,7 +183,7 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 	}
 	_, p := current(t, s)
 	if p.Disturb.Routes["decision:urgent"] != "wake" || p.MaterialWrite.Kinds["minutes"] != WriteProposed ||
-		p.PermissionCap.ByHarness["h1"] != PermEdit || p.ModelEndpoint.APIKey != "sk-secret" {
+		p.PermissionCap.ByHarness["h1"] != PermEdit || p.GenerateEndpoint.APIKey != "sk-secret" {
 		t.Fatalf("policy = %+v", p)
 	}
 	es := events(t, s)
@@ -213,8 +213,8 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 		"route":    func(p *Policy) error { p.Disturb.Routes["mystery"] = "x"; return nil },
 		"priority": func(p *Policy) error { p.Disturb.Routes["decision:meh"] = "x"; return nil },
 		"material": func(p *Policy) error { p.MaterialWrite.Default = "maybe"; return nil },
-		"url":      func(p *Policy) error { p.ModelEndpoint.URL = "ftp://x"; return nil },
-		"timeout":  func(p *Policy) error { p.ModelEndpoint.ScreeningTimeoutMs = 0; return nil },
+		"url":      func(p *Policy) error { p.GenerateEndpoint.URL = "ftp://x"; return nil },
+		"timeout":  func(p *Policy) error { p.ScreeningTimeoutMs = 0; return nil },
 		"mutate":   func(p *Policy) error { return errors.New("boom") },
 	} {
 		if _, err := update(t, s, owner, bad); err == nil {
@@ -334,25 +334,147 @@ func TestDisturbQuietAndMergeWindowAreValidated(t *testing.T) {
 func TestStoredDocWithoutDailyCapDefaultsTo20(t *testing.T) {
 	doc := func(cap string) string {
 		b, _ := json.Marshal(Default())
-		var m map[string]map[string]any
+		var m map[string]any
 		_ = json.Unmarshal(b, &m)
-		delete(m["disturb"], "daily_cap")
-		delete(m["disturb"], "mutes")
+		d := m["disturb"].(map[string]any)
+		delete(d, "daily_cap")
+		delete(d, "mutes")
 		if cap != "" {
-			m["disturb"]["daily_cap"] = json.RawMessage(cap)
+			d["daily_cap"] = json.RawMessage(cap)
 		}
 		out, _ := json.Marshal(m)
 		return string(out)
 	}
-	p, err := decode(doc(""))
+	p, _, err := decode(doc(""))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p.Disturb.DailyCap != DefaultDailyCap || p.Disturb.Mutes == nil || len(p.Disturb.Mutes) != 0 {
 		t.Fatalf("%+v", p.Disturb)
 	}
-	q, err := decode(doc("0"))
+	q, _, err := decode(doc("0"))
 	if err != nil || q.Disturb.DailyCap != 0 {
 		t.Fatalf("explicit 0 must stay unlimited: %v %+v", err, q.Disturb)
+	}
+}
+
+// 旧账本里存的是 v0.1 的单一 model_endpoint 文档（flow-upgrade-rollback / flow-endpoint-config）。
+const legacyDoc = `{"web_only":{"categories":["funds"],"rules":[]},"disturb":{"routes":{"decision":"inject"},"merge_window_sec":0,"remind_on_deadline":true},
+"material_write":{"default":"proposed","kinds":{}},"permission_cap":{"default":"read","by_harness":{}},
+"model_endpoint":{"url":"http://127.0.0.1:9/v1","model":"old-m","api_key":"sk-old","screening_timeout_ms":45000},
+"persona":"","forward_allowlist":{},"channel_answerers":{},"channels":{},"default_harness":""}`
+
+func seedLegacy(t *testing.T, s *store.Store) {
+	t.Helper()
+	if err := s.Update(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec("INSERT INTO policy_version (version, doc, at) VALUES (1, ?, 1)", legacyDoc)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func storedDocs(t *testing.T, s *store.Store) (docs []string) {
+	t.Helper()
+	if err := s.View(ctx, func(tx *store.Tx) error {
+		r, err := tx.Query("SELECT doc FROM policy_version ORDER BY version")
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		for r.Next() {
+			var d string
+			if err := r.Scan(&d); err != nil {
+				return err
+			}
+			docs = append(docs, d)
+		}
+		return r.Err()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+// 旧 model_endpoint 读作生成端点（位置 external），超时提到顶层，判断端点为空；读取不产生新版本、不改写旧文档。
+func TestLegacyModelEndpointReadsAsGenerateEndpoint(t *testing.T) {
+	s := open(t)
+	seedLegacy(t, s)
+	v, p := current(t, s)
+	g := p.GenerateEndpoint
+	if v != 1 || g.URL != "http://127.0.0.1:9/v1" || g.Model != "old-m" || g.APIKey != "sk-old" || g.Locality != LocalityExternal ||
+		p.JudgeEndpoint != nil || p.ScreeningTimeoutMs != 45000 {
+		t.Fatalf("v=%d policy=%+v", v, p)
+	}
+	if d := storedDocs(t, s); len(d) != 1 || d[0] != legacyDoc {
+		t.Fatalf("stored docs rewritten: %v", d)
+	}
+}
+
+// 本人在 Web 不改任何值直接保存：仍追加一个新版本，写成新字段，旧版本逐字节不变。
+func TestSaveOverLegacyWritesNewFieldsAndKeepsOldVersion(t *testing.T) {
+	s := open(t)
+	seedLegacy(t, s)
+	if v := must(t, s, func(*Policy) error { return nil }); v != 2 {
+		t.Fatalf("version = %d, want 2", v)
+	}
+	d := storedDocs(t, s)
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(d[1]), &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["model_endpoint"]; ok {
+		t.Fatalf("new version still has model_endpoint: %s", d[1])
+	}
+	for _, k := range []string{"judge_endpoint", "generate_endpoint", "screening_timeout_ms"} {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("new version lacks %s: %s", k, d[1])
+		}
+	}
+	if d[0] != legacyDoc {
+		t.Fatal("version 1 rewritten")
+	}
+	// 再保存一次没有变化，不再产生版本。
+	if v := must(t, s, func(*Policy) error { return nil }); v != 2 {
+		t.Fatalf("second no-op save bumped version to %d", v)
+	}
+}
+
+// 端点校验与默认值：判断端点缺省字段取附录 B 的默认值；未声明位置按 external；密钥不进事件。
+func TestEndpointDefaultsAndValidation(t *testing.T) {
+	s := open(t)
+	_, p := current(t, s)
+	if p.JudgeEndpoint != nil || p.GenerateEndpoint.URL != "" || p.ScreeningTimeoutMs != 30000 {
+		t.Fatalf("defaults = %+v", p)
+	}
+	must(t, s, func(p *Policy) error {
+		p.JudgeEndpoint = &JudgeEndpoint{URL: "http://127.0.0.1:9/judge", APIKey: "sk-j"}
+		p.GenerateEndpoint = GenerateEndpoint{URL: "http://127.0.0.1:9/gen", Model: "m"}
+		return nil
+	})
+	_, p = current(t, s)
+	j := p.JudgeEndpoint
+	if j.Protocol != ProtocolProbability || j.TimeoutMs != 10000 || j.MaxBatch != 32 || j.MaxMaterialChars != 8000 ||
+		j.Locality != LocalityExternal || p.GenerateEndpoint.Locality != LocalityExternal {
+		t.Fatalf("judge=%+v generate=%+v", j, p.GenerateEndpoint)
+	}
+	for _, e := range events(t, s) {
+		if strings.Contains(string(e.Event.Payload), "sk-j") {
+			t.Fatalf("api key leaked: %s", e.Event.Payload)
+		}
+	}
+	for name, bad := range map[string]func(*Policy){
+		"judge url":      func(p *Policy) { p.JudgeEndpoint.URL = "ftp://x" },
+		"judge protocol": func(p *Policy) { p.JudgeEndpoint.Protocol = "magic" },
+		"logprobs model": func(p *Policy) { p.JudgeEndpoint.Protocol = ProtocolChatLogprobs; p.JudgeEndpoint.Model = "" },
+		"judge locality": func(p *Policy) { p.JudgeEndpoint.Locality = "nearby" },
+		"judge batch":    func(p *Policy) { p.JudgeEndpoint.MaxBatch = -1 },
+		"gen url":        func(p *Policy) { p.GenerateEndpoint.URL = "ftp://x" },
+		"gen locality":   func(p *Policy) { p.GenerateEndpoint.Locality = "nearby" },
+		"timeout":        func(p *Policy) { p.ScreeningTimeoutMs = 0 },
+	} {
+		if _, err := update(t, s, owner, func(p *Policy) error { bad(p); return nil }); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: err = %v", name, err)
+		}
 	}
 }
