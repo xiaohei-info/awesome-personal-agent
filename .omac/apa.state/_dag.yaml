@@ -1,4 +1,4 @@
-# sha256: 209a32419f65abc3a5c19bf8bb53a650111cf44c0d80f7f1751bc3f2d36235cc
+# sha256: 6dc6573cfa339a2b406344a1a69a1feb7f03dc39e591992ee734e37fe32f154f
 defects:
   schema: omac.defect-ledger/v1
   used_global: 15
@@ -177,7 +177,7 @@ defects:
       - flow-delivery-control/ACT-DLV-07
       reporters:
       - release-closeout
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-delivery.56a54b
     dfx-40f4fd84b7bb:
       suspected: e2e-bg-guards
