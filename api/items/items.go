@@ -44,7 +44,7 @@ func Routes(x *command.Executor, st *store.Store) core.RouteGroup {
 		r.Handle(core.Route{Method: "PATCH", Path: "/items/{id}", Handler: h.write("item.update", "id", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/transition", Handler: h.write("item.transition", "id", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/relations", Handler: h.write("item.relate", "from", http.StatusOK)})
-		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/progress", Handler: h.write("item.progress", "id", http.StatusOK)})
+		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/progress", Handler: h.write("item.progress", "id", http.StatusCreated, h.withProgress)})
 		r.Handle(core.Route{Method: "GET", Path: "/today", Handler: h.today})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/revert", Handler: h.write("item.revert", "id", http.StatusOK)})
 	}
@@ -157,7 +157,7 @@ func (h *handlers) today(w http.ResponseWriter, r *http.Request, p *core.Princip
 }
 
 // write 把请求体原样交给命令。pathKey 非空时把路径 id 写入体的该键（体里自带同名键直接拒绝）。
-func (h *handlers) write(cmd, pathKey string, status int) core.Handler {
+func (h *handlers) write(cmd, pathKey string, status int, extra ...func(r *http.Request, id string, out map[string]any) error) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 		var body map[string]json.RawMessage
 		if err := core.DecodeJSON(r, &body); err != nil {
@@ -204,8 +204,27 @@ func (h *handlers) write(cmd, pathKey string, status int) core.Handler {
 		if res.Replayed {
 			status = http.StatusOK
 		}
-		return core.WriteJSON(w, status, map[string]any{"id": out.ID, "version": res.Version, "replayed": res.Replayed})
+		resp := map[string]any{"id": out.ID, "version": res.Version, "replayed": res.Replayed}
+		if !res.Replayed { // 重放时"最后一条"可能已是别的进展，不附
+			for _, f := range extra {
+				if err := f(r, out.ID, resp); err != nil {
+					return err
+				}
+			}
+		}
+		return core.WriteJSON(w, status, resp)
 	}
+}
+
+// withProgress 在 progress 写入的响应里附上刚追加的那条进展（附录 B.2）。
+func (h *handlers) withProgress(r *http.Request, id string, out map[string]any) error {
+	return h.st.View(r.Context(), func(tx *store.Tx) error {
+		ps, err := kitems.Progress(tx, id)
+		if err == nil && len(ps) > 0 {
+			out["progress"] = ps[len(ps)-1]
+		}
+		return err
+	})
 }
 
 // Rejection 是事项上最近一次被拒绝的代理操作（退出码 23，§14.5）：决策待办与建议流据此标明"这次被拒绝的代答/处理"。

@@ -525,14 +525,19 @@ func TestProgressOverHTTP(t *testing.T) {
 	w := e.create(e.web, `{"kind":"task","title":"f","phase":"open","assignee":"wrk1"}`)
 	yday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 	tmrw := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
-	if rec := e.do("POST", "/v1/items/"+w.ID+"/progress", `{"text":"联系了供应商","on":"`+yday+`"}`, wrk); rec.Code != 200 {
-		t.Fatalf("progress = %d %s", rec.Code, rec.Body)
+	rec := e.do("POST", "/v1/items/"+w.ID+"/progress", `{"text":"联系了供应商","on":"`+yday+`"}`, wrk)
+	var created struct {
+		Progress domain.Progress `json:"progress"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if rec.Code != 201 || created.Progress.Text != "联系了供应商" || created.Progress.On != yday {
+		t.Fatalf("progress must return 201 with the entry: %d %s", rec.Code, rec.Body)
 	}
 	var g struct {
 		Item     domain.Item
 		Progress []domain.Progress `json:"progress"`
 	}
-	rec := e.do("GET", "/v1/items/"+w.ID, "", e.web)
+	rec = e.do("GET", "/v1/items/"+w.ID, "", e.web)
 	_ = json.Unmarshal(rec.Body.Bytes(), &g)
 	if g.Item.Phase != domain.PhaseOpen || len(g.Progress) != 1 || g.Progress[0].Text != "联系了供应商" || g.Progress[0].On != yday || g.Progress[0].Actor != "wrk1" || g.Progress[0].At.IsZero() {
 		t.Fatalf("progress[] = %+v (%s)", g.Progress, rec.Body)
