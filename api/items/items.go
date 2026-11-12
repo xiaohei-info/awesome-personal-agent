@@ -35,8 +35,12 @@ const (
 )
 
 // Routes 返回事项路由分组，交给 core.Deps.Groups。x 须已经 kitems.Register。
-func Routes(x *command.Executor, st *store.Store) core.RouteGroup {
-	h := &handlers{x: x, st: st}
+// staleAfter 给"今天"久未推进一组的阈值（取自 stale 规则，热加载后即时生效）；省略时用默认的 14 天。
+func Routes(x *command.Executor, st *store.Store, staleAfter ...func() time.Duration) core.RouteGroup {
+	h := &handlers{x: x, st: st, staleAfter: func() time.Duration { return kitems.StaleAfter }}
+	if len(staleAfter) > 0 && staleAfter[0] != nil {
+		h.staleAfter = staleAfter[0]
+	}
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/items", Handler: h.list})
 		r.Handle(core.Route{Method: "GET", Path: "/items/{id}", Handler: h.get})
@@ -51,8 +55,9 @@ func Routes(x *command.Executor, st *store.Store) core.RouteGroup {
 }
 
 type handlers struct {
-	x  *command.Executor
-	st *store.Store
+	x          *command.Executor
+	st         *store.Store
+	staleAfter func() time.Duration
 }
 
 // readable：读事项对 observer 及以上开放；ext 与 webhook 凭据另有用途，不能读账本，只有导出 ext 例外（§10.3）。
@@ -143,7 +148,7 @@ func (h *handlers) today(w http.ResponseWriter, r *http.Request, p *core.Princip
 	}
 	var l kitems.TodayList
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
-		l, err = kitems.TodayItems(tx, time.Now())
+		l, err = kitems.TodayItemsAfter(tx, time.Now(), h.staleAfter())
 		return err
 	}); err != nil {
 		return err

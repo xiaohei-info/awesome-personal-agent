@@ -92,6 +92,24 @@ func Cancel(tx *store.Tx, id string) error {
 	return nil
 }
 
+// Get 在 tx 内读一个 Timer；不存在时 ok 为假。
+func Get(tx *store.Tx, id string) (t domain.Timer, ok bool, err error) {
+	var kind string
+	var at int64
+	r, err := tx.Query(`SELECT target, kind, at, recurrence FROM clock_timer WHERE id = ?`, id)
+	if err != nil {
+		return t, false, err
+	}
+	if ok = r.Next(); ok {
+		err = r.Scan(&t.Target, &kind, &at, &t.Recurrence)
+	}
+	if cerr := r.Close(); err == nil {
+		err = cerr
+	}
+	t.ID, t.Kind, t.At = id, domain.TimerKind(kind), time.Unix(0, at).UTC()
+	return t, ok && err == nil, err
+}
+
 // Clock 是扫描循环。
 type Clock struct {
 	st      *store.Store
