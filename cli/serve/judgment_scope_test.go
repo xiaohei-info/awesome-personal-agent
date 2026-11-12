@@ -110,7 +110,7 @@ func TestRunCredentialReadsOnlyTargetItemJudgmentRecords(t *testing.T) {
 	if err := s.Update(ctx, func(tx *store.Tx) (err error) { _, obs, err = au.Issue(tx, auth.Spec{Kind: auth.Observer}); return }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: s, Auth: au, Groups: []core.RouteGroup{apijudgments.Routes(s)}})
+	srv, err := core.New(core.Deps{Store: s, Auth: au, Groups: []core.RouteGroup{apijudgments.Routes(s, nil)}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -125,7 +125,7 @@ func newRig(t *testing.T) *rig {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	r.srv, err = core.New(core.Deps{Store: st, Auth: r.au, Groups: []core.RouteGroup{apijudgments.Routes(st)}})
+	r.srv, err = core.New(core.Deps{Store: st, Auth: r.au, Groups: []core.RouteGroup{apijudgments.Routes(st, nil)}})
 	if err != nil {
 		t.Fatal(err)
 	}

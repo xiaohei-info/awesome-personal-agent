@@ -24,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -1385,5 +1386,67 @@ func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 	res := e.waitResult()
 	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); res.Run.Target != ok || !strings.Contains(m, "boss@example.com") || !strings.Contains(m, "relay_input") || !strings.Contains(m, "relay-marker") {
 		t.Fatalf("listed message and the generate step's verdict must reach the task agent: %s", m)
+	}
+}
+
+// ACT-JRC-20：简报运行的资料文件带 per_brief 条抽检条目（来自最近一个周期被初筛忽略的事件），条目不含来源正文。
+func TestBriefRunMaterialsCarrySpotCheckEntries(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "summary")
+	e.setDefaultHarness("hx")
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for i := 0; i < 7; i++ {
+			sid := fmt.Sprintf("low-%d", i)
+			if err := runner.AppendInternal(tx, domain.Source{ID: "src_1"}, domain.SourceEvent{ID: sid, Type: "n", Subject: sid, Summary: "SECRET BODY", OccurredAt: t0}); err != nil {
+				return err
+			}
+			evs, err := runner.Events(tx, "src_1")
+			if err != nil {
+				return err
+			}
+			ev := evs[len(evs)-1]
+			if err := runner.SetDisposition(tx, ev.ID, domain.DispositionIgnored, "", ""); err != nil {
+				return err
+			}
+			p := 0.05
+			if err := record.Put(tx, record.Record{ID: "jd_" + sid, Use: "inbound_screen", Template: "t@x", Subject: ev.ID, Source: "src_1", Fingerprint: "f" + sid,
+				Band: record.Band{Low: 0.15, High: 0.6}, DecidedBy: record.DecidedClassifier, Answer: "no", CreatedAt: e.svc.o.Now(),
+				Levels: []record.Level{{Backend: record.BackendClassifier, PYes: &p, Outcome: record.OutcomeDecided}}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	id := e.openItem()
+	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("brief", id)); err != nil {
+		t.Fatal(err)
+	}
+	raw := read(t, filepath.Join(e.runs, e.waitResult().Run.ID, "materials.json"))
+	var f struct {
+		Materials []Material `json:"materials"`
+	}
+	if err := json.Unmarshal([]byte(raw), &f); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, m := range f.Materials {
+		if m.Name != "spot_check" {
+			continue
+		}
+		found = true
+		var b struct {
+			SpotCheck []struct {
+				Judgment string
+				WebPath  string `json:"web_path"`
+			} `json:"spot_check"`
+		}
+		if err := json.Unmarshal([]byte(m.Body), &b); err != nil || len(b.SpotCheck) != 5 || b.SpotCheck[0].WebPath == "" || strings.Contains(m.Body, "SECRET BODY") {
+			t.Fatalf("spot_check material: %v %s", err, m.Body)
+		}
+	}
+	if !found {
+		t.Fatalf("no spot_check material: %s", raw)
 	}
 }

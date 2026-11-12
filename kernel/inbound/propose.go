@@ -53,6 +53,28 @@ func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, even
 	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, disposeIn{Event: event}, command.Chain{}); err != nil {
 		return domain.SourceEvent{}, err
 	}
+	item, err := s.draftProposal(ctx, id, event)
+	var ev domain.SourceEvent
+	if err != nil {
+		return ev, err
+	}
+	d := disposeIn{Event: event, Item: item, Reason: "manually proposed from the source page"}
+	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
+		return ev, err
+	}
+	err = s.o.Store.View(ctx, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, event); return })
+	return ev, err
+}
+
+// DraftProposal 为来源事件建 proposed 事项并返回它的 id；这个事件已经建过就沿用，重试不会重复建。
+// 只建事项，不改事件的处置：处置由调用方的命令落账（积压转建议、抽检"该看"）。
+func (s *Service) DraftProposal(ctx context.Context, id command.Identity, event string) (string, error) {
+	s.proposing.Lock()
+	defer s.proposing.Unlock()
+	return s.draftProposal(ctx, id, event)
+}
+
+func (s *Service) draftProposal(ctx context.Context, id command.Identity, event string) (string, error) {
 	var (
 		sn snapshot
 		ev domain.SourceEvent
@@ -64,20 +86,12 @@ func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, even
 		return sn.loadFacts(tx)
 	})
 	if err != nil {
-		return ev, err
+		return "", err
 	}
-	item, made := sn.made[event]
-	if !made {
-		if item, err = s.proposeItem(ctx, id, sn, ev); err != nil {
-			return ev, err
-		}
+	if item, made := sn.made[event]; made {
+		return item, nil
 	}
-	d := disposeIn{Event: event, Item: item, Reason: "manually proposed from the source page"}
-	if _, err := s.do(ctx, id, "", "", CmdProposeUnjudged, d, command.Chain{}); err != nil {
-		return ev, err
-	}
-	err = s.o.Store.View(ctx, func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, event); return })
-	return ev, err
+	return s.proposeItem(ctx, id, sn, ev)
 }
 
 func (s *Service) proposeItem(ctx context.Context, id command.Identity, sn snapshot, ev domain.SourceEvent) (string, error) {

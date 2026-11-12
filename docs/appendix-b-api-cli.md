@@ -84,7 +84,7 @@
 | `apa run list/show` | 运行记录 | observer | |
 | `apa judgment stats [--use] [--template] [--source] [--since]` | 【规划中（v0.2.0）】各级调用次数与升级率、未定率、接受率、误丢率（主文档 §8.10） | observer | |
 | `apa judgment show <id>` | 一条判断记录的逐级结果 | observer，按权限裁剪 | 5 |
-| `apa judgment spot-check` | 【规划中（v0.2.0）】列出待抽检的条目；抽检结论只在 Web 填 | observer | |
+| `apa judgment spot-check` | 列出待抽检的条目；抽检结论只在 Web 填 | observer | |
 
 **只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、执行者清单、规则切 `auto`、运行权限上限、判断端点与生成端点、不确定带与影子模式、抽检结论、打扰上限与静音、来源与对话捕获的外发范围、登录口令与在线会话、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效、签发和撤销授权单。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
 
@@ -161,7 +161,7 @@
 | | `POST /source-events/restore` | 【规划中（v0.2.0）】把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate（附本人原话） |
 | 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |
 | | `GET /judgments/stats?use&template&source&since` | 【规划中（v0.2.0）】各级调用次数与四项指标（主文档 §8.10） | observer |
-| | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 【规划中（v0.2.0）】抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
+| | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
 | 事件 | `GET /events?cursor=` | SSE 或长轮询 | observer、导出和转发 ext 密钥 |
 | 投递 | `GET /deliveries/next?wait=` | 长轮询领取；有租约 | 渠道 ext 密钥；网关插件 token（worker 及以上，只领唤醒类投递） |

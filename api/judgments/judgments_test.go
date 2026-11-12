@@ -109,7 +109,7 @@ func setup(t *testing.T) *env {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{Routes(st)}})
+	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{Routes(st, nil)}})
 	if err != nil {
 		t.Fatal(err)
 	}
