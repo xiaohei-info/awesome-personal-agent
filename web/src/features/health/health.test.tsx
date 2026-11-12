@@ -24,6 +24,14 @@ const NEXT: Record<string, string> = {
 };
 const ORDER = Object.keys(NEXT);
 
+const DOCTOR = {
+  ok: true,
+  checks: [
+    { name: "tier", status: "ok", why: "tier 3 (kernel + model endpoint + host)", next: "nothing to do" },
+    { name: "sources", status: "warning", why: "some sources need attention; see details", next: "choose the outbound scope", details: [{ subject: "src_unset", status: "warning", why: "the external outbound scope is not chosen" }] },
+  ],
+};
+
 function report(bad: Record<string, Partial<Signal>> = {}): HealthReport {
   const signals = ORDER.map((id) => ({ id, ok: true, count: 0, next: NEXT[id], ...bad[id] }) as Signal);
   return { healthy: signals.every((s) => s.ok), signals };
@@ -44,6 +52,7 @@ function serve(get: () => Response) {
     calls.push((init.method ?? "GET") + " " + url);
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/health") return get();
+    if (url === "/v1/doctor") return json(200, DOCTOR);
     return json(404, { code: "not_found", why: "no such route", next: "x" });
   }) as unknown as typeof fetch;
   return { impl, calls };
@@ -123,5 +132,19 @@ describe("健康页（flow-health / ACT-HLT-01）", () => {
     mount(serve(() => json(403, { code: "permission_denied", why: "credential kind cannot read the ledger", next: "use an owner or agent credential" })).impl);
     expect(await screen.findByRole("alert")).toHaveTextContent("cannot read the ledger");
     expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  });
+});
+
+describe("健康页的自检区（flow-doctor / ACT-DOC-12）", () => {
+  it("展示 GET /v1/doctor 的每项结论、对象与下一步", async () => {
+    const s = serve(() => json(200, report()));
+    mount(s.impl);
+    const sec = await screen.findByRole("region", { name: "自检" });
+    expect(within(sec).getByRole("article", { name: "自检：tier" })).toHaveTextContent("tier 3");
+    const sources = within(sec).getByRole("article", { name: "自检：sources" });
+    expect(sources).toHaveTextContent("提醒");
+    expect(sources).toHaveTextContent("src_unset");
+    expect(sources).toHaveTextContent("下一步：choose the outbound scope");
+    expect(s.calls).toContain("GET /v1/doctor");
   });
 });

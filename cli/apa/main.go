@@ -10,6 +10,7 @@ import (
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/context" // 登记 context、persona 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/decisions"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/delegation" // 登记 executors、delegate、report、declare 子命令
+	_ "github.com/xiaohei-info/awesome-personal-agent/cli/doctor"     // 登记 doctor 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/events"     // 登记 events 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/ext"        // 登记 ext 子命令
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/followmsg"  // 登记 handback 子命令

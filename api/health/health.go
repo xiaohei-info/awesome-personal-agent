@@ -15,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -208,4 +209,21 @@ func withRejections(rep Report, rs []packs.Rejection) Report {
 		}
 	}
 	return rep
+}
+
+// DoctorRoutes 返回 GET /doctor（附录 B.2，设计 §15.5）：内核一侧的自检结果，与 `apa doctor` 的对应项同一份代码。
+// 涉及本机文件与宿主的检查（数据目录、运行配置、宿主插件、重复提醒）只在 CLI 里做，这里没有。
+func DoctorRoutes(st *store.Store, env kdoctor.Env) core.RouteGroup {
+	return func(r *core.Router) {
+		r.Handle(core.Route{Method: "GET", Path: "/doctor", Handler: func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+			if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
+				return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read the ledger", "use an owner or agent credential")
+			}
+			f, err := kdoctor.ReadFacts(r.Context(), st)
+			if err != nil {
+				return err
+			}
+			return core.WriteJSON(w, http.StatusOK, kdoctor.Assemble(kdoctor.Kernel(r.Context(), f, env)...))
+		}})
+	}
 }
