@@ -20,7 +20,7 @@ function server(opts: { webOnlyDenied?: boolean } = {}) {
   let version = 1;
   const doc: Record<string, any> = {
     web_only: { categories: ["funds", "irreversible"], rules: [{ kind: "payment", category: "funds" }] },
-    disturb: { routes: { decision: "inject", health: "web" } },
+    disturb: { routes: { decision: "inject", health: "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 20, mutes: [] },
     material_write: { default: "proposed", kinds: { minutes: "direct" } },
     persona: "简洁",
     forward_allowlist: { telegram: ["alice"] },
@@ -130,7 +130,8 @@ describe("策略与人格设置页", () => {
     await userEvent.type(d.getByLabelText("打扰路由路由 3"), "web");
     await save("打扰策略");
     await d.findByRole("status");
-    expect(s.puts.at(-1)!.body).toEqual({ disturb: { routes: { decision: "inject", health: "web", "reminder:high": "web" } } });
+    // 整段回传：静默、合并窗口、豁免等不被抹掉。
+    expect(s.puts.at(-1)!.body).toEqual({ disturb: { routes: { decision: "inject", health: "web", "reminder:high": "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 20, mutes: [] } });
 
     const m = await card("材料写入策略");
     await userEvent.selectOptions(m.getByLabelText("未登记 kind 的默认策略"), "direct");
@@ -181,6 +182,45 @@ describe("策略与人格设置页", () => {
     await (await card("人格")).findByRole("status");
     expect(d.getByLabelText("打扰路由类别 3")).toHaveValue("wake"); // 未保存的草稿仍在
     expect(s.doc.disturb.routes).toEqual({ decision: "inject", health: "web" });
+  });
+
+  it("ACT-DLV-16/24: 在 Web 设置日上限与静音并保存", async () => {
+    const s = server();
+    mount(s.impl);
+    const d = await card("打扰策略");
+    await userEvent.clear(d.getByLabelText("日上限"));
+    await userEvent.type(d.getByLabelText("日上限"), "3");
+    await userEvent.click(d.getByRole("button", { name: "添加静音" }));
+    await userEvent.selectOptions(d.getByLabelText("静音1 范围"), "project");
+    await userEvent.type(d.getByLabelText("静音1 id"), "acc-home");
+    await save("打扰策略");
+    await d.findByRole("status");
+    expect(s.puts.at(-1)!.body.disturb).toMatchObject({ daily_cap: 3, mutes: [{ scope: "project", id: "acc-home" }], merge_window_sec: 1800 });
+    expect(s.doc.disturb.mutes).toEqual([{ scope: "project", id: "acc-home" }]);
+
+    await userEvent.type(d.getByLabelText("静音1 到期"), "2030-01-01T10:00");
+    await save("打扰策略");
+    await d.findByRole("status");
+    expect(s.doc.disturb.mutes[0].until).toBe(new Date("2030-01-01T10:00").toISOString());
+
+    await userEvent.click(d.getByRole("button", { name: "删除静音 1" }));
+    await userEvent.clear(d.getByLabelText("日上限"));
+    await userEvent.type(d.getByLabelText("日上限"), "0");
+    await save("打扰策略");
+    await d.findByRole("status");
+    expect(s.doc.disturb).toMatchObject({ daily_cap: 0, mutes: [] });
+  });
+
+  it("日上限不是非负整数时在本地提示，不发请求", async () => {
+    const s = server();
+    mount(s.impl);
+    const d = await card("打扰策略");
+    const before = s.puts.length;
+    await userEvent.clear(d.getByLabelText("日上限"));
+    await userEvent.type(d.getByLabelText("日上限"), "-2");
+    await save("打扰策略");
+    expect(await d.findByRole("alert")).toHaveTextContent("日上限");
+    expect(s.puts.length).toBe(before);
   });
 
   it("同一 map 内重复的键在本地提示，不发请求", async () => {

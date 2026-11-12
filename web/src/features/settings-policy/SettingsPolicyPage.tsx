@@ -170,12 +170,47 @@ export function SettingsPolicyPage() {
   );
 }
 
+interface Mute { scope: string; id: string; until?: string }
+const MUTE_SCOPES = ["source", "project", "item"];
+const pad = (n: number) => String(n).padStart(2, "0");
+const toLocalInput = (iso?: string) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+// 保存时带上整段 disturb：PUT 替换整段，只发 routes 会抹掉静默、合并窗口、豁免和推迟判定。
 function DisturbCard({ doc, save }: { doc: Doc; save: Save }) {
   const [rows, setRows] = useDraft(doc.disturb, () => rowsOf(doc.disturb.routes));
+  const [cap, setCap] = useDraft(doc.disturb, () => String(doc.disturb.daily_cap ?? 20));
+  const [mutes, setMutes] = useDraft(doc.disturb, () => ((doc.disturb.mutes ?? []) as Mute[]).map((m) => [m.scope, m.id, toLocalInput(m.until)]));
+  const setMute = (i: number, j: number, v: string) => setMutes(mutes.map((r, n) => (n === i ? r.map((x, m) => (m === j ? v : x)) : r)));
   return (
-    <Card title="打扰策略" onSave={() => save("policy", { disturb: { routes: toMap(rows, "打扰策略") } })}>
+    <Card title="打扰策略" onSave={() => {
+      const n = Number(cap);
+      if (cap.trim() === "" || !Number.isInteger(n) || n < 0) return Promise.reject(new Error("日上限必须是不小于 0 的整数（0 表示不限）"));
+      const list: Mute[] = mutes
+        .filter(([, id]) => id.trim())
+        .map(([scope, id, until]) => ({ scope, id: id.trim(), ...(until ? { until: new Date(until).toISOString() } : {}) }));
+      return save("policy", { disturb: { ...doc.disturb, routes: toMap(rows, "打扰策略"), daily_cap: n, mutes: list } });
+    }}>
       <p className="sub">键为投递类别，或「类别:优先级」（后者优先）；值为路由。</p>
       <Rows label="打扰路由" keyLabel="类别" valueLabel="路由" rows={rows} onChange={setRows} />
+      <label>日上限（每个自然日经渠道推送的提醒条数，0 表示不限）
+        <input type="number" min={0} aria-label="日上限" value={cap} onChange={(e) => setCap(e.target.value)} />
+      </label>
+      <p className="sub">静音：被静音的来源、项目或事项的提醒只留 Web 未读，决策仍进待办；到期时间为空表示一直静音。</p>
+      {mutes.map((m, i) => (
+        <div key={i} role="group" aria-label={`静音 ${i + 1}`} className="kv-row">
+          <select aria-label={`静音${i + 1} 范围`} value={m[0]} onChange={(e) => setMute(i, 0, e.target.value)}>
+            {MUTE_SCOPES.map((o) => <option key={o}>{o}</option>)}
+          </select>
+          <input aria-label={`静音${i + 1} id`} placeholder="id" value={m[1]} onChange={(e) => setMute(i, 1, e.target.value)} />
+          <input type="datetime-local" aria-label={`静音${i + 1} 到期`} value={m[2]} onChange={(e) => setMute(i, 2, e.target.value)} />
+          <button type="button" aria-label={`删除静音 ${i + 1}`} onClick={() => setMutes(mutes.filter((_, n) => n !== i))}>删除</button>
+        </div>
+      ))}
+      <button type="button" onClick={() => setMutes([...mutes, [MUTE_SCOPES[0], "", ""]])}>添加静音</button>
     </Card>
   );
 }

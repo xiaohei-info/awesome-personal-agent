@@ -69,6 +69,9 @@ func setup(t *testing.T, drafter ...Drafter) *env {
 	if err := decisions.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
+	if err := projects.Register(e.x); err != nil {
+		t.Fatal(err)
+	}
 	e.q = delivery.New(delivery.Options{Now: now, UnclaimedAfter: 5 * time.Minute, Lease: 24 * time.Hour})
 	e.a = New(Options{Queue: e.q, Now: now})
 	if len(drafter) > 0 {
@@ -883,5 +886,184 @@ func TestSystemCloseSupersedesInsteadOfAcknowledging(t *testing.T) {
 	})
 	if got := e.get("decision:" + id + ":" + versionOf(e, id, 0)); got.State != domain.DeliverySuperseded {
 		t.Fatalf("system close state = %s, want superseded", got.State)
+	}
+}
+
+// ---- 日上限与静音（ACT-DLV-17..28、ACT-DGA-12） ----
+
+// dueReminder 建一个截止已到的事项并跑一轮，产生一条普通提醒。
+func (e *env) dueReminder(extra map[string]any) string {
+	e.t.Helper()
+	in := map[string]any{"deadline": e.now.Add(5 * time.Second)}
+	for k, v := range extra {
+		in[k] = v
+	}
+	id := e.item(in)
+	e.advance(31 * time.Second)
+	return id
+}
+
+func (e *env) drain(route string) (ds []domain.Delivery) {
+	for d := e.claim(route); d != nil; d = e.claim(route) {
+		ds = append(ds, *d)
+	}
+	return
+}
+
+func TestDailyCapKeepsOverflowInWebWithOneNotice(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(func(p *policy.Policy) { p.Disturb.DailyCap, p.Disturb.MergeWindowSec = 3, 0 })
+	var ids []string
+	for i := 0; i < 5; i++ {
+		ids = append(ids, e.dueReminder(nil))
+	}
+	got := e.drain("channel:chan")
+	if len(got) != 4 {
+		t.Fatalf("want 3 reminders + 1 notice on the channel, got %d: %+v", len(got), got)
+	}
+	notices := 0
+	for _, d := range got {
+		if strings.HasPrefix(d.ID, "capnotice:") {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("exactly one notice expected, got %d", notices)
+	}
+	unread := e.unread()
+	if len(unread) != 2 || unread[0].Item != ids[3] || unread[1].Item != ids[4] || unread[0].Suppressed != "daily_cap" {
+		t.Fatalf("overflow reminders must be in Web unread: %+v", unread)
+	}
+}
+
+func TestDailyCapExemptsInjectionHealthWebOnlyAndNearDeadline(t *testing.T) {
+	e := setup(t)
+	e.policy(func(p *policy.Policy) {
+		p.Disturb.DailyCap, p.Disturb.MergeWindowSec, p.Disturb.QuietExempt = 1, 0, true
+		p.Disturb.Routes["reminder:normal"], p.Disturb.Routes["decision"] = "inject", "chan"
+		p.Disturb.Routes["reminder:high"] = "chan"
+		p.WebOnly.Rules = []policy.WebOnlyRule{{Tag: "money", Category: policy.CategoryFunds}}
+	})
+	e.dueReminder(map[string]any{"priority": "normal"}) // 注入
+	e.dueReminder(map[string]any{"priority": "normal"})
+	if n := len(e.injectable()); n != 2 {
+		t.Fatalf("injections: %d", n)
+	}
+	e.dueReminder(map[string]any{"priority": "high"}) // 渠道额度仍在
+	if d := e.claim("channel:chan"); d == nil {
+		t.Fatal("injections must not consume the cap")
+	}
+	e.dueReminder(map[string]any{"priority": "high"}) // 超限
+	if d := e.claim("channel:chan"); d == nil || !strings.HasPrefix(d.ID, "capnotice:") {
+		t.Fatalf("expected the notice, got %+v", d)
+	}
+	web := e.item(map[string]any{"tags": []string{"money"}})
+	e.ask(web, nil)
+	near := e.item(nil)
+	e.ask(near, map[string]any{"deadline": e.now.Add(10 * time.Minute)})
+	far := e.item(nil)
+	e.ask(far, map[string]any{"deadline": e.now.Add(72 * time.Hour)})
+	got := map[string]domain.Delivery{}
+	for _, d := range e.drain("channel:chan") {
+		got[d.Item] = d
+	}
+	if _, ok := got[web]; !ok {
+		t.Error("web_only decision must bypass the cap")
+	}
+	if _, ok := got[near]; !ok {
+		t.Error("near-deadline decision must bypass the cap when exemption is on")
+	}
+	if _, ok := got[far]; ok {
+		t.Error("far-deadline decision must respect the cap")
+	}
+}
+
+func (e *env) project(name string) string {
+	e.t.Helper()
+	var out struct{ ID string }
+	_ = json.Unmarshal(e.do(owner, "project.create", map[string]any{"name": name}), &out)
+	return out.ID
+}
+
+func TestMuteByProjectAndItemKeepsDecisionInInbox(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(func(p *policy.Policy) { p.Disturb.MergeWindowSec = 0 })
+	homeP, workP := e.project("home"), e.project("work")
+	e.policy(func(p *policy.Policy) { p.Disturb.Mutes = []policy.Mute{{Scope: policy.MuteProject, ID: homeP}} })
+	home2 := e.dueReminder(map[string]any{"project": homeP})
+	work2 := e.dueReminder(map[string]any{"project": workP})
+	var pushed []string
+	for _, d := range e.drain("channel:chan") {
+		pushed = append(pushed, d.Item)
+	}
+	if len(pushed) != 1 || pushed[0] != work2 {
+		t.Fatalf("pushed %v", pushed)
+	}
+	for _, u := range e.unread() {
+		if u.Item == home2 && u.Suppressed == "muted" {
+			goto ask
+		}
+	}
+	t.Fatal("muted project's reminder must be in Web unread")
+ask:
+	id := e.item(map[string]any{"project": homeP})
+	e.ask(id, nil)
+	if e.phase(id) != domain.PhaseNeedsInput {
+		t.Fatal("muted object's decision must still wait for the owner")
+	}
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("muted decision must not be pushed: %+v", d)
+	}
+}
+
+func TestMuteExpiresAndGoesBackToChannel(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(func(p *policy.Policy) { p.Disturb.MergeWindowSec = 0 })
+	a := e.item(nil)
+	until := e.now.Add(2 * time.Minute)
+	e.policy(func(p *policy.Policy) { p.Disturb.Mutes = []policy.Mute{{Scope: policy.MuteItem, ID: a, Until: &until}} })
+	remind := func(kind string) {
+		e.update(func(tx *store.Tx) error {
+			it, err := items.Get(tx, a)
+			if err != nil {
+				return err
+			}
+			return e.a.Remind(tx, it, kind, e.now, "ping", "s")
+		})
+	}
+	remind("k1")
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("pushed before mute expired: %+v", d)
+	}
+	e.advance(3 * time.Minute)
+	remind("k2")
+	if d := e.claim("channel:chan"); d == nil || d.Item != a {
+		t.Fatalf("not pushed after mute expired: %+v", d)
+	}
+}
+
+func TestMutedMemberLeavesTheDigest(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(func(p *policy.Policy) { p.Disturb.MergeWindowSec = 120 })
+	homeP := e.project("home")
+	muted := e.dueReminder(map[string]any{"priority": "low", "project": homeP})
+	e.dueReminder(map[string]any{"priority": "low"})
+	e.dueReminder(map[string]any{"priority": "low"})
+	e.policy(func(p *policy.Policy) { p.Disturb.Mutes = []policy.Mute{{Scope: policy.MuteProject, ID: homeP}} })
+	e.advance(3 * time.Minute)
+	got := e.drain("channel:chan")
+	if len(got) != 1 || !strings.Contains(got[0].Content.Title, "2") {
+		t.Fatalf("digest should hold only the 2 unmuted: %+v", got)
+	}
+	found := false
+	for _, u := range e.unread() {
+		found = found || u.Item == muted
+	}
+	if !found {
+		t.Fatal("muted member must be in Web unread")
 	}
 }

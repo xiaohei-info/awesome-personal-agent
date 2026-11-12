@@ -119,7 +119,7 @@ func notFound(id string) error {
 	return domain.NewError(domain.CodeNotFound, "delivery "+id+" not found", "check the delivery id")
 }
 
-const cols = "id, item, run, class, route, content, version, state, attempts, next_attempt_at, external_ref"
+const cols = "id, item, run, class, route, content, version, state, attempts, next_attempt_at, external_ref, suppressed"
 
 func ns(t time.Time) int64 { return t.UnixNano() }
 
@@ -145,7 +145,7 @@ func (q *Queue) list(tx *store.Tx, where string, args ...any) ([]domain.Delivery
 			class, content, st string
 			attempts, next     int64
 		)
-		if err := r.Scan(&d.ID, &d.Item, &d.Run, &class, &d.Route, &content, &d.Version, &st, &attempts, &next, &d.ExternalRef); err != nil {
+		if err := r.Scan(&d.ID, &d.Item, &d.Run, &class, &d.Route, &content, &d.Version, &st, &attempts, &next, &d.ExternalRef, &d.Suppressed); err != nil {
 			return err
 		}
 		d.Class, d.State, d.Attempts = domain.DeliveryClass(class), domain.DeliveryState(st), int(attempts)
@@ -223,9 +223,9 @@ func (q *Queue) Create(tx *store.Tx, d domain.Delivery) (domain.Delivery, bool, 
 		state = domain.DeliveryFallbackWeb
 	}
 	if _, err := tx.Exec(`INSERT INTO delivery_delivery
-		(id, item, run, class, route, content, version, state, next_attempt_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.ID, d.Item, d.Run, string(d.Class), d.Route, string(content), d.Version, string(state), now, now); err != nil {
+		(id, item, run, class, route, content, version, state, next_attempt_at, created_at, suppressed)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.Item, d.Run, string(d.Class), d.Route, string(content), d.Version, string(state), now, now, d.Suppressed); err != nil {
 		return d, false, err
 	}
 	got, err := q.Get(tx, d.ID)

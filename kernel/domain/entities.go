@@ -157,6 +157,8 @@ type Delivery struct {
 	NextAttemptAt *time.Time      `json:"next_attempt_at,omitempty"`
 	ExternalRef   string          `json:"external_ref,omitempty"`
 	Injections    []Injection     `json:"injections,omitempty"`
+	// Suppressed 记被日上限（daily_cap）或静音（muted）压成"只留 Web 未读"的原因；为空表示没被压。
+	Suppressed string `json:"suppressed,omitempty"`
 }
 
 // ---- Run（§6.11） ----

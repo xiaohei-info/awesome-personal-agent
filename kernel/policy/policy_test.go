@@ -329,3 +329,30 @@ func TestDisturbQuietAndMergeWindowAreValidated(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// 升级前写下的策略文档没有 daily_cap：读出来取缺省 20（已有部署升级后日上限即生效），静音为空列表。
+func TestStoredDocWithoutDailyCapDefaultsTo20(t *testing.T) {
+	doc := func(cap string) string {
+		b, _ := json.Marshal(Default())
+		var m map[string]map[string]any
+		_ = json.Unmarshal(b, &m)
+		delete(m["disturb"], "daily_cap")
+		delete(m["disturb"], "mutes")
+		if cap != "" {
+			m["disturb"]["daily_cap"] = json.RawMessage(cap)
+		}
+		out, _ := json.Marshal(m)
+		return string(out)
+	}
+	p, err := decode(doc(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Disturb.DailyCap != DefaultDailyCap || p.Disturb.Mutes == nil || len(p.Disturb.Mutes) != 0 {
+		t.Fatalf("%+v", p.Disturb)
+	}
+	q, err := decode(doc("0"))
+	if err != nil || q.Disturb.DailyCap != 0 {
+		t.Fatalf("explicit 0 must stay unlimited: %v %+v", err, q.Disturb)
+	}
+}

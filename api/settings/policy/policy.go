@@ -59,10 +59,24 @@ func sect[T any](key string, field func(*kpolicy.Policy) *T) section {
 	}
 }
 
+// disturbSection 与 sect 相同，但请求体缺 daily_cap 时取缺省 20，而不是被当成"不限"。
+var disturbSection = section{
+	key: "disturb",
+	get: func(p *kpolicy.Policy) any { return p.Disturb },
+	set: func(p *kpolicy.Policy, raw json.RawMessage) error {
+		v := kpolicy.Disturb{DailyCap: kpolicy.DefaultDailyCap}
+		if err := strictDecode(raw, &v); err != nil {
+			return err
+		}
+		p.Disturb = v
+		return nil
+	},
+}
+
 var (
 	policySections = []section{
 		sect("web_only", func(p *kpolicy.Policy) *kpolicy.WebOnly { return &p.WebOnly }),
-		sect("disturb", func(p *kpolicy.Policy) *kpolicy.Disturb { return &p.Disturb }),
+		disturbSection,
 		sect("material_write", func(p *kpolicy.Policy) *kpolicy.MaterialWrite { return &p.MaterialWrite }),
 		sect("persona", func(p *kpolicy.Policy) *string { return &p.Persona }),
 		sect("channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
