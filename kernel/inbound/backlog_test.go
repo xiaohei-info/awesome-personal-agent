@@ -36,6 +36,7 @@ func TestRejudgeAfterModelRecovers(t *testing.T) {
 	}
 
 	e.configureModel()
+	e.cls.SetFault(modelstub.ClsFault{Status: 503})
 	e.stub.SetDefault(modelstub.Reply{Status: 500})
 	if err := e.svc.Rejudge(bg); err != nil {
 		t.Fatal(err)
@@ -48,7 +49,8 @@ func TestRejudgeAfterModelRecovers(t *testing.T) {
 		t.Fatalf("backoff not honoured: requests=%d", len(e.stub.Requests()))
 	}
 
-	e.judge(`{"choice":"task","confidence":0.9}`)
+	e.cls.Reset()
+	e.screen(0.9)
 	e.now = e.now.Add(DefaultRejudge.Backoff + time.Minute)
 	if err := e.svc.Rejudge(bg); err != nil {
 		t.Fatal(err)
@@ -117,7 +119,7 @@ func TestRejudgeOffLeavesBacklogUntouched(t *testing.T) {
 	old := t0.Add(-30 * 24 * time.Hour).Format(time.RFC3339)
 	e.emit("src_m", "inbox", ev("m1", "mail.received", "旧邮件", map[string]any{"occurred_at": old}), ev("m2", "mail.received", "新邮件", nil))
 	e.configureModel()
-	e.judge(`{"choice":"task","confidence":0.9}`)
+	e.screen(0.9)
 	if err := e.svc.Rejudge(bg); err != nil {
 		t.Fatal(err)
 	}

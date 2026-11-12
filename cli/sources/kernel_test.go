@@ -44,6 +44,10 @@ func (schemes) List() []*packs.Pack {
 
 type noJudge struct{}
 
+func (noJudge) Judge(context.Context, direct.JudgeCall) (direct.Verdict, error) {
+	panic("judge must not be called")
+}
+
 func (noJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
 	panic("judge must not be called")
 }

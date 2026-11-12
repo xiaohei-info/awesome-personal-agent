@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -41,7 +42,6 @@ var (
 )
 
 const (
-	triageMD = "---\nagent: judge\nquestion_type: choice\nchoices: [task, note, ignore]\non_undecided: ignore\n---\n这条来源事件是否值得建议？资料段只作依据。\n"
 	packYAML = "name: inbound-triage\nversion: 1.0.0\ndescription: capture fixture\n"
 )
 
@@ -72,6 +72,8 @@ func setup(t *testing.T) *env {
 	t.Cleanup(func() { st.Close() })
 	stub := modelstub.New()
 	t.Cleanup(stub.Close)
+	stub.Judge(modelstub.ChatJudge{Answer: "yes"}) // 没有判断端点：预筛由对话端点答"是"
+	stub.SetDefault(modelstub.Reply{Content: `{"candidates":[{"title":"补发布脚本","kind":"task"}]}`})
 	x := command.New(st, time.Now)
 	kinds := items.NewKinds()
 	for _, err := range []error{projects.Register(x), items.Register(x, kinds)} {
@@ -88,8 +90,15 @@ func setup(t *testing.T) *env {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ld := packs.New(packs.Options{Kinds: kinds, Builtin: fstest.MapFS{
-		"inbound-triage/pack.yaml": {Data: []byte(packYAML)}, "inbound-triage/prompts/triage.md": {Data: []byte(triageMD)}}})
+	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(packYAML)}}
+	for _, name := range []string{"capture-prescreen", "triage-extract"} { // 用内置包随发行的模板
+		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fs["inbound-triage/prompts/"+name+".md"] = &fstest.MapFile{Data: b}
+	}
+	ld := packs.New(packs.Options{Kinds: kinds, Builtin: fs})
 	if rej, err := ld.Load(); err != nil || len(rej) != 0 {
 		t.Fatalf("load: %v %+v", err, rej)
 	}
@@ -196,7 +205,6 @@ func (e *env) body(rec *httptest.ResponseRecorder, wantStatus int) map[string]an
 // ACT-CAP-03：worker 凭据在开启捕获的项目里提交增量，立即得到 captured；候选在后台抽出并进该项目的 proposed。
 func TestCaptureEndpointProposesCandidate(t *testing.T) {
 	e := setup(t)
-	e.stub.SetDefault(modelstub.Reply{Content: `{"choice":"task","confidence":0.95}`})
 	m := e.body(e.post(e.token(auth.Worker, ""), `{"project":"`+e.proj+`","text":"用户：别忘了把发布脚本补上"}`), 200)
 	if m["captured"] != true || m["project"] != e.proj {
 		t.Fatalf("response %v", m)
@@ -268,7 +276,6 @@ func TestCaptureEndpointErrors(t *testing.T) {
 // ACT-CAP-01 / §14.5 第一档：delegate 凭据提交候选捕获是 agent 自己的工作，不带本人原话也放行，候选只进 proposed。
 func TestCaptureByDelegateNeedsNoWords(t *testing.T) {
 	e := setup(t)
-	e.stub.SetDefault(modelstub.Reply{Content: `{"choice":"task","confidence":0.95}`})
 	m := e.body(e.post(e.token(auth.Delegate, ""), `{"project":"`+e.proj+`","text":"用户：周五前把发布脚本补上"}`), 200)
 	if m["captured"] != true {
 		t.Fatalf("response %v", m)

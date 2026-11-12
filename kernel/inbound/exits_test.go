@@ -63,7 +63,7 @@ func TestWhereEqAndIn(t *testing.T) {
 			t.Errorf("%s: %s, want %s", id, got, disp)
 		}
 	}
-	if n := len(e.stub.Requests()); n != 2 { // 只有 w2、w6 经过判断
+	if n := questions(e); n != 2 { // 只有 w2、w6 经过判断
 		t.Fatalf("model called %d times", n)
 	}
 }
@@ -95,7 +95,7 @@ func TestScreenTemplateOverrideAndJudgeAlias(t *testing.T) {
 			templates = append(templates, got)
 		}
 	}
-	if len(templates) != 2 || templates[0] != "acc-screen" || templates[1] != "triage" {
+	if len(templates) != 2 || templates[0] != "acc-screen" || templates[1] != "triage-screen" {
 		t.Fatalf("templates %v", templates)
 	}
 }
@@ -161,11 +161,12 @@ func TestExtractAndAlertExitsRouteToHandlers(t *testing.T) {
 	}
 }
 
-// 没有注入处理器时 extract 出口报真实错误，事件保持 pending，不假装处理。
+// 没有注入处理器时 alert 出口报真实错误，事件保持 pending，不假装处理（extract 出口由本包内置处理）。
 func TestExitWithoutHandlerFailsLoudly(t *testing.T) {
 	e := newEnv(t, true)
 	e.wantErr = true
-	e.emitRaw("src_x", "exits", ev("c1", "x.chat", "群聊", nil))
+	e.svc.o.Series = fixedSeries{prev: 80}
+	e.emitRaw("src_x", "exits", ev("c1", "x.metric", "磁盘", map[string]any{"metrics": map[string]float64{"value": 92}}))
 	select {
 	case err := <-e.errs:
 		if !strings.Contains(err.Error(), "no handler is configured") {
@@ -184,8 +185,12 @@ type recorder struct {
 	on    func(template string)
 }
 
-func (r recorder) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
+func (r recorder) Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict, error) {
 	r.on(c.Template)
+	return r.inner.Judge(ctx, c)
+}
+
+func (r recorder) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
 	return r.inner.Do(ctx, c)
 }
 
@@ -194,6 +199,13 @@ type fixedSeries struct{ prev float64 }
 
 func (f fixedSeries) Previous(domain.SourceEvent, string) (float64, bool, error) {
 	return f.prev, true, nil
+}
+
+func questions(e *env) (n int) {
+	for _, b := range e.cls.Batches() {
+		n += b.Questions
+	}
+	return n
 }
 
 func ruleByID(t *testing.T, e *env, id string) packs.SourceRule {
