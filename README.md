@@ -1,5 +1,7 @@
 # awesome-personal-agent（APA）
 
+Developed with [oh-my-multica](https://github.com/xiaohei-info/oh-my-multica)
+
 **让 agent harness 具备主观能动性，成为你真正的个人助手。**
 
 APA 是架在 agent harness 之上的开源、自部署的一层。harness 指运行 agent 的工具，如 Hermes、Claude Code、Codex CLI。
@@ -189,5 +191,7 @@ APA 是独立的开源项目，与上述产品及其厂商没有关联。
 提交信息遵循 Conventional Commits。
 
 完整设计在 [`docs/`](docs/README.md)，给 coding agent 的规则在 [`AGENTS.md`](AGENTS.md)。读懂本页不需要它们。
+
+本项目由 [oh-my-multica](https://github.com/xiaohei-info/oh-my-multica) 编排开发。[`.omac/`](.omac/) 是开发编排记录：任务拆解、验收清单和各节点的运行状态，留作过程证据，不参与 APA 运行。
 
 [MIT](LICENSE)
