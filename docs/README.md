@@ -25,6 +25,10 @@ APA 的设计已定稿，尚无代码。首版支持 Hermes，接口按多 harne
 | 入站流水线 | [HTML](diagrams/inbound-pipeline.html) · [PNG](diagrams/inbound-pipeline.png) | §9 |
 | 后台执行 | [HTML](diagrams/background-execution.html) · [PNG](diagrams/background-execution.png) | §13.6 |
 
+## 界面截图
+
+[`screenshots/`](screenshots/) 存放 README 引用的 Web 中台截图，取自临时实例的演示数据。
+
 ## 阅读顺序
 
 | 读者 | 建议顺序 |

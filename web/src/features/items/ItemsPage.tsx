@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Route, Routes, useParams } from "react-router-dom";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 import { MATERIAL_RELATION_LABELS, isMaterialId } from "../../app/relations";
 import { AttachedMessages } from "../attached-messages";
 
@@ -38,7 +39,7 @@ const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.n
 /** 每个变更的操作者徽章：谁、从哪个入口。 */
 export function ActorBadge({ actor }: { actor: Step["actor"] }) {
   return (
-    <span aria-label="操作者" data-actor={actor.type}>
+    <span aria-label="操作者" data-actor={actor.type} className="badge plain">
       {[ACTOR[actor.type] ?? actor.type, actor.via, actor.principal].join(" · ")}
     </span>
   );
@@ -73,7 +74,8 @@ function ItemList() {
 
   return (
     <main>
-      <h2>事项</h2>
+      <PageHead>事项</PageHead>
+      <div className="filters">
       <label>
         阶段筛选
         <select value={phase} onChange={(e) => setPhase(e.target.value)}>
@@ -88,15 +90,16 @@ function ItemList() {
           {tags.map((t) => <option key={t}>{t}</option>)}
         </select>
       </label>
+      </div>
       {error && <p role="alert">{error}</p>}
-      {items && !shown.length && !error && <p>没有符合条件的事项</p>}
-      <ul aria-label="事项列表">
+      {items && !shown.length && !error && <p className="empty">没有符合条件的事项</p>}
+      <ul aria-label="事项列表" className="rows">
         {shown.map((i) => (
           <li key={i.id}>
-            <Link to={i.id}>{i.title}</Link> · {i.phase}
-            {i.status_label ? ` · ${i.status_label}` : ""}
-            {i.tags?.length ? ` · ${i.tags.map((t) => "#" + t).join(" ")}` : ""}
-            {i.deadline ? ` · 截止 ${new Date(i.deadline).toLocaleString()}` : ""}
+            <Link to={i.id}>{i.title}</Link> <span className="badge plain">{i.phase}</span>
+            <span className="sub">
+              {[i.status_label, i.tags?.map((t) => "#" + t).join(" "), i.deadline && `截止 ${new Date(i.deadline).toLocaleString()}`].filter(Boolean).join(" · ")}
+            </span>
           </li>
         ))}
       </ul>
@@ -140,30 +143,33 @@ function ItemDetail() {
     }
   };
 
-  if (loadErr) return <p role="alert">{loadErr}</p>;
-  if (!d) return <p>加载中…</p>;
+  if (loadErr) return <main><p role="alert">{loadErr}</p></main>;
+  if (!d) return <main><p role="status">加载中…</p></main>;
   const { item } = d;
   const path = "/items/" + encodeURIComponent(id);
   const ifMatch = { "If-Match": String(item.version) };
 
   return (
     <main>
-      <p><Link to="..">← 事项列表</Link></p>
-      <h2>{item.title}</h2>
-      <p>{`阶段：${item.phase}`}</p>
-      <p>{`版本：${item.version}`}</p>
-      <p>{`状态标签：${item.status_label || "未设置"}`}</p>
-      <p>{item.deadline ? `截止：${new Date(item.deadline).toLocaleString()}` : "截止：未设置"}</p>
-      {item.tags?.length ? <p>标签：{item.tags.join("、")}</p> : null}
+      <p className="eyebrow"><Link to="..">← 事项列表</Link></p>
+      <h1>{item.title}</h1>
+      <div className="panel facts">
+        <p>{`阶段：${item.phase}`}</p>
+        <p>{`版本：${item.version}`}</p>
+        <p>{`状态标签：${item.status_label || "未设置"}`}</p>
+        <p>{item.deadline ? `截止：${new Date(item.deadline).toLocaleString()}` : "截止：未设置"}</p>
+        {item.tags?.length ? <p>标签：{item.tags.join("、")}</p> : null}
+      </div>
       {actErr && <p role="alert">{actErr}</p>}
 
+      <h2>编辑</h2>
       <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
       <DeadlineForm key={"d" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { deadline: v }, ifMatch))} />
       <TransitionForm key={"t" + item.version} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />
 
       <section aria-label="关联">
-        <h3>关系</h3>
-        <ul aria-label="关系">
+        <h2>关系</h2>
+        <ul aria-label="关系" className="rows">
           {d.relations.map((r, n) => {
             const out = r.from === item.id;
             const other = out ? r.to : r.from;
@@ -178,8 +184,8 @@ function ItemDetail() {
       <AttachedMessages itemId={id} />
 
       <section aria-label="变更">
-        <h3>时间线</h3>
-        <ol aria-label="时间线">
+        <h2>时间线</h2>
+        <ol aria-label="时间线" className="rows">
           {d.steps.map((s) => (
             <li key={s.seq}>
               <ActorBadge actor={s.actor} /> <strong>{s.type}</strong> <time dateTime={s.at}>{new Date(s.at).toLocaleString()}</time>
@@ -195,7 +201,7 @@ function ItemDetail() {
 function LabelForm({ item, onSave }: { item: Item; onSave: (v: string) => void }) {
   const [v, setV] = useState(item.status_label ?? "");
   return (
-    <form onSubmit={(e) => { e.preventDefault(); onSave(v); }}>
+    <form className="panel" onSubmit={(e) => { e.preventDefault(); onSave(v); }}>
       <label>状态标签 <input value={v} onChange={(e) => setV(e.target.value)} /></label>
       <button type="submit">保存状态标签</button>
     </form>
@@ -206,10 +212,12 @@ function LabelForm({ item, onSave }: { item: Item; onSave: (v: string) => void }
 function DeadlineForm({ item, onSave }: { item: Item; onSave: (v: string | null) => void }) {
   const [v, setV] = useState("");
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (v) onSave(new Date(v).toISOString()); }}>
+    <form className="panel" onSubmit={(e) => { e.preventDefault(); if (v) onSave(new Date(v).toISOString()); }}>
       <label>截止 <input type="datetime-local" value={v} onChange={(e) => setV(e.target.value)} /></label>
-      <button type="submit" disabled={!v}>设置截止</button>
-      <button type="button" disabled={!item.deadline} onClick={() => onSave(null)}>清除截止</button>
+      <div className="actions">
+        <button type="submit" disabled={!v}>设置截止</button>
+        <button type="button" disabled={!item.deadline} onClick={() => onSave(null)}>清除截止</button>
+      </div>
     </form>
   );
 }
@@ -222,6 +230,7 @@ function TransitionForm({ onSubmit }: { onSubmit: (b: Record<string, unknown>) =
   const [wRef, setWRef] = useState("");
   return (
     <form
+      className="panel"
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit({ to, reason, ...(evidence ? { evidence } : {}), ...(to === "waiting" && wRef ? { waiting_on: { kind: wKind, ref: wRef } } : {}) });
@@ -245,7 +254,7 @@ function RelateForm({ others, onSubmit }: { others: Item[]; onSubmit: (b: { to: 
   const [to, setTo] = useState("");
   const [type, setType] = useState("relates");
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (to) onSubmit({ to, type }); }}>
+    <form className="panel" onSubmit={(e) => { e.preventDefault(); if (to) onSubmit({ to, type }); }}>
       <label>关联事项 <select value={to} onChange={(e) => setTo(e.target.value)}><option value="">选择…</option>{others.map((o) => <option key={o.id} value={o.id}>{o.id}</option>)}</select></label>
       <label>关系类型 <select value={type} onChange={(e) => setType(e.target.value)}>{REL_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
       <button type="submit" disabled={!to}>建立关联</button>

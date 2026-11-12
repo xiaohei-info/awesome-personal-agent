@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../../app/api";
 import { MATERIAL_RELATION_LABELS } from "../../app/relations";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 import { HostedMaterial } from "../materials-hosted/HostedMaterial";
 
 // 形状对应 GET/POST /v1/materials、GET /v1/materials/{id}[/revisions]、POST /v1/materials/{id}/revisions|revert、
@@ -143,10 +144,10 @@ export function MaterialsPage() {
 
   return (
     <main>
-      <h2>材料</h2>
+      <PageHead>材料</PageHead>
       {error && <div role="alert">{error}</div>}
       {notice && <div role="status">{notice}</div>}
-      <div>
+      <div className="filters">
         <label>
           按项目筛选
           <select value={project} onChange={(e) => setProject(e.target.value)}>
@@ -175,8 +176,10 @@ export function MaterialsPage() {
           关联事项
           <input value={item} onChange={(e) => setItem(e.target.value)} />
         </label>
-        <button onClick={search}>搜索</button>
-        <button onClick={() => setCreating(true)}>新建材料</button>
+        <div className="actions">
+          <button onClick={search}>搜索</button>
+          <button onClick={() => setCreating(true)}>新建材料</button>
+        </div>
       </div>
 
       {creating && (
@@ -193,26 +196,28 @@ export function MaterialsPage() {
       )}
 
       {hits ? (
-        <ul>
+        <ul className="rows">
           {hits.map((h) => (
             <li key={h.id} aria-label={h.id}>
-              <button onClick={() => setSelected(h.id)}>{h.title}</button> {h.kind} · {h.project || "全局"} · {h.hosted ? "托管型" : "自有型"}
-              {h.path && <> · {h.path}</>}
-              {h.snippet && <p>{h.snippet}</p>}
+              <button className="link" onClick={() => setSelected(h.id)}>{h.title}</button> <span className="sub">{h.kind} · {h.project || "全局"} · {h.hosted ? "托管型" : "自有型"}
+              {h.path && <> · {h.path}</>}</span>
+              {h.snippet && <p className="sub">{h.snippet}</p>}
             </li>
           ))}
-          {!hits.length && <p>没有命中</p>}
+          {!hits.length && <p className="empty">没有命中</p>}
         </ul>
       ) : (
         <>
-          {materials && !shown?.length && !error && <p>还没有材料</p>}
-          <ul>
-            {shown?.map((m) => (
-              <li key={m.id}>
-                <button onClick={() => setSelected(m.id)}>{m.title}</button> {m.kind} · {m.project || "全局"} · {m.location ? "托管型" : "自有型"}
-              </li>
-            ))}
-          </ul>
+          {materials && !shown?.length && !error && <p className="empty">还没有材料</p>}
+          {!!shown?.length && (
+            <ul className="rows">
+              {shown.map((m) => (
+                <li key={m.id}>
+                  <button className="link" onClick={() => setSelected(m.id)}>{m.title}</button> <span className="sub">{m.kind} · {m.project || "全局"} · {m.location ? "托管型" : "自有型"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </>
       )}
 
@@ -239,6 +244,7 @@ function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: s
   };
   return (
     <form
+      className="panel"
       aria-label="新建材料"
       onSubmit={(e) => {
         e.preventDefault();
@@ -276,7 +282,9 @@ function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: s
         修改原因
         <input value={f.reason} onChange={set("reason")} />
       </label>
-      <button type="submit">提交</button> <button type="button" onClick={onCancel}>取消</button>
+      <div className="actions">
+        <button type="submit">提交</button> <button type="button" onClick={onCancel}>取消</button>
+      </div>
     </form>
   );
 }
@@ -369,7 +377,7 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
   const confirm = (r: Revision, on_stale: string, ok: string) => run(() => api.post(`/revisions/${encodeURIComponent(r.id)}/confirm`, on_stale ? { on_stale } : {}), ok);
 
   return (
-    <section role="region" aria-label="材料详情">
+    <section role="region" aria-label="材料详情" className="panel">
       <h3>
         {m.title} <small>{m.kind} · {m.project || "全局"}</small>
       </h3>
@@ -382,11 +390,11 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
           {pending.map((r) => {
             const stale = r.based_on !== current;
             return (
-              <div key={r.id}>
-                <p>
+              <div key={r.id} className="proposal">
+                <p className="sub">
                   #{r.seq} · {r.actor.principal} · {r.reason}
                 </p>
-                {stale && <p>基线已变化：当前修订已不是此提议所基于的修订，请选择取舍。</p>}
+                {stale && <p role="note">基线已变化：当前修订已不是此提议所基于的修订，请选择取舍。</p>}
                 <Diff id={r.id} from={contentOf(m.current_rev)} to={r.content} />
                 {stale ? (
                   <>
@@ -411,18 +419,20 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
         修改原因
         <input value={reason} onChange={(e) => setReason(e.target.value)} />
       </label>
-      <button onClick={save}>保存修订</button>
+      <div className="actions">
+        <button className="primary" onClick={save}>保存修订</button>
+      </div>
 
       <section role="region" aria-label="版本列表">
         <h4>版本列表</h4>
-        <ul>
+        <ul className="rows">
           {d.revisions.map((r) => {
             const prev = d.revisions.find((x) => x.seq === r.seq - 1);
             const v = open[r.id];
             return (
               <li key={r.id}>
-                #{r.seq} · {r.state} · {r.actor.principal} · {r.reason}
-                {r.based_on && <> · 基于 {r.based_on}</>} · {r.at}{" "}
+                <span>#{r.seq} · {r.state} · {r.actor.principal} · {r.reason}
+                {r.based_on && <> · 基于 {r.based_on}</>} · {r.at}</span>{" "}
                 <button onClick={() => setOpen({ ...open, [r.id]: v === "diff" ? undefined! : "diff" })}>查看 diff</button>{" "}
                 <button onClick={() => setOpen({ ...open, [r.id]: v === "content" ? undefined! : "content" })}>查看内容</button>
                 {r.state === "superseded" && (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 GET /v1/items?kind=brief（spec.period、spec.sections[{project,body}]）、GET/POST /v1/instances、GET /v1/packs（附录 B.2、C.10）。
 // 简报与复盘都是 brief 事项（packs/review 写回 brief kind，以 spec.period 区分周期），本页不猜类型，统一按周期列出；分节与定时校验都由服务端与包负责，本页只展示并搬运输入。
@@ -17,7 +18,7 @@ function BriefCard({ b }: { b: Brief }) {
   return (
     <article aria-label={`简报 ${b.title}`}>
       <h4>{b.title}</h4>
-      <p>{[b.spec?.period, b.created_at && new Date(b.created_at).toLocaleString()].filter(Boolean).join(" · ")}</p>
+      <p className="meta">{[b.spec?.period, b.created_at && new Date(b.created_at).toLocaleString()].filter(Boolean).join(" · ")}</p>
       {!sections.length && <p>暂无分节内容</p>}
       {sections.map((s, i) => (
         <section key={i}>
@@ -74,25 +75,25 @@ export function BriefsPage() {
     }
   }
 
-  if (!briefs || !instances) return error ? <p role="alert">{error}</p> : <p>加载中…</p>;
+  if (!briefs || !instances) return <main>{error ? <p role="alert">{error}</p> : <p role="status">加载中…</p>}</main>;
 
   return (
     <main>
-      <h2>简报</h2>
+      <PageHead>简报</PageHead>
       {error && <p role="alert">{error}</p>}
-      {!briefs.length && <p>还没有简报</p>}
       <section aria-label="简报">
-        <h3>简报与复盘</h3>
+        <h2>简报与复盘</h2>
+        {!briefs.length && <p className="sub">还没有简报</p>}
         {briefs.map((b) => <BriefCard key={b.id} b={b} />)}
       </section>
       <section aria-label="实例管理">
-        <h3>定时实例</h3>
-        <ul aria-label="实例">
+        <h2>定时实例</h2>
+        <ul aria-label="实例" className={instances.length ? "rows" : "plain"}>
           {instances.map((i) => (
             <li key={i.id}>{i.id} · {i.pack} · {i.params.schedule ?? "—"}{i.params.projects?.length ? ` · ${i.params.projects.join("、")}` : ""}{i.enabled ? "" : "（已停用）"}</li>
           ))}
         </ul>
-        <form onSubmit={(e) => void create(e)}>
+        <form className="panel" onSubmit={(e) => void create(e)}>
           <label>能力包
             <select value={pack || packs[0] || ""} onChange={(e) => setPack(e.target.value)}>
               {packs.map((p) => <option key={p}>{p}</option>)}

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -109,6 +109,50 @@ describe("登录与导航框架", () => {
     expect(await screen.findByLabelText("口令")).toBeInTheDocument();
     expect(srv.calls.find((c) => c.path === "/v1/auth/logout")?.csrf).toBe("tok-1");
     expect(sessionStorage.getItem("apa.csrf")).toBeNull();
+  });
+
+  it("导航按分组显示，未声明分组的归到最后一组；数量为 0 或取不到时不显示", async () => {
+    sessionStorage.setItem("apa.csrf", "tok-1");
+    const srv = fakeServer();
+    srv.setValid();
+    mount(srv.impl, [
+      { ...feat("decisions", "决策待办", 1), group: "今天", count: async () => 3 },
+      { ...feat("proposals", "建议流", 2), group: "今天", count: async () => 0 },
+      { ...feat("items", "事项", 3), count: () => Promise.reject(new Error("down")) },
+    ]);
+    const nav = await screen.findByRole("navigation", { name: "主导航" });
+    expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["今天", "系统"]);
+    expect(await within(nav).findByRole("link", { name: "决策待办 3" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "建议流" })).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "事项" })).toBeInTheDocument();
+  });
+
+  it("⌘K / Ctrl+K 跳转面板：过滤、上下键选择、回车跳转，Esc 关闭并归还焦点", async () => {
+    mount(fakeServer().impl);
+    await signIn("correct-horse");
+    await screen.findByRole("heading", { name: "决策待办 页面" });
+    const jump = screen.getByRole("button", { name: "跳转到页面" });
+    jump.focus();
+
+    await userEvent.keyboard("{Control>}k{/Control}");
+    const dialog = await screen.findByRole("dialog", { name: "跳转" });
+    const input = within(dialog).getByRole("combobox", { name: "跳转到页面" });
+    expect(input).toHaveFocus();
+    const opts = within(dialog).getAllByRole("option");
+    expect(opts.map((o) => o.textContent)).toEqual(["决策待办 系统", "事项 系统"]);
+    expect(opts[0]).toHaveAttribute("aria-selected", "true");
+    await userEvent.keyboard("{ArrowDown}");
+    expect(within(dialog).getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(jump).toHaveFocus();
+
+    await userEvent.click(jump);
+    await userEvent.type(screen.getByRole("combobox", { name: "跳转到页面" }), "事项");
+    expect(within(screen.getByRole("dialog")).getAllByRole("option")).toHaveLength(1);
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("heading", { name: "事项 页面" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("没有注册页面时给出空状态而不是白屏", async () => {

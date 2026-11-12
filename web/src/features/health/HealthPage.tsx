@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 GET /v1/health（api/health.Report）：十项信号、顺序固定，判定全在服务端；这里只呈现。
 export interface Signal {
@@ -90,27 +91,33 @@ export function HealthPage() {
   const bad = report?.signals.filter((s) => !s.ok).length ?? 0;
   return (
     <main>
-      <h2>健康</h2>
+      {report === null ? (
+        <PageHead>健康</PageHead>
+      ) : (
+        <PageHead lede={`${report.signals.length} 项信号${bad ? `里有 ${bad} 项需要看一眼。` : "都正常。"}`}>
+          {report.healthy ? "一切正常" : `存在 ${bad} 类异常`}
+        </PageHead>
+      )}
       {error && (
         <div role="alert">
           {error} <button onClick={load}>重试</button>
         </div>
       )}
       {report === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : (
         <>
-          <p>{report.healthy ? "一切正常" : `存在 ${bad} 类异常`}</p>
           {report.signals.map((s) => {
             const m = META[s.id] ?? { title: s.id, links: [] };
             return (
-              <article key={s.id} aria-label={m.title}>
+              <article key={s.id} aria-label={m.title} className="signal">
                 <h3>
-                  {m.title}：{s.ok ? "正常" : `异常（${s.count}）`}
+                  {m.title}
+                  <span className={"badge " + (s.ok ? "ok" : "bad")}>{s.ok ? "正常" : `异常（${s.count}）`}</span>
                 </h3>
                 {!s.ok && s.why && <p>{s.why}</p>}
                 <Detail s={s} />
-                <p>
+                <p className="sub">
                   修复入口：{s.next}
                   {!s.ok && m.links.map((l) => (
                     <span key={l.to}>

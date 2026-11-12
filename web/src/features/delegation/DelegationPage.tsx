@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 GET /v1/items?kind=delegation、GET /v1/audit/events?type=delegation.reported、GET /v1/executors?project=、
 // PATCH /v1/items/{id}（改派，If-Match）、POST /v1/delegations（重新委派）。
@@ -77,7 +78,7 @@ function Row({ c, report, onDone }: { c: Child; report?: Step; onDone: () => Pro
   return (
     <article aria-label={c.title}>
       <h3>{c.title}</h3>
-      <p>
+      <p className="meta">
         执行者：<strong>{c.assignee ?? "未指派"}</strong> · 状态：{PHASE[c.phase] ?? c.phase}
         {c.project && ` · 项目 ${c.project}`}
       </p>
@@ -94,10 +95,12 @@ function Row({ c, report, onDone }: { c: Child; report?: Step; onDone: () => Pro
         </ul>
       )}
       {!mode && (
-        <button onClick={() => open(terminal ? "redelegate" : "reassign")}>{terminal ? "重新委派" : "改派"}</button>
+        <div className="actions">
+          <button onClick={() => open(terminal ? "redelegate" : "reassign")}>{terminal ? "重新委派" : "改派"}</button>
+        </div>
       )}
       {mode && (
-        <div>
+        <div className="actions">
           <select aria-label="目标执行者" value={pick} onChange={(e) => setPick(e.target.value)}>
             <option value="">选择执行者…</option>
             {execs.map((x) => (
@@ -150,16 +153,16 @@ export function DelegationPage() {
 
   return (
     <main>
-      <h2>任务委派</h2>
+      <PageHead>任务委派</PageHead>
       {error && (
         <div role="alert">
           {error} <button onClick={load}>重试</button>
         </div>
       )}
       {items === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : items.length === 0 ? (
-        <p>没有委派</p>
+        <p className="empty">没有委派</p>
       ) : (
         items.map((c) => <Row key={c.id} c={c} report={reports.get(c.id)} onDone={load} />)
       )}

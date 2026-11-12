@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -122,7 +122,7 @@ describe("决策待办页（flow-decision-answer）", () => {
 
   it("空列表与加载失败各有状态", async () => {
     mount(server([]).impl);
-    expect(await screen.findByText("没有待办决策")).toBeInTheDocument();
+    expect(await screen.findByText("没有要你决定的事")).toBeInTheDocument();
   });
 
   it("列表读取失败：显示错误并可重试", async () => {
@@ -138,6 +138,40 @@ describe("决策待办页（flow-decision-answer）", () => {
   });
 });
 
+describe("键盘拍板", () => {
+  it("1–9 选当前卡的第 N 个选项，J/K 切换卡，? 展开原因；焦点在输入框时不生效", async () => {
+    const s = server([item("a", { ask: { free_text: true } }), item("b")]);
+    mount(s.impl);
+    const a = (await screen.findByText("问题 a")).closest("article")!;
+    expect(a).toHaveClass("focus");
+    await userEvent.type(within(a).getByLabelText("别的想法"), "2j");
+    expect(s.calls.some((c) => c.method === "POST")).toBe(false);
+    expect(a).toHaveClass("focus");
+    (document.activeElement as HTMLElement).blur();
+
+    await userEvent.keyboard("?");
+    expect(await within(a).findByText("合并前需要本人确认")).toBeInTheDocument();
+
+    await userEvent.keyboard("j");
+    const b = screen.getByText("问题 b").closest("article")!;
+    expect(b).toHaveClass("focus");
+    expect(a).not.toHaveClass("focus");
+    await userEvent.keyboard("2");
+    await waitFor(() => expect(screen.queryByText("问题 b")).not.toBeInTheDocument());
+    expect(s.calls.find((c) => c.path === "/v1/items/b/decide")!.body).toEqual({ choice: "no" });
+
+    await userEvent.keyboard("k1"); // 只剩一张卡：焦点回到它
+    await screen.findByText("没有要你决定的事");
+    expect(s.calls.find((c) => c.path === "/v1/items/a/decide")!.body).toEqual({ choice: "yes" });
+  });
+
+  it("标题给出待决数量，导航显示同样的数量", async () => {
+    mount(server([item("a"), item("b")]).impl);
+    expect(await screen.findByRole("heading", { level: 1, name: "2 件事等你决定" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "决策待办 2" })).toBeInTheDocument();
+  });
+});
+
 describe("web_only 决策（flow-web-only、flow-life-renewal、flow-first-day）", () => {
   const wo = item("w", { title: "续费 1000 元", ask: { question: "续费吗？", risk_class: "web_only" } });
 
@@ -147,7 +181,7 @@ describe("web_only 决策（flow-web-only、flow-life-renewal、flow-first-day�
     const card = (await screen.findByText("续费吗？")).closest("article")!;
     expect(within(card).getByText("仅限 Web 确认")).toBeInTheDocument();
     await userEvent.click(within(card).getByRole("button", { name: "同意" }));
-    await screen.findByText("没有待办决策");
+    await screen.findByText("没有要你决定的事");
     expect(s.calls.find((c) => c.path === "/v1/items/w/decide")!.body).toEqual({ choice: "yes" });
   });
 

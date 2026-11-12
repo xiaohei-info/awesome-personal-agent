@@ -57,7 +57,7 @@ describe("决策待办的初筛状态（flow-screening）", () => {
     mount(s.impl);
     const card = (await screen.findByText("问题 s")).closest("article")!;
     await userEvent.click(within(card).getByRole("button", { name: "同意" }));
-    await screen.findByText("没有待办决策");
+    await screen.findByText("没有要你决定的事");
     expect(s.calls.find((c) => c.path === "/v1/items/s/decide")!.body).toEqual({ choice: "yes" });
   });
 

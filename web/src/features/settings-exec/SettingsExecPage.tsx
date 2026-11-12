@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { PageHead } from "../../app/page";
 
 // 形状对应 /v1/settings/{executors,declarations,commands}（kernel/executors）。授权（仅 Web 会话）、
 // 声明校验、确认前不生效都在服务端；本页只负责调用并如实展示服务端的回答。
@@ -88,9 +89,10 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
 
   return (
     <section role="region" aria-labelledby="h-executors">
-      <h3 id="h-executors">执行者清单</h3>
+      <h2 id="h-executors">执行者清单</h2>
       {error && <div role="alert">{error}</div>}
       <form
+        className="panel"
         onSubmit={(e) => {
           e.preventDefault();
           add();
@@ -116,19 +118,24 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
           场景（逗号分隔）
           <input value={scenarios} onChange={(e) => setScenarios(e.target.value)} />
         </label>
-        <button type="submit" disabled={!id.trim()}>添加</button>
+        <div>
+          <button type="submit" disabled={!id.trim()}>添加</button>
+        </div>
       </form>
       {items === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : items.length === 0 ? (
-        <p>还没有执行者</p>
+        <p className="sub">还没有执行者</p>
       ) : (
-        <ul>
+        <ul className="rows">
           {items.map((x) => (
             <li key={x.id}>
-              <span>{x.id}</span> · {x.kind}
-              {x.host && ` · ${x.host}`}
-              {x.scenarios?.length ? ` · ${x.scenarios.join(", ")}` : ""} <button onClick={() => remove(x.id)}>删除</button>
+              <span>
+                <strong>{x.id}</strong> · {x.kind}
+                {x.host && ` · ${x.host}`}
+                {x.scenarios?.length ? ` · ${x.scenarios.join(", ")}` : ""}
+              </span>{" "}
+              <button className="danger" onClick={() => remove(x.id)}>删除</button>
             </li>
           ))}
         </ul>
@@ -154,20 +161,24 @@ function PendingSection({ onChanged }: { onChanged: () => void }) {
 
   return (
     <section role="region" aria-labelledby="h-pending">
-      <h3 id="h-pending">待确认声明</h3>
-      <p>确认前声明不生效；确认意味着接受下列声明的全部内容，其中的命令将可在本机执行。</p>
+      <h2 id="h-pending">待确认声明</h2>
+      <p className="sub">确认前声明不生效；确认意味着接受下列声明的全部内容，其中的命令将可在本机执行。</p>
       {error && <div role="alert">{error}</div>}
       {items === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : items.length === 0 ? (
-        <p>没有待确认的声明</p>
+        <p className="sub">没有待确认的声明</p>
       ) : (
-        <ul>
+        <ul className="rows">
           {items.map((r) => (
             <li key={`${r.harness}/${r.rev}`}>
-              <span>{r.harness}</span> · rev {r.rev}
+              <span>
+                <strong>{r.harness}</strong> · rev {r.rev}
+              </span>
               <DeclarationView d={r.declaration} />
-              <button onClick={() => decide(r, "confirm")}>确认</button> <button onClick={() => decide(r, "reject")}>拒绝</button>
+              <div className="actions">
+                <button onClick={() => decide(r, "confirm")}>确认</button> <button onClick={() => decide(r, "reject")}>拒绝</button>
+              </div>
             </li>
           ))}
         </ul>
@@ -205,9 +216,10 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
 
   return (
     <section role="region" aria-labelledby="h-commands">
-      <h3 id="h-commands">可执行命令</h3>
+      <h2 id="h-commands">可执行命令</h2>
       {error && <div role="alert">{error}</div>}
       <form
+        className="panel"
         onSubmit={(e) => {
           e.preventDefault();
           register();
@@ -217,17 +229,21 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
           声明（JSON）
           <textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
-        <button type="submit" disabled={!text.trim()}>登记</button>
+        <div>
+          <button type="submit" disabled={!text.trim()}>登记</button>
+        </div>
       </form>
       {items === null ? (
-        !error && <p>加载中…</p>
+        !error && <p role="status">加载中…</p>
       ) : items.length === 0 ? (
-        <p>还没有可执行命令</p>
+        <p className="sub">还没有可执行命令</p>
       ) : (
-        <ul>
+        <ul className="rows">
           {items.map((r) => (
             <li key={`${r.harness}/${r.rev}`}>
-              <span>{r.harness}</span> · rev {r.rev}
+              <span>
+                <strong>{r.harness}</strong> · rev {r.rev}
+              </span>
               <DeclarationView d={r.declaration} />
             </li>
           ))}
@@ -242,7 +258,7 @@ export function SettingsExecPage() {
   const [n, setN] = useState(0);
   return (
     <main>
-      <h2>执行者与声明</h2>
+      <PageHead lede="谁能被派活、各 harness 声明了哪些可在本机执行的命令。声明要你确认才生效。">执行者与声明</PageHead>
       <ExecutorsSection reloadKey={n} />
       <PendingSection onChanged={() => setN((x) => x + 1)} />
       <CommandsSection reloadKey={n} />

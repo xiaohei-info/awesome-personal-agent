@@ -6,7 +6,7 @@ import { SessionProvider, useSession } from "./session";
 
 function Gate({ features }: { features: Feature[] }) {
   const { status, error, retry } = useSession();
-  if (status === "loading") return <p>加载中…</p>;
+  if (status === "loading") return <p className="boot">加载中…</p>;
   if (status === "error")
     return (
       <main>

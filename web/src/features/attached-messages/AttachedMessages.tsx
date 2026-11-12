@@ -54,12 +54,12 @@ export function AttachedMessages({ itemId }: { itemId: string }) {
 
   return (
     <section aria-label="挂靠消息">
-      <h3>挂靠消息</h3>
+      <h2>挂靠消息</h2>
       {error && <p role="alert">{error}</p>}
-      {!list && !error && <p>加载中…</p>}
-      {list && !list.length && <p>没有挂靠消息</p>}
+      {!list && !error && <p role="status">加载中…</p>}
+      {list && !list.length && <p className="sub">没有挂靠消息</p>}
       {list && list.length > 0 && (
-        <ul aria-label="挂靠消息列表">
+        <ul aria-label="挂靠消息列表" className="rows">
           {list.map((m) => (
             <li key={m.id} data-forward-allowed={m.forward_allowed}>
               <strong>{m.subject || m.summary || m.id}</strong>

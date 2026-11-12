@@ -36,20 +36,22 @@ export function ProjectMaterials({ project }: { project: string }) {
       <section aria-label="材料">
         <h2>材料</h2>
         {error && <p role="alert">{error}</p>}
-        {mats && !rest.length && !error && <p>该项目下没有材料</p>}
-        <ul>
-          {rest.map((m) => (
-            <li key={m.id}>
-              <button onClick={() => setOpen(m)}>{m.title}</button> {m.kind} · {m.location ? "托管型（只读）" : "自有型"}
-              {m.location && <> · {m.location}</>}
-            </li>
-          ))}
-        </ul>
+        {mats && !rest.length && !error && <p className="sub">该项目下没有材料</p>}
+        {!!rest.length && (
+          <ul className="rows">
+            {rest.map((m) => (
+              <li key={m.id}>
+                <button className="link" onClick={() => setOpen(m)}>{m.title}</button> <span className="sub">{m.kind} · {m.location ? "托管型（只读）" : "自有型"}
+                {m.location && <> · {m.location}</>}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         {open?.location && <HostedMaterial key={open.id} material={open} />}
       </section>
       <section aria-label="规范">
         <h2>规范</h2>
-        {mats && !guidelines.length && !error && <p>该项目还没有规范</p>}
+        {mats && !guidelines.length && !error && <p className="sub">该项目还没有规范</p>}
         {guidelines.map((g) => (
           <Guideline key={g.id} m={g} />
         ))}
@@ -72,7 +74,7 @@ function Guideline({ m }: { m: Mat }) {
     <article aria-label={m.title}>
       <h3>{m.title}</h3>
       {error && <p role="alert">{error}</p>}
-      {text === "" && <p>尚无生效的修订（等待本人确认）</p>}
+      {text === "" && <p className="sub">尚无生效的修订（等待本人确认）</p>}
       {text && <pre>{text}</pre>}
     </article>
   );
