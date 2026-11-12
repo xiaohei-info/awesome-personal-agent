@@ -63,6 +63,9 @@ type relateIn struct {
 	Type   string `json:"type"`
 	Remove bool   `json:"remove"`
 	Reason string `json:"reason"`
+	// Key（可带 Domain）表示登记或移除一个关联键（§9.4），此时不给 To 与 Type。
+	Key    string `json:"key"`
+	Domain string `json:"domain"`
 }
 
 type revertIn struct {
@@ -598,6 +601,9 @@ func (s *svc) relate() command.Spec {
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
+			if v.Key != "" || v.Domain != "" {
+				return validateKey(tx, v)
+			}
 			rel := domain.Relation{Type: v.Type, From: v.From, To: v.To}
 			switch {
 			case blank(v.Type) || strings.ContainsAny(v.Type, " \t\r\n"):
@@ -638,6 +644,17 @@ func (s *svc) relate() command.Spec {
 			if err != nil {
 				return nil, err
 			}
+			if v.Key != "" {
+				k := Correlation{Domain: v.Domain, Key: v.Key}
+				if err := setCorrelation(c.Tx, cur.ID, k, v.Remove); err != nil {
+					return nil, err
+				}
+				cur = stamped(cur, c.Now())
+				if err := save(c.Tx, cur); err != nil {
+					return nil, err
+				}
+				return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, c.Evidence, payload{Op: "relate", Item: cur, Key: &k, Remove: v.Remove})
+			}
 			if err := setRelation(c.Tx, rel, v.Remove); err != nil {
 				return nil, err
 			}
@@ -647,6 +664,27 @@ func (s *svc) relate() command.Spec {
 			}
 			return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, c.Evidence, payload{Op: "relate", Item: cur, Relation: &rel, Remove: v.Remove})
 		}}
+}
+
+// validateKey：登记或移除关联键。键不与关系的 To、Type 混用；重复登记与移除不存在的键都明确报错。
+func validateKey(tx *store.Tx, v relateIn) error {
+	k := Correlation{Domain: v.Domain, Key: v.Key}
+	if err := checkCorrelation(k); err != nil {
+		return err
+	}
+	if v.To != "" || v.Type != "" {
+		return invalid("--key cannot be combined with --to or --type")
+	}
+	has, err := hasCorrelation(tx, v.From, k)
+	switch {
+	case err != nil:
+		return err
+	case v.Remove && !has:
+		return domain.NewError(domain.CodeNotFound, "correlation key is not registered on this item", "read the item's correlation keys")
+	case !v.Remove && has:
+		return conflict("correlation key is already registered", "nothing to do")
+	}
+	return nil
 }
 
 // noParentCycle：把 child 挂到 parent 下，不能让 child 成为 parent 的祖先。
@@ -724,8 +762,8 @@ func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
 		return rp, domain.NewError(domain.CodeNotFound, "event does not belong to this item", "read the item's timeline")
 	case target.Tombstone || !slices.Contains(revertible, target.Event.Type):
 		return rp, invalid("only item updates, phase changes and decisions can be reverted")
-	case target.Event.Actor.Type != domain.ActorAgent:
-		return rp, invalid("only changes made by an agent can be reverted")
+	case target.Event.Actor.Type != domain.ActorAgent && target.Event.Actor.Type != domain.ActorSystem:
+		return rp, invalid("only changes made by an agent or the kernel can be reverted")
 	case last == nil || last.Event.Seq != target.Event.Seq:
 		return rp, conflict("later changes exist on this item", "revert the later changes first")
 	}

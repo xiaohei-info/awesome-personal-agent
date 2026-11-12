@@ -192,7 +192,7 @@ func (w *world) message(id string) string {
 	if err != nil || got.ID == "" {
 		w.t.Fatalf("append: %v", err)
 	}
-	if ok, _, err := w.fm.Intercept(bg, got); err != nil || !ok {
+	if ok, _, err := w.fm.Intercept(bg, got, ""); err != nil || !ok {
 		w.t.Fatalf("attach: %v %v", ok, err)
 	}
 	return got.ID

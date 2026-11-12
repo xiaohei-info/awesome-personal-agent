@@ -433,3 +433,21 @@ func TestRemovedDataPackDeactivates(t *testing.T) {
 		t.Fatal("removed pack still active")
 	}
 }
+
+// source_rules 的 on_update 只接受 refresh 与 attach（C.5、主文档 §9.4）；写错的包被拒绝并说明原因。
+func TestSourceRuleOnUpdateIsValidated(t *testing.T) {
+	pack := func(v string) fstest.MapFS {
+		return fstest.MapFS{"p/pack.yaml": {Data: []byte("name: p\nversion: 1.0.0\ndescription: d\nsource_rules:\n  - id: r\n    match: {source_type: mail}\n    kind: task\n    then: proposed\n    on_update: " + v + "\n")}}
+	}
+	for _, ok := range []string{"attach", "refresh"} {
+		if l, rej := load(t, Options{Builtin: pack(ok), Kinds: newKinds()}); len(rej) != 0 {
+			t.Fatalf("on_update %s rejected: %v", ok, rej)
+		} else if p, _ := l.Get("p"); p == nil || p.SourceRules[0].OnUpdate != ok {
+			t.Fatalf("on_update %s not loaded: %+v", ok, p)
+		}
+	}
+	_, rej := load(t, Options{Builtin: pack("merge"), Kinds: newKinds()})
+	if len(rej) != 1 || !strings.Contains(rej[0].Reason, "on_update") {
+		t.Fatalf("rejections %+v", rej)
+	}
+}

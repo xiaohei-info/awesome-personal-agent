@@ -28,7 +28,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> --to <item or material id> --type <t>"
+const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
 
 func item(c *client.Ctx, args []string) error {
 	if len(args) == 0 {
@@ -180,8 +180,8 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 		fields = []string{"to", "reason", "waiting-on"}
 		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <text> | --grant <id> --version <n>]"
 	case "relate":
-		fields, bools = []string{"to", "type", "reason"}, []string{"remove"}
-		hint = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --evidence <text> | --grant <id> --version <n>]"
+		fields, bools = []string{"to", "type", "reason", "key", "domain"}, []string{"remove"}
+		hint = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --evidence <text> | --grant <id> --version <n>]\n   or: apa item relate <from> --key <correlation key> [--domain <dedupe domain>] [--remove] [--evidence <text> | --grant <id>]"
 	}
 	f, rm := newForm("item "+sub, fields, []string{"version", "idempotency-key"}, bools)
 	id, err := f.parse(args, true, hint)
@@ -205,11 +205,24 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 		}
 	}
 	if sub == "relate" {
-		if body["to"] == nil || body["type"] == nil {
-			return usage("--to and --type are required", hint)
-		}
-		if *rm["remove"] {
-			body["remove"] = true
+		if body["key"] != nil { // 登记或移除关联键：POST / DELETE …/correlation-keys
+			if body["to"] != nil || body["type"] != nil {
+				return usage("--key cannot be combined with --to or --type", hint)
+			}
+			method, suffix = "POST", "/correlation-keys"
+			if *rm["remove"] {
+				method = "DELETE"
+			}
+		} else {
+			if body["to"] == nil || body["type"] == nil {
+				return usage("--to and --type are required (or --key)", hint)
+			}
+			if body["domain"] != nil {
+				return usage("--domain only applies to --key", hint)
+			}
+			if *rm["remove"] {
+				body["remove"] = true
+			}
 		}
 	}
 	return send(c, f, method, "/items/"+url.PathEscape(id)+suffix, body)

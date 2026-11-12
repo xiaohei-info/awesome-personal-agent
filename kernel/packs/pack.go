@@ -78,6 +78,7 @@ type SourceRule struct {
 	ProjectBy       string         `yaml:"project_by"`
 	Then            string         `yaml:"then"`
 	CorrelationKeys []string       `yaml:"correlation_keys"`
+	OnUpdate        string         `yaml:"on_update"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
 	Accept          string         `yaml:"accept"`
 	Mode            string         `yaml:"mode"`
 }
@@ -536,6 +537,11 @@ func checkSourceRule(r SourceRule) error {
 	}
 	if r.ProjectBy != "" && r.ProjectBy != "repo_remote" && r.ProjectBy != "none" && !strings.HasPrefix(r.ProjectBy, "fixed:") {
 		return fmt.Errorf("%s: project_by %q must be repo_remote, fixed:<project> or none", where, r.ProjectBy)
+	}
+	switch r.OnUpdate {
+	case "", "refresh", "attach":
+	default:
+		return fmt.Errorf("%s: on_update %q must be refresh or attach", where, r.OnUpdate)
 	}
 	switch r.Then {
 	case "", "proposed", "ignore", "judge":

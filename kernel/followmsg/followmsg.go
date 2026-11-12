@@ -12,6 +12,10 @@
 //     关联键都未经委派登记时，再看同一去重域里带同一关联键的来源事件建出的事项（含 proposed），
 //     命中恰好一个未关闭的就经 item.update 刷新它，消息直接记为 processed（不转发、不交回、关闭时不退回）。
 //     只命中已关闭、或命中多个未关闭事项时不猜，走普通判断流并附线索。
+//   - 本人的未委派事项收到后续消息（回音，v0.2.0）：来源规则 on_update 为 attach，或键是本人经 item.relate 登记的
+//     而规则没有明说 refresh 时，消息记在事项上（直接 processed，不转发），不改标题与正文；事项在 waiting 且等的是
+//     人或外部时，由 system 经 item.transition 转回 open（可撤销，未到期的跟进定时随阶段变更取消）；
+//     等时间的 waiting 与 proposed 只挂靠不转阶段。
 //   - 挂靠本身不拉起运行：本包不起运行、不调模型；挂靠命令继承所挂事项的链路深度，不加一。
 //   - 回执确认游标（delegate.report 的 cursor）之前已转发的消息算已处理；游标是消息的落盘序号。
 //   - 事项进入终态时，未处理（pending、forwarded）的挂靠消息退回判断流，不丢。
@@ -117,14 +121,38 @@ func unprocessed(a runner.Attachment) bool {
 
 // ---- 挂靠 ----
 
-// resolve 按关联键找事项。attach 非空表示恰好命中一个未关闭事项：update 为假是委派事项（挂靠待转发），
-// 为真是同一来源对象建出的事项（用新事件刷新）。否则 hint 说明为什么不猜（可为空）。
-// 已删除的事项按不存在处理。
-func resolve(tx *store.Tx, ev domain.SourceEvent) (attach string, update bool, hint string, err error) {
+// 命中事项后怎样处理。
+type how int
+
+const (
+	forward how = iota // 已委派的事项：挂靠待转发给执行者
+	refresh            // 来源对象的更新：写回它建出的事项，消息直接 processed
+	echo               // 本人的事项收到后续消息（回音）：只记为挂靠消息，消息直接 processed
+)
+
+// plan 是一条事件的归属结果。item 为空表示不挂靠，hint 说明为什么不猜（可为空）。
+// wakes 为真表示事项在等人或外部，收到回音应由内核转回 open。
+type plan struct {
+	item  string
+	how   how
+	wakes bool
+	hint  string
+}
+
+// resolve 按关联键找事项（设计 §9.4）：
+//  1. 委派登记的关联键（回执里的 PR）或事项上登记的键命中已委派的未关闭事项：forward。
+//  2. 关联键都未经委派登记时，看本人的未委派事项：同一去重域里带同一关联键的来源事件建出的事项，
+//     以及本人为事项登记的键（去重域一致或登记时未限域）。命中恰好一个未关闭的就挂靠：
+//     规则 on_update 为 attach，或键是本人登记的而规则没有明说 refresh，是 echo；否则是 refresh。
+//
+// 只命中已关闭事项或命中多个未关闭事项时不猜。已删除的事项按不存在处理。
+func resolve(tx *store.Tx, ev domain.SourceEvent, onUpdate string) (plan, error) {
 	if ev.AttachState == runner.AttachHandedBack || ev.AttachState == runner.AttachReleased {
-		return "", false, fmt.Sprintf("correlation: message was %s from item %s and is not attached again", ev.AttachState, ev.Item), nil
+		return plan{hint: fmt.Sprintf("correlation: message was %s from item %s and is not attached again", ev.AttachState, ev.Item)}, nil
 	}
 	var open, shut []string
+	got := map[string]domain.Item{}
+	registered := map[string]bool{} // 本人为事项登记的键命中
 	seen := map[string]bool{}
 	classify := func(ids []string, ok func(domain.Item) bool) error {
 		for _, id := range ids {
@@ -139,6 +167,7 @@ func resolve(tx *store.Tx, ev domain.SourceEvent) (attach string, update bool, h
 				return err
 			case ok(it):
 				open = append(open, id)
+				got[id] = it
 			default:
 				shut = append(shut, id)
 			}
@@ -148,59 +177,109 @@ func resolve(tx *store.Tx, ev domain.SourceEvent) (attach string, update bool, h
 	for _, k := range ev.CorrelationKeys {
 		id, ok, err := delegation.Lookup(tx, k)
 		if err != nil {
-			return "", false, "", err
+			return plan{}, err
 		}
 		if ok {
 			if err := classify([]string{id}, live); err != nil {
-				return "", false, "", err
+				return plan{}, err
 			}
 		}
+		ids, err := items.Correlated(tx, ev.DedupeKey.Domain, k)
+		if err != nil {
+			return plan{}, err
+		}
+		var delegated []string
+		for _, id := range ids {
+			if it, err := items.Get(tx, id); err == nil && it.Kind == domain.KindDelegation {
+				delegated = append(delegated, id)
+			}
+		}
+		if err := classify(delegated, live); err != nil {
+			return plan{}, err
+		}
 	}
-	// 关联键已由委派登记的（事项未关闭或已关闭）只按委派语义；都未登记才看同一来源对象建出的事项。
+	mode := forward
+	// 关联键已由委派登记的（事项未关闭或已关闭）只按委派语义；都未登记才看本人的事项。
 	if len(open)+len(shut) == 0 {
+		own := func(it domain.Item) bool { return !closed(it) }
 		for _, k := range ev.CorrelationKeys {
 			ids, err := runner.Origins(tx, ev.DedupeKey.Domain, k)
 			if err != nil {
-				return "", false, "", err
+				return plan{}, err
 			}
-			if err := classify(ids, func(it domain.Item) bool { return !closed(it) }); err != nil {
-				return "", false, "", err
+			if err := classify(ids, own); err != nil {
+				return plan{}, err
+			}
+			ids, err = items.Correlated(tx, ev.DedupeKey.Domain, k)
+			if err != nil {
+				return plan{}, err
+			}
+			for _, id := range ids {
+				registered[id] = true
+			}
+			if err := classify(ids, own); err != nil {
+				return plan{}, err
 			}
 		}
-		update = true
+		mode = refresh
 	}
 	switch {
 	case len(open) == 1:
-		return open[0], update, "", nil
+		id := open[0]
+		p := plan{item: id, how: mode}
+		if mode == refresh && (onUpdate == "attach" || (registered[id] && onUpdate != "refresh")) {
+			p.how = echo
+			w := got[id].WaitingOn
+			p.wakes = got[id].Phase == domain.PhaseWaiting && w != nil && (w.Kind == domain.WaitingHuman || w.Kind == domain.WaitingExternal)
+		}
+		return p, nil
 	case len(open) > 1:
-		return "", false, "correlation: matches several open items (" + strings.Join(open, ", ") + "), not guessing", nil
+		return plan{hint: "correlation: matches several open items (" + strings.Join(open, ", ") + "), not guessing"}, nil
 	case len(shut) > 0:
-		return "", false, "correlation: matches only closed items (" + strings.Join(shut, ", ") + "), not reopening", nil
+		return plan{hint: "correlation: matches only closed items (" + strings.Join(shut, ", ") + "), not reopening"}, nil
 	}
-	return "", false, "", nil
+	return plan{}, nil
 }
 
 // Intercept 满足 inbound.Intercept。
-func (s *Service) Intercept(ctx context.Context, ev domain.SourceEvent) (bool, string, error) {
-	var (
-		item, hint string
-		update     bool
-	)
-	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { item, update, hint, err = resolve(tx, ev); return }); err != nil {
+func (s *Service) Intercept(ctx context.Context, ev domain.SourceEvent, onUpdate string) (bool, string, error) {
+	var p plan
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { p, err = resolve(tx, ev, onUpdate); return }); err != nil {
 		return false, "", err
 	}
-	if item == "" {
-		return false, hint, nil
+	if p.item == "" {
+		return false, p.hint, nil
 	}
-	if update {
-		if err := s.refresh(ctx, item, ev); err != nil {
+	// 先写事项、后记消息：中途失败时消息仍是 pending，下一轮重做；两条写入各有幂等键，不会重复。
+	switch {
+	case p.how == refresh:
+		if err := s.refresh(ctx, p.item, ev); err != nil {
+			return false, "", err
+		}
+	case p.wakes:
+		if err := s.wake(ctx, p.item, ev); err != nil {
 			return false, "", err
 		}
 	}
-	in, _ := json.Marshal(attachIn{Event: ev.ID, Item: item, Applied: update})
+	in, _ := json.Marshal(attachIn{Event: ev.ID, Item: p.item, Applied: p.how != forward})
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: CmdAttach, Input: in, IdemKey: "followmsg:attach:" + ev.ID,
-		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Evidence: "followmsg", Owner: s.o.Owner})
+		Chain: command.Chain{Mode: command.ChainKeep, From: p.item}, Evidence: "followmsg", Owner: s.o.Owner})
 	return err == nil, "", err
+}
+
+// onBehalf 是内核代本人写事项的身份：这些事项没有执行者，写入以本人登记该来源或该键为依据（同入站规则的自动接受）。
+func (s *Service) onBehalf() command.Trusted {
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: systemPrinc, Via: domain.ViaSource, OnBehalfOf: s.o.Owner}, Level: authz.LevelDelegate}
+}
+
+// wake：等回音的事项收到回音，转回 open。这是规则性的转移，操作者为 system，可经 item.revert 撤销；
+// 离开 waiting 时未到期的跟进定时由主动服务随阶段变更取消。
+func (s *Service) wake(ctx context.Context, item string, ev domain.SourceEvent) error {
+	in, _ := json.Marshal(map[string]string{"id": item, "to": string(domain.PhaseOpen),
+		"reason": "收到回音：来源事件 " + ev.ID + "（" + ev.Type + "）"})
+	_, err := s.o.Exec.Do(ctx, command.Request{Identity: s.onBehalf(), Command: "item.transition", Input: in, IdemKey: "followmsg:echo:" + ev.ID,
+		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Evidence: "followmsg", Owner: s.o.Owner})
+	return err
 }
 
 // refresh 用同一来源对象的新事件刷新它建出的事项（字段同入站建事项时的映射，只写非空的）。
@@ -216,8 +295,7 @@ func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEven
 		patch["title"] = ev.Type
 	}
 	in, _ := json.Marshal(patch)
-	id := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: systemPrinc, Via: domain.ViaSource, OnBehalfOf: s.o.Owner}, Level: authz.LevelDelegate}
-	_, err := s.o.Exec.Do(ctx, command.Request{Identity: id, Command: "item.update", Input: in, IdemKey: "followmsg:update:" + ev.ID,
+	_, err := s.o.Exec.Do(ctx, command.Request{Identity: s.onBehalf(), Command: "item.update", Input: in, IdemKey: "followmsg:update:" + ev.ID,
 		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Evidence: "followmsg", Owner: s.o.Owner})
 	return err
 }
@@ -225,7 +303,7 @@ func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEven
 type attachIn struct {
 	Event string `json:"event"`
 	Item  string `json:"item"`
-	// Applied 表示这是同一来源对象的更新，已写回事项：消息直接记为 processed。
+	// Applied 表示这是同一来源对象的更新（已写回事项）或本人事项收到的回音（已记在事项上）：消息直接记为 processed。
 	Applied bool `json:"applied,omitempty"`
 }
 
@@ -369,7 +447,7 @@ func attach() command.Spec {
 			v, _ := parse(c.Input)
 			state, reason := runner.AttachPending, "follow-up message attached"
 			if v.Applied {
-				state, reason = runner.AttachProcessed, "source object update applied to the item"
+				state, reason = runner.AttachProcessed, "message recorded on the item"
 			}
 			if err := runner.SetAttachState(c.Tx, v.Event, state, v.Item); err != nil {
 				return nil, err

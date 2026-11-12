@@ -48,6 +48,8 @@ func Routes(x *command.Executor, st *store.Store, staleAfter ...func() time.Dura
 		r.Handle(core.Route{Method: "PATCH", Path: "/items/{id}", Handler: h.write("item.update", "id", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/transition", Handler: h.write("item.transition", "id", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/relations", Handler: h.write("item.relate", "from", http.StatusOK)})
+		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
+		r.Handle(core.Route{Method: "DELETE", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/progress", Handler: h.write("item.progress", "id", http.StatusCreated, h.withProgress)})
 		r.Handle(core.Route{Method: "GET", Path: "/today", Handler: h.today})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/revert", Handler: h.write("item.revert", "id", http.StatusOK)})
@@ -115,9 +117,13 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 		rels []domain.Relation
 		rej  *Rejection
 		prog []domain.Progress
+		keys []kitems.Correlation
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if it, err = kitems.Get(tx, r.PathValue("id")); err != nil {
+			return err
+		}
+		if keys, err = kitems.Correlations(tx, it.ID); err != nil {
 			return err
 		}
 		if rels, err = kitems.Relations(tx, it.ID); err != nil {
@@ -138,7 +144,10 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	if rels == nil || shown.Ask != it.Ask {
 		rels = []domain.Relation{} // 初筛中的事项对非 Web 凭据不带关系
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": shown, "relations": rels, "progress": prog, "last_rejection": rej})
+	if keys == nil || shown.Ask != it.Ask {
+		keys = []kitems.Correlation{}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": shown, "relations": rels, "progress": prog, "correlation_keys": keys, "last_rejection": rej})
 }
 
 // today：四组取材全在内核（kitems.TodayItems）；初筛中的事项照常按凭据级别脱敏。
@@ -179,6 +188,9 @@ func (h *handlers) write(cmd, pathKey string, status int, extra ...func(r *http.
 			}
 			id, _ := json.Marshal(r.PathValue("id"))
 			body[pathKey] = id
+		}
+		if r.Method == http.MethodDelete { // DELETE …/correlation-keys：移除
+			body["remove"] = json.RawMessage("true")
 		}
 		in, err := json.Marshal(body)
 		if err != nil {

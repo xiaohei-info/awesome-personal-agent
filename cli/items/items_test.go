@@ -588,3 +588,35 @@ func TestToday(t *testing.T) {
 		t.Fatalf("today with args: exit %d", r.code)
 	}
 }
+
+// ACT-MSG-14/17：apa item relate --key 登记与移除关联键，show 看到；观察者退出码 4，delegate 缺依据退出码 23，账本不变。
+func TestRelateKeyRegistersAndRemoves(t *testing.T) {
+	k := newKernel(t)
+	id := k.openItem()
+	keys := func() []any { return k.ok(auth.Observer, "item", "show", id).json(t)["correlation_keys"].([]any) }
+
+	if r := k.apa(auth.Observer, "item", "relate", id, "--key", "fm-x"); r.code != 4 {
+		t.Fatalf("observer: %+v", r)
+	}
+	if r := k.apa(auth.Delegate, "item", "relate", id, "--key", "fm-y"); r.code != 23 {
+		t.Fatalf("delegate without evidence: %+v", r)
+	}
+	if len(keys()) != 0 {
+		t.Fatalf("rejected registrations left keys: %v", keys())
+	}
+	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm", "--evidence", "本人原话：归到这件事")
+	got := keys()
+	if len(got) != 1 || got[0].(map[string]any)["key"] != "fm-thread-1" || got[0].(map[string]any)["domain"] != "acc-fm" {
+		t.Fatalf("keys = %v", got)
+	}
+	if r := k.apa(auth.Worker, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm"); r.code != 6 {
+		t.Fatalf("duplicate: %+v", r)
+	}
+	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm", "--remove", "--evidence", "本人原话：解除关联")
+	if len(keys()) != 0 {
+		t.Fatalf("key not removed: %v", keys())
+	}
+	if r := k.apa(auth.Worker, "item", "relate", id, "--key", "k", "--to", id, "--type", "relates"); r.code != 2 {
+		t.Fatalf("key with --to: %+v", r)
+	}
+}

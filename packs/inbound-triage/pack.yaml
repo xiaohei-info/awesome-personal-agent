@@ -16,6 +16,7 @@ source_rules:
     match: {source_type: mail, event_type: [mail.received]}
     project_by: none
     then: judge
+    on_update: attach
 webhook_schemes:
   - id: hmac-sha256-header
     signature_header: X-Hub-Signature-256

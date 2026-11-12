@@ -117,7 +117,7 @@
 | 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for` | 按 §14.3；导出 ext 密钥可 `GET` |
 | | `GET /today` | 今天的清单，四组：`planned`、`due`、`pending`、`stale` | observer |
 | | `POST /items/{id}/progress` | 追加进展 `{text, on?}`；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate 按 §14.5 |
-| | `POST /items/{id}/correlation-keys`，`DELETE /items/{id}/correlation-keys` | 【规划中（v0.2.0）】登记或移除关联键 `{key, domain?}` | 同 `relations` |
+| | `POST /items/{id}/correlation-keys`，`DELETE /items/{id}/correlation-keys` | 登记或移除关联键 `{key, domain?}`（经 `item.relate`；`GET /items/{id}` 返回 `correlation_keys[]`） | 同 `relations` |
 | | `GET /items/{id}/messages` | 事项的全部挂靠消息 | observer；运行身份和无人值守事项按转发白名单过滤；ext 密钥不可用 |
 | | `POST /items/{id}/transition`，`POST /items/{id}/relations` | 转阶段、关联 | 同上 |
 | | `POST /items/{id}/revert` | 撤销 agent 变更 | 只有 Web 登录 |
