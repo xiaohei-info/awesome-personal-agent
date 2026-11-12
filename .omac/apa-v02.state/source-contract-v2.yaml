@@ -1,6 +1,6 @@
-# sha256: 010b879d6c6f751feb55dcbae1fe6105cb5acaa1b26ba3666fb62ea051ca5a5a
+# sha256: 02612a4b0e44684cc44e17ea3ee63b2f75b43ca0271042972642f7a86893163a
 work_item_id: 01a1d069-f012-7432-805a-ba22dfbf5d57
-status: in_progress
+status: in_review
 recovery_marker: true
 retry_note: 推送 403 的原因已修：Oracle 上 multica daemon 继承了 environment.d 里另一个工具的 GH_TOKEN（guantik-gm
   只读），daemon 已去掉该变量重启，git/gh 现在走 hosts.yml 的 xiaohei-info，push --dry-run 已验证可写。不要申请权限、不要用
