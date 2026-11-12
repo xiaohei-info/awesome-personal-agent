@@ -213,8 +213,12 @@ func (s *Service) Rejudge(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		// 判断端点与生成端点任一可用就值得探：任一端点改了立即再探。
 		if ep := pol.GenerateEndpoint; ep.URL != "" && ep.Model != "" {
 			endpoint = ep.URL + "\n" + ep.Model
+		}
+		if ep := pol.JudgeEndpoint; ep != nil && ep.URL != "" {
+			endpoint += "\n" + ep.URL + "\n" + ep.Model
 		}
 		cands, err = runner.RejudgeCandidates(tx, since, lim.Batch)
 		return err

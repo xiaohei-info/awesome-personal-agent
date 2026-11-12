@@ -158,8 +158,19 @@ type ItemInput struct {
 	PlannedFor  string          `json:"planned_for,omitempty"` // 计划日期 YYYY-MM-DD（§6.3），不带定时
 	Ask         *AskInput       `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
+	Proposal    *Proposal       `json:"proposal,omitempty"` // 建议信息，由入站流水线写入（§6.3）
 	Spec        json.RawMessage `json:"spec,omitempty"`
 	Ext         json.RawMessage `json:"ext,omitempty"` // 内核永不读取
+}
+
+// Proposal 是 proposed 事项上的建议信息（§6.3、附录 B.2）：起草给出的推荐处置、是否把握低、来自哪些来源事件。
+// 推荐只是建议流里的默认选项，不触发任何处置。
+type Proposal struct {
+	Recommend     string   `json:"recommend,omitempty"` // accept、attach、dismiss；空表示没有推荐
+	AttachTo      string   `json:"attach_to,omitempty"` // Recommend 为 attach 时的目标事项
+	Reason        string   `json:"reason,omitempty"`
+	LowConfidence bool     `json:"low_confidence"`
+	Sources       []string `json:"sources,omitempty"` // 来源事件 id
 }
 
 // ItemKernelState 只由内核维护；子事项的 Unattended 继承自后台运行。
@@ -191,6 +202,7 @@ type Item struct {
 	PlannedFor  string          `json:"planned_for,omitempty"` // 计划日期 YYYY-MM-DD（§6.3），不带定时、不产生提醒
 	Ask         *Ask            `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
+	Proposal    *Proposal       `json:"proposal,omitempty"`
 	Spec        json.RawMessage `json:"spec,omitempty"`
 	Ext         json.RawMessage `json:"ext,omitempty"`
 }

@@ -59,6 +59,11 @@ func (fakeSecrets) Keep(*store.Tx, string, string) error        { return nil }
 
 type failJudge struct{ t *testing.T }
 
+func (j failJudge) Judge(context.Context, direct.JudgeCall) (direct.Verdict, error) {
+	j.t.Error("judge must not be called")
+	return direct.Verdict{}, nil
+}
+
 func (j failJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
 	j.t.Error("judge must not be called")
 	return direct.Outcome{}, nil

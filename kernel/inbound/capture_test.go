@@ -119,7 +119,8 @@ func TestCaptureRejectsObserverAndNoProject(t *testing.T) {
 func TestCaptureSameDeltaIsIdempotent(t *testing.T) {
 	e := newEnv(t, true)
 	e.setCapture(e.web, true)
-	e.judge(`{"choice":"task","confidence":0.95}`)
+	e.screen(0.95)
+	e.draft(`{"candidates":[{"title":"t","kind":"task"}]}`)
 	in := map[string]any{"project": e.web, "text": "用户：把发布流程写进文档"}
 	for range 2 {
 		if out, err := e.capture(caller(authz.LevelWorker, "s1"), in); err != nil || !out.Captured {
