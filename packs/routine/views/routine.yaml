@@ -1,0 +1,6 @@
+kind: routine
+list:
+  columns: [title, project, phase, created_at]
+  filters: [project, phase]
+card:
+  fields: [summary, spec.result]

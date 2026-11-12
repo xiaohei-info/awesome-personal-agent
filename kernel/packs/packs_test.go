@@ -323,6 +323,8 @@ func TestLoadRulesRejectWholePack(t *testing.T) {
 		{"agent and run_as", map[string]string{"pack.yaml": head, "prompts/t.md": "---\nagent: task\nrun_as: main_session\n---\nq\n"}, "not both"},
 		{"invalid output_schema", map[string]string{"pack.yaml": head, "prompts/g.md": "---\nagent: generate\noutput_schema: {type: object, oneOf: []}\n---\nq\n"}, "JSON Schema"},
 		{"unknown placeholder", map[string]string{"pack.yaml": head, "prompts/t.md": "---\nagent: task\n---\n读取 {item_title} 并执行\n"}, "item_title"},
+		{"instruction_path without instruction param", map[string]string{"pack.yaml": head, "prompts/t.md": "---\nagent: task\n---\n任务说明在 {instruction_path}\n"}, "instruction_path"},
+		{"instruction param of the wrong type", map[string]string{"pack.yaml": head + "instance_params:\n  type: object\n  properties:\n    instruction: {type: number}\n", "prompts/t.md": "---\nagent: task\n---\n{ instruction_path }\n"}, "instruction_path"},
 		{"prompt without front matter", map[string]string{"pack.yaml": head, "prompts/t.md": "just text"}, "front matter"},
 		{"bad view", map[string]string{"pack.yaml": head, "views/v.yaml": "kind: k\nlayout: grid\n"}, "layout"},
 	}
@@ -341,6 +343,22 @@ func TestLoadRulesRejectWholePack(t *testing.T) {
 				t.Fatal("rejected pack must not be active nor register kinds")
 			}
 		})
+	}
+}
+
+// instruction_path 占位符：声明了字符串参数 instruction 的包可以用它（附录 C.7）。
+func TestInstructionPathAllowedWithInstructionParam(t *testing.T) {
+	fsys := fstest.MapFS{
+		"x/pack.yaml": {Data: []byte("name: x\nversion: 1.0.0\ndescription: d\ninstance_params:\n  type: object\n  properties:\n    instruction: {type: string}\n")},
+		"x/prompts/t.md": {Data: []byte("---\nagent: task\n---\n任务说明在 {instruction_path}\n")},
+	}
+	l, rej := load(t, Options{Builtin: fsys, Kinds: newKinds()})
+	if len(rej) != 0 {
+		t.Fatalf("rejected: %+v", rej)
+	}
+	p, _ := l.Get("x")
+	if !UsesPlaceholder(p.Prompts["t"].Body, "instruction_path") || UsesPlaceholder(p.Prompts["t"].Body, "item_id") {
+		t.Fatalf("UsesPlaceholder wrong for %q", p.Prompts["t"].Body)
 	}
 }
 

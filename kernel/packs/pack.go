@@ -167,7 +167,8 @@ var (
 	resultField = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\[\]\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 
 	// 提示词正文只能用内核提供的固定占位符（C.7）。
-	promptPlaceholders = map[string]bool{"item_id": true, "run_id": true, "project_id": true, "materials_path": true}
+	promptPlaceholders = map[string]bool{"item_id": true, "run_id": true, "project_id": true, "materials_path": true,
+		"instruction_path": true}
 
 	// 能力包不能携带命令、脚本或策略字段（§13.3）；这些键出现在 schema 之外的任何位置都拒绝整个包。
 	forbiddenKeys = map[string]bool{"command": true, "commands": true, "cmd": true, "exec": true, "script": true,
@@ -644,6 +645,10 @@ func checkPromptRefs(p *Pack) error {
 	}
 	sort.Strings(names)
 	for _, n := range names {
+		// instruction_path 只在由带 instruction 参数的实例驱动的运行里有值（C.7）；包没有这个参数，占位符永远是空的。
+		if usesPlaceholder(p.Prompts[n].Body, "instruction_path") && !declaresInstruction(p.InstanceParams) {
+			return fmt.Errorf("prompts/%s.md: {instruction_path} needs a string parameter %q in instance_params", n, "instruction")
+		}
 		to := p.Prompts[n].Meta.RelayTo
 		if to == "" {
 			continue
@@ -667,6 +672,24 @@ func checkPromptRefs(p *Pack) error {
 	return nil
 }
 
+// UsesPlaceholder 报告提示词正文是否含占位符 {name}（括号内允许空白）。
+func UsesPlaceholder(body, name string) bool { return usesPlaceholder(body, name) }
+
+func usesPlaceholder(body, name string) bool {
+	for _, mt := range placeholder.FindAllStringSubmatch(body, -1) {
+		if mt[1] == name {
+			return true
+		}
+	}
+	return false
+}
+
+func declaresInstruction(params map[string]any) bool {
+	props, _ := params["properties"].(map[string]any)
+	ins, _ := props["instruction"].(map[string]any)
+	return ins["type"] == "string"
+}
+
 func parsePrompt(data []byte, file string, schema func(string, map[string]any) error) (Prompt, error) {
 	head, body, ok := splitFrontMatter(data)
 	if !ok {
@@ -678,7 +701,7 @@ func parsePrompt(data []byte, file string, schema func(string, map[string]any) e
 	}
 	for _, mt := range placeholder.FindAllStringSubmatch(body, -1) {
 		if !promptPlaceholders[mt[1]] {
-			return Prompt{}, fmt.Errorf("unknown placeholder {%s}; allowed: item_id, run_id, project_id, materials_path", mt[1])
+			return Prompt{}, fmt.Errorf("unknown placeholder {%s}; allowed: item_id, run_id, project_id, materials_path, instruction_path", mt[1])
 		}
 	}
 	if err := checkPromptMeta(&m, file, schema); err != nil {

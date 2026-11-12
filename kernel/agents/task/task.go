@@ -139,10 +139,15 @@ type Task struct {
 	// 给出时 Title、Project、Parent 不再使用；这个事项有过运行就不再拉起（同一触发只拉起一次）。
 	Target string
 	// Harness 只来自规则与 Web 设置，不来自事件内容（§14.10）；为空时用 Web 设置的默认 harness。
-	Harness   string
-	Materials []Material
-	Messages  []Message
-	Actor     domain.Actor // 触发入口（Via 必填），类型记为 agent
+	Harness string
+	// Access 是实例要求的权限档位（例行任务的 access 参数）；为空取模板声明的档位。它仍受 harness 声明和 Web 设置的上限约束。
+	Access string
+	// Instruction 是实例里本人写的任务说明；非空时写成运行目录里的 instruction.txt，经 {instruction_path} 交给运行者。
+	// 它是本人的要求，不是外部资料，不进提示词正文。
+	Instruction string
+	Materials   []Material
+	Messages    []Message
+	Actor       domain.Actor // 触发入口（Via 必填），类型记为 agent
 }
 
 // Outcome 是 Launch 的结果。Run 为空表示没有拉起，事项已进 needs_input，Reason 说明原因。
@@ -179,6 +184,9 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		return Outcome{}, invalid("title is required")
 	}
 	access := pr.Meta.Access
+	if t.Access != "" {
+		access = t.Access
+	}
 	if access == "" {
 		access = "read"
 	}
@@ -241,6 +249,8 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	out := Outcome{Item: itemID}
 	workDir, noCheckout := projects.WorkDir(pr.Meta.Cwd, project, s.o.Host)
 	switch {
+	case packs.UsesPlaceholder(pr.Body, "instruction_path") && t.Instruction == "":
+		out.Reason = "实例没有任务说明（instruction），模板要求经 instruction_path 交给运行者"
 	case t.Harness == "":
 		out.Reason = "规则没有指定 harness，Web 设置里也没有默认 harness"
 	case !declared:
@@ -264,7 +274,8 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	}
 	runDir := filepath.Join(s.o.RunsDir, runID)
 	matPath := filepath.Join(runDir, "materials.json")
-	prompt := renderPrompt(pr.Body, itemID, runID, t.Project, matPath)
+	instrPath := filepath.Join(runDir, instructionFile)
+	prompt := renderPrompt(pr.Body, itemID, runID, t.Project, matPath, instrPath)
 	if err := s.stage(runDir, matPath, prompt, itemID, t); err != nil {
 		return out, err
 	}
@@ -329,9 +340,9 @@ func expand(in []string, pairs ...string) []string {
 }
 
 // renderPrompt 只代入内核给出的 id 与资料文件路径（C.7 的固定占位符）。
-func renderPrompt(body, item, run, project, materials string) string {
+func renderPrompt(body, item, run, project, materials, instruction string) string {
 	pairs := []string{}
-	for k, v := range map[string]string{"item_id": item, "run_id": run, "project_id": project, "materials_path": materials} {
+	for k, v := range map[string]string{"item_id": item, "run_id": run, "project_id": project, "materials_path": materials, "instruction_path": instruction} {
 		pairs = append(pairs, "{"+k+"}", v, "{ "+k+" }", v)
 	}
 	return strings.NewReplacer(pairs...).Replace(body)
@@ -375,6 +386,9 @@ type itemView struct {
 	Project string `json:"project,omitempty"`
 }
 
+// instructionFile 是运行目录里放任务说明的文件名（附录 C.7 的 instruction_path）。
+const instructionFile = "instruction.txt"
+
 func (s *Service) stage(runDir, matPath, prompt, itemID string, t Task) error {
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
 		return err
@@ -395,6 +409,11 @@ func (s *Service) stage(runDir, matPath, prompt, itemID string, t Task) error {
 	}
 	if err := os.WriteFile(matPath, b, 0o600); err != nil {
 		return err
+	}
+	if t.Instruction != "" {
+		if err := os.WriteFile(filepath.Join(runDir, instructionFile), []byte(t.Instruction), 0o600); err != nil {
+			return err
+		}
 	}
 	return os.WriteFile(filepath.Join(runDir, "prompt.md"), []byte(prompt), 0o600)
 }
