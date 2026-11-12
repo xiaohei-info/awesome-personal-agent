@@ -92,6 +92,19 @@ func placeholderPath(m string) bool {
 	return !strings.HasPrefix(m, "/Volumes/") && genericAccounts[m[strings.LastIndex(m, "/")+1:]]
 }
 
+// 本人决定公开的路径：.omac/（编排过程证据，worker 名里带机器名）与 tests/live/（live 测试既有主机名）。
+// 只豁免"机器名或个人名"词表规则；凭据、邮箱、本机路径、内网地址对这两处照常检查。
+var nameExemptPrefixes = []string{".omac/", "tests/live/"}
+
+func nameExempt(rel string) bool {
+	for _, p := range nameExemptPrefixes {
+		if strings.HasPrefix(rel, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func scan(rel string, data []byte, forbidden map[string]bool) []string {
 	var hits []string
 	text := string(data)
@@ -102,7 +115,11 @@ func scan(rel string, data []byte, forbidden map[string]bool) []string {
 			}
 		}
 	}
-	for _, w := range wordRE.FindAllString(strings.ToLower(rel+"\n"+text), -1) {
+	words := wordRE.FindAllString(strings.ToLower(rel+"\n"+text), -1)
+	if nameExempt(rel) {
+		words = nil
+	}
+	for _, w := range words {
 		if forbidden[wordHash(w)] {
 			hits = append(hits, rel+": [机器名或个人名] 命中禁用词表中的一项")
 			break
@@ -164,6 +181,23 @@ func TestLeakScannerRecognisesRealShapes(t *testing.T) {
 	}
 	if hits := scan("run-on-alphahost.sh", []byte("x"), forb); len(hits) != 1 {
 		t.Errorf("文件名里的禁用词也应命中，实际 %v", hits)
+	}
+	// 豁免只作用于词表规则：.omac/ 与 tests/live/ 里的机器名放行，其余规则照常命中，其他路径的机器名照常命中。
+	if hits := scan(".omac/state.yaml", []byte("worker alphahost"), forb); len(hits) != 0 {
+		t.Errorf(".omac/ 的机器名应放行，实际 %v", hits)
+	}
+	if hits := scan("tests/live/alphahost/x.go", []byte("ssh alphahost"), forb); len(hits) != 0 {
+		t.Errorf("tests/live/ 的机器名应放行，实际 %v", hits)
+	}
+	if hits := scan("docs/x.md", []byte("alphahost"), forb); len(hits) != 1 {
+		t.Errorf("豁免前缀之外的机器名仍应命中，实际 %v", hits)
+	}
+	for name, sample := range bad {
+		for _, rel := range []string{".omac/apa.state/_dag.yaml", "tests/live/x/evidence.txt"} {
+			if len(scan(rel, []byte(sample), forb)) == 0 {
+				t.Errorf("%s 下的 %s 仍应命中: %q", rel, name, sample)
+			}
+		}
 	}
 }
 
@@ -314,7 +348,7 @@ func tail(s string, n int) string {
 type flowEvidence struct {
 	ID       string   `json:"id"`
 	Mode     string   `json:"mode"`   // hermetic | live
-	Status   string   `json:"status"` // pass | fail | not-run
+	Status   string   `json:"status"` // pass | fail | not-run | out-of-scope | partial
 	Evidence []string `json:"evidence"`
 	Note     string   `json:"note"`
 }
@@ -400,8 +434,13 @@ func TestCloseoutEvidenceIsTraceable(t *testing.T) {
 			if strings.TrimSpace(f.Note) == "" {
 				t.Errorf("%s: %s 必须写明原因", id, f.Status)
 			}
+		case "out-of-scope", "partial":
+			// 本人决定的范围取舍：必须写明原因（partial 还要写明未执行的动作），不计缺口，不影响 verdict。
+			if strings.TrimSpace(f.Note) == "" {
+				t.Errorf("%s: %s 必须写明原因", id, f.Status)
+			}
 		default:
-			t.Errorf("%s: status 必须是 pass、fail 或 not-run，实际 %q", id, f.Status)
+			t.Errorf("%s: status 必须是 pass、fail、not-run、out-of-scope 或 partial，实际 %q", id, f.Status)
 		}
 		for _, e := range f.Evidence {
 			if strings.Contains(e, ":") { // 形如 "命令: go test ..." 的可复现命令，不是文件

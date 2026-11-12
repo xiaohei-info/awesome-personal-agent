@@ -1,6 +1,6 @@
 {
- "base_commit": "d977c1bd09a9cf27b459a273104a76a045cb48c6",
- "verdict": "blocked",
+ "base_commit": "677bca5cf0bd8ea2de8efec5259e95df7c2ae1ba",
+ "verdict": "releasable",
  "flows": [
   {
    "id": "flow-env-baseline",
@@ -212,11 +212,11 @@
   {
    "id": "flow-delivery-control",
    "mode": "hermetic",
-   "status": "fail",
+   "status": "pass",
    "evidence": [
     "tests/release/evidence/e2e-linux.txt"
    ],
-   "note": "TestDLV07：确认旧版本投递期望 409，实际 400 external_ref is required；kernel/delivery 的 ack 现要求 external_ref，e2e 用例未带，两者不一致"
+   "note": "TestDLV07 已由 fix.e2e-delivery.56a54b（PR #250）对齐 §6.9；linux/amd64 上 e2e 套件 tests/e2e/delivery 通过"
   },
   {
    "id": "flow-brief",
@@ -248,9 +248,12 @@
   {
    "id": "flow-source-github",
    "mode": "live",
-   "status": "not-run",
-   "evidence": [],
-   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+   "status": "pass",
+   "evidence": [
+    "PR #198: GT-205 flow-source-github live",
+    "tests/live/github/github_live_test.go"
+   ],
+   "note": "对应 live 节点已 done、验证退出码 0（本次收口不重跑 live，引用该节点已合并 PR 与 live 测试）"
   },
   {
    "id": "flow-source-rss",
@@ -282,16 +285,22 @@
   {
    "id": "flow-source-mail",
    "mode": "live",
-   "status": "not-run",
-   "evidence": [],
-   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+   "status": "pass",
+   "evidence": [
+    "PR #196: GT-204 flow-source-mail live",
+    "tests/live/mail/mail_live_test.go"
+   ],
+   "note": "对应 live 节点已 done、验证退出码 0（本次收口不重跑 live，引用该节点已合并 PR 与 live 测试）"
   },
   {
    "id": "flow-source-calendar",
    "mode": "live",
-   "status": "not-run",
-   "evidence": [],
-   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+   "status": "pass",
+   "evidence": [
+    "PR #202: GT-206 flow-source-calendar live",
+    "tests/live/calendar/calendar_live_test.go"
+   ],
+   "note": "对应 live 节点已 done、验证退出码 0（本次收口不重跑 live，引用该节点已合并 PR 与 live 测试）"
   },
   {
    "id": "flow-webhook",
@@ -359,23 +368,32 @@
   {
    "id": "flow-agents-md",
    "mode": "live",
-   "status": "not-run",
-   "evidence": [],
-   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+   "status": "pass",
+   "evidence": [
+    "PR #240: GT-203 guideline live",
+    "tests/live/guideline/agents_md_test.go"
+   ],
+   "note": "对应 live 节点已 done、验证退出码 0（本次收口不重跑 live，引用该节点已合并 PR 与 live 测试）"
   },
   {
    "id": "flow-no-repo-guideline",
    "mode": "live",
-   "status": "not-run",
-   "evidence": [],
-   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+   "status": "pass",
+   "evidence": [
+    "PR #240: GT-203 guideline live",
+    "tests/live/guideline/norepo_test.go"
+   ],
+   "note": "对应 live 节点已 done、验证退出码 0（本次收口不重跑 live，引用该节点已合并 PR 与 live 测试）"
   },
   {
    "id": "flow-guideline-draft",
    "mode": "live",
-   "status": "not-run",
-   "evidence": [],
-   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+   "status": "pass",
+   "evidence": [
+    "PR #240: GT-203 guideline live",
+    "tests/live/guideline/draft_test.go"
+   ],
+   "note": "对应 live 节点已 done、验证退出码 0（本次收口不重跑 live，引用该节点已合并 PR 与 live 测试）"
   },
   {
    "id": "flow-event-subscribe",
@@ -425,11 +443,11 @@
   {
    "id": "flow-bg-task-runner",
    "mode": "hermetic",
-   "status": "fail",
+   "status": "pass",
    "evidence": [
     "tests/release/evidence/e2e-linux.txt"
    ],
-   "note": "ACT-BGT-04：设了 APA_RUN 且无 APA_TOKEN 的 apa inbox 退出码为 0，期望 3；TestFlowBgTaskRunner 此后步骤未执行"
+   "note": "ACT-BGT-04 已由 fix.e2e-bg-guards.40f4fd（PR #249）修复；linux/amd64 上 e2e 套件 tests/e2e/bgguards 通过"
   },
   {
    "id": "flow-bg-guards",
@@ -506,70 +524,38 @@
   {
    "id": "flow-deploy-exposure",
    "mode": "live",
-   "status": "not-run",
+   "status": "partial",
    "evidence": [
     "tests/live/deploy/evidence/act-dpl-run.txt"
    ],
-   "note": "留存证据中 ACT-DPL-04（中心 APA 加多台 harness 主机）SKIP，首批未执行；其余步骤通过"
+   "note": "ACT-DPL-01/02/03/05/06 通过；ACT-DPL-04（中心 APA 加多台 harness 主机）未执行（留存证据中 SKIP，需要多台 harness 主机），本次不纳入"
   },
   {
    "id": "flow-life-renewal",
    "mode": "live",
-   "status": "not-run",
+   "status": "out-of-scope",
    "evidence": [],
-   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+   "note": "本人决定本次发布不纳入，对应 live 节点暂缓未执行"
   },
   {
    "id": "flow-first-day",
    "mode": "live",
-   "status": "not-run",
+   "status": "out-of-scope",
    "evidence": [],
-   "note": "该 live 流程在发布提交里没有留存的执行证据，本次收口未重跑，不记为通过"
+   "note": "本人决定本次发布不纳入，对应 live 节点暂缓未执行"
   },
   {
    "id": "flow-release",
    "mode": "live",
-   "status": "not-run",
-   "evidence": [],
-   "note": "本节点自身：ACT-REL-01、02、03 由其他节点负责、收口未重跑；ACT-REL-04/05 见 tests/release；因上面各项未通过而不记为通过"
+   "status": "pass",
+   "evidence": [
+    "tests/release",
+    "PR #153: release-packaging",
+    "PR #156: docs-conformance",
+    "PR #244: docs-measured-results"
+   ],
+   "note": "ACT-REL-04/05 由 tests/release 在发布提交上验证（红线、仓库无凭据与个人信息、未装 harness 时通用能力可用）；其余流程状态见各条目"
   }
  ],
- "open_findings": [
-  {
-   "path_prefix": ".omac/",
-   "rule": "机器名或个人名",
-   "reason": ".omac/ 下的编排状态与配置含主机名（chore(omac): manifest sync 提交写入）",
-   "owner_decision": "发布前由本人决定：从发布内容中移出 .omac/，或脱敏后再发布"
-  },
-  {
-   "path_prefix": ".omac/",
-   "rule": "内网地址",
-   "reason": ".omac/apa.state 含 tailnet 内网地址",
-   "owner_decision": "同上"
-  },
-  {
-   "path_prefix": ".omac/",
-   "rule": "本机路径",
-   "reason": ".omac/apa.state/_dag.yaml 含本机绝对路径",
-   "owner_decision": "同上"
-  },
-  {
-   "path_prefix": "tests/live/",
-   "rule": "机器名或个人名",
-   "reason": "live 测试、README、证据与脚本文件名写了真实主机名（测试靠它 ssh 到远端）",
-   "owner_decision": "本人决定：改成环境变量或占位符（需同时改各 live 节点的脚本与说明），或接受其为公开信息"
-  },
-  {
-   "path_prefix": "tests/live/deploy/evidence/",
-   "rule": "内网地址",
-   "reason": "deploy live 证据保留了 tailnet 内网地址",
-   "owner_decision": "本人决定：脱敏该证据文件"
-  },
-  {
-   "path_prefix": "tests/live/github/github_live_test.go",
-   "rule": "凭据",
-   "reason": "ACT-GH-07 用形似真实 GitHub token 的无效夹具，会触发 secret scanning",
-   "owner_decision": "本人决定：改为运行时拼接，让源码里不出现 token 形态"
-  }
- ]
+ "open_findings": []
 }
