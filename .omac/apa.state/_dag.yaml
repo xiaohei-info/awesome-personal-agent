@@ -1,4 +1,4 @@
-# sha256: c9e43b38ea63c68aa1a4526a80deeef709ff8c8c05db43275b1a2aedf718e0f2
+# sha256: 209a32419f65abc3a5c19bf8bb53a650111cf44c0d80f7f1751bc3f2d36235cc
 defects:
   schema: omac.defect-ledger/v1
   used_global: 15
@@ -185,6 +185,6 @@ defects:
       - flow-bg-task-runner/ACT-BGT-04
       reporters:
       - release-closeout
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-bg-guards.40f4fd
   inbox: []
