@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
@@ -23,6 +23,22 @@ export interface Source {
   cursor?: string;
   enabled: boolean;
   stats?: Stats;
+  outbound?: Outbound;
+}
+// 外发范围（§14.14）：external 为 null 表示未选择，没有缺省值。
+interface Outbound {
+  local: string;
+  external: string | null;
+}
+const SCOPES: [string, string][] = [
+  ["full", "全文"],
+  ["excerpt", "摘录"],
+  ["meta", "仅元信息"],
+  ["none", "不送"],
+];
+interface Restorable {
+  matched: number;
+  sources: { source: string; count: number }[];
 }
 interface Ingest {
   id: string;
@@ -92,24 +108,162 @@ function IgnoreAll({ label, body, onDone }: { label: string; body: Record<string
   );
 }
 
+function ScopeSelect({ label, value, onChange }: { label: string; value: string | null; onChange: (v: string) => void }) {
+  return (
+    <label>
+      {label}
+      <select value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
+        {!value && <option value="">未选择</option>}
+        {SCOPES.map(([v, t]) => (
+          <option key={v} value={v}>
+            {t}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+// 来源行里的两个外发范围：显示服务端当前值，改动即 PUT，以服务端回读为准（只有 Web 登录能写）。
+function OutboundScopes({ source, onSaved, onError }: { source: Source; onSaved: () => Promise<void>; onError: (m: string) => void }) {
+  const { api } = useSession();
+  const o = source.outbound ?? { local: "full", external: null };
+  const save = async (next: Outbound) => {
+    try {
+      await api.put(`/settings/sources/${encodeURIComponent(source.id)}/outbound`, next);
+    } catch (e) {
+      onError(msg(e));
+    }
+    await onSaved();
+  };
+  return (
+    <div className="sub full" role="group" aria-label={`外发范围 ${source.id}`}>
+      <ScopeSelect label="本机范围" value={o.local} onChange={(v) => save({ ...o, local: v })} />{" "}
+      <ScopeSelect label="外部范围" value={o.external} onChange={(v) => save({ ...o, external: v })} />
+    </div>
+  );
+}
+
+// 把旧级联忽略的事件放回积压（§9.3）：先预览（只读）再执行；改动条件后预览作废，必须重新预览。
+function RestorePanel({ sources, onRestored }: { sources: Source[]; onRestored: () => void }) {
+  const { api } = useSession();
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [source, setSource] = useState("");
+  const [preview, setPreview] = useState<Restorable | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<number | null>(null);
+  const key = useRef(crypto.randomUUID());
+  const win = () => ({ from: new Date(from).toISOString(), to: new Date(to).toISOString(), ...(source ? { source } : {}) });
+  const edit = (set: (v: string) => void) => (e: { target: { value: string } }) => {
+    set(e.target.value);
+    setPreview(null);
+    setDone(null);
+    setError(null);
+  };
+
+  const look = async () => {
+    setError(null);
+    setDone(null);
+    try {
+      const q = new URLSearchParams(win());
+      setPreview(await api.get<Restorable>(`/source-events/restorable?${q}`));
+      key.current = crypto.randomUUID();
+    } catch (e) {
+      setPreview(null);
+      setError(msg(e));
+    }
+  };
+  const run = async () => {
+    setError(null);
+    try {
+      const r = await api.post<{ restored: number }>("/source-events/restore", win(), { "Idempotency-Key": key.current });
+      setDone(r.restored);
+      setPreview(null);
+      onRestored();
+    } catch (e) {
+      // 4xx 是明确被拒，换新键；结果未知（网络错误、5xx）保留键以便安全重试。
+      if (e instanceof ApiError && e.status >= 400 && e.status < 500) key.current = crypto.randomUUID();
+      setError(msg(e));
+    }
+  };
+
+  return (
+    <section role="region" aria-labelledby="h-restore">
+      <h2 id="h-restore">把旧级联忽略的事件放回积压</h2>
+      <p className="sub">选一段时间（按落盘时间），把当时被旧规则以低把握忽略、没有判断记录的事件放回积压，之后再经积压放开重判。先预览条数，确认后再执行。</p>
+      {error && <div role="alert">{error}</div>}
+      {done !== null && <p role="status">已放回 {done} 条</p>}
+      <div className="panel">
+        <label>
+          起（含）
+          <input type="datetime-local" value={from} onChange={edit(setFrom)} />
+        </label>
+        <label>
+          止（不含）
+          <input type="datetime-local" value={to} onChange={edit(setTo)} />
+        </label>
+        <label>
+          来源
+          <select value={source} onChange={edit(setSource)}>
+            <option value="">不限来源</option>
+            {sources.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div>
+          <button disabled={!from || !to} onClick={look}>预览</button>{" "}
+          <button disabled={!preview || preview.matched === 0} onClick={run}>放回积压</button>
+        </div>
+        {preview && (
+          <div role="status" aria-label="放回预览">
+            <p>可放回 {preview.matched} 条</p>
+            <ul className="rows">
+              {preview.sources.map((x) => (
+                <li key={x.source}>
+                  {x.source} · {x.count} 条
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Registration({ onDone }: { onDone: () => void }) {
   const { api } = useSession();
-  const [f, setF] = useState({ id: "", command: "", schedule: "15m", timeout: "", credentials_path: "" });
+  const [f, setF] = useState({ id: "", source_type: "", command: "", schedule: "15m", timeout: "", credentials_path: "", local: "full", external: "" });
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
 
   const submit = async () => {
     setError(null);
+    if (!f.external) {
+      setError("必须选择外部外发范围：来源内容发往外部端点前要由你决定送出多少");
+      return;
+    }
     const body: Record<string, unknown> = { id: f.id.trim(), type: "script", command: f.command.trim(), schedule: f.schedule.trim() };
+    if (f.source_type.trim()) body.source_type = f.source_type.trim();
     if (f.timeout.trim()) body.timeout = Number(f.timeout);
     if (f.credentials_path.trim()) body.credentials_path = f.credentials_path.trim();
     try {
       await api.post("/sources", body);
-      setF({ ...f, id: "", command: "", timeout: "", credentials_path: "" });
-      onDone();
     } catch (e) {
       setError(msg(e));
+      return;
     }
+    setF({ ...f, id: "", source_type: "", command: "", timeout: "", credentials_path: "", external: "" });
+    try {
+      await api.put(`/settings/sources/${encodeURIComponent(body.id as string)}/outbound`, { local: f.local, external: f.external });
+    } catch (e) {
+      setError(`来源已登记，但外发范围没有保存：${msg(e)}。请在来源列表里重新选择`);
+    }
+    onDone();
   };
 
   return (
@@ -129,6 +283,10 @@ function Registration({ onDone }: { onDone: () => void }) {
           <input value={f.id} onChange={set("id")} />
         </label>
         <label>
+          来源类型（source_type，可选）
+          <input value={f.source_type} onChange={set("source_type")} />
+        </label>
+        <label>
           命令
           <input value={f.command} onChange={set("command")} />
         </label>
@@ -144,6 +302,8 @@ function Registration({ onDone }: { onDone: () => void }) {
           凭据路径
           <input value={f.credentials_path} onChange={set("credentials_path")} />
         </label>
+        <ScopeSelect label="本机端点外发范围" value={f.local} onChange={(v) => setF({ ...f, local: v })} />
+        <ScopeSelect label="外部端点外发范围" value={f.external} onChange={(v) => setF({ ...f, external: v })} />
         <div>
           <button type="submit" disabled={!f.id.trim() || !f.command.trim() || !f.schedule.trim()}>登记</button>
         </div>
@@ -393,6 +553,7 @@ export function SourcesPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [rev, setRev] = useState(0); // 放回积压后让打开的详情重读积压
 
   const load = useCallback(
     () =>
@@ -452,6 +613,7 @@ export function SourcesPage() {
                   游标 {s.cursor || "—"} · 最近成功 {at(s.stats?.last_success_at)} · 连续失败 {s.stats?.consecutive_failures ?? 0} · 超时 {s.stats?.timeouts ?? 0}
                   {s.stats?.last_error && ` · 最近错误 ${s.stats.last_error}`}
                 </div>
+                <OutboundScopes source={s} onSaved={load} onError={setError} />
                 <div role="group" aria-label={`操作 ${s.id}`}>
                   <button onClick={() => toggle(s)}>{s.enabled ? "停用" : "启用"}</button> <button onClick={() => setSelected(s.id)}>详情</button>
                 </div>
@@ -460,7 +622,8 @@ export function SourcesPage() {
           </ul>
         )}
       </section>
-      {current && <Detail source={current} />}
+      {current && <Detail key={`${current.id}:${rev}`} source={current} />}
+      <RestorePanel sources={sources ?? []} onRestored={() => setRev((n) => n + 1)} />
       <Registration onDone={load} />
     </main>
   );
