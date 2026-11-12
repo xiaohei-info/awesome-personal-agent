@@ -416,3 +416,64 @@ func TestSourceAddWithDefaultProject(t *testing.T) {
 		t.Fatalf("show: %+v", s)
 	}
 }
+
+// ACT-BKL-02、ACT-BKL-04：`apa source backlog list` 列出积压且旧原因原样；`rules` 缺本人原话得 23、observer 得 4，积压不变；
+// 带原话时返回 attached/disposed/remaining（此内核没有来源规则，全部留在积压里）。
+func TestBacklogListAndRulesCommands(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	var hook domain.Source
+	decode(t, k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &hook)
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		for i, row := range []struct{ disp, reason string }{{"unjudged", "undecided"}, {"unjudged", ""}, {"expired", ""}, {"proposed", ""}} {
+			if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
+				correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges)
+				VALUES ('dd', ?, ?, 'src_hook', 'r', 't', 's', '', '', '', 1, '[]', '', 0, ?, '', '', ?, 0)`,
+				"e"+strconv.Itoa(i), "e"+strconv.Itoa(i), row.disp, row.reason); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var list struct {
+		Total  int
+		Events []struct {
+			Disposition    string
+			UnjudgedReason string `json:"unjudged_reason"`
+		}
+	}
+	decode(t, k.apa(obs, "source", "backlog", "list"), &list)
+	if list.Total != 3 || len(list.Events) != 3 || list.Events[0].UnjudgedReason != "undecided" || list.Events[1].UnjudgedReason != "" {
+		t.Fatalf("list: %+v", list)
+	}
+	decode(t, k.apa(obs, "source", "backlog", "list", "--source", "src_hook"), &list)
+	if list.Total != 3 {
+		t.Fatalf("list --source: %+v", list)
+	}
+
+	// 不带 --evidence：直接用 client 跑，k.apa 总是带原话。
+	noWords := func(token string) int {
+		vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": t.TempDir()}
+		return client.Main([]string{"source", "backlog", "rules"}, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
+			Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, HTTP: http.DefaultClient})
+	}
+	if code := noWords(dlg); code != domain.ExitBasisRequired {
+		t.Fatalf("rules without words: %d", code)
+	}
+	if r := k.apa(obs, "source", "backlog", "rules"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer rules: %+v", r)
+	}
+	var res struct{ Attached, Disposed, Remaining int }
+	decode(t, k.apa(dlg, "source", "backlog", "rules"), &res)
+	if res.Attached != 0 || res.Disposed != 0 || res.Remaining != 3 {
+		t.Fatalf("rules: %+v", res)
+	}
+	for _, args := range [][]string{{"source", "backlog"}, {"source", "backlog", "score"}, {"source", "backlog", "list", "extra"}} {
+		if r := k.apa(obs, args...); r.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+}

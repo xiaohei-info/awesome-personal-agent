@@ -719,16 +719,16 @@ func requeue(tx *store.Tx, id, where string) (int, error) {
 	return ev.Rejudges, err
 }
 
-// Resolve 在调用方事务内结清一条积压事件：to 为 expired 时只接受 unjudged；为 proposed、ignored 时接受 unjudged 与 expired
-// （本人处理），proposed 同时关联事项。不记事件，调用方自己负责留痕。
+// Resolve 在调用方事务内结清一条积压事件：to 为 expired 时只接受 unjudged；为 proposed、ignored、digest 时接受 unjudged 与 expired
+// （本人处理、只跑规则），proposed 同时关联事项。不记事件，调用方自己负责留痕。
 func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error {
 	from := `disposition IN ('unjudged', 'expired')`
 	switch to {
 	case domain.DispositionExpired:
 		from = `disposition = 'unjudged'`
-	case domain.DispositionProposed, domain.DispositionIgnored:
+	case domain.DispositionProposed, domain.DispositionIgnored, domain.DispositionDigest:
 	default:
-		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored or expired")
+		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored, digest or expired")
 	}
 	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND `+from, string(to), item, id)
 	if err == nil && n == 0 {
@@ -837,7 +837,8 @@ func SetAttachState(tx *store.Tx, id, to, item string) error {
 		)
 		switch {
 		case f == "": // 首次挂靠
-			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
+			// 积压事件（unjudged、expired）重走规则时也可挂靠（§9.3 积压放开第 1 步）；原因随之清空。
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ?, unjudged_reason = '' WHERE id = ? AND attach_state = ? AND disposition IN (?, 'unjudged', 'expired')`,
 				to, string(domain.DispositionAttached), item, id, f, string(domain.DispositionPending))
 		case to == AttachHandedBack || to == AttachReleased:
 			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
