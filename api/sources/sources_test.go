@@ -154,6 +154,7 @@ func (e *env) do(secret, method, path, body string, hdr ...string) resp {
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
 		req.Header.Set("X-APA-Session", "s1")
+		req.Header.Set("X-APA-Session-Kind", "direct")
 	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])

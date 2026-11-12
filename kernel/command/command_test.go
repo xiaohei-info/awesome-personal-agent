@@ -225,7 +225,7 @@ func TestAuthorizationDenyAndRejectionTrail(t *testing.T) {
 
 	// delegate 回答 web_only：退出码 20，不执行，并留一条 command.rejected。
 	dlg := e.token(t, auth.Spec{Kind: auth.Delegate})
-	d := Bearer{Auth: e.au, Secret: dlg.Label, Origin: auth.Origin{Session: "s1"}}
+	d := Bearer{Auth: e.au, Secret: dlg.Label, Origin: auth.Origin{Session: "s1", SessionKind: "direct"}}
 	if _, err := e.x.Do(bg, Request{Identity: d, Command: "decision.answer", Input: in(noteIn{ID: "d1"}), Evidence: "yes", WebURL: "https://w/d1"}); exit(err) != domain.ExitWebOnly {
 		t.Fatalf("web_only: %v", err)
 	}
@@ -668,7 +668,7 @@ func TestProxyTiersAreDecidedInThePipeline(t *testing.T) {
 		t.Fatalf("declared tier = %v %v", tier, ok)
 	}
 	c := e.token(t, auth.Spec{Kind: auth.Delegate})
-	me := Bearer{Auth: e.au, Secret: c.Label, Origin: auth.Origin{Session: "s1"}, OnBehalfOf: "owner"}
+	me := Bearer{Auth: e.au, Secret: c.Label, Origin: auth.Origin{Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
 	noSession := Bearer{Auth: e.au, Secret: c.Label, OnBehalfOf: "owner"}
 	lastActor := func() domain.Actor { es := e.events(t); return es[len(es)-1].Event.Actor }
 	do := func(id Identity, cmd, ev string, n noteIn) error {
@@ -734,7 +734,7 @@ func TestOnRejectRunsInTheRejectionTransaction(t *testing.T) {
 		return hookErr
 	})
 	c := e.bearer(t, auth.Spec{Kind: auth.Delegate})
-	c.Origin = auth.Origin{Session: "s1"}
+	c.Origin = auth.Origin{Session: "s1", SessionKind: "direct"}
 	do := func() error {
 		_, err := e.x.Do(bg, Request{Identity: c, Command: "tier.decide", Input: in(noteIn{ID: "o1"})})
 		return err

@@ -133,7 +133,7 @@ func TestFlowProjectMapping(t *testing.T) {
 	remotes := map[string]string{work: e.TestRepo}
 	for name, proj := range map[string]string{"acc-open": open, "acc-home": home} {
 		remotes[proj] = "https://example.invalid/acc/" + name + ".git"
-		if _, errOut, code := apaIn(t, e, e.Root, e.DEL, []string{"APA_SESSION=e2e-session"}, "project", "repos", "add", proj, "--remote", remotes[proj], "--evidence", "mapping e2e"); code != 0 {
+		if _, errOut, code := apaIn(t, e, e.Root, e.DEL, []string{"APA_SESSION=e2e-session", "APA_SESSION_KIND=direct"}, "project", "repos", "add", proj, "--remote", remotes[proj], "--evidence", "mapping e2e"); code != 0 {
 			t.Fatalf("登记 %s 远程地址退出码 %d: %s", name, code, errOut)
 		}
 	}

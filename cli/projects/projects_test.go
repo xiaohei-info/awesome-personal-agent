@@ -78,7 +78,7 @@ type result struct {
 
 func (k *kernel) apa(token string, args ...string) result {
 	k.t.Helper()
-	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_HOME": k.t.TempDir()}
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": k.t.TempDir()}
 	var out, errb bytes.Buffer
 	env := client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient}

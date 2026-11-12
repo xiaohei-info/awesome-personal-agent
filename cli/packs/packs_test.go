@@ -111,7 +111,7 @@ type result struct {
 }
 
 func run(url, token string, args ...string) result {
-	vars := map[string]string{"APA_URL": url, "APA_TOKEN": token, "APA_SESSION": "s1"}
+	vars := map[string]string{"APA_URL": url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct"}
 	var out, errb bytes.Buffer
 	env := client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: "/nonexistent",
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient}

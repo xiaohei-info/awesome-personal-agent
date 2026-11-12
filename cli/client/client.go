@@ -25,6 +25,7 @@ const (
 	EnvProject        = "APA_PROJECT"
 	EnvSession        = "APA_SESSION"
 	EnvHarness        = "APA_HARNESS"
+	EnvSessionKind    = "APA_SESSION_KIND"
 	EnvRun            = "APA_RUN"
 	EnvRunCredentials = "APA_RUN_CREDENTIAL_FILE"
 	EnvRunContext     = "APA_RUN_CONTEXT"
@@ -233,6 +234,9 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string,
 	if s := c.Env.Getenv(EnvSession); s != "" {
 		req.Header.Set("X-APA-Session", s)
 	}
+	if k := c.Env.Getenv(EnvSessionKind); k != "" {
+		req.Header.Set("X-APA-Session-Kind", k)
+	}
 	if h := c.Env.Getenv(EnvHarness); h != "" {
 		req.Header.Set("X-APA-Harness", h)
 	}
@@ -279,6 +283,6 @@ func decodeError(status int, data []byte) error {
 
 var knownCodes = map[domain.Code]struct{}{
 	domain.CodeInvalidRequest: {}, domain.CodeUnauthenticated: {}, domain.CodePermissionDenied: {},
-	domain.CodeWebOnly: {}, domain.CodeExecutorNotAllowed: {}, domain.CodeRiskScreeningPending: {}, domain.CodeBasisRequired: {},
+	domain.CodeWebOnly: {}, domain.CodeExecutorNotAllowed: {}, domain.CodeRiskScreeningPending: {}, domain.CodeBasisRequired: {}, domain.CodeSessionNotDirect: {},
 	domain.CodeNotFound: {}, domain.CodeConflict: {}, domain.CodeInternal: {},
 }

@@ -219,7 +219,7 @@ func (e *env) issue(name string, s auth.Spec) {
 }
 
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {

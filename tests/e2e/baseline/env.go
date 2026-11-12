@@ -163,8 +163,12 @@ func (e *Env) env(token string, args []string) []string {
 	}
 	// 带本人原话（--evidence）的第二档命令还要会话引用；harness 插件会设 APA_SESSION，这里替身。
 	// NoSession 供要验证"只带原话不带会话"的用例关掉它。
-	if !e.NoSession && slices.ContainsFunc(args, func(a string) bool { return a == "--evidence" || strings.HasPrefix(a, "--evidence=") }) {
-		env = append(env, "APA_SESSION=e2e-session")
+	// 会话类型是另一条依据（§14.5）：替身按私聊上报，缺会话引用时仍是"依据不足"。
+	if slices.ContainsFunc(args, func(a string) bool { return a == "--evidence" || strings.HasPrefix(a, "--evidence=") }) {
+		env = append(env, "APA_SESSION_KIND=direct")
+		if !e.NoSession {
+			env = append(env, "APA_SESSION=e2e-session")
+		}
 	}
 	return env
 }

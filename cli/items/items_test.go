@@ -121,7 +121,7 @@ func (r run) json(t *testing.T) map[string]any {
 func (k *kernel) apa(kind auth.Kind, args ...string) run {
 	k.t.Helper()
 	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_SESSION": "s1", "APA_HOME": k.t.TempDir()}
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": k.t.TempDir()}
 	code := client.Main(args, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return run{code, out.String(), errb.String()}
