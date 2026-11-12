@@ -2184,7 +2184,7 @@ delegate 凭据调用写命令时，内核按"这个动作是谁的事"分三档
 
 内核生成的 `ask` 只写操作者、命令名和拒绝原因，不带 agent 自述的内容，`risk_class` 固定为 `web_only`，不做初筛，只有本人能在 Web 回答。选项只有"继续"，回答后事项回 `open`，不替 agent 重放被拒绝的修改。本人同意时直接在 Web 修改，或签发授权单后由 agent 重试。
 
-**把本人的事项标为完成（`SPIKE-DONE-AUTHZ` 已证实）。** delegate 凭据对不属于自己的事项（不是绑定的事项，也不是自己发起的委派子事项）执行 `item.transition ... done`，属于第二档：不带本人原话也不带授权单时退出码 23，事项转 `needs_input`、不转 `done`，并记 `command.rejected`；`direct` 会话里的本人原话加会话引用放行，Event 带 `on_behalf_of`、原话、会话引用和会话类型；`group`、`unknown` 会话的原话为 `session_not_direct`；授权单只在 `actions` 含 `item.transition` 且对象在范围内时放行，范围外为 23。委派子事项的 `done` 回执仍是第一档，另要结果证据（上文）。内核实现无需修正，用例见 `tests/contract/authz/session_kind_test.go` 与 `grant_test.go`。
+**把本人的事项标为完成（`SPIKE-DONE-AUTHZ` 已证实）。** delegate 凭据对不属于自己的事项（不是绑定的事项，也不是自己发起的委派子事项）执行 `item.transition ... done`，属于第二档：不带本人原话也不带授权单时退出码 23，事项转 `needs_input`、不转 `done`，并记 `command.rejected`；`direct` 会话里的本人原话加会话引用放行，Event 带 `on_behalf_of`、原话、会话引用和会话类型；`group`、`unknown` 会话的原话为 `session_not_direct`；授权单只在 `actions` 含 `item.transition` 且对象在范围内时放行，范围外或 `actions` 不含它为 23。委派子事项的 `done` 回执仍是第一档，另要结果证据（上文）。内核实现无需修正，用例见 `tests/contract/authz/session_kind_test.go` 的 `TestDelegateDoneOnOwnersItemNeedsWordsInDirectSessionOrGrant`（原话与会话类型）和 `TestGrantAuthorisesDoneOnlyInScope`（授权单）。
 
 **撤销。** 撤销（`item.revert`）只在 Web，由本人操作。agent 经原话或授权单作出的代答和修改都可撤销：代答撤销恢复 `ask` 未回答、事项回 `needs_input`；外部已发生的副作用不撤销，界面明确提示（§6.4）。
 

@@ -9,6 +9,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
 
 // 会话类型（§14.5、附录 B.3）：凭本人原话的代理写入只在 direct 下接受，走真实凭据、命令管线与 HTTP 骨干。
@@ -151,4 +152,58 @@ func TestDelegateDoneOnOwnersItemNeedsWordsInDirectSessionOrGrant(t *testing.T) 
 		}
 	}
 	t.Fatal("done by words must record on_behalf_of, evidence, session and session kind")
+}
+
+// ACT-AUTH-11（SPIKE-DONE-AUTHZ）：授权单把本人的事项标为完成——范围内放行且 Event 记 grant；范围外为 23 且事项转 needs_input；
+// 授权单的 actions 不含 item.transition 也是 23。授权单不看会话类型（这里不带会话类型）。
+func TestGrantAuthorisesDoneOnlyInScope(t *testing.T) {
+	e := setup(t)
+	if err := decisions.Register(e.x); err != nil {
+		t.Fatal(err)
+	}
+	home := e.cmd(owner, "project.create", map[string]any{"name": "acc-home"})
+	open := e.cmd(owner, "project.create", map[string]any{"name": "acc-open"})
+	mk := func(project string) string {
+		return e.cmd(owner, "item.create", map[string]any{"kind": "task", "title": "mine", "phase": "open", "project": project})
+	}
+	done := map[string]any{"to": "done", "reason": "done"}
+	with := func(id string) map[string]any {
+		return map[string]any{"id": id, "to": "done", "reason": done["reason"]}
+	}
+	g := e.grant("DEL", func(in *policy.GrantInput) {
+		in.Scope = policy.Scope{Projects: []string{home}}
+		in.Actions = []string{"item.transition"}
+	})
+	inScope, outScope := mk(home), mk(open)
+
+	e.cmd(e.asKind("DEL", "", ""), "item.transition", with(inScope), withGrant(g.ID))
+	if e.get(inScope).Phase != domain.PhaseDone {
+		t.Fatalf("in scope: %s", e.get(inScope).Phase)
+	}
+	if evs := e.events4(inScope); func() bool {
+		for _, ev := range evs {
+			if ev.Type == domain.EvItemPhaseChanged && ev.Grant == g.ID {
+				return false
+			}
+		}
+		return true
+	}() {
+		t.Fatal("the transition Event must record the grant")
+	}
+
+	rej := e.rejected()
+	e.wantExit(domain.ExitBasisRequired, e.asKind("DEL", "", ""), "item.transition", with(outScope), withGrant(g.ID))
+	if e.get(outScope).Phase != domain.PhaseNeedsInput || e.rejected() != rej+1 {
+		t.Fatalf("out of scope: %s", e.get(outScope).Phase)
+	}
+
+	noAction := e.grant("DEL", func(in *policy.GrantInput) {
+		in.Scope = policy.Scope{Projects: []string{home}}
+		in.Actions = []string{"decision.answer"}
+	})
+	other := mk(home)
+	e.wantExit(domain.ExitBasisRequired, e.asKind("DEL", "", ""), "item.transition", with(other), withGrant(noAction.ID))
+	if e.get(other).Phase == domain.PhaseDone {
+		t.Fatal("a grant without item.transition completed the item")
+	}
 }
