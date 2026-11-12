@@ -154,7 +154,8 @@ func TestDLV05(t *testing.T) {
 	}
 }
 
-// TestDLV07 对应 ACT-DLV-07：事项变化后旧投递作废，渠道领不到旧版本，也不能再确认它。
+// TestDLV07 对应 ACT-DLV-07：事项变化后旧投递作废，渠道领不到旧版本，也不能再确认它；
+// 本人回答的那条（当前版本）投递记 acknowledged，不记 superseded（§6.9"回答即确认"）。
 func TestDLV07(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
@@ -164,20 +165,39 @@ func TestDLV07(t *testing.T) {
 	f.ask(id)
 	// 等触达把投递写进队列（尚未被领取时它在健康视图的投递积压里，id 为 decision:<事项>:<版本>）。
 	old := f.waitBacklog("decision:" + id + ":")
-	f.webOK("POST", "/items/"+id+"/decide", `{"choice":"A"}`, http.StatusOK)
+	ver := old[strings.LastIndex(old, ":")+1:]
 
-	if d := f.claimWithin(settle); d != nil {
-		t.Fatalf("事项已回答，渠道还领到了旧投递: %+v", d)
+	// 本人（DEL）改了事项的无关字段，待决决策以更高版本重发，old 成为低于当前版本的旧投递。
+	f.apa(f.DEL, 0, "item", "update", id, "--title", "dlv-07-v2", "--reason", "改名", "--evidence", "事项变化")
+	cur := f.waitBacklog("decision:" + id + ":")
+	for end := time.Now().Add(settle); cur == old && time.Now().Before(end); time.Sleep(time.Second) {
+		cur = f.waitBacklog("decision:" + id + ":")
 	}
-	if strings.Contains(f.apa(f.OBS, 0, "health").Stdout, old) {
+	if cur == old {
+		t.Fatalf("再次 ask 后没有产生更高版本的投递，仍是 %s", old)
+	}
+	if strings.Contains(f.apa(f.OBS, 0, "health").Stdout, `"`+old+`"`) {
 		t.Errorf("作废的投递 %s 仍在投递积压里", old)
 	}
-	ver := old[strings.LastIndex(old, ":")+1:]
 	if r := f.APIRaw("POST", "/v1/deliveries/"+old+"/ack", `{"version":`+ver+`}`, f.CHAN); r.Code != http.StatusConflict {
 		t.Errorf("确认旧版本投递应为 409，实际 %d %s", r.Code, r.Body)
 	}
-	if got := f.unread(); len(got) != 0 {
-		t.Errorf("作废的投递不应出现在 Web 未读: %+v", got)
+	if d := f.claimWithin(settle); d == nil || d.ID == old {
+		t.Fatalf("渠道应只领到当前版本投递 %s，实际 %+v", cur, d)
+	}
+	for _, d := range f.unread() {
+		if d.ID == old {
+			t.Errorf("作废的投递不应出现在 Web 未读: %+v", d)
+		}
+	}
+
+	// 本人回答当前版本：该投递转 acknowledged，不是 superseded。
+	f.webOK("POST", "/items/"+id+"/decide", `{"choice":"A"}`, http.StatusOK)
+	if d := f.claimWithin(settle); d != nil {
+		t.Fatalf("事项已回答，渠道还领到了投递: %+v", d)
+	}
+	if r := f.APIRaw("POST", "/v1/deliveries/"+cur+"/ack", `{"version":`+cur[strings.LastIndex(cur, ":")+1:]+`}`, f.CHAN); r.Code == http.StatusConflict {
+		t.Errorf("被本人回答的投递应为 acknowledged 而不是 superseded，ack 却回 409: %s", r.Body)
 	}
 }
 
