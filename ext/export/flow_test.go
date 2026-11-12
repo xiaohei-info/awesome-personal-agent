@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -69,6 +71,58 @@ func run(t *testing.T, k *fakeKernel, dir string, o Options) {
 	runUntilOpts(t, k, dir, o, func() bool {
 		b, _ := os.ReadFile(filepath.Join(dir, ".apa-export-cursor"))
 		return k.count("GET /v1/events") > polled+1 && strings.TrimSpace(string(b)) == fmt.Sprint(last)
+	})
+}
+
+// live 起一个常驻会话（不重启）并在其中改内核；对账间隔取毫秒，until 在期限内等条件成立。
+func live(t *testing.T, k *fakeKernel, dir string, o Options, body func(until func(what string, cond func() bool))) {
+	t.Helper()
+	if err := o.normalize(); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(k)
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Config{URL: srv.URL, Key: "k", Dir: dir, Idle: 5 * time.Millisecond, Backoff: 5 * time.Millisecond, Reconcile: 20 * time.Millisecond, Opts: o})
+	}()
+	body(func(what string, cond func() bool) {
+		t.Helper()
+		for i := 0; i < 1000 && !cond(); i++ {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if !cond() {
+			t.Errorf("timed out waiting for: %s", what)
+		}
+	})
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// 决策与委派事件不伴随 item.*：常驻会话里它们也要触发重写（decision.requested/resolved、delegation.created/reported）。
+func TestDecisionAndDelegationEventsReexportLiveItems(t *testing.T) {
+	k, dir := newKernel(), t.TempDir()
+	k.setItem(it("itm_d", "待决", doc{"body": "v1"}))
+	k.event("item.created", "itm_d")
+	p := filepath.Join(dir, "acc-work", "task", "待决.md")
+	live(t, k, dir, accOpts(), func(until func(string, func() bool)) {
+		until("initial", func() bool { _, err := os.Stat(p); return err == nil })
+		for i, typ := range []string{"decision.requested", "decision.resolved", "delegation.created", "delegation.reported"} {
+			body := fmt.Sprintf("after-%d", i)
+			k.setItem(it("itm_d", "待决", doc{"body": body, "version": i + 2}))
+			k.event(typ, "itm_d")
+			until(typ, func() bool { b, _ := os.ReadFile(p); return strings.Contains(string(b), body) })
+		}
+		// 只有委派事件、从未见过 item.* 的新事项也要出现。
+		k.setItem(it("itm_n", "新委派", doc{"kind": "delegation"}))
+		k.event("delegation.created", "itm_n")
+		until("delegation-only item", func() bool {
+			_, err := os.Stat(filepath.Join(dir, "acc-work", "delegation", "新委派.md"))
+			return err == nil
+		})
 	})
 }
 
@@ -318,9 +372,12 @@ func TestPhysicalDeleteRemovesOnlyThatFile(t *testing.T) {
 	run(t, k, dir, accOpts())
 	before := read(t, filepath.Join(dir, "acc-work", "task", "同名事项.md"))
 
-	k.purge("itm_2")
-	k.event("purge.executed", "itm_2")
-	run(t, k, dir, accOpts())
+	// 运行中的会话：内核不发任何删除事件（真实的 /events 不会有），文件仍要消失。
+	live(t, k, dir, accOpts(), func(until func(string, func() bool)) {
+		until("initial export", func() bool { return len(files(t, dir)) == 3 })
+		k.purge("itm_2")
+		until("purged file removed", func() bool { return len(files(t, dir)) == 2 })
+	})
 	if got := files(t, dir); len(got) != 2 {
 		t.Errorf("files after purge = %v", got)
 	}
@@ -430,4 +487,19 @@ func TestOptionsValidationAndFileLoading(t *testing.T) {
 	if _, err := ConfigFromEnv(func(n string) string { return env[n] }); err == nil {
 		t.Error("missing config file must be an error")
 	}
+}
+
+// 材料被物理删除同样靠对账发现。
+func TestPhysicalDeleteOfMaterialIsReconciledWhileRunning(t *testing.T) {
+	k, dir := newKernel(), t.TempDir()
+	k.objects["/materials/mat_bb"] = matJSON
+	k.add(1, "material.revised", "mat_bb")
+	p := filepath.Join(dir, "materials", "mat_bb.md")
+	live(t, k, dir, accOpts(), func(until func(string, func() bool)) {
+		until("exported", func() bool { _, err := os.Stat(p); return err == nil })
+		k.mu.Lock()
+		delete(k.objects, "/materials/mat_bb")
+		k.mu.Unlock()
+		until("removed", func() bool { _, err := os.Stat(p); return err != nil })
+	})
 }

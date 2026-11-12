@@ -24,6 +24,7 @@ type Config struct {
 	URL, Key, Dir string
 	Wait          int // 长轮询秒数
 	Idle, Backoff time.Duration
+	Reconcile     time.Duration // 运行中重新对账的间隔：物理删除没有事件，只能靠对账发现
 	Opts          Options
 }
 
@@ -34,7 +35,7 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	c := Config{URL: getenv("APA_URL"), Key: getenv("APA_EXT_KEY"), Dir: getenv("APA_EXPORT_DIR"), Wait: 50, Idle: time.Second, Backoff: 5 * time.Second, Opts: o}
+	c := Config{URL: getenv("APA_URL"), Key: getenv("APA_EXT_KEY"), Dir: getenv("APA_EXPORT_DIR"), Wait: 50, Idle: time.Second, Backoff: 5 * time.Second, Reconcile: time.Minute, Opts: o}
 	if c.Dir == "" {
 		c.Dir = o.Root
 	}
@@ -91,12 +92,15 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	synced := false
+	synced, lastSync := false, time.Now()
 	for ctx.Err() == nil {
 		var n int
-		if !synced {
+		if !synced || (cfg.Reconcile > 0 && time.Since(lastSync) >= cfg.Reconcile) {
 			err = x.sync(ctx)
 			synced = err == nil
+			if synced {
+				lastSync = time.Now()
+			}
 		} else {
 			cursor, n, err = x.stepFrom(ctx, cursor)
 		}
@@ -146,12 +150,10 @@ func (x *exporter) stepFrom(ctx context.Context, cursor int64) (int64, int, erro
 	for _, e := range page.Events {
 		var bases []string
 		switch {
-		case strings.HasPrefix(e.Type, "item."):
-			bases = []string{"items"}
+		case strings.HasPrefix(e.Type, "item."), strings.HasPrefix(e.Type, "decision."), strings.HasPrefix(e.Type, "delegation."):
+			bases = []string{"items"} // 决策与委派事件的对象是事项 id，不一定伴随 item.*
 		case strings.HasPrefix(e.Type, "material."):
 			bases = []string{"materials"}
-		case e.Type == "purge.executed": // 物理删除（§6.15）：对象读不到了，导出文件随之删除
-			bases = []string{"items", "materials"}
 		default:
 			continue
 		}
@@ -160,7 +162,7 @@ func (x *exporter) stepFrom(ctx context.Context, cursor int64) (int64, int, erro
 		}
 		for _, base := range bases {
 			key := base + "/" + e.Object
-			if done[key] || (e.Type == "purge.executed" && x.state.Files[key] == nil) {
+			if done[key] {
 				continue
 			}
 			done[key] = true
@@ -184,7 +186,7 @@ func (x *exporter) stepFrom(ctx context.Context, cursor int64) (int64, int, erro
 	return cursor, len(page.Events), nil
 }
 
-// sync 按 GET /items 对账：版本、版式、归档状态都没变的跳过，其余重写；列表里没有的已导出事项再确认一次（读不到才删）。
+// sync 按 GET /items 与 GET /materials 对账：版本、版式、归档状态都没变的跳过，其余重写；列表里没有的已导出事项再确认一次（读不到才删）。
 func (x *exporter) sync(ctx context.Context) error {
 	var list struct {
 		Items []item `json:"items"`
@@ -210,11 +212,28 @@ func (x *exporter) sync(ctx context.Context) error {
 			return err
 		}
 	}
+	var mats struct {
+		Materials []struct {
+			ID string `json:"id"`
+		} `json:"materials"`
+	}
+	if err := x.get(ctx, "/materials", &mats); err != nil {
+		return err
+	}
+	seenMat := map[string]bool{}
+	for _, m := range mats.Materials {
+		seenMat[m.ID] = true
+	}
+	// 列表里没有的已导出对象再确认一次：读不到（404）才删。
 	for key := range x.state.Files {
+		var err error
 		if id, ok := strings.CutPrefix(key, "items/"); ok && !seen[id] {
-			if err := x.exportItem(ctx, id); err != nil {
-				return err
-			}
+			err = x.exportItem(ctx, id)
+		} else if id, ok := strings.CutPrefix(key, "materials/"); ok && !seenMat[id] {
+			err = x.exportMaterial(ctx, id)
+		}
+		if err != nil {
+			return err
 		}
 	}
 	return nil

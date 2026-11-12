@@ -63,6 +63,18 @@ func (k *fakeKernel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if p == "/materials" {
+		if _, ok := k.objects["/materials"]; !ok {
+			list := []map[string]string{}
+			for path := range k.objects {
+				if strings.HasPrefix(path, "/materials/") && strings.Count(path, "/") == 2 {
+					list = append(list, map[string]string{"id": strings.TrimPrefix(path, "/materials/")})
+				}
+			}
+			json.NewEncoder(w).Encode(map[string]any{"materials": list})
+			return
+		}
+	}
 	if p == "/events" {
 		cur, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
 		out, next := []map[string]any{}, cur
