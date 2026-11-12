@@ -77,7 +77,8 @@ type PackSource interface {
 
 // Intercept 在规则与判断之前看一条 pending 事件。attached 为真表示已挂靠到原事项，本流水线不再处理；
 // 否则 hint 非空时是关联线索（命中已关闭或多个未关闭事项而没有挂靠），随判断输入与事项理由带走。
-type Intercept func(ctx context.Context, ev domain.SourceEvent) (attached bool, hint string, err error)
+// onUpdate 是命中该事件的来源规则声明的 on_update（refresh、attach 或空），没有规则命中时为空。
+type Intercept func(ctx context.Context, ev domain.SourceEvent, onUpdate string) (attached bool, hint string, err error)
 
 // Options 配置 Service。
 type Options struct {
@@ -407,16 +408,20 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 		return err
 	}
 	var hint string
+	m, merr := s.match(src, ev)
 	if s.o.Intercept != nil {
-		attached, h, err := s.o.Intercept(ctx, ev)
+		onUpdate := ""
+		if m != nil {
+			onUpdate = m.rule.OnUpdate
+		}
+		attached, h, err := s.o.Intercept(ctx, ev, onUpdate)
 		if err != nil || attached {
 			return err
 		}
 		hint = h
 	}
-	m, err := s.match(src, ev)
-	if err != nil {
-		return err
+	if merr != nil {
+		return merr
 	}
 	if id, ok := sn.made[ev.ID]; ok { // 上一轮建好了事项却没记完处置：接着做，不再判断、不再建
 		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure")

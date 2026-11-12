@@ -269,8 +269,10 @@ func Purge(tx *store.Tx, id string) error {
 	if n == 0 {
 		return notFound(id)
 	}
-	if _, err = tx.Exec(`DELETE FROM item_progress WHERE item = ?`, id); err != nil {
-		return err
+	for _, t := range []string{"item_progress", "item_correlation"} {
+		if _, err = tx.Exec(`DELETE FROM `+t+` WHERE item = ?`, id); err != nil {
+			return err
+		}
 	}
 	_, err = tx.Exec(`DELETE FROM item_relations WHERE from_id = ? OR to_id = ?`, id, id)
 	return err
