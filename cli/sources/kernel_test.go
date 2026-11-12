@@ -466,12 +466,12 @@ func TestBacklogListAndRulesCommands(t *testing.T) {
 	}
 
 	// 不带 --evidence：直接用 client 跑，k.apa 总是带原话。
-	noWords := func(token string) int {
+	noWords := func(token, step string) int {
 		vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": t.TempDir()}
-		return client.Main([]string{"source", "backlog", "rules"}, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
+		return client.Main([]string{"source", "backlog", step}, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
 			Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, HTTP: http.DefaultClient})
 	}
-	if code := noWords(dlg); code != domain.ExitBasisRequired {
+	if code := noWords(dlg, "rules"); code != domain.ExitBasisRequired {
 		t.Fatalf("rules without words: %d", code)
 	}
 	if r := k.apa(obs, "source", "backlog", "rules"); r.code != domain.ExitPermissionDenied {
@@ -489,8 +489,15 @@ func TestBacklogListAndRulesCommands(t *testing.T) {
 	if r := k.apa(dlg, "source", "backlog", "score"); r.code != domain.ExitConflict || !strings.Contains(r.out+r.errOut, "judge endpoint") {
 		t.Fatalf("score without a judge endpoint: %+v", r)
 	}
-	for _, args := range [][]string{{"source", "backlog"}, {"source", "backlog", "rejudge"}, {"source", "backlog", "list", "extra"}, {"source", "backlog", "score", "--sort", "score"},
-		{"source", "backlog", "list", "--sort", "name"}} {
+	// 放开重判（第 4 步）同样只接受本人原话；observer 被拒，且在碰账本之前（noJudge 一调就 panic）。
+	if r := k.apa(obs, "source", "backlog", "rejudge", "--limit", "3"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer rejudge: %+v", r)
+	}
+	if code := noWords(dlg, "rejudge"); code != domain.ExitBasisRequired {
+		t.Fatalf("rejudge without words: %d", code)
+	}
+	for _, args := range [][]string{{"source", "backlog"}, {"source", "backlog", "rejudge", "--limit", "-1"}, {"source", "backlog", "rules", "--limit", "3"},
+		{"source", "backlog", "list", "extra"}, {"source", "backlog", "score", "--sort", "score"}, {"source", "backlog", "list", "--sort", "name"}} {
 		if r := k.apa(obs, args...); r.code != domain.ExitUsage {
 			t.Fatalf("%v: %+v", args, r)
 		}

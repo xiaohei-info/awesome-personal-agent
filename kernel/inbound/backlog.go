@@ -93,6 +93,7 @@ func (s *Service) registerBacklog(x *command.Executor) error {
 			}}),
 		x.Register(rulesSpec()),
 		x.Register(scoreSpec(s)),
+		x.Register(rejudgeSpec()),
 		x.Register(command.Spec{Name: CmdExpire, Action: authz.ActionUpdateOwn, Object: ownObject,
 			Apply: func(c *command.Ctx) (any, error) {
 				v, _ := parseBacklog(c.Input)

@@ -20,7 +20,7 @@ import (
 )
 
 const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
-	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] --evidence <words> | auth <id>"
+	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] --evidence <words> | backlog rejudge [--source ID] [--limit N] --evidence <words> | auth <id>"
 
 func init() { client.Register("source", source) }
 
@@ -203,23 +203,28 @@ func auth(c *client.Ctx, id string) error {
 	return cmd.Run()
 }
 
-// backlog 是积压放开的入口（附录 B.1）：list 读积压（未判定与已到期），rules、score 是第 1、2 步（只跑规则、影子打分；
-// 需本人原话，授权在内核）。
+// backlog 是积压放开的入口（附录 B.1）：list 读积压（未判定与已到期），rules、score、rejudge 是第 1、2、4 步（只跑规则、影子打分、
+// 放开重判；需本人原话，授权在内核）。
 func backlog(c *client.Ctx, args []string) error {
-	if len(args) == 0 || (args[0] != "list" && args[0] != "rules" && args[0] != "score") {
-		return usage("backlog needs list, rules or score", usageText)
+	if len(args) == 0 || (args[0] != "list" && args[0] != "rules" && args[0] != "score" && args[0] != "rejudge") {
+		return usage("backlog needs list, rules, score or rejudge", usageText)
 	}
 	fs := flag.NewFlagSet("source backlog "+args[0], flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	src := fs.String("source", "", "")
 	sortBy := fs.String("sort", "", "")
-	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*sortBy != "" && (args[0] != "list" || *sortBy != "score")) {
+	limit := fs.Int("limit", 0, "")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*sortBy != "" && (args[0] != "list" || *sortBy != "score")) ||
+		(*limit != 0 && args[0] != "rejudge") || *limit < 0 {
 		return usage("invalid arguments for source backlog "+args[0], usageText)
 	}
 	if args[0] != "list" {
 		body := map[string]any{}
 		if *src != "" {
 			body["source"] = *src
+		}
+		if *limit > 0 {
+			body["limit"] = *limit
 		}
 		return call(c, "POST", "/source-events/"+args[0], body)
 	}
