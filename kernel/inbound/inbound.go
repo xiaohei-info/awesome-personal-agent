@@ -161,6 +161,7 @@ type disposeIn struct {
 	Reason      string             `json:"reason,omitempty"`
 	// WouldAccept 为真表示 accept: auto 的规则在 observe 档，只记录本来会自动接受。
 	WouldAccept bool `json:"would_accept,omitempty"`
+	mergeFields
 	// UnjudgedReason 是 unjudged 的原因（domain.Unjudged*）。
 	UnjudgedReason string `json:"unjudged_reason,omitempty"`
 	// Judgment 是这次处置依据的初筛判断记录 id；Items 是 extract 出口一次生成的全部事项（Item 为其中第一个）。
@@ -202,8 +203,11 @@ func (s *Service) Register(x *command.Executor) error {
 			if err := runner.SetOutcome(c.Tx, v.Event, v.Judgment, v.Items); err != nil {
 				return nil, err
 			}
+			if err := applyMerge(c, v.Event, v.Item, v.mergeFields); err != nil {
+				return nil, err
+			}
 			payload := map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule,
-				"unjudged_reason": v.UnjudgedReason, "judgment": v.Judgment}
+				"unjudged_reason": v.UnjudgedReason, "judgment": v.Judgment, "merged": v.Merge}
 			if len(v.Conditions) > 0 {
 				payload["conditions"] = v.Conditions
 			}
@@ -492,7 +496,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 		exit = rules.ExitExtract
 	}
 	if id, ok := sn.made[ev.ID]; ok && exit != rules.ExitExtract { // 上一轮建好了事项却没记完处置：接着做，不再判断、不再建
-		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure", "", nil)
+		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure", "", nil, s.resumeFields(ctx, ev))
 	}
 	var (
 		prop    proposal
@@ -1053,11 +1057,11 @@ func (s *Service) repoProject(sn snapshot, src domain.Source, ev domain.SourceEv
 
 // propose 建 proposed 事项，按需自动接受，再记处置。每步的幂等键都含来源事件 id。
 func (s *Service) propose(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, p proposal, project string) error {
-	item, err := s.createItem(ctx, system, m.key(), src, ev, p, project)
+	item, mf, err := s.place(ctx, system, m.key(), src, ev, p, project)
 	if err != nil {
 		return err
 	}
-	return s.finish(ctx, sn, m, ev, item, p.reason, p.judgment, nil)
+	return s.finish(ctx, sn, m, ev, item, p.reason, p.judgment, nil, mf)
 }
 
 // createItem 以 id 的身份为来源事件建 proposed 事项；ext.source_event 记下来源事件，供重入时找回已建事项。
@@ -1095,9 +1099,9 @@ func (s *Service) createItemKeyed(ctx context.Context, id command.Identity, rule
 }
 
 // finish 在事项建好之后按需自动接受，再记处置；对同一事件可重复执行。
-func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason, judgment string, items []string) error {
-	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason, Judgment: judgment, Items: items}
-	if m != nil && m.rule.Accept == "auto" {
+func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason, judgment string, items []string, mf mergeFields) error {
+	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason, Judgment: judgment, Items: items, mergeFields: mf}
+	if m != nil && m.rule.Accept == "auto" && !mf.Merge { // 并入已有建议：它的处置早已定过，不再替它自动接受
 		mode := sn.modes[m.key()]
 		if mode == "" {
 			mode = rules.ModeObserve // 规则状态还没对账：按默认的观察档，不自动接受
