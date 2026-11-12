@@ -1,6 +1,8 @@
 // Package conformance 脚本化对比设计文档与实现：任何漂移都让测试失败。
 //
 // 没有白名单或缺口台账：文档和实现不一致时，先改设计（docs/），再改代码（AGENTS.md 权威顺序）。
+// 唯一例外是附录 B 开头定义的规划标记：带标记的条目只放行“文档有、实现没有”，已实现仍带标记则失败；
+// APA_CONFORMANCE_STRICT=1 时不放行任何标记（发布前，主文档 §20.4 门槛 1）。
 // 覆盖：`apa --help` 与附录 B.1、HTTP 路由与 B.2、事件类型与 B.4、退出码与 §17.3/B.3、内置包与 C.14。
 package conformance
 
@@ -85,12 +87,33 @@ func tableRows(section string) [][]string {
 
 var span = regexp.MustCompile("`([^`]+)`")
 
+// plannedMark 是附录 B 开头定义的规划标记；cli/serve 的装配测试用同一写法。
+var plannedMark = regexp.MustCompile(`【规划中（v\d+\.\d+\.\d+）】`)
+
+// strict 为真时规划标记不再放行：发布前用它确认标记已清零。
+var strict = os.Getenv("APA_CONFORMANCE_STRICT") == "1"
+
+// planned 报告一行文档是否带规划标记；严格模式下一律为假。
+func planned(line string) bool { return !strict && plannedMark.MatchString(line) }
+
 func diff(t *testing.T, what string, docSet, implSet []string) {
 	t.Helper()
-	d, i := toSet(docSet), toSet(implSet)
-	var onlyDoc, onlyImpl []string
+	diffPlanned(t, what, docSet, nil, implSet)
+}
+
+// diffPlanned 同 diff，但 plannedSet 里的条目允许只在文档里；它们已实现时失败，要求去掉标记。
+func diffPlanned(t *testing.T, what string, docSet, plannedSet, implSet []string) {
+	t.Helper()
+	d, p, i := toSet(docSet), toSet(plannedSet), toSet(implSet)
+	var onlyDoc, onlyImpl, stale []string
+	for k := range p {
+		d[k] = true
+		if i[k] {
+			stale = append(stale, k)
+		}
+	}
 	for k := range d {
-		if !i[k] {
+		if !i[k] && !p[k] {
 			onlyDoc = append(onlyDoc, k)
 		}
 	}
@@ -101,6 +124,10 @@ func diff(t *testing.T, what string, docSet, implSet []string) {
 	}
 	sort.Strings(onlyDoc)
 	sort.Strings(onlyImpl)
+	sort.Strings(stale)
+	if len(stale) > 0 {
+		t.Errorf("%s: implemented but still marked as planned; remove the marker: %v", what, stale)
+	}
 	if len(onlyDoc) > 0 {
 		t.Errorf("%s: documented but not implemented: %v", what, onlyDoc)
 	}
@@ -201,10 +228,10 @@ func leaves(prefix []string, words []string) []string {
 	return out
 }
 
-func docCommands(t *testing.T) []string {
+// docCommands 返回已定的命令与带规划标记的命令。
+func docCommands(t *testing.T) (out, plan []string) {
 	t.Helper()
 	sec := between(t, doc(t, "appendix-b-api-cli.md"), "## B.1", "## B.2")
-	var out []string
 	for _, cells := range tableRows(sec) {
 		if len(cells) < 4 {
 			continue
@@ -217,12 +244,16 @@ func docCommands(t *testing.T) []string {
 		if f[0] != "apa" {
 			t.Fatalf("B.1 command %q does not start with apa", m[1])
 		}
-		out = append(out, leaves(nil, f[1:])...)
+		if planned(strings.Join(cells, "|")) {
+			plan = append(plan, leaves(nil, f[1:])...)
+		} else {
+			out = append(out, leaves(nil, f[1:])...)
+		}
 	}
-	if len(out) < 60 {
-		t.Fatalf("parsed only %d commands from B.1; the table format changed", len(out))
+	if len(out)+len(plan) < 60 {
+		t.Fatalf("parsed only %d commands from B.1; the table format changed", len(out)+len(plan))
 	}
-	return out
+	return out, plan
 }
 
 // implCommands 由真实二进制得出命令集：`apa --help` 给出顶层命令，
@@ -271,9 +302,9 @@ func implCommands(t *testing.T, docCmds []string) (top []string, all []string) {
 }
 
 func TestCLIMatchesAppendixB1(t *testing.T) {
-	docCmds := docCommands(t)
-	_, impl := implCommands(t, docCmds)
-	diff(t, "apa commands (B.1 vs `apa --help` and group usage)", docCmds, impl)
+	docCmds, plan := docCommands(t)
+	_, impl := implCommands(t, append(slices.Clone(docCmds), plan...))
+	diffPlanned(t, "apa commands (B.1 vs `apa --help` and group usage)", docCmds, plan, impl)
 }
 
 // ---- B.2 路由 ----
@@ -281,6 +312,7 @@ func TestCLIMatchesAppendixB1(t *testing.T) {
 type route struct {
 	methods []string
 	path    string
+	planned bool // 所在行带规划标记
 }
 
 // docRoutes 解析 B.2 表格第二列：`GET/POST /items`、接在前一条后面的 `/accept`、只有路径的设置组。
@@ -293,8 +325,9 @@ func docRoutes(t *testing.T) []route {
 			continue
 		}
 		var prev *route
+		plan := planned(strings.Join(cells, "|"))
 		for _, m := range span.FindAllStringSubmatch(cells[1], -1) {
-			r := route{}
+			r := route{planned: plan}
 			f := strings.Fields(m[1])
 			r.path, _, _ = strings.Cut(f[len(f)-1], "?")
 			if len(f) == 2 {
@@ -399,33 +432,50 @@ func TestHTTPRoutesMatchAppendixB2(t *testing.T) {
 			for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
 				got = got || mounted(t, base, m, probe)
 			}
-			if !got {
-				t.Errorf("%s is in appendix B.2 but not mounted by apa serve", r.path)
-			}
+			checkRoute(t, r.path, got, r.planned)
 			continue
 		}
 		for _, m := range r.methods {
-			if !mounted(t, base, m, probe) {
-				t.Errorf("%s %s is in appendix B.2 but not mounted by apa serve", m, r.path)
-			}
+			checkRoute(t, m+" "+r.path, mounted(t, base, m, probe), r.planned)
 		}
+	}
+}
+
+func checkRoute(t *testing.T, key string, got, plan bool) {
+	t.Helper()
+	switch {
+	case !got && !plan:
+		t.Errorf("%s is in appendix B.2 but not mounted by apa serve", key)
+	case got && plan:
+		t.Errorf("%s is mounted but still marked as planned in appendix B.2; remove the marker", key)
 	}
 }
 
 // ---- B.4 事件类型 ----
 
 func TestEventTypesMatchAppendixB4(t *testing.T) {
-	sec := between(t, doc(t, "appendix-b-api-cli.md"), "## B.4", "")
-	var docTypes []string
-	for _, m := range span.FindAllStringSubmatch(sec, -1) {
-		if strings.Contains(m[1], ".") && !strings.ContainsAny(m[1], " /") {
-			docTypes = append(docTypes, m[1])
+	sec := between(t, doc(t, "appendix-b-api-cli.md"), "## B.4", "## B.5")
+	// 类型清单是以代码片段开头的行（规划标记可在最前）；说明文字里提到的类型不计入。
+	var docTypes, plan []string
+	for _, line := range strings.Split(sec, "\n") {
+		if !strings.HasPrefix(plannedMark.ReplaceAllString(line, ""), "`") {
+			continue
+		}
+		for _, m := range span.FindAllStringSubmatch(line, -1) {
+			if !strings.Contains(m[1], ".") || strings.ContainsAny(m[1], " /") {
+				continue
+			}
+			if planned(line) {
+				plan = append(plan, m[1])
+			} else {
+				docTypes = append(docTypes, m[1])
+			}
 		}
 	}
-	if len(docTypes) < 20 {
-		t.Fatalf("parsed only %d event types from B.4", len(docTypes))
+	if len(docTypes)+len(plan) < 20 {
+		t.Fatalf("parsed only %d event types from B.4", len(docTypes)+len(plan))
 	}
-	diff(t, "event types (B.4 vs domain.RegisteredEventTypes)", docTypes, domain.RegisteredEventTypes)
+	diffPlanned(t, "event types (B.4 vs domain.RegisteredEventTypes)", docTypes, plan, domain.RegisteredEventTypes)
 	if !slices.Equal(docTypes, domain.RegisteredEventTypes) {
 		t.Errorf("event type order differs from B.4:\n doc  %v\n impl %v", docTypes, domain.RegisteredEventTypes)
 	}
@@ -544,20 +594,24 @@ var facts = []fact{
 	{"字段映射", nonEmpty("webhook_mappings")},
 	{"提示词", dir("prompts")},
 	{"视图", dir("views")},
-	{"模板", dir("templates")},
+	{"渲染模板", dir("templates")}, // 不写成“模板”：提示词也叫模板
 }
 
 func TestBuiltinPacksMatchC14(t *testing.T) {
 	sec := between(t, doc(t, "appendix-c-capability-pack.md"), "## C.14", "")
 	docPacks := map[string]string{}
-	var names []string
+	var names, plan []string
 	for _, cells := range tableRows(sec) {
 		m := span.FindStringSubmatch(cells[0])
 		if m == nil || len(cells) < 2 {
 			continue
 		}
 		docPacks[m[1]] = cells[1]
-		names = append(names, m[1])
+		if planned(cells[1]) {
+			plan = append(plan, m[1])
+		} else {
+			names = append(names, m[1])
+		}
 	}
 	entries, err := fs.ReadDir(rootpacks.FS, ".")
 	if err != nil {
@@ -569,46 +623,91 @@ func TestBuiltinPacksMatchC14(t *testing.T) {
 			impl = append(impl, e.Name())
 		}
 	}
-	diff(t, "builtin packs (C.14 vs packs/)", names, impl)
-
+	for _, name := range plan { // 带标记的包可以还不存在；已存在的按下面的内容检查判定是否已实现
+		if !slices.Contains(impl, name) {
+			continue
+		}
+		if problems := packProblems(name, docPacks[name]); len(problems) == 0 {
+			t.Errorf("pack %s: matches C.14 but is still marked as planned; remove the marker", name)
+		}
+	}
+	// 已存在的规划包是否已实现由上面的内容检查判定，不按目录存在与否
+	rest := slices.DeleteFunc(slices.Clone(impl), func(n string) bool { return slices.Contains(plan, n) })
+	diffPlanned(t, "builtin packs (C.14 vs packs/)", names, plan, rest)
 	for _, name := range names {
-		raw, err := fs.ReadFile(rootpacks.FS, name+"/pack.yaml")
-		if err != nil {
-			t.Errorf("pack %s: %v", name, err)
-			continue
-		}
-		var man map[string]any
-		if err := yaml.Unmarshal(raw, &man); err != nil {
-			t.Errorf("pack %s: pack.yaml: %v", name, err)
-			continue
-		}
-		if man["name"] != name {
-			t.Errorf("pack %s: pack.yaml name is %v", name, man["name"])
-		}
-		pf := packFacts{manifest: man, dirs: map[string]bool{}}
-		for _, d := range []string{"prompts", "views", "templates"} {
-			if es, err := fs.ReadDir(rootpacks.FS, name+"/"+d); err == nil && len(es) > 0 {
-				pf.dirs[d] = true
-			}
-		}
-		text := docPacks[name]
-		for _, f := range facts {
-			says, has := slices.ContainsFunc(strings.Split(f.phrase, "|"), func(p string) bool { return strings.Contains(text, p) }), f.has(pf)
-			switch {
-			case says && !has:
-				t.Errorf("pack %s: C.14 declares %q but the pack has none", name, f.phrase)
-			case !says && has:
-				t.Errorf("pack %s: pack has %q but C.14 does not list it", name, f.phrase)
-			}
-		}
-		// kind `x`：文档点名的 kind 必须在包里声明。
-		for _, m := range regexp.MustCompile("kind `([^`]+)`").FindAllStringSubmatch(text, -1) {
-			if !slices.Contains(kindNames(man), m[1]) {
-				t.Errorf("pack %s: C.14 declares kind %q, pack declares %v", name, m[1], kindNames(man))
-			}
+		for _, p := range packProblems(name, docPacks[name]) {
+			t.Error(p)
 		}
 	}
 }
+
+// packProblems 返回包与 C.14 描述 text 不一致之处。
+func packProblems(name, text string) []string {
+	var out []string
+	errf := func(format string, a ...any) { out = append(out, fmt.Sprintf(format, a...)) }
+	raw, err := fs.ReadFile(rootpacks.FS, name+"/pack.yaml")
+	if err != nil {
+		errf("pack %s: %v", name, err)
+		return out
+	}
+	var man map[string]any
+	if err := yaml.Unmarshal(raw, &man); err != nil {
+		errf("pack %s: pack.yaml: %v", name, err)
+		return out
+	}
+	if man["name"] != name {
+		errf("pack %s: pack.yaml name is %v", name, man["name"])
+	}
+	pf := packFacts{manifest: man, dirs: map[string]bool{}}
+	for _, d := range []string{"prompts", "views", "templates"} {
+		if es, err := fs.ReadDir(rootpacks.FS, name+"/"+d); err == nil && len(es) > 0 {
+			pf.dirs[d] = true
+		}
+	}
+	for _, f := range facts {
+		says, has := slices.ContainsFunc(strings.Split(f.phrase, "|"), func(p string) bool { return strings.Contains(text, p) }), f.has(pf)
+		switch {
+		case says && !has:
+			errf("pack %s: C.14 declares %q but the pack has none", name, f.phrase)
+		case !says && has:
+			errf("pack %s: pack has %q but C.14 does not list it", name, f.phrase)
+		}
+	}
+	// 提示词 `x`：文档点名的提示词必须在包的 prompts/ 里。
+	for _, m := range regexp.MustCompile("提示词 `([^`]+)`").FindAllStringSubmatch(text, -1) {
+		if _, err := fs.Stat(rootpacks.FS, name+"/prompts/"+m[1]+".md"); err != nil {
+			errf("pack %s: C.14 names prompt %q but prompts/%s.md is missing", name, m[1], m[1])
+		}
+	}
+	// kind `x`：文档点名的 kind 必须在包里声明。
+	for _, m := range regexp.MustCompile("kind `([^`]+)`").FindAllStringSubmatch(text, -1) {
+		if !slices.Contains(kindNames(man), m[1]) {
+			errf("pack %s: C.14 declares kind %q, pack declares %v", name, m[1], kindNames(man))
+		}
+	}
+	return out
+}
+
+// 发布前（严格模式）附录里不能再有规划标记；平时只记录还剩多少。
+func TestNoPlannedMarkersInStrictMode(t *testing.T) {
+	n := 0
+	for _, name := range []string{"appendix-b-api-cli.md", "appendix-c-capability-pack.md"} {
+		for i, line := range strings.Split(doc(t, name), "\n") {
+			// 附录 B 开头与 C.14 开头定义标记的说明句把标记写在代码片段里，不算条目。
+			if plannedMark.MatchString(plannedMarkDefinition.ReplaceAllString(line, "")) {
+				n++
+				if strict {
+					t.Errorf("%s:%d still carries a planned marker", name, i+1)
+				}
+			}
+		}
+	}
+	if !strict {
+		t.Skipf("%d planned entries remain; set APA_CONFORMANCE_STRICT=1 to require zero", n)
+	}
+}
+
+var plannedMarkDefinition = regexp.MustCompile("`【规划中（v\\d+\\.\\d+\\.\\d+）】`")
 
 func kindNames(man map[string]any) []string {
 	var out []string
