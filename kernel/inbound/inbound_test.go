@@ -62,6 +62,39 @@ source_rules:
     then: proposed
     accept: auto
     mode: observe
+  - id: x-prop
+    match: {source_type: exits, event_type: x.prop}
+    then: proposed
+  - id: x-dig
+    match: {source_type: exits, event_type: x.news}
+    then: digest
+  - id: x-eq
+    match: {source_type: exits, event_type: x.who}
+    where: [{field: sender, op: eq, value: alice}]
+  - id: x-in
+    match: {source_type: exits, event_type: x.who-in}
+    where: [{field: sender, op: in, value: [bob, carol]}]
+  - id: x-size
+    match: {source_type: exits, event_type: x.size}
+    where: [{field: metrics.size, op: gte, value: 10}, {field: metrics.size, op: lt, value: 20}]
+  - id: x-fixed
+    match: {source_type: exits, event_type: x.fixed}
+    project_by: "fixed:p_mail"
+  - id: x-none
+    match: {source_type: exits, event_type: x.none}
+    project_by: none
+  - id: x-tpl
+    match: {source_type: exits, event_type: x.tpl}
+    then: screen
+    screen: acc-screen
+  - id: x-chat
+    match: {source_type: exits, event_type: x.chat}
+    then: extract
+  - id: x-alert
+    match: {source_type: exits, event_type: x.metric}
+    where: [{field: metrics.value, op: crosses_above, value: 90}]
+    then: alert
+    mode: observe
 `
 	triageMD = `---
 agent: judge
@@ -101,6 +134,8 @@ type env struct {
 	loadr     *packs.Loader
 	web, mail string
 	sources   int
+	// wantErr 为真时，拉取期间的流水线错误留在 errs 里，不让 waitRuns 失败。
+	wantErr bool
 }
 
 func (e *env) Now() time.Time { return e.now }
@@ -142,7 +177,7 @@ func newEnv(t *testing.T, configured bool) *env {
 	e.must("project.repo.add", map[string]any{"id": web.ID, "remote": "https://git.example/org/web"})
 	_ = json.Unmarshal(e.must("project.create", map[string]any{"name": "mail"}), &mail)
 	e.web, e.mail = web.ID, mail.ID
-	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(strings.ReplaceAll(packYAML, "p_mail", mail.ID))}, "inbound-triage/prompts/triage.md": {Data: []byte(triageMD)}, "inbound-triage/prompts/write.md": {Data: []byte(writeMD)}}
+	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(strings.ReplaceAll(packYAML, "p_mail", mail.ID))}, "inbound-triage/prompts/triage.md": {Data: []byte(triageMD)}, "inbound-triage/prompts/write.md": {Data: []byte(writeMD)}, "inbound-triage/prompts/acc-screen.md": {Data: []byte(triageMD)}}
 	e.loadr = packs.New(packs.Options{Builtin: fs, Kinds: kinds})
 	if rej, err := e.loadr.Load(); err != nil || len(rej) != 0 {
 		t.Fatalf("load: %v %+v", err, rej)
@@ -218,6 +253,17 @@ func (e *env) must(cmd string, in any) json.RawMessage {
 // emit 登记一个来源（若尚未登记）并让它的脚本输出给定事件，跑一次拉取，等结果入账并被入站流水线处理完。
 func (e *env) emit(source, kind string, events ...map[string]any) {
 	e.t.Helper()
+	e.emitRaw(source, kind, events...)
+	select {
+	case err := <-e.errs:
+		e.t.Fatalf("pipeline: %v", err)
+	default:
+	}
+}
+
+// emitRaw 同 emit，但不对流水线错误失败：错误留在 e.errs 里由调用方检查。
+func (e *env) emitRaw(source, kind string, events ...map[string]any) {
+	e.t.Helper()
 	var body strings.Builder
 	for _, ev := range events {
 		b, _ := json.Marshal(ev)
@@ -238,11 +284,6 @@ func (e *env) emit(source, kind string, events ...map[string]any) {
 		e.t.Fatal(err)
 	}
 	e.waitRuns()
-	select {
-	case err := <-e.errs:
-		e.t.Fatalf("pipeline: %v", err)
-	default:
-	}
 }
 
 // waitRuns 等所有已登记来源本轮到期的 Run 结束（含结果入账与入站处理）。
@@ -252,7 +293,10 @@ func (e *env) waitRuns() {
 		select {
 		case <-e.done:
 		case err := <-e.errs:
-			e.t.Fatalf("runner: %v", err)
+			if !e.wantErr {
+				e.t.Fatalf("runner: %v", err)
+			}
+			e.errs <- err
 		case <-time.After(20 * time.Second):
 			e.t.Fatal("timed out waiting for the source run")
 		}
