@@ -1135,6 +1135,7 @@ APA 不实现 IMAP/SMTP、CalDAV、MIME 解析和 OAuth。邮件和日历来源�
 | 邮件 | 首版 | himalaya（IMAP、JMAP、Gmail 等） | `himalaya envelope search`、`message read`，加 `--json` | 密码经 `password.command` 取得；OAuth 由外部令牌工具（如 ortie）经 `token.command` 提供，himalaya 2.x 不含 OAuth 流程 |
 | 日历（Google） | 首版 | gog calendar | `gog --no-input --json --enable-commands=calendar --account=<账号> calendar events` | `gog auth`，自行刷新令牌；无桌面环境用它的加密文件后端，口令经 `credentials_path` 交给适配器（见下表“鉴权”） |
 | 邮件（Google） | 后续 | gog | `gog --no-input --json --enable-commands=gmail --account=<账号> gmail search` | 同 gog calendar |
+| 邮件、日历、提醒事项（macOS 自带应用） | 后续（适配器 `apple-pim-source`） | apple-pim 的 `mail-cli`、`calendar-cli`、`reminder-cli` | `mail-cli messages`、`mail-cli get`、`calendar-cli events`、`reminder-cli items`，加 `--format=json` | 系统授权（邮件的自动化与索引读取、日历、提醒事项），不需要邮箱口令；授权归"启动工具的应用"，后台服务拉起时经辅助应用（见下表“Apple 应用”） |
 | 日历（CalDAV 等） | 后续 | vdirsyncer + khal | `vdirsyncer sync` 同步到本地，再 `khal list --json <字段>` | vdirsyncer 配置（密码命令或 OAuth） |
 
 首版每类只做一个适配。首版日历只覆盖 Google 日历；其他日历服务等后续适配器，或由用户按 §9.2 自写脚本接入，能力包规则和内核都不用改。
@@ -1147,6 +1148,7 @@ SMTP 和发信不属于 Source。来源只读；发信属于渠道 ext（§9.6�
 | gog 凭据文件 | `credentials_path` 指向一个 `KEY=VALUE` 文本文件（0600），写法与 gog 的 `keyring.env` 兼容：允许空行、`#` 注释、`export` 前缀和成对引号。适配器只取 `GOG_KEYRING_PASSWORD`（必填）和 `GOG_KEYRING_BACKEND`（缺省 `file`），其余键忽略。文件由本人放在该来源目录内，可以是指向 gog 自己 `keyring.env` 的符号链接。未登记 `credentials_path` 时不注入，适合 gog 用系统钥匙串的桌面环境；文件不可读、缺口令或格式错误返回 2 |
 | 账号 | gog 的账号是非机密配置，登记在来源 `config.account`（gog 已登录的邮箱，见 `gog auth list`），适配器以 `--account` 传入；缺失时不调用工具，返回 2 并提示补填 |
 | 登记 | 只登记命令，只在 Web 或主机配置文件（§14.12）。适配器随发行附带，登记方式与自定义脚本相同，delegate 不能登记 |
+| Apple 应用 | 一个适配器 `apple-pim-source`，`config.kind` 选 `mail`、`calendar`、`reminders`，各登记一个来源（`source_type` 分别为 `mail`、`calendar`、`reminder`）。`mail` 的 `account` 是邮件应用里的账户名，每个账户一个来源；`calendar` 的 `calendars`（名或 ID，缺省全部）用来只收不与其他日历来源重复的日历；`reminders` 的 `lists` 缺省全部，取未完成且有到期日的 `upcoming` 与 `overdue`。事件类型：邮件 `mail.received`（id 为 Message-ID）；日历 `event.created` / `event.cancelled`（工具不给更新时间，id 为 工具日程 id、实例日期与内容摘要，关联键去掉摘要）；提醒事项 `reminder.due`（id 为提醒 id 加内容摘要，关联键为提醒 id）。邮件用 `--engine=sqlite` 只读索引与邮件文件，不经应用，不改已读标记；邮件按 `--since` 最旧优先取、游标推进到已读部分。三个工具没有版本参数，输出契约靠必填字段校验（缺字段、`success` 为 false 返回 2），录制样本在 `sources/applepim/testdata`。`config.bin_dir` 指定工具目录（缺省按 `PATH`）。`config.helper_app` 指定辅助应用：日历和提醒事项的系统授权归启动它的应用，后台服务拉起时没有可授权的应用，填上后适配器经 `open -W -a` 让辅助应用成为授权主体；因 `open` 不回传退出码，这条路径以 stdout 为空判失败，stderr 含授权拒绝字样返回 2。授权由本人在系统弹窗或系统设置里给，APA 不代办 |
 | 语义类型 | 登记时填 `source_type: mail` 或 `calendar`。能力包规则按它匹配，换工具不用改规则 |
 | 换工具 | 在 `sources/` 加一个走 §9.2 的适配器，在 Web 或主机配置文件改登记命令，沿用 `source_type` 和 `dedupe_domain`；能力包规则、内核和 HTTP API 不变 |
 | 只读 | 能用工具的只读开关就用；没有时由适配器保证只调用读命令。不发信，不改已读标记。邮件内容不拼进命令行，参数一律按 argv 传递。gog v0.9 没有只读开关，`--enable-commands` 只能限制到顶层命令（如 `calendar`，其下的 `create`、`delete` 仍可用），所以日历适配器带 `--enable-commands=calendar` 挡住其他服务，只读由适配器只调用 `calendar events` 保证 |
