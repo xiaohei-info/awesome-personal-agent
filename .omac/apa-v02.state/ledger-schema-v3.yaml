@@ -1,3 +1,4 @@
-# sha256: 944b1774d5037018107d57a56a7c1e77f7edda5a89fe78eeda8a562ec5009fc9
-work_item_id: null
-status: todo
+# sha256: 15758f6a23bdc99ea7e2f9b241def35015f5b61e52c2e1eb70fa68d3aff38dbc
+work_item_id: 01a1d03e-bb77-7212-ae11-13573355e941
+status: in_progress
+recovery_marker: true
