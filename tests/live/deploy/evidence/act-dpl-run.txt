@@ -1,7 +1,7 @@
 # 2026-11-09T11:11:44Z go test -tags=live -count=1 -timeout=120m ./tests/live/deploy/...
 === RUN   TestFlowDeployExposure
 === RUN   TestFlowDeployExposure/ACT-DPL-01_经_HTTPS_反向代理暴露，另一台机器访问_Web_与_API
-    deploy_live_test.go:329: 代理 https://100.127.255.10:58094 → apa http://127.0.0.1:58087；另一台机器 oracle
+    deploy_live_test.go:329: 代理 https://<tailnet-addr>:58094 → apa http://127.0.0.1:58087；另一台机器 oracle
     deploy_live_test.go:360: Set-Cookie 属性: apa_session=<redacted>; Path=/; Expires=Mon, 16 Nov 2026 11:11:56 GMT; HttpOnly; Secure; SameSite=Strict
 === RUN   TestFlowDeployExposure/ACT-DPL-02_只暴露_/ingest/_也能工作
 === RUN   TestFlowDeployExposure/ACT-DPL-03_渠道_ext_不需要公网地址（Telegram_主路径）
