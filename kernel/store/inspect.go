@@ -35,6 +35,16 @@ func openReadOnly(path string) (*conn, error) {
 	return openConn(u.String())
 }
 
+// OpenSnapshot 以只读、不可变方式打开一份静止的账本副本（BackupFile 的输出）供查询：不迁移、不切 WAL、不改动任何字节。
+// 返回的 Store 只能用 View；Update 会失败。
+func OpenSnapshot(path string) (*Store, error) {
+	c, err := openReadOnly(path)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{c: c, path: path}, nil
+}
+
 // Inspect 只读地检视一份静止的账本文件（备份副本，不能是正被写入的账本）。
 // 账本里有 reg 不认识的迁移时返回 ErrSchemaTooNew；完整性检查失败或不是账本返回 ErrNotLedger。
 func Inspect(path string, reg *Registry) (Info, error) {

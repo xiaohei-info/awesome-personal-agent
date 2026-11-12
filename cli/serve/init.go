@@ -16,6 +16,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/backup"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/cli/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -26,6 +27,7 @@ import (
 func init() {
 	client.Register("init", initCmd)
 	client.Register("serve", serveCmd)
+	doctor.UseRegistry(registry)
 	backup.UseRegistry(registry) // `apa backup` 与启动时的升级前快照认同一份迁移链
 }
 

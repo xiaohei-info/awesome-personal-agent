@@ -35,6 +35,27 @@ const META: Record<string, { title: string; links: { to: string; label: string }
   other_alerts: { title: "其他健康告警", links: [{ to: "/audit", label: "审计" }] },
 };
 
+// 形状对应 GET /v1/doctor（kernel/doctor.Report）：内核一侧的自检，结论与 `apa doctor` 的对应项同源；这里只呈现。
+export interface DoctorDetail {
+  subject: string;
+  status: "ok" | "warning" | "error";
+  why: string;
+  next?: string;
+}
+export interface DoctorCheck {
+  name: string;
+  status: "ok" | "warning" | "error";
+  why: string;
+  next: string;
+  details?: DoctorDetail[];
+}
+export interface DoctorReport {
+  ok: boolean;
+  checks: DoctorCheck[];
+}
+const STATUS_LABEL = { ok: "正常", warning: "提醒", error: "错误" } as const;
+const STATUS_BADGE = { ok: "ok", warning: "warn", error: "bad" } as const;
+
 const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 interface Queue {
@@ -92,9 +113,12 @@ export function HealthPage() {
   const { api } = useSession();
   const [report, setReport] = useState<HealthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [doctor, setDoctor] = useState<DoctorReport | null>(null);
 
   const load = useCallback(() => {
     setError(null);
+    // 自检是补充信息：取不到不影响健康信号的展示。
+    api.get<DoctorReport>("/doctor").then(setDoctor, () => setDoctor(null));
     return api.get<HealthReport>("/health").then(setReport, (e) => setError(msg(e)));
   }, [api]);
 
@@ -146,6 +170,26 @@ export function HealthPage() {
               </article>
             );
           })}
+          {doctor && (
+            <section aria-label="自检">
+              <h2>自检</h2>
+              {doctor.checks.map((c) => (
+                <article key={c.name} aria-label={"自检：" + c.name} className="signal">
+                  <h3>
+                    {c.name}
+                    <span className={"badge " + STATUS_BADGE[c.status]}>{STATUS_LABEL[c.status]}</span>
+                  </h3>
+                  <p>{c.why}</p>
+                  {c.details?.map((d) => (
+                    <p key={d.subject} className="sub">
+                      {d.subject}（{STATUS_LABEL[d.status]}）：{d.why}
+                    </p>
+                  ))}
+                  {c.status !== "ok" && <p className="sub">下一步：{c.next}</p>}
+                </article>
+              ))}
+            </section>
+          )}
         </>
       )}
     </main>

@@ -18,8 +18,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -54,7 +56,7 @@ func setup(t *testing.T, ph khealth.PackHealth) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, clock.Module, core.Module,
-		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module, items.Module} {
+		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module, items.Module, executors.Module, kdoctor.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +71,7 @@ func setup(t *testing.T, ph khealth.PackHealth) *env {
 		t.Fatal(err)
 	}
 	a := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st, delivery.New(delivery.Options{}), ph, 0)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st, delivery.New(delivery.Options{}), ph, 0), DoctorRoutes(st, kdoctor.Env{})}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +86,7 @@ func (e *env) get(kind auth.Kind) *httptest.ResponseRecorder {
 func (e *env) request(kind auth.Kind) *http.Request {
 	e.t.Helper()
 	scope := ""
-	if kind == auth.Ext {
+	if kind == auth.Ext || kind == auth.Webhook {
 		scope = "x"
 	}
 	var secret string

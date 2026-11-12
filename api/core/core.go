@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -159,6 +160,7 @@ type Server struct {
 	d       Deps
 	handler http.Handler
 	lim     *limiter
+	seen    *kdoctor.Seen
 }
 
 // New 装配路由并校验；任何登记错误（重复、缺处理器、路径非法）都在启动时返回，不留到请求时。
@@ -181,7 +183,7 @@ func New(d Deps) (*Server, error) {
 	if d.LoginDelay <= 0 {
 		d.LoginDelay = DefaultLoginDelay
 	}
-	s := &Server{d: d, lim: newLimiter()}
+	s := &Server{d: d, lim: newLimiter(), seen: kdoctor.NewSeen(0)}
 
 	rt := &Router{}
 	groups := []RouteGroup{s.authRoutes}
@@ -323,6 +325,7 @@ func (s *Server) authenticate(r *http.Request) (*Principal, error) {
 		if err := s.d.Store.View(r.Context(), func(tx *store.Tx) (err error) { caller, err = id.Authenticate(tx); return }); err != nil {
 			return nil, err
 		}
+		s.noteSeen(r.Context(), caller, origin)
 		return &Principal{Identity: id, Caller: caller}, nil
 	}
 	c, err := r.Cookie(SessionCookie)
@@ -460,4 +463,20 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 		return err
 	}
 	return nil
+}
+
+// noteSeen 记下 ext 密钥与宿主插件最近一次调用内核的时间，供 `apa doctor` 报告（§15.5）。只服务自检，失败不影响请求。
+func (s *Server) noteSeen(ctx context.Context, c command.Caller, o auth.Origin) {
+	now := s.d.Now()
+	note := func(subject string) {
+		if err := s.seen.Note(ctx, s.d.Store, subject, now); err != nil {
+			s.d.Logger.Debug("doctor seen", "err", err)
+		}
+	}
+	if c.Kind == auth.Ext {
+		note(kdoctor.SubjectExt + strings.TrimPrefix(c.Actor.Principal, "ext:"))
+	}
+	if h := o.Harness; h != "" && len(h) <= 64 { // 长度设限：任意请求头值不能无限撑大记录
+		note(kdoctor.SubjectHarness + h)
+	}
 }

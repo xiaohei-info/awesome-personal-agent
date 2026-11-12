@@ -104,3 +104,48 @@ func TestPendingRefusesUnknownMigrations(t *testing.T) {
 		t.Errorf("err = %v, want ErrSchemaTooNew", err)
 	}
 }
+
+// OpenSnapshot：副本可查询，不能写，打开与查询不新增任何文件。
+func TestOpenSnapshotIsReadOnlyAndLeavesNoFiles(t *testing.T) {
+	home := t.TempDir()
+	s, err := Open(home, evReg(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	addRows(t, s, 3)
+	s.Close()
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "ledger.db")
+	if err := BackupFile(context.Background(), home, snap); err != nil {
+		t.Fatal(err)
+	}
+	ro, err := OpenSnapshot(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	var n int64
+	if err := ro.View(context.Background(), func(tx *Tx) error {
+		r, err := tx.Query("SELECT count(*) FROM eventlog_event")
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		r.Next()
+		return r.Scan(&n)
+	}); err != nil || n != 3 {
+		t.Fatalf("count = %d, err = %v", n, err)
+	}
+	if err := ro.Update(context.Background(), func(tx *Tx) error {
+		_, err := tx.Exec("INSERT INTO eventlog_event (v) VALUES ('y')")
+		return err
+	}); err == nil {
+		t.Fatal("a snapshot must reject writes")
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 1 {
+		t.Fatalf("snapshot directory has extra files: %v", ents)
+	}
+	if _, err := OpenSnapshot(filepath.Join(dir, "missing.db")); !errors.Is(err, ErrNotLedger) {
+		t.Fatalf("missing snapshot: %v", err)
+	}
+}

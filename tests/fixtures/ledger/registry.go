@@ -19,6 +19,7 @@ import (
 	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
@@ -49,7 +50,7 @@ var Modules = []store.Module{eventlog.Module, auth.Module, policy.Module, comman
 	delivery.Module, attention.Module, proc.Module, direct.Module, task.Module, followup.Module, rules.Module,
 	instances.Module, sregistry.Module, runner.Module, webhook.Module, channel.Module,
 	materials.Module, hosted.Module, search.Module, guideline.Module, agentsmd.Module, background.Module, chain.Module,
-	khealth.Module, resume.Module, wake.Module, summaries.Module}
+	khealth.Module, kdoctor.Module, resume.Module, wake.Module, summaries.Module}
 
 // Latest 是主干当前登记的最高账本结构版本（发布物 schema.ledger）。
 func Latest() (int, error) {
