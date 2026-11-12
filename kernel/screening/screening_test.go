@@ -354,6 +354,7 @@ func TestRuleWebOnlySkipsScreeningAndNeverDowngrades(t *testing.T) {
 
 // 不能降级的另一半：模型回答"不是高风险"不改变规则给的类别；低置信不升也不降。
 func TestInconclusiveScreeningDoesNotEscalate(t *testing.T) {
+	t.Skip("v0.1 判断引擎语义（置信度阈值、escalate_to 级联、follow_up 的 do[]）已被 C.7/C.11 移除；对应引擎由判断引擎与跟进梯度的后续节点重写，届时替换本测试")
 	e := setup(t, true, 5000)
 	e.stub.SetDefault(modelstub.Reply{Content: `{"probability":0.99,"confidence":0.1}`})
 	id := e.request(t, nil, ask(nil))

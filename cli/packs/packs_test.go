@@ -260,7 +260,7 @@ func TestValidateRejectsBadPacks(t *testing.T) {
 	}{
 		{"mode auto", map[string]string{"pack.yaml": head + "event_rules:\n  - {id: r, mode: auto, do: []}\n"}, "auto"},
 		{"executable command", map[string]string{"pack.yaml": head + "event_rules:\n  - id: r\n    do:\n      - {action: add_tag, tag: t, command: rm -rf /}\n"}, "command"},
-		{"judge without text answer", map[string]string{"pack.yaml": head, "prompts/j.md": "---\nagent: judge\n---\nq\n"}, "question_type"},
+		{"judge without text answer", map[string]string{"pack.yaml": head, "prompts/j.md": "---\nagent: judge\non_undecided: yes\n---\nq\n"}, "question_type"},
 		{"generate declares tools", map[string]string{"pack.yaml": head, "prompts/g.md": "---\nagent: generate\noutput_schema: {type: object}\ntools: [shell]\n---\nq\n"}, "tools"},
 		{"main_session with escalate_to", map[string]string{"pack.yaml": head, "prompts/t.md": "---\nrun_as: main_session\nescalate_to: other\n---\nq\n"}, "escalate_to"},
 		{"action outside enum", map[string]string{"pack.yaml": head + "event_rules:\n  - id: r\n    do: [{action: send_mail}]\n"}, "enumeration"},

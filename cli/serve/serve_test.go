@@ -963,10 +963,11 @@ func TestReloadPacksFollowsDataDirectory(t *testing.T) {
 	}
 }
 
-// ACT-FUP：跟进服务用的是已加载能力包里 follow_up 规则的 schedule 与当前模式。serve 运行中在数据目录覆盖内置包、
-// 把间隔改成 1s，热加载后新进入等待的事项按 1s 跟进；规则保持包声明的 observe：到期只记 rule.observed，
-// 不调模型（未配置模型时 auto 会记 health.alert）、不提醒。
-func TestServeFollowUpUsesPackScheduleAndMode(t *testing.T) {
+// ACT-FUP-12：内置 follow-up 包的 follow_up 规则不带 do[]（到期行为由内核固定）。serve 运行中在数据目录覆盖内置包：
+// 带 v0.1 写法 do[] 的覆盖包整包被拒，健康视图的 pack_rejections 指出 follow-up-interval 并提示删除 do[]，内置包保持生效；
+// 去掉 do[] 后（间隔改为 1s）覆盖包生效，拒绝信号消失。
+// 跟进服务本身按新梯度重写由跟进梯度的节点负责，不在本测试范围。
+func TestServeFollowUpOverrideWithDoRejected(t *testing.T) {
 	home := initOnFreePort(t)
 	dst := filepath.Join(home, "packs", "follow-up")
 	sub, err := fs.Sub(rootpacks.FS, "follow-up")
@@ -977,37 +978,30 @@ func TestServeFollowUpUsesPackScheduleAndMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	y, err := os.ReadFile(filepath.Join(dst, "pack.yaml"))
-	if err != nil || !strings.Contains(string(y), "schedule: 72h") || !strings.Contains(string(y), "mode: observe") {
-		t.Fatalf("follow-up pack changed shape: %v\n%s", err, y)
+	if err != nil || !strings.Contains(string(y), "schedule: 72h") || strings.Contains(string(y), "do:") {
+		t.Fatalf("builtin follow-up pack changed shape: %v\n%s", err, y)
 	}
 	addr, stop := start(t, home)
 	defer stop()
 	s := webLogin(t, addr)
-	if err := os.WriteFile(filepath.Join(dst, "pack.yaml"), []byte(strings.Replace(string(y), "schedule: 72h", "schedule: 1s", 1)), 0o644); err != nil {
+
+	v01 := strings.Replace(string(y), "    schedule: 72h\n", "    schedule: 72h\n    do: [{action: call_agent, prompt: follow-up-defer}]\n", 1)
+	if err := os.WriteFile(filepath.Join(dst, "pack.yaml"), []byte(v01), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(packReloadInterval + clockTicks) // 等时钟循环热加载到新内容
-	code, b := s.do("POST", "/items", `{"title":"等回复","kind":"task","phase":"open"}`)
-	var it struct{ ID string }
-	if json.Unmarshal([]byte(b), &it); code != 201 {
-		t.Fatalf("create item: %d %s", code, b)
+	time.Sleep(packReloadInterval + clockTicks)
+	code, b := s.do("GET", "/health", "")
+	if code != 200 || !strings.Contains(b, "follow-up-interval") || !strings.Contains(b, "delete do[]") {
+		t.Fatalf("health must list the do[] rejection: %d %s", code, b)
 	}
-	if code, b := s.do("POST", "/items/"+it.ID+"/transition", `{"to":"waiting","reason":"sent","waiting_on":{"kind":"human","ref":"someone"}}`); code >= 300 {
-		t.Fatalf("transition: %d %s", code, b)
+
+	fixed := strings.Replace(string(y), "schedule: 72h", "schedule: 1s", 1)
+	if err := os.WriteFile(filepath.Join(dst, "pack.yaml"), []byte(fixed), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		code, b := s.do("GET", "/why/"+it.ID, "")
-		if code == 200 && strings.Count(b, `"rule.observed"`) >= 2 { // 每 1s 一轮，observe 也照常再排下一轮
-			if strings.Contains(b, "health.alert") || strings.Contains(b, "followup.reminded") {
-				t.Fatalf("observe must not call the model or remind: %s", b)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("follow-up did not run on the pack's 1s interval: %d %s", code, b)
-		}
-		time.Sleep(200 * time.Millisecond)
+	time.Sleep(packReloadInterval + clockTicks)
+	if code, b := s.do("GET", "/health", ""); code != 200 || strings.Contains(b, "delete do[]") {
+		t.Fatalf("repaired override must clear the rejection: %d %s", code, b)
 	}
 }
 

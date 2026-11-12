@@ -198,10 +198,19 @@ func TestProblemsSurfaceWithRepairEntryAndNoLedgerContent(t *testing.T) {
 			t.Fatalf("%s should be ok: %+v", id, s)
 		}
 	}
-	for _, secret := range []string{"SECRET-SOURCE-ERROR", "SECRET-PACK-REASON", "SECRET-SCREEN-REASON", "SECRET-FOLLOWUP-REASON", "SECRET-RULE-ACTION-REASON", "SECRET-RECEIPT-REASON", "SECRET-RECEIPT-WHY"} {
+	for _, secret := range []string{"SECRET-SOURCE-ERROR", "SECRET-SCREEN-REASON", "SECRET-FOLLOWUP-REASON", "SECRET-RULE-ACTION-REASON", "SECRET-RECEIPT-REASON", "SECRET-RECEIPT-WHY"} {
 		if strings.Contains(rec.Body.String(), secret) {
 			t.Fatalf("response leaks %s: %s", secret, rec.Body)
 		}
+	}
+}
+
+// 能力包的拒绝原因是包文件自己的字段与新写法提示，不是账本内容：detail 逐个列出（C.11），本人据此就能修。
+func TestPackRejectionDetailListsReason(t *testing.T) {
+	e := setup(t, fakePacks{{Pack: "work", Source: "user", Reason: "prompts/j.md: confidence_threshold is removed"}})
+	rec := e.get(auth.Observer)
+	if !strings.Contains(rec.Body.String(), `"rejections":[{"pack":"work","source":"user","reason":"prompts/j.md: confidence_threshold is removed"}]`) {
+		t.Fatalf("%s", rec.Body)
 	}
 }
 
