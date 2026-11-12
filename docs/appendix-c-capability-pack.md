@@ -73,7 +73,7 @@ kinds:
 | `correlation_keys` | 从事件字段得到关联键的模板；来源程序已给出时可省略。关联键标识来源对象，同一对象的各版本应得到同一个键 |
 | `merge_key` | 合并键模板；省略时内核按链接或"标题加发送者"推导（主文档 §9.3） |
 | `screen`、`draft`、`prescreen`、`extract` | 各步所用的提示词模板名，省略时依次取内置的 `triage-screen`、`triage-draft`、`capture-prescreen`、`triage-extract` |
-| `accept` | 接受方式，默认 `manual`。声明 `auto` 时必须带 `mode` |
+| `accept` | 接受方式，默认 `manual`。声明 `auto` 的规则是动作类，`mode` 可省略（初始 `observe`） |
 | `mode` | `accept: auto` 与 `then: alert` 的规则需要：它们是动作类规则，初始只能是 `off` 或 `observe`（缺省 `observe`）。`observe` 时只记录"本来会自动接受"或"本来会提醒"，在 Web 切 `auto` 后才生效。`alert` 规则必须带 `where[]` |
 
 ```yaml

@@ -292,7 +292,6 @@ func TestLoadRulesRejectWholePack(t *testing.T) {
 		{"name != dir", map[string]string{"pack.yaml": "name: y\nversion: 1\ndescription: d\n"}, "directory"},
 		{"mode auto on event rule", map[string]string{"pack.yaml": head + "event_rules:\n  - {id: r, mode: auto, do: []}\n"}, "auto"},
 		{"mode auto on clock rule", map[string]string{"pack.yaml": head + "clock_rules:\n  - {id: r, type: recur, mode: auto}\n"}, "auto"},
-		{"source rule accept auto without mode", map[string]string{"pack.yaml": head + "source_rules:\n  - {id: r, accept: auto}\n"}, "mode"},
 		{"source rule accept auto mode auto", map[string]string{"pack.yaml": head + "source_rules:\n  - {id: r, accept: auto, mode: auto}\n"}, "auto"},
 		{"command field", map[string]string{"pack.yaml": head + "event_rules:\n  - id: r\n    do:\n      - {action: add_tag, tag: t, command: rm -rf /}\n"}, "command"},
 		{"script field", map[string]string{"pack.yaml": head + "webhook_mappings:\n  - {id: m, script: x}\n"}, "script"},

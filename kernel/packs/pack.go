@@ -544,10 +544,7 @@ func checkSourceRule(r SourceRule) error {
 	switch r.Accept {
 	case "", "manual":
 		return checkMode(where, r.Mode)
-	case "auto":
-		if r.Mode == "" {
-			return fmt.Errorf("%s: accept auto requires an initial mode", where)
-		}
+	case "auto": // 动作类规则：省略 mode 即初始 observe（C.4）
 		return checkMode(where, r.Mode)
 	}
 	return fmt.Errorf("%s: accept %q must be manual or auto", where, r.Accept)
