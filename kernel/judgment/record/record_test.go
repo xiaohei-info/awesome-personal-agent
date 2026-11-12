@@ -74,12 +74,12 @@ func TestPutRejectsBadRecordsAndDuplicates(t *testing.T) {
 	s := open(t)
 	bad := map[string]func(*Record){
 		"empty subject":          func(r *Record) { r.Subject = "" },
-		"unknown decided_by":     func(r *Record) { r.DecidedBy = "oracle" },
+		"unknown decided_by":     func(r *Record) { r.DecidedBy = "bogus" },
 		"default w/o low conf":   func(r *Record) { r.DecidedBy, r.LowConfidence = DecidedDefault, false },
 		"decider not in levels":  func(r *Record) { r.DecidedBy = DecidedClassifier },
 		"p_yes out of range":     func(r *Record) { r.Levels[0].PYes = f64(1.5) },
 		"unknown outcome":        func(r *Record) { r.Levels[0].Outcome = "maybe" },
-		"unknown backend":        func(r *Record) { r.Levels[0].Backend = "oracle" },
+		"unknown backend":        func(r *Record) { r.Levels[0].Backend = "bogus" },
 		"inverted band":          func(r *Record) { r.Band = Band{Low: 0.7, High: 0.2} },
 		"bad review":             func(r *Record) { r.Review = &Review{Result: "meh", At: t0} },
 		"negative duration":      func(r *Record) { r.Levels[0].DurationMs = -1 },
