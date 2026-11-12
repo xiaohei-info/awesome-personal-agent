@@ -200,7 +200,7 @@ func (s *Service) Register(x *command.Executor) error {
 	if err := registerPropose(x); err != nil {
 		return err
 	}
-	if err := registerBacklog(x); err != nil {
+	if err := s.registerBacklog(x); err != nil {
 		return err
 	}
 	x.OnCommit(func(c command.Commit) {

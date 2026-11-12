@@ -71,6 +71,8 @@ type Replayer interface {
 // Proposer 把未判定事件转为建议（*inbound.Service 满足它）。
 type Proposer interface {
 	ProposeUnjudged(ctx context.Context, id command.Identity, event string) (domain.SourceEvent, error)
+	// BacklogRules 是积压放开第 1 步：只跑规则，不调模型（§9.3）。req 带调用者身份与本人原话。
+	BacklogRules(ctx context.Context, req command.Request, source string) (inbound.RulesResult, error)
 }
 
 const (
@@ -112,6 +114,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/rejects", Handler: readable(a.rejects)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/rules", MaxBody: 1 << 10, Handler: a.backlogRules})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/ignore", MaxBody: 1 << 10, Handler: a.ignoreBatch})
 	}, nil
 }
@@ -592,6 +595,21 @@ func (a *api) ignoreBatch(w http.ResponseWriter, r *http.Request, p *core.Princi
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, res.Value)
+}
+
+// backlogRules 积压只跑规则：请求体 {"source"?}；返回 {"attached","disposed","remaining"}。授权（本人原话或 Web）由命令管线判定。
+func (a *api) backlogRules(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		Source string `json:"source,omitempty"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	res, err := a.pr.BacklogRules(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, res)
 }
 
 // rejects 返回来源没有入账的输出行及原因。原始行在落账时已截断到 512 字节；与入站记录的请求头同一规则，含接收密钥明文前缀的整行遮蔽。

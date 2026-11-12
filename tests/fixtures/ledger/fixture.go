@@ -509,7 +509,11 @@ func (f *fx) items() {
 	phases := []string{"proposed", "open", "open", "done", "dropped"}
 	for k := 0; k < nProposed; k++ {
 		id := fmt.Sprintf("itm_fx_prop_%02d", k)
-		f.item(id, phases[k%len(phases)], "task", fmt.Sprintf("Fixture proposal %d", k), nil, T0.Add(-time.Duration(26+k*9)*time.Hour), "src_mail_work")
+		phase := phases[k%len(phases)]
+		if k < nAttachable && (phase == "done" || phase == "dropped") {
+			phase = "open" // 积压里可挂靠的事件要对着未关闭的事项：关闭的事项不会被重新打开（§9.4）
+		}
+		f.item(id, phase, "task", fmt.Sprintf("Fixture proposal %d", k), nil, T0.Add(-time.Duration(26+k*9)*time.Hour), "src_mail_work")
 	}
 	for k, w := range []struct{ kind, ref string }{
 		{"human", "reply from alice"}, {"executor", "run fx-1"}, {"external", "vendor quote"}, {"human", "sign-off"},
