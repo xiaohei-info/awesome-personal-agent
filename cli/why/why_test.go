@@ -20,6 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -238,5 +239,25 @@ func TestRenderShowsBasisChainErasureAndScreening(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+// ACT-JRC-04/06：--pretty 在命令 Event 下写"判断"行，记录在就逐级列出，过了保留期只写 Event 里的结论。
+func TestRenderShowsJudgmentLevelsThenOnlyConclusionAfterRetention(t *testing.T) {
+	p := 0.30
+	yes := true
+	rec := &record.Record{ID: "jd_mid", Template: "triage/triage-screen@abc", Answer: "yes", DecidedBy: "chat", Band: record.Band{Low: 0.15, High: 0.60},
+		Levels: []record.Level{
+			{Backend: "classifier", PYes: &p, Outcome: "uncertain", DurationMs: 3},
+			{Backend: "chat", Answer: "yes", Sufficient: &yes, Outcome: "decided", DurationMs: 90}}}
+	out := render(kwhy.Timeline{ID: "item_1", Steps: []kwhy.Step{{Seq: 1, Type: "inbound.disposed", Judgment: &kwhy.Judgment{ID: "jd_mid", Answer: "yes", DecidedBy: "chat", Record: rec}}}})
+	for _, want := range []string{"judgment jd_mid: triage/triage-screen@abc → yes, decided by chat", "1. classifier p=0.30 in the uncertain band, uncertain", "2. chat answer=yes, decided — decided"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	gone := render(kwhy.Timeline{ID: "item_1", Steps: []kwhy.Step{{Seq: 1, Type: "inbound.disposed", Judgment: &kwhy.Judgment{ID: "jd_mid", Answer: "yes", DecidedBy: "chat", Expired: true}}}})
+	if !strings.Contains(gone, "judgment jd_mid: yes, decided by chat (record past retention") || strings.Contains(gone, "classifier") {
+		t.Errorf("expired judgment must show only the conclusion:\n%s", gone)
 	}
 }

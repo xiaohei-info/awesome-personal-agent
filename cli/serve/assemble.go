@@ -26,6 +26,7 @@ import (
 	apihealth "github.com/xiaohei-info/awesome-personal-agent/api/health"
 	apiingest "github.com/xiaohei-info/awesome-personal-agent/api/ingest"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
+	apijudgments "github.com/xiaohei-info/awesome-personal-agent/api/judgments"
 	apimaterials "github.com/xiaohei-info/awesome-personal-agent/api/materials"
 	apipacks "github.com/xiaohei-info/awesome-personal-agent/api/packs"
 	apiprojects "github.com/xiaohei-info/awesome-personal-agent/api/projects"
@@ -203,7 +204,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		Retention: cfg.IngestRetention, ScriptRoot: l.Sources, OnError: logErr("webhook")}); err != nil {
 		return nil, err
 	}
-	if k.ret, err = retention.New(retention.Options{Store: st, Ingest: k.wh, Layout: l, RunRetention: cfg.RunRetention}); err != nil {
+	if k.ret, err = retention.New(retention.Options{Store: st, Ingest: k.wh, Layout: l, RunRetention: cfg.RunRetention, JudgmentRetention: cfg.JudgmentRetention, KeepJudgments: cfg.JudgmentRetention == 0}); err != nil {
 		return nil, err
 	}
 	verifyAgent, err := verify.Handler(verify.Options{Store: st, Judge: judge})
@@ -357,7 +358,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm)}}); err != nil {
+		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)

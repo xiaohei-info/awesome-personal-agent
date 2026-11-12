@@ -19,7 +19,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -45,7 +47,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, proc.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -165,6 +167,31 @@ func TestPurgeItemTombstonesEventsKeepsSequence(t *testing.T) {
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { page, err = eventlog.Read(tx, cursor, 100); return })
 	if len(page) != 1 || page[0].Event.Seq != cursor+1 {
 		t.Fatalf("cursor read %+v", page)
+	}
+}
+
+// 物理删除事项时，指向它的判断记录一并删除，别的对象的记录不动（§6.16）。
+func TestPurgeItemDeletesItsJudgmentRecords(t *testing.T) {
+	e := setup(t)
+	id := e.must(t, owner, "item.create", map[string]any{"title": "x", "kind": "task", "reason": "r", "evidence": "e"})["id"].(string)
+	put := func(rid, subject string) {
+		p := 0.9
+		err := e.st.Update(bg, func(tx *store.Tx) error {
+			return record.Put(tx, record.Record{ID: rid, Use: "followup_defer", Template: "t@h", Subject: subject, Fingerprint: "f", Band: record.Band{Low: .1, High: .6},
+				DecidedBy: record.DecidedClassifier, Answer: "yes", CreatedAt: time.Now(),
+				Levels: []record.Level{{Backend: record.BackendClassifier, PYes: &p, Outcome: record.OutcomeDecided}}})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("jd_mine", id)
+	put("jd_other", "item_other")
+	e.must(t, owner, Command, map[string]any{"object": id})
+	var left []record.Record
+	_ = e.st.View(bg, func(tx *store.Tx) (err error) { left, _, err = record.List(tx, record.Filter{}); return })
+	if len(left) != 1 || left[0].ID != "jd_other" {
+		t.Fatalf("records left: %+v", left)
 	}
 }
 

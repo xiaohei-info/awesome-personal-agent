@@ -9,6 +9,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -39,6 +40,18 @@ type Step struct {
 	Evidence    string          `json:"evidence,omitempty"`
 	Redacted    bool            `json:"redacted,omitempty"`
 	Tombstone   bool            `json:"tombstone,omitempty"`
+	// Judgment 是这条 Event 用到的判断（载荷带 judgment 字段，§8.6）：记录在就逐级展开，
+	// 过了保留期只剩 Event 载荷里的结论。结论与逐级过程不含资料正文，所以各凭据级别都可见。
+	Judgment *Judgment `json:"judgment,omitempty"`
+}
+
+// Judgment 是回放里的"判断"一行。Record 为空表示判断记录已过保留期（Expired），Answer 与 DecidedBy 取自命令 Event 的载荷。
+type Judgment struct {
+	ID        string         `json:"id"`
+	Answer    string         `json:"answer,omitempty"`
+	DecidedBy string         `json:"decided_by,omitempty"`
+	Expired   bool           `json:"expired,omitempty"`
+	Record    *record.Record `json:"record,omitempty"`
 }
 
 // Timeline 是回放结果。ScreeningPending 为真时（仅对非 Web 凭据）Steps 为空，只返回这一标记。
@@ -82,9 +95,33 @@ func Replay(tx *store.Tx, p policy.Policy, r Request) (Timeline, error) {
 		return Timeline{}, domain.NewError(domain.CodeNotFound, "no events for this id", "check the id")
 	}
 	for _, en := range entries {
-		tl.Steps = append(tl.Steps, StepOf(en, r.Level))
+		st := StepOf(en, r.Level)
+		if st.Judgment, err = judgmentOf(tx, en); err != nil {
+			return Timeline{}, err
+		}
+		tl.Steps = append(tl.Steps, st)
 	}
 	return tl, nil
+}
+
+// judgmentOf 展开 Event 载荷里的 judgment 引用；载荷不是对象、没有该字段或已被墓碑抹除都返回 nil。
+// v0.1 的 run.finished（category: judge）没有这个字段，原样作为普通 Event 显示。
+func judgmentOf(tx *store.Tx, en eventlog.Entry) (*Judgment, error) {
+	if en.Tombstone || len(en.Event.Payload) == 0 {
+		return nil, nil
+	}
+	var ref record.Ref
+	if json.Unmarshal(en.Event.Payload, &ref) != nil || ref.Judgment == "" {
+		return nil, nil
+	}
+	rec, err := record.Get(tx, ref.Judgment)
+	if err == nil {
+		return &Judgment{ID: rec.ID, Answer: rec.Answer, DecidedBy: rec.DecidedBy, Record: &rec}, nil
+	}
+	if e, ok := err.(*domain.Error); ok && e.Code == domain.CodeNotFound {
+		return &Judgment{ID: ref.Judgment, Answer: ref.Answer, DecidedBy: ref.DecidedBy, Expired: true}, nil
+	}
+	return nil, err
 }
 
 // StepOf 把一条 Event 按凭据级别裁剪成 Step；回放与审计共用，保证两处裁剪一致。

@@ -11,6 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -210,5 +211,73 @@ func TestSweepRefusesRunIDThatEscapesRunsDir(t *testing.T) {
 func TestNewRequiresDependencies(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("missing dependencies must be rejected")
+	}
+}
+
+func (e *env) putJudgment(id string, at time.Time) {
+	e.t.Helper()
+	p := 0.9
+	err := e.st.Update(bg, func(tx *store.Tx) error {
+		return record.Put(tx, record.Record{ID: id, Use: "inbound_screen", Template: "t@h", Subject: "evt_" + id, Fingerprint: "f", Band: record.Band{Low: .15, High: .6},
+			DecidedBy: record.DecidedClassifier, Answer: "yes", CreatedAt: at,
+			Levels: []record.Level{{Backend: record.BackendClassifier, PYes: &p, Outcome: record.OutcomeDecided}}})
+	})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func (e *env) judgments() (ids []string) {
+	e.t.Helper()
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		rs, _, err := record.List(tx, record.Filter{})
+		for _, r := range rs {
+			ids = append(ids, r.ID)
+		}
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return ids
+}
+
+// 判断记录默认保留 180 天；配置改小后按新值清理，Sweep 幂等。
+func TestSweepExpiresJudgmentsByRetention(t *testing.T) {
+	e := newEnv(t, 30*24*time.Hour, 14*24*time.Hour)
+	e.putJudgment("old", t0.Add(-181*24*time.Hour))
+	e.putJudgment("edge", t0.Add(-179*24*time.Hour))
+	e.putJudgment("new", t0.Add(-time.Hour))
+	if err := e.svc.Sweep(bg); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.judgments(); len(got) != 2 || got[0] != "edge" || got[1] != "new" {
+		t.Fatalf("default retention (180d) kept %v", got)
+	}
+	short, err := New(Options{Store: e.st, Ingest: e.wh, Layout: e.lay, JudgmentRetention: 24 * time.Hour, Now: func() time.Time { return t0 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := short.Sweep(bg); err != nil {
+			t.Fatal(err)
+		}
+		if got := e.judgments(); len(got) != 1 || got[0] != "new" {
+			t.Fatalf("1-day retention kept %v", got)
+		}
+	}
+}
+
+func TestKeepJudgmentsDisablesExpiry(t *testing.T) {
+	e := newEnv(t, 30*24*time.Hour, 14*24*time.Hour)
+	e.putJudgment("ancient", t0.Add(-1000*24*time.Hour))
+	keep, err := New(Options{Store: e.st, Ingest: e.wh, Layout: e.lay, KeepJudgments: true, Now: func() time.Time { return t0 }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := keep.Sweep(bg); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.judgments(); len(got) != 1 {
+		t.Fatalf("judgment_retention_days: 0 must keep everything, got %v", got)
 	}
 }
