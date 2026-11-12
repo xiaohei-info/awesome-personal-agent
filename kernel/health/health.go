@@ -1,4 +1,4 @@
-// Package health 是健康视图的汇总（设计 §15.2）：由既有账本记录与外呼统计读出十类信号，
+// Package health 是健康视图的汇总（设计 §15.2）：由既有账本记录与外呼统计读出十一类信号，
 // 长时与短任务两个队列分开给出排队数和最长等待时间。只读、只报不修；不新增存储，不写任何模块的数据。
 // 每个信号的修复入口由展示层链接（来源页、运行详情、项目页等），本包不触发任何修复。
 package health
@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -16,6 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -92,7 +94,13 @@ type ReceiptFailure struct {
 	at         time.Time
 }
 
-// View 是十类信号。空切片/零值表示该信号当前正常。
+// 模型端点现状（View.Endpoint）。
+const (
+	EndpointNotConfigured = "not_configured" // 没有配置，而有事件在等它
+	EndpointFailing       = "failing"        // 最近一次调用在全部重试后仍失败，之后没有成功
+)
+
+// View 是十一类信号。空切片/零值表示该信号当前正常。
 type View struct {
 	SourceFailures   []SourceFailure
 	Outcall          Outcall
@@ -101,17 +109,21 @@ type View struct {
 	AgentsMDDrift    []agentsmd.OpenDrift
 	PackRejections   []packs.Rejection
 	ModelUnavailable []ModelIssue
-	Unjudged         []domain.SourceEvent
-	RuleFallbacks    []RuleFallback
-	ReceiptFailures  []ReceiptFailure
-	OtherAlerts      []OtherAlert
+	// Endpoint 是模型端点现状，空表示正常（或没有配置、也没有事件在等它）；计入"模型不可用"。
+	Endpoint string
+	// Unjudged 是未判定积压（disposition 为 unjudged），单独一个提醒级信号；Expired 是已过期、不计入积压的条数。
+	Unjudged        []domain.SourceEvent
+	Expired         int
+	RuleFallbacks   []RuleFallback
+	ReceiptFailures []ReceiptFailure
+	OtherAlerts     []OtherAlert
 }
 
-// Healthy 为真表示十类信号都正常。
+// Healthy 为真表示异常级信号都正常。未判定积压只是待本人处理的提醒，不影响它。
 func (v View) Healthy() bool {
 	return len(v.SourceFailures) == 0 && len(v.Outcall.Timeouts) == 0 && len(v.DeliveryBacklog) == 0 &&
 		len(v.ChainTrips) == 0 && len(v.AgentsMDDrift) == 0 && len(v.PackRejections) == 0 &&
-		len(v.ModelUnavailable) == 0 && len(v.Unjudged) == 0 && len(v.RuleFallbacks) == 0 && len(v.ReceiptFailures) == 0 && len(v.OtherAlerts) == 0
+		len(v.ModelUnavailable) == 0 && v.Endpoint == "" && len(v.RuleFallbacks) == 0 && len(v.ReceiptFailures) == 0 && len(v.OtherAlerts) == 0
 }
 
 // Collect 在调用方的只读事务内汇总。任一来源读取失败都原样返回，不给出残缺的"健康"。
@@ -148,10 +160,34 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	if v.Unjudged, err = runner.Unjudged(tx); err != nil {
 		return View{}, err
 	}
+	if v.Expired, err = runner.CountExpired(tx); err != nil {
+		return View{}, err
+	}
+	if v.Endpoint, err = endpoint(tx, v.Unjudged); err != nil {
+		return View{}, err
+	}
 	if v.ModelUnavailable, v.RuleFallbacks, v.ReceiptFailures, v.OtherAlerts, err = alerts(tx); err != nil {
 		return View{}, err
 	}
 	return v, nil
+}
+
+// endpoint 判定模型端点现状：调用持续失败总是异常；没有配置只在有事件因此未判定时才算异常（不用模型是允许的，§5.6）。
+func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (string, error) {
+	h, err := direct.HealthIn(tx)
+	if err != nil || h.Unavailable {
+		return EndpointFailing, err
+	}
+	_, pol, err := policy.Current(tx)
+	if err != nil || (pol.ModelEndpoint.URL != "" && pol.ModelEndpoint.Model != "") {
+		return "", err
+	}
+	for _, e := range backlog {
+		if e.UnjudgedReason != domain.UnjudgedUndecided {
+			return EndpointNotConfigured, nil
+		}
+	}
+	return "", nil
 }
 
 func sourceFailures(tx *store.Tx) ([]SourceFailure, error) {

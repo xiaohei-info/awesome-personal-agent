@@ -187,8 +187,10 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
+	rejudge := inbound.DefaultRejudge
+	rejudge.Window = cfg.UnjudgedRejudgeWindow
 	if k.in, err = inbound.New(inbound.Options{Store: st, Exec: x, Packs: ld, Judge: judge, Owner: owner,
-		Intercept: fm.Intercept, OnError: logErr("inbound")}); err != nil {
+		Intercept: fm.Intercept, OnError: logErr("inbound"), Rejudge: rejudge}); err != nil {
 		return nil, err
 	}
 	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner")}); err != nil {
@@ -485,6 +487,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 		report("webhook recover", k.wh.Recover(ctx))
 		maintain := func() {
 			report("inbound", k.in.Process(ctx))
+			report("inbound rejudge", k.in.Rejudge(ctx)) // 模型恢复后重判积压、到期的转 expired（§9.3）
 			report("webhook", k.wh.Process(ctx))
 			report("retention", k.ret.Sweep(ctx))
 			report("wake receipts", k.wk.Settle(ctx, k.st, k.result)) // 补上重启前漏掉的回执，先于调度器的超时判定

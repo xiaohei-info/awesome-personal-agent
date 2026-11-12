@@ -8,6 +8,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
@@ -45,7 +46,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, policy.Module, command.Module, proc.Module, delivery.Module,
-		registry.Module, runner.Module, agentsmd.Module, chain.Module, Module} {
+		registry.Module, runner.Module, agentsmd.Module, chain.Module, direct.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

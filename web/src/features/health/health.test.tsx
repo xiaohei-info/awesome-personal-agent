@@ -6,7 +6,7 @@ import { App } from "../../app/App";
 import { feature } from "./index";
 import type { HealthReport, Signal } from "./HealthPage";
 
-// 测试边界替身：按 api/health 的契约应答 GET /v1/health（十项信号、顺序固定，错误体见附录 B.3）。
+// 测试边界替身：按 api/health 的契约应答 GET /v1/health（十一项信号、顺序固定，错误体见附录 B.3）。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 const NEXT: Record<string, string> = {
@@ -16,7 +16,8 @@ const NEXT: Record<string, string> = {
   chain_trips: "item detail; re-delegate by hand",
   agentsmd_drift: "project page",
   pack_rejections: "fix the pack, then hot-reload",
-  model_unavailable: "settings page and source page",
+  model_unavailable: "settings page: model endpoint",
+  unjudged_backlog: "source page: propose or ignore, one by one or per source",
   rule_fallbacks: "re-review the rule in Web",
   receipt_failures: "audit page; credential or basis problems go to settings, a receipt turned needs_input is handled in decision todos",
   other_alerts: "audit page; open the object named in detail",
@@ -51,11 +52,11 @@ function serve(get: () => Response) {
 beforeEach(() => sessionStorage.clear());
 
 describe("健康页（flow-health / ACT-HLT-01）", () => {
-  it("全部正常：十类信号都显示且顺序与服务端一致，且不出现修复链接以外的写请求", async () => {
+  it("全部正常：十一类信号都显示且顺序与服务端一致，且不出现修复链接以外的写请求", async () => {
     const s = serve(() => json(200, report()));
     mount(s.impl);
     expect(await screen.findByText("一切正常")).toBeInTheDocument();
-    for (const t of ["来源失败", "外呼超时与排队", "投递积压", "链路熔断", "AGENTS.md 漂移", "能力包加载失败", "模型不可用与未判定积压", "规则回退 observe", "回执与捕获失败", "其他健康告警"])
+    for (const t of ["来源失败", "外呼超时与排队", "投递积压", "链路熔断", "AGENTS.md 漂移", "能力包加载失败", "模型不可用", "未判定积压", "规则回退 observe", "回执与捕获失败", "其他健康告警"])
       expect(screen.getByRole("article", { name: t })).toBeInTheDocument();
     expect(s.calls.filter((c) => !c.startsWith("GET"))).toEqual([]);
   });
@@ -68,7 +69,8 @@ describe("健康页（flow-health / ACT-HLT-01）", () => {
       chain_trips: { ok: false, count: 1, why: "the breaker stopped", detail: ["it-3"] },
       agentsmd_drift: { ok: false, count: 1, why: "drift", detail: ["it-4"] },
       pack_rejections: { ok: false, count: 1, why: "a pack failed to load", detail: ["pk"] },
-      model_unavailable: { ok: false, count: 3, why: "a judge run failed", detail: { screening: ["x"], unjudged: ["e1", "e2"] } },
+      model_unavailable: { ok: false, count: 2, severity: "error", why: "a judge run failed", detail: { endpoint: "not_configured", screening: ["x"], judgements: [] } },
+      unjudged_backlog: { ok: false, count: 54, severity: "warning", why: "source events are still waiting for a judgement", detail: { model_unavailable: 50, undecided: 4, expired: 3, sources: [{ source: "mail", count: 54 }] } },
       rule_fallbacks: { ok: false, count: 1, why: "fell back to observe", detail: ["rule-1"] },
       receipt_failures: { ok: false, count: 2, why: "a receipt or capture was rejected by the kernel", detail: ["it-7", "it-8"] },
       other_alerts: { ok: false, count: 1, why: "a health alert without a dedicated signal", detail: ["rule-2"] },
@@ -86,9 +88,17 @@ describe("健康页（flow-health / ACT-HLT-01）", () => {
     expect(within(screen.getByRole("article", { name: "链路熔断" })).getByRole("link", { name: "事项" })).toHaveAttribute("href", "/items");
     expect(within(screen.getByRole("article", { name: "AGENTS.md 漂移" })).getByRole("link", { name: "项目" })).toHaveAttribute("href", "/projects");
     expect(within(screen.getByRole("article", { name: "能力包加载失败" })).queryByRole("link")).not.toBeInTheDocument();
-    const m = screen.getByRole("article", { name: "模型不可用与未判定积压" });
+    const m = screen.getByRole("article", { name: "模型不可用" });
+    expect(within(m).getByText("异常（2）")).toBeInTheDocument();
+    expect(within(m).getByText(/模型端点没有配置/)).toBeInTheDocument();
     expect(within(m).getByRole("link", { name: "策略与人格" })).toHaveAttribute("href", "/settings");
-    expect(within(m).getByRole("link", { name: "来源" })).toHaveAttribute("href", "/sources");
+    // 积压是提醒级：显示待处理而不是异常，不计入异常类数，状态值不露出内部值
+    const b = screen.getByRole("article", { name: "未判定积压" });
+    expect(within(b).getByText("待处理（54）")).toBeInTheDocument();
+    expect(within(b).getByText(/等模型恢复后自动重判：50 条/)).toBeInTheDocument();
+    expect(within(b).getByText(/另有 3 条已过期/)).toBeInTheDocument();
+    expect(within(b).queryByText(/unjudged/)).not.toBeInTheDocument();
+    expect(within(b).getByRole("link", { name: "来源" })).toHaveAttribute("href", "/sources");
     expect(within(screen.getByRole("article", { name: "规则回退 observe" })).getByRole("link", { name: "规则模式" })).toHaveAttribute("href", "/rules");
     const rc = screen.getByRole("article", { name: "回执与捕获失败" });
     expect(within(rc).getByText(/it-7、it-8/)).toBeInTheDocument();

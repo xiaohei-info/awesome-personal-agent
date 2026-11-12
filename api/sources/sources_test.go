@@ -646,7 +646,7 @@ func (e *env) seedEvents(source string, evs ...[2]string) {
 		}
 		for i, x := range evs {
 			if domain.Disposition(x[1]) != domain.DispositionPending {
-				if err := runner.SetDisposition(tx, all[i].ID, domain.Disposition(x[1]), ""); err != nil {
+				if err := runner.SetDisposition(tx, all[i].ID, domain.Disposition(x[1]), "", ""); err != nil {
 					return err
 				}
 			}

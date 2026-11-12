@@ -5,9 +5,11 @@
 //	DELETE /sources/{id}/webhook        吊销该来源的全部接收密钥，并删除 HMAC 密钥文件
 //	GET /sources/{id}/ingests           入站记录
 //	POST /ingests/{id}/replay           重放
-//	GET /sources/{id}/events            来源事件，可按 disposition 过滤，after + limit 分页
+//	GET /sources/{id}/events            来源事件，可按 disposition 过滤（逗号分隔多个），after + limit 分页
 //	GET /sources/{id}/rejects           没有入账的输出行及原因，after + limit 分页
 //	POST /source-events/{id}/propose    把未判定事件转为建议
+//	POST /source-events/{id}/ignore     忽略一条未判定事件
+//	POST /source-events/ignore          批量忽略未判定积压：按来源或全部
 //
 // 路由只做传输：解码、选命令、渲染。授权与校验都在内核命令管线：可执行命令（script 来源）走只 Web 的命令，
 // delegate 得到 web_only（退出码 20，留痕）；pull 的命令须在随发行附带的清单内。/ingest/{source_id} 接收路由不在本包。
@@ -109,6 +111,8 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/events", Handler: readable(a.events)})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/rejects", Handler: readable(a.rejects)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/ignore", MaxBody: 1 << 10, Handler: a.ignoreBatch})
 	}, nil
 }
 
@@ -480,11 +484,18 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		return domain.NewError(domain.CodePermissionDenied, "run credential cannot list source events", "read forwarded messages from the context instead")
 	}
 	q := r.URL.Query()
-	d := domain.Disposition(q.Get("disposition"))
-	switch d {
-	case "", domain.DispositionPending, domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored, domain.DispositionUnjudged:
-	default:
-		return invalid("disposition is not valid", "use pending, attached, proposed, ignored or unjudged")
+	var ds []domain.Disposition
+	if raw := q.Get("disposition"); raw != "" {
+		for _, x := range strings.Split(raw, ",") {
+			d := domain.Disposition(x)
+			switch d {
+			case domain.DispositionPending, domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored,
+				domain.DispositionUnjudged, domain.DispositionExpired:
+			default:
+				return invalid("disposition is not valid", "use pending, attached, proposed, ignored, unjudged or expired, comma separated")
+			}
+			ds = append(ds, d)
+		}
 	}
 	after, limit, err := pageParams(q)
 	if err != nil {
@@ -502,7 +513,7 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 			}
 		}
 		var err error
-		evs, next, err = runner.EventPage(tx, id, d, after, limit)
+		evs, next, err = runner.EventPage(tx, id, ds, after, limit)
 		return err
 	}); err != nil {
 		return err
@@ -520,6 +531,44 @@ func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal)
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, ev)
+}
+
+// ignoreOne 忽略一条积压事件，返回更新后的来源事件；不在积压里是 409。
+func (a *api) ignoreOne(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	id := r.PathValue("id")
+	in := map[string]json.RawMessage{}
+	in["event"], _ = json.Marshal(id)
+	if _, err := a.run(r, p, inbound.CmdIgnoreUnjudged, in, true); err != nil {
+		return err
+	}
+	var ev domain.SourceEvent
+	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, id); return }); err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, ev)
+}
+
+// ignoreBatch 忽略积压：请求体 {"source": "<id>"} 只忽略该来源，{"all": true} 忽略全部；返回 {"ignored": n}。
+func (a *api) ignoreBatch(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		Source string `json:"source,omitempty"`
+		All    bool   `json:"all,omitempty"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	m := map[string]json.RawMessage{}
+	if in.Source != "" {
+		m["source"], _ = json.Marshal(in.Source)
+	}
+	if in.All {
+		m["all"] = json.RawMessage("true")
+	}
+	res, err := a.run(r, p, inbound.CmdIgnoreUnjudged, m, true)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, res.Value)
 }
 
 // rejects 返回来源没有入账的输出行及原因。原始行在落账时已截断到 512 字节；与入站记录的请求头同一规则，含接收密钥明文前缀的整行遮蔽。

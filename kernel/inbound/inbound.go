@@ -6,12 +6,13 @@
 //   - 判断型模板约定为规则所在包（无规则命中取 DefaultPack）里的 Template。choice 题的枚举是 kind 名，
 //     "ignore" 表示不值得；yes_no 题的 probability 低于 0.5 表示不值得，kind 取规则的 kind（缺省 task）。
 //     级联到生成型时，输出里的 title、summary 用作事项标题与摘要。判断为不值得的只记 ignored。
-//   - 模型未配置、持续不可用，或判断型在级联后仍未定，记 unjudged，留在来源页，不进建议流，也不当作失败；
+//   - 模型未配置、持续不可用，或判断型在级联后仍未定，记 unjudged 并记下原因，留在来源页，不进建议流，也不当作失败；
 //     其他错误（模板缺失、输出不合 schema）原样返回，事件保持 pending。
+//   - 因模型不可用而未判定的事件在模型恢复后自动重判（backlog.go）：放回 pending 再走一遍本流水线；超出时限的转 expired。
 //   - accept: auto 的规则：observe 档事项照常以 proposed 进入，只记一条"本来会自动接受"；auto 档（只在 Web 切换）
 //     直接进 open，Event 记策略版本与规则 id；off 档按普通规则处理。
 //   - 事项与处置都经命令模型写入，每个来源事件的写入幂等，崩溃后重跑不产生重复事项。
-//   - 留在来源页的 unjudged 事件由本人手动转建议（propose.go），只走"进入 proposed"这一步，不再判断、不自动接受。
+//   - 积压（unjudged、expired）由本人手动转建议（propose.go，只走"进入 proposed"这一步，不再判断、不自动接受）或忽略（backlog.go）。
 //
 // 跟进消息归属（§9.4）不在本包：它在判断之前拦截事件，由 kernel-followmsg 负责，经 Options.Intercept 接入；
 // 命中的挂靠后结束，没命中但有关联线索的，线索随判断输入与事项理由带走。
@@ -27,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -88,6 +90,10 @@ type Options struct {
 	OnError func(error)
 	// Intercept 是跟进消息归属（§9.4）；可为空。
 	Intercept Intercept
+	// Now 是时钟，缺省 time.Now；自动重判按它算事件年龄与退避。
+	Now func() time.Time
+	// Rejudge 是自动重判的上限与节流，零值取 DefaultRejudge。
+	Rejudge RejudgeLimits
 }
 
 // Service 消费 pending 的来源事件。
@@ -97,6 +103,9 @@ type Service struct {
 	again atomic.Bool
 	// proposing 串行化手动转建议；不与 mu 共用，mu 在模型调用期间一直被占着。
 	proposing sync.Mutex
+	// rejudging 让同一时刻只有一轮自动重判；probe 是模型仍不可用时的退避（只在内存，重启后立即再探一次）。
+	rejudging sync.Mutex
+	probe     probeState
 	// captures 跟踪捕获触发的后台处理；测试在关账本前等它们退出，否则提交后钩子会撞上已关闭的连接。
 	captures sync.WaitGroup
 }
@@ -108,6 +117,12 @@ func New(o Options) (*Service, error) {
 	}
 	if o.Owner == "" {
 		o.Owner = "owner"
+	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+	if o.Rejudge == (RejudgeLimits{}) {
+		o.Rejudge = DefaultRejudge
 	}
 	return &Service{o: o}, nil
 }
@@ -124,6 +139,8 @@ type disposeIn struct {
 	Reason      string             `json:"reason,omitempty"`
 	// WouldAccept 为真表示 accept: auto 的规则在 observe 档，只记录本来会自动接受。
 	WouldAccept bool `json:"would_accept,omitempty"`
+	// UnjudgedReason 是 unjudged 的原因（domain.Unjudged*）。
+	UnjudgedReason string `json:"unjudged_reason,omitempty"`
 }
 
 func parseDispose(in json.RawMessage) (disposeIn, error) {
@@ -149,10 +166,11 @@ func (s *Service) Register(x *command.Executor) error {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parseDispose(c.Input)
-			if err := runner.SetDisposition(c.Tx, v.Event, v.Disposition, v.Item); err != nil {
+			if err := runner.SetDisposition(c.Tx, v.Event, v.Disposition, v.Item, v.UnjudgedReason); err != nil {
 				return nil, err
 			}
-			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule})
+			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule,
+				"unjudged_reason": v.UnjudgedReason})
 			if _, err := c.Emit(domain.Event{Type: EvDisposed, Object: v.Event, Reason: v.Reason, Payload: p}); err != nil {
 				return nil, err
 			}
@@ -170,6 +188,9 @@ func (s *Service) Register(x *command.Executor) error {
 		return err
 	}
 	if err := registerPropose(x); err != nil {
+		return err
+	}
+	if err := registerBacklog(x); err != nil {
 		return err
 	}
 	x.OnCommit(func(c command.Commit) {
@@ -391,7 +412,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	var prop proposal
 	switch {
 	case m != nil && m.rule.Then == "ignore":
-		return s.dispose(ctx, m, disposeIn{Event: ev.ID, Disposition: domain.DispositionIgnored, Reason: "rule " + m.key() + " ignores this event"})
+		return s.dispose(ctx, m, ev, disposeIn{Event: ev.ID, Disposition: domain.DispositionIgnored, Reason: "rule " + m.key() + " ignores this event"})
 	case m != nil && (m.rule.Then == "" || m.rule.Then == "proposed"):
 		if m.rule.Kind == "" {
 			return invalid("source rule " + m.key() + " maps directly but declares no kind")
@@ -404,11 +425,14 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 			return err
 		}
 		if verdict != "" {
-			disp := domain.DispositionIgnored
+			d := disposeIn{Event: ev.ID, Disposition: domain.DispositionIgnored, Reason: verdict}
 			if verdict != ChoiceIgnore {
-				disp = domain.DispositionUnjudged
+				d.Disposition, d.UnjudgedReason = domain.DispositionUnjudged, domain.UnjudgedUndecided
+				if strings.HasPrefix(verdict, unavailablePrefix) {
+					d.UnjudgedReason = domain.UnjudgedModelUnavailable
+				}
 			}
-			return s.dispose(ctx, m, disposeIn{Event: ev.ID, Disposition: disp, Reason: verdict})
+			return s.dispose(ctx, m, ev, d)
 		}
 	}
 	if hint != "" {
@@ -420,6 +444,9 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	}
 	return s.propose(ctx, sn, src, ev, m, prop, project)
 }
+
+// unavailablePrefix 开头的 verdict 表示因模型不可用而未判定（会自动重判），其余未判定是判断未定。
+const unavailablePrefix = "model unavailable: "
 
 // judge 返回要建的事项；verdict 非空表示不建：ChoiceIgnore 是不值得，其余是未判定的原因。
 func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, hint string) (proposal, string, error) {
@@ -434,7 +461,7 @@ func (s *Service) judge(ctx context.Context, sn snapshot, src domain.Source, ev 
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource},
 		Basis: &domain.Basis{PolicyVersion: sn.policy, RuleID: m.key()}})
 	if errors.Is(err, model.ErrNotConfigured) || errors.Is(err, direct.ErrUnavailable) {
-		return proposal{}, "model unavailable: " + err.Error(), nil
+		return proposal{}, unavailablePrefix + err.Error(), nil
 	}
 	if err != nil {
 		return proposal{}, "", err
@@ -571,14 +598,18 @@ func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain
 			d.WouldAccept = true
 		}
 	}
-	return s.dispose(ctx, m, d)
+	return s.dispose(ctx, m, ev, d)
 }
 
-func (s *Service) dispose(ctx context.Context, m *matched, d disposeIn) error {
+func (s *Service) dispose(ctx context.Context, m *matched, ev domain.SourceEvent, d disposeIn) error {
 	if d.Rule == "" {
 		d.Rule = m.key()
 	}
-	_, err := s.do(ctx, system, d.Rule, "inbound:dispose:"+d.Event, CmdDispose, d, command.Chain{})
+	key := "inbound:dispose:" + d.Event
+	if ev.Rejudges > 0 { // 每次重判是一次新的处置，不能重放上一次的结果
+		key += fmt.Sprintf(":rejudge-%d", ev.Rejudges)
+	}
+	_, err := s.do(ctx, system, d.Rule, key, CmdDispose, d, command.Chain{})
 	return err
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apihealth "github.com/xiaohei-info/awesome-personal-agent/api/health"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
@@ -55,7 +56,7 @@ func newRig(t *testing.T, ph khealth.PackHealth) *rig {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, clock.Module, core.Module,
-		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module} {
+		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -127,8 +128,8 @@ func TestApaHealthPrintsTheSameReportAsTheAPI(t *testing.T) {
 		Signals []struct{ ID, Next string }
 	}
 	_ = json.Unmarshal([]byte(out), &rep)
-	if rep.Healthy || len(rep.Signals) != 10 {
-		t.Fatalf("want 10 signals and unhealthy: %s", out)
+	if rep.Healthy || len(rep.Signals) != 11 {
+		t.Fatalf("want 11 signals and unhealthy: %s", out)
 	}
 	for _, s := range rep.Signals {
 		if s.Next == "" {
@@ -140,7 +141,7 @@ func TestApaHealthPrintsTheSameReportAsTheAPI(t *testing.T) {
 // --pretty：失败的信号带 why 与 next，正常的只标 ok；干净账本显示 healthy。
 func TestApaHealthPretty(t *testing.T) {
 	_, out, _ := newRig(t, nil).apa("health", "--pretty")
-	if !strings.HasPrefix(out, "healthy\n") || strings.Contains(out, "FAIL") || strings.Count(out, "  ok    ") != 10 {
+	if !strings.HasPrefix(out, "healthy\n") || strings.Contains(out, "FAIL") || strings.Count(out, "  ok    ") != 11 {
 		t.Fatalf("clean: %q", out)
 	}
 	_, out, _ = newRig(t, fakePacks{{Pack: "work", Reason: "bad"}}).apa("health", "--pretty")

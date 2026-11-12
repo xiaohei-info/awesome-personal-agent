@@ -11,7 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// CmdProposeUnjudged 把 unjudged 的来源事件记为 proposed（§5.6）。输入不带 item 时只过授权与状态校验，不写入。
+// CmdProposeUnjudged 把积压的来源事件（unjudged、expired）记为 proposed（§9.3）。输入不带 item 时只过授权与状态校验，不写入。
 const CmdProposeUnjudged = "inbound.propose_unjudged"
 
 func registerPropose(x *command.Executor) error {
@@ -25,7 +25,7 @@ func registerPropose(x *command.Executor) error {
 			if err != nil {
 				return err
 			}
-			if ev.Disposition != domain.DispositionUnjudged {
+			if ev.Disposition != domain.DispositionUnjudged && ev.Disposition != domain.DispositionExpired {
 				return domain.NewError(domain.CodeConflict, "source event "+o.ID+" is "+string(ev.Disposition)+", not unjudged", "re-read the source event")
 			}
 			return nil
@@ -35,7 +35,7 @@ func registerPropose(x *command.Executor) error {
 			if v.Item == "" {
 				return nil, nil
 			}
-			if err := runner.ProposeUnjudged(c.Tx, v.Event, v.Item); err != nil {
+			if err := runner.Resolve(c.Tx, v.Event, domain.DispositionProposed, v.Item); err != nil {
 				return nil, err
 			}
 			p, _ := json.Marshal(map[string]any{"event": v.Event, "disposition": domain.DispositionProposed, "item": v.Item})
@@ -45,7 +45,7 @@ func registerPropose(x *command.Executor) error {
 }
 
 // ProposeUnjudged 以 id 的身份把未判定事件转为 proposed 事项，返回更新后的来源事件。kind 与项目沿用命中的规则，
-// 缺省 task、不归项目。事项与处置是两条命令：中途失败时事件仍是 unjudged，重试接回已建事项。
+// 缺省 task、不归项目。事项与处置是两条命令：中途失败时事件仍在积压里，重试接回已建事项。
 func (s *Service) ProposeUnjudged(ctx context.Context, id command.Identity, event string) (domain.SourceEvent, error) {
 	s.proposing.Lock()
 	defer s.proposing.Unlock()

@@ -4,11 +4,13 @@ import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 
-// 形状对应 GET /v1/health（api/health.Report）：十项信号、顺序固定，判定全在服务端；这里只呈现。
+// 形状对应 GET /v1/health（api/health.Report）：十一项信号、顺序固定，判定全在服务端；这里只呈现。
+// severity 为 warning 的是待本人处理的提醒（如未判定积压），不算异常。
 export interface Signal {
   id: string;
   ok: boolean;
   count: number;
+  severity?: string; // "error" 或 "warning"
   why?: string;
   next: string;
   detail?: unknown;
@@ -26,7 +28,8 @@ const META: Record<string, { title: string; links: { to: string; label: string }
   chain_trips: { title: "链路熔断", links: [{ to: "/items", label: "事项" }] },
   agentsmd_drift: { title: "AGENTS.md 漂移", links: [{ to: "/projects", label: "项目" }] },
   pack_rejections: { title: "能力包加载失败", links: [] },
-  model_unavailable: { title: "模型不可用与未判定积压", links: [{ to: "/settings", label: "策略与人格" }, { to: "/sources", label: "来源" }] },
+  model_unavailable: { title: "模型不可用", links: [{ to: "/settings", label: "策略与人格" }] },
+  unjudged_backlog: { title: "未判定积压", links: [{ to: "/sources", label: "来源" }] },
   rule_fallbacks: { title: "规则回退 observe", links: [{ to: "/rules", label: "规则模式" }] },
   receipt_failures: { title: "回执与捕获失败", links: [{ to: "/audit", label: "审计" }, { to: "/settings", label: "策略与人格" }, { to: "/decisions", label: "决策待办" }] },
   other_alerts: { title: "其他健康告警", links: [{ to: "/audit", label: "审计" }] },
@@ -67,8 +70,19 @@ function Detail({ s }: { s: Signal }) {
   if (s.id === "model_unavailable")
     return (
       <ul>
+        {d.endpoint === "not_configured" && <li>模型端点没有配置，有来源事件在等它判断</li>}
+        {d.endpoint === "failing" && <li>模型端点调用持续失败，恢复后自动清除</li>}
         {d.screening?.length > 0 && <li>初筛失败或超时：{d.screening.join("、")}</li>}
-        {d.unjudged?.length > 0 && <li>未判定来源事件：{d.unjudged.join("、")}</li>}
+        {d.judgements?.length > 0 && <li>判断调用失败：{d.judgements.length} 次</li>}
+      </ul>
+    );
+  if (s.id === "unjudged_backlog")
+    return (
+      <ul>
+        {d.model_unavailable > 0 && <li>等模型恢复后自动重判：{d.model_unavailable} 条</li>}
+        {d.undecided > 0 && <li>判断未定，等你处理：{d.undecided} 条</li>}
+        {d.sources?.length > 0 && <li>来源：{d.sources.map((x: { source: string; count: number }) => `${x.source} ${x.count} 条`).join("、")}</li>}
+        {d.expired > 0 && <li>另有 {d.expired} 条已过期，不再自动重判，也不计入积压</li>}
       </ul>
     );
   return Array.isArray(d) ? <p>涉及：{d.join("、")}</p> : null;
@@ -88,14 +102,15 @@ export function HealthPage() {
     load();
   }, [load]);
 
-  const bad = report?.signals.filter((s) => !s.ok).length ?? 0;
+  const bad = report?.signals.filter((s) => !s.ok && s.severity !== "warning").length ?? 0;
+  const warn = report?.signals.filter((s) => !s.ok && s.severity === "warning").length ?? 0;
   return (
     <main>
       {report === null ? (
         <PageHead>健康</PageHead>
       ) : (
-        <PageHead lede={`${report.signals.length} 项信号${bad ? `里有 ${bad} 项需要看一眼。` : "都正常。"}`}>
-          {report.healthy ? "一切正常" : `存在 ${bad} 类异常`}
+        <PageHead lede={`${report.signals.length} 项信号${bad ? `里有 ${bad} 项需要看一眼。` : warn ? `没有异常，${warn} 项待你处理。` : "都正常。"}`}>
+          {report.healthy ? (warn ? "运行正常" : "一切正常") : `存在 ${bad} 类异常`}
         </PageHead>
       )}
       {error && (
@@ -113,7 +128,9 @@ export function HealthPage() {
               <article key={s.id} aria-label={m.title} className="signal">
                 <h3>
                   {m.title}
-                  <span className={"badge " + (s.ok ? "ok" : "bad")}>{s.ok ? "正常" : `异常（${s.count}）`}</span>
+                  <span className={"badge " + (s.ok ? "ok" : s.severity === "warning" ? "warn" : "bad")}>
+                    {s.ok ? "正常" : s.severity === "warning" ? `待处理（${s.count}）` : `异常（${s.count}）`}
+                  </span>
                 </h3>
                 {!s.ok && s.why && <p>{s.why}</p>}
                 <Detail s={s} />

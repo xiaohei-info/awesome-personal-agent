@@ -1,4 +1,4 @@
-// Package health 实现 `apa health`（设计 §15.2、附录 B.1）：只读，打印 GET /v1/health 的十类信号与修复入口。
+// Package health 实现 `apa health`（设计 §15.2、附录 B.1）：只读，打印 GET /v1/health 的十一类信号与修复入口。
 // 薄客户端：判定在内核，这里不重算、不过滤；默认输出就是 API 响应本身，与 Web 读到的是同一份。
 package health
 
@@ -16,11 +16,12 @@ func init() { client.Register("health", run) }
 type report struct {
 	Healthy bool `json:"healthy"`
 	Signals []struct {
-		ID    string `json:"id"`
-		OK    bool   `json:"ok"`
-		Count int    `json:"count"`
-		Why   string `json:"why"`
-		Next  string `json:"next"`
+		ID       string `json:"id"`
+		OK       bool   `json:"ok"`
+		Count    int    `json:"count"`
+		Severity string `json:"severity"`
+		Why      string `json:"why"`
+		Next     string `json:"next"`
 	} `json:"signals"`
 }
 
@@ -55,7 +56,11 @@ func render(rep report) string {
 			fmt.Fprintf(&b, "  ok    %s\n", s.ID)
 			continue
 		}
-		fmt.Fprintf(&b, "  FAIL  %s (%d)\n        why:  %s\n        next: %s\n", s.ID, s.Count, s.Why, s.Next)
+		tag := "FAIL"
+		if s.Severity == "warning" {
+			tag = "WARN"
+		}
+		fmt.Fprintf(&b, "  %-4s  %s (%d)\n        why:  %s\n        next: %s\n", tag, s.ID, s.Count, s.Why, s.Next)
 	}
 	return b.String()
 }

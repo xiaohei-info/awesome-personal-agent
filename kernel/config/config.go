@@ -32,6 +32,8 @@ type Config struct {
 	ChainDepthThreshold int
 	// GuidelineDraftExecutor 是缺规范且本机无检出时受托起草的执行者 id（§12.6）；空表示未配置，起草事项转 needs_input。
 	GuidelineDraftExecutor string
+	// UnjudgedRejudgeWindow 是未判定积压自动重判的年龄窗口（§9.3）：更早的转 expired。0 表示关闭，既不重判也不转 expired。
+	UnjudgedRejudgeWindow time.Duration
 }
 
 // Default 返回设计规定的默认值：额度 4/2，来源输出上限 32MB，Ingest 30 天，运行目录 14 天，
@@ -49,6 +51,7 @@ func Default() Config {
 		DeliveryUnclaimedAfter: 30 * time.Minute,
 		DeliveryBackoff:        []time.Duration{time.Minute, 3 * time.Minute, 7 * time.Minute, 15 * time.Minute, 30 * time.Minute},
 		ChainDepthThreshold:    8,
+		UnjudgedRejudgeWindow:  7 * day,
 	}
 }
 
@@ -204,6 +207,12 @@ func apply(c *Config, seen map[string]bool, raw string) error {
 			bo = append(bo, d)
 		}
 		c.DeliveryBackoff = bo
+	case "unjudged_rejudge_days": // 0 关闭自动重判与到期
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("%s 必须是非负整数: %q", k, v)
+		}
+		c.UnjudgedRejudgeWindow = time.Duration(n) * day
 	case "chain_depth_threshold":
 		return positive(k, v, &c.ChainDepthThreshold)
 	case "guideline_draft_executor":

@@ -12,7 +12,7 @@ const err = (status: number, code: string, why: string) => json(status, { code, 
 
 interface Src { id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
 interface Rj { run_id: string; line: number; reason: string; raw: string; at: string }
-interface Ev { id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string }
+interface Ev { id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string; unjudged_reason?: string }
 
 function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean } = {}) {
   const sources = o.sources ?? [];
@@ -55,7 +55,7 @@ function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: 
       if (p[2] === "/events") {
         const d = u.searchParams.get("disposition");
         const after = Number(u.searchParams.get("after") ?? 0);
-        const all = events.filter((e) => e.disposition === d);
+        const all = events.filter((e) => (d ?? "").split(",").includes(e.disposition));
         const page = all.slice(after, after + 2);
         return json(200, after + 2 < all.length ? { events: page, next_after: after + 2 } : { events: page });
       }
@@ -75,6 +75,19 @@ function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: 
       e.disposition = "proposed";
       e.item = "item_" + e.id;
       return json(200, e);
+    }
+    const ig = u.pathname.match(/^\/v1\/source-events\/([^/]+)\/ignore$/);
+    if (ig && method === "POST") {
+      const e = events.find((x) => x.id === ig[1]);
+      if (!e) return err(404, "not_found", "event not found");
+      if (e.disposition !== "unjudged" && e.disposition !== "expired") return err(409, "conflict", `event is ${e.disposition}, not unjudged`);
+      e.disposition = "ignored";
+      return json(200, e);
+    }
+    if (u.pathname === "/v1/source-events/ignore" && method === "POST") {
+      const backlog = events.filter((e) => e.disposition === "unjudged" || e.disposition === "expired");
+      backlog.forEach((e) => (e.disposition = "ignored")); // 替身只有一个来源，按来源与全部等价
+      return json(200, { ignored: backlog.length });
     }
     return err(404, "not_found", "no such route");
   }) as unknown as typeof fetch;
@@ -207,6 +220,29 @@ describe("未判定事件转建议（flow-triage-failure / ACT-TRI-02）", () =>
     b.events[0].disposition = "ignored"; // 别处已处置
     await userEvent.click(region.getByRole("button", { name: "转为建议" }));
     expect(await region.findByRole("alert")).toHaveTextContent("event is ignored, not unjudged");
+  });
+
+  it("状态显示中文；可逐条忽略，也可两步确认后忽略本来源全部（含已过期的）", async () => {
+    const b = backend({
+      sources: [rss],
+      events: [ev("e1"), { ...ev("e2"), unjudged_reason: "undecided" }, ev("e3", "expired"), ev("e4")],
+    });
+    mount(b.impl);
+    await userEvent.click((await row("src_rss")).getByRole("button", { name: "详情" }));
+    const region = within(await screen.findByRole("region", { name: "未判定事件" }));
+    expect(await region.findAllByText("等模型恢复后自动重判")).toHaveLength(1); // 第一页两条：e1、e2
+    expect(region.getByText("判断未定，等你处理")).toBeInTheDocument();
+    expect(region.queryByText(/unjudged|expired/)).not.toBeInTheDocument();
+    await userEvent.click(within(region.getByRole("group", { name: "处理 e1" })).getByRole("button", { name: "忽略" }));
+    await region.findByText("已过期，不再自动重判");
+    expect(b.events.find((e) => e.id === "e1")!.disposition).toBe("ignored");
+    await userEvent.click(region.getByRole("button", { name: "忽略本来源的全部未判定事件" }));
+    expect(b.calls.some((c) => c.path === "/v1/source-events/ignore")).toBe(false); // 第一次点击只展开确认
+    await userEvent.click(region.getByRole("button", { name: "确认忽略本来源的全部未判定事件" }));
+    expect(await region.findByText("没有未判定事件")).toBeInTheDocument();
+    const post = b.calls.find((c) => c.path === "/v1/source-events/ignore")!;
+    expect(post.body).toEqual({ source: "src_rss" });
+    expect(b.events.every((e) => e.disposition === "ignored")).toBe(true);
   });
 
   it("空状态", async () => {
