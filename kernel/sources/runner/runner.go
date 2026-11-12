@@ -100,6 +100,10 @@ CREATE TABLE sources_runner_metric (
 	at INTEGER NOT NULL,
 	PRIMARY KEY (source_id, correlation_key, name)
 ) WITHOUT ROWID;`,
+}, {
+	// 标准事件 v2 的 items[]（聚合消息）：账本结构版本 3 的 items 列存的是事项 id，消息另存一列，供 extract 出口抽取（§9.2）。
+	Version: 4, Ledger: 3, Name: "event-messages",
+	SQL: `ALTER TABLE sources_runner_event ADD COLUMN messages TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。
@@ -598,6 +602,15 @@ func AppendInternal(tx *store.Tx, src domain.Source, ev domain.SourceEvent) erro
 		Sender: ev.Sender, SenderVerified: ev.SenderVerified})
 }
 
+// jsonOrEmpty 把可选字段存成 JSON；没有时存空串，与迁移的列缺省一致。
+func jsonOrEmpty(v any, empty bool) (string, error) {
+	if empty {
+		return "", nil
+	}
+	b, err := json.Marshal(v)
+	return string(b), err
+}
+
 func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent) error {
 	key := src.DedupeKeyFor(ev.ID)
 	var rnd [8]byte
@@ -612,11 +625,20 @@ func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent) 
 	if ev.SenderVerified {
 		verified = 1
 	}
+	metrics, err := jsonOrEmpty(ev.Metrics, len(ev.Metrics) == 0)
+	if err != nil {
+		return err
+	}
+	msgs, err := jsonOrEmpty(ev.Items, len(ev.Items) == 0)
+	if err != nil {
+		return err
+	}
 	_, err = tx.Exec(`INSERT OR IGNORE INTO sources_runner_event
-		(dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at, correlation_keys, sender, sender_verified)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at, correlation_keys, sender, sender_verified,
+		 metrics, merge_key, messages)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		key.Domain, key.EventID, "sev_"+hex.EncodeToString(rnd[:]), src.ID, runID, ev.Type, ev.Subject, ev.Summary, ev.Detail,
-		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified)
+		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified, metrics, ev.MergeKey, msgs)
 	return err
 }
 
@@ -637,7 +659,8 @@ func (r *Runner) healthAlert(c *command.Ctx, src domain.Source, in resultIn) err
 // ---- 读取（来源页与入站流水线使用；只读） ----
 
 const eventCols = `id, source_id, dedupe_domain, event_id, type, subject, summary, detail, link, occurred_at,
-	correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges`
+	correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges,
+	metrics, merge_key, items, judgment, messages`
 
 // Events 按落盘顺序返回某来源的来源事件。
 func Events(tx *store.Tx, sourceID string) ([]domain.SourceEvent, error) {
@@ -654,9 +677,10 @@ func Pending(tx *store.Tx) ([]domain.SourceEvent, error) {
 // 这些列只由入站流水线经本函数与下面的积压函数维护；不记事件，调用方自己负责留痕。
 func SetDisposition(tx *store.Tx, id string, d domain.Disposition, item, reason string) error {
 	switch d {
-	case domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored, domain.DispositionUnjudged:
+	case domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored, domain.DispositionUnjudged,
+		domain.DispositionDigest, domain.DispositionAlerted:
 	default:
-		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(d)+" cannot be set", "use attached, proposed, ignored or unjudged")
+		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(d)+" cannot be set", "use attached, proposed, ignored, digest, alerted or unjudged")
 	}
 	if d != domain.DispositionUnjudged {
 		reason = ""
@@ -881,10 +905,14 @@ func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
 			a                      Attachment
 			at, verified, rejudges int64
 			keys, disp             string
+			x                      extraCols
 		)
 		e := &a.SourceEvent
 		if err := rows.Scan(&a.Seq, &e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
-			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges); err != nil {
+			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages); err != nil {
+			return nil, err
+		}
+		if err := x.fill(e); err != nil {
 			return nil, err
 		}
 		e.OccurredAt, e.SenderVerified, e.Disposition = time.Unix(0, at).UTC(), verified != 0, domain.Disposition(disp)
@@ -895,6 +923,24 @@ func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// extraCols 是 v2 新增、需要解码的 JSON 列（空串表示没有）。
+type extraCols struct{ metrics, items, messages string }
+
+func (x extraCols) fill(e *domain.SourceEvent) error {
+	for _, c := range []struct {
+		raw, name string
+		dst       any
+	}{{x.metrics, "metrics", &e.Metrics}, {x.items, "items", &e.Items}, {x.messages, "messages", &e.Messages}} {
+		if c.raw == "" {
+			continue
+		}
+		if err := json.Unmarshal([]byte(c.raw), c.dst); err != nil {
+			return fmt.Errorf("runner: event %s %s: %w", e.ID, c.name, err)
+		}
+	}
+	return nil
 }
 
 // Event 按 id 读一条来源事件。
@@ -921,9 +967,13 @@ func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent,
 			e                      domain.SourceEvent
 			at, verified, rejudges int64
 			keys, disp             string
+			x                      extraCols
 		)
 		if err := rows.Scan(&e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
-			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges); err != nil {
+			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages); err != nil {
+			return nil, err
+		}
+		if err := x.fill(&e); err != nil {
 			return nil, err
 		}
 		e.OccurredAt, e.SenderVerified, e.Disposition = time.Unix(0, at).UTC(), verified != 0, domain.Disposition(disp)

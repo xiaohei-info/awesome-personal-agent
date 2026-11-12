@@ -490,9 +490,9 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 			d := domain.Disposition(x)
 			switch d {
 			case domain.DispositionPending, domain.DispositionAttached, domain.DispositionProposed, domain.DispositionIgnored,
-				domain.DispositionUnjudged, domain.DispositionExpired:
+				domain.DispositionUnjudged, domain.DispositionExpired, domain.DispositionDigest, domain.DispositionAlerted:
 			default:
-				return invalid("disposition is not valid", "use pending, attached, proposed, ignored, unjudged or expired, comma separated")
+				return invalid("disposition is not valid", "use pending, attached, proposed, ignored, digest, alerted, unjudged or expired, comma separated")
 			}
 			ds = append(ds, d)
 		}

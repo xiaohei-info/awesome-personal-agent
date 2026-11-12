@@ -883,3 +883,30 @@ func TestRunCredentialCannotReadIngests(t *testing.T) {
 		t.Fatalf("observer: %d %s", r.Code, r.Body)
 	}
 }
+
+// ACT-IRL-20：digest、alerted 处置可过滤读出，v2 字段随事件返回，非法值仍是 400。
+func TestSourceEventsDigestAlertedFilterAndV2Fields(t *testing.T) {
+	e := setup(t)
+	dlg, obs := e.token(auth.Delegate), e.token(auth.Observer)
+	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 201 {
+		t.Fatalf("register: %d %s", r.Code, r.Body)
+	}
+	e.seedEvents("src_hook", [2]string{"p", "proposed"}, [2]string{"d", "digest"}, [2]string{"a", "alerted"}, [2]string{"u", "unjudged"})
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE sources_runner_event SET metrics = '{"size":3}', merge_key = 'mk-d', items = '["itm_1","itm_2"]', judgment = 'jdg_1' WHERE subject = 'd'`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var pg eventPage
+	e.do(obs, "GET", "/v1/sources/src_hook/events?disposition=digest,alerted", "").into(&pg)
+	if len(pg.Events) != 2 || pg.Events[0].Subject != "d" || pg.Events[1].Subject != "a" {
+		t.Fatalf("digest,alerted: %+v", pg.Events)
+	}
+	if d := pg.Events[0]; d.Metrics["size"] != 3 || d.MergeKey != "mk-d" || len(d.Items) != 2 || d.Judgment != "jdg_1" || d.Disposition != domain.DispositionDigest {
+		t.Fatalf("v2 fields: %+v", d)
+	}
+	if r := e.do(obs, "GET", "/v1/sources/src_hook/events?disposition=digest,bogus", ""); r.Code != 400 {
+		t.Errorf("bogus: %d", r.Code)
+	}
+}
