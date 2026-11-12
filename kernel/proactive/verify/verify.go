@@ -1,11 +1,12 @@
-// Package verify 是委派结果核验（设计 §7.5）：回执之后由事件规则的 call_agent 动作调判断型初筛，
-// 存疑时在父事项上生成决策请求交本人。
+// Package verify 是回执核实门控（设计 §7.5、§8.9）：回执之后由事件规则的 call_agent 动作经级联问一道是非题
+// "这份回执需要本人核实吗"，要核实时在父事项上生成决策请求交本人。
 //
-//   - 只核验 done 回执；进展、阻塞回执不核验。
-//   - 初筛提示词必须是 yes_no 判断型：probability 是"结果可信"的概率。置信度不足、需要解释、
-//     需要升级到任务型，或可信概率低于阈值，都算存疑；可信则不写任何业务状态。
-//   - 不自动返工、不重新委派：存疑只产生决策请求，选项都由本人回答，本人事后自行决定是否重新委派。
-//   - 模型未配置或持续不可用时返回真实错误（规则引擎记 health.alert），不当作"可信"放行。
+//   - 只核实 done 回执；进展、阻塞回执不问。
+//   - 模型只决定要不要打扰本人，不判断回执真假：低于下限（答"否"）不打扰；高于下限、不确定带内、各级未定（答"是"）
+//     都交本人核实。门限与保守默认来自提示词模板（delegation-screen），本包不持有阈值。
+//   - 不自动返工、不重新委派：决策请求的选项都由本人回答，本人事后自行决定是否重新委派。
+//   - 两个端点都不可用时门控不运行：不写判断记录、不生成决策请求，返回"未核验"错误，由规则引擎记 health.alert
+//     标在子事项上；回执本身照常被接受。
 //   - 默认 observe 由规则引擎保证（包文件不能声明 auto）；本包只提供动作处理器，不起子进程、不调网络，
 //     不直写其他模块的数据，写入一律经规则给的命令模型入口。
 package verify
@@ -18,7 +19,6 @@ import (
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -27,27 +27,25 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// DefaultMinCredibility 是可信概率的默认下限：低于它算存疑。
-const DefaultMinCredibility = 0.7
-
 // 决策请求的选项 id。两个选项都回到 open，由本人自己决定后续。
 const (
 	OptAccept = "accept"
 	OptRework = "rework"
 )
 
-// Judge 是专属 agent 的判断型入口（*direct.Service 满足它）。
+// Judge 是级联判断入口（*direct.Service 满足它）。
 type Judge interface {
-	Do(ctx context.Context, c direct.Call) (direct.Outcome, error)
+	Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict, error)
 }
 
 // Options 配置处理器。
 type Options struct {
 	Store *store.Store
 	Judge Judge
-	// MinCredibility 是可信概率下限，取值 (0,1]；零值取 DefaultMinCredibility。
-	MinCredibility float64
 }
+
+// ErrUnverified 表示两个端点都不可用，门控没有运行，回执未核验。
+var ErrUnverified = errors.New("delegation receipt unverified: no judge endpoint or chat endpoint answered")
 
 func invalid(why string) error {
 	return domain.NewError(domain.CodeInvalidRequest, why, "fix the rule or the prompt template")
@@ -57,12 +55,6 @@ func invalid(why string) error {
 func Handler(o Options) (rules.Handler, error) {
 	if o.Store == nil || o.Judge == nil {
 		return nil, errors.New("verify: Store and Judge are required")
-	}
-	if o.MinCredibility == 0 {
-		o.MinCredibility = DefaultMinCredibility
-	}
-	if o.MinCredibility < 0 || o.MinCredibility > 1 {
-		return nil, errors.New("verify: MinCredibility must be within (0,1]")
 	}
 	return func(ctx context.Context, c rules.Call) error { return o.run(ctx, c) }, nil
 }
@@ -126,19 +118,24 @@ func (o Options) run(ctx context.Context, c rules.Call) error {
 	}
 	in, _ := json.Marshal(map[string]any{"item": s.child.ID, "parent": s.parent.ID, "outcome": s.report.Outcome, "evidence": s.report.Evidence})
 	pack, _, _ := strings.Cut(c.Rule, "/")
-	out, err := o.Judge.Do(ctx, direct.Call{Pack: pack, Template: tmpl, Input: in, Material: s.report.Summary,
-		Target: s.child.ID, Project: s.child.Project, ChainDepth: chain.Next(c.Depth), // 判断本身不写业务状态，熔断由随后的 decision.request 命令管线执行
-		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule},
-		Basis: &domain.Basis{PolicyVersion: s.policyVersion, RuleID: c.Rule}})
+	// 回执自述是执行者写的，不是来源内容，不受外发范围裁剪；只送资料段，不附 Event 统计。
+	v, err := o.Judge.Judge(ctx, direct.JudgeCall{Pack: pack, Template: tmpl, Input: in, MaterialText: s.report.Summary,
+		Subject: s.child.ID, Project: s.child.Project, NoStats: true, UnjudgedOnUnavailable: true})
 	if err != nil {
 		return err
 	}
-	why, err := o.doubt(out)
-	if err != nil || why == "" {
-		return err
+	if v.Unavailable {
+		return ErrUnverified
 	}
-	_, err = c.Do("decision.request", map[string]any{"id": s.parent.ID, "reason": "delegation verify: " + why, "ask": domain.AskInput{
-		Question: fmt.Sprintf("委派「%s」已回执完成，核验存疑（%s）。是否采信该结果？", s.child.Title, why),
+	if v.Answer != "yes" {
+		return nil
+	}
+	why := "判断为需要核实（" + v.DecidedBy + "）"
+	if v.LowConfidence {
+		why = "各级判断未定，按保守默认交本人核实"
+	}
+	_, err = c.Do("decision.request", map[string]any{"id": s.parent.ID, "reason": "delegation verify gate: judgment " + v.Record.ID, "ask": domain.AskInput{
+		Question: fmt.Sprintf("委派「%s」已回执完成，需要你核实（%s）。是否采信该结果？", s.child.Title, why),
 		Options: []domain.AskOption{
 			{ID: OptAccept, Label: "采信该结果"},
 			{ID: OptRework, Label: "不采信，由我决定如何重新委派"},
@@ -146,22 +143,4 @@ func (o Options) run(ctx context.Context, c rules.Call) error {
 		Recommend: OptRework,
 	}})
 	return err
-}
-
-// doubt 返回存疑原因；空串表示可信。
-func (o Options) doubt(out direct.Outcome) (string, error) {
-	if out.HandoffTask != "" {
-		return "需要任务型核验 " + out.HandoffTask, nil
-	}
-	if !out.Settled {
-		return "初筛未定：" + out.Reason, nil
-	}
-	var j direct.Judgement
-	if err := json.Unmarshal(out.Final().Result, &j); err != nil || j.Probability == nil {
-		return "", invalid("delegation verify prompt " + out.Final().Template + " must be a yes_no judge")
-	}
-	if *j.Probability < o.MinCredibility {
-		return fmt.Sprintf("可信概率 %.2f 低于 %.2f", *j.Probability, o.MinCredibility), nil
-	}
-	return "", nil
 }

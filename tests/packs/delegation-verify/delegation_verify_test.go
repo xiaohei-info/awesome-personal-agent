@@ -19,6 +19,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/proactive/verify"
@@ -63,6 +64,7 @@ type env struct {
 	x    *command.Executor
 	au   *auth.Auth
 	stub *modelstub.Stub
+	cls  *modelstub.ClsStub
 	wrk  string
 }
 
@@ -70,7 +72,7 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, executors.Module, delegation.Module, rules.Module, direct.Module} {
+		items.Module, executors.Module, delegation.Module, rules.Module, direct.Module, proc.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -80,8 +82,9 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	e := &env{t: t, st: st, au: auth.New(nil), stub: modelstub.New()}
+	e := &env{t: t, st: st, au: auth.New(nil), stub: modelstub.New(), cls: modelstub.NewCls()}
 	t.Cleanup(e.stub.Close)
+	t.Cleanup(e.cls.Close)
 	now := func() time.Time { return t0 }
 	e.x = command.New(st, now)
 	kinds := items.NewKinds()
@@ -97,7 +100,8 @@ func newEnv(t *testing.T) *env {
 	}
 	err = st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}, 1000
+			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}, 1000
+			p.JudgeEndpoint = &policy.JudgeEndpoint{URL: e.cls.URL(), Protocol: policy.ProtocolProbability, Locality: policy.LocalityLocal, TimeoutMs: 1000}
 			return nil
 		})
 		return err
@@ -172,10 +176,8 @@ func (e *env) report(child string) {
 		"evidence": map[string]string{"pr": "https://x/pr/" + child}})
 }
 
-func (e *env) judge(prob, conf float64) {
-	b, _ := json.Marshal(map[string]float64{"probability": prob, "confidence": conf})
-	e.stub.SetDefault(modelstub.Reply{Content: string(b)})
-}
+// gate 配分类端点对"这份回执需要本人核实吗"回答是的概率。
+func (e *env) gate(p float64) { e.cls.SetDefaultPYes(p) }
 
 func (e *env) auto() {
 	e.t.Helper()
@@ -214,29 +216,29 @@ func TestPackDeclaresWhatC14Lists(t *testing.T) {
 // 默认 observe：回执不外呼模型、不写业务状态。
 func TestObserveByDefaultDoesNothing(t *testing.T) {
 	e := newEnv(t)
-	e.judge(0.1, 0.9)
+	e.gate(0.9)
 	parent, child := e.delegated()
 	e.report(child)
-	if n := len(e.stub.Requests()); n != 0 || e.item(parent).Ask != nil {
+	if n := len(e.cls.Batches()); n != 0 || e.item(parent).Ask != nil {
 		t.Fatalf("observe acted: calls=%d ask=%+v", n, e.item(parent).Ask)
 	}
 }
 
-// flow-delegate-recover / ACT-DLG-11：本人把规则切到 auto 后，回执可信则放行；
-// 存疑则在父事项生成决策请求，子事项不动、不自动返工，本人回答后父事项回 open。
+// flow-delegate-recover / ACT-DLG-11：本人把规则切到 auto 后，回执低于下限则不打扰；
+// 高于下限则在父事项生成决策请求，子事项不动、不自动返工，本人回答后父事项回 open。
 func TestDoubtfulReportAsksOwnerOnParentWithoutRework(t *testing.T) {
 	e := newEnv(t)
 	e.auto()
 
-	e.judge(0.95, 0.9)
+	e.gate(0.05)
 	p1, c1 := e.delegated()
 	e.report(c1)
 	if it := e.item(p1); it.Ask != nil || it.Phase != domain.PhaseOpen {
-		t.Fatalf("credible report changed parent: %s %+v", it.Phase, it.Ask)
+		t.Fatalf("report below the floor bothered the owner: %s %+v", it.Phase, it.Ask)
 	}
 
-	e.stub.Reset()
-	e.judge(0.2, 0.9)
+	e.cls.Reset()
+	e.gate(0.5)
 	parent, child := e.delegated()
 	e.report(child)
 	p := e.item(parent)
@@ -244,7 +246,7 @@ func TestDoubtfulReportAsksOwnerOnParentWithoutRework(t *testing.T) {
 		!strings.Contains(p.Ask.Question, "做发布") {
 		t.Fatalf("parent phase=%s ask=%+v", p.Phase, p.Ask)
 	}
-	if !strings.Contains(e.stub.Requests()[0].BodyText, "全部完成，测试通过") {
+	if !strings.Contains(e.cls.Batches()[0].BodyText, "全部完成，测试通过") {
 		t.Fatal("report summary not given to the judge")
 	}
 	if c := e.item(child); c.Phase != domain.PhaseDone {
@@ -258,19 +260,5 @@ func TestDoubtfulReportAsksOwnerOnParentWithoutRework(t *testing.T) {
 	e.must(owner, "decision.answer", map[string]any{"id": parent, "choice": verify.OptAccept})
 	if got := e.item(parent).Phase; got != domain.PhaseOpen {
 		t.Fatalf("after answer: %s", got)
-	}
-}
-
-// 初筛把握不足时按包声明的 escalate_to 升级到任务型核验，同样走存疑决策，不当作可信。
-func TestLowConfidenceEscalatesToTaskAndAsksOwner(t *testing.T) {
-	t.Skip("v0.1 置信度升级到任务型核验已移除（C.7、C.14）；判断引擎由后续节点按 answer_by/band 重写，届时替换本测试")
-	e := newEnv(t)
-	e.auto()
-	e.judge(0.99, 0.1)
-	parent, child := e.delegated()
-	e.report(child)
-	p := e.item(parent)
-	if p.Ask == nil || !strings.Contains(p.Ask.Question, "delegation-verify-task") {
-		t.Fatalf("ask %+v", p.Ask)
 	}
 }
