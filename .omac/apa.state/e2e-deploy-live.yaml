@@ -1,10 +1,10 @@
-# sha256: 35880f6db973e3a31f2fccfe463649be1ffc933d6876b26b3808d9db20ad8d83
+# sha256: 53d2a379374a6853ae8d09f4565990f662c774c7b895c3696dd2710151b14519
 work_item_id: 01a1bfaf-d267-7926-b170-b9682b290378
 status: done
 merged: true
 merged_at: '2026-11-09T11:17:55Z'
 retry_note: 主会话决定（本人授权范围内）：taiyi 从本机 SSH 不通，DPL-01/02 的『另一台机器』改用 oracle：ssh oracle
-  'curl ...'，访问本机 tailnet 地址 100.127.255.10 上你起的端口（已实测 oracle→本机 tailnet HTTP 可达）。只用
+  'curl ...'，访问本机 tailnet 地址 <tailnet-addr> 上你起的端口（已实测 oracle→本机 tailnet HTTP 可达）。只用
   curl 只读访问，不在 oracle 上安装、改配置或留文件。TLS 反向代理：优先用 Go 标准库（net/http/httputil + crypto/tls，openssl
   生成测试证书）在 mktemp -d /tmp/apa-live.XXXXXX 里写一个最小代理；若确需 caddy，只允许把官方发布的二进制下载到该临时目录、校验
   sha256、测完删除，不装进系统。ACT-DPL-04 仍按首批未执行记录。其余要求不变：其他 DPL 验收不放宽；本机已有服务、Tailscale Serve
