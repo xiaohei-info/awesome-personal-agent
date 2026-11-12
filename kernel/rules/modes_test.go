@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -143,5 +144,51 @@ func TestUpgradeSwitchesUntouchedReminderRulesToAuto(t *testing.T) {
 	}
 	if len(e.events()) != n {
 		t.Fatal("second reconcile must not switch again")
+	}
+}
+
+const autoAcceptNoMode = `name: acc
+version: 1.0.0
+description: tri
+source_rules:
+  - id: tri-auto
+    accept: auto
+    match: {type: tri.auto}
+    then: proposed
+`
+
+// ACT-TRI-04：accept: auto 的来源规则包内不写 mode 即可加载，初始 observe；Web 切 auto 后才生效。
+func TestAcceptAutoSourceRuleWithoutModeStartsObserve(t *testing.T) {
+	e := newEnv(t, map[string]string{"acc/pack.yaml": autoAcceptNoMode}, nil)
+	k := SourceKey("acc", "tri-auto")
+	if e.mode(k) != ModeObserve {
+		t.Fatalf("mode = %s", e.mode(k))
+	}
+	if err := e.setMode(owner, k, ModeAuto); err != nil || e.mode(k) != ModeAuto {
+		t.Fatalf("owner switch: %v / %s", err, e.mode(k))
+	}
+}
+
+type fakePacks []*packs.Pack
+
+func (f fakePacks) List() []*packs.Pack { return f }
+
+// ACT-DGA-05/06：then: alert 的来源规则登记为动作类，初始 observe；delegate 切不了，Web 上的本人可以切 auto。
+func TestAlertSourceRuleStartsObserveAndIsWebOnly(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	e.eng.o.Packs = fakePacks{{Name: "dga", SourceRules: []packs.SourceRule{{ID: "metric-over-limit", Then: "alert"}},
+		RuleHashes: map[string]string{"source_rules/metric-over-limit": "h1"}}}
+	if err := e.eng.Reconcile(bg); err != nil {
+		t.Fatal(err)
+	}
+	k := SourceKey("dga", "metric-over-limit")
+	if e.mode(k) != ModeObserve {
+		t.Fatalf("alert rule initial mode = %s", e.mode(k))
+	}
+	if err := e.setMode(delegate, k, ModeAuto); err == nil || e.mode(k) != ModeObserve {
+		t.Fatalf("delegate switch err=%v mode=%s", err, e.mode(k))
+	}
+	if err := e.setMode(owner, k, ModeAuto); err != nil || e.mode(k) != ModeAuto {
+		t.Fatalf("owner switch: %v / %s", err, e.mode(k))
 	}
 }
