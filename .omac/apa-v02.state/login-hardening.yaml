@@ -1,6 +1,6 @@
-# sha256: 87b142374daf043ac14225e1db141a2da4da0c378c7ddeef877e7f472c190cc5
+# sha256: d62ad10e214c9083417391b6e86a4da2f92c0dfc137b163c7c9e388a38fe4683
 work_item_id: 01a1d09a-4734-7c35-97ea-55e486a8024d
-status: todo
+status: in_progress
 recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-c72a650c51be9a20: 选 (a)。设计 §14.13 已规定登录成功、失败锁定、改口令、吊销会话各记一条
   Event，本人应能在事件接口里看到；缺的是附录 B.4 没登记这四个类型，属于设计遗漏，由负责人在此授权补登。请在同一个 PR 里把四个类型加入附录 B.4（不加规划中标记）和
