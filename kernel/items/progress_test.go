@@ -207,3 +207,20 @@ func newReq(id command.Identity, item, evidence string) command.Request {
 	b, _ := json.Marshal(map[string]any{"id": item, "text": "x"})
 	return command.Request{Identity: id, Command: "item.progress", Input: b, Owner: "owner", Evidence: evidence}
 }
+
+// 回归：设了 planned_for 不能让阶段不变量（waiting 要 waiting_on、needs_input 要 ask）失效。
+func TestPlannedForKeepsPhaseInvariants(t *testing.T) {
+	e := setup(t)
+	w := e.create(t, owner, map[string]any{"phase": "waiting", "assignee": "wrk", "planned_for": day(e, 1),
+		"waiting_on": map[string]any{"kind": "external", "ref": "x"}})
+	n := e.create(t, owner, map[string]any{"phase": "needs_input", "assignee": "wrk", "planned_for": day(e, 1), "ask": map[string]any{"question": "q?"}})
+	if _, err := e.do(worker, "item.update", map[string]any{"id": w, "waiting_on": nil}); exit(err) != domain.ExitUsage {
+		t.Fatalf("clearing waiting_on on a waiting item must be rejected: %v", err)
+	}
+	if _, err := e.do(worker, "item.update", map[string]any{"id": n, "ask": nil}); exit(err) != domain.ExitUsage {
+		t.Fatalf("clearing ask on a needs_input item must be rejected: %v", err)
+	}
+	if e.get(t, w).WaitingOn == nil || e.get(t, n).Ask == nil {
+		t.Fatal("rejected updates changed the items")
+	}
+}

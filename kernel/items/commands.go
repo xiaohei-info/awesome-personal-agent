@@ -206,14 +206,15 @@ func (s *svc) check(tx *store.Tx, it domain.Item) error {
 		return invalid("ask.question is required")
 	case it.Deadline != nil && it.Deadline.IsZero():
 		return invalid("deadline must not be the zero time")
-	case it.PlannedFor != "":
-		if err := checkDate("planned_for", it.PlannedFor); err != nil {
-			return err
-		}
 	case it.Phase == domain.PhaseWaiting && it.WaitingOn == nil:
 		return invalid("waiting phase requires waiting_on")
 	case it.Phase == domain.PhaseNeedsInput && it.Ask == nil:
 		return invalid("needs_input phase requires ask")
+	}
+	if it.PlannedFor != "" {
+		if err := checkDate("planned_for", it.PlannedFor); err != nil {
+			return err
+		}
 	}
 	if w := it.WaitingOn; w != nil {
 		if !w.Kind.Valid() || blank(w.Ref) {
