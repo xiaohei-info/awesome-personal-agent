@@ -477,7 +477,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			for _, id := range due {
 				k.resume(id)
 			}
-			if now := time.Now(); !now.Before(nextReload) {
+			if now := clock.Now(); !now.Before(nextReload) {
 				nextReload = now.Add(packReloadInterval)
 				k.reloadPacks(ctx, report)
 			}
@@ -488,6 +488,7 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			case <-ctx.Done():
 				return
 			case <-tk.C:
+			case <-clock.Changed(): // 测试构建：偏移前进后不等下一个 tick
 			}
 		}
 	}()

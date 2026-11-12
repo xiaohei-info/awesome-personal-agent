@@ -115,6 +115,16 @@ type env struct {
 	errs chan error
 }
 
+// useClockNow 为真时 Service 不注入 Now（测试时钟构建的测试用）。
+var useClockNow bool
+
+func svcNow() func() time.Time {
+	if useClockNow {
+		return nil
+	}
+	return func() time.Time { return t0 }
+}
+
 func setup(t *testing.T, maxDepth int) *env {
 	t.Helper()
 	reg := store.NewRegistry()
@@ -160,7 +170,7 @@ func setup(t *testing.T, maxDepth int) *env {
 		t.Fatal(err)
 	}
 	svc, err = New(Options{Store: st, Exec: e.x, Packs: ld, Queue: e.gate, RunsDir: e.runs, APIURL: "http://apa.local", Owner: "owner", Host: "h", Wake: e.wake,
-		Now: func() time.Time { return t0 }, MaxChainDepth: maxDepth, OnError: func(_ string, err error) { e.errs <- err }})
+		Now: svcNow(), MaxChainDepth: maxDepth, OnError: func(_ string, err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
 	}

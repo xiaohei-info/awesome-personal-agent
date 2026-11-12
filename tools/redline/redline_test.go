@@ -188,3 +188,36 @@ func TestAllDesignHarnessNames(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectTimeNowOutsideClockIsCaught(t *testing.T) {
+	cases := map[string]string{
+		"call":    "package m\nimport \"time\"\nvar _ = time.Now()\n",
+		"value":   "package m\nimport \"time\"\nvar f = time.Now\n",
+		"since":   "package m\nimport \"time\"\nvar _ = time.Since(time.Time{})\n",
+		"until":   "package m\nimport \"time\"\nvar _ = time.Until(time.Time{})\n",
+		"aliased": "package m\nimport t \"time\"\nvar _ = t.Now()\n",
+	}
+	for name, src := range cases {
+		for _, f := range []string{"kernel/m/m.go", "api/m/m.go", "cli/m/m.go"} {
+			root := t.TempDir()
+			write(t, root, f, src)
+			if got := rules(t, root); !has(got, "time-now "+f) {
+				t.Errorf("%s in %s not caught: %v", name, f, got)
+			}
+		}
+	}
+}
+
+func TestTimeNowAllowedInClockTestsAndNonProduction(t *testing.T) {
+	root := t.TempDir()
+	src := "package m\nimport \"time\"\nvar _ = time.Now()\n"
+	write(t, root, "kernel/clock/provider.go", src)
+	write(t, root, "kernel/m/m_test.go", src)
+	write(t, root, "tests/e2e/x.go", src)
+	write(t, root, "tools/release/x.go", src)
+	// 另一个同名标识符（非 time 包）不算。
+	write(t, root, "kernel/m/ok.go", "package m\nimport \"time\"\ntype c struct{}\nfunc (c) Now() time.Time { return time.Time{} }\nvar _ = c{}.Now()\n")
+	if got := rules(t, root); len(got) != 0 {
+		t.Fatalf("false positive: %v", got)
+	}
+}

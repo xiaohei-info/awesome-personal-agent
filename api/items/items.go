@@ -20,6 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/api/screening"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -148,7 +149,7 @@ func (h *handlers) today(w http.ResponseWriter, r *http.Request, p *core.Princip
 	}
 	var l kitems.TodayList
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
-		l, err = kitems.TodayItemsAfter(tx, time.Now(), h.staleAfter())
+		l, err = kitems.TodayItemsAfter(tx, clock.Now(), h.staleAfter())
 		return err
 	}); err != nil {
 		return err

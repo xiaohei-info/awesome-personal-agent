@@ -23,6 +23,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -99,7 +100,7 @@ func (h *handlers) next(w http.ResponseWriter, r *http.Request, p *core.Principa
 			return domain.NewError(domain.CodeInvalidRequest, "wait must be a non-negative number of seconds", "send wait=50 or omit it")
 		}
 	}
-	deadline := time.Now().Add(time.Duration(min(wait, MaxWait)) * time.Second)
+	deadline := clock.Now().Add(time.Duration(min(wait, MaxWait)) * time.Second)
 	for {
 		var d *domain.Delivery
 		if err := h.st.Update(r.Context(), func(tx *store.Tx) (err error) { d, err = h.q.Claim(tx, rt); return }); err != nil {
@@ -108,7 +109,7 @@ func (h *handlers) next(w http.ResponseWriter, r *http.Request, p *core.Principa
 		if d != nil {
 			return core.WriteJSON(w, http.StatusOK, d)
 		}
-		left := time.Until(deadline)
+		left := deadline.Sub(clock.Now())
 		if left <= 0 {
 			w.WriteHeader(http.StatusNoContent)
 			return nil

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -128,7 +129,7 @@ func New(o Options) (*Service, error) {
 		return nil, errors.New("webhook: Store, Exec, Packs, Auth and Secrets are required")
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	if o.MaxBody <= 0 {
 		o.MaxBody = defaultMaxBody

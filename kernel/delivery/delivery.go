@@ -12,6 +12,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -95,7 +96,7 @@ func New(o Options) *Queue {
 		o.UnclaimedAfter = 30 * time.Minute
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	return &Queue{o}
 }

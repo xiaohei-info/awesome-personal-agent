@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -59,7 +60,7 @@ type Options struct {
 	ContextDir string
 	// OnResult 在终态提交后被调用（可并发）。
 	OnResult func(Result)
-	// Now 默认 time.Now。
+	// Now 默认 clock.Now。
 	Now func() time.Time
 }
 
@@ -83,7 +84,7 @@ func New(st *store.Store, cfg config.Config, opt Options) *Dispatcher {
 		opt.Environ = os.Environ
 	}
 	if opt.Now == nil {
-		opt.Now = time.Now
+		opt.Now = clock.Now
 	}
 	if cfg.MaxSourceOutput == 0 {
 		cfg.MaxSourceOutput = config.Default().MaxSourceOutput

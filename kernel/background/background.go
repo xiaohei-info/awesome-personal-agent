@@ -26,6 +26,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -108,7 +109,7 @@ func New(o Options) (*Service, error) {
 		return nil, errors.New("background: Store, Exec, Packs, Queue and RunsDir are required")
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	if o.DefaultTimeout <= 0 {
 		o.DefaultTimeout = 30 * time.Minute

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/backup"
@@ -88,6 +87,7 @@ func run(ctx context.Context, c *client.Ctx, ready func(net.Addr)) error {
 	if err != nil {
 		return usage("cannot locate the APA home directory", "set APA_HOME to an absolute path")
 	}
+	clock.SetHome(home) // 测试构建从这里读 test-clock-offset；发布构建无操作
 	l := config.LayoutOf(home)
 	if _, err := os.Stat(l.Ledger); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -104,7 +104,7 @@ func run(ctx context.Context, c *client.Ctx, ready func(net.Addr)) error {
 		return err
 	}
 	// 有待办迁移时先留升级前快照；留不下来就不迁移（设计 §16.5）。
-	if _, err := backup.PreUpgradeSnapshot(ctx, home, reg, time.Now()); err != nil {
+	if _, err := backup.PreUpgradeSnapshot(ctx, home, reg, clock.Now()); err != nil {
 		return err
 	}
 	st, err := store.Open(home, reg)
