@@ -1,0 +1,22 @@
+# linux/amd64, go test -tags e2e -count=1 -p 2 ./tests/e2e/... (退出码见末行)
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/agents	86.757s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/authz	15.630s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/automation	90.253s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline	3.416s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/bgguards	242.780s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/bootstrap	1.365s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/channel	122.076s
+?   	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/channel/badext	[no test files]
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/decisions	68.417s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/delivery	252.612s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/events	14.626s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/followmsg	19.857s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/followup	163.603s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/ledger	52.421s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/mapping	1.280s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/materials	3.270s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/ops	171.885s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/screening	79.516s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/sourcepull	69.590s
+ok  	github.com/xiaohei-info/awesome-personal-agent/tests/e2e/webhook	69.837s
+EXIT=0
