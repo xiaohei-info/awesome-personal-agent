@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
 // parsedEvent 是通过必填校验的标准事件（§9.2）。
@@ -20,7 +24,16 @@ type parsedEvent struct {
 	CorrelationKeys []string  `json:"correlation_keys,omitempty"`
 	Sender          string    `json:"sender,omitempty"`
 	SenderVerified  bool      `json:"sender_verified,omitempty"`
+	// 契约 v2 的三个可选字段（§9.2）；不带它们的旧来源程序照常工作，契约版本号不变。
+	Metrics  map[string]float64    `json:"metrics,omitempty"`
+	Items    []domain.EventMessage `json:"items,omitempty"`
+	MergeKey string                `json:"merge_key,omitempty"`
 }
+
+const (
+	maxItems      = 200
+	maxMetricName = 64
+)
 
 // Reject 是一条没有入账的输出行及原因（来源页可查）。
 type Reject struct {
@@ -115,5 +128,26 @@ func asEvent(l []byte) (parsedEvent, error) {
 	if len(missing) > 0 {
 		return ev, fmt.Errorf("missing required field: %s", strings.Join(missing, ", "))
 	}
-	return ev, nil
+	return ev, validateV2(ev)
+}
+
+// validateV2 校验可选字段；非法时整行拒收。items[] 超过 200 条的处置（REQ-K09-2）本版不做，按拒收处理，来源程序应拆成多条事件。
+func validateV2(ev parsedEvent) error {
+	for name, v := range ev.Metrics {
+		if name == "" || utf8.RuneCountInString(name) > maxMetricName {
+			return fmt.Errorf("bad field: metrics name must be 1-%d characters", maxMetricName)
+		}
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return fmt.Errorf("bad field: metrics.%s is not a finite number", name)
+		}
+	}
+	if len(ev.Items) > maxItems {
+		return fmt.Errorf("bad field: items has %d entries, at most %d", len(ev.Items), maxItems)
+	}
+	for i, m := range ev.Items {
+		if strings.TrimSpace(m.Text) == "" {
+			return fmt.Errorf("bad field: items[%d].text is empty", i)
+		}
+	}
+	return nil
 }

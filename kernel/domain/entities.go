@@ -256,12 +256,17 @@ const (
 	DispositionUnjudged Disposition = "unjudged"
 	// DispositionExpired 是超出自动重判时限的未判定事件：不再自动重判、不计入积压，本人仍可转建议或忽略（§9.3）。
 	DispositionExpired Disposition = "expired"
+	// DispositionDigest 汇入简报的"知会"一节，不建事项、不提醒；DispositionAlerted 已直接提醒本人（§6.10、§9.3）。
+	DispositionDigest  Disposition = "digest"
+	DispositionAlerted Disposition = "alerted"
 )
 
 // 未判定的原因（§6.10 unjudged_reason）。
 const (
 	UnjudgedModelUnavailable = "model_unavailable" // 模型未配置或持续不可用：模型恢复后自动重判
 	UnjudgedUndecided        = "undecided"         // 判断型级联后仍未定：不自动重判，等本人处理
+	UnjudgedOutboundUnset    = "outbound_unset"    // 来源未选外发范围而端点都在外部：选定后自动重判
+	UnjudgedRestored         = "restored"          // 本人把旧级联忽略的事件放回积压：只经积压放开重判
 )
 
 // DedupeKey 是 (去重域, 事件 id)。
@@ -297,6 +302,19 @@ type SourceEvent struct {
 	AttachState     string      `json:"attach_state,omitempty"`
 	UnjudgedReason  string      `json:"unjudged_reason,omitempty"`
 	Rejudges        int         `json:"rejudges,omitempty"`
+	// v0.2.0：标准事件的可选字段与判断关联（§6.10）。Items 是挂靠或生成的事项 id；来源程序给的聚合消息在 Messages，不进 API。
+	Metrics  map[string]float64 `json:"metrics,omitempty"`
+	MergeKey string             `json:"merge_key,omitempty"`
+	Items    []string           `json:"items,omitempty"`
+	Judgment string             `json:"judgment,omitempty"`
+	Messages []EventMessage     `json:"-"`
+}
+
+// EventMessage 是聚合事件 items[] 里的一条消息（§9.2）。
+type EventMessage struct {
+	Sender string    `json:"sender"`
+	Text   string    `json:"text"`
+	At     time.Time `json:"at"`
 }
 
 // TrustedSender：缺失或未核实按不在白名单处理（§6.10）。
