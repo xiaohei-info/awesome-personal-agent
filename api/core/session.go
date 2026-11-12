@@ -189,7 +189,7 @@ func (s *Server) resolveSession(ctx context.Context, id string) (*Principal, err
 	return &Principal{Identity: command.Trusted(webCaller), Caller: webCaller, Web: true, csrf: csrf, session: hashID(id)}, nil
 }
 
-// audit 在 tx 内记一条登录相关的审计 Event（内部审计事件，不在对外事件类型表里）。载荷不得含口令。
+// audit 在 tx 内记一条登录相关的审计 Event（对外事件类型，附录 B.4）。载荷不得含口令。
 func (s *Server) audit(tx *store.Tx, typ, reason string, payload map[string]any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -202,10 +202,10 @@ func (s *Server) audit(tx *store.Tx, typ, reason string, payload map[string]any)
 
 // 登录相关的审计事件类型。
 const (
-	evLogin           = "auth.login"
-	evLoginLocked     = "auth.login_locked"
-	evPasswordChanged = "auth.password_changed"
-	evSessionRevoked  = "auth.session_revoked"
+	evLogin           = domain.EvAuthLogin
+	evLoginLocked     = domain.EvAuthLoginLocked
+	evPasswordChanged = domain.EvAuthPasswordChanged
+	evSessionRevoked  = domain.EvAuthSessionRevoked
 )
 
 // clientAddr 是请求的来源地址（不含端口）。经本机反向代理时取代理追加的最后一个 X-Forwarded-For；

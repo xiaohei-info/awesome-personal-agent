@@ -9,6 +9,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventfeed"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -428,5 +429,31 @@ func TestConcurrentWrongAttemptsCannotOutrunTheLock(t *testing.T) {
 				t.Fatalf("want %d evaluated and %d locked out, got %v", lockAfterFails, n-lockAfterFails, got)
 			}
 		})
+	}
+}
+
+// ACT-LGN-13：四类登录审计记录经事件订阅接口（eventfeed，GET /events 的数据源）可见。
+func TestLoginAuditEventsAreVisibleOnTheEventFeed(t *testing.T) {
+	e := setup(t)
+	c, tok := e.login()
+	for i := 0; i < 5; i++ {
+		e.loginFrom("198.51.100.1", "wrong-secret-guess")
+	}
+	e.webDo("POST", "/v1/auth/password", `{"current":"`+ownerPW+`","new":"a-brand-new-passphrase"}`, c, tok)
+	e.webDo("DELETE", "/v1/auth/sessions", "", c, tok)
+	seen := map[string]bool{}
+	if err := e.st.View(context.Background(), func(tx *store.Tx) error {
+		page, err := eventfeed.Read(tx, 0, 1000)
+		for _, env := range page.Envelopes {
+			seen[env.Type] = true
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, typ := range []string{domain.EvAuthLogin, domain.EvAuthLoginLocked, domain.EvAuthPasswordChanged, domain.EvAuthSessionRevoked} {
+		if !seen[typ] {
+			t.Errorf("%s is not visible on the event feed", typ)
+		}
 	}
 }

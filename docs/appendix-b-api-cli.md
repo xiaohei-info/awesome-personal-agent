@@ -281,6 +281,10 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 `item.created`、`item.updated`、`item.phase_changed`、`item.deadline_passed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`command.rejected`、`material.revised`、`material.revision_proposed`、`guideline.activated`、`project.updated`、`project.allowed_executors_changed`、`rule.mode_changed`、`allowlist.changed`、`policy.changed`、`grant.issued`、`grant.revoked`、`run.started`、`run.finished`、`source.failed`、`health.alert`。
 
+v0.2.0 新增四个登录审计类型（主文档 §14.13），对象是 `owner`，载荷不含口令：登录成功、同一来源地址失败锁定、改口令（Web 或主机上 `apa init --reset-password`）、吊销会话（逐个或全部）。
+
+`auth.login`、`auth.login_locked`、`auth.password_changed`、`auth.session_revoked`。
+
 v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表示事项追加了一条进展；后者表示建议被补到已有事项，对象是被补到的事项。
 
 【规划中（v0.2.0）】`item.progress_added`、`proposal.attached`。

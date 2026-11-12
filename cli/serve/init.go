@@ -87,7 +87,7 @@ func initCmd(c *client.Ctx, args []string) error {
 			return nil
 		}
 		// 重设是追加一条审计 Event，账本其余内容不动；载荷不含口令。
-		_, err := eventlog.Append(tx, domain.Event{Type: "auth.password_changed", Object: "owner", Reason: "login password reset on the host; sessions revoked",
+		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvAuthPasswordChanged, Object: "owner", Reason: "login password reset on the host; sessions revoked",
 			Payload: []byte(`{"via":"apa init --reset-password"}`), At: time.Now(),
 			Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaCLI}})
 		return err
