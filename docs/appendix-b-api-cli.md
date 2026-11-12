@@ -64,8 +64,8 @@
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
 | `apa source rejects <id> [--after N] [--limit N]` | 查看没有入账的输出行及原因（`next_after` 作为下一次的 `--after`） | observer | |
 | `apa source replay <入站记录>` | 重放 | delegate | |
-| `apa source backlog list [--source] [--sort score]` | 【规划中（v0.2.0）】列出积压（未判定与已到期），可按影子分数排序 | observer | |
-| `apa source backlog rules [--source] --evidence` | 【规划中（v0.2.0）】积压只跑规则：重走去重、归属与规则，不调模型（主文档 §9.3） | delegate | 23 |
+| `apa source backlog list [--source]` | 列出积压（未判定与已到期），旧原因 `undecided`、空原样返回；按影子分数排序（`--sort score`）随影子打分一并交付 | observer | |
+| `apa source backlog rules [--source] --evidence` | 积压只跑规则：重走归属与确定性规则，能挂靠的挂靠、规则有明确出口的按出口处置，其余原样；不调模型，不受 `unjudged_rejudge_days` 限制，输出 `attached`、`disposed`、`remaining`（主文档 §9.3） | delegate | 23 |
 | `apa source backlog score [--source] --evidence` | 【规划中（v0.2.0）】影子打分：只写判断记录，不改处置 | delegate | 23 |
 | `apa source backlog rejudge [--source] [--limit N] --evidence` | 【规划中（v0.2.0）】放开重判：按分数从高到低走完整流水线，受每日上限约束 | delegate | 23 |
 | `apa source backlog restore --from <时间> --to <时间> [--source] [--dry-run] --evidence` | 【规划中（v0.2.0）】把时间段内被旧级联的判断忽略、没有判断记录的事件放回积压（未判定原因 `restored`），之后只经上面三步重判（主文档 §9.3）；`--dry-run` 只返回命中条数与按来源的分布，不写入，不需要 `--evidence` | delegate（`--dry-run` 为 observer） | 23 |
@@ -155,7 +155,8 @@
 | | `GET /sources/{id}/rejects?after&limit` | 被拒收的输出行及原因 | observer；运行凭据不可用（返回 403，原始行是未过滤的外部输出） |
 | | `POST /source-events/{id}/propose` | 把未判定事件转为建议 | Web 登录、delegate |
 | | `POST /source-events/{id}/ignore`，`POST /source-events/ignore` | 忽略未判定事件：单条；或批量，请求体 `{"source"}` 按来源、`{"all": true}` 全部 | Web 登录、delegate（附本人原话） |
-| | `POST /source-events/rules`，`/score`，`/rejudge` | 【规划中（v0.2.0）】积压放开的三步：只跑规则、影子打分、放开重判；请求体 `{"source"?, "limit"?}` | Web 登录、delegate（附本人原话） |
+| | `POST /source-events/rules` | 积压放开第 1 步：只跑规则，返回 `{"attached", "disposed", "remaining"}`；请求体 `{"source"?}` | Web 登录、delegate（附本人原话） |
+| | `POST /source-events/score`，`/rejudge` | 【规划中（v0.2.0）】积压放开的后两步：影子打分、放开重判；请求体 `{"source"?, "limit"?}` | Web 登录、delegate（附本人原话） |
 | | `GET /source-events/restorable?from&to&source` | 【规划中（v0.2.0）】预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer；运行凭据不可用 |
 | | `POST /source-events/restore` | 【规划中（v0.2.0）】把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate（附本人原话） |
 | 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |

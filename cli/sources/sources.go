@@ -19,7 +19,7 @@ import (
 )
 
 const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
-	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | auth <id>"
+	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] | backlog rules [--source ID] --evidence <words> | auth <id>"
 
 func init() { client.Register("source", source) }
 
@@ -85,6 +85,8 @@ func source(c *client.Ctx, args []string) error {
 			return err
 		}
 		return call(c, "POST", "/ingests/"+url.PathEscape(id)+"/replay", nil)
+	case "backlog":
+		return backlog(c, rest)
 	case "auth":
 		if len(rest) != 1 || strings.HasPrefix(rest[0], "-") {
 			return usage("exactly one source id is required", usageText)
@@ -198,4 +200,58 @@ func auth(c *client.Ctx, id string) error {
 	cmd.Dir = s.CredentialsPath
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.Env.Stdin, c.Env.Stdout, c.Env.Stderr
 	return cmd.Run()
+}
+
+// backlog 是积压放开的入口（附录 B.1）：list 读积压（未判定与已到期），rules 是第 1 步只跑规则（需本人原话，授权在内核）。
+func backlog(c *client.Ctx, args []string) error {
+	if len(args) == 0 || (args[0] != "list" && args[0] != "rules") {
+		return usage("backlog needs list or rules", usageText)
+	}
+	fs := flag.NewFlagSet("source backlog "+args[0], flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	src := fs.String("source", "", "")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+		return usage("invalid arguments for source backlog "+args[0], usageText)
+	}
+	if args[0] == "rules" {
+		body := map[string]any{}
+		if *src != "" {
+			body["source"] = *src
+		}
+		return call(c, "POST", "/source-events/rules", body)
+	}
+	ids := []string{*src}
+	if *src == "" {
+		var list struct {
+			Sources []struct {
+				ID string `json:"id"`
+			} `json:"sources"`
+		}
+		if err := c.Do(context.Background(), "GET", "/sources", nil, &list); err != nil {
+			return err
+		}
+		ids = ids[:0]
+		for _, s := range list.Sources {
+			ids = append(ids, s.ID)
+		}
+	}
+	out := []json.RawMessage{}
+	for _, id := range ids {
+		for after := ""; ; {
+			var page struct {
+				Events    []json.RawMessage `json:"events"`
+				NextAfter int64             `json:"next_after"`
+			}
+			path := "/sources/" + url.PathEscape(id) + "/events?disposition=unjudged,expired&limit=500" + after
+			if err := c.Do(context.Background(), "GET", path, nil, &page); err != nil {
+				return err
+			}
+			out = append(out, page.Events...)
+			if page.NextAfter == 0 {
+				break
+			}
+			after = "&after=" + strconv.FormatInt(page.NextAfter, 10)
+		}
+	}
+	return c.Print(map[string]any{"events": out, "total": len(out)})
 }
