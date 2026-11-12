@@ -1,4 +1,4 @@
-// Package health 是 GET /health 路由（附录 B.2，设计 §15.2）：把 kernel/health 汇总出的十一类信号
+// Package health 是 GET /health 路由（附录 B.2，设计 §15.2）：把 kernel/health 汇总出的十三类信号
 // 连同修复入口原样给出，`apa health` 与 Web 读同一份。
 //
 // 路由里没有业务规则：是否异常由 kernel/health 判定，这里只做格式搬运。
@@ -8,6 +8,7 @@ package health
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
@@ -20,7 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// Signal 是十一类信号之一。OK 为假时 Why 说明触发机制，Next 指向修复入口（只报不修），
+// Signal 是十三类信号之一。OK 为假时 Why 说明触发机制，Next 指向修复入口（只报不修），
 // Severity 是 error（异常）或 warning（待本人处理的提醒，不影响 healthy）。
 type Signal struct {
 	ID       string `json:"id"`
@@ -47,15 +48,15 @@ const (
 	SeverityWarning = "warning"
 )
 
-// Report 是 GET /health 的响应；Signals 恒为十一项且顺序固定（与设计 §15.2 表一致）。
+// Report 是 GET /health 的响应；Signals 恒为十三项且顺序固定（与设计 §15.2 表一致）。
 type Report struct {
 	Healthy bool     `json:"healthy"`
 	Signals []Signal `json:"signals"`
 }
 
 // Routes 返回健康路由分组，交给 core.Deps.Groups。ph 为空表示没有能力包加载器。
-func Routes(st *store.Store, q *delivery.Queue, ph khealth.PackHealth) core.RouteGroup {
-	h := &handlers{st: st, opts: khealth.Options{Deliveries: q, Packs: ph}}
+func Routes(st *store.Store, q *delivery.Queue, ph khealth.PackHealth, stallAfter time.Duration) core.RouteGroup {
+	h := &handlers{st: st, opts: khealth.Options{Deliveries: q, Packs: ph, DelegationStallAfter: stallAfter}}
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/health", Handler: h.get})
 	}
@@ -159,6 +160,12 @@ func build(v khealth.View) Report {
 		backlogSig.Severity = SeverityWarning
 	}
 
+	warn := func(s Signal) Signal { // 提醒级：异常时是 warning，不影响 healthy
+		if !s.OK {
+			s.Severity = SeverityWarning
+		}
+		return s
+	}
 	rep := Report{Healthy: v.Healthy(), Signals: []Signal{
 		sig("source_failures", len(v.SourceFailures), "a source has consecutive pull failures, is disabled, or needs input",
 			"source page; auth failures have a needs_input item", srcs),
@@ -182,6 +189,10 @@ func build(v khealth.View) Report {
 			ids(v.ReceiptFailures, func(r khealth.ReceiptFailure) string { return r.Object })),
 		sig("other_alerts", len(v.OtherAlerts), "a health alert without a dedicated signal was recorded, such as a failed rule action",
 			"audit page; open the object named in detail", ids(v.OtherAlerts, func(a khealth.OtherAlert) string { return a.Object })),
+		warn(sig("stalled_delegations", len(v.StalledDelegations), "a delegated item has had no receipt or progress for longer than delegation_stall_after",
+			"delegations page: nudge, reassign or delegate again", ids(v.StalledDelegations, func(d khealth.StalledDelegation) string { return d.Item }))),
+		warn(sig("clock_lag", len(v.ClockLags), "a timer fired 5 minutes or more after its scheduled time (including timers missed while the kernel was down); clears after an hour without lateness",
+			"health page; if it keeps happening, check host sleep and load", ids(v.ClockLags, func(l khealth.ClockLag) string { return l.Timer }))),
 	}}
 	return withRejections(rep, v.PackRejections)
 }

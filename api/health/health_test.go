@@ -21,6 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -34,7 +35,7 @@ var (
 	bg    = context.Background()
 	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
 	// 十类信号的固定顺序（设计 §15.2 表）。
-	signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts"}
+	signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag"}
 )
 
 type fakePacks []packs.Rejection
@@ -53,7 +54,7 @@ func setup(t *testing.T, ph khealth.PackHealth) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, clock.Module, core.Module,
-		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module} {
+		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module, items.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +69,7 @@ func setup(t *testing.T, ph khealth.PackHealth) *env {
 		t.Fatal(err)
 	}
 	a := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st, delivery.New(delivery.Options{}), ph)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st, delivery.New(delivery.Options{}), ph, 0)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func (e *env) alert(object, reason string, payload any) {
 }
 
 // flow-health：全新账本返回固定顺序的十类信号，全部正常，且每类都带修复入口。
-func TestEmptyLedgerReportsTenHealthySignals(t *testing.T) {
+func TestEmptyLedgerReportsThirteenHealthySignals(t *testing.T) {
 	r := setup(t, nil).report(auth.Observer)
 	if !r.Healthy || len(r.Signals) != len(signalIDs) {
 		t.Fatalf("%+v", r)
@@ -273,5 +274,23 @@ func TestUnjudgedBacklogCountsOutboundUnset(t *testing.T) {
 	}
 	if !strings.Contains(sig.Next, "outbound scope") {
 		t.Fatalf("next does not point to choosing the scope: %q", sig.Next)
+	}
+}
+
+// ACT-HLT-03/05：时钟迟到是提醒级——severity=warning、why 说明机制，healthy 不变，信号仍恒为十三项。
+func TestClockLagIsWarningAndKeepsHealthy(t *testing.T) {
+	e := setup(t, nil)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		return khealth.RecordClockLag(tx, clock.Command{TimerID: "tm_1", Target: "item_hl2", Kind: domain.TimerDue, Late: 8 * time.Minute}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report(auth.Observer)
+	s := r.byID("clock_lag")
+	if len(r.Signals) != 13 || !r.Healthy || s.OK || s.Count != 1 || s.Severity != SeverityWarning || s.Why == "" || s.Next == "" {
+		t.Fatalf("%+v", r)
+	}
+	if sd := r.byID("stalled_delegations"); !sd.OK || sd.Severity != "" {
+		t.Fatalf("%+v", sd)
 	}
 }

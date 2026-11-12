@@ -21,6 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -56,7 +57,7 @@ func newRig(t *testing.T, ph khealth.PackHealth) *rig {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, clock.Module, core.Module,
-		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module} {
+		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module, items.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +68,7 @@ func newRig(t *testing.T, ph khealth.PackHealth) *rig {
 	}
 	t.Cleanup(func() { st.Close() })
 	a := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apihealth.Routes(st, delivery.New(delivery.Options{Now: time.Now}), ph)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apihealth.Routes(st, delivery.New(delivery.Options{Now: time.Now}), ph, 0)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,8 +129,8 @@ func TestApaHealthPrintsTheSameReportAsTheAPI(t *testing.T) {
 		Signals []struct{ ID, Next string }
 	}
 	_ = json.Unmarshal([]byte(out), &rep)
-	if rep.Healthy || len(rep.Signals) != 11 {
-		t.Fatalf("want 11 signals and unhealthy: %s", out)
+	if rep.Healthy || len(rep.Signals) != 13 {
+		t.Fatalf("want 13 signals and unhealthy: %s", out)
 	}
 	for _, s := range rep.Signals {
 		if s.Next == "" {
@@ -141,7 +142,7 @@ func TestApaHealthPrintsTheSameReportAsTheAPI(t *testing.T) {
 // --pretty：失败的信号带 why 与 next，正常的只标 ok；干净账本显示 healthy。
 func TestApaHealthPretty(t *testing.T) {
 	_, out, _ := newRig(t, nil).apa("health", "--pretty")
-	if !strings.HasPrefix(out, "healthy\n") || strings.Contains(out, "FAIL") || strings.Count(out, "  ok    ") != 11 {
+	if !strings.HasPrefix(out, "healthy\n") || strings.Contains(out, "FAIL") || strings.Count(out, "  ok    ") != 13 {
 		t.Fatalf("clean: %q", out)
 	}
 	_, out, _ = newRig(t, fakePacks{{Pack: "work", Reason: "bad"}}).apa("health", "--pretty")
