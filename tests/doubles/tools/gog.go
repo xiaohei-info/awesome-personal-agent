@@ -62,7 +62,7 @@ func gogCall(c string, args []string, root string) out {
 			edit("a1", "保险到期日（改到下周一）", "2026-03-03T08:00:00.000Z")
 		}
 		if c == "cal-new" {
-			doc.Events = append(doc.Events, map[string]any{"id": "e1", "iCalUID": "e1@google.com", "status": "confirmed", "summary": "新增的体检",
+			doc.Events = append(doc.Events, map[string]any{"id": "e1", "iCalUID": "uid-e1", "status": "confirmed", "summary": "新增的体检",
 				"htmlLink": "https://calendar.google.com/event?eid=e1", "created": "2026-03-04T08:00:00.000Z", "updated": "2026-03-04T08:00:00.000Z",
 				"start": map[string]any{"dateTime": "2026-03-25T09:00:00+08:00"}, "end": map[string]any{"dateTime": "2026-03-25T10:00:00+08:00"}})
 		}
