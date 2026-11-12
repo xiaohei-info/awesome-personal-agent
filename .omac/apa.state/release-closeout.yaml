@@ -1,9 +1,8 @@
-# sha256: 60bede15a75638e3e20b6b30237023770e24b3559bb4d5b3221c80999fa14b99
+# sha256: 769fa9f515736a2bb59f2893af76ac2e6b0d1ce78a80a50ec97d7a3cb8a48be5
 work_item_id: 01a1c5de-54fa-7564-b09d-e0fe3f06c24a
 status: done
 merged: true
 merged_at: '2026-11-12T04:43:50Z'
-recovery_marker: true
 retry_note: '本人已定口径，本轮更新 PR #247（只改 tests/release/**）：
 
   1) 先 rebase 到最新 main：TestDLV07、ACT-BGT-04 已由 fix.e2e-delivery.56a54b、fix.e2e-bg-guards.40f4fd
