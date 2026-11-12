@@ -1363,7 +1363,7 @@ func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	relay := fakeGen{direct.Outcome{HandoffTask: "brief", Reason: "insufficient_info", Steps: []direct.Step{{RunID: "run_g"}}}, e.st}
+	relay := fakeGen{direct.Outcome{HandoffTask: "brief", Reason: "insufficient_info", Steps: []direct.Step{{RunID: "run_g", Result: json.RawMessage(`{"insufficient_info":true,"seen":"relay-marker"}`)}}}, e.st}
 	h := e.svc.CallAgent(AgentOptions{Generate: relay})
 
 	blocked := e.openItem()
@@ -1383,7 +1383,7 @@ func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := e.waitResult()
-	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); res.Run.Target != ok || !strings.Contains(m, "boss@example.com") {
-		t.Fatalf("listed message must reach the task agent: %s", m)
+	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); res.Run.Target != ok || !strings.Contains(m, "boss@example.com") || !strings.Contains(m, "relay_input") || !strings.Contains(m, "relay-marker") {
+		t.Fatalf("listed message and the generate step's verdict must reach the task agent: %s", m)
 	}
 }

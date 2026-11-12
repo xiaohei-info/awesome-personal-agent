@@ -61,7 +61,7 @@ func (s *Service) CallAgent(o AgentOptions) rules.Handler {
 		}
 		switch pr.Meta.Agent {
 		case "task":
-			return s.callTask(ctx, c, pack, tmpl, nil)
+			return s.callTask(ctx, c, pack, tmpl, nil, nil)
 		case "generate":
 			if o.Generate != nil {
 				return s.callGenerate(ctx, o.Generate, c, pack, tmpl)
@@ -166,7 +166,8 @@ func (s *Service) ledgerSnapshot(ctx context.Context) (string, error) {
 	return string(b), err
 }
 
-func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string, msgs []Message) error {
+// callTask 拉起任务型；prior 是接力时上一步的定案结果（结构化输入，§8.3），msgs 是接力时事项上的挂靠消息。
+func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string, msgs []Message, prior json.RawMessage) error {
 	depth, over, err := s.launchDepth(ctx, c)
 	if err != nil || over {
 		return err
@@ -174,6 +175,9 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 	mats, err := s.callMaterials(ctx, c)
 	if err != nil {
 		return err
+	}
+	if len(prior) > 0 {
+		mats = append(mats, Material{Name: "relay_input", Body: string(prior)})
 	}
 	ip := instanceParams(c)
 	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs,
@@ -275,7 +279,11 @@ func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, p
 		if err != nil {
 			return err
 		}
-		return s.callTask(ctx, c, pack, out.HandoffTask, msgs)
+		var prior json.RawMessage
+		if n := len(out.Steps); n > 0 {
+			prior = out.Final().Result
+		}
+		return s.callTask(ctx, c, pack, out.HandoffTask, msgs, prior)
 	case !out.Settled:
 		return c.Ask(it.ID, "生成型没有给出可用结果："+out.Reason)
 	}

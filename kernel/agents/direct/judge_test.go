@@ -141,6 +141,10 @@ func TestClassifierBelowLowDecidesNo(t *testing.T) {
 	if n := len(e.stub.Requests()); n != 0 {
 		t.Fatalf("chat endpoint was asked %d times", n)
 	}
+	// ACT-CAS-01：判断型只写判断记录，不写 judge 类 run.finished Event。
+	if evs := e.agentEvents(t, "evt_cas-below"); len(evs) != 0 {
+		t.Fatalf("judgement wrote events: %+v", evs)
+	}
 	r := e.saved(t, v.Record.ID)
 	if len(r.Levels) != 1 || r.Levels[0].Outcome != "decided" || *r.Levels[0].PYes != 0.10 || r.Use != "screen" ||
 		r.Band != (record.Band{Low: 0.15, High: 0.60}) || r.Subject != "evt_cas-below" || r.Source != "src_1" {
