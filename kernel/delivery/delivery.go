@@ -120,7 +120,7 @@ func notFound(id string) error {
 	return domain.NewError(domain.CodeNotFound, "delivery "+id+" not found", "check the delivery id")
 }
 
-const cols = "id, item, run, class, route, content, version, state, attempts, next_attempt_at, external_ref, suppressed"
+const cols = "id, item, run, class, route, content, version, state, attempts, next_attempt_at, external_ref, suppressed, origin"
 
 func ns(t time.Time) int64 { return t.UnixNano() }
 
@@ -142,12 +142,17 @@ func (q *Queue) list(tx *store.Tx, where string, args ...any) ([]domain.Delivery
 	var out []domain.Delivery
 	err := query(tx, func(r *store.Rows) error {
 		var (
-			d                  domain.Delivery
-			class, content, st string
-			attempts, next     int64
+			d                          domain.Delivery
+			class, content, st, origin string
+			attempts, next             int64
 		)
-		if err := r.Scan(&d.ID, &d.Item, &d.Run, &class, &d.Route, &content, &d.Version, &st, &attempts, &next, &d.ExternalRef, &d.Suppressed); err != nil {
+		if err := r.Scan(&d.ID, &d.Item, &d.Run, &class, &d.Route, &content, &d.Version, &st, &attempts, &next, &d.ExternalRef, &d.Suppressed, &origin); err != nil {
 			return err
+		}
+		if origin != "" {
+			if err := json.Unmarshal([]byte(origin), &d.Origin); err != nil {
+				return fmt.Errorf("delivery %s origin: %w", d.ID, err)
+			}
 		}
 		d.Class, d.State, d.Attempts = domain.DeliveryClass(class), domain.DeliveryState(st), int(attempts)
 		if err := json.Unmarshal([]byte(content), &d.Content); err != nil {
@@ -197,8 +202,12 @@ func (q *Queue) Get(tx *store.Tx, id string) (domain.Delivery, error) {
 // 新投递立即可领；State、Attempts 等运行态字段由队列设置。
 func (q *Queue) Create(tx *store.Tx, d domain.Delivery) (domain.Delivery, bool, error) {
 	switch {
-	case d.ID == "" || d.Item == "" || d.Route == "":
-		return d, false, invalid("delivery id, item and route are required")
+	case d.ID == "" || d.Route == "":
+		return d, false, invalid("delivery id and route are required")
+	case d.Item == "" && (d.Origin == nil || d.Origin.SourceEvent == "" || d.Origin.Rule == ""):
+		return d, false, invalid("a delivery without an item needs an origin (source_event and rule)")
+	case d.Item != "" && d.Origin != nil:
+		return d, false, invalid("origin is only for deliveries without an item")
 	case d.Version < 1:
 		return d, false, invalid("delivery version must be >= 1")
 	case d.Content.Title == "":
@@ -218,15 +227,23 @@ func (q *Queue) Create(tx *store.Tx, d domain.Delivery) (domain.Delivery, bool, 
 	if err != nil {
 		return d, false, err
 	}
+	origin := ""
+	if d.Origin != nil {
+		b, err := json.Marshal(d.Origin)
+		if err != nil {
+			return d, false, err
+		}
+		origin = string(b)
+	}
 	now := ns(q.o.Now())
 	state := domain.DeliveryPending
 	if d.Route == RouteWeb {
 		state = domain.DeliveryFallbackWeb
 	}
 	if _, err := tx.Exec(`INSERT INTO delivery_delivery
-		(id, item, run, class, route, content, version, state, next_attempt_at, created_at, suppressed)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.ID, d.Item, d.Run, string(d.Class), d.Route, string(content), d.Version, string(state), now, now, d.Suppressed); err != nil {
+		(id, item, run, class, route, content, version, state, next_attempt_at, created_at, suppressed, origin)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.Item, d.Run, string(d.Class), d.Route, string(content), d.Version, string(state), now, now, d.Suppressed, origin); err != nil {
 		return d, false, err
 	}
 	got, err := q.Get(tx, d.ID)

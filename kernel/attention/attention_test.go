@@ -1073,3 +1073,67 @@ func TestMutedMemberLeavesTheDigest(t *testing.T) {
 		t.Fatal("muted member must be in Web unread")
 	}
 }
+
+// ---- 规则 alert 出口的提醒：没有事项（§7.4、§6.9） ----
+
+func (e *env) alert(event, source string) {
+	e.t.Helper()
+	e.update(func(tx *store.Tx) error {
+		return e.a.Alert(tx, domain.DeliveryOrigin{SourceEvent: event, Rule: "p/source_rules/over", Source: source},
+			domain.DeliveryContent{Title: "磁盘", Summary: "96%", WebURL: "https://mon.example/a"})
+	})
+}
+
+// 无事项的提醒经渠道送出、带 origin；同一来源事件重复触达只提醒一次。
+func TestAlertWithoutItemReachesChannelOnce(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.alert("sev_1", "src_m")
+	e.alert("sev_1", "src_m")
+	got := e.drain("channel:chan")
+	if len(got) != 1 {
+		t.Fatalf("want one delivery, got %+v", got)
+	}
+	d := got[0]
+	if d.ID != AlertID("sev_1") || d.Item != "" || d.Class != domain.DeliveryReminder || d.Origin == nil || d.Origin.SourceEvent != "sev_1" ||
+		d.Origin.Rule != "p/source_rules/over" || d.Content.Title != "磁盘" || d.Content.WebURL != "https://mon.example/a" {
+		t.Fatalf("delivery %+v", d)
+	}
+}
+
+// 静默期内先暂存（连同 origin），静默结束再放行。
+func TestAlertHeldInQuietHoursKeepsOrigin(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(quiet(e.now.Add(-time.Hour), e.now.Add(2*time.Minute)))
+	e.alert("sev_q", "src_m")
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("delivered during quiet hours: %+v", d)
+	}
+	e.advance(3 * time.Minute)
+	d := e.claim("channel:chan")
+	if d == nil || d.Item != "" || d.Origin == nil || d.Origin.SourceEvent != "sev_q" || d.Origin.Source != "src_m" {
+		t.Fatalf("released alert lost its origin: %+v", d)
+	}
+}
+
+// ACT-DGA-12：当天额度被普通提醒用完，上穿的提醒只留在 Web 未读；被静音的来源同样。
+func TestAlertObeysDailyCapAndSourceMute(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(func(p *policy.Policy) {
+		p.Disturb.DailyCap, p.Disturb.MergeWindowSec = 1, 0
+		p.Disturb.Mutes = []policy.Mute{{Scope: policy.MuteSource, ID: "src_noisy"}}
+	})
+	e.dueReminder(nil)
+	e.alert("sev_cap", "src_m")
+	got := e.get(AlertID("sev_cap"))
+	if got.Route != delivery.RouteWeb || got.Suppressed != delivery.SuppressedDailyCap {
+		t.Fatalf("over the cap: %+v", got)
+	}
+	e.policy(func(p *policy.Policy) { p.Disturb.DailyCap = 0 })
+	e.alert("sev_mute", "src_noisy")
+	if m := e.get(AlertID("sev_mute")); m.Route != delivery.RouteWeb || m.Suppressed != delivery.SuppressedMuted {
+		t.Fatalf("muted source: %+v", m)
+	}
+}

@@ -190,3 +190,56 @@ func TestCreateGatedIdempotent(t *testing.T) {
 		t.Fatalf("%+v vs %+v", first, again)
 	}
 }
+
+func (e *env) alertGated(pol policy.Policy, eventID, route, source string) domain.Delivery {
+	e.t.Helper()
+	var d domain.Delivery
+	e.update(func(tx *store.Tx) (err error) {
+		d, _, err = e.q.CreateGated(tx, pol, domain.Delivery{ID: "alert:" + eventID, Class: domain.DeliveryReminder, Route: route, Version: 1,
+			Origin:  &domain.DeliveryOrigin{SourceEvent: eventID, Rule: "p/source_rules/r", Source: source},
+			Content: domain.DeliveryContent{Title: eventID}}, Target{Source: source})
+		return
+	})
+	return d
+}
+
+// ACT-DGA-07/12（§6.9）：没有事项的提醒带 origin 入队、可被渠道领取与回报；同样受日上限与来源静音约束，被压的只留 Web 未读。
+func TestDeliveryWithoutItemKeepsOriginAndIsGated(t *testing.T) {
+	e := newEnv(t, Options{})
+	pol := capPolicy(1)
+	d := e.alertGated(pol, "sev_1", "channel:x", "src_m")
+	if d.Item != "" || d.Origin == nil || d.Origin.SourceEvent != "sev_1" || d.Origin.Rule != "p/source_rules/r" || d.State != domain.DeliveryPending {
+		t.Fatalf("delivery %+v origin %+v", d, d.Origin)
+	}
+	c := e.claim("channel:x")
+	if c == nil || c.ID != d.ID || c.Item != "" || c.Origin == nil || c.Origin.SourceEvent != "sev_1" {
+		t.Fatalf("claimed %+v", c)
+	}
+	if got, r, err := e.ack(d.ID, 1, "msg-1"); err != nil || r != Applied || got.State != domain.DeliveryDelivered {
+		t.Fatalf("ack %+v %v %v", got, r, err)
+	}
+	if over := e.alertGated(pol, "sev_2", "channel:x", "src_m"); over.Route != RouteWeb || over.Suppressed != SuppressedDailyCap {
+		t.Fatalf("over the daily cap: %+v", over)
+	}
+	muted := capPolicy(0, policy.Mute{Scope: policy.MuteSource, ID: "src_noisy"})
+	if m := e.alertGated(muted, "sev_3", "channel:x", "src_noisy"); m.Route != RouteWeb || m.Suppressed != SuppressedMuted {
+		t.Fatalf("muted source: %+v", m)
+	}
+}
+
+// 没有事项又没有 origin 的投递无处可追溯，拒绝；有事项的投递不带 origin。
+func TestDeliveryWithoutItemNeedsOrigin(t *testing.T) {
+	e := newEnv(t, Options{})
+	content := domain.DeliveryContent{Title: "t"}
+	for _, bad := range []domain.Delivery{
+		{ID: "x", Class: domain.DeliveryReminder, Route: ch, Version: 1, Content: content},
+		{ID: "x", Class: domain.DeliveryReminder, Route: ch, Version: 1, Content: content, Origin: &domain.DeliveryOrigin{SourceEvent: "e"}},
+		{ID: "x", Item: "i", Class: domain.DeliveryReminder, Route: ch, Version: 1, Content: content, Origin: &domain.DeliveryOrigin{SourceEvent: "e", Rule: "r"}},
+	} {
+		e.view(func(tx *store.Tx) error {
+			_, _, err := e.q.Create(tx, bad)
+			wantCode(t, err, domain.CodeInvalidRequest)
+			return nil
+		})
+	}
+}
