@@ -1,4 +1,8 @@
-# sha256: bfff3578cddfb15b2e2989eccd3913b661598e21201156a745d1390572af8eaf
+# sha256: 87b142374daf043ac14225e1db141a2da4da0c378c7ddeef877e7f472c190cc5
 work_item_id: 01a1d09a-4734-7c35-97ea-55e486a8024d
-status: blocked
+status: todo
 recovery_marker: true
+retry_note: 'OWNER ANSWER to blocker handoff-c72a650c51be9a20: 选 (a)。设计 §14.13 已规定登录成功、失败锁定、改口令、吊销会话各记一条
+  Event，本人应能在事件接口里看到；缺的是附录 B.4 没登记这四个类型，属于设计遗漏，由负责人在此授权补登。请在同一个 PR 里把四个类型加入附录 B.4（不加规划中标记）和
+  domain.RegisteredEventTypes，类型名沿用现有 auth.* 前缀、与 B.4 现有命名风格一致，载荷不含口令；对照测试保持双向严格通过。ACT-LGN-13
+  不改。'
