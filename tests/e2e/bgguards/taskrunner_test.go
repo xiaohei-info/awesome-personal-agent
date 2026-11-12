@@ -93,18 +93,21 @@ $APA project create --name evil-project > /dev/null 2>&1; rc project_create
 	})
 
 	f.step("ACT-BGT-04 不回退到本机凭据", func(t *testing.T) {
-		// 本机凭据文件在 APA_HOME 里（apa login 保存）；运行内设了 APA_RUN 且清掉 APA_TOKEN，CLI 不得回退使用它。
+		// 本机凭据文件在 APA_HOME 里（apa login 保存）。运行凭据有三个来源（§7.7、§17.4）：APA_TOKEN、APA_RUN_CONTEXT 指向的
+		// 上下文文件、APA_RUN_CREDENTIAL_FILE。全部去掉、只留 APA_RUN 时，CLI 不得回退使用本机凭据。
+		// 对照组去掉 APA_RUN 与运行标记（PATH 末尾的 .apa-run 条目），才是真正走本机凭据。
 		if r := f.Apa("", "", "login", "--url", f.URL, "--token", f.WRK); r.Code != 0 {
 			t.Fatalf("apa login: %d %s%s", r.Code, r.Stdout, r.Stderr)
 		}
 		f.mode("summary-only", preamble+`
 export APA_HOME="`+f.Home+`"
-env -u APA_RUN -u APA_TOKEN $APA inbox > "$OUT/local.out" 2>&1; rc local_inbox
-env -u APA_TOKEN $APA inbox > "$OUT/run.out" 2>&1; rc run_inbox
+LOCALPATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '/\.apa-run$' | paste -sd: -)
+env -u APA_RUN -u APA_TOKEN -u APA_RUN_CONTEXT -u APA_RUN_CREDENTIAL_FILE PATH="$LOCALPATH" $APA inbox > "$OUT/local.out" 2>&1; rc local_inbox
+APA_RUN=${APA_RUN:-run_nofallback} env -u APA_TOKEN -u APA_RUN_CONTEXT -u APA_RUN_CREDENTIAL_FILE $APA inbox > "$OUT/run.out" 2>&1; rc run_inbox
 `)
 		f.task("bgt-nofallback", "acc-work", "acc-task")
 		f.waitFor("脚本跑完", 40*1e9, func() bool { return f.outFile("run_inbox.rc") != "" })
 		eq(t, "本机凭据本身可用（对照）", f.outFile("local_inbox.rc"), "0")
-		eq(t, "设了 APA_RUN 且无 APA_TOKEN 的 apa inbox 退出码", f.outFile("run_inbox.rc"), "3")
+		eq(t, "设了 APA_RUN 且无任何运行凭据来源的 apa inbox 退出码", f.outFile("run_inbox.rc"), "3")
 	})
 }
