@@ -1,63 +1,37 @@
 package inbound
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
-	builtin "github.com/xiaohei-info/awesome-personal-agent/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
-// scoreEnv 在 env 之上接一个带分类端点的判断入口：用随发行的 triage-screen 模板（yes_no，先分类端点后对话端点）。
-type scoreEnv struct {
-	*env
-	cls *modelstub.ClsStub
-}
+// scoreEnv 在 env 之上加影子打分用的辅助：env 已带分类端点替身（cls）与带分类端点的判断入口。
+type scoreEnv struct{ *env }
 
 // newScoreEnv 此时还没有端点：事件先落成积压，再由 configure 配端点（否则入站流水线会先去问替身）。
 func newScoreEnv(t *testing.T) *scoreEnv {
 	t.Helper()
-	e := newEnv(t, false)
-	cls := modelstub.NewCls()
-	t.Cleanup(cls.Close)
-	ld := packs.New(packs.Options{Builtin: builtin.FS, Kinds: items.NewKinds()})
-	if rej, err := ld.Load(); err != nil || len(rej) != 0 {
-		t.Fatalf("load: %v %+v", err, rej)
-	}
-	c := &model.Client{Sleep: func(context.Context, time.Duration) error { return nil }}
-	j, err := direct.New(direct.Options{Store: e.st, Packs: ld, Model: c, Classifier: c, Now: e.Now, Attempts: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.svc.o.Judge = j
-	return &scoreEnv{env: e, cls: cls}
+	return &scoreEnv{env: newEnv(t, false)}
 }
 
-// configure 配上对话端点（影子打分不得碰它），judgeEndpoint 为真时再配分类端点。
+// configure 配上对话端点（影子打分不得碰它）；judgeEndpoint 为假时再撤掉分类端点。
 func (e *scoreEnv) configure(judgeEndpoint bool) {
 	e.t.Helper()
 	e.configureModel()
-	if !judgeEndpoint {
+	if judgeEndpoint {
 		return
 	}
 	err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.JudgeEndpoint = &policy.JudgeEndpoint{URL: e.cls.URL(), Protocol: policy.ProtocolProbability, Locality: policy.LocalityLocal, TimeoutMs: 500}
-			return nil
-		})
+		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.JudgeEndpoint = nil; return nil })
 		return err
 	})
 	if err != nil {
