@@ -59,6 +59,7 @@ func (f *fx) callCount(category string) int { return len(f.agentCalls("", catego
 // TestFlowAgentCascade 对应 flow-agent-cascade（ACT-CAS-01..10）。
 // 判断型与生成型经真实入站流水线（对话捕获 → inbound-triage 的 triage/triage-title）触发，任务型经验收包的事件规则 call_agent 触发。
 func TestFlowAgentCascade(t *testing.T) {
+	t.Skip("v0.1 判断引擎语义（置信度阈值、escalate_to 级联、follow_up 的 do[]）已被 C.7/C.11 移除；对应引擎由判断引擎与跟进梯度的后续节点重写，届时替换本测试")
 	f := setup(t, "")
 	f.auto("run-task", "run-gen", "auto-accept-note")
 	f.webOK("PATCH", "/projects/"+f.Projects["acc-open"], `{"capture":true}`, 200)
@@ -100,6 +101,7 @@ func TestFlowAgentCascade(t *testing.T) {
 	})
 
 	step("ACT-CAS-02 低置信升级到生成型", func(t *testing.T) {
+		t.Skip("v0.1 判断引擎语义（置信度阈值、escalate_to 级联、follow_up 的 do[]）已被 C.7/C.11 移除；对应引擎由判断引擎与跟进梯度的后续节点重写，届时替换本测试")
 		f.ModelStub.Reset()
 		f.ModelStub.When(judgeMark, reply(`{"choice":"task","confidence":0.1}`))
 		f.ModelStub.When(titleMark, reply(`{"insufficient_info":false,"title":"CAS02 生成的标题","summary":"一句话摘要"}`))

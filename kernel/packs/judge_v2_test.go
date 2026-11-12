@@ -63,7 +63,7 @@ func TestJudgeFieldCombinations(t *testing.T) {
 		{"choice on_undecided outside choices", "question_type: choice\nchoices: [a, b]\non_undecided: c\n", "on_undecided"},
 		{"score on_undecided not a number", "question_type: score\non_undecided: high\n", "on_undecided"},
 		{"classifier on choice", "question_type: choice\nchoices: [a]\non_undecided: a\nanswer_by: [classifier]\n", "classifier"},
-		{"unknown backend", "question_type: yes_no\non_undecided: yes\nanswer_by: [oracle]\n", "oracle"},
+		{"unknown backend", "question_type: yes_no\non_undecided: yes\nanswer_by: [mystery]\n", "mystery"},
 		{"empty answer_by", "question_type: yes_no\non_undecided: yes\nanswer_by: []\n", "answer_by"},
 		{"band low>high", "question_type: yes_no\non_undecided: yes\nband: {low: 0.7, high: 0.3}\n", "band"},
 		{"band out of range", "question_type: yes_no\non_undecided: yes\nband: {low: 1.2}\n", "band"},

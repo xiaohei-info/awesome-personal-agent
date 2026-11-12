@@ -47,7 +47,7 @@ func TestFlowPackLoader(t *testing.T) {
 			{"bad-action", "enumeration", pack("bad-action", "event_rules:\n  - id: r\n    mode: observe\n    when: {event: item.created}\n    do:\n      - {action: delete_everything}\n")},
 			{"bad-judge-output", "output_schema", map[string]string{
 				"pack.yaml":        strings.Replace(head, "%s", "bad-judge-output", 1),
-				"prompts/judge.md": prompt("agent: judge\nquestion_type: yes_no\noutput_schema: {type: object}\n"),
+				"prompts/judge.md": prompt("agent: judge\nquestion_type: yes_no\non_undecided: yes\noutput_schema: {type: object}\n"),
 			}},
 			{"bad-gen-tools", "tools", map[string]string{
 				"pack.yaml":      strings.Replace(head, "%s", "bad-gen-tools", 1),
@@ -59,7 +59,7 @@ func TestFlowPackLoader(t *testing.T) {
 			}},
 			{"bad-stats", "event_stats", map[string]string{
 				"pack.yaml":    strings.Replace(head, "%s", "bad-stats", 1),
-				"prompts/j.md": prompt("agent: judge\nquestion_type: yes_no\nevent_stats: everything\n"),
+				"prompts/j.md": prompt("agent: judge\nquestion_type: yes_no\non_undecided: yes\nevent_stats: everything\n"),
 			}},
 			{"bad-main-escalate", "escalate_to", map[string]string{
 				"pack.yaml":    strings.Replace(head, "%s", "bad-main-escalate", 1),
@@ -75,7 +75,7 @@ func TestFlowPackLoader(t *testing.T) {
 		}
 		good := writePack(t, scratch, "good-pack", map[string]string{
 			"pack.yaml":    strings.Replace(head, "%s", "good-pack", 1) + "kinds:\n  - {name: good-kind, spec_schema: {type: object}}\n",
-			"prompts/j.md": prompt("agent: judge\nquestion_type: yes_no\nevent_stats: proposal_outcome\n"),
+			"prompts/j.md": prompt("agent: judge\nquestion_type: yes_no\non_undecided: yes\nevent_stats: proposal_outcome\n"),
 		})
 		if r := e.Apa(e.OBS, "", "pack", "validate", good); r.Code != 0 || !strings.Contains(r.Stdout, `"ok":true`) {
 			t.Errorf("合规包应通过: %d %s %s", r.Code, r.Stdout, r.Stderr)

@@ -249,6 +249,7 @@ $APA delegate --parent "$ITEM" --assignee work-host.cli --title fwd-child > "$OU
 	})
 
 	f.step("ACT-FWD-07 退回判断流后不进入无人值守", func(t *testing.T) {
+		t.Skip("v0.1 判断引擎语义（置信度阈值、escalate_to 级联、follow_up 的 do[]）已被 C.7/C.11 移除；对应引擎由判断引擎与跟进梯度的后续节点重写，届时替换本测试")
 		id := src.emit("FWD-BOB-RELEASED", "bob", true, pr)
 		if ev := src.settled(id); ev.Item != child || ev.AttachState != "pending" {
 			t.Fatalf("应挂靠且未处理: %+v", ev)

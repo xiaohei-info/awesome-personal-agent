@@ -199,6 +199,7 @@ func (f *fx) until(d time.Duration, cond func() bool) bool {
 
 // TestFlowFollowUp 对应 flow-follow-up 的 ACT-FUP-01..05：四个事项共用一个 2 分钟等待窗口。
 func TestFlowFollowUp(t *testing.T) {
+	t.Skip("v0.1 判断引擎语义（置信度阈值、escalate_to 级联、follow_up 的 do[]）已被 C.7/C.11 移除；对应引擎由判断引擎与跟进梯度的后续节点重写，届时替换本测试")
 	t.Parallel()
 	f := setupShort(t) // ACT-FUP-01
 	f.StartModelStub()
@@ -281,6 +282,7 @@ func TestFlowFollowUp(t *testing.T) {
 
 // TestFlowFollowUpModelDown 对应 ACT-FUP-06：模型 500 时跟进不丢，健康视图有信号，恢复后得到判断结果。
 func TestFlowFollowUpModelDown(t *testing.T) {
+	t.Skip("v0.1 判断引擎语义（置信度阈值、escalate_to 级联、follow_up 的 do[]）已被 C.7/C.11 移除；对应引擎由判断引擎与跟进梯度的后续节点重写，届时替换本测试")
 	t.Parallel()
 	f := setupShort(t)
 	f.StartModelStub()

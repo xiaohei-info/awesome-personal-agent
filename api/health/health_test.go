@@ -209,7 +209,7 @@ func TestProblemsSurfaceWithRepairEntryAndNoLedgerContent(t *testing.T) {
 func TestPackRejectionDetailListsReason(t *testing.T) {
 	e := setup(t, fakePacks{{Pack: "work", Source: "user", Reason: "prompts/j.md: confidence_threshold is removed"}})
 	rec := e.get(auth.Observer)
-	if !strings.Contains(rec.Body.String(), `"reason":"prompts/j.md: confidence_threshold is removed"`) || !strings.Contains(rec.Body.String(), `"pack":"work"`) {
+	if !strings.Contains(rec.Body.String(), `"rejections":[{"pack":"work","source":"user","reason":"prompts/j.md: confidence_threshold is removed"}]`) {
 		t.Fatalf("%s", rec.Body)
 	}
 }

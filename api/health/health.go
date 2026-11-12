@@ -30,6 +30,15 @@ type Signal struct {
 	Why      string `json:"why,omitempty"`
 	Next     string `json:"next"`
 	Detail   any    `json:"detail,omitempty"`
+	// Rejections 只有 pack_rejections 给：逐个列出被拒的包、来源与原因（要改的字段和 C.7 的新写法）。detail 仍是包名列表。
+	Rejections []PackRejection `json:"rejections,omitempty"`
+}
+
+// PackRejection 是 pack_rejections 的一条。
+type PackRejection struct {
+	Pack   string `json:"pack"`
+	Source string `json:"source"`
+	Reason string `json:"reason"`
 }
 
 // Severity 的取值。
@@ -157,7 +166,7 @@ func build(v khealth.View) Report {
 		sig("agentsmd_drift", len(v.AgentsMDDrift), "a rendered AGENTS.md no longer matches the repo file",
 			"project page", ids(v.AgentsMDDrift, func(d agentsmd.OpenDrift) string { return d.Item })),
 		sig("pack_rejections", len(v.PackRejections), "a pack failed to load; the last valid version is kept",
-			"fix the pack, then hot-reload", packDetail(v.PackRejections)),
+			"fix the pack, then hot-reload", ids(v.PackRejections, func(r packs.Rejection) string { return r.Pack })),
 		sig("model_unavailable", len(v.ModelUnavailable)+endpointDown, "the model endpoint is not configured while events wait for it, keeps failing, or a judge call failed and has not succeeded since",
 			"settings page: model endpoint", map[string]any{"endpoint": v.Endpoint, "screening": screening, "judgements": judgements}),
 		backlogSig,
@@ -169,14 +178,18 @@ func build(v khealth.View) Report {
 		sig("other_alerts", len(v.OtherAlerts), "a health alert without a dedicated signal was recorded, such as a failed rule action",
 			"audit page; open the object named in detail", ids(v.OtherAlerts, func(a khealth.OtherAlert) string { return a.Object })),
 	}}
-	return rep
+	return withRejections(rep, v.PackRejections)
 }
 
-// packDetail 逐个列出被拒的包及原因：原因里是要改的字段与能力包规范 C.7 的对应写法，本人据此就能修（C.11）。
-func packDetail(rs []packs.Rejection) []map[string]string {
-	out := make([]map[string]string, 0, len(rs))
-	for _, r := range rs {
-		out = append(out, map[string]string{"pack": r.Pack, "source": string(r.Source), "reason": r.Reason})
+// withRejections 给 pack_rejections 补上逐字段的原因（C.11）；本人据此就能修。
+func withRejections(rep Report, rs []packs.Rejection) Report {
+	for i := range rep.Signals {
+		if rep.Signals[i].ID != "pack_rejections" {
+			continue
+		}
+		for _, r := range rs {
+			rep.Signals[i].Rejections = append(rep.Signals[i].Rejections, PackRejection{r.Pack, string(r.Source), r.Reason})
+		}
 	}
-	return out
+	return rep
 }
