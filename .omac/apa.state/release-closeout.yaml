@@ -1,6 +1,8 @@
-# sha256: 080b758f58443d163249a6b8c4758d85603f17d87ec75d426be5d68ebb2145bc
+# sha256: 60bede15a75638e3e20b6b30237023770e24b3559bb4d5b3221c80999fa14b99
 work_item_id: 01a1c5de-54fa-7564-b09d-e0fe3f06c24a
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-12T04:43:50Z'
 recovery_marker: true
 retry_note: '本人已定口径，本轮更新 PR #247（只改 tests/release/**）：
 
