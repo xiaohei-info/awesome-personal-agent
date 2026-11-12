@@ -334,12 +334,13 @@ func TestDisturbQuietAndMergeWindowAreValidated(t *testing.T) {
 func TestStoredDocWithoutDailyCapDefaultsTo20(t *testing.T) {
 	doc := func(cap string) string {
 		b, _ := json.Marshal(Default())
-		var m map[string]map[string]any
+		var m map[string]any
 		_ = json.Unmarshal(b, &m)
-		delete(m["disturb"], "daily_cap")
-		delete(m["disturb"], "mutes")
+		d := m["disturb"].(map[string]any)
+		delete(d, "daily_cap")
+		delete(d, "mutes")
 		if cap != "" {
-			m["disturb"]["daily_cap"] = json.RawMessage(cap)
+			d["daily_cap"] = json.RawMessage(cap)
 		}
 		out, _ := json.Marshal(m)
 		return string(out)
