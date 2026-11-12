@@ -73,6 +73,9 @@ type Alert struct {
 	Delivery    *DeliveryRef    `json:"delivery,omitempty"`
 }
 
+// StateHeld 是尚未成为投递、被静默或合并窗口暂存的提醒在回放里的状态。
+const StateHeld = "held"
+
 // DeliveryRef 是回放里的一条投递：id 与它此刻的状态。
 type DeliveryRef struct {
 	ID         string `json:"id"`
@@ -151,6 +154,11 @@ func alertOf(tx *store.Tx, en eventlog.Entry) (*Alert, error) {
 	a := &Alert{Rule: p.Rule, Disposition: p.Disposition, Conditions: p.Conditions}
 	if p.Delivery != "" {
 		d, err := delivery.New(delivery.Options{}).Get(tx, p.Delivery)
+		if e, ok := err.(*domain.Error); ok && e.Code == domain.CodeNotFound {
+			// 提醒还被触达的静默或合并窗口拦着，没成为投递：如实写“暂存”，不让整个回放失败。
+			a.Delivery = &DeliveryRef{ID: p.Delivery, State: StateHeld}
+			return a, nil
+		}
 		if err != nil {
 			return nil, err
 		}

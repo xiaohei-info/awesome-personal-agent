@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -149,5 +150,48 @@ func TestChangeConditionsComparePerSeries(t *testing.T) {
 		if got := e.disposition("src_x", id).Disposition; got != d {
 			t.Errorf("%s: %s, want %s", id, got, d)
 		}
+	}
+}
+
+// ACT-DGA-10：提醒被静默期暂存时 apa why 仍能回放（投递状态写“held”）；静默结束放行后显示真实投递状态。
+func TestWhyReplaysAlertHeldByQuietHours(t *testing.T) {
+	e := newEnv(t, true)
+	e.emit("src_m", "exits", metric("m0", 50))
+	e.must("rule.set_mode", map[string]string{"rule": alertRule, "mode": rules.ModeAuto})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "quiet", func(p *policy.Policy) error {
+			p.Disturb.Quiet = &policy.Quiet{Start: e.now.Add(-time.Hour).Format("15:04"), End: e.now.Add(30 * time.Minute).Format("15:04")}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.emit("src_m", "exits", metric("m1", 96)) // 50→96 上穿；emit 把时间拨快 2 分钟，仍在静默内
+	hit := e.disposition("src_m", "m1")
+	replay := func() why.Timeline {
+		var tl why.Timeline
+		if err := e.st.View(bg, func(tx *store.Tx) error {
+			_, pol, err := policy.Current(tx)
+			if err != nil {
+				return err
+			}
+			tl, err = why.Replay(tx, pol, why.Request{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "obs"}, Level: authz.LevelObserver, ID: hit.ID})
+			return err
+		}); err != nil {
+			t.Fatalf("replay failed while the alert is held: %v", err)
+		}
+		return tl
+	}
+	if tl := replay(); len(tl.Alerts) != 1 || tl.Alerts[0].Delivery == nil || tl.Alerts[0].Delivery.State != why.StateHeld ||
+		tl.Alerts[0].Delivery.ID != attention.AlertID(hit.ID) || len(tl.Steps) == 0 {
+		t.Fatalf("held replay %+v", tl.Alerts)
+	}
+	e.now = e.now.Add(time.Hour) // 静默结束
+	if err := e.st.Update(bg, e.att.Tick); err != nil {
+		t.Fatal(err)
+	}
+	if tl := replay(); tl.Alerts[0].Delivery == nil || tl.Alerts[0].Delivery.State == why.StateHeld || tl.Alerts[0].Delivery.Class != "reminder" {
+		t.Fatalf("released replay %+v", tl.Alerts[0].Delivery)
 	}
 }

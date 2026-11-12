@@ -128,6 +128,7 @@ type env struct {
 	web, mail string
 	sources   int
 	queue     *delivery.Queue
+	att       *attention.Attention
 	// wantErr 为真时，拉取期间的流水线错误留在 errs 里，不让 waitRuns 失败。
 	wantErr bool
 }
@@ -201,8 +202,9 @@ func newEnv(t *testing.T, configured bool) *env {
 		t.Fatal(err)
 	}
 	e.queue = delivery.New(delivery.Options{Now: e.Now})
+	e.att = attention.New(attention.Options{Queue: e.queue, Now: e.Now})
 	e.svc, err = New(Options{Store: st, Exec: e.x, Packs: e.loadr, Judge: judge, Owner: "owner", OnError: func(err error) { e.errs <- err },
-		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: attention.New(attention.Options{Queue: e.queue, Now: e.Now})}})
+		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: e.att}})
 	if err != nil {
 		t.Fatal(err)
 	}
