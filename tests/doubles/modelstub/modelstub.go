@@ -18,6 +18,8 @@ type Reply struct {
 	Delay   time.Duration `json:"-"`
 	DelayMS int           `json:"delay_ms,omitempty"`
 	Status  int           `json:"status,omitempty"`
+
+	judged bool // 内部：由判断题配置产生
 }
 
 func (r Reply) delay() time.Duration {
@@ -35,9 +37,10 @@ type Rule struct {
 
 // Script 是控制接口 POST /_stub/script 的载荷。
 type Script struct {
-	Queue   []Reply `json:"queue,omitempty"`
-	Default *Reply  `json:"default,omitempty"`
-	Rules   []Rule  `json:"rules,omitempty"`
+	Queue   []Reply     `json:"queue,omitempty"`
+	Default *Reply      `json:"default,omitempty"`
+	Rules   []Rule      `json:"rules,omitempty"`
+	Judges  []ChatJudge `json:"judges,omitempty"`
 }
 
 // Request 是收到的完整请求。
@@ -57,6 +60,7 @@ type Stub struct {
 	mu       sync.Mutex
 	queue    []Reply
 	rules    []Rule
+	judges   []ChatJudge
 	def      Reply
 	requests []Request
 }
@@ -118,7 +122,7 @@ func (s *Stub) Requests() []Request {
 // Reset 清空请求记录与全部脚本。
 func (s *Stub) Reset() {
 	s.mu.Lock()
-	s.queue, s.rules, s.requests, s.def = nil, nil, nil, builtinDefault
+	s.queue, s.rules, s.judges, s.requests, s.def = nil, nil, nil, nil, builtinDefault
 	s.mu.Unlock()
 }
 
@@ -159,7 +163,10 @@ func (s *Stub) chat(w http.ResponseWriter, r *http.Request) {
 	s.requests = append(s.requests, Request{r.Method, r.URL.Path, r.Header.Clone(), raw, string(raw), time.Now()})
 	s.mu.Unlock()
 
-	rep := s.pick(string(raw))
+	rep, lp := s.judgeReply(raw)
+	if lp == nil && !rep.judged {
+		rep = s.pick(string(raw))
+	}
 	if d := rep.delay(); d > 0 {
 		select {
 		case <-time.After(d):
@@ -177,11 +184,15 @@ func (s *Stub) chat(w http.ResponseWriter, r *http.Request) {
 		Model string `json:"model"`
 	}
 	_ = json.Unmarshal(raw, &req)
+	choice := map[string]any{"index": 0, "finish_reason": "stop",
+		"message": map[string]any{"role": "assistant", "content": rep.Content}}
+	if lp != nil {
+		choice["logprobs"] = lp
+	}
 	json.NewEncoder(w).Encode(map[string]any{
 		"id": "chatcmpl-stub", "object": "chat.completion", "created": time.Now().Unix(), "model": req.Model,
-		"choices": []any{map[string]any{"index": 0, "finish_reason": "stop",
-			"message": map[string]any{"role": "assistant", "content": rep.Content}}},
-		"usage": map[string]int{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+		"choices": []any{choice},
+		"usage":   map[string]int{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
 	})
 }
 
@@ -205,6 +216,9 @@ func (s *Stub) control(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, ru := range sc.Rules {
 			s.When(ru.Match, ru.Reply)
+		}
+		for _, j := range sc.Judges {
+			s.Judge(j)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
