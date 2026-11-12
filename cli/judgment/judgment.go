@@ -1,13 +1,15 @@
-// Package judgment 是 apa 的判断记录命令组（附录 B.1「可观测」，设计 §6.16、§8.6）：judgment show。
+// Package judgment 是 apa 的判断记录命令组（附录 B.1「可观测」，设计 §6.16、§8.6、§8.10）：judgment show、spot-check、stats。
 //
-// 薄客户端：只调 GET /v1/judgments/{id}，授权（运行凭据只读目标事项的记录，范围外按不存在，退出码 5）
+// 薄客户端：只调 GET /v1/judgments/{id}、/v1/judgments/spot-check、/v1/judgments/stats，授权（运行凭据只读目标事项的记录，范围外按不存在，退出码 5）
 // 与字段都由内核决定；这里不做业务判定，也不直接访问存储。
 package judgment
 
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 
@@ -18,7 +20,7 @@ import (
 
 func init() { client.Register("judgment", run) }
 
-const usageHint = "usage: apa judgment show <id> [--pretty] | spot-check"
+const usageHint = "usage: apa judgment show <id> [--pretty] | spot-check | stats [--use U] [--template T] [--source S] [--since 30d]"
 
 func usage(why string) error { return domain.NewError(domain.CodeInvalidRequest, why, usageHint) }
 
@@ -31,6 +33,8 @@ func run(c *client.Ctx, args []string) error {
 		return show(c, args[1:])
 	case "spot-check":
 		return spotCheck(c, args[1:])
+	case "stats":
+		return stats(c, args[1:])
 	}
 	return usage("unknown judgment subcommand " + args[0])
 }
@@ -42,6 +46,28 @@ func spotCheck(c *client.Ctx, args []string) error {
 	}
 	var out json.RawMessage
 	if err := c.Do(context.Background(), "GET", "/judgments/spot-check", nil, &out); err != nil {
+		return err
+	}
+	return c.Print(out)
+}
+
+// stats 只读：各级调用次数与四项指标，筛选与窗口都由内核解释（GET /judgments/stats）。
+func stats(c *client.Ctx, args []string) error {
+	fs := flag.NewFlagSet("judgment stats", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	q := url.Values{}
+	for _, name := range []string{"use", "template", "source", "since"} {
+		fs.Func(name, "", func(v string) error { q.Set(name, v); return nil })
+	}
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return usage("apa judgment stats takes only --use, --template, --source and --since")
+	}
+	path := "/judgments/stats"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var out json.RawMessage
+	if err := c.Do(context.Background(), "GET", path, nil, &out); err != nil {
 		return err
 	}
 	return c.Print(out)
