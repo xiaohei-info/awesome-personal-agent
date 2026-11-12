@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/bands"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -153,9 +154,15 @@ func (s *Service) prepare(ctx context.Context, c JudgeCall, pol policy.Policy) (
 	if m := pr.Meta; m.Band != nil && m.Band.Low != nil && m.Band.High != nil {
 		p.band = record.Band{Low: *m.Band.Low, High: *m.Band.High}
 	}
+	// 带：调用方显式给的优先，其次策略覆盖（来源条目优先于模板条目，§8.10），最后是模板声明的值。
+	if c.Band == nil {
+		c.Band = bands.Resolve(pol, c.Template, c.Source)
+	}
 	if c.Band != nil {
 		p.band = *c.Band
 	}
+	// 影子只能由策略或调用方打开，这里不会把它关掉。
+	p.c.Shadow = p.c.Shadow || bands.Shadow(pol, c.Template)
 	in := c.Input
 	if len(strings.TrimSpace(string(in))) == 0 {
 		in = json.RawMessage(`{}`)

@@ -446,6 +446,56 @@ func TestBandOverride(t *testing.T) {
 	}
 }
 
+func (e *jenv) setJudgment(t *testing.T, j policy.Judgment) {
+	t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "judgment", func(p *policy.Policy) error { p.Judgment = j; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ACT-JRC-14：策略打开影子后，Service.Judge 产生 shadow 记录（含 p_yes），处置取自对话端点，而不是按 0.05 忽略。
+func TestPolicyShadowScoresButChatDecides(t *testing.T) {
+	e := setupJudge(t, true, true)
+	e.setJudgment(t, policy.Judgment{Shadow: []string{"screen"}, SpotCheck: policy.SpotCheck{PerBrief: 5}})
+	e.cls.PYes(modelstub.Key{Contains: "pshadow"}, 0.05)
+	e.chat("pshadow", "yes", true)
+	v := e.judge(t, jc("screen", "pshadow"))
+	r := e.saved(t, v.Record.ID)
+	if !r.Shadow || r.Levels[0].PYes == nil || *r.Levels[0].PYes != 0.05 || v.DecidedBy != "chat" || v.Answer != "yes" {
+		t.Fatalf("%+v %+v", v, r)
+	}
+	// 关掉影子后同一分数按分类端点定案为否。
+	e.setJudgment(t, policy.Judgment{Shadow: []string{}, SpotCheck: policy.SpotCheck{PerBrief: 5}})
+	e.cls.PYes(modelstub.Key{Contains: "pnoshadow"}, 0.05)
+	v = e.judge(t, jc("screen", "pnoshadow"))
+	if v.Record.Shadow || v.DecidedBy != "classifier" || v.Answer != "no" {
+		t.Fatalf("%+v", v)
+	}
+}
+
+// 策略的带覆盖写进记录并决定处置；带 source 的条目优先于模板级条目。
+func TestPolicyBandOverrideBySource(t *testing.T) {
+	e := setupJudge(t, true, true)
+	e.setJudgment(t, policy.Judgment{Bands: []policy.JudgmentBand{
+		{Template: "screen", Low: 0.5, High: 0.9},
+		{Template: "screen", Source: "src_1", Low: 0.45, High: 0.95},
+	}, Shadow: []string{}, SpotCheck: policy.SpotCheck{PerBrief: 5}})
+	e.cls.PYes(modelstub.Key{Contains: "pband"}, 0.40)
+	v := e.judge(t, jc("screen", "pband")) // Source=src_1
+	if v.DecidedBy != "classifier" || v.Answer != "no" || v.Record.Band != (record.Band{Low: 0.45, High: 0.95}) {
+		t.Fatalf("%+v", v)
+	}
+	c := jc("screen", "pband2")
+	c.Source = "src_other"
+	e.cls.PYes(modelstub.Key{Contains: "pband2"}, 0.40)
+	if v = e.judge(t, c); v.Record.Band != (record.Band{Low: 0.5, High: 0.9}) {
+		t.Fatalf("%+v", v)
+	}
+}
+
 // 只写一端的带：低于下限为否、高于下限为是（两端相同）。
 func TestSingleEndedBand(t *testing.T) {
 	e := setupJudge(t, true, true)

@@ -194,6 +194,29 @@ type Channel struct {
 	TextOnly bool `json:"text_only"`
 }
 
+// JudgmentBand 是策略对某模板不确定带的覆盖；Source 非空时只对该来源生效，且优先于模板级条目（§8.9、§8.10）。
+type JudgmentBand struct {
+	Template string  `json:"template"`
+	Source   string  `json:"source,omitempty"`
+	Low      float64 `json:"low"`
+	High     float64 `json:"high"`
+}
+
+// SpotCheck 是抽检设置：PerBrief 是每份简报的抽检条数。
+type SpotCheck struct {
+	PerBrief int `json:"per_brief"`
+}
+
+// DefaultSpotCheckPerBrief 是抽检条数缺省值（§8.10）；旧版本策略文档没有此键时也取它。
+const DefaultSpotCheckPerBrief = 5
+
+// Judgment 是判断设置（§6.13）：不确定带覆盖、影子模式的模板列表与抽检。只在 Web 改。
+type Judgment struct {
+	Bands     []JudgmentBand `json:"bands"`
+	Shadow    []string       `json:"shadow"`
+	SpotCheck SpotCheck      `json:"spot_check"`
+}
+
 // Policy 是一个版本的完整配置。两份白名单相互独立：键是来源或渠道，值是发送者或回答人。
 type Policy struct {
 	WebOnly          WebOnly          `json:"web_only"`
@@ -209,7 +232,8 @@ type Policy struct {
 	ChannelAnswerers   map[string][]string `json:"channel_answerers"`
 	Channels           map[string]Channel  `json:"channels"`
 	// DefaultHarness 是规则未指定 harness 时任务型与后台运行用的 harness（§13.6）；为空表示未设置，任务型转 needs_input。
-	DefaultHarness string `json:"default_harness"`
+	DefaultHarness string   `json:"default_harness"`
+	Judgment       Judgment `json:"judgment"`
 }
 
 // Default 是版本 0 的配置：默认类别、权限上限 read、人格与白名单为空。
@@ -235,6 +259,7 @@ func Default() Policy {
 		ForwardAllowlist:   map[string][]string{},
 		ChannelAnswerers:   map[string][]string{},
 		Channels:           map[string]Channel{},
+		Judgment:           Judgment{Bands: []JudgmentBand{}, Shadow: []string{}, SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}},
 	}
 }
 
@@ -417,6 +442,36 @@ func normalize(p Policy) (Policy, error) {
 	if p.Channels == nil {
 		p.Channels = map[string]Channel{}
 	}
+	return normalizeJudgment(p)
+}
+
+// normalizeJudgment 校验判断设置：带的两端在 [0,1] 且下限不大于上限，同一（模板，来源）只能出现一次。
+func normalizeJudgment(p Policy) (Policy, error) {
+	j := &p.Judgment
+	if j.Bands == nil {
+		j.Bands = []JudgmentBand{}
+	}
+	seen := map[[2]string]bool{}
+	for i, b := range j.Bands {
+		if strings.TrimSpace(b.Template) == "" {
+			return p, invalid("judgment band %d has no template", i)
+		}
+		if !(b.Low >= 0 && b.High <= 1 && b.Low <= b.High) { // 写成取反，NaN 也被拒
+			return p, invalid("judgment band %d (%s): need 0 <= low <= high <= 1, got low=%v high=%v (low must not be greater than high)", i, b.Template, b.Low, b.High)
+		}
+		k := [2]string{b.Template, b.Source}
+		if seen[k] {
+			return p, invalid("judgment band %d: template %q source %q is listed twice", i, b.Template, b.Source)
+		}
+		seen[k] = true
+	}
+	j.Shadow = dedupSorted(j.Shadow)
+	if j.Shadow == nil {
+		j.Shadow = []string{}
+	}
+	if j.SpotCheck.PerBrief < 0 {
+		return p, invalid("judgment spot_check per_brief %d < 0", j.SpotCheck.PerBrief)
+	}
 	return p, nil
 }
 
@@ -500,7 +555,7 @@ func decode(doc string) (p Policy, legacy bool, err error) {
 	w := struct {
 		Policy
 		Legacy *legacyModelEndpoint `json:"model_endpoint"`
-	}{Policy: Policy{Disturb: Disturb{DailyCap: DefaultDailyCap}}} // 旧文档没有 daily_cap：升级后日上限即生效
+	}{Policy: Policy{Disturb: Disturb{DailyCap: DefaultDailyCap}, Judgment: Judgment{SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}}}} // 旧文档没有 daily_cap：升级后日上限即生效
 	if err := json.Unmarshal([]byte(doc), &w); err != nil {
 		return Policy{}, false, fmt.Errorf("policy: stored document: %w", err)
 	}
