@@ -1,6 +1,6 @@
-# sha256: a66a5111ceca793d823894218ba8a01b8fb93289a622e7a6a35c5a1788dd26d4
+# sha256: 080b758f58443d163249a6b8c4758d85603f17d87ec75d426be5d68ebb2145bc
 work_item_id: 01a1c5de-54fa-7564-b09d-e0fe3f06c24a
-status: in_progress
+status: in_review
 recovery_marker: true
 retry_note: '本人已定口径，本轮更新 PR #247（只改 tests/release/**）：
 
