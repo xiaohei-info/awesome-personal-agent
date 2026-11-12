@@ -46,6 +46,9 @@ type env struct {
 	now time.Time
 }
 
+// useClockNow 为真时 setup 不注入 Now（测试时钟构建的测试用）。
+var useClockNow bool
+
 // setup 搭好触达；给了 drafter 时决策投递先经它起草卡片文案与阈值判定。
 func setup(t *testing.T, drafter ...Drafter) *env {
 	t.Helper()
@@ -62,6 +65,9 @@ func setup(t *testing.T, drafter ...Drafter) *env {
 	t.Cleanup(func() { st.Close() })
 	e := &env{t: t, st: st, now: t0}
 	now := func() time.Time { return e.now }
+	if useClockNow {
+		now = nil // 不注入：各组件取 kernel/clock 的默认时钟
+	}
 	e.x = command.New(st, now)
 	if err := items.Register(e.x, items.NewKinds()); err != nil {
 		t.Fatal(err)

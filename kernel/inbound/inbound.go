@@ -32,6 +32,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -90,7 +91,7 @@ type Options struct {
 	OnError func(error)
 	// Intercept 是跟进消息归属（§9.4）；可为空。
 	Intercept Intercept
-	// Now 是时钟，缺省 time.Now；自动重判按它算事件年龄与退避。
+	// Now 是时钟，缺省 clock.Now；自动重判按它算事件年龄与退避。
 	Now func() time.Time
 	// Rejudge 是自动重判的上限与节流，零值取 DefaultRejudge。
 	Rejudge RejudgeLimits
@@ -119,7 +120,7 @@ func New(o Options) (*Service, error) {
 		o.Owner = "owner"
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	if o.Rejudge == (RejudgeLimits{}) {
 		o.Rejudge = DefaultRejudge

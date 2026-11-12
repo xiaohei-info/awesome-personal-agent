@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock/wall"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -88,7 +89,7 @@ func Append(tx *store.Tx, e domain.Event) (int64, error) {
 	}
 	at := e.At
 	if at.IsZero() {
-		at = time.Now()
+		at = wall.Now()
 	}
 	actor, err := json.Marshal(e.Actor)
 	if err != nil {

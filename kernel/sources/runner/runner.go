@@ -143,7 +143,7 @@ func New(o Options) (*Runner, error) {
 		return nil, errors.New("runner: Store and Exec are required")
 	}
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	return &Runner{o: o}, nil
 }

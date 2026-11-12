@@ -18,6 +18,7 @@ import (
 const (
 	modulePath = "github.com/xiaohei-info/awesome-personal-agent"
 	outcallDir = "kernel/outcall" // 唯一外呼出口
+	clockDir   = "kernel/clock"   // 唯一允许直接取系统时间的包
 )
 
 // 内核（外呼调用器除外）禁止的网络与子进程库；net/url 等纯解析包不发起外呼，放行。
@@ -47,7 +48,7 @@ func (v Violation) String() string {
 	return fmt.Sprintf("%s:%d: [%s] %s", v.File, v.Line, v.Rule, v.Msg)
 }
 
-// Check 扫描 root 下的 kernel/（Go 非测试文件）与 sources/ext/packs/，缺失的目录视为无代码。
+// Check 扫描 root 下的 kernel/、api/、cli/（Go 非测试文件）与 sources/ext/packs/，缺失的目录视为无代码。
 func Check(root string) ([]Violation, error) {
 	var vs []Violation
 	err := walk(root, "kernel", func(rel string, data []byte) error {
@@ -60,6 +61,20 @@ func Check(root string) ([]Violation, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	// 生产代码取时间只经 kernel/clock：api、cli 与 kernel 里不得直接引用 time.Now（含 Since/Until）。
+	for _, dir := range []string{"kernel", "api", "cli"} {
+		err := walk(root, dir, func(rel string, data []byte) error {
+			if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(rel, clockDir+"/") {
+				return nil
+			}
+			got, err := checkTimeNow(rel, data)
+			vs = append(vs, got...)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	for _, dir := range []string{"sources", "ext", "packs"} {
 		err := walk(root, dir, func(rel string, data []byte) error {
@@ -213,4 +228,39 @@ func words(s string) []string {
 	}
 	flush()
 	return out
+}
+
+// checkTimeNow 报告 time.Now / time.Since / time.Until 的任何引用（调用或当作函数值）。
+func checkTimeNow(rel string, data []byte) ([]Violation, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, rel, data, parser.SkipObjectResolution)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", rel, err)
+	}
+	name := "" // time 包在本文件里的名字
+	for _, im := range f.Imports {
+		if p, _ := strconv.Unquote(im.Path.Value); p == "time" {
+			name = "time"
+			if im.Name != nil {
+				name = im.Name.Name
+			}
+		}
+	}
+	if name == "" || name == "_" || name == "." {
+		return nil, nil
+	}
+	var vs []Violation
+	ast.Inspect(f, func(n ast.Node) bool {
+		if sel, ok := n.(*ast.SelectorExpr); ok {
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == name && id.Obj == nil {
+				switch sel.Sel.Name {
+				case "Now", "Since", "Until":
+					vs = append(vs, Violation{"time-now", rel, fset.Position(sel.Pos()).Line,
+						"生产代码取时间须经 " + clockDir + ".Now，禁止直接用 time." + sel.Sel.Name})
+				}
+			}
+		}
+		return true
+	})
+	return vs, nil
 }

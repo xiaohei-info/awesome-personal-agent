@@ -20,6 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -35,7 +36,7 @@ var formIdentity = command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem,
 // Routes 返回渠道路由分组，交给 core.Deps.Groups。x 须已经 channel.Register。now 为 nil 用系统时钟，须与 x 同一时钟。
 func Routes(x *command.Executor, st *store.Store, now func() time.Time) core.RouteGroup {
 	if now == nil {
-		now = time.Now
+		now = clock.Now
 	}
 	h := &handlers{x: x, st: st, now: now}
 	return func(r *core.Router) {

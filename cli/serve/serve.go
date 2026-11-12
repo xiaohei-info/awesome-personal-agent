@@ -86,6 +86,7 @@ func run(ctx context.Context, c *client.Ctx, ready func(net.Addr)) error {
 	if err != nil {
 		return usage("cannot locate the APA home directory", "set APA_HOME to an absolute path")
 	}
+	clock.SetHome(home) // 测试构建从这里读 test-clock-offset；发布构建无操作
 	l := config.LayoutOf(home)
 	if _, err := os.Stat(l.Ledger); err != nil {
 		if errors.Is(err, os.ErrNotExist) {

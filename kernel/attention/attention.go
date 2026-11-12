@@ -98,7 +98,7 @@ type Attention struct {
 // New 返回触达模块。
 func New(o Options) *Attention {
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = clock.Now
 	}
 	if o.TickEvery <= 0 {
 		o.TickEvery = 30 * time.Second

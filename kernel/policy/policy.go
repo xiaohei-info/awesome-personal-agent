@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -429,7 +430,7 @@ func Update(tx *store.Tx, actor domain.Actor, reason string, mutate func(*Policy
 		return 0, err
 	}
 	version := cur + 1
-	at := time.Now()
+	at := clock.Now()
 	if _, err := tx.Exec("INSERT INTO policy_version (version, doc, at) VALUES (?, ?, ?)", int64(version), string(doc), at.UnixNano()); err != nil {
 		return 0, err
 	}
