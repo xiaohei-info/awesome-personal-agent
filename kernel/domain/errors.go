@@ -14,6 +14,7 @@ const (
 	CodeSessionNotDirect     Code = "session_not_direct"     // 403 → 23：凭原话的代答，会话不是与本人的私聊（§14.5）
 	CodeNotFound             Code = "not_found"              // 404 → 5
 	CodeConflict             Code = "conflict"               // 409 → 6
+	CodeLoginLocked          Code = "login_locked"           // 429 → 1：登录被限速或锁定（§14.13），带 Retry-After
 	CodeInternal             Code = "internal"               // 其余 → 1
 )
 
@@ -46,6 +47,7 @@ var codeHTTP = map[Code]int{
 	CodeSessionNotDirect:     403,
 	CodeNotFound:             404,
 	CodeConflict:             409,
+	CodeLoginLocked:          429,
 	CodeInternal:             500,
 }
 
@@ -60,6 +62,7 @@ var codeExit = map[Code]int{
 	CodeSessionNotDirect:     ExitBasisRequired,
 	CodeNotFound:             ExitNotFound,
 	CodeConflict:             ExitConflict,
+	CodeLoginLocked:          ExitUnclassified,
 	CodeInternal:             ExitUnclassified,
 }
 

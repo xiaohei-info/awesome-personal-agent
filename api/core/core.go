@@ -65,6 +65,7 @@ type Principal struct {
 	Grant    string // GrantHeader 的值；写命令的 command.Request.Grant 取自这里，二选一与同时携带的判定都在内核
 	WebURL   string // 请求对象在 Web 的链接；写命令的 command.Request.WebURL 取自这里，随 20/22/23 拒绝返回
 	csrf     string
+	session  string // Web 会话的 id_hash；Bearer 为空
 }
 
 // Handler 处理一个请求。返回错误由骨干渲染成统一错误体；返回 nil 表示 Handler 已写完响应。
@@ -139,8 +140,12 @@ type Deps struct {
 	Store      *store.Store
 	Auth       *auth.Auth
 	Now        func() time.Time // nil 用系统时钟
-	SessionTTL time.Duration    // 0 用 DefaultSessionTTL
-	Logger     *slog.Logger     // nil 用 slog.Default()
+	SessionTTL time.Duration    // 会话绝对有效期；0 用 DefaultSessionTTL
+	// SessionIdle 是会话空闲有效期，超过这么久没用就失效；0 用 DefaultSessionIdle。
+	SessionIdle time.Duration
+	// LoginDelay 是全部地址失败过多时每次登录尝试的延迟应答时长；0 用 DefaultLoginDelay。
+	LoginDelay time.Duration
+	Logger     *slog.Logger // nil 用 slog.Default()
 	// Guard 非空时包装每个 Bearer 认证入口（唤醒租约，§13.6）：内核据账本把认证出的调用者降级，本层不判定。
 	Guard func(command.Identity) command.Identity
 	// Groups 是除 Register 登记外额外挂载的分组（测试与嵌入用）。
@@ -153,6 +158,7 @@ type Deps struct {
 type Server struct {
 	d       Deps
 	handler http.Handler
+	lim     *limiter
 }
 
 // New 装配路由并校验；任何登记错误（重复、缺处理器、路径非法）都在启动时返回，不留到请求时。
@@ -169,7 +175,13 @@ func New(d Deps) (*Server, error) {
 	if d.Logger == nil {
 		d.Logger = slog.Default()
 	}
-	s := &Server{d: d}
+	if d.SessionIdle <= 0 {
+		d.SessionIdle = DefaultSessionIdle
+	}
+	if d.LoginDelay <= 0 {
+		d.LoginDelay = DefaultLoginDelay
+	}
+	s := &Server{d: d, lim: newLimiter()}
 
 	rt := &Router{}
 	groups := []RouteGroup{s.authRoutes}

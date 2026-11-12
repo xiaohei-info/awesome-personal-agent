@@ -94,6 +94,12 @@ const (
 	EvRunFinished                    = "run.finished"
 	EvSourceFailed                   = "source.failed"
 	EvHealthAlert                    = "health.alert"
+
+	// 登录审计（§14.13）：载荷不含口令。
+	EvAuthLogin           = "auth.login"
+	EvAuthLoginLocked     = "auth.login_locked"
+	EvAuthPasswordChanged = "auth.password_changed"
+	EvAuthSessionRevoked  = "auth.session_revoked"
 )
 
 // RegisteredEventTypes 是对外开放的稳定事件类型表，顺序同附录 B.4。
@@ -106,6 +112,7 @@ var RegisteredEventTypes = []string{
 	EvProjectUpdated, EvProjectAllowedExecutorsChanged,
 	EvRuleModeChanged, EvAllowlistChanged, EvPolicyChanged, EvGrantIssued, EvGrantRevoked,
 	EvRunStarted, EvRunFinished, EvSourceFailed, EvHealthAlert,
+	EvAuthLogin, EvAuthLoginLocked, EvAuthPasswordChanged, EvAuthSessionRevoked,
 	EvItemProgressAdded,
 }
 
