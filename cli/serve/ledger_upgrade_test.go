@@ -215,6 +215,7 @@ func seedV2(t *testing.T, s *store.Store) {
 		seedExec(t, s, `INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at, correlation_keys, sender, sender_verified, disposition, unjudged_reason)
 			VALUES ('mail', ?, ?, 'mail', 'r', 'mail', 's', '', '', '', 1, ?, '', 0, 'unjudged', 'undecided')`, fmt.Sprintf("e%d", i), fmt.Sprintf("se%d", i), keys)
 	}
+	seedExec(t, s, `INSERT INTO projects (id, name, intro, tags, status, repos, allowed_executors, capture) VALUES ('p1', 'keep', '', '[]', 'active', '[]', 'null', 1)`)
 	seedExec(t, s, `INSERT INTO apicore_session (id_hash, csrf, created_at, expires_at) VALUES ('h1', 'c', 1, 9223372036854775807)`)
 }
 
@@ -275,6 +276,9 @@ func TestUpgradeV2To3KeepsRowsAndHistory(t *testing.T) {
 	}
 	if got := scalar(t, s, "SELECT outbound_external || '|' || outbound_local || '|' || default_project FROM sources_registry_source WHERE id = 'mail'"); got != "|full|" {
 		t.Errorf("source scope = %q", got)
+	}
+	if got := scalar(t, s, "SELECT name || '|' || capture || '|' || capture_outbound FROM projects WHERE id = 'p1'"); got != "keep|1|" {
+		t.Errorf("project after upgrade = %q", got)
 	}
 	if got := scalar(t, s, "SELECT expires_at FROM apicore_session WHERE id_hash = 'h1'"); got != int64(0) {
 		t.Errorf("pre-upgrade session still valid: expires_at = %v", got)

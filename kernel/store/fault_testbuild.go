@@ -16,7 +16,7 @@ func migrationFault() (int, bool) {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 1 {
-		return 0, false
+		panic("APA_TEST_MIGRATION_FAIL_AFTER must be a positive integer, got " + v) // 测试构建里写错就暴露，别让测试以为注入生效
 	}
 	return n, true
 }
