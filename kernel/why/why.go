@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
@@ -59,7 +60,30 @@ type Timeline struct {
 	ID               string `json:"id"`
 	ScreeningPending bool   `json:"screening_pending,omitempty"`
 	Steps            []Step `json:"steps"`
+	// Alerts 是来源事件命中数值条件规则的回放（§3.12）：规则、条件、上一次与本次取值、产出的投递及其当前状态。
+	// 只含规则 id、条件文本、数值和投递的状态，不含来源正文，各凭据级别都可见。
+	Alerts []Alert `json:"alerts,omitempty"`
 }
+
+// Alert 是一次处置里命中的数值条件。Conditions 是 [{condition, previous?, current}]，由处置命令的载荷原样取出。
+type Alert struct {
+	Rule        string          `json:"rule"`
+	Disposition string          `json:"disposition"`
+	Conditions  json.RawMessage `json:"conditions"`
+	Delivery    *DeliveryRef    `json:"delivery,omitempty"`
+}
+
+// DeliveryRef 是回放里的一条投递：id 与它此刻的状态。
+type DeliveryRef struct {
+	ID         string `json:"id"`
+	Class      string `json:"class"`
+	Route      string `json:"route"`
+	State      string `json:"state"`
+	Suppressed string `json:"suppressed,omitempty"`
+}
+
+// evDisposed 是入站处置的 Event 类型（kernel/inbound.EvDisposed）；本包不依赖入站，字面值在此对齐。
+const evDisposed = "inbound.disposed"
 
 // content 是各凭据级别可见的正文字段。Evidence 是本人原话与会话引用，只给 Web 与 delegate。
 type content struct{ reason, payload, evidence bool }
@@ -100,8 +124,39 @@ func Replay(tx *store.Tx, p policy.Policy, r Request) (Timeline, error) {
 			return Timeline{}, err
 		}
 		tl.Steps = append(tl.Steps, st)
+		if en.Event.Type == evDisposed && !en.Tombstone {
+			a, err := alertOf(tx, en)
+			if err != nil {
+				return Timeline{}, err
+			}
+			if a != nil {
+				tl.Alerts = append(tl.Alerts, *a)
+			}
+		}
 	}
 	return tl, nil
+}
+
+// alertOf 取处置载荷里的数值条件与产出的投递；载荷没有条件（不是数值条件规则的处置）返回 nil。
+func alertOf(tx *store.Tx, en eventlog.Entry) (*Alert, error) {
+	var p struct {
+		Rule        string          `json:"rule"`
+		Disposition string          `json:"disposition"`
+		Conditions  json.RawMessage `json:"conditions"`
+		Delivery    string          `json:"delivery"`
+	}
+	if json.Unmarshal(en.Event.Payload, &p) != nil || len(p.Conditions) == 0 {
+		return nil, nil
+	}
+	a := &Alert{Rule: p.Rule, Disposition: p.Disposition, Conditions: p.Conditions}
+	if p.Delivery != "" {
+		d, err := delivery.New(delivery.Options{}).Get(tx, p.Delivery)
+		if err != nil {
+			return nil, err
+		}
+		a.Delivery = &DeliveryRef{ID: d.ID, Class: string(d.Class), Route: d.Route, State: string(d.State), Suppressed: d.Suppressed}
+	}
+	return a, nil
 }
 
 // judgmentOf 展开 Event 载荷里的 judgment 引用；载荷不是对象、没有该字段或已被墓碑抹除都返回 nil。

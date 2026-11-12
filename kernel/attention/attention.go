@@ -76,6 +76,10 @@ CREATE INDEX attention_held_release ON attention_held(release_at);`,
 	card TEXT NOT NULL DEFAULT '',
 	verdict TEXT NOT NULL DEFAULT ''
 ) WITHOUT ROWID;`,
+}, {
+	// 账本结构版本 3：规则 alert 出口的提醒没有事项，被静默拦住时要把出处（origin，JSON）一并暂存。
+	Version: 3, Ledger: 3, Name: "ledger-v3-held-origin",
+	SQL: `ALTER TABLE attention_held ADD COLUMN origin TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Options 配置触达；Queue 必填。
@@ -356,6 +360,20 @@ func (a *Attention) RemindGroup(tx *store.Tx, anchor domain.Item, key, title, su
 	})
 }
 
+// AlertID 是规则 alert 出口为来源事件产出的提醒的投递 id：同一来源事件只提醒一次。
+func AlertID(sourceEvent string) string { return "alert:" + sourceEvent }
+
+// Alert 让规则 alert 出口的提醒走触达：没有事项，只记出处（origin）；受静默、日上限和静音约束（§7.4）。
+// 同一来源事件重复调用不会重复提醒。在调用方的事务里运行。
+func (a *Attention) Alert(tx *store.Tx, o domain.DeliveryOrigin, content domain.DeliveryContent) error {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return err
+	}
+	return a.offer(tx, pol, held{id: AlertID(o.SourceEvent), class: domain.DeliveryReminder, priority: domain.PriorityNormal,
+		version: 1, content: content, origin: &o})
+}
+
 func (a *Attention) remind(tx *store.Tx, pol policy.Policy, it domain.Item, kind string, due time.Time, title, summary string) error {
 	ver, err := command.Version(tx, it.ID)
 	if err != nil {
@@ -379,7 +397,8 @@ type held struct {
 	exempt    bool // 豁免静默
 	mergeable bool
 	release   time.Time
-	notBefore time.Time // 阈值判定为并入摘要时的最早放行时刻
+	notBefore time.Time              // 阈值判定为并入摘要时的最早放行时刻
+	origin    *domain.DeliveryOrigin // 没有事项的提醒（规则 alert 出口）的出处；有事项时为空
 }
 
 // offer 决定一条提醒现在投还是先拦住：静默中拦到静默结束；低优先级提醒进合并窗口。
@@ -418,9 +437,17 @@ func (a *Attention) offer(tx *store.Tx, pol policy.Policy, h held) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO attention_held (id, item, class, priority, content, version, exempt, mergeable, release_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, h.id, h.item, string(h.class), string(h.priority), string(content), h.version,
-		b2i(h.exempt), b2i(h.mergeable), h.release.UnixNano())
+	origin := ""
+	if h.origin != nil {
+		b, err := json.Marshal(h.origin)
+		if err != nil {
+			return err
+		}
+		origin = string(b)
+	}
+	_, err = tx.Exec(`INSERT INTO attention_held (id, item, class, priority, content, version, exempt, mergeable, release_at, origin)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, h.id, h.item, string(h.class), string(h.priority), string(content), h.version,
+		b2i(h.exempt), b2i(h.mergeable), h.release.UnixNano(), origin)
 	return err
 }
 
@@ -450,15 +477,21 @@ func (a *Attention) flush(tx *store.Tx, pol policy.Policy) error {
 		var (
 			h                  held
 			class, prio, body  string
+			origin             string
 			exempt, merge, rel int64
 		)
-		if err := r.Scan(&h.id, &h.item, &class, &prio, &body, &h.version, &exempt, &merge, &rel); err != nil {
+		if err := r.Scan(&h.id, &h.item, &class, &prio, &body, &h.version, &exempt, &merge, &rel, &origin); err != nil {
 			return err
+		}
+		if origin != "" {
+			if err := json.Unmarshal([]byte(origin), &h.origin); err != nil {
+				return fmt.Errorf("held %s origin: %w", h.id, err)
+			}
 		}
 		h.class, h.priority, h.exempt, h.mergeable, h.release = domain.DeliveryClass(class), domain.Priority(prio), exempt == 1, merge == 1, time.Unix(0, rel)
 		due = append(due, h)
 		return json.Unmarshal([]byte(body), &due[len(due)-1].content)
-	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at FROM attention_held WHERE release_at <= ? OR class = 'decision' ORDER BY release_at, rowid`, now.UnixNano())
+	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at, origin FROM attention_held WHERE release_at <= ? OR class = 'decision' ORDER BY release_at, rowid`, now.UnixNano())
 	if err != nil {
 		return err
 	}
@@ -524,7 +557,7 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 			return a.deliver(tx, pol, rest)
 		}
 	}
-	d := domain.Delivery{ID: hs[0].id, Item: hs[0].item, Class: hs[0].class, Version: hs[0].version, Content: hs[0].content}
+	d := domain.Delivery{ID: hs[0].id, Item: hs[0].item, Class: hs[0].class, Version: hs[0].version, Content: hs[0].content, Origin: hs[0].origin}
 	if len(hs) > 1 {
 		titles := make([]string, len(hs))
 		for i, h := range hs {
@@ -573,6 +606,10 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 // target 取一条提醒对应事项的项目与来源，供日上限与静音对照；事项已不存在时只剩事项 id。
 func (a *Attention) target(tx *store.Tx, h held) (delivery.Target, error) {
 	t := delivery.Target{Exempt: h.exempt}
+	if h.origin != nil { // 没有事项：只能按来源对照静音
+		t.Source = h.origin.Source
+		return t, nil
+	}
 	it, err := items.Get(tx, h.item)
 	if isNotFound(err) {
 		return t, nil
