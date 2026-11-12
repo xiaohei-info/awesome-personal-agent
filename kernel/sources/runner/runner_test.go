@@ -777,3 +777,28 @@ echo '{"cursor":"c1"}'
 		t.Fatal(err)
 	}
 }
+
+// 列里的 JSON 被写坏时读取暴露真实错误，不返回残缺事件；不可设置的处置被拒。
+func TestCorruptV2ColumnSurfacesErrorAndBadDispositionRejected(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", goodEvents), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	id := e.events("src_a")[0].ID
+	err := e.st.Update(bg, func(tx *store.Tx) error {
+		if err := SetDisposition(tx, id, domain.DispositionExpired, "", ""); err == nil {
+			t.Error("expired must not be settable via SetDisposition")
+		}
+		_, err := tx.Exec(`UPDATE sources_runner_event SET metrics = 'not json' WHERE id = ?`, id)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error { _, err := Events(tx, "src_a"); return err }); err == nil || !strings.Contains(err.Error(), "metrics") {
+		t.Fatalf("corrupt metrics must surface: %v", err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error { _, _, err := EventPage(tx, "src_a", nil, 0, 10); return err }); err == nil {
+		t.Fatal("EventPage must surface corrupt column")
+	}
+}
