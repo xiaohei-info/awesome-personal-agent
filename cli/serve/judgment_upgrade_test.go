@@ -54,7 +54,7 @@ func TestV01JudgeEventsReplayAfterUpgradeAndStayOutOfJudgmentRecords(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: s, Auth: au, Groups: []core.RouteGroup{apiwhy.Routes(s), apijudgments.Routes(s)}})
+	srv, err := core.New(core.Deps{Store: s, Auth: au, Groups: []core.RouteGroup{apiwhy.Routes(s), apijudgments.Routes(s, nil)}})
 	if err != nil {
 		t.Fatal(err)
 	}
