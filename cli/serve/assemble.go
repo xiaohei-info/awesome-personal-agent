@@ -34,6 +34,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
 	apiexec "github.com/xiaohei-info/awesome-personal-agent/api/settings/exec"
 	apigrants "github.com/xiaohei-info/awesome-personal-agent/api/settings/grants"
+	apioutbound "github.com/xiaohei-info/awesome-personal-agent/api/settings/outbound"
 	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	apipurge "github.com/xiaohei-info/awesome-personal-agent/api/settings/purge"
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
@@ -363,7 +364,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
+		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)

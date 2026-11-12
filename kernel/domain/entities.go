@@ -37,6 +37,8 @@ type Project struct {
 	// nil 不限制；空切片只能指派给本人（§14.7）。只在 Web 设置。
 	AllowedExecutors []string `json:"allowed_executors"`
 	Capture          bool     `json:"capture,omitempty"`
+	// CaptureOutbound 是对话增量送外部端点的范围（full、excerpt、meta、none）；nil 未选择，没有缺省值（§6.5、§14.14）。
+	CaptureOutbound *string `json:"capture_outbound"`
 }
 
 // LocalCheckout 返回项目在 host 上的第一个检出（§12.6：Host 等于该机主机名才算本机有检出）；没有时返回 nil。
@@ -241,10 +243,27 @@ type Source struct {
 	CredentialsPath string          `json:"credentials_path,omitempty"`
 	DedupeDomain    string          `json:"dedupe_domain,omitempty"`
 	DefaultProject  string          `json:"default_project"`
+	Outbound        Outbound        `json:"outbound"`
 	Config          json.RawMessage `json:"config,omitempty"`
 	Cursor          string          `json:"cursor,omitempty"`
 	Enabled         bool            `json:"enabled"`
 	Stats           json.RawMessage `json:"stats,omitempty"`
+}
+
+// Outbound 是来源内容可以送给模型端点的范围，按端点位置分别设置（§6.10、§14.14）。
+// 取值 full、excerpt、meta、none；External 为 nil 表示未选择（外部范围没有缺省值）。
+type Outbound struct {
+	Local    string  `json:"local"`
+	External *string `json:"external"`
+}
+
+// ValidOutboundScope 报告 s 是否是外发范围的合法取值（full、excerpt、meta、none）。
+func ValidOutboundScope(s string) bool {
+	switch s {
+	case "full", "excerpt", "meta", "none":
+		return true
+	}
+	return false
 }
 
 type Disposition string

@@ -184,7 +184,8 @@ func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (string, error) {
 		return "", err
 	}
 	for _, e := range backlog {
-		if e.UnjudgedReason != domain.UnjudgedUndecided {
+		// 判断未定、外发范围未选择、放回积压的事件与端点有没有配置无关
+		if e.UnjudgedReason != domain.UnjudgedUndecided && e.UnjudgedReason != domain.UnjudgedOutboundUnset && e.UnjudgedReason != domain.UnjudgedRestored {
 			return EndpointNotConfigured, nil
 		}
 	}

@@ -802,3 +802,52 @@ func TestCorruptV2ColumnSurfacesErrorAndBadDispositionRejected(t *testing.T) {
 		t.Fatal("EventPage must surface corrupt column")
 	}
 }
+
+// OutboundUnset 只列外发范围未选而未判定的事件（按时间窗）；RequeueOutbound 只放回这一类，且重判次数加一。
+func TestOutboundUnsetListAndRequeue(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", `for i in 1 2 3; do echo '{"id":"e'$i'","type":"t","subject":"s","occurred_at":"2026-03-01T00:00:00Z"}'; done
+echo '{"cursor":"c1"}'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	evs := e.events("src_a")
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for i, r := range []string{domain.UnjudgedOutboundUnset, domain.UnjudgedUndecided, domain.UnjudgedModelUnavailable} {
+			if err := SetDisposition(tx, evs[i].ID, domain.DispositionUnjudged, "", r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var got []domain.SourceEvent
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) {
+		got, err = OutboundUnset(tx, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+		return
+	}); err != nil || len(got) != 1 || got[0].ID != evs[0].ID {
+		t.Fatalf("unset list: %+v err=%v", got, err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) {
+		got, err = OutboundUnset(tx, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
+		return
+	}); err != nil || len(got) != 0 {
+		t.Fatalf("window not honoured: %+v err=%v", got, err)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		if _, err := RequeueOutbound(tx, evs[1].ID); err == nil {
+			t.Error("undecided must not be requeued by RequeueOutbound")
+		}
+		n, err := RequeueOutbound(tx, evs[0].ID)
+		if err != nil || n != 1 {
+			t.Errorf("requeue = %d, %v", n, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if g := e.events("src_a")[0]; g.Disposition != domain.DispositionPending || g.UnjudgedReason != "" {
+		t.Fatalf("event %+v", g)
+	}
+}

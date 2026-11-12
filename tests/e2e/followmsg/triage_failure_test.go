@@ -17,8 +17,8 @@ const autoRule = "acc-inbound/source_rules/acc-auto"
 // setModel 在 Web 设置里写模型端点；endpoint 为空表示清除（screening_timeout_ms 必须保留一个合法值）。
 func (k *kit) setModel(endpoint string) {
 	k.t.Helper()
-	body, _ := json.Marshal(map[string]any{"model_endpoint": map[string]any{
-		"url": endpoint, "model": "acc-model", "api_key": "stub-key", "screening_timeout_ms": 2000}})
+	body, _ := json.Marshal(map[string]any{"generate_endpoint": map[string]any{
+		"url": endpoint, "model": "acc-model", "api_key": "stub-key", "locality": "local"}, "screening_timeout_ms": 2000})
 	k.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
 }
 

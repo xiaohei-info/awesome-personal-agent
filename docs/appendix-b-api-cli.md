@@ -175,7 +175,8 @@
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/grants`、`/settings/purge` | 策略（含人格、打扰上限与静音）、两个模型端点、凭据、白名单、名单、命令登记、声明确认、授权单签发与撤销（`POST /settings/grants`、`POST /settings/grants/{id}/revoke`）、物理删除 | 只有 Web 登录 |
-| | `/settings/judgment`、`/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 【规划中（v0.2.0）】不确定带与影子模式；来源与对话捕获的外发范围 | 只有 Web 登录 |
+| | `/settings/judgment` | 【规划中（v0.2.0）】不确定带与影子模式 | 只有 Web 登录 |
+| | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围 | 只有 Web 登录 |
 | 认证 | `POST /auth/login`、`/logout` | Web 会话。连续失败的限速与锁定见主文档 §14.13，锁定期间返回 429 | |
 | | `POST /auth/password` | 【规划中（v0.2.0）】改口令 `{current, new}`；新口令少于 12 个字符返回 400；成功后其他会话全部失效 | 只有 Web 登录 |
 | | `GET /auth/sessions`，`DELETE /auth/sessions/{id}`，`DELETE /auth/sessions` | 【规划中（v0.2.0）】在线会话与吊销 | 只有 Web 登录 |
@@ -242,7 +243,7 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 `/settings/judgment`：`{"bands": [{"template", "source"?, "low", "high"}], "shadow": ["<模板>"], "spot_check": {"per_brief": 5}}`。`bands` 覆盖能力包声明的不确定带，带 `source` 的条目优先；`low` 大于 `high` 返回 400。每次修改是一次策略变更，记 `policy.changed`（主文档 §8.10）。
 
-`/settings/sources/{id}/outbound`：`{"local": "full", "external": "excerpt"}`，各取 `full`、`excerpt`、`meta`、`none`；`external` 可为 `null`（未选择）。`/settings/projects/{id}/capture-outbound` 同理，只有一个值。`POST /sources`、`PATCH /sources/{id}` 可写 `default_project`，不能写 `outbound`（返回 403，退出码 20）。
+`/settings/sources/{id}/outbound`：`{"local": "full", "external": "excerpt"}`，各取 `full`、`excerpt`、`meta`、`none`；`external` 可为 `null`（未选择）。`/settings/projects/{id}/capture-outbound` 同理，请求体与响应只有一个值：`{"value": "excerpt"}`，`value` 可为 `null`。两者读写都只有 Web 登录；写入记账本事件（来源是内部的 `source.updated`，项目是 `project.updated`），未变不记。`POST /sources`、`PATCH /sources/{id}` 可写 `default_project`，不能写 `outbound`（返回 403，退出码 20）。
 
 `GET /materials/{id}/content` 只用于托管型，自有型返回 409（读修订）。响应 200，`state` 取三个值之一，其余字段随之变化：
 

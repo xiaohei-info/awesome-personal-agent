@@ -91,7 +91,7 @@ func newEnv(t *testing.T, configured bool, override map[string]string) *env {
 	if configured {
 		err := st.Update(bg, func(tx *store.Tx) error {
 			_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-				p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}, 1000
+				p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}, 1000
 				return nil
 			})
 			return err

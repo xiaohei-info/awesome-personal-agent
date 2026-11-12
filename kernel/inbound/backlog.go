@@ -46,11 +46,12 @@ type probeState struct {
 }
 
 type backlogIn struct {
-	Event   string `json:"event,omitempty"`
-	Source  string `json:"source,omitempty"`
-	All     bool   `json:"all,omitempty"`
-	Attempt int    `json:"attempt,omitempty"` // 重判第几次：同一次入队幂等，下一次是新的入队
-	Reason  string `json:"reason,omitempty"`
+	Event    string `json:"event,omitempty"`
+	Source   string `json:"source,omitempty"`
+	All      bool   `json:"all,omitempty"`
+	Attempt  int    `json:"attempt,omitempty"`  // 重判第几次：同一次入队幂等，下一次是新的入队
+	Outbound bool   `json:"outbound,omitempty"` // 入队对象是因外发范围未选择而未判定的事件
+	Reason   string `json:"reason,omitempty"`
 }
 
 func parseBacklog(in json.RawMessage) (backlogIn, error) {
@@ -74,12 +75,16 @@ func registerBacklog(x *command.Executor) error {
 		x.Register(command.Spec{Name: CmdRequeue, Action: authz.ActionUpdateOwn, Object: ownObject,
 			Apply: func(c *command.Ctx) (any, error) {
 				v, _ := parseBacklog(c.Input)
-				n, err := runner.Requeue(c.Tx, v.Event)
+				requeue := runner.Requeue
+				if v.Outbound {
+					requeue = runner.RequeueOutbound
+				}
+				n, err := requeue(c.Tx, v.Event)
 				if err != nil {
 					return nil, err
 				}
 				p, _ := json.Marshal(map[string]any{"event": v.Event, "rejudges": n})
-				_, err = c.Emit(domain.Event{Type: EvRequeued, Object: v.Event, Reason: "model endpoint is configured again; rejudging", Payload: p})
+				_, err = c.Emit(domain.Event{Type: EvRequeued, Object: v.Event, Reason: orElse(v.Reason, "model endpoint is configured again; rejudging"), Payload: p})
 				return nil, err
 			}}),
 		x.Register(command.Spec{Name: CmdExpire, Action: authz.ActionUpdateOwn, Object: ownObject,
@@ -138,6 +143,46 @@ func settle(c *command.Ctx, event string, to domain.Disposition, reason string) 
 	return err
 }
 
+// requeueOutboundChosen 把因外发范围未选择而未判定、现在已可送的事件放回 pending 重判（§14.14、§9.3）：
+// 来源（或对话捕获的项目）选定了外部范围，或端点位置改了。范围仍不可用的事件留在积压里。
+func (s *Service) requeueOutboundChosen(ctx context.Context, since time.Time) []error {
+	var ready []domain.SourceEvent
+	err := s.o.Store.View(ctx, func(tx *store.Tx) error {
+		unset, err := runner.OutboundUnset(tx, since)
+		if err != nil || len(unset) == 0 {
+			return err
+		}
+		sn := snapshot{}
+		if err := sn.loadFacts(tx); err != nil {
+			return err
+		}
+		for _, ev := range unset {
+			src, err := sn.source(ev.SourceID)
+			if err == nil && sn.outboundBlock(src) == "" {
+				ready = append(ready, ev)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return []error{err}
+	}
+	var errs []error
+	for _, ev := range ready {
+		n := ev.Rejudges + 1
+		if _, err := s.do(ctx, system, "", fmt.Sprintf("inbound:requeue:%s:%d", ev.ID, n), CmdRequeue,
+			backlogIn{Event: ev.ID, Attempt: n, Outbound: true, Reason: "outbound scope is chosen; rejudging"}, command.Chain{}); err != nil {
+			errs = append(errs, fmt.Errorf("inbound: requeue %s: %w", ev.ID, err))
+		}
+	}
+	if len(ready) > 0 {
+		if err := s.Process(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
+
 // Rejudge 跑一轮积压维护，由后台维护循环定期调用：
 //
 //  1. 发生在 Window 之前、仍未判定的事件转 expired，不再自动重判，也不再计入积压；
@@ -184,6 +229,7 @@ func (s *Service) Rejudge(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("inbound: expire %s: %w", id, err))
 		}
 	}
+	errs = append(errs, s.requeueOutboundChosen(ctx, since)...)
 	if endpoint == "" || len(cands) == 0 || (endpoint == s.probe.endpoint && now.Before(s.probe.next)) {
 		return errors.Join(errs...)
 	}

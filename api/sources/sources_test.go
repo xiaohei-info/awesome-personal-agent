@@ -910,3 +910,52 @@ func TestSourceEventsDigestAlertedFilterAndV2Fields(t *testing.T) {
 		t.Errorf("bogus: %d", r.Code)
 	}
 }
+
+// 验收 ACT-OBD-10/11：来源登记与更新可带默认项目，但从不写外发范围——任何凭据（含 Web）带 outbound 都是 403；
+// delegate 的尝试留 command.rejected，来源的范围不变。
+func TestSourceRoutesWriteDefaultProjectButNeverOutbound(t *testing.T) {
+	e := setup(t)
+	dlg, obs := e.token(auth.Delegate), e.token(auth.Observer)
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO projects (id, name, intro, tags, status, repos, allowed_executors, capture) VALUES ('acc-home', 'home', '', '[]', 'active', '[]', 'null', 0)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reg := `{"id":"src_feed","type":"pull","command":"fetch-feed","schedule":"10m","timeout":60,"default_project":"acc-home"}`
+	if r := e.do(dlg, "POST", "/v1/sources", reg); r.Code != 201 {
+		t.Fatalf("register: %d %s", r.Code, r.Body)
+	}
+	r := e.do(obs, "GET", "/v1/sources/src_feed", "")
+	if !strings.Contains(r.Body.String(), `"default_project":"acc-home"`) || !strings.Contains(r.Body.String(), `"outbound":{"local":"full","external":null}`) {
+		t.Fatalf("show: %s", r.Body)
+	}
+	if r := e.do(dlg, "POST", "/v1/sources", `{"id":"src_other","type":"pull","command":"fetch-feed","schedule":"10m","timeout":60,"default_project":"nope"}`); r.Code != 404 {
+		t.Fatalf("unknown default project: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"default_project":""}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"default_project":""`) {
+		t.Fatalf("clear default project: %d %s", r.Code, r.Body)
+	}
+
+	rejected := e.events(domain.EvCommandRejected)
+	for name, call := range map[string]func() resp{
+		"delegate patch": func() resp { return e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"outbound":{"external":"full"}}`) },
+		"delegate register": func() resp {
+			return e.do(dlg, "POST", "/v1/sources", `{"id":"src_two","type":"pull","command":"fetch-feed","schedule":"1m","timeout":5,"outbound":{"external":"full"}}`)
+		},
+		"web patch": func() resp { return e.web("PATCH", "/v1/sources/src_feed", `{"outbound":{"external":"full"}}`) },
+	} {
+		if r := call(); r.Code != 403 {
+			t.Errorf("%s: %d %s", name, r.Code, r.Body)
+		}
+	}
+	if r := e.do(obs, "GET", "/v1/sources/src_feed", ""); !strings.Contains(r.Body.String(), `"external":null`) {
+		t.Fatalf("outbound changed: %s", r.Body)
+	}
+	if e.events(domain.EvCommandRejected) <= rejected {
+		t.Fatal("delegate's attempt left no command.rejected event")
+	}
+	if r := e.do(obs, "GET", "/v1/sources/src_two", ""); r.Code != 404 {
+		t.Fatalf("a rejected registration created the source: %d", r.Code)
+	}
+}

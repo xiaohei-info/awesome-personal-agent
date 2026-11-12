@@ -40,6 +40,9 @@ var Module = store.Module{Name: "projects", Migrations: []store.Migration{{
 	SQL: `ALTER TABLE projects ADD COLUMN capture_outbound TEXT NOT NULL DEFAULT '';`,
 }}}
 
+// CmdSetCaptureOutbound 设置项目的 capture_outbound，只 Web。
+const CmdSetCaptureOutbound = "project.capture_outbound.set"
+
 func invalid(why string) error {
 	return domain.NewError(domain.CodeInvalidRequest, why, "fix the request and retry")
 }
@@ -54,13 +57,16 @@ func conflict(why string) error {
 
 // ---- 读 ----
 
-const cols = "id, name, intro, tags, status, repos, allowed_executors, capture"
+const cols = "id, name, intro, tags, status, repos, allowed_executors, capture, capture_outbound"
 
 func scan(r *store.Rows) (domain.Project, error) {
 	var p domain.Project
-	var tags, status, repos, allowed string
-	if err := r.Scan(&p.ID, &p.Name, &p.Intro, &tags, &status, &repos, &allowed, &p.Capture); err != nil {
+	var tags, status, repos, allowed, capOut string
+	if err := r.Scan(&p.ID, &p.Name, &p.Intro, &tags, &status, &repos, &allowed, &p.Capture, &capOut); err != nil {
 		return p, err
+	}
+	if capOut != "" { // 空串即未选择
+		p.CaptureOutbound = &capOut
 	}
 	p.Status = domain.ProjectStatus(status)
 	for _, f := range []struct {
@@ -130,8 +136,8 @@ func save(tx *store.Tx, p domain.Project, insert bool) error {
 	if !insert {
 		verb = "INSERT OR REPLACE"
 	}
-	_, err := tx.Exec(verb+" INTO projects ("+cols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		p.ID, p.Name, p.Intro, enc(p.Tags), string(p.Status), enc(p.Repos), enc(p.AllowedExecutors), p.Capture)
+	_, err := tx.Exec(verb+" INTO projects ("+cols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		p.ID, p.Name, p.Intro, enc(p.Tags), string(p.Status), enc(p.Repos), enc(p.AllowedExecutors), p.Capture, derefOr(p.CaptureOutbound))
 	return err
 }
 
@@ -262,6 +268,30 @@ type checkoutIn struct {
 	Remote string `json:"remote"`
 	Host   string `json:"host"`
 	Path   string `json:"path"`
+}
+
+type captureOutboundIn struct {
+	ID    string          `json:"id"`
+	Value json.RawMessage `json:"value"` // 缺省不合法；null 改回未选择
+}
+
+func derefOr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func parseCaptureOutbound(in json.RawMessage) (*string, error) {
+	var v captureOutboundIn
+	if err := decode(in, &v); err != nil {
+		return nil, err
+	}
+	var val *string
+	if len(v.Value) == 0 || json.Unmarshal(v.Value, &val) != nil || (val != nil && !domain.ValidOutboundScope(*val)) {
+		return nil, invalid("value must be full, excerpt, meta, none or null")
+	}
+	return val, nil
 }
 
 type executorsIn struct {
@@ -524,6 +554,31 @@ func Register(x *command.Executor) error {
 					}
 					return domain.NewError(domain.CodeNotFound, "checkout is not registered in this project", "list the project's repos")
 				})
+			}},
+		// 对话捕获送外部端点的范围只在 Web（§14.14）：delegate 得 web_only（退出码 20，留痕）。
+		{Name: CmdSetCaptureOutbound, Action: authz.ActionChangeSettings,
+			Object: objectOf(func(v captureOutboundIn) string { return v.ID }),
+			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
+				_, err := parseCaptureOutbound(in)
+				return err
+			},
+			Apply: func(c *command.Ctx) (any, error) {
+				next, _ := parseCaptureOutbound(c.Input)
+				p, err := Get(c.Tx, c.Object.ID)
+				if err != nil {
+					return nil, err
+				}
+				if derefOr(p.CaptureOutbound) == derefOr(next) { // 未变不记事件（幂等）
+					return ref{p.ID}, nil
+				}
+				p.CaptureOutbound = next
+				if err := save(c.Tx, p, false); err != nil {
+					return nil, err
+				}
+				if _, err := c.Emit(domain.Event{Type: domain.EvProjectUpdated, Object: p.ID, Payload: snapshot("capture_outbound", p)}); err != nil {
+					return nil, err
+				}
+				return ref{p.ID}, nil
 			}},
 		{Name: "project.allowed_executors.set", Action: authz.ActionChangeSettings,
 			Object: objectOf(func(v executorsIn) string { return v.ID }),

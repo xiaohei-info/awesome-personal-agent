@@ -391,3 +391,28 @@ func TestRejectsListsAndPages(t *testing.T) {
 		}
 	}
 }
+
+// 验收 ACT-OBD-11：`apa source add --default-project` 登记成功，show 显示默认项目、本机范围 full、外部范围未选择；
+// 默认项目不存在时返回 not_found，不静默丢弃。
+func TestSourceAddWithDefaultProject(t *testing.T) {
+	k := newKernel(t)
+	dlg := k.token(auth.Delegate)
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO projects (id, name, intro, tags, status, repos, allowed_executors, capture) VALUES ('acc-home', 'home', '', '[]', 'active', '[]', 'null', 0)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{"source", "add", "--id", "src_rss", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"}
+	if r := k.apa(dlg, append(base, "--default-project", "nope")...); r.code != domain.ExitNotFound {
+		t.Fatalf("unknown project: %+v", r)
+	}
+	if r := k.apa(dlg, append(base, "--default-project", "acc-home")...); r.code != 0 {
+		t.Fatalf("add: %+v", r)
+	}
+	var s domain.Source
+	decode(t, k.apa(k.token(auth.Observer), "source", "show", "src_rss"), &s)
+	if s.DefaultProject != "acc-home" || s.Outbound.Local != "full" || s.Outbound.External != nil {
+		t.Fatalf("show: %+v", s)
+	}
+}

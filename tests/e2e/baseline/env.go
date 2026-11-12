@@ -415,8 +415,9 @@ func (e *Env) CreateProjects() {
 func (e *Env) StartModelStub() {
 	e.T.Helper()
 	e.ModelStub = modelstub.NewAt(loopback + ":0")
-	body, _ := json.Marshal(map[string]any{"model_endpoint": map[string]any{
-		"url": e.ModelStub.URL(), "model": "acc-model", "api_key": "stub-key", "screening_timeout_ms": 2000}})
+	// 位置声明为 local：替身在本机；未声明按 external，外部端点在来源未选外发范围时不送内容（§14.14）。
+	body, _ := json.Marshal(map[string]any{"generate_endpoint": map[string]any{
+		"url": e.ModelStub.URL(), "model": "acc-model", "api_key": "stub-key", "locality": "local"}, "screening_timeout_ms": 2000})
 	e.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
 }
 

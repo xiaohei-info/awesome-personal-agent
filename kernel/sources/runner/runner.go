@@ -699,9 +699,16 @@ func SetDisposition(tx *store.Tx, id string, d domain.Disposition, item, reason 
 const rejudgeable = `disposition = 'unjudged' AND unjudged_reason IN ('', 'model_unavailable')`
 
 // Requeue 在调用方事务内把一条可重判的 unjudged 事件放回 pending，重判次数加一并返回新次数。不记事件。
-func Requeue(tx *store.Tx, id string) (int, error) {
+func Requeue(tx *store.Tx, id string) (int, error) { return requeue(tx, id, rejudgeable) }
+
+// RequeueOutbound 同 Requeue，对象是因外发范围未选择而未判定的事件；调用方先确认范围已选定（§14.14）。
+func RequeueOutbound(tx *store.Tx, id string) (int, error) {
+	return requeue(tx, id, `disposition = 'unjudged' AND unjudged_reason = 'outbound_unset'`)
+}
+
+func requeue(tx *store.Tx, id, where string) (int, error) {
 	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = 'pending', unjudged_reason = '', rejudges = rejudges + 1
-		WHERE id = ? AND `+rejudgeable, id)
+		WHERE id = ? AND `+where, id)
 	if err != nil {
 		return 0, err
 	}
@@ -734,6 +741,16 @@ func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error 
 // 一条总是失败的事件不会一直挡在队首。
 func RejudgeCandidates(tx *store.Tx, since time.Time, limit int) ([]domain.SourceEvent, error) {
 	as, err := querySeq(tx, `WHERE `+rejudgeable+` AND occurred_at >= ? ORDER BY rejudges, seq LIMIT ?`, since.UnixNano(), limit)
+	out := make([]domain.SourceEvent, len(as))
+	for i, a := range as {
+		out[i] = a.SourceEvent
+	}
+	return out, err
+}
+
+// OutboundUnset 返回 since 之后发生、因外发范围未选择而未判定的事件（选定后由入站模块放回重判），按落盘顺序。
+func OutboundUnset(tx *store.Tx, since time.Time) ([]domain.SourceEvent, error) {
+	as, err := querySeq(tx, `WHERE disposition = 'unjudged' AND unjudged_reason = 'outbound_unset' AND occurred_at >= ? ORDER BY seq`, since.UnixNano())
 	out := make([]domain.SourceEvent, len(as))
 	for i, a := range as {
 		out[i] = a.SourceEvent
