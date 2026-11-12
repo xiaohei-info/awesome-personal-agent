@@ -118,19 +118,32 @@ func parseAfter(v string) (time.Duration, error) {
 	return d, nil
 }
 
-// Sync 让检查 Timer 与当前的 stale 规则一致：启动时调一次，之后每次能力包重新加载都调。幂等；
-// 规则不在了就撤销 Timer。每次重排从现在起算下一次检查。
+// Sync 让检查 Timer 与当前的 stale 规则一致：启动时调一次，之后每次能力包重新加载都调。
+// 幂等：Timer 已按同一规则与周期排好就不动（重启不推迟检查，错过的检查由时钟补上）；
+// 缺失或规则键、周期变了才重排，规则不在了就撤销。
 func (s *Service) Sync(tx *store.Tx) error {
-	if err := clock.Cancel(tx, timerID); err != nil && !isNotFound(err) {
+	r, ok := s.rule()
+	cur, have, err := clock.Get(tx, timerID)
+	if err != nil {
 		return err
 	}
-	r, ok := s.rule()
 	if !ok {
+		if have {
+			return clock.Cancel(tx, timerID)
+		}
+		return nil
+	}
+	if have && cur.Target == r.key && cur.Recurrence == r.schedule {
 		return nil
 	}
 	at, err := clock.Start(r.schedule, s.o.Now())
 	if err != nil {
 		return fmt.Errorf("stale: %s: %w", r.key, err)
+	}
+	if have {
+		if err := clock.Cancel(tx, timerID); err != nil {
+			return err
+		}
 	}
 	_, err = clock.Add(tx, domain.Timer{ID: timerID, Target: r.key, Kind: domain.TimerRecur, At: at, Recurrence: r.schedule})
 	return err
@@ -207,9 +220,4 @@ func mode(tx *store.Tx, key string) (string, error) {
 		}
 	}
 	return rules.ModeOff, err
-}
-
-func isNotFound(err error) bool {
-	var de *domain.Error
-	return errors.As(err, &de) && de.Code == domain.CodeNotFound
 }

@@ -401,3 +401,53 @@ func TestParseAfter(t *testing.T) {
 		}
 	}
 }
+
+func (e *env) timer() domain.Timer {
+	e.t.Helper()
+	var tm domain.Timer
+	var ok bool
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { tm, ok, err = clock.Get(tx, timerID); return }); err != nil || !ok {
+		e.t.Fatalf("stale timer: ok=%v err=%v", ok, err)
+	}
+	return tm
+}
+
+// Sync 幂等：重启或热加载（规则没变）不能把下一次检查往后推；周期变了才重排。
+func TestSyncIsIdempotentAndRearmsOnChange(t *testing.T) {
+	e := setup(t, false) // 内置 24h
+	armed := e.timer().At
+	e.advance(12 * time.Hour)
+	for i := 0; i < 3; i++ {
+		if err := e.st.Update(bg, e.svc.Sync); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := e.timer().At; !got.Equal(armed) {
+		t.Fatalf("Sync moved the timer from %v to %v", armed, got)
+	}
+	// 错过的检查由时钟补上：模拟停机跨过到期点后重启，再 Tick 即检查。
+	e.create("old", "task", "open", nil)
+	e.now = e.now.Add(15 * 24 * time.Hour)
+	if err := e.st.Update(bg, e.svc.Sync); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.clk.Tick(bg); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.unread()); n != 1 {
+		t.Fatalf("overdue check after restart produced %d reminders, want 1", n)
+	}
+	// 周期变了：重排。
+	short := setup(t, true)
+	old := short.timer()
+	if old.Recurrence != "*/2 * * * *" {
+		t.Fatalf("recurrence = %q", old.Recurrence)
+	}
+	e.svc.o.Packs = short.ld
+	if err := e.st.Update(bg, e.svc.Sync); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.timer(); got.Recurrence != "*/2 * * * *" {
+		t.Fatalf("schedule change not re-armed: %+v", got)
+	}
+}

@@ -36,7 +36,7 @@ type env struct {
 }
 
 // setup 装配真实账本、命令执行器、事项命令和 HTTP 服务，并以本人口令登录一个 Web 会话。
-func setup(t *testing.T) *env {
+func setup(t *testing.T, staleAfter ...func() time.Duration) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, kitems.Module, core.Module} {
@@ -57,7 +57,7 @@ func setup(t *testing.T) *env {
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(x, st)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(x, st, staleAfter...)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,5 +575,26 @@ func TestTodayOverHTTP(t *testing.T) {
 	}
 	if rec := e.do("GET", "/v1/today", "", nil); rec.Code != 401 {
 		t.Fatalf("anonymous = %d", rec.Code)
+	}
+}
+
+// ACT-STL-02：/today 的久未推进阈值取自规则（可热变），默认 14 天。
+func TestTodayStaleUsesRuleThreshold(t *testing.T) {
+	after := 14 * 24 * time.Hour
+	e := setup(t, func() time.Duration { return after })
+	obs := e.token(auth.Observer, "")
+	it := e.create(e.web, `{"kind":"task","title":"S","phase":"open"}`)
+	stale := func() []domain.Item {
+		var l map[string][]domain.Item
+		_ = json.Unmarshal(e.do("GET", "/v1/today", "", obs).Body.Bytes(), &l)
+		return l["stale"]
+	}
+	if got := stale(); len(got) != 0 {
+		t.Fatalf("fresh item listed as stale: %+v", got)
+	}
+	time.Sleep(20 * time.Millisecond)
+	after = 10 * time.Millisecond // 规则热加载后阈值缩短
+	if got := stale(); len(got) != 1 || got[0].ID != it.ID {
+		t.Fatalf("stale group = %+v, want the item", got)
 	}
 }
