@@ -850,9 +850,19 @@ func OutboundUnset(tx *store.Tx, since time.Time) ([]domain.SourceEvent, error) 
 	return out, err
 }
 
-// StaleUnjudged 返回 before 之前发生、仍是 unjudged 的事件 id（到期转 expired）。
+// StaleUnjudged 返回 before 之前发生、仍是 unjudged 的事件 id（到期转 expired）。本人放回的（restored）除外：它们只经积压放开重判，不到期。
 func StaleUnjudged(tx *store.Tx, before time.Time) ([]string, error) {
-	return ids(tx, `WHERE disposition = 'unjudged' AND occurred_at < ? ORDER BY seq`, before.UnixNano())
+	return ids(tx, `WHERE disposition = 'unjudged' AND unjudged_reason <> 'restored' AND occurred_at < ? ORDER BY seq`, before.UnixNano())
+}
+
+// RestoreIgnored 在调用方事务内把一条 ignored 的来源事件放回积压：unjudged，原因 restored。不记事件，调用方自己负责留痕。
+func RestoreIgnored(tx *store.Tx, id string) error {
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, unjudged_reason = ? WHERE id = ? AND disposition = ?`,
+		string(domain.DispositionUnjudged), domain.UnjudgedRestored, id, string(domain.DispositionIgnored))
+	if err == nil && n == 0 {
+		return domain.NewError(domain.CodeConflict, "source event "+id+" is not ignored", "re-read the source event")
+	}
+	return err
 }
 
 // Backlog 返回积压事件（unjudged 与 expired）的 id；source 非空时只看该来源。

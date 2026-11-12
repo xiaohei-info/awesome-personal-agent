@@ -964,3 +964,98 @@ func TestSourceRoutesWriteDefaultProjectButNeverOutbound(t *testing.T) {
 		t.Fatalf("a rejected registration created the source: %d", r.Code)
 	}
 }
+
+// ACT-RST-03、04、05、06、09：预览只读且要时间段，运行凭据不能预览或放回；放回只接受本人原话；同一时间段再放回 0 条（含同一幂等键）。
+func TestRestoreSourceEventsRoutes(t *testing.T) {
+	e := setup(t)
+	if r := e.do(e.token(auth.Delegate), "POST", "/v1/sources", hook); r.Code != 201 {
+		t.Fatalf("register: %d %s", r.Code, r.Body)
+	}
+	e.seedEvents("src_hook", [2]string{"old", "ignored"}, [2]string{"user", "ignored"})
+	var page eventPage
+	e.do(e.token(auth.Observer), "GET", "/v1/sources/src_hook/events", "").into(&page)
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
+		for i, who := range []domain.Actor{{Type: domain.ActorSystem, Principal: "kernel:inbound", Via: domain.ViaSource}, {Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}} {
+			p, _ := json.Marshal(map[string]any{"event": page.Events[i].ID, "disposition": "ignored", "rule": ""})
+			if _, err := eventlog.Append(tx, domain.Event{Type: inbound.EvDisposed, Object: page.Events[i].ID, Actor: who, Payload: p, At: e.now}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	win := "from=" + e.now.Add(-time.Hour).Format(time.RFC3339) + "&to=" + e.now.Add(time.Hour).Format(time.RFC3339)
+	body := `{"from":"` + e.now.Add(-time.Hour).Format(time.RFC3339) + `","to":"` + e.now.Add(time.Hour).Format(time.RFC3339) + `"}`
+	obs := e.token(auth.Observer)
+	before := e.events(inbound.EvDisposed)
+
+	var pv inbound.RestorePreview
+	if r := e.do(obs, "GET", "/v1/source-events/restorable?"+win, ""); r.Code != 200 {
+		t.Fatalf("preview: %d %s", r.Code, r.Body)
+	} else if r.into(&pv); pv.Matched != 1 || len(pv.Sources) != 1 || pv.Sources[0] != (inbound.SourceCount{Source: "src_hook", Count: 1}) {
+		t.Fatalf("preview: %+v", pv)
+	}
+	for name, c := range map[string]struct {
+		path string
+		want int
+	}{
+		"missing to":   {"/v1/source-events/restorable?from=" + e.now.Format(time.RFC3339), 400},
+		"missing from": {"/v1/source-events/restorable?to=" + e.now.Format(time.RFC3339), 400},
+		"equal":        {"/v1/source-events/restorable?from=" + e.now.Format(time.RFC3339) + "&to=" + e.now.Format(time.RFC3339), 400},
+		"not a time":   {"/v1/source-events/restorable?from=yesterday&to=" + e.now.Format(time.RFC3339), 400},
+		"unknown":      {"/v1/source-events/restorable?" + win + "&source=no-such-source", 404},
+	} {
+		if r := e.do(obs, "GET", c.path, ""); r.Code != c.want {
+			t.Fatalf("%s: %d %s", name, r.Code, r.Body)
+		}
+	}
+	run := e.runCredential()
+	if r := e.do(run, "GET", "/v1/source-events/restorable?"+win, ""); r.Code != 403 || strings.Contains(r.Body.String(), "matched") {
+		t.Fatalf("run credential preview: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(run, "POST", "/v1/source-events/restore", body); r.Code != 403 {
+		t.Fatalf("run credential restore: %d %s", r.Code, r.Body)
+	}
+	dlg := e.token(auth.Delegate)
+	for name, r := range map[string]resp{
+		"no words":  e.do(dlg, "POST", "/v1/source-events/restore", body, core.EvidenceHeader, ""),
+		"observer":  e.do(obs, "POST", "/v1/source-events/restore", body),
+		"no window": e.do(dlg, "POST", "/v1/source-events/restore", `{}`),
+	} {
+		if r.Code < 400 {
+			t.Fatalf("%s: %d %s", name, r.Code, r.Body)
+		}
+	}
+	if e.events(inbound.EvDisposed) != before {
+		t.Fatal("a refused call wrote events")
+	}
+
+	var out struct{ Restored int }
+	if r := e.do(dlg, "POST", "/v1/source-events/restore", body); r.Code != 200 {
+		t.Fatalf("restore: %d %s", r.Code, r.Body)
+	} else if r.into(&out); out.Restored != 1 || e.events(inbound.EvDisposed) != before+1 {
+		t.Fatalf("restore: %+v", out)
+	}
+	e.do(obs, "GET", "/v1/sources/src_hook/events", "").into(&page)
+	if d := page.Events[0]; d.Disposition != domain.DispositionUnjudged || d.UnjudgedReason != domain.UnjudgedRestored {
+		t.Fatalf("restored event: %+v", d)
+	}
+	if d := page.Events[1]; d.Disposition != domain.DispositionIgnored {
+		t.Fatalf("the owner's own ignore moved: %+v", d)
+	}
+	for range 2 {
+		out.Restored = -1
+		if r := e.do(dlg, "POST", "/v1/source-events/restore", body, IdempotencyHeader, "k1"); r.Code != 200 {
+			t.Fatalf("again: %d %s", r.Code, r.Body)
+		} else if r.into(&out); out.Restored != 0 {
+			t.Fatalf("again: %+v", out)
+		}
+	}
+	if e.events(inbound.EvDisposed) != before+1 {
+		t.Fatal("a repeated restore wrote events")
+	}
+	if r := e.web("POST", "/v1/source-events/restore", body); r.Code != 200 {
+		t.Fatalf("web: %d %s", r.Code, r.Body)
+	}
+}
