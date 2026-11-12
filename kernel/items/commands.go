@@ -450,6 +450,10 @@ func (s *svc) create() command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
+			// proposal 对外只读，只有入站流水线（内核身份）能写（附录 B.2）。
+			if v.Proposal != nil && c.Caller.Actor.Type != domain.ActorSystem {
+				return nil, invalid("proposal is written by the inbound pipeline only")
+			}
 			it := stamped(v.item(c.Object.ID), c.Now())
 			it.ChainDepth = c.ChainDepth
 			if err := save(c.Tx, it); err != nil {
