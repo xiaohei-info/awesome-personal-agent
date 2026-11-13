@@ -1,5 +1,6 @@
 // Package baseline 是全流程验收（tests/e2e）共用的环境脚本：隔离 APA_HOME、真实 apa 二进制、
-// 五个凭据、四个验收项目、模型端点替身与无头运行替身声明（验收文档 flow-env-baseline，ACT-ENV-01..06）。
+// 五个凭据、四个验收项目、两个模型端点替身（CLS_STUB、MODEL_STUB）、无头运行替身、来源工具与渠道替身、
+// 合成账本夹具与旧版本二进制、测试时钟（验收文档 flow-env-baseline，ACT-ENV-01..10）。不依赖任何真实外部账号。
 // 只用于测试与验收环境，不得被 apa 二进制或内核代码导入。
 package baseline
 
@@ -28,30 +29,36 @@ const (
 	loopback = "127.0.0.1"
 	// Password 是 Web 登录口令（apa init 设置）。
 	Password = "e2e-baseline-password"
-	// DefaultTestRepo 是 <TEST_REPO> 的占位地址；真实验收用 APA_E2E_TEST_REPO 指向专用可写测试仓库。
+	// DefaultTestRepo 是 <TEST_REPO> 的占位地址（仅供需要"一个远程地址"的用例）；用例需要可写远程时用 APA_E2E_TEST_REPO 指向它。
 	DefaultTestRepo = "https://example.invalid/acc/test-repo.git"
 )
 
 // Env 是一套验收环境。字段名对应验收文档里的环境变量。
 type Env struct {
 	T         testing.TB
-	Root      string            // 测试专用根目录，APA_HOME 在其内
-	Home      string            // APA_HOME
-	URL       string            // APA_URL
-	NoSession bool              // 为真时带 --evidence 的命令也不设 APA_SESSION
-	Bin       map[string]string // apa、stub-harness 的可执行文件
-	TestRepo  string            // <TEST_REPO>
+	Root      string // 测试专用根目录，APA_HOME 在其内
+	Home      string // APA_HOME
+	URL       string // APA_URL
+	NoSession bool   // 为真时带 --evidence 的命令也不设 APA_SESSION
+	// SessionKind 非空时作为 APA_SESSION_KIND 传给 apa 子命令（验收文档默认 direct；缺省留空以保持已交付流程的行为）。
+	SessionKind string
+	Bin         map[string]string // apa（-tags apa_testclock 测试构建）、stub-harness、tool-stub、telegram-ext 的可执行文件
+	TestRepo    string            // <TEST_REPO>
+	LocalRepo   string            // LOCAL_REPO：file:// 本地 git 仓库（已提交一次），acc-work 的 repos
+	ToolBin     string            // TOOL_STUB_BIN，InstallToolStub 之后非空；之后启动的内核 PATH 以它开头
 
 	OBS, WRK, WRK2, DEL, CHAN string
 
-	Projects  map[string]string // 项目名 → 项目 id
-	ModelStub *modelstub.Stub   // MODEL_STUB
+	Projects  map[string]string  // 项目名 → 项目 id
+	ModelStub *modelstub.Stub    // MODEL_STUB（生成端点；判断题按 Key 配置）
+	Cls       *modelstub.ClsStub // CLS_STUB（判断端点）
 
-	srv     *exec.Cmd
-	srvDone chan struct{}
-	logs    *syncBuf
-	session string // Web 会话 cookie 值
-	csrf    string
+	srv      *exec.Cmd
+	srvDone  chan struct{}
+	logs     *syncBuf
+	session  string // Web 会话 cookie 值
+	csrf     string
+	fixtures int
 }
 
 type syncBuf struct {
@@ -97,8 +104,10 @@ func buildBinaries() (map[string]string, error) {
 		if buildErr != nil {
 			return
 		}
-		for name, pkg := range map[string]string{"apa": "./cli/apa", "stub-harness": "./tests/doubles/stubharness/cmd/stub-harness"} {
-			cmd := exec.Command("go", "build", "-o", filepath.Join(buildDir, name), pkg)
+		// apa 一律是测试构建（apa_testclock）：发布物不带该标签，由 flow-release 单独验证。
+		for name, pkg := range map[string]string{"apa": "./cli/apa", "stub-harness": "./tests/doubles/stubharness/cmd/stub-harness",
+			"tool-stub": "./tests/doubles/tools/cmd/tool-stub", "telegram-ext": "./ext/telegram/cmd/telegram-ext"} {
+			cmd := exec.Command("go", "build", "-tags", "apa_testclock", "-o", filepath.Join(buildDir, name), pkg)
 			cmd.Dir = root
 			if out, err := cmd.CombinedOutput(); err != nil {
 				buildErr = fmt.Errorf("go build %s: %v\n%s", pkg, err, out)
@@ -109,7 +118,11 @@ func buildBinaries() (map[string]string, error) {
 	if buildErr != nil {
 		return nil, buildErr
 	}
-	return map[string]string{"apa": filepath.Join(buildDir, "apa"), "stub-harness": filepath.Join(buildDir, "stub-harness")}, nil
+	bin := map[string]string{}
+	for _, n := range []string{"apa", "stub-harness", "tool-stub", "telegram-ext"} {
+		bin[n] = filepath.Join(buildDir, n)
+	}
+	return bin, nil
 }
 
 // New 准备目录与二进制，但不启动任何进程；按 StartKernel、IssueCredentials、CreateProjects、StartModelStub、
@@ -129,17 +142,39 @@ func New(t testing.TB) *Env {
 		repo = DefaultTestRepo
 	}
 	e := &Env{T: t, Root: root, Home: filepath.Join(root, "home"), Bin: bin, TestRepo: repo, Projects: map[string]string{}}
+	e.LocalRepo = e.newLocalRepo()
 	t.Cleanup(func() {
 		e.StopKernel()
 		if e.ModelStub != nil {
 			e.ModelStub.Close()
+		}
+		if e.Cls != nil {
+			e.Cls.Close()
 		}
 		os.RemoveAll(root)
 	})
 	return e
 }
 
-// Setup 一次建好全部环境。
+// newLocalRepo 在临时目录 git init 一个本地仓库并提交一次，返回 file:// 地址。
+func (e *Env) newLocalRepo() string {
+	// 放在 APA_HOME 所在的 Root 之外：bootstrap 流程要核对 Root 内只有 APA_HOME 一份数据。
+	dir, err := os.MkdirTemp("", "apa-e2e-repo-")
+	if err != nil {
+		e.fatal("%v", err)
+	}
+	e.T.Cleanup(func() { os.RemoveAll(dir) })
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=acc", "-c", "user.email=acc@example.invalid", "commit", "-q", "--allow-empty", "-m", "init"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			e.fatal("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return "file://" + dir
+}
+
+// Setup 一次建好全部环境（单端点的 legacy 接线）。需要判断/生成两个端点的流程在其后调用 WireEndpoints。
 func Setup(t testing.TB) *Env {
 	t.Helper()
 	e := New(t)
@@ -160,6 +195,9 @@ func (e *Env) env(token string, args []string) []string {
 	env := append(os.Environ(), "APA_HOME="+e.Home, "APA_URL="+e.URL)
 	if token != "" {
 		env = append(env, "APA_TOKEN="+token)
+	}
+	if e.SessionKind != "" {
+		env = append(env, "APA_SESSION_KIND="+e.SessionKind)
 	}
 	// 带本人原话（--evidence）的第二档命令还要会话引用；harness 插件会设 APA_SESSION，这里替身。
 	// NoSession 供要验证"只带原话不带会话"的用例关掉它。
@@ -251,6 +289,9 @@ func (e *Env) startServe(port string) {
 	e.logs = &syncBuf{}
 	e.srv = exec.Command(e.Bin["apa"], "serve")
 	e.srv.Env = e.env("", nil)
+	if e.ToolBin != "" { // 来源程序继承内核的 PATH：把工具替身目录放在最前
+		e.srv.Env = append(e.srv.Env, "PATH="+e.ToolBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
 	e.srv.Stdout, e.srv.Stderr = e.logs, e.logs
 	if err := e.srv.Start(); err != nil {
 		e.fatal("apa serve: %v", err)
@@ -395,7 +436,7 @@ func (e *Env) IssueCredentials() {
 	e.CHAN = issue("/v1/settings/ext-keys", `{"label":"CHAN","scope":"channel.acc-chan"}`)
 }
 
-// CreateProjects 新建 acc-work、acc-open、acc-empty、acc-home，并设置 repos 与允许的执行者。
+// CreateProjects 新建 acc-work（repos=[LOCAL_REPO]）、acc-open、acc-empty、acc-home，并设置允许的执行者。
 func (e *Env) CreateProjects() {
 	e.T.Helper()
 	for _, name := range []string{"acc-work", "acc-open", "acc-empty", "acc-home"} {
@@ -407,7 +448,10 @@ func (e *Env) CreateProjects() {
 		}
 		e.Projects[name] = out.ID
 	}
-	e.webOK("POST", "/v1/projects/"+e.Projects["acc-work"]+"/repos", `{"op":"add_remote","remote":"`+e.TestRepo+`"}`, 200)
+	// LOCAL_REPO 是 acc-work 的主仓库；<TEST_REPO> 仍登记在案，因为已交付的映射、托管资料、健康检查流程按它取远程地址。
+	for _, remote := range []string{e.LocalRepo, e.TestRepo} {
+		e.webOK("POST", "/v1/projects/"+e.Projects["acc-work"]+"/repos", `{"op":"add_remote","remote":"`+remote+`"}`, 200)
+	}
 	allowed := func(name, body string) {
 		e.webOK("PUT", "/v1/settings/projects/"+e.Projects[name]+"/allowed-executors", body, 200)
 	}
@@ -429,18 +473,6 @@ func (e *Env) StartModelStub() {
 
 // ScreeningPhrase 出现在 web_only 初筛的提问里（decision-card/web-only-screening），用来在替身上匹配这道题。
 const ScreeningPhrase = "是否应当只由本人在 Web 回答"
-
-func (e *Env) chatCompletion(t *testing.T, prompt string) string {
-	t.Helper()
-	body, _ := json.Marshal(map[string]any{"model": "acc-model", "messages": []map[string]string{{"role": "user", "content": prompt}}})
-	resp, err := http.Post(e.ModelStub.URL()+"/chat/completions", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	return string(b)
-}
 
 // DeclareStubHarness 经 `apa declare` 提交 acc-stub（read/edit/full 三档，声明 resume 与 session 取法）与
 // acc-stub-noresume（不声明 resume）两份无头运行声明，并在 Web 确认。
@@ -465,49 +497,4 @@ func (e *Env) DeclareStubHarness() {
 		}
 		e.webOK("POST", "/v1/settings/declarations/"+harness+"/1/confirm", "", 200)
 	}
-}
-
-// Dependency 是一项真实外部依赖的就绪记录。
-type Dependency struct {
-	Name   string `json:"name"`
-	Ready  bool   `json:"ready"`
-	Detail string `json:"detail"`
-}
-
-// RecordRealDependencies 只记录 ACT-ENV-06 的检查结果，不判定通过：本人确认真实依赖，未就绪的依赖
-// 会让依赖它的流程记为未执行。结果同时写入 $APA_E2E_EVIDENCE_DIR/env-06.json（设置时）。
-// Telegram 只有在设置了 TG_BOT_TOKEN 时才调用 Bot API getMe。
-func (e *Env) RecordRealDependencies() []Dependency {
-	e.T.Helper()
-	run := func(name string, args ...string) Dependency {
-		out, err := exec.Command(name, args...).CombinedOutput()
-		d := Dependency{Name: name, Ready: err == nil, Detail: firstLine(string(out))}
-		if err != nil && d.Detail == "" {
-			d.Detail = err.Error()
-		}
-		return d
-	}
-	deps := []Dependency{run("hermes", "--version"), run("himalaya", "--version"), run("gog", "--version"), run("gh", "auth", "status")}
-	tg := Dependency{Name: "telegram"}
-	if tok := os.Getenv("TG_BOT_TOKEN"); tok == "" {
-		tg.Detail = "TG_BOT_TOKEN 未设置，未调用 getMe"
-	} else if resp, err := http.Get("https://api.telegram.org/bot" + tok + "/getMe"); err != nil {
-		tg.Detail = "getMe 请求失败"
-	} else {
-		resp.Body.Close()
-		tg.Ready, tg.Detail = resp.StatusCode == 200, fmt.Sprintf("getMe HTTP %d", resp.StatusCode)
-	}
-	deps = append(deps, tg)
-	if dir := os.Getenv("APA_E2E_EVIDENCE_DIR"); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err == nil {
-			b, _ := json.MarshalIndent(deps, "", "  ")
-			_ = os.WriteFile(filepath.Join(dir, "env-06.json"), b, 0o644)
-		}
-	}
-	return deps
-}
-
-func firstLine(s string) string {
-	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
-	return s
 }

@@ -80,7 +80,7 @@ func refresh() {
 	case d < tc.off:
 		slog.Warn("test clock: offset ignored, it only moves forward", "value", raw, "current", tc.off.String())
 	case d > tc.off:
-		slog.Info("test clock: offset advanced", "from", tc.off.String(), "to", d.String())
+		slog.Info("test-clock offset advanced", "from", tc.off.String(), "to", d.String(), "seconds", int64(d.Seconds()))
 		tc.off = d
 		select {
 		case changed <- struct{}{}:
