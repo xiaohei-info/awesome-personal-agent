@@ -1,7 +1,8 @@
-# sha256: 039647ce87a166a00d4a62a3217d536b9fce4c06d9d10b115773db8b4c8dac46
+# sha256: eb61882d01681a50ac382d0fdd05273446953413566e7c641a8014fb04b5e836
 work_item_id: 01a1d2c3-f4c8-7c35-a6be-55223a4cd51a
 status: blocked
 recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-25a5dd093669de37: main 本机路径已由清单持有方修复（main
   commit be2630742330f94b3d21f7d7b0b8ecedead370b7；.omac 仅含相对路径，tests/release 的 TestRepoHasNoCredentialsOrPersonalInfo
   本地通过）。请按原 diff 基于最新 main 重新跑 CI 即可，不要动 .omac 与 tests/release。'
+defect_pending: true

@@ -1,4 +1,4 @@
-# sha256: d3f874a3a9c4d55b661c700a5037b7595055c602da516168c144c20ac41a2d46
+# sha256: f507006959899244173aa190a4084a55a54783a35339c275b278981a3126e7ab
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -13,11 +13,12 @@ defects:
     e2e-release-doctor: 1
     e2e-sources: 1
   granted_by_reporter:
-    e2e-sources: 3
-    e2e-inbound-rules: 1
+    e2e-sources: 4
+    e2e-inbound-rules: 2
     e2e-judge: 4
     e2e-judgment: 4
     e2e-upgrade: 5
+    e2e-workbench: 1
   entries:
     dfx-62f6c689fa3a:
       suspected: attribution-v2
@@ -217,7 +218,6 @@ defects:
       locations:
       - api/core/login_hardening_test.go:TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce
       - api/core/testclock_test.go
-    stopped: defect-budget-exhausted
 pending_human_amendment:
   amendment_id: amend-6c86c8335a0c
   file: reports/apa-dag-unblock-20261113/amendment-reviewed.yaml
