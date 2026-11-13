@@ -1,4 +1,4 @@
-# sha256: 72562037c1cc1e3f9d6cd01ea822fd4d29481f73ba37d772d8fca42e86c674d8
+# sha256: fff393707ff91430a0f3dde4c6c3ee55c1a7b80feb5d041ba627ad2141290f99
 defects:
   schema: omac.defect-ledger/v1
   used_global: 21
@@ -19,7 +19,8 @@ defects:
     e2e-judgment: 4
     e2e-upgrade: 5
     e2e-workbench: 1
-  granted_global: 2
+    release-gates: 2
+  granted_global: 5
   entries:
     dfx-62f6c689fa3a:
       suspected: attribution-v2
@@ -243,4 +244,98 @@ defects:
       - e2e-judge
       state: fixed
       fix_node: fix.cascade-engine.70067b
-  inbox: []
+  inbox:
+  - id: 61542501f27a
+    reporter: release-gates
+    defects:
+    - class: design-gap
+      suspected_node: inbound-pipeline-v2
+      anchors:
+      - flow-inbound-pipeline/ACT-INP-03
+      - flow-proposal-handling/ACT-PRH-09
+      - flow-follow-messages/ACT-MSG-10
+      design_ref: docs/solution-design.md#93-事件到事项
+      expected: 入站六步按序：去重、归属、规则在前，初筛第 4 步在后。第 2 步归属命中关联键的事件挂靠原事项，第 3 步规则有明确出口的按出口处置，二者都不进初筛与起草，分类端点与对话端点替身都不应收到含该事件的请求；回音不进规则与判断。修复要求：恢复这一顺序，且不回退
+        7ce2b7ab2 (GT-333) 原本修的东西（同一轮入站初筛按批提交 §8.5；自定义包规则省略模板时取内置包的内置模板），即批量预取只覆盖确实会走初筛的事件（先过去重、归属、规则）。
+      observed: GT-333 在 drain() 里新增 s.prefetchScreen(ctx, sn.events)，对整个窗口的事件在去重与归属之前就按批问初筛。ACT-INP-03：CLS_LOG
+        含 inp-att 的批次 = 1，期望 0（pipeline_test.go:102）。ACT-PRH-09：含 prh-att-2 的初筛请求
+        = 1，期望 0（handling_test.go:411）。ACT-MSG-10：回音不进规则与判断，两份模型替身都不应有 fm-10 的请求（follow_messages_echo_test.go:147）。注释掉该调用后三个包全过；在
+        7ce2b7ab2 之前通过。
+      locations:
+      - kernel/inbound/inbound.go:drain
+      - kernel/inbound/release.go:prefetchScreen
+      repro:
+        command: go test -tags e2e -count=1 -run 'TestFlowInboundPipeline|TestFlowProposalHandling|TestFlowFollowMessages'
+          ./tests/e2e/inbound/... ./tests/e2e/proposals/... ./tests/e2e/followmsg/...
+        exit_code: 1
+  - id: 1ca51d304085
+    reporter: release-gates
+    defects:
+    - class: design-gap
+      suspected_node: backlog-rules-only
+      anchors:
+      - flow-backlog-release/ACT-BKL-03
+      - flow-backlog-release/ACT-BKL-16
+      design_ref: docs/solution-design.md#93-事件到事项
+      expected: 积压第 1 步「只跑规则」零模型调用：分类端点与对话端点替身的请求数都是 0，不因入站后台预取或预取结果的认领而发出请求（§9.3
+        积压的放开表第 1 步，需要模型：否）；没有判断端点时第 2 步影子打分被拒。修复要求：恢复这一行为，且不回退 52b0bfbb6 (GT-362)
+        原本修的东西（预取后的首次判断记为真实分类调用，judgment stats 的 calls、升级率、分布不为空；之后同一指纹才记 reused，§8.5、§8.6）。
+      observed: worker 在 main(f699b18b1) 上跑全量 e2e：ACT-BKL-03 失败（只跑规则仍有模型请求，release_test.go:163
+        的断言），ACT-BKL-16 失败；二分到首个坏提交 52b0bfbb6 (GT-362)，其父提交 a0a6526a9 通过。注意：报告者在干净克隆（main
+        4dfa133fe）上本机 e2e/backlog 连跑 3 次都通过，没有复现，疑为与后台入站预取（drain 里的 prefetchScreen，见
+        ACT-INP-03 一项）的竞态，取决于时序。要求修复从根因上保证确定性，而不只是让这两条在本机通过；若与 ACT-INP-03 修复同根，在 PR
+        说明里写明。
+      locations:
+      - kernel/agents/direct/judge.go:Prefetch
+      - kernel/agents/direct/judge.go:claimWarm
+      - kernel/inbound/inbound.go:drain
+      - kernel/inbound/backlog.go:BacklogRules
+      - tests/e2e/backlog/release_test.go:ACT-BKL-03
+      repro:
+        command: go test -tags e2e -count=1 -run 'TestBacklogReleaseFlow|TestBacklogReleaseWithoutJudgeEndpoint'
+          ./tests/e2e/backlog/...
+        exit_code: 1
+  - id: 4f0888bce7cf
+    reporter: release-gates
+    defects:
+    - class: design-gap
+      suspected_node: rule-modes-v2
+      anchors:
+      - flow-rule-modes/ACT-RULE-14
+      design_ref: docs/solution-design.md#148-观察模式与规则的两类初始值
+      expected: v0.1 升级时，账本里仍是初始 observe、包里没写 mode、本人从没切换过的内置提醒类规则切到 auto，逐条记 rule.mode_changed（操作者
+        system）；包里显式写 observe/off 的、本人切换过的不动（§14.8、§16.5）。修复要求：恢复这一切换，且不回退 88842ce8b
+        (GT-345) 原本修的东西（v0.1 规则 hash 在升级后第一次对账时保持不变，未改过的规则不被当成「内容变化」；有未修复拒绝的包不替本人切换）。
+      observed: TestFlowRuleModes/升级/ACT-RULE-14：follow-up-interval 应为 auto，实际 {Mode:observe
+        Hash:7e11ef5d...}（rulemodes_test.go:469）。GT-345 之后失败，其父提交通过。可能来自 GT-345 新增的
+        held 逻辑（packs Health() 返回被拒包时整包的提醒类规则不切换）把内置 follow-up 包也算进去，或 omitempty 之后的
+        hash 比较没覆盖未改动的内置规则。
+      locations:
+      - kernel/rules/rules.go:upgradeReminders
+      - kernel/packs/pack.go:ClockRule
+      repro:
+        command: go test -tags e2e -count=1 -run 'TestFlowRuleModes' ./tests/e2e/followup/...
+        exit_code: 1
+  - id: 9b5473fb8d64
+    reporter: release-gates
+    defects:
+    - class: design-gap
+      suspected_node: e2e-followup
+      anchors:
+      - flow-health/ACT-HLT-01
+      - flow-health/ACT-HLT-03
+      design_ref: docs/solution-design.md#152-健康视图
+      expected: 健康视图信号恒为十三项且顺序固定（§15.2、附录 B：source_failures、outcall、delivery_backlog、chain_trips、agentsmd_drift、pack_rejections、model_unavailable、unjudged_backlog、rule_fallbacks、receipt_failures、other_alerts、stalled_delegations、clock_lag；前十一项同
+        v0.1，后两项是 v0.2.0 追加的 warning，不影响 healthy）。tests/e2e/ops 里 v0.1 遗留的 TestFlowHealth
+        的断言要与设计一致：全新环境健康、十三项且按此顺序都正常。修复要求：只更新该测试里过期的信号清单与「十类」断言（signalIDs、期望数量、步骤文案），不改产品代码，不放宽其余断言。flow-health
+        在 v0.2 的唯一全流程 owner 是 e2e-followup，tests/e2e/followup/health_test.go 已按十三项实现；该修复要改的文件在
+        tests/e2e/ops，超出 e2e-followup 的 scope_paths，属有意为之。
+      observed: tests/e2e/ops/health_test.go 的 signalIDs 只有十一个 id、步骤名为「全新环境十类信号都正常」；产品按设计返回十三项（GT-276
+        / 24d4d88a0 之后），len(h.Signals) != len(signalIDs)，TestFlowHealth/全新环境十类信号都正常
+        失败（health_test.go:87）。设计 §15.2 与附录 B 都是十三项，是测试断言过期。
+      locations:
+      - tests/e2e/ops/health_test.go:TestFlowHealth
+      - tests/e2e/ops/health_test.go:signalIDs
+      repro:
+        command: go test -tags e2e -count=1 -run TestFlowHealth ./tests/e2e/ops/...
+        exit_code: 1

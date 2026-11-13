@@ -11,71 +11,60 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 11
+  amendment_revision: 12
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-24a751139c34
-    amendment_file: .omac/apa-v02.system-amendment.yaml
+    amendment_id: amend-6ddfdf9620f3
+    amendment_file: amendment-reviewed.yaml
     nodes:
-      fix.cascade-engine.70067b:
+      release-gates:
         stage: authoring
         state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-d088242cd98f4c3584101db6
-      e2e-judge:
-        stage: authoring
-        state: synced
-        work_item_id: 01a1d2ab-1866-7a85-9059-479469d9c3a4
+        work_item_id: 01a1d5d1-fcc3-7056-8973-f8426da2578a
         baseline:
-          status: blocked
+          status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-2b99fae5dc8fb4f2b7d799f0
+          review_generation: authoring-4b8858538af80cfe10b61d10
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: true
+          bounce_baseline: null
+          decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
-          worker_handoff_pending: true
+          contract_sha256: 30fd60c3a841157b8f318f483e59b006058b6f45aa38971aadbfc0329446cc45
+          worker_handoff_pending: false
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
-        expected_review_generation: amendment-ee18e19ecd11fcb6e6adaab5
+        expected_contract_sha256: b4cd87ef8cf6779b3521afe86e7a69e2b58312e395aa1d6ffa6b248f1db669c8
+        expected_review_generation: amendment-8d33194d38cc402ed00d6cd1
         attempt_baseline:
-          status: blocked
+          status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-2b99fae5dc8fb4f2b7d799f0
+          review_generation: authoring-4b8858538af80cfe10b61d10
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: true
+          bounce_baseline: null
+          decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
-          worker_handoff_pending: true
+          contract_sha256: 30fd60c3a841157b8f318f483e59b006058b6f45aa38971aadbfc0329446cc45
+          worker_handoff_pending: false
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-ee18e19ecd11fcb6e6adaab5
+          review_generation: amendment-8d33194d38cc402ed00d6cd1
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -87,8 +76,13 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
+          contract_sha256: b4cd87ef8cf6779b3521afe86e7a69e2b58312e395aa1d6ffa6b248f1db669c8
           worker_handoff_pending: false
+      ci-e2e-gate:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-e3b82264490afe66787c6b03
     retained_bounce_baselines:
       e2e-followmsg:
         amendment_id: amend-0c6f84cf7965
@@ -242,8 +236,15 @@ meta:
           merge: 0
           review: 0
           worker: 0
-    system: true
-  last_amendment_id: amend-24a751139c34
+      e2e-judge:
+        amendment_id: amend-24a751139c34
+        work_item_id: 01a1d2ab-1866-7a85-9059-479469d9c3a4
+        contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+  last_amendment_id: amend-6ddfdf9620f3
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -8653,6 +8654,7 @@ nodes:
   - e2e-v01-background
   - e2e-v01-agents
   - e2e-v01-channel
+  - ci-e2e-gate
   title: 发布门槛 1、3、4 收口
   description: 产出 release-gates-evidence。整张图的唯一收口节点，是 flow-v01-regression、flow-release-gates
     的全流程 owner。要点：汇总所有流程结果；附录无规划标记、严格模式对照测试通过；§21.3 开发验收条目都有结论；四条遗留缺陷据替身复验关闭或指派本人并标"转本机验证"；核实两条"已修复"但修复节点为
@@ -8666,12 +8668,17 @@ nodes:
     - 不清理被搁置的 e2e-first-day-live、e2e-life-renewal-live 节点，不为 flow-first-day、flow-life-renewal
       建节点
     - 不经 OMAC 以外的途径改缺陷账本或平台状态
+    - 不为通过门槛而跳过、过滤或注释 e2e 用例；e2e 失败回流对应节点
+    - 不新增 sqlite3 shim 或跳过逻辑：全量 e2e 的执行环境须有 PATH 上真实的 sqlite3 CLI（ACT-ENV-01）、python3+pytest（ACT-DLG-06）、已构建的
+      web/dist（由前面的 npm --prefix web run build 保证）、含完整历史的 git 检出（tests/fixtures/ledger/fetch-v01.sh
+      需要冻结提交）
     verification_commands:
     - npm --prefix web ci
     - npm --prefix web run build
     - npm --prefix web run test -- --run src/app
     - go build ./...
     - go test ./...
+    - go test -tags e2e -count=1 -timeout 30m ./tests/e2e/...
     - go run ./tools/redline
     - APA_CONFORMANCE_STRICT=1 go test ./tests/conformance/ ./cli/serve/
     - go test ./tests/conformance/ ./cli/serve/
@@ -8696,6 +8703,7 @@ nodes:
       - APA_CONFORMANCE_STRICT=1 go test ./tests/conformance/ ./cli/serve/
       - go run ./tools/redline
       - go test ./...
+      - go test -tags e2e -count=1 -timeout 30m ./tests/e2e/...
     pr_base: main
     acceptance_claims:
     - flow-v01-regression
@@ -9176,6 +9184,11 @@ nodes:
       evidence_mode: artifact
       requires:
       - e2e-v01-channel-evidence
+    - artifact_id: ci-e2e-gate-delivery
+      producer: ci-e2e-gate
+      evidence_mode: artifact
+      requires:
+      - ci-e2e-job
     requirement_refs:
     - REQ-G1-5
     coverage_gate: 0
@@ -11041,3 +11054,69 @@ nodes:
     - dfx-70067b4c2ffd
     - dfx-b6eef04ed1c1
     coverage_gate: 80
+- id: ci-e2e-gate
+  worker: omac-worker-backend
+  blocked_by:
+  - e2e-env-baseline
+  title: CI 全量 e2e 门
+  description: 产出 ci-e2e-gate-delivery。在 .github/workflows/ci.yml 新增与 build 并行的全量
+    -tags e2e job，让修复 PR 合并前就被跨组回归拦住。不认领验收 flow。运行顺序：由操作者 omac node hold，待 main 上已知
+    e2e 回归的修复节点合并后再放行。
+  reviewer: omac-reviewer
+  contract:
+    objective: 在 .github/workflows/ci.yml 新增一个与现有 build job 并行、在 push main 与 pull_request
+      上跑全量 `go test -tags e2e -count=1 -timeout 40m ./tests/e2e/...` 的 job，并让该 PR
+      的真实 CI（含新 job）通过
+    non_goals:
+    - 不改业务代码与测试；确属用例自身缺陷的，在 PR 说明里列出并经 OMAC 缺陷反馈回流对应节点，不修改、跳过或过滤测试
+    - 不改现有 build job 的步骤与命令
+    - '不去掉或修改触发器上的 paths-ignore: [''.omac/**'']'
+    - 不加 continue-on-error，不用 -run 过滤，不跳过用例，不用 sqlite3 shim
+    - 不改仓库分支保护/必需检查设置（由本人在平台上操作，交付说明里提醒把新 job 设为必需检查）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"
+    integration_gates:
+    - name: ci-e2e-gate-workflow
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#204-v020发布门槛
+      - AGENTS.md#红线检查
+      delivery_goal: '新 e2e job 满足：触发与现有一致（push: main、pull_request，paths-ignore 不变）且与
+        build 并行；actions/checkout 用 fetch-depth: 0（fetch-v01.sh 读冻结提交，浅克隆 exit 3）；setup-go（go-version-file:
+        go.mod）、setup-node 22 + npm --prefix web ci + npm --prefix web run build（e2e
+        需 web/dist/index.html）、sudo apt-get install -y sqlite3（真实 CLI）、python3 + pytest；命令
+        go test -tags e2e -count=1 -timeout 40m ./tests/e2e/...；timeout-minutes: 50；concurrency
+        按 ref 分组并 cancel-in-progress 取消旧运行。该 PR 的真实 GitHub CI（含新 job）通过即为本门判据。取舍：全量约
+        7.5 分钟起（开发机），2 vCPU runner 预计 15–30 分钟，仍在 PR 上跑全量而不按改动路径选包——每个 e2e 包构建整套真实二进制，kernel
+        任何改动都在其依赖闭包内，按路径选包会重新漏掉跨组回归；成本由 concurrency 取消与和 build 并行控制。若用例在纯 Linux runner
+        上因缺宿主工具不稳定，须在本节点内查清并修复运行环境（安装依赖等），不能靠跳过。'
+      covers:
+      - ci-e2e-job
+      acceptance_refs:
+      - flow-release-gates
+      commands:
+      - python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"
+    pr_base: main
+    acceptance_refs:
+    - flow-release-gates
+    source_of_truth:
+    - docs/solution-design.md#204-v020发布门槛
+    - AGENTS.md#红线检查
+    scope_paths:
+    - .github/workflows/ci.yml
+    evidence_mode: artifact
+    produces:
+    - artifact_id: ci-e2e-gate-delivery
+      provides:
+      - id: ci-e2e-job
+        ref: docs/solution-design.md#204-v020发布门槛
+    consumes:
+    - artifact_id: e2e-env-baseline-env
+      producer: e2e-env-baseline
+      evidence_mode: artifact
+      requires:
+      - acc-env-helpers
+    coverage_gate: 0
