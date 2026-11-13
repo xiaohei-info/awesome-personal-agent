@@ -1,17 +1,17 @@
-# sha256: f507006959899244173aa190a4084a55a54783a35339c275b278981a3126e7ab
+# sha256: cf345cbc6e6932b5a2e01f5526d961b3632990113e3f90a024c9afd4adf2e82a
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 16
+  used_global: 19
   used_by_reporter:
     e2e-followmsg: 1
-    e2e-workbench: 2
+    e2e-workbench: 3
     e2e-judge: 4
     e2e-judgment: 3
-    e2e-inbound-rules: 1
+    e2e-inbound-rules: 2
     e2e-upgrade: 3
     e2e-hostplugin: 1
     e2e-release-doctor: 1
-    e2e-sources: 1
+    e2e-sources: 2
   granted_by_reporter:
     e2e-sources: 4
     e2e-inbound-rules: 2
@@ -34,11 +34,8 @@ defects:
       - flow-source-github/ACT-GH-09
       reporters:
       - e2e-sources
-      state: queued
-      retried: true
-      stop:
-        reason_code: defect-budget-exhausted
-        detail: 该报告者或整个 DAG 的自动修复预算已用完。
+      state: fixing
+      fix_node: fix.attribution-v2.d3eb8c
     dfx-bfeb8db8483b:
       suspected: calendar-adapter-v2
       anchors:
@@ -190,7 +187,7 @@ defects:
       - flow-wake-lease/ACT-WAK-03
       reporters:
       - e2e-hostplugin
-      state: fixing
+      state: fixed
       fix_node: fix.wake-lease-recheck.5239bc
     dfx-542f4dae51fa:
       suspected: release-packaging
@@ -200,24 +197,23 @@ defects:
       - e2e-release-doctor
       state: fixing
       fix_node: fix.release-packaging.542f4d
-  inbox:
-  - id: 24e961215eae
-    reporter: e2e-inbound-rules
-    defects:
-    - class: design-gap
-      suspected_node: login-hardening
+    dfx-c8ef9b61a3ec:
+      suspected: web-calibration
+      anchors:
+      - flow-web-workbench/ACT-WBN-16
+      reporters:
+      - e2e-workbench
+      state: fixing
+      fix_node: fix.web-calibration.c8ef9b
+    dfx-0b1aae331f8f:
+      suspected: login-hardening
       anchors:
       - flow-web-login/ACT-LGN-05
-      design_ref: docs/solution-design.md#14-安全
-      expected: TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce 的延迟断言是确定性的：延迟应答与"窗口过去后恢复即时应答"都由已有测试时钟（与仓库已有的
-        test-clock 做法一致，如 e.now 与 api/core/testclock_test.go）驱动，不依赖墙钟 time.Since，CI
-        上任意负载下都稳定通过。
-      observed: 用例约第 132 行用 time.Since 断言"窗口过去后应答耗时 < delay"（"delay must end with
-        the window, 200 in 163ms"），其前的延迟分支同样用 time.Since 断言"耗时 >= delay"。CI 负载下偶发失败，main
-        最近四次 CI 均因此失败，PR
-      locations:
-      - api/core/login_hardening_test.go:TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce
-      - api/core/testclock_test.go
+      reporters:
+      - e2e-inbound-rules
+      state: fixing
+      fix_node: fix.login-hardening.0b1aae
+  inbox: []
 pending_human_amendment:
   amendment_id: amend-6c86c8335a0c
   file: reports/apa-dag-unblock-20261113/amendment-reviewed.yaml
