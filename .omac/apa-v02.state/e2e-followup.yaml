@@ -1,5 +1,5 @@
-# sha256: e23d42f779063f306c503da10257793b09abb357e518cb0515c61394cfc4d3d9
+# sha256: 14b10820cf1eb4b8c3f1cebdd0e0764fd147d2897817552913a627c42f9f2767
 work_item_id: 01a1d304-5728-7f28-a802-058939e8269f
-status: in_progress
+status: in_review
 recovery_marker: true
 retry_note: 'PR #323 与 verification 已完成,核对 head 后重新提交,不要重做'
