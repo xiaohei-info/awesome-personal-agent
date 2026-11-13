@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -493,6 +494,26 @@ func TestScreenedInEventIsFullyDrafted(t *testing.T) {
 		it.Project != e.web || it.PlannedFor != "2026-03-12" || it.Deadline == nil || it.Deadline.Format("2006-01-02") != "2026-03-13" {
 		t.Fatalf("item %+v", it)
 	}
+	// ACT-JRC-04/06：处置 Event 的载荷自带结论，记录过保留期后 apa why 仍能显示答案与定案者。
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		rec, err := record.Get(tx, d.Judgment)
+		if err != nil {
+			t.Fatal(err)
+		}
+		es, _ := eventlog.ReadObject(tx, d.ID)
+		for _, x := range es {
+			if x.Event.Type == EvDisposed {
+				var got record.Ref
+				_ = json.Unmarshal(x.Event.Payload, &got)
+				if got != record.RefOf(rec) || got.Answer == "" || got.DecidedBy == "" {
+					t.Fatalf("disposed payload %s, want %+v", x.Event.Payload, record.RefOf(rec))
+				}
+				return nil
+			}
+		}
+		t.Fatal("no inbound.disposed event")
+		return nil
+	})
 	p := it.Proposal
 	if p == nil || p.Recommend != "accept" || p.Reason != "对方明确提出请求" || p.LowConfidence || len(p.Sources) != 1 || p.Sources[0] != d.ID {
 		t.Fatalf("proposal %+v", p)
