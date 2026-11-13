@@ -123,7 +123,7 @@ func setup(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 包声明 observe（只记录）；这里验的是判断与提醒，按本人在 Web 的方式切到 auto。
+	// 提醒类规则省略 mode，初始就是 auto（C.4），不需要本人切换。
 	eng, err := rules.New(rules.Options{Store: st, Exec: e.x, Packs: onlyPack{p}, Now: now})
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +131,6 @@ func setup(t *testing.T) *env {
 	if err := eng.Reconcile(bg); err != nil {
 		t.Fatal(err)
 	}
-	e.do("rule.set_mode", map[string]string{"rule": key, "mode": rules.ModeAuto})
 	if err := e.svc.Register(); err != nil {
 		t.Fatal(err)
 	}
@@ -251,11 +250,35 @@ func (e *env) events(id, typ string) (n int) {
 	return n
 }
 
-// ACT-FUP-02 / ACT-DAY-06：真实包的判断型提示词被内核按结构化输出解析为"催"——一条提醒，事项仍是 waiting。
-func TestRemindProducesReminderAndKeepsWaiting(t *testing.T) {
-	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
+func (e *env) reminderOptions(id string) (out [][]string) {
+	e.t.Helper()
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT id FROM delivery_delivery WHERE item = ? AND class = 'reminder' ORDER BY rowid`, id)
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for r.Next() {
+			var d string
+			_ = r.Scan(&d)
+			ids = append(ids, d)
+		}
+		_ = r.Close()
+		for _, d := range ids {
+			dv, err := e.q.Get(tx, d)
+			if err != nil {
+				return err
+			}
+			out = append(out, dv.Content.Options)
+		}
+		return nil
+	})
+	return out
+}
+
+// ACT-FUP-02：真实包的第一轮到期——一条带"已催""再等""放弃"的提醒，事项仍是 waiting，没有任何模型请求。
+func TestFirstRoundRemindsWithThreeActionsWithoutModel(t *testing.T) {
 	e := setup(t)
-	e.judged("remind")
 	id := e.create("等装修公司报价", nil)
 	e.wait(id, domain.WaitingExternal, "装修公司报价")
 	if err := e.due(); err != nil {
@@ -264,42 +287,34 @@ func TestRemindProducesReminderAndKeepsWaiting(t *testing.T) {
 	if it := e.get(id); it.Phase != domain.PhaseWaiting {
 		t.Fatalf("phase = %s", it.Phase)
 	}
-	if e.reminders(id) != 1 {
-		t.Fatalf("reminders = %d", e.reminders(id))
+	opts := e.reminderOptions(id)
+	if len(opts) != 1 || strings.Join(opts[0], "/") != "已催/再等/放弃" {
+		t.Fatalf("reminders = %v", opts)
 	}
-	reqs := e.stub.Requests()
-	if len(reqs) != 1 || !strings.Contains(reqs[0].BodyText, "周五前要定") || !strings.Contains(reqs[0].BodyText, id) {
-		t.Fatalf("judge request lacks item id or material: %+v", reqs)
-	}
-}
-
-// ACT-FUP-03：再等——延长 Timer，没有提醒。
-func TestWaitMoreExtendsWithoutReminder(t *testing.T) {
-	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
-	e := setup(t)
-	e.judged("wait")
-	id := e.create("等装修公司报价", nil)
-	e.wait(id, domain.WaitingExternal, "装修公司报价")
-	if err := e.due(); err != nil {
-		t.Fatal(err)
-	}
-	if e.get(id).Phase != domain.PhaseWaiting || e.reminders(id) != 0 || e.events(id, fu.EvExtended) != 1 {
-		t.Fatalf("phase=%s reminders=%d extended=%d", e.get(id).Phase, e.reminders(id), e.events(id, fu.EvExtended))
+	if n := len(e.stub.Requests()); n != 0 {
+		t.Fatalf("model requests = %d", n)
 	}
 }
 
-// ACT-FUP-04：建议放弃——转 needs_input 交本人，不自动 dropped；本人回答后才落地。
-func TestAbandonGoesToOwnerNotSilentlyDropped(t *testing.T) {
-	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
+// ACT-FUP-04 / 06：选"再等"什么都不做；连续 remind_rounds（包里是 2）轮后转 needs_input，三个选项，不自动 dropped。
+func TestLadderEndsWithQuestionNotDrop(t *testing.T) {
 	e := setup(t)
-	e.judged("abandon")
 	id := e.create("等装修公司报价", nil)
 	e.wait(id, domain.WaitingExternal, "装修公司报价")
+	for range 2 {
+		if err := e.due(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if e.reminders(id) != 2 || e.get(id).Phase != domain.PhaseWaiting {
+		t.Fatalf("reminders=%d phase=%s", e.reminders(id), e.get(id).Phase)
+	}
 	if err := e.due(); err != nil {
 		t.Fatal(err)
 	}
-	if it := e.get(id); it.Phase != domain.PhaseNeedsInput || it.Ask == nil {
-		t.Fatalf("item %s %+v", it.Phase, it.Ask)
+	it := e.get(id)
+	if e.reminders(id) != 2 || it.Phase != domain.PhaseNeedsInput || it.Ask == nil || len(it.Ask.Options) != 3 {
+		t.Fatalf("reminders=%d item %s %+v", e.reminders(id), it.Phase, it.Ask)
 	}
 	e.do("decision.answer", map[string]any{"id": id, "choice": fu.OptDrop})
 	if got := e.get(id).Phase; got != domain.PhaseDropped {
@@ -307,11 +322,9 @@ func TestAbandonGoesToOwnerNotSilentlyDropped(t *testing.T) {
 	}
 }
 
-// ACT-FUP-05：委派子事项迟迟不回执，父事项等执行者——同样被跟进，产生提醒，父事项阶段不变。
+// ACT-FUP-05 / 08：委派子事项迟迟不回执，父事项等执行者——同样被跟进，产生提醒，父事项阶段不变。
 func TestSilentDelegationIsFollowedUp(t *testing.T) {
-	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
 	e := setup(t)
-	e.judged("remind")
 	parent := e.create("装修方案", nil)
 	child := e.create("向装修公司索取报价", nil)
 	e.do("item.relate", map[string]any{"from": child, "to": parent, "type": "parent", "reason": "delegated"})
@@ -321,64 +334,6 @@ func TestSilentDelegationIsFollowedUp(t *testing.T) {
 	}
 	if e.get(parent).Phase != domain.PhaseWaiting || e.reminders(parent) != 1 {
 		t.Fatalf("phase=%s reminders=%d", e.get(parent).Phase, e.reminders(parent))
-	}
-	if !strings.Contains(e.stub.Requests()[0].BodyText, string(domain.WaitingExecutor)) {
-		t.Error("judge was not told the item waits on an executor")
-	}
-}
-
-// ACT-FUP-06：模型 500——跟进不丢，暴露真实错误并记 health.alert，恢复后拿到判断结果。
-func TestModelFailureKeepsFollowUpAndRecovers(t *testing.T) {
-	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
-	e := setup(t)
-	e.stub.SetDefault(modelstub.Reply{Status: 500})
-	id := e.create("等装修公司报价", nil)
-	e.wait(id, domain.WaitingExternal, "装修公司报价")
-	err := e.due()
-	if err == nil || !errors.Is(err, direct.ErrUnavailable) {
-		t.Fatalf("err = %v", err)
-	}
-	if e.get(id).Phase != domain.PhaseWaiting || e.reminders(id) != 0 || e.events(id, domain.EvHealthAlert) != 1 {
-		t.Fatalf("phase=%s reminders=%d alerts=%d", e.get(id).Phase, e.reminders(id), e.events(id, domain.EvHealthAlert))
-	}
-	e.judged("remind")
-	if err := e.svc.Drain(bg); err != nil {
-		t.Fatal(err)
-	}
-	if e.reminders(id) != 1 {
-		t.Fatalf("recovery produced %d reminders", e.reminders(id))
-	}
-}
-
-// 逐级升级：判断型答"需要解释"，交生成型给出 choice；生成型信息不足则升级到任务型，交本人，不替本人决定。
-func TestNeedExplanationEscalatesThroughGenerate(t *testing.T) {
-	t.Skip("v0.1 三选一跟进判断与逐级升级已从内置包移除（C.14）；跟进梯度服务由后续节点重写，届时替换本测试")
-	e := setup(t)
-	e.stub.Enqueue(
-		modelstub.Reply{Content: `{"choice":"need_explanation","confidence":0.9}`},
-		modelstub.Reply{Content: `{"insufficient_info":false,"choice":"remind","explanation":"对方三天未回"}`},
-	)
-	id := e.create("等装修公司报价", nil)
-	e.wait(id, domain.WaitingExternal, "装修公司报价")
-	if err := e.due(); err != nil {
-		t.Fatal(err)
-	}
-	if len(e.stub.Requests()) != 2 || e.reminders(id) != 1 || e.get(id).Phase != domain.PhaseWaiting {
-		t.Fatalf("calls=%d reminders=%d phase=%s", len(e.stub.Requests()), e.reminders(id), e.get(id).Phase)
-	}
-
-	e2 := setup(t)
-	e2.stub.Enqueue(
-		modelstub.Reply{Content: `{"choice":"need_explanation","confidence":0.9}`},
-		modelstub.Reply{Content: `{"insufficient_info":true}`},
-	)
-	id2 := e2.create("等装修公司报价", nil)
-	e2.wait(id2, domain.WaitingExternal, "装修公司报价")
-	if err := e2.due(); err != nil {
-		t.Fatal(err)
-	}
-	if it := e2.get(id2); it.Phase != domain.PhaseNeedsInput || e2.reminders(id2) != 0 {
-		t.Fatalf("phase=%s reminders=%d", it.Phase, e2.reminders(id2))
 	}
 }
 
