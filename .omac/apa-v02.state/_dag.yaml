@@ -1,4 +1,4 @@
-# sha256: fc9ecef11ca304c4b5e663d74144df2c30ea1ab3b66a81c6ca2f7d34a916b1a1
+# sha256: 9dd0fd9637811f067156eb2b34701c5ffbb6301ee2958a0f703c3c6f82f0e78c
 defects:
   schema: omac.defect-ledger/v1
   used_global: 25
@@ -262,7 +262,7 @@ defects:
       - flow-backlog-release/ACT-BKL-16
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.backlog-rules-only.a35faf
     dfx-9dda042e748a:
       suspected: rule-modes-v2
