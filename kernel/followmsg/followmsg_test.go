@@ -360,6 +360,20 @@ func TestFollowUpAttachesToDelegatedItem(t *testing.T) {
 	}
 }
 
+// ACT-GH-09：回执里登记的是 PR 地址，适配器给的关联键是 owner/repo#N，两种写法指向同一个 PR。
+func TestFollowUpAttachesWhenPRRegisteredAsURL(t *testing.T) {
+	e := newEnv(t)
+	child := e.delegated()
+	e.report("WRK", child, "progress", "https://github.com/acc-org/acc-repo/pull/7", "")
+
+	e.emit(comment("c1", "acc-org/acc-repo#7"))
+
+	m := e.msg("c1")
+	if m.Disposition != domain.DispositionAttached || m.AttachState != runner.AttachPending || m.Item != child {
+		t.Fatalf("message %+v", m)
+	}
+}
+
 // ACT-MSG-03/04：转给执行者带来源与发送者且标明是资料；回执带游标确认后算已处理，不再转发。
 func TestForwardThenAckByReport(t *testing.T) {
 	e := newEnv(t)
