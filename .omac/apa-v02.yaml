@@ -11,21 +11,21 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 5
+  amendment_revision: 6
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-564dd6687bb3
+    amendment_id: amend-ffc8e6030f1f
     amendment_file: .omac/apa-v02.system-amendment.yaml
     nodes:
-      fix.release-packaging.542f4d:
+      fix.calendar-adapter-v2.bfeb8d:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-cd1e4088cbc1cbc10df04c51
-      e2e-release-doctor:
+        expected_review_generation: amendment-561b3dd0f096ef34b70a7ff8
+      e2e-sources:
         stage: authoring
         state: synced
-        work_item_id: 01a1d344-46c0-7745-81e6-4414d53eb795
+        work_item_id: 01a1d2cd-7f8d-7360-8062-fa1399d19fd6
         baseline:
           status: blocked
           phase: authoring
@@ -40,14 +40,14 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
+          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
           worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
-          worker: 1
-        expected_contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
-        expected_review_generation: amendment-44d1527be3f4f58cf0b69ad1
+          worker: 0
+        expected_contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+        expected_review_generation: amendment-7dae016bda875dfe6066a12f
         attempt_baseline:
           status: blocked
           phase: authoring
@@ -62,26 +62,26 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
+          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
           worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-44d1527be3f4f58cf0b69ad1
+          review_generation: amendment-7dae016bda875dfe6066a12f
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
             merge: 0
             review: 0
-            worker: 1
+            worker: 0
           decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
+          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-followmsg:
@@ -140,8 +140,16 @@ meta:
           merge: 0
           review: 0
           worker: 0
+      e2e-release-doctor:
+        amendment_id: amend-564dd6687bb3
+        work_item_id: 01a1d344-46c0-7745-81e6-4414d53eb795
+        contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 1
     system: true
-  last_amendment_id: amend-564dd6687bb3
+  last_amendment_id: amend-ffc8e6030f1f
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -5971,6 +5979,8 @@ nodes:
   - mail-thread-key
   - calendar-adapter-v2
   - rule-exits-where
+  - fix.attribution-v2.62f6c6
+  - fix.calendar-adapter-v2.bfeb8d
   title: 代码托管、邮件、日历来源全流程（替身版）
   description: 产出 e2e-sources-flow-evidence。是 flow-source-github、flow-source-mail、flow-source-calendar
     的唯一全流程 owner，并负责其中 3 个 v0.1 继承或跨模块 business-action。要点：遗留缺陷 dfx-5dd4c0c9998f、dfx-1699a21c5f70
@@ -10372,4 +10382,72 @@ nodes:
       - version-info
     defect_refs:
     - dfx-542f4dae51fa
+    coverage_gate: 80
+- id: fix.calendar-adapter-v2.bfeb8d
+  worker: omac-worker-frontend
+  blocked_by:
+  - source-contract-v2
+  title: 'Fix calendar-adapter-v2: dfx-bfeb8db8483b'
+  description: "Automatic fix for upstream defect(s) reported by e2e-sources.\n\n-
+    [design-gap] anchors flow-source-calendar/ACT-CAL-02 (docs/appendix-d-adapters.md#d2-邮件与日历的工具适配)\n
+    \ expected: 样本 c1 的两个重复实例（关联键 UID|RECURRENCE-ID 互不相同）各成一条 proposed 事项；ACT-CAL-03
+    才能证明 第一个实例刷新、第二个不变。\n  observed: 两条事件没有 link，内核合并键退回 title+sender=title:周会，两个实例并进同一事项。适配器可经标准事件的
+    merge_key 字段（设计 §9.3 来源自带的优先）给出每个实例自己的合并键，目前没给。\n  where: sources/calendar/calendar.go:convert;
+    kernel/inbound/propose.go:mergeKeyOf\n  repro: `go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/
+    -run TestFlowSourceCalendar` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-bfeb8db8483b in calendar-adapter-v2:
+      样本 c1 的两个重复实例（关联键 UID|RECURRENCE-ID 互不相同）各成一条 proposed 事项；ACT-CAL-03 才能证明 第一个实例刷新、第二个不变。'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./sources/calendar/...
+    - go test -count=1 ./sources/applepim/...
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/ -run TestFlowSourceCalendar
+    integration_gates:
+    - name: calendar-adapter-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+      - docs/appendix-d-adapters.md#d3-工具的实测结论
+      - docs/solution-design.md#92-执行契约
+      delivery_goal: 日历适配器录制样本与凭据注入复验；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-CAL-04
+      - ACT-CAL-05
+      - ACT-CAL-06
+      - ACT-CAL-07
+      - ACT-CAL-08
+      acceptance_refs:
+      - flow-source-calendar
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./sources/calendar/...
+      - go test -count=1 ./sources/applepim/...
+    pr_base: main
+    acceptance_refs:
+    - flow-source-calendar
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+    - docs/appendix-d-adapters.md#d3-工具的实测结论
+    - docs/solution-design.md#92-执行契约
+    scope_paths:
+    - sources/calendar/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: source-contract-v2-delivery
+      producer: source-contract-v2
+      evidence_mode: artifact
+      requires:
+      - standard-event-v2
+    defect_refs:
+    - dfx-bfeb8db8483b
     coverage_gate: 80

@@ -1,7 +1,7 @@
-# sha256: 9ebce5b6a87dc6adc9b74025fda9abf0e9c9b5280459012dcb26c50702001e44
+# sha256: 67291064d93157bc876b6110dfc23533e9f20b8350564e7379b75991c735427a
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 15
+  used_global: 16
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 2
@@ -11,6 +11,7 @@ defects:
     e2e-upgrade: 3
     e2e-hostplugin: 1
     e2e-release-doctor: 1
+    e2e-sources: 1
   granted_by_reporter:
     e2e-sources: 2
     e2e-inbound-rules: 1
@@ -33,13 +34,15 @@ defects:
       reporters:
       - e2e-sources
       state: queued
+      retried: true
     dfx-bfeb8db8483b:
       suspected: calendar-adapter-v2
       anchors:
       - flow-source-calendar/ACT-CAL-02
       reporters:
       - e2e-sources
-      state: queued
+      state: fixing
+      fix_node: fix.calendar-adapter-v2.bfeb8d
     dfx-ec964047626d:
       suspected: web-today
       anchors:
