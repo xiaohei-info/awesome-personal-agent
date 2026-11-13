@@ -278,6 +278,11 @@ type PackSource interface {
 	List() []*packs.Pack
 }
 
+// rejecter 由能同时报告被拒包的 PackSource 实现（packs.Loader）。
+type rejecter interface {
+	Health() []packs.Rejection
+}
+
 type ruleDef struct {
 	State
 	// State.Mode 在这里是包里写的 mode（可能为空）；初始模式由类别决定（sync）。
@@ -413,11 +418,18 @@ func (e *Engine) sync(tx *store.Tx, pv int, d ruleDef, problems *[]error) error 
 
 // upgradeReminders 是 v0.1 → v0.2.0 的规则模式迁移（§16.5）：账本里仍是初始 observe、包里没写 mode、
 // 且从没有过 rule.mode_changed（本人没切过）的提醒类规则切到 auto，逐条记 rule.mode_changed（操作者 system），
-// 并合并成一条健康类说明。包里显式写 observe/off 的、本人切换过的不动；切完即是 auto，再次对账不重复。
+// 并合并成一条健康类说明。包里显式写 observe/off 的、本人切换过的、包被拒绝（写法看不到）的不动；切完即是 auto，再次对账不重复。
 func (e *Engine) upgradeReminders(tx *store.Tx, pv int, ds []ruleDef) error {
+	// 有未修复拒绝的包（如带 v0.1 字段的用户覆盖包）：本人写在被拒包里的 mode 看不到，不替他切换。
+	held := map[string]bool{}
+	if r, ok := e.o.Packs.(rejecter); ok {
+		for _, rej := range r.Health() {
+			held[rej.Pack] = true
+		}
+	}
 	var switched []string
 	for _, d := range ds {
-		if !d.Reminder || d.Mode != "" {
+		if !d.Reminder || d.Mode != "" || held[d.Pack] {
 			continue
 		}
 		cur, ok, err := loadState(tx, d.Key)
