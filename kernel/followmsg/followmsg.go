@@ -59,6 +59,8 @@ const (
 	EvReleased   = "followmsg.released"
 
 	systemPrinc = "kernel:followmsg"
+	// Principal 是本包写事项的内核身份；摘要起草凭它识别"挂靠与来源刷新"，不为它们调模型（挂靠本身不调模型）。
+	Principal = systemPrinc
 )
 
 var system = command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: systemPrinc, Via: domain.ViaSource}, Level: authz.LevelWorker}
