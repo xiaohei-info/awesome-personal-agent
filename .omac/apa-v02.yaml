@@ -11,75 +11,60 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 8
+  amendment_revision: 9
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-0b1820154e25
-    amendment_file: .omac/apa-v02.system-amendment.yaml
+    amendment_id: amend-01e325f261f6
+    amendment_file: reports/apa-dag-amend2-20261113/amendment-reviewed.yaml
     nodes:
       fix.attribution-v2.d3eb8c:
         stage: authoring
         state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-174a3949d8293156fd41d14e
-      fix.login-hardening.0b1aae:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-13f929a3e656484fa628a233
-      fix.web-calibration.c8ef9b:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-a0314d7c4b253d79c73ec402
-      e2e-inbound-rules:
-        stage: authoring
-        state: synced
-        work_item_id: 01a1d2c3-f4c8-7c35-a6be-55223a4cd51a
+        work_item_id: 01a1d4ed-3a51-74ca-accf-26ef1b1756c4
         baseline:
-          status: blocked
+          status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: authoring-97415d2ab0821790071faa00
+          review_generation: authoring-8e82b8532e9886f606be4701
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline: null
-          decision_required_pending: true
+          decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
-          worker_handoff_pending: true
+          contract_sha256: 9c9353b0f2a8f9f4da17db08bfd007b972537ceb335b3ed22eca74c04e5e1f07
+          worker_handoff_pending: false
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
-        expected_review_generation: amendment-1bffd1a150130a29d47f076f
+        expected_contract_sha256: d7f4558d87c83f9f24e3f3cb551a01898580b8cd89f446d4dc87a34b97354ac3
+        expected_review_generation: amendment-ee004741dc43f3177ead3c15
         attempt_baseline:
-          status: blocked
+          status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: authoring-97415d2ab0821790071faa00
+          review_generation: authoring-8e82b8532e9886f606be4701
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline: null
-          decision_required_pending: true
+          decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
-          worker_handoff_pending: true
+          contract_sha256: 9c9353b0f2a8f9f4da17db08bfd007b972537ceb335b3ed22eca74c04e5e1f07
+          worker_handoff_pending: false
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-1bffd1a150130a29d47f076f
+          review_generation: amendment-ee004741dc43f3177ead3c15
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -91,57 +76,74 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+          contract_sha256: d7f4558d87c83f9f24e3f3cb551a01898580b8cd89f446d4dc87a34b97354ac3
+          worker_handoff_pending: false
+      fix.web-calibration.c8ef9b:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1d4f0-9399-75c2-8f2c-9c5ab1a92ab3
+        baseline:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: authoring-1a286eb70180a3ed44a0883b
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 01795b7798d55b33695a6b334fa131de0dea55726ca9a6c973543245bb10733f
+          worker_handoff_pending: false
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+        expected_contract_sha256: d319e537b2c2a3035626b37e5508ba1fb07aa0fd051b2ee9c205acd81b0757e7
+        expected_review_generation: amendment-a5815229c94c79fdc87d9e84
+        attempt_baseline:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: authoring-1a286eb70180a3ed44a0883b
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 01795b7798d55b33695a6b334fa131de0dea55726ca9a6c973543245bb10733f
+          worker_handoff_pending: false
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-a5815229c94c79fdc87d9e84
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: d319e537b2c2a3035626b37e5508ba1fb07aa0fd051b2ee9c205acd81b0757e7
           worker_handoff_pending: false
       e2e-sources:
         stage: authoring
         state: synced
         work_item_id: 01a1d2cd-7f8d-7360-8062-fa1399d19fd6
         baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-7dae016bda875dfe6066a12f
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
-          worker_handoff_pending: true
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-        expected_contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
-        expected_review_generation: amendment-ae80c4fc273a3a05c07e53bb
-        attempt_baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-7dae016bda875dfe6066a12f
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
-          worker_handoff_pending: true
-        observed:
           status: todo
           phase: authoring
           review_verdict: null
@@ -160,60 +162,104 @@ meta:
           delivery_identity_pending: false
           contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
           worker_handoff_pending: false
-      e2e-workbench:
-        stage: authoring
-        state: synced
-        work_item_id: 01a1d2fc-2cb4-707a-8921-2682fe514c2f
-        baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-3ba8bc5214219ecf52670d0e
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
-          worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
-          worker: 1
-        expected_contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
-        expected_review_generation: amendment-3a762bb242d361265950bfbf
+          worker: 0
+        expected_contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+        expected_review_generation: amendment-b0db4ecbb6c4469dcd3496fa
         attempt_baseline:
-          status: blocked
+          status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-3ba8bc5214219ecf52670d0e
+          review_generation: amendment-ae80c4fc273a3a05c07e53bb
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
             merge: 0
             review: 0
             worker: 0
-          decision_required_pending: true
+          decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
-          worker_handoff_pending: true
+          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+          worker_handoff_pending: false
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
+          review_generation: amendment-b0db4ecbb6c4469dcd3496fa
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+          worker_handoff_pending: false
+      e2e-workbench:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1d2fc-2cb4-707a-8921-2682fe514c2f
+        baseline:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
           review_generation: amendment-3a762bb242d361265950bfbf
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 1
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
+          worker_handoff_pending: false
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 1
+        expected_contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
+        expected_review_generation: amendment-766ef846acf28b718cccb16c
+        attempt_baseline:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-3a762bb242d361265950bfbf
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 1
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
+          worker_handoff_pending: false
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-766ef846acf28b718cccb16c
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -348,8 +394,15 @@ meta:
           merge: 0
           review: 0
           worker: 0
-    system: true
-  last_amendment_id: amend-0b1820154e25
+      e2e-inbound-rules:
+        amendment_id: amend-0b1820154e25
+        work_item_id: 01a1d2c3-f4c8-7c35-a6be-55223a4cd51a
+        contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+  last_amendment_id: amend-01e325f261f6
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -10745,7 +10798,6 @@ nodes:
     - go test -count=1 ./kernel/followmsg/...
     - go test -count=1 ./api/followmsg/...
     - go test -count=1 ./cli/followmsg/...
-    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/ -run TestFlowSourceGithub
     integration_gates:
     - name: attribution-v2-gate
       layer: L1
@@ -10924,7 +10976,6 @@ nodes:
     - npm --prefix web ci
     - npm --prefix web run build
     - npm --prefix web run test -- --run src/features/judgment
-    - go test -tags=e2e -count=1 -run TestFlowWebWorkbench ./tests/e2e/workbench/...
     integration_gates:
     - name: web-calibration-gate
       layer: L1
