@@ -683,8 +683,13 @@ func (r *run) upg10(t *testing.T) {
 	for _, s := range h.Signals {
 		merged = merged || (s.ID == "other_alerts" && strings.Contains(string(s.Detail), "rules:upgrade"))
 	}
-	if !merged {
-		t.Errorf("健康视图应有一条合并后的规则模式说明（rules:upgrade）")
+	// 夹具里没有“未动过的内置提醒类规则”可切（follow-up 的用户包被拒、规则不自动切换，GT-345），升级后不应有任何切换，
+	// 也就不应有合并说明；一旦有切换，就必须有这条说明。observe→auto 的切换路径由 kernel/rules 的单元测试覆盖。
+	if len(switched) > 0 && !merged {
+		t.Errorf("有 %d 条规则被切到 auto，健康视图应有一条合并后的规则模式说明（rules:upgrade）", len(switched))
+	}
+	if len(switched) == 0 && merged {
+		t.Errorf("没有规则被切换却出现了 rules:upgrade 说明")
 	}
 }
 
