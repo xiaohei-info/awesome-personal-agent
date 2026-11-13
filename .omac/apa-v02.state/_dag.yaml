@@ -1,4 +1,4 @@
-# sha256: 1628a4344263e4736a6abe48dfa620ae6a6fccdd4ee1b06a3089786bda3f21da
+# sha256: f0c5d29cc83730935ddf3659fac206b9a103366d17f60225f98991d7c8d0c5d6
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -178,7 +178,7 @@ defects:
       - flow-upgrade-rollback/ACT-UPG-10
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.rule-modes-v2.9c33de
     dfx-5239bc3e86a2:
       suspected: wake-lease-recheck
