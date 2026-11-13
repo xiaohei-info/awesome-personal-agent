@@ -124,12 +124,12 @@ describe("今天页（flow-web-workbench）", () => {
 
 describe("发布门槛（flow-release-gates）", () => {
   it("ACT-GATE-09：§4.1 写明 360 像素走查结论，§21.3 的 SPIKE-WEB-MOBILE 行已关闭", async () => {
-    const { readFileSync } = await import("node:fs");
-    const doc = readFileSync(new URL("../../../../docs/solution-design.md", import.meta.url), "utf8");
+    const mods = import.meta.glob<string>("../../../../docs/solution-design.md", { query: "?raw", import: "default", eager: true });
+    const doc = Object.values(mods)[0];
     const s41 = doc.slice(doc.indexOf("### 4.1 Web 中台"), doc.indexOf("### 4.2"));
     expect(s41).toMatch(/SPIKE-WEB-MOBILE.*已关闭/);
     expect(s41).toMatch(/scrollWidth.*360/);
-    const row = doc.split("\n").find((l) => l.startsWith("| `SPIKE-WEB-MOBILE`"))!;
+    const row = doc.split("\n").find((l: string) => l.startsWith("| `SPIKE-WEB-MOBILE`"))!;
     expect(row).toContain("已关闭");
   });
 });
