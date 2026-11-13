@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -850,6 +851,9 @@ func TestEchoOnProposedItemOnlyAttaches(t *testing.T) {
 	m := e.msg("fm-13")
 	if m.Item != item || m.AttachState != runner.AttachProcessed || e.item(item).Phase != domain.PhaseProposed || e.itemCount() != before || len(e.stub.Requests()) != 0 {
 		t.Fatalf("echo on proposed: %+v phase %s items %d -> %d", m, e.item(item).Phase, before, e.itemCount())
+	}
+	if p := e.item(item).Proposal; p == nil || !slices.Contains(p.Sources, m.ID) {
+		t.Fatalf("proposal.sources should contain fm-13: %+v", p)
 	}
 }
 

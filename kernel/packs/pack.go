@@ -67,25 +67,28 @@ type ClockRule struct {
 	Mode     string   `yaml:"mode"`
 	Do       []Action `yaml:"do"`
 	// 提醒类规则的参数（C.4）；到期行为由内核固定，不写 do[]。
-	RemindRounds *int   `yaml:"remind_rounds"` // 只用于 follow_up，默认 2
-	DeferWith    string `yaml:"defer_with"`    // 只用于 follow_up：yes_no 判断型模板名
-	StaleAfter   string `yaml:"stale_after"`   // 只用于 stale，默认 14d
+	// 三个新字段带 omitempty：规则 hash 取自 json 序列化，没写这些字段的规则必须与 v0.1 账本里存的 hash 逐字相同，
+	// 否则升级后第一次对账会把没变过的规则当成"内容变化"（§14.8）。
+	RemindRounds *int   `yaml:"remind_rounds" json:",omitempty"` // 只用于 follow_up，默认 2
+	DeferWith    string `yaml:"defer_with" json:",omitempty"`    // 只用于 follow_up：yes_no 判断型模板名
+	StaleAfter   string `yaml:"stale_after" json:",omitempty"`   // 只用于 stale，默认 14d
 }
 
+// Where、Screen、Draft、Prescreen、Extract、OnUpdate 是 v0.2 新字段，带 omitempty 以保持 v0.1 规则 hash 不变（见 ClockRule）。
 type SourceRule struct {
 	ID        string         `yaml:"id"`
 	Match     map[string]any `yaml:"match"`
-	Where     []Condition    `yaml:"where"`
+	Where     []Condition    `yaml:"where" json:",omitempty"`
 	Kind      string         `yaml:"kind"`
 	ProjectBy string         `yaml:"project_by"`
 	Then      string         `yaml:"then"`
 	// 各步所用的提示词模板名（C.5）；省略时取内置模板。
-	Screen          string   `yaml:"screen"`
-	Draft           string   `yaml:"draft"`
-	Prescreen       string   `yaml:"prescreen"`
-	Extract         string   `yaml:"extract"`
+	Screen          string   `yaml:"screen" json:",omitempty"`
+	Draft           string   `yaml:"draft" json:",omitempty"`
+	Prescreen       string   `yaml:"prescreen" json:",omitempty"`
+	Extract         string   `yaml:"extract" json:",omitempty"`
 	CorrelationKeys []string `yaml:"correlation_keys"`
-	OnUpdate        string   `yaml:"on_update"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
+	OnUpdate        string   `yaml:"on_update" json:",omitempty"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
 	Accept          string   `yaml:"accept"`
 	Mode            string   `yaml:"mode"`
 }

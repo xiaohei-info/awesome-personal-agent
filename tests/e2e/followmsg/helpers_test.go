@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -56,6 +57,10 @@ source_rules:
     kind: task
     project_by: "fixed:%s"
     then: proposed
+  - id: fm-reply
+    match: {source_type: acc, event_type: [acc.reply]}
+    on_update: attach
+    then: screen
   - id: acc-auto
     match: {source_type: acc, event_type: [issue.auto]}
     kind: task
@@ -79,6 +84,13 @@ func newKit(t *testing.T) *kit {
 	pack := filepath.Join(e.Home, "packs", "acc-inbound")
 	k.must(os.MkdirAll(pack, 0o755))
 	k.must(os.WriteFile(filepath.Join(pack, "pack.yaml"), []byte(fmt.Sprintf(accRules, e.Projects["acc-work"], e.Projects["acc-open"])), 0o644))
+	// 用户包里的规则取自己包内的提示词模板：把内置 inbound-triage 的初筛与起草模板复制进来，规则才能 then: screen。
+	for _, f := range []string{"triage-screen.md", "triage-draft.md"} {
+		b, err := os.ReadFile(filepath.Join(repoRoot(), "packs", "inbound-triage", "prompts", f))
+		k.must(err)
+		k.must(os.MkdirAll(filepath.Join(pack, "prompts"), 0o755))
+		k.must(os.WriteFile(filepath.Join(pack, "prompts", f), b, 0o644))
+	}
 	e.StopKernel()
 	e.StartKernelAgain()
 
@@ -90,6 +102,11 @@ func newKit(t *testing.T) *kit {
 		"command": script + " " + k.queue, "schedule": "1s", "timeout": 30})
 	k.webOK("POST", "/v1/sources", string(body), 201)
 	return k
+}
+
+func repoRoot() string {
+	_, f, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(f), "..", "..", "..")
 }
 
 func (k *kit) must(err error) {

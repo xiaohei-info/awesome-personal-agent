@@ -116,6 +116,8 @@ type View struct {
 	ModelUnavailable []ModelIssue
 	// Endpoint 是模型端点现状，空表示正常（或没有配置、也没有事件在等它）；计入"模型不可用"。
 	Endpoint string
+	// Judge 与 Generate 是判断端点与生成端点各自的现状（空、EndpointNotConfigured、EndpointFailing）；Endpoint 取其中较差的。
+	Judge, Generate string
 	// Unjudged 是未判定积压（disposition 为 unjudged），单独一个提醒级信号；Expired 是已过期、不计入积压的条数。
 	Unjudged        []domain.SourceEvent
 	Expired         int
@@ -171,7 +173,7 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	if v.Expired, err = runner.CountExpired(tx); err != nil {
 		return View{}, err
 	}
-	if v.Endpoint, err = endpoint(tx, v.Unjudged); err != nil {
+	if v.Judge, v.Generate, v.Endpoint, err = endpoint(tx, v.Unjudged); err != nil {
 		return View{}, err
 	}
 	if v.ModelUnavailable, v.RuleFallbacks, v.ReceiptFailures, v.OtherAlerts, v.ClockLags, err = alerts(tx, now); err != nil {
@@ -187,23 +189,39 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	return v, nil
 }
 
-// endpoint 判定模型端点现状：调用持续失败总是异常；没有配置只在有事件因此未判定时才算异常（不用模型是允许的，§5.6）。
-func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (string, error) {
+// endpoint 判定两个端点的现状：生成端点调用持续失败总是异常；某个端点没有配置只在有事件因此未判定时才算异常（不用模型是允许的，§5.6）。
+// shortcut: 判断端点没有健康记录（direct 只记生成端点），所以 judge 只会是空或 not_configured；要报 failing 需要先记它的失败。
+func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (judge, generate, worst string, err error) {
 	h, err := direct.HealthIn(tx)
-	if err != nil || h.Unavailable {
-		return EndpointFailing, err
+	if err != nil {
+		return "", EndpointFailing, EndpointFailing, err
+	}
+	if h.Unavailable {
+		generate = EndpointFailing
 	}
 	_, pol, err := policy.Current(tx)
-	if err != nil || (pol.GenerateEndpoint.URL != "" && pol.GenerateEndpoint.Model != "") {
-		return "", err
+	if err != nil {
+		return "", EndpointFailing, EndpointFailing, err
 	}
+	waiting := false
 	for _, e := range backlog {
 		// 判断未定、外发范围未选择、放回积压的事件与端点有没有配置无关
 		if e.UnjudgedReason != domain.UnjudgedUndecided && e.UnjudgedReason != domain.UnjudgedOutboundUnset && e.UnjudgedReason != domain.UnjudgedRestored {
-			return EndpointNotConfigured, nil
+			waiting = true
+			break
 		}
 	}
-	return "", nil
+	if waiting && (pol.JudgeEndpoint == nil || pol.JudgeEndpoint.URL == "") {
+		judge = EndpointNotConfigured
+	}
+	if waiting && generate == "" && (pol.GenerateEndpoint.URL == "" || pol.GenerateEndpoint.Model == "") {
+		generate = EndpointNotConfigured
+	}
+	worst = generate
+	if judge == EndpointFailing || (judge != "" && worst == "") {
+		worst = judge
+	}
+	return judge, generate, worst, nil
 }
 
 func sourceFailures(tx *store.Tx) ([]SourceFailure, error) {

@@ -261,7 +261,7 @@ func (s *Service) Intercept(ctx context.Context, ev domain.SourceEvent, onUpdate
 			return false, "", err
 		}
 	}
-	in, _ := json.Marshal(attachIn{Event: ev.ID, Item: p.item, Applied: p.how != forward})
+	in, _ := json.Marshal(attachIn{Event: ev.ID, Item: p.item, Applied: p.how != forward, Echo: p.how == echo})
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: CmdAttach, Input: in, IdemKey: "followmsg:attach:" + ev.ID,
 		Chain: command.Chain{Mode: command.ChainKeep, From: p.item}, Evidence: "followmsg", Owner: s.o.Owner})
 	return err == nil, "", err
@@ -305,6 +305,8 @@ type attachIn struct {
 	Item  string `json:"item"`
 	// Applied 表示这是同一来源对象的更新（已写回事项）或本人事项收到的回音（已记在事项上）：消息直接记为 processed。
 	Applied bool `json:"applied,omitempty"`
+	// Echo 表示本人事项收到回音；事项仍是 proposed 时，回音来源记入 proposal.sources（§9.4）。
+	Echo bool `json:"echo,omitempty"`
 }
 
 type ackIn struct {
@@ -452,8 +454,30 @@ func attach() command.Spec {
 			if err := runner.SetAttachState(c.Tx, v.Event, state, v.Item); err != nil {
 				return nil, err
 			}
+			if v.Echo {
+				if err := addEchoSource(c, v); err != nil {
+					return nil, err
+				}
+			}
 			return nil, emit(c, EvAttached, v.Item, reason, map[string]string{"message": v.Event})
 		}}
+}
+
+// addEchoSource：proposed 事项收到回音只更新"来自几个来源"，阶段不变；其他阶段不动。
+func addEchoSource(c *command.Ctx, v attachIn) error {
+	it, err := items.Get(c.Tx, v.Item)
+	if err != nil || it.Phase != domain.PhaseProposed {
+		return err
+	}
+	w, changed, err := items.AddProposalSource(c.Tx, v.Item, v.Event, c.Now())
+	if err != nil || !changed {
+		return err
+	}
+	if _, err := command.Bump(c.Tx, w.Object); err != nil {
+		return err
+	}
+	_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "echo source event " + v.Event, Evidence: c.Evidence})
+	return err
 }
 
 func ack() command.Spec {

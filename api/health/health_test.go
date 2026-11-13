@@ -296,3 +296,40 @@ func TestClockLagIsWarningAndKeepsHealthy(t *testing.T) {
 		t.Fatalf("%+v", sd)
 	}
 }
+
+// ACT-EPC-09：model_unavailable 的 detail 是 {judge, generate, endpoint}，各取空、not_configured 或 failing，endpoint 取较差者。
+func TestModelUnavailableDetailSplitsJudgeAndGenerate(t *testing.T) {
+	detail := func(e *env) map[string]any {
+		t.Helper()
+		s := e.report(auth.Observer).byID("model_unavailable")
+		d, _ := s.Detail.(map[string]any)
+		return d
+	}
+	want := func(d map[string]any, judge, generate, endpoint string) {
+		t.Helper()
+		if d["judge"] != judge || d["generate"] != generate || d["endpoint"] != endpoint {
+			t.Fatalf("detail %v, want judge=%q generate=%q endpoint=%q", d, judge, generate, endpoint)
+		}
+	}
+	e := setup(t, fakePacks(nil))
+	want(detail(e), "", "", "")
+
+	// 没配置任何端点而有事件在等：两个端点都 not_configured。
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link,
+			occurred_at, correlation_keys, sender, sender_verified, disposition, unjudged_reason) VALUES ('d', 'e1', 'e1', 'src_rss', 'run', 't', 's', '', '', '', 0, '[]', '', 0, 'unjudged', 'model_unavailable')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want(detail(e), "not_configured", "not_configured", "not_configured")
+
+	// 生成端点持续失败：generate 为 failing，judge 仍只是没配置，endpoint 取较差的 failing。
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO direct_health (id, since, last_error) VALUES (1, 1, 'boom')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want(detail(e), "not_configured", "failing", "failing")
+}

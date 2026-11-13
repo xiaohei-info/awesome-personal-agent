@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/cli/backup"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -599,5 +600,33 @@ func TestDoctorChannelsBacklogBeforeAndAfterClaim(t *testing.T) {
 	r := Run(bg, e.input())
 	if b, _ := json.Marshal(r); strings.Contains(string(b), "SECRET-TITLE") {
 		t.Fatal("delivery content leaked")
+	}
+}
+
+// ACT-BAK-09：--no-secrets 恢复出的目录里，缺失的来源凭据与 webhook 接收密钥在来源检查里给警告，补齐后消失。
+func TestDoctorFlagsSecretsMissingAfterNoSecretsRestore(t *testing.T) {
+	e, _, _ := healthy(t)
+	e.writeFile(backup.NoticeFile, `{"no_secrets":true,"withheld":["sources/doc-ok","webhook-keys/hook1"]}`)
+	e.seal()
+	UseRegistry(func() (*store.Registry, error) { return e.reg, nil })
+	run := func() kdoctor.Check {
+		var out, errb bytes.Buffer
+		cenv := client.Env{Getenv: func(k string) string { return map[string]string{"APA_HOME": e.home}[k] },
+			UserHome: t.TempDir(), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient}
+		client.Main([]string{"doctor", "--json"}, cenv)
+		var rep kdoctor.Report
+		must(t, json.Unmarshal(out.Bytes(), &rep))
+		return find(t, rep, kdoctor.Sources)
+	}
+	c := run()
+	cred, ok1 := c.Find("doc-ok")
+	key, ok2 := c.Find("hook1")
+	if c.Status != kdoctor.Warning || !ok1 || !ok2 || !strings.Contains(cred.Why, "credentials are missing") || !strings.Contains(key.Next, "rotate") {
+		t.Fatalf("sources check: %+v", c)
+	}
+	e.writeFile("sources/doc-ok/cred", "x")
+	e.writeFile("webhook-keys/hook1", "k")
+	if c := run(); c.Status != kdoctor.OK {
+		t.Fatalf("after re-auth and rotation: %+v", c)
 	}
 }
