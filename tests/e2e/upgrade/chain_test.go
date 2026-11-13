@@ -320,11 +320,8 @@ func (r *run) upg15(t *testing.T) {
 	if res.Code == 0 {
 		t.Fatalf("注入失败后待测版本应以非 0 退出，输出: %s", res.Stdout)
 	}
-	// 验收文档写"输出指出迁移失败并已回滚"，但 CLI 对非领域错误只给机制性说明（"the command failed locally"，细节可能含路径，
-	// 见 cli/client/client.go），迁移失败的原因文本不在输出里。这里断言退出码、结构化错误，并用下面的账本哈希与对照组证明确是迁移失败后整体回滚。
-	if !strings.Contains(res.Stdout, `"code"`) {
-		t.Errorf("启动失败应给出结构化错误: %s", res.Stdout)
-	}
+	contains(t, "迁移失败时的输出", res.Stdout, "migration fault injected after step 1", "rolled back")
+	
 	if got := fileSHA(t, db); got != ledgerSHA {
 		t.Errorf("迁移失败后 ledger.db 被改动（%s → %s）", ledgerSHA, got)
 	}
@@ -638,53 +635,43 @@ type ruleChange struct{ Rule, From, To, Why string }
 func (r *run) upg10(t *testing.T) {
 	db := openRO(t, r.home)
 	rm := r.m.RuleModes
-	var switched []ruleChange
-	var fallbacks = map[string]bool{}
+	var switched = map[string]ruleChange{}
+	var anyEvent = map[string][]string{} // 规则 → 升级后所有 rule.mode_changed 的说明
 	for _, e := range events(t, db, `WHERE seq > ? AND type = 'rule.mode_changed'`, r.m.EventMaxSeq) {
 		c := decode[ruleChange](t, e.Payload)
+		anyEvent[c.Rule] = append(anyEvent[c.Rule], c.From+"→"+c.To+" ("+c.Why+", "+e.ActorPrincipal+")")
 		if e.ActorType == "system" && e.ActorPrincipal == "system" {
 			if c.From != "observe" || c.To != "auto" {
 				t.Errorf("升级切换应是 observe → auto: %+v", c)
 			}
-			switched = append(switched, c)
-		} else {
-			fallbacks[c.Rule] = true // 规则内容变化后自动回到 observe（§13.3），不是升级对默认值的切换
+			switched[c.Rule] = c
 		}
 	}
-	if len(switched) == 0 {
-		t.Fatal("没有任何内置提醒类规则被切到 auto")
-	}
-	for _, c := range switched {
-		if !strings.Contains(c.Rule, "/clock_rules/") {
-			t.Errorf("被切换的 %s 不是提醒类（时钟）规则", c.Rule)
-		}
-		if _, owner := rm.OwnerSwitched[c.Rule]; owner {
-			t.Errorf("本人切换过的 %s 不应被升级切换", c.Rule)
+	mode := func(key string) string { return one[string](t, db, `SELECT mode FROM rules_state WHERE key = ?`, key) }
+	// 未动过的内置提醒类规则：各一条 observe → auto（操作者 system）；动作类（事件规则）不切换。
+	for _, key := range rm.Untouched {
+		if strings.Contains(key, "/clock_rules/") {
+			if _, ok := switched[key]; !ok || mode(key) != "auto" {
+				t.Errorf("未动过的提醒类规则 %s 应有 observe→auto 事件且模式为 auto: %v / %s", key, anyEvent[key], mode(key))
+			}
 		}
 	}
-	// 动作类规则（事件规则）不被切换，模式不变。
-	for key, mode := range rm.Current {
-		if !strings.Contains(key, "/event_rules/") {
-			continue
-		}
-		if got := one[string](t, db, `SELECT mode FROM rules_state WHERE key = ?`, key); got != mode {
-			t.Errorf("动作类规则 %s 模式应不变：%s → %s", key, mode, got)
+	for key, mo := range rm.Current {
+		if strings.Contains(key, "/event_rules/") && (mode(key) != mo || len(anyEvent[key]) != 0) {
+			t.Errorf("动作类规则 %s 应不变（%s）也不留事件: %s %v", key, mo, mode(key), anyEvent[key])
 		}
 	}
-	// 本人切换过的规则，没有任何升级切换事件；若模式与升级前不同，必须由"内容变化"回退事件解释。
-	for key, mode := range rm.Current {
-		got := one[string](t, db, `SELECT mode FROM rules_state WHERE key = ?`, key)
-		if got == mode {
-			continue
+	// 本人切换过的、用户包显式写 observe 的、默认关闭的规则：模式不变，没有任何升级后的模式事件。
+	var keep []string
+	for key := range rm.OwnerSwitched {
+		keep = append(keep, key)
+	}
+	keep = append(keep, rm.UserPackExplicitObserve...)
+	keep = append(keep, rm.OffByDefault...)
+	for _, key := range keep {
+		if mode(key) != rm.Current[key] || len(anyEvent[key]) != 0 {
+			t.Errorf("规则 %s 应保持 %s 且没有模式事件，实际 %s %v", key, rm.Current[key], mode(key), anyEvent[key])
 		}
-		inSwitch := false
-		for _, c := range switched {
-			inSwitch = inSwitch || c.Rule == key
-		}
-		if !inSwitch && !fallbacks[key] {
-			t.Errorf("规则 %s 模式 %s → %s，没有对应的 rule.mode_changed 解释", key, mode, got)
-		}
-		t.Logf("规则 %s 升级后模式 %s（升级前 %s）；升级切换=%v 内容变化回退=%v", key, got, mode, inSwitch, fallbacks[key])
 	}
 	h := decode[struct {
 		Signals []struct {

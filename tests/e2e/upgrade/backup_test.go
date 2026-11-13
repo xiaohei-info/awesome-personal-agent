@@ -131,7 +131,7 @@ func TestBackupRestore(t *testing.T) {
 		}
 		// 自定义脚本来源与一份宿主声明由本人写在主机配置文件里（sources.json、declarations/），重启内核后生效。
 		reg, _ := json.Marshal(map[string]any{"sources": []map[string]any{{"id": scriptSource, "type": "script", "command": e.Bin["tool-stub"],
-			"schedule": "24h", "timeout": 60, "enabled": false}}}) // 不写 credentials_path：它必须是原数据目录下的绝对路径，换目录恢复后不再成立（见交付说明）
+			"credentials_path": cred, "schedule": "24h", "timeout": 60, "enabled": false}}})
 		if err := os.WriteFile(filepath.Join(e.Home, "sources.json"), reg, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -261,6 +261,30 @@ func TestBackupRestore(t *testing.T) {
 		}
 	})
 
+	step(t, "备份命令接受相对路径（create/verify/restore）", func(t *testing.T) {
+		b.t = t
+		inRoot := func(args ...string) baseline.Result {
+			cmd := exec.Command(e.Bin["apa"], args...)
+			cmd.Dir = root
+			cmd.Env = cleanEnv(e.Home)
+			var o, er bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &o, &er
+			res := baseline.Result{}
+			if err := cmd.Run(); err != nil {
+				res.Code = cmd.ProcessState.ExitCode()
+			}
+			res.Stdout, res.Stderr = o.String(), er.String()
+			return res
+		}
+		for _, args := range [][]string{{"backup", "create", "--out", "relbk"}, {"backup", "verify", "relbk"}, {"backup", "restore", "relbk", "--home", "relrh"}} {
+			if r := inRoot(args...); r.Code != 0 {
+				t.Fatalf("apa %s（相对路径）退出码 %d: %s%s", strings.Join(args, " "), r.Code, r.Stdout, r.Stderr)
+			}
+		}
+		os.RemoveAll(filepath.Join(root, "relbk"))
+		os.RemoveAll(filepath.Join(root, "relrh"))
+	})
+
 	step(t, "ACT-BAK-05 校验发现损坏的备份", func(t *testing.T) {
 		b.t = t
 		// 改一个 blob 的一个字节：先造出一个 blob（备份里至少要有一个）。
@@ -304,8 +328,19 @@ func TestBackupRestore(t *testing.T) {
 			t.Fatal(err)
 		}
 		db.Close()
+		// 重算清单里账本副本的哈希，让哈希与完整性都通过，只剩序号连续性可以失败。
+		mp := filepath.Join(by, "manifest.json")
+		var mf map[string]any
+		if err := json.Unmarshal(mustRead(t, mp), &mf); err != nil {
+			t.Fatal(err)
+		}
+		mf["files"].(map[string]any)["ledger.db"] = fileSHA(t, filepath.Join(by, "ledger.db"))
+		nb, _ := json.MarshalIndent(mf, "", "  ")
+		if err := os.WriteFile(mp, nb, 0o600); err != nil {
+			t.Fatal(err)
+		}
 		r2 := b.apa("", 1, "backup", "verify", by)
-		contains(t, "Event 序号不连续的备份校验输出", strings.ToLower(r2.Stdout+r2.Stderr), "ledger")
+		contains(t, "Event 序号不连续的备份校验输出", r2.Stdout+r2.Stderr, "not continuous")
 	})
 
 	step(t, "ACT-BAK-06 恢复到空目录并继续使用", func(t *testing.T) {
@@ -392,9 +427,17 @@ func TestBackupRestore(t *testing.T) {
 		if n := len(b.itemTitlesAt(s.URL)); n < b.itemsSeen {
 			t.Errorf("事项应完整：%d < %d", n, b.itemsSeen)
 		}
-		// 提示重新认证：设计 §16.5 的交付形式是恢复命令的输出（来源要重新认证、接收密钥要轮换）；
-		// 验收文档 ACT-BAK-09 写的是"doctor 或健康视图指出"，而 doctor 与健康视图在恢复之后没有这一条（见交付说明）。
+		// 恢复命令的输出提示 + 验收文档要求的 doctor 或健康视图指出来源凭据缺失、接收密钥需轮换。
 		contains(t, "不含密钥的备份恢复时的提示", b.restoreOut, "re-authenticate every source", "rotate each webhook source's key")
+		rep := b.doctorAt(rh3, []string{"APA_URL=" + s.URL, "APA_TOKEN=" + e.OBS}, "--json")
+		notice := b.run(e.Bin["apa"], rh3, []string{"APA_URL=" + s.URL, "APA_TOKEN=" + e.OBS}, "health").Stdout
+		for _, c := range rep {
+			notice += " " + c.Why + " " + c.Next
+			for _, d := range c.Details {
+				notice += " " + d.Subject + " " + d.Why + " " + d.Next
+			}
+		}
+		contains(t, "doctor 或健康视图对缺失密钥的提示", strings.ToLower(notice), hookSource, "rotate")
 		for _, d := range []string{"sources", "webhook-keys"} {
 			if n := len(readDirNames(filepath.Join(rh3, d))); n != 0 {
 				t.Errorf("不含密钥的备份恢复后 %s/ 应为空，实际 %d 项", d, n)
