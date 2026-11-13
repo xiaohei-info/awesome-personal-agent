@@ -1,4 +1,9 @@
-# sha256: d1b36193f64187c00447ccb97b6c1ef6b1e1d6039ad40a57454c01a7a3c18fa2
+# sha256: c3f55f07307c4ad295b15cae44b3450a2b896afc97ab522a710205472386ba29
 work_item_id: 01a1d24b-1057-7344-8a35-b205d5ebbc24
-status: blocked
+status: in_progress
 recovery_marker: true
+retry_note: 'OWNER ANSWER to blocker handoff-638d034f3f12f6eb: 负责人裁定：不停本机 apa serve（那是本人在用的实例）。授权本节点在同一
+  PR 里修改 cli/serve 下的测试，让 TestApaVersionMatchesGetVersionAndLatestLedgerMigration
+  改用临时空闲端口（listen 写 127.0.0.1:0 或先取一个空闲端口写进测试用 config），不再依赖固定的 7777。顺手 grep 整个仓库测试代码里写死
+  7777 的地方，同类的一并改成空闲端口，改了哪些写进 PR 描述；产品默认端口 7777 本身不改。改完 ./cli/serve/ 与合约命令全绿后 submit，submit
+  后不要再推。'
