@@ -60,6 +60,9 @@ func (s signal) outcall(t *testing.T) outcallDetail {
 // the ten signal ids, in design §15.2 order.
 var signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts"}
 
+// allSignalIDs 是健康视图恒有的十三项（§15.2、附录 B）：后两项是 v0.2.0 追加的提醒级信号，不影响 healthy，由 e2e-followup 造出异常。
+var allSignalIDs = append(append([]string{}, signalIDs...), "stalled_delegations", "clock_lag")
+
 // quietWindow 是 ACT-HLT-02 里"不做任何修复操作"的观察时长。验收文档为 10 分钟；默认按 30 秒缩放
 // （合约命令不带 -timeout，go test 默认 10 分钟超时放不下 10 分钟窗口加造数），
 // 设置 APA_E2E_HEALTH_QUIET=10m 并加 -timeout 30m 即按原文执行，窗口内占用型运行与来源的超时都长于 10 分钟。
@@ -81,12 +84,12 @@ func TestFlowHealth(t *testing.T) {
 	open := f.Projects["acc-open"]
 	var driftItem, tripItem string
 
-	step(t, "全新环境十类信号都正常", func(t *testing.T) {
+	step(t, "全新环境十三项信号都正常", func(t *testing.T) {
 		h := f.health()
-		if !h.Healthy || len(h.Signals) != len(signalIDs) {
-			t.Fatalf("全新环境应健康且有十类信号: %+v", h)
+		if !h.Healthy || len(h.Signals) != len(allSignalIDs) {
+			t.Fatalf("全新环境应健康且有十三项信号: %+v", h)
 		}
-		for i, id := range signalIDs {
+		for i, id := range allSignalIDs {
 			if h.Signals[i].ID != id || !h.Signals[i].OK {
 				t.Errorf("第 %d 个信号 = %+v，期望 %s 正常", i, h.Signals[i], id)
 			}
