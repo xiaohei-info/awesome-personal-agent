@@ -2,6 +2,8 @@ package rules
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -190,5 +192,36 @@ func TestAlertSourceRuleStartsObserveAndIsWebOnly(t *testing.T) {
 	}
 	if err := e.setMode(owner, k, ModeAuto); err != nil || e.mode(k) != ModeAuto {
 		t.Fatalf("owner switch: %v / %s", err, e.mode(k))
+	}
+}
+
+// ACT-UPG-10：包被拒绝（如带 v0.1 字段的用户覆盖包）时，本人写在包里的 mode 看不到，升级不替他把 observe 切成 auto；
+// 同一次对账里别的包的提醒类规则照常切换。
+func TestUpgradeHoldsReminderRulesOfRejectedPack(t *testing.T) {
+	e := newEnv(t, map[string]string{"cat/pack.yaml": reminderPack, "oth/pack.yaml": strings.NewReplacer("name: cat", "name: oth").Replace(reminderPack)}, nil)
+	const held, other = "cat/clock_rules/follow", "oth/clock_rules/follow"
+	e.legacy(held)
+	e.legacy(other)
+	bad := strings.Replace(reminderPack, "type: follow_up", "type: no_such_type", 1)
+	if err := os.WriteFile(filepath.Join(e.data, "cat", "pack.yaml"), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rej, err := e.loads.Load(); err != nil || len(rej) != 1 {
+		t.Fatalf("want one rejection, got %v %v", rej, err)
+	}
+	base := len(e.events())
+	if err := e.eng.Reconcile(bg); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.mode(held); got != ModeObserve {
+		t.Errorf("rule of a rejected pack = %s, want observe", got)
+	}
+	if got := e.mode(other); got != ModeAuto {
+		t.Errorf("rule of a healthy pack = %s, want auto", got)
+	}
+	for _, ev := range e.events()[base:] {
+		if ev.Type == domain.EvRuleModeChanged && ev.Object == "rule:"+held {
+			t.Errorf("unexpected mode change for held rule: %+v", ev)
+		}
 	}
 }

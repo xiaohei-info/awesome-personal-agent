@@ -67,9 +67,11 @@ type ClockRule struct {
 	Mode     string   `yaml:"mode"`
 	Do       []Action `yaml:"do"`
 	// 提醒类规则的参数（C.4）；到期行为由内核固定，不写 do[]。
-	RemindRounds *int   `yaml:"remind_rounds"` // 只用于 follow_up，默认 2
-	DeferWith    string `yaml:"defer_with"`    // 只用于 follow_up：yes_no 判断型模板名
-	StaleAfter   string `yaml:"stale_after"`   // 只用于 stale，默认 14d
+	// 三个新字段带 omitempty：规则 hash 取自 json 序列化，没写这些字段的规则必须与 v0.1 账本里存的 hash 逐字相同，
+	// 否则升级后第一次对账会把没变过的规则当成"内容变化"（§14.8）。
+	RemindRounds *int   `yaml:"remind_rounds" json:",omitempty"` // 只用于 follow_up，默认 2
+	DeferWith    string `yaml:"defer_with" json:",omitempty"`    // 只用于 follow_up：yes_no 判断型模板名
+	StaleAfter   string `yaml:"stale_after" json:",omitempty"`   // 只用于 stale，默认 14d
 }
 
 type SourceRule struct {
