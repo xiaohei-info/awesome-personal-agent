@@ -1,12 +1,12 @@
-# sha256: 8397bacaf08943ebe64374e8ac56665e36339846d50546aee7243602527aac0d
+# sha256: 8fdc61a0e713f8287f1ac48a1b79b0e73519ebcaa385e90a9a265570cfa291d0
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 19
+  used_global: 20
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 3
     e2e-judge: 4
-    e2e-judgment: 3
+    e2e-judgment: 4
     e2e-inbound-rules: 2
     e2e-upgrade: 3
     e2e-hostplugin: 1
@@ -213,4 +213,13 @@ defects:
       - e2e-inbound-rules
       state: fixed
       fix_node: fix.login-hardening.0b1aae
+    dfx-184e245a8c8f:
+      suspected: judgment-stats
+      anchors:
+      - flow-judgment-record/ACT-JRC-08
+      - flow-judgment-record/ACT-JRC-10
+      reporters:
+      - e2e-judgment
+      state: fixing
+      fix_node: fix.judgment-stats.184e24
   inbox: []
