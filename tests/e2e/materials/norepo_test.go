@@ -89,6 +89,10 @@ func TestFlowNoRepoGuideline(t *testing.T) {
 	})
 
 	step("ACT-NRG-03 无仓库项目不做缺规范检测", func(t *testing.T) {
+		// 没有仓库也没有规范的项目：若检测不跳过无仓库项目，它就会被起草。
+		bare2 := decode[struct {
+			ID string `json:"id"`
+		}](t, f.webOK("POST", "/projects", `{"name":"acc-bare2"}`, 201))
 		f.webOK("PATCH", "/rules/"+draftRule+"/mode", `{"mode":"auto"}`, 200)
 		before := projectItems(bare.ID)
 		f.TCAdvance(2 * 24 * 3600) // 越过两个检测周期（24h），内核不重启
@@ -98,9 +102,11 @@ func TestFlowNoRepoGuideline(t *testing.T) {
 			t.Fatal("对照项目 acc-work（有仓库无规范）应被检测并起草，检测没有运行")
 		}
 		eq(t, "acc-bare 的事项数", projectItems(bare.ID), before)
+		eq(t, "acc-bare2（无仓库无规范）的事项数", projectItems(bare2.ID), 0)
+		eq(t, "acc-bare2 的规范材料数", len(guidelines(bare2.ID)), 0)
 		eq(t, "acc-bare 的规范材料数", len(guidelines(bare.ID)), 1)
 		for _, e := range f.events("", "health.alert") {
-			if strings.Contains(e.Object, bare.ID) {
+			if strings.Contains(e.Object, bare.ID) || strings.Contains(e.Object, bare2.ID) {
 				t.Errorf("无仓库项目不应触发缺规范检测的告警: %+v", e)
 			}
 		}
