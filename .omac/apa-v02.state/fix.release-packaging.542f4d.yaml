@@ -1,5 +1,5 @@
-# sha256: e516c18a9dc9eb54db5a870657fc3517d7ae7c0eeb45e6a47c5fa7a93ed8473c
+# sha256: d2d618eee6cc016ac428c360bffd9a69b410485bcf3dc04b2c0e9e37d9e41a20
 work_item_id: 01a1d3fd-0ffc-7840-9ee5-4f627a9b94d3
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 'PR #351 head 0d3f474 与节点记录一致，代码与验证已完成；核对 head 后重新提交，不要重做'

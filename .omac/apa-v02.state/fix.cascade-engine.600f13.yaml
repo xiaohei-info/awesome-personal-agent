@@ -1,5 +1,8 @@
-# sha256: a93463292ffad3a325888524e61bdda56ecfaf74d1c8ca86453bce72c7a5729a
+# sha256: 8796ac60a18ed252a19d2d76d7a1458ce7ca576538cd92e84d2ae4cb4f1813e8
 work_item_id: 01a1d3d4-f913-7a5b-8ffb-a26bcd664782
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 代码与 PR 已完成,等契约修订后重新提交,不要重做
+retry_note: 'OWNER ANSWER to blocker handoff-eaef4891aa3d60ca: main 本机路径已由清单持有方修复（main
+  commit be2630742330f94b3d21f7d7b0b8ecedead370b7；.omac 仅含相对路径，tests/release 的 TestRepoHasNoCredentialsOrPersonalInfo
+  本地通过）。请按原 diff 基于最新 main 重新跑 CI 即可，不要动 .omac 与 tests/release。 另：ACT-OUT-06 为进程组时序测试，不在本节点范围，若
+  CI 仅此项抖动可重跑。'
