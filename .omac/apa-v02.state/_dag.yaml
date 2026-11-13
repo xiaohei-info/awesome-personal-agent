@@ -1,4 +1,4 @@
-# sha256: 19802eeefd13ced74798376edd9c984125f623d1ec984ac419c59d1284ae1510
+# sha256: c250762324fc196a41c9ced7a3ae68ab5de975822d21e78ae6f00cca5381f216
 defects:
   schema: omac.defect-ledger/v1
   used_global: 20
@@ -220,6 +220,6 @@ defects:
       - flow-judgment-record/ACT-JRC-10
       reporters:
       - e2e-judgment
-      state: fixing
+      state: fixed
       fix_node: fix.judgment-stats.184e24
   inbox: []
