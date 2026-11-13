@@ -1,4 +1,4 @@
-# sha256: a8a4181f3bda2a84b6b4b1f22583ff73dfbabce89ec7c478492b2e638dcd8be5
+# sha256: f952da31fe1c654b70917dffef9d475432b84e1882175fd02eef9e24b416381d
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -146,7 +146,7 @@ defects:
       - flow-backup-restore/ACT-BAK-04
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.backup-restore.1fd0f7
     dfx-68b52a3729d6:
       suspected: backup-restore
@@ -154,7 +154,7 @@ defects:
       - flow-backup-restore/ACT-BAK-06
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.backup-restore.1fd0f7
     dfx-ed02ce5c6af4:
       suspected: backup-restore
@@ -162,7 +162,7 @@ defects:
       - flow-backup-restore/ACT-BAK-09
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.backup-restore.1fd0f7
     dfx-1d1fcf14b3a9:
       suspected: ledger-schema-v3
