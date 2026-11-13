@@ -1,4 +1,4 @@
-# sha256: 9cadc7f23d04c91360a0ccfd2386a9ecaf3ba26e354ae71a7bafe27b4141e904
+# sha256: b9ec5fd144ce89ef60abb7b599d457dd0720a04ded9660a3abdcb69f848d5f08
 defects:
   schema: omac.defect-ledger/v1
   used_global: 1
@@ -14,4 +14,18 @@ defects:
       - e2e-followmsg
       state: fixing
       fix_node: fix.attribution-v2.62f6c6
+    dfx-d3eb8c700b85:
+      suspected: attribution-v2
+      anchors:
+      - flow-source-github/ACT-GH-09
+      reporters:
+      - e2e-sources
+      state: queued
+    dfx-bfeb8db8483b:
+      suspected: calendar-adapter-v2
+      anchors:
+      - flow-source-calendar/ACT-CAL-02
+      reporters:
+      - e2e-sources
+      state: queued
   inbox: []
