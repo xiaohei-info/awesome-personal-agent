@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -226,5 +227,44 @@ func TestDigestEventCanBeProposedOneByOne(t *testing.T) {
 	}
 	if _, err := e.svc.ProposeUnjudged(bg, owner, first.ID); code(err) != domain.CodeConflict {
 		t.Fatalf("second propose: %v", err)
+	}
+}
+
+// ACT-IRL-04/06/07/18：自定义包里省略 screen、draft、prescreen、extract 的规则取内置包的内置模板，事件不卡在 pending。
+func TestCustomPackRuleFallsBackToBuiltinTemplates(t *testing.T) {
+	e := newEnv(t, true)
+	e.judge(`{"choice":"yes","confidence":0.95}`)
+	e.draft(`{"candidates":[{"title":"回电话","kind":"task"}],"title":"回电话","summary":"s","kind":"task"}`)
+	var seen []string
+	e.svc.o.Judge = recorder{inner: e.svc.o.Judge, on: func(tmpl string) { seen = append(seen, tmpl) }}
+	e.emit("src_acc", "accsrc", ev("a1", "acc.screen", "s", nil), ev("a2", "acc.judge", "j", nil), ev("a3", "acc.extract", "x", nil))
+	for _, id := range []string{"a1", "a2"} {
+		if d := e.disposition("src_acc", id); d.Disposition != domain.DispositionProposed {
+			t.Errorf("%s: %+v", id, d)
+		}
+	}
+	if d := e.disposition("src_acc", "a3"); d.Disposition == domain.DispositionPending {
+		t.Errorf("extract event stuck pending: %+v", d)
+	}
+	if len(seen) == 0 || seen[0] != "triage-screen" {
+		t.Fatalf("templates %v", seen)
+	}
+}
+
+// ACT-JDP-02：同一次拉取落盘的 40 条自由文本事件，分类端点按 max_batch 收到整批而不是 40 个单题请求。
+func TestInboundScreenSubmitsInBatches(t *testing.T) {
+	e := newEnv(t, true)
+	e.judge(`{"choice":"ignore","confidence":0.95}`)
+	var evs []map[string]any
+	for i := 0; i < 40; i++ {
+		evs = append(evs, ev(fmt.Sprintf("b%02d", i), "acc.screen", fmt.Sprintf("subject %d", i), nil))
+	}
+	e.emit("src_acc", "accsrc", evs...)
+	var got []int
+	for _, b := range e.cls.Batches() {
+		got = append(got, b.Questions)
+	}
+	if len(got) != 2 || got[0]+got[1] != 40 || got[0] > 32 || got[1] > 32 {
+		t.Fatalf("classifier batches %v, want 32+8", got)
 	}
 }

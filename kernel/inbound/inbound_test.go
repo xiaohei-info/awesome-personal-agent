@@ -42,6 +42,22 @@ var (
 	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
 )
 
+// accPackYAML 是只有规则、不带模板的自定义包：省略 screen、draft、prescreen、extract，取内置包 inbound-triage 的模板（C.5）。
+const accPackYAML = `name: acc-pack
+version: 1.0.0
+description: custom pack that relies on builtin templates
+source_rules:
+  - id: acc-screen-rule
+    match: {source_type: accsrc, event_type: acc.screen}
+    then: screen
+  - id: acc-judge-rule
+    match: {source_type: accsrc, event_type: acc.judge}
+    then: judge
+  - id: acc-extract-rule
+    match: {source_type: accsrc, event_type: acc.extract}
+    then: extract
+`
+
 const (
 	packYAML = `name: inbound-triage
 version: 1.0.0
@@ -174,6 +190,7 @@ func newEnv(t *testing.T, configured bool) *env {
 	_ = json.Unmarshal(e.must("project.create", map[string]any{"name": "mail"}), &mail)
 	e.web, e.mail = web.ID, mail.ID
 	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(strings.ReplaceAll(packYAML, "p_mail", mail.ID))}}
+	fs["acc-pack/pack.yaml"] = &fstest.MapFile{Data: []byte(accPackYAML)}
 	for _, name := range []string{"triage-screen", "triage-draft", "triage-extract", "capture-prescreen"} { // 用内置包里随发行的模板，不另写一份
 		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
 		if err != nil {
