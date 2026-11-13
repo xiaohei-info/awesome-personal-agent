@@ -173,6 +173,20 @@ func freePort(t *testing.T) int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
+// useFreePort 只把 init 写出的默认端口 7777 换成空闲端口（避免与本机运行中的实例冲突），地址部分不变。
+func useFreePort(t *testing.T, home string) {
+	t.Helper()
+	cfg := filepath.Join(home, "config.yaml")
+	b, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patched := strings.Replace(string(b), "127.0.0.1:7777", "127.0.0.1:"+strconv.Itoa(freePort(t)), 1)
+	if err := os.WriteFile(cfg, []byte(patched), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // start 在已 init 的目录上启动 serve，返回监听地址与停止函数（停止后断言干净退出）。
 func start(t *testing.T, home string) (net.Addr, func()) {
 	t.Helper()
@@ -215,16 +229,10 @@ func TestServeListensOnLoopbackOnlyAndAcceptsInitPassword(t *testing.T) {
 	if r := apa(t, home, pw+"\n", "init", "--password-stdin"); r.code != 0 {
 		t.Fatal(r)
 	}
-	cfg := filepath.Join(home, "config.yaml")
-	b, _ := os.ReadFile(cfg)
-	if !strings.Contains(string(b), "listen: 127.0.0.1:7777") {
+	if b, _ := os.ReadFile(filepath.Join(home, "config.yaml")); !strings.Contains(string(b), "listen: 127.0.0.1:7777") {
 		t.Fatalf("default config must bind loopback: %q", b)
 	}
-	// 只把端口换成空闲端口（避免与本机 7777 冲突），地址部分保持 init 写出的默认值。
-	patched := strings.Replace(string(b), "127.0.0.1:7777", "127.0.0.1:"+strconv.Itoa(freePort(t)), 1)
-	if err := os.WriteFile(cfg, []byte(patched), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	useFreePort(t, home)
 	addr, stop := start(t, home)
 	defer stop()
 	if !addr.(*net.TCPAddr).IP.IsLoopback() {
