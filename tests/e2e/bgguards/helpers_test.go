@@ -374,6 +374,28 @@ func (f *fx) settled(target string, n int) []run {
 	return rs
 }
 
+// settledFinal 在 settled 之外再等每个 Run 的 run.finished（background）Event：
+// Run 置终态与事项转 needs_input 是两步，run.finished 最后才追加，只等 Run 终态会读到 open。
+func (f *fx) settledFinal(target string, n int) []run {
+	f.t.Helper()
+	rs := f.settled(target, n)
+	f.waitFor("事项 "+target+" 的 run.finished", 20*time.Second, func() bool {
+		fin := map[any]bool{}
+		for _, e := range f.events(target, "run.finished") {
+			if e.Payload["category"] == "background" {
+				fin[e.Payload["run_id"]] = true
+			}
+		}
+		for _, r := range rs {
+			if !fin[r.ID] {
+				return false
+			}
+		}
+		return true
+	})
+	return rs
+}
+
 func eq(t *testing.T, what string, got, want any) {
 	t.Helper()
 	if got != want {
