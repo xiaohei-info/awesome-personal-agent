@@ -53,6 +53,14 @@ var Module = store.Module{Name: "summaries", Migrations: []store.Migration{{
 	seq INTEGER NOT NULL
 );
 INSERT INTO summaries_cursor (id, seq) SELECT 1, COALESCE(MAX(seq), 0) FROM eventlog_event;`,
+}, {
+	// 简报"知会"一节已汇入过的摘要出口事件：每条只汇入一次（设计 §9.3）。
+	Version: 2, Ledger: 3, Name: "ledger-v3-summaries-digested",
+	SQL: `CREATE TABLE summaries_digested (
+	event TEXT PRIMARY KEY,
+	brief TEXT NOT NULL,
+	at INTEGER NOT NULL
+);`,
 }}}
 
 // Generator 是生成型调用（*direct.Service 满足它）。

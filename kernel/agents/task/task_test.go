@@ -34,6 +34,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 )
 
@@ -148,7 +149,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, executors.Module, runner.Module, proc.Module, runidentity.Module, delegation.Module, materials.Module, Module} {
+		items.Module, executors.Module, runner.Module, proc.Module, runidentity.Module, delegation.Module, materials.Module, summaries.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -1449,4 +1450,85 @@ func TestBriefRunMaterialsCarrySpotCheckEntries(t *testing.T) {
 	if !found {
 		t.Fatalf("no spot_check material: %s", raw)
 	}
+}
+
+// briefMaterials 在新的 brief 事项上跑一次简报并返回资料文件里按名字索引的材料正文。
+func (e *env) briefMaterials() map[string]string {
+	e.t.Helper()
+	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("brief", e.openItem())); err != nil {
+		e.t.Fatal(err)
+	}
+	var f struct {
+		Materials []Material `json:"materials"`
+	}
+	if err := json.Unmarshal([]byte(read(e.t, filepath.Join(e.runs, e.waitResult().Run.ID, "materials.json"))), &f); err != nil {
+		e.t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, m := range f.Materials {
+		out[m.Name] = m.Body
+	}
+	return out
+}
+
+// ACT-DGA-15/16/17：简报资料带"知会"（digest 事件的标题与链接，不是事项）并只汇入一次，且按计划日期取材：
+// 计划今天的在 planned 里，计划明天与没有计划日期的不在；整条路径不调模型（AgentOptions 不给生成型）。
+func TestBriefMaterialsCarryDigestOnceAndPlannedToday(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "summary")
+	e.setDefaultHarness("hx")
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for _, n := range []string{"n1", "n2"} {
+			if err := runner.AppendInternal(tx, domain.Source{ID: "src_news"}, domain.SourceEvent{ID: n, Type: "news", Subject: "资讯 " + n, Link: "https://example.com/" + n, OccurredAt: t0}); err != nil {
+				return err
+			}
+		}
+		evs, err := runner.Events(tx, "src_news")
+		if err != nil {
+			return err
+		}
+		for _, ev := range evs {
+			if err := runner.SetDisposition(tx, ev.ID, domain.DispositionDigest, "", ""); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for title, day := range map[string]string{"plan-today": items.Today(t0), "plan-tomorrow": items.Today(t0.Add(24 * time.Hour)), "plan-none": ""} {
+		in := map[string]any{"kind": "task", "title": title, "phase": "open"}
+		if day != "" {
+			in["planned_for"] = day
+		}
+		e.must(owner, "item.create", in)
+	}
+	itemsBefore := len(e.listItems())
+
+	first := e.briefMaterials()
+	var dg struct {
+		Digest []struct{ Title, Link string } `json:"digest"`
+	}
+	if err := json.Unmarshal([]byte(first["digest"]), &dg); err != nil || len(dg.Digest) != 2 || dg.Digest[0].Title != "资讯 n1" || dg.Digest[1].Link != "https://example.com/n2" {
+		t.Fatalf("first brief must list both digest events with title and link: %v %s", err, first["digest"])
+	}
+	if p := first["planned"]; !strings.Contains(p, "plan-today") || strings.Contains(p, "plan-tomorrow") || strings.Contains(p, "plan-none") {
+		t.Fatalf("planned must hold today's plan only: %s", p)
+	}
+	if n := len(e.listItems()); n != itemsBefore+1 { // 只多出简报事项本身：digest 事件没有变成事项
+		t.Fatalf("digest events became items: %d -> %d", itemsBefore, n)
+	}
+
+	second := e.briefMaterials()
+	if err := json.Unmarshal([]byte(second["digest"]), &dg); err != nil || len(dg.Digest) != 0 {
+		t.Fatalf("second brief must not repeat merged digest events: %v %s", err, second["digest"])
+	}
+}
+
+func (e *env) listItems() (out []domain.Item) {
+	e.t.Helper()
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { out, err = items.List(tx, items.Filter{}); return }); err != nil {
+		e.t.Fatal(err)
+	}
+	return out
 }

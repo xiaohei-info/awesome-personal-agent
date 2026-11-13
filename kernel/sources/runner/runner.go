@@ -720,6 +720,11 @@ func Pending(tx *store.Tx) ([]domain.SourceEvent, error) {
 	return queryEvents(tx, `WHERE disposition = ?`, string(domain.DispositionPending))
 }
 
+// ByDisposition 按落盘顺序返回所有处于某处置的来源事件（简报的"知会"取 digest）。
+func ByDisposition(tx *store.Tx, d domain.Disposition) ([]domain.SourceEvent, error) {
+	return queryEvents(tx, `WHERE disposition = ?`, string(d))
+}
+
 // SetDisposition 在调用方事务内给一条还是 pending 的来源事件写处置结果与（若有）建出的事项；
 // d 为 unjudged 时 reason 是未判定的原因（domain.Unjudged*），其余处置忽略 reason。
 // 这些列只由入站流水线经本函数与下面的积压函数维护；不记事件，调用方自己负责留痕。
@@ -779,13 +784,15 @@ func SetMergeKey(tx *store.Tx, id, key string) error {
 }
 
 // Resolve 在调用方事务内结清一条积压事件：to 为 expired 时只接受 unjudged；为 proposed、ignored、digest 时接受 unjudged 与 expired
-// （本人处理、只跑规则），proposed 同时关联事项。不记事件，调用方自己负责留痕。
+// （本人处理、只跑规则），proposed 同时关联事项，并且也接受 digest（简报"知会"条目转为建议，§3.12）。不记事件，调用方自己负责留痕。
 func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error {
 	from := `disposition IN ('unjudged', 'expired')`
 	switch to {
 	case domain.DispositionExpired:
 		from = `disposition = 'unjudged'`
-	case domain.DispositionProposed, domain.DispositionIgnored, domain.DispositionDigest:
+	case domain.DispositionProposed:
+		from = `disposition IN ('unjudged', 'expired', 'digest')`
+	case domain.DispositionIgnored, domain.DispositionDigest:
 	default:
 		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored, digest or expired")
 	}
