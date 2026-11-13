@@ -103,6 +103,8 @@ func TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce(t *testing.T) {
 	e := setup(t)
 	const delay = 80 * time.Millisecond
 	e.srv.d.LoginDelay = delay
+	var waits []time.Duration // 延迟由测试时钟观察：记录请求的延迟，不真睡
+	e.srv.wait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
 	// 21 次失败分散在 6 个地址，每个地址都不到 5 次连续失败，因此没有任何地址被锁。
 	n := 0
 	for _, a := range []string{"1", "2", "3", "4", "5", "6"} {
@@ -114,22 +116,21 @@ func TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce(t *testing.T) {
 	if got := len(e.events("health.alert")); got != 1 {
 		t.Fatalf("health.alert events = %d, want 1", got)
 	}
-	start := time.Now()
 	r := e.loginFrom("198.51.100.7", ownerPW)
 	if r.Code != 200 {
 		t.Fatalf("correct password must still succeed eventually: %d", r.Code)
 	}
-	if took := time.Since(start); took < delay {
-		t.Fatalf("login answered in %v, want a delay of at least %v", took, delay)
+	if len(waits) != 1 || waits[0] != delay {
+		t.Fatalf("flooded login waits = %v, want exactly one of %v", waits, delay)
 	}
 	e.loginFrom("198.51.100.8", "wrong-wrong-wrong")
 	if got := len(e.events("health.alert")); got != 1 {
 		t.Fatalf("alert repeated within the same episode: %d", got)
 	}
 	e.now = e.now.Add(15*time.Minute + time.Second) // 窗口过去，恢复即时应答
-	start = time.Now()
-	if r := e.loginFrom("198.51.100.9", ownerPW); r.Code != 200 || time.Since(start) >= delay {
-		t.Fatalf("delay must end with the window: %d in %v", r.Code, time.Since(start))
+	waits = nil
+	if r := e.loginFrom("198.51.100.9", ownerPW); r.Code != 200 || len(waits) != 0 {
+		t.Fatalf("delay must end with the window: %d waits=%v", r.Code, waits)
 	}
 }
 
