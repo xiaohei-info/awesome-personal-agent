@@ -11,21 +11,21 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 4
+  amendment_revision: 5
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-100c15378d8d
+    amendment_id: amend-564dd6687bb3
     amendment_file: .omac/apa-v02.system-amendment.yaml
     nodes:
-      fix.wake-lease-recheck.5239bc:
+      fix.release-packaging.542f4d:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-341fa73eccd8ac2ab6dfc05f
-      e2e-hostplugin:
+        expected_review_generation: amendment-cd1e4088cbc1cbc10df04c51
+      e2e-release-doctor:
         stage: authoring
         state: synced
-        work_item_id: 01a1d32f-e47d-714e-89b9-4783862c659b
+        work_item_id: 01a1d344-46c0-7745-81e6-4414d53eb795
         baseline:
           status: blocked
           phase: authoring
@@ -40,14 +40,14 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
+          contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
           worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
-          worker: 0
-        expected_contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
-        expected_review_generation: amendment-7ae52b6570e97d32736a9732
+          worker: 1
+        expected_contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
+        expected_review_generation: amendment-44d1527be3f4f58cf0b69ad1
         attempt_baseline:
           status: blocked
           phase: authoring
@@ -62,26 +62,26 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
+          contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
           worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-7ae52b6570e97d32736a9732
+          review_generation: amendment-44d1527be3f4f58cf0b69ad1
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
             merge: 0
             review: 0
-            worker: 0
+            worker: 1
           decision_required_pending: false
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
+          contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-followmsg:
@@ -132,8 +132,16 @@ meta:
           merge: 0
           review: 1
           worker: 0
+      e2e-hostplugin:
+        amendment_id: amend-100c15378d8d
+        work_item_id: 01a1d32f-e47d-714e-89b9-4783862c659b
+        contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
     system: true
-  last_amendment_id: amend-100c15378d8d
+  last_amendment_id: amend-564dd6687bb3
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -7273,6 +7281,7 @@ nodes:
   - release-packaging
   - apa-version
   - doctor
+  - fix.release-packaging.542f4d
   title: 发布物与自检全流程
   description: 产出 e2e-release-doctor-flow-evidence。是 flow-release、flow-doctor 的唯一全流程
     owner，并负责其中 3 个 v0.1 继承或跨模块 business-action。要点：干净主机用一次性容器或空用户目录模拟，不依赖编译工具链。
@@ -10291,4 +10300,76 @@ nodes:
       - plugin-session-kind
     defect_refs:
     - dfx-5239bc3e86a2
+    coverage_gate: 80
+- id: fix.release-packaging.542f4d
+  worker: omac-worker-backend
+  blocked_by:
+  - apa-version
+  title: 'Fix release-packaging: dfx-542f4dae51fa'
+  description: "Automatic fix for upstream defect(s) reported by e2e-release-doctor.\n\n-
+    [design-gap] anchors flow-release/ACT-REL-06 (docs/solution-design.md#166-发布物)\n
+    \ expected: Section 16.6 lists deploy samples as \"systemd unit, reverse proxy
+    AND tunnel configuration samples\"; ACT-REL-06 expects the package to contain
+    a tunnel sample alongside the reverse-proxy samples.\n  observed: deploy/ (and
+    so the package deploy/ tree) has nginx and caddy samples but no tunnel sample;
+    grep for tunnel/cloudflared/tailscale/ngrok under deploy/ finds nothing.\n  where:
+    deploy/README.md; tools/release/pack.go:Package\n  repro: `grep -rniE 'tunnel|cloudflared|tailscale|ngrok'
+    deploy` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-542f4dae51fa in release-packaging:
+      Section 16.6 lists deploy samples as "systemd unit, reverse proxy AND tunnel
+      configuration samples"; ACT-REL-06 expects the package to contain a tunnel sample
+      alongside the reverse-proxy samples.'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进入发布构建的生产路径
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./tools/release/...
+    - go test -count=1 ./tests/release/...
+    - grep -rniE 'tunnel|cloudflared|tailscale|ngrok' deploy
+    integration_gates:
+    - name: release-packaging-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#166-发布物
+      - docs/solution-design.md#164-安装路径用户视角
+      - .omac/apa-v02.design/OMAC-NOTES.md#21-替身
+      delivery_goal: 带版本号的完整发布物与哈希清单；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-REL-01
+      - ACT-REL-06
+      - ACT-REL-07
+      - ACT-REL-12
+      acceptance_refs:
+      - flow-release
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./tools/release/...
+      - go test -count=1 ./tests/release/...
+    pr_base: main
+    acceptance_refs:
+    - flow-release
+    source_of_truth:
+    - docs/solution-design.md#166-发布物
+    - docs/solution-design.md#164-安装路径用户视角
+    - .omac/apa-v02.design/OMAC-NOTES.md#21-替身
+    scope_paths:
+    - tools/release/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: apa-version-delivery
+      producer: apa-version
+      evidence_mode: artifact
+      requires:
+      - version-info
+    defect_refs:
+    - dfx-542f4dae51fa
     coverage_gate: 80
