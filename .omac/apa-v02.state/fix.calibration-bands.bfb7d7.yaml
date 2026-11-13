@@ -1,6 +1,4 @@
-# sha256: fb82c79209258b78443d67923711fc708167f5817e898470ee1e9ade78482b9d
+# sha256: 9faa52fe9dd9c73dd5bbfe0060c6972415fcaf69a7ecd3dc404b6dec6eb40dc9
 work_item_id: 01a1d3c9-1f88-7ae1-835c-27910679ce3b
 status: todo
-held: true
-hold_reason: 等待 DAG amendment 删除未合并 e2e 验证命令后 release
 retry_note: 代码与 PR 已完成,等契约修订后重新提交,不要重做
