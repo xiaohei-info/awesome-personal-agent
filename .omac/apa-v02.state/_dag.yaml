@@ -1,4 +1,4 @@
-# sha256: 5187e464d28d27610776c7016f5919fb8a1896ea7338241e655a770a38281e90
+# sha256: fc9ecef11ca304c4b5e663d74144df2c30ea1ab3b66a81c6ca2f7d34a916b1a1
 defects:
   schema: omac.defect-ledger/v1
   used_global: 25
@@ -253,7 +253,7 @@ defects:
       - flow-proposal-handling/ACT-PRH-09
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.inbound-pipeline-v2.6052b8
     dfx-a35faf7b041d:
       suspected: backlog-rules-only
