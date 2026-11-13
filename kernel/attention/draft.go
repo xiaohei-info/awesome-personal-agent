@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -24,17 +25,13 @@ import (
 const (
 	DraftPack         = "decision-card"
 	TemplateCard      = "decision-card-copy"
-	TemplateThreshold = "delivery-threshold"
+	TemplateThreshold = delivery.DeferTemplate
 	// DraftAlertKind 是起草失败 health.alert 的 payload.kind。
 	DraftAlertKind = "decision-card"
 )
 
-// 投递阈值判断型的枚举（delivery-threshold 模板的 choices）。判定只能降低打扰：deliver_now 即按规则路由。
-const (
-	VerdictNow       = "deliver_now"
-	VerdictDigest    = "defer_to_digest"
-	VerdictWebUnread = "web_unread_only"
-)
+// VerdictDefer 是投递推迟判定（delivery-defer，是非题）的"是"：推迟到合并窗口结束后单独投递。其余一律按规则路由（§7.4）。
+const VerdictDefer = "yes"
 
 const (
 	draftPending = "pending"
@@ -45,6 +42,7 @@ const (
 // 装配处给它一个 Attempts=1 的实例：起草挡在投递前，失败按规则继续，不退避重试。
 type Drafter interface {
 	Do(ctx context.Context, c direct.Call) (direct.Outcome, error)
+	delivery.Judge
 }
 
 var draftActor = domain.Actor{Type: domain.ActorSystem, Principal: "system:decision-card", Via: domain.ViaClock}
@@ -144,13 +142,6 @@ func (a *Attention) draft(tx *store.Tx, pol policy.Policy, it domain.Item, ver i
 	return drafted{}, false, err
 }
 
-// verdict 取事项某个版本的阈值判定；没有起草或未判定为空。
-func (a *Attention) verdict(tx *store.Tx, item string, ver int64) (v string, err error) {
-	err = scan(tx, func(r *store.Rows) error { return r.Scan(&v) },
-		`SELECT verdict FROM attention_draft WHERE item = ? AND version = ? AND state = ?`, item, ver, draftDone)
-	return
-}
-
 // DraftDue 报告自上次调用以来是否登记过待起草的决策（装配处据它唤醒 Drafts，不占时钟循环）。
 func (a *Attention) DraftDue() bool { return a.draftDue.Swap(false) }
 
@@ -158,8 +149,8 @@ type pendingDraft struct {
 	item    string
 	version int64
 	card    direct.Call
-	judge   *direct.Call // 策略开启阈值判定时才有
-	stale   bool         // 事项已删或已无决策请求：不调用，写回后由重算清掉
+	judge   *direct.JudgeCall // 策略开启投递推迟判定时才有
+	stale   bool              // 事项已删或已无决策请求：不调用，写回后由重算清掉
 }
 
 // Drafts 起草全部 pending 的决策：事务外调模型，逐个写回并重算投递。只有存储错误才返回；
@@ -230,7 +221,7 @@ func (a *Attention) Drafts(ctx context.Context, st *store.Store) error {
 }
 
 // draftCalls 组织两次调用的输入。事项正文是外部内容，只进资料段；阈值判定只看结构化状态。
-func draftCalls(pol policy.Policy, pv int, it domain.Item, depth int, now time.Time) (direct.Call, *direct.Call) {
+func draftCalls(pol policy.Policy, pv int, it domain.Item, depth int, now time.Time) (direct.Call, *direct.JudgeCall) {
 	ask := it.Ask
 	opts := make([]map[string]string, len(ask.Options))
 	for i, o := range ask.Options {
@@ -246,11 +237,7 @@ func draftCalls(pol policy.Policy, pv int, it domain.Item, depth int, now time.T
 		return card, nil
 	}
 	_, quiet := quietEnd(pol, now)
-	jin, _ := json.Marshal(map[string]any{"item": it.ID, "priority": it.Priority, "deadline": it.Deadline, "ask_deadline": ask.Deadline,
-		"in_quiet_hours": quiet, "now": now.UTC().Truncate(time.Minute)})
-	judge := base
-	judge.Template, judge.Input = TemplateThreshold, jin
-	judge.Basis = &domain.Basis{PolicyVersion: pv, RuleID: DraftPack + "/" + TemplateThreshold}
+	judge := delivery.DeferCall(it, quiet, now)
 	return card, &judge
 }
 
@@ -268,17 +255,16 @@ func (a *Attention) callCard(ctx context.Context, c direct.Call) (string, error)
 	return string(b), err
 }
 
-// callJudge 返回阈值判定；置信度不足、需要解释或未配置返回空（按规则路由）。
-func (a *Attention) callJudge(ctx context.Context, c direct.Call) (string, error) {
-	out, err := a.o.Drafter.Do(ctx, c)
-	if err != nil || !out.Settled {
-		return "", ignorable(err)
-	}
-	var j direct.Judgement
-	if err := json.Unmarshal(out.Final().Result, &j); err != nil {
+// callJudge 返回推迟判定："yes" 才推迟；否、未定按规则路由。端点未配置不算失败；超时、不可用、出错返回错误（不重试）。
+func (a *Attention) callJudge(ctx context.Context, c direct.JudgeCall) (string, error) {
+	ok, err := delivery.CanDefer(ctx, a.o.Drafter, c)
+	if err != nil {
 		return "", err
 	}
-	return j.Choice, nil
+	if ok {
+		return VerdictDefer, nil
+	}
+	return "", nil
 }
 
 // ignorable：模型端点在两次读策略之间被清空不算失败。

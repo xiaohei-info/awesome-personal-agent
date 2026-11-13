@@ -269,7 +269,7 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 		content: content,
 		exempt:  nearDeadline(pol, it, a.o.Now()),
 	}
-	if dr.Verdict == VerdictDigest && pol.Disturb.MergeWindowSec > 0 {
+	if dr.Verdict == VerdictDefer && pol.Disturb.MergeWindowSec > 0 {
 		// 带选项的决策不并入摘要（§7.4）：推迟到合并窗口结束后单独投递。
 		h.notBefore = a.o.Now().Add(time.Duration(pol.Disturb.MergeWindowSec) * time.Second)
 	}
@@ -582,15 +582,6 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 		d.Content = domain.DeliveryContent{Title: fmt.Sprintf("%d 条低优先级提醒", len(hs)), Summary: strings.Join(titles, "；")}
 	}
 	d.Route = a.route(pol, hs[0].class, hs[0].priority)
-	if d.Class == domain.DeliveryDecision {
-		v, err := a.verdict(tx, d.Item, d.Version)
-		if err != nil {
-			return err
-		}
-		if v == VerdictWebUnread { // 阈值判定只能降低打扰：留在 Web 未读
-			d.Route = delivery.RouteWeb
-		}
-	}
 	if err := a.attachForm(tx, pol, &d); err != nil {
 		return err
 	}
