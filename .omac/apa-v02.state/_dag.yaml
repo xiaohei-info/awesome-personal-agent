@@ -1,4 +1,4 @@
-# sha256: 82ab6c2deaa085350b6c2ff98a651f9cf0ebda2a15e5b56b2cb622ec4fead8bd
+# sha256: 7f67a88abfaa2184787c564e99938efb33923c5a4518e79c06d552202375d857
 defects:
   schema: omac.defect-ledger/v1
   used_global: 29
@@ -20,7 +20,7 @@ defects:
     e2e-judgment: 4
     e2e-upgrade: 5
     e2e-workbench: 1
-    release-gates: 6
+    release-gates: 7
   granted_global: 10
   entries:
     dfx-62f6c689fa3a:
@@ -352,4 +352,3 @@ defects:
       repro:
         command: go test -tags e2e -count=5 -run TestFlowSessionKind ./tests/e2e/authz/
         exit_code: 1
-    stopped: defect-budget-exhausted
