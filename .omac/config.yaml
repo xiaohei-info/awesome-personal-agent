@@ -13,3 +13,5 @@ roles:
   reviewers:
   - omac-reviewer
   acceptor: omac-acceptor
+defects:
+  max_auto_fixes: 20
