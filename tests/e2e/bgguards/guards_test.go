@@ -112,13 +112,13 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 	f.step("ACT-BGG-04 失败或超时交本人", func(t *testing.T) {
 		f.mode("exit1", "")
 		id := f.task("bgg-04-exit1", "acc-work", "acc-main")
-		rs := f.settled(id, 1)
+		rs := f.settledFinal(id, 1)
 		eq(t, "退出码 1 的 Run 状态", rs[0].State, "failed")
 		eq(t, "退出码 1 时事项", f.phase(id), "needs_input")
 
 		f.mode("hang", "")
 		id2 := f.task("bgg-04-timeout", "acc-work", "acc-short")
-		rs2 := f.settled(id2, 1)
+		rs2 := f.settledFinal(id2, 1)
 		if rs2[0].State == "succeeded" {
 			t.Errorf("超时的 Run 不应成功: %+v", rs2[0])
 		}
