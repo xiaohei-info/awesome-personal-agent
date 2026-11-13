@@ -1,4 +1,4 @@
-# sha256: 9dd0fd9637811f067156eb2b34701c5ffbb6301ee2958a0f703c3c6f82f0e78c
+# sha256: f8bee8abccc610bdc85463d01f3deeb6922890a5bfea5a89a493283e45378431
 defects:
   schema: omac.defect-ledger/v1
   used_global: 25
@@ -270,7 +270,7 @@ defects:
       - flow-rule-modes/ACT-RULE-14
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.rule-modes-v2.9dda04
     dfx-83b4c71a6f53:
       suspected: e2e-followup
