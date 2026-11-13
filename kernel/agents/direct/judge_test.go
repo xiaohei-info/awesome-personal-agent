@@ -744,3 +744,24 @@ func TestJudgeFaultSurvivesInconclusiveOutcomes(t *testing.T) {
 		}
 	}
 }
+
+// §8.6：预取是真正的外呼，之后写记录的那次判断要把它记成一次调用（不是复用）；同一指纹的第二次判断才是复用。
+func TestPrefetchedAnswerIsCountedAsCallOnce(t *testing.T) {
+	e := setupJudge(t, true, true)
+	e.cls.SetDefaultPYes(0.9)
+	e.svc.Prefetch(bg, []JudgeCall{jc("screen", "pf1")})
+	if len(e.cls.Batches()) != 1 {
+		t.Fatalf("prefetch should call the endpoint once: %+v", e.cls.Batches())
+	}
+	first := e.judge(t, jc("screen", "pf1"))
+	if l := e.saved(t, first.Record.ID).Levels[0]; l.Reused || l.PYes == nil {
+		t.Fatalf("the judgement that follows a prefetch records the real call: %+v", l)
+	}
+	second := e.judge(t, jc("screen", "pf1"))
+	if !e.saved(t, second.Record.ID).Levels[0].Reused {
+		t.Fatal("a later judgement of the same input is a reuse")
+	}
+	if len(e.cls.Batches()) != 1 {
+		t.Fatal("no further endpoint calls")
+	}
+}

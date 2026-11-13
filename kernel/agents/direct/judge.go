@@ -128,6 +128,19 @@ func (s *Service) Prefetch(ctx context.Context, calls []JudgeCall) {
 		}
 	}
 	s.prefetch(ctx, ps, pol)
+	s.warmMu.Lock()
+	defer s.warmMu.Unlock()
+	if s.warm == nil {
+		s.warm = map[string]*classAns{}
+	}
+	for _, p := range ps {
+		if p == nil {
+			continue
+		}
+		if a := p.prefix["classifier"]; a != nil && a.ran && !a.reused && a.ErrCode == "" && a.fp != "" {
+			s.warm[a.fp] = a
+		}
+	}
 }
 
 // pending 是一道题在级联里的运行状态。
@@ -151,6 +164,7 @@ type classAns struct {
 	elapsed time.Duration
 	ran     bool               // 已问过；false 表示没问（被外发范围排除）
 	sig     *model.JudgeResult // 整批故障与健康信号（复用的结果为空）
+	fp      string
 }
 
 func (s *Service) prepare(ctx context.Context, c JudgeCall, pol policy.Policy) (*pending, error) {
@@ -308,6 +322,10 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 			p.firstFP = fp
 		}
 		if cached, ok := s.cachedClass(ctx, fp); ok {
+			if w := s.claimWarm(fp); w != nil {
+				p.prefix["classifier"] = w
+				continue
+			}
 			p.prefix["classifier"] = &classAns{Answer: cached, reused: true, ran: true}
 			continue
 		}
@@ -344,7 +362,7 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 			s.remember(ctx, j.fp, b)
 		}
 		for k, p := range j.owns {
-			p.prefix["classifier"] = &classAns{Answer: a, elapsed: took, ran: true, sig: sig, reused: k > 0 && a.ErrCode == ""}
+			p.prefix["classifier"] = &classAns{Answer: a, elapsed: took, ran: true, sig: sig, fp: j.fp, reused: k > 0 && a.ErrCode == ""}
 		}
 	}
 }
@@ -366,6 +384,14 @@ func (s *Service) noteClassifierHealth(ctx context.Context, res model.JudgeResul
 		}
 		_ = s.setJudgeHealth(ctx, msg)
 	} // 其余（503、429、413、超时）既不是成功也不是新故障：只有成功的调用才清除，状态不动
+}
+
+func (s *Service) claimWarm(fp string) *classAns {
+	s.warmMu.Lock()
+	defer s.warmMu.Unlock()
+	w := s.warm[fp]
+	delete(s.warm, fp)
+	return w
 }
 
 func (s *Service) cachedClass(ctx context.Context, fp string) (model.Answer, bool) {
