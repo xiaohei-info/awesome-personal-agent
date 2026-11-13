@@ -1,4 +1,4 @@
-# sha256: 72e4007de394d7e9123185919d9896eb89852ccb6bd8a647ba7d8a27d799ef9e
+# sha256: 72562037c1cc1e3f9d6cd01ea822fd4d29481f73ba37d772d8fca42e86c674d8
 defects:
   schema: omac.defect-ledger/v1
   used_global: 21
@@ -233,7 +233,7 @@ defects:
       - flow-judge-protocol/ACT-JDP-07
       reporters:
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.cascade-engine.70067b
     dfx-b6eef04ed1c1:
       suspected: cascade-engine
@@ -241,6 +241,6 @@ defects:
       - flow-judge-protocol/ACT-JDP-13
       reporters:
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.cascade-engine.70067b
   inbox: []
