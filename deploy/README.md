@@ -7,6 +7,7 @@
 | `systemd/apa.service` | 把 `apa serve` 注册为系统服务 |
 | `nginx/apa.conf.example`、`caddy/Caddyfile.example` | Web 与 API 全部经 HTTPS |
 | `nginx/apa-ingest-only.conf.example`、`caddy/Caddyfile.ingest-only.example` | 只转发 `/ingest/`，其余 404 |
+| `tunnel/cloudflared.yml.example` | 不开放入站端口，经 cloudflared 隧道暴露（Tailscale 等私有网络同理，指向 `127.0.0.1:7777`） |
 | `container/Dockerfile` | 可选容器镜像 |
 
 要点：
