@@ -321,7 +321,7 @@ func (r *run) upg15(t *testing.T) {
 		t.Fatalf("注入失败后待测版本应以非 0 退出，输出: %s", res.Stdout)
 	}
 	contains(t, "迁移失败时的输出", res.Stdout, "migration fault injected after step 1", "rolled back")
-	
+
 	if got := fileSHA(t, db); got != ledgerSHA {
 		t.Errorf("迁移失败后 ledger.db 被改动（%s → %s）", ledgerSHA, got)
 	}
