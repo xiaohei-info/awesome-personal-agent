@@ -1,9 +1,8 @@
-# sha256: d89734f48e643b86d988971a756ba192190a79571d90ee066f808250815af6c1
+# sha256: 6f4a202aa4bbbc025df24939b138e7f78961a3b2ff026f06a1d73ec9c6a845b9
 work_item_id: 01a1d24b-1057-7344-8a35-b205d5ebbc24
 status: done
 merged: true
 merged_at: '2026-11-13T02:03:14Z'
-recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-638d034f3f12f6eb: 负责人裁定：不停本机 apa serve（那是本人在用的实例）。授权本节点在同一
   PR 里修改 cli/serve 下的测试，让 TestApaVersionMatchesGetVersionAndLatestLedgerMigration
   改用临时空闲端口（listen 写 127.0.0.1:0 或先取一个空闲端口写进测试用 config），不再依赖固定的 7777。顺手 grep 整个仓库测试代码里写死
