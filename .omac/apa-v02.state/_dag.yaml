@@ -1,4 +1,4 @@
-# sha256: a55e84b96e596edd318e29ef8db909476ced35da57368e099f809108a3553f3c
+# sha256: 69f3be1d9b1a094e8968fdb3b0428a57687b8b8795a21c76efafabdbcf743104
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -49,7 +49,7 @@ defects:
       - flow-web-workbench/ACT-WBN-16
       reporters:
       - e2e-workbench
-      state: fixing
+      state: fixed
       fix_node: fix.web-today.ec9640
     dfx-8a3ec29f05ec:
       suspected: health-signals-v2
