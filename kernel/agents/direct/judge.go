@@ -356,16 +356,16 @@ func (s *Service) noteClassifierHealth(ctx context.Context, res model.JudgeResul
 	if callErr != nil { // 请求没发出（如题号重复）是调用方的问题，不是端点的
 		return
 	}
-	var msg string
 	switch {
 	case res.Healthy && !res.Unavailable:
+		_ = s.setJudgeHealth(ctx, "")
 	case res.Unavailable || len(res.Faults) > 0:
-		msg = strings.Join(res.Faults, ",")
+		msg := strings.Join(res.Faults, ",")
 		if msg == "" {
 			msg = model.CodeUnavailable
 		}
-	}
-	_ = s.setJudgeHealth(ctx, msg)
+		_ = s.setJudgeHealth(ctx, msg)
+	} // 其余（503、429、413、超时）既不是成功也不是新故障：只有成功的调用才清除，状态不动
 }
 
 func (s *Service) cachedClass(ctx context.Context, fp string) (model.Answer, bool) {

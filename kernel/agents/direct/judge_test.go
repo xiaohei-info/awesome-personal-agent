@@ -710,3 +710,37 @@ func TestClassifierFaultStaysVisibleAfterChatDecides(t *testing.T) {
 		})
 	}
 }
+
+// 判断端点的故障只由一次成功的调用清除：之后的 503、429、413 既不是成功也不是新故障，标记保持不变。
+func TestJudgeFaultSurvivesInconclusiveOutcomes(t *testing.T) {
+	for _, first := range []modelstub.ClsFault{{Status: 401}, {Source: "self_reported"}, {Status: 400}} {
+		for _, then := range []modelstub.ClsFault{{Status: 503}, {Status: 429}, {Status: 413}} {
+			e := setupJudge(t, true, true)
+			down := func() bool {
+				var h Health
+				if err := e.st.View(bg, func(tx *store.Tx) (err error) { h, err = JudgeHealthIn(tx); return }); err != nil {
+					t.Fatal(err)
+				}
+				return h.Unavailable
+			}
+			e.cls.SetFault(first)
+			e.chat("jdp-keep-1", "yes", true)
+			e.judge(t, jc("screen", "jdp-keep-1"))
+			if !down() {
+				t.Fatalf("%+v: fault not recorded", first)
+			}
+			e.cls.SetFault(then)
+			e.chat("jdp-keep-2", "yes", true)
+			e.judge(t, jc("screen", "jdp-keep-2"))
+			if !down() {
+				t.Fatalf("%+v then %+v: fault cleared without a successful call", first, then)
+			}
+			e.cls.Reset()
+			e.cls.PYes(modelstub.Key{Contains: "jdp-keep-3"}, 0.05)
+			e.judge(t, jc("screen", "jdp-keep-3"))
+			if down() {
+				t.Fatalf("%+v then %+v: not cleared by a successful call", first, then)
+			}
+		}
+	}
+}
