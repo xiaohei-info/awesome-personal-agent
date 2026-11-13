@@ -1,5 +1,5 @@
-# sha256: b1cc5d912e388c9ed82e4aae6da43b98fe78a0273e5e9d111297aa186fd0ff91
+# sha256: 0ddecc8587cb7a771cc94418b84cddea1d89f64639adab757f36780b294a6ce4
 work_item_id: 01a1d3e2-9f68-78e2-8cd1-9ffd31d7b27d
-status: in_progress
+status: in_review
 recovery_marker: true
 retry_note: PR 与验证已完成，核对 PR head 后直接重新提交评审，不要重做已完成部分
