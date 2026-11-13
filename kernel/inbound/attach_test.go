@@ -485,3 +485,28 @@ func TestBatchGrantScopeIsPerEntryAndBasisIsPerBatch(t *testing.T) {
 		t.Fatal("rejected batch processed an entry")
 	}
 }
+
+// 入站六步：归属在初筛之前。会挂靠原事项的事件不进批量预取，分类端点只收到真正要初筛的事件。
+func TestPrefetchSkipsAttachedEvents(t *testing.T) {
+	e := newEnv(t, true)
+	e.judge(`{"choice":"ignore","confidence":0.95}`)
+	fm, err := followmsg.New(followmsg.Options{Store: e.st, Exec: e.x, OnError: func(err error) { t.Errorf("followmsg: %v", err) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fm.Register(e.x); err != nil {
+		t.Fatal(err)
+	}
+	e.svc.o.Intercept, e.svc.o.Attaches = fm.Intercept, fm.Attaches
+	pa := e.proposalOf("pf-0", "原事项", "thread-pf")
+	t3 := e.openItem("合同谈判")
+	if _, err := e.do(delegate, CmdAttach, "这条补到合同谈判", map[string]any{"id": pa, "to": t3}); err != nil {
+		t.Fatal(err)
+	}
+	e.emit("src_t", "ticket",
+		ev("pf-att", "ticket.note", "同线程回音", map[string]any{"correlation_keys": []string{"thread-pf"}}),
+		ev("pf-new", "ticket.note", "全新事件", nil))
+	if bs := e.cls.Batches(); len(bs) != 1 || bs[0].Questions != 1 {
+		t.Fatalf("classifier batches %+v, want one batch with only the new event", bs)
+	}
+}
