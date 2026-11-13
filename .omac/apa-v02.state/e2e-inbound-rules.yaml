@@ -1,6 +1,6 @@
-# sha256: b3b3d99111dbebe4c3db9533f86de4401b1b443ae8b13def9d2260835ad073c6
+# sha256: 039647ce87a166a00d4a62a3217d536b9fce4c06d9d10b115773db8b4c8dac46
 work_item_id: 01a1d2c3-f4c8-7c35-a6be-55223a4cd51a
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-25a5dd093669de37: main 本机路径已由清单持有方修复（main
   commit be2630742330f94b3d21f7d7b0b8ecedead370b7；.omac 仅含相对路径，tests/release 的 TestRepoHasNoCredentialsOrPersonalInfo
