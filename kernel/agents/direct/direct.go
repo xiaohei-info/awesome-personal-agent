@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
@@ -86,7 +87,13 @@ type Options struct {
 }
 
 // Service 是判断型与生成型调用入口，可并发使用。
-type Service struct{ o Options }
+type Service struct {
+	o Options
+	// warm 是 Prefetch 问到、还没被某次判断认领的分类端点结果（指纹 → 结果）。认领的那次判断把它记成真实调用，
+	// 之后同一指纹才是复用（§8.5、§8.6）。只在内存里：重启后丢失，退化为按复用记，不影响判断结果。
+	warmMu sync.Mutex
+	warm   map[string]*classAns
+}
 
 // New 返回 Service。Store、Packs、Model 必须给出。
 func New(o Options) (*Service, error) {
@@ -111,7 +118,7 @@ func New(o Options) (*Service, error) {
 	if o.StatsWindow <= 0 {
 		o.StatsWindow = 90 * 24 * time.Hour
 	}
-	return &Service{o}, nil
+	return &Service{o: o}, nil
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
