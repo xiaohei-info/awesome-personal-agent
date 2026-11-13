@@ -1,4 +1,4 @@
-# sha256: 397230fadd423f947cbf4b36b833e81461230b5f1aa35eab68a3b4e87b0d15e8
+# sha256: 9408d5e002d66cbd9b8b1d691c6b3f722738c9ae62a355fae758d147ffb9e1f5
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -170,7 +170,7 @@ defects:
       - flow-upgrade-rollback/ACT-UPG-15
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.ledger-schema-v3.1d1fcf
     dfx-9c33de15a3a7:
       suspected: rule-modes-v2
