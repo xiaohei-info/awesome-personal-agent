@@ -70,7 +70,7 @@ func TestFlowWebLogin(t *testing.T) {
 	})
 
 	step("ACT-LGN-02 Web 改口令校验当前口令与长度", func(t *testing.T) {
-		a := mustLogin(t, f.URL, "10.0.2.1", "A-browser", pw)
+		a := mustLogin(t, f.URL, "198.51.100.21", "A-browser", pw)
 		change := func(cur, nw string) resp {
 			b, _ := json.Marshal(map[string]string{"current": cur, "new": nw})
 			return a.do("POST", "/v1/auth/password", string(b))
@@ -84,26 +84,26 @@ func TestFlowWebLogin(t *testing.T) {
 				t.Fatalf("新口令 11 个字符应返回 400: %d %s", r.Code, r.Body)
 			}
 		}
-		if s, r := login("10.0.2.2", "after-fail", pw); s == nil {
+		if s, r := login("198.51.100.22", "after-fail", pw); s == nil {
 			t.Fatalf("口令未变，旧口令仍应能登录: %d %s", r.Code, r.Body)
 		}
-		if s, _ := login("10.0.2.3", "must-fail", pwNew); s != nil {
+		if s, _ := login("198.51.100.23", "must-fail", pwNew); s != nil {
 			t.Fatal("新口令不应生效")
 		}
 	})
 
 	step("ACT-LGN-03 改口令成功后其他会话全部失效", func(t *testing.T) {
 		before := countType(ledgerEvents(t, f.Home), "auth.password_changed")
-		a := mustLogin(t, f.URL, "10.0.3.1", "A-browser", pw)
-		b := mustLogin(t, f.URL, "10.0.3.2", "B-browser", pw)
+		a := mustLogin(t, f.URL, "198.51.100.31", "A-browser", pw)
+		b := mustLogin(t, f.URL, "198.51.100.32", "B-browser", pw)
 		body, _ := json.Marshal(map[string]string{"current": pw, "new": pwNew})
 		mustCode(t, "A 改口令", a.do("POST", "/v1/auth/password", string(body)), 200)
 		b.want(401, "改口令后 B 刷新")
 		a.want(200, "改口令后 A 继续操作")
-		if s, _ := login("10.0.3.3", "old", pw); s != nil {
+		if s, _ := login("198.51.100.33", "old", pw); s != nil {
 			t.Fatal("旧口令登录应失败")
 		}
-		if s, r := login("10.0.3.4", "new", pwNew); s == nil {
+		if s, r := login("198.51.100.34", "new", pwNew); s == nil {
 			t.Fatalf("新口令登录应成功: %d %s", r.Code, r.Body)
 		}
 		evs := ledgerEvents(t, f.Home)
@@ -115,7 +115,7 @@ func TestFlowWebLogin(t *testing.T) {
 	})
 
 	step("ACT-LGN-04 同一来源连续失败 5 次后锁定 15 分钟", func(t *testing.T) {
-		const addr = "10.0.4.1"
+		const addr = "198.51.100.41"
 		before := countType(ledgerEvents(t, f.Home), "auth.login_locked")
 		for i := 0; i < 5; i++ {
 			if s, r := login(addr, "guesser", pwWrongA); s != nil || r.Code != 401 {
@@ -126,7 +126,7 @@ func TestFlowWebLogin(t *testing.T) {
 		if s != nil || r.Code != 429 || r.errCode() != "login_locked" || r.Header.Get("Retry-After") == "" {
 			t.Fatalf("第 6 次（正确口令）应得 429 login_locked 并带 Retry-After: %d %s %v", r.Code, r.Body, r.Header)
 		}
-		if _, r := login("10.0.4.2", "other-addr", pw); r.Code != 200 {
+		if _, r := login("198.51.100.42", "other-addr", pw); r.Code != 200 {
 			t.Fatalf("锁定只针对该来源地址: %d", r.Code)
 		}
 		f.TCAdvance(900) // 不重启服务
@@ -151,7 +151,7 @@ func TestFlowWebLogin(t *testing.T) {
 		}
 		before := alerts()
 		for i, per := range []int{4, 4, 4, 4, 5} { // 21 次，单个地址不超过 4 次即不触发锁定（最后一个地址第 5 次才锁）
-			addr := "10.0.5." + strconv.Itoa(i+2)
+			addr := "198.51.100.5" + strconv.Itoa(i+2)
 			for j := 0; j < per; j++ {
 				if s, r := login(addr, "flood", pwWrongA); s != nil || (r.Code != 401 && r.Code != 429) {
 					t.Fatalf("%s 第 %d 次: %d", addr, j+1, r.Code)
@@ -159,7 +159,7 @@ func TestFlowWebLogin(t *testing.T) {
 			}
 		}
 		start := time.Now()
-		s, r := login("10.0.5.7", "slow-but-right", pw)
+		s, r := login("198.51.100.57", "slow-but-right", pw)
 		took := time.Since(start)
 		if s == nil {
 			t.Fatalf("超过 20 次后正确口令最终应登录成功: %d %s", r.Code, r.Body)
@@ -194,9 +194,9 @@ func TestFlowWebLogin(t *testing.T) {
 
 	step("ACT-LGN-07 列出在线会话并逐个或全部吊销", func(t *testing.T) {
 		revokedBefore := countType(ledgerEvents(t, f.Home), "auth.session_revoked")
-		c1 := mustLogin(t, f.URL, "10.0.7.1", "C1-browser", pw)
-		c2 := mustLogin(t, f.URL, "10.0.7.2", "C2-browser", pw)
-		c3 := mustLogin(t, f.URL, "10.0.7.3", "C3-browser", pw)
+		c1 := mustLogin(t, f.URL, "198.51.100.71", "C1-browser", pw)
+		c2 := mustLogin(t, f.URL, "198.51.100.72", "C2-browser", pw)
+		c3 := mustLogin(t, f.URL, "198.51.100.73", "C3-browser", pw)
 		type info struct {
 			ID, Addr, Agent string
 			LastUsedAt      time.Time `json:"last_used_at"`
@@ -218,7 +218,7 @@ func TestFlowWebLogin(t *testing.T) {
 			return m
 		}
 		l := list()
-		for agent, addr := range map[string]string{"C1-browser": "10.0.7.1", "C2-browser": "10.0.7.2", "C3-browser": "10.0.7.3"} {
+		for agent, addr := range map[string]string{"C1-browser": "198.51.100.71", "C2-browser": "198.51.100.72", "C3-browser": "198.51.100.73"} {
 			s, ok := l[agent]
 			if !ok || s.Addr != addr || s.LastUsedAt.IsZero() || s.ID == "" {
 				t.Fatalf("会话 %s 的列表项缺字段（最近使用时间/来源地址/浏览器标识）: %+v", agent, s)
@@ -249,16 +249,16 @@ func TestFlowWebLogin(t *testing.T) {
 				t.Fatalf("Bearer 请求 %s %s 应被拒绝(403): %d %s", c.m, c.p, r.Code, r.Body)
 			}
 		}
-		probe := mustLogin(t, f.URL, "10.0.8.1", "still-here", pw) // 口令没变
+		probe := mustLogin(t, f.URL, "198.51.100.81", "still-here", pw) // 口令没变
 		mustCode(t, "会话仍在", probe.do("GET", "/v1/auth/sessions", ""), 200)
-		if s, _ := login("10.0.8.2", "attacker", "attacker-chosen-passphrase"); s != nil {
+		if s, _ := login("198.51.100.82", "attacker", "attacker-chosen-passphrase"); s != nil {
 			t.Fatal("口令不应被 Bearer 请求改掉")
 		}
 	})
 
 	step("ACT-LGN-09 会话空闲 7 天失效", func(t *testing.T) {
-		s1 := mustLogin(t, f.URL, "10.0.9.1", "S1", pw)
-		s2 := mustLogin(t, f.URL, "10.0.9.2", "S2", pw)
+		s1 := mustLogin(t, f.URL, "198.51.100.91", "S1", pw)
+		s2 := mustLogin(t, f.URL, "198.51.100.92", "S2", pw)
 		f.TCAdvance(518400) // 第 6 天
 		s2.want(200, "第 6 天 S2")
 		f.TCAdvance(86460) // 第 7 天加 1 分钟
@@ -268,7 +268,7 @@ func TestFlowWebLogin(t *testing.T) {
 	})
 
 	step("ACT-LGN-10 会话绝对有效期 30 天", func(t *testing.T) {
-		s3 := mustLogin(t, f.URL, "10.0.10.1", "S3", pw)
+		s3 := mustLogin(t, f.URL, "198.51.100.101", "S3", pw)
 		for i := 0; i < 4; i++ { // 到第 24 天
 			f.TCAdvance(518400)
 			s3.want(200, "第 "+strconv.Itoa(6*(i+1))+" 天 S3")
@@ -297,10 +297,10 @@ func TestFlowWebLogin(t *testing.T) {
 		pw = pwReset
 		f.WebSecret = pw
 		f.StartKernelAgain()
-		if s, _ := login("10.0.11.1", "old", old); s != nil {
+		if s, _ := login("198.51.100.111", "old", old); s != nil {
 			t.Fatal("重设后旧口令应失败")
 		}
-		if s, r := login("10.0.11.2", "new", pw); s == nil {
+		if s, r := login("198.51.100.112", "new", pw); s == nil {
 			t.Fatalf("重设后新口令应成功: %d %s", r.Code, r.Body)
 		}
 		if got := f.countItems(); got != items {
