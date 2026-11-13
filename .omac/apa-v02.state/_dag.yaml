@@ -1,4 +1,4 @@
-# sha256: 35c8e26c83f49fac66748d8ddf80b1956a5aa43ece92b1745239140170ccc489
+# sha256: a99700f4d4677eaed5dd259da915d64fa98e77b4051c8188a549a2429369283f
 defects:
   schema: omac.defect-ledger/v1
   used_global: 19
@@ -131,7 +131,7 @@ defects:
       - flow-judgment-record/ACT-JRC-08
       reporters:
       - e2e-judgment
-      state: fixing
+      state: fixed
       fix_node: fix.judgment-stats.9d6fc9
     dfx-bfb7d70961f5:
       suspected: calibration-bands
