@@ -296,3 +296,25 @@ func TestClockLagIsWarningAndKeepsHealthy(t *testing.T) {
 		t.Fatalf("%+v", sd)
 	}
 }
+
+// ACT-TIER-01：两个端点都没配而有事件在等，detail 里 judge、generate、endpoint 都是 not_configured；没有事件在等则都为空。
+func TestModelUnavailableDetailHasJudgeGenerateEndpoint(t *testing.T) {
+	e := setup(t, fakePacks(nil))
+	detail := func() map[string]any {
+		d, _ := e.report(auth.Observer).byID("model_unavailable").Detail.(map[string]any)
+		return d
+	}
+	if d := detail(); d["judge"] != "" || d["generate"] != "" || d["endpoint"] != "" {
+		t.Fatalf("idle ledger: %v", d)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link,
+			occurred_at, correlation_keys, sender, sender_verified, disposition, unjudged_reason) VALUES ('d', 'w', 'w', 'src_rss', 'run', 't', 's', '', '', '', 0, '[]', '', 0, 'unjudged', 'model_unavailable')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if d := detail(); d["judge"] != "not_configured" || d["generate"] != "not_configured" || d["endpoint"] != "not_configured" {
+		t.Fatalf("waiting event: %v", d)
+	}
+}

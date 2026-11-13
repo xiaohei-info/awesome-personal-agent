@@ -116,6 +116,8 @@ type View struct {
 	ModelUnavailable []ModelIssue
 	// Endpoint 是模型端点现状，空表示正常（或没有配置、也没有事件在等它）；计入"模型不可用"。
 	Endpoint string
+	// Judge、Generate 是判断端点与生成端点各自的现状，取值同 Endpoint；Endpoint 取两者中较差的一个。
+	Judge, Generate string
 	// Unjudged 是未判定积压（disposition 为 unjudged），单独一个提醒级信号；Expired 是已过期、不计入积压的条数。
 	Unjudged        []domain.SourceEvent
 	Expired         int
@@ -171,11 +173,19 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	if v.Expired, err = runner.CountExpired(tx); err != nil {
 		return View{}, err
 	}
-	if v.Endpoint, err = endpoint(tx, v.Unjudged); err != nil {
+	if v.Judge, v.Generate, err = endpoints(tx, v.Unjudged); err != nil {
 		return View{}, err
 	}
+	v.Endpoint = Worse(v.Judge, v.Generate) // 只含配置与调用现状；告警另计 ModelUnavailable，不重复计数
 	if v.ModelUnavailable, v.RuleFallbacks, v.ReceiptFailures, v.OtherAlerts, v.ClockLags, err = alerts(tx, now); err != nil {
 		return View{}, err
+	}
+	for _, m := range v.ModelUnavailable { // 初筛与决策卡起草走生成端点，其余（跟进判断）走判断端点
+		if m.Kind == ScreeningKind || m.Kind == DraftKind {
+			v.Generate = EndpointFailing
+		} else {
+			v.Judge = EndpointFailing
+		}
 	}
 	after := o.DelegationStallAfter
 	if after <= 0 {
@@ -187,23 +197,46 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	return v, nil
 }
 
-// endpoint 判定模型端点现状：调用持续失败总是异常；没有配置只在有事件因此未判定时才算异常（不用模型是允许的，§5.6）。
-func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (string, error) {
+// endpoints 分别判定判断端点与生成端点的现状：生成端点调用持续失败总是异常；没有配置只在有事件因此未判定时才算异常（不用模型是允许的，§5.6）。
+// 判断端点的失败只来自 alerts 里的判断型告警（由 Load 合并），这里只看它有没有配置。
+func endpoints(tx *store.Tx, backlog []domain.SourceEvent) (judge, generate string, err error) {
 	h, err := direct.HealthIn(tx)
-	if err != nil || h.Unavailable {
-		return EndpointFailing, err
+	if err != nil {
+		return "", "", err
+	}
+	if h.Unavailable {
+		generate = EndpointFailing
 	}
 	_, pol, err := policy.Current(tx)
-	if err != nil || (pol.GenerateEndpoint.URL != "" && pol.GenerateEndpoint.Model != "") {
-		return "", err
+	if err != nil {
+		return "", "", err
 	}
+	waiting := false
 	for _, e := range backlog {
 		// 判断未定、外发范围未选择、放回积压的事件与端点有没有配置无关
 		if e.UnjudgedReason != domain.UnjudgedUndecided && e.UnjudgedReason != domain.UnjudgedOutboundUnset && e.UnjudgedReason != domain.UnjudgedRestored {
-			return EndpointNotConfigured, nil
+			waiting = true
+			break
 		}
 	}
-	return "", nil
+	if waiting && generate == "" && (pol.GenerateEndpoint.URL == "" || pol.GenerateEndpoint.Model == "") {
+		generate = EndpointNotConfigured
+	}
+	if waiting && (pol.JudgeEndpoint == nil || pol.JudgeEndpoint.URL == "") {
+		judge = EndpointNotConfigured
+	}
+	return judge, generate, nil
+}
+
+// Worse 取两个端点现状中较差的一个：failing 重于 not_configured 重于空。
+func Worse(a, b string) string {
+	if a == EndpointFailing || b == EndpointFailing {
+		return EndpointFailing
+	}
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func sourceFailures(tx *store.Tx) ([]SourceFailure, error) {

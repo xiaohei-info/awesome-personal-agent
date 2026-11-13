@@ -181,7 +181,7 @@ func build(v khealth.View) Report {
 		sig("pack_rejections", len(v.PackRejections), "a pack failed to load; the last valid version is kept",
 			"fix the pack, then hot-reload", ids(v.PackRejections, func(r packs.Rejection) string { return r.Pack })),
 		sig("model_unavailable", len(v.ModelUnavailable)+endpointDown, "the model endpoint is not configured while events wait for it, keeps failing, or a judge call failed and has not succeeded since",
-			"settings page: model endpoint", map[string]any{"endpoint": v.Endpoint, "screening": screening, "judgements": judgements}),
+			"settings page: model endpoint", map[string]any{"judge": v.Judge, "generate": v.Generate, "endpoint": khealth.Worse(v.Judge, v.Generate), "screening": screening, "judgements": judgements}),
 		backlogSig,
 		sig("rule_fallbacks", len(v.RuleFallbacks), "a rule fell back to observe after its content changed",
 			"re-review the rule in Web", ids(v.RuleFallbacks, func(f khealth.RuleFallback) string { return f.Rule })),
