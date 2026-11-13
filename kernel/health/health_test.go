@@ -12,6 +12,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -46,7 +47,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, policy.Module, command.Module, proc.Module, delivery.Module,
-		registry.Module, runner.Module, agentsmd.Module, chain.Module, direct.Module, Module} {
+		registry.Module, runner.Module, agentsmd.Module, chain.Module, direct.Module, items.Module, clock.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -289,7 +290,7 @@ func TestScreeningRecoversOnLaterSuccessOfSameTemplate(t *testing.T) {
 func TestDraftFailureSurfacesAndRecoversOnSameTemplate(t *testing.T) {
 	e := setup(t)
 	e.event(domain.EvHealthAlert, "item_1", "decision-card-copy draft failed", map[string]string{"kind": DraftKind, "template": "decision-card-copy"})
-	e.event(domain.EvHealthAlert, "item_1", "delivery-threshold draft failed", map[string]string{"kind": DraftKind, "template": "delivery-threshold"})
+	e.event(domain.EvHealthAlert, "item_1", "delivery-defer draft failed", map[string]string{"kind": DraftKind, "template": "delivery-defer"})
 	if v := e.collect(nil); v.Healthy() || len(v.ModelUnavailable) != 2 || v.ModelUnavailable[0].Kind != DraftKind {
 		t.Fatalf("not surfaced: %+v", v.ModelUnavailable)
 	}
@@ -303,10 +304,10 @@ func TestDraftFailureSurfacesAndRecoversOnSameTemplate(t *testing.T) {
 		t.Fatalf("failed/reused/other-template call cleared the signal: %+v", v.ModelUnavailable)
 	}
 	run("item_2", "decision-card-copy", "succeeded", false)
-	if v := e.collect(nil); len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Reason != "delivery-threshold draft failed" || v.Healthy() {
+	if v := e.collect(nil); len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Reason != "delivery-defer draft failed" || v.Healthy() {
 		t.Fatalf("after card recovered: %+v", v.ModelUnavailable)
 	}
-	run("item_3", "delivery-threshold", "succeeded", false)
+	run("item_3", "delivery-defer", "succeeded", false)
 	if v := e.collect(nil); !v.Healthy() {
 		t.Fatalf("not cleared after recovery: %+v", v.ModelUnavailable)
 	}

@@ -34,6 +34,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
 	apiexec "github.com/xiaohei-info/awesome-personal-agent/api/settings/exec"
 	apigrants "github.com/xiaohei-info/awesome-personal-agent/api/settings/grants"
+	apioutbound "github.com/xiaohei-info/awesome-personal-agent/api/settings/outbound"
 	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	apipurge "github.com/xiaohei-info/awesome-personal-agent/api/settings/purge"
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
@@ -54,6 +55,7 @@ import (
 	kdecisions "github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
@@ -62,7 +64,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/spotcheck"
 	kmaterials "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -194,7 +198,8 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	rejudge := inbound.DefaultRejudge
 	rejudge.Window = cfg.UnjudgedRejudgeWindow
 	if k.in, err = inbound.New(inbound.Options{Store: st, Exec: x, Packs: ld, Judge: judge, Owner: owner,
-		Intercept: fm.Intercept, OnError: logErr("inbound"), Rejudge: rejudge}); err != nil {
+		Intercept: fm.Intercept, OnError: logErr("inbound"), Rejudge: rejudge, BacklogReleasePerDay: cfg.BacklogReleasePerDay,
+		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: att}}); err != nil {
 		return nil, err
 	}
 	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner")}); err != nil {
@@ -314,6 +319,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		sregistry.Register(x, sregistry.Options{Bundled: bundledPull, Layout: l}),
 		k.rn.Register(x),
 		k.in.Register(x),
+		spotcheck.Register(x),
 		fm.Register(x),
 		rules.Register(x),
 		instances.Register(x, ld),
@@ -363,7 +369,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), creds, grants,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st), apihealth.Routes(st, q, ld), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
+		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
@@ -372,6 +378,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 
 // handleTimer 把到期 Timer 分派给所属模块；规则与跟进只在事务里排待办，执行要调模型，由后台循环做。
 func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
+	if err := khealth.RecordClockLag(tx, c, clock.Now()); err != nil { // 迟到只报不修，照常触发
+		return err
+	}
 	switch {
 	case k.att.Owns(c):
 		return k.att.HandleTimer(tx, c)

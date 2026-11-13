@@ -4,7 +4,7 @@
 // 工作方式是电平触发：事项一变（Sync）就按事项现状重算它该有什么投递——proposed 与初筛未返回的不产出，
 // 待决的决策产出一条（版本取事项版本），事项变化后旧版本投递作废（Supersede）；时间相关的（截止已过再提醒、
 // 静默结束补发、合并窗口到期、无人领取退回 Web 未读）由一个周期 Timer 驱动的 Tick 处理。
-// 配了 Drafter 且策略配了模型端点时，决策投递先经 decision-card 包起草卡片文案（及可选的投递阈值判定），见 draft.go。
+// 配了 Drafter 且策略配了模型端点时，决策投递先经 decision-card 包起草卡片文案（及可选的投递推迟判定），见 draft.go。
 // 本包只写自己的游标、暂存与起草表，投递表经 delivery.Queue 写入，事项与策略只读。
 package attention
 
@@ -68,7 +68,7 @@ CREATE INDEX attention_held_item ON attention_held(item);
 CREATE INDEX attention_held_release ON attention_held(release_at);`,
 }, {
 	Version: 2, Name: "create-attention-draft",
-	// 每个待决决策一行：哪个版本起草到了哪一步（pending 未返回时不投递）、卡片文案与阈值判定。
+	// 每个待决决策一行：哪个版本起草到了哪一步（pending 未返回时不投递）、卡片文案与推迟判定。
 	SQL: `CREATE TABLE attention_draft (
 	item TEXT PRIMARY KEY,
 	version INTEGER NOT NULL,
@@ -76,6 +76,10 @@ CREATE INDEX attention_held_release ON attention_held(release_at);`,
 	card TEXT NOT NULL DEFAULT '',
 	verdict TEXT NOT NULL DEFAULT ''
 ) WITHOUT ROWID;`,
+}, {
+	// 账本结构版本 3：规则 alert 出口的提醒没有事项，被静默拦住时要把出处（origin，JSON）一并暂存。
+	Version: 3, Ledger: 3, Name: "ledger-v3-held-origin",
+	SQL: `ALTER TABLE attention_held ADD COLUMN origin TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Options 配置触达；Queue 必填。
@@ -85,7 +89,7 @@ type Options struct {
 	TickEvery time.Duration             // 周期 Timer 间隔，默认 30 秒
 	WebURL    func(item string) string  // 投递里的 Web 链接，默认 /items/<id>
 	FormURL   func(token string) string // 投递里的一次性表单链接，默认 /forms/<令牌>
-	// Drafter 起草决策卡片文案与做投递阈值判定；为空时投递内容与路由只按规则。
+	// Drafter 起草决策卡片文案与做投递推迟判定；为空时投递内容与路由只按规则。
 	Drafter Drafter
 }
 
@@ -265,7 +269,7 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 		content: content,
 		exempt:  nearDeadline(pol, it, a.o.Now()),
 	}
-	if dr.Verdict == VerdictDigest && pol.Disturb.MergeWindowSec > 0 {
+	if dr.Verdict == VerdictDefer && pol.Disturb.MergeWindowSec > 0 {
 		// 带选项的决策不并入摘要（§7.4）：推迟到合并窗口结束后单独投递。
 		h.notBefore = a.o.Now().Add(time.Duration(pol.Disturb.MergeWindowSec) * time.Second)
 	}
@@ -339,6 +343,15 @@ func (a *Attention) Remind(tx *store.Tx, it domain.Item, kind string, due time.T
 	return a.remind(tx, pol, it, kind, due, title, summary)
 }
 
+// RemindWith 同 Remind，并在提醒内容里给出本人可选的动作（如跟进的"已催""再等""放弃"）。
+func (a *Attention) RemindWith(tx *store.Tx, it domain.Item, kind string, due time.Time, title, summary string, options []string) error {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return err
+	}
+	return a.remind(tx, pol, it, kind, due, title, summary, options...)
+}
+
 // RemindGroup 把一批事项合成一条提醒（如久未推进），挂在 anchor 事项上；同一 key 只提醒一次。
 // 内容里的 webURL 指向批的入口，不是 anchor。在调用方的事务里运行。
 func (a *Attention) RemindGroup(tx *store.Tx, anchor domain.Item, key, title, summary, webURL string) error {
@@ -356,14 +369,28 @@ func (a *Attention) RemindGroup(tx *store.Tx, anchor domain.Item, key, title, su
 	})
 }
 
-func (a *Attention) remind(tx *store.Tx, pol policy.Policy, it domain.Item, kind string, due time.Time, title, summary string) error {
+// AlertID 是规则 alert 出口为来源事件产出的提醒的投递 id：同一来源事件只提醒一次。
+func AlertID(sourceEvent string) string { return "alert:" + sourceEvent }
+
+// Alert 让规则 alert 出口的提醒走触达：没有事项，只记出处（origin）；受静默、日上限和静音约束（§7.4）。
+// 同一来源事件重复调用不会重复提醒。在调用方的事务里运行。
+func (a *Attention) Alert(tx *store.Tx, o domain.DeliveryOrigin, content domain.DeliveryContent) error {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return err
+	}
+	return a.offer(tx, pol, held{id: AlertID(o.SourceEvent), class: domain.DeliveryReminder, priority: domain.PriorityNormal,
+		version: 1, content: content, origin: &o})
+}
+
+func (a *Attention) remind(tx *store.Tx, pol policy.Policy, it domain.Item, kind string, due time.Time, title, summary string, options ...string) error {
 	ver, err := command.Version(tx, it.ID)
 	if err != nil {
 		return err
 	}
 	return a.offer(tx, pol, held{
 		id: fmt.Sprintf("remind:%s:%s:%d", kind, it.ID, due.UnixNano()), item: it.ID, class: domain.DeliveryReminder, priority: it.Priority, version: ver,
-		content: domain.DeliveryContent{Title: title, Summary: summary, WebURL: a.o.WebURL(it.ID)},
+		content: domain.DeliveryContent{Title: title, Summary: summary, Options: options, WebURL: a.o.WebURL(it.ID)},
 	})
 }
 
@@ -379,7 +406,8 @@ type held struct {
 	exempt    bool // 豁免静默
 	mergeable bool
 	release   time.Time
-	notBefore time.Time // 阈值判定为并入摘要时的最早放行时刻
+	notBefore time.Time              // 推迟判定为“可以晚点送”时的最早放行时刻（合并窗口结束）
+	origin    *domain.DeliveryOrigin // 没有事项的提醒（规则 alert 出口）的出处；有事项时为空
 }
 
 // offer 决定一条提醒现在投还是先拦住：静默中拦到静默结束；低优先级提醒进合并窗口。
@@ -418,9 +446,17 @@ func (a *Attention) offer(tx *store.Tx, pol policy.Policy, h held) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO attention_held (id, item, class, priority, content, version, exempt, mergeable, release_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, h.id, h.item, string(h.class), string(h.priority), string(content), h.version,
-		b2i(h.exempt), b2i(h.mergeable), h.release.UnixNano())
+	origin := ""
+	if h.origin != nil {
+		b, err := json.Marshal(h.origin)
+		if err != nil {
+			return err
+		}
+		origin = string(b)
+	}
+	_, err = tx.Exec(`INSERT INTO attention_held (id, item, class, priority, content, version, exempt, mergeable, release_at, origin)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, h.id, h.item, string(h.class), string(h.priority), string(content), h.version,
+		b2i(h.exempt), b2i(h.mergeable), h.release.UnixNano(), origin)
 	return err
 }
 
@@ -450,15 +486,21 @@ func (a *Attention) flush(tx *store.Tx, pol policy.Policy) error {
 		var (
 			h                  held
 			class, prio, body  string
+			origin             string
 			exempt, merge, rel int64
 		)
-		if err := r.Scan(&h.id, &h.item, &class, &prio, &body, &h.version, &exempt, &merge, &rel); err != nil {
+		if err := r.Scan(&h.id, &h.item, &class, &prio, &body, &h.version, &exempt, &merge, &rel, &origin); err != nil {
 			return err
+		}
+		if origin != "" {
+			if err := json.Unmarshal([]byte(origin), &h.origin); err != nil {
+				return fmt.Errorf("held %s origin: %w", h.id, err)
+			}
 		}
 		h.class, h.priority, h.exempt, h.mergeable, h.release = domain.DeliveryClass(class), domain.Priority(prio), exempt == 1, merge == 1, time.Unix(0, rel)
 		due = append(due, h)
 		return json.Unmarshal([]byte(body), &due[len(due)-1].content)
-	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at FROM attention_held WHERE release_at <= ? OR class = 'decision' ORDER BY release_at, rowid`, now.UnixNano())
+	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at, origin FROM attention_held WHERE release_at <= ? OR class = 'decision' ORDER BY release_at, rowid`, now.UnixNano())
 	if err != nil {
 		return err
 	}
@@ -524,7 +566,7 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 			return a.deliver(tx, pol, rest)
 		}
 	}
-	d := domain.Delivery{ID: hs[0].id, Item: hs[0].item, Class: hs[0].class, Version: hs[0].version, Content: hs[0].content}
+	d := domain.Delivery{ID: hs[0].id, Item: hs[0].item, Class: hs[0].class, Version: hs[0].version, Content: hs[0].content, Origin: hs[0].origin}
 	if len(hs) > 1 {
 		titles := make([]string, len(hs))
 		for i, h := range hs {
@@ -540,15 +582,6 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 		d.Content = domain.DeliveryContent{Title: fmt.Sprintf("%d 条低优先级提醒", len(hs)), Summary: strings.Join(titles, "；")}
 	}
 	d.Route = a.route(pol, hs[0].class, hs[0].priority)
-	if d.Class == domain.DeliveryDecision {
-		v, err := a.verdict(tx, d.Item, d.Version)
-		if err != nil {
-			return err
-		}
-		if v == VerdictWebUnread { // 阈值判定只能降低打扰：留在 Web 未读
-			d.Route = delivery.RouteWeb
-		}
-	}
 	if err := a.attachForm(tx, pol, &d); err != nil {
 		return err
 	}
@@ -573,6 +606,10 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 // target 取一条提醒对应事项的项目与来源，供日上限与静音对照；事项已不存在时只剩事项 id。
 func (a *Attention) target(tx *store.Tx, h held) (delivery.Target, error) {
 	t := delivery.Target{Exempt: h.exempt}
+	if h.origin != nil { // 没有事项：只能按来源对照静音
+		t.Source = h.origin.Source
+		return t, nil
+	}
 	it, err := items.Get(tx, h.item)
 	if isNotFound(err) {
 		return t, nil

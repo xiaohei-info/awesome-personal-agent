@@ -159,6 +159,7 @@ func (e *env) bearer(kind auth.Kind) func(*http.Request) {
 	return func(r *http.Request) {
 		r.Header.Set("Authorization", "Bearer "+secret)
 		r.Header.Set("X-APA-Session", "s1")
+		r.Header.Set("X-APA-Session-Kind", "direct")
 	}
 }
 

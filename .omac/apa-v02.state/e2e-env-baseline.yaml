@@ -1,4 +1,10 @@
-# sha256: 46d1424d157db0ccb8c6859494aba88c1e2401812dc5dbda66da76c4113e5f6c
+# sha256: bdf21be101c34f38c51f117a4b12695bbbf032de28c1bdfe68e2eb5063426110
 work_item_id: 01a1d13f-dccf-7800-8517-fb81a271dd6a
 status: in_progress
 recovery_marker: true
+retry_note: 'OWNER ANSWER to blocker handoff-caf5eb11bd589626: 负责人裁定：选 (A)。授权本节点在同一
+  PR 里改 kernel/clock/wall/wall_testclock.go 的那一行日志，措辞对齐验收契约：消息含 "test-clock offset"，并带
+  seconds=<整数秒>（例如 slog.Info("test-clock offset advanced","from",..,"to",..,"seconds",int64(d.Seconds()))）；这个文件只在
+  apa_testclock 构建里编译，不算改产品功能。同时把 kernel/clock/wall 现有测试里断言旧措辞的地方一起改。apa today 无日期字段：接受你的替代，用事项
+  deadline 推进后触发 item.deadline_passed 作为时钟前进的可观察量，在 PR 描述里写明这是对 ACT-ENV-10 字面判据的替代及理由。改完
+  baseline 全绿后 submit，submit 后不要再推。'

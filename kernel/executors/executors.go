@@ -89,6 +89,12 @@ type Declaration struct {
 	Headless    *Headless    `json:"headless,omitempty"`
 	MainSession *MainSession `json:"main_session,omitempty"`
 	Executors   []Executor   `json:"executors,omitempty"`
+	Selfcheck   *Selfcheck   `json:"selfcheck,omitempty"`
+}
+
+// Selfcheck 是插件的自检命令（A.1、A.2）：只作数据保存，由 `apa doctor` 在 APA 主机上执行，内核不执行。
+type Selfcheck struct {
+	Command []string `json:"command"`
 }
 
 // Record 是一份存下来的声明及其状态。
@@ -155,6 +161,11 @@ func ParseDeclaration(data []byte) (Declaration, error) {
 func (d Declaration) validate() error {
 	if d.Harness == "" || strings.ContainsAny(d.Harness, " \t\r\n") {
 		return invalid("harness is required and must not contain whitespace")
+	}
+	if sc := d.Selfcheck; sc != nil {
+		if len(sc.Command) == 0 || slices.Contains(sc.Command, "") {
+			return invalid("selfcheck.command must list non-empty argv elements")
+		}
 	}
 	if d.Headless == nil && len(d.Executors) == 0 {
 		return invalid("declaration needs headless and/or executors")

@@ -18,9 +18,12 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -34,7 +37,7 @@ var (
 	bg    = context.Background()
 	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
 	// 十类信号的固定顺序（设计 §15.2 表）。
-	signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts"}
+	signalIDs = []string{"source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable", "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag"}
 )
 
 type fakePacks []packs.Rejection
@@ -53,7 +56,7 @@ func setup(t *testing.T, ph khealth.PackHealth) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, clock.Module, core.Module,
-		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module} {
+		proc.Module, delivery.Module, registry.Module, runner.Module, agentsmd.Module, direct.Module, items.Module, executors.Module, kdoctor.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +71,7 @@ func setup(t *testing.T, ph khealth.PackHealth) *env {
 		t.Fatal(err)
 	}
 	a := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st, delivery.New(delivery.Options{}), ph)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st, delivery.New(delivery.Options{}), ph, 0), DoctorRoutes(st, kdoctor.Env{})}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +86,7 @@ func (e *env) get(kind auth.Kind) *httptest.ResponseRecorder {
 func (e *env) request(kind auth.Kind) *http.Request {
 	e.t.Helper()
 	scope := ""
-	if kind == auth.Ext {
+	if kind == auth.Ext || kind == auth.Webhook {
 		scope = "x"
 	}
 	var secret string
@@ -141,7 +144,7 @@ func (e *env) alert(object, reason string, payload any) {
 }
 
 // flow-health：全新账本返回固定顺序的十类信号，全部正常，且每类都带修复入口。
-func TestEmptyLedgerReportsTenHealthySignals(t *testing.T) {
+func TestEmptyLedgerReportsThirteenHealthySignals(t *testing.T) {
 	r := setup(t, nil).report(auth.Observer)
 	if !r.Healthy || len(r.Signals) != len(signalIDs) {
 		t.Fatalf("%+v", r)
@@ -236,5 +239,60 @@ func TestExtCredentialAndAnonymousAreRejected(t *testing.T) {
 	e.srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// 验收 ACT-OBD-13：外发范围未选而未判定的事件计入 unjudged_backlog 的 outbound_unset，信号是提醒级（不影响 healthy），
+// next 指向来源页去选范围；它们与模型端点没配置无关，不会让 model_unavailable 报警。
+func TestUnjudgedBacklogCountsOutboundUnset(t *testing.T) {
+	e := setup(t, fakePacks(nil))
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for id, reason := range map[string]string{"ev1": "outbound_unset", "ev2": "outbound_unset", "ev3": "undecided"} {
+			if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link,
+				occurred_at, correlation_keys, sender, sender_verified, disposition, unjudged_reason) VALUES ('d', ?, ?, 'src_rss', 'run', 't', 's', '', '', '', 0, '[]', '', 0, 'unjudged', ?)`,
+				id, id, reason); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report(auth.Observer)
+	var sig Signal
+	for _, s := range r.Signals {
+		switch s.ID {
+		case "unjudged_backlog":
+			sig = s
+		case "model_unavailable":
+			if !s.OK {
+				t.Errorf("held-back events must not blame the model endpoint: %+v", s)
+			}
+		}
+	}
+	d, _ := sig.Detail.(map[string]any)
+	if sig.OK || sig.Severity != SeverityWarning || !r.Healthy || sig.Count != 3 || d["outbound_unset"] != float64(2) || d["undecided"] != float64(1) || d["model_unavailable"] != float64(0) {
+		t.Fatalf("signal %+v healthy=%v", sig, r.Healthy)
+	}
+	if !strings.Contains(sig.Next, "outbound scope") {
+		t.Fatalf("next does not point to choosing the scope: %q", sig.Next)
+	}
+}
+
+// ACT-HLT-03/05：时钟迟到是提醒级——severity=warning、why 说明机制，healthy 不变，信号仍恒为十三项。
+func TestClockLagIsWarningAndKeepsHealthy(t *testing.T) {
+	e := setup(t, nil)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		return khealth.RecordClockLag(tx, clock.Command{TimerID: "tm_1", Target: "item_hl2", Kind: domain.TimerDue, Late: 8 * time.Minute}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report(auth.Observer)
+	s := r.byID("clock_lag")
+	if len(r.Signals) != 13 || !r.Healthy || s.OK || s.Count != 1 || s.Severity != SeverityWarning || s.Why == "" || s.Next == "" {
+		t.Fatalf("%+v", r)
+	}
+	if sd := r.byID("stalled_delegations"); !sd.OK || sd.Severity != "" {
+		t.Fatalf("%+v", sd)
 	}
 }

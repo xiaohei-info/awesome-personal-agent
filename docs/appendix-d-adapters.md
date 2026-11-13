@@ -9,7 +9,7 @@
 | 首批宿主 | Hermes | `plugins/hermes` | harness 插件接口（主文档 §11.2、附录 A） |
 | 即时通讯渠道 ext | Telegram，用成熟的 Bot SDK | `ext/telegram` | 渠道 ext 协议（主文档 §10.3） |
 | 导出 ext | Markdown 目录 | `ext/export` | 事件订阅与只读 API（主文档 §10.3） |
-| webhook 转发 ext | 通用的签名 POST | `ext/webhookforward` | 事件订阅（主文档 §10.3） |
+| webhook 转发 ext | 通用的签名 POST | `ext/webhookforward` | 事件订阅（主文档 §10.3）；可选 `APA_WEBHOOK_TYPES`（逗号分隔的事件类型）只转发所列类型，缺省转发全部，未选中的事件不投递但游标照常推进 |
 | 代码托管平台来源 | GitHub（`source_type: github`） | `sources/` | Source 执行契约（主文档 §9.2） |
 | 邮件 CLI | himalaya | `sources/` | Source 执行契约，自定义脚本（主文档 §9.7） |
 | 日历 CLI | gog calendar（Google 日历） | `sources/` | 同上 |
@@ -44,7 +44,7 @@ RSS/Atom、通用 HTTP JSON 轮询、本地目录监视三个拉取程序不对�
 | Apple 应用 | 一个适配器 `apple-pim-source`，`config.kind` 选 `mail`、`calendar`、`reminders`，各登记一个来源（`source_type` 分别为 `mail`、`calendar`、`reminder`）。`mail` 的 `account` 是邮件应用里的账户名，每个账户一个来源；`calendar` 的 `calendars`（名或 ID，缺省全部）用来只收不与其他日历来源重复的日历；`reminders` 的 `lists` 缺省全部，取未完成且有到期日的 `upcoming` 与 `overdue`。事件类型：邮件 `mail.received`（id 为 Message-ID）；日历 `event.created` / `event.cancelled`（工具不给更新时间，id 为工具日程 id、实例日期与内容摘要，关联键去掉摘要）；提醒事项 `reminder.due`（id 为提醒 id 加内容摘要，关联键为提醒 id）。邮件用 `--engine=sqlite` 只读索引与邮件文件，不经应用，不改已读标记；邮件按 `--since` 最旧优先取，游标推进到已读部分。三个工具没有版本参数，输出契约靠必填字段校验（缺字段、`success` 为 false 返回 2），录制样本在 `sources/applepim/testdata`。`config.bin_dir` 指定工具目录（缺省按 `PATH`） |
 | Apple 应用的系统授权 | 日历和提醒事项的系统授权归启动工具的应用，后台服务拉起时没有可授权的应用。`config.helper_app` 指定辅助应用，填上后适配器经 `open -W -n -a`（`-n`：多个来源并发时各开一个实例，否则运行中的辅助应用收不到参数）让辅助应用成为授权主体；因 `open` 不回传退出码，这条路径以 stdout 为空判失败，stderr 含授权拒绝字样返回 2。授权由本人在系统弹窗或系统设置里给，APA 不代办 |
 
-邮件线程关联键（主文档 §9.7）在各邮件适配器里的取法：himalaya 与 `mail-cli` 都在读取正文的同一次调用里取 `References` 与 `In-Reply-To` 头；取不到时只给邮件自己的 Message-ID。这一取法属于 v0.2.0 的新增行为，随适配器的契约测试加录制样本（`MEAS-MAIL-THREAD`，见 D.3）。
+邮件线程关联键（主文档 §9.7）在各邮件适配器里的取法：事件的 `correlation_keys` 含 `thread:<线程根 Message-ID>`，线程根取 `References` 的第一项，没有则取 `In-Reply-To`，都没有则是邮件自己的 Message-ID；取不到线程头时只给自己的，回信按普通事件处理。himalaya（`sources/mail`，1.x 范围）在读取正文的同一次调用里加 `-H Message-ID -H References -H In-Reply-To`（仍带 `--preview`），输出的头部块按名取值、支持折行；2.x 范围未实测线程头，只给自己的 Message-ID。apple-pim（`sources/applepim`，`config.kind=mail`）取 `mail-cli get` 返回的 `message.references`、`message.inReplyTo`，并按自己 `messageId` 的写法（带不带尖括号）对齐，使原信与回信的键相等。录制样本：`sources/mail/testdata/1.1.0/thread/`（原信、带 References 与 In-Reply-To 的回信、只带 In-Reply-To 的回信、多级回复），`sources/applepim/testdata/messages-thread.json` 与 `get-mid-p*.json`。
 
 ## D.3 工具的实测结论
 
@@ -65,7 +65,7 @@ RSS/Atom、通用 HTTP JSON 轮询、本地目录监视三个拉取程序不对�
 
 | 项 | 需实测的结论 | 由谁证实 |
 |---|---|---|
-| `MEAS-MAIL-THREAD` | himalaya 与 `mail-cli` 在读取正文的同一次调用里能否取到 `References`、`In-Reply-To` 头 | v0.2.0。W1 的验收：两个邮件适配器各加录制样本，回信回到原事项；在真实邮件工具上的证实是本机升级验证 L11（主文档 §20.4） |
+| `MEAS-MAIL-THREAD` | himalaya 与 `mail-cli` 在读取正文的同一次调用里能否取到 `References`、`In-Reply-To` 头 | **录制样本部分（W1 开发验收）已有结论**：两个适配器的契约测试都断言回信（含只带 `In-Reply-To` 的）的 `correlation_keys` 含原信的 `thread:<Message-ID>`，见 D.2 与 flow-source-mail 的 ACT-MAIL-08/10/12/13。样本版本：himalaya 1.1.0（头部块沿用 1.1.0 实录的 `Message-ID: …` 输出形态，References/In-Reply-To 行按同一形态合成，非真实邮箱实录）；mail-cli 无版本参数，`message.references`/`inReplyTo` 字段为按设计合成。**真实邮件工具上的证实由本机升级验证 L11 承接**（主文档 §20.4），在此之前不得把"能取到"当作已证实 |
 | `MEAS-ADAPT-GMAIL` | gog 邮件结果的粒度（线程或消息）及其增量查询方式 | 接入该适配器时的验收 |
 | `MEAS-ADAPT-KHAL` | `khal list --json` 没有更新时间字段时如何识别更新；重复事件的展开 | 接入该适配器时的验收 |
 
@@ -99,7 +99,7 @@ Gmail、Google 日历、Google Drive 这类服务要用户自备 OAuth 客户端
 | 项 | 写回什么 | 状态 |
 |---|---|---|
 | `SPIKE-STRUCT` | 被测生成端点的类别（本机推理服务、外部托管服务）、对 JSON Schema 结构化输出的支持方式、内置模板的通过情况 | 待本版证实 |
-| `SPIKE-LOGPROB` | 被测端点是否返回首个输出 token 的对数概率、换算后的排序质量、`chat-logprobs` 是否开放 | 待本版证实 |
-| `SPIKE-CLS-BATCH` | 被测分类端点的时延分布与批量上限，默认值是否调整 | 待本版证实 |
+| `SPIKE-LOGPROB` | 被测端点是否返回首个输出 token 的对数概率、换算后的排序质量、`chat-logprobs` 是否开放 | 换算路径已在对话端点替身上验证（主文档 §8.8）；真实端点与排序质量待本机升级验证 L8，`chat-logprobs` 在此之前不开放 |
+| `SPIKE-CLS-BATCH` | 被测分类端点的时延分布与批量上限，默认值是否调整 | 超时、超限、批量的处置已在分类端点替身上验证（主文档 §8.8）；时延分布与默认值待本机升级验证 L8 |
 
 把现有的分类服务接到概率判断协议上，通常只需要一个转换程序：接收协议请求，调用分类服务，把结果换成每题一个 `p_yes`。转换程序是用户自己的部署，不在 APA 的发布物里；仓库里用于验收的分类端点替身可作起点（主文档 §18）。

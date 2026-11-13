@@ -201,8 +201,12 @@ func (e *Env) env(token string, args []string) []string {
 	}
 	// 带本人原话（--evidence）的第二档命令还要会话引用；harness 插件会设 APA_SESSION，这里替身。
 	// NoSession 供要验证"只带原话不带会话"的用例关掉它。
-	if !e.NoSession && slices.ContainsFunc(args, func(a string) bool { return a == "--evidence" || strings.HasPrefix(a, "--evidence=") }) {
-		env = append(env, "APA_SESSION=e2e-session")
+	// 会话类型是另一条依据（§14.5）：替身按私聊上报，缺会话引用时仍是"依据不足"。
+	if slices.ContainsFunc(args, func(a string) bool { return a == "--evidence" || strings.HasPrefix(a, "--evidence=") }) {
+		env = append(env, "APA_SESSION_KIND=direct")
+		if !e.NoSession {
+			env = append(env, "APA_SESSION=e2e-session")
+		}
 	}
 	return env
 }
@@ -459,10 +463,16 @@ func (e *Env) CreateProjects() {
 func (e *Env) StartModelStub() {
 	e.T.Helper()
 	e.ModelStub = modelstub.NewAt(loopback + ":0")
-	body, _ := json.Marshal(map[string]any{"model_endpoint": map[string]any{
-		"url": e.ModelStub.URL(), "model": "acc-model", "api_key": "stub-key", "screening_timeout_ms": 2000}})
+	// 位置声明为 local：替身在本机；未声明按 external，外部端点在来源未选外发范围时不送内容（§14.14）。
+	body, _ := json.Marshal(map[string]any{"generate_endpoint": map[string]any{
+		"url": e.ModelStub.URL(), "model": "acc-model", "api_key": "stub-key", "locality": "local"}, "screening_timeout_ms": 2000})
 	e.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
+	// 只有生成端点时 web_only 初筛由它回答；默认回"否、资料足够"，其他流程不被升级为 web_only（初筛用例自己覆盖）。
+	e.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: ScreeningPhrase}, Answer: "no"})
 }
+
+// ScreeningPhrase 出现在 web_only 初筛的提问里（decision-card/web-only-screening），用来在替身上匹配这道题。
+const ScreeningPhrase = "是否应当只由本人在 Web 回答"
 
 // DeclareStubHarness 经 `apa declare` 提交 acc-stub（read/edit/full 三档，声明 resume 与 session 取法）与
 // acc-stub-noresume（不声明 resume）两份无头运行声明，并在 Web 确认。

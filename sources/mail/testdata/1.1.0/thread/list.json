@@ -1,0 +1,6 @@
+[
+ {"id":"14","flags":[],"subject":"Re: [APA-LIVE-TEST] thread root","from":{"name":"AgentMail","addr":"agent@example.com"},"to":{"name":null,"addr":"agent@example.com"},"date":"2026-11-06 09:00+00:00","has_attachment":false},
+ {"id":"13","flags":[],"subject":"Re: [APA-LIVE-TEST] thread root","from":{"name":"AgentMail","addr":"agent@example.com"},"to":{"name":null,"addr":"agent@example.com"},"date":"2026-11-06 08:00+00:00","has_attachment":false},
+ {"id":"12","flags":[],"subject":"Re: [APA-LIVE-TEST] thread root","from":{"name":"AgentMail","addr":"agent@example.com"},"to":{"name":null,"addr":"agent@example.com"},"date":"2026-11-06 07:00+00:00","has_attachment":false},
+ {"id":"11","flags":[],"subject":"[APA-LIVE-TEST] thread root","from":{"name":"AgentMail","addr":"agent@example.com"},"to":{"name":null,"addr":"agent@example.com"},"date":"2026-11-06 06:00+00:00","has_attachment":false}
+]

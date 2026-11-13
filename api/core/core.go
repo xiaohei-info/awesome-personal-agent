@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -37,6 +38,8 @@ const (
 	CSRFHeader = "X-CSRF-Token"
 	// EvidenceHeader 携带 delegate 代理操作的本人原话（§14.3、§14.5）；骨干统一读入 Principal.Evidence。
 	EvidenceHeader = "X-APA-Evidence"
+	// SessionKindHeader 携带接入方自报的会话类型（direct、group、unknown；§14.5）；缺失即未上报。
+	SessionKindHeader = "X-APA-Session-Kind"
 	// GrantHeader 携带 delegate 代理操作的授权单 id，与 EvidenceHeader 二选一（§14.5）；骨干统一读入 Principal.Grant。
 	GrantHeader = "X-APA-Grant"
 	// ownerPrincipal 是本人的操作者标识（单用户系统，与 Web 会话的 Actor 一致），delegate 凭据代其行事。
@@ -63,6 +66,7 @@ type Principal struct {
 	Grant    string // GrantHeader 的值；写命令的 command.Request.Grant 取自这里，二选一与同时携带的判定都在内核
 	WebURL   string // 请求对象在 Web 的链接；写命令的 command.Request.WebURL 取自这里，随 20/22/23 拒绝返回
 	csrf     string
+	session  string // Web 会话的 id_hash；Bearer 为空
 }
 
 // Handler 处理一个请求。返回错误由骨干渲染成统一错误体；返回 nil 表示 Handler 已写完响应。
@@ -137,8 +141,12 @@ type Deps struct {
 	Store      *store.Store
 	Auth       *auth.Auth
 	Now        func() time.Time // nil 用系统时钟
-	SessionTTL time.Duration    // 0 用 DefaultSessionTTL
-	Logger     *slog.Logger     // nil 用 slog.Default()
+	SessionTTL time.Duration    // 会话绝对有效期；0 用 DefaultSessionTTL
+	// SessionIdle 是会话空闲有效期，超过这么久没用就失效；0 用 DefaultSessionIdle。
+	SessionIdle time.Duration
+	// LoginDelay 是全部地址失败过多时每次登录尝试的延迟应答时长；0 用 DefaultLoginDelay。
+	LoginDelay time.Duration
+	Logger     *slog.Logger // nil 用 slog.Default()
 	// Guard 非空时包装每个 Bearer 认证入口（唤醒租约，§13.6）：内核据账本把认证出的调用者降级，本层不判定。
 	Guard func(command.Identity) command.Identity
 	// Groups 是除 Register 登记外额外挂载的分组（测试与嵌入用）。
@@ -151,6 +159,8 @@ type Deps struct {
 type Server struct {
 	d       Deps
 	handler http.Handler
+	lim     *limiter
+	seen    *kdoctor.Seen
 }
 
 // New 装配路由并校验；任何登记错误（重复、缺处理器、路径非法）都在启动时返回，不留到请求时。
@@ -167,7 +177,13 @@ func New(d Deps) (*Server, error) {
 	if d.Logger == nil {
 		d.Logger = slog.Default()
 	}
-	s := &Server{d: d}
+	if d.SessionIdle <= 0 {
+		d.SessionIdle = DefaultSessionIdle
+	}
+	if d.LoginDelay <= 0 {
+		d.LoginDelay = DefaultLoginDelay
+	}
+	s := &Server{d: d, lim: newLimiter(), seen: kdoctor.NewSeen(0)}
 
 	rt := &Router{}
 	groups := []RouteGroup{s.authRoutes}
@@ -280,13 +296,24 @@ func webLink(r *http.Request) string {
 	return link
 }
 
+// sessionKind 把头的值收成三个枚举之一：缺失为空（未上报），其余不认识的值按 unknown。
+func sessionKind(v string) string {
+	switch v = strings.ToLower(strings.TrimSpace(v)); v {
+	case "":
+		return ""
+	case domain.SessionDirect, domain.SessionGroup:
+		return v
+	}
+	return domain.SessionUnknown
+}
+
 // ---- 认证 ----
 
 // authenticate 先看 Authorization：带了就只按 Bearer 判（无效不回退到 Cookie）；否则看会话 Cookie。
 func (s *Server) authenticate(r *http.Request) (*Principal, error) {
 	if h := r.Header.Get("Authorization"); h != "" {
 		secret := auth.ParseBearer(h)
-		origin := auth.Origin{Harness: r.Header.Get("X-APA-Harness"), Session: r.Header.Get("X-APA-Session")}
+		origin := auth.Origin{Harness: r.Header.Get("X-APA-Harness"), Session: r.Header.Get("X-APA-Session"), SessionKind: sessionKind(r.Header.Get(SessionKindHeader))}
 		var id command.Identity = command.Bearer{Auth: s.d.Auth, Secret: secret, Origin: origin, OnBehalfOf: ownerPrincipal}
 		if runidentity.IsSecret(secret) { // 运行凭据：worker 级、绑定一次运行、没有代答能力
 			id = runidentity.Identity{Secret: secret, Origin: origin}
@@ -298,6 +325,7 @@ func (s *Server) authenticate(r *http.Request) (*Principal, error) {
 		if err := s.d.Store.View(r.Context(), func(tx *store.Tx) (err error) { caller, err = id.Authenticate(tx); return }); err != nil {
 			return nil, err
 		}
+		s.noteSeen(r.Context(), caller, origin)
 		return &Principal{Identity: id, Caller: caller}, nil
 	}
 	c, err := r.Cookie(SessionCookie)
@@ -435,4 +463,20 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 		return err
 	}
 	return nil
+}
+
+// noteSeen 记下 ext 密钥与宿主插件最近一次调用内核的时间，供 `apa doctor` 报告（§15.5）。只服务自检，失败不影响请求。
+func (s *Server) noteSeen(ctx context.Context, c command.Caller, o auth.Origin) {
+	now := s.d.Now()
+	note := func(subject string) {
+		if err := s.seen.Note(ctx, s.d.Store, subject, now); err != nil {
+			s.d.Logger.Debug("doctor seen", "err", err)
+		}
+	}
+	if c.Kind == auth.Ext {
+		note(kdoctor.SubjectExt + strings.TrimPrefix(c.Actor.Principal, "ext:"))
+	}
+	if h := o.Harness; h != "" && len(h) <= 64 { // 长度设限：任意请求头值不能无限撑大记录
+		note(kdoctor.SubjectHarness + h)
+	}
 }

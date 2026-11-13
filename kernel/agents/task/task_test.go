@@ -24,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -31,7 +32,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 )
 
@@ -146,7 +149,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, executors.Module, proc.Module, runidentity.Module, delegation.Module, materials.Module, Module} {
+		items.Module, executors.Module, runner.Module, proc.Module, runidentity.Module, delegation.Module, materials.Module, summaries.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -1327,4 +1330,205 @@ type captureGen struct {
 func (c captureGen) Do(ctx context.Context, d direct.Call) (direct.Outcome, error) {
 	*c.seen = d.Material
 	return c.fakeGen.Do(ctx, d)
+}
+
+// attach 给事项挂上一条来源事件（pending）。
+func (e *env) attach(item, id, sender string, verified bool) {
+	e.t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		ev := domain.SourceEvent{ID: id, Type: "mail", Subject: "s-" + id, Sender: sender, SenderVerified: verified, OccurredAt: t0}
+		if err := runner.AppendInternal(tx, domain.Source{ID: "mail"}, ev); err != nil {
+			return err
+		}
+		evs, err := runner.Pending(tx) // 刚追加的是唯一一条待判断的
+		if err != nil || len(evs) != 1 {
+			return fmt.Errorf("pending events: %d %v", len(evs), err)
+		}
+		return runner.SetAttachState(tx, evs[0].ID, runner.AttachPending, item)
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// ACT-CAS-20：生成型信息不足接力到任务型时，事项上含未进转发白名单的挂靠消息就不拉起任务型，事项转 needs_input 并写明原因；
+// 白名单内的消息照常作为资料交给任务型。
+func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "summary")
+	e.setDefaultHarness("hx")
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "fwd", func(p *policy.Policy) error {
+			p.ForwardAllowlist = map[string][]string{"mail": {"boss@example.com"}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	relay := fakeGen{direct.Outcome{HandoffTask: "brief", Reason: "insufficient_info", Steps: []direct.Step{{RunID: "run_g", Result: json.RawMessage(`{"insufficient_info":true,"seen":"relay-marker"}`)}}}, e.st}
+	h := e.svc.CallAgent(AgentOptions{Generate: relay})
+
+	blocked := e.openItem()
+	e.attach(blocked, "m1", "boss@example.com", true)
+	e.attach(blocked, "m2", "stranger@example.com", true)
+	if err := h(bg, e.call("gen", blocked)); err != nil {
+		t.Fatal(err)
+	}
+	it := e.item(blocked)
+	if len(e.runList()) != 0 || it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "白名单") {
+		t.Fatalf("task agent must not run: runs %d item %+v", len(e.runList()), it)
+	}
+
+	ok := e.openItem()
+	e.attach(ok, "m3", "boss@example.com", true)
+	if err := h(bg, e.call("gen", ok)); err != nil {
+		t.Fatal(err)
+	}
+	res := e.waitResult()
+	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); res.Run.Target != ok || !strings.Contains(m, "boss@example.com") || !strings.Contains(m, "relay_input") || !strings.Contains(m, "relay-marker") {
+		t.Fatalf("listed message and the generate step's verdict must reach the task agent: %s", m)
+	}
+}
+
+// ACT-JRC-20：简报运行的资料文件带 per_brief 条抽检条目（来自最近一个周期被初筛忽略的事件），条目不含来源正文。
+func TestBriefRunMaterialsCarrySpotCheckEntries(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "summary")
+	e.setDefaultHarness("hx")
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for i := 0; i < 7; i++ {
+			sid := fmt.Sprintf("low-%d", i)
+			if err := runner.AppendInternal(tx, domain.Source{ID: "src_1"}, domain.SourceEvent{ID: sid, Type: "n", Subject: sid, Summary: "SECRET BODY", OccurredAt: t0}); err != nil {
+				return err
+			}
+			evs, err := runner.Events(tx, "src_1")
+			if err != nil {
+				return err
+			}
+			ev := evs[len(evs)-1]
+			if err := runner.SetDisposition(tx, ev.ID, domain.DispositionIgnored, "", ""); err != nil {
+				return err
+			}
+			p := 0.05
+			if err := record.Put(tx, record.Record{ID: "jd_" + sid, Use: "inbound_screen", Template: "t@x", Subject: ev.ID, Source: "src_1", Fingerprint: "f" + sid,
+				Band: record.Band{Low: 0.15, High: 0.6}, DecidedBy: record.DecidedClassifier, Answer: "no", CreatedAt: e.svc.o.Now(),
+				Levels: []record.Level{{Backend: record.BackendClassifier, PYes: &p, Outcome: record.OutcomeDecided}}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	id := e.openItem()
+	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("brief", id)); err != nil {
+		t.Fatal(err)
+	}
+	raw := read(t, filepath.Join(e.runs, e.waitResult().Run.ID, "materials.json"))
+	var f struct {
+		Materials []Material `json:"materials"`
+	}
+	if err := json.Unmarshal([]byte(raw), &f); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, m := range f.Materials {
+		if m.Name != "spot_check" {
+			continue
+		}
+		found = true
+		var b struct {
+			SpotCheck []struct {
+				Judgment string
+				WebPath  string `json:"web_path"`
+			} `json:"spot_check"`
+		}
+		if err := json.Unmarshal([]byte(m.Body), &b); err != nil || len(b.SpotCheck) != 5 || b.SpotCheck[0].WebPath == "" || strings.Contains(m.Body, "SECRET BODY") {
+			t.Fatalf("spot_check material: %v %s", err, m.Body)
+		}
+	}
+	if !found {
+		t.Fatalf("no spot_check material: %s", raw)
+	}
+}
+
+// briefMaterials 在新的 brief 事项上跑一次简报并返回资料文件里按名字索引的材料正文。
+func (e *env) briefMaterials() map[string]string {
+	e.t.Helper()
+	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("brief", e.openItem())); err != nil {
+		e.t.Fatal(err)
+	}
+	var f struct {
+		Materials []Material `json:"materials"`
+	}
+	if err := json.Unmarshal([]byte(read(e.t, filepath.Join(e.runs, e.waitResult().Run.ID, "materials.json"))), &f); err != nil {
+		e.t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, m := range f.Materials {
+		out[m.Name] = m.Body
+	}
+	return out
+}
+
+// ACT-DGA-15/16/17：简报资料带"知会"（digest 事件的标题与链接，不是事项）并只汇入一次，且按计划日期取材：
+// 计划今天的在 planned 里，计划明天与没有计划日期的不在；整条路径不调模型（AgentOptions 不给生成型）。
+func TestBriefMaterialsCarryDigestOnceAndPlannedToday(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "summary")
+	e.setDefaultHarness("hx")
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for _, n := range []string{"n1", "n2"} {
+			if err := runner.AppendInternal(tx, domain.Source{ID: "src_news"}, domain.SourceEvent{ID: n, Type: "news", Subject: "资讯 " + n, Link: "https://example.com/" + n, OccurredAt: t0}); err != nil {
+				return err
+			}
+		}
+		evs, err := runner.Events(tx, "src_news")
+		if err != nil {
+			return err
+		}
+		for _, ev := range evs {
+			if err := runner.SetDisposition(tx, ev.ID, domain.DispositionDigest, "", ""); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for title, day := range map[string]string{"plan-today": items.Today(t0), "plan-tomorrow": items.Today(t0.Add(24 * time.Hour)), "plan-none": ""} {
+		in := map[string]any{"kind": "task", "title": title, "phase": "open"}
+		if day != "" {
+			in["planned_for"] = day
+		}
+		e.must(owner, "item.create", in)
+	}
+	itemsBefore := len(e.listItems())
+
+	first := e.briefMaterials()
+	var dg struct {
+		Digest []struct{ Title, Link string } `json:"digest"`
+	}
+	if err := json.Unmarshal([]byte(first["digest"]), &dg); err != nil || len(dg.Digest) != 2 || dg.Digest[0].Title != "资讯 n1" || dg.Digest[1].Link != "https://example.com/n2" {
+		t.Fatalf("first brief must list both digest events with title and link: %v %s", err, first["digest"])
+	}
+	if p := first["planned"]; !strings.Contains(p, "plan-today") || strings.Contains(p, "plan-tomorrow") || strings.Contains(p, "plan-none") {
+		t.Fatalf("planned must hold today's plan only: %s", p)
+	}
+	if n := len(e.listItems()); n != itemsBefore+1 { // 只多出简报事项本身：digest 事件没有变成事项
+		t.Fatalf("digest events became items: %d -> %d", itemsBefore, n)
+	}
+
+	second := e.briefMaterials()
+	if err := json.Unmarshal([]byte(second["digest"]), &dg); err != nil || len(dg.Digest) != 0 {
+		t.Fatalf("second brief must not repeat merged digest events: %v %s", err, second["digest"])
+	}
+}
+
+func (e *env) listItems() (out []domain.Item) {
+	e.t.Helper()
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { out, err = items.List(tx, items.Filter{}); return }); err != nil {
+		e.t.Fatal(err)
+	}
+	return out
 }

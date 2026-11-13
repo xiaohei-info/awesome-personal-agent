@@ -294,3 +294,40 @@ func TestRedirectIsNotAnAcknowledgement(t *testing.T) {
 		t.Fatal("cursor advanced on a redirect")
 	}
 }
+
+// ACT-PRH-18：只订阅 item.created 时，proposal.attached 与 item.progress_added 不投递，但游标越过它们，
+// 之后的 item.created 照常送出；不配类型时两类新事件与其他类型一样送出。
+func TestTypeSubscriptionSkipsUnselectedAndAdvancesCursor(t *testing.T) {
+	k, rc, cfg := setup(t, 0)
+	cfg.Types = []string{"item.created"}
+	k.add(1, "item.created", "a")
+	k.add(2, "proposal.attached", "t3")
+	k.add(3, "item.progress_added", "t3")
+	stop := runBG(t, cfg)
+	waitFor(t, "cursor past the skipped events", func() bool {
+		b, _ := os.ReadFile(cfg.State)
+		return strings.TrimSpace(string(b)) == "3"
+	})
+	k.add(4, "item.created", "b")
+	waitFor(t, "later item.created", func() bool { return len(rc.okIDs()) == 2 })
+	stop()
+	if got := strings.Join(rc.okIDs(), ","); got != "1,4" {
+		t.Fatalf("delivered %q, want only the item.created events 1,4", got)
+	}
+
+	k2, rc2, cfg2 := setup(t, 0)
+	k2.add(1, "proposal.attached", "t3")
+	k2.add(2, "item.progress_added", "t3")
+	stop = runBG(t, cfg2)
+	waitFor(t, "default forwards every type", func() bool { return len(rc2.okIDs()) == 2 })
+	stop()
+}
+
+func TestConfigTypesFromEnv(t *testing.T) {
+	env := map[string]string{"APA_URL": "u", "APA_EXT_KEY": "k", "APA_WEBHOOK_URL": "w", "APA_WEBHOOK_SECRET": "s", "APA_WEBHOOK_STATE": "/x",
+		"APA_WEBHOOK_TYPES": " item.created, ,proposal.attached"}
+	c, err := ConfigFromEnv(func(k string) string { return env[k] })
+	if err != nil || strings.Join(c.Types, ",") != "item.created,proposal.attached" {
+		t.Fatalf("%+v %v", c, err)
+	}
+}

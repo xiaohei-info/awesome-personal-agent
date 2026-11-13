@@ -18,8 +18,8 @@ import (
 const (
 	slow       = 6 * time.Second // 对应"返回延迟 60 秒"
 	timeoutMs  = 30000           // 对应"初筛超时 120 秒"
-	okEscalate = `{"probability":0.95,"confidence":0.95}`
-	okNormal   = `{"probability":0.05,"confidence":0.95}`
+	okEscalate = "yes"           // 对话端点回答"是"：升级
+	okNormal   = "no"            // 回答"否"且资料足够：不升级
 )
 
 type fx struct {
@@ -61,17 +61,19 @@ func (f *fx) apa(token string, want int, args ...string) baseline.Result {
 	return r
 }
 
-// stub 把 MODEL_STUB 的默认响应换成 content/delay/status，并清空请求记录。
-func (f *fx) stub(content string, delay time.Duration, status int) {
+// stub 把 MODEL_STUB 上 web_only 初筛这道题的作答换成 answer/delay/status，并清空请求记录。
+// 只配了生成端点，初筛由对话端点回答（§14.4）；status 非 0 表示端点失败。
+func (f *fx) stub(answer string, delay time.Duration, status int) {
 	f.ModelStub.Reset()
-	f.ModelStub.SetDefault(modelstub.Reply{Content: content, Delay: delay, Status: status})
+	f.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: baseline.ScreeningPhrase}, Answer: answer,
+		DelayMS: int(delay / time.Millisecond), Status: status})
 }
 
 // screeningRequests 只数初筛（web-only-screening 提示词）的请求：决策卡片文案、一句话摘要是系统发起的另类调用，不属初筛。
 func (f *fx) screeningRequests() int {
 	n := 0
 	for _, r := range f.ModelStub.Requests() {
-		if strings.Contains(r.BodyText, "应只允许本人在 Web 回答") {
+		if strings.Contains(r.BodyText, baseline.ScreeningPhrase) {
 			n++
 		}
 	}

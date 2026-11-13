@@ -1,3 +1,5 @@
-# sha256: 1fe4b3b09e34638294c4ec5f878b7ee550dfe8d3bb1913bd46eca75e22856a56
-work_item_id: null
-status: blocked
+# sha256: d0e1bc107be062300ebb7f74951a67926bead2da9a2d641d94178f9dcf70ccd7
+work_item_id: 01a1d151-43fd-7b7a-8435-64b3374ae328
+status: done
+merged: true
+merged_at: '2026-11-12T20:15:12Z'

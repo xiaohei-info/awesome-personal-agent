@@ -52,6 +52,7 @@ func replay(t *testing.T, dir string, calls *[][]string) Runner {
 }
 
 func jsonFlagFor(dir string) []string {
+	dir, _, _ = strings.Cut(dir, "/") // "1.1.0/thread" 与 1.1.0 同属一个版本范围
 	for _, vr := range Supported {
 		if vr.Sample == dir {
 			return vr.JSONFlag
@@ -464,5 +465,64 @@ func TestTimeoutMidRunKeepsReadPart(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(o.String()), "\n")
 	if code != ExitOK || len(lines) != 2 { // 1 封 + 游标
 		t.Fatalf("code=%d out=%q err=%q", code, o.String(), e.String())
+	}
+}
+
+// ACT-MAIL-10、ACT-MAIL-02、ACT-MAIL-08：线程样本（1.1.0/thread）。读正文的同一次调用取
+// Message-ID、References、In-Reply-To；关联键是线程根 Message-ID（References 首项 > In-Reply-To > 自己）。
+func TestThreadCorrelationKeys(t *testing.T) {
+	var calls [][]string
+	code, out, errs := exec1(t, replay(t, "1.1.0/thread", &calls), input(""))
+	if code != ExitOK {
+		t.Fatalf("exit=%d %s", code, errs)
+	}
+	keys := map[string][]string{}
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		var ev struct {
+			ID   string   `json:"id"`
+			Keys []string `json:"correlation_keys"`
+		}
+		_ = json.Unmarshal([]byte(l), &ev)
+		if ev.ID != "" {
+			keys[ev.ID] = ev.Keys
+		}
+	}
+	root := "thread:<mid-t1@example.com>"
+	want := map[string]string{
+		"<mid-t1@example.com>": root, // 原信：自己的 Message-ID
+		"<mid-t2@example.com>": root, // References + In-Reply-To
+		"<mid-t3@example.com>": root, // 只有 In-Reply-To
+		"<mid-t4@example.com>": root, // 多级回复：取 References（折行）首项，不是直接父信
+	}
+	for id, k := range want {
+		if len(keys[id]) != 1 || keys[id][0] != k {
+			t.Errorf("%s correlation_keys=%v, want [%s]", id, keys[id], k)
+		}
+	}
+	// 同一次 message read 取三个头，且仍只读。
+	for _, c := range calls[2:] {
+		if j := strings.Join(c, " "); !strings.Contains(j, "-H Message-ID -H References -H In-Reply-To") || !strings.Contains(j, "--preview") {
+			t.Errorf("message read argv=%v", c)
+		}
+	}
+}
+
+// 没有线程头时关联键只含自己的 Message-ID（回信按普通事件处理）；2.0.0 范围同样给出。
+func TestKeysWithoutThreadHeaders(t *testing.T) {
+	for _, dir := range []string{"1.1.0", "2.0.0"} {
+		var calls [][]string
+		code, out, _ := exec1(t, replay(t, dir, &calls), input(""))
+		if code != ExitOK {
+			t.Fatal(dir, code)
+		}
+		first, _, _ := strings.Cut(out, "\n")
+		var ev struct {
+			ID   string   `json:"id"`
+			Keys []string `json:"correlation_keys"`
+		}
+		_ = json.Unmarshal([]byte(first), &ev)
+		if len(ev.Keys) != 1 || ev.Keys[0] != "thread:"+ev.ID {
+			t.Errorf("%s keys=%v id=%s", dir, ev.Keys, ev.ID)
+		}
 	}
 }

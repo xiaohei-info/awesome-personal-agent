@@ -104,6 +104,10 @@ CREATE TABLE sources_runner_metric (
 	// 标准事件 v2 的 items[]（聚合消息）：账本结构版本 3 的 items 列存的是事项 id，消息另存一列，供 extract 出口抽取（§9.2）。
 	Version: 4, Ledger: 3, Name: "event-messages",
 	SQL: `ALTER TABLE sources_runner_event ADD COLUMN messages TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 入账时同序列上一次的取值（JSON：指标名到数值），变化类条件与 apa why 据此回放（§9.2、§9.3）。
+	Version: 5, Ledger: 3, Name: "event-prev-metrics",
+	SQL: `ALTER TABLE sources_runner_event ADD COLUMN prev_metrics TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。
@@ -633,13 +637,57 @@ func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent) 
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT OR IGNORE INTO sources_runner_event
+	series := ""
+	if len(ev.CorrelationKeys) > 0 {
+		series = ev.CorrelationKeys[0]
+	}
+	prev, err := previousMetrics(tx, src.ID, series, ev.Metrics)
+	if err != nil {
+		return err
+	}
+	n, err := tx.Exec(`INSERT OR IGNORE INTO sources_runner_event
 		(dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at, correlation_keys, sender, sender_verified,
-		 metrics, merge_key, messages)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 metrics, merge_key, messages, prev_metrics)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		key.Domain, key.EventID, "sev_"+hex.EncodeToString(rnd[:]), src.ID, runID, ev.Type, ev.Subject, ev.Summary, ev.Detail,
-		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified, metrics, ev.MergeKey, msgs)
-	return err
+		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified, metrics, ev.MergeKey, msgs, prev)
+	if err != nil || n == 0 { // 重复事件被忽略：它不是这个序列的新样本，不动上一次取值
+		return err
+	}
+	for name, v := range ev.Metrics {
+		if _, err := tx.Exec(`INSERT INTO sources_runner_metric (source_id, correlation_key, name, value, at) VALUES (?,?,?,?,?)
+			ON CONFLICT (source_id, correlation_key, name) DO UPDATE SET value = excluded.value, at = excluded.at`,
+			src.ID, series, name, v, ev.OccurredAt.UnixNano()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// previousMetrics 读同一序列（来源，第一个关联键，指标名）上一次的取值，序列第一次出现的指标不在其中；
+// 取值随来源事件一起落账（prev_metrics），事件入账顺序就是比较顺序。没有指标返回空串，与迁移的列缺省一致。
+func previousMetrics(tx *store.Tx, source, series string, cur map[string]float64) (string, error) {
+	prev := map[string]float64{}
+	for name := range cur {
+		r, err := tx.Query(`SELECT value FROM sources_runner_metric WHERE source_id = ? AND correlation_key = ? AND name = ?`, source, series, name)
+		if err != nil {
+			return "", err
+		}
+		if r.Next() {
+			var v float64
+			if err := r.Scan(&v); err != nil {
+				r.Close()
+				return "", err
+			}
+			prev[name] = v
+		}
+		err = r.Err()
+		r.Close()
+		if err != nil {
+			return "", err
+		}
+	}
+	return jsonOrEmpty(prev, len(prev) == 0)
 }
 
 func (r *Runner) failed(c *command.Ctx, src domain.Source, in resultIn, kind string) error {
@@ -660,7 +708,7 @@ func (r *Runner) healthAlert(c *command.Ctx, src domain.Source, in resultIn) err
 
 const eventCols = `id, source_id, dedupe_domain, event_id, type, subject, summary, detail, link, occurred_at,
 	correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges,
-	metrics, merge_key, items, judgment, messages`
+	metrics, merge_key, items, judgment, messages, prev_metrics`
 
 // Events 按落盘顺序返回某来源的来源事件。
 func Events(tx *store.Tx, sourceID string) ([]domain.SourceEvent, error) {
@@ -670,6 +718,11 @@ func Events(tx *store.Tx, sourceID string) ([]domain.SourceEvent, error) {
 // Pending 按落盘顺序返回所有还没有处置的来源事件（disposition 为 pending），供入站流水线接手。
 func Pending(tx *store.Tx) ([]domain.SourceEvent, error) {
 	return queryEvents(tx, `WHERE disposition = ?`, string(domain.DispositionPending))
+}
+
+// ByDisposition 按落盘顺序返回所有处于某处置的来源事件（简报的"知会"取 digest）。
+func ByDisposition(tx *store.Tx, d domain.Disposition) ([]domain.SourceEvent, error) {
+	return queryEvents(tx, `WHERE disposition = ?`, string(d))
 }
 
 // SetDisposition 在调用方事务内给一条还是 pending 的来源事件写处置结果与（若有）建出的事项；
@@ -699,9 +752,21 @@ func SetDisposition(tx *store.Tx, id string, d domain.Disposition, item, reason 
 const rejudgeable = `disposition = 'unjudged' AND unjudged_reason IN ('', 'model_unavailable')`
 
 // Requeue 在调用方事务内把一条可重判的 unjudged 事件放回 pending，重判次数加一并返回新次数。不记事件。
-func Requeue(tx *store.Tx, id string) (int, error) {
+func Requeue(tx *store.Tx, id string) (int, error) { return requeue(tx, id, rejudgeable) }
+
+// RequeueBacklog 同 Requeue，对象是整个积压：unjudged（任何原因，含旧原因与 restored）与 expired。积压放开用（§9.3）。
+func RequeueBacklog(tx *store.Tx, id string) (int, error) {
+	return requeue(tx, id, `disposition IN ('unjudged', 'expired')`)
+}
+
+// RequeueOutbound 同 Requeue，对象是因外发范围未选择而未判定的事件；调用方先确认范围已选定（§14.14）。
+func RequeueOutbound(tx *store.Tx, id string) (int, error) {
+	return requeue(tx, id, `disposition = 'unjudged' AND unjudged_reason = 'outbound_unset'`)
+}
+
+func requeue(tx *store.Tx, id, where string) (int, error) {
 	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = 'pending', unjudged_reason = '', rejudges = rejudges + 1
-		WHERE id = ? AND `+rejudgeable, id)
+		WHERE id = ? AND `+where, id)
 	if err != nil {
 		return 0, err
 	}
@@ -712,22 +777,63 @@ func Requeue(tx *store.Tx, id string) (int, error) {
 	return ev.Rejudges, err
 }
 
-// Resolve 在调用方事务内结清一条积压事件：to 为 expired 时只接受 unjudged；为 proposed、ignored 时接受 unjudged 与 expired
-// （本人处理），proposed 同时关联事项。不记事件，调用方自己负责留痕。
+// SetMergeKey 记下内核算出的合并键（§9.3）；来源自带键时写入的是同一个值。不记事件，调用方自己负责留痕。
+func SetMergeKey(tx *store.Tx, id, key string) error {
+	_, err := tx.Exec(`UPDATE sources_runner_event SET merge_key = ? WHERE id = ?`, key, id)
+	return err
+}
+
+// Resolve 在调用方事务内结清一条积压事件：to 为 expired 时只接受 unjudged；为 proposed、ignored、digest 时接受 unjudged 与 expired
+// （本人处理、只跑规则），proposed 同时关联事项，并且也接受 digest（简报"知会"条目转为建议，§3.12）。不记事件，调用方自己负责留痕。
 func Resolve(tx *store.Tx, id string, to domain.Disposition, item string) error {
 	from := `disposition IN ('unjudged', 'expired')`
 	switch to {
 	case domain.DispositionExpired:
 		from = `disposition = 'unjudged'`
-	case domain.DispositionProposed, domain.DispositionIgnored:
+	case domain.DispositionProposed:
+		from = `disposition IN ('unjudged', 'expired', 'digest')`
+	case domain.DispositionIgnored, domain.DispositionDigest:
 	default:
-		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored or expired")
+		return domain.NewError(domain.CodeInvalidRequest, "disposition "+string(to)+" cannot settle the backlog", "use proposed, ignored, digest or expired")
 	}
 	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND `+from, string(to), item, id)
 	if err == nil && n == 0 {
 		return domain.NewError(domain.CodeConflict, "source event "+id+" is not in the unjudged backlog", "re-read the source event")
 	}
 	return err
+}
+
+// ProposeIgnored 在调用方事务内把一条被忽略的来源事件改为 proposed 并关联事项（抽检"该看"，§8.10）。
+// 只接受 ignored；不记事件，调用方自己负责留痕。
+func ProposeIgnored(tx *store.Tx, id, item string) error {
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ? WHERE id = ? AND disposition = ?`,
+		string(domain.DispositionProposed), item, id, string(domain.DispositionIgnored))
+	if err == nil && n == 0 {
+		return domain.NewError(domain.CodeConflict, "source event "+id+" is not ignored", "re-read the source event")
+	}
+	return err
+}
+
+// Reattach 在调用方事务内把建议 from 的来源事件（disposition=proposed）改挂到事项 to，记为 attached，挂靠状态取 state
+// （补到自己的事项用 AttachProcessed；补到委派事项用 AttachPending 让它被转发，§9.4）。返回被改挂的事件，按落盘顺序。
+// 不记事件，调用方自己负责留痕。
+func Reattach(tx *store.Tx, from, to, state string) ([]domain.SourceEvent, error) {
+	if state != AttachProcessed && state != AttachPending {
+		return nil, domain.NewError(domain.CodeInvalidRequest, "attach state "+state+" cannot be set on reattach", "use pending or processed")
+	}
+	as, err := querySeq(tx, `WHERE disposition = ? AND item = ? ORDER BY seq`, string(domain.DispositionProposed), from)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.SourceEvent, len(as))
+	for i, a := range as {
+		if _, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, item = ?, attach_state = ? WHERE id = ?`,
+			string(domain.DispositionAttached), to, state, a.ID); err != nil {
+			return nil, err
+		}
+		out[i] = a.SourceEvent
+	}
+	return out, nil
 }
 
 // RejudgeCandidates 返回 since 之后发生、可自动重判的 unjudged 事件，至多 limit 条；重判次数少的在前，同次数按落盘顺序，
@@ -741,9 +847,29 @@ func RejudgeCandidates(tx *store.Tx, since time.Time, limit int) ([]domain.Sourc
 	return out, err
 }
 
-// StaleUnjudged 返回 before 之前发生、仍是 unjudged 的事件 id（到期转 expired）。
+// OutboundUnset 返回 since 之后发生、因外发范围未选择而未判定的事件（选定后由入站模块放回重判），按落盘顺序。
+func OutboundUnset(tx *store.Tx, since time.Time) ([]domain.SourceEvent, error) {
+	as, err := querySeq(tx, `WHERE disposition = 'unjudged' AND unjudged_reason = 'outbound_unset' AND occurred_at >= ? ORDER BY seq`, since.UnixNano())
+	out := make([]domain.SourceEvent, len(as))
+	for i, a := range as {
+		out[i] = a.SourceEvent
+	}
+	return out, err
+}
+
+// StaleUnjudged 返回 before 之前发生、仍是 unjudged 的事件 id（到期转 expired）。本人放回的（restored）除外：它们只经积压放开重判，不到期。
 func StaleUnjudged(tx *store.Tx, before time.Time) ([]string, error) {
-	return ids(tx, `WHERE disposition = 'unjudged' AND occurred_at < ? ORDER BY seq`, before.UnixNano())
+	return ids(tx, `WHERE disposition = 'unjudged' AND unjudged_reason <> 'restored' AND occurred_at < ? ORDER BY seq`, before.UnixNano())
+}
+
+// RestoreIgnored 在调用方事务内把一条 ignored 的来源事件放回积压：unjudged，原因 restored。不记事件，调用方自己负责留痕。
+func RestoreIgnored(tx *store.Tx, id string) error {
+	n, err := tx.Exec(`UPDATE sources_runner_event SET disposition = ?, unjudged_reason = ? WHERE id = ? AND disposition = ?`,
+		string(domain.DispositionUnjudged), domain.UnjudgedRestored, id, string(domain.DispositionIgnored))
+	if err == nil && n == 0 {
+		return domain.NewError(domain.CodeConflict, "source event "+id+" is not ignored", "re-read the source event")
+	}
+	return err
 }
 
 // Backlog 返回积压事件（unjudged 与 expired）的 id；source 非空时只看该来源。
@@ -820,7 +946,8 @@ func SetAttachState(tx *store.Tx, id, to, item string) error {
 		)
 		switch {
 		case f == "": // 首次挂靠
-			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
+			// 积压事件（unjudged、expired）重走规则时也可挂靠（§9.3 积压放开第 1 步）；原因随之清空。
+			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ?, item = ?, unjudged_reason = '' WHERE id = ? AND attach_state = ? AND disposition IN (?, 'unjudged', 'expired')`,
 				to, string(domain.DispositionAttached), item, id, f, string(domain.DispositionPending))
 		case to == AttachHandedBack || to == AttachReleased:
 			n, err = tx.Exec(`UPDATE sources_runner_event SET attach_state = ?, disposition = ? WHERE id = ? AND attach_state = ? AND disposition = ?`,
@@ -909,7 +1036,7 @@ func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
 		)
 		e := &a.SourceEvent
 		if err := rows.Scan(&a.Seq, &e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
-			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages); err != nil {
+			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev); err != nil {
 			return nil, err
 		}
 		if err := x.fill(e); err != nil {
@@ -926,13 +1053,13 @@ func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
 }
 
 // extraCols 是 v2 新增、需要解码的 JSON 列（空串表示没有）。
-type extraCols struct{ metrics, items, messages string }
+type extraCols struct{ metrics, items, messages, prev string }
 
 func (x extraCols) fill(e *domain.SourceEvent) error {
 	for _, c := range []struct {
 		raw, name string
 		dst       any
-	}{{x.metrics, "metrics", &e.Metrics}, {x.items, "items", &e.Items}, {x.messages, "messages", &e.Messages}} {
+	}{{x.metrics, "metrics", &e.Metrics}, {x.items, "items", &e.Items}, {x.messages, "messages", &e.Messages}, {x.prev, "prev_metrics", &e.PrevMetrics}} {
 		if c.raw == "" {
 			continue
 		}
@@ -970,7 +1097,7 @@ func queryEvents(tx *store.Tx, where string, args ...any) ([]domain.SourceEvent,
 			x                      extraCols
 		)
 		if err := rows.Scan(&e.ID, &e.SourceID, &e.DedupeKey.Domain, &e.DedupeKey.EventID, &e.Type, &e.Subject, &e.Summary,
-			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages); err != nil {
+			&e.Detail, &e.Link, &at, &keys, &e.Sender, &verified, &disp, &e.Item, &e.AttachState, &e.UnjudgedReason, &rejudges, &x.metrics, &e.MergeKey, &x.items, &e.Judgment, &x.messages, &x.prev); err != nil {
 			return nil, err
 		}
 		if err := x.fill(&e); err != nil {

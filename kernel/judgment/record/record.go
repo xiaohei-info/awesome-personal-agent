@@ -249,6 +249,7 @@ func Get(tx *store.Tx, id string) (Record, error) {
 type Filter struct {
 	Subject, Use, Template, Source, After string
 	Limit                                 int
+	Since                                 time.Time // 非零时只返回 created_at 不早于它的记录
 }
 
 // 列表分页上限。
@@ -272,6 +273,9 @@ func List(tx *store.Tx, f Filter) (out []Record, more bool, err error) {
 			where, args = append(where, col+" = ?"), append(args, v)
 		}
 	}
+	if !f.Since.IsZero() {
+		where, args = append(where, "created_at >= ?"), append(args, f.Since.UnixNano())
+	}
 	if f.After != "" {
 		a, err := Get(tx, f.After)
 		if err != nil {
@@ -292,6 +296,25 @@ func List(tx *store.Tx, f Filter) (out []Record, more bool, err error) {
 		return rs[:f.Limit], true, nil
 	}
 	return rs, false, nil
+}
+
+// SetReview 填抽检结论（§8.10）：只写未抽检的记录，已有结论返回 conflict；判断本身的字段不变。
+// 谁能填由调用的命令授权（只在 Web），本函数不做授权。
+func SetReview(tx *store.Tx, id, result string, at time.Time) error {
+	if !oneOf(result, "should_see", "correct") {
+		return invalid("review.result must be should_see or correct")
+	}
+	n, err := tx.Exec(`UPDATE outcall_judgment SET review = ?, reviewed_at = ? WHERE id = ? AND review = ''`, result, at.UnixNano(), id)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := Get(tx, id); err != nil {
+			return err
+		}
+		return domain.NewError(domain.CodeConflict, "judgment record "+id+" is already reviewed", "a spot-check result is written once")
+	}
+	return nil
 }
 
 // DeleteBefore 删除 created_at 早于 cutoff 的记录（保留期清理），返回删除条数。Event 与事项不受影响。

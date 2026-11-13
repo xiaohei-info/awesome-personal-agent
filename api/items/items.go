@@ -10,6 +10,7 @@
 package items
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -24,7 +25,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -49,7 +52,11 @@ func Routes(x *command.Executor, st *store.Store, staleAfter ...func() time.Dura
 		r.Handle(core.Route{Method: "PATCH", Path: "/items/{id}", Handler: h.write("item.update", "id", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/transition", Handler: h.write("item.transition", "id", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/relations", Handler: h.write("item.relate", "from", http.StatusOK)})
+		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
+		r.Handle(core.Route{Method: "DELETE", Path: "/items/{id}/correlation-keys", Handler: h.write("item.relate", "from", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/progress", Handler: h.write("item.progress", "id", http.StatusCreated, h.withProgress)})
+		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/attach", Handler: h.write(inbound.CmdAttach, "id", http.StatusOK)})
+		r.Handle(core.Route{Method: "POST", Path: "/proposals/batch", Handler: h.batch})
 		r.Handle(core.Route{Method: "GET", Path: "/today", Handler: h.today})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/revert", Handler: h.write("item.revert", "id", http.StatusOK)})
 	}
@@ -79,13 +86,20 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	q := r.URL.Query()
 	f := kitems.Filter{Phase: domain.Phase(q.Get("phase")), Kind: domain.Kind(q.Get("kind")),
 		Project: q.Get("project"), Assignee: q.Get("assignee")}
+	sq := search.ItemQuery{Text: q.Get("q"), Tag: q.Get("tag"), PlannedFor: q.Get("planned_for"), Sort: q.Get("sort")}
 	var (
 		its  []domain.Item
+		prog map[string]string
 		rejs = map[string]Rejection{}
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if its, err = kitems.List(tx, f); err != nil {
 			return err
+		}
+		if sq.Text != "" {
+			if prog, err = search.ItemProgressText(tx); err != nil {
+				return err
+			}
 		}
 		for _, it := range its {
 			if rj, err := LastRejection(tx, it); err != nil {
@@ -98,11 +112,20 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	}); err != nil {
 		return err
 	}
+	// 先脱敏再检索：初筛中的事项对低级凭据不带标题与正文，也就不能被全文、标签或日期命中；它的进展同样不参与。
+	for i := range its {
+		shown := screening.Redact(its[i], p.Caller.Level)
+		if shown.Title != its[i].Title {
+			delete(prog, its[i].ID)
+		}
+		its[i] = shown
+	}
+	its, err := search.FilterItems(its, prog, sq)
+	if err != nil {
+		return err
+	}
 	if its == nil {
 		its = []domain.Item{}
-	}
-	for i := range its {
-		its[i] = screening.Redact(its[i], p.Caller.Level)
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"items": its, "last_rejections": rejs})
 }
@@ -116,9 +139,13 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 		rels []domain.Relation
 		rej  *Rejection
 		prog []domain.Progress
+		keys []kitems.Correlation
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if it, err = kitems.Get(tx, r.PathValue("id")); err != nil {
+			return err
+		}
+		if keys, err = kitems.Correlations(tx, it.ID); err != nil {
 			return err
 		}
 		if rels, err = kitems.Relations(tx, it.ID); err != nil {
@@ -139,7 +166,10 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	if rels == nil || shown.Ask != it.Ask {
 		rels = []domain.Relation{} // 初筛中的事项对非 Web 凭据不带关系
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": shown, "relations": rels, "progress": prog, "last_rejection": rej})
+	if keys == nil || shown.Ask != it.Ask {
+		keys = []kitems.Correlation{}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": shown, "relations": rels, "progress": prog, "correlation_keys": keys, "last_rejection": rej})
 }
 
 // today：四组取材全在内核（kitems.TodayItems）；初筛中的事项照常按凭据级别脱敏。
@@ -180,6 +210,9 @@ func (h *handlers) write(cmd, pathKey string, status int, extra ...func(r *http.
 			}
 			id, _ := json.Marshal(r.PathValue("id"))
 			body[pathKey] = id
+		}
+		if r.Method == http.MethodDelete { // DELETE …/correlation-keys：移除
+			body["remove"] = json.RawMessage("true")
 		}
 		in, err := json.Marshal(body)
 		if err != nil {
@@ -273,4 +306,28 @@ func LastRejection(tx *store.Tx, it domain.Item) (*Rejection, error) {
 		}
 	}
 	return nil, nil
+}
+
+// batch 处理 POST /proposals/batch（§7.2、附录 B.2）：请求体 {"mode":"recommended","filter":{…}} 或
+// {"mode":"explicit","actions":[…]}；每条建议各自成败、各记一条 Event，依据与身份校验对整批一视同仁。
+func (h *handlers) batch(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var b inbound.BatchRequest
+	var raw json.RawMessage
+	if err := core.DecodeJSON(r, &raw); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&b); err != nil {
+		return domain.NewError(domain.CodeInvalidRequest, "request body is not a valid batch", "send {\"mode\":\"recommended\"|\"explicit\", …}")
+	}
+	req := command.Request{Identity: p.Identity, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
+	res, err := inbound.Batch(context.WithoutCancel(r.Context()), h.x, h.st, req, b)
+	if err != nil {
+		return err
+	}
+	if res == nil {
+		res = []inbound.BatchResult{}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"results": res})
 }

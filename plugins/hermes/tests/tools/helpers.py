@@ -70,3 +70,14 @@ def fake_gateway(monkeypatch):
                       ("hermes_cli", hermes_cli), ("hermes_cli.config", hermes_config), ("hermes_cli.config_effective", config_effective)):
         monkeypatch.setitem(sys.modules, name, mod)
     return session
+
+
+def fake_session_context(monkeypatch, **bound):
+    """Stand-in for Hermes' gateway.session_context.get_session_env: the HERMES_SESSION_* values bound for one turn
+    (keys without the prefix, e.g. platform='telegram', chat_type='dm'). No keys = a terminal with nothing bound."""
+    mod = types.ModuleType("gateway.session_context")
+    mod.get_session_env = lambda name, default="": bound.get(name.removeprefix("HERMES_SESSION_").lower(), default)
+    gateway = types.ModuleType("gateway")
+    gateway.session_context = mod
+    monkeypatch.setitem(sys.modules, "gateway", gateway)
+    monkeypatch.setitem(sys.modules, "gateway.session_context", mod)

@@ -63,6 +63,9 @@ type relateIn struct {
 	Type   string `json:"type"`
 	Remove bool   `json:"remove"`
 	Reason string `json:"reason"`
+	// Key（可带 Domain）表示登记或移除一个关联键（§9.4），此时不给 To 与 Type。
+	Key    string `json:"key"`
+	Domain string `json:"domain"`
 }
 
 type revertIn struct {
@@ -86,7 +89,7 @@ func (c createIn) item(id string) domain.Item {
 	in := c.ItemInput
 	it := domain.Item{ID: id, Phase: c.phase(), Kind: in.Kind, Title: in.Title, Summary: in.Summary, Body: in.Body,
 		StatusLabel: in.StatusLabel, Priority: in.Priority, Project: in.Project, Tags: in.Tags, Assignee: in.Assignee,
-		WaitingOn: in.WaitingOn, Deadline: in.Deadline, PlannedFor: in.PlannedFor, Origin: in.Origin, Spec: in.Spec, Ext: in.Ext}
+		WaitingOn: in.WaitingOn, Deadline: in.Deadline, PlannedFor: in.PlannedFor, Origin: in.Origin, Proposal: in.Proposal, Spec: in.Spec, Ext: in.Ext}
 	if it.Priority == "" {
 		it.Priority = domain.PriorityNormal
 	}
@@ -447,6 +450,10 @@ func (s *svc) create() command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
+			// proposal 对外只读，只有入站流水线（内核身份）能写（附录 B.2）。
+			if v.Proposal != nil && c.Caller.Actor.Type != domain.ActorSystem {
+				return nil, invalid("proposal is written by the inbound pipeline only")
+			}
 			it := stamped(v.item(c.Object.ID), c.Now())
 			it.ChainDepth = c.ChainDepth
 			if err := save(c.Tx, it); err != nil {
@@ -598,6 +605,9 @@ func (s *svc) relate() command.Spec {
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
+			if v.Key != "" || v.Domain != "" {
+				return validateKey(tx, v)
+			}
 			rel := domain.Relation{Type: v.Type, From: v.From, To: v.To}
 			switch {
 			case blank(v.Type) || strings.ContainsAny(v.Type, " \t\r\n"):
@@ -638,6 +648,17 @@ func (s *svc) relate() command.Spec {
 			if err != nil {
 				return nil, err
 			}
+			if v.Key != "" {
+				k := Correlation{Domain: v.Domain, Key: v.Key}
+				if err := setCorrelation(c.Tx, cur.ID, k, v.Remove); err != nil {
+					return nil, err
+				}
+				cur = stamped(cur, c.Now())
+				if err := save(c.Tx, cur); err != nil {
+					return nil, err
+				}
+				return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, c.Evidence, payload{Op: "relate", Item: cur, Key: &k, Remove: v.Remove})
+			}
 			if err := setRelation(c.Tx, rel, v.Remove); err != nil {
 				return nil, err
 			}
@@ -647,6 +668,27 @@ func (s *svc) relate() command.Spec {
 			}
 			return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, c.Evidence, payload{Op: "relate", Item: cur, Relation: &rel, Remove: v.Remove})
 		}}
+}
+
+// validateKey：登记或移除关联键。键不与关系的 To、Type 混用；重复登记与移除不存在的键都明确报错。
+func validateKey(tx *store.Tx, v relateIn) error {
+	k := Correlation{Domain: v.Domain, Key: v.Key}
+	if err := checkCorrelation(k); err != nil {
+		return err
+	}
+	if v.To != "" || v.Type != "" {
+		return invalid("--key cannot be combined with --to or --type")
+	}
+	has, err := hasCorrelation(tx, v.From, k)
+	switch {
+	case err != nil:
+		return err
+	case v.Remove && !has:
+		return domain.NewError(domain.CodeNotFound, "correlation key is not registered on this item", "read the item's correlation keys")
+	case !v.Remove && has:
+		return conflict("correlation key is already registered", "nothing to do")
+	}
+	return nil
 }
 
 // noParentCycle：把 child 挂到 parent 下，不能让 child 成为 parent 的祖先。
@@ -724,8 +766,8 @@ func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
 		return rp, domain.NewError(domain.CodeNotFound, "event does not belong to this item", "read the item's timeline")
 	case target.Tombstone || !slices.Contains(revertible, target.Event.Type):
 		return rp, invalid("only item updates, phase changes and decisions can be reverted")
-	case target.Event.Actor.Type != domain.ActorAgent:
-		return rp, invalid("only changes made by an agent can be reverted")
+	case target.Event.Actor.Type != domain.ActorAgent && target.Event.Actor.Type != domain.ActorSystem:
+		return rp, invalid("only changes made by an agent or the kernel can be reverted")
 	case last == nil || last.Event.Seq != target.Event.Seq:
 		return rp, conflict("later changes exist on this item", "revert the later changes first")
 	}
@@ -737,7 +779,7 @@ func planRevert(tx *store.Tx, in revertIn) (revertPlan, error) {
 	switch {
 	case p.Op == "relate" && p.Relation != nil:
 		rp.rel, rp.remove = p.Relation, !p.Remove
-	case (p.Op == "update" || p.Op == "transition" || p.Op == "decision.answer") && p.Before != nil:
+	case (p.Op == "update" || p.Op == "transition" || p.Op == "decision.answer" || p.Op == "proposal.accept" || p.Op == "proposal.dismiss") && p.Before != nil:
 		rp.next = *p.Before
 		rp.next.ItemKernelState = cur.ItemKernelState // 内核字段不回退
 	default:

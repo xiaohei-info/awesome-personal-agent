@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -10,16 +10,18 @@ import { feature } from "./index";
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix the request" });
 
-interface Src { id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
+interface Src { outbound?: { local: string; external: string | null }; id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
 interface Rj { run_id: string; line: number; reason: string; raw: string; at: string }
-interface Ev { id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string; unjudged_reason?: string }
+interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string; unjudged_reason?: string }
 
-function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean } = {}) {
+function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean } = {}) {
   const sources = o.sources ?? [];
   const events = o.events ?? [];
   const ingests = o.ingests ?? [];
   const rejects = o.rejects ?? [];
   let keyed = false;
+  const restorable = o.restorable ?? [];
+  const restoreKeys: (string | undefined)[] = [];
   const calls: { method: string; path: string; body?: any; csrf: string | null }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -30,8 +32,29 @@ function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: 
     if (u.pathname === "/v1/sources" && method === "GET") return json(200, { sources });
     if (u.pathname === "/v1/sources" && method === "POST") {
       if (o.webOnly) return err(403, "web_only", "custom commands can only be registered in the Web UI");
-      sources.push({ id: body.id, type: body.type, command: body.command, schedule: body.schedule, enabled: true });
+      if (body.outbound) return err(403, "web_only", "outbound is not part of the source registration");
+      sources.push({ id: body.id, type: body.type, command: body.command, schedule: body.schedule, enabled: true, outbound: { local: "full", external: null } });
       return json(201, sources[sources.length - 1]);
+    }
+    const ob = u.pathname.match(/^\/v1\/settings\/sources\/([^/]+)\/outbound$/);
+    if (ob && method === "PUT") {
+      if (o.outboundFails) return err(500, "internal", "store is unavailable");
+      const s = sources.find((x) => x.id === ob[1]);
+      if (!s) return err(404, "not_found", "source not found");
+      s.outbound = { local: body.local, external: body.external };
+      return json(200, s.outbound);
+    }
+    if (u.pathname === "/v1/source-events/restorable" && method === "GET") {
+      const src = u.searchParams.get("source");
+      if (new Date(u.searchParams.get("from")!) >= new Date(u.searchParams.get("to")!)) return err(400, "invalid_request", "from must be earlier than to");
+      const hit = restorable.filter((r) => !src || r.source === src);
+      const by = [...new Set(hit.map((r) => r.source))].map((x) => ({ source: x, count: hit.filter((r) => r.source === x).length }));
+      return json(200, { matched: hit.length, sources: by });
+    }
+    if (u.pathname === "/v1/source-events/restore" && method === "POST") {
+      restoreKeys.push((init.headers as Record<string, string>)["Idempotency-Key"]);
+      const hit = restorable.splice(0).filter((r) => !body.source || r.source === body.source);
+      return json(200, { restored: hit.length });
     }
     const p = u.pathname.match(/^\/v1\/sources\/([^/]+)(\/.*)?$/);
     if (p) {
@@ -56,6 +79,7 @@ function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: 
         const d = u.searchParams.get("disposition");
         const after = Number(u.searchParams.get("after") ?? 0);
         const all = events.filter((e) => (d ?? "").split(",").includes(e.disposition));
+        if (u.searchParams.get("sort") === "score") all.sort((a, b) => (b.score ?? -1) - (a.score ?? -1)); // 没有分数的排最后
         const page = all.slice(after, after + 2);
         return json(200, after + 2 < all.length ? { events: page, next_after: after + 2 } : { events: page });
       }
@@ -91,7 +115,7 @@ function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: 
     }
     return err(404, "not_found", "no such route");
   }) as unknown as typeof fetch;
-  return { impl, calls, events, sources, ingests };
+  return { impl, calls, events, sources, ingests, restoreKeys };
 }
 
 function mount(fetchImpl: typeof fetch) {
@@ -222,6 +246,21 @@ describe("未判定事件转建议（flow-triage-failure / ACT-TRI-02）", () =>
     expect(await region.findByRole("alert")).toHaveTextContent("event is ignored, not unjudged");
   });
 
+  it("勾选按分数排序：请求带 sort=score，列表按服务端顺序显示每条的分数", async () => {
+    const b = backend({ sources: [rss], events: [ev("e1"), { ...ev("e2"), score: 0.05 }, { ...ev("e3"), score: 0.9 }] });
+    mount(b.impl);
+    await userEvent.click((await row("src_rss")).getByRole("button", { name: "详情" }));
+    const region = within(await screen.findByRole("region", { name: "未判定事件" }));
+    await region.findByText(/subject-e1/);
+    expect(b.calls.some((c) => c.path.includes("sort=score"))).toBe(false);
+    await userEvent.click(region.getByRole("checkbox", { name: "按分数排序" }));
+    await region.findByText("分数 0.90");
+    expect(b.calls.some((c) => c.path.includes("sort=score"))).toBe(true);
+    const subjects = region.getAllByText(/^subject-/).map((x) => x.textContent);
+    expect(subjects).toEqual(["subject-e3", "subject-e2"]); // 第一页两条：0.90、0.05；没有分数的 e1 在后面
+    expect(region.getByText("分数 0.05")).toBeInTheDocument();
+  });
+
   it("状态显示中文；可逐条忽略，也可两步确认后忽略本来源全部（含已过期的）", async () => {
     const b = backend({
       sources: [rss],
@@ -290,6 +329,7 @@ describe("登记自定义命令（flow-command-registration / ACT-CMD-04）", ()
     mount(b.impl);
     const f = await fill("src_check", "/opt/check.sh");
     await userEvent.type(within(f).getByLabelText("超时（秒）"), "30");
+    await userEvent.selectOptions(within(f).getByLabelText("外部端点外发范围"), "excerpt");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     const post = b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!;
     expect(post.body).toEqual({ id: "src_check", type: "script", command: "/opt/check.sh", schedule: "15m", timeout: 30 });
@@ -303,6 +343,7 @@ describe("登记自定义命令（flow-command-registration / ACT-CMD-04）", ()
     const b = backend({ webOnly: true });
     mount(b.impl);
     const f = await fill("src_x", "/tmp/evil.sh");
+    await userEvent.selectOptions(within(f).getByLabelText("外部端点外发范围"), "none");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     expect(await within(f).findByRole("alert")).toHaveTextContent("only be registered in the Web UI");
     expect(within(f).getByLabelText("命令")).toHaveValue("/tmp/evil.sh");
@@ -313,5 +354,123 @@ describe("登记自定义命令（flow-command-registration / ACT-CMD-04）", ()
     mount(backend().impl);
     const f = await screen.findByRole("region", { name: "登记自定义命令来源" });
     expect(within(f).getByRole("button", { name: "登记" })).toBeDisabled();
+  });
+});
+
+describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () => {
+  it("登记必须选外部范围：不选被表单拒绝且不发请求；本机范围预填全文；选后先登记再写范围，来源页显示两个范围", async () => {
+    const b = backend();
+    mount(b.impl);
+    const f = await screen.findByRole("region", { name: "登记自定义命令来源" });
+    await userEvent.type(within(f).getByLabelText("来源 id"), "src_obd");
+    await userEvent.type(within(f).getByLabelText("来源类型（source_type，可选）"), "acc-obd");
+    await userEvent.type(within(f).getByLabelText("命令"), "/opt/obd.sh");
+    expect(within(f).getByLabelText("本机端点外发范围")).toHaveValue("full");
+    expect(within(f).getByLabelText("外部端点外发范围")).toHaveValue(""); // 外部范围没有缺省值
+    await userEvent.click(within(f).getByRole("button", { name: "登记" }));
+    expect(await within(f).findByRole("alert")).toHaveTextContent("必须选择外部外发范围");
+    expect(b.calls.some((c) => c.method === "POST" && c.path === "/v1/sources")).toBe(false);
+    expect(b.sources).toHaveLength(0);
+
+    await userEvent.selectOptions(within(f).getByLabelText("外部端点外发范围"), "full");
+    await userEvent.click(within(f).getByRole("button", { name: "登记" }));
+    const r = await row("src_obd");
+    expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body).toMatchObject({ source_type: "acc-obd" });
+    const put = b.calls.find((c) => c.method === "PUT")!;
+    expect(put.path).toBe("/v1/settings/sources/src_obd/outbound");
+    expect(put.body).toEqual({ local: "full", external: "full" });
+    expect(put.csrf).toBe("tok-1");
+    await waitFor(() => expect(r.getByLabelText("本机范围")).toHaveValue("full"));
+    expect(r.getByLabelText("外部范围")).toHaveValue("full");
+  });
+
+  it("来源页显示服务端的两个范围；未选择的外部范围显示未选择；改动即写回并以服务端回读为准", async () => {
+    const b = backend({ sources: [{ ...rss, outbound: { local: "full", external: null } }, { ...hook, outbound: { local: "meta", external: "excerpt" } }] });
+    mount(b.impl);
+    const a = await row("src_rss");
+    expect(a.getByLabelText("外部范围")).toHaveValue("");
+    expect(a.getByRole("option", { name: "未选择" })).toBeInTheDocument();
+    const h = await row("src_hook");
+    expect(h.getByLabelText("本机范围")).toHaveValue("meta");
+    expect(h.getByLabelText("外部范围")).toHaveValue("excerpt");
+    await userEvent.selectOptions(h.getByLabelText("外部范围"), "full");
+    await waitFor(() => expect(b.sources.find((x) => x.id === "src_hook")!.outbound).toEqual({ local: "meta", external: "full" }));
+    expect((await row("src_hook")).getByLabelText("外部范围")).toHaveValue("full");
+  });
+
+  it("来源登记成功但范围写入失败：显示原因并提示重选，来源仍列出", async () => {
+    const b = backend({ outboundFails: true });
+    mount(b.impl);
+    const f = await screen.findByRole("region", { name: "登记自定义命令来源" });
+    await userEvent.type(within(f).getByLabelText("来源 id"), "src_p");
+    await userEvent.type(within(f).getByLabelText("命令"), "/opt/p.sh");
+    await userEvent.selectOptions(within(f).getByLabelText("外部端点外发范围"), "none");
+    await userEvent.click(within(f).getByRole("button", { name: "登记" }));
+    expect(await within(f).findByRole("alert")).toHaveTextContent(/来源已登记，但外发范围没有保存.*store is unavailable/);
+    expect(await row("src_p")).toBeTruthy();
+  });
+});
+
+describe("放回旧级联忽略的事件（flow-backlog-restore / ACT-RST-07）", () => {
+  const fill = async (src?: string) => {
+    const r = within(await screen.findByRole("region", { name: "把旧级联忽略的事件放回积压" }));
+    await userEvent.type(r.getByLabelText("起（含）"), "2030-01-01T00:00");
+    await userEvent.type(r.getByLabelText("止（不含）"), "2030-01-02T00:00");
+    if (src) await userEvent.selectOptions(r.getByLabelText("来源"), src);
+    return r;
+  };
+
+  it("先预览（条数与按来源分布，不写入）再执行；执行条数与预览一致，带 Idempotency-Key 与 CSRF", async () => {
+    const b = backend({ sources: [rss, hook], restorable: [{ source: "src_rss", id: "a" }, { source: "src_rss", id: "b" }, { source: "src_hook", id: "c" }] });
+    mount(b.impl);
+    const r = await fill();
+    expect(r.getByRole("button", { name: "放回积压" })).toBeDisabled(); // 没预览不能执行
+    await userEvent.click(r.getByRole("button", { name: "预览" }));
+    const pv = within(await r.findByRole("status", { name: "放回预览" }));
+    expect(pv.getByText("可放回 3 条")).toBeInTheDocument();
+    expect(pv.getByText("src_rss · 2 条")).toBeInTheDocument();
+    expect(pv.getByText("src_hook · 1 条")).toBeInTheDocument();
+    const q = new URL(b.calls.find((c) => c.path.startsWith("/v1/source-events/restorable"))!.path, "http://x").searchParams;
+    expect(q.get("from")).toBe(new Date("2030-01-01T00:00").toISOString());
+    expect(q.get("source")).toBeNull();
+    expect(b.calls.some((c) => c.path === "/v1/source-events/restore")).toBe(false);
+
+    await userEvent.click(r.getByRole("button", { name: "放回积压" }));
+    expect(await r.findByText("已放回 3 条")).toBeInTheDocument();
+    const post = b.calls.find((c) => c.path === "/v1/source-events/restore")!;
+    expect(post.body).toEqual({ from: new Date("2030-01-01T00:00").toISOString(), to: new Date("2030-01-02T00:00").toISOString() });
+    expect(post.csrf).toBe("tok-1");
+    expect(b.restoreKeys[0]).toBeTruthy();
+    expect(r.queryByRole("status", { name: "放回预览" })).not.toBeInTheDocument();
+    expect(r.getByRole("button", { name: "放回积压" })).toBeDisabled();
+  });
+
+  it("可限定来源；改条件后预览作废，必须重新预览", async () => {
+    const b = backend({ sources: [rss, hook], restorable: [{ source: "src_rss", id: "a" }, { source: "src_hook", id: "c" }] });
+    mount(b.impl);
+    const r = await fill("src_hook");
+    await userEvent.click(r.getByRole("button", { name: "预览" }));
+    await r.findByText("可放回 1 条");
+    await userEvent.selectOptions(r.getByLabelText("来源"), "src_rss");
+    expect(r.queryByText("可放回 1 条")).not.toBeInTheDocument();
+    expect(r.getByRole("button", { name: "放回积压" })).toBeDisabled();
+    await userEvent.click(r.getByRole("button", { name: "预览" }));
+    await r.findByText("可放回 1 条");
+    await userEvent.click(r.getByRole("button", { name: "放回积压" }));
+    await r.findByText("已放回 1 条");
+    expect(b.calls.find((c) => c.path === "/v1/source-events/restore")!.body.source).toBe("src_rss");
+  });
+
+  it("没有命中时不能执行；预览被服务端拒绝时显示原因", async () => {
+    const b = backend({ sources: [rss] });
+    mount(b.impl);
+    const r = await fill();
+    await userEvent.click(r.getByRole("button", { name: "预览" }));
+    await r.findByText("可放回 0 条");
+    expect(r.getByRole("button", { name: "放回积压" })).toBeDisabled();
+    await userEvent.clear(r.getByLabelText("止（不含）"));
+    await userEvent.type(r.getByLabelText("止（不含）"), "2029-12-31T00:00");
+    await userEvent.click(r.getByRole("button", { name: "预览" }));
+    expect(await r.findByRole("alert")).toHaveTextContent("from must be earlier than to");
   });
 });

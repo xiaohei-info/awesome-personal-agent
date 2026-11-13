@@ -23,7 +23,7 @@ var bg = context.Background()
 var t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func agent(p string, lvl authz.Level) command.Trusted {
-	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: lvl}
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: lvl}
 }
 
 var (

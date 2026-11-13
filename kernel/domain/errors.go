@@ -11,8 +11,10 @@ const (
 	CodeExecutorNotAllowed   Code = "executor_not_allowed"   // 403 → 21
 	CodeRiskScreeningPending Code = "risk_screening_pending" // 403 → 22
 	CodeBasisRequired        Code = "basis_required"         // 403 → 23：替本人做决定的依据不足（§14.5）
+	CodeSessionNotDirect     Code = "session_not_direct"     // 403 → 23：凭原话的代答，会话不是与本人的私聊（§14.5）
 	CodeNotFound             Code = "not_found"              // 404 → 5
 	CodeConflict             Code = "conflict"               // 409 → 6
+	CodeLoginLocked          Code = "login_locked"           // 429 → 1：登录被限速或锁定（§14.13），带 Retry-After
 	CodeInternal             Code = "internal"               // 其余 → 1
 )
 
@@ -42,8 +44,10 @@ var codeHTTP = map[Code]int{
 	CodeExecutorNotAllowed:   403,
 	CodeRiskScreeningPending: 403,
 	CodeBasisRequired:        403,
+	CodeSessionNotDirect:     403,
 	CodeNotFound:             404,
 	CodeConflict:             409,
+	CodeLoginLocked:          429,
 	CodeInternal:             500,
 }
 
@@ -55,8 +59,10 @@ var codeExit = map[Code]int{
 	CodeExecutorNotAllowed:   ExitExecutorNotAllowed,
 	CodeRiskScreeningPending: ExitScreeningPending,
 	CodeBasisRequired:        ExitBasisRequired,
+	CodeSessionNotDirect:     ExitBasisRequired,
 	CodeNotFound:             ExitNotFound,
 	CodeConflict:             ExitConflict,
+	CodeLoginLocked:          ExitUnclassified,
 	CodeInternal:             ExitUnclassified,
 }
 

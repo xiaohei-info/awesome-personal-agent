@@ -7,7 +7,7 @@
 //	POST /ingests/{id}/replay           重放
 //	GET /sources/{id}/events            来源事件，可按 disposition 过滤（逗号分隔多个），after + limit 分页
 //	GET /sources/{id}/rejects           没有入账的输出行及原因，after + limit 分页
-//	POST /source-events/{id}/propose    把未判定事件转为建议
+//	POST /source-events/{id}/propose    把未判定事件或 digest 事件转为建议
 //	POST /source-events/{id}/ignore     忽略一条未判定事件
 //	POST /source-events/ignore          批量忽略未判定积压：按来源或全部
 //
@@ -71,6 +71,12 @@ type Replayer interface {
 // Proposer 把未判定事件转为建议（*inbound.Service 满足它）。
 type Proposer interface {
 	ProposeUnjudged(ctx context.Context, id command.Identity, event string) (domain.SourceEvent, error)
+	// BacklogRules 是积压放开第 1 步：只跑规则，不调模型（§9.3）。req 带调用者身份与本人原话。
+	BacklogRules(ctx context.Context, req command.Request, source string) (inbound.RulesResult, error)
+	// BacklogScore 是积压放开第 2 步：影子打分，只写判断记录，不改处置（§9.3）。没有判断端点时是 409。
+	BacklogScore(ctx context.Context, req command.Request, source string) (inbound.ScoreResult, error)
+	// BacklogRejudge 是积压放开第 4 步：放开重判，进入建议流的数量受每日上限约束（§9.3）。limit 大于 0 时本次至多放这么多条进入建议流。
+	BacklogRejudge(ctx context.Context, req command.Request, source string, limit int) (inbound.ReleaseResult, error)
 }
 
 const (
@@ -112,6 +118,11 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/rejects", Handler: readable(a.rejects)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/rules", MaxBody: 1 << 10, Handler: a.backlogRules})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/score", MaxBody: 1 << 10, Handler: a.backlogScore})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/rejudge", MaxBody: 1 << 10, Handler: a.backlogRejudge})
+		r.Handle(core.Route{Method: "GET", Path: "/source-events/restorable", Handler: readable(a.restorable)})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/restore", MaxBody: 1 << 10, Handler: a.restore})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/ignore", MaxBody: 1 << 10, Handler: a.ignoreBatch})
 	}, nil
 }
@@ -193,6 +204,11 @@ func (a *api) create(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 	if err != nil {
 		return err
 	}
+	var newID string
+	_ = json.Unmarshal(in["id"], &newID)
+	if err := a.rejectOutbound(r, p, newID, in); err != nil {
+		return err
+	}
 	cmd := registry.CmdRegister
 	var typ string
 	if raw, ok := in["type"]; ok && json.Unmarshal(raw, &typ) == nil && domain.SourceType(typ) == domain.SourceScript {
@@ -214,6 +230,9 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 	}
 	cur, err := a.source(r, id)
 	if err != nil {
+		return err
+	}
+	if err := a.rejectOutbound(r, p, id, in); err != nil {
 		return err
 	}
 	enabled, hasEnabled := in["enabled"]
@@ -244,6 +263,21 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 		}
 	}
 	return writeValue(w, http.StatusOK, res)
+}
+
+// rejectOutbound：这两条路由从不写 outbound（§14.14）。非 Web 调用者的尝试交给内核的设置命令判定，
+// 以得到规定的退出码（delegate 20 并留拒绝事件，其余 4）；Web 本人则被指向 settings 路由。
+func (a *api) rejectOutbound(r *http.Request, p *core.Principal, id string, in map[string]json.RawMessage) error {
+	if _, ok := in["outbound"]; !ok {
+		return nil
+	}
+	if !p.Web {
+		raw, _ := json.Marshal(id)
+		if _, err := a.run(r, p, registry.CmdSetOutbound, map[string]json.RawMessage{"id": raw}, false); err != nil {
+			return err
+		}
+	}
+	return domain.NewError(domain.CodeWebOnly, "outbound is not part of the source registration or update", "set it in the Web UI (PUT /v1/settings/sources/{id}/outbound)")
 }
 
 func writeValue(w http.ResponseWriter, status int, res command.Result) error {
@@ -478,6 +512,35 @@ func pageParams(q url.Values) (after int64, limit int, err error) {
 	return after, limit, nil
 }
 
+// scoredPage 按影子分数从高到低返回一页，没有分数的排最后。顺序是整体的，所以 after/next_after 在这里是已返回的条数（偏移），
+// 不是落盘序号。shortcut: 每次翻页都重读并重排该来源的全部匹配事件；积压到数万条时再给分数建索引。
+func scoredPage(tx *store.Tx, source string, ds []domain.Disposition, after int64, limit int) ([]inbound.Scored, int64, error) {
+	var all []domain.SourceEvent
+	for cur := int64(0); ; {
+		page, next, err := runner.EventPage(tx, source, ds, cur, maxEventLimit)
+		if err != nil {
+			return nil, 0, err
+		}
+		all = append(all, page...)
+		if next == 0 {
+			break
+		}
+		cur = next
+	}
+	sorted, err := inbound.SortByScore(tx, all)
+	if err != nil {
+		return nil, 0, err
+	}
+	if int64(len(sorted)) <= after {
+		return []inbound.Scored{}, 0, nil
+	}
+	sorted = sorted[after:]
+	if len(sorted) > limit {
+		return sorted[:limit], after + int64(limit), nil
+	}
+	return sorted, 0, nil
+}
+
 func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	// 这里是未过滤的外部内容，运行凭据只能经转发白名单读挂靠消息（§9.4、§14.3）。
 	if p.Caller.Level == authz.LevelRun {
@@ -501,10 +564,15 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 	if err != nil {
 		return err
 	}
+	bySort := q.Get("sort")
+	if bySort != "" && bySort != "score" {
+		return invalid("sort is not valid", "use sort=score, or leave it out for the order the events arrived in")
+	}
 	id := r.PathValue("id")
 	var (
 		evs  []domain.SourceEvent
 		next int64
+		scrd []inbound.Scored
 	)
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
 		if !(p.Web && inbound.IsCaptureSource(id)) { // 对话内容只给本人；其他凭据和登记外的来源一样是 404
@@ -513,12 +581,19 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 			}
 		}
 		var err error
+		if bySort == "score" {
+			scrd, next, err = scoredPage(tx, id, ds, after, limit)
+			return err
+		}
 		evs, next, err = runner.EventPage(tx, id, ds, after, limit)
 		return err
 	}); err != nil {
 		return err
 	}
 	out := map[string]any{"events": evs}
+	if bySort == "score" {
+		out["events"] = scrd
+	}
 	if next != 0 {
 		out["next_after"] = next
 	}
@@ -565,6 +640,107 @@ func (a *api) ignoreBatch(w http.ResponseWriter, r *http.Request, p *core.Princi
 		m["all"] = json.RawMessage("true")
 	}
 	res, err := a.run(r, p, inbound.CmdIgnoreUnjudged, m, true)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, res.Value)
+}
+
+// backlogRules 积压只跑规则：请求体 {"source"?}；返回 {"attached","disposed","remaining"}。授权（本人原话或 Web）由命令管线判定。
+func (a *api) backlogRules(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		Source string `json:"source,omitempty"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	res, err := a.pr.BacklogRules(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, res)
+}
+
+// backlogScore 积压影子打分：请求体 {"source"?}；返回 {"scored","skipped"}。授权同 backlogRules；没有判断端点是 409。
+func (a *api) backlogScore(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		Source string `json:"source,omitempty"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	res, err := a.pr.BacklogScore(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, res)
+}
+
+// backlogRejudge 积压放开重判：请求体 {"source"?, "limit"?}；返回 {"requeued","deferred"}。授权同 backlogRules。
+func (a *api) backlogRejudge(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		Source string `json:"source,omitempty"`
+		Limit  int    `json:"limit,omitempty"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	if in.Limit < 0 {
+		return invalid("limit must not be negative", "leave limit out, or give a positive number")
+	}
+	res, err := a.pr.BacklogRejudge(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source, in.Limit)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, res)
+}
+
+// restorable 预览可放回积压的旧判断忽略事件：from、to 必填（RFC 3339），source 可选；只读。命中的是未过滤的外部事件，运行凭据不能预览。
+func (a *api) restorable(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if p.Caller.Level == authz.LevelRun {
+		return domain.NewError(domain.CodePermissionDenied, "run credential cannot preview restorable source events", "ask the owner to preview from the source page or the CLI")
+	}
+	q := r.URL.Query()
+	var t [2]time.Time
+	for i, k := range []string{"from", "to"} {
+		if q.Get(k) == "" {
+			return invalid(k+" is required", "give from and to as RFC 3339 times")
+		}
+		var err error
+		if t[i], err = time.Parse(time.RFC3339, q.Get(k)); err != nil {
+			return invalid(k+" is not an RFC 3339 time", "for example 2026-01-02T15:04:05Z")
+		}
+	}
+	var out inbound.RestorePreview
+	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) {
+		if err = inbound.RestoreWindow(tx, t[0], t[1], q.Get("source")); err != nil {
+			return err
+		}
+		out, err = inbound.PreviewRestore(tx, t[0], t[1], q.Get("source"))
+		return err
+	}); err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, out)
+}
+
+// restore 把旧级联忽略的事件放回积压：请求体 {"from","to","source"?}；返回 {"restored": n}。授权（本人原话或 Web，不接受授权单）由命令管线判定；可带 Idempotency-Key。
+func (a *api) restore(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in struct {
+		From   time.Time `json:"from"`
+		To     time.Time `json:"to"`
+		Source string    `json:"source,omitempty"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	m := map[string]json.RawMessage{}
+	m["from"], _ = json.Marshal(in.From)
+	m["to"], _ = json.Marshal(in.To)
+	if in.Source != "" {
+		m["source"], _ = json.Marshal(in.Source)
+	}
+	res, err := a.run(r, p, inbound.CmdBacklogRestore, m, true)
 	if err != nil {
 		return err
 	}

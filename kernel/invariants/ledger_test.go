@@ -142,7 +142,8 @@ func TestInv3PhaseEntryConstraints(t *testing.T) {
 func TestInv4WebOnlyOnlyEscalates(t *testing.T) {
 	t.Run("pending screening blocks delivery and delegate answers, then escalation sticks", func(t *testing.T) {
 		e := newLedger(t)
-		e.stub.SetDefault(modelstub.Reply{Content: `{"probability":0.95,"confidence":0.95}`, Delay: 300 * time.Millisecond})
+		e.cls.SetDefaultPYes(0.95)
+		e.cls.SetFault(modelstub.ClsFault{DelayMS: 300})
 		id := e.newItem(t, nil)
 		e.must(t, worker, "decision.request", map[string]any{"id": id, "ask": ask(map[string]any{"default_on_timeout": "A", "deadline": t0.Add(time.Hour)})})
 		if it := e.get(t, id); !it.Ask.ScreeningPending {

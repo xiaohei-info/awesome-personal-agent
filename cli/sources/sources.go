@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -18,8 +19,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--config JSON] [--enabled=false] | " +
-	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | auth <id>"
+const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
+	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] --evidence <words> | backlog rejudge [--source ID] [--limit N] --evidence <words> | backlog restore --from T --to T [--source ID] [--dry-run | --evidence <words>] | auth <id>"
 
 func init() { client.Register("source", source) }
 
@@ -85,6 +86,8 @@ func source(c *client.Ctx, args []string) error {
 			return err
 		}
 		return call(c, "POST", "/ingests/"+url.PathEscape(id)+"/replay", nil)
+	case "backlog":
+		return backlog(c, rest)
 	case "auth":
 		if len(rest) != 1 || strings.HasPrefix(rest[0], "-") {
 			return usage("exactly one source id is required", usageText)
@@ -146,6 +149,7 @@ func addBody(args []string) (map[string]any, error) {
 	str("source-type", "source_type")
 	str("credentials-path", "credentials_path")
 	str("dedupe-domain", "dedupe_domain")
+	str("default-project", "default_project")
 	fs.Func("timeout", "", func(v string) error {
 		n, err := strconv.Atoi(v)
 		body["timeout"] = n
@@ -197,4 +201,99 @@ func auth(c *client.Ctx, id string) error {
 	cmd.Dir = s.CredentialsPath
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = c.Env.Stdin, c.Env.Stdout, c.Env.Stderr
 	return cmd.Run()
+}
+
+// backlog 是积压放开的入口（附录 B.1）：list 读积压（未判定与已到期），rules、score、rejudge 是第 1、2、4 步（只跑规则、影子打分、
+// 放开重判；需本人原话，授权在内核）。
+func backlog(c *client.Ctx, args []string) error {
+	if len(args) == 0 || (args[0] != "list" && args[0] != "rules" && args[0] != "score" && args[0] != "rejudge" && args[0] != "restore") {
+		return usage("backlog needs list, rules, score, rejudge or restore", usageText)
+	}
+	fs := flag.NewFlagSet("source backlog "+args[0], flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	src := fs.String("source", "", "")
+	sortBy := fs.String("sort", "", "")
+	limit := fs.Int("limit", 0, "")
+	from := fs.String("from", "", "")
+	to := fs.String("to", "", "")
+	dry := fs.Bool("dry-run", false, "")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*sortBy != "" && (args[0] != "list" || *sortBy != "score")) ||
+		(*limit != 0 && args[0] != "rejudge") || *limit < 0 ||
+		((*from != "" || *to != "" || *dry) && args[0] != "restore") || (args[0] == "restore" && (*from == "" || *to == "")) {
+		return usage("invalid arguments for source backlog "+args[0], usageText)
+	}
+	if args[0] == "restore" { // 预览是只读的 GET，observer 即可；执行需要本人原话（授权在内核）
+		if *dry {
+			q := url.Values{"from": {*from}, "to": {*to}}
+			if *src != "" {
+				q.Set("source", *src)
+			}
+			return call(c, "GET", "/source-events/restorable?"+q.Encode(), nil)
+		}
+		body := map[string]any{"from": *from, "to": *to}
+		if *src != "" {
+			body["source"] = *src
+		}
+		return call(c, "POST", "/source-events/restore", body)
+	}
+	if args[0] != "list" {
+		body := map[string]any{}
+		if *src != "" {
+			body["source"] = *src
+		}
+		if *limit > 0 {
+			body["limit"] = *limit
+		}
+		return call(c, "POST", "/source-events/"+args[0], body)
+	}
+	ids := []string{*src}
+	if *src == "" {
+		var list struct {
+			Sources []struct {
+				ID string `json:"id"`
+			} `json:"sources"`
+		}
+		if err := c.Do(context.Background(), "GET", "/sources", nil, &list); err != nil {
+			return err
+		}
+		ids = ids[:0]
+		for _, s := range list.Sources {
+			ids = append(ids, s.ID)
+		}
+	}
+	out := []json.RawMessage{}
+	for _, id := range ids {
+		for after := ""; ; {
+			var page struct {
+				Events    []json.RawMessage `json:"events"`
+				NextAfter int64             `json:"next_after"`
+			}
+			path := "/sources/" + url.PathEscape(id) + "/events?disposition=unjudged,expired&limit=500" + after
+			if *sortBy != "" {
+				path += "&sort=" + *sortBy
+			}
+			if err := c.Do(context.Background(), "GET", path, nil, &page); err != nil {
+				return err
+			}
+			out = append(out, page.Events...)
+			if page.NextAfter == 0 {
+				break
+			}
+			after = "&after=" + strconv.FormatInt(page.NextAfter, 10)
+		}
+	}
+	if *sortBy == "score" { // 各来源各自有序：合起来再按分数排一次（同分保持来源顺序），没有分数的在最后
+		score := func(e json.RawMessage) *float64 {
+			var v struct {
+				Score *float64 `json:"score"`
+			}
+			_ = json.Unmarshal(e, &v)
+			return v.Score
+		}
+		sort.SliceStable(out, func(i, j int) bool {
+			a, b := score(out[i]), score(out[j])
+			return a != nil && (b == nil || *a > *b)
+		})
+	}
+	return c.Print(map[string]any{"events": out, "total": len(out)})
 }

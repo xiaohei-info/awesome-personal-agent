@@ -65,7 +65,7 @@ func (e *env) bearer(t *testing.T, s auth.Spec) command.Bearer {
 	if err := e.st.Update(bg, func(tx *store.Tx) (err error) { _, secret, err = e.au.Issue(tx, s); return }); err != nil {
 		t.Fatal(err)
 	}
-	return command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Session: "s1"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
@@ -279,12 +279,14 @@ func TestInvalidDeclarationsAreRejectedAndStoreNothing(t *testing.T) {
 			d.Headless.ExitCodes = map[string][]int{"session_missing": {1}}
 			d.Headless.ExitOutput = map[string][]string{"session_missing": {""}}
 		}),
-		"bad launch":    mod(func(d *Declaration) { d.MainSession = &MainSession{Launch: "daemon"} }),
-		"bad kind":      mod(func(d *Declaration) { d.Executors[0].Kind = "robot" }),
-		"empty id":      mod(func(d *Declaration) { d.Executors[0].ID = "" }),
-		"duplicate id":  mod(func(d *Declaration) { d.Executors = append(d.Executors, build) }),
-		"unknown field": `{"harness":"acme","executors":[{"id":"a","kind":"human","invoke":"rm -rf /"}]}`,
-		"not json":      `harness: acme`,
+		"bad launch":          mod(func(d *Declaration) { d.MainSession = &MainSession{Launch: "daemon"} }),
+		"empty selfcheck":     mod(func(d *Declaration) { d.Selfcheck = &Selfcheck{} }),
+		"empty selfcheck arg": mod(func(d *Declaration) { d.Selfcheck = &Selfcheck{Command: []string{"check", ""}} }),
+		"bad kind":            mod(func(d *Declaration) { d.Executors[0].Kind = "robot" }),
+		"empty id":            mod(func(d *Declaration) { d.Executors[0].ID = "" }),
+		"duplicate id":        mod(func(d *Declaration) { d.Executors = append(d.Executors, build) }),
+		"unknown field":       `{"harness":"acme","executors":[{"id":"a","kind":"human","invoke":"rm -rf /"}]}`,
+		"not json":            `harness: acme`,
 	}
 	for name, in := range cases {
 		if _, err := e.do(worker, "executor.declare", in); exit(err) != domain.ExitUsage {
@@ -447,5 +449,21 @@ func TestDeclareIsIdempotentWithKey(t *testing.T) {
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { recs, err = Records(tx, ""); return })
 	if len(recs) != 1 {
 		t.Fatalf("replay must not add a revision: %+v", recs)
+	}
+}
+
+// ACT-SKD-14 的前提：声明可以带 selfcheck.command，确认后随声明原样取回（内核只存数据，不执行）。
+func TestDeclarationCarriesSelfcheckCommand(t *testing.T) {
+	e := setup(t)
+	worker := e.bearer(t, auth.Spec{Kind: auth.Worker})
+	d := decl("acme", build)
+	d.Selfcheck = &Selfcheck{Command: []string{"acme-selfcheck", "--json"}}
+	if _, err := e.do(worker, "executor.declare", d); err != nil {
+		t.Fatal(err)
+	}
+	var pending []Record
+	_ = e.st.View(bg, func(tx *store.Tx) (err error) { pending, err = Records(tx, StatePending); return })
+	if len(pending) != 1 || pending[0].Declaration.Selfcheck == nil || pending[0].Declaration.Selfcheck.Command[0] != "acme-selfcheck" {
+		t.Fatalf("selfcheck not stored with the declaration: %+v", pending)
 	}
 }

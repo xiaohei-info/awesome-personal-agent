@@ -146,7 +146,7 @@ func startApa(t *testing.T, host string) (addr string) {
 	}
 	_, port, _ := net.SplitHostPort(l.Addr().String())
 	l.Close()
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("listen: "+host+":"+port+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("listen: "+host+":"+port+"\npublic_url: https://apa.example.invalid\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer

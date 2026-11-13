@@ -109,7 +109,7 @@ func setup(t *testing.T) *env {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{Routes(st)}})
+	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{Routes(st, nil)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,9 +243,36 @@ func TestErrorsAndReservedWords(t *testing.T) {
 			t.Fatalf("%s: %d %s", bad, r.Code, r.Body)
 		}
 	}
-	for _, w := range []string{"stats", "spot-check"} {
+	for _, w := range []string{"spot-check"} {
 		if r := e.get(obs, "/v1/judgments/"+w); r.Code != 404 || !strings.Contains(r.Body.String(), "no such route") {
 			t.Fatalf("%s must not be read as a record id: %d %s", w, r.Code, r.Body)
 		}
+	}
+}
+
+// ACT-JRC-08：GET /judgments/stats 返回 rows/rates/histogram，observer 可读，运行凭据与 ext 不可读，非法 since 返回 400。
+func TestStatsReadableByObserverOnly(t *testing.T) {
+	e := setup(t)
+	r := e.get(e.token(auth.Observer), "/v1/judgments/stats?use=inbound_screen&template=triage/triage-screen@abc&source=src_1&since=2026-10-01T00:00:00Z")
+	var got struct {
+		Rows []struct {
+			Backend        string
+			Calls, Decided int
+		}
+		Rates []struct{ Escalation float64 }
+	}
+	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &got) != nil || len(got.Rows) != 1 || got.Rows[0].Backend != "classifier" || len(got.Rates) != 1 {
+		t.Fatalf("%d %s", r.Code, r.Body)
+	}
+	if rr := e.get(e.token(auth.Observer), "/v1/judgments/stats?since=bogus"); rr.Code != 400 {
+		t.Fatalf("bad since: %d", rr.Code)
+	}
+	for _, k := range []auth.Kind{auth.Ext, auth.Webhook} {
+		if rr := e.get(e.token(k), "/v1/judgments/stats"); rr.Code != 403 {
+			t.Fatalf("%s: %d", k, rr.Code)
+		}
+	}
+	if rr := e.get(e.run, "/v1/judgments/stats"); rr.Code != 403 {
+		t.Fatalf("run: %d", rr.Code)
 	}
 }

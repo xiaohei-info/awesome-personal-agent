@@ -88,7 +88,7 @@ func TestMatrixEveryRowAndColumn(t *testing.T) {
 					want = ok
 				}
 				req.Evidence = "owner said so (chat#1)"
-				req.Actor.OnBehalfOf, req.Actor.Session = "owner", "s1"
+				req.Actor.OnBehalfOf, req.Actor.Session, req.Actor.SessionKind = "owner", "s1", domain.SessionDirect
 				d := authz.Decide(pol, req)
 				if d.ExitCode() != want {
 					t.Fatalf("exit %d, want %d (%+v)", d.ExitCode(), want, d)

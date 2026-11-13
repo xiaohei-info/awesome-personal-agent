@@ -65,9 +65,45 @@ def load():
     return ctx
 
 
+# Session surfaces that are the user's own terminal (gateway/session_context.py binds HERMES_SESSION_PLATFORM for
+# gateway sessions and HERMES_SESSION_SOURCE for CLI/TUI; both empty is an in-process `hermes chat`).
+_TERMINAL = frozenset({"", "cli", "tui", "local"})
+# Hermes surfaces that are neither the user's terminal nor a chat with a stated type: who speaks there is not ours to say.
+_NOT_A_CHAT = frozenset({"api_server", "codex", "desktop", "gateway", "kanban", "msgraph_webhook", "tool", "webhook"})
+_GROUP_CHAT = frozenset({"group", "channel", "thread"})
+
+
+def session_kind():
+    """direct | group | unknown for the session this call belongs to (appendix A.5, SPIKE-SESSION-KIND). Read from
+    Hermes' session binding, never from the model. A terminal session is one person at their own keyboard: direct.
+    A gateway session is what the platform says: a DM is direct, a group/channel/thread is group, and anything the
+    binding does not state (other surfaces such as api_server/webhook, a DM without a sender, an unreadable
+    binding) is unknown, so words in it are not accepted as the owner's."""
+    try:
+        from gateway.session_context import get_session_env
+    except ImportError:
+        return "unknown"
+    try:
+        platform = (get_session_env("HERMES_SESSION_PLATFORM", "") or "").strip().lower()
+        source = (get_session_env("HERMES_SESSION_SOURCE", "") or "").strip().lower()
+        if platform in _TERMINAL and source in _TERMINAL:
+            return "direct"
+        if platform in _NOT_A_CHAT or source in _NOT_A_CHAT:
+            return "unknown"
+        chat_type = (get_session_env("HERMES_SESSION_CHAT_TYPE", "") or "").strip().lower()
+        if chat_type in _GROUP_CHAT:
+            return "group"
+        if chat_type == "dm" and (get_session_env("HERMES_SESSION_USER_ID", "") or "").strip():
+            return "direct"
+    except Exception:  # noqa: BLE001 - Hermes' binding layer is not ours; not knowing is the safe answer
+        pass
+    return "unknown"
+
+
 def gateway_env(**extra):
     """The gateway's environment without what it inherited from the run whose client started it."""
     env = dict(os.environ)
+    env.pop("APA_SESSION_KIND", None)  # a session's kind is read from that session, never inherited from the gateway
     if _client_env() is not None:
         env.pop(VAR, None)
         if env.get("APA_RUN"):  # token and project came with it
@@ -83,7 +119,7 @@ def apa_env(**extra):
     """Environment for an `apa` subprocess: this session's run identity, never the one the gateway inherited.
     The CLI reads the rest from the context file; a session with no run uses the gateway's own credentials.
     ValueError for a run whose context did not arrive: the caller must not run `apa` at all."""
-    env = gateway_env(APA_HARNESS="hermes", **extra)
+    env = gateway_env(APA_HARNESS="hermes", APA_SESSION_KIND=session_kind(), **extra)
     path = context_file()
     if path:
         env[VAR] = path

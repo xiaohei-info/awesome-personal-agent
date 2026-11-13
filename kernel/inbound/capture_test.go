@@ -49,32 +49,111 @@ func (e *env) waitDisposed(source string) domain.SourceEvent {
 	return domain.SourceEvent{}
 }
 
-// ACT-CAP-03：开启捕获的项目里，对话增量成为内部来源事件，由判断型/生成型抽出候选，进该项目的 proposed。
-func TestCaptureProposesCandidateInProject(t *testing.T) {
-	t.Skip("v0.1 判断引擎语义（置信度阈值、escalate_to 级联、follow_up 的 do[]）已被 C.7/C.11 移除；对应引擎由判断引擎与跟进梯度的后续节点重写，届时替换本测试")
+// submit 提交一段增量并等内部来源事件处置完。
+func (e *env) submit(text string) domain.SourceEvent {
+	e.t.Helper()
+	if out, err := e.capture(caller(authz.LevelWorker, "s1"), map[string]any{"project": e.web, "text": text}); err != nil || !out.Captured {
+		e.t.Fatalf("out %+v err %v", out, err)
+	}
+	return e.waitDisposed("capture:" + e.web)
+}
+
+func (e *env) extractReqs() (n int) {
+	for _, r := range e.stub.Requests() {
+		if strings.Contains(r.BodyText, "抽取可以成为建议的候选事项") {
+			n++
+		}
+	}
+	return
+}
+
+// ACT-CAP-03：一段含两件事的对话先预筛（分类端点）再抽取（生成端点），得到该项目里两条 proposed 事项，来源事件记下两个事项 id。
+func TestCaptureExtractsTwoCandidatesAfterPrescreen(t *testing.T) {
 	e := newEnv(t, true)
 	e.setCapture(e.web, true)
-	e.stub.When("起标题", modelstub.Reply{Content: `{"title":"补登录页重试","summary":"用户说要给登录页加重试"}`})
-	e.stub.SetDefault(modelstub.Reply{Content: `{"choice":"task","confidence":0.5}`})
-
-	out, err := e.capture(caller(authz.LevelWorker, "s1"), map[string]any{"project": e.web, "text": "用户：登录页挂了，记得加重试"})
-	if err != nil || !out.Captured || out.Project != e.web {
-		t.Fatalf("out %+v err %v", out, err)
-	}
-	ev := e.waitDisposed("capture:" + e.web)
-	if ev.Disposition != domain.DispositionProposed || ev.Type != CaptureEvent || ev.Item == "" {
+	e.screen(0.90)
+	e.draft(`{"candidates":[{"title":"把合同发给小王","kind":"task"},{"title":"周五订会议室","kind":"task"}]}`)
+	ev := e.submit("cap-two 下周三前把合同发给小王；另外周五要订会议室")
+	if ev.Disposition != domain.DispositionProposed || len(ev.Items) != 2 || ev.Item != ev.Items[0] {
 		t.Fatalf("event %+v", ev)
 	}
-	it := e.item(ev.Item)
-	if it.Phase != domain.PhaseProposed || it.Project != e.web || it.Title != "补登录页重试" || it.Kind != "task" {
-		t.Fatalf("item %+v", it)
+	for i, want := range []string{"把合同发给小王", "周五订会议室"} {
+		if it := e.item(ev.Items[i]); it.Title != want || it.Phase != domain.PhaseProposed || it.Project != e.web {
+			t.Fatalf("item %d %+v", i, it)
+		}
 	}
-	if rs := e.stub.Requests(); len(rs) == 0 || !strings.Contains(rs[0].BodyText, "登录页挂了") {
-		t.Fatal("conversation delta was not passed to the model as material")
+	if len(e.cls.Batches()) == 0 || e.extractReqs() != 1 || len(e.stub.Requests()) != 1 {
+		t.Fatalf("prescreen batches %d, generate requests %d (extract %d)", len(e.cls.Batches()), len(e.stub.Requests()), e.extractReqs())
+	}
+	if !strings.Contains(e.sent(0), "把合同发给小王") {
+		t.Fatal("conversation delta was not passed to the extractor as material")
 	}
 }
 
-// 默认关闭：项目没开捕获时不入账、不调模型；原因只写机制。
+// ACT-CAP-04：预筛为否（低于下限 0.10）时生成端点零调用，事件忽略，不建建议。
+func TestCapturePrescreenNoMeansNoGenerateCall(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	e.screen(0.03)
+	e.draft(`{"candidates":[{"title":"不该出现","kind":"task"}]}`)
+	ev := e.submit("cap-chat 好的谢谢，今天天气不错")
+	if ev.Disposition != domain.DispositionIgnored || len(e.cls.Batches()) == 0 || len(e.stub.Requests()) != 0 || len(e.allItems()) != 0 {
+		t.Fatalf("event %+v generate %d items %d", ev, len(e.stub.Requests()), len(e.allItems()))
+	}
+}
+
+// ACT-CAP-05：预筛落在下限之上（0.30）即抽取；生成端点只收到一次抽取，没有对预筛题的重答。
+func TestCapturePrescreenAboveFloorExtracts(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	e.screen(0.30)
+	e.draft(`{"candidates":[{"title":"cap-maybe 回电话给房东","kind":"task"}]}`)
+	ev := e.submit("cap-maybe 回头记得给房东回电话")
+	if ev.Disposition != domain.DispositionProposed || len(ev.Items) != 1 || e.item(ev.Item).Title != "cap-maybe 回电话给房东" {
+		t.Fatalf("event %+v", ev)
+	}
+	if len(e.stub.Requests()) != 1 || e.extractReqs() != 1 {
+		t.Fatalf("generate requests %d extract %d", len(e.stub.Requests()), e.extractReqs())
+	}
+}
+
+// ACT-CAP-06：抽取出零条候选：事件忽略，不建（空标题）建议，不停在 pending。
+func TestCaptureZeroCandidatesCreatesNothing(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	e.screen(0.90)
+	e.draft(`{"candidates":[]}`)
+	ev := e.submit("cap-zero 我们讨论了一下架构")
+	if ev.Disposition != domain.DispositionIgnored || e.extractReqs() != 1 || len(e.allItems()) != 0 {
+		t.Fatalf("event %+v items %d", ev, len(e.allItems()))
+	}
+}
+
+// ACT-CAP-07：判断端点不可用时直接交生成型抽取，抽取照常发生。
+func TestCaptureJudgeDownExtractsDirectly(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	e.cls.SetFault(modelstub.ClsFault{Status: 503})
+	e.draft(`{"candidates":[{"title":"cap-nocls 交报销单","kind":"task"}]}`)
+	ev := e.submit("cap-nocls 明天交报销单")
+	if ev.Disposition != domain.DispositionProposed || len(ev.Items) != 1 || e.item(ev.Item).Title != "cap-nocls 交报销单" || e.extractReqs() != 1 {
+		t.Fatalf("event %+v", ev)
+	}
+}
+
+// ACT-CAP-08：两个端点都不可用：增量记未判定（model_unavailable），不丢，也不进建议流。
+func TestCaptureBothEndpointsDownIsUnjudged(t *testing.T) {
+	e := newEnv(t, true)
+	e.setCapture(e.web, true)
+	e.cls.SetFault(modelstub.ClsFault{Status: 503})
+	e.stub.SetDefault(modelstub.Reply{Status: 500})
+	ev := e.submit("cap-down 下周一体检")
+	if ev.Disposition != domain.DispositionUnjudged || ev.UnjudgedReason != domain.UnjudgedModelUnavailable || len(e.allItems()) != 0 {
+		t.Fatalf("event %+v", ev)
+	}
+}
+
+// ACT-CAP-01：默认关闭：项目没开捕获时不入账、不调模型；原因只写机制。
 func TestCaptureDisabledProjectDoesNothing(t *testing.T) {
 	e := newEnv(t, true)
 	out, err := e.capture(caller(authz.LevelWorker, ""), map[string]any{"project": e.web, "text": "随便聊聊"})
@@ -86,7 +165,7 @@ func TestCaptureDisabledProjectDoesNothing(t *testing.T) {
 	}
 }
 
-// 运行身份下不生效，即使项目已开启捕获（防回环）。
+// ACT-CAP-10：运行身份下不生效，即使项目已开启捕获（防回环）。
 func TestCaptureNoEffectUnderRunIdentity(t *testing.T) {
 	e := newEnv(t, true)
 	e.setCapture(e.web, true)
@@ -115,11 +194,12 @@ func TestCaptureRejectsObserverAndNoProject(t *testing.T) {
 	}
 }
 
-// 同一会话重复提交同一段增量只落一条来源事件、只建一个事项。
+// ACT-CAP-09：同一会话重复提交同一段增量只落一条来源事件、只建一个事项。
 func TestCaptureSameDeltaIsIdempotent(t *testing.T) {
 	e := newEnv(t, true)
 	e.setCapture(e.web, true)
-	e.judge(`{"choice":"task","confidence":0.95}`)
+	e.screen(0.95)
+	e.draft(`{"candidates":[{"title":"t","kind":"task"}]}`)
 	in := map[string]any{"project": e.web, "text": "用户：把发布流程写进文档"}
 	for range 2 {
 		if out, err := e.capture(caller(authz.LevelWorker, "s1"), in); err != nil || !out.Captured {
@@ -130,8 +210,8 @@ func TestCaptureSameDeltaIsIdempotent(t *testing.T) {
 	if err := e.svc.Process(bg); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(e.events("capture:" + e.web)); n != 1 || len(e.allItems()) != 1 {
-		t.Fatalf("events %d items %d", n, len(e.allItems()))
+	if n := len(e.events("capture:" + e.web)); n != 1 || len(e.allItems()) != 1 || e.extractReqs() != 1 {
+		t.Fatalf("events %d items %d extract requests %d", n, len(e.allItems()), e.extractReqs())
 	}
 }
 

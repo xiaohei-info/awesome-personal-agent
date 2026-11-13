@@ -35,7 +35,9 @@ type Command struct {
 	Target  string
 	Kind    domain.TimerKind
 	Due     time.Time
-	Actor   domain.Actor
+	// Late 是实际触发比计划时刻（Timer 登记的 at，周期定时是第一个错过的节拍）晚多久；准时为 0。
+	Late  time.Duration
+	Actor domain.Actor
 }
 
 // Handler 在 tx 内执行命令；返回错误则 Timer 不推进，整个事务回滚。
@@ -199,7 +201,7 @@ func (c *Clock) fire(ctx context.Context, id string, now time.Time) (bool, error
 			}
 			due, next = due.UTC(), next.UTC()
 		}
-		if err := c.handler(tx, Command{TimerID: id, Target: t.Target, Kind: t.Kind, Due: due, Actor: systemActor}); err != nil {
+		if err := c.handler(tx, Command{TimerID: id, Target: t.Target, Kind: t.Kind, Due: due, Late: max(0, now.Sub(t.At)), Actor: systemActor}); err != nil {
 			return err
 		}
 		if next.IsZero() {

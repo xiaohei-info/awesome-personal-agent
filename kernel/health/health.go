@@ -1,4 +1,4 @@
-// Package health 是健康视图的汇总（设计 §15.2）：由既有账本记录与外呼统计读出十一类信号，
+// Package health 是健康视图的汇总（设计 §15.2）：由既有账本记录与外呼统计读出十三类信号，
 // 长时与短任务两个队列分开给出排队数和最长等待时间。只读、只报不修；不新增存储，不写任何模块的数据。
 // 每个信号的修复入口由展示层链接（来源页、运行详情、项目页等），本包不触发任何修复。
 package health
@@ -6,6 +6,7 @@ package health
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
@@ -16,6 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -35,6 +37,8 @@ type Options struct {
 	Deliveries *delivery.Queue
 	Packs      PackHealth
 	Now        func() time.Time
+	// DelegationStallAfter 是委派多久没有回执就算长时间无回执；0 取默认 24 小时（运行配置 delegation_stall_after）。
+	DelegationStallAfter time.Duration
 }
 
 // SourceFailure 是一个来源的失败现状（来源页是修复入口；认证失败带 needs_input 事项）。
@@ -101,7 +105,7 @@ const (
 	EndpointFailing       = "failing"        // 最近一次调用在全部重试后仍失败，之后没有成功
 )
 
-// View 是十一类信号。空切片/零值表示该信号当前正常。
+// View 是十三类信号。空切片/零值表示该信号当前正常。
 type View struct {
 	SourceFailures   []SourceFailure
 	Outcall          Outcall
@@ -118,6 +122,9 @@ type View struct {
 	RuleFallbacks   []RuleFallback
 	ReceiptFailures []ReceiptFailure
 	OtherAlerts     []OtherAlert
+	// StalledDelegations 与 ClockLags 是 v0.2.0 追加的两个提醒级信号，都不影响 Healthy。
+	StalledDelegations []StalledDelegation
+	ClockLags          []ClockLag
 }
 
 // Healthy 为真表示异常级信号都正常。未判定积压只是待本人处理的提醒，不影响它。
@@ -167,7 +174,14 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	if v.Endpoint, err = endpoint(tx, v.Unjudged); err != nil {
 		return View{}, err
 	}
-	if v.ModelUnavailable, v.RuleFallbacks, v.ReceiptFailures, v.OtherAlerts, err = alerts(tx); err != nil {
+	if v.ModelUnavailable, v.RuleFallbacks, v.ReceiptFailures, v.OtherAlerts, v.ClockLags, err = alerts(tx, now); err != nil {
+		return View{}, err
+	}
+	after := o.DelegationStallAfter
+	if after <= 0 {
+		after = 24 * time.Hour
+	}
+	if v.StalledDelegations, err = stalledDelegations(tx, now, after); err != nil {
 		return View{}, err
 	}
 	return v, nil
@@ -184,7 +198,8 @@ func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (string, error) {
 		return "", err
 	}
 	for _, e := range backlog {
-		if e.UnjudgedReason != domain.UnjudgedUndecided {
+		// 判断未定、外发范围未选择、放回积压的事件与端点有没有配置无关
+		if e.UnjudgedReason != domain.UnjudgedUndecided && e.UnjudgedReason != domain.UnjudgedOutboundUnset && e.UnjudgedReason != domain.UnjudgedRestored {
 			return EndpointNotConfigured, nil
 		}
 	}
@@ -236,18 +251,18 @@ func queueHealth(s proc.QueueStat) QueueHealth {
 // alerts 一遍读完 health.alert 并按来源分到各信号，分类只在这里（熔断由 chain.Trips 读，来源与能力包各有专属信号）：
 // 模型调用失败（kind=screening、followup、decision-card）→ 模型不可用，之后恢复的清除；规则回退 observe；回执与捕获被拒（kind=receipt）→ 回执与捕获失败，同凭据同命令成功即清除；其余 → 通用告警。
 // shortcut: 每次读全部健康事件，事件很多时加游标或时间窗。
-func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, receipts []ReceiptFailure, other []OtherAlert, err error) {
+func alerts(tx *store.Tx, now time.Time) (model []ModelIssue, rules []RuleFallback, receipts []ReceiptFailure, other []OtherAlert, lags []ClockLag, err error) {
 	var after int64
 	for {
 		es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvHealthAlert}, after, 500)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, err
 		}
 		if len(es) == 0 {
 			if model, err = recovered(tx, model); err == nil {
 				receipts, err = receiptsOpen(tx, receipts)
 			}
-			return model, rules, receipts, other, err
+			return model, rules, receipts, other, lags, err
 		}
 		for _, en := range es {
 			e := en.Event
@@ -265,6 +280,10 @@ func alerts(tx *store.Tx) (model []ModelIssue, rules []RuleFallback, receipts []
 			_ = json.Unmarshal(e.Payload, &p)
 			switch {
 			case e.Reason == chain.ExceededReason || p.Kind == "source" || p.Kind == "pack":
+			case p.Kind == ClockLagKind: // 迟到只在最近一小时内算数：之后连续一小时没有新的迟到即清除
+				if e.At.After(now.Add(-ClockLagClearAfter)) {
+					lags = append(lags, ClockLag{Seq: e.Seq, Timer: e.Object, At: e.At})
+				}
 			case p.Kind == ScreeningKind || p.Kind == FollowupKind || p.Kind == DraftKind:
 				model = append(model, ModelIssue{Seq: e.Seq, Kind: p.Kind, Object: e.Object, Reason: e.Reason, template: p.Template})
 			case p.Kind == command.ReceiptKind:
@@ -337,4 +356,83 @@ func recovered(tx *store.Tx, model []ModelIssue) ([]ModelIssue, error) {
 		}
 	}
 	return open, nil
+}
+
+// StalledDelegation 是一个超过 delegation_stall_after 没有回执或进展的委派子事项（修复入口：任务委派页）。
+type StalledDelegation struct {
+	Item     string
+	Assignee string
+	Since    time.Time // 最近一次回执或进展，没有则为委派时刻
+}
+
+// stalledDelegations 读出仍开着、执行者没变、最近一次动静（委派、回执、进展）距今不短于 after 的委派子事项。
+// 有回执（动静被刷新）、被改派（assignee 与委派时不同）、终结（离开 open）都使其不再出现。
+// shortcut: 逐个委派读事项事件，委派很多时按事件类型一次查询。
+func stalledDelegations(tx *store.Tx, now time.Time, after time.Duration) ([]StalledDelegation, error) {
+	its, err := items.List(tx, items.Filter{Kind: domain.KindDelegation, Phase: domain.PhaseOpen})
+	if err != nil {
+		return nil, err
+	}
+	var out []StalledDelegation
+	for _, it := range its {
+		if it.Assignee == "" {
+			continue
+		}
+		es, err := eventlog.ReadObject(tx, it.ID)
+		if err != nil {
+			return nil, err
+		}
+		var last time.Time
+		reassigned := false
+		for _, en := range es {
+			switch en.Event.Type {
+			case domain.EvDelegationCreated:
+				var p struct {
+					Item struct {
+						Assignee string `json:"assignee"`
+					} `json:"item"`
+				}
+				if !en.Tombstone && json.Unmarshal(en.Event.Payload, &p) == nil && p.Item.Assignee != "" && p.Item.Assignee != it.Assignee {
+					reassigned = true
+				}
+				fallthrough
+			case domain.EvDelegationReported, domain.EvItemProgressAdded:
+				if en.Event.At.After(last) {
+					last = en.Event.At
+				}
+			}
+		}
+		if reassigned || last.IsZero() || now.Sub(last) < after {
+			continue
+		}
+		out = append(out, StalledDelegation{Item: it.ID, Assignee: it.Assignee, Since: last})
+	}
+	return out, nil
+}
+
+// ClockLagKind 是时钟迟到 health.alert 的 payload.kind；ClockLagThreshold 是算迟到的下限，ClockLagClearAfter 是连续多久没有迟到才清除。
+const (
+	ClockLagKind       = "clock_lag"
+	ClockLagThreshold  = 5 * time.Minute
+	ClockLagClearAfter = time.Hour
+)
+
+// ClockLag 是一次迟到触发；At 是实际触发时刻，Timer 是 Timer 的目标对象。
+type ClockLag struct {
+	Seq   int64
+	Timer string
+	At    time.Time
+}
+
+// RecordClockLag 在时钟处理事务内调用：定时实际触发比应触发时刻晚 ClockLagThreshold 以上（含停机错过的）时，
+// 记一条 health.alert（只报不修；投递仍走同一处，§15.2）。c.Late 由时钟给出；未迟到什么也不写。
+func RecordClockLag(tx *store.Tx, c clock.Command, at time.Time) error {
+	if c.Late < ClockLagThreshold {
+		return nil
+	}
+	p, _ := json.Marshal(map[string]any{"kind": ClockLagKind, "timer": c.TimerID, "timer_kind": c.Kind, "late_seconds": int64(c.Late.Seconds())})
+	_, err := eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: c.Target, Payload: p, At: at,
+		Actor:  domain.Actor{Type: domain.ActorSystem, Principal: "kernel:clock", Via: domain.ViaClock},
+		Reason: fmt.Sprintf("timer %s fired %s after its scheduled time", c.TimerID, c.Late.Round(time.Second))})
+	return err
 }

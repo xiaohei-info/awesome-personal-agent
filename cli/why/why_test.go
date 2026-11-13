@@ -261,3 +261,18 @@ func TestRenderShowsJudgmentLevelsThenOnlyConclusionAfterRetention(t *testing.T)
 		t.Errorf("expired judgment must show only the conclusion:\n%s", gone)
 	}
 }
+
+// ACT-DGA-10：--pretty 回放写出规则、条件、上一次与本次取值，以及产出的投递和它的状态；序列第一次出现明说没有上一次取值。
+func TestRenderAlertReplay(t *testing.T) {
+	out := render(kwhy.Timeline{ID: "sev_1", Alerts: []kwhy.Alert{
+		{Rule: "p/source_rules/over", Disposition: "alerted", Conditions: json.RawMessage(`[{"condition":"metrics.value crosses_above 90","previous":70,"current":96}]`),
+			Delivery: &kwhy.DeliveryRef{ID: "alert:sev_1", Class: "reminder", Route: "channel:acc", State: "delivered"}},
+		{Rule: "p/source_rules/over", Disposition: "ignored", Conditions: json.RawMessage(`[{"condition":"metrics.value crosses_above 90","current":95}]`)},
+	}})
+	for _, want := range []string{"alert rule p/source_rules/over → alerted", "metrics.value crosses_above 90: previous 70, current 96",
+		"delivery alert:sev_1 (reminder via channel:acc): delivered", "previous none (first appearance of the series), current 95"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}

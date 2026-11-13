@@ -85,6 +85,7 @@ type SourceRule struct {
 	Prescreen       string   `yaml:"prescreen"`
 	Extract         string   `yaml:"extract"`
 	CorrelationKeys []string `yaml:"correlation_keys"`
+	OnUpdate        string   `yaml:"on_update"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
 	Accept          string   `yaml:"accept"`
 	Mode            string   `yaml:"mode"`
 }
@@ -380,8 +381,8 @@ func packMeta(p *Pack, dir string) error {
 	return nil
 }
 
-func finish(p *Pack, files map[string][]byte, names []string, checkSchema func(json.RawMessage) error) (*Pack, error) {
-	schema := func(where string, s map[string]any) error {
+func schemaChecker(checkSchema func(json.RawMessage) error) func(string, map[string]any) error {
+	return func(where string, s map[string]any) error {
 		b, err := json.Marshal(s)
 		if err != nil {
 			return fmt.Errorf("%s: %w", where, err)
@@ -391,6 +392,22 @@ func finish(p *Pack, files map[string][]byte, names []string, checkSchema func(j
 		}
 		return nil
 	}
+}
+
+// finish 校验规则与提示词。规则部分先出错时，提示词的问题也一并列出：包的问题一次列全，
+// 本人（与 apa doctor、健康视图）才能逐字段改完，不必改一处再发现下一处。
+func finish(p *Pack, files map[string][]byte, names []string, checkSchema func(json.RawMessage) error) (*Pack, error) {
+	got, err := finishAll(p, files, names, checkSchema)
+	if err != nil && p.Prompts == nil { // 出错时提示词还没读：规则部分的错误之外补上提示词的
+		if perr := loadParts(p, files, names, schemaChecker(checkSchema)); perr != nil {
+			err = fmt.Errorf("%w; %v", err, perr)
+		}
+	}
+	return got, err
+}
+
+func finishAll(p *Pack, files map[string][]byte, names []string, checkSchema func(json.RawMessage) error) (*Pack, error) {
+	schema := schemaChecker(checkSchema)
 	seen := map[string]bool{}
 	for _, k := range p.Kinds {
 		if k.Name == "" {
@@ -543,6 +560,11 @@ func checkSourceRule(r SourceRule) error {
 	}
 	if r.ProjectBy != "" && r.ProjectBy != "repo_remote" && r.ProjectBy != "none" && r.ProjectBy != "draft" && !strings.HasPrefix(r.ProjectBy, "fixed:") {
 		return fmt.Errorf("%s: project_by %q must be repo_remote, fixed:<project>, draft or none", where, r.ProjectBy)
+	}
+	switch r.OnUpdate {
+	case "", "refresh", "attach":
+	default:
+		return fmt.Errorf("%s: on_update %q must be refresh or attach", where, r.OnUpdate)
 	}
 	switch r.Then {
 	case "", "proposed", "ignore", "screen", "judge", "extract", "digest", "alert":

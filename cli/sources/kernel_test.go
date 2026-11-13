@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
@@ -22,6 +24,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -44,7 +47,15 @@ func (schemes) List() []*packs.Pack {
 
 type noJudge struct{}
 
+func (noJudge) Judge(context.Context, direct.JudgeCall) (direct.Verdict, error) {
+	panic("judge must not be called")
+}
+
 func (noJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
+	panic("judge must not be called")
+}
+
+func (noJudge) JudgeBatch(context.Context, []direct.JudgeCall) ([]direct.Verdict, []error) {
 	panic("judge must not be called")
 }
 
@@ -61,7 +72,7 @@ func newKernel(t *testing.T) *kernel {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, core.Module, registry.Module, webhook.Module,
-		projects.Module, clock.Module, items.Module, runner.Module, rules.Module, proc.Module, runidentity.Module} {
+		projects.Module, clock.Module, items.Module, runner.Module, rules.Module, proc.Module, runidentity.Module, direct.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +134,7 @@ type result struct {
 
 func (k *kernel) apa(token string, args ...string) result {
 	k.t.Helper()
-	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_HOME": k.t.TempDir()}
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": k.t.TempDir()}
 	var out, errb bytes.Buffer
 	code := client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
@@ -389,5 +400,222 @@ func TestRejectsListsAndPages(t *testing.T) {
 		if r := k.apa(obs, args...); r.code != domain.ExitUsage {
 			t.Fatalf("%v: %+v", args, r)
 		}
+	}
+}
+
+// 验收 ACT-OBD-11：`apa source add --default-project` 登记成功，show 显示默认项目、本机范围 full、外部范围未选择；
+// 默认项目不存在时返回 not_found，不静默丢弃。
+func TestSourceAddWithDefaultProject(t *testing.T) {
+	k := newKernel(t)
+	dlg := k.token(auth.Delegate)
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO projects (id, name, intro, tags, status, repos, allowed_executors, capture) VALUES ('acc-home', 'home', '', '[]', 'active', '[]', 'null', 0)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{"source", "add", "--id", "src_rss", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"}
+	if r := k.apa(dlg, append(base, "--default-project", "nope")...); r.code != domain.ExitNotFound {
+		t.Fatalf("unknown project: %+v", r)
+	}
+	if r := k.apa(dlg, append(base, "--default-project", "acc-home")...); r.code != 0 {
+		t.Fatalf("add: %+v", r)
+	}
+	var s domain.Source
+	decode(t, k.apa(k.token(auth.Observer), "source", "show", "src_rss"), &s)
+	if s.DefaultProject != "acc-home" || s.Outbound.Local != "full" || s.Outbound.External != nil {
+		t.Fatalf("show: %+v", s)
+	}
+}
+
+// ACT-BKL-02、ACT-BKL-04：`apa source backlog list` 列出积压且旧原因原样；`rules` 缺本人原话得 23、observer 得 4，积压不变；
+// 带原话时返回 attached/disposed/remaining（此内核没有来源规则，全部留在积压里）。
+func TestBacklogListAndRulesCommands(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	var hook domain.Source
+	decode(t, k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &hook)
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		for i, row := range []struct{ disp, reason string }{{"unjudged", "undecided"}, {"unjudged", ""}, {"expired", ""}, {"proposed", ""}} {
+			if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
+				correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges)
+				VALUES ('dd', ?, ?, 'src_hook', 'r', 't', 's', '', '', '', 1, '[]', '', 0, ?, '', '', ?, 0)`,
+				"e"+strconv.Itoa(i), "e"+strconv.Itoa(i), row.disp, row.reason); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var list struct {
+		Total  int
+		Events []struct {
+			Disposition    string
+			UnjudgedReason string `json:"unjudged_reason"`
+		}
+	}
+	decode(t, k.apa(obs, "source", "backlog", "list"), &list)
+	if list.Total != 3 || len(list.Events) != 3 || list.Events[0].UnjudgedReason != "undecided" || list.Events[1].UnjudgedReason != "" {
+		t.Fatalf("list: %+v", list)
+	}
+	decode(t, k.apa(obs, "source", "backlog", "list", "--source", "src_hook"), &list)
+	if list.Total != 3 {
+		t.Fatalf("list --source: %+v", list)
+	}
+
+	// 不带 --evidence：直接用 client 跑，k.apa 总是带原话。
+	noWords := func(token, step string) int {
+		vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": t.TempDir()}
+		return client.Main([]string{"source", "backlog", step}, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
+			Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, HTTP: http.DefaultClient})
+	}
+	if code := noWords(dlg, "rules"); code != domain.ExitBasisRequired {
+		t.Fatalf("rules without words: %d", code)
+	}
+	if r := k.apa(obs, "source", "backlog", "rules"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer rules: %+v", r)
+	}
+	var res struct{ Attached, Disposed, Remaining int }
+	decode(t, k.apa(dlg, "source", "backlog", "rules"), &res)
+	if res.Attached != 0 || res.Disposed != 0 || res.Remaining != 3 {
+		t.Fatalf("rules: %+v", res)
+	}
+	// ACT-BKL-16：影子打分同样需要本人原话；没有判断端点时被拒，退出码 6，不外呼（noJudge 一调就 panic）。
+	if r := k.apa(obs, "source", "backlog", "score"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer score: %+v", r)
+	}
+	if r := k.apa(dlg, "source", "backlog", "score"); r.code != domain.ExitConflict || !strings.Contains(r.out+r.errOut, "judge endpoint") {
+		t.Fatalf("score without a judge endpoint: %+v", r)
+	}
+	// 放开重判（第 4 步）同样只接受本人原话；observer 被拒，且在碰账本之前（noJudge 一调就 panic）。
+	if r := k.apa(obs, "source", "backlog", "rejudge", "--limit", "3"); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer rejudge: %+v", r)
+	}
+	if code := noWords(dlg, "rejudge"); code != domain.ExitBasisRequired {
+		t.Fatalf("rejudge without words: %d", code)
+	}
+	for _, args := range [][]string{{"source", "backlog"}, {"source", "backlog", "rejudge", "--limit", "-1"}, {"source", "backlog", "rules", "--limit", "3"},
+		{"source", "backlog", "list", "extra"}, {"source", "backlog", "score", "--sort", "score"}, {"source", "backlog", "list", "--sort", "name"}} {
+		if r := k.apa(obs, args...); r.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+}
+
+// ACT-BKL-06：`backlog list --sort score` 把各来源的积压合起来按分数从高到低排，每条带分数，没有分数的在最后。
+func TestBacklogListSortsByScoreAcrossSources(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	for _, id := range []string{"src_a", "src_b"} {
+		decode(t, k.apa(dlg, "source", "add", "--id", id, "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &domain.Source{})
+	}
+	scores := map[string]*float64{"a1": ptr(0.40), "a2": nil, "b1": ptr(0.90), "b2": ptr(0.05)}
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		for _, e := range []struct{ src, id string }{{"src_a", "a1"}, {"src_a", "a2"}, {"src_b", "b1"}, {"src_b", "b2"}} {
+			if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
+				correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges)
+				VALUES ('dd', ?, ?, ?, 'r', 't', 's', '', '', '', 1, '[]', '', 0, 'unjudged', '', '', '', 0)`, e.id, e.id, e.src); err != nil {
+				return err
+			}
+			if p := scores[e.id]; p != nil {
+				err := record.Put(tx, record.Record{ID: "jdg_" + e.id, Use: "inbound_screen", Template: "p/triage-screen@h", Subject: e.id, Source: e.src, Fingerprint: "f" + e.id,
+					Band: record.Band{Low: 0.15, High: 0.6}, DecidedBy: record.DecidedDefault, Answer: "yes", LowConfidence: true, Shadow: true, CreatedAt: time.Unix(1, 0).UTC(),
+					Levels: []record.Level{{Backend: record.BackendClassifier, PYes: p, Outcome: record.OutcomeSkipped, ErrorCode: "shadow"}}})
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Events []struct {
+			ID    string
+			Score *float64
+		}
+	}
+	decode(t, k.apa(obs, "source", "backlog", "list", "--sort", "score"), &list)
+	var got []string
+	for _, e := range list.Events {
+		got = append(got, e.ID)
+		if (e.Score == nil) != (e.ID == "a2") {
+			t.Fatalf("%s: score %v", e.ID, e.Score)
+		}
+	}
+	if fmt.Sprint(got) != "[b1 a1 b2 a2]" {
+		t.Fatalf("order %v", got)
+	}
+}
+
+func ptr(f float64) *float64 { return &f }
+
+// ACT-RST-03、05、06、09：`apa source backlog restore --dry-run` 是 observer 可用的只读预览；执行缺本人原话得 23、observer 得 4；
+// 带原话放回 1 条旧级联忽略的事件，再放回得 0 条。
+func TestBacklogRestoreCommand(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	decode(t, k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &domain.Source{})
+	at := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
+			correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges)
+			VALUES ('dd', 'old', 'old', 'src_hook', 'r', 't', 's', '', '', '', ?, '[]', '', 0, 'ignored', '', '', '', 0)`, at.UnixNano()); err != nil {
+			return err
+		}
+		_, err := eventlog.Append(tx, domain.Event{Type: inbound.EvDisposed, Object: "old", At: at, Payload: json.RawMessage(`{"event":"old","disposition":"ignored","rule":""}`),
+			Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:inbound", Via: domain.ViaSource}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	win := []string{"--from", "2026-02-10T00:00:00Z", "--to", "2026-02-20T00:00:00Z"}
+	restore := func(token string, extra ...string) result {
+		return k.apa(token, append(append([]string{"source", "backlog", "restore"}, win...), extra...)...)
+	}
+	noWords := func(token string) int {
+		vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": t.TempDir()}
+		return client.Main(append([]string{"source", "backlog", "restore"}, win...), client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
+			Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, HTTP: http.DefaultClient})
+	}
+
+	var pv inbound.RestorePreview
+	decode(t, restore(obs, "--dry-run"), &pv)
+	if pv.Matched != 1 || len(pv.Sources) != 1 || pv.Sources[0].Source != "src_hook" {
+		t.Fatalf("dry run: %+v", pv)
+	}
+	decode(t, restore(obs, "--dry-run", "--source", "src_hook"), &pv)
+	if pv.Matched != 1 {
+		t.Fatalf("dry run, one source: %+v", pv)
+	}
+	if r := restore(obs, "--dry-run", "--source", "nope"); r.code != domain.ExitNotFound {
+		t.Fatalf("unknown source: %+v", r)
+	}
+	if code := noWords(dlg); code != domain.ExitBasisRequired {
+		t.Fatalf("without words: %d", code)
+	}
+	if r := restore(obs); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("observer: %+v", r)
+	}
+	if n := k.events(inbound.EvDisposed); n != 1 {
+		t.Fatalf("a refused restore wrote events: %d", n)
+	}
+	for _, args := range [][]string{{"source", "backlog", "restore"}, {"source", "backlog", "restore", "--from", win[1]}, {"source", "backlog", "rules", "--from", win[1]},
+		{"source", "backlog", "rules", "--dry-run"}, {"source", "backlog", "restore", "--limit", "3", "--from", win[1], "--to", win[3]}} {
+		if r := k.apa(obs, args...); r.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+	var res struct{ Restored int }
+	decode(t, restore(dlg, "--source", "src_hook"), &res)
+	if res.Restored != 1 || k.events(inbound.EvDisposed) != 2 {
+		t.Fatalf("restore: %+v", res)
+	}
+	decode(t, restore(dlg), &res)
+	if res.Restored != 0 || k.events(inbound.EvDisposed) != 2 {
+		t.Fatalf("second restore: %+v", res)
 	}
 }

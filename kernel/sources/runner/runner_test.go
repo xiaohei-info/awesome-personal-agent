@@ -802,3 +802,135 @@ func TestCorruptV2ColumnSurfacesErrorAndBadDispositionRejected(t *testing.T) {
 		t.Fatal("EventPage must surface corrupt column")
 	}
 }
+
+// OutboundUnset 只列外发范围未选而未判定的事件（按时间窗）；RequeueOutbound 只放回这一类，且重判次数加一。
+func TestOutboundUnsetListAndRequeue(t *testing.T) {
+	e := setup(t, defaults())
+	e.register("src_a", e.script("a.sh", `for i in 1 2 3; do echo '{"id":"e'$i'","type":"t","subject":"s","occurred_at":"2026-03-01T00:00:00Z"}'; done
+echo '{"cursor":"c1"}'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	evs := e.events("src_a")
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for i, r := range []string{domain.UnjudgedOutboundUnset, domain.UnjudgedUndecided, domain.UnjudgedModelUnavailable} {
+			if err := SetDisposition(tx, evs[i].ID, domain.DispositionUnjudged, "", r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var got []domain.SourceEvent
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) {
+		got, err = OutboundUnset(tx, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+		return
+	}); err != nil || len(got) != 1 || got[0].ID != evs[0].ID {
+		t.Fatalf("unset list: %+v err=%v", got, err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) {
+		got, err = OutboundUnset(tx, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
+		return
+	}); err != nil || len(got) != 0 {
+		t.Fatalf("window not honoured: %+v err=%v", got, err)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		if _, err := RequeueOutbound(tx, evs[1].ID); err == nil {
+			t.Error("undecided must not be requeued by RequeueOutbound")
+		}
+		n, err := RequeueOutbound(tx, evs[0].ID)
+		if err != nil || n != 1 {
+			t.Errorf("requeue = %d, %v", n, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if g := e.events("src_a")[0]; g.Disposition != domain.DispositionPending || g.UnjudgedReason != "" {
+		t.Fatalf("event %+v", g)
+	}
+}
+
+// 条件监视（§9.2）：每条事件入账时带上同一序列（来源，第一个关联键，指标名）上一次的取值——序列第一次出现没有，
+// 不同关联键、不同指标互不影响，跨拉取仍在；重复事件不是新样本，不改上一次取值。
+func TestEventsCarryPreviousMetricOfTheirOwnSeries(t *testing.T) {
+	e := setup(t, defaults())
+	feed := filepath.Join(e.dir, "feed")
+	write := func(body string) {
+		if err := os.WriteFile(feed, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	line := func(id, key string, metrics string) string {
+		return `{"id":"` + id + `","type":"acc.metric","subject":"s","occurred_at":"2026-03-01T00:00:00Z","correlation_keys":["` + key + `"],"metrics":` + metrics + `}` + "\n"
+	}
+	e.register("src_a", e.script("a.sh", "cat "+feed+"\necho '{\"cursor\":\"c\"}'\n"), nil)
+	e.r.Sync(bg)
+
+	write(line("m1", "disk-a", `{"value":95,"free":5}`) + line("m2", "disk-b", `{"value":10}`) + line("m3", "disk-a", `{"value":80}`))
+	e.tick(1)
+	byID := func() map[string]domain.SourceEvent {
+		out := map[string]domain.SourceEvent{}
+		for _, ev := range e.events("src_a") {
+			out[ev.DedupeKey.EventID] = ev
+		}
+		return out
+	}
+	got := byID()
+	if len(got["m1"].PrevMetrics) != 0 || len(got["m2"].PrevMetrics) != 0 {
+		t.Fatalf("first appearance carries previous: m1 %v m2 %v", got["m1"].PrevMetrics, got["m2"].PrevMetrics)
+	}
+	if p := got["m3"].PrevMetrics; len(p) != 1 || p["value"] != 95 {
+		t.Fatalf("m3 previous %v, want value 95 from disk-a only", p)
+	}
+
+	e.advance(time.Minute)
+	write(line("m3", "disk-a", `{"value":1}`) + line("m4", "disk-a", `{"value":99,"free":1}`))
+	e.tick(1)
+	got = byID()
+	if p := got["m4"].PrevMetrics; p["value"] != 80 || p["free"] != 5 || len(p) != 2 {
+		t.Fatalf("m4 previous %v, want value 80 (m3) and free 5 (m1); the duplicate m3=1 must not count", p)
+	}
+}
+
+// ACT-DGA-09：上一次取值随账本落盘，进程重启后第一条样本仍与重启前的取值比较，而不是被当成序列第一次出现。
+func TestPreviousMetricSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	open := func() *store.Store {
+		reg := store.NewRegistry()
+		if err := reg.Register(Module); err != nil {
+			t.Fatal(err)
+		}
+		st, err := store.Open(dir, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	src := domain.Source{ID: "src_m"}
+	sample := func(st *store.Store, id string, v float64) {
+		t.Helper()
+		err := st.Update(bg, func(tx *store.Tx) error {
+			return insertEvent(tx, src, "", parsedEvent{ID: id, Type: "acc.metric", Subject: "s", OccurredAt: t0, CorrelationKeys: []string{"disk-a"}, Metrics: map[string]float64{"value": v}})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := open()
+	sample(before, "m60", 60)
+	if err := before.Close(); err != nil {
+		t.Fatal(err)
+	}
+	after := open()
+	defer after.Close()
+	sample(after, "m99", 99)
+	var evs []domain.SourceEvent
+	if err := after.View(bg, func(tx *store.Tx) (err error) { evs, err = Events(tx, "src_m"); return }); err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 2 || len(evs[0].PrevMetrics) != 0 || evs[1].PrevMetrics["value"] != 60 {
+		t.Fatalf("after restart: %+v", evs)
+	}
+}

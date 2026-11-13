@@ -1,3 +1,7 @@
-# sha256: 1fe4b3b09e34638294c4ec5f878b7ee550dfe8d3bb1913bd46eca75e22856a56
-work_item_id: null
-status: blocked
+# sha256: 1aa5df5a45b0268ca56973695c2a8378cb855958ff4d2e50f99ad12d0abe0b31
+work_item_id: 01a1d22b-d06b-7081-a912-16d6e0805130
+status: done
+merged: true
+merged_at: '2026-11-13T00:16:24Z'
+retry_note: CI 门打回后你合了 main（8184796），PR HEAD 与上次 submit 的 bcb8214 不一致，编排器拒收。代码不用重写：确认
+  CI 在当前 HEAD 上全绿（不绿就修到绿），重跑合约命令，以当前 HEAD 重新 submit。submit 之后不要再往 PR 分支推任何提交。

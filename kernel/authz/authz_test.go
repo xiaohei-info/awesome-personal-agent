@@ -23,7 +23,7 @@ func req(l Level, a Action, o Object) Request {
 		actor = domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}
 	}
 	if l == LevelDelegate {
-		actor.OnBehalfOf, actor.Session = "owner", "s1"
+		actor.OnBehalfOf, actor.Session, actor.SessionKind = "owner", "s1", domain.SessionDirect
 	}
 	return Request{Actor: actor, Level: l, Action: a, Object: o, WebURL: web}
 }
@@ -105,7 +105,7 @@ func TestDelegateTiers(t *testing.T) {
 		if d := Decide(pol(), r); d.ExitCode() != domain.ExitBasisRequired {
 			t.Errorf("%s evidence without session: %+v", a, d)
 		}
-		r.Actor.Session = "s1"
+		r.Actor.Session, r.Actor.SessionKind = "s1", domain.SessionDirect
 		if d := Decide(pol(), r); d.Verdict != Allow {
 			t.Errorf("%s with evidence and session: %+v", a, d)
 		}
@@ -324,5 +324,50 @@ func TestRejectionEvent(t *testing.T) {
 	r = req(LevelWeb, ActionRead, Object{})
 	if _, ok := RejectionEvent(r, Decide(pol(), r)); ok {
 		t.Error("allow must not be recorded")
+	}
+}
+
+// §14.5 会话类型：凭原话的第二档只在 direct 下接受；group、unknown、未上报都是退出码 23 / session_not_direct，
+// 授权单、第一档与读取不看会话类型，运行凭据报 direct 也没有代答能力。
+func TestSessionKind(t *testing.T) {
+	withEvidence := func(kind string) Request {
+		r := req(LevelDelegate, ActionAnswerDecision, Object{})
+		r.Tier, r.Evidence, r.Actor.SessionKind = TierDecide, "quote", kind
+		return r
+	}
+	if d := Decide(pol(), withEvidence(domain.SessionDirect)); d.Verdict != Allow {
+		t.Fatalf("direct: %+v", d)
+	}
+	for _, kind := range []string{domain.SessionGroup, domain.SessionUnknown, ""} {
+		d := Decide(pol(), withEvidence(kind))
+		if d.ExitCode() != domain.ExitBasisRequired || d.Err.Code != domain.CodeSessionNotDirect || d.Err.WebURL == nil {
+			t.Errorf("kind %q: %+v", kind, d)
+		}
+		if ev, ok := RejectionEvent(withEvidence(kind), d); !ok || ev.Actor.SessionKind != kind || ev.Type != domain.EvCommandRejected {
+			t.Errorf("kind %q: rejection not recorded with the session kind: %+v", kind, ev)
+		}
+		for _, secret := range []string{"quote"} { // 错误体不带用户内容
+			if s := d.Err.Why + d.Err.Next; contains([]string{s}, secret) || len(s) == 0 {
+				t.Errorf("error leaks content: %q", s)
+			}
+		}
+	}
+	// 原话为空时先报缺原话，不因会话类型掩盖。
+	r := withEvidence(domain.SessionGroup)
+	r.Evidence = ""
+	if d := Decide(pol(), r); d.Err.Code != domain.CodeBasisRequired {
+		t.Errorf("missing words: %+v", d)
+	}
+	// 第一档不看会话类型。
+	own := req(LevelDelegate, ActionUpdateOwn, Object{Assignee: "me"})
+	own.Tier, own.Actor.SessionKind = TierWork, domain.SessionGroup
+	if d := Decide(pol(), own); d.Verdict != Allow {
+		t.Errorf("tier one in a group session: %+v", d)
+	}
+	// 运行凭据：报 direct 也不能代答（退出码 4）。
+	run := withEvidence(domain.SessionDirect)
+	run.Level = LevelRun
+	if d := Decide(pol(), run); d.ExitCode() != domain.ExitPermissionDenied {
+		t.Errorf("run credential: %+v", d)
 	}
 }

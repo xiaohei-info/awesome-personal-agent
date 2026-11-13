@@ -168,7 +168,7 @@ type result struct {
 func (w *world) apa(token string, args ...string) result {
 	w.t.Helper()
 	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": w.ts.URL, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_HOME": w.t.TempDir()}
+	vars := map[string]string{"APA_URL": w.ts.URL, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": w.t.TempDir()}
 	code := client.Main(args, client.Env{Getenv: func(k string) string { return vars[k] }, UserHome: w.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return result{code, out.String(), errb.String()}

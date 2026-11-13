@@ -253,6 +253,10 @@ func needBasis(p policy.Policy, r Request) Decision {
 	switch {
 	case strings.TrimSpace(r.Evidence) == "":
 		return basisMissing(r, "this action decides for the owner and needs the owner's own words as evidence")
+	// 本人原话只在与本人的私聊里成立；group、unknown、未上报一律拒绝，不设开关（§14.5）。
+	case r.Actor.Type == domain.ActorAgent && r.Actor.SessionKind != domain.SessionDirect:
+		return Decision{Verdict: Deny, Err: withLink(domain.CodeSessionNotDirect, "the session is not a private chat with the owner, so the owner's words in it cannot be accepted",
+			"do not retry with other wording; give the Web link to the owner, or use a grant the owner issued in Web", r.WebURL)}
 	// 会话引用是 harness 里的 agent 才有的；规则与内核服务（system）的依据是自己带的证据与规则登记。
 	case r.Actor.Type == domain.ActorAgent && strings.TrimSpace(r.Actor.Session) == "":
 		return basisMissing(r, "the owner's own words need a session reference (APA_SESSION)")
@@ -380,7 +384,7 @@ func RejectionEvent(r Request, d Decision) (domain.Event, bool) {
 	default:
 		return domain.Event{}, false
 	}
-	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "code": d.Err.Code, "exit": d.ExitCode(), "why": d.Err.Why, "grant": r.GrantID})
+	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "code": d.Err.Code, "exit": d.ExitCode(), "why": d.Err.Why, "grant": r.GrantID, "session": r.Actor.Session, "session_kind": r.Actor.SessionKind})
 	return domain.Event{Type: domain.EvCommandRejected, Object: r.Object.ID, Actor: r.Actor, Reason: d.Err.Why, Payload: payload}, true
 }
 

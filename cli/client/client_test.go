@@ -292,6 +292,21 @@ func TestSessionHeaderAndProject(t *testing.T) {
 	if gotHarness != "" {
 		t.Fatalf("harness header sent without APA_HARNESS: %q", gotHarness)
 	}
+	// APA_SESSION_KIND 原样以 X-APA-Session-Kind 发出；没设置就不发（内核按未上报处理，§14.5）。
+	var gotKind string
+	kindSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKind = r.Header.Get("X-APA-Session-Kind")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer kindSrv.Close()
+	apa(t, map[string]string{"APA_URL": kindSrv.URL, "APA_TOKEN": "t", "APA_SESSION_KIND": "group"}, t.TempDir(), "", "items")
+	if gotKind != "group" {
+		t.Fatalf("session kind header: %q", gotKind)
+	}
+	apa(t, map[string]string{"APA_URL": kindSrv.URL, "APA_TOKEN": "t"}, t.TempDir(), "", "items")
+	if gotKind != "" {
+		t.Fatalf("session kind header sent without APA_SESSION_KIND: %q", gotKind)
+	}
 	if (&Ctx{Env: Env{Getenv: func(string) string { return "p" }}}).Project() != "p" {
 		t.Fatal("project")
 	}

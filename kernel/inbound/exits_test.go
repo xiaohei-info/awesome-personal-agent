@@ -63,7 +63,7 @@ func TestWhereEqAndIn(t *testing.T) {
 			t.Errorf("%s: %s, want %s", id, got, disp)
 		}
 	}
-	if n := len(e.stub.Requests()); n != 2 { // 只有 w2、w6 经过判断
+	if n := questions(e); n != 2 { // 只有 w2、w6 经过判断
 		t.Fatalf("model called %d times", n)
 	}
 }
@@ -95,7 +95,7 @@ func TestScreenTemplateOverrideAndJudgeAlias(t *testing.T) {
 			templates = append(templates, got)
 		}
 	}
-	if len(templates) != 2 || templates[0] != "acc-screen" || templates[1] != "triage" {
+	if len(templates) != 2 || templates[0] != "acc-screen" || templates[1] != "triage-screen" {
 		t.Fatalf("templates %v", templates)
 	}
 }
@@ -133,39 +133,29 @@ func TestProjectByFixedNoneAndSourceDefault(t *testing.T) {
 	}
 }
 
-// extract、alert 出口交给注入的处理器；alert 的变化条件按注入的序列上一次取值判断，没有序列时不成立。
-func TestExtractAndAlertExitsRouteToHandlers(t *testing.T) {
+// extract 出口交给注入的处理器。
+func TestExtractExitRoutesToHandler(t *testing.T) {
 	e := newEnv(t, true)
-	e.judge(`{"choice":"ignore","confidence":0.95}`)
 	var routed []string
-	handler := func(ctx context.Context, src domain.Source, ev domain.SourceEvent, rule string) error {
+	e.svc.o.Extract = func(ctx context.Context, src domain.Source, ev domain.SourceEvent, rule string) error {
 		routed = append(routed, ev.ID+"@"+rule)
-		return e.svc.dispose(ctx, nil, ev, disposeIn{Event: ev.ID, Rule: rule, Disposition: domain.DispositionAlerted})
+		return e.svc.dispose(ctx, nil, ev, disposeIn{Event: ev.ID, Rule: rule, Disposition: domain.DispositionIgnored})
 	}
-	e.svc.o.Extract, e.svc.o.Alert = handler, handler
-	e.svc.o.Series = fixedSeries{prev: 80}
-	e.emit("src_x", "exits",
-		ev("c1", "x.chat", "群聊", nil),
-		ev("m1", "x.metric", "磁盘", map[string]any{"metrics": map[string]float64{"value": 92}}),
-		ev("m2", "x.metric", "磁盘", map[string]any{"metrics": map[string]float64{"value": 85}}))
-	x := "inbound-triage/source_rules/"
-	got := map[string]bool{}
-	for _, r := range routed {
-		got[r[strings.Index(r, "@")+1:]] = true
-	}
-	if len(routed) != 2 || !got[x+"x-chat"] || !got[x+"x-alert"] {
+	e.emit("src_x", "exits", ev("c1", "x.chat", "群聊", nil))
+	if len(routed) != 1 || !strings.HasSuffix(routed[0], "@inbound-triage/source_rules/x-chat") {
 		t.Fatalf("routed %v", routed)
-	}
-	if got := e.disposition("src_x", "m2").Disposition; got != domain.DispositionIgnored {
-		t.Fatalf("m2 (80→85 does not cross 90) %s", got)
 	}
 }
 
-// 没有注入处理器时 extract 出口报真实错误，事件保持 pending，不假装处理。
+// 没有注入处理器时 alert 出口报真实错误，事件保持 pending，不假装处理（extract 出口由本包内置处理）。
 func TestExitWithoutHandlerFailsLoudly(t *testing.T) {
 	e := newEnv(t, true)
 	e.wantErr = true
-	e.emitRaw("src_x", "exits", ev("c1", "x.chat", "群聊", nil))
+	e.svc.o.Alert = nil
+	sample := func(id string, v float64) map[string]any {
+		return ev(id, "x.metric", "磁盘", map[string]any{"correlation_keys": []string{"d"}, "metrics": map[string]float64{"value": v}})
+	}
+	e.emitRaw("src_x", "exits", sample("c0", 80), sample("c1", 92))
 	select {
 	case err := <-e.errs:
 		if !strings.Contains(err.Error(), "no handler is configured") {
@@ -184,16 +174,20 @@ type recorder struct {
 	on    func(template string)
 }
 
-func (r recorder) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
+func (r recorder) Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict, error) {
 	r.on(c.Template)
+	return r.inner.Judge(ctx, c)
+}
+
+func (r recorder) Do(ctx context.Context, c direct.Call) (direct.Outcome, error) {
 	return r.inner.Do(ctx, c)
 }
 
-// fixedSeries 让每个序列的上一次取值都是 prev。
-type fixedSeries struct{ prev float64 }
-
-func (f fixedSeries) Previous(domain.SourceEvent, string) (float64, bool, error) {
-	return f.prev, true, nil
+func questions(e *env) (n int) {
+	for _, b := range e.cls.Batches() {
+		n += b.Questions
+	}
+	return n
 }
 
 func ruleByID(t *testing.T, e *env, id string) packs.SourceRule {
@@ -207,4 +201,30 @@ func ruleByID(t *testing.T, e *env, id string) packs.SourceRule {
 	}
 	t.Fatalf("rule %s not found", id)
 	return packs.SourceRule{}
+}
+
+// ACT-DGA-18：简报"知会"条目逐条转为建议：只转点的那条，操作者是本人，另一条仍是 digest；转过的不能再转。
+func TestDigestEventCanBeProposedOneByOne(t *testing.T) {
+	e := newEnv(t, true)
+	e.emit("src_x", "exits", ev("d1", "x.news", "简讯一", nil), ev("d2", "x.news", "简讯二", nil))
+	first, second := e.disposition("src_x", "d1"), e.disposition("src_x", "d2")
+	if first.Disposition != domain.DispositionDigest || second.Disposition != domain.DispositionDigest {
+		t.Fatalf("setup: %+v %+v", first, second)
+	}
+	got, err := e.svc.ProposeUnjudged(bg, owner, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Disposition != domain.DispositionProposed || got.Item == "" {
+		t.Fatalf("event %+v", got)
+	}
+	if it := e.item(got.Item); it.Phase != domain.PhaseProposed || it.Title != "简讯一" {
+		t.Fatalf("item %+v", it)
+	}
+	if d := e.disposition("src_x", "d2"); d.Disposition != domain.DispositionDigest || d.Item != "" {
+		t.Fatalf("the other digest event must stay digest: %+v", d)
+	}
+	if _, err := e.svc.ProposeUnjudged(bg, owner, first.ID); code(err) != domain.CodeConflict {
+		t.Fatalf("second propose: %v", err)
+	}
 }

@@ -387,6 +387,8 @@ result_fields:
 用 apa item update 把 spec 写回事项。写回成功就是回执，直接结束；声明的字段没写全时事项转给本人（§8.4）。
 ```
 
+简报的资料文件除账本快照外，还带两段由内核读账本组出的材料，不调模型：`digest`（摘要出口 `then: digest` 的来源事件，每条只汇入一份简报一次，写进"知会"一节）与 `planned`（按 `planned_for` 取的、计划今天或更早且未完成的事项）。
+
 建实例：`apa instance add brief --param schedule="0 8 * * 1-5"`，到期落为 Timer。到期后内核建好 `brief` 事项，任务型在这个事项上运行，harness 用 Web 设置的默认 harness，资料文件带实例参数（含项目范围）。实例是显式创建的，这条规则只写回自身事项，且运行不超过 Web 设置的权限上限，所以不走观察模式，省略 `mode`。
 
 ## C.14 内置包声明的内容
@@ -402,6 +404,6 @@ result_fields:
 | `background-run` | `start_background_run` 的规则样例，初始 `observe`；主会话角色的"处理事项"提示词；任务型提示词 |
 | `guideline-draft` | 缺规范检测时钟规则；任务型起草提示词 |
 | `agents-md` | AGENTS.md 渲染模板 |
-| `inbound-triage` | 【规划中（v0.2.0）】来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`screen`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`screen`，`project_by: draft`，`on_update: attach`）。新增的结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`：能按关联键挂靠的已在规则之前挂靠）。webhook 校验方案与字段映射。判断型提示词 `triage-screen`（是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`）与 `capture-prescreen`（是非题，下限 0.10，未定取"是"）；生成型提示词 `triage-draft`（标题、摘要、kind、项目、日期、推荐处置）与 `triage-extract`（一段内容抽出零到多条候选）。v0.1 的 `triage`（三选一）与 `triage-title` 模板移除 |
+| `inbound-triage` | 来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`screen`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`screen`，`project_by: draft`，`on_update: attach`）。新增的结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`：能按关联键挂靠的已在规则之前挂靠）。webhook 校验方案与字段映射。判断型提示词 `triage-screen`（是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`）与 `capture-prescreen`（是非题，下限 0.10，未定取"是"）；生成型提示词 `triage-draft`（标题、摘要、kind、项目、日期、推荐处置）与 `triage-extract`（一段内容抽出零到多条候选）。v0.1 的 `triage`（三选一）与 `triage-title` 模板移除 |
 | `delegation-verify` | 响应 `delegation.reported` 的事件规则，初始 `observe`；判断型提示词 `delegation-screen`（是非题"这份回执需要本人核实吗"，下限 0.20，未定取"是"）。命中后在父事项上生成决策请求交本人；拉起任务型用工具查证不在本版（主文档 §20.5） |
 | `routine` | kind `routine`（`spec.result`）；实例参数（`schedule`、`mode`、`title`、`instruction`、`access`、`output`；归属项目是实例自己的字段，见 C.10）；实例驱动的时钟规则（建事项，`mode: run` 时再调任务型；`mode: create_item` 时 `call_agent` 不执行）；任务型提示词 `run-routine`（正文只有固定模板，任务说明经 `instruction_path` 读取，声明 `result_fields`）；列表与卡片视图 |

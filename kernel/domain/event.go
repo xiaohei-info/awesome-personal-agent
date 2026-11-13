@@ -26,15 +26,24 @@ const (
 	ViaExt    Via = "ext"
 )
 
+// 会话类型（§14.5）：只有 SessionDirect 时，内核接受凭本人原话的代理写入。
+const (
+	SessionDirect  = "direct"
+	SessionGroup   = "group"
+	SessionUnknown = "unknown"
+)
+
 // Actor 是变更的操作者（§6.7）。
 type Actor struct {
-	Type       ActorType `json:"type"`
-	Principal  string    `json:"principal"`
-	Via        Via       `json:"via"`
-	Harness    string    `json:"harness,omitempty"`
-	Session    string    `json:"session,omitempty"`
-	Run        string    `json:"run,omitempty"`
-	OnBehalfOf string    `json:"on_behalf_of,omitempty"`
+	Type      ActorType `json:"type"`
+	Principal string    `json:"principal"`
+	Via       Via       `json:"via"`
+	Harness   string    `json:"harness,omitempty"`
+	Session   string    `json:"session,omitempty"`
+	// SessionKind 是接入方自报的会话类型（SessionDirect、SessionGroup、SessionUnknown；§14.5）；空表示没有上报。
+	SessionKind string `json:"session_kind,omitempty"`
+	Run         string `json:"run,omitempty"`
+	OnBehalfOf  string `json:"on_behalf_of,omitempty"`
 }
 
 // Basis 是授权依据：策略版本与规则 id（自动动作必填）。
@@ -66,6 +75,7 @@ const (
 	EvItemPhaseChanged               = "item.phase_changed"
 	EvItemDeadlinePassed             = "item.deadline_passed"
 	EvItemProgressAdded              = "item.progress_added"
+	EvProposalAttached               = "proposal.attached"
 	EvDecisionRequested              = "decision.requested"
 	EvDecisionResolved               = "decision.resolved"
 	EvDelegationCreated              = "delegation.created"
@@ -85,6 +95,12 @@ const (
 	EvRunFinished                    = "run.finished"
 	EvSourceFailed                   = "source.failed"
 	EvHealthAlert                    = "health.alert"
+
+	// 登录审计（§14.13）：载荷不含口令。
+	EvAuthLogin           = "auth.login"
+	EvAuthLoginLocked     = "auth.login_locked"
+	EvAuthPasswordChanged = "auth.password_changed"
+	EvAuthSessionRevoked  = "auth.session_revoked"
 )
 
 // RegisteredEventTypes 是对外开放的稳定事件类型表，顺序同附录 B.4。
@@ -97,7 +113,8 @@ var RegisteredEventTypes = []string{
 	EvProjectUpdated, EvProjectAllowedExecutorsChanged,
 	EvRuleModeChanged, EvAllowlistChanged, EvPolicyChanged, EvGrantIssued, EvGrantRevoked,
 	EvRunStarted, EvRunFinished, EvSourceFailed, EvHealthAlert,
-	EvItemProgressAdded,
+	EvAuthLogin, EvAuthLoginLocked, EvAuthPasswordChanged, EvAuthSessionRevoked,
+	EvItemProgressAdded, EvProposalAttached,
 }
 
 var registered = func() map[string]bool {

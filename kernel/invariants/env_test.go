@@ -20,6 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -33,8 +34,8 @@ var (
 	bg       = context.Background()
 	t0       = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
-	worker   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelWorker}
-	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	worker   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelWorker}
+	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
 )
 
 func exit(err error) int {
@@ -51,6 +52,7 @@ type ledger struct {
 	x    *command.Executor
 	clk  *clock.Clock
 	stub *modelstub.Stub
+	cls  *modelstub.ClsStub // 判断端点：web_only 初筛先问它
 	scr  *screening.Service
 	q    *delivery.Queue
 	att  *attention.Attention
@@ -60,7 +62,7 @@ type ledger struct {
 func newLedger(t *testing.T) *ledger {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, attention.Module, direct.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, attention.Module, direct.Module, proc.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -70,9 +72,10 @@ func newLedger(t *testing.T) *ledger {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	e := &ledger{st: st, now: t0, stub: modelstub.New()}
+	e := &ledger{st: st, now: t0, stub: modelstub.New(), cls: modelstub.NewCls()}
 	t.Cleanup(e.stub.Close)
-	e.stub.SetDefault(modelstub.Reply{Content: `{"probability":0.05,"confidence":0.95}`})
+	t.Cleanup(e.cls.Close)
+	e.cls.SetDefaultPYes(0.05)
 	now := func() time.Time { return e.now }
 	e.x = command.New(st, now)
 	if err := projects.Register(e.x); err != nil {
@@ -115,7 +118,11 @@ func newLedger(t *testing.T) *ledger {
 	}
 	ep := policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}
 	if err := st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.GenerateEndpoint, p.ScreeningTimeoutMs = ep, 5000; return nil })
+		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
+			p.GenerateEndpoint, p.ScreeningTimeoutMs = ep, 5000
+			p.JudgeEndpoint = &policy.JudgeEndpoint{URL: e.cls.URL(), Protocol: policy.ProtocolProbability, Locality: policy.LocalityLocal, TimeoutMs: 5000}
+			return nil
+		})
 		return err
 	}); err != nil {
 		t.Fatal(err)

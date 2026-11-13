@@ -19,8 +19,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -63,6 +65,12 @@ func newKernel(t *testing.T) *kernel {
 		t.Fatal(err)
 	}
 	if err := kitems.Register(k.x, kitems.NewKinds()); err != nil {
+		t.Fatal(err)
+	}
+	if err := decisions.Register(k.x); err != nil {
+		t.Fatal(err)
+	}
+	if err := inbound.RegisterAttach(k.x); err != nil {
 		t.Fatal(err)
 	}
 	srv, err := core.New(core.Deps{Store: st, Auth: k.auth, Groups: []core.RouteGroup{apiitems.Routes(k.x, st), apifm.Routes(k.x)}})
@@ -121,7 +129,7 @@ func (r run) json(t *testing.T) map[string]any {
 func (k *kernel) apa(kind auth.Kind, args ...string) run {
 	k.t.Helper()
 	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_SESSION": "s1", "APA_HOME": k.t.TempDir()}
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": k.t.TempDir()}
 	code := client.Main(args, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return run{code, out.String(), errb.String()}
@@ -273,6 +281,20 @@ func TestRelateAndListFilters(t *testing.T) {
 	}
 	if n := len(list("--phase", "open")); n != 2 {
 		t.Fatalf("phase filter = %d", n)
+	}
+	// ACT-WBN-12/13/14：新参数 --q/--sort/--planned-for/--tag 与旧参数共存。
+	k.ok(auth.Worker, "item", "update", child, "--planned-for", "2026-05-01", "--tags", "t1", "--body", "护照续签", "--reason", "plan")
+	if l := list("--q", "护照"); len(l) != 1 || l[0].(map[string]any)["id"] != child {
+		t.Fatalf("--q = %v", l)
+	}
+	if l := list("--planned-for", "2026-05-01", "--phase", "open", "--tag", "t1"); len(l) != 1 {
+		t.Fatalf("--planned-for/--tag = %v", l)
+	}
+	if l := list("--sort", "planned_for", "--phase", "open"); len(l) != 2 || l[0].(map[string]any)["id"] != child {
+		t.Fatalf("--sort planned_for = %v", l)
+	}
+	if r := k.apa(auth.Observer, "item", "list", "--sort", "bogus"); r.code == 0 {
+		t.Fatal("unknown sort must fail")
 	}
 	k.ok(auth.Worker, "item", "relate", child, "--to", parent, "--type", "parent", "--remove", "--reason", "undo")
 	if rels := k.ok(auth.Observer, "item", "show", child).json(t)["relations"].([]any); len(rels) != 0 {
@@ -586,5 +608,37 @@ func TestToday(t *testing.T) {
 	}
 	if r := k.apa(auth.Observer, "today", "x"); r.code != 2 {
 		t.Fatalf("today with args: exit %d", r.code)
+	}
+}
+
+// ACT-MSG-14/17：apa item relate --key 登记与移除关联键，show 看到；观察者退出码 4，delegate 缺依据退出码 23，账本不变。
+func TestRelateKeyRegistersAndRemoves(t *testing.T) {
+	k := newKernel(t)
+	id := k.openItem()
+	keys := func() []any { return k.ok(auth.Observer, "item", "show", id).json(t)["correlation_keys"].([]any) }
+
+	if r := k.apa(auth.Observer, "item", "relate", id, "--key", "fm-x"); r.code != 4 {
+		t.Fatalf("observer: %+v", r)
+	}
+	if r := k.apa(auth.Delegate, "item", "relate", id, "--key", "fm-y"); r.code != 23 {
+		t.Fatalf("delegate without evidence: %+v", r)
+	}
+	if len(keys()) != 0 {
+		t.Fatalf("rejected registrations left keys: %v", keys())
+	}
+	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm", "--evidence", "本人原话：归到这件事")
+	got := keys()
+	if len(got) != 1 || got[0].(map[string]any)["key"] != "fm-thread-1" || got[0].(map[string]any)["domain"] != "acc-fm" {
+		t.Fatalf("keys = %v", got)
+	}
+	if r := k.apa(auth.Worker, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm"); r.code != 6 {
+		t.Fatalf("duplicate: %+v", r)
+	}
+	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm", "--remove", "--evidence", "本人原话：解除关联")
+	if len(keys()) != 0 {
+		t.Fatalf("key not removed: %v", keys())
+	}
+	if r := k.apa(auth.Worker, "item", "relate", id, "--key", "k", "--to", id, "--type", "relates"); r.code != 2 {
+		t.Fatalf("key with --to: %+v", r)
 	}
 }

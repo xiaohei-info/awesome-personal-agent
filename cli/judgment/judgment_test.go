@@ -125,7 +125,7 @@ func newRig(t *testing.T) *rig {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	r.srv, err = core.New(core.Deps{Store: st, Auth: r.au, Groups: []core.RouteGroup{apijudgments.Routes(st)}})
+	r.srv, err = core.New(core.Deps{Store: st, Auth: r.au, Groups: []core.RouteGroup{apijudgments.Routes(st, nil)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,4 +213,49 @@ func TestLevelLineDescribesErrorsAndReuse(t *testing.T) {
 	if hi := LevelLine(record.Level{Backend: "classifier", PYes: f64(0.9), Outcome: "decided"}, record.Band{Low: .1, High: .6}); !strings.Contains(hi, "≥ high 0.60 → yes") {
 		t.Fatal(hi)
 	}
+}
+
+// ACT-JRC-08：judgment stats 的 JSON 与 HTTP 读取一致，按来源筛选；未知参数是用法错误。
+func TestStatsMatchesHTTPAndFilters(t *testing.T) {
+	r := newRig(t)
+	obs := r.observer()
+	res := r.apa(obs, "judgment", "stats", "--use", "inbound_screen", "--source", "src_1")
+	var got struct {
+		Rows []struct {
+			Backend                   string
+			Calls, Decided, Uncertain int
+		}
+		Rates []struct{ Escalation, Undecided float64 }
+	}
+	if res.code != 0 || json.Unmarshal([]byte(res.out), &got) != nil || len(got.Rows) != 2 || len(got.Rates) != 1 {
+		t.Fatalf("%+v", res)
+	}
+	// jd_mid 的分类端点不确定、对话端点定案；jd_low 的分类端点定案：升级 1/2。
+	if got.Rates[0].Escalation != 0.5 || got.Rates[0].Undecided != 0 {
+		t.Fatalf("%+v", got.Rates)
+	}
+	req := httptest.NewRequest("GET", "/v1/judgments/stats?use=inbound_screen&source=src_1", nil)
+	req.Header.Set("Authorization", "Bearer "+obs)
+	rec := httptest.NewRecorder()
+	r.srv.Handler().ServeHTTP(rec, req)
+	var a, b any
+	_ = json.Unmarshal(rec.Body.Bytes(), &a)
+	_ = json.Unmarshal([]byte(res.out), &b)
+	if !jsonEqual(a, b) {
+		t.Fatalf("CLI %s != HTTP %s", res.out, rec.Body)
+	}
+	if none := r.apa(obs, "judgment", "stats", "--source", "src_none"); none.code != 0 || !strings.Contains(none.out, `"rows":[]`) {
+		t.Fatalf("%+v", none)
+	}
+	for _, args := range [][]string{{"judgment", "stats", "--bogus", "x"}, {"judgment", "stats", "extra"}} {
+		if res := r.apa(obs, args...); res.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, res)
+		}
+	}
+}
+
+func jsonEqual(a, b any) bool {
+	x, _ := json.Marshal(a)
+	y, _ := json.Marshal(b)
+	return string(x) == string(y)
 }

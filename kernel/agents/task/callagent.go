@@ -9,15 +9,20 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/spotcheck"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 )
 
 // Generator 是生成型入口（*direct.Service 满足它）。
@@ -58,7 +63,7 @@ func (s *Service) CallAgent(o AgentOptions) rules.Handler {
 		}
 		switch pr.Meta.Agent {
 		case "task":
-			return s.callTask(ctx, c, pack, tmpl)
+			return s.callTask(ctx, c, pack, tmpl, nil, nil)
 		case "generate":
 			if o.Generate != nil {
 				return s.callGenerate(ctx, o.Generate, c, pack, tmpl)
@@ -163,7 +168,19 @@ func (s *Service) ledgerSnapshot(ctx context.Context) (string, error) {
 	return string(b), err
 }
 
-func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string) error {
+// spotCheckMaterial 是简报的抽检条目：只含 id、来源与标题和 Web 入口，结论只能在 Web 提交。
+func (s *Service) spotCheckMaterial(ctx context.Context) (Material, error) {
+	var es []spotcheck.Entry
+	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { es, err = spotcheck.ForBrief(tx, s.o.Now()); return })
+	if err != nil {
+		return Material{}, err
+	}
+	b, err := json.Marshal(map[string]any{"spot_check": es})
+	return Material{Name: "spot_check", Body: string(b)}, err
+}
+
+// callTask 拉起任务型；prior 是接力时上一步的定案结果（结构化输入，§8.3），msgs 是接力时事项上的挂靠消息。
+func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string, msgs []Message, prior json.RawMessage) error {
 	depth, over, err := s.launchDepth(ctx, c)
 	if err != nil || over {
 		return err
@@ -172,8 +189,26 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string)
 	if err != nil {
 		return err
 	}
+	if len(prior) > 0 {
+		mats = append(mats, Material{Name: "relay_input", Body: string(prior)})
+	}
+	if c.Item != nil && c.Item.Kind == domain.KindBrief { // 每份简报带抽检条目（§8.10）
+		sc, err := s.spotCheckMaterial(ctx)
+		if err != nil {
+			return err
+		}
+		mats = append(mats, sc)
+	}
+	var digest []summaries.DigestEntry
+	if c.Item != nil && c.Item.Kind == domain.KindBrief { // 每份简报带"知会"（摘要出口，§9.3）与按计划日期取的材料（§7.3）
+		var dm, pm Material
+		if dm, digest, pm, err = s.briefSections(ctx); err != nil {
+			return err
+		}
+		mats = append(mats, dm, pm)
+	}
 	ip := instanceParams(c)
-	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction,
+	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs,
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
 	switch {
 	case c.Bound:
@@ -186,8 +221,42 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string)
 	case c.Item != nil:
 		t.Title, t.Project, t.From = c.Item.Title, c.Item.Project, c.Item.ID
 	}
-	_, err = s.Launch(ctx, t) // 没拉起时事项已转 needs_input 并带原因，不是规则失败
-	return err
+	out, err := s.Launch(ctx, t) // 没拉起时事项已转 needs_input 并带原因，不是规则失败
+	if err != nil || out.Run == "" || len(digest) == 0 {
+		return err
+	}
+	// 运行已入队才记"已汇入"：拉起失败时这些条目留给下一份简报。崩溃在两步之间只会重复一次，不会丢。
+	return s.o.Store.Update(ctx, func(tx *store.Tx) error { return summaries.MarkDigested(tx, out.Item, digest, s.o.Now()) })
+}
+
+// briefSections 是简报独有的两段资料：digest（尚未汇入过简报的摘要出口事件，每条只汇入一次）与 planned（计划今天或更早、
+// 尚未完成的事项，过期不自动改期；计划明天或没有计划日期的不在其中）。两段都只是账本读取，不调模型。
+func (s *Service) briefSections(ctx context.Context) (dm Material, digest []summaries.DigestEntry, pm Material, err error) {
+	type plannedItem struct {
+		ID         string       `json:"id"`
+		Title      string       `json:"title"`
+		Project    string       `json:"project,omitempty"`
+		Phase      domain.Phase `json:"phase"`
+		PlannedFor string       `json:"planned_for"`
+	}
+	planned := []plannedItem{}
+	err = s.o.Store.View(ctx, func(tx *store.Tx) error {
+		var verr error
+		if digest, verr = summaries.PendingDigest(tx); verr != nil {
+			return verr
+		}
+		l, verr := items.TodayItems(tx, s.o.Now())
+		for _, it := range l.Planned {
+			planned = append(planned, plannedItem{it.ID, it.Title, it.Project, it.Phase, it.PlannedFor})
+		}
+		return verr
+	})
+	if err != nil {
+		return
+	}
+	db, _ := json.Marshal(map[string]any{"digest": digest})
+	pb, _ := json.Marshal(map[string]any{"planned": planned})
+	return Material{Name: "digest", Body: string(db)}, digest, Material{Name: "planned", Body: string(pb)}, nil
 }
 
 // launchDepth 是规则拉起任务型与直接调用的链路深度，规则与后台运行同一处（chain.Next）；超过阈值只记录不派发，over 为真。
@@ -204,6 +273,21 @@ func (s *Service) launchDepth(ctx context.Context, c rules.Call) (depth int, ove
 		return depth, true, c.Ask(c.Item.ID, fmt.Sprintf("链路深度 %d 超过阈值 %d，规则没有派发运行", depth, max))
 	}
 	return depth, false, nil
+}
+
+// attachedMessages 是事项上尚未处理的挂靠消息（pending、forwarded），不推进 attach_state；是否进白名单由 Launch 判定。
+func (s *Service) attachedMessages(ctx context.Context, item string) ([]Message, error) {
+	var out []Message
+	err := s.o.Store.View(ctx, func(tx *store.Tx) error {
+		as, err := allowlist.Messages(tx, item, authz.LevelWeb)
+		for _, a := range as {
+			if a.AttachState == runner.AttachPending || a.AttachState == runner.AttachForwarded {
+				out = append(out, Message{Source: a.Source, Sender: a.Sender, Verified: a.SenderVerified, Body: a.Detail})
+			}
+		}
+		return err
+	})
+	return out, err
 }
 
 func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, pack, tmpl string) error {
@@ -252,7 +336,16 @@ func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, p
 	case err != nil:
 		return fmt.Errorf("生成型调用失败: %w", err)
 	case out.HandoffTask != "":
-		return s.callTask(ctx, c, pack, out.HandoffTask)
+		// 接力到任务型：事项上还没处理的挂靠消息一并带上，含未进转发白名单的则 Launch 转 needs_input 交本人（§8.3 末行）。
+		msgs, err := s.attachedMessages(ctx, it.ID)
+		if err != nil {
+			return err
+		}
+		var prior json.RawMessage
+		if n := len(out.Steps); n > 0 {
+			prior = out.Final().Result
+		}
+		return s.callTask(ctx, c, pack, out.HandoffTask, msgs, prior)
 	case !out.Settled:
 		return c.Ask(it.ID, "生成型没有给出可用结果："+out.Reason)
 	}

@@ -166,6 +166,7 @@ func req(t *testing.T, e *baseline.Env, method, path, body, token string, hdr ma
 	}
 	rq.Header.Set("Authorization", "Bearer "+token)
 	rq.Header.Set("X-APA-Session", "e2e-session") // 带本人原话的第二档写入还要会话引用
+	rq.Header.Set("X-APA-Session-Kind", "direct") // 且会话是与本人的私聊（§14.5）
 	for k, v := range hdr {
 		rq.Header.Set(k, v)
 	}

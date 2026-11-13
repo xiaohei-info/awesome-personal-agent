@@ -203,3 +203,43 @@ func TestOpenBootstrap(t *testing.T) {
 		t.Fatal("Open must create layout")
 	}
 }
+
+func TestPublicURLAndExposure(t *testing.T) {
+	load := func(body string) (Config, error) {
+		p := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(p)
+	}
+	cases := []struct {
+		name, body, loadErr, exposeErr string
+	}{
+		{"default loopback needs no public_url", "", "", ""},
+		{"localhost", "listen: localhost:7777\n", "", ""},
+		{"ipv6 loopback", "listen: \"[::1]:7777\"\n", "", ""},
+		{"all interfaces without public_url", "listen: 0.0.0.0:7777\n", "", "public_url"},
+		{"empty host without public_url", "listen: :7777\n", "", "public_url"},
+		{"named host without public_url", "listen: apa.example.com:7777\n", "", "public_url"},
+		{"all interfaces with https", "listen: 0.0.0.0:7777\npublic_url: https://apa.example.com\n", "", ""},
+		{"http public_url refused", "listen: 0.0.0.0:7777\npublic_url: http://apa.example.com\n", "https", ""},
+		{"public_url without host", "public_url: https://\n", "https", ""},
+	}
+	for _, c := range cases {
+		cfg, err := load(c.body)
+		if c.loadErr != "" {
+			if err == nil || !strings.Contains(err.Error(), c.loadErr) {
+				t.Errorf("%s: load err = %v", c.name, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		err = cfg.CheckExposure()
+		if (c.exposeErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.exposeErr)) {
+			t.Errorf("%s: CheckExposure = %v", c.name, err)
+		}
+	}
+}

@@ -1,7 +1,9 @@
 // Package direct 是专属 agent 的判断型与生成型（设计 §8.1、§8.3–§8.6）：
-// 按能力包的提示词模板组织输入，经外呼调用器的模型 HTTP 直连调用；判断型只产出枚举、ref、置信度，
-// 生成型按模板 output_schema 校验；低置信与"信息不足"按级联规则升级；同一输入指纹复用结果；
-// Event 统计进资料段、不进指纹；调用失败退避重试，持续失败进健康视图。
+// 按能力包的提示词模板组织输入，经外呼调用器直连模型端点。
+// 判断型级联在 judge.go（Judge、JudgeBatch）：按 answer_by 同题升级，每级写判断记录。
+// Do 处理生成型：按模板 output_schema 校验，"信息不足"按 relay_to 接力；Do 里判断型的 v0.1 旧路径（自报置信度）
+// 只为尚未迁移的调用方（入站、初筛、跟进、核验、决策卡片）保留，它们迁到 Judge 后整段删除。
+// 同一输入指纹复用结果；Event 统计进资料段、不进指纹；调用失败退避重试，持续失败进健康视图。
 //
 // 本包不给模型工具或上下文，不起子进程（任务型归 kernel/agents/task），不直写其他模块的数据：
 // 只写自己的复用表与健康行，并向 Event 日志追加 actor=agent 的调用记录。结果由调用方经命令模型写回账本。
@@ -33,6 +35,8 @@ var (
 	ErrUnavailable = errors.New("direct: model unavailable")
 	// ErrBadTemplate 表示提示词模板不存在，或其类别、级联目标不是本包能执行的形态。
 	ErrBadTemplate = errors.New("direct: bad prompt template")
+	// ErrLocalityChanged 表示调用时端点的位置与 Call.RequireLocality 不同（本人刚改了位置）：不发请求，调用方按新位置重新裁剪（§14.14）。
+	ErrLocalityChanged = errors.New("direct: endpoint locality changed since the outbound scope was chosen")
 )
 
 // Module 是本模块在存储层登记的迁移：输入指纹到结果的复用表，以及模型可用性的单行健康记录。
@@ -65,6 +69,7 @@ type Options struct {
 	Store       *store.Store
 	Packs       PackSource
 	Model       Completer
+	Classifier  Classifier // 分类端点客户端；空时取 Model（model.Client 同时满足两者）
 	Now         func() time.Time
 	Sleep       func(ctx context.Context, d time.Duration) error // 退避等待；测试注入
 	Attempts    int                                              // 每次模型调用的最多尝试数，默认 4
@@ -79,6 +84,9 @@ type Service struct{ o Options }
 func New(o Options) (*Service, error) {
 	if o.Store == nil || o.Packs == nil || o.Model == nil {
 		return nil, errors.New("direct: Store, Packs and Model are required")
+	}
+	if o.Classifier == nil {
+		o.Classifier, _ = o.Model.(Classifier)
 	}
 	if o.Now == nil {
 		o.Now = clock.Now
@@ -115,8 +123,11 @@ type Call struct {
 	Template string          // 提示词模板名（文件名去掉 .md）
 	Input    json.RawMessage // 结构化输入（JSON）；空表示 {}
 	Material string          // 资料段正文（外部内容，只作依据，不是指令）
-	Target   string          // 目标事项 id，可空；非空时 Event 记在该事项上，apa why 可查
-	Project  string          // 目标事项所属项目，可空
+	// RequireLocality 非空时是调用方裁剪 Material 所依据的端点位置（policy.LocalityLocal 或 LocalityExternal）；
+	// 调用时实际端点的位置（未声明按 external）与它不同就不发请求，返回 ErrLocalityChanged。
+	RequireLocality string
+	Target          string // 目标事项 id，可空；非空时 Event 记在该事项上，apa why 可查
+	Project         string // 目标事项所属项目，可空
 	// Scope 是 event_stats 的统计范围（同一来源、kind、项目）；模板声明了 event_stats 且 NoStats 为假时才使用。
 	Scope Scope
 	// NoStats 为真时不附带统计（web_only 初筛，§8.4）。
@@ -195,10 +206,11 @@ func (s *Service) Do(ctx context.Context, c Call) (Outcome, error) {
 			return out, nil
 		}
 		out.Reason = reason
-		if pr.Meta.EscalateTo == "" {
+		// 同题升级归 Judge；这里只剩生成型信息不足时的接力：声明了 relay_to 交任务型，否则返回未定，由调用方取该用途的默认处置（§8.3）。
+		if pr.Meta.Agent != "generate" || pr.Meta.RelayTo == "" {
 			return out, nil
 		}
-		tmpl = pr.Meta.EscalateTo
+		tmpl = pr.Meta.RelayTo
 	}
 }
 
@@ -378,6 +390,9 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		if p.ep.URL == "" || p.ep.Model == "" {
 			return model.ErrNotConfigured
 		}
+		if c.RequireLocality != "" && policy.EffectiveLocality(p.ep.Locality) != c.RequireLocality {
+			return ErrLocalityChanged
+		}
 		if p.fp, err = fingerprint(pk, tmpl, c.Input, c.Material, p.ep); err != nil {
 			return err
 		}
@@ -407,7 +422,7 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 			req.Timeout, _ = time.ParseDuration(m.Timeout) // 加载时已校验
 		}
 		var resp model.Response
-		if resp, callErr = s.complete(ctx, p.ep, req); callErr == nil {
+		if resp, callErr = s.complete(ctx, p.ep, req, s.o.Attempts); callErr == nil {
 			step.Result = json.RawMessage(resp.Content)
 			if m.Agent == "judge" {
 				step.Result = normalizeJudgement(step.Result)
@@ -440,10 +455,10 @@ func normalizeJudgement(raw json.RawMessage) json.RawMessage {
 }
 
 // complete 带退避重试地调用模型。只重试端点侧的暂时性失败；模型已答复但不合 schema、请求本身不对都如实返回。
-func (s *Service) complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request) (model.Response, error) {
+func (s *Service) complete(ctx context.Context, ep policy.GenerateEndpoint, req model.Request, attempts int) (model.Response, error) {
 	wait := s.o.Backoff
 	var last error
-	for i := 0; i < s.o.Attempts; i++ {
+	for i := 0; i < attempts; i++ {
 		if i > 0 {
 			if err := s.o.Sleep(ctx, wait); err != nil {
 				return model.Response{}, err
