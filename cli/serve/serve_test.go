@@ -1365,7 +1365,7 @@ func TestServeDraftsDecisionCardAndSummaries(t *testing.T) {
 	k := assembled(t)
 	stub := modelstub.New()
 	t.Cleanup(stub.Close)
-	stub.SetDefault(modelstub.Reply{Content: `{"probability":0.05,"confidence":0.95}`}) // web_only 初筛：不升级
+	stub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: "下单？"}, Answer: "no"}) // web_only 初筛（只有对话端点）：回答否、资料足够，不升级
 	stub.When("写一句话摘要", modelstub.Reply{Content: `{"insufficient_info":false,"summary":"等供应商报价"}`})
 	stub.When("概述修订", modelstub.Reply{Content: `{"insufficient_info":false,"summary":"新增结论"}`})
 	stub.When("写一张决策卡片", modelstub.Reply{Content: `{"insufficient_info":false,"title":"卡片标题","question":"现在下单吗？"}`})

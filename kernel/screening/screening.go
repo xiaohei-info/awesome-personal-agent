@@ -1,13 +1,17 @@
 // Package screening 是决策请求的 web_only 判断型初筛（设计 §14.4、§7.2、§6.14 第 4 条）。
 //
+// 判断走级联（§8.3、§8.9）：模板 web-only-screening 是 single_shot，分类端点先答，只问一次、不交下一级；
+// 没有判断端点时由对话端点答。概率不低于下限（落在不确定带内或以上）、对话端点自报资料不足、各级未定（保守默认 yes），
+// 一律升级；只有明确的"否"才不升级。每次初筛写一条判断记录（use: risk_screen），其引用（record.Ref）并进结果 Event 的载荷。
+//
 // 时序：decision.request 在同一事务里（经 decisions.Screening）置 screening_pending 并写下判断型 Run 的起点；
-// 提交后本包调一次判断型（decision-card/web-only-screening），结果经 items.Revise 写回。
+// 提交后本包问一次判断型（decision-card/web-only-screening），结果经 items.Revise 写回。
 // 只升不降：返回"升级"才把 risk_class 升为 web_only 并清除超时默认值，其余一律保持规则的结果。
 // 失败、超时、内核重启中断都按规则继续：清除 screening_pending，Event 记原因，进健康视图；不重试、不阻塞。
 // 初筛结束前超时默认值不生效：由决策模块的超时处理器读 screening_pending 把关（本包不碰 Timer 的触发）。
 //
 // 本包不发模型请求（经 Judge）、不附带 event_stats、不起子进程，只写自己对事项的初筛结果（经 items.Revise）
-// 和 Event 日志；判断型 Run 的状态沿用专属 agent 的 Event 留痕（kernel/agents/direct），没有独立的 Run 表行。
+// 和 Event 日志；判断型 Run 的起止都由本包在事项上留痕（run.started / run.finished），没有独立的 Run 表行。
 package screening
 
 import (
@@ -28,7 +32,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -39,13 +43,10 @@ const (
 	Template = "web-only-screening"
 )
 
-// upgradeAt 是 yes 概率的升级线：判断型回答 yes 表示应升级（提示词约定拿不准倾向 yes）。
-const upgradeAt = 0.5
-
-// Judge 是判断型调用（*direct.Service 满足它）。
+// Judge 是级联判断（*direct.Service 满足它）。
 // 装配处必须给初筛一个 Attempts=1 的实例：初筛失败不重试（§14.4），退避重试会把"按规则继续"拖成阻塞。
 type Judge interface {
-	Do(ctx context.Context, c direct.Call) (direct.Outcome, error)
+	Judge(ctx context.Context, c direct.JudgeCall) (direct.Verdict, error)
 }
 
 // Options 配置 Service。Now 为零值时取系统时钟。
@@ -96,14 +97,14 @@ func mustJSON(v any) json.RawMessage {
 
 // ---- 事务内：要不要初筛、写 Run 起点 ----
 
-// Needed：规则已判为 web_only 或未配置模型端点时不做初筛（§14.4）；其余都要。
+// Needed：规则已判为 web_only，或判断端点与生成端点都未配置时不做初筛（§14.4）；其余都要。
 func (s *Service) Needed(tx *store.Tx, it domain.Item) (bool, error) {
 	_, pol, err := policy.Current(tx)
 	if err != nil {
 		return false, err
 	}
-	ep := pol.GenerateEndpoint
-	if ep.URL == "" || ep.Model == "" {
+	judgeSet := pol.JudgeEndpoint != nil && pol.JudgeEndpoint.URL != ""
+	if !judgeSet && (pol.GenerateEndpoint.URL == "" || pol.GenerateEndpoint.Model == "") {
 		return false, nil
 	}
 	var cls string
@@ -150,7 +151,7 @@ type prepared struct {
 	pending bool
 	runID   string
 	timeout time.Duration
-	call    direct.Call
+	call    direct.JudgeCall
 }
 
 func (s *Service) prepare(ctx context.Context, id string) (p prepared, err error) {
@@ -166,22 +167,17 @@ func (s *Service) prepare(ctx context.Context, id string) (p prepared, err error
 		if err != nil {
 			return err
 		}
-		depth, err := items.ChainDepth(tx, id)
-		if err != nil {
-			return err
-		}
 		if p.runID, err = startedRun(tx, id); err != nil {
 			return err
 		}
 		input := mustJSON(map[string]any{"item": id, "kind": it.Kind, "title": it.Title, "tags": it.Tags, "project": it.Project,
 			"question": it.Ask.Question, "options": it.Ask.Options, "free_text": it.Ask.FreeText})
-		actor := systemActor
-		actor.Run = p.runID
 		p.pending = true
 		p.timeout = time.Duration(pol.ScreeningTimeoutMs) * time.Millisecond
 		// 事项正文是外部内容，只进资料段；初筛不附带 event_stats（NoStats）。
-		p.call = direct.Call{Pack: Pack, Template: Template, Input: input, Material: it.Body, Target: id, Project: it.Project,
-			NoStats: true, Actor: actor, ChainDepth: depth}
+		// shortcut: 事项正文不按外发范围裁剪（事项没有外发范围登记），出现外部端点承载事项正文的需求时再接入。
+		p.call = direct.JudgeCall{Pack: Pack, Template: Template, Input: input, MaterialText: it.Body, Subject: id, Project: it.Project,
+			NoStats: true}
 		return nil
 	})
 	return
@@ -214,8 +210,7 @@ type result struct {
 	reason   string // 写入 Event 的 reason
 	failure  string // 非空：失败、超时或中断；进健康视图
 	runState domain.RunState
-	// ownRunEvent 为真：direct 没有为这次调用留 run.finished（超时取消、未配置、调用前失败、中断），由本包补记。
-	ownRunEvent bool
+	ref      *record.Ref // 判断记录的引用；没有写记录时为空
 }
 
 func (s *Service) run(id string) {
@@ -232,36 +227,51 @@ func (s *Service) run(id string) {
 	}
 	var res result
 	if err != nil {
-		res = result{reason: "screening failed before the call: " + err.Error(), failure: err.Error(), runState: domain.RunFailed, ownRunEvent: true}
+		res = result{reason: "screening failed before the call: " + err.Error(), failure: err.Error(), runState: domain.RunFailed}
 	} else {
 		cctx, cancel := context.WithTimeout(ctx, p.timeout)
-		out, derr := s.o.Judge.Do(cctx, p.call)
+		v, derr := s.o.Judge.Judge(cctx, p.call)
 		timedOut := cctx.Err() != nil
 		cancel()
-		res = interpret(out, derr, timedOut)
+		res = interpret(v, derr, timedOut)
 	}
 	// 写回失败（存储不可用）无处可报：flag 留着，下次启动 Recover 会按规则继续。
 	_ = s.finish(ctx, id, p.runID, res)
 }
 
-func interpret(out direct.Outcome, err error, timedOut bool) result {
+func interpret(v direct.Verdict, err error, timedOut bool) result {
 	switch {
-	case timedOut || errors.Is(err, model.ErrTimeout):
-		return result{reason: "screening timed out; continue by policy rules", failure: "timeout", runState: domain.RunTimeout, ownRunEvent: timedOut}
+	case timedOut || errors.Is(err, context.DeadlineExceeded):
+		return result{reason: "screening timed out; continue by policy rules", failure: "timeout", runState: domain.RunTimeout}
 	case err != nil:
-		return result{reason: "screening failed; continue by policy rules: " + err.Error(), failure: err.Error(), runState: domain.RunFailed,
-			ownRunEvent: errors.Is(err, model.ErrNotConfigured)}
-	case !out.Settled:
-		return result{reason: "screening inconclusive (" + out.Reason + "); not escalated", runState: domain.RunSucceeded}
+		return result{reason: "screening failed; continue by policy rules: " + err.Error(), failure: err.Error(), runState: domain.RunFailed}
+	case v.Unavailable:
+		// 单次作答的那一级失败（端点出错、被外发范围排除、对话端点不可用）：不重试、不交下一级、不升级。
+		return result{reason: "screening failed; continue by policy rules: no endpoint gave a usable answer", failure: "no usable answer",
+			runState: domain.RunFailed, ref: refOf(v)}
+	case v.Answer == "yes":
+		return result{escalate: true, reason: fmt.Sprintf("screening escalated to web_only (decided_by=%s)", v.DecidedBy), runState: domain.RunSucceeded, ref: refOf(v)}
 	}
-	var j direct.Judgement
-	if err := json.Unmarshal(out.Final().Result, &j); err != nil || j.Probability == nil {
-		return result{reason: "screening returned no verdict; continue by policy rules", failure: "no verdict", runState: domain.RunFailed, ownRunEvent: true}
+	return result{reason: fmt.Sprintf("screening did not escalate (decided_by=%s)", v.DecidedBy), runState: domain.RunSucceeded, ref: refOf(v)}
+}
+
+func refOf(v direct.Verdict) *record.Ref {
+	if !v.Written {
+		return nil
 	}
-	if *j.Probability >= upgradeAt {
-		return result{escalate: true, reason: fmt.Sprintf("screening escalated to web_only (p=%.2f)", *j.Probability), runState: domain.RunSucceeded}
+	r := record.RefOf(v.Record)
+	return &r
+}
+
+// withRef 把判断记录引用并进 Event 载荷（对象载荷才并；没有记录原样返回）。
+func withRef(payload json.RawMessage, ref *record.Ref) json.RawMessage {
+	var m map[string]json.RawMessage
+	if ref == nil || json.Unmarshal(payload, &m) != nil || m == nil {
+		return payload
 	}
-	return result{reason: fmt.Sprintf("screening did not escalate (p=%.2f)", *j.Probability), runState: domain.RunSucceeded}
+	b, _ := json.Marshal(ref)
+	_ = json.Unmarshal(b, &m) // Ref 是扁平对象：judgment、answer、decided_by 并入同一层
+	return mustJSON(m)
 }
 
 // finish 在一个事务里写回结论：清除 screening_pending；升级时升 risk_class、清默认值与超时 Timer。
@@ -319,16 +329,14 @@ func (s *Service) record(tx *store.Tx, id, runID, reason string, snap json.RawMe
 		_, err := eventlog.Append(tx, domain.Event{Type: typ, Object: id, Actor: systemActor, Reason: why, Payload: payload, ChainDepth: depth, At: now})
 		return err
 	}
-	if res.ownRunEvent {
-		p := map[string]any{"run_id": runID, "category": domain.RunJudge, "template": Template, "state": res.runState}
-		if res.failure != "" {
-			p["error"] = res.failure
-		}
-		if err := ev(domain.EvRunFinished, "judge "+string(res.runState), mustJSON(p)); err != nil {
-			return err
-		}
+	p := map[string]any{"run_id": runID, "category": domain.RunJudge, "template": Template, "state": res.runState}
+	if res.failure != "" {
+		p["error"] = res.failure
 	}
-	if err := ev(domain.EvItemUpdated, reason, snap); err != nil {
+	if err := ev(domain.EvRunFinished, "judge "+string(res.runState), withRef(mustJSON(p), res.ref)); err != nil {
+		return err
+	}
+	if err := ev(domain.EvItemUpdated, reason, withRef(snap, res.ref)); err != nil {
 		return err
 	}
 	if res.failure == "" {
@@ -368,7 +376,7 @@ func (s *Service) Recover(ctx context.Context) (int, error) {
 		if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { runID, err = startedRun(tx, id); return }); err != nil {
 			return n, err
 		}
-		res := result{reason: "screening interrupted by restart; continue by policy rules", failure: "interrupted", runState: domain.RunFailed, ownRunEvent: true}
+		res := result{reason: "screening interrupted by restart; continue by policy rules", failure: "interrupted", runState: domain.RunFailed}
 		if err := s.finish(ctx, id, runID, res); err != nil {
 			return n, err
 		}
