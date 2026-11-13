@@ -134,6 +134,13 @@ func TestFlowAgentCascade(t *testing.T) {
 		target := f.item(last.Target)
 		eq(t, "目标事项阶段", target["phase"], "needs_input")
 		opts := mustJSON(target["ask"])
+		if q, _ := sub(target, "ask")["question"].(string); !strings.Contains(q, "exit status 1") {
+			t.Errorf("needs_input 应附失败摘要（harness 退出码 1 的原因），实际问题: %q", q)
+		}
+		fin := taskFinished(f.audit(last.Target, "run.finished"))
+		if len(fin) != 1 || !strings.Contains(fmt.Sprint(fin[0].Payload["error"]), "exit status 1") {
+			t.Errorf("run.finished 应记失败原因: %+v", fin)
+		}
 		for _, want := range []string{"重新运行", "改派", "放弃"} {
 			if !strings.Contains(opts, want) {
 				t.Errorf("needs_input 的选项缺少 %q: %s", want, opts)
@@ -178,20 +185,42 @@ func TestFlowAgentCascade(t *testing.T) {
 		if p := f.phase(first.Target); p != "done" {
 			t.Errorf("兜底回执应按末段写回，事项阶段 = %s", p)
 		}
+		// 只有 stdout 末段：结果来自摘要（via=stdout），会话 id 取自摘要，写回恰好一次。
+		fin := taskFinished(f.audit(first.Target, "run.finished"))
+		if len(fin) != 1 || fin[0].Payload["via"] != "stdout" || fin[0].Payload["session_id"] != "stub-session-1" {
+			t.Errorf("summary-only：run.finished 应 via=stdout 且带摘要里的会话 id: %+v", fin)
+		}
+		pc := f.audit(first.Target, "item.phase_changed")
+		if len(pc) != 1 || !strings.Contains(pc[0].Reason, "run summary") {
+			t.Errorf("summary-only：应恰有一次按运行摘要写回的转移: %+v", pc)
+		}
+		// 已有 CLI 回执：stdout 只用来取会话 id，回执不重复生效。
+		f.mode("receipt")
+		f.triggerItem("cas06r", "acc-sum")
+		f.waitFor("receipt 运行结束", 60*time.Second, func() bool {
+			rs := f.runs("--category", "task")
+			return len(rs) == before+2 && rs[len(rs)-1].State != "running" && rs[len(rs)-1].State != "queued"
+		})
+		rcp := f.runs("--category", "task")[before+1]
+		eq(t, "receipt 事项阶段", f.phase(rcp.Target), "done")
+		rfin := taskFinished(f.audit(rcp.Target, "run.finished"))
+		if len(rfin) != 1 || rfin[0].Payload["via"] != "cli" || rfin[0].Payload["session_id"] != "stub-session-1" {
+			t.Errorf("receipt：run.finished 应 via=cli 且从 stdout 取会话 id: %+v", rfin)
+		}
+		if n := len(f.audit(rcp.Target, "item.phase_changed")); n != 1 {
+			t.Errorf("receipt：回执不应重复生效，转移事件 = %d，期望 1", n)
+		}
 		f.mode("no-receipt")
 		f.triggerItem("cas06b", "acc-sum")
 		f.waitFor("第二次运行结束", 60*time.Second, func() bool {
 			rs := f.runs("--category", "task")
-			return len(rs) == before+2 && rs[len(rs)-1].State != "running" && rs[len(rs)-1].State != "queued"
+			return len(rs) == before+3 && rs[len(rs)-1].State != "running" && rs[len(rs)-1].State != "queued"
 		})
-		second := f.runs("--category", "task")[before+1]
+		second := f.runs("--category", "task")[before+2]
 		it := f.item(second.Target)
 		eq(t, "都缺时事项阶段", it["phase"], "needs_input")
 		if !strings.Contains(mustJSON(it["ask"]), "没有用运行凭据写过账本") || !strings.Contains(mustJSON(it["ask"]), "stdout") {
 			t.Errorf("needs_input 应写明这次运行实际留下了什么: %s", mustJSON(it["ask"]))
-		}
-		if n := len(f.audit(first.Target, "item.transitioned")); n > 2 {
-			t.Logf("事项转移事件 %d 条", n)
 		}
 	})
 
@@ -296,6 +325,8 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.waitFor("接力终止于 needs_input", 20*time.Second, func() bool { return f.hasPhase("cas10", "needs_input") })
 		manual := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "cas10-ledger", "--phase", "open", "--project", f.Projects["acc-open"], "--evidence", "账本照常")
 		mid := jsonMap(t, manual.Stdout)["id"].(string)
+		f.apa(f.DEL, 0, "item", "transition", mid, "--to", "dropped", "--reason", "harness 不可用时 CLI 照常", "--evidence", "账本照常")
+		eq(t, "CLI 转阶段", f.phase(mid), "dropped")
 		if r := f.Web("GET", "/v1/items/"+mid, ""); r.Code != 200 {
 			t.Errorf("Web 读事项 HTTP %d", r.Code)
 		}
@@ -654,4 +685,14 @@ func appendLine(t *testing.T, path, line string) {
 	defer fh.Close()
 	_, err = fh.WriteString(line + "\n")
 	must(t, err)
+}
+
+// taskFinished 只留任务型运行的 run.finished（同一事项上可能还有生成型的调用记录）。
+func taskFinished(es []auditEvent) (out []auditEvent) {
+	for _, e := range es {
+		if e.Payload["category"] == "task" {
+			out = append(out, e)
+		}
+	}
+	return
 }
