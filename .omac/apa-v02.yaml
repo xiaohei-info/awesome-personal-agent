@@ -11,6 +11,80 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
+  amendment_revision: 1
+  amendment_apply:
+    schema: omac.amendment-apply/v1
+    amendment_id: amend-0c6f84cf7965
+    amendment_file: .omac/apa-v02.system-amendment.yaml
+    nodes:
+      fix.attribution-v2.62f6c6:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-192506b7d93f1d47b3c612c7
+      e2e-followmsg:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1d2d4-3c01-7d0b-a710-5663aafbde78
+        baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: null
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
+          worker_handoff_pending: true
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+        expected_contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
+        expected_review_generation: amendment-0a5e08c57675a15988c1b58e
+        attempt_baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: null
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
+          worker_handoff_pending: true
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-0a5e08c57675a15988c1b58e
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
+          worker_handoff_pending: false
+    system: true
+  last_amendment_id: amend-0c6f84cf7965
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -5935,6 +6009,7 @@ nodes:
   - e2e-env-baseline
   - attribution-v2
   - web-item-edit
+  - fix.attribution-v2.62f6c6
   title: 跟进消息归属全流程
   description: 产出 e2e-followmsg-flow-evidence。是 flow-follow-messages 的唯一全流程 owner，并负责其中
     8 个 v0.1 继承或跨模块 business-action。
@@ -8923,3 +8998,99 @@ nodes:
     requirement_refs:
     - REQ-G1-5
     coverage_gate: 0
+- id: fix.attribution-v2.62f6c6
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  - source-contract-v2
+  title: 'Fix attribution-v2: dfx-62f6c689fa3a'
+  description: "Automatic fix for upstream defect(s) reported by e2e-followmsg.\n\n-
+    [design-gap] anchors flow-follow-messages/ACT-MSG-13 (docs/solution-design.md#94-跟进消息归属)\n
+    \ expected: 设计 §9.4：事项处于 proposed 时只更新“来自几个来源”，验收 ACT-MSG-13 要求建议仍为 proposed 且
+    proposal.sources 含 fm-13。\n  observed: kernel/followmsg 对 proposed 事项只记挂靠消息（attach_state=processed），不调用
+    items.AddProposalSource， GET /v1/items/{id} 的 proposal 为空。kernel/followmsg/followmsg_test.go
+    的 TestEchoOnProposedItemOnlyAttaches 只断言阶段，未覆盖来源数。\n  where: kernel/followmsg/followmsg.go:Service
+    (attach 路径无 AddProposalSource 调用); kernel/items/attach.go:AddProposalSource (仅
+    kernel/inbound/propose.go 调用)\n  repro: `go test -tags=e2e -count=1 -run TestFlowFollowMessages
+    ./tests/e2e/followmsg/...` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-62f6c689fa3a in attribution-v2: 设计
+      §9.4：事项处于 proposed 时只更新“来自几个来源”，验收 ACT-MSG-13 要求建议仍为 proposed 且 proposal.sources
+      含 fm-13。'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/followmsg/...
+    - go test -count=1 ./api/followmsg/...
+    - go test -count=1 ./cli/followmsg/...
+    - go test -tags=e2e -count=1 -run TestFlowFollowMessages ./tests/e2e/followmsg/...
+    integration_gates:
+    - name: attribution-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#94-跟进消息归属
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+      delivery_goal: 跟进消息归属 v2：on_update、回音回 open、本人登记关联键；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-GH-09
+      - ACT-MAIL-11
+      - ACT-MAIL-14
+      - ACT-MAIL-15
+      - ACT-CAL-03
+      - ACT-CAL-09
+      - ACT-MSG-10
+      - ACT-MSG-11
+      - ACT-MSG-12
+      - ACT-MSG-13
+      - ACT-MSG-14
+      - ACT-MSG-15
+      - ACT-MSG-17
+      - ACT-INP-03
+      acceptance_refs:
+      - flow-source-github
+      - flow-source-mail
+      - flow-source-calendar
+      - flow-follow-messages
+      - flow-inbound-pipeline
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/followmsg/...
+      - go test -count=1 ./api/followmsg/...
+      - go test -count=1 ./cli/followmsg/...
+    pr_base: main
+    acceptance_refs:
+    - flow-follow-messages
+    source_of_truth:
+    - docs/solution-design.md#94-跟进消息归属
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+    scope_paths:
+    - kernel/followmsg/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    - artifact_id: source-contract-v2-delivery
+      producer: source-contract-v2
+      evidence_mode: artifact
+      requires:
+      - standard-event-v2
+    defect_refs:
+    - dfx-62f6c689fa3a
+    coverage_gate: 80
