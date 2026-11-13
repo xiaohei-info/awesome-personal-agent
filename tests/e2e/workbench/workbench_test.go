@@ -140,17 +140,35 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 	})
 
 	k.step("ACT-WBN-05 CLI 读写计划日期，计划日期不产生定时与提醒", func(t *testing.T) {
+		timers := func() (n int) {
+			for _, e := range k.events("", "") {
+				if strings.HasPrefix(e.Type, "timer.") {
+					n++
+				}
+			}
+			return
+		}
+		timers0 := timers()
 		k.apa(k.WRK, 0, "item", "update", wbF, "--planned-for", TMRW)
 		eq(t, "planned_for", k.planned(wbF), TMRW)
-		why := k.apa(k.OBS, 0, "why", wbF).Stdout
-		if strings.Contains(strings.ToLower(why), "timer") && !strings.Contains(why, `"timers":[]`) && !strings.Contains(why, `"timers":null`) {
-			// why 的 Timer 列表不为空才算"因计划日期建了 Timer"
-			var w struct {
-				Timers []any `json:"timers"`
+		// 计划日期只是字段：不新建 Timer（审计里没有新的 timer.* 事件），\`apa why\` 的步骤里没有 timer.*，也没有提到该事项的提醒。
+		eq(t, "timer.* 事件数不变", timers(), timers0)
+		var why struct {
+			Steps []struct {
+				Type string `json:"type"`
+			} `json:"steps"`
+		}
+		jsonOf(t, k.apa(k.OBS, 0, "why", wbF).Stdout, &why)
+		if len(why.Steps) == 0 {
+			t.Error("apa why 没有任何步骤，断言会落空")
+		}
+		for _, st := range why.Steps {
+			if strings.HasPrefix(st.Type, "timer.") {
+				t.Errorf("apa why 里有 %s", st.Type)
 			}
-			if json.Unmarshal([]byte(why), &w) == nil && len(w.Timers) > 0 {
-				t.Errorf("计划日期创建了 Timer: %s", why)
-			}
+		}
+		if strings.Contains(k.unreadRaw(), wbF) {
+			t.Errorf("Web 未读里出现了 WB-F 的提醒: %s", k.unreadRaw())
 		}
 		r := k.APIRaw("PATCH", "/v1/items/"+wbF, `{"planned_for": null}`, k.WRK)
 		if r.Code != 200 {
@@ -450,7 +468,7 @@ out.groups = await page.evaluate(() => [...document.querySelectorAll("main secti
 // ② 新建 WB-MOB
 await page.goto(base + "/items/new");
 await page.waitForSelector("form input", { state: "visible" });
-await page.fill("loc=role:textbox[name*='标题']", "WB-MOB 交房租");
+await fillSafe("loc=role:textbox[name*='标题']", "WB-MOB 交房租");
 await page.evaluate((d) => {
   const el = document.querySelector("input[type=date]");
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, d);
@@ -462,7 +480,7 @@ out.mobPath = await page.evaluate(() => location.pathname);
 // ③ WB-D 写进展
 await page.goto(base + "/items/" + %q);
 await page.waitForSelector("loc=role:button[name='写进展']", { state: "visible" });
-await page.fill("loc=role:textbox[name*='进展']", "已交照片");
+await fillSafe("loc=role:textbox[name*='进展']", "已交照片");
 await page.click("loc=role:button[name='写进展']");
 await page.waitForFunction(() => document.body.textContent.includes("已交照片"));
 // ④ 按推荐处理

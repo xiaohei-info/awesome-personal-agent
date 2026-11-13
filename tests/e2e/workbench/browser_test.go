@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -16,6 +17,9 @@ import (
 func needBrowser(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("ego-browser"); err != nil {
+		if os.Getenv("APA_E2E_REQUIRE_BROWSER") != "" {
+			t.Fatal("APA_E2E_REQUIRE_BROWSER 已设置但本机没有 ego-browser")
+		}
 		t.Skip("本机没有 ego-browser：页面渲染与手机宽度走查改由装有 ego-browser 的本机验证")
 	}
 }
@@ -28,6 +32,12 @@ func (k *kit) browse(space, js string) map[string]any {
 const page = task.page("p1");
 const base = %q;
 const out = {};
+async function fillSafe(sel, v) {
+  for (let i = 0; i < 3; i++) {
+    try { await page.fill(sel, v); return; } catch (e) { await page.waitForTimeout(700); }
+  }
+  await page.fill(sel, v);
+}
 async function login() {
   await page.goto(base + "/");
   const needs = await page.evaluate(() => !!document.querySelector("main.login"));

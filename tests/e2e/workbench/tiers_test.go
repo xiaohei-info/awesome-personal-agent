@@ -21,6 +21,8 @@ cat > /dev/null
 n=$(cat "$Q/n" 2>/dev/null || echo 0)
 n=$((n+1))
 echo "$n" > "$Q/n"
+# 前三次运行才产出事件：之后的核对面对的是一份不再增长的积压（来源仍按周期运行，只是没有新事件）。
+if [ "$n" -gt 3 ]; then echo '{"cursor":"'$n'"}'; exit 0; fi
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo '{"id":"m-'$n'","type":"acc.match","subject":"match '$n'","occurred_at":"'$now'","sender_verified":true}'
 echo '{"id":"o-'$n'","type":"acc.other","subject":"other '$n'","occurred_at":"'$now'","sender_verified":true}'
@@ -154,6 +156,9 @@ func TestFlowRunTiers(t *testing.T) {
 		}) {
 			t.Fatal("tier-src 没有运行至少两次")
 		}
+		// 来源脚本只在前三次运行时产出事件（见 tierScript），等已拉到的事件全部处置完，再按同一份快照核对。
+		time.Sleep(3 * time.Second)
+		evs = k.waitEvents("src_tier", 4)
 		matches, others = nil, nil
 		for _, e := range evs {
 			switch e.Type {

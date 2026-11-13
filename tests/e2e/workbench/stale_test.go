@@ -175,11 +175,9 @@ func TestFlowStale(t *testing.T) {
 			t.Fatal("ST-7 没有进入久未推进组")
 		}
 		// "今天"页的批量提交逐条调既有接口：继续=记一条进展，改期=设计划日期，放弃=转 dropped；每条一个 Event。
-		ver1, ver3, ver7 := k.version(st[1]), k.version(st[3]), k.version(st[7])
 		k.webOK("POST", "/items/"+st[1]+"/progress", `{"text":"继续"}`, 201)
 		k.webOK("PATCH", "/items/"+st[3], `{"planned_for":"`+day2+`"}`, 200)
 		k.webOK("POST", "/items/"+st[7]+"/transition", `{"to":"dropped","reason":"久未推进，本人选择放弃"}`, 200)
-		_, _, _ = ver1, ver3, ver7
 		eq(t, "ST-1 阶段", k.phase(st[1]), "open")
 		eq(t, "ST-3 planned_for", k.planned(st[3]), day2)
 		eq(t, "ST-7 阶段", k.phase(st[7]), "dropped")
@@ -218,5 +216,3 @@ func TestFlowStale(t *testing.T) {
 		}
 	})
 }
-
-func toJSON(v any) string { b, _ := json.Marshal(v); return string(b) }

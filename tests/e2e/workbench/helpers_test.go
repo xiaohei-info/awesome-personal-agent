@@ -255,14 +255,6 @@ func (k *kit) countEvents(object, typ string) int { return len(k.events(object, 
 
 // ---- 未读提醒 ----
 
-type delivery struct {
-	Class string `json:"class"`
-	Item  string `json:"item"`
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Text  string `json:"text"`
-}
-
 func (k *kit) unreadRaw() string { return k.webOK("GET", "/deliveries/unread", "", 200) }
 
 // findItem 按标题在全部事项里找 id（本人会话的全文搜索）。

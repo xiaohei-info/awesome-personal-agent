@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"testing"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
@@ -125,8 +124,6 @@ func (k *kit) draft(subject string, d map[string]any) {
 	k.ModelStub.When(`subject\":\"`+subject+`\"`, modelstub.Reply{Content: string(b)})
 }
 
-func ptr[T any](v T) *T { return &v }
-
 // healthSignal 读 apa health 里某个信号（用 token 指定的实例）。
 type signal struct {
 	ID       string `json:"id"`
@@ -149,5 +146,3 @@ func (k *kit) health(token string) (healthy bool, sigs map[string]signal) {
 	}
 	return out.Healthy, sigs
 }
-
-var _ = testing.Short
