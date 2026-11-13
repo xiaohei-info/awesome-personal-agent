@@ -1,0 +1,9 @@
+# 隧道样例（cloudflared）：不开放入站端口，由隧道把 HTTPS 流量送到本机回环上的 apa（设计 §16.6）。
+# 域名与隧道 ID 都是占位，使用前换成自己的；APA 不提供托管服务。
+# config.yaml 需写 public_url: https://apa.example.invalid，apa 仍只监听回环。
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: /etc/cloudflared/00000000-0000-0000-0000-000000000000.json
+ingress:
+  - hostname: apa.example.invalid
+    service: http://127.0.0.1:7777
+  - service: http_status:404

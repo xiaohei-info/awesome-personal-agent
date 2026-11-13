@@ -293,7 +293,7 @@ func writeTarball(dir, out string) error {
 // required 是 §16.6 表里每一类内容在包内必须存在的代表文件。
 var required = []string{"bin/apa", "sources/rss-source", "ext/export/ext.yaml", "ext/telegram/ext.yaml", "ext/webhookforward/ext.yaml",
 	"plugins/hermes/core/plugin.yaml", "plugins/hermes/core/README.md", "deploy/systemd/apa.service", "deploy/nginx/apa.conf.example",
-	"deploy/caddy/Caddyfile.example", "docs/user/quickstart.md", "docs/user/run-tiers.md", "docs/user/troubleshooting.md",
+	"deploy/caddy/Caddyfile.example", "deploy/tunnel/cloudflared.yml.example", "docs/user/quickstart.md", "docs/user/run-tiers.md", "docs/user/troubleshooting.md",
 	"docs/user/security.md", "docs/user/upgrade.md", "docs/user/uninstall.md", "docs/user/changelog.md", manifestName}
 
 const atomFeed = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>t</title><id>urn:feed</id><updated>2030-01-01T00:00:00Z</updated>` +
