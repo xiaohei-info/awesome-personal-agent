@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -235,6 +236,13 @@ func TestFlowBrief(t *testing.T) {
 	})
 
 	t.Run("ACT-BRF-04 停机后只补最近一次", func(t *testing.T) {
+		// 虚拟时钟分钟边界会让"正常的下一周期"被误数成第二份补发：等虚拟秒落在 5–35 秒，
+		// 使停机、推进 300 秒（不改变对齐）、重启、稳定都发生在同一个虚拟分钟内。
+		f.waitFor("虚拟时钟处在分钟内的安全窗口", 70*time.Second, func() bool {
+			off, _ := strconv.ParseInt(strings.TrimSpace(readFile(t, filepath.Join(f.Home, "test-clock-offset"))), 10, 64)
+			sec := time.Now().Add(time.Duration(off) * time.Second).Second()
+			return sec >= 5 && sec <= 35
+		})
 		before := settled("brief ") // 基线必须稳定：前面各步的周期都已写回，没有在途的简报
 		stopAt := time.Now().Format(time.RFC3339Nano)
 		f.StopKernel()
