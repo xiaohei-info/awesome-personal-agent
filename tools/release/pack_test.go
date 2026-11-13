@@ -206,3 +206,50 @@ func TestHelpersReportFailures(t *testing.T) {
 		t.Errorf("plain build flagged: %v", err)
 	}
 }
+
+// 包内的插件、部署样例与用户文档文件集 == 源码树去掉 tests、__pycache__、_test.go 后的文件集。
+func TestPackageCopiesEveryShippedFile(t *testing.T) {
+	root, dir := moduleRoot(t), buildPackage(t)
+	for _, d := range []string{"plugins/hermes", "deploy", "docs/user"} {
+		want := map[string]bool{}
+		_ = filepath.WalkDir(filepath.Join(root, d), func(p string, e os.DirEntry, err error) error {
+			if e.IsDir() && (e.Name() == "tests" || e.Name() == "__pycache__") {
+				return filepath.SkipDir
+			}
+			if !e.IsDir() && !strings.HasSuffix(e.Name(), "_test.go") {
+				rel, _ := filepath.Rel(root, p)
+				want[filepath.ToSlash(rel)] = true
+			}
+			return nil
+		})
+		got := map[string]bool{}
+		_ = filepath.WalkDir(filepath.Join(dir, d), func(p string, e os.DirEntry, err error) error {
+			if !e.IsDir() {
+				rel, _ := filepath.Rel(dir, p)
+				got[filepath.ToSlash(rel)] = true
+			}
+			return nil
+		})
+		for f := range want {
+			if !got[f] {
+				t.Errorf("package misses %s", f)
+			}
+		}
+		for f := range got {
+			if !want[f] {
+				t.Errorf("package has unexpected %s", f)
+			}
+		}
+	}
+}
+
+// 任一插件缺 plugin.yaml，VerifyPackage 必须失败。
+func TestVerifyPackageFailsWhenAnyPluginLacksManifest(t *testing.T) {
+	dir := buildPackage(t)
+	if err := os.Remove(filepath.Join(dir, "plugins", "hermes", "headless", "plugin.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyPackage(dir); err == nil || !strings.Contains(err.Error(), "headless") {
+		t.Fatalf("got %v", err)
+	}
+}

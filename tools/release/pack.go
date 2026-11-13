@@ -147,8 +147,11 @@ func copyTree(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() && (d.Name() == "tests" || d.Name() == "__pycache__") || strings.HasSuffix(d.Name(), "_test.go") {
+		if d.IsDir() && (d.Name() == "tests" || d.Name() == "__pycache__") {
 			return fs.SkipDir
+		}
+		if strings.HasSuffix(d.Name(), "_test.go") { // 文件返回 SkipDir 会连同同目录其余文件一起跳过
+			return nil
 		}
 		rel, _ := filepath.Rel(src, p)
 		target := filepath.Join(dst, rel)
@@ -307,6 +310,18 @@ func VerifyPackage(dir string) error {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(r))); err != nil {
 			return fmt.Errorf("package misses %s", r)
 		}
+	}
+	plugins, _ := filepath.Glob(filepath.Join(dir, "plugins", "hermes", "*", "plugin.yaml"))
+	srcPlugins, _ := filepath.Glob(filepath.Join(dir, "plugins", "hermes", "*"))
+	for _, p := range srcPlugins {
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			if _, err := os.Stat(filepath.Join(p, "plugin.yaml")); err != nil {
+				return fmt.Errorf("plugin %s misses plugin.yaml", filepath.Base(p))
+			}
+		}
+	}
+	if len(plugins) == 0 {
+		return errors.New("package has no host plugin")
 	}
 	if err := CheckSums(dir); err != nil {
 		return err
