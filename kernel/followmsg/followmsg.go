@@ -277,6 +277,15 @@ func resolve(tx *store.Tx, ev domain.SourceEvent, onUpdate string) (plan, error)
 	return plan{}, nil
 }
 
+// Attaches 只读预判 Intercept 会不会把事件挂靠到原事项（不写任何东西）；出错按不挂靠处理。
+func (s *Service) Attaches(ctx context.Context, ev domain.SourceEvent, onUpdate string) bool {
+	var p plan
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { p, err = resolve(tx, ev, onUpdate); return }); err != nil {
+		return false
+	}
+	return p.item != ""
+}
+
 // Intercept 满足 inbound.Intercept。
 func (s *Service) Intercept(ctx context.Context, ev domain.SourceEvent, onUpdate string) (bool, string, error) {
 	var p plan
