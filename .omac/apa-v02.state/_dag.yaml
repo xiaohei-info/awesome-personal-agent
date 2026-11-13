@@ -1,9 +1,10 @@
-# sha256: b9ec5fd144ce89ef60abb7b599d457dd0720a04ded9660a3abdcb69f848d5f08
+# sha256: 7bf84c44ff839d725481b28a9f75899dc6a6b2482691c1f5ca7a997bd6f6f535
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 1
+  used_global: 3
   used_by_reporter:
     e2e-followmsg: 1
+    e2e-workbench: 2
   granted_by_reporter: {}
   entries:
     dfx-62f6c689fa3a:
@@ -28,4 +29,20 @@ defects:
       reporters:
       - e2e-sources
       state: queued
+    dfx-ec964047626d:
+      suspected: web-today
+      anchors:
+      - flow-web-workbench/ACT-WBN-16
+      reporters:
+      - e2e-workbench
+      state: fixing
+      fix_node: fix.web-today.ec9640
+    dfx-8a3ec29f05ec:
+      suspected: health-signals-v2
+      anchors:
+      - flow-run-tiers/ACT-TIER-01
+      reporters:
+      - e2e-workbench
+      state: fixing
+      fix_node: fix.health-signals-v2.8a3ec2
   inbox: []

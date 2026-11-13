@@ -11,21 +11,26 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 1
+  amendment_revision: 2
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-0c6f84cf7965
+    amendment_id: amend-212e20e48a9e
     amendment_file: .omac/apa-v02.system-amendment.yaml
     nodes:
-      fix.attribution-v2.62f6c6:
+      fix.health-signals-v2.8a3ec2:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-192506b7d93f1d47b3c612c7
-      e2e-followmsg:
+        expected_review_generation: amendment-05ff17d3577cac9b6de8c5df
+      fix.web-today.ec9640:
         stage: authoring
         state: synced
-        work_item_id: 01a1d2d4-3c01-7d0b-a710-5663aafbde78
+        reason: no existing work item side effect
+        expected_review_generation: amendment-1acac9373b585caf5025751b
+      e2e-workbench:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1d2fc-2cb4-707a-8921-2682fe514c2f
         baseline:
           status: blocked
           phase: authoring
@@ -40,14 +45,14 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
+          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
           worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
-        expected_review_generation: amendment-0a5e08c57675a15988c1b58e
+        expected_contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
+        expected_review_generation: amendment-f5787ac88c919aef9947017c
         attempt_baseline:
           status: blocked
           phase: authoring
@@ -62,14 +67,14 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
+          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
           worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-0a5e08c57675a15988c1b58e
+          review_generation: amendment-f5787ac88c919aef9947017c
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -81,10 +86,19 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
+          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
           worker_handoff_pending: false
+    retained_bounce_baselines:
+      e2e-followmsg:
+        amendment_id: amend-0c6f84cf7965
+        work_item_id: 01a1d2d4-3c01-7d0b-a710-5663aafbde78
+        contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
     system: true
-  last_amendment_id: amend-0c6f84cf7965
+  last_amendment_id: amend-212e20e48a9e
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -6505,6 +6519,8 @@ nodes:
   - web-today
   - item-list-search
   - stale-check
+  - fix.health-signals-v2.8a3ec2
+  - fix.web-today.ec9640
   title: 工作台、久未推进与第一档全流程
   description: 产出 e2e-workbench-flow-evidence。是 flow-web-workbench、flow-stale、flow-run-tiers
     的唯一全流程 owner，并负责其中 4 个 v0.1 继承或跨模块 business-action。要点：不启动任何模型替身；Web 步骤用 ego-browser。
@@ -9094,3 +9110,154 @@ nodes:
     defect_refs:
     - dfx-62f6c689fa3a
     coverage_gate: 80
+- id: fix.health-signals-v2.8a3ec2
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  - test-clock
+  title: 'Fix health-signals-v2: dfx-8a3ec29f05ec'
+  description: "Automatic fix for upstream defect(s) reported by e2e-workbench.\n\n-
+    [design-gap] anchors flow-run-tiers/ACT-TIER-01 (docs/appendix-b-api-cli.md#b2-http-api)\n
+    \ expected: model_unavailable.detail 为 {judge, generate, endpoint}，各取空、not_configured
+    或 failing；未配判断端点与生成端点且有事件在等时 judge=generate=not_configured\n  observed: detail
+    为 {endpoint:not_configured, screening:[], judgements:[]}，没有 judge、generate 两个键\n
+    \ where: api/health/health.go:model_unavailable\n  repro: `go test -tags=e2e -count=1
+    -run TestFlowRunTiers ./tests/e2e/workbench/...` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-8a3ec29f05ec in health-signals-v2:
+      model_unavailable.detail 为 {judge, generate, endpoint}，各取空、not_configured 或
+      failing；未配判断端点与生成端点且有事件在等时 judge=generate=not_configured'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/health/...
+    - go test -count=1 ./api/health/...
+    - go test -tags=e2e -count=1 -run TestFlowRunTiers ./tests/e2e/workbench/...
+    integration_gates:
+    - name: health-signals-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#152-健康视图
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 健康视图十三项：长时间无回执的委派与时钟迟到；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-HLT-01
+      - ACT-HLT-03
+      - ACT-HLT-04
+      - ACT-HLT-05
+      - ACT-HLT-06
+      acceptance_refs:
+      - flow-health
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/health/...
+      - go test -count=1 ./api/health/...
+    pr_base: main
+    acceptance_refs:
+    - flow-run-tiers
+    source_of_truth:
+    - docs/solution-design.md#152-健康视图
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - kernel/health/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    - artifact_id: test-clock-delivery
+      producer: test-clock
+      evidence_mode: artifact
+      requires:
+      - test-clock-offset
+      - test-clock-build-flag
+    defect_refs:
+    - dfx-8a3ec29f05ec
+    coverage_gate: 80
+- id: fix.web-today.ec9640
+  worker: omac-worker-frontend-taiyi
+  blocked_by:
+  - web-item-edit
+  - item-list-search
+  - web-proposals
+  title: 'Fix web-today: dfx-ec964047626d'
+  description: "Automatic fix for upstream defect(s) reported by e2e-workbench.\n\n-
+    [design-gap] anchors flow-web-workbench/ACT-WBN-16 (docs/solution-design.md#314-场景十二在工作台上安排一天)\n
+    \ expected: 360 像素宽度下逐页打开（含来源、判断与校准），每页 document.scrollingElement.scrollWidth
+    ≤ 360，无需横向滚动\n  observed: 来源页 scrollWidth=1001（来源命令的 <code> 不换行，宽 1001px）；判断与校准页
+    scrollWidth=1102（指标 <table> 宽 1102px）；其余 12 页均 ≤ 360\n  where: web/src/features/sources/SourcesPage.tsx:609;
+    web/src/features/judgment/JudgmentPage.tsx:108\n  repro: `go test -tags=e2e -count=1
+    -run TestFlowWebWorkbench ./tests/e2e/workbench/...` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-ec964047626d in web-today: 360 像素宽度下逐页打开（含来源、判断与校准），每页
+      document.scrollingElement.scrollWidth ≤ 360，无需横向滚动'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - npm --prefix web run test -- --run src/features/today
+    - go test -tags=e2e -count=1 -run TestFlowWebWorkbench ./tests/e2e/workbench/...
+    integration_gates:
+    - name: web-today-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#41-web-中台
+      - docs/solution-design.md#314-场景十二在工作台上安排一天
+      - docs/solution-design.md#213-需实测的事项
+      delivery_goal: Web"今天"视图与手机宽度走查；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-WBN-08
+      - ACT-WBN-16
+      - ACT-GATE-09
+      acceptance_refs:
+      - flow-web-workbench
+      - flow-release-gates
+      commands:
+      - npm --prefix web run test -- --run src/features/today
+    pr_base: main
+    acceptance_refs:
+    - flow-web-workbench
+    source_of_truth:
+    - docs/solution-design.md#41-web-中台
+    - docs/solution-design.md#314-场景十二在工作台上安排一天
+    - docs/solution-design.md#213-需实测的事项
+    scope_paths:
+    - web/src/features/today/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: web-item-edit-delivery
+      producer: web-item-edit
+      evidence_mode: artifact
+      requires:
+      - web-item-editor
+    - artifact_id: item-list-search-delivery
+      producer: item-list-search
+      evidence_mode: artifact
+      requires:
+      - item-list-search
+    - artifact_id: web-proposals-delivery
+      producer: web-proposals
+      evidence_mode: artifact
+      requires:
+      - web-proposal-stream
+    defect_refs:
+    - dfx-ec964047626d
+    coverage_gate: 70
