@@ -131,14 +131,15 @@ func (s *Service) Prefetch(ctx context.Context, calls []JudgeCall) {
 	s.warmMu.Lock()
 	defer s.warmMu.Unlock()
 	if s.warm == nil {
-		s.warm = map[string]*classAns{}
+		s.warm = map[string][]*classAns{}
 	}
 	for _, p := range ps {
 		if p == nil {
 			continue
 		}
-		if a := p.prefix["classifier"]; a != nil && a.ran && !a.reused && a.ErrCode == "" && a.fp != "" {
-			s.warm[a.fp] = a
+		// 出错的结果也留着：这些题随后的判断直接交下一级，不再逐题重发（§8.8）。复用的成功结果走复用表。
+		if a := p.prefix["classifier"]; a != nil && a.ran && (!a.reused || a.ErrCode != "") && a.fp != "" {
+			s.warm[a.fp] = append(s.warm[a.fp], a)
 		}
 	}
 }
@@ -321,11 +322,11 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 		if p.firstFP == "" {
 			p.firstFP = fp
 		}
+		if w := s.claimWarm(fp); w != nil {
+			p.prefix["classifier"] = w
+			continue
+		}
 		if cached, ok := s.cachedClass(ctx, fp); ok {
-			if w := s.claimWarm(fp); w != nil {
-				p.prefix["classifier"] = w
-				continue
-			}
 			p.prefix["classifier"] = &classAns{Answer: cached, reused: true, ran: true}
 			continue
 		}
@@ -389,9 +390,16 @@ func (s *Service) noteClassifierHealth(ctx context.Context, res model.JudgeResul
 func (s *Service) claimWarm(fp string) *classAns {
 	s.warmMu.Lock()
 	defer s.warmMu.Unlock()
-	w := s.warm[fp]
-	delete(s.warm, fp)
-	return w
+	q := s.warm[fp]
+	if len(q) == 0 {
+		return nil
+	}
+	if len(q) == 1 {
+		delete(s.warm, fp)
+	} else {
+		s.warm[fp] = q[1:]
+	}
+	return q[0]
 }
 
 func (s *Service) cachedClass(ctx context.Context, fp string) (model.Answer, bool) {

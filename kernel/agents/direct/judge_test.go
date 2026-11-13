@@ -765,3 +765,91 @@ func TestPrefetchedAnswerIsCountedAsCallOnce(t *testing.T) {
 		t.Fatal("no further endpoint calls")
 	}
 }
+
+// ACT-JDP-03/04/06/07：预取（整批外呼）出错的题，之后各自的判断不再对分类端点重发，直接交下一级。
+func TestPrefetchedFaultsAreNotResentPerQuestion(t *testing.T) {
+	keys := []string{"jf1", "jf2", "jf3", "jf4", "jf5"}
+	cases := map[string]struct {
+		fault  modelstub.ClsFault
+		perQ   map[string]string // key → ClsJudge.Error
+		code   string            // 出错题的 levels[0].error_code
+		failed []string
+	}{
+		"per-question": {perQ: map[string]string{"jf2": "input_too_large", "jf3": "unsupported_question", "jf4": "internal"},
+			failed: []string{"jf2", "jf3", "jf4"}, code: ""},
+		"batch-400":  {fault: modelstub.ClsFault{Status: 400}, failed: keys, code: "invalid_request"},
+		"401":        {fault: modelstub.ClsFault{Status: 401}, failed: keys, code: "unauthorized"},
+		"protocol":   {fault: modelstub.ClsFault{Protocol: "probability-judgment/9"}, failed: keys, code: "protocol_error"},
+		"503":        {fault: modelstub.ClsFault{Status: 503}, failed: keys, code: "unavailable"},
+		"always-413": {fault: modelstub.ClsFault{Status: 413}, failed: keys, code: "batch_too_large"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := setupJudge(t, true, true)
+			e.cls.SetDefaultPYes(0.05)
+			e.cls.SetFault(tc.fault)
+			for k, code := range tc.perQ {
+				e.cls.Judge(modelstub.ClsJudge{Key: modelstub.Key{Contains: k}, Error: code})
+			}
+			var calls []JudgeCall
+			for _, k := range keys {
+				e.chat(k, "no", true)
+				calls = append(calls, jc("screen", k))
+			}
+			e.svc.Prefetch(bg, calls)
+			after := len(e.cls.Batches())
+			failed := map[string]bool{}
+			for _, k := range tc.failed {
+				failed[k] = true
+			}
+			for _, k := range keys {
+				v := e.judge(t, jc("screen", k))
+				l := e.saved(t, v.Record.ID).Levels
+				if failed[k] {
+					if v.DecidedBy != "chat" || l[0].Outcome != record.OutcomeError || l[0].Reused {
+						t.Fatalf("%s: %+v", k, l[0])
+					}
+					if tc.code != "" && l[0].ErrorCode != tc.code {
+						t.Fatalf("%s: error_code %q", k, l[0].ErrorCode)
+					}
+				} else if v.DecidedBy != "classifier" || l[0].Reused {
+					t.Fatalf("%s: %+v", k, v)
+				}
+			}
+			if n := len(e.cls.Batches()); n != after {
+				t.Fatalf("the classifier was asked again after prefetch: %d -> %d", after, n)
+			}
+		})
+	}
+}
+
+// ACT-JDP-13：预取过的第一条不标 reused；同内容的第二条标；换模型后的第三条重新外呼且不标。
+func TestReuseFlagAcrossModelChange(t *testing.T) {
+	e := setupJudge(t, true, true)
+	e.cls.SetDefaultPYes(0.05)
+	run := func(subject string) record.Level {
+		c := jc("screen", "same")
+		c.Subject = subject
+		e.svc.Prefetch(bg, []JudgeCall{c})
+		return e.saved(t, e.judge(t, c).Record.ID).Levels[0]
+	}
+	if l := run("evt_1"); l.Reused {
+		t.Fatalf("first: %+v", l)
+	}
+	if l := run("evt_2"); !l.Reused {
+		t.Fatalf("second should be reused: %+v", l)
+	}
+	if len(e.cls.Batches()) != 1 {
+		t.Fatal("second call went out")
+	}
+	e.setJudgment(t, policy.Judgment{})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error { p.JudgeEndpoint.Model = "acc-model-2"; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if l := run("evt_3"); l.Reused || len(e.cls.Batches()) != 2 {
+		t.Fatalf("third: %+v batches=%d", l, len(e.cls.Batches()))
+	}
+}
