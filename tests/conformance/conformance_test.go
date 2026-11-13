@@ -405,7 +405,7 @@ func startServe(t *testing.T) string {
 func mounted(t *testing.T, base, method, p string) bool {
 	t.Helper()
 	url := base + "/v1" + p
-	if strings.HasPrefix(p, "/ingest/") || strings.HasPrefix(p, "/forms/") { // 外部系统与人点开的链接不带版本前缀
+	if strings.HasPrefix(p, "/ingest/") || strings.HasPrefix(p, "/forms/") || strings.HasPrefix(p, "/act/") { // 外部系统与人点开的链接（含动作链接，交给 Web 前端）不带版本前缀
 		url = base + p
 	}
 	req, err := http.NewRequest(method, url, nil)

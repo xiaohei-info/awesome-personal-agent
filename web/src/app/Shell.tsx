@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { COUNTS_EVENT, GroupContext } from "./page";
 import { GROUPS, groupOf, type Feature } from "./registry";
@@ -7,7 +7,8 @@ import { toggleTheme } from "./theme";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
-export function Shell({ features }: { features: Feature[] }) {
+export function Shell({ features: all }: { features: Feature[] }) {
+  const features = useMemo(() => all.filter((f) => !f.hidden), [all]); // 稳定引用：下面的 effect 依赖它
   const { api, logout } = useSession();
   const { pathname } = useLocation();
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +91,7 @@ export function Shell({ features }: { features: Feature[] }) {
           </button>
         </div>
         <Routes>
-          {features.map((f) => (
+          {all.map((f) => (
             <Route key={f.id} path={f.path + "/*"} element={<GroupContext.Provider value={groupOf(f)}>{f.element}</GroupContext.Provider>} />
           ))}
           <Route

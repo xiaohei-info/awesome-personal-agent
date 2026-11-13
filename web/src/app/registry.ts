@@ -20,6 +20,8 @@ export interface Feature {
   element: ReactNode;
   /** 无需登录的页面（如一次性表单）：不进导航、不经登录门，由令牌自身授权。 */
   public?: boolean;
+  /** 只作链接目标（如动作确认页）：路由有效，但不进导航、跳转面板和默认落点。 */
+  hidden?: boolean;
 }
 
 export function collectFeatures(modules: Record<string, { feature?: Feature }>): Feature[] {
