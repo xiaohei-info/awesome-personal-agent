@@ -233,7 +233,7 @@ pre code { padding: 0; background: none; }
 .login .gate form { max-width: 320px; }
 
 @media (max-width: 820px) {
-  .shell { grid-template-columns: 1fr; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
   .shell > nav { position: static; height: auto; flex-direction: row; align-items: center; gap: 4px; padding: 8px 10px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand { padding: 0 8px 0 2px; } .brand small, .shell > nav h2 { display: none; }
   .shell > nav ul { display: flex; gap: 2px; } .shell > nav a { white-space: nowrap; gap: 6px; padding: 8px 10px; }
@@ -318,6 +318,9 @@ pre [data-op="-"] { background: var(--warn-soft); color: var(--warn); text-decor
 
 @media (max-width: 820px) {
   .kbd-hint { display: none; }
+  /* 手机宽度：长命令折行，宽表格在自身内部横向滚动，页面不出现横向滚动条 */
+  .rows code { white-space: normal; overflow-wrap: anywhere; }
+  table { display: block; max-width: 100%; overflow-x: auto; }
   .shell, .login { grid-template-rows: auto 1fr; }
   .decision > header { flex-wrap: wrap; }
   .filters label { flex: 1 1 100%; }
