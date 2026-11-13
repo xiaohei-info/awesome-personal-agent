@@ -94,7 +94,9 @@ type event struct {
 	Subject    string `json:"subject"`
 	Detail     string `json:"detail,omitempty"`
 	OccurredAt string `json:"occurred_at"`
-	Sender     string `json:"sender,omitempty"`
+	// CorrelationKeys 含 thread:<线程根 Message-ID>，回信与原信共用（§9.4、§9.7）。
+	CorrelationKeys []string `json:"correlation_keys,omitempty"`
+	Sender          string   `json:"sender,omitempty"`
 	// 不设 sender_verified：himalaya 不给出可核实的结论（§9.7）。
 }
 
@@ -260,7 +262,8 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 		// --preview：不把邮件标为已读（§9.7 只读）。
 		read := append(base("message", "read"), "--preview")
 		if vr.IDFromRead {
-			read = append(read, "-H", "Message-ID") // 与读正文同一次调用，不增加往返
+			// 与读正文同一次调用，不增加往返；References/In-Reply-To 给线程关联键（MEAS-MAIL-THREAD）。
+			read = append(read, "-H", "Message-ID", "-H", "References", "-H", "In-Reply-To")
 		}
 		body, err := call(ctx, r, append(append(read, it.ref), vr.JSONFlag...))
 		if err != nil {
@@ -273,11 +276,13 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 		if err := json.Unmarshal(body, &text); err != nil {
 			return nil, fail(ExitConfig, "message read 输出不是 JSON 字符串: %v", err)
 		}
+		root := it.ev.ID
 		if vr.IDFromRead {
-			if it.ev.ID, text, err = splitMessageID(text); err != nil {
+			if it.ev.ID, root, text, err = parseRead(text); err != nil {
 				return nil, fail(ExitConfig, "message read 输出无法解析: %v", err)
 			}
 		}
+		it.ev.CorrelationKeys = []string{"thread:" + root}
 		it.ev.Detail = truncate(text)
 		// 游标最多到当前时间：发件人控制的 Date 不可信，未来日期不能让后续邮件被永久越过。
 		if at := minTime(it.at, now()); at.After(newest) {

@@ -166,6 +166,9 @@ type mailMsg struct {
 	SenderAddr   string `json:"senderAddress"`
 	Sender       string `json:"sender"`
 	Content      string `json:"content"`
+	// get 的 message 带线程头（MEAS-MAIL-THREAD）；缺失时只给自己的 Message-ID。
+	References string `json:"references"`
+	InReplyTo  string `json:"inReplyTo"`
 }
 
 func pollMail(ctx context.Context, r Runner, cfg Config, in Input, now time.Time) ([]event, string, error) {
@@ -251,7 +254,8 @@ func pollMail(ctx context.Context, r Runner, cfg Config, in Input, now time.Time
 			sender = it.m.Sender
 		}
 		evs = append(evs, event{ID: it.m.MessageID, Type: "mail.received", Subject: subj, Detail: truncate(got.Message.Content),
-			OccurredAt: it.at.UTC().Format(time.RFC3339Nano), Sender: sender})
+			OccurredAt: it.at.UTC().Format(time.RFC3339Nano), Sender: sender,
+			CorrelationKeys: []string{"thread:" + threadRoot(it.m.MessageID, got.Message)}})
 		// 游标最多到当前时间：发件人控制的日期不可信，未来日期不能让后续邮件被永久越过。
 		if at := minTime(it.at, now); at.After(newest) {
 			newest = at
@@ -261,6 +265,22 @@ func pollMail(ctx context.Context, r Runner, cfg Config, in Input, now time.Time
 		newest = now
 	}
 	return evs, newest.UTC().Format(time.RFC3339Nano), nil
+}
+
+var msgIDRe = regexp.MustCompile(`<([^<>\s]+)>`)
+
+// threadRoot 返回线程根 Message-ID（§9.7：References 首项，没有取 In-Reply-To，都没有就是自己）。
+// 写法与自己的 messageId 对齐：messageId 不带尖括号时，头里的 <id> 也去掉，根信与回信的键才相等。
+func threadRoot(own string, m mailMsg) string {
+	for _, h := range []string{m.References, m.InReplyTo} {
+		if sm := msgIDRe.FindStringSubmatch(h); sm != nil {
+			if strings.HasPrefix(own, "<") {
+				return sm[0]
+			}
+			return sm[1]
+		}
+	}
+	return own
 }
 
 // ---- 日历 ----

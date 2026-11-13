@@ -1,0 +1,1 @@
+{"success":true,"engine":"sqlite","message":{"account":"Acct","mailbox":"INBOX","messageId":"mid-p3@example.test","content":"只有 In-Reply-To 的回信","inReplyTo":"<mid-p1@example.test>"}}
