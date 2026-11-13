@@ -1,7 +1,7 @@
-# sha256: 7f67a88abfaa2184787c564e99938efb33923c5a4518e79c06d552202375d857
+# sha256: 05732e87284b426e57b59a60dee323d2cc1443a9426706e7c97d99ddf7c9adce
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 29
+  used_global: 30
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 3
@@ -12,7 +12,7 @@ defects:
     e2e-hostplugin: 1
     e2e-release-doctor: 1
     e2e-sources: 2
-    release-gates: 8
+    release-gates: 9
   granted_by_reporter:
     e2e-sources: 4
     e2e-inbound-rules: 2
@@ -319,36 +319,6 @@ defects:
       - flow-session-kind/ACT-SKD-10
       reporters:
       - release-gates
-      state: queued
-      stop:
-        reason_code: defect-budget-exhausted
-        detail: '自动修复预算已用完: 报告者 8/8'
-  inbox:
-  - id: 9b1e10ea4a0b
-    reporter: release-gates
-    defects:
-    - class: design-gap
-      suspected_node: e2e-session-authz
-      anchors:
-      - flow-session-kind/ACT-SKD-10
-      design_ref: docs/solution-design.md#204-v020发布门槛
-      expected: 'ACT-SKD-10 只断言 agent 自己的写入不带 on_behalf_of：遍历事项事件时排除内核代本人落的 system
-        身份事件（如 system:decision-card 的摘要起草
-
-        run.finished / health.alert，按 §6.3 以 system 身份代表本人，带 on_behalf_of 是设计），或在该用例里不让后台摘要起草介入；只改
-        tests/e2e/authz。
-
-        '
-      observed: 'Oracle main 9b0eed201，go test -tags e2e -count=1 ./tests/e2e/authz/
-        连跑 3 次 1 次失败：session_kind_test.go:166，事项 i2 上出现
-
-        actor=system:decision-card（on_behalf_of=owner）的 run.finished / health.alert（one-line-summary
-        起草，替身输出不合 schema）。起草异步，故时序相关。
-
-        '
-      locations:
-      - tests/e2e/authz/session_kind_test.go:ACT-SKD-10
-      - kernel/summaries/summaries.go:write
-      repro:
-        command: go test -tags e2e -count=5 -run TestFlowSessionKind ./tests/e2e/authz/
-        exit_code: 1
+      state: fixing
+      fix_node: fix.e2e-session-authz.9dccef
+  inbox: []
