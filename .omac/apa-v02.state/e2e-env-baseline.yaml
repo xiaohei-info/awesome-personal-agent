@@ -1,6 +1,8 @@
-# sha256: fe3c0d70b97fdef2c1e4662307cd24c49cc736e181d549f11e05fef5d715bd12
+# sha256: bea31395481009414e535ad2d629622932b123563b1fc6024768edd32511229f
 work_item_id: 01a1d13f-dccf-7800-8517-fb81a271dd6a
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-13T02:09:47Z'
 recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-caf5eb11bd589626: 负责人裁定：选 (A)。授权本节点在同一
   PR 里改 kernel/clock/wall/wall_testclock.go 的那一行日志，措辞对齐验收契约：消息含 "test-clock offset"，并带
