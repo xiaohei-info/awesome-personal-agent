@@ -199,7 +199,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	rejudge := inbound.DefaultRejudge
 	rejudge.Window = cfg.UnjudgedRejudgeWindow
 	if k.in, err = inbound.New(inbound.Options{Store: st, Exec: x, Packs: ld, Judge: judge, Owner: owner,
-		Intercept: fm.Intercept, OnError: logErr("inbound"), Rejudge: rejudge, BacklogReleasePerDay: cfg.BacklogReleasePerDay,
+		Intercept: fm.Intercept, Attaches: fm.Attaches, OnError: logErr("inbound"), Rejudge: rejudge, BacklogReleasePerDay: cfg.BacklogReleasePerDay,
 		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: att}}); err != nil {
 		return nil, err
 	}

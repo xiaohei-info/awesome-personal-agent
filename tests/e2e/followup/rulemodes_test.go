@@ -407,6 +407,13 @@ func upgrade(t *testing.T) {
 
 	step(t, "ACT-RULE-13 准备三份 v0.1 结构夹具副本与升级前的规则模式快照", func(t *testing.T) {
 		fxA, fxB, fxC = e.LedgerFixture(2), e.LedgerFixture(2), e.LedgerFixture(2)
+		// FX_A、FX_B 要的是「未动过的内置规则」：夹具自带的用户包 follow-up（v0.1 写法、显式 mode: observe）会被 v0.2.0 整包拒绝，
+		// 本人写的 mode 看不到，升级不替他切换（GT-345、§16.5），所以先去掉它，让内置 follow-up 包生效。
+		for _, fx := range []*baseline.Fixture{fxA, fxB} {
+			if err := os.RemoveAll(filepath.Join(fx.Home, "packs", "follow-up")); err != nil {
+				t.Fatal(err)
+			}
+		}
 		// FX_C：覆盖内置 follow-up 包的用户包，按 v0.2.0 写法（不写 do[]）显式写 mode: observe。
 		dst := filepath.Join(fxC.Home, "packs", "follow-up")
 		_ = os.RemoveAll(dst)

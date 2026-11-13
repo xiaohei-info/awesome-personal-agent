@@ -1,4 +1,4 @@
-# sha256: 5187e464d28d27610776c7016f5919fb8a1896ea7338241e655a770a38281e90
+# sha256: f8bee8abccc610bdc85463d01f3deeb6922890a5bfea5a89a493283e45378431
 defects:
   schema: omac.defect-ledger/v1
   used_global: 25
@@ -253,7 +253,7 @@ defects:
       - flow-proposal-handling/ACT-PRH-09
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.inbound-pipeline-v2.6052b8
     dfx-a35faf7b041d:
       suspected: backlog-rules-only
@@ -262,7 +262,7 @@ defects:
       - flow-backlog-release/ACT-BKL-16
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.backlog-rules-only.a35faf
     dfx-9dda042e748a:
       suspected: rule-modes-v2
@@ -270,7 +270,7 @@ defects:
       - flow-rule-modes/ACT-RULE-14
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.rule-modes-v2.9dda04
     dfx-83b4c71a6f53:
       suspected: e2e-followup

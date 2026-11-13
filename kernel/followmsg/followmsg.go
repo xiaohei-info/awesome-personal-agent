@@ -59,6 +59,8 @@ const (
 	EvReleased   = "followmsg.released"
 
 	systemPrinc = "kernel:followmsg"
+	// Principal 是本包写事项的内核身份；摘要起草凭它识别"挂靠与来源刷新"，不为它们调模型（挂靠本身不调模型）。
+	Principal = systemPrinc
 )
 
 var system = command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: systemPrinc, Via: domain.ViaSource}, Level: authz.LevelWorker}
@@ -275,6 +277,15 @@ func resolve(tx *store.Tx, ev domain.SourceEvent, onUpdate string) (plan, error)
 		return plan{hint: "correlation: matches only closed items (" + strings.Join(shut, ", ") + "), not reopening"}, nil
 	}
 	return plan{}, nil
+}
+
+// Attaches 只读预判 Intercept 会不会把事件挂靠到原事项（不写任何东西）；出错按不挂靠处理。
+func (s *Service) Attaches(ctx context.Context, ev domain.SourceEvent, onUpdate string) bool {
+	var p plan
+	if err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) { p, err = resolve(tx, ev, onUpdate); return }); err != nil {
+		return false
+	}
+	return p.item != ""
 }
 
 // Intercept 满足 inbound.Intercept。

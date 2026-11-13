@@ -104,6 +104,8 @@ type Options struct {
 	OnError func(error)
 	// Intercept 是跟进消息归属（§9.4）；可为空。
 	Intercept Intercept
+	// Attaches 是 Intercept 的只读预判：事件会不会被挂靠到原事项。批量预取用它跳过不会走初筛的事件；可为空（视为不挂靠）。
+	Attaches func(ctx context.Context, ev domain.SourceEvent, onUpdate string) bool
 	// Now 是时钟，缺省 clock.Now；自动重判按它算事件年龄与退避。
 	Now func() time.Time
 	// Rejudge 是自动重判的上限与节流，零值取 DefaultRejudge。

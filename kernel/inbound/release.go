@@ -249,7 +249,7 @@ func (s *Service) releaseBatch(ctx context.Context, call func(releaseIn, string)
 }
 
 // prefetchScreen 把这一窗口里要走初筛的事件的分类端点一级合并成批先问掉；题与入站初筛一致，之后流水线逐条作答时复用。
-// shortcut: 不替被跟进归属拦截的事件省掉这一问（拦截在流水线里才发生），多问一次分类端点，不影响结果。
+// 归属会挂靠的事件由 Options.Attaches 预判后跳过；预判只读，同一窗口里前一条事件新建的事项它看不到（多问一次，不影响结果）。
 func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEvent) {
 	pf, ok := s.o.Judge.(Prefetcher)
 	if !ok {
@@ -275,6 +275,15 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 				continue
 			}
 			custom = m.rule.Screen
+		}
+		if s.o.Attaches != nil {
+			onUpdate := ""
+			if m != nil {
+				onUpdate = m.rule.OnUpdate
+			}
+			if s.o.Attaches(ctx, ev, onUpdate) { // 归属在规则之前：会挂靠原事项的事件不进初筛
+				continue
+			}
 		}
 		pack, screen := m.tmpl(custom, Template)
 		o, pol, err := s.freshOutbound(ctx, src)
