@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -139,6 +140,41 @@ type plan struct {
 	hint  string
 }
 
+var shortPR = regexp.MustCompile(`^([\w.-]+/[\w.-]+)#(\d+)$`)
+
+// lookupDelegated 查委派登记的关联键。回执里的 PR 可能登记成地址（…/owner/repo/pull/N），适配器给的是
+// owner/repo#N，两种写法指向同一个 PR，所以简写键再按地址后缀查一次；后缀不唯一时不猜。
+func lookupDelegated(tx *store.Tx, k string) (string, bool, error) {
+	id, ok, err := delegation.Lookup(tx, k)
+	if ok || err != nil {
+		return id, ok, err
+	}
+	m := shortPR.FindStringSubmatch(strings.TrimSpace(k))
+	if m == nil {
+		return "", false, nil
+	}
+	r, err := tx.Query(`SELECT DISTINCT item FROM delegation_link WHERE ref LIKE ? ESCAPE '\' LIMIT 2`,
+		"%/"+likeEscape.Replace(m[1])+"/pull/"+m[2])
+	if err != nil {
+		return "", false, err
+	}
+	defer r.Close()
+	var ids []string
+	for r.Next() {
+		var x string
+		if err := r.Scan(&x); err != nil {
+			return "", false, err
+		}
+		ids = append(ids, x)
+	}
+	if err := r.Err(); err != nil || len(ids) != 1 {
+		return "", false, err
+	}
+	return ids[0], true, nil
+}
+
+var likeEscape = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
 // resolve 按关联键找事项（设计 §9.4）：
 //  1. 委派登记的关联键（回执里的 PR）或事项上登记的键命中已委派的未关闭事项：forward。
 //  2. 关联键都未经委派登记时，看本人的未委派事项：同一去重域里带同一关联键的来源事件建出的事项，
@@ -175,7 +211,7 @@ func resolve(tx *store.Tx, ev domain.SourceEvent, onUpdate string) (plan, error)
 		return nil
 	}
 	for _, k := range ev.CorrelationKeys {
-		id, ok, err := delegation.Lookup(tx, k)
+		id, ok, err := lookupDelegated(tx, k)
 		if err != nil {
 			return plan{}, err
 		}

@@ -1,4 +1,4 @@
-# sha256: 8fdc61a0e713f8287f1ac48a1b79b0e73519ebcaa385e90a9a265570cfa291d0
+# sha256: 397ae76e8093c02c3e986a3ed23fac0d8a4a47f44527a5a2d4387ec64f3db3b9
 defects:
   schema: omac.defect-ledger/v1
   used_global: 20
@@ -34,7 +34,7 @@ defects:
       - flow-source-github/ACT-GH-09
       reporters:
       - e2e-sources
-      state: fixing
+      state: fixed
       fix_node: fix.attribution-v2.d3eb8c
     dfx-bfeb8db8483b:
       suspected: calendar-adapter-v2
