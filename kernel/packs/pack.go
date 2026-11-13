@@ -74,20 +74,21 @@ type ClockRule struct {
 	StaleAfter   string `yaml:"stale_after" json:",omitempty"`   // 只用于 stale，默认 14d
 }
 
+// Where、Screen、Draft、Prescreen、Extract、OnUpdate 是 v0.2 新字段，带 omitempty 以保持 v0.1 规则 hash 不变（见 ClockRule）。
 type SourceRule struct {
 	ID        string         `yaml:"id"`
 	Match     map[string]any `yaml:"match"`
-	Where     []Condition    `yaml:"where"`
+	Where     []Condition    `yaml:"where" json:",omitempty"`
 	Kind      string         `yaml:"kind"`
 	ProjectBy string         `yaml:"project_by"`
 	Then      string         `yaml:"then"`
 	// 各步所用的提示词模板名（C.5）；省略时取内置模板。
-	Screen          string   `yaml:"screen"`
-	Draft           string   `yaml:"draft"`
-	Prescreen       string   `yaml:"prescreen"`
-	Extract         string   `yaml:"extract"`
+	Screen          string   `yaml:"screen" json:",omitempty"`
+	Draft           string   `yaml:"draft" json:",omitempty"`
+	Prescreen       string   `yaml:"prescreen" json:",omitempty"`
+	Extract         string   `yaml:"extract" json:",omitempty"`
 	CorrelationKeys []string `yaml:"correlation_keys"`
-	OnUpdate        string   `yaml:"on_update"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
+	OnUpdate        string   `yaml:"on_update" json:",omitempty"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
 	Accept          string   `yaml:"accept"`
 	Mode            string   `yaml:"mode"`
 }

@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -223,5 +225,32 @@ func TestUpgradeHoldsReminderRulesOfRejectedPack(t *testing.T) {
 		if ev.Type == domain.EvRuleModeChanged && ev.Object == "rule:"+held {
 			t.Errorf("unexpected mode change for held rule: %+v", ev)
 		}
+	}
+}
+
+// ACT-UPG-10：本人切成 auto 的动作类来源规则，账本里存的是 v0.1 的规则 hash；升级后第一次对账 hash 对得上，
+// 模式保持 auto，没有 rule.mode_changed 与健康告警。
+func TestUpgradeKeepsOwnerSwitchedSourceRuleWithV01Hash(t *testing.T) {
+	e := newEnv(t, map[string]string{"acc/pack.yaml": autoAcceptNoMode}, nil)
+	k := SourceKey("acc", "tri-auto")
+	if err := e.setMode(owner, k, ModeAuto); err != nil {
+		t.Fatal(err)
+	}
+	legacy := sha256.Sum256([]byte(`{"ID":"tri-auto","Match":{"type":"tri.auto"},"Kind":"","ProjectBy":"","Then":"proposed","CorrelationKeys":null,"Accept":"auto","Mode":""}`))
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE rules_state SET hash = ? WHERE key = ?`, hex.EncodeToString(legacy[:]), k)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := len(e.events())
+	if err := e.eng.Reconcile(bg); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.mode(k); got != ModeAuto {
+		t.Errorf("owner-switched source rule after upgrade = %s, want auto", got)
+	}
+	if n := len(e.events()) - base; n != 0 {
+		t.Errorf("first reconcile after upgrade appended %d events, want none", n)
 	}
 }

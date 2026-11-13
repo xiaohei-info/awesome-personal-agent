@@ -467,15 +467,31 @@ clock_rules:
     do:
       - action: call_agent
         prompt: draft-guideline
+event_rules:
+  - id: on-open
+    when: {event: item.phase_changed}
+    do:
+      - action: call_agent
+        prompt: draft-guideline
+source_rules:
+  - id: tri-auto
+    accept: auto
+    match: {type: tri.auto}
+    then: proposed
 `)}, "g/prompts/draft-guideline.md": {Data: []byte("---\nagent: generate\ntimeout: 60s\noutput_schema: {type: object}\n---\nx\n")}}
 	l, rej := load(t, Options{Builtin: files, Kinds: newKinds()})
 	if len(rej) != 0 {
 		t.Fatalf("rejections: %+v", rej)
 	}
 	p, _ := l.Get("g")
-	legacy := `{"ID":"guideline-check","Type":"check","Schedule":"24h","Mode":"","Do":[{"action":"call_agent","prompt":"draft-guideline"}]}`
-	sum := sha256.Sum256([]byte(legacy))
-	if got := p.RuleHashes["clock_rules/guideline-check"]; got != hex.EncodeToString(sum[:]) {
-		t.Fatalf("hash = %s, want the v0.1 digest %x", got, sum)
+	for key, legacy := range map[string]string{
+		"clock_rules/guideline-check": `{"ID":"guideline-check","Type":"check","Schedule":"24h","Mode":"","Do":[{"action":"call_agent","prompt":"draft-guideline"}]}`,
+		"event_rules/on-open":         `{"ID":"on-open","When":{"event":"item.phase_changed"},"Mode":"","Do":[{"action":"call_agent","prompt":"draft-guideline"}]}`,
+		"source_rules/tri-auto":       `{"ID":"tri-auto","Match":{"type":"tri.auto"},"Kind":"","ProjectBy":"","Then":"proposed","CorrelationKeys":null,"Accept":"auto","Mode":""}`,
+	} {
+		sum := sha256.Sum256([]byte(legacy))
+		if got := p.RuleHashes[key]; got != hex.EncodeToString(sum[:]) {
+			t.Errorf("%s hash = %s, want the v0.1 digest %x", key, got, sum)
+		}
 	}
 }
