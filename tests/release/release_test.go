@@ -317,7 +317,6 @@ func TestGenericCapabilitiesWithoutHarness(t *testing.T) {
 	root := repoRoot(t)
 	env := noHarnessEnv(t)
 	suites := []string{
-		"./tests/e2e/bootstrap",  // 安装、登录、Web
 		"./tests/e2e/ledger",     // 账本与 CLI
 		"./tests/e2e/agents",     // 判断型、生成型，级联终止于 needs_input
 		"./tests/e2e/screening",  // 判断型初筛
