@@ -31,7 +31,7 @@ func TestPackageContentsAndHashManifest(t *testing.T) {
 	}
 	for _, p := range []string{"bin/apa", "sources/rss-source", "sources/mail-himalaya", "ext/export/export", "ext/export/ext.yaml",
 		"ext/telegram/telegram-ext", "ext/webhookforward/webhookforward", "plugins/hermes/core/plugin.yaml",
-		"deploy/systemd/apa.service", "deploy/nginx/apa.conf.example", "deploy/caddy/Caddyfile.example",
+		"deploy/systemd/apa.service", "deploy/nginx/apa.conf.example", "deploy/caddy/Caddyfile.example", "deploy/tunnel/cloudflared.yml.example",
 		"docs/user/quickstart.md", "docs/user/changelog.md", "SHA256SUMS"} {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Errorf("package misses %s", p)

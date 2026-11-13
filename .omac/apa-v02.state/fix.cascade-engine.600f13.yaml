@@ -1,0 +1,9 @@
+# sha256: e7c3e85f0ef295fe9b58e64438e3602fb1944e207ff7a156110743d46a320705
+work_item_id: 01a1d3d4-f913-7a5b-8ffb-a26bcd664782
+status: done
+merged: true
+merged_at: '2026-11-13T11:44:54Z'
+retry_note: 'OWNER ANSWER to blocker handoff-eaef4891aa3d60ca: main 本机路径已由清单持有方修复（main
+  commit be2630742330f94b3d21f7d7b0b8ecedead370b7；.omac 仅含相对路径，tests/release 的 TestRepoHasNoCredentialsOrPersonalInfo
+  本地通过）。请按原 diff 基于最新 main 重新跑 CI 即可，不要动 .omac 与 tests/release。 另：ACT-OUT-06 为进程组时序测试，不在本节点范围，若
+  CI 仅此项抖动可重跑。'

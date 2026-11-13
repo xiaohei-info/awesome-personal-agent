@@ -268,10 +268,15 @@ func List(tx *store.Tx, f Filter) (out []Record, more bool, err error) {
 	}
 	var where []string
 	var args []any
-	for col, v := range map[string]string{"subject": f.Subject, "use": f.Use, "template": f.Template, "source": f.Source} {
+	for col, v := range map[string]string{"subject": f.Subject, "use": f.Use, "source": f.Source} {
 		if v != "" {
 			where, args = append(where, col+" = ?"), append(args, v)
 		}
+	}
+	if f.Template != "" {
+		// 记录里存的是 <包>/<模板>@<hash>；既认完整名，也认裸模板名。
+		esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(f.Template)
+		where, args = append(where, `(template = ? OR template LIKE ? ESCAPE '\')`), append(args, f.Template, "%/"+esc+"@%")
 	}
 	if !f.Since.IsZero() {
 		where, args = append(where, "created_at >= ?"), append(args, f.Since.UnixNano())

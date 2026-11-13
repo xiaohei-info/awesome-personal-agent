@@ -175,6 +175,13 @@ func ReadObject(tx *store.Tx, object string) ([]Entry, error) {
 	return collect(tx, "SELECT "+cols+" FROM eventlog_event WHERE object = ? ORDER BY seq", object)
 }
 
+// ReadDisposedFor 返回把 item 建成（或并入）建议事项的入站处置事件（payload.item 或 payload.items 含它），按序号升序。
+// 回放建议事项时用它带出来源事件上的判断（§15.1）；这些事件的 object 是来源事件 id。
+func ReadDisposedFor(tx *store.Tx, item string) ([]Entry, error) {
+	return collect(tx, "SELECT "+cols+` FROM eventlog_event WHERE type = 'inbound.disposed' AND tombstone = 0 AND (json_extract(payload, '$.item') = ?1
+		OR EXISTS (SELECT 1 FROM json_each(payload, '$.items') WHERE value = ?1)) ORDER BY seq`, item)
+}
+
 // Filter 是审计查询条件；空字段不限。Actor 匹配操作者 principal，Grant 匹配依据的授权单 id（授权单的使用记录）。
 type Filter struct {
 	Actor, Object, Type, Grant string

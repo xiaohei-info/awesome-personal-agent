@@ -48,8 +48,9 @@ type Manifest struct {
 	} `json:"schema"`
 	Tables      map[string]int64  `json:"tables"`
 	EventMaxSeq int64             `json:"event_max_seq"`
-	Files       map[string]string `json:"files"` // 相对路径 → sha256
-	Dirs        []string          `json:"dirs"`  // 含空目录，恢复时原样建出
+	Files       map[string]string `json:"files"`              // 相对路径 → sha256
+	Dirs        []string          `json:"dirs"`               // 含空目录，恢复时原样建出
+	Withheld    []string          `json:"withheld,omitempty"` // --no-secrets 时没进备份的密钥条目（sources/<id>、webhook-keys/<id>），只记名字，不记内容
 
 	Dir string `json:"-"` // 备份目录（Create 返回时填）
 }
@@ -155,7 +156,11 @@ func Create(ctx context.Context, home string, o Options, reg *store.Registry, no
 	if err != nil {
 		return m, err
 	}
-	m = Manifest{Format: manifestFormat, APAVersion: apaVersion(), CreatedAt: now.UTC().Format(time.RFC3339), NoSecrets: o.NoSecrets,
+	var withheld []string
+	if o.NoSecrets && !o.core {
+		withheld = secretEntries(home)
+	}
+	m = Manifest{Withheld: withheld, Format: manifestFormat, APAVersion: apaVersion(), CreatedAt: now.UTC().Format(time.RFC3339), NoSecrets: o.NoSecrets,
 		Tables: info.Tables, EventMaxSeq: info.EventMaxSeq, Dir: out}
 	m.Schema.Ledger, m.Schema.Modules = info.Ledger, info.Modules
 	if m.Files, m.Dirs, err = scan(out); err != nil {
@@ -166,6 +171,17 @@ func Create(ctx context.Context, home string, o Options, reg *store.Registry, no
 		return m, err
 	}
 	return m, os.WriteFile(filepath.Join(out, ManifestFile), append(b, '\n'), 0o600)
+}
+
+// secretEntries 列出 home 里每个来源的凭据目录与接收密钥文件（只取名字），--no-secrets 恢复后据此提示补齐。
+func secretEntries(home string) (out []string) {
+	for _, d := range secretDirs {
+		ents, _ := os.ReadDir(filepath.Join(home, d))
+		for _, e := range ents {
+			out = append(out, d+"/"+e.Name())
+		}
+	}
+	return out
 }
 
 func clearDir(dir string) {
@@ -296,6 +312,10 @@ func readManifest(dir string) (Manifest, error) {
 // Verify 核对清单里的文件哈希（含多出与缺少的文件），对账本副本做完整性检查，并检查 Event 序号连续。
 // 任一项不过都列在错误里（退出码 1）。账本里有 reg 不认识的迁移同样不过。
 func Verify(dir string, reg *store.Registry) (Report, error) {
+	dir, err := filepath.Abs(dir) // 相对路径也要能进 sqlite 的 file: URI
+	if err != nil {
+		return Report{}, err
+	}
 	m, err := readManifest(dir)
 	if err != nil {
 		return Report{}, err
@@ -368,6 +388,9 @@ type Result struct {
 // Restore 把备份恢复到空目录 target（不存在则新建）。目标非空、备份校验不过、
 // 备份的账本结构版本高于当前二进制时一律拒绝，且不在目标留下任何文件。
 func Restore(dir, target string, reg *store.Registry) (res Result, err error) {
+	if dir, err = filepath.Abs(dir); err != nil {
+		return Result{}, err
+	}
 	m, err := readManifest(dir)
 	if err != nil {
 		return Result{}, err
@@ -422,8 +445,15 @@ func Restore(dir, target string, reg *store.Registry) (res Result, err error) {
 	if err = config.LayoutOf(target).Ensure(); err != nil { // 补齐没进备份的目录（runs/、logs/ 等；密钥目录 0700）
 		return Result{}, err
 	}
+	pending, err := rebaseSources(target)
+	if err != nil {
+		return Result{}, err
+	}
 	res = Result{Home: target, SchemaLedger: m.Schema.Ledger, NoSecrets: m.NoSecrets}
 	if m.NoSecrets {
+		if err = writeNotice(target, append(m.Withheld, pending...)); err != nil {
+			return Result{}, err
+		}
 		res.Notices = []string{
 			"this backup holds no source credentials: re-authenticate every source (`apa source auth <id>` or the tool's own login)",
 			"this backup holds no webhook receive keys: rotate each webhook source's key; the old keys are rejected",
@@ -452,4 +482,80 @@ func PreUpgradeSnapshot(ctx context.Context, home string, reg *store.Registry, n
 		return "", fmt.Errorf("pre-upgrade snapshot failed, the ledger was not migrated: %w", err)
 	}
 	return m.Dir, nil
+}
+
+// NoticeFile 是 --no-secrets 恢复后留在数据目录里的待办记录；apa doctor 据此持续提示，直到凭据与接收密钥补齐。
+const NoticeFile = "restore-notice.json"
+
+// Notice 是 NoticeFile 的内容：Withheld 是备份时没带的密钥条目（sources/<id>、webhook-keys/<id>）。
+type Notice struct {
+	NoSecrets bool     `json:"no_secrets"`
+	Withheld  []string `json:"withheld"`
+}
+
+func writeNotice(home string, withheld []string) error {
+	seen := map[string]bool{}
+	n := Notice{NoSecrets: true, Withheld: []string{}}
+	for _, w := range withheld {
+		if !seen[w] {
+			seen[w] = true
+			n.Withheld = append(n.Withheld, w)
+		}
+	}
+	sort.Strings(n.Withheld)
+	b, err := json.MarshalIndent(n, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(home, NoticeFile), append(b, '\n'), 0o600)
+}
+
+// ReadNotice 读 home 里的待办记录；没有（不是 --no-secrets 恢复出来的）返回 false。
+func ReadNotice(home string) (n Notice, ok bool) {
+	b, err := os.ReadFile(filepath.Join(home, NoticeFile))
+	return n, err == nil && json.Unmarshal(b, &n) == nil && n.NoSecrets
+}
+
+// rebaseSources 把恢复出的 sources.json 里指向旧数据目录的 credentials_path 改到新目录的 sources/<id>/ 下
+// （registry 要求凭据路径在来源自己的目录里），并返回带 credentials_path 的来源对应的 sources/<id>。
+// 文件缺失或不是预期形状就原样不动：那是 apa serve 与 doctor 本来就会报的问题。
+// shortcut: 靠路径里最后一个 /sources/<id> 段认旧目录，不在清单里记旧 home；凭据不在 <旧 home>/sources/<id>/ 下的登记本来就非法，原样保留。
+func rebaseSources(home string) (pending []string, err error) {
+	path := config.LayoutOf(home).HostSources
+	b, rerr := os.ReadFile(path)
+	if rerr != nil {
+		return nil, nil
+	}
+	var top map[string]json.RawMessage
+	var list []map[string]json.RawMessage
+	if json.Unmarshal(b, &top) != nil || json.Unmarshal(top["sources"], &list) != nil {
+		return nil, nil
+	}
+	changed := false
+	for _, s := range list {
+		var id, cp string
+		if json.Unmarshal(s["id"], &id) != nil || json.Unmarshal(s["credentials_path"], &cp) != nil || id == "" || cp == "" {
+			continue
+		}
+		pending = append(pending, "sources/"+id)
+		seg := "/sources/" + id
+		p := filepath.ToSlash(cp)
+		i := strings.LastIndex(p, seg)
+		if i < 0 || (len(p) > i+len(seg) && p[i+len(seg)] != '/') {
+			continue
+		}
+		nv, _ := json.Marshal(filepath.Join(home, "sources", id) + filepath.FromSlash(p[i+len(seg):]))
+		s["credentials_path"] = nv
+		changed = true
+	}
+	if !changed {
+		return pending, nil
+	}
+	if top["sources"], err = json.Marshal(list); err != nil {
+		return nil, err
+	}
+	if b, err = json.MarshalIndent(top, "", "  "); err != nil {
+		return nil, err
+	}
+	return pending, os.WriteFile(path, append(b, '\n'), 0o644)
 }

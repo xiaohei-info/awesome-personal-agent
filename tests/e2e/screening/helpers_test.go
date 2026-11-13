@@ -30,16 +30,20 @@ type fx struct {
 func setup(t *testing.T) *fx {
 	t.Helper()
 	f := &fx{baseline.Setup(t), t}
+	f.WireEndpoints() // 判断端点 CLS_STUB、生成端点 MODEL_STUB（ACT-ENV-09）
 	f.endpoint(timeoutMs)
 	// 决策投递走渠道 acc-chan，且不合并：这样"没有投递"与"随后投递"都能用 CHAN 直接观察。
 	f.webOK("PUT", "/settings/policy", `{"disturb":{"routes":{"brief":"inject","decision":"channel:acc-chan","health":"web","reminder":"inject","wake":"web"},"merge_window_sec":0,"remind_on_deadline":true},"web_only":{"categories":["external_commitment","funds","irreversible","permission_change","spec_activation"],"rules":[{"tag":"acc-finance","category":"funds"}]}}`, 200)
 	return f
 }
 
+// endpoint 恢复两个端点并把初筛超时设为 ms（顶层 screening_timeout_ms）。
 func (f *fx) endpoint(ms int) {
 	f.t.Helper()
-	b, _ := json.Marshal(map[string]any{"model_endpoint": map[string]any{
-		"url": f.ModelStub.URL(), "model": "acc-model", "api_key": "stub-key", "screening_timeout_ms": ms}})
+	b, _ := json.Marshal(map[string]any{
+		"judge_endpoint":       map[string]any{"url": f.Cls.URL(), "api_key": "stub-key", "protocol": modelstub.ProtocolJudgment, "locality": "local"},
+		"generate_endpoint":    map[string]any{"url": f.ModelStub.URL(), "model": "acc-model", "api_key": "stub-key", "locality": "local"},
+		"screening_timeout_ms": ms})
 	f.webOK("PUT", "/settings/model-endpoints", string(b), 200)
 }
 
@@ -61,16 +65,35 @@ func (f *fx) apa(token string, want int, args ...string) baseline.Result {
 	return r
 }
 
-// stub 把 MODEL_STUB 上 web_only 初筛这道题的作答换成 answer/delay/status，并清空请求记录。
-// 只配了生成端点，初筛由对话端点回答（§14.4）；status 非 0 表示端点失败。
+// stub 把 CLS_STUB 上 web_only 初筛这道题的结果换成 answer/delay/status，并清空两个替身的请求记录。
+// 初筛先问分类端点（§14.4）：升级 → p_yes 0.9（不低于下限 0.20），不升级 → 0.05；status 非 0 表示分类端点整批失败。
 func (f *fx) stub(answer string, delay time.Duration, status int) {
 	f.ModelStub.Reset()
-	f.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: baseline.ScreeningPhrase}, Answer: answer,
-		DelayMS: int(delay / time.Millisecond), Status: status})
+	f.Cls.Reset()
+	if status != 0 {
+		f.Cls.SetFault(modelstub.ClsFault{Status: status})
+		return
+	}
+	p := 0.05
+	if answer == okEscalate {
+		p = 0.9
+	}
+	f.Cls.Judge(modelstub.ClsJudge{Key: modelstub.Key{Contains: baseline.ScreeningPhrase}, PYes: &p, DelayMS: int(delay / time.Millisecond)})
 }
 
-// screeningRequests 只数初筛（web-only-screening 提示词）的请求：决策卡片文案、一句话摘要是系统发起的另类调用，不属初筛。
+// screeningRequests 只数分类端点（CLS_LOG）收到的初筛请求：决策卡片文案、一句话摘要是系统发起的另类调用，不属初筛。
 func (f *fx) screeningRequests() int {
+	n := 0
+	for _, b := range f.Cls.Batches() {
+		if strings.Contains(b.BodyText, baseline.ScreeningPhrase) {
+			n++
+		}
+	}
+	return n
+}
+
+// chatScreeningRequests 数生成端点（MODEL_LOG）收到的初筛请求；分类端点可用时必须为 0（不交下一级）。
+func (f *fx) chatScreeningRequests() int {
 	n := 0
 	for _, r := range f.ModelStub.Requests() {
 		if strings.Contains(r.BodyText, baseline.ScreeningPhrase) {
@@ -197,4 +220,14 @@ func eq(t *testing.T, what string, got, want any) {
 	if got != want {
 		t.Errorf("%s = %v，期望 %v", what, got, want)
 	}
+}
+
+// webSetting 读 GET /settings/model-endpoints 的顶层字段。
+func (f *fx) webSetting(key string) any {
+	f.t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(f.webOK("GET", "/settings/model-endpoints", "", 200)), &m); err != nil {
+		f.t.Fatal(err)
+	}
+	return m[key]
 }

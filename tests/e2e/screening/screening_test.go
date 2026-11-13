@@ -27,12 +27,13 @@ func TestFlowScreening(t *testing.T) {
 		eq(t, "Web 显示初筛中", f.pending(a), true)
 		eq(t, "阶段", f.phase(a), "needs_input")
 		deadline := time.Now().Add(5 * time.Second)
-		for len(f.ModelStub.Requests()) == 0 && time.Now().Before(deadline) {
+		for f.screeningRequests() == 0 && time.Now().Before(deadline) {
 			time.Sleep(100 * time.Millisecond)
 		}
-		if n := len(f.ModelStub.Requests()); n != 1 {
-			t.Errorf("MODEL_STUB 应收到 1 次初筛请求，实际 %d", n)
+		if n := f.screeningRequests(); n != 1 {
+			t.Errorf("CLS_LOG 应有 1 次 web-only-screening 请求，实际 %d", n)
 		}
+		eq(t, "初筛超时配置", f.webSetting("screening_timeout_ms"), float64(timeoutMs))
 	})
 
 	t.Run("ACT-SCR-02 初筛中只在 Web 可见", func(t *testing.T) {
@@ -200,8 +201,8 @@ func TestFlowScreening(t *testing.T) {
 		d := f.task("scr-d", "acc-finance")
 		f.ask(d)
 		time.Sleep(2 * time.Second)
-		if n := f.screeningRequests(); n != 0 {
-			t.Errorf("规则已判 web_only 时不应初筛，MODEL_STUB 收到 %d 次初筛请求", n)
+		if n, m := f.screeningRequests(), f.chatScreeningRequests(); n != 0 || m != 0 {
+			t.Errorf("规则已判 web_only 时不应初筛，CLS_LOG %d 次、MODEL_LOG %d 次", n, m)
 		}
 		eq(t, "screening_pending", f.pending(d), false)
 		eq(t, "risk_class", f.askOf(d)["risk_class"], "funds")
@@ -215,8 +216,8 @@ func TestFlowScreening(t *testing.T) {
 		f.ask(e)
 		f.waitCleared(e, 10*time.Second)
 		time.Sleep(2 * time.Second)
-		if n := len(f.ModelStub.Requests()); n != 1 {
-			t.Errorf("失败后不应重试，MODEL_STUB 收到 %d 次请求", n)
+		if n := f.screeningRequests(); n != 1 || f.chatScreeningRequests() != 0 {
+			t.Errorf("失败后不应重试也不交下一级，CLS_LOG %d 次、MODEL_LOG %d 次", n, f.chatScreeningRequests())
 		}
 		if !f.hasEvent(e, "item.updated", "screening failed") || !f.hasEvent(e, "health.alert", "did not complete") {
 			t.Error("Event 没有记录初筛失败原因")
@@ -232,8 +233,8 @@ func TestFlowScreening(t *testing.T) {
 		f.ask(g)
 		f.waitCleared(g, 10*time.Second)
 		time.Sleep(2 * time.Second)
-		if n := len(f.ModelStub.Requests()); n != 1 {
-			t.Errorf("超时后不应重试，MODEL_STUB 收到 %d 次请求", n)
+		if n := f.screeningRequests(); n != 1 || f.chatScreeningRequests() != 0 {
+			t.Errorf("超时后不应重试也不交下一级，CLS_LOG %d 次、MODEL_LOG %d 次", n, f.chatScreeningRequests())
 		}
 		if !f.hasEvent(g, "item.updated", "timed out") || !strings.Contains(f.health(), g) {
 			t.Errorf("超时没有 Event 或健康信号: %s", f.health())
@@ -245,13 +246,13 @@ func TestFlowScreening(t *testing.T) {
 	t.Run("ACT-SCR-11 未配置模型端点时不做初筛", func(t *testing.T) {
 		f.t = t
 		f.stub(okEscalate, 0, 0)
-		f.webOK("PUT", "/settings/model-endpoints", `{"model_endpoint":{"url":"","model":"","api_key":"","screening_timeout_ms":30000}}`, 200)
+		f.webOK("PUT", "/settings/model-endpoints", `{"judge_endpoint":null,"generate_endpoint":null,"screening_timeout_ms":30000}`, 200)
 		h := f.task("scr-h")
 		f.ask(h)
 		eq(t, "screening_pending", f.pending(h), false)
 		time.Sleep(time.Second)
-		if n := len(f.ModelStub.Requests()); n != 0 {
-			t.Errorf("未配置端点不应发出请求: %d", n)
+		if n, m := f.screeningRequests(), f.chatScreeningRequests(); n != 0 || m != 0 {
+			t.Errorf("未配置端点不应发出请求: CLS_LOG %d、MODEL_LOG %d", n, m)
 		}
 		if !strings.Contains(f.apa(f.OBS, 0, "inbox").Stdout, h) {
 			t.Error("应按规则立刻进入决策流")
@@ -271,9 +272,9 @@ func TestFlowScreening(t *testing.T) {
 		if !f.hasEvent(i, "item.updated", "interrupted by restart") || !strings.Contains(f.health(), i) {
 			t.Errorf("没有重启中断的 Event 或健康信号: %s", f.health())
 		}
-		n := len(f.ModelStub.Requests())
+		n := f.screeningRequests()
 		time.Sleep(2 * time.Second)
-		if got := len(f.ModelStub.Requests()); got != n {
+		if got := f.screeningRequests(); got != n {
 			t.Errorf("重启后不应重试初筛: %d → %d", n, got)
 		}
 		eq(t, "阶段", f.phase(i), "needs_input")
@@ -282,10 +283,10 @@ func TestFlowScreening(t *testing.T) {
 	t.Run("ACT-SCR-13 初筛未结束时超时默认值不生效", func(t *testing.T) {
 		f.t = t
 		// 返回不升级：deadline 到达时不决定，初筛结束后按默认值决定。
-		f.stub(okNormal, 12*time.Second, 0)
+		f.stub(okNormal, 8*time.Second, 0)
 		j := f.task("scr-j")
-		f.ask(j, "--deadline", time.Now().Add(6*time.Second).UTC().Format(time.RFC3339), "--default-on-timeout", "A")
-		time.Sleep(9 * time.Second) // 已过 deadline，初筛仍未返回
+		f.ask(j, "--deadline", time.Now().Add(3*time.Second).UTC().Format(time.RFC3339), "--default-on-timeout", "A")
+		time.Sleep(5 * time.Second) // 已过 deadline，初筛仍未返回
 		eq(t, "deadline 到达时仍在初筛", f.pending(j), true)
 		if f.resolution(j) != nil {
 			t.Fatal("抢在初筛前决定了")
@@ -301,11 +302,14 @@ func TestFlowScreening(t *testing.T) {
 		}
 		eq(t, "choice", r["choice"], "A")
 		eq(t, "resolved_via", r["resolved_via"], "timeout")
+		if !f.hasEvent(j, "item.updated", "did not escalate") { // 必须是分类端点真的答了"不升级"，不是失败后继续
+			t.Error("没有记录初筛结果的 Event")
+		}
 
 		// 返回升级：默认值被清除且不决定。
-		f.stub(okEscalate, 12*time.Second, 0)
+		f.stub(okEscalate, 8*time.Second, 0)
 		k := f.task("scr-k")
-		f.ask(k, "--deadline", time.Now().Add(6*time.Second).UTC().Format(time.RFC3339), "--default-on-timeout", "A")
+		f.ask(k, "--deadline", time.Now().Add(3*time.Second).UTC().Format(time.RFC3339), "--default-on-timeout", "A")
 		f.waitCleared(k, 25*time.Second)
 		time.Sleep(5 * time.Second)
 		eq(t, "risk_class", f.askOf(k)["risk_class"], "web_only")

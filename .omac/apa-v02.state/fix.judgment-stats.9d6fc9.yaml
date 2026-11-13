@@ -1,0 +1,6 @@
+# sha256: f96d501eb3f73e600d629efc6c0ef0c4159b003120940d785c875e2cd60ef7c8
+work_item_id: 01a1d3e2-9f68-78e2-8cd1-9ffd31d7b27d
+status: done
+merged: true
+merged_at: '2026-11-13T14:02:06Z'
+retry_note: PR 与验证已完成，核对 PR head 后直接重新提交评审，不要重做已完成部分

@@ -137,7 +137,12 @@ func Exchange(tx *store.Tx, c command.Caller, runID string, now time.Time) (stri
 	if rec.Run.TimeoutSec > 0 {
 		ttl = time.Duration(rec.Run.TimeoutSec) * time.Second
 	}
-	expires := now.Add(ttl)
+	// 截止时刻是运行开始时间加超时（§13.6），不是换取时刻；尚未开始则以换取时刻为开始。
+	start := now
+	if rec.Run.StartedAt != nil {
+		start = *rec.Run.StartedAt
+	}
+	expires := start.Add(ttl)
 	secret, err := issue(tx, runID, now, expires)
 	if err != nil {
 		return "", time.Time{}, err

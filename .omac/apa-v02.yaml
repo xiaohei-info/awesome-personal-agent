@@ -11,6 +11,345 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
+  amendment_revision: 8
+  amendment_apply:
+    schema: omac.amendment-apply/v1
+    amendment_id: amend-0b1820154e25
+    amendment_file: .omac/apa-v02.system-amendment.yaml
+    nodes:
+      fix.attribution-v2.d3eb8c:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-174a3949d8293156fd41d14e
+      fix.login-hardening.0b1aae:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-13f929a3e656484fa628a233
+      fix.web-calibration.c8ef9b:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-a0314d7c4b253d79c73ec402
+      e2e-inbound-rules:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1d2c3-f4c8-7c35-a6be-55223a4cd51a
+        baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: authoring-97415d2ab0821790071faa00
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+          worker_handoff_pending: true
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+        expected_contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+        expected_review_generation: amendment-1bffd1a150130a29d47f076f
+        attempt_baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: authoring-97415d2ab0821790071faa00
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+          worker_handoff_pending: true
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-1bffd1a150130a29d47f076f
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+          worker_handoff_pending: false
+      e2e-sources:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1d2cd-7f8d-7360-8062-fa1399d19fd6
+        baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-7dae016bda875dfe6066a12f
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+          worker_handoff_pending: true
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+        expected_contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+        expected_review_generation: amendment-ae80c4fc273a3a05c07e53bb
+        attempt_baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-7dae016bda875dfe6066a12f
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+          worker_handoff_pending: true
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-ae80c4fc273a3a05c07e53bb
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+          worker_handoff_pending: false
+      e2e-workbench:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1d2fc-2cb4-707a-8921-2682fe514c2f
+        baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-3ba8bc5214219ecf52670d0e
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
+          worker_handoff_pending: true
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 1
+        expected_contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
+        expected_review_generation: amendment-3a762bb242d361265950bfbf
+        attempt_baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-3ba8bc5214219ecf52670d0e
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
+          worker_handoff_pending: true
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-3a762bb242d361265950bfbf
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 1
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
+          worker_handoff_pending: false
+    retained_bounce_baselines:
+      e2e-followmsg:
+        amendment_id: amend-0c6f84cf7965
+        work_item_id: 01a1d2d4-3c01-7d0b-a710-5663aafbde78
+        contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-upgrade:
+        amendment_id: amend-6cd1291ea27b
+        work_item_id: 01a1d2dd-dd27-7342-bf57-4405c552e5a6
+        contract_sha256: 0ae5a8290ce3240c972f3eb5569a0b2b8ee788aa6975dc4a18a02381ef42640b
+        bounce_baseline:
+          merge: 0
+          review: 1
+          worker: 0
+      e2e-release-doctor:
+        amendment_id: amend-564dd6687bb3
+        work_item_id: 01a1d344-46c0-7745-81e6-4414d53eb795
+        contract_sha256: 3d69f659d38e0cabcfec59f3f45b0cb8e45391008332f50fba7bd1ba9c8fc66b
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 1
+      fix.health-signals-v2.8a3ec2:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3bf-9d99-7bcc-867e-b4477644a786
+        contract_sha256: 24d962962e6a244f0622574cf38db89441b3d5328a38d15bcb3306a0d3c2e35c
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.web-today.ec9640:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3c3-c674-7163-bc4e-a0f9046b7433
+        contract_sha256: 67c9b266e7f165845aa127d2b2b08c7c59d5dc585512bb77610b166f2af6176a
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.calibration-bands.bfb7d7:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3c9-1f88-7ae1-835c-27910679ce3b
+        contract_sha256: c50a83d86065eb0d320b6159f8789948076c5aa2b48149d48fdbd094d41238a6
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.cascade-engine.600f13:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3d4-f913-7a5b-8ffb-a26bcd664782
+        contract_sha256: 6b9a0e98aded60a091fda59a30cc4b4fc401252ffe9320b73f9b7f1ffeb75f5f
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.inbound-pipeline-v2.1189ac:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3b4-e32d-7917-aeae-af040354940e
+        contract_sha256: 0fdfc901c8ec8241c99feb528d04a9cc1afc30601c8cddb1615b49ffdb97fe84
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.judge-protocol-client.cd766f:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3dd-37ec-793f-b98d-01f79b342bb6
+        contract_sha256: 7dcbd2339eeb1004aa7ff75ebab56e59aab91439c4c5db6142a9857a05884144
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.judgment-record.4fdb4d:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3df-482d-77d9-addf-77821af6281b
+        contract_sha256: 63a086f985e329cfca2c78496e4b13591801c5d7a6dc308cd4288eaa01c3909c
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.judgment-stats.9d6fc9:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3e2-9f68-78e2-8cd1-9ffd31d7b27d
+        contract_sha256: 969ad3a0a12c8ea27951ef63819127f1c6aa5386482c8c10085efc5b306723a9
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.wake-lease-recheck.5239bc:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3f8-ee31-79ea-82a0-27b9c0dfb76f
+        contract_sha256: e8d38bd33845dd3f96e6c509c266136ae9a4ae4ca0bc450811135f1f694d37a2
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-judge:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d2ab-1866-7a85-9059-479469d9c3a4
+        contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-judgment:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d2ab-28bd-796b-9b26-77595af37b58
+        contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-hostplugin:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d32f-e47d-714e-89b9-4783862c659b
+        contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+    system: true
+  last_amendment_id: amend-0b1820154e25
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -5389,6 +5728,10 @@ nodes:
   - cascade-engine
   - inbound-pipeline-v2
   - delivery-verify-gate
+  - fix.cascade-engine.600f13
+  - fix.endpoint-config-split.1a33fa
+  - fix.inbound-pipeline-v2.1189ac
+  - fix.judge-protocol-client.cd766f
   title: 概率判断协议、端点配置与级联全流程
   description: 产出 e2e-judge-flow-evidence。是 flow-judge-protocol、flow-endpoint-config、flow-agent-cascade
     的唯一全流程 owner，并负责其中 6 个 v0.1 继承或跨模块 business-action。要点：§8.9 表里每个用途的每一格各一条用例；只配一个端点、都不配时与
@@ -5660,6 +6003,9 @@ nodes:
   - calibration-bands
   - web-sources-v2
   - spot-check
+  - fix.calibration-bands.bfb7d7
+  - fix.judgment-record.4fdb4d
+  - fix.judgment-stats.9d6fc9
   title: 判断记录、计数、校准与抽检全流程
   description: 产出 e2e-judgment-flow-evidence。是 flow-judgment-record 的唯一全流程 owner。
   reviewer: omac-reviewer
@@ -5748,6 +6094,8 @@ nodes:
   - alert-exit
   - source-contract-v2
   - builtin-struct-rules
+  - fix.inbound-pipeline-v2.1189ac
+  - fix.login-hardening.0b1aae
   title: 来源规则出口与内置规则全流程
   description: 产出 e2e-inbound-rules-flow-evidence。是 flow-inbound-rules 的唯一全流程 owner。要点：撤掉两个模型端点后断言零调用。
   reviewer: omac-reviewer
@@ -5832,6 +6180,9 @@ nodes:
   - mail-thread-key
   - calendar-adapter-v2
   - rule-exits-where
+  - fix.attribution-v2.62f6c6
+  - fix.calendar-adapter-v2.bfeb8d
+  - fix.attribution-v2.d3eb8c
   title: 代码托管、邮件、日历来源全流程（替身版）
   description: 产出 e2e-sources-flow-evidence。是 flow-source-github、flow-source-mail、flow-source-calendar
     的唯一全流程 owner，并负责其中 3 个 v0.1 继承或跨模块 business-action。要点：遗留缺陷 dfx-5dd4c0c9998f、dfx-1699a21c5f70
@@ -5935,6 +6286,7 @@ nodes:
   - e2e-env-baseline
   - attribution-v2
   - web-item-edit
+  - fix.attribution-v2.62f6c6
   title: 跟进消息归属全流程
   description: 产出 e2e-followmsg-flow-evidence。是 flow-follow-messages 的唯一全流程 owner，并负责其中
     8 个 v0.1 继承或跨模块 business-action。
@@ -6206,6 +6558,9 @@ nodes:
   - login-hardening
   - session-kind
   - ledger-fixture
+  - fix.backup-restore.1fd0f7
+  - fix.ledger-schema-v3.1d1fcf
+  - fix.rule-modes-v2.9c33de
   title: 升级与回退演练、备份恢复全流程（门槛 2）
   description: 产出 e2e-upgrade-flow-evidence。是 flow-upgrade-rollback、flow-backup-restore
     的唯一全流程 owner。要点：本节点结果即门槛 2 证据：覆盖整条迁移链（版本 2 与每个已冻结版本的夹具）。
@@ -6430,6 +6785,9 @@ nodes:
   - web-today
   - item-list-search
   - stale-check
+  - fix.health-signals-v2.8a3ec2
+  - fix.web-today.ec9640
+  - fix.web-calibration.c8ef9b
   title: 工作台、久未推进与第一档全流程
   description: 产出 e2e-workbench-flow-evidence。是 flow-web-workbench、flow-stale、flow-run-tiers
     的唯一全流程 owner，并负责其中 4 个 v0.1 继承或跨模块 business-action。要点：不启动任何模型替身；Web 步骤用 ego-browser。
@@ -6904,6 +7262,7 @@ nodes:
   - e2e-env-baseline
   - session-kind
   - wake-lease-recheck
+  - fix.wake-lease-recheck.5239bc
   title: 宿主插件上下文与唤醒租约全流程（替身与插件契约测试版）
   description: 产出 e2e-hostplugin-flow-evidence。是 flow-hermes-context、flow-wake-lease
     的唯一全流程 owner，并负责其中 2 个 v0.1 继承或跨模块 business-action。要点：真实宿主上的证实由本机验证 L9 承接。
@@ -7135,6 +7494,7 @@ nodes:
   - release-packaging
   - apa-version
   - doctor
+  - fix.release-packaging.542f4d
   title: 发布物与自检全流程
   description: 产出 e2e-release-doctor-flow-evidence。是 flow-release、flow-doctor 的唯一全流程
     owner，并负责其中 3 个 v0.1 继承或跨模块 business-action。要点：干净主机用一次性容器或空用户目录模拟，不依赖编译工具链。
@@ -8923,3 +9283,1691 @@ nodes:
     requirement_refs:
     - REQ-G1-5
     coverage_gate: 0
+- id: fix.attribution-v2.62f6c6
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  - source-contract-v2
+  title: 'Fix attribution-v2: dfx-62f6c689fa3a'
+  description: "Automatic fix for upstream defect(s) reported by e2e-followmsg.\n\n-
+    [design-gap] anchors flow-follow-messages/ACT-MSG-13 (docs/solution-design.md#94-跟进消息归属)\n
+    \ expected: 设计 §9.4：事项处于 proposed 时只更新“来自几个来源”，验收 ACT-MSG-13 要求建议仍为 proposed 且
+    proposal.sources 含 fm-13。\n  observed: kernel/followmsg 对 proposed 事项只记挂靠消息（attach_state=processed），不调用
+    items.AddProposalSource， GET /v1/items/{id} 的 proposal 为空。kernel/followmsg/followmsg_test.go
+    的 TestEchoOnProposedItemOnlyAttaches 只断言阶段，未覆盖来源数。\n  where: kernel/followmsg/followmsg.go:Service
+    (attach 路径无 AddProposalSource 调用); kernel/items/attach.go:AddProposalSource (仅
+    kernel/inbound/propose.go 调用)\n  repro: `go test -tags=e2e -count=1 -run TestFlowFollowMessages
+    ./tests/e2e/followmsg/...` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-62f6c689fa3a in attribution-v2: 设计
+      §9.4：事项处于 proposed 时只更新“来自几个来源”，验收 ACT-MSG-13 要求建议仍为 proposed 且 proposal.sources
+      含 fm-13。'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/followmsg/...
+    - go test -count=1 ./api/followmsg/...
+    - go test -count=1 ./cli/followmsg/...
+    - go test -tags=e2e -count=1 -run TestFlowFollowMessages ./tests/e2e/followmsg/...
+    integration_gates:
+    - name: attribution-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#94-跟进消息归属
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+      delivery_goal: 跟进消息归属 v2：on_update、回音回 open、本人登记关联键；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-GH-09
+      - ACT-MAIL-11
+      - ACT-MAIL-14
+      - ACT-MAIL-15
+      - ACT-CAL-03
+      - ACT-CAL-09
+      - ACT-MSG-10
+      - ACT-MSG-11
+      - ACT-MSG-12
+      - ACT-MSG-13
+      - ACT-MSG-14
+      - ACT-MSG-15
+      - ACT-MSG-17
+      - ACT-INP-03
+      acceptance_refs:
+      - flow-source-github
+      - flow-source-mail
+      - flow-source-calendar
+      - flow-follow-messages
+      - flow-inbound-pipeline
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/followmsg/...
+      - go test -count=1 ./api/followmsg/...
+      - go test -count=1 ./cli/followmsg/...
+    pr_base: main
+    acceptance_refs:
+    - flow-follow-messages
+    source_of_truth:
+    - docs/solution-design.md#94-跟进消息归属
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+    scope_paths:
+    - kernel/followmsg/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    - artifact_id: source-contract-v2-delivery
+      producer: source-contract-v2
+      evidence_mode: artifact
+      requires:
+      - standard-event-v2
+    defect_refs:
+    - dfx-62f6c689fa3a
+    coverage_gate: 80
+- id: fix.health-signals-v2.8a3ec2
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  - test-clock
+  title: 'Fix health-signals-v2: dfx-8a3ec29f05ec'
+  description: "Automatic fix for upstream defect(s) reported by e2e-workbench.\n\n-
+    [design-gap] anchors flow-run-tiers/ACT-TIER-01 (docs/appendix-b-api-cli.md#b2-http-api)\n
+    \ expected: model_unavailable.detail 为 {judge, generate, endpoint}，各取空、not_configured
+    或 failing；未配判断端点与生成端点且有事件在等时 judge=generate=not_configured\n  observed: detail
+    为 {endpoint:not_configured, screening:[], judgements:[]}，没有 judge、generate 两个键\n
+    \ where: api/health/health.go:model_unavailable\n  repro: `go test -tags=e2e -count=1
+    -run TestFlowRunTiers ./tests/e2e/workbench/...` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-8a3ec29f05ec in health-signals-v2:
+      model_unavailable.detail 为 {judge, generate, endpoint}，各取空、not_configured 或
+      failing；未配判断端点与生成端点且有事件在等时 judge=generate=not_configured'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/health/...
+    - go test -count=1 ./api/health/...
+    integration_gates:
+    - name: health-signals-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#152-健康视图
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 健康视图十三项：长时间无回执的委派与时钟迟到；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-HLT-01
+      - ACT-HLT-03
+      - ACT-HLT-04
+      - ACT-HLT-05
+      - ACT-HLT-06
+      acceptance_refs:
+      - flow-health
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/health/...
+      - go test -count=1 ./api/health/...
+    pr_base: main
+    acceptance_refs:
+    - flow-run-tiers
+    source_of_truth:
+    - docs/solution-design.md#152-健康视图
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - kernel/health/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    - artifact_id: test-clock-delivery
+      producer: test-clock
+      evidence_mode: artifact
+      requires:
+      - test-clock-offset
+      - test-clock-build-flag
+    defect_refs:
+    - dfx-8a3ec29f05ec
+    coverage_gate: 80
+- id: fix.web-today.ec9640
+  worker: omac-worker-frontend-taiyi
+  blocked_by:
+  - web-item-edit
+  - item-list-search
+  - web-proposals
+  title: 'Fix web-today: dfx-ec964047626d'
+  description: "Automatic fix for upstream defect(s) reported by e2e-workbench.\n\n-
+    [design-gap] anchors flow-web-workbench/ACT-WBN-16 (docs/solution-design.md#314-场景十二在工作台上安排一天)\n
+    \ expected: 360 像素宽度下逐页打开（含来源、判断与校准），每页 document.scrollingElement.scrollWidth
+    ≤ 360，无需横向滚动\n  observed: 来源页 scrollWidth=1001（来源命令的 <code> 不换行，宽 1001px）；判断与校准页
+    scrollWidth=1102（指标 <table> 宽 1102px）；其余 12 页均 ≤ 360\n  where: web/src/features/sources/SourcesPage.tsx:609;
+    web/src/features/judgment/JudgmentPage.tsx:108\n  repro: `go test -tags=e2e -count=1
+    -run TestFlowWebWorkbench ./tests/e2e/workbench/...` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-ec964047626d in web-today: 360 像素宽度下逐页打开（含来源、判断与校准），每页
+      document.scrollingElement.scrollWidth ≤ 360，无需横向滚动'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - npm --prefix web run test -- --run src/features/today
+    integration_gates:
+    - name: web-today-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#41-web-中台
+      - docs/solution-design.md#314-场景十二在工作台上安排一天
+      - docs/solution-design.md#213-需实测的事项
+      delivery_goal: Web"今天"视图与手机宽度走查；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-WBN-08
+      - ACT-WBN-16
+      - ACT-GATE-09
+      acceptance_refs:
+      - flow-web-workbench
+      - flow-release-gates
+      commands:
+      - npm --prefix web run test -- --run src/features/today
+    pr_base: main
+    acceptance_refs:
+    - flow-web-workbench
+    source_of_truth:
+    - docs/solution-design.md#41-web-中台
+    - docs/solution-design.md#314-场景十二在工作台上安排一天
+    - docs/solution-design.md#213-需实测的事项
+    scope_paths:
+    - web/src/features/today/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: web-item-edit-delivery
+      producer: web-item-edit
+      evidence_mode: artifact
+      requires:
+      - web-item-editor
+    - artifact_id: item-list-search-delivery
+      producer: item-list-search
+      evidence_mode: artifact
+      requires:
+      - item-list-search
+    - artifact_id: web-proposals-delivery
+      producer: web-proposals
+      evidence_mode: artifact
+      requires:
+      - web-proposal-stream
+    defect_refs:
+    - dfx-ec964047626d
+    coverage_gate: 70
+- id: fix.backup-restore.1fd0f7
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  title: 'Fix backup-restore: dfx-1fd0f7679f25, dfx-68b52a3729d6, dfx-ed02ce5c6af4'
+  description: "Automatic fix for upstream defect(s) reported by e2e-upgrade.\n\n-
+    [design-gap] anchors flow-backup-restore/ACT-BAK-04 (docs/solution-design.md#165-备份升级回退与卸载)\n
+    \ expected: apa backup create/verify/restore work with a relative backup path\n
+    \ observed: apa backup verify relbk -> invalid uri authority: relbk (exit 1);
+    restore likewise\n  where: cli/backup/backup.go:Verify/Restore (sqlite file://
+    URI built from the unresolved path)\n  repro: `go test -tags=e2e -count=1 -run
+    TestBackupRestore ./tests/e2e/upgrade/` (exit 1)\n- [design-gap] anchors flow-backup-restore/ACT-BAK-06
+    (docs/solution-design.md#165-备份升级回退与卸载)\n  expected: a backup of a home with a
+    script source that has credentials_path restores into an empty directory and apa
+    serve starts\n  observed: apa serve in the restored home exits 2: credentials_path
+    must be inside the source's own directory (sources.json keeps the old absolute
+    path)\n  where: kernel/sources/registry/registry.go:checkCredentials; cli/backup/backup.go:Restore\n
+    \ repro: `go test -tags=e2e -count=1 -run TestBackupRestore ./tests/e2e/upgrade/`
+    (exit 1)\n- [design-gap] anchors flow-backup-restore/ACT-BAK-09 (docs/solution-design.md#165-备份升级回退与卸载)\n
+    \ expected: after restoring a --no-secrets backup, doctor or the health view flags
+    missing source credentials and webhook keys needing rotation\n  observed: only
+    the one-off restore stdout notices; doctor sources check and apa health say nothing\n
+    \ where: cli/doctor/local.go; cli/backup/backup.go:Restore\n  repro: `go test
+    -tags=e2e -count=1 -run TestBackupRestore ./tests/e2e/upgrade/` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-1fd0f7679f25, dfx-68b52a3729d6, dfx-ed02ce5c6af4
+      in backup-restore: apa backup create/verify/restore work with a relative backup
+      path; a backup of a home with a script source that has credentials_path restores
+      into an empty directory and apa serve starts; after restoring a --no-secrets
+      backup, doctor or the health view flags missing source credentials and webhook
+      keys needing rotation'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./cli/backup/...
+    - go test -count=1 ./kernel/store/...
+    - go test -tags=e2e -count=1 -run TestBackupRestore ./tests/e2e/upgrade/
+    - go test -tags=e2e -count=1 -run TestBackupRestore ./tests/e2e/upgrade/
+    - go test -tags=e2e -count=1 -run TestBackupRestore ./tests/e2e/upgrade/
+    integration_gates:
+    - name: backup-restore-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#165-备份升级回退与卸载
+      - docs/appendix-b-api-cli.md#b1-cli
+      - .omac/apa-v02.design/OMAC-NOTES.md#54-回退
+      delivery_goal: 备份、校验、恢复与迁移前自动快照；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-UPG-04
+      - ACT-UPG-16
+      - ACT-UPG-17
+      - ACT-BAK-02
+      - ACT-BAK-03
+      - ACT-BAK-04
+      - ACT-BAK-05
+      - ACT-BAK-06
+      - ACT-BAK-07
+      - ACT-BAK-08
+      - ACT-BAK-09
+      acceptance_refs:
+      - flow-upgrade-rollback
+      - flow-backup-restore
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./cli/backup/...
+      - go test -count=1 ./kernel/store/...
+    pr_base: main
+    acceptance_refs:
+    - flow-backup-restore
+    source_of_truth:
+    - docs/solution-design.md#165-备份升级回退与卸载
+    - docs/appendix-b-api-cli.md#b1-cli
+    - .omac/apa-v02.design/OMAC-NOTES.md#54-回退
+    scope_paths:
+    - cli/backup/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    defect_refs:
+    - dfx-1fd0f7679f25
+    - dfx-68b52a3729d6
+    - dfx-ed02ce5c6af4
+    coverage_gate: 80
+- id: fix.calibration-bands.bfb7d7
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - judgment-record
+  - cascade-engine
+  title: 'Fix calibration-bands: dfx-bfb7d70961f5'
+  description: "Automatic fix for upstream defect(s) reported by e2e-judgment.\n\n-
+    [design-gap] anchors flow-judgment-record/ACT-JRC-14 (docs/solution-design.md#616-判断记录)\n
+    \ expected: 影子记录 shadow=true 只记分、没有用于处置；处置 Event 的 judgment 指向另一条非影子的定案记录（设计 §6.16
+    shadow 字段：没有用于处置）\n  observed: 影子期间事件只有一条 shadow=true 的记录（分类级 skipped + 对话级 decided），处置
+    Event 指向它；四项指标与抽检池因 Shadow 整条跳过，对话端点的真实定案不计入\n  where: kernel/agents/direct/judge.go:record
+    写入（Shadow: shadowed）\n  repro: `go test -tags=e2e -count=1 -run TestFlowJudgmentRecord
+    ./tests/e2e/judgment/` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-bfb7d70961f5 in calibration-bands:
+      影子记录 shadow=true 只记分、没有用于处置；处置 Event 的 judgment 指向另一条非影子的定案记录（设计 §6.16 shadow
+      字段：没有用于处置）'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/judgment/...
+    - go test -count=1 ./api/settings/...
+    integration_gates:
+    - name: calibration-bands-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#810-观测抽检与影子模式
+      - docs/solution-design.md#89-各用途的不确定带与保守默认
+      - docs/solution-design.md#148-观察模式与规则的两类初始值
+      delivery_goal: 不确定带覆盖与影子模式；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-JRC-12
+      - ACT-JRC-13
+      - ACT-JRC-14
+      acceptance_refs:
+      - flow-judgment-record
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/judgment/...
+      - go test -count=1 ./api/settings/...
+    pr_base: main
+    acceptance_refs:
+    - flow-judgment-record
+    source_of_truth:
+    - docs/solution-design.md#810-观测抽检与影子模式
+    - docs/solution-design.md#89-各用途的不确定带与保守默认
+    - docs/solution-design.md#148-观察模式与规则的两类初始值
+    scope_paths:
+    - kernel/judgment/bands/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: judgment-record-delivery
+      producer: judgment-record
+      evidence_mode: artifact
+      requires:
+      - judgment-record-store
+    - artifact_id: cascade-engine-delivery
+      producer: cascade-engine
+      evidence_mode: artifact
+      requires:
+      - judge-cascade
+    defect_refs:
+    - dfx-bfb7d70961f5
+    coverage_gate: 80
+- id: fix.cascade-engine.600f13
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - judge-protocol-client
+  - pack-loader-v2
+  - judgment-record
+  title: 'Fix cascade-engine: dfx-600f134c6ba0'
+  description: "Automatic fix for upstream defect(s) reported by e2e-judge.\n\n- [design-gap]
+    anchors flow-agent-cascade/ACT-CAS-18 (docs/appendix-c-capability-pack.md#c7-提示词模板)\n
+    \ expected: 能力包事件规则用 call_agent 调自定义 single_shot 判断型模板，写判断记录（通用规则里判断型的答案只留痕）\n
+    \ observed: call_agent 的判断型一律交 verify.Handler，对非委派子事项报 \"item ... is not a delegated
+    child item\"，规则动作失败，没有判断记录\n  where: cli/serve/assemble.go:callAgent; kernel/proactive/verify/verify.go:Handler\n
+    \ repro: `go test -tags=e2e -count=1 -run 'TestFlowAgentCascade/ACT-CAS-18' ./tests/e2e/judge/...`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-600f134c6ba0 in cascade-engine: 能力包事件规则用
+      call_agent 调自定义 single_shot 判断型模板，写判断记录（通用规则里判断型的答案只留痕）'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/agents/...
+    - go test -count=1 ./kernel/outcall/...
+    integration_gates:
+    - name: cascade-engine-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#83-级联同题升级与接力
+      - docs/solution-design.md#84-输入输出契约
+      - docs/solution-design.md#87-不可用时
+      - docs/solution-design.md#89-各用途的不确定带与保守默认
+      - docs/appendix-c-capability-pack.md#c7-提示词模板
+      delivery_goal: 外呼调用器级联：同题升级、接力、各级未定取保守默认；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-EPC-07
+      - ACT-CAS-01
+      - ACT-CAS-02
+      - ACT-CAS-03
+      - ACT-CAS-05
+      - ACT-CAS-11
+      - ACT-CAS-12
+      - ACT-CAS-13
+      - ACT-CAS-14
+      - ACT-CAS-15
+      - ACT-CAS-16
+      - ACT-CAS-17
+      - ACT-CAS-18
+      - ACT-CAS-19
+      - ACT-CAS-20
+      - ACT-CAS-21
+      acceptance_refs:
+      - flow-endpoint-config
+      - flow-agent-cascade
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/agents/...
+      - go test -count=1 ./kernel/outcall/...
+    pr_base: main
+    acceptance_refs:
+    - flow-agent-cascade
+    source_of_truth:
+    - docs/solution-design.md#83-级联同题升级与接力
+    - docs/solution-design.md#84-输入输出契约
+    - docs/solution-design.md#87-不可用时
+    - docs/solution-design.md#89-各用途的不确定带与保守默认
+    - docs/appendix-c-capability-pack.md#c7-提示词模板
+    scope_paths:
+    - kernel/agents/direct/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: judge-protocol-client-delivery
+      producer: judge-protocol-client
+      evidence_mode: artifact
+      requires:
+      - probability-judgment-client
+    - artifact_id: pack-loader-v2-delivery
+      producer: pack-loader-v2
+      evidence_mode: artifact
+      requires:
+      - pack-schema-v2
+    - artifact_id: judgment-record-delivery
+      producer: judgment-record
+      evidence_mode: artifact
+      requires:
+      - judgment-record-store
+    defect_refs:
+    - dfx-600f134c6ba0
+    coverage_gate: 80
+- id: fix.endpoint-config-split.1a33fa
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - ledger-schema-v3
+  title: 'Fix endpoint-config-split: dfx-1a33faf37354'
+  description: "Automatic fix for upstream defect(s) reported by e2e-judge.\n\n- [design-gap]
+    anchors flow-endpoint-config/ACT-EPC-09, flow-agent-cascade/ACT-CAS-09 (docs/appendix-b-api-cli.md#b2-http-api)\n
+    \ expected: GET /health 的 model_unavailable.detail 为 {judge, generate, endpoint}，各取空、not_configured
+    或 failing\n  observed: detail 是 {endpoint, screening, judgements}，没有 judge、generate
+    字段\n  where: api/health/health.go:report; kernel/health/health.go:endpoint\n  repro:
+    `go test -tags=e2e -count=1 -run 'TestFlowEndpointConfig/ACT-EPC-09' ./tests/e2e/judge/...`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-1a33faf37354 in endpoint-config-split:
+      GET /health 的 model_unavailable.detail 为 {judge, generate, endpoint}，各取空、not_configured
+      或 failing'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/config/...
+    - go test -count=1 ./api/settings/...
+    - go test -tags=e2e -count=1 -run 'TestFlowEndpointConfig/ACT-EPC-09' ./tests/e2e/judge/...
+    integration_gates:
+    - name: endpoint-config-split-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#613-配置记录
+      - docs/solution-design.md#87-不可用时
+      - docs/solution-design.md#162-数据目录
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+      delivery_goal: 判断端点与生成端点分开配置，旧 model_endpoint 兼容；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-EPC-01
+      - ACT-EPC-03
+      - ACT-EPC-04
+      - ACT-EPC-05
+      - ACT-EPC-06
+      - ACT-OBD-09
+      - ACT-UPG-08
+      acceptance_refs:
+      - flow-endpoint-config
+      - flow-outbound-scope
+      - flow-upgrade-rollback
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/config/...
+      - go test -count=1 ./api/settings/...
+    pr_base: main
+    acceptance_refs:
+    - flow-agent-cascade
+    - flow-endpoint-config
+    source_of_truth:
+    - docs/solution-design.md#613-配置记录
+    - docs/solution-design.md#87-不可用时
+    - docs/solution-design.md#162-数据目录
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+    scope_paths:
+    - kernel/config/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    defect_refs:
+    - dfx-1a33faf37354
+    coverage_gate: 80
+- id: fix.inbound-pipeline-v2.1189ac
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - cascade-engine
+  - rule-exits-where
+  - attribution-v2
+  - pack-loader-v2
+  - outbound-scope
+  title: 'Fix inbound-pipeline-v2: dfx-1189ac175aed, dfx-1837894e5c57'
+  description: "Automatic fix for upstream defect(s) reported by e2e-inbound-rules,
+    e2e-judge.\n\n- [design-gap] anchors flow-judge-protocol/ACT-JDP-02, flow-judge-protocol/ACT-JDP-03,
+    flow-judge-protocol/ACT-JDP-07 (docs/solution-design.md#88-概率判断协议版本-1)\n  expected:
+    同一次拉取落盘的 40 条自由文本事件，分类端点收到 32 与 8 两批；5 题一批；413 时对半拆批（§8.5/§8.8 入站按批提交）\n  observed:
+    每条事件各发一个只含 1 题的请求（40 个 1 题批次），批量与拆批永不发生\n  where: kernel/inbound/inbound.go:ask;
+    kernel/inbound/release.go:Prefetch 仅用于积压放开\n  repro: `go test -tags=e2e -count=1
+    -run 'TestFlowJudgeProtocol/ACT-JDP-02' ./tests/e2e/judge/...` (exit 1)\n- [design-gap]
+    anchors flow-inbound-rules/ACT-IRL-04, flow-inbound-rules/ACT-IRL-06, flow-inbound-rules/ACT-IRL-07,
+    flow-inbound-rules/ACT-IRL-18 (docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings)\n
+    \ expected: 自定义包里 then 为 screen/judge/extract 且省略 screen、draft、prescreen、extract
+    的规则，初筛与起草用内置 triage-screen、triage-draft、capture-prescreen、triage-extract（C.5：省略时取内置模板）。\n
+    \ observed: inbound.go 命中规则后 pack 取规则所在包、模板名取内置默认名，在该包里找不到，判断调用返回 ErrBadTemplate，事件一直
+    pending 并反复报错。\n  where: kernel/inbound/inbound.go:730-733 (pack, screen, draft
+    := DefaultPack, Template, DraftTemplate; pack 被 m.pack 覆盖); kernel/inbound/inbound.go:944-947
+    (prescreen/extract 同); kernel/inbound/release.go:272-277 (积压影子初筛同); kernel/agents/direct/judge.go:160-163
+    (prepare 返回 is not a judge template)\n  repro: `go test -tags=e2e -count=1 -run
+    TestFlowInboundRules ./tests/e2e/inboundrules/...` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-1189ac175aed, dfx-1837894e5c57 in inbound-pipeline-v2:
+      同一次拉取落盘的 40 条自由文本事件，分类端点收到 32 与 8 两批；5 题一批；413 时对半拆批（§8.5/§8.8 入站按批提交）; 自定义包里
+      then 为 screen/judge/extract 且省略 screen、draft、prescreen、extract 的规则，初筛与起草用内置
+      triage-screen、triage-draft、capture-prescreen、triage-extract（C.5：省略时取内置模板）。'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/inbound/...
+    - go test -count=1 ./packs/...
+    integration_gates:
+    - name: inbound-pipeline-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#93-事件到事项
+      - docs/appendix-c-capability-pack.md#c14-内置包声明的内容
+      - docs/solution-design.md#87-不可用时
+      - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+      delivery_goal: 入站六步：去重、归属、规则、初筛、起草、合并进 proposed；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-EPC-08
+      - ACT-EPC-09
+      - ACT-IRL-04
+      - ACT-IRL-05
+      - ACT-IRL-07
+      - ACT-IRL-18
+      - ACT-GH-02
+      - ACT-GH-03
+      - ACT-GH-04
+      - ACT-INP-02
+      - ACT-INP-04
+      - ACT-INP-05
+      - ACT-INP-06
+      - ACT-INP-07
+      - ACT-INP-08
+      - ACT-INP-09
+      - ACT-INP-10
+      - ACT-INP-11
+      - ACT-INP-12
+      - ACT-INP-14
+      - ACT-TRI-01
+      - ACT-TRI-02
+      - ACT-TRI-05
+      - ACT-TRI-06
+      - ACT-TRI-07
+      acceptance_refs:
+      - flow-endpoint-config
+      - flow-inbound-rules
+      - flow-source-github
+      - flow-inbound-pipeline
+      - flow-triage-failure
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/inbound/...
+      - go test -count=1 ./packs/...
+    pr_base: main
+    acceptance_refs:
+    - flow-inbound-rules
+    - flow-judge-protocol
+    source_of_truth:
+    - docs/solution-design.md#93-事件到事项
+    - docs/appendix-c-capability-pack.md#c14-内置包声明的内容
+    - docs/solution-design.md#87-不可用时
+    - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+    scope_paths:
+    - kernel/inbound/inbound.go
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: cascade-engine-delivery
+      producer: cascade-engine
+      evidence_mode: artifact
+      requires:
+      - judge-cascade
+    - artifact_id: rule-exits-where-delivery
+      producer: rule-exits-where
+      evidence_mode: artifact
+      requires:
+      - source-rule-exits
+    - artifact_id: attribution-v2-delivery
+      producer: attribution-v2
+      evidence_mode: artifact
+      requires:
+      - followmsg-attribution-v2
+    - artifact_id: pack-loader-v2-delivery
+      producer: pack-loader-v2
+      evidence_mode: artifact
+      requires:
+      - pack-schema-v2
+    - artifact_id: outbound-scope-delivery
+      producer: outbound-scope
+      evidence_mode: artifact
+      requires:
+      - outbound-trim
+    defect_refs:
+    - dfx-1189ac175aed
+    - dfx-1837894e5c57
+    coverage_gate: 80
+- id: fix.judge-protocol-client.cd766f
+  worker: omac-worker-backend
+  blocked_by:
+  - endpoint-config-split
+  - outbound-scope
+  - doubles-model
+  title: 'Fix judge-protocol-client: dfx-cd766f1a49ef'
+  description: "Automatic fix for upstream defect(s) reported by e2e-judge.\n\n- [design-gap]
+    anchors flow-judge-protocol/ACT-JDP-04, flow-judge-protocol/ACT-JDP-09 (docs/solution-design.md#88-概率判断协议版本-1)\n
+    \ expected: 分类端点整批 400/协议错误/self_reported 后由对话端点定案，健康视图 model_unavailable 仍给出机制性信号（401
+    同理 detail.judge=failing）\n  observed: 对话端点定案后 model_unavailable.count 为 0，分类端点故障不可见\n
+    \ where: kernel/health/health.go:endpoint; kernel/agents/direct/judge.go:classLevel\n
+    \ repro: `go test -tags=e2e -count=1 -run 'TestFlowJudgeProtocol/ACT-JDP-09' ./tests/e2e/judge/...`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-cd766f1a49ef in judge-protocol-client:
+      分类端点整批 400/协议错误/self_reported 后由对话端点定案，健康视图 model_unavailable 仍给出机制性信号（401 同理
+      detail.judge=failing）'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/outcall/...
+    integration_gates:
+    - name: judge-protocol-client-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#88-概率判断协议版本-1
+      - docs/solution-design.md#85-批量与复用
+      - docs/solution-design.md#213-需实测的事项
+      - docs/appendix-d-adapters.md#d7-模型端点
+      delivery_goal: 概率判断协议 v1 客户端：批量、错误处置、复用、logprobs 换算；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-JDP-02
+      - ACT-JDP-03
+      - ACT-JDP-04
+      - ACT-JDP-05
+      - ACT-JDP-06
+      - ACT-JDP-07
+      - ACT-JDP-08
+      - ACT-JDP-09
+      - ACT-JDP-10
+      - ACT-JDP-12
+      - ACT-JDP-13
+      - ACT-GATE-05
+      - ACT-GATE-06
+      acceptance_refs:
+      - flow-judge-protocol
+      - flow-release-gates
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/outcall/...
+    pr_base: main
+    acceptance_refs:
+    - flow-judge-protocol
+    source_of_truth:
+    - docs/solution-design.md#88-概率判断协议版本-1
+    - docs/solution-design.md#85-批量与复用
+    - docs/solution-design.md#213-需实测的事项
+    - docs/appendix-d-adapters.md#d7-模型端点
+    scope_paths:
+    - kernel/outcall/model/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: endpoint-config-split-delivery
+      producer: endpoint-config-split
+      evidence_mode: artifact
+      requires:
+      - endpoint-config
+    - artifact_id: outbound-scope-delivery
+      producer: outbound-scope
+      evidence_mode: artifact
+      requires:
+      - outbound-trim
+    - artifact_id: doubles-model-delivery
+      producer: doubles-model
+      evidence_mode: artifact
+      requires:
+      - cls-stub
+      - model-stub-v2
+    defect_refs:
+    - dfx-cd766f1a49ef
+    coverage_gate: 80
+- id: fix.judgment-record.4fdb4d
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - ledger-schema-v3
+  title: 'Fix judgment-record: dfx-4fdb4d4ca954, dfx-81887fbc6daf'
+  description: "Automatic fix for upstream defect(s) reported by e2e-judgment.\n\n-
+    [design-gap] anchors flow-judgment-record/ACT-JRC-04 (docs/solution-design.md#616-判断记录)\n
+    \ expected: apa why <建议事项 id>（及 Web 时间线）展开判断一行：triage-screen、各级后端、结果、定案者（设计 §15.1、场景判据）\n
+    \ observed: apa why <JRC-HIGH/JRC-MID 的建议事项> 只有 item.created/item.updated，无 judgment；judgment
+    只挂在以来源事件 id 为 object 的 inbound.disposed 上，要 apa why <来源事件 id> 才展开\n  where: kernel/why/why.go:Replay（只读
+    r.ID 自己的 Event）; kernel/inbound/inbound.go:dispose payload\n  repro: `go test
+    -tags=e2e -count=1 -run TestFlowJudgmentRecord ./tests/e2e/judgment/` (exit 1)\n-
+    [design-gap] anchors flow-judgment-record/ACT-JRC-06 (docs/solution-design.md#616-判断记录)\n
+    \ expected: 记录过保留期后 apa why 仍显示命令 Event 里的结论（是、由哪一级定案）：inbound.disposed 载荷带 judgment
+    及 answer、decided_by（record.Ref）\n  observed: inbound.disposed 载荷只有 judgment id；记录清理后
+    apa why <来源事件 id> 的判断行 expired=true 但 answer、decided_by 为空，结论丢失\n  where: kernel/inbound/inbound.go:Apply
+    payload（未并入 record.RefOf）; kernel/judgment/record/record.go:RefOf\n  repro: `go
+    test -tags=e2e -count=1 -run TestFlowJudgmentRecord ./tests/e2e/judgment/` (exit
+    1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-4fdb4d4ca954, dfx-81887fbc6daf in judgment-record:
+      apa why <建议事项 id>（及 Web 时间线）展开判断一行：triage-screen、各级后端、结果、定案者（设计 §15.1、场景判据）;
+      记录过保留期后 apa why 仍显示命令 Event 里的结论（是、由哪一级定案）：inbound.disposed 载荷带 judgment 及 answer、decided_by（record.Ref）'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/judgment/...
+    - go test -count=1 ./kernel/why/...
+    - go test -count=1 ./cli/why/...
+    integration_gates:
+    - name: judgment-record-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#616-判断记录
+      - docs/solution-design.md#86-留痕计数与撤销
+      - docs/solution-design.md#151-apa-why
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 判断记录：写入、读取授权、保留与 apa why 回放；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-JRC-02
+      - ACT-JRC-03
+      - ACT-JRC-04
+      - ACT-JRC-05
+      - ACT-JRC-06
+      - ACT-JRC-07
+      - ACT-UPG-07
+      acceptance_refs:
+      - flow-judgment-record
+      - flow-upgrade-rollback
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/judgment/...
+      - go test -count=1 ./kernel/why/...
+      - go test -count=1 ./cli/why/...
+    pr_base: main
+    acceptance_refs:
+    - flow-judgment-record
+    source_of_truth:
+    - docs/solution-design.md#616-判断记录
+    - docs/solution-design.md#86-留痕计数与撤销
+    - docs/solution-design.md#151-apa-why
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - kernel/judgment/record/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    defect_refs:
+    - dfx-4fdb4d4ca954
+    - dfx-81887fbc6daf
+    coverage_gate: 80
+- id: fix.judgment-stats.9d6fc9
+  worker: omac-worker-backend
+  blocked_by:
+  - judgment-record
+  - proposal-attach-batch
+  title: 'Fix judgment-stats: dfx-9d6fc9aed5ca'
+  description: "Automatic fix for upstream defect(s) reported by e2e-judgment.\n\n-
+    [design-gap] anchors flow-judgment-record/ACT-JRC-08 (docs/solution-design.md#810-观测抽检与影子模式)\n
+    \ expected: apa judgment stats --template triage-screen 与 GET /judgments/stats?template=triage-screen
+    按模板名筛到记录（页面与不确定带都用模板名 triage-screen）\n  observed: 记录的 template 是 inbound-triage/triage-screen@<hash>，--template
+    triage-screen 精确比较，rows/rates 全空；/judgments?template= 同样\n  where: kernel/judgment/record/record.go:List（template
+    = ?）; kernel/judgment/stats/stats.go:Compute\n  repro: `go test -tags=e2e -count=1
+    -run TestFlowJudgmentRecord ./tests/e2e/judgment/` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-9d6fc9aed5ca in judgment-stats: apa
+      judgment stats --template triage-screen 与 GET /judgments/stats?template=triage-screen
+      按模板名筛到记录（页面与不确定带都用模板名 triage-screen）'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/judgment/...
+    integration_gates:
+    - name: judgment-stats-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#86-留痕计数与撤销
+      - docs/solution-design.md#810-观测抽检与影子模式
+      - docs/appendix-b-api-cli.md#b1-cli
+      delivery_goal: 判断计数与四项指标；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-JRC-08
+      - ACT-JRC-09
+      acceptance_refs:
+      - flow-judgment-record
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/judgment/...
+    pr_base: main
+    acceptance_refs:
+    - flow-judgment-record
+    source_of_truth:
+    - docs/solution-design.md#86-留痕计数与撤销
+    - docs/solution-design.md#810-观测抽检与影子模式
+    - docs/appendix-b-api-cli.md#b1-cli
+    scope_paths:
+    - kernel/judgment/stats/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: judgment-record-delivery
+      producer: judgment-record
+      evidence_mode: artifact
+      requires:
+      - judgment-record-store
+    - artifact_id: proposal-attach-batch-delivery
+      producer: proposal-attach-batch
+      evidence_mode: artifact
+      requires:
+      - proposal-attach-batch
+    defect_refs:
+    - dfx-9d6fc9aed5ca
+    coverage_gate: 80
+- id: fix.ledger-schema-v3.1d1fcf
+  worker: omac-worker-backend
+  blocked_by: []
+  title: 'Fix ledger-schema-v3: dfx-1d1fcf14b3a9'
+  description: "Automatic fix for upstream defect(s) reported by e2e-upgrade.\n\n-
+    [design-gap] anchors flow-upgrade-rollback/ACT-UPG-15 (docs/solution-design.md#165-备份升级回退与卸载)\n
+    \ expected: a failed migration is reported to the operator as failed and rolled
+    back, with the 'migration fault injected after step <n>' marker visible\n  observed:
+    apa serve prints only {code:internal, why:'the command failed locally'}; no marker,
+    no rollback text\n  where: cli/client/client.go:Run; kernel/store/migrate.go\n
+    \ repro: `go test -tags=e2e -count=1 -run TestUpgradeChain ./tests/e2e/upgrade/`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-1d1fcf14b3a9 in ledger-schema-v3: a
+      failed migration is reported to the operator as failed and rolled back, with
+      the ''migration fault injected after step <n>'' marker visible'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进入发布构建的生产路径
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/store/...
+    - go test -count=1 ./kernel/invariants/...
+    - go test -tags=e2e -count=1 -run TestUpgradeChain ./tests/e2e/upgrade/
+    integration_gates:
+    - name: ledger-schema-v3-gate
+      layer: L1
+      source_of_truth:
+      - .omac/apa-v02.design/OMAC-NOTES.md#12-建议在-w0-之后先落一个账本结构版本-3节点
+      - docs/solution-design.md#616-判断记录
+      - docs/solution-design.md#63-item事项
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/solution-design.md#165-备份升级回退与卸载
+      - docs/appendix-b-api-cli.md#b5-协议与版本
+      - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+      - .omac/apa-v02.design/OMAC-NOTES.md#52-升级必须满足
+      delivery_goal: 账本结构版本 3：v0.2.0 全部新表新列一次收齐；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-UPG-05
+      - ACT-UPG-06
+      - ACT-UPG-14
+      - ACT-UPG-15
+      - ACT-UPG-19
+      acceptance_refs:
+      - flow-upgrade-rollback
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/store/...
+      - go test -count=1 ./kernel/invariants/...
+    pr_base: main
+    acceptance_refs:
+    - flow-upgrade-rollback
+    source_of_truth:
+    - .omac/apa-v02.design/OMAC-NOTES.md#12-建议在-w0-之后先落一个账本结构版本-3节点
+    - docs/solution-design.md#616-判断记录
+    - docs/solution-design.md#63-item事项
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/solution-design.md#165-备份升级回退与卸载
+    - docs/appendix-b-api-cli.md#b5-协议与版本
+    - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+    - .omac/apa-v02.design/OMAC-NOTES.md#52-升级必须满足
+    scope_paths:
+    - kernel/store/**
+    evidence_mode: fixture
+    consumes: []
+    defect_refs:
+    - dfx-1d1fcf14b3a9
+    coverage_gate: 80
+- id: fix.rule-modes-v2.9c33de
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  - pack-loader-v2
+  title: 'Fix rule-modes-v2: dfx-9c33de15a3a7'
+  description: "Automatic fix for upstream defect(s) reported by e2e-upgrade.\n\n-
+    [design-gap] anchors flow-upgrade-rollback/ACT-UPG-10 (.omac/apa-v02.design/OMAC-NOTES.md#52-升级必须满足)\n
+    \ expected: owner-switched, explicit-observe and off-by-default rules keep their
+    mode with no mode event; every untouched builtin reminder rule gets observe to
+    auto. Note fixture manifest rule_modes.untouched lists an event rule (handle-labelled),
+    which is action class and must stay observe; the fixture owner should confirm.\n
+    \ observed: 'content changed' fallbacks demote guideline-check auto->observe,
+    scheduled-brief/scheduled-review off->observe; follow-up-interval observe->auto
+    although the user pack wrote observe (pack rejected, builtin applies)\n  where:
+    kernel/rules (hash fallback on first load after upgrade)\n  repro: `go test -tags=e2e
+    -count=1 -run TestUpgradeChain ./tests/e2e/upgrade/` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-9c33de15a3a7 in rule-modes-v2: owner-switched,
+      explicit-observe and off-by-default rules keep their mode with no mode event;
+      every untouched builtin reminder rule gets observe to auto. Note fixture manifest
+      rule_modes.untouched lists an event rule (handle-labelled), which is action
+      class and must stay observe; the fixture owner should confirm.'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/policy/...
+    - go test -count=1 ./kernel/rules/...
+    - go test -tags=e2e -count=1 -run TestUpgradeChain ./tests/e2e/upgrade/
+    integration_gates:
+    - name: rule-modes-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#148-观察模式与规则的两类初始值
+      - docs/solution-design.md#211-已定决定
+      - docs/solution-design.md#165-备份升级回退与卸载
+      - docs/appendix-c-capability-pack.md#c11-加载与校验
+      delivery_goal: 规则两类初始值与升级时的切换；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-TRI-04
+      - ACT-UPG-10
+      - ACT-RULE-02
+      - ACT-RULE-03
+      - ACT-RULE-04
+      - ACT-RULE-05
+      - ACT-RULE-06
+      - ACT-RULE-07
+      - ACT-RULE-08
+      - ACT-RULE-09
+      - ACT-RULE-10
+      - ACT-RULE-11
+      - ACT-RULE-12
+      - ACT-RULE-14
+      - ACT-RULE-15
+      - ACT-RULE-16
+      - ACT-DGA-05
+      - ACT-DGA-06
+      acceptance_refs:
+      - flow-triage-failure
+      - flow-upgrade-rollback
+      - flow-rule-modes
+      - flow-digest-alert
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/policy/...
+      - go test -count=1 ./kernel/rules/...
+    pr_base: main
+    acceptance_refs:
+    - flow-upgrade-rollback
+    source_of_truth:
+    - docs/solution-design.md#148-观察模式与规则的两类初始值
+    - docs/solution-design.md#211-已定决定
+    - docs/solution-design.md#165-备份升级回退与卸载
+    - docs/appendix-c-capability-pack.md#c11-加载与校验
+    scope_paths:
+    - kernel/policy/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    - artifact_id: pack-loader-v2-delivery
+      producer: pack-loader-v2
+      evidence_mode: artifact
+      requires:
+      - pack-schema-v2
+    defect_refs:
+    - dfx-9c33de15a3a7
+    coverage_gate: 80
+- id: fix.wake-lease-recheck.5239bc
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - session-kind
+  title: 'Fix wake-lease-recheck: dfx-5239bc3e86a2'
+  description: "Automatic fix for upstream defect(s) reported by e2e-hostplugin.\n\n-
+    [design-gap] anchors flow-wake-lease/ACT-WAK-03 (docs/solution-design.md#136-后台执行无人值守与会话续接)\n
+    \ expected: Acceptance ACT-WAK-03: the exchange returns 200, token starts with
+    apa_run_, and expires_at is not later than the run start time plus the run timeout.
+    Design 13.6 lease row also takes the deadline as run start + run timeout.\n  observed:
+    POST /v1/runs/{id}/credential returns expires_at = exchange time + run timeout
+    (3s late in this run).\n  where: kernel/runidentity/runidentity.go:Exchange; kernel/runidentity/runidentity_test.go:TestExchangeForWakeRun\n
+    \ repro: `go test -tags=e2e -count=1 -run TestFlowWakeLease ./tests/e2e/hostplugin/...`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-5239bc3e86a2 in wake-lease-recheck:
+      Acceptance ACT-WAK-03: the exchange returns 200, token starts with apa_run_,
+      and expires_at is not later than the run start time plus the run timeout. Design
+      13.6 lease row also takes the deadline as run start + run timeout.'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/wake/...
+    - go test -count=1 ./plugins/hermes/...
+    integration_gates:
+    - name: wake-lease-recheck-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#136-后台执行无人值守与会话续接
+      - docs/appendix-a-harness.md#a2-无头运行声明
+      - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+      delivery_goal: 唤醒租约复验（遗留缺陷 dfx-5410a4c832ad）；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-WAK-02
+      - ACT-WAK-03
+      - ACT-WAK-04
+      - ACT-WAK-05
+      - ACT-WAK-06
+      - ACT-WAK-07
+      - ACT-WAK-08
+      - ACT-WAK-09
+      acceptance_refs:
+      - flow-wake-lease
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/wake/...
+      - go test -count=1 ./plugins/hermes/...
+    pr_base: main
+    acceptance_refs:
+    - flow-wake-lease
+    source_of_truth:
+    - docs/solution-design.md#136-后台执行无人值守与会话续接
+    - docs/appendix-a-harness.md#a2-无头运行声明
+    - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+    scope_paths:
+    - kernel/wake/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: session-kind-delivery
+      producer: session-kind
+      evidence_mode: artifact
+      requires:
+      - session-kind-gate
+      - plugin-session-kind
+    defect_refs:
+    - dfx-5239bc3e86a2
+    coverage_gate: 80
+- id: fix.release-packaging.542f4d
+  worker: omac-worker-backend
+  blocked_by:
+  - apa-version
+  title: 'Fix release-packaging: dfx-542f4dae51fa'
+  description: "Automatic fix for upstream defect(s) reported by e2e-release-doctor.\n\n-
+    [design-gap] anchors flow-release/ACT-REL-06 (docs/solution-design.md#166-发布物)\n
+    \ expected: Section 16.6 lists deploy samples as \"systemd unit, reverse proxy
+    AND tunnel configuration samples\"; ACT-REL-06 expects the package to contain
+    a tunnel sample alongside the reverse-proxy samples.\n  observed: deploy/ (and
+    so the package deploy/ tree) has nginx and caddy samples but no tunnel sample;
+    grep for tunnel/cloudflared/tailscale/ngrok under deploy/ finds nothing.\n  where:
+    deploy/README.md; tools/release/pack.go:Package\n  repro: `grep -rniE 'tunnel|cloudflared|tailscale|ngrok'
+    deploy` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-542f4dae51fa in release-packaging:
+      Section 16.6 lists deploy samples as "systemd unit, reverse proxy AND tunnel
+      configuration samples"; ACT-REL-06 expects the package to contain a tunnel sample
+      alongside the reverse-proxy samples.'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进入发布构建的生产路径
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./tools/release/...
+    - go test -count=1 ./tests/release/...
+    - grep -rniE 'tunnel|cloudflared|tailscale|ngrok' deploy
+    integration_gates:
+    - name: release-packaging-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#166-发布物
+      - docs/solution-design.md#164-安装路径用户视角
+      - .omac/apa-v02.design/OMAC-NOTES.md#21-替身
+      delivery_goal: 带版本号的完整发布物与哈希清单；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-REL-01
+      - ACT-REL-06
+      - ACT-REL-07
+      - ACT-REL-12
+      acceptance_refs:
+      - flow-release
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./tools/release/...
+      - go test -count=1 ./tests/release/...
+    pr_base: main
+    acceptance_refs:
+    - flow-release
+    source_of_truth:
+    - docs/solution-design.md#166-发布物
+    - docs/solution-design.md#164-安装路径用户视角
+    - .omac/apa-v02.design/OMAC-NOTES.md#21-替身
+    scope_paths:
+    - tools/release/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: apa-version-delivery
+      producer: apa-version
+      evidence_mode: artifact
+      requires:
+      - version-info
+    defect_refs:
+    - dfx-542f4dae51fa
+    coverage_gate: 80
+- id: fix.calendar-adapter-v2.bfeb8d
+  worker: omac-worker-frontend
+  blocked_by:
+  - source-contract-v2
+  title: 'Fix calendar-adapter-v2: dfx-bfeb8db8483b'
+  description: "Automatic fix for upstream defect(s) reported by e2e-sources.\n\n-
+    [design-gap] anchors flow-source-calendar/ACT-CAL-02 (docs/appendix-d-adapters.md#d2-邮件与日历的工具适配)\n
+    \ expected: 样本 c1 的两个重复实例（关联键 UID|RECURRENCE-ID 互不相同）各成一条 proposed 事项；ACT-CAL-03
+    才能证明 第一个实例刷新、第二个不变。\n  observed: 两条事件没有 link，内核合并键退回 title+sender=title:周会，两个实例并进同一事项。适配器可经标准事件的
+    merge_key 字段（设计 §9.3 来源自带的优先）给出每个实例自己的合并键，目前没给。\n  where: sources/calendar/calendar.go:convert;
+    kernel/inbound/propose.go:mergeKeyOf\n  repro: `go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/
+    -run TestFlowSourceCalendar` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-bfeb8db8483b in calendar-adapter-v2:
+      样本 c1 的两个重复实例（关联键 UID|RECURRENCE-ID 互不相同）各成一条 proposed 事项；ACT-CAL-03 才能证明 第一个实例刷新、第二个不变。'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./sources/calendar/...
+    - go test -count=1 ./sources/applepim/...
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/ -run TestFlowSourceCalendar
+    integration_gates:
+    - name: calendar-adapter-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+      - docs/appendix-d-adapters.md#d3-工具的实测结论
+      - docs/solution-design.md#92-执行契约
+      delivery_goal: 日历适配器录制样本与凭据注入复验；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-CAL-04
+      - ACT-CAL-05
+      - ACT-CAL-06
+      - ACT-CAL-07
+      - ACT-CAL-08
+      acceptance_refs:
+      - flow-source-calendar
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./sources/calendar/...
+      - go test -count=1 ./sources/applepim/...
+    pr_base: main
+    acceptance_refs:
+    - flow-source-calendar
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+    - docs/appendix-d-adapters.md#d3-工具的实测结论
+    - docs/solution-design.md#92-执行契约
+    scope_paths:
+    - sources/calendar/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: source-contract-v2-delivery
+      producer: source-contract-v2
+      evidence_mode: artifact
+      requires:
+      - standard-event-v2
+    defect_refs:
+    - dfx-bfeb8db8483b
+    coverage_gate: 80
+- id: brief-delivery-enqueue
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - digest-exit
+  - delivery-cap-mute
+  - delivery-defer-judge
+  title: 简报触达入队
+  description: 产出 brief-delivery-enqueue-delivery。补 §3.6 第 4 步缺口：简报事项（kind=brief）写回完成后，经命令模型向触达模块入队一条
+    class=brief 的投递，由打扰策略定路由；未注入、未领取时留在 Web 未读（GET /deliveries/unread 可见），可被渠道 ext
+    领取，下次会话开始可被 apa context 注入摘要；同一简报只入队一次。行为验收仍由 e2e-v01-agents（flow-brief / ACT-BRF-02）负责。
+  reviewer: omac-reviewer
+  contract:
+    objective: 简报事项（kind=brief）写回完成后，经命令模型向触达模块入队一条 class=brief 的投递：未经渠道送达时留在 Web
+      未读（GET /deliveries/unread 可见），可被渠道 ext 领取，下次会话开始可被注入摘要；同一简报只入队一次
+    non_goals:
+    - 不新增命令、路由、事件类型或配置项；不修改迁移
+    - 不直写 delivery 数据；入队只经命令模型调用触达模块（AGENTS.md 依赖红线）
+    - 不改 kernel/delivery/disturb.go、kernel/delivery/defer.go 的打扰控制与推迟判定语义
+    - 不改 tests/e2e 下的任何断言；flow-brief 全流程证据由 e2e-v01-agents 负责
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/summaries/...
+    - go test -count=1 ./kernel/delivery/...
+    integration_gates:
+    - name: brief-delivery-enqueue-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#36-场景五简报
+      - docs/solution-design.md#69-delivery
+      - docs/solution-design.md#74-触达
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 简报写回后产出且只产出一条 class=brief 的投递，Web 未读可见、渠道 ext 可领取、会话开始可注入；单测与对照测试通过
+      covers:
+      - brief-delivery-enqueue
+      acceptance_refs:
+      - flow-brief
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/summaries/...
+      - go test -count=1 ./kernel/delivery/...
+    pr_base: main
+    acceptance_refs:
+    - flow-brief
+    source_of_truth:
+    - docs/solution-design.md#36-场景五简报
+    - docs/solution-design.md#69-delivery
+    - docs/solution-design.md#74-触达
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - kernel/summaries/**
+    - kernel/delivery/brief.go
+    - kernel/delivery/brief_test.go
+    evidence_mode: fixture
+    produces:
+    - artifact_id: brief-delivery-enqueue-delivery
+      provides:
+      - id: brief-delivery-enqueue
+        ref: docs/solution-design.md#36-场景五简报
+    consumes:
+    - artifact_id: digest-exit-delivery
+      producer: digest-exit
+      evidence_mode: artifact
+      requires:
+      - digest-exit
+    coverage_gate: 80
+- id: fix.attribution-v2.d3eb8c
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  - source-contract-v2
+  title: 'Fix attribution-v2: dfx-d3eb8c700b85'
+  description: "Automatic fix for upstream defect(s) reported by e2e-sources.\n\n-
+    [design-gap] anchors flow-source-github/ACT-GH-09 (docs/solution-design.md#94-跟进消息归属)\n
+    \ expected: apa report --pr https://github.com/acc-org/acc-repo/pull/7 登记的关联键，能让适配器给出的
+    PR 事件 （correlation_keys=acc-org/acc-repo#7）挂靠到该委派子事项：disposition=attached、attach_state=pending，不被
+    pr-activity 忽略。\n  observed: report 把 --pr 原样字符串存进 delegation_link.ref（PR 地址）；followmsg
+    用事件关联键 acc-org/acc-repo#7 精确 Lookup，不命中， 事件被 pr-activity 规则 ignored。用 --pr acc-org/acc-repo#7
+    登记时同一流程可以挂靠，说明只是两边键的写法不一致。\n  where: kernel/delegation/delegation.go:Lookup; kernel/followmsg/followmsg.go:resolve;
+    sources/github/github.go:issueEvents\n  repro: `go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/
+    -run TestFlowSourceGithub` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-d3eb8c700b85 in attribution-v2: apa
+      report --pr https://github.com/acc-org/acc-repo/pull/7 登记的关联键，能让适配器给出的 PR 事件
+      （correlation_keys=acc-org/acc-repo#7）挂靠到该委派子事项：disposition=attached、attach_state=pending，不被
+      pr-activity 忽略。'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/followmsg/...
+    - go test -count=1 ./api/followmsg/...
+    - go test -count=1 ./cli/followmsg/...
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/ -run TestFlowSourceGithub
+    integration_gates:
+    - name: attribution-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#94-跟进消息归属
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+      delivery_goal: 跟进消息归属 v2：on_update、回音回 open、本人登记关联键；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-GH-09
+      - ACT-MAIL-11
+      - ACT-MAIL-14
+      - ACT-MAIL-15
+      - ACT-CAL-03
+      - ACT-CAL-09
+      - ACT-MSG-10
+      - ACT-MSG-11
+      - ACT-MSG-12
+      - ACT-MSG-13
+      - ACT-MSG-14
+      - ACT-MSG-15
+      - ACT-MSG-17
+      - ACT-INP-03
+      acceptance_refs:
+      - flow-source-github
+      - flow-source-mail
+      - flow-source-calendar
+      - flow-follow-messages
+      - flow-inbound-pipeline
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/followmsg/...
+      - go test -count=1 ./api/followmsg/...
+      - go test -count=1 ./cli/followmsg/...
+    pr_base: main
+    acceptance_refs:
+    - flow-source-github
+    source_of_truth:
+    - docs/solution-design.md#94-跟进消息归属
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+    scope_paths:
+    - kernel/followmsg/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    - artifact_id: source-contract-v2-delivery
+      producer: source-contract-v2
+      evidence_mode: artifact
+      requires:
+      - standard-event-v2
+    defect_refs:
+    - dfx-d3eb8c700b85
+    coverage_gate: 80
+- id: fix.login-hardening.0b1aae
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  title: 'Fix login-hardening: dfx-0b1aae331f8f'
+  description: "Automatic fix for upstream defect(s) reported by e2e-inbound-rules.\n\n-
+    [design-gap] anchors flow-web-login/ACT-LGN-05 (docs/solution-design.md#14-安全)\n
+    \ expected: TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce 的延迟断言是确定性的：延迟应答与\"窗口过去后恢复即时应答\"都由已有测试时钟（与仓库已有的
+    test-clock 做法一致，如 e.now 与 api/core/testclock_test.go）驱动，不依赖墙钟 time.Since，CI 上任意负载下都稳定通过。\n
+    \ observed: 用例约第 132 行用 time.Since 断言\"窗口过去后应答耗时 < delay\"（\"delay must end with
+    the window, 200 in 163ms\"），其前的延迟分支同样用 time.Since 断言\"耗时 >= delay\"。CI 负载下偶发失败，main
+    最近四次 CI 均因此失败，PR\n  where: api/core/login_hardening_test.go:TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce;
+    api/core/testclock_test.go"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-0b1aae331f8f in login-hardening: TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce
+      的延迟断言是确定性的：延迟应答与"窗口过去后恢复即时应答"都由已有测试时钟（与仓库已有的 test-clock 做法一致，如 e.now 与 api/core/testclock_test.go）驱动，不依赖墙钟
+      time.Since，CI 上任意负载下都稳定通过。'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/auth/...
+    - go test -count=1 ./api/core/...
+    - go test -count=1 ./cli/serve/...
+    integration_gates:
+    - name: login-hardening-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#1413-web-入口
+      - docs/solution-design.md#162-数据目录
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 登录加固：口令长度、限速锁定、会话有效期与吊销、public_url 检查；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-UPG-12
+      - ACT-LGN-01
+      - ACT-LGN-03
+      - ACT-LGN-04
+      - ACT-LGN-05
+      - ACT-LGN-06
+      - ACT-LGN-08
+      - ACT-LGN-09
+      - ACT-LGN-10
+      - ACT-LGN-11
+      - ACT-LGN-12
+      - ACT-LGN-13
+      - ACT-DPL-07
+      - ACT-DPL-08
+      - ACT-DPL-09
+      acceptance_refs:
+      - flow-upgrade-rollback
+      - flow-web-login
+      - flow-deploy-exposure
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/auth/...
+      - go test -count=1 ./api/core/...
+      - go test -count=1 ./cli/serve/...
+    pr_base: main
+    acceptance_refs:
+    - flow-web-login
+    source_of_truth:
+    - docs/solution-design.md#1413-web-入口
+    - docs/solution-design.md#162-数据目录
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - kernel/auth/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    defect_refs:
+    - dfx-0b1aae331f8f
+    coverage_gate: 80
+- id: fix.web-calibration.c8ef9b
+  worker: omac-worker-frontend-taiyi
+  blocked_by:
+  - judgment-stats
+  - calibration-bands
+  - spot-check
+  title: 'Fix web-calibration: dfx-c8ef9b61a3ec'
+  description: "Automatic fix for upstream defect(s) reported by e2e-workbench.\n\n-
+    [design-gap] anchors flow-web-workbench/ACT-WBN-16 (docs/solution-design.md#314-场景十二在工作台上安排一天)\n
+    \ expected: every page, including 判断与校准, has document.scrollingElement.scrollWidth
+    <= 360 at a 360px viewport\n  observed: judgment page scrollWidth=640, its metric
+    table header rows are wider than the viewport\n  where: web/src/features/judgment/JudgmentPage.tsx:108\n
+    \ repro: `go test -tags=e2e -count=1 -run TestFlowWebWorkbench ./tests/e2e/workbench/...`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-c8ef9b61a3ec in web-calibration: every
+      page, including 判断与校准, has document.scrollingElement.scrollWidth <= 360 at a
+      360px viewport'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - npm --prefix web run test -- --run src/features/judgment
+    - go test -tags=e2e -count=1 -run TestFlowWebWorkbench ./tests/e2e/workbench/...
+    integration_gates:
+    - name: web-calibration-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#810-观测抽检与影子模式
+      - docs/solution-design.md#41-web-中台
+      - docs/solution-design.md#93-事件到事项
+      delivery_goal: Web"判断与校准"页；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-JRC-10
+      - ACT-JRC-11
+      - ACT-BKL-07
+      acceptance_refs:
+      - flow-judgment-record
+      - flow-backlog-release
+      commands:
+      - npm --prefix web run test -- --run src/features/judgment
+    pr_base: main
+    acceptance_refs:
+    - flow-web-workbench
+    source_of_truth:
+    - docs/solution-design.md#810-观测抽检与影子模式
+    - docs/solution-design.md#41-web-中台
+    - docs/solution-design.md#93-事件到事项
+    scope_paths:
+    - web/src/features/judgment/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: judgment-stats-delivery
+      producer: judgment-stats
+      evidence_mode: artifact
+      requires:
+      - judgment-metrics
+    - artifact_id: calibration-bands-delivery
+      producer: calibration-bands
+      evidence_mode: artifact
+      requires:
+      - judgment-bands-shadow
+    - artifact_id: spot-check-delivery
+      producer: spot-check
+      evidence_mode: artifact
+      requires:
+      - spot-check
+    defect_refs:
+    - dfx-c8ef9b61a3ec
+    coverage_gate: 70

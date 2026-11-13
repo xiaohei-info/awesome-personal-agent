@@ -1,0 +1,219 @@
+# sha256: a99700f4d4677eaed5dd259da915d64fa98e77b4051c8188a549a2429369283f
+defects:
+  schema: omac.defect-ledger/v1
+  used_global: 19
+  used_by_reporter:
+    e2e-followmsg: 1
+    e2e-workbench: 3
+    e2e-judge: 4
+    e2e-judgment: 3
+    e2e-inbound-rules: 2
+    e2e-upgrade: 3
+    e2e-hostplugin: 1
+    e2e-release-doctor: 1
+    e2e-sources: 2
+  granted_by_reporter:
+    e2e-sources: 4
+    e2e-inbound-rules: 2
+    e2e-judge: 4
+    e2e-judgment: 4
+    e2e-upgrade: 5
+    e2e-workbench: 1
+  entries:
+    dfx-62f6c689fa3a:
+      suspected: attribution-v2
+      anchors:
+      - flow-follow-messages/ACT-MSG-13
+      reporters:
+      - e2e-followmsg
+      state: fixed
+      fix_node: fix.attribution-v2.62f6c6
+    dfx-d3eb8c700b85:
+      suspected: attribution-v2
+      anchors:
+      - flow-source-github/ACT-GH-09
+      reporters:
+      - e2e-sources
+      state: fixing
+      fix_node: fix.attribution-v2.d3eb8c
+    dfx-bfeb8db8483b:
+      suspected: calendar-adapter-v2
+      anchors:
+      - flow-source-calendar/ACT-CAL-02
+      reporters:
+      - e2e-sources
+      state: fixed
+      fix_node: fix.calendar-adapter-v2.bfeb8d
+    dfx-ec964047626d:
+      suspected: web-today
+      anchors:
+      - flow-web-workbench/ACT-WBN-16
+      reporters:
+      - e2e-workbench
+      state: fixed
+      fix_node: fix.web-today.ec9640
+    dfx-8a3ec29f05ec:
+      suspected: health-signals-v2
+      anchors:
+      - flow-run-tiers/ACT-TIER-01
+      reporters:
+      - e2e-workbench
+      state: fixed
+      fix_node: fix.health-signals-v2.8a3ec2
+    dfx-1189ac175aed:
+      suspected: inbound-pipeline-v2
+      anchors:
+      - flow-judge-protocol/ACT-JDP-02
+      - flow-judge-protocol/ACT-JDP-03
+      - flow-judge-protocol/ACT-JDP-07
+      reporters:
+      - e2e-inbound-rules
+      - e2e-judge
+      state: fixed
+      fix_node: fix.inbound-pipeline-v2.1189ac
+    dfx-1837894e5c57:
+      suspected: inbound-pipeline-v2
+      anchors:
+      - flow-inbound-rules/ACT-IRL-04
+      - flow-inbound-rules/ACT-IRL-06
+      - flow-inbound-rules/ACT-IRL-07
+      - flow-inbound-rules/ACT-IRL-18
+      reporters:
+      - e2e-inbound-rules
+      - e2e-judge
+      state: fixed
+      fix_node: fix.inbound-pipeline-v2.1189ac
+    dfx-1a33faf37354:
+      suspected: endpoint-config-split
+      anchors:
+      - flow-agent-cascade/ACT-CAS-09
+      - flow-endpoint-config/ACT-EPC-09
+      reporters:
+      - e2e-judge
+      state: fixed
+      fix_node: fix.endpoint-config-split.1a33fa
+    dfx-600f134c6ba0:
+      suspected: cascade-engine
+      anchors:
+      - flow-agent-cascade/ACT-CAS-18
+      reporters:
+      - e2e-judge
+      state: fixed
+      fix_node: fix.cascade-engine.600f13
+    dfx-cd766f1a49ef:
+      suspected: judge-protocol-client
+      anchors:
+      - flow-judge-protocol/ACT-JDP-04
+      - flow-judge-protocol/ACT-JDP-09
+      reporters:
+      - e2e-judge
+      state: fixing
+      fix_node: fix.judge-protocol-client.cd766f
+    dfx-81887fbc6daf:
+      suspected: judgment-record
+      anchors:
+      - flow-judgment-record/ACT-JRC-04
+      reporters:
+      - e2e-judgment
+      state: fixed
+      fix_node: fix.judgment-record.4fdb4d
+    dfx-4fdb4d4ca954:
+      suspected: judgment-record
+      anchors:
+      - flow-judgment-record/ACT-JRC-06
+      reporters:
+      - e2e-judgment
+      state: fixed
+      fix_node: fix.judgment-record.4fdb4d
+    dfx-9d6fc9aed5ca:
+      suspected: judgment-stats
+      anchors:
+      - flow-judgment-record/ACT-JRC-08
+      reporters:
+      - e2e-judgment
+      state: fixed
+      fix_node: fix.judgment-stats.9d6fc9
+    dfx-bfb7d70961f5:
+      suspected: calibration-bands
+      anchors:
+      - flow-judgment-record/ACT-JRC-14
+      reporters:
+      - e2e-judgment
+      state: fixed
+      fix_node: fix.calibration-bands.bfb7d7
+    dfx-1fd0f7679f25:
+      suspected: backup-restore
+      anchors:
+      - flow-backup-restore/ACT-BAK-04
+      reporters:
+      - e2e-upgrade
+      state: fixed
+      fix_node: fix.backup-restore.1fd0f7
+    dfx-68b52a3729d6:
+      suspected: backup-restore
+      anchors:
+      - flow-backup-restore/ACT-BAK-06
+      reporters:
+      - e2e-upgrade
+      state: fixed
+      fix_node: fix.backup-restore.1fd0f7
+    dfx-ed02ce5c6af4:
+      suspected: backup-restore
+      anchors:
+      - flow-backup-restore/ACT-BAK-09
+      reporters:
+      - e2e-upgrade
+      state: fixed
+      fix_node: fix.backup-restore.1fd0f7
+    dfx-1d1fcf14b3a9:
+      suspected: ledger-schema-v3
+      anchors:
+      - flow-upgrade-rollback/ACT-UPG-15
+      reporters:
+      - e2e-upgrade
+      state: fixed
+      fix_node: fix.ledger-schema-v3.1d1fcf
+    dfx-9c33de15a3a7:
+      suspected: rule-modes-v2
+      anchors:
+      - flow-upgrade-rollback/ACT-UPG-10
+      reporters:
+      - e2e-upgrade
+      state: fixed
+      fix_node: fix.rule-modes-v2.9c33de
+    dfx-5239bc3e86a2:
+      suspected: wake-lease-recheck
+      anchors:
+      - flow-wake-lease/ACT-WAK-03
+      reporters:
+      - e2e-hostplugin
+      state: fixed
+      fix_node: fix.wake-lease-recheck.5239bc
+    dfx-542f4dae51fa:
+      suspected: release-packaging
+      anchors:
+      - flow-release/ACT-REL-06
+      reporters:
+      - e2e-release-doctor
+      state: fixed
+      fix_node: fix.release-packaging.542f4d
+    dfx-c8ef9b61a3ec:
+      suspected: web-calibration
+      anchors:
+      - flow-web-workbench/ACT-WBN-16
+      reporters:
+      - e2e-workbench
+      state: fixing
+      fix_node: fix.web-calibration.c8ef9b
+    dfx-0b1aae331f8f:
+      suspected: login-hardening
+      anchors:
+      - flow-web-login/ACT-LGN-05
+      reporters:
+      - e2e-inbound-rules
+      state: fixed
+      fix_node: fix.login-hardening.0b1aae
+  inbox: []
+pending_human_amendment:
+  amendment_id: amend-6c86c8335a0c
+  file: reports/apa-dag-unblock-20261113/amendment-reviewed.yaml

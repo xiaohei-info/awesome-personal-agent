@@ -48,6 +48,8 @@ var (
 	ErrMigrationChanged = errors.New("store: applied migration changed")
 	// ErrSchemaTooNew 表示账本里有当前程序不认识的迁移（降级或漏登记模块）。
 	ErrSchemaTooNew = errors.New("store: ledger schema is newer than this build")
+	// ErrMigrationFailed 表示迁移中途失败并已整体回滚，账本保持升级前的样子（§16.5）。
+	ErrMigrationFailed = errors.New("store: migration failed")
 )
 
 // Registry 收集各模块的迁移。
@@ -173,7 +175,7 @@ func (r *Registry) gate(applied map[string]map[int]string) error {
 func (s *Store) migrate(reg *Registry, applied map[string]map[int]string) error {
 	ctx := context.Background()
 	failAfter, inject := migrationFault()
-	return s.Update(ctx, func(tx *Tx) error {
+	err := s.Update(ctx, func(tx *Tx) error {
 		if _, err := tx.Exec(migrationsTable); err != nil {
 			return err
 		}
@@ -198,4 +200,8 @@ func (s *Store) migrate(reg *Registry, applied map[string]map[int]string) error 
 		}
 		return nil
 	})
+	if err != nil {
+		return fmt.Errorf("%w and was rolled back, the ledger is unchanged: %w", ErrMigrationFailed, err)
+	}
+	return nil
 }

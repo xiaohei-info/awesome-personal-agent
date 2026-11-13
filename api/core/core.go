@@ -161,6 +161,8 @@ type Server struct {
 	handler http.Handler
 	lim     *limiter
 	seen    *kdoctor.Seen
+	// wait 实现延迟应答；测试替换它以观察延迟时长，不依赖墙钟。
+	wait func(ctx context.Context, d time.Duration) error
 }
 
 // New 装配路由并校验；任何登记错误（重复、缺处理器、路径非法）都在启动时返回，不留到请求时。
@@ -183,7 +185,7 @@ func New(d Deps) (*Server, error) {
 	if d.LoginDelay <= 0 {
 		d.LoginDelay = DefaultLoginDelay
 	}
-	s := &Server{d: d, lim: newLimiter(), seen: kdoctor.NewSeen(0)}
+	s := &Server{d: d, lim: newLimiter(), seen: kdoctor.NewSeen(0), wait: sleepCtx}
 
 	rt := &Router{}
 	groups := []RouteGroup{s.authRoutes}
@@ -478,5 +480,16 @@ func (s *Server) noteSeen(ctx context.Context, c command.Caller, o auth.Origin) 
 	}
 	if h := o.Harness; h != "" && len(h) <= 64 { // 长度设限：任意请求头值不能无限撑大记录
 		note(kdoctor.SubjectHarness + h)
+	}
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

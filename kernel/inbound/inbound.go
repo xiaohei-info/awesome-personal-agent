@@ -41,6 +41,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -210,6 +211,19 @@ func (s *Service) Register(x *command.Executor) error {
 			}
 			payload := map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule,
 				"unjudged_reason": v.UnjudgedReason, "judgment": v.Judgment, "merged": v.Merge}
+			if len(v.Items) > 0 {
+				payload["items"] = v.Items
+			}
+			if v.Judgment != "" { // 并入结论：记录过了保留期，apa why 仍从这里读出答案与定案者（§6.16）
+				rec, err := record.Get(c.Tx, v.Judgment)
+				if e, ok := err.(*domain.Error); err != nil && !(ok && e.Code == domain.CodeNotFound) {
+					return nil, err
+				}
+				if err == nil {
+					ref := record.RefOf(rec)
+					payload["answer"], payload["decided_by"] = ref.Answer, ref.DecidedBy
+				}
+			}
 			if len(v.Conditions) > 0 {
 				payload["conditions"] = v.Conditions
 			}
@@ -378,6 +392,7 @@ func (s *Service) drain(ctx context.Context) []error {
 		if err != nil {
 			return append(errs, err)
 		}
+		s.prefetchScreen(ctx, sn.events) // 同一轮的初筛按批提交（§8.5），之后逐条作答时复用
 		for _, ev := range sn.events {
 			if err := s.one(ctx, sn, ev); err != nil {
 				if ctx.Err() != nil {
@@ -397,6 +412,14 @@ func (s *Service) drain(ctx context.Context) []error {
 type matched struct {
 	pack string
 	rule packs.SourceRule
+}
+
+// tmpl 取规则声明的模板（在规则所在包里），省略时取内置默认模板（在内置包 DefaultPack 里，C.5）。
+func (m *matched) tmpl(custom, def string) (pack, name string) {
+	if m == nil || custom == "" {
+		return DefaultPack, def
+	}
+	return m.pack, custom
 }
 
 func (m *matched) key() string {
@@ -727,11 +750,12 @@ func outboundGate(o domain.Outbound, pol policy.Policy, src domain.Source) strin
 
 // screenAndDraft 走第 4、5 步：初筛，是（或未定标把握低）则起草。返回的 verdict 非空表示不建事项：ChoiceIgnore 是不值得，其余是未判定的原因。
 func (s *Service) screenAndDraft(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched, hint, project string) (proposal, string, error) {
-	pack, screen, draft := DefaultPack, Template, DraftTemplate
+	var sr, dr string
 	if m != nil {
-		pack = m.pack
-		screen, draft = orElse(m.rule.Screen, screen), orElse(m.rule.Draft, draft)
+		sr, dr = m.rule.Screen, m.rule.Draft
 	}
+	screenPack, screen := m.tmpl(sr, Template)
+	draftPack, draft := m.tmpl(dr, DraftTemplate)
 	// 外发控制（§14.14）：范围在每次调用前重读；裁剪后的内容才进请求与输入指纹。
 	o, pol, err := s.freshOutbound(ctx, src)
 	if err != nil {
@@ -740,7 +764,7 @@ func (s *Service) screenAndDraft(ctx context.Context, sn snapshot, src domain.So
 	if why := outboundGate(o, pol, src); why != "" {
 		return proposal{}, why, nil
 	}
-	a, err := s.ask(ctx, src, ev, pack, screen, hint, o)
+	a, err := s.ask(ctx, src, ev, screenPack, screen, hint, o)
 	if err != nil {
 		return proposal{}, "", err
 	}
@@ -760,7 +784,7 @@ func (s *Service) screenAndDraft(ctx context.Context, sn snapshot, src domain.So
 	}
 	p := proposal{kind: kind, title: orElse(ev.Subject, ev.Type), reason: reason, judgment: a.judgment, project: project,
 		rec: &domain.Proposal{LowConfidence: a.low, Sources: []string{ev.ID}}}
-	if err := s.draft(ctx, sn, src, ev, pack, draft, hint, o, pol, &p); err != nil {
+	if err := s.draft(ctx, sn, src, ev, draftPack, draft, hint, o, pol, &p); err != nil {
 		return proposal{}, "", err
 	}
 	return p, "", nil
@@ -941,11 +965,12 @@ const maxExtracted = 20
 // extract 是 extract 出口：先预筛"要不要抽取"，再由生成型抽出零到多条候选，每条候选各自成为 proposed 事项。
 // 事项的幂等键带候选序号，崩溃后重跑不产生重复事项（模型结果按输入指纹复用）。
 func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched) error {
-	pack, prescreen, extract := DefaultPack, PrescreenTemplate, ExtractTemplate
+	var pr, ex string
 	if m != nil {
-		pack = m.pack
-		prescreen, extract = orElse(m.rule.Prescreen, prescreen), orElse(m.rule.Extract, extract)
+		pr, ex = m.rule.Prescreen, m.rule.Extract
 	}
+	prescreenPack, prescreen := m.tmpl(pr, PrescreenTemplate)
+	extractPack, extract := m.tmpl(ex, ExtractTemplate)
 	o, pol, err := s.freshOutbound(ctx, src)
 	if err != nil {
 		return err
@@ -953,7 +978,7 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 	if why := outboundGate(o, pol, src); why != "" {
 		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{}, why))
 	}
-	a, err := s.ask(ctx, src, ev, pack, prescreen, "", o)
+	a, err := s.ask(ctx, src, ev, prescreenPack, prescreen, "", o)
 	if err != nil {
 		return err
 	}
@@ -968,7 +993,7 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 	if !allowed {
 		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{judgment: a.judgment}, outboundUnsetPrefix+"the generate endpoint is excluded by the outbound scope"))
 	}
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: extract, Input: eventInput(src, ev, "", nil), Material: text, RequireLocality: locality,
+	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: extractPack, Template: extract, Input: eventInput(src, ev, "", nil), Material: text, RequireLocality: locality,
 		Scope: direct.Scope{Source: src.ID}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
 	if errors.Is(err, model.ErrNotConfigured) || errors.Is(err, direct.ErrUnavailable) {
 		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{judgment: a.judgment}, unavailablePrefix+err.Error()))
@@ -978,7 +1003,7 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 	}
 	var x extractOut
 	if !out.Settled || json.Unmarshal(out.Final().Result, &x) != nil {
-		return fmt.Errorf("extract template %s/%s gave no usable candidates", pack, extract)
+		return fmt.Errorf("extract template %s/%s gave no usable candidates", extractPack, extract)
 	}
 	project, err := s.project(sn, src, ev, m)
 	if err != nil {

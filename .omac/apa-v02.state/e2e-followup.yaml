@@ -1,3 +1,6 @@
-# sha256: 944b1774d5037018107d57a56a7c1e77f7edda5a89fe78eeda8a562ec5009fc9
-work_item_id: null
-status: todo
+# sha256: 89df4ad18cd4dc921134c5b25056da274e475706bb412b933e6781574110551a
+work_item_id: 01a1d304-5728-7f28-a802-058939e8269f
+status: done
+merged: true
+merged_at: '2026-11-13T09:01:31Z'
+retry_note: 'PR #323 与 verification 已完成,核对 head 后重新提交,不要重做'

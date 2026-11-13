@@ -127,6 +127,7 @@ type Event struct {
 	Actor    map[string]any `json:"actor"`
 	Reason   string         `json:"reason"`
 	Evidence string         `json:"evidence"`
+	Grant    string         `json:"grant"`
 	Payload  map[string]any `json:"payload"`
 }
 

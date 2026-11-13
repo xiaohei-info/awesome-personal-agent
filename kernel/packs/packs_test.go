@@ -1,6 +1,8 @@
 package packs
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -449,5 +451,47 @@ func TestSourceRuleOnUpdateIsValidated(t *testing.T) {
 	_, rej := load(t, Options{Builtin: pack("merge"), Kinds: newKinds()})
 	if len(rej) != 1 || !strings.Contains(rej[0].Reason, "on_update") {
 		t.Fatalf("rejections %+v", rej)
+	}
+}
+
+// v0.1 账本里存的规则 hash 是旧结构体（无 remind_rounds 等字段）的 json 摘要；没写新字段的规则必须得出同一个值，
+// 否则升级后第一次对账会把没变过的规则当成"内容变化"而改掉本人的模式（§14.8）。
+func TestRuleHashStableForV01Rules(t *testing.T) {
+	files := fstest.MapFS{"g/pack.yaml": {Data: []byte(`name: g
+version: 1.0.0
+description: guideline
+clock_rules:
+  - id: guideline-check
+    type: check
+    schedule: 24h
+    do:
+      - action: call_agent
+        prompt: draft-guideline
+event_rules:
+  - id: on-open
+    when: {event: item.phase_changed}
+    do:
+      - action: call_agent
+        prompt: draft-guideline
+source_rules:
+  - id: tri-auto
+    accept: auto
+    match: {type: tri.auto}
+    then: proposed
+`)}, "g/prompts/draft-guideline.md": {Data: []byte("---\nagent: generate\ntimeout: 60s\noutput_schema: {type: object}\n---\nx\n")}}
+	l, rej := load(t, Options{Builtin: files, Kinds: newKinds()})
+	if len(rej) != 0 {
+		t.Fatalf("rejections: %+v", rej)
+	}
+	p, _ := l.Get("g")
+	for key, legacy := range map[string]string{
+		"clock_rules/guideline-check": `{"ID":"guideline-check","Type":"check","Schedule":"24h","Mode":"","Do":[{"action":"call_agent","prompt":"draft-guideline"}]}`,
+		"event_rules/on-open":         `{"ID":"on-open","When":{"event":"item.phase_changed"},"Mode":"","Do":[{"action":"call_agent","prompt":"draft-guideline"}]}`,
+		"source_rules/tri-auto":       `{"ID":"tri-auto","Match":{"type":"tri.auto"},"Kind":"","ProjectBy":"","Then":"proposed","CorrelationKeys":null,"Accept":"auto","Mode":""}`,
+	} {
+		sum := sha256.Sum256([]byte(legacy))
+		if got := p.RuleHashes[key]; got != hex.EncodeToString(sum[:]) {
+			t.Errorf("%s hash = %s, want the v0.1 digest %x", key, got, sum)
+		}
 	}
 }
