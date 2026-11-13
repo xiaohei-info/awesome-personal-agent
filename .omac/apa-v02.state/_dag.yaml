@@ -1,4 +1,4 @@
-# sha256: 13c6100835267ec83daeeffb614acd7db34f24fce5b4bebae39fa63aa2d8cec1
+# sha256: b033ce26a0f565d9c4440ad53867056ae1988258733c13e1d4dcd23ebf1a7911
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -57,7 +57,7 @@ defects:
       - flow-run-tiers/ACT-TIER-01
       reporters:
       - e2e-workbench
-      state: fixing
+      state: fixed
       fix_node: fix.health-signals-v2.8a3ec2
     dfx-1189ac175aed:
       suspected: inbound-pipeline-v2
