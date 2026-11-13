@@ -6,6 +6,7 @@ import { PageHead } from "../../app/page";
 import { MATERIAL_RELATION_LABELS, isMaterialId } from "../../app/relations";
 import { AttachedMessages } from "../attached-messages";
 import { Markdown } from "./Markdown";
+import { ProgressForm } from "../today/ProgressForm";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -136,7 +137,7 @@ function ItemList() {
   );
 }
 
-interface Detail { item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; steps: Step[]; others: Item[] }
+interface Detail { item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; steps: Step[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string }[] }
 
 function ItemDetail() {
   const { id = "" } = useParams();
@@ -149,11 +150,11 @@ function ItemDetail() {
   const load = useCallback(async () => {
     const eid = encodeURIComponent(id);
     const [it, why, list] = await Promise.all([
-      api.get<{ item: Item; relations: Relation[]; correlation_keys?: { key: string; domain?: string }[] }>("/items/" + eid),
+      api.get<{ item: Item; relations: Relation[]; correlation_keys?: { key: string; domain?: string }[]; progress?: Detail["progress"] }>("/items/" + eid),
       api.get<{ steps: Step[] }>("/why/" + eid),
       api.get<{ items: Item[] }>("/items"),
     ]);
-    setD({ item: it.item, relations: it.relations, keys: it.correlation_keys ?? [], steps: why.steps, others: list.items.filter((i) => i.id !== id) });
+    setD({ item: it.item, relations: it.relations, keys: it.correlation_keys ?? [], steps: why.steps, progress: it.progress ?? [], others: list.items.filter((i) => i.id !== id) });
   }, [api, id]);
 
   useEffect(() => {
@@ -234,6 +235,16 @@ function ItemDetail() {
       </section>
 
       <AttachedMessages itemId={id} />
+
+      <section aria-label="进展">
+        <h2>进展</h2>
+        <ul aria-label="进展" className="rows">
+          {d.progress.map((p) => (
+            <li key={p.id}>{p.text} <span className="sub">{[p.on && `所指 ${p.on}`, p.actor, new Date(p.at).toLocaleString()].filter(Boolean).join(" · ")}</span></li>
+          ))}
+        </ul>
+        <ProgressForm onSubmit={(b) => act(() => api.post(path + "/progress", b))} />
+      </section>
 
       <section aria-label="变更">
         <h2>时间线</h2>

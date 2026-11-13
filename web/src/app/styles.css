@@ -242,6 +242,7 @@ pre code { padding: 0; background: none; }
   .login { grid-template-columns: 1fr; } .login .pitch { padding: 40px 24px; border-right: 0; border-bottom: 1px solid var(--line); }
   .login .gate { padding: 32px 24px; }
   kbd { display: none; } .options button { min-height: 44px; }
+  main button, main select, main input:not([type=checkbox]):not([type=radio]) { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
