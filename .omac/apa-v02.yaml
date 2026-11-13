@@ -8626,7 +8626,7 @@ nodes:
       - alert-exit
     coverage_gate: 0
 - id: release-gates
-  worker: omac-worker-backend
+  worker: omac-worker-backend-oracle
   blocked_by:
   - ledger-schema-v3
   - test-clock
