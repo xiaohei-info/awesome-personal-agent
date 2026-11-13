@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# 同一 ref 上的新运行取消旧运行，控制全量 e2e 的成本
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -30,3 +35,25 @@ jobs:
       - run: go build ./...
       - run: go test ./...
       - run: go run ./tools/redline
+
+  # 全量 e2e：与 build 并行；每个 e2e 包构建整套真实二进制，不按改动路径选包，避免漏掉跨组回归
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tests/fixtures/ledger/fetch-v01.sh 读冻结提交，浅克隆会 exit 3
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: npm --prefix web run build  # e2e 起的真实 apa serve 内嵌 web/dist/index.html
+      - run: sudo apt-get install -y sqlite3  # 账本断言使用真实 sqlite3 CLI
+      - run: python3 -m pip install pytest  # hermes 插件契约测试
+      - run: go test -tags e2e -count=1 -timeout 40m ./tests/e2e/...
