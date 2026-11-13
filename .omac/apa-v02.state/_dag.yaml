@@ -1,4 +1,4 @@
-# sha256: 38b6c07295874a1b4b3eaae9fe2fcc90c354ea6b40082f1e8607214023cbac5d
+# sha256: a0204a31ab8e53ba4ad0515b9fb75d2cbde584f921698ccf2cfcf4ce7a2c179f
 defects:
   schema: omac.defect-ledger/v1
   used_global: 30
@@ -319,6 +319,6 @@ defects:
       - flow-session-kind/ACT-SKD-10
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-session-authz.9dccef
   inbox: []
