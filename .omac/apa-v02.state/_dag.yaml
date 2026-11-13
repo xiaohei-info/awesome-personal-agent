@@ -1,7 +1,7 @@
-# sha256: 06dd660576d761b68228ac71725fb7c5da610dcedf586f92a3e0edc082133105
+# sha256: 38b6c07295874a1b4b3eaae9fe2fcc90c354ea6b40082f1e8607214023cbac5d
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 29
+  used_global: 30
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 3
@@ -12,7 +12,7 @@ defects:
     e2e-hostplugin: 1
     e2e-release-doctor: 1
     e2e-sources: 2
-    release-gates: 8
+    release-gates: 9
   granted_by_reporter:
     e2e-sources: 4
     e2e-inbound-rules: 2
@@ -20,8 +20,8 @@ defects:
     e2e-judgment: 4
     e2e-upgrade: 5
     e2e-workbench: 1
-    release-gates: 6
-  granted_global: 9
+    release-gates: 7
+  granted_global: 10
   entries:
     dfx-62f6c689fa3a:
       suspected: attribution-v2
@@ -295,7 +295,7 @@ defects:
       - flow-backlog-restore/ACT-RST-05
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-env-baseline.3e7f9b
     dfx-50dd0435adcb:
       suspected: e2e-sources
@@ -303,7 +303,7 @@ defects:
       - flow-source-mail/ACT-MAIL-04
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-sources.50dd04
     dfx-1222a3a43647:
       suspected: e2e-v01-background
@@ -313,4 +313,12 @@ defects:
       - release-gates
       state: fixing
       fix_node: fix.e2e-v01-background.1222a3
+    dfx-9dccef293d4e:
+      suspected: e2e-session-authz
+      anchors:
+      - flow-session-kind/ACT-SKD-10
+      reporters:
+      - release-gates
+      state: fixing
+      fix_node: fix.e2e-session-authz.9dccef
   inbox: []
