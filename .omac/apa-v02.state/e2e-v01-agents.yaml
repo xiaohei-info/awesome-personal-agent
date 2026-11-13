@@ -1,5 +1,5 @@
-# sha256: e96dd2a0306ebd03581e4e3913cdaa4916233e1045a1eb39bdfb634578f69759
+# sha256: cf630cd1712a038d438913cafe650e516e4fc453ba1e58d96331abacf28b239e
 work_item_id: 01a1d39a-b64a-7de6-8107-46b04cfbf9ee
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 产品缺口由 brief-delivery-enqueue 补;PR 与测试已在,不要重做,等该节点合并后再复验
+retry_note: PR 与验证已完成，核对 PR head 后直接重新提交评审，不要重做已完成部分

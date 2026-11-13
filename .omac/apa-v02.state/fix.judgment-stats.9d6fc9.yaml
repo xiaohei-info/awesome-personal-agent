@@ -1,5 +1,5 @@
-# sha256: 613c526afc6296d227688d7d42107b796a36c3358ebffa0a61c3eed382d954a9
+# sha256: b1cc5d912e388c9ed82e4aae6da43b98fe78a0273e5e9d111297aa186fd0ff91
 work_item_id: 01a1d3e2-9f68-78e2-8cd1-9ffd31d7b27d
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 上次失败是 Claude 5 小时额度上限（429），已重置；在原分支/PR 上继续，不要重做已完成部分
+retry_note: PR 与验证已完成，核对 PR head 后直接重新提交评审，不要重做已完成部分
