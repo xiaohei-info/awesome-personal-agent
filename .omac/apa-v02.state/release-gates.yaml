@@ -1,6 +1,6 @@
-# sha256: 1d549db22ac91ef391eaa7e848eb803baf8a9994ab1318d6ec9d08107b5bcb2b
+# sha256: b8eb565c1fd1b982ec8337c39800b216079fe3f0ce0f548458838836cf14d637
 work_item_id: 01a1d5d1-fcc3-7056-8973-f8426da2578a
 status: todo
-retry_note: 原 worker 所在环境缺 sqlite3 CLI 且 apt 源不可用，改派到已具备真实 sqlite3 3.45、python3+pytest、go
-  的 worker。上游四个回归修复（#366–#369、#371）与 ci-e2e-gate（#370）均已合入 main。请基于最新 main 完整检出重跑全部门槛，含全量
-  e2e，不使用 shim。
+retry_note: 上游修复节点（outbound-scope 出站范围统一出口、e2e-env-baseline StubRun 竞态、e2e-sources
+  ACT-MAIL-04 隔离 PATH、e2e-v01-background ACT-BGG-04 等 run.finished）合入后，基于最新 main 重跑全部门槛（含全量
+  go test -tags e2e ./tests/e2e/...），继续由 omac-worker-backend-oracle 执行。另有 ACT-SKD-10（tests/e2e/authz）间歇失败尚未报缺陷（预算不足），若再现请在报告里原样写出。
