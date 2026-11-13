@@ -244,6 +244,9 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 			return err
 		}
 	}
+	if it.Kind == domain.KindBrief && it.Phase == domain.PhaseDone {
+		return a.briefDone(tx, pol, it)
+	}
 	if it.Phase != domain.PhaseNeedsInput || ask == nil || ask.Resolution != nil || ask.ScreeningPending {
 		return a.drop(tx, id) // proposed 不产生投递（§6.14.2）；初筛返回前决策不投递（§14.4）；阶段离开则作废
 	}
@@ -274,6 +277,24 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 		h.notBefore = a.o.Now().Add(time.Duration(pol.Disturb.MergeWindowSec) * time.Second)
 	}
 	return a.offer(tx, pol, h)
+}
+
+// briefDone 在简报写回完成（转 done）时为它产出一条 class=brief 的投递，路由与静默、日上限、静音都走 offer（§3.6、§7.4）。
+// 一份简报只入队一次：已有该 id 的暂存或投递就什么都不做，所以简报之后的事项变化既不重发也不作废它。
+func (a *Attention) briefDone(tx *store.Tx, pol policy.Policy, it domain.Item) error {
+	id := delivery.BriefID(it.ID)
+	if known, err := a.known(tx, id); err != nil || known {
+		return err
+	}
+	if err := a.drop(tx, it.ID); err != nil { // 简报曾转 needs_input 问过本人：那条决策投递随完成作废
+		return err
+	}
+	ver, err := command.Version(tx, it.ID)
+	if err != nil {
+		return err
+	}
+	return a.offer(tx, pol, held{id: id, item: it.ID, class: domain.DeliveryBrief, priority: it.Priority, version: ver,
+		content: delivery.BriefContent(it, a.o.WebURL(it.ID))})
 }
 
 // answeredByPerson：只有本人在 Web 或聊天里给出了真实回答才算（渠道回答自己已经 Confirm 过）。
