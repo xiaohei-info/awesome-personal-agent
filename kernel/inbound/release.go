@@ -269,13 +269,14 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 		if err != nil {
 			continue
 		}
-		pack, screen := DefaultPack, Template
+		var custom string
 		if m != nil {
 			if rules.Exit(m.rule) != rules.ExitScreen {
 				continue
 			}
-			pack, screen = m.pack, orElse(m.rule.Screen, Template)
+			custom = m.rule.Screen
 		}
+		pack, screen := m.tmpl(custom, Template)
 		o, pol, err := s.freshOutbound(ctx, src)
 		if err != nil || outboundGate(o, pol, src) != "" {
 			continue
