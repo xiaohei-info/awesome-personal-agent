@@ -1,7 +1,6 @@
-# sha256: ed714b4597d02831aab47e502ff864cfaa05f604bd34b95f0d1060d32ac311c0
+# sha256: 4ff92285b98aed9e9c58e08d64d8cceb99168c3e2cdacee0ceb1205a20014fcc
 work_item_id: 01a1d39a-b64a-7de6-8107-46b04cfbf9ee
 status: done
 merged: true
 merged_at: '2026-11-13T15:48:38Z'
-recovery_marker: true
 retry_note: PR 与验证已完成，核对 PR head 后直接重新提交评审，不要重做已完成部分
