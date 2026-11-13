@@ -41,6 +41,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -210,6 +211,19 @@ func (s *Service) Register(x *command.Executor) error {
 			}
 			payload := map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule,
 				"unjudged_reason": v.UnjudgedReason, "judgment": v.Judgment, "merged": v.Merge}
+			if len(v.Items) > 0 {
+				payload["items"] = v.Items
+			}
+			if v.Judgment != "" { // 并入结论：记录过了保留期，apa why 仍从这里读出答案与定案者（§6.16）
+				rec, err := record.Get(c.Tx, v.Judgment)
+				if e, ok := err.(*domain.Error); err != nil && !(ok && e.Code == domain.CodeNotFound) {
+					return nil, err
+				}
+				if err == nil {
+					ref := record.RefOf(rec)
+					payload["answer"], payload["decided_by"] = ref.Answer, ref.DecidedBy
+				}
+			}
 			if len(v.Conditions) > 0 {
 				payload["conditions"] = v.Conditions
 			}

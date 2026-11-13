@@ -339,3 +339,35 @@ func TestV01JudgeEventReplaysUntouched(t *testing.T) {
 		t.Fatal("event without judgment field must have no judgment line")
 	}
 }
+
+// 建议事项自己只有 item.created；建出它的处置挂在来源事件上。apa why <事项 id> 也要展开判断一行，过了保留期还剩结论（ACT-JRC-04/06）。
+func TestReplayItemPullsInJudgmentFromItsDisposal(t *testing.T) {
+	s := open(t)
+	rec := seedJudged(t, s)
+	payload, _ := json.Marshal(map[string]any{"event": "evt_1", "item": "item_p", "judgment": rec.ID, "answer": rec.Answer, "decided_by": rec.DecidedBy})
+	err := s.Update(ctx, func(tx *store.Tx) error {
+		for _, e := range []domain.Event{
+			{Type: domain.EvItemCreated, Object: "item_p", Actor: rule, Basis: &domain.Basis{PolicyVersion: 1, RuleID: "r"}, Payload: json.RawMessage(`{"title":"t"}`)},
+			{Type: "inbound.disposed", Object: "evt_1", Actor: rule, Basis: &domain.Basis{PolicyVersion: 1, RuleID: "r"}, Payload: payload},
+		} {
+			if _, err := eventlog.Append(tx, e); err != nil {
+				return err
+			}
+		}
+		_, err := record.DeleteBefore(tx, time.Now())
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tl, err := replay(t, s, Request{Actor: agent, Level: authz.LevelObserver, ID: "item_p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tl.Steps) != 2 || tl.Steps[1].Type != "inbound.disposed" {
+		t.Fatalf("steps: %+v", tl.Steps)
+	}
+	if j := tl.Steps[1].Judgment; j == nil || !j.Expired || j.Answer != "yes" || j.DecidedBy != "chat" {
+		t.Fatalf("conclusion lost after retention: %+v", j)
+	}
+}
