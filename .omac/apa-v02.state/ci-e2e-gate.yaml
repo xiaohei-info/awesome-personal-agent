@@ -1,5 +1,4 @@
-# sha256: 319f5c7536a72515ec8f64d0dd3305d950d498219befed418c2b6abdf9abc7bb
-work_item_id: null
-status: todo
-held: true
-hold_reason: 等 main 上 4 处 e2e 回归的修复节点合并后再放行，否则新 CI 门会卡死这些修复 PR
+# sha256: 1e09a98d57005ba8262c310a8418582d6c937f4dbff41bff97d03e7031151fca
+work_item_id: 01a1d661-e93b-77e6-a7f7-f2c1865dfb01
+status: in_progress
+recovery_marker: true
