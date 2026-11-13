@@ -40,14 +40,16 @@ func (m mailMsg) read(args []string) string {
 }
 
 var (
+	// 合成邮件的时间要晚于录制样本里最晚的一封（mid-7，09:00）并按验收出场顺序递增：适配器的游标是已读最晚一封的时间，
+	// 更早的信读不到（验收 ACT-MAIL-06 之后才放线程与旧回信）。
 	threadMsgs = []mailMsg{
-		{"11", "<mid-t1@example.com>", "[APA-LIVE-TEST] thread root", "agent@example.com", "2026-11-06 06:00+00:00", "", ""},
-		{"12", "<mid-t2@example.com>", "Re: [APA-LIVE-TEST] thread root", "agent@example.com", "2026-11-06 07:00+00:00", "<mid-t1@example.com>", "<mid-t1@example.com>"},
-		{"13", "<mid-t3@example.com>", "Re: [APA-LIVE-TEST] thread root", "agent@example.com", "2026-11-06 08:00+00:00", "", "<mid-t1@example.com>"},
+		{"11", "<mid-t1@example.com>", "[APA-LIVE-TEST] thread root", "agent@example.com", "2026-11-06 12:00+00:00", "", ""},
+		{"12", "<mid-t2@example.com>", "Re: [APA-LIVE-TEST] thread root", "agent@example.com", "2026-11-06 13:00+00:00", "<mid-t1@example.com>", "<mid-t1@example.com>"},
+		{"13", "<mid-t3@example.com>", "Re: [APA-LIVE-TEST] thread root", "agent@example.com", "2026-11-06 14:00+00:00", "", "<mid-t1@example.com>"},
 	}
 	mid7      = mailMsg{"7", "<mid-7@example.com>", "[APA-LIVE-TEST] mid probe 7", "agent@example.com", "2026-11-06 09:00+00:00", "", ""}
-	oldReply2 = mailMsg{"21", "<mid-o2@example.com>", "Re: 报价", "王经理 <wang@example.com>", "2026-11-06 06:00+00:00", "<mid-o1@example.com>", ""}
-	oldReply3 = mailMsg{"22", "<mid-o3@example.com>", "Re: 报价", "王经理 <wang@example.com>", "2026-11-06 07:00+00:00", "<mid-o1@example.com>", ""}
+	oldReply2 = mailMsg{"21", "<mid-o2@example.com>", "Re: 报价", "王经理 <wang@example.com>", "2026-11-06 15:00+00:00", "<mid-o1@example.com>", ""}
+	oldReply3 = mailMsg{"22", "<mid-o3@example.com>", "Re: 报价", "王经理 <wang@example.com>", "2026-11-06 16:00+00:00", "<mid-o1@example.com>", ""}
 )
 
 // 合成 case：版本 1.1.0 的输出形态，邮件集合如下。
@@ -107,7 +109,9 @@ func mailCall(c string, args []string, root string) out {
 		if err != nil {
 			return failf(ExitNoCase, "tool-stub: %v", err)
 		}
-		if c == "mail-1.1.0-new" { // 追加 mid-7
+		// 追加 mid-7。garbled 两个 case 紧接在 mid-7 入账之后（验收 ACT-MAIL-06、07），邮箱里已有它：
+		// 否则列表里的信全都早于游标，适配器一封也不会去读，"输出无法解析"就永远触发不了。
+		if c == "mail-1.1.0-new" || c == "mail-garbled" || c == "mail-garbled-json" {
 			var l []any
 			json.Unmarshal(b, &l)
 			b = marshal(append(l, mid7.envelope()))
