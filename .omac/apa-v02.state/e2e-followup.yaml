@@ -1,5 +1,7 @@
-# sha256: 14b10820cf1eb4b8c3f1cebdd0e0764fd147d2897817552913a627c42f9f2767
+# sha256: 53f594aa1aac7b9622a4e609d3c6b1c60d9236410fd43089ca92c1521c2da6ca
 work_item_id: 01a1d304-5728-7f28-a802-058939e8269f
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-13T09:01:31Z'
 recovery_marker: true
 retry_note: 'PR #323 与 verification 已完成,核对 head 后重新提交,不要重做'
