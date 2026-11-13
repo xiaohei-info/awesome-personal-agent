@@ -1,0 +1,278 @@
+//go:build e2e
+
+package agents
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+type briefItem struct {
+	ID      string         `json:"id"`
+	Title   string         `json:"title"`
+	Phase   string         `json:"phase"`
+	Created string         `json:"created_at"`
+	Spec    map[string]any `json:"spec"`
+}
+
+func (f *fx) briefs(titlePrefix string) []briefItem {
+	f.t.Helper()
+	var out []briefItem
+	for _, b := range decode[struct{ Items []briefItem }](f.t, f.apa(f.DEL, 0, "item", "list", "--kind", "brief").Stdout).Items {
+		if strings.HasPrefix(b.Title, titlePrefix) {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// briefScript 是简报的 STUB_HARNESS 脚本：按账本里的事项逐项目分节，用运行凭据把正文写回目标事项（写回就是回执）。
+// 周期取目标事项标题里的到期时刻（"brief 2026-11-09 10:50"）。
+func (f *fx) briefScript() {
+	f.t.Helper()
+	script := fmt.Sprintf(`#!/bin/sh
+set -e
+APA=%q
+"$APA" item show "$1" > show.json
+"$APA" item list > items.json
+"$APA" project list > projects.json
+spec=$(python3 - <<'PY'
+import json
+title = json.load(open("show.json"))["item"]["title"]
+names = {p["id"]: p["name"] for p in json.load(open("projects.json"))["projects"]}
+by = {}
+for it in json.load(open("items.json"))["items"]:
+    if it.get("project") and it.get("kind") != "brief":
+        by.setdefault(names.get(it["project"], it["project"]), []).append(it["title"])
+sections = [{"project": n, "body": "进展：" + "；".join(ts) + "。到期事项：无。待本人决定：无。"} for n, ts in sorted(by.items())]
+print(json.dumps({"period": title.split(" ", 1)[1], "sections": sections}, ensure_ascii=False))
+PY
+)
+exec "$APA" item update "$1" --spec "$spec" --reason 写回简报
+`, f.Bin["apa"])
+	if err := os.WriteFile(filepath.Join(f.Root, "acc-receipt.sh"), []byte(script), 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	f.mode("receipt")
+}
+
+// TestFlowBrief 对应验收文档 flow-brief（ACT-BRF-01..06，替身版）：简报由 STUB_HARNESS 脚本经运行凭据写回，
+// "等待几分钟"由测试时钟推进代替（TC_ADVANCE）。ACT-BRF-05 见 TestBriefGenerateOverrideLeavesOpen（生成型覆盖，无 harness）。
+func TestFlowBrief(t *testing.T) {
+	f := setup(t, "")
+	f.briefScript()
+	work, open := f.Projects["acc-work"], f.Projects["acc-open"]
+	for name, p := range map[string]string{"BRF 示例任务 acc-work": work, "BRF 示例任务 acc-open": open} { // 账本里有可分节的素材
+		f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", name, "--phase", "open", "--project", p, "--evidence", "简报素材")
+	}
+	// 周期推进一格并等该周期的简报离开 open（Run 已写回）。
+	tick := func(prefix string, want int) {
+		t.Helper()
+		f.TCAdvance(61)
+		f.waitFor(fmt.Sprintf("%s 累计 %d 份且写回完成", prefix, want), 60*time.Second, func() bool {
+			bs := f.briefs(prefix)
+			if len(bs) < want {
+				return false
+			}
+			for _, b := range bs {
+				if b.Phase == "open" {
+					return false
+				}
+			}
+			return true
+		})
+	}
+	// settled 等到没有 open 的简报且份数连续 3 秒不变，返回份数。
+	settled := func(prefix string) int {
+		t.Helper()
+		n, since := -1, time.Now()
+		f.waitFor(prefix+"份数稳定且无在途简报", 90*time.Second, func() bool {
+			bs := f.briefs(prefix)
+			open := false
+			for _, b := range bs {
+				open = open || b.Phase == "open"
+			}
+			if open || len(bs) != n {
+				n, since = len(bs), time.Now()
+				return false
+			}
+			return time.Since(since) >= 3*time.Second
+		})
+		return n
+	}
+	var inst string
+
+	t.Run("ACT-BRF-01 到期生成简报，按项目分节", func(t *testing.T) {
+		inst = idOf(t, f.apa(f.DEL, 0, "instance", "add", "brief", "--param", "schedule=* * * * *", "--evidence", "每分钟出一份简报").Stdout)
+		tick("brief ", 1)
+		b := f.briefs("brief ")[0]
+		eq(t, "简报最终阶段", b.Phase, "done")
+		eq(t, "spec.period 取自到期时刻", b.Spec["period"], strings.TrimPrefix(b.Title, "brief "))
+		secs, _ := b.Spec["sections"].([]any)
+		projects := map[string]bool{}
+		for _, s := range secs {
+			m := s.(map[string]any)
+			p, _ := m["project"].(string)
+			body, _ := m["body"].(string)
+			if p == "" || strings.TrimSpace(body) == "" {
+				t.Errorf("分节缺 project 或 body: %v", m)
+			}
+			projects[p] = true
+		}
+		if !projects["acc-work"] || !projects["acc-open"] {
+			t.Errorf("正文应按项目分节（acc-work、acc-open）: %v", secs)
+		}
+		// 事项先建好，随后由 task 型 Run（STUB_HARNESS）写回。
+		var found bool
+		for _, r := range f.taskRuns() {
+			if r.Target == b.ID {
+				found = true
+				eq(t, "Run 状态", r.State, "succeeded")
+				eq(t, "Run 的 harness", r.Harness, harness)
+			}
+		}
+		if !found {
+			t.Errorf("没有以简报 %s 为目标的任务型 Run: %+v", b.ID, f.taskRuns())
+		}
+		contains(t, "Web 简报页", f.webOK("GET", "/items?kind=brief", "", http.StatusOK), b.ID)
+	})
+
+	t.Run("ACT-BRF-02 简报送达：会话注入、Web 未读、渠道领取", func(t *testing.T) {
+		// 简报写回完成（done）时产出一条 class=brief 的投递（设计 §3.6、§7.4），路由按 disturb.routes.brief。
+		type dlv struct{ ID, Item, Class, State string }
+		find := func(ds []dlv, item string) *dlv {
+			for i := range ds {
+				if ds[i].Item == item && ds[i].Class == "brief" {
+					return &ds[i]
+				}
+			}
+			return nil
+		}
+		unread := func() []dlv {
+			return decode[struct{ Deliveries []dlv }](t, f.webOK("GET", "/deliveries/unread", "", http.StatusOK)).Deliveries
+		}
+		route := func(brief string) {
+			b, _ := json.Marshal(map[string]any{"disturb": map[string]any{"routes": map[string]string{
+				"decision": "inject", "reminder": "inject", "brief": brief, "health": "web", "wake": "web"}}})
+			f.webOK("PUT", "/settings/policy", string(b), http.StatusOK)
+		}
+		known := map[string]bool{}
+		for _, b := range f.briefs("brief ") {
+			known[b.ID] = true
+		}
+		newBrief := func() briefItem {
+			t.Helper()
+			tick("brief ", len(known)+1)
+			for _, b := range f.briefs("brief ") {
+				if !known[b.ID] {
+					known[b.ID] = true
+					return b
+				}
+			}
+			t.Fatal("没有新简报")
+			return briefItem{}
+		}
+
+		// 1. 默认路由是会话注入：新会话开始时注入带上简报摘要（投递条目 class=brief，事项增量带简报标题）。
+		first := f.briefs("brief ")[0]
+		code, out, errs := f.apaEnv(f.DEL, "", []string{"APA_SESSION=acc-session-9", "APA_SESSION_KIND=direct"}, "context", "--format", "inject")
+		if code != 0 {
+			t.Fatalf("apa context 退出码 %d: %s%s", code, out, errs)
+		}
+		contains(t, "会话开始注入带上简报摘要", out, first.Title, "| brief |")
+
+		// 2. 路由 web：简报生成后、未被注入或领取之前，留在 Web 未读。
+		route("web")
+		web := newBrief()
+		d := find(unread(), web.ID)
+		if d == nil {
+			t.Fatalf("简报 %s 应出现在 Web 未读（class brief）: %+v", web.ID, unread())
+		}
+		eq(t, "Web 未读的投递状态", d.State, "fallback_web")
+
+		// 3. 路由渠道 acc-chan：CHAN_EXT 领取到该简报（200，class brief，item 为简报 id）；没被领取的 Web 简报仍在未读。
+		route("acc-chan")
+		ch := newBrief()
+		var got dlv
+		f.waitFor("CHAN_EXT 领取到渠道路由的简报", 30*time.Second, func() bool {
+			r := f.APIRaw("GET", "/v1/deliveries/next?wait=1", "", f.CHAN)
+			if r.Code != http.StatusOK {
+				return false
+			}
+			got = decode[dlv](t, r.Body)
+			return true
+		})
+		eq(t, "领取到的投递类别", got.Class, "brief")
+		eq(t, "领取到的投递对应简报", got.Item, ch.ID)
+		if find(unread(), web.ID) == nil {
+			t.Errorf("未领取的 Web 路由简报应仍在未读: %+v", unread())
+		}
+		route("inject")
+	})
+
+	t.Run("ACT-BRF-03 同一周期只生成一份", func(t *testing.T) {
+		for i := 2; i <= 5; i++ { // 保持每分钟的实例运行 5 个周期
+			tick("brief ", i)
+		}
+		per := map[string]int{}
+		for _, b := range f.briefs("brief ") {
+			per[b.Title]++
+		}
+		for p, n := range per {
+			if n > 1 {
+				t.Errorf("周期 %s 出现 %d 份简报", p, n)
+			}
+		}
+		if len(per) < 5 {
+			t.Errorf("5 个周期应至少 5 份简报，实际 %d", len(per))
+		}
+	})
+
+	t.Run("ACT-BRF-04 停机后只补最近一次", func(t *testing.T) {
+		// 虚拟时钟分钟边界会让"正常的下一周期"被误数成第二份补发：等虚拟秒落在 5–35 秒，
+		// 使停机、推进 300 秒（不改变对齐）、重启、稳定都发生在同一个虚拟分钟内。
+		f.waitFor("虚拟时钟处在分钟内的安全窗口", 70*time.Second, func() bool {
+			off, _ := strconv.ParseInt(strings.TrimSpace(readFile(t, filepath.Join(f.Home, "test-clock-offset"))), 10, 64)
+			sec := time.Now().Add(time.Duration(off) * time.Second).Second()
+			return sec >= 5 && sec <= 35
+		})
+		before := settled("brief ") // 基线必须稳定：前面各步的周期都已写回，没有在途的简报
+		stopAt := time.Now().Format(time.RFC3339Nano)
+		f.StopKernel()
+		f.TCAdvance(5 * 60) // 停机 5 分钟
+		f.StartKernelAgain()
+		f.waitFor("重启后补出简报", 60*time.Second, func() bool { return len(f.briefs("brief ")) > before })
+		after := settled("brief ")
+		if after-before != 1 {
+			for _, b := range f.briefs("brief ") {
+				t.Logf("简报 %s 创建于 %s", b.Title, b.Created)
+			}
+			t.Logf("停机前 %s", stopAt)
+		}
+		eq(t, "错过 5 个周期只补一份", after-before, 1) // 稳定后再数，给多补的第二份留出出现的时间
+		f.apa(f.DEL, 0, "instance", "disable", inst, "--evidence", "停止每分钟简报")
+	})
+
+	t.Run("ACT-BRF-06 周期复盘，由 spec.period 区分周期", func(t *testing.T) {
+		f.apa(f.DEL, 0, "instance", "add", "review", "--param", "schedule=* * * * *", "--evidence", "每分钟复盘")
+		tick("review ", 1)
+		tick("review ", 2)
+		periods := map[string]bool{}
+		for _, b := range f.briefs("review ") {
+			p, _ := b.Spec["period"].(string)
+			if p == "" {
+				t.Errorf("复盘 %s 没有 spec.period", b.ID)
+			}
+			periods[p] = true
+			eq(t, "复盘最终阶段", b.Phase, "done")
+		}
+		eq(t, "按 spec.period 区分的周期数", len(periods), 2)
+	})
+}

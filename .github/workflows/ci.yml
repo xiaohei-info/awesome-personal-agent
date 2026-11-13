@@ -26,6 +26,7 @@ jobs:
       - run: npm --prefix web ci
       - run: npm --prefix web run build
       - run: npm --prefix web run test -- --run src/app
+      - run: python3 -m pip install pytest  # ACT-DLG-06 跑 plugins/hermes/tests/receipt 契约测试
       - run: go build ./...
       - run: go test ./...
       - run: go run ./tools/redline
