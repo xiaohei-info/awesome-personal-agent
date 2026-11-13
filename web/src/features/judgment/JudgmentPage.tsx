@@ -93,7 +93,7 @@ export function JudgmentPage() {
     settings?.bands.find((b) => b.template === g.template && (b.source ?? "") === (g.source ?? "")) ?? settings?.bands.find((b) => b.template === g.template && !b.source);
 
   return (
-    <section>
+    <main>
       <PageHead lede="各级判断的指标与分数分布；不确定带、影子模式和抽检结论只能在这里由你调整。">判断与校准</PageHead>
       {error && <p role="alert" className="err">{error}</p>}
       {notice && <p role="status">{notice}</p>}
@@ -212,6 +212,6 @@ export function JudgmentPage() {
           </li>
         ))}
       </ul>
-    </section>
+    </main>
   );
 }
