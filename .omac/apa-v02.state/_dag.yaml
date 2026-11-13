@@ -1,4 +1,4 @@
-# sha256: 11086a553de3e4ba8e5c41b3b4de737295d116bf6cca5d9fe5b8f2529133e30f
+# sha256: 19802eeefd13ced74798376edd9c984125f623d1ec984ac419c59d1284ae1510
 defects:
   schema: omac.defect-ledger/v1
   used_global: 20
@@ -203,7 +203,7 @@ defects:
       - flow-web-workbench/ACT-WBN-16
       reporters:
       - e2e-workbench
-      state: fixing
+      state: fixed
       fix_node: fix.web-calibration.c8ef9b
     dfx-0b1aae331f8f:
       suspected: login-hardening
