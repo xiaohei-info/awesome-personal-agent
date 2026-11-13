@@ -10,7 +10,7 @@ import { feature } from "./index";
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 interface Sess { id: string; created_at: string; last_used_at: string; addr: string; agent: string; current: boolean }
-const sess = (id: string, over: Partial<Sess> = {}): Sess => ({ id, created_at: "2026-01-01T00:00:00Z", last_used_at: "2026-01-02T03:04:05Z", addr: "10.0.0." + id.length, agent: "Browser-" + id, current: false, ...over });
+const sess = (id: string, over: Partial<Sess> = {}): Sess => ({ id, created_at: "2026-01-01T00:00:00Z", last_used_at: "2026-01-02T03:04:05Z", addr: "198.51.100." + id.length, agent: "Browser-" + id, current: false, ...over });
 
 function server(initial: Sess[], password = "correct-horse-battery") {
   let sessions = initial;
@@ -110,7 +110,7 @@ describe("口令与在线会话（flow-web-login）", () => {
     expect(rows.getAllByRole("listitem")).toHaveLength(3);
     const mine = rows.getByText("Mine").closest("li")!;
     expect(within(mine).getByText("当前会话")).toBeInTheDocument();
-    expect(within(mine).getByText("10.0.0.2")).toBeInTheDocument();
+    expect(within(mine).getByText("198.51.100.2")).toBeInTheDocument();
     expect(within(mine).getByText(/2026-01-02/)).toBeInTheDocument();
   });
 
