@@ -7,7 +7,7 @@
 //	POST /ingests/{id}/replay           重放
 //	GET /sources/{id}/events            来源事件，可按 disposition 过滤（逗号分隔多个），after + limit 分页
 //	GET /sources/{id}/rejects           没有入账的输出行及原因，after + limit 分页
-//	POST /source-events/{id}/propose    把未判定事件转为建议
+//	POST /source-events/{id}/propose    把未判定事件或 digest 事件转为建议
 //	POST /source-events/{id}/ignore     忽略一条未判定事件
 //	POST /source-events/ignore          批量忽略未判定积压：按来源或全部
 //

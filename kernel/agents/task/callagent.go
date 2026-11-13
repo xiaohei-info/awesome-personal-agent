@@ -22,6 +22,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 )
 
 // Generator 是生成型入口（*direct.Service 满足它）。
@@ -198,6 +199,14 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 		}
 		mats = append(mats, sc)
 	}
+	var digest []summaries.DigestEntry
+	if c.Item != nil && c.Item.Kind == domain.KindBrief { // 每份简报带"知会"（摘要出口，§9.3）与按计划日期取的材料（§7.3）
+		var dm, pm Material
+		if dm, digest, pm, err = s.briefSections(ctx); err != nil {
+			return err
+		}
+		mats = append(mats, dm, pm)
+	}
 	ip := instanceParams(c)
 	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs,
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
@@ -212,8 +221,42 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 	case c.Item != nil:
 		t.Title, t.Project, t.From = c.Item.Title, c.Item.Project, c.Item.ID
 	}
-	_, err = s.Launch(ctx, t) // 没拉起时事项已转 needs_input 并带原因，不是规则失败
-	return err
+	out, err := s.Launch(ctx, t) // 没拉起时事项已转 needs_input 并带原因，不是规则失败
+	if err != nil || out.Run == "" || len(digest) == 0 {
+		return err
+	}
+	// 运行已入队才记"已汇入"：拉起失败时这些条目留给下一份简报。崩溃在两步之间只会重复一次，不会丢。
+	return s.o.Store.Update(ctx, func(tx *store.Tx) error { return summaries.MarkDigested(tx, out.Item, digest, s.o.Now()) })
+}
+
+// briefSections 是简报独有的两段资料：digest（尚未汇入过简报的摘要出口事件，每条只汇入一次）与 planned（计划今天或更早、
+// 尚未完成的事项，过期不自动改期；计划明天或没有计划日期的不在其中）。两段都只是账本读取，不调模型。
+func (s *Service) briefSections(ctx context.Context) (dm Material, digest []summaries.DigestEntry, pm Material, err error) {
+	type plannedItem struct {
+		ID         string       `json:"id"`
+		Title      string       `json:"title"`
+		Project    string       `json:"project,omitempty"`
+		Phase      domain.Phase `json:"phase"`
+		PlannedFor string       `json:"planned_for"`
+	}
+	planned := []plannedItem{}
+	err = s.o.Store.View(ctx, func(tx *store.Tx) error {
+		var verr error
+		if digest, verr = summaries.PendingDigest(tx); verr != nil {
+			return verr
+		}
+		l, verr := items.TodayItems(tx, s.o.Now())
+		for _, it := range l.Planned {
+			planned = append(planned, plannedItem{it.ID, it.Title, it.Project, it.Phase, it.PlannedFor})
+		}
+		return verr
+	})
+	if err != nil {
+		return
+	}
+	db, _ := json.Marshal(map[string]any{"digest": digest})
+	pb, _ := json.Marshal(map[string]any{"planned": planned})
+	return Material{Name: "digest", Body: string(db)}, digest, Material{Name: "planned", Body: string(pb)}, nil
 }
 
 // launchDepth 是规则拉起任务型与直接调用的链路深度，规则与后台运行同一处（chain.Next）；超过阈值只记录不派发，over 为真。

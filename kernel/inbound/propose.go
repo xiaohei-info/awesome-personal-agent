@@ -16,7 +16,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// CmdProposeUnjudged 把积压的来源事件（unjudged、expired）记为 proposed（§9.3）。输入不带 item 时只过授权与状态校验，不写入。
+// CmdProposeUnjudged 把积压的来源事件（unjudged、expired）或简报"知会"里的 digest 事件记为 proposed（§9.3、§3.12）。输入不带 item 时只过授权与状态校验，不写入。
 const CmdProposeUnjudged = "inbound.propose_unjudged"
 
 func registerPropose(x *command.Executor) error {
@@ -30,8 +30,8 @@ func registerPropose(x *command.Executor) error {
 			if err != nil {
 				return err
 			}
-			if ev.Disposition != domain.DispositionUnjudged && ev.Disposition != domain.DispositionExpired {
-				return domain.NewError(domain.CodeConflict, "source event "+o.ID+" is "+string(ev.Disposition)+", not unjudged", "re-read the source event")
+			if d := ev.Disposition; d != domain.DispositionUnjudged && d != domain.DispositionExpired && d != domain.DispositionDigest {
+				return domain.NewError(domain.CodeConflict, "source event "+o.ID+" is "+string(d)+", not unjudged or digest", "re-read the source event")
 			}
 			return nil
 		},

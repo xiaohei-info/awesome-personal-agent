@@ -202,3 +202,29 @@ func ruleByID(t *testing.T, e *env, id string) packs.SourceRule {
 	t.Fatalf("rule %s not found", id)
 	return packs.SourceRule{}
 }
+
+// ACT-DGA-18：简报"知会"条目逐条转为建议：只转点的那条，操作者是本人，另一条仍是 digest；转过的不能再转。
+func TestDigestEventCanBeProposedOneByOne(t *testing.T) {
+	e := newEnv(t, true)
+	e.emit("src_x", "exits", ev("d1", "x.news", "简讯一", nil), ev("d2", "x.news", "简讯二", nil))
+	first, second := e.disposition("src_x", "d1"), e.disposition("src_x", "d2")
+	if first.Disposition != domain.DispositionDigest || second.Disposition != domain.DispositionDigest {
+		t.Fatalf("setup: %+v %+v", first, second)
+	}
+	got, err := e.svc.ProposeUnjudged(bg, owner, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Disposition != domain.DispositionProposed || got.Item == "" {
+		t.Fatalf("event %+v", got)
+	}
+	if it := e.item(got.Item); it.Phase != domain.PhaseProposed || it.Title != "简讯一" {
+		t.Fatalf("item %+v", it)
+	}
+	if d := e.disposition("src_x", "d2"); d.Disposition != domain.DispositionDigest || d.Item != "" {
+		t.Fatalf("the other digest event must stay digest: %+v", d)
+	}
+	if _, err := e.svc.ProposeUnjudged(bg, owner, first.ID); code(err) != domain.CodeConflict {
+		t.Fatalf("second propose: %v", err)
+	}
+}

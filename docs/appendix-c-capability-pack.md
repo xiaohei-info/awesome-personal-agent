@@ -387,6 +387,8 @@ result_fields:
 用 apa item update 把 spec 写回事项。写回成功就是回执，直接结束；声明的字段没写全时事项转给本人（§8.4）。
 ```
 
+简报的资料文件除账本快照外，还带两段由内核读账本组出的材料，不调模型：`digest`（摘要出口 `then: digest` 的来源事件，每条只汇入一份简报一次，写进"知会"一节）与 `planned`（按 `planned_for` 取的、计划今天或更早且未完成的事项）。
+
 建实例：`apa instance add brief --param schedule="0 8 * * 1-5"`，到期落为 Timer。到期后内核建好 `brief` 事项，任务型在这个事项上运行，harness 用 Web 设置的默认 harness，资料文件带实例参数（含项目范围）。实例是显式创建的，这条规则只写回自身事项，且运行不超过 Web 设置的权限上限，所以不走观察模式，省略 `mode`。
 
 ## C.14 内置包声明的内容
