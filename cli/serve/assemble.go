@@ -41,6 +41,7 @@ import (
 	apiversion "github.com/xiaohei-info/awesome-personal-agent/api/version"
 	apiwhy "github.com/xiaohei-info/awesome-personal-agent/api/why"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct/rulejudge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
@@ -218,7 +219,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 	// 判断型：委派回执核验包（要求触发事项是委派子事项）走核验处理器，其余包的判断型模板只写判断记录。
-	genericJudge := judge.CallHandler()
+	genericJudge := rulejudge.Handler(judge)
 	judgeAgent := func(ctx context.Context, c rules.Call) error {
 		if pack, _, _ := strings.Cut(c.Rule, "/"); pack == "delegation-verify" {
 			return verifyAgent(ctx, c)
