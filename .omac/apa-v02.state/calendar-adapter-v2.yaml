@@ -1,6 +1,8 @@
-# sha256: 9763e9fee5a860f77879da78429b6c8faa62623ea72930ca37994e2d37252f9d
+# sha256: d89734f48e643b86d988971a756ba192190a79571d90ee066f808250815af6c1
 work_item_id: 01a1d24b-1057-7344-8a35-b205d5ebbc24
-status: in_review
+status: done
+merged: true
+merged_at: '2026-11-13T02:03:14Z'
 recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-638d034f3f12f6eb: 负责人裁定：不停本机 apa serve（那是本人在用的实例）。授权本节点在同一
   PR 里修改 cli/serve 下的测试，让 TestApaVersionMatchesGetVersionAndLatestLedgerMigration
