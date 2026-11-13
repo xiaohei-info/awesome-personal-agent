@@ -469,8 +469,9 @@ func TestFlowFollowUpUpgrade(t *testing.T) {
 			return false
 		})
 		for _, r := range model.Requests() {
-			if strings.Contains(r.BodyText, fuX) {
-				t.Errorf("MODEL_STUB 里不应有为 FU-X 发出的请求: %s", r.BodyText)
+			// 事项转 waiting 时 decision-card 包起草的一句话摘要是另一个模板的外呼，不是跟进判断。
+			if strings.Contains(r.BodyText, fuX) && !strings.Contains(r.BodyText, "一句话摘要") {
+				t.Errorf("MODEL_STUB 里不应有为 FU-X 发出的跟进判断请求: %s", r.BodyText)
 			}
 		}
 		for _, b := range cls.Batches() {
