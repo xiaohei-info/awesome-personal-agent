@@ -190,7 +190,7 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 }
 
 // endpoint 判定两个端点的现状：生成端点调用持续失败总是异常；某个端点没有配置只在有事件因此未判定时才算异常（不用模型是允许的，§5.6）。
-// shortcut: 判断端点没有健康记录（direct 只记生成端点），所以 judge 只会是空或 not_configured；要报 failing 需要先记它的失败。
+// 判断端点的故障由 direct 记在 direct_judge_health：分类端点整批失败后即使对话端点定案也要报（§8.8）。
 func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (judge, generate, worst string, err error) {
 	h, err := direct.HealthIn(tx)
 	if err != nil {
@@ -199,9 +199,17 @@ func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (judge, generate, wors
 	if h.Unavailable {
 		generate = EndpointFailing
 	}
+	jh, err := direct.JudgeHealthIn(tx)
+	if err != nil {
+		return EndpointFailing, generate, EndpointFailing, err
+	}
 	_, pol, err := policy.Current(tx)
 	if err != nil {
 		return "", EndpointFailing, EndpointFailing, err
+	}
+	// 判断端点可选：撤掉之后旧故障记录不再报，否则没有调用能把它清掉。
+	if jh.Unavailable && pol.JudgeEndpoint != nil && pol.JudgeEndpoint.URL != "" {
+		judge = EndpointFailing
 	}
 	waiting := false
 	for _, e := range backlog {

@@ -675,3 +675,72 @@ func TestScoreOnlyAsksClassifierOnly(t *testing.T) {
 		t.Fatalf("a failed score must not leave a record: %+v", v)
 	}
 }
+
+// ACT-JDP-04/05/09：分类端点整批 400、self_reported、401 后由对话端点定案，判断端点仍被标为不可用；
+// 下一次成功清除；对话端点定案不清除它，也不污染生成端点的健康。
+func TestClassifierFaultStaysVisibleAfterChatDecides(t *testing.T) {
+	judgeDown := func(e *jenv) bool {
+		var h Health
+		if err := e.st.View(bg, func(tx *store.Tx) (err error) { h, err = JudgeHealthIn(tx); return }); err != nil {
+			t.Fatal(err)
+		}
+		return h.Unavailable
+	}
+	for name, fault := range map[string]modelstub.ClsFault{
+		"400": {Status: 400}, "self_reported": {Source: "self_reported"}, "401": {Status: 401}, "protocol": {Protocol: "probability-judgment/9"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := setupJudge(t, true, true)
+			e.cls.SetFault(fault)
+			e.chat("jdp-h-"+name, "yes", true)
+			if v := e.judge(t, jc("screen", "jdp-h-"+name)); v.DecidedBy != "chat" {
+				t.Fatalf("%+v", v)
+			}
+			if !judgeDown(e) {
+				t.Fatal("classifier fault is invisible after chat decided")
+			}
+			if h, _ := e.svc.Health(bg); h.Unavailable {
+				t.Fatalf("generate endpoint marked down: %+v", h)
+			}
+			e.cls.Reset()
+			e.cls.PYes(modelstub.Key{Contains: "jdp-h-ok"}, 0.05)
+			if v := e.judge(t, jc("screen", "jdp-h-ok")); v.DecidedBy != "classifier" || judgeDown(e) {
+				t.Fatalf("not cleared after success: %+v down=%v", v, judgeDown(e))
+			}
+		})
+	}
+}
+
+// 判断端点的故障只由一次成功的调用清除：之后的 503、429、413 既不是成功也不是新故障，标记保持不变。
+func TestJudgeFaultSurvivesInconclusiveOutcomes(t *testing.T) {
+	for _, first := range []modelstub.ClsFault{{Status: 401}, {Source: "self_reported"}, {Status: 400}} {
+		for _, then := range []modelstub.ClsFault{{Status: 503}, {Status: 429}, {Status: 413}} {
+			e := setupJudge(t, true, true)
+			down := func() bool {
+				var h Health
+				if err := e.st.View(bg, func(tx *store.Tx) (err error) { h, err = JudgeHealthIn(tx); return }); err != nil {
+					t.Fatal(err)
+				}
+				return h.Unavailable
+			}
+			e.cls.SetFault(first)
+			e.chat("jdp-keep-1", "yes", true)
+			e.judge(t, jc("screen", "jdp-keep-1"))
+			if !down() {
+				t.Fatalf("%+v: fault not recorded", first)
+			}
+			e.cls.SetFault(then)
+			e.chat("jdp-keep-2", "yes", true)
+			e.judge(t, jc("screen", "jdp-keep-2"))
+			if !down() {
+				t.Fatalf("%+v then %+v: fault cleared without a successful call", first, then)
+			}
+			e.cls.Reset()
+			e.cls.PYes(modelstub.Key{Contains: "jdp-keep-3"}, 0.05)
+			e.judge(t, jc("screen", "jdp-keep-3"))
+			if down() {
+				t.Fatalf("%+v then %+v: not cleared by a successful call", first, then)
+			}
+		}
+	}
+}

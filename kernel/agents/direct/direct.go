@@ -52,6 +52,14 @@ CREATE TABLE direct_health (
 	since INTEGER NOT NULL,
 	last_error TEXT NOT NULL
 );`,
+}, {
+	Version: 2, Ledger: 3, Name: "ledger-v3-judge-health",
+	// 判断端点（分类端点）的可用性与生成端点分开记：对话端点定案不应抹掉分类端点的故障（§8.8、§15.2）。
+	SQL: `CREATE TABLE direct_judge_health (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	since INTEGER NOT NULL,
+	last_error TEXT NOT NULL
+);`,
 }}}
 
 // Completer 是外呼调用器的模型 HTTP（model.Client 满足它）。
@@ -614,9 +622,14 @@ func (s *Service) Health(ctx context.Context) (h Health, err error) {
 	return
 }
 
-// HealthIn 在调用方事务内读模型可用性（健康视图在自己的只读事务里汇总）。
-func HealthIn(tx *store.Tx) (h Health, err error) {
-	r, err := tx.Query(`SELECT since, last_error FROM direct_health WHERE id = 1`)
+// HealthIn 在调用方事务内读生成端点的可用性（健康视图在自己的只读事务里汇总）。
+func HealthIn(tx *store.Tx) (Health, error) { return healthIn(tx, "direct_health") }
+
+// JudgeHealthIn 读判断端点（分类端点）的可用性：整批 400、协议错误、401/403、self_reported 之后到下一次成功之前为不可用。
+func JudgeHealthIn(tx *store.Tx) (Health, error) { return healthIn(tx, "direct_judge_health") }
+
+func healthIn(tx *store.Tx, table string) (h Health, err error) {
+	r, err := tx.Query(`SELECT since, last_error FROM ` + table + ` WHERE id = 1`)
 	if err != nil {
 		return h, err
 	}
@@ -634,16 +647,25 @@ func HealthIn(tx *store.Tx) (h Health, err error) {
 
 // setHealth 记下不可用（errMsg 非空，保留最早的 since）或清除。
 func (s *Service) setHealth(ctx context.Context, errMsg string) error {
+	return s.setHealthIn(ctx, "direct_health", errMsg)
+}
+
+// setJudgeHealth 同 setHealth，记判断端点。
+func (s *Service) setJudgeHealth(ctx context.Context, errMsg string) error {
+	return s.setHealthIn(ctx, "direct_judge_health", errMsg)
+}
+
+func (s *Service) setHealthIn(ctx context.Context, table, errMsg string) error {
 	return s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		if errMsg == "" {
-			_, err := tx.Exec(`DELETE FROM direct_health WHERE id = 1`)
+			_, err := tx.Exec(`DELETE FROM ` + table + ` WHERE id = 1`)
 			return err
 		}
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO direct_health (id, since, last_error) VALUES (1, ?, ?)`,
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO `+table+` (id, since, last_error) VALUES (1, ?, ?)`,
 			s.o.Now().UnixNano(), errMsg); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`UPDATE direct_health SET last_error = ? WHERE id = 1`, errMsg)
+		_, err := tx.Exec(`UPDATE `+table+` SET last_error = ? WHERE id = 1`, errMsg)
 		return err
 	})
 }
