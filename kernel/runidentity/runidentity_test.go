@@ -425,6 +425,20 @@ func TestExchangeForWakeRun(t *testing.T) {
 	at := func(s string, when time.Time) command.Identity {
 		return Identity{Secret: s, Now: func() time.Time { return when }}
 	}
+	// 截止时刻按运行开始时间算，换取晚于开始时不顺延。
+	var started string
+	third := e.newItem(t, map[string]any{})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		r, err := proc.Enqueue(tx, proc.Request{External: true, Run: domain.Run{Category: domain.RunBackground, Launch: LaunchWake, Target: third, TimeoutSec: 60},
+			Spec: proc.Spec{Command: []string{"true"}}}, now.Add(-10*time.Second))
+		started = r.ID
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, late, err := exchange(auth.Delegate, started); err != nil || !late.Equal(now.Add(50*time.Second)) {
+		t.Fatalf("expires must be start+timeout: %v %v", late, err)
+	}
 	e.must(t, at(first, now), "item.update", update)
 	e.want(t, domain.ExitPermissionDenied, at(first, now), "item.update", map[string]any{"id": other, "summary": "s"})
 	e.want(t, domain.ExitUnauthenticated, at(first, exp), "item.update", update)
@@ -435,7 +449,7 @@ func TestExchangeForWakeRun(t *testing.T) {
 	}
 	e.want(t, domain.ExitUnauthenticated, at(first, now), "item.update", update)
 	e.must(t, at(second, now), "item.update", update)
-	if n := e.events(t, EvExchanged); n != 2 {
+	if n := e.events(t, EvExchanged); n != 3 {
 		t.Fatalf("exchanged events: %d", n)
 	}
 	if err := e.st.View(bg, func(tx *store.Tx) error {
