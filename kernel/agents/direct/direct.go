@@ -92,7 +92,7 @@ type Service struct {
 	// warm 是 Prefetch 问到、还没被某次判断认领的分类端点结果（指纹 → 结果）。认领的那次判断把它记成真实调用，
 	// 之后同一指纹才是复用（§8.5、§8.6）。只在内存里：重启后丢失，退化为按复用记，不影响判断结果。
 	warmMu sync.Mutex
-	warm   map[string]*classAns
+	warm   map[string][]*classAns
 }
 
 // New 返回 Service。Store、Packs、Model 必须给出。
