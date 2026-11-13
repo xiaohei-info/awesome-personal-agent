@@ -1,7 +1,5 @@
-# sha256: 8ea33d688e94a1ab0815c454726ddf4d69d6ea20ccfe81d4c669bbeaabd76cb0
+# sha256: 9af52c15ca4b78236a6f4a267f5709ecc0cb1dbd87e196f3d87ef49af8dffcbd
 work_item_id: 01a1d39a-b64a-7de6-8107-46b04cfbf9ee
-status: todo
+status: in_progress
 recovery_marker: true
-held: true
-hold_reason: 等待 brief-delivery-enqueue 合并(amendment 未能加依赖边,以 hold 保证顺序)
 retry_note: 产品缺口由 brief-delivery-enqueue 补;PR 与测试已在,不要重做,等该节点合并后再复验
