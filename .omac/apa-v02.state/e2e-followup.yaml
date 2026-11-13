@@ -1,4 +1,5 @@
-# sha256: 4a14501d927500c94e016a77180c55fa99c9de20b45649e87dc09759c635f48c
+# sha256: e23d42f779063f306c503da10257793b09abb357e518cb0515c61394cfc4d3d9
 work_item_id: 01a1d304-5728-7f28-a802-058939e8269f
-status: blocked
+status: in_progress
 recovery_marker: true
+retry_note: 'PR #323 与 verification 已完成,核对 head 后重新提交,不要重做'

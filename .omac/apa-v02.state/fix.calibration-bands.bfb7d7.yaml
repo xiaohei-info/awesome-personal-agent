@@ -1,4 +1,6 @@
-# sha256: d3457d29cd96ee77e236222b224206036b9baf26b27d644a21de14e2dc8860b5
+# sha256: fb82c79209258b78443d67923711fc708167f5817e898470ee1e9ade78482b9d
 work_item_id: 01a1d3c9-1f88-7ae1-835c-27910679ce3b
-status: blocked
-recovery_marker: true
+status: todo
+held: true
+hold_reason: 等待 DAG amendment 删除未合并 e2e 验证命令后 release
+retry_note: 代码与 PR 已完成,等契约修订后重新提交,不要重做
