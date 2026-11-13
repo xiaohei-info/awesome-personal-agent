@@ -1,7 +1,6 @@
-# sha256: 92f53859fc86178ffab56d041ffb8bb820d6767ef741b3013711141a1768cff3
+# sha256: ec456264a2cd6563ea2c10e76740fdf6c91c251117f87ca470961339a0735e15
 work_item_id: 01a1d3df-482d-77d9-addf-77821af6281b
 status: done
 merged: true
 merged_at: '2026-11-13T12:19:05Z'
-recovery_marker: true
 retry_note: 上次失败是 Claude 5 小时额度上限（429），已重置；在原分支/PR 上继续，不要重做已完成部分

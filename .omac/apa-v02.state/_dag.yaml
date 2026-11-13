@@ -1,4 +1,4 @@
-# sha256: 9471e9f30ecabf0dbbc2c2cf80e048759d9f66c108d2bf50a22c827c0473cc33
+# sha256: d3f874a3a9c4d55b661c700a5037b7595055c602da516168c144c20ac41a2d46
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -35,6 +35,9 @@ defects:
       - e2e-sources
       state: queued
       retried: true
+      stop:
+        reason_code: defect-budget-exhausted
+        detail: 该报告者或整个 DAG 的自动修复预算已用完。
     dfx-bfeb8db8483b:
       suspected: calendar-adapter-v2
       anchors:
@@ -114,7 +117,7 @@ defects:
       - flow-judgment-record/ACT-JRC-04
       reporters:
       - e2e-judgment
-      state: fixing
+      state: fixed
       fix_node: fix.judgment-record.4fdb4d
     dfx-4fdb4d4ca954:
       suspected: judgment-record
@@ -122,7 +125,7 @@ defects:
       - flow-judgment-record/ACT-JRC-06
       reporters:
       - e2e-judgment
-      state: fixing
+      state: fixed
       fix_node: fix.judgment-record.4fdb4d
     dfx-9d6fc9aed5ca:
       suspected: judgment-stats
@@ -214,6 +217,7 @@ defects:
       locations:
       - api/core/login_hardening_test.go:TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce
       - api/core/testclock_test.go
+    stopped: defect-budget-exhausted
 pending_human_amendment:
   amendment_id: amend-6c86c8335a0c
   file: reports/apa-dag-unblock-20261113/amendment-reviewed.yaml
