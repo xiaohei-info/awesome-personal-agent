@@ -60,29 +60,31 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-AUTH-03 delegate 改任意事项必须附证据", func(t *testing.T) {
-		target := k.addItem("", otherHost)
-		r := k.Apa(k.DEL, "", "item", "update", target, "--title", "no-evidence", "--reason", "x")
-		if r.Code == 0 {
-			t.Fatal("delegate 不带证据也能改事项")
-		}
-		// §14.5：依据不足的修改不生效；open 的事项转 needs_input（版本随阶段变），内容不变。
-		if k.item(target)["title"] == "no-evidence" || k.item(target)["phase"] != "needs_input" {
-			t.Error("不带证据被拒绝后修改不应生效，事项应转 needs_input")
-		}
-		const words = "把标题改成 with-evidence"
-		k.expect("DEL 带证据", k.Apa(k.DEL, "", "item", "update", target, "--title", "with-evidence", "--reason", "owner asked", "--evidence", words), 0)
-		if k.item(target)["title"] != "with-evidence" {
-			t.Error("带证据的修改应生效")
-		}
-		var hit bool
-		for _, ev := range k.audit(url.Values{"object": {target}, "type": {"item.updated"}}) {
-			if ev.Evidence == words && ev.Actor["on_behalf_of"] == "owner" {
-				hit = true
+	var auth03 string // ACT-AUTH-08 沿用 ACT-AUTH-03 的事项
+	k.step("ACT-AUTH-03 delegate 改别人的事项须私聊会话里的本人原话加会话引用，或授权单", func(t *testing.T) {
+		target := k.addItem("acc-open", otherHost)
+		auth03 = target
+		unchanged := func(label string) {
+			t.Helper()
+			if k.item(target)["title"] == "no-basis" || k.item(target)["phase"] != "needs_input" {
+				t.Errorf("%s: 修改不应生效，事项应转 needs_input", label)
 			}
 		}
-		if !hit {
-			t.Errorf("Event 应含 on_behalf_of=owner 和证据原话 %q", words)
+		k.expect("不带 --evidence 也不带 --grant", k.run(k.DEL, nil, "item", "update", target, "--title", "no-basis", "--reason", "x"), exitBasis)
+		unchanged("无依据")
+		const words = "把标题改成 with-evidence"
+		k.expect("direct 会话 + 原话", k.run(k.DEL, at("auth-s3", "direct"), "item", "update", target, "--title", "with-evidence", "--reason", "owner asked", "--evidence", words), 0)
+		if k.item(target)["title"] != "with-evidence" {
+			t.Error("direct 会话里带原话的修改应生效")
+		}
+		ev := k.lastEvent(target, "item.updated")
+		if ev.Evidence != words || ev.Actor["on_behalf_of"] != "owner" || ev.Actor["session"] != "auth-s3" || ev.Actor["session_kind"] != "direct" {
+			t.Errorf("Event 应含 on_behalf_of、原话、会话引用与会话类型 direct: %+v", ev)
+		}
+		before := k.version(target)
+		k.expect("同时带 --evidence 与 --grant", k.run(k.DEL, at("auth-s3", "direct"), "item", "update", target, "--title", "both", "--reason", "x", "--evidence", words, "--grant", "gnt_none"), exitInvalid)
+		if k.item(target)["title"] == "both" || k.version(target) != before {
+			t.Error("两种依据同时携带不应生效")
 		}
 	})
 
@@ -177,7 +179,10 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		}
 		// 矩阵每一行、每一列、表中每个动作都有断言；缺任一项即矩阵有未覆盖的格子。
 		for _, name := range []string{"TestMatrixEveryRowAndColumn", "TestMatrixCoversEveryTableAction", "TestWebLevelCannotBeClaimedByAgent",
-			"TestMatrixRunIDExchange", "TestSettingsRejectEveryBearerAndAcceptWebSession"} {
+			"TestMatrixRunIDExchange", "TestSettingsRejectEveryBearerAndAcceptWebSession",
+			// §14.5 会话类型规则：凭原话的第二档在 direct 之外（group、unknown、缺失）都被拒；授权单、自己的工作、读取不看会话类型。
+			"TestOwnerWordsOnlyInDirectSessions", "TestSessionKindDoesNotGateGrantsOwnWorkOrReads",
+			"TestDelegateDoneOnOwnersItemNeedsWordsInDirectSessionOrGrant", "TestGrantAuthorisesDoneOnlyInScope"} {
 			if !passed[name] {
 				t.Errorf("契约测试 %s 没有通过（或没有运行）", name)
 			}
@@ -201,6 +206,64 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		}
 		if n := strings.Count(strings.Join(kinds, ","), "project.updated"); n < 3 { // 建项目 + 远程地址 + 本机检出
 			t.Errorf("变更应都记 Event，project.updated 只有 %d 条: %v", n, kinds)
+		}
+	})
+	k.step("ACT-AUTH-08 多人会话里的原话不能让 delegate 改别人的事项", func(t *testing.T) {
+		// 先在 Web 回答内核生成的 ask，让事项回到 open。
+		opts, _ := k.ask(auth03)["options"].([]any)
+		if len(opts) == 0 {
+			t.Fatalf("ACT-AUTH-03 留下的事项应带内核生成的 ask: %v", k.ask(auth03))
+		}
+		k.webOK("POST", "/v1/items/"+auth03+"/decide", `{"choice":"`+opts[0].(map[string]any)["id"].(string)+`"}`, 200)
+		eq(t, "回答后阶段", k.phase(auth03), "open")
+		title := k.item(auth03)["title"]
+		k.rejectedNotDirect("group item update", k.run(k.DEL, at("auth-g8", "group"), "item", "update", auth03, "--title", "x", "--reason", "x", "--evidence", "本人说改"))
+		eq(t, "标题不变", k.item(auth03)["title"], title)
+		eq(t, "阶段", k.phase(auth03), "needs_input")
+	})
+
+	k.step("ACT-AUTH-09 delegate 无依据把本人的事项标为完成被拒（SPIKE-DONE-AUTHZ）", func(t *testing.T) {
+		own := k.ownItem("acc-open", "AUTH-I9")
+		k.expect("无依据 transition done", k.run(k.DEL, nil, "item", "transition", own, "--to", "done", "--reason", "x"), exitBasis)
+		eq(t, "AUTH-I9 阶段", k.phase(own), "needs_input")
+		if len(k.auditOf(own, "command.rejected")) == 0 {
+			t.Error("应记 command.rejected")
+		}
+		// DEL 自己委派出去的子事项：回执标记完成缺结果证据，退出码 2。
+		parent := k.addItem("acc-open", workHost)
+		child := k.idOf("delegate", k.delegate("--parent", parent, "--assignee", workHost))
+		before := k.version(child)
+		k.expect("缺结果证据的 done", k.run(k.DEL, nil, "report", child, "--outcome", "done", "--summary", "完成"), exitInvalid)
+		if k.version(child) != before || k.phase(child) == "done" {
+			t.Error("缺结果证据的 done 不应被接受")
+		}
+	})
+
+	k.step("ACT-AUTH-10 私聊会话原话可以把本人的事项标为完成", func(t *testing.T) {
+		own := k.ownItem("acc-open", "AUTH-I10")
+		k.expect("direct transition done", k.run(k.DEL, at("auth-s10", "direct"), "item", "transition", own, "--to", "done", "--reason", "x", "--evidence", "这件事做完了"), 0)
+		eq(t, "AUTH-I10 阶段", k.phase(own), "done")
+		ev := k.lastEvent(own, "item.phase_changed")
+		if ev.Actor["on_behalf_of"] != "owner" || ev.Evidence != "这件事做完了" || ev.Actor["session"] != "auth-s10" || ev.Actor["session_kind"] != "direct" {
+			t.Errorf("Event 缺依据字段: %+v", ev)
+		}
+	})
+
+	k.step("ACT-AUTH-11 授权单可以把范围内本人的事项标为完成，范围外不行", func(t *testing.T) {
+		g := k.grant([]string{"item.transition"}, "acc-home")
+		inScope, outScope := k.ownItem("acc-home", "AUTH-I11-home"), k.ownItem("acc-open", "AUTH-I11-open")
+		k.expect("范围内", k.run(k.DEL, nil, "item", "transition", inScope, "--to", "done", "--reason", "x", "--grant", g), 0)
+		eq(t, "范围内阶段", k.phase(inScope), "done")
+		eq(t, "Event 记的授权单", k.lastEvent(inScope, "item.phase_changed").Grant, g)
+		k.expect("范围外", k.run(k.DEL, nil, "item", "transition", outScope, "--to", "done", "--reason", "x", "--grant", g), exitBasis)
+		eq(t, "范围外阶段", k.phase(outScope), "needs_input")
+	})
+
+	k.step("ACT-AUTH-12 多人会话原话不能把本人的事项标为完成", func(t *testing.T) {
+		own := k.ownItem("acc-open", "AUTH-I12")
+		k.rejectedNotDirect("group transition done", k.run(k.DEL, at("auth-g12", "group"), "item", "transition", own, "--to", "done", "--reason", "x", "--evidence", "做完了"))
+		if k.phase(own) == "done" {
+			t.Error("事项不应被标为完成")
 		}
 	})
 }
