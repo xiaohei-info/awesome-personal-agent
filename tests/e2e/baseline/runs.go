@@ -101,22 +101,39 @@ func (e *Env) StubRun(mode string) (item, runDir string, env map[string]string) 
 	if r := e.Apa(e.DEL, "", "item", "transition", m.ID, "--to", "open", "--reason", "go", "--evidence", "环境基线触发"); r.Code != 0 {
 		e.fatal("item transition: %d %s %s", r.Code, r.Stdout, r.Stderr)
 	}
+	// 替身用 os.WriteFile 非原子写入：文件出现不等于内容写完，轮询到可解析为止。
 	var file string
+	var readErr, parseErr error
+	var rawLen int
 	if !e.WaitFor(30*time.Second, func() bool {
 		fs, _ := filepath.Glob(filepath.Join(e.Home, "runs", "*", "stub-harness-env.json"))
 		for _, f := range fs {
-			if !seen[f] {
-				file = f
-				return true
+			if seen[f] {
+				continue
 			}
+			file = f
+			raw, err := os.ReadFile(f)
+			if readErr = err; err != nil {
+				return false
+			}
+			rawLen = len(raw)
+			var got map[string]string
+			if parseErr = json.Unmarshal(raw, &got); parseErr != nil {
+				return false
+			}
+			env = got
+			return true
 		}
 		return false
 	}) {
-		e.fatal("经内核触发 %s 运行后，运行目录里没有环境变量记录\n%s", harness, e.ServiceLog())
-	}
-	raw, err := os.ReadFile(file)
-	if err != nil || json.Unmarshal(raw, &env) != nil {
-		e.fatal("读取运行环境记录 %s: %v", file, err)
+		switch {
+		case file == "":
+			e.fatal("经内核触发 %s 运行后，运行目录里没有环境变量记录\n%s", harness, e.ServiceLog())
+		case readErr != nil:
+			e.fatal("读取运行环境记录 %s 失败: %v", file, readErr)
+		default:
+			e.fatal("运行环境记录 %s 等待 30s 仍无法解析（原始长度 %d 字节）: %v", file, rawLen, parseErr)
+		}
 	}
 	return m.ID, filepath.Dir(file), env
 }
