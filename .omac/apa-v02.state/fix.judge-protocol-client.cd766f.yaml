@@ -1,4 +1,8 @@
-# sha256: 56850a1b5bf45bca3c83a4a0be3989bf3a26649935a2a7eef2f864be201eaf82
+# sha256: ef089b1d5871114eb006267fd47443e6baf95def6cc32ae739bcb864ec8a8eed
 work_item_id: 01a1d3dd-37ec-793f-b98d-01f79b342bb6
 status: in_progress
 recovery_marker: true
+retry_note: 'PR #345 (head 36db09b92) 与 main 在 kernel/health/health.go 有合并冲突,GitHub
+  因此不触发 pull_request CI(no checks reported),OMAC CI 门禁判失败并回退。请在同一分支上 rebase/merge
+  origin/main,解决 health.go 冲突,保留 TestJudgeFaultIgnoredOnceJudgeEndpointRemoved 覆盖的修复,推送后
+  omac work submit。不要重做其余代码。'

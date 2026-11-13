@@ -11,65 +11,71 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 6
+  amendment_revision: 10
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-ffc8e6030f1f
+    amendment_id: amend-ab40b9c6295b
     amendment_file: .omac/apa-v02.system-amendment.yaml
     nodes:
-      fix.calendar-adapter-v2.bfeb8d:
+      fix.judgment-stats.184e24:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-561b3dd0f096ef34b70a7ff8
-      e2e-sources:
+        expected_review_generation: amendment-79c1124e9e3038c2b46d0ddc
+      e2e-judgment:
         stage: authoring
         state: synced
-        work_item_id: 01a1d2cd-7f8d-7360-8062-fa1399d19fd6
+        work_item_id: 01a1d2ab-28bd-796b-9b26-77595af37b58
         baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: null
+          review_generation: amendment-af2bc6d1d50cb83a39206240
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline: null
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
           decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+          contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
           worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
-        expected_review_generation: amendment-7dae016bda875dfe6066a12f
+        expected_contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
+        expected_review_generation: amendment-9043ed2a26cc7ae8c4a2c50e
         attempt_baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: null
+          review_generation: amendment-af2bc6d1d50cb83a39206240
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline: null
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
           decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+          contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
           worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-7dae016bda875dfe6066a12f
+          review_generation: amendment-9043ed2a26cc7ae8c4a2c50e
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -81,45 +87,13 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+          contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-followmsg:
         amendment_id: amend-0c6f84cf7965
         work_item_id: 01a1d2d4-3c01-7d0b-a710-5663aafbde78
         contract_sha256: ce1bfaa05637c8d1321cddab97ee54d562ee45f2f81400183b312c253250be7a
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-      e2e-workbench:
-        amendment_id: amend-212e20e48a9e
-        work_item_id: 01a1d2fc-2cb4-707a-8921-2682fe514c2f
-        contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-      e2e-inbound-rules:
-        amendment_id: amend-6cd1291ea27b
-        work_item_id: 01a1d2c3-f4c8-7c35-a6be-55223a4cd51a
-        contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-      e2e-judge:
-        amendment_id: amend-6cd1291ea27b
-        work_item_id: 01a1d2ab-1866-7a85-9059-479469d9c3a4
-        contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-      e2e-judgment:
-        amendment_id: amend-6cd1291ea27b
-        work_item_id: 01a1d2ab-28bd-796b-9b26-77595af37b58
-        contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
         bounce_baseline:
           merge: 0
           review: 0
@@ -132,14 +106,6 @@ meta:
           merge: 0
           review: 1
           worker: 0
-      e2e-hostplugin:
-        amendment_id: amend-100c15378d8d
-        work_item_id: 01a1d32f-e47d-714e-89b9-4783862c659b
-        contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
       e2e-release-doctor:
         amendment_id: amend-564dd6687bb3
         work_item_id: 01a1d344-46c0-7745-81e6-4414d53eb795
@@ -148,8 +114,136 @@ meta:
           merge: 0
           review: 0
           worker: 1
+      fix.health-signals-v2.8a3ec2:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3bf-9d99-7bcc-867e-b4477644a786
+        contract_sha256: 24d962962e6a244f0622574cf38db89441b3d5328a38d15bcb3306a0d3c2e35c
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.web-today.ec9640:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3c3-c674-7163-bc4e-a0f9046b7433
+        contract_sha256: 67c9b266e7f165845aa127d2b2b08c7c59d5dc585512bb77610b166f2af6176a
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.calibration-bands.bfb7d7:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3c9-1f88-7ae1-835c-27910679ce3b
+        contract_sha256: c50a83d86065eb0d320b6159f8789948076c5aa2b48149d48fdbd094d41238a6
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.cascade-engine.600f13:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3d4-f913-7a5b-8ffb-a26bcd664782
+        contract_sha256: 6b9a0e98aded60a091fda59a30cc4b4fc401252ffe9320b73f9b7f1ffeb75f5f
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.inbound-pipeline-v2.1189ac:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3b4-e32d-7917-aeae-af040354940e
+        contract_sha256: 0fdfc901c8ec8241c99feb528d04a9cc1afc30601c8cddb1615b49ffdb97fe84
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.judge-protocol-client.cd766f:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3dd-37ec-793f-b98d-01f79b342bb6
+        contract_sha256: 7dcbd2339eeb1004aa7ff75ebab56e59aab91439c4c5db6142a9857a05884144
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.judgment-record.4fdb4d:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3df-482d-77d9-addf-77821af6281b
+        contract_sha256: 63a086f985e329cfca2c78496e4b13591801c5d7a6dc308cd4288eaa01c3909c
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.judgment-stats.9d6fc9:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3e2-9f68-78e2-8cd1-9ffd31d7b27d
+        contract_sha256: 969ad3a0a12c8ea27951ef63819127f1c6aa5386482c8c10085efc5b306723a9
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.wake-lease-recheck.5239bc:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d3f8-ee31-79ea-82a0-27b9c0dfb76f
+        contract_sha256: e8d38bd33845dd3f96e6c509c266136ae9a4ae4ca0bc450811135f1f694d37a2
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-judge:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d2ab-1866-7a85-9059-479469d9c3a4
+        contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-hostplugin:
+        amendment_id: amend-6c86c8335a0c
+        work_item_id: 01a1d32f-e47d-714e-89b9-4783862c659b
+        contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-inbound-rules:
+        amendment_id: amend-0b1820154e25
+        work_item_id: 01a1d2c3-f4c8-7c35-a6be-55223a4cd51a
+        contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.attribution-v2.d3eb8c:
+        amendment_id: amend-01e325f261f6
+        work_item_id: 01a1d4ed-3a51-74ca-accf-26ef1b1756c4
+        contract_sha256: d7f4558d87c83f9f24e3f3cb551a01898580b8cd89f446d4dc87a34b97354ac3
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      fix.web-calibration.c8ef9b:
+        amendment_id: amend-01e325f261f6
+        work_item_id: 01a1d4f0-9399-75c2-8f2c-9c5ab1a92ab3
+        contract_sha256: d319e537b2c2a3035626b37e5508ba1fb07aa0fd051b2ee9c205acd81b0757e7
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-sources:
+        amendment_id: amend-01e325f261f6
+        work_item_id: 01a1d2cd-7f8d-7360-8062-fa1399d19fd6
+        contract_sha256: 382079420b10ac8e5feafdcb6c976a9d7b68d10e47215820f2935020b34dd798
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-workbench:
+        amendment_id: amend-01e325f261f6
+        work_item_id: 01a1d2fc-2cb4-707a-8921-2682fe514c2f
+        contract_sha256: db8073513b0b24880f32e39814fb1dce6351fa6b8b85e67e3815289f178e0fc9
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 1
     system: true
-  last_amendment_id: amend-ffc8e6030f1f
+  last_amendment_id: amend-ab40b9c6295b
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -5806,6 +5900,7 @@ nodes:
   - fix.calibration-bands.bfb7d7
   - fix.judgment-record.4fdb4d
   - fix.judgment-stats.9d6fc9
+  - fix.judgment-stats.184e24
   title: 判断记录、计数、校准与抽检全流程
   description: 产出 e2e-judgment-flow-evidence。是 flow-judgment-record 的唯一全流程 owner。
   reviewer: omac-reviewer
@@ -5895,6 +5990,7 @@ nodes:
   - source-contract-v2
   - builtin-struct-rules
   - fix.inbound-pipeline-v2.1189ac
+  - fix.login-hardening.0b1aae
   title: 来源规则出口与内置规则全流程
   description: 产出 e2e-inbound-rules-flow-evidence。是 flow-inbound-rules 的唯一全流程 owner。要点：撤掉两个模型端点后断言零调用。
   reviewer: omac-reviewer
@@ -5981,6 +6077,7 @@ nodes:
   - rule-exits-where
   - fix.attribution-v2.62f6c6
   - fix.calendar-adapter-v2.bfeb8d
+  - fix.attribution-v2.d3eb8c
   title: 代码托管、邮件、日历来源全流程（替身版）
   description: 产出 e2e-sources-flow-evidence。是 flow-source-github、flow-source-mail、flow-source-calendar
     的唯一全流程 owner，并负责其中 3 个 v0.1 继承或跨模块 business-action。要点：遗留缺陷 dfx-5dd4c0c9998f、dfx-1699a21c5f70
@@ -6585,6 +6682,7 @@ nodes:
   - stale-check
   - fix.health-signals-v2.8a3ec2
   - fix.web-today.ec9640
+  - fix.web-calibration.c8ef9b
   title: 工作台、久未推进与第一档全流程
   description: 产出 e2e-workbench-flow-evidence。是 flow-web-workbench、flow-stale、flow-run-tiers
     的唯一全流程 owner，并负责其中 4 个 v0.1 继承或跨模块 business-action。要点：不启动任何模型替身；Web 步骤用 ego-browser。
@@ -9206,7 +9304,6 @@ nodes:
     - go test -count=1 ./tests/conformance/ ./cli/serve/
     - go test -count=1 ./kernel/health/...
     - go test -count=1 ./api/health/...
-    - go test -tags=e2e -count=1 -run TestFlowRunTiers ./tests/e2e/workbench/...
     integration_gates:
     - name: health-signals-v2-gate
       layer: L1
@@ -9280,7 +9377,6 @@ nodes:
     - npm --prefix web ci
     - npm --prefix web run build
     - npm --prefix web run test -- --run src/features/today
-    - go test -tags=e2e -count=1 -run TestFlowWebWorkbench ./tests/e2e/workbench/...
     integration_gates:
     - name: web-today-gate
       layer: L1
@@ -9453,7 +9549,6 @@ nodes:
     - go test -count=1 ./tests/conformance/ ./cli/serve/
     - go test -count=1 ./kernel/judgment/...
     - go test -count=1 ./api/settings/...
-    - go test -tags=e2e -count=1 -run TestFlowJudgmentRecord ./tests/e2e/judgment/
     integration_gates:
     - name: calibration-bands-gate
       layer: L1
@@ -9526,7 +9621,6 @@ nodes:
     - go test -count=1 ./tests/conformance/ ./cli/serve/
     - go test -count=1 ./kernel/agents/...
     - go test -count=1 ./kernel/outcall/...
-    - go test -tags=e2e -count=1 -run 'TestFlowAgentCascade/ACT-CAS-18' ./tests/e2e/judge/...
     integration_gates:
     - name: cascade-engine-gate
       layer: L1
@@ -9717,8 +9811,6 @@ nodes:
     - go test -count=1 ./tests/conformance/ ./cli/serve/
     - go test -count=1 ./kernel/inbound/...
     - go test -count=1 ./packs/...
-    - go test -tags=e2e -count=1 -run 'TestFlowJudgeProtocol/ACT-JDP-02' ./tests/e2e/judge/...
-    - go test -tags=e2e -count=1 -run TestFlowInboundRules ./tests/e2e/inboundrules/...
     integration_gates:
     - name: inbound-pipeline-v2-gate
       layer: L1
@@ -9837,7 +9929,6 @@ nodes:
     - go run ./tools/redline
     - go test -count=1 ./tests/conformance/ ./cli/serve/
     - go test -count=1 ./kernel/outcall/...
-    - go test -tags=e2e -count=1 -run 'TestFlowJudgeProtocol/ACT-JDP-09' ./tests/e2e/judge/...
     integration_gates:
     - name: judge-protocol-client-gate
       layer: L1
@@ -9936,8 +10027,6 @@ nodes:
     - go test -count=1 ./kernel/judgment/...
     - go test -count=1 ./kernel/why/...
     - go test -count=1 ./cli/why/...
-    - go test -tags=e2e -count=1 -run TestFlowJudgmentRecord ./tests/e2e/judgment/
-    - go test -tags=e2e -count=1 -run TestFlowJudgmentRecord ./tests/e2e/judgment/
     integration_gates:
     - name: judgment-record-gate
       layer: L1
@@ -10017,7 +10106,6 @@ nodes:
     - go run ./tools/redline
     - go test -count=1 ./tests/conformance/ ./cli/serve/
     - go test -count=1 ./kernel/judgment/...
-    - go test -tags=e2e -count=1 -run TestFlowJudgmentRecord ./tests/e2e/judgment/
     integration_gates:
     - name: judgment-stats-gate
       layer: L1
@@ -10266,7 +10354,6 @@ nodes:
     - go test -count=1 ./tests/conformance/ ./cli/serve/
     - go test -count=1 ./kernel/wake/...
     - go test -count=1 ./plugins/hermes/...
-    - go test -tags=e2e -count=1 -run TestFlowWakeLease ./tests/e2e/hostplugin/...
     integration_gates:
     - name: wake-lease-recheck-gate
       layer: L1
@@ -10450,4 +10537,400 @@ nodes:
       - standard-event-v2
     defect_refs:
     - dfx-bfeb8db8483b
+    coverage_gate: 80
+- id: brief-delivery-enqueue
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - digest-exit
+  - delivery-cap-mute
+  - delivery-defer-judge
+  title: 简报触达入队
+  description: 产出 brief-delivery-enqueue-delivery。补 §3.6 第 4 步缺口：简报事项（kind=brief）写回完成后，经命令模型向触达模块入队一条
+    class=brief 的投递，由打扰策略定路由；未注入、未领取时留在 Web 未读（GET /deliveries/unread 可见），可被渠道 ext
+    领取，下次会话开始可被 apa context 注入摘要；同一简报只入队一次。行为验收仍由 e2e-v01-agents（flow-brief / ACT-BRF-02）负责。
+  reviewer: omac-reviewer
+  contract:
+    objective: 简报事项（kind=brief）写回完成后，经命令模型向触达模块入队一条 class=brief 的投递：未经渠道送达时留在 Web
+      未读（GET /deliveries/unread 可见），可被渠道 ext 领取，下次会话开始可被注入摘要；同一简报只入队一次
+    non_goals:
+    - 不新增命令、路由、事件类型或配置项；不修改迁移
+    - 不直写 delivery 数据；入队只经命令模型调用触达模块（AGENTS.md 依赖红线）
+    - 不改 kernel/delivery/disturb.go、kernel/delivery/defer.go 的打扰控制与推迟判定语义
+    - 不改 tests/e2e 下的任何断言；flow-brief 全流程证据由 e2e-v01-agents 负责
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/summaries/...
+    - go test -count=1 ./kernel/delivery/...
+    integration_gates:
+    - name: brief-delivery-enqueue-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#36-场景五简报
+      - docs/solution-design.md#69-delivery
+      - docs/solution-design.md#74-触达
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 简报写回后产出且只产出一条 class=brief 的投递，Web 未读可见、渠道 ext 可领取、会话开始可注入；单测与对照测试通过
+      covers:
+      - brief-delivery-enqueue
+      acceptance_refs:
+      - flow-brief
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/summaries/...
+      - go test -count=1 ./kernel/delivery/...
+    pr_base: main
+    acceptance_refs:
+    - flow-brief
+    source_of_truth:
+    - docs/solution-design.md#36-场景五简报
+    - docs/solution-design.md#69-delivery
+    - docs/solution-design.md#74-触达
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - kernel/summaries/**
+    - kernel/delivery/brief.go
+    - kernel/delivery/brief_test.go
+    evidence_mode: fixture
+    produces:
+    - artifact_id: brief-delivery-enqueue-delivery
+      provides:
+      - id: brief-delivery-enqueue
+        ref: docs/solution-design.md#36-场景五简报
+    consumes:
+    - artifact_id: digest-exit-delivery
+      producer: digest-exit
+      evidence_mode: artifact
+      requires:
+      - digest-exit
+    coverage_gate: 80
+- id: fix.attribution-v2.d3eb8c
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  - source-contract-v2
+  title: 'Fix attribution-v2: dfx-d3eb8c700b85'
+  description: "Automatic fix for upstream defect(s) reported by e2e-sources.\n\n-
+    [design-gap] anchors flow-source-github/ACT-GH-09 (docs/solution-design.md#94-跟进消息归属)\n
+    \ expected: apa report --pr https://github.com/acc-org/acc-repo/pull/7 登记的关联键，能让适配器给出的
+    PR 事件 （correlation_keys=acc-org/acc-repo#7）挂靠到该委派子事项：disposition=attached、attach_state=pending，不被
+    pr-activity 忽略。\n  observed: report 把 --pr 原样字符串存进 delegation_link.ref（PR 地址）；followmsg
+    用事件关联键 acc-org/acc-repo#7 精确 Lookup，不命中， 事件被 pr-activity 规则 ignored。用 --pr acc-org/acc-repo#7
+    登记时同一流程可以挂靠，说明只是两边键的写法不一致。\n  where: kernel/delegation/delegation.go:Lookup; kernel/followmsg/followmsg.go:resolve;
+    sources/github/github.go:issueEvents\n  repro: `go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/
+    -run TestFlowSourceGithub` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-d3eb8c700b85 in attribution-v2: apa
+      report --pr https://github.com/acc-org/acc-repo/pull/7 登记的关联键，能让适配器给出的 PR 事件
+      （correlation_keys=acc-org/acc-repo#7）挂靠到该委派子事项：disposition=attached、attach_state=pending，不被
+      pr-activity 忽略。'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/followmsg/...
+    - go test -count=1 ./api/followmsg/...
+    - go test -count=1 ./cli/followmsg/...
+    integration_gates:
+    - name: attribution-v2-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#94-跟进消息归属
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+      delivery_goal: 跟进消息归属 v2：on_update、回音回 open、本人登记关联键；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-GH-09
+      - ACT-MAIL-11
+      - ACT-MAIL-14
+      - ACT-MAIL-15
+      - ACT-CAL-03
+      - ACT-CAL-09
+      - ACT-MSG-10
+      - ACT-MSG-11
+      - ACT-MSG-12
+      - ACT-MSG-13
+      - ACT-MSG-14
+      - ACT-MSG-15
+      - ACT-MSG-17
+      - ACT-INP-03
+      acceptance_refs:
+      - flow-source-github
+      - flow-source-mail
+      - flow-source-calendar
+      - flow-follow-messages
+      - flow-inbound-pipeline
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/followmsg/...
+      - go test -count=1 ./api/followmsg/...
+      - go test -count=1 ./cli/followmsg/...
+    pr_base: main
+    acceptance_refs:
+    - flow-source-github
+    source_of_truth:
+    - docs/solution-design.md#94-跟进消息归属
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+    scope_paths:
+    - kernel/followmsg/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    - artifact_id: source-contract-v2-delivery
+      producer: source-contract-v2
+      evidence_mode: artifact
+      requires:
+      - standard-event-v2
+    defect_refs:
+    - dfx-d3eb8c700b85
+    coverage_gate: 80
+- id: fix.login-hardening.0b1aae
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  title: 'Fix login-hardening: dfx-0b1aae331f8f'
+  description: "Automatic fix for upstream defect(s) reported by e2e-inbound-rules.\n\n-
+    [design-gap] anchors flow-web-login/ACT-LGN-05 (docs/solution-design.md#14-安全)\n
+    \ expected: TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce 的延迟断言是确定性的：延迟应答与\"窗口过去后恢复即时应答\"都由已有测试时钟（与仓库已有的
+    test-clock 做法一致，如 e.now 与 api/core/testclock_test.go）驱动，不依赖墙钟 time.Since，CI 上任意负载下都稳定通过。\n
+    \ observed: 用例约第 132 行用 time.Since 断言\"窗口过去后应答耗时 < delay\"（\"delay must end with
+    the window, 200 in 163ms\"），其前的延迟分支同样用 time.Since 断言\"耗时 >= delay\"。CI 负载下偶发失败，main
+    最近四次 CI 均因此失败，PR\n  where: api/core/login_hardening_test.go:TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce;
+    api/core/testclock_test.go"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-0b1aae331f8f in login-hardening: TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce
+      的延迟断言是确定性的：延迟应答与"窗口过去后恢复即时应答"都由已有测试时钟（与仓库已有的 test-clock 做法一致，如 e.now 与 api/core/testclock_test.go）驱动，不依赖墙钟
+      time.Since，CI 上任意负载下都稳定通过。'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/auth/...
+    - go test -count=1 ./api/core/...
+    - go test -count=1 ./cli/serve/...
+    integration_gates:
+    - name: login-hardening-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#1413-web-入口
+      - docs/solution-design.md#162-数据目录
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 登录加固：口令长度、限速锁定、会话有效期与吊销、public_url 检查；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-UPG-12
+      - ACT-LGN-01
+      - ACT-LGN-03
+      - ACT-LGN-04
+      - ACT-LGN-05
+      - ACT-LGN-06
+      - ACT-LGN-08
+      - ACT-LGN-09
+      - ACT-LGN-10
+      - ACT-LGN-11
+      - ACT-LGN-12
+      - ACT-LGN-13
+      - ACT-DPL-07
+      - ACT-DPL-08
+      - ACT-DPL-09
+      acceptance_refs:
+      - flow-upgrade-rollback
+      - flow-web-login
+      - flow-deploy-exposure
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/auth/...
+      - go test -count=1 ./api/core/...
+      - go test -count=1 ./cli/serve/...
+    pr_base: main
+    acceptance_refs:
+    - flow-web-login
+    source_of_truth:
+    - docs/solution-design.md#1413-web-入口
+    - docs/solution-design.md#162-数据目录
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - kernel/auth/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    defect_refs:
+    - dfx-0b1aae331f8f
+    coverage_gate: 80
+- id: fix.web-calibration.c8ef9b
+  worker: omac-worker-frontend-taiyi
+  blocked_by:
+  - judgment-stats
+  - calibration-bands
+  - spot-check
+  title: 'Fix web-calibration: dfx-c8ef9b61a3ec'
+  description: "Automatic fix for upstream defect(s) reported by e2e-workbench.\n\n-
+    [design-gap] anchors flow-web-workbench/ACT-WBN-16 (docs/solution-design.md#314-场景十二在工作台上安排一天)\n
+    \ expected: every page, including 判断与校准, has document.scrollingElement.scrollWidth
+    <= 360 at a 360px viewport\n  observed: judgment page scrollWidth=640, its metric
+    table header rows are wider than the viewport\n  where: web/src/features/judgment/JudgmentPage.tsx:108\n
+    \ repro: `go test -tags=e2e -count=1 -run TestFlowWebWorkbench ./tests/e2e/workbench/...`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-c8ef9b61a3ec in web-calibration: every
+      page, including 判断与校准, has document.scrollingElement.scrollWidth <= 360 at a
+      360px viewport'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - npm --prefix web run test -- --run src/features/judgment
+    integration_gates:
+    - name: web-calibration-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#810-观测抽检与影子模式
+      - docs/solution-design.md#41-web-中台
+      - docs/solution-design.md#93-事件到事项
+      delivery_goal: Web"判断与校准"页；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-JRC-10
+      - ACT-JRC-11
+      - ACT-BKL-07
+      acceptance_refs:
+      - flow-judgment-record
+      - flow-backlog-release
+      commands:
+      - npm --prefix web run test -- --run src/features/judgment
+    pr_base: main
+    acceptance_refs:
+    - flow-web-workbench
+    source_of_truth:
+    - docs/solution-design.md#810-观测抽检与影子模式
+    - docs/solution-design.md#41-web-中台
+    - docs/solution-design.md#93-事件到事项
+    scope_paths:
+    - web/src/features/judgment/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: judgment-stats-delivery
+      producer: judgment-stats
+      evidence_mode: artifact
+      requires:
+      - judgment-metrics
+    - artifact_id: calibration-bands-delivery
+      producer: calibration-bands
+      evidence_mode: artifact
+      requires:
+      - judgment-bands-shadow
+    - artifact_id: spot-check-delivery
+      producer: spot-check
+      evidence_mode: artifact
+      requires:
+      - spot-check
+    defect_refs:
+    - dfx-c8ef9b61a3ec
+    coverage_gate: 70
+- id: fix.judgment-stats.184e24
+  worker: omac-worker-backend
+  blocked_by:
+  - judgment-record
+  - proposal-attach-batch
+  title: 'Fix judgment-stats: dfx-184e245a8c8f'
+  description: "Automatic fix for upstream defect(s) reported by e2e-judgment.\n\n-
+    [design-gap] anchors flow-judgment-record/ACT-JRC-08, flow-judgment-record/ACT-JRC-10
+    (docs/solution-design.md#810-观测抽检与影子模式)\n  expected: 四条新事件各一次真实分类调用：stats classifier
+    calls=4 decided=2 uncertain=2，escalation=0.5，分数分布覆盖 4 次打分\n  observed: classifier
+    rows calls=0 reused=4，escalation=0，histogram 为空；记录里分类级 reused=true（批量预取后写记录时命中缓存）\n
+    \ where: kernel/agents/direct/judge.go:cachedClass/prefix（预取后记 reused）; kernel/judgment/stats/stats.go:Compute（reused
+    不计调用与分布）\n  repro (the reporter re-runs it after your fix merges; it is not your
+    gate): `go test -tags=e2e -count=1 -run TestFlowJudgmentRecord ./tests/e2e/judgment/`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-184e245a8c8f in judgment-stats: 四条新事件各一次真实分类调用：stats
+      classifier calls=4 decided=2 uncertain=2，escalation=0.5，分数分布覆盖 4 次打分'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/judgment/...
+    integration_gates:
+    - name: judgment-stats-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#86-留痕计数与撤销
+      - docs/solution-design.md#810-观测抽检与影子模式
+      - docs/appendix-b-api-cli.md#b1-cli
+      delivery_goal: 判断计数与四项指标；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-JRC-08
+      - ACT-JRC-09
+      acceptance_refs:
+      - flow-judgment-record
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/judgment/...
+    pr_base: main
+    acceptance_refs:
+    - flow-judgment-record
+    source_of_truth:
+    - docs/solution-design.md#86-留痕计数与撤销
+    - docs/solution-design.md#810-观测抽检与影子模式
+    - docs/appendix-b-api-cli.md#b1-cli
+    scope_paths:
+    - kernel/judgment/stats/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: judgment-record-delivery
+      producer: judgment-record
+      evidence_mode: artifact
+      requires:
+      - judgment-record-store
+    - artifact_id: proposal-attach-batch-delivery
+      producer: proposal-attach-batch
+      evidence_mode: artifact
+      requires:
+      - proposal-attach-batch
+    defect_refs:
+    - dfx-184e245a8c8f
     coverage_gate: 80

@@ -398,7 +398,7 @@ func (s *Service) walk(ctx context.Context, p *pending, pol policy.Policy) (Verd
 	var v Verdict
 	var levels []record.Level
 	var final level
-	answeredAny, shadowed := false, false
+	answeredAny, shadowed, shIdx := false, false, 0
 	for _, b := range p.meta.AnswerBy {
 		var lv level
 		var err error
@@ -407,7 +407,9 @@ func (s *Service) walk(ctx context.Context, p *pending, pol policy.Policy) (Verd
 		}
 		if b == "classifier" {
 			lv, err = s.classLevel(ctx, p, pol, &v)
-			shadowed = shadowed || lv.ErrorCode == "shadow"
+			if lv.ErrorCode == "shadow" {
+				shadowed, shIdx = true, len(levels)
+			}
 		} else {
 			lv, err = s.chatLevel(ctx, p, pol)
 		}
@@ -452,7 +454,30 @@ func (s *Service) walk(ctx context.Context, p *pending, pol policy.Policy) (Verd
 	v.Record = record.Record{ID: id, Use: p.use(), Template: p.pk.Name + "/" + p.c.Template + "@" + p.pk.Hash, Subject: p.c.Subject,
 		Source: p.c.Source, Fingerprint: fp, Band: p.band, Levels: levels, DecidedBy: v.DecidedBy, Answer: v.Answer,
 		LowConfidence: v.LowConfidence, Shadow: shadowed, CreatedAt: s.o.Now().UTC()}
-	if err := s.o.Store.Update(ctx, func(tx *store.Tx) error { return record.Put(tx, v.Record) }); err != nil {
+	recs := []record.Record{v.Record}
+	if shadowed && !p.c.ScoreOnly {
+		// 影子记录只记分、没有用于处置（§6.16）：分数单独留一条影子记录，处置指向的是另一条非影子的定案记录。
+		// 定案记录的影子级不重复分数，免得直方图把同一个分数数两次。
+		shID, err := newID("jdg_")
+		if err != nil {
+			return Verdict{}, err
+		}
+		sh := v.Record
+		sh.ID, sh.Levels = shID, levels[shIdx:shIdx+1]
+		sh.DecidedBy, sh.Answer, sh.LowConfidence = record.DecidedDefault, onUndecided(p.meta), true
+		fin := v.Record
+		fin.Shadow, fin.Levels = false, append([]record.Level(nil), levels...)
+		fin.Levels[shIdx].PYes = nil
+		v.Record, recs = fin, []record.Record{sh, fin}
+	}
+	if err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
+		for _, r := range recs {
+			if err := record.Put(tx, r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return Verdict{}, err
 	}
 	v.Written = true

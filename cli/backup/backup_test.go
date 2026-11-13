@@ -645,3 +645,85 @@ func runCLIWithoutRegistry(t *testing.T) (int, string, error) {
 	c := &client.Ctx{Env: client.Env{Stdout: &out, Stderr: &errb, Getenv: func(string) string { return "" }}}
 	return 0, "", backupCmd(c, []string{"create"})
 }
+
+// ACT-BAK-04：备份路径可以是相对路径（create、verify、restore 都认）。
+func TestRelativeBackupPath(t *testing.T) {
+	UseRegistry(func() (*store.Registry, error) { return reg(t, true), nil })
+	home := newHome(t, 5)
+	t.Chdir(t.TempDir())
+	if code, out, errs := runCLI(t, home, "backup", "create", "--out", "relbk"); code != 0 {
+		t.Fatalf("create: %d %s %s", code, out, errs)
+	}
+	if code, out, errs := runCLI(t, home, "backup", "verify", "relbk"); code != 0 || !strings.Contains(out, `"hashes":"match"`) {
+		t.Fatalf("verify: %d %s %s", code, out, errs)
+	}
+	if code, out, errs := runCLI(t, home, "backup", "restore", "relbk", "--home", "relhome"); code != 0 {
+		t.Fatalf("restore: %d %s %s", code, out, errs)
+	}
+	if _, err := os.Stat("relhome/ledger.db"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ACT-BAK-06：sources.json 里指向旧数据目录的 credentials_path 恢复后落在新目录的 sources/<id>/ 下，其余字段与不带路径的来源不变。
+func TestRestoreRebasesCredentialsPath(t *testing.T) {
+	home := newHome(t, 3)
+	write(t, filepath.Join(home, "sources.json"), fmt.Sprintf(`{"sources":[
+	 {"id":"mail","command":"/bin/true","timeout":30,"credentials_path":%q,"config":{"a":1}},
+	 {"id":"plain","command":"/bin/true"},
+	 {"id":"odd","command":"/bin/true","credentials_path":"/elsewhere/cred"}]}`, filepath.Join(home, "sources", "mail", "cred")), 0o644)
+	out, _ := mustCreate(t, home, Options{})
+	target := filepath.Join(t.TempDir(), "restored")
+	if _, err := Restore(out, target, reg(t, true)); err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Sources []map[string]any `json:"sources"`
+	}
+	b, _ := os.ReadFile(filepath.Join(target, "sources.json"))
+	if err := json.Unmarshal(b, &f); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.Sources[0]["credentials_path"], filepath.Join(target, "sources", "mail", "cred"); got != want {
+		t.Errorf("credentials_path = %v, want %v", got, want)
+	}
+	if f.Sources[0]["timeout"] != float64(30) || f.Sources[0]["config"].(map[string]any)["a"] != float64(1) {
+		t.Errorf("other fields changed: %v", f.Sources[0])
+	}
+	if _, has := f.Sources[1]["credentials_path"]; has {
+		t.Errorf("plain source gained a credentials_path")
+	}
+	if f.Sources[2]["credentials_path"] != "/elsewhere/cred" {
+		t.Errorf("a path outside any sources/<id> was rewritten: %v", f.Sources[2]["credentials_path"])
+	}
+	// 源备份目录里的 sources.json 不被改。
+	if b, _ := os.ReadFile(filepath.Join(out, "sources.json")); !strings.Contains(string(b), home) {
+		t.Errorf("the backup itself was modified")
+	}
+}
+
+// ACT-BAK-09：--no-secrets 恢复后留下待办记录，列出没带的凭据目录与接收密钥；普通备份不留。
+func TestRestoreNoSecretsLeavesNotice(t *testing.T) {
+	home := newHome(t, 3)
+	write(t, filepath.Join(home, "sources.json"), fmt.Sprintf(`{"sources":[{"id":"mail","command":"/bin/true","credentials_path":%q}]}`, filepath.Join(home, "sources", "mail", "cred")), 0o644)
+	out, _ := mustCreate(t, home, Options{NoSecrets: true})
+	target := filepath.Join(t.TempDir(), "r")
+	if _, err := Restore(out, target, reg(t, true)); err != nil {
+		t.Fatal(err)
+	}
+	n, ok := ReadNotice(target)
+	if !ok || strings.Join(n.Withheld, ",") != "sources/mail,webhook-keys/hook" {
+		t.Fatalf("notice = %+v, %v", n, ok)
+	}
+	if strings.Contains(fmt.Sprint(n), "SECRET") {
+		t.Fatal("secret content leaked into the notice")
+	}
+	full, _ := mustCreate(t, home, Options{})
+	t2 := filepath.Join(t.TempDir(), "r2")
+	if _, err := Restore(full, t2, reg(t, true)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ReadNotice(t2); ok {
+		t.Error("a full backup left a notice")
+	}
+}

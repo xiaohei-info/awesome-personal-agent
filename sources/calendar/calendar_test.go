@@ -111,6 +111,15 @@ func TestEventIDDistinguishesInstancesAndUpdates(t *testing.T) {
 		!strings.HasPrefix(evs[3].ID, "uid-weekly@google.com|2026-03-17T09:00:00+08:00|") {
 		t.Fatalf("instances: %q %q", evs[2].ID, evs[3].ID)
 	}
+	// 设计 §9.3：来源自带的 merge_key 优先；每个实例各自一个，不退回 title+sender。
+	for _, e := range evs[2:4] {
+		if e.MergeKey == "" || e.MergeKey != e.CorrelationKeys[0] {
+			t.Fatalf("merge_key 应为 UID|RECURRENCE-ID: %q %v", e.MergeKey, e.CorrelationKeys)
+		}
+	}
+	if evs[2].MergeKey == evs[3].MergeKey {
+		t.Fatal("两个实例的 merge_key 必须不同")
+	}
 	_, again, _ := do(t, fakeTool(version, events, nil, ""), in)
 	if decode(t, again)[1].ID != evs[1].ID {
 		t.Fatal("未更新的日程 id 必须稳定")

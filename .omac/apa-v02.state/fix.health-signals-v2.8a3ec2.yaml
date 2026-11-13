@@ -1,4 +1,4 @@
-# sha256: acb4ce02279374111e6d7e9ec3c481c311074e567d88368c984d6fbcca484192
+# sha256: bb2e54c299aa2076356d841c0fd339d6e4691b5f8746da4cdd80416f7c15ea52
 work_item_id: 01a1d3bf-9d99-7bcc-867e-b4477644a786
-status: blocked
-recovery_marker: true
+status: abandoned
+retry_note: 代码与 PR 已完成,等契约修订后重新提交,不要重做

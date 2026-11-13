@@ -116,7 +116,7 @@ type View struct {
 	ModelUnavailable []ModelIssue
 	// Endpoint 是模型端点现状，空表示正常（或没有配置、也没有事件在等它）；计入"模型不可用"。
 	Endpoint string
-	// Judge 与 Generate 是两个端点各自的现状（空、not_configured 或 failing）；Endpoint 取两者中较差的一个。
+	// Judge 与 Generate 是判断端点与生成端点各自的现状（空、EndpointNotConfigured、EndpointFailing）；Endpoint 取其中较差的。
 	Judge, Generate string
 	// Unjudged 是未判定积压（disposition 为 unjudged），单独一个提醒级信号；Expired 是已过期、不计入积压的条数。
 	Unjudged        []domain.SourceEvent
@@ -189,54 +189,47 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	return v, nil
 }
 
-// endpoint 判定模型端点现状：调用持续失败总是异常；没有配置只在有事件因此未判定时才算异常（不用模型是允许的，§5.6）。
-// 判断端点只有故障一种异常（不配置它是允许的，生成端点接手）；综合现状取两者中较差的，failing 重于 not_configured。
+// endpoint 判定两个端点的现状：生成端点调用持续失败总是异常；某个端点没有配置只在有事件因此未判定时才算异常（不用模型是允许的，§5.6）。
+// 判断端点的故障由 direct 记在 direct_judge_health：分类端点整批失败后即使对话端点定案也要报（§8.8）。
 func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (judge, generate, worst string, err error) {
+	h, err := direct.HealthIn(tx)
+	if err != nil {
+		return "", EndpointFailing, EndpointFailing, err
+	}
+	if h.Unavailable {
+		generate = EndpointFailing
+	}
 	jh, err := direct.JudgeHealthIn(tx)
 	if err != nil {
-		return "", "", EndpointFailing, err
+		return EndpointFailing, generate, EndpointFailing, err
 	}
-	if jh.Unavailable {
-		// 判断端点可选：撤掉之后旧故障记录不再报，否则没有调用能把它清掉。
-		_, pol, err := policy.Current(tx)
-		if err != nil {
-			return "", "", EndpointFailing, err
-		}
-		if pol.JudgeEndpoint != nil && pol.JudgeEndpoint.URL != "" {
-			judge = EndpointFailing
-		}
-	}
-	gh, err := direct.HealthIn(tx)
-	if err != nil {
-		return judge, "", EndpointFailing, err
-	}
-	if gh.Unavailable {
-		generate = EndpointFailing
-	} else if generate, err = generateNotConfigured(tx, backlog); err != nil {
-		return judge, "", EndpointFailing, err
-	}
-	worst = generate
-	if judge != "" {
-		worst = judge
-	}
-	if generate == EndpointFailing {
-		worst = generate
-	}
-	return judge, generate, worst, nil
-}
-
-func generateNotConfigured(tx *store.Tx, backlog []domain.SourceEvent) (string, error) {
 	_, pol, err := policy.Current(tx)
-	if err != nil || (pol.GenerateEndpoint.URL != "" && pol.GenerateEndpoint.Model != "") {
-		return "", err
+	if err != nil {
+		return "", EndpointFailing, EndpointFailing, err
 	}
+	// 判断端点可选：撤掉之后旧故障记录不再报，否则没有调用能把它清掉。
+	if jh.Unavailable && pol.JudgeEndpoint != nil && pol.JudgeEndpoint.URL != "" {
+		judge = EndpointFailing
+	}
+	waiting := false
 	for _, e := range backlog {
 		// 判断未定、外发范围未选择、放回积压的事件与端点有没有配置无关
 		if e.UnjudgedReason != domain.UnjudgedUndecided && e.UnjudgedReason != domain.UnjudgedOutboundUnset && e.UnjudgedReason != domain.UnjudgedRestored {
-			return EndpointNotConfigured, nil
+			waiting = true
+			break
 		}
 	}
-	return "", nil
+	if waiting && (pol.JudgeEndpoint == nil || pol.JudgeEndpoint.URL == "") {
+		judge = EndpointNotConfigured
+	}
+	if waiting && generate == "" && (pol.GenerateEndpoint.URL == "" || pol.GenerateEndpoint.Model == "") {
+		generate = EndpointNotConfigured
+	}
+	worst = generate
+	if judge == EndpointFailing || (judge != "" && worst == "") {
+		worst = judge
+	}
+	return judge, generate, worst, nil
 }
 
 func sourceFailures(tx *store.Tx) ([]SourceFailure, error) {

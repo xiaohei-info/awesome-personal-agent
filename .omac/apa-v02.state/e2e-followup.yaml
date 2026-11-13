@@ -1,4 +1,6 @@
-# sha256: 4a14501d927500c94e016a77180c55fa99c9de20b45649e87dc09759c635f48c
+# sha256: 89df4ad18cd4dc921134c5b25056da274e475706bb412b933e6781574110551a
 work_item_id: 01a1d304-5728-7f28-a802-058939e8269f
-status: blocked
-recovery_marker: true
+status: done
+merged: true
+merged_at: '2026-11-13T09:01:31Z'
+retry_note: 'PR #323 与 verification 已完成,核对 head 后重新提交,不要重做'

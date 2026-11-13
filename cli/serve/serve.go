@@ -112,6 +112,9 @@ func run(ctx context.Context, c *client.Ctx, ready func(net.Addr)) error {
 		return err
 	}
 	st, err := store.Open(home, reg)
+	if errors.Is(err, store.ErrMigrationFailed) { // 迁移失败要如实告诉本人：失败、已回滚、原因（不含路径）
+		return domain.NewError(domain.CodeInternal, err.Error(), "the pre-upgrade snapshot is under <APA_HOME>/backups; fix the cause and run `apa serve` again, or restore the snapshot (§16.5)")
+	}
 	if err != nil {
 		return err
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -41,6 +42,22 @@ var (
 	t0    = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
 )
+
+// accPackYAML 是只有规则、不带模板的自定义包：省略 screen、draft、prescreen、extract，取内置包 inbound-triage 的模板（C.5）。
+const accPackYAML = `name: acc-pack
+version: 1.0.0
+description: custom pack that relies on builtin templates
+source_rules:
+  - id: acc-screen-rule
+    match: {source_type: accsrc, event_type: acc.screen}
+    then: screen
+  - id: acc-judge-rule
+    match: {source_type: accsrc, event_type: acc.judge}
+    then: judge
+  - id: acc-extract-rule
+    match: {source_type: accsrc, event_type: acc.extract}
+    then: extract
+`
 
 const (
 	packYAML = `name: inbound-triage
@@ -174,6 +191,7 @@ func newEnv(t *testing.T, configured bool) *env {
 	_ = json.Unmarshal(e.must("project.create", map[string]any{"name": "mail"}), &mail)
 	e.web, e.mail = web.ID, mail.ID
 	fs := fstest.MapFS{"inbound-triage/pack.yaml": {Data: []byte(strings.ReplaceAll(packYAML, "p_mail", mail.ID))}}
+	fs["acc-pack/pack.yaml"] = &fstest.MapFile{Data: []byte(accPackYAML)}
 	for _, name := range []string{"triage-screen", "triage-draft", "triage-extract", "capture-prescreen"} { // 用内置包里随发行的模板，不另写一份
 		b, err := os.ReadFile("../../packs/inbound-triage/prompts/" + name + ".md")
 		if err != nil {
@@ -493,6 +511,26 @@ func TestScreenedInEventIsFullyDrafted(t *testing.T) {
 		it.Project != e.web || it.PlannedFor != "2026-03-12" || it.Deadline == nil || it.Deadline.Format("2006-01-02") != "2026-03-13" {
 		t.Fatalf("item %+v", it)
 	}
+	// ACT-JRC-04/06：处置 Event 的载荷自带结论，记录过保留期后 apa why 仍能显示答案与定案者。
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		rec, err := record.Get(tx, d.Judgment)
+		if err != nil {
+			t.Fatal(err)
+		}
+		es, _ := eventlog.ReadObject(tx, d.ID)
+		for _, x := range es {
+			if x.Event.Type == EvDisposed {
+				var got record.Ref
+				_ = json.Unmarshal(x.Event.Payload, &got)
+				if got != record.RefOf(rec) || got.Answer == "" || got.DecidedBy == "" {
+					t.Fatalf("disposed payload %s, want %+v", x.Event.Payload, record.RefOf(rec))
+				}
+				return nil
+			}
+		}
+		t.Fatal("no inbound.disposed event")
+		return nil
+	})
 	p := it.Proposal
 	if p == nil || p.Recommend != "accept" || p.Reason != "对方明确提出请求" || p.LowConfidence || len(p.Sources) != 1 || p.Sources[0] != d.ID {
 		t.Fatalf("proposal %+v", p)

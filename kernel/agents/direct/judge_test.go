@@ -123,6 +123,47 @@ func (e *jenv) saved(t *testing.T, id string) record.Record {
 	return r
 }
 
+// bySubject 返回某个对象的全部判断记录。
+func (e *jenv) bySubject(t *testing.T, subject string) []record.Record {
+	t.Helper()
+	var rs []record.Record
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) {
+		rs, _, err = record.List(tx, record.Filter{Subject: subject})
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return rs
+}
+
+// wantShadowPair：影子期间一道题留两条记录——只记分的影子记录，和处置所指的非影子定案记录（§6.16）。
+func (e *jenv) wantShadowPair(t *testing.T, v Verdict, pyes float64) {
+	t.Helper()
+	rs := e.bySubject(t, v.Record.Subject)
+	if len(rs) != 2 {
+		t.Fatalf("want shadow + final record, got %+v", rs)
+	}
+	var sh, fin record.Record
+	for _, r := range rs {
+		if r.Shadow {
+			sh = r
+		} else {
+			fin = r
+		}
+	}
+	if fin.ID != v.Record.ID || fin.Shadow || v.Record.Shadow || fin.DecidedBy != v.DecidedBy || fin.Answer != v.Answer {
+		t.Fatalf("disposition must point at the non-shadow record: %+v / %+v", v.Record, rs)
+	}
+	if sh.ID == "" || sh.ID == fin.ID || len(sh.Levels) != 1 || sh.Levels[0].PYes == nil || *sh.Levels[0].PYes != pyes {
+		t.Fatalf("shadow record must carry only the score: %+v", sh)
+	}
+	for _, l := range fin.Levels {
+		if l.PYes != nil {
+			t.Fatalf("final record must not repeat the shadow score: %+v", fin)
+		}
+	}
+}
+
 func f64(v float64) *float64 { return &v }
 func bptr(v bool) *bool      { return &v }
 
@@ -429,9 +470,10 @@ func TestShadowClassifierScoresButDoesNotDecide(t *testing.T) {
 	c.Shadow = true
 	v := e.judge(t, c)
 	r := e.saved(t, v.Record.ID)
-	if v.DecidedBy != "chat" || v.Answer != "no" || !r.Shadow || r.Levels[0].PYes == nil || *r.Levels[0].PYes != 0.95 || r.Levels[0].Outcome != "skipped" {
+	if v.DecidedBy != "chat" || v.Answer != "no" || r.Shadow || r.Levels[0].Outcome != "skipped" || r.Levels[0].ErrorCode != "shadow" {
 		t.Fatalf("%+v %+v", v, r)
 	}
+	e.wantShadowPair(t, v, 0.95)
 }
 
 // 策略覆盖的不确定带优先于模板的值，并写进记录。
@@ -463,10 +505,10 @@ func TestPolicyShadowScoresButChatDecides(t *testing.T) {
 	e.cls.PYes(modelstub.Key{Contains: "pshadow"}, 0.05)
 	e.chat("pshadow", "yes", true)
 	v := e.judge(t, jc("screen", "pshadow"))
-	r := e.saved(t, v.Record.ID)
-	if !r.Shadow || r.Levels[0].PYes == nil || *r.Levels[0].PYes != 0.05 || v.DecidedBy != "chat" || v.Answer != "yes" {
-		t.Fatalf("%+v %+v", v, r)
+	if v.DecidedBy != "chat" || v.Answer != "yes" {
+		t.Fatalf("%+v", v)
 	}
+	e.wantShadowPair(t, v, 0.05)
 	// 关掉影子后同一分数按分类端点定案为否。
 	e.setJudgment(t, policy.Judgment{Shadow: []string{}, SpotCheck: policy.SpotCheck{PerBrief: 5}})
 	e.cls.PYes(modelstub.Key{Contains: "pnoshadow"}, 0.05)

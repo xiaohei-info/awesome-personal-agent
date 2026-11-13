@@ -333,6 +333,48 @@ func probeTools(ctx context.Context, in Input, f kdoctor.Facts, c *kdoctor.Check
 	}
 }
 
+// restoredSecrets：`apa backup restore` 恢复的是 --no-secrets 备份时，备份没带的来源凭据与 webhook 接收密钥要补齐
+// （重新认证来源、轮换接收密钥）。记录里列的条目在数据目录里仍然缺失就在来源检查里给警告，补齐后自然消失。
+func restoredSecrets(l config.Layout, c *kdoctor.Check) {
+	n, ok := backup.ReadNotice(l.Home)
+	if !ok {
+		return
+	}
+	for _, w := range n.Withheld {
+		kind, id, _ := strings.Cut(w, "/")
+		var why, next string
+		switch kind {
+		case "sources":
+			if ents, _ := os.ReadDir(filepath.Join(l.Sources, id)); len(ents) > 0 {
+				continue
+			}
+			why, next = "restored from a --no-secrets backup: the source credentials are missing", "re-authenticate the source (`apa source auth "+id+"` or the tool's own login)"
+		case "webhook-keys":
+			if _, err := os.Stat(filepath.Join(l.WebhookKeys, id)); err == nil {
+				continue
+			}
+			why, next = "restored from a --no-secrets backup: the webhook receive key is missing, the old key is rejected", "rotate the webhook key of this source and give the new key to the sender"
+		default:
+			continue
+		}
+		d, found := c.Find(id)
+		if !found {
+			c.Add(kdoctor.Detail{Subject: id, Status: kdoctor.Warning, Why: why, Next: next})
+			continue
+		}
+		d.Status = kdoctor.Worst(d.Status, kdoctor.Warning)
+		d.Why = strings.Trim(d.Why+"; "+why, "; ")
+		d.Next = strings.Trim(d.Next+"; "+next, "; ")
+		c.Status = kdoctor.Worst(c.Status, d.Status)
+	}
+	if c.Status != kdoctor.OK && strings.Contains(c.Why, "commands exist") {
+		c.Why, c.Next = "some sources need attention; see details", "fix the registration or choose the outbound scope on the source page"
+	}
+	if c.Status != kdoctor.OK && c.Why == "no source is registered (optional)" {
+		c.Why, c.Next = "restored secrets are missing; see details", "re-authenticate sources and rotate webhook keys"
+	}
+}
+
 func probeOne(ctx context.Context, in Input, s domain.Source) (problem, next string) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()

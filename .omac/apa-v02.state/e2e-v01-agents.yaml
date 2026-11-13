@@ -1,4 +1,5 @@
-# sha256: 46e925253accb28ded9d0aabc1bea9c64c3bcd21a9c447eab59df4f33c385ea6
+# sha256: cf630cd1712a038d438913cafe650e516e4fc453ba1e58d96331abacf28b239e
 work_item_id: 01a1d39a-b64a-7de6-8107-46b04cfbf9ee
-status: blocked
+status: in_progress
 recovery_marker: true
+retry_note: PR 与验证已完成，核对 PR head 后直接重新提交评审，不要重做已完成部分

@@ -237,13 +237,9 @@ func (s *Server) guardAttempt(w http.ResponseWriter, r *http.Request, addr strin
 	}
 	release = func() { s.lim.end(addr) }
 	if s.lim.flooded(now) {
-		t := time.NewTimer(s.d.LoginDelay)
-		defer t.Stop()
-		select {
-		case <-t.C:
-		case <-r.Context().Done():
+		if err := s.wait(r.Context(), s.d.LoginDelay); err != nil {
 			release()
-			return nil, r.Context().Err()
+			return nil, err
 		}
 	}
 	return release, nil
