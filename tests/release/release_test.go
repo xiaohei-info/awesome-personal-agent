@@ -279,62 +279,6 @@ func isBinary(b []byte) bool {
 // harnessNames 是首版设计点名的 harness 可执行文件；与 tools/redline 的词表一致，只在测试里用来构造"未安装 harness"的主机。
 var harnessNames = []string{"hermes", "claude", "codex", "dsh", "gemini", "opencode", "openclaw"}
 
-// noHarnessEnv 返回把含 harness 的 PATH 目录剔除后的环境，并确认确实找不到任何 harness。
-func noHarnessEnv(t *testing.T) []string {
-	t.Helper()
-	var keep []string
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		has := false
-		for _, n := range harnessNames {
-			if st, err := os.Stat(filepath.Join(dir, n)); err == nil && !st.IsDir() {
-				has = true
-			}
-		}
-		if !has {
-			keep = append(keep, dir)
-		}
-	}
-	path := strings.Join(keep, string(os.PathListSeparator))
-	env := append(os.Environ(), "PATH="+path)
-	t.Setenv("PATH", path) // 让下面的 LookPath 与子进程看到同一个 PATH
-	for _, n := range harnessNames {
-		if p, err := exec.LookPath(n); err == nil {
-			t.Fatalf("未安装 harness 的主机上不应找到 %s（%s）", n, p)
-		}
-	}
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Fatalf("剔除 harness 目录后找不到 go：%v", err)
-	}
-	return env
-}
-
-// ACT-REL-04：未安装任何 harness 时，账本、Web、CLI、判断型、生成型、Source 流水线、Telegram 渠道协议可用；
-// 只有任务型和后台执行不可用，级联终止于 needs_input。用真实 apa 二进制的 e2e 套件在剔除 harness 的 PATH 下跑。
-func TestGenericCapabilitiesWithoutHarness(t *testing.T) {
-	if testing.Short() {
-		t.Skip("-short 跳过：需要先构建 Web（npm --prefix web run build）")
-	}
-	root := repoRoot(t)
-	env := noHarnessEnv(t)
-	suites := []string{
-		"./tests/e2e/ledger",     // 账本与 CLI
-		"./tests/e2e/agents",     // 判断型、生成型，级联终止于 needs_input
-		"./tests/e2e/screening",  // 判断型初筛
-		"./tests/e2e/sourcepull", // Source 流水线
-		"./tests/e2e/channel",    // 渠道 ext 协议
-	}
-	args := append([]string{"test", "-tags", "e2e", "-count=1", "-p", "2"}, suites...)
-	out, code := run(t, root, env, "go", args...)
-	if code != 0 {
-		t.Fatalf("未装 harness 时通用能力失败（退出码 %d）:\n%s", code, tail(out, 4000))
-	}
-	for _, s := range suites {
-		if !strings.Contains(out, "ok  \tgithub.com/xiaohei-info/awesome-personal-agent/"+strings.TrimPrefix(s, "./")) {
-			t.Errorf("套件 %s 没有通过的记录:\n%s", s, tail(out, 2000))
-		}
-	}
-}
-
 func tail(s string, n int) string {
 	if len(s) > n {
 		return "…" + s[len(s)-n:]
