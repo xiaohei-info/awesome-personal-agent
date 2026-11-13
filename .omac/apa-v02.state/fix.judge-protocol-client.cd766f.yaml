@@ -1,5 +1,5 @@
-# sha256: 6d5b5110a4c1afc1f58a3af7a321c34e216bf624f634d43c5c09c5464e9f6ad5
+# sha256: 15697ad9dd061348e0fad46aa5844309e7b7d4dbecb35a4a53add8b69f6a68bb
 work_item_id: 01a1d3dd-37ec-793f-b98d-01f79b342bb6
-status: in_review
+status: in_progress
 recovery_marker: true
 retry_note: 代码与 PR 已完成,等契约修订后重新提交,不要重做
