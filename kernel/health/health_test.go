@@ -503,3 +503,46 @@ func TestCursorInheritedFromChainOnUpgrade(t *testing.T) {
 		t.Fatalf("cursor = %d, %v", seq, err)
 	}
 }
+
+// setJudgeEndpoint 配上（或撤掉）判断端点。
+func (e *env) setJudgeEndpoint(on bool) {
+	e.update(func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
+			p.JudgeEndpoint = nil
+			if on {
+				p.JudgeEndpoint = &policy.JudgeEndpoint{URL: "http://judge.local/v1", Protocol: policy.ProtocolProbability}
+			}
+			return nil
+		})
+		return err
+	})
+}
+
+func (e *env) recordJudgeFault() {
+	e.update(func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO direct_judge_health (id, since, last_error) VALUES (1, 1, 'protocol_error')`)
+		return err
+	})
+}
+
+// ACT-JDP-04/09：判断端点故障（分类端点整批失败后由对话端点定案）在健康视图里仍可见，且与生成端点分开。
+func TestJudgeEndpointFailureIsVisibleAndSeparate(t *testing.T) {
+	e := setup(t)
+	e.setJudgeEndpoint(true)
+	e.recordJudgeFault()
+	v := e.collect(nil)
+	if v.Judge != EndpointFailing || v.Generate != "" || v.Endpoint != EndpointFailing || v.Healthy() {
+		t.Fatalf("%+v", v)
+	}
+}
+
+// 判断端点是可选的：撤掉它之后，留下的旧故障记录不再报（否则永远清不掉）。
+func TestJudgeFaultIgnoredOnceJudgeEndpointRemoved(t *testing.T) {
+	e := setup(t)
+	e.setJudgeEndpoint(true)
+	e.recordJudgeFault()
+	e.setJudgeEndpoint(false)
+	if v := e.collect(nil); v.Judge != "" || v.Endpoint != "" || !v.Healthy() {
+		t.Fatalf("%+v", v)
+	}
+}

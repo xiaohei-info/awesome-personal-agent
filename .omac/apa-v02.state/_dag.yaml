@@ -1,12 +1,12 @@
-# sha256: a99700f4d4677eaed5dd259da915d64fa98e77b4051c8188a549a2429369283f
+# sha256: c250762324fc196a41c9ced7a3ae68ab5de975822d21e78ae6f00cca5381f216
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 19
+  used_global: 20
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 3
     e2e-judge: 4
-    e2e-judgment: 3
+    e2e-judgment: 4
     e2e-inbound-rules: 2
     e2e-upgrade: 3
     e2e-hostplugin: 1
@@ -34,7 +34,7 @@ defects:
       - flow-source-github/ACT-GH-09
       reporters:
       - e2e-sources
-      state: fixing
+      state: fixed
       fix_node: fix.attribution-v2.d3eb8c
     dfx-bfeb8db8483b:
       suspected: calendar-adapter-v2
@@ -107,7 +107,7 @@ defects:
       - flow-judge-protocol/ACT-JDP-09
       reporters:
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.judge-protocol-client.cd766f
     dfx-81887fbc6daf:
       suspected: judgment-record
@@ -203,7 +203,7 @@ defects:
       - flow-web-workbench/ACT-WBN-16
       reporters:
       - e2e-workbench
-      state: fixing
+      state: fixed
       fix_node: fix.web-calibration.c8ef9b
     dfx-0b1aae331f8f:
       suspected: login-hardening
@@ -213,7 +213,13 @@ defects:
       - e2e-inbound-rules
       state: fixed
       fix_node: fix.login-hardening.0b1aae
+    dfx-184e245a8c8f:
+      suspected: judgment-stats
+      anchors:
+      - flow-judgment-record/ACT-JRC-08
+      - flow-judgment-record/ACT-JRC-10
+      reporters:
+      - e2e-judgment
+      state: fixed
+      fix_node: fix.judgment-stats.184e24
   inbox: []
-pending_human_amendment:
-  amendment_id: amend-6c86c8335a0c
-  file: reports/apa-dag-unblock-20261113/amendment-reviewed.yaml

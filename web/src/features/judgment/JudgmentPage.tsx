@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import "./judgment.css";
 
 // 形状对应 GET /v1/judgments/stats、/judgments/spot-check、/settings/judgment（附录 B.2、B.4；主文档 §8.10）。
 // 指标、分布、抽检与不确定带的校验都在服务端；本页只调用并如实展示服务端的回答。
@@ -93,7 +94,7 @@ export function JudgmentPage() {
     settings?.bands.find((b) => b.template === g.template && (b.source ?? "") === (g.source ?? "")) ?? settings?.bands.find((b) => b.template === g.template && !b.source);
 
   return (
-    <section>
+    <main className="judgment">
       <PageHead lede="各级判断的指标与分数分布；不确定带、影子模式和抽检结论只能在这里由你调整。">判断与校准</PageHead>
       {error && <p role="alert" className="err">{error}</p>}
       {notice && <p role="status">{notice}</p>}
@@ -212,6 +213,6 @@ export function JudgmentPage() {
           </li>
         ))}
       </ul>
-    </section>
+    </main>
   );
 }

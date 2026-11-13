@@ -71,6 +71,15 @@ function mount(fetchImpl: typeof fetch) {
 beforeEach(() => sessionStorage.clear());
 
 describe("判断与校准页", () => {
+  // 360px 不横向溢出依赖 <main> 上的手机样式（宽表格在自身内滚动）；页面根必须是 main，包住所有表格。
+  it("renders inside <main> so the mobile table-scroll styles apply", async () => {
+    mount(backend().impl);
+    const rates = await screen.findByRole("table", { name: "指标" });
+    const main = screen.getByRole("main");
+    expect(main).toContainElement(rates);
+    expect(within(main).getByRole("table", { name: "不确定带" })).toBeInTheDocument();
+  });
+
   // ACT-JRC-10：四项指标、分数分布、按后端分组，窗口切换生效。
   it("shows the four rates, histogram and per-backend rows, and the window switch re-queries", async () => {
     const be = backend();

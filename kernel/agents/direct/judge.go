@@ -128,6 +128,19 @@ func (s *Service) Prefetch(ctx context.Context, calls []JudgeCall) {
 		}
 	}
 	s.prefetch(ctx, ps, pol)
+	s.warmMu.Lock()
+	defer s.warmMu.Unlock()
+	if s.warm == nil {
+		s.warm = map[string]*classAns{}
+	}
+	for _, p := range ps {
+		if p == nil {
+			continue
+		}
+		if a := p.prefix["classifier"]; a != nil && a.ran && !a.reused && a.ErrCode == "" && a.fp != "" {
+			s.warm[a.fp] = a
+		}
+	}
 }
 
 // pending 是一道题在级联里的运行状态。
@@ -151,6 +164,7 @@ type classAns struct {
 	elapsed time.Duration
 	ran     bool               // 已问过；false 表示没问（被外发范围排除）
 	sig     *model.JudgeResult // 整批故障与健康信号（复用的结果为空）
+	fp      string
 }
 
 func (s *Service) prepare(ctx context.Context, c JudgeCall, pol policy.Policy) (*pending, error) {
@@ -308,6 +322,10 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 			p.firstFP = fp
 		}
 		if cached, ok := s.cachedClass(ctx, fp); ok {
+			if w := s.claimWarm(fp); w != nil {
+				p.prefix["classifier"] = w
+				continue
+			}
 			p.prefix["classifier"] = &classAns{Answer: cached, reused: true, ran: true}
 			continue
 		}
@@ -330,6 +348,7 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 	t0 := s.o.Now()
 	res, err := s.o.Classifier.Judge(ctx, ep, qs, model.JudgeOptions{SingleShot: group[0].meta.SingleShot})
 	took := s.o.Now().Sub(t0)
+	s.noteClassifierHealth(ctx, res, err)
 	for i, j := range jobs {
 		a := model.Answer{ID: j.q.ID, ErrCode: model.CodeUnavailable}
 		sig := &res
@@ -343,9 +362,36 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 			s.remember(ctx, j.fp, b)
 		}
 		for k, p := range j.owns {
-			p.prefix["classifier"] = &classAns{Answer: a, elapsed: took, ran: true, sig: sig, reused: k > 0 && a.ErrCode == ""}
+			p.prefix["classifier"] = &classAns{Answer: a, elapsed: took, ran: true, sig: sig, fp: j.fp, reused: k > 0 && a.ErrCode == ""}
 		}
 	}
+}
+
+// noteClassifierHealth 把分类端点的整批故障记进判断端点的健康：致命故障（401/403、self_reported）或没有任何可采信的批次
+// 都标为不可用，下一次合法响应清除。对话端点随后定案不影响这里，故障才不会被级联掩盖（§8.8）。
+// 记不下来只影响可见性，不影响本次判断；下一次调用会再写。
+func (s *Service) noteClassifierHealth(ctx context.Context, res model.JudgeResult, callErr error) {
+	if callErr != nil { // 请求没发出（如题号重复）是调用方的问题，不是端点的
+		return
+	}
+	switch {
+	case res.Healthy && !res.Unavailable:
+		_ = s.setJudgeHealth(ctx, "")
+	case res.Unavailable || len(res.Faults) > 0:
+		msg := strings.Join(res.Faults, ",")
+		if msg == "" {
+			msg = model.CodeUnavailable
+		}
+		_ = s.setJudgeHealth(ctx, msg)
+	} // 其余（503、429、413、超时）既不是成功也不是新故障：只有成功的调用才清除，状态不动
+}
+
+func (s *Service) claimWarm(fp string) *classAns {
+	s.warmMu.Lock()
+	defer s.warmMu.Unlock()
+	w := s.warm[fp]
+	delete(s.warm, fp)
+	return w
 }
 
 func (s *Service) cachedClass(ctx context.Context, fp string) (model.Answer, bool) {
