@@ -211,3 +211,53 @@ func TestCandidatesSkipFollowmsgWrites(t *testing.T) {
 		t.Fatalf("candidates = %v, want only the owner's title change", got)
 	}
 }
+
+// 外发范围拦下起草（direct.ErrOutboundBlocked）：摘要留空、不写回、不记 health.alert（未判定积压已在健康视图提示本人）。
+func TestOutboundBlockedLeavesSummaryEmptyWithoutAlert(t *testing.T) {
+	reg := store.NewRegistry()
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, Module} {
+		if err := reg.Register(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(t.TempDir(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := command.New(st, time.Now)
+	if err := errors.Join(projects.Register(x), items.Register(x, items.NewKinds()), materials.Register(x)); err != nil {
+		t.Fatal(err)
+	}
+	gen := &fakeGen{err: direct.ErrOutboundBlocked}
+	s, err := New(Options{Store: st, Exec: x, Gen: gen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(map[string]any{"title": "t", "kind": "task", "phase": "open", "body": "synthetic body"})
+	r, err := x.Do(bg, command.Request{Identity: owner, Command: "item.create", Input: b, Owner: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ref struct{ ID string }
+	_ = json.Unmarshal(r.Value, &ref)
+	if err := s.Drain(bg); err != nil {
+		t.Fatal(err)
+	}
+	if len(gen.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(gen.calls))
+	}
+	if err := st.View(bg, func(tx *store.Tx) error {
+		it, err := items.Get(tx, ref.ID)
+		if err != nil || it.Summary != "" {
+			t.Errorf("summary %q err %v, want empty", it.Summary, err)
+		}
+		as, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvHealthAlert}, 0, 10)
+		if len(as) != 0 {
+			t.Errorf("blocked draft recorded %d health alerts", len(as))
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

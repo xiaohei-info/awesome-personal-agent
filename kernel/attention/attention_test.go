@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -1300,5 +1301,19 @@ func TestBriefHonorsMute(t *testing.T) {
 	}
 	if u := e.unread(); len(u) != 1 || u[0].Class != domain.DeliveryBrief || u[0].Suppressed != "muted" {
 		t.Fatalf("muted brief should be Web unread: %+v", u)
+	}
+}
+
+// 外发范围拦下卡片起草（direct.ErrOutboundBlocked）不是起草失败：不重试、不卡投递，投递按没有卡片文案的路径走；
+// 与摘要起草是同一个统一出口（kernel/agents/direct）的第二个调用方。
+func TestCardDraftOutboundBlockedIsNotAFailure(t *testing.T) {
+	f := &fakeDrafter{err: fmt.Errorf("%w (outbound_unset, source src_a)", direct.ErrOutboundBlocked)}
+	e := setup(t, f)
+	e.toChannel()
+	e.withModel()
+	e.asked(nil)
+	e.drafts()
+	if len(f.calls) != 1 {
+		t.Fatalf("draft calls = %d, want exactly 1 (no retry)", len(f.calls))
 	}
 }

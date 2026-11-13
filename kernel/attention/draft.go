@@ -271,9 +271,9 @@ func (a *Attention) callJudge(ctx context.Context, c direct.JudgeCall) (verdict 
 	return VerdictDefer, ref, nil
 }
 
-// ignorable：模型端点在两次读策略之间被清空不算失败。
+// ignorable：模型端点在两次读策略之间被清空、或外发范围不允许送出，都不算失败。
 func ignorable(err error) error {
-	if errors.Is(err, model.ErrNotConfigured) {
+	if errors.Is(err, model.ErrNotConfigured) || errors.Is(err, direct.ErrOutboundBlocked) { // 外发范围未选或 none：不起草，本人选定后下次触发再做
 		return nil
 	}
 	return err
