@@ -156,6 +156,7 @@ func Run(ctx context.Context, in Input) kdoctor.Report {
 	for i := range kernel {
 		if kernel[i].Name == kdoctor.Sources {
 			probeTools(ctx, in, facts, &kernel[i])
+			restoredSecrets(layout, &kernel[i])
 		}
 	}
 	host, overlaps := hostChecks(ctx, in, facts)

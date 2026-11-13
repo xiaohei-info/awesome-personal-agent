@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	harness    = "acc-bg-stub"
-	packName   = "acc-bg"
-	rulePrefix = packName + "/event_rules/"
+	harness         = "acc-bg-stub"
+	harnessNoResume = "acc-bg-noresume"
+	packName        = "acc-bg"
+	rulePrefix      = packName + "/event_rules/"
 )
 
 // bgPack 是验收用能力包：规则初始 observe，由 Web 切到 auto。运行参数只来自规则动作与 Web 设置。
@@ -67,6 +68,18 @@ event_rules:
     mode: observe
     when: {event: item.phase_changed, to_phase: open, kind: task, tag_any: [acc-loop]}
     do: [{action: start_background_run, runner: main_session, prompt: handle-item, access: read, cwd: run_dir}]
+  - id: bgm-created
+    mode: observe
+    when: {event: item.created, kind: task, tag_any: [acc-bgm]}
+    do: [{action: start_background_run, runner: main_session, prompt: handle-item, access: edit, cwd: run_dir}]
+  - id: bgm-reopen
+    mode: observe
+    when: {event: item.phase_changed, to_phase: open, kind: task, tag_any: [acc-bgm]}
+    do: [{action: start_background_run, runner: main_session, prompt: handle-item, access: edit, cwd: run_dir}]
+  - id: bgm-explicit
+    mode: observe
+    when: {event: item.created, kind: task, tag_any: [acc-explicit]}
+    do: [{action: start_background_run, runner: main_session, prompt: handle-item, access: read, harness: acc-bg-noresume, cwd: run_dir}]
   - id: main-again
     mode: observe
     when: {event: delegation.reported, kind: task, tag_any: [acc-chain]}
@@ -144,6 +157,13 @@ func (f *fx) declareHarness() {
 printf '%%s\n' "$@" > args.txt
 env > env.txt
 export APA="%s" OUT=%q
+# 会话 id：每次运行各自一个；带 --resume 时沿用被续接的会话 id（与真实 harness 同行为）。
+SID="sess-$APA_RUN"; prev=""
+for a in "$@"; do [ "$prev" = "--resume" ] && SID="$a"; prev="$a"; done
+export STUB_HARNESS_SESSION_ID="$SID"
+if [ -n "$LOSE_SESSION" ] && printf '%%s' "$*" | grep -q -- '--resume'; then
+  echo "No session found matching $SID"; echo "No session found matching $SID" >&2; exit 1
+fi
 if [ -n "$SCRIPT" ]; then
   sh "$SCRIPT" "$@"
 fi
@@ -154,14 +174,20 @@ exec %q "$@"
 	must(f.t, os.WriteFile(wrapper, []byte(script), 0o755))
 	f.mode("summary-only", "")
 	f.declare(harness, wrapper, "{prompt}", true)
+	f.declare(harnessNoResume, wrapper, "{prompt}", false)
 	f.webOK("PUT", "/settings/access-limits", `{"permission_cap":{"default":"read","by_harness":{}}}`, 200)
 }
 
 func (f *fx) declare(name, wrapper, arg string, resume bool) {
 	h := map[string]any{
-		"command": []string{wrapper, arg},
-		"session": map[string]any{"extract": "$.session_id"},
-		"access":  map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}},
+		"command":     []string{wrapper, arg},
+		"session":     map[string]any{"extract": "$.session_id"},
+		"access":      map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}},
+		"exit_codes":  map[string]any{"ok": []int{0}, "session_missing": []int{1}},
+		"exit_output": map[string]any{"session_missing": []string{"No session found matching"}},
+	}
+	if resume {
+		h["resume"] = []string{"--resume", "{session_id}"}
 	}
 	f.declareRaw(name, h)
 }
@@ -253,6 +279,12 @@ type run struct {
 	Harness  string `json:"harness"`
 	Access   string `json:"access"`
 	Session  string `json:"session_id"`
+
+	ChainDepth int `json:"chain_depth"`
+	Basis      struct {
+		RuleID        string `json:"rule_id"`
+		PolicyVersion int    `json:"policy_version"`
+	} `json:"basis"`
 }
 
 func (f *fx) runs(args ...string) []run {
@@ -396,4 +428,27 @@ func (f *fx) listAssignee(assignee string) []string {
 func (f *fx) projectNamed(name string) bool {
 	f.t.Helper()
 	return strings.Contains(f.apa(f.OBS, 0, "project", "list").Stdout, `"`+name+`"`)
+}
+
+// sessionOf 是内核记在事项上的该运行的会话 id：运行结束时按 stdout 末段摘要写进 run.finished 事件（apa why 以 DEL 读取）。
+func (f *fx) sessionOf(item, runID string) string {
+	f.t.Helper()
+	var out struct {
+		Steps []struct {
+			Type  string `json:"type"`
+			Actor struct {
+				Run string `json:"run"`
+			} `json:"actor"`
+			Payload struct {
+				Session string `json:"session_id"`
+			} `json:"payload"`
+		} `json:"steps"`
+	}
+	must(f.t, json.Unmarshal([]byte(f.apa(f.DEL, 0, "why", item).Stdout), &out))
+	for _, s := range out.Steps {
+		if s.Type == "run.finished" && s.Actor.Run == runID {
+			return s.Payload.Session
+		}
+	}
+	return ""
 }

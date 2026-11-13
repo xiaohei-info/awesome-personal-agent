@@ -3,9 +3,12 @@
 package ops
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -241,15 +244,40 @@ func TestFlowPurge(t *testing.T) {
 
 	step(t, "ACT-PRG-05 墓碑不计入统计", func(t *testing.T) {
 		const judge = "这条来源事件是否值得成为建议" // inbound-triage/triage.md（判断型，声明 event_stats）
-		f.webOK("PATCH", "/projects/"+f.Projects["acc-open"], `{"capture":true}`, http.StatusOK)
+		// 来源事件经 triage-screen：判断端点落在 band 内（0.15–0.60）才升级到对话端点，统计只出现在对话端点的请求里。
+		f.WireEndpoints()
 		f.ModelStub.Reset()
-		f.ModelStub.When(judge, modelstub.Reply{Content: `{"choice":"task","confidence":0.9}`})
-		propose := func(text, session string) string {
+		f.Cls.PYes(modelstub.Key{Contains: judge}, 0.40)
+		f.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: judge}, Answer: "yes"})
+		q := filepath.Join(f.Root, "prg05-source")
+		for _, d := range []string{"in", "done"} {
+			if err := os.MkdirAll(filepath.Join(q, d), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		script := "#!/bin/sh\nQ=\"$1\"\ncat > /dev/null\nfor f in \"$Q\"/in/*.jsonl; do\n  [ -e \"$f\" ] || continue\n  cat \"$f\"\n  mv \"$f\" \"$Q/done/\"\ndone\necho '{\"cursor\":\"c'\"$(ls \"$Q/done\" | wc -l | tr -d ' ')\"'\"}'\n"
+		if err := os.WriteFile(filepath.Join(q, "src.sh"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		reg, _ := json.Marshal(map[string]any{"id": "src_prg05", "type": "script", "source_type": "acc",
+			"command": filepath.Join(q, "src.sh") + " " + q, "schedule": "1s", "timeout": 30, "default_project": f.Projects["acc-open"]})
+		f.webOK("POST", "/sources", string(reg), http.StatusCreated)
+		seq := 0
+		propose := func(text, _ string) string {
 			t.Helper()
 			known := f.itemIDs()
-			f.capture("acc-open", text, session)
+			seq++
+			ev, _ := json.Marshal(map[string]any{"id": fmt.Sprintf("prg05-%d", seq), "type": "acc.msg", "subject": text, "summary": "摘要 " + text,
+				"detail": "正文 " + text, "sender": "prg05@example.invalid", "sender_verified": true, "occurred_at": time.Now().UTC().Format(time.RFC3339)})
+			tmp := filepath.Join(q, "tmp")
+			if err := os.WriteFile(tmp, append(ev, '\n'), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(tmp, filepath.Join(q, "in", fmt.Sprintf("%04d.jsonl", seq))); err != nil {
+				t.Fatal(err)
+			}
 			var id string
-			f.waitFor("新建议入账: "+text, 20*time.Second, func() bool {
+			f.waitFor("新建议入账: "+text, 30*time.Second, func() bool {
 				for k := range f.itemIDs() {
 					if !known[k] {
 						id = k
@@ -265,16 +293,22 @@ func TestFlowPurge(t *testing.T) {
 
 		lastReq := func() string {
 			reqs := f.ModelStub.Requests()
-			return reqs[len(reqs)-1].BodyText
+			for i := len(reqs) - 1; i >= 0; i-- { // 起草请求在判断之后，不带统计
+				if strings.Contains(reqs[i].BodyText, judge) {
+					return reqs[i].BodyText
+				}
+			}
+			t.Fatal("对话端点没有收到判断题")
+			return ""
 		}
 		propose("PRG05 丢弃后再来一条", "s2")
-		if !strings.Contains(lastReq(), "dismissed: 1") {
+		if dismissedIn(lastReq()) != "1" {
 			t.Fatalf("物理删除前，统计应计入已丢弃的建议: %s", lastReq())
 		}
 
 		f.webOK("POST", "/settings/purge", `{"object":"`+dropped+`"}`, http.StatusOK)
 		propose("PRG05 删除后再来一条", "s3")
-		if got := lastReq(); strings.Contains(got, "dismissed: 1") || !strings.Contains(got, "dismissed: 0") {
+		if got := lastReq(); dismissedIn(got) != "0" {
 			t.Errorf("物理删除后，统计不应再计该条: %s", got)
 		}
 	})
@@ -291,4 +325,13 @@ func TestFlowPurge(t *testing.T) {
 			t.Error("未删除的内容应仍在（共享 blob、被拒绝删除的材料）")
 		}
 	})
+}
+
+// dismissedIn 取判断题输入里 stats.dismissed 的值（输入是 JSON，请求体里引号被转义）。
+func dismissedIn(body string) string {
+	m := regexp.MustCompile(`dismissed\\*":(\d+)`).FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return m[1]
 }

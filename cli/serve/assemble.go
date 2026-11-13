@@ -41,6 +41,7 @@ import (
 	apiversion "github.com/xiaohei-info/awesome-personal-agent/api/version"
 	apiwhy "github.com/xiaohei-info/awesome-personal-agent/api/why"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct/rulejudge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/attention"
@@ -217,7 +218,15 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
-	// call_agent 按模板类别分派：任务型与生成型由任务型服务处理，判断型交委派核验。任务型服务要等调度器建好，闭包里再取。
+	// 判断型：委派回执核验包（要求触发事项是委派子事项）走核验处理器，其余包的判断型模板只写判断记录。
+	genericJudge := rulejudge.Handler(judge)
+	judgeAgent := func(ctx context.Context, c rules.Call) error {
+		if pack, _, _ := strings.Cut(c.Rule, "/"); pack == "delegation-verify" {
+			return verifyAgent(ctx, c)
+		}
+		return genericJudge(ctx, c)
+	}
+	// call_agent 按模板类别分派：任务型与生成型由任务型服务处理，判断型见上。任务型服务要等调度器建好，闭包里再取。
 	var tk *task.Service
 	var hs *hosted.Service           // 托管型读取器的运行结果回到它；调度器建好后再赋值
 	var draftGuideline rules.Handler // 缺规范检测（§12.6）：guideline-draft 包的 call_agent 交给它；任务型服务建好后再赋值
@@ -225,7 +234,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		if pack, _, _ := strings.Cut(c.Rule, "/"); pack == "guideline-draft" {
 			return draftGuideline(ctx, c)
 		}
-		return tk.CallAgent(task.AgentOptions{Judge: verifyAgent, Generate: judge})(ctx, c)
+		return tk.CallAgent(task.AgentOptions{Judge: judgeAgent, Generate: judge})(ctx, c)
 	}
 	var bg *background.Service // start_background_run 的处理器；调度器建好后再赋值
 	startBackground := func(ctx context.Context, c rules.Call) error { return bg.Handler()(ctx, c) }

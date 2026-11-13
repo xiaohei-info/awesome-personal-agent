@@ -66,10 +66,14 @@ func (k *kit) stubRequestsAbout(subject string) int {
 }
 
 type auditEvent struct {
+	Seq    int64  `json:"seq"`
 	Type   string `json:"type"`
 	Object string `json:"object"`
 	Reason string `json:"reason"`
-	Basis  struct {
+	Actor  struct {
+		Type string `json:"type"`
+	} `json:"actor"`
+	Basis struct {
 		PolicyVersion int    `json:"policy_version"`
 		RuleID        string `json:"rule_id"`
 	} `json:"basis"`

@@ -5,6 +5,7 @@ package why
 
 import (
 	"encoding/json"
+	"sort"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
@@ -118,6 +119,13 @@ func Replay(tx *store.Tx, p policy.Policy, r Request) (Timeline, error) {
 	if err != nil {
 		return Timeline{}, err
 	}
+	// 建议事项自己的 Event 没有判断：把建出它的入站处置并进时间线，判断一行才跟着事项走（§15.1）。
+	disposed, err := eventlog.ReadDisposedFor(tx, r.ID)
+	if err != nil {
+		return Timeline{}, err
+	}
+	entries = append(entries, disposed...)
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Event.Seq < entries[j].Event.Seq })
 	if len(entries) == 0 {
 		return Timeline{}, domain.NewError(domain.CodeNotFound, "no events for this id", "check the id")
 	}

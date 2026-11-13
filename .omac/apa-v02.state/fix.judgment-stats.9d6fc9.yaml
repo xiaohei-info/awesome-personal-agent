@@ -1,3 +1,5 @@
-# sha256: 944b1774d5037018107d57a56a7c1e77f7edda5a89fe78eeda8a562ec5009fc9
-work_item_id: null
-status: todo
+# sha256: 613c526afc6296d227688d7d42107b796a36c3358ebffa0a61c3eed382d954a9
+work_item_id: 01a1d3e2-9f68-78e2-8cd1-9ffd31d7b27d
+status: blocked
+recovery_marker: true
+retry_note: 上次失败是 Claude 5 小时额度上限（429），已重置；在原分支/PR 上继续，不要重做已完成部分

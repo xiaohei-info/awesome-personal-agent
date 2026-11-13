@@ -1,4 +1,5 @@
-# sha256: 1dc23ca829e8196ee5b0c61bcc916898e5b04c222894805936a9806447789f7b
+# sha256: 9af52c15ca4b78236a6f4a267f5709ecc0cb1dbd87e196f3d87ef49af8dffcbd
 work_item_id: 01a1d39a-b64a-7de6-8107-46b04cfbf9ee
 status: in_progress
 recovery_marker: true
+retry_note: 产品缺口由 brief-delivery-enqueue 补;PR 与测试已在,不要重做,等该节点合并后再复验

@@ -1,7 +1,7 @@
-# sha256: 9ebce5b6a87dc6adc9b74025fda9abf0e9c9b5280459012dcb26c50702001e44
+# sha256: d3f874a3a9c4d55b661c700a5037b7595055c602da516168c144c20ac41a2d46
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 15
+  used_global: 16
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 2
@@ -11,8 +11,9 @@ defects:
     e2e-upgrade: 3
     e2e-hostplugin: 1
     e2e-release-doctor: 1
+    e2e-sources: 1
   granted_by_reporter:
-    e2e-sources: 2
+    e2e-sources: 3
     e2e-inbound-rules: 1
     e2e-judge: 4
     e2e-judgment: 4
@@ -24,7 +25,7 @@ defects:
       - flow-follow-messages/ACT-MSG-13
       reporters:
       - e2e-followmsg
-      state: fixing
+      state: fixed
       fix_node: fix.attribution-v2.62f6c6
     dfx-d3eb8c700b85:
       suspected: attribution-v2
@@ -33,20 +34,25 @@ defects:
       reporters:
       - e2e-sources
       state: queued
+      retried: true
+      stop:
+        reason_code: defect-budget-exhausted
+        detail: 该报告者或整个 DAG 的自动修复预算已用完。
     dfx-bfeb8db8483b:
       suspected: calendar-adapter-v2
       anchors:
       - flow-source-calendar/ACT-CAL-02
       reporters:
       - e2e-sources
-      state: queued
+      state: fixed
+      fix_node: fix.calendar-adapter-v2.bfeb8d
     dfx-ec964047626d:
       suspected: web-today
       anchors:
       - flow-web-workbench/ACT-WBN-16
       reporters:
       - e2e-workbench
-      state: fixing
+      state: fixed
       fix_node: fix.web-today.ec9640
     dfx-8a3ec29f05ec:
       suspected: health-signals-v2
@@ -54,7 +60,7 @@ defects:
       - flow-run-tiers/ACT-TIER-01
       reporters:
       - e2e-workbench
-      state: fixing
+      state: fixed
       fix_node: fix.health-signals-v2.8a3ec2
     dfx-1189ac175aed:
       suspected: inbound-pipeline-v2
@@ -65,7 +71,7 @@ defects:
       reporters:
       - e2e-inbound-rules
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.inbound-pipeline-v2.1189ac
     dfx-1837894e5c57:
       suspected: inbound-pipeline-v2
@@ -77,7 +83,7 @@ defects:
       reporters:
       - e2e-inbound-rules
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.inbound-pipeline-v2.1189ac
     dfx-1a33faf37354:
       suspected: endpoint-config-split
@@ -86,7 +92,7 @@ defects:
       - flow-endpoint-config/ACT-EPC-09
       reporters:
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.endpoint-config-split.1a33fa
     dfx-600f134c6ba0:
       suspected: cascade-engine
@@ -94,7 +100,7 @@ defects:
       - flow-agent-cascade/ACT-CAS-18
       reporters:
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.cascade-engine.600f13
     dfx-cd766f1a49ef:
       suspected: judge-protocol-client
@@ -111,7 +117,7 @@ defects:
       - flow-judgment-record/ACT-JRC-04
       reporters:
       - e2e-judgment
-      state: fixing
+      state: fixed
       fix_node: fix.judgment-record.4fdb4d
     dfx-4fdb4d4ca954:
       suspected: judgment-record
@@ -119,7 +125,7 @@ defects:
       - flow-judgment-record/ACT-JRC-06
       reporters:
       - e2e-judgment
-      state: fixing
+      state: fixed
       fix_node: fix.judgment-record.4fdb4d
     dfx-9d6fc9aed5ca:
       suspected: judgment-stats
@@ -135,7 +141,7 @@ defects:
       - flow-judgment-record/ACT-JRC-14
       reporters:
       - e2e-judgment
-      state: fixing
+      state: fixed
       fix_node: fix.calibration-bands.bfb7d7
     dfx-1fd0f7679f25:
       suspected: backup-restore
@@ -143,7 +149,7 @@ defects:
       - flow-backup-restore/ACT-BAK-04
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.backup-restore.1fd0f7
     dfx-68b52a3729d6:
       suspected: backup-restore
@@ -151,7 +157,7 @@ defects:
       - flow-backup-restore/ACT-BAK-06
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.backup-restore.1fd0f7
     dfx-ed02ce5c6af4:
       suspected: backup-restore
@@ -159,7 +165,7 @@ defects:
       - flow-backup-restore/ACT-BAK-09
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.backup-restore.1fd0f7
     dfx-1d1fcf14b3a9:
       suspected: ledger-schema-v3
@@ -167,7 +173,7 @@ defects:
       - flow-upgrade-rollback/ACT-UPG-15
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.ledger-schema-v3.1d1fcf
     dfx-9c33de15a3a7:
       suspected: rule-modes-v2
@@ -175,7 +181,7 @@ defects:
       - flow-upgrade-rollback/ACT-UPG-10
       reporters:
       - e2e-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.rule-modes-v2.9c33de
     dfx-5239bc3e86a2:
       suspected: wake-lease-recheck
@@ -193,4 +199,25 @@ defects:
       - e2e-release-doctor
       state: fixing
       fix_node: fix.release-packaging.542f4d
-  inbox: []
+  inbox:
+  - id: 24e961215eae
+    reporter: e2e-inbound-rules
+    defects:
+    - class: design-gap
+      suspected_node: login-hardening
+      anchors:
+      - flow-web-login/ACT-LGN-05
+      design_ref: docs/solution-design.md#14-安全
+      expected: TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce 的延迟断言是确定性的：延迟应答与"窗口过去后恢复即时应答"都由已有测试时钟（与仓库已有的
+        test-clock 做法一致，如 e.now 与 api/core/testclock_test.go）驱动，不依赖墙钟 time.Since，CI
+        上任意负载下都稳定通过。
+      observed: 用例约第 132 行用 time.Since 断言"窗口过去后应答耗时 < delay"（"delay must end with
+        the window, 200 in 163ms"），其前的延迟分支同样用 time.Since 断言"耗时 >= delay"。CI 负载下偶发失败，main
+        最近四次 CI 均因此失败，PR
+      locations:
+      - api/core/login_hardening_test.go:TestFloodAcrossAddressesDelaysEveryLoginAndAlertsOnce
+      - api/core/testclock_test.go
+    stopped: defect-budget-exhausted
+pending_human_amendment:
+  amendment_id: amend-6c86c8335a0c
+  file: reports/apa-dag-unblock-20261113/amendment-reviewed.yaml

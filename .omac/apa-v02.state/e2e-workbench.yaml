@@ -1,3 +1,4 @@
-# sha256: 054a692e3dc918aa0978916ff961bb8943ba9959cd3c509dd1c0a5b285c7abba
+# sha256: 58623833b4eb121eb7c0ea8db6c952dbe72ce2d9a70aa8b7a04cd724b8956918
 work_item_id: 01a1d2fc-2cb4-707a-8921-2682fe514c2f
-status: todo
+status: blocked
+recovery_marker: true
