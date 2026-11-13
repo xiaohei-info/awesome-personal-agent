@@ -1,4 +1,5 @@
-# sha256: 5b946fcc3798d81111f450278d1a6dafcb5aade17fb36d86f24c7fc764010b17
+# sha256: 168ff992ad30ea5f7ef03d0e4754b780ab4740d14d0d75aa86e092002176c318
 work_item_id: 01a1d2ab-28bd-796b-9b26-77595af37b58
 status: blocked
 recovery_marker: true
+defect_pending: true

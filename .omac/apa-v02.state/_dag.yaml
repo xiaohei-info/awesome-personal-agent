@@ -1,11 +1,16 @@
-# sha256: 7bf84c44ff839d725481b28a9f75899dc6a6b2482691c1f5ca7a997bd6f6f535
+# sha256: 6df67601a71807b8a373e9ae525e768e379003bde1d559edf517ae5ec3897091
 defects:
   schema: omac.defect-ledger/v1
   used_global: 3
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 2
-  granted_by_reporter: {}
+  granted_by_reporter:
+    e2e-sources: 2
+    e2e-inbound-rules: 1
+    e2e-judge: 4
+    e2e-judgment: 4
+    e2e-upgrade: 5
   entries:
     dfx-62f6c689fa3a:
       suspected: attribution-v2
