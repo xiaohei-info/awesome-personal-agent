@@ -1239,3 +1239,66 @@ func TestAlertObeysDailyCapAndSourceMute(t *testing.T) {
 		t.Fatalf("muted source: %+v", m)
 	}
 }
+
+// ---- 简报触达入队（§3.6 第 4 步） ----
+
+func (e *env) briefDone(extra map[string]any) string {
+	e.t.Helper()
+	in := map[string]any{"kind": "brief", "title": "每日简报", "assignee": "owner",
+		"spec": map[string]any{"period": "2026-01-01 08:00", "sections": []map[string]any{{"project": "alpha", "body": "b"}}}}
+	for k, v := range extra {
+		in[k] = v
+	}
+	id := e.item(in)
+	e.do(owner, "item.transition", map[string]any{"id": id, "to": "done", "reason": "written back"})
+	return id
+}
+
+// 简报写回完成后只产出一条 class=brief 的投递：默认路由注入，无人领取退回 Web 未读，重复事件不重复入队。
+func TestBriefDoneEnqueuesExactlyOneBriefDelivery(t *testing.T) {
+	e := setup(t)
+	id := e.briefDone(nil)
+	ds := e.injectable()
+	if len(ds) != 1 || ds[0].Class != domain.DeliveryBrief || ds[0].Item != id || ds[0].ID != delivery.BriefID(id) ||
+		ds[0].Content.Title != "每日简报" || ds[0].Content.WebURL != "/items/"+id {
+		t.Fatalf("want one brief delivery for the item, got %+v", ds)
+	}
+	e.do(owner, "item.update", map[string]any{"id": id, "title": "改名"}) // 事项再变：旧投递不作废、不重复
+	e.advance(time.Minute)
+	if ds := e.injectable(); len(ds) != 1 || ds[0].ID != delivery.BriefID(id) || ds[0].State == domain.DeliverySuperseded {
+		t.Fatalf("brief delivery must survive later item events: %+v", ds)
+	}
+	e.advance(10 * time.Minute)
+	if u := e.unread(); len(u) != 1 || u[0].Class != domain.DeliveryBrief {
+		t.Fatalf("unclaimed brief must stay in Web unread: %+v", u)
+	}
+}
+
+// 简报没写完（未 done）不入队；渠道路由可被 ext 领取。
+func TestBriefNotDoneProducesNothingAndChannelRouteIsClaimable(t *testing.T) {
+	e := setup(t)
+	e.policy(func(p *policy.Policy) { p.Disturb.Routes["brief"] = "chan" })
+	e.item(map[string]any{"kind": "brief", "title": "未写完"})
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("unfinished brief must not be delivered: %+v", d)
+	}
+	id := e.briefDone(nil)
+	if d := e.claim("channel:chan"); d == nil || d.Item != id || d.Class != domain.DeliveryBrief {
+		t.Fatalf("channel ext should claim the brief: %+v", d)
+	}
+}
+
+// 打扰策略仍然约束简报：被静音的事项，简报只留 Web 未读，不经渠道。
+func TestBriefHonorsMute(t *testing.T) {
+	e := setup(t)
+	e.policy(func(p *policy.Policy) { p.Disturb.Routes["brief"] = "chan" })
+	id := e.item(map[string]any{"kind": "brief", "title": "被静音的简报"})
+	e.policy(func(p *policy.Policy) { p.Disturb.Mutes = []policy.Mute{{Scope: policy.MuteItem, ID: id}} })
+	e.do(owner, "item.transition", map[string]any{"id": id, "to": "done", "reason": "written back"})
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("muted brief must not reach the channel: %+v", d)
+	}
+	if u := e.unread(); len(u) != 1 || u[0].Class != domain.DeliveryBrief || u[0].Suppressed != "muted" {
+		t.Fatalf("muted brief should be Web unread: %+v", u)
+	}
+}
