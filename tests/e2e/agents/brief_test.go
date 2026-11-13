@@ -3,6 +3,7 @@
 package agents
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -125,19 +126,76 @@ func TestFlowBrief(t *testing.T) {
 	})
 
 	t.Run("ACT-BRF-02 简报送达：会话注入、Web 未读、渠道领取", func(t *testing.T) {
-		b := f.briefs("brief ")[0]
-		// 简报是账本里的 brief 事项，不入投递队列：送达靠会话注入（事项增量）和 Web 简报页；
-		// Web 未读与渠道领取只承载投递队列里的条目，这里确认两个入口照常可用且不重复投递简报。
-		unread := f.webOK("GET", "/deliveries/unread", "", http.StatusOK)
-		lacks(t, "简报不入投递队列", unread, b.ID)
+		// 简报写回完成（done）时产出一条 class=brief 的投递（设计 §3.6、§7.4），路由按 disturb.routes.brief。
+		type dlv struct{ ID, Item, Class, State string }
+		find := func(ds []dlv, item string) *dlv {
+			for i := range ds {
+				if ds[i].Item == item && ds[i].Class == "brief" {
+					return &ds[i]
+				}
+			}
+			return nil
+		}
+		unread := func() []dlv {
+			return decode[struct{ Deliveries []dlv }](t, f.webOK("GET", "/deliveries/unread", "", http.StatusOK)).Deliveries
+		}
+		route := func(brief string) {
+			b, _ := json.Marshal(map[string]any{"disturb": map[string]any{"routes": map[string]string{
+				"decision": "inject", "reminder": "inject", "brief": brief, "health": "web", "wake": "web"}}})
+			f.webOK("PUT", "/settings/policy", string(b), http.StatusOK)
+		}
+		known := map[string]bool{}
+		for _, b := range f.briefs("brief ") {
+			known[b.ID] = true
+		}
+		newBrief := func() briefItem {
+			t.Helper()
+			tick("brief ", len(known)+1)
+			for _, b := range f.briefs("brief ") {
+				if !known[b.ID] {
+					known[b.ID] = true
+					return b
+				}
+			}
+			t.Fatal("没有新简报")
+			return briefItem{}
+		}
+
+		// 1. 默认路由是会话注入：新会话开始时注入带上简报摘要（投递条目 class=brief，事项增量带简报标题）。
+		first := f.briefs("brief ")[0]
 		code, out, errs := f.apaEnv(f.DEL, "", []string{"APA_SESSION=acc-session-9", "APA_SESSION_KIND=direct"}, "context", "--format", "inject")
 		if code != 0 {
 			t.Fatalf("apa context 退出码 %d: %s%s", code, out, errs)
 		}
-		contains(t, "会话开始注入带上简报摘要", out, b.Title)
-		if r := f.APIRaw("GET", "/v1/deliveries/next?wait=1", "", f.CHAN); r.Code != http.StatusOK && r.Code != http.StatusNoContent {
-			t.Errorf("CHAN_EXT 领取应返回 200/204: %d %s", r.Code, r.Body)
+		contains(t, "会话开始注入带上简报摘要", out, first.Title, "| brief |")
+
+		// 2. 路由 web：简报生成后、未被注入或领取之前，留在 Web 未读。
+		route("web")
+		web := newBrief()
+		d := find(unread(), web.ID)
+		if d == nil {
+			t.Fatalf("简报 %s 应出现在 Web 未读（class brief）: %+v", web.ID, unread())
 		}
+		eq(t, "Web 未读的投递状态", d.State, "fallback_web")
+
+		// 3. 路由渠道 acc-chan：CHAN_EXT 领取到该简报（200，class brief，item 为简报 id）；没被领取的 Web 简报仍在未读。
+		route("acc-chan")
+		ch := newBrief()
+		var got dlv
+		f.waitFor("CHAN_EXT 领取到渠道路由的简报", 30*time.Second, func() bool {
+			r := f.APIRaw("GET", "/v1/deliveries/next?wait=1", "", f.CHAN)
+			if r.Code != http.StatusOK {
+				return false
+			}
+			got = decode[dlv](t, r.Body)
+			return true
+		})
+		eq(t, "领取到的投递类别", got.Class, "brief")
+		eq(t, "领取到的投递对应简报", got.Item, ch.ID)
+		if find(unread(), web.ID) == nil {
+			t.Errorf("未领取的 Web 路由简报应仍在未读: %+v", unread())
+		}
+		route("inject")
 	})
 
 	t.Run("ACT-BRF-03 同一周期只生成一份", func(t *testing.T) {
