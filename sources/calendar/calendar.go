@@ -70,6 +70,7 @@ type event struct {
 	OccurredAt      string   `json:"occurred_at"`
 	CorrelationKeys []string `json:"correlation_keys,omitempty"`
 	Sender          string   `json:"sender,omitempty"`
+	MergeKey        string   `json:"merge_key,omitempty"`
 }
 
 // gogEvent 是 gog 输出的单个日程（Google Calendar 事件字段）。
@@ -339,6 +340,8 @@ func convert(g gogEvent) (event, time.Time, error) {
 		ID: uid + "|" + recurrence + "|" + marker, Type: typ, Subject: subject, Summary: summary,
 		Detail: g.Description, Link: g.HTMLLink, OccurredAt: at.UTC().Format(time.RFC3339Nano),
 		CorrelationKeys: []string{uid + "|" + recurrence}, Sender: g.Organizer.Email,
+		// 来源自带合并键优先于内核的 title+sender 推导（§9.3）：各重复实例各自成事项，同实例各版本合并。
+		MergeKey: uid + "|" + recurrence,
 	}
 	return ev, updated, nil // 工具不给可核实的结论，不设 sender_verified
 }
