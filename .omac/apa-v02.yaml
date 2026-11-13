@@ -15,7 +15,7 @@ meta:
   amendment_apply:
     schema: omac.amendment-apply/v1
     amendment_id: amend-6c86c8335a0c
-    amendment_file: /Volumes/SSD1T/apps/hermes/home/workspace/reports/apa-dag-unblock-20261113/amendment-reviewed.yaml
+    amendment_file: reports/apa-dag-unblock-20261113/amendment-reviewed.yaml
     nodes:
       fix.health-signals-v2.8a3ec2:
         stage: authoring

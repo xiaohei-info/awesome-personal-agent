@@ -1,4 +1,4 @@
-# sha256: dc3d72f0db4ba4de2ea878f35f3476c4fbe63b85d0570c4f5a3107429780de69
+# sha256: 22ad335fb33a0c74240b99a1e046ae1ff51b92b5527c830c987de978b0189898
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -199,4 +199,4 @@ defects:
   inbox: []
 pending_human_amendment:
   amendment_id: amend-6c86c8335a0c
-  file: /Volumes/SSD1T/apps/hermes/home/workspace/reports/apa-dag-unblock-20261113/amendment-reviewed.yaml
+  file: reports/apa-dag-unblock-20261113/amendment-reviewed.yaml
