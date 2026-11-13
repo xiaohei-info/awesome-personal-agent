@@ -1,9 +1,8 @@
-# sha256: eafee28decb124849bf24cfa48ee1af943ec71c681105a21fbe2ba2f85f388a3
+# sha256: b4f109036c7639699e5f4664398b26ce899710b0ff6bc629aa5e649864658eeb
 work_item_id: 01a1d632-e60f-79c0-9879-d32b9ebd9e1f
 status: done
 merged: true
 merged_at: '2026-11-13T19:28:05Z'
-recovery_marker: true
 retry_note: 'OWNER ANSWER to blocker handoff-0ea5e1bc87c35939: rule-modes 的修复（fix.rule-modes-v2.9dda04，ACT-RULE-14）已合入
   main。请把 PR #366 rebase 到最新 main 后重跑全部验证与 e2e-followup-flow 集成门禁，不改代码范围。business_tests
   引用 .omac/apa-v02.acceptance.yaml 里现有的 flow-health（含 ACT-HLT-03）。'

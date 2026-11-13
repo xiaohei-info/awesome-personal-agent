@@ -1,4 +1,4 @@
-# sha256: f8bee8abccc610bdc85463d01f3deeb6922890a5bfea5a89a493283e45378431
+# sha256: b154cb2fa7852029e3d3a11a01deb649eb651b8da89dd7a6f89ea390aec52983
 defects:
   schema: omac.defect-ledger/v1
   used_global: 25
@@ -279,6 +279,6 @@ defects:
       - flow-health/ACT-HLT-03
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-followup.83b4c7
   inbox: []
