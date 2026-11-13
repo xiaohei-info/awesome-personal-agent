@@ -1,5 +1,5 @@
-# sha256: 8e4f1e7e7d5424117990998e46f6d80a72eafb7b17dab48daf42a08a164055e1
+# sha256: 6e43bdf4491493b7d62f9d561fcb8703d0661e2ff91ba236aa7914825c90e627
 work_item_id: 01a1d3e2-9f68-78e2-8cd1-9ffd31d7b27d
-status: blocked
+status: in_progress
 recovery_marker: true
-retry_note: 代码与 PR 已完成,等契约修订后重新提交,不要重做
+retry_note: 上次失败是 Claude 5 小时额度上限（429），已重置；在原分支/PR 上继续，不要重做已完成部分
