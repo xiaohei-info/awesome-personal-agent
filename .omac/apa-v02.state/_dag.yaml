@@ -1,4 +1,4 @@
-# sha256: 4b54a61cdbc7f8dd35523516ae44b8ddd0f3d157d2f86a4a6666df4c0cd6549b
+# sha256: 82ab6c2deaa085350b6c2ff98a651f9cf0ebda2a15e5b56b2cb622ec4fead8bd
 defects:
   schema: omac.defect-ledger/v1
   used_global: 29
@@ -313,6 +313,16 @@ defects:
       - release-gates
       state: fixing
       fix_node: fix.e2e-v01-background.1222a3
+    dfx-9dccef293d4e:
+      suspected: e2e-session-authz
+      anchors:
+      - flow-session-kind/ACT-SKD-10
+      reporters:
+      - release-gates
+      state: queued
+      stop:
+        reason_code: defect-budget-exhausted
+        detail: '自动修复预算已用完: 报告者 8/8'
   inbox:
   - id: 9b1e10ea4a0b
     reporter: release-gates
@@ -342,3 +352,4 @@ defects:
       repro:
         command: go test -tags e2e -count=5 -run TestFlowSessionKind ./tests/e2e/authz/
         exit_code: 1
+    stopped: defect-budget-exhausted
