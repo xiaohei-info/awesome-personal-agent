@@ -438,3 +438,32 @@ func TestMoreCases(t *testing.T) {
 		t.Errorf("pim-mail-thread 应含回信")
 	}
 }
+
+// gh-epoch 存在时样本时间平移到安装时刻之后，since 同步换回样本时间；不存在时保持录制时的时间。
+func TestGhRebase(t *testing.T) {
+	bin := newBin(t)
+	setCase(t, bin, "gh-issue-opened")
+	path := "/repos/acc-org/acc-repo/issues?per_page=100&page=1&since="
+	call := func(since string) string {
+		o, _, code := run(t, bin, "gh", nil, "api", path+since)
+		if code != 0 {
+			t.Fatalf("gh api: 退出码 %d", code)
+		}
+		return o
+	}
+	if o := call("2026-11-10T08:00:00Z"); !strings.Contains(o, `"updated_at":"2026-11-10T09:00:00Z"`) {
+		t.Fatalf("没有 epoch 时应保持录制时间: %s", o)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "gh-epoch"), []byte("2030-01-01T00:00:00Z"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if o := call("2030-01-01T00:30:00Z"); !strings.Contains(o, `"number":11`) {
+		t.Fatalf("样本在 epoch+1h，since=epoch+30m 时应读到: %s", o)
+	}
+	if o := call("2030-01-01T01:00:00Z"); !strings.Contains(o, `"updated_at":"2030-01-01T01:00:00Z"`) {
+		t.Fatalf("样本时间应平移到 epoch+1h: %s", o)
+	}
+	if o := call("2030-01-01T01:00:01Z"); strings.Contains(o, `"number":11`) {
+		t.Fatalf("since 晚于样本时间时不应读到: %s", o)
+	}
+}

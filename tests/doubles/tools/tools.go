@@ -95,7 +95,12 @@ func Run(name string, args, env []string, binDir string, stdout, stderr io.Write
 		fmt.Fprintf(stderr, "tool-stub: %s/case 为空，且未设置 TOOL_STUB_CASE\n", binDir)
 		return ExitNoCase
 	}
-	r := dispatch(name, caseName, args, root)
+	var rebase *ghRebase
+	if name == "gh" {
+		rebase = loadGhRebase(binDir)
+	}
+	r := dispatch(name, caseName, rebase.args(args), root)
+	r.stdout = rebase.output(r.stdout)
 	io.WriteString(stdout, r.stdout)
 	io.WriteString(stderr, r.stderr)
 	return r.exit
