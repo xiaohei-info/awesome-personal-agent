@@ -1,4 +1,4 @@
-# sha256: cf345cbc6e6932b5a2e01f5526d961b3632990113e3f90a024c9afd4adf2e82a
+# sha256: 79141056f5d3d16740c70b5f010293d8a80503ee8820217fff103f1368cb257e
 defects:
   schema: omac.defect-ledger/v1
   used_global: 19
@@ -195,7 +195,7 @@ defects:
       - flow-release/ACT-REL-06
       reporters:
       - e2e-release-doctor
-      state: fixing
+      state: fixed
       fix_node: fix.release-packaging.542f4d
     dfx-c8ef9b61a3ec:
       suspected: web-calibration
