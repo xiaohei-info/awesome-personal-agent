@@ -1,6 +1,6 @@
-# sha256: 13b1fc52e11ef17ef0552216235c718736ae3901d30cb36f51d1b17f98976c7a
+# sha256: 8e810d105d9edd4ba237a8ee9388154c9ad18183e6fcedeb281c9a1f603e785f
 work_item_id: 01a1d5d1-fcc3-7056-8973-f8426da2578a
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 门槛 1 的合同要改：全量 go test -tags e2e ./tests/e2e/... 纳入验证，并新增 ci-e2e-gate 前置节点；同时
   4 处 e2e 回归已按缺陷回流上游修复。本节点在 amendment 与修复节点合并前保持挂起，等重新放行后再从头执行。不要在此之前提交。
