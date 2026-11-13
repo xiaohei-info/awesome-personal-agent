@@ -14,7 +14,10 @@ import (
 var registered = []string{"item.created", "item.updated", "item.phase_changed", "item.deadline_passed", "decision.requested",
 	"decision.resolved", "delegation.created", "delegation.reported", "command.rejected", "material.revised",
 	"material.revision_proposed", "guideline.activated", "project.updated", "project.allowed_executors_changed",
-	"rule.mode_changed", "allowlist.changed", "policy.changed", "run.started", "run.finished", "source.failed", "health.alert"}
+	"rule.mode_changed", "allowlist.changed", "policy.changed", "grant.issued", "grant.revoked", "run.started", "run.finished",
+	"source.failed", "health.alert",
+	// v0.2.0 新增（B.4）：登录审计四类、进展追加、建议补到已有事项。
+	"auth.login", "auth.login_locked", "auth.password_changed", "auth.session_revoked", "item.progress_added", "proposal.attached"}
 
 func find(es []envelope, typ, object string) *envelope {
 	for i := range es {
