@@ -77,7 +77,9 @@ func setup(t *testing.T) *kit {
 	t.Helper()
 	dir := programs(t)
 	// 登记的拉取程序只认裸名（设计 §9.1），apa serve 继承测试进程的 PATH 来找到它们；工具替身目录随后放在最前。
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// 宿主 PATH 不能直接继承：宿主若装了真实 himalaya，ACT-MAIL-04 的「工具未安装」就不成立。
+	// 改用测试自带的隔离目录：宿主 PATH 上除 himalaya 外的可执行文件的符号链接。
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+hostPathWithout(t, "himalaya"))
 	e := baseline.Setup(t)
 	e.WireEndpoints()
 	e.InstallToolStub()
@@ -588,4 +590,23 @@ func (k *kit) ghAt(c string, hour int) {
 		k.clockOffset = off
 		k.TCSet(off)
 	}
+}
+
+// hostPathWithout 返回一个目录，内含宿主 PATH 上除 name 外的全部可执行文件的符号链接（先出现者优先）。
+func hostPathWithout(t *testing.T, name string) string {
+	t.Helper()
+	farm := t.TempDir()
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
+		ents, _ := os.ReadDir(d)
+		for _, e := range ents {
+			if e.Name() == name {
+				continue
+			}
+			if fi, err := os.Stat(filepath.Join(d, e.Name())); err != nil || fi.IsDir() || fi.Mode()&0o111 == 0 {
+				continue
+			}
+			_ = os.Symlink(filepath.Join(d, e.Name()), filepath.Join(farm, e.Name())) // 已存在则保留先出现者
+		}
+	}
+	return farm
 }
