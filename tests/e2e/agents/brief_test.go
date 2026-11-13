@@ -88,6 +88,24 @@ func TestFlowBrief(t *testing.T) {
 			return true
 		})
 	}
+	// settled 等到没有 open 的简报且份数连续 3 秒不变，返回份数。
+	settled := func(prefix string) int {
+		t.Helper()
+		n, since := -1, time.Now()
+		f.waitFor(prefix+"份数稳定且无在途简报", 90*time.Second, func() bool {
+			bs := f.briefs(prefix)
+			open := false
+			for _, b := range bs {
+				open = open || b.Phase == "open"
+			}
+			if open || len(bs) != n {
+				n, since = len(bs), time.Now()
+				return false
+			}
+			return time.Since(since) >= 3*time.Second
+		})
+		return n
+	}
 	var inst string
 
 	t.Run("ACT-BRF-01 到期生成简报，按项目分节", func(t *testing.T) {
@@ -217,13 +235,20 @@ func TestFlowBrief(t *testing.T) {
 	})
 
 	t.Run("ACT-BRF-04 停机后只补最近一次", func(t *testing.T) {
-		before := len(f.briefs("brief "))
+		before := settled("brief ") // 基线必须稳定：前面各步的周期都已写回，没有在途的简报
+		stopAt := time.Now().Format(time.RFC3339Nano)
 		f.StopKernel()
 		f.TCAdvance(5 * 60) // 停机 5 分钟
 		f.StartKernelAgain()
 		f.waitFor("重启后补出简报", 60*time.Second, func() bool { return len(f.briefs("brief ")) > before })
-		time.Sleep(3 * time.Second) // 给多补的第二份留出出现的时间
-		eq(t, "错过 5 个周期只补一份", len(f.briefs("brief "))-before, 1)
+		after := settled("brief ")
+		if after-before != 1 {
+			for _, b := range f.briefs("brief ") {
+				t.Logf("简报 %s 创建于 %s", b.Title, b.Created)
+			}
+			t.Logf("停机前 %s", stopAt)
+		}
+		eq(t, "错过 5 个周期只补一份", after-before, 1) // 稳定后再数，给多补的第二份留出出现的时间
 		f.apa(f.DEL, 0, "instance", "disable", inst, "--evidence", "停止每分钟简报")
 	})
 
