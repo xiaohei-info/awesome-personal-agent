@@ -1,7 +1,8 @@
-# sha256: fdc09fcf11ab6f0346a72f42fc55dabb1b3626ea03b94cb99cf24d6385105e98
+# sha256: f9eb2ec8b0571272f61a422a5fed99a06dc7fb29823242e1e9380a81ad1de8ed
 work_item_id: 01a1d5d1-fcc3-7056-8973-f8426da2578a
 status: blocked
 recovery_marker: true
 retry_note: 原 worker 所在环境缺 sqlite3 CLI 且 apt 源不可用，改派到已具备真实 sqlite3 3.45、python3+pytest、go
   的 worker。上游四个回归修复（#366–#369、#371）与 ci-e2e-gate（#370）均已合入 main。请基于最新 main 完整检出重跑全部门槛，含全量
   e2e，不使用 shim。
+defect_pending: true
