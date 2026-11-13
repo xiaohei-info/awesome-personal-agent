@@ -175,3 +175,33 @@ func TestFailures(t *testing.T) {
 		}
 	}
 }
+
+// ACT-MAIL-13、ACT-MAIL-08：桌面邮件应用适配器同样产出线程关联键。get 的 message 带
+// references/inReplyTo；关联键写法与事件 id 一致（messageId 不带尖括号）。
+func TestMailThreadCorrelationKeys(t *testing.T) {
+	var calls [][]string
+	base := replay(t, &calls)
+	mk := func(c Config) Runner {
+		r := base(c)
+		return func(ctx context.Context, cli string, a ...string) ([]byte, []byte, error) {
+			if a[0] == "messages" {
+				b, err := os.ReadFile("testdata/messages-thread.json")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return b, nil, nil
+			}
+			return r(ctx, cli, a...)
+		}
+	}
+	code, lines, _ := exec1(t, mk, `{"config":{"kind":"mail","account":"Acct"}}`)
+	if code != ExitOK || len(lines) != 4 {
+		t.Fatalf("code=%d lines=%v", code, lines)
+	}
+	for i, id := range []string{"mid-p1@example.test", "mid-p2@example.test", "mid-p3@example.test"} {
+		ks, _ := lines[i]["correlation_keys"].([]any)
+		if lines[i]["id"] != id || len(ks) != 1 || ks[0] != "thread:mid-p1@example.test" {
+			t.Errorf("%s: %v", id, lines[i])
+		}
+	}
+}

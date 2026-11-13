@@ -1,0 +1,1 @@
+{"success":true,"engine":"sqlite","message":{"account":"Acct","mailbox":"INBOX","messageId":"mid-p2@example.test","content":"回信正文","references":"<mid-p1@example.test>","inReplyTo":"<mid-p1@example.test>"}}

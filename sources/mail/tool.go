@@ -133,15 +133,38 @@ func (e envelope) toEvent(needID bool) (event, time.Time, error) {
 	return event{ID: id, Type: "mail.received", Subject: subj, OccurredAt: at.UTC().Format(time.RFC3339Nano), Sender: sender}, at, nil
 }
 
-// splitMessageID 拆开 `message read -H Message-ID` 的输出："Message-ID: <id>\n\n正文"。
-func splitMessageID(s string) (id, body string, err error) {
+// parseRead 拆开 `message read -H Message-ID -H References -H In-Reply-To` 的输出：
+// "头: 值\n…\n\n正文"（头可折行）。返回自己的 Message-ID 与线程根（设计 §9.7：References 首项，
+// 没有取 In-Reply-To，都没有就是自己）。Message-ID 缺失视为输出无法解析；线程头缺失不是错误。
+func parseRead(s string) (id, root, body string, err error) {
 	head, body, _ := strings.Cut(s, "\n\n")
-	v, ok := strings.CutPrefix(head, "Message-ID:")
-	if id = strings.Join(strings.Fields(v), ""); !ok || id == "" {
-		return "", "", errors.New("缺少 Message-ID")
+	h := map[string]string{}
+	last := ""
+	for _, ln := range strings.Split(head, "\n") {
+		if ln != "" && (ln[0] == ' ' || ln[0] == '\t') { // 折行续上一个头
+			h[last] += " " + ln
+		} else if k, v, ok := strings.Cut(ln, ":"); ok {
+			last = strings.ToLower(strings.TrimSpace(k))
+			h[last] = v
+		}
 	}
-	return id, body, nil
+	if id = strings.Join(strings.Fields(h["message-id"]), ""); id == "" {
+		return "", "", "", errors.New("缺少 Message-ID")
+	}
+	root = firstMsgID(h["references"])
+	if root == "" {
+		root = firstMsgID(h["in-reply-to"])
+	}
+	if root == "" {
+		root = id
+	}
+	return id, root, body, nil
 }
+
+var msgIDRe = regexp.MustCompile(`<[^<>\s]+>`)
+
+// firstMsgID 取头值里的第一个 <Message-ID>。
+func firstMsgID(v string) string { return msgIDRe.FindString(v) }
 
 func truncate(s string) string {
 	if len(s) <= maxDetail {

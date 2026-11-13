@@ -1,0 +1,4 @@
+{"count":3,"engine":"sqlite","mailbox":"INBOX","success":true,"totalInMailbox":9,"messages":[
+{"dateReceived":"2026-01-03T12:00:00.000Z","isRead":false,"messageId":"mid-p3@example.test","sender":"A <a@example.test>","senderAddress":"a@example.test","senderName":"A","subject":"Re: 报价"},
+{"dateReceived":"2026-01-03T10:00:00.000Z","isRead":false,"messageId":"mid-p2@example.test","sender":"B <b@example.test>","senderAddress":"b@example.test","senderName":"B","subject":"Re: 报价"},
+{"dateReceived":"2026-01-02T10:00:00.000Z","isRead":false,"messageId":"mid-p1@example.test","sender":"A <a@example.test>","senderAddress":"a@example.test","senderName":"A","subject":"报价"}]}
