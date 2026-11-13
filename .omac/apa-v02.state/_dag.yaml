@@ -1,4 +1,4 @@
-# sha256: f952da31fe1c654b70917dffef9d475432b84e1882175fd02eef9e24b416381d
+# sha256: 397230fadd423f947cbf4b36b833e81461230b5f1aa35eab68a3b4e87b0d15e8
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -89,7 +89,7 @@ defects:
       - flow-endpoint-config/ACT-EPC-09
       reporters:
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.endpoint-config-split.1a33fa
     dfx-600f134c6ba0:
       suspected: cascade-engine
