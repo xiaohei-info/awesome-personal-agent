@@ -1,3 +1,4 @@
-# sha256: 8a6d4e64312703ea26f01cb4b3a8114dbd34b2b1fb0fbe829f5ee2533c99bc61
+# sha256: 80378bf31b2cc0e25e795467c901ca16aff86a66d070979144a5a1ee6cf221a7
 work_item_id: 01a1d73b-c4e3-7e55-a251-c8fb15bdd8de
-status: in_progress
+status: in_review
+recovery_marker: true
