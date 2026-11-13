@@ -1,7 +1,6 @@
-# sha256: b2cc71291e4d557c171865d11465d423564b83feccb6fe46809ae3727b83a7ab
+# sha256: fd14efcd2a8fb3f2b5bb9ad14fb403fa539f75853e22c7ba9487c3d85659e9b1
 work_item_id: 01a1d3b4-e32d-7917-aeae-af040354940e
 status: done
 merged: true
 merged_at: '2026-11-13T09:38:34Z'
-recovery_marker: true
 retry_note: 代码与 PR 已完成,等契约修订后重新提交,不要重做

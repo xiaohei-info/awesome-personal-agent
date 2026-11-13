@@ -1,4 +1,4 @@
-# sha256: 69f3be1d9b1a094e8968fdb3b0428a57687b8b8795a21c76efafabdbcf743104
+# sha256: 4309bdf518adbfb89f966fa1454f9e760b18a17e94256653b45747d62103f318
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -68,7 +68,7 @@ defects:
       reporters:
       - e2e-inbound-rules
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.inbound-pipeline-v2.1189ac
     dfx-1837894e5c57:
       suspected: inbound-pipeline-v2
@@ -80,7 +80,7 @@ defects:
       reporters:
       - e2e-inbound-rules
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.inbound-pipeline-v2.1189ac
     dfx-1a33faf37354:
       suspected: endpoint-config-split
