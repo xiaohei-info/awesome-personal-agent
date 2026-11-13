@@ -1,4 +1,4 @@
-# sha256: 397ae76e8093c02c3e986a3ed23fac0d8a4a47f44527a5a2d4387ec64f3db3b9
+# sha256: 11086a553de3e4ba8e5c41b3b4de737295d116bf6cca5d9fe5b8f2529133e30f
 defects:
   schema: omac.defect-ledger/v1
   used_global: 20
@@ -107,7 +107,7 @@ defects:
       - flow-judge-protocol/ACT-JDP-09
       reporters:
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.judge-protocol-client.cd766f
     dfx-81887fbc6daf:
       suspected: judgment-record
