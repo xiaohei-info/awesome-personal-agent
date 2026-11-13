@@ -1,4 +1,4 @@
-# sha256: 05732e87284b426e57b59a60dee323d2cc1443a9426706e7c97d99ddf7c9adce
+# sha256: 45b8a4b10223335f0af7c38c2d64a9a96d7c86398e9fc5c290c94ebf736c0791
 defects:
   schema: omac.defect-ledger/v1
   used_global: 30
@@ -303,7 +303,7 @@ defects:
       - flow-source-mail/ACT-MAIL-04
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-sources.50dd04
     dfx-1222a3a43647:
       suspected: e2e-v01-background
