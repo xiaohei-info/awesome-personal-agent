@@ -254,4 +254,6 @@ func TestFlowFollowMessages(t *testing.T) {
 			t.Errorf("越权交回不应生效: %+v", got)
 		}
 	})
+
+	echoSteps(k)
 }
