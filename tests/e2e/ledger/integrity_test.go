@@ -58,8 +58,11 @@ func passed(t *testing.T, out string, names ...string) {
 // TestFlowLedgerIntegrity 按验收文档 flow-ledger-integrity 执行 ACT-LED-01..04。
 func TestFlowLedgerIntegrity(t *testing.T) {
 	t.Run("ACT-LED-01 由 Event 重建投影结果一致", func(t *testing.T) {
-		// 事项投影按 Event 折叠重建后与现有投影逐字段比较；强杀实验另验 SQLite 完整与折叠一致。
-		out := goTest(t, "-v", "-run", "TestProjectionFoldsFromEvents|TestTimestampsFoldFromEvents|TestCorrelationKeysFoldAndRebuild", "./kernel/items/")
+		// 项目、事项（含决策请求）、关系按 Event 折叠后与现有投影逐字段比较，事项投影重建后与原投影相同；
+		// 强杀实验另验 SQLite 完整与折叠一致。
+		out := goTest(t, "-v", "-run", "TestProjectionRebuildFromEventsMatchesAllFields", "./kernel/invariants/")
+		passed(t, out, "TestProjectionRebuildFromEventsMatchesAllFields")
+		out = goTest(t, "-v", "-run", "TestProjectionFoldsFromEvents|TestTimestampsFoldFromEvents|TestCorrelationKeysFoldAndRebuild", "./kernel/items/")
 		passed(t, out, "TestProjectionFoldsFromEvents", "TestTimestampsFoldFromEvents", "TestCorrelationKeysFoldAndRebuild")
 		out = goTest(t, "-v", "-run", "TestKillDuringWriteLoopKeepsVersionAndEventsAligned", "./tests/crash/")
 		passed(t, out, "TestKillDuringWriteLoopKeepsVersionAndEventsAligned")
