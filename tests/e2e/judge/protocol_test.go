@@ -97,7 +97,11 @@ func TestFlowJudgeProtocol(t *testing.T) {
 		}
 		bs := f.Cls.Batches()
 		if len(bs) != 1 || bs[0].Questions != 5 {
-			t.Fatalf("CLS_LOG 应只有 1 批 5 题且没有重发，实际 %d 批 %+v", len(bs), bs)
+			sz := []int{}
+			for _, b := range bs {
+				sz = append(sz, b.Questions)
+			}
+			t.Fatalf("CLS_LOG 应只有 1 批 5 题且没有重发，实际 %d 批，题数 %v", len(bs), sz)
 		}
 		if n := len(f.judgeRequests()); n != 4 {
 			t.Errorf("MODEL_LOG 判断题请求 = %d，期望 4", n)

@@ -475,7 +475,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.When("ACCRELAYGEN", reply(`{"insufficient_info":true}`))
 		const pr = "https://example.invalid/acc/test-repo/pull/20"
 		parent := jsonMap(t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "cas20-parent", "--phase", "open",
-			"--project", f.Projects["acc-work"], "--evidence", "验收父事项").Stdout)["id"].(string)
+			"--project", f.Projects["acc-open"], "--evidence", "验收父事项").Stdout)["id"].(string)
 		child := jsonMap(t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", "cas20-child", "--evidence", "委派").Stdout)["id"].(string)
 		f.apa(f.WRK, 0, "report", child, "--outcome", "progress", "--summary", "已开 PR", "--pr", pr)
 		raw, _ := json.Marshal(map[string]any{"id": "cas20-msg", "type": "acc.comment", "subject": "cas20 后续消息", "detail": "来自白名单之外的发送者",
