@@ -65,7 +65,11 @@ func TestFlowPackLoader(t *testing.T) {
 				"pack.yaml":    strings.Replace(head, "%s", "bad-stats", 1),
 				"prompts/j.md": prompt("agent: judge\nquestion_type: yes_no\non_undecided: yes\nevent_stats: everything\n"),
 			}},
-			{"bad-main-escalate", "escalate_to", map[string]string{
+			{"bad-main-answer-by", "main_session", map[string]string{
+				"pack.yaml":    strings.Replace(head, "%s", "bad-main-answer-by", 1),
+				"prompts/m.md": prompt("run_as: main_session\nanswer_by: [chat]\n"),
+			}},
+			{"bad-main-escalate", "escalate_to", map[string]string{ // v0.1 已移除字段
 				"pack.yaml":    strings.Replace(head, "%s", "bad-main-escalate", 1),
 				"prompts/m.md": prompt("run_as: main_session\nescalate_to: other\n"),
 			}},
@@ -145,10 +149,15 @@ func TestFlowPackLoader(t *testing.T) {
 		if !ok || got.Description != "acc-overridden" || got.Source != "data" {
 			t.Errorf("应继续以上一有效版本（acc-overridden，data）工作，brief 不得消失: %+v", got)
 		}
-		waitUntil(t, "应产出一条健康类投递", func() bool {
-			d := e.Web("GET", "/v1/deliveries/unread", "")
-			return d.Code == 200 && strings.Contains(d.Body, "health")
-		})
+		waitUntil(t, "应产出一条健康类投递", func() bool { return packHealthDeliveries(e) == 1 })
+		// 同一内容再次热加载（重写同一文件，等过至少两个 5 秒热加载周期）不得再产出第二条。
+		if err := os.WriteFile(p, []byte(bad), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(12 * time.Second)
+		if n := packHealthDeliveries(e); n != 1 {
+			t.Errorf("同一内容再次热加载后 brief 的健康投递应仍为 1 条，实际 %d", n)
+		}
 	})
 
 	packStep(t, "ACT-PACK-05 新增自动化只写能力包", func(t *testing.T) {
@@ -326,4 +335,28 @@ func packRules(t *testing.T, e *baseline.Env) map[string]ruleState {
 		m[s.ID] = s
 	}
 	return m
+}
+
+// packHealthDeliveries 数未读投递里 class=health 且 item=pack:brief 的条数。
+func packHealthDeliveries(e *baseline.Env) int {
+	d := e.Web("GET", "/v1/deliveries/unread", "")
+	if d.Code != 200 {
+		return -1
+	}
+	var out struct {
+		Deliveries []struct {
+			Class string `json:"class"`
+			Item  string `json:"item"`
+		} `json:"deliveries"`
+	}
+	if json.Unmarshal([]byte(d.Body), &out) != nil {
+		return -1
+	}
+	n := 0
+	for _, x := range out.Deliveries {
+		if x.Class == "health" && x.Item == "pack:brief" {
+			n++
+		}
+	}
+	return n
 }
