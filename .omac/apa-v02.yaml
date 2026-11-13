@@ -11,27 +11,27 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 10
+  amendment_revision: 11
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-ab40b9c6295b
+    amendment_id: amend-24a751139c34
     amendment_file: .omac/apa-v02.system-amendment.yaml
     nodes:
-      fix.judgment-stats.184e24:
+      fix.cascade-engine.70067b:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-79c1124e9e3038c2b46d0ddc
-      e2e-judgment:
+        expected_review_generation: amendment-d088242cd98f4c3584101db6
+      e2e-judge:
         stage: authoring
         state: synced
-        work_item_id: 01a1d2ab-28bd-796b-9b26-77595af37b58
+        work_item_id: 01a1d2ab-1866-7a85-9059-479469d9c3a4
         baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-af2bc6d1d50cb83a39206240
+          review_generation: amendment-2b99fae5dc8fb4f2b7d799f0
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -43,20 +43,20 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
+          contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
           worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
-        expected_review_generation: amendment-9043ed2a26cc7ae8c4a2c50e
+        expected_contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
+        expected_review_generation: amendment-ee18e19ecd11fcb6e6adaab5
         attempt_baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-af2bc6d1d50cb83a39206240
+          review_generation: amendment-2b99fae5dc8fb4f2b7d799f0
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -68,14 +68,14 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
+          contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
           worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-9043ed2a26cc7ae8c4a2c50e
+          review_generation: amendment-ee18e19ecd11fcb6e6adaab5
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -87,7 +87,7 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
+          contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-followmsg:
@@ -186,14 +186,6 @@ meta:
           merge: 0
           review: 0
           worker: 0
-      e2e-judge:
-        amendment_id: amend-6c86c8335a0c
-        work_item_id: 01a1d2ab-1866-7a85-9059-479469d9c3a4
-        contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
       e2e-hostplugin:
         amendment_id: amend-6c86c8335a0c
         work_item_id: 01a1d32f-e47d-714e-89b9-4783862c659b
@@ -242,8 +234,16 @@ meta:
           merge: 0
           review: 0
           worker: 1
+      e2e-judgment:
+        amendment_id: amend-ab40b9c6295b
+        work_item_id: 01a1d2ab-28bd-796b-9b26-77595af37b58
+        contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
     system: true
-  last_amendment_id: amend-ab40b9c6295b
+  last_amendment_id: amend-24a751139c34
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -5626,6 +5626,7 @@ nodes:
   - fix.endpoint-config-split.1a33fa
   - fix.inbound-pipeline-v2.1189ac
   - fix.judge-protocol-client.cd766f
+  - fix.cascade-engine.70067b
   title: 概率判断协议、端点配置与级联全流程
   description: 产出 e2e-judge-flow-evidence。是 flow-judge-protocol、flow-endpoint-config、flow-agent-cascade
     的唯一全流程 owner，并负责其中 6 个 v0.1 继承或跨模块 business-action。要点：§8.9 表里每个用途的每一格各一条用例；只配一个端点、都不配时与
@@ -10933,4 +10934,110 @@ nodes:
       - proposal-attach-batch
     defect_refs:
     - dfx-184e245a8c8f
+    coverage_gate: 80
+- id: fix.cascade-engine.70067b
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - judge-protocol-client
+  - pack-loader-v2
+  - judgment-record
+  title: 'Fix cascade-engine: dfx-70067b4c2ffd, dfx-b6eef04ed1c1'
+  description: "Automatic fix for upstream defect(s) reported by e2e-judge.\n\n- [design-gap]
+    anchors flow-judge-protocol/ACT-JDP-03, flow-judge-protocol/ACT-JDP-04, flow-judge-protocol/ACT-JDP-05,
+    flow-judge-protocol/ACT-JDP-06, flow-judge-protocol/ACT-JDP-07 (docs/solution-design.md#88-概率判断协议版本-1)\n
+    \ expected: 按题错误只让该题交下一级、不重发整批；整批 400、协议错误、401、超时 5xx 不再逐题重发（首发加至多 2 次退避）；一律 413
+    时 8、4、4 后不再拆\n  observed: 首批 5 题后，出错的 4 题又各发一个 1 题请求；整批 400 共 4 次请求，一律 413 为 [8
+    4 4 1 1 1 1 1 1 1 1]，503 共 6 次\n  where: kernel/agents/direct/judge.go:classify
+    只缓存成功结果; kernel/agents/direct/judge.go:classLevel 无 prefix 时单题重问\n  repro (the
+    reporter re-runs it after your fix merges; it is not your gate): `go test -tags=e2e
+    -count=1 -run 'TestFlowJudgeProtocol/ACT-JDP-03' ./tests/e2e/judge/...` (exit
+    1)\n- [design-gap] anchors flow-judge-protocol/ACT-JDP-13 (docs/solution-design.md#85-批量与复用)\n
+    \ expected: 第一条判断记录不标 reused；换模型后第三条重新外呼且不标 reused\n  observed: 预取过的第一条被标 reused；换模型后第三条
+    reused=true\n  where: kernel/agents/direct/judge.go:classify reused 标记\n  repro
+    (the reporter re-runs it after your fix merges; it is not your gate): `go test
+    -tags=e2e -count=1 -run 'TestFlowJudgeProtocol/ACT-JDP-13' ./tests/e2e/judge/...`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-70067b4c2ffd, dfx-b6eef04ed1c1 in cascade-engine:
+      按题错误只让该题交下一级、不重发整批；整批 400、协议错误、401、超时 5xx 不再逐题重发（首发加至多 2 次退避）；一律 413 时 8、4、4
+      后不再拆; 第一条判断记录不标 reused；换模型后第三条重新外呼且不标 reused'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/agents/...
+    - go test -count=1 ./kernel/outcall/...
+    integration_gates:
+    - name: cascade-engine-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#83-级联同题升级与接力
+      - docs/solution-design.md#84-输入输出契约
+      - docs/solution-design.md#87-不可用时
+      - docs/solution-design.md#89-各用途的不确定带与保守默认
+      - docs/appendix-c-capability-pack.md#c7-提示词模板
+      delivery_goal: 外呼调用器级联：同题升级、接力、各级未定取保守默认；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-EPC-07
+      - ACT-CAS-01
+      - ACT-CAS-02
+      - ACT-CAS-03
+      - ACT-CAS-05
+      - ACT-CAS-11
+      - ACT-CAS-12
+      - ACT-CAS-13
+      - ACT-CAS-14
+      - ACT-CAS-15
+      - ACT-CAS-16
+      - ACT-CAS-17
+      - ACT-CAS-18
+      - ACT-CAS-19
+      - ACT-CAS-20
+      - ACT-CAS-21
+      acceptance_refs:
+      - flow-endpoint-config
+      - flow-agent-cascade
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/agents/...
+      - go test -count=1 ./kernel/outcall/...
+    pr_base: main
+    acceptance_refs:
+    - flow-judge-protocol
+    source_of_truth:
+    - docs/solution-design.md#83-级联同题升级与接力
+    - docs/solution-design.md#84-输入输出契约
+    - docs/solution-design.md#87-不可用时
+    - docs/solution-design.md#89-各用途的不确定带与保守默认
+    - docs/appendix-c-capability-pack.md#c7-提示词模板
+    scope_paths:
+    - kernel/agents/direct/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: judge-protocol-client-delivery
+      producer: judge-protocol-client
+      evidence_mode: artifact
+      requires:
+      - probability-judgment-client
+    - artifact_id: pack-loader-v2-delivery
+      producer: pack-loader-v2
+      evidence_mode: artifact
+      requires:
+      - pack-schema-v2
+    - artifact_id: judgment-record-delivery
+      producer: judgment-record
+      evidence_mode: artifact
+      requires:
+      - judgment-record-store
+    defect_refs:
+    - dfx-70067b4c2ffd
+    - dfx-b6eef04ed1c1
     coverage_gate: 80

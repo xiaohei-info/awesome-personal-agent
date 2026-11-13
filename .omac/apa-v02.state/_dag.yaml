@@ -1,11 +1,11 @@
-# sha256: cdbd56e8aadbef4d11f4ba72ca2d2821fbb7df864f40a1cd21dedc69f3a728d1
+# sha256: 72e4007de394d7e9123185919d9896eb89852ccb6bd8a647ba7d8a27d799ef9e
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 20
+  used_global: 21
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 3
-    e2e-judge: 4
+    e2e-judge: 5
     e2e-judgment: 4
     e2e-inbound-rules: 2
     e2e-upgrade: 3
@@ -223,4 +223,24 @@ defects:
       - e2e-judgment
       state: fixed
       fix_node: fix.judgment-stats.184e24
+    dfx-70067b4c2ffd:
+      suspected: cascade-engine
+      anchors:
+      - flow-judge-protocol/ACT-JDP-03
+      - flow-judge-protocol/ACT-JDP-04
+      - flow-judge-protocol/ACT-JDP-05
+      - flow-judge-protocol/ACT-JDP-06
+      - flow-judge-protocol/ACT-JDP-07
+      reporters:
+      - e2e-judge
+      state: fixing
+      fix_node: fix.cascade-engine.70067b
+    dfx-b6eef04ed1c1:
+      suspected: cascade-engine
+      anchors:
+      - flow-judge-protocol/ACT-JDP-13
+      reporters:
+      - e2e-judge
+      state: fixing
+      fix_node: fix.cascade-engine.70067b
   inbox: []
