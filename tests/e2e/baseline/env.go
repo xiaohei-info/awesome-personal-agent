@@ -6,6 +6,7 @@ package baseline
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -35,11 +36,13 @@ const (
 
 // Env 是一套验收环境。字段名对应验收文档里的环境变量。
 type Env struct {
-	T         testing.TB
-	Root      string // 测试专用根目录，APA_HOME 在其内
-	Home      string // APA_HOME
-	URL       string // APA_URL
-	NoSession bool   // 为真时带 --evidence 的命令也不设 APA_SESSION
+	T    testing.TB
+	Root string // 测试专用根目录，APA_HOME 在其内
+	Home string // APA_HOME
+	URL  string // APA_URL
+	// WebSecret 是 Web 登录口令；缺省为 Password，在账本夹具上启动时是夹具自己的口令（ServeFixture）。
+	WebSecret string
+	NoSession bool // 为真时带 --evidence 的命令也不设 APA_SESSION
 	// SessionKind 非空时作为 APA_SESSION_KIND 传给 apa 子命令（验收文档默认 direct；缺省留空以保持已交付流程的行为）。
 	SessionKind string
 	Bin         map[string]string // apa（-tags apa_testclock 测试构建）、stub-harness、tool-stub、telegram-ext 的可执行文件
@@ -373,7 +376,7 @@ func (e *Env) WebLogin() { e.T.Helper(); e.webLogin() }
 
 func (e *Env) webLogin() {
 	e.T.Helper()
-	r := e.do("POST", "/v1/auth/login", `{"password":"`+Password+`"}`, nil)
+	r := e.do("POST", "/v1/auth/login", `{"password":"`+cmp.Or(e.WebSecret, Password)+`"}`, nil)
 	var out struct {
 		CSRF string `json:"csrf_token"`
 	}
