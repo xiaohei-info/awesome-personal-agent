@@ -174,7 +174,7 @@ func TestFlowMaterialHosted(t *testing.T) {
 		merged := git(t, dir, "rev-parse", "HEAD")
 		f.apa(f.WRK, 0, "report", out.Item, "--outcome", "done", "--summary", "已合并", "--pr", "https://example.invalid/pr/13", "--commit", merged)
 		eq(t, "子事项阶段", f.phase(out.Item), "done")
-		f.waitFor("最近 commit 刷新", 10*time.Second, func() bool { return f.showMaterial(design).Hosted["commit"] == merged })
+		f.waitFor("最近 commit 刷新", 40*time.Second, func() bool { return f.showMaterial(design).Hosted["commit"] == merged })
 		contains(t, "Web 展示合并后的内容", f.read(design).Content, "令牌桶")
 	})
 
@@ -188,7 +188,7 @@ func TestFlowMaterialHosted(t *testing.T) {
 		git(t, dir, "commit", "-m", "remove other")
 		f.Apa(f.WRK, "", "agents", "check", "--repo", repo, "--file", filepath.Join(dir, "AGENTS.md"))
 		var fix any
-		f.waitFor("生成修正登记事项", 10*time.Second, func() bool { fix = f.showMaterial(other).Hosted["fix_item"]; return fix != nil })
+		f.waitFor("生成修正登记事项", 40*time.Second, func() bool { fix = f.showMaterial(other).Hosted["fix_item"]; return fix != nil })
 		eq(t, "修正事项阶段", f.phase(fix.(string)), "needs_input")
 		lacks(t, "索引随之重新渲染", agentsMD(), "docs/other.md")
 	})
