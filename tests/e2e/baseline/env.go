@@ -368,6 +368,9 @@ func (e *Env) do(method, path, body string, hdr map[string]string) Resp {
 	return Resp{resp.StatusCode, string(b)}
 }
 
+// WebLogin 以口令重新登录 Web（测试时钟推进数日后原会话已过期）。
+func (e *Env) WebLogin() { e.T.Helper(); e.webLogin() }
+
 func (e *Env) webLogin() {
 	e.T.Helper()
 	r := e.do("POST", "/v1/auth/login", `{"password":"`+Password+`"}`, nil)
