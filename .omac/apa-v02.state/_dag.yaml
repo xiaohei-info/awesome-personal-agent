@@ -1,7 +1,7 @@
-# sha256: 8d027da3b06673a23b86fc5308e0ba0f94164f93f4e8bbeb2ab650b433c52abf
+# sha256: 6dc0cb583a7fc74bd7ae41687fcabaa0012721c8dd1a5a8ec9005b3ed88ea1ab
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 13
+  used_global: 14
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 2
@@ -9,6 +9,7 @@ defects:
     e2e-judgment: 3
     e2e-inbound-rules: 1
     e2e-upgrade: 3
+    e2e-hostplugin: 1
   granted_by_reporter:
     e2e-sources: 2
     e2e-inbound-rules: 1
@@ -175,4 +176,12 @@ defects:
       - e2e-upgrade
       state: fixing
       fix_node: fix.rule-modes-v2.9c33de
+    dfx-5239bc3e86a2:
+      suspected: wake-lease-recheck
+      anchors:
+      - flow-wake-lease/ACT-WAK-03
+      reporters:
+      - e2e-hostplugin
+      state: fixing
+      fix_node: fix.wake-lease-recheck.5239bc
   inbox: []

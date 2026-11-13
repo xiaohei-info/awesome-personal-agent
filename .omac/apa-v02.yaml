@@ -11,66 +11,21 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 3
+  amendment_revision: 4
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-6cd1291ea27b
+    amendment_id: amend-100c15378d8d
     amendment_file: .omac/apa-v02.system-amendment.yaml
     nodes:
-      fix.backup-restore.1fd0f7:
+      fix.wake-lease-recheck.5239bc:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-fdbcb85455be2f9569fbf41d
-      fix.calibration-bands.bfb7d7:
+        expected_review_generation: amendment-341fa73eccd8ac2ab6dfc05f
+      e2e-hostplugin:
         stage: authoring
         state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-343c0b221bb5e33b0c1bfb89
-      fix.cascade-engine.600f13:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-cfc711f5ce193209edb4a749
-      fix.endpoint-config-split.1a33fa:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-0ca51438f02dfa5b6271c3e2
-      fix.inbound-pipeline-v2.1189ac:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-d869159a12611e376acc7bfb
-      fix.judge-protocol-client.cd766f:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-aedc6f32745b8c9cf9caf4f9
-      fix.judgment-record.4fdb4d:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-884e7207137a4e11db0d6f57
-      fix.judgment-stats.9d6fc9:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-43dd45adf7331e6ca043e312
-      fix.ledger-schema-v3.1d1fcf:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-95a2e9ad108ee7cebd23575c
-      fix.rule-modes-v2.9c33de:
-        stage: authoring
-        state: synced
-        reason: no existing work item side effect
-        expected_review_generation: amendment-3e6cf6052a69e3720ec8e30f
-      e2e-inbound-rules:
-        stage: authoring
-        state: synced
-        work_item_id: 01a1d2c3-f4c8-7c35-a6be-55223a4cd51a
+        work_item_id: 01a1d32f-e47d-714e-89b9-4783862c659b
         baseline:
           status: blocked
           phase: authoring
@@ -85,14 +40,14 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+          contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
           worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
-        expected_review_generation: amendment-2180da89990172a17faafbc1
+        expected_contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
+        expected_review_generation: amendment-7ae52b6570e97d32736a9732
         attempt_baseline:
           status: blocked
           phase: authoring
@@ -107,14 +62,14 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+          contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
           worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-2180da89990172a17faafbc1
+          review_generation: amendment-7ae52b6570e97d32736a9732
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -126,190 +81,7 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
-          worker_handoff_pending: false
-      e2e-judge:
-        stage: authoring
-        state: synced
-        work_item_id: 01a1d2ab-1866-7a85-9059-479469d9c3a4
-        baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: null
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
-          worker_handoff_pending: true
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-        expected_contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
-        expected_review_generation: amendment-dba33b24af1ab87f2ac9a960
-        attempt_baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: null
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
-          worker_handoff_pending: true
-        observed:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-dba33b24af1ab87f2ac9a960
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
-          worker_handoff_pending: false
-      e2e-judgment:
-        stage: authoring
-        state: synced
-        work_item_id: 01a1d2ab-28bd-796b-9b26-77595af37b58
-        baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: null
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
-          worker_handoff_pending: true
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-        expected_contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
-        expected_review_generation: amendment-b167b64ef5a0a5e4fac9bc92
-        attempt_baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: null
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
-          worker_handoff_pending: true
-        observed:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-b167b64ef5a0a5e4fac9bc92
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
-          worker_handoff_pending: false
-      e2e-upgrade:
-        stage: authoring
-        state: synced
-        work_item_id: 01a1d2dd-dd27-7342-bf57-4405c552e5a6
-        baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: null
-          review_ledger_generation: null
-          review_ledger_current: true
-          bounce_baseline: null
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 0ae5a8290ce3240c972f3eb5569a0b2b8ee788aa6975dc4a18a02381ef42640b
-          worker_handoff_pending: true
-        bounce_baseline:
-          merge: 0
-          review: 1
-          worker: 0
-        expected_contract_sha256: 0ae5a8290ce3240c972f3eb5569a0b2b8ee788aa6975dc4a18a02381ef42640b
-        expected_review_generation: amendment-dfb40f6839a7caca79db592c
-        attempt_baseline:
-          status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: null
-          review_ledger_generation: null
-          review_ledger_current: true
-          bounce_baseline: null
-          decision_required_pending: true
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 0ae5a8290ce3240c972f3eb5569a0b2b8ee788aa6975dc4a18a02381ef42640b
-          worker_handoff_pending: true
-        observed:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-dfb40f6839a7caca79db592c
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 1
-            worker: 0
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 0ae5a8290ce3240c972f3eb5569a0b2b8ee788aa6975dc4a18a02381ef42640b
+          contract_sha256: 396de18be22fad0609a3b9248544bf893a5252c679e7dc3fdbec0ba6fff5a4b6
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-followmsg:
@@ -328,8 +100,40 @@ meta:
           merge: 0
           review: 0
           worker: 0
+      e2e-inbound-rules:
+        amendment_id: amend-6cd1291ea27b
+        work_item_id: 01a1d2c3-f4c8-7c35-a6be-55223a4cd51a
+        contract_sha256: 43f997c120b080623c51ad6a6dd6ec3a36719dc12d69004d04adea47612efa4b
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-judge:
+        amendment_id: amend-6cd1291ea27b
+        work_item_id: 01a1d2ab-1866-7a85-9059-479469d9c3a4
+        contract_sha256: b0854e4d527f796d2fc4a63772384c153d51f52b760e1b4da78ff484f036e87b
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-judgment:
+        amendment_id: amend-6cd1291ea27b
+        work_item_id: 01a1d2ab-28bd-796b-9b26-77595af37b58
+        contract_sha256: dbb3b68ba24fb7fc60c0f017b7e238a913aa85a792b04d5c7bc87730176dcfef
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+      e2e-upgrade:
+        amendment_id: amend-6cd1291ea27b
+        work_item_id: 01a1d2dd-dd27-7342-bf57-4405c552e5a6
+        contract_sha256: 0ae5a8290ce3240c972f3eb5569a0b2b8ee788aa6975dc4a18a02381ef42640b
+        bounce_baseline:
+          merge: 0
+          review: 1
+          worker: 0
     system: true
-  last_amendment_id: amend-6cd1291ea27b
+  last_amendment_id: amend-100c15378d8d
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -7237,6 +7041,7 @@ nodes:
   - e2e-env-baseline
   - session-kind
   - wake-lease-recheck
+  - fix.wake-lease-recheck.5239bc
   title: 宿主插件上下文与唤醒租约全流程（替身与插件契约测试版）
   description: 产出 e2e-hostplugin-flow-evidence。是 flow-hermes-context、flow-wake-lease
     的唯一全流程 owner，并负责其中 2 个 v0.1 继承或跨模块 business-action。要点：真实宿主上的证实由本机验证 L9 承接。
@@ -10409,4 +10214,81 @@ nodes:
       - pack-schema-v2
     defect_refs:
     - dfx-9c33de15a3a7
+    coverage_gate: 80
+- id: fix.wake-lease-recheck.5239bc
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - session-kind
+  title: 'Fix wake-lease-recheck: dfx-5239bc3e86a2'
+  description: "Automatic fix for upstream defect(s) reported by e2e-hostplugin.\n\n-
+    [design-gap] anchors flow-wake-lease/ACT-WAK-03 (docs/solution-design.md#136-后台执行无人值守与会话续接)\n
+    \ expected: Acceptance ACT-WAK-03: the exchange returns 200, token starts with
+    apa_run_, and expires_at is not later than the run start time plus the run timeout.
+    Design 13.6 lease row also takes the deadline as run start + run timeout.\n  observed:
+    POST /v1/runs/{id}/credential returns expires_at = exchange time + run timeout
+    (3s late in this run).\n  where: kernel/runidentity/runidentity.go:Exchange; kernel/runidentity/runidentity_test.go:TestExchangeForWakeRun\n
+    \ repro: `go test -tags=e2e -count=1 -run TestFlowWakeLease ./tests/e2e/hostplugin/...`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-5239bc3e86a2 in wake-lease-recheck:
+      Acceptance ACT-WAK-03: the exchange returns 200, token starts with apa_run_,
+      and expires_at is not later than the run start time plus the run timeout. Design
+      13.6 lease row also takes the deadline as run start + run timeout.'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/wake/...
+    - go test -count=1 ./plugins/hermes/...
+    - go test -tags=e2e -count=1 -run TestFlowWakeLease ./tests/e2e/hostplugin/...
+    integration_gates:
+    - name: wake-lease-recheck-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#136-后台执行无人值守与会话续接
+      - docs/appendix-a-harness.md#a2-无头运行声明
+      - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+      delivery_goal: 唤醒租约复验（遗留缺陷 dfx-5410a4c832ad）；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-WAK-02
+      - ACT-WAK-03
+      - ACT-WAK-04
+      - ACT-WAK-05
+      - ACT-WAK-06
+      - ACT-WAK-07
+      - ACT-WAK-08
+      - ACT-WAK-09
+      acceptance_refs:
+      - flow-wake-lease
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/wake/...
+      - go test -count=1 ./plugins/hermes/...
+    pr_base: main
+    acceptance_refs:
+    - flow-wake-lease
+    source_of_truth:
+    - docs/solution-design.md#136-后台执行无人值守与会话续接
+    - docs/appendix-a-harness.md#a2-无头运行声明
+    - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+    scope_paths:
+    - kernel/wake/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: session-kind-delivery
+      producer: session-kind
+      evidence_mode: artifact
+      requires:
+      - session-kind-gate
+      - plugin-session-kind
+    defect_refs:
+    - dfx-5239bc3e86a2
     coverage_gate: 80
