@@ -1,4 +1,4 @@
-# sha256: 22ad335fb33a0c74240b99a1e046ae1ff51b92b5527c830c987de978b0189898
+# sha256: 13c6100835267ec83daeeffb614acd7db34f24fce5b4bebae39fa63aa2d8cec1
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -97,7 +97,7 @@ defects:
       - flow-agent-cascade/ACT-CAS-18
       reporters:
       - e2e-judge
-      state: fixing
+      state: fixed
       fix_node: fix.cascade-engine.600f13
     dfx-cd766f1a49ef:
       suspected: judge-protocol-client
