@@ -1,0 +1,8 @@
+# sha256: f98619622a32c336ec83f12dd3f0c7f3a34f8442324fd2e5bbe3760d524997df
+defects:
+  schema: omac.defect-ledger/v1
+  used_global: 0
+  used_by_reporter: {}
+  granted_by_reporter: {}
+  entries: {}
+  inbox: []
