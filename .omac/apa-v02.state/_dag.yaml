@@ -1,4 +1,4 @@
-# sha256: 79141056f5d3d16740c70b5f010293d8a80503ee8820217fff103f1368cb257e
+# sha256: 35c8e26c83f49fac66748d8ddf80b1956a5aa43ece92b1745239140170ccc489
 defects:
   schema: omac.defect-ledger/v1
   used_global: 19
@@ -211,7 +211,7 @@ defects:
       - flow-web-login/ACT-LGN-05
       reporters:
       - e2e-inbound-rules
-      state: fixing
+      state: fixed
       fix_node: fix.login-hardening.0b1aae
   inbox: []
 pending_human_amendment:
