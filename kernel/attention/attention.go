@@ -343,6 +343,15 @@ func (a *Attention) Remind(tx *store.Tx, it domain.Item, kind string, due time.T
 	return a.remind(tx, pol, it, kind, due, title, summary)
 }
 
+// RemindWith 同 Remind，并在提醒内容里给出本人可选的动作（如跟进的"已催""再等""放弃"）。
+func (a *Attention) RemindWith(tx *store.Tx, it domain.Item, kind string, due time.Time, title, summary string, options []string) error {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return err
+	}
+	return a.remind(tx, pol, it, kind, due, title, summary, options...)
+}
+
 // RemindGroup 把一批事项合成一条提醒（如久未推进），挂在 anchor 事项上；同一 key 只提醒一次。
 // 内容里的 webURL 指向批的入口，不是 anchor。在调用方的事务里运行。
 func (a *Attention) RemindGroup(tx *store.Tx, anchor domain.Item, key, title, summary, webURL string) error {
@@ -374,14 +383,14 @@ func (a *Attention) Alert(tx *store.Tx, o domain.DeliveryOrigin, content domain.
 		version: 1, content: content, origin: &o})
 }
 
-func (a *Attention) remind(tx *store.Tx, pol policy.Policy, it domain.Item, kind string, due time.Time, title, summary string) error {
+func (a *Attention) remind(tx *store.Tx, pol policy.Policy, it domain.Item, kind string, due time.Time, title, summary string, options ...string) error {
 	ver, err := command.Version(tx, it.ID)
 	if err != nil {
 		return err
 	}
 	return a.offer(tx, pol, held{
 		id: fmt.Sprintf("remind:%s:%s:%d", kind, it.ID, due.UnixNano()), item: it.ID, class: domain.DeliveryReminder, priority: it.Priority, version: ver,
-		content: domain.DeliveryContent{Title: title, Summary: summary, WebURL: a.o.WebURL(it.ID)},
+		content: domain.DeliveryContent{Title: title, Summary: summary, Options: options, WebURL: a.o.WebURL(it.ID)},
 	})
 }
 
