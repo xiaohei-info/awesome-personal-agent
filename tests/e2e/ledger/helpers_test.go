@@ -1,6 +1,6 @@
 //go:build e2e
 
-// Package ledger 是验收文档四个全流程的端到端测试：flow-item-lifecycle、flow-clock-due、flow-why-audit、
+// Package ledger 是验收文档六个全流程的端到端测试：flow-bootstrap、flow-ledger-integrity、flow-item-lifecycle、flow-clock-due、flow-why-audit、
 // flow-agent-revert。全部走真实 apa 二进制与真实内核进程（环境来自 tests/e2e/baseline），
 // CLI 步骤直接运行 apa；Web 步骤以登录后的本人会话调用 Web 页面使用的同一组 HTTP API。
 package ledger
