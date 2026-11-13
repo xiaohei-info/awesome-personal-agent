@@ -1,4 +1,5 @@
-# sha256: 9faa52fe9dd9c73dd5bbfe0060c6972415fcaf69a7ecd3dc404b6dec6eb40dc9
+# sha256: 8c25ec6594a1c0b89684ecf5197c9b5874b4afac9ffd91aa88087a163630660d
 work_item_id: 01a1d3c9-1f88-7ae1-835c-27910679ce3b
-status: todo
+status: in_progress
+recovery_marker: true
 retry_note: 代码与 PR 已完成,等契约修订后重新提交,不要重做
