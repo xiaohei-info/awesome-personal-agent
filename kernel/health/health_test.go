@@ -503,3 +503,16 @@ func TestCursorInheritedFromChainOnUpgrade(t *testing.T) {
 		t.Fatalf("cursor = %d, %v", seq, err)
 	}
 }
+
+// ACT-JDP-04/09：判断端点故障（分类端点整批失败后由对话端点定案）在健康视图里仍可见，且与生成端点分开。
+func TestJudgeEndpointFailureIsVisibleAndSeparate(t *testing.T) {
+	e := setup(t)
+	e.update(func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO direct_judge_health (id, since, last_error) VALUES (1, 1, 'protocol_error')`)
+		return err
+	})
+	v := e.collect(nil)
+	if v.Judge != EndpointFailing || v.Generate != "" || v.Endpoint != EndpointFailing || v.Healthy() {
+		t.Fatalf("%+v", v)
+	}
+}

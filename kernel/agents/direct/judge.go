@@ -330,6 +330,7 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 	t0 := s.o.Now()
 	res, err := s.o.Classifier.Judge(ctx, ep, qs, model.JudgeOptions{SingleShot: group[0].meta.SingleShot})
 	took := s.o.Now().Sub(t0)
+	s.noteClassifierHealth(ctx, res, err)
 	for i, j := range jobs {
 		a := model.Answer{ID: j.q.ID, ErrCode: model.CodeUnavailable}
 		sig := &res
@@ -346,6 +347,25 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 			p.prefix["classifier"] = &classAns{Answer: a, elapsed: took, ran: true, sig: sig, reused: k > 0 && a.ErrCode == ""}
 		}
 	}
+}
+
+// noteClassifierHealth 把分类端点的整批故障记进判断端点的健康：致命故障（401/403、self_reported）或没有任何可采信的批次
+// 都标为不可用，下一次合法响应清除。对话端点随后定案不影响这里，故障才不会被级联掩盖（§8.8）。
+// 记不下来只影响可见性，不影响本次判断；下一次调用会再写。
+func (s *Service) noteClassifierHealth(ctx context.Context, res model.JudgeResult, callErr error) {
+	if callErr != nil { // 请求没发出（如题号重复）是调用方的问题，不是端点的
+		return
+	}
+	var msg string
+	switch {
+	case res.Healthy && !res.Unavailable:
+	case res.Unavailable || len(res.Faults) > 0:
+		msg = strings.Join(res.Faults, ",")
+		if msg == "" {
+			msg = model.CodeUnavailable
+		}
+	}
+	_ = s.setJudgeHealth(ctx, msg)
 }
 
 func (s *Service) cachedClass(ctx context.Context, fp string) (model.Answer, bool) {
