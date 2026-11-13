@@ -1,8 +1,8 @@
 //go:build e2e
 
-// Package bootstrap 按验收文档 flow-bootstrap（ACT-BOOT-01..07）用真实 apa 二进制从零安装、启动并登录。
+// flow-bootstrap 按验收文档 flow-bootstrap（ACT-BOOT-01..07）用真实 apa 二进制从零安装、启动并登录。
 // Web 步骤经与页面相同的 HTTP API 驱动；页面渲染本身由 web/ 下的组件测试与 ego-browser 人工步骤覆盖。
-package bootstrap
+package ledger
 
 import (
 	"bytes"

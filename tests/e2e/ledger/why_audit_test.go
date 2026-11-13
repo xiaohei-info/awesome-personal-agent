@@ -5,6 +5,7 @@ package ledger
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
@@ -16,7 +17,13 @@ func decidedItem(t *testing.T, e *baseline.Env, title string) string {
 	t.Helper()
 	id := addTask(t, e, title, "--assignee", "work-host.cli")
 	ok(t, e.Apa(e.WRK, "", "ask", id, "--question", "which vendor?", "--option", "x=Vendor X", "--option", "y=Vendor Y", "--reason", "need the owner's call"), "ask")
-	ok(t, e.Apa(e.DEL, "", "decide", id, "--option", "x", "--evidence", secretEvidence), "decide")
+	// web_only 初筛是异步的：返回前代答被拒（退出码 22，§6.14 第 4 条），等它返回后重试。
+	var r baseline.Result
+	waitFor(t, 30*time.Second, "初筛返回后可代答", func() bool {
+		r = e.Apa(e.DEL, "", "decide", id, "--option", "x", "--evidence", secretEvidence)
+		return r.Code != 22
+	})
+	ok(t, r, "decide")
 	ok(t, e.Apa(e.DEL, "", "item", "transition", id, "--to", "done", "--reason", "vendor chosen", "--evidence", "owner: done"), "done")
 	return id
 }
