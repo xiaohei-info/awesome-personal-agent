@@ -162,6 +162,10 @@ func TestFlowSessionKind(t *testing.T) {
 			t.Error("第一档命令不应被拒绝")
 		}
 		for _, e := range k.auditOf(i2, "") {
+			// 内核以 system 身份代本人异步起草摘要（§6.3），带 on_behalf_of 是设计，不属于 agent 的写入。
+			if p, _ := e.Actor["principal"].(string); strings.HasPrefix(p, "system:") {
+				continue
+			}
 			if _, ok := e.Actor["on_behalf_of"]; ok && e.Actor["principal"] != "" && e.Type != "item.created" {
 				t.Errorf("agent 自己的工作不带 on_behalf_of: %+v", e)
 			}
