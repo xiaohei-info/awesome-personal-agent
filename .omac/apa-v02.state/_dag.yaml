@@ -1,4 +1,4 @@
-# sha256: 9408d5e002d66cbd9b8b1d691c6b3f722738c9ae62a355fae758d147ffb9e1f5
+# sha256: 1628a4344263e4736a6abe48dfa620ae6a6fccdd4ee1b06a3089786bda3f21da
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -41,7 +41,7 @@ defects:
       - flow-source-calendar/ACT-CAL-02
       reporters:
       - e2e-sources
-      state: fixing
+      state: fixed
       fix_node: fix.calendar-adapter-v2.bfeb8d
     dfx-ec964047626d:
       suspected: web-today
