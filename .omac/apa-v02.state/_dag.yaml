@@ -1,4 +1,4 @@
-# sha256: c250762324fc196a41c9ced7a3ae68ab5de975822d21e78ae6f00cca5381f216
+# sha256: cdbd56e8aadbef4d11f4ba72ca2d2821fbb7df864f40a1cd21dedc69f3a728d1
 defects:
   schema: omac.defect-ledger/v1
   used_global: 20
@@ -15,10 +15,11 @@ defects:
   granted_by_reporter:
     e2e-sources: 4
     e2e-inbound-rules: 2
-    e2e-judge: 4
+    e2e-judge: 5
     e2e-judgment: 4
     e2e-upgrade: 5
     e2e-workbench: 1
+  granted_global: 2
   entries:
     dfx-62f6c689fa3a:
       suspected: attribution-v2
