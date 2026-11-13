@@ -1,4 +1,4 @@
-# sha256: 67291064d93157bc876b6110dfc23533e9f20b8350564e7379b75991c735427a
+# sha256: a8a4181f3bda2a84b6b4b1f22583ff73dfbabce89ec7c478492b2e638dcd8be5
 defects:
   schema: omac.defect-ledger/v1
   used_global: 16
@@ -25,7 +25,7 @@ defects:
       - flow-follow-messages/ACT-MSG-13
       reporters:
       - e2e-followmsg
-      state: fixing
+      state: fixed
       fix_node: fix.attribution-v2.62f6c6
     dfx-d3eb8c700b85:
       suspected: attribution-v2
