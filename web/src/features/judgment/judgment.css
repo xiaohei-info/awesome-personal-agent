@@ -1,0 +1,4 @@
+/* 360px：长来源/模板标识符不得把页面撑出横向滚动条；宽表格仍在自身内部滚动（见 app/styles.css）。 */
+.judgment { min-width: 0; overflow-wrap: anywhere; }
+.judgment figure { margin: 0 0 16px; min-width: 0; }
+.judgment td, .judgment th, .judgment li, .judgment figcaption { overflow-wrap: anywhere; }
