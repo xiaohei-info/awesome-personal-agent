@@ -279,3 +279,17 @@ func TestParseSince(t *testing.T) {
 		}
 	}
 }
+
+// 记录里的模板是 <包>/<模板>@<hash>；按模板名筛选必须命中，完整名也要命中，同名前缀不能误中。
+func TestTemplateNameFilterMatchesPackQualified(t *testing.T) {
+	e := newEnv(t)
+	q := func(r *record.Record) { r.Template = "inbound-triage/triage-screen@abc123" }
+	e.seed("q1", "", []record.Level{cls(0.9, record.OutcomeDecided)}, record.DecidedClassifier, "yes", q)
+	e.seed("q2", "", []record.Level{cls(0.4, record.OutcomeUncertain)}, record.DecidedDefault, "yes", func(r *record.Record) { r.Template = "inbound-triage/triage-screen-2@abc123" })
+	for _, tpl := range []string{"triage-screen", "inbound-triage/triage-screen@abc123"} {
+		res := e.stats(Filter{Template: tpl})
+		if len(res.Rows) != 1 || res.Rows[0].Calls != 1 || res.Rows[0].Decided != 1 || len(res.Rates) != 1 || len(res.Histogram) != 1 {
+			t.Fatalf("template=%q: %+v", tpl, res)
+		}
+	}
+}
