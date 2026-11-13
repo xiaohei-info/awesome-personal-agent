@@ -82,7 +82,7 @@ type Quiet struct {
 // Disturb 是打扰策略（§7.4）。Routes 的键为投递类别，或「类别:优先级」（后者优先），值为路由。
 // Quiet 为空表示不设静默；QuietExempt 为真时，临近截止的决策不受静默限制（默认静默优先）；
 // MergeWindowSec 是低优先级提醒的合并窗口，0 表示不合并；RemindOnDeadline 为真时，截止已过仍未处理的事项再提醒一次。
-// ThresholdJudge 为真时，决策投递在按优先级定路由之外再经判断型做投递阈值判定（只能降低打扰），默认关闭（§7.4）。
+// ThresholdJudge 为真时，决策投递在按优先级定路由之外再经判断型问“这条决策可以晚点送吗”（只能降低打扰：是则推迟到合并窗口后单独投递），默认关闭（§7.4）。
 type Disturb struct {
 	Routes           map[string]string `json:"routes"`
 	Quiet            *Quiet            `json:"quiet,omitempty"`

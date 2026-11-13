@@ -4,7 +4,7 @@
 // 工作方式是电平触发：事项一变（Sync）就按事项现状重算它该有什么投递——proposed 与初筛未返回的不产出，
 // 待决的决策产出一条（版本取事项版本），事项变化后旧版本投递作废（Supersede）；时间相关的（截止已过再提醒、
 // 静默结束补发、合并窗口到期、无人领取退回 Web 未读）由一个周期 Timer 驱动的 Tick 处理。
-// 配了 Drafter 且策略配了模型端点时，决策投递先经 decision-card 包起草卡片文案（及可选的投递阈值判定），见 draft.go。
+// 配了 Drafter 且策略配了模型端点时，决策投递先经 decision-card 包起草卡片文案（及可选的投递推迟判定），见 draft.go。
 // 本包只写自己的游标、暂存与起草表，投递表经 delivery.Queue 写入，事项与策略只读。
 package attention
 
@@ -68,7 +68,7 @@ CREATE INDEX attention_held_item ON attention_held(item);
 CREATE INDEX attention_held_release ON attention_held(release_at);`,
 }, {
 	Version: 2, Name: "create-attention-draft",
-	// 每个待决决策一行：哪个版本起草到了哪一步（pending 未返回时不投递）、卡片文案与阈值判定。
+	// 每个待决决策一行：哪个版本起草到了哪一步（pending 未返回时不投递）、卡片文案与推迟判定。
 	SQL: `CREATE TABLE attention_draft (
 	item TEXT PRIMARY KEY,
 	version INTEGER NOT NULL,
@@ -89,7 +89,7 @@ type Options struct {
 	TickEvery time.Duration             // 周期 Timer 间隔，默认 30 秒
 	WebURL    func(item string) string  // 投递里的 Web 链接，默认 /items/<id>
 	FormURL   func(token string) string // 投递里的一次性表单链接，默认 /forms/<令牌>
-	// Drafter 起草决策卡片文案与做投递阈值判定；为空时投递内容与路由只按规则。
+	// Drafter 起草决策卡片文案与做投递推迟判定；为空时投递内容与路由只按规则。
 	Drafter Drafter
 }
 
@@ -269,7 +269,7 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 		content: content,
 		exempt:  nearDeadline(pol, it, a.o.Now()),
 	}
-	if dr.Verdict == VerdictDigest && pol.Disturb.MergeWindowSec > 0 {
+	if dr.Verdict == VerdictDefer && pol.Disturb.MergeWindowSec > 0 {
 		// 带选项的决策不并入摘要（§7.4）：推迟到合并窗口结束后单独投递。
 		h.notBefore = a.o.Now().Add(time.Duration(pol.Disturb.MergeWindowSec) * time.Second)
 	}
@@ -406,7 +406,7 @@ type held struct {
 	exempt    bool // 豁免静默
 	mergeable bool
 	release   time.Time
-	notBefore time.Time              // 阈值判定为并入摘要时的最早放行时刻
+	notBefore time.Time              // 推迟判定为“可以晚点送”时的最早放行时刻（合并窗口结束）
 	origin    *domain.DeliveryOrigin // 没有事项的提醒（规则 alert 出口）的出处；有事项时为空
 }
 
@@ -582,15 +582,6 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 		d.Content = domain.DeliveryContent{Title: fmt.Sprintf("%d 条低优先级提醒", len(hs)), Summary: strings.Join(titles, "；")}
 	}
 	d.Route = a.route(pol, hs[0].class, hs[0].priority)
-	if d.Class == domain.DeliveryDecision {
-		v, err := a.verdict(tx, d.Item, d.Version)
-		if err != nil {
-			return err
-		}
-		if v == VerdictWebUnread { // 阈值判定只能降低打扰：留在 Web 未读
-			d.Route = delivery.RouteWeb
-		}
-	}
 	if err := a.attachForm(tx, pol, &d); err != nil {
 		return err
 	}
