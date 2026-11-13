@@ -317,3 +317,84 @@ func exitedState(t *testing.T) *os.ProcessState {
 	_ = cmd.Run()
 	return cmd.ProcessState
 }
+
+func recordedStderr(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "0.9.0", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// ACT-CAL-07 / MEAS-CAL-AUTH：账号没有令牌、keyring 口令不对，两种录制 stderr（退出码都是 1）都识别为认证失败，
+// 返回 2、stdout 无内容（游标不动）；恢复后同样输入正常产出。
+func TestRecordedAuthFailuresNeedInputAndRecover(t *testing.T) {
+	version, events := recorded(t, "0.9.0")
+	exitErr := &exec.ExitError{ProcessState: exitedState(t)}
+	for _, name := range []string{"auth-no-token.stderr", "auth-bad-keyring.stderr"} {
+		code, lines, stderr := do(t, fakeTool(version, "", exitErr, recordedStderr(t, name)), in)
+		if code != ExitAuth || len(lines) != 0 || !strings.Contains(stderr, "认证失败") {
+			t.Errorf("%s: code=%d lines=%v stderr=%q", name, code, lines, stderr)
+		}
+	}
+	if code, lines, _ := do(t, fakeTool(version, events, nil, ""), in); code != ExitOK || len(decode(t, lines)) != 5 {
+		t.Fatalf("恢复后应正常拉取: code=%d", code)
+	}
+}
+
+// ACT-CAL-06：录制的 v0.1.0 版本输出在声明范围外：退出码 2、错误写明版本不符，且版本查询之后没有取数调用。
+func TestVersionOutOfRangeStopsBeforeFetch(t *testing.T) {
+	v, err := os.ReadFile(filepath.Join("testdata", "0.1.0", "version.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls [][]string
+	ex := func(_ context.Context, _ []string, args ...string) ([]byte, []byte, error) {
+		calls = append(calls, args)
+		return v, nil, nil
+	}
+	code, lines, stderr := do(t, ex, in)
+	if code != ExitAuth || len(lines) != 0 || !strings.Contains(stderr, "0.1.0") || !strings.Contains(stderr, "不在声明范围") ||
+		len(calls) != 1 || calls[0][0] != "--version" {
+		t.Fatalf("code=%d lines=%v stderr=%q calls=%v", code, lines, stderr, calls)
+	}
+}
+
+// ACT-CAL-08：口令只在子进程环境（含缺省后端 file），不进 argv；缺必填键退出码 2、不调用工具、报错不带文件内容。
+func TestCredentialsInjectedViaEnvOnlyAndMissingKeyNeedsInput(t *testing.T) {
+	const pw = "acc-keyring-pw"
+	cred := filepath.Join(t.TempDir(), "keyring.env")
+	if err := os.WriteFile(cred, []byte("GOG_KEYRING_PASSWORD="+pw+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input := `{"config":{"account":"acc@example.com"},"credentials_path":"` + cred + `","window":{"to":"2026-03-08T00:00:00Z"}}`
+	var envs, argvs []string
+	ex := func(_ context.Context, env []string, args ...string) ([]byte, []byte, error) {
+		envs = append(envs, env...)
+		argvs = append(argvs, args...)
+		if args[0] == "--version" {
+			return []byte("0.9.0"), nil, nil
+		}
+		return []byte(`[]`), nil, nil
+	}
+	if code, lines, _ := do(t, ex, input); code != ExitOK || len(lines) != 1 {
+		t.Fatalf("code=%d lines=%v", code, lines)
+	}
+	if !strings.Contains(strings.Join(envs, "\n"), "GOG_KEYRING_PASSWORD="+pw) || !strings.Contains(strings.Join(envs, "\n"), "GOG_KEYRING_BACKEND=file") ||
+		strings.Contains(strings.Join(argvs, " "), pw) {
+		t.Fatalf("env=%v argv=%v", envs, argvs)
+	}
+
+	if err := os.WriteFile(cred, []byte("GOG_KEYRING_BACKEND=file\nSECRET_LINE=leak-me\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	code, lines, stderr := do(t, func(context.Context, []string, ...string) ([]byte, []byte, error) {
+		called = true
+		return nil, nil, nil
+	}, input)
+	if code != ExitAuth || len(lines) != 0 || called || !strings.Contains(stderr, "GOG_KEYRING_PASSWORD") || strings.Contains(stderr, "leak-me") {
+		t.Fatalf("code=%d called=%v stderr=%q", code, called, stderr)
+	}
+}

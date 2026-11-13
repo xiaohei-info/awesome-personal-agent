@@ -24,6 +24,7 @@ func TestApaVersionMatchesGetVersionAndLatestLedgerMigration(t *testing.T) {
 	if err := json.Unmarshal([]byte(cli.out), &fromCLI); err != nil {
 		t.Fatal(err)
 	}
+	useFreePort(t, home)
 	addr, stop := start(t, home)
 	defer stop()
 	resp, err := http.Get("http://" + addr.String() + "/v1/version") // 不带 Authorization
