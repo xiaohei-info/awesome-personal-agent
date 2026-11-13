@@ -251,7 +251,8 @@ func cmp(a, b [3]int) int {
 
 func join(v [3]int) string { return fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2]) }
 
-var authRe = regexp.MustCompile(`(?i)\b(auth|authenticat\w*|unauthori[sz]ed|credentials?|token|login|invalid_grant|401|403|forbidden)\b`)
+// "integrity check failed" 是 keyring 口令不对时 gog 的 stderr（MEAS-CAL-AUTH），退出码同样是 1。
+var authRe = regexp.MustCompile(`(?i)\b(auth|authenticat\w*|unauthori[sz]ed|credentials?|token|login|invalid_grant|401|403|forbidden)\b|integrity check failed`)
 
 // toolErr 把工具失败映射成退出码：未安装、认证失败为 2；超时、网络等其余失败为 1。
 func toolErr(ctx context.Context, err error, stderr []byte) error {
