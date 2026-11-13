@@ -1,4 +1,4 @@
-# sha256: 45b8a4b10223335f0af7c38c2d64a9a96d7c86398e9fc5c290c94ebf736c0791
+# sha256: 38b6c07295874a1b4b3eaae9fe2fcc90c354ea6b40082f1e8607214023cbac5d
 defects:
   schema: omac.defect-ledger/v1
   used_global: 30
@@ -295,7 +295,7 @@ defects:
       - flow-backlog-restore/ACT-RST-05
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-env-baseline.3e7f9b
     dfx-50dd0435adcb:
       suspected: e2e-sources
