@@ -34,7 +34,7 @@ func TestCanDefer(t *testing.T) {
 		{"unavailable", stubJudge{v: direct.Verdict{Answer: "no", Unavailable: true}}, false, true},
 		{"error", stubJudge{err: errors.New("timeout")}, false, true},
 	} {
-		got, err := CanDefer(context.Background(), c.j, direct.JudgeCall{})
+		got, _, err := CanDefer(context.Background(), c.j, direct.JudgeCall{})
 		if got != c.want || (err != nil) != c.wantErr {
 			t.Errorf("%s: got %v, %v", c.name, got, err)
 		}

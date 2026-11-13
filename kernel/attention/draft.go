@@ -11,6 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -199,21 +200,22 @@ func (a *Attention) Drafts(ctx context.Context, st *store.Store) error {
 	}
 	for _, p := range todo {
 		if p.stale {
-			if err := st.Update(ctx, func(tx *store.Tx) error { return a.settleDraft(tx, p, "", "", nil, nil) }); err != nil {
+			if err := st.Update(ctx, func(tx *store.Tx) error { return a.settleDraft(tx, p, "", "", nil, nil, nil) }); err != nil {
 				return err
 			}
 			continue
 		}
 		card, cardErr := a.callCard(ctx, p.card)
 		var verdict string
+		var ref *record.Ref
 		var judgeErr error
 		if p.judge != nil {
-			verdict, judgeErr = a.callJudge(ctx, *p.judge)
+			verdict, ref, judgeErr = a.callJudge(ctx, *p.judge)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err() // 停机：留着 pending，下次启动接着做
 		}
-		if err := st.Update(ctx, func(tx *store.Tx) error { return a.settleDraft(tx, p, card, verdict, cardErr, judgeErr) }); err != nil {
+		if err := st.Update(ctx, func(tx *store.Tx) error { return a.settleDraft(tx, p, card, verdict, ref, cardErr, judgeErr) }); err != nil {
 			return err
 		}
 	}
@@ -255,16 +257,18 @@ func (a *Attention) callCard(ctx context.Context, c direct.Call) (string, error)
 	return string(b), err
 }
 
-// callJudge 返回推迟判定："yes" 才推迟；否、未定按规则路由。端点未配置不算失败；超时、不可用、出错返回错误（不重试）。
-func (a *Attention) callJudge(ctx context.Context, c direct.JudgeCall) (string, error) {
-	ok, err := delivery.CanDefer(ctx, a.o.Drafter, c)
-	if err != nil {
-		return "", err
+// callJudge 返回推迟判定："yes" 才推迟；否、未定按规则路由。超时、不可用、出错返回错误（不重试）。
+// ref 是已写入的判断记录引用（没有记录为 nil），无论结论与错误都要带回，供 settleDraft 写 Event。
+func (a *Attention) callJudge(ctx context.Context, c direct.JudgeCall) (verdict string, ref *record.Ref, err error) {
+	ok, v, err := delivery.CanDefer(ctx, a.o.Drafter, c)
+	if v.Written {
+		r := record.RefOf(v.Record)
+		ref = &r
 	}
-	if ok {
-		return VerdictDefer, nil
+	if err != nil || !ok {
+		return "", ref, err
 	}
-	return "", nil
+	return VerdictDefer, ref, nil
 }
 
 // ignorable：模型端点在两次读策略之间被清空不算失败。
@@ -276,11 +280,28 @@ func ignorable(err error) error {
 }
 
 // settleDraft 写回起草结果并重算事项。事项已变到别的版本（行被重置或删掉）时什么都不写，新版本另起草。
-func (a *Attention) settleDraft(tx *store.Tx, p pendingDraft, card, verdict string, cardErr, judgeErr error) error {
+func (a *Attention) settleDraft(tx *store.Tx, p pendingDraft, card, verdict string, ref *record.Ref, cardErr, judgeErr error) error {
 	n, err := tx.Exec(`UPDATE attention_draft SET state = ?, card = ?, verdict = ? WHERE item = ? AND version = ? AND state = ?`,
 		draftDone, card, verdict, p.item, p.version, draftPending)
 	if err != nil || n == 0 {
 		return err
+	}
+	// 用了判断结果的命令在自己的 Event 载荷带 judgment，apa why 据此展开（§6.7）；成功时同模板的 run.finished 也清掉该模板的旧健康告警。
+	if ref != nil {
+		state := domain.RunSucceeded
+		if judgeErr != nil {
+			state = domain.RunFailed
+		}
+		depth, err := items.ChainDepth(tx, p.item)
+		if err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"category": domain.RunJudge, "template": TemplateThreshold, "state": state, "judgment": ref.Judgment,
+			"answer": ref.Answer, "decided_by": ref.DecidedBy})
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: p.item, Actor: draftActor,
+			Reason: "judge " + string(state), Payload: payload, ChainDepth: depth, At: a.o.Now()}); err != nil {
+			return err
+		}
 	}
 	// 每个失败的调用各记一条，带所用模板：健康视图据此归类，并在同一模板之后成功调用时清除（字面值见 kernel/health.DraftKind）。
 	for _, f := range []struct {

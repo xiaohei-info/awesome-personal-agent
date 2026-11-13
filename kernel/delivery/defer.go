@@ -35,14 +35,15 @@ func DeferCall(it domain.Item, inQuiet bool, now time.Time) direct.JudgeCall {
 }
 
 // CanDefer 只有明确答"是"才返回 true；否与未定（保守默认"否"）返回 false。
+// 返回的 Verdict 带判断记录（Written 时），调用方把它挂到 Event 载荷的 judgment 字段，供 apa why 回放（§6.7）；
 // 端点不可用或判断失败返回 false 和错误，调用方按规则路由并记健康视图，不重试。
-func CanDefer(ctx context.Context, j Judge, c direct.JudgeCall) (bool, error) {
+func CanDefer(ctx context.Context, j Judge, c direct.JudgeCall) (bool, direct.Verdict, error) {
 	v, err := j.Judge(ctx, c)
 	if err != nil {
-		return false, err
+		return false, v, err
 	}
 	if v.Unavailable {
-		return false, errors.New("no judge endpoint or chat endpoint answered")
+		return false, v, errors.New("no judge endpoint or chat endpoint answered")
 	}
-	return v.Answer == "yes", nil
+	return v.Answer == "yes", v, nil
 }

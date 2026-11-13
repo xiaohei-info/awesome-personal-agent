@@ -22,10 +22,12 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/why"
 )
 
 var (
@@ -743,6 +745,7 @@ type fakeDrafter struct {
 	answer      string
 	judgeErr    error
 	unavailable bool
+	rec         record.Record // 非零时 Judge 返回它作为已写入的判断记录
 	calls       []direct.Call
 	judged      []direct.JudgeCall
 }
@@ -757,7 +760,7 @@ func (f *fakeDrafter) Do(_ context.Context, c direct.Call) (direct.Outcome, erro
 
 func (f *fakeDrafter) Judge(_ context.Context, c direct.JudgeCall) (direct.Verdict, error) {
 	f.judged = append(f.judged, c)
-	return direct.Verdict{Answer: f.answer, Unavailable: f.unavailable}, f.judgeErr
+	return direct.Verdict{Answer: f.answer, Unavailable: f.unavailable, Record: f.rec, Written: f.rec.ID != ""}, f.judgeErr
 }
 
 func (e *env) withModel() {
@@ -814,7 +817,7 @@ func TestDeliveryDeferJudgment(t *testing.T) {
 	}{
 		{"above upper bound defers", fakeDrafter{answer: "yes"}, false, true, true},
 		{"below upper bound routes now", fakeDrafter{answer: "no"}, false, false, true},
-		{"undecided takes no", fakeDrafter{answer: "no"}, false, false, true},
+		{"undecided takes no", fakeDrafter{answer: "no", rec: record.Record{ID: "jdg_low", LowConfidence: true}}, false, false, true},
 		{"judge error routes now", fakeDrafter{judgeErr: errors.New("timeout")}, false, false, true},
 		{"endpoints unavailable routes now", fakeDrafter{unavailable: true}, false, false, true},
 		{"off never asks", fakeDrafter{answer: "yes"}, true, false, false},
@@ -851,6 +854,53 @@ func TestDeliveryDeferJudgment(t *testing.T) {
 			}
 			if d == nil || d.Item != id || d.Route != "channel:chan" {
 				t.Fatalf("decision not routed by rules at once: %+v", d)
+			}
+		})
+	}
+}
+
+// apa why 能展开投递推迟的判断（ACT-DLV-11）：判断记录引用并进事项上的 run.finished 载荷，Replay 读回 Answer/DecidedBy。
+func TestDeferJudgmentIsReplayableThroughWhy(t *testing.T) {
+	for _, c := range []struct {
+		name, answer, by string
+		low              bool
+		levelOutcome     string
+	}{
+		{"yes", "yes", record.DecidedClassifier, false, record.OutcomeDecided},
+		{"classifier error, conservative default no", "no", record.DecidedDefault, true, record.OutcomeError},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rec := record.Record{ID: "jdg_" + c.by, Use: "delivery_defer", Template: "decision-card/delivery-defer@h", Subject: "x", Fingerprint: "fp",
+				Levels: []record.Level{{Backend: record.BackendClassifier, Outcome: c.levelOutcome}}, DecidedBy: c.by, Answer: c.answer,
+				LowConfidence: c.low, CreatedAt: time.Now().UTC()}
+			f := &fakeDrafter{card: cardJSON, answer: c.answer, rec: rec}
+			e := setup(t, f)
+			e.toChannel()
+			e.withModel()
+			e.policy(func(p *policy.Policy) { p.Disturb.ThresholdJudge = true })
+			id := e.asked(nil)
+			f.rec.Subject = id
+			e.drafts()
+			e.update(func(tx *store.Tx) error { return record.Put(tx, f.rec) })
+			var tl why.Timeline
+			if err := e.st.View(bg, func(tx *store.Tx) (err error) {
+				_, pol, err := policy.Current(tx)
+				if err != nil {
+					return err
+				}
+				tl, err = why.Replay(tx, pol, why.Request{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "obs"}, Level: authz.LevelObserver, ID: id})
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var got *why.Judgment
+			for _, st := range tl.Steps {
+				if st.Judgment != nil {
+					got = st.Judgment
+				}
+			}
+			if got == nil || got.ID != rec.ID || got.Answer != c.answer || got.DecidedBy != c.by || got.Record == nil || got.Record.LowConfidence != c.low {
+				t.Fatalf("why judgment %+v", got)
 			}
 		})
 	}
