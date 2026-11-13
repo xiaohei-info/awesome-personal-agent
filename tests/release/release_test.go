@@ -279,35 +279,6 @@ func isBinary(b []byte) bool {
 // harnessNames 是首版设计点名的 harness 可执行文件；与 tools/redline 的词表一致，只在测试里用来构造"未安装 harness"的主机。
 var harnessNames = []string{"hermes", "claude", "codex", "dsh", "gemini", "opencode", "openclaw"}
 
-// noHarnessEnv 返回把含 harness 的 PATH 目录剔除后的环境，并确认确实找不到任何 harness。
-func noHarnessEnv(t *testing.T) []string {
-	t.Helper()
-	var keep []string
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		has := false
-		for _, n := range harnessNames {
-			if st, err := os.Stat(filepath.Join(dir, n)); err == nil && !st.IsDir() {
-				has = true
-			}
-		}
-		if !has {
-			keep = append(keep, dir)
-		}
-	}
-	path := strings.Join(keep, string(os.PathListSeparator))
-	env := append(os.Environ(), "PATH="+path)
-	t.Setenv("PATH", path) // 让下面的 LookPath 与子进程看到同一个 PATH
-	for _, n := range harnessNames {
-		if p, err := exec.LookPath(n); err == nil {
-			t.Fatalf("未安装 harness 的主机上不应找到 %s（%s）", n, p)
-		}
-	}
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Fatalf("剔除 harness 目录后找不到 go：%v", err)
-	}
-	return env
-}
-
 func tail(s string, n int) string {
 	if len(s) > n {
 		return "…" + s[len(s)-n:]
