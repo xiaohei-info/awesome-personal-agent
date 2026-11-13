@@ -1,4 +1,4 @@
-# sha256: a0204a31ab8e53ba4ad0515b9fb75d2cbde584f921698ccf2cfcf4ce7a2c179f
+# sha256: 756a7df1ca90b35ccf1a9b3a210a1865af689747e3e85a31a43ffa19d8fd1e55
 defects:
   schema: omac.defect-ledger/v1
   used_global: 30
@@ -311,7 +311,7 @@ defects:
       - flow-bg-guards/ACT-BGG-04
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-v01-background.1222a3
     dfx-9dccef293d4e:
       suspected: e2e-session-authz
