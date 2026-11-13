@@ -1,7 +1,7 @@
-# sha256: 7fe8e510f3d98786a7283b4a671e684c2ec1c954c07bb62526a98d787e6a9f4d
+# sha256: 06dd660576d761b68228ac71725fb7c5da610dcedf586f92a3e0edc082133105
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 25
+  used_global: 29
   used_by_reporter:
     e2e-followmsg: 1
     e2e-workbench: 3
@@ -12,7 +12,7 @@ defects:
     e2e-hostplugin: 1
     e2e-release-doctor: 1
     e2e-sources: 2
-    release-gates: 4
+    release-gates: 8
   granted_by_reporter:
     e2e-sources: 4
     e2e-inbound-rules: 2
@@ -281,152 +281,36 @@ defects:
       - release-gates
       state: fixed
       fix_node: fix.e2e-followup.83b4c7
-  inbox:
-  - id: 2e48e6105d5e
-    reporter: release-gates
-    defects:
-    - class: design-gap
-      suspected_node: outbound-scope
+    dfx-a2cf4dcf005a:
+      suspected: outbound-scope
       anchors:
       - flow-backlog-release/ACT-BKL-19
-      design_ref: docs/solution-design.md#1414-外发控制
-      expected: '设计 §14.14「未选择」「裁剪」与 §6.14 第 15 条：送往外部模型端点的来源内容不超过本人选定的外发范围，未选定时不送；
-
-        来源 external 范围未选择而可用端点都在外部时，不向外部端点发出任何带来源事件内容的请求（含判断型与生成型）。
-
-        修法必须落在所有外部生成调用的统一出口（kernel/agents/direct 的 Do 路径或其调用前的统一范围检查，复用 kernel/sources/registry/outbound.go
-
-        的 Decide/Trim），而不是只在 kernel/summaries 这一处补判断；调用方包括 kernel/summaries（一句话摘要、修订摘要）、kernel/attention/draft.go
-
-        （卡片文案起草）、kernel/agents/task/callagent.go（任务型调用 Material）、kernel/inbound（判断与抽取）。资料正文里带来源事件内容、而该来源对
-
-        当前端点位置的范围是未选择或 none 时，统一出口不发请求（与 outbound_unset 同语义）。范围的终点（§14.14 末行）管的是「本人接受成为事项之后」，
-
-        事项内容因 rules-only 挂靠/合并从来源事件刷新进账本、本人尚未选范围时不属于该终点；若实现者认为二者冲突，先提设计修改，不得留泄漏。
-
-        同时要求补回归测试：覆盖至少两个不同调用方（摘要起草与卡片起草，或任务型调用）在 external 范围未选时对外部生成端点零请求，
-
-        并覆盖「触发在后台游标异步到达」的时序（不依赖 clear() 之前是否已 Drain）。
-
-        '
-      observed: 'ACT-BKL-19（tests/e2e/backlog/release_test.go:746）：来源 external 外发范围未选、端点为外部时，rejudge
-        之后生成端点替身收到
-
-        「为事项 itm_fx_prop_11 写一句话摘要」请求，资料段含「synthetic body sev_0000000000263340」（来源事件正文）。该事项的标题/正文是
-        ACT-BKL-18
-
-        积压只跑规则时由来源事件刷新写入的（原夹具标题 Fixture proposal 11 → Calendar event #11），触发者不是 followmsg
-        身份，GT-366（PR #368）
-
-        只跳过了 followmsg.Principal，其它写入路径的 item.updated 仍触发起草；起草异步（kernel/summaries
-        Drain 游标），故是否落在 clear() 之后取决于时序。
-
-        kernel/summaries 与 kernel/agents/direct.Do 都没有外发范围检查（Do 只有 RequireLocality，调用方不填就不查）。
-
-        复现（Oracle main 9b0eed201，真实 sqlite3，已构建 web/dist）：go test -tags e2e -count=1
-        -run TestBacklogReleaseWithoutJudgeEndpoint ./tests/e2e/backlog/ ，
-
-        本轮 1/6 失败；release-gates worker 记录 2/3（隔离）与全量 2/2 失败；GitHub main CI run 43498393956
-        同。
-
-        '
-      locations:
-      - kernel/summaries/summaries.go:call
-      - kernel/summaries/summaries.go:candidates
-      - kernel/agents/direct/direct.go:Do
-      - kernel/sources/registry/outbound.go:Decide
-      - tests/e2e/backlog/release_test.go:ACT-BKL-19
-      repro:
-        command: go test -tags e2e -count=1 -run TestBacklogReleaseWithoutJudgeEndpoint
-          ./tests/e2e/backlog/
-        exit_code: 1
-    - class: design-gap
-      suspected_node: e2e-env-baseline
+      reporters:
+      - release-gates
+      state: fixing
+      fix_node: fix.outbound-scope.a2cf4d
+    dfx-3e7f9b955ecb:
+      suspected: e2e-env-baseline
       anchors:
       - flow-backlog-restore/ACT-RST-05
-      design_ref: docs/solution-design.md#204-v020发布门槛
-      expected: '测试按完成信号等待，不靠时序：Env.StubRun 在发现 stub-harness-env.json 出现后立刻一次性读取并解析，而替身
-        harness 是 os.WriteFile
-
-        （先截断再写）非原子写入，读到空文件或半截文件就失败。要求 StubRun 等到记录可解析再取（轮询到 JSON 解析成功，或替身改为临时文件+rename
-        原子写入，
-
-        二选一或都做），并修正 e.fatal 的格式（err 为 nil 时现在打印「<nil>」，应区分读文件失败与解析失败并带上原始长度）。
-
-        不改产品行为。该 helper 被 tests/e2e/backlog、agents、authz、hostplugin 等共用，修在共用处。
-
-        '
-      observed: 'GitHub main CI run 43498393956（head 53acd8de）：TestBacklogRestoreFlow/ACT-RST-05，restore_test.go:211
-        → restore_test.go:runCredential → baseline.StubRun
-
-        （tests/e2e/baseline/runs.go:119）报「读取运行环境记录 …/stub-harness-env.json: <nil>」：os.ReadFile
-        成功（err 为 nil）而 json.Unmarshal 失败，
-
-        即文件已存在但内容还没写完。成因由读码得出：WaitFor 只检查文件存在；tests/doubles/stubharness/stubharness.go:Run
-        用 os.WriteFile 写入。
-
-        Oracle 上 TestBacklogRestoreFlow 本轮未复现，属概率性竞态。
-
-        '
-      locations:
-      - tests/e2e/baseline/runs.go:StubRun
-      - tests/doubles/stubharness/stubharness.go:Run
-      - tests/e2e/backlog/restore_test.go:runCredential
-      repro:
-        command: go test -tags e2e -count=20 -run TestBacklogRestoreFlow ./tests/e2e/backlog/
-        exit_code: 1
-    - class: design-gap
-      suspected_node: e2e-sources
+      reporters:
+      - release-gates
+      state: fixing
+      fix_node: fix.e2e-env-baseline.3e7f9b
+    dfx-50dd0435adcb:
+      suspected: e2e-sources
       anchors:
       - flow-source-mail/ACT-MAIL-04
-      design_ref: docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
-      expected: 'ACT-MAIL-04「工具未安装」必须在测试自带的隔离环境里成立，不依赖执行机器是否装了 himalaya，也不要求执行者卸载：
-
-        测试自己构造不含 himalaya 的 PATH（替身目录 + 只含系统必需工具的最小目录，而不是继承宿主 PATH），或使用设计规定的覆盖方式；
-
-        只改 tests/e2e/sourcesv2，不改产品行为。
-
-        '
-      observed: 'tests/e2e/sourcesv2/mail_test.go（ACT-MAIL-04）把 ToolBin/himalaya 改名后期望拉取失败，但内核
-        PATH 为 ToolBin + 宿主 PATH
-
-        （tests/e2e/baseline/env.go:296，sourcesv2/helpers_test.go:80），宿主 PATH 上有真实
-        himalaya（Oracle：~/.local/bin/himalaya）就会找到它，用例失败；
-
-        release-gates worker 在 Oracle 上记录为失败。
-
-        '
-      locations:
-      - tests/e2e/sourcesv2/mail_test.go:ACT-MAIL-04
-      - tests/e2e/sourcesv2/helpers_test.go
-      repro:
-        command: PATH="$HOME/.local/bin:$PATH" go test -tags e2e -count=1 -run TestFlowSourceMail
-          ./tests/e2e/sourcesv2/
-        exit_code: 1
-    - class: design-gap
-      suspected_node: e2e-v01-background
+      reporters:
+      - release-gates
+      state: fixing
+      fix_node: fix.e2e-sources.50dd04
+    dfx-1222a3a43647:
+      suspected: e2e-v01-background
       anchors:
       - flow-bg-guards/ACT-BGG-04
-      design_ref: docs/solution-design.md#204-v020发布门槛
-      expected: '测试按完成信号等待：Run 状态置为 failed/timeout 与事项转 needs_input 是两步（kernel/background/background.go:settle
-        先 Settle 再 needsInput，
-
-        最后才追加 run.finished Event），f.settled 只等 Run 不再 queued/running 就去读 phase，会读到
-        open。要求 bgguards 的 settled（或 ACT-BGG-04 的断言）
-
-        等到该事项的 run.finished（background）Event 出现，再断言事项阶段；不改产品行为。
-
-        '
-      observed: 'Oracle main 9b0eed201，go test -tags e2e -count=1 ./tests/e2e/bgguards/
-        连跑 3 次 1 次失败：ACT-BGG-04，guards_test.go:117「退出码 1 时事项 = open，期望 needs_input」
-
-        （全包 252s）；release-gates worker 首跑同样失败、重跑通过。
-
-        '
-      locations:
-      - tests/e2e/bgguards/helpers_test.go:settled
-      - tests/e2e/bgguards/guards_test.go:ACT-BGG-04
-      - kernel/background/background.go:settle
-      repro:
-        command: go test -tags e2e -count=3 -run TestFlowBgGuards ./tests/e2e/bgguards/
-        exit_code: 1
+      reporters:
+      - release-gates
+      state: fixing
+      fix_node: fix.e2e-v01-background.1222a3
+  inbox: []

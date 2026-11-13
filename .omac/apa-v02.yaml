@@ -11,127 +11,85 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 14
+  amendment_revision: 15
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-b79bcdeb47b8
-    amendment_file: amendment.yaml
+    amendment_id: amend-e4d86a53c795
+    amendment_file: .omac/apa-v02.system-amendment.yaml
     nodes:
-      fix.e2e-followup.83b4c7:
+      fix.e2e-env-baseline.3e7f9b:
         stage: authoring
         state: synced
-        work_item_id: 01a1d632-e60f-79c0-9879-d32b9ebd9e1f
-        baseline:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: authoring-bdd7b43d73c73721710c7daf
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 985b4e6a8818483e42250f9dd53e5f5017eb996179e2fe99d54d96f5cbf40d3a
-          worker_handoff_pending: false
-        bounce_baseline:
-          merge: 0
-          review: 0
-          worker: 0
-        expected_contract_sha256: 372afcaeb6f6ee11cff56d7e92b5b93794ab3c3a1bdf8a9c1c3a793474aeba35
-        expected_review_generation: amendment-a54c77b96b5ff30fbe726c7a
-        attempt_baseline:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: authoring-bdd7b43d73c73721710c7daf
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 985b4e6a8818483e42250f9dd53e5f5017eb996179e2fe99d54d96f5cbf40d3a
-          worker_handoff_pending: false
-        observed:
-          status: todo
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
-          review_generation: amendment-a54c77b96b5ff30fbe726c7a
-          review_ledger_generation: null
-          review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: false
-          review_report_pending: false
-          review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 372afcaeb6f6ee11cff56d7e92b5b93794ab3c3a1bdf8a9c1c3a793474aeba35
-          worker_handoff_pending: false
+        reason: no existing work item side effect
+        expected_review_generation: amendment-7734d46a219dfbad47637256
+      fix.e2e-sources.50dd04:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-9a6880abcc8e3fb3d7d20258
+      fix.e2e-v01-background.1222a3:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-a21dfd57bdd9439a8e72c9ce
+      fix.outbound-scope.a2cf4d:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-2a93a20b861d59e1841613cc
       release-gates:
         stage: authoring
         state: synced
         work_item_id: 01a1d5d1-fcc3-7056-8973-f8426da2578a
         baseline:
-          status: todo
+          status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-ccf58f20c184cf15621524fe
+          review_generation: authoring-a8d7c013cf6dad59179ea1a9
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: false
+          bounce_baseline: null
+          decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
           contract_sha256: b4cd87ef8cf6779b3521afe86e7a69e2b58312e395aa1d6ffa6b248f1db669c8
-          worker_handoff_pending: false
+          worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
         expected_contract_sha256: b4cd87ef8cf6779b3521afe86e7a69e2b58312e395aa1d6ffa6b248f1db669c8
-        expected_review_generation: amendment-ab87d8983492ef9c3fb69f60
+        superseded_decision:
+          reason_code: worker-decision-required
+          gate: worker
+          blocker_reason_code: owner-decision-required
+          decision_sha256: e95da8d5949ccbd1079c4ec00e7feeb135d07d542d9b4b2650ece09617a84729
+        expected_review_generation: amendment-0773e2e01603a43e3343659a
         attempt_baseline:
-          status: todo
+          status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-ccf58f20c184cf15621524fe
+          review_generation: authoring-a8d7c013cf6dad59179ea1a9
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
-          decision_required_pending: false
+          bounce_baseline: null
+          decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
           contract_sha256: b4cd87ef8cf6779b3521afe86e7a69e2b58312e395aa1d6ffa6b248f1db669c8
-          worker_handoff_pending: false
+          worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-ab87d8983492ef9c3fb69f60
+          review_generation: amendment-0773e2e01603a43e3343659a
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -306,7 +264,16 @@ meta:
           merge: 0
           review: 0
           worker: 0
-  last_amendment_id: amend-b79bcdeb47b8
+      fix.e2e-followup.83b4c7:
+        amendment_id: amend-b79bcdeb47b8
+        work_item_id: 01a1d632-e60f-79c0-9879-d32b9ebd9e1f
+        contract_sha256: 372afcaeb6f6ee11cff56d7e92b5b93794ab3c3a1bdf8a9c1c3a793474aeba35
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+    system: true
+  last_amendment_id: amend-e4d86a53c795
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -8721,6 +8688,10 @@ nodes:
   - fix.e2e-followup.83b4c7
   - fix.inbound-pipeline-v2.6052b8
   - fix.rule-modes-v2.9dda04
+  - fix.e2e-env-baseline.3e7f9b
+  - fix.e2e-sources.50dd04
+  - fix.e2e-v01-background.1222a3
+  - fix.outbound-scope.a2cf4d
   title: 发布门槛 1、3、4 收口
   description: 产出 release-gates-evidence。整张图的唯一收口节点，是 flow-v01-regression、flow-release-gates
     的全流程 owner。要点：汇总所有流程结果；附录无规划标记、严格模式对照测试通过；§21.3 开发验收条目都有结论；四条遗留缺陷据替身复验关闭或指派本人并标"转本机验证"；核实两条"已修复"但修复节点为
@@ -11578,4 +11549,442 @@ nodes:
       - pack-schema-v2
     defect_refs:
     - dfx-9dda042e748a
+    coverage_gate: 80
+- id: fix.e2e-env-baseline.3e7f9b
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - test-clock
+  - doubles-model
+  - doubles-tools
+  - ledger-fixture
+  - endpoint-config-split
+  - web-settings-v2
+  - apa-version
+  title: 'Fix e2e-env-baseline: dfx-3e7f9b955ecb'
+  description: "Automatic fix for upstream defect(s) reported by release-gates.\n\n-
+    [design-gap] anchors flow-backlog-restore/ACT-RST-05 (docs/solution-design.md#204-v020发布门槛)\n
+    \ expected: 测试按完成信号等待，不靠时序：Env.StubRun 在发现 stub-harness-env.json 出现后立刻一次性读取并解析，而替身
+    harness 是 os.WriteFile\n（先截断再写）非原子写入，读到空文件或半截文件就失败。要求 StubRun 等到记录可解析再取（轮询到 JSON
+    解析成功，或替身改为临时文件+rename 原子写入，\n二选一或都做），并修正 e.fatal 的格式（err 为 nil 时现在打印「<nil>」，应区分读文件失败与解析失败并带上原始长度）。\n不改产品行为。该
+    helper 被 tests/e2e/backlog、agents、authz、hostplugin 等共用，修在共用处。\n\n  observed: GitHub
+    main CI run 43498393956（head 53acd8de）：TestBacklogRestoreFlow/ACT-RST-05，restore_test.go:211
+    → restore_test.go:runCredential → baseline.StubRun\n（tests/e2e/baseline/runs.go:119）报「读取运行环境记录
+    …/stub-harness-env.json: <nil>」：os.ReadFile 成功（err 为 nil）而 json.Unmarshal 失败，\n即文件已存在但内容还没写完。成因由读码得出：WaitFor
+    只检查文件存在；tests/doubles/stubharness/stubharness.go:Run 用 os.WriteFile 写入。\nOracle
+    上 TestBacklogRestoreFlow 本轮未复现，属概率性竞态。\n\n  where: tests/e2e/baseline/runs.go:StubRun;
+    tests/doubles/stubharness/stubharness.go:Run; tests/e2e/backlog/restore_test.go:runCredential\n
+    \ repro (the reporter re-runs it after your fix merges; it is not your gate):
+    `go test -tags e2e -count=20 -run TestBacklogRestoreFlow ./tests/e2e/backlog/`
+    (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-3e7f9b955ecb in e2e-env-baseline: 测试按完成信号等待，不靠时序：Env.StubRun
+      在发现 stub-harness-env.json 出现后立刻一次性读取并解析，而替身 harness 是 os.WriteFile
+
+      （先截断再写）非原子写入，读到空文件或半截文件就失败。要求 StubRun 等到记录可解析再取（轮询到 JSON 解析成功，或替身改为临时文件+rename
+      原子写入，
+
+      二选一或都做），并修正 e.fatal 的格式（err 为 nil 时现在打印「<nil>」，应区分读文件失败与解析失败并带上原始长度）。
+
+      不改产品行为。该 helper 被 tests/e2e/backlog、agents、authz、hostplugin 等共用，修在共用处。
+
+      '
+    non_goals:
+    - 不实现或修改产品功能；发现缺陷回流对应实现节点（经 OMAC 缺陷反馈），不改断言迁就实现
+    - 不把节点级单元测试当作全流程证据
+    - 不使用真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库；离不开真实依赖的断言注明由本机升级验证 L1–L12 承接
+    - 不引入 Playwright；Web 步骤用项目规定的 ego-browser
+    verification_commands:
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/baseline/...
+    integration_gates:
+    - name: e2e-env-baseline-flow
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#204-v020发布门槛
+      - .omac/apa-v02.design/OMAC-NOTES.md#21-替身
+      - .omac/apa-v02.design/OMAC-NOTES.md#51-账本夹具
+      delivery_goal: 建立并证明后续所有流程共用的替身验收环境（flow-env-baseline 全部 flow-step 通过）
+      covers:
+      - flow-env-baseline
+      acceptance_refs:
+      - flow-env-baseline
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/baseline/...
+    pr_base: main
+    acceptance_refs:
+    - flow-backlog-restore
+    source_of_truth:
+    - docs/solution-design.md#204-v020发布门槛
+    - .omac/apa-v02.design/OMAC-NOTES.md#21-替身
+    - .omac/apa-v02.design/OMAC-NOTES.md#51-账本夹具
+    scope_paths:
+    - tests/e2e/baseline/**
+    evidence_mode: live
+    consumes:
+    - artifact_id: test-clock-delivery
+      producer: test-clock
+      evidence_mode: artifact
+      requires:
+      - test-clock-offset
+      - test-clock-build-flag
+    - artifact_id: doubles-model-delivery
+      producer: doubles-model
+      evidence_mode: artifact
+      requires:
+      - cls-stub
+      - model-stub-v2
+    - artifact_id: doubles-tools-delivery
+      producer: doubles-tools
+      evidence_mode: artifact
+      requires:
+      - tool-stub-bin
+    - artifact_id: ledger-fixture-delivery
+      producer: ledger-fixture
+      evidence_mode: artifact
+      requires:
+      - ledger-fixture-v2
+    - artifact_id: endpoint-config-split-delivery
+      producer: endpoint-config-split
+      evidence_mode: artifact
+      requires:
+      - endpoint-config
+    - artifact_id: web-settings-v2-delivery
+      producer: web-settings-v2
+      evidence_mode: artifact
+      requires:
+      - web-settings-endpoints
+    - artifact_id: apa-version-delivery
+      producer: apa-version
+      evidence_mode: artifact
+      requires:
+      - version-info
+    defect_refs:
+    - dfx-3e7f9b955ecb
+    coverage_gate: 0
+- id: fix.e2e-sources.50dd04
+  worker: omac-worker-backend
+  blocked_by:
+  - e2e-env-baseline
+  - inbound-pipeline-v2
+  - builtin-struct-rules
+  - attribution-v2
+  - mail-thread-key
+  - calendar-adapter-v2
+  - rule-exits-where
+  - fix.attribution-v2.62f6c6
+  - fix.calendar-adapter-v2.bfeb8d
+  - fix.attribution-v2.d3eb8c
+  title: 'Fix e2e-sources: dfx-50dd0435adcb'
+  description: "Automatic fix for upstream defect(s) reported by release-gates.\n\n-
+    [design-gap] anchors flow-source-mail/ACT-MAIL-04 (docs/appendix-d-adapters.md#d2-邮件与日历的工具适配)\n
+    \ expected: ACT-MAIL-04「工具未安装」必须在测试自带的隔离环境里成立，不依赖执行机器是否装了 himalaya，也不要求执行者卸载：\n测试自己构造不含
+    himalaya 的 PATH（替身目录 + 只含系统必需工具的最小目录，而不是继承宿主 PATH），或使用设计规定的覆盖方式；\n只改 tests/e2e/sourcesv2，不改产品行为。\n\n
+    \ observed: tests/e2e/sourcesv2/mail_test.go（ACT-MAIL-04）把 ToolBin/himalaya 改名后期望拉取失败，但内核
+    PATH 为 ToolBin + 宿主 PATH\n（tests/e2e/baseline/env.go:296，sourcesv2/helpers_test.go:80），宿主
+    PATH 上有真实 himalaya（Oracle：~/.local/bin/himalaya）就会找到它，用例失败；\nrelease-gates worker
+    在 Oracle 上记录为失败。\n\n  where: tests/e2e/sourcesv2/mail_test.go:ACT-MAIL-04; tests/e2e/sourcesv2/helpers_test.go\n
+    \ repro (the reporter re-runs it after your fix merges; it is not your gate):
+    `PATH=\"$HOME/.local/bin:$PATH\" go test -tags e2e -count=1 -run TestFlowSourceMail
+    ./tests/e2e/sourcesv2/` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-50dd0435adcb in e2e-sources: ACT-MAIL-04「工具未安装」必须在测试自带的隔离环境里成立，不依赖执行机器是否装了
+      himalaya，也不要求执行者卸载：
+
+      测试自己构造不含 himalaya 的 PATH（替身目录 + 只含系统必需工具的最小目录，而不是继承宿主 PATH），或使用设计规定的覆盖方式；
+
+      只改 tests/e2e/sourcesv2，不改产品行为。
+
+      '
+    non_goals:
+    - 只为本节点自身负责的 v0.1 继承 action 做必要的回归修复；其他产品功能缺陷回流对应实现节点，不改断言迁就实现
+    - 不把节点级单元测试当作全流程证据
+    - 不使用真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库；离不开真实依赖的断言注明由本机升级验证 L1–L12 承接
+    - 不引入 Playwright；Web 步骤用项目规定的 ego-browser
+    verification_commands:
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    integration_gates:
+    - name: e2e-sources-flow
+      layer: L2
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+      - docs/solution-design.md#94-跟进消息归属
+      - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+      delivery_goal: 在 flow-env-baseline 的替身环境上用测试构建的真实二进制独立执行并证明完整流程：flow-source-github、flow-source-mail、flow-source-calendar
+      covers:
+      - flow-source-github
+      - flow-source-mail
+      - flow-source-calendar
+      acceptance_refs:
+      - flow-source-github
+      - flow-source-mail
+      - flow-source-calendar
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    pr_base: main
+    acceptance_refs:
+    - flow-source-mail
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+    - docs/solution-design.md#94-跟进消息归属
+    - .omac/apa-v02.design/OMAC-NOTES.md#4-上一轮遗留的缺陷
+    scope_paths:
+    - tests/e2e/sourcesv2/**
+    evidence_mode: live
+    consumes:
+    - artifact_id: e2e-env-baseline-env
+      producer: e2e-env-baseline
+      evidence_mode: artifact
+      requires:
+      - acc-env-helpers
+    - artifact_id: inbound-pipeline-v2-delivery
+      producer: inbound-pipeline-v2
+      evidence_mode: artifact
+      requires:
+      - inbound-six-steps
+    - artifact_id: builtin-struct-rules-delivery
+      producer: builtin-struct-rules
+      evidence_mode: artifact
+      requires:
+      - builtin-structured-rules
+    - artifact_id: attribution-v2-delivery
+      producer: attribution-v2
+      evidence_mode: artifact
+      requires:
+      - followmsg-attribution-v2
+    - artifact_id: mail-thread-key-delivery
+      producer: mail-thread-key
+      evidence_mode: artifact
+      requires:
+      - mail-thread-key
+    - artifact_id: calendar-adapter-v2-delivery
+      producer: calendar-adapter-v2
+      evidence_mode: artifact
+      requires:
+      - calendar-adapter-v2
+    - artifact_id: rule-exits-where-delivery
+      producer: rule-exits-where
+      evidence_mode: artifact
+      requires:
+      - source-rule-exits
+    defect_refs:
+    - dfx-50dd0435adcb
+    coverage_gate: 0
+- id: fix.e2e-v01-background.1222a3
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - e2e-env-baseline
+  - session-kind
+  - wake-lease-recheck
+  - cascade-engine
+  - delivery-verify-gate
+  title: 'Fix e2e-v01-background: dfx-1222a3a43647'
+  description: "Automatic fix for upstream defect(s) reported by release-gates.\n\n-
+    [design-gap] anchors flow-bg-guards/ACT-BGG-04 (docs/solution-design.md#204-v020发布门槛)\n
+    \ expected: 测试按完成信号等待：Run 状态置为 failed/timeout 与事项转 needs_input 是两步（kernel/background/background.go:settle
+    先 Settle 再 needsInput，\n最后才追加 run.finished Event），f.settled 只等 Run 不再 queued/running
+    就去读 phase，会读到 open。要求 bgguards 的 settled（或 ACT-BGG-04 的断言）\n等到该事项的 run.finished（background）Event
+    出现，再断言事项阶段；不改产品行为。\n\n  observed: Oracle main 9b0eed201，go test -tags e2e -count=1
+    ./tests/e2e/bgguards/ 连跑 3 次 1 次失败：ACT-BGG-04，guards_test.go:117「退出码 1 时事项 = open，期望
+    needs_input」\n（全包 252s）；release-gates worker 首跑同样失败、重跑通过。\n\n  where: tests/e2e/bgguards/helpers_test.go:settled;
+    tests/e2e/bgguards/guards_test.go:ACT-BGG-04; kernel/background/background.go:settle\n
+    \ repro (the reporter re-runs it after your fix merges; it is not your gate):
+    `go test -tags e2e -count=3 -run TestFlowBgGuards ./tests/e2e/bgguards/` (exit
+    1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-1222a3a43647 in e2e-v01-background:
+      测试按完成信号等待：Run 状态置为 failed/timeout 与事项转 needs_input 是两步（kernel/background/background.go:settle
+      先 Settle 再 needsInput，
+
+      最后才追加 run.finished Event），f.settled 只等 Run 不再 queued/running 就去读 phase，会读到 open。要求
+      bgguards 的 settled（或 ACT-BGG-04 的断言）
+
+      等到该事项的 run.finished（background）Event 出现，再断言事项阶段；不改产品行为。
+
+      '
+    non_goals:
+    - 只为本节点自身负责的 v0.1 继承 action 做必要的回归修复；其他产品功能缺陷回流对应实现节点，不改断言迁就实现
+    - 不把节点级单元测试当作全流程证据
+    - 不使用真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库；离不开真实依赖的断言注明由本机升级验证 L1–L12 承接
+    - 不引入 Playwright；Web 步骤用项目规定的 ego-browser
+    verification_commands:
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/bgguards/...
+    integration_gates:
+    - name: e2e-v01-background-flow
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#204-v020发布门槛
+      - .omac/apa-v02.design/OMAC-NOTES.md#24-现有验收流程里要改写的
+      delivery_goal: 在 flow-env-baseline 的替身环境上用测试构建的真实二进制独立执行并证明完整流程：flow-bg-main-session、flow-bg-guards、flow-bg-task-runner、flow-bg-resume
+      covers:
+      - flow-bg-main-session
+      - flow-bg-guards
+      - flow-bg-task-runner
+      - flow-bg-resume
+      acceptance_refs:
+      - flow-bg-main-session
+      - flow-bg-guards
+      - flow-bg-task-runner
+      - flow-bg-resume
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/bgguards/...
+    pr_base: main
+    acceptance_refs:
+    - flow-bg-guards
+    source_of_truth:
+    - docs/solution-design.md#204-v020发布门槛
+    - .omac/apa-v02.design/OMAC-NOTES.md#24-现有验收流程里要改写的
+    scope_paths:
+    - tests/e2e/bgguards/**
+    evidence_mode: live
+    consumes:
+    - artifact_id: e2e-env-baseline-env
+      producer: e2e-env-baseline
+      evidence_mode: artifact
+      requires:
+      - acc-env-helpers
+    - artifact_id: session-kind-delivery
+      producer: session-kind
+      evidence_mode: artifact
+      requires:
+      - session-kind-gate
+      - plugin-session-kind
+    - artifact_id: wake-lease-recheck-delivery
+      producer: wake-lease-recheck
+      evidence_mode: artifact
+      requires:
+      - wake-lease
+    - artifact_id: cascade-engine-delivery
+      producer: cascade-engine
+      evidence_mode: artifact
+      requires:
+      - judge-cascade
+    - artifact_id: delivery-verify-gate-delivery
+      producer: delivery-verify-gate
+      evidence_mode: artifact
+      requires:
+      - receipt-verify-gate
+    defect_refs:
+    - dfx-1222a3a43647
+    coverage_gate: 0
+- id: fix.outbound-scope.a2cf4d
+  worker: omac-worker-backend
+  blocked_by:
+  - ledger-schema-v3
+  - endpoint-config-split
+  title: 'Fix outbound-scope: dfx-a2cf4dcf005a'
+  description: "Automatic fix for upstream defect(s) reported by release-gates.\n\n-
+    [design-gap] anchors flow-backlog-release/ACT-BKL-19 (docs/solution-design.md#1414-外发控制)\n
+    \ expected: 设计 §14.14「未选择」「裁剪」与 §6.14 第 15 条：送往外部模型端点的来源内容不超过本人选定的外发范围，未选定时不送；\n来源
+    external 范围未选择而可用端点都在外部时，不向外部端点发出任何带来源事件内容的请求（含判断型与生成型）。\n修法必须落在所有外部生成调用的统一出口（kernel/agents/direct
+    的 Do 路径或其调用前的统一范围检查，复用 kernel/sources/registry/outbound.go\n的 Decide/Trim），而不是只在
+    kernel/summaries 这一处补判断；调用方包括 kernel/summaries（一句话摘要、修订摘要）、kernel/attention/draft.go\n（卡片文案起草）、kernel/agents/task/callagent.go（任务型调用
+    Material）、kernel/inbound（判断与抽取）。资料正文里带来源事件内容、而该来源对\n当前端点位置的范围是未选择或 none 时，统一出口不发请求（与
+    outbound_unset 同语义）。范围的终点（§14.14 末行）管的是「本人接受成为事项之后」，\n事项内容因 rules-only 挂靠/合并从来源事件刷新进账本、本人尚未选范围时不属于该终点；若实现者认为二者冲突，先提设计修改，不得留泄漏。\n同时要求补回归测试：覆盖至少两个不同调用方（摘要起草与卡片起草，或任务型调用）在
+    external 范围未选时对外部生成端点零请求，\n并覆盖「触发在后台游标异步到达」的时序（不依赖 clear() 之前是否已 Drain）。\n\n  observed:
+    ACT-BKL-19（tests/e2e/backlog/release_test.go:746）：来源 external 外发范围未选、端点为外部时，rejudge
+    之后生成端点替身收到\n「为事项 itm_fx_prop_11 写一句话摘要」请求，资料段含「synthetic body sev_0000000000263340」（来源事件正文）。该事项的标题/正文是
+    ACT-BKL-18\n积压只跑规则时由来源事件刷新写入的（原夹具标题 Fixture proposal 11 → Calendar event #11），触发者不是
+    followmsg 身份，GT-366（PR #368）\n只跳过了 followmsg.Principal，其它写入路径的 item.updated 仍触发起草；起草异步（kernel/summaries
+    Drain 游标），故是否落在 clear() 之后取决于时序。\nkernel/summaries 与 kernel/agents/direct.Do 都没有外发范围检查（Do
+    只有 RequireLocality，调用方不填就不查）。\n复现（Oracle main 9b0eed201，真实 sqlite3，已构建 web/dist）：go
+    test -tags e2e -count=1 -run TestBacklogReleaseWithoutJudgeEndpoint ./tests/e2e/backlog/
+    ，\n本轮 1/6 失败；release-gates worker 记录 2/3（隔离）与全量 2/2 失败；GitHub main CI run 43498393956
+    同。\n\n  where: kernel/summaries/summaries.go:call; kernel/summaries/summaries.go:candidates;
+    kernel/agents/direct/direct.go:Do; kernel/sources/registry/outbound.go:Decide;
+    tests/e2e/backlog/release_test.go:ACT-BKL-19\n  repro (the reporter re-runs it
+    after your fix merges; it is not your gate): `go test -tags e2e -count=1 -run
+    TestBacklogReleaseWithoutJudgeEndpoint ./tests/e2e/backlog/` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-a2cf4dcf005a in outbound-scope: 设计
+      §14.14「未选择」「裁剪」与 §6.14 第 15 条：送往外部模型端点的来源内容不超过本人选定的外发范围，未选定时不送；
+
+      来源 external 范围未选择而可用端点都在外部时，不向外部端点发出任何带来源事件内容的请求（含判断型与生成型）。
+
+      修法必须落在所有外部生成调用的统一出口（kernel/agents/direct 的 Do 路径或其调用前的统一范围检查，复用 kernel/sources/registry/outbound.go
+
+      的 Decide/Trim），而不是只在 kernel/summaries 这一处补判断；调用方包括 kernel/summaries（一句话摘要、修订摘要）、kernel/attention/draft.go
+
+      （卡片文案起草）、kernel/agents/task/callagent.go（任务型调用 Material）、kernel/inbound（判断与抽取）。资料正文里带来源事件内容、而该来源对
+
+      当前端点位置的范围是未选择或 none 时，统一出口不发请求（与 outbound_unset 同语义）。范围的终点（§14.14 末行）管的是「本人接受成为事项之后」，
+
+      事项内容因 rules-only 挂靠/合并从来源事件刷新进账本、本人尚未选范围时不属于该终点；若实现者认为二者冲突，先提设计修改，不得留泄漏。
+
+      同时要求补回归测试：'
+    non_goals:
+    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
+    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
+    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
+    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
+    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
+    verification_commands:
+    - go build ./...
+    - go run ./tools/redline
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go test -count=1 ./kernel/sources/...
+    - go test -count=1 ./api/sources/...
+    integration_gates:
+    - name: outbound-scope-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#1414-外发控制
+      - docs/solution-design.md#65-project项目
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/solution-design.md#165-备份升级回退与卸载
+      - .omac/apa-v02.design/OMAC-NOTES.md#13-各组的依赖与建议的节点切分
+      delivery_goal: 外发范围：来源与项目登记、按端点位置裁剪、未选不送；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
+        PR 去掉其标记（REQ-G1-5），对照测试通过
+      covers:
+      - ACT-OBD-03
+      - ACT-OBD-04
+      - ACT-OBD-05
+      - ACT-OBD-06
+      - ACT-OBD-07
+      - ACT-OBD-08
+      - ACT-OBD-10
+      - ACT-OBD-11
+      - ACT-OBD-12
+      - ACT-OBD-13
+      - ACT-OBD-14
+      - ACT-OBD-16
+      - ACT-OBD-17
+      - ACT-OBD-18
+      acceptance_refs:
+      - flow-outbound-scope
+      commands:
+      - go test -count=1 ./tests/conformance/ ./cli/serve/
+      - go test -count=1 ./kernel/sources/...
+      - go test -count=1 ./api/sources/...
+    pr_base: main
+    acceptance_refs:
+    - flow-backlog-release
+    source_of_truth:
+    - docs/solution-design.md#1414-外发控制
+    - docs/solution-design.md#65-project项目
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/solution-design.md#165-备份升级回退与卸载
+    - .omac/apa-v02.design/OMAC-NOTES.md#13-各组的依赖与建议的节点切分
+    scope_paths:
+    - kernel/sources/registry/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: ledger-schema-v3-delivery
+      producer: ledger-schema-v3
+      evidence_mode: artifact
+      requires:
+      - ledger-v3-tables
+      - migration-fault-injection
+    - artifact_id: endpoint-config-split-delivery
+      producer: endpoint-config-split
+      evidence_mode: artifact
+      requires:
+      - endpoint-config
+    defect_refs:
+    - dfx-a2cf4dcf005a
     coverage_gate: 80
