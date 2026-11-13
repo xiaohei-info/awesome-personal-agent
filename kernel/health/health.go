@@ -197,7 +197,14 @@ func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (judge, generate, wors
 		return "", "", EndpointFailing, err
 	}
 	if jh.Unavailable {
-		judge = EndpointFailing
+		// 判断端点可选：撤掉之后旧故障记录不再报，否则没有调用能把它清掉。
+		_, pol, err := policy.Current(tx)
+		if err != nil {
+			return "", "", EndpointFailing, err
+		}
+		if pol.JudgeEndpoint != nil && pol.JudgeEndpoint.URL != "" {
+			judge = EndpointFailing
+		}
 	}
 	gh, err := direct.HealthIn(tx)
 	if err != nil {
