@@ -29,6 +29,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
@@ -166,6 +167,10 @@ func candidates(batch []eventlog.Entry) (itemIDs, revIDs []string) {
 			continue
 		}
 		e := en.Event
+		// 挂靠与来源刷新（含积压只跑规则的挂靠）不调模型：它们改的标题与正文来自来源对象，摘要等本人或之后的变更再起草。
+		if e.Actor.Principal == followmsg.Principal {
+			continue
+		}
 		switch e.Type {
 		case domain.EvItemCreated, domain.EvItemPhaseChanged:
 			add(&itemIDs, e.Object)
@@ -174,8 +179,9 @@ func candidates(batch []eventlog.Entry) (itemIDs, revIDs []string) {
 				Before *struct{ Title, Body string } `json:"before"`
 				Item   struct{ Title, Body string }  `json:"item"`
 			}
-			// 只在标题或正文变化时起草：信息不足的事项不会因无关修改反复调用。
-			if json.Unmarshal(e.Payload, &p) == nil && (p.Before == nil || p.Before.Title != p.Item.Title || p.Before.Body != p.Item.Body) {
+			// 只在标题或正文变化时起草：信息不足的事项不会因无关修改反复调用。没有 before 的 item.updated 是关系、
+			// 关联键、建议信息等变更（挂靠消息、积压只跑规则也会写），标题与正文没动，不起草。
+			if json.Unmarshal(e.Payload, &p) == nil && p.Before != nil && (p.Before.Title != p.Item.Title || p.Before.Body != p.Item.Body) {
 				add(&itemIDs, e.Object)
 			}
 		case domain.EvMaterialRevised, domain.EvMaterialRevisionProposed:

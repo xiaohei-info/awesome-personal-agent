@@ -15,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
@@ -148,5 +149,65 @@ func TestDraftsItemAndRevisionSummaries(t *testing.T) {
 				t.Fatalf("alerts = %d, want %d", alerts, tc.alerts)
 			}
 		})
+	}
+}
+
+// 只改关联键或关系（item.relate，item.updated 不带 before）不触发起草：标题与正文没变，
+// 积压"只跑规则"挂靠消息时不能因此多出模型调用（§9.3 积压放开第 1 步，需要模型：否）。
+func TestRelateDoesNotDraftSummary(t *testing.T) {
+	reg := store.NewRegistry()
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
+		items.Module, materials.Module, Module} {
+		if err := reg.Register(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(t.TempDir(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := command.New(st, time.Now)
+	if err := errors.Join(projects.Register(x), items.Register(x, items.NewKinds()), materials.Register(x)); err != nil {
+		t.Fatal(err)
+	}
+	gen := &fakeGen{err: model.ErrNotConfigured} // 不写回：事项的摘要一直为空
+	s, err := New(Options{Store: st, Exec: x, Gen: gen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(cmd string, in any) json.RawMessage {
+		b, _ := json.Marshal(in)
+		r, err := x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner"})
+		if err != nil {
+			t.Fatalf("%s: %v", cmd, err)
+		}
+		return r.Value
+	}
+	var ref struct{ ID string }
+	_ = json.Unmarshal(do("item.create", map[string]any{"title": "采购服务器", "kind": "task", "phase": "open", "body": "等报价"}), &ref)
+	if err := s.Drain(bg); err != nil || len(gen.calls) != 1 {
+		t.Fatalf("created item should be drafted once: calls=%d err=%v", len(gen.calls), err)
+	}
+	do("item.relate", map[string]any{"from": ref.ID, "key": "followmsg:m1", "domain": "followmsg", "reason": "attach"})
+	if err := s.Drain(bg); err != nil || len(gen.calls) != 1 {
+		t.Fatalf("relate must not draft again: calls=%d err=%v", len(gen.calls), err)
+	}
+	do("item.update", map[string]any{"id": ref.ID, "title": "采购服务器（改）", "reason": "retitle"})
+	if err := s.Drain(bg); err != nil || len(gen.calls) != 2 {
+		t.Fatalf("title change must draft: calls=%d err=%v", len(gen.calls), err)
+	}
+}
+
+// 挂靠与来源刷新是 followmsg 写的：标题与正文变了也不起草（积压只跑规则零模型调用，§9.3、§9.4）。
+func TestCandidatesSkipFollowmsgWrites(t *testing.T) {
+	upd := func(actor, title string) eventlog.Entry {
+		p, _ := json.Marshal(map[string]any{"before": map[string]string{"Title": "a"}, "item": map[string]string{"Title": title}})
+		return eventlog.Entry{Event: domain.Event{Type: domain.EvItemUpdated, Object: actor + title, Payload: p,
+			Actor: domain.Actor{Type: domain.ActorSystem, Principal: actor}}}
+	}
+	got, _ := candidates([]eventlog.Entry{upd(followmsg.Principal, "b"), upd("owner", "b"), upd("owner", "a")})
+	if len(got) != 1 || got[0] != "ownerb" {
+		t.Fatalf("candidates = %v, want only the owner's title change", got)
 	}
 }
