@@ -1,4 +1,6 @@
-# sha256: a3d5ae26cab7bc0a4ddea072328cad32d0b3d24a6e6d31fc7c4c8641960a83bb
+# sha256: b85faa6008eafd57e1d054d66eb9f97833a1ef19828086ab6cb07f52392798b0
 work_item_id: 01a1d632-e60f-79c0-9879-d32b9ebd9e1f
-status: blocked
+status: in_progress
 recovery_marker: true
+retry_note: 'OWNER ANSWER to blocker handoff-933140e478d6e344: 合同已纠正（scope 改为 tests/e2e/ops/**，验证命令改为
+  ops 套件），请基于 PR #366 现有改动重新验证并提交，不要重做。'
