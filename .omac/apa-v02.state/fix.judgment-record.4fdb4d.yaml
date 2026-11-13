@@ -1,5 +1,5 @@
-# sha256: aff6ca617ea4bc9450cfea5dd592457cbb1e23b94dc5768efa77db859c5e0b7f
+# sha256: a3efcef7405a4578af940d5fc2f199a24f572087f26cd4beae4dea12b6f66533
 work_item_id: 01a1d3df-482d-77d9-addf-77821af6281b
-status: in_progress
+status: in_review
 recovery_marker: true
 retry_note: 上次失败是 Claude 5 小时额度上限（429），已重置；在原分支/PR 上继续，不要重做已完成部分
