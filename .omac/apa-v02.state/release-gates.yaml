@@ -1,6 +1,6 @@
-# sha256: 88de0350fbfff9e3ec2452446913e5b330fdbe3fc472f846f6a8210a980e2689
+# sha256: c4d2af4e00604cca0f9f4dc1f67745aec848b05e04f2420fbee9b248ef8f142f
 work_item_id: 01a1d5d1-fcc3-7056-8973-f8426da2578a
-status: in_progress
+status: blocked
 recovery_marker: true
 retry_note: 上游修复节点（outbound-scope 出站范围统一出口、e2e-env-baseline StubRun 竞态、e2e-sources
   ACT-MAIL-04 隔离 PATH、e2e-v01-background ACT-BGG-04 等 run.finished）合入后，基于最新 main 重跑全部门槛（含全量
