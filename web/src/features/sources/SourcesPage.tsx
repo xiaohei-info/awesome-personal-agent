@@ -5,6 +5,7 @@ import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { Val } from "../../app/values";
 import { useRaw } from "../../app/raw";
+import { rejudgeDays } from "../../app/status";
 import { strings } from "./strings";
 import { ago, period, when, type Source } from "./shared";
 import { BacklogFlow, IgnoreAll, inProgress, SourceBacklog, type Models } from "./Backlog";
@@ -18,6 +19,7 @@ import { DefaultProject, Digest } from "./Digest";
 interface Backlog {
   count: number;
   outbound_unset: number;
+  rejudgeDays?: number;
 }
 interface HealthSignal {
   id: string;
@@ -52,7 +54,7 @@ function Status({ s }: { s: Source }) {
   );
 }
 
-function Detail({ source, onChooseOutbound, onSaved }: { source: Source; onChooseOutbound: () => void; onSaved: () => void }) {
+function Detail({ source, rejudgeDays, onChooseOutbound, onSaved }: { source: Source; rejudgeDays?: number; onChooseOutbound: () => void; onSaved: () => void }) {
   const t = useT(strings);
   const raw = useRaw();
   const st = source.stats;
@@ -61,7 +63,7 @@ function Detail({ source, onChooseOutbound, onSaved }: { source: Source; onChoos
       <h3>{source.id}</h3>
       {source.type === "webhook" && <WebhookKey source={source} />}
       <DefaultProject source={source} onSaved={onSaved} />
-      <SourceBacklog source={source.id} onChooseOutbound={onChooseOutbound} />
+      <SourceBacklog source={source.id} rejudgeDays={rejudgeDays} onChooseOutbound={onChooseOutbound} />
       <Digest source={source.id} />
       <details>
         <summary>{t.advanced}</summary>
@@ -108,7 +110,7 @@ export function SourcesPage() {
       api.get<{ signals: HealthSignal[] }>("/health").then(
         (r) => {
           const s = r.signals.find((x) => x.id === "unjudged_backlog");
-          setBacklog({ count: s?.count ?? 0, outbound_unset: Number(s?.detail?.outbound_unset ?? 0) });
+          setBacklog({ count: s?.count ?? 0, outbound_unset: Number(s?.detail?.outbound_unset ?? 0), rejudgeDays: rejudgeDays(r) });
         },
         () => setBacklog(null),
       ),
@@ -204,7 +206,7 @@ export function SourcesPage() {
         )}
       </section>
       {(total > 0 || inProgress()) && models && <BacklogFlow total={total} models={models} onChanged={changed} ignoreAll={ignoreAll} />}
-      {current && <Detail key={`${current.id}:${rev}`} source={current} onChooseOutbound={() => setEditing(current.id)} onSaved={() => void load()} />}
+      {current && <Detail key={`${current.id}:${rev}`} source={current} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={() => setEditing(current.id)} onSaved={() => void load()} />}
       <details ref={advanced}>
         <summary>{t.advanced}</summary>
         <RestorePanel sources={sources ?? []} onRestored={changed} />

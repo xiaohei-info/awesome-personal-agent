@@ -6,6 +6,7 @@ import { ErrorNote } from "../../app/errors";
 import { entryOf, useLabel, Val } from "../../app/values";
 import { useLang } from "../../app/i18n";
 import { useRaw } from "../../app/raw";
+import { rejudgeHint } from "../../app/strings";
 import { strings } from "./strings";
 import { backlogReason, when, type SourceEvent } from "./shared";
 
@@ -169,7 +170,7 @@ export function IgnoreAll({ label, body, onDone }: { label: string; body: Record
 const BADGE: Record<string, string> = { model_unavailable: "badge warn", outbound_unset: "badge warn", models_paused: "badge plain", restored: "badge plain", expired: "badge plain" };
 
 /** 一个来源的积压（未判定与已过期）：逐条转建议或忽略；等外发范围的可点去选。 */
-export function SourceBacklog({ source, onChooseOutbound }: { source: string; onChooseOutbound: () => void }) {
+export function SourceBacklog({ source, rejudgeDays, onChooseOutbound }: { source: string; rejudgeDays?: number; onChooseOutbound: () => void }) {
   const t = useT(strings);
   const lang = useLang();
   const raw = useRaw();
@@ -231,7 +232,7 @@ export function SourceBacklog({ source, onChooseOutbound }: { source: string; on
             {items.map((v) => {
               const why = backlogReason(v);
               const k = why === "expired" ? "disposition" : "unjudgedReason";
-              const badge = <span className={BADGE[why] ?? "badge"} title={entryOf(lang, k, why)?.hint}><Val k={k} id={why} /></span>;
+              const badge = <span className={BADGE[why] ?? "badge"} title={why === "expired" ? entryOf(lang, k, why)?.hint : rejudgeHint(lang, v.unjudged_reason || "model_unavailable", rejudgeDays) ?? entryOf(lang, k, why)?.hint}><Val k={k} id={why} /></span>;
               return (
                 <li key={v.id}>
                   <span>{v.subject || v.id}</span> · {when(v.occurred_at)} {raw && <code className="raw-id">{v.type}</code>}{" "}

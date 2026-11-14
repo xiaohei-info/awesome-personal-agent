@@ -68,7 +68,7 @@ func newRig(t *testing.T, ph khealth.PackHealth) *rig {
 	}
 	t.Cleanup(func() { st.Close() })
 	a := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apihealth.Routes(st, delivery.New(delivery.Options{Now: time.Now}), ph, 0)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apihealth.Routes(st, delivery.New(delivery.Options{Now: time.Now}), ph, 0, 0)}})
 	if err != nil {
 		t.Fatal(err)
 	}

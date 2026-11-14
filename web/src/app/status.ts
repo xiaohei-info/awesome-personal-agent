@@ -28,6 +28,8 @@ export interface Status {
   paused: boolean;
   /** 暂停期间积下、还没判断的消息条数。 */
   pausedBacklog: number;
+  /** 自动重判窗口（天），见 rejudgeDays。 */
+  rejudgeDays?: number;
 }
 
 const num = (d: unknown, k: string) => Number((d as Record<string, unknown> | undefined)?.[k] ?? 0);
@@ -42,7 +44,13 @@ export function assess(r: HealthReport): Status {
   const needs = r.signals.filter((s) => !s.ok && !onlyPaused(s));
   const fine = r.signals.filter((s) => s.ok);
   const kind = needs.some((s) => s.severity !== "warning") ? "bad" : needs.length ? "warn" : paused ? "paused" : "ok";
-  return { kind, needs, fine, paused, pausedBacklog };
+  return { kind, needs, fine, paused, pausedBacklog, rejudgeDays: rejudgeDays(r) };
+}
+
+/** 自动重判窗口（天）：unjudged_backlog.detail.rejudge_days，0 表示关闭（§9.3）；没有这个键时为 undefined，界面不说之后会怎样。 */
+export function rejudgeDays(r: { signals: { id: string; detail?: unknown }[] }): number | undefined {
+  const d = r.signals.find((s) => s.id === "unjudged_backlog")?.detail as { rejudge_days?: unknown } | undefined;
+  return typeof d?.rejudge_days === "number" ? d.rejudge_days : undefined;
 }
 
 /** 导航上的状态灯：换页面或页面里数据变了（COUNTS_EVENT）时重取；取不到时为 null，不显示。 */

@@ -49,6 +49,10 @@ const zh = {
   setHost: "去设置",
   output: "结果写到哪",
   outputs: { item: "写进这条事项", item_and_material: "也存一份纪要" } as Record<string, string>,
+  edit: "修改",
+  editOf: (what: string) => `修改 ${what}`,
+  routineEdit: "修改例行任务",
+  scheduledEdit: "修改定时简报",
 };
 
 const en: typeof zh = {
@@ -99,6 +103,10 @@ const en: typeof zh = {
   setHost: "Settings",
   output: "Where results go",
   outputs: { item: "Into this item", item_and_material: "Also save as notes" } as Record<string, string>,
+  edit: "Edit",
+  editOf: (what) => `Edit ${what}`,
+  routineEdit: "Edit routine",
+  scheduledEdit: "Edit scheduled brief",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

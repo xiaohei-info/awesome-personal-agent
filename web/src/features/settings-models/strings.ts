@@ -95,7 +95,7 @@ const zh = {
   running: "运行中",
   paused: "已暂停",
   willCall: (u: string) => `将请求：${u}`,
-  stored: (n: number) => `暂停期间判不了的先存着 · 已存 ${n} 条`,
+  stored: (n: number) => `暂停期间积下 ${n} 条`,
   pausedNote: "配置和密钥都保留",
 };
 
@@ -193,7 +193,7 @@ const en: typeof zh = {
   running: "Running",
   paused: "Paused",
   willCall: (u) => `Will call: ${u}`,
-  stored: (n) => `Undecided items wait while paused · ${n} so far`,
+  stored: (n) => `${n} held while paused`,
   pausedNote: "Settings and keys are kept",
 };
 

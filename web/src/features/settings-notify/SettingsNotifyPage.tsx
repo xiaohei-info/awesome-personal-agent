@@ -19,9 +19,11 @@ export function SettingsNotifyPage() {
   const t = useT(strings);
   const { docs, error, load, save } = usePolicyDocs(ROUTES);
   const p = docs?.policy;
+  const channels = useChannels();
   return (
     <PolicyPage title={t.title} lede={t.lede} error={error} ready={!!p} onRetry={() => void load()}>
-      {p && <DisturbCard doc={p} save={save} />}
+      {p && <DisturbCard doc={p} channels={channels} save={save} />}
+      {p && <ChannelsCard doc={p} channels={channels} save={save} />}
     </PolicyPage>
   );
 }
@@ -59,10 +61,9 @@ const toLocalInput = (iso?: string) => {
 };
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
-function DisturbCard({ doc, save }: { doc: Doc; save: Save }) {
+function DisturbCard({ doc, channels, save }: { doc: Doc; channels: string[]; save: Save }) {
   const t = useT(strings);
   const label = useLabel();
-  const channels = useChannels();
   const today = useToday();
   const routesIn = doc.disturb.routes as Record<string, string>;
   // 类别级路由（含文档里的其他键，如 wake）与「类别:优先级」级分开编辑，保存时合并；两行写到同一个键时在本地报重复。
@@ -190,6 +191,31 @@ function DisturbCard({ doc, save }: { doc: Doc; save: Save }) {
           </label>
         </div>
       </details>
+    </Card>
+  );
+}
+
+// 渠道的登记属性（§10.3，策略的 channels 段）：只能发文字的渠道，决策投递带一次性表单链接（kernel/channel/form.go）。
+// PUT 替换整段：已接入的渠道与段里已有的渠道（含已吊销的）一起列出，没改的原样带回。
+function ChannelsCard({ doc, channels, save }: { doc: Doc; channels: string[]; save: Save }) {
+  const t = useT(strings);
+  const stored = (doc.channels ?? {}) as Record<string, { text_only?: boolean }>;
+  const [draft, setDraft] = useDraft<Record<string, boolean>>(doc.channels, () => ({}));
+  const names = [...new Set([...channels, ...Object.keys(stored)])];
+  if (!names.length) return null;
+  const on = (c: string) => (c in draft ? draft[c] : !!stored[c]?.text_only);
+  const submit = () => {
+    const next: Record<string, { text_only: boolean }> = {};
+    for (const c of names) if (c in stored || c in draft) next[c] = { text_only: on(c) };
+    return save("policy", { channels: next });
+  };
+  return (
+    <Card title={t.channels} hint={t.textOnlyHint} onSave={submit}>
+      {names.map((c) => (
+        <label key={c}>
+          <input type="checkbox" checked={on(c)} onChange={(e) => setDraft({ ...draft, [c]: e.target.checked })} /> {t.textOnly(c)}
+        </label>
+      ))}
     </Card>
   );
 }

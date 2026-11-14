@@ -71,7 +71,7 @@ func setup(t *testing.T, ph khealth.PackHealth) *env {
 		t.Fatal(err)
 	}
 	a := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st, delivery.New(delivery.Options{}), ph, 0), DoctorRoutes(st, kdoctor.Env{})}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st, delivery.New(delivery.Options{}), ph, 0, 0), DoctorRoutes(st, kdoctor.Env{})}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,5 +365,21 @@ func TestPausedModelsAreHealthyAndCountedApart(t *testing.T) {
 	bd, _ := b.Detail.(map[string]any)
 	if b.OK || b.Count != 1 || bd["models_paused"] != float64(1) || bd["model_unavailable"] != float64(0) {
 		t.Fatalf("backlog signal %+v", b)
+	}
+}
+
+// unjudged_backlog 的 detail 带出运行配置的自动重判窗口（天），Web 据它说积压会不会自动判断；0 表示关闭。
+func TestUnjudgedBacklogCarriesRejudgeDays(t *testing.T) {
+	e := setup(t, fakePacks(nil))
+	if d, _ := e.report(auth.Observer).byID("unjudged_backlog").Detail.(map[string]any); d["rejudge_days"] != float64(0) {
+		t.Fatalf("window 0: detail %+v", d)
+	}
+	srv, err := core.New(core.Deps{Store: e.st, Auth: e.auth, Groups: []core.RouteGroup{Routes(e.st, delivery.New(delivery.Options{}), fakePacks(nil), 0, 7*24*time.Hour)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.srv = srv
+	if d, _ := e.report(auth.Observer).byID("unjudged_backlog").Detail.(map[string]any); d["rejudge_days"] != float64(7) {
+		t.Fatalf("window 7d: detail %+v", d)
 	}
 }

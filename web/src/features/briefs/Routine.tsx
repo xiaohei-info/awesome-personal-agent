@@ -6,10 +6,11 @@ import { ErrorNote } from "../../app/errors";
 import { EntityPick } from "../../app/names";
 import { PERM } from "../../app/ids";
 import { Pick } from "../../app/values";
-import { DAYS, browserZone, toCron, type Days } from "./schedule";
+import { DAYS, browserZone, parseCron, toCron, type Days } from "./schedule";
 import { strings } from "./strings";
 
-// 例行任务实例（routine 包，§13.5）：POST /v1/instances {pack:"routine", project?, params}。
+// 例行任务实例（routine 包，§13.5）：POST /v1/instances {pack:"routine", project?, params}；修改走 PATCH /v1/instances/{id} {project, params}
+// （instance.update：params 整体替换，project 给了就改，空串表示不归项目；只有定时变了才重排）。
 // params 的形状以 packs/routine/pack.yaml 的 instance_params 为准（schedule、mode 必填；title、instruction、access、output 可选），
 // 服务端按它校验；任务说明在「到点运行」时由本页要求填写。
 export const MODES = ["run", "create_item"] as const;
@@ -17,7 +18,7 @@ export const OUTPUTS = ["item", "item_and_material"] as const;
 type Mode = (typeof MODES)[number];
 type Output = (typeof OUTPUTS)[number];
 
-export interface Instance { id: string; pack: string; project?: string; params: { schedule?: string; projects?: string[]; mode?: string; title?: string; access?: string }; enabled: boolean }
+export interface Instance { id: string; pack: string; project?: string; params: { schedule?: string; projects?: string[]; mode?: string; title?: string; instruction?: string; access?: string; output?: string }; enabled: boolean }
 
 /** 到点运行时用哪个宿主、它的上限是多少（§13.6）：规则不指定宿主，所以取默认宿主；读不到时为 null，不提示。 */
 function useHostCap(): { host: string; cap: string } | null {
@@ -38,18 +39,24 @@ function useHostCap(): { host: string; cap: string } | null {
   return v;
 }
 
-export function RoutineForm({ onCreated }: { onCreated: (i: Instance) => void }) {
+/** 新建（无 edit）或修改一个实例；修改时按实例预填，调用方用 key 换实例。 */
+export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDone: (i: Instance) => void; onCancel?: () => void }) {
   const t = useT(strings);
   const { api } = useSession();
   const host = useHostCap();
-  const [mode, setMode] = useState<Mode>("create_item");
-  const [title, setTitle] = useState("");
-  const [instruction, setInstruction] = useState("");
-  const [days, setDays] = useState<Days>("1");
-  const [time, setTime] = useState("09:00");
-  const [project, setProject] = useState("");
-  const [access, setAccess] = useState("read");
-  const [output, setOutput] = useState<Output>("item");
+  const p = edit?.params ?? {};
+  const cron = p.schedule ? parseCron(p.schedule) : null;
+  const [mode, setMode] = useState<Mode>((p.mode as Mode) ?? "create_item");
+  const [title, setTitle] = useState(p.title ?? "");
+  const [instruction, setInstruction] = useState(p.instruction ?? "");
+  const [days, setDays] = useState<Days>(cron?.days ?? "1");
+  const [time, setTime] = useState(cron?.time ?? "09:00");
+  // 修改时定时没动过就原样带回，原来的时区不丢。
+  // shortcut: 本页读不回的定时（CLI 写的复杂 cron）预填成默认的「每周一 09:00」，不动就不改；需要时加「直接写定时」。
+  const [timed, setTimed] = useState(false);
+  const [project, setProject] = useState(edit?.project ?? "");
+  const [access, setAccess] = useState(p.access ?? "read");
+  const [output, setOutput] = useState<Output>((p.output as Output) ?? "item");
   const [error, setError] = useState<unknown>(null);
   const run = mode === "run";
   const over = run && host && PERM.indexOf(access as (typeof PERM)[number]) > PERM.indexOf(host.cap as (typeof PERM)[number]);
@@ -59,12 +66,13 @@ export function RoutineForm({ onCreated }: { onCreated: (i: Instance) => void })
     if (run && !instruction.trim()) return setError(new Error(t.needInstruction));
     try {
       const params = {
-        schedule: toCron(days, time, browserZone()),
+        schedule: edit?.params.schedule && !timed ? edit.params.schedule : toCron(days, time, cron?.zone ?? browserZone()),
         mode,
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(run ? { instruction: instruction.trim(), access, output } : {}),
       };
-      onCreated(await api.post<Instance>("/instances", { pack: "routine", ...(project ? { project } : {}), params }));
+      if (edit) return onDone(await api.patch<Instance>(`/instances/${encodeURIComponent(edit.id)}`, { project, params }));
+      onDone(await api.post<Instance>("/instances", { pack: "routine", ...(project ? { project } : {}), params }));
       setTitle("");
       setInstruction("");
       setError(null);
@@ -74,7 +82,7 @@ export function RoutineForm({ onCreated }: { onCreated: (i: Instance) => void })
   }
 
   return (
-    <form className="panel" aria-label={t.routineNew} onSubmit={(e) => void create(e)}>
+    <form className="panel" aria-label={edit ? t.routineEdit : t.routineNew} onSubmit={(e) => void create(e)}>
       <fieldset className="seg-radio" role="radiogroup" aria-label={t.routineMode}>
         <legend>{t.routineMode}</legend>
         {MODES.map((m) => (
@@ -88,10 +96,10 @@ export function RoutineForm({ onCreated }: { onCreated: (i: Instance) => void })
       {run && <label>{t.instruction}<textarea value={instruction} onChange={(e) => setInstruction(e.target.value)} /></label>}
       <fieldset>
         <legend>{t.schedule}</legend>
-        <select aria-label={t.routineDays} value={days} onChange={(e) => setDays(e.target.value as Days)}>
+        <select aria-label={t.routineDays} value={days} onChange={(e) => (setDays(e.target.value as Days), setTimed(true))}>
           {DAYS.map((d) => <option key={d} value={d}>{t.days[d]}</option>)}
         </select>
-        <input type="time" aria-label={t.routineTime} value={time} onChange={(e) => setTime(e.target.value)} />
+        <input type="time" aria-label={t.routineTime} value={time} onChange={(e) => (setTime(e.target.value), setTimed(true))} />
       </fieldset>
       <label>{t.routineProject}<EntityPick kind="project" value={project} onChange={setProject} empty={t.noProject} /></label>
       {run && (
@@ -106,7 +114,7 @@ export function RoutineForm({ onCreated }: { onCreated: (i: Instance) => void })
           </label>
         </>
       )}
-      <button type="submit">{t.routineCreate}</button>
+      <button type="submit">{edit ? t.save : t.routineCreate}</button>{onCancel && <> <button type="button" onClick={onCancel}>{t.cancel}</button></>}
       {error != null && <ErrorNote error={error} />}
     </form>
   );

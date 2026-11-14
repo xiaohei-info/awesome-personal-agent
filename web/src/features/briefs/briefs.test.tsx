@@ -32,7 +32,7 @@ function server(o: { fail?: boolean; items?: unknown[]; reject?: boolean; routin
       const body = JSON.parse(init.body as string);
       (calls.patches ??= []).push({ url, body });
       const cur = [...instances, ...routines].find((x) => x.id === decodeURIComponent(ip[1]))!;
-      return json(200, { ...cur, enabled: body.enabled });
+      return json(200, { ...cur, ...body, params: body.params ?? cur.params, enabled: body.enabled ?? cur.enabled });
     }
     if (url === "/v1/instances" && init?.method === "POST") {
       calls.posts.push({ body: JSON.parse(init.body as string), csrf: (init.headers as Record<string, string>)["X-CSRF-Token"] ?? null });
@@ -191,6 +191,45 @@ describe("简报页", () => {
     await userEvent.click(form.getByRole("radio", { name: "让 agent 去做" }));
     expect(await form.findByText(/还没设默认宿主/)).toBeInTheDocument();
     expect(form.getAllByRole("link", { name: "去设置" })[0]).toHaveAttribute("href", "/settings/access");
+  });
+
+  it("修改例行任务：按实例预填；定时没动就原样带回，改了几点仍用原来的时区；PATCH 带 project 与整份 params", async () => {
+    const calls: Calls = { posts: [], urls: [], patches: [] };
+    mount(server({ routine: true }, calls));
+    const r = within(await screen.findByRole("list", { name: "已安排的例行任务" }));
+    await userEvent.click(r.getByRole("button", { name: "修改 〈日期〉 周报" }));
+    const form = within(await screen.findByRole("form", { name: "修改例行任务" }));
+    expect(form.getByLabelText("标题（{date} 会换成当天日期）")).toHaveValue("{date} 周报");
+    expect(form.getByLabelText("哪几天做")).toHaveValue("1");
+    expect(form.getByLabelText("几点做")).toHaveValue("09:00");
+    await userEvent.clear(form.getByLabelText("标题（{date} 会换成当天日期）"));
+    await userEvent.type(form.getByLabelText("标题（{date} 会换成当天日期）"), "月报");
+    await userEvent.click(form.getByRole("button", { name: "保存" }));
+    expect(calls.patches!.at(-1)).toEqual({ url: "/v1/instances/ins_r", body: { project: "", params: { schedule: "CRON_TZ=UTC 0 9 * * 1", mode: "create_item", title: "月报" } } });
+    expect(await r.findByText(/月报 · 每周一 09:00/)).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "修改例行任务" })).toBeNull();
+
+    await userEvent.click(r.getByRole("button", { name: "修改 月报" }));
+    const again = within(await screen.findByRole("form", { name: "修改例行任务" }));
+    await userEvent.selectOptions(again.getByLabelText("哪几天做"), "1-5");
+    await userEvent.click(again.getByRole("button", { name: "保存" }));
+    expect(calls.patches!.at(-1)!.body).toMatchObject({ params: { schedule: "CRON_TZ=UTC 0 9 * * 1-5" } });
+  });
+
+  it("修改定时简报：包不能换；读不回的定时放进「直接写定时」；PATCH 只换定时与项目，其余参数带回", async () => {
+    const calls: Calls = { posts: [], urls: [], patches: [] };
+    mount(server({}, calls));
+    const l = within(await screen.findByRole("list", { name: "已安排的" }));
+    await userEvent.click(l.getByRole("button", { name: "修改 ins_1" }));
+    const form = within(await screen.findByRole("form", { name: "修改定时简报" }));
+    expect(form.getByLabelText("做什么")).toBeDisabled();
+    expect(form.getByLabelText("cron 或时长")).toHaveValue("0 8 * * 1-5");
+    await userEvent.click(await form.findByLabelText("家务"));
+    await userEvent.click(form.getByRole("button", { name: "保存" }));
+    expect(calls.patches).toEqual([{ url: "/v1/instances/ins_1", body: { params: { schedule: "0 8 * * 1-5", projects: ["home"] } } }]);
+    expect(calls.posts).toEqual([]);
+    expect(await l.findByText(/家务/)).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "修改定时简报" })).toBeNull();
   });
 
   it("服务端失败时显示真实原因", async () => {

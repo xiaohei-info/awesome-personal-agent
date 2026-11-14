@@ -58,6 +58,8 @@ export function BriefsPage() {
   const [time, setTime] = useState("08:00");
   const [raw, setRaw] = useState(""); // 高级：直接写 cron 或时长，填了就用它
   const [projects, setProjects] = useState<string[]>([]);
+  const [editing, setEditing] = useState<Instance | null>(null); // 正在修改的简报或复盘；表单与新建共用
+  const [editingRoutine, setEditingRoutine] = useState<string | null>(null);
   const allProjects = useNamed("project");
   const projectName = useNames("project");
   const submitRef = useRef<HTMLButtonElement>(null);
@@ -87,18 +89,41 @@ export function BriefsPage() {
   }, [api]);
   useEffect(() => { void load(); }, [load]);
 
+  const replace = (i: Instance) => setInstances((l) => (l ?? []).map((x) => (x.id === i.id ? i : x)));
+  // 修改：表单按实例预填。定时是本页能读回的写法就填进哪几天与几点，否则放进「直接写定时」。
+  function edit(i: Instance) {
+    const p = i.params.schedule ? parseCron(i.params.schedule) : null;
+    setEditing(i);
+    setPack(i.pack);
+    setDays(p?.days ?? "1-5");
+    setTime(p?.time ?? "08:00");
+    setRaw(p ? "" : i.params.schedule ?? "");
+    setProjects(i.params.projects ?? []);
+  }
+  function reset() {
+    setEditing(null);
+    setRaw("");
+    setProjects([]);
+  }
+
   async function create(e: FormEvent) {
     e.preventDefault();
-    const schedule = raw.trim() || (time ? toCron(days, time, browserZone()) : "");
+    const zone = (editing?.params.schedule && parseCron(editing.params.schedule)?.zone) || browserZone();
+    const schedule = raw.trim() || (time ? toCron(days, time, zone) : "");
     if (!schedule) return setError(new Error(t.needSchedule));
     try {
-      const created = await api.post<Instance>("/instances", {
-        pack: pack || briefPacks[0],
-        params: { schedule, ...(projects.length ? { projects } : {}) },
-      });
-      setInstances((l) => [...(l ?? []), created]);
-      setRaw("");
-      setProjects([]);
+      if (editing) {
+        // instance.update 整体替换 params：其余参数原样带回，只换定时与项目。
+        const { projects: _old, ...rest } = editing.params;
+        replace(await api.patch<Instance>(`/instances/${encodeURIComponent(editing.id)}`, { params: { ...rest, schedule, ...(projects.length ? { projects } : {}) } }));
+      } else {
+        const created = await api.post<Instance>("/instances", {
+          pack: pack || briefPacks[0],
+          params: { schedule, ...(projects.length ? { projects } : {}) },
+        });
+        setInstances((l) => [...(l ?? []), created]);
+      }
+      reset();
       setError(null);
     } catch (err) {
       setError(err);
@@ -108,8 +133,7 @@ export function BriefsPage() {
   // 启停：只发 enabled，服务端按 instance.toggle 处理并返回实例的当前状态。
   async function toggle(i: Instance) {
     try {
-      const next = await api.patch<Instance>(`/instances/${encodeURIComponent(i.id)}`, { enabled: !i.enabled });
-      setInstances((l) => (l ?? []).map((x) => (x.id === i.id ? next : x)));
+      replace(await api.patch<Instance>(`/instances/${encodeURIComponent(i.id)}`, { enabled: !i.enabled }));
       setError(null);
     } catch (err) {
       setError(err);
@@ -117,6 +141,9 @@ export function BriefsPage() {
   }
   const OnOff = ({ i }: { i: Instance }) => (
     <button type="button" aria-pressed={i.enabled} aria-label={t.toggle(i.params.title?.split("{date}").join(t.dateMark) || i.id)} onClick={() => void toggle(i)}>{i.enabled ? t.pause : t.resume}</button>
+  );
+  const Edit = ({ i, onClick }: { i: Instance; onClick: () => void }) => (
+    <button type="button" aria-label={t.editOf(i.params.title?.split("{date}").join(t.dateMark) || i.id)} onClick={onClick}>{t.edit}</button>
   );
   const briefPacks = packs.filter((n) => BRIEF_PACKS.includes(n));
   const scheduled = (instances ?? []).filter((x) => x.pack !== ROUTINE);
@@ -141,12 +168,12 @@ export function BriefsPage() {
         <h2>{t.scheduled}</h2>
         <ul aria-label={t.instanceList} className={scheduled.length ? "rows" : "plain"}>
           {scheduled.map((i) => (
-            <li key={i.id}><span><When schedule={i.params.schedule} /> · <Val k="pack" id={i.pack} />{i.params.projects?.length ? ` · ${i.params.projects.map(projectName).join(t.listSep)}` : ""}{i.enabled ? "" : t.disabled}</span> <OnOff i={i} /></li>
+            <li key={i.id}><span><When schedule={i.params.schedule} /> · <Val k="pack" id={i.pack} />{i.params.projects?.length ? ` · ${i.params.projects.map(projectName).join(t.listSep)}` : ""}{i.enabled ? "" : t.disabled}</span> <span><Edit i={i} onClick={() => edit(i)} /> <OnOff i={i} /></span></li>
           ))}
         </ul>
-        <form className="panel" onSubmit={(e) => void create(e)}>
+        <form className="panel" aria-label={editing ? t.scheduledEdit : undefined} onSubmit={(e) => void create(e)}>
           <label>{t.pack}
-            <Pick k="pack" value={pack || briefPacks[0] || ""} onChange={setPack} ids={briefPacks} />
+            <Pick k="pack" value={pack || briefPacks[0] || ""} onChange={setPack} ids={briefPacks} disabled={!!editing} />
           </label>
           <fieldset disabled={!!raw.trim()}>
             <legend>{t.schedule}</legend>
@@ -170,7 +197,8 @@ export function BriefsPage() {
             <summary>{t.advanced}</summary>
             <label>{t.rawSchedule}<input value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="0 8 * * 1-5" /></label>
           </details>
-          <button type="submit" ref={submitRef} disabled={!briefPacks.length}>{t.create}</button>
+          <button type="submit" ref={submitRef} disabled={!briefPacks.length}>{editing ? t.save : t.create}</button>
+          {editing && <> <button type="button" onClick={reset}>{t.cancel}</button></>}
         </form>
       </section>
       {packs.includes(ROUTINE) && (
@@ -180,11 +208,12 @@ export function BriefsPage() {
             {!routines.length && <li className="sub">{t.noRoutines}</li>}
             {routines.map((i) => (
               <li key={i.id}>
-                <span>{i.params.title?.split("{date}").join(t.dateMark) || t.modes[i.params.mode as "run" | "create_item"] || i.id} · <When schedule={i.params.schedule} />{i.project ? ` · ${projectName(i.project)}` : ""}{i.enabled ? "" : t.disabled}</span> <OnOff i={i} />
+                <span>{i.params.title?.split("{date}").join(t.dateMark) || t.modes[i.params.mode as "run" | "create_item"] || i.id} · <When schedule={i.params.schedule} />{i.project ? ` · ${projectName(i.project)}` : ""}{i.enabled ? "" : t.disabled}</span> <span><Edit i={i} onClick={() => setEditingRoutine(i.id)} /> <OnOff i={i} /></span>
+                {editingRoutine === i.id && <RoutineForm key={i.id} edit={i} onDone={(n) => (replace(n), setEditingRoutine(null))} onCancel={() => setEditingRoutine(null)} />}
               </li>
             ))}
           </ul>
-          <RoutineForm onCreated={(i) => setInstances((l) => [...(l ?? []), i])} />
+          <RoutineForm onDone={(i) => setInstances((l) => [...(l ?? []), i])} />
         </section>
       )}
     </main>
