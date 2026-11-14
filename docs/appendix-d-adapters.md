@@ -110,6 +110,7 @@ Gmail、Google 日历、Google Drive 这类服务要用户自备 OAuth 客户端
 | 预填值 | 地址 `https://api.typesafe.ai/v1`，模型 `jev-latest`（别名，响应里给实际版本，如 `jev-1.14.0`；需要固定版本时填版本号） |
 | 经网关接入 | 地址改成网关的接口根（如 `http://<网关>/v1`），模型名按网关的命名（如 `typesafe/jev-latest`） |
 | 限制 | 题数不设上限；每请求 64k token（state 加全部题）、每题 32k token；请求体至多 32 MiB；限流按组织计，超出回 429，可带 `retry-after`；过载回 529 |
-| 地区 | 官方接口对部分地区回 451（不在服务范围），内核按其他 4xx 记 `protocol_error`；这类地区只能经网关或代理接入 |
+| 地区 | 官方接口对部分地区回 451（`Typesafe is not available in your region.`），内核记 `region_unavailable`，"测试连接"提示改用可访问的网关地址或代理 |
+| 超时 | 冷调用约 9.7 秒，Web 新配时 `timeout_ms` 预填 30000 |
 
 自建的分类服务讲 `probability-judgment/1` 即可接入；仓库里用于验收的分类端点替身（同时讲两种协议）可作参照（主文档 §18）。

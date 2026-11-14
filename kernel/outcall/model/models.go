@@ -46,7 +46,7 @@ func (c *Client) ListModels(ctx context.Context, url, key string) (ids []string,
 		return nil, false, transportErr(ctx, err, key)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, false, &StatusError{Code: resp.StatusCode, Message: errorMessage(raw, key)}
+		return nil, false, &StatusError{Code: resp.StatusCode, Message: errorMessage(raw, key), Region: RegionBlocked(resp.StatusCode, raw)}
 	}
 	if len(raw) > maxListBody {
 		return nil, false, fmt.Errorf("%w: body exceeds %d bytes", ErrBadResponse, maxListBody)

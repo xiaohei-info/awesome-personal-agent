@@ -138,7 +138,7 @@ func TestProbeRefusesStoredKeyForOtherOrigin(t *testing.T) {
 // 探测失败是数据（200 + reason），各类原因可区分。
 func TestProbeModelsFailureReasons(t *testing.T) {
 	e := setup(t)
-	for status, reason := range map[int]string{401: "unauthorized", 404: "not_found", 503: "http_status"} {
+	for status, reason := range map[int]string{401: "unauthorized", 404: "not_found", 503: "http_status", 451: "region_unavailable"} {
 		f := newFake(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) })
 		out := decode(t, e.do("POST", modelsPath, `{"endpoint":"generate","url":"`+f.srv.URL+`","api_key":"k"}`, e.web))
 		if out["ok"] != false || out["reason"] != reason {

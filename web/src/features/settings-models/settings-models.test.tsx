@@ -105,6 +105,8 @@ describe("设置 › 模型", () => {
     expect(j.getByLabelText("协议")).toHaveValue("system-one");
     expect(j.getByLabelText(/接口根地址/)).toHaveValue("https://api.typesafe.ai/v1");
     expect(j.getByLabelText("模型")).toHaveValue("jev-latest");
+    expect(j.getByLabelText("超时（毫秒）")).toHaveValue(30000);
+    expect(j.getByText(/首次调用可能需要约 10 秒/)).toBeInTheDocument();
     await userEvent.type(j.getByLabelText("API 密钥"), "ts-key");
     await userEvent.click(j.getByRole("button", { name: "获取模型" }));
     await j.findByText("已从端点取到 2 个模型。");
@@ -120,7 +122,7 @@ describe("设置 › 模型", () => {
     await userEvent.type(j.getByLabelText("模型"), "gw/jev-latest");
     await save("判断端点");
     await j.findByText(/已保存/);
-    expect(s.puts.at(-1)).toEqual({ judge_endpoint: { url: "http://gw.example.invalid/v1", api_key: "ts-key", model: "gw/jev-latest", locality: "external", protocol: "system-one", timeout_ms: 10000, max_batch: 32, max_material_chars: 8000 } });
+    expect(s.puts.at(-1)).toEqual({ judge_endpoint: { url: "http://gw.example.invalid/v1", api_key: "ts-key", model: "gw/jev-latest", locality: "external", protocol: "system-one", timeout_ms: 30000, max_batch: 32, max_material_chars: 8000 } });
   });
 
   it("获取模型后从列表选择，再测试连接；请求用占位沿用已存密钥", async () => {
@@ -170,6 +172,17 @@ describe("设置 › 模型", () => {
     expect(s.posts.at(-1)!.body).toEqual({ endpoint: "generate", url: "https://other.example.com/v1", api_key: "sk-other" });
   });
 
+  it("地区不可用：测试连接直接提示改用网关地址或代理，不说协议不符", async () => {
+    const s = server();
+    s.setProbe({ subject: "judge_endpoint", status: "error", code: "region_unavailable", why: "the service is not available from this network location", next: "use a reachable compatible gateway URL or a proxy", data: { elapsed_ms: 200 } });
+    mount(s.impl);
+    const j = await card("判断端点");
+    await userEvent.click(j.getByRole("button", { name: "测试连接" }));
+    const r = await j.findByRole("status", { name: "测试结果" });
+    expect(r).toHaveTextContent("✗ 服务在当前网络位置不可用，请改用可访问的网关地址或代理");
+    expect(r).not.toHaveTextContent("响应不符合所选协议");
+  });
+
   it("外部端点提示还没设置外部外发范围的来源数，并链接到来源页", async () => {
     mount(server().impl);
     const g = await card("生成端点");
@@ -186,10 +199,11 @@ describe("设置 › 模型", () => {
     await userEvent.click(j.getByLabelText("配置判断端点"));
     expect(j.getByRole("radio", { name: /本机/ })).not.toBeChecked();
     expect(j.getByRole("radio", { name: /外部服务/ })).not.toBeChecked();
-    expect(j.getByLabelText("超时（毫秒）")).toHaveValue(10000);
-    // 换成自建服务协议：仍是预填值的地址与模型清空。
+    expect(j.getByLabelText("超时（毫秒）")).toHaveValue(30000);
+    // 换成自建服务协议：仍是预填值的地址与模型清空，超时回到 10000。
     await userEvent.selectOptions(j.getByLabelText("协议"), "probability-judgment/1");
     expect(j.getByLabelText(/端点 URL/)).toHaveValue("");
+    expect(j.getByLabelText("超时（毫秒）")).toHaveValue(10000);
     await userEvent.type(j.getByLabelText(/端点 URL/), "http://cls.stub/judge");
     await save("判断端点");
     expect(await j.findByRole("alert")).toHaveTextContent("配置这个端点时必选");

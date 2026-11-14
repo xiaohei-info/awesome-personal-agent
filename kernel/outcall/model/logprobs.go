@@ -40,9 +40,9 @@ func (j *judgeRun) logprobs(ctx context.Context, qs []Question) error {
 				}
 			case f != "":
 				a.ErrCode = f
-				if f == CodeUnauthorized || f == CodeInvalidRequest || f == CodeProtocolError {
+				if f == CodeUnauthorized || f == CodeInvalidRequest || f == CodeProtocolError || f == CodeRegionUnavailable {
 					j.fault(f)
-					j.res.Unavailable = j.res.Unavailable || f == CodeUnauthorized
+					j.res.Unavailable = j.res.Unavailable || f == CodeUnauthorized || f == CodeRegionUnavailable
 				}
 			default:
 				a.PYes, a.Model, a.Source = p, j.ep.Model, "logprobs"
