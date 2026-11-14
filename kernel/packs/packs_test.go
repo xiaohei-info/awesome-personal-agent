@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -208,6 +209,24 @@ func TestHotReloadPicksUpChanges(t *testing.T) {
 	}
 }
 
+// OnReject 落账要拿存储锁，而健康查询持存储锁读 Health：回调必须在加载器锁外调用，否则锁序相反死等（§15.2 健康视图随时可查）。
+func TestOnRejectRunsOutsideLoaderLock(t *testing.T) {
+	data := t.TempDir()
+	writePack(t, data, map[string]string{"brief/pack.yaml": "name: brief\nversion: 2.0.0\ndescription: d\nevent_rules:\n  - id: r\n    mode: auto\n    do: []\n"})
+	var l *Loader
+	got := make(chan int, 1)
+	l = New(Options{DataDir: data, Kinds: newKinds(), OnReject: func(Rejection) { got <- len(l.Health()) }})
+	go l.Load()
+	select {
+	case n := <-got:
+		if n != 1 {
+			t.Fatalf("health in callback = %d", n)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnReject 回调未返回：加载器锁未释放")
+	}
+}
+
 // ACT-PACK-04：校验失败保留上一有效版本，进健康视图，只通知一次；修好后恢复。
 func TestRejectedReloadKeepsLastValidVersion(t *testing.T) {
 	data := t.TempDir()
@@ -351,7 +370,7 @@ func TestLoadRulesRejectWholePack(t *testing.T) {
 // instruction_path 占位符：声明了字符串参数 instruction 的包可以用它（附录 C.7）。
 func TestInstructionPathAllowedWithInstructionParam(t *testing.T) {
 	fsys := fstest.MapFS{
-		"x/pack.yaml": {Data: []byte("name: x\nversion: 1.0.0\ndescription: d\ninstance_params:\n  type: object\n  properties:\n    instruction: {type: string}\n")},
+		"x/pack.yaml":    {Data: []byte("name: x\nversion: 1.0.0\ndescription: d\ninstance_params:\n  type: object\n  properties:\n    instruction: {type: string}\n")},
 		"x/prompts/t.md": {Data: []byte("---\nagent: task\n---\n任务说明在 {instruction_path}\n")},
 	}
 	l, rej := load(t, Options{Builtin: fsys, Kinds: newKinds()})
