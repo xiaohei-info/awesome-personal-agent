@@ -4,7 +4,8 @@ import { PageHead } from "../../app/page";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { EXECUTOR_KIND } from "../../app/ids";
-import { Pick, Val } from "../../app/values";
+import { Pick, Val, useLabel } from "../../app/values";
+import { TagInput } from "../settings-policy/shared";
 
 // 形状对应 /v1/settings/{executors,declarations,commands}（kernel/executors）。授权（仅 Web 会话）、
 // 声明校验、确认前不生效都在服务端；本页只负责调用并如实展示服务端的回答。
@@ -16,7 +17,8 @@ interface Executor {
 }
 interface Declaration {
   harness: string;
-  headless?: Record<string, unknown>;
+  headless?: { command?: string[] | string; access?: Record<string, unknown> } & Record<string, unknown>;
+  selfcheck?: { command?: unknown };
   main_session?: Record<string, unknown>;
   executors?: Executor[];
 }
@@ -48,7 +50,30 @@ function useList<T>(path: string, pick: (r: any) => T[]) {
 }
 
 // 完整、只读地展示整份声明：确认/登记的就是这里显示的全部内容（命令、access、resume、main_session、执行者）。
-const DeclarationView = ({ d }: { d: Declaration }) => <pre data-testid={`declaration-${d.harness}`}>{JSON.stringify(d, null, 2)}</pre>;
+// 先给一行摘要（要运行的命令、提供的权限档、附带的执行者），完整声明收在下面可展开，批准前可以逐字看。
+const DeclarationView = ({ d }: { d: Declaration }) => {
+  const t = useT(strings);
+  const label = useLabel();
+  const cmd = d.headless?.command;
+  const levels = Object.keys(d.headless?.access ?? {});
+  return (
+    <div className="full">
+      {cmd && (
+        <p>
+          {t.wantsToRun(d.harness)}
+          <code>{Array.isArray(cmd) ? cmd.join(" ") : String(cmd)}</code>
+        </p>
+      )}
+      <p className="sub">
+        {[levels.length ? t.levels(levels.map((p) => label("perm", p)).join(t.listSep)) : "", d.executors?.length ? t.withExecutors(d.executors.length) : "", d.selfcheck ? t.selfcheck : ""].filter(Boolean).join(" · ")}
+      </p>
+      <details>
+        <summary>{t.fullDeclaration}</summary>
+        <pre data-testid={`declaration-${d.harness}`}>{JSON.stringify(d, null, 2)}</pre>
+      </details>
+    </div>
+  );
+};
 
 function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
   const { api } = useSession();
@@ -57,7 +82,7 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
   const [id, setId] = useState("");
   const [kind, setKind] = useState("external-cli");
   const [host, setHost] = useState("");
-  const [scenarios, setScenarios] = useState("");
+  const [scenarios, setScenarios] = useState<string[]>([]);
 
   useEffect(() => {
     if (reloadKey) load();
@@ -67,13 +92,12 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
     setError(null);
     const body: Executor = { id: id.trim(), kind };
     if (host.trim()) body.host = host.trim();
-    const sc = scenarios.split(",").map((s) => s.trim()).filter(Boolean);
-    if (sc.length) body.scenarios = sc;
+    if (scenarios.length) body.scenarios = scenarios;
     try {
       await api.post("/settings/executors", body);
       setId("");
       setHost("");
-      setScenarios("");
+      setScenarios([]);
     } catch (e) {
       setError(msg(e));
     }
@@ -113,10 +137,10 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
           {t.host}
           <input value={host} onChange={(e) => setHost(e.target.value)} />
         </label>
-        <label>
+        <div>
           {t.scenarios}
-          <input value={scenarios} onChange={(e) => setScenarios(e.target.value)} />
-        </label>
+          <TagInput label={t.scenarios} values={scenarios} onChange={setScenarios} />
+        </div>
         <div>
           <button type="submit" disabled={!id.trim()}>{t.add}</button>
         </div>
@@ -173,11 +197,11 @@ function PendingSection({ onChanged }: { onChanged: () => void }) {
           {items.map((r) => (
             <li key={`${r.harness}/${r.rev}`}>
               <span>
-                <strong>{r.harness}</strong> · rev {r.rev}
+                <strong>{r.harness}</strong>
               </span>
               <DeclarationView d={r.declaration} />
               <div className="actions">
-                <button onClick={() => decide(r, "confirm")}>{t.confirm}</button> <button onClick={() => decide(r, "reject")}>{t.reject}</button>
+                <button className="danger" onClick={() => decide(r, "confirm")}>{t.confirm}</button> <button onClick={() => decide(r, "reject")}>{t.reject}</button>
               </div>
             </li>
           ))}
@@ -219,21 +243,23 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
     <section role="region" aria-labelledby="h-commands">
       <h2 id="h-commands">{t.commands}</h2>
       {error && <div role="alert">{error}</div>}
-      <form
-        className="panel"
-        onSubmit={(e) => {
-          e.preventDefault();
-          register();
-        }}
-      >
-        <label>
-          {t.declaration}
-          <textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} />
-        </label>
-        <div>
-          <button type="submit" disabled={!text.trim()}>{t.register}</button>
-        </div>
-      </form>
+      <details className="panel">
+        <summary>{t.advanced}</summary>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            register();
+          }}
+        >
+          <label>
+            {t.declaration}
+            <textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} />
+          </label>
+          <div>
+            <button type="submit" disabled={!text.trim()}>{t.register}</button>
+          </div>
+        </form>
+      </details>
       {items === null ? (
         !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
@@ -243,7 +269,7 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
           {items.map((r) => (
             <li key={`${r.harness}/${r.rev}`}>
               <span>
-                <strong>{r.harness}</strong> · rev {r.rev}
+                <strong>{r.harness}</strong>
               </span>
               <DeclarationView d={r.declaration} />
             </li>

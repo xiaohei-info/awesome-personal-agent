@@ -20,6 +20,7 @@ function server(initial: Cred[] = [], deny?: Response, failRevoke?: Response) {
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
     if (url === "/v1/projects") return json(200, { projects: [] });
+    if (url === "/v1/settings/executors") return json(200, { executors: [{ id: "exec-1", kind: "external-cli" }] });
     const m = url.match(/^\/v1\/settings\/(tokens|ext-keys)(?:\/(.+))?$/);
     if (!m) return json(404, { code: "not_found", why: "no such route", next: "x" });
     if (deny) return deny.clone();
@@ -60,19 +61,21 @@ describe("凭据设置页（flow-bootstrap / flow-authz-matrix）", () => {
     const s = server([cred("a"), cred("b", { revoked_at: "2026-01-02T00:00:00Z" }), cred("e", { kind: "ext", scope: "calendar", label: "cal" })]);
     mount(s.impl);
     await screen.findByText("L-a");
-    expect(within(section("令牌")).getByText("L-b").closest("li")).toHaveTextContent("已吊销");
-    expect(within(section("令牌")).getByText("L-a").closest("li")).not.toHaveTextContent("已吊销");
-    expect(within(section("ext 密钥")).getByText("cal")).toBeInTheDocument();
-    expect(within(section("令牌")).queryByText("cal")).not.toBeInTheDocument();
+    expect(within(section("给 agent 的")).getByText("L-b").closest("li")).toHaveTextContent("已停用");
+    expect(within(section("给 agent 的")).getByText("L-a").closest("li")).not.toHaveTextContent("已停用");
+    expect(within(section("给扩展程序的")).getByText("cal")).toBeInTheDocument();
+    expect(within(section("给 agent 的")).queryByText("cal")).not.toBeInTheDocument();
   });
 
   it("ACT-BOOT-04：签发令牌 → POST 带 CSRF 与 kind；明文只显示一次，关闭后不再可见、不落存储", async () => {
     const s = server();
     mount(s.impl);
-    const tokens = await screen.findByRole("region", { name: "令牌" });
-    await userEvent.selectOptions(within(tokens).getByLabelText("类型"), "worker");
-    await userEvent.type(within(tokens).getByLabelText("标签"), "ci");
-    await userEvent.type(within(tokens).getByLabelText("执行者"), "exec-1");
+    const tokens = await screen.findByRole("region", { name: "给 agent 的" });
+    await userEvent.selectOptions(within(tokens).getByLabelText("给谁"), "worker");
+    await userEvent.type(within(tokens).getByLabelText("备注"), "ci");
+    const exec = within(tokens).getByLabelText("绑定的执行者");
+    await waitFor(() => expect(within(exec).getAllByRole("option").map((o) => o.textContent)).toContain("exec-1"));
+    await userEvent.selectOptions(exec, "exec-1");
     await userEvent.click(within(tokens).getByRole("button", { name: "签发" }));
 
     const alert = await screen.findByRole("alert");
@@ -90,23 +93,34 @@ describe("凭据设置页（flow-bootstrap / flow-authz-matrix）", () => {
     expect(document.body.textContent).not.toContain("apa_SECRET_1");
   });
 
-  it("ACT-BOOT-04：签发 ext 密钥必须有 scope，请求不带 kind 之外的越组字段", async () => {
+  it("ACT-BOOT-04：签发 ext 密钥必须有 scope，请求不带 kind 之外的越组字段；用途按类型拼成 scope", async () => {
     const s = server();
     mount(s.impl);
-    const ext = await screen.findByRole("region", { name: "ext 密钥" });
+    const ext = await screen.findByRole("region", { name: "给扩展程序的" });
+    // 消息渠道要有渠道名
     expect(within(ext).getByRole("button", { name: "签发" })).toBeDisabled();
-    await userEvent.type(within(ext).getByLabelText("范围（scope）"), "calendar");
+    await userEvent.type(within(ext).getByLabelText("渠道名"), "chat");
     await userEvent.click(within(ext).getByRole("button", { name: "签发" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("apa_SECRET_1");
-    const w = s.calls.find((c) => c.method === "POST")!;
-    expect(w.path).toBe("/v1/settings/ext-keys");
-    expect(w.body).toEqual({ scope: "calendar" });
+    const posts = () => s.calls.filter((c) => c.method === "POST");
+    expect(posts()[0].path).toBe("/v1/settings/ext-keys");
+    expect(posts()[0].body).toEqual({ scope: "channel.chat" });
+    expect(await within(ext).findByText("消息渠道：chat")).toBeInTheDocument();
+    await userEvent.selectOptions(within(ext).getByLabelText("用途"), "export");
+    await userEvent.click(within(ext).getByRole("button", { name: "签发" }));
+    await screen.findByText(/apa_SECRET_2/);
+    expect(posts()[1].body).toEqual({ scope: "export" });
+    await userEvent.selectOptions(within(ext).getByLabelText("用途"), "forward");
+    expect(within(ext).queryByLabelText("名称（可选）")).not.toBeInTheDocument();
+    await userEvent.click(within(ext).getByRole("button", { name: "签发" }));
+    await screen.findByText(/apa_SECRET_3/);
+    expect(posts()[2].body).toEqual({ scope: "forward" });
   });
 
   it("ACT-BOOT-04：新签发会替换上一条明文提示，不会同时留两个密钥", async () => {
     const s = server();
     mount(s.impl);
-    const tokens = await screen.findByRole("region", { name: "令牌" });
+    const tokens = await screen.findByRole("region", { name: "给 agent 的" });
     await userEvent.click(within(tokens).getByRole("button", { name: "签发" }));
     await screen.findByText(/apa_SECRET_1/);
     await userEvent.click(within(tokens).getByRole("button", { name: "签发" }));
@@ -118,18 +132,18 @@ describe("凭据设置页（flow-bootstrap / flow-authz-matrix）", () => {
     const s = server([cred("a")]);
     mount(s.impl);
     const li = (await screen.findByText("L-a")).closest("li")!;
-    await userEvent.click(within(li).getByRole("button", { name: "吊销" }));
-    await within(section("令牌")).findByText(/已吊销/);
+    await userEvent.click(within(li).getByRole("button", { name: "停用" }));
+    await within(section("给 agent 的")).findByText(/已停用/);
     const d = s.calls.find((c) => c.method === "DELETE")!;
     expect(d.path).toBe("/v1/settings/tokens/a");
     expect(d.csrf).toBe("tok-1");
-    expect(within(section("令牌")).queryByRole("button", { name: "吊销" })).not.toBeInTheDocument();
+    expect(within(section("给 agent 的")).queryByRole("button", { name: "停用" })).not.toBeInTheDocument();
   });
 
   it("ACT-AUTH-04：非 Web 会话被服务端拒绝（web_only）时，展示服务端原因，不显示成功", async () => {
     const s = server([], json(403, { code: "web_only", why: "this change is Web-session only", next: "do it in the Web UI" }));
     mount(s.impl);
-    const tokens = await screen.findByRole("region", { name: "令牌" });
+    const tokens = await screen.findByRole("region", { name: "给 agent 的" });
     expect(await screen.findAllByText(/Web-session only/)).not.toHaveLength(0);
     await userEvent.click(within(tokens).getByRole("button", { name: "签发" }));
     await waitFor(() => expect(within(tokens).getByRole("alert")).toHaveTextContent(/Web-session only/));
@@ -141,8 +155,8 @@ describe("凭据设置页（flow-bootstrap / flow-authz-matrix）", () => {
     const s = server([cred("a")], undefined, json(404, { code: "not_found", why: "credential not found", next: "list credentials and retry" }));
     mount(s.impl);
     const li = (await screen.findByText("L-a")).closest("li")!;
-    await userEvent.click(within(li).getByRole("button", { name: "吊销" }));
+    await userEvent.click(within(li).getByRole("button", { name: "停用" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("credential not found");
-    expect(within(section("令牌")).queryByText(/已吊销/)).not.toBeInTheDocument();
+    expect(within(section("给 agent 的")).queryByText(/已停用/)).not.toBeInTheDocument();
   });
 });

@@ -121,12 +121,12 @@ describe("口令与在线会话（flow-web-login）", () => {
     const rows = within(await screen.findByRole("region", { name: "在线会话" }));
     await rows.findByText("Phone");
 
-    await user.click(within(rows.getByText("Phone").closest("li")!).getByRole("button", { name: "吊销" }));
+    await user.click(within(rows.getByText("Phone").closest("li")!).getByRole("button", { name: "让它退出" }));
     await waitFor(() => expect(rows.queryByText("Phone")).toBeNull());
     expect(rows.getByText("Tablet")).toBeInTheDocument();
     expect(s.calls.some((c) => c.method === "DELETE" && c.path === "/v1/auth/sessions/other" && c.csrf === "tok-1")).toBe(true);
 
-    await user.click(rows.getByRole("button", { name: "吊销全部会话" }));
+    await user.click(rows.getByRole("button", { name: "让所有设备退出" }));
     await waitFor(() => expect(s.calls.some((c) => c.method === "DELETE" && c.path === "/v1/auth/sessions")).toBe(true));
     // 全部吊销包含当前会话：之后的任何请求都会 401，页面须回到登录
     await waitFor(() => expect(sessionStorage.getItem("apa.csrf")).toBeNull());
@@ -140,7 +140,7 @@ describe("口令与在线会话（flow-web-login）", () => {
     await rows.findByText("Ghost");
     // 另一处先把它吊销了
     await fetchDelete(s.impl, "/v1/auth/sessions/gone");
-    await user.click(within(rows.getByText("Ghost").closest("li")!).getByRole("button", { name: "吊销" }));
+    await user.click(within(rows.getByText("Ghost").closest("li")!).getByRole("button", { name: "让它退出" }));
     expect(await rows.findByRole("alert")).toHaveTextContent("session not found");
     await waitFor(() => expect(rows.queryByText("Ghost")).toBeNull());
   });

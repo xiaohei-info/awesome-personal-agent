@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { COUNTS_EVENT, SectionContext } from "./page";
-import { MOBILE, buildNav, featureAt, type Entry, type Feature, type NavModel } from "./registry";
+import { MOBILE, SETTINGS, SETTINGS_HOME, buildNav, featureAt, settingsGroups, type Entry, type Feature, type NavModel } from "./registry";
+import { SettingsHome } from "./SettingsHome";
 import { useLang, useT } from "./i18n";
 import { BRAND_MARK, common } from "./strings";
 import { useSession } from "./session";
@@ -61,16 +62,19 @@ export function Shell({ features: all }: { features: Feature[] }) {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  const current = featureAt(features, pathname);
-  const here = current && entryOf.get(current.id);
+  const atHome = pathname.replace(/^\/+|\/+$/g, "") === SETTINGS_HOME;
+  const current = atHome ? undefined : featureAt(features, pathname);
+  const here = atHome ? nav.settings : current && entryOf.get(current.id);
+  const inSettings = !!here && here.id === SETTINGS;
   const sum = (fs: Feature[]) => fs.reduce((n, f) => n + (counts[f.id] ?? 0), 0);
   const signOut = () => logout().catch((e: Error) => setError(e.message));
   const entryLink = (e: Entry, label: string = e.title, onClick?: () => void) => (
-    <NavItem to={e.features[0].path} active={e === here} count={sum(e.features)} onClick={onClick}>
+    <NavItem to={narrow && e.id === SETTINGS ? SETTINGS_HOME : e.features[0].path} active={e === here} count={sum(e.features)} onClick={onClick}>
       {label}
     </NavItem>
   );
   const bar = nav.entries.filter((e) => (MOBILE as string[]).includes(e.id));
+  const routes = <AppRoutes all={all} nav={nav} entryOf={entryOf} noPages={t.noPages} />;
 
   return (
     <div className="shell">
@@ -135,8 +139,33 @@ export function Shell({ features: all }: { features: Feature[] }) {
             </span>
           </button>
         </div>
-        {here && here.features.length > 1 && <Tabs entry={here} current={current} counts={counts} />}
+        {here && here.features.length > 1 && !inSettings && <Tabs entry={here} current={current} counts={counts} />}
+        {inSettings && narrow && !atHome && (
+          <Link className="back" to={"/" + SETTINGS_HOME}>
+            ‹ {here.title}
+          </Link>
+        )}
+        {inSettings && !narrow ? (
+          <div className="settings-layout">
+            <SettingsNav entry={here} current={current} />
+            <div>{routes}</div>
+          </div>
+        ) : (
+          routes
+        )}
+      </section>
+      {jumping && <Palette nav={nav} onClose={() => setJumping(false)} />}
+      {more && (
+        <More nav={nav} skip={bar} onClose={() => setMore(false)} link={(e) => entryLink(e, e.title, () => setMore(false))} onLogout={signOut} />
+      )}
+    </div>
+  );
+}
+
+function AppRoutes({ all, nav, entryOf, noPages }: { all: Feature[]; nav: NavModel; entryOf: Map<string, Entry>; noPages: string }) {
+  return (
         <Routes>
+          {nav.settings && <Route path={SETTINGS_HOME + "/*"} element={<SettingsHome entry={nav.settings} />} />}
           {all.map((f) => (
             <Route key={f.id} path={f.path + "/*"} element={<SectionContext.Provider value={entryOf.get(f.id)?.title}>{f.element}</SectionContext.Provider>} />
           ))}
@@ -148,18 +177,12 @@ export function Shell({ features: all }: { features: Feature[] }) {
                 <Navigate to={"/" + nav.entries[0].features[0].path} replace />
               ) : (
                 <main>
-                  <p className="empty">{t.noPages}</p>
+                  <p className="empty">{noPages}</p>
                 </main>
               )
             }
           />
         </Routes>
-      </section>
-      {jumping && <Palette nav={nav} onClose={() => setJumping(false)} />}
-      {more && (
-        <More nav={nav} skip={bar} onClose={() => setMore(false)} link={(e) => entryLink(e, e.title, () => setMore(false))} onLogout={signOut} />
-      )}
-    </div>
   );
 }
 
@@ -187,6 +210,31 @@ function Tabs({ entry, current, counts }: { entry: Entry; current?: Feature; cou
           {f.title[lang]}
           {(counts[f.id] ?? 0) > 0 && <span className="count">{counts[f.id]}</span>}
         </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** 设置的第二列（桌面）：按「日常 / agent / 系统」分组列出设置页，永久删除排最后并标红。 */
+function SettingsNav({ entry, current }: { entry: Entry; current?: Feature }) {
+  const lang = useLang();
+  const t = useT(common);
+  return (
+    <nav className="settings-nav" aria-label={t.tabs(entry.title)}>
+      {settingsGroups(entry, lang).map((g) => (
+        <Fragment key={g.title}>
+          <h2>{g.title}</h2>
+          {g.features.map((f) => (
+            <Link
+              key={f.id}
+              to={"/" + f.path}
+              className={[f === current ? "on" : "", f.id === "purge" ? "danger" : ""].join(" ").trim() || undefined}
+              aria-current={f === current ? "page" : undefined}
+            >
+              {f.title[lang]}
+            </Link>
+          ))}
+        </Fragment>
       ))}
     </nav>
   );

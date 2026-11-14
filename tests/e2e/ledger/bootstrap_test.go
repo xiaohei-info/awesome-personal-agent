@@ -164,7 +164,7 @@ func TestFlowBootstrap(t *testing.T) {
 			r.Body.Close()
 			js.Write(b)
 		}
-		for _, title := range []string{"决策待办", "建议流", "事项", "项目", "策略与人格"} {
+		for _, title := range []string{"决策待办", "建议流", "事项", "项目", "我来拍板"} {
 			if !strings.Contains(js.String(), title) {
 				t.Errorf("Web 包里没有页面 %q", title)
 			}

@@ -32,7 +32,7 @@ function server(initial: Grant[] = [], opt: { denyIssue?: Response; denyRevoke?:
     const method = init.method ?? "GET";
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
-    if (url === "/v1/projects") return json(200, { projects: [] });
+    if (url === "/v1/projects") return json(200, { projects: [{ id: "p1", name: "家务" }, { id: "p2", name: "工作" }] });
     if (url === "/v1/settings/tokens") {
       return json(200, { credentials: [
         { id: "tok_d1", kind: "delegate", label: "main", created_at: "x" },
@@ -73,12 +73,18 @@ function mount(fetchImpl: typeof fetch) {
 const post = (s: ReturnType<typeof server>) => s.calls.find((c) => c.method === "POST" && c.path === "/v1/settings/grants")!;
 
 beforeEach(() => sessionStorage.clear());
+const row = async (id: string) => {
+  await waitFor(() => expect(document.querySelector(`[data-grant=${id}]`)).not.toBeNull());
+  return document.querySelector(`[data-grant=${id}]`) as HTMLElement;
+};
 
 describe("授权单页（flow-authz-matrix）", () => {
   it("路由 settings/grants；动作只列附录 B.1 可用授权单一列，没有全选与 web_only/管理类命令", async () => {
     mount(server().impl);
-    const form = await screen.findByRole("form", { name: "签发授权单" });
-    const boxes = within(form).getAllByRole("checkbox").map((b) => (b as HTMLInputElement).value);
+    const form = await screen.findByRole("form", { name: "签发临时授权" });
+    const acts = within(form).getByRole("group", { name: "可以做什么" });
+    const boxes = within(acts).getAllByRole("checkbox").map((b) => (b as HTMLInputElement).value);
+    expect(acts).toHaveTextContent("需要你亲自确认的事不能授权");
     expect(boxes.sort()).toEqual([...GRANTABLE_ACTIONS].sort());
     expect(boxes).not.toContain("project.create");
     expect(within(form).queryByLabelText(/全选|\*/)).not.toBeInTheDocument();
@@ -88,22 +94,23 @@ describe("授权单页（flow-authz-matrix）", () => {
   it("签发：默认 7 天；被授权方只列未吊销的 delegate；POST 带 CSRF、范围与逐条勾选的动作", async () => {
     const s = server();
     mount(s.impl);
-    const form = await screen.findByRole("form", { name: "签发授权单" });
-    const cred = within(form).getByLabelText("被授权凭据");
-    await waitFor(() => expect(within(cred).getAllByRole("option").map((o) => o.textContent)).toEqual(expect.arrayContaining(["main（tok_d1）"])));
+    const form = await screen.findByRole("form", { name: "签发临时授权" });
+    const cred = within(form).getByLabelText("给哪个主助手");
+    await waitFor(() => expect(within(cred).getAllByRole("option").map((o) => o.textContent)).toEqual(["main"]));
     expect(within(cred).queryByText(/tok_d2|tok_o1/)).not.toBeInTheDocument();
     expect(within(form).getByLabelText("有效天数")).toHaveValue(7);
 
     await userEvent.selectOptions(cred, "tok_d1");
-    await userEvent.type(within(form).getByLabelText("项目范围"), "p1, p2");
-    await userEvent.type(within(form).getByLabelText("事项范围"), "it_1");
-    await userEvent.type(within(form).getByLabelText("原因"), "away");
-    await userEvent.click(within(form).getByLabelText("decision.answer"));
-    await userEvent.click(within(form).getByLabelText("proposal.accept"));
+    await userEvent.click(await within(form).findByLabelText("家务"));
+    await userEvent.click(within(form).getByLabelText("工作"));
+    await userEvent.type(within(form).getByLabelText("具体事项编号（可选）"), "it_1");
+    await userEvent.type(within(form).getByLabelText("用途（可选）"), "away");
+    await userEvent.click(within(form).getByLabelText("回答决策"));
+    await userEvent.click(within(form).getByLabelText("接受建议"));
     const before = Date.now();
     await userEvent.click(within(form).getByRole("button", { name: "签发" }));
 
-    await screen.findByText("grt_new");
+    await waitFor(() => expect(document.querySelector("[data-grant=grt_new]")).not.toBeNull());
     const w = post(s);
     expect(w.csrf).toBe("tok-1");
     expect(w.body.grantee).toEqual({ credential: "tok_d1" });
@@ -118,16 +125,16 @@ describe("授权单页（flow-authz-matrix）", () => {
   it("有效期最长 90 天：输入框上限为 90，90 天照实发送", async () => {
     const s = server();
     mount(s.impl);
-    const form = await screen.findByRole("form", { name: "签发授权单" });
+    const form = await screen.findByRole("form", { name: "签发临时授权" });
     const days = within(form).getByLabelText("有效天数");
     expect(days).toHaveAttribute("max", "90");
-    await waitFor(() => expect(within(form).getByLabelText("被授权凭据")).toHaveValue("tok_d1"));
+    await waitFor(() => expect(within(form).getByLabelText("给哪个主助手")).toHaveValue("tok_d1"));
     await userEvent.clear(days);
     await userEvent.type(days, "90");
-    await userEvent.type(within(form).getByLabelText("项目范围"), "p1");
-    await userEvent.click(within(form).getByLabelText("item.update"));
+    await userEvent.click(await within(form).findByLabelText("家务"));
+    await userEvent.click(within(form).getByLabelText("修改事项"));
     await userEvent.click(within(form).getByRole("button", { name: "签发" }));
-    await screen.findByText("grt_new");
+    await waitFor(() => expect(document.querySelector("[data-grant=grt_new]")).not.toBeNull());
     const ttl = Date.parse(post(s).body.expires_at) - Date.now();
     expect(ttl).toBeGreaterThan(90 * DAY - 120_000);
     expect(ttl).toBeLessThanOrEqual(90 * DAY);
@@ -136,15 +143,15 @@ describe("授权单页（flow-authz-matrix）", () => {
   it("服务端拒绝签发（如超过 90 天）：展示服务端原因，不出现新授权单", async () => {
     const s = server([], { denyIssue: json(400, { code: "invalid_request", why: "expires_at must be in the future and within 90 days", next: "fix the grant and send it again; nothing was saved" }) });
     mount(s.impl);
-    const form = await screen.findByRole("form", { name: "签发授权单" });
-    await waitFor(() => expect(within(form).getByLabelText("被授权凭据")).toHaveValue("tok_d1"));
+    const form = await screen.findByRole("form", { name: "签发临时授权" });
+    await waitFor(() => expect(within(form).getByLabelText("给哪个主助手")).toHaveValue("tok_d1"));
     await userEvent.clear(within(form).getByLabelText("有效天数"));
     await userEvent.type(within(form).getByLabelText("有效天数"), "400");
-    await userEvent.type(within(form).getByLabelText("项目范围"), "p1");
-    await userEvent.click(within(form).getByLabelText("item.update"));
+    await userEvent.click(await within(form).findByLabelText("家务"));
+    await userEvent.click(within(form).getByLabelText("修改事项"));
     await userEvent.click(within(form).getByRole("button", { name: "签发" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("within 90 days");
-    expect(screen.queryByText("grt_new")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-grant=grt_new]")).toBeNull();
   });
 
   it("列表区分有效、已撤销（含原因）、已过期；已撤销与已过期没有撤销按钮；页面没有编辑或延长", async () => {
@@ -153,8 +160,11 @@ describe("授权单页（flow-authz-matrix）", () => {
       grant("grt_rev", { revoked_at: "2026-01-03T00:00:00Z", revoked_reason: "back home" }),
       grant("grt_exp", { expires_at: new Date(Date.now() - DAY).toISOString() }),
     ]).impl);
-    const li = async (id: string) => (await screen.findByText(id)).closest("li")!;
+    const li = async (id: string) => { await waitFor(() => expect(document.querySelector(`[data-grant=${id}]`)).not.toBeNull()); return document.querySelector(`[data-grant=${id}]`) as HTMLElement; };
     expect(await li("grt_ok")).toHaveTextContent("有效");
+    // 一句话读得懂：谁 可以 做什么 · 在哪 · 到哪天；内部 id 只在「显示原始值」里出现
+    await waitFor(async () => expect(await li("grt_ok")).toHaveTextContent(/main 可以 回答决策 有效 · 家务 · 到 /));
+    expect(await li("grt_ok")).not.toHaveTextContent("grt_ok");
     expect(await li("grt_ok")).not.toHaveTextContent(/已撤销|已过期/);
     expect(await li("grt_rev")).toHaveTextContent("已撤销");
     expect(await li("grt_rev")).toHaveTextContent("back home");
@@ -168,33 +178,33 @@ describe("授权单页（flow-authz-matrix）", () => {
   it("撤销必须填原因 → POST /revoke 带 CSRF 与原因，随后列表显示已撤销", async () => {
     const s = server([grant("grt_ok")]);
     mount(s.impl);
-    const item = (await screen.findByText("grt_ok")).closest("li")!;
+    const item = await row("grt_ok");
     const btn = within(item).getByRole("button", { name: "撤销" });
     expect(btn).toBeDisabled();
     await userEvent.type(within(item).getByLabelText("撤销原因"), "back home");
     await userEvent.click(btn);
-    await waitFor(() => expect(screen.getByText("grt_ok").closest("li")).toHaveTextContent("已撤销"));
+    await waitFor(() => expect(document.querySelector("[data-grant=grt_ok]")).toHaveTextContent("已撤销"));
     const w = s.calls.find((c) => c.path === "/v1/settings/grants/grt_ok/revoke")!;
     expect(w.method).toBe("POST");
     expect(w.csrf).toBe("tok-1");
     expect(w.body).toEqual({ reason: "back home" });
-    expect(screen.getByText("grt_ok").closest("li")).toHaveTextContent("back home");
+    expect(document.querySelector("[data-grant=grt_ok]")).toHaveTextContent("back home");
   });
 
   it("撤销被服务端拒绝（404）：展示服务端原因，授权单仍按服务端状态显示", async () => {
     const s = server([grant("grt_ok")], { denyRevoke: json(404, { code: "not_found", why: "grant not found", next: "reload" }) });
     mount(s.impl);
-    const item = (await screen.findByText("grt_ok")).closest("li")!;
+    const item = await row("grt_ok");
     await userEvent.type(within(item).getByLabelText("撤销原因"), "x");
     await userEvent.click(within(item).getByRole("button", { name: "撤销" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("grant not found");
-    expect(screen.getByText("grt_ok").closest("li")).not.toHaveTextContent("已撤销");
+    expect(document.querySelector("[data-grant=grt_ok]")).not.toHaveTextContent("已撤销");
   });
 
   it("使用记录：按 grant=<id> 查审计事件并列出签发、使用", async () => {
     const s = server([grant("grt_a")]);
     mount(s.impl);
-    const item = (await screen.findByText("grt_a")).closest("li")!;
+    const item = await row("grt_a");
     await userEvent.click(within(item).getByRole("button", { name: "使用记录" }));
     const list = await within(item).findByRole("list", { name: "使用记录" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
@@ -206,7 +216,7 @@ describe("授权单页（flow-authz-matrix）", () => {
 
   it("没有授权单时给出空状态；列表加载失败展示服务端原因", async () => {
     mount(server().impl);
-    expect(await screen.findByText("还没有授权单")).toBeInTheDocument();
+    expect(await screen.findByText("还没有临时授权")).toBeInTheDocument();
   });
 
   it("加载失败（403）展示服务端原因", async () => {

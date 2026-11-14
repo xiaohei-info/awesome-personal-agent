@@ -3,8 +3,9 @@ import { common } from "../../app/strings";
 
 const zh = {
   ...common.zh,
-  title: "登录安全",
-  lede: "修改登录口令，查看并吊销在线会话。改口令后，除当前会话外的其他会话全部失效。",
+  title: "登录与会话",
+  summary: (n: number) => `${n} 个会话在线`,
+  othersOut: "改口令后，其他设备会被登出",
   tooShort: (n: number) => `新口令至少 ${n} 个字符`,
   changePassword: "修改口令",
   changed: "口令已修改，其他会话已失效",
@@ -15,14 +16,15 @@ const zh = {
   unknownBrowser: "未知浏览器",
   lastUsed: (at: string) => `最近使用 ${at}`,
   currentSession: "当前会话",
-  revoke: "吊销",
-  revokeAll: "吊销全部会话",
+  revoke: "让它退出",
+  revokeAll: "让所有设备退出",
 };
 
 const en: typeof zh = {
   ...common.en,
-  title: "Sign-in security",
-  lede: "Change the sign-in password, and review and revoke active sessions. After a password change, every session except this one is signed out.",
+  title: "Sign-in & sessions",
+  summary: (n) => `${n} sessions signed in`,
+  othersOut: "Other devices are signed out after a password change",
   tooShort: (n) => `The new password needs at least ${n} characters`,
   changePassword: "Change password",
   changed: "Password changed; other sessions are signed out",
@@ -33,8 +35,8 @@ const en: typeof zh = {
   unknownBrowser: "Unknown browser",
   lastUsed: (at) => `last used ${at}`,
   currentSession: "This session",
-  revoke: "Revoke",
-  revokeAll: "Revoke all sessions",
+  revoke: "Sign it out",
+  revokeAll: "Sign out all devices",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

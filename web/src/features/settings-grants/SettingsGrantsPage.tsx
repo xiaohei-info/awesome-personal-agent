@@ -4,7 +4,10 @@ import { PageHead } from "../../app/page";
 import { ActorBadge, type Step } from "../items/ItemsPage";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
-import { Val } from "../../app/values";
+import { Val, useLabel } from "../../app/values";
+import { GRANT_ACTION, ITEM_KIND } from "../../app/ids";
+import { useNamed, useNames } from "../../app/names";
+import { useRaw } from "../../app/raw";
 
 // 形状对应 /v1/settings/grants（policy.Grant）与 /v1/audit/events?grant=。有效期上限、动作白名单、凭据与范围校验都在服务端，
 // 本页只搬运输入并如实展示服务端的回答；授权单内容不可改，所以没有编辑或延长，只有撤销后重签。
@@ -22,13 +25,17 @@ interface Grant {
 interface Credential { id: string; kind: string; label?: string; revoked_at?: string }
 interface UsageEvent extends Step { object: string }
 
-/** 附录 B.1「第二档（可用授权单）」一列；没有通配，项目/来源/能力包管理只接受本人原话，不在其中。 */
-export const GRANTABLE_ACTIONS = [
-  "item.create", "item.update", "item.transition", "item.relate",
-  "decision.answer", "proposal.accept", "proposal.dismiss",
-  "revision.confirm", "revision.reject",
-  "delegate.report", "followmsg.handback",
+/** 附录 B.1「第二档（可用授权单）」一列（与 kernel/policy.GrantableActions 对照，见 ids.check）；没有通配，项目/来源/能力包管理只接受本人原话，不在其中。 */
+export const GRANTABLE_ACTIONS: readonly string[] = GRANT_ACTION;
+// 按用户要做的事分组显示；组里的动作合起来正好是全集。
+const ACTION_GROUPS: [string, string[]][] = [
+  ["decide", ["decision.answer"]],
+  ["proposals", ["proposal.accept", "proposal.dismiss", "proposal.attach"]],
+  ["items", ["item.create", "item.update", "item.transition", "item.relate"]],
+  ["docs", ["revision.confirm", "revision.reject"]],
+  ["reports", ["delegate.report", "followmsg.handback"]],
 ];
+const QUICK_DAYS = [1, 7, 30];
 const DEFAULT_DAYS = 7;
 const MAX_DAYS = 90;
 const DAY_MS = 86_400_000;
@@ -46,6 +53,15 @@ function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | n
   const [reason, setReason] = useState("");
   const [usage, setUsage] = useState<UsageEvent[] | null>(null);
   const st = status(g);
+  const raw = useRaw();
+  const label = useLabel();
+  const cred = useNames("credential");
+  const project = useNames("project");
+  const scope = [
+    ...g.scope.projects.map((p) => project(p)),
+    ...g.scope.kinds.map((k) => label("itemKind", k)),
+    ...g.scope.items,
+  ].join(t.listSep);
 
   const revoke = async () => {
     onError(null);
@@ -66,18 +82,15 @@ function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | n
   };
 
   return (
-    <li>
-      <strong>{g.id}</strong> <span className={"badge" + (st === "active" ? " ok" : st === "expired" ? " warn" : "")}>{t.status[st]}</span>
+    <li data-grant={g.id}>
+      <strong>{t.can(cred(g.grantee.credential), g.actions.map((a) => label("grantAction", a)).join(t.listSep))}</strong> <span className={"badge" + (st === "active" ? " ok" : st === "expired" ? " warn" : "")}>{t.status[st]}</span>
       {g.revoked_at && g.revoked_reason ? <span className="sub">{t.reasonParen(g.revoked_reason)}</span> : ""}
       <div className="sub full">
-        {t.credential(g.grantee.credential)}
-        {g.grantee.harness ? ` · harness ${g.grantee.harness}` : ""}
-        {t.actions(g.actions.join(t.listSep))}
-        {g.scope.projects.length ? t.scopeProjects(g.scope.projects.join(t.listSep)) : ""}
-        {g.scope.kinds.length ? t.scopeKinds(g.scope.kinds.join(t.listSep)) : ""}
-        {g.scope.items.length ? t.scopeItems(g.scope.items.join(t.listSep)) : ""}
-        {t.expires(new Date(g.expires_at).toLocaleString(locale()))}
+        {scope && t.within(scope)}
+        {g.grantee.harness ? t.harnessOnly(g.grantee.harness) : ""}
+        {t.until(new Date(g.expires_at).toLocaleString(locale()))}
         {g.reason ? ` · ${g.reason}` : ""}
+        {raw && <code className="raw-id">{g.id}</code>}
       </div>
       <div className="actions full">
         {st === "active" && (
@@ -114,8 +127,10 @@ export function SettingsGrantsPage() {
   const [busy, setBusy] = useState(false);
   const [credential, setCredential] = useState("");
   const [harness, setHarness] = useState("");
-  const [projects, setProjects] = useState("");
-  const [kinds, setKinds] = useState("");
+  const [projects, setProjects] = useState<string[]>([]);
+  const [kinds, setKinds] = useState<string[]>([]);
+  const allProjects = useNamed("project");
+  const hosts = useHarnesses();
   const [items, setItems] = useState("");
   const [actions, setActions] = useState<string[]>([]);
   const [days, setDays] = useState(String(DEFAULT_DAYS));
@@ -148,15 +163,15 @@ export function SettingsGrantsPage() {
     if (harness.trim()) grantee.harness = harness.trim();
     const body: Record<string, unknown> = {
       grantee,
-      scope: { projects: split(projects), kinds: split(kinds), items: split(items) },
+      scope: { projects, kinds, items: split(items) },
       actions,
       expires_at: new Date(Date.now() + Number(days) * DAY_MS).toISOString(),
     };
     if (reason.trim()) body.reason = reason.trim();
     try {
       await api.post("/settings/grants", body);
-      setProjects("");
-      setKinds("");
+      setProjects([]);
+      setKinds([]);
       setItems("");
       setActions([]);
       setReason("");
@@ -170,6 +185,7 @@ export function SettingsGrantsPage() {
   };
 
   const toggle = (a: string) => setActions((cur) => (cur.includes(a) ? cur.filter((x) => x !== a) : [...cur, a]));
+  const flip = (list: string[], set: (v: string[]) => void, x: string) => set(list.includes(x) ? list.filter((y) => y !== x) : [...list, x]);
 
   return (
     <main>
@@ -182,43 +198,74 @@ export function SettingsGrantsPage() {
           {t.grantee}
           <select value={chosen} onChange={(e) => setCredential(e.target.value)}>
             {delegates.map((c) => (
-              <option key={c.id} value={c.id}>{t.option(c.label || c.id, c.id)}</option>
+              <option key={c.id} value={c.id}>{c.label || c.id}</option>
             ))}
           </select>
         </label>
-        <label>
-          {t.harness}
-          <input value={harness} onChange={(e) => setHarness(e.target.value)} />
-        </label>
-        <label>
-          {t.projects}
-          <input value={projects} onChange={(e) => setProjects(e.target.value)} />
-        </label>
-        <label>
-          {t.kinds}
-          <input value={kinds} onChange={(e) => setKinds(e.target.value)} />
-        </label>
-        <label>
-          {t.items}
-          <input value={items} onChange={(e) => setItems(e.target.value)} />
-        </label>
+        {delegates.length === 0 && <p className="sub">{t.noDelegate}</p>}
         <fieldset className="checks">
           <legend>{t.actionsLegend}</legend>
-          {GRANTABLE_ACTIONS.map((a) => (
-            <label key={a}>
-              <input type="checkbox" value={a} checked={actions.includes(a)} onChange={() => toggle(a)} />
-              {a}
-            </label>
+          {ACTION_GROUPS.map(([g, acts]) => (
+            <div key={g}>
+              <b className="sub">{t.groups[g]}</b>
+              {acts.map((a) => (
+                <label key={a}>
+                  <input type="checkbox" value={a} checked={actions.includes(a)} onChange={() => toggle(a)} />
+                  <Val k="grantAction" id={a} />
+                </label>
+              ))}
+            </div>
           ))}
+          <p className="sub full">{t.notGrantable}</p>
         </fieldset>
-        <label>
-          {t.days}
-          <input type="number" min={1} max={MAX_DAYS} value={days} onChange={(e) => setDays(e.target.value)} />
-        </label>
+        <fieldset className="checks">
+          <legend>{t.scopeLegend}</legend>
+          <div role="group" aria-label={t.projects}>
+            <b className="sub">{t.projects}</b>
+            {allProjects.map((p) => (
+              <label key={p.id}>
+                <input type="checkbox" checked={projects.includes(p.id)} onChange={() => flip(projects, setProjects, p.id)} />
+                {p.name}
+              </label>
+            ))}
+          </div>
+          <div role="group" aria-label={t.kinds}>
+            <b className="sub">{t.kinds}</b>
+            {ITEM_KIND.map((k) => (
+              <label key={k}>
+                <input type="checkbox" checked={kinds.includes(k)} onChange={() => flip(kinds, setKinds, k)} />
+                <Val k="itemKind" id={k} />
+              </label>
+            ))}
+          </div>
+          <label className="full">
+            {t.items}
+            <input value={items} onChange={(e) => setItems(e.target.value)} />
+          </label>
+        </fieldset>
+        <div>
+          <span className="sub">{t.days}</span>
+          <span className="sentence">
+            {QUICK_DAYS.map((n) => (
+              <button key={n} type="button" aria-pressed={days === String(n)} onClick={() => setDays(String(n))}>{t.dayN(n)}</button>
+            ))}
+            <input type="number" min={1} max={MAX_DAYS} aria-label={t.days} value={days} onChange={(e) => setDays(e.target.value)} />
+          </span>
+        </div>
         <label>
           {t.reason}
           <input value={reason} onChange={(e) => setReason(e.target.value)} />
         </label>
+        <details>
+          <summary>{t.advanced}</summary>
+          <label>
+            {t.harness}
+            <select value={harness} onChange={(e) => setHarness(e.target.value)}>
+              <option value="">{t.anyHarness}</option>
+              {[...hosts, ...(harness && !hosts.includes(harness) ? [harness] : [])].map((h) => <option key={h} value={h}>{h}</option>)}
+            </select>
+          </label>
+        </details>
         <div>
           <button type="submit" disabled={busy || !chosen || actions.length === 0}>{t.issue}</button>
         </div>
@@ -236,4 +283,14 @@ export function SettingsGrantsPage() {
       )}
     </main>
   );
+}
+
+/** 已确认声明的宿主名（授权单的「只限某个宿主」只用于收窄和审计，§14.5）。 */
+function useHarnesses(): string[] {
+  const { api } = useSession();
+  const [list, setList] = useState<string[]>([]);
+  useEffect(() => {
+    api.get<{ declarations: { harness: string }[] }>("/settings/commands").then((r) => setList([...new Set(r.declarations.map((d) => d.harness))]), () => setList([]));
+  }, [api]);
+  return list;
 }
