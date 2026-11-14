@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import { errorText as msg, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/sources（domain.Source，stats 为 runner.Stats）、/sources/{id}/ingests、/sources/{id}/events、/sources/{id}/rejects。
 // 授权（自定义命令只 Web）、命令校验、转建议的规则都在服务端；本页只调用并如实展示服务端的回答。
@@ -30,12 +32,7 @@ interface Outbound {
   local: string;
   external: string | null;
 }
-const SCOPES: [string, string][] = [
-  ["full", "全文"],
-  ["excerpt", "摘录"],
-  ["meta", "仅元信息"],
-  ["none", "不送"],
-];
+const SCOPES = ["full", "excerpt", "meta", "none"];
 interface Restorable {
   matched: number;
   sources: { source: string; count: number }[];
@@ -75,19 +72,19 @@ interface Secret {
   rotated: boolean;
 }
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 const at = (s?: string) => (s && !s.startsWith("0001") ? s : "—");
 
-// 积压事件的状态（§9.3）：只显示中文，不露出内部值。
-const backlogState = (v: SourceEvent): { label: string; cls: string } =>
+// 积压事件的状态（§9.3）：只显示说明文字，不露出内部值。
+const backlogState = (t: { expired: string; undecided: string; waitModel: string }, v: SourceEvent): { label: string; cls: string } =>
   v.disposition === "expired"
-    ? { label: "已过期，不再自动重判", cls: "badge plain" }
+    ? { label: t.expired, cls: "badge plain" }
     : v.unjudged_reason === "undecided"
-      ? { label: "判断未定，等你处理", cls: "badge" }
-      : { label: "等模型恢复后自动重判", cls: "badge warn" };
+      ? { label: t.undecided, cls: "badge" }
+      : { label: t.waitModel, cls: "badge warn" };
 
 // 两步确认的批量忽略：第一次点击只展开确认，避免误触一次忽略整批。
 function IgnoreAll({ label, body, onDone }: { label: string; body: Record<string, unknown>; onDone: (err: string | null, n: number) => void }) {
+  const t = useT(strings);
   const { api } = useSession();
   const [confirming, setConfirming] = useState(false);
   const go = async () => {
@@ -101,7 +98,7 @@ function IgnoreAll({ label, body, onDone }: { label: string; body: Record<string
   };
   return confirming ? (
     <span role="group" aria-label={label}>
-      <button className="danger" onClick={go}>确认{label}</button> <button className="quiet" onClick={() => setConfirming(false)}>取消</button>
+      <button className="danger" onClick={go}>{t.confirm(label)}</button> <button className="quiet" onClick={() => setConfirming(false)}>{t.cancel}</button>
     </span>
   ) : (
     <button onClick={() => setConfirming(true)}>{label}</button>
@@ -109,14 +106,15 @@ function IgnoreAll({ label, body, onDone }: { label: string; body: Record<string
 }
 
 function ScopeSelect({ label, value, onChange }: { label: string; value: string | null; onChange: (v: string) => void }) {
+  const t = useT(strings);
   return (
     <label>
       {label}
       <select value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
-        {!value && <option value="">未选择</option>}
-        {SCOPES.map(([v, t]) => (
+        {!value && <option value="">{t.unset}</option>}
+        {SCOPES.map((v) => (
           <option key={v} value={v}>
-            {t}
+            {t.scopes[v]}
           </option>
         ))}
       </select>
@@ -126,6 +124,7 @@ function ScopeSelect({ label, value, onChange }: { label: string; value: string 
 
 // 来源行里的两个外发范围：显示服务端当前值，改动即 PUT，以服务端回读为准（只有 Web 登录能写）。
 function OutboundScopes({ source, onSaved, onError }: { source: Source; onSaved: () => Promise<void>; onError: (m: string) => void }) {
+  const t = useT(strings);
   const { api } = useSession();
   const o = source.outbound ?? { local: "full", external: null };
   const save = async (next: Outbound) => {
@@ -137,15 +136,16 @@ function OutboundScopes({ source, onSaved, onError }: { source: Source; onSaved:
     await onSaved();
   };
   return (
-    <div className="sub full" role="group" aria-label={`外发范围 ${source.id}`}>
-      <ScopeSelect label="本机范围" value={o.local} onChange={(v) => save({ ...o, local: v })} />{" "}
-      <ScopeSelect label="外部范围" value={o.external} onChange={(v) => save({ ...o, external: v })} />
+    <div className="sub full" role="group" aria-label={t.outbound(source.id)}>
+      <ScopeSelect label={t.localScope} value={o.local} onChange={(v) => save({ ...o, local: v })} />{" "}
+      <ScopeSelect label={t.externalScope} value={o.external} onChange={(v) => save({ ...o, external: v })} />
     </div>
   );
 }
 
 // 把旧级联忽略的事件放回积压（§9.3）：先预览（只读）再执行；改动条件后预览作废，必须重新预览。
 function RestorePanel({ sources, onRestored }: { sources: Source[]; onRestored: () => void }) {
+  const t = useT(strings);
   const { api } = useSession();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -190,23 +190,23 @@ function RestorePanel({ sources, onRestored }: { sources: Source[]; onRestored: 
 
   return (
     <section role="region" aria-labelledby="h-restore">
-      <h2 id="h-restore">把旧级联忽略的事件放回积压</h2>
-      <p className="sub">选一段时间（按落盘时间），把当时被旧规则以低把握忽略、没有判断记录的事件放回积压，之后再经积压放开重判。先预览条数，确认后再执行。</p>
+      <h2 id="h-restore">{t.restoreTitle}</h2>
+      <p className="sub">{t.restoreHint}</p>
       {error && <div role="alert">{error}</div>}
-      {done !== null && <p role="status">已放回 {done} 条</p>}
+      {done !== null && <p role="status">{t.restored(done)}</p>}
       <div className="panel">
         <label>
-          起（含）
+          {t.from}
           <input type="datetime-local" value={from} onChange={edit(setFrom)} />
         </label>
         <label>
-          止（不含）
+          {t.to}
           <input type="datetime-local" value={to} onChange={edit(setTo)} />
         </label>
         <label>
-          来源
+          {t.source}
           <select value={source} onChange={edit(setSource)}>
-            <option value="">不限来源</option>
+            <option value="">{t.anySource}</option>
             {sources.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.id}
@@ -215,16 +215,16 @@ function RestorePanel({ sources, onRestored }: { sources: Source[]; onRestored: 
           </select>
         </label>
         <div>
-          <button disabled={!from || !to} onClick={look}>预览</button>{" "}
-          <button disabled={!preview || preview.matched === 0} onClick={run}>放回积压</button>
+          <button disabled={!from || !to} onClick={look}>{t.preview}</button>{" "}
+          <button disabled={!preview || preview.matched === 0} onClick={run}>{t.restore}</button>
         </div>
         {preview && (
-          <div role="status" aria-label="放回预览">
-            <p>可放回 {preview.matched} 条</p>
+          <div role="status" aria-label={t.previewLabel}>
+            <p>{t.matched(preview.matched)}</p>
             <ul className="rows">
               {preview.sources.map((x) => (
                 <li key={x.source}>
-                  {x.source} · {x.count} 条
+                  {t.count(x.source, x.count)}
                 </li>
               ))}
             </ul>
@@ -236,6 +236,7 @@ function RestorePanel({ sources, onRestored }: { sources: Source[]; onRestored: 
 }
 
 function Registration({ onDone }: { onDone: () => void }) {
+  const t = useT(strings);
   const { api } = useSession();
   const [f, setF] = useState({ id: "", source_type: "", command: "", schedule: "15m", timeout: "", credentials_path: "", local: "full", external: "" });
   const [error, setError] = useState<string | null>(null);
@@ -244,7 +245,7 @@ function Registration({ onDone }: { onDone: () => void }) {
   const submit = async () => {
     setError(null);
     if (!f.external) {
-      setError("必须选择外部外发范围：来源内容发往外部端点前要由你决定送出多少");
+      setError(t.needExternal);
       return;
     }
     const body: Record<string, unknown> = { id: f.id.trim(), type: "script", command: f.command.trim(), schedule: f.schedule.trim() };
@@ -261,15 +262,15 @@ function Registration({ onDone }: { onDone: () => void }) {
     try {
       await api.put(`/settings/sources/${encodeURIComponent(body.id as string)}/outbound`, { local: f.local, external: f.external });
     } catch (e) {
-      setError(`来源已登记，但外发范围没有保存：${msg(e)}。请在来源列表里重新选择`);
+      setError(t.scopeNotSaved(msg(e)));
     }
     onDone();
   };
 
   return (
     <section role="region" aria-labelledby="h-register">
-      <h2 id="h-register">登记自定义命令来源</h2>
-      <p className="sub">登记的命令会在本机按周期执行，只能在 Web 登记。</p>
+      <h2 id="h-register">{t.registerTitle}</h2>
+      <p className="sub">{t.registerHint}</p>
       {error && <div role="alert">{error}</div>}
       <form
         className="panel"
@@ -279,33 +280,33 @@ function Registration({ onDone }: { onDone: () => void }) {
         }}
       >
         <label>
-          来源 id
+          {t.id}
           <input value={f.id} onChange={set("id")} />
         </label>
         <label>
-          来源类型（source_type，可选）
+          {t.sourceType}
           <input value={f.source_type} onChange={set("source_type")} />
         </label>
         <label>
-          命令
+          {t.command}
           <input value={f.command} onChange={set("command")} />
         </label>
         <label>
-          周期
+          {t.schedule}
           <input value={f.schedule} onChange={set("schedule")} />
         </label>
         <label>
-          超时（秒）
+          {t.timeout}
           <input value={f.timeout} onChange={set("timeout")} inputMode="numeric" />
         </label>
         <label>
-          凭据路径
+          {t.credential}
           <input value={f.credentials_path} onChange={set("credentials_path")} />
         </label>
-        <ScopeSelect label="本机端点外发范围" value={f.local} onChange={(v) => setF({ ...f, local: v })} />
-        <ScopeSelect label="外部端点外发范围" value={f.external} onChange={(v) => setF({ ...f, external: v })} />
+        <ScopeSelect label={t.localEndpointScope} value={f.local} onChange={(v) => setF({ ...f, local: v })} />
+        <ScopeSelect label={t.externalEndpointScope} value={f.external} onChange={(v) => setF({ ...f, external: v })} />
         <div>
-          <button type="submit" disabled={!f.id.trim() || !f.command.trim() || !f.schedule.trim()}>登记</button>
+          <button type="submit" disabled={!f.id.trim() || !f.command.trim() || !f.schedule.trim()}>{t.register}</button>
         </div>
       </form>
     </section>
@@ -313,6 +314,7 @@ function Registration({ onDone }: { onDone: () => void }) {
 }
 
 function WebhookKey({ source }: { source: Source }) {
+  const t = useT(strings);
   const { api } = useSession();
   const [secret, setSecret] = useState<Secret | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -330,13 +332,16 @@ function WebhookKey({ source }: { source: Source }) {
     }
   };
   return (
-    <section role="region" aria-label="webhook 密钥">
-      <h4>webhook 密钥</h4>
+    <section role="region" aria-label={t.webhookKey}>
+      <h4>{t.webhookKey}</h4>
       {error && <div role="alert">{error}</div>}
-      <button onClick={issue}>创建或轮换密钥</button>
+      <button onClick={issue}>{t.rotate}</button>
       {secret && (
         <div>
-          <p>{secret.rotated ? "已轮换，旧密钥短期内仍有效。" : "已创建。"}密钥只显示这一次，请立即保存；接收地址 {secret.url}</p>
+          <p>
+            {secret.rotated ? t.rotated : t.created}
+            {t.secretOnce(secret.url)}
+          </p>
           <code data-testid="webhook-secret">{secret.secret}</code>
         </div>
       )}
@@ -345,6 +350,7 @@ function WebhookKey({ source }: { source: Source }) {
 }
 
 function Ingests({ source }: { source: Source }) {
+  const t = useT(strings);
   const { api } = useSession();
   const [items, setItems] = useState<Ingest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -371,7 +377,7 @@ function Ingests({ source }: { source: Source }) {
     setNotice(null);
     try {
       await api.post(`/ingests/${encodeURIComponent(id)}/replay`);
-      setNotice(`已重放 ${id}`);
+      setNotice(t.replayed(id));
     } catch (e) {
       setError(msg(e));
     }
@@ -379,22 +385,22 @@ function Ingests({ source }: { source: Source }) {
   };
 
   return (
-    <section role="region" aria-label="入站记录">
-      <h4>入站记录</h4>
+    <section role="region" aria-label={t.ingests}>
+      <h4>{t.ingests}</h4>
       {error && <div role="alert">{error}</div>}
       {notice && <p role="status">{notice}</p>}
       {items === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
-        <p className="sub">还没有入站记录</p>
+        <p className="sub">{t.noIngests}</p>
       ) : (
         <ul className="rows">
           {items.map((g) => (
             <li key={g.id}>
-              <span>{g.id}</span> · {g.received_at} · {g.state} · {g.signed ? "已验签" : "未验签"} · {g.events} 个事件
-              {g.reason && ` · ${g.reason}`} <button onClick={() => setOpen(open === g.id ? null : g.id)}>{open === g.id ? "收起" : "查看"}</button>{" "}
-              <button onClick={() => replay(g.id)}>重放</button>
-              {open === g.id && <pre data-testid={`ingest-body-${g.id}`}>{g.body ?? (g.body_base64 ? `base64: ${g.body_base64}` : "（无内容）")}</pre>}
+              <span>{g.id}</span> · {g.received_at} · {g.state} · {g.signed ? t.signed : t.unsigned} · {t.events(g.events)}
+              {g.reason && ` · ${g.reason}`} <button onClick={() => setOpen(open === g.id ? null : g.id)}>{open === g.id ? t.hide : t.view}</button>{" "}
+              <button onClick={() => replay(g.id)}>{t.replay}</button>
+              {open === g.id && <pre data-testid={`ingest-body-${g.id}`}>{g.body ?? (g.body_base64 ? `base64: ${g.body_base64}` : t.noBody)}</pre>}
             </li>
           ))}
         </ul>
@@ -404,6 +410,7 @@ function Ingests({ source }: { source: Source }) {
 }
 
 function Events({ source }: { source: Source }) {
+  const t = useT(strings);
   const { api } = useSession();
   const [items, setItems] = useState<SourceEvent[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
@@ -442,52 +449,53 @@ function Events({ source }: { source: Source }) {
   };
 
   return (
-    <section role="region" aria-label="未判定事件">
-      <h4>未判定事件</h4>
-      <p className="sub">因模型不可用而未判定的，模型恢复后会自动重判；发生在 7 天之前的标为已过期，不再自动重判。都可以手动转为建议或忽略。</p>
+    <section role="region" aria-label={t.unjudged}>
+      <h4>{t.unjudged}</h4>
+      <p className="sub">{t.unjudgedHint}</p>
       <label>
-        <input type="checkbox" checked={byScore} onChange={(e) => setByScore(e.target.checked)} /> 按分数排序
+        <input type="checkbox" checked={byScore} onChange={(e) => setByScore(e.target.checked)} /> {t.byScore}
       </label>
       {error && <div role="alert">{error}</div>}
       {notice && <p role="status">{notice}</p>}
       {items === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
-        <p className="sub">没有未判定事件</p>
+        <p className="sub">{t.noUnjudged}</p>
       ) : (
         <>
           <ul className="rows">
             {items.map((v) => {
-              const st = backlogState(v);
+              const st = backlogState(t, v);
               return (
                 <li key={v.id}>
                   <span>{v.subject || v.id}</span> · {v.type} · {v.occurred_at} <span className={st.cls}>{st.label}</span>
-                  {v.score !== undefined && <span className="badge plain">分数 {v.score.toFixed(2)}</span>}
+                  {v.score !== undefined && <span className="badge plain">{t.score(v.score.toFixed(2))}</span>}
                   {v.summary && <p>{v.summary}</p>}
-                  <div role="group" aria-label={`处理 ${v.id}`}>
-                    <button onClick={() => act(v.id, "propose")}>转为建议</button> <button onClick={() => act(v.id, "ignore")}>忽略</button>
+                  <div role="group" aria-label={t.handle(v.id)}>
+                    <button onClick={() => act(v.id, "propose")}>{t.propose}</button> <button onClick={() => act(v.id, "ignore")}>{t.ignore}</button>
                   </div>
                 </li>
               );
             })}
           </ul>
           <IgnoreAll
-            label="忽略本来源的全部未判定事件"
+            label={t.ignoreSource}
             body={{ source: source.id }}
             onDone={async (err, n) => {
               setError(err);
-              if (!err) setNotice(`已忽略 ${n} 条`);
+              if (!err) setNotice(t.ignored(n));
               await load();
             }}
           />
         </>
       )}
-      {next !== null && <button onClick={() => load(next)}>加载更多</button>}
+      {next !== null && <button onClick={() => load(next)}>{t.more}</button>}
     </section>
   );
 }
 
 function Rejects({ source }: { source: Source }) {
+  const t = useT(strings);
   const { api } = useSession();
   const [items, setItems] = useState<Reject[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
@@ -513,31 +521,32 @@ function Rejects({ source }: { source: Source }) {
   }, [load]);
 
   return (
-    <section role="region" aria-label="被拒收的事件">
-      <h4>被拒收的事件</h4>
+    <section role="region" aria-label={t.rejects}>
+      <h4>{t.rejects}</h4>
       {error && <div role="alert">{error}</div>}
       {items === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
-        <p className="sub">没有被拒收的事件</p>
+        <p className="sub">{t.noRejects}</p>
       ) : (
         <ul className="rows">
           {items.map((j, i) => (
             <li key={i}>
-              {j.at} · 运行 {j.run_id} · 第 {j.line} 行 · {j.reason}
+              {t.reject(j.at, j.run_id, j.line, j.reason)}
               <pre>{j.raw}</pre>
             </li>
           ))}
         </ul>
       )}
-      {next !== null && <button onClick={() => load(next)}>加载更多</button>}
+      {next !== null && <button onClick={() => load(next)}>{t.more}</button>}
     </section>
   );
 }
 
 function Detail({ source }: { source: Source }) {
+  const t = useT(strings);
   return (
-    <section role="region" aria-label={`来源 ${source.id}`} className="panel">
+    <section role="region" aria-label={t.detail(source.id)} className="panel">
       <h3>{source.id}</h3>
       {source.type === "webhook" && <WebhookKey source={source} />}
       {source.type === "webhook" && <Ingests source={source} />}
@@ -548,6 +557,7 @@ function Detail({ source }: { source: Source }) {
 }
 
 export function SourcesPage() {
+  const t = useT(strings);
   const { api } = useSession();
   const [sources, setSources] = useState<Source[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -580,42 +590,42 @@ export function SourcesPage() {
   const current = sources?.find((s) => s.id === selected);
   return (
     <main>
-      <PageHead lede="APA 从这些地方读你的事。读到的内容先筛查，再决定要不要打扰你。">来源</PageHead>
+      <PageHead lede={t.lede}>{t.title}</PageHead>
       {error && <div role="alert">{error}</div>}
       {notice && <p role="status">{notice}</p>}
       <section role="region" aria-labelledby="h-list">
-        <h2 id="h-list">来源登记</h2>
+        <h2 id="h-list">{t.registry}</h2>
         <p className="sub">
-          未判定事件在各来源的详情里处理；也可以一次忽略所有来源的未判定事件。{" "}
+          {t.registryHint}{" "}
           <IgnoreAll
-            label="忽略所有来源的未判定事件"
+            label={t.ignoreAll}
             body={{ all: true }}
             onDone={(err, n) => {
               setError(err);
-              setNotice(err ? null : `已忽略 ${n} 条未判定事件`);
+              setNotice(err ? null : t.ignoredAll(n));
               setSelected(null); // 打开的详情列表已过时
             }}
           />
         </p>
         {sources === null ? (
-          !error && <p role="status">加载中…</p>
+          !error && <p role="status">{t.loading}</p>
         ) : sources.length === 0 ? (
-          <p className="empty">还没有来源</p>
+          <p className="empty">{t.none}</p>
         ) : (
           <ul className="rows">
             {sources.map((s) => (
               <li key={s.id} aria-label={s.id}>
                 <strong>{s.id}</strong> <span className="sub">{s.type}</span>
                 {s.command && <code>{s.command}</code>}
-                {s.schedule && <span className="sub">每 {s.schedule}</span>}
-                <span className={"badge" + (s.enabled ? " ok" : "")}>{s.enabled ? "已启用" : "已停用"}</span>
+                {s.schedule && <span className="sub">{t.every(s.schedule)}</span>}
+                <span className={"badge" + (s.enabled ? " ok" : "")}>{s.enabled ? t.enabled : t.disabled}</span>
                 <div className="sub full">
-                  游标 {s.cursor || "—"} · 最近成功 {at(s.stats?.last_success_at)} · 连续失败 {s.stats?.consecutive_failures ?? 0} · 超时 {s.stats?.timeouts ?? 0}
-                  {s.stats?.last_error && ` · 最近错误 ${s.stats.last_error}`}
+                  {t.stats(s.cursor || "—", at(s.stats?.last_success_at), s.stats?.consecutive_failures ?? 0, s.stats?.timeouts ?? 0)}
+                  {s.stats?.last_error && t.lastError(s.stats.last_error)}
                 </div>
                 <OutboundScopes source={s} onSaved={load} onError={setError} />
-                <div role="group" aria-label={`操作 ${s.id}`}>
-                  <button onClick={() => toggle(s)}>{s.enabled ? "停用" : "启用"}</button> <button onClick={() => setSelected(s.id)}>详情</button>
+                <div role="group" aria-label={t.ops(s.id)}>
+                  <button onClick={() => toggle(s)}>{s.enabled ? t.disable : t.enable}</button> <button onClick={() => setSelected(s.id)}>{t.details}</button>
                 </div>
               </li>
             ))}

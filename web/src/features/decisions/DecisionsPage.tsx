@@ -4,6 +4,8 @@ import { COUNTS_EVENT, PageHead } from "../../app/page";
 import { useSession } from "../../app/session";
 import { ScreeningBadge } from "../decision-screening/ScreeningBadge";
 import { RejectionNote, type Rejection } from "./RejectionNote";
+import { errorText as msg, locale, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。排序之外的判定（web_only、权限、只认第一次回答）都在服务端。
 export interface AskOption {
@@ -38,7 +40,6 @@ export function sortDecisions(items: DecisionItem[]): DecisionItem[] {
   return [...items].sort((a, b) => due(a) - due(b) || rank(a) - rank(b));
 }
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 interface WhyResp {
   steps: { type: string; reason?: string }[];
@@ -48,18 +49,20 @@ const DAY_MS = 86_400_000;
 const SOON_MS = 3 * DAY_MS; // 三天内截止（或已过）用朱砂提示
 
 function Due({ deadline }: { deadline: string }) {
+  const t = useT(strings);
   const at = new Date(deadline);
   const left = at.getTime() - Date.now();
-  const short = at.toLocaleString(undefined, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const short = at.toLocaleString(locale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
   return (
-    <span className={"due" + (left < SOON_MS ? " soon" : "")} title={at.toLocaleString()}>
-      截止 {short} · {left < 0 ? "已过期" : `还剩 ${Math.ceil(left / DAY_MS)} 天`}
+    <span className={"due" + (left < SOON_MS ? " soon" : "")} title={at.toLocaleString(locale())}>
+      {t.due(short)} · {left < 0 ? t.overdue : t.daysLeft(Math.ceil(left / DAY_MS))}
     </span>
   );
 }
 
 function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionItem; focused: boolean; onFocus: () => void; rejection?: Rejection; onAnswer: (id: string, body: { choice: string } | { text: string }) => Promise<void> }) {
   const { api } = useSession();
+  const t = useT(strings);
   const ask = item.ask!;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -81,7 +84,7 @@ function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionI
       : api.get<WhyResp>("/why/" + encodeURIComponent(item.id)).then(
           (r) => {
             const step = [...r.steps].reverse().find((s) => s.type === "decision.requested");
-            setWhy(step?.reason || "没有记录原因");
+            setWhy(step?.reason || t.noReason);
             setWhyErr(null);
           },
           (e) => setWhyErr(msg(e)),
@@ -96,31 +99,31 @@ function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionI
       <p className="meta">
         <span>{item.title}</span>
         {item.priority && item.priority !== "normal" && <span className="dot">{item.priority}</span>}
-        {ask.risk_class === "web_only" && <span className="badge bad plain">仅限 Web 确认</span>}
+        {ask.risk_class === "web_only" && <span className="badge bad plain">{t.webOnly}</span>}
         <ScreeningBadge pending={ask.screening_pending} />
       </p>
-      <RejectionNote rejection={rejection} what="代答" />
+      <RejectionNote rejection={rejection} what="answer" />
       {/* 选项一律同等样式：不替本人暗示选哪个 */}
-      <div role="group" aria-label="选项" className="options">
+      <div role="group" aria-label={t.options} className="options">
         {(ask.options ?? []).map((o, n) => (
           <button key={o.id} disabled={busy} onClick={() => answer({ choice: o.id })}>
             {n < 9 && <kbd aria-hidden="true">{n + 1}</kbd>}
             {o.label}
-            {ask.recommend === o.id ? "（推荐）" : ""}
+            {ask.recommend === o.id ? t.recommended : ""}
           </button>
         ))}
       </div>
       {ask.free_text && (
         <div className="free">
-          <input aria-label="别的想法" placeholder="别的想法…" value={text} onChange={(e) => setText(e.target.value)} />
+          <input aria-label={t.otherIdea} placeholder={t.otherIdeaPlaceholder} value={text} onChange={(e) => setText(e.target.value)} />
           <button className="primary" disabled={busy || !text.trim()} onClick={() => answer({ text: text.trim() })}>
-            提交想法
+            {t.submitIdea}
           </button>
         </div>
       )}
       <footer>
         <button className="quiet why-toggle" aria-expanded={why !== null} onClick={toggleWhy}>
-          为什么在这 <kbd aria-hidden="true">?</kbd>
+          {t.why} <kbd aria-hidden="true">?</kbd>
         </button>
       </footer>
       {why && <p className="why">{why}</p>}
@@ -140,6 +143,7 @@ const typing = (t: EventTarget | null) => t instanceof HTMLElement && !!t.closes
 
 export function DecisionsPage() {
   const { api } = useSession();
+  const t = useT(strings);
   const [items, setItems] = useState<DecisionItem[] | null>(null);
   const [rejections, setRejections] = useState<Record<string, Rejection>>({});
   const [error, setError] = useState<string | null>(null);
@@ -201,19 +205,25 @@ export function DecisionsPage() {
   return (
     <main>
       {items === null || n === 0 ? (
-        <PageHead>{items === null ? "决策待办" : "没有要你决定的事"}</PageHead>
+        <PageHead>{items === null ? t.title : t.none}</PageHead>
       ) : (
         <PageHead
           lede={
             <>
-              agent 停在这里等你。
+              {t.waiting}
               <span className="kbd-hint">
-                按数字键直接拍板，<kbd>J</kbd> <kbd>K</kbd> 上下切换，<kbd>?</kbd> 看原因。
+                {t.hint1}
+                <kbd>J</kbd> <kbd>K</kbd>
+                {t.hint2}
+                <kbd>?</kbd>
+                {t.hint3}
               </span>
             </>
           }
         >
-          <em>{n}</em> 件事等你决定
+          {t.countPre}
+          <em>{n}</em>
+          {t.countPost}
         </PageHead>
       )}
       {error && (
@@ -225,14 +235,14 @@ export function DecisionsPage() {
               load();
             }}
           >
-            重试
+            {t.retry}
           </button>
         </div>
       )}
       {items === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : n === 0 ? (
-        <p className="empty">agent 遇到该你拍板的事，会停下来在这里等你。</p>
+        <p className="empty">{t.empty}</p>
       ) : (
         <div ref={list}>
           {items.map((i, k) => (

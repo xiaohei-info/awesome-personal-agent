@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import { errorText as msg, locale, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/runs?state=&limit=、GET /v1/runs/{id}（设计 §6.11）。只读展示，不做任何判定；失败处理走 needs_input，不提供重试。
 interface Run {
@@ -23,13 +24,12 @@ interface Run {
 }
 
 const LIMIT = 200;
-const STATE: Record<string, string> = { queued: "排队中", running: "运行中", succeeded: "成功", failed: "失败", timeout: "超时" };
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
-const at = (s?: string) => (s ? new Date(s).toLocaleString() : "—");
+const at = (s?: string) => (s ? new Date(s).toLocaleString(locale()) : "—");
 
 function Card({ r }: { r: Run }) {
   const { api } = useSession();
+  const t = useT(strings);
   const [detail, setDetail] = useState<Run | null>(null);
   const [error, setError] = useState<string | null>(null);
   const d = detail ?? r;
@@ -44,37 +44,45 @@ function Card({ r }: { r: Run }) {
   };
 
   return (
-    <article aria-label={`运行 ${r.id}`}>
+    <article aria-label={t.run(r.id)}>
       <h3>
         {r.category} → {r.target}
       </h3>
       <p className="meta">
-        <strong className={"badge" + (r.state === "succeeded" ? " ok" : r.state === "failed" || r.state === "timeout" ? " bad" : "")}>{STATE[r.state] ?? r.state}</strong>
+        <strong className={"badge" + (r.state === "succeeded" ? " ok" : r.state === "failed" || r.state === "timeout" ? " bad" : "")}>{t.states[r.state] ?? r.state}</strong>
         {r.runner && ` · ${r.runner}/${r.launch ?? "—"}`}
         {r.harness && ` · ${r.harness}`}
       </p>
       <p>
-        会话：{r.session_id ? <code>{r.session_id}</code> : "无"}
+        {t.session}
+        {r.session_id ? <code>{r.session_id}</code> : t.none}
       </p>
-      <p>权限档位：{r.access ? <code>{r.access}</code> : "无"}</p>
+      <p>
+        {t.access}
+        {r.access ? <code>{r.access}</code> : t.none}
+      </p>
       {r.basis ? (
         <p>
-          授权依据：规则 {r.basis.rule_id ?? "—"} · 策略版本 {r.basis.policy_version}
+          {t.basis}
+          {t.basisRule(r.basis.rule_id ?? "—", r.basis.policy_version)}
         </p>
       ) : (
-        <p>授权依据：无</p>
+        <p>
+          {t.basis}
+          {t.none}
+        </p>
       )}
-      {!detail && <div className="actions"><button onClick={open}>详情</button></div>}
+      {!detail && <div className="actions"><button onClick={open}>{t.details}</button></div>}
       {detail && (
-        <ul aria-label="执行统计">
-          <li>链路深度 {d.chain_depth}</li>
-          <li>开始 {at(d.started_at)}</li>
-          <li>结束 {at(d.finished_at)}</li>
-          {d.exit_code !== undefined && <li>退出码 {d.exit_code}</li>}
-          {d.timeout ? <li>超时 {d.timeout} 秒</li> : null}
+        <ul aria-label={t.stats}>
+          <li>{t.depth(d.chain_depth)}</li>
+          <li>{t.started(at(d.started_at))}</li>
+          <li>{t.finished(at(d.finished_at))}</li>
+          {d.exit_code !== undefined && <li>{t.exitCode(d.exit_code)}</li>}
+          {d.timeout ? <li>{t.timeoutSec(d.timeout)}</li> : null}
         </ul>
       )}
-      {!detail && r.exit_code !== undefined && <p>退出码 {r.exit_code}</p>}
+      {!detail && r.exit_code !== undefined && <p>{t.exitCode(r.exit_code)}</p>}
       {error && <div role="alert">{error}</div>}
     </article>
   );
@@ -82,6 +90,7 @@ function Card({ r }: { r: Run }) {
 
 export function RunsPage() {
   const { api } = useSession();
+  const t = useT(strings);
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [state, setState] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -102,13 +111,13 @@ export function RunsPage() {
 
   return (
     <main>
-      <PageHead>运行记录</PageHead>
+      <PageHead>{t.title}</PageHead>
       <div className="filters">
       <label>
-        状态
-        <select aria-label="状态" value={state} onChange={(e) => setState(e.target.value)}>
-          <option value="">全部</option>
-          {Object.entries(STATE).map(([k, v]) => (
+        {t.state}
+        <select aria-label={t.state} value={state} onChange={(e) => setState(e.target.value)}>
+          <option value="">{t.all}</option>
+          {Object.entries(t.states).map(([k, v]) => (
             <option key={k} value={k}>
               {v}
             </option>
@@ -118,13 +127,13 @@ export function RunsPage() {
       </div>
       {error && (
         <div role="alert">
-          {error} <button onClick={load}>重新加载</button>
+          {error} <button onClick={load}>{t.reload}</button>
         </div>
       )}
       {runs === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : runs.length === 0 ? (
-        <p className="empty">没有运行记录</p>
+        <p className="empty">{t.empty}</p>
       ) : (
         [...runs].reverse().map((r) => <Card key={r.id} r={r} />)
       )}

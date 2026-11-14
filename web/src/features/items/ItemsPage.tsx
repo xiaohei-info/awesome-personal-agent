@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
-import { MATERIAL_RELATION_LABELS, isMaterialId } from "../../app/relations";
+import { isMaterialId } from "../../app/relations";
 import { AttachedMessages } from "../attached-messages";
 import { Markdown } from "./Markdown";
 import { ProgressForm } from "../today/ProgressForm";
+import { errorText as msg, locale, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -36,15 +37,14 @@ export interface Step {
 
 const PHASES = ["proposed", "open", "waiting", "needs_input", "done", "dropped"];
 const REL_TYPES = ["relates", "parent", "blocks", "derived_from", "supersedes"];
-const ACTOR = { human: "本人", agent: "agent", system: "系统" } as Record<string, string>;
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 /** 每个变更的操作者徽章：谁、从哪个入口。 */
 export function ActorBadge({ actor }: { actor: Step["actor"] }) {
+  const t = useT(strings);
   return (
-    <span aria-label="操作者" data-actor={actor.type} className="badge plain">
-      {[ACTOR[actor.type] ?? actor.type, actor.via, actor.principal].join(" · ")}
+    <span aria-label={t.actorLabel} data-actor={actor.type} className="badge plain">
+      {[t.actors[actor.type] ?? actor.type, actor.via, actor.principal].join(" · ")}
     </span>
   );
 }
@@ -60,6 +60,7 @@ export function ItemsPage() {
 }
 
 function ItemList() {
+  const t = useT(strings);
   const { api } = useSession();
   const [phase, setPhase] = useState("");
   const [tag, setTag] = useState("");
@@ -85,50 +86,50 @@ function ItemList() {
 
   return (
     <main>
-      <PageHead>事项</PageHead>
-      <p><Link to="new"><button type="button">新建</button></Link></p>
+      <PageHead>{t.title}</PageHead>
+      <p><Link to="new"><button type="button">{t.create}</button></Link></p>
       <div className="filters">
       <label>
-        阶段筛选
+        {t.phaseFilter}
         <select value={phase} onChange={(e) => setPhase(e.target.value)}>
-          <option value="">全部</option>
+          <option value="">{t.all}</option>
           {PHASES.map((p) => <option key={p}>{p}</option>)}
         </select>
       </label>
       <label>
-        标签筛选
+        {t.tagFilter}
         <select value={tag} onChange={(e) => setTag(e.target.value)}>
-          <option value="">全部</option>
+          <option value="">{t.all}</option>
           {tags.map((t) => <option key={t}>{t}</option>)}
         </select>
       </label>
       <label>
-        搜索
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="标题、摘要、正文、进展" />
+        {t.search}
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t.searchPlaceholder} />
       </label>
       <label>
-        排序
+        {t.sort}
         <select value={sort} onChange={(e) => setSort(e.target.value)}>
-          <option value="">默认</option>
-          <option value="updated">更新时间</option>
-          <option value="deadline">截止</option>
-          <option value="planned_for">计划日期</option>
-          <option value="priority">优先级</option>
+          {Object.entries(t.sorts).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
         </select>
       </label>
       <label>
-        计划日期
+        {t.plannedDate}
         <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} />
       </label>
       </div>
       {error && <p role="alert">{error}</p>}
-      {items && !shown.length && !error && <p className="empty">没有符合条件的事项</p>}
-      <ul aria-label="事项列表" className="rows">
+      {items && !shown.length && !error && <p className="empty">{t.noMatch}</p>}
+      <ul aria-label={t.list} className="rows">
         {shown.map((i) => (
           <li key={i.id}>
             <Link to={i.id}>{i.title}</Link> <span className="badge plain">{i.phase}</span>
             <span className="sub">
-              {[i.status_label, i.tags?.map((t) => "#" + t).join(" "), i.deadline && `截止 ${new Date(i.deadline).toLocaleString()}`].filter(Boolean).join(" · ")}
+              {[i.status_label, i.tags?.map((t) => "#" + t).join(" "), i.deadline && t.due(new Date(i.deadline).toLocaleString(locale()))].filter(Boolean).join(" · ")}
             </span>
           </li>
         ))}
@@ -140,6 +141,7 @@ function ItemList() {
 interface Detail { item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; steps: Step[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string }[] }
 
 function ItemDetail() {
+  const t = useT(strings);
   const { id = "" } = useParams();
   const { api } = useSession();
   const [d, setD] = useState<Detail | null>(null);
@@ -176,49 +178,49 @@ function ItemDetail() {
   };
 
   if (loadErr) return <main><p role="alert">{loadErr}</p></main>;
-  if (!d) return <main><p role="status">加载中…</p></main>;
+  if (!d) return <main><p role="status">{t.loading}</p></main>;
   const { item } = d;
   const path = "/items/" + encodeURIComponent(id);
   const ifMatch = { "If-Match": String(item.version) };
 
   return (
     <main>
-      <p className="eyebrow"><Link to="..">← 事项列表</Link></p>
+      <p className="eyebrow"><Link to="..">{t.back}</Link></p>
       <h1>{item.title}</h1>
       <div className="panel facts">
-        <p>{`阶段：${item.phase}`}</p>
-        <p>{`版本：${item.version}`}</p>
-        <p>{`状态标签：${item.status_label || "未设置"}`}</p>
-        <p>{item.deadline ? `截止：${new Date(item.deadline).toLocaleString()}` : "截止：未设置"}</p>
-        {item.project ? <p>{`项目：${item.project}`}</p> : null}
-        {item.planned_for ? <p>{`计划日期：${item.planned_for}`}</p> : null}
-        {item.tags?.length ? <p>标签：{item.tags.join("、")}</p> : null}
+        <p>{t.phase(item.phase)}</p>
+        <p>{t.version(item.version)}</p>
+        <p>{t.label(item.status_label || t.notSet)}</p>
+        <p>{t.deadline(item.deadline ? new Date(item.deadline).toLocaleString(locale()) : t.notSet)}</p>
+        {item.project ? <p>{t.project(item.project)}</p> : null}
+        {item.planned_for ? <p>{t.planned(item.planned_for)}</p> : null}
+        {item.tags?.length ? <p>{t.tags(item.tags.join(t.listSep))}</p> : null}
       </div>
       {item.body ? <Markdown source={item.body} /> : null}
       {actErr && <p role="alert">{actErr}</p>}
 
-      <h2>编辑</h2>
+      <h2>{t.edit}</h2>
       {editing ? (
         <ContentForm
           initial={{ title: item.title, body: item.body ?? "" }}
-          submitLabel="保存"
+          submitLabel={t.save}
           onCancel={() => setEditing(false)}
           onSubmit={(v) => act(() => api.patch(path, { title: v.title, body: v.body }, ifMatch))}
         />
       ) : (
-        <p><button type="button" onClick={() => setEditing(true)}>编辑</button></p>
+        <p><button type="button" onClick={() => setEditing(true)}>{t.edit}</button></p>
       )}
       <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
       <DeadlineForm key={"d" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { deadline: v }, ifMatch))} />
       <TransitionForm key={"t" + item.version} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />
 
-      <section aria-label="关联">
-        <h2>关系</h2>
-        <ul aria-label="关系" className="rows">
+      <section aria-label={t.relationsLabel}>
+        <h2>{t.relations}</h2>
+        <ul aria-label={t.relations} className="rows">
           {d.relations.map((r, n) => {
             const out = r.from === item.id;
             const other = out ? r.to : r.from;
-            const type = MATERIAL_RELATION_LABELS[r.type] ?? r.type;
+            const type = t.relation[r.type] ?? r.type;
             const to = isMaterialId(other) ? "/materials?id=" + encodeURIComponent(other) : "../" + encodeURIComponent(other);
             return <li key={n}>{out ? `${type} →` : `← ${type}`} <Link to={to}>{other}</Link></li>;
           })}
@@ -226,9 +228,9 @@ function ItemDetail() {
         <RelateForm others={d.others} onSubmit={(b) => act(() => api.post(path + "/relations", b))} />
       </section>
 
-      <section aria-label="关联来源">
-        <h2>关联来源线程</h2>
-        <ul aria-label="关联键" className="rows">
+      <section aria-label={t.sourcesLabel}>
+        <h2>{t.sourceThreads}</h2>
+        <ul aria-label={t.keys} className="rows">
           {d.keys.map((k, n) => <li key={n}>{k.key}</li>)}
         </ul>
         <KeyForm key={"k" + item.version} onSubmit={(key) => act(() => api.post(path + "/correlation-keys", { key }, ifMatch))} />
@@ -236,22 +238,22 @@ function ItemDetail() {
 
       <AttachedMessages itemId={id} />
 
-      <section aria-label="进展">
-        <h2>进展</h2>
-        <ul aria-label="进展" className="rows">
+      <section aria-label={t.progress}>
+        <h2>{t.progress}</h2>
+        <ul aria-label={t.progress} className="rows">
           {d.progress.map((p) => (
-            <li key={p.id}>{p.text} <span className="sub">{[p.on && `所指 ${p.on}`, p.actor, new Date(p.at).toLocaleString()].filter(Boolean).join(" · ")}</span></li>
+            <li key={p.id}>{p.text} <span className="sub">{[p.on && t.pointsTo(p.on), p.actor, new Date(p.at).toLocaleString(locale())].filter(Boolean).join(" · ")}</span></li>
           ))}
         </ul>
         <ProgressForm onSubmit={(b) => act(() => api.post(path + "/progress", b))} />
       </section>
 
-      <section aria-label="变更">
-        <h2>时间线</h2>
-        <ol aria-label="时间线" className="rows">
+      <section aria-label={t.changes}>
+        <h2>{t.timeline}</h2>
+        <ol aria-label={t.timeline} className="rows">
           {d.steps.map((s) => (
             <li key={s.seq}>
-              <ActorBadge actor={s.actor} /> <strong>{s.type}</strong> <time dateTime={s.at}>{new Date(s.at).toLocaleString()}</time>
+              <ActorBadge actor={s.actor} /> <strong>{s.type}</strong> <time dateTime={s.at}>{new Date(s.at).toLocaleString(locale())}</time>
               {s.reason ? ` — ${s.reason}` : ""}
             </li>
           ))}
@@ -262,30 +264,33 @@ function ItemDetail() {
 }
 
 function LabelForm({ item, onSave }: { item: Item; onSave: (v: string) => void }) {
+  const t = useT(strings);
   const [v, setV] = useState(item.status_label ?? "");
   return (
     <form className="panel" onSubmit={(e) => { e.preventDefault(); onSave(v); }}>
-      <label>状态标签 <input value={v} onChange={(e) => setV(e.target.value)} /></label>
-      <button type="submit">保存状态标签</button>
+      <label>{t.statusLabel} <input value={v} onChange={(e) => setV(e.target.value)} /></label>
+      <button type="submit">{t.saveLabel}</button>
     </form>
   );
 }
 
 // datetime-local 是本地时间；发给服务端的是 RFC 3339（UTC）。
 function DeadlineForm({ item, onSave }: { item: Item; onSave: (v: string | null) => void }) {
+  const t = useT(strings);
   const [v, setV] = useState("");
   return (
     <form className="panel" onSubmit={(e) => { e.preventDefault(); if (v) onSave(new Date(v).toISOString()); }}>
-      <label>截止 <input type="datetime-local" value={v} onChange={(e) => setV(e.target.value)} /></label>
+      <label>{t.deadlineField} <input type="datetime-local" value={v} onChange={(e) => setV(e.target.value)} /></label>
       <div className="actions">
-        <button type="submit" disabled={!v}>设置截止</button>
-        <button type="button" disabled={!item.deadline} onClick={() => onSave(null)}>清除截止</button>
+        <button type="submit" disabled={!v}>{t.setDeadline}</button>
+        <button type="button" disabled={!item.deadline} onClick={() => onSave(null)}>{t.clearDeadline}</button>
       </div>
     </form>
   );
 }
 
 function TransitionForm({ onSubmit }: { onSubmit: (b: Record<string, unknown>) => void }) {
+  const t = useT(strings);
   const [to, setTo] = useState("open");
   const [reason, setReason] = useState("");
   const [evidence, setEvidence] = useState("");
@@ -299,28 +304,29 @@ function TransitionForm({ onSubmit }: { onSubmit: (b: Record<string, unknown>) =
         onSubmit({ to, reason, ...(evidence ? { evidence } : {}), ...(to === "waiting" && wRef ? { waiting_on: { kind: wKind, ref: wRef } } : {}) });
       }}
     >
-      <label>目标阶段 <select value={to} onChange={(e) => setTo(e.target.value)}>{PHASES.map((p) => <option key={p}>{p}</option>)}</select></label>
-      <label>原因 <input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-      <label>证据 <input value={evidence} onChange={(e) => setEvidence(e.target.value)} /></label>
+      <label>{t.targetPhase} <select value={to} onChange={(e) => setTo(e.target.value)}>{PHASES.map((p) => <option key={p}>{p}</option>)}</select></label>
+      <label>{t.reason} <input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+      <label>{t.evidence} <input value={evidence} onChange={(e) => setEvidence(e.target.value)} /></label>
       {to === "waiting" && (
         <>
-          <label>等待对象类别 <select value={wKind} onChange={(e) => setWKind(e.target.value)}>{["human", "executor", "external", "time"].map((k) => <option key={k}>{k}</option>)}</select></label>
-          <label>等待对象 <input value={wRef} onChange={(e) => setWRef(e.target.value)} /></label>
+          <label>{t.waitKind} <select value={wKind} onChange={(e) => setWKind(e.target.value)}>{["human", "executor", "external", "time"].map((k) => <option key={k}>{k}</option>)}</select></label>
+          <label>{t.waitRef} <input value={wRef} onChange={(e) => setWRef(e.target.value)} /></label>
         </>
       )}
-      <button type="submit">转阶段</button>
+      <button type="submit">{t.transition}</button>
     </form>
   );
 }
 
 function RelateForm({ others, onSubmit }: { others: Item[]; onSubmit: (b: { to: string; type: string }) => void }) {
+  const t = useT(strings);
   const [to, setTo] = useState("");
   const [type, setType] = useState("relates");
   return (
     <form className="panel" onSubmit={(e) => { e.preventDefault(); if (to) onSubmit({ to, type }); }}>
-      <label>关联事项 <select value={to} onChange={(e) => setTo(e.target.value)}><option value="">选择…</option>{others.map((o) => <option key={o.id} value={o.id}>{o.id}</option>)}</select></label>
-      <label>关系类型 <select value={type} onChange={(e) => setType(e.target.value)}>{REL_TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
-      <button type="submit" disabled={!to}>建立关联</button>
+      <label>{t.relateTo} <select value={to} onChange={(e) => setTo(e.target.value)}><option value="">{t.choose}</option>{others.map((o) => <option key={o.id} value={o.id}>{o.id}</option>)}</select></label>
+      <label>{t.relType} <select value={type} onChange={(e) => setType(e.target.value)}>{REL_TYPES.map((x) => <option key={x}>{x}</option>)}</select></label>
+      <button type="submit" disabled={!to}>{t.relate}</button>
     </form>
   );
 }
@@ -334,6 +340,7 @@ function ContentForm({ initial, submitLabel, onSubmit, onCancel, extra }: {
   onCancel?: () => void;
   extra?: ReactNode;
 }) {
+  const t = useT(strings);
   const [v, setV] = useState(initial);
   const [err, setErr] = useState<string | null>(null);
   return (
@@ -341,18 +348,18 @@ function ContentForm({ initial, submitLabel, onSubmit, onCancel, extra }: {
       className="panel stack"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!v.title.trim()) return setErr("标题不能为空");
+        if (!v.title.trim()) return setErr(t.emptyTitle);
         setErr(null);
         onSubmit({ title: v.title.trim(), body: v.body });
       }}
     >
-      <label>标题 <input value={v.title} onChange={(e) => setV({ ...v, title: e.target.value })} /></label>
+      <label>{t.titleField} <input value={v.title} onChange={(e) => setV({ ...v, title: e.target.value })} /></label>
       {extra}
-      <label>正文 <textarea placeholder="支持 Markdown" rows={8} value={v.body} onChange={(e) => setV({ ...v, body: e.target.value })} /></label>
+      <label>{t.body} <textarea placeholder={t.markdown} rows={8} value={v.body} onChange={(e) => setV({ ...v, body: e.target.value })} /></label>
       {err && <p role="alert">{err}</p>}
       <div className="actions">
         <button type="submit">{submitLabel}</button>
-        {onCancel && <button type="button" onClick={onCancel}>取消</button>}
+        {onCancel && <button type="button" onClick={onCancel}>{t.cancel}</button>}
       </div>
     </form>
   );
@@ -360,6 +367,7 @@ function ContentForm({ initial, submitLabel, onSubmit, onCancel, extra }: {
 
 // 新建直接进 open（本人创建，不走建议流）；校验与授权在服务端，这里只拦空标题。
 function NewItem() {
+  const t = useT(strings);
   const { api } = useSession();
   const nav = useNavigate();
   const [projects, setProjects] = useState<{ id: string; name?: string }[]>([]);
@@ -388,18 +396,18 @@ function NewItem() {
 
   return (
     <main>
-      <p className="eyebrow"><Link to="..">← 事项列表</Link></p>
-      <PageHead>新建事项</PageHead>
+      <p className="eyebrow"><Link to="..">{t.back}</Link></p>
+      <PageHead>{t.newItem}</PageHead>
       {err && <p role="alert">{err}</p>}
       <ContentForm
         initial={{ title: "", body: "" }}
-        submitLabel="创建"
+        submitLabel={t.createSubmit}
         onSubmit={create}
         extra={
           <>
-            <label>项目 <select value={project} onChange={(e) => setProject(e.target.value)}><option value="">无</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name ?? p.id}</option>)}</select></label>
-            <label>截止 <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
-            <label>计划日期 <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} /></label>
+            <label>{t.projectField} <select value={project} onChange={(e) => setProject(e.target.value)}><option value="">{t.noProject}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name ?? p.id}</option>)}</select></label>
+            <label>{t.deadlineField} <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
+            <label>{t.plannedDate} <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} /></label>
           </>
         }
       />
@@ -408,11 +416,12 @@ function NewItem() {
 }
 
 function KeyForm({ onSubmit }: { onSubmit: (key: string) => void }) {
+  const t = useT(strings);
   const [key, setKey] = useState("");
   return (
     <form className="panel" onSubmit={(e) => { e.preventDefault(); if (key.trim()) onSubmit(key.trim()); }}>
-      <label>关联来源线程 <input value={key} onChange={(e) => setKey(e.target.value)} /></label>
-      <button type="submit" disabled={!key.trim()}>登记关联</button>
+      <label>{t.sourceThreads} <input value={key} onChange={(e) => setKey(e.target.value)} /></label>
+      <button type="submit" disabled={!key.trim()}>{t.registerKey}</button>
     </form>
   );
 }

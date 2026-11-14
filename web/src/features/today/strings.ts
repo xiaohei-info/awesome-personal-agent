@@ -1,0 +1,63 @@
+import type { Dict } from "../../app/i18n";
+import { common } from "../../app/strings";
+
+const zh = {
+  ...common.zh,
+  title: "今天",
+  lede: "今天要做的、到期的、等你决定的，和久未推进的。",
+  groups: { planned: "计划今天或更早", due: "今天到期", pending: "等你决定", stale: "久未推进" },
+  count: (title: string, n: number) => `${title}（${n}）`,
+  empty: "这一组没有事项。",
+  toDecisions: "去决策待办处理",
+  planned: (d: string) => `计划 ${d}`,
+  deadline: (d: string) => `截止 ${d}`,
+  plannedDate: "计划日期",
+  changePlanFor: (t: string) => `改计划日期 ${t}`,
+  changePlan: "改计划日期",
+  done: "完成",
+  doneReason: "在今天页完成",
+  select: (t: string) => `选择 ${t}`,
+  how: "处理方式",
+  choices: { continue: "继续", reschedule: "改期", drop: "放弃" },
+  continueText: "继续",
+  dropReason: "久未推进，本人选择放弃",
+  newDate: "新计划日期",
+  batchDate: "批量改期日期",
+  apply: (n: number) => `应用到所选（${n}）`,
+  failed: (t: string, e: string) => `${t}：${e}`,
+  sep: "；",
+  // 写进展（今天页、事项详情共用）
+  progress: "进展",
+  writeProgress: "写进展",
+};
+
+const en: typeof zh = {
+  ...common.en,
+  title: "Today",
+  lede: "What to do today, what is due, what waits for your decision, and what has stalled.",
+  groups: { planned: "Planned for today or earlier", due: "Due today", pending: "Waiting for you", stale: "Stale" },
+  count: (title, n) => `${title} (${n})`,
+  empty: "Nothing in this group.",
+  toDecisions: "Go to Decisions",
+  planned: (d) => `planned ${d}`,
+  deadline: (d) => `due ${d}`,
+  plannedDate: "Planned date",
+  changePlanFor: (t) => `Change planned date of ${t}`,
+  changePlan: "Change planned date",
+  done: "Done",
+  doneReason: "completed on the Today page",
+  select: (t) => `Select ${t}`,
+  how: "Action",
+  choices: { continue: "Continue", reschedule: "Reschedule", drop: "Drop" },
+  continueText: "continue",
+  dropReason: "stale; dropped by the owner",
+  newDate: "New planned date",
+  batchDate: "Reschedule date for selected",
+  apply: (n) => `Apply to selected (${n})`,
+  failed: (t, e) => `${t}: ${e}`,
+  sep: "; ",
+  progress: "Progress",
+  writeProgress: "Add progress",
+};
+
+export const strings: Dict<typeof zh> = { zh, en };

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
+import { errorText as msg, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/materials/{id}、GET /v1/materials/{id}/content、POST /v1/materials/{id}/changes（附录 B.2）。
 // 读取是异步的（reading → ready|unavailable），"暂不可读"是降级结果不是错误；
@@ -23,10 +25,10 @@ interface Registered {
   commit?: string;
 }
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 export function HostedMaterial({ material, pollMs = 3000 }: { material: HostedMaterialInfo; pollMs?: number }) {
   const { api } = useSession();
+  const t = useT(strings);
   const id = encodeURIComponent(material.id);
   const [reg, setReg] = useState<Registered | null>(null);
   const [content, setContent] = useState<Content | null>(null);
@@ -59,21 +61,21 @@ export function HostedMaterial({ material, pollMs = 3000 }: { material: HostedMa
   const commit = content?.state === "ready" ? content.commit : reg?.commit;
 
   return (
-    <section role="region" aria-label="材料详情" className="panel">
+    <section role="region" aria-label={t.detail} className="panel">
       <h3>
-        {material.title} <small>{material.kind} · {material.project || "全局"} · 托管型（只读）</small>
+        {material.title} <small>{material.kind} · {material.project || t.global} · {t.hosted}</small>
       </h3>
       <p className="sub">
-        登记信息：{repo ?? material.location ?? ""}
+        {t.registered(repo ?? material.location ?? "")}
         {path ? ` · ${path}` : ""}
-        {commit ? ` · 最近 commit ${commit}` : ""}
+        {commit ? t.lastCommit(commit) : ""}
       </p>
       {error && <div role="alert">{error}</div>}
-      {content?.state === "reading" && <p role="status">读取中…</p>}
-      {content?.state === "unavailable" && <p role="status">暂不可读：{content.reason}</p>}
+      {content?.state === "reading" && <p role="status">{t.reading}</p>}
+      {content?.state === "unavailable" && <p role="status">{t.unavailable(content.reason)}</p>}
       {content?.state === "ready" && (
         <>
-          <p className="sub">默认分支内容 · commit {content.commit}</p>
+          <p className="sub">{t.defaultBranch(content.commit)}</p>
           <pre data-testid="hosted-content">{content.content}</pre>
         </>
       )}
@@ -84,6 +86,7 @@ export function HostedMaterial({ material, pollMs = 3000 }: { material: HostedMa
 
 function ChangeForm({ material }: { material: HostedMaterialInfo }) {
   const { api } = useSession();
+  const t = useT(strings);
   const [executors, setExecutors] = useState<{ id: string }[]>([]);
   const [assignee, setAssignee] = useState("");
   const [request, setRequest] = useState("");
@@ -117,27 +120,30 @@ function ChangeForm({ material }: { material: HostedMaterialInfo }) {
   };
 
   return (
-    <form aria-label="发起修改" onSubmit={submit}>
-      <h4>发起修改</h4>
-      <p className="sub">文档在仓库里改：这会生成委派子事项，由执行者开分支提 PR。</p>
+    <form aria-label={t.change} onSubmit={submit}>
+      <h4>{t.change}</h4>
+      <p className="sub">{t.changeHint}</p>
       <label>
-        执行者
+        {t.executor}
         <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-          <option value="">请选择</option>
+          <option value="">{t.choose}</option>
           {executors.map((x) => (
             <option key={x.id}>{x.id}</option>
           ))}
         </select>
       </label>
       <label>
-        修改要求
+        {t.request}
         <textarea value={request} onChange={(e) => setRequest(e.target.value)} rows={4} />
       </label>
-      <button type="submit">发起修改</button>
+      <button type="submit">{t.change}</button>
       {error && <p role="alert">{error}</p>}
       {done && (
         <p role="status">
-          已发起修改委派：子事项 <Link to={"/items/" + done.item}>{done.item}</Link>，父事项 <Link to={"/items/" + done.parent}>{done.parent}</Link>
+          {t.started}
+          <Link to={"/items/" + done.item}>{done.item}</Link>
+          {t.parent}
+          <Link to={"/items/" + done.parent}>{done.parent}</Link>
         </p>
       )}
     </form>

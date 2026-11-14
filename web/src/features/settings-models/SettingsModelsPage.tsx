@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import { errorText as msg, lang, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 /v1/settings/model-endpoints 与它的两条探测路由（附录 B.2；设计 §4.1、§14.14、§15.5）。
 // 校验、规整、默认值都在服务端；本页只搬运编辑结果，原样显示拒绝原因，被拒绝时草稿保留。
@@ -45,30 +46,6 @@ interface ModelList {
   status?: number;
 }
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
-
-// 探测结论的说明（按服务端的 code）；查不到时只显示服务端原文。
-const CODE_TEXT: Record<string, string> = {
-  ok: "连通，鉴权通过，示例请求得到了回答",
-  unauthorized: "鉴权失败：端点拒绝了这个密钥",
-  protocol_error: "响应不符合所选协议",
-  self_reported: "端点给出的概率是自报的，不能作为判断端点",
-  invalid_request: "端点认为示例请求无效：检查协议与模型名",
-  no_answer: "端点没有回答示例题",
-  timeout: "端点没有在时限内回答",
-  http_status: "端点返回了错误状态",
-  schema_mismatch: "能用，但输出不符合示例的结构化格式，卡片文案可能退化",
-  bad_response: "响应不是对话补全格式",
-  unreachable: "连不上端点：检查地址与网络",
-};
-const REASON_TEXT: Record<string, string> = {
-  unauthorized: "鉴权失败：端点拒绝了这个密钥",
-  not_found: "这个端点不提供模型列表",
-  http_status: "端点返回了错误状态",
-  timeout: "端点没有在时限内回答",
-  bad_response: "端点返回的不是模型列表",
-  unreachable: "连不上端点：检查地址与网络",
-};
 
 function origin(u: string) {
   try {
@@ -81,7 +58,7 @@ function origin(u: string) {
 
 function posInt(v: string, what: string) {
   const n = Number(v);
-  if (v.trim() === "" || !Number.isInteger(n) || n <= 0) throw new Error(`${what}必须是正整数`);
+  if (v.trim() === "" || !Number.isInteger(n) || n <= 0) throw new Error(strings[lang()].posInt(what));
   return n;
 }
 
@@ -97,6 +74,7 @@ function draftOf(kind: Kind, e: Endpoint | null): Draft {
 }
 
 export function SettingsModelsPage() {
+  const t = useT(strings);
   const { api } = useSession();
   const [doc, setDoc] = useState<Doc | null>(null);
   const [unsetExternal, setUnsetExternal] = useState<number | null>(null);
@@ -124,23 +102,22 @@ export function SettingsModelsPage() {
     return next.version;
   };
 
-  const lede = "生成端点起草建议、写决策卡片和摘要；判断端点给是非题打分，比生成端点更快、更省。两个都可以不配，工作台和规则照常可用。";
   if (error)
     return (
       <main>
-        <PageHead lede={lede}>模型</PageHead>
+        <PageHead lede={t.lede}>{t.title}</PageHead>
         <p role="alert">{error}</p>
-        <button onClick={() => void load()}>重试</button>
+        <button onClick={() => void load()}>{t.retry}</button>
       </main>
     );
-  if (!doc) return <main><p role="status">加载中…</p></main>;
+  if (!doc) return <main><p role="status">{t.loading}</p></main>;
   return (
     <main>
-      <PageHead lede={lede}>模型</PageHead>
+      <PageHead lede={t.lede}>{t.title}</PageHead>
       {!doc.generate_endpoint && !doc.judge_endpoint && (
-        <section className="panel" aria-label="还没有配置模型端点">
-          <p>还没有配置模型端点。不配也能用：工作台、规则和提醒照常工作，规则判不了的事件留在来源页的积压里。</p>
-          <p className="sub">配置生成端点后，APA 开始初筛来源事件、起草建议并撰写决策卡片；判断端点是可选的加速。</p>
+        <section className="panel" aria-label={t.emptyLabel}>
+          <p>{t.empty1}</p>
+          <p className="sub">{t.empty2}</p>
         </section>
       )}
       <EndpointCard kind="generate" doc={doc.generate_endpoint} unsetExternal={unsetExternal} save={(e) => save({ generate_endpoint: e as Endpoint | null })} />
@@ -151,10 +128,11 @@ export function SettingsModelsPage() {
 }
 
 function SaveLine({ busy, status, onSave, label }: { busy: boolean; status: { ok: boolean; text: string } | null; onSave: () => void; label: string }) {
+  const t = useT(strings);
   return (
     <>
       <div className="row">
-        <button type="button" className="primary" disabled={busy} onClick={onSave} aria-label={label}>保存</button>
+        <button type="button" className="primary" disabled={busy} onClick={onSave} aria-label={label}>{t.save}</button>
       </div>
       {status && <p role={status.ok ? "status" : "alert"}>{status.text}</p>}
     </>
@@ -168,7 +146,7 @@ function useSaver(run: () => Promise<number>) {
     setBusy(true);
     setStatus(null);
     try {
-      setStatus({ ok: true, text: `已保存（版本 ${await run()}）` });
+      setStatus({ ok: true, text: strings[lang()].saved(await run()) });
     } catch (e) {
       setStatus({ ok: false, text: msg(e) });
     } finally {
@@ -179,8 +157,9 @@ function useSaver(run: () => Promise<number>) {
 }
 
 function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: Endpoint | null; unsetExternal: number | null; save: (e: object | null) => Promise<number> }) {
+  const t = useT(strings);
   const { api } = useSession();
-  const title = kind === "generate" ? "生成端点" : "判断端点";
+  const title = kind === "generate" ? t.generate : t.judge;
   const sig = JSON.stringify(doc);
   const [on, setOn] = useState(doc != null);
   const [d, setD] = useState<Draft>(() => draftOf(kind, doc));
@@ -223,11 +202,11 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
   const config = () => {
     const base = { url: d.url.trim(), api_key: apiKey, model: d.model.trim(), locality: d.locality };
     if (kind === "generate") return base;
-    return { ...base, protocol: d.protocol, timeout_ms: posInt(d.timeout_ms, "超时（毫秒）"), max_batch: posInt(d.max_batch, "批量上限"), max_material_chars: posInt(d.max_material_chars, "资料字数上限") };
+    return { ...base, protocol: d.protocol, timeout_ms: posInt(d.timeout_ms, t.timeoutMs), max_batch: posInt(d.max_batch, t.maxBatch), max_material_chars: posInt(d.max_material_chars, t.maxChars) };
   };
   const saver = useSaver(async () => {
     if (!on) return save(null);
-    if (!d.locality) throw new Error("请选择端点在哪里：配置这个端点时必选");
+    if (!d.locality) throw new Error(t.needWhere);
     return save(config());
   });
   // 判断端点只有在开放对数概率换算（对话补全兼容协议）后才有模型列表；目前只有生成端点能获取。
@@ -242,12 +221,12 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
       if (r.ok && r.models) {
         setModels(r.models);
         setManual(r.models.length === 0);
-        setListNote({ ok: true, text: r.models.length ? `已从端点取到 ${r.models.length} 个模型${r.truncated ? "（只列出前 500 个）" : ""}。` : "端点没有列出任何模型，请手动填写。" });
+        setListNote({ ok: true, text: r.models.length ? t.got(r.models.length, !!r.truncated) : t.gotNone });
       } else {
         setModels(null);
         setManual(true);
-        const why = REASON_TEXT[r.reason ?? ""] ?? r.reason ?? "";
-        setListNote({ ok: false, text: `${why}${r.status ? `（HTTP ${r.status}）` : ""}。可以手动填写模型名。` });
+        const why = t.reasons[r.reason ?? ""] ?? r.reason ?? "";
+        setListNote({ ok: false, text: t.listFailed(why, r.status) });
       }
     } catch (e) {
       setProbeErr(msg(e));
@@ -275,15 +254,15 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
       <label>
         {label}
         <select value={d.model} onChange={(e) => (e.target.value === MANUAL ? setManual(true) : set("model", e.target.value))}>
-          {!d.model && <option value="">（请选择）</option>}
+          {!d.model && <option value="">{t.pickModel}</option>}
           {options.map((m) => <option key={m} value={m}>{m}</option>)}
-          <option value={MANUAL}>手动填写…</option>
+          <option value={MANUAL}>{t.manual}</option>
         </select>
       </label>
     ) : (
       <label>
         {label}
-        <input value={d.model} onChange={(e) => set("model", e.target.value)} placeholder={kind === "judge" && !canList ? "此协议不提供模型列表" : undefined} />
+        <input value={d.model} onChange={(e) => set("model", e.target.value)} placeholder={kind === "judge" && !canList ? t.noList : undefined} />
       </label>
     );
   };
@@ -292,42 +271,41 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
     <section aria-label={title} className="panel stack">
       <h2>{title}</h2>
       <p className="sub">
-        {kind === "generate"
-          ? "对话补全兼容协议。用于起草建议、决策卡片文案和摘要；没有判断端点时也由它初筛来源事件。"
-          : "概率判断协议，给“值不值得看”这类是非题打分。不配时，是非题交给生成端点。"}
+        {kind === "generate" ? t.generateHint : t.judgeHint}
       </p>
       <label>
-        <input type="checkbox" checked={on} aria-label={`配置${title}`} onChange={(e) => setOn(e.target.checked)} />
-        配置{title}
+        <input type="checkbox" checked={on} aria-label={t.configure(title)} onChange={(e) => setOn(e.target.checked)} />
+        {t.configure(title)}
       </label>
       {on && (
         <>
           <fieldset className="choice">
-            <legend>端点在哪里（配置这个端点时必选）</legend>
+            <legend>{t.where}</legend>
             <label>
               <input type="radio" name={kind + "-locality"} value="local" checked={d.locality === "local"} onChange={() => set("locality", "local")} />
-              <span><b>本机或我自己控制的主机</b><small>local：来源内容按各来源的本机外发范围送出，缺省为全文</small></span>
+              <span><b>{t.local}</b><small>{t.localHint}</small></span>
             </label>
             <label>
               <input type="radio" name={kind + "-locality"} value="external" checked={d.locality === "external"} onChange={() => set("locality", "external")} />
-              <span><b>外部服务</b><small>external：来源内容按各来源的外部外发范围裁剪后才送出</small></span>
+              <span><b>{t.external}</b><small>{t.externalHint}</small></span>
             </label>
           </fieldset>
           {d.locality === "external" && unsetExternal != null && unsetExternal > 0 && (
             <p className="note">
-              有 {unsetExternal} 个来源还没设置外部外发范围，它们的内容不会送到这个端点。<Link to="/sources">去来源页设置</Link>
+              {t.unsetPre(unsetExternal)}
+              <Link to="/sources">{t.toSources}</Link>
             </p>
           )}
           {kind === "judge" && (
             <label>
-              协议
+              {t.protocol}
               <select value={d.protocol} onChange={(e) => set("protocol", e.target.value)}>
                 {JUDGE_PROTOCOLS.map((p) => <option key={p}>{p}</option>)}
               </select>
             </label>
           )}
           <label>
-            {kind === "judge" ? "端点 URL（完整路径，不追加任何后缀）" : "端点 URL"}
+            {kind === "judge" ? t.urlJudge : t.url}
             <input value={d.url} onChange={(e) => setURL(e.target.value)} placeholder={kind === "judge" ? "http://127.0.0.1:8090/judge" : "https://llm.example.com/v1"} />
           </label>
           <KeyField
@@ -339,33 +317,33 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
             urlChanged={!!doc?.api_key_set && keyMode === "edit" && origin(d.url) !== origin(doc.url)}
           />
           <div className="row end">
-            {modelField(kind === "judge" ? "模型（可留空，由端点自报）" : "模型")}
+            {modelField(kind === "judge" ? t.modelJudge : t.model)}
             {canList && (
               <button type="button" disabled={!!probing || !d.url.trim()} onClick={() => void fetchModels()}>
-                {probing === "models" ? `获取中… ${elapsed} 秒` : "获取模型"}
+                {probing === "models" ? t.fetching(elapsed) : t.fetch}
               </button>
             )}
           </div>
-          {models && !manual && <button type="button" className="link" onClick={() => setManual(true)}>手动填写模型名</button>}
+          {models && !manual && <button type="button" className="link" onClick={() => setManual(true)}>{t.manualLink}</button>}
           {listNote && <p className={listNote.ok ? "sub" : "note"} role="status">{listNote.text}</p>}
           {kind === "judge" && (
             <details>
-              <summary>高级：超时、批量与资料长度</summary>
-              <label>超时（毫秒）<input type="number" value={d.timeout_ms} onChange={(e) => set("timeout_ms", e.target.value)} /></label>
-              <label>批量上限<input type="number" value={d.max_batch} onChange={(e) => set("max_batch", e.target.value)} /></label>
-              <label>资料字数上限<input type="number" value={d.max_material_chars} onChange={(e) => set("max_material_chars", e.target.value)} /></label>
+              <summary>{t.advanced}</summary>
+              <label>{t.timeoutMs}<input type="number" value={d.timeout_ms} onChange={(e) => set("timeout_ms", e.target.value)} /></label>
+              <label>{t.maxBatch}<input type="number" value={d.max_batch} onChange={(e) => set("max_batch", e.target.value)} /></label>
+              <label>{t.maxChars}<input type="number" value={d.max_material_chars} onChange={(e) => set("max_material_chars", e.target.value)} /></label>
             </details>
           )}
           <div className="row">
             <button type="button" disabled={!!probing || !d.url.trim() || (kind === "generate" && !d.model.trim())} onClick={() => void test().catch((e) => setProbeErr(msg(e)))}>
-              {probing === "test" ? `测试中… ${elapsed} 秒` : "测试连接"}
+              {probing === "test" ? t.testing(elapsed) : t.test}
             </button>
           </div>
           {probeErr && <p role="alert">{probeErr}</p>}
           {probe && <ProbeView r={probe} />}
         </>
       )}
-      <SaveLine busy={saver.busy} status={saver.status} onSave={saver.save} label={`保存${title}`} />
+      <SaveLine busy={saver.busy} status={saver.status} onSave={saver.save} label={t.saveCard(title)} />
     </section>
   );
 }
@@ -373,56 +351,65 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
 function KeyField({ stored, mode, value, onChange, onMode, urlChanged }: {
   stored: string | null; mode: "keep" | "edit"; value: string; onChange: (v: string) => void; onMode: (m: "keep" | "edit") => void; urlChanged: boolean;
 }) {
+  const t = useT(strings);
   if (stored != null && mode === "keep")
     return (
-      <div role="group" aria-label="API 密钥" className="row">
-        <span className="sub" aria-hidden="true">API 密钥</span>
-        <span className="badge plain">已设置{stored && ` ····${stored}`}</span>
-        <button type="button" onClick={() => onMode("edit")}>更换</button>
+      <div role="group" aria-label={t.apiKey} className="row">
+        <span className="sub" aria-hidden="true">{t.apiKey}</span>
+        <span className="badge plain">
+          {t.keySet}
+          {stored && ` ····${stored}`}
+        </span>
+        <button type="button" onClick={() => onMode("edit")}>{t.change}</button>
       </div>
     );
   return (
     <>
       <label>
-        API 密钥
-        <input type="password" autoComplete="off" value={value} onChange={(e) => onChange(e.target.value)} placeholder={stored != null ? "留空表示清除已存的密钥" : "没有可留空"} />
+        {t.apiKey}
+        <input type="password" autoComplete="off" value={value} onChange={(e) => onChange(e.target.value)} placeholder={stored != null ? t.clearHint : t.noneHint} />
       </label>
       {urlChanged ? (
-        <small className="sub">端点地址换了主机，已存的密钥不会发到新地址，请重新输入。</small>
+        <small className="sub">{t.originChanged}</small>
       ) : (
-        stored != null && <button type="button" className="link" onClick={() => onMode("keep")}>沿用已存的密钥</button>
+        stored != null && <button type="button" className="link" onClick={() => onMode("keep")}>{t.keepKey}</button>
       )}
-      <small className="sub">密钥只写入，保存后不再显示。</small>
+      <small className="sub">{t.writeOnly}</small>
     </>
   );
 }
 
 function ProbeView({ r }: { r: ProbeResult }) {
+  const t = useT(strings);
   const mark = { ok: "✓", warning: "!", error: "✗" }[r.status];
-  const text = (r.code && CODE_TEXT[r.code]) || r.why;
+  const text = (r.code && t.codes[r.code]) || r.why;
   const facts: ReactNode[] = [];
-  if (r.data?.elapsed_ms != null) facts.push(`耗时 ${r.data.elapsed_ms} ms`);
+  if (r.data?.elapsed_ms != null) facts.push(t.elapsed(r.data.elapsed_ms));
   if (r.data?.status) facts.push(`HTTP ${r.data.status}`);
-  if (r.data?.model) facts.push(`模型 ${r.data.model}`);
-  if (r.data?.probability_source) facts.push(`概率来源 ${r.data.probability_source}`);
+  if (r.data?.model) facts.push(t.modelFact(r.data.model));
+  if (r.data?.probability_source) facts.push(t.source(r.data.probability_source));
   return (
-    <div role="status" aria-label="测试结果" className={"probe " + r.status}>
+    <div role="status" aria-label={t.result} className={"probe " + r.status}>
       <p><b>{mark} {text}</b>{facts.length > 0 && <span className="sub"> · {facts.join(" · ")}</span>}</p>
-      <p className="sub">{r.why}{r.next ? `（${r.next}）` : ""}</p>
+      <p className="sub">
+        {r.why}
+        {r.next ? t.paren(r.next) : ""}
+      </p>
     </div>
   );
 }
 
 function ScreeningTimeoutCard({ value, save }: { value: number; save: (n: number) => Promise<number> }) {
-  const [t, setT] = useState(String(value));
-  useEffect(() => setT(String(value)), [value]);
-  const saver = useSaver(() => save(posInt(t, "筛选超时")));
+  const t = useT(strings);
+  const [v, setV] = useState(String(value));
+  useEffect(() => setV(String(value)), [value]);
+  const saver = useSaver(() => save(posInt(v, t.screening)));
   return (
-    <section aria-label="筛选超时" className="panel stack">
-      <h2>筛选超时</h2>
-      <p className="sub">web_only 初筛等待模型的最长时间；超时按规则的结果继续。</p>
-      <label>筛选超时（毫秒）<input type="number" value={t} onChange={(e) => setT(e.target.value)} /></label>
-      <SaveLine busy={saver.busy} status={saver.status} onSave={saver.save} label="保存筛选超时" />
+    <section aria-label={t.screening} className="panel stack">
+      <h2>{t.screening}</h2>
+      <p className="sub">{t.screeningHint}</p>
+      <label>{t.screeningMs}<input type="number" value={v} onChange={(e) => setV(e.target.value)} /></label>
+      <SaveLine busy={saver.busy} status={saver.status} onSave={saver.save} label={t.saveCard(t.screening)} />
     </section>
   );
 }

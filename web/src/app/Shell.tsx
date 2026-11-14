@@ -2,6 +2,8 @@ import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, typ
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { COUNTS_EVENT, SectionContext } from "./page";
 import { MOBILE, buildNav, featureAt, type Entry, type Feature, type NavModel } from "./registry";
+import { useLang, useT } from "./i18n";
+import { BRAND_MARK, common } from "./strings";
 import { useSession } from "./session";
 import { toggleTheme } from "./theme";
 
@@ -23,7 +25,9 @@ function useNarrow() {
 
 export function Shell({ features: all }: { features: Feature[] }) {
   const features = useMemo(() => all.filter((f) => !f.hidden), [all]); // 稳定引用：下面的 effect 依赖它
-  const nav = useMemo(() => buildNav(features), [features]);
+  const lang = useLang();
+  const t = useT(common);
+  const nav = useMemo(() => buildNav(features, lang), [features, lang]);
   const entryOf = useMemo(() => new Map(nav.entries.flatMap((e) => e.features.map((f) => [f.id, e] as const))), [nav]);
   const { api, logout } = useSession();
   const { pathname } = useLocation();
@@ -70,12 +74,12 @@ export function Shell({ features: all }: { features: Feature[] }) {
 
   return (
     <div className="shell">
-      <nav aria-label="主导航">
+      <nav aria-label={t.navLabel}>
         <div className="brand">
-          <span className="mark" aria-hidden="true">决</span>
+          <span className="mark" aria-hidden="true">{BRAND_MARK}</span>
           <div>
             <b>APA</b>
-            <small>事情交给 agent，决定留给你</small>
+            <small>{t.brand}</small>
           </div>
         </div>
         {narrow ? (
@@ -91,7 +95,7 @@ export function Shell({ features: all }: { features: Feature[] }) {
               aria-haspopup="dialog"
               onClick={() => setMore(true)}
             >
-              更多
+              {t.more}
             </button>
           </>
         ) : (
@@ -109,11 +113,11 @@ export function Shell({ features: all }: { features: Feature[] }) {
             <div className="nav-foot">
               {nav.settings && <ul>{<li>{entryLink(nav.settings)}</li>}</ul>}
               <div>
-                <button className="quiet" aria-label="切换明暗主题" onClick={toggleTheme}>
-                  明 / 暗
+                <button className="quiet" aria-label={t.themeLabel} onClick={toggleTheme}>
+                  {t.theme}
                 </button>
                 <button className="quiet" onClick={signOut}>
-                  退出登录
+                  {t.logout}
                 </button>
               </div>
             </div>
@@ -123,8 +127,8 @@ export function Shell({ features: all }: { features: Feature[] }) {
       </nav>
       <section>
         <div className="topbar">
-          <button className="jump" aria-label="跳转到页面" onClick={() => setJumping(true)}>
-            <span>跳转到…</span>
+          <button className="jump" aria-label={t.jumpLabel} onClick={() => setJumping(true)}>
+            <span>{t.jump}</span>
             <span aria-hidden="true">
               <kbd>{MOD}</kbd>
               <kbd>K</kbd>
@@ -144,7 +148,7 @@ export function Shell({ features: all }: { features: Feature[] }) {
                 <Navigate to={"/" + nav.entries[0].features[0].path} replace />
               ) : (
                 <main>
-                  <p className="empty">暂无可用页面</p>
+                  <p className="empty">{t.noPages}</p>
                 </main>
               )
             }
@@ -170,15 +174,17 @@ function NavItem({ to, active, count, onClick, children }: { to: string; active:
 
 /** 入口内的页签：每个页签就是一个页面的原地址，旧链接直接落到对应页签。 */
 function Tabs({ entry, current, counts }: { entry: Entry; current?: Feature; counts: Record<string, number> }) {
+  const lang = useLang();
+  const t = useT(common);
   const on = useRef<HTMLAnchorElement>(null);
   useEffect(() => {
     on.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [current]);
   return (
-    <nav className="tabs" aria-label={entry.title + "页签"}>
+    <nav className="tabs" aria-label={t.tabs(entry.title)}>
       {entry.features.map((f) => (
         <Link key={f.id} ref={f === current ? on : undefined} to={"/" + f.path} className={f === current ? "on" : undefined} aria-current={f === current ? "page" : undefined}>
-          {f.title}
+          {f.title[lang]}
           {(counts[f.id] ?? 0) > 0 && <span className="count">{counts[f.id]}</span>}
         </Link>
       ))}
@@ -194,6 +200,8 @@ function Alias({ to }: { to: string }) {
 
 /** 手机上的"更多"：顶栏放不下的入口、设置、明暗与退出。模态，Esc 或点遮罩关闭，焦点留在抽屉里，关闭后回到打开前的位置。 */
 function More({ nav, skip, onClose, link, onLogout }: { nav: NavModel; skip: Entry[]; onClose: () => void; link: (e: Entry) => ReactNode; onLogout: () => void }) {
+  const lang = useLang();
+  const t = useT(common);
   const box = useRef<HTMLDivElement>(null);
   const back = useRef(document.activeElement as HTMLElement | null);
   useEffect(() => {
@@ -217,7 +225,7 @@ function More({ nav, skip, onClose, link, onLogout }: { nav: NavModel; skip: Ent
   const groups = [...nav.groups.map((g) => ({ group: g.group, entries: g.entries.filter((e) => !skip.includes(e)) })), { group: "", entries: nav.settings ? [nav.settings] : [] }];
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="sheet" role="dialog" aria-modal="true" aria-label="全部页面" ref={box} onKeyDown={onKey}>
+      <div className="sheet" role="dialog" aria-modal="true" aria-label={t.allPages} ref={box} onKeyDown={onKey}>
         {groups.map(
           (g) =>
             g.entries.length > 0 && (
@@ -227,7 +235,7 @@ function More({ nav, skip, onClose, link, onLogout }: { nav: NavModel; skip: Ent
                   {g.entries.map((e) => (
                     <li key={e.id}>
                       {link(e)}
-                      {e.features.length > 1 && e.features.length <= 3 && <small>{e.features.map((f) => f.title).join(" · ")}</small>}
+                      {e.features.length > 1 && e.features.length <= 3 && <small>{e.features.map((f) => f.title[lang]).join(" · ")}</small>}
                     </li>
                   ))}
                 </ul>
@@ -235,11 +243,11 @@ function More({ nav, skip, onClose, link, onLogout }: { nav: NavModel; skip: Ent
             ),
         )}
         <div className="sheet-foot">
-          <button className="quiet" aria-label="切换明暗主题" onClick={toggleTheme}>
-            明 / 暗
+          <button className="quiet" aria-label={t.themeLabel} onClick={toggleTheme}>
+            {t.theme}
           </button>
           <button className="quiet" onClick={onLogout}>
-            退出登录
+            {t.logout}
           </button>
         </div>
       </div>
@@ -249,6 +257,8 @@ function More({ nav, skip, onClose, link, onLogout }: { nav: NavModel; skip: Ent
 
 /** ⌘K / Ctrl+K 跳转面板：从注册的页面生成，输入过滤、上下键选择、回车跳转、Esc 关闭；关闭后焦点回到打开前的位置。 */
 function Palette({ nav, onClose }: { nav: NavModel; onClose: () => void }) {
+  const lang = useLang();
+  const t = useT(common);
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -257,8 +267,9 @@ function Palette({ nav, onClose }: { nav: NavModel; onClose: () => void }) {
 
   const needle = q.trim().toLowerCase();
   // 按导航顺序列出全部页面；小字是所在入口（与页面同名时不重复）。
-  const all = nav.entries.flatMap((e) => e.features.map((f) => ({ f, where: e.title === f.title ? "" : e.title })));
-  const list = all.filter(({ f, where }) => !needle || [f.title, where, f.path].some((s) => s.toLowerCase().includes(needle)));
+  // 两种语言的页面名都能搜到，英文界面下输中文名也能跳转。
+  const all = nav.entries.flatMap((e) => e.features.map((f) => ({ f, where: e.title === f.title[lang] ? "" : e.title })));
+  const list = all.filter(({ f, where }) => !needle || [f.title.zh, f.title.en, where, f.path].some((s) => s.toLowerCase().includes(needle)));
   const at = Math.min(sel, Math.max(list.length - 1, 0));
   const go = ({ f }: { f: Feature }) => {
     onClose();
@@ -282,15 +293,15 @@ function Palette({ nav, onClose }: { nav: NavModel; onClose: () => void }) {
 
   return (
     <div className="palette-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="palette" role="dialog" aria-modal="true" aria-label="跳转">
+      <div className="palette" role="dialog" aria-modal="true" aria-label={t.jumpDialog}>
         <input
           autoFocus
           role="combobox"
-          aria-label="跳转到页面"
+          aria-label={t.jumpLabel}
           aria-expanded="true"
           aria-controls="palette-list"
           aria-activedescendant={list[at] ? "palette-" + list[at].f.id : undefined}
-          placeholder="跳转到页面…"
+          placeholder={t.jumpPlaceholder}
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
@@ -298,24 +309,24 @@ function Palette({ nav, onClose }: { nav: NavModel; onClose: () => void }) {
           }}
           onKeyDown={onKey}
         />
-        <ul id="palette-list" role="listbox" aria-label="页面">
+        <ul id="palette-list" role="listbox" aria-label={t.jumpList}>
           {list.map((x, n) => (
             <li key={x.f.id} id={"palette-" + x.f.id} role="option" aria-selected={n === at} onMouseEnter={() => setSel(n)} onClick={() => go(x)}>
-              {x.f.title}
+              {x.f.title[lang]}
               {x.where && <small> {x.where}</small>}
             </li>
           ))}
         </ul>
-        {!list.length && <p className="palette-empty">没有匹配的页面</p>}
+        {!list.length && <p className="palette-empty">{t.jumpEmpty}</p>}
         <footer aria-hidden="true">
           <span>
-            <kbd>↑</kbd> <kbd>↓</kbd> 选择
+            <kbd>↑</kbd> <kbd>↓</kbd> {t.jumpSelect}
           </span>
           <span>
-            <kbd>↵</kbd> 打开
+            <kbd>↵</kbd> {t.jumpOpen}
           </span>
           <span>
-            <kbd>Esc</kbd> 关闭
+            <kbd>Esc</kbd> {t.jumpClose}
           </span>
         </footer>
       </div>

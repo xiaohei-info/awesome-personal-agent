@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
 import type { ApiErrorBody } from "../../app/api";
+import { useT, whyNext } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 对应 GET/POST /forms/{令牌}（不带 /v1，无需登录）。页面只展示问题与选项，不含任何账本其他内容，也不判定令牌有效性——以服务端为准。
 interface Form {
@@ -41,11 +43,12 @@ function toState(e: unknown): State {
   const b = (e as { body?: ApiErrorBody }).body;
   if (b && (b.code === "not_found" || b.code === "conflict")) return { k: "dead", why: b.why };
   if (b && (b.code === "web_only" || b.code === "risk_screening_pending")) return { k: "web", why: b.why, url: b.web_url ?? null };
-  return { k: "error", why: b ? `${b.why}（${b.next}）` : e instanceof Error ? e.message : "request failed" };
+  return { k: "error", why: b ? whyNext(b) : e instanceof Error ? e.message : "request failed" };
 }
 
 export function FormPage() {
   const token = useParams()["*"] ?? "";
+  const t = useT(strings);
   const [st, setSt] = useState<State>({ k: "loading" });
   const [choice, setChoice] = useState("");
   const [text, setText] = useState("");
@@ -87,34 +90,34 @@ export function FormPage() {
 
   switch (st.k) {
     case "loading":
-      return <main className="form-page"><p role="status">加载中…</p></main>;
+      return <main className="form-page"><p role="status">{t.loading}</p></main>;
     case "done":
       return (
         <main className="form-page">
-          <h1>已提交</h1>
-          <p>你的回答已记录，此链接已失效，可以关闭本页。</p>
+          <h1>{t.submitted}</h1>
+          <p>{t.submittedBody}</p>
         </main>
       );
     case "dead":
       return (
         <main className="form-page">
-          <h1>链接已失效</h1>
-          <p role="alert">此链接已被使用、已过期或对应事项已变化（{st.why}）。请使用最新消息中的链接，或在 Web 中作答。</p>
+          <h1>{t.expired}</h1>
+          <p role="alert">{t.expiredBody(st.why)}</p>
         </main>
       );
     case "web":
       return (
         <main className="form-page">
-          <h1>请在 Web 中作答</h1>
+          <h1>{t.useWeb}</h1>
           <p role="alert">{st.why}</p>
-          {st.url && <a href={st.url}>前往 Web 登录并作答</a>}
+          {st.url && <a href={st.url}>{t.goWeb}</a>}
         </main>
       );
     case "error":
       return (
         <main className="form-page">
-          <p role="alert">无法加载表单：{st.why}</p>
-          <button onClick={() => location.reload()}>重试</button>
+          <p role="alert">{t.loadFailed(st.why)}</p>
+          <button onClick={() => location.reload()}>{t.retry}</button>
         </main>
       );
   }
@@ -127,7 +130,7 @@ export function FormPage() {
         <h1>{form.question}</h1>
         {form.options.length > 0 && (
           <fieldset>
-            <legend>选项</legend>
+            <legend>{t.options}</legend>
             {form.options.map((o) => (
               <label key={o.id}>
                 <input type="radio" name="choice" value={o.id} checked={choice === o.id} onChange={() => setChoice(o.id)} /> {o.label}
@@ -137,21 +140,21 @@ export function FormPage() {
         )}
         {form.free_text && (
           <label>
-            补充说明
+            {t.note}
             <textarea value={text} onChange={(e) => setText(e.target.value)} />
           </label>
         )}
         <label>
-          理由（可选）
+          {t.reason}
           <input value={reason} onChange={(e) => setReason(e.target.value)} />
         </label>
         {err && <p role="alert">{err}</p>}
         <div>
           <button type="submit" disabled={!canSubmit}>
-            提交
+            {t.submit}
           </button>
         </div>
-        <p className="sub">此链接只能提交一次。</p>
+        <p className="sub">{t.once}</p>
       </form>
     </main>
   );

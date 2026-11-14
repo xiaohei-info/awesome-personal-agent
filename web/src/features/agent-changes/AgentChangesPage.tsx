@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import { errorText as msg, locale, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/audit/events 返回的 Step。哪些能撤销、是否最新、授权都由服务端的 item.revert 判定。
 interface Step {
@@ -20,24 +21,25 @@ interface Step {
 const VISIT_KEY = "apa.agentChanges.lastVisit";
 const PAGE = 500;
 const REVERTIBLE = new Set(["item.updated", "item.phase_changed", "decision.resolved"]);
-const TYPE_LABEL: Record<string, string> = { "item.updated": "修改事项", "item.phase_changed": "变更阶段", "item.created": "新建事项", "decision.resolved": "决定" };
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: (s: Step) => Promise<void> }) {
+  const t = useT(strings);
   const [busy, setBusy] = useState(false);
   const title = s.payload?.item?.title;
-  const who = [s.actor.principal, s.actor.on_behalf_of && `代 ${s.actor.on_behalf_of}`, s.resolved_via === "chat" && "聊天代答", s.grant && `授权单代答 · 授权单 ${s.grant}`].filter(Boolean).join(" · ");
+  const who = [s.actor.principal, s.actor.on_behalf_of && t.onBehalfOf(s.actor.on_behalf_of), s.resolved_via === "chat" && t.viaChat, s.grant && t.viaGrant(s.grant)].filter(Boolean).join(" · ");
   const canRevert = REVERTIBLE.has(s.type) && !reverted;
 
   return (
     <article aria-label={`${s.type} #${s.seq}`}>
       <h3>
-        {TYPE_LABEL[s.type] ?? s.type}：{title ?? s.object}
+        {t.types[s.type] ?? s.type}
+        {t.colon}
+        {title ?? s.object}
       </h3>
       <p className="meta">
-        {who} · {new Date(s.at).toLocaleString()}
-        {reverted && " · 已撤销"}
+        {who} · {new Date(s.at).toLocaleString(locale())}
+        {reverted && t.reverted}
       </p>
       {s.reason && <p>{s.reason}</p>}
       {s.evidence && <blockquote>{s.evidence}</blockquote>}
@@ -53,7 +55,7 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
             }
           }}
         >
-          撤销
+          {t.revert}
         </button>
       )}
     </article>
@@ -62,6 +64,7 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
 
 export function AgentChangesPage() {
   const { api } = useSession();
+  const t = useT(strings);
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showOlder, setShowOlder] = useState(false);
@@ -105,11 +108,11 @@ export function AgentChangesPage() {
 
   return (
     <main>
-      <PageHead lede="撤销只会写一条反向命令恢复账本状态，原记录保留；外部已发生的副作用不会被撤销。">agent 变更</PageHead>
+      <PageHead lede={t.lede}>{t.title}</PageHead>
       {since && (
         <label>
           <input type="checkbox" checked={showOlder} onChange={(e) => setShowOlder(e.target.checked)} />
-          显示更早的变更
+          {t.showOlder}
         </label>
       )}
       {error && (
@@ -121,14 +124,14 @@ export function AgentChangesPage() {
               load();
             }}
           >
-            重试
+            {t.retry}
           </button>
         </div>
       )}
       {steps === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : shown.length === 0 ? (
-        <p className="empty">没有 agent 变更</p>
+        <p className="empty">{t.empty}</p>
       ) : (
         shown.map((s) => <Row key={s.seq} s={s} reverted={reverted.has(s.seq)} onRevert={revert} />)
       )}

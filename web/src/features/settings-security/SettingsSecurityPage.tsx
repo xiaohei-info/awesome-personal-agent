@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import { errorText as msg, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 对应 /v1/auth/password 与 /v1/auth/sessions（附录 B 认证节）。长度下限、当前口令校验、
 // 限速和"改口令后其他会话失效"都在服务端；本页只做 12 字符的即时提示并如实展示服务端的回答。
@@ -16,10 +17,10 @@ interface SessionInfo {
   current: boolean;
 }
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 function PasswordSection({ onChanged }: { onChanged: () => void }) {
   const { api } = useSession();
+  const t = useT(strings);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +29,7 @@ function PasswordSection({ onChanged }: { onChanged: () => void }) {
 
   const submit = async () => {
     setDone(false);
-    if ([...next].length < MIN_LEN) return setError(`新口令至少 ${MIN_LEN} 个字符`);
+    if ([...next].length < MIN_LEN) return setError(t.tooShort(MIN_LEN));
     setBusy(true);
     setError(null);
     try {
@@ -46,9 +47,9 @@ function PasswordSection({ onChanged }: { onChanged: () => void }) {
 
   return (
     <section role="region" aria-labelledby="heading-password">
-      <h2 id="heading-password">修改口令</h2>
+      <h2 id="heading-password">{t.changePassword}</h2>
       {error && <div role="alert">{error}</div>}
-      {done && <p role="status">口令已修改，其他会话已失效</p>}
+      {done && <p role="status">{t.changed}</p>}
       <form
         className="panel"
         onSubmit={(e) => {
@@ -57,15 +58,15 @@ function PasswordSection({ onChanged }: { onChanged: () => void }) {
         }}
       >
         <label>
-          当前口令
+          {t.current}
           <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
         </label>
         <label>
-          新口令
+          {t.next}
           <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
         </label>
         <div>
-          <button type="submit" disabled={busy || !current || !next}>修改口令</button>
+          <button type="submit" disabled={busy || !current || !next}>{t.changePassword}</button>
         </div>
       </form>
     </section>
@@ -74,6 +75,7 @@ function PasswordSection({ onChanged }: { onChanged: () => void }) {
 
 function SessionsSection({ reloadKey }: { reloadKey: number }) {
   const { api } = useSession();
+  const t = useT(strings);
   const [list, setList] = useState<SessionInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -102,24 +104,24 @@ function SessionsSection({ reloadKey }: { reloadKey: number }) {
 
   return (
     <section role="region" aria-labelledby="heading-sessions">
-      <h2 id="heading-sessions">在线会话</h2>
+      <h2 id="heading-sessions">{t.sessions}</h2>
       {error && <div role="alert">{error}</div>}
       {list === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : list.length === 0 ? (
-        <p className="sub">没有在线会话</p>
+        <p className="sub">{t.noSessions}</p>
       ) : (
         <>
           <ul className="rows">
             {list.map((s) => (
               <li key={s.id}>
-                <strong>{s.agent || "未知浏览器"}</strong> <code>{s.addr}</code> <span className="sub">最近使用 {s.last_used_at.replace("T", " ").replace(/Z$/, " UTC")}</span>
-                {s.current && <span className="badge">当前会话</span>}
-                <button className="danger" onClick={() => revoke("/auth/sessions/" + encodeURIComponent(s.id))}>吊销</button>
+                <strong>{s.agent || t.unknownBrowser}</strong> <code>{s.addr}</code> <span className="sub">{t.lastUsed(s.last_used_at.replace("T", " ").replace(/Z$/, " UTC"))}</span>
+                {s.current && <span className="badge">{t.currentSession}</span>}
+                <button className="danger" onClick={() => revoke("/auth/sessions/" + encodeURIComponent(s.id))}>{t.revoke}</button>
               </li>
             ))}
           </ul>
-          <button className="danger" onClick={() => revoke("/auth/sessions")}>吊销全部会话</button>
+          <button className="danger" onClick={() => revoke("/auth/sessions")}>{t.revokeAll}</button>
         </>
       )}
     </section>
@@ -128,9 +130,10 @@ function SessionsSection({ reloadKey }: { reloadKey: number }) {
 
 export function SettingsSecurityPage() {
   const [reloadKey, setReloadKey] = useState(0);
+  const t = useT(strings);
   return (
     <main>
-      <PageHead lede="修改登录口令，查看并吊销在线会话。改口令后，除当前会话外的其他会话全部失效。">登录安全</PageHead>
+      <PageHead lede={t.lede}>{t.title}</PageHead>
       <PasswordSection onChanged={() => setReloadKey((k) => k + 1)} />
       <SessionsSection reloadKey={reloadKey} />
     </main>

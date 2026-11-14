@@ -1,4 +1,6 @@
 import { Fragment, useState, type ReactNode } from "react";
+import { useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 最小 Markdown 子集（标题、列表、段落、围栏代码、行内粗体/斜体/代码/链接/图片），直接产出 React 元素，
 // 从不走 innerHTML：正文里的 HTML 一律显示为文本，所以不会有来自正文的 <script>。
@@ -8,10 +10,11 @@ const SAFE_LINK = /^(https?:\/\/|mailto:)/i;
 const INLINE = /(!?)\[([^\]]*)\]\(([^)\s]*)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*/g;
 
 function ExternalImage({ alt, src }: { alt: string; src: string }) {
+  const t = useT(strings);
   const [shown, setShown] = useState(false);
   if (!/^https?:\/\//i.test(src)) return <span>{alt}</span>;
   if (shown) return <img alt={alt} src={src} referrerPolicy="no-referrer" style={{ maxWidth: "100%" }} />;
-  return <button type="button" onClick={() => setShown(true)}>{`加载图片：${alt || src}`}</button>;
+  return <button type="button" onClick={() => setShown(true)}>{t.loadImage(alt || src)}</button>;
 }
 
 function inline(text: string): ReactNode[] {

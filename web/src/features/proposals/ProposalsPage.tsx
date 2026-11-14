@@ -3,6 +3,8 @@ import { ApiError, type ApiClient } from "../../app/api";
 import { useSession } from "../../app/session";
 import { COUNTS_EVENT, PageHead } from "../../app/page";
 import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
+import { errorText as msg, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。是否可接受/丢弃、授权与只认第一次处理都在服务端。
 export interface Proposal {
@@ -19,11 +21,10 @@ export interface Proposal {
 type Action = "accept" | "dismiss" | "attach";
 interface BatchResult { id: string; do: string; ok: boolean; why?: string }
 
-const DO: Record<string, string> = { accept: "接受", attach: "补到已有事项", dismiss: "忽略" };
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejection?: Rejection; candidates: () => Promise<Proposal[]>; onAct: (id: string, action: Action, body: object) => Promise<void> }) {
+  const t = useT(strings);
   const [mode, setMode] = useState<"dismiss" | "attach" | null>(null);
   const [reason, setReason] = useState("");
   const [targets, setTargets] = useState<Proposal[] | null>(null);
@@ -46,7 +47,7 @@ function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejectio
     if (rec && list.some((t) => t.id === rec)) setTarget(rec);
   };
   const p = item.proposal;
-  const meta = [item.project, item.origin && `来自 ${item.origin.actor || item.origin.source}`, item.priority && item.priority !== "normal" ? item.priority : ""].filter(Boolean).join(" · ");
+  const meta = [item.project, item.origin && t.from(item.origin.actor || item.origin.source), item.priority && item.priority !== "normal" ? item.priority : ""].filter(Boolean).join(" · ");
 
   return (
     <article aria-label={item.title}>
@@ -57,42 +58,42 @@ function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejectio
         <p className="meta">
           {p.recommend && (
             <span>
-              推荐：{DO[p.recommend]}
+              {t.recommend(t.do[p.recommend] ?? p.recommend)}
               {p.reason ? ` — ${p.reason}` : ""}
             </span>
           )}
           {p.recommend && " · "}
-          <span>来源 {p.sources?.length ?? 0} 条</span>
-          {p.low_confidence && <> · <strong>把握低</strong></>}
+          <span>{t.sources(p.sources?.length ?? 0)}</span>
+          {p.low_confidence && <> · <strong>{t.lowConfidence}</strong></>}
         </p>
       )}
-      <RejectionNote rejection={rejection} what="处理" />
+      <RejectionNote rejection={rejection} what="handle" />
       <div className="actions">
-        <button disabled={busy} onClick={() => act("accept", {})}>接受</button>
-        <button disabled={busy} onClick={openAttach}>补到已有事项</button>
-        <button disabled={busy} onClick={() => setMode("dismiss")}>忽略</button>
+        <button disabled={busy} onClick={() => act("accept", {})}>{t.do.accept}</button>
+        <button disabled={busy} onClick={openAttach}>{t.do.attach}</button>
+        <button disabled={busy} onClick={() => setMode("dismiss")}>{t.do.dismiss}</button>
       </div>
       {mode === "dismiss" && (
         <div>
           <label>
-            忽略原因（选填）
-            <input value={reason} placeholder="理由（选填）" onChange={(e) => setReason(e.target.value)} />
+            {t.dismissReason}
+            <input value={reason} placeholder={t.reasonPlaceholder} onChange={(e) => setReason(e.target.value)} />
           </label>
-          <button disabled={busy} onClick={() => act("dismiss", reason.trim() ? { reason: reason.trim() } : {})}>确认忽略</button>
+          <button disabled={busy} onClick={() => act("dismiss", reason.trim() ? { reason: reason.trim() } : {})}>{t.confirmDismiss}</button>
         </div>
       )}
       {mode === "attach" && (
         <div>
           <label>
-            补到哪个事项
+            {t.attachTo}
             <select value={target} onChange={(e) => setTarget(e.target.value)} disabled={targets === null}>
-              <option value="">{targets === null ? "加载中…" : "选择事项"}</option>
-              {targets?.map((t) => (
-                <option key={t.id} value={t.id}>{t.title}</option>
+              <option value="">{targets === null ? t.loading : t.chooseItem}</option>
+              {targets?.map((x) => (
+                <option key={x.id} value={x.id}>{x.title}</option>
               ))}
             </select>
           </label>
-          <button disabled={busy || !target} onClick={() => act("attach", { to: target })}>确认补到</button>
+          <button disabled={busy || !target} onClick={() => act("attach", { to: target })}>{t.confirmAttach}</button>
         </div>
       )}
     </article>
@@ -103,6 +104,7 @@ function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejectio
 export const countProposals = (api: ApiClient) => api.get<{ items: Proposal[] }>("/items?phase=proposed").then((r) => r.items.length);
 
 export function ProposalsPage() {
+  const t = useT(strings);
   const { api } = useSession();
   const [items, setItems] = useState<Proposal[] | null>(null);
   const [rejections, setRejections] = useState<Record<string, Rejection>>({});
@@ -169,7 +171,7 @@ export function ProposalsPage() {
       const title = (id: string) => all.find((i) => i.id === id)?.title ?? id;
       setOutcome({
         done: r.results.filter((x) => x.ok).length,
-        skipped: r.results.filter((x) => !x.ok).map((x) => ({ title: title(x.id), why: x.why ?? "未处理" })),
+        skipped: r.results.filter((x) => !x.ok).map((x) => ({ title: title(x.id), why: x.why ?? t.notHandled })),
       });
     } catch (e) {
       setError(msg(e));
@@ -182,7 +184,7 @@ export function ProposalsPage() {
 
   return (
     <main>
-      <PageHead lede="agent 从来源里读到、觉得值得做的事。可接受、补到已有事项或忽略（要写原因）；带推荐的可一次按推荐处理。">建议流</PageHead>
+      <PageHead lede={t.lede}>{t.title}</PageHead>
       {error && (
         <div role="alert">
           {error}{" "}
@@ -192,42 +194,49 @@ export function ProposalsPage() {
               load();
             }}
           >
-            重试
+            {t.retry}
           </button>
         </div>
       )}
       {outcome && (
-        <div role="status" aria-label="批量处理结果">
-          <p>已处理 {outcome.done} 条{outcome.skipped.length > 0 && `，跳过 ${outcome.skipped.length} 条`}</p>
+        <div role="status" aria-label={t.batchResult}>
+          <p>
+            {t.handled(outcome.done)}
+            {outcome.skipped.length > 0 && t.skipped(outcome.skipped.length)}
+          </p>
           {outcome.skipped.length > 0 && (
             <ul>
               {outcome.skipped.map((x, n) => (
-                <li key={n}>{x.title}：{x.why}</li>
+                <li key={n}>
+                  {x.title}
+                  {t.colon}
+                  {x.why}
+                </li>
               ))}
             </ul>
           )}
         </div>
       )}
       {items === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
-        <p className="empty">没有待处理的建议</p>
+        <p className="empty">{t.empty}</p>
       ) : (
         <>
           <div className="actions">
             <label>
-              来源
+              {t.source}
               <select value={source} onChange={(e) => setSource(e.target.value)}>
-                <option value="">全部</option>
+                <option value="">{t.all}</option>
                 {opts((i) => i.origin?.source).map((v) => (
                   <option key={v} value={v}>{v}</option>
                 ))}
               </select>
             </label>
             <label>
-              项目
+              {t.project}
               <select value={project} onChange={(e) => setProject(e.target.value)}>
-                <option value="">全部</option>
+                <option value="">{t.all}</option>
                 {opts((i) => i.project).map((v) => (
                   <option key={v} value={v}>{v}</option>
                 ))}
@@ -235,12 +244,12 @@ export function ProposalsPage() {
             </label>
             {confirming ? (
               <>
-                <span>将对当前范围内 {recommended} 条带推荐的建议各自执行推荐处置；没有推荐的不动。</span>
-                <button disabled={batching} onClick={batch}>确认按推荐处理</button>
-                <button onClick={() => setConfirming(false)}>取消</button>
+                <span>{t.batchConfirm(recommended)}</span>
+                <button disabled={batching} onClick={batch}>{t.confirmBatch}</button>
+                <button onClick={() => setConfirming(false)}>{t.cancel}</button>
               </>
             ) : (
-              <button disabled={batching || recommended === 0} onClick={() => setConfirming(true)}>按推荐处理</button>
+              <button disabled={batching || recommended === 0} onClick={() => setConfirming(true)}>{t.batch}</button>
             )}
           </div>
           {shown.map((i) => (

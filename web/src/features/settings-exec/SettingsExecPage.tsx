@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import { errorText as msg, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 /v1/settings/{executors,declarations,commands}（kernel/executors）。授权（仅 Web 会话）、
 // 声明校验、确认前不生效都在服务端；本页只负责调用并如实展示服务端的回答。
@@ -24,7 +25,6 @@ interface Record_ {
   declaration: Declaration;
 }
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 // 每个分区各自加载、各自报错；写操作之后一律重新读取，以服务端状态为准。
 function useList<T>(path: string, pick: (r: any) => T[]) {
@@ -50,6 +50,7 @@ const DeclarationView = ({ d }: { d: Declaration }) => <pre data-testid={`declar
 
 function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
   const { api } = useSession();
+  const t = useT(strings);
   const { items, error, setError, load } = useList<Executor>("/settings/executors", (r) => r.executors);
   const [id, setId] = useState("");
   const [kind, setKind] = useState("external-cli");
@@ -89,7 +90,7 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
 
   return (
     <section role="region" aria-labelledby="h-executors">
-      <h2 id="h-executors">执行者清单</h2>
+      <h2 id="h-executors">{t.executors}</h2>
       {error && <div role="alert">{error}</div>}
       <form
         className="panel"
@@ -99,11 +100,11 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
         }}
       >
         <label>
-          执行者 id
+          {t.executorId}
           <input value={id} onChange={(e) => setId(e.target.value)} />
         </label>
         <label>
-          种类
+          {t.kind}
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
             <option value="external-cli">external-cli</option>
             <option value="native-subagent">native-subagent</option>
@@ -111,21 +112,21 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
           </select>
         </label>
         <label>
-          主机
+          {t.host}
           <input value={host} onChange={(e) => setHost(e.target.value)} />
         </label>
         <label>
-          场景（逗号分隔）
+          {t.scenarios}
           <input value={scenarios} onChange={(e) => setScenarios(e.target.value)} />
         </label>
         <div>
-          <button type="submit" disabled={!id.trim()}>添加</button>
+          <button type="submit" disabled={!id.trim()}>{t.add}</button>
         </div>
       </form>
       {items === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
-        <p className="sub">还没有执行者</p>
+        <p className="sub">{t.noExecutors}</p>
       ) : (
         <ul className="rows">
           {items.map((x) => (
@@ -135,7 +136,7 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
                 {x.host && ` · ${x.host}`}
                 {x.scenarios?.length ? ` · ${x.scenarios.join(", ")}` : ""}
               </span>{" "}
-              <button className="danger" onClick={() => remove(x.id)}>删除</button>
+              <button className="danger" onClick={() => remove(x.id)}>{t.remove}</button>
             </li>
           ))}
         </ul>
@@ -146,6 +147,7 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
 
 function PendingSection({ onChanged }: { onChanged: () => void }) {
   const { api } = useSession();
+  const t = useT(strings);
   const { items, error, setError, load } = useList<Record_>("/settings/declarations", (r) => r.declarations);
 
   const decide = async (r: Record_, verb: "confirm" | "reject") => {
@@ -161,13 +163,13 @@ function PendingSection({ onChanged }: { onChanged: () => void }) {
 
   return (
     <section role="region" aria-labelledby="h-pending">
-      <h2 id="h-pending">待确认声明</h2>
-      <p className="sub">确认前声明不生效；确认意味着接受下列声明的全部内容，其中的命令将可在本机执行。</p>
+      <h2 id="h-pending">{t.pending}</h2>
+      <p className="sub">{t.pendingHint}</p>
       {error && <div role="alert">{error}</div>}
       {items === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
-        <p className="sub">没有待确认的声明</p>
+        <p className="sub">{t.noPending}</p>
       ) : (
         <ul className="rows">
           {items.map((r) => (
@@ -177,7 +179,7 @@ function PendingSection({ onChanged }: { onChanged: () => void }) {
               </span>
               <DeclarationView d={r.declaration} />
               <div className="actions">
-                <button onClick={() => decide(r, "confirm")}>确认</button> <button onClick={() => decide(r, "reject")}>拒绝</button>
+                <button onClick={() => decide(r, "confirm")}>{t.confirm}</button> <button onClick={() => decide(r, "reject")}>{t.reject}</button>
               </div>
             </li>
           ))}
@@ -189,6 +191,7 @@ function PendingSection({ onChanged }: { onChanged: () => void }) {
 
 function CommandsSection({ reloadKey }: { reloadKey: number }) {
   const { api } = useSession();
+  const t = useT(strings);
   const { items, error, setError, load } = useList<Record_>("/settings/commands", (r) => r.declarations);
   const [text, setText] = useState("");
 
@@ -202,7 +205,7 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
     try {
       body = JSON.parse(text);
     } catch {
-      setError("声明不是合法的 JSON");
+      setError(t.badJSON);
       return;
     }
     try {
@@ -216,7 +219,7 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
 
   return (
     <section role="region" aria-labelledby="h-commands">
-      <h2 id="h-commands">可执行命令</h2>
+      <h2 id="h-commands">{t.commands}</h2>
       {error && <div role="alert">{error}</div>}
       <form
         className="panel"
@@ -226,17 +229,17 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
         }}
       >
         <label>
-          声明（JSON）
+          {t.declaration}
           <textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
         <div>
-          <button type="submit" disabled={!text.trim()}>登记</button>
+          <button type="submit" disabled={!text.trim()}>{t.register}</button>
         </div>
       </form>
       {items === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
-        <p className="sub">还没有可执行命令</p>
+        <p className="sub">{t.noCommands}</p>
       ) : (
         <ul className="rows">
           {items.map((r) => (
@@ -256,9 +259,10 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
 export function SettingsExecPage() {
   // 确认/拒绝声明会改变清单与命令；用计数通知另外两个分区重新读取。
   const [n, setN] = useState(0);
+  const t = useT(strings);
   return (
     <main>
-      <PageHead lede="谁能被派活、各 harness 声明了哪些可在本机执行的命令。声明要你确认才生效。">执行者与声明</PageHead>
+      <PageHead lede={t.lede}>{t.title}</PageHead>
       <ExecutorsSection reloadKey={n} />
       <PendingSection onChanged={() => setN((x) => x + 1)} />
       <CommandsSection reloadKey={n} />
