@@ -11,8 +11,9 @@ export const feature: Feature = {
   order: 3,
   section: "settings",
   summary: async (api, lang) => {
-    const level = (await api.get<Doc>("/settings/access-limits")).permission_cap?.default ?? "read";
-    return strings[lang].summary((vocab[lang].perm as Record<string, { label: string }>)[level]?.label ?? level);
+    const [lim, pol] = await Promise.all([api.get<Doc>("/settings/access-limits"), api.get<Doc>("/settings/policy")]);
+    const level = lim.permission_cap?.default ?? "read";
+    return strings[lang].summary((vocab[lang].perm as Record<string, { label: string }>)[level]?.label ?? level, (pol.default_harness as string) ?? "");
   },
   element: <SettingsAccessPage />,
 };

@@ -3,36 +3,7 @@ import { describe, expect, it } from "vitest";
 // 文字预算（设计 §2）：页面上不出现成段解释，主界面不出现机制词。扫描全部 strings.ts 与 vocab.ts 的中文一份：
 // - 任何一条文案（函数按占位参数取返回值）超过 MAX 个字符：成段文字，应改成命名、控件或预览；
 // - 主界面文案里出现机制词：只允许出现在键路径含 advanced、raw、diag 的文案里（高级、原始值、诊断区）。
-// 这一版先只报告不失败（STRICT = false）；各页改完后改为 true，此后新增违规就会让 CI 失败。
-// 改完的目录先列进 STRICT_DIRS：这些目录里的违规现在就让测试失败。
-export const STRICT = false;
-/** 已按文字预算改完的目录（文件路径前缀）：这些目录里的违规现在就让测试失败；STRICT 改为 true 后这份名单就不再需要。 */
-export const STRICT_DIRS = [
-  "features/settings-",
-  "features/today/",
-  "features/briefs/",
-  "features/unread/",
-  "features/decisions/",
-  "features/decision-screening/",
-  "features/proposals/",
-  "features/items/",
-  "features/projects/",
-  "features/materials/",
-  "features/materials-hosted/",
-  "features/agent-changes/",
-  "features/delegation/",
-  "features/attached-messages/",
-  "features/action-confirm/",
-  "features/forms/",
-  "features/sources/",
-  "features/purge/",
-  "features/health/",
-  "features/audit/",
-  "features/runs/",
-  "features/rules/",
-  "features/judgment/",
-  "features/spot-check/",
-];
+// 违规一律让测试失败：新文案要么写短，要么放进高级、原始值或诊断区。
 export const MAX = 40;
 export const BANNED = ["账本", "投影", "墓碑", "注入", "级联", "Event", "blob", "actor", "schema", "scope", "harness", "web_only"];
 /** 有意保留的长文字：键名（各页文案展开了共用文案，所以按键名，不按文件）→ 理由。 */
@@ -106,7 +77,7 @@ describe("文字预算", () => {
     ]);
   });
 
-  it(STRICT ? "全部文案在预算内" : "报告当前违规（暂不失败）", () => {
+  it("全部文案在预算内", () => {
     const found = scan();
     const byFile = new Map<string, number>();
     for (const v of found) {
@@ -120,8 +91,7 @@ describe("文字预算", () => {
           "\n" + found.map((v) => `  [${v.kind}] ${v.where}  ${v.text.slice(0, 60)}`).join("\n"),
       );
     }
-    if (STRICT) expect(found).toEqual([]);
-    else expect(found.filter((v) => STRICT_DIRS.some((d) => v.where.startsWith(d))).map((v) => `[${v.kind}] ${v.where} ${v.text}`)).toEqual([]);
+    expect(found.map((v) => `[${v.kind}] ${v.where} ${v.text}`)).toEqual([]);
     expect(Object.keys(dicts).length).toBeGreaterThanOrEqual(25); // 至少扫到全部页面的文案
   });
 });

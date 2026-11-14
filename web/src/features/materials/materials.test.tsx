@@ -394,7 +394,11 @@ describe("检索与筛选（ACT-MAT-09 / ACT-MAT-13）", () => {
     await userEvent.selectOptions(screen.getByLabelText("按类型筛选"), "design");
     expect(screen.queryByRole("button", { name: "周会纪要" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "登录方案" })).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText("关联事项"), "item_1");
+    // 关联事项按标题找、按名字选，不再手打 id；提交的仍是 id。
+    await userEvent.type(screen.getByLabelText("按标题找事项"), "登录");
+    await screen.findByRole("option", { name: "登录改造" });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "关联事项" }), "item_1");
+    expect(b.calls.some((c) => c.path.startsWith("/v1/items?q="))).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "搜索" }));
     const hit = await screen.findByRole("listitem", { name: "mat_h" });
     expect(hit).toHaveTextContent("在仓库里（只读）");

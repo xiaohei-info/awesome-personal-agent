@@ -9,6 +9,7 @@ import { strings } from "./strings";
 import { PROJECT_STATUS } from "../../app/ids";
 import { Pick, Val } from "../../app/values";
 import { ErrorNote } from "../../app/errors";
+import { ScopeRadios } from "../sources/Outbound";
 
 // 形状对应 GET/POST /v1/projects、GET/PATCH /v1/projects/{id}、POST /v1/projects/{id}/repos、
 // GET /v1/settings/executors、PUT /v1/settings/projects/{id}/allowed-executors（附录 B.2）。
@@ -23,6 +24,8 @@ export interface Project {
   repos?: Repo[];
   allowed_executors: string[] | null;
   capture?: boolean;
+  /** 对话增量送外部模型的范围；null 为还没选，没有缺省值（§6.5、§14.14）。 */
+  capture_outbound?: string | null;
 }
 
 const splitTags = (s: string) => s.split(",").map((t) => t.trim()).filter(Boolean);
@@ -115,6 +118,7 @@ function ProjectDetail() {
       <p className="eyebrow"><Link to="/projects">{t.back}</Link></p>
       <h1>{p.name}</h1>
       <EditForm key={p.id + p.name} p={p} onSaved={setP} />
+      {p.capture && <CaptureOutbound key={p.id + (p.capture_outbound ?? "")} p={p} onSaved={setP} />}
       <Repos p={p} onChange={setP} />
       <Executors p={p} onSaved={setP} />
       <ProjectItems id={p.id} />
@@ -165,6 +169,28 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
       <button type="submit">{t.saveProject}</button>
       {error != null && <ErrorNote error={error} />}
     </form>
+  );
+}
+
+/** 从聊天里记下的内容发给外部模型时送多少：PUT /settings/projects/{id}/capture-outbound {value}，只 Web；不预选。 */
+function CaptureOutbound({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }) {
+  const t = useT(strings);
+  const { api } = useSession();
+  const { error, run } = useAct();
+  const saved = p.capture_outbound ?? null;
+  const [draft, setDraft] = useState<string | null>(saved);
+  const save = () =>
+    run(async () => {
+      const r = await api.put<{ value: string | null }>(`/settings/projects/${p.id}/capture-outbound`, { value: draft });
+      onSaved({ ...p, capture_outbound: r.value });
+    });
+  return (
+    <section className="panel" aria-label={t.captureOut}>
+      <ScopeRadios name={`${p.id}-capture`} legend={t.captureOut} value={draft} onChange={setDraft} />
+      {saved === null && <span className="badge warn">{t.notChosen}</span>}{" "}
+      <button type="button" disabled={draft === saved} onClick={() => void save()}>{t.save}</button>
+      {error != null && <ErrorNote error={error} />}
+    </section>
   );
 }
 

@@ -11,12 +11,12 @@ import { backlogReason } from "./shared";
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix the request" });
 
-interface Src { outbound?: { local: string; external: string | null }; id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
+interface Src { default_project?: string; outbound?: { local: string; external: string | null }; id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
 interface Rj { run_id: string; line: number; reason: string; raw: string; at: string }
 interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string; unjudged_reason?: string }
 
 interface Models { judge?: boolean; generate?: boolean; paused?: boolean }
-function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean; backlog?: { count: number; outbound_unset?: number }; models?: Models; release?: { requeued: number; deferred: number } } = {}) {
+function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean; backlog?: { count: number; outbound_unset?: number }; models?: Models; release?: { requeued: number; deferred: number } } = {}) {
   const sources = o.sources ?? [];
   const events = o.events ?? [];
   const ingests = o.ingests ?? [];
@@ -30,7 +30,7 @@ function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: 
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
     const u = new URL(url, "http://x");
-    if (u.pathname === "/v1/projects") return json(200, { projects: [] });
+    if (u.pathname === "/v1/projects") return json(200, { projects: o.projects ?? [] });
     if (u.pathname === "/v1/health") {
       const b = o.backlog ?? { count: 0 };
       return json(200, { healthy: true, signals: [{ id: "unjudged_backlog", ok: b.count === 0, count: b.count, next: "", detail: { outbound_unset: b.outbound_unset ?? 0 } }] });
@@ -87,7 +87,8 @@ function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: 
       const s = sources.find((x) => x.id === decodeURIComponent(p[1]));
       if (!s) return err(404, "not_found", "source not found");
       if (!p[2] && method === "PATCH") {
-        s.enabled = body.enabled;
+        if ("enabled" in body) s.enabled = body.enabled;
+        if ("default_project" in body) s.default_project = body.default_project;
         return json(200, s);
       }
       if (p[2] === "/webhook" && method === "POST") {
@@ -122,7 +123,7 @@ function backend(o: { sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: 
     if (pr && method === "POST") {
       const e = events.find((x) => x.id === pr[1]);
       if (!e) return err(404, "not_found", "event not found");
-      if (e.disposition !== "unjudged") return err(409, "conflict", `event is ${e.disposition}, not unjudged`);
+      if (e.disposition !== "unjudged" && e.disposition !== "digest") return err(409, "conflict", `event is ${e.disposition}, not unjudged or digest`);
       e.disposition = "proposed";
       e.item = "item_" + e.id;
       return json(200, e);
@@ -336,6 +337,38 @@ describe("积压的消息（flow-triage-failure / ACT-TRI-02）", () => {
     mount(backend({ sources: [rss] }).impl);
     await details("src_rss");
     expect(await screen.findByText("没有积压的消息")).toBeInTheDocument();
+  });
+});
+
+describe("来源归到哪个项目、只进了简报的（§9.1、§9.3）", () => {
+  it("默认项目：PATCH 只带 default_project，按名字选；选「不归项目」发空串清除", async () => {
+    const b = backend({ sources: [{ ...rss }], projects: [{ id: "prj_home", name: "家务" }] });
+    mount(b.impl);
+    await details("src_rss");
+    const pick = await screen.findByRole("combobox", { name: "归到哪个项目" });
+    await screen.findByRole("option", { name: "家务" });
+    await userEvent.selectOptions(pick, "prj_home");
+    await waitFor(() => expect(b.calls.some((c) => c.method === "PATCH" && c.path === "/v1/sources/src_rss")).toBe(true));
+    const patch = b.calls.filter((c) => c.method === "PATCH" && c.path === "/v1/sources/src_rss");
+    expect(patch[0].body).toEqual({ default_project: "prj_home" });
+    expect(patch[0].csrf).toBe("tok-1");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "归到哪个项目" })).toHaveValue("prj_home"));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "归到哪个项目" }), "");
+    await waitFor(() => expect(b.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ default_project: "" }));
+  });
+
+  it("只进了简报的：只列 digest，可逐条转成建议，转后离开列表", async () => {
+    const b = backend({ sources: [rss], events: [ev("d1", "digest"), ev("e1"), ev("d2", "digest")] });
+    mount(b.impl);
+    await details("src_rss");
+    const region = within(await screen.findByRole("region", { name: "只进了简报的" }));
+    expect(await region.findByText(/subject-d1/)).toBeInTheDocument();
+    expect(region.getByText(/subject-d2/)).toBeInTheDocument();
+    expect(region.queryByText(/subject-e1/)).not.toBeInTheDocument();
+    expect(b.calls.some((c) => c.path === "/v1/sources/src_rss/events?disposition=digest")).toBe(true);
+    await userEvent.click(within(region.getByRole("group", { name: "处理 d1" })).getByRole("button", { name: "转为建议" }));
+    await waitFor(() => expect(region.queryByText(/subject-d1/)).not.toBeInTheDocument());
+    expect(b.events.find((e) => e.id === "d1")).toMatchObject({ disposition: "proposed" });
   });
 });
 
