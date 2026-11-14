@@ -4,6 +4,15 @@ import { PageHead } from "../../app/page";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { Pick, Val } from "../../app/values";
+import { EntityPick } from "../../app/names";
+
+// 扩展程序密钥的 scope（§10.3）：channel.<名> 是消息渠道，export 或 export.<名> 是导出，forward 是转发。
+const EXT_TYPES = ["channel", "export", "forward"] as const;
+const scopeOf = (type: string, name: string) => (type === "forward" ? "forward" : name ? `${type}.${name}` : type);
+function parseScope(scope: string): [string, string] {
+  const [type, ...rest] = scope.split(".");
+  return [type, rest.join(".")];
+}
 
 // 形状对应 /v1/settings/{tokens,ext-keys} 返回的 auth.Credential。授权（仅 Web 会话）、
 // 种类与分组校验、明文只出现一次都在服务端；本页只负责调用并如实展示服务端的回答。
@@ -33,7 +42,9 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
   const [kind, setKind] = useState("observer");
   const [label, setLabel] = useState("");
   const [executor, setExecutor] = useState("");
-  const [scope, setScope] = useState("");
+  const [extType, setExtType] = useState<string>("channel");
+  const [extName, setExtName] = useState("");
+  const scope = scopeOf(extType, extName.trim());
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(
@@ -53,7 +64,7 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
     setBusy(true);
     setError(null);
     onSecret(null);
-    const body: Record<string, string> = isExt ? { scope: scope.trim() } : { kind };
+    const body: Record<string, string> = isExt ? { scope } : { kind };
     if (label.trim()) body.label = label.trim();
     if (!isExt && kind === "worker" && executor.trim()) body.executor = executor.trim();
     try {
@@ -61,7 +72,7 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
       onSecret(r.secret);
       setLabel("");
       setExecutor("");
-      setScope("");
+      setExtName("");
     } catch (e) {
       setError(msg(e));
     } finally {
@@ -80,6 +91,10 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
     await load(); // 以服务端状态为准
   };
 
+  const scopeText = (sc: string) => {
+    const [type, name] = parseScope(sc);
+    return t.ext[type] ? t.scopeLabel(t.ext[type], name) : sc;
+  };
   const heading = `heading-${group.path}`;
   return (
     <section role="region" aria-labelledby={heading}>
@@ -93,10 +108,20 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
         }}
       >
         {isExt ? (
-          <label>
-            {t.scope}
-            <input value={scope} onChange={(e) => setScope(e.target.value)} />
-          </label>
+          <>
+            <label>
+              {t.scope}
+              <select value={extType} onChange={(e) => setExtType(e.target.value)}>
+                {EXT_TYPES.map((x) => <option key={x} value={x}>{t.ext[x]}</option>)}
+              </select>
+            </label>
+            {extType !== "forward" && (
+              <label>
+                {extType === "channel" ? t.channelName : t.exportName}
+                <input value={extName} onChange={(e) => setExtName(e.target.value)} />
+              </label>
+            )}
+          </>
         ) : (
           <label>
             {t.kind}
@@ -110,11 +135,11 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
         {!isExt && kind === "worker" && (
           <label>
             {t.executor}
-            <input value={executor} onChange={(e) => setExecutor(e.target.value)} />
+            <EntityPick kind="executor" value={executor} onChange={setExecutor} empty={t.noExecutor} />
           </label>
         )}
         <div>
-          <button type="submit" disabled={busy || (isExt && !scope.trim())}>{t.issue}</button>
+          <button type="submit" disabled={busy || (isExt && extType === "channel" && !extName.trim())}>{t.issue}</button>
         </div>
       </form>
       {creds === null ? (
@@ -126,7 +151,7 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
           {creds.map((c) => (
             <li key={c.id}>
               <strong>{c.label || c.id}</strong> <span className="badge plain"><Val k="credKind" id={c.kind} /></span>
-              {c.scope && <code>{c.scope}</code>}
+              {c.scope && <span className="sub">{scopeText(c.scope)}</span>}
               {c.executor && <code>{c.executor}</code>}
               {c.revoked_at ? <span className="badge">{t.revoked}</span> : <button className="danger" onClick={() => revoke(c.id)}>{t.revoke}</button>}
             </li>

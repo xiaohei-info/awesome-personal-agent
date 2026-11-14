@@ -25,6 +25,7 @@ function server(init: { judge?: any; generate?: any } = {}) {
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/v1/projects") return json(200, { projects: [] });
+    if (url === "/v1/health") return json(200, { healthy: true, signals: [{ id: "unjudged_backlog", ok: false, detail: { models_paused: 14 } }] });
     if (url === "/v1/sources") return json(200, { sources: [{ outbound: { local: "full", external: null } }, { outbound: { local: "full", external: "meta" } }, {}] });
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     if (url === "/v1/settings/model-endpoints/models") return posts.push({ path: url, body }), json(200, models);
@@ -66,23 +67,23 @@ describe("设置 › 模型", () => {
   it("flow-bg-guards ACT-BGG-08 / flow-endpoint-config ACT-EPC-02: 两个端点分开显示与保存，密钥只显示已设置与末 4 位", async () => {
     const s = server();
     mount(s.impl);
-    const g = await card("生成端点");
+    const g = await card("写作模型");
     expect(g.getByRole("group", { name: "API 密钥" })).toHaveTextContent("已设置 ····9f2c");
     expect(document.body).not.toHaveTextContent("sk-test-key");
     expect(g.getByLabelText("模型")).toHaveValue("model-a");
     expect(g.getByRole("radio", { name: /外部服务/ })).toBeChecked();
 
-    const j = await card("判断端点");
+    const j = await card("打分模型");
     expect(j.getByLabelText("协议")).toHaveValue("probability-judgment/1");
     expect(j.getByRole("radio", { name: /本机或我自己控制的主机/ })).toBeChecked();
     await userEvent.type(j.getByLabelText("API 密钥"), "acc-cls-key");
-    await userEvent.clear(j.getByLabelText("超时（毫秒）"));
-    await userEvent.type(j.getByLabelText("超时（毫秒）"), "8000");
-    await save("判断端点");
+    await userEvent.clear(j.getByLabelText("超时（秒）"));
+    await userEvent.type(j.getByLabelText("超时（秒）"), "8");
+    await save("打分模型");
     await j.findByRole("status", {}, { timeout: 2000 });
     expect(s.puts.at(-1)).toEqual({ judge_endpoint: { url: "http://cls.local/judge", api_key: "acc-cls-key", model: "", locality: "local", protocol: "probability-judgment/1", timeout_ms: 8000, max_batch: 32, max_material_chars: 8000 } });
 
-    await save("生成端点");
+    await save("写作模型");
     await g.findByText(/已保存/);
     expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://llm.example.com/v1", api_key: "***", model: "model-a", locality: "external" } });
     expect(s.keys.generate_endpoint).toBe("sk-test-key-9f2c"); // 占位沿用原密钥
@@ -90,10 +91,10 @@ describe("设置 › 模型", () => {
 
   it("flow-judge-protocol ACT-JDP-11: 判断端点协议是 system-one 与 probability-judgment/1，不开放 chat-logprobs；已存的自建服务配置原样显示、没有获取模型", async () => {
     mount(server().impl);
-    const j = await card("判断端点");
+    const j = await card("打分模型");
     expect(within(j.getByLabelText("协议")).getAllByRole("option").map((o) => (o as HTMLOptionElement).value)).toEqual(["system-one", "probability-judgment/1"]);
     expect(j.getByLabelText("协议")).toHaveValue("probability-judgment/1");
-    expect(j.getByLabelText(/端点 URL/)).toHaveValue("http://cls.local/judge");
+    expect(j.getByLabelText(/地址/)).toHaveValue("http://cls.local/judge");
     expect(j.queryByRole("button", { name: "获取模型" })).toBeNull();
   });
 
@@ -102,27 +103,28 @@ describe("设置 › 模型", () => {
     s.setModels({ ok: true, models: ["jev-latest", "jev-preview"], truncated: false, elapsed_ms: 50 });
     s.setProbe({ subject: "judge_endpoint", status: "ok", code: "ok", why: "answered", data: { elapsed_ms: 300, model: "jev-1.14.0", probability_source: "native" } });
     mount(s.impl);
-    const j = await card("判断端点");
-    await userEvent.click(j.getByLabelText("配置判断端点"));
+    const j = await card("打分模型");
+    await userEvent.click(j.getByLabelText("配置打分模型"));
     expect(j.getByLabelText("协议")).toHaveValue("system-one");
     expect(j.getByLabelText(/接口根地址/)).toHaveValue("https://api.typesafe.ai/v1");
     expect(j.getByLabelText("模型")).toHaveValue("jev-latest");
-    expect(j.getByLabelText("超时（毫秒）")).toHaveValue(30000);
-    expect(j.getByText(/首次调用可能需要约 10 秒/)).toBeInTheDocument();
+    expect(j.getByLabelText("超时（秒）")).toHaveValue(30);
+    expect(j.getByText(/首次调用约需 10 秒/)).toBeInTheDocument();
+    expect(j.getByText("将请求：https://api.typesafe.ai/v1/systemone")).toBeInTheDocument();
     await userEvent.type(j.getByLabelText("API 密钥"), "ts-key");
     await userEvent.click(j.getByRole("button", { name: "获取模型" }));
     await j.findByText("已从端点取到 2 个模型。");
     expect(s.posts.at(-1)!.body).toEqual({ endpoint: "judge", url: "https://api.typesafe.ai/v1", api_key: "ts-key", protocol: "system-one" });
     await userEvent.click(j.getByRole("radio", { name: /外部服务/ }));
     await userEvent.click(j.getByRole("button", { name: "测试连接" }));
-    expect(await j.findByRole("status", { name: "测试结果" })).toHaveTextContent("概率来源 native");
+    expect(await j.findByRole("status", { name: "测试结果" })).toHaveTextContent("模型原生概率");
     const url = j.getByLabelText(/接口根地址/);
     await userEvent.clear(url);
     await userEvent.type(url, "http://gw.example.invalid/v1");
     await userEvent.click(j.getByRole("button", { name: "手动填写模型名" }));
     await userEvent.clear(j.getByLabelText("模型"));
     await userEvent.type(j.getByLabelText("模型"), "gw/jev-latest");
-    await save("判断端点");
+    await save("打分模型");
     await j.findByText(/已保存/);
     expect(s.puts.at(-1)).toEqual({ judge_endpoint: { url: "http://gw.example.invalid/v1", api_key: "ts-key", model: "gw/jev-latest", locality: "external", protocol: "system-one", timeout_ms: 30000, max_batch: 32, max_material_chars: 8000 } });
   });
@@ -130,7 +132,7 @@ describe("设置 › 模型", () => {
   it("获取模型后从列表选择，再测试连接；请求用占位沿用已存密钥", async () => {
     const s = server();
     mount(s.impl);
-    const g = await card("生成端点");
+    const g = await card("写作模型");
     await userEvent.click(g.getByRole("button", { name: "获取模型" }));
     expect(await g.findByText("已从端点取到 2 个模型。")).toBeInTheDocument();
     expect(s.posts.at(-1)).toEqual({ path: "/v1/settings/model-endpoints/models", body: { endpoint: "generate", url: "https://llm.example.com/v1", api_key: "***" } });
@@ -148,7 +150,7 @@ describe("设置 › 模型", () => {
     s.setModels({ ok: false, reason: "not_found", status: 404, elapsed_ms: 30 });
     s.setProbe({ subject: "generate_endpoint", status: "error", code: "unauthorized", why: "the endpoint returned HTTP status 401", next: "check URL, API key and model name", data: { elapsed_ms: 40, status: 401 } });
     mount(s.impl);
-    const g = await card("生成端点");
+    const g = await card("写作模型");
     await userEvent.click(g.getByRole("button", { name: "获取模型" }));
     expect(await g.findByText(/这个端点不提供模型列表（HTTP 404）。可以手动填写模型名/)).toBeInTheDocument();
     await userEvent.clear(g.getByLabelText("模型"));
@@ -163,11 +165,11 @@ describe("设置 › 模型", () => {
   it("地址换到另一个主机时不再沿用已存密钥，要求重新输入", async () => {
     const s = server();
     mount(s.impl);
-    const g = await card("生成端点");
-    const url = g.getByLabelText("端点 URL");
+    const g = await card("写作模型");
+    const url = g.getByLabelText("地址");
     await userEvent.clear(url);
     await userEvent.type(url, "https://other.example.com/v1");
-    expect(g.getByText(/已存的密钥不会发到新地址，请重新输入/)).toBeInTheDocument();
+    expect(g.getByText(/地址换了主机，请重新输入密钥/)).toBeInTheDocument();
     await userEvent.type(g.getByLabelText("API 密钥"), "sk-other");
     await userEvent.click(g.getByRole("button", { name: "获取模型" }));
     await g.findByText(/已从端点取到/);
@@ -178,7 +180,7 @@ describe("设置 › 模型", () => {
     const s = server();
     s.setProbe({ subject: "judge_endpoint", status: "error", code: "region_unavailable", why: "the service is not available from this network location", next: "use a reachable compatible gateway URL or a proxy", data: { elapsed_ms: 200 } });
     mount(s.impl);
-    const j = await card("判断端点");
+    const j = await card("打分模型");
     await userEvent.click(j.getByRole("button", { name: "测试连接" }));
     const r = await j.findByRole("status", { name: "测试结果" });
     expect(r).toHaveTextContent("✗ 服务在当前网络位置不可用，请改用可访问的网关地址或代理");
@@ -187,36 +189,36 @@ describe("设置 › 模型", () => {
 
   it("外部端点提示还没设置外部外发范围的来源数，并链接到来源页", async () => {
     mount(server().impl);
-    const g = await card("生成端点");
-    expect(await g.findByText(/有 2 个来源还没设置外部外发范围/)).toBeInTheDocument();
+    const g = await card("写作模型");
+    expect(await g.findByText(/2 个来源没选外发范围/)).toBeInTheDocument();
     expect(g.getByRole("link", { name: "去来源页设置" })).toHaveAttribute("href", "/sources");
   });
 
   it("flow-endpoint-config: 两个都没配时有空状态；新配端点的位置没有预选，选之前不保存；取消配置发 null", async () => {
     const s = server({ judge: null, generate: null });
     mount(s.impl);
-    expect(await screen.findByRole("region", { name: "还没有配置模型端点" })).toHaveTextContent("不配也能用");
-    const j = await card("判断端点");
-    expect(j.queryByLabelText(/端点 URL/)).toBeNull();
-    await userEvent.click(j.getByLabelText("配置判断端点"));
+    expect(await screen.findByRole("region", { name: "还没有配置模型端点" })).toHaveTextContent("不接也能用");
+    const j = await card("打分模型");
+    expect(j.queryByLabelText(/地址/)).toBeNull();
+    await userEvent.click(j.getByLabelText("配置打分模型"));
     expect(j.getByRole("radio", { name: /本机/ })).not.toBeChecked();
     expect(j.getByRole("radio", { name: /外部服务/ })).not.toBeChecked();
-    expect(j.getByLabelText("超时（毫秒）")).toHaveValue(30000);
+    expect(j.getByLabelText("超时（秒）")).toHaveValue(30);
     // 换成自建服务协议：仍是预填值的地址与模型清空，超时回到 10000。
     await userEvent.selectOptions(j.getByLabelText("协议"), "probability-judgment/1");
-    expect(j.getByLabelText(/端点 URL/)).toHaveValue("");
-    expect(j.getByLabelText("超时（毫秒）")).toHaveValue(10000);
-    await userEvent.type(j.getByLabelText(/端点 URL/), "http://cls.stub/judge");
-    await save("判断端点");
+    expect(j.getByLabelText(/地址/)).toHaveValue("");
+    expect(j.getByLabelText("超时（秒）")).toHaveValue(10);
+    await userEvent.type(j.getByLabelText(/地址/), "http://cls.stub/judge");
+    await save("打分模型");
     expect(await j.findByRole("alert")).toHaveTextContent("配置这个端点时必选");
     expect(s.puts).toHaveLength(0);
     await userEvent.click(j.getByRole("radio", { name: /本机/ }));
-    await save("判断端点");
+    await save("打分模型");
     await j.findByText(/已保存/);
     expect(s.puts.at(-1)).toEqual({ judge_endpoint: { url: "http://cls.stub/judge", api_key: "", model: "", locality: "local", protocol: "probability-judgment/1", timeout_ms: 10000, max_batch: 32, max_material_chars: 8000 } });
 
-    await userEvent.click(j.getByLabelText("配置判断端点"));
-    await save("判断端点");
+    await userEvent.click(j.getByLabelText("配置打分模型"));
+    await save("打分模型");
     await j.findByText(/已保存（版本 3）/);
     expect(s.puts.at(-1)).toEqual({ judge_endpoint: null });
   });
@@ -224,23 +226,23 @@ describe("设置 › 模型", () => {
   it("flow-endpoint-config: 服务端拒绝时显示原因，草稿保留；筛选超时单独保存，非法值本地提示", async () => {
     const s = server();
     mount(s.impl);
-    const g = await card("生成端点");
-    const url = g.getByLabelText("端点 URL");
+    const g = await card("写作模型");
+    const url = g.getByLabelText("地址");
     await userEvent.clear(url);
     await userEvent.type(url, "not a url");
     await userEvent.type(g.getByLabelText("API 密钥"), "k");
-    await save("生成端点");
+    await save("写作模型");
     expect(await g.findByRole("alert")).toHaveTextContent("bad endpoint url");
     expect(url).toHaveValue("not a url");
 
-    const t = await card("筛选超时");
-    await userEvent.clear(t.getByLabelText("筛选超时（毫秒）"));
-    await userEvent.type(t.getByLabelText("筛选超时（毫秒）"), "0");
-    await save("筛选超时");
-    expect(await t.findByRole("alert")).toHaveTextContent("筛选超时必须是正整数");
-    await userEvent.clear(t.getByLabelText("筛选超时（毫秒）"));
-    await userEvent.type(t.getByLabelText("筛选超时（毫秒）"), "45000");
-    await save("筛选超时");
+    const t = await card("高风险检查");
+    await userEvent.clear(t.getByLabelText("高风险检查最多等（秒）"));
+    await userEvent.type(t.getByLabelText("高风险检查最多等（秒）"), "0");
+    await save("高风险检查");
+    expect(await t.findByRole("alert")).toHaveTextContent("高风险检查必须是大于 0 的秒数");
+    await userEvent.clear(t.getByLabelText("高风险检查最多等（秒）"));
+    await userEvent.type(t.getByLabelText("高风险检查最多等（秒）"), "45");
+    await save("高风险检查");
     await t.findByRole("status");
     expect(s.puts.at(-1)).toEqual({ screening_timeout_ms: 45000 });
   });
@@ -251,15 +253,16 @@ describe("设置 › 模型", () => {
     const sw = await screen.findByRole("switch", { name: "模型运行开关" });
     expect(sw).toBeChecked();
     expect(screen.getByRole("region", { name: "模型运行开关" })).toHaveTextContent("运行中");
-    expect((await card("生成端点")).queryByText("已暂停")).toBeNull();
+    expect((await card("写作模型")).queryByText("已暂停")).toBeNull();
 
     await userEvent.click(sw);
     expect(await screen.findByRole("switch", { name: "模型运行开关" })).not.toBeChecked();
     expect(s.puts.at(-1)).toEqual({ models_paused: true });
     expect(screen.getByRole("region", { name: "模型运行开关" })).toHaveTextContent("已暂停");
-    const g = await card("生成端点");
+    expect(await within(screen.getByRole("region", { name: "模型运行开关" })).findByText("暂停期间判不了的先存着 · 已存 14 条")).toBeInTheDocument();
+    const g = await card("写作模型");
     expect(within(g.getByRole("heading")).getByText("已暂停")).toBeInTheDocument();
-    expect(within((await card("判断端点")).getByRole("heading")).getByText("已暂停")).toBeInTheDocument();
+    expect(within((await card("打分模型")).getByRole("heading")).getByText("已暂停")).toBeInTheDocument();
     expect(g.getByLabelText("模型")).toBeEnabled();
     expect(g.getByRole("button", { name: "测试连接" })).toBeEnabled();
 

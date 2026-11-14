@@ -6,11 +6,26 @@ import { describe, expect, it } from "vitest";
 // 这一版先只报告不失败（STRICT = false）；各页改完后改为 true，此后新增违规就会让 CI 失败。
 // 改完的目录先列进 STRICT_DIRS：这些目录里的违规现在就让测试失败。
 export const STRICT = false;
+/** 已按文字预算改完的目录（文件路径前缀）：这些目录里的违规现在就让测试失败；STRICT 改为 true 后这份名单就不再需要。 */
 export const STRICT_DIRS = [
-  "features/today", "features/briefs", "features/unread", "features/decisions", "features/decision-screening",
-  "features/proposals", "features/items", "features/projects", "features/materials", "features/materials-hosted",
-  "features/agent-changes", "features/delegation", "features/attached-messages", "features/action-confirm", "features/forms",
-  "features/sources",
+  "features/settings-",
+  "features/today/",
+  "features/briefs/",
+  "features/unread/",
+  "features/decisions/",
+  "features/decision-screening/",
+  "features/proposals/",
+  "features/items/",
+  "features/projects/",
+  "features/materials/",
+  "features/materials-hosted/",
+  "features/agent-changes/",
+  "features/delegation/",
+  "features/attached-messages/",
+  "features/action-confirm/",
+  "features/forms/",
+  "features/sources/",
+  "features/purge/",
 ];
 export const MAX = 40;
 export const BANNED = ["账本", "投影", "墓碑", "注入", "级联", "Event", "blob", "actor", "schema", "scope", "harness", "web_only"];
@@ -100,7 +115,7 @@ describe("文字预算", () => {
       );
     }
     if (STRICT) expect(found).toEqual([]);
-    else expect(found.filter((v) => STRICT_DIRS.some((d) => v.where.startsWith(d + "/")))).toEqual([]);
+    else expect(found.filter((v) => STRICT_DIRS.some((d) => v.where.startsWith(d))).map((v) => `[${v.kind}] ${v.where} ${v.text}`)).toEqual([]);
     expect(Object.keys(dicts).length).toBeGreaterThanOrEqual(25); // 至少扫到全部页面的文案
   });
 });

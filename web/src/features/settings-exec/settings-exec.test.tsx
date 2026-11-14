@@ -79,11 +79,11 @@ describe("执行者清单（flow-env-baseline）", () => {
     const s = server({ execs: [{ id: "work-host.cli", kind: "external-cli", host: "m1" }] });
     mount(s.impl);
     await screen.findByText("work-host.cli");
-    const sec = section("执行者清单");
-    await userEvent.type(within(sec).getByLabelText("执行者 id"), "other-host.cli");
+    const sec = section("可以派活的对象");
+    await userEvent.type(within(sec).getByLabelText("名称"), "other-host.cli");
     await userEvent.selectOptions(within(sec).getByLabelText("种类"), "external-cli");
-    await userEvent.type(within(sec).getByLabelText("主机"), "m2");
-    await userEvent.type(within(sec).getByLabelText("场景（逗号分隔）"), "code, review");
+    await userEvent.type(within(sec).getByLabelText("在哪台机器（可选）"), "m2");
+    await userEvent.type(within(sec).getByRole("textbox", { name: "适合做什么" }), "code, review{Enter}");
     await userEvent.click(within(sec).getByRole("button", { name: "添加" }));
 
     expect(await within(sec).findByText("other-host.cli")).toBeInTheDocument();
@@ -105,8 +105,8 @@ describe("执行者清单（flow-env-baseline）", () => {
   it("被服务端拒绝（web_only）时展示 why，不假装成功", async () => {
     const s = server({ deny: true });
     mount(s.impl);
-    const sec = await screen.findByRole("region", { name: "执行者清单" });
-    await userEvent.type(within(sec).getByLabelText("执行者 id"), "x.cli");
+    const sec = await screen.findByRole("region", { name: "可以派活的对象" });
+    await userEvent.type(within(sec).getByLabelText("名称"), "x.cli");
     await userEvent.click(within(sec).getByRole("button", { name: "添加" }));
     expect(await within(sec).findByRole("alert")).toHaveTextContent("only be used by the owner");
     expect(within(sec).queryByText("x.cli")).not.toBeInTheDocument();
@@ -117,16 +117,16 @@ describe("插件声明（flow-command-registration）", () => {
   it("待确认声明展示将要执行的命令；确认前不在清单与命令里，确认后生效", async () => {
     const s = server({ recs: [pending("acme")] });
     mount(s.impl);
-    const decls = await screen.findByRole("region", { name: "待确认声明" });
+    const decls = await screen.findByRole("region", { name: "待批准的接入请求" });
     expect(within(decls).getByText("acme")).toBeInTheDocument();
-    expect(within(decls).getByText(/\/opt\/acme\/run/)).toBeInTheDocument();
-    expect(within(section("执行者清单")).queryByText("acme.build")).not.toBeInTheDocument();
-    expect(within(section("可执行命令")).queryByText("acme")).not.toBeInTheDocument();
+    expect(within(decls).getAllByText(/\/opt\/acme\/run/)[0]).toBeInTheDocument(); // 摘要里就能看到要运行的命令
+    expect(within(section("可以派活的对象")).queryByText("acme.build")).not.toBeInTheDocument();
+    expect(within(section("已允许运行的命令")).queryByText("acme")).not.toBeInTheDocument();
 
-    await userEvent.click(within(decls).getByRole("button", { name: "确认" }));
-    expect(await within(section("执行者清单")).findByText("acme.build")).toBeInTheDocument();
-    expect(await within(section("可执行命令")).findByText("acme")).toBeInTheDocument();
-    expect(within(section("待确认声明")).queryByRole("button", { name: "确认" })).not.toBeInTheDocument();
+    await userEvent.click(within(decls).getByRole("button", { name: "允许它在本机运行这些命令" }));
+    expect(await within(section("可以派活的对象")).findByText("acme.build")).toBeInTheDocument();
+    expect(await within(section("已允许运行的命令")).findByText("acme")).toBeInTheDocument();
+    expect(within(section("待批准的接入请求")).queryByRole("button", { name: "允许它在本机运行这些命令" })).not.toBeInTheDocument();
     const w = s.calls.find((c) => c.path === "/v1/settings/declarations/acme/1/confirm")!;
     expect(w.method).toBe("POST");
     expect(w.csrf).toBe("tok-1");
@@ -134,48 +134,48 @@ describe("插件声明（flow-command-registration）", () => {
 
   it("确认前完整展示声明：access.full、resume、main_session、executors 都可见", async () => {
     mount(server({ recs: [full] }).impl);
-    const decls = await screen.findByRole("region", { name: "待确认声明" });
+    const decls = await screen.findByRole("region", { name: "待批准的接入请求" });
     const text = within(decls).getByTestId("declaration-deep").textContent!;
     for (const v of ["--dangerously-all", "/opt/deep/resume", "--wake-flag", "deep.cli"]) expect(text).toContain(v);
   });
 
   it("已登记命令同样完整展示声明", async () => {
     mount(server({ recs: [{ ...full, state: "active" }] }).impl);
-    const sec = await screen.findByRole("region", { name: "可执行命令" });
+    const sec = await screen.findByRole("region", { name: "已允许运行的命令" });
     expect(await within(sec).findByTestId("declaration-deep")).toHaveTextContent("--dangerously-all");
   });
 
   it("拒绝声明 → POST reject；不进入清单与命令", async () => {
     const s = server({ recs: [pending("evil")] });
     mount(s.impl);
-    const decls = await screen.findByRole("region", { name: "待确认声明" });
+    const decls = await screen.findByRole("region", { name: "待批准的接入请求" });
     await userEvent.click(within(decls).getByRole("button", { name: "拒绝" }));
-    expect(await within(decls).findByText("没有待确认的声明")).toBeInTheDocument();
+    expect(await within(decls).findByText("没有待批准的请求")).toBeInTheDocument();
     expect(s.calls.some((c) => c.path === "/v1/settings/declarations/evil/1/reject")).toBe(true);
-    expect(within(section("可执行命令")).queryByText("evil")).not.toBeInTheDocument();
+    expect(within(section("已允许运行的命令")).queryByText("evil")).not.toBeInTheDocument();
   });
 
   it("冲突（409）时显示服务端原因", async () => {
     const r = pending("acme");
     const s = server({ recs: [r] });
     mount(s.impl);
-    const decls = await screen.findByRole("region", { name: "待确认声明" });
+    const decls = await screen.findByRole("region", { name: "待批准的接入请求" });
     r.state = "active"; // 另一处已处理
-    await userEvent.click(within(decls).getByRole("button", { name: "确认" }));
+    await userEvent.click(within(decls).getByRole("button", { name: "允许它在本机运行这些命令" }));
     expect(await within(decls).findByRole("alert")).toHaveTextContent("not pending");
   });
 
   it("本人直接登记可执行命令：POST /settings/commands，立即出现在命令列表", async () => {
     const s = server();
     mount(s.impl);
-    const sec = await screen.findByRole("region", { name: "可执行命令" });
-    expect(within(sec).getByText("还没有可执行命令")).toBeInTheDocument();
+    const sec = await screen.findByRole("region", { name: "已允许运行的命令" });
+    expect(within(sec).getByText("还没有允许运行的命令")).toBeInTheDocument();
     const text = JSON.stringify(decl("mine", ["/usr/local/bin/mine", "run"]));
     await userEvent.click(within(sec).getByLabelText("声明（JSON）"));
     await userEvent.paste(text);
     await userEvent.click(within(sec).getByRole("button", { name: "登记" }));
     expect(await within(sec).findByText("mine")).toBeInTheDocument();
-    expect(within(sec).getByText(/\/usr\/local\/bin\/mine/)).toBeInTheDocument();
+    expect(within(sec).getAllByText(/\/usr\/local\/bin\/mine/)[0]).toBeInTheDocument();
     const w = s.calls.find((c) => c.method === "POST" && c.path === "/v1/settings/commands")!;
     expect(w.csrf).toBe("tok-1");
     expect(w.body.headless.command).toEqual(["/usr/local/bin/mine", "run"]);
@@ -184,7 +184,7 @@ describe("插件声明（flow-command-registration）", () => {
   it("非法 JSON 不发请求；服务端校验失败显示原因且不新增", async () => {
     const s = server();
     mount(s.impl);
-    const sec = await screen.findByRole("region", { name: "可执行命令" });
+    const sec = await screen.findByRole("region", { name: "已允许运行的命令" });
     const box = within(sec).getByLabelText("声明（JSON）");
     await userEvent.click(box);
     await userEvent.paste("{not json");
@@ -197,6 +197,6 @@ describe("插件声明（flow-command-registration）", () => {
     await userEvent.paste('{"harness":"x","bogus":1}');
     await userEvent.click(within(sec).getByRole("button", { name: "登记" }));
     expect(await within(sec).findByRole("alert")).toHaveTextContent("unknown field");
-    expect(within(sec).getByText("还没有可执行命令")).toBeInTheDocument();
+    expect(within(sec).getByText("还没有允许运行的命令")).toBeInTheDocument();
   });
 });

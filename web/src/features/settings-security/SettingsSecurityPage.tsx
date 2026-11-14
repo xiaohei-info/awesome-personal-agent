@@ -67,6 +67,7 @@ function PasswordSection({ onChanged }: { onChanged: () => void }) {
         </label>
         <div>
           <button type="submit" disabled={busy || !current || !next}>{t.changePassword}</button>
+          <p className="sub">{t.othersOut}</p>
         </div>
       </form>
     </section>
@@ -133,7 +134,7 @@ export function SettingsSecurityPage() {
   const t = useT(strings);
   return (
     <main>
-      <PageHead lede={t.lede}>{t.title}</PageHead>
+      <PageHead>{t.title}</PageHead>
       <PasswordSection onChanged={() => setReloadKey((k) => k + 1)} />
       <SessionsSection reloadKey={reloadKey} />
     </main>

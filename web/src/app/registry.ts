@@ -27,6 +27,14 @@ export const NAV: { group: Text; sections: SectionId[] }[] = [
   { group: { zh: "运营", en: "Operate" }, sections: ["sources", "automation", "health"] },
 ];
 export const SETTINGS: SectionId = "settings";
+/** 设置里的分组（设计 §3.1）：桌面上是设置页的第二列，手机上是「设置首页」列表。按页面 id 归组，没列出的页面排在最后一组。 */
+export const SETTINGS_GROUPS: { title: Text; ids: string[] }[] = [
+  { title: { zh: "日常", en: "Everyday" }, ids: ["settings-general", "settings-notify", "settings-policy"] },
+  { title: { zh: "agent", en: "Agents" }, ids: ["settings-access", "settings-grants", "settings-credentials", "settings-exec"] },
+  { title: { zh: "系统", en: "System" }, ids: ["settings-models", "settings-security", "purge"] },
+];
+/** 手机上的「设置首页」：设置入口在窄屏上落到这里。 */
+export const SETTINGS_HOME = "settings/home";
 /** 手机顶栏直接显示的入口（§4.1 手机主路径），其余收进"更多"。 */
 export const MOBILE: SectionId[] = ["today", "decisions", "proposals", "items"];
 
@@ -44,6 +52,8 @@ export interface Feature {
   aliases?: string[];
   /** 导航上显示的数量（如待决数）；取不到或为 0 不显示。 */
   count?: (api: ApiClient) => Promise<number>;
+  /** 设置首页上这一项的当前值摘要（如「每天最多 20 条」）；取不到时不显示。 */
+  summary?: (api: ApiClient, lang: Lang) => Promise<string>;
   element: ReactNode;
   /** 无需登录的页面（如一次性表单）：不进导航、不经登录门，由令牌自身授权。 */
   public?: boolean;
@@ -100,4 +110,12 @@ export function featureAt(list: Feature[], pathname: string): Feature | undefine
   return list
     .filter((f) => p === f.path || p.startsWith(f.path + "/"))
     .sort((a, b) => b.path.length - a.path.length)[0];
+}
+
+/** 设置入口里的页面按 SETTINGS_GROUPS 分组（组内保持入口内顺序）；没有页面的组不显示。 */
+export function settingsGroups(entry: Entry, lang: Lang): { title: string; features: Feature[] }[] {
+  const known = new Set(SETTINGS_GROUPS.flatMap((g) => g.ids));
+  const groups = SETTINGS_GROUPS.map((g) => ({ title: g.title[lang], features: entry.features.filter((f) => g.ids.includes(f.id)) }));
+  groups[groups.length - 1].features.push(...entry.features.filter((f) => !known.has(f.id)));
+  return groups.filter((g) => g.features.length);
 }

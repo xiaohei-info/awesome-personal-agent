@@ -203,8 +203,9 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     ["/agent-changes", "agent 动态", "改动"], ["/delegation", "agent 动态", "委派"], ["/runs", "agent 动态", "运行记录"],
     ["/sources", "来源", "来源"], ["/rules", "规则与判断", "规则模式"], ["/judgment", "规则与判断", "判断与校准"],
     ["/health", "健康", "健康"], ["/audit", "健康", "审计"],
-    ["/settings", "设置", "策略与人格"], ["/settings-credentials", "设置", "凭据"], ["/settings-exec", "设置", "执行者与声明"],
-    ["/settings/grants", "设置", "授权单"], ["/settings-security", "设置", "登录安全"], ["/purge", "设置", "物理删除"],
+    ["/settings", "设置", "我来拍板"], ["/settings-credentials", "设置", "接入钥匙"], ["/settings-exec", "设置", "执行者"],
+    ["/settings/grants", "设置", "临时授权"], ["/settings-security", "设置", "登录与会话"], ["/purge", "设置", "永久删除"],
+    ["/settings/general", "设置", "通用"], ["/settings/notify", "设置", "提醒与打扰"], ["/settings/access", "设置", "后台权限"], ["/settings/models", "设置", "模型"],
   ];
   it.each(OLD)("%s → 入口「%s」页签「%s」", async (at, entry, tab) => {
     const nav = await openAt(at);
@@ -250,6 +251,36 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
       await userEvent.click(within(screen.getByRole("dialog")).getByRole("link", { name: "来源" }));
       expect(await screen.findByRole("heading", { name: "来源 页面" })).toBeInTheDocument();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    } finally {
+      window.matchMedia = mm;
+    }
+  });
+});
+
+describe("设置的分组（设计 §3.1）", () => {
+  it("桌面：设置页左侧按 日常 / agent / 系统 分组列出，当前页高亮，永久删除排最后", async () => {
+    await openAt("/settings/notify");
+    const sub = await screen.findByRole("navigation", { name: "设置页签" });
+    expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "agent", "系统"]);
+    expect(within(sub).getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "通用", "提醒与打扰", "我来拍板", "后台权限", "临时授权", "接入钥匙", "执行者", "模型", "登录与会话", "永久删除",
+    ]);
+    expect(within(sub).getByRole("link", { name: "提醒与打扰" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("窄屏：设置入口落到设置首页，按组列出各页；进到某页后有返回设置首页的链接", async () => {
+    const mm = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: true, media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    try {
+      const nav = await openAt("/today");
+      await userEvent.click(within(nav).getByRole("button", { name: "更多" }));
+      await userEvent.click(within(screen.getByRole("dialog")).getByRole("link", { name: "设置" }));
+      expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("设置");
+      expect(screen.getAllByRole("list").filter((l) => ["日常", "agent", "系统"].includes(l.getAttribute("aria-label") ?? ""))).toHaveLength(3);
+      await userEvent.click(within(screen.getByRole("list", { name: "日常" })).getByRole("link", { name: /提醒与打扰/ }));
+      expect(await screen.findByRole("heading", { name: "提醒与打扰 页面" })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("link", { name: /‹ 设置/ }));
+      expect(await screen.findByRole("list", { name: "系统" })).toBeInTheDocument();
     } finally {
       window.matchMedia = mm;
     }

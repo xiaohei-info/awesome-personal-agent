@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, lang, useT } from "../../app/i18n";
+import { useLabel } from "../../app/values";
 import { strings } from "./strings";
 
 // 形状对应 /v1/settings/model-endpoints 与它的两条探测路由（附录 B.2；设计 §4.1、§14.14、§15.5）。
@@ -16,9 +17,10 @@ const PJ = "probability-judgment/1";
 const JUDGE_PROTOCOLS = [SYSTEM_ONE, PJ];
 // 新配时的预填值；换协议时，仍是上一个协议预填值的字段换成新协议的预填值，本人改过的不动。
 // system-one 的首次调用可能要约 10 秒（建连），超时预填 30000；只影响新配，已存配置照旧。
+// 超时在页面上以秒显示与编辑，保存时换回毫秒（timeout_ms）。
 const PRESETS: Record<string, { url: string; model: string; timeout_ms: string }> = {
-  [SYSTEM_ONE]: { url: "https://api.typesafe.ai/v1", model: "jev-latest", timeout_ms: "30000" },
-  [PJ]: { url: "", model: "", timeout_ms: "10000" },
+  [SYSTEM_ONE]: { url: "https://api.typesafe.ai/v1", model: "jev-latest", timeout_ms: "30" },
+  [PJ]: { url: "", model: "", timeout_ms: "10" },
 };
 const MANUAL = "\u0000manual";
 
@@ -73,6 +75,14 @@ function posInt(v: string, what: string) {
   return n;
 }
 
+/** 秒（可带小数）→ 毫秒；不是正数时报错。 */
+function posSec(v: string, what: string) {
+  const n = Number(v);
+  if (v.trim() === "" || !Number.isFinite(n) || n <= 0) throw new Error(strings[lang()].posSec(what));
+  return Math.round(n * 1000);
+}
+const sec = (ms: number) => String(ms / 1000);
+
 type Draft = Record<string, string>;
 const JUDGE_NEW: Draft = { ...PRESETS[SYSTEM_ONE], protocol: SYSTEM_ONE, locality: "", max_batch: "32", max_material_chars: "8000" };
 
@@ -80,7 +90,7 @@ function draftOf(kind: Kind, e: Endpoint | null): Draft {
   if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { url: "", model: "", locality: "" };
   const d: Draft = { url: e.url ?? "", model: e.model ?? "", locality: e.locality ?? "" };
   if (kind === "judge")
-    Object.assign(d, { protocol: e.protocol || PJ, timeout_ms: String(e.timeout_ms ?? 10000), max_batch: String(e.max_batch ?? 32), max_material_chars: String(e.max_material_chars ?? 8000) });
+    Object.assign(d, { protocol: e.protocol || PJ, timeout_ms: sec(e.timeout_ms ?? 10000), max_batch: String(e.max_batch ?? 32), max_material_chars: String(e.max_material_chars ?? 8000) });
   return d;
 }
 
@@ -116,7 +126,7 @@ export function SettingsModelsPage() {
   if (error)
     return (
       <main>
-        <PageHead lede={t.lede}>{t.title}</PageHead>
+        <PageHead>{t.title}</PageHead>
         <p role="alert">{error}</p>
         <button onClick={() => void load()}>{t.retry}</button>
       </main>
@@ -126,18 +136,20 @@ export function SettingsModelsPage() {
   const paused = any && !!doc.models_paused;
   return (
     <main>
-      <PageHead lede={t.lede}>{t.title}</PageHead>
+      <PageHead>{t.title}</PageHead>
       {any ? (
         <PauseSwitch paused={paused} save={(on) => save({ models_paused: on })} />
       ) : (
         <section className="panel" aria-label={t.emptyLabel}>
           <p>{t.empty1}</p>
-          <p className="sub">{t.empty2}</p>
         </section>
       )}
       <EndpointCard kind="generate" doc={doc.generate_endpoint} paused={paused} unsetExternal={unsetExternal} save={(e) => save({ generate_endpoint: e as Endpoint | null })} />
       <EndpointCard kind="judge" doc={doc.judge_endpoint} paused={paused} unsetExternal={unsetExternal} save={(e) => save({ judge_endpoint: e as Endpoint | null })} />
-      <ScreeningTimeoutCard value={doc.screening_timeout_ms} save={(n) => save({ screening_timeout_ms: n })} />
+      <details className="panel">
+        <summary>{t.advanced}</summary>
+        <ScreeningTimeoutCard value={doc.screening_timeout_ms} save={(n) => save({ screening_timeout_ms: n })} />
+      </details>
     </main>
   );
 }
@@ -145,6 +157,16 @@ export function SettingsModelsPage() {
 // 暂停模型（§8.7）：两个端点与密钥原样保留，内核按没配端点运行；只改 models_paused 一段。
 function PauseSwitch({ paused, save }: { paused: boolean; save: (on: boolean) => Promise<number> }) {
   const t = useT(strings);
+  const { api } = useSession();
+  const [stored, setStored] = useState<number | null>(null);
+  // 暂停期间积下的条数取自健康视图的积压明细（models_paused），只作提示，取不到就不显示。
+  useEffect(() => {
+    if (!paused) return setStored(null);
+    api.get<{ signals: { id: string; detail?: { models_paused?: number } }[] }>("/health").then(
+      (r) => setStored(r.signals.find((s) => s.id === "unjudged_backlog")?.detail?.models_paused ?? null),
+      () => setStored(null),
+    );
+  }, [api, paused]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const flip = async () => {
@@ -165,6 +187,7 @@ function PauseSwitch({ paused, save }: { paused: boolean; save: (on: boolean) =>
         <span className={"badge " + (paused ? "warn" : "ok")}>{paused ? t.paused : t.running}</span>
       </label>
       {paused && <small className="sub">{t.pausedNote}</small>}
+      {paused && stored != null && stored > 0 && <p className="sub">{t.stored(stored)}</p>}
       {err && <p role="alert">{err}</p>}
     </section>
   );
@@ -253,7 +276,7 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
   const config = () => {
     const base = { url: d.url.trim(), api_key: apiKey, model: d.model.trim(), locality: d.locality };
     if (kind === "generate") return base;
-    return { ...base, protocol: d.protocol, timeout_ms: posInt(d.timeout_ms, t.timeoutMs), max_batch: posInt(d.max_batch, t.maxBatch), max_material_chars: posInt(d.max_material_chars, t.maxChars) };
+    return { ...base, protocol: d.protocol, timeout_ms: posSec(d.timeout_ms, t.timeoutMs), max_batch: posInt(d.max_batch, t.maxBatch), max_material_chars: posInt(d.max_material_chars, t.maxChars) };
   };
   const saver = useSaver(async () => {
     if (!on) return save(null);
@@ -365,6 +388,7 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
             {so ? t.urlSystemOne : kind === "judge" ? t.urlJudge : t.url}
             <input value={d.url} onChange={(e) => setURL(e.target.value)} placeholder={so ? PRESETS[SYSTEM_ONE].url : kind === "judge" ? "http://127.0.0.1:8090/judge" : "https://llm.example.com/v1"} />
           </label>
+          {so && d.url.trim() && <small className="sub">{t.willCall(d.url.trim().replace(/\/+$/, "") + "/systemone")}</small>}
           <KeyField
             stored={doc?.api_key_set ? doc.api_key_hint || "" : null}
             mode={keyMode}
@@ -438,13 +462,14 @@ function KeyField({ stored, mode, value, onChange, onMode, urlChanged }: {
 
 function ProbeView({ r }: { r: ProbeResult }) {
   const t = useT(strings);
+  const label = useLabel();
   const mark = { ok: "✓", warning: "!", error: "✗" }[r.status];
   const text = (r.code && t.codes[r.code]) || r.why;
   const facts: ReactNode[] = [];
   if (r.data?.elapsed_ms != null) facts.push(t.elapsed(r.data.elapsed_ms));
   if (r.data?.status) facts.push(`HTTP ${r.data.status}`);
   if (r.data?.model) facts.push(t.modelFact(r.data.model));
-  if (r.data?.probability_source) facts.push(t.source(r.data.probability_source));
+  if (r.data?.probability_source) facts.push(label("probSource", r.data.probability_source));
   return (
     <div role="status" aria-label={t.result} className={"probe " + r.status}>
       <p><b>{mark} {text}</b>{facts.length > 0 && <span className="sub"> · {facts.join(" · ")}</span>}</p>
@@ -458,9 +483,9 @@ function ProbeView({ r }: { r: ProbeResult }) {
 
 function ScreeningTimeoutCard({ value, save }: { value: number; save: (n: number) => Promise<number> }) {
   const t = useT(strings);
-  const [v, setV] = useState(String(value));
-  useEffect(() => setV(String(value)), [value]);
-  const saver = useSaver(() => save(posInt(v, t.screening)));
+  const [v, setV] = useState(sec(value));
+  useEffect(() => setV(sec(value)), [value]);
+  const saver = useSaver(() => save(posSec(v, t.screening)));
   return (
     <section aria-label={t.screening} className="panel stack">
       <h2>{t.screening}</h2>

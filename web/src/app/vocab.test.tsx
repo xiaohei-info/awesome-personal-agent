@@ -8,7 +8,10 @@ import { forgetNames, loadNames } from "./names";
 import { setRawShown } from "./raw";
 import { Pick, Val } from "./values";
 import { vocab, type Vocab } from "./vocab";
-import { SettingsGeneralPage } from "../features/settings-general/SettingsGeneralPage";
+import { MemoryRouter } from "react-router-dom";
+import { App } from "./App";
+import type { Feature } from "./registry";
+import { feature as general } from "../features/settings-general";
 
 describe("取值词表", () => {
   it("封闭集合缺一个 ID 的显示名时编译失败；中英两份的键一致", () => {
@@ -95,12 +98,20 @@ describe("id → 显示名", () => {
 
 describe("设置 › 通用 › 显示原始值", () => {
   it("默认关；打开后各处带上 ID，存在这台浏览器", async () => {
-    render(<><SettingsGeneralPage /><p data-testid="v"><Val k="perm" id="read" /></p></>);
-    const box = screen.getByRole("checkbox", { name: "显示原始值" });
+    sessionStorage.setItem("apa.csrf", "tok-1");
+    const fetchImpl = (async (url: string) =>
+      new Response(JSON.stringify(url === "/v1/settings/policy" ? { version: 1, persona: "" } : { projects: [] }), { status: 200, headers: { "Content-Type": "application/json" } })) as unknown as typeof fetch;
+    const probe: Feature = { id: "probe", title: { zh: "探针", en: "Probe" }, path: "probe", element: <p data-testid="v"><Val k="perm" id="read" /></p> };
+    render(
+      <MemoryRouter initialEntries={["/settings/general"]}>
+        <App features={[general, probe]} fetchImpl={fetchImpl} />
+      </MemoryRouter>,
+    );
+    const box = await screen.findByRole("checkbox", { name: "显示原始值" });
     expect(box).not.toBeChecked();
-    expect(screen.getByTestId("v")).toHaveTextContent(/^只看$/);
     await userEvent.click(box);
     expect(localStorage.getItem("apa.raw")).toBe("1");
-    expect(screen.getByTestId("v")).toHaveTextContent("只看read");
+    await userEvent.click(screen.getByRole("link", { name: "探针" }));
+    expect(await screen.findByTestId("v")).toHaveTextContent("只看read");
   });
 });
