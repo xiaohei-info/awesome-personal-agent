@@ -428,8 +428,8 @@ describe("积压徽章的去向随 rejudge_days", () => {
       const badge = region.getByText(new RegExp(`subject-r${i}`)).closest("li")!.querySelector("[class*=badge]");
       expect(badge?.getAttribute("title"), x).toBe(want[x]);
     });
-    // 判断未定的不自动重判（kernel/domain UnjudgedUndecided），不给自动判断的说法
-    expect(region.getByText(/subject-u/).closest("li")!.querySelector("[class*=badge]")?.getAttribute("title")).toBeNull();
+    // v0.1 的 undecided 按 model_unavailable 对待（§6.10），提示与它一致
+    expect(region.getByText(/subject-u/).closest("li")!.querySelector("[class*=badge]")?.getAttribute("title")).toBe(want.model_unavailable);
   });
 });
 

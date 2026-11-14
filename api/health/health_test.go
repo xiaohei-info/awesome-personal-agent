@@ -247,7 +247,7 @@ func TestExtCredentialAndAnonymousAreRejected(t *testing.T) {
 func TestUnjudgedBacklogCountsOutboundUnset(t *testing.T) {
 	e := setup(t, fakePacks(nil))
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		for id, reason := range map[string]string{"ev1": "outbound_unset", "ev2": "outbound_unset", "ev3": "undecided"} {
+		for id, reason := range map[string]string{"ev1": "outbound_unset", "ev2": "outbound_unset", "ev3": "restored"} {
 			if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link,
 				occurred_at, correlation_keys, sender, sender_verified, disposition, unjudged_reason) VALUES ('d', ?, ?, 'src_rss', 'run', 't', 's', '', '', '', 0, '[]', '', 0, 'unjudged', ?)`,
 				id, id, reason); err != nil {
@@ -271,7 +271,7 @@ func TestUnjudgedBacklogCountsOutboundUnset(t *testing.T) {
 		}
 	}
 	d, _ := sig.Detail.(map[string]any)
-	if sig.OK || sig.Severity != SeverityWarning || !r.Healthy || sig.Count != 3 || d["outbound_unset"] != float64(2) || d["undecided"] != float64(1) || d["model_unavailable"] != float64(0) {
+	if sig.OK || sig.Severity != SeverityWarning || !r.Healthy || sig.Count != 3 || d["outbound_unset"] != float64(2) || d["restored"] != float64(1) || d["model_unavailable"] != float64(0) {
 		t.Fatalf("signal %+v healthy=%v", sig, r.Healthy)
 	}
 	if !strings.Contains(sig.Next, "outbound scope") {

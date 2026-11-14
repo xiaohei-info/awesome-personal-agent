@@ -232,7 +232,7 @@ export function SourceBacklog({ source, rejudgeDays, onChooseOutbound }: { sourc
             {items.map((v) => {
               const why = backlogReason(v);
               const k = why === "expired" ? "disposition" : "unjudgedReason";
-              const badge = <span className={BADGE[why] ?? "badge"} title={why === "expired" ? entryOf(lang, k, why)?.hint : rejudgeHint(lang, v.unjudged_reason || "model_unavailable", rejudgeDays) ?? entryOf(lang, k, why)?.hint}><Val k={k} id={why} /></span>;
+              const badge = <span className={BADGE[why] ?? "badge"} title={why === "expired" ? entryOf(lang, k, why)?.hint : rejudgeHint(lang, why, rejudgeDays) ?? entryOf(lang, k, why)?.hint}><Val k={k} id={why} /></span>;
               return (
                 <li key={v.id}>
                   <span>{v.subject || v.id}</span> · {when(v.occurred_at)} {raw && <code className="raw-id">{v.type}</code>}{" "}

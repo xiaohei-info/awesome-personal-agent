@@ -293,7 +293,7 @@ const (
 // 未判定的原因（§6.10 unjudged_reason）。
 const (
 	UnjudgedModelUnavailable = "model_unavailable" // 模型未配置或持续不可用：模型恢复后自动重判
-	UnjudgedUndecided        = "undecided"         // 判断型级联后仍未定：不自动重判，等本人处理
+	UnjudgedUndecided        = "undecided"         // 只存在于 v0.1 的数据里，新级联不再产生（各级未定留为建议）：读取时视同 model_unavailable，参与自动重判与到期
 	UnjudgedOutboundUnset    = "outbound_unset"    // 来源未选外发范围而端点都在外部：选定后自动重判
 	UnjudgedRestored         = "restored"          // 本人把旧级联忽略的事件放回积压：只经积压放开重判
 	UnjudgedModelsPaused     = "models_paused"     // 本人暂停了模型：同 model_unavailable 参与自动重判与到期，恢复本身不触发重判

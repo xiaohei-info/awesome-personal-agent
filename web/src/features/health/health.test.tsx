@@ -151,6 +151,18 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
     expect(line.textContent).toBe(text);
   });
 
+  it.each([
+    [7, "3 条等模型恢复 · 恢复后自动判断（最近 7 天的）"],
+    [0, "3 条等模型恢复 · 恢复后在积压里放开"],
+  ])("v0.1 的 undecided 并进「等模型恢复」，去向随 rejudge_days（%s）", async (days, text) => {
+    const r = report({
+      unjudged_backlog: { ok: false, count: 3, severity: "warning", why: "w", detail: { model_unavailable: 1, models_paused: 0, outbound_unset: 0, undecided: 2, restored: 0, expired: 0, rejudge_days: days, sources: [] } },
+    });
+    mount(serve(() => json(200, r)).impl);
+    await screen.findByRole("heading", { level: 1, name: "1 项要处理" });
+    expect(within(main().getByRole("article", { name: "积压待处理" })).getByText(/条等模型恢复/).textContent).toBe(text);
+  });
+
   it("读取失败：显示服务端原因并可重试", async () => {
     let fail = true;
     mount(serve(() => (fail ? json(500, { code: "internal", why: "boom", next: "retry" }) : json(200, report()))).impl);
