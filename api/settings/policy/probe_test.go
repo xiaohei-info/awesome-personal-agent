@@ -195,3 +195,16 @@ func TestProbeWebOnly(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 }
+
+// 照 GET 的形状回传（含只读的 api_key_hint）时 PUT 忽略它，密钥不变。
+func TestPutIgnoresKeyHint(t *testing.T) {
+	e := setup(t)
+	e.do("PUT", routes[2], `{"generate_endpoint":{"url":"https://m.example/v1","model":"m","api_key":"`+storedKey+`"}}`, e.web)
+	rec := e.do("PUT", routes[2], `{"generate_endpoint":{"url":"https://m.example/v1","model":"m2","api_key_hint":"0001","locality":"local"}}`, e.web)
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if _, p := e.current(); p.GenerateEndpoint.APIKey != storedKey || p.GenerateEndpoint.Model != "m2" {
+		t.Fatalf("%+v", p.GenerateEndpoint)
+	}
+}

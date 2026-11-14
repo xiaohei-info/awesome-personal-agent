@@ -230,7 +230,8 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
     if (!d.locality) throw new Error("请选择端点在哪里：配置这个端点时必选");
     return save(config());
   });
-  const canList = kind === "generate" || d.protocol === "chat-logprobs";
+  // 判断端点只有在开放对数概率换算（对话补全兼容协议）后才有模型列表；目前只有生成端点能获取。
+  const canList = kind === "generate";
 
   const fetchModels = async () => {
     setProbing("models");

@@ -234,7 +234,7 @@
 
 `/settings/policy` 的 `channels` 段是渠道的登记属性：`{"<渠道名>": {"text_only": true}}`。`default_harness` 段是规则未指定 harness 时任务型与后台运行用的 harness，值为 harness 名，空串表示未设置（主文档 §13.6）。`disturb` 段在 v0.2.0 新增三个键，旧键不变：`daily_cap`（整数，默认 20，`0` 不限）、`mutes`（`[{"scope": "source" \| "project" \| "item", "id", "until"?}]`）、`followup_defer`（布尔，默认 `false`）；`threshold_judge` 保留，含义改为"是否开启投递推迟判定"（主文档 §7.4）。
 
-`/settings/model-endpoints`：`GET` 返回、`PUT` 接受下面的形状，两个端点都可为 `null`；`api_key` 只写不读，`GET` 以 `api_key_set` 表示是否已设置，以 `api_key_hint` 给出已存密钥的末 4 个字符（密钥短于 12 个字符时为空串）。字段语义见主文档 §6.13、§8.8。
+`/settings/model-endpoints`：`GET` 返回、`PUT` 接受下面的形状，两个端点都可为 `null`；`api_key` 只写不读，`GET` 以 `api_key_set` 表示是否已设置，以 `api_key_hint` 给出已存密钥的末 4 个字符（密钥短于 12 个字符时为空串）；`api_key_hint` 只读，照 `GET` 的形状回传时 `PUT` 忽略它。字段语义见主文档 §6.13、§8.8。
 
 ```json
 {"judge_endpoint": {"url": "…", "api_key": "…", "protocol": "probability-judgment/1", "model": "", "locality": "local", "timeout_ms": 10000, "max_batch": 32, "max_material_chars": 8000},
