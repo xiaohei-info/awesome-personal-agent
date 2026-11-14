@@ -1066,6 +1066,25 @@ func TestCallAgentGenerateOverride(t *testing.T) {
 	}
 }
 
+// 外发范围拦下生成型（direct.ErrOutboundBlocked）：规则动作以明确的外发原因失败，事项不写 spec、不转 done、不接力任务型。
+type blockedGen struct{}
+
+func (blockedGen) Do(context.Context, direct.Call) (direct.Outcome, error) {
+	return direct.Outcome{}, fmt.Errorf("%w (outbound_unset, source src_a)", direct.ErrOutboundBlocked)
+}
+
+func TestCallAgentGenerateBlockedByOutboundScope(t *testing.T) {
+	e := setup(t)
+	id := e.openItem()
+	err := e.svc.CallAgent(AgentOptions{Generate: blockedGen{}})(bg, e.call("gen", id))
+	if !errors.Is(err, direct.ErrOutboundBlocked) || !strings.Contains(err.Error(), "外发范围") {
+		t.Fatalf("err = %v, want an outbound-scope error naming the cause", err)
+	}
+	if it := e.item(id); it.Phase != domain.PhaseOpen || len(it.Spec) != 0 {
+		t.Fatalf("blocked generate must leave the item untouched: %+v", it)
+	}
+}
+
 // 规则建的事项在链路熔断时不派发运行，也不留在 open：转 needs_input 写明原因。
 func TestChainTripOnRuleItemAsksOwner(t *testing.T) {
 	e := setup(t)

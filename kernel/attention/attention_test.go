@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
+	builtin "github.com/xiaohei-info/awesome-personal-agent/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 	"reflect"
 	"strings"
 	"testing"
@@ -56,7 +61,7 @@ var useClockNow bool
 func setup(t *testing.T, drafter ...Drafter) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, proc.Module, background.Module, channel.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, proc.Module, registry.Module, direct.Module, background.Module, channel.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -1301,6 +1306,48 @@ func TestBriefHonorsMute(t *testing.T) {
 	}
 	if u := e.unread(); len(u) != 1 || u[0].Class != domain.DeliveryBrief || u[0].Suppressed != "muted" {
 		t.Fatalf("muted brief should be Web unread: %+v", u)
+	}
+}
+
+// lateDrafter 让真实 direct.Service 在 setup 建好存储之后再接入。
+type lateDrafter struct{ Drafter }
+
+// 真实统一出口：来源 external 范围未选择、生成端点在外部时，卡片起草对生成端点零请求（即使事项没有正文），
+// 且不卡投递；范围选定后同一事项的下一次起草正常发出请求。
+func TestCardDraftSendsNothingToExternalEndpointWhenScopeNotChosen(t *testing.T) {
+	late := &lateDrafter{}
+	e := setup(t, late)
+	stub := modelstub.New()
+	t.Cleanup(stub.Close)
+	stub.SetDefault(modelstub.Reply{Content: cardJSON})
+	ld := packs.New(packs.Options{Builtin: builtin.FS, Kinds: items.NewKinds()})
+	if rej, err := ld.Load(); err != nil || len(rej) != 0 {
+		t.Fatalf("load: %v %+v", err, rej)
+	}
+	svc, err := direct.New(direct.Options{Store: e.st, Packs: ld, Model: &model.Client{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	late.Drafter = svc
+	e.policy(func(p *policy.Policy) {
+		p.GenerateEndpoint = policy.GenerateEndpoint{URL: stub.URL(), Model: "m", APIKey: "k", Locality: policy.LocalityExternal}
+		p.ScreeningTimeoutMs = 1000
+	})
+	e.update(func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO sources_registry_source
+			(id, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats)
+			VALUES ('src_a', 'pull', 'k', '', '', 0, '', '', '', 'full', '', '', '', 1, '')`)
+		return err
+	})
+	e.toChannel()
+	id := e.item(map[string]any{"title": "Calendar event #11", "origin": map[string]string{"source": "src_a"}}) // 没有正文：标题也是来源内容
+	e.ask(id, nil)
+	e.drafts()
+	if n := len(stub.Requests()); n != 0 {
+		t.Fatalf("external endpoint got %d requests for source content with scope unset", n)
+	}
+	if d := e.claim("channel:chan"); d == nil {
+		t.Fatal("a blocked card draft must not hold the delivery back")
 	}
 }
 

@@ -27,14 +27,17 @@ func TestDoBlocksSourceContentWhenOutboundScopeNotChosen(t *testing.T) {
 		origin   string // 事项 origin.source；空表示没有来源
 		require  string // 调用方自己裁剪过
 		blocked  bool
+		noBody   bool // 资料段为空：来源内容只在结构化输入的标题里
 	}{
-		{"external endpoint, scope unset", policy.LocalityExternal, unset, "src_a", "", true},
-		{"external endpoint, scope none", policy.LocalityExternal, none, "src_a", "", true},
-		{"external endpoint, scope full", policy.LocalityExternal, full, "src_a", "", false},
-		{"local endpoint ignores the unset external scope", policy.LocalityLocal, unset, "src_a", "", false},
-		{"item without origin", policy.LocalityExternal, unset, "", "", false},
-		{"caller already trimmed", policy.LocalityExternal, unset, "src_a", policy.LocalityExternal, false},
-		{"capture project, scope unset", policy.LocalityExternal, unset, "capture:", "", true},
+		{"external endpoint, scope unset", policy.LocalityExternal, unset, "src_a", "", true, false},
+		{"external endpoint, scope none", policy.LocalityExternal, none, "src_a", "", true, false},
+		{"external endpoint, scope full", policy.LocalityExternal, full, "src_a", "", false, false},
+		{"local endpoint ignores the unset external scope", policy.LocalityLocal, unset, "src_a", "", false, false},
+		{"item without origin", policy.LocalityExternal, unset, "", "", false, false},
+		{"caller already trimmed", policy.LocalityExternal, unset, "src_a", policy.LocalityExternal, false, false},
+		{"no material, scope unset", policy.LocalityExternal, unset, "src_a", "", true, true},
+		{"no material, scope none", policy.LocalityExternal, none, "src_a", "", true, true},
+		{"capture project, scope unset", policy.LocalityExternal, unset, "capture:", "", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := setup(t, true)
@@ -77,6 +80,9 @@ func TestDoBlocksSourceContentWhenOutboundScopeNotChosen(t *testing.T) {
 			_ = json.Unmarshal(r.Value, &ref)
 			c := e.call("explain")
 			c.Target, c.Project, c.RequireLocality = ref.ID, "", tc.require
+			if tc.noBody {
+				c.Material = ""
+			}
 
 			_, err = e.svc.Do(bg, c)
 			if got := errors.Is(err, ErrOutboundBlocked); got != tc.blocked || (!tc.blocked && err != nil) {

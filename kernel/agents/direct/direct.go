@@ -471,7 +471,7 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 // 本人尚未选范围就不能因为它已是事项而送出（§6.14 第 15 条优先；设计 §14.14 末行已据此收窄）。
 // shortcut: 资料段是已成文的字符串、无法按 excerpt/meta 再裁，只拦未选择与 none；要按范围裁剪的调用方自行 Trim 并填 RequireLocality。
 func outboundGate(tx *store.Tx, c Call, locality string) error {
-	if c.RequireLocality != "" || c.Material == "" || c.Target == "" {
+	if c.RequireLocality != "" || c.Target == "" {
 		return nil
 	}
 	it, err := items.Get(tx, c.Target)
@@ -507,7 +507,7 @@ func sourceOutbound(tx *store.Tx, id string) (domain.Outbound, bool, error) {
 	}
 	src, err := registry.Get(tx, id)
 	if errors.As(err, &de) && de.Code == domain.CodeNotFound {
-		return domain.Outbound{}, false, nil
+		return domain.Outbound{}, false, nil // 有意取舍：来源登记已删，没有范围可依据，遗留事项按已成为工作现场放行
 	}
 	return src.Outbound, err == nil, err
 }

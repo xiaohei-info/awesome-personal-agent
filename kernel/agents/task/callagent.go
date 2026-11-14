@@ -333,6 +333,8 @@ func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, p
 	switch {
 	case errors.Is(err, model.ErrNotConfigured):
 		return fmt.Errorf("生成型需要模型端点，请在 Web 设置里配置: %w", err)
+	case errors.Is(err, direct.ErrOutboundBlocked):
+		return fmt.Errorf("外发范围不允许把该来源的内容送往生成端点，请在来源页选择外发范围后重试: %w", err)
 	case err != nil:
 		return fmt.Errorf("生成型调用失败: %w", err)
 	case out.HandoffTask != "":
