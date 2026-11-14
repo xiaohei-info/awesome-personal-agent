@@ -4,7 +4,6 @@ import { common } from "../../app/strings";
 const zh = {
   ...common.zh,
   title: "事项",
-  actors: { human: "本人", agent: "agent", system: "系统" } as Record<string, string>,
   actorLabel: "操作者",
   create: "新建",
   phaseFilter: "阶段筛选",
@@ -68,7 +67,6 @@ const zh = {
 const en: typeof zh = {
   ...common.en,
   title: "Items",
-  actors: { human: "owner", agent: "agent", system: "system" },
   actorLabel: "Actor",
   create: "New",
   phaseFilter: "Filter by phase",

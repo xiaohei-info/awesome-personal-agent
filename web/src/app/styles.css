@@ -226,6 +226,9 @@ code, pre { font: 12.5px/1.65 var(--mono); }
 code { padding: 1px 6px; background: var(--sunken); border-radius: 5px; }
 pre { margin: 0 0 12px; padding: 14px 16px; overflow-x: auto; background: var(--sunken); border: 1px solid var(--line); border-radius: var(--r); }
 pre code { padding: 0; background: none; }
+/* 「显示原始值」打开时跟在显示名后的内核 ID（设计 §4.2） */
+.raw-id { margin-left: 4px; font: 11px/1.4 var(--mono); color: var(--ink-3, var(--ink-2)); }
+.error-note details { font-size: 12px; color: var(--ink-2); }
 :is(ul, ol).rows { list-style: none; margin: 0 0 14px; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
 :is(ul, ol).rows > li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
 :is(ul, ol).rows > li:last-child { border-bottom: 0; }

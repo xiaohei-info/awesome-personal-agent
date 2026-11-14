@@ -8,6 +8,8 @@ import { Markdown } from "./Markdown";
 import { ProgressForm } from "../today/ProgressForm";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { PHASE, WAITING } from "../../app/ids";
+import { Pick, Val, useLabel } from "../../app/values";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -35,16 +37,16 @@ export interface Step {
   reason?: string;
 }
 
-const PHASES = ["proposed", "open", "waiting", "needs_input", "done", "dropped"];
 const REL_TYPES = ["relates", "parent", "blocks", "derived_from", "supersedes"];
 
 
 /** 每个变更的操作者徽章：谁、从哪个入口。 */
 export function ActorBadge({ actor }: { actor: Step["actor"] }) {
   const t = useT(strings);
+  const label = useLabel();
   return (
     <span aria-label={t.actorLabel} data-actor={actor.type} className="badge plain">
-      {[t.actors[actor.type] ?? actor.type, actor.via, actor.principal].join(" · ")}
+      {[label("actorType", actor.type), label("via", actor.via), actor.principal].join(" · ")}
     </span>
   );
 }
@@ -91,10 +93,7 @@ function ItemList() {
       <div className="filters">
       <label>
         {t.phaseFilter}
-        <select value={phase} onChange={(e) => setPhase(e.target.value)}>
-          <option value="">{t.all}</option>
-          {PHASES.map((p) => <option key={p}>{p}</option>)}
-        </select>
+        <Pick k="phase" value={phase} onChange={setPhase} ids={PHASE} empty={t.all} />
       </label>
       <label>
         {t.tagFilter}
@@ -127,7 +126,7 @@ function ItemList() {
       <ul aria-label={t.list} className="rows">
         {shown.map((i) => (
           <li key={i.id}>
-            <Link to={i.id}>{i.title}</Link> <span className="badge plain">{i.phase}</span>
+            <Link to={i.id}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
             <span className="sub">
               {[i.status_label, i.tags?.map((t) => "#" + t).join(" "), i.deadline && t.due(new Date(i.deadline).toLocaleString(locale()))].filter(Boolean).join(" · ")}
             </span>
@@ -142,6 +141,7 @@ interface Detail { item: Item; relations: Relation[]; keys: { key: string; domai
 
 function ItemDetail() {
   const t = useT(strings);
+  const label = useLabel();
   const { id = "" } = useParams();
   const { api } = useSession();
   const [d, setD] = useState<Detail | null>(null);
@@ -188,7 +188,7 @@ function ItemDetail() {
       <p className="eyebrow"><Link to="..">{t.back}</Link></p>
       <h1>{item.title}</h1>
       <div className="panel facts">
-        <p>{t.phase(item.phase)}</p>
+        <p>{t.phase(label("phase", item.phase))}</p>
         <p>{t.version(item.version)}</p>
         <p>{t.label(item.status_label || t.notSet)}</p>
         <p>{t.deadline(item.deadline ? new Date(item.deadline).toLocaleString(locale()) : t.notSet)}</p>
@@ -253,7 +253,7 @@ function ItemDetail() {
         <ol aria-label={t.timeline} className="rows">
           {d.steps.map((s) => (
             <li key={s.seq}>
-              <ActorBadge actor={s.actor} /> <strong>{s.type}</strong> <time dateTime={s.at}>{new Date(s.at).toLocaleString(locale())}</time>
+              <ActorBadge actor={s.actor} /> <strong><Val k="event" id={s.type} /></strong> <time dateTime={s.at}>{new Date(s.at).toLocaleString(locale())}</time>
               {s.reason ? ` — ${s.reason}` : ""}
             </li>
           ))}
@@ -304,12 +304,12 @@ function TransitionForm({ onSubmit }: { onSubmit: (b: Record<string, unknown>) =
         onSubmit({ to, reason, ...(evidence ? { evidence } : {}), ...(to === "waiting" && wRef ? { waiting_on: { kind: wKind, ref: wRef } } : {}) });
       }}
     >
-      <label>{t.targetPhase} <select value={to} onChange={(e) => setTo(e.target.value)}>{PHASES.map((p) => <option key={p}>{p}</option>)}</select></label>
+      <label>{t.targetPhase} <Pick k="phase" value={to} onChange={setTo} ids={PHASE} /></label>
       <label>{t.reason} <input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
       <label>{t.evidence} <input value={evidence} onChange={(e) => setEvidence(e.target.value)} /></label>
       {to === "waiting" && (
         <>
-          <label>{t.waitKind} <select value={wKind} onChange={(e) => setWKind(e.target.value)}>{["human", "executor", "external", "time"].map((k) => <option key={k}>{k}</option>)}</select></label>
+          <label>{t.waitKind} <Pick k="waiting" value={wKind} onChange={setWKind} ids={WAITING} /></label>
           <label>{t.waitRef} <input value={wRef} onChange={(e) => setWRef(e.target.value)} /></label>
         </>
       )}
@@ -325,7 +325,7 @@ function RelateForm({ others, onSubmit }: { others: Item[]; onSubmit: (b: { to: 
   return (
     <form className="panel" onSubmit={(e) => { e.preventDefault(); if (to) onSubmit({ to, type }); }}>
       <label>{t.relateTo} <select value={to} onChange={(e) => setTo(e.target.value)}><option value="">{t.choose}</option>{others.map((o) => <option key={o.id} value={o.id}>{o.id}</option>)}</select></label>
-      <label>{t.relType} <select value={type} onChange={(e) => setType(e.target.value)}>{REL_TYPES.map((x) => <option key={x}>{x}</option>)}</select></label>
+      <label>{t.relType} <Pick k="relation" value={type} onChange={setType} ids={REL_TYPES} /></label>
       <button type="submit" disabled={!to}>{t.relate}</button>
     </form>
   );

@@ -61,7 +61,7 @@ describe("审计页", () => {
     const r = await rows();
     await waitFor(() => expect(r.getAllByRole("listitem")).toHaveLength(3));
     expect(r.getAllByLabelText("操作者").map((b) => b.textContent)).toEqual([
-      "agent · cli · del-1", "本人 · web · owner", "agent · cli · del-2",
+      "agent · 命令行 · del-1", "你 · 网页 · owner", "agent · 命令行 · del-2",
     ]);
     expect(r.getByText(/ship it/)).toBeInTheDocument();
   });
@@ -74,7 +74,7 @@ describe("审计页", () => {
     await userEvent.type(screen.getByLabelText("操作者筛选"), "owner");
     await userEvent.click(screen.getByRole("button", { name: "筛选" }));
     await waitFor(async () => expect(await count()).toBe(1));
-    expect((await rows()).getByText(/item\.phase_changed/)).toBeInTheDocument();
+    expect((await rows()).getByText(/改了阶段/)).toBeInTheDocument();
 
     await userEvent.clear(screen.getByLabelText("操作者筛选"));
     await userEvent.type(screen.getByLabelText("对象筛选"), "item_a");
@@ -94,7 +94,7 @@ describe("审计页", () => {
     await userEvent.click(screen.getByRole("button", { name: "只看被拒绝的命令" }));
     await waitFor(async () => expect(await count()).toBe(1));
     const r = await rows();
-    expect(r.getByText(/command\.rejected/)).toBeInTheDocument();
+    expect(r.getByText(/操作被拒绝/)).toBeInTheDocument();
     expect(r.getByText(/high-risk command needs web confirmation/)).toBeInTheDocument();
   });
 

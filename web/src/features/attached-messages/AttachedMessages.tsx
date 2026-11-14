@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { Val } from "../../app/values";
 
 // 形状对应 GET /v1/items/{id}/messages（附录 B.2）。Web 登录拿到全部挂靠消息；
 // 白名单判定在服务端（forward_allowed），本组件只显示，不判定、不修改白名单。
@@ -65,7 +66,7 @@ export function AttachedMessages({ itemId }: { itemId: string }) {
               {" · "}
               <span aria-label={t.allowLabel}>{m.forward_allowed ? t.allowed : t.notAllowed}</span>
               {" · "}
-              <span aria-label={t.stateLabel}>{t.states[m.attach_state] ?? m.attach_state}</span>
+              <span aria-label={t.stateLabel}><Val k="attachState" id={m.attach_state} /></span>
               {!m.forward_allowed && t.ownerOnly}
               {safeHref(m.link) ? <> · <a href={safeHref(m.link)!} rel="noopener noreferrer">{t.source}</a></> : null}
             </li>

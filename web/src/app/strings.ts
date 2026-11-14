@@ -58,6 +58,7 @@ const zh = {
   password: "口令",
   cannotConnect: "无法连接服务",
   language: "界面语言",
+  details: "详情",
   // 事项指向材料的内置关系类型（§6.3）；其余类型原样显示
   relation: { basis: "依据", output: "产出", minutes: "纪要" } as Record<string, string>,
 };
@@ -98,6 +99,7 @@ const en: typeof zh = {
   password: "Password",
   cannotConnect: "Cannot reach the server",
   language: "Interface language",
+  details: "Details",
   relation: { basis: "basis", output: "output", minutes: "minutes" },
 };
 

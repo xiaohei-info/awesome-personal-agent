@@ -49,7 +49,7 @@ describe("动作链接与确认页（flow-export-ext / ACT-EXP-16、17）", () =
     await userEvent.click(screen.getByRole("button", { name: "登录" }));
     expect(await screen.findByRole("heading", { name: "完成事项" })).toBeInTheDocument();
     expect(screen.getByText("写季度报告")).toBeInTheDocument();
-    expect(screen.getByText("阶段：open")).toBeInTheDocument();
+    expect(screen.getByText("阶段：进行中")).toBeInTheDocument();
     expect(writes(s)).toHaveLength(0);
   });
 

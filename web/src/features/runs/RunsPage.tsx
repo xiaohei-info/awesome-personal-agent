@@ -3,6 +3,8 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { RUN_STATE } from "../../app/ids";
+import { Pick, Val } from "../../app/values";
 
 // 形状对应 GET /v1/runs?state=&limit=、GET /v1/runs/{id}（设计 §6.11）。只读展示，不做任何判定；失败处理走 needs_input，不提供重试。
 interface Run {
@@ -46,11 +48,11 @@ function Card({ r }: { r: Run }) {
   return (
     <article aria-label={t.run(r.id)}>
       <h3>
-        {r.category} → {r.target}
+        <Val k="runCategory" id={r.category} /> → {r.target}
       </h3>
       <p className="meta">
-        <strong className={"badge" + (r.state === "succeeded" ? " ok" : r.state === "failed" || r.state === "timeout" ? " bad" : "")}>{t.states[r.state] ?? r.state}</strong>
-        {r.runner && ` · ${r.runner}/${r.launch ?? "—"}`}
+        <strong className={"badge" + (r.state === "succeeded" ? " ok" : r.state === "failed" || r.state === "timeout" ? " bad" : "")}><Val k="runState" id={r.state} /></strong>
+        {r.runner && <> · <Val k="runner" id={r.runner} />/{r.launch ? <Val k="launch" id={r.launch} /> : "—"}</>}
         {r.harness && ` · ${r.harness}`}
       </p>
       <p>
@@ -59,7 +61,7 @@ function Card({ r }: { r: Run }) {
       </p>
       <p>
         {t.access}
-        {r.access ? <code>{r.access}</code> : t.none}
+        {r.access ? <Val k="perm" id={r.access} /> : t.none}
       </p>
       {r.basis ? (
         <p>
@@ -115,14 +117,7 @@ export function RunsPage() {
       <div className="filters">
       <label>
         {t.state}
-        <select aria-label={t.state} value={state} onChange={(e) => setState(e.target.value)}>
-          <option value="">{t.all}</option>
-          {Object.entries(t.states).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
+        <Pick k="runState" label={t.state} value={state} onChange={setState} ids={RUN_STATE} empty={t.all} />
       </label>
       </div>
       {error && (

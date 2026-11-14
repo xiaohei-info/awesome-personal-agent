@@ -49,10 +49,10 @@ describe("运行记录页（flow-bg-main-session、flow-outcall-limits）", () =
     mount(server().impl);
     const a = await screen.findByRole("article", { name: "运行 r1" });
     expect(within(a).getByText("运行中")).toBeInTheDocument();
-    expect(within(a).getByText(/main_session/)).toBeInTheDocument();
-    expect(within(a).getByText(/headless/)).toBeInTheDocument();
+    expect(within(a).getByText(/主会话/)).toBeInTheDocument();
+    expect(within(a).getByText(/后台启动/)).toBeInTheDocument();
     expect(within(a).getByText("sess-abc")).toBeInTheDocument();
-    expect(within(a).getByText("edit")).toBeInTheDocument();
+    expect(within(a).getByText(/可改文件/)).toBeInTheDocument();
     expect(within(a).getByText(/handle-labelled/)).toBeInTheDocument();
     expect(within(a).getByText(/策略版本 7/)).toBeInTheDocument();
   });

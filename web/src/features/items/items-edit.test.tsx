@@ -78,7 +78,7 @@ describe("Web 新建与编辑事项", () => {
     const post = l.calls.find((c) => c.method === "POST" && c.path === "/v1/items")!;
     expect(post.body).toMatchObject({ kind: "task", phase: "open", title: "WB-NEW 订机票", project: "acc-home", planned_for: "2030-03-04", body: BODY });
     expect(post.body.deadline).toBe(new Date("2030-03-05T18:00").toISOString());
-    expect((await timelineText())).toContain("item.created");
+    expect((await timelineText())).toContain("新建了事项");
   });
 
   it("新建缺标题时不发请求", async () => {
@@ -135,7 +135,7 @@ describe("Web 新建与编辑事项", () => {
     expect(patch.ifMatch).toBe("3");
     expect(patch.body).toEqual({ title: "新标题", body: "- a\n- b" });
     expect(await screen.findByText("版本：4")).toBeInTheDocument();
-    expect(await timelineText()).toContain("item.updated");
+    expect(await timelineText()).toContain("修改了事项");
   });
 
   it("版本冲突时显示服务端原因，不留本地假状态", async () => {
@@ -165,7 +165,7 @@ describe("Web 新建与编辑事项", () => {
     const post = l.calls.find((c) => c.path === "/v1/items/item_x/correlation-keys")!;
     expect(post.body).toEqual({ key: "fm-thread-5" });
     expect(post.ifMatch).toBe("1");
-    expect(await timelineText()).toContain("item.updated");
+    expect(await timelineText()).toContain("修改了事项");
   });
 });
 

@@ -3,10 +3,11 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { RULE_MODE } from "../../app/ids";
+import { Pick, Val } from "../../app/values";
 
 // 形状对应 GET /v1/rules、PATCH /v1/rules/{id}/mode（附录 B.2）与 GET /v1/audit/events（§14.8）。
 // 谁能切、切到什么、观察记录怎么产生都由服务端判定；本页只搬运选择并原样显示拒绝原因，被拒绝时模式保持原值。只改模式，不编辑规则内容。
-const MODES = ["off", "observe", "auto"];
 interface Rule { key: string; pack: string; group: string; id: string; mode: string }
 interface Observed { seq: number; object: string; at: string; reason?: string; payload?: { would_do?: unknown } }
 
@@ -73,11 +74,9 @@ export function RulesPage() {
       {rules?.map((r) => (
         <section key={r.key} aria-label={r.key} className="panel">
           <h3>{r.key}</h3>
-          <p className="sub">{r.pack} · {r.group}</p>
+          <p className="sub"><Val k="pack" id={r.pack} /> · <Val k="ruleGroup" id={r.group} /></p>
           <div className="actions">
-            <select aria-label={t.mode(r.key)} value={r.mode} onChange={(e) => void setMode(r, e.target.value)}>
-              {MODES.map((m) => <option key={m}>{m}</option>)}
-            </select>
+            <Pick k="ruleMode" label={t.mode(r.key)} value={r.mode} onChange={(m) => void setMode(r, m)} ids={RULE_MODE} />
             <button type="button" aria-label={t.review(r.key)} onClick={() => setOpen(open === r.key ? null : r.key)}>
               {open === r.key ? t.hideObs : t.showObs}
             </button>

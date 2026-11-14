@@ -3,6 +3,7 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { Val, useLabel } from "../../app/values";
 
 // 形状对应 GET /v1/audit/events 返回的 Step。哪些能撤销、是否最新、授权都由服务端的 item.revert 判定。
 interface Step {
@@ -25,15 +26,16 @@ const REVERTIBLE = new Set(["item.updated", "item.phase_changed", "decision.reso
 
 function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: (s: Step) => Promise<void> }) {
   const t = useT(strings);
+  const label = useLabel();
   const [busy, setBusy] = useState(false);
   const title = s.payload?.item?.title;
   const who = [s.actor.principal, s.actor.on_behalf_of && t.onBehalfOf(s.actor.on_behalf_of), s.resolved_via === "chat" && t.viaChat, s.grant && t.viaGrant(s.grant)].filter(Boolean).join(" · ");
   const canRevert = REVERTIBLE.has(s.type) && !reverted;
 
   return (
-    <article aria-label={`${s.type} #${s.seq}`}>
+    <article aria-label={`${label("event", s.type)} #${s.seq}`}>
       <h3>
-        {t.types[s.type] ?? s.type}
+        <Val k="event" id={s.type} />
         {t.colon}
         {title ?? s.object}
       </h3>

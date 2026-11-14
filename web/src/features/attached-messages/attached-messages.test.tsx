@@ -50,7 +50,7 @@ describe("事项页挂靠消息（ACT-FWD-04）", () => {
     expect(within(rows[1]).getByLabelText("发送者")).toHaveTextContent("mallory");
     expect(within(rows[1]).getByLabelText("核实状态")).toHaveTextContent("未核实");
     expect(within(rows[1]).getByLabelText("白名单")).toHaveTextContent("未进白名单");
-    expect(within(rows[1]).getByLabelText("处理状态")).toHaveTextContent("待转发");
+    expect(within(rows[1]).getByLabelText("处理状态")).toHaveTextContent("待转给 agent");
     expect(rows[1]).toHaveTextContent("仅本人可见，不进入无人值守会话，不算已处理");
 
     // 发送者缺失：显示为未知且未核实，不伪造发送者

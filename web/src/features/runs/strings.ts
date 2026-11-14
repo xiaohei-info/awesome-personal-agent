@@ -4,7 +4,6 @@ import { common } from "../../app/strings";
 const zh = {
   ...common.zh,
   title: "运行记录",
-  states: { queued: "排队中", running: "运行中", succeeded: "成功", failed: "失败", timeout: "超时" } as Record<string, string>,
   run: (id: string) => `运行 ${id}`,
   session: "会话：",
   access: "权限档位：",
@@ -27,7 +26,6 @@ const zh = {
 const en: typeof zh = {
   ...common.en,
   title: "Runs",
-  states: { queued: "queued", running: "running", succeeded: "succeeded", failed: "failed", timeout: "timed out" },
   run: (id) => `Run ${id}`,
   session: "Session: ",
   access: "Access level: ",

@@ -6,6 +6,7 @@ import { ScreeningBadge } from "../decision-screening/ScreeningBadge";
 import { RejectionNote, type Rejection } from "./RejectionNote";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { Val } from "../../app/values";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。排序之外的判定（web_only、权限、只认第一次回答）都在服务端。
 export interface AskOption {
@@ -98,7 +99,7 @@ function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionI
       </header>
       <p className="meta">
         <span>{item.title}</span>
-        {item.priority && item.priority !== "normal" && <span className="dot">{item.priority}</span>}
+        {item.priority && item.priority !== "normal" && <span className="dot"><Val k="priority" id={item.priority} /></span>}
         {ask.risk_class === "web_only" && <span className="badge bad plain">{t.webOnly}</span>}
         <ScreeningBadge pending={ask.screening_pending} />
       </p>

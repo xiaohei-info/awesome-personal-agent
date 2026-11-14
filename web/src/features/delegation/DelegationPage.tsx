@@ -3,8 +3,9 @@ import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { common } from "../../app/strings";
-import { lang, locale, useT, whyNext } from "../../app/i18n";
+import { codeText, lang, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { Val, useLabel } from "../../app/values";
 
 // 形状对应 GET /v1/items?kind=delegation、GET /v1/audit/events?type=delegation.reported、GET /v1/executors?project=、
 // PATCH /v1/items/{id}（改派，If-Match）、POST /v1/delegations（重新委派）。
@@ -30,12 +31,13 @@ const msg = (e: unknown) => {
   if (!(e instanceof ApiError)) return e instanceof Error ? e.message : "request failed";
   const t = strings[lang()];
   const allowed = e.body.allowed ? t.allowedTail(e.body.allowed.length ? e.body.allowed.join(common[lang()].listSep) : t.ownerOnly) : "";
-  return whyNext(e.body) + allowed;
+  return codeText(e.body) + allowed;
 };
 
 function Row({ c, report, onDone }: { c: Child; report?: Step; onDone: () => Promise<void> }) {
   const { api } = useSession();
   const t = useT(strings);
+  const label = useLabel();
   const [mode, setMode] = useState<"reassign" | "redelegate" | null>(null);
   const [execs, setExecs] = useState<Executor[]>([]);
   const [pick, setPick] = useState("");
@@ -85,13 +87,13 @@ function Row({ c, report, onDone }: { c: Child; report?: Step; onDone: () => Pro
         {t.executor}
         <strong>{c.assignee ?? t.unassigned}</strong>
         {t.state}
-        {t.phases[c.phase] ?? c.phase}
+        <Val k="phase" id={c.phase} />
         {c.project && t.project(c.project)}
       </p>
       <p>
         {t.progress}
         {c.status_label || t.noReport}
-        {r && t.report(t.outcomes[r.outcome] ?? r.outcome, new Date(report!.at).toLocaleString(locale()))}
+        {r && t.report(label("outcome", r.outcome), new Date(report!.at).toLocaleString(locale()))}
       </p>
       {(ev.commit || ev.pr || ev.branch || ev.link) && (
         <ul aria-label={t.evidence}>

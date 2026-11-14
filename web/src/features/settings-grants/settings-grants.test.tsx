@@ -198,8 +198,8 @@ describe("授权单页（flow-authz-matrix）", () => {
     await userEvent.click(within(item).getByRole("button", { name: "使用记录" }));
     const list = await within(item).findByRole("list", { name: "使用记录" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
-    expect(list).toHaveTextContent("grant.issued");
-    expect(list).toHaveTextContent("item.updated");
+    expect(list).toHaveTextContent("签发了临时授权");
+    expect(list).toHaveTextContent("修改了事项");
     expect(list).toHaveTextContent("it_1");
     expect(s.calls.some((c) => c.path.startsWith("/v1/audit/events") && new URL(c.path, "http://x").searchParams.get("grant") === "grt_a")).toBe(true);
   });
