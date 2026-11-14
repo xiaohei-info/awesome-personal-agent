@@ -333,3 +333,37 @@ func TestModelUnavailableDetailSplitsJudgeAndGenerate(t *testing.T) {
 	}
 	want(detail(e), "not_configured", "failing", "failing")
 }
+
+// 暂停模型（§8.7、§15.2）：暂停期间未判定的事件记 models_paused，进积压提醒；模型信号是正常的"已暂停"，
+// 端点此前的失败标记不报警，整体仍健康。
+func TestPausedModelsAreHealthyAndCountedApart(t *testing.T) {
+	e := setup(t, fakePacks(nil))
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		if _, err := policy.Update(tx, owner.Actor, "pause", func(p *policy.Policy) error {
+			p.GenerateEndpoint = policy.GenerateEndpoint{URL: "http://127.0.0.1:9/v1", Model: "m", APIKey: "k"}
+			p.ModelsPaused = true
+			return nil
+		}); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO direct_health (id, since, last_error) VALUES (1, 1, 'boom')`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link,
+			occurred_at, correlation_keys, sender, sender_verified, disposition, unjudged_reason) VALUES ('d', 'e1', 'e1', 'src_rss', 'run', 't', 's', '', '', '', 0, '[]', '', 0, 'unjudged', 'models_paused')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r := e.report(auth.Observer)
+	m := r.byID("model_unavailable")
+	md, _ := m.Detail.(map[string]any)
+	if !m.OK || md["paused"] != true || md["judge"] != "paused" || md["generate"] != "paused" || md["endpoint"] != "" || !r.Healthy {
+		t.Fatalf("model signal %+v healthy=%v", m, r.Healthy)
+	}
+	b := r.byID("unjudged_backlog")
+	bd, _ := b.Detail.(map[string]any)
+	if b.OK || b.Count != 1 || bd["models_paused"] != float64(1) || bd["model_unavailable"] != float64(0) {
+		t.Fatalf("backlog signal %+v", b)
+	}
+}

@@ -98,6 +98,8 @@ var (
 		{key: "judge_endpoint", get: getJudge, set: setJudge},
 		{key: "generate_endpoint", get: getGenerate, set: setGenerate},
 		sect("screening_timeout_ms", func(p *kpolicy.Policy) *int { return &p.ScreeningTimeoutMs }),
+		// 暂停模型：两个端点原样保留，内核按未配置运行（§8.7）；没有端点时内核规整为 false。
+		sect("models_paused", func(p *kpolicy.Policy) *bool { return &p.ModelsPaused }),
 		// v0.1 的请求形状：只在 PUT 里被接受（等同只设生成端点，位置 external），响应一律是新形状（附录 B.2）。
 		{key: legacyKey, set: setLegacy},
 	}
@@ -260,7 +262,7 @@ func read(st *store.Store, secs []section) core.Handler {
 			v   int
 			pol kpolicy.Policy
 		)
-		if err := st.View(r.Context(), func(tx *store.Tx) (err error) { v, pol, err = kpolicy.Current(tx); return }); err != nil {
+		if err := st.View(r.Context(), func(tx *store.Tx) (err error) { v, pol, err = kpolicy.Stored(tx); return }); err != nil {
 			return err
 		}
 		return core.WriteJSON(w, http.StatusOK, render(v, pol, secs))
@@ -309,7 +311,7 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 			if err != nil {
 				return err
 			}
-			_, pol, err = kpolicy.Current(tx)
+			_, pol, err = kpolicy.Stored(tx) // 设置页显示存储的原文：暂停时端点照常在内
 			return err
 		})
 		if errors.Is(err, kpolicy.ErrInvalid) {

@@ -75,12 +75,14 @@ interface Secret {
 const at = (s?: string) => (s && !s.startsWith("0001") ? s : "—");
 
 // 积压事件的状态（§9.3）：只显示说明文字，不露出内部值。
-const backlogState = (t: { expired: string; undecided: string; waitModel: string }, v: SourceEvent): { label: string; cls: string } =>
+const backlogState = (t: { expired: string; undecided: string; waitModel: string; waitPaused: string }, v: SourceEvent): { label: string; cls: string } =>
   v.disposition === "expired"
     ? { label: t.expired, cls: "badge plain" }
     : v.unjudged_reason === "undecided"
       ? { label: t.undecided, cls: "badge" }
-      : { label: t.waitModel, cls: "badge warn" };
+      : v.unjudged_reason === "models_paused"
+        ? { label: t.waitPaused, cls: "badge plain" }
+        : { label: t.waitModel, cls: "badge warn" };
 
 // 两步确认的批量忽略：第一次点击只展开确认，避免误触一次忽略整批。
 function IgnoreAll({ label, body, onDone }: { label: string; body: Record<string, unknown>; onDone: (err: string | null, n: number) => void }) {

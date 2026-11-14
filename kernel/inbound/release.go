@@ -66,6 +66,13 @@ func rejudgeSpec() command.Spec {
 			v, err := parseRelease(in)
 			return authz.Object{ID: v.Event}, err
 		},
+		Validate: func(tx *store.Tx, _ authz.Object, _ json.RawMessage) error {
+			_, pol, err := policy.Current(tx)
+			if err != nil {
+				return err
+			}
+			return pausedErr(pol)
+		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parseRelease(c.Input)
 			if v.Event == "" {
@@ -237,7 +244,7 @@ func (s *Service) releaseBatch(ctx context.Context, call func(releaseIn, string)
 		case got.Disposition == domain.DispositionPending: // 处理出错留在 pending：按进入建议流计，保证不超额，下一次调用接手
 			proposed++
 			stop = true
-		case got.Disposition == domain.DispositionUnjudged && got.UnjudgedReason == domain.UnjudgedModelUnavailable:
+		case got.Disposition == domain.DispositionUnjudged && (got.UnjudgedReason == domain.UnjudgedModelUnavailable || got.UnjudgedReason == domain.UnjudgedModelsPaused):
 			stop = true
 		}
 	}

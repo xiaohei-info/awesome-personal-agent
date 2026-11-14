@@ -69,7 +69,7 @@ func (pr *prober) apiKey(ctx context.Context, kind, target string, in *string) (
 		return *in, nil
 	}
 	var pol kpolicy.Policy
-	if err := pr.st.View(ctx, func(tx *store.Tx) (err error) { _, pol, err = kpolicy.Current(tx); return }); err != nil {
+	if err := pr.st.View(ctx, func(tx *store.Tx) (err error) { _, pol, err = kpolicy.Stored(tx); return }); err != nil {
 		return "", err
 	}
 	saved, key := pol.GenerateEndpoint.URL, pol.GenerateEndpoint.APIKey

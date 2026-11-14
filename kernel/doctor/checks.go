@@ -63,8 +63,12 @@ func tier(f Facts) Check {
 	gen := f.Policy.GenerateEndpoint
 	model2 := gen.URL != "" && gen.Model != ""
 	host := hasHost(f)
-	c := Check{Name: Tier, Status: OK, Data: map[string]any{"model_endpoint": model2, "host": host}}
+	c := Check{Name: Tier, Status: OK, Data: map[string]any{"model_endpoint": model2, "host": host, "models_paused": f.Policy.ModelsPaused}}
 	switch {
+	case f.Policy.ModelsPaused: // 生效中的策略里端点已视为未配置
+		c.Data["tier"] = 1
+		c.Why = "tier 1 (kernel only) while the models are paused: the endpoints are kept but not called; this is a chosen state, not an error"
+		c.Next = "to use the models again, resume them in Web settings (model endpoints)"
 	case !model2:
 		c.Data["tier"] = 1
 		c.Why = "tier 1 (kernel only): no generate endpoint is configured; this is a complete mode, not an error"
@@ -85,6 +89,10 @@ func tier(f Facts) Check {
 
 func modelEndpoint(ctx context.Context, f Facts, e Env) Check {
 	c := Check{Name: ModelEndpoint, Status: OK}
+	if f.Policy.ModelsPaused {
+		c.Why, c.Next = "paused: the endpoints are kept but the kernel does not call them, so they are not probed", "resume the models in Web settings (model endpoints) when you want them to work"
+		return c
+	}
 	c.Add(ProbeJudge(ctx, f.Policy.JudgeEndpoint, e))
 	c.Add(ProbeGenerate(ctx, f.Policy.GenerateEndpoint, e))
 	switch c.Status {

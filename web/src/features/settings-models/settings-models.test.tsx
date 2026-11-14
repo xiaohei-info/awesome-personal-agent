@@ -16,6 +16,7 @@ function server(init: { judge?: any; generate?: any } = {}) {
     judge_endpoint: "judge" in init ? init.judge : { url: "http://cls.local/judge", api_key_set: false, api_key_hint: "", protocol: "probability-judgment/1", model: "", locality: "local", timeout_ms: 10000, max_batch: 32, max_material_chars: 8000 },
     generate_endpoint: "generate" in init ? init.generate : { url: "https://llm.example.com/v1", api_key_set: true, api_key_hint: "9f2c", model: "model-a", locality: "external" },
     screening_timeout_ms: 30000,
+    models_paused: false,
   };
   const puts: any[] = [];
   const posts: { path: string; body: any }[] = [];
@@ -40,6 +41,7 @@ function server(init: { judge?: any; generate?: any } = {}) {
         doc[k] = { ...rest, api_key_set: keys[k] !== "", api_key_hint: keys[k].length >= 12 ? keys[k].slice(-4) : "" };
       }
       if ("screening_timeout_ms" in body) doc.screening_timeout_ms = body.screening_timeout_ms;
+      if ("models_paused" in body) doc.models_paused = body.models_paused;
       version++;
     }
     return json(200, { version, ...doc });
@@ -241,5 +243,34 @@ describe("设置 › 模型", () => {
     await save("筛选超时");
     await t.findByRole("status");
     expect(s.puts.at(-1)).toEqual({ screening_timeout_ms: 45000 });
+  });
+
+  it("暂停开关：运行中 ↔ 已暂停只发 models_paused；暂停时两张卡片照常可编辑并标出已暂停；没有端点时不显示开关", async () => {
+    const s = server();
+    mount(s.impl);
+    const sw = await screen.findByRole("switch", { name: "模型运行开关" });
+    expect(sw).toBeChecked();
+    expect(screen.getByRole("region", { name: "模型运行开关" })).toHaveTextContent("运行中");
+    expect((await card("生成端点")).queryByText("已暂停")).toBeNull();
+
+    await userEvent.click(sw);
+    expect(await screen.findByRole("switch", { name: "模型运行开关" })).not.toBeChecked();
+    expect(s.puts.at(-1)).toEqual({ models_paused: true });
+    expect(screen.getByRole("region", { name: "模型运行开关" })).toHaveTextContent("已暂停");
+    const g = await card("生成端点");
+    expect(within(g.getByRole("heading")).getByText("已暂停")).toBeInTheDocument();
+    expect(within((await card("判断端点")).getByRole("heading")).getByText("已暂停")).toBeInTheDocument();
+    expect(g.getByLabelText("模型")).toBeEnabled();
+    expect(g.getByRole("button", { name: "测试连接" })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("switch", { name: "模型运行开关" }));
+    expect(await screen.findByRole("switch", { name: "模型运行开关" })).toBeChecked();
+    expect(s.puts.at(-1)).toEqual({ models_paused: false });
+  });
+
+  it("没有任何端点时不显示暂停开关", async () => {
+    mount(server({ judge: null, generate: null }).impl);
+    await screen.findByRole("region", { name: "还没有配置模型端点" });
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 });

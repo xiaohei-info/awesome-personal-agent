@@ -47,6 +47,15 @@ func noJudgeEndpoint() error {
 		"set a judge endpoint in Settings first, or release the backlog with the chat endpoint (apa source backlog rejudge)")
 }
 
+// pausedErr 在本人暂停了模型时拒绝需要模型的积压操作（影子打分、放开重判，§8.7、§9.3）；pol 是生效中的策略。
+func pausedErr(pol policy.Policy) error {
+	if !pol.ModelsPaused {
+		return nil
+	}
+	return domain.NewError(domain.CodeModelsPaused, "the models are paused in settings, so this backlog step cannot call them",
+		"resume the models in Settings > Models, then run it again")
+}
+
 func scoreSpec(s *Service) command.Spec {
 	return command.Spec{Name: CmdBacklogScore, Action: authz.ActionManageSource, Tier: authz.TierWords,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
@@ -58,10 +67,16 @@ func scoreSpec(s *Service) command.Spec {
 				return errors.New("inbound: the judge cannot score in batches")
 			}
 			_, pol, err := policy.Current(tx)
-			if err == nil && (pol.JudgeEndpoint == nil || pol.JudgeEndpoint.URL == "") {
-				err = noJudgeEndpoint()
+			if err != nil {
+				return err
 			}
-			return err
+			if err := pausedErr(pol); err != nil {
+				return err
+			}
+			if pol.JudgeEndpoint == nil || pol.JudgeEndpoint.URL == "" {
+				return noJudgeEndpoint()
+			}
+			return nil
 		},
 		Apply: func(*command.Ctx) (any, error) { return nil, nil }}
 }

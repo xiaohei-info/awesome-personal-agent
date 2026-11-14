@@ -582,6 +582,8 @@ func withdrawn(ev domain.SourceEvent, prop proposal, verdict string) disposeIn {
 	switch {
 	case strings.HasPrefix(verdict, unavailablePrefix):
 		d.UnjudgedReason = domain.UnjudgedModelUnavailable
+	case strings.HasPrefix(verdict, pausedPrefix):
+		d.UnjudgedReason = domain.UnjudgedModelsPaused
 	case strings.HasPrefix(verdict, outboundUnsetPrefix):
 		d.UnjudgedReason = domain.UnjudgedOutboundUnset
 	case strings.HasPrefix(verdict, outboundNonePrefix):
@@ -621,6 +623,7 @@ func (s *Service) observeAlert(c *command.Ctx, v disposeIn) error {
 // 其余未判定是判断未定。
 const (
 	unavailablePrefix   = "model unavailable: "
+	pausedPrefix        = "models paused: "
 	outboundUnsetPrefix = "outbound scope not chosen: "
 	outboundNonePrefix  = "outbound scope is none: "
 )
@@ -728,6 +731,9 @@ func (s *Service) ask(ctx context.Context, src domain.Source, ev domain.SourceEv
 		Material: material(ev, o), Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
 	if err != nil {
 		return asked{}, err
+	}
+	if v.Paused {
+		return asked{unavailable: pausedPrefix + "the owner paused the models in settings"}, nil
 	}
 	if v.Unavailable {
 		return asked{unavailable: unavailablePrefix + "no judge endpoint or chat endpoint answered"}, nil
@@ -997,6 +1003,9 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 	}
 	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: extractPack, Template: extract, Input: eventInput(src, ev, "", nil), Material: text, RequireLocality: locality,
 		Scope: direct.Scope{Source: src.ID}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
+	if errors.Is(err, model.ErrPaused) {
+		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{judgment: a.judgment}, pausedPrefix+err.Error()))
+	}
 	if errors.Is(err, model.ErrNotConfigured) || errors.Is(err, direct.ErrUnavailable) {
 		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{judgment: a.judgment}, unavailablePrefix+err.Error()))
 	}

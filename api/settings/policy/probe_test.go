@@ -241,3 +241,34 @@ func TestPutIgnoresKeyHint(t *testing.T) {
 		t.Fatalf("%+v", p.GenerateEndpoint)
 	}
 }
+
+// 暂停模型（§8.7）：PUT models_paused 是一次策略变更；暂停时 GET 照样给出两个端点与已设置的密钥，
+// 内核生效中的策略里没有端点；本人手动的获取模型与测试连接照常可用、沿用已存密钥；恢复后内核立即看到原配置。
+func TestModelsPausedKeepsSettingsAndManualProbes(t *testing.T) {
+	e := setup(t)
+	f := newFake(t, okModels)
+	e.endpoints(`{"generate_endpoint":{"url":"` + f.srv.URL + `/v1","model":"model-a","api_key":"` + storedKey + `","locality":"local"}}`)
+	out := e.endpoints(`{"models_paused":true}`)
+	if string(out["models_paused"]) != "true" || !strings.Contains(string(out["generate_endpoint"]), `"api_key_set":true`) {
+		t.Fatalf("PUT while paused %s", out)
+	}
+	if rec := e.do("GET", routes[2], "", e.web); !strings.Contains(rec.Body.String(), `"models_paused":true`) || !strings.Contains(rec.Body.String(), `"model":"model-a"`) {
+		t.Fatalf("GET while paused %s", rec.Body)
+	}
+	if _, p := e.current(); p.GenerateEndpoint.URL != "" || !p.ModelsPaused {
+		t.Fatalf("kernel must see no endpoint while paused: %+v", p.GenerateEndpoint)
+	}
+	if rec := e.do("POST", modelsPath, `{"endpoint":"generate","url":"`+f.srv.URL+`/v1","api_key":"***"}`, e.web); decode(t, rec)["ok"] != true {
+		t.Fatalf("models while paused %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", testPath, `{"endpoint":"generate","config":{"url":"`+f.srv.URL+`/v1","model":"model-a","locality":"local"}}`, e.web); decode(t, rec)["code"] != "ok" {
+		t.Fatalf("test while paused %d %s", rec.Code, rec.Body)
+	}
+	if got := f.requests(); len(got) != 2 || !strings.HasSuffix(got[1], "Bearer "+storedKey) {
+		t.Fatalf("manual probes must reuse the stored key: %v", got)
+	}
+	e.endpoints(`{"models_paused":false}`)
+	if _, p := e.current(); p.GenerateEndpoint.APIKey != storedKey || p.ModelsPaused {
+		t.Fatalf("resumed: %+v", p)
+	}
+}

@@ -103,6 +103,7 @@ function Detail({ s }: { s: Signal }) {
     return (
       <ul>
         {d.model_unavailable > 0 && <li>{t.waitModel(d.model_unavailable)}</li>}
+        {d.models_paused > 0 && <li>{t.waitPaused(d.models_paused)}</li>}
         {d.undecided > 0 && <li>{t.undecided(d.undecided)}</li>}
         {d.sources?.length > 0 && <li>{t.bySource(d.sources.map((x: { source: string; count: number }) => t.sourceCount(x.source, x.count)).join(t.listSep))}</li>}
         {d.expired > 0 && <li>{t.expired(d.expired)}</li>}
@@ -152,12 +153,14 @@ export function HealthPage() {
           {report.signals.map((s) => {
             const title = t.signals[s.id] ?? s.id;
             const links = META[s.id] ?? [];
+            // 本人暂停了模型：正常状态，标"已暂停"而不是"正常"或告警（§15.2）。
+            const paused = s.ok && s.id === "model_unavailable" && (s.detail as { paused?: boolean } | undefined)?.paused === true;
             return (
               <article key={s.id} aria-label={title} className="signal">
                 <h3>
                   {title}
-                  <span className={"badge " + (s.ok ? "ok" : s.severity === "warning" ? "warn" : "bad")}>
-                    {s.ok ? t.ok : s.severity === "warning" ? t.pending(s.count) : t.abnormal(s.count)}
+                  <span className={"badge " + (paused ? "plain" : s.ok ? "ok" : s.severity === "warning" ? "warn" : "bad")}>
+                    {paused ? t.paused : s.ok ? t.ok : s.severity === "warning" ? t.pending(s.count) : t.abnormal(s.count)}
                   </span>
                 </h3>
                 {!s.ok && s.why && <p>{s.why}</p>}
