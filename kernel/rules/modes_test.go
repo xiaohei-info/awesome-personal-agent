@@ -66,6 +66,25 @@ func TestInitialModeByRuleClass(t *testing.T) {
 	}
 }
 
+// Classes 与初始模式同一推定：提醒类（follow_up、stale）无论包里写了什么 mode 都是 reminder，其余是 action。
+func TestClassesFollowTheLoaderInference(t *testing.T) {
+	e := newEnv(t, map[string]string{"cat/pack.yaml": reminderPack}, nil)
+	want := map[string]string{
+		"cat/clock_rules/follow": ClassReminder, "cat/clock_rules/stale": ClassReminder,
+		"cat/clock_rules/stale-off": ClassReminder, "cat/clock_rules/stale-obs": ClassReminder,
+		"cat/clock_rules/sweep": ClassAction, "cat/event_rules/timer": ClassAction,
+	}
+	got := Classes(e.loads)
+	if len(got) != len(want) {
+		t.Fatalf("classes = %v", got)
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Errorf("%s class = %q, want %q", k, got[k], w)
+		}
+	}
+}
+
 // ACT-RULE-12：提醒类规则本人关掉后，内容变化保持本人的选择，不回退 observe、不产生告警；动作类仍回 observe（见 TestContentChangeFallsBackToObserve）。
 func TestReminderRuleKeepsOwnersChoiceOnContentChange(t *testing.T) {
 	e := newEnv(t, map[string]string{"cat/pack.yaml": reminderPack}, nil)

@@ -85,6 +85,26 @@ type State struct {
 	ID    string `json:"id"`
 	Mode  string `json:"mode"`
 	Hash  string `json:"hash"`
+	// Class 是规则类别（§14.8），只在读取时按当前已加载的能力包填写，不存账本；规则已不在加载的包里时为空。
+	Class string `json:"class,omitempty"`
+}
+
+// 规则类别（§14.8）：提醒类开箱 auto，动作类初始 observe。由加载器从规则类型与动作推定，能力包不能自报。
+const (
+	ClassReminder = "reminder"
+	ClassAction   = "action"
+)
+
+// Classes 返回当前已加载能力包里每条有模式的规则的类别，键是规则键；与 Reconcile 定初始模式用同一推定（defs）。
+func Classes(src PackSource) map[string]string {
+	out := map[string]string{}
+	for _, d := range defs(src) {
+		out[d.Key] = ClassAction
+		if d.Reminder {
+			out[d.Key] = ClassReminder
+		}
+	}
+	return out
 }
 
 func invalid(why string) error {

@@ -288,7 +288,7 @@ func TestWebSessionSwitchesRuleModeAndRecordsEvent(t *testing.T) {
 	e := setup(t)
 	rec := e.do("GET", "/v1/rules", "", e.bearer(auth.Observer))
 	list := decode[struct{ Rules []rules.State }](t, rec)
-	if len(list.Rules) != 1 || list.Rules[0].Key != ruleKey || list.Rules[0].Mode != rules.ModeObserve {
+	if len(list.Rules) != 1 || list.Rules[0].Key != ruleKey || list.Rules[0].Mode != rules.ModeObserve || list.Rules[0].Class != rules.ClassAction {
 		t.Fatalf("rules = %+v (%s)", list.Rules, rec.Body)
 	}
 
@@ -296,7 +296,7 @@ func TestWebSessionSwitchesRuleModeAndRecordsEvent(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("switch: %d %s", rec.Code, rec.Body)
 	}
-	if st := decode[rules.State](t, rec); st.Mode != rules.ModeAuto || st.Key != ruleKey {
+	if st := decode[rules.State](t, rec); st.Mode != rules.ModeAuto || st.Key != ruleKey || st.Class != rules.ClassAction {
 		t.Fatalf("state = %+v", st)
 	}
 	again := decode[struct{ Rules []rules.State }](t, e.do("GET", "/v1/rules", "", e.bearer(auth.Observer)))

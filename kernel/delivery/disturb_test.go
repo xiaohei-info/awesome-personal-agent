@@ -243,3 +243,36 @@ func TestDeliveryWithoutItemNeedsOrigin(t *testing.T) {
 		})
 	}
 }
+
+// Today 与日上限同口径：pushed 数到上限时下一条恰好被压；超限说明、注入、健康不计入；被压的按原因分开计数。
+func TestTodayCountsMatchDailyCap(t *testing.T) {
+	e := newEnv(t, Options{})
+	pol := capPolicy(2, policy.Mute{Scope: policy.MuteItem, ID: "M"})
+	today := func() TodayCounts {
+		var c TodayCounts
+		e.view(func(tx *store.Tx) (err error) { c, err = e.q.Today(tx, pol); return })
+		return c
+	}
+	e.gated(pol, "inj", "i0", domain.DeliveryReminder, RouteInject, Target{})
+	e.gated(pol, "h", "i1", domain.DeliveryHealth, "channel:x", Target{})
+	e.gated(pol, "m", "M", domain.DeliveryReminder, "channel:x", Target{})
+	e.gated(pol, "r1", "i2", domain.DeliveryReminder, "channel:x", Target{})
+	if c := today(); c.Pushed != 1 || c.Cap != 2 || c.SuppressedMuted != 1 || c.SuppressedDailyCap != 0 {
+		t.Fatalf("before cap: %+v", c)
+	}
+	e.gated(pol, "r2", "i3", domain.DeliveryDecision, "channel:x", Target{})
+	if c := today(); c.Pushed != 2 {
+		t.Fatalf("pushed reaches the cap: %+v", c)
+	}
+	// pushed == cap：下一条被压，并补发一条说明；说明不计入 pushed。
+	if d := e.gated(pol, "r3", "i4", domain.DeliveryBrief, "channel:x", Target{}); d.Suppressed != SuppressedDailyCap {
+		t.Fatalf("next must be capped: %+v", d)
+	}
+	if c := today(); c.Pushed != 2 || c.SuppressedDailyCap != 1 || c.SuppressedMuted != 1 {
+		t.Fatalf("after cap: %+v", c)
+	}
+	e.now = e.now.Add(24 * time.Hour)
+	if c := today(); c != (TodayCounts{Cap: 2}) {
+		t.Fatalf("a new day starts from zero: %+v", c)
+	}
+}

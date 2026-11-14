@@ -51,7 +51,7 @@ v0.2.0 在 v0.1 之上加入判断分层、入站流水线、三档运行形态�
 
 ### 新增
 
-入站六步流水线（去重、归属、规则、初筛、起草、合并）；判断记录与“判断与校准”页；来源规则的出口 `proposed`、`ignore`、`screen`、`extract`、`digest`、`alert` 与字段条件；“今天”视图、计划日期、进展记录；建议的“补到已有事项”和批量处理；打扰日上限与静音；Web 改口令与会话管理；外发控制；`apa doctor`；`apa backup create|verify|restore`；升级前自动快照；完整发布物与本用户文档。
+入站六步流水线（去重、归属、规则、初筛、起草、合并）；判断记录与“判断与校准”页；来源规则的出口 `proposed`、`ignore`、`screen`、`extract`、`digest`、`alert` 与字段条件；规则带提醒类或动作类的类别（`GET /rules` 的 `class`）；“今天”视图、计划日期、进展记录；建议的“补到已有事项”和批量处理；打扰日上限与静音（`GET /deliveries/today` 可读当天已推送几条）；Web 改口令与会话管理；外发控制（`GET /source-events/{id}/outbound-preview` 可预览一条事件在各外发范围下会送出什么）；`apa doctor`；`apa backup create|verify|restore`；升级前自动快照；完整发布物与本用户文档。
 
 ### Web 界面调整
 

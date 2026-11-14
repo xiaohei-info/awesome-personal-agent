@@ -159,6 +159,7 @@
 | | `POST /source-events/score` | 积压放开第 2 步：影子打分，返回 `{"scored", "skipped"}`；请求体 `{"source"?}`；没有判断端点是 409；模型已暂停是 409 `models_paused` | Web 登录、delegate（附本人原话） |
 | | `POST /source-events/rejudge` | 积压放开第 4 步：放开重判，返回 `{"requeued", "deferred"}`；请求体 `{"source"?, "limit"?}`；模型已暂停是 409 `models_paused` | Web 登录、delegate（附本人原话） |
 | | `GET /source-events/restorable?from&to&source` | 预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer；运行凭据不可用 |
+| | `GET /source-events/{id}/outbound-preview` | 外发预览：这条事件按 `full`、`excerpt`、`meta` 裁剪后实际送给模型的内容，与外发同源（主文档 §14.14）；只读，不写 Event | observer；运行凭据不可用（返回 403）；内部来源 `capture:<项目>` 的事件只有 Web 登录能读 |
 | | `POST /source-events/restore` | 把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate（附本人原话） |
 | 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |
 | | `GET /judgments/stats?use&template&source&since` | 各级调用次数与四项指标（主文档 §8.10） | observer |
@@ -168,6 +169,7 @@
 | 投递 | `GET /deliveries/next?wait=` | 长轮询领取；有租约 | 渠道 ext 密钥；网关插件 token（worker 及以上，只领唤醒类投递） |
 | | `POST /deliveries/{id}/ack`，`/fail`，`/answer` | 送达、失败、转达回答 | 同上 |
 | | `GET /deliveries/unread`，`POST /deliveries/{id}/read` | Web 未读；`read` 即本人确认（投递转 `acknowledged`） | Web 登录 |
+| | `GET /deliveries/today` | 今天的推送计数，与打扰日上限同口径（主文档 §7.4）；只读 | Web 登录 |
 | | `GET/POST /forms/{一次性令牌}` | 一次性表单 | 令牌本身 |
 | 运行 | `GET /runs`，`GET /runs/{id}` | 运行记录 | observer |
 | | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
@@ -175,7 +177,7 @@
 | | `GET /doctor` | 内核一侧的自检结果（主文档 §15.5）；模型端点的明细带稳定机器码 `code`（取值同 `POST /settings/model-endpoints/test`） | observer |
 | | `GET /version` | 版本与各协议版本（B.5） | 不需要凭据 |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
-| | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
+| | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；每条带 `class`（`reminder` 提醒类或 `action` 动作类，由加载器推定，主文档 §14.8）；切换只有 Web | Web 登录 |
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/grants`、`/settings/purge` | 策略（含人格、打扰上限与静音）、两个模型端点、凭据、白名单、名单、命令登记、声明确认、授权单签发与撤销（`POST /settings/grants`、`POST /settings/grants/{id}/revoke`）、物理删除 | 只有 Web 登录 |
 | | `/settings/judgment` | 不确定带与影子模式 | 只有 Web 登录 |
 | | `POST /settings/model-endpoints/models`、`POST /settings/model-endpoints/test` | "设置 › 模型"的获取模型与测试连接：只读，不写 Event，不改策略；同一类端点同一时刻只跑一个，其余返回 409（主文档 §4.1、§15.5） | 只有 Web 登录 |
@@ -213,6 +215,12 @@
 `POST /source-events/{id}/ignore` 不带请求体，成功返回 200 与更新后的来源事件（`disposition` 为 `ignored`），事件不在积压里（不是 `unjudged` 或 `expired`）时返回 409，不存在时返回 404。`POST /source-events/ignore` 的请求体恰好给出 `source` 或 `all: true` 之一，否则返回 400；在一个命令里忽略该来源或全部来源的积压，返回 200 `{"ignored": n}`，没有积压时 `n` 为 0。两者都可带 `Idempotency-Key`，每条被忽略的事件记一条 `inbound.disposed`，操作者是调用者。
 
 `POST /source-events/rules`、`/score`、`/rejudge` 对应主文档 §9.3 的积压放开：请求体可带 `source` 限定来源，`rejudge` 可带 `limit`；都可带 `Idempotency-Key`。它们不受 `unjudged_rejudge_days` 限制，也作用于 `expired` 的事件。响应分别是 `{"attached": n, "disposed": n, "remaining": n}`、`{"scored": n, "skipped": n}`、`{"requeued": n, "deferred": n}`；`deferred` 是因当天进入建议流的数量已到 `backlog_release_per_day` 而留到次日的条数。没有判断端点时 `score` 返回 409。模型已暂停时 `score` 与 `rejudge` 都返回 409，`code` 为 `models_paused`，不碰积压、不调模型；`rules` 不需要模型，照常可用。每条被放回的事件记一条 `inbound.requeued`，操作者是调用者。
+
+`GET /source-events/{id}/outbound-preview` 返回 200 `{"full": {…}, "excerpt": {…}, "meta": {…}}`，三档各是 `{"event_type", "subject", "sender", "occurred_at", "link", "material"}`：前五项是送给每一级的结构化输入（链接只有域名），`material` 是按该范围裁剪的资料正文（聚合事件的消息接在正文后；`full` 另带完整链接，`meta` 为空串）。`none` 与未选择不外发，不在结果里。事件不存在返回 404。
+
+`GET /deliveries/today` 返回 200 `{"pushed", "cap", "suppressed_daily_cap", "suppressed_muted"}`：`pushed` 是当天经渠道推送、计入日上限的决策、提醒与简报条数（不含超限说明），日上限判定用的就是这个数；`cap` 是策略的 `disturb.daily_cap`，`0` 表示不限；后两项是当天被日上限、静音改为只留 Web 未读的条数。自然日按静默时段的时区算，未设置取 UTC。
+
+`GET /rules` 每条规则的 `class` 只在读取时按当前已加载的能力包填写，不存账本；规则已不在加载的能力包里时省略。
 
 `GET /source-events/restorable` 与 `POST /source-events/restore` 对应主文档 §9.3 的"补救旧级联误丢的事件"。`from`、`to` 必填，是 RFC 3339 时刻，按来源事件的落盘时间取左闭右开区间，`from` 不早于 `to` 返回 400；`source` 可选，不存在时返回 404。命中条件：处置为 `ignored`，最近一次处置由内核依判断结论写入（不是规则的 `ignore` 出口，也不是调用者的忽略），且没有判断记录。预览返回 200 `{"matched": n, "sources": [{"source", "count"}]}`，不写入。执行返回 200 `{"restored": n}`：每条命中的事件转 `unjudged`、`unjudged_reason` 为 `restored`，各记一条 `inbound.disposed`，操作者是调用者，载荷带原处置 `ignored` 与本次的 `from`、`to`；不调模型、不建事项。同一时间段再次执行时已放回的不再命中，返回 `{"restored": 0}`；可带 `Idempotency-Key`。`restored` 的事件只经 `/rules`、`/score`、`/rejudge` 重判，不参与自动重判，也不转 `expired`。
 
