@@ -366,3 +366,26 @@ pre [data-op="-"] { background: var(--warn-soft); color: var(--warn); text-decor
   .filters label { flex: 1 1 100%; }
 }
 
+
+/* 带进度的多步流程（积压四步）、分段单选与外发预览 */
+.flow-steps { display: flex; gap: 6px; margin: 4px 0 14px; padding: 0; list-style: none; counter-reset: none; }
+.flow-steps li { flex: 1; padding-top: 6px; font-size: 12px; color: var(--ink-3); border-top: 3px solid var(--line); }
+.flow-steps li.done { color: var(--ok); border-color: var(--ok); }
+.flow-steps li.on { color: var(--ink); font-weight: 600; border-color: var(--ink); }
+main p.big { margin: 6px 0; font: 600 22px/1.3 var(--serif); }
+.seg-radio { display: block; min-width: 0; margin: 0; padding: 0; border: 0; }
+.seg-radio legend { width: 100%; margin-bottom: 6px; font-size: 13px; color: var(--ink-2); }
+fieldset.seg-radio label { display: inline-flex; width: auto; align-items: center; gap: 4px; margin: 0 6px 6px 0; padding: 5px 12px; border: 1px solid var(--line-2); border-radius: 99px; cursor: pointer; }
+.seg-radio input { position: absolute; opacity: 0; pointer-events: none; }
+fieldset.seg-radio label:has(input:checked) { color: var(--paper); background: var(--ink); border-color: var(--ink); }
+fieldset.seg-radio label:has(input:focus-visible) { box-shadow: 0 0 0 3px color-mix(in oklch, var(--ink) 18%, transparent); }
+.rows > li > .out-editor[role="group"] { display: grid; gap: 10px; justify-items: stretch; }
+.out-editor p { margin: 0; }
+.out-preview { margin-top: 0; padding: 10px 12px; font-size: 12.5px; background: var(--sunken); border-radius: 8px; }
+.out-preview pre { max-height: 10em; overflow: auto; white-space: pre-wrap; }
+.out-preview s { color: var(--ink-3); }
+.copy-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.copy-row code { overflow-wrap: anywhere; }
+.seg-row { margin: 0; padding: 0; border: 0; }
+.seg-row legend { margin-bottom: 4px; font-size: 13px; color: var(--ink-2); }
+.rows button.quiet { white-space: nowrap; }

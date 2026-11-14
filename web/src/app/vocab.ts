@@ -108,7 +108,7 @@ const zh: Vocab & { channelRoute: (name: string) => string } = {
   unjudgedReason: {
     model_unavailable: { label: "等模型恢复", hint: "恢复后自动判断" },
     outbound_unset: { label: "等你选外发范围", hint: "选好后自动判断" },
-    undecided: { label: "拿不准，等你处理" },
+    undecided: { label: "等模型恢复", hint: "恢复后自动判断" },
     restored: { label: "已放回，等你放开" },
     models_paused: { label: "模型已暂停", hint: "恢复后自动判断" },
   },
@@ -312,7 +312,7 @@ const en: typeof zh = {
   unjudgedReason: {
     model_unavailable: { label: "Waiting for the model", hint: "Judged automatically once it is back" },
     outbound_unset: { label: "Choose what may be sent", hint: "Judged automatically once chosen" },
-    undecided: { label: "Unsure, needs you" },
+    undecided: { label: "Waiting for the model", hint: "Judged automatically once it is back" },
     restored: { label: "Put back, waiting for release" },
     models_paused: { label: "Models paused", hint: "Judged automatically once resumed" },
   },

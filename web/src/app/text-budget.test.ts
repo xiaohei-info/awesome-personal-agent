@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 // - 任何一条文案（函数按占位参数取返回值）超过 MAX 个字符：成段文字，应改成命名、控件或预览；
 // - 主界面文案里出现机制词：只允许出现在键路径含 advanced、raw、diag 的文案里（高级、原始值、诊断区）。
 // 这一版先只报告不失败（STRICT = false）；各页改完后改为 true，此后新增违规就会让 CI 失败。
+// 改完的目录先列进 STRICT_DIRS：这些目录里的违规现在就让测试失败。
 export const STRICT = false;
+export const STRICT_DIRS = ["features/sources"];
 export const MAX = 40;
 export const BANNED = ["账本", "投影", "墓碑", "注入", "级联", "Event", "blob", "actor", "schema", "scope", "harness", "web_only"];
 /** 有意保留的长文字：键名（各页文案展开了共用文案，所以按键名，不按文件）→ 理由。 */
@@ -93,6 +95,7 @@ describe("文字预算", () => {
       );
     }
     if (STRICT) expect(found).toEqual([]);
+    else expect(found.filter((v) => STRICT_DIRS.some((d) => v.where.startsWith(d + "/")))).toEqual([]);
     expect(Object.keys(dicts).length).toBeGreaterThanOrEqual(25); // 至少扫到全部页面的文案
   });
 });
