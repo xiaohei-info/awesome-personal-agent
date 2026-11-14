@@ -134,7 +134,9 @@ describe("Web 新建与编辑事项", () => {
     const patch = l.calls.find((c) => c.method === "PATCH")!;
     expect(patch.ifMatch).toBe("3");
     expect(patch.body).toEqual({ title: "新标题", body: "- a\n- b" });
-    expect(await screen.findByText("版本：4")).toBeInTheDocument();
+    // 页面按服务端重读：下一次写入带的是新版本号（版本号本身不再显示）。
+    await u.click(screen.getByRole("button", { name: "保存状态标签" }));
+    await waitFor(() => expect(l.calls.filter((c) => c.method === "PATCH")[1]?.ifMatch).toBe("4"));
     expect(await timelineText()).toContain("修改了事项");
   });
 

@@ -62,6 +62,7 @@ describe("一次性表单页", () => {
 
     open();
     expect(await screen.findByRole("heading", { name: "链接已失效" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "登录网页去作答" })).toHaveAttribute("href", "/decisions"); // 失效后给出下一步
     expect(screen.queryByRole("button", { name: "提交" })).toBeNull();
   });
 
@@ -89,7 +90,7 @@ describe("一次性表单页", () => {
     open();
     await u.click(await screen.findByLabelText(/发布/));
     await u.click(screen.getByRole("button", { name: "提交" }));
-    expect(await screen.findByRole("link", { name: /Web/ })).toHaveAttribute("href", "https://apa.local/items/it-1");
+    expect(await screen.findByRole("link", { name: "登录网页去作答" })).toHaveAttribute("href", "https://apa.local/items/it-1");
   });
 
   it("校验类失败：显示错误，表单保留可再提交", async () => {

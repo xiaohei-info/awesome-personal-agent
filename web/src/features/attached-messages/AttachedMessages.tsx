@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
-import { errorText as msg, useT } from "../../app/i18n";
+import { useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
 import { Val } from "../../app/values";
 
@@ -36,22 +38,22 @@ export function AttachedMessages({ itemId }: { itemId: string }) {
   const { api } = useSession();
   const t = useT(strings);
   const [list, setList] = useState<AttachedMessage[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
     setList(null);
     setError(null);
     api.get<{ messages: AttachedMessage[] }>("/items/" + encodeURIComponent(itemId) + "/messages").then(
       (r) => setList(r.messages),
-      (e) => setError(msg(e)),
+      (e) => setError(e),
     );
   }, [api, itemId]);
 
   return (
     <section aria-label={t.title}>
       <h2>{t.title}</h2>
-      {error && <p role="alert">{error}</p>}
-      {!list && !error && <p role="status">{t.loading}</p>}
+      {error != null && <ErrorNote error={error} />}
+      {!list && error == null && <p role="status">{t.loading}</p>}
       {list && !list.length && <p className="sub">{t.none}</p>}
       {list && list.length > 0 && (
         <ul aria-label={t.list} className="rows">
@@ -67,7 +69,12 @@ export function AttachedMessages({ itemId }: { itemId: string }) {
               <span aria-label={t.allowLabel}>{m.forward_allowed ? t.allowed : t.notAllowed}</span>
               {" · "}
               <span aria-label={t.stateLabel}><Val k="attachState" id={m.attach_state} /></span>
-              {!m.forward_allowed && t.ownerOnly}
+              {!m.forward_allowed && (
+                <>
+                  {" · "}
+                  <Link to="/settings/access">{t.addToList}</Link>
+                </>
+              )}
               {safeHref(m.link) ? <> · <a href={safeHref(m.link)!} rel="noopener noreferrer">{t.source}</a></> : null}
             </li>
           ))}

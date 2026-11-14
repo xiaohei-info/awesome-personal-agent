@@ -16,16 +16,18 @@ const report = (seq: number, object: string, outcome: string, summary: string, e
 const EXECS = [{ id: "work-host.cli", kind: "cli" }, { id: "home.cli", kind: "cli" }];
 const ALLOWED = ["work-host.cli", "work-host.alt"];
 
-function server(items: It[], events: unknown[]) {
+function server(items: It[], events: unknown[], stalled: string[] = []) {
   const calls: { method: string; path: string; body?: any; headers: Record<string, string> }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, headers: (init.headers ?? {}) as Record<string, string> });
-    if (url === "/v1/projects") return json(200, { projects: [] });
+    if (url === "/v1/projects") return json(200, { projects: [{ id: "p_work", name: "工作" }] });
+    if (url === "/v1/settings/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli" }] });
+    if (url === "/v1/health") return json(200, { healthy: !stalled.length, signals: [{ id: "stalled_delegations", ok: !stalled.length, detail: stalled }] });
     if (url === "/v1/items?kind=delegation") return json(200, { items });
     if (url.startsWith("/v1/audit/events?type=delegation.reported&after=")) return json(200, { events });
-    if (url === "/v1/executors?project=p_work") return json(200, { executors: [{ id: "work-host.cli", kind: "cli", allowed: true }, { id: "home.cli", kind: "cli", allowed: false }] });
+    if (url === "/v1/executors?project=p_work") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli", allowed: true }, { id: "home.cli", kind: "external-cli", allowed: false }] });
     if (url === "/v1/items/c1" && method === "PATCH") {
       if (!ALLOWED.includes(body.assignee)) return json(403, { code: "executor_not_allowed", why: `executor ${body.assignee} is not allowed in project p_work`, next: "pick an allowed executor", allowed: ALLOWED });
       items[0] = { ...items[0], assignee: body.assignee, version: items[0].version + 1 };
@@ -73,13 +75,22 @@ describe("任务委派页（flow-delegate-recover）", () => {
     expect(within(b).getByText(/abc123/)).toBeInTheDocument();
   });
 
+  it("执行者带种类、项目显示名称；健康信号里久无回音的委派标出来", async () => {
+    mount(server([work, fin], [], ["c1"]).impl);
+    const a = await screen.findByRole("article", { name: "写报告" });
+    expect(await within(a).findByText("久无回音")).toBeInTheDocument();
+    expect(within(a).getByText(/外部命令行工具/)).toBeInTheDocument();
+    expect(within(a).getByText(/项目 工作/)).toBeInTheDocument();
+    expect(within(card("已交付")).queryByText("久无回音")).not.toBeInTheDocument();
+  });
+
   it("ACT-DLG-10：本人改派到允许的执行者 → PATCH 带 If-Match 与 CSRF，列表刷新", async () => {
     const s = server([{ ...work }], []);
     mount(s.impl);
     const a = await screen.findByRole("article", { name: "写报告" });
     await userEvent.click(within(a).getByRole("button", { name: "改派" }));
     const sel = await within(a).findByRole("combobox", { name: "目标执行者" });
-    expect(within(sel).getByRole("option", { name: "home.cli（项目不允许）" })).toBeInTheDocument();
+    expect(within(sel).getByRole("option", { name: "home.cli · 外部命令行工具（项目不允许）" })).toBeInTheDocument();
     await userEvent.selectOptions(sel, "work-host.cli");
     await userEvent.click(within(a).getByRole("button", { name: "确认改派" }));
     const w = s.calls.find((c) => c.method === "PATCH")!;
@@ -119,7 +130,7 @@ describe("任务委派页（flow-delegate-recover）", () => {
 
   it("空列表与读取失败可重试", async () => {
     mount(server([], []).impl);
-    expect(await screen.findByText("没有委派")).toBeInTheDocument();
+    expect(await screen.findByText("还没有派出的活")).toBeInTheDocument();
   });
 
   it("读取失败：显示错误并可重试", async () => {

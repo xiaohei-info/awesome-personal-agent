@@ -36,22 +36,23 @@ function mount(f: typeof fetch) {
 beforeEach(() => sessionStorage.clear());
 
 describe("事项页挂靠消息（ACT-FWD-04）", () => {
-  it("显示全部消息及发送者、核实状态、白名单；未进白名单的标明本人可见且不算已处理", async () => {
+  it("显示全部消息及发送者、核实状态、后台能否读到；读不到的标明并给出加入可读名单的入口", async () => {
     mount(fetchFor(MESSAGES));
-    const list = within(await screen.findByRole("list", { name: "挂靠消息列表" }));
+    const list = within(await screen.findByRole("list", { name: "跟进消息列表" }));
     const rows = list.getAllByRole("listitem");
     expect(rows).toHaveLength(3);
 
     expect(within(rows[0]).getByLabelText("发送者")).toHaveTextContent("alice");
     expect(within(rows[0]).getByLabelText("核实状态")).toHaveTextContent("已核实");
-    expect(within(rows[0]).getByLabelText("白名单")).toHaveTextContent("已进白名单");
-    expect(rows[0]).not.toHaveTextContent("不算已处理");
+    expect(within(rows[0]).getByLabelText("后台 agent 能否读到")).toHaveTextContent("后台 agent 可读");
+    expect(within(rows[0]).queryByRole("link", { name: "加入可读名单" })).toBeNull();
 
     expect(within(rows[1]).getByLabelText("发送者")).toHaveTextContent("mallory");
     expect(within(rows[1]).getByLabelText("核实状态")).toHaveTextContent("未核实");
-    expect(within(rows[1]).getByLabelText("白名单")).toHaveTextContent("未进白名单");
+    expect(within(rows[1]).getByLabelText("后台 agent 能否读到")).toHaveTextContent("后台 agent 看不到");
     expect(within(rows[1]).getByLabelText("处理状态")).toHaveTextContent("待转给 agent");
-    expect(rows[1]).toHaveTextContent("仅本人可见，不进入无人值守会话，不算已处理");
+    // 名单外：后台 agent 看不到（上一行），处理状态仍是待转（上上行）；给出去设置可读名单的入口
+    expect(within(rows[1]).getByRole("link", { name: "加入可读名单" })).toHaveAttribute("href", "/settings/access");
 
     // 发送者缺失：显示为未知且未核实，不伪造发送者
     expect(within(rows[2]).getByLabelText("发送者")).toHaveTextContent("未知发送者");
@@ -65,7 +66,7 @@ describe("事项页挂靠消息（ACT-FWD-04）", () => {
       { ...MESSAGES[0], id: "l3", subject: "junk", link: "not a url" },
     ];
     mount(fetchFor(msgs));
-    const rows = within(await screen.findByRole("list", { name: "挂靠消息列表" })).getAllByRole("listitem");
+    const rows = within(await screen.findByRole("list", { name: "跟进消息列表" })).getAllByRole("listitem");
     const ok = within(rows[0]).getByRole("link", { name: "来源" });
     expect(ok).toHaveAttribute("href", "https://example.com/pr/1");
     expect(ok).toHaveAttribute("rel", "noopener noreferrer");
@@ -76,12 +77,12 @@ describe("事项页挂靠消息（ACT-FWD-04）", () => {
 
   it("没有挂靠消息时显示空状态", async () => {
     mount(fetchFor([]));
-    expect(await screen.findByText("没有挂靠消息")).toBeInTheDocument();
+    expect(await screen.findByText("还没有跟进消息")).toBeInTheDocument();
   });
 
   it("读取失败时显示服务端原因，不显示空列表", async () => {
     mount(fetchFor({ code: "permission_denied", why: "credential cannot read messages", next: "log in" }, 403));
     expect(await screen.findByRole("alert")).toHaveTextContent("credential cannot read messages");
-    expect(screen.queryByText("没有挂靠消息")).not.toBeInTheDocument();
+    expect(screen.queryByText("还没有跟进消息")).not.toBeInTheDocument();
   });
 });

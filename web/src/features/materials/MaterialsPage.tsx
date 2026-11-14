@@ -3,7 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { HostedMaterial } from "../materials-hosted/HostedMaterial";
-import { errorText as msg, useT } from "../../app/i18n";
+import { useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
+import { useNames } from "../../app/names";
 import { strings } from "./strings";
 import { MATERIAL_KIND } from "../../app/ids";
 import { Pick, Val } from "../../app/values";
@@ -111,14 +113,15 @@ export function MaterialsPage() {
   // ?id= 让事项页的材料链接直达详情。
   const [selected, setSelected] = useState<string | null>(useSearchParams()[0].get("id"));
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const projectName = useNames("project");
 
   const reload = useCallback(
     (p: string) =>
       api.get<{ materials: Material[] }>(p ? `/materials?project=${encodeURIComponent(p)}` : "/materials").then(
         (r) => (setMaterials(r.materials), setHits(null)),
-        (e) => setError(msg(e)),
+        (e) => setError(e),
       ),
     [api],
   );
@@ -136,18 +139,18 @@ export function MaterialsPage() {
     try {
       setHits((await api.get<{ hits: Hit[] }>("/materials/search?" + sp)).hits);
     } catch (e) {
-      setError(msg(e));
+      setError(e);
     }
   };
 
   const shown = materials?.filter((m) => !kind || m.kind === kind);
   const done = (text: string) => (setError(null), setNotice(text));
-  const failed = (e: unknown) => (setNotice(null), setError(msg(e)));
+  const failed = (e: unknown) => (setNotice(null), setError(e));
 
   return (
     <main>
       <PageHead>{t.title}</PageHead>
-      {error && <div role="alert">{error}</div>}
+      {error != null && <ErrorNote error={error} />}
       {notice && <div role="status">{notice}</div>}
       <div className="filters">
         <label>
@@ -196,7 +199,7 @@ export function MaterialsPage() {
         <ul className="rows">
           {hits.map((h) => (
             <li key={h.id} aria-label={h.id}>
-              <button className="link" onClick={() => setSelected(h.id)}>{h.title}</button> <span className="sub"><Val k="materialKind" id={h.kind} /> · {h.project || t.global} · {h.hosted ? t.hosted : t.owned}
+              <button className="link" onClick={() => setSelected(h.id)}>{h.title}</button> <span className="sub"><Val k="materialKind" id={h.kind} /> · {projectName(h.project) || t.global} · {h.hosted ? t.hosted : t.owned}
               {h.path && <> · {h.path}</>}</span>
               {h.snippet && <p className="sub">{h.snippet}</p>}
             </li>
@@ -210,7 +213,7 @@ export function MaterialsPage() {
             <ul className="rows">
               {shown.map((m) => (
                 <li key={m.id}>
-                  <button className="link" onClick={() => setSelected(m.id)}>{m.title}</button> <span className="sub"><Val k="materialKind" id={m.kind} /> · {m.project || t.global} · {m.location ? t.hosted : t.owned}</span>
+                  <button className="link" onClick={() => setSelected(m.id)}>{m.title}</button> <span className="sub"><Val k="materialKind" id={m.kind} /> · {projectName(m.project) || t.global} · {m.location ? t.hosted : t.owned}</span>
                 </li>
               ))}
             </ul>
@@ -227,6 +230,10 @@ function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: s
   const t = useT(strings);
   const { api } = useSession();
   const [f, setF] = useState({ kind: "minutes", project: "", title: "", content: "", reason: "" });
+  // 提交后会怎样，按写入策略当场标在按钮上（§6.9）：规范恒为先确认；按类型设过的照设置；没设过的可能由能力包定，不猜。
+  const [write, setWrite] = useState<{ kinds: Record<string, string> } | null>(null);
+  useEffect(() => void api.get<{ material_write?: { kinds: Record<string, string> } }>("/settings/policy").then((r) => setWrite(r.material_write ?? null), () => {}), [api]);
+  const mode = f.kind === "guideline" ? "proposed" : write?.kinds[f.kind];
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const pickKind = (e: { target: { value: string } }) => {
     const k = e.target.value;
@@ -278,7 +285,7 @@ function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: s
         <input value={f.reason} onChange={set("reason")} />
       </label>
       <div className="actions">
-        <button type="submit">{t.submit}</button> <button type="button" onClick={onCancel}>{t.cancel}</button>
+        <button type="submit">{mode === "direct" ? t.submitDirect : mode === "proposed" ? t.submitProposed : t.submit}</button> <button type="button" onClick={onCancel}>{t.cancel}</button>
       </div>
     </form>
   );
@@ -288,6 +295,7 @@ const written = (t: { current: string; proposed: string }, r: Write) => (r.state
 
 function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onError: (e: unknown) => void; onChanged: () => void }) {
   const t = useT(strings);
+  const projectName = useNames("project");
   const { api } = useSession();
   const { id } = props;
   // 回调每次父渲染都是新函数；用 ref 持有，使重载只在 id 变化或显式写入后发生，不冲掉未保存的草稿。
@@ -375,7 +383,7 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
   return (
     <section role="region" aria-label={t.detail} className="panel">
       <h3>
-        {m.title} <small><Val k="materialKind" id={m.kind} /> · {m.project || t.global}</small>
+        {m.title} <small><Val k="materialKind" id={m.kind} /> · {projectName(m.project) || t.global}</small>
       </h3>
 
       {related}

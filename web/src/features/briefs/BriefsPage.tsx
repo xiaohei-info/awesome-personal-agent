@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
-import { errorText as msg, locale, useT } from "../../app/i18n";
+import { locale, useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
+import { useNamed, useNames } from "../../app/names";
+import { DAYS, browserZone, parseCron, toCron, type Days } from "./schedule";
 import { strings } from "./strings";
 import { Pick, Val } from "../../app/values";
 
@@ -14,8 +17,18 @@ interface Pack { name: string }
 
 const BRIEF_PACKS = ["brief", "review"]; // 产出 brief 事项的内置包
 
+/** 实例的定时：本页生成的写法显示成「工作日 08:00」，时区与这台设备不同时带上时区；其余原样显示。 */
+function When({ schedule }: { schedule?: string }) {
+  const t = useT(strings);
+  if (!schedule) return <>—</>;
+  const p = parseCron(schedule);
+  if (!p) return <code>{schedule}</code>;
+  return <>{t.days[p.days]} {p.time}{p.zone !== browserZone() ? t.zone(p.zone) : ""}</>;
+}
+
 function BriefCard({ b }: { b: Brief }) {
   const t = useT(strings);
+  const projectName = useNames("project");
   const sections = b.spec?.sections ?? [];
   return (
     <article aria-label={t.brief(b.title)}>
@@ -24,7 +37,7 @@ function BriefCard({ b }: { b: Brief }) {
       {!sections.length && <p>{t.noSections}</p>}
       {sections.map((s, i) => (
         <section key={i}>
-          <h5>{s.project}</h5>
+          <h5>{projectName(s.project)}</h5>
           <p>{s.body}</p>
         </section>
       ))}
@@ -38,10 +51,23 @@ export function BriefsPage() {
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [instances, setInstances] = useState<Instance[] | null>(null);
   const [packs, setPacks] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [pack, setPack] = useState("");
-  const [schedule, setSchedule] = useState("");
-  const [projects, setProjects] = useState("");
+  const [days, setDays] = useState<Days>("1-5");
+  const [time, setTime] = useState("08:00");
+  const [raw, setRaw] = useState(""); // 高级：直接写 cron 或时长，填了就用它
+  const [projects, setProjects] = useState<string[]>([]);
+  const allProjects = useNamed("project");
+  const projectName = useNames("project");
+  const submitRef = useRef<HTMLButtonElement>(null);
+  // 空状态的下一步：把表单预填成「每天 08:00 的简报」，本人再点一次「安排」才创建。
+  const suggest = () => {
+    setPack("brief");
+    setDays("*");
+    setTime("08:00");
+    setRaw("");
+    submitRef.current?.focus();
+  };
 
   const load = useCallback(async () => {
     try {
@@ -55,54 +81,78 @@ export function BriefsPage() {
       setPacks(p.packs.map((x) => x.name).filter((n) => BRIEF_PACKS.includes(n)));
       setError(null);
     } catch (e) {
-      setError(msg(e));
+      setError(e);
     }
   }, [api]);
   useEffect(() => { void load(); }, [load]);
 
   async function create(e: FormEvent) {
     e.preventDefault();
-    if (!schedule.trim()) return setError(t.needSchedule);
-    const list = projects.split(",").map((s) => s.trim()).filter(Boolean);
+    const schedule = raw.trim() || (time ? toCron(days, time, browserZone()) : "");
+    if (!schedule) return setError(new Error(t.needSchedule));
     try {
       const created = await api.post<Instance>("/instances", {
         pack: pack || packs[0],
-        params: { schedule: schedule.trim(), ...(list.length ? { projects: list } : {}) },
+        params: { schedule, ...(projects.length ? { projects } : {}) },
       });
       setInstances((l) => [...(l ?? []), created]);
-      setSchedule("");
-      setProjects("");
+      setRaw("");
+      setProjects([]);
       setError(null);
     } catch (err) {
-      setError(msg(err));
+      setError(err);
     }
   }
 
-  if (!briefs || !instances) return <main>{error ? <p role="alert">{error}</p> : <p role="status">{t.loading}</p>}</main>;
+  if (!briefs || !instances) return <main>{error != null ? <ErrorNote error={error} /> : <p role="status">{t.loading}</p>}</main>;
 
   return (
     <main>
       <PageHead>{t.title}</PageHead>
-      {error && <p role="alert">{error}</p>}
+      {error != null && <ErrorNote error={error} />}
       <section aria-label={t.title}>
         <h2>{t.briefs}</h2>
-        {!briefs.length && <p className="sub">{t.none}</p>}
+        {!briefs.length && (
+          <p className="sub">
+            {t.none} {!instances.length && packs.includes("brief") && <button type="button" onClick={suggest}>{t.suggest}</button>}
+          </p>
+        )}
         {briefs.map((b) => <BriefCard key={b.id} b={b} />)}
       </section>
       <section aria-label={t.instances}>
         <h2>{t.scheduled}</h2>
         <ul aria-label={t.instanceList} className={instances.length ? "rows" : "plain"}>
           {instances.map((i) => (
-            <li key={i.id}>{i.id} · <Val k="pack" id={i.pack} /> · {i.params.schedule ?? "—"}{i.params.projects?.length ? ` · ${i.params.projects.join(t.listSep)}` : ""}{i.enabled ? "" : t.disabled}</li>
+            <li key={i.id}><When schedule={i.params.schedule} /> · <Val k="pack" id={i.pack} />{i.params.projects?.length ? ` · ${i.params.projects.map(projectName).join(t.listSep)}` : ""}{i.enabled ? "" : t.disabled}</li>
           ))}
         </ul>
         <form className="panel" onSubmit={(e) => void create(e)}>
           <label>{t.pack}
             <Pick k="pack" value={pack || packs[0] || ""} onChange={setPack} ids={packs} />
           </label>
-          <label>{t.schedule}<input value={schedule} onChange={(e) => setSchedule(e.target.value)} placeholder="0 8 * * 1-5" /></label>
-          <label>{t.projects}<input value={projects} onChange={(e) => setProjects(e.target.value)} /></label>
-          <button type="submit" disabled={!packs.length}>{t.create}</button>
+          <fieldset disabled={!!raw.trim()}>
+            <legend>{t.schedule}</legend>
+            <select aria-label={t.whichDays} value={days} onChange={(e) => setDays(e.target.value as Days)}>
+              {DAYS.map((d) => <option key={d} value={d}>{t.days[d]}</option>)}
+            </select>
+            <input type="time" aria-label={t.atTime} value={time} onChange={(e) => setTime(e.target.value)} />
+          </fieldset>
+          {allProjects.length > 0 && (
+            <fieldset>
+              <legend>{t.projects}</legend>
+              {allProjects.map((p) => (
+                <label key={p.id}>
+                  <input type="checkbox" checked={projects.includes(p.id)} onChange={() => setProjects((l) => (l.includes(p.id) ? l.filter((x) => x !== p.id) : [...l, p.id]))} />
+                  {p.name}
+                </label>
+              ))}
+            </fieldset>
+          )}
+          <details>
+            <summary>{t.advanced}</summary>
+            <label>{t.rawSchedule}<input value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="0 8 * * 1-5" /></label>
+          </details>
+          <button type="submit" ref={submitRef} disabled={!packs.length}>{t.create}</button>
         </form>
       </section>
     </main>

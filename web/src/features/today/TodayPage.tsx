@@ -5,6 +5,7 @@ import { PageHead } from "../../app/page";
 import type { Item } from "../items/ItemsPage";
 import { ProgressForm } from "./ProgressForm";
 import { errorText as msg, locale, useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
 
 // 形状对应 GET /v1/today（附录 B.2）：四组取材全在服务端，本页只展示并把操作交给既有事项接口。
@@ -18,10 +19,10 @@ export function TodayPage() {
   const { api } = useSession();
   const t = useT(strings);
   const [data, setData] = useState<Today | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(
-    () => api.get<Today>("/today").then((r) => setData(r), (e) => setError(msg(e))),
+    () => api.get<Today>("/today").then((r) => setData(r), (e) => setError(e)),
     [api],
   );
   useEffect(() => { load(); }, [load]);
@@ -29,16 +30,16 @@ export function TodayPage() {
   // 写入后整页重读：分组永远以服务端为准，失败时不留下本地假状态。
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
-    try { await fn(); } catch (e) { setError(msg(e)); }
+    try { await fn(); } catch (e) { setError(e); }
     await load();
   };
 
   return (
     <main>
-      <PageHead lede={t.lede}>{t.title}</PageHead>
-      {error && <p role="alert">{error}</p>}
+      <PageHead>{t.title}</PageHead>
+      {error != null && <ErrorNote error={error} />}
       {!data ? (
-        !error && <p role="status">{t.loading}</p>
+        error == null && <p role="status">{t.loading}</p>
       ) : (
         <>
           <Section group="planned" items={data.planned} render={(it) => <PlannedRow key={it.id} item={it} act={act} />} />
@@ -74,7 +75,7 @@ function ItemLink({ item }: { item: Item }) {
   return (
     <span>
       <Link to={"/items/" + encodeURIComponent(item.id)}>{item.title}</Link>{" "}
-      <span className="sub">{[item.id, item.planned_for && t.planned(item.planned_for), item.deadline && t.deadline(new Date(item.deadline).toLocaleDateString(locale()))].filter(Boolean).join(" · ")}</span>
+      <span className="sub">{[item.planned_for && t.planned(item.planned_for), item.deadline && t.deadline(new Date(item.deadline).toLocaleDateString(locale()))].filter(Boolean).join(" · ")}</span>
     </span>
   );
 }

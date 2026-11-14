@@ -118,7 +118,7 @@ describe("建议流页（flow-proposal-triage）", () => {
 
   it("空列表", async () => {
     mount(server([]).impl);
-    expect(await screen.findByText("没有待处理的建议")).toBeInTheDocument();
+    expect(await screen.findByText("建议都处理完了")).toBeInTheDocument();
   });
 
   it("读取失败：显示错误并可重试", async () => {
@@ -158,11 +158,11 @@ describe("建议流：推荐、理由、来源数与把握低（ACT-PROP-10、AC
     const r = await screen.findByRole("article", { name: "建议 r" });
     expect(within(r).getByText(/推荐：忽略/)).toBeInTheDocument();
     expect(within(r).getByText(/群发通知，与你无关/)).toBeInTheDocument();
-    expect(within(r).getByText("来源 1 条")).toBeInTheDocument();
+    expect(within(r).getByText("1 条消息")).toBeInTheDocument();
     expect(within(r).queryByText("把握低")).toBeNull();
     const u = screen.getByRole("article", { name: "建议 u" });
     expect(within(u).getByText("把握低")).toBeInTheDocument();
-    expect(within(u).getByText("来源 2 条")).toBeInTheDocument();
+    expect(within(u).getByText("2 条消息")).toBeInTheDocument();
     expect(within(u).queryByText(/推荐：/)).toBeNull();
     expect(within(screen.getByRole("article", { name: "建议 d" })).queryByText(/推荐：/)).toBeNull();
   });
@@ -171,7 +171,7 @@ describe("建议流：推荐、理由、来源数与把握低（ACT-PROP-10、AC
     mount(server([prop("d")]).impl);
     const d = await screen.findByRole("article", { name: "建议 d" });
     for (const n of ["接受", "补到已有事项", "忽略"]) expect(within(d).getByRole("button", { name: n })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "按推荐处理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ })).toBeInTheDocument();
   });
 });
 
@@ -218,6 +218,13 @@ describe("补到已有事项（ACT-PRH-10）", () => {
 describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
   const rec = (recommend: string) => ({ proposal: { recommend, low_confidence: false, sources: ["e"] } });
 
+  it("按推荐处理前先看到条数与各处置的分布；没有推荐的不计入", async () => {
+    mount(server([prop("a1", rec("accept")), prop("a2", rec("accept")), prop("d1", rec("dismiss")), prop("n1")]).impl);
+    await screen.findByText("建议 a1");
+    await userEvent.click(screen.getByRole("button", { name: "按推荐处理 3 条" }));
+    expect(screen.getByText("接受 2 条 · 忽略 1 条")).toBeInTheDocument();
+  });
+
   it("ACT-PRH-13：按来源与项目筛选后一次点击，确认后 POST batch {mode:recommended, filter}；只带筛选，不逐条列动作", async () => {
     const s = server([
       prop("b1", { origin: { source: "PRH_A" }, project: "acc-open", ...rec("accept") }),
@@ -229,7 +236,7 @@ describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
     await userEvent.selectOptions(screen.getByLabelText("来源"), "PRH_A");
     await userEvent.selectOptions(screen.getByLabelText("项目"), "acc-open");
     expect(screen.queryByText("建议 x")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "按推荐处理" }));
+    await userEvent.click(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ }));
     expect(s.calls.some((c) => c.path === "/v1/proposals/batch")).toBe(false); // 先确认
     await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
     await waitFor(() => expect(s.calls.some((c) => c.path === "/v1/proposals/batch")).toBe(true));
@@ -248,7 +255,7 @@ describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
     );
     mount(s.impl);
     await screen.findByText("建议 skip-1");
-    await userEvent.click(screen.getByRole("button", { name: "按推荐处理" }));
+    await userEvent.click(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ }));
     await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
     const res = await screen.findByRole("status", { name: "批量处理结果" });
     expect(res).toHaveTextContent("已处理 1 条");
@@ -262,7 +269,7 @@ describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
     const s = server([prop("a", rec("accept"))], (u) => (u === "/v1/proposals/batch" ? json(403, { code: "permission_denied", why: "batch needs the owner's own words", next: "use the web session" }) : undefined));
     mount(s.impl);
     await screen.findByText("建议 a");
-    await userEvent.click(screen.getByRole("button", { name: "按推荐处理" }));
+    await userEvent.click(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ }));
     await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("batch needs the owner's own words");
     expect(screen.queryByRole("status", { name: "批量处理结果" })).toBeNull();
@@ -271,6 +278,6 @@ describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
   it("范围内没有任何带推荐的建议时，「按推荐处理」不可点", async () => {
     mount(server([prop("d")]).impl);
     await screen.findByText("建议 d");
-    expect(screen.getByRole("button", { name: "按推荐处理" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ })).toBeDisabled();
   });
 });

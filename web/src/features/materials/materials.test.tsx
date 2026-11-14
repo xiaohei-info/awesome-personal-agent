@@ -35,6 +35,7 @@ function backend(o: { materials?: Mat[]; revisions?: Rev[]; hits?: any[]; propos
       return json(200, { materials: materials.filter((m) => p === null || p === "" || m.project === p) });
     }
     if (q === "/v1/items") return json(200, { items: [{ id: "item_1", title: "登录改造" }] });
+    if (q === "/v1/settings/policy") return json(200, { version: 1, material_write: { default: "proposed", kinds: { minutes: "direct", design: "proposed" } } });
     if (q === "/v1/materials/search") return json(200, { hits: o.hits ?? [], ...{ _q: u.search } });
     if (q === "/v1/materials" && method === "POST") {
       const id = "mat_new" + materials.length;
@@ -148,7 +149,7 @@ describe("版本列表与 diff（ACT-MAT-04）", () => {
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent(/#3.*current.*bot.*r3.*基于 r2/s);
     expect(rows[2]).toHaveTextContent(/#1.*superseded/s);
-    await userEvent.click(within(rows[0]).getByRole("button", { name: "查看 diff" }));
+    await userEvent.click(within(rows[0]).getByRole("button", { name: "查看改动" }));
     const diff = within(await screen.findByTestId("diff-r3"));
     expect(diff.getByText("B").closest("[data-op]")).toHaveAttribute("data-op", "+");
     expect(diff.getByText("b").closest("[data-op]")).toHaveAttribute("data-op", "-");
@@ -167,7 +168,7 @@ describe("编辑与写入策略（ACT-MAT-11）", () => {
     await userEvent.clear(ed);
     await userEvent.type(ed, "新正文");
     await userEvent.type(d.getByLabelText("修改原因"), "补充");
-    await userEvent.click(d.getByRole("button", { name: "保存修订" }));
+    await userEvent.click(d.getByRole("button", { name: "保存修改" }));
     expect(await screen.findByRole("status")).toHaveTextContent("已生效");
     const post = b.calls.find((c) => c.method === "POST" && c.path === "/v1/materials/mat_note/revisions")!;
     expect(post.body).toMatchObject({ content: "新正文", reason: "补充", based_on: "r3" });
@@ -181,8 +182,8 @@ describe("编辑与写入策略（ACT-MAT-11）", () => {
     const ed = await d.findByLabelText("Markdown 内容");
     await userEvent.type(ed, "+改");
     await userEvent.type(d.getByLabelText("修改原因"), "x");
-    await userEvent.click(d.getByRole("button", { name: "保存修订" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("待本人确认");
+    await userEvent.click(d.getByRole("button", { name: "保存修改" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("等你确认后生效");
     expect(b.materials[0].current_rev).toBe("d1");
   });
 
@@ -192,7 +193,7 @@ describe("编辑与写入策略（ACT-MAT-11）", () => {
     const d = within(await open("周会纪要"));
     await userEvent.type(await d.findByLabelText("Markdown 内容"), "x");
     b.materials[0].current_rev = "r-other"; // 别处已写入
-    await userEvent.click(d.getByRole("button", { name: "保存修订" }));
+    await userEvent.click(d.getByRole("button", { name: "保存修改" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("baseline changed");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
@@ -217,7 +218,7 @@ describe("未保存草稿不被父组件重渲染冲掉", () => {
     await userEvent.type(await d.findByLabelText("Markdown 内容"), "-草稿");
     await userEvent.type(d.getByLabelText("修改原因"), "补充");
     b.materials[0].current_rev = "r-other";
-    await userEvent.click(d.getByRole("button", { name: "保存修订" }));
+    await userEvent.click(d.getByRole("button", { name: "保存修改" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("baseline changed");
     expect(d.getByLabelText("Markdown 内容")).toHaveValue("a\nB\nc-草稿");
     expect(d.getByLabelText("修改原因")).toHaveValue("补充");
@@ -234,8 +235,8 @@ describe("proposed 修订确认（ACT-MAT-03 / ACT-MAT-06 / ACT-AGM-01）", () =
     const b = withProposed();
     mount(b.impl);
     const d = within(await open("登录方案"));
-    const box = within(await d.findByRole("region", { name: "待确认修订" }));
-    expect(box.queryByText(/基线已变化/)).not.toBeInTheDocument();
+    const box = within(await d.findByRole("region", { name: "等你确认的修改" }));
+    expect(box.queryByText(/确认前这份材料又被改过/)).not.toBeInTheDocument();
     expect(box.getByTestId("diff-p1")).toBeInTheDocument();
     await userEvent.click(box.getByRole("button", { name: "确认生效" }));
     expect(await screen.findByRole("status")).toHaveTextContent("已确认");
@@ -250,7 +251,7 @@ describe("proposed 修订确认（ACT-MAT-03 / ACT-MAT-06 / ACT-AGM-01）", () =
     await userEvent.click(await d.findByRole("button", { name: "拒绝" }));
     await screen.findByRole("status");
     expect(screen.getByRole("status")).toHaveTextContent("已拒绝");
-    expect(d.queryByRole("region", { name: "待确认修订" })).not.toBeInTheDocument();
+    expect(d.queryByRole("region", { name: "等你确认的修改" })).not.toBeInTheDocument();
     expect(b.revisions.find((r) => r.id === "p1")).toMatchObject({ state: "superseded", content: "v2" });
     expect(d.getAllByRole("listitem")).toHaveLength(2);
   });
@@ -262,10 +263,10 @@ describe("proposed 修订确认（ACT-MAT-03 / ACT-MAT-06 / ACT-AGM-01）", () =
     b.materials[0].current_rev = "d9";
     mount(b.impl);
     const d = within(await open("登录方案"));
-    const box = within(await d.findByRole("region", { name: "待确认修订" }));
-    expect(box.getByText(/基线已变化/)).toBeInTheDocument();
+    const box = within(await d.findByRole("region", { name: "等你确认的修改" }));
+    expect(box.getByText(/确认前这份材料又被改过/)).toBeInTheDocument();
     expect(box.queryByRole("button", { name: "确认生效" })).not.toBeInTheDocument();
-    await userEvent.click(box.getByRole("button", { name: "仍然采用" }));
+    await userEvent.click(box.getByRole("button", { name: "仍用这版" }));
     await screen.findByRole("status");
     expect(b.calls.find((c) => c.path === "/v1/revisions/p1/confirm")!.body).toMatchObject({ on_stale: "adopt" });
     expect(b.revisions.find((r) => r.id === "p1")!.state).toBe("current");
@@ -277,19 +278,19 @@ describe("proposed 修订确认（ACT-MAT-03 / ACT-MAT-06 / ACT-AGM-01）", () =
     b.materials[0].current_rev = "d9";
     mount(b.impl);
     const d = within(await open("登录方案"));
-    const box = within(await d.findByRole("region", { name: "待确认修订" }));
-    await userEvent.click(box.getByRole("button", { name: "基于当前重提" }));
+    const box = within(await d.findByRole("region", { name: "等你确认的修改" }));
+    await userEvent.click(box.getByRole("button", { name: "在最新版上重做" }));
     await screen.findByRole("status");
     expect(b.calls.find((c) => c.path === "/v1/revisions/p1/confirm")!.body).toMatchObject({ on_stale: "rebase" });
     expect(b.revisions.filter((r) => r.state === "proposed")).toHaveLength(1);
-    expect(await d.findByRole("region", { name: "待确认修订" })).toBeInTheDocument();
+    expect(await d.findByRole("region", { name: "等你确认的修改" })).toBeInTheDocument();
   });
 
   it("确认被服务端拒绝（如 delegate/已处置）：显示原因，状态不变", async () => {
     const b = withProposed();
     mount(b.impl);
     const d = within(await open("登录方案"));
-    const box = within(await d.findByRole("region", { name: "待确认修订" }));
+    const box = within(await d.findByRole("region", { name: "等你确认的修改" }));
     b.revisions[1].state = "superseded"; // 别处已处置
     await userEvent.click(box.getByRole("button", { name: "确认生效" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("already superseded");
@@ -309,11 +310,24 @@ describe("新建规范（ACT-AGM-01 / ACT-NRG-01）", () => {
     for (const h of ["处理规则", "架构边界", "开发规范", "设计约束", "验收要求"]) expect(body.value).toContain("## " + h);
     await userEvent.type(body, "先问我");
     await userEvent.type(f.getByLabelText("修改原因"), "初版");
-    await userEvent.click(f.getByRole("button", { name: "提交" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("待本人确认");
+    await userEvent.click(f.getByRole("button", { name: "提交给自己确认" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("等你确认后生效");
     const post = b.calls.find((c) => c.method === "POST" && c.path === "/v1/materials")!;
     expect(post.body).toMatchObject({ kind: "guideline", project: "acc-home", title: "家庭事务规范", reason: "初版", based_on: "" });
     expect(post.body.content).toContain("先问我");
+  });
+
+  it("提交按钮按写入策略预告后果：直接生效 / 提交给自己确认；规范恒为先确认；没设过的类型不猜", async () => {
+    mount(backend().impl);
+    await userEvent.click(await screen.findByRole("button", { name: "新建材料" }));
+    const f = within(await screen.findByRole("form", { name: "新建材料" }));
+    expect(await f.findByRole("button", { name: "保存（直接生效）" })).toBeInTheDocument(); // 默认类型是纪要
+    await userEvent.selectOptions(f.getByLabelText("类型"), "design");
+    expect(f.getByRole("button", { name: "提交给自己确认" })).toBeInTheDocument();
+    await userEvent.selectOptions(f.getByLabelText("类型"), "guideline");
+    expect(f.getByRole("button", { name: "提交给自己确认" })).toBeInTheDocument();
+    await userEvent.selectOptions(f.getByLabelText("类型"), "reference");
+    expect(f.getByRole("button", { name: "提交" })).toBeInTheDocument();
   });
 
   it("服务端拒绝新建时显示原因", async () => {
@@ -383,7 +397,7 @@ describe("检索与筛选（ACT-MAT-09 / ACT-MAT-13）", () => {
     await userEvent.type(screen.getByLabelText("关联事项"), "item_1");
     await userEvent.click(screen.getByRole("button", { name: "搜索" }));
     const hit = await screen.findByRole("listitem", { name: "mat_h" });
-    expect(hit).toHaveTextContent("托管型");
+    expect(hit).toHaveTextContent("在仓库里（只读）");
     expect(hit).toHaveTextContent("docs/a.md");
     const call = b.calls.find((c) => c.path.startsWith("/v1/materials/search?"))!;
     const sp = new URL(call.path, "http://x").searchParams;
@@ -397,7 +411,7 @@ describe("检索与筛选（ACT-MAT-09 / ACT-MAT-13）", () => {
     const hosted: Mat = { id: "mat_hosted", project: "acc-open", kind: "design", title: "仓库文档", location: "r:p" };
     mount(backend({ materials: [hosted] }).impl);
     const d = within(await open("仓库文档"));
-    expect(await d.findByText(/托管型/)).toBeInTheDocument();
+    expect(await d.findByText(/在仓库里（只读）/)).toBeInTheDocument();
     expect(d.queryByLabelText("Markdown 内容")).not.toBeInTheDocument();
   });
 });

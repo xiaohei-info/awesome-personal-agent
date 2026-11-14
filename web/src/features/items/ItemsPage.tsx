@@ -6,10 +6,12 @@ import { isMaterialId } from "../../app/relations";
 import { AttachedMessages } from "../attached-messages";
 import { Markdown } from "./Markdown";
 import { ProgressForm } from "../today/ProgressForm";
-import { errorText as msg, locale, useT } from "../../app/i18n";
+import { locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { PHASE, WAITING } from "../../app/ids";
 import { Pick, Val, useLabel } from "../../app/values";
+import { ErrorNote } from "../../app/errors";
+import { EntityPick, useItemTitle, useNames } from "../../app/names";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -44,9 +46,12 @@ const REL_TYPES = ["relates", "parent", "blocks", "derived_from", "supersedes"];
 export function ActorBadge({ actor }: { actor: Step["actor"] }) {
   const t = useT(strings);
   const label = useLabel();
+  const credential = useNames("credential");
+  // agent 显示凭据的标签；本人与系统不再重复显示身份串。
+  const who = actor.type === "agent" ? credential(actor.principal) : "";
   return (
     <span aria-label={t.actorLabel} data-actor={actor.type} className="badge plain">
-      {[label("actorType", actor.type), label("via", actor.via), actor.principal].join(" · ")}
+      {[label("actorType", actor.type), label("via", actor.via), who].filter(Boolean).join(" · ")}
     </span>
   );
 }
@@ -70,7 +75,7 @@ function ItemList() {
   const [sort, setSort] = useState("");
   const [plannedFor, setPlannedFor] = useState("");
   const [items, setItems] = useState<Item[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
     setError(null);
@@ -79,7 +84,7 @@ function ItemList() {
     for (const [k, v] of [["phase", phase], ["q", q.trim()], ["sort", sort], ["planned_for", plannedFor]]) if (v) qs.set(k, v);
     api.get<{ items: Item[] }>("/items" + (qs.size ? "?" + qs : "")).then(
       (r) => setItems(r.items),
-      (e) => setError(msg(e)),
+      (e) => setError(e),
     );
   }, [api, phase, q, sort, plannedFor]);
 
@@ -121,8 +126,8 @@ function ItemList() {
         <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} />
       </label>
       </div>
-      {error && <p role="alert">{error}</p>}
-      {items && !shown.length && !error && <p className="empty">{t.noMatch}</p>}
+      {error != null && <ErrorNote error={error} />}
+      {items && !shown.length && error == null && <p className="empty">{t.noMatch}</p>}
       <ul aria-label={t.list} className="rows">
         {shown.map((i) => (
           <li key={i.id}>
@@ -145,8 +150,10 @@ function ItemDetail() {
   const { id = "" } = useParams();
   const { api } = useSession();
   const [d, setD] = useState<Detail | null>(null);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
-  const [actErr, setActErr] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
+  const [actErr, setActErr] = useState<unknown>(null);
+  const projectName = useNames("project");
+  const credential = useNames("credential");
   const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
@@ -162,7 +169,7 @@ function ItemDetail() {
   useEffect(() => {
     setD(null);
     setLoadErr(null);
-    load().catch((e) => setLoadErr(msg(e)));
+    load().catch((e) => setLoadErr(e));
   }, [load]);
 
   // 写入后整页重读：显示的永远是服务端状态，冲突/拒绝时不留下本地假状态。
@@ -173,11 +180,11 @@ function ItemDetail() {
       setEditing(false);
       await load();
     } catch (e) {
-      setActErr(msg(e));
+      setActErr(e);
     }
   };
 
-  if (loadErr) return <main><p role="alert">{loadErr}</p></main>;
+  if (loadErr != null) return <main><ErrorNote error={loadErr} /></main>;
   if (!d) return <main><p role="status">{t.loading}</p></main>;
   const { item } = d;
   const path = "/items/" + encodeURIComponent(id);
@@ -189,15 +196,14 @@ function ItemDetail() {
       <h1>{item.title}</h1>
       <div className="panel facts">
         <p>{t.phase(label("phase", item.phase))}</p>
-        <p>{t.version(item.version)}</p>
         <p>{t.label(item.status_label || t.notSet)}</p>
         <p>{t.deadline(item.deadline ? new Date(item.deadline).toLocaleString(locale()) : t.notSet)}</p>
-        {item.project ? <p>{t.project(item.project)}</p> : null}
+        {item.project ? <p>{t.project(projectName(item.project))}</p> : null}
         {item.planned_for ? <p>{t.planned(item.planned_for)}</p> : null}
         {item.tags?.length ? <p>{t.tags(item.tags.join(t.listSep))}</p> : null}
       </div>
       {item.body ? <Markdown source={item.body} /> : null}
-      {actErr && <p role="alert">{actErr}</p>}
+      {actErr != null && <ErrorNote error={actErr} />}
 
       <h2>{t.edit}</h2>
       {editing ? (
@@ -220,21 +226,22 @@ function ItemDetail() {
           {d.relations.map((r, n) => {
             const out = r.from === item.id;
             const other = out ? r.to : r.from;
-            const type = t.relation[r.type] ?? r.type;
+            const type = label("relation", r.type);
             const to = isMaterialId(other) ? "/materials?id=" + encodeURIComponent(other) : "../" + encodeURIComponent(other);
-            return <li key={n}>{out ? `${type} →` : `← ${type}`} <Link to={to}>{other}</Link></li>;
+            return <li key={n}>{out ? `${type} →` : `← ${type}`} <Link to={to}>{isMaterialId(other) ? other : <ItemTitle id={other} />}</Link></li>;
           })}
         </ul>
         <RelateForm others={d.others} onSubmit={(b) => act(() => api.post(path + "/relations", b))} />
       </section>
 
-      <section aria-label={t.sourcesLabel}>
-        <h2>{t.sourceThreads}</h2>
+      {/* 关联键是来源线程或对象的标识（§9.4），平时用不到，收在高级里。 */}
+      <details aria-label={t.sourcesLabel}>
+        <summary>{t.advancedKeys}</summary>
         <ul aria-label={t.keys} className="rows">
           {d.keys.map((k, n) => <li key={n}>{k.key}</li>)}
         </ul>
         <KeyForm key={"k" + item.version} onSubmit={(key) => act(() => api.post(path + "/correlation-keys", { key }, ifMatch))} />
-      </section>
+      </details>
 
       <AttachedMessages itemId={id} />
 
@@ -242,7 +249,7 @@ function ItemDetail() {
         <h2>{t.progress}</h2>
         <ul aria-label={t.progress} className="rows">
           {d.progress.map((p) => (
-            <li key={p.id}>{p.text} <span className="sub">{[p.on && t.pointsTo(p.on), p.actor, new Date(p.at).toLocaleString(locale())].filter(Boolean).join(" · ")}</span></li>
+            <li key={p.id}>{p.text} <span className="sub">{[p.on && t.pointsTo(p.on), credential(p.actor), new Date(p.at).toLocaleString(locale())].filter(Boolean).join(" · ")}</span></li>
           ))}
         </ul>
         <ProgressForm onSubmit={(b) => act(() => api.post(path + "/progress", b))} />
@@ -296,12 +303,15 @@ function TransitionForm({ onSubmit }: { onSubmit: (b: Record<string, unknown>) =
   const [evidence, setEvidence] = useState("");
   const [wKind, setWKind] = useState("human");
   const [wRef, setWRef] = useState("");
+  // 等待对象随类别换控件：时间用日期时间（发 RFC 3339），执行者用名单，其余写一句话。
+  const pickKind = (k: string) => { setWKind(k); setWRef(""); };
+  const ref = wKind === "time" && wRef ? new Date(wRef).toISOString() : wRef.trim();
   return (
     <form
       className="panel"
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit({ to, reason, ...(evidence ? { evidence } : {}), ...(to === "waiting" && wRef ? { waiting_on: { kind: wKind, ref: wRef } } : {}) });
+        onSubmit({ to, reason, ...(evidence ? { evidence } : {}), ...(to === "waiting" && ref ? { waiting_on: { kind: wKind, ref } } : {}) });
       }}
     >
       <label>{t.targetPhase} <Pick k="phase" value={to} onChange={setTo} ids={PHASE} /></label>
@@ -309,8 +319,14 @@ function TransitionForm({ onSubmit }: { onSubmit: (b: Record<string, unknown>) =
       <label>{t.evidence} <input value={evidence} onChange={(e) => setEvidence(e.target.value)} /></label>
       {to === "waiting" && (
         <>
-          <label>{t.waitKind} <Pick k="waiting" value={wKind} onChange={setWKind} ids={WAITING} /></label>
-          <label>{t.waitRef} <input value={wRef} onChange={(e) => setWRef(e.target.value)} /></label>
+          <label>{t.waitKind} <Pick k="waiting" value={wKind} onChange={pickKind} ids={WAITING} /></label>
+          {wKind === "time" ? (
+            <label>{t.waitUntil} <input type="datetime-local" value={wRef} onChange={(e) => setWRef(e.target.value)} /></label>
+          ) : wKind === "executor" ? (
+            <label>{t.waitRef} <EntityPick kind="executor" value={wRef} onChange={setWRef} empty={t.choose} /></label>
+          ) : (
+            <label>{t.waitRef} <input value={wRef} onChange={(e) => setWRef(e.target.value)} /></label>
+          )}
         </>
       )}
       <button type="submit">{t.transition}</button>
@@ -324,7 +340,7 @@ function RelateForm({ others, onSubmit }: { others: Item[]; onSubmit: (b: { to: 
   const [type, setType] = useState("relates");
   return (
     <form className="panel" onSubmit={(e) => { e.preventDefault(); if (to) onSubmit({ to, type }); }}>
-      <label>{t.relateTo} <select value={to} onChange={(e) => setTo(e.target.value)}><option value="">{t.choose}</option>{others.map((o) => <option key={o.id} value={o.id}>{o.id}</option>)}</select></label>
+      <label>{t.relateTo} <select value={to} onChange={(e) => setTo(e.target.value)}><option value="">{t.choose}</option>{others.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</select></label>
       <label>{t.relType} <Pick k="relation" value={type} onChange={setType} ids={REL_TYPES} /></label>
       <button type="submit" disabled={!to}>{t.relate}</button>
     </form>
@@ -374,7 +390,7 @@ function NewItem() {
   const [project, setProject] = useState("");
   const [deadline, setDeadline] = useState("");
   const [plannedFor, setPlannedFor] = useState("");
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<unknown>(null);
   useEffect(() => void api.get<{ projects: { id: string; name?: string }[] }>("/projects").then((r) => setProjects(r.projects), () => {}), [api]);
 
   const create = async (c: Content) => {
@@ -390,7 +406,7 @@ function NewItem() {
       });
       nav("../" + encodeURIComponent(r.id));
     } catch (e) {
-      setErr(msg(e));
+      setErr(e);
     }
   };
 
@@ -398,7 +414,7 @@ function NewItem() {
     <main>
       <p className="eyebrow"><Link to="..">{t.back}</Link></p>
       <PageHead>{t.newItem}</PageHead>
-      {err && <p role="alert">{err}</p>}
+      {err != null && <ErrorNote error={err} />}
       <ContentForm
         initial={{ title: "", body: "" }}
         submitLabel={t.createSubmit}
@@ -413,6 +429,10 @@ function NewItem() {
       />
     </main>
   );
+}
+
+function ItemTitle({ id }: { id: string }) {
+  return <>{useItemTitle(id)}</>;
 }
 
 function KeyForm({ onSubmit }: { onSubmit: (key: string) => void }) {

@@ -60,7 +60,7 @@ describe("agent 变更视图（flow-agent-revert）", () => {
     expect(within(a).getByText(/代 owner/)).toBeInTheDocument();
     expect(within(a).getByText(/本人说：改成新标题/)).toBeInTheDocument();
     const d = screen.getByRole("heading", { name: /要不要上线/ }).closest("article")!;
-    expect(within(d).getByText(/聊天代答/)).toBeInTheDocument();
+    expect(within(d).getByText(/凭你在聊天里的原话/)).toBeInTheDocument();
     expect(within(d).getByText(/本人说：选 A/)).toBeInTheDocument();
     expect(within(d).getByRole("button", { name: "撤销" })).toBeEnabled(); // 聊天代答的决策可撤销（§6.4）
     expect(screen.queryByText("人改的")).not.toBeInTheDocument();
@@ -75,7 +75,7 @@ describe("agent 变更视图（flow-agent-revert）", () => {
     await screen.findByText("新的");
     expect(screen.getAllByRole("article")).toHaveLength(1);
     expect(screen.queryByText("早的")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByLabelText("显示更早的变更"));
+    await userEvent.click(screen.getByLabelText("显示更早的改动"));
     expect(screen.getAllByRole("article")).toHaveLength(3);
   });
 
@@ -88,12 +88,14 @@ describe("agent 变更视图（flow-agent-revert）", () => {
     expect(Date.parse(localStorage.getItem("apa.agentChanges.lastVisit")!)).toBeGreaterThanOrEqual(before);
   });
 
-  it("ACT-REV-02：一键撤销 → POST revert 带 CSRF 与事件序号；原事件仍在，标为已撤销；提示外部副作用不撤销", async () => {
+  it("ACT-REV-02：撤销（先确认）→ POST revert 带 CSRF 与事件序号；原事件仍在，标为已撤销；提示外部副作用不撤销", async () => {
     const s = server([upd(1, "2030-01-01T00:00:00Z")]);
     mount(s.impl);
-    expect(await screen.findByText(/外部已发生的副作用不会被撤销/)).toBeInTheDocument();
     const a = (await screen.findByRole("heading", { name: /新标题/ })).closest("article")!;
     await userEvent.click(within(a).getByRole("button", { name: "撤销" }));
+    expect(within(a).getByText(/已发出的消息、已提的 PR 不会收回/)).toBeInTheDocument();
+    expect(s.calls.some((c) => c.method === "POST")).toBe(false); // 先确认，才发撤销
+    await userEvent.click(within(a).getByRole("button", { name: "确认撤销" }));
     expect(await within(screen.getByRole("heading", { name: /新标题/ }).closest("article")!).findByText(/已撤销/)).toBeInTheDocument();
     const w = s.calls.find((c) => c.method === "POST")!;
     expect(w.path).toBe("/v1/items/i1/revert");
@@ -107,13 +109,14 @@ describe("agent 变更视图（flow-agent-revert）", () => {
     mount(s.impl);
     const a = (await screen.findByRole("heading", { name: /新标题/ })).closest("article")!;
     await userEvent.click(within(a).getByRole("button", { name: "撤销" }));
+    await userEvent.click(within(a).getByRole("button", { name: "确认撤销" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("later changes exist");
     expect(within(a).getByRole("button", { name: "撤销" })).toBeEnabled();
   });
 
   it("空列表", async () => {
     mount(server([]).impl);
-    expect(await screen.findByText("没有 agent 变更")).toBeInTheDocument();
+    expect(await screen.findByText("agent 还没改过什么")).toBeInTheDocument();
   });
 
   it("读取失败：显示错误并可重试", async () => {
@@ -140,13 +143,14 @@ describe("agent 变更视图（flow-agent-revert）", () => {
 describe("授权单代答（ACT-AUTH-03、flow-agent-revert）", () => {
   const viaGrant = (seq: number): Step => ({ seq, type: "decision.resolved", object: "i3", actor: agent, at: "2030-01-01T00:05:00Z", resolved_via: "grant", grant: "grt_ok", payload: { item: { title: "要不要发布" } } });
 
-  it("显示授权单 id 并可撤销；撤销后标记已撤销，且仍提示外部副作用不撤销", async () => {
+  it("标明按临时授权（链接到这张授权单）并可撤销；确认里提示外部副作用不撤销，撤销后标记已撤销", async () => {
     const s = server([viaGrant(1)]);
     mount(s.impl);
     const a = (await screen.findByRole("heading", { name: /要不要发布/ })).closest("article")!;
-    expect(within(a).getByText(/授权单代答 · 授权单 grt_ok/)).toBeInTheDocument();
-    expect(screen.getByText(/外部已发生的副作用不会被撤销/)).toBeInTheDocument();
+    expect(within(a).getByRole("link", { name: "按临时授权" })).toHaveAttribute("href", "/settings/grants#grt_ok");
     await userEvent.click(within(a).getByRole("button", { name: "撤销" }));
+    expect(within(a).getByText(/已发出的消息、已提的 PR 不会收回/)).toBeInTheDocument();
+    await userEvent.click(within(a).getByRole("button", { name: "确认撤销" }));
     expect(await within(a).findByText(/已撤销/)).toBeInTheDocument();
     expect(s.calls.find((c) => c.method === "POST")).toMatchObject({ path: "/v1/items/i3/revert", body: { event: 1 }, csrf: "tok-1" });
   });

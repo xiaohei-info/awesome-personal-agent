@@ -4,7 +4,6 @@ import { common } from "../../app/strings";
 const zh = {
   ...common.zh,
   title: "今天",
-  lede: "今天要做的、到期的、等你决定的，和久未推进的。",
   groups: { planned: "计划今天或更早", due: "今天到期", pending: "等你决定", stale: "久未推进" },
   count: (title: string, n: number) => `${title}（${n}）`,
   empty: "这一组没有事项。",
@@ -34,7 +33,6 @@ const zh = {
 const en: typeof zh = {
   ...common.en,
   title: "Today",
-  lede: "What to do today, what is due, what waits for your decision, and what has stalled.",
   groups: { planned: "Planned for today or earlier", due: "Due today", pending: "Waiting for you", stale: "Stale" },
   count: (title, n) => `${title} (${n})`,
   empty: "Nothing in this group.",

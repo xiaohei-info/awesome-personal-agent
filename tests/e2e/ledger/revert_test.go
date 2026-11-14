@@ -81,11 +81,11 @@ func TestFlowAgentRevert(t *testing.T) {
 		if rev.Actor.Type != "human" || rev.Actor.Via != "web" || rev.Payload["op"] != "revert" || rev.Payload["reverts"] != float64(renameSeq) {
 			t.Errorf("撤销 Event 应由本人经 web 写入并指向原 Event: %+v", rev)
 		}
-		// 界面提示：Web 页面文案随前端构建产物发布，必须含"外部副作用不会被撤销"。
+		// 界面提示：Web 页面文案随前端构建产物发布，必须含"外部副作用不会被撤销"的提示（撤销确认里的"已发出的消息、已提的 PR 不会收回"）。
 		hit := false
 		assets, _ := filepath.Glob(filepath.Join("..", "..", "..", "web", "dist", "assets", "*.js"))
 		for _, f := range assets {
-			if b, _ := os.ReadFile(f); strings.Contains(string(b), "外部已发生的副作用不会被撤销") {
+			if b, _ := os.ReadFile(f); strings.Contains(string(b), "已发出的消息、已提的 PR 不会收回") {
 				hit = true
 			}
 		}

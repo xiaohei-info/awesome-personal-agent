@@ -179,7 +179,7 @@ describe("web_only 决策（flow-web-only、flow-life-renewal、flow-first-day�
     const s = server([wo]);
     mount(s.impl);
     const card = (await screen.findByText("续费吗？")).closest("article")!;
-    expect(within(card).getByText("仅限 Web 确认")).toBeInTheDocument();
+    expect(within(card).getByText("需要你亲自确认")).toBeInTheDocument();
     await userEvent.click(within(card).getByRole("button", { name: "同意" }));
     await screen.findByText("没有要你决定的事");
     expect(s.calls.find((c) => c.path === "/v1/items/w/decide")!.body).toEqual({ choice: "yes" });
@@ -188,7 +188,7 @@ describe("web_only 决策（flow-web-only、flow-life-renewal、flow-first-day�
   it("非 web_only 不显示该标记", async () => {
     mount(server([item("a")]).impl);
     await screen.findByText("问题 a");
-    expect(screen.queryByText("仅限 Web 确认")).not.toBeInTheDocument();
+    expect(screen.queryByText("需要你亲自确认")).not.toBeInTheDocument();
   });
 });
 
