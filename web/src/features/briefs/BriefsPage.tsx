@@ -116,7 +116,7 @@ export function BriefsPage() {
     }
   }
   const OnOff = ({ i }: { i: Instance }) => (
-    <button type="button" aria-pressed={i.enabled} aria-label={t.toggle(i.params.title || i.id)} onClick={() => void toggle(i)}>{i.enabled ? t.pause : t.resume}</button>
+    <button type="button" aria-pressed={i.enabled} aria-label={t.toggle(i.params.title?.split("{date}").join(t.dateMark) || i.id)} onClick={() => void toggle(i)}>{i.enabled ? t.pause : t.resume}</button>
   );
   const briefPacks = packs.filter((n) => BRIEF_PACKS.includes(n));
   const scheduled = (instances ?? []).filter((x) => x.pack !== ROUTINE);
@@ -180,7 +180,7 @@ export function BriefsPage() {
             {!routines.length && <li className="sub">{t.noRoutines}</li>}
             {routines.map((i) => (
               <li key={i.id}>
-                <span>{i.params.title || t.modes[i.params.mode as "run" | "create_item"] || i.id} · <When schedule={i.params.schedule} />{i.project ? ` · ${projectName(i.project)}` : ""}{i.enabled ? "" : t.disabled}</span> <OnOff i={i} />
+                <span>{i.params.title?.split("{date}").join(t.dateMark) || t.modes[i.params.mode as "run" | "create_item"] || i.id} · <When schedule={i.params.schedule} />{i.project ? ` · ${projectName(i.project)}` : ""}{i.enabled ? "" : t.disabled}</span> <OnOff i={i} />
               </li>
             ))}
           </ul>

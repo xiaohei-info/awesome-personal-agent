@@ -150,7 +150,7 @@ describe("简报页", () => {
     expect(await l.findByText(/（已停用）/)).toBeInTheDocument();
     expect(l.getByRole("button", { name: "启停 ins_1" })).toHaveTextContent("启用");
     const r = within(screen.getByRole("list", { name: "已安排的例行任务" }));
-    await userEvent.click(r.getByRole("button", { name: "启停 {date} 周报" }));
+    await userEvent.click(r.getByRole("button", { name: "启停 〈日期〉 周报" }));
     expect(calls.patches!.at(-1)).toEqual({ url: "/v1/instances/ins_r", body: { enabled: false } });
   });
 
@@ -159,7 +159,7 @@ describe("简报页", () => {
     mount(server({ routine: true }, calls));
     const form = within(await screen.findByRole("form", { name: "新的例行任务" }));
     expect(form.queryByLabelText("要它做的事")).not.toBeInTheDocument();
-    await userEvent.type(form.getByLabelText("标题（可写 {date}）"), "交水电费");
+    await userEvent.type(form.getByLabelText("标题（{date} 会换成当天日期）"), "交水电费");
     await userEvent.selectOptions(form.getByLabelText("哪几天做"), "1");
     await userEvent.selectOptions(await form.findByRole("combobox", { name: "归到哪个项目" }), "home");
     await userEvent.click(form.getByRole("button", { name: "安排例行任务" }));
