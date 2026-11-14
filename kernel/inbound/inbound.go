@@ -685,26 +685,59 @@ func (s *Service) freshOutbound(ctx context.Context, src domain.Source) (domain.
 // material 是按端点位置裁剪后的资料正文；ok 为假表示该位置的端点被外发范围排除（§14.14）。
 // 聚合事件的消息与正文同等对待：它们也是来源内容。
 func material(ev domain.SourceEvent, o domain.Outbound) func(locality string) (string, bool) {
-	body := ev
-	if len(ev.Messages) > 0 {
-		var b strings.Builder
-		b.WriteString(ev.Detail)
-		for _, m := range ev.Messages {
-			fmt.Fprintf(&b, "\n%s: %s", m.Sender, m.Text)
-		}
-		body.Detail = b.String()
+	body := withMessages(ev)
+	return func(locality string) (string, bool) { return materialAt(body, registry.ScopeFor(o, locality)) }
+}
+
+// withMessages 把聚合事件的消息接到正文后面，与正文一起按范围裁剪。
+func withMessages(ev domain.SourceEvent) domain.SourceEvent {
+	if len(ev.Messages) == 0 {
+		return ev
 	}
-	return func(locality string) (string, bool) {
-		t, ok := registry.Trim(body, registry.ScopeFor(o, locality))
-		if !ok {
-			return "", false
-		}
-		text := t.Summary + "\n" + t.Detail
-		if scope := registry.ScopeFor(o, locality); scope == registry.ScopeFull && t.Link != "" {
-			text += "\n" + t.Link // 完整链接只在全文范围内送出，其余范围只有结构化输入里的域名
-		}
-		return strings.TrimSpace(text), true
+	var b strings.Builder
+	b.WriteString(ev.Detail)
+	for _, m := range ev.Messages {
+		fmt.Fprintf(&b, "\n%s: %s", m.Sender, m.Text)
 	}
+	ev.Detail = b.String()
+	return ev
+}
+
+// materialAt 是按一个外发范围裁剪后的资料正文；范围不可外发时 ok 为假。
+func materialAt(body domain.SourceEvent, scope string) (string, bool) {
+	t, ok := registry.Trim(body, scope)
+	if !ok {
+		return "", false
+	}
+	text := t.Summary + "\n" + t.Detail
+	if scope == registry.ScopeFull && t.Link != "" {
+		text += "\n" + t.Link // 完整链接只在全文范围内送出，其余范围只有结构化输入里的域名
+	}
+	return strings.TrimSpace(text), true
+}
+
+// OutboundView 是一条来源事件在某个外发范围下实际送给模型的内容：前五项是结构化输入里的元信息
+// （与 eventInput 同源，链接只有域名），Material 是资料正文（与 material 同源）。
+type OutboundView struct {
+	EventType  string `json:"event_type"`
+	Subject    string `json:"subject"`
+	Sender     string `json:"sender"`
+	OccurredAt string `json:"occurred_at"`
+	Link       string `json:"link"`
+	Material   string `json:"material"`
+}
+
+// OutboundPreview 按 full、excerpt、meta 三个可外发的范围分别给出送出的内容（§14.14），供 Web 选范围前预览。
+// 只读，不调模型；none 与未选择不外发，不在结果里。
+func OutboundPreview(ev domain.SourceEvent) map[string]OutboundView {
+	meta, _ := registry.Trim(ev, registry.ScopeMeta)
+	body := withMessages(ev)
+	out := map[string]OutboundView{}
+	for _, scope := range []string{registry.ScopeFull, registry.ScopeExcerpt, registry.ScopeMeta} {
+		text, _ := materialAt(body, scope)
+		out[scope] = OutboundView{EventType: meta.Type, Subject: meta.Subject, Sender: meta.Sender, OccurredAt: meta.OccurredAt, Link: meta.Link, Material: text}
+	}
+	return out
 }
 
 // eventInput 是送给每一级的结构化输入：只含元信息（类型、标题、发送者、时间、链接域名），正文走资料段按位置裁剪。

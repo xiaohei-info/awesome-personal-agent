@@ -468,3 +468,36 @@ func TestNoDeliveryMeansNothingToClaimOrRead(t *testing.T) {
 		t.Fatalf("unread: %s", rec.Body)
 	}
 }
+
+// GET /deliveries/today：只有 Web 登录；pushed 与日上限同口径，cap 取当前策略，被静音压下的单独计数。
+func TestTodayCountsAreWebOnly(t *testing.T) {
+	e := setup(t, delivery.Options{})
+	pol := policy.Default()
+	pol.Disturb.Mutes = []policy.Mute{{Scope: policy.MuteItem, ID: "item-m"}}
+	for _, id := range []string{"p", "m"} {
+		d := domain.Delivery{ID: id, Item: "item-" + id, Class: domain.DeliveryReminder, Route: delivery.ChannelRoute("c"), Version: 1, Content: domain.DeliveryContent{Title: id}}
+		if err := e.st.Update(bg, func(tx *store.Tx) error { _, _, err := e.q.CreateGated(tx, pol, d, delivery.Target{}); return err }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	obs, _ := e.key(auth.Spec{Kind: auth.Observer})
+	for _, mod := range []func(*http.Request){e.chan_("c"), obs, func(*http.Request) {}} {
+		if rec := e.do("GET", "/v1/deliveries/today", "", mod); rec.Code != 401 && rec.Code != 403 {
+			t.Fatalf("non-web today: %d", rec.Code)
+		}
+	}
+	rec := e.do("GET", "/v1/deliveries/today", "", e.web)
+	var c map[string]int
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &c) != nil {
+		t.Fatalf("today: %d %s", rec.Code, rec.Body)
+	}
+	want := map[string]int{"pushed": 1, "cap": policy.DefaultDailyCap, "suppressed_daily_cap": 0, "suppressed_muted": 1}
+	if len(c) != len(want) {
+		t.Fatalf("today = %v, want %v", c, want)
+	}
+	for k, v := range want {
+		if c[k] != v {
+			t.Fatalf("today = %v, want %v", c, want)
+		}
+	}
+}

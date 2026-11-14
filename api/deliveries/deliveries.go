@@ -4,13 +4,14 @@
 //	POST /deliveries/{id}/ack        送达回报（带版本号与外部消息 ref）
 //	POST /deliveries/{id}/fail       失败回报（内核退避重试，超限退回 Web 未读）
 //	GET  /deliveries/unread          Web 未读
+//	GET  /deliveries/today           今天的推送计数（与日上限同口径）
 //	POST /deliveries/{id}/read       本人在 Web 点击：确认（acknowledged）
 //
 // 路由里没有业务规则：租约、幂等、版本冲突、退避都在 kernel/delivery。本层只决定"这把凭据能碰哪条路由"：
 //   - 渠道 ext 密钥（scope 为 channel.<名>）只碰路由 channel:<名>，渠道由密钥确定，请求里没有渠道参数；
 //   - 网关插件 token（worker、delegate）只碰唤醒类路由；
 //   - 其他凭据（observer、导出与转发 ext、webhook、运行凭据）一律拒绝；
-//   - 未读与已读只有 Web 登录。
+//   - 未读、已读与今天的计数只有 Web 登录。
 //
 // 凭据在每个请求里重新校验，吊销下一次请求即生效。回答回流（/answer）不在这里。
 package deliveries
@@ -26,6 +27,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -49,6 +51,7 @@ func Routes(st *store.Store, q *delivery.Queue, poll time.Duration) core.RouteGr
 		r.Handle(core.Route{Method: "POST", Path: "/deliveries/{id}/ack", Handler: h.ack})
 		r.Handle(core.Route{Method: "POST", Path: "/deliveries/{id}/fail", Handler: h.fail})
 		r.Handle(core.Route{Method: "GET", Path: "/deliveries/unread", Handler: h.unread})
+		r.Handle(core.Route{Method: "GET", Path: "/deliveries/today", Handler: h.today})
 		r.Handle(core.Route{Method: "POST", Path: "/deliveries/{id}/read", Handler: h.read})
 	}
 }
@@ -191,6 +194,25 @@ func (h *handlers) unread(w http.ResponseWriter, r *http.Request, p *core.Princi
 		ds = []domain.Delivery{}
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"deliveries": ds})
+}
+
+// today 返回当前自然日的推送计数（delivery.TodayCounts）：只读，不写 Event。
+func (h *handlers) today(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if err := webOnly(p); err != nil {
+		return err
+	}
+	var c delivery.TodayCounts
+	if err := h.st.View(r.Context(), func(tx *store.Tx) error {
+		_, pol, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		c, err = h.q.Today(tx, pol)
+		return err
+	}); err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, c)
 }
 
 func (h *handlers) read(w http.ResponseWriter, r *http.Request, p *core.Principal) error {

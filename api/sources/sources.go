@@ -7,6 +7,7 @@
 //	POST /ingests/{id}/replay           重放
 //	GET /sources/{id}/events            来源事件，可按 disposition 过滤（逗号分隔多个），after + limit 分页
 //	GET /sources/{id}/rejects           没有入账的输出行及原因，after + limit 分页
+//	GET /source-events/{id}/outbound-preview  一条事件在 full、excerpt、meta 下送给模型的内容（只读）
 //	POST /source-events/{id}/propose    把未判定事件或 digest 事件转为建议
 //	POST /source-events/{id}/ignore     忽略一条未判定事件
 //	POST /source-events/ignore          批量忽略未判定积压：按来源或全部
@@ -122,6 +123,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/score", MaxBody: 1 << 10, Handler: a.backlogScore})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/rejudge", MaxBody: 1 << 10, Handler: a.backlogRejudge})
 		r.Handle(core.Route{Method: "GET", Path: "/source-events/restorable", Handler: readable(a.restorable)})
+		r.Handle(core.Route{Method: "GET", Path: "/source-events/{id}/outbound-preview", Handler: readable(a.outboundPreview)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/restore", MaxBody: 1 << 10, Handler: a.restore})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/ignore", MaxBody: 1 << 10, Handler: a.ignoreBatch})
 	}, nil
@@ -598,6 +600,32 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		out["next_after"] = next
 	}
 	return core.WriteJSON(w, http.StatusOK, out)
+}
+
+// outboundPreview 返回一条来源事件按 full、excerpt、meta 裁剪后实际送给模型的内容（§14.14），与外发同源，不写 Event。
+// 读取口径与 GET /sources/{id}/events 相同：这是未过滤的外部内容，运行凭据不可用；对话捕获的内部来源只给 Web。
+func (a *api) outboundPreview(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if p.Caller.Level == authz.LevelRun {
+		return domain.NewError(domain.CodePermissionDenied, "run credential cannot read source events", "read forwarded messages from the context instead")
+	}
+	var ev domain.SourceEvent
+	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
+		var err error
+		if ev, err = runner.Event(tx, r.PathValue("id")); err != nil {
+			return err
+		}
+		if inbound.IsCaptureSource(ev.SourceID) {
+			if !p.Web { // 对话内容只给本人；其他凭据看来就是不存在
+				return domain.NewError(domain.CodeNotFound, "source event "+ev.ID+" not found", "list the source's events")
+			}
+			return nil
+		}
+		_, err = registry.Get(tx, ev.SourceID)
+		return err
+	}); err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, inbound.OutboundPreview(ev))
 }
 
 func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal) error {

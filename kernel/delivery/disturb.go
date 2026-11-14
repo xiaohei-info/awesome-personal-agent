@@ -95,13 +95,56 @@ func (q *Queue) overCap(tx *store.Tx, pol policy.Policy, d domain.Delivery, t Ta
 	if limit <= 0 || !strings.HasPrefix(d.Route, "channel:") || t.Exempt || d.Content.WebOnly {
 		return false, nil
 	}
+	n, err := pushedToday(tx, pol, now)
+	return n >= int64(limit), err
+}
+
+// pushedToday 是 now 所在自然日已计入日上限的推送条数：经渠道、决策/提醒/简报、未被压、不含超限说明。
+// 日上限判定（overCap）与 Today 共用它，二者口径一致。
+func pushedToday(tx *store.Tx, pol policy.Policy, now time.Time) (int64, error) {
 	from, to, _ := dayBounds(pol, now)
 	var n int64
 	err := query(tx, func(r *store.Rows) error { return r.Scan(&n) },
 		`SELECT COUNT(*) FROM delivery_delivery
 		WHERE route LIKE 'channel:%' AND class IN ('decision', 'reminder', 'brief') AND suppressed = ''
 		AND id NOT LIKE ? AND created_at >= ? AND created_at < ?`, noticePrefix+"%", ns(from), ns(to))
-	return n >= int64(limit), err
+	return n, err
+}
+
+// TodayCounts 是本自然日的推送计数（§7.4）：Pushed 与日上限同口径，Cap 为 0 表示不限；
+// 两个 Suppressed 是当天被日上限、静音压成只留 Web 未读的条数。
+type TodayCounts struct {
+	Pushed             int64 `json:"pushed"`
+	Cap                int   `json:"cap"`
+	SuppressedDailyCap int64 `json:"suppressed_daily_cap"`
+	SuppressedMuted    int64 `json:"suppressed_muted"`
+}
+
+// Today 返回当前自然日（按静默时段的时区，未设置取 UTC）的推送计数。只读。
+func (q *Queue) Today(tx *store.Tx, pol policy.Policy) (TodayCounts, error) {
+	now := q.o.Now()
+	c := TodayCounts{Cap: pol.Disturb.DailyCap}
+	var err error
+	if c.Pushed, err = pushedToday(tx, pol, now); err != nil {
+		return c, err
+	}
+	from, to, _ := dayBounds(pol, now)
+	err = query(tx, func(r *store.Rows) error {
+		var why string
+		var n int64
+		if err := r.Scan(&why, &n); err != nil {
+			return err
+		}
+		switch why {
+		case SuppressedDailyCap:
+			c.SuppressedDailyCap = n
+		case SuppressedMuted:
+			c.SuppressedMuted = n
+		}
+		return nil
+	}, `SELECT suppressed, COUNT(*) FROM delivery_delivery WHERE suppressed != '' AND created_at >= ? AND created_at < ? GROUP BY suppressed`,
+		ns(from), ns(to))
+	return c, err
 }
 
 // noticeOnce 当天第一次超限时补发一条说明（走被压提醒原本的渠道）；之后同一天不再发。

@@ -1059,3 +1059,54 @@ func TestRestoreSourceEventsRoutes(t *testing.T) {
 		t.Fatalf("web: %d %s", r.Code, r.Body)
 	}
 }
+
+// GET /source-events/{id}/outbound-preview：与来源事件列表同一读取口径（observer 可读，ext、运行凭据 403，
+// 对话捕获的事件只给 Web）；返回 full、excerpt、meta 三档，与外发同源，不写 Event。
+func TestOutboundPreviewRoute(t *testing.T) {
+	e := setup(t)
+	if r := e.do(e.token(auth.Delegate), "POST", "/v1/sources", hook); r.Code != 201 {
+		t.Fatalf("register: %d %s", r.Code, r.Body)
+	}
+	e.seedEvents("src_hook", [2]string{"a", "unjudged"})
+	e.seedEvents("capture:prj_1", [2]string{"c1", "unjudged"})
+	idOf := func(source string) string {
+		var evs []domain.SourceEvent
+		if err := e.st.View(context.Background(), func(tx *store.Tx) (err error) { evs, err = runner.Events(tx, source); return }); err != nil {
+			t.Fatal(err)
+		}
+		return evs[0].ID
+	}
+	path := "/v1/source-events/" + idOf("src_hook") + "/outbound-preview"
+	var before int64
+	e.st.View(context.Background(), func(tx *store.Tx) (err error) { before, err = eventlog.Head(tx); return })
+	var pv map[string]inbound.OutboundView
+	r := e.do(e.token(auth.Observer), "GET", path, "")
+	r.into(&pv)
+	if r.Code != 200 || len(pv) != 3 {
+		t.Fatalf("observer: %d %s", r.Code, r.Body)
+	}
+	if f, m := pv["full"], pv["meta"]; !strings.HasPrefix(f.Material, "s\n") || !strings.HasSuffix(f.Material, "https://x.example/a") || pv["excerpt"].Material != "s" || f.Link != "x.example" || m.Material != "" || m.Subject != "a" {
+		t.Fatalf("preview: %+v", pv)
+	}
+	var after int64
+	e.st.View(context.Background(), func(tx *store.Tx) (err error) { after, err = eventlog.Head(tx); return })
+	if after != before {
+		t.Fatalf("preview must not write events: %d -> %d", before, after)
+	}
+	if r := e.do(e.token(auth.Ext), "GET", path, ""); r.Code != 403 {
+		t.Errorf("ext: %d", r.Code)
+	}
+	if r := e.do(e.runCredential(), "GET", path, ""); r.Code != 403 {
+		t.Errorf("run credential: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(e.token(auth.Observer), "GET", "/v1/source-events/sev_nope/outbound-preview", ""); r.Code != 404 {
+		t.Errorf("unknown event: %d", r.Code)
+	}
+	capPath := "/v1/source-events/" + idOf("capture:prj_1") + "/outbound-preview"
+	if r := e.do(e.token(auth.Delegate), "GET", capPath, ""); r.Code != 404 {
+		t.Errorf("capture event for a token: %d", r.Code)
+	}
+	if r := e.web("GET", capPath, ""); r.Code != 200 {
+		t.Errorf("capture event for Web: %d %s", r.Code, r.Body)
+	}
+}

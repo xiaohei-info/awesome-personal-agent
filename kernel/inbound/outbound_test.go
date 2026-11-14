@@ -2,10 +2,12 @@ package inbound
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -345,5 +347,36 @@ func TestScopeChangeMidBatchAppliesToNextEvent(t *testing.T) {
 				t.Fatalf("second event: %+v", got)
 			}
 		})
+	}
+}
+
+// 外发预览与真实外发同源：每个范围的资料正文等于 material 按该范围给出的正文，元信息等于 eventInput 的结构化字段。
+func TestOutboundPreviewMatchesWhatIsSent(t *testing.T) {
+	ev := domain.SourceEvent{ID: "sev_p", SourceID: "mail", Type: "message", Subject: "renewal", Sender: "a@example.com",
+		Summary: "please confirm", Detail: strings.Repeat("长", registry.ExcerptChars+20), Link: "https://docs.example.com/x?token=t",
+		OccurredAt: time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC), Messages: []domain.EventMessage{{Sender: "b@example.com", Text: "follow-up"}}}
+	pv := OutboundPreview(ev)
+	if len(pv) != 3 {
+		t.Fatalf("preview has full, excerpt and meta only: %v", pv)
+	}
+	var in map[string]any
+	if err := json.Unmarshal(eventInput(domain.Source{ID: "mail"}, ev, "", nil), &in); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{registry.ScopeFull, registry.ScopeExcerpt, registry.ScopeMeta} {
+		want, ok := material(ev, domain.Outbound{Local: scope})(policy.LocalityLocal)
+		v := pv[scope]
+		if !ok || v.Material != want {
+			t.Fatalf("%s material = %q, want %q", scope, v.Material, want)
+		}
+		if v.EventType != in["event_type"] || v.Subject != in["subject"] || v.Sender != in["sender"] || v.OccurredAt != in["occurred_at"] || v.Link != in["link"] {
+			t.Fatalf("%s fields %+v differ from the structured input %v", scope, v, in)
+		}
+	}
+	if !strings.Contains(pv[registry.ScopeFull].Material, "follow-up") || !strings.Contains(pv[registry.ScopeFull].Material, "token=t") {
+		t.Fatalf("full sends messages and the full link: %q", pv[registry.ScopeFull].Material)
+	}
+	if pv[registry.ScopeMeta].Material != "" || pv[registry.ScopeMeta].Link != "docs.example.com" {
+		t.Fatalf("meta sends no body and only the link domain: %+v", pv[registry.ScopeMeta])
 	}
 }
