@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "../../app/api";
+import { ApiError, type ApiClient } from "../../app/api";
 import { useSession } from "../../app/session";
-import { PageHead } from "../../app/page";
+import { COUNTS_EVENT, PageHead } from "../../app/page";
 import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。是否可接受/丢弃、授权与只认第一次处理都在服务端。
@@ -99,6 +99,9 @@ function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejectio
   );
 }
 
+/** 导航上建议流的数量：待处理的建议条数。 */
+export const countProposals = (api: ApiClient) => api.get<{ items: Proposal[] }>("/items?phase=proposed").then((r) => r.items.length);
+
 export function ProposalsPage() {
   const { api } = useSession();
   const [items, setItems] = useState<Proposal[] | null>(null);
@@ -147,6 +150,7 @@ export function ProposalsPage() {
       setError(msg(e)); // 含 409：已有人先处理 / 目标已终结，刷新后以服务端为准
     }
     await load();
+    window.dispatchEvent(new Event(COUNTS_EVENT));
   };
 
   const all = items ?? [];
@@ -173,6 +177,7 @@ export function ProposalsPage() {
       setBatching(false);
     }
     await load();
+    window.dispatchEvent(new Event(COUNTS_EVENT));
   };
 
   return (
