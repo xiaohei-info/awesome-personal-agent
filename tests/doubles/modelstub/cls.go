@@ -53,7 +53,8 @@ type ClsBatch struct {
 	ReceivedAt time.Time   `json:"received_at"`
 }
 
-// ClsStub 是讲 probability-judgment/1 的分类端点替身（CLS_STUB）。
+// ClsStub 是分类端点替身（CLS_STUB）：在 URL() 讲 probability-judgment/1，在 SystemOneURL() 下讲 system-one
+// （POST /v1/systemone、GET /v1/models），两种协议共用同一套按题配置与故障。
 // 只用于测试与验收环境，不得被 apa 二进制或内核代码导入。
 type ClsStub struct {
 	srv *httptest.Server
@@ -91,6 +92,9 @@ func NewClsAt(addr string) *ClsStub {
 // URL 是应配置为 judge_endpoint.url 的完整地址（路径由配置给全）。
 func (s *ClsStub) URL() string { return s.srv.URL + "/judge" }
 func (s *ClsStub) Close()      { s.srv.Close() }
+
+// SystemOneURL 是 system-one 协议应配置的接口根（内核追加 /systemone）。
+func (s *ClsStub) SystemOneURL() string { return s.srv.URL + "/v1" }
 
 // Judge 追加一条按题配置。
 func (s *ClsStub) Judge(j ClsJudge) {
@@ -140,16 +144,28 @@ func (s *ClsStub) handle(w http.ResponseWriter, r *http.Request) {
 		s.control(w, r)
 		return
 	}
+	if r.URL.Path == "/v1/models" && r.Method == http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"models":[{"name":"cls-stub-latest","description":"stub","release_date":"2026-01-01"}]}`)
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	raw, _ := io.ReadAll(r.Body)
+	so := strings.HasSuffix(r.URL.Path, "/systemone")
 	var req struct {
 		Protocol  string        `json:"protocol"`
 		Questions []clsQuestion `json:"questions"`
 	}
-	parseErr := json.Unmarshal(raw, &req)
+	var parseErr error
+	if so {
+		req.Questions, parseErr = systemOneQuestions(raw)
+		req.Protocol = ProtocolJudgment // system-one 没有协议字段：解析成功即视为合协议
+	} else {
+		parseErr = json.Unmarshal(raw, &req)
+	}
 
 	s.mu.Lock()
 	s.batches = append(s.batches, ClsBatch{r.URL.Path, r.Header.Clone(), raw, string(raw), len(req.Questions), time.Now()})
@@ -181,6 +197,9 @@ func (s *ClsStub) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if status == 0 && (parseErr != nil || req.Protocol != ProtocolJudgment || len(req.Questions) == 0) {
 		status = 400
+		if so {
+			status = 422
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if status != 0 {
@@ -200,6 +219,27 @@ func (s *ClsStub) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if so {
+		answers := map[string]any{}
+		for _, q := range req.Questions {
+			p := defP
+			for i := range judges {
+				if judges[i].Key.matches(q.text()) {
+					if judges[i].Omit || judges[i].Error != "" { // system-one 没有按题错误：按漏答处理
+						p = -1
+					} else if judges[i].PYes != nil {
+						p = *judges[i].PYes
+					}
+					break
+				}
+			}
+			if p >= 0 {
+				answers[q.ID] = map[string]any{"type": "noul", "noul": p}
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"model": "cls-stub-1.0", "answers": answers, "usage": map[string]int{"input_tokens": 1, "output_tokens": 0}})
+		return
+	}
 	results := make([]any, 0, len(req.Questions))
 	for _, q := range req.Questions {
 		var hit *ClsJudge
@@ -256,4 +296,36 @@ func (s *ClsStub) control(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "not found or method not allowed", http.StatusNotFound)
 	}
+}
+
+// systemOneQuestions 把 system-one 请求里的具名 noul 题转成按题配置能匹配的形状；model 缺失或题型不是 noul 视为不合规。
+func systemOneQuestions(raw []byte) ([]clsQuestion, error) {
+	var req struct {
+		Model     string `json:"model"`
+		Questions map[string]struct {
+			Type         string `json:"type"`
+			Instructions struct {
+				Question string          `json:"question"`
+				Input    json.RawMessage `json:"input"`
+				Material string          `json:"material"`
+			} `json:"instructions"`
+			Criteria struct {
+				True string `json:"true"`
+			} `json:"criteria"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, err
+	}
+	if req.Model == "" {
+		return nil, fmt.Errorf("model is required")
+	}
+	out := make([]clsQuestion, 0, len(req.Questions))
+	for id, q := range req.Questions {
+		if q.Type != "noul" {
+			return nil, fmt.Errorf("question %s: type %q", id, q.Type)
+		}
+		out = append(out, clsQuestion{ID: id, Question: q.Instructions.Question, Criteria: q.Criteria.True, Input: q.Instructions.Input, Material: q.Instructions.Material})
+	}
+	return out, nil
 }

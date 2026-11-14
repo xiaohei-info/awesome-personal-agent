@@ -464,14 +464,15 @@ func TestEndpointDefaultsAndValidation(t *testing.T) {
 		}
 	}
 	for name, bad := range map[string]func(*Policy){
-		"judge url":      func(p *Policy) { p.JudgeEndpoint.URL = "ftp://x" },
-		"judge protocol": func(p *Policy) { p.JudgeEndpoint.Protocol = "magic" },
-		"logprobs model": func(p *Policy) { p.JudgeEndpoint.Protocol = ProtocolChatLogprobs; p.JudgeEndpoint.Model = "" },
-		"judge locality": func(p *Policy) { p.JudgeEndpoint.Locality = "nearby" },
-		"judge batch":    func(p *Policy) { p.JudgeEndpoint.MaxBatch = -1 },
-		"gen url":        func(p *Policy) { p.GenerateEndpoint.URL = "ftp://x" },
-		"gen locality":   func(p *Policy) { p.GenerateEndpoint.Locality = "nearby" },
-		"timeout":        func(p *Policy) { p.ScreeningTimeoutMs = 0 },
+		"judge url":        func(p *Policy) { p.JudgeEndpoint.URL = "ftp://x" },
+		"judge protocol":   func(p *Policy) { p.JudgeEndpoint.Protocol = "magic" },
+		"logprobs model":   func(p *Policy) { p.JudgeEndpoint.Protocol = ProtocolChatLogprobs; p.JudgeEndpoint.Model = "" },
+		"system-one model": func(p *Policy) { p.JudgeEndpoint.Protocol = ProtocolSystemOne; p.JudgeEndpoint.Model = "" },
+		"judge locality":   func(p *Policy) { p.JudgeEndpoint.Locality = "nearby" },
+		"judge batch":      func(p *Policy) { p.JudgeEndpoint.MaxBatch = -1 },
+		"gen url":          func(p *Policy) { p.GenerateEndpoint.URL = "ftp://x" },
+		"gen locality":     func(p *Policy) { p.GenerateEndpoint.Locality = "nearby" },
+		"timeout":          func(p *Policy) { p.ScreeningTimeoutMs = 0 },
 	} {
 		if _, err := update(t, s, owner, func(p *Policy) error { bad(p); return nil }); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: err = %v", name, err)

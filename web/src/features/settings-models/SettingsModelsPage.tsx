@@ -9,7 +9,16 @@ import { strings } from "./strings";
 // 校验、规整、默认值都在服务端；本页只搬运编辑结果，原样显示拒绝原因，被拒绝时草稿保留。
 // 密钥只写不读：读取只有 api_key_set 与末 4 位；回传占位 *** 表示沿用原密钥。
 const MASK = "***";
-const JUDGE_PROTOCOLS = ["probability-judgment/1"]; // chat-logprobs 待 SPIKE-LOGPROB（§21.3）结论后再开放，此前不提供。
+// 判断端点按协议分适配器（§8.8）：system-one 是原生分类模型服务的判断接口，新配时默认；probability-judgment/1 给自建分类服务。
+// chat-logprobs 待 SPIKE-LOGPROB（§21.3）结论后再开放，此前不提供。
+const SYSTEM_ONE = "system-one";
+const PJ = "probability-judgment/1";
+const JUDGE_PROTOCOLS = [SYSTEM_ONE, PJ];
+// 新配时的预填值；换协议时，仍是上一个协议预填值的字段换成新协议的预填值，本人改过的不动。
+const PRESETS: Record<string, { url: string; model: string }> = {
+  [SYSTEM_ONE]: { url: "https://api.typesafe.ai/v1", model: "jev-latest" },
+  [PJ]: { url: "", model: "" },
+};
 const MANUAL = "\u0000manual";
 
 type Kind = "generate" | "judge";
@@ -63,13 +72,13 @@ function posInt(v: string, what: string) {
 }
 
 type Draft = Record<string, string>;
-const JUDGE_NEW: Draft = { url: "", protocol: JUDGE_PROTOCOLS[0], model: "", locality: "", timeout_ms: "10000", max_batch: "32", max_material_chars: "8000" };
+const JUDGE_NEW: Draft = { ...PRESETS[SYSTEM_ONE], protocol: SYSTEM_ONE, locality: "", timeout_ms: "10000", max_batch: "32", max_material_chars: "8000" };
 
 function draftOf(kind: Kind, e: Endpoint | null): Draft {
   if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { url: "", model: "", locality: "" };
   const d: Draft = { url: e.url ?? "", model: e.model ?? "", locality: e.locality ?? "" };
   if (kind === "judge")
-    Object.assign(d, { protocol: e.protocol || JUDGE_PROTOCOLS[0], timeout_ms: String(e.timeout_ms ?? 10000), max_batch: String(e.max_batch ?? 32), max_material_chars: String(e.max_material_chars ?? 8000) });
+    Object.assign(d, { protocol: e.protocol || PJ, timeout_ms: String(e.timeout_ms ?? 10000), max_batch: String(e.max_batch ?? 32), max_material_chars: String(e.max_material_chars ?? 8000) });
   return d;
 }
 
@@ -190,6 +199,14 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
   }, [probing]);
 
   const set = (k: string, v: string) => setD((x) => ({ ...x, [k]: v }));
+  const setProtocol = (p: string) =>
+    setD((x) => {
+      const from = PRESETS[x.protocol], to = PRESETS[p];
+      const next: Draft = { ...x, protocol: p };
+      if (from && to) for (const k of ["url", "model"] as const) if (x[k] === from[k]) next[k] = to[k];
+      return next;
+    });
+  const so = kind === "judge" && d.protocol === SYSTEM_ONE;
   const setURL = (v: string) => {
     set("url", v);
     // 已存密钥只发往原来的主机：地址换了源就要求重新输入（服务端同样拒绝）。
@@ -209,8 +226,8 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
     if (!d.locality) throw new Error(t.needWhere);
     return save(config());
   });
-  // 判断端点只有在开放对数概率换算（对话补全兼容协议）后才有模型列表；目前只有生成端点能获取。
-  const canList = kind === "generate";
+  // 生成端点与 system-one 判断接口有模型列表；probability-judgment/1 没有。
+  const canList = kind === "generate" || so;
 
   const fetchModels = async () => {
     setProbing("models");
@@ -297,16 +314,19 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
             </p>
           )}
           {kind === "judge" && (
-            <label>
-              {t.protocol}
-              <select value={d.protocol} onChange={(e) => set("protocol", e.target.value)}>
-                {JUDGE_PROTOCOLS.map((p) => <option key={p}>{p}</option>)}
-              </select>
-            </label>
+            <>
+              <label>
+                {t.protocol}
+                <select value={d.protocol} onChange={(e) => setProtocol(e.target.value)}>
+                  {JUDGE_PROTOCOLS.map((p) => <option key={p} value={p}>{t.protocolNames[p] ?? p}</option>)}
+                </select>
+              </label>
+              {t.protocolHints[d.protocol] && <small className="sub">{t.protocolHints[d.protocol]}</small>}
+            </>
           )}
           <label>
-            {kind === "judge" ? t.urlJudge : t.url}
-            <input value={d.url} onChange={(e) => setURL(e.target.value)} placeholder={kind === "judge" ? "http://127.0.0.1:8090/judge" : "https://llm.example.com/v1"} />
+            {so ? t.urlSystemOne : kind === "judge" ? t.urlJudge : t.url}
+            <input value={d.url} onChange={(e) => setURL(e.target.value)} placeholder={so ? PRESETS[SYSTEM_ONE].url : kind === "judge" ? "http://127.0.0.1:8090/judge" : "https://llm.example.com/v1"} />
           </label>
           <KeyField
             stored={doc?.api_key_set ? doc.api_key_hint || "" : null}
@@ -317,7 +337,7 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
             urlChanged={!!doc?.api_key_set && keyMode === "edit" && origin(d.url) !== origin(doc.url)}
           />
           <div className="row end">
-            {modelField(kind === "judge" ? t.modelJudge : t.model)}
+            {modelField(kind === "judge" && !so ? t.modelJudge : t.model)}
             {canList && (
               <button type="button" disabled={!!probing || !d.url.trim()} onClick={() => void fetchModels()}>
                 {probing === "models" ? t.fetching(elapsed) : t.fetch}
@@ -335,7 +355,7 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
             </details>
           )}
           <div className="row">
-            <button type="button" disabled={!!probing || !d.url.trim() || (kind === "generate" && !d.model.trim())} onClick={() => void test().catch((e) => setProbeErr(msg(e)))}>
+            <button type="button" disabled={!!probing || !d.url.trim() || ((kind === "generate" || so) && !d.model.trim())} onClick={() => void test().catch((e) => setProbeErr(msg(e)))}>
               {probing === "test" ? t.testing(elapsed) : t.test}
             </button>
           </div>

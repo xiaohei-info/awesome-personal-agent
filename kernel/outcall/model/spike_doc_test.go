@@ -44,7 +44,8 @@ func TestSpikeSubstituteConclusionsWrittenBack(t *testing.T) {
 		t.Error("appendix D.7 not updated")
 	}
 	web := read("../../../web/src/features/settings-models/SettingsModelsPage.tsx")
-	if !strings.Contains(web, `const JUDGE_PROTOCOLS = ["probability-judgment/1"];`) {
-		t.Error("settings page must offer only probability-judgment/1")
+	// 选项是 system-one 与 probability-judgment/1；chat-logprobs 在 SPIKE-LOGPROB 有结论前不出现在选项里。
+	if !strings.Contains(web, `const JUDGE_PROTOCOLS = [SYSTEM_ONE, PJ];`) || strings.Contains(web, `"chat-logprobs"`) {
+		t.Error("settings page must offer system-one and probability-judgment/1 only")
 	}
 }
