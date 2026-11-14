@@ -1,5 +1,6 @@
-# sha256: 74513c148d16978bb954f414950e210b34676e77cfa8fb76cffb5e3ee44b3491
+# sha256: 0d1f580714f75fd30a7516e5455ecc0fbcab9953458ab02c2e195782d6345880
 work_item_id: 01a1d5d1-fcc3-7056-8973-f8426da2578a
-status: blocked
+status: in_progress
+recovery_marker: true
 retry_note: 上游修复 fix.e2e-session-authz.f65ac5 合入后，基于最新 main 重跑全部门槛含全量 e2e；仍由 Oracle
   worker 执行，需 npm --prefix web ci/build
