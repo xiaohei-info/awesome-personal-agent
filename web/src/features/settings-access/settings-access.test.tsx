@@ -18,6 +18,7 @@ const card = async (name: string) => within(await screen.findByRole("region", { 
 const save = async (name: string) => userEvent.click((await card(name)).getByRole("button", { name: `保存${name}` }));
 const CAP = "后台运行能做多少";
 const LISTS = "信任名单";
+const HOST = "没指定时用哪个宿主";
 
 beforeEach(() => sessionStorage.clear());
 
@@ -38,6 +39,22 @@ describe("设置 › 后台权限", () => {
     await save(CAP);
     await c.findByRole("status");
     expect(s.puts.at(-1)).toMatchObject({ path: "/v1/settings/access-limits", body: { permission_cap: { default: "read", by_harness: { hermes: "edit" } } } });
+  });
+
+  it("默认宿主：没设时提示后果；只列已确认声明的宿主；保存只发 default_harness 这一段，其余策略不动", async () => {
+    const s = policyServer();
+    mount(s.impl);
+    const c = await card(HOST);
+    expect(c.getByText("不设时后台任务会停下来问你")).toBeInTheDocument();
+    const pick = c.getByRole("combobox", { name: HOST });
+    expect(pick).toHaveValue("");
+    await waitFor(() => expect(within(pick).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["", "hermes"]));
+    await userEvent.selectOptions(pick, "hermes");
+    await save(HOST);
+    await c.findByRole("status");
+    expect(s.puts.at(-1)).toEqual({ path: "/v1/settings/policy", body: { default_harness: "hermes" }, csrf: "tok-1" });
+    expect(s.doc.persona).toBe("Be brief."); // 别的段原样
+    expect(c.queryByText("不设时后台任务会停下来问你")).not.toBeInTheDocument();
   });
 
   it("flow-bg-guards ACT-BGG-08: 两份白名单分开显示，一起保存；发送者、回答人用标签增删", async () => {

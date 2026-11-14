@@ -10,6 +10,7 @@ import { ago, period, when, type Source } from "./shared";
 import { BacklogFlow, IgnoreAll, inProgress, SourceBacklog, type Models } from "./Backlog";
 import { OutboundEditor } from "./Outbound";
 import { Ingests, Registration, Rejects, RestorePanel, WebhookKey } from "./Advanced";
+import { DefaultProject, Digest } from "./Digest";
 
 // 消息来源页（设计 §5.13）：来源列表 → 外发范围 → 积压四步；排障与一次性操作在「高级」里。
 // 授权（自定义命令只 Web）、命令校验、转建议的规则都在服务端；本页只调用并如实展示服务端的回答。
@@ -51,7 +52,7 @@ function Status({ s }: { s: Source }) {
   );
 }
 
-function Detail({ source, onChooseOutbound }: { source: Source; onChooseOutbound: () => void }) {
+function Detail({ source, onChooseOutbound, onSaved }: { source: Source; onChooseOutbound: () => void; onSaved: () => void }) {
   const t = useT(strings);
   const raw = useRaw();
   const st = source.stats;
@@ -59,7 +60,9 @@ function Detail({ source, onChooseOutbound }: { source: Source; onChooseOutbound
     <section role="region" aria-label={t.detail(source.id)} className="panel">
       <h3>{source.id}</h3>
       {source.type === "webhook" && <WebhookKey source={source} />}
+      <DefaultProject source={source} onSaved={onSaved} />
       <SourceBacklog source={source.id} onChooseOutbound={onChooseOutbound} />
+      <Digest source={source.id} />
       <details>
         <summary>{t.advanced}</summary>
         <p className="sub">
@@ -201,7 +204,7 @@ export function SourcesPage() {
         )}
       </section>
       {(total > 0 || inProgress()) && models && <BacklogFlow total={total} models={models} onChanged={changed} ignoreAll={ignoreAll} />}
-      {current && <Detail key={`${current.id}:${rev}`} source={current} onChooseOutbound={() => setEditing(current.id)} />}
+      {current && <Detail key={`${current.id}:${rev}`} source={current} onChooseOutbound={() => setEditing(current.id)} onSaved={() => void load()} />}
       <details ref={advanced}>
         <summary>{t.advanced}</summary>
         <RestorePanel sources={sources ?? []} onRestored={changed} />

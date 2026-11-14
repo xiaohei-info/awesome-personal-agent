@@ -6,7 +6,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix it; nothing was saved" });
 
 export const SECTIONS: Record<string, string[]> = {
-  "/v1/settings/policy": ["web_only", "disturb", "material_write", "persona"],
+  "/v1/settings/policy": ["web_only", "disturb", "material_write", "persona", "channels", "default_harness"],
   "/v1/settings/allowlists": ["forward_allowlist", "channel_answerers"],
   "/v1/settings/access-limits": ["permission_cap"],
 };
@@ -17,6 +17,8 @@ export function initialDoc(): Record<string, any> {
     disturb: { routes: { decision: "inject", health: "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 20, mutes: [] },
     material_write: { default: "proposed", kinds: { minutes: "direct" } },
     persona: "Be brief.",
+    channels: {},
+    default_harness: "",
     forward_allowlist: { telegram: ["alice"] },
     channel_answerers: {},
     permission_cap: { default: "read", by_harness: {} },

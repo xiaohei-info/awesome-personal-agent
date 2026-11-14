@@ -5,7 +5,7 @@ import { PageHead } from "../../app/page";
 import { HostedMaterial } from "../materials-hosted/HostedMaterial";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
-import { useNames } from "../../app/names";
+import { ItemPick, useNames } from "../../app/names";
 import { strings } from "./strings";
 import { MATERIAL_KIND } from "../../app/ids";
 import { Pick, Val } from "../../app/values";
@@ -172,10 +172,10 @@ export function MaterialsPage() {
           {t.search}
           <input value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
-        <label>
+        <div>
           {t.relatedItem}
-          <input value={item} onChange={(e) => setItem(e.target.value)} />
-        </label>
+          <ItemPick label={t.relatedItem} find={t.findItem} empty={t.anyItem} value={item} onChange={setItem} />
+        </div>
         <div className="actions">
           <button onClick={search}>{t.searchBtn}</button>
           <button onClick={() => setCreating(true)}>{t.create}</button>

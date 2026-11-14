@@ -5,7 +5,10 @@ import { shared } from "../settings-policy/strings";
 const zh = {
   ...shared.zh,
   title: "后台权限",
-  summary: (level: string) => `默认${level}`,
+  summary: (level: string, host: string) => `默认${level} · ${host || "没设默认宿主"}`,
+  defaultHost: "没指定时用哪个宿主",
+  noHost: "不设",
+  noHostHint: "不设时后台任务会停下来问你",
   lede: "我不在时，后台 agent 能做多少。",
   cap: "后台运行能做多少",
   capHint: "实际能做什么以宿主的声明为准",
@@ -40,7 +43,10 @@ const zh = {
 const en: typeof zh = {
   ...shared.en,
   title: "Background access",
-  summary: (level) => `Default: ${level}`,
+  summary: (level, host) => `Default: ${level} · ${host || "no default host"}`,
+  defaultHost: "Host to use when none is given",
+  noHost: "None",
+  noHostHint: "Without one, background tasks stop and ask you",
   lede: "What background agents may do while I'm away.",
   cap: "What background runs may do",
   capHint: "The host's declaration decides the details",

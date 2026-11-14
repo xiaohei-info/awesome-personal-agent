@@ -105,3 +105,42 @@ export function useItemTitle(id?: string | null): string {
   }, [api, id]);
   return id ? title || id : "";
 }
+
+/** 按标题找一个事项：输入几个字列出匹配的事项（GET /items?q=），选中后提交 id；不让人手打 id。 */
+export function ItemPick({ value, onChange, label, find, empty }: {
+  value: string;
+  onChange: (id: string) => void;
+  /** 下拉的无障碍名称。 */
+  label: string;
+  /** 搜索框的无障碍名称与提示。 */
+  find: string;
+  /** 「不限」选项的文字。 */
+  empty: string;
+}) {
+  const { api } = useSession();
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<{ id: string; title: string }[]>([]);
+  const current = useItemTitle(value);
+  useEffect(() => {
+    if (!q.trim()) return setHits([]);
+    let live = true;
+    // shortcut: 每次输入都查一次、只取第一页，事项很多时再加防抖与分页。
+    api.get<{ items: { id: string; title: string }[] }>("/items?q=" + encodeURIComponent(q.trim())).then(
+      (r) => live && setHits(r.items),
+      () => live && setHits([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, q]);
+  const opts = value && !hits.some((x) => x.id === value) ? [{ id: value, title: current || value }, ...hits] : hits;
+  return (
+    <span>
+      <input aria-label={find} placeholder={find} value={q} onChange={(e) => setQ(e.target.value)} />
+      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{empty}</option>
+        {opts.map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
+      </select>
+    </span>
+  );
+}

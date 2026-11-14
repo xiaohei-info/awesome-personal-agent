@@ -19,7 +19,7 @@ interface Tier {
 }
 type Preview = Record<"full" | "excerpt" | "meta", Tier>;
 
-function ScopeRadios({ name, legend, value, onChange }: { name: string; legend: string; value: string | null; onChange: (v: string) => void }) {
+export function ScopeRadios({ name, legend, value, onChange }: { name: string; legend: string; value: string | null; onChange: (v: string) => void }) {
   const lang = useLang();
   return (
     <fieldset className="seg-radio" role="radiogroup" aria-label={legend}>

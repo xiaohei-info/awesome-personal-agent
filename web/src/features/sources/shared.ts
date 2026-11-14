@@ -25,6 +25,7 @@ export interface Source {
   enabled: boolean;
   stats?: Stats;
   outbound?: Outbound;
+  default_project?: string; // 规则没给项目时归到这里（§9.1）；空为不归
 }
 export interface SourceEvent {
   id: string;

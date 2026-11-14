@@ -10,7 +10,7 @@ import { feature } from "./index";
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix the input" });
 
-interface P { id: string; name: string; intro?: string; tags?: string[]; status: string; repos?: { remote: string; checkouts?: { host: string; path: string }[] }[]; allowed_executors: string[] | null; capture?: boolean }
+interface P { id: string; name: string; intro?: string; tags?: string[]; status: string; repos?: { remote: string; checkouts?: { host: string; path: string }[] }[]; allowed_executors: string[] | null; capture?: boolean; capture_outbound?: string | null }
 
 function server(opts: { putDenied?: boolean } = {}) {
   const projects: P[] = [
@@ -34,6 +34,12 @@ function server(opts: { putDenied?: boolean } = {}) {
     if (url.startsWith("/v1/items?project=")) {
       const id = new URL(url, "http://x").searchParams.get("project");
       return json(200, { items: id === "p_work" ? [{ id: "item_1", phase: "open", version: 1, kind: "task", title: "项目内事项" }] : [] });
+    }
+    const co = url.match(/^\/v1\/settings\/projects\/([^/]+)\/capture-outbound$/);
+    if (co && method === "PUT") {
+      const p = projects.find((x) => x.id === co[1])!;
+      p.capture_outbound = body.value;
+      return json(200, { value: p.capture_outbound });
     }
     const a = url.match(/^\/v1\/settings\/projects\/([^/]+)\/allowed-executors$/);
     if (a && method === "PUT") {
@@ -109,6 +115,28 @@ describe("项目页", () => {
     expect(patch.body).toMatchObject({ name: "acc-work2", status: "paused" });
     expect(patch.body).not.toHaveProperty("allowed_executors");
     expect(s.projects[0].status).toBe("paused");
+  });
+
+  it("聊天内容发给外部模型时：开启记下待办后才出现；不预选、标「还没选」；保存只发 value", async () => {
+    const s = server();
+    const u = userEvent.setup();
+    mount(s.impl, "/projects/p_work");
+    await screen.findByLabelText("名称");
+    expect(screen.queryByRole("radiogroup", { name: "聊天内容发给外部模型时" })).not.toBeInTheDocument();
+    await u.click(screen.getByRole("checkbox", { name: "从聊天里自动记下待办" }));
+    await u.click(screen.getByRole("button", { name: "保存项目" }));
+    const group = await screen.findByRole("radiogroup", { name: "聊天内容发给外部模型时" });
+    expect(within(group).getAllByRole("radio").every((r) => !(r as HTMLInputElement).checked)).toBe(true);
+    expect(screen.getByText("还没选")).toBeInTheDocument();
+    const region = within(screen.getByRole("region", { name: "聊天内容发给外部模型时" }));
+    expect(region.getByRole("button", { name: "保存" })).toBeDisabled();
+    await u.click(within(group).getByRole("radio", { name: "摘要和开头" }));
+    await u.click(region.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(s.projects[0].capture_outbound).toBe("excerpt"));
+    const put = s.calls.find((c) => c.method === "PUT" && c.path === "/v1/settings/projects/p_work/capture-outbound")!;
+    expect(put.body).toEqual({ value: "excerpt" });
+    expect(put.csrf).toBe("tok-1");
+    await waitFor(() => expect(screen.queryByText("还没选")).not.toBeInTheDocument());
   });
 
   it("repos：添加/删除远程地址、设置检出，显示服务端状态", async () => {
