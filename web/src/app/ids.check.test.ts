@@ -77,7 +77,8 @@ const CASES: [string, string, () => string[]][] = [
   ["WRITE", "write", () => named("kernel/policy/policy.go", "Write")],
   ["MUTE_SCOPE", "muteScope", () => named("kernel/policy/policy.go", "Mute")],
   ["LOCALITY", "locality", () => named("kernel/policy/policy.go", "Locality")],
-  ["PROTOCOL", "protocol", () => named("kernel/policy/policy.go", "Protocol")],
+  // Web 不提供对数概率换算的协议（ACT-JDP-11 断言前端产物里没有它），这里有意排除。
+  ["PROTOCOL", "protocol", () => named("kernel/policy/policy.go", "Protocol").filter((p) => p !== "chat-logprobs")],
   ["GRANT_ACTION", "grantAction", () => block("kernel/policy/grant.go", "var GrantableActions = []string{")],
   ["CRED_KIND", "credKind", () => typed("kernel/auth/auth.go", "Kind")],
   ["EXECUTOR_KIND", "executorKind", () => named("kernel/executors/executors.go", "Kind")],

@@ -68,8 +68,8 @@ export const WRITE = ["direct", "proposed"] as const;
 export const MUTE_SCOPE = ["source", "project", "item"] as const;
 /** 端点位置：kernel/policy/policy.go Locality* */
 export const LOCALITY = ["local", "external"] as const;
-/** 判断协议：kernel/policy/policy.go Protocol* */
-export const PROTOCOL = ["system-one", "probability-judgment/1", "chat-logprobs"] as const;
+/** 判断协议：kernel/policy/policy.go Protocol*；对数概率换算的协议在 SPIKE-LOGPROB（§21.3）有结论前 Web 不提供，前端产物里不得出现它的名字（ACT-JDP-11）。 */
+export const PROTOCOL = ["system-one", "probability-judgment/1"] as const;
 /** 概率来源（§8.8；内核按字面量写入） */
 export const PROB_SOURCE = ["native", "logprobs", "self_reported"] as const;
 /** 可授权的动作：kernel/policy/grant.go GrantableActions */
