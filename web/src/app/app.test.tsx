@@ -121,7 +121,7 @@ describe("登录与导航框架", () => {
       { ...feat("items", "事项", 3), count: () => Promise.reject(new Error("down")) },
     ]);
     const nav = await screen.findByRole("navigation", { name: "主导航" });
-    expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["处理", "运营"]);
+    expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["处理", "自动化"]);
     expect(await within(nav).findByRole("link", { name: "决策待办 3" })).toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "建议流" })).toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "事项" })).toBeInTheDocument();
@@ -185,11 +185,11 @@ async function openAt(at: string) {
 }
 
 describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
-  it("三组九个入口，设置在底部；默认落到今天", async () => {
+  it("三组八个入口，设置与诊断在底部；默认落到今天", async () => {
     const nav = await openAt("/");
-    expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["处理", "工作", "运营"]);
+    expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["处理", "工作", "自动化"]);
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "今天", "决策待办", "建议流", "事项", "项目", "agent 动态", "来源", "规则与判断", "健康", "设置",
+      "今天", "决策待办", "建议流", "事项", "项目", "agent 动态", "消息来源", "自动规则", "设置", "诊断",
     ]);
     expect(await screen.findByRole("heading", { name: "今天 页面" })).toBeInTheDocument();
   });
@@ -198,11 +198,12 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
   const OLD: [string, string, string][] = [
     ["/today", "今天", "今天"], ["/briefs", "今天", "简报"], ["/unread", "今天", "未读提醒"],
     ["/decisions", "决策待办", "决策待办"], ["/proposals", "建议流", "建议流"],
-    ["/items", "事项", "事项"], ["/items/itm_1", "事项", "事项"], ["/pack-views", "事项", "能力包视图"],
+    ["/items", "事项", "事项"], ["/items/itm_1", "事项", "事项"], ["/pack-views", "事项", "事项"],
     ["/projects", "项目", "项目"], ["/materials", "项目", "材料"],
-    ["/agent-changes", "agent 动态", "改动"], ["/delegation", "agent 动态", "委派"], ["/runs", "agent 动态", "运行记录"],
-    ["/sources", "来源", "来源"], ["/rules", "规则与判断", "规则模式"], ["/judgment", "规则与判断", "判断与校准"],
-    ["/health", "健康", "健康"], ["/audit", "健康", "审计"],
+    ["/agent-changes", "agent 动态", "改动"], ["/delegation", "agent 动态", "委派"], ["/runs", "诊断", "后台运行"],
+    ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "抽查漏掉的"],
+    ["/rules", "自动规则", "规则"], ["/judgment", "自动规则", "筛选门槛"],
+    ["/health", "诊断", "状态"], ["/audit", "诊断", "操作记录"],
     ["/settings", "设置", "我来拍板"], ["/settings-credentials", "设置", "接入钥匙"], ["/settings-exec", "设置", "执行者"],
     ["/settings/grants", "设置", "临时授权"], ["/settings-security", "设置", "登录与会话"], ["/purge", "设置", "永久删除"],
     ["/settings/general", "设置", "通用"], ["/settings/notify", "设置", "提醒与打扰"], ["/settings/access", "设置", "后台权限"], ["/settings/models", "设置", "模型"],
@@ -216,10 +217,16 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     else expect(entry).toBe(tab); // 只有一个页面的入口没有页签
   });
 
-  it("简报抽检链接 /judgments/… 改写到判断与校准，保留查询串", async () => {
+  it("简报抽检链接 /judgments/… 改写到消息来源 › 抽查漏掉的，保留查询串", async () => {
     await openAt("/judgments/spot-check?judgment=jdg_1");
-    expect(await screen.findByRole("heading", { name: "判断与校准 页面" })).toBeInTheDocument();
-    expect(screen.getByTestId("at")).toHaveTextContent("/judgment?judgment=jdg_1");
+    expect(await screen.findByRole("heading", { name: "抽查漏掉的 页面" })).toBeInTheDocument();
+    expect(screen.getByTestId("at")).toHaveTextContent("/spot-check?judgment=jdg_1");
+  });
+
+  it("原「能力包视图」地址改写到事项，保留查询串", async () => {
+    await openAt("/pack-views?view=brief/brief");
+    expect(await screen.findByRole("heading", { name: "事项 页面" })).toBeInTheDocument();
+    expect(screen.getByTestId("at")).toHaveTextContent("/items?view=brief/brief");
   });
 
   it("久未推进提醒的锚点保留", async () => {
@@ -242,18 +249,59 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
       const more = within(nav).getByRole("button", { name: "更多" });
       await userEvent.click(more);
       const sheet = screen.getByRole("dialog", { name: "全部页面" });
-      expect(within(sheet).getAllByRole("link").map((a) => a.textContent)).toEqual(["项目", "agent 动态", "来源", "规则与判断", "健康", "设置"]);
+      expect(within(sheet).getAllByRole("link").map((a) => a.textContent)).toEqual(["项目", "agent 动态", "消息来源", "自动规则", "设置", "诊断"]);
       expect(within(sheet).getAllByRole("link")[0]).toHaveFocus();
       await userEvent.keyboard("{Escape}");
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(more).toHaveFocus();
       await userEvent.click(more);
-      await userEvent.click(within(screen.getByRole("dialog")).getByRole("link", { name: "来源" }));
+      await userEvent.click(within(screen.getByRole("dialog")).getByRole("link", { name: "消息来源" }));
       expect(await screen.findByRole("heading", { name: "来源 页面" })).toBeInTheDocument();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     } finally {
       window.matchMedia = mm;
     }
+  });
+});
+
+// 导航底部的状态灯：取自 GET /v1/health 的十三项信号；本人暂停了模型是中性的「模型已暂停」，不算要处理（§8.7）。
+describe("状态灯（设计 §3.1）", () => {
+  const ok = (id: string) => ({ id, ok: true, count: 0, next: "" });
+  const IDS = ["source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable",
+    "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag"];
+  const report = (over: Record<string, object>) => ({ healthy: true, signals: IDS.map((id) => ({ ...ok(id), ...over[id] })) });
+  async function light(body: unknown) {
+    sessionStorage.setItem("apa.csrf", "tok-1");
+    const srv = fakeServer();
+    srv.setValid();
+    const impl = ((u: string, i: RequestInit) =>
+      u === "/v1/health" ? Promise.resolve(new Response(JSON.stringify(body), { status: 200 })) : srv.impl(u, i)) as typeof fetch;
+    mount(impl, REAL, "/today");
+    const nav = await screen.findByRole("navigation", { name: "主导航" });
+    return within(nav);
+  }
+
+  it("一切正常：显示「运行正常」，点开是诊断 › 状态", async () => {
+    const nav = await light(report({}));
+    expect(await nav.findByRole("link", { name: "运行正常" })).toHaveAttribute("href", "/health");
+  });
+
+  it("模型已暂停：中性的「模型已暂停」；暂停期间积下的积压不算要处理", async () => {
+    const nav = await light(report({
+      model_unavailable: { detail: { judge: "paused", generate: "paused", endpoint: "", paused: true } },
+      unjudged_backlog: { ok: false, count: 4, severity: "warning", detail: { models_paused: 4, model_unavailable: 0, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, sources: [] } },
+    }));
+    const link = await nav.findByRole("link", { name: "模型已暂停" });
+    expect(link.querySelector(".dot")).toHaveClass("paused");
+  });
+
+  it("有要处理的：显示条数；暂停时其他积压照样算", async () => {
+    const nav = await light(report({
+      model_unavailable: { detail: { judge: "paused", generate: "paused", endpoint: "", paused: true } },
+      unjudged_backlog: { ok: false, count: 5, severity: "warning", detail: { models_paused: 4, outbound_unset: 1, model_unavailable: 0, undecided: 0, restored: 0, expired: 0, sources: [] } },
+      source_failures: { ok: false, count: 1, severity: "error", detail: [{ source: "mail", enabled: true, consecutive_failures: 3 }] },
+    }));
+    expect(await nav.findByRole("link", { name: "2 项要处理" })).toBeInTheDocument();
   });
 });
 
@@ -296,7 +344,7 @@ describe("界面语言（设计 §4.1）", () => {
     mount(srv.impl, [...REAL.filter((f) => f.id !== "settings-general"), ...general], "/settings/general");
     await userEvent.click(await screen.findByRole("radio", { name: "English" }));
     const nav = await screen.findByRole("navigation", { name: "Main navigation" });
-    expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["Act", "Work", "Operate"]);
+    expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["Act", "Work", "Automate"]);
     expect(within(nav).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("General");
     expect(localStorage.getItem("apa.lang")).toBe("en");

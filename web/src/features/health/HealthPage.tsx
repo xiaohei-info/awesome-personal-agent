@@ -1,41 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
-import { errorText as msg, useT } from "../../app/i18n";
+import { useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
+import { useNames } from "../../app/names";
+import { useRaw } from "../../app/raw";
+import { useLabel } from "../../app/values";
+import { assess, type HealthReport, type Signal } from "../../app/status";
 import { strings } from "./strings";
 
-// 形状对应 GET /v1/health（api/health.Report）：十一项信号、顺序固定，判定全在服务端；这里只呈现。
-// severity 为 warning 的是待本人处理的提醒（如未判定积压），不算异常。
-export interface Signal {
-  id: string;
-  ok: boolean;
-  count: number;
-  severity?: string; // "error" 或 "warning"
-  why?: string;
-  next: string;
-  detail?: unknown;
-}
-export interface HealthReport {
-  healthy: boolean;
-  signals: Signal[];
-}
-
-// 信号 id → 标题与可跳转的修复入口（设计 §15.2）。能力包加载失败的修复是"修包后热加载"，没有 Web 页面，只显示接口给出的说明。
-type Page = keyof (typeof strings)["zh"]["pages"];
-const META: Record<string, { to: string; page: Page }[]> = {
-  source_failures: [{ to: "/sources", page: "sources" }],
-  outcall: [{ to: "/runs", page: "runs" }, { to: "/settings/models", page: "models" }],
-  delivery_backlog: [{ to: "/settings", page: "policy" }],
-  chain_trips: [{ to: "/items", page: "items" }],
-  agentsmd_drift: [{ to: "/projects", page: "projects" }],
-  pack_rejections: [],
-  model_unavailable: [{ to: "/settings/models", page: "models" }],
-  unjudged_backlog: [{ to: "/sources", page: "sources" }],
-  rule_fallbacks: [{ to: "/rules", page: "rules" }],
-  receipt_failures: [{ to: "/audit", page: "audit" }, { to: "/settings", page: "policy" }, { to: "/decisions", page: "decisions" }],
-  other_alerts: [{ to: "/audit", page: "audit" }],
-};
+// 诊断 › 状态（原「健康」，设计 §5.26）：形状对应 GET /v1/health 与 GET /v1/doctor（附录 B.2），判定全在服务端，这里只呈现。
+// 只列需要处理的信号，每条一句结论加去处；正常的折叠；本人暂停模型是中性的「已暂停」，不算要处理（§8.7）。
+export type { HealthReport, Signal } from "../../app/status";
 
 // 形状对应 GET /v1/doctor（kernel/doctor.Report）：内核一侧的自检，结论与 `apa doctor` 的对应项同源；这里只呈现。
 export interface DoctorDetail {
@@ -57,145 +34,178 @@ export interface DoctorReport {
 }
 const STATUS_BADGE = { ok: "ok", warning: "warn", error: "bad" } as const;
 
+type Go = keyof (typeof strings)["zh"]["go"];
+interface Line { text: string; to?: string; go?: Go }
 
-interface Queue {
-  running: number;
-  queued: number;
-  longest_wait_seconds: number;
+const n = (d: unknown, k: string) => Number((d as Record<string, unknown> | undefined)?.[k] ?? 0);
+const list = <T,>(d: unknown) => (Array.isArray(d) ? (d as T[]) : []);
+
+/** 一条信号的结论与去处：按 id 与 detail 生成（附录 B.2 的 detail 形状）。 */
+function useLines(): (s: Signal, paused: boolean) => Line[] {
+  const t = useT(strings);
+  const source = useNames("source");
+  return (s, paused) => {
+    const d = s.detail;
+    switch (s.id) {
+      case "source_failures":
+        return list<{ source: string; enabled: boolean; consecutive_failures: number; needs_input_item?: string }>(d).map((x) =>
+          x.needs_input_item
+            ? { text: t.sourceFail(source(x.source), x.consecutive_failures), to: "/items/" + x.needs_input_item, go: "fill" }
+            : { text: x.enabled ? t.sourceFail(source(x.source), x.consecutive_failures) : t.sourceOff(source(x.source)), to: "/sources", go: "sources" },
+        );
+      case "outcall": {
+        const q = (d as { long?: { queued: number; longest_wait_seconds: number }; short?: { queued: number; longest_wait_seconds: number } }) ?? {};
+        const queued = (q.long?.queued ?? 0) + (q.short?.queued ?? 0);
+        const wait = Math.max(q.long?.longest_wait_seconds ?? 0, q.short?.longest_wait_seconds ?? 0);
+        return [{ text: t.outcall(s.count), to: "/runs", go: "runs" }, ...(queued ? [{ text: t.queue(queued, wait) }] : [])];
+      }
+      case "delivery_backlog":
+        return [{ text: t.delivery(s.count), to: "/settings/notify", go: "notify" }];
+      case "chain_trips": {
+        const ids = list<string>(d);
+        return [{ text: t.chain(s.count), to: ids.length === 1 ? "/items/" + ids[0] : "/items", go: "items" }];
+      }
+      case "agentsmd_drift":
+        return [{ text: t.drift(s.count), to: "/projects", go: "projects" }];
+      case "pack_rejections":
+        return [{ text: t.packs(s.count) }, ...(s.rejections ?? []).map((r) => ({ text: `${r.pack}：${r.reason}` }))];
+      case "model_unavailable": {
+        const m = (d ?? {}) as { judge?: string; generate?: string; screening?: unknown[]; judgements?: unknown[] };
+        const ends = (["generate", "judge"] as const).flatMap((k): Line[] => {
+          const say = t.endpoint[m[k] ?? ""];
+          return say ? [{ text: say(t.models[k]), to: "/settings/models", go: "models" }] : [];
+        });
+        const scr = list(m.screening).length, failed = list(m.judgements).length;
+        return [
+          ...ends,
+          ...(scr ? [{ text: t.screening(scr) }] : []),
+          ...(failed ? [{ text: t.judgeFails(failed), to: "/settings/models", go: "models" as Go }] : []),
+        ];
+      }
+      case "unjudged_backlog":
+        return [
+          ...(n(d, "model_unavailable") + n(d, "undecided") ? [{ text: t.waitModel(n(d, "model_unavailable") + n(d, "undecided")), to: "/settings/models", go: "models" as Go }] : []),
+          ...(n(d, "outbound_unset") ? [{ text: t.waitScope(n(d, "outbound_unset")), to: "/sources", go: "scope" as Go }] : []),
+          // 暂停期间积下的：暂停时并进上面的「已暂停」卡；恢复后在这里列出，按重判期限自动判断。
+          ...(!paused && n(d, "models_paused") ? [{ text: t.waitPaused(n(d, "models_paused")), to: "/sources", go: "sources" as Go }] : []),
+          ...(n(d, "restored") ? [{ text: t.restored(n(d, "restored")), to: "/sources", go: "release" as Go }] : []),
+          ...(n(d, "expired") ? [{ text: t.expired(n(d, "expired")) }] : []),
+        ];
+      case "rule_fallbacks":
+        return [{ text: t.fallbacks(s.count), to: "/rules", go: "rules" }];
+      case "receipt_failures":
+        return [{ text: t.receipts(s.count), to: "/audit", go: "audit" }, { text: "", to: "/settings/access", go: "access" }];
+      case "other_alerts":
+        return [{ text: t.others(s.count), to: "/audit", go: "audit" }];
+      case "stalled_delegations":
+        return [{ text: t.stalled(s.count), to: "/delegation", go: "delegation" }];
+      case "clock_lag":
+        return [{ text: t.lag(s.count) }];
+      default:
+        return [{ text: s.why ?? s.id }];
+    }
+  };
 }
 
-function Detail({ s }: { s: Signal }) {
-  const t = useT(strings);
-  const d = s.detail as any;
-  if (d == null || s.ok) return null;
-  if (s.id === "outcall") {
-    const q = (name: string, x: Queue) => <li key={name}>{t.queue(name, x.running, x.queued, x.longest_wait_seconds)}</li>;
-    return (
-      <ul>
-        {q(t.long, d.long)}
-        {q(t.short, d.short)}
-        {d.timeouts?.length > 0 && <li>{t.timeouts(d.timeouts.join(t.listSep))}</li>}
-      </ul>
-    );
-  }
-  if (s.id === "source_failures")
-    return (
-      <ul>
-        {(d as { source: string; enabled: boolean; consecutive_failures: number; needs_input_item?: string }[]).map((x) => (
-          <li key={x.source}>
-            {t.sourceFail(x.source, x.consecutive_failures)}
-            {x.enabled ? "" : t.disabled}
-            {x.needs_input_item ? t.needsInput(x.needs_input_item) : ""}
-          </li>
-        ))}
-      </ul>
-    );
-  if (s.id === "model_unavailable")
-    return (
-      <ul>
-        {d.endpoint === "not_configured" && <li>{t.notConfigured}</li>}
-        {d.endpoint === "failing" && <li>{t.failing}</li>}
-        {d.screening?.length > 0 && <li>{t.screening(d.screening.join(t.listSep))}</li>}
-        {d.judgements?.length > 0 && <li>{t.judgeFails(d.judgements.length)}</li>}
-      </ul>
-    );
-  if (s.id === "unjudged_backlog")
-    return (
-      <ul>
-        {d.model_unavailable > 0 && <li>{t.waitModel(d.model_unavailable)}</li>}
-        {d.models_paused > 0 && <li>{t.waitPaused(d.models_paused)}</li>}
-        {d.undecided > 0 && <li>{t.undecided(d.undecided)}</li>}
-        {d.sources?.length > 0 && <li>{t.bySource(d.sources.map((x: { source: string; count: number }) => t.sourceCount(x.source, x.count)).join(t.listSep))}</li>}
-        {d.expired > 0 && <li>{t.expired(d.expired)}</li>}
-      </ul>
-    );
-  return Array.isArray(d) ? <p>{t.involved(d.join(t.listSep))}</p> : null;
+function Card({ dot, title, children, raw }: { dot: string; title: string; children: ReactNode; raw?: string }) {
+  return (
+    <article aria-label={title} className="panel signal">
+      <h2>
+        <span className={"dot " + dot} aria-hidden="true" /> {title}
+      </h2>
+      {children}
+      {raw && <code className="raw-id">{raw}</code>}
+    </article>
+  );
 }
 
 export function HealthPage() {
   const t = useT(strings);
+  const label = useLabel();
+  const raw = useRaw();
+  const lines = useLines();
   const { api } = useSession();
   const [report, setReport] = useState<HealthReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [doctor, setDoctor] = useState<DoctorReport | null>(null);
 
   const load = useCallback(() => {
     setError(null);
-    // 自检是补充信息：取不到不影响健康信号的展示。
+    // 自检是补充信息：取不到不影响状态的展示。
     api.get<DoctorReport>("/doctor").then(setDoctor, () => setDoctor(null));
-    return api.get<HealthReport>("/health").then(setReport, (e) => setError(msg(e)));
+    return api.get<HealthReport>("/health").then(setReport, (e) => setError(e));
   }, [api]);
-
   useEffect(() => {
     load();
   }, [load]);
 
-  const bad = report?.signals.filter((s) => !s.ok && s.severity !== "warning").length ?? 0;
-  const warn = report?.signals.filter((s) => !s.ok && s.severity === "warning").length ?? 0;
+  const st = report && assess(report);
+  const head = !st ? t.title : st.kind === "ok" || st.kind === "paused" ? t.head[st.kind] : t.head[st.kind](st.needs.length);
   return (
-    <main>
-      {report === null ? (
-        <PageHead>{t.title}</PageHead>
-      ) : (
-        <PageHead lede={t.lede(report.signals.length, bad, warn)}>
-          {t.head(report.healthy, bad, warn)}
-        </PageHead>
+    <main className="status-page">
+      <PageHead>{head}</PageHead>
+      {error != null && (
+        <>
+          <ErrorNote error={error} />
+          <button onClick={load}>{t.retry}</button>
+        </>
       )}
-      {error && (
-        <div role="alert">
-          {error} <button onClick={load}>{t.retry}</button>
-        </div>
-      )}
-      {report === null ? (
-        !error && <p role="status">{t.loading}</p>
+      {!st ? (
+        error == null && <p role="status">{t.loading}</p>
       ) : (
         <>
-          {report.signals.map((s) => {
-            const title = t.signals[s.id] ?? s.id;
-            const links = META[s.id] ?? [];
-            // 本人暂停了模型：正常状态，标"已暂停"而不是"正常"或告警（§15.2）。
-            const paused = s.ok && s.id === "model_unavailable" && (s.detail as { paused?: boolean } | undefined)?.paused === true;
+          {st.paused && (
+            <Card dot="paused" title={t.paused}>
+              <p className="sub">{t.pausedHeld(st.pausedBacklog)}</p>
+              <div className="actions">
+                <Link className="btn" to="/settings/models">{t.resume}</Link>
+              </div>
+            </Card>
+          )}
+          {st.needs.map((s) => {
+            const ls = lines(s, st.paused);
             return (
-              <article key={s.id} aria-label={title} className="signal">
-                <h3>
-                  {title}
-                  <span className={"badge " + (paused ? "plain" : s.ok ? "ok" : s.severity === "warning" ? "warn" : "bad")}>
-                    {paused ? t.paused : s.ok ? t.ok : s.severity === "warning" ? t.pending(s.count) : t.abnormal(s.count)}
-                  </span>
-                </h3>
-                {!s.ok && s.why && <p>{s.why}</p>}
-                <Detail s={s} />
-                <p className="sub">
-                  {t.fix(s.next)}
-                  {!s.ok && links.map((l) => (
-                    <span key={l.to}>
-                      {" "}
-                      <Link to={l.to}>{t.pages[l.page]}</Link>
-                    </span>
+              <Card key={s.id} dot={s.severity === "warning" ? "warn" : "bad"} title={label("healthSignal", s.id)} raw={raw ? `${s.id} · ${s.why ?? ""} · ${s.next}` : undefined}>
+                <ul className="lines">
+                  {ls.map((l, i) => (
+                    <li key={i}>
+                      {l.text && <span>{l.text}</span>}
+                      {l.to && l.go && <Link className="btn" to={l.to}>{t.go[l.go]}</Link>}
+                    </li>
                   ))}
-                </p>
-              </article>
+                </ul>
+              </Card>
             );
           })}
+          {st.fine.length > 0 && (
+            <details className="panel">
+              <summary>
+                <span className="dot ok" aria-hidden="true" /> {st.needs.length || st.paused ? t.fine(st.fine.length) : t.allFine(st.fine.length)}
+              </summary>
+              <ul className="sub-list">
+                {st.fine.map((s) => <li key={s.id}>{label("healthSignal", s.id)}</li>)}
+              </ul>
+            </details>
+          )}
           {doctor && (
-            <section aria-label={t.doctor}>
-              <h2>{t.doctor}</h2>
+            <details className="panel">
+              <summary>{t.doctor}</summary>
               {doctor.checks.map((c) => (
-                <article key={c.name} aria-label={t.doctorCheck(c.name)} className="signal">
+                <article key={c.name} aria-label={label("doctorCheck", c.name)} className="signal">
                   <h3>
-                    {c.name}
+                    {label("doctorCheck", c.name)}
                     <span className={"badge " + STATUS_BADGE[c.status]}>{t.status[c.status]}</span>
                   </h3>
-                  <p>{c.why}</p>
+                  <p lang="en" className="sub">{c.why}</p>
                   {c.details?.map((d) => (
-                    <p key={d.subject} className="sub">
+                    <p key={d.subject} lang="en" className="sub">
                       {t.detail(d.subject, t.status[d.status], d.why)}
                     </p>
                   ))}
-                  {c.status !== "ok" && <p className="sub">{t.next(c.next)}</p>}
+                  {c.status !== "ok" && <p lang="en" className="sub">{c.next}</p>}
                 </article>
               ))}
-            </section>
+            </details>
           )}
         </>
       )}

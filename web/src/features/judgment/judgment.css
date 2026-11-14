@@ -2,3 +2,14 @@
 .judgment { min-width: 0; overflow-wrap: anywhere; }
 .judgment figure { margin: 0 0 16px; min-width: 0; }
 .judgment td, .judgment th, .judgment li, .judgment figcaption { overflow-wrap: anywhere; }
+.threshold .figures { display: flex; gap: 28px; flex-wrap: wrap; }
+.threshold .figures p { display: grid; margin: 0; }
+.threshold .big { font: 600 22px/1.3 var(--serif); }
+.histogram { position: relative; height: 72px; margin: 12px 0 4px; border-bottom: 1px solid var(--line); }
+.histogram span { position: absolute; bottom: 0; min-width: 2px; border-radius: 2px 2px 0 0; background: var(--ink-3); }
+.histogram span.between { background: var(--warn); }
+.histogram span.above { background: var(--ok); }
+.histogram .line { position: absolute; top: -4px; bottom: 0; width: 2px; background: var(--ink); }
+.sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sliders input[type="range"] { width: 100%; }
+.threshold label.check { display: flex; gap: 6px; align-items: center; margin-top: 10px; }

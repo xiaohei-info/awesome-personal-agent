@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { COUNTS_EVENT, SectionContext } from "./page";
-import { MOBILE, SETTINGS, SETTINGS_HOME, buildNav, featureAt, settingsGroups, type Entry, type Feature, type NavModel } from "./registry";
+import { DIAG, MOBILE, SETTINGS, SETTINGS_HOME, buildNav, featureAt, settingsGroups, type Entry, type Feature, type NavModel } from "./registry";
 import { SettingsHome } from "./SettingsHome";
 import { useLang, useT } from "./i18n";
 import { BRAND_MARK, common } from "./strings";
 import { useSession } from "./session";
 import { toggleTheme } from "./theme";
+import { useStatus, type Status } from "./status";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 // 与 styles.css 的窄屏断点一致：窄屏只渲染手机顶栏，宽屏只渲染侧栏，DOM 里不重复出现同名链接。
@@ -37,6 +38,7 @@ export function Shell({ features: all }: { features: Feature[] }) {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [jumping, setJumping] = useState(false);
   const [more, setMore] = useState(false);
+  const status = useStatus(api, pathname);
 
   useEffect(() => {
     const refresh = () =>
@@ -69,7 +71,7 @@ export function Shell({ features: all }: { features: Feature[] }) {
   const sum = (fs: Feature[]) => fs.reduce((n, f) => n + (counts[f.id] ?? 0), 0);
   const signOut = () => logout().catch((e: Error) => setError(e.message));
   const entryLink = (e: Entry, label: string = e.title, onClick?: () => void) => (
-    <NavItem to={narrow && e.id === SETTINGS ? SETTINGS_HOME : e.features[0].path} active={e === here} count={sum(e.features)} onClick={onClick}>
+    <NavItem to={narrow && e.id === SETTINGS ? SETTINGS_HOME : e.features[0].path} active={e === here} count={sum(e.features)} onClick={onClick} quiet={e.id === DIAG}>
       {label}
     </NavItem>
   );
@@ -99,6 +101,7 @@ export function Shell({ features: all }: { features: Feature[] }) {
               aria-haspopup="dialog"
               onClick={() => setMore(true)}
             >
+              {status && <span className={"dot " + status.kind} aria-hidden="true" />}
               {t.more}
             </button>
           </>
@@ -115,7 +118,11 @@ export function Shell({ features: all }: { features: Feature[] }) {
               </Fragment>
             ))}
             <div className="nav-foot">
-              {nav.settings && <ul>{<li>{entryLink(nav.settings)}</li>}</ul>}
+              {status && <StatusLight status={status} />}
+              <ul>
+                {nav.settings && <li>{entryLink(nav.settings)}</li>}
+                {nav.diag && <li>{entryLink(nav.diag)}</li>}
+              </ul>
               <div>
                 <button className="quiet" aria-label={t.themeLabel} onClick={toggleTheme}>
                   {t.theme}
@@ -156,7 +163,14 @@ export function Shell({ features: all }: { features: Feature[] }) {
       </section>
       {jumping && <Palette nav={nav} onClose={() => setJumping(false)} />}
       {more && (
-        <More nav={nav} skip={bar} onClose={() => setMore(false)} link={(e) => entryLink(e, e.title, () => setMore(false))} onLogout={signOut} />
+        <More
+          nav={nav}
+          skip={bar}
+          onClose={() => setMore(false)}
+          link={(e) => entryLink(e, e.title, () => setMore(false))}
+          status={status && <StatusLight status={status} onClick={() => setMore(false)} />}
+          onLogout={signOut}
+        />
       )}
     </div>
   );
@@ -186,9 +200,21 @@ function AppRoutes({ all, nav, entryOf, noPages }: { all: Feature[]; nav: NavMod
   );
 }
 
-function NavItem({ to, active, count, onClick, children }: { to: string; active: boolean; count: number; onClick?: () => void; children: ReactNode }) {
+/** 导航底部的状态灯：一切正常、模型已暂停（中性，不算异常）或 n 项要处理；点开是诊断 › 状态。 */
+function StatusLight({ status, onClick }: { status: Status; onClick?: () => void }) {
+  const t = useT(common);
+  const text = status.kind === "ok" ? t.statusOk : status.kind === "paused" ? t.statusPaused : t.statusNeeds(status.needs.length);
   return (
-    <Link to={"/" + to} className={active ? "active" : undefined} aria-current={active ? "page" : undefined} onClick={onClick}>
+    <Link to="/health" className={"status-light " + status.kind} onClick={onClick}>
+      <span className={"dot " + status.kind} aria-hidden="true" />
+      {text}
+    </Link>
+  );
+}
+
+function NavItem({ to, active, count, onClick, quiet, children }: { to: string; active: boolean; count: number; onClick?: () => void; quiet?: boolean; children: ReactNode }) {
+  return (
+    <Link to={"/" + to} className={[active ? "active" : "", quiet ? "quiet" : ""].join(" ").trim() || undefined} aria-current={active ? "page" : undefined} onClick={onClick}>
       {children}
       {count > 0 && <span className="count">{count}</span>}
     </Link>
@@ -247,7 +273,14 @@ function Alias({ to }: { to: string }) {
 }
 
 /** 手机上的"更多"：顶栏放不下的入口、设置、明暗与退出。模态，Esc 或点遮罩关闭，焦点留在抽屉里，关闭后回到打开前的位置。 */
-function More({ nav, skip, onClose, link, onLogout }: { nav: NavModel; skip: Entry[]; onClose: () => void; link: (e: Entry) => ReactNode; onLogout: () => void }) {
+function More({ nav, skip, onClose, link, status, onLogout }: {
+  nav: NavModel;
+  skip: Entry[];
+  onClose: () => void;
+  link: (e: Entry) => ReactNode;
+  status: ReactNode;
+  onLogout: () => void;
+}) {
   const lang = useLang();
   const t = useT(common);
   const box = useRef<HTMLDivElement>(null);
@@ -270,7 +303,8 @@ function More({ nav, skip, onClose, link, onLogout }: { nav: NavModel; skip: Ent
       }
     }
   };
-  const groups = [...nav.groups.map((g) => ({ group: g.group, entries: g.entries.filter((e) => !skip.includes(e)) })), { group: "", entries: nav.settings ? [nav.settings] : [] }];
+  const foot = [nav.settings, nav.diag].flatMap((e) => e ?? []);
+  const groups = [...nav.groups.map((g) => ({ group: g.group, entries: g.entries.filter((e) => !skip.includes(e)) })), { group: "", entries: foot }];
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="sheet" role="dialog" aria-modal="true" aria-label={t.allPages} ref={box} onKeyDown={onKey}>
@@ -290,6 +324,7 @@ function More({ nav, skip, onClose, link, onLogout }: { nav: NavModel; skip: Ent
               </Fragment>
             ),
         )}
+        {status}
         <div className="sheet-foot">
           <button className="quiet" aria-label={t.themeLabel} onClick={toggleTheme}>
             {t.theme}

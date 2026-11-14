@@ -112,3 +112,20 @@ describe("ids.ts 覆盖内核取值", () => {
     }
   });
 });
+
+// 筛选门槛页的拖线起点：内置模板的 band 与包文件一致。
+const prompts = import.meta.glob("../../../packs/*/prompts/*.md", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+describe("PACK_BAND 与内置包的 band 一致", () => {
+  it("每个声明了 band 的内置模板都在 PACK_BAND 里，取值相同", () => {
+    const fromPacks: Record<string, { low?: number; high?: number }> = {};
+    for (const [f, text] of Object.entries(prompts)) {
+      const m = /^band:\s*\{([^}]*)\}/m.exec(text.split(/^---$/m)[1] ?? text);
+      if (!m) continue;
+      const band: { low?: number; high?: number } = {};
+      for (const [, k, v] of m[1].matchAll(/(low|high):\s*([\d.]+)/g)) band[k as "low" | "high"] = Number(v);
+      fromPacks[f.split("/").pop()!.replace(/\.md$/, "")] = band;
+    }
+    expect(Object.keys(fromPacks).length, "没读到任何包的 band：检查 glob 与 front matter 写法").toBeGreaterThan(0);
+    expect(I.PACK_BAND, "内置包的 band 变了：同步 web/src/app/ids.ts 的 PACK_BAND").toEqual(fromPacks);
+  });
+});

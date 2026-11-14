@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
 
@@ -50,52 +50,68 @@ function mount(fetchImpl: typeof fetch) {
     </MemoryRouter>,
   );
 }
-const rows = async () => within(await screen.findByRole("list", { name: "审计事件" }));
+const rows = async () => within(await screen.findByRole("list", { name: "操作记录" }));
 const count = async () => (await rows()).queryAllByRole("listitem").length;
 
 beforeEach(() => sessionStorage.clear());
+afterEach(() => localStorage.removeItem("apa.raw"));
 
-describe("审计页", () => {
-  it("flow-why-audit: 默认列出全量 Event，每条带操作者徽章", async () => {
+describe("诊断 › 操作记录", () => {
+  it("flow-why-audit: 默认列出全量 Event，每行一句话：谁 · 做了什么 · 对象 · 时间", async () => {
     mount(ledger().impl);
     const r = await rows();
     await waitFor(() => expect(r.getAllByRole("listitem")).toHaveLength(3));
     expect(r.getAllByLabelText("操作者").map((b) => b.textContent)).toEqual([
       "agent · 命令行 · del-1", "你 · 网页", "agent · 命令行 · del-2", // 本人与系统不重复显示身份串（共用的 ActorBadge）
     ]);
-    expect(r.getByText(/ship it/)).toBeInTheDocument();
+    expect(r.getAllByRole("listitem")[1]).toHaveTextContent(/你 · 网页\s*改了阶段 item_a/);
+    expect(r.queryByText(/ship it|#2/)).not.toBeInTheDocument(); // 原始值只在「显示原始值」里
   });
 
-  it("flow-why-audit: 按操作者、对象、事件类型筛选（服务端过滤，可组合）", async () => {
+  it("flow-why-audit: 打开「显示原始值」后每行带序号、类型与原因", async () => {
+    localStorage.setItem("apa.raw", "1");
+    mount(ledger().impl);
+    const r = await rows();
+    expect(await r.findByText(/#2 · item.phase_changed · item_a · ship it/)).toBeInTheDocument();
+  });
+
+  it("flow-why-audit: 按谁、做了什么、对象筛选（服务端过滤，可组合）", async () => {
     const l = ledger();
     mount(l.impl);
     await waitFor(async () => expect(await count()).toBe(3));
 
-    await userEvent.type(screen.getByLabelText("操作者筛选"), "owner");
+    await userEvent.selectOptions(screen.getByLabelText("谁"), "你");
     await userEvent.click(screen.getByRole("button", { name: "筛选" }));
     await waitFor(async () => expect(await count()).toBe(1));
     expect((await rows()).getByText(/改了阶段/)).toBeInTheDocument();
+    expect(l.queries.at(-1)!.get("actor")).toBe("owner");
 
-    await userEvent.clear(screen.getByLabelText("操作者筛选"));
-    await userEvent.type(screen.getByLabelText("对象筛选"), "item_a");
+    await userEvent.selectOptions(screen.getByLabelText("谁"), "所有人");
+    await userEvent.click(screen.getByText("按对象查"));
+    await userEvent.type(screen.getByLabelText("对象（事项或材料的 id）"), "item_a");
     await userEvent.click(screen.getByRole("button", { name: "筛选" }));
     await waitFor(async () => expect(await count()).toBe(2));
 
-    await userEvent.type(screen.getByLabelText("事件类型筛选"), "item.created");
+    await userEvent.selectOptions(screen.getByLabelText("做了什么"), "新建了事项");
     await userEvent.click(screen.getByRole("button", { name: "筛选" }));
     await waitFor(async () => expect(await count()).toBe(1));
     const last = l.queries.at(-1)!;
     expect([last.get("object"), last.get("type"), last.get("actor")]).toEqual(["item_a", "item.created", null]);
   });
 
-  it("flow-why-audit: 被拒绝的命令可一键查出，并显示拒绝原因", async () => {
+  it("「做了什么」按组列出，选项是中文", async () => {
+    mount(ledger().impl);
+    const sel = await screen.findByLabelText("做了什么");
+    expect([...sel.querySelectorAll("optgroup")].map((g) => g.label)).toContain("事项与决策");
+    expect(within(sel).getByRole("option", { name: "新建了事项" })).toHaveValue("item.created");
+  });
+
+  it("flow-why-audit: 被拒绝的操作可一键查出", async () => {
     mount(ledger().impl);
     await waitFor(async () => expect(await count()).toBe(3));
-    await userEvent.click(screen.getByRole("button", { name: "只看被拒绝的命令" }));
+    await userEvent.click(screen.getByRole("button", { name: "只看被拒绝的操作" }));
     await waitFor(async () => expect(await count()).toBe(1));
-    const r = await rows();
-    expect(r.getByText(/操作被拒绝/)).toBeInTheDocument();
-    expect(r.getByText(/high-risk command needs web confirmation/)).toBeInTheDocument();
+    expect((await rows()).getByText(/操作被拒绝/)).toBeInTheDocument();
   });
 
   it("flow-why-audit: 没有匹配时显示空态；分页用 after 游标加载更多", async () => {
@@ -108,12 +124,13 @@ describe("审计页", () => {
     expect(l.queries.at(-1)!.get("after")).toBe("100");
     expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull();
 
-    await userEvent.type(screen.getByLabelText("对象筛选"), "nope");
+    await userEvent.click(screen.getByText("按对象查"));
+    await userEvent.type(screen.getByLabelText("对象（事项或材料的 id）"), "nope");
     await userEvent.click(screen.getByRole("button", { name: "筛选" }));
-    expect(await screen.findByText("没有符合条件的事件")).toBeInTheDocument();
+    expect(await screen.findByText("没有符合条件的记录")).toBeInTheDocument();
   });
 
-  it("flow-web-only: 只读且只调 HTTP API；服务端错误原因原样显示，不留假数据", async () => {
+  it("flow-web-only: 只读且只调 HTTP API；服务端错误原因可查看，不留假数据", async () => {
     let bad = false;
     const l = ledger([], () => bad ? json(400, { code: "invalid_request", why: "after or limit is out of range", next: "use after >= 0" }) : null);
     mount(l.impl);
@@ -123,16 +140,18 @@ describe("审计页", () => {
     bad = true;
     await userEvent.click(screen.getByRole("button", { name: "筛选" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("after or limit is out of range");
-    expect(screen.queryByRole("list", { name: "审计事件" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "操作记录" })).toBeNull();
   });
 });
 
 describe("授权单依据（ACT-AUTH-03、flow-why-audit）", () => {
-  it("依据授权单的变更显示授权单 id；其他事件不带", async () => {
+  it("依据临时授权的变更带一个指向授权单的链接；其他事件不带", async () => {
     const l = ledger([{ ...ev(4, "decision.resolved", "item_g", A("agent", "del-1", "cli")), grant: "grt_ok" }]);
     mount(l.impl);
-    const row = (await screen.findByText(/#4 ·/)).closest("li")!;
-    expect(row).toHaveTextContent("授权单 grt_ok");
-    expect(screen.getByText(/#1 ·/).closest("li")).not.toHaveTextContent("授权单");
+    const r = await rows();
+    await waitFor(() => expect(r.getAllByRole("listitem")).toHaveLength(4));
+    const items = r.getAllByRole("listitem");
+    expect(within(items[3]).getByRole("link", { name: "按临时授权" })).toHaveAttribute("href", "/settings/grants#grt_ok");
+    expect(within(items[0]).queryByRole("link", { name: "按临时授权" })).toBeNull();
   });
 });

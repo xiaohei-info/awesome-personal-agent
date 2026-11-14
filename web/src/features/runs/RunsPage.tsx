@@ -2,9 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, locale, useT } from "../../app/i18n";
+import { Link } from "react-router-dom";
+import { ErrorNote } from "../../app/errors";
+import { useItemTitle, useNames } from "../../app/names";
+import { useRaw } from "../../app/raw";
 import { strings } from "./strings";
 import { RUN_STATE } from "../../app/ids";
-import { Pick, Val } from "../../app/values";
+import { Pick, Val, useLabel } from "../../app/values";
 
 // 形状对应 GET /v1/runs?state=&limit=、GET /v1/runs/{id}（设计 §6.11）。只读展示，不做任何判定；失败处理走 needs_input，不提供重试。
 interface Run {
@@ -29,11 +33,25 @@ const LIMIT = 200;
 
 const at = (s?: string) => (s ? new Date(s).toLocaleString(locale()) : "—");
 
+function Target({ r }: { r: Run }) {
+  const source = useNames("source");
+  const title = useItemTitle(r.category === "source" ? null : r.target);
+  return r.category === "source" ? <>{source(r.target)}</> : <Link to={"/items/" + r.target}>{title}</Link>;
+}
+
+const took = (a?: string, b?: string) => {
+  if (!a || !b) return "";
+  const s = Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`;
+};
+
 function Card({ r }: { r: Run }) {
   const { api } = useSession();
   const t = useT(strings);
+  const label = useLabel();
+  const raw = useRaw();
   const [detail, setDetail] = useState<Run | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const d = detail ?? r;
 
   const open = async () => {
@@ -41,51 +59,35 @@ function Card({ r }: { r: Run }) {
     try {
       setDetail(await api.get<Run>(`/runs/${encodeURIComponent(r.id)}`));
     } catch (e) {
-      setError(msg(e));
+      setError(e);
     }
   };
 
   return (
-    <article aria-label={t.run(r.id)}>
+    <article aria-label={t.run(r.id)} className="panel">
       <h3>
-        <Val k="runCategory" id={r.category} /> → {r.target}
+        <Val k="runCategory" id={r.category} /> → <Target r={r} />
       </h3>
       <p className="meta">
         <strong className={"badge" + (r.state === "succeeded" ? " ok" : r.state === "failed" || r.state === "timeout" ? " bad" : "")}><Val k="runState" id={r.state} /></strong>
-        {r.runner && <> · <Val k="runner" id={r.runner} />/{r.launch ? <Val k="launch" id={r.launch} /> : "—"}</>}
-        {r.harness && ` · ${r.harness}`}
+        {r.runner && <> · <Val k="runner" id={r.runner} />{r.launch && <> · <Val k="launch" id={r.launch} /></>}</>}
+        {r.access && ` · ${t.access(label("perm", r.access))}`}
+        {took(r.started_at, r.finished_at) && ` · ${t.took(took(r.started_at, r.finished_at))}`}
       </p>
-      <p>
-        {t.session}
-        {r.session_id ? <code>{r.session_id}</code> : t.none}
-      </p>
-      <p>
-        {t.access}
-        {r.access ? <Val k="perm" id={r.access} /> : t.none}
-      </p>
-      {r.basis ? (
-        <p>
-          {t.basis}
-          {t.basisRule(r.basis.rule_id ?? "—", r.basis.policy_version)}
-        </p>
-      ) : (
-        <p>
-          {t.basis}
-          {t.none}
-        </p>
-      )}
       {!detail && <div className="actions"><button onClick={open}>{t.details}</button></div>}
       {detail && (
-        <ul aria-label={t.stats}>
-          <li>{t.depth(d.chain_depth)}</li>
+        <ul aria-label={t.stats} className="sub-list">
+          {d.basis?.rule_id && <li>{t.rule(d.basis.rule_id)}</li>}
+          {d.session_id && <li>{t.session(d.session_id)}</li>}
           <li>{t.started(at(d.started_at))}</li>
           <li>{t.finished(at(d.finished_at))}</li>
+          {d.chain_depth > 0 && <li>{t.depth(d.chain_depth)}</li>}
           {d.exit_code !== undefined && <li>{t.exitCode(d.exit_code)}</li>}
           {d.timeout ? <li>{t.timeoutSec(d.timeout)}</li> : null}
         </ul>
       )}
-      {!detail && r.exit_code !== undefined && <p>{t.exitCode(r.exit_code)}</p>}
-      {error && <div role="alert">{error}</div>}
+      {raw && <code className="raw-id">{[r.id, r.harness, d.basis ? `policy v${d.basis.policy_version}` : ""].filter(Boolean).join(" · ")}</code>}
+      {error != null && <ErrorNote error={error} />}
     </article>
   );
 }

@@ -139,3 +139,13 @@ export const BUILTIN_RULE = [
 ] as const;
 /** 视图字段（附录 C.8，packs/<包名>/views） */
 export const VIEW_FIELD = ["title", "project", "created_at", "updated_at", "phase", "summary", "tag", "tags", "deadline", "planned_for", "priority", "spec.period", "spec.result"] as const;
+/** 内置判断模板在能力包里声明的不确定带起始值（packs/<包>/prompts/<模板>.md 的 band，§8.9）；缺的一端按 0 或 1。
+ * 筛选门槛页拖线的起点；本人在 Web 覆盖过的以策略为准。ids.check 对照包文件防漂移。 */
+export const PACK_BAND: Record<string, { low?: number; high?: number }> = {
+  "triage-screen": { low: 0.15, high: 0.6 },
+  "capture-prescreen": { low: 0.1 },
+  "web-only-screening": { low: 0.2 },
+  "delivery-defer": { high: 0.85 },
+  "follow-up-defer": { high: 0.85 },
+  "delegation-screen": { low: 0.2 },
+};

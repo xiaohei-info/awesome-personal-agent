@@ -35,6 +35,10 @@ const zh = {
   // 导航
   navLabel: "主导航",
   more: "更多",
+  // 导航底部的状态灯（点开进诊断 › 状态）
+  statusOk: "运行正常",
+  statusPaused: "模型已暂停",
+  statusNeeds: (n: number) => `${n} 项要处理`,
   allPages: "全部页面",
   tabs: (entry: string) => `${entry}页签`,
   theme: "明 / 暗",
@@ -77,6 +81,9 @@ const en: typeof zh = {
   listSep: ", ",
   navLabel: "Main navigation",
   more: "More",
+  statusOk: "All good",
+  statusPaused: "Models paused",
+  statusNeeds: (n: number) => `${n} to look at`,
   allPages: "All pages",
   tabs: (entry) => `${entry} tabs`,
   theme: "Light / Dark",

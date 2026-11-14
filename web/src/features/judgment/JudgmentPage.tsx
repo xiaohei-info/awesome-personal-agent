@@ -2,221 +2,229 @@ import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import "./judgment.css";
-import { errorText as msg, useT } from "../../app/i18n";
+import { useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
+import { EntityPick, useNames } from "../../app/names";
+import { useLabel } from "../../app/values";
+import { JUDGE_TEMPLATE, PACK_BAND } from "../../app/ids";
 import { strings } from "./strings";
 
-// 形状对应 GET /v1/judgments/stats、/judgments/spot-check、/settings/judgment（附录 B.2、B.4；主文档 §8.10）。
-// 指标、分布、抽检与不确定带的校验都在服务端；本页只调用并如实展示服务端的回答。
+// 筛选门槛（原「判断与校准」去掉抽检后的部分，设计 §5.16）：形状对应 GET /v1/judgments/stats 与 /v1/settings/judgment（附录 B.2，主文档 §8.10）。
+// 不确定带与影子模式的写入语义不变：PUT 只带 bands（整份列表）或 shadow（整份列表），校验在服务端；本页只换了编辑方式。
 interface Row { use: string; template: string; source?: string; backend: string; calls: number; decided: number; uncertain: number; errors: number; reused: number }
 interface Rate { use: string; template: string; source?: string; escalation: number; undecided: number; acceptance: number; false_drop: number; reviewed: number }
 interface Bucket { use: string; template: string; source?: string; low: number; high: number; count: number }
 interface Stats { rows: Row[]; rates: Rate[]; histogram: Bucket[] }
-interface Band { template: string; source?: string; low: number; high: number }
+export interface Band { template: string; source?: string; low: number; high: number }
 interface Settings { bands: Band[]; shadow: string[]; spot_check: { per_brief: number } }
-interface Entry { judgment: string; event: string; source: string; subject?: string; template: string; judged_at: string; results: string[] }
-interface Source { id: string }
 
-const WINDOWS = ["7d", "30d", "90d"];
+const WINDOWS = [7, 30, 90];
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
-const key = (g: { use: string; template: string; source?: string }) => `${g.use}|${g.template}|${g.source ?? ""}`;
+const same = (b: { template: string; source?: string }, template: string, source: string) => b.template === template && (b.source ?? "") === source;
 
-interface BandDraft { template: string; source: string; low: string; high: string }
-const toDraft = (b: Band): BandDraft => ({ template: b.template, source: b.source ?? "", low: String(b.low), high: String(b.high) });
+/** 拖线时的估算：按桶中点落在哪一段计数，结果是近似（标「约」）。 */
+export function estimate(buckets: Bucket[], low: number, high: number): [number, number, number] {
+  let a = 0, b = 0, c = 0;
+  for (const k of buckets) {
+    const mid = (k.low + k.high) / 2;
+    if (mid < low) a += k.count;
+    else if (mid > high) c += k.count;
+    else b += k.count;
+  }
+  return [a, b, c];
+}
+
+/** 保存一条线后的整份不确定带：替换（或新增）这个模板在这个来源上的那一条，其余原样保留。 */
+export function withBand(bands: Band[], next: Band): Band[] {
+  const rest = bands.filter((b) => !same(b, next.template, next.source ?? ""));
+  return [...rest, next];
+}
+
+function Card({ template, rate, buckets, band, override, days, shadow, onSave, onReset, onShadow }: {
+  template: string;
+  rate?: Rate;
+  buckets: Bucket[];
+  band: { low: number; high: number };
+  override: boolean;
+  days: number;
+  shadow: boolean;
+  onSave: (low: number, high: number) => Promise<void>;
+  onReset: () => Promise<void>;
+  onShadow: (on: boolean) => Promise<void>;
+}) {
+  const t = useT(strings);
+  const label = useLabel();
+  const [low, setLow] = useState(band.low);
+  const [high, setHigh] = useState(band.high);
+  useEffect(() => { setLow(band.low); setHigh(band.high); }, [band.low, band.high]);
+  const question = label("judgeTemplate", template);
+  const max = Math.max(1, ...buckets.map((b) => b.count));
+  const [a, b, c] = estimate(buckets, low, high);
+  const changed = low !== band.low || high !== band.high;
+  return (
+    <section aria-label={question} className="panel threshold">
+      <h2>{question}</h2>
+      {rate ? (
+        <div className="figures">
+          <p><span className="big">{pct(rate.false_drop)}</span><span className="sub">{t.missed} · {t.checked(rate.reviewed)}</span></p>
+          <p><span className="big">{pct(rate.acceptance)}</span><span className="sub">{t.accepted}</span></p>
+        </div>
+      ) : (
+        <p className="sub">{t.noData}</p>
+      )}
+      {buckets.length > 0 && (
+        <div className="histogram" role="img" aria-label={t.chart(question)}>
+          {buckets.map((k) => (
+            <span key={k.low} className={(k.low + k.high) / 2 < low ? "below" : (k.low + k.high) / 2 > high ? "above" : "between"} style={{ left: `${k.low * 100}%`, width: `calc(${(k.high - k.low) * 100}% - 2px)`, height: `${Math.max(4, (k.count / max) * 100)}%` }} title={`${k.low.toFixed(1)}–${k.high.toFixed(1)}: ${k.count}`} />
+          ))}
+          <i className="line" style={{ left: `${low * 100}%` }} />
+          <i className="line" style={{ left: `${high * 100}%` }} />
+        </div>
+      )}
+      <div className="sliders">
+        <label>{t.low}<input type="range" min={0} max={1} step={0.01} value={low} onChange={(e) => setLow(Number(e.target.value))} /></label>
+        <label>{t.high}<input type="range" min={0} max={1} step={0.01} value={high} onChange={(e) => setHigh(Number(e.target.value))} /></label>
+      </div>
+      <p className="sub">
+        {t.lines(low.toFixed(2), high.toFixed(2))}
+        {!override && !changed ? t.packDefault : ""}
+      </p>
+      {buckets.length > 0 && <p role="status">{template === "triage-screen" ? t.estimateTriage(days, a, b, c) : t.estimate(days, a, b, c)}</p>}
+      <div className="actions">
+        <button className="primary" disabled={!changed || low > high} onClick={() => void onSave(low, high)}>{t.saveLines}</button>
+        {override && <button onClick={() => void onReset()}>{t.useDefault}</button>}
+        {low > high && <span role="alert">{t.invalid}</span>}
+      </div>
+      <label className="check">
+        <input type="checkbox" checked={shadow} onChange={() => void onShadow(!shadow)} /> {t.trial}
+      </label>
+    </section>
+  );
+}
 
 export function JudgmentPage() {
   const t = useT(strings);
+  const label = useLabel();
+  const sourceName = useNames("source");
   const { api } = useSession();
-  const [since, setSince] = useState("30d");
-  const [template, setTemplate] = useState("");
+  const [days, setDays] = useState(30);
   const [source, setSource] = useState("");
-  const [sources, setSources] = useState<Source[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [drafts, setDrafts] = useState<BandDraft[]>([]);
-  const [newShadow, setNewShadow] = useState("");
-  const [pool, setPool] = useState<Entry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const loadStats = useCallback(async () => {
-    const q = new URLSearchParams({ since });
-    if (template) q.set("template", template);
-    if (source) q.set("source", source);
-    setStats(await api.get<Stats>(`/judgments/stats?${q}`));
-  }, [api, since, template, source]);
-  const loadSettings = useCallback(async () => {
-    const s = await api.get<Settings>("/settings/judgment");
-    setSettings(s);
-    setDrafts(s.bands.map(toDraft));
-  }, [api]);
-  const loadPool = useCallback(async () => setPool((await api.get<{ spot_check: Entry[] }>("/judgments/spot-check")).spot_check), [api]);
   const guard = useCallback(async (f: () => Promise<void>) => {
     try {
       await f();
       setError(null);
     } catch (e) {
-      setError(msg(e));
+      setError(e);
     }
   }, []);
-
+  const loadStats = useCallback(async () => {
+    const q = new URLSearchParams({ since: `${days}d` });
+    if (source) q.set("source", source);
+    setStats(await api.get<Stats>(`/judgments/stats?${q}`));
+  }, [api, days, source]);
+  const loadSettings = useCallback(async () => setSettings(await api.get<Settings>("/settings/judgment")), [api]);
   useEffect(() => { void guard(loadStats); }, [guard, loadStats]);
-  useEffect(() => {
-    void guard(async () => {
-      await Promise.all([loadSettings(), loadPool(), api.get<{ sources: Source[] }>("/sources").then((r) => setSources(r.sources))]);
-    });
-  }, [api, guard, loadSettings, loadPool]);
+  useEffect(() => { void guard(loadSettings); }, [guard, loadSettings]);
 
-  const saveBands = () =>
+  const putBands = (bands: Band[]) =>
     guard(async () => {
       setNotice(null);
-      const bands = drafts.map((d) => ({ template: d.template.trim(), ...(d.source ? { source: d.source } : {}), low: Number(d.low), high: Number(d.high) }));
       await api.put("/settings/judgment", { bands });
       await loadSettings();
-      setNotice(t.bandsSaved);
+      setNotice(t.saved);
     });
-  const saveShadow = (shadow: string[]) =>
+  const putShadow = (shadow: string[]) =>
     guard(async () => {
       setNotice(null);
       await api.put("/settings/judgment", { shadow });
       await loadSettings();
     });
-  const review = (e: Entry, result: string) =>
-    guard(async () => {
-      setNotice(null);
-      await api.post(`/judgments/${encodeURIComponent(e.judgment)}/review`, { result });
-      await Promise.all([loadPool(), loadStats()]);
-      setNotice(t.reviewed(t.results[result] ?? result));
-    });
-  const setDraft = (i: number, patch: Partial<BandDraft>) => setDrafts((ds) => ds.map((d, j) => (j === i ? { ...d, ...patch } : d)));
 
-  const templates = [...new Set([...(stats?.rates ?? []).map((r) => r.template), ...(settings?.bands ?? []).map((b) => b.template), ...(settings?.shadow ?? [])])].sort();
-  const bandFor = (g: { template: string; source?: string }) =>
-    settings?.bands.find((b) => b.template === g.template && (b.source ?? "") === (g.source ?? "")) ?? settings?.bands.find((b) => b.template === g.template && !b.source);
+  const rates = stats?.rates ?? [];
+  const templates = [...new Set([...JUDGE_TEMPLATE, ...rates.map((r) => r.template), ...(settings?.bands ?? []).map((b) => b.template), ...(settings?.shadow ?? [])])];
+  const bandOf = (template: string) => {
+    const own = settings?.bands.find((b) => same(b, template, source));
+    const any = settings?.bands.find((b) => same(b, template, ""));
+    const pack = PACK_BAND[template] ?? {};
+    const b = own ?? any;
+    return { band: b ? { low: b.low, high: b.high } : { low: pack.low ?? 0, high: pack.high ?? 1 }, override: !!own };
+  };
 
   return (
     <main className="judgment">
-      <PageHead lede={t.lede}>{t.title}</PageHead>
-      {error && <p role="alert" className="err">{error}</p>}
+      <PageHead>{t.title}</PageHead>
+      <div className="filters">
+        <label>
+          {t.window}
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            {WINDOWS.map((w) => <option key={w} value={w}>{t.days(w)}</option>)}
+          </select>
+        </label>
+        <label>
+          {t.source}
+          <EntityPick kind="source" value={source} onChange={setSource} empty={t.allSources} />
+        </label>
+      </div>
+      {error != null && <ErrorNote error={error} />}
       {notice && <p role="status">{notice}</p>}
-
-      <h2>{t.metrics}</h2>
-      <p>
-        <label>{t.window} <select aria-label={t.window} value={since} onChange={(e) => setSince(e.target.value)}>{WINDOWS.map((w) => <option key={w} value={w}>{t.days(w)}</option>)}</select></label>{" "}
-        <label>{t.template} <select aria-label={t.template} value={template} onChange={(e) => setTemplate(e.target.value)}><option value="">{t.all}</option>{templates.map((x) => <option key={x}>{x}</option>)}</select></label>{" "}
-        <label>{t.source} <select aria-label={t.source} value={source} onChange={(e) => setSource(e.target.value)}><option value="">{t.all}</option>{sources.map((s) => <option key={s.id}>{s.id}</option>)}</select></label>
-      </p>
-      {!stats ? <p>{t.loading}</p> : stats.rates.length === 0 ? <p>{t.noRecords}</p> : (
-        <table aria-label={t.metrics}>
-          <thead><tr>{t.rateCols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-          <tbody>
-            {stats.rates.map((r) => (
-              <tr key={key(r)}>
-                <td>{r.use}</td><td>{r.template}</td><td>{r.source ?? t.all}</td>
-                <td>{pct(r.escalation)}</td><td>{pct(r.undecided)}</td><td>{pct(r.acceptance)}</td><td>{pct(r.false_drop)}</td><td>{r.reviewed}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {stats && stats.rows.length > 0 && (
-        <table aria-label={t.calls}>
-          <thead><tr>{t.callCols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-          <tbody>
-            {stats.rows.map((r) => (
-              <tr key={key(r) + "|" + r.backend}>
-                <td>{r.use}</td><td>{r.template}</td><td>{r.source ?? t.all}</td><td>{r.backend}</td><td>{r.calls}</td><td>{r.decided}</td><td>{r.uncertain}</td><td>{r.errors}</td><td>{r.reused}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h2>{t.distribution}</h2>
-      {(stats?.rates ?? []).map((g) => {
-        const buckets = (stats?.histogram ?? []).filter((b) => key(b) === key(g));
-        if (buckets.length === 0) return null;
-        const max = Math.max(...buckets.map((b) => b.count));
-        const band = bandFor(g);
-        return (
-          <figure key={key(g)} aria-label={t.dist(g.use, g.template, g.source ?? t.all)}>
-            <figcaption>
-              {g.use} · {g.template} · {g.source ?? t.allSources}
-              {t.currentBand}
-              {band ? `${band.low}–${band.high}` : t.packBand}
-              {t.lowEnd(pct(g.false_drop), g.reviewed)}
-              {t.highEnd(pct(g.acceptance))}
-            </figcaption>
-            <table>
+      {(!stats || !settings) && error == null && <p role="status">{t.loading}</p>}
+      {stats && settings &&
+        templates.map((tpl) => {
+          const rate = rates.find((r) => r.template === tpl);
+          const buckets = (stats.histogram ?? []).filter((k) => k.template === tpl && (k.source ?? "") === (rate?.source ?? source));
+          const { band, override } = bandOf(tpl);
+          return (
+            <Card
+              key={tpl + "|" + source}
+              template={tpl}
+              rate={rate}
+              buckets={buckets}
+              band={band}
+              override={override}
+              days={days}
+              shadow={settings.shadow.includes(tpl)}
+              onSave={(low, high) => putBands(withBand(settings.bands, { template: tpl, ...(source ? { source } : {}), low, high }))}
+              onReset={() => putBands(settings.bands.filter((b) => !same(b, tpl, source)))}
+              onShadow={(on) => putShadow(on ? [...settings.shadow, tpl] : settings.shadow.filter((x) => x !== tpl))}
+            />
+          );
+        })}
+      {stats && (stats.rates.length > 0 || stats.rows.length > 0) && (
+        <details className="panel">
+          <summary>{t.details}</summary>
+          {stats.rates.length > 0 && (
+            <table aria-label={t.rates}>
+              <thead><tr>{t.rateCols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
               <tbody>
-                {buckets.map((b) => (
-                  <tr key={b.low}>
-                    <td>{b.low.toFixed(1)}–{b.high.toFixed(1)}</td>
-                    <td><progress aria-label={`${b.low.toFixed(1)}–${b.high.toFixed(1)}`} max={max} value={b.count} /></td>
-                    <td>{b.count}</td>
+                {stats.rates.map((r) => (
+                  <tr key={r.use + r.template + (r.source ?? "")}>
+                    <td>{label("judgeTemplate", r.template)}</td><td>{r.source ? sourceName(r.source) : t.allSources}</td>
+                    <td>{pct(r.escalation)}</td><td>{pct(r.undecided)}</td><td>{pct(r.acceptance)}</td><td>{pct(r.false_drop)}</td><td>{r.reviewed}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </figure>
-        );
-      })}
-
-      <h2>{t.bands}</h2>
-      <p>{t.bandsHint}</p>
-      <table aria-label={t.bands}>
-        <thead><tr>{t.bandCols.map((c) => <th key={c}>{c}</th>)}<th /></tr></thead>
-        <tbody>
-          {drafts.map((d, i) => (
-            <tr key={i}>
-              <td><input aria-label={t.bandTemplate} value={d.template} onChange={(e) => setDraft(i, { template: e.target.value })} /></td>
-              <td>
-                <select aria-label={t.bandSource} value={d.source} onChange={(e) => setDraft(i, { source: e.target.value })}>
-                  <option value="">{t.allSources}</option>{sources.map((s) => <option key={s.id}>{s.id}</option>)}
-                </select>
-              </td>
-              <td><input aria-label={t.low} type="number" step="0.01" value={d.low} onChange={(e) => setDraft(i, { low: e.target.value })} /></td>
-              <td><input aria-label={t.high} type="number" step="0.01" value={d.high} onChange={(e) => setDraft(i, { high: e.target.value })} /></td>
-              <td><button className="quiet" onClick={() => setDrafts((ds) => ds.filter((_, j) => j !== i))}>{t.del}</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p>
-        <button onClick={() => setDrafts((ds) => [...ds, { template: template || "", source: "", low: "", high: "" }])}>{t.addBand}</button>{" "}
-        <button onClick={saveBands}>{t.saveBands}</button>
-      </p>
-
-      <h2>{t.shadow}</h2>
-      <p>{t.shadowHint}</p>
-      <ul>
-        {[...new Set([...templates, ...(settings?.shadow ?? [])])].map((name) => {
-          const on = settings?.shadow.includes(name) ?? false;
-          return (
-            <li key={name}>
-              <label>
-                <input type="checkbox" checked={on} onChange={() => saveShadow(on ? settings!.shadow.filter((x) => x !== name) : [...(settings?.shadow ?? []), name])} /> {name}
-              </label>
-            </li>
-          );
-        })}
-      </ul>
-      <p>
-        <input aria-label={t.shadowTemplate} placeholder={t.templateName} value={newShadow} onChange={(e) => setNewShadow(e.target.value)} />{" "}
-        <button disabled={!newShadow.trim()} onClick={() => { const name = newShadow.trim(); setNewShadow(""); void saveShadow([...new Set([...(settings?.shadow ?? []), name])]); }}>{t.enableShadow}</button>
-      </p>
-
-      <h2>{t.spotCheck}</h2>
-      <p>{t.spotHint}</p>
-      {pool && pool.length === 0 && <p>{t.noPool}</p>}
-      <ul aria-label={t.pool}>
-        {(pool ?? []).map((e) => (
-          <li key={e.judgment}>
-            <strong>{e.subject || e.event}</strong>
-            {t.entryMeta(e.source, e.template, e.judged_at)}{" "}
-            {e.results.map((r) => <button key={r} onClick={() => review(e, r)}>{t.results[r] ?? r}</button>)}
-          </li>
-        ))}
-      </ul>
+          )}
+          {stats.rows.length > 0 && (
+            <table aria-label={t.calls}>
+              <thead><tr>{t.callCols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+              <tbody>
+                {stats.rows.map((r) => (
+                  <tr key={r.use + r.template + (r.source ?? "") + r.backend}>
+                    <td>{label("judgeTemplate", r.template)}</td><td>{r.source ? sourceName(r.source) : t.allSources}</td><td>{label("judgeBackend", r.backend)}</td>
+                    <td>{r.calls}</td><td>{r.decided}</td><td>{r.uncertain}</td><td>{r.errors}</td><td>{r.reused}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </details>
+      )}
     </main>
   );
 }
