@@ -853,3 +853,56 @@ func TestReuseFlagAcrossModelChange(t *testing.T) {
 		t.Fatalf("third: %+v batches=%d", l, len(e.cls.Batches()))
 	}
 }
+
+// setPaused 在 Web 设置里暂停或恢复模型（§8.7）。
+func (e *jenv) setPaused(t *testing.T, on bool) {
+	t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "pause", func(p *policy.Policy) error { p.ModelsPaused = on; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// 暂停模型：两个端点都配着，判断题与生成型都不发任何请求，结果与没配端点一致但标明是暂停；恢复后立即按原配置调用。
+func TestPausedModelsSendNothingAndResumeAtOnce(t *testing.T) {
+	e := setupJudge(t, true, true)
+	e.cls.PYes(modelstub.Key{Contains: "pause-1"}, 0.95)
+	e.stub.SetDefault(modelstub.Reply{Content: `{"title":"t"}`})
+	e.setPaused(t, true)
+
+	c := jc("screen", "pause-1")
+	c.UnjudgedOnUnavailable = true
+	v := e.judge(t, c)
+	if !v.Unavailable || !v.Paused || v.Written {
+		t.Fatalf("paused verdict %+v", v)
+	}
+	for _, lv := range v.Record.Levels {
+		if lv.Outcome != "skipped" || lv.ErrorCode != "models_paused" {
+			t.Fatalf("paused levels %+v", v.Record.Levels)
+		}
+	}
+	// 不要求未判定的调用照没配端点一样取保守默认、写记录。
+	if d := e.judge(t, jc("screen", "pause-2")); !d.Unavailable || !d.Written || d.DecidedBy != "default" {
+		t.Fatalf("paused default %+v", d)
+	}
+	_, err := e.svc.Do(bg, Call{Pack: "jp", Template: "draft", Input: json.RawMessage(`{}`), Target: "it1", Actor: ruleA, Basis: basis})
+	if !errors.Is(err, model.ErrPaused) || !errors.Is(err, model.ErrNotConfigured) {
+		t.Fatalf("paused generate err = %v", err)
+	}
+	if n, m := len(e.cls.Batches()), len(e.stub.Requests()); n != 0 || m != 0 {
+		t.Fatalf("paused models were called: judge %d, generate %d", n, m)
+	}
+
+	e.setPaused(t, false)
+	if v := e.judge(t, c); v.Paused || v.Unavailable || v.DecidedBy != "classifier" || v.Answer != "yes" {
+		t.Fatalf("after resume %+v", v)
+	}
+	if out, err := e.svc.Do(bg, Call{Pack: "jp", Template: "draft", Input: json.RawMessage(`{}`), Target: "it1", Actor: ruleA, Basis: basis}); err != nil || !out.Settled {
+		t.Fatalf("generate after resume: %+v %v", out, err)
+	}
+	if len(e.cls.Batches()) == 0 || len(e.stub.Requests()) == 0 {
+		t.Fatal("resumed models must be called again")
+	}
+}

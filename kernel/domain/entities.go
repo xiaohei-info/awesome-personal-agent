@@ -296,6 +296,7 @@ const (
 	UnjudgedUndecided        = "undecided"         // 判断型级联后仍未定：不自动重判，等本人处理
 	UnjudgedOutboundUnset    = "outbound_unset"    // 来源未选外发范围而端点都在外部：选定后自动重判
 	UnjudgedRestored         = "restored"          // 本人把旧级联忽略的事件放回积压：只经积压放开重判
+	UnjudgedModelsPaused     = "models_paused"     // 本人暂停了模型：同 model_unavailable 参与自动重判与到期，恢复本身不触发重判
 )
 
 // DedupeKey 是 (去重域, 事件 id)。

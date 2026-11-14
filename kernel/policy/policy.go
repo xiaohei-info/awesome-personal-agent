@@ -236,6 +236,9 @@ type Policy struct {
 	// DefaultHarness 是规则未指定 harness 时任务型与后台运行用的 harness（§13.6）；为空表示未设置，任务型转 needs_input。
 	DefaultHarness string   `json:"default_harness"`
 	Judgment       Judgment `json:"judgment"`
+	// ModelsPaused 为真时两个端点的配置与密钥原样保留，但内核按两者都未配置运行（Current 给出的就是这个视图，§8.7）。
+	// 没有任何端点时规整为假。只在 Web 改。
+	ModelsPaused bool `json:"models_paused"`
 }
 
 // Default 是版本 0 的配置：默认类别、权限上限 read、人格与白名单为空。
@@ -435,6 +438,9 @@ func normalize(p Policy) (Policy, error) {
 	if err := normalizeEndpoints(&p); err != nil {
 		return p, err
 	}
+	if p.GenerateEndpoint.URL == "" && p.JudgeEndpoint == nil {
+		p.ModelsPaused = false
+	}
 
 	if n := EstimateTokens(p.Persona); n > MaxPersonaTokens {
 		return p, invalid("persona is about %d tokens, limit %d", n, MaxPersonaTokens)
@@ -575,8 +581,18 @@ func decode(doc string) (p Policy, legacy bool, err error) {
 	return p, legacy, err
 }
 
-// Current 返回最新版本号与配置；尚无版本时为 (0, Default())。
+// Current 返回最新版本号与生效中的配置；尚无版本时为 (0, Default())。
+// 模型暂停时两个端点在这里已视为未配置（ModelsPaused 仍为真，供调用方区分原因）：内核各处据此退化，与没配端点一致（§8.7）。
 func Current(tx *store.Tx) (int, Policy, error) {
+	v, p, _, err := latest(tx)
+	if p.ModelsPaused {
+		p.GenerateEndpoint, p.JudgeEndpoint = GenerateEndpoint{}, nil
+	}
+	return v, p, err
+}
+
+// Stored 返回最新版本号与存储的配置原文（暂停时端点与密钥照常在内）。只给设置页的读写与本人手动的端点探测用。
+func Stored(tx *store.Tx) (int, Policy, error) {
 	v, p, _, err := latest(tx)
 	return v, p, err
 }

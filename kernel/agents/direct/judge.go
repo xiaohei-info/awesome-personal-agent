@@ -70,6 +70,8 @@ type Verdict struct {
 	LowConfidence bool          // 取了保守默认
 	// Unavailable：没有任何一级给出可用答复（端点未配置、不可用、被排除）。
 	Unavailable bool
+	// Paused：本人暂停了模型，各级都按未配置跳过（隐含 Unavailable）；调用方据此把原因记为暂停而不是不可用。
+	Paused bool
 	// Written 报告判断记录是否已写入。
 	Written bool
 	// 分类端点的整批故障与健康信号，供调用方写健康视图（见 model.JudgeResult）。
@@ -261,6 +263,14 @@ func canon(raw json.RawMessage) []byte {
 	return b
 }
 
+// notConfiguredCode 是端点未配置那一级的错误码：暂停时记 models_paused，与真未配置区分。
+func notConfiguredCode(pol policy.Policy) string {
+	if pol.ModelsPaused {
+		return "models_paused"
+	}
+	return "not_configured"
+}
+
 func judgeEndpointID(ep *policy.JudgeEndpoint) string {
 	return strings.Join([]string{ep.URL, ep.Protocol, ep.Model}, "|")
 }
@@ -429,7 +439,7 @@ type level struct {
 }
 
 func (s *Service) walk(ctx context.Context, p *pending, pol policy.Policy) (Verdict, error) {
-	var v Verdict
+	v := Verdict{Paused: pol.ModelsPaused}
 	var levels []record.Level
 	var final level
 	answeredAny, shadowed, shIdx := false, false, 0
@@ -544,7 +554,7 @@ func (s *Service) classLevel(ctx context.Context, p *pending, pol policy.Policy,
 	lv := level{Level: record.Level{Backend: record.BackendClassifier, Outcome: record.OutcomeSkipped}}
 	ep := pol.JudgeEndpoint
 	if ep == nil || ep.URL == "" {
-		lv.ErrorCode = "not_configured"
+		lv.ErrorCode = notConfiguredCode(pol)
 		return lv, nil
 	}
 	if s.o.Classifier == nil {
@@ -636,7 +646,7 @@ func (s *Service) chatLevel(ctx context.Context, p *pending, pol policy.Policy) 
 	lv := level{Level: record.Level{Backend: record.BackendChat, Outcome: record.OutcomeSkipped}}
 	ep := pol.GenerateEndpoint
 	if ep.URL == "" || ep.Model == "" {
-		lv.ErrorCode = "not_configured"
+		lv.ErrorCode = notConfiguredCode(pol)
 		return lv, nil
 	}
 	loc := policy.EffectiveLocality(ep.Locality)

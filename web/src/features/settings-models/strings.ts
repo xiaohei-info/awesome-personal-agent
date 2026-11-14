@@ -91,6 +91,10 @@ const zh = {
   screeningHint: "web_only 初筛等待模型的最长时间；超时按规则的结果继续。",
   screeningMs: "筛选超时（毫秒）",
   saveCard: (title: string) => `保存${title}`,
+  pauseLabel: "模型运行开关",
+  running: "运行中",
+  paused: "已暂停",
+  pausedNote: "配置和密钥都保留，模型暂不调用。",
 };
 
 const en: typeof zh = {
@@ -183,6 +187,10 @@ const en: typeof zh = {
   screeningHint: "How long web_only screening waits for the model; on timeout, handling continues with the rules' result.",
   screeningMs: "Screening timeout (ms)",
   saveCard: (title) => `Save ${title.toLowerCase()}`,
+  pauseLabel: "Models on or paused",
+  running: "Running",
+  paused: "Paused",
+  pausedNote: "Settings and keys are kept; the models are not called.",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

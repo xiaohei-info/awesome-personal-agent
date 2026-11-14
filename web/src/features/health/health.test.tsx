@@ -147,4 +147,17 @@ describe("健康页的自检区（flow-doctor / ACT-DOC-12）", () => {
     expect(sources).toHaveTextContent("下一步：choose the outbound scope");
     expect(s.calls).toContain("GET /v1/doctor");
   });
+
+  it("模型已暂停：模型信号显示“已暂停”而不是正常或告警；暂停期间未判定的条数单独列出", async () => {
+    const r = report({
+      model_unavailable: { detail: { judge: "paused", generate: "paused", endpoint: "", paused: true } },
+      unjudged_backlog: { ok: false, count: 2, severity: "warning", why: "w", detail: { model_unavailable: 0, models_paused: 2, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, sources: [] } },
+    });
+    mount(serve(() => json(200, r)).impl);
+    const m = await screen.findByRole("article", { name: "模型不可用" });
+    expect(within(m).getByRole("heading")).toHaveTextContent("已暂停");
+    expect(within(m).getByRole("heading")).not.toHaveTextContent("正常");
+    expect(screen.getByRole("article", { name: "未判定积压" })).toHaveTextContent("模型暂停期间未判定：2 条");
+  });
 });
+

@@ -103,6 +103,7 @@ type ReceiptFailure struct {
 const (
 	EndpointNotConfigured = "not_configured" // 没有配置，而有事件在等它
 	EndpointFailing       = "failing"        // 最近一次调用在全部重试后仍失败，之后没有成功
+	EndpointPaused        = "paused"         // 本人暂停了模型：是正常状态，不计入"模型不可用"
 )
 
 // View 是十三类信号。空切片/零值表示该信号当前正常。
@@ -116,7 +117,8 @@ type View struct {
 	ModelUnavailable []ModelIssue
 	// Endpoint 是模型端点现状，空表示正常（或没有配置、也没有事件在等它）；计入"模型不可用"。
 	Endpoint string
-	// Judge 与 Generate 是判断端点与生成端点各自的现状（空、EndpointNotConfigured、EndpointFailing）；Endpoint 取其中较差的。
+	// Judge 与 Generate 是判断端点与生成端点各自的现状（空、EndpointNotConfigured、EndpointFailing、EndpointPaused）；
+	// Endpoint 取其中较差的，暂停时为空。
 	Judge, Generate string
 	// Unjudged 是未判定积压（disposition 为 unjudged），单独一个提醒级信号；Expired 是已过期、不计入积压的条数。
 	Unjudged        []domain.SourceEvent
@@ -191,7 +193,15 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 
 // endpoint 判定两个端点的现状：生成端点调用持续失败总是异常；某个端点没有配置只在有事件因此未判定时才算异常（不用模型是允许的，§5.6）。
 // 判断端点的故障由 direct 记在 direct_judge_health：分类端点整批失败后即使对话端点定案也要报（§8.8）。
+// 本人暂停了模型时两者都是 EndpointPaused，不算异常：暂停前留下的故障标记要等恢复后的调用来清除。
 func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (judge, generate, worst string, err error) {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return "", EndpointFailing, EndpointFailing, err
+	}
+	if pol.ModelsPaused {
+		return EndpointPaused, EndpointPaused, "", nil
+	}
 	h, err := direct.HealthIn(tx)
 	if err != nil {
 		return "", EndpointFailing, EndpointFailing, err
@@ -202,10 +212,6 @@ func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (judge, generate, wors
 	jh, err := direct.JudgeHealthIn(tx)
 	if err != nil {
 		return EndpointFailing, generate, EndpointFailing, err
-	}
-	_, pol, err := policy.Current(tx)
-	if err != nil {
-		return "", EndpointFailing, EndpointFailing, err
 	}
 	// 判断端点可选：撤掉之后旧故障记录不再报，否则没有调用能把它清掉。
 	if jh.Unavailable && pol.JudgeEndpoint != nil && pol.JudgeEndpoint.URL != "" {

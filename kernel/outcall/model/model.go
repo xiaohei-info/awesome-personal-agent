@@ -20,6 +20,8 @@ import (
 var (
 	// ErrNotConfigured 表示策略里没有配置模型端点（URL 或 model 为空）。
 	ErrNotConfigured = errors.New("model: endpoint not configured")
+	// ErrPaused 表示本人在设置里暂停了模型：它包装 ErrNotConfigured，调用方按未配置退化，只在需要区分原因时单独判断。
+	ErrPaused = fmt.Errorf("%w: models are paused in settings", ErrNotConfigured)
 	// ErrTimeout 表示调用超过时限。
 	ErrTimeout = errors.New("model: timeout")
 	// ErrBadResponse 表示端点返回了非预期的响应体（不是合法的 chat completions 响应）。

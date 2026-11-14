@@ -748,8 +748,8 @@ func SetDisposition(tx *store.Tx, id string, d domain.Disposition, item, reason 
 
 // ---- 未判定积压（§9.3）：unjudged 与 expired 合称积压，expired 不再自动重判 ----
 
-// rejudgeable 是自动重判的对象：因模型不可用而未判定的；原因为空是迁移前留下的，同样按模型不可用对待。
-const rejudgeable = `disposition = 'unjudged' AND unjudged_reason IN ('', 'model_unavailable')`
+// rejudgeable 是自动重判的对象：因模型不可用或暂停而未判定的；原因为空是迁移前留下的，同样按模型不可用对待。
+const rejudgeable = `disposition = 'unjudged' AND unjudged_reason IN ('', 'model_unavailable', 'models_paused')`
 
 // Requeue 在调用方事务内把一条可重判的 unjudged 事件放回 pending，重判次数加一并返回新次数。不记事件。
 func Requeue(tx *store.Tx, id string) (int, error) { return requeue(tx, id, rejudgeable) }

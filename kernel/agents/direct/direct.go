@@ -360,6 +360,14 @@ func fingerprint(pk *packs.Pack, tmpl string, input json.RawMessage, material st
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// notConfigured 是端点未配置时返回的错误：暂停时是包装了 ErrNotConfigured 的 ErrPaused。
+func notConfigured(pol policy.Policy) error {
+	if pol.ModelsPaused {
+		return model.ErrPaused
+	}
+	return model.ErrNotConfigured
+}
+
 func newRunID() (string, error) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -409,7 +417,7 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		}
 		p.ep = pol.GenerateEndpoint
 		if p.ep.URL == "" || p.ep.Model == "" {
-			return model.ErrNotConfigured
+			return notConfigured(pol)
 		}
 		if c.RequireLocality != "" && policy.EffectiveLocality(p.ep.Locality) != c.RequireLocality {
 			return ErrLocalityChanged

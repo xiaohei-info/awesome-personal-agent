@@ -40,6 +40,7 @@ interface Doc {
   judge_endpoint: Endpoint | null;
   generate_endpoint: Endpoint | null;
   screening_timeout_ms: number;
+  models_paused?: boolean;
 }
 interface ProbeResult {
   status: "ok" | "warning" | "error";
@@ -121,19 +122,51 @@ export function SettingsModelsPage() {
       </main>
     );
   if (!doc) return <main><p role="status">{t.loading}</p></main>;
+  const any = !!(doc.generate_endpoint || doc.judge_endpoint);
+  const paused = any && !!doc.models_paused;
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
-      {!doc.generate_endpoint && !doc.judge_endpoint && (
+      {any ? (
+        <PauseSwitch paused={paused} save={(on) => save({ models_paused: on })} />
+      ) : (
         <section className="panel" aria-label={t.emptyLabel}>
           <p>{t.empty1}</p>
           <p className="sub">{t.empty2}</p>
         </section>
       )}
-      <EndpointCard kind="generate" doc={doc.generate_endpoint} unsetExternal={unsetExternal} save={(e) => save({ generate_endpoint: e as Endpoint | null })} />
-      <EndpointCard kind="judge" doc={doc.judge_endpoint} unsetExternal={unsetExternal} save={(e) => save({ judge_endpoint: e as Endpoint | null })} />
+      <EndpointCard kind="generate" doc={doc.generate_endpoint} paused={paused} unsetExternal={unsetExternal} save={(e) => save({ generate_endpoint: e as Endpoint | null })} />
+      <EndpointCard kind="judge" doc={doc.judge_endpoint} paused={paused} unsetExternal={unsetExternal} save={(e) => save({ judge_endpoint: e as Endpoint | null })} />
       <ScreeningTimeoutCard value={doc.screening_timeout_ms} save={(n) => save({ screening_timeout_ms: n })} />
     </main>
+  );
+}
+
+// 暂停模型（§8.7）：两个端点与密钥原样保留，内核按没配端点运行；只改 models_paused 一段。
+function PauseSwitch({ paused, save }: { paused: boolean; save: (on: boolean) => Promise<number> }) {
+  const t = useT(strings);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const flip = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await save(!paused);
+    } catch (e) {
+      setErr(msg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="panel row" aria-label={t.pauseLabel}>
+      <label>
+        <input type="checkbox" role="switch" checked={!paused} disabled={busy} aria-label={t.pauseLabel} onChange={() => void flip()} />
+        <span className={"badge " + (paused ? "warn" : "ok")}>{paused ? t.paused : t.running}</span>
+      </label>
+      {paused && <small className="sub">{t.pausedNote}</small>}
+      {err && <p role="alert">{err}</p>}
+    </section>
   );
 }
 
@@ -166,7 +199,7 @@ function useSaver(run: () => Promise<number>) {
   return { busy, status, save: () => void go() };
 }
 
-function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: Endpoint | null; unsetExternal: number | null; save: (e: object | null) => Promise<number> }) {
+function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; doc: Endpoint | null; paused: boolean; unsetExternal: number | null; save: (e: object | null) => Promise<number> }) {
   const t = useT(strings);
   const { api } = useSession();
   const title = kind === "generate" ? t.generate : t.judge;
@@ -287,7 +320,10 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
 
   return (
     <section aria-label={title} className="panel stack">
-      <h2>{title}</h2>
+      <h2>
+        {title}
+        {paused && doc && <> <span className="badge warn">{t.paused}</span></>}
+      </h2>
       <p className="sub">
         {kind === "generate" ? t.generateHint : t.judgeHint}
       </p>

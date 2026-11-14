@@ -377,3 +377,27 @@ func TestProbeReportsRegionUnavailable(t *testing.T) {
 		}
 	}
 }
+
+// 暂停模型（§8.7、§15.5）：运行形态与模型端点两项都是正常，结论写"已暂停"，不向端点发探测。
+func TestPausedModelsAreReportedAsPausedWithoutProbing(t *testing.T) {
+	st := newStore(t)
+	gen := modelstub.New()
+	t.Cleanup(gen.Close)
+	setPolicy(t, st, func(p *policy.Policy) {
+		p.GenerateEndpoint = policy.GenerateEndpoint{URL: gen.URL(), Model: "m", Locality: "local"}
+		p.ModelsPaused = true
+	})
+	f, err := ReadFacts(bg, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := tier(f); c.Status != OK || c.Data["tier"] != 1 || c.Data["models_paused"] != true || !strings.Contains(c.Why, "paused") {
+		t.Fatalf("tier while paused: %+v", c)
+	}
+	if c := modelEndpoint(bg, f, Env{Model: &model.Client{}}); c.Status != OK || len(c.Details) != 0 || !strings.Contains(c.Why, "paused") {
+		t.Fatalf("model endpoint while paused: %+v", c)
+	}
+	if n := len(gen.Requests()); n != 0 {
+		t.Fatalf("doctor probed a paused endpoint %d times", n)
+	}
+}

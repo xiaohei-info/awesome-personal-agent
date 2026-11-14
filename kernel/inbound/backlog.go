@@ -263,7 +263,7 @@ func (s *Service) Rejudge(ctx context.Context) error {
 		if got.Disposition == domain.DispositionPending { // 正在运行的另一轮接手了，或处理出错留在 pending：下一轮再看
 			break
 		}
-		if got.Disposition == domain.DispositionUnjudged && got.UnjudgedReason == domain.UnjudgedModelUnavailable {
+		if got.Disposition == domain.DispositionUnjudged && (got.UnjudgedReason == domain.UnjudgedModelUnavailable || got.UnjudgedReason == domain.UnjudgedModelsPaused) {
 			s.probe = probeState{next: now.Add(lim.Backoff), endpoint: endpoint}
 			break
 		}

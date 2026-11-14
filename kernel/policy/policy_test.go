@@ -479,3 +479,53 @@ func TestEndpointDefaultsAndValidation(t *testing.T) {
 		}
 	}
 }
+
+// 暂停模型（§8.7）：旧文档没有 models_paused 即不暂停；暂停是一次策略变更；Current 里两个端点视为未配置，
+// Stored 原样保留端点与密钥；恢复后 Current 立即给回原配置；没有端点时规整为不暂停。
+func TestModelsPausedKeepsEndpointsButCurrentSeesNone(t *testing.T) {
+	s := open(t)
+	seedLegacy(t, s)
+	if _, p := current(t, s); p.ModelsPaused {
+		t.Fatal("a stored document without models_paused must read as not paused")
+	}
+	must(t, s, func(p *Policy) error {
+		p.JudgeEndpoint = &JudgeEndpoint{URL: "http://127.0.0.1:9/judge", APIKey: "cls-key"}
+		return nil
+	})
+	v := must(t, s, func(p *Policy) error { p.ModelsPaused = true; return nil })
+	if es := events(t, s); es[len(es)-1].Event.Type != domain.EvPolicyChanged || !strings.Contains(string(es[len(es)-1].Event.Payload), `"models_paused"`) {
+		t.Fatalf("pausing must be a policy.changed naming models_paused: %+v", es[len(es)-1].Event)
+	}
+	if _, p := current(t, s); !p.ModelsPaused || p.GenerateEndpoint.URL != "" || p.JudgeEndpoint != nil {
+		t.Fatalf("paused Current must see no endpoint: %+v", p)
+	}
+	var stored Policy
+	if err := s.View(ctx, func(tx *store.Tx) (err error) { _, stored, err = Stored(tx); return }); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.ModelsPaused || stored.GenerateEndpoint.APIKey != "sk-old" || stored.JudgeEndpoint == nil || stored.JudgeEndpoint.APIKey != "cls-key" {
+		t.Fatalf("Stored must keep endpoints and keys while paused: %+v", stored)
+	}
+	// 暂停期间改端点：写入口基于存储原文，密钥不丢，仍是暂停。
+	must(t, s, func(p *Policy) error { p.GenerateEndpoint.Model = "new-m"; return nil })
+	if err := s.View(ctx, func(tx *store.Tx) (err error) { _, stored, err = Stored(tx); return }); err != nil {
+		t.Fatal(err)
+	}
+	if !stored.ModelsPaused || stored.GenerateEndpoint.APIKey != "sk-old" || stored.GenerateEndpoint.Model != "new-m" {
+		t.Fatalf("editing while paused: %+v", stored.GenerateEndpoint)
+	}
+	if got := must(t, s, func(p *Policy) error { p.ModelsPaused = false; return nil }); got != v+2 {
+		t.Fatalf("resume version = %d, want %d", got, v+2)
+	}
+	if _, p := current(t, s); p.ModelsPaused || p.GenerateEndpoint.APIKey != "sk-old" || p.JudgeEndpoint == nil {
+		t.Fatalf("resumed Current must give the configuration back: %+v", p)
+	}
+	// 两个端点都撤掉：暂停没有意义，规整为不暂停。
+	must(t, s, func(p *Policy) error {
+		p.ModelsPaused, p.GenerateEndpoint, p.JudgeEndpoint = true, GenerateEndpoint{}, nil
+		return nil
+	})
+	if _, p := current(t, s); p.ModelsPaused {
+		t.Fatal("models_paused must normalize to false without any endpoint")
+	}
+}

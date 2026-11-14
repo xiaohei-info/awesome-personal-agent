@@ -134,12 +134,12 @@ func build(v khealth.View) Report {
 		Source string `json:"source"`
 		Count  int    `json:"count"`
 	}
-	backlog := map[string]any{"model_unavailable": 0, "outbound_unset": 0, "undecided": 0, "restored": 0, "expired": v.Expired}
+	backlog := map[string]any{"model_unavailable": 0, "models_paused": 0, "outbound_unset": 0, "undecided": 0, "restored": 0, "expired": v.Expired}
 	bySource, at := []sourceCount{}, map[string]int{}
 	for _, e := range v.Unjudged {
 		reason := domain.UnjudgedModelUnavailable // 原因为空是迁移前留下的，按模型不可用对待（同自动重判）
 		switch e.UnjudgedReason {
-		case domain.UnjudgedUndecided, domain.UnjudgedOutboundUnset, domain.UnjudgedRestored:
+		case domain.UnjudgedUndecided, domain.UnjudgedOutboundUnset, domain.UnjudgedRestored, domain.UnjudgedModelsPaused:
 			reason = e.UnjudgedReason
 		}
 		backlog[reason] = backlog[reason].(int) + 1
@@ -155,7 +155,7 @@ func build(v khealth.View) Report {
 	if backlog[domain.UnjudgedOutboundUnset].(int) > 0 {
 		next = "source page: choose the external outbound scope of the sources in detail (held events are judged again once chosen); " + next
 	}
-	backlogSig := sig("unjudged_backlog", len(v.Unjudged), "source events are still waiting for a judgement; those held back for lack of a model or of a chosen outbound scope are judged again automatically once it is fixed, the rest wait for the owner",
+	backlogSig := sig("unjudged_backlog", len(v.Unjudged), "source events are still waiting for a judgement; those held back for lack of a model, while the models were paused, or for lack of a chosen outbound scope are judged again automatically once it is fixed (within the rejudge window), the rest wait for the owner",
 		next, backlog)
 	if !backlogSig.OK {
 		backlogSig.Severity = SeverityWarning
@@ -181,7 +181,8 @@ func build(v khealth.View) Report {
 		sig("pack_rejections", len(v.PackRejections), "a pack failed to load; the last valid version is kept",
 			"fix the pack, then hot-reload", ids(v.PackRejections, func(r packs.Rejection) string { return r.Pack })),
 		sig("model_unavailable", len(v.ModelUnavailable)+endpointDown, "the model endpoint is not configured while events wait for it, keeps failing, or a judge call failed and has not succeeded since",
-			"settings page: model endpoint", map[string]any{"judge": v.Judge, "generate": v.Generate, "endpoint": v.Endpoint, "screening": screening, "judgements": judgements}),
+			"settings page: model endpoint", map[string]any{"judge": v.Judge, "generate": v.Generate, "endpoint": v.Endpoint, "paused": v.Generate == khealth.EndpointPaused,
+				"screening": screening, "judgements": judgements}),
 		backlogSig,
 		sig("rule_fallbacks", len(v.RuleFallbacks), "a rule fell back to observe after its content changed",
 			"re-review the rule in Web", ids(v.RuleFallbacks, func(f khealth.RuleFallback) string { return f.Rule })),
