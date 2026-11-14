@@ -1,19 +1,37 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { COUNTS_EVENT, GroupContext } from "./page";
-import { GROUPS, groupOf, type Feature } from "./registry";
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { COUNTS_EVENT, SectionContext } from "./page";
+import { MOBILE, buildNav, featureAt, type Entry, type Feature, type NavModel } from "./registry";
 import { useSession } from "./session";
 import { toggleTheme } from "./theme";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+// 与 styles.css 的窄屏断点一致：窄屏只渲染手机顶栏，宽屏只渲染侧栏，DOM 里不重复出现同名链接。
+const NARROW = "(max-width: 820px)";
+
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(NARROW).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(NARROW);
+    if (!mq) return;
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener?.("change", on);
+    return () => mq.removeEventListener?.("change", on);
+  }, []);
+  return narrow;
+}
 
 export function Shell({ features: all }: { features: Feature[] }) {
   const features = useMemo(() => all.filter((f) => !f.hidden), [all]); // 稳定引用：下面的 effect 依赖它
+  const nav = useMemo(() => buildNav(features), [features]);
+  const entryOf = useMemo(() => new Map(nav.entries.flatMap((e) => e.features.map((f) => [f.id, e] as const))), [nav]);
   const { api, logout } = useSession();
   const { pathname } = useLocation();
+  const narrow = useNarrow();
   const [error, setError] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [jumping, setJumping] = useState(false);
+  const [more, setMore] = useState(false);
 
   useEffect(() => {
     const refresh = () =>
@@ -39,6 +57,17 @@ export function Shell({ features: all }: { features: Feature[] }) {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
+  const current = featureAt(features, pathname);
+  const here = current && entryOf.get(current.id);
+  const sum = (fs: Feature[]) => fs.reduce((n, f) => n + (counts[f.id] ?? 0), 0);
+  const signOut = () => logout().catch((e: Error) => setError(e.message));
+  const entryLink = (e: Entry, label: string = e.title, onClick?: () => void) => (
+    <NavItem to={e.features[0].path} active={e === here} count={sum(e.features)} onClick={onClick}>
+      {label}
+    </NavItem>
+  );
+  const bar = nav.entries.filter((e) => (MOBILE as string[]).includes(e.id));
+
   return (
     <div className="shell">
       <nav aria-label="主导航">
@@ -49,35 +78,47 @@ export function Shell({ features: all }: { features: Feature[] }) {
             <small>事情交给 agent，决定留给你</small>
           </div>
         </div>
-        {GROUPS.map((g) => {
-          const list = features.filter((f) => groupOf(f) === g);
-          return (
-            list.length > 0 && (
-              <Fragment key={g}>
-                <h2>{g}</h2>
+        {narrow ? (
+          <>
+            <ul>
+              {bar.map((e) => (
+                <li key={e.id}>{entryLink(e, e.short ?? e.title)}</li>
+              ))}
+            </ul>
+            <button
+              className={"more" + (here && !bar.includes(here) ? " active" : "")}
+              aria-expanded={more}
+              aria-haspopup="dialog"
+              onClick={() => setMore(true)}
+            >
+              更多
+            </button>
+          </>
+        ) : (
+          <>
+            {nav.groups.map((g) => (
+              <Fragment key={g.group}>
+                <h2>{g.group}</h2>
                 <ul>
-                  {list.map((f) => (
-                    <li key={f.id}>
-                      {/* 有子路径页面的父路径（settings 与 settings/grants）只在完全匹配时高亮 */}
-                      <NavLink to={"/" + f.path} end={features.some((o) => o.path.startsWith(f.path + "/"))}>
-                        {f.title}
-                        {counts[f.id] > 0 && <span className="count">{counts[f.id]}</span>}
-                      </NavLink>
-                    </li>
+                  {g.entries.map((e) => (
+                    <li key={e.id}>{entryLink(e)}</li>
                   ))}
                 </ul>
               </Fragment>
-            )
-          );
-        })}
-        <div className="nav-foot">
-          <button className="quiet" aria-label="切换明暗主题" onClick={toggleTheme}>
-            明 / 暗
-          </button>
-          <button className="quiet" onClick={() => logout().catch((e: Error) => setError(e.message))}>
-            退出登录
-          </button>
-        </div>
+            ))}
+            <div className="nav-foot">
+              {nav.settings && <ul>{<li>{entryLink(nav.settings)}</li>}</ul>}
+              <div>
+                <button className="quiet" aria-label="切换明暗主题" onClick={toggleTheme}>
+                  明 / 暗
+                </button>
+                <button className="quiet" onClick={signOut}>
+                  退出登录
+                </button>
+              </div>
+            </div>
+          </>
+        )}
         {error && <p role="alert">{error}</p>}
       </nav>
       <section>
@@ -90,15 +131,17 @@ export function Shell({ features: all }: { features: Feature[] }) {
             </span>
           </button>
         </div>
+        {here && here.features.length > 1 && <Tabs entry={here} current={current} counts={counts} />}
         <Routes>
           {all.map((f) => (
-            <Route key={f.id} path={f.path + "/*"} element={<GroupContext.Provider value={groupOf(f)}>{f.element}</GroupContext.Provider>} />
+            <Route key={f.id} path={f.path + "/*"} element={<SectionContext.Provider value={entryOf.get(f.id)?.title}>{f.element}</SectionContext.Provider>} />
           ))}
+          {all.flatMap((f) => (f.aliases ?? []).map((a) => <Route key={f.id + ":" + a} path={a + "/*"} element={<Alias to={f.path} />} />))}
           <Route
             path="*"
             element={
-              features.length ? (
-                <Navigate to={"/" + features[0].path} replace />
+              nav.entries.length ? (
+                <Navigate to={"/" + nav.entries[0].features[0].path} replace />
               ) : (
                 <main>
                   <p className="empty">暂无可用页面</p>
@@ -108,13 +151,104 @@ export function Shell({ features: all }: { features: Feature[] }) {
           />
         </Routes>
       </section>
-      {jumping && <Palette features={features} onClose={() => setJumping(false)} />}
+      {jumping && <Palette nav={nav} onClose={() => setJumping(false)} />}
+      {more && (
+        <More nav={nav} skip={bar} onClose={() => setMore(false)} link={(e) => entryLink(e, e.title, () => setMore(false))} onLogout={signOut} />
+      )}
+    </div>
+  );
+}
+
+function NavItem({ to, active, count, onClick, children }: { to: string; active: boolean; count: number; onClick?: () => void; children: ReactNode }) {
+  return (
+    <Link to={"/" + to} className={active ? "active" : undefined} aria-current={active ? "page" : undefined} onClick={onClick}>
+      {children}
+      {count > 0 && <span className="count">{count}</span>}
+    </Link>
+  );
+}
+
+/** 入口内的页签：每个页签就是一个页面的原地址，旧链接直接落到对应页签。 */
+function Tabs({ entry, current, counts }: { entry: Entry; current?: Feature; counts: Record<string, number> }) {
+  const on = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    on.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [current]);
+  return (
+    <nav className="tabs" aria-label={entry.title + "页签"}>
+      {entry.features.map((f) => (
+        <Link key={f.id} ref={f === current ? on : undefined} to={"/" + f.path} className={f === current ? "on" : undefined} aria-current={f === current ? "page" : undefined}>
+          {f.title}
+          {(counts[f.id] ?? 0) > 0 && <span className="count">{counts[f.id]}</span>}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** 别名地址改写到页面的正式地址，保留查询串与锚点（如 /judgments/spot-check?judgment=…）。 */
+function Alias({ to }: { to: string }) {
+  const { search, hash } = useLocation();
+  return <Navigate to={"/" + to + search + hash} replace />;
+}
+
+/** 手机上的"更多"：顶栏放不下的入口、设置、明暗与退出。模态，Esc 或点遮罩关闭，焦点留在抽屉里，关闭后回到打开前的位置。 */
+function More({ nav, skip, onClose, link, onLogout }: { nav: NavModel; skip: Entry[]; onClose: () => void; link: (e: Entry) => ReactNode; onLogout: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const back = useRef(document.activeElement as HTMLElement | null);
+  useEffect(() => {
+    box.current?.querySelector<HTMLElement>("a, button")?.focus();
+    const prev = back.current;
+    return () => prev?.focus?.();
+  }, []);
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    } else if (e.key === "Tab") {
+      const all = [...(box.current?.querySelectorAll<HTMLElement>("a, button") ?? [])];
+      const [first, last] = [all[0], all[all.length - 1]];
+      if (e.shiftKey ? document.activeElement === first : document.activeElement === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first)?.focus();
+      }
+    }
+  };
+  const groups = [...nav.groups.map((g) => ({ group: g.group, entries: g.entries.filter((e) => !skip.includes(e)) })), { group: "", entries: nav.settings ? [nav.settings] : [] }];
+  return (
+    <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet" role="dialog" aria-modal="true" aria-label="全部页面" ref={box} onKeyDown={onKey}>
+        {groups.map(
+          (g) =>
+            g.entries.length > 0 && (
+              <Fragment key={g.group}>
+                {g.group && <h2>{g.group}</h2>}
+                <ul>
+                  {g.entries.map((e) => (
+                    <li key={e.id}>
+                      {link(e)}
+                      {e.features.length > 1 && e.features.length <= 3 && <small>{e.features.map((f) => f.title).join(" · ")}</small>}
+                    </li>
+                  ))}
+                </ul>
+              </Fragment>
+            ),
+        )}
+        <div className="sheet-foot">
+          <button className="quiet" aria-label="切换明暗主题" onClick={toggleTheme}>
+            明 / 暗
+          </button>
+          <button className="quiet" onClick={onLogout}>
+            退出登录
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 /** ⌘K / Ctrl+K 跳转面板：从注册的页面生成，输入过滤、上下键选择、回车跳转、Esc 关闭；关闭后焦点回到打开前的位置。 */
-function Palette({ features, onClose }: { features: Feature[]; onClose: () => void }) {
+function Palette({ nav, onClose }: { nav: NavModel; onClose: () => void }) {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -122,9 +256,11 @@ function Palette({ features, onClose }: { features: Feature[]; onClose: () => vo
   useEffect(() => () => back.current?.focus?.(), []);
 
   const needle = q.trim().toLowerCase();
-  const list = features.filter((f) => !needle || [f.title, groupOf(f), f.path].some((s) => s.toLowerCase().includes(needle)));
+  // 按导航顺序列出全部页面；小字是所在入口（与页面同名时不重复）。
+  const all = nav.entries.flatMap((e) => e.features.map((f) => ({ f, where: e.title === f.title ? "" : e.title })));
+  const list = all.filter(({ f, where }) => !needle || [f.title, where, f.path].some((s) => s.toLowerCase().includes(needle)));
   const at = Math.min(sel, Math.max(list.length - 1, 0));
-  const go = (f: Feature) => {
+  const go = ({ f }: { f: Feature }) => {
     onClose();
     navigate("/" + f.path);
   };
@@ -153,7 +289,7 @@ function Palette({ features, onClose }: { features: Feature[]; onClose: () => vo
           aria-label="跳转到页面"
           aria-expanded="true"
           aria-controls="palette-list"
-          aria-activedescendant={list[at] ? "palette-" + list[at].id : undefined}
+          aria-activedescendant={list[at] ? "palette-" + list[at].f.id : undefined}
           placeholder="跳转到页面…"
           value={q}
           onChange={(e) => {
@@ -163,9 +299,10 @@ function Palette({ features, onClose }: { features: Feature[]; onClose: () => vo
           onKeyDown={onKey}
         />
         <ul id="palette-list" role="listbox" aria-label="页面">
-          {list.map((f, n) => (
-            <li key={f.id} id={"palette-" + f.id} role="option" aria-selected={n === at} onMouseEnter={() => setSel(n)} onClick={() => go(f)}>
-              {f.title} <small>{groupOf(f)}</small>
+          {list.map((x, n) => (
+            <li key={x.f.id} id={"palette-" + x.f.id} role="option" aria-selected={n === at} onMouseEnter={() => setSel(n)} onClick={() => go(x)}>
+              {x.f.title}
+              {x.where && <small> {x.where}</small>}
             </li>
           ))}
         </ul>

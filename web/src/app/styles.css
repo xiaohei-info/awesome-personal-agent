@@ -82,7 +82,29 @@ kbd {
 .shell > nav a:hover { background: color-mix(in oklch, var(--ink) 6%, transparent); color: var(--ink); }
 .shell > nav a.active { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
 .count { min-width: 20px; padding: 0 6px; border-radius: 99px; font: 600 11px/18px var(--sans); text-align: center; color: oklch(98% 0.01 60); background: var(--seal); }
-.nav-foot { margin-top: auto; padding-top: 14px; display: flex; gap: 6px; }
+.nav-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
+.nav-foot > div { display: flex; gap: 6px; margin-top: 8px; }
+
+/* 入口内的页签：每个页签是一个页面的原地址 */
+.tabs { display: flex; gap: 2px; max-width: 800px; margin: 0; padding: 10px 40px 0; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.tabs a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; white-space: nowrap; color: var(--ink-2); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs a:hover { color: var(--ink); }
+.tabs a.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+.tabs + main { padding-top: 22px; }
+
+/* 手机上的"更多"抽屉 */
+.shell > nav .more { margin-left: auto; white-space: nowrap; }
+.shell > nav .more.active { font-weight: 600; color: var(--ink); }
+.sheet-backdrop { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; background: oklch(20% 0.01 60 / .35); }
+.sheet { width: 100%; max-height: 82vh; overflow-y: auto; padding: 8px 16px 18px; background: var(--surface); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-lift); }
+.sheet h2 { margin: 14px 4px 2px; font-size: 11px; font-weight: 500; color: var(--ink-3); letter-spacing: .14em; }
+.sheet ul { list-style: none; margin: 0; padding: 0; }
+.sheet li { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); }
+.sheet li a { flex: none; white-space: nowrap; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 4px; color: var(--ink); text-decoration: none; }
+.sheet li a.active { font-weight: 600; }
+.sheet li small { flex: 1; min-width: 0; color: var(--ink-3); font-size: 12px; text-align: right; }
+.sheet-foot { display: flex; gap: 8px; margin-top: 14px; }
+.sheet-foot button { min-height: 44px; }
 
 .topbar { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 40px 0; }
 .jump {
@@ -235,10 +257,12 @@ pre code { padding: 0; background: none; }
 @media (max-width: 820px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .shell > nav { position: static; height: auto; flex-direction: row; align-items: center; gap: 4px; padding: 8px 10px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-  .brand { padding: 0 8px 0 2px; } .brand small, .shell > nav h2 { display: none; }
+  .brand { padding: 0 6px 0 2px; } .brand > div, .shell > nav h2 { display: none; }
   .shell > nav ul { display: flex; gap: 2px; } .shell > nav a { white-space: nowrap; gap: 6px; padding: 8px 10px; }
-  .nav-foot { margin: 0 0 0 8px; padding: 0; }
+  .shell > nav { padding: 8px 6px; gap: 2px; } .shell > nav a { padding: 8px 8px; }
+  .shell > nav .more { min-height: 44px; padding: 8px 8px; border: 0; background: none; box-shadow: none; color: var(--ink-2); }
   .topbar { display: none; } main { padding: 22px 16px 56px; } h1 { font-size: 25px; }
+  .tabs { padding: 4px 16px 0; } .tabs a { min-height: 44px; padding: 8px 10px; }
   .login { grid-template-columns: 1fr; } .login .pitch { padding: 40px 24px; border-right: 0; border-bottom: 1px solid var(--line); }
   .login .gate { padding: 32px 24px; }
   kbd { display: none; } .options button { min-height: 44px; }
@@ -324,6 +348,5 @@ pre [data-op="-"] { background: var(--warn-soft); color: var(--warn); text-decor
   .shell, .login { grid-template-rows: auto 1fr; }
   .decision > header { flex-wrap: wrap; }
   .filters label { flex: 1 1 100%; }
-  .nav-foot button { white-space: nowrap; }
 }
 
