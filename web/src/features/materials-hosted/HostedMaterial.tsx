@@ -4,6 +4,7 @@ import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { Val } from "../../app/values";
 
 // 形状对应 GET /v1/materials/{id}、GET /v1/materials/{id}/content、POST /v1/materials/{id}/changes（附录 B.2）。
 // 读取是异步的（reading → ready|unavailable），"暂不可读"是降级结果不是错误；
@@ -63,7 +64,7 @@ export function HostedMaterial({ material, pollMs = 3000 }: { material: HostedMa
   return (
     <section role="region" aria-label={t.detail} className="panel">
       <h3>
-        {material.title} <small>{material.kind} · {material.project || t.global} · {t.hosted}</small>
+        {material.title} <small><Val k="materialKind" id={material.kind} /> · {material.project || t.global} · {t.hosted}</small>
       </h3>
       <p className="sub">
         {t.registered(repo ?? material.location ?? "")}

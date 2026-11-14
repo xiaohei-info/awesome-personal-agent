@@ -88,11 +88,11 @@ describe("事项列表与详情（ACT-ITEM-01）", () => {
   it("CLI 建的事项在 Web 可见：标题、阶段 open、agent 操作者徽章、创建记录", async () => {
     mount(ledger().impl);
     await userEvent.click(await screen.findByRole("link", { name: "item-a" }));
-    expect(await screen.findByText("阶段：open")).toBeInTheDocument();
+    expect(await screen.findByText("阶段：进行中")).toBeInTheDocument();
     const tl = await timeline();
     expect(tl.getAllByRole("listitem")).toHaveLength(1);
-    expect(tl.getByText("item.created")).toBeInTheDocument();
-    expect(tl.getByLabelText("操作者")).toHaveTextContent("agent · cli · del-1");
+    expect(tl.getByText("新建了事项")).toBeInTheDocument();
+    expect(tl.getByLabelText("操作者")).toHaveTextContent("agent · 命令行 · del-1");
   });
 
   it("读取失败时显示服务端的原因，不显示空列表", async () => {
@@ -116,7 +116,7 @@ describe("改 status_label（ACT-ITEM-02）", () => {
     expect(l.items[0]).toMatchObject({ status_label: "review", version: 2 }); // CLI 读同一份账本
     const tl = await timeline();
     expect(tl.getAllByRole("listitem")).toHaveLength(2);
-    expect(tl.getAllByLabelText("操作者")[1]).toHaveTextContent("本人 · web · owner");
+    expect(tl.getAllByLabelText("操作者")[1]).toHaveTextContent("你 · 网页 · owner");
   });
 
   it("别处已改过（409）：显示冲突原因，页面状态不被覆盖", async () => {
@@ -139,12 +139,12 @@ describe("转阶段", () => {
     await userEvent.type(screen.getByLabelText("原因"), "等报价");
     await userEvent.click(screen.getByRole("button", { name: "转阶段" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("waiting phase requires waiting_on");
-    expect(screen.getByText("阶段：open")).toBeInTheDocument();
+    expect(screen.getByText("阶段：进行中")).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText("等待对象类别"), "external");
     await userEvent.type(screen.getByLabelText("等待对象"), "报价单");
     await userEvent.click(screen.getByRole("button", { name: "转阶段" }));
-    expect(await screen.findByText("阶段：waiting")).toBeInTheDocument();
+    expect(await screen.findByText("阶段：等待中")).toBeInTheDocument();
     expect(l.calls.filter((c) => c.path.endsWith("/transition")).at(-1)!.body).toEqual({ to: "waiting", reason: "等报价", waiting_on: { kind: "external", ref: "报价单" } });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });

@@ -3,6 +3,7 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { Pick, Val } from "../../app/values";
 
 // 形状对应 /v1/settings/{tokens,ext-keys} 返回的 auth.Credential。授权（仅 Web 会话）、
 // 种类与分组校验、明文只出现一次都在服务端；本页只负责调用并如实展示服务端的回答。
@@ -99,11 +100,7 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
         ) : (
           <label>
             {t.kind}
-            <select value={kind} onChange={(e) => setKind(e.target.value)}>
-              <option value="observer">observer</option>
-              <option value="worker">worker</option>
-              <option value="delegate">delegate</option>
-            </select>
+            <Pick k="credKind" value={kind} onChange={setKind} ids={["observer", "worker", "delegate"]} />
           </label>
         )}
         <label>
@@ -128,7 +125,7 @@ function CredentialSection({ group, onSecret }: { group: Group; onSecret: (s: st
         <ul className="rows">
           {creds.map((c) => (
             <li key={c.id}>
-              <strong>{c.label || c.id}</strong> <span className="badge plain">{c.kind}</span>
+              <strong>{c.label || c.id}</strong> <span className="badge plain"><Val k="credKind" id={c.kind} /></span>
               {c.scope && <code>{c.scope}</code>}
               {c.executor && <code>{c.executor}</code>}
               {c.revoked_at ? <span className="badge">{t.revoked}</span> : <button className="danger" onClick={() => revoke(c.id)}>{t.revoke}</button>}

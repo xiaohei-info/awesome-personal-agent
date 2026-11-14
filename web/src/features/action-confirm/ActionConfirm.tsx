@@ -3,6 +3,7 @@ import { Link, Route, Routes, useParams, useSearchParams } from "react-router-do
 import { useSession } from "../../app/session";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { useLabel } from "../../app/values";
 
 // 身份由 Web 登录态承担：写请求走 Cookie + CSRF，服务端把操作者记为 Web 本人。链接本身不含凭据。
 // 校验、授权、版本冲突都在服务端，本页只搬运输入并显示服务端的错误原因。
@@ -25,6 +26,7 @@ function Confirm() {
   const act = q.get("do") as Act | null;
   const { api } = useSession();
   const t = useT(strings);
+  const label = useLabel();
   const [item, setItem] = useState<Item | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -58,7 +60,7 @@ function Confirm() {
       <h1>{t.actions[act]}</h1>
       <div className="panel facts">
         <p><Link to={"/items/" + encodeURIComponent(id)}>{item.title}</Link></p>
-        <p>{t.phase(item.phase)}</p>
+        <p>{t.phase(label("phase", item.phase))}</p>
         {item.planned_for ? <p>{t.planned(item.planned_for)}</p> : null}
       </div>
       {error && <p role="alert">{error}</p>}

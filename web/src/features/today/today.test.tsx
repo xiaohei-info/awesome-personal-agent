@@ -92,7 +92,7 @@ describe("今天页（flow-web-workbench）", () => {
     await user.click(await screen.findByLabelText("选择 事项 S1"));
     await user.click(screen.getByLabelText("选择 事项 S2"));
     await user.click(screen.getByRole("button", { name: /应用到所选/ }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("事项 S2：version moved");
+    expect(await screen.findByRole("alert")).toHaveTextContent("事项 S2：内容已被改动（version moved）");
     expect(writes(s).map((c) => c.path)).toEqual(["/v1/items/S1/progress", "/v1/items/S2/progress"]);
 
     await user.click(screen.getByLabelText("选择 事项 S1"));

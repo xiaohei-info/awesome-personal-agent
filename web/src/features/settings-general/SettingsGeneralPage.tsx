@@ -3,10 +3,12 @@ import { PageHead } from "../../app/page";
 import { browserLang, setChoice, storedChoice, useT, type Choice } from "../../app/i18n";
 import { LANG_NAMES } from "../../app/strings";
 import { strings } from "./strings";
+import { setRawShown, useRaw } from "../../app/raw";
 
 // 界面语言（设计 §4.1）：存在这台浏览器的 localStorage，不进账本、不跨设备同步；默认跟随浏览器。
 export function SettingsGeneralPage() {
   const t = useT(strings);
+  const raw = useRaw();
   const [choice, setLocal] = useState<Choice>(storedChoice);
   const pick = (c: Choice) => {
     setLocal(c);
@@ -33,6 +35,12 @@ export function SettingsGeneralPage() {
           ))}
         </fieldset>
         <p className="sub">{t.scope}</p>
+      </section>
+      <section className="panel stack" aria-label={t.raw}>
+        <label>
+          <input type="checkbox" checked={raw} onChange={(e) => setRawShown(e.target.checked)} /> {t.raw}
+        </label>
+        <p className="sub">{t.rawHint}</p>
       </section>
     </main>
   );

@@ -65,7 +65,7 @@ describe("规则模式页", () => {
     mount(server().impl);
     expect((await modeOf(K1)).value).toBe("observe");
     expect((await modeOf(K2)).value).toBe("off");
-    expect(screen.getByText("brief · clock_rules")).toBeInTheDocument();
+    expect(screen.getByText("简报 · 定时")).toBeInTheDocument();
   });
 
   it("ACT-RULE-03: 本人切 auto，请求带 CSRF，路径为编码后的规则 key，页面显示服务端返回的模式", async () => {

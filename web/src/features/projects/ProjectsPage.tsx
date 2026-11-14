@@ -6,6 +6,8 @@ import { ProjectMaterials } from "../materials-hosted/ProjectMaterials";
 import type { Item } from "../items/ItemsPage";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { PROJECT_STATUS } from "../../app/ids";
+import { Pick, Val } from "../../app/values";
 
 // 形状对应 GET/POST /v1/projects、GET/PATCH /v1/projects/{id}、POST /v1/projects/{id}/repos、
 // GET /v1/settings/executors、PUT /v1/settings/projects/{id}/allowed-executors（附录 B.2）。
@@ -22,7 +24,6 @@ export interface Project {
   capture?: boolean;
 }
 
-const STATUSES = ["active", "paused", "archived"];
 const splitTags = (s: string) => s.split(",").map((t) => t.trim()).filter(Boolean);
 
 export function ProjectsPage() {
@@ -72,7 +73,7 @@ function ProjectList() {
         <ul aria-label={t.list} className="rows">
           {projects.map((p) => (
             <li key={p.id}>
-              <Link to={p.id}>{p.name}</Link> <span className={"badge" + (p.status === "active" ? " ok" : "")}>{p.status}</span>
+              <Link to={p.id}>{p.name}</Link> <span className={"badge" + (p.status === "active" ? " ok" : "")}><Val k="projectStatus" id={p.status} /></span>
               {p.tags?.length ? <span className="sub">{p.tags.map((t) => "#" + t).join(" ")}</span> : null}
             </li>
           ))}
@@ -157,9 +158,7 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
       <label>{t.tags} <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
       <label>
         {t.status}
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          {STATUSES.map((s) => <option key={s}>{s}</option>)}
-        </select>
+        <Pick k="projectStatus" value={status} onChange={setStatus} ids={PROJECT_STATUS} />
       </label>
       <label><input type="checkbox" checked={capture} onChange={(e) => setCapture(e.target.checked)} /> {t.capture}</label>
       <button type="submit">{t.saveProject}</button>
@@ -280,7 +279,7 @@ function ProjectItems({ id }: { id: string }) {
       {!!items?.length && (
         <ul className="rows">
           {items.map((i) => (
-            <li key={i.id}><Link to={"/items/" + i.id}>{i.title}</Link> <span className="badge plain">{i.phase}</span></li>
+            <li key={i.id}><Link to={"/items/" + i.id}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span></li>
           ))}
         </ul>
       )}

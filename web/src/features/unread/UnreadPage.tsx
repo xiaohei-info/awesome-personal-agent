@@ -3,6 +3,7 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { Val } from "../../app/values";
 
 // 形状对应 GET /v1/deliveries/unread 返回的 domain.Delivery。未读 = 退回 Web 且本人没点过；是否未读由服务端判定。
 export interface UnreadDelivery {
@@ -73,7 +74,7 @@ export function UnreadPage() {
         items.map((d) => (
           <article key={d.id} aria-label={d.content.title}>
             <h3>{d.content.title}</h3>
-            <p className="meta"><span className="badge plain">{d.class}</span></p>
+            <p className="meta"><span className="badge plain"><Val k="deliveryClass" id={d.class} /></span></p>
             {d.content.summary && <p>{d.content.summary}</p>}
             {d.content.options && d.content.options.length > 0 && <p>{t.options(d.content.options.join(" / "))}</p>}
             {d.content.web_url && <a href={d.content.web_url}>{t.open}</a>}

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
 import type { ApiErrorBody } from "../../app/api";
-import { useT, whyNext } from "../../app/i18n";
+import { codeText, useT } from "../../app/i18n";
 import { strings } from "./strings";
 
 // 对应 GET/POST /forms/{令牌}（不带 /v1，无需登录）。页面只展示问题与选项，不含任何账本其他内容，也不判定令牌有效性——以服务端为准。
@@ -43,7 +43,7 @@ function toState(e: unknown): State {
   const b = (e as { body?: ApiErrorBody }).body;
   if (b && (b.code === "not_found" || b.code === "conflict")) return { k: "dead", why: b.why };
   if (b && (b.code === "web_only" || b.code === "risk_screening_pending")) return { k: "web", why: b.why, url: b.web_url ?? null };
-  return { k: "error", why: b ? whyNext(b) : e instanceof Error ? e.message : "request failed" };
+  return { k: "error", why: b ? codeText(b) : e instanceof Error ? e.message : "request failed" };
 }
 
 export function FormPage() {

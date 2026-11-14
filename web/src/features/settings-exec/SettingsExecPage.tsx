@@ -3,6 +3,8 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { EXECUTOR_KIND } from "../../app/ids";
+import { Pick, Val } from "../../app/values";
 
 // 形状对应 /v1/settings/{executors,declarations,commands}（kernel/executors）。授权（仅 Web 会话）、
 // 声明校验、确认前不生效都在服务端；本页只负责调用并如实展示服务端的回答。
@@ -105,11 +107,7 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
         </label>
         <label>
           {t.kind}
-          <select value={kind} onChange={(e) => setKind(e.target.value)}>
-            <option value="external-cli">external-cli</option>
-            <option value="native-subagent">native-subagent</option>
-            <option value="human">human</option>
-          </select>
+          <Pick k="executorKind" value={kind} onChange={setKind} ids={EXECUTOR_KIND} />
         </label>
         <label>
           {t.host}
@@ -132,7 +130,7 @@ function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
           {items.map((x) => (
             <li key={x.id}>
               <span>
-                <strong>{x.id}</strong> · {x.kind}
+                <strong>{x.id}</strong> · <Val k="executorKind" id={x.kind} />
                 {x.host && ` · ${x.host}`}
                 {x.scenarios?.length ? ` · ${x.scenarios.join(", ")}` : ""}
               </span>{" "}

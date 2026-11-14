@@ -4,6 +4,7 @@ import { PageHead } from "../../app/page";
 import { ActorBadge, type Step } from "../items/ItemsPage";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { Val } from "../../app/values";
 
 // 形状对应 /v1/settings/grants（policy.Grant）与 /v1/audit/events?grant=。有效期上限、动作白名单、凭据与范围校验都在服务端，
 // 本页只搬运输入并如实展示服务端的回答；授权单内容不可改，所以没有编辑或延长，只有撤销后重签。
@@ -94,7 +95,7 @@ function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | n
         <ul aria-label={t.usage} className="plain">
           {usage.map((e) => (
             <li key={e.seq}>
-              #{e.seq} · {e.type} · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString(locale())}
+              #{e.seq} · <Val k="event" id={e.type} /> · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString(locale())}
               {e.reason ? ` · ${e.reason}` : ""}
             </li>
           ))}

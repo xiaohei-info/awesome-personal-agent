@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
-import { ApiError } from "./api";
+import { ApiError, type ApiErrorBody } from "./api";
+import { GENERIC_ERROR } from "./ids";
+import { vocab, type Entry } from "./vocab";
 
 // 界面语言（设计 §4.1）：只切换 Web 界面文案与日期格式；服务端的 why/next、通知、简报与内置提示词不随它变。
 // 选择存在这台浏览器的 localStorage，不进账本、不跨设备同步；没选过时跟随浏览器语言。
@@ -74,10 +76,30 @@ export function useT<T>(d: Dict<T>): T {
   return d[useLang()];
 }
 
-/** 服务端错误：原样显示 why 与 next（机制性英文，CLI 与 agent 共用，不随界面语言切换）。 */
+/** 错误码的显示名（设计 §4.2）；词表里没有这个码时为 undefined。 */
+export function codeLabel(code: string): string | undefined {
+  return (vocab[current].error as Partial<Record<string, Entry>>)[code]?.label;
+}
+
+const withWhy = (label: string, why: string) => (current === "zh" ? `${label}（${why}）` : `${label} (${why})`);
+
+/** 服务端错误的一行文字：已知错误码显示「当前语言的一句话（服务端 why）」，未知码原样显示 why 与 next。
+ *  next 是给 CLI 与 agent 的下一步，不进这一行；ErrorNote 把 why、next 全文收在「详情」里。 */
 export function errorText(e: unknown): string {
-  if (e instanceof ApiError) return whyNext(e.body);
+  if (e instanceof ApiError) return codeText(e.body);
   return e instanceof Error ? e.message : "request failed";
+}
+
+export function codeText(b: Pick<ApiErrorBody, "code" | "why" | "next">): string {
+  const label = codeLabel(b.code);
+  return label ? withWhy(label, b.why) : whyNext(b);
+}
+
+/** ErrorNote 的主行：错误码说得清的只显示那句话；只说了类别的码（请求有误、冲突、服务出错）仍要带上 why。 */
+export function codeHeadline(b: Pick<ApiErrorBody, "code" | "why" | "next">): string {
+  const label = codeLabel(b.code);
+  if (!label) return whyNext(b);
+  return GENERIC_ERROR.includes(b.code) ? withWhy(label, b.why) : label;
 }
 
 export const whyNext = (b: { why: string; next: string }) => (current === "zh" ? `${b.why}（${b.next}）` : `${b.why} (${b.next})`);

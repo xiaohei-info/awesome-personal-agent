@@ -3,7 +3,6 @@ import { common } from "../../app/strings";
 
 const zh = {
   ...common.zh,
-  states: { pending: "待转发", forwarded: "已转发", processed: "已处理", handed_back: "已交回", released: "已退回判断流" } as Record<string, string>,
   title: "挂靠消息",
   none: "没有挂靠消息",
   list: "挂靠消息列表",
@@ -22,7 +21,6 @@ const zh = {
 
 const en: typeof zh = {
   ...common.en,
-  states: { pending: "to forward", forwarded: "forwarded", processed: "processed", handed_back: "handed back", released: "returned to judgment" },
   title: "Attached messages",
   none: "No attached messages",
   list: "Attached message list",

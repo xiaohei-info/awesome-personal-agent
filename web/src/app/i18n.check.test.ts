@@ -6,9 +6,10 @@ import { browserLang } from "./i18n";
 // 页面代码里出现中文字面量就失败；每份英文文案里不能出现中文。注释不受限制。
 const HAN = /[\u4e00-\u9fff]/;
 const sources = import.meta.glob("../**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-const dicts = import.meta.glob("../**/strings.ts", { eager: true }) as Record<string, Record<string, unknown>>;
+const dicts = import.meta.glob(["../**/strings.ts", "./vocab.ts"], { eager: true }) as Record<string, Record<string, unknown>>;
 
-const skip = (f: string) => /\.test\.tsx?$/.test(f) || f.endsWith("/strings.ts") || f.endsWith("/test-setup.ts");
+// 词表 vocab.ts 与 strings.ts 同类：是登记文案的地方。
+const skip = (f: string) => /\.test\.tsx?$/.test(f) || f.endsWith("/strings.ts") || f.endsWith("/vocab.ts") || f.endsWith("/test-setup.ts");
 
 /** 就地写的 { zh: "…", en: "…" }：zh 的值放行。 */
 function inlineZh(node: ts.Node): boolean {

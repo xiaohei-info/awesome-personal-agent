@@ -5,6 +5,8 @@ import { PageHead } from "../../app/page";
 import { HostedMaterial } from "../materials-hosted/HostedMaterial";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { MATERIAL_KIND } from "../../app/ids";
+import { Pick, Val } from "../../app/values";
 
 // 形状对应 GET/POST /v1/materials、GET /v1/materials/{id}[/revisions]、POST /v1/materials/{id}/revisions|revert、
 // POST /v1/revisions/{id}/confirm|reject、GET /v1/materials/search（附录 B.2）。
@@ -56,7 +58,7 @@ interface Write {
 }
 
 // shortcut: kind 取内置集合（kernel/materials builtinKinds）；能力包扩展的 kind 暂无 HTTP 枚举接口，有了再改读接口。
-const KINDS = ["minutes", "reference", "worknote", "requirement", "design", "guideline"];
+const KINDS = MATERIAL_KIND;
 // 规范的五个固定小节（§6.6），均可留空；空小节由服务端渲染时丢弃。
 const guidelineTemplate = (heads: string[]) => heads.map((h) => `## ${h}\n\n`).join("\n");
 
@@ -161,12 +163,7 @@ export function MaterialsPage() {
         </label>
         <label>
           {t.byKind}
-          <select value={kind} onChange={(e) => setKind(e.target.value)}>
-            <option value="">{t.allKinds}</option>
-            {KINDS.map((k) => (
-              <option key={k}>{k}</option>
-            ))}
-          </select>
+          <Pick k="materialKind" value={kind} onChange={setKind} ids={KINDS} empty={t.allKinds} />
         </label>
         <label>
           {t.search}
@@ -199,7 +196,7 @@ export function MaterialsPage() {
         <ul className="rows">
           {hits.map((h) => (
             <li key={h.id} aria-label={h.id}>
-              <button className="link" onClick={() => setSelected(h.id)}>{h.title}</button> <span className="sub">{h.kind} · {h.project || t.global} · {h.hosted ? t.hosted : t.owned}
+              <button className="link" onClick={() => setSelected(h.id)}>{h.title}</button> <span className="sub"><Val k="materialKind" id={h.kind} /> · {h.project || t.global} · {h.hosted ? t.hosted : t.owned}
               {h.path && <> · {h.path}</>}</span>
               {h.snippet && <p className="sub">{h.snippet}</p>}
             </li>
@@ -213,7 +210,7 @@ export function MaterialsPage() {
             <ul className="rows">
               {shown.map((m) => (
                 <li key={m.id}>
-                  <button className="link" onClick={() => setSelected(m.id)}>{m.title}</button> <span className="sub">{m.kind} · {m.project || t.global} · {m.location ? t.hosted : t.owned}</span>
+                  <button className="link" onClick={() => setSelected(m.id)}>{m.title}</button> <span className="sub"><Val k="materialKind" id={m.kind} /> · {m.project || t.global} · {m.location ? t.hosted : t.owned}</span>
                 </li>
               ))}
             </ul>
@@ -255,11 +252,7 @@ function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: s
     >
       <label>
         {t.kind}
-        <select value={f.kind} onChange={pickKind}>
-          {KINDS.map((k) => (
-            <option key={k}>{k}</option>
-          ))}
-        </select>
+        <Pick k="materialKind" value={f.kind} onChange={(k) => pickKind({ target: { value: k } })} ids={KINDS} />
       </label>
       <label>
         {t.project}
@@ -382,7 +375,7 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
   return (
     <section role="region" aria-label={t.detail} className="panel">
       <h3>
-        {m.title} <small>{m.kind} · {m.project || t.global}</small>
+        {m.title} <small><Val k="materialKind" id={m.kind} /> · {m.project || t.global}</small>
       </h3>
 
       {related}

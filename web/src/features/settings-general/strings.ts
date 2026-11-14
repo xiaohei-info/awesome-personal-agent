@@ -8,7 +8,9 @@ const zh = {
   language: "界面语言",
   auto: "跟随浏览器",
   autoNow: (name: string) => `（现在是 ${name}）`,
-  scope: "只改这台浏览器上的界面文字，不跨设备同步。通知、简报和内置提示词仍是中文；服务端返回的原因说明与 CLI 是英文。",
+  scope: "只对这台浏览器生效",
+  raw: "显示原始值",
+  rawHint: "在中文名旁显示系统里的 ID",
 };
 
 const en: typeof zh = {
@@ -18,7 +20,9 @@ const en: typeof zh = {
   language: "Interface language",
   auto: "Follow the browser",
   autoNow: (name) => ` (currently ${name})`,
-  scope: "Changes the interface text in this browser only and does not sync across devices. Notifications, briefs and built-in prompts stay in Chinese; reasons returned by the server and the CLI are in English.",
+  scope: "Applies to this browser only",
+  raw: "Show raw values",
+  rawHint: "Show system IDs next to names",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };
