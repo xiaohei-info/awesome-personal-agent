@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
@@ -65,6 +66,17 @@ func (f *fx) ask(id string, extra ...string) {
 	f.t.Helper()
 	args := append([]string{"ask", id, "--question", "选哪个方案", "--option", "A=方案A", "--option", "B=方案B", "--recommend", "A", "--free-text"}, extra...)
 	f.apa(f.WRK, 0, args...)
+	f.settle(id)
+}
+
+// settle 等 web_only 初筛返回（ask.screening_pending 清除）：初筛是提交后异步进行，未返回时 delegate 代答按退出码 22 不接受
+// （设计 §9、§14.4），慢机或并发负载下不能指望它先于 decide 完成。
+func (f *fx) settle(id string) {
+	f.t.Helper()
+	f.waitFor(30*time.Second, "决策 "+id+" 的初筛返回", func() bool {
+		a, _ := f.item(id)["ask"].(map[string]any)
+		return a["screening_pending"] != true
+	})
 }
 
 // item 读事项（item 对象）。
