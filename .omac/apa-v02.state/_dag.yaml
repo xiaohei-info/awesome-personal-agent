@@ -1,4 +1,4 @@
-# sha256: 756a7df1ca90b35ccf1a9b3a210a1865af689747e3e85a31a43ffa19d8fd1e55
+# sha256: 71056bf724c2308dd447e98c043552303f43484879ee80ed4481e96cb7819909
 defects:
   schema: omac.defect-ledger/v1
   used_global: 30
@@ -287,7 +287,7 @@ defects:
       - flow-backlog-release/ACT-BKL-19
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.outbound-scope.a2cf4d
     dfx-3e7f9b955ecb:
       suspected: e2e-env-baseline
