@@ -47,7 +47,7 @@
 
 ## v0.1 不回退的例外（相对 v0.1.1）
 
-v0.2.0 把 v0.1 的判断引擎语义（置信度阈值、`escalate_to` 级联、follow_up 的 `do[]`）换成判断型能力包，设计依据是 `docs/appendix-c-capability-pack.md` C.7、C.11 与 `OMAC-NOTES` §2.4（`flow-agent-cascade`、`flow-follow-up` 改写）。据 `git ls-tree`/`grep '^func Test'` 比较 `v0.1.1` 与本基线的测试函数名，共 34 个按名称不再存在（按包计数）：
+v0.2.0 把 v0.1 的判断引擎语义（置信度阈值、`escalate_to` 级联、follow_up 的 `do[]`）换成判断型能力包，设计依据是 `docs/appendix-c-capability-pack.md` C.7、C.11 与 `OMAC-NOTES` §2.4（`flow-agent-cascade`、`flow-follow-up` 改写）。据 `git ls-tree`/`grep '^func Test'` 比较 `v0.1.1` 与本基线的测试函数名，共 34 个按名称不再存在（下表按文件计数，有一个名称在两个文件里出现，合计 35 行；“覆盖”一栏是按设计文档对应关系的说明，未逐条回放）：
 
 | 包 | 数量 | 说明 |
 |---|---|---|
@@ -57,7 +57,7 @@ v0.2.0 把 v0.1 的判断引擎语义（置信度阈值、`escalate_to` 级联�
 | `kernel/inbound` | 5 | 旧入站判断与级联（由入站六步与 `e2e/inbound`、`e2e/screening` 覆盖） |
 | `kernel/agents/direct` | 4 | 旧 `escalate_to` 级联（由 `cascade-engine` 与 `e2e/judge` 覆盖） |
 | `tests/packs/inbound-triage` | 2 | 旧置信度级联（由 `e2e/inboundrules`、`e2e/judge` 覆盖） |
-| 其余各 1 | 5 | `api/health`、`cli/serve`、`kernel/attention`、`kernel/screening`、`tests/e2e/followup`（`TestFlowFollowUpModelDown`）、`tests/packs/delegation-verify`，分别被健康视图十三项、能力包 v2 装配、判断型流程取代 |
+| 其余各 1 | 6 | `api/health`、`cli/serve`、`kernel/attention`、`kernel/screening`、`tests/e2e/followup`（`TestFlowFollowUpModelDown`）、`tests/packs/delegation-verify`，分别被健康视图十三项、能力包 v2 装配、判断型流程取代 |
 
 仓库里原有的 `t.Skip`（本节点未新增）：
 
