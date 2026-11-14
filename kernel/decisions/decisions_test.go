@@ -425,6 +425,12 @@ func TestProposalAcceptAndDismiss(t *testing.T) {
 	if ev := e.last(t, d, domain.EvItemPhaseChanged); ev.ResolvedVia != "web" || ev.Reason != "not now" {
 		t.Fatalf("dismiss event: %+v", ev)
 	}
+	// 理由选填：不带理由也能忽略，事件理由取缺省。
+	n := e.item(t, map[string]any{"phase": "proposed"})
+	e.must(t, owner, "proposal.dismiss", "", map[string]any{"id": n})
+	if ev := e.last(t, n, domain.EvItemPhaseChanged); e.get(t, n).Phase != domain.PhaseDropped || ev.Reason != "proposal dismissed" {
+		t.Fatalf("dismiss without reason: %+v", ev)
+	}
 	// 只认第一次：已处理的建议再来是 6；运行身份是 4 并留痕。
 	if _, err := e.do(owner, "proposal.dismiss", "", map[string]any{"id": a}); exit(err) != domain.ExitConflict {
 		t.Fatalf("second decision on a proposal: %v", err)

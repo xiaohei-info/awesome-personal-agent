@@ -83,22 +83,28 @@ describe("建议流页（flow-proposal-triage）", () => {
     expect(w.csrf).toBe("tok-1");
   });
 
-  it("ACT-PROP-04：忽略必须填原因；原因随 dismiss 提交，离开建议流", async () => {
+  it("ACT-PROP-04：忽略的理由选填；有理由时随 dismiss 提交，离开建议流", async () => {
     const s = server([prop("a"), prop("b")]);
     mount(s.impl);
     const card = (await screen.findByText("建议 a")).closest("article")!;
     await userEvent.click(within(card).getByRole("button", { name: "忽略" }));
-    const confirm = within(card).getByRole("button", { name: "确认忽略" });
-    expect(confirm).toBeDisabled();
-    await userEvent.type(within(card).getByLabelText("忽略原因"), "   ");
-    expect(confirm).toBeDisabled();
-    await userEvent.clear(within(card).getByLabelText("忽略原因"));
-    await userEvent.type(within(card).getByLabelText("忽略原因"), "重复");
-    await userEvent.click(confirm);
+    await userEvent.type(within(card).getByLabelText("忽略原因（选填）"), "重复");
+    await userEvent.click(within(card).getByRole("button", { name: "确认忽略" }));
     await screen.findByText("建议 b");
     expect(screen.queryByText("建议 a")).not.toBeInTheDocument();
     expect(s.calls.find((c) => c.path === "/v1/items/a/dismiss")!.body).toEqual({ reason: "重复" });
     expect(s.calls.some((c) => c.path === "/v1/items/a/accept")).toBe(false);
+  });
+
+  it("ACT-PROP-04：不填理由也能忽略，请求体不带 reason", async () => {
+    const s = server([prop("a"), prop("b")]);
+    mount(s.impl);
+    const card = (await screen.findByText("建议 a")).closest("article")!;
+    await userEvent.click(within(card).getByRole("button", { name: "忽略" }));
+    await userEvent.type(within(card).getByLabelText("忽略原因（选填）"), "   ");
+    await userEvent.click(within(card).getByRole("button", { name: "确认忽略" }));
+    await screen.findByText("建议 b");
+    expect(s.calls.find((c) => c.path === "/v1/items/a/dismiss")!.body).toEqual({});
   });
 
   it("已被别处处理（409）：显示服务端原因并刷新列表", async () => {

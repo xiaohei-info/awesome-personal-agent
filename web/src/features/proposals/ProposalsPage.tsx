@@ -75,10 +75,10 @@ function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejectio
       {mode === "dismiss" && (
         <div>
           <label>
-            忽略原因
-            <input value={reason} onChange={(e) => setReason(e.target.value)} />
+            忽略原因（选填）
+            <input value={reason} placeholder="理由（选填）" onChange={(e) => setReason(e.target.value)} />
           </label>
-          <button disabled={busy || !reason.trim()} onClick={() => act("dismiss", { reason: reason.trim() })}>确认忽略</button>
+          <button disabled={busy} onClick={() => act("dismiss", reason.trim() ? { reason: reason.trim() } : {})}>确认忽略</button>
         </div>
       )}
       {mode === "attach" && (
