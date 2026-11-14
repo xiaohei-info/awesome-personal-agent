@@ -85,8 +85,8 @@ func tier(f Facts) Check {
 
 func modelEndpoint(ctx context.Context, f Facts, e Env) Check {
 	c := Check{Name: ModelEndpoint, Status: OK}
-	c.Add(probeJudge(ctx, f, e))
-	c.Add(probeGenerate(ctx, f, e))
+	c.Add(ProbeJudge(ctx, f.Policy.JudgeEndpoint, e))
+	c.Add(ProbeGenerate(ctx, f.Policy.GenerateEndpoint, e))
 	switch c.Status {
 	case OK:
 		c.Why, c.Next = "configured endpoints answered the built-in sample request; unconfigured ones are not an error", "nothing to do"

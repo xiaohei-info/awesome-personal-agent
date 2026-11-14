@@ -125,6 +125,15 @@ type generateReq struct {
 	Locality string  `json:"locality"`
 }
 
+// keyHint 是已存密钥的末 4 个字符，供 Web 显示"已设置 ····末 4 位"；短于 12 个字符的密钥不给，免得暴露过大比例。
+func keyHint(k string) string {
+	r := []rune(k)
+	if len(r) < 12 {
+		return ""
+	}
+	return string(r[len(r)-4:])
+}
+
 func keepKey(in *string, old string) string {
 	if in == nil || *in == maskedKey {
 		return old
@@ -137,7 +146,7 @@ func getJudge(p *kpolicy.Policy) any {
 	if j == nil {
 		return nil
 	}
-	return map[string]any{"url": j.URL, "api_key_set": j.APIKey != "", "protocol": j.Protocol, "model": j.Model, "locality": j.Locality,
+	return map[string]any{"url": j.URL, "api_key_set": j.APIKey != "", "api_key_hint": keyHint(j.APIKey), "protocol": j.Protocol, "model": j.Model, "locality": j.Locality,
 		"timeout_ms": j.TimeoutMs, "max_batch": j.MaxBatch, "max_material_chars": j.MaxMaterialChars}
 }
 
@@ -164,7 +173,7 @@ func getGenerate(p *kpolicy.Policy) any {
 	if g.URL == "" {
 		return nil
 	}
-	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "model": g.Model, "locality": g.Locality}
+	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "api_key_hint": keyHint(g.APIKey), "model": g.Model, "locality": g.Locality}
 }
 
 func setGenerate(p *kpolicy.Policy, raw json.RawMessage) error {

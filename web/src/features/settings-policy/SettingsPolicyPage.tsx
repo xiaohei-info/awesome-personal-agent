@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "../../app/api";
+import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 
-// 形状对应 /v1/settings/{policy,allowlists,model-endpoints,access-limits}（附录 B.2）；模型端点为 judge_endpoint / generate_endpoint 两组与顶层 screening_timeout_ms。
+// 形状对应 /v1/settings/{policy,allowlists,access-limits}（附录 B.2）。模型端点在"设置 › 模型"（features/settings-models）。
 // 校验、规整、人格上限（约 400 token）全部由服务端判定，本页只搬运编辑结果并原样显示拒绝原因；被拒绝时什么都没保存，草稿保留。
-const ROUTES = ["policy", "allowlists", "model-endpoints", "access-limits"] as const;
-const MASK = "***"; // 读取时代替模型端点密钥；原样回传表示保持原密钥
+const ROUTES = ["policy", "allowlists", "access-limits"] as const;
 const LEVELS = ["read", "edit", "full"];
 const WRITES = ["direct", "proposed"];
 
@@ -155,7 +155,7 @@ export function SettingsPolicyPage() {
       </main>
     );
   if (!docs) return <main><p role="status">加载中…</p></main>;
-  const p = docs["policy"], al = docs["allowlists"], me = docs["model-endpoints"], lim = docs["access-limits"];
+  const p = docs["policy"], al = docs["allowlists"], lim = docs["access-limits"];
   return (
     <main>
       <PageHead lede="保存的设置在下一次判定时生效；服务端拒绝时不会保存任何内容。">策略与人格</PageHead>
@@ -163,9 +163,7 @@ export function SettingsPolicyPage() {
       <DisturbCard doc={p} save={save} />
       <MaterialCard doc={p} save={save} />
       <LimitCard doc={lim} save={save} />
-      <JudgeEndpointCard doc={me} save={save} />
-      <GenerateEndpointCard doc={me} save={save} />
-      <ScreeningTimeoutCard doc={me} save={save} />
+      <p className="sub">模型端点已移到 <Link to="/settings/models">设置 › 模型</Link>。</p>
       <AllowlistCard doc={al} save={save} />
       <PersonaCard doc={p} save={save} />
     </main>
@@ -235,90 +233,6 @@ function LimitCard({ doc, save }: { doc: Doc; save: Save }) {
     <Card title="权限上限" onSave={() => save("access-limits", { permission_cap: { default: def, by_harness: toMap(rows, "权限上限") } })}>
       <SelectField label="默认上限" value={def} onChange={setDef} options={LEVELS} />
       <Rows label="harness 上限" keyLabel="harness" valueLabel="上限" rows={rows} onChange={setRows} options={LEVELS} />
-    </Card>
-  );
-}
-
-const LOCALITIES = ["local", "external"];
-const JUDGE_PROTOCOLS = ["probability-judgment/1"]; // chat-logprobs 待 SPIKE-LOGPROB（§21.3）结论后再开放，此前不提供。
-// 新建判断端点的默认值取自附录 B.2；位置默认 external（未声明按外部处理，外发范围最保守）。
-const JUDGE_NEW = { url: "", api_key: "", protocol: JUDGE_PROTOCOLS[0], model: "", locality: "external", timeout_ms: "10000", max_batch: "32", max_material_chars: "8000" };
-
-function posInt(v: string, what: string) {
-  const n = Number(v);
-  if (v.trim() === "" || !Number.isInteger(n) || n <= 0) throw new Error(`${what}必须是正整数`);
-  return n;
-}
-
-// 端点位置与密钥：密钥只写不读，已设置时显示占位 ***，原样回传表示保持原密钥。
-function EndpointCard({ title, toggle, doc, init, build, save, fields }: {
-  title: string; toggle: string; doc: unknown; init: (e: any) => Record<string, string>;
-  build: (d: Record<string, string>) => unknown; save: (body: unknown) => Promise<number>;
-  fields: (d: Record<string, string>, f: (k: string, label: string, type?: string) => ReactNode, sel: (k: string, label: string, options: string[]) => ReactNode) => ReactNode;
-}) {
-  const [on, setOn] = useDraft(doc, () => doc != null);
-  const [d, setD] = useDraft(doc, () => (doc ? init(doc) : { ...JUDGE_NEW }));
-  const f = (k: string, label: string, type = "text") => (
-    <label>{label}<input type={type} value={d[k]} onChange={(ev) => setD({ ...d, [k]: ev.target.value })} /></label>
-  );
-  const sel = (k: string, label: string, options: string[]) => <SelectField label={label} value={d[k]} onChange={(v) => setD({ ...d, [k]: v })} options={options} />;
-  return (
-    <Card title={title} onSave={() => save(on ? build(d) : null)}>
-      <label><input type="checkbox" checked={on} aria-label={toggle} onChange={(e) => setOn(e.target.checked)} />{toggle}</label>
-      {on && fields(d, f, sel)}
-    </Card>
-  );
-}
-
-const keyHint = (k: string) => <small className="sub">{k === MASK ? "已设置密钥；保持不变即沿用原密钥" : "密钥只写入，保存后不再显示"}</small>;
-
-function JudgeEndpointCard({ doc, save }: { doc: Doc; save: Save }) {
-  return (
-    <EndpointCard
-      title="判断端点" toggle="配置判断端点" doc={doc.judge_endpoint}
-      save={(judge_endpoint) => save("model-endpoints", { judge_endpoint })}
-      init={(e) => ({ url: e.url ?? "", api_key: e.api_key_set ? MASK : "", protocol: e.protocol, model: e.model ?? "", locality: e.locality,
-        timeout_ms: String(e.timeout_ms), max_batch: String(e.max_batch), max_material_chars: String(e.max_material_chars) })}
-      build={(d) => ({ url: d.url, api_key: d.api_key, protocol: d.protocol, model: d.model, locality: d.locality,
-        timeout_ms: posInt(d.timeout_ms, "超时（毫秒）"), max_batch: posInt(d.max_batch, "批量上限"), max_material_chars: posInt(d.max_material_chars, "资料字数上限") })}
-      fields={(d, f, sel) => <>
-        {f("url", "端点 URL")}
-        {f("api_key", "API 密钥", "password")}
-        {keyHint(d.api_key)}
-        {sel("protocol", "协议", JUDGE_PROTOCOLS)}
-        {f("model", "模型（可留空）")}
-        {sel("locality", "位置（locality）", LOCALITIES)}
-        {f("timeout_ms", "超时（毫秒）", "number")}
-        {f("max_batch", "批量上限", "number")}
-        {f("max_material_chars", "资料字数上限", "number")}
-      </>}
-    />
-  );
-}
-
-function GenerateEndpointCard({ doc, save }: { doc: Doc; save: Save }) {
-  return (
-    <EndpointCard
-      title="生成端点" toggle="配置生成端点" doc={doc.generate_endpoint}
-      save={(generate_endpoint) => save("model-endpoints", { generate_endpoint })}
-      init={(e) => ({ url: e.url ?? "", api_key: e.api_key_set ? MASK : "", model: e.model ?? "", locality: e.locality })}
-      build={(d) => ({ url: d.url, api_key: d.api_key, model: d.model, locality: d.locality })}
-      fields={(d, f, sel) => <>
-        {f("url", "端点 URL")}
-        {f("model", "模型")}
-        {f("api_key", "API 密钥", "password")}
-        {keyHint(d.api_key)}
-        {sel("locality", "位置（locality）", LOCALITIES)}
-      </>}
-    />
-  );
-}
-
-function ScreeningTimeoutCard({ doc, save }: { doc: Doc; save: Save }) {
-  const [t, setT] = useDraft(doc.screening_timeout_ms, () => String(doc.screening_timeout_ms));
-  return (
-    <Card title="筛选超时" onSave={() => save("model-endpoints", { screening_timeout_ms: posInt(t, "筛选超时") })}>
-      <label>筛选超时（毫秒）<input type="number" value={t} onChange={(ev) => setT(ev.target.value)} /></label>
     </Card>
   );
 }

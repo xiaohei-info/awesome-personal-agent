@@ -43,7 +43,7 @@ func TestSpikeSubstituteConclusionsWrittenBack(t *testing.T) {
 	if strings.Count(appx, "替身上验证（主文档 §8.8）") != 2 {
 		t.Error("appendix D.7 not updated")
 	}
-	web := read("../../../web/src/features/settings-policy/SettingsPolicyPage.tsx")
+	web := read("../../../web/src/features/settings-models/SettingsModelsPage.tsx")
 	if !strings.Contains(web, `const JUDGE_PROTOCOLS = ["probability-judgment/1"];`) {
 		t.Error("settings page must offer only probability-judgment/1")
 	}

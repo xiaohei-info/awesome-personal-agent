@@ -100,7 +100,7 @@ describe("健康页（flow-health / ACT-HLT-01）", () => {
     const m = screen.getByRole("article", { name: "模型不可用" });
     expect(within(m).getByText("异常（2）")).toBeInTheDocument();
     expect(within(m).getByText(/模型端点没有配置/)).toBeInTheDocument();
-    expect(within(m).getByRole("link", { name: "策略与人格" })).toHaveAttribute("href", "/settings");
+    expect(within(m).getByRole("link", { name: "模型" })).toHaveAttribute("href", "/settings/models");
     // 积压是提醒级：显示待处理而不是异常，不计入异常类数，状态值不露出内部值
     const b = screen.getByRole("article", { name: "未判定积压" });
     expect(within(b).getByText("待处理（54）")).toBeInTheDocument();

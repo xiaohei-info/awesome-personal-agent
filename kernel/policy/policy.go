@@ -494,6 +494,10 @@ func normLocality(field, v string) (string, error) {
 	return "", invalid("%s locality %q must be local or external", field, v)
 }
 
+// NormalizeEndpoints 按保存时的同一套规则校验并补全两个端点；Web 的"测试连接"用它检查未保存的草稿。
+// 不合规时返回包装 ErrInvalid 的错误。
+func NormalizeEndpoints(p *Policy) error { return normalizeEndpoints(p) }
+
 // normalizeEndpoints 校验两个端点并补全默认值；生成端点的 URL 为空时整个视为未配置。
 func normalizeEndpoints(p *Policy) (err error) {
 	if g := &p.GenerateEndpoint; g.URL == "" {
