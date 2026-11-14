@@ -1,4 +1,4 @@
-# sha256: 6dc6573cfa339a2b406344a1a69a1feb7f03dc39e591992ee734e37fe32f154f
+# sha256: 1222370e81f00b8714d3089fc4df48e2c4b26a2687fa6bcbf26319f68954995d
 defects:
   schema: omac.defect-ledger/v1
   used_global: 15
@@ -19,14 +19,16 @@ defects:
       - flow-source-calendar/ACT-CAL-03
       reporters:
       - e2e-source-calendar-live
-      state: needs-owner
+      state: fixed
+      external_fix: https://github.com/xiaohei-info/awesome-personal-agent/pull/201
     dfx-1699a21c5f70:
       suspected: sources-calendar
       anchors:
       - flow-source-calendar/ACT-CAL-02
       reporters:
       - e2e-source-calendar-live
-      state: needs-owner
+      state: fixed
+      external_fix: https://github.com/xiaohei-info/awesome-personal-agent/pull/200
     dfx-27e69d9e5716:
       suspected: hermes-plugin-headless
       anchors:
@@ -42,7 +44,8 @@ defects:
       - flow-wake-lease/ACT-WAK-04
       reporters:
       - e2e-wake-live
-      state: needs-owner
+      state: fixed
+      external_fix: https://github.com/xiaohei-info/awesome-personal-agent/pull/205
     dfx-0bdd78ac2371:
       suspected: kernel-delegation
       anchors:
@@ -110,8 +113,9 @@ defects:
       - flow-hermes-context/ACT-HCTX-09
       reporters:
       - e2e-hermes-session
-      state: queued
+      state: fixed
       retried: true
+      external_fix: https://github.com/xiaohei-info/awesome-personal-agent/pull/212
     dfx-992917373ac0:
       suspected: hermes-plugin-receipt
       anchors:

@@ -9,7 +9,7 @@
 | `npm --prefix web ci` / `run build` / `run test -- --run src/app` | 0 / 0 / 0（16 个测试通过） |
 | `go build ./...` | 0 |
 | `go test ./...` | 0（见下“已知波动”） |
-| `go test -tags e2e -count=1 -timeout 30m ./tests/e2e/...` | 0，28 个包全部 ok，含 `e2e/v01` 系列（ledger、decisions、mapping、sources、webhook、materials、background、agents、channel）的 v0.1 不回退流程 |
+| `go test -tags e2e -count=1 -timeout 30m ./tests/e2e/...` | 0，28 个包全部 ok，含 v0.1 不回退流程（ledger、decisions、mapping、sourcepull、webhook、materials、bgguards、agents、channel 等包） |
 | `go run ./tools/redline` | `redline: ok` |
 | `APA_CONFORMANCE_STRICT=1 go test ./tests/conformance/ ./cli/serve/` | 0：附录 B、C.14 规划标记已清零，`TestNoPlannedMarkersInStrictMode` 通过 |
 | `go test ./tests/conformance/ ./cli/serve/` | 0 |
@@ -24,7 +24,7 @@
 | `ACT-BKL` | 放开四步流程在合成夹具上通过（`e2e/backlog`）；起始值与带内比例归 L5 |
 | `SPIKE-STRUCT` | 开发验收验证不符合 schema 的退化（§8.7）；真实端点归 L8、L10 |
 | `SPIKE-SESSION-KIND` | 宿主替身与插件上报通过（`e2e/authz`、`e2e/hostplugin`）；真实宿主归 L9 |
-| `SPIKE-ROUTINE` | `create_item` 与 `instruction_path` 写入通过（`e2e/digest`/routine 流程）；`run` 模式归 L12 |
+| `SPIKE-ROUTINE` | `create_item` 与 `instruction_path` 写入通过（`tests/e2e` 中的例行任务流程）；`run` 模式归 L12 |
 | `SPIKE-WEB-MOBILE`、`SPIKE-DONE-AUTHZ` | 文档已标已关闭/已证实；`e2e/workbench`、`e2e/authz` 通过 |
 | `MEAS-HOST-CTX` | 替身与插件契约测试通过（`e2e/hostplugin`）；真实运行归 L9 |
 | `MEAS-MAIL-*`、`MEAS-CAL-*` | 录制样本验收通过（`e2e/sourcesv2`）；`MEAS-MAIL-THREAD` 真实工具归 L11 |
