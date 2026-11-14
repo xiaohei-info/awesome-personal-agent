@@ -25,9 +25,12 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -38,6 +41,9 @@ var (
 	ErrBadTemplate = errors.New("direct: bad prompt template")
 	// ErrLocalityChanged 表示调用时端点的位置与 Call.RequireLocality 不同（本人刚改了位置）：不发请求，调用方按新位置重新裁剪（§14.14）。
 	ErrLocalityChanged = errors.New("direct: endpoint locality changed since the outbound scope was chosen")
+	// ErrOutboundBlocked 表示资料段带着来源内容，而该来源对本端点位置的外发范围是未选择或 none：不发请求（§14.14、§6.14 第 15 条）。
+	// 与入站的 outbound_unset、outbound_none 同语义；本人选定范围后，调用方在下次触发时重新起草。
+	ErrOutboundBlocked = errors.New("direct: outbound scope does not allow sending this source's content to the endpoint")
 )
 
 // Module 是本模块在存储层登记的迁移：输入指纹到结果的复用表，以及模型可用性的单行健康记录。
@@ -408,6 +414,9 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		if c.RequireLocality != "" && policy.EffectiveLocality(p.ep.Locality) != c.RequireLocality {
 			return ErrLocalityChanged
 		}
+		if err := outboundGate(tx, c, policy.EffectiveLocality(p.ep.Locality)); err != nil {
+			return err
+		}
 		if p.fp, err = fingerprint(pk, tmpl, c.Input, c.Material, p.ep); err != nil {
 			return err
 		}
@@ -454,6 +463,53 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 		return Step{}, callErr
 	}
 	return step, nil
+}
+
+// outboundGate 是生成型调用的统一外发检查：调用方没有自己按位置裁剪（RequireLocality 为空）、资料段又带着目标事项的内容时，
+// 事项若出自某个来源，而该来源对本端点位置的范围未选择或为 none，就不发请求。
+// 范围到事项为止：§14.14 末行说本人接受后的事项不再裁剪，但事项内容可能是 rules-only 挂靠/合并从来源事件刷新写入的，
+// 本人尚未选范围就不能因为它已是事项而送出（§6.14 第 15 条优先；设计 §14.14 末行已据此收窄）。
+// shortcut: 资料段是已成文的字符串、无法按 excerpt/meta 再裁，只拦未选择与 none；要按范围裁剪的调用方自行 Trim 并填 RequireLocality。
+func outboundGate(tx *store.Tx, c Call, locality string) error {
+	if c.RequireLocality != "" || c.Target == "" {
+		return nil
+	}
+	it, err := items.Get(tx, c.Target)
+	if err != nil {
+		var de *domain.Error
+		if errors.As(err, &de) && de.Code == domain.CodeNotFound {
+			return nil // 目标不是事项（如材料）
+		}
+		return err
+	}
+	if it.Origin == nil || it.Origin.Source == "" {
+		return nil
+	}
+	o, found, err := sourceOutbound(tx, it.Origin.Source)
+	if err != nil || !found {
+		return err
+	}
+	if b := registry.Decide(o, locality).Block; b != "" {
+		return fmt.Errorf("%w (%s, source %s)", ErrOutboundBlocked, b, it.Origin.Source)
+	}
+	return nil
+}
+
+// sourceOutbound 取来源的外发范围；对话捕获的内部来源 capture:<项目> 取项目的 capture_outbound。
+func sourceOutbound(tx *store.Tx, id string) (domain.Outbound, bool, error) {
+	var de *domain.Error
+	if proj, ok := strings.CutPrefix(id, "capture:"); ok && proj != "" {
+		p, err := projects.Get(tx, proj)
+		if errors.As(err, &de) && de.Code == domain.CodeNotFound {
+			return domain.Outbound{}, false, nil
+		}
+		return domain.Outbound{Local: registry.ScopeFull, External: p.CaptureOutbound}, err == nil, err
+	}
+	src, err := registry.Get(tx, id)
+	if errors.As(err, &de) && de.Code == domain.CodeNotFound {
+		return domain.Outbound{}, false, nil // 有意取舍：来源登记已删，没有范围可依据，遗留事项按已成为工作现场放行
+	}
+	return src.Outbound, err == nil, err
 }
 
 // normalizeJudgement 把 yes_no 的模型输出整理成 Judgement：只保留 schema 里的数值字段，置信度缺省不会出现（schema 已要求）。

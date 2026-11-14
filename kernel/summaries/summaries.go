@@ -312,8 +312,8 @@ func (s *Service) call(tx *store.Tx, tmpl, target, project string, in json.RawMe
 func (s *Service) generate(ctx context.Context, c direct.Call, out any, summary *string) (ok bool, err error) {
 	res, derr := s.o.Gen.Do(ctx, c)
 	switch {
-	case errors.Is(derr, model.ErrNotConfigured):
-		return false, nil
+	case errors.Is(derr, model.ErrNotConfigured), errors.Is(derr, direct.ErrOutboundBlocked):
+		return false, nil // 外发范围未选或 none：不是起草失败；选定范围后不会自动补起草，等事项下次变更
 	case ctx.Err() != nil:
 		return false, ctx.Err()
 	case derr != nil:
