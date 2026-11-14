@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
-import { errorText as msg, lang, useT } from "../../app/i18n";
+import { errorText as msg, lang, useLang, useT } from "../../app/i18n";
+import { rejudgeHint } from "../../app/strings";
+import { rejudgeDays } from "../../app/status";
 import { useLabel } from "../../app/values";
 import { strings } from "./strings";
 
@@ -157,16 +159,18 @@ export function SettingsModelsPage() {
 // 暂停模型（§8.7）：两个端点与密钥原样保留，内核按没配端点运行；只改 models_paused 一段。
 function PauseSwitch({ paused, save }: { paused: boolean; save: (on: boolean) => Promise<number> }) {
   const t = useT(strings);
+  const ui = useLang();
   const { api } = useSession();
-  const [stored, setStored] = useState<number | null>(null);
-  // 暂停期间积下的条数取自健康视图的积压明细（models_paused），只作提示，取不到就不显示。
+  const [stored, setStored] = useState<{ n: number; days?: number } | null>(null);
+  // 暂停期间积下的条数与恢复后的去向取自健康视图的积压明细（models_paused、rejudge_days），只作提示，取不到就不显示。
   useEffect(() => {
     if (!paused) return setStored(null);
     api.get<{ signals: { id: string; detail?: { models_paused?: number } }[] }>("/health").then(
-      (r) => setStored(r.signals.find((s) => s.id === "unjudged_backlog")?.detail?.models_paused ?? null),
+      (r) => setStored({ n: r.signals.find((s) => s.id === "unjudged_backlog")?.detail?.models_paused ?? 0, days: rejudgeDays(r) }),
       () => setStored(null),
     );
   }, [api, paused]);
+  const hint = stored && rejudgeHint(ui, "models_paused", stored.days);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const flip = async () => {
@@ -187,7 +191,7 @@ function PauseSwitch({ paused, save }: { paused: boolean; save: (on: boolean) =>
         <span className={"badge " + (paused ? "warn" : "ok")}>{paused ? t.paused : t.running}</span>
       </label>
       {paused && <small className="sub">{t.pausedNote}</small>}
-      {paused && stored != null && stored > 0 && <p className="sub">{t.stored(stored)}</p>}
+      {paused && stored && stored.n > 0 && <p className="sub">{t.stored(stored.n)}{hint && ` · ${hint}`}</p>}
       {err && <p role="alert">{err}</p>}
     </section>
   );

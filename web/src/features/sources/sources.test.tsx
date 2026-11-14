@@ -16,7 +16,7 @@ interface Rj { run_id: string; line: number; reason: string; raw: string; at: st
 interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string; unjudged_reason?: string }
 
 interface Models { judge?: boolean; generate?: boolean; paused?: boolean }
-function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean; backlog?: { count: number; outbound_unset?: number }; models?: Models; release?: { requeued: number; deferred: number } } = {}) {
+function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]; events?: Ev[]; rejects?: Rj[]; ingests?: any[]; webOnly?: boolean; restorable?: { source: string; id: string }[]; outboundFails?: boolean; backlog?: { count: number; outbound_unset?: number; rejudge_days?: number }; models?: Models; release?: { requeued: number; deferred: number } } = {}) {
   const sources = o.sources ?? [];
   const events = o.events ?? [];
   const ingests = o.ingests ?? [];
@@ -33,7 +33,7 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
     if (u.pathname === "/v1/projects") return json(200, { projects: o.projects ?? [] });
     if (u.pathname === "/v1/health") {
       const b = o.backlog ?? { count: 0 };
-      return json(200, { healthy: true, signals: [{ id: "unjudged_backlog", ok: b.count === 0, count: b.count, next: "", detail: { outbound_unset: b.outbound_unset ?? 0 } }] });
+      return json(200, { healthy: true, signals: [{ id: "unjudged_backlog", ok: b.count === 0, count: b.count, next: "", detail: { outbound_unset: b.outbound_unset ?? 0, rejudge_days: b.rejudge_days } }] });
     }
     if (u.pathname === "/v1/settings/model-endpoints") {
       const m = o.models ?? {};
@@ -404,6 +404,32 @@ describe("积压的状态与未判定原因一一对应", () => {
     expect(r.queryByRole("radiogroup", { name: "发给外部模型时" })).not.toBeInTheDocument();
     await userEvent.click(region.getByRole("button", { name: "等你选外发范围" }));
     expect(await r.findByRole("radiogroup", { name: "发给外部模型时" })).toBeInTheDocument();
+  });
+});
+
+describe("积压徽章的去向随 rejudge_days", () => {
+  it.each([
+    [7, { model_unavailable: "恢复后自动判断（最近 7 天的）", models_paused: "恢复后自动判断（最近 7 天的）", outbound_unset: "选好后自动判断（最近 7 天的）" }],
+    [0, { model_unavailable: "恢复后在积压里放开", models_paused: "恢复后在积压里放开", outbound_unset: "选好后在积压里放开" }],
+    [undefined, { model_unavailable: null, models_paused: null, outbound_unset: null }],
+  ])("rejudge_days=%s", async (days, want) => {
+    const reasons = Object.keys(want) as (keyof typeof want)[];
+    const b = backend({ sources: [rss], backlog: { count: 3, rejudge_days: days }, events: [...reasons.map((x, i): Ev => ({ ...ev("r" + i), unjudged_reason: x })), { ...ev("u"), unjudged_reason: "undecided" }] });
+    mount(b.impl);
+    await details("src_rss");
+    const region = within(await screen.findByRole("region", { name: "积压的消息" }));
+    await region.findByText(/subject-r0/);
+    while (region.queryByRole("button", { name: "加载更多" })) {
+      await userEvent.click(region.getByRole("button", { name: "加载更多" }));
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    await region.findByText(/subject-u/);
+    reasons.forEach((x, i) => {
+      const badge = region.getByText(new RegExp(`subject-r${i}`)).closest("li")!.querySelector("[class*=badge]");
+      expect(badge?.getAttribute("title"), x).toBe(want[x]);
+    });
+    // 判断未定的不自动重判（kernel/domain UnjudgedUndecided），不给自动判断的说法
+    expect(region.getByText(/subject-u/).closest("li")!.querySelector("[class*=badge]")?.getAttribute("title")).toBeNull();
   });
 });
 

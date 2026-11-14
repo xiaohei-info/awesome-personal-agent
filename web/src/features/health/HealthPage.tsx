@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
-import { useT } from "../../app/i18n";
+import { useLang, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { useNames } from "../../app/names";
 import { useRaw } from "../../app/raw";
 import { useLabel } from "../../app/values";
+import { rejudgeHint } from "../../app/strings";
 import { assess, type HealthReport, type Signal } from "../../app/status";
 import { strings } from "./strings";
 
@@ -37,14 +38,16 @@ const STATUS_BADGE = { ok: "ok", warning: "warn", error: "bad" } as const;
 type Go = keyof (typeof strings)["zh"]["go"];
 interface Line { text: string; to?: string; go?: Go }
 
+const hinted = (text: string, hint?: string) => (hint ? `${text} · ${hint}` : text);
 const n = (d: unknown, k: string) => Number((d as Record<string, unknown> | undefined)?.[k] ?? 0);
 const list = <T,>(d: unknown) => (Array.isArray(d) ? (d as T[]) : []);
 
 /** 一条信号的结论与去处：按 id 与 detail 生成（附录 B.2 的 detail 形状）。 */
-function useLines(): (s: Signal, paused: boolean) => Line[] {
+function useLines(): (s: Signal, paused: boolean, days?: number) => Line[] {
   const t = useT(strings);
+  const lang = useLang();
   const source = useNames("source");
-  return (s, paused) => {
+  return (s, paused, days) => {
     const d = s.detail;
     switch (s.id) {
       case "source_failures":
@@ -87,7 +90,7 @@ function useLines(): (s: Signal, paused: boolean) => Line[] {
           ...(n(d, "model_unavailable") + n(d, "undecided") ? [{ text: t.waitModel(n(d, "model_unavailable") + n(d, "undecided")), to: "/settings/models", go: "models" as Go }] : []),
           ...(n(d, "outbound_unset") ? [{ text: t.waitScope(n(d, "outbound_unset")), to: "/sources", go: "scope" as Go }] : []),
           // 暂停期间积下的：暂停时并进上面的「已暂停」卡；恢复后在这里列出，按重判期限自动判断。
-          ...(!paused && n(d, "models_paused") ? [{ text: t.waitPaused(n(d, "models_paused")), to: "/sources", go: "sources" as Go }] : []),
+          ...(!paused && n(d, "models_paused") ? [{ text: hinted(t.waitPaused(n(d, "models_paused")), rejudgeHint(lang, "models_paused", days)), to: "/sources", go: "sources" as Go }] : []),
           ...(n(d, "restored") ? [{ text: t.restored(n(d, "restored")), to: "/sources", go: "release" as Go }] : []),
           ...(n(d, "expired") ? [{ text: t.expired(n(d, "expired")) }] : []),
         ];
@@ -121,6 +124,7 @@ function Card({ dot, title, children, raw }: { dot: string; title: string; child
 
 export function HealthPage() {
   const t = useT(strings);
+  const lang = useLang();
   const label = useLabel();
   const raw = useRaw();
   const lines = useLines();
@@ -156,14 +160,14 @@ export function HealthPage() {
         <>
           {st.paused && (
             <Card dot="paused" title={t.paused}>
-              <p className="sub">{t.pausedHeld(st.pausedBacklog)}</p>
+              <p className="sub">{st.pausedBacklog ? hinted(t.pausedHeld(st.pausedBacklog), rejudgeHint(lang, "models_paused", st.rejudgeDays)) : t.pausedHeld(0)}</p>
               <div className="actions">
                 <Link className="btn" to="/settings/models">{t.resume}</Link>
               </div>
             </Card>
           )}
           {st.needs.map((s) => {
-            const ls = lines(s, st.paused);
+            const ls = lines(s, st.paused, st.rejudgeDays);
             return (
               <Card key={s.id} dot={s.severity === "warning" ? "warn" : "bad"} title={label("healthSignal", s.id)} raw={raw ? `${s.id} · ${s.why ?? ""} · ${s.next}` : undefined}>
                 <ul className="lines">

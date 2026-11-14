@@ -45,6 +45,9 @@ const zh = {
   followupDefer: "让模型判断提醒能不能晚点提",
   advanced: "高级",
   wake: "唤醒宿主",
+  channels: "渠道",
+  textOnly: (name: string) => `${name} 只能发文字`,
+  textOnlyHint: "决策附一次性表单链接",
 };
 
 const en: typeof zh = {
@@ -90,6 +93,9 @@ const en: typeof zh = {
   followupDefer: "Let a model decide whether a reminder can wait",
   advanced: "Advanced",
   wake: "Host wake-up",
+  channels: "Channels",
+  textOnly: (name) => `${name} is text only`,
+  textOnlyHint: "Decisions come with a one-time form link",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

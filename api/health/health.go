@@ -56,16 +56,18 @@ type Report struct {
 }
 
 // Routes 返回健康路由分组，交给 core.Deps.Groups。ph 为空表示没有能力包加载器。
-func Routes(st *store.Store, q *delivery.Queue, ph khealth.PackHealth, stallAfter time.Duration) core.RouteGroup {
-	h := &handlers{st: st, opts: khealth.Options{Deliveries: q, Packs: ph, DelegationStallAfter: stallAfter}}
+// rejudge 是运行配置的自动重判窗口（unjudged_rejudge_days），只原样带进 unjudged_backlog 的 detail，0 表示关闭。
+func Routes(st *store.Store, q *delivery.Queue, ph khealth.PackHealth, stallAfter, rejudge time.Duration) core.RouteGroup {
+	h := &handlers{st: st, opts: khealth.Options{Deliveries: q, Packs: ph, DelegationStallAfter: stallAfter}, rejudgeDays: int(rejudge / (24 * time.Hour))}
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/health", Handler: h.get})
 	}
 }
 
 type handlers struct {
-	st   *store.Store
-	opts khealth.Options
+	st          *store.Store
+	opts        khealth.Options
+	rejudgeDays int
 }
 
 func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
@@ -80,7 +82,7 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	}); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, build(v))
+	return core.WriteJSON(w, http.StatusOK, build(v, h.rejudgeDays))
 }
 
 func ids[T any](xs []T, id func(T) string) []string {
@@ -91,7 +93,7 @@ func ids[T any](xs []T, id func(T) string) []string {
 	return out
 }
 
-func build(v khealth.View) Report {
+func build(v khealth.View, rejudgeDays int) Report {
 	sig := func(id string, n int, why, next string, detail any) Signal {
 		s := Signal{ID: id, OK: n == 0, Count: n, Next: next, Detail: detail}
 		if n > 0 {
@@ -134,7 +136,7 @@ func build(v khealth.View) Report {
 		Source string `json:"source"`
 		Count  int    `json:"count"`
 	}
-	backlog := map[string]any{"model_unavailable": 0, "models_paused": 0, "outbound_unset": 0, "undecided": 0, "restored": 0, "expired": v.Expired}
+	backlog := map[string]any{"model_unavailable": 0, "models_paused": 0, "outbound_unset": 0, "undecided": 0, "restored": 0, "expired": v.Expired, "rejudge_days": rejudgeDays}
 	bySource, at := []sourceCount{}, map[string]int{}
 	for _, e := range v.Unjudged {
 		reason := domain.UnjudgedModelUnavailable // 原因为空是迁移前留下的，按模型不可用对待（同自动重判）

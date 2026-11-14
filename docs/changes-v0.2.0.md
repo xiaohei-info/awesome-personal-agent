@@ -105,7 +105,7 @@
 | N-27 | 设置 › 模型 | 判断端点与生成端点单独成页；新配端点时位置必选；获取模型（`POST /settings/model-endpoints/models`）与测试连接（`POST /settings/model-endpoints/test`，与 `apa doctor` 同一份探测），都只读、不写 Event；已存密钥只发往原来的源；`GET /settings/model-endpoints` 新增 `api_key_hint`，`GET /doctor` 的模型端点明细新增 `code` | §4.1、§14.14、§15.5、附录 B.2 |
 | N-28 | Web 界面语言 | 中文与英文可切换（设置 › 通用、登录页），选择存在浏览器本地，默认跟随浏览器；只切界面文案与日期格式，服务端 why/next、通知、简报与内置提示词不变；每页文案登记在 `strings.ts`，缺译与页面里的中文字面量由构建与检查拦下 | §4.1、§18 |
 | N-29 | 暂停模型 | "设置 › 模型"一个全局开关同时暂停判断端点与生成端点（策略的 `models_paused`，只在 Web 改）：端点配置与密钥保留，暂停期间内核按两个端点都未配置运行；未判定原因新增 `models_paused`，与 `model_unavailable` 一样在重判窗口内自动重判，恢复本身不额外触发；暂停时影子打分与放开重判拒绝（错误码 `models_paused`）；健康视图与自检显示"已暂停"，不算异常 | §6.13、§8.7、§9.3、§15.2、§15.5、附录 B.2、B.3 |
-| N-30 | 三个只读接口 | `GET /deliveries/today`（今天经渠道推送的条数与上限，与日上限同一口径）、`GET /source-events/{id}/outbound-preview`（一条来源事件在各外发范围下实际会送出的内容，与外发裁剪同源）、`GET /rules` 每项加 `class`（提醒类或动作类）；都不写 Event | 附录 B.2 |
+| N-30 | 三个只读接口 | `GET /deliveries/today`（今天经渠道推送的条数与上限，与日上限同一口径）、`GET /source-events/{id}/outbound-preview`（一条来源事件在各外发范围下实际会送出的内容，与外发裁剪同源）、`GET /rules` 每项加 `class`（提醒类或动作类）、`GET /health` 的 `unjudged_backlog.detail` 加 `rejudge_days`（运行配置的自动重判窗口，0 为关闭）；都不写 Event | 附录 B.2、B.6 |
 | N-31 | Web 取值词表与设置分页 | 内核取值在界面上只显示词表里的名字，ID 只在"显示原始值"（设置 › 通用，存在浏览器本地）里可见；错误按错误码显示中文；词表中英两份，缺词构建失败，与内核取值的对照由检查守住。设置按本人要做的事分页（提醒与打扰、我来拍板、后台权限等），旧地址不变、请求体不变 | §4.1、§21.1 决定 49 |
 
 **迁移**（只有六条涉及已有契约）：

@@ -18,7 +18,7 @@
 // | 计划日期 | planned date | 久未推进 | stale |
 // | 本人 | owner (界面里多用 you) | 物理删除 | permanent deletion |
 // | web_only、observe、auto 等枚举 | 原样保留 | | |
-import type { Dict } from "./i18n";
+import type { Dict, Lang } from "./i18n";
 
 const zh = {
   brand: "事情交给 agent，决定留给你",
@@ -64,6 +64,9 @@ const zh = {
   language: "界面语言",
   details: "详情",
   // 事项指向材料的内置关系类型（§6.3）；其余类型原样显示
+  // 积压在条件满足后会不会自动判断，随运行配置 unjudged_rejudge_days（§9.3）：0 时关闭自动重判，要在积压里放开。
+  rejudgeBack: (days: number) => (days > 0 ? `恢复后自动判断（最近 ${days} 天的）` : "恢复后在积压里放开"),
+  rejudgeChosen: (days: number) => (days > 0 ? `选好后自动判断（最近 ${days} 天的）` : "选好后在积压里放开"),
   relation: { basis: "依据", output: "产出", minutes: "纪要" } as Record<string, string>,
 };
 
@@ -107,10 +110,20 @@ const en: typeof zh = {
   cannotConnect: "Cannot reach the server",
   language: "Interface language",
   details: "Details",
+  rejudgeBack: (days) => (days > 0 ? `Judged automatically once back (last ${days} days)` : "Release from the backlog once back"),
+  rejudgeChosen: (days) => (days > 0 ? `Judged automatically once chosen (last ${days} days)` : "Release from the backlog once chosen"),
   relation: { basis: "basis", output: "output", minutes: "minutes" },
 };
 
 export const common: Dict<typeof zh> = { zh, en };
+
+/** 积压原因在条件满足后的去向；days 取自 GET /health 的 unjudged_backlog.detail.rejudge_days，取不到时不说。其余原因不自动判断，见词表。 */
+export function rejudgeHint(lang: Lang, reason: string, days: number | undefined): string | undefined {
+  if (days === undefined) return undefined;
+  if (reason === "outbound_unset") return common[lang].rejudgeChosen(days);
+  if (reason === "model_unavailable" || reason === "models_paused") return common[lang].rejudgeBack(days);
+  return undefined;
+}
 
 // 不随界面语言变的固定写法：品牌字形与各语言的自称（语言选项总用该语言自己的名字）。
 export const BRAND_MARK = "决";

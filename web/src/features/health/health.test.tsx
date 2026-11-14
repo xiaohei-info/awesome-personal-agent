@@ -115,25 +115,40 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
   it("模型已暂停：中性的「已暂停」卡，不计入要处理、页头不变成异常；暂停期间积下的条数并在卡里", async () => {
     const r = report({
       model_unavailable: { detail: { judge: "paused", generate: "paused", endpoint: "", paused: true } },
-      unjudged_backlog: { ok: false, count: 2, severity: "warning", why: "w", detail: { model_unavailable: 0, models_paused: 2, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, sources: [] } },
+      unjudged_backlog: { ok: false, count: 2, severity: "warning", why: "w", detail: { model_unavailable: 0, models_paused: 2, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, rejudge_days: 7, sources: [] } },
     });
     mount(serve(() => json(200, r)).impl);
     expect(await screen.findByRole("heading", { level: 1, name: "模型已暂停" })).toBeInTheDocument();
     const card = main().getByRole("article", { name: "模型已暂停" });
     expect(card.querySelector(".dot")).toHaveClass("paused");
-    expect(card).toHaveTextContent("暂停期间积下 2 条，恢复后在重判期限内自动判断");
+    expect(card).toHaveTextContent("暂停期间积下 2 条 · 恢复后自动判断（最近 7 天的）");
     expect(within(card).getByRole("link", { name: "去恢复" })).toHaveAttribute("href", "/settings/models");
     expect(main().queryByRole("article", { name: "积压待处理" })).not.toBeInTheDocument();
     expect(main().queryByRole("article", { name: "模型连不上" })).not.toBeInTheDocument();
   });
 
-  it("恢复之后：暂停期间积下的仍在积压里列出（按重判期限自动判断）", async () => {
+  it("自动重判关闭（rejudge_days 为 0）：暂停卡说恢复后在积压里放开", async () => {
     const r = report({
-      unjudged_backlog: { ok: false, count: 2, severity: "warning", why: "w", detail: { model_unavailable: 0, models_paused: 2, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, sources: [] } },
+      model_unavailable: { detail: { judge: "paused", generate: "paused", endpoint: "", paused: true } },
+      unjudged_backlog: { ok: false, count: 2, severity: "warning", why: "w", detail: { model_unavailable: 0, models_paused: 2, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, rejudge_days: 0, sources: [] } },
+    });
+    mount(serve(() => json(200, r)).impl);
+    await screen.findByRole("heading", { level: 1, name: "模型已暂停" });
+    expect(main().getByRole("article", { name: "模型已暂停" })).toHaveTextContent("暂停期间积下 2 条 · 恢复后在积压里放开");
+  });
+
+  it.each([
+    [7, "2 条是模型暂停期间积下的 · 恢复后自动判断（最近 7 天的）"],
+    [0, "2 条是模型暂停期间积下的 · 恢复后在积压里放开"],
+    [undefined, "2 条是模型暂停期间积下的"],
+  ])("恢复之后：暂停期间积下的仍在积压里列出，去向随 rejudge_days（%s）", async (days, text) => {
+    const r = report({
+      unjudged_backlog: { ok: false, count: 2, severity: "warning", why: "w", detail: { model_unavailable: 0, models_paused: 2, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, rejudge_days: days, sources: [] } },
     });
     mount(serve(() => json(200, r)).impl);
     await screen.findByRole("heading", { level: 1 , name: "1 项要处理" });
-    expect(main().getByRole("article", { name: "积压待处理" })).toHaveTextContent("2 条是模型暂停期间积下的");
+    const line = within(main().getByRole("article", { name: "积压待处理" })).getByText(/条是模型暂停期间积下的/);
+    expect(line.textContent).toBe(text);
   });
 
   it("读取失败：显示服务端原因并可重试", async () => {

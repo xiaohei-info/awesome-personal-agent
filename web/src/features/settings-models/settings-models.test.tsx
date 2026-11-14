@@ -9,7 +9,8 @@ import { feature } from "./index";
 // 读取时只给 api_key_set 与末 4 位；api_key 缺省或为 *** 保持原密钥，"" 清除。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-function server(init: { judge?: any; generate?: any } = {}) {
+function server(init: { judge?: any; generate?: any; days?: number } = {}) {
+  const days = init.days ?? 7;
   let version = 1;
   const keys: Record<string, string> = { judge_endpoint: "", generate_endpoint: "sk-test-key-9f2c" };
   const doc: Record<string, any> = {
@@ -25,7 +26,7 @@ function server(init: { judge?: any; generate?: any } = {}) {
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/v1/projects") return json(200, { projects: [] });
-    if (url === "/v1/health") return json(200, { healthy: true, signals: [{ id: "unjudged_backlog", ok: false, detail: { models_paused: 14 } }] });
+    if (url === "/v1/health") return json(200, { healthy: true, signals: [{ id: "unjudged_backlog", ok: false, detail: { models_paused: 14, rejudge_days: days } }] });
     if (url === "/v1/sources") return json(200, { sources: [{ outbound: { local: "full", external: null } }, { outbound: { local: "full", external: "meta" } }, {}] });
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     if (url === "/v1/settings/model-endpoints/models") return posts.push({ path: url, body }), json(200, models);
@@ -259,7 +260,7 @@ describe("设置 › 模型", () => {
     expect(await screen.findByRole("switch", { name: "模型运行开关" })).not.toBeChecked();
     expect(s.puts.at(-1)).toEqual({ models_paused: true });
     expect(screen.getByRole("region", { name: "模型运行开关" })).toHaveTextContent("已暂停");
-    expect(await within(screen.getByRole("region", { name: "模型运行开关" })).findByText("暂停期间判不了的先存着 · 已存 14 条")).toBeInTheDocument();
+    expect(await within(screen.getByRole("region", { name: "模型运行开关" })).findByText("暂停期间积下 14 条 · 恢复后自动判断（最近 7 天的）")).toBeInTheDocument();
     const g = await card("写作模型");
     expect(within(g.getByRole("heading")).getByText("已暂停")).toBeInTheDocument();
     expect(within((await card("打分模型")).getByRole("heading")).getByText("已暂停")).toBeInTheDocument();
@@ -269,6 +270,13 @@ describe("设置 › 模型", () => {
     await userEvent.click(screen.getByRole("switch", { name: "模型运行开关" }));
     expect(await screen.findByRole("switch", { name: "模型运行开关" })).toBeChecked();
     expect(s.puts.at(-1)).toEqual({ models_paused: false });
+  });
+
+  it("自动重判关闭（rejudge_days 为 0）时，暂停卡说恢复后在积压里放开", async () => {
+    const s = server({ days: 0 });
+    mount(s.impl);
+    await userEvent.click(await screen.findByRole("switch", { name: "模型运行开关" }));
+    expect(await within(screen.getByRole("region", { name: "模型运行开关" })).findByText("暂停期间积下 14 条 · 恢复后在积压里放开")).toBeInTheDocument();
   });
 
   it("没有任何端点时不显示暂停开关", async () => {
