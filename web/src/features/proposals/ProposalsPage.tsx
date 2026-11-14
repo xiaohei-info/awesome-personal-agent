@@ -3,8 +3,11 @@ import { ApiError, type ApiClient } from "../../app/api";
 import { useSession } from "../../app/session";
 import { COUNTS_EVENT, PageHead } from "../../app/page";
 import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
-import { errorText as msg, useT } from "../../app/i18n";
+import { useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
+import { useNames } from "../../app/names";
+import { Val } from "../../app/values";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。是否可接受/丢弃、授权与只认第一次处理都在服务端。
 export interface Proposal {
@@ -46,13 +49,23 @@ function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejectio
     const rec = item.proposal?.attach_to;
     if (rec && list.some((t) => t.id === rec)) setTarget(rec);
   };
+  const project = useNames("project");
+  const credential = useNames("credential");
   const p = item.proposal;
-  const meta = [item.project, item.origin && t.from(item.origin.actor || item.origin.source), item.priority && item.priority !== "normal" ? item.priority : ""].filter(Boolean).join(" · ");
+  const from = item.origin && t.from(item.origin.actor ? credential(item.origin.actor) : item.origin.source);
+  const meta = [project(item.project), from].filter(Boolean).join(" · ");
+  const pri = item.priority && item.priority !== "normal" ? item.priority : "";
 
   return (
     <article aria-label={item.title}>
       <h3>{item.title}</h3>
-      {meta && <p className="meta">{meta}</p>}
+      {(meta || pri) && (
+        <p className="meta">
+          {meta}
+          {meta && pri && " · "}
+          <Val k="priority" id={pri} />
+        </p>
+      )}
       {item.summary && <p>{item.summary}</p>}
       {p && (
         <p className="meta">
@@ -108,7 +121,7 @@ export function ProposalsPage() {
   const { api } = useSession();
   const [items, setItems] = useState<Proposal[] | null>(null);
   const [rejections, setRejections] = useState<Record<string, Rejection>>({});
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [source, setSource] = useState("");
   const [project, setProject] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -122,7 +135,7 @@ export function ProposalsPage() {
           setRejections(r.last_rejections ?? {});
           setItems(r.items);
         },
-        (e) => setError(msg(e)),
+        (e) => setError(e),
       ),
     [api],
   );
@@ -137,7 +150,7 @@ export function ProposalsPage() {
       api.get<{ items: Proposal[] }>("/items?phase=open").then(
         (r) => r.items,
         (e) => {
-          setError(msg(e));
+          setError(e);
           return [] as Proposal[];
         },
       ),
@@ -149,7 +162,7 @@ export function ProposalsPage() {
     try {
       await api.post("/items/" + encodeURIComponent(id) + "/" + action, body);
     } catch (e) {
-      setError(msg(e)); // 含 409：已有人先处理 / 目标已终结，刷新后以服务端为准
+      setError(e); // 含 409：已有人先处理 / 目标已终结，刷新后以服务端为准
     }
     await load();
     window.dispatchEvent(new Event(COUNTS_EVENT));
@@ -159,6 +172,13 @@ export function ProposalsPage() {
   const opts = (pick: (i: Proposal) => string | undefined) => [...new Set(all.map(pick).filter((v): v is string => !!v))].sort();
   const shown = all.filter((i) => (!source || i.origin?.source === source) && (!project || i.project === project));
   const recommended = shown.filter((i) => i.proposal?.recommend).length;
+  const projectName = useNames("project");
+  // 按推荐处理前先看清楚会发生什么：各推荐处置各有几条。
+  const plan = (["accept", "attach", "dismiss"] as const)
+    .map((a) => [a, shown.filter((i) => i.proposal?.recommend === a).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([a, n]) => t.planPart(t.do[a], n))
+    .join(" · ");
 
   const batch = async () => {
     setConfirming(false);
@@ -174,7 +194,7 @@ export function ProposalsPage() {
         skipped: r.results.filter((x) => !x.ok).map((x) => ({ title: title(x.id), why: x.why ?? t.notHandled })),
       });
     } catch (e) {
-      setError(msg(e));
+      setError(e);
     } finally {
       setBatching(false);
     }
@@ -185,9 +205,9 @@ export function ProposalsPage() {
   return (
     <main>
       <PageHead lede={t.lede}>{t.title}</PageHead>
-      {error && (
-        <div role="alert">
-          {error}{" "}
+      {error != null && (
+        <div>
+          <ErrorNote error={error} />
           <button
             onClick={() => {
               setError(null);
@@ -218,7 +238,7 @@ export function ProposalsPage() {
         </div>
       )}
       {items === null ? (
-        !error && <p role="status">{t.loading}</p>
+        error == null && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
         <p className="empty">{t.empty}</p>
       ) : (
@@ -238,18 +258,18 @@ export function ProposalsPage() {
               <select value={project} onChange={(e) => setProject(e.target.value)}>
                 <option value="">{t.all}</option>
                 {opts((i) => i.project).map((v) => (
-                  <option key={v} value={v}>{v}</option>
+                  <option key={v} value={v}>{projectName(v)}</option>
                 ))}
               </select>
             </label>
             {confirming ? (
               <>
-                <span>{t.batchConfirm(recommended)}</span>
+                <span>{plan}</span>
                 <button disabled={batching} onClick={batch}>{t.confirmBatch}</button>
                 <button onClick={() => setConfirming(false)}>{t.cancel}</button>
               </>
             ) : (
-              <button disabled={batching || recommended === 0} onClick={() => setConfirming(true)}>{t.batch}</button>
+              <button disabled={batching || recommended === 0} onClick={() => setConfirming(true)}>{t.batch(recommended)}</button>
             )}
           </div>
           {shown.map((i) => (

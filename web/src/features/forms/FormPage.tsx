@@ -102,7 +102,13 @@ export function FormPage() {
       return (
         <main className="form-page">
           <h1>{t.expired}</h1>
-          <p role="alert">{t.expiredBody(st.why)}</p>
+          <p role="alert">{t.expiredBody}</p>
+          {/* 链接已用过、过期或事项已变化：服务端的原因收在详情里，下一步是去网页作答 */}
+          <details>
+            <summary>{t.details}</summary>
+            <p lang="en">{st.why}</p>
+          </details>
+          <a href="/decisions">{t.goWeb}</a>
         </main>
       );
     case "web":

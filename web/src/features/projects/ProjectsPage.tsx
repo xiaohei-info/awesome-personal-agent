@@ -4,10 +4,11 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { ProjectMaterials } from "../materials-hosted/ProjectMaterials";
 import type { Item } from "../items/ItemsPage";
-import { errorText as msg, useT } from "../../app/i18n";
+import { useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { PROJECT_STATUS } from "../../app/ids";
 import { Pick, Val } from "../../app/values";
+import { ErrorNote } from "../../app/errors";
 
 // 形状对应 GET/POST /v1/projects、GET/PATCH /v1/projects/{id}、POST /v1/projects/{id}/repos、
 // GET /v1/settings/executors、PUT /v1/settings/projects/{id}/allowed-executors（附录 B.2）。
@@ -39,13 +40,13 @@ function ProjectList() {
   const t = useT(strings);
   const { api } = useSession();
   const [projects, setProjects] = useState<Project[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [name, setName] = useState("");
   const [intro, setIntro] = useState("");
   const [tags, setTags] = useState("");
 
   const load = useCallback(
-    () => api.get<{ projects: Project[] }>("/projects").then((r) => setProjects(r.projects), (e) => setError(msg(e))),
+    () => api.get<{ projects: Project[] }>("/projects").then((r) => setProjects(r.projects), (e) => setError(e)),
     [api],
   );
   useEffect(() => void load(), [load]);
@@ -60,15 +61,15 @@ function ProjectList() {
       setTags("");
       await load();
     } catch (err) {
-      setError(msg(err));
+      setError(err);
     }
   };
 
   return (
     <main>
       <PageHead>{t.title}</PageHead>
-      {error && <p role="alert">{error}</p>}
-      {projects && !projects.length && !error && <p className="empty">{t.none}</p>}
+      {error != null && <ErrorNote error={error} />}
+      {projects && !projects.length && error == null && <p className="empty">{t.none}</p>}
       {!!projects?.length && (
         <ul aria-label={t.list} className="rows">
           {projects.map((p) => (
@@ -95,7 +96,7 @@ function ProjectDetail() {
   const { id = "" } = useParams();
   const { api } = useSession();
   const [p, setP] = useState<Project | null>(null);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
 
   const load = useCallback(
     () => api.get<Project>("/projects/" + encodeURIComponent(id)).then(setP),
@@ -104,10 +105,10 @@ function ProjectDetail() {
   useEffect(() => {
     setP(null);
     setLoadErr(null);
-    load().catch((e) => setLoadErr(msg(e)));
+    load().catch((e) => setLoadErr(e));
   }, [load]);
 
-  if (loadErr) return <main><p role="alert">{loadErr}</p><Link to="/projects">{t.back}</Link></main>;
+  if (loadErr != null) return <main><ErrorNote error={loadErr} /><Link to="/projects">{t.back}</Link></main>;
   if (!p) return <main><p role="status">{t.loading}</p></main>;
   return (
     <main>
@@ -124,13 +125,13 @@ function ProjectDetail() {
 
 // 每个写操作的错误显示在各自区块，成功后用服务端返回值覆盖本地状态。
 function useAct() {
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const run = async (fn: () => Promise<void>) => {
     try {
       await fn();
       setError(null);
     } catch (e) {
-      setError(msg(e));
+      setError(e);
     }
   };
   return { error, run };
@@ -162,7 +163,7 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
       </label>
       <label><input type="checkbox" checked={capture} onChange={(e) => setCapture(e.target.checked)} /> {t.capture}</label>
       <button type="submit">{t.saveProject}</button>
-      {error && <p role="alert">{error}</p>}
+      {error != null && <ErrorNote error={error} />}
     </form>
   );
 }
@@ -177,7 +178,7 @@ function Repos({ p, onChange }: { p: Project; onChange: (p: Project) => void }) 
   return (
     <section aria-label={t.repos}>
       <h2>{t.repos}</h2>
-      {error && <p role="alert">{error}</p>}
+      {error != null && <ErrorNote error={error} />}
       {!!p.repos?.length && (
         <ul className="rows">
           {p.repos.map((r) => <RepoRow key={r.remote} r={r} op={op} />)}
@@ -209,16 +210,20 @@ function RepoRow({ r, op }: { r: Repo; op: (b: Record<string, string>) => Promis
           ))}
         </ul>
       )}
-      <div className="actions">
-        <label>{t.host} <input value={host} onChange={(e) => setHost(e.target.value)} /></label>
-        <label>{t.path} <input value={path} onChange={(e) => setPath(e.target.value)} /></label>
-        <button onClick={() => op({ op: "set_checkout", remote: r.remote, host, path })}>{t.setCheckout}</button>
-      </div>
+      {/* 本机检出：主机名须等于该机的主机名（§6.5），平时由 agent 维护，收在高级里。 */}
+      <details>
+        <summary>{t.advancedCheckout}</summary>
+        <div className="actions">
+          <label>{t.host} <input value={host} onChange={(e) => setHost(e.target.value)} /></label>
+          <label>{t.path} <input value={path} onChange={(e) => setPath(e.target.value)} /></label>
+          <button onClick={() => op({ op: "set_checkout", remote: r.remote, host, path })}>{t.setCheckout}</button>
+        </div>
+      </details>
     </li>
   );
 }
 
-interface Executor { id: string; kind: string }
+interface Executor { id: string; kind: string; host?: string }
 
 function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }) {
   const t = useT(strings);
@@ -227,14 +232,15 @@ function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }
   const [list, setList] = useState<Executor[] | null>(null);
   const [limited, setLimited] = useState(p.allowed_executors !== null);
   const [sel, setSel] = useState<string[]>(p.allowed_executors ?? []);
-  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<unknown>(null);
 
   useEffect(() => {
-    api.get<{ executors: Executor[] }>("/settings/executors").then((r) => setList(r.executors), (e) => setLoadErr(msg(e)));
+    api.get<{ executors: Executor[] }>("/settings/executors").then((r) => setList(r.executors), (e) => setLoadErr(e));
   }, [api]);
 
   // 名单里已有但清单里没有的 id 也要显示，否则保存会悄悄丢掉它。
   const ids = [...new Set([...(list ?? []).map((e) => e.id), ...(p.allowed_executors ?? [])])];
+  const byId = new Map((list ?? []).map((e) => [e.id, e]));
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const save = () =>
     run(async () => {
@@ -245,21 +251,33 @@ function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }
   return (
     <section aria-label={t.executors}>
       <h2>{t.executors}</h2>
-      {loadErr && <p role="alert">{loadErr}</p>}
+      {loadErr != null && <ErrorNote error={loadErr} />}
       <div className="panel">
       <label><input type="radio" name="lim" checked={!limited} onChange={() => setLimited(false)} />{t.unlimited}</label>
       <label><input type="radio" name="lim" checked={limited} onChange={() => setLimited(true)} />{t.limited}</label>
       {limited && (
         <ul className="plain">
           {ids.map((id) => (
-            <li key={id}><label><input type="checkbox" checked={sel.includes(id)} onChange={() => toggle(id)} />{id}</label></li>
+            <li key={id}><label><input type="checkbox" checked={sel.includes(id)} onChange={() => toggle(id)} /><ExecutorName e={byId.get(id) ?? { id, kind: "" }} /></label></li>
           ))}
         </ul>
       )}
+      {limited && sel.length === 0 && <p className="sub">{t.onlyYou}</p>}
       <div><button className="primary" onClick={save}>{t.saveExecutors}</button></div>
       </div>
-      {error && <p role="alert">{error}</p>}
+      {error != null && <ErrorNote error={error} />}
     </section>
+  );
+}
+
+/** 执行者：名称 · 种类 · 主机（主机只是说明，§6.13）。 */
+function ExecutorName({ e }: { e: Executor }) {
+  return (
+    <>
+      {e.id}
+      {e.kind && <span className="sub"> · <Val k="executorKind" id={e.kind} /></span>}
+      {e.host && <span className="sub"> · {e.host}</span>}
+    </>
   );
 }
 
@@ -267,14 +285,14 @@ function ProjectItems({ id }: { id: string }) {
   const t = useT(strings);
   const { api } = useSession();
   const [items, setItems] = useState<Item[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   useEffect(() => {
-    api.get<{ items: Item[] }>("/items?project=" + encodeURIComponent(id)).then((r) => setItems(r.items), (e) => setError(msg(e)));
+    api.get<{ items: Item[] }>("/items?project=" + encodeURIComponent(id)).then((r) => setItems(r.items), (e) => setError(e));
   }, [api, id]);
   return (
     <section aria-label={t.items}>
       <h2>{t.items}</h2>
-      {error && <p role="alert">{error}</p>}
+      {error != null && <ErrorNote error={error} />}
       {items && !items.length && <p className="sub">{t.noItems}</p>}
       {!!items?.length && (
         <ul className="rows">

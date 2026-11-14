@@ -47,9 +47,9 @@ describe("决策待办的初筛状态（flow-screening）", () => {
     mount(server([item("s", true), item("n", false)]).impl);
     const s = (await screen.findByText("问题 s")).closest("article")!;
     const n = screen.getByText("问题 n").closest("article")!;
-    expect(within(s).getByText(/初筛中/)).toBeInTheDocument();
+    expect(within(s).getByText(/正在判断风险/)).toBeInTheDocument();
     expect(within(s).getByRole("button", { name: "同意" })).toBeEnabled();
-    expect(within(n).queryByText(/初筛中/)).not.toBeInTheDocument();
+    expect(within(n).queryByText(/正在判断风险/)).not.toBeInTheDocument();
   });
 
   it("本人在初筛中直接回答：照常 POST decide，答完从待办消失", async () => {
@@ -64,11 +64,11 @@ describe("决策待办的初筛状态（flow-screening）", () => {
   it("初筛结束后刷新：标记消失，决策照常保留", async () => {
     const s = server([item("s", true), item("x", false)]);
     mount(s.impl);
-    await screen.findByText(/初筛中/);
+    await screen.findByText(/正在判断风险/);
     s.setItems([item("s", false), item("x", false)]);
     const x = screen.getByText("问题 x").closest("article")!;
     await userEvent.click(within(x).getByRole("button", { name: "同意" })); // 答另一条触发刷新
     await screen.findByText("问题 s");
-    expect(screen.queryByText(/初筛中/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/正在判断风险/)).not.toBeInTheDocument();
   });
 });

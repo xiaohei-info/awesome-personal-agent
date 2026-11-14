@@ -110,13 +110,13 @@ describe("改 status_label（ACT-ITEM-02）", () => {
     await userEvent.type(input, "review");
     await userEvent.click(screen.getByRole("button", { name: "保存状态标签" }));
 
-    expect(await screen.findByText("版本：2")).toBeInTheDocument();
+    expect(await screen.findByText("状态标签：review")).toBeInTheDocument(); // 重新读取后显示服务端状态
     const patch = l.calls.find((c) => c.method === "PATCH")!;
     expect(patch).toMatchObject({ path: "/v1/items/item_a", body: { status_label: "review" }, csrf: "tok-1", ifMatch: "1" });
     expect(l.items[0]).toMatchObject({ status_label: "review", version: 2 }); // CLI 读同一份账本
     const tl = await timeline();
     expect(tl.getAllByRole("listitem")).toHaveLength(2);
-    expect(tl.getAllByLabelText("操作者")[1]).toHaveTextContent("你 · 网页 · owner");
+    expect(tl.getAllByLabelText("操作者")[1]).toHaveTextContent(/^你 · 网页$/);
   });
 
   it("别处已改过（409）：显示冲突原因，页面状态不被覆盖", async () => {

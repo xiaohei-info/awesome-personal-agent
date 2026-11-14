@@ -61,7 +61,7 @@ describe("审计页", () => {
     const r = await rows();
     await waitFor(() => expect(r.getAllByRole("listitem")).toHaveLength(3));
     expect(r.getAllByLabelText("操作者").map((b) => b.textContent)).toEqual([
-      "agent · 命令行 · del-1", "你 · 网页 · owner", "agent · 命令行 · del-2",
+      "agent · 命令行 · del-1", "你 · 网页", "agent · 命令行 · del-2", // 本人与系统不重复显示身份串（共用的 ActorBadge）
     ]);
     expect(r.getByText(/ship it/)).toBeInTheDocument();
   });

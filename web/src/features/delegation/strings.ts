@@ -3,7 +3,7 @@ import { common } from "../../app/strings";
 
 const zh = {
   ...common.zh,
-  title: "任务委派",
+  title: "委派",
   allowedTail: (list: string) => `；该项目允许的执行者：${list}`,
   ownerOnly: "仅本人",
   noParent: "找不到父事项，无法重新委派",
@@ -23,7 +23,8 @@ const zh = {
   pickExecutor: "选择执行者…",
   notAllowed: "（项目不允许）",
   confirm: (what: string) => `确认${what}`,
-  empty: "没有委派",
+  empty: "还没有派出的活",
+  stalled: "久无回音",
 };
 
 const en: typeof zh = {
@@ -48,7 +49,8 @@ const en: typeof zh = {
   pickExecutor: "Choose an executor…",
   notAllowed: " (not allowed in this project)",
   confirm: (what) => `Confirm: ${what}`,
-  empty: "No delegations",
+  empty: "Nothing delegated yet",
+  stalled: "No word for a while",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

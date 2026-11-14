@@ -6,6 +6,7 @@ import { common } from "../../app/strings";
 import { codeText, lang, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { Val, useLabel } from "../../app/values";
+import { useNames } from "../../app/names";
 
 // 形状对应 GET /v1/items?kind=delegation、GET /v1/audit/events?type=delegation.reported、GET /v1/executors?project=、
 // PATCH /v1/items/{id}（改派，If-Match）、POST /v1/delegations（重新委派）。
@@ -34,10 +35,11 @@ const msg = (e: unknown) => {
   return codeText(e.body) + allowed;
 };
 
-function Row({ c, report, onDone }: { c: Child; report?: Step; onDone: () => Promise<void> }) {
+function Row({ c, report, kinds, stalled, onDone }: { c: Child; report?: Step; kinds: Map<string, string>; stalled: boolean; onDone: () => Promise<void> }) {
   const { api } = useSession();
   const t = useT(strings);
   const label = useLabel();
+  const projectName = useNames("project");
   const [mode, setMode] = useState<"reassign" | "redelegate" | null>(null);
   const [execs, setExecs] = useState<Executor[]>([]);
   const [pick, setPick] = useState("");
@@ -86,9 +88,11 @@ function Row({ c, report, onDone }: { c: Child; report?: Step; onDone: () => Pro
       <p className="meta">
         {t.executor}
         <strong>{c.assignee ?? t.unassigned}</strong>
+        {c.assignee && kinds.get(c.assignee) && <span className="sub"> · <Val k="executorKind" id={kinds.get(c.assignee)} /></span>}
         {t.state}
         <Val k="phase" id={c.phase} />
-        {c.project && t.project(c.project)}
+        {c.project && t.project(projectName(c.project))}
+        {stalled && <> <span className="badge warn">{t.stalled}</span></>}
       </p>
       <p>
         {t.progress}
@@ -113,8 +117,9 @@ function Row({ c, report, onDone }: { c: Child; report?: Step; onDone: () => Pro
           <select aria-label={t.target} value={pick} onChange={(e) => setPick(e.target.value)}>
             <option value="">{t.pickExecutor}</option>
             {execs.map((x) => (
+              // 名单外的仍可选：是否允许由服务端判定（§14.7），这里只标出来。
               <option key={x.id} value={x.id}>
-                {x.id}
+                {[x.id, x.kind && label("executorKind", x.kind), x.host].filter(Boolean).join(" · ")}
                 {x.allowed === false ? t.notAllowed : ""}
               </option>
             ))}
@@ -137,6 +142,8 @@ export function DelegationPage() {
   const t = useT(strings);
   const [items, setItems] = useState<Child[] | null>(null);
   const [reports, setReports] = useState<Map<string, Step>>(new Map());
+  const [kinds, setKinds] = useState<Map<string, string>>(new Map());
+  const [stalled, setStalled] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -160,6 +167,14 @@ export function DelegationPage() {
   useEffect(() => {
     load();
   }, [load]);
+  // 执行者种类与「久无回音」只是显示上的补充：取不到就不显示，不挡列表。久无回音的判定在内核（健康信号 stalled_delegations）。
+  useEffect(() => {
+    api.get<{ executors: Executor[] }>("/settings/executors").then((r) => setKinds(new Map(r.executors.map((x) => [x.id, x.kind]))), () => {});
+    api.get<{ signals: { id: string; detail?: unknown }[] }>("/health").then((r) => {
+      const d = r.signals.find((s) => s.id === "stalled_delegations")?.detail;
+      setStalled(new Set(Array.isArray(d) ? d.filter((x): x is string => typeof x === "string") : []));
+    }, () => {});
+  }, [api]);
 
   return (
     <main>
@@ -174,7 +189,7 @@ export function DelegationPage() {
       ) : items.length === 0 ? (
         <p className="empty">{t.empty}</p>
       ) : (
-        items.map((c) => <Row key={c.id} c={c} report={reports.get(c.id)} onDone={load} />)
+        items.map((c) => <Row key={c.id} c={c} report={reports.get(c.id)} kinds={kinds} stalled={stalled.has(c.id)} onDone={load} />)
       )}
     </main>
   );

@@ -98,11 +98,11 @@ describe("ACT-HST-06 发起修改走委派", () => {
     const s = server({ content: [READY], allowed: ["work-host.cli"] });
     mount(s.impl, "/materials");
     const d = await openHosted();
-    await userEvent.click(d.getByRole("button", { name: "发起修改" }));
+    await userEvent.click(d.getByRole("button", { name: "交给执行者去仓库改" }));
     expect(await d.findByRole("alert")).toHaveTextContent("request is required");
     await userEvent.selectOptions(d.getByLabelText("执行者"), "work-host.cli");
     await userEvent.type(d.getByLabelText("修改要求"), "修正错别字");
-    await userEvent.click(d.getByRole("button", { name: "发起修改" }));
+    await userEvent.click(d.getByRole("button", { name: "交给执行者去仓库改" }));
     expect(await d.findByRole("link", { name: "item_child" })).toHaveAttribute("href", "/items/item_child");
     const post = s.calls.filter((c) => c.method === "POST" && c.path === "/v1/materials/mat_h/changes").at(-1)!;
     expect(post.body).toEqual({ assignee: "work-host.cli", request: "修正错别字" });
@@ -115,7 +115,7 @@ describe("ACT-HST-06 发起修改走委派", () => {
     const d = await openHosted();
     await userEvent.selectOptions(d.getByLabelText("执行者"), "third.cli");
     await userEvent.type(d.getByLabelText("修改要求"), "x");
-    await userEvent.click(d.getByRole("button", { name: "发起修改" }));
+    await userEvent.click(d.getByRole("button", { name: "交给执行者去仓库改" }));
     expect(await d.findByRole("alert")).toHaveTextContent("not an allowed executor");
     expect(d.queryByRole("link", { name: "item_child" })).not.toBeInTheDocument();
   });
@@ -136,12 +136,12 @@ describe("ACT-HST-06 发起修改走委派", () => {
     const d = await openHosted();
     await userEvent.type(d.getByLabelText("修改要求"), "x");
     await userEvent.selectOptions(d.getByLabelText("执行者"), "third.cli");
-    await userEvent.click(d.getByRole("button", { name: "发起修改" }));
+    await userEvent.click(d.getByRole("button", { name: "交给执行者去仓库改" }));
     await d.findByRole("alert");
     await userEvent.selectOptions(d.getByLabelText("执行者"), "work-host.cli");
-    await userEvent.click(d.getByRole("button", { name: "发起修改" }));
+    await userEvent.click(d.getByRole("button", { name: "交给执行者去仓库改" }));
     await waitFor(() => expect(d.getByRole("alert")).toHaveTextContent("try later"));
-    await userEvent.click(d.getByRole("button", { name: "发起修改" }));
+    await userEvent.click(d.getByRole("button", { name: "交给执行者去仓库改" }));
     expect(await d.findByRole("link", { name: "item_child" })).toBeInTheDocument();
     expect(keys).toHaveLength(3); // 403、503、成功
     expect(keys[1]).not.toBe(keys[0]); // 明确被拒后换新键
@@ -155,8 +155,8 @@ describe("ACT-HST-08 项目页集中查看", () => {
     const mats = within(await screen.findByRole("region", { name: "材料" }));
     expect(await mats.findByText(/登录方案/)).toBeInTheDocument();
     const lis = mats.getAllByRole("listitem");
-    expect(lis.find((l) => l.textContent?.includes("登录方案"))).toHaveTextContent("托管型（只读）");
-    expect(lis.find((l) => l.textContent?.includes("周会纪要"))).toHaveTextContent("自有型");
+    expect(lis.find((l) => l.textContent?.includes("登录方案"))).toHaveTextContent("在仓库里（只读）");
+    expect(lis.find((l) => l.textContent?.includes("周会纪要"))).toHaveTextContent("在 APA 里");
     expect(mats.queryByText("别的项目纪要")).not.toBeInTheDocument();
     expect(mats.queryByText("项目规范")).not.toBeInTheDocument();
     const rules = within(screen.getByRole("region", { name: "规范" }));

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { ErrorNote } from "../../app/errors";
+import { useNames } from "../../app/names";
+import { useRaw } from "../../app/raw";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
-import { errorText as msg, locale, useT } from "../../app/i18n";
+import { locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { Val, useLabel } from "../../app/values";
 
@@ -28,8 +32,12 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
   const t = useT(strings);
   const label = useLabel();
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const credential = useNames("credential");
+  const raw = useRaw();
   const title = s.payload?.item?.title;
-  const who = [s.actor.principal, s.actor.on_behalf_of && t.onBehalfOf(s.actor.on_behalf_of), s.resolved_via === "chat" && t.viaChat, s.grant && t.viaGrant(s.grant)].filter(Boolean).join(" · ");
+  // 操作者显示凭据的标签而不是 id；临时授权给出链接，id 只在「显示原始值」里。
+  const who = [credential(s.actor.principal), s.actor.on_behalf_of && t.onBehalfOf(s.actor.on_behalf_of), s.resolved_via === "chat" && t.viaChat].filter(Boolean).join(" · ");
   const canRevert = REVERTIBLE.has(s.type) && !reverted;
 
   return (
@@ -40,25 +48,40 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
         {title ?? s.object}
       </h3>
       <p className="meta">
-        {who} · {new Date(s.at).toLocaleString(locale())}
+        {who}
+        {s.grant && (
+          <>
+            {" · "}
+            <Link to={"/settings/grants#" + encodeURIComponent(s.grant)}>{t.viaGrant}</Link>
+            {raw && <code className="raw-id">{s.grant}</code>}
+          </>
+        )}
+        {" · "}{new Date(s.at).toLocaleString(locale())}
         {reverted && t.reverted}
       </p>
       {s.reason && <p>{s.reason}</p>}
       {s.evidence && <blockquote>{s.evidence}</blockquote>}
-      {canRevert && (
-        <button
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await onRevert(s);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {t.revert}
-        </button>
+      {canRevert && !asking && <button onClick={() => setAsking(true)}>{t.revert}</button>}
+      {canRevert && asking && (
+        <div className="actions">
+          <p className="sub">{t.revertWhat}</p>
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onRevert(s);
+              } finally {
+                setBusy(false);
+                setAsking(false);
+              }
+            }}
+          >
+            {t.confirmRevert}
+          </button>
+          <button onClick={() => setAsking(false)}>{t.cancel}</button>
+        </div>
       )}
     </article>
   );
@@ -68,7 +91,7 @@ export function AgentChangesPage() {
   const { api } = useSession();
   const t = useT(strings);
   const [steps, setSteps] = useState<Step[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [showOlder, setShowOlder] = useState(false);
   // 基线只在挂载时取一次；离开页面才推进，刷新不会让"新变更"凭空消失。
   const [since] = useState(() => localStorage.getItem(VISIT_KEY));
@@ -86,7 +109,7 @@ export function AgentChangesPage() {
       }
       setSteps(all);
     } catch (e) {
-      setError(msg(e));
+      setError(e);
     }
   }, [api]);
 
@@ -100,7 +123,7 @@ export function AgentChangesPage() {
       await api.post("/items/" + encodeURIComponent(s.object) + "/revert", { event: s.seq });
       await load();
     } catch (e) {
-      setError(msg(e)); // 含 403/409：以服务端判定为准，不在前端猜
+      setError(e); // 含 403/409：以服务端判定为准，不在前端猜
     }
   };
 
@@ -110,16 +133,16 @@ export function AgentChangesPage() {
 
   return (
     <main>
-      <PageHead lede={t.lede}>{t.title}</PageHead>
+      <PageHead>{t.title}</PageHead>
       {since && (
         <label>
           <input type="checkbox" checked={showOlder} onChange={(e) => setShowOlder(e.target.checked)} />
           {t.showOlder}
         </label>
       )}
-      {error && (
-        <div role="alert">
-          {error}{" "}
+      {error != null && (
+        <div>
+          <ErrorNote error={error} />
           <button
             onClick={() => {
               setError(null);
@@ -131,7 +154,7 @@ export function AgentChangesPage() {
         </div>
       )}
       {steps === null ? (
-        !error && <p role="status">{t.loading}</p>
+        error == null && <p role="status">{t.loading}</p>
       ) : shown.length === 0 ? (
         <p className="empty">{t.empty}</p>
       ) : (

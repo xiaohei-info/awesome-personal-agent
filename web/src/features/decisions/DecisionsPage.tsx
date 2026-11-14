@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError, type ApiClient } from "../../app/api";
 import { COUNTS_EVENT, PageHead } from "../../app/page";
 import { useSession } from "../../app/session";
 import { ScreeningBadge } from "../decision-screening/ScreeningBadge";
 import { RejectionNote, type Rejection } from "./RejectionNote";
-import { errorText as msg, locale, useT } from "../../app/i18n";
+import { locale, useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
 import { Val } from "../../app/values";
 
@@ -68,7 +70,7 @@ function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionI
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState<string | null>(null);
-  const [whyErr, setWhyErr] = useState<string | null>(null);
+  const [whyErr, setWhyErr] = useState<unknown>(null);
 
   const answer = async (body: { choice: string } | { text: string }) => {
     setBusy(true);
@@ -88,7 +90,7 @@ function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionI
             setWhy(step?.reason || t.noReason);
             setWhyErr(null);
           },
-          (e) => setWhyErr(msg(e)),
+          (e) => setWhyErr(e),
         );
 
   return (
@@ -100,7 +102,7 @@ function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionI
       <p className="meta">
         <span>{item.title}</span>
         {item.priority && item.priority !== "normal" && <span className="dot"><Val k="priority" id={item.priority} /></span>}
-        {ask.risk_class === "web_only" && <span className="badge bad plain">{t.webOnly}</span>}
+        {ask.risk_class === "web_only" && <Link to="/settings" className="badge bad plain">{t.webOnly}</Link>}
         <ScreeningBadge pending={ask.screening_pending} />
       </p>
       <RejectionNote rejection={rejection} what="answer" />
@@ -128,7 +130,7 @@ function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionI
         </button>
       </footer>
       {why && <p className="why">{why}</p>}
-      {whyErr && <p role="alert">{whyErr}</p>}
+      {whyErr != null && <ErrorNote error={whyErr} />}
     </article>
   );
 }
@@ -147,7 +149,7 @@ export function DecisionsPage() {
   const t = useT(strings);
   const [items, setItems] = useState<DecisionItem[] | null>(null);
   const [rejections, setRejections] = useState<Record<string, Rejection>>({});
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [cur, setCur] = useState(0);
   const list = useRef<HTMLDivElement>(null);
 
@@ -158,7 +160,7 @@ export function DecisionsPage() {
           setRejections(r.last_rejections ?? {});
           setItems(sortDecisions(r.items.filter(pending)));
         },
-        (e) => setError(msg(e)),
+        (e) => setError(e),
       ),
     [api],
   );
@@ -172,7 +174,7 @@ export function DecisionsPage() {
     try {
       await api.post("/items/" + encodeURIComponent(id) + "/decide", body);
     } catch (e) {
-      setError(msg(e)); // 含 409：已有人先答，刷新后以服务端为准
+      setError(e); // 含 409：已有人先答，刷新后以服务端为准
     }
     await load();
     window.dispatchEvent(new Event(COUNTS_EVENT));
@@ -227,9 +229,9 @@ export function DecisionsPage() {
           {t.countPost}
         </PageHead>
       )}
-      {error && (
-        <div role="alert">
-          {error}{" "}
+      {error != null && (
+        <div>
+          <ErrorNote error={error} />
           <button
             onClick={() => {
               setError(null);
@@ -241,7 +243,7 @@ export function DecisionsPage() {
         </div>
       )}
       {items === null ? (
-        !error && <p role="status">{t.loading}</p>
+        error == null && <p role="status">{t.loading}</p>
       ) : n === 0 ? (
         <p className="empty">{t.empty}</p>
       ) : (

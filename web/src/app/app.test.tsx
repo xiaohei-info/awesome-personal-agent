@@ -196,11 +196,11 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
 
   // 旧地址一个不改：每个原页面仍在原地址，落到所属入口并高亮对应页签。
   const OLD: [string, string, string][] = [
-    ["/today", "今天", "今天"], ["/briefs", "今天", "简报"], ["/unread", "今天", "Web 未读"],
+    ["/today", "今天", "今天"], ["/briefs", "今天", "简报"], ["/unread", "今天", "未读提醒"],
     ["/decisions", "决策待办", "决策待办"], ["/proposals", "建议流", "建议流"],
     ["/items", "事项", "事项"], ["/items/itm_1", "事项", "事项"], ["/pack-views", "事项", "能力包视图"],
     ["/projects", "项目", "项目"], ["/materials", "项目", "材料"],
-    ["/agent-changes", "agent 动态", "agent 变更"], ["/delegation", "agent 动态", "任务委派"], ["/runs", "agent 动态", "运行记录"],
+    ["/agent-changes", "agent 动态", "改动"], ["/delegation", "agent 动态", "委派"], ["/runs", "agent 动态", "运行记录"],
     ["/sources", "来源", "来源"], ["/rules", "规则与判断", "规则模式"], ["/judgment", "规则与判断", "判断与校准"],
     ["/health", "健康", "健康"], ["/audit", "健康", "审计"],
     ["/settings", "设置", "策略与人格"], ["/settings-credentials", "设置", "凭据"], ["/settings-exec", "设置", "执行者与声明"],

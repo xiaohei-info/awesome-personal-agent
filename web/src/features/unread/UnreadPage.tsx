@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
-import { errorText as msg, useT } from "../../app/i18n";
+import { useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
 import { Val } from "../../app/values";
 
@@ -14,6 +15,8 @@ export interface UnreadDelivery {
   state: string;
   content: { title: string; summary?: string; options?: string[]; web_url?: string };
   injections?: { injected_to_session: string; at: string }[];
+  /** 被日上限或静音压成只留 Web 未读的原因（domain.Delivery.suppressed）；为空表示没被压。 */
+  suppressed?: string;
 }
 
 
@@ -21,14 +24,14 @@ export function UnreadPage() {
   const { api } = useSession();
   const t = useT(strings);
   const [items, setItems] = useState<UnreadDelivery[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(
     () =>
       api.get<{ deliveries: UnreadDelivery[] }>("/deliveries/unread").then(
         (r) => setItems(r.deliveries),
-        (e) => setError(msg(e)),
+        (e) => setError(e),
       ),
     [api],
   );
@@ -44,7 +47,7 @@ export function UnreadPage() {
     try {
       await api.post("/deliveries/" + encodeURIComponent(id) + "/read");
     } catch (e) {
-      setError(msg(e));
+      setError(e);
     }
     await load();
     setBusy(null);
@@ -52,10 +55,10 @@ export function UnreadPage() {
 
   return (
     <main>
-      <PageHead lede={t.lede}>{t.title}</PageHead>
-      {error && (
-        <div role="alert">
-          {error}{" "}
+      <PageHead>{t.title}</PageHead>
+      {error != null && (
+        <div>
+          <ErrorNote error={error} />
           <button
             onClick={() => {
               setError(null);
@@ -67,14 +70,14 @@ export function UnreadPage() {
         </div>
       )}
       {items === null ? (
-        !error && <p role="status">{t.loading}</p>
+        error == null && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
         <p className="empty">{t.empty}</p>
       ) : (
         items.map((d) => (
           <article key={d.id} aria-label={d.content.title}>
             <h3>{d.content.title}</h3>
-            <p className="meta"><span className="badge plain"><Val k="deliveryClass" id={d.class} /></span></p>
+            <p className="meta"><span className="badge plain"><Val k="deliveryClass" id={d.class} /></span>{d.suppressed && <> <span className="badge warn"><Val k="suppressed" id={d.suppressed} /></span></>}</p>
             {d.content.summary && <p>{d.content.summary}</p>}
             {d.content.options && d.content.options.length > 0 && <p>{t.options(d.content.options.join(" / "))}</p>}
             {d.content.web_url && <a href={d.content.web_url}>{t.open}</a>}

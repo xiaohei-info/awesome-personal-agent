@@ -6,7 +6,12 @@ import { describe, expect, it } from "vitest";
 // 这一版先只报告不失败（STRICT = false）；各页改完后改为 true，此后新增违规就会让 CI 失败。
 // 改完的目录先列进 STRICT_DIRS：这些目录里的违规现在就让测试失败。
 export const STRICT = false;
-export const STRICT_DIRS = ["features/sources"];
+export const STRICT_DIRS = [
+  "features/today", "features/briefs", "features/unread", "features/decisions", "features/decision-screening",
+  "features/proposals", "features/items", "features/projects", "features/materials", "features/materials-hosted",
+  "features/agent-changes", "features/delegation", "features/attached-messages", "features/action-confirm", "features/forms",
+  "features/sources",
+];
 export const MAX = 40;
 export const BANNED = ["账本", "投影", "墓碑", "注入", "级联", "Event", "blob", "actor", "schema", "scope", "harness", "web_only"];
 /** 有意保留的长文字：键名（各页文案展开了共用文案，所以按键名，不按文件）→ 理由。 */

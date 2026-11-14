@@ -59,8 +59,17 @@ describe("Web 未读页（flow-hermes-context / ACT-HCTX-06）", () => {
     const s = server([d("a", { injections: [{ injected_to_session: "sess-1", at: "2030-01-01T00:00:00Z" }, { injected_to_session: "sess-2", at: "2030-01-01T00:01:00Z" }] })]);
     mount(s.impl);
     const card = await screen.findByRole("article", { name: "投递 a" });
-    expect(within(card).getByText(/已注入 2 个会话.*注入不算确认/)).toBeInTheDocument();
+    expect(within(card).getByText(/已在 2 次聊天里提过，仍未确认/)).toBeInTheDocument();
     expect(s.calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("被日上限或暂停提醒压下的投递标出原因，没被压的不标", async () => {
+    mount(server([d("a", { suppressed: "daily_cap" }), d("b", { suppressed: "muted" }), d("c")]).impl);
+    expect(within(await screen.findByRole("article", { name: "投递 a" })).getByText("超过今天上限")).toBeInTheDocument();
+    expect(within(screen.getByRole("article", { name: "投递 b" })).getByText("已暂停提醒")).toBeInTheDocument();
+    const c = screen.getByRole("article", { name: "投递 c" });
+    expect(within(c).queryByText("超过今天上限")).not.toBeInTheDocument();
+    expect(within(c).queryByText("已暂停提醒")).not.toBeInTheDocument();
   });
 
   it("本人点击才确认：POST read 带 CSRF，成功后该条从未读消失、其余仍在", async () => {
@@ -78,7 +87,7 @@ describe("Web 未读页（flow-hermes-context / ACT-HCTX-06）", () => {
     mount(server([d("a")]).impl);
     const card = await screen.findByRole("article", { name: "投递 a" });
     await userEvent.click(within(card).getByRole("button", { name: "标记已读" }));
-    expect(await screen.findByText("没有未读")).toBeInTheDocument();
+    expect(await screen.findByText("都看过了")).toBeInTheDocument();
   });
 
   it("确认失败（409）：显示服务端原因，该条仍留在未读里，并重新读取", async () => {

@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
-import { errorText as msg, useT } from "../../app/i18n";
+import { useT } from "../../app/i18n";
+import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
 import { useLabel } from "../../app/values";
 
@@ -28,7 +29,7 @@ function Confirm() {
   const t = useT(strings);
   const label = useLabel();
   const [item, setItem] = useState<Item | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [done, setDone] = useState<string | null>(null);
   const known = act !== null && Object.hasOwn(ACTIONS, act);
 
@@ -36,11 +37,11 @@ function Confirm() {
     if (!known) return;
     setItem(null);
     setError(null);
-    api.get<{ item: Item }>("/items/" + encodeURIComponent(id)).then((r) => setItem(r.item), (e) => setError(msg(e)));
+    api.get<{ item: Item }>("/items/" + encodeURIComponent(id)).then((r) => setItem(r.item), (e) => setError(e));
   }, [api, id, known]);
 
   if (!known) return <main><p role="alert">{t.unsupported(act ?? t.missingDo)}</p><p><Link to="/">{t.home}</Link></p></main>;
-  if (error && !item) return <main><p role="alert">{error}</p></main>;
+  if (error != null && !item) return <main><ErrorNote error={error} /><p><Link to="/">{t.home}</Link></p></main>;
   if (!item) return <main><p role="status">{t.loading}</p></main>;
 
   const path = "/items/" + encodeURIComponent(id);
@@ -51,7 +52,7 @@ function Confirm() {
       await fn();
       setDone(ok);
     } catch (e) {
-      setError(msg(e));
+      setError(e);
     }
   };
 
@@ -63,7 +64,7 @@ function Confirm() {
         <p>{t.phase(label("phase", item.phase))}</p>
         {item.planned_for ? <p>{t.planned(item.planned_for)}</p> : null}
       </div>
-      {error && <p role="alert">{error}</p>}
+      {error != null && <ErrorNote error={error} />}
       {done ? (
         <p role="status">{done}</p>
       ) : act === "done" ? (

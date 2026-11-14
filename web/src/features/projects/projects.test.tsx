@@ -30,7 +30,7 @@ function server(opts: { putDenied?: boolean } = {}) {
       projects.push(p);
       return json(201, p);
     }
-    if (url === "/v1/settings/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "cli" }, { id: "other-host.cli", kind: "cli" }] });
+    if (url === "/v1/settings/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli", host: "work-host" }, { id: "other-host.cli", kind: "external-cli" }] });
     if (url.startsWith("/v1/items?project=")) {
       const id = new URL(url, "http://x").searchParams.get("project");
       return json(200, { items: id === "p_work" ? [{ id: "item_1", phase: "open", version: 1, kind: "task", title: "项目内事项" }] : [] });
@@ -133,21 +133,23 @@ describe("项目页", () => {
     const s = server();
     const u = userEvent.setup();
     mount(s.impl, "/projects/p_work");
-    const other = await screen.findByRole("checkbox", { name: "other-host.cli" });
-    expect(screen.getByRole("checkbox", { name: "work-host.cli" })).toBeChecked();
+    const other = await screen.findByRole("checkbox", { name: /^other-host\.cli/ });
+    expect(screen.getByRole("checkbox", { name: /^work-host\.cli/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "work-host.cli · 外部命令行工具 · work-host" })).toBeInTheDocument(); // 名称 · 种类 · 主机
     expect(other).not.toBeChecked();
     await u.click(other);
     await u.click(screen.getByRole("button", { name: "保存执行者" }));
     await waitFor(() => expect(s.projects[0].allowed_executors).toEqual(["work-host.cli", "other-host.cli"]));
     expect(s.calls.find((c) => c.method === "PUT")!.csrf).toBe("tok-1");
 
-    await u.click(screen.getByLabelText("不限制"));
+    await u.click(screen.getByLabelText("谁都可以"));
     await u.click(screen.getByRole("button", { name: "保存执行者" }));
     await waitFor(() => expect(s.projects[0].allowed_executors).toBeNull());
 
-    await u.click(screen.getByLabelText("限制为所选（不选则只能指派给本人）"));
-    await u.click(screen.getByRole("checkbox", { name: "work-host.cli" })); // 取消
-    await u.click(screen.getByRole("checkbox", { name: "other-host.cli" })); // 取消
+    await u.click(screen.getByLabelText("只能派给："));
+    await u.click(screen.getByRole("checkbox", { name: /^work-host\.cli/ })); // 取消
+    await u.click(screen.getByRole("checkbox", { name: /^other-host\.cli/ })); // 取消
+    expect(screen.getByText("只能派给你自己")).toBeInTheDocument(); // 一个都不选的后果当场可见（§14.7）
     await u.click(screen.getByRole("button", { name: "保存执行者" }));
     await waitFor(() => expect(s.projects[0].allowed_executors).toEqual([]));
   });
@@ -155,7 +157,7 @@ describe("项目页", () => {
   it("允许的执行者被拒（非 Web）：显示原因，页面状态不变", async () => {
     const u = userEvent.setup();
     mount(server({ putDenied: true }).impl, "/projects/p_work");
-    await u.click(await screen.findByRole("checkbox", { name: "other-host.cli" }));
+    await u.click(await screen.findByRole("checkbox", { name: /^other-host\.cli/ }));
     await u.click(screen.getByRole("button", { name: "保存执行者" }));
     expect(await screen.findByText(/only be changed by the owner/)).toBeInTheDocument();
   });
@@ -170,7 +172,7 @@ describe("项目页", () => {
   it("空项目：事项视图显示空状态；不存在的项目显示错误", async () => {
     const s = server();
     const { unmount } = mount(s.impl, "/projects/p_open");
-    expect(await screen.findByText("该项目下没有事项")).toBeInTheDocument();
+    expect(await screen.findByText("这个项目还没有事项")).toBeInTheDocument();
     unmount();
     mount(s.impl, "/projects/nope");
     expect(await screen.findByRole("alert")).toHaveTextContent("project not found");
