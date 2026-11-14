@@ -219,8 +219,8 @@ func endpoint(tx *store.Tx, backlog []domain.SourceEvent) (judge, generate, wors
 	}
 	waiting := false
 	for _, e := range backlog {
-		// 判断未定、外发范围未选择、放回积压的事件与端点有没有配置无关
-		if e.UnjudgedReason != domain.UnjudgedUndecided && e.UnjudgedReason != domain.UnjudgedOutboundUnset && e.UnjudgedReason != domain.UnjudgedRestored {
+		// 外发范围未选择、放回积压的事件与端点有没有配置无关；v0.1 的 undecided 按 model_unavailable 对待
+		if e.UnjudgedReason != domain.UnjudgedOutboundUnset && e.UnjudgedReason != domain.UnjudgedRestored {
 			waiting = true
 			break
 		}

@@ -559,7 +559,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 			return err
 		}
 		if verdict != "" {
-			return s.dispose(ctx, m, ev, withdrawn(ev, prop, verdict))
+			return s.withdraw(ctx, m, ev, prop, verdict)
 		}
 	}
 	if hint != "" {
@@ -571,15 +571,22 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 	return s.propose(ctx, sn, src, ev, m, prop, project)
 }
 
-// withdrawn 把不建事项的结论（verdict）翻成对来源事件的处置。
-func withdrawn(ev domain.SourceEvent, prop proposal, verdict string) disposeIn {
-	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionIgnored, Reason: verdict, Judgment: prop.judgment}
-	if verdict == ChoiceIgnore {
-		d.Reason = "screened out: not worth a suggestion"
-		return d
+// withdraw 按不建事项的结论（verdict）处置来源事件。
+func (s *Service) withdraw(ctx context.Context, m *matched, ev domain.SourceEvent, prop proposal, verdict string) error {
+	d, err := withdrawn(ev, prop, verdict)
+	if err != nil {
+		return err
 	}
-	d.Disposition, d.UnjudgedReason = domain.DispositionUnjudged, domain.UnjudgedUndecided
+	return s.dispose(ctx, m, ev, d)
+}
+
+// withdrawn 把不建事项的结论（verdict）翻成对来源事件的处置。verdict 只有 ChoiceIgnore 与下面几个前缀；
+// 认不出的是内核缺陷，报错而不定案：事件留在 pending、错误交给 OnError，不归进一个不会被重判的状态（§6.14）。
+func withdrawn(ev domain.SourceEvent, prop proposal, verdict string) (disposeIn, error) {
+	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionUnjudged, Reason: verdict, Judgment: prop.judgment}
 	switch {
+	case verdict == ChoiceIgnore:
+		d.Disposition, d.Reason = domain.DispositionIgnored, "screened out: not worth a suggestion"
 	case strings.HasPrefix(verdict, unavailablePrefix):
 		d.UnjudgedReason = domain.UnjudgedModelUnavailable
 	case strings.HasPrefix(verdict, pausedPrefix):
@@ -587,9 +594,11 @@ func withdrawn(ev domain.SourceEvent, prop proposal, verdict string) disposeIn {
 	case strings.HasPrefix(verdict, outboundUnsetPrefix):
 		d.UnjudgedReason = domain.UnjudgedOutboundUnset
 	case strings.HasPrefix(verdict, outboundNonePrefix):
-		d.Disposition, d.UnjudgedReason = domain.DispositionDigest, ""
+		d.Disposition = domain.DispositionDigest
+	default:
+		return disposeIn{}, fmt.Errorf("inbound: event %s: unknown verdict %q; left pending", ev.ID, verdict)
 	}
-	return d
+	return d, nil
 }
 
 // alert 处理 then: alert 的出口（§9.3、§14.8）：auto 档产出没有事项的提醒并记 alerted；
@@ -619,8 +628,8 @@ func (s *Service) observeAlert(c *command.Ctx, v disposeIn) error {
 	return err
 }
 
-// verdict 的前缀：模型不可用而未判定（自动重判）；外发范围未选而未判定（选定后自动重判）；外发范围对可用端点都是 none（改走摘要出口）。
-// 其余未判定是判断未定。
+// verdict 的前缀：模型不可用或已暂停而未判定（自动重判）；外发范围未选而未判定（选定后自动重判）；外发范围对可用端点都是 none（改走摘要出口）。
+// 各级都未定不在其中：留为建议并标把握低（§8.9），不产生未判定。
 const (
 	unavailablePrefix   = "model unavailable: "
 	pausedPrefix        = "models paused: "
@@ -1017,30 +1026,30 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 		return err
 	}
 	if why := outboundGate(o, pol, src); why != "" {
-		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{}, why))
+		return s.withdraw(ctx, m, ev, proposal{}, why)
 	}
 	a, err := s.ask(ctx, src, ev, prescreenPack, prescreen, "", o)
 	if err != nil {
 		return err
 	}
 	if a.unavailable != "" {
-		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{}, a.unavailable))
+		return s.withdraw(ctx, m, ev, proposal{}, a.unavailable)
 	}
 	if a.no {
-		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{judgment: a.judgment}, ChoiceIgnore))
+		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, ChoiceIgnore)
 	}
 	locality := policy.EffectiveLocality(pol.GenerateEndpoint.Locality)
 	text, allowed := material(ev, o)(locality)
 	if !allowed {
-		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{judgment: a.judgment}, outboundUnsetPrefix+"the generate endpoint is excluded by the outbound scope"))
+		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, outboundUnsetPrefix+"the generate endpoint is excluded by the outbound scope")
 	}
 	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: extractPack, Template: extract, Input: eventInput(src, ev, "", nil), Material: text, RequireLocality: locality,
 		Scope: direct.Scope{Source: src.ID}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
 	if errors.Is(err, model.ErrPaused) {
-		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{judgment: a.judgment}, pausedPrefix+err.Error()))
+		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, pausedPrefix+err.Error())
 	}
 	if errors.Is(err, model.ErrNotConfigured) || errors.Is(err, direct.ErrUnavailable) {
-		return s.dispose(ctx, m, ev, withdrawn(ev, proposal{judgment: a.judgment}, unavailablePrefix+err.Error()))
+		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, unavailablePrefix+err.Error())
 	}
 	if err != nil {
 		return err

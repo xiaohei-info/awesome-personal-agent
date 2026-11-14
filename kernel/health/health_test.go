@@ -536,6 +536,21 @@ func TestJudgeEndpointFailureIsVisibleAndSeparate(t *testing.T) {
 	}
 }
 
+// v0.1 的 undecided 按 model_unavailable 对待：积压里只有它时，没配端点同样报 not_configured；外发范围未选的不算。
+func TestLegacyUndecidedBacklogNeedsEndpoint(t *testing.T) {
+	for reason, want := range map[string]string{"undecided": EndpointNotConfigured, "": EndpointNotConfigured, "outbound_unset": ""} {
+		e := setup(t)
+		e.update(func(tx *store.Tx) error {
+			_, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link,
+				occurred_at, correlation_keys, sender, sender_verified, disposition, unjudged_reason) VALUES ('d', 'e', 'ev1', 'src_1', 'run', 't', 's', '', '', '', 0, '[]', '', 0, 'unjudged', ?)`, reason)
+			return err
+		})
+		if v := e.collect(nil); v.Generate != want || v.Judge != want {
+			t.Fatalf("reason %q: %+v", reason, v)
+		}
+	}
+}
+
 // 判断端点是可选的：撤掉它之后，留下的旧故障记录不再报（否则永远清不掉）。
 func TestJudgeFaultIgnoredOnceJudgeEndpointRemoved(t *testing.T) {
 	e := setup(t)

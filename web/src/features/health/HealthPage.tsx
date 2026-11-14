@@ -87,7 +87,7 @@ function useLines(): (s: Signal, paused: boolean, days?: number) => Line[] {
       }
       case "unjudged_backlog":
         return [
-          ...(n(d, "model_unavailable") + n(d, "undecided") ? [{ text: t.waitModel(n(d, "model_unavailable") + n(d, "undecided")), to: "/settings/models", go: "models" as Go }] : []),
+          ...(n(d, "model_unavailable") + n(d, "undecided") ? [{ text: hinted(t.waitModel(n(d, "model_unavailable") + n(d, "undecided")), rejudgeHint(lang, "model_unavailable", days)), to: "/settings/models", go: "models" as Go }] : []),
           ...(n(d, "outbound_unset") ? [{ text: t.waitScope(n(d, "outbound_unset")), to: "/sources", go: "scope" as Go }] : []),
           // 暂停期间积下的：暂停时并进上面的「已暂停」卡；恢复后在这里列出，按重判期限自动判断。
           ...(!paused && n(d, "models_paused") ? [{ text: hinted(t.waitPaused(n(d, "models_paused")), rejudgeHint(lang, "models_paused", days)), to: "/sources", go: "sources" as Go }] : []),

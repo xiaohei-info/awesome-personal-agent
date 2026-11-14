@@ -132,3 +132,57 @@ func TestRejudgeOffLeavesBacklogUntouched(t *testing.T) {
 		t.Fatalf("model called %d times", n)
 	}
 }
+
+// v0.1 留下的 undecided 与空原因按 model_unavailable 对待（§6.10、§16.5）：窗口内的随模型恢复重判进建议流，窗口外的到期。
+func TestLegacyUndecidedRejudgedAndExpires(t *testing.T) {
+	e := newEnv(t, false)
+	e.svc.o.Now = e.Now
+	old := t0.Add(-DefaultRejudge.Window - time.Hour).Format(time.RFC3339)
+	e.emit("src_m", "inbox", ev("m1", "mail.received", "旧邮件", map[string]any{"occurred_at": old}),
+		ev("m2", "mail.received", "合同请签字", nil), ev("m3", "mail.received", "发票", nil))
+	got := e.byID("src_m")
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for id, why := range map[string]string{"m1": domain.UnjudgedUndecided, "m2": domain.UnjudgedUndecided, "m3": ""} {
+			if _, err := tx.Exec(`UPDATE sources_runner_event SET unjudged_reason = ? WHERE id = ?`, why, got[id].ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.configureModel()
+	e.screen(0.9)
+	if err := e.svc.Rejudge(bg); err != nil {
+		t.Fatal(err)
+	}
+	got = e.byID("src_m")
+	if got["m1"].Disposition != domain.DispositionExpired {
+		t.Fatalf("old undecided must expire: %+v", got["m1"])
+	}
+	for _, id := range []string{"m2", "m3"} {
+		if x := got[id]; x.Disposition != domain.DispositionProposed || x.Rejudges != 1 {
+			t.Fatalf("%s not rejudged into a proposal: %+v", id, x)
+		}
+	}
+}
+
+// withdrawn 只认 ChoiceIgnore 与已知前缀；认不出的报错，事件留在 pending，不静默归成不会重判的状态。
+func TestWithdrawnRejectsUnknownVerdict(t *testing.T) {
+	x := domain.SourceEvent{ID: "sev_1"}
+	for verdict, want := range map[string][2]string{
+		ChoiceIgnore:              {string(domain.DispositionIgnored), ""},
+		unavailablePrefix + "x":   {string(domain.DispositionUnjudged), domain.UnjudgedModelUnavailable},
+		pausedPrefix + "x":        {string(domain.DispositionUnjudged), domain.UnjudgedModelsPaused},
+		outboundUnsetPrefix + "x": {string(domain.DispositionUnjudged), domain.UnjudgedOutboundUnset},
+		outboundNonePrefix + "x":  {string(domain.DispositionDigest), ""},
+	} {
+		d, err := withdrawn(x, proposal{}, verdict)
+		if err != nil || string(d.Disposition) != want[0] || d.UnjudgedReason != want[1] {
+			t.Fatalf("%q: %+v err=%v", verdict, d, err)
+		}
+	}
+	if _, err := withdrawn(x, proposal{}, "something new"); err == nil {
+		t.Fatal("unknown verdict must not be settled")
+	}
+}
