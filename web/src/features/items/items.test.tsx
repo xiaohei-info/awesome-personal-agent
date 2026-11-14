@@ -170,15 +170,15 @@ describe("设截止（ACT-LIF-03）", () => {
 });
 
 describe("关联与按 tag 筛选（ACT-ITEM-12）", () => {
-  it("在两个事项间建 relates 边，详情两端都能看到", async () => {
+  it("在两个事项间建 relates 边，详情两端都能看到（关系显示名字与对方标题）", async () => {
     const l = ledger();
     mount(l.impl, "/items/item_a");
     await userEvent.selectOptions(await screen.findByLabelText("关联事项"), "item_b");
     await userEvent.selectOptions(screen.getByLabelText("关系类型"), "relates");
     await userEvent.click(screen.getByRole("button", { name: "建立关联" }));
     const rels = within(await screen.findByRole("list", { name: "关系" }));
-    expect(rels.getByText(/relates/)).toBeInTheDocument();
-    expect(rels.getByRole("link", { name: "item_b" })).toHaveAttribute("href", "/items/item_b");
+    expect(rels.getByText(/相关 →/)).toBeInTheDocument(); // 关系类型走词表，不露 relates
+    expect(await rels.findByRole("link", { name: "item-b" })).toHaveAttribute("href", "/items/item_b"); // 显示对方标题，不露 id
     expect(screen.getByRole("link", { name: /事项列表/ })).toHaveAttribute("href", "/items");
     expect(l.calls.find((c) => c.path.endsWith("/relations"))!.body).toEqual({ to: "item_b", type: "relates" });
   });

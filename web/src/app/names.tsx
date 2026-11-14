@@ -92,7 +92,8 @@ export function useItemTitle(id?: string | null): string {
     if (!m) titles.set(api, (m = new Map()));
     let p = m.get(id);
     if (!p) {
-      p = api.get<{ title?: string }>("/items/" + encodeURIComponent(id)).then((it) => it.title || id);
+      // GET /items/{id} 返回 {item, relations, …}，标题在 item 里。
+      p = api.get<{ item?: { title?: string } }>("/items/" + encodeURIComponent(id)).then((r) => r.item?.title || id);
       p.catch(() => m!.delete(id));
       m.set(id, p);
     }

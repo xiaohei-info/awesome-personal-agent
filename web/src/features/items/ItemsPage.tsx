@@ -226,7 +226,7 @@ function ItemDetail() {
           {d.relations.map((r, n) => {
             const out = r.from === item.id;
             const other = out ? r.to : r.from;
-            const type = t.relation[r.type] ?? r.type;
+            const type = label("relation", r.type);
             const to = isMaterialId(other) ? "/materials?id=" + encodeURIComponent(other) : "../" + encodeURIComponent(other);
             return <li key={n}>{out ? `${type} →` : `← ${type}`} <Link to={to}>{isMaterialId(other) ? other : <ItemTitle id={other} />}</Link></li>;
           })}
