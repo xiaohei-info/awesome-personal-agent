@@ -1,4 +1,4 @@
-# sha256: 0a4fb5a20373ca4cdd6972c6da93d801cba16234fa31a7b8a19a48e53e7f8489
+# sha256: 4a78d567ba7eaf0a8cc9b230680c93876290854990dd9edf028cedc697114c2d
 defects:
   schema: omac.defect-ledger/v1
   used_global: 31
@@ -327,6 +327,6 @@ defects:
       - flow-decision-answer/ACT-DEC-03
       reporters:
       - release-gates
-      state: fixing
+      state: fixed
       fix_node: fix.e2e-session-authz.f65ac5
   inbox: []
