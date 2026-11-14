@@ -718,9 +718,10 @@ func TestServeLoadsHostFilesAndRunsKernelServices(t *testing.T) {
 
 	home := initOnFreePort(t)
 	script := filepath.Join(t.TempDir(), "emit.sh")
+	// 发生时间取当下：早于自动重判窗口（7 天）的未判定事件会被维护循环转为 expired，写死旧日期会让下面的断言与维护循环赛跑。
 	emit := `#!/bin/sh
 cat >/dev/null
-echo '{"id":"e1","type":"note.created","subject":"from host file","occurred_at":"2026-01-01T00:00:00Z"}'
+echo '{"id":"e1","type":"note.created","subject":"from host file","occurred_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}'
 echo '{"cursor":"c1"}'
 `
 	if err := os.WriteFile(script, []byte(emit), 0o755); err != nil {
