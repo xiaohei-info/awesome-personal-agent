@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ApiError } from "../../app/api";
-import { MATERIAL_RELATION_LABELS } from "../../app/relations";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { HostedMaterial } from "../materials-hosted/HostedMaterial";
+import { errorText as msg, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET/POST /v1/materials、GET /v1/materials/{id}[/revisions]、POST /v1/materials/{id}/revisions|revert、
 // POST /v1/revisions/{id}/confirm|reject、GET /v1/materials/search（附录 B.2）。
@@ -58,9 +58,8 @@ interface Write {
 // shortcut: kind 取内置集合（kernel/materials builtinKinds）；能力包扩展的 kind 暂无 HTTP 枚举接口，有了再改读接口。
 const KINDS = ["minutes", "reference", "worknote", "requirement", "design", "guideline"];
 // 规范的五个固定小节（§6.6），均可留空；空小节由服务端渲染时丢弃。
-const GUIDELINE_TEMPLATE = ["处理规则", "架构边界", "开发规范", "设计约束", "验收要求"].map((h) => `## ${h}\n\n`).join("\n");
+const guidelineTemplate = (heads: string[]) => heads.map((h) => `## ${h}\n\n`).join("\n");
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 export interface DiffLine {
   op: " " | "-" | "+";
@@ -98,6 +97,7 @@ function Diff({ id, from, to }: { id: string; from: string; to: string }) {
 }
 
 export function MaterialsPage() {
+  const t = useT(strings);
   const { api } = useSession();
   const [projects, setProjects] = useState<{ id: string; name?: string }[]>([]);
   const [project, setProject] = useState("");
@@ -144,14 +144,14 @@ export function MaterialsPage() {
 
   return (
     <main>
-      <PageHead>材料</PageHead>
+      <PageHead>{t.title}</PageHead>
       {error && <div role="alert">{error}</div>}
       {notice && <div role="status">{notice}</div>}
       <div className="filters">
         <label>
-          按项目筛选
+          {t.byProject}
           <select value={project} onChange={(e) => setProject(e.target.value)}>
-            <option value="">全部项目</option>
+            <option value="">{t.allProjects}</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name ?? p.id}
@@ -160,25 +160,25 @@ export function MaterialsPage() {
           </select>
         </label>
         <label>
-          按类型筛选
+          {t.byKind}
           <select value={kind} onChange={(e) => setKind(e.target.value)}>
-            <option value="">全部类型</option>
+            <option value="">{t.allKinds}</option>
             {KINDS.map((k) => (
               <option key={k}>{k}</option>
             ))}
           </select>
         </label>
         <label>
-          搜索材料
+          {t.search}
           <input value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
         <label>
-          关联事项
+          {t.relatedItem}
           <input value={item} onChange={(e) => setItem(e.target.value)} />
         </label>
         <div className="actions">
-          <button onClick={search}>搜索</button>
-          <button onClick={() => setCreating(true)}>新建材料</button>
+          <button onClick={search}>{t.searchBtn}</button>
+          <button onClick={() => setCreating(true)}>{t.create}</button>
         </div>
       </div>
 
@@ -199,21 +199,21 @@ export function MaterialsPage() {
         <ul className="rows">
           {hits.map((h) => (
             <li key={h.id} aria-label={h.id}>
-              <button className="link" onClick={() => setSelected(h.id)}>{h.title}</button> <span className="sub">{h.kind} · {h.project || "全局"} · {h.hosted ? "托管型" : "自有型"}
+              <button className="link" onClick={() => setSelected(h.id)}>{h.title}</button> <span className="sub">{h.kind} · {h.project || t.global} · {h.hosted ? t.hosted : t.owned}
               {h.path && <> · {h.path}</>}</span>
               {h.snippet && <p className="sub">{h.snippet}</p>}
             </li>
           ))}
-          {!hits.length && <p className="empty">没有命中</p>}
+          {!hits.length && <p className="empty">{t.noHits}</p>}
         </ul>
       ) : (
         <>
-          {materials && !shown?.length && !error && <p className="empty">还没有材料</p>}
+          {materials && !shown?.length && !error && <p className="empty">{t.none}</p>}
           {!!shown?.length && (
             <ul className="rows">
               {shown.map((m) => (
                 <li key={m.id}>
-                  <button className="link" onClick={() => setSelected(m.id)}>{m.title}</button> <span className="sub">{m.kind} · {m.project || "全局"} · {m.location ? "托管型" : "自有型"}</span>
+                  <button className="link" onClick={() => setSelected(m.id)}>{m.title}</button> <span className="sub">{m.kind} · {m.project || t.global} · {m.location ? t.hosted : t.owned}</span>
                 </li>
               ))}
             </ul>
@@ -227,17 +227,19 @@ export function MaterialsPage() {
 }
 
 function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: string; name?: string }[]; onCancel: () => void; onDone: (s: string) => void; onError: (e: unknown) => void }) {
+  const t = useT(strings);
   const { api } = useSession();
   const [f, setF] = useState({ kind: "minutes", project: "", title: "", content: "", reason: "" });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const pickKind = (e: { target: { value: string } }) => {
     const k = e.target.value;
-    setF({ ...f, kind: k, content: k === "guideline" && !f.content ? GUIDELINE_TEMPLATE : f.content === GUIDELINE_TEMPLATE ? "" : f.content });
+    const tpl = guidelineTemplate(t.guidelineHeads);
+    setF({ ...f, kind: k, content: k === "guideline" && !f.content ? tpl : f.content === tpl ? "" : f.content });
   };
   const submit = async () => {
     try {
       const r = await api.post<{ state: string }>("/materials", { kind: f.kind, project: f.project, title: f.title.trim(), content: f.content, reason: f.reason.trim(), based_on: "" });
-      onDone(written(r));
+      onDone(written(t, r));
     } catch (e) {
       onError(e);
     }
@@ -245,14 +247,14 @@ function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: s
   return (
     <form
       className="panel"
-      aria-label="新建材料"
+      aria-label={t.create}
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
       }}
     >
       <label>
-        类型
+        {t.kind}
         <select value={f.kind} onChange={pickKind}>
           {KINDS.map((k) => (
             <option key={k}>{k}</option>
@@ -260,9 +262,9 @@ function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: s
         </select>
       </label>
       <label>
-        项目
+        {t.project}
         <select value={f.project} onChange={set("project")}>
-          <option value="">全局（无项目）</option>
+          <option value="">{t.globalNoProject}</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name ?? p.id}
@@ -271,27 +273,28 @@ function CreateForm({ projects, onCancel, onDone, onError }: { projects: { id: s
         </select>
       </label>
       <label>
-        标题
+        {t.titleField}
         <input value={f.title} onChange={set("title")} />
       </label>
       <label>
-        Markdown 内容
+        {t.content}
         <textarea value={f.content} onChange={set("content")} rows={10} />
       </label>
       <label>
-        修改原因
+        {t.reason}
         <input value={f.reason} onChange={set("reason")} />
       </label>
       <div className="actions">
-        <button type="submit">提交</button> <button type="button" onClick={onCancel}>取消</button>
+        <button type="submit">{t.submit}</button> <button type="button" onClick={onCancel}>{t.cancel}</button>
       </div>
     </form>
   );
 }
 
-const written = (r: Write) => (r.state === "current" ? "已生效" : "已提交，待本人确认后生效");
+const written = (t: { current: string; proposed: string }, r: Write) => (r.state === "current" ? t.current : t.proposed);
 
 function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onError: (e: unknown) => void; onChanged: () => void }) {
+  const t = useT(strings);
   const { api } = useSession();
   const { id } = props;
   // 回调每次父渲染都是新函数；用 ref 持有，使重载只在 id 变化或显式写入后发生，不冲掉未保存的草稿。
@@ -342,12 +345,12 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
   };
 
   const related = d.relations.length > 0 && (
-    <section role="region" aria-label="关联事项">
-      <h4>关联事项</h4>
+    <section role="region" aria-label={t.relatedItem}>
+      <h4>{t.relatedItem}</h4>
       <ul>
         {d.relations.map((r) => (
           <li key={r.type + r.from}>
-            {MATERIAL_RELATION_LABELS[r.type] ?? r.type} · <Link to={"/items/" + encodeURIComponent(r.from)}>{d.titles[r.from] ?? r.from}</Link>
+            {t.relation[r.type] ?? r.type} · <Link to={"/items/" + encodeURIComponent(r.from)}>{d.titles[r.from] ?? r.from}</Link>
           </li>
         ))}
       </ul>
@@ -366,7 +369,7 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
     try {
       const r = await api.post<Write>(`/materials/${base}/revisions`, { content: draft, reason: reason.trim(), based_on: current });
       setReason("");
-      onNotice(written(r));
+      onNotice(written(t, r));
       await load();
       onChanged();
     } catch (e) {
@@ -377,16 +380,16 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
   const confirm = (r: Revision, on_stale: string, ok: string) => run(() => api.post(`/revisions/${encodeURIComponent(r.id)}/confirm`, on_stale ? { on_stale } : {}), ok);
 
   return (
-    <section role="region" aria-label="材料详情" className="panel">
+    <section role="region" aria-label={t.detail} className="panel">
       <h3>
-        {m.title} <small>{m.kind} · {m.project || "全局"}</small>
+        {m.title} <small>{m.kind} · {m.project || t.global}</small>
       </h3>
 
       {related}
 
       {pending.length > 0 && (
-        <section role="region" aria-label="待确认修订">
-          <h4>待确认修订</h4>
+        <section role="region" aria-label={t.pending}>
+          <h4>{t.pending}</h4>
           {pending.map((r) => {
             const stale = r.based_on !== current;
             return (
@@ -394,17 +397,17 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
                 <p className="sub">
                   #{r.seq} · {r.actor.principal} · {r.reason}
                 </p>
-                {stale && <p role="note">基线已变化：当前修订已不是此提议所基于的修订，请选择取舍。</p>}
+                {stale && <p role="note">{t.stale}</p>}
                 <Diff id={r.id} from={contentOf(m.current_rev)} to={r.content} />
                 {stale ? (
                   <>
-                    <button onClick={() => confirm(r, "adopt", "已确认，修订已成为当前版本")}>仍然采用</button>{" "}
-                    <button onClick={() => confirm(r, "rebase", "已基于当前重提，等待再次确认")}>基于当前重提</button>
+                    <button onClick={() => confirm(r, "adopt", t.confirmed)}>{t.adopt}</button>{" "}
+                    <button onClick={() => confirm(r, "rebase", t.rebased)}>{t.rebase}</button>
                   </>
                 ) : (
-                  <button onClick={() => confirm(r, "", "已确认，修订已成为当前版本")}>确认生效</button>
+                  <button onClick={() => confirm(r, "", t.confirmed)}>{t.confirm}</button>
                 )}{" "}
-                <button onClick={() => run(() => api.post(`/revisions/${encodeURIComponent(r.id)}/reject`, {}), "已拒绝，内容保留在版本列表")}>拒绝</button>
+                <button onClick={() => run(() => api.post(`/revisions/${encodeURIComponent(r.id)}/reject`, {}), t.rejected)}>{t.reject}</button>
               </div>
             );
           })}
@@ -412,19 +415,19 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
       )}
 
       <label>
-        Markdown 内容
+        {t.content}
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={12} />
       </label>
       <label>
-        修改原因
+        {t.reason}
         <input value={reason} onChange={(e) => setReason(e.target.value)} />
       </label>
       <div className="actions">
-        <button className="primary" onClick={save}>保存修订</button>
+        <button className="primary" onClick={save}>{t.saveRevision}</button>
       </div>
 
-      <section role="region" aria-label="版本列表">
-        <h4>版本列表</h4>
+      <section role="region" aria-label={t.versions}>
+        <h4>{t.versions}</h4>
         <ul className="rows">
           {d.revisions.map((r) => {
             const prev = d.revisions.find((x) => x.seq === r.seq - 1);
@@ -432,13 +435,13 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
             return (
               <li key={r.id}>
                 <span>#{r.seq} · {r.state} · {r.actor.principal} · {r.reason}
-                {r.based_on && <> · 基于 {r.based_on}</>} · {r.at}</span>{" "}
-                <button onClick={() => setOpen({ ...open, [r.id]: v === "diff" ? undefined! : "diff" })}>查看 diff</button>{" "}
-                <button onClick={() => setOpen({ ...open, [r.id]: v === "content" ? undefined! : "content" })}>查看内容</button>
+                {r.based_on && t.basedOn(r.based_on)} · {r.at}</span>{" "}
+                <button onClick={() => setOpen({ ...open, [r.id]: v === "diff" ? undefined! : "diff" })}>{t.viewDiff}</button>{" "}
+                <button onClick={() => setOpen({ ...open, [r.id]: v === "content" ? undefined! : "content" })}>{t.viewContent}</button>
                 {r.state === "superseded" && (
                   <>
                     {" "}
-                    <button onClick={() => run(() => api.post(`/materials/${base}/revert`, { to: r.id, reason: `回退到 #${r.seq}` }), "已回退")}>回退到此版</button>
+                    <button onClick={() => run(() => api.post(`/materials/${base}/revert`, { to: r.id, reason: t.revertReason(r.seq) }), t.reverted)}>{t.revert}</button>
                   </>
                 )}
                 {v === "diff" && <Diff id={r.id} from={prev?.content ?? ""} to={r.content} />}

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, Route, Routes, useParams } from "react-router-dom";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { ProjectMaterials } from "../materials-hosted/ProjectMaterials";
 import type { Item } from "../items/ItemsPage";
+import { errorText as msg, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET/POST /v1/projects、GET/PATCH /v1/projects/{id}、POST /v1/projects/{id}/repos、
 // GET /v1/settings/executors、PUT /v1/settings/projects/{id}/allowed-executors（附录 B.2）。
@@ -22,7 +23,6 @@ export interface Project {
 }
 
 const STATUSES = ["active", "paused", "archived"];
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 const splitTags = (s: string) => s.split(",").map((t) => t.trim()).filter(Boolean);
 
 export function ProjectsPage() {
@@ -35,6 +35,7 @@ export function ProjectsPage() {
 }
 
 function ProjectList() {
+  const t = useT(strings);
   const { api } = useSession();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,11 +65,11 @@ function ProjectList() {
 
   return (
     <main>
-      <PageHead>项目</PageHead>
+      <PageHead>{t.title}</PageHead>
       {error && <p role="alert">{error}</p>}
-      {projects && !projects.length && !error && <p className="empty">还没有项目</p>}
+      {projects && !projects.length && !error && <p className="empty">{t.none}</p>}
       {!!projects?.length && (
-        <ul aria-label="项目列表" className="rows">
+        <ul aria-label={t.list} className="rows">
           {projects.map((p) => (
             <li key={p.id}>
               <Link to={p.id}>{p.name}</Link> <span className={"badge" + (p.status === "active" ? " ok" : "")}>{p.status}</span>
@@ -77,18 +78,19 @@ function ProjectList() {
           ))}
         </ul>
       )}
-      <h2>新建项目</h2>
+      <h2>{t.create}</h2>
       <form className="panel" onSubmit={create}>
-        <label>名称 <input value={name} onChange={(e) => setName(e.target.value)} /></label>
-        <label>简介 <input value={intro} onChange={(e) => setIntro(e.target.value)} /></label>
-        <label>标签（逗号分隔） <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
-        <button type="submit">新建项目</button>
+        <label>{t.name} <input value={name} onChange={(e) => setName(e.target.value)} /></label>
+        <label>{t.intro} <input value={intro} onChange={(e) => setIntro(e.target.value)} /></label>
+        <label>{t.tags} <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
+        <button type="submit">{t.create}</button>
       </form>
     </main>
   );
 }
 
 function ProjectDetail() {
+  const t = useT(strings);
   const { id = "" } = useParams();
   const { api } = useSession();
   const [p, setP] = useState<Project | null>(null);
@@ -104,11 +106,11 @@ function ProjectDetail() {
     load().catch((e) => setLoadErr(msg(e)));
   }, [load]);
 
-  if (loadErr) return <main><p role="alert">{loadErr}</p><Link to="/projects">返回项目列表</Link></main>;
-  if (!p) return <main><p role="status">加载中…</p></main>;
+  if (loadErr) return <main><p role="alert">{loadErr}</p><Link to="/projects">{t.back}</Link></main>;
+  if (!p) return <main><p role="status">{t.loading}</p></main>;
   return (
     <main>
-      <p className="eyebrow"><Link to="/projects">返回项目列表</Link></p>
+      <p className="eyebrow"><Link to="/projects">{t.back}</Link></p>
       <h1>{p.name}</h1>
       <EditForm key={p.id + p.name} p={p} onSaved={setP} />
       <Repos p={p} onChange={setP} />
@@ -134,6 +136,7 @@ function useAct() {
 }
 
 function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }) {
+  const t = useT(strings);
   const { api } = useSession();
   const { error, run } = useAct();
   const [name, setName] = useState(p.name);
@@ -148,32 +151,33 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
     return run(async () => onSaved(await api.patch<Project>("/projects/" + p.id, { name, intro, tags: splitTags(tags), status, capture })));
   };
   return (
-    <form className="panel" onSubmit={save} aria-label="项目属性">
-      <label>名称 <input value={name} onChange={(e) => setName(e.target.value)} /></label>
-      <label>简介 <input value={intro} onChange={(e) => setIntro(e.target.value)} /></label>
-      <label>标签（逗号分隔） <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
+    <form className="panel" onSubmit={save} aria-label={t.props}>
+      <label>{t.name} <input value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <label>{t.intro} <input value={intro} onChange={(e) => setIntro(e.target.value)} /></label>
+      <label>{t.tags} <input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
       <label>
-        状态
+        {t.status}
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
           {STATUSES.map((s) => <option key={s}>{s}</option>)}
         </select>
       </label>
-      <label><input type="checkbox" checked={capture} onChange={(e) => setCapture(e.target.checked)} /> 对话候选捕获</label>
-      <button type="submit">保存项目</button>
+      <label><input type="checkbox" checked={capture} onChange={(e) => setCapture(e.target.checked)} /> {t.capture}</label>
+      <button type="submit">{t.saveProject}</button>
       {error && <p role="alert">{error}</p>}
     </form>
   );
 }
 
 function Repos({ p, onChange }: { p: Project; onChange: (p: Project) => void }) {
+  const t = useT(strings);
   const { api } = useSession();
   const { error, run } = useAct();
   const [remote, setRemote] = useState("");
   const op = (body: Record<string, string>) => run(async () => onChange(await api.post<Project>(`/projects/${p.id}/repos`, body)));
 
   return (
-    <section aria-label="仓库">
-      <h2>仓库</h2>
+    <section aria-label={t.repos}>
+      <h2>{t.repos}</h2>
       {error && <p role="alert">{error}</p>}
       {!!p.repos?.length && (
         <ul className="rows">
@@ -181,34 +185,35 @@ function Repos({ p, onChange }: { p: Project; onChange: (p: Project) => void }) 
         </ul>
       )}
       <div className="actions">
-        <label>远程地址 <input value={remote} onChange={(e) => setRemote(e.target.value)} /></label>
-        <button onClick={() => op({ op: "add_remote", remote }).then(() => setRemote(""))}>添加仓库</button>
+        <label>{t.remote} <input value={remote} onChange={(e) => setRemote(e.target.value)} /></label>
+        <button onClick={() => op({ op: "add_remote", remote }).then(() => setRemote(""))}>{t.addRepo}</button>
       </div>
     </section>
   );
 }
 
 function RepoRow({ r, op }: { r: Repo; op: (b: Record<string, string>) => Promise<void> }) {
+  const t = useT(strings);
   const [host, setHost] = useState("");
   const [path, setPath] = useState("");
   return (
     <li>
       <code>{r.remote}</code>
-      <button className="danger" onClick={() => op({ op: "remove_remote", remote: r.remote })}>删除仓库</button>
+      <button className="danger" onClick={() => op({ op: "remove_remote", remote: r.remote })}>{t.removeRepo}</button>
       {!!r.checkouts?.length && (
         <ul className="plain">
           {r.checkouts.map((c) => (
             <li key={c.host + c.path}>
               <span>{c.host}:{c.path}</span>{" "}
-              <button className="quiet" onClick={() => op({ op: "remove_checkout", remote: r.remote, host: c.host, path: c.path })}>移除检出</button>
+              <button className="quiet" onClick={() => op({ op: "remove_checkout", remote: r.remote, host: c.host, path: c.path })}>{t.removeCheckout}</button>
             </li>
           ))}
         </ul>
       )}
       <div className="actions">
-        <label>主机名 <input value={host} onChange={(e) => setHost(e.target.value)} /></label>
-        <label>路径 <input value={path} onChange={(e) => setPath(e.target.value)} /></label>
-        <button onClick={() => op({ op: "set_checkout", remote: r.remote, host, path })}>设置检出</button>
+        <label>{t.host} <input value={host} onChange={(e) => setHost(e.target.value)} /></label>
+        <label>{t.path} <input value={path} onChange={(e) => setPath(e.target.value)} /></label>
+        <button onClick={() => op({ op: "set_checkout", remote: r.remote, host, path })}>{t.setCheckout}</button>
       </div>
     </li>
   );
@@ -217,6 +222,7 @@ function RepoRow({ r, op }: { r: Repo; op: (b: Record<string, string>) => Promis
 interface Executor { id: string; kind: string }
 
 function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }) {
+  const t = useT(strings);
   const { api } = useSession();
   const { error, run } = useAct();
   const [list, setList] = useState<Executor[] | null>(null);
@@ -238,12 +244,12 @@ function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }
     });
 
   return (
-    <section aria-label="允许的执行者">
-      <h2>允许的执行者</h2>
+    <section aria-label={t.executors}>
+      <h2>{t.executors}</h2>
       {loadErr && <p role="alert">{loadErr}</p>}
       <div className="panel">
-      <label><input type="radio" name="lim" checked={!limited} onChange={() => setLimited(false)} />不限制</label>
-      <label><input type="radio" name="lim" checked={limited} onChange={() => setLimited(true)} />限制为所选（不选则只能指派给本人）</label>
+      <label><input type="radio" name="lim" checked={!limited} onChange={() => setLimited(false)} />{t.unlimited}</label>
+      <label><input type="radio" name="lim" checked={limited} onChange={() => setLimited(true)} />{t.limited}</label>
       {limited && (
         <ul className="plain">
           {ids.map((id) => (
@@ -251,7 +257,7 @@ function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }
           ))}
         </ul>
       )}
-      <div><button className="primary" onClick={save}>保存执行者</button></div>
+      <div><button className="primary" onClick={save}>{t.saveExecutors}</button></div>
       </div>
       {error && <p role="alert">{error}</p>}
     </section>
@@ -259,6 +265,7 @@ function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }
 }
 
 function ProjectItems({ id }: { id: string }) {
+  const t = useT(strings);
   const { api } = useSession();
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -266,10 +273,10 @@ function ProjectItems({ id }: { id: string }) {
     api.get<{ items: Item[] }>("/items?project=" + encodeURIComponent(id)).then((r) => setItems(r.items), (e) => setError(msg(e)));
   }, [api, id]);
   return (
-    <section aria-label="事项">
-      <h2>事项</h2>
+    <section aria-label={t.items}>
+      <h2>{t.items}</h2>
       {error && <p role="alert">{error}</p>}
-      {items && !items.length && <p className="sub">该项目下没有事项</p>}
+      {items && !items.length && <p className="sub">{t.noItems}</p>}
       {!!items?.length && (
         <ul className="rows">
           {items.map((i) => (

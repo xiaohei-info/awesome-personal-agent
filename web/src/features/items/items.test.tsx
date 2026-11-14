@@ -161,7 +161,7 @@ describe("设截止（ACT-LIF-03）", () => {
     const iso = new Date(local).toISOString();
     await waitFor(() => expect(l.items[0].deadline).toBe(iso));
     expect(l.calls.find((c) => c.method === "PATCH")).toMatchObject({ body: { deadline: iso }, ifMatch: "1" });
-    expect(await screen.findByText(`截止：${new Date(iso).toLocaleString()}`)).toBeInTheDocument();
+    expect(await screen.findByText(`截止：${new Date(iso).toLocaleString("zh-CN")}`)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "清除截止" }));
     await waitFor(() => expect(l.items[0].deadline).toBeNull());

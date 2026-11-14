@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { ActorBadge, type Step } from "../items/ItemsPage";
+import { errorText as msg, locale, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 /v1/settings/grants（policy.Grant）与 /v1/audit/events?grant=。有效期上限、动作白名单、凭据与范围校验都在服务端，
 // 本页只搬运输入并如实展示服务端的回答；授权单内容不可改，所以没有编辑或延长，只有撤销后重签。
@@ -31,16 +32,16 @@ const DEFAULT_DAYS = 7;
 const MAX_DAYS = 90;
 const DAY_MS = 86_400_000;
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 const split = (s: string) => s.split(/[\s,，]+/).filter(Boolean);
 
-function status(g: Grant, now = Date.now()) {
-  if (g.revoked_at) return "已撤销";
-  return Date.parse(g.expires_at) <= now ? "已过期" : "有效";
+function status(g: Grant, now = Date.now()): "revoked" | "expired" | "active" {
+  if (g.revoked_at) return "revoked";
+  return Date.parse(g.expires_at) <= now ? "expired" : "active";
 }
 
 function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | null) => void; onChanged: () => Promise<void> }) {
   const { api } = useSession();
+  const t = useT(strings);
   const [reason, setReason] = useState("");
   const [usage, setUsage] = useState<UsageEvent[] | null>(null);
   const st = status(g);
@@ -65,33 +66,35 @@ function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | n
 
   return (
     <li>
-      <strong>{g.id}</strong> <span className={"badge" + (st === "有效" ? " ok" : st === "已过期" ? " warn" : "")}>{st}</span>
-      {g.revoked_at && g.revoked_reason ? <span className="sub">（{g.revoked_reason}）</span> : ""}
+      <strong>{g.id}</strong> <span className={"badge" + (st === "active" ? " ok" : st === "expired" ? " warn" : "")}>{t.status[st]}</span>
+      {g.revoked_at && g.revoked_reason ? <span className="sub">{t.reasonParen(g.revoked_reason)}</span> : ""}
       <div className="sub full">
-        凭据 {g.grantee.credential}
-        {g.grantee.harness ? ` · harness ${g.grantee.harness}` : ""} · 动作 {g.actions.join("、")} · 范围
-        {g.scope.projects.length ? ` 项目 ${g.scope.projects.join("、")}` : ""}
-        {g.scope.kinds.length ? ` 类型 ${g.scope.kinds.join("、")}` : ""}
-        {g.scope.items.length ? ` 事项 ${g.scope.items.join("、")}` : ""} · 到期 {new Date(g.expires_at).toLocaleString()}
+        {t.credential(g.grantee.credential)}
+        {g.grantee.harness ? ` · harness ${g.grantee.harness}` : ""}
+        {t.actions(g.actions.join(t.listSep))}
+        {g.scope.projects.length ? t.scopeProjects(g.scope.projects.join(t.listSep)) : ""}
+        {g.scope.kinds.length ? t.scopeKinds(g.scope.kinds.join(t.listSep)) : ""}
+        {g.scope.items.length ? t.scopeItems(g.scope.items.join(t.listSep)) : ""}
+        {t.expires(new Date(g.expires_at).toLocaleString(locale()))}
         {g.reason ? ` · ${g.reason}` : ""}
       </div>
       <div className="actions full">
-        {st === "有效" && (
+        {st === "active" && (
           <>
             <label>
-              撤销原因
+              {t.revokeReason}
               <input value={reason} onChange={(e) => setReason(e.target.value)} />
             </label>
-            <button className="danger" disabled={!reason.trim()} onClick={revoke}>撤销</button>
+            <button className="danger" disabled={!reason.trim()} onClick={revoke}>{t.revoke}</button>
           </>
         )}
-        <button onClick={showUsage}>使用记录</button>
+        <button onClick={showUsage}>{t.usage}</button>
       </div>
-      {usage && (usage.length === 0 ? <p className="sub full">还没有使用记录</p> : (
-        <ul aria-label="使用记录" className="plain">
+      {usage && (usage.length === 0 ? <p className="sub full">{t.noUsage}</p> : (
+        <ul aria-label={t.usage} className="plain">
           {usage.map((e) => (
             <li key={e.seq}>
-              #{e.seq} · {e.type} · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString()}
+              #{e.seq} · {e.type} · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString(locale())}
               {e.reason ? ` · ${e.reason}` : ""}
             </li>
           ))}
@@ -103,6 +106,7 @@ function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | n
 
 export function SettingsGrantsPage() {
   const { api } = useSession();
+  const t = useT(strings);
   const [grants, setGrants] = useState<Grant[] | null>(null);
   const [delegates, setDelegates] = useState<Credential[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -168,37 +172,37 @@ export function SettingsGrantsPage() {
 
   return (
     <main>
-      <PageHead lede="让某个 agent 凭据在限定范围、限定期限内替你做决定。只在这里签发和撤销。">授权单</PageHead>
+      <PageHead lede={t.lede}>{t.title}</PageHead>
       {error && <div role="alert">{error}</div>}
       {/* noValidate：有效期等校验以服务端为准，max 只是提示 */}
-      <h2>签发授权单</h2>
-      <form className="panel" aria-label="签发授权单" noValidate onSubmit={issue}>
+      <h2>{t.issueTitle}</h2>
+      <form className="panel" aria-label={t.issueTitle} noValidate onSubmit={issue}>
         <label>
-          被授权凭据
+          {t.grantee}
           <select value={chosen} onChange={(e) => setCredential(e.target.value)}>
             {delegates.map((c) => (
-              <option key={c.id} value={c.id}>{`${c.label || c.id}（${c.id}）`}</option>
+              <option key={c.id} value={c.id}>{t.option(c.label || c.id, c.id)}</option>
             ))}
           </select>
         </label>
         <label>
-          harness（可选）
+          {t.harness}
           <input value={harness} onChange={(e) => setHarness(e.target.value)} />
         </label>
         <label>
-          项目范围
+          {t.projects}
           <input value={projects} onChange={(e) => setProjects(e.target.value)} />
         </label>
         <label>
-          类型范围
+          {t.kinds}
           <input value={kinds} onChange={(e) => setKinds(e.target.value)} />
         </label>
         <label>
-          事项范围
+          {t.items}
           <input value={items} onChange={(e) => setItems(e.target.value)} />
         </label>
         <fieldset className="checks">
-          <legend>动作</legend>
+          <legend>{t.actionsLegend}</legend>
           {GRANTABLE_ACTIONS.map((a) => (
             <label key={a}>
               <input type="checkbox" value={a} checked={actions.includes(a)} onChange={() => toggle(a)} />
@@ -207,23 +211,23 @@ export function SettingsGrantsPage() {
           ))}
         </fieldset>
         <label>
-          有效天数
+          {t.days}
           <input type="number" min={1} max={MAX_DAYS} value={days} onChange={(e) => setDays(e.target.value)} />
         </label>
         <label>
-          原因
+          {t.reason}
           <input value={reason} onChange={(e) => setReason(e.target.value)} />
         </label>
         <div>
-          <button type="submit" disabled={busy || !chosen || actions.length === 0}>签发</button>
+          <button type="submit" disabled={busy || !chosen || actions.length === 0}>{t.issue}</button>
         </div>
       </form>
       {grants === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : grants.length === 0 ? (
-        <p className="empty">还没有授权单</p>
+        <p className="empty">{t.empty}</p>
       ) : (
-        <ul aria-label="授权单列表" className="rows">
+        <ul aria-label={t.list} className="rows">
           {grants.map((g) => (
             <GrantRow key={g.id} g={g} onError={setError} onChanged={load} />
           ))}

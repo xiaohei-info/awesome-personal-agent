@@ -252,15 +252,16 @@ pre code { padding: 0; background: none; }
 .login .pitch p.sub { max-width: 30em; color: var(--ink-2); font-size: 15px; }
 .login .gate { display: flex; flex-direction: column; justify-content: center; padding: 8vh 6vw; }
 .login .gate h1 { font-size: 22px; margin-bottom: 18px; }
+.login .lang-switch { margin: 0 0 18px; }
 .login .gate form { max-width: 320px; }
 
 @media (max-width: 820px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .shell > nav { position: static; height: auto; flex-direction: row; align-items: center; gap: 4px; padding: 8px 10px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-  .brand { padding: 0 6px 0 2px; } .brand > div, .shell > nav h2 { display: none; }
+  .shell > nav .brand, .shell > nav h2 { display: none; }
   .shell > nav ul { display: flex; gap: 2px; } .shell > nav a { white-space: nowrap; gap: 6px; padding: 8px 10px; }
-  .shell > nav { padding: 8px 6px; gap: 2px; } .shell > nav a { padding: 8px 8px; }
-  .shell > nav .more { min-height: 44px; padding: 8px 8px; border: 0; background: none; box-shadow: none; color: var(--ink-2); }
+  .shell > nav { padding: 8px 6px; gap: 2px; } .shell > nav a { min-height: 44px; padding: 8px 6px; }
+  .shell > nav .more { min-height: 44px; padding: 8px 6px; border: 0; background: none; box-shadow: none; color: var(--ink-2); }
   .topbar { display: none; } main { padding: 22px 16px 56px; } h1 { font-size: 25px; }
   .tabs { padding: 4px 16px 0; } .tabs a { min-height: 44px; padding: 8px 10px; }
   .login { grid-template-columns: 1fr; } .login .pitch { padding: 40px 24px; border-right: 0; border-bottom: 1px solid var(--line); }

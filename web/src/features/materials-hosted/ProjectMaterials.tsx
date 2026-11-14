@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { HostedMaterial } from "./HostedMaterial";
+import { errorText as msg, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 项目页的材料与规范视图：只显示该项目的数据（服务端按 project 过滤），托管型与自有型并列并标明来源。
 interface Mat {
@@ -13,10 +14,10 @@ interface Mat {
   current_rev?: string;
 }
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 export function ProjectMaterials({ project }: { project: string }) {
   const { api } = useSession();
+  const t = useT(strings);
   const [mats, setMats] = useState<Mat[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Mat | null>(null);
@@ -33,15 +34,15 @@ export function ProjectMaterials({ project }: { project: string }) {
 
   return (
     <>
-      <section aria-label="材料">
-        <h2>材料</h2>
+      <section aria-label={t.materials}>
+        <h2>{t.materials}</h2>
         {error && <p role="alert">{error}</p>}
-        {mats && !rest.length && !error && <p className="sub">该项目下没有材料</p>}
+        {mats && !rest.length && !error && <p className="sub">{t.noMaterials}</p>}
         {!!rest.length && (
           <ul className="rows">
             {rest.map((m) => (
               <li key={m.id}>
-                <button className="link" onClick={() => setOpen(m)}>{m.title}</button> <span className="sub">{m.kind} · {m.location ? "托管型（只读）" : "自有型"}
+                <button className="link" onClick={() => setOpen(m)}>{m.title}</button> <span className="sub">{m.kind} · {m.location ? t.hosted : t.owned}
                 {m.location && <> · {m.location}</>}</span>
               </li>
             ))}
@@ -49,9 +50,9 @@ export function ProjectMaterials({ project }: { project: string }) {
         )}
         {open?.location && <HostedMaterial key={open.id} material={open} />}
       </section>
-      <section aria-label="规范">
-        <h2>规范</h2>
-        {mats && !guidelines.length && !error && <p className="sub">该项目还没有规范</p>}
+      <section aria-label={t.guidelines}>
+        <h2>{t.guidelines}</h2>
+        {mats && !guidelines.length && !error && <p className="sub">{t.noGuidelines}</p>}
         {guidelines.map((g) => (
           <Guideline key={g.id} m={g} />
         ))}
@@ -62,6 +63,7 @@ export function ProjectMaterials({ project }: { project: string }) {
 
 function Guideline({ m }: { m: Mat }) {
   const { api } = useSession();
+  const t = useT(strings);
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -74,7 +76,7 @@ function Guideline({ m }: { m: Mat }) {
     <article aria-label={m.title}>
       <h3>{m.title}</h3>
       {error && <p role="alert">{error}</p>}
-      {text === "" && <p className="sub">尚无生效的修订（等待本人确认）</p>}
+      {text === "" && <p className="sub">{t.noActiveRevision}</p>}
       {text && <pre>{text}</pre>}
     </article>
   );

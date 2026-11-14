@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import { errorText as msg, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/deliveries/unread 返回的 domain.Delivery。未读 = 退回 Web 且本人没点过；是否未读由服务端判定。
 export interface UnreadDelivery {
@@ -14,10 +15,10 @@ export interface UnreadDelivery {
   injections?: { injected_to_session: string; at: string }[];
 }
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 export function UnreadPage() {
   const { api } = useSession();
+  const t = useT(strings);
   const [items, setItems] = useState<UnreadDelivery[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -50,7 +51,7 @@ export function UnreadPage() {
 
   return (
     <main>
-      <PageHead lede="退回 Web、你还没看过的通知。">Web 未读</PageHead>
+      <PageHead lede={t.lede}>{t.title}</PageHead>
       {error && (
         <div role="alert">
           {error}{" "}
@@ -60,28 +61,28 @@ export function UnreadPage() {
               load();
             }}
           >
-            重试
+            {t.retry}
           </button>
         </div>
       )}
       {items === null ? (
-        !error && <p role="status">加载中…</p>
+        !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
-        <p className="empty">没有未读</p>
+        <p className="empty">{t.empty}</p>
       ) : (
         items.map((d) => (
           <article key={d.id} aria-label={d.content.title}>
             <h3>{d.content.title}</h3>
             <p className="meta"><span className="badge plain">{d.class}</span></p>
             {d.content.summary && <p>{d.content.summary}</p>}
-            {d.content.options && d.content.options.length > 0 && <p>选项：{d.content.options.join(" / ")}</p>}
-            {d.content.web_url && <a href={d.content.web_url}>打开</a>}
+            {d.content.options && d.content.options.length > 0 && <p>{t.options(d.content.options.join(" / "))}</p>}
+            {d.content.web_url && <a href={d.content.web_url}>{t.open}</a>}
             {d.injections && d.injections.length > 0 && (
-              <p>已注入 {d.injections.length} 个会话（注入不算确认，仍需你本人确认）</p>
+              <p>{t.injected(d.injections.length)}</p>
             )}
             <div className="actions">
               <button disabled={busy === d.id} onClick={() => markRead(d.id)}>
-                标记已读
+                {t.markRead}
               </button>
             </div>
           </article>

@@ -1,0 +1,61 @@
+import type { Dict } from "../../app/i18n";
+import { common } from "../../app/strings";
+
+const zh = {
+  ...common.zh,
+  title: "决策待办",
+  none: "没有要你决定的事",
+  waiting: "agent 停在这里等你。",
+  hint1: "按数字键直接拍板，",
+  hint2: "上下切换，",
+  hint3: "看原因。",
+  countPre: "",
+  countPost: " 件事等你决定",
+  empty: "agent 遇到该你拍板的事，会停下来在这里等你。",
+  due: (at: string) => `截止 ${at}`,
+  overdue: "已过期",
+  daysLeft: (n: number) => `还剩 ${n} 天`,
+  noReason: "没有记录原因",
+  webOnly: "仅限 Web 确认",
+  options: "选项",
+  recommended: "（推荐）",
+  otherIdea: "别的想法",
+  otherIdeaPlaceholder: "别的想法…",
+  submitIdea: "提交想法",
+  why: "为什么在这",
+  // 被拒绝的代答 / 处理（决策待办与建议流共用）
+  rejectedWhat: { answer: "代答", handle: "处理" },
+  rejected: (what: string) => `被拒绝的${what}`,
+  rejectedBody: (who: string, what: string) => `${who} 的${what}未生效`,
+  rejectedGrant: (g: string) => ` · 授权单 ${g}`,
+};
+
+const en: typeof zh = {
+  ...common.en,
+  title: "Decisions",
+  none: "Nothing needs your decision",
+  waiting: "Agents are waiting for you here. ",
+  hint1: "Press a number key to decide, ",
+  hint2: " to move, ",
+  hint3: " for the reason.",
+  countPre: "",
+  countPost: " waiting for your decision",
+  empty: "When an agent needs your call, it stops and waits for you here.",
+  due: (at) => `due ${at}`,
+  overdue: "overdue",
+  daysLeft: (n) => `${n} day${n === 1 ? "" : "s"} left`,
+  noReason: "No reason recorded",
+  webOnly: "Web confirmation only",
+  options: "Options",
+  recommended: " (recommended)",
+  otherIdea: "Something else",
+  otherIdeaPlaceholder: "Something else…",
+  submitIdea: "Send",
+  why: "Why is this here",
+  rejectedWhat: { answer: "answer on behalf", handle: "handling" },
+  rejected: (what) => `Rejected ${what}`,
+  rejectedBody: (who, what) => `${what} by ${who} did not take effect`,
+  rejectedGrant: (g) => ` · grant ${g}`,
+};
+
+export const strings: Dict<typeof zh> = { zh, en };

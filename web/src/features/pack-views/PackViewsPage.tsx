@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import { errorText as msg, lang, locale, useT } from "../../app/i18n";
+import { common } from "../../app/strings";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/packs 的 views 与 GET /v1/items（附录 B.2、C.8）。
 // 列、筛选、卡片字段全部来自能力包声明；本页只按字段路径取值，不含任何包专属逻辑，新增包不改这里。
@@ -9,7 +11,6 @@ interface View { kind: string; list: { columns: string[]; filters: string[] }; c
 interface Pack { name: string; views?: Record<string, View> | null }
 type Item = { id: string; kind: string; title: string } & Record<string, unknown>
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 /** 按点路径取值：`spec.period`。缺失返回 undefined。 */
 export function pick(o: unknown, path: string): unknown {
@@ -24,8 +25,8 @@ export function pick(o: unknown, path: string): unknown {
 const ISO = /^\d{4}-\d{2}-\d{2}T/;
 function show(v: unknown): string {
   if (v === undefined || v === null || v === "") return "—";
-  if (Array.isArray(v)) return v.map(show).join("、");
-  if (typeof v === "string") return ISO.test(v) ? new Date(v).toLocaleString() : v;
+  if (Array.isArray(v)) return v.map(show).join(common[lang()].listSep);
+  if (typeof v === "string") return ISO.test(v) ? new Date(v).toLocaleString(locale()) : v;
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
 }
@@ -33,6 +34,7 @@ const values = (v: unknown): string[] => (v === undefined || v === null || v ===
 
 export function PackViewsPage() {
   const { api } = useSession();
+  const t = useT(strings);
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,10 +49,10 @@ export function PackViewsPage() {
   }, [api]);
 
   if (error) return <main><p role="alert">{error}</p></main>;
-  if (!packs || !items) return <main><p role="status">加载中…</p></main>;
+  if (!packs || !items) return <main><p role="status">{t.loading}</p></main>;
 
   const views = packs.flatMap((p) => Object.entries(p.views ?? {}).map(([name, v]) => ({ key: `${p.name}/${name}`, v })));
-  if (!views.length) return <main><PageHead>能力包视图</PageHead><p className="empty">没有能力包声明视图</p></main>;
+  if (!views.length) return <main><PageHead>{t.title}</PageHead><p className="empty">{t.none}</p></main>;
   const cur = views.find((x) => x.key === sel) ?? views[0];
   const { v } = cur;
   const rows = items.filter((i) => i.kind === v.kind);
@@ -58,10 +60,10 @@ export function PackViewsPage() {
 
   return (
     <main>
-      <PageHead>能力包视图</PageHead>
+      <PageHead>{t.title}</PageHead>
       <div className="filters">
       <label>
-        视图
+        {t.view}
         <select value={cur.key} onChange={(e) => { setSel(e.target.value); setFilters({}); }}>
           {views.map((x) => <option key={x.key}>{x.key}</option>)}
         </select>
@@ -70,19 +72,19 @@ export function PackViewsPage() {
         const opts = [...new Set(rows.flatMap((i) => values(pick(i, f))))].sort();
         return (
           <label key={f}>
-            {`筛选 ${f}`}
+            {t.filter(f)}
             <select value={filters[f] ?? ""} onChange={(e) => setFilters({ ...filters, [f]: e.target.value })}>
-              <option value="">全部</option>
+              <option value="">{t.all}</option>
               {opts.map((o) => <option key={o}>{o}</option>)}
             </select>
           </label>
         );
       })}
       </div>
-      {!shown.length && <p className="empty">没有符合条件的事项</p>}
+      {!shown.length && <p className="empty">{t.noMatch}</p>}
       {!!shown.length && (
         <div className="panel flush">
-        <table aria-label="视图列表">
+        <table aria-label={t.table}>
           <thead><tr>{v.list.columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
           <tbody>
             {shown.map((i) => <tr key={i.id}>{v.list.columns.map((c) => <td key={c}>{show(pick(i, c))}</td>)}</tr>)}
@@ -90,9 +92,9 @@ export function PackViewsPage() {
         </table>
         </div>
       )}
-      <section aria-label="视图卡片">
+      <section aria-label={t.cards}>
         {shown.map((i) => (
-          <article key={i.id} aria-label={`卡片 ${i.title}`}>
+          <article key={i.id} aria-label={t.card(i.title)}>
             <h3>{i.title}</h3>
             <dl>
               {v.card.fields.map((f) => <div key={f}><dt>{f}</dt><dd>{show(pick(i, f))}</dd></div>)}

@@ -1,12 +1,17 @@
 import { useState, type FormEvent } from "react";
 import { ApiError } from "./api";
+import { errorText, setChoice, useLang, useT } from "./i18n";
 import { useSession } from "./session";
+import { BRAND_MARK, LANG_NAMES, common } from "./strings";
 
 export function Login() {
   const { login } = useSession();
+  const lang = useLang();
+  const t = useT(common);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const other = lang === "zh" ? "en" : "zh";
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -15,7 +20,7 @@ export function Login() {
     try {
       await login(password);
     } catch (err) {
-      setError(err instanceof ApiError ? `${err.body.why}（${err.body.next}）` : "无法连接服务");
+      setError(err instanceof ApiError ? errorText(err) : t.cannotConnect);
       setBusy(false);
     }
   }
@@ -24,28 +29,35 @@ export function Login() {
     <main className="login">
       <div className="pitch">
         <div className="brand">
-          <span className="mark" aria-hidden="true">决</span>
+          <span className="mark" aria-hidden="true">{BRAND_MARK}</span>
           <div>
             <b>APA</b>
             <small>awesome personal agent</small>
           </div>
         </div>
         <p className="big">
-          事情交给 agent，
+          {t.loginPitch1}
           <br />
-          <em>决定</em>留给你。
+          <em>{t.loginPitch2}</em>
+          {t.loginPitch3}
         </p>
-        <p className="sub">agent 替你读邮件、看日历、推进事项。遇到该你拍板的事，它会停下来，在这里等你一句话。</p>
+        <p className="sub">{t.loginSub}</p>
       </div>
       <div className="gate">
-        <h1>登录</h1>
+        {/* 未登录时进不了设置页，所以登录页自带语言切换 */}
+        <p className="lang-switch">
+          <button type="button" className="link" lang={other} aria-label={`${t.language}: ${LANG_NAMES[other]}`} onClick={() => setChoice(other)}>
+            {LANG_NAMES[other]}
+          </button>
+        </p>
+        <h1>{t.login}</h1>
         <form onSubmit={submit}>
           <label>
-            口令
+            {t.password}
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required autoFocus />
           </label>
           <div>
-            <button type="submit" disabled={busy}>登录</button>
+            <button type="submit" disabled={busy}>{t.login}</button>
           </div>
           {error && <p role="alert">{error}</p>}
         </form>

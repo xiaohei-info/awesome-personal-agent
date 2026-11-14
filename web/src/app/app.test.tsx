@@ -34,7 +34,7 @@ function fakeServer() {
   return { impl, calls, setValid: () => (sessionValid = true) };
 }
 
-const feat = (id: string, title: string, order?: number): Feature => ({ id, title, path: id, order, element: <h2>{title} 页面</h2> });
+const feat = (id: string, title: string, order?: number): Feature => ({ id, title: { zh: title, en: title }, path: id, order, element: <h2>{title} 页面</h2> });
 const FEATURES = [feat("decisions", "决策待办", 1), feat("items", "事项", 2)];
 
 function mount(fetchImpl: typeof fetch, features = FEATURES, at = "/") {
@@ -174,7 +174,7 @@ function Probe({ title }: { title: string }) {
     </main>
   );
 }
-const REAL = registered.map((f) => ({ ...f, count: undefined, element: <Probe title={f.title} /> }));
+const REAL = registered.map((f) => ({ ...f, count: undefined, element: <Probe title={f.title.zh} /> }));
 
 async function openAt(at: string) {
   sessionStorage.setItem("apa.csrf", "tok-1");
@@ -253,6 +253,34 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     } finally {
       window.matchMedia = mm;
     }
+  });
+});
+
+describe("界面语言（设计 §4.1）", () => {
+  it("设置 › 通用 选 English：导航与页面切到英文，记在本机，<html lang> 随之改变；选跟随浏览器则清掉记录", async () => {
+    sessionStorage.setItem("apa.csrf", "tok-1");
+    const srv = fakeServer();
+    srv.setValid();
+    const general = registered.filter((f) => f.id === "settings-general");
+    mount(srv.impl, [...REAL.filter((f) => f.id !== "settings-general"), ...general], "/settings/general");
+    await userEvent.click(await screen.findByRole("radio", { name: "English" }));
+    const nav = await screen.findByRole("navigation", { name: "Main navigation" });
+    expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["Act", "Work", "Operate"]);
+    expect(within(nav).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("General");
+    expect(localStorage.getItem("apa.lang")).toBe("en");
+    expect(document.documentElement.lang).toBe("en");
+    await userEvent.click(screen.getByRole("radio", { name: /Follow the browser/ }));
+    expect(localStorage.getItem("apa.lang")).toBeNull();
+  });
+
+  it("登录页自带语言切换（未登录进不了设置）", async () => {
+    mount(fakeServer().impl);
+    await userEvent.click(await screen.findByRole("button", { name: /English/ }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /中文/ }));
+    expect(await screen.findByRole("heading", { name: "登录" })).toBeInTheDocument();
   });
 });
 

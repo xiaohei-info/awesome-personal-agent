@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
+import { errorText as msg, locale, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/items?kind=brief（spec.period、spec.sections[{project,body}]）、GET/POST /v1/instances、GET /v1/packs（附录 B.2、C.10）。
 // 简报与复盘都是 brief 事项（packs/review 写回 brief kind，以 spec.period 区分周期），本页不猜类型，统一按周期列出；分节与定时校验都由服务端与包负责，本页只展示并搬运输入。
@@ -11,15 +12,15 @@ interface Instance { id: string; pack: string; params: { schedule?: string; proj
 interface Pack { name: string }
 
 const BRIEF_PACKS = ["brief", "review"]; // 产出 brief 事项的内置包
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 function BriefCard({ b }: { b: Brief }) {
+  const t = useT(strings);
   const sections = b.spec?.sections ?? [];
   return (
-    <article aria-label={`简报 ${b.title}`}>
+    <article aria-label={t.brief(b.title)}>
       <h4>{b.title}</h4>
-      <p className="meta">{[b.spec?.period, b.created_at && new Date(b.created_at).toLocaleString()].filter(Boolean).join(" · ")}</p>
-      {!sections.length && <p>暂无分节内容</p>}
+      <p className="meta">{[b.spec?.period, b.created_at && new Date(b.created_at).toLocaleString(locale())].filter(Boolean).join(" · ")}</p>
+      {!sections.length && <p>{t.noSections}</p>}
       {sections.map((s, i) => (
         <section key={i}>
           <h5>{s.project}</h5>
@@ -32,6 +33,7 @@ function BriefCard({ b }: { b: Brief }) {
 
 export function BriefsPage() {
   const { api } = useSession();
+  const t = useT(strings);
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [instances, setInstances] = useState<Instance[] | null>(null);
   const [packs, setPacks] = useState<string[]>([]);
@@ -59,7 +61,7 @@ export function BriefsPage() {
 
   async function create(e: FormEvent) {
     e.preventDefault();
-    if (!schedule.trim()) return setError("请填写定时");
+    if (!schedule.trim()) return setError(t.needSchedule);
     const list = projects.split(",").map((s) => s.trim()).filter(Boolean);
     try {
       const created = await api.post<Instance>("/instances", {
@@ -75,33 +77,33 @@ export function BriefsPage() {
     }
   }
 
-  if (!briefs || !instances) return <main>{error ? <p role="alert">{error}</p> : <p role="status">加载中…</p>}</main>;
+  if (!briefs || !instances) return <main>{error ? <p role="alert">{error}</p> : <p role="status">{t.loading}</p>}</main>;
 
   return (
     <main>
-      <PageHead>简报</PageHead>
+      <PageHead>{t.title}</PageHead>
       {error && <p role="alert">{error}</p>}
-      <section aria-label="简报">
-        <h2>简报与复盘</h2>
-        {!briefs.length && <p className="sub">还没有简报</p>}
+      <section aria-label={t.title}>
+        <h2>{t.briefs}</h2>
+        {!briefs.length && <p className="sub">{t.none}</p>}
         {briefs.map((b) => <BriefCard key={b.id} b={b} />)}
       </section>
-      <section aria-label="实例管理">
-        <h2>定时实例</h2>
-        <ul aria-label="实例" className={instances.length ? "rows" : "plain"}>
+      <section aria-label={t.instances}>
+        <h2>{t.scheduled}</h2>
+        <ul aria-label={t.instanceList} className={instances.length ? "rows" : "plain"}>
           {instances.map((i) => (
-            <li key={i.id}>{i.id} · {i.pack} · {i.params.schedule ?? "—"}{i.params.projects?.length ? ` · ${i.params.projects.join("、")}` : ""}{i.enabled ? "" : "（已停用）"}</li>
+            <li key={i.id}>{i.id} · {i.pack} · {i.params.schedule ?? "—"}{i.params.projects?.length ? ` · ${i.params.projects.join(t.listSep)}` : ""}{i.enabled ? "" : t.disabled}</li>
           ))}
         </ul>
         <form className="panel" onSubmit={(e) => void create(e)}>
-          <label>能力包
+          <label>{t.pack}
             <select value={pack || packs[0] || ""} onChange={(e) => setPack(e.target.value)}>
               {packs.map((p) => <option key={p}>{p}</option>)}
             </select>
           </label>
-          <label>定时<input value={schedule} onChange={(e) => setSchedule(e.target.value)} placeholder="0 8 * * 1-5" /></label>
-          <label>项目（逗号分隔，可空）<input value={projects} onChange={(e) => setProjects(e.target.value)} /></label>
-          <button type="submit" disabled={!packs.length}>创建实例</button>
+          <label>{t.schedule}<input value={schedule} onChange={(e) => setSchedule(e.target.value)} placeholder="0 8 * * 1-5" /></label>
+          <label>{t.projects}<input value={projects} onChange={(e) => setProjects(e.target.value)} /></label>
+          <button type="submit" disabled={!packs.length}>{t.create}</button>
         </form>
       </section>
     </main>

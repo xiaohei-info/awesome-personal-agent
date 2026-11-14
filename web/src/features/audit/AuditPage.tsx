@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { ActorBadge, type Step } from "../items/ItemsPage";
+import { errorText as msg, locale, useT } from "../../app/i18n";
+import { strings } from "./strings";
 
 // 形状对应 GET /v1/audit/events（附录 B.2，§15.3）。筛选、裁剪、分页都在服务端，本页只搬运条件并显示结果；只读，不提供撤销。
 const PAGE = 100;
@@ -11,7 +12,6 @@ interface AuditEvent extends Step { object: string; chain_depth: number; grant?:
 interface Filter { actor: string; object: string; type: string }
 const EMPTY: Filter = { actor: "", object: "", type: "" };
 
-const msg = (e: unknown) => (e instanceof ApiError ? `${e.body.why}（${e.body.next}）` : e instanceof Error ? e.message : "request failed");
 
 function query(f: Filter, after: number) {
   const p = new URLSearchParams({ limit: String(PAGE) });
@@ -22,6 +22,7 @@ function query(f: Filter, after: number) {
 
 export function AuditPage() {
   const { api } = useSession();
+  const t = useT(strings);
   const [draft, setDraft] = useState<Filter>(EMPTY);
   const [applied, setApplied] = useState<Filter>(EMPTY);
   const [events, setEvents] = useState<AuditEvent[] | null>(null);
@@ -58,35 +59,35 @@ export function AuditPage() {
 
   return (
     <main>
-      <PageHead lede="账本里的每一条事件：谁、从哪个入口、对什么做了什么。只读。">审计</PageHead>
+      <PageHead lede={t.lede}>{t.title}</PageHead>
       <form className="panel inline" onSubmit={submit}>
-        {field("actor", "操作者筛选")}
-        {field("object", "对象筛选")}
-        {field("type", "事件类型筛选")}
+        {field("actor", t.actor)}
+        {field("object", t.object)}
+        {field("type", t.type)}
         <div className="actions">
-          <button type="submit">筛选</button>
-          <button type="button" onClick={() => apply({ ...EMPTY, type: REJECTED })}>只看被拒绝的命令</button>
-          <button type="button" onClick={() => apply(EMPTY)}>清除</button>
+          <button type="submit">{t.filter}</button>
+          <button type="button" onClick={() => apply({ ...EMPTY, type: REJECTED })}>{t.rejectedOnly}</button>
+          <button type="button" onClick={() => apply(EMPTY)}>{t.clear}</button>
         </div>
       </form>
       {error && <p role="alert">{error}</p>}
-      {!events && !error && <p role="status">加载中…</p>}
-      {events && !events.length && <p className="empty">没有符合条件的事件</p>}
+      {!events && !error && <p role="status">{t.loading}</p>}
+      {events && !events.length && <p className="empty">{t.empty}</p>}
       {events && events.length > 0 && (
-        <ul aria-label="审计事件" className="rows">
+        <ul aria-label={t.events} className="rows">
           {events.map((e) => (
             <li key={e.seq}>
               <span>
-                #{e.seq} · {e.type} · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString()}
-                {e.grant ? ` · 授权单 ${e.grant}` : ""}
+                #{e.seq} · {e.type} · {e.object} · <ActorBadge actor={e.actor} /> · {new Date(e.at).toLocaleString(locale())}
+                {e.grant ? t.grant(e.grant) : ""}
                 {e.reason ? ` · ${e.reason}` : ""}
-                {e.redacted || e.tombstone ? " · （内容已隐藏）" : ""}
+                {e.redacted || e.tombstone ? t.hidden : ""}
               </span>
             </li>
           ))}
         </ul>
       )}
-      {more && events && <button onClick={() => void load(applied, events[events.length - 1].seq)}>加载更多</button>}
+      {more && events && <button onClick={() => void load(applied, events[events.length - 1].seq)}>{t.more}</button>}
     </main>
   );
 }

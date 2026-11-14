@@ -10,6 +10,6 @@
 | [security.md](security.md) | 远程访问、登录与会话、外发范围、凭据与备份的保管 | 把 Web 暴露到本机之外之前 |
 | [upgrade.md](upgrade.md) | 备份、升级、回退，升级后本机验证清单 L1–L12 | 升级已有部署 |
 | [uninstall.md](uninstall.md) | 干净地卸载 | 不再使用时 |
-| [changelog.md](changelog.md) | 各版本变更，含界面语言限制与需要迁移的变更 | 升级之前 |
+| [changelog.md](changelog.md) | 各版本变更，含界面语言说明与需要迁移的变更 | 升级之前 |
 
 发布包里的二进制与配置样例见发布物清单（设计文档 §16.6）：主程序 `apa`、来源程序与工具适配器、渠道/导出/webhook 转发 ext、首批宿主插件包、`deploy/` 下的部署样例和每个文件的哈希清单。用 `apa version` 查看版本号、构建提交、各数据结构版本与协议版本。

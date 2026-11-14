@@ -1,0 +1,58 @@
+import type { Dict } from "../../app/i18n";
+import { common } from "../../app/strings";
+
+const zh = {
+  ...common.zh,
+  title: "任务委派",
+  phases: { open: "进行中", waiting: "等待中", needs_input: "待本人", done: "已完成", dropped: "已丢弃" } as Record<string, string>,
+  outcomes: { progress: "进展", done: "完成", blocked: "阻塞" } as Record<string, string>,
+  allowedTail: (list: string) => `；该项目允许的执行者：${list}`,
+  ownerOnly: "仅本人",
+  noParent: "找不到父事项，无法重新委派",
+  executor: "执行者：",
+  unassigned: "未指派",
+  state: " · 状态：",
+  project: (p: string) => ` · 项目 ${p}`,
+  progress: "进度：",
+  noReport: "暂无回执",
+  report: (o: string, at: string) => ` （${o} · ${at}）`,
+  evidence: "证据",
+  branch: "分支",
+  link: "链接",
+  redelegate: "重新委派",
+  reassign: "改派",
+  target: "目标执行者",
+  pickExecutor: "选择执行者…",
+  notAllowed: "（项目不允许）",
+  confirm: (what: string) => `确认${what}`,
+  empty: "没有委派",
+};
+
+const en: typeof zh = {
+  ...common.en,
+  title: "Delegations",
+  phases: { open: "in progress", waiting: "waiting", needs_input: "needs you", done: "done", dropped: "dropped" },
+  outcomes: { progress: "progress", done: "done", blocked: "blocked" },
+  allowedTail: (list) => `; executors allowed in this project: ${list}`,
+  ownerOnly: "only you",
+  noParent: "The parent item was not found, so it cannot be redelegated",
+  executor: "Executor: ",
+  unassigned: "unassigned",
+  state: " · state: ",
+  project: (p) => ` · project ${p}`,
+  progress: "Progress: ",
+  noReport: "no report yet",
+  report: (o, at) => ` (${o} · ${at})`,
+  evidence: "Evidence",
+  branch: "branch",
+  link: "link",
+  redelegate: "Redelegate",
+  reassign: "Reassign",
+  target: "Target executor",
+  pickExecutor: "Choose an executor…",
+  notAllowed: " (not allowed in this project)",
+  confirm: (what) => `Confirm: ${what}`,
+  empty: "No delegations",
+};
+
+export const strings: Dict<typeof zh> = { zh, en };
