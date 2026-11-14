@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -11,8 +11,8 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix the request" });
 
 interface Band { template: string; source?: string; low: number; high: number }
-function backend(o: { pool?: { judgment: string; subject: string }[] } = {}) {
-  let settings = { bands: [] as Band[], shadow: [] as string[], spot_check: { per_brief: 5 } };
+function backend(o: { pool?: { judgment: string; subject: string }[]; bands?: Band[]; reject?: boolean } = {}) {
+  let settings = { bands: [...(o.bands ?? [])] as Band[], shadow: [] as string[], spot_check: { per_brief: 5 } };
   const pool = [...(o.pool ?? [])];
   const reviewed: Record<string, string> = {};
   const calls: { method: string; path: string; body?: any }[] = [];
@@ -51,6 +51,7 @@ function backend(o: { pool?: { judgment: string; subject: string }[] } = {}) {
     }
     if (u.pathname === "/v1/settings/judgment") {
       if (method === "GET") return json(200, settings);
+      if (o.reject) return err(400, "invalid_request", "band for an unknown template");
       for (const b of body.bands ?? []) if (b.low > b.high) return err(400, "invalid_request", "band low must not be greater than high");
       settings = { ...settings, ...body };
       return json(200, settings);
@@ -68,100 +69,106 @@ function mount(fetchImpl: typeof fetch) {
     </MemoryRouter>,
   );
 }
+const TRIAGE = "来源消息值不值得看";
+const card = async (name = TRIAGE) => within(await screen.findByRole("region", { name }));
+const slide = (c: ReturnType<typeof within>, which: "下线" | "上线", v: number) => fireEvent.change(c.getByLabelText(which), { target: { value: String(v) } });
+const puts = (be: ReturnType<typeof backend>) => be.calls.filter((c) => c.method === "PUT").map((c) => c.body);
 beforeEach(() => sessionStorage.clear());
 
-describe("判断与校准页", () => {
-  // 360px 不横向溢出依赖 <main> 上的手机样式（宽表格在自身内滚动）；页面根必须是 main，包住所有表格。
-  it("renders inside <main> so the mobile table-scroll styles apply", async () => {
+describe("自动规则 › 筛选门槛", () => {
+  // 360px 不横向溢出依赖 <main> 上的手机样式（宽表格在自身内滚动）；页面根必须是 main。
+  it("每个问题一张卡：中文问题、两个数、分数分布；内置问题没有数据时也在（可以先开试用）", async () => {
     mount(backend().impl);
-    const rates = await screen.findByRole("table", { name: "指标" });
-    const main = screen.getByRole("main");
-    expect(main).toContainElement(rates);
-    expect(within(main).getByRole("table", { name: "不确定带" })).toBeInTheDocument();
+    const c = await card();
+    expect(document.querySelector("main")).toContainElement(c.getByRole("img", { name: `分数分布：${TRIAGE}` }));
+    expect(c.getByText("50.0%")).toBeInTheDocument(); // 你接受的
+    expect(c.getByText(/漏掉该看的 · 已抽查 0 条/)).toBeInTheDocument();
+    expect(within(await screen.findByRole("region", { name: "要不要你亲自确认" })).getByText("还没有打分记录")).toBeInTheDocument();
+    expect(screen.queryByText("triage-screen")).not.toBeInTheDocument();
   });
 
-  // ACT-JRC-10：四项指标、分数分布、按后端分组，窗口切换生效。
-  it("shows the four rates, histogram and per-backend rows, and the window switch re-queries", async () => {
+  // ACT-JRC-10：四项比例与按后端分组收在「详细数据」，窗口与来源切换会重查。
+  it("详细数据里有四项比例与按谁答的分组；窗口切换重查", async () => {
     const be = backend();
     mount(be.impl);
-    const rates = await screen.findByRole("table", { name: "指标" });
-    expect(within(rates).getByText("25.0%")).toBeInTheDocument();
-    expect(within(rates).getByText("10.0%")).toBeInTheDocument();
-    expect(within(rates).getAllByText("50.0%").length).toBe(1);
-    const rows = screen.getByRole("table", { name: "各级调用" });
-    expect(within(rows).getByText("classifier")).toBeInTheDocument();
-    expect(within(rows).getByText("chat")).toBeInTheDocument();
-    expect(await screen.findByRole("figure")).toHaveTextContent("低端误丢率");
-    expect(screen.getByLabelText("0.9–1.0")).toHaveAttribute("value", "3");
-    expect(screen.getByLabelText("0.0–0.1")).toHaveAttribute("value", "10"); // 缺省 30 天
-
-    await userEvent.selectOptions(screen.getByLabelText("窗口"), "7d");
-    await waitFor(() => expect(screen.getByLabelText("0.0–0.1")).toHaveAttribute("value", "4"));
+    await card();
+    const rates = screen.getByRole("table", { name: "各级调用" });
+    expect(within(rates).getByText("打分模型")).toBeInTheDocument();
+    expect(within(rates).getByText("写作模型")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "各问题的比例" })).getByText("25.0%")).toBeInTheDocument();
+    expect((await card()).getByRole("status")).toHaveTextContent("最近 30 天：约丢掉 10 · 交给写作模型 0 · 直接起草 3");
+    await userEvent.selectOptions(screen.getByLabelText("看最近"), "7");
+    await waitFor(async () => expect((await card()).getByRole("status")).toHaveTextContent("最近 7 天：约丢掉 4"));
     expect(be.calls.some((c) => c.path.includes("since=7d"))).toBe(true);
     await userEvent.selectOptions(screen.getByLabelText("来源"), "src_b");
-    expect(await screen.findByText("这个窗口里还没有判断记录。")).toBeInTheDocument();
+    expect(await (await card()).findByText("还没有打分记录")).toBeInTheDocument();
   });
 
-  // ACT-JRC-11 / ACT-BKL-07：按来源覆盖的不确定带由本人保存，读回两条。
-  it("saves a global band and a per-source band as one PUT and reads both back", async () => {
-    const be = backend();
-    mount(be.impl);
-    await screen.findByRole("table", { name: "不确定带" });
-    for (const [low, high, src] of [["0.10", "0.90", ""], ["0.25", "0.50", "src_a"]]) {
-      await userEvent.click(screen.getByText("添加一条"));
-      const row = within(screen.getByRole("table", { name: "不确定带" })).getAllByRole("row").at(-1)!;
-      await userEvent.type(within(row).getByLabelText("带模板"), "triage-screen");
-      if (src) await userEvent.selectOptions(within(row).getByLabelText("带来源"), src);
-      await userEvent.type(within(row).getByLabelText("下限"), low);
-      await userEvent.type(within(row).getByLabelText("上限"), high);
-    }
-    await userEvent.click(screen.getByText("保存不确定带"));
-    expect(await screen.findByText("不确定带已保存")).toBeInTheDocument();
-    expect(be.settings.bands).toEqual([
-      { template: "triage-screen", low: 0.1, high: 0.9 },
-      { template: "triage-screen", source: "src_a", low: 0.25, high: 0.5 },
-    ]);
-    expect(be.calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+  it("拖线时实时估算（按桶，标「约」）；不改就不能保存", async () => {
+    mount(backend().impl);
+    const c = await card();
+    expect(c.getByRole("button", { name: "保存这两条线" })).toBeDisabled();
+    expect(c.getByText(/下线 0.15 · 上线 0.60（默认）/)).toBeInTheDocument();
+    slide(c, "下线", 0.01);
+    expect(c.getByRole("status")).toHaveTextContent("约丢掉 0 · 交给写作模型 10 · 直接起草 3");
+    expect(c.getByRole("button", { name: "保存这两条线" })).toBeEnabled();
   });
 
-  // ACT-JRC-12：服务端拒绝 low>high，页面显示原因，已有的带不变。
-  it("shows the server's 400 for low > high and keeps the saved bands", async () => {
-    const be = backend();
+  // 写入语义与改版前一致：PUT 只带 bands，整份列表 = 已有的 + 这一条；与旧页「添加一条再保存」的请求体逐字段相同。
+  it("ACT-JRC-11：保存一条线的请求体与改版前相同（全局与按来源各一次）", async () => {
+    const existing = { template: "web-only-screening", low: 0.3, high: 1 };
+    const be = backend({ bands: [existing] });
     mount(be.impl);
-    await screen.findByRole("table", { name: "不确定带" });
-    await userEvent.click(screen.getByText("添加一条"));
-    await userEvent.type(screen.getByLabelText("带模板"), "triage-screen");
-    await userEvent.type(screen.getByLabelText("下限"), "0.70");
-    await userEvent.type(screen.getByLabelText("上限"), "0.40");
-    await userEvent.click(screen.getByText("保存不确定带"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("band low must not be greater than high");
+    let c = await card();
+    slide(c, "下线", 0.1);
+    slide(c, "上线", 0.9);
+    await userEvent.click(c.getByRole("button", { name: "保存这两条线" }));
+    await screen.findByText("已保存");
+    // 旧页：添加一行 template=triage-screen、来源空、0.10/0.90 后保存，请求体是 { bands: [已有的, 新的] }。
+    expect(puts(be)).toEqual([{ bands: [existing, { template: "triage-screen", low: 0.1, high: 0.9 }] }]);
+    await userEvent.selectOptions(screen.getByLabelText("来源"), "src_a");
+    c = await card();
+    slide(c, "下线", 0.25);
+    slide(c, "上线", 0.5);
+    await userEvent.click(c.getByRole("button", { name: "保存这两条线" }));
+    await waitFor(() => expect(puts(be)).toHaveLength(2));
+    expect(puts(be)[1]).toEqual({ bands: [existing, { template: "triage-screen", low: 0.1, high: 0.9 }, { template: "triage-screen", source: "src_a", low: 0.25, high: 0.5 }] });
+    expect(be.settings.bands).toHaveLength(3);
+  });
+
+  it("用默认值：去掉这一条覆盖，其余不动", async () => {
+    const be = backend({ bands: [{ template: "triage-screen", low: 0.2, high: 0.7 }, { template: "web-only-screening", low: 0.3, high: 1 }] });
+    mount(be.impl);
+    const c = await card();
+    expect(c.getByText(/下线 0.20 · 上线 0.70/)).toBeInTheDocument();
+    await userEvent.click(c.getByRole("button", { name: "用默认值" }));
+    await waitFor(() => expect(puts(be)).toEqual([{ bands: [{ template: "web-only-screening", low: 0.3, high: 1 }] }]));
+  });
+
+  // ACT-JRC-12：下线高于上线在页面上就拦下；服务端的拒绝照样显示，已有的带不变。
+  it("下线高于上线不能保存；服务端拒绝时显示原因", async () => {
+    const be = backend({ reject: true });
+    mount(be.impl);
+    const c = await card();
+    slide(c, "下线", 0.7);
+    slide(c, "上线", 0.4);
+    expect(c.getByRole("alert")).toHaveTextContent("下线不能高于上线");
+    expect(c.getByRole("button", { name: "保存这两条线" })).toBeDisabled();
+    slide(c, "上线", 0.8);
+    await userEvent.click(c.getByRole("button", { name: "保存这两条线" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(be.settings.bands).toEqual([]);
   });
 
-  // ACT-JRC-14 的设置一半：影子开关保存到服务端。
-  it("toggles shadow mode for a template and persists it", async () => {
+  // ACT-JRC-14 的设置一半：试用（影子）开关，请求体与改版前相同（整份 shadow 列表）。
+  it("试用开关保存到服务端", async () => {
     const be = backend();
     mount(be.impl);
-    const box = await screen.findByRole("checkbox", { name: "triage-screen" });
+    const box = (await card()).getByRole("checkbox", { name: "试用：只打分，不影响结果" });
     await userEvent.click(box);
     await waitFor(() => expect(be.settings.shadow).toEqual(["triage-screen"]));
-    expect(await screen.findByRole("checkbox", { name: "triage-screen" })).toBeChecked();
-    await userEvent.click(screen.getByRole("checkbox", { name: "triage-screen" }));
+    expect(puts(be)).toEqual([{ shadow: ["triage-screen"] }]);
+    await userEvent.click((await card()).getByRole("checkbox", { name: "试用：只打分，不影响结果" }));
     await waitFor(() => expect(be.settings.shadow).toEqual([]));
-  });
-
-  // ACT-JRC-17..19：抽检池逐条处理，结论发给服务端，条目消失、误丢率刷新。
-  it("lists the spot-check pool and records should_see / correct", async () => {
-    const be = backend({ pool: [{ judgment: "j1", subject: "first" }, { judgment: "j2", subject: "second" }] });
-    mount(be.impl);
-    const list = await screen.findByRole("list", { name: "待抽检" });
-    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
-    await userEvent.click(within(within(list).getAllByRole("listitem")[0]).getByText("该看"));
-    await waitFor(() => expect(be.reviewed).toEqual({ j1: "should_see" }));
-    await waitFor(() => expect(within(screen.getByRole("list", { name: "待抽检" })).getAllByRole("listitem")).toHaveLength(1));
-    expect(await within(screen.getByRole("table", { name: "指标" })).findByText("100.0%")).toBeInTheDocument();
-    await userEvent.click(screen.getByText("确实不用"));
-    await waitFor(() => expect(be.reviewed).toEqual({ j1: "should_see", j2: "correct" }));
-    expect(await screen.findByText("现在没有待抽检的条目。")).toBeInTheDocument();
   });
 });

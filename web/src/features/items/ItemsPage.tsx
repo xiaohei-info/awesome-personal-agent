@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { isMaterialId } from "../../app/relations";
@@ -12,6 +12,7 @@ import { PHASE, WAITING } from "../../app/ids";
 import { Pick, Val, useLabel } from "../../app/values";
 import { ErrorNote } from "../../app/errors";
 import { EntityPick, useItemTitle, useNames } from "../../app/names";
+import { ViewTable, useViews } from "./TypeViews";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -76,6 +77,11 @@ function ItemList() {
   const [plannedFor, setPlannedFor] = useState("");
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const views = useViews(api);
+  const label = useLabel();
+  const [params, setParams] = useSearchParams();
+  const view = views.find((x) => x.key === params.get("view"));
+  const setView = (key: string) => setParams(key ? { view: key } : {}, { replace: true });
 
   useEffect(() => {
     setError(null);
@@ -95,6 +101,16 @@ function ItemList() {
     <main>
       <PageHead>{t.title}</PageHead>
       <p><Link to="new"><button type="button">{t.create}</button></Link></p>
+      {views.length > 0 && (
+        <nav className="chips" aria-label={t.typeFilter}>
+          <button type="button" className={view ? undefined : "on"} aria-pressed={!view} onClick={() => setView("")}>{t.allTypes}</button>
+          {views.map((x) => (
+            <button key={x.key} type="button" className={x === view ? "on" : undefined} aria-pressed={x === view} onClick={() => setView(x.key)}>
+              {label("itemKind", x.v.kind)}
+            </button>
+          ))}
+        </nav>
+      )}
       <div className="filters">
       <label>
         {t.phaseFilter}
@@ -127,8 +143,9 @@ function ItemList() {
       </label>
       </div>
       {error != null && <ErrorNote error={error} />}
-      {items && !shown.length && error == null && <p className="empty">{t.noMatch}</p>}
-      <ul aria-label={t.list} className="rows">
+      {view && items && <ViewTable view={view} items={shown} />}
+      {!view && items && !shown.length && error == null && <p className="empty">{t.noMatch}</p>}
+      {!view && <ul aria-label={t.list} className="rows">
         {shown.map((i) => (
           <li key={i.id}>
             <Link to={i.id}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
@@ -137,7 +154,7 @@ function ItemList() {
             </span>
           </li>
         ))}
-      </ul>
+      </ul>}
     </main>
   );
 }

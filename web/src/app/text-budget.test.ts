@@ -26,6 +26,12 @@ export const STRICT_DIRS = [
   "features/forms/",
   "features/sources/",
   "features/purge/",
+  "features/health/",
+  "features/audit/",
+  "features/runs/",
+  "features/rules/",
+  "features/judgment/",
+  "features/spot-check/",
 ];
 export const MAX = 40;
 export const BANNED = ["账本", "投影", "墓碑", "注入", "级联", "Event", "blob", "actor", "schema", "scope", "harness", "web_only"];

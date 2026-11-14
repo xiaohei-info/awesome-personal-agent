@@ -436,3 +436,27 @@ fieldset.cards3 { max-width: none; }
   .settings-layout { display: block; }
   .seg button { min-height: 44px; }
 }
+
+/* 导航底部的状态灯与诊断入口（设计 §3.1）：暂停模型是中性的灰色，不算异常 */
+.dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.dot.paused { background: var(--ink-3); }
+.dot.warn { background: var(--warn); }
+.dot.bad { background: var(--seal); }
+.shell > nav a.status-light { justify-content: flex-start; gap: 8px; margin-bottom: 4px; font-size: 13px; }
+.shell > nav a.quiet { color: var(--ink-3); font-size: 13px; }
+.shell > nav .more .dot { margin-right: 6px; vertical-align: 1px; }
+.sheet a.status-light { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 4px; color: var(--ink); text-decoration: none; }
+nav.chips { margin: 0 0 12px; }
+nav.chips button { min-height: 32px; padding: 4px 14px; border-radius: 99px; }
+nav.chips button.on { color: var(--paper); background: var(--ink); border-color: var(--ink); }
+.rows > li.rule { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.rows > li.rule > div { min-width: 0; }
+.sub-list { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+.rows.spot > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.rows.spot > li.on { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 8px; }
+.inline-field label { display: inline-flex; align-items: center; gap: 6px; }
+.inline-field input[type="number"] { width: 5em; }
+.status-page article.signal h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 16px; }
+.status-page ul.lines { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.status-page ul.lines li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.status-page details > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; }

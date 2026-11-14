@@ -13,20 +13,21 @@ export const SECTIONS = {
   items: { title: { zh: "事项", en: "Items" } },
   projects: { title: { zh: "项目", en: "Projects" } },
   agents: { title: { zh: "agent 动态", en: "Agent activity" } },
-  sources: { title: { zh: "来源", en: "Sources" } },
-  automation: { title: { zh: "规则与判断", en: "Rules & judgment" } },
-  health: { title: { zh: "健康", en: "Health" } },
+  sources: { title: { zh: "消息来源", en: "Sources" } },
+  automation: { title: { zh: "自动规则", en: "Automation" } },
   settings: { title: { zh: "设置", en: "Settings" } },
+  diag: { title: { zh: "诊断", en: "Diagnostics" } },
 } satisfies Record<string, { title: Text; short?: Text }>;
 export type SectionId = keyof typeof SECTIONS;
 
-/** 入口分组，按此顺序显示；"设置"不在组里，固定在导航底部。 */
+/** 入口分组，按此顺序显示；"设置"与"诊断"不在组里，固定在导航底部（诊断是排障区，字色弱化）。 */
 export const NAV: { group: Text; sections: SectionId[] }[] = [
   { group: { zh: "处理", en: "Act" }, sections: ["today", "decisions", "proposals"] },
   { group: { zh: "工作", en: "Work" }, sections: ["items", "projects", "agents"] },
-  { group: { zh: "运营", en: "Operate" }, sections: ["sources", "automation", "health"] },
+  { group: { zh: "自动化", en: "Automate" }, sections: ["sources", "automation"] },
 ];
 export const SETTINGS: SectionId = "settings";
+export const DIAG: SectionId = "diag";
 /** 设置里的分组（设计 §3.1）：桌面上是设置页的第二列，手机上是「设置首页」列表。按页面 id 归组，没列出的页面排在最后一组。 */
 export const SETTINGS_GROUPS: { title: Text; ids: string[] }[] = [
   { title: { zh: "日常", en: "Everyday" }, ids: ["settings-general", "settings-notify", "settings-policy"] },
@@ -85,7 +86,8 @@ export interface Entry {
 export interface NavModel {
   groups: { group: string; entries: Entry[] }[];
   settings?: Entry;
-  /** 全部入口，按显示顺序（设置在最后）。 */
+  diag?: Entry;
+  /** 全部入口，按显示顺序（设置、诊断在最后）。 */
   entries: Entry[];
 }
 
@@ -100,8 +102,10 @@ export function buildNav(list: Feature[], lang: Lang): NavModel {
   const orphans = list.filter((f) => !f.section).map((f): Entry => ({ id: f.id, title: f.title[lang], features: [f] }));
   if (orphans.length) groups[groups.length - 1].entries.push(...orphans);
   const settings = entry(SETTINGS);
+  const diag = entry(DIAG);
   const visible = groups.filter((g) => g.entries.length);
-  return { groups: visible, settings, entries: [...visible.flatMap((g) => g.entries), ...(settings ? [settings] : [])] };
+  const foot = [settings, diag].flatMap((e) => e ?? []);
+  return { groups: visible, settings, diag, entries: [...visible.flatMap((g) => g.entries), ...foot] };
 }
 
 /** 当前地址落在哪个页面：取路径匹配最长的那个（settings/grants 优先于 settings）。 */
