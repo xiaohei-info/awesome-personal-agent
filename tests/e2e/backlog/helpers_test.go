@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -113,6 +114,33 @@ func (k *kit) wire(judge, generate string, maxBatch int) {
 		"generate_endpoint":    map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": generate},
 		"screening_timeout_ms": 30000})
 	k.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
+	k.settleSummaries()
+}
+
+// settleSummaries 等一句话摘要服务（kernel/summaries，按事件游标追赶）追上当前的事件日志末尾。
+// 夹具的旧形状 model_endpoint 指向一个不可达的地址：内核一启动，摘要服务就拿夹具里缺摘要的事项去问它，
+// 外呼调用器退避重试约 7 秒才放弃，余下的事项随后发往刚接上的 MODEL_STUB，其中带来源事件正文的会被 eventRequests 数进去。
+// 这些请求属于摘要服务的追赶，与积压放开无关；不等它追上，它们何时落进后面哪一步的统计窗口取决于机器快慢。
+func (k *kit) settleSummaries() {
+	k.t.Helper()
+	seq := k.maxSeq()
+	if !k.WaitFor(60*time.Second, func() bool { return k.summariesCursor() >= seq }) {
+		k.t.Fatalf("摘要服务 60 秒内没有追上事件 %d（游标 %d）", seq, k.summariesCursor())
+	}
+}
+
+// summariesCursor 读账本里摘要服务的游标（只读打开）。
+func (k *kit) summariesCursor() int64 {
+	k.t.Helper()
+	out, err := exec.Command("sqlite3", "-readonly", filepath.Join(k.Home, "ledger.db"), "SELECT seq FROM summaries_cursor WHERE id = 1").CombinedOutput()
+	if err != nil {
+		k.t.Fatalf("读摘要游标: %v %s", err, out)
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		k.t.Fatalf("摘要游标不是整数: %q", out)
+	}
+	return n
 }
 
 // wireGenerateOnly 只配生成端点，判断端点留空。
