@@ -1,8 +1,6 @@
-# sha256: 06f2b9cc0276c51aad9d76cfb2ba876eaf70cb807bfeb9e48bb98705c02c3fb6
+# sha256: b8eb565c1fd1b982ec8337c39800b216079fe3f0ce0f548458838836cf14d637
 work_item_id: 01a1d5d1-fcc3-7056-8973-f8426da2578a
-status: blocked
-recovery_marker: true
+status: todo
 retry_note: 上游修复节点（outbound-scope 出站范围统一出口、e2e-env-baseline StubRun 竞态、e2e-sources
   ACT-MAIL-04 隔离 PATH、e2e-v01-background ACT-BGG-04 等 run.finished）合入后，基于最新 main 重跑全部门槛（含全量
   go test -tags e2e ./tests/e2e/...），继续由 omac-worker-backend-oracle 执行。另有 ACT-SKD-10（tests/e2e/authz）间歇失败尚未报缺陷（预算不足），若再现请在报告里原样写出。
-defect_pending: true

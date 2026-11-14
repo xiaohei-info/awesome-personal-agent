@@ -11,65 +11,76 @@ meta:
   - 01a1cfd9-a065-7006-8c2c-0a17e97acf33
   - 01a1cfd9-a2a4-75da-a4f5-d9ce95e11adc
   - 01a1d024-7a0a-7228-aa4b-0a2e78496bde
-  amendment_revision: 16
+  amendment_revision: 17
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-825ec6782419
+    amendment_id: amend-1c62966de7dd
     amendment_file: .omac/apa-v02.system-amendment.yaml
     nodes:
-      fix.e2e-session-authz.9dccef:
+      fix.e2e-session-authz.f65ac5:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-a66798fef57207c290e5e9e3
+        expected_review_generation: amendment-184967dcbb2dddfec2a69ee5
       release-gates:
         stage: authoring
         state: synced
         work_item_id: 01a1d5d1-fcc3-7056-8973-f8426da2578a
         baseline:
-          status: todo
+          status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: authoring-a8d7c013cf6dad59179ea1a9
+          review_generation: amendment-10d1110538e8b93dd9639cc1
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
           contract_sha256: b4cd87ef8cf6779b3521afe86e7a69e2b58312e395aa1d6ffa6b248f1db669c8
-          worker_handoff_pending: false
+          worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
         expected_contract_sha256: b4cd87ef8cf6779b3521afe86e7a69e2b58312e395aa1d6ffa6b248f1db669c8
-        expected_review_generation: amendment-10d1110538e8b93dd9639cc1
+        superseded_decision:
+          reason_code: worker-decision-required
+          gate: worker
+          blocker_reason_code: owner-decision-required
+          decision_sha256: 2bc881473152d91e4e3585962da3298d04f7064eb2cc60229f2ebfd8987cbed6
+        expected_review_generation: amendment-642f5687b56b58ae46c9a9d8
         attempt_baseline:
-          status: todo
+          status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: authoring-a8d7c013cf6dad59179ea1a9
+          review_generation: amendment-10d1110538e8b93dd9639cc1
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline: null
-          decision_required_pending: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
           contract_sha256: b4cd87ef8cf6779b3521afe86e7a69e2b58312e395aa1d6ffa6b248f1db669c8
-          worker_handoff_pending: false
+          worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-10d1110538e8b93dd9639cc1
+          review_generation: amendment-642f5687b56b58ae46c9a9d8
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -253,7 +264,7 @@ meta:
           review: 0
           worker: 0
     system: true
-  last_amendment_id: amend-825ec6782419
+  last_amendment_id: amend-1c62966de7dd
 nodes:
 - id: ledger-schema-v3
   worker: omac-worker-backend
@@ -8673,6 +8684,7 @@ nodes:
   - fix.e2e-v01-background.1222a3
   - fix.outbound-scope.a2cf4d
   - fix.e2e-session-authz.9dccef
+  - fix.e2e-session-authz.f65ac5
   title: 发布门槛 1、3、4 收口
   description: 产出 release-gates-evidence。整张图的唯一收口节点，是 flow-v01-regression、flow-release-gates
     的全流程 owner。要点：汇总所有流程结果；附录无规划标记、严格模式对照测试通过；§21.3 开发验收条目都有结论；四条遗留缺陷据替身复验关闭或指派本人并标"转本机验证"；核实两条"已修复"但修复节点为
@@ -12056,4 +12068,90 @@ nodes:
       - plugin-session-kind
     defect_refs:
     - dfx-9dccef293d4e
+    coverage_gate: 0
+- id: fix.e2e-session-authz.f65ac5
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - e2e-env-baseline
+  - doctor
+  - session-kind
+  title: 'Fix e2e-session-authz: dfx-f65ac5860f63'
+  description: "Automatic fix for upstream defect(s) reported by release-gates.\n\n-
+    [design-gap] anchors flow-decision-answer/ACT-DEC-03 (docs/solution-design.md#143-操作分级)\n
+    \ expected: 设计（§9 异常、§14.4）规定决策请求的 web_only 初筛是提交后异步进行，未返回时 delegate 代答返回退出码 22，调用方可稍后重试。
+    全流程 e2e 因此必须在 apa ask 之后先等初筛结束（事项 ask.screening_pending 变为 false），再做 apa decide，
+    不能依赖初筛恰好先于 decide 完成；验收在 2 核慢机或有并发负载时也要稳定。\n  observed: tests/e2e/decisions 的
+    ask 之后立即 decide，未等初筛返回。Oracle（2 核 arm64）上 4 个空转进程并发时， TestFlowDecisionAnswer 3
+    次全败（ACT-DEC-01 或 ACT-DEC-04：decide 退出码 22，期望 0/23）；无负载整包跑一次 TestFlowGrantBasis
+    退出码 22（grant_test.go:56），再跑 2 次通过。产品行为符合设计，9a73f55a 与 main 代码相同 （其后只有 manifest
+    sync），与 #373 出站拦截无关。GitHub CI 机器快所以侥幸通过。\n  where: tests/e2e/decisions/helpers_test.go:fx.ask;
+    tests/e2e/decisions/flows_test.go:TestFlowDecisionAnswer; tests/e2e/decisions/grant_test.go:TestFlowGrantBasis;
+    kernel/screening/screening.go:Service.run\n  repro (the reporter re-runs it after
+    your fix merges; it is not your gate): `go test -tags e2e -count=1 -run 'TestFlowDecisionAnswer|TestFlowGrantBasis'
+    ./tests/e2e/decisions/` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-f65ac5860f63 in e2e-session-authz:
+      设计（§9 异常、§14.4）规定决策请求的 web_only 初筛是提交后异步进行，未返回时 delegate 代答返回退出码 22，调用方可稍后重试。
+      全流程 e2e 因此必须在 apa ask 之后先等初筛结束（事项 ask.screening_pending 变为 false），再做 apa decide，
+      不能依赖初筛恰好先于 decide 完成；验收在 2 核慢机或有并发负载时也要稳定。'
+    non_goals:
+    - 只为本节点自身负责的 v0.1 继承 action 做必要的回归修复；其他产品功能缺陷回流对应实现节点，不改断言迁就实现
+    - 不把节点级单元测试当作全流程证据
+    - 不使用真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库；离不开真实依赖的断言注明由本机升级验证 L1–L12 承接
+    - 不引入 Playwright；Web 步骤用项目规定的 ego-browser
+    verification_commands:
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/authz/...
+    integration_gates:
+    - name: e2e-session-authz-flow
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#143-操作分级
+      - docs/solution-design.md#1410-资料不是指令
+      delivery_goal: 在 flow-env-baseline 的替身环境上用测试构建的真实二进制独立执行并证明完整流程：flow-session-kind、flow-chat-answer、flow-authz-matrix、flow-decision-answer、flow-data-not-instructions
+      covers:
+      - flow-session-kind
+      - flow-chat-answer
+      - flow-authz-matrix
+      - flow-decision-answer
+      - flow-data-not-instructions
+      acceptance_refs:
+      - flow-session-kind
+      - flow-chat-answer
+      - flow-authz-matrix
+      - flow-decision-answer
+      - flow-data-not-instructions
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/authz/...
+    pr_base: main
+    acceptance_refs:
+    - flow-decision-answer
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#143-操作分级
+    - docs/solution-design.md#1410-资料不是指令
+    scope_paths:
+    - tests/e2e/authz/**
+    evidence_mode: live
+    consumes:
+    - artifact_id: e2e-env-baseline-env
+      producer: e2e-env-baseline
+      evidence_mode: artifact
+      requires:
+      - acc-env-helpers
+    - artifact_id: doctor-delivery
+      producer: doctor
+      evidence_mode: artifact
+      requires:
+      - doctor
+    - artifact_id: session-kind-delivery
+      producer: session-kind
+      evidence_mode: artifact
+      requires:
+      - session-kind-gate
+      - plugin-session-kind
+    defect_refs:
+    - dfx-f65ac5860f63
     coverage_gate: 0
