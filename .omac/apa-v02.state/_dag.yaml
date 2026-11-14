@@ -1,4 +1,4 @@
-# sha256: 71056bf724c2308dd447e98c043552303f43484879ee80ed4481e96cb7819909
+# sha256: 1b78153a5011171b63b7881923b262b88205f48c5dcdb660eba964b2bd13eb7a
 defects:
   schema: omac.defect-ledger/v1
   used_global: 30
@@ -20,8 +20,8 @@ defects:
     e2e-judgment: 4
     e2e-upgrade: 5
     e2e-workbench: 1
-    release-gates: 7
-  granted_global: 10
+    release-gates: 9
+  granted_global: 12
   entries:
     dfx-62f6c689fa3a:
       suspected: attribution-v2
@@ -321,4 +321,28 @@ defects:
       - release-gates
       state: fixed
       fix_node: fix.e2e-session-authz.9dccef
-  inbox: []
+  inbox:
+  - id: b5837c37417f
+    reporter: release-gates
+    defects:
+    - class: design-gap
+      suspected_node: e2e-session-authz
+      anchors:
+      - flow-decision-answer/ACT-DEC-03
+      design_ref: docs/solution-design.md#143-操作分级
+      expected: 设计（§9 异常、§14.4）规定决策请求的 web_only 初筛是提交后异步进行，未返回时 delegate 代答返回退出码 22，调用方可稍后重试。
+        全流程 e2e 因此必须在 apa ask 之后先等初筛结束（事项 ask.screening_pending 变为 false），再做 apa decide，
+        不能依赖初筛恰好先于 decide 完成；验收在 2 核慢机或有并发负载时也要稳定。
+      observed: 'tests/e2e/decisions 的 ask 之后立即 decide，未等初筛返回。Oracle（2 核 arm64）上 4
+        个空转进程并发时， TestFlowDecisionAnswer 3 次全败（ACT-DEC-01 或 ACT-DEC-04：decide 退出码
+        22，期望 0/23）；无负载整包跑一次 TestFlowGrantBasis 退出码 22（grant_test.go:56），再跑 2 次通过。产品行为符合设计，9a73f55a
+        与 main 代码相同 （其后只有 manifest sync），与 #373 出站拦截无关。GitHub CI 机器快所以侥幸通过。'
+      locations:
+      - tests/e2e/decisions/helpers_test.go:fx.ask
+      - tests/e2e/decisions/flows_test.go:TestFlowDecisionAnswer
+      - tests/e2e/decisions/grant_test.go:TestFlowGrantBasis
+      - kernel/screening/screening.go:Service.run
+      repro:
+        command: go test -tags e2e -count=1 -run 'TestFlowDecisionAnswer|TestFlowGrantBasis'
+          ./tests/e2e/decisions/
+        exit_code: 1
