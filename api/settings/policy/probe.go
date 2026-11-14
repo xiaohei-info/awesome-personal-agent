@@ -166,6 +166,9 @@ func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Princip
 		case http.StatusNotFound:
 			out["reason"] = "not_found"
 		}
+		if se.Region {
+			out["reason"] = "region_unavailable"
+		}
 	case errors.Is(err, model.ErrTimeout):
 		out["reason"] = "timeout"
 	case errors.Is(err, model.ErrBadResponse):

@@ -20,6 +20,7 @@ const zh = {
     schema_mismatch: "能用，但输出不符合示例的结构化格式，卡片文案可能退化",
     bad_response: "响应不是对话补全格式",
     unreachable: "连不上端点：检查地址与网络",
+    region_unavailable: "服务在当前网络位置不可用，请改用可访问的网关地址或代理",
   } as Record<string, string>,
   reasons: {
     unauthorized: "鉴权失败：端点拒绝了这个密钥",
@@ -28,6 +29,7 @@ const zh = {
     timeout: "端点没有在时限内回答",
     bad_response: "端点返回的不是模型列表",
     unreachable: "连不上端点：检查地址与网络",
+    region_unavailable: "服务在当前网络位置不可用，请改用可访问的网关地址或代理",
   } as Record<string, string>,
   posInt: (what: string) => `${what}必须是正整数`,
   timeoutMs: "超时（毫秒）",
@@ -42,7 +44,7 @@ const zh = {
     "probability-judgment/1": "自建分类服务（probability-judgment/1）",
   } as Record<string, string>,
   protocolHints: {
-    "system-one": "直接调用 System One 接口，一批题一次请求。官方地址已预填；经网关接入时改成网关的接口根地址和它用的模型名。",
+    "system-one": "直接调用 System One 接口，一批题一次请求。官方地址已预填；直连受地区限制时，改成可访问的兼容网关的接口根地址和它用的模型名。首次调用可能需要约 10 秒，超时已预填 30000 毫秒。",
     "probability-judgment/1": "自己部署、讲 APA 概率判断协议的分类服务；地址填完整路径。",
   } as Record<string, string>,
   urlSystemOne: "端点 URL（接口根地址，APA 在后面追加 /systemone）",
@@ -110,6 +112,7 @@ const en: typeof zh = {
     schema_mismatch: "Usable, but the output does not follow the sample's structured format; card copy may degrade",
     bad_response: "The response is not a chat completions response",
     unreachable: "Cannot reach the endpoint: check the URL and network",
+    region_unavailable: "The service is not available from this network location; use a reachable gateway URL or a proxy",
   },
   reasons: {
     unauthorized: "Authentication failed: the endpoint rejected this key",
@@ -118,6 +121,7 @@ const en: typeof zh = {
     timeout: "The endpoint did not answer in time",
     bad_response: "The endpoint did not return a model list",
     unreachable: "Cannot reach the endpoint: check the URL and network",
+    region_unavailable: "The service is not available from this network location; use a reachable gateway URL or a proxy",
   },
   posInt: (what) => `${what} must be a positive integer`,
   timeoutMs: "Timeout (ms)",
@@ -132,7 +136,7 @@ const en: typeof zh = {
     "probability-judgment/1": "Self-hosted classifier (probability-judgment/1)",
   },
   protocolHints: {
-    "system-one": "Calls the System One API directly, one request per batch of questions. The official URL is prefilled; through a gateway, use the gateway's API root and the model name it expects.",
+    "system-one": "Calls the System One API directly, one request per batch of questions. The official URL is prefilled; if direct access is region-restricted, use a reachable compatible gateway's API root and the model name it expects. The first call may take about 10 seconds, so the timeout is prefilled with 30000 ms.",
     "probability-judgment/1": "A classifier you host yourself that speaks APA's probability judgment protocol; enter the full path.",
   },
   urlSystemOne: "Endpoint URL (API root; APA appends /systemone)",

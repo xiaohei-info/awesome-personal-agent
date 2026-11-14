@@ -3,6 +3,9 @@ package doctor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -344,5 +347,33 @@ func TestAssembleOrdersChecksAndComputesOK(t *testing.T) {
 	all := Kernel(bg, Facts{Policy: policy.Default()}, Env{})
 	if len(all) != 5 || byName(all, Tier).Name == "" {
 		t.Fatalf("%+v", all)
+	}
+}
+
+// 地区不可用（451，或说明地区受限的 403）有独立的结论码，不显示成协议错误或鉴权失败；普通 403 仍是鉴权失败。
+func TestProbeReportsRegionUnavailable(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		body   string
+		want   string
+	}{
+		{451, `{"title":"Not available in your region.","status":451}`, CodeRegionUnavailable},
+		{403, `{"error":{"message":"unsupported_country_region_territory"}}`, CodeRegionUnavailable},
+		{403, `{"error":{"message":"forbidden"}}`, CodeUnauthorized},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(c.status)
+			fmt.Fprint(w, c.body)
+		}))
+		e := Env{Model: &model.Client{}}
+		j := ProbeJudge(bg, &policy.JudgeEndpoint{URL: srv.URL + "/v1", Protocol: policy.ProtocolSystemOne, Model: "m", TimeoutMs: 5000}, e)
+		g := ProbeGenerate(bg, policy.GenerateEndpoint{URL: srv.URL + "/v1", Model: "m"}, e)
+		srv.Close()
+		if j.Status != Error || j.Code != c.want || g.Code != c.want {
+			t.Fatalf("%d %s: judge=%+v generate=%+v", c.status, c.body, j, g)
+		}
+		if c.want == CodeRegionUnavailable && (!strings.Contains(j.Next, "gateway") || strings.Contains(j.Why, "protocol")) {
+			t.Fatalf("region text: %+v", j)
+		}
 	}
 }

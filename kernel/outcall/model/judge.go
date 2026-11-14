@@ -38,6 +38,8 @@ const (
 	CodeUnsupportedQuest = "unsupported_question"
 	CodeInternal         = "internal"
 	CodeMissingResult    = "missing_result"
+	// CodeRegionUnavailable：服务在当前网络位置不可用（HTTP 451，或 403 且响应体说明地区受限），换网关或代理才能用。
+	CodeRegionUnavailable = "region_unavailable"
 	// CodeSelfReported 不在错误码表里：端点报 self_reported 时它不算分类端点，这一级记为不可用（§8.8 概率语义）。
 	CodeSelfReported = "self_reported"
 	// CodeNoAnswerMass 只出现在 chat-logprobs：yes 与 no 的概率和不足 0.5。
@@ -255,9 +257,9 @@ func (j *judgeRun) batch(ctx context.Context, qs []Question, lo, hi int, canSpli
 				}
 				return j.batch(ctx, qs, mid, hi, false)
 			}
-		case CodeInvalidRequest, CodeProtocolError, CodeUnauthorized:
+		case CodeInvalidRequest, CodeProtocolError, CodeUnauthorized, CodeRegionUnavailable:
 			j.fault(f.code)
-			j.res.Unavailable = j.res.Unavailable || f.code == CodeUnauthorized
+			j.res.Unavailable = j.res.Unavailable || f.code == CodeUnauthorized || f.code == CodeRegionUnavailable
 		}
 		j.failRange(lo, hi, f.code)
 		return nil
@@ -422,7 +424,22 @@ func (c *Client) post(ctx context.Context, url, key string, body []byte, timeout
 	}
 	f := httpFault(s, resp.Header.Get("Retry-After"))
 	f.status, f.body = s, raw
+	if RegionBlocked(s, raw) {
+		f.code = CodeRegionUnavailable
+	}
 	return nil, f
+}
+
+// RegionBlocked 报告一个非 2xx 响应是否表示服务在当前网络位置不可用：HTTP 451，或 403 且响应体提到地区或国家。
+func RegionBlocked(status int, body []byte) bool {
+	if status == http.StatusUnavailableForLegalReasons {
+		return true
+	}
+	if status != http.StatusForbidden {
+		return false
+	}
+	b := bytes.ToLower(body)
+	return bytes.Contains(b, []byte("region")) || bytes.Contains(b, []byte("country")) || bytes.Contains(b, []byte("territor"))
 }
 
 // httpFault 按 §8.8 的通用状态码表归类非 2xx。

@@ -32,6 +32,7 @@ var (
 type StatusError struct {
 	Code    int
 	Message string // 端点错误体里的 message（截断），可能为空
+	Region  bool   // 服务在当前网络位置不可用（见 RegionBlocked）
 }
 
 func (e *StatusError) Error() string {
@@ -130,7 +131,7 @@ func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req R
 		return Response{}, transportErr(ctx, err, ep.APIKey)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Response{}, &StatusError{Code: resp.StatusCode, Message: errorMessage(raw, ep.APIKey)}
+		return Response{}, &StatusError{Code: resp.StatusCode, Message: errorMessage(raw, ep.APIKey), Region: RegionBlocked(resp.StatusCode, raw)}
 	}
 	if len(raw) > maxBody {
 		return Response{}, fmt.Errorf("%w: body exceeds %d bytes", ErrBadResponse, maxBody)

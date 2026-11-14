@@ -38,6 +38,13 @@ const (
 	CodeHTTPStatus     = "http_status"
 	CodeSchemaMismatch = "schema_mismatch"
 	CodeBadResponse    = "bad_response"
+	// CodeRegionUnavailable：服务在当前网络位置不可用（HTTP 451 或说明地区受限的 403）。
+	CodeRegionUnavailable = "region_unavailable"
+)
+
+const (
+	regionWhy  = "the service is not available from this network location (HTTP 451, or a 403 that cites the region)"
+	regionNext = "use a reachable compatible gateway URL or a proxy"
 )
 
 // ProbeJudge 用内置示例题探测判断端点 ep（nil 表示未配置）。`apa doctor`、GET /doctor 与 Web 的"测试连接"共用。
@@ -74,6 +81,8 @@ func ProbeJudge(ctx context.Context, ep *policy.JudgeEndpoint, e Env) Detail {
 		case model.CodeProtocolError:
 			return fail(CodeProtocolError, fmt.Sprintf("the endpoint's response does not match protocol %s (protocol identifier or response shape is wrong)", protocolOf(ep.Protocol)),
 				"check the endpoint's protocol and the protocol setting")
+		case model.CodeRegionUnavailable:
+			return fail(CodeRegionUnavailable, regionWhy, regionNext)
 		case model.CodeUnauthorized:
 			return fail(CodeUnauthorized, "the endpoint rejected the credentials (unauthorized)", "check the API key of the judge endpoint")
 		case model.CodeInvalidRequest:
@@ -124,6 +133,9 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 				d.Code = CodeUnauthorized
 			}
 			d.Why = fmt.Sprintf("the endpoint returned HTTP status %d for the structured-output sample request", se.Code)
+			if se.Region {
+				d.Code, d.Why, d.Next = CodeRegionUnavailable, regionWhy, regionNext
+			}
 		case errors.Is(err, model.ErrTimeout):
 			d.Code, d.Why = CodeTimeout, "the endpoint did not answer the structured-output sample request in time"
 		case errors.Is(err, model.ErrSchema): // 端点通了，只是输出没守 schema：提醒，不算坏

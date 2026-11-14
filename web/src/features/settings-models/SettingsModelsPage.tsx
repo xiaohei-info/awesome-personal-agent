@@ -15,9 +15,10 @@ const SYSTEM_ONE = "system-one";
 const PJ = "probability-judgment/1";
 const JUDGE_PROTOCOLS = [SYSTEM_ONE, PJ];
 // 新配时的预填值；换协议时，仍是上一个协议预填值的字段换成新协议的预填值，本人改过的不动。
-const PRESETS: Record<string, { url: string; model: string }> = {
-  [SYSTEM_ONE]: { url: "https://api.typesafe.ai/v1", model: "jev-latest" },
-  [PJ]: { url: "", model: "" },
+// system-one 的首次调用可能要约 10 秒（建连），超时预填 30000；只影响新配，已存配置照旧。
+const PRESETS: Record<string, { url: string; model: string; timeout_ms: string }> = {
+  [SYSTEM_ONE]: { url: "https://api.typesafe.ai/v1", model: "jev-latest", timeout_ms: "30000" },
+  [PJ]: { url: "", model: "", timeout_ms: "10000" },
 };
 const MANUAL = "\u0000manual";
 
@@ -72,7 +73,7 @@ function posInt(v: string, what: string) {
 }
 
 type Draft = Record<string, string>;
-const JUDGE_NEW: Draft = { ...PRESETS[SYSTEM_ONE], protocol: SYSTEM_ONE, locality: "", timeout_ms: "10000", max_batch: "32", max_material_chars: "8000" };
+const JUDGE_NEW: Draft = { ...PRESETS[SYSTEM_ONE], protocol: SYSTEM_ONE, locality: "", max_batch: "32", max_material_chars: "8000" };
 
 function draftOf(kind: Kind, e: Endpoint | null): Draft {
   if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { url: "", model: "", locality: "" };
@@ -203,7 +204,7 @@ function EndpointCard({ kind, doc, unsetExternal, save }: { kind: Kind; doc: End
     setD((x) => {
       const from = PRESETS[x.protocol], to = PRESETS[p];
       const next: Draft = { ...x, protocol: p };
-      if (from && to) for (const k of ["url", "model"] as const) if (x[k] === from[k]) next[k] = to[k];
+      if (from && to) for (const k of ["url", "model", "timeout_ms"] as const) if (x[k] === from[k]) next[k] = to[k];
       return next;
     });
   const so = kind === "judge" && d.protocol === SYSTEM_ONE;

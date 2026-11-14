@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -264,5 +265,33 @@ func TestSystemOneAgainstClsStub(t *testing.T) {
 	ids, _, err := (&Client{}).ListModels(context.Background(), SystemOneBase(ep.URL+"/systemone"), "")
 	if err != nil || strings.Join(ids, ",") != "cls-stub-latest" {
 		t.Fatalf("ids=%v err=%v", ids, err)
+	}
+}
+
+// 地区不可用：不重试、标不可用、进健康视图；普通 403 仍是 unauthorized。列模型的 StatusError 带 Region。
+func TestRegionUnavailable(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		body   string
+		want   string
+	}{
+		{451, `{"title":"Typesafe is not available in your region.","status":451}`, CodeRegionUnavailable},
+		{403, `{"detail":"Service is not available in your country"}`, CodeRegionUnavailable},
+		{403, `{"detail":"invalid key"}`, CodeUnauthorized},
+	} {
+		_, ep, cl, _ := soSetup(t, func(_ int, _ soReq, w http.ResponseWriter) {
+			w.WriteHeader(c.status)
+			fmt.Fprint(w, c.body)
+		})
+		res, err := cl.Judge(context.Background(), ep, qn("g", 2), JudgeOptions{})
+		if err != nil || res.Requests != 1 || !res.Unavailable || codes(res)[0] != c.want || len(res.Faults) != 1 || res.Faults[0] != c.want {
+			t.Fatalf("%d %s: %+v err=%v", c.status, c.body, res, err)
+		}
+	}
+	url := listServer(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(451) })
+	_, _, err := (&Client{}).ListModels(context.Background(), url, "")
+	var se *StatusError
+	if !errors.As(err, &se) || !se.Region {
+		t.Fatalf("err=%v", err)
 	}
 }
