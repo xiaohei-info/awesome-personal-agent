@@ -106,10 +106,12 @@ var (
 // legacyKey 是 v0.1 的 PUT 体里的段名；它没有 get，不会出现在响应里。
 const legacyKey = "model_endpoint"
 
-// 端点请求体里 api_key 为 nil 或占位 "***" 表示保持原密钥，显式 "" 表示清除；读取时只给 api_key_set。
+// 端点请求体里 api_key 为 nil 或占位 "***" 表示保持原密钥，显式 "" 表示清除；读取时只给 api_key_set 与 api_key_hint。
+// api_key_hint 是只读字段：照 GET 的形状回传时出现在请求体里，忽略它，免得严格解码拒绝。
 type endpointReq struct {
 	URL              string  `json:"url"`
 	APIKey           *string `json:"api_key"`
+	APIKeyHint       *string `json:"api_key_hint"`
 	Protocol         string  `json:"protocol"`
 	Model            string  `json:"model"`
 	Locality         string  `json:"locality"`
@@ -119,10 +121,20 @@ type endpointReq struct {
 }
 
 type generateReq struct {
-	URL      string  `json:"url"`
-	APIKey   *string `json:"api_key"`
-	Model    string  `json:"model"`
-	Locality string  `json:"locality"`
+	URL        string  `json:"url"`
+	APIKey     *string `json:"api_key"`
+	APIKeyHint *string `json:"api_key_hint"`
+	Model      string  `json:"model"`
+	Locality   string  `json:"locality"`
+}
+
+// keyHint 是已存密钥的末 4 个字符，供 Web 显示"已设置 ····末 4 位"；短于 12 个字符的密钥不给，免得暴露过大比例。
+func keyHint(k string) string {
+	r := []rune(k)
+	if len(r) < 12 {
+		return ""
+	}
+	return string(r[len(r)-4:])
 }
 
 func keepKey(in *string, old string) string {
@@ -137,7 +149,7 @@ func getJudge(p *kpolicy.Policy) any {
 	if j == nil {
 		return nil
 	}
-	return map[string]any{"url": j.URL, "api_key_set": j.APIKey != "", "protocol": j.Protocol, "model": j.Model, "locality": j.Locality,
+	return map[string]any{"url": j.URL, "api_key_set": j.APIKey != "", "api_key_hint": keyHint(j.APIKey), "protocol": j.Protocol, "model": j.Model, "locality": j.Locality,
 		"timeout_ms": j.TimeoutMs, "max_batch": j.MaxBatch, "max_material_chars": j.MaxMaterialChars}
 }
 
@@ -164,7 +176,7 @@ func getGenerate(p *kpolicy.Policy) any {
 	if g.URL == "" {
 		return nil
 	}
-	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "model": g.Model, "locality": g.Locality}
+	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "api_key_hint": keyHint(g.APIKey), "model": g.Model, "locality": g.Locality}
 }
 
 func setGenerate(p *kpolicy.Policy, raw json.RawMessage) error {

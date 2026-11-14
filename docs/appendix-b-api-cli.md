@@ -172,12 +172,13 @@
 | 运行 | `GET /runs`，`GET /runs/{id}` | 运行记录 | observer |
 | | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
 | 回放与健康 | `GET /why/{id}`，`GET /health` | 回放（来源事件命中数值条件规则时另带 `alerts`：规则、条件文本、上一次与本次取值、产出的投递及其状态（提醒还被静默或合并窗口暂存时状态为 `held`），各凭据级别可见）、健康视图；所有健康告警都经同一处产出健康类投递（§15.2），读取走 `GET /deliveries/unread` | observer |
-| | `GET /doctor` | 内核一侧的自检结果（主文档 §15.5） | observer |
+| | `GET /doctor` | 内核一侧的自检结果（主文档 §15.5）；模型端点的明细带稳定机器码 `code`（取值同 `POST /settings/model-endpoints/test`） | observer |
 | | `GET /version` | 版本与各协议版本（B.5） | 不需要凭据 |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；切换只有 Web | Web 登录 |
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/grants`、`/settings/purge` | 策略（含人格、打扰上限与静音）、两个模型端点、凭据、白名单、名单、命令登记、声明确认、授权单签发与撤销（`POST /settings/grants`、`POST /settings/grants/{id}/revoke`）、物理删除 | 只有 Web 登录 |
 | | `/settings/judgment` | 不确定带与影子模式 | 只有 Web 登录 |
+| | `POST /settings/model-endpoints/models`、`POST /settings/model-endpoints/test` | "设置 › 模型"的获取模型与测试连接：只读，不写 Event，不改策略；同一类端点同一时刻只跑一个，其余返回 409（主文档 §4.1、§15.5） | 只有 Web 登录 |
 | | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围 | 只有 Web 登录 |
 | 认证 | `POST /auth/login`、`/logout` | Web 会话。连续失败的限速与锁定见主文档 §14.13，锁定期间返回 429 | |
 | | `POST /auth/password` | 改口令 `{current, new}`；新口令少于 12 个字符返回 400；成功后其他会话全部失效 | 只有 Web 登录 |
@@ -233,13 +234,19 @@
 
 `/settings/policy` 的 `channels` 段是渠道的登记属性：`{"<渠道名>": {"text_only": true}}`。`default_harness` 段是规则未指定 harness 时任务型与后台运行用的 harness，值为 harness 名，空串表示未设置（主文档 §13.6）。`disturb` 段在 v0.2.0 新增三个键，旧键不变：`daily_cap`（整数，默认 20，`0` 不限）、`mutes`（`[{"scope": "source" \| "project" \| "item", "id", "until"?}]`）、`followup_defer`（布尔，默认 `false`）；`threshold_judge` 保留，含义改为"是否开启投递推迟判定"（主文档 §7.4）。
 
-`/settings/model-endpoints`：`GET` 返回、`PUT` 接受下面的形状，两个端点都可为 `null`；`api_key` 只写不读，`GET` 以 `api_key_set` 表示是否已设置。字段语义见主文档 §6.13、§8.8。
+`/settings/model-endpoints`：`GET` 返回、`PUT` 接受下面的形状，两个端点都可为 `null`；`api_key` 只写不读，`GET` 以 `api_key_set` 表示是否已设置，以 `api_key_hint` 给出已存密钥的末 4 个字符（密钥短于 12 个字符时为空串）；`api_key_hint` 只读，照 `GET` 的形状回传时 `PUT` 忽略它。字段语义见主文档 §6.13、§8.8。
 
 ```json
 {"judge_endpoint": {"url": "…", "api_key": "…", "protocol": "probability-judgment/1", "model": "", "locality": "local", "timeout_ms": 10000, "max_batch": 32, "max_material_chars": 8000},
  "generate_endpoint": {"url": "…", "api_key": "…", "model": "…", "locality": "external"},
  "screening_timeout_ms": 30000}
 ```
+
+`POST /settings/model-endpoints/models` 取模型列表，请求 `{"endpoint": "generate" | "judge", "url", "api_key"?, "protocol"?}`：按对话补全兼容协议 `GET <url>/models` 读 `data[].id`，去重排序，至多 500 个。`endpoint` 为 `judge` 时只接受 `protocol: chat-logprobs`，概率判断协议没有模型列表，返回 400。探测本身的成败是数据，响应恒为 200：成功 `{"ok": true, "models": [...], "truncated": false, "elapsed_ms": 120}`，失败 `{"ok": false, "reason", "status"?, "elapsed_ms"}`，`reason` 取 `unauthorized`、`not_found`、`http_status`（带 `status`）、`timeout`、`bad_response`、`unreachable`。
+
+`POST /settings/model-endpoints/test` 测试连接，请求 `{"endpoint": "judge" | "generate", "config": {…}}`，`config` 与 `PUT` 里对应端点的形状相同，按保存时的同一套规则校验（不合规返回 400）；生成端点须有 `url` 与 `model`。用 `apa doctor` 的内置示例题探测（主文档 §15.5），示例内容是固定文本，不取账本内容。响应与 `GET /doctor` 的明细同形：`{"subject", "status", "code", "why", "next"?, "data"}`；`code` 取 `ok`、`unauthorized`、`protocol_error`、`self_reported`、`invalid_request`、`no_answer`、`timeout`、`http_status`、`schema_mismatch`（`status` 为 `warning`）、`bad_response`、`unreachable`；`data` 含 `elapsed_ms`、`locality`，判断端点另有 `protocol`、`probability_source` 与端点自报的 `model`。
+
+两条路由的密钥规则相同：`api_key` 显式给出时照用，`""` 表示不带；省略或为占位 `***` 时沿用该端点已存的密钥，但只在请求的 URL 与已存 URL 同源（scheme、主机、端口相同）时沿用，否则返回 400，要求重新输入密钥。
 
 v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_timeout_ms"}}` 在本版仍被 `PUT` 接受：等同只设置 `generate_endpoint`（`locality` 记为 `external`），`screening_timeout_ms` 提到顶层，判断端点不变；响应一律是新形状。下一个次版本起不再接受旧形状。
 

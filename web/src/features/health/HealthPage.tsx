@@ -23,12 +23,12 @@ export interface HealthReport {
 // 信号 id → 标题与可跳转的修复入口（设计 §15.2）。能力包加载失败的修复是"修包后热加载"，没有 Web 页面，只显示接口给出的说明。
 const META: Record<string, { title: string; links: { to: string; label: string }[] }> = {
   source_failures: { title: "来源失败", links: [{ to: "/sources", label: "来源" }] },
-  outcall: { title: "外呼超时与排队", links: [{ to: "/runs", label: "运行记录" }, { to: "/settings", label: "策略与人格" }] },
+  outcall: { title: "外呼超时与排队", links: [{ to: "/runs", label: "运行记录" }, { to: "/settings/models", label: "模型" }] },
   delivery_backlog: { title: "投递积压", links: [{ to: "/settings", label: "策略与人格" }] },
   chain_trips: { title: "链路熔断", links: [{ to: "/items", label: "事项" }] },
   agentsmd_drift: { title: "AGENTS.md 漂移", links: [{ to: "/projects", label: "项目" }] },
   pack_rejections: { title: "能力包加载失败", links: [] },
-  model_unavailable: { title: "模型不可用", links: [{ to: "/settings", label: "策略与人格" }] },
+  model_unavailable: { title: "模型不可用", links: [{ to: "/settings/models", label: "模型" }] },
   unjudged_backlog: { title: "未判定积压", links: [{ to: "/sources", label: "来源" }] },
   rule_fallbacks: { title: "规则回退 observe", links: [{ to: "/rules", label: "规则模式" }] },
   receipt_failures: { title: "回执与捕获失败", links: [{ to: "/audit", label: "审计" }, { to: "/settings", label: "策略与人格" }, { to: "/decisions", label: "决策待办" }] },

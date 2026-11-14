@@ -33,11 +33,13 @@ var Order = []string{DataDir, Config, Tier, ModelEndpoint, Sources, Packs, HostP
 
 // Detail 是一项检查里针对某个对象（来源、端点、包、插件、渠道）的结论。
 type Detail struct {
-	Subject string         `json:"subject"`
-	Status  Status         `json:"status"`
-	Why     string         `json:"why"`
-	Next    string         `json:"next,omitempty"`
-	Data    map[string]any `json:"data,omitempty"`
+	Subject string `json:"subject"`
+	Status  Status `json:"status"`
+	// Code 是结论的稳定机器码（目前只有模型端点探测给出），Web 据此显示本地化说明；Why、Next 仍是机制性英文。
+	Code string         `json:"code,omitempty"`
+	Why  string         `json:"why"`
+	Next string         `json:"next,omitempty"`
+	Data map[string]any `json:"data,omitempty"`
 }
 
 // Check 是一项检查。Status 是 Details 里最差的一个；没有 Details 时由检查自己给。
