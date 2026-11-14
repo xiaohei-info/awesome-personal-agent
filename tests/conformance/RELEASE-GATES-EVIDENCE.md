@@ -1,6 +1,6 @@
 # v0.2.0 发布门槛 1、3、4 证据（GT-364）
 
-基线：`main` @ `4ff6ab8e8`。环境：真实 sqlite3 3.53、python3 + pytest 9、go 1.26、已构建的 `web/dist`、完整历史的 git 检出；不使用 shim，未跳过或过滤任何 e2e 用例（`himalaya` 的 PATH 隔离由 e2e 自身完成，GT-373）。
+基线：`main` @ `4ff6ab8e8`。环境：真实 sqlite3 3.53、python3 + pytest 9、go 1.26、已构建的 `web/dist`、完整历史的 git 检出；不使用 shim；本节点没有新增、过滤或注释任何 e2e 用例，仓库里原有的跳过与相对 v0.1.1 移除的测试见下文“v0.1 不回退的例外”（`himalaya` 的 PATH 隔离由 e2e 自身完成，GT-373）。
 
 ## 门槛 1：各组验收与 v0.1 不回退
 
@@ -39,8 +39,35 @@
   - `dfx-1699a21c5f70`（ACT-CAL-02）→ #200；同上
   - `dfx-5410a4c832ad`（ACT-WAK-01/04）→ #205；`e2e/hostplugin` 唤醒租约流程通过
   - `dfx-80defa39c0dd`（ACT-HCTX-09）→ #212；`e2e/hostplugin` 的 ACT-HCTX-09 通过
-- 两条“已修复但修复节点 abandoned”：`dfx-27e69d9e5716`（ACT-RES-04，节点 `fix.hermes-plugin-headless.27e69d`）与 `dfx-992917373ac0`（ACT-DLG-06，节点 `fix.hermes-plugin-receipt.992917`）。修复经别的 PR 合入（#237、#224），对应替身测试 `e2e/bgguards` ACT-RES-04、`e2e/agents` ACT-DLG-06 在本次完整 e2e 中通过。
-- 真实环境复核由本机升级验证 L9 / L11 承接。
+- 两条“已修复但修复节点 abandoned”的缺陷，逐条对应实际合入的修复 PR 与替身测试：
+  - `dfx-27e69d9e5716`（ACT-RES-04，abandoned 节点 `fix.hermes-plugin-headless.27e69d`）→ #204（GT-209，按退出码与输出文本判定会话丢失）；替身测试 `tests/e2e/bgguards/resume_test.go` ACT-RES-04 通过。真实环境复核：L9（首批宿主的无头续接）。
+  - `dfx-992917373ac0`（ACT-DLG-06，abandoned 节点 `fix.hermes-plugin-receipt.992917`）→ #224（GT-228，回执提取与补发）；替身测试 `tests/e2e/agents/delegate_test.go` ACT-DLG-06 通过。真实环境复核：L9（委派并等回执）。
+- 另外四条经 `omac defect resolve` 关闭的缺陷，真实环境复核分别为：日历 ACT-CAL-02/03 → L11；唤醒租约 ACT-WAK-01/04、插件上下文 ACT-HCTX-09 → L9。
+- 账本状态有可重复的检查：`go test ./tests/conformance/ -run TestDefectLedgersHaveNoOpenEntries` 读取两份 `.omac/*state/_dag.yaml`，任何非 fixed 且无人负责的条目、或 fixed 却没有修复节点与外部修复 PR 的条目都会使其失败。§21.3 的结论检查是 `TestRealMeasurementRowsHaveConclusionOrChecklistNumber`。
+
+## v0.1 不回退的例外（相对 v0.1.1）
+
+v0.2.0 把 v0.1 的判断引擎语义（置信度阈值、`escalate_to` 级联、follow_up 的 `do[]`）换成判断型能力包，设计依据是 `docs/appendix-c-capability-pack.md` C.7、C.11 与 `OMAC-NOTES` §2.4（`flow-agent-cascade`、`flow-follow-up` 改写）。据 `git ls-tree`/`grep '^func Test'` 比较 `v0.1.1` 与本基线的测试函数名，共 34 个按名称不再存在（按包计数）：
+
+| 包 | 数量 | 说明 |
+|---|---|---|
+| `kernel/proactive/verify` | 7 | 回执核实的置信度与 yes/no 提示（C.7 改为门控题，由 `delivery-verify-gate` 与 `e2e/delivery` 覆盖） |
+| `kernel/proactive/followup` | 6 | 旧 follow_up 的 remind/wait/abandon 置信度语义（由 `followup-ladder` 与 `e2e/followup` 覆盖） |
+| `tests/packs/follow-up` | 5 | 同上，包测试 |
+| `kernel/inbound` | 5 | 旧入站判断与级联（由入站六步与 `e2e/inbound`、`e2e/screening` 覆盖） |
+| `kernel/agents/direct` | 4 | 旧 `escalate_to` 级联（由 `cascade-engine` 与 `e2e/judge` 覆盖） |
+| `tests/packs/inbound-triage` | 2 | 旧置信度级联（由 `e2e/inboundrules`、`e2e/judge` 覆盖） |
+| 其余各 1 | 5 | `api/health`、`cli/serve`、`kernel/attention`、`kernel/screening`、`tests/e2e/followup`（`TestFlowFollowUpModelDown`）、`tests/packs/delegation-verify`，分别被健康视图十三项、能力包 v2 装配、判断型流程取代 |
+
+仓库里原有的 `t.Skip`（本节点未新增）：
+
+| 位置 | 原因 | 覆盖 |
+|---|---|---|
+| `tests/e2e/agents/cascade_test.go:62`、`:104` | 无条件跳过：v0.1 判断引擎语义已被 C.7/C.11 移除 | `e2e/judge`、`e2e/inbound` 的新级联流程 |
+| `tests/e2e/bgguards/allowlist_test.go:252` | 无条件跳过：同上，ACT-FWD-07 与 `tests/e2e/channel/fwd_test.go:230` 重复 | `e2e/channel` |
+| `tests/e2e/workbench/browser_test.go:23` | 条件跳过：本机无 ego-browser，页面渲染与手机宽度走查 | 本机升级验证 L10 |
+| `tests/e2e/agents/outcall_test.go:332` | 条件跳过：重放时没有排队的定时拉取 | 同包其余外呼用例 |
+| `tests/e2e/judgment/judgment_test.go:537`、`:566` | 条件跳过：抽检池不足 | L5/L10 的真实积压 |
 
 ## 门槛 5（不作为收口条件）：本机升级验证清单
 
