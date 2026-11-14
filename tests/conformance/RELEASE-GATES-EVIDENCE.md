@@ -9,7 +9,7 @@
 | `npm --prefix web ci` / `run build` / `run test -- --run src/app` | 0 / 0 / 0（16 个测试通过） |
 | `go build ./...` | 0 |
 | `go test ./...` | 0（见下“已知波动”） |
-| `go test -tags e2e -count=1 -timeout 30m ./tests/e2e/...` | 0，28 个包全部 ok，含 v0.1 不回退流程（ledger、decisions、mapping、sourcepull、webhook、materials、bgguards、agents、channel 等包） |
+| `go test -tags e2e -count=1 -timeout 30m ./tests/e2e/...` | 0，29 个包全部 ok，含 v0.1 不回退流程（ledger、decisions、mapping、sourcepull、webhook、materials、bgguards、agents、channel 等包） |
 | `go run ./tools/redline` | `redline: ok` |
 | `APA_CONFORMANCE_STRICT=1 go test ./tests/conformance/ ./cli/serve/` | 0：附录 B、C.14 规划标记已清零，`TestNoPlannedMarkersInStrictMode` 通过 |
 | `go test ./tests/conformance/ ./cli/serve/` | 0 |
