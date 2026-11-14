@@ -86,11 +86,41 @@ describe("设置 › 模型", () => {
     expect(s.keys.generate_endpoint).toBe("sk-test-key-9f2c"); // 占位沿用原密钥
   });
 
-  it("flow-judge-protocol ACT-JDP-11: 判断端点协议只有 probability-judgment/1，且没有获取模型", async () => {
+  it("flow-judge-protocol ACT-JDP-11: 判断端点协议是 system-one 与 probability-judgment/1，不开放 chat-logprobs；已存的自建服务配置原样显示、没有获取模型", async () => {
     mount(server().impl);
     const j = await card("判断端点");
-    expect(within(j.getByLabelText("协议")).getAllByRole("option").map((o) => o.textContent)).toEqual(["probability-judgment/1"]);
+    expect(within(j.getByLabelText("协议")).getAllByRole("option").map((o) => (o as HTMLOptionElement).value)).toEqual(["system-one", "probability-judgment/1"]);
+    expect(j.getByLabelText("协议")).toHaveValue("probability-judgment/1");
+    expect(j.getByLabelText(/端点 URL/)).toHaveValue("http://cls.local/judge");
     expect(j.queryByRole("button", { name: "获取模型" })).toBeNull();
+  });
+
+  it("新配判断端点默认 System One：预填官方地址与模型，可获取模型、测试连接并保存；改成网关地址照存", async () => {
+    const s = server({ judge: null });
+    s.setModels({ ok: true, models: ["jev-latest", "jev-preview"], truncated: false, elapsed_ms: 50 });
+    s.setProbe({ subject: "judge_endpoint", status: "ok", code: "ok", why: "answered", data: { elapsed_ms: 300, model: "jev-1.14.0", probability_source: "native" } });
+    mount(s.impl);
+    const j = await card("判断端点");
+    await userEvent.click(j.getByLabelText("配置判断端点"));
+    expect(j.getByLabelText("协议")).toHaveValue("system-one");
+    expect(j.getByLabelText(/接口根地址/)).toHaveValue("https://api.typesafe.ai/v1");
+    expect(j.getByLabelText("模型")).toHaveValue("jev-latest");
+    await userEvent.type(j.getByLabelText("API 密钥"), "ts-key");
+    await userEvent.click(j.getByRole("button", { name: "获取模型" }));
+    await j.findByText("已从端点取到 2 个模型。");
+    expect(s.posts.at(-1)!.body).toEqual({ endpoint: "judge", url: "https://api.typesafe.ai/v1", api_key: "ts-key", protocol: "system-one" });
+    await userEvent.click(j.getByRole("radio", { name: /外部服务/ }));
+    await userEvent.click(j.getByRole("button", { name: "测试连接" }));
+    expect(await j.findByRole("status", { name: "测试结果" })).toHaveTextContent("概率来源 native");
+    const url = j.getByLabelText(/接口根地址/);
+    await userEvent.clear(url);
+    await userEvent.type(url, "http://gw.example.invalid/v1");
+    await userEvent.click(j.getByRole("button", { name: "手动填写模型名" }));
+    await userEvent.clear(j.getByLabelText("模型"));
+    await userEvent.type(j.getByLabelText("模型"), "gw/jev-latest");
+    await save("判断端点");
+    await j.findByText(/已保存/);
+    expect(s.puts.at(-1)).toEqual({ judge_endpoint: { url: "http://gw.example.invalid/v1", api_key: "ts-key", model: "gw/jev-latest", locality: "external", protocol: "system-one", timeout_ms: 10000, max_batch: 32, max_material_chars: 8000 } });
   });
 
   it("获取模型后从列表选择，再测试连接；请求用占位沿用已存密钥", async () => {
@@ -157,6 +187,9 @@ describe("设置 › 模型", () => {
     expect(j.getByRole("radio", { name: /本机/ })).not.toBeChecked();
     expect(j.getByRole("radio", { name: /外部服务/ })).not.toBeChecked();
     expect(j.getByLabelText("超时（毫秒）")).toHaveValue(10000);
+    // 换成自建服务协议：仍是预填值的地址与模型清空。
+    await userEvent.selectOptions(j.getByLabelText("协议"), "probability-judgment/1");
+    expect(j.getByLabelText(/端点 URL/)).toHaveValue("");
     await userEvent.type(j.getByLabelText(/端点 URL/), "http://cls.stub/judge");
     await save("判断端点");
     expect(await j.findByRole("alert")).toHaveTextContent("配置这个端点时必选");

@@ -66,7 +66,7 @@ func TestListModelsFailures(t *testing.T) {
 			var se *StatusError
 			return errors.As(err, &se) && se.Code == 401 && !strings.Contains(err.Error(), "sekret-key")
 		}},
-		"not a list": {func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"models":[]}`) },
+		"not a list": {func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"items":[]}`) },
 			func(err error) bool { return errors.Is(err, ErrBadResponse) }},
 		"not json": {func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `<html>`) },
 			func(err error) bool { return errors.Is(err, ErrBadResponse) }},
@@ -90,5 +90,16 @@ func TestListModelsTimeout(t *testing.T) {
 	defer cancel()
 	if _, _, err := (&Client{}).ListModels(ctx, url, ""); !errors.Is(err, ErrTimeout) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+// system-one 判断接口的模型列表是 models[].name。
+func TestListModelsNamesShape(t *testing.T) {
+	url := listServer(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"models":[{"name":"jev-preview","description":"d","release_date":"x"},{"name":"jev-latest"}]}`)
+	})
+	ids, _, err := (&Client{}).ListModels(context.Background(), url+"/v1", "k")
+	if err != nil || strings.Join(ids, ",") != "jev-latest,jev-preview" {
+		t.Fatalf("ids=%v err=%v", ids, err)
 	}
 }

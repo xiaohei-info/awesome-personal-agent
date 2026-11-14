@@ -101,7 +101,7 @@ func invalidDraft(err error) error {
 	return err
 }
 
-// models：取对话补全兼容端点的模型列表。探测本身的成败是数据（200 + ok:false + reason），不是 HTTP 错误。
+// models：取对话补全兼容端点或 system-one 判断接口的模型列表。探测本身的成败是数据（200 + ok:false + reason），不是 HTTP 错误。
 func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if err := webOnly(p); err != nil {
 		return err
@@ -115,10 +115,15 @@ func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Princip
 	if err := core.DecodeJSON(r, &in); err != nil {
 		return err
 	}
+	listURL := in.URL
 	switch in.Endpoint {
 	case kindGenerate:
 	case kindJudge:
-		if in.Protocol != kpolicy.ProtocolChatLogprobs {
+		switch in.Protocol {
+		case kpolicy.ProtocolChatLogprobs:
+		case kpolicy.ProtocolSystemOne:
+			listURL = model.SystemOneBase(in.URL)
+		default:
 			return domain.NewError(domain.CodeInvalidRequest, "protocol "+kpolicy.ProtocolProbability+" has no model list",
 				"type the model name, or leave it empty for the endpoint to report")
 		}
@@ -142,7 +147,7 @@ func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Princip
 	}
 	defer release()
 	start := clock.Now()
-	ids, truncated, err := pr.env.Model.ListModels(r.Context(), in.URL, key)
+	ids, truncated, err := pr.env.Model.ListModels(r.Context(), listURL, key)
 	out := map[string]any{"ok": err == nil, "elapsed_ms": clock.Now().Sub(start).Milliseconds()}
 	if err == nil {
 		out["models"], out["truncated"] = ids, truncated

@@ -142,6 +142,8 @@ const (
 
 	ProtocolProbability  = "probability-judgment/1"
 	ProtocolChatLogprobs = "chat-logprobs"
+	// ProtocolSystemOne 是原生分类模型服务的判断接口：一次请求带共享 state 与一组具名是非题（§8.8）。
+	ProtocolSystemOne = "system-one"
 )
 
 // 判断端点的默认值（附录 B.2、§8.8）。
@@ -524,9 +526,9 @@ func normalizeEndpoints(p *Policy) (err error) {
 	case "":
 		j.Protocol = ProtocolProbability
 	case ProtocolProbability:
-	case ProtocolChatLogprobs:
+	case ProtocolChatLogprobs, ProtocolSystemOne:
 		if j.Model == "" {
-			return invalid("judge_endpoint model is required for protocol %s", ProtocolChatLogprobs)
+			return invalid("judge_endpoint model is required for protocol %s", j.Protocol)
 		}
 	default:
 		return invalid("judge_endpoint protocol %q", j.Protocol)

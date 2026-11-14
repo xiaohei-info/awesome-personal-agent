@@ -1,7 +1,8 @@
 package model
 
-// 概率判断协议 v1 客户端（设计 §8.5、§8.8）：把一批是非题整批提交给判断端点，逐题取回 p_yes。
-// 只做线上协议与错误处置，不做定案（是否落入不确定带由调用方按 §8.3 判定）、不写判断记录、不保存复用结果；
+// 判断端点客户端（设计 §8.5、§8.8）：把一批是非题整批提交给判断端点，逐题取回 p_yes。
+// 端点按 protocol 分适配器（judgeWire）：适配器只管线上编码、解码与状态码归类，批量、拆批、重试与健康标记共用一套；
+// 内核其他部分只看到每题一个 p_yes 与 probability_source。只做线上协议与错误处置，不做定案（是否落入不确定带由调用方按 §8.3 判定）、不写判断记录、不保存复用结果；
 // 调用方按 Fingerprint 取已有结果后，只把未命中的题交给 Judge。
 
 import (
@@ -119,21 +120,57 @@ func (c *Client) Judge(ctx context.Context, ep policy.JudgeEndpoint, qs []Questi
 	}
 	switch ep.Protocol {
 	case "", policy.ProtocolProbability:
-		size := intOr(ep.MaxBatch, policy.DefaultJudgeMaxBatch)
-		for lo := 0; lo < len(qs); lo += size {
-			hi := min(lo+size, len(qs))
-			if err := j.batch(ctx, qs, lo, hi, true); err != nil {
-				return JudgeResult{}, err
-			}
-		}
-	case policy.ProtocolChatLogprobs:
+		j.wire = probabilityWire{}
+	case policy.ProtocolSystemOne:
+		j.wire = systemOneWire{}
+	case policy.ProtocolChatLogprobs: // 逐题一次请求，不走批量
 		if err := j.logprobs(ctx, qs); err != nil {
 			return JudgeResult{}, err
 		}
+		return j.res, nil
 	default:
 		return JudgeResult{}, fmt.Errorf("model: unsupported judge protocol %q", ep.Protocol)
 	}
+	for _, r := range j.wire.chunks(qs, intOr(ep.MaxBatch, policy.DefaultJudgeMaxBatch)) {
+		if err := j.batch(ctx, qs, r[0], r[1], true); err != nil {
+			return JudgeResult{}, err
+		}
+	}
 	return j.res, nil
+}
+
+// judgeWire 是一种批量判断协议的线上格式。
+type judgeWire interface {
+	// chunks 把题切成若干 [lo,hi) 批，每批至多 size 题。
+	chunks(qs []Question, size int) [][2]int
+	url(ep policy.JudgeEndpoint) string
+	encode(ep policy.JudgeEndpoint, qs []Question) ([]byte, error)
+	// decode 校验 200 响应并填入 [lo,hi) 的结果。
+	decode(j *judgeRun, raw []byte, qs []Question, lo, hi int)
+	// classify 按协议细化非 2xx 的归类；post 已按 §8.8 的通用状态码表归过一次。
+	classify(f *callFault) *callFault
+}
+
+// pack 按顺序贪心切批：每批至多 size 题；budget > 0 时每批的 cost 之和不超过 budget（单题超出时独占一批）。
+func pack(qs []Question, size, budget int, cost func(Question) int) [][2]int {
+	var out [][2]int
+	for lo := 0; lo < len(qs); {
+		hi, used := lo, 0
+		for hi < len(qs) && hi-lo < size {
+			c := 0
+			if budget > 0 {
+				c = cost(qs[hi])
+			}
+			if hi > lo && used+c > budget && budget > 0 {
+				break
+			}
+			used += c
+			hi++
+		}
+		out = append(out, [2]int{lo, hi})
+		lo = hi
+	}
+	return out
 }
 
 func intOr(v, def int) int {
@@ -169,10 +206,11 @@ func prepare(in []Question, maxChars int) ([]Question, error) {
 }
 
 type judgeRun struct {
-	c   *Client
-	ep  policy.JudgeEndpoint
-	opt JudgeOptions
-	res JudgeResult
+	c    *Client
+	ep   policy.JudgeEndpoint
+	opt  JudgeOptions
+	wire judgeWire
+	res  JudgeResult
 }
 
 func (j *judgeRun) fault(code string) {
@@ -193,12 +231,16 @@ func (j *judgeRun) failRange(lo, hi int, code string) {
 
 // batch 提交 qs[lo:hi]。canSplit 为真时遇 413 对半拆开各发一次；拆开后的两半不再拆（§8.8）。
 func (j *judgeRun) batch(ctx context.Context, qs []Question, lo, hi int, canSplit bool) error {
-	body, err := j.encode(qs[lo:hi])
+	body, err := j.wire.encode(j.ep, qs[lo:hi])
 	if err != nil {
 		return err
 	}
 	raw, f, err := j.retry(ctx, func(ctx context.Context) ([]byte, *callFault) {
-		return j.c.post(ctx, j.ep.URL, j.ep.APIKey, body, j.timeout(), &j.res.Requests)
+		raw, f := j.c.post(ctx, j.wire.url(j.ep), j.ep.APIKey, body, j.timeout(), &j.res.Requests)
+		if f != nil {
+			f = j.wire.classify(f)
+		}
+		return raw, f
 	})
 	if err != nil {
 		return err
@@ -220,7 +262,7 @@ func (j *judgeRun) batch(ctx context.Context, qs []Question, lo, hi int, canSpli
 		j.failRange(lo, hi, f.code)
 		return nil
 	}
-	j.decode(raw, qs, lo, hi)
+	j.wire.decode(j, raw, qs, lo, hi)
 	return nil
 }
 
@@ -228,7 +270,14 @@ func (j *judgeRun) timeout() time.Duration {
 	return time.Duration(intOr(j.ep.TimeoutMs, policy.DefaultJudgeTimeoutMs)) * time.Millisecond
 }
 
-func (j *judgeRun) encode(qs []Question) ([]byte, error) {
+// probabilityWire 是概率判断协议 v1（probability-judgment/1）：路径由配置给全，请求与响应见 §8.8。
+type probabilityWire struct{}
+
+func (probabilityWire) chunks(qs []Question, size int) [][2]int { return pack(qs, size, 0, nil) }
+func (probabilityWire) url(ep policy.JudgeEndpoint) string      { return ep.URL }
+func (probabilityWire) classify(f *callFault) *callFault        { return f }
+
+func (probabilityWire) encode(_ policy.JudgeEndpoint, qs []Question) ([]byte, error) {
 	type wire struct {
 		ID        string          `json:"id"`
 		Question  string          `json:"question"`
@@ -249,7 +298,7 @@ func (j *judgeRun) encode(qs []Question) ([]byte, error) {
 }
 
 // decode 校验 200 响应并填入 [lo,hi) 的结果。任何协议违例都按整批 protocol_error 处理，不采信其中任何一题。
-func (j *judgeRun) decode(raw []byte, qs []Question, lo, hi int) {
+func (probabilityWire) decode(j *judgeRun, raw []byte, qs []Question, lo, hi int) {
 	var resp struct {
 		Protocol string `json:"protocol"`
 		Model    string `json:"model"`
@@ -334,6 +383,8 @@ func questionCode(c string) string {
 type callFault struct {
 	code       string
 	retryAfter time.Duration // 仅 429，且响应带了 Retry-After
+	status     int           // HTTP 状态；传输层失败为 0
+	body       []byte        // 非 2xx 的响应体，供适配器细化归类
 }
 
 // post 发一次 POST，返回 2xx 的响应体或归类后的故障。err 非空只表示调用方的 ctx 被取消。
@@ -362,26 +413,35 @@ func (c *Client) post(ctx context.Context, url, key string, body []byte, timeout
 	if err != nil {
 		return nil, transportFault(ctx, cctx)
 	}
-	switch s := resp.StatusCode; {
-	case s >= 200 && s < 300:
+	s := resp.StatusCode
+	if s >= 200 && s < 300 {
 		if len(raw) > maxBody {
 			return nil, &callFault{code: CodeProtocolError}
 		}
 		return raw, nil
-	case s == 400:
-		return nil, &callFault{code: CodeInvalidRequest}
-	case s == 401 || s == 403:
-		return nil, &callFault{code: CodeUnauthorized}
-	case s == 408 || s == 504:
-		return nil, &callFault{code: CodeTimeout}
-	case s == 413:
-		return nil, &callFault{code: CodeBatchTooLarge}
-	case s == 429:
-		return nil, &callFault{code: CodeRateLimited, retryAfter: retryAfter(resp.Header.Get("Retry-After"))}
-	case s >= 500:
-		return nil, &callFault{code: CodeUnavailable}
 	}
-	return nil, &callFault{code: CodeProtocolError} // 其余状态（重定向、其他 4xx）不在协议内
+	f := httpFault(s, resp.Header.Get("Retry-After"))
+	f.status, f.body = s, raw
+	return nil, f
+}
+
+// httpFault 按 §8.8 的通用状态码表归类非 2xx。
+func httpFault(s int, retry string) *callFault {
+	switch {
+	case s == 400:
+		return &callFault{code: CodeInvalidRequest}
+	case s == 401 || s == 403:
+		return &callFault{code: CodeUnauthorized}
+	case s == 408 || s == 504:
+		return &callFault{code: CodeTimeout}
+	case s == 413:
+		return &callFault{code: CodeBatchTooLarge}
+	case s == 429:
+		return &callFault{code: CodeRateLimited, retryAfter: retryAfter(retry)}
+	case s >= 500:
+		return &callFault{code: CodeUnavailable}
+	}
+	return &callFault{code: CodeProtocolError} // 其余状态（重定向、其他 4xx）不在协议内
 }
 
 // transportFault 区分调用方取消（原样上报，由 retry 转成错误）与超时、连接失败。

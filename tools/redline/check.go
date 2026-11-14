@@ -33,7 +33,7 @@ var (
 	// 设计点名的 harness；Pi、Cursor 词太通用（cursor 还是游标），有意不列入。
 	harnessNames = []string{"hermes", "claude", "codex", "dsh", "gemini", "opencode", "openclaw"}
 	productNames = append([]string{"telegram", "openai", "anthropic", "himalaya", "gog",
-		"slack", "discord", "feishu", "dingtalk", "wechat", "github"}, harnessNames...)
+		"slack", "discord", "feishu", "dingtalk", "wechat", "github", "typesafe", "jev"}, harnessNames...)
 )
 
 // Violation 是一条红线违规。

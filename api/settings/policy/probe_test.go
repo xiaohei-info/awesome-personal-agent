@@ -50,6 +50,15 @@ func okModels(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"data":[{"id":"model-b"},{"id":"model-a"}]}`)
 	case "/v1/chat/completions":
 		fmt.Fprint(w, `{"choices":[{"message":{"content":"{\"answer\":\"yes\",\"sufficient\":true}"}}]}`)
+	case "/v1/systemone":
+		var req struct {
+			Model     string                     `json:"model"`
+			Questions map[string]json.RawMessage `json:"questions"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		for id := range req.Questions {
+			fmt.Fprintf(w, `{"model":"so-model-1","answers":{%q:{"type":"noul","noul":0.96}},"usage":{"input_tokens":1,"output_tokens":0}}`, id)
+		}
 	case "/judge":
 		var req struct {
 			Questions []struct{ ID string } `json:"questions"`
@@ -159,6 +168,30 @@ func TestProbeJudgeEndpoint(t *testing.T) {
 	// 草稿不合规按保存时的同一套规则拒绝。
 	rec = e.do("POST", testPath, `{"endpoint":"judge","config":{"url":"ftp://x","protocol":"probability-judgment/1"}}`, e.web)
 	if rec.Code != 400 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+// system-one 判断接口：获取模型走接口根下的 /models（URL 多填 /systemone 也一样），测试连接回答示例题。
+func TestProbeJudgeSystemOne(t *testing.T) {
+	e := setup(t)
+	f := newFake(t, okModels)
+	out := decode(t, e.do("POST", modelsPath, `{"endpoint":"judge","url":"`+f.srv.URL+`/v1/systemone","api_key":"k","protocol":"system-one"}`, e.web))
+	if out["ok"] != true || fmt.Sprint(out["models"]) != "[model-a model-b]" {
+		t.Fatalf("%v", out)
+	}
+	rec := e.do("POST", testPath, `{"endpoint":"judge","config":{"url":"`+f.srv.URL+`/v1","api_key":"k","protocol":"system-one","model":"so-latest","locality":"external"}}`, e.web)
+	out = decode(t, rec)
+	data, _ := out["data"].(map[string]any)
+	if out["code"] != "ok" || data["probability_source"] != "native" || data["model"] != "so-model-1" || data["protocol"] != "system-one" {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	got := f.requests()
+	if got[0] != "GET /v1/models Bearer k" || got[1] != "POST /v1/systemone Bearer k" {
+		t.Fatalf("%v", got)
+	}
+	// 缺模型名按保存时的规则拒绝。
+	if rec := e.do("POST", testPath, `{"endpoint":"judge","config":{"url":"`+f.srv.URL+`/v1","protocol":"system-one"}}`, e.web); rec.Code != 400 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 }
