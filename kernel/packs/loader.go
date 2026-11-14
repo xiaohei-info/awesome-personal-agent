@@ -71,10 +71,19 @@ func (l *Loader) Load() ([]Rejection, error) {
 	if err != nil {
 		return nil, err
 	}
+	fresh := l.swap(cands)
+	// OnReject 要写账本（拿存储锁）；健康查询在存储事务内读 Health（拿 l.mu）。必须放锁后调用，否则锁序相反会互相死等。
+	if l.o.OnReject != nil {
+		for _, r := range fresh {
+			l.o.OnReject(r)
+		}
+	}
+	return fresh, nil
+}
+
+func (l *Loader) swap(cands map[string][]candidate) (fresh []Rejection) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
-	var fresh []Rejection
 	for name, cs := range cands {
 		fresh = append(fresh, l.apply(name, cs)...)
 	}
@@ -91,12 +100,7 @@ func (l *Loader) Load() ([]Rejection, error) {
 			delete(l.health, name)
 		}
 	}
-	if l.o.OnReject != nil {
-		for _, r := range fresh {
-			l.o.OnReject(r)
-		}
-	}
-	return fresh, nil
+	return fresh
 }
 
 func (l *Loader) apply(name string, cs []candidate) (fresh []Rejection) {
