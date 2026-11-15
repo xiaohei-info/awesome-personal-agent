@@ -83,7 +83,7 @@ export const GRANT_STATUS = ["active", "expired", "revoked"] as const;
 /** 凭据种类：kernel/auth/auth.go Kind */
 export const CRED_KIND = ["observer", "worker", "delegate", "ext", "webhook"] as const;
 /** 执行者种类：kernel/executors/executors.go Kind* */
-export const EXECUTOR_KIND = ["native-subagent", "external-cli", "human"] as const;
+export const EXECUTOR_KIND = ["native-subagent", "external-cli", "remote-agent", "human"] as const;
 
 /** 规则模式：kernel/rules/rules.go Mode* */
 export const RULE_MODE = ["off", "observe", "auto"] as const;
