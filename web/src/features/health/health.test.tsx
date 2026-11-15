@@ -109,7 +109,7 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
     const out = main().getByRole("article", { name: "后台任务排队或超时" });
     expect(out).toHaveTextContent("后台任务超时 2 次");
     expect(out).toHaveTextContent("还有 3 个在排队，最久等了 42 秒");
-    expect(within(out).getByRole("link", { name: "去看后台运行" })).toHaveAttribute("href", "/runs");
+    expect(within(out).getByRole("link", { name: "去看运行日志" })).toHaveAttribute("href", "/runs");
     expect(within(main().getByRole("article", { name: "提醒发不出去" })).getByRole("link", { name: "去看提醒设置" })).toHaveAttribute("href", "/settings/notify");
     expect(within(main().getByRole("article", { name: "自动化连锁被叫停" })).getByRole("link", { name: "去看事项" })).toHaveAttribute("href", "/items/itm_3");
     const pk = main().getByRole("article", { name: "能力包加载失败" });

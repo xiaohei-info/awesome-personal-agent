@@ -428,7 +428,7 @@ button[aria-pressed="true"] { font-weight: 600; }
 .line > select, .line > .sentence { flex: 0 1 auto; }
 .sentence input[type=number] { width: 7em; }
 .chips input { flex: 1 1 140px; }
-.chips .badge button { min-height: 0; padding: 0 2px; border: 0; background: none; box-shadow: none; }
+.chips .badge button { padding: 0 2px; border: 0; background: none; box-shadow: none; }
 .meter { height: 6px; border-radius: 3px; background: var(--sunken); overflow: hidden; }
 .meter > b { display: block; height: 100%; background: var(--ink); }
 fieldset.cards3 { max-width: none; }
@@ -464,3 +464,20 @@ nav.chips button.on { color: var(--paper); background: var(--ink); border-color:
 .status-page ul.lines { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .status-page ul.lines li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .status-page details > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+
+/* 运行日志：一行一条，整行可点，就地展开；手机上折成两行（做了什么 + 结果 / 时间 + 用时）。 */
+ul.rows.log > li { display: block; padding: 0; }
+button.log-line { display: grid; font-weight: 400; line-height: 1.5; grid-template-columns: 11em minmax(0, 1fr) auto 4.5em; align-items: center; gap: 4px 12px; width: 100%; padding: 9px 16px; border-radius: 0; text-align: left; color: var(--ink); }
+button.log-line:hover { background: var(--sunken); }
+.log-line .when, .log-line .took { font-size: 12.5px; color: var(--ink-3); }
+.log-line .took { text-align: right; }
+.log-line .what { overflow-wrap: anywhere; }
+.log-detail { padding: 0 16px 12px calc(28px + 11em); }
+.log-detail .sub-list { margin: 0 0 6px; }
+ul.log-children { list-style: none; margin: 0 0 8px 16px; padding: 0; border-left: 2px solid var(--line); }
+ul.log-children > li { padding: 0; border-bottom: 0; }
+@media (max-width: 820px) {
+  button.log-line { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "what result" "when took"; }
+  .log-line .what { grid-area: what; } .log-line .result { grid-area: result; } .log-line .when { grid-area: when; } .log-line .took { grid-area: took; }
+  .log-detail { padding-left: 16px; }
+}

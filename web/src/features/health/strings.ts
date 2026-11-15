@@ -42,7 +42,7 @@ const zh = {
   // 去处
   go: {
     sources: "去看来源",
-    runs: "去看后台运行",
+    runs: "去看运行日志",
     notify: "去看提醒设置",
     items: "去看事项",
     projects: "去看项目",
@@ -95,7 +95,7 @@ const en: typeof zh = {
   lag: (n) => `${n} timers fired late; if this keeps happening, check host sleep and load`,
   go: {
     sources: "Open sources",
-    runs: "Open background runs",
+    runs: "Open the run log",
     notify: "Open notifications",
     items: "Open items",
     projects: "Open projects",
