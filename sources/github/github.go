@@ -16,10 +16,13 @@
 //   - updated：updated_at 晚于上面所有时间时才有，id 带时间。评论、改标签都只改 updated_at，
 //     相邻两次拉取之间的多次改动合并成一条，所以每个对象每次拉取至多一条 updated；reopen 也表现为 updated。
 //
-// sender 是对象的作者。只有 opened 的动作者确定是作者才标 sender_verified；
-// issue 列表不给 closed、merged、updated 的动作者，这些事件不标。
+// opened 的 sender 是对象的作者（接口返回的 user.login），已核实；issue 列表不给 closed、merged、updated 的动作者，
+// 这些事件不带 sender（填作者会把别人的评论、关闭显示成作者做的）。
 //
-// 游标是每个流（一个仓库或通知）各自的续传位置，见 stream。
+// 评论另按仓库读（issues/comments、pulls/comments），每条一个事件：issue.commented、pr.commented、pr.review_commented，
+// sender 是评论的作者，已核实；id 只含评论 id，编辑后再读到同一条由 admit 与内核去重。
+//
+// 游标是每个流（一个仓库、它的两类评论或通知）各自的续传位置，见 stream。
 package github
 
 import (
@@ -252,6 +255,22 @@ func pull(ctx context.Context, stdin io.Reader, api API, now time.Time) ([]event
 		}
 		out = append(out, evs...)
 		budget -= used
+		for _, c := range commentFeeds {
+			name := repo + c.stream
+			cs := streamOf(name)
+			next[name] = cs
+			if budget <= 0 {
+				continue
+			}
+			evs, used, err := sweep(ctx, api, "/repos/"+repo+c.path, cs, to, budget, func(raw json.RawMessage) (time.Time, []event, error) {
+				return commentEvent(repo, c.kind, raw)
+			})
+			if err != nil {
+				return nil, "", fmt.Errorf("repo %s comments: %w", repo, err)
+			}
+			out = append(out, evs...)
+			budget -= used
+		}
 		ev, err := agentsEvent(ctx, api, repo, s, to)
 		if err != nil {
 			return nil, "", fmt.Errorf("repo %s: %w", repo, err)
@@ -278,12 +297,25 @@ func pull(ctx context.Context, stdin io.Reader, api API, now time.Time) ([]event
 // 每页读完后把 since 收到已读的最新时间再从第一页读：页码翻页时，读取途中被更新的对象移到队尾，
 // 后面的对象前移一位，会有对象落在两页之间读不到。一整页都是同一秒时 since 无法前进，才翻页。
 func sweepIssues(ctx context.Context, api API, repo string, s *stream, to time.Time, budget int) ([]event, int, error) {
+	return sweep(ctx, api, "/repos/"+repo+"/issues?state=all&", s, to, budget, func(raw json.RawMessage) (time.Time, []event, error) {
+		var it issueRaw
+		if err := json.Unmarshal(raw, &it); err != nil || it.Number == 0 || it.UpdatedAt.IsZero() {
+			return time.Time{}, nil, fmt.Errorf("bad issue item")
+		}
+		return it.UpdatedAt, issueEvents(repo, it, s.Floor), nil
+	})
+}
+
+// sweep 是按 updated_at 升序、带 since 的列表接口的通用读法（翻页与续传见 sweepIssues）。
+// prefix 是路径加上查询串开头（以 ? 或 & 结尾）；decode 给出一条记录的 updated_at 和它的事件。
+func sweep(ctx context.Context, api API, prefix string, s *stream, to time.Time, budget int,
+	decode func(json.RawMessage) (time.Time, []event, error)) ([]event, int, error) {
 	var out []event
 	used := 0
 	since, page := s.At, 1
 	for {
-		body, err := api.Get(ctx, fmt.Sprintf("/repos/%s/issues?state=all&sort=updated&direction=asc&per_page=%d&since=%s&page=%d",
-			repo, perPage, since.UTC().Format(time.RFC3339), page))
+		body, err := api.Get(ctx, fmt.Sprintf("%ssort=updated&direction=asc&per_page=%d&since=%s&page=%d",
+			prefix, perPage, since.UTC().Format(time.RFC3339), page))
 		if err != nil {
 			return nil, 0, err
 		}
@@ -292,14 +324,14 @@ func sweepIssues(ctx context.Context, api API, repo string, s *stream, to time.T
 			return nil, 0, fmt.Errorf("unexpected response: %w", err)
 		}
 		for _, raw := range items {
-			var it issueRaw
-			if err := json.Unmarshal(raw, &it); err != nil || it.Number == 0 || it.UpdatedAt.IsZero() {
-				return nil, 0, fmt.Errorf("bad issue item")
+			updated, evs, err := decode(raw)
+			if err != nil {
+				return nil, 0, err
 			}
-			if it.UpdatedAt.After(to) { // 升序：其后都晚于窗口。这些对象的早期迁移还没读到，Floor 不动
+			if updated.After(to) { // 升序：其后都晚于窗口。这些对象的早期迁移还没读到，Floor 不动
 				return out, used, nil
 			}
-			if evs := s.admit(it.UpdatedAt, issueEvents(repo, it, s.Floor)); len(evs) > 0 {
+			if evs := s.admit(updated, evs); len(evs) > 0 {
 				out = append(out, evs...)
 				used++
 			}
@@ -397,8 +429,9 @@ func issueEvents(repo string, it issueRaw, floor time.Time) []event {
 			Link:            it.HTMLURL,
 			OccurredAt:      at.UTC().Format(time.RFC3339),
 			CorrelationKeys: []string{key},
-			Sender:          it.User.Login,
-			SenderVerified:  it.User.Login != "" && typ == "opened",
+		}
+		if typ == "opened" && it.User.Login != "" {
+			ev.Sender, ev.SenderVerified = it.User.Login, true
 		}
 		if len([]rune(it.Body)) > sumLimit { // 摘要已含全文时不重复，省事件体积
 			ev.Detail = clip(it.Body, bodyLimit)
@@ -418,6 +451,58 @@ func issueEvents(repo string, it issueRaw, floor time.Time) []event {
 		add("updated", it.UpdatedAt, fmt.Sprintf("updated-%d", it.UpdatedAt.Unix()))
 	}
 	return evs
+}
+
+// commentFeeds 是每个仓库另读的两类评论，各自一个流（流名是仓库名加后缀，仓库名里没有 #）。
+// issues/comments 含 PR 上的普通评论，按 html_url 区分；pulls/comments 是 PR 的行内评审评论。
+var commentFeeds = []struct{ stream, path, kind string }{
+	{"#issue-comments", "/issues/comments?", ""},
+	{"#review-comments", "/pulls/comments?", "pr.review_commented"},
+}
+
+type commentRaw struct {
+	ID             int64                  `json:"id"`
+	Body           string                 `json:"body"`
+	HTMLURL        string                 `json:"html_url"`
+	IssueURL       string                 `json:"issue_url"`
+	PullRequestURL string                 `json:"pull_request_url"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+	User           struct{ Login string } `json:"user"`
+}
+
+var commentHTMLRe = regexp.MustCompile(`^https://[^/]+/[^/]+/[^/]+/(issues|pull)/(\d+)`)
+
+// commentEvent 把一条评论映射成事件。typ 为空时按 html_url 定 issue.commented 或 pr.commented。
+func commentEvent(repo, typ string, raw json.RawMessage) (time.Time, []event, error) {
+	var c commentRaw
+	if err := json.Unmarshal(raw, &c); err != nil || c.ID == 0 || c.UpdatedAt.IsZero() {
+		return time.Time{}, nil, fmt.Errorf("bad comment item")
+	}
+	m := commentHTMLRe.FindStringSubmatch(c.HTMLURL)
+	if m == nil {
+		return time.Time{}, nil, fmt.Errorf("bad comment html_url %q", c.HTMLURL)
+	}
+	if typ == "" {
+		typ = map[string]string{"issues": "issue.commented", "pull": "pr.commented"}[m[1]]
+	}
+	key := repo + "#" + m[2]
+	ev := event{
+		ID:              fmt.Sprintf("%s-%s-%d", map[bool]string{true: "review-comment", false: "comment"}[typ == "pr.review_commented"], strings.ReplaceAll(repo, "/", "-"), c.ID),
+		Type:            typ,
+		Subject:         fmt.Sprintf("%s comment", key),
+		Summary:         clip(c.Body, sumLimit),
+		Link:            c.HTMLURL,
+		OccurredAt:      c.CreatedAt.UTC().Format(time.RFC3339),
+		CorrelationKeys: []string{key},
+	}
+	if c.User.Login != "" {
+		ev.Sender, ev.SenderVerified = c.User.Login, true
+	}
+	if len([]rune(c.Body)) > sumLimit {
+		ev.Detail = clip(c.Body, bodyLimit)
+	}
+	return c.UpdatedAt, []event{ev}, nil
 }
 
 func later(a, b time.Time) time.Time {
@@ -535,4 +620,30 @@ func clip(s string, n int) string {
 		return string(r[:n])
 	}
 	return s
+}
+
+// Identity 是 identity 模式（§9.2）：读同一份 stdin，用同一套凭据取当前账号，stdout 输出一行 {"sender": "<login>"}。
+func Identity(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, newAPI func(credentialsPath string) API) int {
+	var in Input
+	if err := json.NewDecoder(stdin).Decode(&in); err != nil || in.CredentialsPath == "" {
+		fmt.Fprintln(stderr, "github source: identity needs the Source input with credentials_path")
+		return ExitAuth
+	}
+	body, err := newAPI(in.CredentialsPath).Get(ctx, "/user")
+	var u struct{ Login string }
+	if err == nil {
+		if err = json.Unmarshal(body, &u); err == nil && u.Login == "" {
+			err = fmt.Errorf("no login in /user")
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "github source:", err)
+		var e *Error
+		if errors.As(err, &e) {
+			return e.Exit
+		}
+		return ExitTemporary
+	}
+	_ = json.NewEncoder(stdout).Encode(map[string]string{"sender": u.Login})
+	return ExitOK
 }

@@ -350,13 +350,18 @@ func TestGitHubIssueStaysUnjudgedWithoutModel(t *testing.T) {
 // flow-source-github 的入口：webhook 校验方案与字段映射按数据声明，字段对齐 C.5。
 func TestWebhookSchemeAndMappingAreDeclaredAsData(t *testing.T) {
 	p := loadBuiltin(t)
-	if len(p.WebhookSchemes) != 1 || len(p.WebhookMaps) != 1 {
+	if len(p.WebhookSchemes) != 1 || len(p.WebhookMaps) != 4 {
 		t.Fatalf("schemes %d mappings %d", len(p.WebhookSchemes), len(p.WebhookMaps))
 	}
 	s := p.WebhookSchemes[0]
 	if s.Algorithm != "hmac-sha256" || s.SignatureHeader != "X-Hub-Signature-256" || s.SignaturePrefix != "sha256=" ||
 		s.SignedPayload != "body" || s.DeliveryIDHeader != "X-GitHub-Delivery" {
 		t.Fatalf("scheme %+v", s)
+	}
+	for _, m := range p.WebhookMaps {
+		if m.SenderVerified != "on_signature" || m.Fields["sender"] != "{$.sender.login}" {
+			t.Errorf("%s: sender %v verified %q, the sender is the platform's and only verified when the signature passes", m.ID, m.Fields["sender"], m.SenderVerified)
+		}
 	}
 	m := p.WebhookMaps[0]
 	want := map[string]string{"id": "{header.X-GitHub-Delivery}", "type": "issue.{$.action}", "subject": "{$.issue.title}",
@@ -515,16 +520,18 @@ func TestReminderDueBecomesProposedTaskWithoutModel(t *testing.T) {
 	}
 }
 
-// ACT-IRL-24、ACT-GH-08、ACT-GH-10：没有事项登记过关联键的 PR 状态变化与规范文件变化只记 ignored，不调模型，不进建议流。
+// ACT-IRL-24、ACT-GH-08、ACT-GH-10：没有事项登记过关联键的 PR 状态变化、评论与规范文件变化只记 ignored，不调模型，不进建议流。
 func TestPRActivityAndAgentsMDChangeAreIgnoredByRules(t *testing.T) {
 	e := newEnv(t, true, nil)
 	e.emit("src_gh", "github",
 		ev("pr1", "pr.closed", "修复登录", map[string]any{"correlation_keys": []string{"acc-org/acc-repo#7"}}),
 		ev("pr2", "pr.merged", "修复注册", map[string]any{"correlation_keys": []string{"acc-org/acc-repo#8"}}),
 		ev("pr3", "pr.updated", "改动", map[string]any{"correlation_keys": []string{"acc-org/acc-repo#9"}}),
+		ev("pr4", "pr.commented", "评论", map[string]any{"correlation_keys": []string{"acc-org/acc-repo#10"}, "sender": "bob", "sender_verified": true}),
+		ev("pr5", "pr.review_commented", "行内评论", map[string]any{"correlation_keys": []string{"acc-org/acc-repo#10"}}),
 		ev("agm1", "repo.agents_md_changed", "AGENTS.md 变化", nil))
 	evs := e.events("src_gh")
-	if len(evs) != 4 {
+	if len(evs) != 6 {
 		t.Fatalf("events %+v", evs)
 	}
 	for _, x := range evs {

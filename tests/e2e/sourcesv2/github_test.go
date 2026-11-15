@@ -228,7 +228,7 @@ func TestFlowSourceGithub(t *testing.T) {
 		eq(t, "建议流条数", len(k.suggestions()), sug)
 	})
 
-	k.step("ACT-GH-09 PR 更新命中已委派事项的关联键时挂靠", func(t *testing.T) {
+	k.step("ACT-GH-09 PR 更新与评论命中已委派事项的关联键时挂靠", func(t *testing.T) {
 		parent := k.idOf(k.apa(k.DEL, 0, "item", "add", "--kind", "task", "--title", "补充导出单测", "--phase", "open",
 			"--project", k.Projects["acc-work"], "--evidence", "建父事项"))
 		child := k.idOf(k.apa(k.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--evidence", "委派"))
@@ -238,6 +238,10 @@ func TestFlowSourceGithub(t *testing.T) {
 		ev := k.settledPrefix(src, "pr-acc-org-acc-repo#7-updated")
 		if ev.Disposition != "attached" || ev.Item != child || ev.AttachState != "pending" {
 			t.Errorf("事件应 attached 到子事项且 attach_state=pending: %+v", ev)
+		}
+		// PR 上的评论另成一条事件，挂到同一事项，发件人是评论作者且已核实
+		if c := k.settledPrefix(src, "comment-acc-org-acc-repo-901"); c.Type != "pr.commented" || c.Item != child || c.Sender != "dev-c" || !c.SenderVerified {
+			t.Errorf("评论事件应 attached 到子事项、发件人已核实: %+v", c)
 		}
 		// 建父/子事项会触发与来源事件无关的"一句话摘要"请求，所以只数提到这条 PR 事件的请求。
 		eq(t, "两份模型替身日志里提到该事件的请求", k.modelAbout("acc-org/acc-repo/pull/7"), 0)

@@ -34,7 +34,7 @@ RSS/Atom、通用 HTTP JSON 轮询、本地目录监视三个拉取程序不对�
 
 | 来源程序 | 结论 | 按事件类型细分 | 依据 |
 |---|---|---|---|
-| `github-source`；`source_type` 为 `github` 的 webhook | 可信，格式提示"GitHub 用户名"，能推出本人身份（`identity` 模式取 `GET /user` 的 `login`） | `*.opened`、`*.commented`、`pr.review_commented` 可信；`*.updated`、`*.closed`、`*.merged`、`notification.*` 不带发件人 | 作者取自接口返回的 `user.login`（webhook 取验签后的 `sender.login`），由平台填写。聚合出的更新与关闭事件不知道动作者，通知接口不给动作者 |
+| `github-source`；`source_type` 为 `github` 的 webhook | 可信，格式提示"GitHub 用户名"，能推出本人身份（`identity` 模式取 `GET /user` 的 `login`） | `*.opened`、`*.commented`、`pr.review_commented`、`pr.reviewed` 可信；`*.updated`、`*.closed`、`*.merged`、`notification.*` 不带发件人 | 作者取自接口返回的 `user.login`（webhook 取验签后的 `sender.login`），由平台填写。聚合出的更新与关闭事件不知道动作者，通知接口不给动作者 |
 | `mail-himalaya` | 需确认 | — | 取不到可信的认证结果信头（D.3 `MEAS-MAIL-AR`） |
 | `apple-pim-source` | 需确认 | 提醒事项不带发件人 | 邮件的认证结果信头能否取到待实测（主文档 §21.3 `MEAS-MAIL-DMARC`）；日历组织者由对方写入 |
 | `calendar` | 需确认 | — | 组织者由对方的邀请写入 |
@@ -125,7 +125,7 @@ default: {zh: Apple 邮件, en: Apple Mail}
 ## D.4 代码托管来源与 webhook 校验方案
 
 - **拉取程序**：本版附带 GitHub 的拉取程序，产出 Issue、PR、评论、通知四类事件，并在每次拉取时比对仓库默认分支根目录 AGENTS.md 的 blob sha（主文档 §12.5）。来源类型登记为 `github`，内置规则按它匹配（附录 C.14）。
-- **评论**：按仓库另取 `GET /repos/{owner}/{repo}/issues/comments?since=` 与 `GET /repos/{owner}/{repo}/pulls/comments?since=`，每条评论一个事件（`issue.commented`、`pr.commented`、`pr.review_commented`），`sender` 为评论的 `user.login` 并已核实，关联键取所属 issue 或 PR 的 `owner/repo#编号`，因此挂到已有事项上成为挂靠消息。Issue 与 PR 的 `updated`、`closed`、`merged` 由列表的时间字段推出，不知道动作者，不带 `sender`。webhook 侧 `inbound-triage` 包另映射 `issue_comment`、`pull_request_review`、`pull_request_review_comment`，`sender` 取 `$.sender.login`，验签通过才算已核实。
+- **评论**：按仓库另取 `GET /repos/{owner}/{repo}/issues/comments?since=` 与 `GET /repos/{owner}/{repo}/pulls/comments?since=`，每条评论一个事件（`issue.commented`、`pr.commented`、`pr.review_commented`；issues/comments 里 PR 上的普通评论按 `html_url` 认作 `pr.commented`），id 只含评论 id，编辑后再读到的由去重吸收；`sender` 为评论的 `user.login` 并已核实，关联键取所属 issue 或 PR 的 `owner/repo#编号`，因此挂到已有事项上成为挂靠消息。两类评论各有自己的游标流，与 issue 列表共用每次运行的条数上限。Issue 与 PR 的 `updated`、`closed`、`merged` 由列表的时间字段推出，不知道动作者，不带 `sender`。webhook 侧 `inbound-triage` 包另有三个映射：`github-issue-comments`（`issue_comment` 的 `created`，一律 `issue.commented`，因为载荷里 issue 与 PR 的评论同形）、`github-pr-reviews`（`pull_request_review` 的 `submitted`，`pr.reviewed`）、`github-pr-review-comments`（`pull_request_review_comment` 的 `created`，`pr.review_commented`）；编辑与删除不映射；`sender` 取 `$.sender.login`，验签通过才算已核实。
 - **仓库简写**：托管型材料的只读读取器把 `owner/repo` 简写展开成 GitHub 地址；默认站点只在读取器里认定，内核只保存登记的写法（主文档 §12.3）。
 - **校验方案**（`inbound-triage` 包的声明式数据，附录 C.5）：
 

@@ -26,8 +26,9 @@ source_rules:
   - id: agents-md-changed
     match: {source_type: github, event_type: [repo.agents_md_changed]}
     then: ignore
+  # PR 上的评论与评审同 pr.updated；issue 上的评论同 issue.updated，没有规则（交初筛）。
   - id: pr-activity
-    match: {source_type: github, event_type: [pr.merged, pr.closed, pr.updated]}
+    match: {source_type: github, event_type: [pr.merged, pr.closed, pr.updated, pr.commented, pr.review_commented, pr.reviewed]}
     then: ignore
 webhook_schemes:
   - id: hmac-sha256-header
@@ -47,5 +48,42 @@ webhook_mappings:
       link: "{$.issue.html_url}"
       occurred_at: "{$.issue.updated_at}"
       correlation_keys: ["{$.repository.full_name}#{$.issue.number}"]
+      sender: "{$.sender.login}"
+    sender_verified: on_signature
+  # 评论与评审只取新建（created、submitted）：编辑和删除不产生新事件。issue_comment 不区分 issue 与 PR，一律 issue.commented。
+  - id: github-issue-comments
+    match: {header: {X-GitHub-Event: issue_comment}, json_path: "$.action", equals: created}
+    fields:
+      id: "{header.X-GitHub-Delivery}"
+      type: issue.commented
+      subject: "{$.issue.title}"
+      summary: "{$.comment.body}"
+      link: "{$.comment.html_url}"
+      occurred_at: "{$.comment.created_at}"
+      correlation_keys: ["{$.repository.full_name}#{$.issue.number}"]
+      sender: "{$.sender.login}"
+    sender_verified: on_signature
+  - id: github-pr-reviews
+    match: {header: {X-GitHub-Event: pull_request_review}, json_path: "$.action", equals: submitted}
+    fields:
+      id: "{header.X-GitHub-Delivery}"
+      type: pr.reviewed
+      subject: "{$.pull_request.title}"
+      summary: "{$.review.body}"
+      link: "{$.review.html_url}"
+      occurred_at: "{$.review.submitted_at}"
+      correlation_keys: ["{$.repository.full_name}#{$.pull_request.number}"]
+      sender: "{$.sender.login}"
+    sender_verified: on_signature
+  - id: github-pr-review-comments
+    match: {header: {X-GitHub-Event: pull_request_review_comment}, json_path: "$.action", equals: created}
+    fields:
+      id: "{header.X-GitHub-Delivery}"
+      type: pr.review_commented
+      subject: "{$.pull_request.title}"
+      summary: "{$.comment.body}"
+      link: "{$.comment.html_url}"
+      occurred_at: "{$.comment.created_at}"
+      correlation_keys: ["{$.repository.full_name}#{$.pull_request.number}"]
       sender: "{$.sender.login}"
     sender_verified: on_signature

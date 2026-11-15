@@ -198,6 +198,7 @@ type SrcEvent struct {
 	Item            string   `json:"item"`
 	AttachState     string   `json:"attach_state"`
 	CorrelationKeys []string `json:"correlation_keys"`
+	Sender          string   `json:"sender"`
 	SenderVerified  bool     `json:"sender_verified"`
 	Rule            string   `json:"rule"`
 	Raw             map[string]any
