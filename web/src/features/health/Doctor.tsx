@@ -105,7 +105,8 @@ function CheckView({ c }: { c: DoctorCheck }) {
   const go = GO[c.code];
   const head = (
     <>
-      {title} <Badge c={c} /> <span className="sub">{say(c.code, c.data)}</span>
+      {title} <Badge c={c} />
+      {!NOT_CONNECTED.has(c.code) && <span className="sub"> {say(c.code, c.data)}</span>}
       {go && c.status === "ok" && <> <Link className="btn" to={go[0]}>{t.doctorGo[go[1]]}</Link></>}
       {raw && <Raw id={c.name} code={c.code} why={c.why} next={c.next} />}
     </>
@@ -122,7 +123,11 @@ function CheckView({ c }: { c: DoctorCheck }) {
           ))}
         </ul>
       )}
-      {go && c.status !== "ok" && <Link className="btn" to={go[0]}>{t.doctorGo[go[1]]}</Link>}
+      {go && c.status !== "ok" && (
+        <div className="actions">
+          <Link className="btn" to={go[0]}>{t.doctorGo[go[1]]}</Link>
+        </div>
+      )}
     </>
   );
   // 正常项默认折叠成一行；要处理的直接展开。
