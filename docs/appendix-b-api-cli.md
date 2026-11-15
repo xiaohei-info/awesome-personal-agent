@@ -15,7 +15,7 @@
 | `apa serve` | 启动内核与 Web | 主机本地 | |
 | `apa login` | 保存 APA 地址与 token | 任意 token | 3 |
 | `apa guide [主题] [--template]` | 输出使用说明，只写机制；`--template` 输出常驻指令模板 | 无 | |
-| `apa declare <文件>` | 提交插件声明（无头运行、执行者），本人在 Web 确认后生效 | worker | 4 |
+| `apa declare <文件>` | 提交插件声明（无头运行；旧插件的 `executors[]` 仍被接受，确认后并入执行者名录），本人在 Web 确认后生效 | worker | 4 |
 | `apa version` | 版本号、构建提交、各模块数据结构版本与各协议版本 | 无 | |
 | `apa doctor [--json] [--upgrade-check]` | 自检（主文档 §15.5）；`--upgrade-check` 是升级前的只读预检（主文档 §16.5） | 主机本地；内核一侧的检查需 observer | 1 |
 | `apa backup create/verify/restore` | `create [--out <目录>] [--no-secrets]` 备份；`verify <备份>` 校验；`restore <备份> --home <目录>` 恢复到空目录（主文档 §16.5） | 主机本地 | 1、6 |
@@ -38,8 +38,10 @@
 | `apa proposals apply (--recommended \| --file <处置清单>) [--source] [--project] [--evidence \| --grant]` | 批量处理建议：按推荐，或逐条给出处置；每条各自成败，输出逐条结果 | delegate | 2、4、23 |
 | `apa grant list` | 列出该凭据名下未撤销、未过期的授权单：id、范围、动作、有效期；签发和撤销只在 Web | delegate | 4 |
 | **委派** | | | |
-| `apa executors [--project]` | 列出执行者，带项目时标明是否允许 | observer | |
-| `apa delegate --parent --assignee` | 建子事项，校验项目允许的执行者 | worker（自己的事项）；delegate（任意） | 4、5、21 |
+| `apa executors [--project]` | 列出执行者名录（主文档 §6.17），带项目时标明是否允许 | observer | |
+| `apa delegate --parent --assignee` | 建子事项，校验项目允许的执行者。本版新增、尚未实现：`--executor <JSON 文件或 ->`（`kind`、`host`、`label`、`handle`）在同一事务里登记或更新执行者，`harness` 取 `APA_HARNESS`；`assignee` 不在名录里不再返回 5；身份字段冲突或名录已满返回 6 | worker（自己的事项）；delegate（任意） | 4、5、21 |
+| `apa dispatch add <子事项> --session [--resumable] [--cwd] [--repo] [--handle <JSON 文件或 ->] [--continues <记录>]` | 【规划中（v0.2.0）】在委派子事项上写一条委派记录，输出 `{id}`；`harness` 取 `APA_HARNESS`，必填；句柄规则见主文档 §6.17 | 同 `apa report` | 2、4、5、6、23 |
+| `apa dispatch update <记录> [--state ended\|lost] [--resumable true\|false]` | 【规划中（v0.2.0）】推进委派记录；`lost` 同时置 `resumable` 为假，终态不可改 | 同 `apa report` | 2、4、5、6、23 |
 | `apa report <id> --outcome --summary [--pr --commit --branch --link] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`done` 必须带结果证据（`--pr`、`--commit`、`--branch`、`--link` 至少一项），附不出只能报 `progress` 或 `blocked` | 绑定该 assignee 的 worker、该运行的运行凭据、发起该委派的 delegate；其他 delegate 附 `--evidence` 或 `--grant` | 2、4、6、23 |
 | `apa handback <消息> --reason` | 把挂靠消息交回一次 | 同上 | 4、6 |
 | **项目** | | | |
@@ -87,7 +89,7 @@
 | `apa judgment show <id>` | 一条判断记录的逐级结果 | observer，按权限裁剪 | 5 |
 | `apa judgment spot-check` | 列出待抽检的条目；抽检结论只在 Web 填 | observer | |
 
-**只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、执行者清单、规则切 `auto`、运行权限上限、判断端点与生成端点、不确定带与影子模式、抽检结论、打扰上限与静音、来源与对话捕获的外发范围、登录口令与在线会话、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效、签发和撤销授权单。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
+**只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、移除执行者名录条目、规则切 `auto`、运行权限上限、判断端点与生成端点、不确定带与影子模式、抽检结论、打扰上限与静音、来源与对话捕获的外发范围、登录口令与在线会话、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效、签发和撤销授权单。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
 
 **代理写命令清单**：delegate 调用写命令时按动作归属分三档（主文档 §14.5）。其他凭据与 Web 本人不经这张表；只读命令不在清单内。
 
@@ -103,7 +105,7 @@
 | 对话捕获 | `inbound.capture` | | |
 | 决策 | `decision.request` | `decision.answer`、`proposal.accept`、`proposal.attach`、`proposal.dismiss`、`proposal.batch` | |
 | 材料 | `material.commit`、`material.add`、`blob.put` | `revision.confirm`、`revision.reject` | |
-| 委派 | `delegate.create`；`delegate.report`、`followmsg.handback`（绑定的事项）；`executor.declare` | `delegate.report`、`followmsg.handback`（其他事项） | |
+| 委派 | `delegate.create`；`delegate.report`、`delegate.dispatch`、`delegate.dispatch_update`、`followmsg.handback`（绑定的事项）；`executor.declare` | `delegate.report`、`delegate.dispatch`、`delegate.dispatch_update`、`followmsg.handback`（其他事项） | |
 | 项目 | `project.checkout.set`、`project.checkout.remove` | | `project.create`、`project.update`、`project.repo.add`、`project.repo.remove` |
 | 来源与能力包 | | | `source.register`、`source.update`、`source.set_enabled`、`source.webhook_key`、`source.webhook_revoke`、`source.replay`、`inbound.backlog_rules`、`inbound.backlog_score`、`inbound.backlog_rejudge`、`inbound.backlog_restore`、`instance.create`、`instance.update`、`instance.toggle` |
 
@@ -127,9 +129,13 @@
 | | `POST /items/{id}/attach` | 把建议补到已有事项，请求体 `{to, reason?}`；依据同上 | Web 登录、delegate |
 | | `POST /proposals/batch` | 批量处理建议，见下 | Web 登录、delegate |
 | | `GET /grants` | 该凭据名下未撤销、未过期的授权单 | delegate |
-| 委派 | `GET /executors` | 执行者清单 | observer |
+| 委派 | `GET /executors` | 执行者名录；本版另带 `harness`、`label`、`last_used_at`（尚未实现） | observer |
+| | `DELETE /executors/{id}` | 【规划中（v0.2.0）】移除名录条目，已有事项与委派记录里的 id 原样保留 | 只有 Web 登录 |
 | | `POST /delegations` | 建子事项 | worker |
 | | `POST /items/{id}/report` | 回执 | worker |
+| | `POST /items/{id}/dispatches` | 【规划中（v0.2.0）】写委派记录 `{session, resumable?, cwd?, repo?, handle?, continues?}`，返回 201 与记录 | 同回执 |
+| | `PATCH /dispatches/{id}` | 【规划中（v0.2.0）】推进委派记录 `{state?, resumable?}` | 同回执 |
+| | `GET /dispatches` | 【规划中（v0.2.0）】列委派记录，可带 `executor`、`item`、`resumable`、`limit` | observer；运行凭据限范围内的事项 |
 | | `POST /messages/{id}/handback` | 交回挂靠消息 | worker |
 | 项目 | `GET/POST /projects`，`GET/PATCH /projects/{id}` | 项目 | observer 读，delegate 写 |
 | | `POST /projects/{id}/repos` | repos 属性 | worker、delegate |
@@ -147,7 +153,7 @@
 | 上下文 | `GET /context` | 账本增量投影 | observer |
 | | `GET /context/persona` | 当前人格，前面带内核固定声明；本人没写时是内置默认；语言：查询参数 `lang`（`zh` 或 `en`）> 策略的 `persona_lang` > 查询参数 `locale`（调用方的区域设置，`zh` 开头为中文）> 英文；另带 `default`，即该语言的默认原文（不含声明） | observer |
 | | `POST /capture` | 提交对话增量 `{text, project?, path?, host?}`；运行身份下、项目未开启捕获时不生效，返回 200 `{"captured": false, "reason"}`；候选在提交后异步抽取 | worker |
-| 插件声明 | `POST /declarations` | 提交无头运行声明与执行者，进 Web 待确认 | worker |
+| 插件声明 | `POST /declarations` | 提交无头运行声明（旧插件可带 `executors[]`），进 Web 待确认 | worker |
 | 来源 | `GET/POST /sources`，`GET/PATCH /sources/{id}` | 来源登记 | observer 读，delegate 写；自定义命令只有 Web |
 | | `GET /sources/declared-name?type&command&source_type&config` | 来源程序接入声明的显示名（中英），新登记表单预填 | observer |
 | | `POST /sources/{id}/webhook` | 创建或轮换接收密钥 | delegate |
@@ -315,7 +321,8 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 {"code": "executor_not_allowed", "why": "执行者不在项目允许范围内", "next": "改选 allowed 中的执行者，或用 apa ask 交给本人", "allowed": ["work-host.cli"], "web_url": null}
 ```
 
-- `why` 与 `next` 只写机制，不含账本里的用户内容。`allowed` 是 Web 中配置的执行者 id。
+- `why` 与 `next` 只写机制，不含账本里的用户内容。`allowed` 是 Web 中配置的执行者 id。本版另加（尚未实现）：`allowed_match`（按机器或 harness 的匹配规则）与 `candidates`（名录里当前命中名单的执行者 id）。
+- 委派记录与执行者句柄未通过校验时返回 400（退出码 2），`why` 只写键路径与规则名，不回显取值（主文档 §6.17）。
 - HTTP 状态与退出码的对应：400 → 2；401 → 3；403 → 4、20、21、22（由 `code` 区分）；404 → 5；409 → 6；其余错误 → 1。不可达时 CLI 返回 7。
 - 退出码 22 的 `code` 为 `risk_screening_pending`，`why` 说明 web_only 初筛未返回，`web_url` 给出 Web 链接（主文档 §14.4）。
 - 退出码 23 在 v0.2.0 新增一个原因：`code` 为 `session_not_direct`，`why` 说明会话不是与本人的私聊，`web_url` 给出 Web 链接（主文档 §14.5）。HTTP 状态与其他依据不足的情况相同。
@@ -367,3 +374,4 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 判断留痕 | `run.finished`（`category: judge`）事件 | 判断记录（`/judgments`） | 旧事件保留、可回放；不计入校准统计 |
 | 来源的显示名 | 无；Web 显示来源 id | `name` 总有值：登记时给定或取来源程序的接入声明；都没有时登记被拒（400），重名的登记与改名返回 409 | 只增字段与列（`sources_registry` 迁移 3，账本结构版本 3 → 4）。已有来源在 `apa serve` 启动时补名：先按接入声明，没有声明的按类型起名并记一条健康说明，逐个记 `source.renamed`（操作者 system），不触发判断、重判或健康说明以外的投递。**调用方要改的**：登记仓库之外的来源程序（自定义脚本、自建拉取程序、非自带类型的 webhook）以前可以不带名字，现在必须带 `name` / `--name`，否则 400；同一程序登记多个实例而声明给出同名时（如两个 RSS 订阅）要显式起名。迁移后旧二进制拒绝打开账本（结构版本更高），回退要用升级前快照，见主文档 §16.5 |
 | 规则初始模式 | 一律 `observe` | 提醒类 `auto`，动作类 `observe` | 升级时未动过的内置提醒类规则切到 `auto` 并记 Event（主文档 §16.5） |
+| 执行者与委派（主文档 §6.17） | 执行者由本人在 Web 手填或确认插件声明后进入清单；`assignee` 不在清单里返回 5；确认声明时覆盖该 harness 的全部条目；名单只按 id；挂靠消息只对 `assignee` 推进 | 宿主随 `apa delegate --executor` 登记，身份字段固定；不在名录里也可指派；确认声明并入名录、不删除；新增委派记录（`apa dispatch`、`/items/{id}/dispatches`、`/dispatches`）与 `apa context --scope item` 的 `history`；名单可按机器或 harness 匹配（`allowed-executors` 的请求与返回加 `match`）；21 的返回体加 `allowed_match`、`candidates`；发起委派的凭据与运行身份对目标的委派子事项也能推进挂靠消息并拿到确认游标；删除 `GET/POST /settings/executors` 与 `executor.put`，`DELETE /settings/executors/{id}` 改为 `DELETE /executors/{id}` | 只增列与表（账本结构版本 4 → 5），已有条目、声明与名单原样保留，名单判定不变。**调用方要改的**：依赖"未登记返回 5"的调用方改为自己先查 `GET /executors`；用 `/settings/executors` 读名录的改用 `GET /executors`。带调用表的旧插件仍可委派，只是不写委派记录。删除的路由与 Web 切换在同一次改动里完成 |
