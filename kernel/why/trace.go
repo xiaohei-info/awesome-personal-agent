@@ -740,6 +740,8 @@ func (b builder) item(id string, fromMessage bool) ([]Entry, error) {
 			e.Who, e.Kind, e.Mech = Who{Kind: WhoSystem}, KAlert, true
 		case t == domain.EvCommandRejected:
 			e.Kind = KRejected
+		case t == domain.EvDelegationCreated || t == domain.EvDelegationReported || t == evDispatched || t == evDispatchUpd:
+			e = delegationEntry(e, t, p) // 子事项自己的经过：与它在父事项经过里的几行同一写法
 		default:
 			e.Kind, e.Args = KEvent, map[string]any{"type": t}
 		}
@@ -774,19 +776,9 @@ func (b builder) child(k domain.Item) ([]Entry, error) {
 		var p itemPayload
 		_ = json.Unmarshal(en.Event.Payload, &p)
 		e := Entry{At: en.Event.At, Who: b.who(en), Item: ref, Steps: b.steps(en)}
-		switch en.Event.Type {
-		case domain.EvDelegationCreated:
-			e.Kind, e.Args = KDelegated, map[string]any{"assignee": snap(p.Item).Assignee}
-		case evDispatched, evDispatchUpd:
-			e.Kind, e.Args = KDispatch, map[string]any{}
-			if en.Event.Type == evDispatchUpd {
-				e.Kind, e.Mech = KDispUpd, true
-			}
-			if p.Dispatch != nil {
-				e.Args = map[string]any{"executor": p.Dispatch.Executor, "harness": p.Dispatch.Harness, "state": p.Dispatch.State}
-			}
-		case domain.EvDelegationReported:
-			e.Kind, e.Args = KReported, map[string]any{"phase": snap(p.Item).Phase, "assignee": snap(p.Item).Assignee}
+		switch t := en.Event.Type; t {
+		case domain.EvDelegationCreated, evDispatched, evDispatchUpd, domain.EvDelegationReported:
+			e = delegationEntry(e, t, p)
 		case domain.EvCommandRejected:
 			e.Kind = KRejected
 		default:
@@ -795,6 +787,25 @@ func (b builder) child(k domain.Item) ([]Entry, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// delegationEntry 写委派的一行：派出、开工、进度、交回。
+func delegationEntry(e Entry, t string, p itemPayload) Entry {
+	switch t {
+	case domain.EvDelegationCreated:
+		e.Kind, e.Args = KDelegated, map[string]any{"assignee": snap(p.Item).Assignee}
+	case domain.EvDelegationReported:
+		e.Kind, e.Args = KReported, map[string]any{"phase": snap(p.Item).Phase, "assignee": snap(p.Item).Assignee}
+	default:
+		e.Kind, e.Args = KDispatch, map[string]any{}
+		if t == evDispatchUpd {
+			e.Kind, e.Mech = KDispUpd, true
+		}
+		if p.Dispatch != nil {
+			e.Args = map[string]any{"executor": p.Dispatch.Executor, "harness": p.Dispatch.Harness, "state": p.Dispatch.State}
+		}
+	}
+	return e
 }
 
 // follow 是事项上的一条后续消息：挂上、已处理、交回或退回。

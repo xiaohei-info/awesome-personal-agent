@@ -324,6 +324,10 @@ func TestTraceItemWithDelegation(t *testing.T) {
 	if u := tr.Entries[6]; !u.Mech || u.Args["state"] != "ended" {
 		t.Fatalf("dispatch_updated %+v", u)
 	}
+	// 子事项自己的经过与它在父事项里的几行同一写法。
+	if got := kinds(e.trace(child, authz.LevelWeb).Entries); got != "delegated,dispatched,dispatch_updated" {
+		t.Fatalf("child kinds %s", got)
+	}
 	// observer 只见信封：原始记录不带 reason 与 payload。
 	for _, en := range e.trace(it, authz.LevelObserver).Entries {
 		for _, s := range en.Steps {

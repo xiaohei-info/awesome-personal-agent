@@ -159,7 +159,11 @@ function What({ e, subjects }: { e: TraceEntry; subjects?: boolean }) {
     }
     case "observed": return <>{t.observed}</>;
     case "run": return <>{t.run[String(a.state)] ?? t.internal}</>;
-    case "generated": return <>{t.generated[String(a.state)] ?? t.generated.succeeded}</>;
+    case "generated": {
+      const w = t.templates[String(a.template)];
+      const st = a.state === "failed" ? "failed" : "succeeded";
+      return <>{w ? t.generatedOf[st](w) : t.generated[st]}</>;
+    }
     case "alert": return <>{t.alert}</>;
     case "delegated": return <>{t.delegated(executor(String(a.assignee ?? "")))} {item}</>;
     case "dispatched": return <>{t.dispatched(executor(String(a.executor ?? "")))} {item}</>;

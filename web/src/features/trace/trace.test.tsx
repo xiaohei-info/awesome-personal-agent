@@ -54,6 +54,7 @@ const GAPS: TraceData = {
     { at: "2030-01-01T09:20:00Z", who: { kind: "system" }, kind: "backlog", args: { reason: "model_unavailable" }, steps: [] },
     { at: "2030-01-01T10:20:00Z", who: { kind: "model", role: "judge" }, kind: "judged", args: { expired: true, answer: "yes", decided_by: "classifier" }, steps: [] },
     { at: "2030-01-01T10:20:00Z", who: { kind: "system" }, kind: "drafted", args: { outcome: "unknown" }, steps: [] },
+    { at: "2030-01-01T10:21:00Z", who: { kind: "model", role: "generate" }, kind: "generated", mech: true, args: { state: "failed", template: "one-line-summary" }, steps: [] },
   ],
 };
 const TRACES: Record<string, TraceData> = { sev_a: RULE, sev_b: MODEL, sev_c: PROPOSED, sev_d: GAPS };
@@ -122,6 +123,7 @@ describe("一条消息的处理经过（/sources/events/:id）", () => {
     expect(l[1]).toMatch(/还没判断：模型连不上，在积压里/);
     expect(l[2]).toMatch(/判断记录已过保留期，结论是提成建议/);
     expect(l[3]).toMatch(/不清楚是否起草/);
+    expect(l[4]).toMatch(/^写作模型一句话摘要没写出来，留空/); // 写作模型的一次生成，不是规则，也不是 Agent 运行
   });
 
   it("内核事件名、id、载荷只在「显示原始值」里", async () => {
