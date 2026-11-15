@@ -685,7 +685,7 @@ func TestMappingTemplates(t *testing.T) {
 	}
 	ok := packs.WebhookMapping{ID: "o", Fields: map[string]any{"type": "t"}}
 	ev, err := mapEvent(ok, c, []byte("{}"), "key-1", t0, false)
-	if err != nil || ev.ID != "key-1" || ev.Subject != "t" || !ev.OccurredAt.Equal(t0) || ev.Detail != "{}" {
+	if err != nil || ev.ID != "key-1" || ev.Subject != "t" || !ev.OccurredAt.Equal(t0) || ev.Detail != "" {
 		t.Fatalf("defaults: %+v %v", ev, err)
 	}
 }

@@ -15,9 +15,12 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
@@ -64,7 +67,7 @@ func newEnv(t *testing.T, configured bool, override map[string]string) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, proc.Module, delivery.Module, registry.Module, runner.Module, rules.Module, direct.Module} {
+		items.Module, executors.Module, delegation.Module, proc.Module, delivery.Module, registry.Module, runner.Module, rules.Module, direct.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -135,12 +138,21 @@ func newEnv(t *testing.T, configured bool, override map[string]string) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := inbound.New(inbound.Options{Store: st, Exec: e.x, Packs: ld, Judge: judge, Owner: "owner", OnError: func(err error) { e.errs <- err }})
+	// 跟进消息归属按 cli/serve 的接线拦在规则与判断之前，这样包里的 on_update 声明才生效。
+	var svc *inbound.Service
+	fm, err := followmsg.New(followmsg.Options{Store: st, Exec: e.x, Owner: "owner", Wake: func(ctx context.Context) error { return svc.Process(ctx) },
+		OnError: func(err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Register(e.x); err != nil {
+	svc, err = inbound.New(inbound.Options{Store: st, Exec: e.x, Packs: ld, Judge: judge, Owner: "owner", Intercept: fm.Intercept, OnError: func(err error) { e.errs <- err }})
+	if err != nil {
 		t.Fatal(err)
+	}
+	for _, r := range []interface{ Register(*command.Executor) error }{svc, fm} {
+		if err := r.Register(e.x); err != nil {
+			t.Fatal(err)
+		}
 	}
 	e.r, err = runner.New(runner.Options{Store: st, Exec: e.x, Layout: lay, Now: e.Now,
 		OnError: func(err error) { e.errs <- err }})
@@ -306,6 +318,33 @@ func TestGitHubIssueBecomesProposedSuggestionInRepoProject(t *testing.T) {
 	reqs := e.stub.Requests()
 	if len(reqs) != 2 || !strings.Contains(reqs[0].BodyText, "外部正文：登录页 500") { // 初筛一次、起草一次
 		t.Fatal("event detail must reach the judge as material")
+	}
+}
+
+// issue 与 PR 上的评论、评审是后续消息：挂到它们建出的建议上，只记在事项上，不改标题、摘要与正文。
+func TestCommentsAttachToProposalWithoutRewritingIt(t *testing.T) {
+	e := newEnv(t, true, nil)
+	e.stub.Judge(modelstub.ChatJudge{Answer: "yes"})
+	key := map[string]any{"summary": "点击登录后 500", "correlation_keys": []string{"org/web#7"}}
+	e.emit("src_gh", "github", ev("d1", "issue.opened", "登录页 500", key))
+	item := e.events("src_gh")[0].Item
+	before, calls := e.item(item), len(e.stub.Requests())
+
+	e.emit("src_gh", "github",
+		ev("c1", "issue.commented", "登录页 500", map[string]any{"summary": "补一句：注册也 500", "correlation_keys": []string{"org/web#7"}}),
+		ev("c2", "pr.reviewed", "修登录", map[string]any{"summary": "LGTM", "correlation_keys": []string{"org/web#7"}}))
+
+	for _, x := range e.events("src_gh")[1:] {
+		if x.Disposition != domain.DispositionAttached || x.Item != item || x.AttachState != runner.AttachProcessed {
+			t.Fatalf("comment not attached: %+v", x)
+		}
+	}
+	after := e.item(item)
+	if after.Title != before.Title || after.Summary != before.Summary || after.Body != before.Body || after.Phase != domain.PhaseProposed {
+		t.Fatalf("comment rewrote the item: %q/%q/%q -> %q/%q/%q", before.Title, before.Summary, before.Body, after.Title, after.Summary, after.Body)
+	}
+	if len(e.stub.Requests()) != calls {
+		t.Fatal("attached comments must not reach the model")
 	}
 }
 

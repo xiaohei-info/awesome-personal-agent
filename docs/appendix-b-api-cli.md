@@ -391,4 +391,6 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 来源事件的 `sender_verified` | 来源程序逐条自报 | 以来源程序的接入声明为上限，没有声明的程序按需确认（恒为假）；声明为"不带发件人"的事件类型清空 `sender` | 已落盘的事件不改写。自定义脚本与 webhook 转换脚本以前自报为真的，之后按未核实处理，转发白名单对它们不再生效（主文档 §9.1） |
 | 代码托管来源的事件 | `*.updated`、`*.closed`、`*.merged` 的 `sender` 为对象作者 | 这些类型不带 `sender`；新增评论事件 `issue.commented`、`pr.commented`、`pr.review_commented`（webhook 另有 `pr.reviewed`），带已核实的评论作者 | 已落盘的事件不改写。按事件类型匹配的用户规则若要处理评论，需加上新类型（附录 D.4） |
 | 渠道回答人 | 即时通讯渠道 ext 优先报用户名 | 一律报平台用户 ID | 写着用户名的旧条目不再匹配，本人在"设置 › 渠道"识别一次 ID（主文档 §16.5） |
+| webhook 映射没写 `detail` | 事件的 `detail` 取原始 payload 的前 16 KiB | 不带 `detail`；原始 payload 只在接收记录里（`apa source ingests`） | 已落盘的事件不改写；已被原始 payload 覆盖正文的事项不修复，本人可在 Web 改正文。要把 payload 的某段作资料，在映射里显式写 `detail` |
+| 代码托管来源的评论与评审挂到已有事项 | `issue.commented` 没有规则、按来源对象更新刷新事项的标题、摘要与正文 | 内置规则 `pr-discussion`、`issue-comment` 声明 `on_update: attach`：只记为挂靠消息，不改事项；`pr-activity` 只匹配合并、关闭与更新 | 覆盖了 `inbound-triage` 的同名包要同步这两条规则，否则评论仍按来源对象更新处理 |
 | 凭据表 | 无 `harness` | `auth_credential.harness`，账本结构版本 5 → 6 | 只增列，已有 token 照常可用；迁移后旧二进制拒绝打开账本，回退用升级前快照 |
