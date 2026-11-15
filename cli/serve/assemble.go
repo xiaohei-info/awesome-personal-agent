@@ -359,7 +359,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		k.in.Register(x),
 		spotcheck.Register(x),
 		fm.Register(x),
-		rules.Register(x),
+		rules.RegisterWith(x, ld),
 		instances.Register(x, ld),
 		blobs.Register(x, l.Blobs),
 		kmaterials.RegisterWith(x, ld), // 能力包声明的 material_kinds 与默认写入策略，提交时从加载器读

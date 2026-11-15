@@ -11,13 +11,15 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const K1 = "brief/event_rules/tag-hit"; // 不在词表里：名字取包的说明
 const K2 = "follow-up/clock_rules/stale-check"; // 内置规则：名字取词表
 const K3 = "gone/event_rules/x"; // 包已不在：没有 class
+const K4 = "brief/clock_rules/scheduled-brief"; // 由实例驱动：只读，不显示开关
 const N1 = "周期简报", N2 = "14 天没动静的事项问我一声";
 
-function server(opts: { denied?: boolean; auditFails?: boolean } = {}) {
+function server(opts: { denied?: boolean; auditFails?: boolean; instances?: { pack: string; enabled: boolean }[] } = {}) {
   const rules = [
     { key: K1, pack: "brief", group: "event_rules", id: "tag-hit", mode: "observe", hash: "h1", class: "action" },
     { key: K2, pack: "follow-up", group: "clock_rules", id: "stale-check", mode: "auto", hash: "h2", class: "reminder" },
     { key: K3, pack: "gone", group: "event_rules", id: "x", mode: "off", hash: "h3" },
+    { key: K4, pack: "brief", group: "clock_rules", id: "scheduled-brief", mode: "auto", hash: "h4", class: "action", instance_driven: true },
   ];
   const now = Date.now();
   const observed = [
@@ -31,6 +33,7 @@ function server(opts: { denied?: boolean; auditFails?: boolean } = {}) {
     const method = init.method ?? "GET";
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/packs") return json(200, { packs: [{ name: "brief", description: N1 }, { name: "follow-up", description: "跟进" }] });
+    if (url === "/v1/instances") return opts.instances ? json(200, { instances: opts.instances }) : json(500, { code: "internal", why: "x", next: "" });
     if (url === "/v1/items/itm_a") return json(200, { item: { id: "itm_a", title: "续保材料确认" } });
     if (url === "/v1/rules" && method === "GET") return json(200, { rules });
     const m = /^\/v1\/rules\/([^/]+)\/mode$/.exec(url);
@@ -80,6 +83,22 @@ describe("自动规则 › 规则", () => {
     expect(await checked(N1)).toBe("试运行");
     expect(within(screen.getByRole("region", { name: "其他" })).getByText("x")).toBeInTheDocument();
     expect(screen.queryByText(K1)).not.toBeInTheDocument(); // 原始 key 只在「显示原始值」里
+  });
+
+  it("由安排驱动的规则没有开关：单列在最后一组，写已安排几个，链到简报页", async () => {
+    mount(server({ instances: [{ pack: "brief", enabled: true }, { pack: "brief", enabled: true }, { pack: "brief", enabled: false }] }).impl);
+    const sec = within(await screen.findByRole("region", { name: "按安排运行" }));
+    expect(sec.getByText("按时写简报")).toBeInTheDocument();
+    expect(sec.queryByRole("radiogroup")).not.toBeInTheDocument();
+    expect(sec.getByText(/按你的安排运行 · 已安排 2 个/)).toBeInTheDocument();
+    expect(sec.getByRole("link", { name: "去安排 ›" })).toHaveAttribute("href", "/briefs");
+    expect(screen.getAllByRole("region").at(-1)).toBe(screen.getByRole("region", { name: "按安排运行" }));
+    expect(within(screen.getByRole("region", { name: "替我动手" })).queryByText("按时写简报")).not.toBeInTheDocument();
+  });
+
+  it("没有安排时写「还没安排」", async () => {
+    mount(server({ instances: [] }).impl);
+    expect(await screen.findByText(/还没安排/)).toBeInTheDocument();
   });
 
   it("ACT-RULE-03: 本人切开，请求带 CSRF，路径为编码后的规则 key，页面显示服务端返回的模式", async () => {

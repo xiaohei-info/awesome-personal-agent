@@ -925,8 +925,11 @@ func TestReloadPacksFollowsDataDirectory(t *testing.T) {
 	}); err != nil || key == "" {
 		t.Fatalf("brief rule not registered: %v", err)
 	}
-	in, _ := json.Marshal(map[string]string{"rule": key, "mode": "auto"})
-	if _, err := k.x.Do(ctx, command.Request{Identity: hostOwner, Command: "rule.set_mode", Input: in, Owner: owner}); err != nil {
+	// brief 的规则由实例驱动，rule.set_mode 已拒绝它；这里直接写一个升级前已存的 auto，检查包变化时的回落。
+	if err := st.Update(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE rules_state SET mode = 'auto' WHERE key = ?`, key)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	base := healthDeliveries()
