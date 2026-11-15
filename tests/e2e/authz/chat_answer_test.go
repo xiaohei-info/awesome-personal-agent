@@ -114,7 +114,9 @@ func TestFlowChatAnswer(t *testing.T) {
 		if got := len(k.auditOf(d1, "")); got <= before {
 			t.Errorf("撤销应记一条 Event: %d → %d", before, got)
 		}
-		rev := k.auditOf(d1, "")[len(k.auditOf(d1, ""))-1]
+		// 撤销后事项回到 needs_input，决策卡片起草（system:decision-card，via clock）会异步追加 Event，所以不能取 d1 的“最后一条”，按撤销自己的类型取。
+		revs := k.auditOf(d1, "item.phase_changed")
+		rev := revs[len(revs)-1]
 		eq(t, "撤销操作者", rev.Actor["type"], "human")
 		eq(t, "撤销经由", rev.Actor["via"], "web")
 		eq(t, "指向原 Event", rev.Payload["reverts"], float64(ev.Seq))
