@@ -506,6 +506,9 @@ func outboundGate(tx *store.Tx, c Call, locality string) error {
 // sourceOutbound 取来源的外发范围；对话捕获的内部来源 capture:<项目> 取项目的 capture_outbound。
 func sourceOutbound(tx *store.Tx, id string) (domain.Outbound, bool, error) {
 	var de *domain.Error
+	if strings.HasPrefix(id, domain.OriginInstancePrefix) {
+		return domain.Outbound{}, false, nil // 例行任务实例建的事项：内容是本人写的任务说明，不是外部来源（§6.17）
+	}
 	if proj, ok := strings.CutPrefix(id, "capture:"); ok && proj != "" {
 		p, err := projects.Get(tx, proj)
 		if errors.As(err, &de) && de.Code == domain.CodeNotFound {
