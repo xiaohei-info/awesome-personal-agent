@@ -17,15 +17,45 @@ A session without the marker cannot be told from an ordinary one and keeps the g
 Tools and hooks run in Hermes' shared gateway process, so its cwd and environment say nothing about the run (a gateway started by a run's client even keeps that run's `APA_RUN` / `APA_TOKEN`). `run_context.py` is the single source: the session's bound `APA_RUN_CONTEXT` (Hermes freezes it from the client's environment and binds it for that session's turns) names the file the kernel wrote at launch with the run's id, credential, `run_dir` and `work_dir` (design §7.7). Every `apa` call in these plugins gets that path and never the inherited run variables; a session with no run uses the gateway's own credential. A session whose client PATH has the kernel's marker (`.apa-run`) but no context is a run that lost it, and gets an error.
 
 Registers toolset `apa`: `apa_propose`, `apa_ask`, `apa_decide`, `apa_accept`, `apa_dismiss`, `apa_executors`, `apa_delegate`, `apa_report`,
-`apa_declare_executors`, `apa_executor_call`, and the read-tier set `apa_read_file`, `apa_list_dir`, `apa_item_update`, `apa_material_commit`. Every CLI tool runs `apa` with `APA_SESSION=<Hermes session_id>`,
+`apa_dispatch`, `apa_item_history`, and the read-tier set `apa_read_file`, `apa_list_dir`, `apa_item_update`, `apa_material_commit`. Every CLI tool runs `apa` with `APA_SESSION=<Hermes session_id>`,
 so the ledger audits to the session. The result is `{exit_code, ok, stdout, stderr}` with the kernel's verdict untouched
 (exit 20 web_only, 21 executor not allowed, ... are the model's cue to stop; nothing is retried or faked).
 
-Executors come from the owner's table: a JSON list at `$APA_HERMES_EXECUTORS` (default `$HERMES_HOME/apa-executors.json`),
-e.g. `[{"id":"work-host.cli","kind":"external-cli","scenarios":["coding"],"host":"work-host","command":["codex","exec","{prompt}"]}]`.
-No file = nothing configured and nothing declared. `apa_executor_call` maps a configured id to a Hermes call
-(`delegate_task` for native-subagent, `terminal` for external-cli; human has none). `apa_declare_executors` submits only
-`{id, kind, scenarios, host?}`; the command never reaches the ledger.
+## Delegation (design §6.17)
+
+Hermes decides how to delegate, with its own tools. There is no "executor id -> invocation" table and nothing to configure.
+`dispatch.py` holds Hermes' own shapes:
+
+- **Executor ids are derived, not named by the model.** `apa_delegate` takes `mech` and its parameters and sends
+  `apa delegate --assignee <id> --executor -` with the id, label, kind, host and executor handle below. Same way of delegating,
+  same id; `harness` travels as `APA_HARNESS=hermes` and `host` is this machine unless paseo names another. A person is given
+  with `assignee` and no `mech`.
+
+  | mech | id | kind | label | executor handle |
+  |---|---|---|---|---|
+  | `delegate_task` | `hermes.delegate_task.<this host>` | native-subagent | `Hermes 子 agent @ <host>` | `{mech, host}` |
+  | `paseo` + `profile` | `hermes.paseo.<host>.<profile>` | remote-agent | `Paseo · <profile> @ <host>` | `{mech, host, target?, profile}` |
+  | `paseo` + `provider` [+ `model`] | `hermes.paseo.<host>.<provider>[.<model>]` | remote-agent | `Paseo · <provider>/<model> @ <host>` | `{mech, host, target?, provider, model?}` |
+
+  Segments are lower-cased with anything outside `[a-z0-9_-]` turned into `-`; `<host>` is the machine part of paseo's
+  `--host` (`user@mbp.local:22` -> `mbp`), kept verbatim as `target`. Ids over 64 characters keep a 55-character prefix plus
+  8 hex of their SHA-1.
+- **Dispatches are captured after the call** (apa-receipt's `post_tool_call`), when the arguments name a child item this
+  Hermes session delegated (or read with `apa_item_history`):
+
+  | Tool call | Dispatch record |
+  |---|---|
+  | `delegate_task` | no session, not resumable, handle `{mech: delegate_task, host}` |
+  | `terminal`: `paseo run ...` or `paseo-profile-run [--host H] <profile> <prompt>` | session = the agent id printed under `AGENT ID` (or `agentId` in JSON), resumable when found, handle `{mech: paseo, host, target?, agent_id}`, `cwd` from `--cwd` |
+  | `terminal`: `paseo send [--host H] <agent> ...` | same agent as session, `continues` = this process's last dispatch for that item and agent; when paseo says the agent is not found, that dispatch is marked `lost` instead |
+
+  The record is written before the report, with an idempotency key; the kernel keeps one running record per item, harness
+  and session, so a manual `apa_dispatch` for the same dispatch adds nothing. The "delegated in this session" set lives in
+  the Hermes process and is lost on restart; `apa_item_history` refills it, and `apa_dispatch` covers the rest.
+- **Handles are data.** `apa_dispatch` refuses handles outside the shapes above before calling `apa`. `apa_item_history`
+  returns `apa context --scope item` with a `hermes` hint per dispatch: for records Hermes wrote whose handles match these
+  shapes, how to resume with `terminal` (`paseo send ...`) or start anew the same way; everything else is
+  `reference only`. The hint is advice; the model still decides and Hermes' own permissions apply.
 
 Only the on-behalf tools (`apa_decide`, `apa_accept`, `apa_dismiss`, `apa_item_update`) take optional `evidence` (the owner's own words from this turn, never reworded) or `grant`, passed verbatim to `--evidence` / `--grant`; propose, ask, delegate, report and declare tools have neither.
 

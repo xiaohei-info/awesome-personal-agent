@@ -3,10 +3,12 @@
 Install (next to `apa-core`): `ln -s "$PWD" ~/.hermes/plugins/apa-receipt`, then `hermes plugins enable apa-receipt`.
 Needs `apa` on PATH (or `APA_BIN`) plus `APA_URL` / `APA_TOKEN`.
 
-Fallback for executors that do not run `apa report` themselves. Captured only when the arguments carry an item id (`itm_…`):
+Records dispatches and forwards results for executors that do not run `apa report` themselves. Captured only when the
+arguments carry the id (`itm_…`) of an item this Hermes session delegated or dispatched (shared state in `tools/dispatch.py`):
 
-- `post_tool_call` on `delegate_task` (one report per task whose goal/context holds an id) and on `terminal` when the command
-  starts with an `external-cli` executor from the owner's table (`$APA_HERMES_EXECUTORS`).
+- `post_tool_call` on `delegate_task` and on the paseo commands in `tools/README.md` first records the dispatch
+  (`apa dispatch add`, or `apa dispatch update --state lost`), then reports. Any other `terminal` command naming such an item
+  only reports; `apa ...` itself is never captured.
 - `subagent_stop` when the child summary names an item id (the hook carries no arguments).
 
 `completed` / exit 0 reports `done` with the result as summary and the evidence found in it (`--pr`, `--commit`, `--branch`, `--link`);

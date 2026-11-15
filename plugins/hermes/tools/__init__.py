@@ -1,7 +1,7 @@
 """APA tools plugin for Hermes: the apa CLI as native tools that carry the Hermes session id."""
 import json
 
-from . import cli, executors, files
+from . import cli, dispatch, files
 
 TOOLSET = "apa"
 
@@ -51,13 +51,6 @@ _CLI_TOOLS = {
     "apa_executors": ("List the executors the project allows (apa executors).",
                       {"project": _s("Project id")}, [],
                       lambda a: ["executors", *_flags(a, "project")]),
-    "apa_delegate": ("Create a child item for an executor and put the parent in waiting (apa delegate). Run it BEFORE handing work to anyone; exit 21 = executor not allowed.",
-                     {"parent": _s("Parent item id"), "assignee": _s("Executor id"), "title": _s("Child title"),
-                      "summary": _s("Summary"), "body": _s("Body"), "priority": _s("Priority"),
-                      "project": _s("Project id"), "reason": _REASON,
-                      "idempotency_key": _s("Idempotency key")}, ["parent", "assignee"],
-                     lambda a: ["delegate", *_flags(a, "parent", "assignee", "title", "summary", "body", "priority",
-                                                    "project", "reason", "idempotency_key")]),
     "apa_report": ("Report a result on a child item or on this run's target item (apa report). outcome=done needs pr, commit, branch or link, or the kernel refuses it; "
                     "a result the prompt asks you to write to the item's spec with apa_item_update needs no report.",
                    {"id": _s("Child item id"), "outcome": _s("progress | done | blocked"), "summary": _s("Summary"),
@@ -109,19 +102,74 @@ def _material_commit(args, session_id=None, **_):
     return json.dumps(cli.call(argv, session_id, stdin=content))
 
 
-def _declare(args, session_id=None, **_):
-    try:
-        body = executors.declaration()
-    except ValueError as e:
-        return json.dumps({"ok": False, "error": str(e)})
-    return json.dumps(cli.call(["declare", "-"], session_id, stdin=json.dumps(body)))
+_DELEGATE_FLAGS = ("parent", "title", "summary", "body", "priority", "project", "reason", "idempotency_key")
 
 
-def _invoke(args, **_):
-    try:
-        return json.dumps(executors.invocation(args.get("executor", ""), args.get("id", ""), args.get("task", "")))
-    except ValueError as e:
-        return json.dumps({"ok": False, "error": str(e)})
+def _delegate(args, session_id=None, **_):
+    """apa delegate. With mech, the plugin derives the executor id, label and handle (dispatch.executor); the model never
+    names the executor. Without mech, assignee is given (a person, or an id the owner already uses)."""
+    if not args.get("parent"):
+        return json.dumps({"ok": False, "error": "parent is required"})
+    stdin = None
+    if args.get("mech"):
+        try:
+            assignee, enrollment = dispatch.executor(args["mech"], args)
+        except dispatch.Invalid as e:
+            return json.dumps({"ok": False, "error": str(e)})
+        argv = ["delegate", "--assignee", assignee, "--executor", "-"]
+        stdin = json.dumps(enrollment)
+    elif args.get("assignee"):
+        argv = ["delegate", "--assignee", args["assignee"]]
+    else:
+        return json.dumps({"ok": False, "error": "give mech (and its parameters) for an agent, or assignee for a person"})
+    r = cli.call(argv + _flags(args, *_DELEGATE_FLAGS), session_id, stdin=stdin)
+    child = r.get("stdout", {}).get("id") if r.get("ok") and isinstance(r.get("stdout"), dict) else None
+    if child:
+        dispatch.remember_delegated(session_id, child)
+    return json.dumps(r)
+
+
+def _dispatch(args, session_id=None, **_):
+    """apa dispatch add|update for ways of delegating the plugin does not capture by itself."""
+    if args.get("action") == "update":
+        if not args.get("dispatch"):
+            return json.dumps({"ok": False, "error": "dispatch is required to update"})
+        argv = ["dispatch", "update", args["dispatch"], *_flags(args, "state")]
+        if isinstance(args.get("resumable"), bool):
+            argv += ["--resumable", "true" if args["resumable"] else "false"]
+        return json.dumps(cli.call(argv, session_id))
+    if not args.get("item"):
+        return json.dumps({"ok": False, "error": "item is required"})
+    stdin = None
+    argv = ["dispatch", "add", args["item"], *_flags(args, "session", "resumable", "cwd", "repo", "continues")]
+    if args.get("handle") is not None:
+        try:
+            dispatch.check_handle(args["handle"])
+        except dispatch.Invalid as e:
+            return json.dumps({"ok": False, "error": str(e)})
+        argv += ["--handle", "-"]
+        stdin = json.dumps(args["handle"])
+    r = cli.call(argv, session_id, stdin=stdin)
+    out = r.get("stdout") if isinstance(r.get("stdout"), dict) else {}
+    if r.get("ok") and out.get("id"):
+        dispatch.remember_dispatch(session_id, args["item"], args.get("session"), out["id"])
+    return json.dumps(r)
+
+
+def _history(args, session_id=None, **_):
+    """apa context --scope item, with a resume hint per dispatch: only for handles Hermes wrote and that match its shapes."""
+    if not args.get("item"):
+        return json.dumps({"ok": False, "error": "item is required"})
+    r = cli.call(["context", "--scope", "item", "--item", args["item"]], session_id)
+    out = r.get("stdout") if isinstance(r.get("stdout"), dict) else None
+    for h in (out or {}).get("history") or []:
+        dispatch.remember_delegated(session_id, h.get("item"))  # picking it up in this session: capture what follows
+        for d in sorted(h.get("dispatches") or [], key=lambda d: d.get("started_at", "")):
+            d["hermes"] = dispatch.resume_hint(d)
+            if d.get("harness") == dispatch.HARNESS:  # oldest first, so the latest wins for continues
+                dispatch.remember_delegated(session_id, d.get("item"))
+                dispatch.remember_dispatch(session_id, d.get("item"), d.get("session"), d.get("id"))
+    return json.dumps(r)
 
 
 def register(ctx):
@@ -142,10 +190,26 @@ def register(ctx):
     for name, (desc, props, req, build) in _CLI_TOOLS.items():
         ctx.register_tool(name=name, toolset=TOOLSET, schema=_schema(name, desc, props, req),
                           handler=_cli_handler(build), description=desc)
-    desc = "Submit the executors configured for this harness to the ledger (apa declare); they take effect after the owner confirms in Web."
-    ctx.register_tool(name="apa_declare_executors", toolset=TOOLSET, schema=_schema("apa_declare_executors", desc, {}, []),
-                      handler=_declare, description=desc)
-    desc = "Map a delegated item's executor id to the Hermes tool call that runs it. Call apa_delegate first; run the returned tool call yourself."
-    ctx.register_tool(name="apa_executor_call", toolset=TOOLSET, description=desc, handler=_invoke,
-                      schema=_schema("apa_executor_call", desc, {"executor": _s("Executor id"), "id": _s("Child item id"),
-                                                                 "task": _s("What the executor must do")}, ["executor", "id", "task"]))
+    desc = ("Create a child item and put the parent in waiting (apa delegate). Run it BEFORE handing work to anyone, then delegate "
+            "with your own tools and put the child item id in the task. For an agent give mech (delegate_task, or paseo with host and "
+            "profile, or provider and model); the plugin names the executor. For a person give assignee. Exit 21 = not allowed in this project.")
+    ctx.register_tool(name="apa_delegate", toolset=TOOLSET, handler=_delegate, description=desc, schema=_schema("apa_delegate", desc, {
+        "parent": _s("Parent item id"), "mech": {"type": "string", "enum": list(dispatch.MECHS), "description": "How you will delegate"},
+        "host": _s("paseo: the --host you will pass (machine or daemon); empty for this machine"),
+        "profile": _s("paseo: agent profile"), "provider": _s("paseo: provider, when not using a profile"), "model": _s("paseo: model"),
+        "assignee": _s("A person's id, when giving the work to a person instead of an agent"),
+        "title": _s("Child title"), "summary": _s("Summary"), "body": _s("Body"), "priority": _s("Priority"),
+        "project": _s("Project id"), "reason": _REASON, "idempotency_key": _s("Idempotency key")}, ["parent"]))
+    desc = ("Record a dispatch the plugin could not capture by itself (apa dispatch add), or mark one ended or lost (update). "
+            "Dispatches through delegate_task and paseo commands that name the child item are recorded automatically.")
+    ctx.register_tool(name="apa_dispatch", toolset=TOOLSET, handler=_dispatch, description=desc, schema=_schema("apa_dispatch", desc, {
+        "action": {"type": "string", "enum": ["add", "update"], "description": "add (default) or update"},
+        "item": _s("Child item id (add)"), "session": _s("Session or agent id (add)"),
+        "resumable": {"type": "boolean", "description": "Whether that session can be resumed later"},
+        "cwd": _s("Working directory (add)"), "repo": _s("Repository (add)"), "continues": _s("Dispatch id this continues (add)"),
+        "handle": {"type": "object", "description": "Hermes' handle: {mech: delegate_task|paseo, host?, target?, agent_id?, profile?, provider?, model?}. No commands, prompts or secrets."},
+        "dispatch": _s("Dispatch id (update)"), "state": {"type": "string", "enum": ["ended", "lost"], "description": "update: ended or lost"}}, []))
+    desc = ("Read an item with its earlier dispatches (apa context --scope item). Each dispatch carries a 'hermes' hint: resume that "
+            "session, start a new one the same way, or reference only (written by another host or not in Hermes' shapes). You decide.")
+    ctx.register_tool(name="apa_item_history", toolset=TOOLSET, handler=_history, description=desc,
+                      schema=_schema("apa_item_history", desc, {"item": _s("Item id")}, ["item"]))

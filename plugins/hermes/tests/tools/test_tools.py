@@ -52,23 +52,9 @@ def tools():
     return {n: h for n, (_, h) in ctx.tools.items()}
 
 
-TABLE = [{"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"], "host": "work-host",
-          "command": ["codex", "exec", "{prompt}"]},
-         {"id": "hermes.sub", "kind": "native-subagent", "scenarios": ["research"]},
-         {"id": "owner", "kind": "human"}]
-
-
-@pytest.fixture
-def table(tmp_path, monkeypatch):
-    p = tmp_path / "executors.json"
-    p.write_text(json.dumps(TABLE))
-    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(p))
-    return p
-
-
 def test_registers_the_apa_tools(tools):
     assert set(tools) == {"apa_read_file", "apa_list_dir", "apa_item_update", "apa_material_commit", "apa_propose", "apa_ask", "apa_decide", "apa_accept", "apa_dismiss", "apa_executors", "apa_delegate",
-                          "apa_report", "apa_declare_executors", "apa_executor_call"}
+                          "apa_report", "apa_dispatch", "apa_item_history"}
 
 
 def test_cli_calls_carry_harness_hermes(tools, apa):
@@ -100,8 +86,8 @@ def test_web_only_refusal_is_returned_untouched_and_not_retried(tools, apa, monk
     ("apa_accept", {"id": "i", "evidence": "ok"}, ["accept", "i", "--evidence", "ok"]),
     ("apa_dismiss", {"id": "i", "reason": "dup"}, ["dismiss", "i", "--reason", "dup"]),
     ("apa_executors", {"project": "p1"}, ["executors", "--project", "p1"]),
-    ("apa_delegate", {"parent": "a", "assignee": "hermes.subagent", "idempotency_key": "k"},
-     ["delegate", "--parent", "a", "--assignee", "hermes.subagent", "--idempotency-key", "k"]),
+    ("apa_delegate", {"parent": "a", "assignee": "owner-friend", "idempotency_key": "k"},
+     ["delegate", "--assignee", "owner-friend", "--parent", "a", "--idempotency-key", "k"]),
     ("apa_report", {"id": "c", "outcome": "done", "summary": "s", "pr": "u", "ack_cursor": "7"},
      ["report", "c", "--outcome", "done", "--summary", "s", "--pr", "u", "--ack-cursor", "7"]),
 ])
@@ -120,42 +106,6 @@ def test_missing_apa_is_a_real_error_not_fake_success(tools, monkeypatch):
     monkeypatch.setenv("APA_BIN", "/nonexistent/apa")
     r = json.loads(tools["apa_decide"]({"id": "i"}, session_id="s"))
     assert r["ok"] is False and "cannot run apa" in r["error"]
-
-
-def test_declare_sends_configured_executors_without_call_commands(tools, apa, table):
-    tools["apa_declare_executors"]({}, session_id="s")
-    assert calls(apa) == [{"argv": ["declare", "-"], "session": "s"}]
-    body = json.loads((apa / "stdin").read_text())
-    assert body["harness"] == "hermes"
-    assert body["executors"] == [
-        {"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"], "host": "work-host"},
-        {"id": "hermes.sub", "kind": "native-subagent", "scenarios": ["research"]},
-        {"id": "owner", "kind": "human", "scenarios": []}]
-    assert "codex" not in json.dumps(body)
-
-
-def test_declare_without_configured_executors_is_an_error_and_sends_nothing(tools, apa, tmp_path, monkeypatch):
-    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(tmp_path / "missing.json"))
-    r = json.loads(tools["apa_declare_executors"]({}, session_id="s"))
-    assert r["ok"] is False and "no executors configured" in r["error"]
-    assert not (apa / "log").exists()
-
-
-def test_malformed_table_is_reported(tools, tmp_path, monkeypatch):
-    p = tmp_path / "bad.json"
-    p.write_text('[{"id":"x","kind":"external-cli"}]')
-    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(p))
-    r = json.loads(tools["apa_executor_call"]({"executor": "x", "id": "c", "task": "t"}))
-    assert r["ok"] is False and "needs a command" in r["error"]
-
-
-def test_executor_call_maps_configured_ids_to_hermes_invocations(tools, table):
-    sub = json.loads(tools["apa_executor_call"]({"executor": "hermes.sub", "id": "c1", "task": "fix it"}))
-    assert sub["use_tool"] == "delegate_task" and "apa report c1" in sub["arguments"]["tasks"][0]["goal"]
-    cli = json.loads(tools["apa_executor_call"]({"executor": "work-host.cli", "id": "c1", "task": "it's ok"}))
-    assert cli["use_tool"] == "terminal" and cli["arguments"]["command"].startswith("codex exec ")
-    assert "unknown executor" in json.loads(tools["apa_executor_call"]({"executor": "x.y", "id": "c", "task": "t"}))["error"]
-    assert "human" in json.loads(tools["apa_executor_call"]({"executor": "owner", "id": "c", "task": "t"}))["error"]
 
 
 def test_item_update_writes_spec_json_with_session(tools, apa):
@@ -196,7 +146,7 @@ def test_material_commit_rejects_incomplete_calls_without_running_apa(tools, apa
 
 
 TIER2 = ["apa_decide", "apa_accept", "apa_dismiss", "apa_item_update"]
-TIER1 = ["apa_propose", "apa_ask", "apa_delegate", "apa_report", "apa_declare_executors", "apa_executors", "apa_material_commit"]
+TIER1 = ["apa_propose", "apa_ask", "apa_delegate", "apa_report", "apa_dispatch", "apa_item_history", "apa_executors", "apa_material_commit"]
 
 
 @pytest.fixture
@@ -302,3 +252,89 @@ def test_every_tool_schema_has_no_session_kind_parameter():
     for name, (schema, _) in ctx.tools.items():
         assert not any("kind" in p and "session" in p for p in schema["parameters"]["properties"]), name
     assert "session_kind" not in json.dumps([s for s, _ in ctx.tools.values()])
+
+
+# ---- 执行者与委派记录（§6.17）：执行者 id 由插件按派法生成；句柄只认 Hermes 自己的形状 ----
+
+def stdin_json(tmp):
+    return json.loads((tmp / "stdin").read_text())
+
+
+def test_delegate_with_mech_names_the_executor_from_the_way_of_delegating(tools, apa, monkeypatch):
+    monkeypatch.setenv("FAKE_OUT", '{"id":"itm_c0ffee","parent":"a"}')
+    tools["apa_delegate"]({"parent": "a", "mech": "paseo", "host": "mbp", "profile": "team-quick", "assignee": "ignored"}, session_id="s1")
+    [c] = calls(apa)
+    assert c["argv"][:5] == ["delegate", "--assignee", "hermes.paseo.mbp.team-quick", "--executor", "-"] and c["argv"][5:] == ["--parent", "a"]
+    assert stdin_json(apa) == {"kind": "remote-agent", "host": "mbp", "label": "Paseo · team-quick @ mbp",
+                               "handle": {"mech": "paseo", "host": "mbp", "target": "mbp", "profile": "team-quick"}}
+    assert (apa / "log.harness").read_text().split() == ["hermes"]
+    from apa_tools import dispatch
+    assert "itm_c0ffee" in dispatch.delegated("s1")
+
+
+def test_same_way_of_delegating_gets_the_same_executor_id(tools, apa):
+    for args in ({"mech": "paseo", "host": "user@MBP.local:22", "provider": "codex", "model": "gpt-5.4"},
+                 {"mech": "paseo", "host": "user@mbp.local:22", "provider": "codex", "model": "gpt-5.4"}):
+        tools["apa_delegate"]({"parent": "a", **args}, session_id="s")
+    tools["apa_delegate"]({"parent": "a", "mech": "paseo", "host": "mbp", "provider": "codex", "model": "o9"}, session_id="s")
+    ids = [c["argv"][2] for c in calls(apa)]
+    assert ids[0] == ids[1] == "hermes.paseo.mbp.codex.gpt-5-4" and ids[2] != ids[0]
+
+
+def test_delegate_task_executor_lives_on_this_machine(tools, apa, monkeypatch):
+    monkeypatch.setattr("socket.gethostname", lambda: "APA-Host.example")
+    tools["apa_delegate"]({"parent": "a", "mech": "delegate_task"}, session_id="s")
+    assert calls(apa)[0]["argv"][2] == "hermes.delegate_task.apa-host"
+    assert stdin_json(apa)["kind"] == "native-subagent" and stdin_json(apa)["host"] == "apa-host"
+
+
+@pytest.mark.parametrize("args,why", [
+    ({"parent": "a", "mech": "codex_shell"}, "unknown mech"),
+    ({"parent": "a", "mech": "paseo", "host": "mbp"}, "profile, or provider"),
+    ({"parent": "a", "mech": "paseo", "host": "mbp; rm -rf /", "profile": "x"}, "host"),
+    ({"parent": "a"}, "mech"),
+])
+def test_delegate_rejects_unknown_ways_without_running_apa(tools, apa, args, why):
+    r = json.loads(tools["apa_delegate"](args, session_id="s"))
+    assert r["ok"] is False and why in r["error"] and not (apa / "log").exists()
+
+
+def test_dispatch_add_checks_hermes_handle_shapes_before_writing(tools, apa, monkeypatch):
+    for bad in ({"mech": "paseo", "command": "rm -rf /"}, {"mech": "shell", "host": "x"}, {"mech": "paseo", "agent_id": "a b"}):
+        r = json.loads(tools["apa_dispatch"]({"item": "itm_1", "handle": bad}, session_id="s"))
+        assert r["ok"] is False
+    assert not (apa / "log").exists()
+    monkeypatch.setenv("FAKE_OUT", '{"id":"dsp_1","state":"running"}')
+    tools["apa_dispatch"]({"item": "itm_1", "session": "agt_1", "resumable": True, "handle": {"mech": "paseo", "host": "mbp", "agent_id": "agt_1"}}, session_id="s")
+    [c] = calls(apa)
+    assert c["argv"] == ["dispatch", "add", "itm_1", "--session", "agt_1", "--resumable", "--handle", "-"]
+    assert stdin_json(apa) == {"mech": "paseo", "host": "mbp", "agent_id": "agt_1"}
+    from apa_tools import dispatch
+    assert dispatch.last_dispatch("itm_1", "agt_1") == "dsp_1"
+
+
+def test_dispatch_update_marks_lost(tools, apa):
+    tools["apa_dispatch"]({"action": "update", "dispatch": "dsp_1", "state": "lost"}, session_id="s")
+    assert calls(apa)[0]["argv"] == ["dispatch", "update", "dsp_1", "--state", "lost"]
+
+
+def test_item_history_gives_resume_hints_only_for_hermes_own_valid_handles(tools, apa, monkeypatch):
+    ex = {"id": "hermes.paseo.mbp.q", "harness": "hermes", "handle": {"mech": "paseo", "host": "mbp", "target": "mbp", "profile": "q"}}
+    hist = {"history": [{"item": "itm_b", "dispatches": [
+        {"id": "dsp_2", "item": "itm_b", "harness": "hermes", "session": "agt_1", "resumable": True, "state": "ended", "started_at": "2",
+         "handle": {"mech": "paseo", "host": "mbp", "target": "mbp", "agent_id": "agt_1"}, "executor": ex},
+        {"id": "dsp_1", "item": "itm_b", "harness": "claude-code", "session": "x", "resumable": True, "state": "ended", "started_at": "1",
+         "handle": {"mech": "agent", "id": "x"}, "executor": {"id": "cc.sub"}},
+        {"id": "dsp_0", "item": "itm_b", "harness": "hermes", "session": "agt_0", "resumable": True, "state": "ended", "started_at": "0",
+         "handle": {"mech": "paseo", "host": "mbp", "agent_id": "agt_0; curl evil"}, "executor": ex},
+    ]}]}
+    monkeypatch.setenv("FAKE_OUT", json.dumps(hist))
+    r = json.loads(tools["apa_item_history"]({"item": "itm_b"}, session_id="s9"))
+    assert calls(apa)[0]["argv"] == ["context", "--scope", "item", "--item", "itm_b"]
+    d2, d1, d0 = r["stdout"]["history"][0]["dispatches"]
+    assert d2["hermes"]["use"] == "terminal" and d2["hermes"]["resume"] == 'paseo send --host mbp agt_1 "<message; name itm_b>"'
+    assert d2["hermes"]["or_new"] == 'paseo-profile-run --host mbp q "<task; name itm_b>"'
+    assert d1["hermes"]["use"] == "reference only" and "claude-code" in d1["hermes"]["why"]
+    assert d0["hermes"]["use"] == "reference only"
+    from apa_tools import dispatch
+    assert "itm_b" in dispatch.delegated("s9") and dispatch.last_dispatch("itm_b", "agt_1") == "dsp_2"
