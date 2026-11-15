@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 
-# 同一 ref 上的新运行取消旧运行，控制全量 e2e 的成本
+# 同一 ref 上的新运行取消旧运行
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -35,11 +35,13 @@ jobs:
       - run: go build ./...
       - run: go test ./...
       - run: go run ./tools/redline
+      - run: .github/e2e/pkgs.sh check  # e2e 分组与 tests/e2e 目录保持一致
 
-  # 全量 e2e：与 build 并行；每个 e2e 包构建整套真实二进制，不按改动路径选包，避免漏掉跨组回归
-  e2e:
+  # 冒烟 e2e：与 build 并行；固定包清单（.github/e2e/smoke.txt），不按改动路径选包。
+  # 全量 e2e 只在发版时跑，见 release.yml
+  e2e-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,4 +59,4 @@ jobs:
       - run: sudo apt-get install -y sqlite3  # 账本断言使用真实 sqlite3 CLI
       - run: git config --global user.name ci && git config --global user.email ci@example.invalid  # 用例在临时仓库里 git commit，runner 没有默认身份
       - run: python3 -m pip install pytest  # hermes 插件契约测试
-      - run: go test -tags e2e -count=1 -timeout 40m ./tests/e2e/...
+      - run: go test -tags e2e -count=1 -timeout 12m $(.github/e2e/pkgs.sh smoke)

@@ -74,6 +74,12 @@
 
 技术选型已定（§18），本文件不重复；变更时先改 §18。
 
+## CI 与合并
+
+- PR 与合入 main 只跑 `build`（web 构建与单测、`go build`、`go test ./...`、红线检查）和冒烟 e2e（固定包清单 `.github/e2e/smoke.txt`，不按改动路径选包）；两者全绿才能合并。
+- 全量 e2e（`.github/e2e/full-*.txt`，覆盖 `tests/e2e` 全部包）只在发版时跑：推 `v*` tag 自动触发，发版前也可在 Actions 手动触发 `release` 工作流。发布以全量 e2e 通过为前提，不通过不出 release（`.github/workflows/release.yml`）。
+- 新增 e2e 包必须登记到某个 `full-*.txt`（`.github/e2e/pkgs.sh check` 在 CI 里校验）；主干流程级的用例再加入 `smoke.txt`。
+
 ## 语言与提交
 
 - 文档用中文，措辞正式，面向公开读者。
