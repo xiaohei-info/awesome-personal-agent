@@ -36,7 +36,28 @@ func setup(t *testing.T) *fx {
 	t.Helper()
 	e := baseline.Setup(t)
 	e.WireEndpoints()
-	return &fx{Env: e, t: t, statTemplate: "triage-screen"}
+	f := &fx{Env: e, t: t, statTemplate: "triage-screen"}
+	f.pauseDefaults()
+	return f
+}
+
+// pauseDefaults 停用开箱的简报与复盘默认安排（§7.3）：它们到点会消耗抽检条目，ACT-JRC-20 要的是本流程建的第一份简报。
+func (f *fx) pauseDefaults() {
+	f.t.Helper()
+	var l struct {
+		Instances []struct {
+			ID      string `json:"id"`
+			Enabled bool   `json:"enabled"`
+		} `json:"instances"`
+	}
+	if err := json.Unmarshal([]byte(f.webOK("GET", "/instances", "", 200)), &l); err != nil {
+		f.t.Fatal(err)
+	}
+	for _, in := range l.Instances {
+		if in.Enabled {
+			f.webOK("PATCH", "/instances/"+in.ID, `{"enabled":false}`, 200)
+		}
+	}
 }
 
 func (f *fx) apa(token string, want int, args ...string) baseline.Result {

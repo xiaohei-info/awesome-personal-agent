@@ -484,8 +484,8 @@ func TestFlowJudgmentRecord(t *testing.T) {
 	// ---- ACT-JRC-16 ----
 	stepFatal("ACT-JRC-16 关闭影子模式并造出一批被初筛忽略的事件", func(t *testing.T) {
 		f.webOK("PUT", "/settings/judgment", `{"shadow":[],"bands":[]}`, 200)
-		if body := f.webOK("GET", "/instances", "", 200); strings.Contains(body, `"pack":"brief"`) {
-			t.Fatalf("不应有简报实例: %s", body)
+		if body := f.webOK("GET", "/instances", "", 200); strings.Contains(strings.ReplaceAll(body, " ", ""), `"enabled":true`) {
+			t.Fatalf("不应有启用的简报实例: %s", body)
 		}
 		keys := f.lows(1, 6)
 		f.emit(keys...)

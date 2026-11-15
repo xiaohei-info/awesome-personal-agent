@@ -81,6 +81,9 @@ type Options struct {
 	// Reminder 是触达的提醒入口（*attention.Attention 满足它）：create_timer 建的 Timer 到期经它提醒。
 	// 只在用到 create_timer 时需要；为空时这类 Timer 到期返回错误，不静默丢弃。
 	Reminder Reminder
+	// Gate 在执行实例驱动的规则前调用：返回非空原因时这次到期整次跳过，只记一条 rule.skipped，不执行任何动作，
+	// 也不补跑（§7.3）。为空时不检查。
+	Gate func(ctx context.Context, pack string, do []packs.Action, params json.RawMessage) (skip string, err error)
 }
 
 // Reminder 在调用方事务里产出一条提醒；同一 (kind, 事项, due) 只提醒一次。
@@ -319,6 +322,18 @@ func (e *Engine) instance(ctx context.Context, rs []ruleDef, en eventlog.Entry) 
 		ran = true
 		t := &trigger{entry: en, instance: &f, object: f.ID, depth: en.Event.ChainDepth,
 			ref: fmt.Sprintf("i%s:%d", f.ID, f.Due.UnixNano())}
+		if e.o.Gate != nil {
+			skip, err := e.o.Gate(ctx, d.Pack, d.Do, f.Params)
+			if err != nil {
+				return err
+			}
+			if skip != "" {
+				if err := e.skipped(ctx, d, t, f, skip); err != nil {
+					return err
+				}
+				continue
+			}
+		}
 		if err := e.execute(ctx, d, t); err != nil {
 			return err
 		}
@@ -329,6 +344,35 @@ func (e *Engine) instance(ctx context.Context, rs []ruleDef, en eventlog.Entry) 
 	// 包被删除或覆盖后不再有实例驱动的规则：实例还在到期，不能什么都不留。
 	return e.fail(ctx, ruleDef{State: State{Key: f.Pack + "/" + groupClock}}, &trigger{entry: en, object: f.ID, depth: en.Event.ChainDepth},
 		"instance", invalid("instance "+f.ID+" fired, but pack "+f.Pack+" has no instance-driven clock rule"))
+}
+
+// skipped 记一条跳过；重处理同一个 instance.fired 时不重复记。
+func (e *Engine) skipped(ctx context.Context, d ruleDef, t *trigger, f Fired, why string) error {
+	return e.o.Store.Update(ctx, func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, f.ID)
+		if err != nil {
+			return err
+		}
+		for _, x := range es {
+			if x.Event.Type == EvSkipped && x.Event.Seq > t.entry.Event.Seq {
+				var p struct {
+					Rule    string `json:"rule"`
+					Trigger int64  `json:"trigger_seq"`
+				}
+				if json.Unmarshal(x.Event.Payload, &p) == nil && p.Rule == d.Key && p.Trigger == t.entry.Event.Seq {
+					return nil
+				}
+			}
+		}
+		pv, _, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		b, _ := json.Marshal(map[string]any{"rule": d.Key, "trigger_seq": t.entry.Event.Seq, "due": f.Due, "reason": why})
+		_, err = eventlog.Append(tx, domain.Event{Type: EvSkipped, Object: f.ID, Actor: ruleActor(d.Key),
+			Basis: &domain.Basis{PolicyVersion: pv, RuleID: d.Key}, Reason: why, Payload: b, ChainDepth: t.depth, At: e.now()})
+		return err
+	})
 }
 
 func instanceDriven(d ruleDef) bool {

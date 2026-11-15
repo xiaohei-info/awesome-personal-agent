@@ -485,8 +485,11 @@ func upgrade(t *testing.T) {
 			if k == followKey || strings.Contains(k, "stale-check") {
 				continue
 			}
+			a, listed := after[k]
+			if !listed && strings.Contains(k, "/clock_rules/scheduled-") {
+				continue // 实例驱动的规则升级后不再列出（§7.3），启停在实例上
+			}
 			actionRules++
-			a := after[k]
 			if a.Hash == b.Hash && a.Mode != b.Mode {
 				t.Errorf("动作类规则 %s 内容未变，mode 应保持 %s，实际 %s", k, b.Mode, a.Mode)
 			}

@@ -338,8 +338,30 @@ func TestFlowRoutine(t *testing.T) {
 			e.Apa(e.DEL, "", "--evidence", "owner: 清理 routine 实例", "instance", "disable", id) // 已停用的再停用不算错
 		}
 		h.Mode("routine")
-		if l := k.apa(e.OBS, 0, "instance", "list").Stdout; strings.Contains(strings.ReplaceAll(l, " ", ""), `"enabled":true`) {
+		if l := k.apa(e.OBS, 0, "instance", "list").Stdout; len(stillEnabled(t, l, instances...)) > 0 {
 			t.Errorf("本流程的实例都应已停用: %s", l)
 		}
 	})
+}
+
+// stillEnabled 返回 ids 里在 apa instance list 输出中仍启用的；开箱默认安排（§7.3）不属于任何流程，不在其中。
+func stillEnabled(t *testing.T, list string, ids ...string) (out []string) {
+	t.Helper()
+	var l struct {
+		Instances []struct {
+			ID      string `json:"id"`
+			Enabled bool   `json:"enabled"`
+		} `json:"instances"`
+	}
+	if err := json.Unmarshal([]byte(list), &l); err != nil {
+		t.Fatalf("instance list: %v: %s", err, list)
+	}
+	for _, in := range l.Instances {
+		for _, id := range ids {
+			if in.ID == id && in.Enabled {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
 }

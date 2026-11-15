@@ -184,6 +184,9 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	if t.Target == "" && strings.TrimSpace(t.Title) == "" {
 		return Outcome{}, invalid("title is required")
 	}
+	if strings.TrimSpace(t.Instruction) == "" { // 实例没写内容要求时用模板的默认要求，随发行更新（C.7）
+		t.Instruction = pr.Meta.DefaultInstruction
+	}
 	access := pr.Meta.Access
 	if t.Access != "" {
 		access = t.Access

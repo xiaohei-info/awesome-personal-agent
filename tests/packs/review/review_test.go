@@ -147,7 +147,12 @@ func TestReviewPackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("write-review result_fields: %q", got)
 	}
 	// spec.period 取到期时刻才分得开周期；分节键名与简报同一 schema；写回即回执，提示词不能再让运行者报 done（附不出证据，§8.4）。
-	for _, s := range []string{"{item_id}", "{materials_path}", "spec.period", "item.title", "spec.sections[].{project, body}", "按项目分节", "写回成功就是回执"} {
+	for _, s := range []string{"本期完成", "没有完成及原因", "下期要决定的事"} { // 可改的默认要求
+		if !strings.Contains(w.Meta.DefaultInstruction, s) {
+			t.Errorf("write-review default_instruction lacks %q: %s", s, w.Meta.DefaultInstruction)
+		}
+	}
+	for _, s := range []string{"{item_id}", "{materials_path}", "{instruction_path}", "spec.period", "item.title", "spec.sections[].{project, body}", "按项目分节", "写回成功就是回执"} {
 		if !strings.Contains(w.Body, s) {
 			t.Errorf("write-review body lacks %q: %s", s, w.Body)
 		}

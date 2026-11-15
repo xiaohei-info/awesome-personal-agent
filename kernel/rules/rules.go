@@ -41,6 +41,7 @@ const (
 const (
 	EvObserved     = "rule.observed"      // observe 档：本来会做什么
 	EvTimerCreated = "rule.timer_created" // create_timer 动作建出的 Timer
+	EvSkipped      = "rule.skipped"       // 实例到期但 Options.Gate 让这次整次跳过（§7.3）
 )
 
 const (

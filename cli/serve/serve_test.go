@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -742,8 +743,10 @@ echo '{"cursor":"c1"}'
 
 	addr, stop := start(t, home)
 	s := webLogin(t, addr)
-	if code, body := s.do("POST", "/instances", `{"pack":"brief","params":{"schedule":"1s"}}`); code >= 300 {
-		t.Fatalf("create instance: %d %s", code, body)
+	for _, in := range []string{`{"pack":"routine","params":{"schedule":"1s","mode":"run","instruction":"写周报"}}`, `{"pack":"brief","params":{"schedule":"1s"}}`} {
+		if code, body := s.do("POST", "/instances", in); code >= 300 {
+			t.Fatalf("create instance: %d %s", code, body)
+		}
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
@@ -762,9 +765,9 @@ echo '{"cursor":"c1"}'
 	if code, body := s.do("GET", "/packs", ""); code != 200 || !strings.Contains(body, "inbound-triage") {
 		t.Fatalf("builtin packs not loaded: %d %s", code, body)
 	}
-	// 实例到期 → instance.fired → 规则执行建 brief 事项 → 任务型。没有设默认 harness，所以转 needs_input 交本人（§8.7）。
+	// 实例到期 → instance.fired → 规则执行建 routine 事项 → 任务型。没有设默认 harness，所以转 needs_input 交本人（§8.7）。
 	for {
-		code, body := s.do("GET", "/items?kind=brief", "")
+		code, body := s.do("GET", "/items?kind=routine", "")
 		if code == 200 && strings.Contains(body, `"phase":"needs_input"`) && strings.Contains(body, "默认 harness") {
 			break
 		}
@@ -774,10 +777,35 @@ echo '{"cursor":"c1"}'
 		time.Sleep(100 * time.Millisecond)
 	}
 	time.Sleep(2 * clockTicks) // 让实例与来源的 Timer 再各到期一次
+	// 周期简报在 Agent 还不能后台运行时到点跳过，不建事项（§7.3）；开箱的简报与复盘默认安排已建好。
+	if code, body := s.do("GET", "/items?kind=brief", ""); code != 200 || strings.Contains(body, `"kind":"brief"`) {
+		t.Fatalf("brief created while agent cannot run in background: %d %s", code, body)
+	}
+	countPacks := func() string {
+		code, body := s.do("GET", "/instances", "")
+		var out struct {
+			Instances []struct{ Pack string }
+			Ready     *bool `json:"agent_ready"`
+		}
+		if code != 200 || json.Unmarshal([]byte(body), &out) != nil || out.Ready == nil || *out.Ready {
+			t.Fatalf("instances: %d %s", code, body)
+		}
+		n := map[string]int{}
+		for _, in := range out.Instances {
+			n[in.Pack]++
+		}
+		return fmt.Sprint(n)
+	}
+	if got := countPacks(); got != "map[brief:2 review:1 routine:1]" {
+		t.Fatalf("instances = %s, want the two defaults plus the two created here", got)
+	}
 	stop()
 
 	addr, stop = start(t, home)
 	s = webLogin(t, addr)
+	if got := countPacks(); got != "map[brief:2 review:1 routine:1]" { // 默认安排只建一次
+		t.Fatalf("instances after restart = %s", got)
+	}
 	if code, body := s.do("GET", "/sources/src_host", ""); code != 200 || !strings.Contains(body, script) {
 		t.Fatalf("source lost after restart: %d %s", code, body)
 	}

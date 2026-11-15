@@ -1,7 +1,7 @@
 // Package packs 是能力包、实例与规则分组的 HTTP 路由（附录 B.2，设计 §6.12、§14.8）：
 //
 //	GET /packs
-//	GET/POST /instances        PATCH /instances/{id}
+//	GET/POST /instances        PATCH /instances/{id}        POST /instances/{id}/run
 //	GET /rules                 PATCH /rules/{id}/mode
 //
 // 路由只做传输：解码、把请求交给内核命令（授权、校验、事件都在 kernel/instances、kernel/rules 与命令管线）、渲染结果。
@@ -13,8 +13,10 @@ package packs
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -47,6 +49,7 @@ func Routes(st *store.Store, x *command.Executor, ps Packs) core.RouteGroup {
 		r.Handle(core.Route{Method: "GET", Path: "/instances", Handler: readable(a.listInstances)})
 		r.Handle(core.Route{Method: "POST", Path: "/instances", Handler: a.createInstance})
 		r.Handle(core.Route{Method: "PATCH", Path: "/instances/{id}", Handler: a.patchInstance})
+		r.Handle(core.Route{Method: "POST", Path: "/instances/{id}/run", Handler: a.runInstance})
 		r.Handle(core.Route{Method: "GET", Path: "/rules", Handler: readable(a.listRules)})
 		r.Handle(core.Route{Method: "PATCH", Path: "/rules/{id}/mode", Handler: a.setMode})
 	}
@@ -104,6 +107,23 @@ type packView struct {
 	ClockRules     []packRule         `json:"clock_rules"`
 	EventRules     []packRule         `json:"event_rules"`
 	Views          map[string]kp.View `json:"views"`
+	// DefaultInstruction 是实例驱动的 call_agent 模板的默认内容要求（C.7）；Web 在本人没改时显示它并标"默认"。
+	DefaultInstruction string `json:"default_instruction,omitempty"`
+}
+
+// defaultInstruction 取包里实例驱动的时钟规则所调模板的 default_instruction。
+func defaultInstruction(p *kp.Pack) string {
+	for _, c := range p.ClockRules {
+		if !strings.Contains(c.Schedule, "{instance.") {
+			continue
+		}
+		for _, a := range c.Do {
+			if pr, _ := a["prompt"].(string); a["action"] == "call_agent" && p.Prompts[pr].Meta.DefaultInstruction != "" {
+				return p.Prompts[pr].Meta.DefaultInstruction
+			}
+		}
+	}
+	return ""
 }
 
 func (a *api) packs(w http.ResponseWriter, _ *http.Request, _ *core.Principal) error {
@@ -111,7 +131,8 @@ func (a *api) packs(w http.ResponseWriter, _ *http.Request, _ *core.Principal) e
 	for _, p := range a.ps.List() {
 		src, _ := a.ps.Source(p.Name)
 		v := packView{Name: p.Name, Version: p.Version, Description: p.Description, Source: src, Hash: p.Hash,
-			Kinds: []string{}, InstanceParams: p.InstanceParams, ClockRules: []packRule{}, EventRules: []packRule{}, Views: p.Views}
+			Kinds: []string{}, InstanceParams: p.InstanceParams, ClockRules: []packRule{}, EventRules: []packRule{}, Views: p.Views,
+			DefaultInstruction: defaultInstruction(p)}
 		for _, k := range p.Kinds {
 			v.Kinds = append(v.Kinds, k.Name)
 		}
@@ -133,15 +154,33 @@ func (a *api) instance(r *http.Request, id string) (in instances.Instance, err e
 	return
 }
 
+// listInstances 另带 agent_ready：Agent 能否后台运行（§13.6）。为假时周期简报到点跳过（§7.3），Web 据它显示等待状态。
 func (a *api) listInstances(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
 	var l []instances.Instance
-	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { l, err = instances.List(tx); return }); err != nil {
+	var ready bool
+	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) {
+		if l, err = instances.List(tx); err != nil {
+			return err
+		}
+		ready, err = task.AgentReady(tx)
+		return err
+	}); err != nil {
 		return err
 	}
 	if l == nil {
 		l = []instances.Instance{}
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"instances": l})
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"instances": l, "agent_ready": ready})
+}
+
+// runInstance 立即跑一次（instance.run）：到期时刻取当前时刻，由规则执行照常处理。
+func (a *api) runInstance(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	id := r.PathValue("id")
+	raw, _ := json.Marshal(id)
+	if _, err := a.run(r, p, "instance.run", map[string]json.RawMessage{"id": raw}); err != nil {
+		return err
+	}
+	return a.reply(w, r, http.StatusAccepted, id)
 }
 
 // reply 把命令结果指向的实例读回并渲染。
