@@ -13,7 +13,7 @@ eval "$(tests/fixtures/ledger/fetch-v01.sh /tmp/apa-v01)"
 
 夹具目录就是一个完整的 `APA_HOME`（`ledger.db`、`config.yaml`、`packs/`），`cp -R` 得到一次性副本；根目录的 `manifest.json` 给出全部期望基线（键名同验收文档 ACT-ENV-08）。生成是确定的：同版本两次生成逐字节相同。
 
-- **冻结版本**登记在 `fixture.go` 的 `Frozen`：版本 2（`bfafc2d0`）与版本 3（`05106506`，真实账本 2026-11-14 起运行的提交）。冻结摘要 `frozenDigest` 取自冻结提交的二进制 `apa init` 出的账本。新增冻结版本时往两处各加一行。
+- **冻结版本**登记在 `fixture.go` 的 `Frozen`：版本 2（`bfafc2d0`）、版本 3（`05106506`，真实账本 2026-11-14 起运行的提交）与版本 4（`ce5c504b`，真实账本 2026-11-15 起运行的提交）。冻结摘要 `frozenDigest` 取自冻结提交的二进制 `apa init` 出的账本。新增冻结版本时往两处各加一行。
 - **回退用的旧二进制**按版本取：环境变量 `APA_V01_BIN`（版本 2，验收文档的名字）、`APA_V<n>_BIN`（其余版本，`BinaryEnv`）；没有设置时 `fetch-v01.sh <目录> <冻结提交>` 从该版本的冻结提交构建。
 - **`APA_V01_BIN` 不是 v0.1.1 标签**：标签早于 `sources_runner` 的第 2 步迁移（未判定原因，#254），而账本结构版本 2 包含它；v0.1.1 的二进制会把结构版本 2 的账本当成「比自己新」。`fetch-v01.sh` 缺省从 `Frozen[2]`（结构版本 2 的最后一次变更）构建。
 - `config.yaml` 带 `unjudged_rejudge_days: 0`：夹具的时间固定在过去，不冻结的话任何一次启动都会按真实时钟把积压转成 `expired`。

@@ -215,6 +215,7 @@ type facts struct {
 	item     domain.Item
 	busy     bool
 	project  *domain.Project
+	executor domain.ExecutorRef // runner=task 的执行者在名录里的登记（名单按它判定）
 	rec      executors.Record
 	declared bool
 	depth    int // 本次拉起的链路深度：触发事件的深度加一（规则拉起新运行，§14.9）
@@ -247,6 +248,9 @@ func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err
 				return err
 			}
 			f.project = &p
+		}
+		if f.executor, err = executors.Ref(tx, sp.executor); err != nil {
+			return err
 		}
 		if sp.harness == "" {
 			sp.harness = f.pol.DefaultHarness
@@ -347,7 +351,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 		reason = "无头运行声明未提供权限档位：" + sp.access
 	case !withinCap(f.pol, harness, sp.access):
 		reason = "权限档位 " + sp.access + " 超过 Web 设置的上限"
-	case sp.runner == "task" && (f.project != nil && !f.project.ExecutorAllowed(sp.executor, s.o.Owner)):
+	case sp.runner == "task" && (f.project != nil && !f.project.ExecutorAllowed(f.executor, s.o.Owner)):
 		reason = "执行者 " + sp.executor + " 不在项目允许的执行者名单内"
 	case noCheckout != "":
 		reason = noCheckout

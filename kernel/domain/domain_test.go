@@ -233,9 +233,28 @@ func TestProjectAllowedExecutors(t *testing.T) {
 		{"名单外", []string{"a", "b"}, "c", false},
 	}
 	for _, c := range cases {
-		if got := (Project{AllowedExecutors: c.allowed}).ExecutorAllowed(c.exec, "me"); got != c.want {
+		if got := (Project{AllowedExecutors: c.allowed}).ExecutorAllowed(ExecutorRef{ID: c.exec}, "me"); got != c.want {
 			t.Errorf("%s: got %v", c.name, got)
 		}
+	}
+	// 按维度匹配（§14.7）：非空字段都相等才命中；任一规则命中即允许；没有登记信息的 id 只能按 id 命中。
+	mbp := Project{AllowedExecutorMatch: []ExecutorMatch{{Host: "mbp"}, {Harness: "h2", Host: "studio"}}}
+	for _, c := range []struct {
+		ref  ExecutorRef
+		want bool
+	}{
+		{ExecutorRef{ID: "x", Host: "mbp", Harness: "h1"}, true},
+		{ExecutorRef{ID: "x", Host: "studio", Harness: "h1"}, false},
+		{ExecutorRef{ID: "x", Host: "studio", Harness: "h2"}, true},
+		{ExecutorRef{ID: "unregistered"}, false},
+		{ExecutorRef{ID: "me"}, true},
+	} {
+		if got := mbp.ExecutorAllowed(c.ref, "me"); got != c.want {
+			t.Errorf("match %+v: got %v", c.ref, got)
+		}
+	}
+	if !(Project{AllowedExecutorMatch: []ExecutorMatch{{Host: "mbp"}}}).Restricted() || (Project{}).Restricted() {
+		t.Error("a match rule alone must restrict the project")
 	}
 	// nil 与空列表在 JSON 里必须可区分
 	var p Project

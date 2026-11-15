@@ -38,6 +38,10 @@ var Module = store.Module{Name: "projects", Migrations: []store.Migration{{
 	// 账本结构版本 3（§6.5）：对话捕获送外部端点的范围；空串即未选择，已有项目升级后都是未选择（§14.14）。
 	Version: 2, Ledger: 3, Name: "ledger-v3-capture-outbound",
 	SQL: `ALTER TABLE projects ADD COLUMN capture_outbound TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 5（§6.5、§14.7）：按机器或 harness 匹配的项目名单。默认为空，名单判定与升级前一致。
+	Version: 3, Ledger: 5, Name: "ledger-v5-allowed-executor-match",
+	SQL: `ALTER TABLE projects ADD COLUMN allowed_executor_match TEXT NOT NULL DEFAULT '[]';`,
 }}}
 
 // CmdSetCaptureOutbound 设置项目的 capture_outbound，只 Web。
@@ -57,12 +61,12 @@ func conflict(why string) error {
 
 // ---- 读 ----
 
-const cols = "id, name, intro, tags, status, repos, allowed_executors, capture, capture_outbound"
+const cols = "id, name, intro, tags, status, repos, allowed_executors, capture, capture_outbound, allowed_executor_match"
 
 func scan(r *store.Rows) (domain.Project, error) {
 	var p domain.Project
-	var tags, status, repos, allowed, capOut string
-	if err := r.Scan(&p.ID, &p.Name, &p.Intro, &tags, &status, &repos, &allowed, &p.Capture, &capOut); err != nil {
+	var tags, status, repos, allowed, capOut, match string
+	if err := r.Scan(&p.ID, &p.Name, &p.Intro, &tags, &status, &repos, &allowed, &p.Capture, &capOut, &match); err != nil {
 		return p, err
 	}
 	if capOut != "" { // 空串即未选择
@@ -72,10 +76,13 @@ func scan(r *store.Rows) (domain.Project, error) {
 	for _, f := range []struct {
 		raw string
 		dst any
-	}{{tags, &p.Tags}, {repos, &p.Repos}, {allowed, &p.AllowedExecutors}} {
+	}{{tags, &p.Tags}, {repos, &p.Repos}, {allowed, &p.AllowedExecutors}, {match, &p.AllowedExecutorMatch}} {
 		if err := json.Unmarshal([]byte(f.raw), f.dst); err != nil {
 			return p, fmt.Errorf("projects: corrupt row %s: %w", p.ID, err)
 		}
+	}
+	if len(p.AllowedExecutorMatch) == 0 {
+		p.AllowedExecutorMatch = nil
 	}
 	return p, nil
 }
@@ -136,8 +143,12 @@ func save(tx *store.Tx, p domain.Project, insert bool) error {
 	if !insert {
 		verb = "INSERT OR REPLACE"
 	}
-	_, err := tx.Exec(verb+" INTO projects ("+cols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		p.ID, p.Name, p.Intro, enc(p.Tags), string(p.Status), enc(p.Repos), enc(p.AllowedExecutors), p.Capture, derefOr(p.CaptureOutbound))
+	match := p.AllowedExecutorMatch
+	if match == nil {
+		match = []domain.ExecutorMatch{}
+	}
+	_, err := tx.Exec(verb+" INTO projects ("+cols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		p.ID, p.Name, p.Intro, enc(p.Tags), string(p.Status), enc(p.Repos), enc(p.AllowedExecutors), p.Capture, derefOr(p.CaptureOutbound), enc(match))
 	return err
 }
 
@@ -297,6 +308,15 @@ func parseCaptureOutbound(in json.RawMessage) (*string, error) {
 type executorsIn struct {
 	ID        string          `json:"id"`
 	Executors json.RawMessage `json:"executors"` // 必须出现：null 为不限制，[] 为只能指派给本人
+	// Match 是按机器或 harness 的匹配规则，可缺省（等于不设）；非空时名单生效（§14.7）。
+	Match []domain.ExecutorMatch `json:"match"`
+}
+
+func orEmpty(m []domain.ExecutorMatch) []domain.ExecutorMatch {
+	if m == nil {
+		return []domain.ExecutorMatch{}
+	}
+	return m
 }
 
 func validStatus(s domain.ProjectStatus) bool {
@@ -583,21 +603,21 @@ func Register(x *command.Executor) error {
 		{Name: "project.allowed_executors.set", Action: authz.ActionChangeSettings,
 			Object: objectOf(func(v executorsIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
-				_, err := parseExecutors(in)
+				_, _, err := parseExecutors(in)
 				return err
 			},
 			Apply: func(c *command.Ctx) (any, error) {
-				next, _ := parseExecutors(c.Input)
+				next, match, _ := parseExecutors(c.Input)
 				p, err := Get(c.Tx, c.Object.ID)
 				if err != nil {
 					return nil, err
 				}
-				before := p.AllowedExecutors
-				p.AllowedExecutors = next
+				before, matchBefore := p.AllowedExecutors, p.AllowedExecutorMatch
+				p.AllowedExecutors, p.AllowedExecutorMatch = next, match
 				if err := save(c.Tx, p, false); err != nil {
 					return nil, err
 				}
-				payload, _ := json.Marshal(map[string]any{"before": before, "after": next})
+				payload, _ := json.Marshal(map[string]any{"before": before, "after": next, "match_before": orEmpty(matchBefore), "match_after": orEmpty(match)})
 				if _, err := c.Emit(domain.Event{Type: domain.EvProjectAllowedExecutorsChanged, Object: p.ID, Payload: payload}); err != nil {
 					return nil, err
 				}
@@ -613,29 +633,39 @@ func Register(x *command.Executor) error {
 }
 
 // parseExecutors 把 executors 字段落成三态：null → nil（不限制），[] → 空非 nil，名单 → 去重后的名单。
-func parseExecutors(in json.RawMessage) ([]string, error) {
+func parseExecutors(in json.RawMessage) ([]string, []domain.ExecutorMatch, error) {
 	var v executorsIn
 	if err := decode(in, &v); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	var match []domain.ExecutorMatch
+	for _, m := range v.Match {
+		m.Host, m.Harness = strings.TrimSpace(m.Host), strings.TrimSpace(m.Harness)
+		if m.Host == "" && m.Harness == "" {
+			return nil, nil, invalid("each match needs host or harness")
+		}
+		if !slices.Contains(match, m) {
+			match = append(match, m)
+		}
 	}
 	if len(v.Executors) == 0 {
-		return nil, invalid("executors is required: null for unrestricted, [] for owner only")
+		return nil, nil, invalid("executors is required: null for unrestricted, [] for owner only")
 	}
 	var ids []string
 	if err := json.Unmarshal(v.Executors, &ids); err != nil {
-		return nil, invalid("executors must be null or a list of strings")
+		return nil, nil, invalid("executors must be null or a list of strings")
 	}
 	if ids == nil {
-		return nil, nil
+		return nil, match, nil
 	}
 	out := []string{}
 	for _, id := range ids {
 		if strings.TrimSpace(id) == "" {
-			return nil, invalid("executor ids must not be blank")
+			return nil, nil, invalid("executor ids must not be blank")
 		}
 		if !slices.Contains(out, id) {
 			out = append(out, id)
 		}
 	}
-	return out, nil
+	return out, match, nil
 }

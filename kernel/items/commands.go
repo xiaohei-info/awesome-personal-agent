@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -262,8 +263,25 @@ func object(tx *store.Tx, cur, next domain.Item) (authz.Object, error) {
 			return o, err
 		}
 		o.ProjectInfo = &p
+		if err := annotateExecutor(tx, &o, p); err != nil {
+			return o, err
+		}
 	}
 	return o, nil
+}
+
+// annotateExecutor 给名单校验补上执行者在名录里的登记与命中名单的候选（§14.7）；项目不限制时不必读。
+func annotateExecutor(tx *store.Tx, o *authz.Object, p domain.Project) error {
+	if !p.Restricted() {
+		return nil
+	}
+	ref, err := executors.Ref(tx, o.Executor)
+	if err != nil {
+		return err
+	}
+	o.ExecutorHost, o.ExecutorHarness = ref.Host, ref.Harness
+	o.Candidates, err = executors.Candidates(tx, p, "")
+	return err
 }
 
 // BoundTo 是 §14.5 第一档的对象绑定，只据账本：事项的 assignee 等于该凭据，或这个委派子事项由该凭据发起

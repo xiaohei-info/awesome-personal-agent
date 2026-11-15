@@ -93,9 +93,9 @@ func exit(err error) int {
 	return -1
 }
 
-func (e *env) list(t *testing.T) []Executor {
+func (e *env) list(t *testing.T) []Entry {
 	t.Helper()
-	var es []Executor
+	var es []Entry
 	if err := e.st.View(bg, func(tx *store.Tx) (err error) { es, err = List(tx); return }); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestRejectedDeclarationNeverTakesEffect(t *testing.T) {
 	}
 }
 
-func TestNewDeclarationSupersedesAndReplacesHarnessEntries(t *testing.T) {
+func TestNewDeclarationSupersedesAndMergesHarnessEntries(t *testing.T) {
 	e := setup(t)
 	worker := e.bearer(t, auth.Spec{Kind: auth.Worker})
 	e.must(t, worker, "executor.declare", decl("acme", build, chat))
@@ -244,14 +244,14 @@ func TestNewDeclarationSupersedesAndReplacesHarnessEntries(t *testing.T) {
 		t.Fatalf("list %+v", got)
 	}
 
-	// 已生效后再声明：确认前仍用旧的，确认后整体替换，旧项消失。
+	// 已生效后再声明：确认前不变；确认后并入名录，已登记的条目不删除（§6.17）。
 	e.must(t, worker, "executor.declare", decl("acme", chat))
 	if got := e.list(t); len(got) != 1 || got[0].ID != "acme.build" {
 		t.Fatalf("active must stay until confirmed: %+v", got)
 	}
 	e.must(t, owner, "executor.confirm", ref{"acme", 3})
-	if got := e.list(t); len(got) != 1 || got[0].ID != "acme.chat" {
-		t.Fatalf("list after replace %+v", got)
+	if got := e.list(t); len(got) != 2 || got[0].ID != "acme.build" || got[1].ID != "acme.chat" {
+		t.Fatalf("list after merge %+v", got)
 	}
 	var active []Record
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { active, err = Records(tx, StateActive); return })
@@ -363,7 +363,7 @@ func TestHostFileRegistration(t *testing.T) {
 	if r, err := RegisterHostFile(bg, e.x, owner, path); err != nil || string(r.Value) != `{"harness":"acme","rev":2}` {
 		t.Fatalf("changed file: %s %v", r.Value, err)
 	}
-	if got := e.list(t); len(got) != 1 || got[0].ID != "acme.chat" {
+	if got := e.list(t); len(got) != 2 || got[1].ID != "acme.chat" {
 		t.Fatalf("list %+v", got)
 	}
 

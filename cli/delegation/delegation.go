@@ -63,7 +63,7 @@ func executors(c *client.Ctx, args []string) error {
 	return send(c, nil, "GET", path, nil)
 }
 
-const delegateUsage = "usage: apa delegate --parent <id> --assignee <executor> [--title --summary --body --priority --project --reason --idempotency-key]"
+const delegateUsage = "usage: apa delegate --parent <id> --assignee <executor> [--executor <json file|->] [--title --summary --body --priority --project --reason --idempotency-key]"
 
 func delegate(c *client.Ctx, args []string) error {
 	fs := flags("delegate")
@@ -72,6 +72,7 @@ func delegate(c *client.Ctx, args []string) error {
 		v[n] = fs.String(n, "", "")
 	}
 	key := fs.String("idempotency-key", "", "")
+	exec := fs.String("executor", "", "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return usage("invalid arguments for delegate", delegateUsage)
 	}
@@ -83,6 +84,13 @@ func delegate(c *client.Ctx, args []string) error {
 		if *s != "" {
 			body[n] = *s
 		}
+	}
+	if *exec != "" { // 随委派登记执行者（§6.17）：{kind, host?, label?, handle?}，harness 取 APA_HARNESS
+		data, err := readFile(c, *exec)
+		if err != nil || !json.Valid(data) {
+			return usage("--executor must be a JSON file or - with valid JSON", delegateUsage)
+		}
+		body["executor"] = json.RawMessage(data)
 	}
 	return send(c, idem(*key), "POST", "/delegations", body)
 }

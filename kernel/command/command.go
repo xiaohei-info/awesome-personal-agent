@@ -193,6 +193,9 @@ type Spec struct {
 	Actions func(tx *store.Tx, c Caller, o authz.Object, in json.RawMessage) []authz.Action
 	// Object 在事务内据账本解析授权对象；对象的所有字段来自账本，不来自 Input。
 	Object func(tx *store.Tx, in json.RawMessage) (authz.Object, error)
+	// Refine 非空时在 Object 之后、授权之前调用，补上只有调用者才能确定的对象字段
+	// （如随委派新登记的执行者的 harness 取调用方报告的值）；字段仍只来自账本与凭据。
+	Refine func(tx *store.Tx, c Caller, o *authz.Object, in json.RawMessage) error
 	// Validate 校验 kind 的 spec schema、阶段进入约束等；可为空。
 	Validate func(tx *store.Tx, o authz.Object, in json.RawMessage) error
 	// Apply 更新投影并经 Emit 追加事件；返回值序列化为结果，幂等重放时原样返回。
@@ -497,6 +500,11 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 		return Result{}, Commit{}, err
 	}
 	tr.obj = obj.ID
+	if spec.Refine != nil {
+		if err := spec.Refine(tx, caller, &obj, req.Input); err != nil {
+			return Result{}, Commit{}, err
+		}
+	}
 	if caller.Level == authz.LevelRun && caller.RunScope != nil {
 		if obj.InRunScope, obj.InRunProject, err = caller.RunScope(tx, obj); err != nil {
 			return Result{}, Commit{}, err

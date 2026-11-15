@@ -22,6 +22,8 @@ out=$(cd "$out" && pwd)
 src=$(mktemp -d)
 trap 'rm -rf "$src"' EXIT
 git -C "$root" archive "$commit" | tar -x -C "$src"
+# 自 #397 起仓库不再带 web/dist/.gitkeep，go:embed 找不到文件会拒绝构建；旧二进制只用于账本演练，不需要前端，放一个占位文件。
+mkdir -p "$src/web/dist" && { [ -n "$(ls -A "$src/web/dist")" ] || : > "$src/web/dist/.gitkeep"; }
 echo "fetch-v01: building $commit" >&2
 (cd "$src" && CGO_ENABLED=0 go build -trimpath -o "$out/apa-$commit" ./cli/apa)
 tar -C "$src/plugins" --exclude=tests -czf "$out/apa-hermes-plugin-$commit.tar.gz" hermes

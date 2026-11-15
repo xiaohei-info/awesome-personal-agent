@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"regexp"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -19,6 +20,7 @@ const (
 	EvRejected  = "executor.rejected"  // 本人拒绝声明
 	EvChanged   = "executor.changed"   // 本人增改清单项
 	EvRemoved   = "executor.removed"   // 本人移除清单项
+	EvEnrolled  = "executor.enrolled"  // 宿主随委派登记或更新名录条目（§6.17）
 )
 
 // Options 注入本模块读取但不拥有的东西。
@@ -296,9 +298,86 @@ func remove(c *command.Ctx) (any, error) {
 	return r, err
 }
 
+// ---- 随委派登记（§6.17） ----
+
+var (
+	enrollID  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+	hostShape = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+)
+
+// Enrollment 是 delegate.create 随委派登记执行者时的输入：id 取 assignee，harness 取调用方报告的 harness。
+type Enrollment struct {
+	Kind   string          `json:"kind"`
+	Host   string          `json:"host,omitempty"`
+	Label  string          `json:"label,omitempty"`
+	Handle json.RawMessage `json:"handle,omitempty"`
+}
+
+// Check 只按形状校验（不读账本），并把句柄规范化；Object 阶段调用，好让名单判定看到将要登记的 host。
+func (in *Enrollment) Check(id string) error {
+	if !enrollID.MatchString(id) {
+		return invalid("executor id must match ^[a-z0-9][a-z0-9._-]{0,63}$ to be registered")
+	}
+	if !validKind(in.Kind) {
+		return invalid("executor.kind must be native-subagent, external-cli, remote-agent or human")
+	}
+	if in.Host != "" && !hostShape.MatchString(in.Host) {
+		return invalid("executor.host must be 1-64 characters of [A-Za-z0-9._-]")
+	}
+	if err := CheckValue("executor.label", in.Label, 80); err != nil {
+		return err
+	}
+	h, err := ValidateHandle("executor.handle", in.Handle)
+	in.Handle = h
+	return err
+}
+
+// Enroll 在调用方的命令事务里登记或更新名录条目，并记 executor.enrolled。已在名录里时身份字段（harness、kind、host）
+// 必须一致，否则冲突；label 与 handle 只有同一 harness 能改。调用方先 Check。
+func Enroll(c *command.Ctx, id string, in Enrollment) error {
+	harness := c.Caller.Actor.Harness
+	if harness == "" {
+		return invalid("registering an executor needs the caller's harness (APA_HARNESS / X-APA-Harness)")
+	}
+	cur, found, err := Get(c.Tx, id)
+	if err != nil {
+		return err
+	}
+	if found {
+		if cur.Harness != harness || cur.Kind != in.Kind || cur.Host != in.Host {
+			return domain.NewError(domain.CodeConflict, "executor "+id+" is already registered with a different harness, kind or host",
+				"use another executor id, or ask the owner to remove the entry in Web")
+		}
+		if cur.Label == in.Label && bytes.Equal(cur.Handle, in.Handle) {
+			return nil // 同一派法再次使用：不产生事件
+		}
+		if _, err := c.Tx.Exec("UPDATE executors_entry SET label = ?, handle = ? WHERE id = ?", in.Label, string(in.Handle), id); err != nil {
+			return err
+		}
+	} else {
+		var n int64
+		if err := query(c.Tx, func(r *store.Rows) error { return r.Scan(&n) }, "SELECT COUNT(*) FROM executors_entry"); err != nil {
+			return err
+		}
+		if n >= MaxEntries {
+			return domain.NewError(domain.CodeConflict, "the executor list is full", "register one executor per way of delegating, not per agent; ask the owner to remove unused entries in Web")
+		}
+		if _, err := c.Tx.Exec(`INSERT INTO executors_entry (id, kind, scenarios, host, harness, label, handle, created_at) VALUES (?, ?, '[]', ?, ?, ?, ?, ?)`,
+			id, in.Kind, in.Host, harness, in.Label, string(in.Handle), c.Now().UnixNano()); err != nil {
+			return err
+		}
+	}
+	e, _, err := Get(c.Tx, id)
+	if err != nil {
+		return err
+	}
+	_, err = c.Emit(domain.Event{Type: EvEnrolled, Object: "executors:" + id, Payload: payload(e)})
+	return err
+}
+
 // listed 是 executor.list 的一项；Allowed 只在带 project 时出现。
 type listed struct {
-	Executor
+	Entry
 	Allowed *bool `json:"allowed,omitempty"`
 }
 
@@ -328,9 +407,9 @@ func (o Options) list(c *command.Ctx) (any, error) {
 	}
 	out := make([]listed, len(es))
 	for i, e := range es {
-		out[i].Executor = e
+		out[i].Entry = e
 		if proj != nil {
-			ok := proj.ExecutorAllowed(e.ID, o.Owner)
+			ok := proj.ExecutorAllowed(domain.ExecutorRef{ID: e.ID, Host: e.Host, Harness: e.Harness}, o.Owner)
 			out[i].Allowed = &ok
 		}
 	}

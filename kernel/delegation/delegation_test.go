@@ -362,11 +362,11 @@ func TestAllowedExecutorsAreEnforced(t *testing.T) {
 		t.Fatalf("rejections = %d", countType(es, domain.EvCommandRejected))
 	}
 
-	// 不在执行者清单里：退出码 5。
+	// 不在执行者名录里也可以指派（§6.17）：不登记名录条目。
 	oparent := e.parent(t, open)
-	e.wantExit(t, domain.ExitNotFound, e.as("DEL"), "delegate.create", map[string]any{"parent": oparent, "assignee": "ghost.cli"})
-	if kids := e.children(t, oparent); len(kids) != 0 {
-		t.Fatalf("children = %v", kids)
+	e.delegate(t, e.as("DEL"), oparent, "ghost.cli")
+	if _, found := e.entry(t, "ghost.cli"); found {
+		t.Fatal("assigning without an executor descriptor must not register one")
 	}
 
 	// 未设置不限制。
@@ -672,5 +672,76 @@ func TestRejectedReceiptTurnsChildToNeedsInputAndAlerts(t *testing.T) {
 	if as := alerts(); len(as) != 2 || as[1].Actor.Principal == "" {
 		t.Fatalf("alerts = %+v", as)
 	}
+	e.consistent(t)
+}
+
+func (e *env) entry(t *testing.T, id string) (executors.Entry, bool) {
+	t.Helper()
+	var en executors.Entry
+	var found bool
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { en, found, err = executors.Get(tx, id); return }); err != nil {
+		t.Fatal(err)
+	}
+	return en, found
+}
+
+// 执行者随委派登记（§6.17）：harness 取调用方；身份字段登记即固定；同一 harness 可改显示名与句柄；被拒的委派不登记。
+func TestDelegateEnrollsExecutor(t *testing.T) {
+	e := setup(t)
+	open := e.project(t, "enroll-open", nil)
+	desc := map[string]any{"kind": "remote-agent", "host": "mbp", "label": "Paseo · quick @ mbp", "handle": map[string]any{"mech": "paseo", "host": "mbp", "profile": "quick"}}
+	parent := e.parent(t, open)
+	e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": parent, "assignee": "h.paseo.mbp.quick", "executor": desc})
+	en, found := e.entry(t, "h.paseo.mbp.quick")
+	if !found || en.Harness != "h" || en.Host != "mbp" || en.Kind != "remote-agent" || en.Label != desc["label"] ||
+		string(en.Handle) != `{"host":"mbp","mech":"paseo","profile":"quick"}` || en.CreatedAt == nil {
+		t.Fatalf("entry %+v", en)
+	}
+	enrolled := countType(e.events(t), executors.EvEnrolled)
+
+	// 同一派法再用：不新增事件。
+	e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": e.parent(t, open), "assignee": "h.paseo.mbp.quick", "executor": desc})
+	if got := countType(e.events(t), executors.EvEnrolled); got != enrolled {
+		t.Fatalf("re-using the same executor emitted %d enrolment events", got-enrolled)
+	}
+	// 身份字段不同：冲突，什么都不写。
+	moved := map[string]any{"kind": "remote-agent", "host": "studio"}
+	p2 := e.parent(t, open)
+	e.wantExit(t, domain.ExitConflict, e.as("DEL"), "delegate.create", map[string]any{"parent": p2, "assignee": "h.paseo.mbp.quick", "executor": moved})
+	if kids := e.children(t, p2); len(kids) != 0 {
+		t.Fatal("a conflicting enrolment must not create a child")
+	}
+	// 别的 harness 来改：冲突。
+	other := command.Bearer{Auth: e.au, Secret: e.secret["DEL"], Origin: auth.Origin{Harness: "h2", Session: "s9", SessionKind: "direct"}}
+	e.wantExit(t, domain.ExitConflict, other, "delegate.create", map[string]any{"parent": p2, "assignee": "h.paseo.mbp.quick", "executor": desc})
+	// 没有 harness 不能登记。
+	bare := command.Bearer{Auth: e.au, Secret: e.secret["DEL"]}
+	e.wantExit(t, domain.ExitUsage, bare, "delegate.create", map[string]any{"parent": p2, "assignee": "x.y", "executor": desc})
+	// id 与句柄形状不对：2。
+	e.wantExit(t, domain.ExitUsage, e.as("DEL"), "delegate.create", map[string]any{"parent": p2, "assignee": "Bad Id", "executor": desc})
+	e.wantExit(t, domain.ExitUsage, e.as("DEL"), "delegate.create", map[string]any{"parent": p2, "assignee": "h.x",
+		"executor": map[string]any{"kind": "remote-agent", "handle": map[string]any{"mech": "x", "command": "rm -rf /"}}})
+
+	// 按机器匹配的名单：自报在 mbp 上的新执行者通过；别的机器 21，名录不留条目，返回匹配规则与候选。
+	work := e.project(t, "enroll-work", nil)
+	e.must(t, owner, "project.allowed_executors.set", map[string]any{"id": work, "executors": nil, "match": []map[string]string{{"host": "mbp"}}})
+	wp := e.parent(t, work)
+	e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": wp, "assignee": "h.codex.mbp",
+		"executor": map[string]any{"kind": "external-cli", "host": "mbp"}})
+	wp2 := e.parent(t, work)
+	de := e.wantExit(t, domain.ExitExecutorNotAllowed, e.as("DEL"), "delegate.create", map[string]any{"parent": wp2, "assignee": "h.sub.apa",
+		"executor": map[string]any{"kind": "native-subagent", "host": "apa"}})
+	if _, found := e.entry(t, "h.sub.apa"); found {
+		t.Fatal("a rejected delegation must not register its executor")
+	}
+	if len(de.AllowedMatch) != 1 || de.AllowedMatch[0].Host != "mbp" || !slices.Contains(de.Candidates, "h.codex.mbp") || !slices.Contains(de.Candidates, "h.paseo.mbp.quick") {
+		t.Fatalf("21 body: match %v candidates %v", de.AllowedMatch, de.Candidates)
+	}
+	// 未登记、也不带描述的 id 只能按 id 命中。
+	e.wantExit(t, domain.ExitExecutorNotAllowed, e.as("DEL"), "delegate.create", map[string]any{"parent": wp2, "assignee": "ghost"})
+	// 按 harness 匹配：新登记的 harness 取调用方。
+	e.must(t, owner, "project.allowed_executors.set", map[string]any{"id": work, "executors": nil, "match": []map[string]string{{"harness": "h"}}})
+	e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": wp2, "assignee": "h.sub.apa",
+		"executor": map[string]any{"kind": "native-subagent", "host": "apa"}})
 	e.consistent(t)
 }

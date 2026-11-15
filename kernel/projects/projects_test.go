@@ -251,7 +251,7 @@ func TestAllowedExecutorsThreeStates(t *testing.T) {
 	if p.AllowedExecutors == nil || len(p.AllowedExecutors) != 0 {
 		t.Fatalf("empty list must persist as empty, not nil: %#v", p.AllowedExecutors)
 	}
-	if p.ExecutorAllowed("agent-a", "me") || !p.ExecutorAllowed("me", "me") {
+	if p.ExecutorAllowed(domain.ExecutorRef{ID: "agent-a"}, "me") || !p.ExecutorAllowed(domain.ExecutorRef{ID: "me"}, "me") {
 		t.Fatal("empty list means self only")
 	}
 
@@ -259,14 +259,14 @@ func TestAllowedExecutorsThreeStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	p = e.get(t, id)
-	if len(p.AllowedExecutors) != 2 || !p.ExecutorAllowed("agent-b", "me") || p.ExecutorAllowed("agent-c", "me") {
+	if len(p.AllowedExecutors) != 2 || !p.ExecutorAllowed(domain.ExecutorRef{ID: "agent-b"}, "me") || p.ExecutorAllowed(domain.ExecutorRef{ID: "agent-c"}, "me") {
 		t.Fatalf("list: %#v", p.AllowedExecutors)
 	}
 
 	if err := set(nil); err != nil {
 		t.Fatal(err)
 	}
-	if p = e.get(t, id); p.AllowedExecutors != nil || !p.ExecutorAllowed("anyone", "me") {
+	if p = e.get(t, id); p.AllowedExecutors != nil || !p.ExecutorAllowed(domain.ExecutorRef{ID: "anyone"}, "me") {
 		t.Fatalf("null must restore unrestricted: %#v", p.AllowedExecutors)
 	}
 
@@ -546,5 +546,34 @@ func TestRepoCommandsAcceptAnySpelling(t *testing.T) {
 	e.must(t, delegate, "project.repo.remove", map[string]any{"id": id, "remote": "acme/app"})
 	if p := e.get(t, id); len(p.Repos) != 0 {
 		t.Fatalf("%+v", p.Repos)
+	}
+}
+
+// 按维度匹配的名单（§14.7）：随名单一起设、去重、可清空；投影与事件折叠一致。
+func TestAllowedExecutorMatch(t *testing.T) {
+	e := setup(t)
+	id := e.create(t, "P")
+	in := map[string]any{"id": id, "executors": nil, "match": []map[string]string{{"host": "mbp"}, {"host": "mbp"}, {"harness": "h", "host": " x "}}}
+	if _, err := e.do(t, owner, "project.allowed_executors.set", in); err != nil {
+		t.Fatal(err)
+	}
+	p := e.get(t, id)
+	if !p.Restricted() || len(p.AllowedExecutorMatch) != 2 || p.AllowedExecutorMatch[1] != (domain.ExecutorMatch{Host: "x", Harness: "h"}) {
+		t.Fatalf("match %+v", p.AllowedExecutorMatch)
+	}
+	if !p.ExecutorAllowed(domain.ExecutorRef{ID: "a", Host: "mbp"}, "me") || p.ExecutorAllowed(domain.ExecutorRef{ID: "a", Host: "x"}, "me") {
+		t.Fatal("match rules not applied")
+	}
+	if _, err := e.do(t, owner, "project.allowed_executors.set", map[string]any{"id": id, "executors": nil, "match": []map[string]string{{}}}); err == nil {
+		t.Fatal("an empty match rule must be rejected")
+	}
+	if _, err := e.do(t, owner, "project.allowed_executors.set", map[string]any{"id": id, "executors": nil}); err != nil {
+		t.Fatal(err)
+	}
+	if p := e.get(t, id); p.Restricted() {
+		t.Fatalf("clearing must unrestrict: %+v", p)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error { return Verify(tx) }); err != nil {
+		t.Fatal(err)
 	}
 }

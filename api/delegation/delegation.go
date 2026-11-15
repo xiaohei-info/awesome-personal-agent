@@ -1,5 +1,5 @@
 // Package delegation 是委派与声明分组的 HTTP 路由（附录 B.2，设计 §7.5、§14.3）：
-// GET /executors、POST /delegations、POST /items/{id}/report、POST /declarations。
+// GET /executors、DELETE /executors/{id}、POST /delegations、POST /items/{id}/report、POST /declarations。
 //
 // 路由里没有业务规则：全部映射到内核命令（executor.list、delegate.create、delegate.report、executor.declare），
 // 授权（项目允许的执行者 21、运行身份范围 4、声明须 Web 确认）、校验、乐观版本与幂等都由命令管线判定。
@@ -35,6 +35,7 @@ func Routes(x *command.Executor) core.RouteGroup {
 	h := &handlers{x: x}
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/executors", Handler: h.executors})
+		r.Handle(core.Route{Method: "DELETE", Path: "/executors/{id}", MaxBody: 1, Handler: h.removeExecutor})
 		r.Handle(core.Route{Method: "POST", Path: "/delegations", Handler: h.write("delegate.create", false, http.StatusCreated)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/report", Handler: h.write("delegate.report", true, http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/declarations", Handler: h.write("executor.declare", false, http.StatusAccepted)})
@@ -49,6 +50,16 @@ func (h *handlers) executors(w http.ResponseWriter, r *http.Request, p *core.Pri
 		in, _ = json.Marshal(map[string]string{"project": proj})
 	}
 	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "executor.list", Input: in})
+	if err != nil {
+		return err
+	}
+	return writeRaw(w, http.StatusOK, res.Value)
+}
+
+// removeExecutor 移除名录条目：executor.remove 要求改设置的权限，只有 Web 本人通过（§6.17）。
+func (h *handlers) removeExecutor(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	in, _ := json.Marshal(map[string]string{"id": r.PathValue("id")})
+	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "executor.remove", Input: in})
 	if err != nil {
 		return err
 	}

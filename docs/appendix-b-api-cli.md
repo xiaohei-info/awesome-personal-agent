@@ -39,7 +39,7 @@
 | `apa grant list` | 列出该凭据名下未撤销、未过期的授权单：id、范围、动作、有效期；签发和撤销只在 Web | delegate | 4 |
 | **委派** | | | |
 | `apa executors [--project]` | 列出执行者名录（主文档 §6.17），带项目时标明是否允许 | observer | |
-| `apa delegate --parent --assignee` | 建子事项，校验项目允许的执行者。本版新增、尚未实现：`--executor <JSON 文件或 ->`（`kind`、`host`、`label`、`handle`）在同一事务里登记或更新执行者，`harness` 取 `APA_HARNESS`；`assignee` 不在名录里不再返回 5；身份字段冲突或名录已满返回 6 | worker（自己的事项）；delegate（任意） | 4、5、21 |
+| `apa delegate --parent --assignee` | 建子事项，校验项目允许的执行者。`--executor <JSON 文件或 ->`（`kind`、`host`、`label`、`handle`）在同一事务里登记或更新执行者，`harness` 取 `APA_HARNESS`；`assignee` 不必先在名录里；身份字段冲突或名录已满返回 6 | worker（自己的事项）；delegate（任意） | 2、4、5、6、21 |
 | `apa dispatch add <子事项> --session [--resumable] [--cwd] [--repo] [--handle <JSON 文件或 ->] [--continues <记录>]` | 【规划中（v0.2.0）】在委派子事项上写一条委派记录，输出 `{id}`；`harness` 取 `APA_HARNESS`，必填；句柄规则见主文档 §6.17 | 同 `apa report` | 2、4、5、6、23 |
 | `apa dispatch update <记录> [--state ended\|lost] [--resumable true\|false]` | 【规划中（v0.2.0）】推进委派记录；`lost` 同时置 `resumable` 为假，终态不可改 | 同 `apa report` | 2、4、5、6、23 |
 | `apa report <id> --outcome --summary [--pr --commit --branch --link] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`done` 必须带结果证据（`--pr`、`--commit`、`--branch`、`--link` 至少一项），附不出只能报 `progress` 或 `blocked` | 绑定该 assignee 的 worker、该运行的运行凭据、发起该委派的 delegate；其他 delegate 附 `--evidence` 或 `--grant` | 2、4、6、23 |
@@ -129,8 +129,8 @@
 | | `POST /items/{id}/attach` | 把建议补到已有事项，请求体 `{to, reason?}`；依据同上 | Web 登录、delegate |
 | | `POST /proposals/batch` | 批量处理建议，见下 | Web 登录、delegate |
 | | `GET /grants` | 该凭据名下未撤销、未过期的授权单 | delegate |
-| 委派 | `GET /executors` | 执行者名录；本版另带 `harness`、`label`、`last_used_at`（尚未实现） | observer |
-| | `DELETE /executors/{id}` | 【规划中（v0.2.0）】移除名录条目，已有事项与委派记录里的 id 原样保留 | 只有 Web 登录 |
+| 委派 | `GET /executors` | 执行者名录：`id`、`kind`、`host`、`harness`、`label`、`handle`、`created_at`；带 `project` 时另带 `allowed` | observer |
+| | `DELETE /executors/{id}` | 移除名录条目，已有事项与委派记录里的 id 原样保留 | 只有 Web 登录 |
 | | `POST /delegations` | 建子事项 | worker |
 | | `POST /items/{id}/report` | 回执 | worker |
 | | `POST /items/{id}/dispatches` | 【规划中（v0.2.0）】写委派记录 `{session, resumable?, cwd?, repo?, handle?, continues?}`，返回 201 与记录 | 同回执 |
@@ -321,7 +321,7 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 {"code": "executor_not_allowed", "why": "执行者不在项目允许范围内", "next": "改选 allowed 中的执行者，或用 apa ask 交给本人", "allowed": ["work-host.cli"], "web_url": null}
 ```
 
-- `why` 与 `next` 只写机制，不含账本里的用户内容。`allowed` 是 Web 中配置的执行者 id。本版另加（尚未实现）：`allowed_match`（按机器或 harness 的匹配规则）与 `candidates`（名录里当前命中名单的执行者 id）。
+- `why` 与 `next` 只写机制，不含账本里的用户内容。`allowed` 是 Web 中配置的执行者 id。本版另加：`allowed_match`（按机器或 harness 的匹配规则）与 `candidates`（名录里当前命中名单的执行者 id）。
 - 委派记录与执行者句柄未通过校验时返回 400（退出码 2），`why` 只写键路径与规则名，不回显取值（主文档 §6.17）。
 - HTTP 状态与退出码的对应：400 → 2；401 → 3；403 → 4、20、21、22（由 `code` 区分）；404 → 5；409 → 6；其余错误 → 1。不可达时 CLI 返回 7。
 - 退出码 22 的 `code` 为 `risk_screening_pending`，`why` 说明 web_only 初筛未返回，`web_url` 给出 Web 链接（主文档 §14.4）。

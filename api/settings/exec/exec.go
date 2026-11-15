@@ -136,10 +136,12 @@ func (a *api) getAllowed(w http.ResponseWriter, r *http.Request, _ *core.Princip
 	return core.WriteJSON(w, http.StatusOK, allowedView(proj))
 }
 
-// setAllowed：请求体 {"executors": null|[...]}——null 不限制，[] 只能指派给本人（§14.7）。
+// setAllowed：请求体 {"executors": null|[...], "match": [{host?, harness?}]}——null 不限制，[] 只能指派给本人；
+// match 非空时按机器或 harness 匹配，与 id 名单任一命中即允许（§14.7）。
 func (a *api) setAllowed(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	var body struct {
 		Executors json.RawMessage `json:"executors"`
+		Match     json.RawMessage `json:"match"`
 	}
 	if err := core.DecodeJSON(r, &body); err != nil {
 		return err
@@ -148,6 +150,9 @@ func (a *api) setAllowed(w http.ResponseWriter, r *http.Request, p *core.Princip
 	in := map[string]any{"id": id}
 	if body.Executors != nil { // 缺字段不能被当成 null（不限制）；交给内核报 invalid_request
 		in["executors"] = body.Executors
+	}
+	if body.Match != nil {
+		in["match"] = body.Match
 	}
 	raw, err := json.Marshal(in)
 	if err != nil {
@@ -160,5 +165,9 @@ func (a *api) setAllowed(w http.ResponseWriter, r *http.Request, p *core.Princip
 }
 
 func allowedView(p domain.Project) map[string]any {
-	return map[string]any{"id": p.ID, "allowed_executors": p.AllowedExecutors}
+	match := p.AllowedExecutorMatch
+	if match == nil {
+		match = []domain.ExecutorMatch{}
+	}
+	return map[string]any{"id": p.ID, "allowed_executors": p.AllowedExecutors, "match": match}
 }

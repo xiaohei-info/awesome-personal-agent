@@ -76,6 +76,10 @@ type Object struct {
 	// 执行者校验点（§14.7）。ProjectInfo 为 nil 表示无项目，不校验。
 	ProjectInfo *domain.Project
 	Executor    string
+	// ExecutorHost、ExecutorHarness 是名录里该执行者登记的机器与 harness（新登记时取将要登记的值），供按维度匹配；
+	// Candidates 是名录里当前命中名单的执行者 id，只随拒绝返回。三者都由内核据账本填，不来自调用方。
+	ExecutorHost, ExecutorHarness string
+	Candidates                    []string
 
 	// ToProject 非 nil 表示命令要把对象移入该项目（空串为移出）：授权单要求来源和目标都在范围内（§14.5）。
 	ToProject *string
@@ -340,11 +344,13 @@ func checkExecutor(r Request) Decision {
 		return allow
 	}
 	pr := r.Object.ProjectInfo
-	if pr == nil || pr.ExecutorAllowed(r.Object.Executor, r.Owner) {
+	if pr == nil || pr.ExecutorAllowed(domain.ExecutorRef{ID: r.Object.Executor, Host: r.Object.ExecutorHost, Harness: r.Object.ExecutorHarness}, r.Owner) {
 		return allow
 	}
-	e := domain.NewError(domain.CodeExecutorNotAllowed, "executor is not allowed in this project", "pick an executor from the allowed list or turn the item to needs_input")
+	e := domain.NewError(domain.CodeExecutorNotAllowed, "executor is not allowed in this project", "pick one of the candidates or an allowed executor, or turn the item to needs_input")
 	e.Allowed = append([]string{}, pr.AllowedExecutors...)
+	e.AllowedMatch = append([]domain.ExecutorMatch{}, pr.AllowedExecutorMatch...)
+	e.Candidates = append([]string{}, r.Object.Candidates...)
 	return Decision{Verdict: Deny, Err: e}
 }
 

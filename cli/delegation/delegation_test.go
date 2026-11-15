@@ -192,7 +192,7 @@ type result struct {
 func (w *world) apa(token, stdin string, args ...string) result {
 	w.t.Helper()
 	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": w.ts.URL, "APA_TOKEN": token, "APA_HOME": w.t.TempDir()}
+	vars := map[string]string{"APA_URL": w.ts.URL, "APA_TOKEN": token, "APA_HOME": w.t.TempDir(), "APA_HARNESS": "cli-test"}
 	code := client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), client.Env{Getenv: func(k string) string { return vars[k] }, UserHome: w.t.TempDir(),
 		Stdin: strings.NewReader(stdin), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return result{code, out.String(), errb.String()}
@@ -308,8 +308,19 @@ func TestAllowedExecutors(t *testing.T) {
 	if p := w.get(parent); p.Phase != domain.PhaseOpen {
 		t.Fatalf("parent changed: %+v", p)
 	}
-	if r := w.apa(dlg, "", "delegate", "--parent", parent, "--assignee", "ghost.cli"); r.code != 5 {
-		t.Fatalf("unknown executor: %+v", r)
+	if r := w.apa(dlg, "", "delegate", "--parent", parent, "--assignee", "ghost.cli"); r.code != 21 {
+		t.Fatalf("unknown executor outside the list: %+v", r)
+	}
+	// --executor 随委派登记（harness 取 APA_HARNESS）；不是合法 JSON 是用法错误。
+	open := w.project(nil)
+	if r := w.apa(dlg, `{"kind":"remote-agent","host":"mbp","label":"x"}`, "delegate", "--parent", w.parent(open), "--assignee", "cli-test.x.mbp", "--executor", "-"); r.code != 0 {
+		t.Fatalf("delegate --executor: %+v", r)
+	}
+	if r := w.apa(obs, "", "executors"); r.code != 0 || !strings.Contains(r.out, `"harness":"cli-test"`) {
+		t.Fatalf("enrolled executor not listed with its harness: %+v", r)
+	}
+	if r := w.apa(dlg, "{", "delegate", "--parent", w.parent(open), "--assignee", "cli-test.y", "--executor", "-"); r.code != 2 {
+		t.Fatalf("bad --executor: %+v", r)
 	}
 	if r := w.apa(dlg, "", "delegate", "--parent", parent); r.code != 2 {
 		t.Fatalf("missing assignee: %+v", r)
@@ -335,7 +346,7 @@ func TestAllowedExecutors(t *testing.T) {
 		}
 		got[x.ID] = *x.Allowed
 	}
-	if len(got) != 2 || !got[workHost] || got[otherHost] {
+	if len(got) != 3 || !got[workHost] || got[otherHost] || got["cli-test.x.mbp"] {
 		t.Fatalf("allowed = %v", got)
 	}
 	if r := w.apa(obs, "", "executors"); r.code != 0 || strings.Contains(r.out, "allowed") || !strings.Contains(r.out, workHost) {
