@@ -81,7 +81,7 @@ function Rename({ s, onSaved }: { s: Source; onSaved: () => void }) {
     onSaved();
   };
   return (
-    <form className="inline" aria-label={t.renameLabel(s.name)} onSubmit={(e) => { e.preventDefault(); void save(); }}>
+    <form className="rename" aria-label={t.renameLabel(s.name)} onSubmit={(e) => { e.preventDefault(); void save(); }}>
       <input aria-label={t.name} value={draft} maxLength={40} autoFocus onChange={(e) => setDraft(e.target.value)} />{" "}
       <button type="submit" disabled={!draft.trim()}>{t.save}</button> <button type="button" onClick={() => setDraft(null)}>{t.cancel}</button>
       {error !== null && <ErrorNote error={error} />}
