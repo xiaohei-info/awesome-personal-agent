@@ -717,7 +717,18 @@ func TestSourceEventsListFilterAndPage(t *testing.T) {
 		t.Fatalf("page 2: %+v", p2)
 	}
 
-	for _, q := range []string{"disposition=bogus", "limit=0", "limit=501", "after=-1"} {
+	// sort=recent：从新到旧，after/next_after 是偏移。
+	var r1, r2 eventPage
+	e.do(obs, "GET", "/v1/sources/src_hook/events?sort=recent&limit=2", "").into(&r1)
+	if len(r1.Events) != 2 || r1.Events[0].Subject != "c" || r1.Events[1].Subject != "b" || r1.NextAfter != 2 {
+		t.Fatalf("recent page 1: %+v", r1)
+	}
+	e.do(obs, "GET", "/v1/sources/src_hook/events?sort=recent&limit=2&after=2", "").into(&r2)
+	if len(r2.Events) != 1 || r2.Events[0].Subject != "a" || r2.NextAfter != 0 {
+		t.Fatalf("recent page 2: %+v", r2)
+	}
+
+	for _, q := range []string{"disposition=bogus", "limit=0", "limit=501", "after=-1", "sort=oldest"} {
 		if r := e.do(obs, "GET", "/v1/sources/src_hook/events?"+q, ""); r.Code != 400 {
 			t.Errorf("%s: %d", q, r.Code)
 		}

@@ -215,10 +215,13 @@ func TestShouldSeeProposesTheEventAndCountsAsFalseDrop(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		last := es[len(es)-1].Event
-		if last.Type != EvDisposed || last.Actor.Principal != "owner" {
-			t.Fatalf("audit event %+v", last)
+		if len(es) < 2 {
+			t.Fatalf("events %+v", es)
 		}
+		if d := es[len(es)-2].Event; d.Type != EvDisposed || d.Actor.Principal != "owner" {
+			t.Fatalf("audit event %+v", d)
+		}
+		reviewedIs(t, es[len(es)-1].Event, ShouldSee, jd)
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -244,6 +247,26 @@ func TestCorrectOnlyRecordsTheVerdict(t *testing.T) {
 	}
 	if ev := e.event(evID); ev.Disposition != domain.DispositionIgnored || ev.Item != "" || e.d.calls != 0 {
 		t.Fatalf("event %+v calls %d", ev, e.d.calls)
+	}
+	// 本人的决定落在 Event 里，不只在会过期的判断记录上。
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, evID)
+		if err != nil || len(es) == 0 {
+			t.Fatalf("events %+v %v", es, err)
+		}
+		reviewedIs(t, es[len(es)-1].Event, Correct, jd)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func reviewedIs(t *testing.T, ev domain.Event, verdict, judgment string) {
+	t.Helper()
+	var p struct{ Verdict, Judgment string }
+	_ = json.Unmarshal(ev.Payload, &p)
+	if ev.Type != EvReviewed || ev.Actor.Principal != "owner" || p.Verdict != verdict || p.Judgment != judgment {
+		t.Fatalf("review event %+v payload %s", ev, ev.Payload)
 	}
 }
 

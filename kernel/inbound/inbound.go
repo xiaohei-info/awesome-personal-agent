@@ -177,7 +177,28 @@ type disposeIn struct {
 	Conditions []metrics.Condition `json:"conditions,omitempty"`
 	Alert      bool                `json:"alert,omitempty"`
 	WouldAlert bool                `json:"would_alert,omitempty"`
+	// Draft 是第 5 步起草的结果，只在初筛后进建议流的处置上有（处置载荷的 draft，§9.3）。
+	Draft *Draft `json:"draft,omitempty"`
 }
+
+// Draft 是起草的结果：Outcome 为 ok、failed 或 skipped；Code 说明没成的原因。
+type Draft struct {
+	Outcome string `json:"outcome"`
+	Code    string `json:"code,omitempty"`
+}
+
+// 起草的结果与原因（处置载荷 draft，附录 B.6）。
+const (
+	DraftOK      = "ok"
+	DraftFailed  = "failed"
+	DraftSkipped = "skipped"
+
+	DraftCodeOutbound    = "outbound"    // 外发范围不含生成端点
+	DraftCodeUnavailable = "unavailable" // 生成端点不可用
+	DraftCodeSchema      = "schema"      // 输出不合起草的格式
+	DraftCodeUnsettled   = "unsettled"   // 模型没给出结论
+	DraftCodeModel       = "model"       // 其他调用错误
+)
 
 func parseDispose(in json.RawMessage) (disposeIn, error) {
 	var v disposeIn
@@ -215,6 +236,9 @@ func (s *Service) Register(x *command.Executor) error {
 				"unjudged_reason": v.UnjudgedReason, "judgment": v.Judgment, "merged": v.Merge}
 			if len(v.Items) > 0 {
 				payload["items"] = v.Items
+			}
+			if v.Draft != nil {
+				payload["draft"] = v.Draft
 			}
 			if v.Judgment != "" { // 并入结论：记录过了保留期，apa why 仍从这里读出答案与定案者（§6.16）
 				rec, err := record.Get(c.Tx, v.Judgment)
@@ -492,6 +516,7 @@ type proposal struct {
 	plannedFor string
 	rec        *domain.Proposal
 	judgment   string // 初筛的判断记录 id
+	draft      *Draft // 起草的结果；没有起草（规则直出、手动转建议）时为空
 }
 
 func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) error {
@@ -523,7 +548,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 		exit = rules.ExitExtract
 	}
 	if id, ok := sn.made[ev.ID]; ok && exit != rules.ExitExtract { // 上一轮建好了事项却没记完处置：接着做，不再判断、不再建
-		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure", "", nil, s.resumeFields(ctx, ev))
+		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure", "", nil, s.resumeFields(ctx, ev), nil)
 	}
 	var (
 		prop    proposal
@@ -860,6 +885,7 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 	text, allowed := material(ev, o)(locality)
 	if !allowed {
 		p.reason += "; draft skipped: outbound scope excludes the generate endpoint"
+		p.draft = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}
 		return nil
 	}
 	cands := sn.candidates(ev, p.project)
@@ -885,6 +911,7 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 		var ok bool
 		if text, ok = material(ev, o)(locality); !ok {
 			p.reason += "; draft skipped: outbound scope excludes the generate endpoint"
+			p.draft = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}
 			return nil
 		}
 	}
@@ -896,16 +923,26 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 		return err
 	case err != nil:
 		p.reason += "; draft failed: " + err.Error()
+		p.draft = &Draft{Outcome: DraftFailed, Code: DraftCodeModel}
+		switch {
+		case errors.Is(err, model.ErrSchema):
+			p.draft.Code = DraftCodeSchema
+		case errors.Is(err, direct.ErrUnavailable):
+			p.draft.Code = DraftCodeUnavailable
+		}
 		return nil
 	case !out.Settled:
 		p.reason += "; draft failed: " + orElse(out.Reason, "unsettled")
+		p.draft = &Draft{Outcome: DraftFailed, Code: DraftCodeUnsettled}
 		return nil
 	}
 	var d draftOut
 	if json.Unmarshal(out.Final().Result, &d) != nil || d.Title == "" || !validKind(d.Kind) {
 		p.reason += "; draft failed: output does not fit the draft schema"
+		p.draft = &Draft{Outcome: DraftFailed, Code: DraftCodeSchema}
 		return nil
 	}
+	p.draft = &Draft{Outcome: DraftOK}
 	p.title, p.summary, p.kind = d.Title, d.Summary, domain.Kind(d.Kind)
 	if sn.hasProject(d.Project) {
 		p.project = d.Project
@@ -1141,7 +1178,7 @@ func (s *Service) propose(ctx context.Context, sn snapshot, src domain.Source, e
 	if err != nil {
 		return err
 	}
-	return s.finish(ctx, sn, m, ev, item, p.reason, p.judgment, nil, mf)
+	return s.finish(ctx, sn, m, ev, item, p.reason, p.judgment, nil, mf, p.draft)
 }
 
 // createItem 以 id 的身份为来源事件建 proposed 事项；ext.source_event 记下来源事件，供重入时找回已建事项。
@@ -1179,8 +1216,8 @@ func (s *Service) createItemKeyed(ctx context.Context, id command.Identity, rule
 }
 
 // finish 在事项建好之后按需自动接受，再记处置；对同一事件可重复执行。
-func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason, judgment string, items []string, mf mergeFields) error {
-	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason, Judgment: judgment, Items: items, mergeFields: mf}
+func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason, judgment string, items []string, mf mergeFields, draft *Draft) error {
+	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason, Judgment: judgment, Items: items, mergeFields: mf, Draft: draft}
 	if m != nil && m.rule.Accept == "auto" && !mf.Merge { // 并入已有建议：它的处置早已定过，不再替它自动接受
 		mode := sn.modes[m.key()]
 		if mode == "" {

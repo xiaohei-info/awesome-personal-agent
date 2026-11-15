@@ -701,8 +701,8 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		return err
 	}
 	bySort := q.Get("sort")
-	if bySort != "" && bySort != "score" {
-		return invalid("sort is not valid", "use sort=score, or leave it out for the order the events arrived in")
+	if bySort != "" && bySort != "score" && bySort != "recent" {
+		return invalid("sort is not valid", "use sort=score or sort=recent, or leave it out for the order the events arrived in")
 	}
 	id := r.PathValue("id")
 	var (
@@ -717,8 +717,12 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 			}
 		}
 		var err error
-		if bySort == "score" {
+		switch bySort {
+		case "score":
 			scrd, next, err = scoredPage(tx, id, ds, after, limit)
+			return err
+		case "recent": // 从新到旧，after/next_after 是偏移（同 score）
+			evs, next, err = runner.EventPageRecent(tx, id, ds, after, limit)
 			return err
 		}
 		evs, next, err = runner.EventPage(tx, id, ds, after, limit)

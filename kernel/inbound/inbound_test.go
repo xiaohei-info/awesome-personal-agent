@@ -526,6 +526,9 @@ func TestScreenedInEventIsFullyDrafted(t *testing.T) {
 				if got != record.RefOf(rec) || got.Answer == "" || got.DecidedBy == "" {
 					t.Fatalf("disposed payload %s, want %+v", x.Event.Payload, record.RefOf(rec))
 				}
+				if dr := draftOf(x.Event.Payload); dr == nil || *dr != (Draft{Outcome: DraftOK}) {
+					t.Fatalf("draft outcome %+v", dr)
+				}
 				return nil
 			}
 		}
@@ -604,6 +607,14 @@ func TestDraftFailureDegradesToEventTitle(t *testing.T) {
 						}
 						if name == "fenced" && !strings.Contains(x.Event.Reason, model.ShapeFence) {
 							t.Fatalf("disposed reason lacks the content shape: %q", x.Event.Reason)
+						}
+						// 起草成败另有结构化字段，不必解析理由（§9.3）。
+						want := DraftCodeSchema
+						if reply.Status != 0 {
+							want = DraftCodeUnavailable
+						}
+						if dr := draftOf(x.Event.Payload); dr == nil || dr.Outcome != DraftFailed || dr.Code != want {
+							t.Fatalf("draft outcome %+v, want failed/%s", dr, want)
 						}
 						return nil
 					}
@@ -1113,4 +1124,12 @@ func TestDraftProposalIsIdempotentAndLeavesDispositionAlone(t *testing.T) {
 	if again, err := e.svc.DraftProposal(bg, owner, id); err != nil || again != first || len(e.allItems()) != n {
 		t.Fatalf("retry: %q %v items %d→%d", again, err, n, len(e.allItems()))
 	}
+}
+
+func draftOf(payload json.RawMessage) *Draft {
+	var p struct {
+		Draft *Draft `json:"draft"`
+	}
+	_ = json.Unmarshal(payload, &p)
+	return p.Draft
 }

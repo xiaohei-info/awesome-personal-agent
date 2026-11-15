@@ -4,7 +4,8 @@
 //   - 抽检池只含初筛定案为忽略（use=inbound_screen、answer=no、非影子、非把握低）、事件仍是 ignored、还没有结论的判断记录；
 //     建议、规则忽略、其他用途的判断都不进池。池只读，CLI 与 API 列出的是同一批。
 //   - "该看"：事件转为 proposed 事项（建议流可见），判断记录记 should_see 与抽检时间，这次判断计为误丢。
-//   - "确实不用"：只在判断记录上记 correct 与抽检时间，事件仍是 ignored，不产生建议。
+//   - "确实不用"：判断记录记 correct 与抽检时间，事件仍是 ignored，不产生建议。
+//   - 两种结论都记一条 inbound.spot_reviewed（对象是来源事件）：本人的决定落在 Event 里，不随判断记录过期。
 //   - 有简报实例时每份简报带 Policy.Judgment.SpotCheck.PerBrief 条抽检条目（Entries）；条目只带 id 与 Web 入口，结论仍只能在 Web 提交。
 //
 // 结论是策略类变更，命令按 change_settings 授权，只有 Web 本人会话通过（§14.8）。事项的起草由入站模块完成（Proposer），
@@ -40,6 +41,10 @@ const CmdReview = "judgment.review"
 
 // EvDisposed 是入站处置的审计事件类型（与 kernel/inbound 同值；本包不依赖入站包，由装配处的测试守住一致）。
 const EvDisposed = "inbound.disposed"
+
+// EvReviewed 是本人的抽检结论（§8.10）：对象是来源事件，载荷 {verdict, judgment}。两种结论都记；
+// "该看"另有原来的 inbound.disposed（转为建议），这条只记本人的决定。
+const EvReviewed = "inbound.spot_reviewed"
 
 // Window 是"最近一个周期"：判断时刻在此之内的初筛忽略才进池。
 // shortcut: 固定 7 天，不随简报实例的周期变；实例周期差别大时再按实例参数取。
@@ -195,6 +200,10 @@ func Register(x *command.Executor) error {
 				if _, err := c.Emit(domain.Event{Type: EvDisposed, Object: r.Subject, Reason: "spot-check: the owner says this ignored event should have been seen", Payload: p}); err != nil {
 					return nil, err
 				}
+			}
+			p, _ := json.Marshal(map[string]any{"verdict": v.Result, "judgment": r.ID})
+			if _, err := c.Emit(domain.Event{Type: EvReviewed, Object: r.Subject, Reason: "spot-check: " + v.Result, Payload: p}); err != nil {
+				return nil, err
 			}
 			return nil, record.SetReview(c.Tx, r.ID, v.Result, now)
 		}})
