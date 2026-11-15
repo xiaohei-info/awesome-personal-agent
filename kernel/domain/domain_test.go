@@ -105,6 +105,7 @@ func TestLedgerErrorContractMapping(t *testing.T) {
 		{CodePermissionDenied, 403, 4},
 		{CodeNotFound, 404, 5},
 		{CodeConflict, 409, 6},
+		{CodeInstanceDriven, 409, 6},
 		{CodeWebOnly, 403, 20},
 		{CodeExecutorNotAllowed, 403, 21},
 		{CodeRiskScreeningPending, 403, 22},

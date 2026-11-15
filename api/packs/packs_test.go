@@ -36,6 +36,13 @@ instance_params:
   additionalProperties: false
   properties:
     schedule: {type: string}
+clock_rules:
+  - id: scheduled
+    type: recur
+    schedule: "{instance.schedule}"
+    do:
+      - action: add_tag
+        tag: tick
 event_rules:
   - id: tag-hit
     mode: observe
@@ -83,7 +90,7 @@ func setup(t *testing.T) *env {
 	x := command.New(st, nil)
 	kinds := items.NewKinds()
 	for _, f := range []func(*command.Executor) error{
-		projects.Register, rules.Register,
+		projects.Register, func(x *command.Executor) error { return rules.RegisterWith(x, ld) },
 		func(x *command.Executor) error { return instances.Register(x, ld) },
 		func(x *command.Executor) error { return items.Register(x, kinds) },
 	} {
@@ -283,12 +290,39 @@ func TestInstanceWritesNeedDelegate(t *testing.T) {
 	}
 }
 
+func ruleOf(l []rules.State, key string) rules.State {
+	for _, r := range l {
+		if r.Key == key {
+			return r
+		}
+	}
+	return rules.State{}
+}
+
+// 实例驱动的时钟规则不看模式：读接口标 instance_driven，改模式 409 instance_driven，已存模式不变、不留 mode_changed。
+func TestInstanceDrivenRuleModeIsRejected(t *testing.T) {
+	e := setup(t)
+	const key = "brief/clock_rules/scheduled"
+	r := ruleOf(decode[struct{ Rules []rules.State }](t, e.do("GET", "/v1/rules", "", e.bearer(auth.Observer))).Rules, key)
+	if !r.InstanceDriven {
+		t.Fatalf("instance_driven missing: %+v", r)
+	}
+	rec := e.do("PATCH", "/v1/rules/"+url.PathEscape(key)+"/mode", `{"mode":"auto"}`, e.web)
+	if got := decode[domain.Error](t, rec); rec.Code != 409 || got.Code != domain.CodeInstanceDriven {
+		t.Fatalf("switch: %d %s", rec.Code, rec.Body)
+	}
+	after := ruleOf(decode[struct{ Rules []rules.State }](t, e.do("GET", "/v1/rules", "", e.bearer(auth.Observer))).Rules, key)
+	if after.Mode != r.Mode || len(e.events(domain.EvRuleModeChanged)) != 0 {
+		t.Fatalf("mode changed: %+v", after)
+	}
+}
+
 // flow-rule-modes：规则状态可读；Web 会话切模式并记 rule.mode_changed。
 func TestWebSessionSwitchesRuleModeAndRecordsEvent(t *testing.T) {
 	e := setup(t)
 	rec := e.do("GET", "/v1/rules", "", e.bearer(auth.Observer))
 	list := decode[struct{ Rules []rules.State }](t, rec)
-	if len(list.Rules) != 1 || list.Rules[0].Key != ruleKey || list.Rules[0].Mode != rules.ModeObserve || list.Rules[0].Class != rules.ClassAction {
+	if r := ruleOf(list.Rules, ruleKey); len(list.Rules) != 2 || r.Mode != rules.ModeObserve || r.Class != rules.ClassAction || r.InstanceDriven {
 		t.Fatalf("rules = %+v (%s)", list.Rules, rec.Body)
 	}
 
@@ -300,7 +334,7 @@ func TestWebSessionSwitchesRuleModeAndRecordsEvent(t *testing.T) {
 		t.Fatalf("state = %+v", st)
 	}
 	again := decode[struct{ Rules []rules.State }](t, e.do("GET", "/v1/rules", "", e.bearer(auth.Observer)))
-	if again.Rules[0].Mode != rules.ModeAuto {
+	if ruleOf(again.Rules, ruleKey).Mode != rules.ModeAuto {
 		t.Fatalf("mode not persisted: %+v", again.Rules)
 	}
 	evs := e.events(domain.EvRuleModeChanged)
@@ -324,7 +358,7 @@ func TestNoTokenCanSwitchRuleMode(t *testing.T) {
 		t.Fatalf("anonymous: %d", rec.Code)
 	}
 	cur := decode[struct{ Rules []rules.State }](t, e.do("GET", "/v1/rules", "", e.bearer(auth.Observer)))
-	if cur.Rules[0].Mode != rules.ModeObserve {
+	if ruleOf(cur.Rules, ruleKey).Mode != rules.ModeObserve {
 		t.Fatalf("mode changed by token: %+v", cur.Rules)
 	}
 	if n := len(e.events(domain.EvRuleModeChanged)); n != 0 {

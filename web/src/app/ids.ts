@@ -40,7 +40,7 @@ export const SESSION_KIND = ["direct", "group", "unknown"] as const;
 /** 错误码：kernel/domain/errors.go Code。models_paused 由「暂停模型」改动新增 */
 export const ERROR_CODE = [
   "invalid_request", "unauthenticated", "permission_denied", "web_only", "executor_not_allowed", "risk_screening_pending",
-  "basis_required", "session_not_direct", "not_found", "conflict", "login_locked", "internal", "models_paused",
+  "basis_required", "session_not_direct", "not_found", "conflict", "login_locked", "internal", "models_paused", "instance_driven",
 ] as const;
 /** 错误码里只说了类别、要靠服务端 why 才说得清的：显示「类别：why」 */
 export const GENERIC_ERROR: readonly string[] = ["invalid_request", "conflict", "internal"];

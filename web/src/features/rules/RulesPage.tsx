@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { locale, useLang, useT } from "../../app/i18n";
@@ -11,7 +12,7 @@ import { strings } from "./strings";
 
 // 形状对应 GET /v1/rules（含 class）、PATCH /v1/rules/{id}/mode（附录 B.2）、GET /v1/packs 与 GET /v1/audit/events（§14.8）。
 // 谁能切、切到什么、观察记录怎么产生都由服务端判定；本页只搬运选择，被拒绝时模式保持原值。只改模式，不编辑规则内容。
-interface Rule { key: string; pack: string; group: string; id: string; mode: string; class?: "reminder" | "action" }
+interface Rule { key: string; pack: string; group: string; id: string; mode: string; class?: "reminder" | "action"; instance_driven?: boolean }
 interface Pack { name: string; description?: string }
 interface Observed { seq: number; object: string; at: string; reason?: string; payload?: { would_do?: unknown } }
 
@@ -79,6 +80,7 @@ export function RulesPage() {
   const t = useT(strings);
   const [rules, setRules] = useState<Rule[] | null>(null);
   const [packs, setPacks] = useState<Pack[]>([]);
+  const [scheduled, setScheduled] = useState<Record<string, number> | null>(null); // 包 → 已安排（启用）的实例数；读不到时不显示数量
   const [error, setError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
@@ -93,6 +95,14 @@ export function RulesPage() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { api.get<{ packs: Pack[] }>("/packs").then((r) => setPacks(r.packs), () => setPacks([])); }, [api]);
 
+  useEffect(() => {
+    api.get<{ instances: { pack: string; enabled: boolean }[] }>("/instances").then((r) => {
+      const n: Record<string, number> = {};
+      for (const i of r.instances) if (i.enabled) n[i.pack] = (n[i.pack] ?? 0) + 1;
+      setScheduled(n);
+    }, () => setScheduled(null));
+  }, [api]);
+
   async function setMode(r: Rule, mode: string) {
     try {
       const next = await api.patch<Rule>(`/rules/${encodeURIComponent(r.key)}/mode`, { mode });
@@ -104,8 +114,10 @@ export function RulesPage() {
   }
   // 规则名：词表按「包/规则 id」查；查不到时用包的说明。
   const nameOf = (r: Rule) => entryOf(lang, "rule", `${r.pack}/${r.id}`)?.label ?? packs.find((p) => p.name === r.pack)?.description ?? r.id;
-  const groups = (["reminder", "action", "other"] as const)
-    .map((g) => ({ g, list: (rules ?? []).filter((r) => (r.class ?? "other") === g) }))
+  // 由安排驱动的规则不看模式，单列一组放在最后，只读。
+  const groupOf = (r: Rule) => (r.instance_driven ? "scheduled" : r.class ?? "other");
+  const groups = (["reminder", "action", "other", "scheduled"] as const)
+    .map((g) => ({ g, list: (rules ?? []).filter((r) => groupOf(r) === g) }))
     .filter((x) => x.list.length);
 
   return (
@@ -128,14 +140,18 @@ export function RulesPage() {
                       {entryOf(lang, "ruleGroup", r.group)?.label ?? r.group}
                       {raw && <code className="raw-id">{r.key}</code>}
                     </p>
-                    {r.mode === "observe" && <Trial rule={r} name={name} />}
+                    {r.mode === "observe" && !r.instance_driven && <Trial rule={r} name={name} />}
                   </div>
-                  <Modes id={r.key} name={name} value={r.mode} onChange={(m) => void setMode(r, m)} />
+                  {r.instance_driven ? (
+                    <p className="sub">{t.driven(scheduled?.[r.pack] ?? (scheduled ? 0 : null))} <Link to="/briefs">{t.arrange}</Link></p>
+                  ) : (
+                    <Modes id={r.key} name={name} value={r.mode} onChange={(m) => void setMode(r, m)} />
+                  )}
                 </li>
               );
             })}
           </ul>
-          {g !== "reminder" && <p className="sub">{t.hint}</p>}
+          {(g === "action" || g === "other") && <p className="sub">{t.hint}</p>}
         </section>
       ))}
     </main>
