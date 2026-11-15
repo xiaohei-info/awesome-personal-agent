@@ -82,10 +82,11 @@ func TestAnswerByButtonAndByReplyIsForwarded(t *testing.T) {
 
 	_, _, as := f.snapshot()
 	ref := "4242:" + strconv.Itoa(msg.ID)
+	// owner 有用户名 "owner"，转达的回答人仍是数字用户 ID（§14.6）
 	want := []answerCall{
-		{ID: "decision:item-1:3", Ref: ref, Sender: "owner", Choice: "release"},
-		{ID: "decision:item-1:3", Ref: ref, Sender: "owner", Choice: "main"},
-		{ID: "decision:item-1:3", Ref: ref, Sender: "owner", Text: "同意"},
+		{ID: "decision:item-1:3", Ref: ref, Sender: "7", Choice: "release"},
+		{ID: "decision:item-1:3", Ref: ref, Sender: "7", Choice: "main"},
+		{ID: "decision:item-1:3", Ref: ref, Sender: "7", Text: "同意"},
 	}
 	got := map[answerCall]bool{}
 	for _, a := range as {

@@ -17,7 +17,7 @@ TG_BOT=<Bot token> TG_CHAT=<本人会话 id> apa ext run telegram
 | `APA_WEB_URL` | 内核给相对 Web 链接时的前缀，缺省 `APA_URL` |
 | `APA_EXT_STATE` | 发送记录文件，缺省 `$XDG_STATE_HOME/apa/ext-telegram.json` |
 
-本人的 harness 也连着 Telegram 时，`TG_BOT` 要用另一个 Bot：同一个 Bot 不能同时有多个长轮询消费者。回答人白名单（Telegram 用户名，没有用户名时是数字 id）在 Web 设置，由内核校验。
+本人的 harness 也连着 Telegram 时，`TG_BOT` 要用另一个 Bot：同一个 Bot 不能同时有多个长轮询消费者。谁能在 Telegram 里替你回答，在 Web 的“设置 › 渠道”里设置，由内核校验：填 Telegram 分配的数字用户 ID，不填用户名（用户名可改，也可能被别人重新注册）。旧版本按用户名填的条目不再生效，要改填数字 ID；自动识别 ID 的流程在后续版本提供。
 
 ## 行为
 

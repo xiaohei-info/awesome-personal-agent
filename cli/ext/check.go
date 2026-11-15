@@ -33,7 +33,7 @@ import (
 //	            送达后调 POST /v1/deliveries/{id}/answer，带 ack 时的 ref、sender、choice
 const (
 	AnswerTitle = "apa-ext-check:answer"
-	SimSender   = "check-user"
+	SimSender   = "4242" // 平台用户 ID 的形态：渠道 ext 以平台分配的 ID 认回答人（§14.6）
 	leaseTime   = 3 * time.Second
 	maxWait     = 2 * time.Second // 模拟内核的长轮询上限
 )
