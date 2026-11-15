@@ -82,7 +82,7 @@ function useLines(): (s: Signal, paused: boolean, days?: number) => Line[] {
       case "rule_fallbacks":
         return [{ text: t.fallbacks(s.count), to: "/rules", go: "rules" }];
       case "receipt_failures":
-        return [{ text: t.receipts(s.count), to: "/audit", go: "audit" }, { text: "", to: "/settings/access", go: "access" }];
+        return [{ text: t.receipts(s.count), to: "/audit", go: "audit" }, { text: "", to: "/settings/agents", go: "access" }];
       case "other_alerts":
         return [{ text: t.others(s.count), to: "/audit", go: "audit" }];
       case "stalled_delegations":

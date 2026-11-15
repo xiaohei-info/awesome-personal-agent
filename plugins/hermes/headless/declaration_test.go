@@ -22,9 +22,13 @@ func TestDeclarationIsAcceptedByKernel(t *testing.T) {
 		t.Fatalf("unexpected declaration: %+v", d)
 	}
 	for _, tier := range []string{"read", "edit", "full"} {
-		if h.Access[tier] == nil {
-			t.Errorf("tier %s missing", tier)
+		if h.Access[tier] == nil || len(h.Tools[tier]) == 0 {
+			t.Errorf("tier %s missing flags or tools", tier)
 		}
+	}
+	// The tool list shown to the owner must match the -t toolsets: edit/full grant a terminal.
+	if d.Name == nil || d.Name.Zh != "Hermes" || len(h.Tools["edit"]) != 5 || h.Tools["edit"][3].Zh != "终端" || h.ToolNotes["full"].Zh == "" {
+		t.Fatalf("name/tools for the Agent card: %+v %+v %+v", d.Name, h.Tools, h.ToolNotes)
 	}
 	// Hermes exits 1 on every failure; only the measured "No session found" text marks a lost session.
 	lost := map[string]struct {

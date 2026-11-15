@@ -51,7 +51,7 @@ function Row({ e }: { e: AuditEvent }) {
     <li>
       <span>
         <ActorBadge actor={e.actor} /> <Val k="event" id={e.type} /> {what} · {new Date(e.at).toLocaleString(locale())}
-        {e.grant ? <> · <Link to={"/settings/grants#" + e.grant}>{t.byGrant}</Link></> : null}
+        {e.grant ? <> · <Link to={"/settings/agents#grant-" + encodeURIComponent(e.grant)}>{t.byGrant}</Link></> : null}
         {e.redacted || e.tombstone ? ` · ${t.hidden}` : ""}
       </span>
       {raw && <code className="raw-id">{[`#${e.seq}`, e.type, e.object, e.reason, e.grant].filter(Boolean).join(" · ")}</code>}

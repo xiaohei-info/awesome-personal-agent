@@ -1,5 +1,6 @@
 {
   "harness": "hermes",
+  "name": {"zh": "Hermes", "en": "Hermes"},
   "headless": {
     "command": ["hermes", "chat", "--oneshot", "-q", "{prompt}"],
     "output": ["--format", "stream-json"],
@@ -10,6 +11,12 @@
       "edit": ["-t", "apa,web,file,terminal,delegation"],
       "full": ["--yolo", "-t", "apa,web,file,terminal,delegation"]
     },
+    "tools": {
+      "read": [{"zh": "APA", "en": "APA"}, {"zh": "网页", "en": "Web"}],
+      "edit": [{"zh": "APA", "en": "APA"}, {"zh": "网页", "en": "Web"}, {"zh": "文件", "en": "Files"}, {"zh": "终端", "en": "Terminal"}, {"zh": "委派", "en": "Delegation"}],
+      "full": [{"zh": "APA", "en": "APA"}, {"zh": "网页", "en": "Web"}, {"zh": "文件", "en": "Files"}, {"zh": "终端", "en": "Terminal"}, {"zh": "委派", "en": "Delegation"}]
+    },
+    "tool_notes": {"full": {"zh": "不再逐项问你", "en": "Stops asking you each time"}},
     "credential": "env",
     "exit_codes": {"ok": [0], "session_missing": [1]},
     "exit_output": {"session_missing": ["No session found matching"]}

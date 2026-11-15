@@ -8,13 +8,14 @@ import { PageHead } from "../../app/page";
 import { locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { Val, useLabel } from "../../app/values";
+import { useAgentName } from "../settings-agents/SettingsAgentsPage";
 
 // 形状对应 GET /v1/audit/events 返回的 Step。哪些能撤销、是否最新、授权都由服务端的 item.revert 判定。
 interface Step {
   seq: number;
   type: string;
   object: string;
-  actor: { type: string; principal: string; via: string; on_behalf_of?: string };
+  actor: { type: string; principal: string; via: string; on_behalf_of?: string; harness?: string };
   at: string;
   reason?: string;
   evidence?: string;
@@ -35,7 +36,10 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
   const [asking, setAsking] = useState(false);
   const credential = useNames("credential");
   const raw = useRaw();
+  const agentName = useAgentName();
   const title = s.payload?.item?.title;
+  // Agent 后台运行凭授权单替本人做的事：直说是后台运行替你做的，并指向那张授权（§14.5）。
+  const byRun = s.actor.principal.startsWith("run:") && !!s.grant;
   // 操作者显示凭据的标签而不是 id；临时授权给出链接，id 只在「显示原始值」里。
   const who = [credential(s.actor.principal), s.actor.on_behalf_of && t.onBehalfOf(s.actor.on_behalf_of), s.resolved_via === "chat" && t.viaChat].filter(Boolean).join(" · ");
   const canRevert = REVERTIBLE.has(s.type) && !reverted;
@@ -47,6 +51,8 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
       <h3>
         {draftFailed ? (
           t.draftFailed
+        ) : byRun ? (
+          t.runDid(label("event", s.type), title ?? s.object)
         ) : (
           <>
             <Val k="event" id={s.type} />
@@ -56,11 +62,11 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
         )}
       </h3>
       <p className="meta">
-        {draftFailed ? t.byApa : who}
+        {draftFailed ? t.byApa : byRun ? "" : who}
         {s.grant && (
           <>
-            {" · "}
-            <Link to={"/settings/grants#" + encodeURIComponent(s.grant)}>{t.viaGrant}</Link>
+            {byRun ? "" : " · "}
+            <Link to={"/settings/agents#grant-" + encodeURIComponent(s.grant)}>{byRun ? t.viaAgentGrant(agentName(s.actor.harness)) : t.viaGrant}</Link>
             {raw && <code className="raw-id">{s.grant}</code>}
           </>
         )}
