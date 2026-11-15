@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -156,6 +158,7 @@ func (e *env) input() Input {
 
 func find(t *testing.T, r kdoctor.Report, name string) kdoctor.Check {
 	t.Helper()
+	requireCodes(t, r)
 	for _, c := range r.Checks {
 		if c.Name == name {
 			return c
@@ -163,6 +166,47 @@ func find(t *testing.T, r kdoctor.Report, name string) kdoctor.Check {
 	}
 	t.Fatalf("no check %s in %+v", name, r)
 	return kdoctor.Check{}
+}
+
+var declaredCodes = func() map[string]bool {
+	src, err := os.ReadFile("../../kernel/doctor/codes.go")
+	if err != nil {
+		panic(err)
+	}
+	known := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?m)^\s*Code\w+\s*=\s*"([^"]+)"`).FindAllStringSubmatch(string(src), -1) {
+		known[m[1]] = true
+	}
+	return known
+}()
+
+// requireCodes：九项检查（kdoctor.Order）的每项、每个对象、每处问题都带 kernel/doctor/codes.go 里声明的机器码（Web 按它显示中文）。
+// 升级预检（--upgrade-check）的专用项只在 CLI 出现，不在此列。
+func requireCodes(t *testing.T, r kdoctor.Report) {
+	t.Helper()
+	for _, c := range r.Checks {
+		if !slices.Contains(kdoctor.Order, c.Name) {
+			continue
+		}
+		if !declaredCodes[c.Code] {
+			t.Errorf("%s: undeclared code %q", c.Name, c.Code)
+		}
+		for _, d := range c.Details {
+			codes := []string{d.Code}
+			if ps, ok := d.Data["problems"].([]any); ok { // 经 JSON 往返
+				for _, p := range ps {
+					codes = append(codes, fmt.Sprint(p))
+				}
+			} else if ps, ok := d.Data["problems"].([]string); ok {
+				codes = append(codes, ps...)
+			}
+			for _, code := range codes {
+				if !declaredCodes[code] {
+					t.Errorf("%s/%s: undeclared code %q", c.Name, d.Subject, code)
+				}
+			}
+		}
+	}
 }
 
 // healthy 备好一个除"最近一次备份"外一切正常的实例：两个端点接替身、已确认的宿主声明、已选范围的来源。
@@ -309,10 +353,10 @@ func TestDoctorOlderLedgerWarnsAndSkips(t *testing.T) {
 	must(t, os.Chmod(home, 0o700))
 	r := Run(bg, Input{Home: home, Reg: fullRegFor(t), Model: &model.Client{}, Now: now})
 	c := find(t, r, kdoctor.DataDir)
-	if c.Status != kdoctor.Warning || !strings.Contains(c.Why, "migrates when apa serve starts") {
+	if c.Status != kdoctor.Warning || c.Code != kdoctor.CodeLedgerMigrate || !strings.Contains(c.Why, "migrates when apa serve starts") {
 		t.Fatalf("%+v", c)
 	}
-	if find(t, r, kdoctor.Sources).Status != kdoctor.Warning || !r.OK {
+	if s := find(t, r, kdoctor.Sources); s.Status != kdoctor.Warning || s.Code != kdoctor.CodeSkipped || s.Data["reason"] != kdoctor.CodeLedgerSchemaDiffers || !r.OK {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -422,17 +466,17 @@ func TestDoctorSourcesMissingCommandToolVersionUnsetAndFullText(t *testing.T) {
 		}
 	}
 	// 工具未安装、认证问题、超时之外的退出：分类各不同。
-	for stderr, sub := range map[string]string{"未找到 himalaya，请先安装": "not installed", "himalaya 认证失败": "authentication"} {
+	for stderr, want := range map[string][2]string{"未找到 himalaya，请先安装": {"not installed", kdoctor.CodeSourceToolMissing}, "himalaya 认证失败": {"authentication", kdoctor.CodeSourceToolConfig}} {
 		tool := e.script("t2", fmt.Sprintf("echo %q >&2; exit 2", stderr))
-		problem, _ := probeOne(bg, e.input(), domain.Source{ID: "x", Command: tool})
-		if !strings.Contains(problem, sub) {
-			t.Errorf("%s: %q", stderr, problem)
+		code, problem, _ := probeOne(bg, e.input(), domain.Source{ID: "x", Command: tool})
+		if !strings.Contains(problem, want[0]) || code != want[1] {
+			t.Errorf("%s: %s %q", stderr, code, problem)
 		}
 	}
-	if p, _ := probeOne(bg, e.input(), domain.Source{ID: "x", Command: e.script("t3", "exit 1")}); !strings.Contains(p, "temporarily") {
+	if _, p, _ := probeOne(bg, e.input(), domain.Source{ID: "x", Command: e.script("t3", "exit 1")}); !strings.Contains(p, "temporarily") {
 		t.Errorf("temporary: %q", p)
 	}
-	if p, _ := probeOne(bg, e.input(), domain.Source{ID: "x", Command: e.script("t4", "exit 0")}); p != "" {
+	if _, p, _ := probeOne(bg, e.input(), domain.Source{ID: "x", Command: e.script("t4", "exit 0")}); p != "" {
 		t.Errorf("ok adapter: %q", p)
 	}
 }
@@ -477,7 +521,7 @@ func TestDoctorHostPluginAndOverlaps(t *testing.T) {
 	r := Run(bg, e.input())
 	hp := find(t, r, kdoctor.HostPlugin)
 	d := hp.Details[0]
-	if hp.Status != kdoctor.OK || d.Data["plugin_version"] != "0.1.0" || d.Data["last_call_at"] != "2026-11-12T09:59:00Z" {
+	if hp.Status != kdoctor.OK || hp.Code != kdoctor.CodeHostOK || d.Code != kdoctor.CodeHostReady || d.Data["plugin_version"] != "0.1.0" || d.Data["last_call_at"] != "2026-11-12T09:59:00Z" {
 		t.Fatalf("healthy: %+v", hp)
 	}
 	if ov := find(t, r, kdoctor.Overlaps); ov.Status != kdoctor.OK || len(ov.Details) != 0 {
@@ -487,7 +531,7 @@ func TestDoctorHostPluginAndOverlaps(t *testing.T) {
 	in := e.input()
 	in.Env = append(os.Environ(), "DOCTOR_CASE=no-session-kind")
 	hp = find(t, Run(bg, in), kdoctor.HostPlugin)
-	if hp.Status != kdoctor.Warning || !strings.Contains(hp.Details[0].Why, "does not report the session type") ||
+	if hp.Status != kdoctor.Warning || hp.Details[0].Code != kdoctor.CodeHostNoSessionKind || !strings.Contains(hp.Details[0].Why, "does not report the session type") ||
 		!strings.Contains(hp.Details[0].Why, "exit 23") || !strings.Contains(hp.Details[0].Next, "upgrade the plugin") || hp.Details[0].Data["plugin_version"] != "0.1.0" {
 		t.Fatalf("no session kind: %+v", hp)
 	}
@@ -496,7 +540,7 @@ func TestDoctorHostPluginAndOverlaps(t *testing.T) {
 	before := tree(t, dir)
 	in.Env = append(os.Environ(), "DOCTOR_CASE=overlaps")
 	ov := find(t, Run(bg, in), kdoctor.Overlaps)
-	if ov.Status != kdoctor.Warning || len(ov.Details) != 2 || !strings.Contains(ov.Details[0].Subject+ov.Details[1].Subject, "other-todo-hook") ||
+	if ov.Status != kdoctor.Warning || ov.Code != kdoctor.CodeOverlapsFound || len(ov.Details) != 2 || ov.Details[0].Code != kdoctor.CodeOverlap || !strings.Contains(ov.Details[0].Subject+ov.Details[1].Subject, "other-todo-hook") ||
 		!strings.Contains(ov.Details[0].Subject+ov.Details[1].Subject, "daily-standup") {
 		t.Fatalf("overlaps: %+v", ov)
 	}
@@ -510,7 +554,7 @@ func TestDoctorHostPluginAndOverlaps(t *testing.T) {
 	e2.declare(executors.Declaration{Harness: "slow", Selfcheck: &executors.Selfcheck{Command: []string{e2.script("junk", "echo not-json")}}, Executors: nil})
 	e2.seal()
 	hp = find(t, Run(bg, e2.input()), kdoctor.HostPlugin)
-	if hp.Status != kdoctor.Error || !strings.Contains(hp.Details[0].Why, "not executable") || !strings.Contains(hp.Details[0].Why, "selfcheck failed") {
+	if hp.Status != kdoctor.Error || fmt.Sprint(hp.Details[0].Data["problems"]) != "[host_headless_missing host_selfcheck_failed]" || !strings.Contains(hp.Details[0].Why, "not executable") || !strings.Contains(hp.Details[0].Why, "selfcheck failed") {
 		t.Fatalf("gone: %+v", hp)
 	}
 	if !strings.Contains(hp.Details[1].Why, "not the JSON") {
@@ -522,10 +566,10 @@ func TestDoctorHostPluginAndOverlaps(t *testing.T) {
 		Access: map[string][]string{"read": nil}}})
 	e3.seal()
 	r3 := Run(bg, e3.input())
-	if ov := find(t, r3, kdoctor.Overlaps); ov.Status != kdoctor.OK || !strings.Contains(ov.Why, "skipped") || !r3.OK {
+	if ov := find(t, r3, kdoctor.Overlaps); ov.Status != kdoctor.OK || ov.Code != kdoctor.CodeOverlapsSkipped || !strings.Contains(ov.Why, "skipped") || !r3.OK {
 		t.Fatalf("skipped: %+v", ov)
 	}
-	if hp := find(t, Run(bg, newEnv(t).sealed()), kdoctor.HostPlugin); hp.Status != kdoctor.OK {
+	if hp := find(t, Run(bg, newEnv(t).sealed()), kdoctor.HostPlugin); hp.Status != kdoctor.OK || hp.Code != kdoctor.CodeHostNone {
 		t.Fatalf("no host: %+v", hp)
 	}
 }
@@ -621,7 +665,7 @@ func TestDoctorFlagsSecretsMissingAfterNoSecretsRestore(t *testing.T) {
 	c := run()
 	cred, ok1 := c.Find("doc-ok")
 	key, ok2 := c.Find("hook1")
-	if c.Status != kdoctor.Warning || !ok1 || !ok2 || !strings.Contains(cred.Why, "credentials are missing") || !strings.Contains(key.Next, "rotate") {
+	if c.Status != kdoctor.Warning || c.Code != kdoctor.CodeSourcesAttention || cred.Code != kdoctor.CodeSourceCredsMissing || key.Code != kdoctor.CodeSourceWebhookKeyMissing || !ok1 || !ok2 || !strings.Contains(cred.Why, "credentials are missing") || !strings.Contains(key.Next, "rotate") {
 		t.Fatalf("sources check: %+v", c)
 	}
 	e.writeFile("sources/doc-ok/cred", "x")

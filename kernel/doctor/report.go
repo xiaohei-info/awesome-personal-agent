@@ -35,8 +35,8 @@ var Order = []string{DataDir, Config, Tier, ModelEndpoint, Sources, Packs, HostP
 type Detail struct {
 	Subject string `json:"subject"`
 	Status  Status `json:"status"`
-	// Code 是结论的稳定机器码（目前只有模型端点探测给出），Web 据此显示本地化说明；Why、Next 仍是机制性英文。
-	Code string         `json:"code,omitempty"`
+	// Code 是结论的稳定机器码（codes.go），可变参数在 Data；Web 据此显示本地化说明，Why、Next 是机制性英文。
+	Code string         `json:"code"`
 	Why  string         `json:"why"`
 	Next string         `json:"next,omitempty"`
 	Data map[string]any `json:"data,omitempty"`
@@ -46,6 +46,7 @@ type Detail struct {
 type Check struct {
 	Name    string         `json:"name"`
 	Status  Status         `json:"status"`
+	Code    string         `json:"code"` // 稳定机器码（codes.go），可变参数在 Data
 	Why     string         `json:"why"`
 	Next    string         `json:"next"`
 	Details []Detail       `json:"details,omitempty"`
@@ -80,6 +81,21 @@ func Worst(a, b Status) Status {
 func (c *Check) Add(d Detail) {
 	c.Details = append(c.Details, d)
 	c.Status = Worst(c.Status, d.Status)
+}
+
+// AddProblems 追加问题的机器码：Code 是第一处问题，Data["problems"] 按顺序列出全部。
+func (d *Detail) AddProblems(codes ...string) {
+	if len(codes) == 0 {
+		return
+	}
+	if d.Data == nil {
+		d.Data = map[string]any{}
+	}
+	ps, _ := d.Data["problems"].([]string)
+	if len(ps) == 0 {
+		d.Code = codes[0]
+	}
+	d.Data["problems"] = append(ps, codes...)
 }
 
 // Find 返回名为 subject 的对象结论。

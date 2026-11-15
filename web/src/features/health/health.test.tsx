@@ -14,13 +14,32 @@ const ORDER = ["source_failures", "outcall", "delivery_backlog", "chain_trips", 
 const TITLES = ["来源读取失败", "后台任务排队或超时", "提醒发不出去", "自动化连锁被叫停", "仓库规范和 APA 不一致", "能力包加载失败", "模型连不上",
   "积压待处理", "自动规则被退回试运行", "agent 回报失败", "其他告警", "委派久无回音", "定时器迟到"];
 
-const DOCTOR = {
+// 形状与取值同 kernel/doctor（codes.go）：全部正常的一份与有问题的一份。
+const FINE = {
   ok: true,
   checks: [
-    { name: "tier", status: "ok", why: "tier 3 (kernel + model endpoint + host)", next: "nothing to do" },
-    { name: "sources", status: "warning", why: "some sources need attention; see details", next: "choose the outbound scope", details: [{ subject: "src_unset", status: "warning", why: "the external outbound scope is not chosen" }] },
+    { name: "tier", status: "ok", code: "tier_kernel_only", why: "tier 1 (kernel only): no generate endpoint is configured; this is a complete mode, not an error", next: "to reach tier 2, configure the generate endpoint", data: { tier: 1 } },
+    { name: "model_endpoint", status: "ok", code: "models_none", why: "no endpoint is configured (optional)", next: "configure the endpoints", details: [
+      { subject: "judge_endpoint", status: "ok", code: "not_configured", why: "not configured (optional); not an error" },
+      { subject: "generate_endpoint", status: "ok", code: "not_configured", why: "not configured (optional); not an error" },
+    ] },
+    { name: "sources", status: "ok", code: "sources_ok", why: "2 sources: commands exist and the outbound scope fits the endpoints", next: "nothing to do", data: { count: 2 }, details: [
+      { subject: "mail", status: "ok", code: "source_ok", why: "command found, outbound scope fits the endpoints, last run: ok", data: { last_run: "ok" } },
+      { subject: "src_new", status: "ok", code: "source_ok", why: "command found, outbound scope fits the endpoints, last run: never", data: { last_run: "never" } },
+    ] },
+    { name: "packs", status: "ok", code: "packs_ok", why: "10 packs loaded, none rejected", next: "nothing to do", data: { loaded: 10, rejected: 0 } },
+    { name: "channels", status: "ok", code: "channels_none", why: "no channel or export ext key is issued (optional)", next: "issue an ext key" },
   ],
 };
+const BAD = {
+  ok: false,
+  checks: [
+    { name: "sources", status: "warning", code: "sources_attention", why: "some sources need attention; see details", next: "choose the outbound scope", data: { count: 1 }, details: [
+      { subject: "mail", status: "warning", code: "source_outbound_unset", why: "the external outbound scope is not chosen", next: "choose it in Web", data: { last_run: "failed", consecutive_failures: 3, problems: ["source_outbound_unset", "source_last_failed"] } },
+    ] },
+  ],
+};
+let DOCTOR: unknown = FINE;
 
 function report(bad: Record<string, Partial<Signal>> = {}): HealthReport {
   const signals = ORDER.map((id) => ({ id, ok: true, count: 0, next: "server next for " + id, ...bad[id] }) as Signal);
@@ -50,7 +69,11 @@ function serve(get: () => Response) {
 }
 const main = () => within(document.querySelector("main")!);
 
-beforeEach(() => sessionStorage.clear());
+beforeEach(() => {
+  sessionStorage.clear();
+  localStorage.clear();
+  DOCTOR = FINE;
+});
 
 describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
   it("全部正常：页头「一切正常」，十三项都有中文名并折叠在一起；没有写请求", async () => {
@@ -89,7 +112,8 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
     expect(within(main().getByRole("article", { name: "提醒发不出去" })).getByRole("link", { name: "去看提醒设置" })).toHaveAttribute("href", "/settings/notify");
     expect(within(main().getByRole("article", { name: "自动化连锁被叫停" })).getByRole("link", { name: "去看事项" })).toHaveAttribute("href", "/items/itm_3");
     const pk = main().getByRole("article", { name: "能力包加载失败" });
-    expect(pk).toHaveTextContent("pk：band is required");
+    expect(pk).toHaveTextContent("pk");
+    expect(pk).not.toHaveTextContent("band is required"); // 加载器的英文原因只在「显示原始值」里
     expect(within(pk).queryByRole("link")).not.toBeInTheDocument();
     const m = main().getByRole("article", { name: "模型连不上" });
     expect(m).toHaveTextContent("写作模型还没配置，有消息在等它");
@@ -180,15 +204,73 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
 });
 
 describe("诊断 › 状态的自检详情（flow-doctor / ACT-DOC-12）", () => {
-  it("收在「自检详情」里，名称是中文，保留服务端的结论、对象与下一步", async () => {
+  const section = async () => (await screen.findByText("自检详情")).closest("details")!;
+
+  it("全部正常：每项一行中文结论，不出现「错误」和英文说明；未接入是灰色；去接模型有按钮", async () => {
     const s = serve(() => json(200, report()));
     mount(s.impl);
-    const sec = (await screen.findByText("自检详情")).closest("details")!;
-    expect(within(sec).getByRole("article", { name: "运行形态" })).toHaveTextContent("tier 3");
-    const sources = within(sec).getByRole("article", { name: "来源" });
-    expect(sources).toHaveTextContent("提醒");
-    expect(sources).toHaveTextContent("src_unset");
-    expect(sources).toHaveTextContent("choose the outbound scope");
+    const sec = await section();
+    const text = sec.textContent!;
+    expect(text).not.toMatch(/错误|error/i);
+    expect(text).not.toContain("not configured");
+    expect(text).not.toContain("tier 1");
+    expect(within(sec).getByLabelText("运行形态")).toHaveTextContent("只用内核运行，没有接模型");
+    expect(within(within(sec).getByLabelText("运行形态")).getByRole("link", { name: "去接模型" })).toHaveAttribute("href", "/settings/models");
+    const models = within(sec).getByLabelText("模型");
+    expect(within(models).getAllByText("未接入")[0]).toHaveClass("badge");
+    expect(within(models).getAllByText("未接入")[0]).not.toHaveClass("warn");
+    expect(models).toHaveTextContent("写作模型 · 未接入");
+    const sources = within(sec).getByLabelText("来源");
+    expect(sources.tagName).toBe("DETAILS");
+    expect(sources).not.toHaveAttribute("open");
+    expect(sources).toHaveTextContent("2 个来源都正常");
+    expect(sources).toHaveTextContent("mail · 上次读取成功");
+    expect(sources).toHaveTextContent("src_new · 还没读过");
     expect(s.calls).toContain("GET /v1/doctor");
+  });
+
+  it("要处理的展开显示，多处问题逐条说出；英文说明不上主界面", async () => {
+    DOCTOR = BAD;
+    mount(serve(() => json(200, report())).impl);
+    const sources = within(await section()).getByRole("article", { name: "来源" });
+    expect(sources).toHaveTextContent("有来源要处理");
+    expect(sources).toHaveTextContent("mail · 还没选外发范围，新消息先压着；连续 3 次没读到");
+    expect(within(sources).getByRole("link", { name: "去看来源" })).toHaveAttribute("href", "/sources");
+    expect(sources).not.toHaveTextContent("outbound scope");
+  });
+
+  it("「显示原始值」打开后才出现检查名、机器码和内核的英文说明", async () => {
+    localStorage.setItem("apa.raw", "1");
+    mount(serve(() => json(200, report())).impl);
+    const sec = await section();
+    expect(sec).toHaveTextContent("tier · tier_kernel_only");
+    expect(sec).toHaveTextContent("this is a complete mode, not an error");
+    expect(sec).toHaveTextContent("judge_endpoint · not_configured");
+  });
+});
+
+describe("自检结论词表 doctorCode", () => {
+  it("每个机器码中英两份都有一句话，且不把机器码原样当文字", async () => {
+    const { DOCTOR_CODE } = await import("../../app/ids");
+    const { vocab } = await import("../../app/vocab");
+    for (const lang of ["zh", "en"] as const) {
+      for (const code of DOCTOR_CODE) {
+        const say = vocab[lang].doctorCode[code];
+        for (const data of [undefined, {}, { count: 2, tier: 1, loaded: 3, rejected: 1, backlog: 2, consecutive_failures: 4, last_run: "never", status: 500, missing_hooks: ["a"] }]) {
+          const text = say(data);
+          expect(text.trim(), `${lang}.${code}`).not.toBe("");
+          expect(text, `${lang}.${code}`).not.toContain(code.includes("_") ? code : "\u0000");
+          expect(text, `${lang}.${code}`).not.toMatch(/undefined|NaN/);
+        }
+      }
+    }
+  });
+
+  it("正常结论的中文里没有「错误」二字和「不是错误」式的反说", async () => {
+    const { vocab } = await import("../../app/vocab");
+    const fine = ["ok", "not_configured", "data_dir_ok", "data_dir_no_backup", "config_ok", "tier_paused", "tier_kernel_only", "tier_no_host", "tier_full",
+      "models_paused", "models_none", "models_ok", "sources_none", "sources_ok", "source_ok", "packs_no_loader", "packs_ok", "host_none", "host_ok",
+      "host_ready", "host_ready_no_selfcheck", "overlaps_skipped", "overlaps_none", "channels_none", "channels_ok", "channel_ok", "export_ok"] as const;
+    for (const c of fine) expect(vocab.zh.doctorCode[c]({ count: 1, last_run: "ok" }), c).not.toContain("错误");
   });
 });

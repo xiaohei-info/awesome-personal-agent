@@ -174,7 +174,7 @@
 | 运行 | `GET /runs`，`GET /runs/{id}` | 运行记录 | observer |
 | | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
 | 回放与健康 | `GET /why/{id}`，`GET /health` | 回放（来源事件命中数值条件规则时另带 `alerts`：规则、条件文本、上一次与本次取值、产出的投递及其状态（提醒还被静默或合并窗口暂存时状态为 `held`），各凭据级别可见）、健康视图；所有健康告警都经同一处产出健康类投递（§15.2），读取走 `GET /deliveries/unread` | observer |
-| | `GET /doctor` | 内核一侧的自检结果（主文档 §15.5）；模型端点的明细带稳定机器码 `code`（取值同 `POST /settings/model-endpoints/test`） | observer |
+| | `GET /doctor` | 内核一侧的自检结果（主文档 §15.5）；每项检查与每个对象都带稳定机器码 `code` 与可变参数 `data`，形状见下文"自检结果" | observer |
 | | `GET /version` | 版本与各协议版本（B.5） | 不需要凭据 |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
 | | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；每条带 `class`（`reminder` 提醒类或 `action` 动作类，由加载器推定，主文档 §14.8）；切换只有 Web | Web 登录 |
@@ -258,6 +258,22 @@
 `POST /settings/model-endpoints/models` 取模型列表，请求 `{"endpoint": "generate" | "judge", "url", "api_key"?, "protocol"?}`：按对话补全兼容协议 `GET <url>/models` 读 `data[].id`，去重排序，至多 500 个。`endpoint` 为 `judge` 时只接受 `protocol: system-one`（`GET <接口根>/models`，读 `models[].name`；`url` 末尾带 `/systemone` 的先去掉）与 `chat-logprobs`，`probability-judgment/1` 没有模型列表，返回 400。探测本身的成败是数据，响应恒为 200：成功 `{"ok": true, "models": [...], "truncated": false, "elapsed_ms": 120}`，失败 `{"ok": false, "reason", "status"?, "elapsed_ms"}`，`reason` 取 `unauthorized`、`not_found`、`http_status`（带 `status`）、`timeout`、`bad_response`、`unreachable`、`region_unavailable`（HTTP 451，或 403 且响应体提到地区、国家）。
 
 `POST /settings/model-endpoints/test` 测试连接，请求 `{"endpoint": "judge" | "generate", "config": {…}}`，`config` 与 `PUT` 里对应端点的形状相同，按保存时的同一套规则校验（不合规返回 400）；生成端点须有 `url` 与 `model`。用 `apa doctor` 的内置示例题探测（主文档 §15.5），示例内容是固定文本，不取账本内容。响应与 `GET /doctor` 的明细同形：`{"subject", "status", "code", "why", "next"?, "data"}`；`code` 取 `ok`、`unauthorized`、`region_unavailable`（服务在当前网络位置不可用，`next` 提示改用可访问的网关地址或代理）、`protocol_error`、`self_reported`、`invalid_request`、`no_answer`、`timeout`、`http_status`、`schema_mismatch`（`status` 为 `warning`）、`bad_response`、`unreachable`；`data` 含 `elapsed_ms`、`locality`，判断端点另有 `protocol`、`probability_source` 与端点自报的 `model`。
+
+**自检结果**（`GET /doctor` 与 `apa doctor --json`）：`{"ok", "checks": [{"name", "status", "code", "why", "next", "data"?, "details"?: [{"subject", "status", "code", "why", "next"?, "data"?}]}]}`。`status` 取 `ok`、`warning`、`error`；`why`、`next` 是机制性英文，供 CLI 与 agent 阅读；`code` 是稳定的机器码，取值只增不改，清单在 `kernel/doctor/codes.go`，Web 按 `code` 与 `data` 显示本地化的一句话。一个对象有多处问题时，`code` 是第一处，`data.problems` 按顺序列出全部问题的机器码。各项检查的 `code` 与 `data`：
+
+| 检查 | 检查一级的 `code` | 对象一级的 `code` | `data` |
+|---|---|---|---|
+| `data_dir` | `data_dir_ok`、`data_dir_no_backup`、`data_dir_missing`、`data_dir_permissions`、`ledger_missing`、`ledger_unreadable`、`ledger_damaged`、`ledger_too_new`、`ledger_migrate` | — | `schema_binary`、`schema_ledger`、`last_backup_at` |
+| `config` | `config_ok`、`config_invalid`、`config_exposed`、`host_file_invalid` | — | `listen` |
+| `tier` | `tier_paused`、`tier_kernel_only`、`tier_no_host`、`tier_full`；账本事实读不出时 `facts_unreadable` | — | `tier`、`model_endpoint`、`host`、`models_paused` |
+| `model_endpoint` | `models_paused`、`models_none`、`models_ok`、`models_failing` | 同 `POST /settings/model-endpoints/test` 的 `code`，另有 `not_configured`、`no_client` | 同测试连接 |
+| `sources` | `sources_none`、`sources_ok`、`sources_attention`、`sources_restored_missing` | `source_ok`（`data.last_run` 为 `ok`、`never`、`unreadable`）、`source_command_missing`、`source_outbound_unset`、`source_outbound_full`、`source_last_failed`、`source_tool_timeout`、`source_tool_version`、`source_tool_missing`、`source_tool_config`、`source_tool_failed`、`source_creds_missing`、`source_webhook_key_missing` | 检查一级 `count`；对象一级 `enabled`、`type`、`command`、`outbound`、`last_run`、`consecutive_failures`、`last_success_at`、`last_failure_at`、`tool`、`problems` |
+| `packs` | `packs_no_loader`、`packs_ok`、`packs_rejected` | `pack_rejected` | 检查一级 `loaded`、`rejected`；对象一级 `source`、`in_effect` |
+| `host_plugin` | `host_none`、`host_ok`、`host_attention` | `host_ready`、`host_ready_no_selfcheck`、`host_headless_missing`、`host_selfcheck_failed`、`host_no_session_kind`、`host_hook_missing` | `last_call_at`、`plugin_version`、`missing_hooks`、`problems` |
+| `overlaps` | `overlaps_skipped`、`overlaps_none`、`overlaps_found` | `overlap` | `harness`、`kind`、`name` |
+| `channels` | `channels_none`、`channels_ok`、`channels_backlog` | `channel_ok`、`channel_backlog`、`channel_orphan`、`export_ok` | `kind`、`backlog`、`last_seen_at` |
+
+`apa doctor` 在数据目录不可读或数据结构与二进制不符时只做前两项，其余各项为 `warning`，`code` 为 `skipped`，`data.reason` 取 `ledger_unreadable` 或 `ledger_schema_differs`。升级预检（`--upgrade-check`）的专用项只在 CLI 输出，不带 `code`。
 
 两条路由的密钥规则相同：`api_key` 显式给出时照用，`""` 表示不带；省略或为占位 `***` 时沿用该端点已存的密钥，但只在请求的 URL 与已存 URL 同源（scheme、主机、端口相同）时沿用，否则返回 400，要求重新输入密钥。
 

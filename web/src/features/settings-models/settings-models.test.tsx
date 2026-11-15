@@ -160,6 +160,7 @@ describe("设置 › 模型", () => {
     const r = await g.findByRole("status", { name: "测试结果" });
     expect(r).toHaveTextContent("✗ 鉴权失败");
     expect(r).toHaveTextContent("HTTP 401");
+    expect(r).not.toHaveTextContent("check URL"); // 英文说明只在「显示原始值」里
     expect(s.posts.at(-1)!.body.config.model).toBe("my-model");
   });
 

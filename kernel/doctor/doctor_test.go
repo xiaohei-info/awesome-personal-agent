@@ -96,18 +96,19 @@ func TestTierReportsLevelAndWhatIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := tier(f)
-	if c.Data["tier"] != 1 || c.Status != OK || !strings.Contains(c.Next, "generate endpoint") {
+	requireCodes(t, "codes.go", c)
+	if c.Data["tier"] != 1 || c.Code != CodeTierKernelOnly || c.Status != OK || !strings.Contains(c.Next, "generate endpoint") {
 		t.Fatalf("tier 1 expected: %+v", c)
 	}
 	setPolicy(t, st, func(p *policy.Policy) {
 		p.GenerateEndpoint = policy.GenerateEndpoint{URL: "http://x/v1", Model: "m", Locality: "local"}
 	})
 	f, _ = ReadFacts(bg, st)
-	if c := tier(f); c.Data["tier"] != 2 || !strings.Contains(c.Next, "host plugin") {
+	if c := tier(f); c.Data["tier"] != 2 || c.Code != CodeTierNoHost || !strings.Contains(c.Next, "host plugin") {
 		t.Fatalf("tier 2 expected: %+v", c)
 	}
 	f.Declarations = []executors.Record{{Harness: "h", Declaration: executors.Declaration{Headless: &executors.Headless{}}}}
-	if c := tier(f); c.Data["tier"] != 3 {
+	if c := tier(f); c.Data["tier"] != 3 || c.Code != CodeTierFull {
 		t.Fatalf("tier 3 expected: %+v", c)
 	}
 }
@@ -126,7 +127,8 @@ func TestModelEndpointProbesSampleAndFlagsBadProtocol(t *testing.T) {
 	f, _ := ReadFacts(bg, st)
 	e := Env{Model: &model.Client{}}
 	c := modelEndpoint(bg, f, e)
-	if c.Status != OK || len(c.Details) != 2 || c.Details[0].Data["elapsed_ms"] == nil {
+	requireCodes(t, "codes.go", c)
+	if c.Status != OK || c.Code != CodeModelsOK || len(c.Details) != 2 || c.Details[0].Code != CodeOK || c.Details[0].Data["elapsed_ms"] == nil {
 		t.Fatalf("healthy endpoints: %+v", c)
 	}
 	if len(cls.Batches()) != 1 || len(gen.Requests()) != 1 {
@@ -142,7 +144,8 @@ func TestModelEndpointProbesSampleAndFlagsBadProtocol(t *testing.T) {
 		cls.SetFault(fault)
 		c := modelEndpoint(bg, f, e)
 		d, _ := c.Find("judge_endpoint")
-		if c.Status != Error || d.Status != Error {
+		requireCodes(t, "codes.go", c)
+		if c.Status != Error || c.Code != CodeModelsFailing || d.Status != Error {
 			t.Fatalf("%s must be an error: %+v", name, c)
 		}
 		if name == "self_reported" && !strings.Contains(d.Why, "self_reported") {
@@ -160,7 +163,7 @@ func TestModelEndpointProbesSampleAndFlagsBadProtocol(t *testing.T) {
 	}
 	// 未配置不是错误。
 	f.Policy.JudgeEndpoint, f.Policy.GenerateEndpoint = nil, policy.GenerateEndpoint{}
-	if c := modelEndpoint(bg, f, e); c.Status != OK {
+	if c := modelEndpoint(bg, f, e); c.Status != OK || c.Code != CodeModelsNone || c.Details[0].Code != CodeNotConfigured || c.Details[1].Code != CodeNotConfigured {
 		t.Fatalf("unconfigured: %+v", c)
 	}
 }
@@ -181,16 +184,21 @@ func TestSourcesFlagMissingCommandUnsetScopeAndFullTextOutbound(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := sources(f, Env{CommandExists: func(cmd string) bool { return cmd == "good" }})
+	requireCodes(t, "codes.go", c)
 	want := map[string]struct {
-		st  Status
-		sub string
+		st   Status
+		sub  string
+		code string
 	}{
-		"src_ok": {OK, ""}, "src_missing": {Error, "command does not exist"},
-		"src_unset": {Warning, "not chosen"}, "src_full": {Warning, "full text"},
+		"src_ok": {OK, "", CodeSourceOK}, "src_missing": {Error, "command does not exist", CodeSourceCommandMissing},
+		"src_unset": {Warning, "not chosen", CodeSourceOutboundUnset}, "src_full": {Warning, "full text", CodeSourceOutboundFull},
+	}
+	if c.Code != CodeSourcesAttention || c.Data["count"] != 4 {
+		t.Errorf("sources check: %+v", c)
 	}
 	for id, w := range want {
 		d, ok := c.Find(id)
-		if !ok || d.Status != w.st || !strings.Contains(d.Why, w.sub) || d.Data["last_run"] == nil {
+		if !ok || d.Status != w.st || d.Code != w.code || !strings.Contains(d.Why, w.sub) || d.Data["last_run"] == nil {
 			t.Errorf("%s: %+v", id, d)
 		}
 	}
@@ -198,7 +206,7 @@ func TestSourcesFlagMissingCommandUnsetScopeAndFullTextOutbound(t *testing.T) {
 	if strings.Contains(string(b), "PRIVATE-STDERR") {
 		t.Fatal("source error text must not reach the report")
 	}
-	if d, _ := c.Find("src_full"); d.Data["last_run"] != "failed" {
+	if d, _ := c.Find("src_full"); d.Data["last_run"] != "failed" || fmt.Sprint(d.Data["problems"]) != "[source_outbound_full source_last_failed]" || d.Data["consecutive_failures"] != 2 {
 		t.Fatalf("last run: %+v", d)
 	}
 	// 没有外部端点时，外部范围不起作用。
@@ -249,13 +257,14 @@ func TestPackCheckRelaysFieldReasonsAndFallbackSource(t *testing.T) {
 	rej := packs.Rejection{Pack: "inbound-triage", Source: packs.Data, Reason: "template judge: field confidence_threshold removed; escalate_to removed; on_undecided missing"}
 	c := packCheck(Env{Packs: fakePacks{rej: []packs.Rejection{rej}, src: packs.Builtin}})
 	d, _ := c.Find("inbound-triage")
-	if c.Status != Error || !strings.Contains(d.Why, "confidence_threshold") || !strings.Contains(d.Why, "builtin pack of the same name is in effect") {
+	requireCodes(t, "codes.go", c)
+	if c.Status != Error || c.Code != CodePacksRejected || d.Code != CodePackRejected || d.Data["in_effect"] != "builtin" || !strings.Contains(d.Why, "confidence_threshold") || !strings.Contains(d.Why, "builtin pack of the same name is in effect") {
 		t.Fatalf("%+v", c)
 	}
-	if c := packCheck(Env{Packs: fakePacks{}}); c.Status != OK {
+	if c := packCheck(Env{Packs: fakePacks{}}); c.Status != OK || c.Code != CodePacksOK {
 		t.Fatalf("%+v", c)
 	}
-	if c := packCheck(Env{}); c.Status != OK {
+	if c := packCheck(Env{}); c.Status != OK || c.Code != CodePacksNoLoader {
 		t.Fatalf("%+v", c)
 	}
 }
@@ -294,11 +303,12 @@ func TestChannelsReportLastClaimAndBacklog(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := channels(f, Env{})
+	requireCodes(t, "codes.go", c)
 	d, _ := c.Find("channel.tg")
-	if d.Status != Warning || d.Data["backlog"] != 3 || d.Data["last_seen_at"] != "2026-11-12T10:00:00Z" {
+	if d.Status != Warning || d.Code != CodeChannelBacklog || c.Code != CodeChannelsBacklog || d.Data["backlog"] != 3 || d.Data["last_seen_at"] != "2026-11-12T10:00:00Z" {
 		t.Fatalf("stopped ext: %+v", d)
 	}
-	if e, _ := c.Find("export"); e.Status != OK || !strings.Contains(e.Why, "never") {
+	if e, _ := c.Find("export"); e.Status != OK || e.Code != CodeExportOK || !strings.Contains(e.Why, "never") {
 		t.Fatalf("export: %+v", e)
 	}
 	// ext 启动并领完：积压为 0，领取时间更新。
@@ -322,16 +332,17 @@ func TestChannelsReportLastClaimAndBacklog(t *testing.T) {
 		t.Fatal(err)
 	}
 	f, _ = ReadFacts(bg, st)
-	d, _ = channels(f, Env{}).Find("channel.tg")
-	if d.Status != OK || d.Data["backlog"] != 0 || d.Data["last_seen_at"] != "2026-11-12T10:01:00Z" {
+	c = channels(f, Env{})
+	d, _ = c.Find("channel.tg")
+	if d.Status != OK || d.Code != CodeChannelOK || c.Code != CodeChannelsOK || d.Data["backlog"] != 0 || d.Data["last_seen_at"] != "2026-11-12T10:01:00Z" {
 		t.Fatalf("after claim: %+v", d)
 	}
 	// 没有 ext 密钥的路由上有积压：提醒。
 	f.ExtKeys, f.Backlog = nil, map[string]int{"channel:lost": 2}
-	if c := channels(f, Env{}); c.Status != Warning || len(c.Details) != 1 {
+	if c := channels(f, Env{}); c.Status != Warning || len(c.Details) != 1 || c.Details[0].Code != CodeChannelOrphan {
 		t.Fatalf("orphan: %+v", c)
 	}
-	if c := channels(Facts{}, Env{}); c.Status != OK {
+	if c := channels(Facts{}, Env{}); c.Status != OK || c.Code != CodeChannelsNone {
 		t.Fatalf("empty: %+v", c)
 	}
 }
@@ -347,6 +358,10 @@ func TestAssembleOrdersChecksAndComputesOK(t *testing.T) {
 	all := Kernel(bg, Facts{Policy: policy.Default()}, Env{})
 	if len(all) != 5 || byName(all, Tier).Name == "" {
 		t.Fatalf("%+v", all)
+	}
+	requireCodes(t, "codes.go", all...)
+	if c := byName(all, Sources); c.Code != CodeSourcesNone {
+		t.Fatalf("no sources: %+v", c)
 	}
 }
 
@@ -391,10 +406,10 @@ func TestPausedModelsAreReportedAsPausedWithoutProbing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := tier(f); c.Status != OK || c.Data["tier"] != 1 || c.Data["models_paused"] != true || !strings.Contains(c.Why, "paused") {
+	if c := tier(f); c.Status != OK || c.Code != CodeTierPaused || c.Data["tier"] != 1 || c.Data["models_paused"] != true || !strings.Contains(c.Why, "paused") {
 		t.Fatalf("tier while paused: %+v", c)
 	}
-	if c := modelEndpoint(bg, f, Env{Model: &model.Client{}}); c.Status != OK || len(c.Details) != 0 || !strings.Contains(c.Why, "paused") {
+	if c := modelEndpoint(bg, f, Env{Model: &model.Client{}}); c.Status != OK || c.Code != CodeModelsPaused || len(c.Details) != 0 || !strings.Contains(c.Why, "paused") {
 		t.Fatalf("model endpoint while paused: %+v", c)
 	}
 	if n := len(gen.Requests()); n != 0 {

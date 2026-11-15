@@ -66,19 +66,19 @@ func tier(f Facts) Check {
 	c := Check{Name: Tier, Status: OK, Data: map[string]any{"model_endpoint": model2, "host": host, "models_paused": f.Policy.ModelsPaused}}
 	switch {
 	case f.Policy.ModelsPaused: // 生效中的策略里端点已视为未配置
-		c.Data["tier"] = 1
+		c.Data["tier"], c.Code = 1, CodeTierPaused
 		c.Why = "tier 1 (kernel only) while the models are paused: the endpoints are kept but not called; this is a chosen state, not an error"
 		c.Next = "to use the models again, resume them in Web settings (model endpoints)"
 	case !model2:
-		c.Data["tier"] = 1
+		c.Data["tier"], c.Code = 1, CodeTierKernelOnly
 		c.Why = "tier 1 (kernel only): no generate endpoint is configured; this is a complete mode, not an error"
 		c.Next = "to reach tier 2, configure the generate endpoint in Web settings (model endpoints)"
 	case !host:
-		c.Data["tier"] = 2
+		c.Data["tier"], c.Code = 2, CodeTierNoHost
 		c.Why = "tier 2 (kernel + model endpoint): no confirmed headless declaration from a host harness"
 		c.Next = "to reach tier 3, install the host plugin and confirm its declaration in Web"
 	default:
-		c.Data["tier"] = 3
+		c.Data["tier"], c.Code = 3, CodeTierFull
 		c.Why = "tier 3 (kernel + model endpoint + host): a generate endpoint and a confirmed host declaration are in place"
 		c.Next = "nothing to do"
 	}
@@ -90,16 +90,18 @@ func tier(f Facts) Check {
 func modelEndpoint(ctx context.Context, f Facts, e Env) Check {
 	c := Check{Name: ModelEndpoint, Status: OK}
 	if f.Policy.ModelsPaused {
-		c.Why, c.Next = "paused: the endpoints are kept but the kernel does not call them, so they are not probed", "resume the models in Web settings (model endpoints) when you want them to work"
+		c.Code, c.Why, c.Next = CodeModelsPaused, "paused: the endpoints are kept but the kernel does not call them, so they are not probed", "resume the models in Web settings (model endpoints) when you want them to work"
 		return c
 	}
 	c.Add(ProbeJudge(ctx, f.Policy.JudgeEndpoint, e))
 	c.Add(ProbeGenerate(ctx, f.Policy.GenerateEndpoint, e))
-	switch c.Status {
-	case OK:
-		c.Why, c.Next = "configured endpoints answered the built-in sample request; unconfigured ones are not an error", "nothing to do"
+	switch {
+	case c.Details[0].Code == CodeNotConfigured && c.Details[1].Code == CodeNotConfigured:
+		c.Code, c.Why, c.Next = CodeModelsNone, "no endpoint is configured (optional)", "configure the endpoints in Web settings (model endpoints) when you want the models to work"
+	case c.Status == OK:
+		c.Code, c.Why, c.Next = CodeModelsOK, "configured endpoints answered the built-in sample request; unconfigured ones are not an error", "nothing to do"
 	default:
-		c.Why, c.Next = "an endpoint did not answer the built-in sample request as the protocol requires; see details", "fix the endpoint in Web settings (model endpoints)"
+		c.Code, c.Why, c.Next = CodeModelsFailing, "an endpoint did not answer the built-in sample request as the protocol requires; see details", "fix the endpoint in Web settings (model endpoints)"
 	}
 	return c
 }
@@ -107,19 +109,19 @@ func modelEndpoint(ctx context.Context, f Facts, e Env) Check {
 // ---- 来源（§9、§14.14） ----
 
 func sources(f Facts, e Env) Check {
-	c := Check{Name: Sources, Status: OK}
+	c := Check{Name: Sources, Status: OK, Data: map[string]any{"count": len(f.Sources)}}
 	external := ExternalInUse(f.Policy)
 	for _, s := range f.Sources {
 		c.Add(SourceDetail(s, external, e.exists))
 	}
 	if len(f.Sources) == 0 {
-		c.Why, c.Next = "no source is registered (optional)", "register sources in Web or in sources.json when you want events to flow in"
+		c.Code, c.Why, c.Next = CodeSourcesNone, "no source is registered (optional)", "register sources in Web or in sources.json when you want events to flow in"
 		return c
 	}
 	if c.Status == OK {
-		c.Why, c.Next = fmt.Sprintf("%d sources: commands exist and the outbound scope fits the endpoints", len(f.Sources)), "nothing to do"
+		c.Code, c.Why, c.Next = CodeSourcesOK, fmt.Sprintf("%d sources: commands exist and the outbound scope fits the endpoints", len(f.Sources)), "nothing to do"
 	} else {
-		c.Why, c.Next = "some sources need attention; see details", "fix the registration or choose the outbound scope on the source page"
+		c.Code, c.Why, c.Next = CodeSourcesAttention, "some sources need attention; see details", "fix the registration or choose the outbound scope on the source page"
 	}
 	return c
 }
@@ -159,13 +161,14 @@ func CommandExists(command string) bool {
 // 只写机制与时间，不带来源报错原文（可能含用户内容）。external 为真表示配置了外部端点。
 func SourceDetail(s domain.Source, external bool, exists func(string) bool) Detail {
 	d := Detail{Subject: s.ID, Status: OK, Data: map[string]any{"enabled": s.Enabled, "type": string(s.Type)}}
-	var why, next []string
+	var why, next, problems []string
 	if s.Type != domain.SourceWebhook {
 		if exists(s.Command) {
 			d.Data["command"] = "found"
 		} else {
 			d.Status = Error
 			d.Data["command"] = "missing"
+			problems = append(problems, CodeSourceCommandMissing)
 			why = append(why, "the registered command does not exist or is not executable on this host")
 			next = append(next, "fix the command registered for this source")
 		}
@@ -178,10 +181,12 @@ func SourceDetail(s domain.Source, external bool, exists func(string) bool) Deta
 	switch {
 	case external && s.Outbound.External == nil:
 		d.Status = Worst(d.Status, Warning)
+		problems = append(problems, CodeSourceOutboundUnset)
 		why = append(why, "the external outbound scope is not chosen; new events are held as outbound_unset until you choose")
 		next = append(next, "choose the external outbound scope of this source in Web")
 	case external && ext == registry.ScopeFull:
 		d.Status = Worst(d.Status, Warning)
+		problems = append(problems, CodeSourceOutboundFull)
 		why = append(why, "full text of this source is being sent to an external model endpoint")
 		next = append(next, "narrow the external outbound scope on the source page if that is not intended")
 	}
@@ -196,6 +201,7 @@ func SourceDetail(s domain.Source, external bool, exists func(string) bool) Deta
 		d.Data["last_run"] = "failed"
 		d.Data["consecutive_failures"] = st.ConsecutiveFailures
 		d.Data["last_failure_at"] = ts(st.LastFailureAt)
+		problems = append(problems, CodeSourceLastFailed)
 		why = append(why, fmt.Sprintf("the last run failed (%d consecutive failures)", st.ConsecutiveFailures))
 		next = append(next, "open the source page; auth failures have a needs_input item")
 	default:
@@ -203,9 +209,10 @@ func SourceDetail(s domain.Source, external bool, exists func(string) bool) Deta
 		d.Data["last_success_at"] = ts(st.LastSuccessAt)
 	}
 	if len(why) == 0 {
-		d.Why, d.Next = "command found, outbound scope fits the endpoints, last run: "+fmt.Sprint(d.Data["last_run"]), ""
+		d.Code, d.Why, d.Next = CodeSourceOK, "command found, outbound scope fits the endpoints, last run: "+fmt.Sprint(d.Data["last_run"]), ""
 	} else {
 		d.Why, d.Next = strings.Join(why, "; "), strings.Join(next, "; ")
+		d.AddProblems(problems...)
 	}
 	return d
 }
@@ -215,24 +222,26 @@ func SourceDetail(s domain.Source, external bool, exists func(string) bool) Deta
 func packCheck(e Env) Check {
 	c := Check{Name: Packs, Status: OK}
 	if e.Packs == nil {
-		c.Why, c.Next = "no pack loader is attached", "nothing to do"
+		c.Code, c.Why, c.Next = CodePacksNoLoader, "no pack loader is attached", "nothing to do"
 		return c
 	}
 	rejected := e.Packs.Health()
 	for _, r := range rejected {
 		why := "pack rejected: " + r.Reason
+		data := map[string]any{"source": string(r.Source)}
 		if cur, ok := e.Packs.Source(r.Pack); ok {
 			why += fmt.Sprintf("; the %s pack of the same name is in effect", cur)
+			data["in_effect"] = string(cur)
 		}
-		c.Add(Detail{Subject: r.Pack, Status: Error, Why: why,
+		c.Add(Detail{Subject: r.Pack, Status: Error, Code: CodePackRejected, Why: why,
 			Next: "fix the pack under packs/" + r.Pack + " as appendix C.7 and C.11 describe; it is loaded again on the next hot reload or restart",
-			Data: map[string]any{"source": string(r.Source)}})
+			Data: data})
 	}
 	c.Data = map[string]any{"loaded": len(e.Packs.List()), "rejected": len(rejected)}
 	if len(rejected) == 0 {
-		c.Why, c.Next = fmt.Sprintf("%d packs loaded, none rejected", len(e.Packs.List())), "nothing to do"
+		c.Code, c.Why, c.Next = CodePacksOK, fmt.Sprintf("%d packs loaded, none rejected", len(e.Packs.List())), "nothing to do"
 	} else {
-		c.Why, c.Next = fmt.Sprintf("%d pack(s) were rejected; the last valid or builtin version stays in effect", len(rejected)), "fix the packs listed in details"
+		c.Code, c.Why, c.Next = CodePacksRejected, fmt.Sprintf("%d pack(s) were rejected; the last valid or builtin version stays in effect", len(rejected)), "fix the packs listed in details"
 	}
 	return c
 }
@@ -245,7 +254,7 @@ func channels(f Facts, e Env) Check {
 	keys := append([]ExtKey(nil), f.ExtKeys...)
 	sort.Slice(keys, func(i, j int) bool { return keys[i].Scope < keys[j].Scope })
 	for _, k := range keys {
-		d := Detail{Subject: k.Scope, Status: OK, Data: map[string]any{"kind": "export"}}
+		d := Detail{Subject: k.Scope, Status: OK, Code: CodeExportOK, Data: map[string]any{"kind": "export"}}
 		last, seen := f.Seen[SubjectExt+k.Scope]
 		if seen {
 			d.Data["last_seen_at"] = ts(last)
@@ -259,8 +268,9 @@ func channels(f Facts, e Env) Check {
 			covered[route] = true
 			n := f.Backlog[route]
 			d.Data["kind"], d.Data["backlog"] = "channel", n
+			d.Code = CodeChannelOK
 			if n > 0 {
-				d.Status = Warning
+				d.Status, d.Code = Warning, CodeChannelBacklog
 				d.Why = fmt.Sprintf("%d deliveries are queued and not yet sent; the channel ext last claimed at %s", n, when)
 				d.Next = "start the channel ext (apa ext run) and check its key; queued deliveries fall back to Web after delivery_unclaimed_after"
 			} else {
@@ -279,17 +289,17 @@ func channels(f Facts, e Env) Check {
 	}
 	sort.Strings(orphan)
 	for _, route := range orphan {
-		c.Add(Detail{Subject: route, Status: Warning, Data: map[string]any{"kind": "channel", "backlog": f.Backlog[route]},
+		c.Add(Detail{Subject: route, Status: Warning, Code: CodeChannelOrphan, Data: map[string]any{"kind": "channel", "backlog": f.Backlog[route]},
 			Why:  fmt.Sprintf("%d deliveries are queued on a route that has no active ext key", f.Backlog[route]),
 			Next: "issue a channel ext key in Web settings for this channel, or let the queued deliveries fall back to Web"})
 	}
 	switch {
 	case len(c.Details) == 0:
-		c.Why, c.Next = "no channel or export ext key is issued (optional)", "issue an ext key in Web settings when you want a channel or an export"
+		c.Code, c.Why, c.Next = CodeChannelsNone, "no channel or export ext key is issued (optional)", "issue an ext key in Web settings when you want a channel or an export"
 	case c.Status == OK:
-		c.Why, c.Next = "no delivery backlog; last claim and read times are in details", "nothing to do"
+		c.Code, c.Why, c.Next = CodeChannelsOK, "no delivery backlog; last claim and read times are in details", "nothing to do"
 	default:
-		c.Why, c.Next = "deliveries are waiting for a channel ext; see details", "start the channel ext or check its key"
+		c.Code, c.Why, c.Next = CodeChannelsBacklog, "deliveries are waiting for a channel ext; see details", "start the channel ext or check its key"
 	}
 	return c
 }
