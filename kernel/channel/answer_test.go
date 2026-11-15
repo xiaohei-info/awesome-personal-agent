@@ -3,6 +3,8 @@ package channel_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +54,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, channel.Module, attention.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, channel.Module, attention.Module, executors.Module, delegation.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

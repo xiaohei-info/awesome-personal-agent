@@ -3,6 +3,8 @@ package channel
 import (
 	"context"
 	"encoding/json"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,7 +60,7 @@ func (e *env) advance(d time.Duration) {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, kchannel.Module, attention.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, delivery.Module, kcontext.Module, kchannel.Module, attention.Module, core.Module, executors.Module, delegation.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

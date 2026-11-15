@@ -177,6 +177,11 @@ func Dispatches(tx *store.Tx, item string) ([]Dispatch, error) {
 	return queryDispatches(tx, "WHERE item = ? ORDER BY started_at DESC, id", item)
 }
 
+// Continuing 返回接续 id 的委派记录（continues = id）。
+func Continuing(tx *store.Tx, id string) ([]Dispatch, error) {
+	return queryDispatches(tx, "WHERE continues = ? ORDER BY started_at DESC, id", id)
+}
+
 // DispatchFilter 是 ListDispatches 的条件；空字段不过滤。
 type DispatchFilter struct {
 	Executor  string

@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -50,7 +52,7 @@ func newKernel(t *testing.T) *kernel {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, kdelivery.Module, kcontext.Module, km.Module, search.Module, hosted.Module, core.Module} {
+		items.Module, kdelivery.Module, kcontext.Module, km.Module, search.Module, hosted.Module, core.Module, executors.Module, delegation.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
