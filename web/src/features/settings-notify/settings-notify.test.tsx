@@ -61,6 +61,20 @@ describe("设置 › 提醒与打扰", () => {
     expect(s.doc.disturb).toMatchObject({ daily_cap: 0, mutes: [] });
   });
 
+  it("暂停提醒的来源下拉按名字列出（本人反馈），选中后提交 id；不出现 src_ 原始 id", async () => {
+    const s = policyServer();
+    mount(s.impl);
+    const d = await card();
+    await userEvent.click(d.getByRole("button", { name: "＋ 暂停一个" }));
+    await userEvent.selectOptions(d.getByLabelText("暂停1 类型"), "source");
+    const pick = d.getByLabelText("暂停1 对象");
+    await waitFor(() => expect(within(pick).getByRole("option", { name: "Apple Calendar" })).toHaveValue("src_cal_apple"));
+    expect(within(pick).getAllByRole("option").map((o) => o.textContent)).toEqual(["", "Apple Calendar", "QQ Mail"]);
+    await userEvent.selectOptions(pick, "src_mail_qq");
+    await save();
+    await waitFor(() => expect(s.puts.at(-1)!.body.disturb.mutes).toEqual([{ scope: "source", id: "src_mail_qq" }]));
+  });
+
   it("日上限不是非负整数时在本地提示，不发请求", async () => {
     const s = policyServer();
     mount(s.impl);

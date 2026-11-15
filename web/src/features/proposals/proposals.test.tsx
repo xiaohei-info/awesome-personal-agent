@@ -20,6 +20,7 @@ function server(initial: P[], write?: (path: string, body: any) => Response | un
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
     if (url === "/v1/projects") return json(200, { projects: [] });
+    if (url === "/v1/sources") return json(200, { sources: [{ id: "src_mail_qq", name: "QQ 邮箱" }] });
     const q = url.match(/^\/v1\/items\?phase=(\w+)$/);
     if (q) return json(200, { items: items.filter((i) => i.phase === q[1]), last_rejections: rejections });
     if (url === "/v1/proposals/batch" && method === "POST") {
@@ -243,6 +244,16 @@ describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
     const b = s.calls.find((c) => c.path === "/v1/proposals/batch")!;
     expect(b.body).toEqual({ mode: "recommended", filter: { source: "PRH_A", project: "acc-open" } });
     expect(b.csrf).toBe("tok-1");
+  });
+
+  it("来源按名字称呼（§9.1）：卡片的「来自」与来源筛选都显示名字，对话捕获显示「对话捕获 · 项目」；不出现 src_", async () => {
+    mount(server([prop("m", { origin: { source: "src_mail_qq" } }), prop("c", { origin: { source: "capture:acc-open" } })]).impl);
+    await screen.findByText("建议 m");
+    await waitFor(() => expect(document.querySelector("main")!.textContent).toContain("QQ 邮箱"));
+    expect(document.querySelector("main")!.textContent).toContain("对话捕获 · acc-open");
+    const pick = screen.getByLabelText("来源");
+    expect(within(pick).getByRole("option", { name: "QQ 邮箱" })).toHaveValue("src_mail_qq");
+    expect(document.querySelector("main")!.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
   });
 
   it("ACT-PRH-14：目标已关闭的那条跳过并说明原因，成功的计数，列表以服务端为准刷新", async () => {

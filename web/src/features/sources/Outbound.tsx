@@ -116,14 +116,14 @@ export function OutboundEditor({ source, waiting, open, onOpen, onSaved }: {
 
   if (!shown)
     return (
-      <div className="sub full" role="group" aria-label={t.outbound(source.id)}>
+      <div className="sub full" role="group" aria-label={t.outbound(source.name)}>
         {t.toLocal} <Val k="outboundScope" id={saved.local} /> · {t.toExternal} <Val k="outboundScope" id={saved.external} />{" "}
         <button className="quiet" onClick={() => onOpen(true)}>{t.change}</button>
       </div>
     );
   const scope = last === "local" ? draft.local : draft.external;
   return (
-    <div className="full out-editor" role="group" aria-label={t.outbound(source.id)}>
+    <div className="full out-editor" role="group" aria-label={t.outbound(source.name)}>
       <ScopeRadios name={`${source.id}-local`} legend={t.toLocal} value={draft.local} onChange={(v) => { setDraft({ ...draft, local: v }); setLast("local"); }} />{" "}
       <ScopeRadios name={`${source.id}-external`} legend={t.toExternal} value={draft.external} onChange={(v) => { setDraft({ ...draft, external: v }); setLast("external"); }} />
       {saved.external === null && (

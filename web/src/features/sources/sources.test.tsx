@@ -1,17 +1,18 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
 import { backlogReason } from "./shared";
+import { setChoice } from "../../app/i18n";
 
 // 测试边界替身：按 api/sources 的契约应答（/sources、PATCH enabled、webhook 密钥、ingests、replay、
 // 来源事件按 disposition 分页、拒收记录分页、转建议；错误体见附录 B.3）。业务规则在服务端，这里只复现它的可观察行为。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix the request" });
 
-interface Src { default_project?: string; outbound?: { local: string; external: string | null }; id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
+interface Src { name: string; default_project?: string; outbound?: { local: string; external: string | null }; id: string; type: string; command?: string; schedule?: string; cursor?: string; enabled: boolean; stats?: Record<string, unknown> }
 interface Rj { run_id: string; line: number; reason: string; raw: string; at: string }
 interface Ev { score?: number; id: string; type: string; subject?: string; occurred_at: string; disposition: string; item?: string; unjudged_reason?: string }
 
@@ -55,11 +56,17 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
       const tier = (material: string, link: string) => ({ event_type: e.type, subject: e.subject ?? "", sender: "someone@example.com", occurred_at: e.occurred_at, link, material });
       return json(200, { full: tier("full body " + e.id + " and the rest", "https://example.com/x/1"), excerpt: tier("full body " + e.id, "example.com"), meta: tier("", "example.com") });
     }
+    if (u.pathname === "/v1/sources/declared-name") {
+      // 替身的接入声明：只有 apple-pim-source 声明了名字（按 source_type 选），其余程序没有
+      const cmd = u.searchParams.get("command") ?? "";
+      if (!cmd.endsWith("apple-pim-source")) return json(200, { name: null });
+      return json(200, { name: u.searchParams.get("source_type") === "calendar" ? { zh: "Apple 日历", en: "Apple Calendar" } : { zh: "Apple 邮件", en: "Apple Mail" } });
+    }
     if (u.pathname === "/v1/sources" && method === "GET") return json(200, { sources });
     if (u.pathname === "/v1/sources" && method === "POST") {
       if (o.webOnly) return err(403, "web_only", "custom commands can only be registered in the Web UI");
       if (body.outbound) return err(403, "web_only", "outbound is not part of the source registration");
-      sources.push({ id: body.id, type: body.type, command: body.command, schedule: body.schedule, enabled: true, outbound: { local: "full", external: null } });
+      sources.push({ id: body.id, name: body.name, type: body.type, command: body.command, schedule: body.schedule, enabled: true, outbound: { local: "full", external: null } });
       return json(201, sources[sources.length - 1]);
     }
     const ob = u.pathname.match(/^\/v1\/settings\/sources\/([^/]+)\/outbound$/);
@@ -89,6 +96,10 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
       if (!p[2] && method === "PATCH") {
         if ("enabled" in body) s.enabled = body.enabled;
         if ("default_project" in body) s.default_project = body.default_project;
+        if ("name" in body) {
+          if (sources.some((x) => x !== s && x.name.toLowerCase() === String(body.name).trim().toLowerCase())) return err(409, "conflict", "another source is already named " + body.name);
+          s.name = String(body.name).trim();
+        }
         return json(200, s);
       }
       if (p[2] === "/webhook" && method === "POST") {
@@ -155,16 +166,16 @@ function mount(fetchImpl: typeof fetch) {
   );
 }
 
-const hook: Src = { id: "src_hook", type: "webhook", enabled: true };
-const rss: Src = { id: "src_rss", type: "pull", schedule: "15m", cursor: "cur-42", enabled: true, stats: { consecutive_failures: 3, timeouts: 1, last_success_at: "2030-01-01T00:00:00Z", last_error: "boom" } };
+const hook: Src = { id: "src_hook", name: "仓库推送", type: "webhook", enabled: true };
+const rss: Src = { id: "src_rss", name: "新闻订阅", type: "pull", schedule: "15m", cursor: "cur-42", enabled: true, stats: { consecutive_failures: 3, timeouts: 1, last_success_at: "2030-01-01T00:00:00Z", last_error: "boom" } };
 const ev = (id: string, disposition = "unjudged"): Ev => ({ id, type: "issue.opened", subject: "subject-" + id, occurred_at: "2030-01-01T00:00:00Z", disposition });
-const row = async (id: string) => within(await screen.findByRole("listitem", { name: id }));
+const row = async (name: string) => within(await screen.findByRole("listitem", { name }));
 
 beforeEach(() => {
   sessionStorage.clear();
   localStorage.removeItem("apa.backlog");
 });
-const details = async (id: string) => userEvent.click((await row(id)).getByRole("button", { name: "详情" }));
+const details = async (name: string) => userEvent.click((await row(name)).getByRole("button", { name: "详情" }));
 const openAdvanced = async (within_: ReturnType<typeof within> | typeof screen = screen) => {
   for (const s of within_.getAllByText("高级")) if (!(s.parentElement as HTMLDetailsElement).open) await userEvent.click(s);
 };
@@ -173,14 +184,14 @@ describe("来源列表：类型、周期、状态与读取统计", () => {
   it("行上是类型、周期和一句状态；游标、最近成功、连续失败、超时和最近错误在详情的高级里", async () => {
     const b = backend({ sources: [rss] });
     mount(b.impl);
-    const r = await row("src_rss");
+    const r = await row("新闻订阅");
     expect(r.getByText("定时拉取")).toBeInTheDocument();
     expect(r.getByText("每 15 分钟")).toBeInTheDocument();
     expect(r.getByText("连续 3 次没读到")).toBeInTheDocument();
     expect(r.getByText("读取失败")).toBeInTheDocument();
     expect(r.queryByText(/cur-42/)).not.toBeInTheDocument();
-    await details("src_rss");
-    const d = within(await screen.findByRole("region", { name: "来源 src_rss" }));
+    await details("新闻订阅");
+    const d = within(await screen.findByRole("region", { name: "来源 新闻订阅" }));
     await openAdvanced(d);
     expect(d.getByText(/读到 cur-42/)).toBeInTheDocument();
     expect(d.getByText(/连续失败 3 · 超时 1/)).toBeInTheDocument();
@@ -198,14 +209,14 @@ describe("来源列表：类型、周期、状态与读取统计", () => {
   it("启停：PATCH enabled 带 CSRF，界面以服务端回读为准", async () => {
     const b = backend({ sources: [{ ...rss }] });
     mount(b.impl);
-    await userEvent.click(within((await row("src_rss")).getByRole("group", { name: "操作 src_rss" })).getByRole("button", { name: "停用" }));
+    await userEvent.click(within((await row("新闻订阅")).getByRole("group", { name: "操作 新闻订阅" })).getByRole("button", { name: "停用" }));
     const patch = b.calls.find((c) => c.method === "PATCH")!;
     expect(patch.path).toBe("/v1/sources/src_rss");
     expect(patch.body).toEqual({ enabled: false });
     expect(patch.csrf).toBe("tok-1");
-    expect(await (await row("src_rss")).findByText("已停用")).toBeInTheDocument();
-    await userEvent.click((await row("src_rss")).getByRole("button", { name: "启用" }));
-    await waitFor(async () => expect((await row("src_rss")).queryByText("已停用")).not.toBeInTheDocument());
+    expect(await (await row("新闻订阅")).findByText("已停用")).toBeInTheDocument();
+    await userEvent.click((await row("新闻订阅")).getByRole("button", { name: "启用" }));
+    await waitFor(async () => expect((await row("新闻订阅")).queryByText("已停用")).not.toBeInTheDocument());
   });
 });
 
@@ -221,7 +232,7 @@ describe("接收密钥与入站记录重放", () => {
   it("创建后只显示一次明文，带地址与复制；再次点击是更换并提示旧密钥短期可用；换来源后明文不残留", async () => {
     const b = backend({ sources: [hook, rss] });
     mount(b.impl);
-    await details("src_hook");
+    await details("仓库推送");
     await userEvent.click(await screen.findByRole("button", { name: "创建或更换密钥" }));
     expect(await screen.findByTestId("webhook-secret")).toHaveTextContent("apa_whk_SECRET123");
     expect(screen.getByText("/ingest/src_hook")).toBeInTheDocument();
@@ -230,7 +241,7 @@ describe("接收密钥与入站记录重放", () => {
     expect(b.calls.find((c) => c.path === "/v1/sources/src_hook/webhook")!.csrf).toBe("tok-1");
     await userEvent.click(screen.getByRole("button", { name: "创建或更换密钥" }));
     expect(await screen.findByText(/已更换，旧密钥短期内仍能用/)).toBeInTheDocument();
-    await details("src_rss");
+    await details("新闻订阅");
     expect(screen.queryByTestId("webhook-secret")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "创建或更换密钥" })).not.toBeInTheDocument();
   });
@@ -238,8 +249,8 @@ describe("接收密钥与入站记录重放", () => {
   it("入站记录在高级里：列出校验结果并可看原始内容；重放后状态以服务端为准", async () => {
     const b = backend({ sources: [hook], ingests: [{ id: "ing_1", received_at: "2030-01-01T00:00:00Z", state: "rejected", signed: false, events: 0, reason: "bad signature", body: "{\"a\":1}" }] });
     mount(b.impl);
-    await details("src_hook");
-    await openAdvanced(within(await screen.findByRole("region", { name: "来源 src_hook" })));
+    await details("仓库推送");
+    await openAdvanced(within(await screen.findByRole("region", { name: "来源 仓库推送" })));
     const region = within(await screen.findByRole("region", { name: "入站记录" }));
     expect(await region.findByText(/bad signature/)).toBeInTheDocument();
     expect(region.getByText(/已拒收 · 未验签 · 产出 0 条/)).toBeInTheDocument();
@@ -256,7 +267,7 @@ describe("积压的消息（flow-triage-failure / ACT-TRI-02）", () => {
   it("只列未判定的；转为建议后该事件离开列表且服务端处置为 proposed", async () => {
     const b = backend({ sources: [rss], events: [ev("e1"), ev("e2", "ignored"), ev("e3")] });
     mount(b.impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const region = within(await screen.findByRole("region", { name: "积压的消息" }));
     expect(await region.findByText(/subject-e1/)).toBeInTheDocument();
     expect(region.getByText(/subject-e3/)).toBeInTheDocument();
@@ -271,7 +282,7 @@ describe("积压的消息（flow-triage-failure / ACT-TRI-02）", () => {
   it("分页用 next_after 加载更多", async () => {
     const b = backend({ sources: [rss, hook], events: [ev("e1"), ev("e2"), ev("e3")] });
     mount(b.impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const region = within(await screen.findByRole("region", { name: "积压的消息" }));
     await region.findByText(/subject-e1/);
     expect(region.queryByText(/subject-e3/)).not.toBeInTheDocument();
@@ -284,7 +295,7 @@ describe("积压的消息（flow-triage-failure / ACT-TRI-02）", () => {
   it("转换被拒绝（事件已不是未判定）：显示服务端原因，不假装成功", async () => {
     const b = backend({ sources: [rss], events: [ev("e1")] });
     mount(b.impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const region = within(await screen.findByRole("region", { name: "积压的消息" }));
     await region.findByText(/subject-e1/);
     b.events[0].disposition = "ignored"; // 别处已处置
@@ -295,7 +306,7 @@ describe("积压的消息（flow-triage-failure / ACT-TRI-02）", () => {
   it("打过分时才出现按预估排序：请求带 sort=score，按服务端顺序显示预估值得看的百分比", async () => {
     const b = backend({ sources: [rss], events: [ev("e1"), { ...ev("e2"), score: 0.05 }, { ...ev("e3"), score: 0.9 }] });
     mount(b.impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const region = within(await screen.findByRole("region", { name: "积压的消息" }));
     await region.findByText(/subject-e1/);
     expect(b.calls.some((c) => c.path.includes("sort=score"))).toBe(false);
@@ -308,7 +319,7 @@ describe("积压的消息（flow-triage-failure / ACT-TRI-02）", () => {
 
   it("没打过分时没有分数，也没有按预估排序", async () => {
     mount(backend({ sources: [rss], events: [ev("e1")] }).impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const region = within(await screen.findByRole("region", { name: "积压的消息" }));
     await region.findByText(/subject-e1/);
     expect(region.queryByRole("checkbox")).not.toBeInTheDocument();
@@ -318,7 +329,7 @@ describe("积压的消息（flow-triage-failure / ACT-TRI-02）", () => {
   it("可逐条忽略，也可两步确认后忽略本来源全部（含已过期的）", async () => {
     const b = backend({ sources: [rss], events: [ev("e1"), ev("e2"), ev("e3", "expired"), ev("e4")] });
     mount(b.impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const region = within(await screen.findByRole("region", { name: "积压的消息" }));
     await region.findByText(/subject-e1/);
     expect(region.queryByText(/unjudged|expired/)).not.toBeInTheDocument();
@@ -335,7 +346,7 @@ describe("积压的消息（flow-triage-failure / ACT-TRI-02）", () => {
 
   it("空状态", async () => {
     mount(backend({ sources: [rss] }).impl);
-    await details("src_rss");
+    await details("新闻订阅");
     expect(await screen.findByText("没有积压的消息")).toBeInTheDocument();
   });
 });
@@ -344,7 +355,7 @@ describe("来源归到哪个项目、只进了简报的（§9.1、§9.3）", () 
   it("默认项目：PATCH 只带 default_project，按名字选；选「不归项目」发空串清除", async () => {
     const b = backend({ sources: [{ ...rss }], projects: [{ id: "prj_home", name: "家务" }] });
     mount(b.impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const pick = await screen.findByRole("combobox", { name: "归到哪个项目" });
     await screen.findByRole("option", { name: "家务" });
     await userEvent.selectOptions(pick, "prj_home");
@@ -360,7 +371,7 @@ describe("来源归到哪个项目、只进了简报的（§9.1、§9.3）", () 
   it("只进了简报的：只列 digest，可逐条转成建议，转后离开列表", async () => {
     const b = backend({ sources: [rss], events: [ev("d1", "digest"), ev("e1"), ev("d2", "digest")] });
     mount(b.impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const region = within(await screen.findByRole("region", { name: "只进了简报的" }));
     expect(await region.findByText(/subject-d1/)).toBeInTheDocument();
     expect(region.getByText(/subject-d2/)).toBeInTheDocument();
@@ -388,7 +399,7 @@ describe("积压的状态与未判定原因一一对应", () => {
     const reasons = ["model_unavailable", "models_paused", "outbound_unset", "restored"];
     const b = backend({ sources: [{ ...rss, outbound: { local: "full", external: "meta" } }], events: [...reasons.map((x, i): Ev => ({ ...ev("r" + i), unjudged_reason: x })), ev("x", "expired")] });
     mount(b.impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const region = within(await screen.findByRole("region", { name: "积压的消息" }));
     await region.findByText(/subject-r0/);
     while (region.queryByRole("button", { name: "加载更多" })) {
@@ -400,7 +411,7 @@ describe("积压的状态与未判定原因一一对应", () => {
     expect(region.getByText("模型已暂停")).toBeInTheDocument();
     expect(region.getByText("已放回，等你放开")).toBeInTheDocument();
     expect(region.getByText("已过期")).toBeInTheDocument();
-    const r = await row("src_rss");
+    const r = await row("新闻订阅");
     expect(r.queryByRole("radiogroup", { name: "发给外部模型时" })).not.toBeInTheDocument();
     await userEvent.click(region.getByRole("button", { name: "等你选外发范围" }));
     expect(await r.findByRole("radiogroup", { name: "发给外部模型时" })).toBeInTheDocument();
@@ -416,7 +427,7 @@ describe("积压徽章的去向随 rejudge_days", () => {
     const reasons = Object.keys(want) as (keyof typeof want)[];
     const b = backend({ sources: [rss], backlog: { count: 3, rejudge_days: days }, events: [...reasons.map((x, i): Ev => ({ ...ev("r" + i), unjudged_reason: x })), { ...ev("u"), unjudged_reason: "undecided" }] });
     mount(b.impl);
-    await details("src_rss");
+    await details("新闻订阅");
     const region = within(await screen.findByRole("region", { name: "积压的消息" }));
     await region.findByText(/subject-r0/);
     while (region.queryByRole("button", { name: "加载更多" })) {
@@ -439,8 +450,8 @@ describe("读取失败的记录（ACT-SRC-04）", () => {
   it("在高级里列出原因与原始行；分页用 next_after 加载更多", async () => {
     const b = backend({ sources: [rss], rejects: [rj(1), rj(2), rj(3)] });
     mount(b.impl);
-    await details("src_rss");
-    await openAdvanced(within(await screen.findByRole("region", { name: "来源 src_rss" })));
+    await details("新闻订阅");
+    await openAdvanced(within(await screen.findByRole("region", { name: "来源 新闻订阅" })));
     const region = within(await screen.findByRole("region", { name: "读取失败的记录" }));
     expect(await region.findByText(/reason-1/)).toBeInTheDocument();
     expect(region.getByText("{bad-1")).toBeInTheDocument();
@@ -454,7 +465,7 @@ describe("读取失败的记录（ACT-SRC-04）", () => {
 
   it("没有记录时显示空状态", async () => {
     mount(backend({ sources: [rss] }).impl);
-    await details("src_rss");
+    await details("新闻订阅");
     expect(await screen.findByText("没有读取失败的记录")).toBeInTheDocument();
   });
 });
@@ -464,7 +475,8 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     await screen.findByText("高级");
     await openAdvanced();
     const f = await screen.findByRole("region", { name: "自定义命令来源" });
-    await userEvent.type(within(f).getByLabelText("来源名"), id);
+    await userEvent.type(within(f).getByLabelText("名字"), "巡检"); // 替身程序没有接入声明，要本人起名
+    await userEvent.type(within(f).getByLabelText("内部标识"), id);
     await userEvent.type(within(f).getByLabelText("命令"), cmd);
     return f;
   }
@@ -477,10 +489,10 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "excerpt");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     const post = b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!;
-    expect(post.body).toEqual({ id: "src_check", type: "script", command: "/opt/check.sh", schedule: "15m", timeout: 30 });
+    expect(post.body).toEqual({ id: "src_check", name: "巡检", type: "script", command: "/opt/check.sh", schedule: "15m", timeout: 30 });
     expect(post.csrf).toBe("tok-1");
-    await row("src_check");
-    expect(within(f).getByLabelText("来源名")).toHaveValue("");
+    await row("巡检");
+    expect(within(f).getByLabelText("内部标识")).toHaveValue("");
   });
 
   it("周期按小时：每 2 小时得到 2h；间隔不是正整数时不能提交", async () => {
@@ -493,7 +505,7 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     await userEvent.selectOptions(within(f).getByLabelText("单位"), "h");
     await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "none");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
-    await row("src_h");
+    await row("巡检");
     expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body.schedule).toBe("2h");
   });
 
@@ -505,7 +517,7 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     expect(await within(f).findByRole("alert")).toHaveTextContent("only be registered in the Web UI");
     expect(within(f).getByLabelText("命令")).toHaveValue("/tmp/evil.sh");
-    expect(screen.queryByRole("listitem", { name: "src_x" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listitem", { name: "巡检" })).not.toBeInTheDocument();
   });
 
   it("缺必填项时不能提交", async () => {
@@ -526,7 +538,8 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
       await screen.findByText("高级");
       await openAdvanced();
       const f = await screen.findByRole("region", { name: "自定义命令来源" });
-      await userEvent.type(within(f).getByLabelText("来源名"), "src_obd");
+      await userEvent.type(within(f).getByLabelText("名字"), "验收来源");
+      await userEvent.type(within(f).getByLabelText("内部标识"), "src_obd");
       await userEvent.selectOptions(within(f).getByLabelText("这是什么"), "其他…");
       await userEvent.type(within(f).getByLabelText("类型名"), "acc-obd");
       await userEvent.type(within(f).getByLabelText("命令"), "/opt/obd.sh");
@@ -540,32 +553,32 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
 
     await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "full");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
-    const r = await row("src_obd");
+    const r = await row("验收来源");
     expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body).toMatchObject({ source_type: "acc-obd" });
     const put = b.calls.find((c) => c.method === "PUT")!;
     expect(put.path).toBe("/v1/settings/sources/src_obd/outbound");
     expect(put.body).toEqual({ local: "full", external: "full" });
     expect(put.csrf).toBe("tok-1");
-    await waitFor(() => expect(r.getByRole("group", { name: "src_obd 的外发范围" })).toHaveTextContent("发给本机模型时 全部内容 · 发给外部模型时 全部内容"));
+    await waitFor(() => expect(r.getByRole("group", { name: "验收来源 的外发范围" })).toHaveTextContent("发给本机模型时 全部内容 · 发给外部模型时 全部内容"));
   });
 
   it("显示服务端的两个范围；外部未选的直接展开且标「还没选 · n 条在等」；已选的点修改才展开", async () => {
     const b = backend({ sources: [{ ...rss, outbound: { local: "full", external: null } }, { ...hook, outbound: { local: "meta", external: "excerpt" } }], backlog: { count: 7, outbound_unset: 4 } });
     mount(b.impl);
-    const a = await row("src_rss");
+    const a = await row("新闻订阅");
     const ext = within(a.getByRole("radiogroup", { name: "发给外部模型时" }));
     expect(ext.getAllByRole("radio").every((x) => !(x as HTMLInputElement).checked)).toBe(true);
     expect(within(a.getByRole("radiogroup", { name: "发给本机模型时" })).getByRole("radio", { name: "全部内容" })).toBeChecked();
     expect(await a.findByText("还没选 · 4 条在等")).toBeInTheDocument();
-    const h = await row("src_hook");
-    expect(h.getByRole("group", { name: "src_hook 的外发范围" })).toHaveTextContent("发给本机模型时 只有标题 · 发给外部模型时 摘要和开头");
+    const h = await row("仓库推送");
+    expect(h.getByRole("group", { name: "仓库推送 的外发范围" })).toHaveTextContent("发给本机模型时 只有标题 · 发给外部模型时 摘要和开头");
     expect(h.queryByRole("radiogroup")).not.toBeInTheDocument();
   });
 
   it("改了先预览一条真实消息会发出什么，点「就这样发」才写回，以服务端回读为准", async () => {
     const b = backend({ sources: [{ ...hook, outbound: { local: "meta", external: "excerpt" } }], events: [ev("e1", "ignored"), ev("e2", "proposed")] });
     mount(b.impl);
-    const h = await row("src_hook");
+    const h = await row("仓库推送");
     await userEvent.click(h.getByRole("button", { name: "修改" }));
     const ext = within(h.getByRole("radiogroup", { name: "发给外部模型时" }));
     await userEvent.click(ext.getByRole("radio", { name: "摘要和开头" }));
@@ -584,19 +597,19 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
     await userEvent.click(h.getByRole("button", { name: "就这样发" }));
     await waitFor(() => expect(b.sources[0].outbound).toEqual({ local: "meta", external: "full" }));
     expect(b.calls.filter((c) => c.method === "PUT")).toHaveLength(1);
-    await waitFor(async () => expect((await row("src_hook")).getByRole("group", { name: "src_hook 的外发范围" })).toHaveTextContent("发给外部模型时 全部内容"));
+    await waitFor(async () => expect((await row("仓库推送")).getByRole("group", { name: "仓库推送 的外发范围" })).toHaveTextContent("发给外部模型时 全部内容"));
   });
 
   it("选「不发送」时预览说明不会发出去；还没有消息时说没有可预览的", async () => {
     const b = backend({ sources: [{ ...rss, outbound: { local: "full", external: null } }] });
     const first = mount(b.impl);
-    const a = await row("src_rss");
+    const a = await row("新闻订阅");
     await userEvent.click(within(a.getByRole("radiogroup", { name: "发给外部模型时" })).getByRole("radio", { name: "不发送" }));
     expect(await a.findByText("还没有消息可预览")).toBeInTheDocument();
     first.unmount();
     b.events.push(ev("e9", "ignored"));
     mount(b.impl);
-    const a2 = await row("src_rss");
+    const a2 = await row("新闻订阅");
     await userEvent.click(within(a2.getByRole("radiogroup", { name: "发给外部模型时" })).getByRole("radio", { name: "不发送" }));
     expect(await a2.findByText("这个来源的消息不会发出去")).toBeInTheDocument();
   });
@@ -607,12 +620,13 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
     await screen.findByText("高级");
     await openAdvanced();
     const f = await screen.findByRole("region", { name: "自定义命令来源" });
-    await userEvent.type(within(f).getByLabelText("来源名"), "src_p");
+    await userEvent.type(within(f).getByLabelText("名字"), "巡检");
+    await userEvent.type(within(f).getByLabelText("内部标识"), "src_p");
     await userEvent.type(within(f).getByLabelText("命令"), "/opt/p.sh");
     await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "none");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     expect(await within(f).findByRole("alert")).toHaveTextContent(/来源已登记，外发范围没存上.*store is unavailable/);
-    expect(await row("src_p")).toBeTruthy();
+    expect(await row("巡检")).toBeTruthy();
   });
 });
 
@@ -622,7 +636,7 @@ describe("处理积压四步（§9.3、设计 §6.5）", () => {
 
   it("没有积压时不出现", async () => {
     mount(backend({ sources: [rss], models: { judge: true } }).impl);
-    await row("src_rss");
+    await row("新闻订阅");
     expect(screen.queryByRole("region", { name: /积压的/ })).not.toBeInTheDocument();
   });
 
@@ -713,14 +727,14 @@ describe("找回升级前被自动忽略的消息（flow-backlog-restore / ACT-R
   it("先看条数（按来源分布，不写入）再执行；执行条数与预览一致，带 Idempotency-Key 与 CSRF", async () => {
     const b = backend({ sources: [rss, hook], restorable: [{ source: "src_rss", id: "a" }, { source: "src_rss", id: "b" }, { source: "src_hook", id: "c" }] });
     mount(b.impl);
-    await row("src_rss");
+    await row("新闻订阅");
     const r = await fill();
     expect(r.getByRole("button", { name: "放回积压" })).toBeDisabled(); // 没看条数不能执行
     await userEvent.click(r.getByRole("button", { name: "先看有几条" }));
     const pv = within(await r.findByRole("status", { name: "可找回" }));
     expect(pv.getByText("找到 3 条")).toBeInTheDocument();
-    expect(pv.getByText("src_rss · 2 条")).toBeInTheDocument();
-    expect(pv.getByText("src_hook · 1 条")).toBeInTheDocument();
+    expect(pv.getByText("新闻订阅 · 2 条")).toBeInTheDocument();
+    expect(pv.getByText("仓库推送 · 1 条")).toBeInTheDocument();
     const q = new URL(b.calls.find((c) => c.path.startsWith("/v1/source-events/restorable"))!.path, "http://x").searchParams;
     expect(q.get("from")).toBe(new Date("2030-01-01T00:00").toISOString());
     expect(q.get("source")).toBeNull();
@@ -739,7 +753,7 @@ describe("找回升级前被自动忽略的消息（flow-backlog-restore / ACT-R
   it("可限定来源；改条件后条数作废，必须重看", async () => {
     const b = backend({ sources: [rss, hook], restorable: [{ source: "src_rss", id: "a" }, { source: "src_hook", id: "c" }] });
     mount(b.impl);
-    await row("src_rss");
+    await row("新闻订阅");
     const r = await fill("src_hook");
     await userEvent.click(r.getByRole("button", { name: "先看有几条" }));
     await r.findByText("找到 1 条");
@@ -756,7 +770,7 @@ describe("找回升级前被自动忽略的消息（flow-backlog-restore / ACT-R
   it("没有命中时不能执行；被服务端拒绝时显示原因", async () => {
     const b = backend({ sources: [rss] });
     mount(b.impl);
-    await row("src_rss");
+    await row("新闻订阅");
     const r = await fill();
     await userEvent.click(r.getByRole("button", { name: "先看有几条" }));
     await r.findByText("找到 0 条");
@@ -765,5 +779,88 @@ describe("找回升级前被自动忽略的消息（flow-backlog-restore / ACT-R
     await userEvent.type(r.getByLabelText("到"), "2029-12-31T00:00");
     await userEvent.click(r.getByRole("button", { name: "先看有几条" }));
     expect(await r.findByRole("alert")).toHaveTextContent("from must be earlier than to");
+  });
+});
+
+describe("来源的显示名（§9.1）", () => {
+  it("列表与详情按名字称呼，id 只在「显示原始值」里", async () => {
+    mount(backend({ sources: [rss, hook] }).impl);
+    await row("新闻订阅");
+    await details("新闻订阅");
+    await screen.findByRole("region", { name: "来源 新闻订阅" });
+    expect(document.querySelector("main")!.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
+  });
+
+  it("「显示原始值」打开后名字旁出现 id", async () => {
+    localStorage.setItem("apa.raw", "1");
+    try {
+      mount(backend({ sources: [rss] }).impl);
+      expect((await row("新闻订阅")).getByText("src_rss")).toHaveClass("raw-id");
+    } finally {
+      localStorage.removeItem("apa.raw");
+    }
+  });
+
+  it("行内改名：PATCH 只带 name，以服务端回读为准；重名被拒时原地说明原因，名字不变", async () => {
+    const b = backend({ sources: [rss, hook] });
+    mount(b.impl);
+    const r = await row("新闻订阅");
+    await userEvent.click(r.getByRole("button", { name: "给新闻订阅改名" }));
+    const input = r.getByLabelText("名字");
+    expect(input).toHaveValue("新闻订阅");
+    await userEvent.clear(input);
+    await userEvent.type(input, "仓库推送");
+    await userEvent.click(r.getByRole("button", { name: "保存" }));
+    expect(await r.findByRole("alert")).toHaveTextContent("already named");
+    await userEvent.click(r.getByRole("button", { name: "取消" }));
+    expect(r.getByText("新闻订阅")).toBeInTheDocument();
+    await userEvent.click(r.getByRole("button", { name: "给新闻订阅改名" }));
+    await userEvent.clear(r.getByLabelText("名字"));
+    await userEvent.type(r.getByLabelText("名字"), "早报订阅");
+    await userEvent.click(r.getByRole("button", { name: "保存" }));
+    await row("早报订阅");
+    const patches = b.calls.filter((c) => c.method === "PATCH" && c.path === "/v1/sources/src_rss");
+    expect(patches.map((c) => c.body)).toEqual([{ name: "仓库推送" }, { name: "早报订阅" }]);
+    expect(patches.every((c) => c.csrf === "tok-1")).toBe(true);
+  });
+
+  it("新登记第一步起名：按界面语言预填来源程序声明的名字，随命令与类型变化；改过就以本人写的为准；没有声明时必须自己起", async () => {
+    const b = backend({ sources: [{ id: "src_mail", name: "邮件", type: "script", enabled: true }] });
+    mount(b.impl);
+    await screen.findByText("高级");
+    await openAdvanced();
+    const f = within(await screen.findByRole("region", { name: "自定义命令来源" }));
+    const name = f.getByLabelText("名字");
+    // 没有声明的程序：名字留空并提示，不起名就不发登记请求
+    await userEvent.type(f.getByLabelText("命令"), "/opt/qq.sh");
+    await waitFor(() => expect(b.calls.some((c) => c.path.startsWith("/v1/sources/declared-name?") && c.path.includes("command=%2Fopt%2Fqq.sh"))).toBe(true));
+    expect(name).toHaveValue("");
+    expect(name).toHaveAttribute("placeholder", "这个程序没有声明名字，请起一个");
+    await userEvent.type(f.getByLabelText("内部标识"), "src_mail_qq");
+    await userEvent.selectOptions(f.getByLabelText("发给外部模型时"), "none");
+    await userEvent.click(f.getByRole("button", { name: "登记" }));
+    expect(await f.findByRole("alert")).toHaveTextContent("请给这个来源起个名字");
+    expect(b.calls.some((c) => c.method === "POST" && c.path === "/v1/sources")).toBe(false);
+    // 有声明的程序：预填声明名，随类型变化；界面切到英文时预填英文那一份
+    await userEvent.clear(f.getByLabelText("命令"));
+    await userEvent.type(f.getByLabelText("命令"), "apple-pim-source");
+    await waitFor(() => expect(name).toHaveValue("Apple 邮件"));
+    await userEvent.selectOptions(f.getByLabelText("这是什么"), "日历");
+    await waitFor(() => expect(name).toHaveValue("Apple 日历"));
+    act(() => setChoice("en"));
+    try {
+      await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Apple Calendar"));
+    } finally {
+      act(() => setChoice("zh"));
+    }
+    // 本人改过就以本人写的为准，换命令也不覆盖
+    await userEvent.clear(name);
+    await userEvent.type(name, "QQ 邮箱");
+    await userEvent.clear(f.getByLabelText("命令"));
+    await userEvent.type(f.getByLabelText("命令"), "/opt/qq.sh");
+    expect(name).toHaveValue("QQ 邮箱");
+    await userEvent.click(f.getByRole("button", { name: "登记" }));
+    await row("QQ 邮箱");
+    expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body).toMatchObject({ id: "src_mail_qq", name: "QQ 邮箱", source_type: "calendar", command: "/opt/qq.sh" });
   });
 });

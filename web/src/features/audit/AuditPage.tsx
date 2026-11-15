@@ -5,7 +5,7 @@ import { PageHead } from "../../app/page";
 import { ActorBadge, type Step } from "../items/ItemsPage";
 import { locale, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
-import { useItemTitle, useNamed } from "../../app/names";
+import { useItemTitle, useNamed, useNames } from "../../app/names";
 import { useRaw } from "../../app/raw";
 import { useLabel, Val } from "../../app/values";
 import { EVENT, EVENT_INTERNAL } from "../../app/ids";
@@ -44,7 +44,9 @@ function Row({ e }: { e: AuditEvent }) {
   const t = useT(strings);
   const raw = useRaw();
   const title = useItemTitle(e.object.startsWith("itm_") ? e.object : null);
-  const what = e.object.startsWith("itm_") ? <Link to={"/items/" + e.object}>{title}</Link> : e.object;
+  const source = useNames("source");
+  // 对象按名字称呼：事项链到事项，来源（含对话捕获）用显示名；其余原样。
+  const what = e.object.startsWith("itm_") ? <Link to={"/items/" + e.object}>{title}</Link> : /^(src_|capture:)/.test(e.object) ? source(e.object) : e.object;
   return (
     <li>
       <span>

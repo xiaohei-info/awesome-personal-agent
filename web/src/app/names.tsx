@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ApiClient } from "./api";
 import { useSession } from "./session";
+import { useLang } from "./i18n";
+import { vocab } from "./vocab";
 
 // id → 显示名（设计 §4.2）：项目、来源、凭据、执行者按 id 显示名字，不让本人看 id、手打 id。
 // 每个 API 客户端各缓存一份，一个页面会话里只取一次；改名后调 forgetNames 让下次重取。
@@ -13,12 +15,14 @@ export interface Named {
 type Row = { id: string; name?: string; label?: string };
 const SOURCES: Record<NameKind, { path: string; key: string; name: (r: Row) => string }> = {
   project: { path: "/projects", key: "projects", name: (r) => r.name || r.id },
-  source: { path: "/sources", key: "sources", name: (r) => r.id },
+  source: { path: "/sources", key: "sources", name: (r) => r.name || r.id }, // 内核保证有显示名（§9.1）；id 只在旧服务端时兜底
   credential: { path: "/settings/tokens", key: "credentials", name: (r) => r.label || r.id },
   executor: { path: "/settings/executors", key: "executors", name: (r) => r.id },
 };
 
 const cache = new WeakMap<ApiClient, Map<NameKind, Promise<Named[]>>>();
+// 已取到的名单：后挂载的组件首帧就用上名字，不先闪一下 id。
+const resolved = new WeakMap<ApiClient, Map<NameKind, Named[]>>();
 
 export function loadNames(api: ApiClient, kind: NameKind): Promise<Named[]> {
   let m = cache.get(api);
@@ -26,7 +30,12 @@ export function loadNames(api: ApiClient, kind: NameKind): Promise<Named[]> {
   let p = m.get(kind);
   if (!p) {
     const s = SOURCES[kind];
-    p = api.get<Record<string, Row[]>>(s.path).then((r) => (r[s.key] ?? []).map((x) => ({ id: x.id, name: s.name(x) })));
+    p = api.get<Record<string, Row[]>>(s.path).then((r) => {
+      const list = (r[s.key] ?? []).map((x) => ({ id: x.id, name: s.name(x) }));
+      if (!resolved.has(api)) resolved.set(api, new Map());
+      resolved.get(api)!.set(kind, list);
+      return list;
+    });
     // 名字只是显示上的改进：取不到时退回显示 id，并允许下次重试。
     p.catch(() => m!.delete(kind));
     m.set(kind, p);
@@ -36,12 +45,13 @@ export function loadNames(api: ApiClient, kind: NameKind): Promise<Named[]> {
 
 export function forgetNames(api: ApiClient, kind: NameKind) {
   cache.get(api)?.delete(kind);
+  resolved.get(api)?.delete(kind);
 }
 
 /** 某类对象的列表（取到之前为空）。 */
 export function useNamed(kind: NameKind): Named[] {
   const { api } = useSession();
-  const [list, setList] = useState<Named[]>([]);
+  const [list, setList] = useState<Named[]>(() => resolved.get(api)?.get(kind) ?? []);
   useEffect(() => {
     let live = true;
     loadNames(api, kind).then((l) => live && setList(l), () => undefined);
@@ -52,11 +62,24 @@ export function useNamed(kind: NameKind): Named[] {
   return list;
 }
 
-/** 按 id 取显示名；名单里没有（或还没取到）时显示 id。 */
+/** 对话捕获的内部来源 capture:<项目>（§9.3）：不在来源登记里，按项目名称呼。 */
+export const CAPTURE_PREFIX = "capture:";
+
+/** 按 id 取显示名；名单里没有（或还没取到）时显示 id。来源里的对话捕获显示「对话捕获 · 项目名」。 */
 export function useNames(kind: NameKind): (id?: string | null) => string {
   const list = useNamed(kind);
+  const projects = useNamed("project");
+  const lang = useLang();
   const by = new Map(list.map((x) => [x.id, x.name]));
-  return (id) => (id ? by.get(id) ?? id : "");
+  const project = new Map(projects.map((x) => [x.id, x.name]));
+  return (id) => {
+    if (!id) return "";
+    if (kind === "source" && id.startsWith(CAPTURE_PREFIX)) {
+      const p = id.slice(CAPTURE_PREFIX.length);
+      return `${vocab[lang].captureSource} · ${project.get(p) ?? p}`;
+    }
+    return by.get(id) ?? id;
+  };
 }
 
 /** 选一个对象：显示名字，提交 id。当前值不在名单里时仍保留为一个选项，不丢。 */

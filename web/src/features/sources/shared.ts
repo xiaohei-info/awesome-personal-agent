@@ -16,6 +16,7 @@ export interface Outbound {
 }
 export interface Source {
   id: string;
+  name: string; // 显示名（§9.1）：内核保证有值；id 只在「显示原始值」里出现
   type: "pull" | "script" | "webhook";
   source_type?: string;
   command?: string;

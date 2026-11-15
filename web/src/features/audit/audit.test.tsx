@@ -23,6 +23,7 @@ function ledger(extra: Ev[] = [], fail?: () => Response | null) {
   const queries: URLSearchParams[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     if (url === "/v1/projects") return json(200, { projects: [] });
+    if (url === "/v1/sources") return json(200, { sources: [{ id: "src_mail_qq", name: "QQ 邮箱" }] });
     const u = new URL(url, "http://x");
     if (u.pathname !== "/v1/audit/events") return json(404, { code: "not_found", why: "no such route", next: "" });
     if ((init.method ?? "GET") !== "GET") throw new Error("audit page must be read-only");
@@ -66,6 +67,14 @@ describe("诊断 › 操作记录", () => {
     ]);
     expect(r.getAllByRole("listitem")[1]).toHaveTextContent(/你 · 网页\s*改了阶段 item_a/);
     expect(r.queryByText(/ship it|#2/)).not.toBeInTheDocument(); // 原始值只在「显示原始值」里
+  });
+
+  it("对象是来源时按名字称呼（§9.1）：改名、停用都写「QQ 邮箱」，不出现 src_", async () => {
+    mount(ledger([ev(4, "source.renamed", "src_mail_qq", A("human", "owner", "web")), ev(5, "source.disabled", "src_mail_qq", A("system", "kernel:sources", "clock"))]).impl);
+    const r = await rows();
+    await waitFor(() => expect(r.getAllByRole("listitem")[3]).toHaveTextContent(/改了来源名字 QQ 邮箱/));
+    expect(r.getAllByRole("listitem")[4]).toHaveTextContent("QQ 邮箱");
+    expect(document.querySelector("main")!.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
   });
 
   it("flow-why-audit: 打开「显示原始值」后每行带序号、类型与原因", async () => {

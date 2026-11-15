@@ -51,8 +51,9 @@ function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejectio
   };
   const project = useNames("project");
   const credential = useNames("credential");
+  const sourceName = useNames("source");
   const p = item.proposal;
-  const from = item.origin && t.from(item.origin.actor ? credential(item.origin.actor) : item.origin.source);
+  const from = item.origin && t.from(item.origin.actor ? credential(item.origin.actor) : sourceName(item.origin.source));
   const meta = [project(item.project), from].filter(Boolean).join(" · ");
   const pri = item.priority && item.priority !== "normal" ? item.priority : "";
 
@@ -173,6 +174,7 @@ export function ProposalsPage() {
   const shown = all.filter((i) => (!source || i.origin?.source === source) && (!project || i.project === project));
   const recommended = shown.filter((i) => i.proposal?.recommend).length;
   const projectName = useNames("project");
+  const sourceName = useNames("source");
   // 按推荐处理前先看清楚会发生什么：各推荐处置各有几条。
   const plan = (["accept", "attach", "dismiss"] as const)
     .map((a) => [a, shown.filter((i) => i.proposal?.recommend === a).length] as const)
@@ -249,7 +251,7 @@ export function ProposalsPage() {
               <select value={source} onChange={(e) => setSource(e.target.value)}>
                 <option value="">{t.all}</option>
                 {opts((i) => i.origin?.source).map((v) => (
-                  <option key={v} value={v}>{v}</option>
+                  <option key={v} value={v}>{sourceName(v)}</option>
                 ))}
               </select>
             </label>

@@ -322,6 +322,10 @@ button.link:hover { text-decoration-color: currentColor; }
 /* 行式列表里的块级内容占满一行 */
 .rows > li > :is(pre, ul, ol, p, form, .actions, .full) { flex-basis: 100%; margin: 0; }
 .rows > li > [role="group"] { display: flex; gap: 8px; }
+/* 来源行内改名：与名字同处一行，不占满整行 */
+.rows > li > form.rename { display: inline-flex; flex-basis: auto; flex-wrap: wrap; align-items: center; gap: 6px; }
+.rows > li > form.rename input { width: 12em; max-width: 100%; }
+.rows > li > form.rename [role="alert"] { flex-basis: 100%; }
 .rows .badge, .rows code { white-space: nowrap; }
 ul.plain { list-style: none; margin: 0; padding: 0; }
 ul.plain > li { padding: 2px 0; }
