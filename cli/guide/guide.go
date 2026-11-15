@@ -49,6 +49,7 @@ Exit codes:
 Deciding for the user (decide, accept, dismiss, item update/transition, ...) needs exactly one basis:
   --evidence <the user's own words> (with APA_SESSION, and APA_SESSION_KIND=direct: a private chat with the user; group/unknown/unset is refused with exit 23), or --grant <id> (a grant the user issued in the Web UI; see apa grant list).
   Passing both is exit 2. Grants are issued and revoked only in the Web UI.
+  In a background run there are no user's words: apa grant list shows only the grants the user allowed for background runs of this Agent, and they apply only to this run's items. Exit 23 means the grant does not apply here (not allowed in background, outside this run's items, or the run or proposal came from an untrusted sender); use apa ask instead.
 
 Print the standing-instruction template: apa guide --template
 `

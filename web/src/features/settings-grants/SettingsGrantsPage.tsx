@@ -13,10 +13,10 @@ import { useRaw } from "../../app/raw";
 // 本页只搬运输入并如实展示服务端的回答；授权单内容不可改，所以没有编辑或延长，只有撤销后重签。
 interface Grant {
   id: string;
-  grantee: { credential: string; harness?: string };
-  scope: { projects: string[]; kinds: string[]; items: string[] };
+  grantee: { credential?: string; harness?: string; agent?: string; background?: boolean };
+  scope: { projects: string[]; kinds: string[]; items: string[]; all?: boolean };
   actions: string[];
-  expires_at: string;
+  expires_at?: string; // 没有即长期有效（签给 Agent 的单）
   reason?: string;
   created_at: string;
   revoked_at?: string;
@@ -44,7 +44,7 @@ const split = (s: string) => s.split(/[\s,，]+/).filter(Boolean);
 
 function status(g: Grant, now = Date.now()): "revoked" | "expired" | "active" {
   if (g.revoked_at) return "revoked";
-  return Date.parse(g.expires_at) <= now ? "expired" : "active";
+  return g.expires_at && Date.parse(g.expires_at) <= now ? "expired" : "active";
 }
 
 function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | null) => void; onChanged: () => Promise<void> }) {
@@ -57,7 +57,7 @@ function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | n
   const label = useLabel();
   const cred = useNames("credential");
   const project = useNames("project");
-  const scope = [
+  const scope = g.scope.all ? t.allScope : [
     ...g.scope.projects.map((p) => project(p)),
     ...g.scope.kinds.map((k) => label("itemKind", k)),
     ...g.scope.items,
@@ -83,12 +83,12 @@ function GrantRow({ g, onError, onChanged }: { g: Grant; onError: (m: string | n
 
   return (
     <li data-grant={g.id}>
-      <strong>{t.can(cred(g.grantee.credential), g.actions.map((a) => label("grantAction", a)).join(t.listSep))}</strong> <span className={"badge" + (st === "active" ? " ok" : st === "expired" ? " warn" : "")}>{t.status[st]}</span>
+      <strong>{t.can(g.grantee.agent ? t.agentWho : cred(g.grantee.credential ?? ""), g.actions.map((a) => label("grantAction", a)).join(t.listSep))}</strong> <span className={"badge" + (st === "active" ? " ok" : st === "expired" ? " warn" : "")}>{t.status[st]}</span>
       {g.revoked_at && g.revoked_reason ? <span className="sub">{t.reasonParen(g.revoked_reason)}</span> : ""}
       <div className="sub full">
         {scope && t.within(scope)}
         {g.grantee.harness ? t.harnessOnly(g.grantee.harness) : ""}
-        {t.until(new Date(g.expires_at).toLocaleString(locale()))}
+        {g.expires_at && t.until(new Date(g.expires_at).toLocaleString(locale()))}
         {g.reason ? ` · ${g.reason}` : ""}
         {raw && <code className="raw-id">{g.id}</code>}
       </div>

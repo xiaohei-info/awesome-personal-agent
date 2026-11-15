@@ -64,6 +64,11 @@ type Caller struct {
 	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
 	// RunDepth 只有运行凭据有值：运行记录的链路深度，本运行发出的命令据它继承（§14.9）。
 	RunDepth int
+	// RunHarness 只有运行凭据有值：运行记录上内核记的 harness，agent 式授权单按它匹配（§14.5），不是自报的 Actor.Harness。
+	// 唤醒租约期间被降级的 delegate 没有它，所以用不了授权单。
+	RunHarness string
+	// RunTrusted 只有运行凭据有值：据账本判断触发这次运行的内容是否可信（§14.5）；只在运行带着授权单时调用。
+	RunTrusted func(tx *store.Tx) (bool, error)
 }
 
 // Identity 在事务内把请求携带的凭据确定为 Caller。
@@ -543,7 +548,8 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 		}
 	}
 	var grant *policy.Grant
-	if req.Grant != "" && caller.Level == authz.LevelDelegate {
+	grantable := caller.Level == authz.LevelDelegate || (caller.Level == authz.LevelRun && caller.RunHarness != "")
+	if req.Grant != "" && grantable {
 		g, err := policy.GetGrant(tx, req.Grant)
 		var de *domain.Error
 		if errors.As(err, &de) && de.Code == domain.CodeNotFound {
@@ -555,11 +561,18 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 			return Result{}, Commit{}, err
 		}
 	}
+	trigger := false
+	if grant != nil && caller.Level == authz.LevelRun && caller.RunTrusted != nil {
+		if trigger, err = caller.RunTrusted(tx); err != nil {
+			return Result{}, Commit{}, err
+		}
+	}
 	decided := authz.TierNone
 	for _, act := range actions {
 		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
 			Evidence: req.Evidence, Tier: tier, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender,
-			Command: spec.Name, GrantID: req.Grant, Grant: grant, Credential: caller.Credential, Now: x.now()}
+			Command: spec.Name, GrantID: req.Grant, Grant: grant, Credential: caller.Credential, Now: x.now(),
+			CredentialHarness: caller.CredentialHarness, RunHarness: caller.RunHarness, TriggerTrusted: trigger}
 		d := authz.Decide(pol, ar)
 		if d.Err == nil {
 			decided = max(decided, authz.TierOf(ar))
@@ -582,8 +595,11 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 		caller.Actor.OnBehalfOf = ""
 	}
 	usedGrant := ""
-	if req.Grant != "" && caller.Level == authz.LevelDelegate && decided >= authz.TierDecide {
+	if req.Grant != "" && grantable && decided >= authz.TierDecide {
 		usedGrant = req.Grant
+		if caller.Level == authz.LevelRun { // 运行凭据凭单代本人决定：Event 记替谁（§14.5），运行 id 保留在 Actor.Run
+			caller.Actor.OnBehalfOf = grant.Principal
+		}
 	}
 	// 3 校验：幂等 → 乐观版本 → 命令自身约束
 	hash := sha256.Sum256(req.Input)

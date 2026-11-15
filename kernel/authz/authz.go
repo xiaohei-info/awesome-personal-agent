@@ -19,7 +19,7 @@ const (
 	LevelObserver Level = "observer"
 	LevelWorker   Level = "worker"
 	LevelDelegate Level = "delegate"
-	LevelRun      Level = "run" // 运行凭据：worker 级，绑定一次运行，没有代答能力
+	LevelRun      Level = "run" // 运行凭据：worker 级，绑定一次运行；只凭允许后台使用的 agent 式授权单代本人决定（§14.5）
 	LevelWeb      Level = "web"
 )
 
@@ -84,6 +84,10 @@ type Object struct {
 	// ToProject 非 nil 表示命令要把对象移入该项目（空串为移出）：授权单要求来源和目标都在范围内（§14.5）。
 	ToProject *string
 
+	// OriginTrusted：对象（建议）来自一条发件人已核实且在该来源转发白名单内的来源事件（§14.5 来源可信）。
+	// 由登记命令的模块据账本填；agent 自己提出的、对话捕获产生的都为假。
+	OriginTrusted bool
+
 	// Creator 仅供调用方留痕；判定从不读取它（§14.4 判定不来自事项创建者）。
 	Creator domain.Actor
 }
@@ -108,6 +112,13 @@ type Request struct {
 	Grant      *policy.Grant
 	Credential string
 	Now        time.Time
+
+	// agent 式授权单的匹配只用内核记录的值（§14.5）：CredentialHarness 是凭据的 harness 列，RunHarness 是运行记录的 harness；
+	// 都不是调用方自报的 Actor.Harness。RunHarness 为空的运行级调用（唤醒租约期间被降级的 delegate）不能用授权单。
+	CredentialHarness string
+	RunHarness        string
+	// TriggerTrusted：触发这次运行的内容可信（§14.5 后台运行使用授权单）；只对运行凭据有意义，由管线据账本填。
+	TriggerTrusted bool
 }
 
 type Verdict string
@@ -165,8 +176,12 @@ func Decide(p policy.Policy, r Request) Decision {
 				return deny(domain.CodeInvalidRequest, "give either the owner's words or a grant, not both", "resend with only one basis")
 			}
 		case LevelWeb: // 本人在 Web 不需要授权单，忽略
+		case LevelRun:
+			if r.RunHarness == "" {
+				return denied() // 唤醒租约期间被降级的 delegate：没有运行记录，先换取运行凭据（§13.6、§14.5）
+			}
 		default:
-			return denied() // 授权单只对 delegate 凭据生效；运行凭据（含唤醒租约期间的 token）没有代答能力
+			return denied() // observer、worker 没有代答能力
 		}
 	}
 	var d Decision
@@ -182,7 +197,7 @@ func Decide(p policy.Policy, r Request) Decision {
 	case ActionDelegate:
 		d = byLevel(r, own(r), true, r.Object.InRunScope)
 	case ActionEditAnyItem:
-		d = byLevel(r, false, true, false)
+		d = byLevel(r, false, true, runGrant(r))
 	case ActionAnswerDecision:
 		d = answerDecision(p, r)
 	case ActionManageProject, ActionManageSource:
@@ -197,7 +212,7 @@ func Decide(p policy.Policy, r Request) Decision {
 	default:
 		return deny(domain.CodeInvalidRequest, "unknown action "+string(r.Action), "see apa guide")
 	}
-	if d.Verdict == Allow && r.Level == LevelDelegate && TierOf(r) >= TierDecide {
+	if d.Verdict == Allow && (r.Level == LevelDelegate || runGrant(r)) && TierOf(r) >= TierDecide {
 		d = needBasis(p, r)
 	}
 	if d.Verdict != Allow {
@@ -215,6 +230,9 @@ func validLevel(r Request) bool {
 	}
 	return false
 }
+
+// runGrant：运行凭据带着授权单。放行与否由 needBasis 里的授权单校验决定（含运行范围），这里只是不按"运行凭据没有代答能力"直接拒绝。
+func runGrant(r Request) bool { return r.Level == LevelRun && r.GrantID != "" }
 
 func own(r Request) bool { return r.Object.Assignee != "" && r.Object.Assignee == r.Actor.Principal }
 
@@ -271,29 +289,47 @@ func needBasis(p policy.Policy, r Request) Decision {
 // grantMismatch 按 §14.5 的顺序逐项校验授权单，返回第一个不符的原因；空串表示放行。
 func grantMismatch(p policy.Policy, r Request) string {
 	g, o := r.Grant, r.Object
+	run := r.Level == LevelRun
 	switch {
 	case g == nil:
 		return "grant " + r.GrantID + " does not exist"
-	case g.Grantee.Credential != r.Credential:
+	case g.Grantee.Agent == "" && run:
+		return "grant_not_for_background: the grant was issued to a token, not to this Agent's background runs"
+	case g.Grantee.Agent == "" && g.Grantee.Credential != r.Credential:
 		return "grant was issued to another credential"
-	case g.Grantee.Harness != "" && g.Grantee.Harness != r.Actor.Harness:
+	case g.Grantee.Agent == "" && g.Grantee.Harness != "" && g.Grantee.Harness != r.Actor.Harness:
 		return "grant is limited to another harness"
+	case g.Grantee.Agent != "" && !run && g.Grantee.Agent != r.CredentialHarness:
+		return "grant was issued to another Agent"
+	case g.Grantee.Agent != "" && run && g.Grantee.Agent != r.RunHarness:
+		return "grant was issued to another Agent"
+	case run && !g.Grantee.Background:
+		return "grant_not_for_background: the owner did not allow this grant in background runs"
 	case !g.RevokedAt.IsZero():
 		return "grant was revoked"
-	case !r.Now.Before(g.ExpiresAt):
+	case !g.ExpiresAt.IsZero() && !r.Now.Before(g.ExpiresAt):
 		return "grant has expired"
 	case !contains(g.Actions, r.Command):
 		return "grant does not cover " + r.Command
 	case !inScope(g.Scope, o.Kind, o.Project, o.ID) || (o.ToProject != nil && !inScope(g.Scope, o.Kind, *o.ToProject, o.ID)):
 		return "object is outside the grant scope"
+	case run && !o.InRunScope:
+		return "object is outside this run's scope: a grant does not widen what a background run may write"
 	case g.RiskCeiling == policy.RiskNormal && (WebOnly(p, o) || o.ScreeningPending):
 		return "object risk exceeds the grant's risk ceiling"
+	case g.Grantee.Agent != "" && (r.Command == "proposal.accept" || r.Command == "proposal.attach") && !o.OriginTrusted:
+		return "untrusted_origin: this proposal did not come from a trusted sender, so it can only be accepted by the owner"
+	case run && !r.TriggerTrusted:
+		return "untrusted_trigger: this run was started by content from an untrusted sender, so it cannot use grants"
 	}
 	return ""
 }
 
 // inScope：scope 的非空项都命中才算在范围内。授权单不继承到子事项，所以只比对象自己的字段。
 func inScope(s policy.Scope, kind, project, id string) bool {
+	if s.All {
+		return true
+	}
 	return (len(s.Projects) == 0 || contains(s.Projects, project)) &&
 		(len(s.Kinds) == 0 || contains(s.Kinds, kind)) &&
 		(len(s.Items) == 0 || contains(s.Items, id))
@@ -311,8 +347,8 @@ func answerDecision(p policy.Policy, r Request) Decision {
 	if r.Level == LevelWeb {
 		return allow
 	}
-	if r.Level != LevelDelegate {
-		return denied() // observer/worker/运行凭据：没有代答能力（运行凭据为退出码 4）
+	if r.Level != LevelDelegate && !runGrant(r) {
+		return denied() // observer/worker/不带授权单的运行凭据：没有代答能力（运行凭据为退出码 4）
 	}
 	if WebOnly(p, r.Object) {
 		return needWeb(r, "this decision is web_only and can only be answered by the owner in the Web UI")

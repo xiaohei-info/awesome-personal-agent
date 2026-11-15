@@ -169,7 +169,7 @@ func dismiss(c *client.Ctx, args []string) error {
 
 const grantUsage = "usage: apa grant list"
 
-// grant list 只读：列出该凭据名下未撤销、未过期的授权单。签发和撤销只在 Web，这里没有对应的写命令。
+// grant list 只读：列出调用者能用的有效授权单（delegate：凭据名下的与签给所属 Agent 的；运行凭据：签给该 Agent 且允许后台使用的）。签发和撤销只在 Web，这里没有对应的写命令。
 func grant(c *client.Ctx, args []string) error {
 	if len(args) != 1 || args[0] != "list" {
 		return usage("apa grant takes the subcommand list", grantUsage)

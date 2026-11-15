@@ -121,9 +121,11 @@ func TestIssueGrantRejectsInvalidGrants(t *testing.T) {
 		"unknown action":        func(in *GrantInput) { in.Actions = []string{"item.delete"} },
 		"web-only-only action":  func(in *GrantInput) { in.Actions = []string{"project.update"} },
 		"risk above normal":     func(in *GrantInput) { in.RiskCeiling = "web_only" },
-		"no expiry":             func(in *GrantInput) { in.ExpiresAt = time.Time{} },
 		"expired":               func(in *GrantInput) { in.ExpiresAt = time.Now().Add(-time.Minute) },
-		"over 90 days":          func(in *GrantInput) { in.ExpiresAt = time.Now().Add(91 * 24 * time.Hour) },
+		"all plus projects":     func(in *GrantInput) { in.Scope = Scope{All: true, Projects: []string{"p"}} },
+		"agent and credential":  func(in *GrantInput) { in.Grantee.Agent = "hermes" },
+		"agent with spaces":     func(in *GrantInput) { in.Grantee = Grantee{Agent: "her mes"} },
+		"background on a token": func(in *GrantInput) { in.Grantee.Background = true },
 		"worker grantee":        func(in *GrantInput) { in.Grantee.Credential = wrk.ID },
 		"revoked grantee":       func(in *GrantInput) { in.Grantee.Credential = revoked.ID },
 		"unknown grantee":       func(in *GrantInput) { in.Grantee.Credential = "cred_nope" },
@@ -140,10 +142,67 @@ func TestIssueGrantRejectsInvalidGrants(t *testing.T) {
 		t.Fatalf("rejected grants must not log events, got %d", n)
 	}
 	in := validInput(dlg.ID)
-	in.ExpiresAt = time.Now().Add(89 * 24 * time.Hour)
-	if _, err := issue(t, s, a, owner, in); err != nil {
-		t.Fatalf("89 days is within the limit: %v", err)
+	in.ExpiresAt = time.Time{}
+	g, err := issue(t, s, a, owner, in)
+	if err != nil {
+		t.Fatalf("a grant without expiry lasts until revoked: %v", err)
 	}
+	if !g.Active(time.Now().Add(10 * 365 * 24 * time.Hour)) {
+		t.Fatalf("long-lived grant must stay active: %+v", g)
+	}
+}
+
+// Agent 式授权单（§6.13）：不随钥匙失效；替换在同一事务里撤旧签新；actions 为空只撤不签；只有 Web 本人能替换。
+func TestReplaceAgentGrant(t *testing.T) {
+	s, a := openGrants(t)
+	replace := func(actor domain.Actor, in GrantInput) (rev []string, g *Grant, err error) {
+		err = s.Update(ctx, func(tx *store.Tx) (err error) {
+			rev, g, err = ReplaceAgentGrant(tx, a, actor, time.Now(), "hermes", in)
+			return
+		})
+		return
+	}
+	agentGrants := func() []Grant {
+		var out []Grant
+		if err := s.View(ctx, func(tx *store.Tx) (err error) { out, err = AgentGrants(tx, "hermes", time.Now()); return }); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	in := GrantInput{Grantee: Grantee{Background: true}, Scope: Scope{All: true}, Actions: []string{"proposal.dismiss"}}
+	if _, _, err := replace(agent, in); !isCode(err, domain.CodeWebOnly) {
+		t.Fatalf("agent replacing: %v", err)
+	}
+	_, g1, err := replace(owner, in)
+	if err != nil || g1 == nil || g1.Grantee.Agent != "hermes" || !g1.Grantee.Background || !g1.ExpiresAt.IsZero() {
+		t.Fatalf("first: %+v %v", g1, err)
+	}
+	in.Actions = []string{"proposal.dismiss", "decision.answer"}
+	rev, g2, err := replace(owner, in)
+	if err != nil || len(rev) != 1 || rev[0] != g1.ID || g2 == nil {
+		t.Fatalf("second: %v %+v %v", rev, g2, err)
+	}
+	if got := agentGrants(); len(got) != 1 || got[0].ID != g2.ID {
+		t.Fatalf("only the new grant stays active: %+v", got)
+	}
+	bad := in
+	bad.Actions = []string{"project.update"}
+	if _, _, err := replace(owner, bad); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid replacement: %v", err)
+	}
+	if got := agentGrants(); len(got) != 1 || got[0].ID != g2.ID {
+		t.Fatalf("a failed replacement must keep the old grant: %+v", got)
+	}
+	in.Actions = nil
+	rev, g3, err := replace(owner, in)
+	if err != nil || g3 != nil || len(rev) != 1 || len(agentGrants()) != 0 {
+		t.Fatalf("empty actions only revokes: %v %+v %v", rev, g3, err)
+	}
+}
+
+func isCode(err error, c domain.Code) bool {
+	var de *domain.Error
+	return errors.As(err, &de) && de.Code == c
 }
 
 func TestOnlyWebOwnerIssuesAndRevokes(t *testing.T) {

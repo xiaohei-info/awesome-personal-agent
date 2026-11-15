@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist/trust"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
@@ -203,6 +204,9 @@ func (i Identity) Authenticate(tx *store.Tx) (command.Caller, error) {
 		Level:    authz.LevelRun,
 		RunScope: scope(target),
 		RunDepth: rec.Run.ChainDepth,
+		// 授权单只按运行记录的 harness 匹配；Actor.Harness 可以是调用方自报的，只作留痕（§14.5）。
+		RunHarness: rec.Run.Harness,
+		RunTrusted: func(tx *store.Tx) (bool, error) { return trust.TriggerTrusted(tx, target.ID) },
 	}, nil
 }
 

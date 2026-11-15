@@ -262,12 +262,13 @@ func TestIssueValidationFailuresAreInvalidRequestAndWriteNothing(t *testing.T) {
 	d, _ := e.token(auth.Delegate)
 	w, _ := e.token(auth.Worker)
 	for name, b := range map[string]string{
-		"no expiry":      `{"grantee":{"credential":"` + d.ID + `"},"scope":{"projects":["p1"]},"actions":["decision.answer"]}`,
-		"over 90 days":   body(d.ID, 91),
-		"worker grantee": body(w.ID, 7),
-		"wildcard":       strings.Replace(body(d.ID, 7), `"decision.answer"`, `"*"`, 1),
-		"empty scope":    strings.Replace(body(d.ID, 7), `"projects":["p1"]`, `"projects":[]`, 1),
-		"not json":       `{`,
+		"past expiry":           body(d.ID, -1),
+		"agent and token":       strings.Replace(body(d.ID, 7), `"credential"`, `"agent":"hermes","credential"`, 1),
+		"background on a token": strings.Replace(body(d.ID, 7), `"credential"`, `"background":true,"credential"`, 1),
+		"worker grantee":        body(w.ID, 7),
+		"wildcard":              strings.Replace(body(d.ID, 7), `"decision.answer"`, `"*"`, 1),
+		"empty scope":           strings.Replace(body(d.ID, 7), `"projects":["p1"]`, `"projects":[]`, 1),
+		"not json":              `{`,
 	} {
 		if r := e.web("POST", "/v1/settings/grants", b); r.Code != 400 || code(t, r) != domain.CodeInvalidRequest {
 			t.Errorf("%s: %d %s", name, r.Code, r.Body)
@@ -280,5 +281,48 @@ func TestIssueValidationFailuresAreInvalidRequestAndWriteNothing(t *testing.T) {
 	e.st.View(context.Background(), func(tx *store.Tx) error { g, _ := policy.ListGrants(tx); n = len(g); return nil })
 	if n != 0 {
 		t.Fatalf("rejected requests must write nothing, got %d grants", n)
+	}
+}
+
+// PUT /settings/agents/{harness}/grant（附录 B.2）：只有 Web 本人；同一事务撤旧签新；actions 为空只撤不签。
+// 签给 Agent 的单不另需钥匙，凭据归属该 Agent 的 delegate 在 GET /grants 里也能看到它。
+func TestReplaceAgentGrantRoute(t *testing.T) {
+	e := setup(t)
+	_, ds := e.token(auth.Delegate)
+	var hermes string
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) (err error) {
+		_, hermes, err = e.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, Label: "hermes", Harness: "hermes"})
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	put := `{"grantee":{"background":true},"scope":{"all":true},"actions":["proposal.dismiss"]}`
+	if r := e.do("PUT", "/v1/settings/agents/hermes/grant", put, as(ds)); r.Code != 403 || code(t, r) != domain.CodeWebOnly {
+		t.Fatalf("delegate replacing: %d %s", r.Code, r.Body)
+	}
+	var first struct {
+		Grant   *policy.Grant `json:"grant"`
+		Revoked []string      `json:"revoked"`
+	}
+	r := e.web("PUT", "/v1/settings/agents/hermes/grant", put)
+	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &first) != nil || first.Grant == nil || first.Grant.Grantee.Agent != "hermes" || len(first.Revoked) != 0 {
+		t.Fatalf("first: %d %s", r.Code, r.Body)
+	}
+	if got := e.mine(hermes); len(got) != 1 || got[0].ID != first.Grant.ID {
+		t.Fatalf("the Agent's delegate token sees the Agent's grant: %+v", got)
+	}
+	if got := e.mine(ds); len(got) != 0 {
+		t.Fatalf("a token of no Agent sees nothing: %+v", got)
+	}
+	var second struct {
+		Grant   *policy.Grant `json:"grant"`
+		Revoked []string      `json:"revoked"`
+	}
+	r = e.web("PUT", "/v1/settings/agents/hermes/grant", `{"grantee":{"background":true},"scope":{"all":true},"actions":[]}`)
+	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &second) != nil || second.Grant != nil || len(second.Revoked) != 1 || second.Revoked[0] != first.Grant.ID {
+		t.Fatalf("empty actions only revokes: %d %s", r.Code, r.Body)
+	}
+	if got := e.mine(hermes); len(got) != 0 {
+		t.Fatalf("revoked grant must drop out: %+v", got)
 	}
 }
