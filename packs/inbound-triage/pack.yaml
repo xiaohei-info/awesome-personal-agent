@@ -26,10 +26,18 @@ source_rules:
   - id: agents-md-changed
     match: {source_type: github, event_type: [repo.agents_md_changed]}
     then: ignore
-  # PR 上的评论与评审同 pr.updated；issue 上的评论同 issue.updated，没有规则（交初筛）。
   - id: pr-activity
-    match: {source_type: github, event_type: [pr.merged, pr.closed, pr.updated, pr.commented, pr.review_commented, pr.reviewed]}
+    match: {source_type: github, event_type: [pr.merged, pr.closed, pr.updated]}
     then: ignore
+  # 评论与评审是关于对象的消息，不是对象本身的更新：挂到已有事项时只记为后续消息，不改标题、正文与摘要（§9.4）。
+  - id: pr-discussion
+    match: {source_type: github, event_type: [pr.commented, pr.review_commented, pr.reviewed]}
+    then: ignore
+    on_update: attach
+  - id: issue-comment
+    match: {source_type: github, event_type: [issue.commented]}
+    then: judge
+    on_update: attach
 webhook_schemes:
   - id: hmac-sha256-header
     signature_header: X-Hub-Signature-256

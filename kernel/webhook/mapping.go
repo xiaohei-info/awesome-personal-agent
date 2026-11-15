@@ -128,11 +128,8 @@ func (c exprCtx) matches(m map[string]any) (bool, error) {
 	return true, nil
 }
 
-// detailLimit 是缺省的事件详情长度：映射没写 detail 时取原始 payload 的这一段作资料。
-const detailLimit = 16 << 10
-
 // mapEvent 按字段映射把 payload 转成标准事件（§9.2）。
-// 缺省：id 取投递键、subject 取 type、occurred_at 取接收时间；sender_verified 只在声明 on_signature 且签名方案通过时为真。
+// 缺省：id 取投递键、subject 取 type、occurred_at 取接收时间；没写 detail 就不带 detail（原始 payload 只留在接收记录里，不充当正文）；sender_verified 只在声明 on_signature 且签名方案通过时为真。
 func mapEvent(m packs.WebhookMapping, c exprCtx, body []byte, deliveryKey string, received time.Time, signed bool) (runner.IngestEvent, error) {
 	f := func(name string) string {
 		s, _ := m.Fields[name].(string)
@@ -145,9 +142,6 @@ func mapEvent(m packs.WebhookMapping, c exprCtx, body []byte, deliveryKey string
 	}
 	if ev.Subject == "" {
 		ev.Subject = ev.Type
-	}
-	if ev.Detail == "" {
-		ev.Detail = string(body[:min(len(body), detailLimit)])
 	}
 	if at := f("occurred_at"); at != "" {
 		t, err := time.Parse(time.RFC3339, at)

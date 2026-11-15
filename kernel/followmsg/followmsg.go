@@ -329,7 +329,8 @@ func (s *Service) wake(ctx context.Context, item string, ev domain.SourceEvent) 
 	return err
 }
 
-// refresh 用同一来源对象的新事件刷新它建出的事项（字段同入站建事项时的映射，只写非空的）。
+// refresh 用同一来源对象的新事件刷新它建出的事项：只写对象自己的规范化字段（标题、摘要、正文文本）里非空的，
+// 都为空时不写。关于对象的消息（评论、评审）由规则声明 on_update: attach，走 echo，不到这里（§9.4）。
 // 这些事项没有执行者，写入以本人登记该来源为依据，代本人执行（同入站规则的自动接受）。
 func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEvent) error {
 	patch := map[string]string{"id": item, "reason": "source object updated by " + ev.Type + " " + ev.ID}
@@ -338,8 +339,8 @@ func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEven
 			patch[k] = v
 		}
 	}
-	if _, ok := patch["title"]; !ok {
-		patch["title"] = ev.Type
+	if len(patch) == 2 {
+		return nil
 	}
 	in, _ := json.Marshal(patch)
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: s.onBehalf(), Command: "item.update", Input: in, IdemKey: "followmsg:update:" + ev.ID,

@@ -36,7 +36,7 @@
 | K-08 | 来源事件的处置与未判定原因 [B1、F4] | 处置：`pending`、`attached`、`proposed`、`ignored`、`unjudged`、`expired`；原因：`model_unavailable`、`undecided` | 处置新增 `digest`、`alerted`；原因新增 `outbound_unset` 与 `restored`（N-25），`undecided` 不再产生。来源事件新增 `metrics`、`merge_key`、`items[]`、`judgment` | §6.10、§9.3 |
 | K-09 | Source 执行契约的标准事件 [A6、B5] | 固定字段 | 新增三个可选字段：`metrics`（数值字典）、`items[]`（聚合消息，每条 `{sender, text, at}`，至多 200 条）、`merge_key`。契约版本号不变 | §9.2 |
 | K-10 | 邮件来源的关联键 [A3] | 邮件适配器不产出关联键 | 以线程根邮件的 Message-ID 为关联键，回信与原信共用；邮件规则默认 `on_update: attach` | §9.4、§9.7、附录 D.2 |
-| K-11 | 归属：回音让等待中的事项回到可推进 [A3] | 关联键只用于挂到已委派事项，以及刷新来源对象建出的事项 | 新增"挂到本人的事项"：命中未委派、未关闭的事项时记为挂靠消息；事项在 `waiting` 且等的是人或外部时，由内核（操作者 system）转回 `open` 并取消未到期的跟进定时，可撤销。本人可为事项登记关联键 | §9.4、附录 B |
+| K-11 | 归属：回音让等待中的事项回到可推进 [A3] | 关联键只用于挂到已委派事项，以及刷新来源对象建出的事项 | 新增"挂到本人的事项"：命中未委派、未关闭的事项时记为挂靠消息；事项在 `waiting` 且等的是人或外部时，由内核（操作者 system）转回 `open` 并取消未到期的跟进定时，可撤销。本人可为事项登记关联键。评论与评审是关于对象的消息，由规则声明 `on_update: attach`，只记为挂靠消息，不改事项的标题、正文与摘要；webhook 映射没写 `detail` 时不再拿原始 payload 充当正文 | §9.4、§9.5、附录 B.6、附录 C.14 |
 | K-12 | Source 登记与项目的新字段 [B3、F4] | 无 | Source：`default_project`、`outbound {local, external}`；Project：`capture_outbound`。外发范围只能在 Web 设置 | §6.5、§6.10、§14.14 |
 | K-13 | 事项与投递的新字段 [C3、C4、B5、E3、A6] | 无 | 事项：`planned_for`（日期）、`proposal {recommend, attach_to?, reason, low_confidence, sources[]}`、进展（带可选日期）。投递：`item` 可为空（`alert` 出口），此时带 `origin` | §6.3、§6.9 |
 | K-14 | 新命令与新的稳定事件 [C4、B5、E3] | 无 | 命令：`item.progress`、`proposal.attach`、`proposal.batch`、`inbound.backlog_rules`、`inbound.backlog_score`、`inbound.backlog_rejudge`、`inbound.backlog_restore`。对外稳定事件：`item.progress_added`、`proposal.attached` | §7、§10.1、附录 B.4 |
