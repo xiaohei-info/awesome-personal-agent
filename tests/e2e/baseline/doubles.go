@@ -265,46 +265,66 @@ func (e *Env) LedgerFixture(version int) *Fixture {
 	return fx
 }
 
+type frozenBuild struct {
+	once sync.Once
+	bin  string
+	err  error
+	skip bool
+}
+
 var (
-	v01Once sync.Once
-	v01Bin  string
-	v01Err  error
-	v01Skip bool
+	frozenMu     sync.Mutex
+	frozenBuilds = map[int]*frozenBuild{}
 )
 
-// V01Bin 是旧版本主程序（APA_V01_BIN）：优先用同名环境变量，否则由 fetch-v01.sh 从冻结提交构建（缓存在系统临时目录，与夹具测试共用）。
-// 冻结提交不在这份克隆里（浅克隆）时跳过当前测试。
-func (e *Env) V01Bin() string {
+// V01Bin 是结构版本 2 的旧主程序（APA_V01_BIN）。
+func (e *Env) V01Bin() string { return e.FrozenBin(2) }
+
+// FrozenBin 是冻结结构版本 v 的旧主程序：优先用环境变量（ledgerfixture.BinaryEnv），否则由 fetch-v01.sh 从冻结提交构建
+// （缓存在系统临时目录，与夹具测试共用）。冻结提交不在这份克隆里（浅克隆）时跳过当前测试。
+func (e *Env) FrozenBin(v int) string {
 	e.T.Helper()
-	v01Once.Do(func() {
-		if b := os.Getenv("APA_V01_BIN"); b != "" {
-			if _, v01Err = os.Stat(b); v01Err == nil {
-				v01Bin = b
+	frozenMu.Lock()
+	b := frozenBuilds[v]
+	if b == nil {
+		b = &frozenBuild{}
+		frozenBuilds[v] = b
+	}
+	frozenMu.Unlock()
+	env, _ := ledgerfixture.BinaryEnv(v)
+	b.once.Do(func() {
+		if p := os.Getenv(env); p != "" {
+			if _, b.err = os.Stat(p); b.err == nil {
+				b.bin = p
 			}
+			return
+		}
+		commit, ok := ledgerfixture.Frozen[v]
+		if !ok {
+			b.err = fmt.Errorf("结构版本 %d 没有冻结", v)
 			return
 		}
 		out := filepath.Join(os.TempDir(), "apa-fixture-v01")
-		commit := ledgerfixture.Frozen[2]
-		v01Bin = filepath.Join(out, "apa-"+commit)
-		if _, err := os.Stat(v01Bin); err == nil {
+		b.bin = filepath.Join(out, "apa-"+commit)
+		if _, err := os.Stat(b.bin); err == nil {
 			return
 		}
-		cmd := exec.Command("bash", filepath.Join(repoRoot(), "tests", "fixtures", "ledger", "fetch-v01.sh"), out)
+		cmd := exec.Command("bash", filepath.Join(repoRoot(), "tests", "fixtures", "ledger", "fetch-v01.sh"), out, commit)
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 3 {
-				v01Skip = true
+				b.skip = true
 			}
-			v01Err = fmt.Errorf("fetch-v01.sh: %w", err)
+			b.err = fmt.Errorf("fetch-v01.sh: %w", err)
 		}
 	})
-	if v01Skip {
-		e.T.Skipf("冻结提交不在这份克隆里；设置 APA_V01_BIN 或 git fetch --unshallow: %v", v01Err)
+	if b.skip {
+		e.T.Skipf("冻结提交不在这份克隆里；设置 %s 或 git fetch --unshallow: %v", env, b.err)
 	}
-	if v01Err != nil {
-		e.fatal("%v", v01Err)
+	if b.err != nil {
+		e.fatal("%v", b.err)
 	}
-	return v01Bin
+	return b.bin
 }
 
 // V01Plugin 是旧版本宿主插件包路径（APA_V01_PLUGIN）：优先用同名环境变量，否则取 V01Bin 同目录里 fetch-v01.sh 的产物。

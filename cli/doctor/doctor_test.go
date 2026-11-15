@@ -363,16 +363,28 @@ func TestDoctorOlderLedgerWarnsAndSkips(t *testing.T) {
 
 func fullRegFor(t *testing.T) *store.Registry { return fullReg(t) }
 
-// 同一结构版本内追加的迁移（来源显示名）还没应用：数据目录项提醒要迁移，依赖账本的检查跳过而不是读出错；升级预检也说明要迁移。
-func TestDoctorSameStructureWithPendingMigrationWarnsAndSkips(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "apa")
-	before := registry.Module
-	before.Migrations = before.Migrations[:2] // 显示名之前的来源表
-	old := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, executors.Module,
-		delivery.Module, before, runner.Module, kdoctor.Module} {
-		must(t, old.Register(m))
+// regWith 是 fullReg 的模块，其中来源登记与来源事件只取各自迁移序列的前 nReg、nRunner 步（0 为全部）。
+func regWith(t *testing.T, nReg, nRunner int) *store.Registry {
+	t.Helper()
+	src, run := registry.Module, runner.Module
+	if nReg > 0 {
+		src.Migrations = src.Migrations[:nReg]
 	}
+	if nRunner > 0 {
+		run.Migrations = run.Migrations[:nRunner]
+	}
+	r := store.NewRegistry()
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, executors.Module,
+		delivery.Module, src, run, kdoctor.Module} {
+		must(t, r.Register(m))
+	}
+	return r
+}
+
+// openLegacy 用 old 建一个数据目录并登记一个没有显示名列的来源。
+func openLegacy(t *testing.T, old *store.Registry) string {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "apa")
 	st, err := store.Open(home, old)
 	must(t, err)
 	must(t, st.Update(bg, func(tx *store.Tx) error {
@@ -383,9 +395,16 @@ func TestDoctorSameStructureWithPendingMigrationWarnsAndSkips(t *testing.T) {
 	}))
 	must(t, st.Close())
 	must(t, os.Chmod(home, 0o700))
+	return home
+}
+
+// 结构版本 3 的账本（没有显示名列）遇到结构版本 4 的程序：数据目录项提醒要迁移，依赖账本的检查跳过而不是读出错；
+// 升级预检说明 3 → 4，并能读出没有名字列的旧来源。
+func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
+	home := openLegacy(t, regWith(t, 2, 0))
 	reg := fullReg(t)
-	if old.SchemaLedger() != reg.SchemaLedger() {
-		t.Fatalf("precondition: same structure version, got %d and %d", old.SchemaLedger(), reg.SchemaLedger())
+	if reg.SchemaLedger() != 4 {
+		t.Fatalf("precondition: structure 4, got %d", reg.SchemaLedger())
 	}
 	in := Input{Home: home, Reg: reg, Model: &model.Client{}, Now: now}
 	r := Run(bg, in)
@@ -396,11 +415,30 @@ func TestDoctorSameStructureWithPendingMigrationWarnsAndSkips(t *testing.T) {
 		t.Fatalf("sources: %+v", c)
 	}
 	u := UpgradeCheck(bg, in)
-	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "adds migrations") {
+	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 4") {
 		t.Fatalf("upgrade check: %+v", c)
 	}
 	if c := find(t, u, checkOutbound); c.Status != kdoctor.OK {
 		t.Fatalf("legacy sources read without the name column: %+v", c)
+	}
+}
+
+// 同一结构版本内追加的迁移还没应用（来源事件的后两步都属于结构版本 3）：同样按未迁移处理，而不是当成已是当前版本。
+func TestDoctorSameStructureWithPendingMigrationWarnsAndSkips(t *testing.T) {
+	old, reg := regWith(t, 2, 3), regWith(t, 2, 0)
+	if old.SchemaLedger() != reg.SchemaLedger() {
+		t.Fatalf("precondition: same structure version, got %d and %d", old.SchemaLedger(), reg.SchemaLedger())
+	}
+	in := Input{Home: openLegacy(t, old), Reg: reg, Model: &model.Client{}, Now: now}
+	r := Run(bg, in)
+	if c := find(t, r, kdoctor.DataDir); c.Status != kdoctor.Warning || c.Code != kdoctor.CodeLedgerMigrate {
+		t.Fatalf("data dir: %+v", c)
+	}
+	if c := find(t, r, kdoctor.Sources); c.Code != kdoctor.CodeSkipped || c.Data["reason"] != kdoctor.CodeLedgerSchemaDiffers {
+		t.Fatalf("sources: %+v", c)
+	}
+	if c := find(t, UpgradeCheck(bg, in), checkSchema); !strings.Contains(c.Why, "adds migrations") {
+		t.Fatalf("upgrade check: %+v", c)
 	}
 }
 

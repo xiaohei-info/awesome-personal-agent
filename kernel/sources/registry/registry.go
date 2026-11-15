@@ -73,8 +73,9 @@ var Module = store.Module{Name: "sources_registry", Migrations: []store.Migratio
 ALTER TABLE sources_registry_source ADD COLUMN outbound_local TEXT NOT NULL DEFAULT 'full';
 ALTER TABLE sources_registry_source ADD COLUMN outbound_external TEXT NOT NULL DEFAULT '';`,
 }, {
-	// 显示名（§9.1）：只加一列，旧来源读出为空名，由 apa serve 启动时的 Backfill 按同一套规则补上。账本结构版本不变。
-	Version: 3, Ledger: 3, Name: "source-name",
+	// 账本结构版本 4（§16.5 决定 46：版本 3 已冻结，结构变更另起版本）。显示名（§9.1）：只加一列，
+	// 旧来源读出为空名，由 apa serve 启动时的 Backfill 按同一套规则补上。
+	Version: 3, Ledger: 4, Name: "ledger-v4-source-name",
 	SQL: `ALTER TABLE sources_registry_source ADD COLUMN name TEXT NOT NULL DEFAULT '';`,
 }}}
 

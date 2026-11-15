@@ -39,17 +39,13 @@ func frozenVersions() []int {
 	return vs
 }
 
-// oldBinary 是回退用的旧版本主程序：清单 `binary` 字段给出环境变量名；版本 2 缺省由 fetch-v01.sh 从冻结提交构建。
+// oldBinary 是回退用的旧版本主程序：清单 `binary` 字段给出环境变量名；缺省由 fetch-v01.sh 从该版本的冻结提交构建。
 func oldBinary(l *lab, m *ledgerfixture.Manifest, v int) string {
 	l.t.Helper()
 	if b := os.Getenv(m.Binary); b != "" {
 		return b
 	}
-	if v == 2 {
-		return l.V01Bin()
-	}
-	l.t.Fatalf("结构版本 %d 的回退二进制需要环境变量 %s", v, m.Binary)
-	return ""
+	return l.FrozenBin(v)
 }
 
 // TestUpgradeChain 是 flow-upgrade-rollback 的全流程：对每个已冻结版本的夹具从头走一遍（ACT-UPG-18），
@@ -911,6 +907,25 @@ func (r *run) upg17(t *testing.T) {
 	if max := one[int64](t, rdb, `SELECT MAX(seq) FROM eventlog_event`); max != r.m.EventMaxSeq {
 		t.Errorf("回退后账本最大 Event 序号 = %d，期望 %d", max, r.m.EventMaxSeq)
 	}
+	// 结构正好回到冻结版本：迁移记录与清单的冻结校验和逐条相同，没有新版本的迁移。
+	var applied []string
+	rows, err := rdb.Query(`SELECT module || '/' || version || '/' || checksum FROM store_migrations ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			t.Fatal(err)
+		}
+		applied = append(applied, a)
+	}
+	rows.Close()
+	want := append([]string(nil), r.m.MigrationChecksums...)
+	sort.Strings(want)
+	if strings.Join(applied, "\n") != strings.Join(want, "\n") {
+		t.Errorf("回退后的迁移记录不是结构版本 %d 的冻结集合:\n%s", r.v, strings.Join(applied, "\n"))
+	}
 	// v0.1 二进制在恢复出的目录上正常启动（观察者 token 读得到待办与事件流）。
 	old := r.serve(r.bin, rb)
 	if res := r.run(r.bin, rb, []string{"APA_URL=" + old.URL, "APA_TOKEN=" + r.obs}, "inbox"); res.Code != 0 {
@@ -920,15 +935,18 @@ func (r *run) upg17(t *testing.T) {
 	if len(seqs) == 0 || seqs[0] != 1 {
 		t.Errorf("v0.1 事件流应从序号 1 起可读: %v", seqs)
 	}
-	// 升级前的每条 Event 载荷不变；v0.1 启动后自己写的只有它的规则对到期跟进的观察记录（rule.observed），
-	// 不是回退带来的数据变化。
+	// 升级前的每条 Event 载荷不变。旧二进制启动后自己写的：v0.1 只有它的规则对到期跟进的观察记录（rule.observed）；
+	// 更新的冻结版本还有它自己的例行维护（规则默认值对账、到期跟进），都由系统写入，不是回退带来的数据变化。
 	for _, e := range events(t, rdb, "") {
-		if e.Seq <= r.m.EventMaxSeq {
+		switch {
+		case e.Seq <= r.m.EventMaxSeq:
 			if e.PayloadHashLower != r.m.EventPayloadSHA[itoa(int(e.Seq))] {
 				t.Errorf("回退后 Event %d 的载荷变了", e.Seq)
 			}
-		} else if e.Type != "rule.observed" {
+		case r.v == 2 && e.Type != "rule.observed":
 			t.Errorf("v0.1 启动后新增的 Event %d 是 %s，只应有它自己的 rule.observed", e.Seq, e.Type)
+		case e.ActorType != "system":
+			t.Errorf("旧二进制启动后新增的 Event %d（%s）的行为者是 %s，只应有系统的例行维护", e.Seq, e.Type, e.ActorType)
 		}
 	}
 	old.stop()
