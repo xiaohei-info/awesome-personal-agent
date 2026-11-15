@@ -40,8 +40,8 @@
 | **委派** | | | |
 | `apa executors [--project]` | 列出执行者名录（主文档 §6.17），带项目时标明是否允许 | observer | |
 | `apa delegate --parent --assignee` | 建子事项，校验项目允许的执行者。`--executor <JSON 文件或 ->`（`kind`、`host`、`label`、`handle`）在同一事务里登记或更新执行者，`harness` 取 `APA_HARNESS`；`assignee` 不必先在名录里；身份字段冲突或名录已满返回 6 | worker（自己的事项）；delegate（任意） | 2、4、5、6、21 |
-| `apa dispatch add <子事项> --session [--resumable] [--cwd] [--repo] [--handle <JSON 文件或 ->] [--continues <记录>]` | 【规划中（v0.2.0）】在委派子事项上写一条委派记录，输出 `{id}`；`harness` 取 `APA_HARNESS`，必填；句柄规则见主文档 §6.17 | 同 `apa report` | 2、4、5、6、23 |
-| `apa dispatch update <记录> [--state ended\|lost] [--resumable true\|false]` | 【规划中（v0.2.0）】推进委派记录；`lost` 同时置 `resumable` 为假，终态不可改 | 同 `apa report` | 2、4、5、6、23 |
+| `apa dispatch add <子事项> [--session] [--resumable] [--cwd] [--repo] [--handle <JSON 文件或 ->] [--continues <记录>] [--idempotency-key]` | 在委派子事项上写一条委派记录，输出该记录；`harness` 取 `APA_HARNESS`，必填；`--resumable` 要有 `--session`；同一子事项上已有运行中、harness 与会话都相同的记录时不新增，返回已有记录；句柄规则见主文档 §6.17 | 同 `apa report` | 2、4、5、6、23 |
+| `apa dispatch update <记录> [--state ended\|lost] [--resumable true\|false]` | 推进委派记录；`lost` 同时置 `resumable` 为假，终态不可改 | 同 `apa report` | 2、4、5、6、23 |
 | `apa report <id> --outcome --summary [--pr --commit --branch --link] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`done` 必须带结果证据（`--pr`、`--commit`、`--branch`、`--link` 至少一项），附不出只能报 `progress` 或 `blocked` | 绑定该 assignee 的 worker、该运行的运行凭据、发起该委派的 delegate；其他 delegate 附 `--evidence` 或 `--grant` | 2、4、6、23 |
 | `apa handback <消息> --reason` | 把挂靠消息交回一次 | 同上 | 4、6 |
 | **项目** | | | |
@@ -133,9 +133,9 @@
 | | `DELETE /executors/{id}` | 移除名录条目，已有事项与委派记录里的 id 原样保留 | 只有 Web 登录 |
 | | `POST /delegations` | 建子事项 | worker |
 | | `POST /items/{id}/report` | 回执 | worker |
-| | `POST /items/{id}/dispatches` | 【规划中（v0.2.0）】写委派记录 `{session, resumable?, cwd?, repo?, handle?, continues?}`，返回 201 与记录 | 同回执 |
-| | `PATCH /dispatches/{id}` | 【规划中（v0.2.0）】推进委派记录 `{state?, resumable?}` | 同回执 |
-| | `GET /dispatches` | 【规划中（v0.2.0）】列委派记录，可带 `executor`、`item`、`resumable`、`limit` | observer；运行凭据限范围内的事项 |
+| | `POST /items/{id}/dispatches` | 写委派记录 `{session, resumable?, cwd?, repo?, handle?, continues?}`，返回 201 与记录 | 同回执 |
+| | `PATCH /dispatches/{id}` | 推进委派记录 `{state?, resumable?}` | 同回执 |
+| | `GET /dispatches` | 列委派记录，可带 `executor`、`item`、`resumable`、`limit` | observer；运行凭据限范围内的事项 |
 | | `POST /messages/{id}/handback` | 交回挂靠消息 | worker |
 | 项目 | `GET/POST /projects`，`GET/PATCH /projects/{id}` | 项目 | observer 读，delegate 写 |
 | | `POST /projects/{id}/repos` | repos 属性 | worker、delegate |

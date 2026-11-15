@@ -4,7 +4,7 @@
 // 正文引用的 blob 在没有其他材料引用时才删除，有引用的保留。墓碑不计入 Event 统计（统计方读到 Tombstone 即跳过）。
 //
 // 授权是 change_settings：只有 Web 上的本人可执行，delegate 得到退出码 20，其余级别被拒绝。
-// 本包不写自己的表，也不直写其他模块的数据：投影、正文和 blob 文件的删除分别由 items、materials、blobs 提供入口，
+// 本包不写自己的表，也不直写其他模块的数据：投影、正文、委派记录和 blob 文件的删除分别由 items、materials、delegation、blobs 提供入口，
 // Event 墓碑由 eventlog 提供。
 package purge
 
@@ -17,6 +17,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -95,6 +96,9 @@ func apply(c *command.Ctx, blobDir, id string) (any, error) {
 	case err == nil:
 		kind = KindItem
 		if err := items.Purge(c.Tx, id); err != nil {
+			return nil, err
+		}
+		if err := delegation.Purge(c.Tx, id); err != nil {
 			return nil, err
 		}
 		// 判断记录只含结构化摘要，但指向被删对象的一并删除（§6.16）。

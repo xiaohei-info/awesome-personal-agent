@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +48,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, proc.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, proc.Module, delegation.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

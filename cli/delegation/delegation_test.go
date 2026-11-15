@@ -419,3 +419,38 @@ func TestIdempotencyAndVersion(t *testing.T) {
 		t.Fatalf("malformed version: %+v", r)
 	}
 }
+
+// apa dispatch add/update：写委派记录、同会话去重、推进为 lost；用法错误是 2。
+func TestDispatchCommands(t *testing.T) {
+	w := newWorld(t)
+	dlg := w.token(auth.Delegate, "")
+	parent := w.parent(w.project(nil))
+	r := w.apa(dlg, "", "delegate", "--parent", parent, "--assignee", workHost)
+	var child struct{ ID string }
+	if r.code != 0 || json.Unmarshal([]byte(r.out), &child) != nil {
+		t.Fatalf("delegate: %+v", r)
+	}
+	add := func(stdin string, args ...string) result {
+		return w.apa(dlg, stdin, append([]string{"dispatch", "add", child.ID}, args...)...)
+	}
+	r = add(`{"mech":"paseo","agent_id":"agt_1"}`, "--session", "agt_1", "--resumable", "--cwd", "/w/app", "--handle", "-")
+	var d struct{ ID, State, Harness string }
+	if r.code != 0 || json.Unmarshal([]byte(r.out), &d) != nil || d.State != "running" || d.Harness != "cli-test" {
+		t.Fatalf("dispatch add: %+v", r)
+	}
+	if r := add("", "--session", "agt_1"); r.code != 0 || !strings.Contains(r.out, d.ID) {
+		t.Fatalf("same session must return the running dispatch: %+v", r)
+	}
+	if r := add(`{"mech":"x","command":"rm -rf /"}`, "--handle", "-"); r.code != 2 {
+		t.Fatalf("bad handle: %+v", r)
+	}
+	if r := w.apa(dlg, "", "dispatch", "update", d.ID, "--state", "lost"); r.code != 0 || !strings.Contains(r.out, `"resumable":false`) {
+		t.Fatalf("dispatch update: %+v", r)
+	}
+	if r := w.apa(dlg, "", "dispatch", "update", d.ID, "--resumable", "maybe"); r.code != 2 {
+		t.Fatalf("bad --resumable: %+v", r)
+	}
+	if r := w.apa(dlg, "", "dispatch"); r.code != 2 {
+		t.Fatalf("missing subcommand: %+v", r)
+	}
+}

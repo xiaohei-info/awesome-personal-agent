@@ -1,5 +1,6 @@
 // Package delegation 是委派与声明分组的 HTTP 路由（附录 B.2，设计 §7.5、§14.3）：
-// GET /executors、DELETE /executors/{id}、POST /delegations、POST /items/{id}/report、POST /declarations。
+// GET /executors、DELETE /executors/{id}、POST /delegations、POST /items/{id}/report、
+// POST /items/{id}/dispatches、PATCH /dispatches/{id}、GET /dispatches、POST /declarations。
 //
 // 路由里没有业务规则：全部映射到内核命令（executor.list、delegate.create、delegate.report、executor.declare），
 // 授权（项目允许的执行者 21、运行身份范围 4、声明须 Web 确认）、校验、乐观版本与幂等都由命令管线判定。
@@ -38,6 +39,9 @@ func Routes(x *command.Executor) core.RouteGroup {
 		r.Handle(core.Route{Method: "DELETE", Path: "/executors/{id}", MaxBody: 1, Handler: h.removeExecutor})
 		r.Handle(core.Route{Method: "POST", Path: "/delegations", Handler: h.write("delegate.create", false, http.StatusCreated)})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/report", Handler: h.write("delegate.report", true, http.StatusOK)})
+		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/dispatches", Handler: h.write("delegate.dispatch", true, http.StatusCreated)})
+		r.Handle(core.Route{Method: "PATCH", Path: "/dispatches/{id}", Handler: h.write("delegate.dispatch_update", true, http.StatusOK)})
+		r.Handle(core.Route{Method: "GET", Path: "/dispatches", Handler: h.dispatches})
 		r.Handle(core.Route{Method: "POST", Path: "/declarations", Handler: h.write("executor.declare", false, http.StatusAccepted)})
 	}
 }
@@ -50,6 +54,37 @@ func (h *handlers) executors(w http.ResponseWriter, r *http.Request, p *core.Pri
 		in, _ = json.Marshal(map[string]string{"project": proj})
 	}
 	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "executor.list", Input: in})
+	if err != nil {
+		return err
+	}
+	return writeRaw(w, http.StatusOK, res.Value)
+}
+
+// dispatches 列委派记录：?executor=&item=&resumable=true|false&limit=。
+func (h *handlers) dispatches(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	q := r.URL.Query()
+	in := map[string]any{}
+	for _, k := range []string{"executor", "item"} {
+		if v := q.Get(k); v != "" {
+			in[k] = v
+		}
+	}
+	if v := q.Get("resumable"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return domain.NewError(domain.CodeInvalidRequest, "resumable must be true or false", "fix the query")
+		}
+		in["resumable"] = b
+	}
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			return domain.NewError(domain.CodeInvalidRequest, "limit must be 1..200", "fix the query")
+		}
+		in["limit"] = n
+	}
+	raw, _ := json.Marshal(in)
+	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "delegate.dispatch_list", Input: raw})
 	if err != nil {
 		return err
 	}

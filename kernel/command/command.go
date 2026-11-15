@@ -211,6 +211,9 @@ type Spec struct {
 	// Receipt 标记回执与捕获类命令（§14.5 失败可见）：它们多由插件异步发起、对模型不可见，
 	// 内核可达但拒绝（退出码 2、4、23）时，管线在独立事务里另记 health.alert。
 	Receipt bool
+	// KeepVersion 为真时不改授权对象的版本：命令写的是挂在对象名下的附属记录（如委派记录），对象本身不变，
+	// 事项的版本仍等于它的事项事件条数（投影可由事件折叠重建）。
+	KeepVersion bool
 	// RequireVersion 为真时必须带 ExpectVersion。
 	RequireVersion bool
 	// Kinds 是允许调用的 ext/webhook 凭据种类；默认这两类凭据不能调用。
@@ -653,7 +656,7 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 			return Result{}, Commit{}, err
 		}
 		out.Version = cur
-		if obj.ID != "" {
+		if obj.ID != "" && !spec.KeepVersion {
 			out.Version = cur + 1
 			if _, err := tx.Exec(`INSERT INTO command_version (object, version) VALUES (?, ?)
 				ON CONFLICT(object) DO UPDATE SET version = excluded.version`, obj.ID, out.Version); err != nil {

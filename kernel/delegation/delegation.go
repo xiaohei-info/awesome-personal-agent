@@ -48,7 +48,7 @@ var Module = store.Module{Name: "delegation", Migrations: []store.Migration{{
 	ref TEXT PRIMARY KEY,
 	item TEXT NOT NULL
 ) WITHOUT ROWID;`,
-}}}
+}, dispatchMigration}}
 
 // Options 注入本模块读取但不拥有的东西。
 type Options struct {
@@ -131,11 +131,12 @@ func Register(x *command.Executor, o Options) error {
 	if o.OnError == nil {
 		return invalid("delegation: Options.OnError is required")
 	}
-	for _, s := range []command.Spec{o.create(), report(), settle()} {
+	for _, s := range []command.Spec{o.create(), report(), settle(), o.dispatch(), o.dispatchUpdate(), dispatchList()} {
 		if err := x.Register(s); err != nil {
 			return err
 		}
 	}
+	x.InTx(closeDispatches)
 	x.OnCommit(func(c command.Commit) {
 		if !settlers[c.Command] || c.Object == "" {
 			return
