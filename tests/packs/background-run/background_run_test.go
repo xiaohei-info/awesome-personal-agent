@@ -361,6 +361,40 @@ func TestUnlabelledItemIsNotLaunched(t *testing.T) {
 	}
 }
 
+// 「交给 Agent」就是 Web 对事项做一次 item.update 写 tags：建议阶段加上标签，接受进入 open 时拉起；
+// 去掉标签后不拉起；已在 open 的事项后加标签不会补拉起（规则只认进入 open 的那一刻）。
+func TestHandoffTagWrittenByItemUpdateDrivesTheRule(t *testing.T) {
+	e := newEnv(t, "")
+	e.auto(mainRule)
+	mk := func(title string) string {
+		var out struct{ ID string }
+		_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "task", "title": title, "phase": "proposed"}), &out)
+		return out.ID
+	}
+	open := func(id string) { e.must(owner, "item.transition", map[string]any{"id": id, "to": "open", "reason": "go"}) }
+	tag := func(id string, tags []string) {
+		e.must(owner, "item.update", map[string]any{"id": id, "tags": tags, "reason": "交给 Agent 处理"})
+	}
+
+	on := mk("交出去")
+	tag(on, []string{"mine", "agent-ok"})
+	open(on)
+	if rs := e.runs_(); len(rs) != 1 || rs[0].Run.Target != on {
+		t.Fatalf("handed-over item runs = %+v", rs)
+	}
+
+	off := mk("又收回来")
+	tag(off, []string{"agent-ok"})
+	tag(off, []string{})
+	open(off)
+	late := mk("开了才交")
+	open(late)
+	tag(late, []string{"agent-ok"})
+	if n := len(e.runs_()); n != 1 {
+		t.Fatalf("runs = %d, want only the first item's", n)
+	}
+}
+
 // flow-bg-task-runner（ACT-BGT-01）：包里的任务型提示词驱动 runner=task：内核先建子事项（assignee=执行者），
 // Run 目标是子事项，运行者按提示词 `apa report` 在子事项上回执 done 带证据，父事项随之回 open。
 func TestTaskRunnerPromptWorksOnChild(t *testing.T) {

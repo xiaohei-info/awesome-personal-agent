@@ -85,6 +85,10 @@ export const CRED_KIND = ["observer", "worker", "delegate", "ext", "webhook"] as
 /** 执行者种类：kernel/executors/executors.go Kind* */
 export const EXECUTOR_KIND = ["native-subagent", "external-cli", "remote-agent", "human"] as const;
 
+/** 「交给 Agent」在账本里就是这个标签：packs/background-run 的 handle-labelled 规则按它拉起后台运行；界面不露出标签名 */
+export const HANDOFF_TAG = "agent-ok";
+export const HANDOFF_RULE = "background-run/event_rules/handle-labelled";
+
 /** 规则模式：kernel/rules/rules.go Mode* */
 export const RULE_MODE = ["off", "observe", "auto"] as const;
 /** 规则组：kernel/packs/pack.go 的 yaml 键 */
