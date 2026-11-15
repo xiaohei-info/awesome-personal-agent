@@ -1,0 +1,63 @@
+name: release
+
+# 全量 e2e 只在发版时跑：推 v* tag 自动触发；发版前想提前验证时手动触发（workflow_dispatch）。
+# 打包与发布只在 tag 上执行，且以全量 e2e 全部通过为前提。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [full-1, full-2, full-3, full-4]  # 分组见 .github/e2e/full-*.txt，合起来覆盖 tests/e2e 全部包
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tests/fixtures/ledger/fetch-v01.sh 读冻结提交，浅克隆会 exit 3
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: .github/e2e/pkgs.sh check
+      - run: npm --prefix web ci
+      - run: npm --prefix web run build  # e2e 起的真实 apa serve 内嵌 web/dist/index.html
+      - run: sudo apt-get install -y sqlite3  # 账本断言使用真实 sqlite3 CLI
+      - run: git config --global user.name ci && git config --global user.email ci@example.invalid  # 用例在临时仓库里 git commit，runner 没有默认身份
+      - run: python3 -m pip install pytest  # hermes 插件契约测试
+      - run: go test -tags e2e -count=1 -timeout 40m $(.github/e2e/pkgs.sh ${{ matrix.group }})
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: e2e-full
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: go run ./tools/release -pack dist/
+      - run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --title "$GITHUB_REF_NAME" --notes-file docs/user/changelog.md
+        env:
+          GH_TOKEN: ${{ github.token }}
