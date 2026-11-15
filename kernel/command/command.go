@@ -57,6 +57,8 @@ type Caller struct {
 	Kind  auth.Kind // 仅凭据入口有值
 	// Credential 是凭据 id，仅凭据入口有值；授权单按它认人（Actor.Principal 在绑定执行者时是执行者 id）。
 	Credential string
+	// CredentialHarness 是凭据上内核记录的所属 harness（§14.2），仅凭据入口有值；不是调用方自报的 Actor.Harness。
+	CredentialHarness string
 	// RunScope 只有运行凭据有值：据账本判断授权对象是否在运行范围内（目标事项及其子事项 / 目标事项所属项目）。
 	// 管线用它填 authz.Object 的 InRunScope、InRunProject，命令自己不必也无法声明。
 	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
@@ -95,7 +97,7 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	if l == authz.LevelDelegate {
 		a.OnBehalfOf = b.OnBehalfOf
 	}
-	return Caller{Actor: a, Level: l, Kind: c.Kind, Credential: c.ID}, nil
+	return Caller{Actor: a, Level: l, Kind: c.Kind, Credential: c.ID, CredentialHarness: c.Harness}, nil
 }
 
 // Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。

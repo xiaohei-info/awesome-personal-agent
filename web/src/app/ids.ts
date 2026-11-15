@@ -143,7 +143,7 @@ export const EVENT_INTERNAL = [
   "instance.updated", "instance.toggled", "instance.fired", "material.revision_rejected", "material.revision_summarized",
   "followmsg.attached", "followmsg.processed", "followmsg.handed_back", "followmsg.released", "executor.declared",
   "executor.confirmed", "executor.rejected", "executor.changed", "executor.removed", "source.registered", "source.updated",
-  "source.enabled", "source.disabled", "source.renamed", "item.deleted", "run.credential_exchanged", "timer.fired",
+  "source.enabled", "source.disabled", "source.renamed", "item.deleted", "run.credential_exchanged", "timer.fired", "credential.assigned",
 ] as const;
 
 // 以下是开放集合：能力包可以扩展，词表只登记内置的，查不到时显示原值。

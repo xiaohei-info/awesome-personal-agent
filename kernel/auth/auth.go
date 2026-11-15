@@ -44,6 +44,10 @@ var Module = store.Module{Name: "auth", Migrations: []store.Migration{{
 	expires_at INTEGER NOT NULL DEFAULT 0,
 	revoked_at INTEGER NOT NULL DEFAULT 0
 );`,
+}, {
+	// 账本结构版本 6：token 所属的 harness（§14.2）。已有行为空，由本人在 Web 认领一次。
+	Version: 2, Ledger: 6, Name: "ledger-v6-credential-harness",
+	SQL: `ALTER TABLE auth_credential ADD COLUMN harness TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Credential 是凭据登记，不含明文也不对外暴露哈希。
@@ -53,6 +57,7 @@ type Credential struct {
 	Label     string    `json:"label,omitempty"`
 	Executor  string    `json:"executor,omitempty"` // 绑定的执行者 id；空表示未绑定
 	Scope     string    `json:"scope,omitempty"`
+	Harness   string    `json:"harness"` // 所属 harness（§14.2）；空表示未认领。设定后不可改
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at,omitzero"` // 零值：不过期；轮换后的旧密钥才有
 	RevokedAt time.Time `json:"revoked_at,omitzero"`
@@ -69,6 +74,7 @@ type Spec struct {
 	Label    string
 	Executor string // 只对 worker 有意义（回执据此校验）；delegate 无需绑定
 	Scope    string // ext、webhook 必填，其余种类必须为空
+	Harness  string // 只对 worker、delegate 有意义
 }
 
 // Auth 签发与校验凭据；now 可注入以便测试过期。
@@ -104,6 +110,20 @@ func (s Spec) validate() error {
 	if s.Executor != "" && s.Kind != Worker {
 		return invalid("executor binding is only valid for worker")
 	}
+	if s.Harness != "" {
+		if s.Kind != Worker && s.Kind != Delegate {
+			return invalid("harness is only valid for worker and delegate")
+		}
+		return validHarness(s.Harness)
+	}
+	return nil
+}
+
+// validHarness 与无头运行声明的 harness 标识同一规则：非空、不含空白。
+func validHarness(h string) error {
+	if h == "" || strings.ContainsAny(h, " \t\r\n") {
+		return invalid("harness is required and must not contain whitespace")
+	}
 	return nil
 }
 
@@ -134,21 +154,21 @@ func (a *Auth) Issue(tx *store.Tx, s Spec) (Credential, string, error) {
 		return Credential{}, "", err
 	}
 	secret := prefix[s.Kind] + body
-	c := Credential{ID: "cred_" + id, Kind: s.Kind, Label: s.Label, Executor: s.Executor, Scope: s.Scope, CreatedAt: a.now()}
-	if _, err := tx.Exec(`INSERT INTO auth_credential (id, kind, hash, label, executor, scope, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, string(c.Kind), hashOf(secret), c.Label, c.Executor, c.Scope, c.CreatedAt.UnixNano()); err != nil {
+	c := Credential{ID: "cred_" + id, Kind: s.Kind, Label: s.Label, Executor: s.Executor, Scope: s.Scope, Harness: s.Harness, CreatedAt: a.now()}
+	if _, err := tx.Exec(`INSERT INTO auth_credential (id, kind, hash, label, executor, scope, harness, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, string(c.Kind), hashOf(secret), c.Label, c.Executor, c.Scope, c.Harness, c.CreatedAt.UnixNano()); err != nil {
 		return Credential{}, "", err
 	}
 	return c, secret, nil
 }
 
-const cols = "id, kind, label, executor, scope, created_at, expires_at, revoked_at"
+const cols = "id, kind, label, executor, scope, harness, created_at, expires_at, revoked_at"
 
 func scan(r *store.Rows) (Credential, error) {
 	var c Credential
 	var kind string
 	var created, expires, revoked int64
-	if err := r.Scan(&c.ID, &kind, &c.Label, &c.Executor, &c.Scope, &created, &expires, &revoked); err != nil {
+	if err := r.Scan(&c.ID, &kind, &c.Label, &c.Executor, &c.Scope, &c.Harness, &created, &expires, &revoked); err != nil {
 		return c, err
 	}
 	c.Kind, c.CreatedAt = Kind(kind), time.Unix(0, created)
@@ -220,7 +240,7 @@ func (a *Auth) Rotate(tx *store.Tx, id string, grace time.Duration) (Credential,
 	if grace < 0 {
 		return Credential{}, "", invalid("grace must not be negative")
 	}
-	c, secret, err := a.Issue(tx, Spec{Kind: old.Kind, Label: old.Label, Executor: old.Executor, Scope: old.Scope})
+	c, secret, err := a.Issue(tx, Spec{Kind: old.Kind, Label: old.Label, Executor: old.Executor, Scope: old.Scope, Harness: old.Harness})
 	if err != nil {
 		return Credential{}, "", err
 	}
@@ -228,6 +248,30 @@ func (a *Auth) Rotate(tx *store.Tx, id string, grace time.Duration) (Credential,
 		return Credential{}, "", err
 	}
 	return c, secret, nil
+}
+
+// Assign 认领 token 所属的 harness（§14.2）：只能从空设成非空，之后不可改；已吊销的不能认领。
+func (a *Auth) Assign(tx *store.Tx, id, harness string) (Credential, error) {
+	if err := validHarness(harness); err != nil {
+		return Credential{}, err
+	}
+	c, err := a.Get(tx, id)
+	if err != nil {
+		return Credential{}, err
+	}
+	switch {
+	case c.Kind != Worker && c.Kind != Delegate:
+		return Credential{}, invalid("harness is only valid for worker and delegate")
+	case !c.RevokedAt.IsZero():
+		return Credential{}, domain.NewError(domain.CodeConflict, "credential is revoked", "issue a new credential")
+	case c.Harness != "":
+		return Credential{}, domain.NewError(domain.CodeConflict, "credential already belongs to a harness", "issue a new credential for the other harness")
+	}
+	if _, err := tx.Exec("UPDATE auth_credential SET harness = ? WHERE id = ? AND harness = ''", harness, id); err != nil {
+		return Credential{}, err
+	}
+	c.Harness = harness
+	return c, nil
 }
 
 // Get 按 id 取凭据登记（含已吊销）；不存在返回 not_found。
