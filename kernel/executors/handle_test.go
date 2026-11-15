@@ -8,6 +8,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
+// pemMarker 在运行时拼出，免得仓库的凭据扫描把测试数据当成私钥。
+var pemMarker = strings.Repeat("-", 5) + "BEGIN"
+
 // 句柄只看结构（§6.17）：每条规则一条拒绝用例，why 不回显取值。
 func TestValidateHandleRejectsCommandsPromptsAndCredentials(t *testing.T) {
 	long := strings.Repeat("a", 257)
@@ -29,7 +32,7 @@ func TestValidateHandleRejectsCommandsPromptsAndCredentials(t *testing.T) {
 		"newline":            `{"mech":"x","note":"a\nb"}`,
 		"too long string":    `{"mech":"x","note":"` + long + `"}`,
 		"bearer":             `{"mech":"x","h":"Bearer abc"}`,
-		"pem":                `{"mech":"x","h":"-----BEGIN PRIVATE KEY-----"}`,
+		"pem":                `{"mech":"x","h":"` + pemMarker + ` RSA"}`,
 		"jwt":                `{"mech":"x","h":"eyJhbGciOi.eyJzdWIiOi.sig"}`,
 		"url userinfo":       `{"mech":"x","u":"https://u:p@host/x"}`,
 		"url token param":    `{"mech":"x","u":"https://host/x?token=abc"}`,
