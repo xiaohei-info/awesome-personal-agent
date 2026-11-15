@@ -71,6 +71,15 @@ export type DoctorData = Record<string, unknown> | undefined;
 /** 自检结论（设计 §15.5）：按机器码与 data 生成一句话。封闭集合：DOCTOR_CODE 多一个而这里没写，tsc 失败。 */
 type DoctorSay = Record<I.DoctorCode, (d: DoctorData) => string>;
 const num = (d: DoctorData, k: string) => Number(d?.[k] ?? 0);
+// draft_schema 的 data.shape：端点返回的内容长什么样（kernel/outcall/model 的 Shape*）。
+const DRAFT_SHAPE_ZH: Record<string, string> = {
+  empty: "：返回为空", markdown_fence: "：被代码块包着", truncated: "：被截断", malformed_json: "：不是合法 JSON",
+  trailing_data: "：JSON 后多了内容", text_around: "：JSON 前后夹着文字", plain_text: "：返回的是一段文字",
+};
+const DRAFT_SHAPE_EN: Record<string, string> = {
+  empty: ": empty reply", markdown_fence: ": wrapped in a code block", truncated: ": cut off", malformed_json: ": not valid JSON",
+  trailing_data: ": extra text after the JSON", text_around: ": text around the JSON", plain_text: ": plain text, no JSON",
+};
 const stamp = (loc: string) => (d: DoctorData, k: string) => {
   const v = d?.[k];
   return typeof v === "string" && !v.startsWith("0001") && v !== "never" ? new Date(v).toLocaleString(loc) : "";
@@ -299,6 +308,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     no_answer: () => "端点没有回答示例题",
     http_status: (d) => (d?.status ? `端点返回了错误状态（HTTP ${d.status}）` : "端点返回了错误状态"),
     schema_mismatch: () => "能用，但输出不符合示例的结构化格式，卡片文案可能退化",
+    draft_schema: (d) => `起草建议的输出不合格${DRAFT_SHAPE_ZH[String(d?.shape)] ?? ""}`,
     bad_response: () => "响应不是对话补全格式",
     region_unavailable: () => "服务在当前网络位置不可用，请改用可访问的网关地址或代理",
     skipped: (d) => (d?.reason === "ledger_schema_differs" ? "数据版本和程序不一致，这项先不查" : "数据读不到，这项先不查"),
@@ -587,6 +597,7 @@ const en: typeof zh = {
     no_answer: () => "The endpoint did not answer the sample question",
     http_status: (d) => (d?.status ? `The endpoint returned an error status (HTTP ${d.status})` : "The endpoint returned an error status"),
     schema_mismatch: () => "Usable, but the output does not follow the sample's structured format; card copy may degrade",
+    draft_schema: (d) => `Drafted suggestions fail the output check${DRAFT_SHAPE_EN[String(d?.shape)] ?? ""}`,
     bad_response: () => "The response is not a chat completions response",
     region_unavailable: () => "The service is not available from this network location; use a reachable gateway URL or a proxy",
     skipped: (d) => (d?.reason === "ledger_schema_differs" ? "Data version differs from the program; not checked yet" : "Data can't be read; not checked yet"),

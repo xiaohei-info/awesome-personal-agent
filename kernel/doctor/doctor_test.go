@@ -16,12 +16,14 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
@@ -414,5 +416,64 @@ func TestPausedModelsAreReportedAsPausedWithoutProbing(t *testing.T) {
 	}
 	if n := len(gen.Requests()); n != 0 {
 		t.Fatalf("doctor probed a paused endpoint %d times", n)
+	}
+}
+
+func builtinPacks(t *testing.T) *packs.Loader {
+	t.Helper()
+	ld := packs.New(packs.Options{Builtin: rootpacks.FS, DataDir: t.TempDir(), Kinds: items.NewKinds()})
+	if rej, err := ld.Load(); err != nil || len(rej) != 0 {
+		t.Fatalf("load builtin packs: %v %v", rej, err)
+	}
+	return ld
+}
+
+// 自检用起草建议的真实模板探测生成端点：请求带的是模板自己的结构约束（不是内置小样例），
+// 输入的项目清单为空（本人还没建项目）。端点答不了真实约束时，自检不能再报"正常"。
+func TestProbeGenerateUsesTheDraftTemplate(t *testing.T) {
+	ld := builtinPacks(t)
+	for _, c := range []struct {
+		name, reply string
+		status      Status
+		code, shape string
+	}{
+		{"valid", `{"title":"Send the report","kind":"task","recommend":"accept","reason":"asked by finance"}`, OK, CodeOK, ""},
+		{"fenced", "```json\n{\"title\":\"a\",\"kind\":\"task\"}\n```", Error, CodeDraftSchema, model.ShapeFence},
+		{"prose", "I could not draft this one.", Error, CodeDraftSchema, model.ShapePlainText},
+		{"empty", "", Error, CodeDraftSchema, model.ShapeEmpty},
+		{"kind outside the enum", `{"title":"a","kind":"reminder"}`, Error, CodeDraftSchema, ""},
+		{"required field missing", `{"kind":"task"}`, Error, CodeDraftSchema, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			gen := modelstub.New()
+			defer gen.Close()
+			gen.SetDefault(modelstub.Reply{Content: c.reply})
+			d := ProbeGenerate(bg, policy.GenerateEndpoint{URL: gen.URL(), Model: "m", Locality: "local"}, Env{Model: &model.Client{}, Packs: ld})
+			if d.Status != c.status || d.Code != c.code || d.Data["shape"] != nilIfEmpty(c.shape) || d.Data["sample"] != "draft" {
+				t.Fatalf("%+v", d)
+			}
+			sent := gen.Requests()[0].BodyText
+			if !strings.Contains(sent, "commitment") || !strings.Contains(sent, "attach_to") || !strings.Contains(sent, `\"projects\":[]`) {
+				t.Fatalf("probe did not carry the draft template's constraints: %s", sent)
+			}
+		})
+	}
+}
+
+func nilIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// 没有起草模板可用（包没加载）时退回内置小样例，不因此报错。
+func TestProbeGenerateFallsBackToTheBuiltinSample(t *testing.T) {
+	gen := modelstub.New()
+	defer gen.Close()
+	gen.SetDefault(modelstub.Reply{Content: `{"answer":"yes","sufficient":true}`})
+	d := ProbeGenerate(bg, policy.GenerateEndpoint{URL: gen.URL(), Model: "m", Locality: "local"}, Env{Model: &model.Client{}, Packs: fakePacks{}})
+	if d.Status != OK || d.Data["sample"] != "builtin" {
+		t.Fatalf("%+v", d)
 	}
 }

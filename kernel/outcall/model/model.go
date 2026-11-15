@@ -30,6 +30,63 @@ var (
 	ErrSchema = errors.New("model: output violates schema")
 )
 
+// SchemaError 是带内容形态的 ErrSchema：errors.Is(err, ErrSchema) 为真。Shape 只描述返回内容长什么样，不含内容本身
+// （内容可能带来源正文，不进错误文本、事件或健康视图）。
+type SchemaError struct {
+	Shape  string // Shape* 之一；内容是 JSON 但违反 schema 时为空
+	Detail string
+}
+
+// 内容形态：端点答了，但 content 不是单个 JSON 值时它是什么。
+const (
+	ShapeEmpty      = "empty"          // 空串或只有空白
+	ShapeFence      = "markdown_fence" // 用 ``` 包着
+	ShapeTruncated  = "truncated"      // 以 { 或 [ 开头但没写完，且 finish_reason 为 length
+	ShapeMalformed  = "malformed_json" // 以 { 或 [ 开头但不是合法 JSON
+	ShapeTrailing   = "trailing_data"  // JSON 之后还有别的内容
+	ShapeTextAround = "text_around"    // 文字夹着 JSON
+	ShapePlainText  = "plain_text"     // 没有 JSON，是一段文字
+)
+
+func (e *SchemaError) Error() string {
+	if e.Shape == "" {
+		return "model: output violates schema: " + e.Detail
+	}
+	return fmt.Sprintf("model: output violates schema: %s (%s)", e.Detail, e.Shape)
+}
+
+func (e *SchemaError) Unwrap() error { return ErrSchema }
+
+// SchemaShape 返回 err 里的内容形态，没有则为空串。
+func SchemaShape(err error) string {
+	var se *SchemaError
+	if errors.As(err, &se) {
+		return se.Shape
+	}
+	return ""
+}
+
+// contentShape 判断 content 不是单个 JSON 值时的形态；decodeErr 为 nil 表示解码成功但后面还有内容。
+func contentShape(content string, decodeErr error, finish string) string {
+	t := strings.TrimSpace(content)
+	switch {
+	case t == "":
+		return ShapeEmpty
+	case strings.HasPrefix(t, "```"):
+		return ShapeFence
+	case decodeErr == nil:
+		return ShapeTrailing
+	case t[0] != '{' && t[0] != '[':
+		if strings.ContainsAny(t, "{[") {
+			return ShapeTextAround
+		}
+		return ShapePlainText
+	case finish == "length":
+		return ShapeTruncated
+	}
+	return ShapeMalformed
+}
+
 // StatusError 是端点返回的非 2xx 响应。
 type StatusError struct {
 	Code    int
@@ -143,6 +200,7 @@ func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req R
 			Message struct {
 				Content *string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil || len(out.Choices) == 0 || out.Choices[0].Message.Content == nil {
@@ -154,10 +212,10 @@ func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req R
 		dec := json.NewDecoder(strings.NewReader(content))
 		dec.UseNumber()
 		if err := dec.Decode(&v); err != nil || dec.More() {
-			return Response{}, fmt.Errorf("%w: content is not a single JSON value", ErrSchema)
+			return Response{}, &SchemaError{Shape: contentShape(content, err, out.Choices[0].FinishReason), Detail: "content is not a single JSON value"}
 		}
 		if err := validate(schema, v, "$"); err != nil {
-			return Response{}, fmt.Errorf("%w: %v", ErrSchema, err)
+			return Response{}, &SchemaError{Detail: err.Error()}
 		}
 	}
 	return Response{Content: content}, nil

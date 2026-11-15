@@ -20,6 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -575,6 +576,10 @@ func TestDraftFailureDegradesToEventTitle(t *testing.T) {
 		"http 500":   {Status: 500},
 		"bad schema": {Content: `{"kind":"foo"}`},
 		"bad kind":   {Content: `{"title":"x","kind":"foo"}`},
+		// 网关没按结构化输出返回：代码块包着、一段文字、空内容。校验不放宽，也不重试。
+		"fenced": {Content: "```json\n{\"title\":\"x\",\"kind\":\"task\"}\n```"},
+		"prose":  {Content: "我先看一下这条消息。"},
+		"empty":  {Content: ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, true)
@@ -586,7 +591,34 @@ func TestDraftFailureDegradesToEventTitle(t *testing.T) {
 			if d.Disposition != domain.DispositionProposed || it.Title != "原始标题" || it.Summary != "" || it.Kind != "task" || it.Project != "" {
 				t.Fatalf("event %+v item %+v", d, it)
 			}
+			if reply.Status == 0 && e.drafts() != 1 {
+				t.Fatalf("a schema failure was retried: %d draft requests", e.drafts())
+			}
+			// 失败原因随处置留痕；不合 JSON 的返回写明内容形态，不带内容本身。
+			_ = e.st.View(bg, func(tx *store.Tx) error {
+				es, _ := eventlog.ReadObject(tx, d.ID)
+				for _, x := range es {
+					if x.Event.Type == EvDisposed {
+						if !strings.Contains(x.Event.Reason, "draft failed") || strings.Contains(x.Event.Reason, "我先看一下") {
+							t.Fatalf("disposed reason %q", x.Event.Reason)
+						}
+						if name == "fenced" && !strings.Contains(x.Event.Reason, model.ShapeFence) {
+							t.Fatalf("disposed reason lacks the content shape: %q", x.Event.Reason)
+						}
+						return nil
+					}
+				}
+				t.Fatal("no inbound.disposed event")
+				return nil
+			})
 		})
+	}
+}
+
+// 自检探测的模板与入站起草用的是同一个（doctor 不依赖 inbound，常量各存一份，这里对照）。
+func TestDoctorProbesTheDraftTemplateInboundUses(t *testing.T) {
+	if kdoctor.DraftPack != DefaultPack || kdoctor.DraftTemplate != DraftTemplate {
+		t.Fatalf("doctor probes %s/%s, inbound drafts with %s/%s", kdoctor.DraftPack, kdoctor.DraftTemplate, DefaultPack, DraftTemplate)
 	}
 }
 

@@ -17,7 +17,9 @@ const (
 	CodeNoAnswer       = "no_answer"
 	CodeHTTPStatus     = "http_status"
 	CodeSchemaMismatch = "schema_mismatch"
-	CodeBadResponse    = "bad_response"
+	// CodeDraftSchema：端点能答，但起草建议模板的结构化输出过不了校验（起草每次都失败）；Data["shape"] 是返回内容的形态（有则给）。
+	CodeDraftSchema = "draft_schema"
+	CodeBadResponse = "bad_response"
 	// CodeRegionUnavailable：服务在当前网络位置不可用（HTTP 451 或说明地区受限的 403）。
 	CodeRegionUnavailable = "region_unavailable"
 

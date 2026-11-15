@@ -112,7 +112,7 @@ export const DOCTOR_CHECK = ["data_dir", "config", "tier", "model_endpoint", "so
 /** 自检结论的机器码：kernel/doctor/codes.go Code*（Check.code、Detail.code、data.problems） */
 export const DOCTOR_CODE = [
   "ok", "not_configured", "no_client", "unreachable", "timeout", "unauthorized", "protocol_error", "self_reported", "invalid_request",
-  "no_answer", "http_status", "schema_mismatch", "bad_response", "region_unavailable",
+  "no_answer", "http_status", "schema_mismatch", "draft_schema", "bad_response", "region_unavailable",
   "skipped", "ledger_unreadable", "ledger_schema_differs", "facts_unreadable",
   "data_dir_ok", "data_dir_no_backup", "data_dir_missing", "data_dir_permissions", "ledger_missing", "ledger_damaged", "ledger_too_new", "ledger_migrate",
   "config_ok", "config_invalid", "config_exposed", "host_file_invalid",
