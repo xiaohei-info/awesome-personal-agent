@@ -104,7 +104,7 @@ function ChangeForm({ material }: { material: HostedMaterialInfo }) {
   const key = useRef(crypto.randomUUID());
 
   useEffect(() => {
-    api.get<{ executors: { id: string; kind?: string }[] }>("/settings/executors").then((r) => setExecutors(r.executors), (e) => setError(e));
+    api.get<{ executors: { id: string; kind?: string }[] }>("/executors").then((r) => setExecutors(r.executors), (e) => setError(e));
   }, [api]);
 
   const submit = async (e: FormEvent) => {

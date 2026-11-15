@@ -1,6 +1,6 @@
 // Package exec 是执行者与声明设置分组的 HTTP 路由（附录 B.2，设计 §14.7、§14.12）：
 //
-//	GET/POST /settings/executors、DELETE /settings/executors/{id}        执行者清单
+//	POST /settings/executors                                              本人维护名录条目（无界面；读名录用 GET /executors，移除用 DELETE /executors/{id}）
 //	GET /settings/declarations、POST /settings/declarations/{harness}/{rev}/confirm|reject   待确认声明
 //	GET/POST /settings/commands                                           可执行命令（无头运行声明）的直接登记
 //	GET/PUT /settings/projects/{id}/allowed-executors                     项目允许的执行者
@@ -35,9 +35,7 @@ func Routes(st *store.Store, x *command.Executor) core.RouteGroup {
 	a := &api{st, x}
 	return func(r *core.Router) {
 		for _, rt := range []core.Route{
-			{Method: "GET", Path: "/settings/executors", Handler: web(a.listExecutors)},
 			{Method: "POST", Path: "/settings/executors", Handler: a.putExecutor},
-			{Method: "DELETE", Path: "/settings/executors/{id}", MaxBody: 1, Handler: a.removeExecutor},
 			{Method: "GET", Path: "/settings/declarations", Handler: web(a.declarations(""))},
 			{Method: "POST", Path: "/settings/declarations/{harness}/{rev}/confirm", MaxBody: 1, Handler: a.decide("executor.confirm")},
 			{Method: "POST", Path: "/settings/declarations/{harness}/{rev}/reject", MaxBody: 1, Handler: a.decide("executor.reject")},
@@ -74,14 +72,6 @@ func (a *api) run(w http.ResponseWriter, r *http.Request, p *core.Principal, sta
 	return core.WriteJSON(w, status, res.Value)
 }
 
-func (a *api) listExecutors(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	in := map[string]string{}
-	if proj := r.URL.Query().Get("project"); proj != "" {
-		in["project"] = proj
-	}
-	return a.run(w, r, p, http.StatusOK, "executor.list", in)
-}
-
 // putExecutor / registerCommand：请求体就是内核命令的输入，由内核严格校验。
 func (a *api) putExecutor(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	var in json.RawMessage
@@ -97,10 +87,6 @@ func (a *api) registerCommand(w http.ResponseWriter, r *http.Request, p *core.Pr
 		return err
 	}
 	return a.run(w, r, p, http.StatusCreated, "executor.register", in)
-}
-
-func (a *api) removeExecutor(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	return a.run(w, r, p, http.StatusOK, "executor.remove", map[string]string{"id": r.PathValue("id")})
 }
 
 // declarations 列出某状态的声明；state 为空时取查询参数，再缺省为待确认。

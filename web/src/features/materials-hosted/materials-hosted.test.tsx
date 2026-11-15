@@ -28,7 +28,7 @@ function server(o: { content: Record<string, unknown>[]; allowed?: string[] }) {
     if (u.pathname === "/v1/projects") return json(200, { projects: [{ id: "acc-work", name: "acc-work", status: "active", allowed_executors: o.allowed ?? null }] });
     if (u.pathname === "/v1/projects/acc-work") return json(200, { id: "acc-work", name: "acc-work", status: "active", allowed_executors: null });
     if (u.pathname === "/v1/items") return json(200, { items: [] });
-    if (u.pathname === "/v1/settings/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "cli" }, { id: "third.cli", kind: "cli" }] });
+    if (u.pathname === "/v1/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "cli" }, { id: "third.cli", kind: "cli" }] });
     if (u.pathname === "/v1/materials") {
       const p = u.searchParams.get("project");
       return json(200, { materials: all.filter((m) => !p || m.project === p) });

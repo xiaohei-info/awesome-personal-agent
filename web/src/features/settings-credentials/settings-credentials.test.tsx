@@ -20,7 +20,7 @@ function server(initial: Cred[] = [], deny?: Response, failRevoke?: Response) {
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
     if (url === "/v1/projects") return json(200, { projects: [] });
-    if (url === "/v1/settings/executors") return json(200, { executors: [{ id: "exec-1", kind: "external-cli" }] });
+    if (url === "/v1/executors") return json(200, { executors: [{ id: "exec-1", kind: "external-cli" }] });
     const m = url.match(/^\/v1\/settings\/(tokens|ext-keys)(?:\/(.+))?$/);
     if (!m) return json(404, { code: "not_found", why: "no such route", next: "x" });
     if (deny) return deny.clone();

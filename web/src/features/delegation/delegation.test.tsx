@@ -23,7 +23,7 @@ function server(items: It[], events: unknown[], stalled: string[] = []) {
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, headers: (init.headers ?? {}) as Record<string, string> });
     if (url === "/v1/projects") return json(200, { projects: [{ id: "p_work", name: "工作" }] });
-    if (url === "/v1/settings/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli" }] });
+    if (url === "/v1/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli" }] });
     if (url === "/v1/health") return json(200, { healthy: !stalled.length, signals: [{ id: "stalled_delegations", ok: !stalled.length, detail: stalled }] });
     if (url === "/v1/items?kind=delegation") return json(200, { items });
     if (url.startsWith("/v1/audit/events?type=delegation.reported&after=")) return json(200, { events });

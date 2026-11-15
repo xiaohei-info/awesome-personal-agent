@@ -169,7 +169,7 @@ export function DelegationPage() {
   }, [load]);
   // 执行者种类与「久无回音」只是显示上的补充：取不到就不显示，不挡列表。久无回音的判定在内核（健康信号 stalled_delegations）。
   useEffect(() => {
-    api.get<{ executors: Executor[] }>("/settings/executors").then((r) => setKinds(new Map(r.executors.map((x) => [x.id, x.kind]))), () => {});
+    api.get<{ executors: Executor[] }>("/executors").then((r) => setKinds(new Map(r.executors.map((x) => [x.id, x.kind]))), () => {});
     api.get<{ signals: { id: string; detail?: unknown }[] }>("/health").then((r) => {
       const d = r.signals.find((s) => s.id === "stalled_delegations")?.detail;
       setStalled(new Set(Array.isArray(d) ? d.filter((x): x is string => typeof x === "string") : []));

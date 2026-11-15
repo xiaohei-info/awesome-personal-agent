@@ -17,7 +17,7 @@ const SOURCES: Record<NameKind, { path: string; key: string; name: (r: Row) => s
   project: { path: "/projects", key: "projects", name: (r) => r.name || r.id },
   source: { path: "/sources", key: "sources", name: (r) => r.name || r.id }, // 内核保证有显示名（§9.1）；id 只在旧服务端时兜底
   credential: { path: "/settings/tokens", key: "credentials", name: (r) => r.label || r.id },
-  executor: { path: "/settings/executors", key: "executors", name: (r) => r.id },
+  executor: { path: "/executors", key: "executors", name: (r) => r.label || r.id },
 };
 
 const cache = new WeakMap<ApiClient, Map<NameKind, Promise<Named[]>>>();

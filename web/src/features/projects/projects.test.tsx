@@ -30,7 +30,7 @@ function server(opts: { putDenied?: boolean } = {}) {
       projects.push(p);
       return json(201, p);
     }
-    if (url === "/v1/settings/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli", host: "work-host" }, { id: "other-host.cli", kind: "external-cli" }] });
+    if (url === "/v1/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli", host: "work-host" }, { id: "other-host.cli", kind: "external-cli" }] });
     if (url.startsWith("/v1/items?project=")) {
       const id = new URL(url, "http://x").searchParams.get("project");
       return json(200, { items: id === "p_work" ? [{ id: "item_1", phase: "open", version: 1, kind: "task", title: "项目内事项" }] : [] });
