@@ -52,7 +52,20 @@ const zh = {
   edit: "修改",
   editOf: (what: string) => `修改 ${what}`,
   routineEdit: "修改例行任务",
-  scheduledEdit: "修改定时简报",
+  on: "开",
+  off: "关",
+  waitingAgent: "等 Agent 接入后开始",
+  what: "跑什么",
+  defaultTag: "默认",
+  restore: "恢复默认",
+  runNow: "立即跑一次",
+  started: "已开始",
+  saved: "已保存，下次运行生效",
+  last: (at: string) => `最近一次 ${at}`,
+  customSchedule: "自定义时间",
+  more: "再安排一个",
+  newSchedule: "新的定时简报",
+  scheduleOf: (what: string) => `${what}的安排`,
 };
 
 const en: typeof zh = {
@@ -106,7 +119,20 @@ const en: typeof zh = {
   edit: "Edit",
   editOf: (what) => `Edit ${what}`,
   routineEdit: "Edit routine",
-  scheduledEdit: "Edit scheduled brief",
+  on: "on",
+  off: "off",
+  waitingAgent: "Starts once an Agent is connected",
+  what: "What it writes",
+  defaultTag: "Default",
+  restore: "Restore default",
+  runNow: "Run now",
+  started: "Started",
+  saved: "Saved; applies from the next run",
+  last: (at) => `Latest ${at}`,
+  customSchedule: "Custom schedule",
+  more: "Schedule another",
+  newSchedule: "New scheduled brief",
+  scheduleOf: (what) => `${what} schedule`,
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

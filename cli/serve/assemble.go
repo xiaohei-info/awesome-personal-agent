@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	srcdecl "github.com/xiaohei-info/awesome-personal-agent/sources"
 	"log/slog"
@@ -267,7 +268,10 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	var bg *background.Service // start_background_run 的处理器；调度器建好后再赋值
 	startBackground := func(ctx context.Context, c rules.Call) error { return bg.Handler()(ctx, c) }
 	if k.eng, err = rules.New(rules.Options{Store: st, Exec: x, Packs: ld, Owner: owner,
-		Handlers: map[string]rules.Handler{"call_agent": callAgent, background.Action: startBackground}, Reminder: att, OnError: logErr("rules")}); err != nil {
+		Handlers: map[string]rules.Handler{"call_agent": callAgent, background.Action: startBackground}, Reminder: att, OnError: logErr("rules"),
+		Gate: func(ctx context.Context, pack string, do []kpacks.Action, params json.RawMessage) (string, error) {
+			return tk.Gate(ctx, pack, do, params)
+		}}); err != nil {
 		return nil, err
 	}
 	// 间隔、模板与模式取自 follow-up 包的 follow_up 时钟规则，跟进服务每次使用时从加载器读。
@@ -421,6 +425,12 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	return k, err
 }
 
+// defaultSchedules 是开箱默认安排（§7.3）：简报工作日 08:30、复盘每周五 17:30；cron 不带时区，按本机时区解释。
+var defaultSchedules = []instances.Default{
+	{Pack: "brief", Params: json.RawMessage(`{"schedule":"30 8 * * 1-5"}`)},
+	{Pack: "review", Params: json.RawMessage(`{"schedule":"30 17 * * 5"}`)},
+}
+
 // handleTimer 把到期 Timer 分派给所属模块；规则与跟进只在事务里排待办，执行要调模型，由后台循环做。
 func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 	if err := khealth.RecordClockLag(tx, c, clock.Now()); err != nil { // 迟到只报不修，照常触发
@@ -466,6 +476,9 @@ func (k *kernel) start(ctx context.Context) error {
 		slog.Error("rules reconcile", "err", err)
 	}
 	if err := k.loadHostFiles(ctx); err != nil {
+		return err
+	}
+	if err := instances.Seed(ctx, k.x, k.st, k.packs, owner, defaultSchedules); err != nil {
 		return err
 	}
 	if n, err := sregistry.Backfill(ctx, k.st, storedName, sourceKindNames, clock.Now()); err != nil {

@@ -9,16 +9,17 @@ import { browserZone } from "./schedule";
 // 测试边界替身：按 GET /v1/items?kind=brief、GET /v1/instances、GET /v1/packs 与 POST /v1/instances 契约应答。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const items = [
-  { id: "b1", kind: "brief", title: "周一简报", created_at: "2030-01-01T00:00:00Z", spec: { period: "2030-W01", sections: [{ project: "home", body: "家里进展" }, { project: "work", body: "工作进展" }] } },
+  { id: "b1", kind: "brief", title: "周一简报", created_at: "2030-01-01T00:00:00Z", origin: { source: "instance:ins_1" }, spec: { period: "2030-W01", sections: [{ project: "home", body: "家里进展" }, { project: "work", body: "工作进展" }] } },
   { id: "b2", kind: "brief", title: "周复盘", created_at: "2030-01-07T00:00:00Z", spec: { period: "2030-W02-review", sections: [{ project: "work", body: "复盘工作" }] } },
   { id: "b3", kind: "brief", title: "空简报", created_at: "2030-01-08T00:00:00Z", spec: {} },
 ];
-const packs = [{ name: "brief", instance_params: {} }, { name: "review", instance_params: {} }, { name: "follow-up", instance_params: {} }];
+const DEF = "每个项目一节，写进展。";
+const packs = [{ name: "brief", instance_params: {}, default_instruction: DEF }, { name: "review", instance_params: {} }, { name: "follow-up", instance_params: {} }];
 const routines = [{ id: "ins_r", pack: "routine", params: { schedule: "CRON_TZ=UTC 0 9 * * 1", mode: "create_item", title: "{date} 周报" }, enabled: true }];
-const instances = [{ id: "ins_1", pack: "brief", params: { schedule: "0 8 * * 1-5" }, enabled: true }, { id: "ins_2", pack: "follow-up", params: {}, enabled: true }];
+const instances = [{ id: "ins_1", pack: "brief", params: { schedule: "30 8 * * 1-5" }, enabled: true }, { id: "ins_2", pack: "follow-up", params: {}, enabled: true }];
 
 interface Calls { posts: { body: unknown; csrf: string | null }[]; urls: string[]; patches?: { url: string; body: unknown }[] }
-function server(o: { fail?: boolean; items?: unknown[]; reject?: boolean; routine?: boolean; host?: string; caps?: Record<string, string> } = {}, calls: Calls = { posts: [], urls: [] }) {
+function server(o: { fail?: boolean; items?: unknown[]; reject?: boolean; routine?: boolean; host?: string; caps?: Record<string, string>; ready?: boolean; instances?: unknown[] } = {}, calls: Calls = { posts: [], urls: [] }) {
   const f = (async (url: string, init?: RequestInit) => {
     calls.urls.push(url);
     if (url === "/v1/projects") return json(200, { projects: [{ id: "home", name: "家务" }, { id: "work", name: "工作" }] });
@@ -34,13 +35,17 @@ function server(o: { fail?: boolean; items?: unknown[]; reject?: boolean; routin
       const cur = [...instances, ...routines].find((x) => x.id === decodeURIComponent(ip[1]))!;
       return json(200, { ...cur, ...body, params: body.params ?? cur.params, enabled: body.enabled ?? cur.enabled });
     }
+    if (/^\/v1\/instances\/[^/]+\/run$/.test(url) && init?.method === "POST") {
+      calls.posts.push({ body: url, csrf: (init.headers as Record<string, string>)["X-CSRF-Token"] ?? null });
+      return json(202, instances[0]);
+    }
     if (url === "/v1/instances" && init?.method === "POST") {
       calls.posts.push({ body: JSON.parse(init.body as string), csrf: (init.headers as Record<string, string>)["X-CSRF-Token"] ?? null });
       if (o.reject) return json(400, { code: "invalid_request", why: "schedule is not a valid cron expression", next: "fix the request and retry" });
       const b = JSON.parse(init.body as string);
       return json(201, { id: "ins_3", pack: b.pack, ...(b.project ? { project: b.project } : {}), params: b.params, enabled: true });
     }
-    if (url === "/v1/instances") return json(200, { instances: o.routine ? [...instances, ...routines] : instances });
+    if (url === "/v1/instances") return json(200, { instances: o.instances ?? (o.routine ? [...instances, ...routines] : instances), agent_ready: !!o.ready });
     return json(404, { code: "not_found", why: "no such route", next: "" });
   }) as unknown as typeof fetch;
   return f;
@@ -83,37 +88,87 @@ describe("简报页", () => {
     expect(await screen.findByText("还没有简报")).toBeInTheDocument();
   });
 
-  it("flow-brief: 只列出简报类能力包的实例；不带时区的定时原样显示", async () => {
+  it("flow-brief: 只列出简报类能力包的实例；每个一张卡，收起时一行摘要，不露 cron 串", async () => {
     mount(server());
-    const l = within(await screen.findByRole("list", { name: "已安排的" }));
-    expect(l.getAllByRole("listitem")).toHaveLength(1);
-    expect(l.getByText("0 8 * * 1-5")).toBeInTheDocument();
+    const l = within(await screen.findByLabelText("已安排的"));
+    const card = await l.findByRole("group", { name: "简报" });
+    expect(l.queryByRole("group", { name: "跟进提醒" })).toBeNull();
+    expect(card).not.toHaveAttribute("open");
+    expect(within(card).getByText(/工作日 08:30 · 开/)).toBeInTheDocument();
+    expect(screen.queryByText("30 8 * * 1-5")).not.toBeInTheDocument();
   });
 
-  it("flow-brief: 建能力包实例：POST /v1/instances 带包、定时与项目，成功后列出新实例", async () => {
+  it("Agent 还不能后台运行时卡片写明等它接入并链到设置；「立即跑一次」不可点", async () => {
+    mount(server());
+    const card = within(await screen.findByRole("group", { name: "简报" }));
+    expect(card.getByText("等 Agent 接入后开始")).toBeInTheDocument();
+    expect(card.getByRole("link", { name: "去设置" })).toHaveAttribute("href", "/settings/agents");
+    expect(card.getByRole("button", { name: "立即跑一次" })).toBeDisabled();
+  });
+
+  it("展开改「跑什么」：没改时显示默认并标「默认」；改了带 instruction，恢复默认后不带；定时没动原样带回", async () => {
+    const calls: Calls = { posts: [], urls: [], patches: [] };
+    mount(server({ ready: true }, calls));
+    const card = within(await screen.findByRole("group", { name: "简报" }));
+    await userEvent.click(card.getByText("简报"));
+    const box = card.getByRole("textbox", { name: /跑什么/ });
+    expect(box).toHaveValue(DEF);
+    expect(card.getByText("默认")).toBeInTheDocument();
+    expect(card.queryByRole("button", { name: "恢复默认" })).toBeNull();
+    await userEvent.clear(box);
+    await userEvent.type(box, "只写风险");
+    expect(card.queryByText("默认")).toBeNull();
+    await userEvent.click(card.getByRole("button", { name: "保存" }));
+    expect(calls.patches!.at(-1)).toEqual({ url: "/v1/instances/ins_1", body: { params: { schedule: "30 8 * * 1-5", instruction: "只写风险" } } });
+    expect(await card.findByText("已保存，下次运行生效")).toBeInTheDocument();
+    await userEvent.click(card.getByRole("button", { name: "恢复默认" }));
+    expect(box).toHaveValue(DEF);
+    await userEvent.selectOptions(card.getByLabelText("哪几天"), "每周五");
+    await userEvent.click(card.getByRole("button", { name: "保存" }));
+    expect(calls.patches!.at(-1)).toEqual({ url: "/v1/instances/ins_1", body: { params: { schedule: "30 8 * * 5" } } });
+  });
+
+  it("Agent 可用时可以立即跑一次；卡片链到这个安排最近一次的简报", async () => {
+    const calls: Calls = { posts: [], urls: [] };
+    mount(server({ ready: true }, calls));
+    const card = within(await screen.findByRole("group", { name: "简报" }));
+    expect(card.queryByText("等 Agent 接入后开始")).toBeNull();
+    expect(card.getByRole("link", { name: /最近一次/ })).toHaveAttribute("href", "/items/b1");
+    await userEvent.click(card.getByRole("button", { name: "立即跑一次" }));
+    expect(calls.posts).toEqual([{ body: "/v1/instances/ins_1/run", csrf: "tok-1" }]);
+    expect(await card.findByText("已开始")).toBeInTheDocument();
+  });
+
+  it("读不回的定时只显示「自定义时间」", async () => {
+    mount(server({ instances: [{ id: "ins_9", pack: "review", params: { schedule: "*/5 * * * *" }, enabled: false }] }));
+    const card = within(await screen.findByRole("group", { name: "复盘" }));
+    expect(card.getByText(/自定义时间 · 关/)).toBeInTheDocument();
+    expect(screen.queryByText("*/5 * * * *")).not.toBeInTheDocument();
+  });
+
+  it("flow-brief: 再安排一个：POST /v1/instances 带包、定时与项目，成功后列出新实例", async () => {
     const calls: Calls = { posts: [], urls: [] };
     mount(server({}, calls));
-    await screen.findByRole("list", { name: "已安排的" });
-    await userEvent.selectOptions(screen.getByLabelText("做什么"), "review");
-    await userEvent.selectOptions(screen.getByLabelText("哪几天"), "每周五");
-    const at = screen.getByLabelText("几点");
+    const form = within(await screen.findByRole("form", { name: "新的定时简报" }));
+    await userEvent.selectOptions(form.getByLabelText("做什么"), "review");
+    await userEvent.selectOptions(form.getByLabelText("哪几天"), "每周五");
+    const at = form.getByLabelText("几点");
     await userEvent.clear(at);
     await userEvent.type(at, "09:00");
-    await userEvent.click(await screen.findByLabelText("家务"));
-    await userEvent.click(screen.getByLabelText("工作"));
-    await userEvent.click(screen.getByRole("button", { name: "安排" }));
+    await userEvent.click(await form.findByLabelText("家务"));
+    await userEvent.click(form.getByLabelText("工作"));
+    await userEvent.click(form.getByRole("button", { name: "安排" }));
     // 定时带上这台设备的时区，避免 APA 主机时区不同时错开（§6.8）
     const zone = browserZone();
     expect(calls.posts).toEqual([{ body: { pack: "review", params: { schedule: `CRON_TZ=${zone} 0 9 * * 5`, projects: ["home", "work"] } }, csrf: "tok-1" }]);
-    const l = within(screen.getByRole("list", { name: "已安排的" }));
-    expect(await l.findByText(/每周五 09:00 · 复盘 · 家务、工作/)).toBeInTheDocument();
+    expect(await screen.findByRole("group", { name: "复盘" })).toBeInTheDocument();
   });
 
   it("建实例被服务端拒绝时显示原因，不伪造新实例", async () => {
     mount(server({ reject: true }));
-    await screen.findByRole("list", { name: "已安排的" });
-    await userEvent.type(screen.getByLabelText("cron 或时长"), "bad"); // 高级里直接写的定时原样提交
-    await userEvent.click(screen.getByRole("button", { name: "安排" }));
+    const form = within(await screen.findByRole("form", { name: "新的定时简报" }));
+    await userEvent.type(form.getByLabelText("cron 或时长"), "bad"); // 高级里直接写的定时原样提交
+    await userEvent.click(form.getByRole("button", { name: "安排" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("schedule is not a valid cron expression");
     expect(screen.queryByText(/ins_3/)).not.toBeInTheDocument();
   });
@@ -134,9 +189,9 @@ describe("简报页", () => {
   it("没选时间时不发请求", async () => {
     const calls: Calls = { posts: [], urls: [] };
     mount(server({}, calls));
-    await screen.findByRole("list", { name: "已安排的" });
-    await userEvent.clear(screen.getByLabelText("几点"));
-    await userEvent.click(screen.getByRole("button", { name: "安排" }));
+    const form = within(await screen.findByRole("form", { name: "新的定时简报" }));
+    await userEvent.clear(form.getByLabelText("几点"));
+    await userEvent.click(form.getByRole("button", { name: "安排" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("请选好时间");
     expect(calls.posts).toEqual([]);
   });
@@ -144,11 +199,11 @@ describe("简报页", () => {
   it("启停：每个实例一个开关，只发 enabled，界面按服务端返回更新", async () => {
     const calls: Calls = { posts: [], urls: [], patches: [] };
     mount(server({ routine: true }, calls));
-    const l = within(await screen.findByRole("list", { name: "已安排的" }));
-    await userEvent.click(l.getByRole("button", { name: "启停 ins_1" }));
+    const card = within(await screen.findByRole("group", { name: "简报" }));
+    await userEvent.click(card.getByRole("button", { name: "停用" }));
     expect(calls.patches).toEqual([{ url: "/v1/instances/ins_1", body: { enabled: false } }]);
-    expect(await l.findByText(/（已停用）/)).toBeInTheDocument();
-    expect(l.getByRole("button", { name: "启停 ins_1" })).toHaveTextContent("启用");
+    expect(await card.findByText(/工作日 08:30 · 关/)).toBeInTheDocument();
+    expect(card.getByRole("button", { name: "启用" })).toBeInTheDocument();
     const r = within(screen.getByRole("list", { name: "已安排的例行任务" }));
     await userEvent.click(r.getByRole("button", { name: "启停 〈日期〉 周报" }));
     expect(calls.patches!.at(-1)).toEqual({ url: "/v1/instances/ins_r", body: { enabled: false } });
@@ -214,22 +269,6 @@ describe("简报页", () => {
     await userEvent.selectOptions(again.getByLabelText("哪几天做"), "1-5");
     await userEvent.click(again.getByRole("button", { name: "保存" }));
     expect(calls.patches!.at(-1)!.body).toMatchObject({ params: { schedule: "CRON_TZ=UTC 0 9 * * 1-5" } });
-  });
-
-  it("修改定时简报：包不能换；读不回的定时放进「直接写定时」；PATCH 只换定时与项目，其余参数带回", async () => {
-    const calls: Calls = { posts: [], urls: [], patches: [] };
-    mount(server({}, calls));
-    const l = within(await screen.findByRole("list", { name: "已安排的" }));
-    await userEvent.click(l.getByRole("button", { name: "修改 ins_1" }));
-    const form = within(await screen.findByRole("form", { name: "修改定时简报" }));
-    expect(form.getByLabelText("做什么")).toBeDisabled();
-    expect(form.getByLabelText("cron 或时长")).toHaveValue("0 8 * * 1-5");
-    await userEvent.click(await form.findByLabelText("家务"));
-    await userEvent.click(form.getByRole("button", { name: "保存" }));
-    expect(calls.patches).toEqual([{ url: "/v1/instances/ins_1", body: { params: { schedule: "0 8 * * 1-5", projects: ["home"] } } }]);
-    expect(calls.posts).toEqual([]);
-    expect(await l.findByText(/家务/)).toBeInTheDocument();
-    expect(screen.queryByRole("form", { name: "修改定时简报" })).toBeNull();
   });
 
   it("服务端失败时显示真实原因", async () => {

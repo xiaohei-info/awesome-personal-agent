@@ -484,7 +484,7 @@ func TestFlowDigestAlert(t *testing.T) {
 				t.Errorf("来源 %s 应已停用: %s", id, out)
 			}
 		}
-		if l := k.apa(e.OBS, 0, "instance", "list").Stdout; strings.Contains(strings.ReplaceAll(l, " ", ""), `"enabled":true`) {
+		if l := k.apa(e.OBS, 0, "instance", "list").Stdout; len(stillEnabled(t, l, briefInstance)) > 0 {
 			t.Errorf("brief 实例应已停用: %s", l)
 		}
 	})

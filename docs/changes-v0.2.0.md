@@ -12,9 +12,9 @@
 |---|---|---|
 | 一、契约与写入路径变更 | 20 | 16 |
 | 二、新增能力 | 32 | 7 |
-| 三、默认值变更 | 11 | 6 |
+| 三、默认值变更 | 12 | 7 |
 | 四、删除或收窄 | 10 | 3 |
-| 合计 | 73 | 32 |
+| 合计 | 74 | 33 |
 
 另有：文档结构与订正 9 条（第五节，不计入上表）；推翻评审结论细节 7 处、评审结论没有写而由本修订补定的 6 处（第六节）；已知未覆盖 1 项（第七节）；设计确认时的四项决定（第九节）。
 
@@ -138,6 +138,7 @@
 | V-09 | 新增配置键的默认值 | — | `judge_endpoint.timeout_ms` 10000、`max_batch` 32、`max_material_chars` 8000；`judgment.spot_check.per_brief` 5；`backlog_release_per_day` 40；`judgment_retention_days` 180；`delegation_stall_after` 24h；`remind_rounds` 2；`stale_after` 14d；会话绝对有效期 30 天、空闲 7 天 | §16.2、附录 C |
 | V-10 | 界面语言的口径 [G7、Q13] | 未声明 | Web 界面中英可切换（N-28）；通知、简报与内置提示词为中文，CLI 为英文，写进发布说明 | §4.1 |
 | V-11 | 助手的语气（人格）[本人要求] | 默认为空，装好后要自己写 | 为空时用内置默认语气（中英各一份，随发行附带、不入账本）；本人写了就用本人的，Web 可"恢复默认"；助手语言新增策略键 `persona_lang`（默认空 = 跟随系统，Web 里选）；`apa persona` 新增 `--lang`，`GET /context/persona` 新增 `lang`、`locale` 参数与 `default` 字段，语言优先级 `--lang` > 设置 > 区域设置 > 英文 | §6.13、§11.2、附录 B |
+| V-12 | 简报与复盘开箱即有 [本人要求] | 实例要本人自己建，装好后没有简报；没有 Agent 时到点建一条"需要你处理"的事项 | 启动时为从没有过实例的 `brief`、`review` 各建一个默认安排（工作日 08:30、每周五 17:30，主机时区，开启），只建一次；Agent 还不能后台运行时周期简报到点跳过（记 `rule.skipped`，不建事项、不补跑）；简报页每个安排一张卡片，可改时间、项目与内容要求（实例参数 `instruction`，没写时用模板的 `default_instruction`），可立即跑一次（`instance.run`） | §3.6、§4.1、§7.3、§13.5、附录 B.2、C.7 |
 
 **迁移**：
 
@@ -149,6 +150,7 @@
 | V-07 | 能力包（配置） | 只为改邮件、日历的项目归属而覆盖 `inbound-triage` 的用户包不再需要：给来源设默认项目即可。已建事项的项目不变 |
 | V-08 | 策略（配置） | 新键 `judgment.bands[]` 覆盖模板声明的值，只在 Web 的"自动规则 › 筛选门槛"页改，记 Event。旧的单边阈值随 K-01 移除，不换算成新值 |
 | V-11 | 策略（配置）、CLI、API | 不迁移账本，也不改写已存策略：人格仍是本人写的串，空串读作"用默认"；已存策略没有 `persona_lang`，读作空串（跟随系统），已部署的实例由本人在 Web 里选，不替本人猜。`apa persona`、`GET /context/persona` 对空人格不再返回空，而是声明加默认语气；按"输出为空 = 没有人格"判断的调用方要改。新增的 `--lang`、`lang`、`default` 是纯加法 |
+| V-12 | 账本数据、能力包、API | 不迁移、不改结构：是否建过按 `instance.created` 事件判定，补建经 `instance.create` 落账、操作者 system；本人建过实例的包不补建。内置简报与复盘模板改为经 `instruction_path` 读内容要求，默认要求与原提示词同义；覆盖内置包、用到 `instruction_path` 的用户包须声明字符串参数 `instruction`。`GET /instances` 只增 `agent_ready`，`GET /packs` 只增 `default_instruction`，新路由 `POST /instances/{id}/run` |
 
 ---
 

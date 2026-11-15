@@ -28,7 +28,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
@@ -53,7 +56,8 @@ func newEnv(t *testing.T, dataDir string) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, instances.Module,
-		rules.Module, direct.Module, task.Module, executors.Module, proc.Module, runidentity.Module} {
+		rules.Module, direct.Module, task.Module, executors.Module, proc.Module, runidentity.Module,
+		sregistry.Module, runner.Module, summaries.Module} { // 后三个只为任务型简报取"知会"一节的资料
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -156,7 +160,16 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("write-brief body: %s", w.Body)
 	}
 	// spec_schema 的分节键名必须写进提示词，否则运行者会自行发明键（progress/due/decisions），Web 简报页读 body 会显示空分节。
-	for _, k := range []string{"spec.sections", "project", "body", "进展", "到期事项", "待本人决定的事"} {
+	// 每节写什么是可改的默认要求（default_instruction，经 {instruction_path} 交给运行者）；写回格式留在固定正文里。
+	if !strings.Contains(w.Body, "{instruction_path}") {
+		t.Fatalf("write-brief must read the instruction file: %s", w.Body)
+	}
+	for _, k := range []string{"进展", "到期事项", "待本人决定的事"} {
+		if !strings.Contains(w.Meta.DefaultInstruction, k) {
+			t.Fatalf("write-brief default_instruction lacks %q: %s", k, w.Meta.DefaultInstruction)
+		}
+	}
+	for _, k := range []string{"spec.sections", "project", "body"} {
 		if !strings.Contains(w.Body, k) {
 			t.Fatalf("write-brief must name %q for spec.sections[].{project, body}: %s", k, w.Body)
 		}

@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -151,6 +152,9 @@ type PromptMeta struct {
 	ResultFields        []string       `yaml:"result_fields"`   // 任务型：spec 里要写全的字段，顶层键或 a[].b（§8.4）
 	ResultMaterial      bool           `yaml:"result_material"` // 任务型：结果是一条材料修订
 	Tools               any            `yaml:"tools"`           // 只为识别并拒绝"生成型声明工具"
+
+	// DefaultInstruction 是任务型模板在实例没写 instruction 时交给运行者的默认内容要求（C.7）：随发行更新，不写进账本。
+	DefaultInstruction string `yaml:"default_instruction"`
 }
 
 // Band 是不确定带 {low, high}（C.7）；只写一端时另一端取相同的值。
@@ -689,6 +693,9 @@ func checkPromptRefs(p *Pack) error {
 		if usesPlaceholder(p.Prompts[n].Body, "instruction_path") && !declaresInstruction(p.InstanceParams) {
 			return fmt.Errorf("prompts/%s.md: {instruction_path} needs a string parameter %q in instance_params", n, "instruction")
 		}
+		if p.Prompts[n].Meta.DefaultInstruction != "" && !usesPlaceholder(p.Prompts[n].Body, "instruction_path") {
+			return fmt.Errorf("prompts/%s.md: default_instruction needs {instruction_path} in the prompt body", n)
+		}
 		to := p.Prompts[n].Meta.RelayTo
 		if to == "" {
 			continue
@@ -711,6 +718,9 @@ func checkPromptRefs(p *Pack) error {
 	}
 	return nil
 }
+
+// MaxInstructionRunes 是实例 instruction 参数与模板 default_instruction 的长度上限（字符数，C.7、C.10）。
+const MaxInstructionRunes = 2000
 
 // UsesPlaceholder 报告提示词正文是否含占位符 {name}（括号内允许空白）。
 func UsesPlaceholder(body, name string) bool { return usesPlaceholder(body, name) }
@@ -798,6 +808,10 @@ func checkPromptMeta(m *PromptMeta, file string, schema func(string, map[string]
 		return errors.New("result_fields and result_material are only for task prompts")
 	case len(m.ResultFields) > 0 && m.ResultMaterial:
 		return errors.New("declare either result_fields or result_material, not both")
+	case m.DefaultInstruction != "" && m.Agent != "task":
+		return errors.New("default_instruction is only for task prompts")
+	case utf8.RuneCountInString(m.DefaultInstruction) > MaxInstructionRunes:
+		return fmt.Errorf("default_instruction is longer than %d characters", MaxInstructionRunes)
 	}
 	for _, f := range m.ResultFields {
 		if !resultField.MatchString(f) {

@@ -7,6 +7,7 @@ instance_params:
   properties:
     schedule: {type: string}
     projects: {type: array, items: {type: string}}
+    instruction: {type: string}
 clock_rules:
   - id: scheduled-review
     type: recur

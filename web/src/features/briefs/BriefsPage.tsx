@@ -1,31 +1,25 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { locale, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { useNamed, useNames } from "../../app/names";
-import { DAYS, browserZone, parseCron, toCron, type Days } from "./schedule";
+import { DAYS, browserZone, toCron, type Days } from "./schedule";
 import { strings } from "./strings";
-import { Pick, Val } from "../../app/values";
+import { Pick } from "../../app/values";
 import { RoutineForm, type Instance } from "./Routine";
+import { ScheduleCard, When } from "./ScheduleCard";
 
-// 形状对应 GET /v1/items?kind=brief（spec.period、spec.sections[{project,body}]）、GET/POST /v1/instances、PATCH /v1/instances/{id}（enabled 走 instance.toggle）、GET /v1/packs（附录 B.2、C.10）。
+// 形状对应 GET /v1/items?kind=brief（spec.period、spec.sections[{project,body}]、origin.source）、GET/POST /v1/instances（列表带 agent_ready）、
+// PATCH /v1/instances/{id}（enabled 走 instance.toggle）、POST /v1/instances/{id}/run、GET /v1/packs（default_instruction）（附录 B.2、C.10）。
 // 简报与复盘都是 brief 事项（packs/review 写回 brief kind，以 spec.period 区分周期），本页不猜类型，统一按周期列出；分节与定时校验都由服务端与包负责，本页只展示并搬运输入。
+// 简报与复盘开箱各有一个默认安排（§7.3），每个实例一张卡；例行任务由本人自己建。
 interface Section { project: string; body: string }
-interface Brief { id: string; title: string; created_at?: string; spec?: { period?: string; sections?: Section[] } }
-interface Pack { name: string }
+interface Brief { id: string; title: string; created_at?: string; origin?: { source?: string }; spec?: { period?: string; sections?: Section[] } }
+interface Pack { name: string; default_instruction?: string }
 
 const BRIEF_PACKS = ["brief", "review"]; // 产出 brief 事项的内置包
 const ROUTINE = "routine"; // 例行任务：结果也进本页（§13.5）
-
-/** 实例的定时：本页生成的写法显示成「工作日 08:00」，时区与这台设备不同时带上时区；其余原样显示。 */
-function When({ schedule }: { schedule?: string }) {
-  const t = useT(strings);
-  if (!schedule) return <>—</>;
-  const p = parseCron(schedule);
-  if (!p) return <code>{schedule}</code>;
-  return <>{t.days[p.days]} {p.time}{p.zone !== browserZone() ? t.zone(p.zone) : ""}</>;
-}
 
 function BriefCard({ b }: { b: Brief }) {
   const t = useT(strings);
@@ -46,19 +40,25 @@ function BriefCard({ b }: { b: Brief }) {
   );
 }
 
+/** 已有安排时「再安排一个」收起；一个都没有时直接展开表单。 */
+function More({ open, label, children }: { open: boolean; label: string; children: ReactNode }) {
+  return open ? <>{children}</> : <details><summary>{label}</summary>{children}</details>;
+}
+
 export function BriefsPage() {
   const { api } = useSession();
   const t = useT(strings);
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [instances, setInstances] = useState<Instance[] | null>(null);
   const [packs, setPacks] = useState<string[]>([]);
+  const [defaults, setDefaults] = useState<Record<string, string>>({});
+  const [agentReady, setAgentReady] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [pack, setPack] = useState("");
   const [days, setDays] = useState<Days>("1-5");
   const [time, setTime] = useState("08:00");
   const [raw, setRaw] = useState(""); // 高级：直接写 cron 或时长，填了就用它
   const [projects, setProjects] = useState<string[]>([]);
-  const [editing, setEditing] = useState<Instance | null>(null); // 正在修改的简报或复盘；表单与新建共用
   const [editingRoutine, setEditingRoutine] = useState<string | null>(null);
   const allProjects = useNamed("project");
   const projectName = useNames("project");
@@ -76,12 +76,14 @@ export function BriefsPage() {
     try {
       const [b, i, p] = await Promise.all([
         api.get<{ items: Brief[] }>("/items?kind=brief"),
-        api.get<{ instances: Instance[] }>("/instances"),
+        api.get<{ instances: Instance[]; agent_ready?: boolean }>("/instances"),
         api.get<{ packs: Pack[] }>("/packs"),
       ]);
       setBriefs(b.items);
       setInstances(i.instances.filter((x) => BRIEF_PACKS.includes(x.pack) || x.pack === ROUTINE));
       setPacks(p.packs.map((x) => x.name).filter((n) => BRIEF_PACKS.includes(n) || n === ROUTINE));
+      setDefaults(Object.fromEntries(p.packs.map((x) => [x.name, x.default_instruction ?? ""])));
+      setAgentReady(!!i.agent_ready);
       setError(null);
     } catch (e) {
       setError(e);
@@ -90,40 +92,22 @@ export function BriefsPage() {
   useEffect(() => { void load(); }, [load]);
 
   const replace = (i: Instance) => setInstances((l) => (l ?? []).map((x) => (x.id === i.id ? i : x)));
-  // 修改：表单按实例预填。定时是本页能读回的写法就填进哪几天与几点，否则放进「直接写定时」。
-  function edit(i: Instance) {
-    const p = i.params.schedule ? parseCron(i.params.schedule) : null;
-    setEditing(i);
-    setPack(i.pack);
-    setDays(p?.days ?? "1-5");
-    setTime(p?.time ?? "08:00");
-    setRaw(p ? "" : i.params.schedule ?? "");
-    setProjects(i.params.projects ?? []);
-  }
-  function reset() {
-    setEditing(null);
-    setRaw("");
-    setProjects([]);
-  }
+  // 某个实例最近一次建的简报（origin.source 是 instance:<id>）。
+  const lastOf = (id: string) => (briefs ?? []).filter((b) => b.origin?.source === `instance:${id}`)
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
 
   async function create(e: FormEvent) {
     e.preventDefault();
-    const zone = (editing?.params.schedule && parseCron(editing.params.schedule)?.zone) || browserZone();
-    const schedule = raw.trim() || (time ? toCron(days, time, zone) : "");
+    const schedule = raw.trim() || (time ? toCron(days, time, browserZone()) : "");
     if (!schedule) return setError(new Error(t.needSchedule));
     try {
-      if (editing) {
-        // instance.update 整体替换 params：其余参数原样带回，只换定时与项目。
-        const { projects: _old, ...rest } = editing.params;
-        replace(await api.patch<Instance>(`/instances/${encodeURIComponent(editing.id)}`, { params: { ...rest, schedule, ...(projects.length ? { projects } : {}) } }));
-      } else {
-        const created = await api.post<Instance>("/instances", {
-          pack: pack || briefPacks[0],
-          params: { schedule, ...(projects.length ? { projects } : {}) },
-        });
-        setInstances((l) => [...(l ?? []), created]);
-      }
-      reset();
+      const created = await api.post<Instance>("/instances", {
+        pack: pack || briefPacks[0],
+        params: { schedule, ...(projects.length ? { projects } : {}) },
+      });
+      setInstances((l) => [...(l ?? []), created]);
+      setRaw("");
+      setProjects([]);
       setError(null);
     } catch (err) {
       setError(err);
@@ -146,7 +130,8 @@ export function BriefsPage() {
     <button type="button" aria-label={t.editOf(i.params.title?.split("{date}").join(t.dateMark) || i.id)} onClick={onClick}>{t.edit}</button>
   );
   const briefPacks = packs.filter((n) => BRIEF_PACKS.includes(n));
-  const scheduled = (instances ?? []).filter((x) => x.pack !== ROUTINE);
+  const scheduled = (instances ?? []).filter((x) => x.pack !== ROUTINE)
+    .sort((a, b) => BRIEF_PACKS.indexOf(a.pack) - BRIEF_PACKS.indexOf(b.pack)); // 简报在前，复盘在后
   const routines = (instances ?? []).filter((x) => x.pack === ROUTINE);
 
   if (!briefs || !instances) return <main>{error != null ? <ErrorNote error={error} /> : <p role="status">{t.loading}</p>}</main>;
@@ -166,14 +151,16 @@ export function BriefsPage() {
       </section>
       <section aria-label={t.instances}>
         <h2>{t.scheduled}</h2>
-        <ul aria-label={t.instanceList} className={scheduled.length ? "rows" : "plain"}>
-          {scheduled.map((i) => (
-            <li key={i.id}><span><When schedule={i.params.schedule} /> · <Val k="pack" id={i.pack} />{i.params.projects?.length ? ` · ${i.params.projects.map(projectName).join(t.listSep)}` : ""}{i.enabled ? "" : t.disabled}</span> <span><Edit i={i} onClick={() => edit(i)} /> <OnOff i={i} /></span></li>
-          ))}
-        </ul>
-        <form className="panel" aria-label={editing ? t.scheduledEdit : undefined} onSubmit={(e) => void create(e)}>
+        <div aria-label={t.instanceList}>
+          {scheduled.map((i) => {
+            const last = lastOf(i.id);
+            return <ScheduleCard key={i.id} i={i} fallback={defaults[i.pack] ?? ""} agentReady={agentReady} last={last && { id: last.id, at: last.created_at }} onChange={replace} />;
+          })}
+        </div>
+        <More open={!scheduled.length} label={t.more}>
+        <form className="panel" aria-label={t.newSchedule} onSubmit={(e) => void create(e)}>
           <label>{t.pack}
-            <Pick k="pack" value={pack || briefPacks[0] || ""} onChange={setPack} ids={briefPacks} disabled={!!editing} />
+            <Pick k="pack" value={pack || briefPacks[0] || ""} onChange={setPack} ids={briefPacks} />
           </label>
           <fieldset disabled={!!raw.trim()}>
             <legend>{t.schedule}</legend>
@@ -197,9 +184,9 @@ export function BriefsPage() {
             <summary>{t.advanced}</summary>
             <label>{t.rawSchedule}<input value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="0 8 * * 1-5" /></label>
           </details>
-          <button type="submit" ref={submitRef} disabled={!briefPacks.length}>{editing ? t.save : t.create}</button>
-          {editing && <> <button type="button" onClick={reset}>{t.cancel}</button></>}
+          <button type="submit" ref={submitRef} disabled={!briefPacks.length}>{t.create}</button>
         </form>
+        </More>
       </section>
       {packs.includes(ROUTINE) && (
         <section aria-label={t.routines}>

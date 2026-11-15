@@ -6,11 +6,14 @@ package instances
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
@@ -50,7 +53,7 @@ const (
 	EvCreated = "instance.created"
 	EvUpdated = "instance.updated"
 	EvToggled = "instance.toggled"
-	EvFired   = "instance.fired"
+	EvFired   = "instance.fired" // 到期或"立即跑一次"（instance.run）
 )
 
 // Packs 是实例读取包声明的来源（packs.Loader 满足）。
@@ -152,6 +155,12 @@ func (s *svc) check(tx *store.Tx, in Instance) error {
 	}
 	if _, _, err := plan(in, time.Time{}); err != nil {
 		return err
+	}
+	var ins struct {
+		Instruction string `json:"instruction"`
+	}
+	if json.Unmarshal(in.Params, &ins) == nil && utf8.RuneCountInString(ins.Instruction) > packs.MaxInstructionRunes {
+		return invalid(fmt.Sprintf("instruction is longer than %d characters", packs.MaxInstructionRunes))
 	}
 	if in.Project != "" {
 		if _, err := projects.Get(tx, in.Project); err != nil {
@@ -255,11 +264,11 @@ type ref struct {
 	ID string `json:"id"`
 }
 
-// Register 在命令执行器上登记实例命令。三条都按 manage_source 授权（§14.3）：本人与 delegate 可，
+// Register 在命令执行器上登记实例命令。四条都按 manage_source 授权（§14.3）：本人与 delegate 可，
 // worker、observer、运行身份不可；ext 与 webhook 凭据默认不能调用。
 func Register(x *command.Executor, p Packs) error {
 	s := &svc{packs: p}
-	for _, sp := range []command.Spec{s.create(), s.update(), s.toggle()} {
+	for _, sp := range []command.Spec{s.create(), s.update(), s.toggle(), s.run()} {
 		if err := x.Register(sp); err != nil {
 			return err
 		}
@@ -415,6 +424,85 @@ func (s *svc) toggle() command.Spec {
 			}
 			return ref{in.ID}, emit(c, EvToggled, "toggled", in)
 		}}
+}
+
+// run 是"立即跑一次"：以当前时刻为到期时刻记一条 instance.fired，由规则执行照常消费（同一套动作、同一个跳过检查）；
+// 不动 Timer，下一个周期照旧。停用的实例也可以手动跑。
+func (s *svc) run() command.Spec {
+	parse := func(raw json.RawMessage) (ref, error) {
+		var v ref
+		return v, decode(raw, &v)
+	}
+	return command.Spec{Name: "instance.run", Action: authz.ActionManageSource, Tier: authz.TierWords,
+		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
+			v, err := parse(raw)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			return existing(tx, v.ID)
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			in, err := Get(c.Tx, c.Object.ID)
+			if err != nil {
+				return nil, err
+			}
+			b, err := json.Marshal(struct {
+				Instance
+				Due time.Time `json:"due"`
+			}{in, c.Now()})
+			if err != nil {
+				return nil, err
+			}
+			_, err = c.Emit(domain.Event{Type: EvFired, Object: in.ID, Reason: "run now", Payload: b})
+			return ref{in.ID}, err
+		}}
+}
+
+// ---- 开箱默认安排 ----
+
+// Default 是一条开箱默认安排：包与实例参数（§7.3）。
+type Default struct {
+	Pack   string
+	Params json.RawMessage
+}
+
+// Seed 在启动时补建默认安排：某个包从没有过 instance.created 记录（本人自己建过、或已经补建过都算）时才建，
+// 所以只建一次，本人停用或删除后不再补回。建实例走 instance.create，操作者是 system（§16.5）。包没加载时跳过。
+func Seed(ctx context.Context, x *command.Executor, st *store.Store, p Packs, owner string, ds []Default) error {
+	seen := map[string]bool{}
+	if err := st.View(ctx, func(tx *store.Tx) error {
+		for after := int64(0); ; {
+			es, err := eventlog.Query(tx, eventlog.Filter{Type: EvCreated}, after, 500)
+			if err != nil || len(es) == 0 {
+				return err
+			}
+			for _, e := range es {
+				var in Instance
+				if json.Unmarshal(e.Event.Payload, &in) == nil {
+					seen[in.Pack] = true
+				}
+				after = e.Event.Seq
+			}
+		}
+	}); err != nil {
+		return err
+	}
+	system := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:defaults", Via: domain.ViaClock, OnBehalfOf: owner},
+		Level: authz.LevelDelegate}
+	for _, d := range ds {
+		if _, ok := p.Get(d.Pack); !ok || seen[d.Pack] {
+			continue
+		}
+		raw, err := json.Marshal(map[string]any{"pack": d.Pack, "params": d.Params})
+		if err != nil {
+			return err
+		}
+		if _, err := x.Do(ctx, command.Request{Identity: system, Command: "instance.create", Input: raw,
+			IdemKey: "defaults:instance:" + d.Pack, Evidence: "default schedule shipped with APA (§7.3)", Owner: owner}); err != nil {
+			return fmt.Errorf("instances: default %s: %w", d.Pack, err)
+		}
+	}
+	return nil
 }
 
 // ---- 时钟 ----
