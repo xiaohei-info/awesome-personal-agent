@@ -244,6 +244,7 @@ const (
 // Source 是来源登记。SourceKind 是能力包规则匹配用的语义类型，内核只当字符串比较。
 type Source struct {
 	ID              string          `json:"id"`
+	Name            string          `json:"name"` // 显示名（§9.1）：登记时给定或由内核按 source_type 生成，实例内不重名
 	Type            SourceType      `json:"type"`
 	SourceKind      string          `json:"source_type,omitempty"`
 	Command         string          `json:"command,omitempty"`

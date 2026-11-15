@@ -238,8 +238,10 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 		return err
 	}
 	enabled, hasEnabled := in["enabled"]
+	name, hasName := in["name"] // 显示名走 source.rename，不进登记内容的更新（类型、命令等）
 	delete(in, "enabled")
-	if len(in) == 0 && !hasEnabled {
+	delete(in, "name")
+	if len(in) == 0 && !hasEnabled && !hasName {
 		return invalid("nothing to update", "send at least one field")
 	}
 	var res command.Result
@@ -250,6 +252,13 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 			cmd = registry.CmdUpdateExec
 		}
 		if res, err = a.run(r, p, cmd, in, true); err != nil {
+			return err
+		}
+	}
+	if hasName {
+		n := map[string]json.RawMessage{"name": name}
+		n["id"], _ = json.Marshal(id)
+		if res, err = a.run(r, p, registry.CmdRename, n, true); err != nil {
 			return err
 		}
 	}

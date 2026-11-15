@@ -1110,3 +1110,43 @@ func TestOutboundPreviewRoute(t *testing.T) {
 		t.Errorf("capture event for Web: %d %s", r.Code, r.Body)
 	}
 }
+
+// 显示名（§9.1）：Web 与 CLI 的登记都经 POST /sources，三种情况：带名字、不带名字（内核起名并在响应里给出）、重名 409；
+// PATCH name 改名记 source.renamed，空名改回内核起的名字；delegate 改名同其他来源管理一样要本人原话。
+func TestSourceDisplayNameThroughRoutes(t *testing.T) {
+	e := setup(t)
+	dlg := e.token(auth.Delegate)
+	var s struct{ Name string }
+	r := e.web("POST", "/v1/sources", `{"id":"src_a","name":" 工作邮箱 ","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`)
+	if r.Code != 201 {
+		t.Fatalf("named: %d %s", r.Code, r.Body)
+	}
+	if r.into(&s); s.Name != "工作邮箱" {
+		t.Fatalf("named: %q", s.Name)
+	}
+	r = e.do(dlg, "POST", "/v1/sources", `{"id":"src_b","type":"webhook","source_type":"forge","config":{"scheme":"shared"}}`)
+	if r.into(&s); r.Code != 201 || s.Name != "外部推送" {
+		t.Fatalf("fallback named by the kernel and returned: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(dlg, "POST", "/v1/sources", `{"id":"src_c","name":"工作邮箱","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`); r.Code != 409 {
+		t.Fatalf("duplicate name: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("PATCH", "/v1/sources/src_b", `{"name":"仓库推送"}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"name":"仓库推送"`) {
+		t.Fatalf("rename: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("PATCH", "/v1/sources/src_b", `{"name":"工作邮箱"}`); r.Code != 409 {
+		t.Fatalf("rename onto a taken name: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_b", `{"name":""}`, core.EvidenceHeader, ""); r.Code == 200 {
+		t.Fatalf("delegate rename without the owner's words: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_b", `{"name":""}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"name":"外部推送"`) {
+		t.Fatalf("reset to the kernel's name: %d %s", r.Code, r.Body)
+	}
+	if n := e.events("source.renamed"); n != 2 {
+		t.Fatalf("source.renamed events: %d", n)
+	}
+	if r := e.web("GET", "/v1/sources/src_a", ""); !strings.Contains(r.Body.String(), `"name":"工作邮箱"`) {
+		t.Fatalf("read back: %s", r.Body)
+	}
+}

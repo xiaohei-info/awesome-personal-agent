@@ -40,9 +40,12 @@ func UpgradeCheck(ctx context.Context, in Input) kdoctor.Report {
 		schema.Status, schema.Why, schema.Next = kdoctor.Error, "the ledger is damaged: "+l.infoErr.Error(), "restore a backup before upgrading"
 	default:
 		schema.Data = map[string]any{"current": l.info.Ledger, "target": target}
-		if l.info.Ledger < target {
+		switch {
+		case l.info.Ledger < target:
 			schema.Why = fmt.Sprintf("ledger structure %d → %d: apa serve takes a pre-upgrade snapshot under backups/ and then migrates (additive only)", l.info.Ledger, target)
-		} else {
+		case in.Reg.Behind(l.info):
+			schema.Why = fmt.Sprintf("ledger structure %d stays, but this binary adds migrations within it: apa serve takes a pre-upgrade snapshot under backups/ and then migrates (additive only)", target)
+		default:
 			schema.Why = fmt.Sprintf("ledger structure %d already matches this binary; there is nothing to migrate", l.info.Ledger)
 		}
 		schema.Next = "stop the service, replace the release, start apa serve"

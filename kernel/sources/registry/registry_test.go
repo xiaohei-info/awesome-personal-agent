@@ -44,7 +44,7 @@ func setup(t *testing.T) *env {
 	t.Cleanup(func() { st.Close() })
 	e := &env{st: st, au: auth.New(nil), x: command.New(st, nil), dir: t.TempDir()}
 	lay := config.LayoutOf(e.dir)
-	if err := Register(e.x, Options{Bundled: []string{"pull-feed", "pull-http"}, Layout: lay}); err != nil {
+	if err := Register(e.x, Options{Bundled: []string{"pull-feed", "pull-http"}, Layout: lay, KindNames: map[string]string{"feed": "订阅", "mail": "邮件"}}); err != nil {
 		t.Fatal(err)
 	}
 	return e

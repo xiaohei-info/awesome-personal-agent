@@ -76,23 +76,31 @@ func LegacySources(ctx context.Context, st *store.Store) (out []domain.Source, e
 		if err != nil {
 			return err
 		}
-		if cols["outbound_external"] {
+		if cols["name"] {
 			out, err = registry.List(tx)
 			return err
 		}
-		r, err := tx.Query(`SELECT id, type, source_type, command, enabled, stats FROM sources_registry_source ORDER BY id`)
+		// 显示名之前的结构：外发范围列可能有也可能没有，名字一律为空（启动时补上）。
+		outbound := `'full', ''`
+		if cols["outbound_external"] {
+			outbound = `outbound_local, outbound_external`
+		}
+		r, err := tx.Query(`SELECT id, type, source_type, command, enabled, stats, ` + outbound + ` FROM sources_registry_source ORDER BY id`)
 		if err != nil {
 			return err
 		}
 		defer r.Close()
 		for r.Next() {
 			var s domain.Source
-			var typ, stats string
+			var typ, stats, ext string
 			var enabled int64
-			if err := r.Scan(&s.ID, &typ, &s.SourceKind, &s.Command, &enabled, &stats); err != nil {
+			if err := r.Scan(&s.ID, &typ, &s.SourceKind, &s.Command, &enabled, &stats, &s.Outbound.Local, &ext); err != nil {
 				return err
 			}
-			s.Type, s.Enabled, s.Outbound = domain.SourceType(typ), enabled != 0, domain.Outbound{Local: "full"}
+			s.Type, s.Enabled = domain.SourceType(typ), enabled != 0
+			if ext != "" {
+				s.Outbound.External = &ext
+			}
 			if stats != "" {
 				s.Stats = []byte(stats)
 			}

@@ -57,8 +57,9 @@
 | `apa agents sync` | 写入工作区；漂移时不覆盖并返回 6，本人选择"覆盖"后才写入 | observer | 6 |
 | **来源** | | | |
 | `apa source list/show` | 来源与统计 | observer | |
-| `apa source add` | 登记附带的拉取程序或 webhook source，可带 `--default-project`；自定义命令（含邮件、日历工具的适配命令）与外发范围只在 Web | delegate | 20 |
+| `apa source add` | 登记附带的拉取程序或 webhook source，可带 `--default-project`、`--name`（显示名，缺省由内核按 `source_type` 生成，输出里给出；重名退出码 6）；自定义命令（含邮件、日历工具的适配命令）与外发范围只在 Web | delegate | 20 |
 | `apa source auth <id>` | 以该来源登记的 `credentials_path` 启动附带拉取程序的认证模式（在本机运行 `<来源命令> auth <credentials_path>`，继承标准输入输出），凭据写在该路径；不是 pull 类型或未登记 `credentials_path` 的来源返回 2，工具适配的来源用工具自己的认证命令（主文档 §9.7） | 主机本地，经 API 读来源登记，需 observer | 2、5 |
+| `apa source rename <id> <名字>` | 改显示名（主文档 §9.1）；空串改回内核生成的名字；重名退出码 6；记 `source.renamed` | delegate | 6 |
 | `apa source enable/disable` | 启停 | delegate | |
 | `apa source webhook create/rotate/revoke` | 创建、轮换、吊销 webhook 接收密钥 | delegate | |
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
@@ -198,6 +199,8 @@
 `GET /items` 返回 `last_rejections`（事项 id → 最近一次未处理的退出码 23 拒绝：`seq`、`at`、`actor`、`code`、`why`、`grant`），`GET /items/{id}` 返回 `last_rejection`；只对 `needs_input`、`proposed` 事项给出，决策待办与建议流据此标明被拒绝的代答或处理。`GET /audit/events` 可加 `grant=<授权单 id>` 查该授权单的签发、使用与撤销记录。
 
 事项字段 `created_at`、`updated_at`：`GET /items` 与 `GET /items/{id}` 返回，值为 RFC 3339 时间，只读。`created_at` 是该事项首条事项事件的时间（委派子事项的首条是 `delegation.created`，其余是 `item.created`）；`updated_at` 是最后一条事项事件的时间，与 `version` 同步推进（含关系变更；`item.deadline_passed` 与 `command.rejected` 不算）。
+
+来源的显示名 `name`（主文档 §9.1）：`POST /sources` 可带，去掉首尾空白后不超过 40 个字符、不含控制字符，与实例内其他来源不重名（不区分大小写），重名返回 409 `conflict`；不带时内核按 `source_type` 生成并存下（同类已有时加序号，如"邮件 2"），响应里给出。`PATCH /sources/{id}` 带 `name` 即改名（`source.rename` 命令，记 `source.renamed`，载荷 `{"name", "previous"}`），空串改回内核生成的名字；名字与其他字段同一请求里给出时分别生效。`GET /sources` 与 `GET /sources/{id}` 总带 `name`。
 
 `POST /sources`、`PATCH /sources/{id}` 的 `credentials_path` 必须落在该来源自己的目录（`<APA_HOME>/sources/<id>/`）内，否则返回 400。内核只记录这个路径，不读内容；每次拉取时经 stdin JSON 的 `credentials_path` 字段原样交给来源进程（主文档 §9.2），不经环境变量传递。
 
@@ -359,4 +362,5 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | `disturb.threshold_judge` | 开启三选一的投递阈值判定 | 开启"可以晚点送吗"的推迟判定 | 键名与类型不变；已开启的继续开启，"只留 Web 未读"这一去向不再由模型选择 |
 | 来源规则的 `then: judge` | 交判断型三选一 | `screen` 的别名 | 仍被接受 |
 | 判断留痕 | `run.finished`（`category: judge`）事件 | 判断记录（`/judgments`） | 旧事件保留、可回放；不计入校准统计 |
+| 来源的显示名 | 无；Web 显示来源 id | `name` 总有值：登记时给定或由内核生成；重名的登记与改名返回 409 | 只增字段与列（`sources_registry` 迁移 3，结构版本不变）。已有来源在 `apa serve` 启动时按同一规则补名，逐个记 `source.renamed`（操作者 system），不触发判断、投递或重判。带名字的登记以前不会因为名字失败，现在会因重名得 409。迁移后旧二进制拒绝打开账本（存在不认识的迁移），回退要用升级前快照，见主文档 §16.5 |
 | 规则初始模式 | 一律 `observe` | 提醒类 `auto`，动作类 `observe` | 升级时未动过的内置提醒类规则切到 `auto` 并记 Event（主文档 §16.5） |

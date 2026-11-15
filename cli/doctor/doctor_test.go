@@ -363,6 +363,47 @@ func TestDoctorOlderLedgerWarnsAndSkips(t *testing.T) {
 
 func fullRegFor(t *testing.T) *store.Registry { return fullReg(t) }
 
+// 同一结构版本内追加的迁移（来源显示名）还没应用：数据目录项提醒要迁移，依赖账本的检查跳过而不是读出错；升级预检也说明要迁移。
+func TestDoctorSameStructureWithPendingMigrationWarnsAndSkips(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "apa")
+	before := registry.Module
+	before.Migrations = before.Migrations[:2] // 显示名之前的来源表
+	old := store.NewRegistry()
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, executors.Module,
+		delivery.Module, before, runner.Module, kdoctor.Module} {
+		must(t, old.Register(m))
+	}
+	st, err := store.Open(home, old)
+	must(t, err)
+	must(t, st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO sources_registry_source (id, type, source_type, command, schedule, timeout, credentials_path,
+		dedupe_domain, config, cursor, enabled, stats, default_project, outbound_local, outbound_external) VALUES
+		('src_old', 'script', 'mail', '/bin/sh', '1h', 30, '', '', '', '', 1, '', '', 'full', 'meta')`)
+		return err
+	}))
+	must(t, st.Close())
+	must(t, os.Chmod(home, 0o700))
+	reg := fullReg(t)
+	if old.SchemaLedger() != reg.SchemaLedger() {
+		t.Fatalf("precondition: same structure version, got %d and %d", old.SchemaLedger(), reg.SchemaLedger())
+	}
+	in := Input{Home: home, Reg: reg, Model: &model.Client{}, Now: now}
+	r := Run(bg, in)
+	if c := find(t, r, kdoctor.DataDir); c.Status != kdoctor.Warning || c.Code != kdoctor.CodeLedgerMigrate {
+		t.Fatalf("data dir: %+v", c)
+	}
+	if c := find(t, r, kdoctor.Sources); c.Code != kdoctor.CodeSkipped || c.Data["reason"] != kdoctor.CodeLedgerSchemaDiffers || !r.OK {
+		t.Fatalf("sources: %+v", c)
+	}
+	u := UpgradeCheck(bg, in)
+	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "adds migrations") {
+		t.Fatalf("upgrade check: %+v", c)
+	}
+	if c := find(t, u, checkOutbound); c.Status != kdoctor.OK {
+		t.Fatalf("legacy sources read without the name column: %+v", c)
+	}
+}
+
 // ACT-DOC-04 与 ACT-DPL-10：监听非本机地址而没有 https 的 public_url 是错误，退出码 1；无法解析的 config.yaml 指明位置。
 func TestDoctorRuntimeConfigErrors(t *testing.T) {
 	e, _, _ := healthy(t)

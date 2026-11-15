@@ -14,13 +14,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -33,6 +37,7 @@ const (
 	CmdUpdateExec   = "source.update_script"   // script，只 Web
 	CmdSetEnabled   = "source.set_enabled"     // 任意类型启停
 	CmdSetOutbound  = "source.set_outbound"    // 外发范围，只 Web（§14.14）
+	CmdRename       = "source.rename"          // 显示名；空名表示改回内核生成的名字
 )
 
 // 事件类型是本模块内部的账本记录，不在对外稳定表里。
@@ -41,6 +46,7 @@ const (
 	EvUpdated    = "source.updated"
 	EvEnabled    = "source.enabled"
 	EvDisabled   = "source.disabled"
+	EvRenamed    = "source.renamed" // 只是显示名变化，没有订阅方
 )
 
 // Module 是本模块在存储层登记的迁移。
@@ -66,6 +72,10 @@ var Module = store.Module{Name: "sources_registry", Migrations: []store.Migratio
 	SQL: `ALTER TABLE sources_registry_source ADD COLUMN default_project TEXT NOT NULL DEFAULT '';
 ALTER TABLE sources_registry_source ADD COLUMN outbound_local TEXT NOT NULL DEFAULT 'full';
 ALTER TABLE sources_registry_source ADD COLUMN outbound_external TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 显示名（§9.1）：只加一列，旧来源读出为空名，由 apa serve 启动时的 Backfill 按同一套规则补上。账本结构版本不变。
+	Version: 3, Ledger: 3, Name: "source-name",
+	SQL: `ALTER TABLE sources_registry_source ADD COLUMN name TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Options 是登记所需的外部事实。
@@ -74,7 +84,16 @@ type Options struct {
 	Bundled []string
 	// Layout 非零时，credentials_path 必须落在该来源自己的目录里（§9.1）。
 	Layout config.Layout
+	// KindNames 是 source_type → 兜底显示名（如 mail → 邮件）。具体产品的名字不进内核，由装配方给出；
+	// 没登记的 source_type 按来源类型（pull、script、webhook）起名。
+	KindNames map[string]string
 }
+
+// MaxName 是显示名的上限（字符数）。
+const MaxName = 40
+
+// typeNames 是没有 source_type 显示名时按来源类型起的兜底名。
+var typeNames = map[domain.SourceType]string{domain.SourcePull: "定时拉取", domain.SourceScript: "自定义脚本", domain.SourceWebhook: "外部推送"}
 
 const (
 	minSchedule = time.Second
@@ -90,6 +109,7 @@ var (
 // SourceInput 是登记与（来自主机配置文件的）整体覆盖的输入。
 type SourceInput struct {
 	ID              string            `json:"id"`
+	Name            string            `json:"name,omitempty"` // 缺省由内核按 source_type 生成
 	Type            domain.SourceType `json:"type,omitempty"`
 	SourceKind      string            `json:"source_type,omitempty"`
 	Command         string            `json:"command,omitempty"`
@@ -122,6 +142,11 @@ type OutboundInput struct {
 	External json.RawMessage `json:"external,omitempty"`
 }
 
+type renameInput struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type enabledInput struct {
 	ID      string `json:"id"`
 	Enabled bool   `json:"enabled"`
@@ -146,6 +171,11 @@ func strict(in json.RawMessage, v any) error {
 // Register 把本模块的命令登记到 x。
 func Register(x *command.Executor, o Options) error {
 	m := &mod{o: o, bundled: map[string]bool{}}
+	for k, v := range o.KindNames {
+		if _, err := cleanName(v); err != nil || v == "" {
+			return fmt.Errorf("registry: invalid name %q for source_type %q", v, k)
+		}
+	}
 	for _, b := range o.Bundled {
 		if !progRe.MatchString(b) {
 			return fmt.Errorf("registry: invalid bundled program name %q", b)
@@ -175,6 +205,13 @@ func Register(x *command.Executor, o Options) error {
 				return err
 			},
 			Apply: m.applyEnabled},
+		// 与来源的其他管理命令同档：delegate 改名要带本人原话。
+		{Name: CmdRename, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: objectOf,
+			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+				_, _, err := m.planRename(tx, in)
+				return err
+			},
+			Apply: m.applyRename},
 	}
 	for _, s := range specs {
 		if err := x.Register(s); err != nil {
@@ -248,7 +285,11 @@ func (m *mod) plan(tx *store.Tx, o op, exec bool, in json.RawMessage) (domain.So
 		} else if !isNotFound(err) {
 			return s, "", err
 		}
-		s = domain.Source{ID: r.ID, Type: r.Type, SourceKind: r.SourceKind, Command: r.Command, Schedule: r.Schedule,
+		name, err := cleanName(r.Name)
+		if err != nil {
+			return s, "", err
+		}
+		s = domain.Source{ID: r.ID, Name: name, Type: r.Type, SourceKind: r.SourceKind, Command: r.Command, Schedule: r.Schedule,
 			Timeout: r.Timeout, CredentialsPath: r.CredentialsPath, DedupeDomain: r.DedupeDomain, DefaultProject: r.DefaultProject,
 			Outbound: domain.Outbound{Local: ScopeFull}, Config: r.Config, Enabled: true}
 		if r.Enabled != nil {
@@ -294,6 +335,17 @@ func (m *mod) plan(tx *store.Tx, o op, exec bool, in json.RawMessage) (domain.So
 	}
 	if err := m.check(s, exec); err != nil {
 		return s, "", err
+	}
+	if o == opRegister {
+		if s.Name == "" {
+			n, err := m.fallbackName(tx, s)
+			if err != nil {
+				return s, "", err
+			}
+			s.Name = n
+		} else if err := nameFree(tx, s.Name, s.ID); err != nil {
+			return s, "", err
+		}
 	}
 	if s.DefaultProject != "" {
 		if _, err := projects.Get(tx, s.DefaultProject); err != nil {
@@ -364,6 +416,149 @@ func (m *mod) checkCredentials(s domain.Source) error {
 		return invalid("credentials_path must be inside the source's own directory", "use a path under "+dir)
 	}
 	return nil
+}
+
+// cleanName 去掉首尾空白并校验显示名：不超过 MaxName 个字符、不含控制字符。空串表示没给名字。
+func cleanName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if utf8.RuneCountInString(name) > MaxName {
+		return "", invalid(fmt.Sprintf("name must be at most %d characters", MaxName), "shorten the name")
+	}
+	if strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return "", invalid("name must not contain control characters", "fix the name")
+	}
+	return name, nil
+}
+
+// nameFree 报告显示名是否没被 except 以外的来源占用（不区分大小写）；占用时返回 conflict。
+func nameFree(tx *store.Tx, name, except string) error {
+	taken, err := takenNames(tx, except)
+	if err != nil {
+		return err
+	}
+	if taken[strings.ToLower(name)] {
+		return domain.NewError(domain.CodeConflict, "another source is already named "+strconv.Quote(name), "pick another name")
+	}
+	return nil
+}
+
+func takenNames(tx *store.Tx, except string) (map[string]bool, error) {
+	r, err := tx.Query(`SELECT name FROM sources_registry_source WHERE id != ? AND name != ''`, except)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	out := map[string]bool{}
+	for r.Next() {
+		var n string
+		if err := r.Scan(&n); err != nil {
+			return nil, err
+		}
+		out[strings.ToLower(n)] = true
+	}
+	return out, r.Err()
+}
+
+// fallbackName 是没给名字时内核起的名字：source_type 的显示名（没有则按来源类型），
+// 已被占用时依次加序号「邮件 2」「邮件 3」……；同类按登记顺序得到递增的序号。
+func (m *mod) fallbackName(tx *store.Tx, s domain.Source) (string, error) {
+	return fallbackName(tx, m.o.KindNames, s)
+}
+
+func fallbackName(tx *store.Tx, kindNames map[string]string, s domain.Source) (string, error) {
+	base := kindNames[s.SourceKind]
+	if base == "" {
+		base = typeNames[s.Type]
+	}
+	taken, err := takenNames(tx, s.ID)
+	if err != nil {
+		return "", err
+	}
+	name := base
+	for i := 2; taken[strings.ToLower(name)]; i++ {
+		name = fmt.Sprintf("%s %d", base, i)
+	}
+	return name, nil
+}
+
+// planRename 解出改名输入并校验；空名表示改回内核生成的名字。返回改名后的登记与原名。
+func (m *mod) planRename(tx *store.Tx, in json.RawMessage) (domain.Source, string, error) {
+	var ri renameInput
+	if err := strict(in, &ri); err != nil {
+		return domain.Source{}, "", err
+	}
+	s, err := Get(tx, ri.ID)
+	if err != nil {
+		return s, "", err
+	}
+	prev := s.Name
+	name, err := cleanName(ri.Name)
+	if err != nil {
+		return s, prev, err
+	}
+	if name == "" {
+		if name, err = m.fallbackName(tx, s); err != nil {
+			return s, prev, err
+		}
+	} else if err := nameFree(tx, name, s.ID); err != nil {
+		return s, prev, err
+	}
+	s.Name = name
+	return s, prev, nil
+}
+
+func (m *mod) applyRename(c *command.Ctx) (any, error) {
+	s, prev, err := m.planRename(c.Tx, c.Input)
+	if err != nil {
+		return nil, err
+	}
+	if s.Name == prev { // 未变不记事件（幂等）
+		return s, nil
+	}
+	if _, err := c.Tx.Exec(`UPDATE sources_registry_source SET name = ? WHERE id = ?`, s.Name, s.ID); err != nil {
+		return nil, err
+	}
+	payload, _ := json.Marshal(map[string]string{"name": s.Name, "previous": prev})
+	if _, err := c.Emit(domain.Event{Type: EvRenamed, Object: s.ID, Payload: payload}); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// namer 是启动补名的行为者：系统按规则补上，不是本人改名。
+var namer = domain.Actor{Type: domain.ActorSystem, Principal: "kernel:sources", Via: domain.ViaClock}
+
+// Backfill 给还没有显示名的来源（升级前登记的）按兜底规则起名并存下，每个记一条 source.renamed（行为者 kernel:sources）。
+// 只写名字列，不碰游标、统计、外发范围，也不经命令管线、不进入判断或投递。apa serve 启动时调用；kindNames 同 Options.KindNames。
+func Backfill(ctx context.Context, st *store.Store, kindNames map[string]string, at time.Time) (int, error) {
+	n := 0
+	err := st.Update(ctx, func(tx *store.Tx) error {
+		n = 0
+		srcs, err := List(tx)
+		if err != nil {
+			return err
+		}
+		for _, s := range srcs { // 按 id 顺序：同类的序号在补名时按 id 排
+			if s.Name != "" {
+				continue
+			}
+			name, err := fallbackName(tx, kindNames, s)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`UPDATE sources_registry_source SET name = ? WHERE id = ?`, name, s.ID); err != nil {
+				return err
+			}
+			payload, _ := json.Marshal(map[string]string{"name": name, "previous": ""})
+			if _, err := eventlog.Append(tx, domain.Event{Type: EvRenamed, Object: s.ID, Actor: namer, Payload: payload,
+				Reason: "upgrade: sources registered before display names get one", At: at}); err != nil {
+				return err
+			}
+			n++
+		}
+		return nil
+	})
+	return n, err
 }
 
 // planOutbound 解出外发范围的设置并套在现有登记上；取值非法返回 invalid_request。
@@ -474,9 +669,9 @@ func save(tx *store.Tx, s domain.Source, insert bool) error {
 	cfg := string(s.Config)
 	if insert {
 		_, err := tx.Exec(`INSERT INTO sources_registry_source
-			(id, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '')`,
-			s.ID, string(s.Type), s.SourceKind, s.Command, s.Schedule, s.Timeout, s.CredentialsPath, s.DedupeDomain,
+			(id, name, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '')`,
+			s.ID, s.Name, string(s.Type), s.SourceKind, s.Command, s.Schedule, s.Timeout, s.CredentialsPath, s.DedupeDomain,
 			s.DefaultProject, s.Outbound.Local, derefOr(s.Outbound.External, ""), cfg, b2i(s.Enabled))
 		return err
 	}
@@ -488,7 +683,7 @@ func save(tx *store.Tx, s domain.Source, insert bool) error {
 
 // ---- 读取（供调度、Ingest 等模块使用；只读） ----
 
-const cols = `id, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats`
+const cols = `id, name, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats`
 
 func scan(r *store.Rows) (domain.Source, error) {
 	var (
@@ -497,7 +692,7 @@ func scan(r *store.Rows) (domain.Source, error) {
 		ext              string
 		timeout, enabled int64
 	)
-	if err := r.Scan(&s.ID, &typ, &s.SourceKind, &s.Command, &s.Schedule, &timeout, &s.CredentialsPath,
+	if err := r.Scan(&s.ID, &s.Name, &typ, &s.SourceKind, &s.Command, &s.Schedule, &timeout, &s.CredentialsPath,
 		&s.DedupeDomain, &s.DefaultProject, &s.Outbound.Local, &ext, &cfg, &s.Cursor, &enabled, &stats); err != nil {
 		return s, err
 	}
@@ -600,8 +795,17 @@ func apply(ctx context.Context, x *command.Executor, id command.Identity, s Sour
 	cfg := s.Config
 	u, _ := json.Marshal(UpdateInput{ID: s.ID, SourceKind: &s.SourceKind, Command: &s.Command, Schedule: &s.Schedule,
 		Timeout: &s.Timeout, CredentialsPath: &s.CredentialsPath, DedupeDomain: &s.DedupeDomain, DefaultProject: &s.DefaultProject, Config: &cfg})
-	if _, err := x.Do(ctx, command.Request{Identity: id, Command: upd, Input: u}); err != nil {
-		return err
+	if _, uerr := x.Do(ctx, command.Request{Identity: id, Command: upd, Input: u}); uerr != nil {
+		if isNotFound(uerr) { // 不是 id 已存在，是登记本身冲突（如显示名重名）：报登记的原因
+			return err
+		}
+		return uerr
+	}
+	if s.Name != "" { // 文件里改了名字：与 Web 改名同一条规则
+		n, _ := json.Marshal(renameInput{ID: s.ID, Name: s.Name})
+		if _, err := x.Do(ctx, command.Request{Identity: id, Command: CmdRename, Input: n}); err != nil {
+			return err
+		}
 	}
 	if s.Enabled == nil {
 		return nil

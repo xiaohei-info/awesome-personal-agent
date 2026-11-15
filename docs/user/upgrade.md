@@ -30,7 +30,7 @@ v0.x 期间次版本可以包含需要迁移的变更。升级前先读[变更�
 | 来源事件与积压 | 原样保留，处置不变；升级本身不触发重判。`unjudged_rejudge_days` 为 `0` 的继续关闭自动重判；积压的放开由你显式触发 |
 | v0.1 的判断留痕 | 原样保留、可回放，不计入校准统计 |
 | 策略里的 `model_endpoint` | 读取时等同 `generate_endpoint`，位置按 `external`；你下一次在 Web 保存端点设置时写成新字段 |
-| 来源登记 | `default_project` 为空；`outbound.local` 为 `full`，`outbound.external` 为未选择，使用外部端点前每个来源要选一次 |
+| 来源登记 | `default_project` 为空；`outbound.local` 为 `full`，`outbound.external` 为未选择，使用外部端点前每个来源要选一次。没有显示名的来源在启动时按类型自动起名（如"邮件""邮件 2"），可在来源页改名 |
 | 规则模式 | 内置提醒类规则若仍是初始 `observe` 且你从未切换过，升级时切到 `auto` 并逐条记 `rule.mode_changed`；你切换过的、覆盖包里显式写了 `observe` 或 `off` 的不变；动作类规则不变 |
 | 覆盖内置包的用户包 | 用到已移除字段的包被拒绝加载，内置包生效，健康视图给出要改的字段 |
 | 运行配置 | 旧键全部有效；监听非本机地址的部署升级前要补 https 的 `public_url` |

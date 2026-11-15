@@ -105,6 +105,10 @@ const (
 // 新增 sources/*/cmd/* 程序必须在这里登记，或在 serve_test.go:notBundled 里写明不登记的理由，否则测试失败。
 var bundledPull = []string{"http-json", "dir-watch", "github-source", "rss-source"}
 
+// sourceKindNames 是没给显示名的来源按 source_type 起的兜底名（§9.1）；产品名不进内核，在这里给出。
+// 没列的 source_type 由内核按来源类型起名。
+var sourceKindNames = map[string]string{"mail": "邮件", "calendar": "日历", "reminder": "提醒事项", "github": "GitHub"}
+
 // hostedReader 是只读读取器的 argv；托管文档与 AGENTS.md 触发共用，按名字解析（PATH）。
 var hostedReader = []string{"hosted-reader"}
 
@@ -325,7 +329,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		delegation.Register(x, delegation.Options{Owner: owner, OnError: func(c command.Commit, err error) {
 			slog.Error("delegation settle", "object", c.Object, "err", err)
 		}}),
-		sregistry.Register(x, sregistry.Options{Bundled: bundledPull, Layout: l}),
+		sregistry.Register(x, sregistry.Options{Bundled: bundledPull, Layout: l, KindNames: sourceKindNames}),
 		k.rn.Register(x),
 		k.in.Register(x),
 		spotcheck.Register(x),
@@ -431,6 +435,11 @@ func (k *kernel) start(ctx context.Context) error {
 	}
 	if err := k.loadHostFiles(ctx); err != nil {
 		return err
+	}
+	if n, err := sregistry.Backfill(ctx, k.st, sourceKindNames, clock.Now()); err != nil {
+		return err
+	} else if n > 0 {
+		slog.Info("named sources registered before display names existed", "count", n)
 	}
 	if err := k.st.Update(ctx, k.hn.Sync); err != nil { // 装配期的能力包拒绝与规则回退
 		return err

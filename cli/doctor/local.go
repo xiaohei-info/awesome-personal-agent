@@ -129,6 +129,9 @@ func dataDirCheck(l config.Layout, in Input, led *ledger, openErr error) kdoctor
 	case led.info.Ledger < target:
 		return fail(kdoctor.Warning, kdoctor.CodeLedgerMigrate, fmt.Sprintf("the ledger structure is %d, this binary expects %d; it migrates when apa serve starts (a pre-upgrade snapshot is taken first); %s", led.info.Ledger, target, when),
 			"run `apa doctor --upgrade-check`, then start apa serve")
+	case !led.current: // 结构版本相同，但还有同一版本内追加的迁移没应用
+		return fail(kdoctor.Warning, kdoctor.CodeLedgerMigrate, fmt.Sprintf("the ledger structure is %d, but some of this binary's migrations are not applied yet; they apply when apa serve starts (a pre-upgrade snapshot is taken first); %s", target, when),
+			"run `apa doctor --upgrade-check`, then start apa serve")
 	case led.info.Ledger > target:
 		return fail(kdoctor.Error, kdoctor.CodeLedgerTooNew, fmt.Sprintf("the ledger structure %d is newer than this binary (%d)", led.info.Ledger, target), "use the matching binary")
 	case !ok:
