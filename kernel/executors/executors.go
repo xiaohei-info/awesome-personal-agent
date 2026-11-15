@@ -1,8 +1,8 @@
-// Package executors 是执行者清单与无头运行声明的唯一写入模块（设计 §6.13、§7.5、§14.12、附录 A.2）。
+// Package executors 是执行者名录与无头运行声明的唯一写入模块（设计 §6.17、§7.5、§14.12、附录 A.2）。
 //
-// 清单是声明式数据：本人在 Web 维护，插件经 declare 提交声明后进入待确认，确认前不生效；
-// 本人也可以直接用主机配置文件登记。内核只把声明当数据存取，不执行其中任何命令，
-// 也不保存"执行者 id → 调用方式"的映射（那在各 harness 插件里）。
+// 名录由宿主在第一次委派时随 delegate.create 登记（Enroll），身份字段（harness、kind、host）登记即固定；
+// 旧插件的声明里的执行者在本人确认后并入名录，不删除已登记的条目。内核只把名录与声明当数据存取，
+// 不执行其中任何命令，句柄只校验结构（handle.go），不解释。
 //
 // 声明文档用 JSON（YAML 的子集）。shortcut: 仓库没有 YAML 依赖，需要 YAML 文件时在 CLI 侧转换。
 package executors
@@ -13,17 +13,22 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 执行者种类（§6.13）。
+// 执行者种类（§6.17）。
 const (
 	KindNativeSubagent = "native-subagent"
 	KindExternalCLI    = "external-cli"
+	KindRemoteAgent    = "remote-agent"
 	KindHuman          = "human"
 )
+
+// MaxEntries 是名录条目上限：宿主把每个子 agent 实例都登记成执行者时在这里被拦下（§6.17）。
+const MaxEntries = 256
 
 // 声明状态：待确认 → 生效；被本人拒绝；被同 harness 的新声明取代。
 const (
@@ -33,12 +38,22 @@ const (
 	StateSuperseded = "superseded"
 )
 
-// Executor 是清单的一项。Host 只是说明字段，内核不校验进程实际所在。
+// Executor 是声明（旧插件）与本人维护时的一项。Host 是自报字段，内核不校验进程实际所在。
 type Executor struct {
 	ID        string   `json:"id"`
 	Kind      string   `json:"kind"`
 	Scenarios []string `json:"scenarios,omitempty"`
 	Host      string   `json:"host,omitempty"`
+}
+
+// Entry 是名录里的一条：Harness 是登记者（为空是本人维护的旧条目），Label 与 Handle 由登记的插件给出，
+// CreatedAt 是首次登记的时间（旧条目没有）。
+type Entry struct {
+	Executor
+	Harness   string          `json:"harness,omitempty"`
+	Label     string          `json:"label,omitempty"`
+	Handle    json.RawMessage `json:"handle,omitempty"`
+	CreatedAt *time.Time      `json:"created_at,omitempty"`
 }
 
 // Session 的 Assign 与 Extract 二选一。
@@ -122,6 +137,12 @@ CREATE TABLE executors_declaration (
 	state TEXT NOT NULL,
 	PRIMARY KEY (harness, rev)
 ) WITHOUT ROWID;`,
+}, {
+	// 账本结构版本 5（§6.17）：宿主登记的显示名、句柄与首次登记时间。只增列，已有条目取空值。
+	Version: 2, Ledger: 5, Name: "ledger-v5-executor-enroll",
+	SQL: `ALTER TABLE executors_entry ADD COLUMN label TEXT NOT NULL DEFAULT '';
+ALTER TABLE executors_entry ADD COLUMN handle TEXT NOT NULL DEFAULT '';
+ALTER TABLE executors_entry ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;`,
 }}}
 
 func invalid(format string, a ...any) error {
@@ -197,10 +218,8 @@ func (e Executor) validate() error {
 	if e.ID == "" || strings.ContainsAny(e.ID, " \t\r\n") {
 		return invalid("executor id is required and must not contain whitespace")
 	}
-	switch e.Kind {
-	case KindNativeSubagent, KindExternalCLI, KindHuman:
-	default:
-		return invalid("executor %q: kind must be native-subagent, external-cli or human", e.ID)
+	if !validKind(e.Kind) {
+		return invalid("executor %q: kind must be native-subagent, external-cli, remote-agent or human", e.ID)
 	}
 	for _, s := range e.Scenarios {
 		if s == "" {
@@ -286,34 +305,84 @@ func query(tx *store.Tx, each func(*store.Rows) error, sql string, args ...any) 
 	return r.Err()
 }
 
-func scanEntry(r *store.Rows) (Executor, string, error) {
-	var e Executor
-	var scen, harness string
-	if err := r.Scan(&e.ID, &e.Kind, &scen, &e.Host, &harness); err != nil {
-		return e, "", err
+func validKind(k string) bool {
+	switch k {
+	case KindNativeSubagent, KindExternalCLI, KindRemoteAgent, KindHuman:
+		return true
 	}
-	return e, harness, json.Unmarshal([]byte(scen), &e.Scenarios)
+	return false
 }
 
-// List 返回生效的执行者清单，按 id 排序。
-func List(tx *store.Tx) ([]Executor, error) {
-	out := []Executor{}
+const entryCols = "e.id, e.kind, e.scenarios, e.host, e.harness, e.label, e.handle, e.created_at"
+
+func scanEntry(r *store.Rows) (Entry, error) {
+	var e Entry
+	var scen, handle string
+	var created int64
+	if err := r.Scan(&e.ID, &e.Kind, &scen, &e.Host, &e.Harness, &e.Label, &handle, &created); err != nil {
+		return e, err
+	}
+	if handle != "" {
+		e.Handle = json.RawMessage(handle)
+	}
+	e.CreatedAt = unixTime(created)
+	return e, json.Unmarshal([]byte(scen), &e.Scenarios)
+}
+
+func unixTime(ns int64) *time.Time {
+	if ns <= 0 {
+		return nil
+	}
+	t := time.Unix(0, ns).UTC()
+	return &t
+}
+
+// List 返回执行者名录，按 id 排序。
+func List(tx *store.Tx) ([]Entry, error) {
+	out := []Entry{}
 	err := query(tx, func(r *store.Rows) error {
-		e, _, err := scanEntry(r)
+		e, err := scanEntry(r)
 		out = append(out, e)
 		return err
-	}, "SELECT id, kind, scenarios, host, harness FROM executors_entry ORDER BY id")
+	}, "SELECT "+entryCols+" FROM executors_entry e ORDER BY e.id")
 	return out, err
 }
 
-// Get 返回生效清单里的一项；ok 为假表示不在清单里（委派据此返回退出码 5）。
-func Get(tx *store.Tx, id string) (e Executor, ok bool, err error) {
+// Get 返回名录里的一项；ok 为假表示不在名录里。
+func Get(tx *store.Tx, id string) (e Entry, ok bool, err error) {
 	err = query(tx, func(r *store.Rows) (err error) {
-		e, _, err = scanEntry(r)
+		e, err = scanEntry(r)
 		ok = err == nil
 		return
-	}, "SELECT id, kind, scenarios, host, harness FROM executors_entry WHERE id = ?", id)
+	}, "SELECT "+entryCols+" FROM executors_entry e WHERE e.id = ?", id)
 	return
+}
+
+// Ref 返回名单判定用的执行者信息；不在名录里时只有 id。
+func Ref(tx *store.Tx, id string) (domain.ExecutorRef, error) {
+	e, ok, err := Get(tx, id)
+	if err != nil || !ok {
+		return domain.ExecutorRef{ID: id}, err
+	}
+	return domain.ExecutorRef{ID: id, Host: e.Host, Harness: e.Harness}, nil
+}
+
+// Candidates 返回名录里当前命中项目名单的执行者 id（随退出码 21 返回）；项目不限制时为空。
+func Candidates(tx *store.Tx, p domain.Project, owner string) ([]string, error) {
+	if !p.Restricted() {
+		return nil, nil
+	}
+	es, err := List(tx)
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, e := range es {
+		if e.ID != owner && p.ExecutorAllowed(domain.ExecutorRef{ID: e.ID, Host: e.Host, Harness: e.Harness}, owner) {
+			out = append(out, e.ID)
+		}
+	}
+	return out, nil
 }
 
 func scanRecord(r *store.Rows) (Record, error) {
@@ -390,12 +459,8 @@ func checkCollisions(tx *store.Tx, harness string, execs []Executor) error {
 }
 
 func entryOwner(tx *store.Tx, id string) (e Executor, harness string, ok bool, err error) {
-	err = query(tx, func(r *store.Rows) (err error) {
-		e, harness, err = scanEntry(r)
-		ok = err == nil
-		return
-	}, "SELECT id, kind, scenarios, host, harness FROM executors_entry WHERE id = ?", id)
-	return
+	en, ok, err := Get(tx, id)
+	return en.Executor, en.Harness, ok, err
 }
 
 func putEntry(tx *store.Tx, e Executor, harness string) error {
@@ -409,11 +474,9 @@ func putEntry(tx *store.Tx, e Executor, harness string) error {
 	return err
 }
 
-// activate 让 d 生效：该 harness 原有的声明项整体换成 d 里的项。调用方先做冲突检查。
+// activate 让 d 生效：声明里的执行者并入名录（新增或更新），不删除该 harness 已登记的其他条目（§6.17）。
+// 调用方先做冲突检查。
 func activate(tx *store.Tx, d Declaration) error {
-	if _, err := tx.Exec("DELETE FROM executors_entry WHERE harness = ?", d.Harness); err != nil {
-		return err
-	}
 	for _, e := range d.Executors {
 		if err := putEntry(tx, e, d.Harness); err != nil {
 			return err

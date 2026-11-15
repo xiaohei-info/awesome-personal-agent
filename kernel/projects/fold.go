@@ -40,13 +40,18 @@ func fold(tx *store.Tx) (map[string]domain.Project, error) {
 				out[p.Project.ID] = p.Project
 			case domain.EvProjectAllowedExecutorsChanged:
 				var p struct {
-					After []string `json:"after"`
+					After      []string               `json:"after"`
+					MatchAfter []domain.ExecutorMatch `json:"match_after"` // 账本结构版本 5 起才有；旧事件没有，即不设
 				}
 				cur, ok := out[en.Event.Object]
 				if err := json.Unmarshal(en.Event.Payload, &p); err != nil || !ok {
 					continue
 				}
 				cur.AllowedExecutors = p.After
+				cur.AllowedExecutorMatch = nil
+				if len(p.MatchAfter) > 0 {
+					cur.AllowedExecutorMatch = p.MatchAfter
+				}
 				out[cur.ID] = cur
 			}
 		}

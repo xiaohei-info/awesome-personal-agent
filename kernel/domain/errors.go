@@ -109,7 +109,10 @@ type Error struct {
 	Why     string   `json:"why"`
 	Next    string   `json:"next"`
 	Allowed []string `json:"allowed,omitempty"`
-	WebURL  *string  `json:"web_url"`
+	// AllowedMatch 与 Candidates 只随退出码 21 返回：项目的匹配规则，以及名录里当前命中名单的执行者 id。
+	AllowedMatch []ExecutorMatch `json:"allowed_match,omitempty"`
+	Candidates   []string        `json:"candidates,omitempty"`
+	WebURL       *string         `json:"web_url"`
 }
 
 func NewError(code Code, why, next string) *Error {

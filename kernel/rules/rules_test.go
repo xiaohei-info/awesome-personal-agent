@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,7 +62,7 @@ func (f *fakeReminder) Remind(_ *store.Tx, it domain.Item, kind string, due time
 func newEnv(t *testing.T, files map[string]string, h map[string]Handler) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, instances.Module, delivery.Module, chain.Module, health.Module, Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, executors.Module, instances.Module, delivery.Module, chain.Module, health.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

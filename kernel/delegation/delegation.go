@@ -4,7 +4,8 @@
 //	delegate.report  回执：进展、done、阻塞，可带证据（commit、PR、分支、链接）和消息确认游标
 //
 // 项目允许的执行者是硬约束：名单外的 assignee 在命令管线的授权步骤被拒绝（退出码 21，带允许的 id 列表，
-// 不写任何子事项，管线记 command.rejected）；assignee 不在执行者清单里是退出码 5。
+// 不写任何子事项，管线记 command.rejected）。assignee 不必先在执行者名录里；请求带 executor 时，
+// 同一事务里随委派登记或更新名录条目（§6.17），被拒的请求不登记。
 // 回执只接受事项 assignee 绑定的 worker 凭据、delegate 凭据、Web 本人，或范围内的运行凭据（任务型运行对自己的目标事项回执，附录 C.13），
 // 其他 worker 凭据是退出码 4（授权行"更新自己的事项"：绑定了执行者的凭据，其操作者就是执行者 id）。
 //
@@ -103,6 +104,8 @@ type createIn struct {
 	Priority domain.Priority `json:"priority"`
 	Project  string          `json:"project"` // 只能缺省或等于父事项的 project
 	Reason   string          `json:"reason"`
+	// Executor 随委派登记或更新名录条目（id 取 Assignee，harness 取调用方），可缺省。
+	Executor *executors.Enrollment `json:"executor,omitempty"`
 }
 
 type reportIn struct {
@@ -155,7 +158,13 @@ var system = command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Princ
 func (o Options) create() command.Spec {
 	parse := func(in json.RawMessage) (createIn, error) {
 		var v createIn
-		return v, decode(in, &v)
+		if err := decode(in, &v); err != nil {
+			return v, err
+		}
+		if v.Executor != nil && v.Assignee != o.Owner {
+			return v, v.Executor.Check(v.Assignee)
+		}
+		return v, nil
 	}
 	return command.Spec{Name: "delegate.create", Action: authz.ActionDelegate, Tier: authz.TierWork,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
@@ -173,13 +182,6 @@ func (o Options) create() command.Spec {
 			if v.Project != "" && v.Project != parent.Project {
 				return authz.Object{}, invalid("a delegated item inherits its parent's project and cannot choose another")
 			}
-			if v.Assignee != o.Owner {
-				if _, ok, err := executors.Get(tx, v.Assignee); err != nil {
-					return authz.Object{}, err
-				} else if !ok {
-					return authz.Object{}, domain.NewError(domain.CodeNotFound, "executor "+v.Assignee+" is not in the executor list", "run executor.list and pick an id from it")
-				}
-			}
 			obj := authz.Object{ID: parent.ID, Assignee: parent.Assignee, Kind: string(parent.Kind), Tags: parent.Tags,
 				Project: parent.Project, Executor: v.Assignee}
 			if parent.Project != "" && v.Assignee != o.Owner {
@@ -188,8 +190,35 @@ func (o Options) create() command.Spec {
 					return authz.Object{}, err
 				}
 				obj.ProjectInfo = &p
+				if p.Restricted() {
+					// 名单按名录里已登记的值判定；还没登记、本次随委派登记的，按将要登记的值（harness 由 Refine 取调用方）。
+					e, found, err := executors.Get(tx, v.Assignee)
+					if err != nil {
+						return authz.Object{}, err
+					}
+					switch {
+					case found:
+						obj.ExecutorHost, obj.ExecutorHarness = e.Host, e.Harness
+					case v.Executor != nil:
+						obj.ExecutorHost = v.Executor.Host
+					}
+					if obj.Candidates, err = executors.Candidates(tx, p, o.Owner); err != nil {
+						return authz.Object{}, err
+					}
+				}
 			}
 			return obj, nil
+		},
+		Refine: func(tx *store.Tx, c command.Caller, obj *authz.Object, in json.RawMessage) error {
+			v, _ := parse(in)
+			if v.Executor == nil || obj.ProjectInfo == nil || !obj.ProjectInfo.Restricted() {
+				return nil
+			}
+			if _, found, err := executors.Get(tx, v.Assignee); err != nil || found {
+				return err
+			}
+			obj.ExecutorHarness = c.Actor.Harness
+			return nil
 		},
 		Validate: func(tx *store.Tx, obj authz.Object, _ json.RawMessage) error {
 			parent, err := items.Get(tx, obj.ID)
@@ -206,6 +235,11 @@ func (o Options) create() command.Spec {
 			parent, err := items.Get(c.Tx, v.Parent)
 			if err != nil {
 				return nil, err
+			}
+			if v.Executor != nil && v.Assignee != o.Owner {
+				if err := executors.Enroll(c, v.Assignee, *v.Executor); err != nil {
+					return nil, err
+				}
 			}
 			title := v.Title
 			if blank(title) {

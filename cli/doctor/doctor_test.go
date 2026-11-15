@@ -366,7 +366,8 @@ func fullRegFor(t *testing.T) *store.Registry { return fullReg(t) }
 // regWith 是 fullReg 的模块，其中来源登记与来源事件只取各自迁移序列的前 nReg、nRunner 步（0 为全部）。
 func regWith(t *testing.T, nReg, nRunner int) *store.Registry {
 	t.Helper()
-	src, run := registry.Module, runner.Module
+	src, run, ex := registry.Module, runner.Module, executors.Module
+	ex.Migrations = ex.Migrations[:1] // 旧账本：没有结构版本 5 的执行者列
 	if nReg > 0 {
 		src.Migrations = src.Migrations[:nReg]
 	}
@@ -374,7 +375,7 @@ func regWith(t *testing.T, nReg, nRunner int) *store.Registry {
 		run.Migrations = run.Migrations[:nRunner]
 	}
 	r := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, executors.Module,
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, ex,
 		delivery.Module, src, run, kdoctor.Module} {
 		must(t, r.Register(m))
 	}
@@ -398,13 +399,13 @@ func openLegacy(t *testing.T, old *store.Registry) string {
 	return home
 }
 
-// 结构版本 3 的账本（没有显示名列）遇到结构版本 4 的程序：数据目录项提醒要迁移，依赖账本的检查跳过而不是读出错；
-// 升级预检说明 3 → 4，并能读出没有名字列的旧来源。
+// 结构版本 3 的账本（没有显示名列）遇到更新的程序：数据目录项提醒要迁移，依赖账本的检查跳过而不是读出错；
+// 升级预检说明 3 → 当前版本，并能读出没有名字列的旧来源。
 func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
 	home := openLegacy(t, regWith(t, 2, 0))
 	reg := fullReg(t)
-	if reg.SchemaLedger() != 4 {
-		t.Fatalf("precondition: structure 4, got %d", reg.SchemaLedger())
+	if reg.SchemaLedger() != 5 {
+		t.Fatalf("precondition: structure 5, got %d", reg.SchemaLedger())
 	}
 	in := Input{Home: home, Reg: reg, Model: &model.Client{}, Now: now}
 	r := Run(bg, in)
@@ -415,7 +416,7 @@ func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
 		t.Fatalf("sources: %+v", c)
 	}
 	u := UpgradeCheck(bg, in)
-	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 4") {
+	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 5") {
 		t.Fatalf("upgrade check: %+v", c)
 	}
 	if c := find(t, u, checkOutbound); c.Status != kdoctor.OK {

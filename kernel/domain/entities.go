@@ -36,7 +36,9 @@ type Project struct {
 	Repos  []Repo        `json:"repos,omitempty"`
 	// nil 不限制；空切片只能指派给本人（§14.7）。只在 Web 设置。
 	AllowedExecutors []string `json:"allowed_executors"`
-	Capture          bool     `json:"capture,omitempty"`
+	// AllowedExecutorMatch 按维度允许的执行者：任一项命中即允许；非空时名单生效（§14.7）。只在 Web 设置。
+	AllowedExecutorMatch []ExecutorMatch `json:"allowed_executor_match,omitempty"`
+	Capture              bool            `json:"capture,omitempty"`
 	// CaptureOutbound 是对话增量送外部端点的范围（full、excerpt、meta、none）；nil 未选择，没有缺省值（§6.5、§14.14）。
 	CaptureOutbound *string `json:"capture_outbound"`
 }
@@ -53,13 +55,34 @@ func (p Project) LocalCheckout(host string) *Checkout {
 	return nil
 }
 
-// ExecutorAllowed 按 §6.14 第 5 条判断指派是否在项目允许范围内。
-func (p Project) ExecutorAllowed(executor, self string) bool {
-	if p.AllowedExecutors == nil || executor == self {
+// ExecutorMatch 是项目名单的一条维度规则：非空字段都等于执行者登记的值才算命中。
+type ExecutorMatch struct {
+	Host    string `json:"host,omitempty"`
+	Harness string `json:"harness,omitempty"`
+}
+
+// ExecutorRef 是名单判定用到的执行者信息：id，以及名录登记的机器与 harness（没有名录条目时为空）。
+type ExecutorRef struct {
+	ID, Host, Harness string
+}
+
+// Restricted 报告项目是否设了允许的执行者。
+func (p Project) Restricted() bool {
+	return p.AllowedExecutors != nil || len(p.AllowedExecutorMatch) > 0
+}
+
+// ExecutorAllowed 按 §6.14 第 5 条判断指派是否在项目允许范围内：本人、名单里的 id，或登记信息命中任一匹配规则。
+func (p Project) ExecutorAllowed(e ExecutorRef, self string) bool {
+	if !p.Restricted() || e.ID == self {
 		return true
 	}
 	for _, id := range p.AllowedExecutors {
-		if id == executor {
+		if id == e.ID {
+			return true
+		}
+	}
+	for _, m := range p.AllowedExecutorMatch {
+		if (m.Host != "" || m.Harness != "") && (m.Host == "" || m.Host == e.Host) && (m.Harness == "" || m.Harness == e.Harness) {
 			return true
 		}
 	}

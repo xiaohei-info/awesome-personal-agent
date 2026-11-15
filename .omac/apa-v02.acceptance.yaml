@@ -5249,9 +5249,9 @@ flows:
     - REQ-G1-2
   - id: ACT-ALW-02
     kind: business-action
-    step: 指派给清单外 id 返回 5
-    how: 在 acc-open 运行 `APA_TOKEN=$DEL apa delegate --parent <id> --assignee ghost.cli`。
-    expected: 通过：退出码 5，无子事项。失败：子事项被建。
+    step: 指派给未登记的 id：不限制时照常委派、不登记名录；名单生效时只按 id 命中
+    how: 在 acc-open 运行 `APA_TOKEN=$DEL apa delegate --parent <id> --assignee ghost.cli`，再查 `apa executors`；在 acc-work 用同一 id 再委派一次。
+    expected: 通过：acc-open 建出子事项，名录里没有 ghost.cli；acc-work 退出码 21，无子事项（设计 §6.17、§14.7）。失败：acc-open 被拒，或名录多出条目，或 acc-work 建出子事项。
     requirement_ids:
     - REQ-G1-2
   - id: ACT-ALW-03

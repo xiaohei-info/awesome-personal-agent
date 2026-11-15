@@ -145,6 +145,7 @@ type facts struct {
 	pol      policy.Policy
 	mode     string
 	project  *domain.Project
+	executor domain.ExecutorRef // 事项 assignee 在名录里的登记（runner=task 的名单按它判定）
 	rec      executors.Record
 	declared bool
 	session  string
@@ -243,6 +244,9 @@ func (s *Service) read(tx *store.Tx, itemID string, retry bool) (f facts, err er
 			return f, err
 		}
 		f.project = &p
+		if f.executor, err = executors.Ref(tx, f.it.Assignee); err != nil {
+			return f, err
+		}
 	}
 	harness := s.harnessOf(f.base.Run.Basis.RuleID, f.pol)
 	recs, err := executors.Records(tx, executors.StateActive)
@@ -364,7 +368,7 @@ func (s *Service) decide(tx *store.Tx, itemID string, sessionLost bool) (Outcome
 		reason = "无头运行声明未提供权限档位：" + tier
 	case tierRank[tier] == 0 || tierRank[tier] > tierRank[limit]:
 		reason = "权限档位 " + tier + " 超过 Web 设置的上限"
-	case runner == "task" && f.project != nil && !f.project.ExecutorAllowed(f.it.Assignee, s.o.Owner):
+	case runner == "task" && f.project != nil && !f.project.ExecutorAllowed(f.executor, s.o.Owner):
 		reason = "执行者 " + f.it.Assignee + " 不在项目允许的执行者名单内"
 	}
 	if reason != "" {

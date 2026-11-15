@@ -270,8 +270,10 @@ func TestAllowedExecutors(t *testing.T) {
 	if p := e.item(parent); p.Phase != domain.PhaseOpen {
 		t.Fatalf("parent changed: %+v", p)
 	}
-	// 不在清单里：404。
-	errBody(t, e.do("POST", "/v1/delegations", `{"parent":"`+parent+`","assignee":"ghost.cli"}`, dlg), 404)
+	// 不在名录里也不带描述：只能按 id 命中名单，名单外 403（§6.17）。
+	if de := errBody(t, e.do("POST", "/v1/delegations", `{"parent":"`+parent+`","assignee":"ghost.cli"}`, dlg), 403); !slices.Equal(de.Candidates, []string{workHost}) {
+		t.Fatalf("candidates = %v", de.Candidates)
+	}
 
 	rec := e.do("GET", "/v1/executors?project="+proj, "", obs)
 	if rec.Code != 200 {

@@ -86,11 +86,19 @@ func TestFlowAllowedExecutors(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-ALW-02 指派给清单外 id 返回 5", func(t *testing.T) {
+	k.step("ACT-ALW-02 指派给未登记的 id：不限制时照常委派、不登记名录；名单生效时只按 id 命中", func(t *testing.T) {
 		parent := k.addItem("acc-open", "")
-		before := k.childrenCount("acc-open")
-		k.expect("delegate ghost.cli", k.delegate("--parent", parent, "--assignee", "ghost.cli"), exitNotFound)
-		if got := k.childrenCount("acc-open"); got != before {
+		child := k.idOf("delegate ghost.cli", k.delegate("--parent", parent, "--assignee", "ghost.cli"))
+		if got := k.item(child)["assignee"]; got != "ghost.cli" {
+			t.Errorf("子事项 assignee = %v", got)
+		}
+		if r := k.Apa(k.DEL, "", "executors"); strings.Contains(r.Stdout, "ghost.cli") {
+			t.Errorf("不带执行者描述的委派不应登记名录: %s", r.Stdout)
+		}
+		wp := k.addItem("acc-work", "")
+		before := k.childrenCount("acc-work")
+		k.expect("acc-work delegate ghost.cli", k.delegate("--parent", wp, "--assignee", "ghost.cli"), exitNotAllow)
+		if got := k.childrenCount("acc-work"); got != before {
 			t.Errorf("不应建出子事项: %d → %d", before, got)
 		}
 	})
