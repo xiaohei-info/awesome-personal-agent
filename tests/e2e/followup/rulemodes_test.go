@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
+	"github.com/xiaohei-info/awesome-personal-agent/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
@@ -486,7 +489,13 @@ func upgrade(t *testing.T) {
 				continue
 			}
 			actionRules++
-			a := after[k]
+			a, ok := after[k]
+			if !ok { // §7.3：实例驱动的时钟规则升级后不再列出（#421），只在简报页管理
+				if !instanceDrivenRule(t, k) {
+					t.Errorf("升级后规则 %s 不见了，而它不是实例驱动的时钟规则", k)
+				}
+				continue
+			}
 			if a.Hash == b.Hash && a.Mode != b.Mode {
 				t.Errorf("动作类规则 %s 内容未变，mode 应保持 %s，实际 %s", k, b.Mode, a.Mode)
 			}
@@ -547,4 +556,32 @@ func upgrade(t *testing.T) {
 			t.Errorf("不应有把它切到 auto 的 rule.mode_changed: %+v", c)
 		}
 	})
+}
+
+// instanceDrivenRule 按内置包判定 <包>/clock_rules/<id> 的 schedule 是否来自实例（含 {instance.}，§7.3）。
+func instanceDrivenRule(t *testing.T, key string) bool {
+	t.Helper()
+	parts := strings.Split(key, "/")
+	if len(parts) != 3 || parts[1] != "clock_rules" {
+		return false
+	}
+	raw, err := packs.FS.ReadFile(parts[0] + "/pack.yaml")
+	if err != nil {
+		return false
+	}
+	var p struct {
+		ClockRules []struct {
+			ID       string `yaml:"id"`
+			Schedule string `yaml:"schedule"`
+		} `yaml:"clock_rules"`
+	}
+	if err := yaml.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("解析内置包 %s: %v", parts[0], err)
+	}
+	for _, r := range p.ClockRules {
+		if r.ID == parts[2] {
+			return strings.Contains(r.Schedule, "{instance.")
+		}
+	}
+	return false
 }
