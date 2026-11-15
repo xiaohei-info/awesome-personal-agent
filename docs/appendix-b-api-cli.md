@@ -145,7 +145,7 @@
 | 规范 | `GET /agents-md?repo` | 取渲染结果，带最近一次检查状态 | observer |
 | | `POST /agents-md/check` | 上报文件 hash，返回三态 | observer |
 | 上下文 | `GET /context` | 账本增量投影 | observer |
-| | `GET /context/persona[?lang=zh\|en]` | 当前人格，前面带内核固定声明；本人没写时是 `lang` 对应的内置默认（缺省英文）；另带 `default`，即该语言的默认原文（不含声明） | observer |
+| | `GET /context/persona` | 当前人格，前面带内核固定声明；本人没写时是查询参数 `lang`（`zh` 或 `en`）对应的内置默认，缺省英文；另带 `default`，即该语言的默认原文（不含声明） | observer |
 | | `POST /capture` | 提交对话增量 `{text, project?, path?, host?}`；运行身份下、项目未开启捕获时不生效，返回 200 `{"captured": false, "reason"}`；候选在提交后异步抽取 | worker |
 | 插件声明 | `POST /declarations` | 提交无头运行声明与执行者，进 Web 待确认 | worker |
 | 来源 | `GET/POST /sources`，`GET/PATCH /sources/{id}` | 来源登记 | observer 读，delegate 写；自定义命令只有 Web |
