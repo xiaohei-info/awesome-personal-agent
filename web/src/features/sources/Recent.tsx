@@ -69,7 +69,7 @@ export function RecentMessages({ source }: { source: string }) {
   return (
     <section role="region" aria-label={t.recent}>
       <h4>{t.recent}</h4>
-      <div role="group" aria-label={t.recent} className="actions">
+      <div role="group" aria-label={t.recent} className="seg">
         {Object.keys(FILTERS).map((f) => (
           <button key={f} type="button" className="quiet" aria-pressed={filter === f} onClick={() => setFilter(f)}>{t.filters[f]}</button>
         ))}

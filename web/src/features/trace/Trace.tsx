@@ -154,13 +154,16 @@ function What({ e, subjects }: { e: TraceEntry; subjects?: boolean }) {
     case "decision": return <>{t.decision[String(a.state)] ?? t.internal}</>;
     case "follow": {
       const what = t.follow[String(a.state)] ?? t.internal;
-      return <>{what}{a.subject ? `「${String(a.subject)}」` : ""}{a.count ? t.followCount(Number(a.count)) : ""}</>;
+      const quote = a.text ?? a.subject; // 评论的标题常是所属对象的标题，正文才区分得开
+      return <>{what}{quote ? `「${String(quote)}」` : ""}{a.count ? t.followCount(Number(a.count)) : ""}</>;
     }
     case "observed": return <>{t.observed}</>;
     case "run": return <>{t.run[String(a.state)] ?? t.internal}</>;
+    case "generated": return <>{t.generated[String(a.state)] ?? t.generated.succeeded}</>;
+    case "alert": return <>{t.alert}</>;
     case "delegated": return <>{t.delegated(executor(String(a.assignee ?? "")))} {item}</>;
     case "dispatched": return <>{t.dispatched(executor(String(a.executor ?? "")))} {item}</>;
-    case "dispatch_updated": return <>{t.dispatchUpdated(executor(String(a.executor ?? "")), String(a.state ?? ""))}</>;
+    case "dispatch_updated": return <>{t.dispatchUpdated(executor(String(a.executor ?? "")), t.dispatchState[String(a.state)] ?? String(a.state ?? ""))}</>;
     case "reported": return <>{t.reported(executor(String(a.assignee ?? "")), label("phase", String(a.phase)))} {item}</>;
     case "rejected": return <>{t.rejected}</>;
   }

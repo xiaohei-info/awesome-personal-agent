@@ -150,7 +150,7 @@ describe("消息来源 › 最近的消息", () => {
     const region = within(await screen.findByRole("region", { name: "「修登录超时」的处理经过" }));
     expect(await region.findByText(/驳回了建议/)).toBeInTheDocument();
     expect(region.getByRole("link", { name: "单独打开" })).toHaveAttribute("href", "/sources/events/sev_c");
-    await userEvent.click(screen.getByRole("button", { name: "忽略" }));
+    await userEvent.click(screen.getByRole("button", { name: "已跳过" }));
     expect(await screen.findByRole("button", { name: /改为选填/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /修登录超时/ })).not.toBeInTheDocument();
   });

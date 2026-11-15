@@ -116,7 +116,9 @@ const (
 	KDecision  = "decision" // args: state（requested、resolved）
 	KFollow    = "follow"   // 后续消息；args: message, subject, state（attached、processed、handed_back、released）
 	KObserved  = "observed" // 规则试运行；args: rule
-	KRun       = "run"      // args: state（started、finished）
+	KRun       = "run"      // Agent 后台运行；args: state（started、finished）
+	KGenerated = "generated" // 写作模型的一次生成（如一句话摘要）；args: state（succeeded、failed）、template
+	KAlert     = "alert"     // 系统告警（详情在健康视图）
 	KDelegated = "delegated"
 	KDispatch  = "dispatched"       // args: executor, harness, state
 	KDispUpd   = "dispatch_updated" // args: state
@@ -728,7 +730,14 @@ func (b builder) item(id string, fromMessage bool) ([]Entry, error) {
 				e.Who = Who{Kind: WhoRule, Name: ruleName(observedRule(en.Event.Payload))}
 			}
 		case t == domain.EvRunStarted || t == domain.EvRunFinished:
+			var rp struct{ Category, State, Template string }
+			_ = json.Unmarshal(en.Event.Payload, &rp)
 			e.Kind, e.Mech, e.Args = KRun, true, map[string]any{"state": strings.TrimPrefix(t, "run.")}
+			if rp.Category != string(domain.RunBackground) && rp.Category != string(domain.RunTask) { // 写作模型的调用不是 Agent 运行
+				e.Who, e.Kind, e.Args = Who{Kind: WhoModel, Role: RoleGenerate}, KGenerated, map[string]any{"state": rp.State, "template": rp.Template}
+			}
+		case t == domain.EvHealthAlert:
+			e.Who, e.Kind, e.Mech = Who{Kind: WhoSystem}, KAlert, true
 		case t == domain.EvCommandRejected:
 			e.Kind = KRejected
 		default:
@@ -807,6 +816,9 @@ func (b builder) follow(en eventlog.Entry, state string) (Entry, error) {
 		switch m, err := runner.Event(b.tx, p.Message); {
 		case err == nil:
 			e.Args["subject"] = m.Subject
+			if r := []rune(m.Summary); len(r) > 0 { // 评论等后续消息的标题常是所属对象的标题，正文才区分得开
+				e.Args["text"] = string(r[:min(len(r), 60)])
+			}
 			if state == "attached" {
 				e.Who = Who{Kind: WhoSource, Name: m.SourceID}
 			}
@@ -828,7 +840,7 @@ func (b builder) who(en eventlog.Entry) Who {
 		return Who{Kind: WhoRule, Name: ruleName(strings.TrimPrefix(a.Principal, "rule:"))}
 	case a.Type == domain.ActorAgent:
 		return Who{Kind: WhoAgent, Name: a.Principal}
-	case en.Event.Basis != nil && en.Event.Basis.RuleID != "":
+	case a.Via == domain.ViaRule && en.Event.Basis != nil && en.Event.Basis.RuleID != "": // 只认规则写入；其他记录的 basis 可能只是模板
 		return Who{Kind: WhoRule, Name: ruleName(en.Event.Basis.RuleID)}
 	}
 	return Who{Kind: WhoSystem}
