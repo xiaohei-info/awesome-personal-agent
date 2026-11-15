@@ -1,7 +1,7 @@
 // Package context 是上下文与人格的 HTTP 路由（附录 B.2，设计 §7.6、§11.2）：
 //
 //	GET /context[?session&project&path&host&scope&item&instruction&format=inject]
-//	GET /context/persona
+//	GET /context/persona[?lang=zh|en]
 //
 // 路由里没有业务规则：增量投影、游标、注入渲染在 kernel/context，人格与它的固定声明在 kernel/policy；
 // 本层只做认证后的参数搬运。会话取自 X-APA-Session 头（与审计同源），不带会话时不读不写游标。
@@ -95,14 +95,16 @@ func (h *handlers) context(w http.ResponseWriter, r *http.Request, p *core.Princ
 	return core.WriteJSON(w, http.StatusOK, res)
 }
 
+// persona 返回注入用的人格全文，以及 lang 对应的内置默认原文（Web 在没自定义时显示它）。lang 缺省按英文。
 func (h *handlers) persona(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
+	lang := r.URL.Query().Get("lang")
 	var text string
 	if err := h.st.View(r.Context(), func(tx *store.Tx) error {
 		_, pol, err := policy.Current(tx)
-		text = policy.PersonaText(pol)
+		text = policy.PersonaText(pol, lang)
 		return err
 	}); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]string{"persona": text})
+	return core.WriteJSON(w, http.StatusOK, map[string]string{"persona": text, "default": policy.DefaultPersona(lang)})
 }

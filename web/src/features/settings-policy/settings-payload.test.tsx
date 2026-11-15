@@ -141,4 +141,51 @@ describe("设置 › 通用 › 助手的语气", () => {
     expect(s.doc.persona).toBe("Be brief.");
     expect(box).toHaveValue("长".repeat(500));
   });
+
+  async function open(persona: string) {
+    const s = policyServer();
+    s.doc.persona = persona;
+    sessionStorage.setItem("apa.csrf", "tok-1");
+    render(
+      <MemoryRouter initialEntries={["/settings/general"]}>
+        <App features={[general]} fetchImpl={s.impl} />
+      </MemoryRouter>,
+    );
+    const c = within(await screen.findByRole("region", { name: "助手的语气" }));
+    const box = await c.findByRole("textbox", { name: "助手的语气" });
+    await waitFor(() => expect(box).toHaveValue(persona || "Default tone (zh)"));
+    return { s, c, box };
+  }
+
+  it("没自定义：显示内置默认并标「默认」，没有「恢复默认」；原样保存仍存空串", async () => {
+    const { s, c } = await open("");
+    expect(c.getByText("默认")).toBeInTheDocument();
+    expect(c.queryByRole("button", { name: "恢复默认" })).toBeNull();
+    await userEvent.click(c.getByRole("button", { name: "保存助手的语气" }));
+    await c.findByRole("status");
+    expect(s.puts[0].body).toEqual({ persona: "" });
+  });
+
+  it("改了就是自定义（「默认」标记换成「恢复默认」）；恢复默认后回到默认并存回空串", async () => {
+    const { s, c, box } = await open("");
+    await userEvent.type(box, "!");
+    expect(c.queryByText("默认")).toBeNull();
+    await userEvent.click(c.getByRole("button", { name: "保存助手的语气" }));
+    await c.findByRole("status");
+    expect(s.puts[0].body).toEqual({ persona: "Default tone (zh)!" });
+    await userEvent.click(await c.findByRole("button", { name: "恢复默认" }));
+    expect(box).toHaveValue("Default tone (zh)");
+    expect(c.getByText("默认")).toBeInTheDocument();
+    await userEvent.click(c.getByRole("button", { name: "保存助手的语气" }));
+    await waitFor(() => expect(s.puts).toHaveLength(2));
+    expect(s.puts[1].body).toEqual({ persona: "" });
+    expect(s.doc.persona).toBe("");
+  });
+
+  it("已自定义：显示自己的文字、不标「默认」，可恢复默认", async () => {
+    const { c, box } = await open("Be brief.");
+    expect(c.queryByText("默认")).toBeNull();
+    await userEvent.click(c.getByRole("button", { name: "恢复默认" }));
+    expect(box).toHaveValue("Default tone (zh)");
+  });
 });

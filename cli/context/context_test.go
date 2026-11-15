@@ -305,8 +305,22 @@ func TestContextDefaultsToProcessCwd(t *testing.T) {
 
 func TestPersona(t *testing.T) {
 	k := newKernel(t)
-	if r := k.apa("persona"); r.code != 0 || r.out != "" {
-		t.Fatalf("unset persona must print nothing: %+v", r)
+	// 没自定义：内置默认；语言取 --lang，其次区域设置，取不到用英文。
+	for _, c := range []struct {
+		env  map[string]string
+		args []string
+		want string
+	}{
+		{nil, nil, "en"},
+		{map[string]string{"LANG": "zh_CN.UTF-8"}, nil, "zh"},
+		{map[string]string{"LC_ALL": "en_US.UTF-8", "LANG": "zh_CN.UTF-8"}, nil, "en"},
+		{map[string]string{"LANG": "zh_CN.UTF-8"}, []string{"--lang", "en"}, "en"},
+		{nil, []string{"--lang", "zh"}, "zh"},
+	} {
+		r := k.apaTok(k.tok, c.env, append([]string{"persona"}, c.args...)...)
+		if want := policy.PersonaDeclaration + "\n" + policy.DefaultPersona(c.want) + "\n"; r.code != 0 || r.out != want {
+			t.Fatalf("persona env=%v args=%v: %+v", c.env, c.args, r)
+		}
 	}
 	actor := domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}
 	if err := k.st.Update(bg, func(tx *store.Tx) error {

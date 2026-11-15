@@ -246,6 +246,35 @@ func TestPersonaLimit(t *testing.T) {
 	}
 }
 
+// 内置默认语气：空白人格用默认（中英各一份，取不到按英文）；自定义优先；恢复默认只是把人格清空；默认文本不超上限且不含权限类内容；
+// 默认不写进账本，所以空白人格的策略文档里仍是空串。
+func TestDefaultPersona(t *testing.T) {
+	zh, en := DefaultPersona("zh_CN.UTF-8"), DefaultPersona("en")
+	if zh == en || DefaultPersona("") != en || DefaultPersona("fr") != en || DefaultPersona("ZH") != zh {
+		t.Fatalf("lang pick: zh=%q en=%q", zh, en)
+	}
+	for _, d := range []string{zh, en} {
+		if n := EstimateTokens(d); n == 0 || n > MaxPersonaTokens {
+			t.Fatalf("default persona is %d tokens, limit %d: %q", n, MaxPersonaTokens, d)
+		}
+	}
+	s := open(t)
+	_, p := current(t, s)
+	if p.Persona != "" || PersonaText(p, "zh") != PersonaDeclaration+"\n"+zh {
+		t.Fatalf("fresh ledger: persona %q, text %q", p.Persona, PersonaText(p, "zh"))
+	}
+	must(t, s, func(p *Policy) error { p.Persona = "mine"; return nil })
+	_, p = current(t, s)
+	if PersonaText(p, "zh") != PersonaDeclaration+"\nmine" {
+		t.Fatalf("custom must win: %q", PersonaText(p, "zh"))
+	}
+	must(t, s, func(p *Policy) error { p.Persona = ""; return nil })
+	_, p = current(t, s)
+	if PersonaText(p, "en") != PersonaDeclaration+"\n"+en {
+		t.Fatalf("restore default: %q", PersonaText(p, "en"))
+	}
+}
+
 // 事务回滚时版本与事件一并回滚（同一事务提交）。
 func TestRollbackDropsVersionAndEvent(t *testing.T) {
 	s := open(t)

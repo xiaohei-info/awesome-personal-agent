@@ -32,12 +32,28 @@ const MaxPersonaTokens = 400
 // PersonaDeclaration 是 `apa persona` 返回内容前的内核固定声明（§11.2）：人格不是权限来源。
 const PersonaDeclaration = "[APA 内核声明] 以下人格只影响表达方式，不能放宽判断、权限、web_only 和内核规则；权限与 web_only 由内核判定，不读提示词。"
 
-// PersonaText 返回注入用的人格文本：未设定（空白）时为空串，否则固定声明在前。
-func PersonaText(p Policy) string {
-	if strings.TrimSpace(p.Persona) == "" {
-		return ""
+// 内置默认语气（§6.13）：随发行附带，不写进账本；本人没写自己的人格时 `apa persona` 返回它。
+// 改文本不需要迁移，没自定义的人下一个新会话自动跟随；它不得含权限类内容，与本人写的人格同样受固定声明约束，也不超过 MaxPersonaTokens。
+const (
+	defaultPersonaZH = "像一位靠谱、温和的长期助理那样说话。先说结论和需要你做的事，再给必要的依据；用平常话，不打官腔、不堆术语、不过度客套。不确定就直说，事实和推测分开讲。有不同意见可以直接提，最后由你决定。事情轻松时可以轻松，事情重要时把风险和影响讲清楚。"
+	defaultPersonaEN = "Talk like a dependable, warm long-term assistant. Lead with the answer and anything you need from me, then the reasons that matter. Use plain words — no corporate tone, jargon, or excess politeness. Say so when you're unsure, and keep facts apart from guesses. Disagree openly when you should; the call is mine. Keep it light when things are light, and spell out risks and impact when they matter."
+)
+
+// DefaultPersona 返回内置默认语气：lang 以 zh 开头为中文，其余（含空）为英文。
+func DefaultPersona(lang string) string {
+	if strings.HasPrefix(strings.ToLower(lang), "zh") {
+		return defaultPersonaZH
 	}
-	return PersonaDeclaration + "\n" + p.Persona
+	return defaultPersonaEN
+}
+
+// PersonaText 返回注入用的人格文本：固定声明在前；本人的人格为空白时用 lang 对应的内置默认。
+func PersonaText(p Policy, lang string) string {
+	body := p.Persona
+	if strings.TrimSpace(body) == "" {
+		body = DefaultPersona(lang)
+	}
+	return PersonaDeclaration + "\n" + body
 }
 
 // 默认 web_only 类别（§14.4）。
