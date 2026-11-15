@@ -5,6 +5,7 @@ import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { Val } from "../../app/values";
 import { useRaw } from "../../app/raw";
+import { forgetNames } from "../../app/names";
 import { rejudgeDays } from "../../app/status";
 import { strings } from "./strings";
 import { ago, period, when, type Source } from "./shared";
@@ -54,13 +55,47 @@ function Status({ s }: { s: Source }) {
   );
 }
 
+/** 名字与行内改名：重名等被拒时原地显示原因，名字不变。 */
+function Rename({ s, onSaved }: { s: Source; onSaved: () => void }) {
+  const t = useT(strings);
+  const raw = useRaw();
+  const { api } = useSession();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  if (draft === null)
+    return (
+      <>
+        <strong>{s.name}</strong>
+        {raw && <code className="raw-id">{s.id}</code>}{" "}
+        <button className="link" aria-label={t.renameLabel(s.name)} onClick={() => { setError(null); setDraft(s.name); }}>{t.rename}</button>
+      </>
+    );
+  const save = async () => {
+    try {
+      await api.patch(`/sources/${encodeURIComponent(s.id)}`, { name: draft });
+    } catch (e) {
+      setError(e);
+      return;
+    }
+    setDraft(null);
+    onSaved();
+  };
+  return (
+    <form className="inline" aria-label={t.renameLabel(s.name)} onSubmit={(e) => { e.preventDefault(); void save(); }}>
+      <input aria-label={t.name} value={draft} maxLength={40} autoFocus onChange={(e) => setDraft(e.target.value)} />{" "}
+      <button type="submit" disabled={!draft.trim()}>{t.save}</button> <button type="button" onClick={() => setDraft(null)}>{t.cancel}</button>
+      {error !== null && <ErrorNote error={error} />}
+    </form>
+  );
+}
+
 function Detail({ source, rejudgeDays, onChooseOutbound, onSaved }: { source: Source; rejudgeDays?: number; onChooseOutbound: () => void; onSaved: () => void }) {
   const t = useT(strings);
   const raw = useRaw();
   const st = source.stats;
   return (
-    <section role="region" aria-label={t.detail(source.id)} className="panel">
-      <h3>{source.id}</h3>
+    <section role="region" aria-label={t.detail(source.name)} className="panel">
+      <h3>{source.name}{raw && <code className="raw-id">{source.id}</code>}</h3>
       {source.type === "webhook" && <WebhookKey source={source} />}
       <DefaultProject source={source} onSaved={onSaved} />
       <SourceBacklog source={source.id} rejudgeDays={rejudgeDays} onChooseOutbound={onChooseOutbound} />
@@ -184,8 +219,9 @@ export function SourcesPage() {
         ) : (
           <ul className="rows">
             {sources.map((s) => (
-              <li key={s.id} aria-label={s.id}>
-                <span aria-hidden="true">{ICON[s.source_type ?? s.type] ?? "\ud83d\udcf0"}</span> <strong>{s.id}</strong>{" "}
+              <li key={s.id} aria-label={s.name}>
+                <span aria-hidden="true">{ICON[s.source_type ?? s.type] ?? "\ud83d\udcf0"}</span>{" "}
+                <Rename s={s} onSaved={() => { forgetNames(api, "source"); void load(); }} />{" "}
                 <span className="sub">{(s.source_type && t.kinds[s.source_type]) || <Val k="sourceType" id={s.type} />}</span> <Schedule s={s.schedule} /> <Status s={s} />
                 <OutboundEditor
                   source={s}
@@ -197,7 +233,7 @@ export function SourcesPage() {
                     loadBacklog();
                   }}
                 />
-                <div role="group" aria-label={t.ops(s.id)}>
+                <div role="group" aria-label={t.ops(s.name)}>
                   <button onClick={() => toggle(s)}>{s.enabled ? t.disable : t.enable}</button> <button onClick={() => setSelected(s.id)}>{t.details}</button>
                 </div>
               </li>
@@ -210,7 +246,7 @@ export function SourcesPage() {
       <details ref={advanced}>
         <summary>{t.advanced}</summary>
         <RestorePanel sources={sources ?? []} onRestored={changed} />
-        <Registration onDone={load} />
+        <Registration sources={sources ?? []} onDone={() => { forgetNames(api, "source"); void load(); }} />
       </details>
     </main>
   );

@@ -24,7 +24,7 @@ const FINE = {
       { subject: "generate_endpoint", status: "ok", code: "not_configured", why: "not configured (optional); not an error" },
     ] },
     { name: "sources", status: "ok", code: "sources_ok", why: "2 sources: commands exist and the outbound scope fits the endpoints", next: "nothing to do", data: { count: 2 }, details: [
-      { subject: "mail", status: "ok", code: "source_ok", why: "command found, outbound scope fits the endpoints, last run: ok", data: { last_run: "ok" } },
+      { subject: "src_mail", status: "ok", code: "source_ok", why: "command found, outbound scope fits the endpoints, last run: ok", data: { last_run: "ok" } },
       { subject: "src_new", status: "ok", code: "source_ok", why: "command found, outbound scope fits the endpoints, last run: never", data: { last_run: "never" } },
     ] },
     { name: "packs", status: "ok", code: "packs_ok", why: "10 packs loaded, none rejected", next: "nothing to do", data: { loaded: 10, rejected: 0 } },
@@ -35,7 +35,7 @@ const BAD = {
   ok: false,
   checks: [
     { name: "sources", status: "warning", code: "sources_attention", why: "some sources need attention; see details", next: "choose the outbound scope", data: { count: 1 }, details: [
-      { subject: "mail", status: "warning", code: "source_outbound_unset", why: "the external outbound scope is not chosen", next: "choose it in Web", data: { last_run: "failed", consecutive_failures: 3, problems: ["source_outbound_unset", "source_last_failed"] } },
+      { subject: "src_mail", status: "warning", code: "source_outbound_unset", why: "the external outbound scope is not chosen", next: "choose it in Web", data: { last_run: "failed", consecutive_failures: 3, problems: ["source_outbound_unset", "source_last_failed"] } },
     ] },
   ],
 };
@@ -60,7 +60,7 @@ function serve(get: () => Response) {
   const impl = (async (url: string, init: RequestInit = {}) => {
     calls.push((init.method ?? "GET") + " " + url);
     if (url === "/v1/projects") return json(200, { projects: [] });
-    if (url === "/v1/sources") return json(200, { sources: [{ id: "mail", name: "邮件" }] });
+    if (url === "/v1/sources") return json(200, { sources: [{ id: "src_mail", name: "邮件" }, { id: "src_new", name: "新来源" }] });
     if (url === "/v1/health") return get();
     if (url === "/v1/doctor") return json(200, DOCTOR);
     return json(404, { code: "not_found", why: "no such route", next: "x" });
@@ -88,13 +88,13 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
 
   it("只列要处理的：每条一句中文结论加去处，英文原因不上主界面；正常的折叠", async () => {
     const bad = {
-      source_failures: { ok: false, count: 1, severity: "error", why: "a source has consecutive pull failures", detail: [{ source: "mail", enabled: true, consecutive_failures: 5, needs_input_item: "itm_9" }] },
+      source_failures: { ok: false, count: 1, severity: "error", why: "a source has consecutive pull failures", detail: [{ source: "src_mail", enabled: true, consecutive_failures: 5, needs_input_item: "itm_9" }] },
       outcall: { ok: false, count: 2, severity: "error", why: "outcall runs timed out", detail: { long: { running: 1, queued: 3, longest_wait_seconds: 42 }, short: { running: 0, queued: 0, longest_wait_seconds: 0 }, timeouts: ["r1", "r2"] } },
       delivery_backlog: { ok: false, count: 1, severity: "error", why: "deliveries are queued", detail: ["d1"] },
       chain_trips: { ok: false, count: 1, severity: "error", why: "the breaker stopped", detail: ["itm_3"] },
       pack_rejections: { ok: false, count: 1, severity: "error", why: "a pack failed to load", detail: ["pk"], rejections: [{ pack: "pk", source: "user", reason: "band is required" }] },
       model_unavailable: { ok: false, count: 2, severity: "error", why: "x", detail: { judge: "", generate: "not_configured", endpoint: "not_configured", screening: ["x"], judgements: [] } },
-      unjudged_backlog: { ok: false, count: 57, severity: "warning", why: "w", detail: { model_unavailable: 50, models_paused: 0, outbound_unset: 3, undecided: 2, restored: 2, expired: 3, sources: [{ source: "mail", count: 57 }] } },
+      unjudged_backlog: { ok: false, count: 57, severity: "warning", why: "w", detail: { model_unavailable: 50, models_paused: 0, outbound_unset: 3, undecided: 2, restored: 2, expired: 3, sources: [{ source: "src_mail", count: 57 }] } },
       rule_fallbacks: { ok: false, count: 1, severity: "error", why: "fell back to observe", detail: ["rule-1"] },
       receipt_failures: { ok: false, count: 2, severity: "error", why: "rejected", detail: ["itm_7", "itm_8"] },
       stalled_delegations: { ok: false, count: 1, severity: "warning", why: "stalled", detail: ["itm_5"] },
@@ -102,9 +102,10 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
     mount(serve(() => json(200, report(bad))).impl);
     expect(await screen.findByRole("heading", { level: 1, name: "10 项要处理" })).toBeInTheDocument();
     const src = main().getByRole("article", { name: "来源读取失败" });
-    expect(src).toHaveTextContent("mail 连续 5 次没读到");
+    expect(src).toHaveTextContent("邮件 连续 5 次没读到");
     expect(within(src).getByRole("link", { name: "去补充" })).toHaveAttribute("href", "/items/itm_9");
     expect(src).not.toHaveTextContent("consecutive pull failures");
+    expect(document.querySelector("main")!.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
     const out = main().getByRole("article", { name: "后台任务排队或超时" });
     expect(out).toHaveTextContent("后台任务超时 2 次");
     expect(out).toHaveTextContent("还有 3 个在排队，最久等了 42 秒");
@@ -225,8 +226,9 @@ describe("诊断 › 状态的自检详情（flow-doctor / ACT-DOC-12）", () =>
     expect(sources.tagName).toBe("DETAILS");
     expect(sources).not.toHaveAttribute("open");
     expect(sources).toHaveTextContent("2 个来源都正常");
-    expect(sources).toHaveTextContent("mail · 上次读取成功");
-    expect(sources).toHaveTextContent("src_new · 还没读过");
+    expect(sources).toHaveTextContent("邮件 · 上次读取成功");
+    expect(sources).toHaveTextContent("新来源 · 还没读过");
+    expect(sec.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
     expect(s.calls).toContain("GET /v1/doctor");
   });
 
@@ -235,7 +237,8 @@ describe("诊断 › 状态的自检详情（flow-doctor / ACT-DOC-12）", () =>
     mount(serve(() => json(200, report())).impl);
     const sources = within(await section()).getByRole("article", { name: "来源" });
     expect(sources).toHaveTextContent("有来源要处理");
-    expect(sources).toHaveTextContent("mail · 还没选外发范围，新消息先压着；连续 3 次没读到");
+    expect(sources).toHaveTextContent("邮件 · 还没选外发范围，新消息先压着；连续 3 次没读到");
+    expect(sources.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
     expect(within(sources).getByRole("link", { name: "去看来源" })).toHaveAttribute("href", "/sources");
     expect(sources).not.toHaveTextContent("outbound scope");
   });

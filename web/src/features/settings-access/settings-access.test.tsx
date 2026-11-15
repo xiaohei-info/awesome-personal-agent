@@ -78,9 +78,11 @@ describe("设置 › 后台权限", () => {
     const a = await card(LISTS);
     await userEvent.click(a.getByRole("button", { name: "＋ 加一个来源" }));
     await userEvent.click(a.getByRole("button", { name: "＋ 加一个来源" }));
-    await waitFor(() => expect(within(a.getByLabelText("跟进来源 2")).getByRole("option", { name: "mail" })).toBeInTheDocument());
-    await userEvent.selectOptions(a.getByLabelText("跟进来源 2"), "mail");
-    await userEvent.selectOptions(a.getByLabelText("跟进来源 3"), "mail");
+    // 转发白名单的来源按名字选，提交 id（§9.1）
+    await waitFor(() => expect(within(a.getByLabelText("跟进来源 2")).getByRole("option", { name: "QQ Mail" })).toHaveValue("src_mail_qq"));
+    expect(within(a.getByLabelText("跟进来源 2")).queryByRole("option", { name: /src_/ })).not.toBeInTheDocument();
+    await userEvent.selectOptions(a.getByLabelText("跟进来源 2"), "src_mail_qq");
+    await userEvent.selectOptions(a.getByLabelText("跟进来源 3"), "src_mail_qq");
     await save(LISTS);
     expect(await a.findByRole("alert")).toHaveTextContent("重复");
     expect(s.puts).toHaveLength(0);

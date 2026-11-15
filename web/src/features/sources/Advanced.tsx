@@ -5,6 +5,7 @@ import { errorText, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { useRaw } from "../../app/raw";
 import { Pick } from "../../app/values";
+import { fallbackSourceName } from "../../app/vocab";
 import { strings } from "./strings";
 import { when, type Source } from "./shared";
 
@@ -258,7 +259,7 @@ export function RestorePanel({ sources, onRestored }: { sources: Source[]; onRes
             <option value="">{t.anySource}</option>
             {sources.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.id}
+                {s.name}
               </option>
             ))}
           </select>
@@ -272,7 +273,7 @@ export function RestorePanel({ sources, onRestored }: { sources: Source[]; onRes
             <p>{t.matched(preview.matched)}</p>
             <ul className="rows">
               {preview.sources.map((x) => (
-                <li key={x.source}>{t.count(x.source, x.count)}</li>
+                <li key={x.source}>{t.count(sources.find((s) => s.id === x.source)?.name ?? x.source, x.count)}</li>
               ))}
             </ul>
           </div>
@@ -286,14 +287,16 @@ const KNOWN_KINDS = ["mail", "calendar", "reminder", "github"];
 const OTHER = "\u0000other";
 
 // 自定义命令来源（只能在 Web 登记，§14.3）：周期用「每 [n][单位]」，外部外发范围必须选（§14.14，没有缺省值）。
-export function Registration({ onDone }: { onDone: () => void }) {
+export function Registration({ sources, onDone }: { sources: Source[]; onDone: () => void }) {
   const t = useT(strings);
   const { api } = useSession();
-  const blank = { id: "", kind: "", custom: "", command: "", every: "15", unit: "m", timeout: "", credentials_path: "", local: "full", external: "" };
+  const blank = { name: null as string | null, id: "", kind: "", custom: "", command: "", every: "15", unit: "m", timeout: "", credentials_path: "", local: "full", external: "" };
   const [f, setF] = useState(blank);
   const [error, setError] = useState<unknown>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const sourceType = f.kind === OTHER ? f.custom.trim() : f.kind;
+  // 第一步起名：没动过时预填内核会起的名字（§9.1），随类型变化；动过就以本人写的为准。
+  const name = f.name ?? fallbackSourceName(sourceType, "script", sources.map((s) => s.name));
 
   const submit = async () => {
     setError(null);
@@ -301,7 +304,7 @@ export function Registration({ onDone }: { onDone: () => void }) {
       setError(new Error(t.needExternal));
       return;
     }
-    const body: Record<string, unknown> = { id: f.id.trim(), type: "script", command: f.command.trim(), schedule: `${f.every.trim()}${f.unit}` };
+    const body: Record<string, unknown> = { id: f.id.trim(), name: name.trim(), type: "script", command: f.command.trim(), schedule: `${f.every.trim()}${f.unit}` };
     if (sourceType) body.source_type = sourceType;
     if (f.timeout.trim()) body.timeout = Number(f.timeout);
     if (f.credentials_path.trim()) body.credentials_path = f.credentials_path.trim();
@@ -331,6 +334,10 @@ export function Registration({ onDone }: { onDone: () => void }) {
           submit();
         }}
       >
+        <label>
+          {t.name}
+          <input value={name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </label>
         <label>
           {t.id}
           <input value={f.id} onChange={set("id")} />

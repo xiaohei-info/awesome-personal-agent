@@ -81,7 +81,7 @@ const len = (d: DoctorData, k: string) => (Array.isArray(d?.[k]) ? (d![k] as unk
 /** 渠道路由 channel:<名> 的显示名。 */
 export const CHANNEL_PREFIX = "channel:";
 
-const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSay } = {
+const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSay; captureSource: string } = {
   phase: { proposed: { label: "建议" }, open: { label: "进行中" }, waiting: { label: "等待中" }, needs_input: { label: "等你决定" }, done: { label: "已完成" }, dropped: { label: "已放弃" } },
   priority: { low: { label: "低" }, normal: { label: "普通" }, high: { label: "高" }, urgent: { label: "紧急" } },
   itemKind: { task: { label: "任务" }, commitment: { label: "承诺" }, decision: { label: "决策" }, delegation: { label: "委派" }, brief: { label: "简报" }, routine: { label: "例行任务" } },
@@ -251,6 +251,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     "source.updated": { label: "修改了来源" },
     "source.enabled": { label: "启用了来源" },
     "source.disabled": { label: "停用了来源" },
+    "source.renamed": { label: "改了来源名字" },
     "item.deleted": { label: "永久删除了事项" },
     "run.credential_exchanged": { label: "后台运行领取了钥匙" },
     "timer.fired": { label: "定时器到点" },
@@ -364,6 +365,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     export_ok: (d) => (at(d, "last_seen_at") ? `上次读取 ${at(d, "last_seen_at")}` : "还没读取过"),
   },
   channelRoute: (name) => `推送到 ${name}`,
+  captureSource: "对话捕获",
 };
 
 const en: typeof zh = {
@@ -535,6 +537,7 @@ const en: typeof zh = {
     "source.updated": { label: "edited a source" },
     "source.enabled": { label: "enabled a source" },
     "source.disabled": { label: "disabled a source" },
+    "source.renamed": { label: "renamed a source" },
     "item.deleted": { label: "permanently deleted an item" },
     "run.credential_exchanged": { label: "background run picked up its key" },
     "timer.fired": { label: "timer fired" },
@@ -648,6 +651,22 @@ const en: typeof zh = {
     export_ok: (d) => (atEn(d, "last_seen_at") ? `Last read ${atEn(d, "last_seen_at")}` : "Never read"),
   },
   channelRoute: (name) => `Push to ${name}`,
+  captureSource: "Chat capture",
 };
 
 export const vocab: Dict<typeof zh> = { zh, en };
+
+/** 来源的兜底显示名（§9.1）：这些名字由内核生成并存进来源登记，不随界面语言变化（与本人起的名字同属数据）。
+ * 没给名字时内核按 source_type 起名（cli/serve/assemble.go sourceKindNames），
+ * 没有对应名字的按来源类型（kernel/sources/registry typeNames）。新登记表单据此预填；ids.check 对照两处防漂移。 */
+export const SOURCE_KIND_NAME: Record<string, string> = { mail: "邮件", calendar: "日历", reminder: "提醒事项", github: "GitHub" };
+export const SOURCE_TYPE_NAME: Record<string, string> = { pull: "定时拉取", script: "自定义脚本", webhook: "外部推送" };
+
+/** 内核会起的名字：基础名已被占用（不区分大小写）时依次加序号「邮件 2」「邮件 3」。与 registry.fallbackName 同一规则。 */
+export function fallbackSourceName(kind: string | undefined, type: string, taken: readonly string[]): string {
+  const base = (kind && SOURCE_KIND_NAME[kind]) || SOURCE_TYPE_NAME[type] || "";
+  const used = new Set(taken.map((n) => n.toLowerCase()));
+  let name = base;
+  for (let i = 2; used.has(name.toLowerCase()); i++) name = `${base} ${i}`;
+  return name;
+}

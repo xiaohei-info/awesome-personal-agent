@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as I from "./ids";
-import { vocab } from "./vocab";
+import { fallbackSourceName, SOURCE_KIND_NAME, SOURCE_TYPE_NAME, vocab } from "./vocab";
 
 // 防漂移（设计 §4.1）：ids.ts 是内核取值的前端镜像。这里读内核源码里的常量，内核有而 ids.ts 没有就失败，
 // 失败信息指出要在 ids.ts 的哪一组、vocab.ts 的哪一类补上什么。单向检查：ids.ts 可以先放进内核即将新增的取值。
@@ -23,6 +23,8 @@ const go = import.meta.glob(
     "../../../kernel/doctor/report.go",
     "../../../kernel/doctor/codes.go",
     "../../../api/health/health.go",
+    "../../../cli/serve/assemble.go",
+    "../../../kernel/sources/registry/registry.go",
     "!**/*_test.go",
   ],
   { query: "?raw", import: "default", eager: true },
@@ -112,6 +114,28 @@ describe("ids.ts 覆盖内核取值", () => {
       const keys = group === "EVENT" ? [...I.EVENT, ...I.EVENT_INTERNAL] : ids;
       expect(Object.keys(table).sort(), kind).toEqual([...keys].sort());
     }
+  });
+});
+
+describe("来源兜底名与内核一致", () => {
+  it("SOURCE_KIND_NAME 等于 cli/serve 的 sourceKindNames，SOURCE_TYPE_NAME 等于 registry 的 typeNames", () => {
+    const lits = block("cli/serve/assemble.go", "var sourceKindNames = map[string]string{"); // 键、值依次排列
+    const kinds = Object.fromEntries(lits.flatMap((v, k) => (k % 2 ? [] : [[v, lits[k + 1]]])));
+    expect(SOURCE_KIND_NAME, "同步 web/src/app/vocab.ts 的 SOURCE_KIND_NAME").toEqual(kinds);
+    const typeConst = Object.fromEntries([...file("domain/entities.go").matchAll(/^\s*(Source\w+)\s+SourceType\s*=\s*"([^"]+)"/gm)].map((m) => [m[1], m[2]]));
+    const reg = file("kernel/sources/registry/registry.go");
+    const at = reg.indexOf("var typeNames = map[domain.SourceType]string{");
+    expect(at, "registry.go 里找不到 typeNames").toBeGreaterThan(0);
+    const body = reg.slice(at, reg.indexOf("}", at));
+    const types = Object.fromEntries([...body.matchAll(/domain\.(Source\w+):\s*"([^"]+)"/g)].map((m) => [typeConst[m[1]], m[2]]));
+    expect(SOURCE_TYPE_NAME, "同步 web/src/app/vocab.ts 的 SOURCE_TYPE_NAME").toEqual(types);
+  });
+
+  it("fallbackSourceName 与内核同一规则：按类型起名、占用时加序号、不区分大小写", () => {
+    expect(fallbackSourceName("mail", "script", [])).toBe("邮件");
+    expect(fallbackSourceName("mail", "script", ["邮件", "邮件 2"])).toBe("邮件 3");
+    expect(fallbackSourceName("github", "pull", ["github"])).toBe("GitHub 2");
+    expect(fallbackSourceName("forge", "webhook", [])).toBe("外部推送");
   });
 });
 

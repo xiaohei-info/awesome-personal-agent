@@ -32,7 +32,7 @@ export function policyServer(opts: { webOnlyDenied?: boolean } = {}) {
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/v1/projects") return json(200, { projects: [{ id: "acc-home", name: "Home" }] });
-    if (url === "/v1/sources") return json(200, { sources: [{ id: "mail" }] });
+    if (url === "/v1/sources") return json(200, { sources: [{ id: "src_cal_apple", name: "Apple Calendar" }, { id: "src_mail_qq", name: "QQ Mail" }] });
     if (url === "/v1/settings/ext-keys") return json(200, { credentials: [{ id: "k1", kind: "ext", scope: "channel.slack" }, { id: "k2", kind: "ext", scope: "channel.old", revoked_at: "x" }] });
     if (url === "/v1/settings/commands") return json(200, { declarations: [{ harness: "hermes", rev: 1, state: "confirmed", declaration: { harness: "hermes", headless: { command: ["hermes"], access: { read: [], edit: [] } } } }] });
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
