@@ -58,6 +58,6 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm --prefix web ci
       - run: go run ./tools/release -pack dist/
-      - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file docs/user/changelog.md
+      - run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --title "$GITHUB_REF_NAME" --notes-file docs/user/changelog.md
         env:
           GH_TOKEN: ${{ github.token }}
