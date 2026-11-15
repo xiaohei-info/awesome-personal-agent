@@ -1,3 +1,5 @@
 # 接入声明（主文档 §9.1）。接多个接口时登记时起名区分（重名会被拒绝）。
 program: http-json
 default: {zh: JSON 接口, en: JSON endpoint}
+# 发件人（附录 D.1）：由对方自己写，无从核实。
+sender: {trust: unverified}

@@ -61,3 +61,44 @@ func TestNameForPicksByConfigAndFallsBackToDefault(t *testing.T) {
 		}
 	}
 }
+
+// T1：发件人段必填且取值受限；可信时必须给格式提示。
+func TestSenderDeclarationValidated(t *testing.T) {
+	ok := []Sender{{Trust: TrustUnverified}, {Trust: TrustVerified, Hint: Text{"用户名", "username"}, Self: "identity", Types: map[string]string{"a.*": TrustNone}}}
+	for _, s := range ok {
+		if err := validSender(s); err != nil {
+			t.Errorf("%+v: %v", s, err)
+		}
+	}
+	bad := []Sender{{}, {Trust: "maybe"}, {Trust: TrustVerified}, {Trust: TrustUnverified, Self: "whoami"},
+		{Trust: TrustUnverified, Types: map[string]string{"a.b": "trusted"}}, {Trust: TrustUnverified, Types: map[string]string{"[": TrustNone}}}
+	for _, s := range bad {
+		if err := validSender(s); err == nil {
+			t.Errorf("%+v should be rejected", s)
+		}
+	}
+}
+
+// 按事件类型取上限：精确类型优先，其次最长的通配，都不中时用 trust。
+func TestSenderForMatchesDeclaredTypes(t *testing.T) {
+	ds, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh, _ := Find(ds, "webhook", "", "github")
+	pim, _ := Find(ds, "script", "apple-pim-source", "")
+	cases := []struct {
+		d          Declaration
+		typ, want string
+	}{
+		{gh, "pr.commented", TrustVerified}, {gh, "issue.opened", TrustVerified}, {gh, "pr.closed", TrustNone},
+		{gh, "notification.mention", TrustNone}, {pim, "mail.received", TrustUnverified}, {pim, "reminder.due", TrustNone},
+		{Declaration{Sender: Sender{Trust: TrustVerified, Types: map[string]string{"*": TrustNone, "a.*": TrustUnverified, "a.b": TrustVerified}}}, "a.c", TrustUnverified},
+		{Declaration{Sender: Sender{Trust: TrustVerified, Types: map[string]string{"*": TrustNone, "a.*": TrustUnverified, "a.b": TrustVerified}}}, "a.b", TrustVerified},
+	}
+	for _, c := range cases {
+		if got := c.d.SenderFor(c.typ); got != c.want {
+			t.Errorf("%s %s: got %s, want %s", c.d.Program, c.typ, got, c.want)
+		}
+	}
+}

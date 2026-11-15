@@ -32,6 +32,58 @@ type Declaration struct {
 	By                string          `yaml:"by"`    // 按 config 的这个字段区分实例
 	Names             map[string]Text `yaml:"names"` // By 字段的取值 → 名字模板，优先于 Name
 	Default           Text            `yaml:"default"`
+	Sender            Sender          `yaml:"sender"` // 发件人是否可信（§9.1），必填
+}
+
+// 发件人信任的取值（§9.1）：声明的结论只有前两种；Types 可再把某类事件标为不带发件人。
+const (
+	TrustVerified   = "verified"   // 发件人由平台机制填写，可以核实
+	TrustUnverified = "unverified" // 发件人由对方自己写，需确认
+	TrustNone       = "none"       // 这类事件不带发件人
+)
+
+// Sender 是接入声明里的发件人段。Trust 是对本人显示的唯一结论；Types 按事件类型（可用 path.Match 通配）覆盖它，
+// 精确的类型优先，其次是最长的匹配模式。
+type Sender struct {
+	Trust string            `yaml:"trust"`
+	Types map[string]string `yaml:"types"`
+	Hint  Text              `yaml:"hint"` // 可信时必填：信任发件人输入框的格式提示
+	Self  string            `yaml:"self"` // identity：程序支持 identity 模式，能推出本人身份（§9.2）
+}
+
+// SenderFor 是这类事件的发件人上限：verified、unverified 或 none。
+func (d Declaration) SenderFor(eventType string) string {
+	if v, ok := d.Sender.Types[eventType]; ok {
+		return v
+	}
+	best, out := -1, d.Sender.Trust
+	for pat, v := range d.Sender.Types {
+		if ok, _ := path.Match(pat, eventType); ok && len(pat) > best {
+			best, out = len(pat), v
+		}
+	}
+	return out
+}
+
+func validSender(s Sender) error {
+	if s.Trust != TrustVerified && s.Trust != TrustUnverified {
+		return fmt.Errorf("sender.trust must be verified or unverified")
+	}
+	if s.Trust == TrustVerified && (s.Hint.Zh == "" || s.Hint.En == "") {
+		return fmt.Errorf("sender.hint needs zh and en when trust is verified")
+	}
+	if s.Self != "" && s.Self != "identity" {
+		return fmt.Errorf("sender.self must be identity or empty")
+	}
+	for pat, v := range s.Types {
+		if _, err := path.Match(pat, ""); err != nil {
+			return fmt.Errorf("sender.types %q: %w", pat, err)
+		}
+		if v != TrustVerified && v != TrustUnverified && v != TrustNone {
+			return fmt.Errorf("sender.types %q must be verified, unverified or none", pat)
+		}
+	}
+	return nil
 }
 
 var placeholder = regexp.MustCompile(`\{([a-z_]+)\}`)
@@ -63,6 +115,9 @@ func Load() ([]Declaration, error) {
 		}
 		if (d.By == "") != (len(d.Names) == 0) {
 			return nil, fmt.Errorf("sources: %s: by and names go together", n)
+		}
+		if err := validSender(d.Sender); err != nil {
+			return nil, fmt.Errorf("sources: %s: %w", n, err)
 		}
 		seen[d.Program] = true
 		out = append(out, d)

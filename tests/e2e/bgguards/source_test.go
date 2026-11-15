@@ -35,7 +35,8 @@ func (f *fx) newSource() *source {
 	s := &source{f: f, queue: filepath.Join(f.Root, "acc-source")}
 	must(f.t, os.MkdirAll(filepath.Join(s.queue, "in"), 0o755))
 	must(f.t, os.MkdirAll(filepath.Join(s.queue, "done"), 0o755))
-	script := filepath.Join(s.queue, "acc-source.sh")
+	// 文件名取仓库自带的可信来源程序名：发件人上限按接入声明里的程序名认定（主文档 §9.1），没有声明的自定义脚本一律未核实。
+	script := filepath.Join(s.queue, "github-source")
 	must(f.t, os.WriteFile(script, []byte(accScript), 0o755))
 	body, _ := json.Marshal(map[string]any{"id": srcID, "name": srcID, "type": "script", "source_type": "acc",
 		"command": script + " " + s.queue, "schedule": "1s", "timeout": 30})

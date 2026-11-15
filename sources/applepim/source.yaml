@@ -7,3 +7,7 @@ names:
   calendar: {zh: Apple 日历, en: Apple Calendar}
   reminders: {zh: 提醒事项, en: Reminders}
 default: {zh: Apple 邮件, en: Apple Mail}
+# 发件人（附录 D.1）：邮件 From 与日历组织者由对方写入；提醒事项没有发件人。
+sender:
+  trust: unverified
+  types: {"reminder.*": none}

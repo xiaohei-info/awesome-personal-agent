@@ -2,3 +2,13 @@
 program: github-source
 webhook_source_type: github
 default: {zh: GitHub, en: GitHub}
+# 发件人（§9.1、附录 D.1）：作者取自接口返回的 user.login（webhook 取验签后的 sender.login）；聚合出的更新、关闭、合并不知道动作者，通知接口不给动作者。
+sender:
+  trust: verified
+  hint: {zh: GitHub 用户名, en: GitHub username}
+  self: identity
+  types:
+    "*.updated": none
+    "*.closed": none
+    "*.merged": none
+    "notification.*": none

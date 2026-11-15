@@ -153,6 +153,35 @@ type Options struct {
 	Now    func() time.Time
 	// OnError 接收无处可返回的后台错误（提交后同步时间轮的失败）。
 	OnError func(error)
+	// SenderCeiling 是来源接入声明给这类事件的发件人上限（§9.1），由装配方按声明给出；nil 表示不封顶。
+	SenderCeiling func(src domain.Source, eventType string) SenderCeiling
+}
+
+// SenderCeiling 是发件人上限：verified 时保留事件自报的 sender_verified，unverified 时一律未核实，none 时清空发件人。
+type SenderCeiling string
+
+const (
+	CeilingVerified   SenderCeiling = "verified"
+	CeilingUnverified SenderCeiling = "unverified"
+	CeilingNone       SenderCeiling = "none"
+)
+
+// IdentityPrefix 是来源 identity 模式那次运行的 Target 前缀（§9.2）：结果由发起方同步取走，不是拉取结果。
+const IdentityPrefix = "identity:"
+
+// capSender 在落盘前按接入声明给发件人封顶：来源程序自报的核实结论不能超过声明。
+func (r *Runner) capSender(src domain.Source, ev parsedEvent) parsedEvent {
+	if r.o.SenderCeiling == nil {
+		return ev
+	}
+	switch r.o.SenderCeiling(src, ev.Type) {
+	case CeilingVerified:
+	case CeilingNone:
+		ev.Sender, ev.SenderVerified = "", false
+	default:
+		ev.SenderVerified = false
+	}
+	return ev
 }
 
 // Runner 持有无状态的调度逻辑；状态全在账本里。
@@ -431,7 +460,7 @@ func orElse(a, b string) string {
 // 非来源类别的 Run 原样忽略。
 func (r *Runner) Handle(ctx context.Context, res proc.Result) error {
 	run := res.Run
-	if run.Category != domain.RunSource {
+	if run.Category != domain.RunSource || strings.HasPrefix(run.Target, IdentityPrefix) {
 		return nil
 	}
 	in := resultIn{SourceID: run.Target, RunID: run.ID, FinishedAt: r.o.Now()}
@@ -539,7 +568,7 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 		}
 	}
 	for _, ev := range in.Events {
-		if err := insertEvent(tx, src, in.RunID, ev); err != nil {
+		if err := insertEvent(tx, src, in.RunID, r.capSender(src, ev)); err != nil {
 			return nil, err
 		}
 	}
@@ -584,6 +613,21 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"id": src.ID, "class": in.Class, "cursor": cursor}, nil
+}
+
+// IdentityTimeout 是 identity 模式一次运行的超时（秒）。
+const IdentityTimeout = 10
+
+// IdentityPlan 是来源 s 的 identity 模式（§9.2）：同一份 stdin、同一工作目录，命令是程序名加 identity；
+// 走短任务队列，本人发起所以排在前面。结果不落事件、不动游标，由发起方按 Target 取走。
+func (r *Runner) IdentityPlan(s domain.Source, now time.Time) (proc.Request, error) {
+	run, spec, err := r.plan(s, Stats{}, now)
+	if err != nil {
+		return proc.Request{}, err
+	}
+	spec.Command = []string{spec.Command[0], "identity"}
+	run.Target, run.TimeoutSec = IdentityPrefix+s.ID, IdentityTimeout
+	return proc.Request{Run: run, Spec: spec, Explicit: true}, nil
 }
 
 // nextAttempt：第 1 次连续失败下个节拍照常重试；之后每次翻倍，封顶一小时（至少一个周期）。
