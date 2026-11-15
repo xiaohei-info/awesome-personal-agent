@@ -19,7 +19,7 @@ function server(opts: { denied?: boolean; auditFails?: boolean; instances?: { pa
     { key: K1, pack: "brief", group: "event_rules", id: "tag-hit", mode: "observe", hash: "h1", class: "action" },
     { key: K2, pack: "follow-up", group: "clock_rules", id: "stale-check", mode: "auto", hash: "h2", class: "reminder" },
     { key: K3, pack: "gone", group: "event_rules", id: "x", mode: "off", hash: "h3" },
-    { key: K4, pack: "brief", group: "clock_rules", id: "scheduled-brief", mode: "auto", hash: "h4", class: "action", instance_driven: true },
+    { key: K4, pack: "brief", group: "clock_rules", id: "scheduled-brief", mode: "observe", hash: "h4", class: "action", instance_driven: true },
   ];
   const now = Date.now();
   const observed = [
@@ -90,6 +90,7 @@ describe("自动规则 › 规则", () => {
     const sec = within(await screen.findByRole("region", { name: "按安排运行" }));
     expect(sec.getByText("按时写简报")).toBeInTheDocument();
     expect(sec.queryByRole("radiogroup")).not.toBeInTheDocument();
+    expect(sec.queryByText(/本周/)).not.toBeInTheDocument(); // 已存的 observe 不再显示试运行统计
     expect(sec.getByText(/按你的安排运行 · 已安排 2 个/)).toBeInTheDocument();
     expect(sec.getByRole("link", { name: "去安排 ›" })).toHaveAttribute("href", "/briefs");
     expect(screen.getAllByRole("region").at(-1)).toBe(screen.getByRole("region", { name: "按安排运行" }));

@@ -140,7 +140,7 @@ export function RulesPage() {
                       {entryOf(lang, "ruleGroup", r.group)?.label ?? r.group}
                       {raw && <code className="raw-id">{r.key}</code>}
                     </p>
-                    {r.mode === "observe" && <Trial rule={r} name={name} />}
+                    {r.mode === "observe" && !r.instance_driven && <Trial rule={r} name={name} />}
                   </div>
                   {r.instance_driven ? (
                     <p className="sub">{t.driven(scheduled?.[r.pack] ?? (scheduled ? 0 : null))} <Link to="/briefs">{t.arrange}</Link></p>
