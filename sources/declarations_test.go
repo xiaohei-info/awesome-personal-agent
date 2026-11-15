@@ -88,7 +88,7 @@ func TestSenderForMatchesDeclaredTypes(t *testing.T) {
 	gh, _ := Find(ds, "webhook", "", "github")
 	pim, _ := Find(ds, "script", "apple-pim-source", "")
 	cases := []struct {
-		d          Declaration
+		d         Declaration
 		typ, want string
 	}{
 		{gh, "pr.commented", TrustVerified}, {gh, "issue.opened", TrustVerified}, {gh, "pr.closed", TrustNone},

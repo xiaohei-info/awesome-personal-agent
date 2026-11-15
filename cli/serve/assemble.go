@@ -161,7 +161,7 @@ type kernel struct {
 	sum    *summaries.Service
 	packs  *kpacks.Loader
 	agm    *agentsmd.Service
-	agmWG  sync.WaitGroup // 事件触发的 AGENTS.md 检测；测试收尾时等它们结束
+	agmWG  sync.WaitGroup  // 事件触发的 AGENTS.md 检测；测试收尾时等它们结束
 	ids    identityFetcher // 来源 identity 模式（§9.2）
 	wk     *wake.Service
 
