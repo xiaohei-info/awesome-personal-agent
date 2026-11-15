@@ -163,7 +163,7 @@ APA 是独立的开源项目，与上述产品及其厂商没有关联。
 4. 登记来源。邮件和日历要先装好对应工具并用它自己的命令完成认证。
 5. 之后主要处理决策待办和建议流。
 
-**agent：** 插件和 `apa guide` 告诉它怎么用，不用读文档。上下文由注入和 `apa context` 带到。需要决定时用 `apa ask`，派活用 `apa delegate`，用宿主自己的方式派出后用 `apa dispatch add` 记下，交结果用 `apa report`。
+**agent：** 插件和 `apa guide` 告诉它怎么用，不用读文档。上下文由注入和 `apa context` 带到。需要决定时用 `apa ask`，派活用 `apa delegate`，用宿主自己的方式派出（插件会自动把这次委派记进账本，认不出的派法用 `apa dispatch add` 补记），交结果用 `apa report`。
 
 ## 部署与数据
 
