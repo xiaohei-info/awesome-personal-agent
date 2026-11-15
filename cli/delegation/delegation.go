@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
@@ -23,6 +24,7 @@ func init() {
 	client.Register("delegate", delegate)
 	client.Register("report", report)
 	client.Register("declare", declare)
+	client.Register("dispatch", dispatch)
 }
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
@@ -136,6 +138,54 @@ func report(c *client.Ctx, args []string) error {
 		hdr["If-Match"] = *version
 	}
 	return send(c, hdr, "POST", "/items/"+url.PathEscape(id)+"/report", body)
+}
+
+const dispatchUsage = "usage: apa dispatch add <item> [--session S] [--resumable] [--cwd D] [--repo R] [--handle <json file|->] [--continues <dispatch>] [--idempotency-key K] | " +
+	"update <dispatch> [--state ended|lost] [--resumable true|false]"
+
+// dispatch 写或推进委派记录（§6.17）：harness 取 APA_HARNESS；同会话去重、句柄校验与授权都在内核。
+func dispatch(c *client.Ctx, args []string) error {
+	if len(args) < 2 || strings.HasPrefix(args[1], "-") {
+		return usage("apa dispatch needs add <item> or update <dispatch>", dispatchUsage)
+	}
+	sub, id, rest := args[0], args[1], args[2:]
+	fs := flags("dispatch")
+	switch sub {
+	case "add":
+		session, cwd, repo, handle, cont, key := fs.String("session", "", ""), fs.String("cwd", "", ""), fs.String("repo", "", ""),
+			fs.String("handle", "", ""), fs.String("continues", "", ""), fs.String("idempotency-key", "", "")
+		resumable := fs.Bool("resumable", false, "")
+		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 {
+			return usage("invalid arguments for dispatch add", dispatchUsage)
+		}
+		body := map[string]any{"session": *session, "resumable": *resumable, "cwd": *cwd, "repo": *repo, "continues": *cont}
+		if *handle != "" {
+			data, err := readFile(c, *handle)
+			if err != nil || !json.Valid(data) {
+				return usage("--handle must be a JSON file or - with valid JSON", dispatchUsage)
+			}
+			body["handle"] = json.RawMessage(data)
+		}
+		return send(c, idem(*key), "POST", "/items/"+url.PathEscape(id)+"/dispatches", body)
+	case "update":
+		state, resumable := fs.String("state", "", ""), fs.String("resumable", "", "")
+		if err := fs.Parse(rest); err != nil || fs.NArg() != 0 {
+			return usage("invalid arguments for dispatch update", dispatchUsage)
+		}
+		body := map[string]any{}
+		if *state != "" {
+			body["state"] = *state
+		}
+		if *resumable != "" {
+			b, err := strconv.ParseBool(*resumable)
+			if err != nil {
+				return usage("--resumable must be true or false", dispatchUsage)
+			}
+			body["resumable"] = b
+		}
+		return send(c, nil, "PATCH", "/dispatches/"+url.PathEscape(id), body)
+	}
+	return usage("unknown dispatch subcommand "+sub, dispatchUsage)
 }
 
 const declareUsage = "usage: apa declare <file|-> (a JSON declaration; takes effect only after the owner confirms it in Web)"

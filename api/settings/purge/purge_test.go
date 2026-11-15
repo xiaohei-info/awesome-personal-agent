@@ -3,6 +3,7 @@ package purge
 import (
 	"context"
 	"encoding/json"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +56,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, proc.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, proc.Module, delegation.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
