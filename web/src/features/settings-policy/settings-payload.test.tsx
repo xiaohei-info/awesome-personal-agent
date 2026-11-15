@@ -26,6 +26,7 @@ const CASES: Case[] = [
   { name: "打扰策略（未改）", at: "/settings/notify", card: "怎么找我", path: "/v1/settings/policy", body: { disturb: DISTURB } },
   { name: "权限上限（未改）", at: "/settings/access", card: "后台运行能做多少", path: "/v1/settings/access-limits", body: { permission_cap: { default: "read", by_harness: {} } } },
   { name: "白名单（未改）", at: "/settings/access", card: "信任名单", path: "/v1/settings/allowlists", body: { forward_allowlist: { telegram: ["alice"] }, channel_answerers: {} } },
+  { name: "助手语言（未改）", at: "/settings/general", card: "助手说哪种语言", path: "/v1/settings/policy", body: { persona_lang: "" } },
   { name: "人格（未改）", at: "/settings/general", card: "助手的语气", path: "/v1/settings/policy", body: { persona: "Be brief." } },
   // 与改版前测试相同的编辑
   {
@@ -180,6 +181,23 @@ describe("设置 › 通用 › 助手的语气", () => {
     await waitFor(() => expect(s.puts).toHaveLength(2));
     expect(s.puts[1].body).toEqual({ persona: "" });
     expect(s.doc.persona).toBe("");
+  });
+
+  it("助手语言：只发自己的段；存下后没自定义的默认文字换成那种语言，已改的不动", async () => {
+    const { s, c, box } = await open("");
+    const l = within(screen.getByRole("region", { name: "助手说哪种语言" }));
+    await userEvent.click(l.getByRole("button", { name: "English" }));
+    await userEvent.click(l.getByRole("button", { name: "保存助手说哪种语言" }));
+    await waitFor(() => expect(s.puts).toHaveLength(1));
+    expect(s.puts[0].body).toEqual({ persona_lang: "en" });
+    await waitFor(() => expect(box).toHaveValue("Default tone (en)"));
+    await userEvent.type(box, "!");
+    await userEvent.click(l.getByRole("button", { name: "中文" }));
+    await userEvent.click(l.getByRole("button", { name: "保存助手说哪种语言" }));
+    await waitFor(() => expect(s.puts).toHaveLength(2));
+    expect(s.puts[1].body).toEqual({ persona_lang: "zh" });
+    expect(box).toHaveValue("Default tone (en)!");
+    expect(c.queryByText("默认")).toBeNull();
   });
 
   it("已自定义：显示自己的文字、不标「默认」，可恢复默认", async () => {

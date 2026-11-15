@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageHead } from "../../app/page";
 import { browserLang, setChoice, storedChoice, useLang, useT, type Choice } from "../../app/i18n";
 import { useSession } from "../../app/session";
 import { LANG_NAMES } from "../../app/strings";
 import { strings } from "./strings";
 import { setRawShown, useRaw } from "../../app/raw";
-import { Card, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
+import { Card, Seg, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
 
 // 界面语言（设计 §4.1）：存在这台浏览器的 localStorage，不进账本、不跨设备同步；默认跟随浏览器。
 export function SettingsGeneralPage() {
@@ -65,15 +65,32 @@ function Persona() {
   const { docs, error, save } = usePolicyDocs(PERSONA_ROUTES);
   const { api } = useSession();
   const lang = useLang();
-  // 内置默认原文由内核按界面语言给出（§11.2）；取不到时按空文本处理，编辑框仍可写自己的。
+  const said = (docs?.policy?.persona_lang as string | undefined) ?? "";
+  // 内置默认原文由内核给出（§11.2）：已存的助手语言优先，「跟随系统」时按界面语言；取不到时按空文本处理，编辑框仍可写自己的。
   const [def, setDef] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    api.get<{ default?: string }>("/context/persona?lang=" + lang).then((r) => live && setDef(r.default ?? ""), () => live && setDef(""));
+    api.get<{ default?: string }>("/context/persona?locale=" + lang).then((r) => live && setDef(r.default ?? ""), () => live && setDef(""));
     return () => { live = false; };
-  }, [api, lang]);
+  }, [api, lang, said]);
   if (error) return <p role="alert">{error}</p>;
-  return docs?.policy && def !== null ? <PersonaCard doc={docs.policy} def={def} save={save} /> : null;
+  return docs?.policy && def !== null ? (
+    <>
+      <PersonaLangCard doc={docs.policy} save={save} />
+      <PersonaCard doc={docs.policy} def={def} save={save} />
+    </>
+  ) : null;
+}
+
+// 助手说哪种语言：存在策略里（只在 Web 改），与界面语言分开；「跟随系统」按运行助手那台机器的区域设置。
+function PersonaLangCard({ doc, save }: { doc: Doc; save: Save }) {
+  const t = useT(strings);
+  const [v, setV] = useDraft(doc.persona_lang, () => (doc.persona_lang as string | undefined) ?? "");
+  return (
+    <Card title={t.personaLang} hint={t.personaLangHint} onSave={() => save("policy", { persona_lang: v })}>
+      <Seg label={t.personaLang} value={v} onChange={setV} options={[["", t.personaLangSystem], ["zh", LANG_NAMES.zh], ["en", LANG_NAMES.en]]} />
+    </Card>
+  );
 }
 const PERSONA_ROUTES = ["policy"] as const;
 
@@ -81,7 +98,14 @@ const PERSONA_ROUTES = ["policy"] as const;
 function PersonaCard({ doc, def, save }: { doc: Doc; def: string; save: Save }) {
   const t = useT(strings);
   const stored = ((doc.persona as string | undefined) ?? "").trim() !== "";
-  const [text, setText] = useDraft(stored ? doc.persona : [doc.persona, def], () => (stored ? (doc.persona as string) : def));
+  const [text, setText] = useDraft(doc.persona, () => (stored ? (doc.persona as string) : def));
+  // 默认原文换了语言：还停在默认上的文字跟着换，本人已改的不动。
+  const prev = useRef(def);
+  useEffect(() => {
+    const was = prev.current;
+    prev.current = def;
+    setText((x) => (x === was ? def : x));
+  }, [def]); // eslint-disable-line react-hooks/exhaustive-deps
   const n = estimateTokens(text);
   const isDefault = text === def;
   return (

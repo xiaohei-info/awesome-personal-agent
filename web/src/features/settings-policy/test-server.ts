@@ -6,7 +6,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix it; nothing was saved" });
 
 export const SECTIONS: Record<string, string[]> = {
-  "/v1/settings/policy": ["web_only", "disturb", "material_write", "persona", "channels", "default_harness"],
+  "/v1/settings/policy": ["web_only", "disturb", "material_write", "persona", "persona_lang", "channels", "default_harness"],
   "/v1/settings/allowlists": ["forward_allowlist", "channel_answerers"],
   "/v1/settings/access-limits": ["permission_cap"],
 };
@@ -17,6 +17,7 @@ export function initialDoc(): Record<string, any> {
     disturb: { routes: { decision: "inject", health: "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 20, mutes: [] },
     material_write: { default: "proposed", kinds: { minutes: "direct" } },
     persona: "Be brief.",
+    persona_lang: "",
     channels: {},
     default_harness: "",
     forward_allowlist: { telegram: ["alice"] },
@@ -37,7 +38,7 @@ export function policyServer(opts: { webOnlyDenied?: boolean } = {}) {
     if (url === "/v1/settings/commands") return json(200, { declarations: [{ harness: "hermes", rev: 1, state: "confirmed", declaration: { harness: "hermes", headless: { command: ["hermes"], access: { read: [], edit: [] } } } }] });
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
     if (url.startsWith("/v1/items/")) return json(200, { id: url.slice("/v1/items/".length), title: "Renew domain" });
-    if (url.startsWith("/v1/context/persona")) return json(200, { persona: "decl\n" + doc.persona, default: url.endsWith("lang=zh") ? "Default tone (zh)" : "Default tone (en)" });
+    if (url.startsWith("/v1/context/persona")) return json(200, { persona: "decl\n" + doc.persona, default: (doc.persona_lang || (url.endsWith("locale=zh") ? "zh" : "en")) === "zh" ? "Default tone (zh)" : "Default tone (en)" });
     const keys = SECTIONS[url];
     if (!keys) return err(404, "not_found", "no such route");
     if (opts.webOnlyDenied) return err(403, "web_only", "settings can only be used by the owner in the Web UI");
