@@ -18,6 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/background"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -32,7 +33,7 @@ import (
 
 // InstructionVersion 是常驻指令的当前版本；插件带着自己持有的版本来问，过期就提示更新。
 // 常驻指令（`apa guide`）的内容变化时递增。
-const InstructionVersion = 1
+const InstructionVersion = 2
 
 // Module 登记会话游标表。游标是事件序号，只属于本模块。
 var Module = store.Module{Name: "context", Migrations: []store.Migration{{
@@ -67,6 +68,7 @@ type Reader struct {
 	Level     authz.Level
 	Principal string
 	Run       string
+	Harness   string // 调用方报告的 harness：委派历史据它标 own（只是方便字段，不是边界）
 }
 
 // ItemMessages 是一个事项转给读取者的挂靠消息。
@@ -84,6 +86,20 @@ type Entry struct {
 	Action   string       `json:"action"` // 建议动作（命令行）
 	// Running：事项上有排队或运行中的运行（§7.6），主会话与运行者据此避免重复处理。
 	Running bool `json:"running,omitempty"`
+	// Last 是事项所在序列最近一次委派（§6.17），注入里多一行；完整记录与句柄用 --scope item 读。
+	Last *LastDispatch `json:"last_dispatch,omitempty"`
+}
+
+// LastDispatch 是注入用的最近一次委派摘要，不带句柄。
+type LastDispatch struct {
+	Item      string `json:"item"` // 记录所在的事项（可能是子事项）
+	Executor  string `json:"executor"`
+	Label     string `json:"label,omitempty"`
+	Session   string `json:"session,omitempty"`
+	Resumable bool   `json:"resumable"`
+	State     string `json:"state"`
+	Harness   string `json:"harness"`
+	Own       bool   `json:"own"`
 }
 
 // DeliveryEntry 是一条路由为注入的投递：只带标题、摘要、选项与建议动作，不带来源正文。
@@ -132,6 +148,8 @@ type Result struct {
 	Materials   []MaterialEntry `json:"materials,omitempty"`
 	Deliveries  []DeliveryEntry `json:"deliveries,omitempty"`
 	Messages    []ItemMessages  `json:"messages,omitempty"`
+	// History 只在 --scope item：每个目标事项所在序列最近的委派记录（§6.17）。
+	History []ItemHistory `json:"history,omitempty"`
 	// WebOnlyPending：作用域内有待 Web 确认的高风险决策（§11.6 第 5 条）。
 	WebOnlyPending bool `json:"web_only_pending,omitempty"`
 }
@@ -182,7 +200,7 @@ func Build(tx *store.Tx, req Request) (Result, error) {
 		if (!req.All && it.Project != project) || hiddenAsk(it) {
 			continue
 		}
-		e, err := entry(tx, it, pol)
+		e, _, err := entry(tx, it, pol, req.Reader)
 		if err != nil {
 			return res, err
 		}
@@ -251,11 +269,14 @@ func buildItem(tx *store.Tx, req Request, head int64) (Result, error) {
 		if hiddenAsk(it) {
 			continue
 		}
-		e, err := entry(tx, it, pol)
+		e, hist, err := entry(tx, it, pol, req.Reader)
 		if err != nil {
 			return res, err
 		}
 		res.Items = append(res.Items, e)
+		if len(hist) > 0 {
+			res.History = append(res.History, ItemHistory{Item: it.ID, Dispatches: hist})
+		}
 		if res.Messages, err = appendMessages(tx, res.Messages, req.Reader, it, pol); err != nil {
 			return res, err
 		}
@@ -263,9 +284,20 @@ func buildItem(tx *store.Tx, req Request, head int64) (Result, error) {
 	return res, nil
 }
 
-func entry(tx *store.Tx, it domain.Item, pol policy.Policy) (Entry, error) {
+func entry(tx *store.Tx, it domain.Item, pol policy.Policy, r Reader) (Entry, []HistoryEntry, error) {
 	running, err := background.InFlight(tx, it.ID)
-	return Entry{ID: it.ID, Title: it.Title, Phase: it.Phase, Deadline: it.Deadline, Action: action(it, pol), Running: running}, err
+	if err != nil {
+		return Entry{}, nil, err
+	}
+	e := Entry{ID: it.ID, Title: it.Title, Phase: it.Phase, Deadline: it.Deadline, Action: action(it, pol), Running: running}
+	hist, err := History(tx, it, r.Harness)
+	if err != nil || len(hist) == 0 {
+		return e, hist, err
+	}
+	h := hist[0]
+	e.Last = &LastDispatch{Item: h.Item, Executor: h.Executor.ID, Label: h.Executor.Label, Session: h.Session, Resumable: h.Resumable,
+		State: h.State, Harness: h.Harness, Own: h.Own}
+	return e, hist, nil
 }
 
 // itemTargets：显式 Item；否则运行身份取目标事项，其他读取者取分配给自己的未关闭事项。
@@ -314,13 +346,25 @@ func appendMessages(tx *store.Tx, to []ItemMessages, r Reader, it domain.Item, p
 	return append(to, ItemMessages{Item: it.ID, Forwarded: f}), nil
 }
 
-// responsible：运行身份对目标事项负责（子事项有自己的执行者）；其他读取者对分配给自己的事项负责。
+// responsible：运行身份对目标事项与它的委派子事项负责；其他读取者对分配给自己的事项负责，
+// 也对自己发起的委派子事项负责（子 agent 多数没有 APA 凭据，由发起委派的主会话转交并回执，§7.6）。
+// 白名单过滤照旧按读取者级别与事项的 unattended 生效，与这里无关。
 func (r Reader) responsible(tx *store.Tx, it domain.Item) (bool, error) {
 	if r.Run == "" {
-		return r.Principal != "" && it.Assignee == r.Principal, nil
+		if r.Principal == "" {
+			return false, nil
+		}
+		return items.BoundTo(tx, r.Principal, authz.Object{ID: it.ID, Assignee: it.Assignee})
 	}
 	rec, err := proc.Get(tx, r.Run)
-	return err == nil && rec.Run.Target == it.ID, err
+	if err != nil || rec.Run.Target == it.ID {
+		return err == nil, err
+	}
+	if it.Kind != domain.KindDelegation {
+		return false, nil
+	}
+	parent, ok, err := items.ParentOf(tx, it.ID)
+	return ok && parent == rec.Run.Target, err
 }
 
 func instruction(req Request) Instruction {
@@ -549,6 +593,9 @@ func (r Result) Inject() string {
 		if e.Running {
 			line("  ", runningNotice)
 		}
+		if d := e.Last; d != nil {
+			line("  ", lastDispatchLine(*d, e.ID))
+		}
 	}
 	for _, m := range r.Materials {
 		line("- 材料 ", m.ID, " | ", oneLine(m.Title), " | ", m.Kind, " | 变更：", oneLine(m.Summary))
@@ -577,6 +624,31 @@ func (r Result) Inject() string {
 		b.WriteString(m.Inject())
 	}
 	return b.String()
+}
+
+// lastDispatchLine 是注入里"上次怎么派的"一行：不带句柄，别的 harness 写的标仅供参考。
+func lastDispatchLine(d LastDispatch, item string) string {
+	who := d.Label
+	if who == "" {
+		who = d.Executor
+	}
+	parts := []string{"上次：" + oneLine(who)}
+	if d.Session != "" {
+		parts = append(parts, "会话 "+oneLine(d.Session))
+	}
+	switch {
+	case d.State == delegation.DispatchLost:
+		parts = append(parts, "会话已失效")
+	case d.Resumable:
+		parts = append(parts, "可续接")
+	default:
+		parts = append(parts, "不可续接")
+	}
+	s := strings.Join(parts, " · ")
+	if !d.Own {
+		s += " · 来自 " + oneLine(d.Harness) + "，仅供参考"
+	}
+	return s + "（apa context --scope item --item " + item + "）"
 }
 
 func isNotFound(err error) bool {

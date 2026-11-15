@@ -49,7 +49,7 @@ func (h *handlers) context(w http.ResponseWriter, r *http.Request, p *core.Princ
 	req := kcontext.Request{Session: p.Caller.Actor.Session,
 		Scope:  projects.Scope{Flag: q.Get("project"), Cwd: q.Get("path"), Host: q.Get("host")},
 		Item:   q.Get("item"),
-		Reader: kcontext.Reader{Level: p.Caller.Level, Principal: p.Caller.Actor.Principal, Run: p.Caller.Actor.Run}}
+		Reader: kcontext.Reader{Level: p.Caller.Level, Principal: p.Caller.Actor.Principal, Run: p.Caller.Actor.Run, Harness: p.Caller.Actor.Harness}}
 	if req.Scope.Cwd != "" && req.Scope.Host == "" {
 		return invalid("host is required with path", "send the machine's host name")
 	}

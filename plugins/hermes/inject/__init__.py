@@ -15,7 +15,7 @@ run_context = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(run_context)
 
 TIMEOUT_SECS = 2
-INSTRUCTION_VERSION = 1  # version of the standing instructions this plugin ships (kernel compares)
+INSTRUCTION_VERSION = 2  # version of the standing instructions this plugin ships (kernel compares)
 
 _keys = {}          # Hermes session id -> session key whose kernel cursor this process continues
 _reinject = set()   # session ids whose next turn must inject the full summary again (after compaction)
