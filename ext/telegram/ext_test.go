@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-telegram/bot/models"
+
 	"github.com/xiaohei-info/awesome-personal-agent/ext/telegram/fakebot"
 )
 
@@ -360,5 +362,41 @@ func TestWebOnlyFlagWinsOverStrayOptions(t *testing.T) {
 	m := fb.Sent()[0]
 	if len(m.Buttons) != 0 || strings.Contains(m.Text, "同意") || strings.Contains(m.Text, "/forms/") || strings.Contains(m.Text, "推荐") {
 		t.Errorf("stray options leaked into a web_only message: %+v", m)
+	}
+}
+
+// 识别我的 ID：私聊里的口令（含 /start 前缀）报给内核，sender 是数字 ID；有效时回一句，无效时不回；
+// 不是口令的私聊消息照旧丢弃。
+func TestIdentifyCodeInPrivateChatIsReportedWithNumericID(t *testing.T) {
+	f, fb := newFakeAPA(t), newBot(t)
+	f.code = "apa-7K3Q"
+	start(t, f, fb, memStore())
+	stranger := models.User{ID: 99, Username: "someone"}
+	fb.Private(stranger, "/start apa-7K3Q")
+	eventually(t, "reply in the private chat", func() bool {
+		for _, s := range fb.Sent() {
+			if s.Chat == 99 && s.Text == "已收到，回网页确认。" {
+				return true
+			}
+		}
+		return false
+	})
+	fb.Private(stranger, "apa-ZZZZ")
+	fb.Private(stranger, "你好")
+	eventually(t, "second report", func() bool { f.mu.Lock(); defer f.mu.Unlock(); return len(f.idents) == 2 })
+	f.mu.Lock()
+	got := append([]answerCall(nil), f.idents...)
+	f.mu.Unlock()
+	if got[0].Ref != "apa-7K3Q" || got[0].Sender != "99" || got[0].Text != "@someone" || got[1].Ref != "apa-ZZZZ" {
+		t.Fatalf("reports: %+v", got)
+	}
+	n := 0
+	for _, s := range fb.Sent() {
+		if s.Chat == 99 {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("bot should reply only to the valid code, sent %d messages to the stranger", n)
 	}
 }

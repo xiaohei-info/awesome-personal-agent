@@ -11,6 +11,7 @@ const MESSAGES = [
   { id: "m1", source: "gh", sender: "alice", sender_verified: true, subject: "s-m1", occurred_at: "2030-01-01T00:00:00Z", attach_state: "pending", forward_allowed: true },
   { id: "m2", source: "gh", sender: "mallory", sender_verified: false, subject: "s-m2", occurred_at: "2030-01-01T00:01:00Z", attach_state: "pending", forward_allowed: false },
   { id: "m3", source: "gh", subject: "s-m3", occurred_at: "2030-01-01T00:02:00Z", attach_state: "processed", forward_allowed: false },
+  { id: "m4", source: "gh", sender: "bob", sender_verified: true, subject: "s-m4", occurred_at: "2030-01-01T00:03:00Z", attach_state: "pending", forward_allowed: false },
 ];
 
 function fetchFor(messages: unknown, status = 200) {
@@ -36,11 +37,11 @@ function mount(f: typeof fetch) {
 beforeEach(() => sessionStorage.clear());
 
 describe("事项页挂靠消息（ACT-FWD-04）", () => {
-  it("显示全部消息及发送者、核实状态、后台能否读到；读不到的标明并给出加入可读名单的入口", async () => {
+  it("显示全部消息及发送者、核实状态、后台能否读到；已核实而读不到的给出加入可读名单的入口", async () => {
     mount(fetchFor(MESSAGES));
     const list = within(await screen.findByRole("list", { name: "跟进消息列表" }));
     const rows = list.getAllByRole("listitem");
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
 
     expect(within(rows[0]).getByLabelText("发送者")).toHaveTextContent("alice");
     expect(within(rows[0]).getByLabelText("核实状态")).toHaveTextContent("已核实");
@@ -51,8 +52,11 @@ describe("事项页挂靠消息（ACT-FWD-04）", () => {
     expect(within(rows[1]).getByLabelText("核实状态")).toHaveTextContent("未核实");
     expect(within(rows[1]).getByLabelText("后台 agent 能否读到")).toHaveTextContent("后台 agent 看不到");
     expect(within(rows[1]).getByLabelText("处理状态")).toHaveTextContent("待转给 agent");
-    // 名单外：后台 agent 看不到（上一行），处理状态仍是待转（上上行）；给出去设置可读名单的入口
-    expect(within(rows[1]).getByRole("link", { name: "加入可读名单" })).toHaveAttribute("href", "/settings/access");
+    // T17：未核实的发件人加进名单也不生效，不给入口
+    expect(within(rows[1]).queryByRole("link", { name: "加入可读名单" })).toBeNull();
+    // 已核实但不在名单里：入口指向该来源的「信任的发件人」，带上要加的人
+    expect(within(rows[3]).getByLabelText("后台 agent 能否读到")).toHaveTextContent("后台 agent 看不到");
+    expect(within(rows[3]).getByRole("link", { name: "加入可读名单" })).toHaveAttribute("href", "/sources?open=gh&add=bob#trusted-senders");
 
     // 发送者缺失：显示为未知且未核实，不伪造发送者
     expect(within(rows[2]).getByLabelText("发送者")).toHaveTextContent("未知发送者");

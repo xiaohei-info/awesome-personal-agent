@@ -23,7 +23,6 @@ export function SettingsNotifyPage() {
   return (
     <PolicyPage title={t.title} lede={t.lede} error={error} ready={!!p} onRetry={() => void load()}>
       {p && <DisturbCard doc={p} channels={channels} save={save} />}
-      {p && <ChannelsCard doc={p} channels={channels} save={save} />}
     </PolicyPage>
   );
 }
@@ -191,31 +190,6 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: string[]; sa
           </label>
         </div>
       </details>
-    </Card>
-  );
-}
-
-// 渠道的登记属性（§10.3，策略的 channels 段）：只能发文字的渠道，决策投递带一次性表单链接（kernel/channel/form.go）。
-// PUT 替换整段：已接入的渠道与段里已有的渠道（含已吊销的）一起列出，没改的原样带回。
-function ChannelsCard({ doc, channels, save }: { doc: Doc; channels: string[]; save: Save }) {
-  const t = useT(strings);
-  const stored = (doc.channels ?? {}) as Record<string, { text_only?: boolean }>;
-  const [draft, setDraft] = useDraft<Record<string, boolean>>(doc.channels, () => ({}));
-  const names = [...new Set([...channels, ...Object.keys(stored)])];
-  if (!names.length) return null;
-  const on = (c: string) => (c in draft ? draft[c] : !!stored[c]?.text_only);
-  const submit = () => {
-    const next: Record<string, { text_only: boolean }> = {};
-    for (const c of names) if (c in stored || c in draft) next[c] = { text_only: on(c) };
-    return save("policy", { channels: next });
-  };
-  return (
-    <Card title={t.channels} hint={t.textOnlyHint} onSave={submit}>
-      {names.map((c) => (
-        <label key={c}>
-          <input type="checkbox" checked={on(c)} onChange={(e) => setDraft({ ...draft, [c]: e.target.checked })} /> {t.textOnly(c)}
-        </label>
-      ))}
     </Card>
   );
 }

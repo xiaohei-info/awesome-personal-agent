@@ -13,6 +13,8 @@ import { BacklogFlow, IgnoreAll, inProgress, SourceBacklog, type Models } from "
 import { OutboundEditor } from "./Outbound";
 import { Ingests, Registration, Rejects, RestorePanel, WebhookKey } from "./Advanced";
 import { DefaultProject, Digest } from "./Digest";
+import { TrustedSenders } from "./TrustedSenders";
+import { useSearchParams } from "react-router-dom";
 
 // 消息来源页（设计 §5.13）：来源列表 → 外发范围 → 积压四步；排障与一次性操作在「高级」里。
 // 授权（自定义命令只 Web）、命令校验、转建议的规则都在服务端；本页只调用并如实展示服务端的回答。
@@ -89,7 +91,7 @@ function Rename({ s, onSaved }: { s: Source; onSaved: () => void }) {
   );
 }
 
-function Detail({ source, rejudgeDays, onChooseOutbound, onSaved }: { source: Source; rejudgeDays?: number; onChooseOutbound: () => void; onSaved: () => void }) {
+function Detail({ source, rejudgeDays, add, onChooseOutbound, onSaved }: { source: Source; rejudgeDays?: number; add?: string; onChooseOutbound: () => void; onSaved: () => void }) {
   const t = useT(strings);
   const raw = useRaw();
   const st = source.stats;
@@ -98,6 +100,7 @@ function Detail({ source, rejudgeDays, onChooseOutbound, onSaved }: { source: So
       <h3>{source.name}{raw && <code className="raw-id">{source.id}</code>}</h3>
       {source.type === "webhook" && <WebhookKey source={source} />}
       <DefaultProject source={source} onSaved={onSaved} />
+      <TrustedSenders source={source} add={add} />
       <SourceBacklog source={source.id} rejudgeDays={rejudgeDays} onChooseOutbound={onChooseOutbound} />
       <Digest source={source.id} />
       <details>
@@ -123,7 +126,8 @@ export function SourcesPage() {
   const { api } = useSession();
   const [sources, setSources] = useState<Source[] | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [params] = useSearchParams(); // 挂靠消息的「加入可读名单」带 ?open=<来源>&add=<发件人>
+  const [selected, setSelected] = useState<string | null>(params.get("open"));
   const [editing, setEditing] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [rev, setRev] = useState(0); // 积压变化后让打开的详情重读
@@ -242,7 +246,7 @@ export function SourcesPage() {
         )}
       </section>
       {(total > 0 || inProgress()) && models && <BacklogFlow total={total} models={models} onChanged={changed} ignoreAll={ignoreAll} />}
-      {current && <Detail key={`${current.id}:${rev}`} source={current} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={() => setEditing(current.id)} onSaved={() => void load()} />}
+      {current && <Detail key={`${current.id}:${rev}`} source={current} add={current.id === params.get("open") ? params.get("add") ?? undefined : undefined} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={() => setEditing(current.id)} onSaved={() => void load()} />}
       <details ref={advanced}>
         <summary>{t.advanced}</summary>
         <RestorePanel sources={sources ?? []} onRestored={changed} />

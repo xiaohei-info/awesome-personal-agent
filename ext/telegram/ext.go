@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -244,7 +245,37 @@ func (e *Ext) onButton(ctx context.Context, q *models.CallbackQuery) {
 	}
 }
 
+// identifyCode 是"识别我的 ID"的口令（内核发给本人，形如 apa-7K3Q）；可以带 /start 前缀，深链接也是这个形式。
+var identifyCode = regexp.MustCompile(`(?i)^(?:/start(?:@\w+)?\s+)?(apa-[0-9a-z]{4})$`)
+
+// onIdentify 在与 Bot 的私聊里认出口令，把发送者的数字 ID 报给内核；不在私聊、不是口令返回 false。
+// 口令由内核判定；无效时不回话，免得陌生人借 Bot 试探。
+func (e *Ext) onIdentify(ctx context.Context, m *models.Message) bool {
+	if m.Chat.Type != models.ChatTypePrivate || m.From == nil {
+		return false
+	}
+	g := identifyCode.FindStringSubmatch(strings.TrimSpace(m.Text))
+	if g == nil {
+		return false
+	}
+	display := strings.TrimSpace(m.From.FirstName + " " + m.From.LastName)
+	if m.From.Username != "" {
+		display = "@" + m.From.Username
+	}
+	if err := e.apa.identify(ctx, g[1], sender(*m.From), display); err != nil {
+		e.log.Printf("identify: %v", err)
+		return true
+	}
+	if _, err := e.bot.SendMessage(ctx, &bot.SendMessageParams{ChatID: m.Chat.ID, Text: "已收到，回网页确认。"}); err != nil {
+		e.log.Printf("sendMessage: %v", err)
+	}
+	return true
+}
+
 func (e *Ext) onReply(ctx context.Context, m *models.Message) {
+	if e.onIdentify(ctx, m) {
+		return
+	}
 	if m.Chat.ID != e.cfg.Chat || m.From == nil || m.Text == "" {
 		return
 	}

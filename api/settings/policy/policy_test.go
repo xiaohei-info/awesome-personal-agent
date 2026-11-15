@@ -35,7 +35,7 @@ type env struct {
 }
 
 // setup 装配真实账本与 HTTP 服务，并以本人口令登录一个 Web 会话。
-func setup(t *testing.T) *env {
+func setup(t *testing.T, extra ...core.RouteGroup) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, kpolicy.Module, command.Module, core.Module} {
@@ -52,7 +52,7 @@ func setup(t *testing.T) *env {
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(st), ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}})}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: append([]core.RouteGroup{Routes(st), ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}})}, extra...)})
 	if err != nil {
 		t.Fatal(err)
 	}

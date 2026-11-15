@@ -125,6 +125,12 @@ func (a *apa) answer(ctx context.Context, id, ref, sender, choice, text string) 
 	return err
 }
 
+// identify 上报谁发来了识别口令（POST /channels/identify）；名单由本人在 Web 确认后才写。
+func (a *apa) identify(ctx context.Context, code, sender, display string) error {
+	_, _, err := a.do(ctx, http.MethodPost, "/channels/identify", map[string]any{"code": code, "sender": sender, "display": display})
+	return err
+}
+
 func asAPIError(err error) *APIError {
 	var e *APIError
 	if errors.As(err, &e) {

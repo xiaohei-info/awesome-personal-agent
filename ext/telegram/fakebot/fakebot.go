@@ -82,6 +82,11 @@ func (b *Bot) Reply(chat int64, to int, from models.User, text string) {
 		ReplyToMessage: &models.Message{ID: to, Chat: models.Chat{ID: chat}}}})
 }
 
+// Private 模拟 from 在与 Bot 的私聊里发一条消息（私聊的 chat id 就是用户 id）。
+func (b *Bot) Private(from models.User, text string) {
+	b.push(models.Update{Message: &models.Message{ID: b.id(), Chat: models.Chat{ID: from.ID, Type: models.ChatTypePrivate}, From: &from, Text: text}})
+}
+
 func (b *Bot) id() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
