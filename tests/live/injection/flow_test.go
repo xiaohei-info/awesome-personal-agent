@@ -47,7 +47,7 @@ func TestFlowDataNotInstructions(t *testing.T) {
 		}
 
 		// 判断型：来源事件的 detail 写诱导语（GitHub issue webhook，经 inbound-triage 的 github-issue 规则）→ MODEL_STUB。
-		f.apa(f.DEL, 0, "source", "add", "--id", "src_accinj", "--type", "webhook", "--source-type", "github",
+		f.apa(f.DEL, 0, "source", "add", "--id", "src_accinj", "--name", "src_accinj", "--type", "webhook", "--source-type", "github",
 			"--config", `{"scheme":"hmac-sha256-header","mappings":["inj-issues"]}`, "--evidence", "验收来源")
 		var key struct {
 			Secret string `json:"secret"`

@@ -81,7 +81,7 @@ func (s *feedServer) start() {
 func (f *fx) addPull(id, program, sourceType string, config any) {
 	f.t.Helper()
 	cfg, _ := json.Marshal(config)
-	f.apa(f.DEL, 0, "source", "add", "--id", id, "--type", "pull", "--command", program,
+	f.apa(f.DEL, 0, "source", "add", "--id", id, "--name", id, "--type", "pull", "--command", program,
 		"--schedule", "1s", "--timeout", "20", "--source-type", sourceType, "--config", string(cfg), "--evidence", "登记附带的拉取程序")
 }
 

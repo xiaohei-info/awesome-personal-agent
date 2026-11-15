@@ -62,7 +62,7 @@ func (k *kit) registerTierSource() {
 	k.must(os.MkdirAll(q, 0o755))
 	script := filepath.Join(q, "tier-src.sh")
 	k.must(os.WriteFile(script, []byte(tierScript), 0o755))
-	k.webOK("POST", "/sources", `{"id":"src_tier","type":"script","source_type":"acc-tier","command":"`+script+` `+q+`","schedule":"1s","timeout":30}`, 201)
+	k.webOK("POST", "/sources", `{"id":"src_tier","name":"src_tier","type":"script","source_type":"acc-tier","command":"`+script+` `+q+`","schedule":"1s","timeout":30}`, 201)
 }
 
 // TestFlowRunTiers 走完 flow-run-tiers：只有内核的第一档自成可用产品——不配模型端点、不接宿主时工作台、提醒和积压照常。

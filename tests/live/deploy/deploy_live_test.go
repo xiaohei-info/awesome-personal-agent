@@ -385,7 +385,7 @@ func TestFlowDeployExposure(t *testing.T) {
 	})
 
 	step("ACT-DPL-02 只暴露 /ingest/ 也能工作", func(t *testing.T) {
-		f.apa(f.DEL, 0, "source", "add", "--id", "src_dpl_hook", "--type", "webhook", "--source-type", "acc-hook",
+		f.apa(f.DEL, 0, "source", "add", "--id", "src_dpl_hook", "--name", "src_dpl_hook", "--type", "webhook", "--source-type", "acc-hook",
 			"--config", `{"scheme":"acc-token","mappings":["acc-generic"]}`, "--evidence", "owner asked")
 		var k struct {
 			Secret, URL string
@@ -683,7 +683,7 @@ printf '%s\n' '{"id":"t1","type":"acc.event","subject":"tool event","occurred_at
 	if err := os.Chmod(script, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	reg, _ := json.Marshal(map[string]any{"id": "src_dpl_tool", "type": "script", "source_type": "acc",
+	reg, _ := json.Marshal(map[string]any{"id": "src_dpl_tool", "name": "src_dpl_tool", "type": "script", "source_type": "acc",
 		"command": "/bin/sh " + script + " " + toolDir, "schedule": "1s", "timeout": 30})
 	f.webOK("POST", "/sources", string(reg), 201)
 

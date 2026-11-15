@@ -350,7 +350,7 @@ func TestFlowAgentsMD(t *testing.T) {
 		if err := os.MkdirAll(cred, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		f.apa(f.DEL, 0, "source", "add", "--id", "src_gh", "--type", "pull", "--command", "github-source", "--schedule", "5s", "--timeout", "60",
+		f.apa(f.DEL, 0, "source", "add", "--id", "src_gh", "--name", "src_gh", "--type", "pull", "--command", "github-source", "--schedule", "5s", "--timeout", "60",
 			"--source-type", "github", "--credentials-path", cred, "--dedupe-domain", "github", "--config", string(cfg), "--evidence", "登记代码托管来源")
 		defer func() {
 			if f.t.Failed() {

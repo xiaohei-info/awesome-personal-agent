@@ -108,7 +108,7 @@ func (f *fx) apa(token string, want int, args ...string) baseline.Result {
 
 func (f *fx) addSource(id, sourceType, config, dedupe string) {
 	f.t.Helper()
-	args := []string{"source", "add", "--id", id, "--type", "webhook", "--source-type", sourceType, "--config", config, "--evidence", "owner asked"}
+	args := []string{"source", "add", "--id", id, "--name", id, "--type", "webhook", "--source-type", sourceType, "--config", config, "--evidence", "owner asked"}
 	if dedupe != "" {
 		args = append(args, "--dedupe-domain", dedupe)
 	}
@@ -809,7 +809,7 @@ func TestFlowWebhook(t *testing.T) {
 		if err := os.WriteFile(script, []byte(src), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		reg, _ := json.Marshal(map[string]any{"id": pull, "type": "script", "source_type": "acc-hook", "command": script, "schedule": "1s", "timeout": 10, "dedupe_domain": domainName})
+		reg, _ := json.Marshal(map[string]any{"id": pull, "name": pull, "type": "script", "source_type": "acc-hook", "command": script, "schedule": "1s", "timeout": 10, "dedupe_domain": domainName})
 		if r := f.Web("POST", "/v1/sources", string(reg)); r.Code != 201 {
 			t.Fatalf("Web 登记拉取脚本来源: %d %s", r.Code, r.Body)
 		}

@@ -741,7 +741,7 @@ func TestFlowExportExtMapping(t *testing.T) {
 		}
 		f.StopKernel() // 新能力包在内核启动时装载
 		f.StartKernelAgain()
-		src, _ := json.Marshal(map[string]any{"id": "src_acc", "type": "script", "source_type": "acc", "command": script + " " + queue, "schedule": "1s", "timeout": 30})
+		src, _ := json.Marshal(map[string]any{"id": "src_acc", "name": "src_acc", "type": "script", "source_type": "acc", "command": script + " " + queue, "schedule": "1s", "timeout": 30})
 		f.webOK("POST", "/sources", string(src), 201)
 		const pr = "https://example.invalid/acc/test-repo/pull/18"
 		parent := f.task("exp-18 父事项")

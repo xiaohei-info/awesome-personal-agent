@@ -212,7 +212,7 @@ func (f *fx) registerText() {
 	if err := os.WriteFile(script, []byte(accScript), 0o755); err != nil {
 		f.t.Fatal(err)
 	}
-	f.webOK("POST", "/sources", mustJSON(map[string]any{"id": f.src, "type": "script", "source_type": "acc",
+	f.webOK("POST", "/sources", mustJSON(map[string]any{"id": f.src, "name": f.src, "type": "script", "source_type": "acc",
 		"command": "/bin/sh " + script + " " + f.events, "schedule": "1s", "timeout": 10}), 201)
 	f.webOK("PUT", "/settings/sources/"+f.src+"/outbound", `{"local":"full"}`, 200)
 }

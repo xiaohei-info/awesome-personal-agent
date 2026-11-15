@@ -74,7 +74,7 @@ func setup(t *testing.T, cfg config.Config) *env {
 		t.Fatal(err)
 	}
 	for _, err := range []error{projects.Register(e.x), items.Register(e.x, items.NewKinds()),
-		registry.Register(e.x, registry.Options{Layout: lay})} {
+		registry.Register(e.x, registry.Options{Layout: lay, Declared: func(s domain.Source) string { return s.ID }})} {
 		if err != nil {
 			t.Fatal(err)
 		}

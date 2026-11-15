@@ -40,7 +40,7 @@ func TestFlowSourceMail(t *testing.T) {
 	k.step("ACT-MAIL-01 登记邮件适配器（录制样本）", func(t *testing.T) {
 		k.SetToolCase("mail-1.1.0")
 		// lookback_days 放大：样本邮件固定在 2026-11-06，默认只回看 7 天，真实日期一过就读不到。
-		k.webSource(map[string]any{"id": src, "type": "script", "command": filepath.Join(progDir, "mail-himalaya"), "schedule": "1s", "timeout": 20,
+		k.webSource(map[string]any{"id": src, "name": src, "type": "script", "command": filepath.Join(progDir, "mail-himalaya"), "schedule": "1s", "timeout": 20,
 			"source_type": "mail", "dedupe_domain": "acc-mail", "default_project": home,
 			"config": map[string]any{"account": "acc@example.com", "lookback_days": 36500}})
 		k.clearToolLog()
@@ -338,7 +338,7 @@ echo '{"cursor":"'"$cursor"'"}'
 		k.patchSource(src, map[string]any{"enabled": false})
 		k.clearToolLog()
 		const pim = "src_pimmail"
-		k.webSource(map[string]any{"id": pim, "type": "script", "command": filepath.Join(progDir, "apple-pim-source"), "schedule": "1s", "timeout": 20,
+		k.webSource(map[string]any{"id": pim, "name": pim, "type": "script", "command": filepath.Join(progDir, "apple-pim-source"), "schedule": "1s", "timeout": 20,
 			"source_type": "mail", "dedupe_domain": "acc-pim-mail", "default_project": home,
 			"config": map[string]any{"kind": "mail", "account": "acc", "bin_dir": k.ToolBin, "lookback_days": 36500}})
 		k.clsYes("报价", 0.9)

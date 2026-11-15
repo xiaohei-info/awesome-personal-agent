@@ -115,7 +115,7 @@ func TestBackupRestore(t *testing.T) {
 		}
 		b.apa(e.WRK, 0, "material", "commit", "--from", note, "--reason", "备份演练", "--kind", "minutes", "--title", "备份演练纪要", "--project", open)
 		// 一个 webhook 来源（有接收密钥文件）与一个自定义脚本来源（凭据目录非空）。
-		b.apa(e.DEL, 0, "source", "add", "--id", hookSource, "--type", "webhook", "--source-type", "github",
+		b.apa(e.DEL, 0, "source", "add", "--id", hookSource, "--name", hookSource, "--type", "webhook", "--source-type", "github",
 			"--config", `{"scheme":"hmac-sha256-header","mappings":["github-issues"]}`, "--evidence", "备份演练登记 webhook 来源")
 		k := decode[struct{ Secret string }](t, b.apa(e.DEL, 0, "source", "webhook", "create", hookSource, "--evidence", "备份演练签发接收密钥").Stdout)
 		if k.Secret == "" {
@@ -130,7 +130,7 @@ func TestBackupRestore(t *testing.T) {
 			t.Fatal(err)
 		}
 		// 自定义脚本来源与一份宿主声明由本人写在主机配置文件里（sources.json、declarations/），重启内核后生效。
-		reg, _ := json.Marshal(map[string]any{"sources": []map[string]any{{"id": scriptSource, "type": "script", "command": e.Bin["tool-stub"],
+		reg, _ := json.Marshal(map[string]any{"sources": []map[string]any{{"id": scriptSource, "name": scriptSource, "type": "script", "command": e.Bin["tool-stub"],
 			"credentials_path": cred, "schedule": "24h", "timeout": 60, "enabled": false}}})
 		if err := os.WriteFile(filepath.Join(e.Home, "sources.json"), reg, 0o600); err != nil {
 			t.Fatal(err)

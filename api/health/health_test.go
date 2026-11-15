@@ -67,7 +67,7 @@ func setup(t *testing.T, ph khealth.PackHealth) *env {
 	}
 	t.Cleanup(func() { st.Close() })
 	x := command.New(st, time.Now)
-	if err := registry.Register(x, registry.Options{Bundled: []string{"pull-feed"}}); err != nil {
+	if err := registry.Register(x, registry.Options{Bundled: []string{"pull-feed"}, Declared: func(s domain.Source) string { return s.ID }}); err != nil {
 		t.Fatal(err)
 	}
 	a := auth.New(nil)

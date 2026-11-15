@@ -85,15 +85,15 @@ type Options struct {
 	Bundled []string
 	// Layout 非零时，credentials_path 必须落在该来源自己的目录里（§9.1）。
 	Layout config.Layout
-	// KindNames 是 source_type → 兜底显示名（如 mail → 邮件）。具体产品的名字不进内核，由装配方给出；
-	// 没登记的 source_type 按来源类型（pull、script、webhook）起名。
-	KindNames map[string]string
+	// Declared 返回来源程序（接入层）为这条登记声明的显示名，没有声明时返回空串（§9.1）。
+	// 具体程序与产品的名字不进内核，由装配方给出；为 nil 等于没有任何声明。
+	Declared func(domain.Source) string
 }
 
 // MaxName 是显示名的上限（字符数）。
 const MaxName = 40
 
-// typeNames 是没有 source_type 显示名时按来源类型起的兜底名。
+// typeNames 是升级补名时既没有接入层声明、也没有 source_type 显示名时按来源类型起的兜底名。
 var typeNames = map[domain.SourceType]string{domain.SourcePull: "定时拉取", domain.SourceScript: "自定义脚本", domain.SourceWebhook: "外部推送"}
 
 const (
@@ -172,11 +172,6 @@ func strict(in json.RawMessage, v any) error {
 // Register 把本模块的命令登记到 x。
 func Register(x *command.Executor, o Options) error {
 	m := &mod{o: o, bundled: map[string]bool{}}
-	for k, v := range o.KindNames {
-		if _, err := cleanName(v); err != nil || v == "" {
-			return fmt.Errorf("registry: invalid name %q for source_type %q", v, k)
-		}
-	}
 	for _, b := range o.Bundled {
 		if !progRe.MatchString(b) {
 			return fmt.Errorf("registry: invalid bundled program name %q", b)
@@ -339,12 +334,13 @@ func (m *mod) plan(tx *store.Tx, o op, exec bool, in json.RawMessage) (domain.So
 	}
 	if o == opRegister {
 		if s.Name == "" {
-			n, err := m.fallbackName(tx, s)
+			n, err := m.declaredName(s)
 			if err != nil {
 				return s, "", err
 			}
 			s.Name = n
-		} else if err := nameFree(tx, s.Name, s.ID); err != nil {
+		}
+		if err := nameFree(tx, s.Name, s.ID); err != nil {
 			return s, "", err
 		}
 	}
@@ -460,18 +456,36 @@ func takenNames(tx *store.Tx, except string) (map[string]bool, error) {
 	return out, r.Err()
 }
 
-// fallbackName 是没给名字时内核起的名字：source_type 的显示名（没有则按来源类型），
-// 已被占用时依次加序号「邮件 2」「邮件 3」……；同类按登记顺序得到递增的序号。
-func (m *mod) fallbackName(tx *store.Tx, s domain.Source) (string, error) {
-	return fallbackName(tx, m.o.KindNames, s)
+// declaredName 是登记没给名字时接入层声明的名字；没有声明时拒绝登记（§9.1：每个来源接入都必须有名字）。
+func (m *mod) declaredName(s domain.Source) (string, error) {
+	var n string
+	if m.o.Declared != nil {
+		n = m.o.Declared(s)
+	}
+	n, err := cleanName(n)
+	if err != nil {
+		return "", err
+	}
+	if n == "" {
+		return "", invalid("source "+s.ID+" has no display name and its source program declares none",
+			"give a name (Web name field, apa source add --name, the name field in sources.json), or declare one in the program's source.yaml")
+	}
+	return n, nil
 }
 
+// fallbackName 只用于升级补名：没有接入层声明的旧来源按 source_type 的显示名（没有则按来源类型）起名，
+// 已被占用时依次加序号「邮件 2」「邮件 3」……
 func fallbackName(tx *store.Tx, kindNames map[string]string, s domain.Source) (string, error) {
 	base := kindNames[s.SourceKind]
 	if base == "" {
 		base = typeNames[s.Type]
 	}
-	taken, err := takenNames(tx, s.ID)
+	return numbered(tx, base, s.ID)
+}
+
+// numbered 返回 base，被 except 以外的来源占用时依次加序号。
+func numbered(tx *store.Tx, base, except string) (string, error) {
+	taken, err := takenNames(tx, except)
 	if err != nil {
 		return "", err
 	}
@@ -482,7 +496,7 @@ func fallbackName(tx *store.Tx, kindNames map[string]string, s domain.Source) (s
 	return name, nil
 }
 
-// planRename 解出改名输入并校验；空名表示改回内核生成的名字。返回改名后的登记与原名。
+// planRename 解出改名输入并校验；空名表示改回接入层声明的名字（没有声明时拒绝）。返回改名后的登记与原名。
 func (m *mod) planRename(tx *store.Tx, in json.RawMessage) (domain.Source, string, error) {
 	var ri renameInput
 	if err := strict(in, &ri); err != nil {
@@ -498,10 +512,11 @@ func (m *mod) planRename(tx *store.Tx, in json.RawMessage) (domain.Source, strin
 		return s, prev, err
 	}
 	if name == "" {
-		if name, err = m.fallbackName(tx, s); err != nil {
+		if name, err = m.declaredName(s); err != nil {
 			return s, prev, err
 		}
-	} else if err := nameFree(tx, name, s.ID); err != nil {
+	}
+	if err := nameFree(tx, name, s.ID); err != nil {
 		return s, prev, err
 	}
 	s.Name = name
@@ -529,9 +544,14 @@ func (m *mod) applyRename(c *command.Ctx) (any, error) {
 // namer 是启动补名的行为者：系统按规则补上，不是本人改名。
 var namer = domain.Actor{Type: domain.ActorSystem, Principal: "kernel:sources", Via: domain.ViaClock}
 
-// Backfill 给还没有显示名的来源（升级前登记的）按兜底规则起名并存下，每个记一条 source.renamed（行为者 kernel:sources）。
-// 只写名字列，不碰游标、统计、外发范围，也不经命令管线、不进入判断或投递。apa serve 启动时调用；kindNames 同 Options.KindNames。
-func Backfill(ctx context.Context, st *store.Store, kindNames map[string]string, at time.Time) (int, error) {
+// NamesObject 是升级补名留下的健康说明的对象：有来源只能按类型兜底起名时记一条，建议本人起名。
+const NamesObject = "sources:names"
+
+// Backfill 给还没有显示名的来源（升级前登记的）起名并存下，每个记一条 source.renamed（行为者 kernel:sources）：
+// 先用接入层声明的名字（declared 同 Options.Declared），取不到的为了兼容按 kindNames（source_type → 名字，装配方给出）
+// 或来源类型兜底，名字被占用时加序号；有兜底的另记一条健康说明（对象 NamesObject），建议本人起名。这是唯一保留兜底的地方。
+// 只写名字列，不碰游标、统计、外发范围，也不经命令管线、不进入判断或投递。apa serve 启动时调用。
+func Backfill(ctx context.Context, st *store.Store, declared func(domain.Source) string, kindNames map[string]string, at time.Time) (int, error) {
 	n := 0
 	err := st.Update(ctx, func(tx *store.Tx) error {
 		n = 0
@@ -539,11 +559,21 @@ func Backfill(ctx context.Context, st *store.Store, kindNames map[string]string,
 		if err != nil {
 			return err
 		}
-		for _, s := range srcs { // 按 id 顺序：同类的序号在补名时按 id 排
+		var guessed []string
+		for _, s := range srcs { // 按 id 顺序：同名的序号在补名时按 id 排
 			if s.Name != "" {
 				continue
 			}
-			name, err := fallbackName(tx, kindNames, s)
+			var name string
+			if declared != nil {
+				name, _ = cleanName(declared(s)) // 声明不合法时按没有声明处理，不挡启动
+			}
+			if name != "" {
+				name, err = numbered(tx, name, s.ID)
+			} else {
+				guessed = append(guessed, s.ID)
+				name, err = fallbackName(tx, kindNames, s)
+			}
 			if err != nil {
 				return err
 			}
@@ -557,7 +587,13 @@ func Backfill(ctx context.Context, st *store.Store, kindNames map[string]string,
 			}
 			n++
 		}
-		return nil
+		if len(guessed) == 0 {
+			return nil
+		}
+		p, _ := json.Marshal(map[string]any{"kind": "source_names", "sources": guessed})
+		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: NamesObject, Actor: namer, Payload: p, At: at,
+			Reason: fmt.Sprintf("upgrade: %d source(s) had no declared display name and were named by type (%s); give them a name on the sources page", len(guessed), strings.Join(guessed, ", "))})
+		return err
 	})
 	return n, err
 }

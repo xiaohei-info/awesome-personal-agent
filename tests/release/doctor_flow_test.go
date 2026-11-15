@@ -452,14 +452,14 @@ func TestFlowDoctor(t *testing.T) {
 
 	step("ACT-DOC-07 来源：命令缺失、工具版本不符、外发范围未选与外部全文外发都被指出", func(t *testing.T) {
 		f.SetToolCase("mail-version-0.1")
-		f.webOK("POST", "/v1/sources", `{"id":"src_doc_missing","type":"script","command":"/no/such/command","schedule":"1h","timeout":10}`, 201)
-		f.webOK("POST", "/v1/sources", mustJSON(map[string]any{"id": "src_doc_mail", "type": "script", "source_type": "mail", "command": f.adapterBin,
+		f.webOK("POST", "/v1/sources", `{"id":"src_doc_missing","name":"src_doc_missing","type":"script","command":"/no/such/command","schedule":"1h","timeout":10}`, 201)
+		f.webOK("POST", "/v1/sources", mustJSON(map[string]any{"id": "src_doc_mail", "name": "src_doc_mail", "type": "script", "source_type": "mail", "command": f.adapterBin,
 			"schedule": "1h", "timeout": 10, "config": map[string]any{"account": "doc"}}), 201)
 		noop := filepath.Join(f.dir, "noop.sh")
 		if err := os.WriteFile(noop, []byte("#!/bin/sh\necho '{\"cursor\":\"c1\"}'\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		f.webOK("POST", "/v1/sources", mustJSON(map[string]any{"id": "src_doc_unset", "type": "script", "command": noop, "schedule": "1h", "timeout": 10}), 201)
+		f.webOK("POST", "/v1/sources", mustJSON(map[string]any{"id": "src_doc_unset", "name": "src_doc_unset", "type": "script", "command": noop, "schedule": "1h", "timeout": 10}), 201)
 		gen := f.Web("GET", "/v1/settings/model-endpoints", "")
 		_ = gen
 		f.setOutbound("src_doc_missing", "meta")

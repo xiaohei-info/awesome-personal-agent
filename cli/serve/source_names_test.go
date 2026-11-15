@@ -12,16 +12,28 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 启动补名（§9.1、§16.5）：升级前登记、没有显示名的来源在 apa serve 启动时按兜底规则起名，每个记一条 source.renamed；
-// 不产生新的判断、投递或重判，也不碰来源消息、事项与运行。
+// 启动补名（§9.1、§16.5）：升级前登记、没有显示名的来源在 apa serve 启动时先按仓库自带来源程序的接入声明起名，
+// 同一程序的多个实例按 config 得到不同的名字；没有声明的才按类型兜底，并记一条健康说明。每个记一条 source.renamed；
+// 不产生新的判断、投递或重判，也不碰来源消息、事项与运行。形状与本人实例的 7 个来源相同，另加一个没有声明的自定义脚本。
 func TestServeNamesLegacySourcesWithoutTriggeringAnything(t *testing.T) {
 	home := initOnFreePort(t)
-	var srcs []any
-	for _, s := range [][2]string{{"src_cal_apple", "calendar"}, {"src_mail", "mail"}, {"src_mail_qq", "mail"}, {"src_custom", "inspect"}} {
-		srcs = append(srcs, map[string]any{"id": s[0], "type": "script", "source_type": s[1], "command": "/bin/sh", "schedule": "1h", "timeout": 10, "enabled": false})
+	type src = map[string]any
+	script := func(id, kind, cmd string, cfg src) src {
+		return src{"id": id, "type": "script", "source_type": kind, "command": cmd, "config": cfg, "schedule": "1h", "timeout": 10, "enabled": false}
 	}
-	src, _ := json.Marshal(map[string]any{"sources": srcs})
-	if err := os.WriteFile(filepath.Join(home, "sources.json"), src, 0o644); err != nil {
+	srcs := []any{
+		script("src_cal_apple", "calendar", "apple-pim-source", src{"kind": "calendar"}),
+		script("src_calendar", "calendar", "calendar", src{"account": "me@example.com"}),
+		src{"id": "src_github", "type": "pull", "source_type": "github", "command": "github-source", "config": src{"repos": []string{"example/app"}}, "schedule": "1h", "timeout": 10, "enabled": false},
+		script("src_mail", "mail", "mail-himalaya", src{"account": "gmail"}),
+		script("src_mail_icloud", "mail", "/usr/local/bin/apple-pim-source", src{"kind": "mail", "account": "iCloud"}),
+		script("src_mail_qq", "mail", "apple-pim-source", src{"kind": "mail", "account": "QQ"}),
+		script("src_reminders", "reminder", "apple-pim-source", src{"kind": "reminders"}),
+		script("src_custom", "inspect", "/bin/sh", src{}), // 第三方程序：没有声明，登记时必须给名字
+	}
+	srcs[len(srcs)-1].(src)["name"] = "巡检"
+	file, _ := json.Marshal(map[string]any{"sources": srcs})
+	if err := os.WriteFile(filepath.Join(home, "sources.json"), file, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, stop := start(t, home) // 对照：第一次启动登记来源（此时就起了名）
@@ -35,13 +47,19 @@ func TestServeNamesLegacySourcesWithoutTriggeringAnything(t *testing.T) {
 		}
 		return s
 	}
+	// 升级前的 sources.json 没有 name 字段（第一次登记时必须给，这里只为让登记成功）。
+	delete(srcs[len(srcs)-1].(src), "name")
+	file, _ = json.Marshal(map[string]any{"sources": srcs})
+	if err := os.WriteFile(filepath.Join(home, "sources.json"), file, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	s := open()
 	// 模拟升级前的来源：名字为空；再放一条等模型的来源消息，它是最可能被"顺手"重判的东西。
 	seedExec(t, s, `UPDATE sources_registry_source SET name = ''`)
 	seedExec(t, s, `INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
 		correlation_keys, sender, sender_verified, disposition, unjudged_reason) VALUES ('mail', 'e1', 'se1', 'src_mail', 'r', 'mail.received', 's', '', '', '', ?,
 		'[]', '', 0, 'unjudged', 'model_unavailable')`, time.Now().UnixNano()) // occurred_at 是纳秒
-	watched := []string{"outcall_judgment", "outcall_run", "delivery_delivery", "items", "sources_runner_event"}
+	watched := []string{"outcall_judgment", "outcall_run", "delivery_delivery WHERE class != 'health'", "items", "sources_runner_event"}
 	state := func(s *store.Store) string {
 		var b strings.Builder
 		for _, tb := range watched {
@@ -61,15 +79,23 @@ func TestServeNamesLegacySourcesWithoutTriggeringAnything(t *testing.T) {
 	s = open()
 	defer s.Close()
 	names := scalar(t, s, "SELECT group_concat(id || '=' || name, ',') FROM (SELECT id, name FROM sources_registry_source ORDER BY id)")
-	if names != "src_cal_apple=日历,src_custom=自定义脚本,src_mail=邮件,src_mail_qq=邮件 2" {
+	if names != "src_cal_apple=Apple 日历,src_calendar=Google 日历,src_custom=自定义脚本,src_github=GitHub,src_mail=gmail 邮件,"+
+		"src_mail_icloud=iCloud 邮件,src_mail_qq=QQ 邮件,src_reminders=提醒事项" {
 		t.Fatalf("names: %v", names)
 	}
 	if after := state(s); after != before {
 		t.Fatalf("backfill touched judgments, deliveries or rejudges:\nbefore %s\nafter  %s", before, after)
 	}
+	// 唯一的投递是那条健康说明按「系统健康」去向（缺省只进网页未读）出的一条，不经渠道推送。
+	if got := fmt.Sprint(scalar(t, s, "SELECT group_concat(class || ':' || route) FROM delivery_delivery")); got != "health:web" {
+		t.Fatalf("deliveries: %s", got)
+	}
 	types := fmt.Sprint(scalar(t, s, fmt.Sprintf("SELECT group_concat(type, ',') FROM eventlog_event WHERE seq > %v", seq)))
-	if n := strings.Count(types, "source.renamed"); n != 4 {
-		t.Fatalf("one source.renamed per legacy source, got %d: %s", n, types)
+	if n := strings.Count(types, "source.renamed"); n != 8 || strings.Count(types, "health.alert") != 1 {
+		t.Fatalf("one source.renamed per legacy source and one health note, got %s", types)
+	}
+	if note := fmt.Sprint(scalar(t, s, "SELECT object || ' ' || payload FROM eventlog_event WHERE type = 'health.alert'")); note != `sources:names {"kind":"source_names","sources":["src_custom"]}` {
+		t.Fatalf("the health note lists only the type-named source: %s", note)
 	}
 	for _, p := range []string{"inbound.", "decision.", "run.", "item.", "delivery", "followmsg."} {
 		if strings.Contains(types, p) {

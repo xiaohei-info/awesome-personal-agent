@@ -38,7 +38,7 @@ func (f *fx) script(name, body string) string {
 // addScriptSource 在 Web 登记周期脚本来源（脚本来源只能在 Web 登记）。
 func (f *fx) addScriptSource(id, command, schedule string) {
 	f.t.Helper()
-	body, _ := json.Marshal(map[string]any{"id": id, "type": "script", "source_type": "acc", "command": command, "schedule": schedule, "timeout": 30})
+	body, _ := json.Marshal(map[string]any{"id": id, "name": id, "type": "script", "source_type": "acc", "command": command, "schedule": schedule, "timeout": 30})
 	f.webOK("POST", "/sources", string(body), 201)
 }
 
@@ -302,7 +302,7 @@ func TestFlowOutcallShort(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg, _ := json.Marshal(map[string]any{"scheme": "hmac-sha256-header", "transform": map[string]any{"command": tr}})
-		body, _ := json.Marshal(map[string]any{"id": "src_hook", "type": "webhook", "source_type": "acc", "config": json.RawMessage(cfg)})
+		body, _ := json.Marshal(map[string]any{"id": "src_hook", "name": "src_hook", "type": "webhook", "source_type": "acc", "config": json.RawMessage(cfg)})
 		f.webOK("POST", "/sources", string(body), 201)
 		var key struct{ Secret string }
 		if err := json.Unmarshal([]byte(f.webOK("POST", "/sources/src_hook/webhook", "", 201)), &key); err != nil || key.Secret == "" {

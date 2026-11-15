@@ -1,0 +1,4 @@
+# 接入声明（主文档 §9.1）：拉取程序与同类型的 webhook 来源同名。
+program: github-source
+webhook_source_type: github
+default: {zh: GitHub, en: GitHub}

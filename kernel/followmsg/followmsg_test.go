@@ -109,7 +109,7 @@ func newEnv(t *testing.T) *env {
 	}
 	kinds := items.NewKinds()
 	for _, err := range []error{projects.Register(e.x), items.Register(e.x, kinds), rules.Register(e.x),
-		registry.Register(e.x, registry.Options{Layout: lay}), executors.Register(e.x, executors.Options{Owner: "owner"}),
+		registry.Register(e.x, registry.Options{Layout: lay, Declared: func(s domain.Source) string { return s.ID }}), executors.Register(e.x, executors.Options{Owner: "owner"}),
 		delegation.Register(e.x, delegation.Options{Owner: "owner", OnError: func(_ command.Commit, err error) { e.errs <- err }})} {
 		if err != nil {
 			t.Fatal(err)

@@ -58,7 +58,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 		k.SetToolCase("cal-base")
 		// 登记时 calendar-event 之外的事件（d1 已取消）走默认判断，给它一个明确的"不值得"。
 		k.clsYes("取消的聚餐", 0.05)
-		k.webSource(map[string]any{"id": src, "type": "script", "command": filepath.Join(progDir, "calendar"), "schedule": "1s", "timeout": 20,
+		k.webSource(map[string]any{"id": src, "name": src, "type": "script", "command": filepath.Join(progDir, "calendar"), "schedule": "1s", "timeout": 20,
 			"source_type": "calendar", "dedupe_domain": "acc-cal", "default_project": home, "credentials_path": cred,
 			"config": map[string]any{"account": "acc@example.com"}})
 		k.clearToolLog()
@@ -355,7 +355,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 	k.step("ACT-CAL-11 到期的提醒事项经内置规则成为建议", func(t *testing.T) {
 		k.patchSource(src, map[string]any{"enabled": false})
 		const rem = "src_pimrem"
-		k.webSource(map[string]any{"id": rem, "type": "script", "command": filepath.Join(progDir, "apple-pim-source"), "schedule": "1s", "timeout": 20,
+		k.webSource(map[string]any{"id": rem, "name": rem, "type": "script", "command": filepath.Join(progDir, "apple-pim-source"), "schedule": "1s", "timeout": 20,
 			"source_type": "reminder", "dedupe_domain": "acc-pim-rem", "default_project": home,
 			"config": map[string]any{"kind": "reminders", "bin_dir": k.ToolBin}})
 		lines := k.modelLines()

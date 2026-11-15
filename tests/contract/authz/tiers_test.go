@@ -1,6 +1,7 @@
 package authz_test
 
 import (
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"testing"
 
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
@@ -22,13 +23,13 @@ func TestRegisteredTiersMatchAppendixB1(t *testing.T) {
 		"decisions": decisions.Register(x),
 		"hosted":    hosted.Register(x),
 		"instances": instances.Register(x, nil),
-		"registry":  registry.Register(x, registry.Options{}),
+		"registry":  registry.Register(x, registry.Options{Declared: func(s domain.Source) string { return s.ID }}),
 	} {
 		if err != nil {
 			t.Fatalf("register %s: %v", name, err)
 		}
 	}
-	if _, err := apisources.Mount(e.st, x, auth.New(nil), nil, nil); err != nil {
+	if _, err := apisources.Mount(e.st, x, auth.New(nil), nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	const (

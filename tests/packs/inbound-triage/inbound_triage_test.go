@@ -83,7 +83,7 @@ func newEnv(t *testing.T, configured bool, override map[string]string) *env {
 	}
 	kinds := items.NewKinds()
 	for _, err := range []error{projects.Register(e.x), items.Register(e.x, kinds), rules.Register(e.x),
-		registry.Register(e.x, registry.Options{Layout: lay})} {
+		registry.Register(e.x, registry.Options{Layout: lay, Declared: func(s domain.Source) string { return s.ID }})} {
 		if err != nil {
 			t.Fatal(err)
 		}

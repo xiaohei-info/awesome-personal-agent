@@ -727,7 +727,7 @@ echo '{"cursor":"c1"}'
 	if err := os.WriteFile(script, []byte(emit), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	src, _ := json.Marshal(map[string]any{"sources": []any{map[string]any{"id": "src_host", "type": "script", "source_type": "note",
+	src, _ := json.Marshal(map[string]any{"sources": []any{map[string]any{"id": "src_host", "name": "笔记", "type": "script", "source_type": "note",
 		"command": script, "schedule": "1s", "timeout": 10, "dedupe_domain": "note"}}})
 	if err := os.WriteFile(filepath.Join(home, "sources.json"), src, 0o644); err != nil {
 		t.Fatal(err)

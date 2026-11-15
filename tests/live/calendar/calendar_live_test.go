@@ -364,7 +364,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 		if err := os.Symlink(keyringFile, credLink); err != nil {
 			t.Fatal(err)
 		}
-		body, _ := json.Marshal(map[string]any{"id": src, "type": "script", "source_type": "calendar", "command": "/bin/sh " + wrapper,
+		body, _ := json.Marshal(map[string]any{"id": src, "name": src, "type": "script", "source_type": "calendar", "command": "/bin/sh " + wrapper,
 			"schedule": "5s", "timeout": 100, "credentials_path": credLink, "dedupe_domain": "calendar",
 			"config": map[string]any{"account": account, "calendar_id": "primary", "horizon_days": horizon}})
 		if r := l.Web("POST", "/v1/sources", string(body)); r.Code != 201 {

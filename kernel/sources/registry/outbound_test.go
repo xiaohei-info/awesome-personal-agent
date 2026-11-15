@@ -117,7 +117,7 @@ func setupWithProjects(t *testing.T) *env {
 	}
 	t.Cleanup(func() { st.Close() })
 	e := &env{st: st, au: auth.New(nil), x: command.New(st, nil), dir: t.TempDir()}
-	if err := Register(e.x, Options{Bundled: []string{"pull-feed"}, Layout: config.LayoutOf(e.dir)}); err != nil {
+	if err := Register(e.x, Options{Bundled: []string{"pull-feed"}, Layout: config.LayoutOf(e.dir), Declared: declareByID}); err != nil {
 		t.Fatal(err)
 	}
 	return e

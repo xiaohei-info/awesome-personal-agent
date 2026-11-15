@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"errors"
+	srcdecl "github.com/xiaohei-info/awesome-personal-agent/sources"
 	"log/slog"
 	"net"
 	"os"
@@ -105,7 +106,29 @@ const (
 // 新增 sources/*/cmd/* 程序必须在这里登记，或在 serve_test.go:notBundled 里写明不登记的理由，否则测试失败。
 var bundledPull = []string{"http-json", "dir-watch", "github-source", "rss-source"}
 
-// sourceKindNames 是没给显示名的来源按 source_type 起的兜底名（§9.1）；产品名不进内核，在这里给出。
+// sourceDecls 是仓库自带来源程序的接入声明（sources/*/source.yaml，嵌入主程序，§9.1）；不合法是构建缺陷，由 sources 的测试守住。
+var sourceDecls = func() []srcdecl.Declaration {
+	ds, err := srcdecl.Load()
+	if err != nil {
+		panic(err)
+	}
+	return ds
+}()
+
+// declaredName 是接入层为登记 s 声明的名字（lang 为 zh 或 en）；没有声明返回空串。
+func declaredName(s domain.Source, lang string) string {
+	d, ok := srcdecl.Find(sourceDecls, string(s.Type), s.Command, s.SourceKind)
+	if !ok {
+		return ""
+	}
+	return d.NameFor(s.Config, lang)
+}
+
+// storedName 是登记没给名字时存下的声明名：账本里只存一种语言的名字（本人改名后也只有一种），
+// 取中文，与通知、简报、卡片的语言一致；Web 新登记表单按界面语言预填，提交的就是本人看到的那一个。
+func storedName(s domain.Source) string { return declaredName(s, "zh") }
+
+// sourceKindNames 只用于升级补名：没有接入层声明的旧来源按 source_type 起的兜底名（§16.5）；产品名不进内核，在这里给出。
 // 没列的 source_type 由内核按来源类型起名。
 var sourceKindNames = map[string]string{"mail": "邮件", "calendar": "日历", "reminder": "提醒事项", "github": "GitHub"}
 
@@ -329,7 +352,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		delegation.Register(x, delegation.Options{Owner: owner, OnError: func(c command.Commit, err error) {
 			slog.Error("delegation settle", "object", c.Object, "err", err)
 		}}),
-		sregistry.Register(x, sregistry.Options{Bundled: bundledPull, Layout: l, KindNames: sourceKindNames}),
+		sregistry.Register(x, sregistry.Options{Bundled: bundledPull, Layout: l, Declared: storedName}),
 		k.rn.Register(x),
 		k.in.Register(x),
 		spotcheck.Register(x),
@@ -370,7 +393,10 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
-	sources, err := apisources.Mount(st, x, a, k.wh, k.in)
+	sources, err := apisources.Mount(st, x, a, k.wh, k.in, func(s domain.Source) (string, string, bool) {
+		zh := declaredName(s, "zh")
+		return zh, declaredName(s, "en"), zh != ""
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +462,7 @@ func (k *kernel) start(ctx context.Context) error {
 	if err := k.loadHostFiles(ctx); err != nil {
 		return err
 	}
-	if n, err := sregistry.Backfill(ctx, k.st, sourceKindNames, clock.Now()); err != nil {
+	if n, err := sregistry.Backfill(ctx, k.st, storedName, sourceKindNames, clock.Now()); err != nil {
 		return err
 	} else if n > 0 {
 		slog.Info("named sources registered before display names existed", "count", n)

@@ -108,7 +108,7 @@ func (f *fx) register(id, sourceType, domain string) *source {
 	f.t.Helper()
 	script := filepath.Join(f.w, "irl-script.sh")
 	f.must(os.WriteFile(script, []byte(irlScript), 0o755))
-	body, _ := json.Marshal(map[string]any{"id": id, "type": "script", "source_type": sourceType, "dedupe_domain": domain,
+	body, _ := json.Marshal(map[string]any{"id": id, "name": id, "type": "script", "source_type": sourceType, "dedupe_domain": domain,
 		"command": "/bin/sh " + script + " " + f.w + " " + id, "schedule": "1s", "timeout": 30})
 	f.webOK("POST", "/sources", string(body), 201)
 	return &source{f: f, id: id, out: filepath.Join(f.w, "out-"+id+".jsonl")}

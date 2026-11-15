@@ -109,12 +109,12 @@ func TestFlowCommandRegistration(t *testing.T) {
 		evil := script(t, work, "evil.sh", marker)
 		r := k.Apa(k.DEL, "", "source", "add", "--id", "src_evil", "--command", evil, "--schedule", "1s", "--timeout", "10", "--evidence", "owner asked")
 		k.expect("CLI 登记自定义命令", r, exitWebOnly)
-		body := `{"id":"src_evil2","type":"script","command":"` + evil + `","schedule":"1s","timeout":10}`
+		body := `{"id":"src_evil2","name":"src_evil2","type":"script","command":"` + evil + `","schedule":"1s","timeout":10}`
 		if w := k.APIRaw("POST", "/v1/sources", body, k.DEL); w.Code != http.StatusForbidden {
 			t.Errorf("POST /v1/sources 带自定义命令: HTTP %d，期望 403 %s", w.Code, w.Body)
 		}
 		// 把自定义命令塞进"附带拉取程序"也不行：pull 只接受随发行附带的程序名。
-		if r := k.Apa(k.DEL, "", "source", "add", "--id", "src_evil3", "--type", "pull", "--command", evil, "--schedule", "1s", "--timeout", "10", "--evidence", "owner asked"); r.Code == 0 {
+		if r := k.Apa(k.DEL, "", "source", "add", "--id", "src_evil3", "--name", "src_evil3", "--type", "pull", "--command", evil, "--schedule", "1s", "--timeout", "10", "--evidence", "owner asked"); r.Code == 0 {
 			t.Error("pull 来源不应接受自定义命令")
 		}
 		// 登记要是生效，来源会在 1 秒节拍内被拉起；等 3 个节拍仍无标记文件才算没有执行。
@@ -184,13 +184,13 @@ func TestFlowCommandRegistration(t *testing.T) {
 		webMarker, hostMarker := filepath.Join(work, "web.ran"), filepath.Join(work, "host.ran")
 		webScript, hostScript := script(t, work, "web.sh", webMarker), script(t, work, "host.sh", hostMarker)
 		// Web：本人登记自定义脚本 Source 命令。
-		body := `{"id":"src_webscript","type":"script","command":"` + webScript + `","schedule":"1s","timeout":10}`
+		body := `{"id":"src_webscript","name":"src_webscript","type":"script","command":"` + webScript + `","schedule":"1s","timeout":10}`
 		k.webOK("POST", "/v1/sources", body, 201)
 		k.waitFor("Web 登记的命令被调度执行", 15*time.Second, func() bool { return exists(webMarker) })
 
 		// 主机配置文件：sources.json 与 declarations/*.json，重启服务后按本人身份登记。
 		writeFile(t, filepath.Join(k.Home, "sources.json"),
-			`{"sources":[{"id":"src_hostscript","type":"script","command":"`+hostScript+`","schedule":"1s","timeout":10}]}`)
+			`{"sources":[{"id":"src_hostscript","name":"src_hostscript","type":"script","command":"`+hostScript+`","schedule":"1s","timeout":10}]}`)
 		writeFile(t, filepath.Join(k.Home, "declarations", "acc-host.json"), declaration("acc-host", filepath.Join(work, "host-decl.ran")))
 		k.StopKernel()
 		k.StartKernelAgain()
@@ -214,7 +214,7 @@ func TestFlowCommandRegistration(t *testing.T) {
 	})
 
 	k.step("ACT-CMD-05 delegate 可以登记随发行附带的拉取程序", func(t *testing.T) {
-		r := k.Apa(k.DEL, "", "source", "add", "--id", "src_rss", "--type", "pull", "--command", "rss-source", "--schedule", "1h", "--timeout", "30", "--evidence", "owner asked")
+		r := k.Apa(k.DEL, "", "source", "add", "--id", "src_rss", "--name", "src_rss", "--type", "pull", "--command", "rss-source", "--schedule", "1h", "--timeout", "30", "--evidence", "owner asked")
 		k.expect("登记 RSS 拉取程序", r, 0)
 		if show := k.Apa(k.OBS, "", "source", "show", "src_rss"); show.Code != 0 || !contains(show.Stdout, `"rss-source"`, `"pull"`) {
 			t.Errorf("来源应已登记: %d %s", show.Code, show.Stdout)

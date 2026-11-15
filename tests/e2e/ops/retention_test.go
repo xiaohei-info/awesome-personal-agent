@@ -222,7 +222,7 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 
 func (f *fx) addWebhookSource(id string) {
 	f.t.Helper()
-	f.apa(f.DEL, 0, "source", "add", "--id", id, "--type", "webhook", "--source-type", "acc-ret", "--config", `{"scheme":"acc-token","mappings":["acc-generic"]}`, "--evidence", "验收登记")
+	f.apa(f.DEL, 0, "source", "add", "--id", id, "--name", id, "--type", "webhook", "--source-type", "acc-ret", "--config", `{"scheme":"acc-token","mappings":["acc-generic"]}`, "--evidence", "验收登记")
 }
 
 // TestFlowRetention 对应验收文档 flow-retention（ACT-RET-01、ACT-RET-02）。

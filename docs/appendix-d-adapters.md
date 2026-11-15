@@ -18,16 +18,35 @@
 
 RSS/Atom、通用 HTTP JSON 轮询、本地目录监视三个拉取程序不对应具体产品，不在本表。
 
-**来源的显示名**（主文档 §9.1）：登记任何来源（Web、`apa source add --name`、`sources.json` 的 `name`）都可以给一个本人认得的名字；不给时按下表的 `source_type` 起名并存下，同类已有时加序号。下表在 `cli/serve/assemble.go:sourceKindNames`，换掉或新增适配器时在这里补一行；表里没有的 `source_type` 按来源类型称"定时拉取""自定义脚本""外部推送"。名字只用于显示，不经 stdin 交给来源程序，适配器不需要处理它。
+**来源的接入声明与显示名**（主文档 §9.1）：每个来源接入都必须有名字。仓库自带的每个来源程序在自己的目录里带一份 `source.yaml`，写明它登记出的来源叫什么；登记（Web、`apa source add`、`sources.json`）不带名字时取声明的名字，带了以带的为准，都没有就拒绝登记。声明随 `apa` 主程序嵌入（`sources/declarations.go`），发布物不另带文件；名字只用于显示，不经 stdin 交给来源程序，适配器不需要处理它。
 
-| `source_type` | 兜底名 |
-|---|---|
-| `mail` | 邮件 |
-| `calendar` | 日历 |
-| `reminder` | 提醒事项 |
-| `github` | GitHub |
+| 来源程序 | 声明的名字（中文 / 英文） | 同一程序多个实例怎么区分 |
+|---|---|---|
+| `apple-pim-source` | 按 `config.kind`：`mail` 为"`{account}` 邮件 / `{account}` Mail"（如"iCloud 邮件""QQ 邮件"），`calendar` 为"Apple 日历 / Apple Calendar"，`reminders` 为"提醒事项 / Reminders"；邮件没有 `account` 时为"Apple 邮件" | 邮件按账户名；同类日历或提醒事项接多个时登记时起名 |
+| `mail-himalaya` | "`{account}` 邮件 / `{account}` Mail"（`account` 是邮件工具里的账户名，如 `gmail` 得到"gmail 邮件"）；没有 `account` 时为"邮件 / Mail" | 按账户名 |
+| `calendar` | "Google 日历 / Google Calendar" | 登记时起名 |
+| `github-source` | "GitHub"；`source_type` 为 `github` 的 webhook 来源同名 | 登记时起名 |
+| `rss-source` | "RSS 订阅 / RSS feed" | 登记时起名 |
+| `http-json` | "JSON 接口 / JSON endpoint" | 登记时起名 |
+| `dir-watch` | "文件夹 / Folder" | 登记时起名 |
 
-同一类接了多个账户时（如 Apple 日历与 Google 日历），登记时直接起名更清楚，`sources.json` 的写法：`{"sources": [{"id": "src_cal_apple", "name": "Apple 日历", "type": "script", "source_type": "calendar", "command": "apple-pim-source", "schedule": "15m", "timeout": 60, "config": {"kind": "calendar"}}]}`。
+"登记时起名"的程序再登记第二个实例而不带名字时，声明出的名字已被占用，返回 409，提示起名；不会自动加序号。`hosted-reader` 是托管文档读取器，不登记为来源，没有声明。
+
+**来源程序作者**：新增或换掉一个来源程序，在它的目录里写 `source.yaml`，声明显示名是接入的必填项。字段：`program`（`command` 第一个词的文件名部分）、`default`（中英各一份的名字，不含占位，必填）、`name`（可选的名字模板，`{字段}` 取 `config` 里同名的字符串值，取不到值时用 `default`）、`by` 与 `names`（可选：按 `config` 的 `by` 字段取值选模板，优先于 `name`）、`webhook_source_type`（可选：同一 `source_type` 的 webhook 来源也按本声明取名）。例：
+
+```yaml
+program: apple-pim-source
+by: kind
+names:
+  mail: {zh: "{account} 邮件", en: "{account} Mail"}
+  calendar: {zh: Apple 日历, en: Apple Calendar}
+  reminders: {zh: 提醒事项, en: Reminders}
+default: {zh: Apple 邮件, en: Apple Mail}
+```
+
+`sources/declarations_test.go` 要求 `sources/*/cmd/*` 下每个来源程序都有声明。仓库之外的来源程序没有声明位置，登记时必须带名字（`sources.json` 的 `name`、`apa source add --name` 或 Web 的名字一栏）。账本只存一种语言的名字，取中文；Web 新登记表单按界面语言预填，本人可改。
+
+**升级补名**：升级前登记的来源没有名字，`apa serve` 启动时先按上面的声明补；取不到声明的（自定义脚本等）为了兼容按 `source_type` 起名（`cli/serve/assemble.go:sourceKindNames`：`mail` 邮件、`calendar` 日历、`reminder` 提醒事项、`github` GitHub；表里没有的按来源类型称"定时拉取""自定义脚本""外部推送"），同名加序号，并在健康视图留一条"建议起名"的说明。
 
 ## D.2 邮件与日历的工具适配
 

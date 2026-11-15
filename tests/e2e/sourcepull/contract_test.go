@@ -73,7 +73,7 @@ func (f *fx) register(id, dir string, timeout int, dedupeDomain string) *accSour
 	}
 	a := &accSource{f: f, id: id, ctl: ctl}
 	a.out("", 0)
-	body := map[string]any{"id": id, "type": "script", "source_type": "acc",
+	body := map[string]any{"id": id, "name": id, "type": "script", "source_type": "acc",
 		"command": "/bin/sh " + f.script(dir) + " " + ctl, "schedule": "1s", "timeout": timeout}
 	if dedupeDomain != "" {
 		body["dedupe_domain"] = dedupeDomain

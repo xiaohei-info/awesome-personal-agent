@@ -36,7 +36,7 @@ func (k *kit) injSource() string {
 	if err := os.WriteFile(filepath.Join(q, "inj.sh"), []byte(injScript), 0o755); err != nil {
 		k.t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]any{"id": injSrc, "type": "script", "source_type": "acc",
+	body, _ := json.Marshal(map[string]any{"id": injSrc, "name": injSrc, "type": "script", "source_type": "acc",
 		"command": filepath.Join(q, "inj.sh") + " " + q, "schedule": "1s", "timeout": 30})
 	k.webOK("POST", "/v1/sources", string(body), 201)
 	return q

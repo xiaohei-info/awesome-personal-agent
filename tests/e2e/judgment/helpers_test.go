@@ -86,7 +86,7 @@ func (f *fx) registerSource() {
 		f.t.Fatal(err)
 	}
 	f.srcID = "src_jrc"
-	b, _ := json.Marshal(map[string]any{"id": f.srcID, "type": "script", "source_type": "acc-jrc", "command": script, "schedule": "1s", "timeout": 20})
+	b, _ := json.Marshal(map[string]any{"id": f.srcID, "name": f.srcID, "type": "script", "source_type": "acc-jrc", "command": script, "schedule": "1s", "timeout": 20})
 	f.webOK("POST", "/sources", string(b), 201)
 	f.webOK("PUT", "/settings/sources/"+f.srcID+"/outbound", `{"local":"full","external":"none"}`, 200)
 }

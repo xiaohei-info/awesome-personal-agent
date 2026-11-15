@@ -120,7 +120,7 @@ func (k *kit) registerSource(id, sourceType string) *queueSource {
 		k.must(os.MkdirAll(filepath.Join(dir, d), 0o755))
 	}
 	k.must(os.WriteFile(filepath.Join(dir, "run.sh"), []byte(queueScript), 0o755))
-	body, _ := json.Marshal(map[string]any{"id": id, "type": "script", "source_type": sourceType,
+	body, _ := json.Marshal(map[string]any{"id": id, "name": id, "type": "script", "source_type": sourceType,
 		"command": filepath.Join(dir, "run.sh") + " " + dir, "schedule": "1s", "timeout": 30})
 	k.webOK("POST", "/v1/sources", string(body), 201)
 	return &queueSource{k: k, id: id, dir: dir}

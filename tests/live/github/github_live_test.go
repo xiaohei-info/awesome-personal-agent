@@ -260,7 +260,7 @@ func TestFlowSourceGitHub(t *testing.T) {
 
 	step("ACT-GH-01 登记并认证 GitHub 来源", func(t *testing.T) {
 		cfg, _ := json.Marshal(map[string]any{"repos": []string{repo}})
-		r := l.Apa(l.DEL, "", "source", "add", "--id", src, "--type", "pull", "--command", "github-source", "--schedule", "5s",
+		r := l.Apa(l.DEL, "", "source", "add", "--id", src, "--name", src, "--type", "pull", "--command", "github-source", "--schedule", "5s",
 			"--timeout", "60", "--source-type", "github", "--credentials-path", l.cred, "--dedupe-domain", "github", "--config", string(cfg), "--evidence", "登记附带的 GitHub 拉取程序")
 		if r.Code != 0 {
 			t.Fatalf("source add: %d %s %s", r.Code, r.Stdout, r.Stderr)

@@ -93,7 +93,7 @@ func setup(t *testing.T) *env {
 	x := command.New(st, e.clock)
 	e.x = x
 	e.au = auth.New(e.clock)
-	if err := registry.Register(x, registry.Options{Bundled: []string{"fetch-feed"}}); err != nil {
+	if err := registry.Register(x, registry.Options{Bundled: []string{"fetch-feed"}, Declared: declared}); err != nil {
 		t.Fatal(err)
 	}
 	e.wh, err = webhook.New(webhook.Options{Store: st, Exec: x, Packs: fakePacks{}, Auth: e.au, Secrets: webhook.KeyFiles{Dir: e.keys, Auth: e.au}, Now: e.clock})
@@ -111,7 +111,13 @@ func setup(t *testing.T) *env {
 	if err := in.Register(x); err != nil {
 		t.Fatal(err)
 	}
-	grp, err := Mount(st, x, e.au, e.wh, in)
+	grp, err := Mount(st, x, e.au, e.wh, in, func(s domain.Source) (string, string, bool) {
+		// 只验路由把查询参数原样交给装配方并按形状返回；取名规则本身在 sources 包与 registry 的测试里。
+		if s.Command == "" && s.SourceKind == "" {
+			return "", "", false
+		}
+		return string(s.Type) + "|" + s.Command + "|" + s.SourceKind + "|" + string(s.Config), "en", true
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +295,7 @@ func TestSourceRegistrationContract(t *testing.T) {
 func TestCustomCommandsRejectedForTokensAcceptedInWeb(t *testing.T) {
 	e := setup(t)
 	dlg, wrk := e.token(auth.Delegate), e.token(auth.Worker)
-	script := `{"id":"src_mail","type":"script","command":"/opt/tool --json","schedule":"10m","timeout":30}`
+	script := `{"id":"src_mail","name":"邮件","type":"script","command":"/opt/tool --json","schedule":"10m","timeout":30}`
 
 	r := e.do(dlg, "POST", "/v1/sources", script)
 	if r.Code != 403 || r.code() != "web_only" {
@@ -1113,6 +1119,17 @@ func TestOutboundPreviewRoute(t *testing.T) {
 
 // 显示名（§9.1）：Web 与 CLI 的登记都经 POST /sources，三种情况：带名字、不带名字（内核起名并在响应里给出）、重名 409；
 // PATCH name 改名记 source.renamed，空名改回内核起的名字；delegate 改名同其他来源管理一样要本人原话。
+// declared 是测试装配的接入层声明（§9.1）：附带的 fetch-feed 与 webhook 来源按实例声明名字，其他程序（如自定义脚本）没有声明。
+func declared(s domain.Source) string {
+	switch {
+	case s.Command == "fetch-feed":
+		return "订阅 " + s.ID
+	case s.Type == domain.SourceWebhook:
+		return "推送 " + s.ID
+	}
+	return ""
+}
+
 func TestSourceDisplayNameThroughRoutes(t *testing.T) {
 	e := setup(t)
 	dlg := e.token(auth.Delegate)
@@ -1125,8 +1142,11 @@ func TestSourceDisplayNameThroughRoutes(t *testing.T) {
 		t.Fatalf("named: %q", s.Name)
 	}
 	r = e.do(dlg, "POST", "/v1/sources", `{"id":"src_b","type":"webhook","source_type":"forge","config":{"scheme":"shared"}}`)
-	if r.into(&s); r.Code != 201 || s.Name != "外部推送" {
-		t.Fatalf("fallback named by the kernel and returned: %d %s", r.Code, r.Body)
+	if r.into(&s); r.Code != 201 || s.Name != "推送 src_b" {
+		t.Fatalf("declared name stored and returned: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("POST", "/v1/sources", `{"id":"src_s","type":"script","command":"/opt/x.sh","schedule":"1h","timeout":60}`); r.Code != 400 || !strings.Contains(r.Body.String(), "--name") {
+		t.Fatalf("no name and no declaration: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(dlg, "POST", "/v1/sources", `{"id":"src_c","name":"工作邮箱","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`); r.Code != 409 {
 		t.Fatalf("duplicate name: %d %s", r.Code, r.Body)
@@ -1140,13 +1160,24 @@ func TestSourceDisplayNameThroughRoutes(t *testing.T) {
 	if r := e.do(dlg, "PATCH", "/v1/sources/src_b", `{"name":""}`, core.EvidenceHeader, ""); r.Code == 200 {
 		t.Fatalf("delegate rename without the owner's words: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_b", `{"name":""}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"name":"外部推送"`) {
-		t.Fatalf("reset to the kernel's name: %d %s", r.Code, r.Body)
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_b", `{"name":""}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"name":"推送 src_b"`) {
+		t.Fatalf("reset to the declared name: %d %s", r.Code, r.Body)
 	}
 	if n := e.events("source.renamed"); n != 2 {
 		t.Fatalf("source.renamed events: %d", n)
 	}
 	if r := e.web("GET", "/v1/sources/src_a", ""); !strings.Contains(r.Body.String(), `"name":"工作邮箱"`) {
 		t.Fatalf("read back: %s", r.Body)
+	}
+	// 新登记表单预填：接入层声明的名字（中英），没有声明时 name 为 null；config 不是 JSON 时 400。
+	r = e.do(dlg, "GET", "/v1/sources/declared-name?type=script&command=apple-pim-source&source_type=calendar&config=%7B%22kind%22%3A%22calendar%22%7D", "")
+	if r.Code != 200 || r.Body.String() != `{"name":{"en":"en","zh":"script|apple-pim-source|calendar|{\"kind\":\"calendar\"}"}}`+"\n" {
+		t.Fatalf("declared-name: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("GET", "/v1/sources/declared-name?type=script&command=", ""); r.Code != 200 || r.Body.String() != `{"name":null}`+"\n" {
+		t.Fatalf("no declaration: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("GET", "/v1/sources/declared-name?command=x&config=%7B", ""); r.Code != 400 {
+		t.Fatalf("bad config: %d %s", r.Code, r.Body)
 	}
 }

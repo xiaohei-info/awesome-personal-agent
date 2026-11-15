@@ -330,7 +330,7 @@ func (f *fx) attachMessages(item string) {
 	if err := os.WriteFile(script, []byte(accScript), 0o755); err != nil {
 		f.t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]any{"id": srcID, "type": "script", "source_type": "acc", "command": script + " " + q, "schedule": "1s", "timeout": 30})
+	body, _ := json.Marshal(map[string]any{"id": srcID, "name": srcID, "type": "script", "source_type": "acc", "command": script + " " + q, "schedule": "1s", "timeout": 30})
 	f.webOK("POST", "/sources", string(body), 201)
 	f.webOK("PUT", "/settings/allowlists", `{"forward_allowlist":{"`+srcID+`":["alice"]}}`, 200)
 
