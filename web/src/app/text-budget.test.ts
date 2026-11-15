@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 // - 主界面文案里出现机制词：只允许出现在键路径含 advanced、raw、diag 的文案里（高级、原始值、诊断区）。
 // 违规一律让测试失败：新文案要么写短，要么放进高级、原始值或诊断区。
 export const MAX = 40;
-export const BANNED = ["账本", "投影", "墓碑", "注入", "级联", "Event", "blob", "actor", "schema", "scope", "harness", "web_only"];
+export const BANNED = ["账本", "投影", "墓碑", "注入", "级联", "Event", "blob", "actor", "schema", "scope", "harness", "web_only", "宿主", "主会话", "主助手", "无头"];
+/** 「后台运行」在主界面上只作「Agent 后台运行」出现（设计 §6：APA 在本人不在时拉起 Agent）。 */
+const BARE_BACKGROUND_RUN = /(?<!Agent )后台运行/;
 /** 有意保留的长文字：键名（各页文案展开了共用文案，所以按键名，不按文件）→ 理由。 */
 const EXEMPT: Record<string, string> = {
   loginSub: "登录页的产品介绍，不是功能说明（设计 §5.1）",
@@ -42,6 +44,7 @@ export function violations(file: string, name: string, zh: unknown): Violation[]
     if (!ALLOWED_PATH.test(path)) {
       const hit = BANNED.find((w) => text.toLowerCase().includes(w.toLowerCase()));
       if (hit) out.push({ where, kind: "banned", text: `${hit}：${text}` });
+      else if (BARE_BACKGROUND_RUN.test(text)) out.push({ where, kind: "banned", text: `后台运行：${text}` });
     }
   }
   return out;
@@ -67,12 +70,17 @@ describe("文字预算", () => {
       ok: "保存",
       long: "这是一段很长的说明文字，用来解释某个设置在什么时候需要修改、修改以后会发生什么、默认值是多少。",
       word: "写进账本",
-      advanced: { note: "写进账本" },
+      host: "唤醒宿主",
+      bare: "后台运行能做多少",
+      named: "Agent 后台运行能做多少",
+      advanced: { note: "写进账本", run: "后台运行" },
       fn: (n: number) => `已推送 ${n} 条，超出的会留在未读里，第二天零点重新计数，健康类和需要亲自确认的决策不计入`,
     });
     expect(v.map((x) => `${x.kind} ${x.where}`)).toEqual([
       "long x/strings.ts:strings.long",
       "banned x/strings.ts:strings.word",
+      "banned x/strings.ts:strings.host",
+      "banned x/strings.ts:strings.bare",
       "long x/strings.ts:strings.fn()",
     ]);
   });

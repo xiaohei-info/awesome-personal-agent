@@ -12,7 +12,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const ORDER = ["source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable",
   "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag"];
 const TITLES = ["来源读取失败", "后台任务排队或超时", "提醒发不出去", "自动化连锁被叫停", "仓库规范和 APA 不一致", "能力包加载失败", "模型连不上",
-  "积压待处理", "自动规则被退回试运行", "agent 回报失败", "其他告警", "委派久无回音", "定时器迟到"];
+  "积压待处理", "自动规则被退回试运行", "回报失败", "其他告警", "委派久无回音", "定时器迟到"];
 
 // 形状与取值同 kernel/doctor（codes.go）：全部正常的一份与有问题的一份。
 const FINE = {
@@ -129,7 +129,7 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
     expect(within(b).getByRole("link", { name: "去放开" })).toHaveAttribute("href", "/sources");
     expect(b).toHaveTextContent("另有 3 条已过期");
     expect(within(main().getByRole("article", { name: "自动规则被退回试运行" })).getByRole("link", { name: "去看规则" })).toHaveAttribute("href", "/rules");
-    const rc = main().getByRole("article", { name: "agent 回报失败" });
+    const rc = main().getByRole("article", { name: "回报失败" });
     expect(within(rc).getByRole("link", { name: "去看操作记录" })).toHaveAttribute("href", "/audit");
     expect(within(rc).getByRole("link", { name: "去看 Agent 设置" })).toHaveAttribute("href", "/settings/agents");
     expect(within(main().getByRole("article", { name: "委派久无回音" })).getByRole("link", { name: "去看委派" })).toHaveAttribute("href", "/delegation");

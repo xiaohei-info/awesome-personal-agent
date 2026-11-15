@@ -45,17 +45,17 @@ describe("事项页挂靠消息（ACT-FWD-04）", () => {
 
     expect(within(rows[0]).getByLabelText("发送者")).toHaveTextContent("alice");
     expect(within(rows[0]).getByLabelText("核实状态")).toHaveTextContent("已核实");
-    expect(within(rows[0]).getByLabelText("后台 agent 能否读到")).toHaveTextContent("后台 agent 可读");
+    expect(within(rows[0]).getByLabelText("Agent 后台运行能否读到")).toHaveTextContent("Agent 后台运行能读");
     expect(within(rows[0]).queryByRole("link", { name: "加入可读名单" })).toBeNull();
 
     expect(within(rows[1]).getByLabelText("发送者")).toHaveTextContent("mallory");
     expect(within(rows[1]).getByLabelText("核实状态")).toHaveTextContent("未核实");
-    expect(within(rows[1]).getByLabelText("后台 agent 能否读到")).toHaveTextContent("后台 agent 看不到");
-    expect(within(rows[1]).getByLabelText("处理状态")).toHaveTextContent("待转给 agent");
+    expect(within(rows[1]).getByLabelText("Agent 后台运行能否读到")).toHaveTextContent("Agent 后台运行读不到");
+    expect(within(rows[1]).getByLabelText("处理状态")).toHaveTextContent("待转给 Agent");
     // T17：未核实的发件人加进名单也不生效，不给入口
     expect(within(rows[1]).queryByRole("link", { name: "加入可读名单" })).toBeNull();
     // 已核实但不在名单里：入口指向该来源的「信任的发件人」，带上要加的人
-    expect(within(rows[3]).getByLabelText("后台 agent 能否读到")).toHaveTextContent("后台 agent 看不到");
+    expect(within(rows[3]).getByLabelText("Agent 后台运行能否读到")).toHaveTextContent("Agent 后台运行读不到");
     expect(within(rows[3]).getByRole("link", { name: "加入可读名单" })).toHaveAttribute("href", "/sources?open=gh&add=bob#trusted-senders");
 
     // 发送者缺失：显示为未知且未核实，不伪造发送者

@@ -238,8 +238,8 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 		if h := rec.Declaration.Headless; h != nil && !kdoctor.CommandExists(h.Command[0]) {
 			d.Status = kdoctor.Error
 			problems = append(problems, kdoctor.CodeHostHeadlessMissing)
-			why = append(why, "the confirmed headless declaration is not executable: its command does not exist on this host")
-			next = append(next, "fix the headless command in the declaration and confirm it again in Web")
+			why = append(why, "the confirmed Agent background-run declaration is not executable: its command does not exist on this host")
+			next = append(next, "fix the start command in the Agent's declaration and confirm it again in Web")
 		}
 		if sc := rec.Declaration.Selfcheck; sc != nil {
 			out, err := runSelfcheck(ctx, sc.Command, env)
@@ -273,8 +273,8 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 				for _, o := range out.Overlaps {
 					overlaps.Add(kdoctor.Detail{Subject: rec.Harness + ":" + o.Kind + ":" + o.Name, Status: kdoctor.Warning, Code: kdoctor.CodeOverlap,
 						Data: map[string]any{"harness": rec.Harness, "kind": o.Kind, "name": o.Name},
-						Why:  fmt.Sprintf("the host side has a %s that overlaps with APA: %s %s", o.Kind, o.Name, o.Detail),
-						Next: "decide on the host side whether to keep it; APA does not change the host configuration"})
+						Why:  fmt.Sprintf("the Agent side has a %s that overlaps with APA: %s %s", o.Kind, o.Name, o.Detail),
+						Next: "decide on the Agent side whether to keep it; APA does not change the Agent's configuration"})
 				}
 			}
 		}
@@ -291,11 +291,11 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 	}
 	switch {
 	case len(f.Declarations) == 0:
-		host.Code, host.Why, host.Next = kdoctor.CodeHostNone, "no host harness has a confirmed declaration (tiers 1 and 2 do not need one)", "install the host plugin and confirm its declaration in Web to reach tier 3"
+		host.Code, host.Why, host.Next = kdoctor.CodeHostNone, "no Agent has a confirmed declaration (tiers 1 and 2 do not need one)", "install the Agent plugin and confirm its declaration in Web to reach tier 3"
 	case host.Status == kdoctor.OK:
 		host.Code, host.Why, host.Next = kdoctor.CodeHostOK, "the confirmed declarations are executable and plugins report their session type", "nothing to do"
 	default:
-		host.Code, host.Why, host.Next = kdoctor.CodeHostAttention, "a host plugin needs attention; see details", "fix what the details name"
+		host.Code, host.Why, host.Next = kdoctor.CodeHostAttention, "an Agent plugin needs attention; see details", "fix what the details name"
 	}
 	switch {
 	case ran == 0:
@@ -303,7 +303,7 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 	case overlaps.Status == kdoctor.OK:
 		overlaps.Code, overlaps.Why, overlaps.Next = kdoctor.CodeOverlapsNone, "no overlapping injection hook or schedule was reported", "nothing to do"
 	default:
-		overlaps.Code, overlaps.Why, overlaps.Next = kdoctor.CodeOverlapsFound, "the host side has injections or schedules that overlap with APA; listed only, nothing was changed", "remove the duplicates on the host side"
+		overlaps.Code, overlaps.Why, overlaps.Next = kdoctor.CodeOverlapsFound, "the Agent side has injections or schedules that overlap with APA; listed only, nothing was changed", "remove the duplicates on the Agent side"
 	}
 	sort.Slice(overlaps.Details, func(i, j int) bool { return overlaps.Details[i].Subject < overlaps.Details[j].Subject })
 	return host, overlaps

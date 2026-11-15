@@ -167,29 +167,29 @@ describe("简报页", () => {
     expect(await within(screen.getByRole("list", { name: "已安排的例行任务" })).findByText(/交水电费 · 每周一 09:00 · 家务/)).toBeInTheDocument();
   });
 
-  it("例行任务让 agent 去做：任务说明必填；带上权限档与结果去处；超出默认宿主上限时提示后果", async () => {
+  it("例行任务让 Agent 去做：任务说明必填；带上权限档与结果去处；超出默认宿主上限时提示后果", async () => {
     const calls: Calls = { posts: [], urls: [] };
     mount(server({ routine: true, host: "hermes", caps: { hermes: "edit" } }, calls));
     const form = within(await screen.findByRole("form", { name: "新的例行任务" }));
-    await userEvent.click(form.getByRole("radio", { name: "让 agent 去做" }));
+    await userEvent.click(form.getByRole("radio", { name: "让 Agent 去做" }));
     await userEvent.click(form.getByRole("button", { name: "安排例行任务" }));
     expect(await form.findByRole("alert")).toHaveTextContent("请写清要它做的事");
     expect(calls.posts).toEqual([]);
     await userEvent.type(form.getByLabelText("要它做的事"), "按本周完成的事写周报草稿");
-    await userEvent.selectOptions(form.getByLabelText("后台权限"), "full");
-    expect(await form.findByText(/超出宿主的上限/)).toBeInTheDocument();
-    await userEvent.selectOptions(form.getByLabelText("后台权限"), "edit");
-    expect(form.queryByText(/超出宿主的上限/)).not.toBeInTheDocument();
+    await userEvent.selectOptions(form.getByLabelText("Agent 能用什么"), "full");
+    expect(await form.findByText(/超出 Agent 的上限/)).toBeInTheDocument();
+    await userEvent.selectOptions(form.getByLabelText("Agent 能用什么"), "edit");
+    expect(form.queryByText(/超出 Agent 的上限/)).not.toBeInTheDocument();
     await userEvent.selectOptions(form.getByLabelText("结果写到哪"), "item_and_material");
     await userEvent.click(form.getByRole("button", { name: "安排例行任务" }));
     expect(calls.posts).toEqual([{ body: { pack: "routine", params: { schedule: `CRON_TZ=${browserZone()} 0 9 * * 1`, mode: "run", instruction: "按本周完成的事写周报草稿", access: "edit", output: "item_and_material" } }, csrf: "tok-1" }]);
   });
 
-  it("没设默认宿主时，选「让 agent 去做」提示到点会停下来问你，并给去设置的入口", async () => {
+  it("没设默认宿主时，选「让 Agent 去做」提示到点会停下来问你，并给去设置的入口", async () => {
     mount(server({ routine: true }));
     const form = within(await screen.findByRole("form", { name: "新的例行任务" }));
-    await userEvent.click(form.getByRole("radio", { name: "让 agent 去做" }));
-    expect(await form.findByText(/还没设默认宿主/)).toBeInTheDocument();
+    await userEvent.click(form.getByRole("radio", { name: "让 Agent 去做" }));
+    expect(await form.findByText(/还没设默认 Agent/)).toBeInTheDocument();
     expect(form.getAllByRole("link", { name: "去设置" })[0]).toHaveAttribute("href", "/settings/agents");
   });
 

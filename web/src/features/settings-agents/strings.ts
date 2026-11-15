@@ -1,7 +1,7 @@
 import type { Dict } from "../../app/i18n";
 import { shared } from "../settings-policy/strings";
 
-// 设置 › Agent：每个 Agent 一张卡（§4.1）——接入、后台运行能用什么、Agent 可以替我决定，钥匙与声明收在高级里。
+// 设置 › Agent：每个 Agent 一张卡（§4.1）——接入、Agent 后台运行能用什么、Agent 可以替我决定，钥匙与声明收在高级里。
 const zh = {
   ...shared.zh,
   title: "Agent",
@@ -13,15 +13,15 @@ const zh = {
   useDefault: "没指定时用它",
   connected: "已接入：可以调用 APA",
   notConnected: "未接入：还没有给它的钥匙",
-  launch: { pending: "待确认：允许 APA 在后台拉起它", active: "已允许：APA 可以在后台拉起它", none: "未请求：它还没要求在后台运行" } as Record<string, string>,
+  launch: { pending: "待确认：允许 APA 在后台拉起它", active: "已允许：APA 可以在后台拉起它", none: "未请求：它还没要求 APA 在后台拉起它" } as Record<string, string>,
   wantsToRun: (name: string) => `${name} 想在本机运行：`,
   allow: "允许",
   reject: "拒绝",
   claimHint: (name: string) => `这把钥匙最近由 ${name} 使用`,
   claim: "归给它",
-  tools: "后台运行能用什么",
+  tools: "Agent 后台运行能用什么",
   notOffered: "它没提供",
-  allowFirst: "先允许它在后台运行",
+  allowFirst: "先允许 APA 在后台拉起它",
   fullPreview: "完全放开会给它：",
   confirmFull: "确认完全放开",
   decide: "Agent 可以替我决定",
@@ -40,7 +40,7 @@ const zh = {
   until: "有效到",
   always: "一直有效",
   untilDate: (d: string) => `到 ${d}`,
-  background: "后台运行时也可以",
+  background: "Agent 后台运行时也可以",
   preview: (what: string, where: string, until: string) => `将允许：${what} · ${where} · ${until}`,
   previewRevoke: "保存后不再允许它替你决定",
   used: (n: number) => `用过 ${n} 次`,

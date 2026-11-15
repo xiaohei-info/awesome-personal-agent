@@ -117,11 +117,11 @@ describe("设置 › 提醒与打扰", () => {
     expect(s.puts.at(-1)!.body.disturb).not.toHaveProperty("quiet");
   });
 
-  it("唤醒宿主只在高级里出现，选项里多一个「唤醒宿主开工」", async () => {
+  it("唤醒 Agent只在高级里出现，选项里多一个「唤醒 Agent 开工」", async () => {
     mount(policyServer().impl);
     const d = await card();
-    expect(within(d.getByLabelText("决策")).queryByRole("option", { name: "唤醒宿主开工" })).toBeNull();
-    const wake = d.getByLabelText("唤醒宿主");
-    expect(within(wake).getByRole("option", { name: "唤醒宿主开工" })).toBeInTheDocument();
+    expect(within(d.getByLabelText("决策")).queryByRole("option", { name: "唤醒 Agent 开工" })).toBeNull();
+    const wake = d.getByLabelText("唤醒 Agent");
+    expect(within(wake).getByRole("option", { name: "唤醒 Agent 开工" })).toBeInTheDocument();
   });
 });

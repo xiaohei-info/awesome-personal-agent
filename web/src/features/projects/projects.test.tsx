@@ -190,7 +190,7 @@ describe("项目页", () => {
     await u.click(await screen.findByRole("checkbox", { name: /^work-host\.cli/ })); // 取消按 id
     await u.click(screen.getByRole("checkbox", { name: "work-host" })); // 按机器
     expect(screen.queryByText("只能派给你自己")).not.toBeInTheDocument();
-    expect(screen.getByText("机器与宿主由宿主自己报告")).toBeInTheDocument();
+    expect(screen.getByText("机器和 Agent 由 Agent 自己报告")).toBeInTheDocument();
     await u.click(screen.getByRole("button", { name: "保存执行者" }));
     await waitFor(() => expect(s.calls.find((c) => c.method === "PUT")!.body).toEqual({ executors: [], match: [{ host: "work-host" }] }));
   });

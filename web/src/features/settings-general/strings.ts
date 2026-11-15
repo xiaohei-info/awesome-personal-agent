@@ -16,7 +16,7 @@ const zh = {
   personaHint: "只影响说话方式，不改变任何权限",
   personaLang: "助手说哪种语言",
   personaLangSystem: "跟随系统",
-  personaLangHint: "决定默认语气的语言；跟随系统按助手所在机器的设置",
+  personaLangHint: "决定默认语气的语言；跟随系统按 Agent 所在机器的设置",
   personaDefault: "默认",
   personaRestore: "恢复默认",
   personaUsed: (n: number, max: number) => `约 ${n} / ${max}`,

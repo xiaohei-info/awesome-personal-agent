@@ -4,7 +4,7 @@ import { common } from "../../app/strings";
 const zh = {
   ...common.zh,
   title: "建议流",
-  lede: "agent 觉得值得做的事。",
+  lede: "Agent 觉得值得做的事。",
   do: { accept: "接受", attach: "补到已有事项", dismiss: "忽略" } as Record<string, string>,
   from: (who: string) => `来自 ${who}`,
   recommend: (what: string) => `推荐：${what}`,
@@ -32,7 +32,7 @@ const zh = {
 const en: typeof zh = {
   ...common.en,
   title: "Proposals",
-  lede: "Things agents think are worth doing.",
+  lede: "Things your Agent thinks are worth doing.",
   do: { accept: "Accept", attach: "Attach to existing item", dismiss: "Ignore" },
   from: (who) => `from ${who}`,
   recommend: (what) => `Recommended: ${what}`,
