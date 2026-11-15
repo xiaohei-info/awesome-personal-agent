@@ -44,7 +44,7 @@ func TestAuthWritesToGivenCredentialsPath(t *testing.T) {
 	}
 }
 
-// 真实入口：凭据目录只来自 stdin 的 credentials_path，APA_HOME 指向别处也不影响。
+// 真实入口：凭据目录只来自 stdin 的 credentials_path，APA_HOME 指向别处也不影响（issue 列表、两类评论、AGENTS.md 四次调用）。
 func TestPullUsesCredentialsPathFromStdin(t *testing.T) {
 	rec := fakeGH(t)
 	t.Setenv("APA_HOME", "/elsewhere")
@@ -53,7 +53,7 @@ func TestPullUsesCredentialsPathFromStdin(t *testing.T) {
 	if code := run(context.Background(), nil, strings.NewReader(in), &out, &bytes.Buffer{}); code != github.ExitOK {
 		t.Fatalf("exit %d", code)
 	}
-	if b, _ := os.ReadFile(rec); strings.TrimSpace(string(b)) != "api /data/sources/src_gh/gh\napi /data/sources/src_gh/gh" || !strings.Contains(out.String(), `"cursor"`) {
+	if b, _ := os.ReadFile(rec); strings.TrimSpace(string(b)) != strings.Repeat("api /data/sources/src_gh/gh\n", 3)+"api /data/sources/src_gh/gh" || !strings.Contains(out.String(), `"cursor"`) {
 		t.Fatalf("gh called as %q, out %q", b, out.String())
 	}
 }

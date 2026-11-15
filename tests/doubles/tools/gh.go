@@ -13,9 +13,12 @@ const ghRepo = "acc-org/acc-repo"
 type ghCase struct {
 	AgentsSHA string            `json:"agents_sha"`
 	Issues    []json.RawMessage `json:"issues"`
+	// IssueComments、ReviewComments 是 issues/comments 与 pulls/comments 两个列表，语义同 issues
+	IssueComments  []json.RawMessage `json:"issue_comments"`
+	ReviewComments []json.RawMessage `json:"review_comments"`
 }
 
-// ghCall 回放 `gh api <path>`：issues 列表按 since/page/per_page 过滤分页，与 GitHub REST 一致；
+// ghCall 回放 `gh api <path>`：issues 与两类评论列表按 since/page/per_page 过滤分页，与 GitHub REST 一致；
 // 其余子命令（含 auth login）一律拒绝，保证没有写操作。
 func ghCall(c string, args []string, root string) out {
 	if len(args) < 2 || args[0] != "api" {
@@ -37,8 +40,9 @@ func ghCall(c string, args []string, root string) out {
 		return failf(ExitRefused, "tool-stub: 路径无法解析 %q", args[len(args)-1])
 	}
 	q := u.Query()
+	list := map[string][]json.RawMessage{"issues": cs.Issues, "issues/comments": cs.IssueComments, "pulls/comments": cs.ReviewComments}
 	switch p := strings.TrimPrefix(u.Path, "/"); {
-	case p == "repos/"+ghRepo+"/issues":
+	case p == "repos/"+ghRepo+"/issues" || p == "repos/"+ghRepo+"/issues/comments" || p == "repos/"+ghRepo+"/pulls/comments":
 		since, _ := time.Parse(time.RFC3339, q.Get("since"))
 		per, _ := strconv.Atoi(q.Get("per_page"))
 		page, _ := strconv.Atoi(q.Get("page"))
@@ -49,7 +53,7 @@ func ghCall(c string, args []string, root string) out {
 			page = 1
 		}
 		var hit []json.RawMessage
-		for _, raw := range cs.Issues { // 样本已按 updated_at 升序
+		for _, raw := range list[strings.TrimPrefix(p, "repos/"+ghRepo+"/")] { // 样本已按 updated_at 升序
 			var it struct {
 				UpdatedAt time.Time `json:"updated_at"`
 			}

@@ -24,11 +24,15 @@ type upstream struct {
 	calls  []string
 	onGet  func(call int) // 每次请求前调用，用来模拟读取途中的上游变化
 	agents *string        // 默认分支根目录 AGENTS.md 的 blob sha；nil 表示没有该文件（404）
+	// comments 是两类评论列表（键 issues、pulls），语义同 issue 列表
+	comments map[string][]string
 }
 
 // issueCalls 是对 issue 列表的请求（AGENTS.md 读取不算）。
 func (u *upstream) issueCalls() []string {
-	return slices.DeleteFunc(slices.Clone(u.calls), func(c string) bool { return strings.Contains(c, "/contents/") })
+	return slices.DeleteFunc(slices.Clone(u.calls), func(c string) bool {
+		return strings.Contains(c, "/contents/") || strings.Contains(c, "/comments?")
+	})
 }
 
 func (u *upstream) set(n int, raw string) {
@@ -58,9 +62,14 @@ func (u *upstream) Get(_ context.Context, path string) ([]byte, error) {
 	}
 	q := p.Query()
 	var all []string
-	if strings.HasPrefix(path, "/notifications") {
+	switch {
+	case strings.HasPrefix(path, "/notifications"):
 		all = u.notifs
-	} else {
+	case strings.HasSuffix(p.Path, "/issues/comments"):
+		all = u.comments["issues"]
+	case strings.HasSuffix(p.Path, "/pulls/comments"):
+		all = u.comments["pulls"]
+	default:
 		for _, raw := range u.issues {
 			all = append(all, raw)
 		}
@@ -75,9 +84,9 @@ func (u *upstream) Get(_ context.Context, path string) ([]byte, error) {
 	var rows []row
 	for _, raw := range all {
 		var it struct {
-			UpdatedAt time.Time `json:"updated_at"`
-			Number    int       `json:"number"`
-			ID        string    `json:"id"`
+			UpdatedAt time.Time       `json:"updated_at"`
+			Number    int             `json:"number"`
+			ID        json.RawMessage `json:"id"`
 		}
 		if err := json.Unmarshal([]byte(raw), &it); err != nil {
 			return nil, err
@@ -85,7 +94,7 @@ func (u *upstream) Get(_ context.Context, path string) ([]byte, error) {
 		if it.UpdatedAt.Before(since) || (!before.IsZero() && !it.UpdatedAt.Before(before)) {
 			continue
 		}
-		rows = append(rows, row{it.UpdatedAt, fmt.Sprintf("%08d%s", it.Number, it.ID), raw})
+		rows = append(rows, row{it.UpdatedAt, fmt.Sprintf("%08d%s", it.Number, string(it.ID)), raw})
 	}
 	desc := q.Get("direction") != "asc"
 	slices.SortFunc(rows, func(a, b row) int {
@@ -514,8 +523,8 @@ func TestNotificationCursorReplayAndLateArrival(t *testing.T) {
 	}
 }
 
-// 评审第 2 轮 nit：只有 opened 的动作者确定是作者才标 sender_verified。
-func TestOnlyOpenedMarksSenderVerified(t *testing.T) {
+// 只有 opened 带发件人（接口返回的作者，已核实）；closed、merged、updated 不知道动作者，不带 sender。
+func TestOnlyOpenedCarriesVerifiedSender(t *testing.T) {
 	api := &upstream{}
 	api.set(1, item(1, at(time.Hour), at(5*time.Hour), at(2*time.Hour), "", ""))
 	api.set(2, item(2, at(time.Hour), at(2*time.Hour), at(2*time.Hour), at(2*time.Hour), ""))
@@ -525,10 +534,65 @@ func TestOnlyOpenedMarksSenderVerified(t *testing.T) {
 	}
 	for _, ev := range o.events {
 		verified, _ := ev["sender_verified"].(bool)
-		if opened := strings.HasSuffix(ev["type"].(string), ".opened"); verified != opened || ev["sender"] != "alice" {
+		opened := strings.HasSuffix(ev["type"].(string), ".opened")
+		if sender, _ := ev["sender"].(string); verified != opened || (sender == "alice") != opened {
 			t.Errorf("%v", ev)
 		}
 	}
+}
+
+func comment(id int, page, updated, login string) string {
+	b, _ := json.Marshal(map[string]any{"id": id, "body": fmt.Sprintf("c%d", id), "html_url": fmt.Sprintf("https://github.com/o/r/%s#c%d", page, id),
+		"created_at": updated, "updated_at": updated, "user": map[string]string{"login": login}})
+	return string(b)
+}
+
+// 评论按仓库另读：类型按 html_url 与接口区分，发件人是评论作者且已核实，关联键挂到所属对象；游标重放不重发。
+func TestCommentsBecomeVerifiedEventsOnTheirObject(t *testing.T) {
+	api := &upstream{comments: map[string][]string{
+		"issues": {comment(11, "issues/3", at(time.Hour), "bob"), comment(12, "pull/4", at(2*time.Hour), "carol")},
+		"pulls":  {comment(11, "pull/4", at(3*time.Hour), "dave")},
+	}}
+	o := pullOnce(t, api, repoCfg, "")
+	want := map[string][3]string{
+		"comment-o-r-11":        {"issue.commented", "bob", "o/r#3"},
+		"comment-o-r-12":        {"pr.commented", "carol", "o/r#4"},
+		"review-comment-o-r-11": {"pr.review_commented", "dave", "o/r#4"},
+	}
+	if len(o.events) != len(want) {
+		t.Fatalf("events %v", o.ids())
+	}
+	for _, ev := range o.events {
+		w, ok := want[ev["id"].(string)]
+		keys, _ := ev["correlation_keys"].([]any)
+		if !ok || ev["type"] != w[0] || ev["sender"] != w[1] || ev["sender_verified"] != true || len(keys) != 1 || keys[0] != w[2] {
+			t.Errorf("%v", ev)
+		}
+	}
+	if again := pullOnce(t, api, repoCfg, o.cursor); len(again.events) != 0 {
+		t.Fatalf("replay emitted %v", again.ids())
+	}
+}
+
+func TestIdentityPrintsLogin(t *testing.T) {
+	api := fixedAPI{"/user": `{"login":"octo","id":1}`}
+	var out, errb bytes.Buffer
+	in := `{"source_id":"s","credentials_path":"/c","config":{"repos":["o/r"]}}`
+	if code := Identity(context.Background(), strings.NewReader(in), &out, &errb, func(string) API { return api }); code != ExitOK {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if strings.TrimSpace(out.String()) != `{"sender":"octo"}` {
+		t.Fatalf("out %q", out.String())
+	}
+}
+
+type fixedAPI map[string]string
+
+func (f fixedAPI) Get(_ context.Context, path string) ([]byte, error) {
+	if b, ok := f[path]; ok {
+		return []byte(b), nil
+	}
+	return nil, &Error{Exit: ExitPermanent, Msg: "not found", NotFound: true}
 }
 
 func TestNoChangeKeepsCursor(t *testing.T) {
