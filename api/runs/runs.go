@@ -1,5 +1,5 @@
 // Package runs 是运行记录分组的 HTTP 路由（附录 B.2，设计 §6.11）：
-// GET /runs（可按 state、category、target 筛选）、GET /runs/{id}，以及网关插件换取唤醒运行凭据的 POST /runs/{id}/credential（§13.6）。
+// GET /runs（可按 state、category、target 筛选，before 翻页）、GET /runs/{id}，以及网关插件换取唤醒运行凭据的 POST /runs/{id}/credential（§13.6）。
 //
 // 路由里没有业务规则：Run 的读取在 kernel/outcall/proc，授权判定在 kernel/authz；
 // 本层只做认证后的参数校验与搬运。响应只含 §6.11 的字段（状态、执行统计、授权依据），
@@ -10,6 +10,7 @@ package runs
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
@@ -92,12 +93,26 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 
 func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	q := r.URL.Query()
-	state, category, target := domain.RunState(q.Get("state")), domain.RunCategory(q.Get("category")), q.Get("target")
-	if state != "" && !validState(state) {
-		return invalid("state is not a run state", "use queued, running, succeeded, failed or timeout")
+	// state、category 可逗号分隔多个（任一匹配）；before 是上一页最旧一条的 id，只取它之前入队的。
+	states, categories, target, before := q.Get("state"), q.Get("category"), q.Get("target"), q.Get("before")
+	stateSet, categorySet := map[domain.RunState]bool{}, map[domain.RunCategory]bool{}
+	for _, s := range strings.Split(states, ",") {
+		if s == "" {
+			continue
+		}
+		if !validState(domain.RunState(s)) {
+			return invalid("state is not a run state", "use queued, running, succeeded, failed or timeout, comma separated")
+		}
+		stateSet[domain.RunState(s)] = true
 	}
-	if category != "" && !validCategory(category) {
-		return invalid("category is not a run category", "use judge, generate, task, background, source, transform or reader")
+	for _, c := range strings.Split(categories, ",") {
+		if c == "" {
+			continue
+		}
+		if !validCategory(domain.RunCategory(c)) {
+			return invalid("category is not a run category", "use judge, generate, task, background, source, transform or reader, comma separated")
+		}
+		categorySet[domain.RunCategory(c)] = true
 	}
 	limit := defaultLimit
 	if s := q.Get("limit"); s != "" {
@@ -116,11 +131,19 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		if err != nil {
 			return err
 		}
+		found := before == ""
 		for _, rec := range recs {
 			run := rec.Run
-			if (state == "" || run.State == state) && (category == "" || run.Category == category) && (target == "" || run.Target == target) {
+			if run.ID == before {
+				found = true
+				break
+			}
+			if (len(stateSet) == 0 || stateSet[run.State]) && (len(categorySet) == 0 || categorySet[run.Category]) && (target == "" || run.Target == target) {
 				out = append(out, run)
 			}
+		}
+		if !found {
+			return invalid("before is not a run id", "use the id of the oldest run on the previous page")
 		}
 		return nil
 	})

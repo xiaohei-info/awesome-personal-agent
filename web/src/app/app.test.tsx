@@ -200,7 +200,7 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     ["/decisions", "决策待办", "决策待办"], ["/proposals", "建议流", "建议流"],
     ["/items", "事项", "事项"], ["/items/itm_1", "事项", "事项"], ["/pack-views", "事项", "事项"],
     ["/projects", "项目", "项目"], ["/materials", "项目", "材料"],
-    ["/agent-changes", "agent 动态", "改动"], ["/delegation", "agent 动态", "委派"], ["/runs", "诊断", "后台运行"],
+    ["/agent-changes", "agent 动态", "改动"], ["/delegation", "agent 动态", "委派"], ["/runs", "诊断", "运行日志"],
     ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "抽查漏掉的"],
     ["/rules", "自动规则", "规则"], ["/judgment", "自动规则", "筛选门槛"],
     ["/health", "诊断", "状态"], ["/audit", "诊断", "操作记录"],

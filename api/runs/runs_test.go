@@ -236,6 +236,13 @@ func TestListFiltersAndLimit(t *testing.T) {
 	eq(ids("/v1/runs?target=item_2"), b)
 	eq(ids("/v1/runs?state=queued&category=task"), b)
 	eq(ids("/v1/runs?limit=2"), b, c)
+	// 逗号分隔取并集；before 只取该条之前入队的，与筛选、limit 叠加（翻页）。
+	eq(ids("/v1/runs?category=task,source"), a, b, c)
+	eq(ids("/v1/runs?state=running,queued&category=task"), a, b)
+	eq(ids("/v1/runs?before="+c), a, b)
+	eq(ids("/v1/runs?before="+c+"&limit=1"), b)
+	eq(ids("/v1/runs?before="+c+"&category=task&state=queued"), b)
+	eq(ids("/v1/runs?before=" + a))
 	if got := listOf(t, e.do("GET", "/v1/runs?state=timeout", "", obs)); got == nil || len(got) != 0 {
 		t.Fatalf("empty result must be [] not null: %v", got)
 	}
@@ -263,7 +270,7 @@ func TestErrors(t *testing.T) {
 			}
 		}
 	}
-	for _, q := range []string{"state=bogus", "category=bogus", "limit=0", "limit=501", "limit=x"} {
+	for _, q := range []string{"state=bogus", "category=bogus", "state=failed,bogus", "category=task,bogus", "before=run_missing", "limit=0", "limit=501", "limit=x"} {
 		rec := e.do("GET", "/v1/runs?"+q, "", e.token(auth.Observer))
 		if rec.Code != 400 || codeOf(t, rec) != domain.CodeInvalidRequest {
 			t.Fatalf("%s = %d %s", q, rec.Code, rec.Body)
