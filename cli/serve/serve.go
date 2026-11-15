@@ -109,14 +109,14 @@ func run(ctx context.Context, c *client.Ctx, ready func(net.Addr)) error {
 	}
 	// 有待办迁移时先留升级前快照；留不下来就不迁移（设计 §16.5）。
 	if _, err := backup.PreUpgradeSnapshot(ctx, home, reg, clock.Now()); err != nil {
-		return err
+		return tooNew(err)
 	}
 	st, err := store.Open(home, reg)
 	if errors.Is(err, store.ErrMigrationFailed) { // 迁移失败要如实告诉本人：失败、已回滚、原因（不含路径）
 		return domain.NewError(domain.CodeInternal, err.Error(), "the pre-upgrade snapshot is under <APA_HOME>/backups; fix the cause and run `apa serve` again, or restore the snapshot (§16.5)")
 	}
 	if err != nil {
-		return err
+		return tooNew(err)
 	}
 	defer st.Close()
 	set, err := ownerPasswordSet(ctx, st)
@@ -162,4 +162,13 @@ func ownerPasswordSet(ctx context.Context, st *store.Store) (set bool, err error
 		return r.Err()
 	})
 	return
+}
+
+// tooNew 把"账本里有本程序不认识的迁移"说清楚（降级到更旧的二进制时）；其他错误原样返回。
+func tooNew(err error) error {
+	if !errors.Is(err, store.ErrSchemaTooNew) {
+		return err
+	}
+	return usage("the ledger was migrated by a newer build and has migrations this binary does not know; an older binary never opens newer data",
+		"use the binary that matches the data directory, or go back by restoring the pre-upgrade snapshot under <APA_HOME>/backups with `apa backup restore` (§16.5)")
 }

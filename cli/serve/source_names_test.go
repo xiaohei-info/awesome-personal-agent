@@ -81,3 +81,22 @@ func TestServeNamesLegacySourcesWithoutTriggeringAnything(t *testing.T) {
 		t.Fatalf("renamed by the system, not the owner: %v", actor)
 	}
 }
+
+// 降级：账本里有本程序不认识的迁移（被更新的二进制迁移过）时，apa serve 拒绝启动并说明怎么回退，不报成"本地失败、检查权限"。
+func TestServeRefusesLedgerMigratedByANewerBuild(t *testing.T) {
+	home := initOnFreePort(t)
+	reg, _ := registry()
+	newer := store.Module{Name: "zz_newer", Migrations: []store.Migration{{Version: 1, Ledger: 3, Name: "from-the-future", SQL: `CREATE TABLE zz_newer_x (id TEXT)`}}}
+	if err := reg.Register(newer); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(home, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	r := apa(t, home, "", "serve")
+	if r.code != 2 || !strings.Contains(r.errOut, "migrated by a newer build") || !strings.Contains(r.errOut, "pre-upgrade snapshot") {
+		t.Fatalf("want exit 2 explaining the downgrade: %+v", r)
+	}
+}

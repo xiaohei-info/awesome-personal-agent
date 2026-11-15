@@ -317,7 +317,7 @@ func TestDoctorDataDirVersionCases(t *testing.T) {
 	in := e.input()
 	in.Reg = older
 	r := Run(bg, in)
-	if c := find(t, r, kdoctor.DataDir); c.Status != kdoctor.Error || !strings.Contains(c.Why, "newer version") || r.OK {
+	if c := find(t, r, kdoctor.DataDir); c.Status != kdoctor.Error || !strings.Contains(c.Why, "migrated by a newer build") || r.OK {
 		t.Fatalf("newer: %+v", c)
 	}
 	if c := find(t, r, kdoctor.Tier); c.Status != kdoctor.Warning || !strings.Contains(c.Why, "skipped") {

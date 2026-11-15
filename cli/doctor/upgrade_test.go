@@ -125,7 +125,7 @@ func TestUpgradeCheckLedgerEdgeCases(t *testing.T) {
 	must(t, older.Register(eventlog.Module))
 	in := e.input()
 	in.Reg = older
-	if rep := UpgradeCheck(bg, in); rep.OK || !strings.Contains(find(t, rep, "schema_version").Why, "newer than this binary") {
+	if rep := UpgradeCheck(bg, in); rep.OK || !strings.Contains(find(t, rep, "schema_version").Why, "migrations this binary does not know") {
 		t.Fatalf("newer ledger: %+v", rep)
 	}
 	must(t, os.Remove(filepath.Join(e.home, "ledger.db")))

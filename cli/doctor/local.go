@@ -112,7 +112,7 @@ func dataDirCheck(l config.Layout, in Input, led *ledger, openErr error) kdoctor
 	case openErr != nil:
 		return fail(kdoctor.Error, kdoctor.CodeLedgerUnreadable, "the ledger cannot be read: "+openErr.Error(), "check the file permissions and the disk, or restore a backup")
 	case led.infoErr != nil && errors.Is(led.infoErr, store.ErrSchemaTooNew):
-		return fail(kdoctor.Error, kdoctor.CodeLedgerTooNew, fmt.Sprintf("the ledger was written by a newer version than this binary (ledger structure up to %d)", target), "use the binary that matches the data directory; never run an older binary on newer data")
+		return fail(kdoctor.Error, kdoctor.CodeLedgerTooNew, fmt.Sprintf("the ledger has migrations this binary does not know: it was migrated by a newer build (this binary supports ledger structure %d)", target), "use the binary that matches the data directory; never run an older binary on newer data")
 	case led.infoErr != nil:
 		return fail(kdoctor.Error, kdoctor.CodeLedgerDamaged, "the ledger is damaged or not a ledger: "+led.infoErr.Error(), "restore the latest backup with `apa backup restore`")
 	}
