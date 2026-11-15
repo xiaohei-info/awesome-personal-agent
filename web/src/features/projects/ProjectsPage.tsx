@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Route, Routes, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
@@ -12,7 +12,7 @@ import { ErrorNote } from "../../app/errors";
 import { ScopeRadios } from "../sources/Outbound";
 
 // 形状对应 GET/POST /v1/projects、GET/PATCH /v1/projects/{id}、POST /v1/projects/{id}/repos、
-// GET /v1/settings/executors、PUT /v1/settings/projects/{id}/allowed-executors（附录 B.2）。
+// GET /v1/executors、PUT /v1/settings/projects/{id}/allowed-executors（附录 B.2；body 带 executors 与 match）。
 // 校验、授权、事件都在服务端；本页只搬运输入并显示服务端的错误原因。
 interface Repo { remote: string; checkouts?: { host: string; path: string }[] }
 export interface Project {
@@ -23,6 +23,8 @@ export interface Project {
   status: string;
   repos?: Repo[];
   allowed_executors: string[] | null;
+  /** 按机器或宿主匹配的名单（§14.7）；与 allowed_executors 任一命中即允许。 */
+  allowed_executor_match?: Match[];
   capture?: boolean;
   /** 对话增量送外部模型的范围；null 为还没选，没有缺省值（§6.5、§14.14）。 */
   capture_outbound?: string | null;
@@ -249,30 +251,49 @@ function RepoRow({ r, op }: { r: Repo; op: (b: Record<string, string>) => Promis
   );
 }
 
-interface Executor { id: string; kind: string; host?: string }
+interface Executor { id: string; kind: string; host?: string; harness?: string; label?: string }
+interface Match { host?: string; harness?: string }
 
 function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }) {
   const t = useT(strings);
   const { api } = useSession();
   const { error, run } = useAct();
   const [list, setList] = useState<Executor[] | null>(null);
-  const [limited, setLimited] = useState(p.allowed_executors !== null);
+  const match = p.allowed_executor_match ?? [];
+  const [limited, setLimited] = useState(p.allowed_executors !== null || match.length > 0);
   const [sel, setSel] = useState<string[]>(p.allowed_executors ?? []);
+  const [hosts, setHosts] = useState<string[]>(match.filter((m) => m.host && !m.harness).map((m) => m.host!));
+  const [harnesses, setHarnesses] = useState<string[]>(match.filter((m) => m.harness && !m.host).map((m) => m.harness!));
+  const both = match.filter((m) => m.host && m.harness); // 页面不新建这种组合，原样保留
   const [loadErr, setLoadErr] = useState<unknown>(null);
 
   useEffect(() => {
-    api.get<{ executors: Executor[] }>("/settings/executors").then((r) => setList(r.executors), (e) => setLoadErr(e));
+    api.get<{ executors: Executor[] }>("/executors").then((r) => setList(r.executors), (e) => setLoadErr(e));
   }, [api]);
 
-  // 名单里已有但清单里没有的 id 也要显示，否则保存会悄悄丢掉它。
+  // 名单里已有但名录里没有的 id、机器、宿主也要显示，否则保存会悄悄丢掉它。
   const ids = [...new Set([...(list ?? []).map((e) => e.id), ...(p.allowed_executors ?? [])])];
+  const allHosts = [...new Set([...(list ?? []).map((e) => e.host ?? ""), ...hosts].filter(Boolean))].sort();
+  const allHarnesses = [...new Set([...(list ?? []).map((e) => e.harness ?? ""), ...harnesses].filter(Boolean))].sort();
   const byId = new Map((list ?? []).map((e) => [e.id, e]));
-  const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const flip = (set: (f: (s: string[]) => string[]) => void, v: string) => set((s) => (s.includes(v) ? s.filter((x) => x !== v) : [...s, v]));
   const save = () =>
     run(async () => {
-      await api.put(`/settings/projects/${p.id}/allowed-executors`, { executors: limited ? sel : null });
+      const m: Match[] = limited ? [...hosts.map((host) => ({ host })), ...harnesses.map((harness) => ({ harness })), ...both] : [];
+      await api.put(`/settings/projects/${p.id}/allowed-executors`, { executors: limited ? sel : null, match: m });
       onSaved(await api.get<Project>("/projects/" + p.id));
     });
+  const group = (title: string, values: string[], picked: string[], set: (f: (s: string[]) => string[]) => void, show: (v: string) => ReactNode) =>
+    values.length > 0 && (
+      <fieldset className="plain">
+        <legend>{title}</legend>
+        <ul className="plain">
+          {values.map((v) => (
+            <li key={v}><label><input type="checkbox" checked={picked.includes(v)} onChange={() => flip(set, v)} />{show(v)}</label></li>
+          ))}
+        </ul>
+      </fieldset>
+    );
 
   return (
     <section aria-label={t.executors}>
@@ -281,14 +302,12 @@ function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }
       <div className="panel">
       <label><input type="radio" name="lim" checked={!limited} onChange={() => setLimited(false)} />{t.unlimited}</label>
       <label><input type="radio" name="lim" checked={limited} onChange={() => setLimited(true)} />{t.limited}</label>
-      {limited && (
-        <ul className="plain">
-          {ids.map((id) => (
-            <li key={id}><label><input type="checkbox" checked={sel.includes(id)} onChange={() => toggle(id)} /><ExecutorName e={byId.get(id) ?? { id, kind: "" }} /></label></li>
-          ))}
-        </ul>
-      )}
-      {limited && sel.length === 0 && <p className="sub">{t.onlyYou}</p>}
+      {limited && group(t.byHost, allHosts, hosts, setHosts, (v) => v)}
+      {limited && group(t.byHarness, allHarnesses, harnesses, setHarnesses, (v) => v)}
+      {limited && group(t.byExecutor, ids, sel, setSel, (id) => <ExecutorName e={byId.get(id) ?? { id, kind: "" }} />)}
+      {limited && both.length > 0 && <p className="sub">{both.map((m) => `${m.harness} @ ${m.host}`).join(", ")}</p>}
+      {limited && sel.length === 0 && hosts.length === 0 && harnesses.length === 0 && both.length === 0 && <p className="sub">{t.onlyYou}</p>}
+      {limited && (hosts.length > 0 || harnesses.length > 0) && <p className="sub">{t.selfReported}</p>}
       <div><button className="primary" onClick={save}>{t.saveExecutors}</button></div>
       </div>
       {error != null && <ErrorNote error={error} />}
@@ -296,11 +315,11 @@ function Executors({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }
   );
 }
 
-/** 执行者：名称 · 种类 · 主机（主机只是说明，§6.13）。 */
+/** 执行者：显示名 · 种类 · 机器（机器由宿主自报，§6.17）。 */
 function ExecutorName({ e }: { e: Executor }) {
   return (
     <>
-      {e.id}
+      {e.label || e.id}
       {e.kind && <span className="sub"> · <Val k="executorKind" id={e.kind} /></span>}
       {e.host && <span className="sub"> · {e.host}</span>}
     </>

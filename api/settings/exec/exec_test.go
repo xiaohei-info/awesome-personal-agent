@@ -223,8 +223,8 @@ func TestDeclarationsAndCommandRegistration(t *testing.T) {
 	if r.Code != 200 || !strings.Contains(r.Body.String(), `"state":"pending"`) {
 		t.Fatalf("pending list: %d %s", r.Code, r.Body)
 	}
-	if r := e.web("GET", "/v1/settings/executors", ""); strings.Contains(r.Body.String(), "acme.build") {
-		t.Fatalf("pending declaration must not be in the executor list: %s", r.Body)
+	if e.listed("acme.build") {
+		t.Fatal("pending declaration must not be in the executor list")
 	}
 	if r := e.web("GET", "/v1/settings/commands", ""); strings.Contains(r.Body.String(), "acme") {
 		t.Fatalf("pending declaration must not be an active command: %s", r.Body)
@@ -249,8 +249,8 @@ func TestDeclarationsAndCommandRegistration(t *testing.T) {
 	if len(e.events(kexec.EvConfirmed)) != 1 {
 		t.Fatal("confirm must be recorded")
 	}
-	if r := e.web("GET", "/v1/settings/executors", ""); !strings.Contains(r.Body.String(), "acme.build") {
-		t.Fatalf("confirmed executor missing: %s", r.Body)
+	if !e.listed("acme.build") {
+		t.Fatal("confirmed executor missing")
 	}
 	if r := e.web("GET", "/v1/settings/commands", ""); !strings.Contains(r.Body.String(), `"state":"active"`) {
 		t.Fatalf("active command missing: %s", r.Body)
@@ -281,50 +281,46 @@ func TestDeclarationsAndCommandRegistration(t *testing.T) {
 	}
 }
 
-// 执行者清单：Web 维护，带 project 时标明是否允许；声明来源的项不能被覆盖。
-func TestExecutorsListPutRemove(t *testing.T) {
+// 本人维护名录条目（无界面）：只有 Web 本人能写；读名录与移除走 /executors（§6.17）。
+func TestExecutorPutIsWebOnly(t *testing.T) {
 	e := setup(t)
-	pid := e.project("acc-work")
-	e.web("PUT", "/v1/settings/projects/"+pid+"/allowed-executors", `{"executors":["a.cli"]}`)
-
 	for _, id := range []string{"a.cli", "b.cli"} {
 		if r := e.web("POST", "/v1/settings/executors", `{"id":"`+id+`","kind":"external-cli"}`); r.Code != 200 {
 			t.Fatalf("put %s: %d %s", id, r.Code, r.Body)
 		}
 	}
-	if len(e.events(kexec.EvChanged)) != 2 {
+	if len(e.events(kexec.EvChanged)) != 2 || !e.listed("a.cli") || !e.listed("b.cli") {
 		t.Fatal("list changes must be recorded")
-	}
-	r := e.web("GET", "/v1/settings/executors?project="+pid, "")
-	var out struct {
-		Executors []struct {
-			ID      string `json:"id"`
-			Allowed *bool  `json:"allowed"`
-		}
-	}
-	_ = json.Unmarshal(r.Body.Bytes(), &out)
-	if len(out.Executors) != 2 || out.Executors[0].Allowed == nil || !*out.Executors[0].Allowed || *out.Executors[1].Allowed {
-		t.Fatalf("allowed flags wrong: %s", r.Body)
-	}
-	if r := e.web("GET", "/v1/settings/executors?project=nope", ""); r.Code != 404 {
-		t.Fatalf("unknown project: %d", r.Code)
 	}
 	if r := e.do("POST", "/v1/settings/executors", `{"id":"c.cli","kind":"external-cli"}`, e.token(auth.Delegate)); r.Code != 403 || code(t, r) != domain.CodeWebOnly {
 		t.Fatalf("delegate put: %d %s", r.Code, r.Body)
 	}
-	if r := e.do("DELETE", "/v1/settings/executors/a.cli", "", e.token(auth.Delegate)); r.Code != 403 {
-		t.Fatalf("delegate remove: %d", r.Code)
-	}
-	if r := e.web("DELETE", "/v1/settings/executors/a.cli", ""); r.Code != 200 {
-		t.Fatalf("remove: %d %s", r.Code, r.Body)
-	}
-	if r := e.web("DELETE", "/v1/settings/executors/a.cli", ""); r.Code != 404 {
-		t.Fatalf("remove twice: %d", r.Code)
-	}
 	if r := e.web("POST", "/v1/settings/executors", `not json`); r.Code != 400 {
 		t.Fatalf("bad body: %d", r.Code)
 	}
-	if len(e.events(kexec.EvRemoved)) != 1 {
-		t.Fatal("removal must be recorded")
+	if r := e.web("GET", "/v1/settings/executors", ""); r.Code == 200 {
+		t.Fatalf("the settings list route is gone; read /executors: %d", r.Code)
+	}
+}
+
+func (e *env) listed(id string) bool {
+	var ok bool
+	_ = e.st.View(bg, func(tx *store.Tx) (err error) { _, ok, err = kexec.Get(tx, id); return })
+	return ok
+}
+
+// 项目名单的匹配规则经同一路由读写（§14.7）。
+func TestAllowedExecutorsMatchRoundTrip(t *testing.T) {
+	e := setup(t)
+	pid := e.project("acc-work")
+	r := e.web("PUT", "/v1/settings/projects/"+pid+"/allowed-executors", `{"executors":[],"match":[{"host":"mbp"}]}`)
+	if r.Code != 200 || !strings.Contains(r.Body.String(), `"match":[{"host":"mbp"}]`) {
+		t.Fatalf("put match: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("PUT", "/v1/settings/projects/"+pid+"/allowed-executors", `{"executors":null,"match":[{}]}`); r.Code != 400 {
+		t.Fatalf("empty match rule: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("GET", "/v1/settings/projects/"+pid+"/allowed-executors", ""); !strings.Contains(r.Body.String(), `"host":"mbp"`) {
+		t.Fatalf("get: %s", r.Body)
 	}
 }

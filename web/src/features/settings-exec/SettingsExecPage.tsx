@@ -3,12 +3,11 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
-import { EXECUTOR_KIND } from "../../app/ids";
-import { Pick, Val, useLabel } from "../../app/values";
-import { TagInput } from "../settings-policy/shared";
+import { useLabel } from "../../app/values";
 
-// 形状对应 /v1/settings/{executors,declarations,commands}（kernel/executors）。授权（仅 Web 会话）、
+// 形状对应 /v1/settings/{declarations,commands}（kernel/executors）。授权（仅 Web 会话）、
 // 声明校验、确认前不生效都在服务端；本页只负责调用并如实展示服务端的回答。
+// 执行者由宿主在委派时登记，不在设置里手填；谁在干活见"agent 动态 › 执行者"（§6.17）。
 interface Executor {
   id: string;
   kind: string;
@@ -74,98 +73,6 @@ const DeclarationView = ({ d }: { d: Declaration }) => {
     </div>
   );
 };
-
-function ExecutorsSection({ reloadKey }: { reloadKey: number }) {
-  const { api } = useSession();
-  const t = useT(strings);
-  const { items, error, setError, load } = useList<Executor>("/settings/executors", (r) => r.executors);
-  const [id, setId] = useState("");
-  const [kind, setKind] = useState("external-cli");
-  const [host, setHost] = useState("");
-  const [scenarios, setScenarios] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (reloadKey) load();
-  }, [reloadKey, load]);
-
-  const add = async () => {
-    setError(null);
-    const body: Executor = { id: id.trim(), kind };
-    if (host.trim()) body.host = host.trim();
-    if (scenarios.length) body.scenarios = scenarios;
-    try {
-      await api.post("/settings/executors", body);
-      setId("");
-      setHost("");
-      setScenarios([]);
-    } catch (e) {
-      setError(msg(e));
-    }
-    await load();
-  };
-
-  const remove = async (eid: string) => {
-    setError(null);
-    try {
-      await api.del("/settings/executors/" + encodeURIComponent(eid));
-    } catch (e) {
-      setError(msg(e));
-    }
-    await load();
-  };
-
-  return (
-    <section role="region" aria-labelledby="h-executors">
-      <h2 id="h-executors">{t.executors}</h2>
-      {error && <div role="alert">{error}</div>}
-      <form
-        className="panel"
-        onSubmit={(e) => {
-          e.preventDefault();
-          add();
-        }}
-      >
-        <label>
-          {t.executorId}
-          <input value={id} onChange={(e) => setId(e.target.value)} />
-        </label>
-        <label>
-          {t.kind}
-          <Pick k="executorKind" value={kind} onChange={setKind} ids={EXECUTOR_KIND} />
-        </label>
-        <label>
-          {t.host}
-          <input value={host} onChange={(e) => setHost(e.target.value)} />
-        </label>
-        <div>
-          {t.scenarios}
-          <TagInput label={t.scenarios} values={scenarios} onChange={setScenarios} />
-        </div>
-        <div>
-          <button type="submit" disabled={!id.trim()}>{t.add}</button>
-        </div>
-      </form>
-      {items === null ? (
-        !error && <p role="status">{t.loading}</p>
-      ) : items.length === 0 ? (
-        <p className="sub">{t.noExecutors}</p>
-      ) : (
-        <ul className="rows">
-          {items.map((x) => (
-            <li key={x.id}>
-              <span>
-                <strong>{x.id}</strong> · <Val k="executorKind" id={x.kind} />
-                {x.host && ` · ${x.host}`}
-                {x.scenarios?.length ? ` · ${x.scenarios.join(", ")}` : ""}
-              </span>{" "}
-              <button className="danger" onClick={() => remove(x.id)}>{t.remove}</button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
 
 function PendingSection({ onChanged }: { onChanged: () => void }) {
   const { api } = useSession();
@@ -281,13 +188,12 @@ function CommandsSection({ reloadKey }: { reloadKey: number }) {
 }
 
 export function SettingsExecPage() {
-  // 确认/拒绝声明会改变清单与命令；用计数通知另外两个分区重新读取。
+  // 确认/拒绝声明会改变已允许的命令；用计数通知命令分区重新读取。
   const [n, setN] = useState(0);
   const t = useT(strings);
   return (
     <main>
-      <PageHead lede={t.lede}>{t.title}</PageHead>
-      <ExecutorsSection reloadKey={n} />
+      <PageHead>{t.title}</PageHead>
       <PendingSection onChanged={() => setN((x) => x + 1)} />
       <CommandsSection reloadKey={n} />
     </main>

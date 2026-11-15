@@ -30,7 +30,7 @@ function server(opts: { putDenied?: boolean } = {}) {
       projects.push(p);
       return json(201, p);
     }
-    if (url === "/v1/settings/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli", host: "work-host" }, { id: "other-host.cli", kind: "external-cli" }] });
+    if (url === "/v1/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli", host: "work-host" }, { id: "other-host.cli", kind: "external-cli" }] });
     if (url.startsWith("/v1/items?project=")) {
       const id = new URL(url, "http://x").searchParams.get("project");
       return json(200, { items: id === "p_work" ? [{ id: "item_1", phase: "open", version: 1, kind: "task", title: "项目内事项" }] : [] });
@@ -46,7 +46,8 @@ function server(opts: { putDenied?: boolean } = {}) {
       if (opts.putDenied) return err(403, "web_only", "allowed_executors can only be changed by the owner in the Web UI");
       const p = projects.find((x) => x.id === a[1])!;
       p.allowed_executors = body.executors;
-      return json(200, { id: p.id, allowed_executors: p.allowed_executors });
+      (p as P & { allowed_executor_match?: unknown }).allowed_executor_match = body.match;
+      return json(200, { id: p.id, allowed_executors: p.allowed_executors, match: body.match });
     }
     const m = url.match(/^\/v1\/projects\/([^/]+)(\/repos)?$/);
     if (!m) return err(404, "not_found", "no such route");
@@ -180,6 +181,18 @@ describe("项目页", () => {
     expect(screen.getByText("只能派给你自己")).toBeInTheDocument(); // 一个都不选的后果当场可见（§14.7）
     await u.click(screen.getByRole("button", { name: "保存执行者" }));
     await waitFor(() => expect(s.projects[0].allowed_executors).toEqual([]));
+  });
+
+  it("允许的执行者按机器：勾选机器 → PUT 带 match；只按机器时不提示只能派给你自己", async () => {
+    const s = server();
+    const u = userEvent.setup();
+    mount(s.impl, "/projects/p_work");
+    await u.click(await screen.findByRole("checkbox", { name: /^work-host\.cli/ })); // 取消按 id
+    await u.click(screen.getByRole("checkbox", { name: "work-host" })); // 按机器
+    expect(screen.queryByText("只能派给你自己")).not.toBeInTheDocument();
+    expect(screen.getByText("机器与宿主由宿主自己报告")).toBeInTheDocument();
+    await u.click(screen.getByRole("button", { name: "保存执行者" }));
+    await waitFor(() => expect(s.calls.find((c) => c.method === "PUT")!.body).toEqual({ executors: [], match: [{ host: "work-host" }] }));
   });
 
   it("允许的执行者被拒（非 Web）：显示原因，页面状态不变", async () => {

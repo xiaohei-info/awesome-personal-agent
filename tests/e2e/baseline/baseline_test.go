@@ -51,7 +51,7 @@ func TestFlowEnvBaseline(t *testing.T) {
 		if r := e.WebRaw("POST", "/v1/auth/login", `{"password":"wrong-password-x"}`, false); r.Code != http.StatusUnauthorized && r.Code != http.StatusForbidden {
 			t.Errorf("错误口令应被拒绝，实际 %d", r.Code)
 		}
-		if r := e.Web("GET", "/v1/settings/executors", ""); r.Code != 200 {
+		if r := e.Web("GET", "/v1/executors", ""); r.Code != 200 {
 			t.Errorf("Web 登录后应能读设置: %d %s", r.Code, r.Body)
 		}
 		// 测试构建：`apa version`（离线、无凭据）与 GET /version 同一份内容，test_clock 为 true。

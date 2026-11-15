@@ -200,11 +200,11 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     ["/decisions", "决策待办", "决策待办"], ["/proposals", "建议流", "建议流"],
     ["/items", "事项", "事项"], ["/items/itm_1", "事项", "事项"], ["/pack-views", "事项", "事项"],
     ["/projects", "项目", "项目"], ["/materials", "项目", "材料"],
-    ["/agent-changes", "agent 动态", "改动"], ["/delegation", "agent 动态", "委派"], ["/runs", "诊断", "运行日志"],
+    ["/agent-changes", "agent 动态", "改动"], ["/delegation", "agent 动态", "委派"], ["/executors", "agent 动态", "执行者"], ["/runs", "诊断", "运行日志"],
     ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "抽查漏掉的"],
     ["/rules", "自动规则", "规则"], ["/judgment", "自动规则", "筛选门槛"],
     ["/health", "诊断", "状态"], ["/audit", "诊断", "操作记录"],
-    ["/settings", "设置", "我来拍板"], ["/settings-credentials", "设置", "接入钥匙"], ["/settings-exec", "设置", "执行者"],
+    ["/settings", "设置", "我来拍板"], ["/settings-credentials", "设置", "接入钥匙"], ["/settings-exec", "设置", "宿主接入"],
     ["/settings/grants", "设置", "临时授权"], ["/settings-security", "设置", "登录与会话"], ["/purge", "设置", "永久删除"],
     ["/settings/general", "设置", "通用"], ["/settings/notify", "设置", "提醒与打扰"], ["/settings/access", "设置", "后台权限"], ["/settings/models", "设置", "模型"],
   ];
@@ -311,7 +311,7 @@ describe("设置的分组（设计 §3.1）", () => {
     const sub = await screen.findByRole("navigation", { name: "设置页签" });
     expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "agent", "系统"]);
     expect(within(sub).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "通用", "提醒与打扰", "我来拍板", "后台权限", "临时授权", "接入钥匙", "执行者", "模型", "登录与会话", "永久删除",
+      "通用", "提醒与打扰", "我来拍板", "后台权限", "临时授权", "接入钥匙", "宿主接入", "模型", "登录与会话", "永久删除",
     ]);
     expect(within(sub).getByRole("link", { name: "提醒与打扰" })).toHaveAttribute("aria-current", "page");
   });

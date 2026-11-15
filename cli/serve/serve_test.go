@@ -756,7 +756,7 @@ echo '{"cursor":"c1"}'
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if code, body := s.do("GET", "/settings/executors", ""); code != 200 || !strings.Contains(body, "acme.cli") {
+	if code, body := s.do("GET", "/executors", ""); code != 200 || !strings.Contains(body, "acme.cli") {
 		t.Fatalf("host declaration not active: %d %s", code, body)
 	}
 	if code, body := s.do("GET", "/packs", ""); code != 200 || !strings.Contains(body, "inbound-triage") {

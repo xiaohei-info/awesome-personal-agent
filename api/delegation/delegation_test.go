@@ -367,3 +367,21 @@ func TestIdempotencyAndVersion(t *testing.T) {
 		t.Fatalf("status label = %q", e.item(child).StatusLabel)
 	}
 }
+
+// DELETE /executors/{id}：只有 Web 本人能移除名录条目；delegate 得 web_only，移除两次 404（§6.17）。
+func TestRemoveExecutorIsWebOnly(t *testing.T) {
+	e := setup(t)
+	if r := e.do("DELETE", "/v1/executors/"+workHost, "", e.token(auth.Delegate, "")); r.Code != 403 {
+		t.Fatalf("delegate remove: %d %s", r.Code, r.Body)
+	}
+	if r := e.do("DELETE", "/v1/executors/"+workHost, "", e.web); r.Code != 200 {
+		t.Fatalf("web remove: %d %s", r.Code, r.Body)
+	}
+	if r := e.do("DELETE", "/v1/executors/"+workHost, "", e.web); r.Code != 404 {
+		t.Fatalf("remove twice: %d %s", r.Code, r.Body)
+	}
+	rec := e.do("GET", "/v1/executors", "", e.token(auth.Observer, ""))
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), workHost) {
+		t.Fatalf("removed executor still listed: %d %s", rec.Code, rec.Body)
+	}
+}
