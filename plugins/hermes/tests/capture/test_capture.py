@@ -85,6 +85,13 @@ def log_text(tmp_path):
     return f.read_text() if f.exists() else ""
 
 
+def settled_unreachable(tmp_path):
+    """The helper that met a dead kernel is done: it logged the failure and put its claim back (.sending -> .json).
+    _send writes the .json before it claims it, so the file alone does not mean the attempt is over."""
+    pend = state(tmp_path) / "pending"
+    return ("unreachable" in log_text(tmp_path) and any(pend.glob("*.json")) and not any(pend.glob("*.sending")))
+
+
 def wait_for(cond, wait=15):
     import time
     end = time.time() + wait
@@ -115,7 +122,7 @@ def test_unreachable_kernel_keeps_request_and_resends_once_with_the_original_key
     env.setenv("APA_URL", "http://127.0.0.1:9")
     turn(hooks, "s", "keep me", "ok")
     hooks["on_session_end"](session_id="s")
-    assert wait_for(lambda: "unreachable" in log_text(tmp_path))
+    assert wait_for(lambda: settled_unreachable(tmp_path))
     kept = list((state(tmp_path) / "pending").glob("*.json"))
     assert len(kept) == 1
     key = kept[0].stem
@@ -136,7 +143,7 @@ def test_refused_resend_is_logged_and_dropped(hooks, kernel, env, tmp_path):
     env.setenv("APA_URL", "http://127.0.0.1:9")
     turn(hooks, "s", "kept", "x")
     hooks["on_session_end"](session_id="s")
-    assert wait_for(lambda: list((state(tmp_path) / "pending").glob("*.json")))
+    assert wait_for(lambda: settled_unreachable(tmp_path))
     env.setenv("APA_URL", kernel["url"])
     kernel["status"] = 400
     hooks["post_llm_call"](session_id="s", user_message="", assistant_response="")  # a hook with nothing new still re-sends
