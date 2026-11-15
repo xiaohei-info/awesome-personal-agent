@@ -1,10 +1,11 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
 import { backlogReason } from "./shared";
+import { setChoice } from "../../app/i18n";
 
 // 测试边界替身：按 api/sources 的契约应答（/sources、PATCH enabled、webhook 密钥、ingests、replay、
 // 来源事件按 disposition 分页、拒收记录分页、转建议；错误体见附录 B.3）。业务规则在服务端，这里只复现它的可观察行为。
@@ -54,6 +55,12 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
       if (!e) return err(404, "not_found", "event not found");
       const tier = (material: string, link: string) => ({ event_type: e.type, subject: e.subject ?? "", sender: "someone@example.com", occurred_at: e.occurred_at, link, material });
       return json(200, { full: tier("full body " + e.id + " and the rest", "https://example.com/x/1"), excerpt: tier("full body " + e.id, "example.com"), meta: tier("", "example.com") });
+    }
+    if (u.pathname === "/v1/sources/declared-name") {
+      // 替身的接入声明：只有 apple-pim-source 声明了名字（按 source_type 选），其余程序没有
+      const cmd = u.searchParams.get("command") ?? "";
+      if (!cmd.endsWith("apple-pim-source")) return json(200, { name: null });
+      return json(200, { name: u.searchParams.get("source_type") === "calendar" ? { zh: "Apple 日历", en: "Apple Calendar" } : { zh: "Apple 邮件", en: "Apple Mail" } });
     }
     if (u.pathname === "/v1/sources" && method === "GET") return json(200, { sources });
     if (u.pathname === "/v1/sources" && method === "POST") {
@@ -468,6 +475,7 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     await screen.findByText("高级");
     await openAdvanced();
     const f = await screen.findByRole("region", { name: "自定义命令来源" });
+    await userEvent.type(within(f).getByLabelText("名字"), "巡检"); // 替身程序没有接入声明，要本人起名
     await userEvent.type(within(f).getByLabelText("内部标识"), id);
     await userEvent.type(within(f).getByLabelText("命令"), cmd);
     return f;
@@ -481,9 +489,9 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "excerpt");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     const post = b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!;
-    expect(post.body).toEqual({ id: "src_check", name: "自定义脚本", type: "script", command: "/opt/check.sh", schedule: "15m", timeout: 30 });
+    expect(post.body).toEqual({ id: "src_check", name: "巡检", type: "script", command: "/opt/check.sh", schedule: "15m", timeout: 30 });
     expect(post.csrf).toBe("tok-1");
-    await row("自定义脚本");
+    await row("巡检");
     expect(within(f).getByLabelText("内部标识")).toHaveValue("");
   });
 
@@ -497,7 +505,7 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     await userEvent.selectOptions(within(f).getByLabelText("单位"), "h");
     await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "none");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
-    await row("自定义脚本");
+    await row("巡检");
     expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body.schedule).toBe("2h");
   });
 
@@ -509,7 +517,7 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     expect(await within(f).findByRole("alert")).toHaveTextContent("only be registered in the Web UI");
     expect(within(f).getByLabelText("命令")).toHaveValue("/tmp/evil.sh");
-    expect(screen.queryByRole("listitem", { name: "自定义脚本" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listitem", { name: "巡检" })).not.toBeInTheDocument();
   });
 
   it("缺必填项时不能提交", async () => {
@@ -530,6 +538,7 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
       await screen.findByText("高级");
       await openAdvanced();
       const f = await screen.findByRole("region", { name: "自定义命令来源" });
+      await userEvent.type(within(f).getByLabelText("名字"), "验收来源");
       await userEvent.type(within(f).getByLabelText("内部标识"), "src_obd");
       await userEvent.selectOptions(within(f).getByLabelText("这是什么"), "其他…");
       await userEvent.type(within(f).getByLabelText("类型名"), "acc-obd");
@@ -544,13 +553,13 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
 
     await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "full");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
-    const r = await row("自定义脚本");
+    const r = await row("验收来源");
     expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body).toMatchObject({ source_type: "acc-obd" });
     const put = b.calls.find((c) => c.method === "PUT")!;
     expect(put.path).toBe("/v1/settings/sources/src_obd/outbound");
     expect(put.body).toEqual({ local: "full", external: "full" });
     expect(put.csrf).toBe("tok-1");
-    await waitFor(() => expect(r.getByRole("group", { name: "自定义脚本 的外发范围" })).toHaveTextContent("发给本机模型时 全部内容 · 发给外部模型时 全部内容"));
+    await waitFor(() => expect(r.getByRole("group", { name: "验收来源 的外发范围" })).toHaveTextContent("发给本机模型时 全部内容 · 发给外部模型时 全部内容"));
   });
 
   it("显示服务端的两个范围；外部未选的直接展开且标「还没选 · n 条在等」；已选的点修改才展开", async () => {
@@ -611,12 +620,13 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
     await screen.findByText("高级");
     await openAdvanced();
     const f = await screen.findByRole("region", { name: "自定义命令来源" });
+    await userEvent.type(within(f).getByLabelText("名字"), "巡检");
     await userEvent.type(within(f).getByLabelText("内部标识"), "src_p");
     await userEvent.type(within(f).getByLabelText("命令"), "/opt/p.sh");
     await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "none");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     expect(await within(f).findByRole("alert")).toHaveTextContent(/来源已登记，外发范围没存上.*store is unavailable/);
-    expect(await row("自定义脚本")).toBeTruthy();
+    expect(await row("巡检")).toBeTruthy();
   });
 });
 
@@ -814,26 +824,43 @@ describe("来源的显示名（§9.1）", () => {
     expect(patches.every((c) => c.csrf === "tok-1")).toBe(true);
   });
 
-  it("新登记第一步起名：预填内核会起的名字，随类型变化、同类已有时加序号；改过就以本人写的为准", async () => {
-    const mail: Src = { id: "src_mail", name: "邮件", type: "script", enabled: true };
-    const b = backend({ sources: [mail] });
+  it("新登记第一步起名：按界面语言预填来源程序声明的名字，随命令与类型变化；改过就以本人写的为准；没有声明时必须自己起", async () => {
+    const b = backend({ sources: [{ id: "src_mail", name: "邮件", type: "script", enabled: true }] });
     mount(b.impl);
     await screen.findByText("高级");
     await openAdvanced();
     const f = within(await screen.findByRole("region", { name: "自定义命令来源" }));
     const name = f.getByLabelText("名字");
-    expect(name).toHaveValue("自定义脚本");
-    await userEvent.selectOptions(f.getByLabelText("这是什么"), "邮件");
-    expect(name).toHaveValue("邮件 2");
-    await userEvent.clear(name);
-    await userEvent.type(name, "QQ 邮箱");
-    await userEvent.selectOptions(f.getByLabelText("这是什么"), "日历");
-    expect(name).toHaveValue("QQ 邮箱");
-    await userEvent.type(f.getByLabelText("内部标识"), "src_mail_qq");
+    // 没有声明的程序：名字留空并提示，不起名就不发登记请求
     await userEvent.type(f.getByLabelText("命令"), "/opt/qq.sh");
+    await waitFor(() => expect(b.calls.some((c) => c.path.startsWith("/v1/sources/declared-name?") && c.path.includes("command=%2Fopt%2Fqq.sh"))).toBe(true));
+    expect(name).toHaveValue("");
+    expect(name).toHaveAttribute("placeholder", "这个程序没有声明名字，请起一个");
+    await userEvent.type(f.getByLabelText("内部标识"), "src_mail_qq");
     await userEvent.selectOptions(f.getByLabelText("发给外部模型时"), "none");
     await userEvent.click(f.getByRole("button", { name: "登记" }));
+    expect(await f.findByRole("alert")).toHaveTextContent("请给这个来源起个名字");
+    expect(b.calls.some((c) => c.method === "POST" && c.path === "/v1/sources")).toBe(false);
+    // 有声明的程序：预填声明名，随类型变化；界面切到英文时预填英文那一份
+    await userEvent.clear(f.getByLabelText("命令"));
+    await userEvent.type(f.getByLabelText("命令"), "apple-pim-source");
+    await waitFor(() => expect(name).toHaveValue("Apple 邮件"));
+    await userEvent.selectOptions(f.getByLabelText("这是什么"), "日历");
+    await waitFor(() => expect(name).toHaveValue("Apple 日历"));
+    act(() => setChoice("en"));
+    try {
+      await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Apple Calendar"));
+    } finally {
+      act(() => setChoice("zh"));
+    }
+    // 本人改过就以本人写的为准，换命令也不覆盖
+    await userEvent.clear(name);
+    await userEvent.type(name, "QQ 邮箱");
+    await userEvent.clear(f.getByLabelText("命令"));
+    await userEvent.type(f.getByLabelText("命令"), "/opt/qq.sh");
+    expect(name).toHaveValue("QQ 邮箱");
+    await userEvent.click(f.getByRole("button", { name: "登记" }));
     await row("QQ 邮箱");
-    expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body).toMatchObject({ id: "src_mail_qq", name: "QQ 邮箱", source_type: "calendar" });
+    expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body).toMatchObject({ id: "src_mail_qq", name: "QQ 邮箱", source_type: "calendar", command: "/opt/qq.sh" });
   });
 });

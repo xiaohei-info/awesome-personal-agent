@@ -655,18 +655,3 @@ const en: typeof zh = {
 };
 
 export const vocab: Dict<typeof zh> = { zh, en };
-
-/** 来源的兜底显示名（§9.1）：这些名字由内核生成并存进来源登记，不随界面语言变化（与本人起的名字同属数据）。
- * 没给名字时内核按 source_type 起名（cli/serve/assemble.go sourceKindNames），
- * 没有对应名字的按来源类型（kernel/sources/registry typeNames）。新登记表单据此预填；ids.check 对照两处防漂移。 */
-export const SOURCE_KIND_NAME: Record<string, string> = { mail: "邮件", calendar: "日历", reminder: "提醒事项", github: "GitHub" };
-export const SOURCE_TYPE_NAME: Record<string, string> = { pull: "定时拉取", script: "自定义脚本", webhook: "外部推送" };
-
-/** 内核会起的名字：基础名已被占用（不区分大小写）时依次加序号「邮件 2」「邮件 3」。与 registry.fallbackName 同一规则。 */
-export function fallbackSourceName(kind: string | undefined, type: string, taken: readonly string[]): string {
-  const base = (kind && SOURCE_KIND_NAME[kind]) || SOURCE_TYPE_NAME[type] || "";
-  const used = new Set(taken.map((n) => n.toLowerCase()));
-  let name = base;
-  for (let i = 2; used.has(name.toLowerCase()); i++) name = `${base} ${i}`;
-  return name;
-}

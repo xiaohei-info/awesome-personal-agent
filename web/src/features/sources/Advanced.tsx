@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
-import { errorText, useT } from "../../app/i18n";
+import { errorText, useLang, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { useRaw } from "../../app/raw";
 import { Pick } from "../../app/values";
-import { fallbackSourceName } from "../../app/vocab";
 import { strings } from "./strings";
 import { when, type Source } from "./shared";
 
@@ -295,11 +294,30 @@ export function Registration({ sources, onDone }: { sources: Source[]; onDone: (
   const [error, setError] = useState<unknown>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
   const sourceType = f.kind === OTHER ? f.custom.trim() : f.kind;
-  // 第一步起名：没动过时预填内核会起的名字（§9.1），随类型变化；动过就以本人写的为准。
-  const name = f.name ?? fallbackSourceName(sourceType, "script", sources.map((s) => s.name));
+  // 第一步起名：没动过时按界面语言预填来源程序接入声明的名字（§9.1），随命令变化；动过就以本人写的为准。没有声明时要本人起。
+  const lang = useLang();
+  const [declared, setDeclared] = useState<{ zh: string; en: string } | null>(null);
+  const command = f.command.trim();
+  useEffect(() => {
+    if (!command) return setDeclared(null);
+    let live = true;
+    const q = new URLSearchParams({ type: "script", command, source_type: sourceType });
+    api.get<{ name: { zh: string; en: string } | null }>(`/sources/declared-name?${q}`).then(
+      (r) => live && setDeclared(r.name),
+      () => live && setDeclared(null), // 取不到预填不挡登记：本人照样可以自己起名
+    );
+    return () => {
+      live = false;
+    };
+  }, [api, command, sourceType]);
+  const name = f.name ?? declared?.[lang] ?? "";
 
   const submit = async () => {
     setError(null);
+    if (!name.trim()) {
+      setError(new Error(t.needName));
+      return;
+    }
     if (!f.external) {
       setError(new Error(t.needExternal));
       return;
@@ -336,7 +354,7 @@ export function Registration({ sources, onDone }: { sources: Source[]; onDone: (
       >
         <label>
           {t.name}
-          <input value={name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          <input value={name} maxLength={40} placeholder={declared ? undefined : t.namePlaceholder} onChange={(e) => setF({ ...f, name: e.target.value })} />
         </label>
         <label>
           {t.id}

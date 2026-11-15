@@ -146,6 +146,8 @@ const zh = {
   choose: "请选择",
   register: "登记",
   needExternal: "请选好「发给外部模型时」",
+  needName: "请给这个来源起个名字",
+  namePlaceholder: "这个程序没有声明名字，请起一个",
   scopeNotSaved: (e: string) => `来源已登记，外发范围没存上：${e}`,
 };
 
@@ -287,6 +289,8 @@ const en: typeof zh = {
   choose: "Choose",
   register: "Add",
   needExternal: 'Choose "To outside models" first',
+  needName: "Give this source a name",
+  namePlaceholder: "This program declares no name; give it one",
   scopeNotSaved: (e) => `Source added, but what it may send was not saved: ${e}`,
 };
 
