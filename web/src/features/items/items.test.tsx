@@ -4,13 +4,14 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
+import { traceRoute } from "../trace/testing";
 
 // 测试边界替身：按 api/items、api/why 的契约应答（版本冲突 409、阶段进入约束 400、错误体见附录 B.3），
 // 写入后追加 Event（Web 会话 = human/web），与 CLI 共用同一份"账本"。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "re-read the item and retry" });
 
-interface Ev { seq: number; type: string; object: string; actor: { type: string; principal: string; via: string }; at: string; reason?: string; chain_depth: number }
+interface Ev { seq: number; type: string; object: string; actor: { type: string; principal: string; via: string }; at: string; reason?: string; chain_depth: number; to?: string; fields?: string[] }
 interface It { id: string; phase: string; version: number; kind: string; title: string; status_label?: string; tags?: string[]; deadline?: string | null; waiting_on?: { kind: string; ref: string } }
 
 const AGENT = { type: "agent", principal: "del-1", via: "cli" };
@@ -27,8 +28,8 @@ function ledger() {
     { seq: 2, type: "item.created", object: "item_b", actor: AGENT, at: "2030-01-01T00:01:00Z", chain_depth: 0 },
   ];
   const calls: { method: string; path: string; body?: any; csrf: string | null; ifMatch: string | null }[] = [];
-  const push = (type: string, object: string, reason?: string) =>
-    events.push({ seq: events.length + 1, type, object, actor: HUMAN, at: "2030-01-02T00:00:00Z", reason, chain_depth: 0 });
+  const push = (type: string, object: string, reason?: string, more: Partial<Ev> = {}) =>
+    events.push({ seq: events.length + 1, type, object, actor: HUMAN, at: "2030-01-02T00:00:00Z", reason, chain_depth: 0, ...more });
 
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -42,8 +43,8 @@ function ledger() {
       return json(200, { items: items.filter((i) => (!phase || i.phase === phase) && (!q || i.title.includes(q))) });
     }
     if (/^\/v1\/items\/[^/]+\/messages$/.test(url)) return json(200, { messages: [] });
-    const why = url.match(/^\/v1\/why\/(.+)$/);
-    if (why) return json(200, { id: why[1], steps: events.filter((e) => e.object === why[1]) });
+    const tr = traceRoute(url, events);
+    if (tr) return tr;
     const m = url.match(/^\/v1\/items\/([^/]+)(?:\/(transition|relations))?$/);
     if (!m) return err(404, "not_found", "no such route");
     const it = items.find((i) => i.id === m[1]);
@@ -60,12 +61,12 @@ function ledger() {
       it.phase = body.to;
       if (body.waiting_on) it.waiting_on = body.waiting_on;
       it.version++;
-      push("item.phase_changed", it.id, body.reason);
+      push("item.phase_changed", it.id, body.reason, { to: body.to });
       return json(200, { id: it.id, version: it.version });
     }
     Object.assign(it, body);
     it.version++;
-    push("item.updated", it.id);
+    push("item.updated", it.id, undefined, { fields: Object.keys(body).filter((k) => k !== "reason") });
     return json(200, { id: it.id, version: it.version });
   }) as unknown as typeof fetch;
   return { impl, items, rels, calls, events, bump: (id: string) => items.find((i) => i.id === id)!.version++ };
@@ -80,19 +81,19 @@ function mount(fetchImpl: typeof fetch, path = "/items") {
   );
 }
 
-const timeline = async () => within(await screen.findByRole("list", { name: "时间线" }));
+const timeline = async () => within(await screen.findByRole("list", { name: "处理经过" }));
 
 beforeEach(() => sessionStorage.clear());
 
 describe("事项列表与详情（ACT-ITEM-01）", () => {
-  it("CLI 建的事项在 Web 可见：标题、阶段 open、agent 操作者徽章、创建记录", async () => {
+  it("CLI 建的事项在 Web 可见：标题、阶段 open，经过里一句「Agent（凭据名）· 新建了」", async () => {
     mount(ledger().impl);
     await userEvent.click(await screen.findByRole("link", { name: "item-a" }));
     expect(await screen.findByText("阶段：进行中")).toBeInTheDocument();
     const tl = await timeline();
     expect(tl.getAllByRole("listitem")).toHaveLength(1);
-    expect(tl.getByText("新建了事项")).toBeInTheDocument();
-    expect(tl.getByLabelText("操作者")).toHaveTextContent("agent · 命令行 · del-1");
+    expect(tl.getByRole("listitem")).toHaveTextContent(/^Agent（del-1）新建了/);
+    expect(tl.getByRole("listitem").textContent).not.toMatch(/item\.created|item_a/); // 不露事件名与 id
   });
 
   it("读取失败时显示服务端的原因，不显示空列表", async () => {
@@ -116,7 +117,7 @@ describe("改 status_label（ACT-ITEM-02）", () => {
     expect(l.items[0]).toMatchObject({ status_label: "review", version: 2 }); // CLI 读同一份账本
     const tl = await timeline();
     expect(tl.getAllByRole("listitem")).toHaveLength(2);
-    expect(tl.getAllByLabelText("操作者")[1]).toHaveTextContent(/^你 · 网页$/);
+    expect(tl.getAllByRole("listitem")[1]).toHaveTextContent(/^你改了状态标签/);
   });
 
   it("别处已改过（409）：显示冲突原因，页面状态不被覆盖", async () => {

@@ -116,7 +116,9 @@ const (
 	KDecision  = "decision" // args: state（requested、resolved）
 	KFollow    = "follow"   // 后续消息；args: message, subject, state（attached、processed、handed_back、released）
 	KObserved  = "observed" // 规则试运行；args: rule
-	KRun       = "run"      // args: state（started、finished）
+	KRun       = "run"      // Agent 后台运行；args: state（started、finished）
+	KGenerated = "generated" // 写作模型的一次生成（如一句话摘要）；args: state（succeeded、failed）、template
+	KAlert     = "alert"     // 系统告警（详情在健康视图）
 	KDelegated = "delegated"
 	KDispatch  = "dispatched"       // args: executor, harness, state
 	KDispUpd   = "dispatch_updated" // args: state
@@ -728,9 +730,18 @@ func (b builder) item(id string, fromMessage bool) ([]Entry, error) {
 				e.Who = Who{Kind: WhoRule, Name: ruleName(observedRule(en.Event.Payload))}
 			}
 		case t == domain.EvRunStarted || t == domain.EvRunFinished:
+			var rp struct{ Category, State, Template string }
+			_ = json.Unmarshal(en.Event.Payload, &rp)
 			e.Kind, e.Mech, e.Args = KRun, true, map[string]any{"state": strings.TrimPrefix(t, "run.")}
+			if rp.Category != string(domain.RunBackground) && rp.Category != string(domain.RunTask) { // 写作模型的调用不是 Agent 运行
+				e.Who, e.Kind, e.Args = Who{Kind: WhoModel, Role: RoleGenerate}, KGenerated, map[string]any{"state": rp.State, "template": rp.Template}
+			}
+		case t == domain.EvHealthAlert:
+			e.Who, e.Kind, e.Mech = Who{Kind: WhoSystem}, KAlert, true
 		case t == domain.EvCommandRejected:
 			e.Kind = KRejected
+		case t == domain.EvDelegationCreated || t == domain.EvDelegationReported || t == evDispatched || t == evDispatchUpd:
+			e = delegationEntry(e, t, p) // 子事项自己的经过：与它在父事项经过里的几行同一写法
 		default:
 			e.Kind, e.Args = KEvent, map[string]any{"type": t}
 		}
@@ -765,19 +776,9 @@ func (b builder) child(k domain.Item) ([]Entry, error) {
 		var p itemPayload
 		_ = json.Unmarshal(en.Event.Payload, &p)
 		e := Entry{At: en.Event.At, Who: b.who(en), Item: ref, Steps: b.steps(en)}
-		switch en.Event.Type {
-		case domain.EvDelegationCreated:
-			e.Kind, e.Args = KDelegated, map[string]any{"assignee": snap(p.Item).Assignee}
-		case evDispatched, evDispatchUpd:
-			e.Kind, e.Args = KDispatch, map[string]any{}
-			if en.Event.Type == evDispatchUpd {
-				e.Kind, e.Mech = KDispUpd, true
-			}
-			if p.Dispatch != nil {
-				e.Args = map[string]any{"executor": p.Dispatch.Executor, "harness": p.Dispatch.Harness, "state": p.Dispatch.State}
-			}
-		case domain.EvDelegationReported:
-			e.Kind, e.Args = KReported, map[string]any{"phase": snap(p.Item).Phase, "assignee": snap(p.Item).Assignee}
+		switch t := en.Event.Type; t {
+		case domain.EvDelegationCreated, evDispatched, evDispatchUpd, domain.EvDelegationReported:
+			e = delegationEntry(e, t, p)
 		case domain.EvCommandRejected:
 			e.Kind = KRejected
 		default:
@@ -786,6 +787,25 @@ func (b builder) child(k domain.Item) ([]Entry, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// delegationEntry 写委派的一行：派出、开工、进度、交回。
+func delegationEntry(e Entry, t string, p itemPayload) Entry {
+	switch t {
+	case domain.EvDelegationCreated:
+		e.Kind, e.Args = KDelegated, map[string]any{"assignee": snap(p.Item).Assignee}
+	case domain.EvDelegationReported:
+		e.Kind, e.Args = KReported, map[string]any{"phase": snap(p.Item).Phase, "assignee": snap(p.Item).Assignee}
+	default:
+		e.Kind, e.Args = KDispatch, map[string]any{}
+		if t == evDispatchUpd {
+			e.Kind, e.Mech = KDispUpd, true
+		}
+		if p.Dispatch != nil {
+			e.Args = map[string]any{"executor": p.Dispatch.Executor, "harness": p.Dispatch.Harness, "state": p.Dispatch.State}
+		}
+	}
+	return e
 }
 
 // follow 是事项上的一条后续消息：挂上、已处理、交回或退回。
@@ -807,6 +827,9 @@ func (b builder) follow(en eventlog.Entry, state string) (Entry, error) {
 		switch m, err := runner.Event(b.tx, p.Message); {
 		case err == nil:
 			e.Args["subject"] = m.Subject
+			if r := []rune(m.Summary); len(r) > 0 { // 评论等后续消息的标题常是所属对象的标题，正文才区分得开
+				e.Args["text"] = string(r[:min(len(r), 60)])
+			}
 			if state == "attached" {
 				e.Who = Who{Kind: WhoSource, Name: m.SourceID}
 			}
@@ -828,7 +851,7 @@ func (b builder) who(en eventlog.Entry) Who {
 		return Who{Kind: WhoRule, Name: ruleName(strings.TrimPrefix(a.Principal, "rule:"))}
 	case a.Type == domain.ActorAgent:
 		return Who{Kind: WhoAgent, Name: a.Principal}
-	case en.Event.Basis != nil && en.Event.Basis.RuleID != "":
+	case a.Via == domain.ViaRule && en.Event.Basis != nil && en.Event.Basis.RuleID != "": // 只认规则写入；其他记录的 basis 可能只是模板
 		return Who{Kind: WhoRule, Name: ruleName(en.Event.Basis.RuleID)}
 	}
 	return Who{Kind: WhoSystem}

@@ -14,6 +14,7 @@ import { ErrorNote } from "../../app/errors";
 import { EntityPick, useItemTitle, useNames } from "../../app/names";
 import { ViewTable, useViews } from "./TypeViews";
 import { HandOff, tagName } from "./HandOff";
+import { TraceView } from "../trace/Trace";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -160,7 +161,7 @@ function ItemList() {
   );
 }
 
-interface Detail { item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; steps: Step[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string }[] }
+interface Detail { item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string }[] }
 
 function ItemDetail() {
   const t = useT(strings);
@@ -176,12 +177,11 @@ function ItemDetail() {
 
   const load = useCallback(async () => {
     const eid = encodeURIComponent(id);
-    const [it, why, list] = await Promise.all([
+    const [it, list] = await Promise.all([
       api.get<{ item: Item; relations: Relation[]; correlation_keys?: { key: string; domain?: string }[]; progress?: Detail["progress"] }>("/items/" + eid),
-      api.get<{ steps: Step[] }>("/why/" + eid),
       api.get<{ items: Item[] }>("/items"),
     ]);
-    setD({ item: it.item, relations: it.relations, keys: it.correlation_keys ?? [], steps: why.steps, progress: it.progress ?? [], others: list.items.filter((i) => i.id !== id) });
+    setD({ item: it.item, relations: it.relations, keys: it.correlation_keys ?? [], progress: it.progress ?? [], others: list.items.filter((i) => i.id !== id) });
   }, [api, id]);
 
   useEffect(() => {
@@ -278,14 +278,7 @@ function ItemDetail() {
 
       <section aria-label={t.changes}>
         <h2>{t.timeline}</h2>
-        <ol aria-label={t.timeline} className="rows">
-          {d.steps.map((s) => (
-            <li key={s.seq}>
-              <ActorBadge actor={s.actor} /> <strong><Val k="event" id={s.type} /></strong> <time dateTime={s.at}>{new Date(s.at).toLocaleString(locale())}</time>
-              {s.reason ? ` — ${s.reason}` : ""}
-            </li>
-          ))}
-        </ol>
+        <TraceView path={path + "/trace"} rev={item.version} />
       </section>
     </main>
   );

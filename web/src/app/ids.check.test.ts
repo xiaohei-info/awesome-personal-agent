@@ -115,6 +115,17 @@ describe("ids.ts 覆盖内核取值", () => {
   });
 });
 
+// 事件类型分散在各模块里定义（Ev 开头的常量）：任何一种都要在 EVENT 或 EVENT_INTERNAL 里，否则处理经过与审计页会露出内部名字。
+const goAll = import.meta.glob(["../../../kernel/**/*.go", "../../../api/**/*.go", "!**/*_test.go"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+describe("事件类型都有显示名", () => {
+  it("内核与接口层定义的每种事件类型都在 ids.ts 里", () => {
+    const found = new Set(Object.values(goAll).flatMap((text) => all(text, /^(?:\s*|const\s+)Ev\w*\s*(?:\w+\s*)?=\s*"([a-z_]+\.[a-z_]+)"/gm)));
+    expect(found.size, "没读到事件类型：检查 glob 与常量写法").toBeGreaterThan(50);
+    const known = new Set<string>([...I.EVENT, ...I.EVENT_INTERNAL]);
+    expect([...found].filter((e) => !known.has(e)), "在 ids.ts 的 EVENT_INTERNAL 里加上，并在 vocab.ts 的 event 里写中英两份").toEqual([]);
+  });
+});
+
 // 筛选门槛页的拖线起点：内置模板的 band 与包文件一致。
 const prompts = import.meta.glob("../../../packs/*/prompts/*.md", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 describe("PACK_BAND 与内置包的 band 一致", () => {

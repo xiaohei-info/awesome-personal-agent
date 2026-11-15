@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError, type ApiClient } from "../../app/api";
 import { useSession } from "../../app/session";
 import { COUNTS_EVENT, PageHead } from "../../app/page";
@@ -77,7 +78,11 @@ function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejectio
             </span>
           )}
           {p.recommend && " · "}
-          <span>{t.sources(p.sources?.length ?? 0)}</span>
+          {p.sources?.length ? (
+            <Link to={p.sources.length === 1 ? "/sources/events/" + encodeURIComponent(p.sources[0]) : "/items/" + encodeURIComponent(item.id)}>{t.sources(p.sources.length)}</Link>
+          ) : (
+            <span>{t.sources(0)}</span>
+          )}
           {p.low_confidence && <> · <strong>{t.lowConfidence}</strong></>}
         </p>
       )}

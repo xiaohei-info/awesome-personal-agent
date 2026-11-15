@@ -108,7 +108,7 @@
 | N-30 | 三个只读接口 | `GET /deliveries/today`（今天经渠道推送的条数与上限，与日上限同一口径）、`GET /source-events/{id}/outbound-preview`（一条来源事件在各外发范围下实际会送出的内容，与外发裁剪同源）、`GET /rules` 每项加 `class`（提醒类或动作类）、`GET /health` 的 `unjudged_backlog.detail` 加 `rejudge_days`（运行配置的自动重判窗口，0 为关闭）；都不写 Event | 附录 B.2、B.6 |
 | N-31 | Web 取值词表与设置分页 | 内核取值在界面上只显示词表里的名字，ID 只在"显示原始值"（设置 › 通用，存在浏览器本地）里可见；错误按错误码显示中文；词表中英两份，缺词构建失败，与内核取值的对照由检查守住。设置按本人要做的事分页（提醒与打扰、我来拍板、后台权限等），旧地址不变、请求体不变 | §4.1、§21.1 决定 49 |
 | N-32 | 来源显示名与接入声明 | 每个来源有本人认得的名字，界面处处按名字称呼，id 只在"显示原始值"里；仓库自带的来源程序带接入声明（`source.yaml`），登记不带名字时取声明的名字，同一程序的多个实例按 `config` 取名不同；都没有时拒绝登记；`source.rename` 改名，记 `source.renamed`；`GET /sources/declared-name` 供新登记表单预填 | §9.1、附录 B.1、B.2、附录 D.1 |
-| N-33 | 处理经过 | 一条来源消息从哪进来、规则还是判断模型筛的（门槛哪一段）、结果、起草成败、后来本人与 Agent 做了什么，一行一句；事项的经过开头接上它来自的消息，并进派出去的子事项。`GET /source-events/{id}/trace`、`GET /items/{id}/trace`；入站处置载荷新增 `draft`；抽检结论另记 `inbound.spot_reviewed`；`GET /sources/{id}/events` 新增 `sort=recent` | §8.10、§9.3、§15.1、附录 B.2、B.6 |
+| N-33 | 处理经过 | Web：来源详情的"最近的消息"点一行展开经过，`/sources/events/<id>` 单独打开；事项详情的"时间线"改为"经过"，开头接上来源消息。一条来源消息从哪进来、规则还是判断模型筛的（门槛哪一段）、结果、起草成败、后来本人与 Agent 做了什么，一行一句；事项的经过开头接上它来自的消息，并进派出去的子事项。`GET /source-events/{id}/trace`、`GET /items/{id}/trace`；入站处置载荷新增 `draft`；抽检结论另记 `inbound.spot_reviewed`；`GET /sources/{id}/events` 新增 `sort=recent` | §8.10、§9.3、§15.1、附录 B.2、B.6 |
 
 **迁移**（只有八条涉及已有契约）：
 

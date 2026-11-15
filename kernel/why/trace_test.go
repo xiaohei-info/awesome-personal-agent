@@ -324,6 +324,10 @@ func TestTraceItemWithDelegation(t *testing.T) {
 	if u := tr.Entries[6]; !u.Mech || u.Args["state"] != "ended" {
 		t.Fatalf("dispatch_updated %+v", u)
 	}
+	// 子事项自己的经过与它在父事项里的几行同一写法。
+	if got := kinds(e.trace(child, authz.LevelWeb).Entries); got != "delegated,dispatched,dispatch_updated" {
+		t.Fatalf("child kinds %s", got)
+	}
 	// observer 只见信封：原始记录不带 reason 与 payload。
 	for _, en := range e.trace(it, authz.LevelObserver).Entries {
 		for _, s := range en.Steps {
@@ -344,5 +348,35 @@ func TestTraceEventTypesMatchProducers(t *testing.T) {
 		if got != want {
 			t.Errorf("%q != %q", got, want)
 		}
+	}
+}
+
+// 写作模型替事项写一句话摘要失败：是写作模型的一次生成与一条告警，不是规则，也不是 Agent 后台运行。
+func TestTraceGenerateCallIsNotARule(t *testing.T) {
+	e := traceEnv(t)
+	it := e.item("修登录", domain.PhaseOpen, "", 0, owner, "created")
+	clockActor := domain.Actor{Type: domain.ActorSystem, Principal: "kernel:summaries", Via: domain.ViaClock}
+	e.do(func(tx *store.Tx) error {
+		for _, ev := range []domain.Event{
+			{Type: domain.EvRunFinished, Object: it, Actor: clockActor, Reason: "generate failed", Payload: json.RawMessage(`{"category":"generate","state":"failed","template":"one-line-summary"}`),
+				Basis: &domain.Basis{RuleID: "decision-card/one-line-summary"}, At: t0.Add(time.Minute)},
+			{Type: domain.EvHealthAlert, Object: it, Actor: clockActor, Reason: "one-line-summary draft failed", Payload: json.RawMessage(`{}`),
+				Basis: &domain.Basis{RuleID: "decision-card/one-line-summary"}, At: t0.Add(time.Minute)},
+		} {
+			if _, err := eventlog.Append(tx, ev); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	tr := e.trace(it, authz.LevelWeb)
+	if got := kinds(tr.Entries); got != "created,generated,alert" {
+		t.Fatalf("kinds %s", got)
+	}
+	if g := tr.Entries[1]; g.Who != (Who{Kind: WhoModel, Role: RoleGenerate}) || g.Args["state"] != "failed" || !g.Mech {
+		t.Fatalf("generated %+v", g)
+	}
+	if a := tr.Entries[2]; a.Who.Kind != WhoSystem {
+		t.Fatalf("alert %+v", a)
 	}
 }
