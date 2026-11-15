@@ -8,11 +8,12 @@ import { Markdown } from "./Markdown";
 import { ProgressForm } from "../today/ProgressForm";
 import { locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
-import { PHASE, WAITING } from "../../app/ids";
+import { HANDOFF_TAG, PHASE, WAITING } from "../../app/ids";
 import { Pick, Val, useLabel } from "../../app/values";
 import { ErrorNote } from "../../app/errors";
 import { EntityPick, useItemTitle, useNames } from "../../app/names";
 import { ViewTable, useViews } from "./TypeViews";
+import { HandOff, tagName } from "./HandOff";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -120,7 +121,7 @@ function ItemList() {
         {t.tagFilter}
         <select value={tag} onChange={(e) => setTag(e.target.value)}>
           <option value="">{t.all}</option>
-          {tags.map((t) => <option key={t}>{t}</option>)}
+          {tags.map((x) => <option key={x} value={x}>{tagName(x, t.handoffName)}</option>)}
         </select>
       </label>
       <label>
@@ -150,7 +151,7 @@ function ItemList() {
           <li key={i.id}>
             <Link to={i.id}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
             <span className="sub">
-              {[i.status_label, i.tags?.map((t) => "#" + t).join(" "), i.deadline && t.due(new Date(i.deadline).toLocaleString(locale()))].filter(Boolean).join(" · ")}
+              {[i.status_label, i.tags?.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" "), i.deadline && t.due(new Date(i.deadline).toLocaleString(locale()))].filter(Boolean).join(" · ")}
             </span>
           </li>
         ))}
@@ -217,7 +218,7 @@ function ItemDetail() {
         <p>{t.deadline(item.deadline ? new Date(item.deadline).toLocaleString(locale()) : t.notSet)}</p>
         {item.project ? <p>{t.project(projectName(item.project))}</p> : null}
         {item.planned_for ? <p>{t.planned(item.planned_for)}</p> : null}
-        {item.tags?.length ? <p>{t.tags(item.tags.join(t.listSep))}</p> : null}
+        {item.tags?.some((x) => x !== HANDOFF_TAG) ? <p>{t.tags(item.tags.filter((x) => x !== HANDOFF_TAG).join(t.listSep))}</p> : null}
       </div>
       {item.body ? <Markdown source={item.body} /> : null}
       {actErr != null && <ErrorNote error={actErr} />}
@@ -232,6 +233,9 @@ function ItemDetail() {
         />
       ) : (
         <p><button type="button" onClick={() => setEditing(true)}>{t.edit}</button></p>
+      )}
+      {item.kind === "task" && !["done", "dropped"].includes(item.phase) && (
+        <HandOff key={"h" + item.version} item={item} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
       )}
       <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
       <DeadlineForm key={"d" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { deadline: v }, ifMatch))} />

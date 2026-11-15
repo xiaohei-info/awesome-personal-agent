@@ -286,7 +286,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     "review/scheduled-review": { label: "按时写复盘" },
     "routine/scheduled-routine": { label: "按时做例行任务" },
     "guideline-draft/guideline-check": { label: "项目缺规范时起草一份" },
-    "background-run/handle-labelled": { label: "带 agent-ok 标签的事项自动开工" },
+    "background-run/handle-labelled": { label: "我交给 Agent 的事项自动开工" },
     "delegation-verify/verify-report": { label: "执行者交回结果时问我要不要核实" },
   },
   viewField: {
@@ -574,7 +574,7 @@ const en: typeof zh = {
     "review/scheduled-review": { label: "Write reviews on schedule" },
     "routine/scheduled-routine": { label: "Run routines on schedule" },
     "guideline-draft/guideline-check": { label: "Draft a guideline when a project has none" },
-    "background-run/handle-labelled": { label: "Start work on items tagged agent-ok" },
+    "background-run/handle-labelled": { label: "Start work on items I hand to the agent" },
     "delegation-verify/verify-report": { label: "Ask me whether to verify executor results" },
   },
   viewField: {
