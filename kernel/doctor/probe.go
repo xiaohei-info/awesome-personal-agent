@@ -23,25 +23,6 @@ const (
 	probeTimeout = 30 * time.Second
 )
 
-// 探测结论的机器码（Detail.Code）：Web 的"测试连接"与健康页按它显示本地化说明（设计 §15.5）。
-const (
-	CodeOK             = "ok"
-	CodeNotConfigured  = "not_configured"
-	CodeNoClient       = "no_client"
-	CodeUnreachable    = "unreachable"
-	CodeTimeout        = "timeout"
-	CodeUnauthorized   = "unauthorized"
-	CodeProtocolError  = "protocol_error"
-	CodeSelfReported   = "self_reported"
-	CodeInvalidRequest = "invalid_request"
-	CodeNoAnswer       = "no_answer"
-	CodeHTTPStatus     = "http_status"
-	CodeSchemaMismatch = "schema_mismatch"
-	CodeBadResponse    = "bad_response"
-	// CodeRegionUnavailable：服务在当前网络位置不可用（HTTP 451 或说明地区受限的 403）。
-	CodeRegionUnavailable = "region_unavailable"
-)
-
 const (
 	regionWhy  = "the service is not available from this network location (HTTP 451, or a 403 that cites the region)"
 	regionNext = "use a reachable compatible gateway URL or a proxy"

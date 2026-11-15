@@ -136,19 +136,19 @@ func Run(ctx context.Context, in Input) kdoctor.Report {
 	defer l.cleanup()
 	checks := []kdoctor.Check{cfgCheck, dataDirCheck(layout, in, l, openErr)}
 	if l.st == nil || !l.current {
-		why := "the ledger is not readable"
+		why, reason := "the ledger is not readable", kdoctor.CodeLedgerUnreadable
 		if l.st != nil {
-			why = "the ledger structure differs from this binary; an older one migrates when apa serve starts"
+			why, reason = "the ledger structure differs from this binary; an older one migrates when apa serve starts", kdoctor.CodeLedgerSchemaDiffers
 		}
 		for _, n := range []string{kdoctor.Tier, kdoctor.ModelEndpoint, kdoctor.Sources, kdoctor.Packs, kdoctor.HostPlugin, kdoctor.Overlaps, kdoctor.Channels} {
-			checks = append(checks, kdoctor.Check{Name: n, Status: kdoctor.Warning, Why: "skipped: " + why,
+			checks = append(checks, kdoctor.Check{Name: n, Status: kdoctor.Warning, Code: kdoctor.CodeSkipped, Data: map[string]any{"reason": reason}, Why: "skipped: " + why,
 				Next: "fix the data directory check first; run apa doctor --upgrade-check before upgrading"})
 		}
 		return kdoctor.Assemble(checks...)
 	}
 	facts, err := kdoctor.ReadFacts(ctx, l.st)
 	if err != nil {
-		checks = append(checks, kdoctor.Check{Name: kdoctor.Tier, Status: kdoctor.Error, Why: "the ledger facts cannot be read: " + err.Error(), Next: "restore from a backup (apa backup restore)"})
+		checks = append(checks, kdoctor.Check{Name: kdoctor.Tier, Status: kdoctor.Error, Code: kdoctor.CodeFactsUnreadable, Why: "the ledger facts cannot be read: " + err.Error(), Next: "restore from a backup (apa backup restore)"})
 		return kdoctor.Assemble(checks...)
 	}
 	ld := offlinePacks(layout)

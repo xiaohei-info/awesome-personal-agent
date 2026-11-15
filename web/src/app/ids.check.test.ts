@@ -21,6 +21,7 @@ const go = import.meta.glob(
     "../../../kernel/judgment/spotcheck/spotcheck.go",
     "../../../kernel/agents/direct/judge.go",
     "../../../kernel/doctor/report.go",
+    "../../../kernel/doctor/codes.go",
     "../../../api/health/health.go",
     "!**/*_test.go",
   ],
@@ -91,6 +92,7 @@ const CASES: [string, string, () => string[]][] = [
   ["SPOT_RESULT", "spotResult", () => block("kernel/judgment/spotcheck/spotcheck.go", "// 抽检结论的取值")],
   ["HEALTH_SIGNAL", "healthSignal", () => all(file("api/health/health.go"), /\bsig\("([a-z_]+)"/g)],
   ["DOCTOR_CHECK", "doctorCheck", () => block("kernel/doctor/report.go", "// 检查名")],
+  ["DOCTOR_CODE", "doctorCode", () => named("kernel/doctor/codes.go", "Code")],
   ["EVENT", "event", () => named("domain/event.go", "Ev")],
 ];
 

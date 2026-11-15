@@ -10,31 +10,13 @@ import { useLabel } from "../../app/values";
 import { rejudgeHint } from "../../app/strings";
 import { assess, type HealthReport, type Signal } from "../../app/status";
 import { strings } from "./strings";
+import { DoctorDetails, type DoctorReport } from "./Doctor";
 
 // 诊断 › 状态（原「健康」，设计 §5.26）：形状对应 GET /v1/health 与 GET /v1/doctor（附录 B.2），判定全在服务端，这里只呈现。
 // 只列需要处理的信号，每条一句结论加去处；正常的折叠；本人暂停模型是中性的「已暂停」，不算要处理（§8.7）。
 export type { HealthReport, Signal } from "../../app/status";
 
-// 形状对应 GET /v1/doctor（kernel/doctor.Report）：内核一侧的自检，结论与 `apa doctor` 的对应项同源；这里只呈现。
-export interface DoctorDetail {
-  subject: string;
-  status: "ok" | "warning" | "error";
-  why: string;
-  next?: string;
-}
-export interface DoctorCheck {
-  name: string;
-  status: "ok" | "warning" | "error";
-  why: string;
-  next: string;
-  details?: DoctorDetail[];
-}
-export interface DoctorReport {
-  ok: boolean;
-  checks: DoctorCheck[];
-}
-const STATUS_BADGE = { ok: "ok", warning: "warn", error: "bad" } as const;
-
+export type { DoctorCheck, DoctorDetail, DoctorReport } from "./Doctor";
 type Go = keyof (typeof strings)["zh"]["go"];
 interface Line { text: string; to?: string; go?: Go }
 
@@ -47,6 +29,8 @@ function useLines(): (s: Signal, paused: boolean, days?: number) => Line[] {
   const t = useT(strings);
   const lang = useLang();
   const source = useNames("source");
+  const pack = useLabel();
+  const raw = useRaw();
   return (s, paused, days) => {
     const d = s.detail;
     switch (s.id) {
@@ -71,7 +55,8 @@ function useLines(): (s: Signal, paused: boolean, days?: number) => Line[] {
       case "agentsmd_drift":
         return [{ text: t.drift(s.count), to: "/projects", go: "projects" }];
       case "pack_rejections":
-        return [{ text: t.packs(s.count) }, ...(s.rejections ?? []).map((r) => ({ text: `${r.pack}：${r.reason}` }))];
+        // 加载器给的原因是英文的字段说明：主界面只列包名，原因随「显示原始值」出现。
+        return [{ text: t.packs(s.count) }, ...(s.rejections ?? []).map((r) => ({ text: raw ? `${pack("pack", r.pack)}：${r.reason}` : pack("pack", r.pack) }))];
       case "model_unavailable": {
         const m = (d ?? {}) as { judge?: string; generate?: string; screening?: unknown[]; judgements?: unknown[] };
         const ends = (["generate", "judge"] as const).flatMap((k): Line[] => {
@@ -191,26 +176,7 @@ export function HealthPage() {
               </ul>
             </details>
           )}
-          {doctor && (
-            <details className="panel">
-              <summary>{t.doctor}</summary>
-              {doctor.checks.map((c) => (
-                <article key={c.name} aria-label={label("doctorCheck", c.name)} className="signal">
-                  <h3>
-                    {label("doctorCheck", c.name)}
-                    <span className={"badge " + STATUS_BADGE[c.status]}>{t.status[c.status]}</span>
-                  </h3>
-                  <p lang="en" className="sub">{c.why}</p>
-                  {c.details?.map((d) => (
-                    <p key={d.subject} lang="en" className="sub">
-                      {t.detail(d.subject, t.status[d.status], d.why)}
-                    </p>
-                  ))}
-                  {c.status !== "ok" && <p lang="en" className="sub">{c.next}</p>}
-                </article>
-              ))}
-            </details>
-          )}
+          {doctor && <DoctorDetails report={doctor} />}
         </>
       )}
     </main>

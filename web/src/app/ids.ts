@@ -109,6 +109,25 @@ export const HEALTH_SIGNAL = [
 ] as const;
 /** 自检项：kernel/doctor/report.go Order */
 export const DOCTOR_CHECK = ["data_dir", "config", "tier", "model_endpoint", "sources", "packs", "host_plugin", "overlaps", "channels"] as const;
+/** 自检结论的机器码：kernel/doctor/codes.go Code*（Check.code、Detail.code、data.problems） */
+export const DOCTOR_CODE = [
+  "ok", "not_configured", "no_client", "unreachable", "timeout", "unauthorized", "protocol_error", "self_reported", "invalid_request",
+  "no_answer", "http_status", "schema_mismatch", "bad_response", "region_unavailable",
+  "skipped", "ledger_unreadable", "ledger_schema_differs", "facts_unreadable",
+  "data_dir_ok", "data_dir_no_backup", "data_dir_missing", "data_dir_permissions", "ledger_missing", "ledger_damaged", "ledger_too_new", "ledger_migrate",
+  "config_ok", "config_invalid", "config_exposed", "host_file_invalid",
+  "tier_paused", "tier_kernel_only", "tier_no_host", "tier_full",
+  "models_paused", "models_none", "models_ok", "models_failing",
+  "sources_none", "sources_ok", "sources_attention", "sources_restored_missing",
+  "source_ok", "source_command_missing", "source_outbound_unset", "source_outbound_full", "source_last_failed", "source_tool_timeout",
+  "source_tool_version", "source_tool_missing", "source_tool_config", "source_tool_failed", "source_creds_missing", "source_webhook_key_missing",
+  "packs_no_loader", "packs_ok", "packs_rejected", "pack_rejected",
+  "host_none", "host_ok", "host_attention", "host_ready", "host_ready_no_selfcheck", "host_headless_missing", "host_selfcheck_failed",
+  "host_no_session_kind", "host_hook_missing",
+  "overlaps_skipped", "overlaps_none", "overlaps_found", "overlap",
+  "channels_none", "channels_ok", "channels_backlog", "channel_ok", "channel_backlog", "channel_orphan", "export_ok",
+] as const;
+export type DoctorCode = (typeof DOCTOR_CODE)[number];
 
 /** 对外事件类型：kernel/domain/event.go Ev*（附录 B.4） */
 export const EVENT = [

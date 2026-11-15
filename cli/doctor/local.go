@@ -32,19 +32,20 @@ func configCheck(l config.Layout) (kdoctor.Check, config.Config) {
 	c := kdoctor.Check{Name: kdoctor.Config, Status: kdoctor.OK}
 	cfg, err := config.Load(l.Config)
 	if err != nil {
-		c.Status, c.Why, c.Next = kdoctor.Error, "config.yaml cannot be parsed: "+err.Error(), "fix "+l.Config
+		c.Status, c.Code, c.Why, c.Next = kdoctor.Error, kdoctor.CodeConfigInvalid, "config.yaml cannot be parsed: "+err.Error(), "fix "+l.Config
 		return c, cfg
 	}
 	if cfg.PublicURL == "" && cfg.CheckExposure() != nil {
-		c.Status = kdoctor.Error
+		c.Status, c.Code, c.Data = kdoctor.Error, kdoctor.CodeConfigExposed, map[string]any{"listen": cfg.Listen}
 		c.Why = fmt.Sprintf("listen %s is not a local address and no https public_url is configured; apa serve refuses to start (§14.13)", cfg.Listen)
 		c.Next = "set `public_url: https://<your domain>` in " + l.Config + ", or listen on 127.0.0.1"
 		return c, cfg
 	}
 	if err := hostFiles(l); err != nil {
-		c.Status, c.Why, c.Next = kdoctor.Error, err.Error(), "fix the host configuration file named above"
+		c.Status, c.Code, c.Why, c.Next = kdoctor.Error, kdoctor.CodeHostFileInvalid, err.Error(), "fix the host configuration file named above"
 		return c, cfg
 	}
+	c.Code, c.Data = kdoctor.CodeConfigOK, map[string]any{"listen": cfg.Listen}
 	c.Why, c.Next = fmt.Sprintf("config.yaml and the host configuration files parse; listening on %s", cfg.Listen), "nothing to do"
 	return c, cfg
 }
@@ -80,13 +81,13 @@ func hostFiles(l config.Layout) error {
 
 func dataDirCheck(l config.Layout, in Input, led *ledger, openErr error) kdoctor.Check {
 	c := kdoctor.Check{Name: kdoctor.DataDir, Status: kdoctor.OK, Data: map[string]any{}}
-	fail := func(s kdoctor.Status, why, next string) kdoctor.Check {
-		c.Status, c.Why, c.Next = s, why, next
+	fail := func(s kdoctor.Status, code, why, next string) kdoctor.Check {
+		c.Status, c.Code, c.Why, c.Next = s, code, why, next
 		return c
 	}
 	st, err := os.Stat(l.Home)
 	if err != nil || !st.IsDir() {
-		return fail(kdoctor.Error, "the data directory does not exist", "run `apa init`, or set APA_HOME to the data directory")
+		return fail(kdoctor.Error, kdoctor.CodeDataDirMissing, "the data directory does not exist", "run `apa init`, or set APA_HOME to the data directory")
 	}
 	var bad []string
 	if st.Mode().Perm()&0o022 != 0 {
@@ -101,19 +102,19 @@ func dataDirCheck(l config.Layout, in Input, led *ledger, openErr error) kdoctor
 		bad = append(bad, fmt.Sprintf("ledger.db is writable by other users (mode %04o)", s.Mode().Perm()))
 	}
 	if len(bad) > 0 {
-		return fail(kdoctor.Error, "permissions: "+strings.Join(bad, "; "), "run `chmod 700 "+l.Home+"` and keep credential directories at 0700")
+		return fail(kdoctor.Error, kdoctor.CodeDataDirPermissions, "permissions: "+strings.Join(bad, "; "), "run `chmod 700 "+l.Home+"` and keep credential directories at 0700")
 	}
 	target := in.Reg.SchemaLedger()
 	c.Data["schema_binary"] = target
 	switch {
 	case openErr != nil && errors.Is(openErr, os.ErrNotExist):
-		return fail(kdoctor.Error, "there is no ledger.db in the data directory", "run `apa init`, or restore a backup with `apa backup restore`")
+		return fail(kdoctor.Error, kdoctor.CodeLedgerMissing, "there is no ledger.db in the data directory", "run `apa init`, or restore a backup with `apa backup restore`")
 	case openErr != nil:
-		return fail(kdoctor.Error, "the ledger cannot be read: "+openErr.Error(), "check the file permissions and the disk, or restore a backup")
+		return fail(kdoctor.Error, kdoctor.CodeLedgerUnreadable, "the ledger cannot be read: "+openErr.Error(), "check the file permissions and the disk, or restore a backup")
 	case led.infoErr != nil && errors.Is(led.infoErr, store.ErrSchemaTooNew):
-		return fail(kdoctor.Error, fmt.Sprintf("the ledger was written by a newer version than this binary (ledger structure up to %d)", target), "use the binary that matches the data directory; never run an older binary on newer data")
+		return fail(kdoctor.Error, kdoctor.CodeLedgerTooNew, fmt.Sprintf("the ledger was written by a newer version than this binary (ledger structure up to %d)", target), "use the binary that matches the data directory; never run an older binary on newer data")
 	case led.infoErr != nil:
-		return fail(kdoctor.Error, "the ledger is damaged or not a ledger: "+led.infoErr.Error(), "restore the latest backup with `apa backup restore`")
+		return fail(kdoctor.Error, kdoctor.CodeLedgerDamaged, "the ledger is damaged or not a ledger: "+led.infoErr.Error(), "restore the latest backup with `apa backup restore`")
 	}
 	c.Data["schema_ledger"] = led.info.Ledger
 	last, ok := lastBackup(l)
@@ -126,14 +127,14 @@ func dataDirCheck(l config.Layout, in Input, led *ledger, openErr error) kdoctor
 	}
 	switch {
 	case led.info.Ledger < target:
-		return fail(kdoctor.Warning, fmt.Sprintf("the ledger structure is %d, this binary expects %d; it migrates when apa serve starts (a pre-upgrade snapshot is taken first); %s", led.info.Ledger, target, when),
+		return fail(kdoctor.Warning, kdoctor.CodeLedgerMigrate, fmt.Sprintf("the ledger structure is %d, this binary expects %d; it migrates when apa serve starts (a pre-upgrade snapshot is taken first); %s", led.info.Ledger, target, when),
 			"run `apa doctor --upgrade-check`, then start apa serve")
 	case led.info.Ledger > target:
-		return fail(kdoctor.Error, fmt.Sprintf("the ledger structure %d is newer than this binary (%d)", led.info.Ledger, target), "use the matching binary")
+		return fail(kdoctor.Error, kdoctor.CodeLedgerTooNew, fmt.Sprintf("the ledger structure %d is newer than this binary (%d)", led.info.Ledger, target), "use the matching binary")
 	case !ok:
-		return fail(kdoctor.Warning, fmt.Sprintf("permissions fine, ledger readable, structure %d matches the binary; %s", target, when), "run `apa backup create`")
+		return fail(kdoctor.Warning, kdoctor.CodeDataDirNoBackup, fmt.Sprintf("permissions fine, ledger readable, structure %d matches the binary; %s", target, when), "run `apa backup create`")
 	}
-	return fail(kdoctor.OK, fmt.Sprintf("permissions fine, ledger readable, structure %d matches the binary; %s", target, when), "nothing to do")
+	return fail(kdoctor.OK, kdoctor.CodeDataDirOK, fmt.Sprintf("permissions fine, ledger readable, structure %d matches the binary; %s", target, when), "nothing to do")
 }
 
 func lastBackup(l config.Layout) (time.Time, bool) {
@@ -225,7 +226,7 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 	ran := 0
 	for _, rec := range f.Declarations {
 		d := kdoctor.Detail{Subject: rec.Harness, Status: kdoctor.OK, Data: map[string]any{}}
-		var why, next []string
+		var why, next, problems []string
 		if at, ok := f.Seen[kdoctor.SubjectHarness+rec.Harness]; ok {
 			d.Data["last_call_at"] = ts(at)
 		} else {
@@ -233,6 +234,7 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 		}
 		if h := rec.Declaration.Headless; h != nil && !kdoctor.CommandExists(h.Command[0]) {
 			d.Status = kdoctor.Error
+			problems = append(problems, kdoctor.CodeHostHeadlessMissing)
 			why = append(why, "the confirmed headless declaration is not executable: its command does not exist on this host")
 			next = append(next, "fix the headless command in the declaration and confirm it again in Web")
 		}
@@ -240,6 +242,7 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 			out, err := runSelfcheck(ctx, sc.Command, env)
 			if err != nil {
 				d.Status = kdoctor.Worst(d.Status, kdoctor.Warning)
+				problems = append(problems, kdoctor.CodeHostSelfcheckFailed)
 				why = append(why, "the plugin selfcheck failed: "+err.Error())
 				next = append(next, "check the selfcheck.command of the declaration")
 			} else {
@@ -247,48 +250,57 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 				d.Data["plugin_version"] = out.PluginVersion
 				if !out.ReportsSessionKind {
 					d.Status = kdoctor.Worst(d.Status, kdoctor.Warning)
+					problems = append(problems, kdoctor.CodeHostNoSessionKind)
 					why = append(why, "the plugin does not report the session type, so agent answers on the owner's own words are rejected (exit 23, §14.5)")
 					next = append(next, "upgrade the plugin together with the kernel")
 				}
+				var hooks []string
 				for _, h := range out.Hooks {
 					if !h.Installed {
+						hooks = append(hooks, h.Name)
 						d.Status = kdoctor.Worst(d.Status, kdoctor.Warning)
 						why = append(why, "hook "+h.Name+" is not installed")
 						next = append(next, "install the plugin hook "+h.Name)
 					}
 				}
+				if len(hooks) > 0 {
+					problems = append(problems, kdoctor.CodeHostHookMissing)
+					d.Data["missing_hooks"] = hooks
+				}
 				for _, o := range out.Overlaps {
-					overlaps.Add(kdoctor.Detail{Subject: rec.Harness + ":" + o.Kind + ":" + o.Name, Status: kdoctor.Warning,
+					overlaps.Add(kdoctor.Detail{Subject: rec.Harness + ":" + o.Kind + ":" + o.Name, Status: kdoctor.Warning, Code: kdoctor.CodeOverlap,
+						Data: map[string]any{"harness": rec.Harness, "kind": o.Kind, "name": o.Name},
 						Why:  fmt.Sprintf("the host side has a %s that overlaps with APA: %s %s", o.Kind, o.Name, o.Detail),
 						Next: "decide on the host side whether to keep it; APA does not change the host configuration"})
 				}
 			}
 		}
 		if len(why) == 0 {
-			d.Why = "declaration confirmed and executable; plugin reports its session type"
+			d.Code, d.Why = kdoctor.CodeHostReady, "declaration confirmed and executable; plugin reports its session type"
 			if rec.Declaration.Selfcheck == nil {
-				d.Why = "declaration confirmed and executable; no selfcheck.command is declared"
+				d.Code, d.Why = kdoctor.CodeHostReadyNoSelfcheck, "declaration confirmed and executable; no selfcheck.command is declared"
 			}
 		} else {
 			d.Why, d.Next = strings.Join(why, "; "), strings.Join(next, "; ")
+			d.AddProblems(problems...)
 		}
 		host.Add(d)
 	}
 	switch {
 	case len(f.Declarations) == 0:
-		host.Why, host.Next = "no host harness has a confirmed declaration (tiers 1 and 2 do not need one)", "install the host plugin and confirm its declaration in Web to reach tier 3"
+		host.Code, host.Why, host.Next = kdoctor.CodeHostNone, "no host harness has a confirmed declaration (tiers 1 and 2 do not need one)", "install the host plugin and confirm its declaration in Web to reach tier 3"
 	case host.Status == kdoctor.OK:
-		host.Why, host.Next = "the confirmed declarations are executable and plugins report their session type", "nothing to do"
+		host.Code, host.Why, host.Next = kdoctor.CodeHostOK, "the confirmed declarations are executable and plugins report their session type", "nothing to do"
 	default:
-		host.Why, host.Next = "a host plugin needs attention; see details", "fix what the details name"
+		host.Code, host.Why, host.Next = kdoctor.CodeHostAttention, "a host plugin needs attention; see details", "fix what the details name"
 	}
 	switch {
 	case ran == 0:
-		overlaps.Why, overlaps.Next = "skipped: no plugin declares selfcheck.command (appendix A.1)", "nothing to do"
+		overlaps.Code, overlaps.Why, overlaps.Next = kdoctor.CodeOverlapsSkipped, "skipped: no plugin declares selfcheck.command (appendix A.1)", "nothing to do"
 	case overlaps.Status == kdoctor.OK:
-		overlaps.Why, overlaps.Next = "no overlapping injection hook or schedule was reported", "nothing to do"
+		overlaps.Code, overlaps.Why, overlaps.Next = kdoctor.CodeOverlapsNone, "no overlapping injection hook or schedule was reported", "nothing to do"
 	default:
-		overlaps.Why, overlaps.Next = "the host side has injections or schedules that overlap with APA; listed only, nothing was changed", "remove the duplicates on the host side"
+		overlaps.Code, overlaps.Why, overlaps.Next = kdoctor.CodeOverlapsFound, "the host side has injections or schedules that overlap with APA; listed only, nothing was changed", "remove the duplicates on the host side"
 	}
 	sort.Slice(overlaps.Details, func(i, j int) bool { return overlaps.Details[i].Subject < overlaps.Details[j].Subject })
 	return host, overlaps
@@ -313,13 +325,14 @@ func probeTools(ctx context.Context, in Input, f kdoctor.Facts, c *kdoctor.Check
 		if !ok {
 			continue
 		}
-		problem, next := probeOne(ctx, in, s)
+		code, problem, next := probeOne(ctx, in, s)
 		d.Data["tool"] = "ok"
 		if problem == "" {
 			continue
 		}
 		d.Data["tool"] = "problem"
 		d.Status = kdoctor.Worst(d.Status, kdoctor.Warning)
+		d.AddProblems(code)
 		if strings.HasPrefix(d.Why, "command found, ") { // 原来是"一切正常"的说明，换成问题本身
 			d.Why = problem
 		} else {
@@ -327,8 +340,8 @@ func probeTools(ctx context.Context, in Input, f kdoctor.Facts, c *kdoctor.Check
 		}
 		d.Next = strings.Trim(d.Next+"; "+next, "; ")
 		c.Status = kdoctor.Worst(c.Status, d.Status)
-		if c.Why == "" || strings.Contains(c.Why, "commands exist") {
-			c.Why, c.Next = "some sources need attention; see details", "fix the registration or choose the outbound scope on the source page"
+		if c.Code == kdoctor.CodeSourcesOK {
+			c.Code, c.Why, c.Next = kdoctor.CodeSourcesAttention, "some sources need attention; see details", "fix the registration or choose the outbound scope on the source page"
 		}
 	}
 }
@@ -342,40 +355,43 @@ func restoredSecrets(l config.Layout, c *kdoctor.Check) {
 	}
 	for _, w := range n.Withheld {
 		kind, id, _ := strings.Cut(w, "/")
-		var why, next string
+		var code, why, next string
 		switch kind {
 		case "sources":
 			if ents, _ := os.ReadDir(filepath.Join(l.Sources, id)); len(ents) > 0 {
 				continue
 			}
-			why, next = "restored from a --no-secrets backup: the source credentials are missing", "re-authenticate the source (`apa source auth "+id+"` or the tool's own login)"
+			code, why, next = kdoctor.CodeSourceCredsMissing, "restored from a --no-secrets backup: the source credentials are missing", "re-authenticate the source (`apa source auth "+id+"` or the tool's own login)"
 		case "webhook-keys":
 			if _, err := os.Stat(filepath.Join(l.WebhookKeys, id)); err == nil {
 				continue
 			}
-			why, next = "restored from a --no-secrets backup: the webhook receive key is missing, the old key is rejected", "rotate the webhook key of this source and give the new key to the sender"
+			code, why, next = kdoctor.CodeSourceWebhookKeyMissing, "restored from a --no-secrets backup: the webhook receive key is missing, the old key is rejected", "rotate the webhook key of this source and give the new key to the sender"
 		default:
 			continue
 		}
 		d, found := c.Find(id)
 		if !found {
-			c.Add(kdoctor.Detail{Subject: id, Status: kdoctor.Warning, Why: why, Next: next})
+			nd := kdoctor.Detail{Subject: id, Status: kdoctor.Warning, Why: why, Next: next}
+			nd.AddProblems(code)
+			c.Add(nd)
 			continue
 		}
 		d.Status = kdoctor.Worst(d.Status, kdoctor.Warning)
+		d.AddProblems(code)
 		d.Why = strings.Trim(d.Why+"; "+why, "; ")
 		d.Next = strings.Trim(d.Next+"; "+next, "; ")
 		c.Status = kdoctor.Worst(c.Status, d.Status)
 	}
-	if c.Status != kdoctor.OK && strings.Contains(c.Why, "commands exist") {
-		c.Why, c.Next = "some sources need attention; see details", "fix the registration or choose the outbound scope on the source page"
+	if c.Status != kdoctor.OK && c.Code == kdoctor.CodeSourcesOK {
+		c.Code, c.Why, c.Next = kdoctor.CodeSourcesAttention, "some sources need attention; see details", "fix the registration or choose the outbound scope on the source page"
 	}
-	if c.Status != kdoctor.OK && c.Why == "no source is registered (optional)" {
-		c.Why, c.Next = "restored secrets are missing; see details", "re-authenticate sources and rotate webhook keys"
+	if c.Status != kdoctor.OK && c.Code == kdoctor.CodeSourcesNone {
+		c.Code, c.Why, c.Next = kdoctor.CodeSourcesRestoredMissing, "restored secrets are missing; see details", "re-authenticate sources and rotate webhook keys"
 	}
 }
 
-func probeOne(ctx context.Context, in Input, s domain.Source) (problem, next string) {
+func probeOne(ctx context.Context, in Input, s domain.Source) (code, problem, next string) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	argv := strings.Fields(s.Command)
@@ -404,20 +420,20 @@ func probeOne(ctx context.Context, in Input, s domain.Source) (problem, next str
 	var ee *exec.ExitError
 	switch {
 	case err == nil:
-		return "", ""
+		return "", "", ""
 	case ctx.Err() != nil:
-		return "the adapter did not finish the probe in time", "check the tool and the network, then run apa doctor again"
+		return kdoctor.CodeSourceToolTimeout, "the adapter did not finish the probe in time", "check the tool and the network, then run apa doctor again"
 	case errors.As(err, &ee) && ee.ExitCode() == 2:
 		msg := errOut.String()
 		switch {
 		case strings.Contains(msg, "声明范围") || strings.Contains(strings.ToLower(msg), "version"):
-			return "the dependent tool's version is not in the range the adapter declares (§9.7)", "install a supported version of the tool (appendix D lists the ranges)"
+			return kdoctor.CodeSourceToolVersion, "the dependent tool's version is not in the range the adapter declares (§9.7)", "install a supported version of the tool (appendix D lists the ranges)"
 		case strings.Contains(msg, "未找到") || strings.Contains(strings.ToLower(msg), "not found"):
-			return "the dependent tool is not installed", "install the tool the adapter wraps (appendix D)"
+			return kdoctor.CodeSourceToolMissing, "the dependent tool is not installed", "install the tool the adapter wraps (appendix D)"
 		}
-		return "the adapter reports a configuration or authentication problem (exit 2, §9.7)", "authenticate the tool with its own command and check the source's config"
+		return kdoctor.CodeSourceToolConfig, "the adapter reports a configuration or authentication problem (exit 2, §9.7)", "authenticate the tool with its own command and check the source's config"
 	}
-	return "the adapter probe failed temporarily (exit status or start failure)", "run apa doctor again; if it persists check the tool and the network"
+	return kdoctor.CodeSourceToolFailed, "the adapter probe failed temporarily (exit status or start failure)", "run apa doctor again; if it persists check the tool and the network"
 }
 
 func dirExists(p string) bool {

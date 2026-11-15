@@ -6,6 +6,9 @@ import { errorText as msg, lang, useLang, useT } from "../../app/i18n";
 import { rejudgeHint } from "../../app/strings";
 import { rejudgeDays } from "../../app/status";
 import { useLabel } from "../../app/values";
+import { useRaw } from "../../app/raw";
+import { vocab } from "../../app/vocab";
+import type { DoctorCode } from "../../app/ids";
 import { strings } from "./strings";
 
 // 形状对应 /v1/settings/model-endpoints 与它的两条探测路由（附录 B.2；设计 §4.1、§14.14、§15.5）。
@@ -468,19 +471,23 @@ function ProbeView({ r }: { r: ProbeResult }) {
   const t = useT(strings);
   const label = useLabel();
   const mark = { ok: "✓", warning: "!", error: "✗" }[r.status];
-  const text = (r.code && t.codes[r.code]) || r.why;
+  const raw = useRaw();
+  const say = vocab[useLang()].doctorCode[r.code as DoctorCode];
+  const text = say ? say(r.data) : r.why;
   const facts: ReactNode[] = [];
   if (r.data?.elapsed_ms != null) facts.push(t.elapsed(r.data.elapsed_ms));
-  if (r.data?.status) facts.push(`HTTP ${r.data.status}`);
+  if (r.data?.status && r.code !== "http_status") facts.push(`HTTP ${r.data.status}`); // http_status 的结论里已带状态码
   if (r.data?.model) facts.push(t.modelFact(r.data.model));
   if (r.data?.probability_source) facts.push(label("probSource", r.data.probability_source));
   return (
     <div role="status" aria-label={t.result} className={"probe " + r.status}>
       <p><b>{mark} {text}</b>{facts.length > 0 && <span className="sub"> · {facts.join(" · ")}</span>}</p>
-      <p className="sub">
-        {r.why}
-        {r.next ? t.paren(r.next) : ""}
-      </p>
+      {raw && (
+        <p lang="en" className="sub">
+          <code className="raw-id">{r.code}</code> {r.why}
+          {r.next ? t.paren(r.next) : ""}
+        </p>
+      )}
     </div>
   );
 }

@@ -103,8 +103,8 @@ func TestSelfcheckAndProbeReturnWithinTheBoundWhenAChildLingers(t *testing.T) {
 		t.Fatalf("selfcheck took %s", d)
 	}
 	start = time.Now()
-	problem, _ := probeOne(bg, e.input(), domainSource(slow))
-	if !strings.Contains(problem, "in time") {
+	code, problem, _ := probeOne(bg, e.input(), domainSource(slow))
+	if !strings.Contains(problem, "in time") || code != kdoctor.CodeSourceToolTimeout {
 		t.Fatalf("probe: %q", problem)
 	}
 	if d := time.Since(start); d > probeTimeout+3*time.Second {
