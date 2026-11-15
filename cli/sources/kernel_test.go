@@ -102,7 +102,7 @@ func newKernel(t *testing.T) *kernel {
 	if err := in.Register(x); err != nil {
 		t.Fatal(err)
 	}
-	grp, err := apisources.Mount(st, x, au, wh, in, nil)
+	grp, err := apisources.Mount(st, x, au, wh, in, apisources.Declared{})
 	if err != nil {
 		t.Fatal(err)
 	}

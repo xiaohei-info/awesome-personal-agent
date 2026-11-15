@@ -161,7 +161,8 @@ type kernel struct {
 	sum    *summaries.Service
 	packs  *kpacks.Loader
 	agm    *agentsmd.Service
-	agmWG  sync.WaitGroup // 事件触发的 AGENTS.md 检测；测试收尾时等它们结束
+	agmWG  sync.WaitGroup  // 事件触发的 AGENTS.md 检测；测试收尾时等它们结束
+	ids    identityFetcher // 来源 identity 模式（§9.2）
 	wk     *wake.Service
 
 	resumeMu  sync.Mutex
@@ -230,7 +231,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: att}}); err != nil {
 		return nil, err
 	}
-	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner")}); err != nil {
+	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner"), SenderCeiling: senderCeiling}); err != nil {
 		return nil, err
 	}
 	a := auth.New(nil)
@@ -282,7 +283,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	// 调度器的结果要回到 runner、webhook、task，而它们又要调度器：先建调度器，闭包里再取。
 	var agmFetch agentsFetcher
 	k.result = func(res proc.Result) {
-		if agmFetch.deliver(res) { // AGENTS.md 读取的结果交给等待的 Fetch，不属于其他模块
+		if agmFetch.deliver(res) || k.ids.deliver(res) { // AGENTS.md 读取与 identity 模式的结果交给等待者，不属于其他模块
 			return
 		}
 		ctx := context.Background() // 关停时也要把终态落账
@@ -304,6 +305,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	k.disp = proc.New(st, cfg, proc.Options{Env: env, ContextDir: l.RunCredentials, OnResult: k.result})
 	agmFetch.st, agmFetch.disp, agmFetch.reader = st, k.disp, hostedReader
+	k.ids.st, k.ids.disp, k.ids.rn = st, k.disp, k.rn
 	host, herr := os.Hostname()
 	if herr != nil {
 		host = "localhost"
@@ -393,9 +395,13 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
-	sources, err := apisources.Mount(st, x, a, k.wh, k.in, func(s domain.Source) (string, string, bool) {
-		zh := declaredName(s, "zh")
-		return zh, declaredName(s, "en"), zh != ""
+	sources, err := apisources.Mount(st, x, a, k.wh, k.in, apisources.Declared{
+		Name: func(s domain.Source) (string, string, bool) {
+			zh := declaredName(s, "zh")
+			return zh, declaredName(s, "en"), zh != ""
+		},
+		Sender:     senderInfo(ld),
+		SelfSender: k.ids.Fetch,
 	})
 	if err != nil {
 		return nil, err

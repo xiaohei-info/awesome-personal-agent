@@ -2,6 +2,7 @@
 //
 //	GET/POST /sources        GET/PATCH /sources/{id}
 //	GET /sources/declared-name          接入层为一份登记声明的显示名（中英），新登记表单预填用
+//	GET /settings/sources/{id}/self-sender  运行一次来源程序的 identity 模式，取本人身份供预填（只 Web）
 //	POST /sources/{id}/webhook          创建或轮换 webhook 接收密钥
 //	DELETE /sources/{id}/webhook        吊销该来源的全部接收密钥，并删除 HMAC 密钥文件
 //	GET /sources/{id}/ingests           入站记录
@@ -89,8 +90,45 @@ const (
 // Namer 返回接入层为登记 s 声明的显示名（中英）；没有声明时 ok 为 false。由装配方给出（§9.1）。
 type Namer func(s domain.Source) (zh, en string, ok bool)
 
+// Text 是中英两份文字。
+type Text struct {
+	Zh string `json:"zh"`
+	En string `json:"en"`
+}
+
+// Sender 是来源发件人可信的结论（§9.1）：trust 为 verified 或 unverified；可信时 hint 是格式提示；
+// self 为 identity 时可经 self-sender 取本人身份。
+type Sender struct {
+	Trust string `json:"trust"`
+	Hint  *Text  `json:"hint,omitempty"`
+	Self  string `json:"self,omitempty"`
+}
+
+// Declared 是装配方按接入声明给出的查询（§9.1）；零值字段等于没有声明。
+type Declared struct {
+	Name   Namer
+	Sender func(s domain.Source) Sender
+	// SelfSender 运行来源程序的 identity 模式，返回本人身份（§9.2）。
+	SelfSender func(ctx context.Context, s domain.Source) (string, error)
+}
+
+// sourceView 是读接口给出的来源：登记加发件人结论。
+type sourceView struct {
+	domain.Source
+	Sender *Sender `json:"sender,omitempty"`
+}
+
+func (a *api) view(s domain.Source) sourceView {
+	v := sourceView{Source: s}
+	if a.dc.Sender != nil {
+		sd := a.dc.Sender(s)
+		v.Sender = &sd
+	}
+	return v
+}
+
 type api struct {
-	nm Namer
+	dc Declared
 	st *store.Store
 	x  *command.Executor
 	rp Replayer
@@ -99,9 +137,9 @@ type api struct {
 }
 
 // Mount 在 x 上登记本包的两条命令并返回路由分组，挂到 core.Deps.Groups 即生效。
-// x 须已由 registry.Register 登记来源命令；au 用于签发 webhook 密钥；nm 为 nil 等于没有任何接入层声明。
-func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr Proposer, nm Namer) (core.RouteGroup, error) {
-	a := &api{st: st, x: x, rp: rp, pr: pr, au: au, nm: nm}
+// x 须已由 registry.Register 登记来源命令；au 用于签发 webhook 密钥；dc 为零值等于没有任何接入层声明。
+func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr Proposer, dc Declared) (core.RouteGroup, error) {
+	a := &api{st: st, x: x, rp: rp, pr: pr, au: au, dc: dc}
 	for _, s := range []command.Spec{
 		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
 		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
@@ -116,6 +154,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "POST", Path: "/sources", Handler: a.create})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/declared-name", Handler: readable(a.declaredName)})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}", Handler: readable(a.get)})
+		r.Handle(core.Route{Method: "GET", Path: "/settings/sources/{id}/self-sender", Handler: a.selfSender})
 		r.Handle(core.Route{Method: "PATCH", Path: "/sources/{id}", Handler: a.patch})
 		r.Handle(core.Route{Method: "POST", Path: "/sources/{id}/webhook", MaxBody: 1 << 10, Handler: a.webhookKey})
 		r.Handle(core.Route{Method: "DELETE", Path: "/sources/{id}/webhook", MaxBody: 1, Handler: a.webhookRevoke})
@@ -192,10 +231,11 @@ func (a *api) list(w http.ResponseWriter, r *http.Request, _ *core.Principal) er
 	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { ss, err = registry.List(tx); return }); err != nil {
 		return err
 	}
-	if ss == nil {
-		ss = []domain.Source{}
+	out := make([]sourceView, 0, len(ss))
+	for _, s := range ss {
+		out = append(out, a.view(s))
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"sources": ss})
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"sources": out})
 }
 
 // declaredName：按查询参数 type、command、source_type、config（JSON 对象）给出接入层声明的名字；没有声明时 name 为 null。
@@ -209,8 +249,8 @@ func (a *api) declaredName(w http.ResponseWriter, r *http.Request, _ *core.Princ
 		s.Config = json.RawMessage(c)
 	}
 	var name any
-	if a.nm != nil {
-		if zh, en, ok := a.nm(s); ok {
+	if a.dc.Name != nil {
+		if zh, en, ok := a.dc.Name(s); ok {
 			name = map[string]string{"zh": zh, "en": en}
 		}
 	}
@@ -222,7 +262,28 @@ func (a *api) get(w http.ResponseWriter, r *http.Request, _ *core.Principal) err
 	if err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, s)
+	return core.WriteJSON(w, http.StatusOK, a.view(s))
+}
+
+// selfSender：只对声明了 identity 模式的来源；不落账、不缓存。只 Web：它会在主机上运行来源程序。
+func (a *api) selfSender(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if !p.Web {
+		return domain.NewError(domain.CodeWebOnly, "only the owner in the Web UI can look up their own identity", "open the source in the Web UI")
+	}
+	s, err := a.source(r, r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	if a.dc.Sender == nil || a.dc.SelfSender == nil || a.dc.Sender(s).Self != "identity" {
+		return domain.NewError(domain.CodeNotFound, "source "+s.ID+" cannot tell who you are", "type your identity by hand")
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second) // 运行本身 10 秒超时，另留排队时间
+	defer cancel()
+	who, err := a.dc.SelfSender(ctx, s)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]string{"sender": who})
 }
 
 // create：type=script 是可执行命令的登记，走只 Web 的命令；其余走 delegate 可用的命令。

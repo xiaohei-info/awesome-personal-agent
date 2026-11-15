@@ -326,7 +326,8 @@ func (f *fx) attachMessages(item string) {
 			f.t.Fatal(err)
 		}
 	}
-	script := filepath.Join(q, "src.sh")
+	// 文件名取仓库自带的可信来源程序名：发件人上限按接入声明里的程序名认定（主文档 §9.1），没有声明的自定义脚本一律未核实。
+	script := filepath.Join(q, "github-source")
 	if err := os.WriteFile(script, []byte(accScript), 0o755); err != nil {
 		f.t.Fatal(err)
 	}

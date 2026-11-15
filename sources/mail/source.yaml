@@ -2,3 +2,5 @@
 program: mail-himalaya
 name: {zh: "{account} 邮件", en: "{account} Mail"}
 default: {zh: 邮件, en: Mail}
+# 发件人（附录 D.1）：From 由对方自己写，工具取不到可信的认证结果信头。
+sender: {trust: unverified}

@@ -51,7 +51,7 @@ func (r *Runner) applyIngest(c *command.Ctx) (any, error) {
 		if err := ValidEvent(ev); err != nil {
 			return nil, domain.NewError(domain.CodeInvalidRequest, "event "+ev.ID+": "+err.Error(), "fix the mapping or script")
 		}
-		if err := insertEvent(c.Tx, src, in.RunID, ev); err != nil {
+		if err := insertEvent(c.Tx, src, in.RunID, r.capSender(src, ev)); err != nil {
 			return nil, err
 		}
 	}

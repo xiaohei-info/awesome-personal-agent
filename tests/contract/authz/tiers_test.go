@@ -29,7 +29,7 @@ func TestRegisteredTiersMatchAppendixB1(t *testing.T) {
 			t.Fatalf("register %s: %v", name, err)
 		}
 	}
-	if _, err := apisources.Mount(e.st, x, auth.New(nil), nil, nil, nil); err != nil {
+	if _, err := apisources.Mount(e.st, x, auth.New(nil), nil, nil, apisources.Declared{}); err != nil {
 		t.Fatal(err)
 	}
 	const (

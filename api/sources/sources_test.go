@@ -111,12 +111,22 @@ func setup(t *testing.T) *env {
 	if err := in.Register(x); err != nil {
 		t.Fatal(err)
 	}
-	grp, err := Mount(st, x, e.au, e.wh, in, func(s domain.Source) (string, string, bool) {
-		// 只验路由把查询参数原样交给装配方并按形状返回；取名规则本身在 sources 包与 registry 的测试里。
-		if s.Command == "" && s.SourceKind == "" {
-			return "", "", false
-		}
-		return string(s.Type) + "|" + s.Command + "|" + s.SourceKind + "|" + string(s.Config), "en", true
+	grp, err := Mount(st, x, e.au, e.wh, in, Declared{
+		Name: func(s domain.Source) (string, string, bool) {
+			// 只验路由把查询参数原样交给装配方并按形状返回；取名规则本身在 sources 包与 registry 的测试里。
+			if s.Command == "" && s.SourceKind == "" {
+				return "", "", false
+			}
+			return string(s.Type) + "|" + s.Command + "|" + s.SourceKind + "|" + string(s.Config), "en", true
+		},
+		// 声明的查表在装配层（cli/serve/sender.go）与 sources 包里测；这里只验路由按它渲染、按 self 放行。
+		Sender: func(s domain.Source) Sender {
+			if s.Command == "fetch-feed" {
+				return Sender{Trust: "verified", Hint: &Text{Zh: "用户名", En: "username"}, Self: "identity"}
+			}
+			return Sender{Trust: "unverified"}
+		},
+		SelfSender: func(_ context.Context, s domain.Source) (string, error) { return "me-on-" + s.ID, nil },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1179,5 +1189,39 @@ func TestSourceDisplayNameThroughRoutes(t *testing.T) {
 	}
 	if r := e.web("GET", "/v1/sources/declared-name?command=x&config=%7B", ""); r.Code != 400 {
 		t.Fatalf("bad config: %d %s", r.Code, r.Body)
+	}
+}
+
+// GET /sources 与 GET /sources/{id} 带发件人结论；self-sender 只对声明了 identity 的来源、只给 Web。
+func TestSourceSenderAndSelfSenderRoutes(t *testing.T) {
+	e := setup(t)
+	for _, b := range []string{`{"id":"src_a","name":"a","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`,
+		`{"id":"src_s","name":"s","type":"script","command":"/opt/x.sh","schedule":"1h","timeout":60}`} {
+		if r := e.web("POST", "/v1/sources", b); r.Code != 201 {
+			t.Fatalf("register: %d %s", r.Code, r.Body)
+		}
+	}
+	var list struct {
+		Sources []struct {
+			ID     string
+			Sender *Sender
+		}
+	}
+	e.web("GET", "/v1/sources", "").into(&list)
+	if len(list.Sources) != 2 || list.Sources[0].Sender == nil || list.Sources[0].Sender.Trust != "verified" || list.Sources[0].Sender.Hint.Zh != "用户名" ||
+		list.Sources[1].Sender == nil || list.Sources[1].Sender.Trust != "unverified" || list.Sources[1].Sender.Hint != nil {
+		t.Fatalf("list sender: %+v", list.Sources)
+	}
+	if r := e.web("GET", "/v1/sources/src_s", ""); !strings.Contains(r.Body.String(), `"sender":{"trust":"unverified"}`) {
+		t.Fatalf("get sender: %s", r.Body)
+	}
+	if r := e.web("GET", "/v1/settings/sources/src_a/self-sender", ""); r.Code != 200 || r.Body.String() != `{"sender":"me-on-src_a"}`+"\n" {
+		t.Fatalf("self-sender: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("GET", "/v1/settings/sources/src_s/self-sender", ""); r.Code != 404 {
+		t.Fatalf("self-sender without identity: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(e.token(auth.Delegate), "GET", "/v1/settings/sources/src_a/self-sender", ""); r.Code != 403 || r.code() != "web_only" {
+		t.Fatalf("self-sender for a token: %d %s", r.Code, r.Body)
 	}
 }

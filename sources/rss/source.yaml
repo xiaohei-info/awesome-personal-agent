@@ -1,3 +1,5 @@
 # 接入声明（主文档 §9.1）。订阅多个源时登记时起名区分（重名会被拒绝）。
 program: rss-source
 default: {zh: RSS 订阅, en: RSS feed}
+# 发件人（附录 D.1）：由对方自己写，无从核实。
+sender: {trust: unverified}

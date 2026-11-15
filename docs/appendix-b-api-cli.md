@@ -192,7 +192,7 @@
 | | `POST /settings/model-endpoints/models`、`POST /settings/model-endpoints/test` | "设置 › 模型"的获取模型与测试连接：只读，不写 Event，不改策略；同一类端点同一时刻只跑一个，其余返回 409（主文档 §4.1、§15.5） | 只有 Web 登录 |
 | | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围 | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/trusted-senders` | 【规划中（v0.2.0）】只替换这个来源的转发白名单 `{"senders": [...]}`，经 `policy.Update`，记 `policy.changed` 与 `allowlist.changed`；来源声明为需确认时 400（`sender_unverifiable`） | 只有 Web 登录 |
-| | `GET /settings/sources/{id}/self-sender` | 【规划中（v0.2.0）】声明了 `sender.self: identity` 的来源：运行一次来源程序的 `identity` 模式，返回 `{"sender"}` 供预填；不落账；其他来源 404 | 只有 Web 登录 |
+| | `GET /settings/sources/{id}/self-sender` | 声明了 `sender.self: identity` 的来源：运行一次来源程序的 `identity` 模式（登记命令的第一个词加 `identity`，超时 10 秒），返回 `{"sender"}` 供预填；不产生来源事件、不写 Event；其他来源 404，程序失败或没给出身份时 409 `conflict` | 只有 Web 登录 |
 | | `PUT /settings/channels/{name}/answerers` | 【规划中（v0.2.0）】只替换这个渠道的回答人白名单 `{"answerers": [...]}`，记 `policy.changed` 与 `allowlist.changed` | 只有 Web 登录 |
 | | `POST /settings/channels/{name}/identify`，`GET /settings/channels/{name}/identify` | 【规划中（v0.2.0）】开始识别：返回一次性口令 `{code, expires_at}`（10 分钟，同一渠道同时一个，只在内存里，重启作废）；查看：`{state: waiting \| got \| expired, sender?, display?}` | 只有 Web 登录 |
 | | `PATCH /settings/tokens/{id}` | 【规划中（v0.2.0）】认领 token 所属的 harness `{"harness"}`：只能从空设一次，再设为 409（`credential.assign`，记 `credential.assigned`）；`GET /settings/tokens` 每条另带 `harness` 与 `seen_harness`（最近一次调用自报的 harness，只作推荐） | 只有 Web 登录 |
@@ -214,7 +214,7 @@
 
 事项字段 `created_at`、`updated_at`：`GET /items` 与 `GET /items/{id}` 返回，值为 RFC 3339 时间，只读。`created_at` 是该事项首条事项事件的时间（委派子事项的首条是 `delegation.created`，其余是 `item.created`）；`updated_at` 是最后一条事项事件的时间，与 `version` 同步推进（含关系变更；`item.deadline_passed` 与 `command.rejected` 不算）。
 
-来源的显示名 `name`（主文档 §9.1）：`POST /sources` 可带，去掉首尾空白后不超过 40 个字符、不含控制字符，与实例内其他来源不重名（不区分大小写），重名返回 409 `conflict`；不带时取来源程序接入声明的名字（中文）存下，响应里给出；程序没有声明又不带时返回 400 `invalid_request`，`next` 说明带名字或在声明里补上；声明出的名字被占用同样返回 409，不自动加序号。`PATCH /sources/{id}` 带 `name` 即改名（`source.rename` 命令，记 `source.renamed`，载荷 `{"name", "previous"}`），空串改回接入声明的名字（没有声明时 400）；名字与其他字段同一请求里给出时分别生效。`GET /sources` 与 `GET /sources/{id}` 总带 `name`。`GET /sources/declared-name?type=&command=&source_type=&config=`（`config` 是 JSON 对象，非法时 400）按同一套声明返回 `{"name": {"zh", "en"}}`，没有声明时 `{"name": null}`，供 Web 新登记表单按界面语言预填；它只读，不登记。
+来源的显示名 `name`（主文档 §9.1）：`POST /sources` 可带，去掉首尾空白后不超过 40 个字符、不含控制字符，与实例内其他来源不重名（不区分大小写），重名返回 409 `conflict`；不带时取来源程序接入声明的名字（中文）存下，响应里给出；程序没有声明又不带时返回 400 `invalid_request`，`next` 说明带名字或在声明里补上；声明出的名字被占用同样返回 409，不自动加序号。`PATCH /sources/{id}` 带 `name` 即改名（`source.rename` 命令，记 `source.renamed`，载荷 `{"name", "previous"}`），空串改回接入声明的名字（没有声明时 400）；名字与其他字段同一请求里给出时分别生效。`GET /sources` 与 `GET /sources/{id}` 总带 `name`，另带发件人结论 `sender: {"trust": "verified" | "unverified", "hint"?: {"zh", "en"}, "self"?: "identity"}`（主文档 §9.1）：有接入声明按声明；没有声明的只用映射的 webhook 来源，所用映射里有按验签核实发件人的为 `verified`；其余为 `unverified`。`GET /sources/declared-name?type=&command=&source_type=&config=`（`config` 是 JSON 对象，非法时 400）按同一套声明返回 `{"name": {"zh", "en"}}`，没有声明时 `{"name": null}`，供 Web 新登记表单按界面语言预填；它只读，不登记。
 
 `POST /sources`、`PATCH /sources/{id}` 的 `credentials_path` 必须落在该来源自己的目录（`<APA_HOME>/sources/<id>/`）内，否则返回 400。内核只记录这个路径，不读内容；每次拉取时经 stdin JSON 的 `credentials_path` 字段原样交给来源进程（主文档 §9.2），不经环境变量传递。
 
@@ -383,7 +383,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 规则初始模式 | 一律 `observe` | 提醒类 `auto`，动作类 `observe` | 升级时未动过的内置提醒类规则切到 `auto` 并记 Event（主文档 §16.5） |
 | 执行者与委派（主文档 §6.17） | 执行者由本人在 Web 手填或确认插件声明后进入清单；`assignee` 不在清单里返回 5；确认声明时覆盖该 harness 的全部条目；名单只按 id；挂靠消息只对 `assignee` 推进 | 宿主随 `apa delegate --executor` 登记，身份字段固定；不在名录里也可指派；确认声明并入名录、不删除；新增委派记录（`apa dispatch`、`/items/{id}/dispatches`、`/dispatches`）与 `apa context --scope item` 的 `history`；名单可按机器或 harness 匹配（`allowed-executors` 的请求与返回加 `match`）；21 的返回体加 `allowed_match`、`candidates`；发起委派的凭据与运行身份对目标的委派子事项也能推进挂靠消息并拿到确认游标；删除 `GET /settings/executors`（读名录改用 `GET /executors`）与 Web 设置里的手填表单；`DELETE /settings/executors/{id}` 改为 `DELETE /executors/{id}`；`POST /settings/executors`（`executor.put`）保留为只 Web 登录、无界面的本人维护入口（如登记交给人的执行者） | 只增列与表（账本结构版本 4 → 5），已有条目、声明与名单原样保留，名单判定不变。**调用方要改的**：依赖"未登记返回 5"的调用方改为自己先查 `GET /executors`；用 `/settings/executors` 读名录的改用 `GET /executors`。带调用表的旧插件仍可委派，只是不写委派记录。删除的路由与 Web 切换在同一次改动里完成 |
 | 授权单的被授权方与有效期 | `grantee.credential` 必填；`expires_at` 必填，不超过 90 天；运行凭据带 `--grant` 一律退出码 4 | 另可 `grantee.agent`（按内核记录的 harness 匹配）与 `background`；`scope.all`；`expires_at` 可选（不设即长期）；允许后台使用的单对该 Agent 的运行凭据生效，不符时退出码 23（原 4） | 已签发的单原样生效。按"运行凭据带单为 4"断言的调用方改为 23。见主文档 §6.13、§14.5 |
-| 来源事件的 `sender_verified` | 来源程序逐条自报 | 以来源程序的接入声明为上限，没有声明的程序按需确认（恒为假）；声明为"不带发件人"的事件类型清空 `sender` | 已落盘的事件不改写。自定义脚本以前自报为真的，之后按未核实处理，转发白名单对它们不再生效（主文档 §9.1） |
+| 来源事件的 `sender_verified` | 来源程序逐条自报 | 以来源程序的接入声明为上限，没有声明的程序按需确认（恒为假）；声明为"不带发件人"的事件类型清空 `sender` | 已落盘的事件不改写。自定义脚本与 webhook 转换脚本以前自报为真的，之后按未核实处理，转发白名单对它们不再生效（主文档 §9.1） |
 | 代码托管来源的事件 | `*.updated`、`*.closed`、`*.merged` 的 `sender` 为对象作者 | 这些类型不带 `sender`；新增评论事件 `issue.commented`、`pr.commented`、`pr.review_commented`（webhook 另有 `pr.reviewed`），带已核实的评论作者 | 已落盘的事件不改写。按事件类型匹配的用户规则若要处理评论，需加上新类型（附录 D.4） |
 | 渠道回答人 | 即时通讯渠道 ext 优先报用户名 | 一律报平台用户 ID | 写着用户名的旧条目不再匹配，本人在"设置 › 渠道"识别一次 ID（主文档 §16.5） |
 | 凭据表 | 无 `harness` | `auth_credential.harness`，账本结构版本 5 → 6 | 只增列，已有 token 照常可用；迁移后旧二进制拒绝打开账本，回退用升级前快照 |
