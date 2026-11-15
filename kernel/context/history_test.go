@@ -116,7 +116,7 @@ func TestDispatchHistoryAcrossInstanceRuns(t *testing.T) {
 	e := setup(t)
 	e.withDelegation(t)
 	week := func(inst, title string) string {
-		return e.item(t, map[string]any{"title": title, "origin": map[string]string{"source": domain.OriginInstance, "ref": inst}})
+		return e.item(t, map[string]any{"title": title, "origin": map[string]string{"source": domain.OriginInstancePrefix + inst}})
 	}
 	w1 := week("inst_weekly", "周报 W1")
 	c1 := e.id(t, host, "delegate.create", map[string]any{"parent": w1, "assignee": "writer"})

@@ -926,7 +926,7 @@ clock_rules:
 		calls[0].Instance == nil || calls[0].Instance.ID != ins.ID || !calls[0].Instance.Due.Equal(t0.Add(24*time.Hour)) {
 		t.Fatalf("calls %+v briefs %+v", calls, bs)
 	}
-	if o := bs[0].Origin; o == nil || o.Source != domain.OriginInstance || o.Ref != ins.ID { // 同一实例的事项连成序列（§6.17）
+	if o := bs[0].Origin; o == nil || o.Source != domain.OriginInstancePrefix+ins.ID { // 同一实例的事项连成序列（§6.17）
 		t.Fatalf("origin %+v", o)
 	}
 	fire(72 * time.Hour) // 错过两个周期：只补最近一次

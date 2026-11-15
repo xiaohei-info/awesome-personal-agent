@@ -65,8 +65,9 @@ type Origin struct {
 	Ref    string `json:"ref,omitempty"`
 }
 
-// OriginInstance 是例行任务实例建的事项的 origin.source，ref 为实例 id；同一实例建的事项算同一序列（§6.17）。
-const OriginInstance = "instance"
+// OriginInstancePrefix 是例行任务实例建的事项的 origin.source 前缀（instance:<实例 id>，与对话捕获的 capture:<项目> 同为内部来源）；
+// 同一实例建的事项算同一序列（§6.17）。
+const OriginInstancePrefix = "instance:"
 
 // 内置关系类型；类型字符串开放。
 const (
