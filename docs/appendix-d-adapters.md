@@ -6,7 +6,7 @@
 
 | 主文档里的称呼 | 本版适配 | 位置 | 所在的通用契约 |
 |---|---|---|---|
-| 首批宿主 | Hermes | `plugins/hermes` | harness 插件接口（主文档 §11.2、附录 A） |
+| 首批 harness（界面称 Agent） | Hermes | `plugins/hermes` | harness 插件接口（主文档 §11.2、附录 A） |
 | 即时通讯渠道 ext | Telegram，用成熟的 Bot SDK | `ext/telegram` | 渠道 ext 协议（主文档 §10.3） |
 | 导出 ext | Markdown 目录 | `ext/export` | 事件订阅与只读 API（主文档 §10.3） |
 | webhook 转发 ext | 通用的签名 POST | `ext/webhookforward` | 事件订阅（主文档 §10.3）；可选 `APA_WEBHOOK_TYPES`（逗号分隔的事件类型）只转发所列类型，缺省转发全部，未选中的事件不投递但游标照常推进 |
@@ -30,6 +30,27 @@ RSS/Atom、通用 HTTP JSON 轮询、本地目录监视三个拉取程序不对�
 | `http-json` | "JSON 接口 / JSON endpoint" | 登记时起名 |
 | `dir-watch` | "文件夹 / Folder" | 登记时起名 |
 
+**发件人是否可信**（主文档 §9.1）：同一份 `source.yaml` 里的 `sender` 段。界面对本人只显示"可信"或"需确认"一个结论，本人不能改。
+
+| 来源程序 | 结论 | 按事件类型细分 | 依据 |
+|---|---|---|---|
+| `github-source`；`source_type` 为 `github` 的 webhook | 可信，格式提示"GitHub 用户名"，能推出本人身份（`identity` 模式取 `GET /user` 的 `login`） | `*.opened`、`*.commented`、`pr.review_commented` 可信；`*.updated`、`*.closed`、`*.merged`、`notification.*` 不带发件人 | 作者取自接口返回的 `user.login`（webhook 取验签后的 `sender.login`），由平台填写。聚合出的更新与关闭事件不知道动作者，通知接口不给动作者 |
+| `mail-himalaya` | 需确认 | — | 取不到可信的认证结果信头（D.3 `MEAS-MAIL-AR`） |
+| `apple-pim-source` | 需确认 | 提醒事项不带发件人 | 邮件的认证结果信头能否取到待实测（主文档 §21.3 `MEAS-MAIL-DMARC`）；日历组织者由对方写入 |
+| `calendar` | 需确认 | — | 组织者由对方的邀请写入 |
+| `rss-source`、`http-json` | 需确认 | — | 作者与字段由对方写 |
+| `dir-watch` | 需确认 | 全部不带发件人 | 没有发件人 |
+
+写法：
+
+```yaml
+sender:
+  trust: verified            # 或 unverified
+  types: {"issue.updated": none, "notification.*": none}   # 可选；值 verified、unverified、none
+  hint: {zh: GitHub 用户名, en: GitHub username}         # trust 为 verified 时必填
+  self: identity             # 可选：程序支持 identity 模式（主文档 §9.2）
+```
+
 "登记时起名"的程序再登记第二个实例而不带名字时，声明出的名字已被占用，返回 409，提示起名；不会自动加序号。`hosted-reader` 是托管文档读取器，不登记为来源，没有声明。
 
 **来源程序作者**：新增或换掉一个来源程序，在它的目录里写 `source.yaml`，声明显示名是接入的必填项。字段：`program`（`command` 第一个词的文件名部分）、`default`（中英各一份的名字，不含占位，必填）、`name`（可选的名字模板，`{字段}` 取 `config` 里同名的字符串值，取不到值时用 `default`）、`by` 与 `names`（可选：按 `config` 的 `by` 字段取值选模板，优先于 `name`）、`webhook_source_type`（可选：同一 `source_type` 的 webhook 来源也按本声明取名）。例：
@@ -44,7 +65,7 @@ names:
 default: {zh: Apple 邮件, en: Apple Mail}
 ```
 
-`sources/declarations_test.go` 要求 `sources/*/cmd/*` 下每个来源程序都有声明。仓库之外的来源程序没有声明位置，登记时必须带名字（`sources.json` 的 `name`、`apa source add --name` 或 Web 的名字一栏）。账本只存一种语言的名字，取中文；Web 新登记表单按界面语言预填，本人可改。
+`sources/declarations_test.go` 要求 `sources/*/cmd/*` 下每个来源程序都有声明，且声明带 `sender` 段。仓库之外的来源程序没有声明位置，登记时必须带名字（`sources.json` 的 `name`、`apa source add --name` 或 Web 的名字一栏）。账本只存一种语言的名字，取中文；Web 新登记表单按界面语言预填，本人可改。
 
 **升级补名**：升级前登记的来源没有名字，`apa serve` 启动时先按上面的声明补；取不到声明的（自定义脚本等）为了兼容按 `source_type` 起名（`cli/serve/assemble.go:sourceKindNames`：`mail` 邮件、`calendar` 日历、`reminder` 提醒事项、`github` GitHub；表里没有的按来源类型称"定时拉取""自定义脚本""外部推送"），同名加序号，并在健康视图留一条"建议起名"的说明。
 
@@ -84,6 +105,7 @@ default: {zh: Apple 邮件, en: Apple Mail}
 |---|---|---|
 | `MEAS-MAIL-SEEN` | 有条件成立 | 命题：读正文不改已读标记。`message read --preview` 前后标记不变；不加 `--preview` 的 `message read` 在该测试邮箱上标记也没变，但其他 IMAP 服务器可能在非预览读取时置已读，所以适配器一律带 `--preview`。himalaya v1.1.0，仅一个邮箱服务实测 |
 | `MEAS-MAIL-MSGID` | 不成立 | 命题：`envelope list` 的 JSON 带 Message-ID。字段只有 `id`（IMAP 序号）、`flags`、`subject`、`from`、`to`、`date`、`has_attachment`，没有 Message-ID；用 `message read --preview -H Message-ID <id>` 取，输出 `Message-ID: <…>` 后接空行和正文，与读正文是同一次调用。himalaya v1.1.0；2.x 未实测 |
+| `MEAS-MAIL-AR` | 不成立 | 命题：能在不改已读标记的前提下取到收件服务加的认证结果信头。`message read --preview -H Authentication-Results` 遇到多条同名信头只输出**最后一条**，即最靠近发件人、可被发件人伪造的那条，收件服务加在最上面的那条取不到；`message export --full` 能取到全部原始信头，但会把信置为已读。所以邮件来源声明为需确认。himalaya v1.1.0，在合成的本地邮箱上实测（一条收件方结果在上、一条伪造结果在下），未对真实邮箱运行；IMAP 后端未测 |
 | `MEAS-MAIL-AUTH` | 成立 | 命题：认证失败可识别。错误口令与服务不可达都以退出码 1 失败，没有专用退出码，区别只在 stderr：前者含 `Invalid credentials`，后者含 `Connection refused`。适配器按 stderr 文本识别并返回 2。himalaya v1.1.0 |
 | `MEAS-CAL-INCR` | 不成立 | 命题：gog 有增量查询。`calendar events` 只有 `--from/--to`、`--days`、`--query`、`--max`、`--page` 一类窗口与分页参数，没有按更新时间或同步令牌取增量的选项；返回的 `nextPageToken` 只用于分页。做法是每次取前瞻窗口，内核按事件 id 去重。gog v0.9.0 |
 | `MEAS-CAL-IDS` | 成立 | 命题：JSON 带 UID、RECURRENCE-ID 和更新时间。每个日程带 `iCalUID`、`updated`、`created`、`etag`；重复事件的实例另带 `recurringEventId` 和 `originalStartTime`，后者即 RECURRENCE-ID。gog v0.9.0 |
@@ -96,12 +118,14 @@ default: {zh: Apple 邮件, en: Apple Mail}
 | 项 | 需实测的结论 | 由谁证实 |
 |---|---|---|
 | `MEAS-MAIL-THREAD` | himalaya 与 `mail-cli` 在读取正文的同一次调用里能否取到 `References`、`In-Reply-To` 头 | **录制样本部分（W1 开发验收）已有结论**：两个适配器的契约测试都断言回信（含只带 `In-Reply-To` 的）的 `correlation_keys` 含原信的 `thread:<Message-ID>`，见 D.2 与 flow-source-mail 的 ACT-MAIL-08/10/12/13。样本版本：himalaya 1.1.0（头部块沿用 1.1.0 实录的 `Message-ID: …` 输出形态，References/In-Reply-To 行按同一形态合成，非真实邮箱实录）；mail-cli 无版本参数，`message.references`/`inReplyTo` 字段为按设计合成。**真实邮件工具上的证实由本机升级验证 L11 承接**（主文档 §20.4），在此之前不得把"能取到"当作已证实 |
+| `MEAS-MAIL-DMARC` | `mail-cli get --include-source` 在 `--engine=sqlite` 下能否返回原始信头、是否改已读标记、字段名；收件服务的标识按账户配置还是按服务推定；`mail-cli accounts` 是否带邮箱地址。`mail-cli auth-check` 只做 DKIM 与 SPF、自带一份发件人名单，不用它 | 把 apple-pim 邮件声明为可信之前的验收（主文档 §21.3） |
 | `MEAS-ADAPT-GMAIL` | gog 邮件结果的粒度（线程或消息）及其增量查询方式 | 接入该适配器时的验收 |
 | `MEAS-ADAPT-KHAL` | `khal list --json` 没有更新时间字段时如何识别更新；重复事件的展开 | 接入该适配器时的验收 |
 
 ## D.4 代码托管来源与 webhook 校验方案
 
-- **拉取程序**：本版附带 GitHub 的拉取程序，产出 Issue、PR、通知三类事件，并在每次拉取时比对仓库默认分支根目录 AGENTS.md 的 blob sha（主文档 §12.5）。来源类型登记为 `github`，内置规则按它匹配（附录 C.14）。
+- **拉取程序**：本版附带 GitHub 的拉取程序，产出 Issue、PR、评论、通知四类事件，并在每次拉取时比对仓库默认分支根目录 AGENTS.md 的 blob sha（主文档 §12.5）。来源类型登记为 `github`，内置规则按它匹配（附录 C.14）。
+- **评论**：按仓库另取 `GET /repos/{owner}/{repo}/issues/comments?since=` 与 `GET /repos/{owner}/{repo}/pulls/comments?since=`，每条评论一个事件（`issue.commented`、`pr.commented`、`pr.review_commented`），`sender` 为评论的 `user.login` 并已核实，关联键取所属 issue 或 PR 的 `owner/repo#编号`，因此挂到已有事项上成为挂靠消息。Issue 与 PR 的 `updated`、`closed`、`merged` 由列表的时间字段推出，不知道动作者，不带 `sender`。webhook 侧 `inbound-triage` 包另映射 `issue_comment`、`pull_request_review`、`pull_request_review_comment`，`sender` 取 `$.sender.login`，验签通过才算已核实。
 - **仓库简写**：托管型材料的只读读取器把 `owner/repo` 简写展开成 GitHub 地址；默认站点只在读取器里认定，内核只保存登记的写法（主文档 §12.3）。
 - **校验方案**（`inbound-triage` 包的声明式数据，附录 C.5）：
 
@@ -115,6 +139,10 @@ default: {zh: Apple 邮件, en: Apple Mail}
 ## D.5 即时通讯渠道
 
 本版的渠道 ext 是 Telegram：独立进程，长轮询领取投递，用成熟的 Bot SDK 收发。本人的 harness 也连着 Telegram 时，ext 用单独的 Bot，因为同一个 Bot 不能同时有多个长轮询消费者。渠道在 `/settings/policy` 的 `channels` 段登记为 `telegram`。
+
+- **回答人**：ext 一律以 Telegram 分配的数字用户 ID（`from.id`）作为回答人，不用可改、可被他人重新注册的用户名。
+- **识别 ID**：本人在"设置 › 渠道"点"识别我的 ID"，页面给出口令；本人在与 Bot 的私聊里发 `/start <口令>`，ext 把 `from.id` 与 `@用户名` 经 `POST /channels/identify` 上报，回一句"已收到，回网页确认"，本人在网页点"加上"才写入名单。私聊之外的会话不处理识别。
+- 旧版本写着用户名的回答人条目升级后不再匹配，按主文档 §16.5 识别一次。
 
 其他渠道（企业协作工具、其他聊天应用、邮件发信）按同一份渠道 ext 协议实现，不改内核。
 
