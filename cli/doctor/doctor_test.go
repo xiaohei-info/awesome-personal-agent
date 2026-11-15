@@ -215,7 +215,7 @@ func healthy(t *testing.T) (*env, *modelstub.ClsStub, *modelstub.Stub) {
 	cls, gen := modelstub.NewCls(), modelstub.New()
 	t.Cleanup(cls.Close)
 	t.Cleanup(gen.Close)
-	gen.SetDefault(modelstub.Reply{Content: `{"answer":"yes","sufficient":true}`})
+	gen.SetDefault(modelstub.Reply{Content: `{"title":"Send the quarterly report","kind":"task"}`})
 	e.setPolicy(func(p *policy.Policy) {
 		p.JudgeEndpoint = &policy.JudgeEndpoint{URL: cls.URL(), Protocol: policy.ProtocolProbability, Locality: "local"}
 		p.GenerateEndpoint = policy.GenerateEndpoint{URL: gen.URL(), Model: "m", Locality: "local"}
@@ -510,6 +510,13 @@ func TestDoctorProbesEndpointsWithBuiltInSamples(t *testing.T) {
 	if len(cls.Batches()) != 1 || len(gen.Requests()) != 1 {
 		t.Fatalf("requests: %d %d", len(cls.Batches()), len(gen.Requests()))
 	}
+	// 生成端点答得了小样例、答不了起草模板的约束（代码块包着）：不能再报正常，要说出具体原因。
+	gen.SetDefault(modelstub.Reply{Content: "```json\n{\"title\":\"x\",\"kind\":\"task\"}\n```"})
+	r = Run(bg, e.input())
+	if d := find(t, r, kdoctor.ModelEndpoint).Details[1]; r.OK || d.Status != kdoctor.Error || d.Code != kdoctor.CodeDraftSchema || d.Data["shape"] != "markdown_fence" {
+		t.Fatalf("draft template failure not reported: %+v", d)
+	}
+	gen.SetDefault(modelstub.Reply{Content: `{"title":"Send the quarterly report","kind":"task"}`})
 	cls.SetFault(modelstub.ClsFault{Source: "self_reported"})
 	if r := Run(bg, e.input()); r.OK || find(t, r, kdoctor.ModelEndpoint).Status != kdoctor.Error {
 		t.Fatalf("self_reported must fail")

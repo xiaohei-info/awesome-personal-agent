@@ -272,3 +272,38 @@ func TestUnsupportedSchemaRejectedBeforeRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// 端点答了但 content 不是单个 JSON 值：错误说明内容的形态（不含内容本身），仍是 ErrSchema，不放行。
+func TestSchemaErrorNamesContentShape(t *testing.T) {
+	for _, c := range []struct{ name, content, finish, shape string }{
+		{"empty", "  ", "stop", ShapeEmpty},
+		{"fence", "```json\n{\"choice\":\"remind\",\"confidence\":1}\n```", "stop", ShapeFence},
+		{"trailing", `{"choice":"remind","confidence":1} 以上`, "stop", ShapeTrailing},
+		{"text around", `结果如下：{"choice":"remind","confidence":1}`, "stop", ShapeTextAround},
+		{"plain", "我无法完成这个请求", "stop", ShapePlainText},
+		{"truncated", `{"choice":"rem`, "length", ShapeTruncated},
+		{"malformed", `{"choice":}`, "stop", ShapeMalformed},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"finish_reason": c.finish, "message": map[string]any{"content": c.content}}}})
+				_, _ = w.Write(body)
+			}))
+			defer srv.Close()
+			_, err := (&Client{}).Complete(context.Background(), policy.GenerateEndpoint{URL: srv.URL, Model: "m"}, Request{Schema: json.RawMessage(judgeSchema)})
+			if !errors.Is(err, ErrSchema) || SchemaShape(err) != c.shape {
+				t.Fatalf("err=%v shape=%q, want %q", err, SchemaShape(err), c.shape)
+			}
+			if strings.Contains(err.Error(), "remind") || strings.Contains(err.Error(), "无法") {
+				t.Fatalf("error text carries the content: %v", err)
+			}
+		})
+	}
+	// 内容是合法 JSON 只是违反 schema（枚举外、缺字段）：没有内容形态。
+	s, ep := setup(t)
+	s.SetDefault(modelstub.Reply{Content: `{"choice":"nope","confidence":1}`})
+	_, err := (&Client{}).Complete(context.Background(), ep, Request{Schema: json.RawMessage(judgeSchema)})
+	if !errors.Is(err, ErrSchema) || SchemaShape(err) != "" {
+		t.Fatalf("enum violation: %v", err)
+	}
+}

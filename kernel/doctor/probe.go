@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
@@ -22,6 +23,40 @@ const (
 
 	probeTimeout = 30 * time.Second
 )
+
+// 起草建议的模板：生成端点的真实用途。自检用它的结构约束与提示词探测，端点只答得了小样例却答不了它时才看得出来。
+// 与 kernel/inbound 的 DefaultPack、DraftTemplate 同值（inbound 的测试对照）。输入形状同入站起草：项目与候选清单为空。
+const (
+	DraftPack     = "inbound-triage"
+	DraftTemplate = "triage-draft"
+
+	sampleDraftInput    = `{"source":"doctor-sample","source_type":"cli","event_type":"mail.received","subject":"Send the quarterly report by Friday","link":"","sender":"sample@example.com","sender_verified":false,"occurred_at":"2026-01-01T00:00:00Z","correlation_hint":"","projects":[],"candidates":[],"today":"2026-01-01"}`
+	sampleDraftMaterial = "Please send the quarterly report to finance by Friday."
+)
+
+// draftProbe 取生效中的起草模板，组出探测请求；包或模板不可用（包被拒载、不是生成型）返回 false，由调用方退回内置小样例。
+func draftProbe(e Env) (model.Request, bool) {
+	if e.Packs == nil {
+		return model.Request{}, false
+	}
+	for _, p := range e.Packs.List() {
+		if p.Name != DraftPack {
+			continue
+		}
+		pr, ok := p.Prompts[DraftTemplate]
+		if !ok || pr.Meta.Agent != "generate" || len(pr.Meta.OutputSchema) == 0 {
+			return model.Request{}, false
+		}
+		schema, err := json.Marshal(pr.Meta.OutputSchema)
+		if err != nil {
+			return model.Request{}, false
+		}
+		req := direct.PromptRequest(pr, direct.Call{Input: json.RawMessage(sampleDraftInput), Material: sampleDraftMaterial}, "run_doctor", nil, schema)
+		req.Timeout = probeTimeout
+		return req, true
+	}
+	return model.Request{}, false
+}
 
 const (
 	regionWhy  = "the service is not available from this network location (HTTP 451, or a 403 that cites the region)"
@@ -101,7 +136,12 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	start := e.now()
-	resp, err := e.Model.Complete(ctx, ep, model.Request{System: sampleSystem, User: sampleUser, Schema: json.RawMessage(sampleSchema), Timeout: probeTimeout})
+	req, real := draftProbe(e)
+	if !real {
+		req = model.Request{System: sampleSystem, User: sampleUser, Schema: json.RawMessage(sampleSchema), Timeout: probeTimeout}
+	}
+	d.Data["sample"] = map[bool]string{true: "draft", false: "builtin"}[real]
+	resp, err := e.Model.Complete(ctx, ep, req)
 	ms := e.now().Sub(start).Milliseconds()
 	d.Data["elapsed_ms"] = ms
 	if err != nil {
@@ -119,7 +159,15 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 			}
 		case errors.Is(err, model.ErrTimeout):
 			d.Code, d.Why = CodeTimeout, "the endpoint did not answer the structured-output sample request in time"
-		case errors.Is(err, model.ErrSchema): // 端点通了，只是输出没守 schema：提醒，不算坏
+		case errors.Is(err, model.ErrSchema) && real: // 真实模板的输出过不了：起草会逐条失败，是坏的
+			d.Code = CodeDraftSchema
+			d.Data["template"] = DraftPack + "/" + DraftTemplate
+			d.Why = "the endpoint answered, but its output does not follow the JSON schema of the " + DraftTemplate + " template, so drafting fails on every call: " + err.Error()
+			d.Next = "check that the endpoint and model support structured output for this schema; the shape in the message names what the endpoint returned"
+			if shape := model.SchemaShape(err); shape != "" {
+				d.Data["shape"] = shape
+			}
+		case errors.Is(err, model.ErrSchema): // 端点通了，只是输出没守小样例的 schema：提醒，不算坏
 			d.Status, d.Code = Warning, CodeSchemaMismatch
 			d.Why = "the endpoint answered, but its output does not follow the JSON schema of the structured-output sample request"
 		case errors.Is(err, model.ErrBadResponse):
@@ -131,6 +179,9 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 	}
 	_ = resp
 	d.Why = fmt.Sprintf("answered the structured-output sample request in %d ms", ms)
+	if real {
+		d.Why = fmt.Sprintf("answered the %s structured-output sample request in %d ms", DraftTemplate, ms)
+	}
 	return d
 }
 

@@ -449,10 +449,7 @@ func (s *Service) step(ctx context.Context, c Call, pk *packs.Pack, tmpl string,
 	if p.cached != nil {
 		step.Reused, step.Result = true, p.cached
 	} else {
-		req := model.Request{System: render(pr.Body, c, id), User: userSegment(c, p.stats), Schema: schema}
-		if m.Timeout != "" {
-			req.Timeout, _ = time.ParseDuration(m.Timeout) // 加载时已校验
-		}
+		req := PromptRequest(pr, c, id, p.stats, schema)
 		var resp model.Response
 		if resp, callErr = s.complete(ctx, p.ep, req, s.o.Attempts); callErr == nil {
 			step.Result = json.RawMessage(resp.Content)
@@ -575,6 +572,16 @@ func retryable(err error) bool {
 	}
 	// shortcut: model 包对传输层失败没有哨兵错误，按文本前缀识别；model 加哨兵后改用 errors.Is。
 	return strings.HasPrefix(err.Error(), "model: request failed")
+}
+
+// PromptRequest 是一次模型调用的请求：系统段是渲染后的模板，用户段是结构化输入、资料与统计，schema 是输出约束。
+// step 与自检（kernel/doctor）共用它，自检才能带着与真实调用同一份约束去探测端点。
+func PromptRequest(pr packs.Prompt, c Call, runID string, st *Stats, schema json.RawMessage) model.Request {
+	req := model.Request{System: render(pr.Body, c, runID), User: userSegment(c, st), Schema: schema}
+	if pr.Meta.Timeout != "" {
+		req.Timeout, _ = time.ParseDuration(pr.Meta.Timeout) // 加载时已校验
+	}
+	return req
 }
 
 func render(body string, c Call, runID string) string {
