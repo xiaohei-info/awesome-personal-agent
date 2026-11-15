@@ -17,8 +17,12 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
 )
@@ -40,7 +44,8 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, kitems.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, kitems.Module, core.Module,
+		proc.Module, registry.Module, runner.Module, runidentity.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -354,4 +359,48 @@ func TestAuditErrors(t *testing.T) {
 	if _, rec := e.get("/v1/audit/events", e.token(auth.Ext)); rec.Code != 403 {
 		t.Fatalf("ext = %d", rec.Code)
 	}
+}
+
+// 处理经过：本人与 observer 可读事项与来源消息的经过；运行凭据、ext 凭据不可读；不存在的消息 404。
+func TestTraceRoutes(t *testing.T) {
+	e := setup(t)
+	id := e.createItem("fix login")
+	var tr struct {
+		Entries []struct{ Kind string }
+	}
+	rec := e.do("GET", "/v1/items/"+id+"/trace", "", e.web)
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &tr) != nil || len(tr.Entries) != 1 || tr.Entries[0].Kind != "created" {
+		t.Fatalf("owner trace: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/v1/items/"+id+"/trace", "", e.token(auth.Observer)); rec.Code != 200 {
+		t.Fatalf("observer trace: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", "/v1/items/"+id+"/trace", "", e.token(auth.Ext)); rec.Code != 403 {
+		t.Fatalf("ext trace: %d %s", rec.Code, rec.Body)
+	}
+	run := e.runCredential(id)
+	for _, path := range []string{"/v1/items/" + id + "/trace", "/v1/source-events/sev_x/trace"} {
+		if rec := e.do("GET", path, "", func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+run) }); rec.Code != 403 {
+			t.Fatalf("run credential %s: %d %s", path, rec.Code, rec.Body)
+		}
+	}
+	if rec := e.do("GET", "/v1/source-events/sev_missing/trace", "", e.web); rec.Code != 404 {
+		t.Fatalf("missing message: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func (e *env) runCredential(item string) string {
+	e.t.Helper()
+	var run string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		r, err := proc.Enqueue(tx, proc.Request{Run: domain.Run{Category: domain.RunBackground, Target: item, TimeoutSec: 60}, Spec: proc.Spec{Command: []string{"true"}}}, time.Now())
+		if err != nil {
+			return err
+		}
+		run, err = runidentity.Issue(tx, r.ID, time.Now())
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return run
 }

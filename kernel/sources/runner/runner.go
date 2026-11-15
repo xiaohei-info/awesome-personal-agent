@@ -1065,6 +1065,31 @@ func EventPage(tx *store.Tx, sourceID string, ds []domain.Disposition, after int
 	return out, next, nil
 }
 
+// EventPageRecent 按落盘从新到旧返回一页；offset 是已返回的条数，next 为 0 表示没有下一页。
+// shortcut: 偏移翻页，翻页期间有新事件落盘时会重复读到一条；需要严格翻页时再改按序号游标。
+func EventPageRecent(tx *store.Tx, sourceID string, ds []domain.Disposition, offset int64, limit int) ([]domain.SourceEvent, int64, error) {
+	where, args := `WHERE source_id = ?`, []any{sourceID}
+	if len(ds) > 0 {
+		where += ` AND disposition IN (?` + strings.Repeat(`,?`, len(ds)-1) + `)`
+		for _, d := range ds {
+			args = append(args, string(d))
+		}
+	}
+	as, err := querySeq(tx, where+` ORDER BY seq DESC LIMIT ? OFFSET ?`, append(args, limit+1, offset)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	var next int64
+	if len(as) > limit {
+		next, as = offset+int64(limit), as[:limit]
+	}
+	out := make([]domain.SourceEvent, len(as))
+	for i, a := range as {
+		out[i] = a.SourceEvent
+	}
+	return out, next, nil
+}
+
 func querySeq(tx *store.Tx, tail string, args ...any) ([]Attachment, error) {
 	rows, err := tx.Query(`SELECT seq, `+eventCols+` FROM sources_runner_event `+tail, args...)
 	if err != nil {

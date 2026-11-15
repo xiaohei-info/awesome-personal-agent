@@ -182,6 +182,14 @@ func ReadDisposedFor(tx *store.Tx, item string) ([]Entry, error) {
 		OR EXISTS (SELECT 1 FROM json_each(payload, '$.items') WHERE value = ?1)) ORDER BY seq`, item)
 }
 
+// ReadMentioning 返回事项一侧点名某条来源消息的事件（跟进消息的挂上、交回、退回，建议补到已有事项时随之改挂），按序号升序。
+// 这些事件的 object 是事项，消息 id 在载荷的 message 或 messages 里（处理经过用）。
+// shortcut: 按类型与载荷扫表，没有索引；账本到几十万条事件、经过页明显变慢时再加载荷索引。
+func ReadMentioning(tx *store.Tx, message string) ([]Entry, error) {
+	return collect(tx, "SELECT "+cols+` FROM eventlog_event WHERE type IN ('followmsg.attached', 'followmsg.handed_back', 'followmsg.released', 'proposal.attached')
+		AND tombstone = 0 AND (json_extract(payload, '$.message') = ?1 OR EXISTS (SELECT 1 FROM json_each(payload, '$.messages') WHERE value = ?1)) ORDER BY seq`, message)
+}
+
 // Filter 是审计查询条件；空字段不限。Actor 匹配操作者 principal，Grant 匹配依据的授权单 id（授权单的使用记录）。
 type Filter struct {
 	Actor, Object, Type, Grant string
