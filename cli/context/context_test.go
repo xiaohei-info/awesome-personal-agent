@@ -305,7 +305,7 @@ func TestContextDefaultsToProcessCwd(t *testing.T) {
 
 func TestPersona(t *testing.T) {
 	k := newKernel(t)
-	// 没自定义：内置默认；语言取 --lang，其次区域设置，取不到用英文。
+	// 没自定义：内置默认；语言取 --lang，其次 Web 里的设置，其次区域设置，取不到用英文。
 	for _, c := range []struct {
 		env  map[string]string
 		args []string
@@ -322,9 +322,30 @@ func TestPersona(t *testing.T) {
 			t.Fatalf("persona env=%v args=%v: %+v", c.env, c.args, r)
 		}
 	}
+	// 设置压过区域设置，--lang 又压过设置（进程环境没有 LANG 的宿主靠设置拿到中文）。
 	actor := domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}
 	if err := k.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, actor, "test", func(p *policy.Policy) error { p.Persona = "warm and brief"; return nil })
+		_, err := policy.Update(tx, actor, "test", func(p *policy.Policy) error { p.PersonaLang = "zh"; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		env  map[string]string
+		args []string
+		want string
+	}{
+		{nil, nil, "zh"},
+		{map[string]string{"LANG": "en_US.UTF-8"}, nil, "zh"},
+		{map[string]string{"LANG": "en_US.UTF-8"}, []string{"--lang", "en"}, "en"},
+	} {
+		r := k.apaTok(k.tok, c.env, append([]string{"persona"}, c.args...)...)
+		if want := policy.PersonaDeclaration + "\n" + policy.DefaultPersona(c.want) + "\n"; r.code != 0 || r.out != want {
+			t.Fatalf("persona_lang=zh env=%v args=%v: %+v", c.env, c.args, r)
+		}
+	}
+	if err := k.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, actor, "test", func(p *policy.Policy) error { p.PersonaLang = ""; p.Persona = "warm and brief"; return nil })
 		return err
 	}); err != nil {
 		t.Fatal(err)

@@ -231,6 +231,23 @@ func TestPartialPutKeepsOtherSections(t *testing.T) {
 	}
 }
 
+// 助手说哪种语言：只收 zh、en 与空串（跟随系统），其余 400 且不写版本；新账本读作空串。
+func TestPersonaLang(t *testing.T) {
+	e := setup(t)
+	if _, p := e.current(); p.PersonaLang != "" {
+		t.Fatalf("fresh ledger: %q", p.PersonaLang)
+	}
+	if rec := e.do("PUT", routes[0], `{"persona_lang":"fr"}`, e.web); rec.Code != 400 || errCode(t, rec) != domain.CodeInvalidRequest {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("PUT", routes[0], `{"persona_lang":"zh"}`, e.web); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if v, p := e.current(); v != 1 || p.PersonaLang != "zh" {
+		t.Fatalf("v%d lang=%q", v, p.PersonaLang)
+	}
+}
+
 // 人格超长被拒（§11.2），错误为 invalid_request，且不写版本。
 func TestPersonaTooLongRejected(t *testing.T) {
 	e := setup(t)

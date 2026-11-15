@@ -47,6 +47,16 @@ func DefaultPersona(lang string) string {
 	return defaultPersonaEN
 }
 
+// PickLang 定助手说哪种语言（§11.2）：调用方明确给的 lang > 本人在 Web 的设置 > 调用方的进程区域设置 locale > 都没有（空，按英文）。
+func PickLang(p Policy, lang, locale string) string {
+	for _, v := range []string{lang, p.PersonaLang, locale} {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // PersonaText 返回注入用的人格文本：固定声明在前；本人的人格为空白时用 lang 对应的内置默认。
 func PersonaText(p Policy, lang string) string {
 	body := p.Persona
@@ -244,11 +254,13 @@ type Policy struct {
 	JudgeEndpoint    *JudgeEndpoint   `json:"judge_endpoint"`
 	GenerateEndpoint GenerateEndpoint `json:"generate_endpoint"`
 	// ScreeningTimeoutMs 是 web_only 初筛的超时（v0.1 时在 model_endpoint 里）。
-	ScreeningTimeoutMs int                 `json:"screening_timeout_ms"`
-	Persona            string              `json:"persona"` // 只影响表达方式，不进入任何权限判定
-	ForwardAllowlist   map[string][]string `json:"forward_allowlist"`
-	ChannelAnswerers   map[string][]string `json:"channel_answerers"`
-	Channels           map[string]Channel  `json:"channels"`
+	ScreeningTimeoutMs int    `json:"screening_timeout_ms"`
+	Persona            string `json:"persona"` // 只影响表达方式，不进入任何权限判定
+	// PersonaLang 是助手说哪种语言：zh、en，空串 = 跟随系统（调用方的区域设置）。旧版本策略文档没有此键，读作空串。
+	PersonaLang      string              `json:"persona_lang"`
+	ForwardAllowlist map[string][]string `json:"forward_allowlist"`
+	ChannelAnswerers map[string][]string `json:"channel_answerers"`
+	Channels         map[string]Channel  `json:"channels"`
 	// DefaultHarness 是规则未指定 harness 时任务型与后台运行用的 harness（§13.6）；为空表示未设置，任务型转 needs_input。
 	DefaultHarness string   `json:"default_harness"`
 	Judgment       Judgment `json:"judgment"`
@@ -460,6 +472,9 @@ func normalize(p Policy) (Policy, error) {
 
 	if n := EstimateTokens(p.Persona); n > MaxPersonaTokens {
 		return p, invalid("persona is about %d tokens, limit %d", n, MaxPersonaTokens)
+	}
+	if !oneOf(p.PersonaLang, "", "zh", "en") {
+		return p, invalid("persona_lang %q", p.PersonaLang)
 	}
 	p.ForwardAllowlist = normList(p.ForwardAllowlist)
 	p.ChannelAnswerers = normList(p.ChannelAnswerers)

@@ -113,8 +113,8 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// persona 输出当前人格：本人写的，没写则是内置默认（附录 B.1）。语言取 --lang，其次进程的区域设置
-// （LC_ALL、LC_MESSAGES、LANG，插件由宿主拉起本进程，天然继承宿主所在机器的设置），都取不到由内核按英文。
+// persona 输出当前人格：本人写的，没写则是内置默认（附录 B.1）。语言取 --lang，其次 Web 里的设置，
+// 再其次进程的区域设置（LC_ALL、LC_MESSAGES、LANG，作为 locale 交给内核），都没有按英文。
 func persona(c *client.Ctx, args []string) error {
 	fs := flag.NewFlagSet("persona", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -122,17 +122,19 @@ func persona(c *client.Ctx, args []string) error {
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return usage("invalid arguments for persona", "usage: apa persona [--lang zh|en]")
 	}
-	if *lang == "" {
-		for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
-			if v := c.Env.Getenv(k); v != "" {
-				*lang = v
-				break
-			}
+	q := url.Values{}
+	if *lang != "" {
+		q.Set("lang", *lang)
+	}
+	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if v := c.Env.Getenv(k); v != "" {
+			q.Set("locale", v)
+			break
 		}
 	}
 	path := "/context/persona"
-	if *lang != "" {
-		path += "?" + url.Values{"lang": {*lang}}.Encode()
+	if len(q) > 0 {
+		path += "?" + q.Encode()
 	}
 	var out struct {
 		Persona string `json:"persona"`

@@ -139,6 +139,17 @@ func (e *env) setPersona(text string) {
 	}
 }
 
+func (e *env) setPersonaLang(lang string) {
+	e.t.Helper()
+	actor := domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, actor, "test", func(p *policy.Policy) error { p.PersonaLang = lang; return nil })
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 func (e *env) createItem(title string) string {
 	e.t.Helper()
 	rec := e.do("POST", "/v1/items", `{"kind":"task","title":"`+title+`","reason":"r"}`, e.web)
@@ -316,6 +327,24 @@ func TestPersona(t *testing.T) {
 			t.Fatalf("%s = %d %q default %q", path, rec.Code, p, def)
 		}
 	}
+	// 语言优先级：lang > 设置 > locale > 英文。
+	e.setPersonaLang("")
+	for _, c := range []struct{ setting, query, want string }{
+		{"", "locale=zh_CN.UTF-8", "zh"},
+		{"", "locale=fr", "en"},
+		{"zh", "", "zh"},
+		{"zh", "locale=en_US.UTF-8", "zh"},
+		{"en", "locale=zh_CN.UTF-8", "en"},
+		{"en", "lang=zh&locale=en_US.UTF-8", "zh"},
+		{"zh", "lang=en", "en"},
+	} {
+		e.setPersonaLang(c.setting)
+		path := "/v1/context/persona?" + c.query
+		if p, def, rec := read(path, obs); rec.Code != 200 || p != policy.PersonaDeclaration+"\n"+policy.DefaultPersona(c.want) || def != policy.DefaultPersona(c.want) {
+			t.Fatalf("setting=%q %s: want %s got %q", c.setting, c.query, c.want, p)
+		}
+	}
+	e.setPersonaLang("")
 	if zh, en := policy.DefaultPersona("zh"), policy.DefaultPersona("en"); zh == en || zh == "" || en == "" {
 		t.Fatal("zh and en defaults must be two distinct texts")
 	}
