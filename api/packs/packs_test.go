@@ -299,21 +299,21 @@ func ruleOf(l []rules.State, key string) rules.State {
 	return rules.State{}
 }
 
-// 实例驱动的时钟规则不看模式：读接口标 instance_driven，改模式 409 instance_driven，已存模式不变、不留 mode_changed。
-func TestInstanceDrivenRuleModeIsRejected(t *testing.T) {
+// 实例驱动的时钟规则不是可见规则：GET /rules 不列，改模式与「没有这条规则」同为 404 not_found，不留 mode_changed。
+func TestInstanceDrivenRuleIsNotARule(t *testing.T) {
 	e := setup(t)
 	const key = "brief/clock_rules/scheduled"
-	r := ruleOf(decode[struct{ Rules []rules.State }](t, e.do("GET", "/v1/rules", "", e.bearer(auth.Observer))).Rules, key)
-	if !r.InstanceDriven {
-		t.Fatalf("instance_driven missing: %+v", r)
+	rec := e.do("GET", "/v1/rules", "", e.bearer(auth.Observer))
+	if r := ruleOf(decode[struct{ Rules []rules.State }](t, rec).Rules, key); r.Key != "" || strings.Contains(rec.Body.String(), "instance_driven") {
+		t.Fatalf("listed: %s", rec.Body)
 	}
-	rec := e.do("PATCH", "/v1/rules/"+url.PathEscape(key)+"/mode", `{"mode":"auto"}`, e.web)
-	if got := decode[domain.Error](t, rec); rec.Code != 409 || got.Code != domain.CodeInstanceDriven {
-		t.Fatalf("switch: %d %s", rec.Code, rec.Body)
+	hidden := e.do("PATCH", "/v1/rules/"+url.PathEscape(key)+"/mode", `{"mode":"auto"}`, e.web)
+	absent := e.do("PATCH", "/v1/rules/"+url.PathEscape("brief/clock_rules/nope")+"/mode", `{"mode":"auto"}`, e.web)
+	if h := decode[domain.Error](t, hidden); hidden.Code != 404 || h.Code != domain.CodeNotFound || absent.Code != 404 {
+		t.Fatalf("switch: %d %s / %d %s", hidden.Code, hidden.Body, absent.Code, absent.Body)
 	}
-	after := ruleOf(decode[struct{ Rules []rules.State }](t, e.do("GET", "/v1/rules", "", e.bearer(auth.Observer))).Rules, key)
-	if after.Mode != r.Mode || len(e.events(domain.EvRuleModeChanged)) != 0 {
-		t.Fatalf("mode changed: %+v", after)
+	if len(e.events(domain.EvRuleModeChanged)) != 0 {
+		t.Fatal("mode_changed written")
 	}
 }
 
@@ -322,7 +322,7 @@ func TestWebSessionSwitchesRuleModeAndRecordsEvent(t *testing.T) {
 	e := setup(t)
 	rec := e.do("GET", "/v1/rules", "", e.bearer(auth.Observer))
 	list := decode[struct{ Rules []rules.State }](t, rec)
-	if r := ruleOf(list.Rules, ruleKey); len(list.Rules) != 2 || r.Mode != rules.ModeObserve || r.Class != rules.ClassAction || r.InstanceDriven {
+	if r := ruleOf(list.Rules, ruleKey); len(list.Rules) != 1 || r.Mode != rules.ModeObserve || r.Class != rules.ClassAction {
 		t.Fatalf("rules = %+v (%s)", list.Rules, rec.Body)
 	}
 

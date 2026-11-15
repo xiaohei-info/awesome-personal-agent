@@ -87,8 +87,6 @@ type State struct {
 	Hash  string `json:"hash"`
 	// Class 是规则类别（§14.8），只在读取时按当前已加载的能力包填写，不存账本；规则已不在加载的包里时为空。
 	Class string `json:"class,omitempty"`
-	// InstanceDriven 同样只在读取时填写：规则的 schedule 来自实例（含 {instance.}），不看模式，模式不能改（§7.3）。
-	InstanceDriven bool `json:"instance_driven,omitempty"`
 }
 
 // 规则类别（§14.8）：提醒类开箱 auto，动作类初始 observe。由加载器从规则类型与动作推定，能力包不能自报。
@@ -109,18 +107,22 @@ func Classes(src PackSource) map[string]string {
 	return out
 }
 
-// Decorate 填写 State 里只在读取时按当前能力包给出的字段：Class、InstanceDriven。
-func Decorate(src PackSource, st *State) {
+// Visible 返回本人可见、可管的规则：去掉由实例驱动的时钟规则（schedule 含 {instance.}）。
+// 那是实例执行的内部逻辑，只在简报页管理（§7.3）；账本里它们的 rules_state 行照旧保留，只是不再读出给人看。
+func Visible(src PackSource, l []State) []State {
+	hidden := map[string]bool{}
 	for _, d := range defs(src) {
-		if d.Key != st.Key {
-			continue
+		if instanceDriven(d) {
+			hidden[d.Key] = true
 		}
-		st.Class = ClassAction
-		if d.Reminder {
-			st.Class = ClassReminder
-		}
-		st.InstanceDriven = instanceDriven(d)
 	}
+	out := make([]State, 0, len(l))
+	for _, s := range l {
+		if !hidden[s.Key] {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func invalid(why string) error {
@@ -212,7 +214,7 @@ func decode(in json.RawMessage, v any) error {
 //   - rule.create_timer：规则的 create_timer 动作用它经命令模型写 Timer。
 func Register(x *command.Executor) error { return RegisterWith(x, nil) }
 
-// RegisterWith 同 Register；给了能力包来源时，rule.set_mode 拒绝实例驱动的规则（instance_driven）。
+// RegisterWith 同 Register；给了能力包来源时，rule.set_mode 对实例驱动的规则按「没有这条规则」处理（not_found）。
 func RegisterWith(x *command.Executor, src PackSource) error {
 	for _, sp := range []command.Spec{setMode(src), createTimer()} {
 		if err := x.Register(sp); err != nil {
@@ -246,15 +248,11 @@ func setMode(src PackSource) command.Spec {
 			if err != nil {
 				return err
 			}
+			if ok && src != nil && len(Visible(src, []State{cur})) == 0 {
+				ok = false // 实例驱动的规则不是可管的规则，与不存在同一个答案
+			}
 			if !ok {
 				return domain.NewError(domain.CodeNotFound, "rule "+v.Rule+" does not exist", "list rules and retry")
-			}
-			if src != nil {
-				var st State
-				st.Key = v.Rule
-				if Decorate(src, &st); st.InstanceDriven {
-					return domain.NewError(domain.CodeInstanceDriven, "它按安排运行，到简报页里启停", "在简报页停用或修改对应的安排，规则页不改模式")
-				}
 			}
 			if cur.Mode == v.Mode {
 				return invalid("rule is already in mode " + v.Mode)

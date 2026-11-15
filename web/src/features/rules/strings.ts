@@ -4,10 +4,8 @@ import { common } from "../../app/strings";
 const zh = {
   ...common.zh,
   title: "规则",
-  groups: { reminder: "提醒我", action: "替我动手", other: "其他", scheduled: "按安排运行" },
+  groups: { reminder: "提醒我", action: "替我动手", other: "其他" },
   hint: "试运行只记录，不动手。",
-  driven: (n: number | null) => (n === 0 ? "还没安排" : n ? `按你的安排运行 · 已安排 ${n} 个` : "按你的安排运行"),
-  arrange: "去安排 ›",
   none: "还没有加载任何规则",
   mode: (name: string) => `${name}：开关`,
   week: (n: number) => (n ? `本周本来会做 ${n} 次 ›` : "本周还没触发"),
@@ -20,10 +18,8 @@ const zh = {
 const en: typeof zh = {
   ...common.en,
   title: "Rules",
-  groups: { reminder: "Remind me", action: "Act for me", other: "Other", scheduled: "Run on your schedule" },
+  groups: { reminder: "Remind me", action: "Act for me", other: "Other" },
   hint: "Trial only records; it does nothing.",
-  driven: (n) => (n === 0 ? "Nothing scheduled" : n ? `Runs on your schedule · ${n} scheduled` : "Runs on your schedule"),
-  arrange: "Schedule ›",
   none: "No rules are loaded yet",
   mode: (name) => `${name}: switch`,
   week: (n) => (n ? `Would have run ${n}× this week ›` : "Not triggered this week"),
