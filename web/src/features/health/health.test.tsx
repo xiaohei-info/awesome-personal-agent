@@ -220,6 +220,7 @@ describe("诊断 › 状态的自检详情（flow-doctor / ACT-DOC-12）", () =>
     expect(within(models).getAllByText("未接入")[0]).toHaveClass("badge");
     expect(within(models).getAllByText("未接入")[0]).not.toHaveClass("warn");
     expect(models).toHaveTextContent("写作模型 · 未接入");
+    expect(within(models).getAllByText("未接入")).toHaveLength(1); // 检查一级只用灰色标记说一次，不再重复一句
     const sources = within(sec).getByLabelText("来源");
     expect(sources.tagName).toBe("DETAILS");
     expect(sources).not.toHaveAttribute("open");
