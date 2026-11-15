@@ -108,7 +108,7 @@ func (c *Ctx) resolveCredentials() (Credentials, error) {
 			}
 		}
 		if cr.Token == "" && c.Env.Getenv(EnvRunContext) == "" && runMarked(c.Env.Getenv("PATH")) {
-			return cr, domain.NewError(domain.CodeUnauthenticated, "this is an APA run but APA_RUN_CONTEXT did not reach this process", "let the harness pass APA_RUN_CONTEXT through to its tools (see the harness plugin's README), then start a new run. A run never uses another credential")
+			return cr, domain.NewError(domain.CodeUnauthenticated, "this is an APA run but APA_RUN_CONTEXT did not reach this process", "let the Agent pass APA_RUN_CONTEXT through to its tools (see the Agent plugin's README), then start a new run. A run never uses another credential")
 		}
 		if cr.Token == "" && c.Env.Getenv(EnvRunContext) != "" {
 			return cr, domain.NewError(domain.CodeUnauthenticated, "the run context file cannot be read", "the run has ended or never started; do not retry. A run never falls back to the local credential file")

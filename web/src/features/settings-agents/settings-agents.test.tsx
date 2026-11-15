@@ -95,7 +95,7 @@ describe("设置 › Agent", () => {
     expect(c.getByText(/未接入/)).toBeInTheDocument();
     expect(c.getByText("hermes chat --oneshot")).toBeInTheDocument();
     expect(c.getByRole("button", { name: "可改文件" })).toBeDisabled();
-    expect(c.getByText("先允许它在后台运行")).toBeInTheDocument();
+    expect(c.getByText("先允许 APA 在后台拉起它")).toBeInTheDocument();
 
     await userEvent.click(c.getByRole("button", { name: "归给它" }));
     await waitFor(() => expect(writes(s, "/settings/tokens/")).toEqual([{ method: "PATCH", url: "/v1/settings/tokens/k1", body: { harness: "hermes" } }]));
@@ -130,7 +130,7 @@ describe("设置 › Agent", () => {
     expect(c.getByRole("button", { name: "完全放开" })).toHaveAttribute("aria-pressed", "false");
     await userEvent.click(within(pv).getByRole("button", { name: "确认完全放开" }));
     expect(c.getByRole("button", { name: "完全放开" })).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(c.getByRole("button", { name: "保存后台运行能用什么" }));
+    await userEvent.click(c.getByRole("button", { name: "保存Agent 后台运行能用什么" }));
     await waitFor(() => expect(s.puts.at(-1)).toMatchObject({ path: "/v1/settings/access-limits", body: { permission_cap: { default: "read", by_harness: { other: "edit", hermes: "full" } } } }));
   });
 
@@ -148,7 +148,7 @@ describe("设置 › Agent", () => {
     const d2 = within(c.getByRole("region", { name: "Agent 可以替我决定" }));
     await userEvent.click(d2.getByLabelText("回答普通问题"));
     expect(d2.getByTestId("grant-preview-hermes")).toHaveTextContent("将允许：忽略建议、回答普通问题 · 全部项目 · 一直有效");
-    expect(d2.getByLabelText("后台运行时也可以")).toBeChecked();
+    expect(d2.getByLabelText("Agent 后台运行时也可以")).toBeChecked();
     await userEvent.click(d2.getByRole("button", { name: "保存Agent 可以替我决定" }));
     await waitFor(() => expect(writes(s, "/grant")).toHaveLength(1));
     expect(writes(s, "/grant")[0]).toEqual({

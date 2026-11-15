@@ -91,7 +91,7 @@ func UpgradeCheck(ctx context.Context, in Input) kdoctor.Report {
 	fu := kdoctor.Check{Name: checkFollowUps, Status: kdoctor.OK, Why: "things for you to handle after the upgrade", Next: "see details"}
 	todo := map[string]string{
 		"web-login":  "Web login sessions made before the upgrade are invalid; log in once again",
-		"plugins":    "upgrade the host plugins together with the kernel; old plugins do not report the session type and answers on your own words are rejected",
+		"plugins":    "upgrade the Agent plugins together with the kernel; old plugins do not report the session type and answers on your own words are rejected",
 		"rule-modes": "builtin reminder rules still on their initial observe mode switch to auto and are recorded as rule.mode_changed",
 		"event-subs": "subscribers and channel ext should skip event types they do not know and handle deliveries without an item",
 	}

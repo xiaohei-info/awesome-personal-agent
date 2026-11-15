@@ -57,7 +57,7 @@ describe("诊断 › 运行日志（flow-bg-main-session、flow-outcall-limits�
     await screen.findByText("拉取 Gmail");
     const rows = lines();
     expect(rows).toHaveLength(3);
-    expect(rows[0]).toContain("后台处理：整理周报");
+    expect(rows[0]).toContain("Agent 后台运行：整理周报");
     expect(rows[0]).toContain("运行中");
     expect(rows[1]).toContain("执行任务：写周报");
     expect(rows[1]).toContain("排队中");
@@ -71,7 +71,7 @@ describe("诊断 › 运行日志（flow-bg-main-session、flow-outcall-limits�
   it("点一行就地展开：规则、会话、权限、连锁层数、退出码、时限；策略版本与 id 在原始值里；再点收起", async () => {
     localStorage.setItem("apa.raw", "1");
     mount(server([failed, bg]).impl);
-    const row = await screen.findByRole("button", { name: /后台处理：整理周报/ });
+    const row = await screen.findByRole("button", { name: /Agent 后台运行：整理周报/ });
     expect(row).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("会话 sess-abc")).not.toBeInTheDocument();
     await userEvent.click(row);
@@ -89,7 +89,7 @@ describe("诊断 › 运行日志（flow-bg-main-session、flow-outcall-limits�
 
   it("不开原始值时 id 不出现", async () => {
     mount(server([bg]).impl);
-    await userEvent.click(await screen.findByRole("button", { name: /后台处理/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Agent 后台运行：/ }));
     await screen.findByText("会话 sess-abc");
     expect(document.body).not.toHaveTextContent(/policy v7|hermes/);
   });
@@ -106,8 +106,8 @@ describe("诊断 › 运行日志（flow-bg-main-session、flow-outcall-limits�
   it("类型与「只看失败」走服务端 ?category=、?state=，且没有重试按钮", async () => {
     const s = server([failed, q1, bg, timedOut, pull(1)]);
     mount(s.impl);
-    await screen.findByText("后台处理：整理周报");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "类型" }), "agent 任务");
+    await screen.findByText("Agent 后台运行：整理周报");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "类型" }), "Agent 任务");
     await screen.findByText("执行任务：写周报");
     expect(lines()).toHaveLength(2);
     expect(s.calls).toContain("/v1/runs?limit=100&category=task%2Cbackground");

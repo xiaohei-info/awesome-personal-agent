@@ -1,18 +1,18 @@
 # 文档索引
 
-APA 是架在 agent harness 之上的开源、自部署个人 agent 层，它让只在被调用时才动的 harness 具备主观能动性，成为真正的个人助手，而不是对话工具或开发工具。
+APA 是架在 agent harness（界面与用户文档称 Agent）之上的开源、自部署个人 agent 层，它让只在被调用时才动的 Agent 具备主观能动性，成为真正的个人助手，而不是对话工具或开发工具。
 
-v0.1 已实现并在主干运行；这里是 v0.2.0 的设计，也是 v0.2.0 实现与验收的依据。本版支持一个宿主，接口按多 harness 设计，第二个宿主是本版之后的第一优先（§20）。主文档不写厂商和产品的名字，被适配的对象见附录 A 与附录 D。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
+v0.1 已实现并在主干运行；这里是 v0.2.0 的设计，也是 v0.2.0 实现与验收的依据。本版支持一个 Agent，接口按多个 harness 设计，支持第二个 Agent 是本版之后的第一优先（§20）。主文档不写厂商和产品的名字，被适配的对象见附录 A 与附录 D。权威顺序：`docs/` 设计文档 > [`AGENTS.md`](../AGENTS.md) > CI 与代码 > [`README.md`](../README.md)。
 
 ## 文档清单
 
 | 文档 | 内容 | 什么时候读 |
 |---|---|---|
 | [solution-design.md](solution-design.md) | 主设计文档：本修订采用的决定、为什么做（定位、背景、问题、价值）、目标与承诺、场景、架构、领域模型、模块详设、判断分层与概率判断协议、安全、同类对照、版本路线、已定决定与风险 | 必读 |
-| [appendix-a-harness.md](appendix-a-harness.md) | 插件约定、无头运行声明、各 harness 的标志与退出码、钩子全表、首批宿主的实测结论、其余 harness 的调研结论 | 开发 harness 插件时 |
+| [appendix-a-harness.md](appendix-a-harness.md) | 插件约定、无头运行声明、各 harness 的标志与退出码、钩子全表、首批 harness 的实测结论、其余 harness 的调研结论 | 开发 harness 插件时 |
 | [appendix-b-api-cli.md](appendix-b-api-cli.md) | CLI 逐条清单、HTTP 路由、错误响应、标准事件类型、协议版本、v0.2.0 对已有契约的改动 | 开发内核、CLI、Web、ext 时 |
 | [appendix-c-capability-pack.md](appendix-c-capability-pack.md) | `pack.yaml` 字段、来源规则的出口与字段条件、枚举动作、提示词模板字段、校验规则与 v0.1 包的兼容、示例 | 编写或加载能力包时 |
-| [appendix-d-adapters.md](appendix-d-adapters.md) | 本版适配的对象（宿主、渠道、来源工具、校验方案）、各工具的专属约定与实测结论、模型端点的实测写回位置 | 接入或更换来源工具、渠道时 |
+| [appendix-d-adapters.md](appendix-d-adapters.md) | 本版适配的对象（harness、渠道、来源工具、校验方案）、各工具的专属约定与实测结论、模型端点的实测写回位置 | 接入或更换来源工具、渠道时 |
 | [changes-v0.2.0.md](changes-v0.2.0.md) | v0.2.0 相对 v0.1 设计的变更清单：契约与写入路径变更、新增能力、默认值变更、删除或收窄，逐条的迁移方式，与评审结论不一致之处，设计确认时的决定 | 评审 v0.2.0 改了什么、升级已有部署时 |
 
 ## 用户文档

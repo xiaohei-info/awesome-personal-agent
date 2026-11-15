@@ -17,7 +17,7 @@ function mount(fetchImpl: typeof fetch) {
 const card = async (name: string) => within(await screen.findByRole("region", { name }));
 const save = async (name: string) => userEvent.click((await card(name)).getByRole("button", { name: `保存${name}` }));
 const WEB_ONLY = "只能我在网页上亲自确认";
-const DOCS = "agent 写的文档，哪些先给我过目";
+const DOCS = "Agent 写的文档，哪些先给我过目";
 
 beforeEach(() => sessionStorage.clear());
 

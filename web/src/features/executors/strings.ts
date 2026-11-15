@@ -1,7 +1,7 @@
 import type { Dict } from "../../app/i18n";
 import { common } from "../../app/strings";
 
-// agent 动态 › 执行者：谁在替你干活（§6.17）。执行者由宿主在委派时登记，这里只看、只移除。
+// Agent 动态 › 执行者：谁在替你干活（§6.17）。执行者由 Agent 在委派时登记，这里只看、只移除。
 const zh = {
   ...common.zh,
   title: "执行者",

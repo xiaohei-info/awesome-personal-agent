@@ -21,7 +21,7 @@ interface Case { name: string; at: string; card: string; edit?: Edit; path: stri
 const CASES: Case[] = [
   // 不改直接保存
   { name: "web_only（未改）", at: "/settings", card: "只能我在网页上亲自确认", path: "/v1/settings/policy", body: { web_only: { categories: ["funds", "irreversible"], rules: [RULE1] } } },
-  { name: "材料写入（未改）", at: "/settings", card: "agent 写的文档，哪些先给我过目", path: "/v1/settings/policy", body: { material_write: { default: "proposed", kinds: { minutes: "direct" } } } },
+  { name: "材料写入（未改）", at: "/settings", card: "Agent 写的文档，哪些先给我过目", path: "/v1/settings/policy", body: { material_write: { default: "proposed", kinds: { minutes: "direct" } } } },
   { name: "打扰策略（未改）", at: "/settings/notify", card: "怎么找我", path: "/v1/settings/policy", body: { disturb: DISTURB } },
   { name: "助手语言（未改）", at: "/settings/general", card: "助手说哪种语言", path: "/v1/settings/policy", body: { persona_lang: "" } },
   { name: "人格（未改）", at: "/settings/general", card: "助手的语气", path: "/v1/settings/policy", body: { persona: "Be brief." } },
@@ -59,7 +59,7 @@ const CASES: Case[] = [
     body: { disturb: { ...DISTURB, daily_cap: 3, mutes: [{ scope: "project", id: "acc-home" }] } },
   },
   {
-    name: "材料写入：默认与单个类型", at: "/settings", card: "agent 写的文档，哪些先给我过目", path: "/v1/settings/policy",
+    name: "材料写入：默认与单个类型", at: "/settings", card: "Agent 写的文档，哪些先给我过目", path: "/v1/settings/policy",
     edit: async (c) => {
       await userEvent.click(within(c.getByRole("group", { name: "其他类型" })).getByRole("button", { name: "直接生效" }));
       await userEvent.click(within(c.getByRole("group", { name: "纪要" })).getByRole("button", { name: "先给我看" }));

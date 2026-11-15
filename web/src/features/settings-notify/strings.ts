@@ -44,7 +44,7 @@ const zh = {
   thresholdJudge: "让模型判断决策能不能晚点送",
   followupDefer: "让模型判断提醒能不能晚点提",
   advanced: "高级",
-  wake: "唤醒宿主",
+  wake: "唤醒 Agent",
 };
 
 const en: typeof zh = {
@@ -89,7 +89,7 @@ const en: typeof zh = {
   thresholdJudge: "Let a model decide whether a decision can wait",
   followupDefer: "Let a model decide whether a reminder can wait",
   advanced: "Advanced",
-  wake: "Host wake-up",
+  wake: "Agent wake-up",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

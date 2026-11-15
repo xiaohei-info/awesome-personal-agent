@@ -75,11 +75,11 @@ func tier(f Facts) Check {
 		c.Next = "to reach tier 2, configure the generate endpoint in Web settings (model endpoints)"
 	case !host:
 		c.Data["tier"], c.Code = 2, CodeTierNoHost
-		c.Why = "tier 2 (kernel + model endpoint): no confirmed headless declaration from a host harness"
-		c.Next = "to reach tier 3, install the host plugin and confirm its declaration in Web"
+		c.Why = "tier 2 (kernel + model endpoint): no confirmed background-run declaration from an Agent"
+		c.Next = "to reach tier 3, install the Agent plugin and confirm its declaration in Web"
 	default:
 		c.Data["tier"], c.Code = 3, CodeTierFull
-		c.Why = "tier 3 (kernel + model endpoint + host): a generate endpoint and a confirmed host declaration are in place"
+		c.Why = "tier 3 (kernel + model endpoint + Agent): a generate endpoint and a confirmed Agent declaration are in place"
 		c.Next = "nothing to do"
 	}
 	return c

@@ -21,7 +21,7 @@
 import type { Dict, Lang } from "./i18n";
 
 const zh = {
-  brand: "事情交给 agent，决定留给你",
+  brand: "事情交给 Agent，决定留给你",
   loading: "加载中…",
   retry: "重试",
   save: "保存",
@@ -54,10 +54,10 @@ const zh = {
   jumpOpen: "打开",
   jumpClose: "关闭",
   // 登录
-  loginPitch1: "事情交给 agent，",
+  loginPitch1: "事情交给 Agent，",
   loginPitch2: "决定",
   loginPitch3: "留给你。",
-  loginSub: "agent 替你读邮件、看日历、推进事项。遇到该你拍板的事，它会停下来，在这里等你一句话。",
+  loginSub: "Agent 替你读邮件、看日历、推进事项。遇到该你拍板的事，它会停下来，在这里等你一句话。",
   login: "登录",
   password: "口令",
   cannotConnect: "无法连接服务",
@@ -71,7 +71,7 @@ const zh = {
 };
 
 const en: typeof zh = {
-  brand: "Hand the work to agents, keep the decisions",
+  brand: "Hand the work to your Agent, keep the decisions",
   loading: "Loading…",
   retry: "Retry",
   save: "Save",
@@ -101,7 +101,7 @@ const en: typeof zh = {
   jumpSelect: "select",
   jumpOpen: "open",
   jumpClose: "close",
-  loginPitch1: "Hand the work to agents,",
+  loginPitch1: "Hand the work to your Agent,",
   loginPitch2: "keep the decisions",
   loginPitch3: " yourself.",
   loginSub: "Agents read your mail, watch your calendar and move items forward. When something needs your call, they stop and wait for you here.",

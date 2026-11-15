@@ -106,7 +106,7 @@ func TestTierReportsLevelAndWhatIsMissing(t *testing.T) {
 		p.GenerateEndpoint = policy.GenerateEndpoint{URL: "http://x/v1", Model: "m", Locality: "local"}
 	})
 	f, _ = ReadFacts(bg, st)
-	if c := tier(f); c.Data["tier"] != 2 || c.Code != CodeTierNoHost || !strings.Contains(c.Next, "host plugin") {
+	if c := tier(f); c.Data["tier"] != 2 || c.Code != CodeTierNoHost || !strings.Contains(c.Next, "Agent plugin") {
 		t.Fatalf("tier 2 expected: %+v", c)
 	}
 	f.Declarations = []executors.Record{{Harness: "h", Declaration: executors.Declaration{Headless: &executors.Headless{}}}}

@@ -100,7 +100,7 @@ const zh = {
   trusted: "信任的发件人",
   prefilled: "已填上你自己，还没保存",
   fillYourself: (hint: string) => `填你自己的${hint}`,
-  trustedHint: "名单里的人发来的跟进，后台运行能读",
+  trustedHint: "名单里的人发来的跟进，Agent 后台运行能读",
   savedTrusted: "已保存",
   unverifiable: "核实不了发件人：后台不照它办事，自称是你也只给你看",
   legacy: (n: number) => `以前填的 ${n} 个发件人不会生效`,
