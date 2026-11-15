@@ -125,19 +125,3 @@ describe("设置 › 提醒与打扰", () => {
     expect(within(wake).getByRole("option", { name: "唤醒宿主开工" })).toBeInTheDocument();
   });
 });
-
-describe("设置 › 提醒与打扰 › 渠道", () => {
-  it("只能发文字：已接入的渠道与段里已有的都列出；PUT 整段替换，没改的原样带回", async () => {
-    const s = policyServer();
-    s.doc.channels = { old: { text_only: true } };
-    mount(s.impl);
-    const c = within(await screen.findByRole("region", { name: "渠道" }));
-    const slack = await c.findByLabelText("slack 只能发文字");
-    expect(slack).not.toBeChecked();
-    expect(c.getByLabelText("old 只能发文字")).toBeChecked(); // 已吊销的渠道仍在段里，不丢
-    await userEvent.click(slack);
-    await userEvent.click(c.getByRole("button", { name: "保存渠道" }));
-    await c.findByRole("status");
-    expect(s.puts.at(-1)!.body).toEqual({ channels: { slack: { text_only: true }, old: { text_only: true } } });
-  });
-});

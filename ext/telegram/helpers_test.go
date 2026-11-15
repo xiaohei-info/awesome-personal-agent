@@ -34,6 +34,8 @@ type fakeAPA struct {
 	stale    map[string]bool // 版本已作废：ack/fail 回 409
 	answerFn func(a answerCall) (int, *APIError)
 	refs     map[string]string // 投递 id → 首次 ack 的 ref（回答的 ref 校验）
+	code     string            // 内核当前有效的识别口令
+	idents   []answerCall      // 识别上报：Ref 放口令，Sender、Text 放 sender 与 display
 }
 
 func newFakeAPA(t *testing.T) *fakeAPA {
@@ -44,6 +46,7 @@ func newFakeAPA(t *testing.T) *fakeAPA {
 	mux.HandleFunc("POST /v1/deliveries/{id}/ack", f.report(true))
 	mux.HandleFunc("POST /v1/deliveries/{id}/fail", f.report(false))
 	mux.HandleFunc("POST /v1/deliveries/{id}/answer", f.answer)
+	mux.HandleFunc("POST /v1/channels/identify", f.identify)
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
 	return f
@@ -149,6 +152,23 @@ func (f *fakeAPA) answer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"id": "item-1", "replayed": false})
+}
+
+func (f *fakeAPA) identify(w http.ResponseWriter, r *http.Request) {
+	if !f.authed(w, r) {
+		return
+	}
+	var in struct{ Code, Sender, Display string }
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	f.mu.Lock()
+	f.idents = append(f.idents, answerCall{Ref: in.Code, Sender: in.Sender, Text: in.Display})
+	ok := in.Code == f.code
+	f.mu.Unlock()
+	if !ok {
+		apiErr(w, 404, APIError{Code: "not_found", Why: "this identification code is not valid for this channel"})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 func (f *fakeAPA) snapshot() (acks map[string][]string, fails map[string][]string, answers []answerCall) {

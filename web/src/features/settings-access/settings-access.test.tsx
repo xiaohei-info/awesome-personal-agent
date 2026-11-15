@@ -17,7 +17,6 @@ function mount(fetchImpl: typeof fetch) {
 const card = async (name: string) => within(await screen.findByRole("region", { name }));
 const save = async (name: string) => userEvent.click((await card(name)).getByRole("button", { name: `保存${name}` }));
 const CAP = "后台运行能做多少";
-const LISTS = "信任名单";
 const HOST = "没指定时用哪个宿主";
 
 beforeEach(() => sessionStorage.clear());
@@ -55,36 +54,5 @@ describe("设置 › 后台权限", () => {
     expect(s.puts.at(-1)).toEqual({ path: "/v1/settings/policy", body: { default_harness: "hermes" }, csrf: "tok-1" });
     expect(s.doc.persona).toBe("Be brief."); // 别的段原样
     expect(c.queryByText("不设时后台任务会停下来问你")).not.toBeInTheDocument();
-  });
-
-  it("flow-bg-guards ACT-BGG-08: 两份白名单分开显示，一起保存；发送者、回答人用标签增删", async () => {
-    const s = policyServer();
-    mount(s.impl);
-    const a = await card(LISTS);
-    expect(a.getByLabelText("跟进来源 1")).toHaveValue("telegram"); // 不在来源与渠道列表里的已有键保留
-    await userEvent.type(a.getByRole("textbox", { name: "跟进来源1 发送者" }), "bob{Enter}");
-    await userEvent.click(a.getByRole("button", { name: "＋ 加一个渠道" }));
-    await waitFor(() => expect(a.getByLabelText("渠道 1")).toHaveValue("slack"));
-    await userEvent.type(a.getByRole("textbox", { name: "渠道1 回答人" }), "carol{Enter}");
-    await userEvent.click(a.getByRole("button", { name: "去掉 alice" }));
-    await save(LISTS);
-    await a.findByRole("status");
-    expect(s.puts.at(-1)).toMatchObject({ path: "/v1/settings/allowlists", body: { forward_allowlist: { telegram: ["bob"] }, channel_answerers: { slack: ["carol"] } } });
-  });
-
-  it("同一个来源列两次时在本地提示，不发请求", async () => {
-    const s = policyServer();
-    mount(s.impl);
-    const a = await card(LISTS);
-    await userEvent.click(a.getByRole("button", { name: "＋ 加一个来源" }));
-    await userEvent.click(a.getByRole("button", { name: "＋ 加一个来源" }));
-    // 转发白名单的来源按名字选，提交 id（§9.1）
-    await waitFor(() => expect(within(a.getByLabelText("跟进来源 2")).getByRole("option", { name: "QQ Mail" })).toHaveValue("src_mail_qq"));
-    expect(within(a.getByLabelText("跟进来源 2")).queryByRole("option", { name: /src_/ })).not.toBeInTheDocument();
-    await userEvent.selectOptions(a.getByLabelText("跟进来源 2"), "src_mail_qq");
-    await userEvent.selectOptions(a.getByLabelText("跟进来源 3"), "src_mail_qq");
-    await save(LISTS);
-    expect(await a.findByRole("alert")).toHaveTextContent("重复");
-    expect(s.puts).toHaveLength(0);
   });
 });

@@ -1225,3 +1225,51 @@ func TestSourceSenderAndSelfSenderRoutes(t *testing.T) {
 		t.Fatalf("self-sender for a token: %d %s", r.Code, r.Body)
 	}
 }
+
+// T6：信任的发件人只改这个来源的键；需确认的来源只能清空；只给 Web。
+func TestTrustedSendersReplaceOnlyThisSource(t *testing.T) {
+	e := setup(t)
+	for _, b := range []string{`{"id":"src_a","name":"a","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`,
+		`{"id":"src_b","name":"b","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`,
+		`{"id":"src_s","name":"s","type":"script","command":"/opt/x.sh","schedule":"1h","timeout":60}`} {
+		if r := e.web("POST", "/v1/sources", b); r.Code != 201 {
+			t.Fatalf("register: %d %s", r.Code, r.Body)
+		}
+	}
+	// 以前在需确认来源上填过的条目（旧版本的集中页能写进去）
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "seed", func(p *policy.Policy) error {
+			p.ForwardAllowlist = map[string][]string{"src_b": {"bob"}, "src_s": {"mallory"}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	allow := func() map[string][]string {
+		var out map[string][]string
+		e.st.View(context.Background(), func(tx *store.Tx) error { _, p, err := policy.Stored(tx); out = p.ForwardAllowlist; return err })
+		return out
+	}
+	if r := e.web("PUT", "/v1/settings/sources/src_a/trusted-senders", `{"senders":["me"]}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"senders":["me"]`) {
+		t.Fatalf("put trusted: %d %s", r.Code, r.Body)
+	}
+	if got := allow(); len(got["src_a"]) != 1 || got["src_b"][0] != "bob" || got["src_s"][0] != "mallory" {
+		t.Fatalf("other keys changed: %v", got)
+	}
+	if r := e.web("PUT", "/v1/settings/sources/src_s/trusted-senders", `{"senders":["me"]}`); r.Code != 400 || !strings.Contains(r.Body.String(), "sender_unverifiable") {
+		t.Fatalf("unverified source must refuse a list: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("PUT", "/v1/settings/sources/src_s/trusted-senders", `{"senders":[]}`); r.Code != 200 {
+		t.Fatalf("clearing an unverified source: %d %s", r.Code, r.Body)
+	}
+	if got := allow(); got["src_s"] != nil || got["src_b"][0] != "bob" {
+		t.Fatalf("clear: %v", got)
+	}
+	if e.events("allowlist.changed") != 3 {
+		t.Fatalf("allowlist.changed = %d, want 3 (seed, set, clear)", e.events("allowlist.changed"))
+	}
+	if r := e.do(e.token(auth.Delegate), "PUT", "/v1/settings/sources/src_a/trusted-senders", `{"senders":["x"]}`); r.Code != 403 || r.code() != "web_only" {
+		t.Fatalf("token: %d %s", r.Code, r.Body)
+	}
+}

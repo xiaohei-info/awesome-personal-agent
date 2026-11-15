@@ -3,6 +3,7 @@
 //	GET/POST /sources        GET/PATCH /sources/{id}
 //	GET /sources/declared-name          接入层为一份登记声明的显示名（中英），新登记表单预填用
 //	GET /settings/sources/{id}/self-sender  运行一次来源程序的 identity 模式，取本人身份供预填（只 Web）
+//	PUT /settings/sources/{id}/trusted-senders  只替换这个来源的转发白名单（只 Web；需确认的来源只能清空）
 //	POST /sources/{id}/webhook          创建或轮换 webhook 接收密钥
 //	DELETE /sources/{id}/webhook        吊销该来源的全部接收密钥，并删除 HMAC 密钥文件
 //	GET /sources/{id}/ingests           入站记录
@@ -30,11 +31,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
+	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -155,6 +158,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "GET", Path: "/sources/declared-name", Handler: readable(a.declaredName)})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}", Handler: readable(a.get)})
 		r.Handle(core.Route{Method: "GET", Path: "/settings/sources/{id}/self-sender", Handler: a.selfSender})
+		r.Handle(core.Route{Method: "PUT", Path: "/settings/sources/{id}/trusted-senders", MaxBody: 64 << 10, Handler: a.trustedSenders})
 		r.Handle(core.Route{Method: "PATCH", Path: "/sources/{id}", Handler: a.patch})
 		r.Handle(core.Route{Method: "POST", Path: "/sources/{id}/webhook", MaxBody: 1 << 10, Handler: a.webhookKey})
 		r.Handle(core.Route{Method: "DELETE", Path: "/sources/{id}/webhook", MaxBody: 1, Handler: a.webhookRevoke})
@@ -284,6 +288,41 @@ func (a *api) selfSender(w http.ResponseWriter, r *http.Request, p *core.Princip
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]string{"sender": who})
+}
+
+// trustedSenders 只替换这个来源的转发白名单（§14.6）。需确认的来源只接受空名单（清掉以前填的、本来就不生效的条目），
+// 非空返回 sender_unverifiable：名单在那里不会生效，不让人以为填了有用。
+func (a *api) trustedSenders(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if !p.Web {
+		return domain.NewError(domain.CodeWebOnly, "trusted senders can only be changed by the owner in the Web UI", "open the source in the Web UI")
+	}
+	s, err := a.source(r, r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+	var in struct {
+		Senders []string `json:"senders"`
+	}
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	if len(in.Senders) > 0 && (a.dc.Sender == nil || a.dc.Sender(s).Trust != "verified") {
+		return invalid("sender_unverifiable: source "+s.ID+" cannot verify who sent a message, so a trusted-sender list would have no effect", "only clear the list for this source")
+	}
+	v, pol, err := apipolicy.UpdateKey(a.st, r, p, "web settings: trusted senders of source "+s.ID, func(np *kpolicy.Policy) {
+		if np.ForwardAllowlist == nil {
+			np.ForwardAllowlist = map[string][]string{}
+		}
+		np.ForwardAllowlist[s.ID] = in.Senders
+	})
+	if err != nil {
+		return err
+	}
+	out := pol.ForwardAllowlist[s.ID]
+	if out == nil {
+		out = []string{}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"version": v, "senders": out})
 }
 
 // create：type=script 是可执行命令的登记，走只 Web 的命令；其余走 delegate 可用的命令。

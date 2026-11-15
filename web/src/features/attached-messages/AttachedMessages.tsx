@@ -69,10 +69,11 @@ export function AttachedMessages({ itemId }: { itemId: string }) {
               <span aria-label={t.allowLabel}>{m.forward_allowed ? t.allowed : t.notAllowed}</span>
               {" · "}
               <span aria-label={t.stateLabel}><Val k="attachState" id={m.attach_state} /></span>
-              {!m.forward_allowed && (
+              {!m.forward_allowed && m.sender_verified && m.sender && (
+                // 只对已核实的发件人：未核实的加进名单也不会生效（§14.6）
                 <>
                   {" · "}
-                  <Link to="/settings/access">{t.addToList}</Link>
+                  <Link to={`/sources?open=${encodeURIComponent(m.source)}&add=${encodeURIComponent(m.sender)}#trusted-senders`}>{t.addToList}</Link>
                 </>
               )}
               {safeHref(m.link) ? <> · <a href={safeHref(m.link)!} rel="noopener noreferrer">{t.source}</a></> : null}

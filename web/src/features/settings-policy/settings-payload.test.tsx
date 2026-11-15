@@ -25,7 +25,6 @@ const CASES: Case[] = [
   { name: "材料写入（未改）", at: "/settings", card: "agent 写的文档，哪些先给我过目", path: "/v1/settings/policy", body: { material_write: { default: "proposed", kinds: { minutes: "direct" } } } },
   { name: "打扰策略（未改）", at: "/settings/notify", card: "怎么找我", path: "/v1/settings/policy", body: { disturb: DISTURB } },
   { name: "权限上限（未改）", at: "/settings/access", card: "后台运行能做多少", path: "/v1/settings/access-limits", body: { permission_cap: { default: "read", by_harness: {} } } },
-  { name: "白名单（未改）", at: "/settings/access", card: "信任名单", path: "/v1/settings/allowlists", body: { forward_allowlist: { telegram: ["alice"] }, channel_answerers: {} } },
   { name: "助手语言（未改）", at: "/settings/general", card: "助手说哪种语言", path: "/v1/settings/policy", body: { persona_lang: "" } },
   { name: "人格（未改）", at: "/settings/general", card: "助手的语气", path: "/v1/settings/policy", body: { persona: "Be brief." } },
   // 与改版前测试相同的编辑
@@ -77,16 +76,6 @@ const CASES: Case[] = [
       await userEvent.selectOptions(c.getByLabelText("宿主1 档位"), "edit");
     },
     body: { permission_cap: { default: "read", by_harness: { hermes: "edit" } } },
-  },
-  {
-    name: "白名单：两份各加一人", at: "/settings/access", card: "信任名单", path: "/v1/settings/allowlists",
-    edit: async (c) => {
-      await userEvent.type(c.getByRole("textbox", { name: "跟进来源1 发送者" }), "bob{Enter}");
-      await userEvent.click(c.getByRole("button", { name: "＋ 加一个渠道" }));
-      await waitFor(() => expect(c.getByLabelText("渠道 1")).toHaveValue("slack"));
-      await userEvent.type(c.getByRole("textbox", { name: "渠道1 回答人" }), "carol{Enter}");
-    },
-    body: { forward_allowlist: { telegram: ["alice", "bob"] }, channel_answerers: { slack: ["carol"] } },
   },
   {
     name: "人格：改写", at: "/settings/general", card: "助手的语气", path: "/v1/settings/policy",

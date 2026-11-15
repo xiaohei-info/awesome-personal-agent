@@ -1,0 +1,61 @@
+import type { Dict } from "../../app/i18n";
+import { shared } from "../settings-policy/strings";
+
+// 设置 › 渠道：每个消息渠道一张卡（§4.1、§14.6）：只能发文字、谁能在这里替我回答、识别我的 ID。
+const zh = {
+  ...shared.zh,
+  title: "渠道",
+  summary: (n: number) => `${n} 个渠道`,
+  lede: "提醒能送到哪些聊天渠道，谁能在那里回答。",
+  none: "还没接入渠道",
+  textOnly: "只能发文字",
+  textOnlyHint: "决策会附一个网页表单链接",
+  answerers: "谁能在这里替我回答",
+  answerersHint: "填平台的数字用户 ID",
+  identify: "识别我的 ID",
+  sendThis: (code: string) => `给机器人发：/start ${code}`,
+  waiting: "等你发消息…（10 分钟内有效）",
+  got: (display: string, id: string) => (display ? `收到：${display}（${id}）` : `收到：${id}`),
+  addIt: "加上",
+  expired: "没收到",
+  retry: "再试一次",
+  advanced: "高级",
+  keys: "渠道钥匙",
+  revoke: "停用",
+  revoked: "已停用",
+  newChannel: "新建渠道",
+  channelName: "渠道名",
+  create: "新建",
+  secretOnce: "只显示这一次，请立即保存：",
+  savedIt: "我已保存",
+};
+
+const en: typeof zh = {
+  ...shared.en,
+  title: "Channels",
+  summary: (n) => `${n} channels`,
+  lede: "Which chat channels get reminders, and who may answer there.",
+  none: "No channel connected yet",
+  textOnly: "Text only",
+  textOnlyHint: "Decisions come with a web form link",
+  answerers: "Who may answer for me here",
+  answerersHint: "Use the platform's numeric user ID",
+  identify: "Find my ID",
+  sendThis: (code) => `Send the bot: /start ${code}`,
+  waiting: "Waiting for your message… (valid 10 minutes)",
+  got: (display, id) => (display ? `Got: ${display} (${id})` : `Got: ${id}`),
+  addIt: "Add",
+  expired: "Nothing arrived",
+  retry: "Try again",
+  advanced: "Advanced",
+  keys: "Channel keys",
+  revoke: "Revoke",
+  revoked: "Revoked",
+  newChannel: "New channel",
+  channelName: "Channel name",
+  create: "Create",
+  secretOnce: "Shown only once. Save it now:",
+  savedIt: "I've saved it",
+};
+
+export const strings: Dict<typeof zh> = { zh, en };

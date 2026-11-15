@@ -1,7 +1,7 @@
 import type { Dict } from "../../app/i18n";
 import { shared } from "../settings-policy/strings";
 
-// 设置 › 后台权限：无人值守运行的权限上限（§13.6）与两份白名单（§14.6）。
+// 设置 › 后台权限：无人值守运行的权限上限（§13.6）。
 const zh = {
   ...shared.zh,
   title: "后台权限",
@@ -26,17 +26,6 @@ const zh = {
   offers: (list: string) => `提供：${list}`,
   notDeclared: "（未声明，不会启动）",
   dup: (what: string) => `「${what}」重复`,
-  lists: "信任名单",
-  forward: "后台 agent 能读谁发来的跟进",
-  forwardHint: "名单外的只给你看",
-  answerers: "谁能在聊天渠道里替我回答",
-  sourceN: (n: number) => `跟进来源 ${n}`,
-  senders: (n: number) => `跟进来源${n} 发送者`,
-  channelN: (n: number) => `渠道 ${n}`,
-  people: (n: number) => `渠道${n} 回答人`,
-  delRow: (n: number) => `删除第 ${n} 行`,
-  addSource: "＋ 加一个来源",
-  addChannel: "＋ 加一个渠道",
   pick: "（请选择）",
 };
 
@@ -64,17 +53,6 @@ const en: typeof zh = {
   offers: (list) => `Offers: ${list}`,
   notDeclared: " (not declared, won't start)",
   dup: (what) => `"${what}" is listed twice`,
-  lists: "Trusted senders",
-  forward: "Whose follow-ups background agents may read",
-  forwardHint: "Others are shown to you only",
-  answerers: "Who may answer for me in chat channels",
-  sourceN: (n) => `Follow-up source ${n}`,
-  senders: (n) => `Follow-up source ${n} senders`,
-  channelN: (n) => `Channel ${n}`,
-  people: (n) => `Channel ${n} answerers`,
-  delRow: (n) => `Delete row ${n}`,
-  addSource: "+ Add a source",
-  addChannel: "+ Add a channel",
   pick: "(choose)",
 };
 

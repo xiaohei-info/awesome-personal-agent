@@ -221,7 +221,76 @@ func Routes(st *store.Store) core.RouteGroup {
 			r.Handle(core.Route{Method: "GET", Path: path, Handler: read(st, secs)})
 			r.Handle(core.Route{Method: "PUT", Path: path, Handler: write(st, path, secs)})
 		}
+		r.Handle(core.Route{Method: "PUT", Path: "/settings/channels/{name}/answerers", Handler: answerers(st)})
 	}
+}
+
+// answerers 只替换一个渠道的回答人白名单（§14.6），其余渠道不动；空名单即清空。
+func answerers(st *store.Store) core.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+		path := "/settings/channels/{name}/answerers"
+		if err := webOnly(p); err != nil {
+			auditRejected(st, r, p, path)
+			return err
+		}
+		var in struct {
+			Answerers []string `json:"answerers"`
+		}
+		raw, err := readBody(r)
+		if err != nil {
+			return err
+		}
+		if err := strictDecode(raw, &in); err != nil {
+			return err
+		}
+		name := r.PathValue("name")
+		v, pol, err := UpdateKey(st, r, p, "web settings: answerers of channel "+name, func(np *kpolicy.Policy) {
+			if np.ChannelAnswerers == nil {
+				np.ChannelAnswerers = map[string][]string{}
+			}
+			np.ChannelAnswerers[name] = in.Answerers
+		})
+		if err != nil {
+			return err
+		}
+		return core.WriteJSON(w, http.StatusOK, map[string]any{"version": v, "answerers": nonNil(pol.ChannelAnswerers[name])})
+	}
+}
+
+func readBody(r *http.Request) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := core.DecodeJSON(r, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func nonNil(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
+}
+
+// UpdateKey 经 kernel/policy.Update 改策略里的一处（如白名单的一个键），返回新版本号与存储的策略。
+// 调用方须先确认是 Web 会话；内核仍会再判一次。
+func UpdateKey(st *store.Store, r *http.Request, p *core.Principal, reason string, mutate func(*kpolicy.Policy)) (int, kpolicy.Policy, error) {
+	var (
+		v   int
+		pol kpolicy.Policy
+	)
+	err := st.Update(detached(r), func(tx *store.Tx) error {
+		var err error
+		if v, err = kpolicy.Update(tx, p.Caller.Actor, reason, func(np *kpolicy.Policy) error { mutate(np); return nil }); err != nil {
+			return err
+		}
+		_, pol, err = kpolicy.Stored(tx)
+		return err
+	})
+	if errors.Is(err, kpolicy.ErrInvalid) {
+		return 0, pol, domain.NewError(domain.CodeInvalidRequest, err.Error(), "fix the setting and send it again; nothing was saved")
+	}
+	return v, pol, err
 }
 
 // webOnly：设置只有 Web 会话能碰（读也算：模型端点、白名单属于账本之外的配置，agent 不需要看）。
