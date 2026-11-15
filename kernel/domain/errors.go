@@ -15,7 +15,6 @@ const (
 	CodeNotFound             Code = "not_found"              // 404 → 5
 	CodeConflict             Code = "conflict"               // 409 → 6
 	CodeModelsPaused         Code = "models_paused"          // 409 → 6：本人暂停了模型，需要模型的本人操作被拒（§8.7）
-	CodeInstanceDriven       Code = "instance_driven"        // 409 → 6：规则由实例驱动，不看模式，改模式被拒（§7.3）
 	CodeLoginLocked          Code = "login_locked"           // 429 → 1：登录被限速或锁定（§14.13），带 Retry-After
 	CodeInternal             Code = "internal"               // 其余 → 1
 )
@@ -50,7 +49,6 @@ var codeHTTP = map[Code]int{
 	CodeNotFound:             404,
 	CodeConflict:             409,
 	CodeModelsPaused:         409,
-	CodeInstanceDriven:       409,
 	CodeLoginLocked:          429,
 	CodeInternal:             500,
 }
@@ -67,7 +65,6 @@ var codeExit = map[Code]int{
 	CodeNotFound:             ExitNotFound,
 	CodeConflict:             ExitConflict,
 	CodeModelsPaused:         ExitConflict,
-	CodeInstanceDriven:       ExitConflict,
 	CodeLoginLocked:          ExitUnclassified,
 	CodeInternal:             ExitUnclassified,
 }

@@ -186,7 +186,7 @@
 | | `GET /doctor` | 内核一侧的自检结果（主文档 §15.5）；每项检查与每个对象都带稳定机器码 `code` 与可变参数 `data`，形状见下文"自检结果" | observer |
 | | `GET /version` | 版本与各协议版本（B.5） | 不需要凭据 |
 | 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例 | observer 读，delegate 写 |
-| | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；每条带 `class`（`reminder` 提醒类或 `action` 动作类，由加载器推定，主文档 §14.8），实例驱动的规则（`schedule` 含 `{instance.…}`）另带 `instance_driven: true`；切换只有 Web，对实例驱动的规则返回 409 `instance_driven` | Web 登录 |
+| | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；每条带 `class`（`reminder` 提醒类或 `action` 动作类，由加载器推定，主文档 §14.8）；实例驱动的时钟规则（`schedule` 含 `{instance.…}`）不是可见规则，不列出，对它改模式与规则不存在同为 404 `not_found`（主文档 §7.3）；切换只有 Web | Web 登录 |
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/grants`、`/settings/purge` | 策略（含人格、打扰上限与静音）、两个模型端点、凭据、白名单、名单、命令登记、声明确认、授权单签发与撤销（`POST /settings/grants`、`POST /settings/grants/{id}/revoke`）、物理删除 | 只有 Web 登录 |
 | | `/settings/judgment` | 不确定带与影子模式 | 只有 Web 登录 |
 | | `POST /settings/model-endpoints/models`、`POST /settings/model-endpoints/test` | "设置 › 模型"的获取模型与测试连接：只读，不写 Event，不改策略；同一类端点同一时刻只跑一个，其余返回 409（主文档 §4.1、§15.5） | 只有 Web 登录 |
@@ -335,7 +335,6 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 - 退出码 23 在 v0.2.0 新增一个原因：`code` 为 `session_not_direct`，`why` 说明会话不是与本人的私聊，`web_url` 给出 Web 链接（主文档 §14.5）。HTTP 状态与其他依据不足的情况相同。
 - 登录被限速或锁定时 `POST /auth/login` 返回 429，`code` 为 `login_locked`，带 `Retry-After`。
 - 本人暂停了模型时，需要模型的本人操作（积压的影子打分与放开重判）返回 409，退出码 6，`code` 为 `models_paused`，`next` 提示到"设置 › 模型"恢复（主文档 §8.7）。
-- 对实例驱动的规则改模式（`PATCH /rules/{id}/mode`）返回 409，退出码 6，`code` 为 `instance_driven`，`why` 说明它按安排运行，`next` 指向简报页的实例启停（主文档 §7.3）。
 
 ## B.4 标准事件类型
 
@@ -378,7 +377,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 策略的 `models_paused` | 无 | 顶层布尔，经 `/settings/model-endpoints` 读写 | 只增字段：已存的策略版本没有这个键，读作不暂停，不改写旧版本；`GET /health` 的 `model_unavailable.detail` 只增 `paused` 键与取值 `paused` |
 | `GET /health` 的 `unjudged_backlog.detail` | 各原因计数与 `sources` | 另带 `rejudge_days` | 只增字段，按键取值的调用方不受影响 |
 | `disturb.threshold_judge` | 开启三选一的投递阈值判定 | 开启"可以晚点送吗"的推迟判定 | 键名与类型不变；已开启的继续开启，"只留 Web 未读"这一去向不再由模型选择 |
-| 实例驱动规则的模式 | `PATCH /rules/{id}/mode` 可改，值不生效 | 返回 409 `instance_driven`；`GET /rules` 带 `instance_driven` | 已存的模式值保留不动、不再使用；只增不改。调用方需按 409 处理 |
+| 实例驱动的时钟规则 | `GET /rules` 列出，`PATCH /rules/{id}/mode` 可改，值不生效 | `GET /rules` 不再列出；`PATCH` 返回 404 `not_found`，与规则不存在一致 | 账本里 `rules_state` 已存的行不删不改，内核照旧用它们执行实例到期；只是不再读出给人看。调用方按列表取规则的不受影响，直接对这类规则改模式的要按 404 处理 |
 | 来源规则的 `then: judge` | 交判断型三选一 | `screen` 的别名 | 仍被接受 |
 | 判断留痕 | `run.finished`（`category: judge`）事件 | 判断记录（`/judgments`） | 旧事件保留、可回放；不计入校准统计 |
 | 来源的显示名 | 无；Web 显示来源 id | `name` 总有值：登记时给定或取来源程序的接入声明；都没有时登记被拒（400），重名的登记与改名返回 409 | 只增字段与列（`sources_registry` 迁移 3，账本结构版本 3 → 4）。已有来源在 `apa serve` 启动时补名：先按接入声明，没有声明的按类型起名并记一条健康说明，逐个记 `source.renamed`（操作者 system），不触发判断、重判或健康说明以外的投递。**调用方要改的**：登记仓库之外的来源程序（自定义脚本、自建拉取程序、非自带类型的 webhook）以前可以不带名字，现在必须带 `name` / `--name`，否则 400；同一程序登记多个实例而声明给出同名时（如两个 RSS 订阅）要显式起名。迁移后旧二进制拒绝打开账本（结构版本更高），回退要用升级前快照，见主文档 §16.5 |
