@@ -201,7 +201,7 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     ["/items", "事项", "事项"], ["/items/itm_1", "事项", "事项"], ["/pack-views", "事项", "事项"],
     ["/projects", "项目", "项目"], ["/materials", "项目", "材料"],
     ["/agent-changes", "agent 动态", "改动"], ["/delegation", "agent 动态", "委派"], ["/executors", "agent 动态", "执行者"], ["/runs", "诊断", "运行日志"],
-    ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "抽查漏掉的"],
+    ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "被忽略的，抽几条看看"],
     ["/rules", "自动规则", "规则"], ["/judgment", "自动规则", "筛选门槛"],
     ["/health", "诊断", "状态"], ["/audit", "诊断", "操作记录"],
     ["/settings", "设置", "我来拍板"], ["/settings-credentials", "设置", "接入钥匙"], ["/settings-exec", "设置", "宿主接入"],
@@ -217,9 +217,9 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     else expect(entry).toBe(tab); // 只有一个页面的入口没有页签
   });
 
-  it("简报抽检链接 /judgments/… 改写到消息来源 › 抽查漏掉的，保留查询串", async () => {
+  it("简报抽检链接 /judgments/… 改写到消息来源 › 被忽略的，抽几条看看，保留查询串", async () => {
     await openAt("/judgments/spot-check?judgment=jdg_1");
-    expect(await screen.findByRole("heading", { name: "抽查漏掉的 页面" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "被忽略的，抽几条看看 页面" })).toBeInTheDocument();
     expect(screen.getByTestId("at")).toHaveTextContent("/spot-check?judgment=jdg_1");
   });
 
