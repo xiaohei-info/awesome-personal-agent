@@ -206,7 +206,7 @@ func TestOutboundScope(t *testing.T) {
 		top.Cleanup(feed.Close) // 订阅服务要活到整条流程结束，不随本步骤的子测试退出
 		k.installRSS()
 		cfg, _ := json.Marshal(map[string]any{"url": feed.URL + "/feed.xml"})
-		k.apa(k.DEL, 0, "source", "add", "--id", rssID, "--type", "pull", "--command", "rss-source", "--schedule", "5s", "--timeout", "30",
+		k.apa(k.DEL, 0, "source", "add", "--id", rssID, "--name", rssID, "--type", "pull", "--command", "rss-source", "--schedule", "5s", "--timeout", "30",
 			"--config", string(cfg), "--default-project", k.Projects["acc-home"], "--evidence", "登记 RSS 来源，默认归入 acc-home")
 		s := k.sourceShow(rssID)
 		if s.DefaultProject != k.Projects["acc-home"] || s.Outbound.Local != "full" || s.Outbound.External != nil {

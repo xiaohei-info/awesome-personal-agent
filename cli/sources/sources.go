@@ -19,8 +19,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 )
 
-const usageText = "usage: apa source list | show <id> | add --id ID [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
-	"enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] --evidence <words> | backlog rejudge [--source ID] [--limit N] --evidence <words> | backlog restore --from T --to T [--source ID] [--dry-run | --evidence <words>] | auth <id>"
+const usageText = "usage: apa source list | show <id> | add --id ID [--name N] [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
+	"rename <id> <name> | enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] --evidence <words> | backlog rejudge [--source ID] [--limit N] --evidence <words> | backlog restore --from T --to T [--source ID] [--dry-run | --evidence <words>] | auth <id>"
 
 func init() { client.Register("source", source) }
 
@@ -49,6 +49,11 @@ func source(c *client.Ctx, args []string) error {
 			return err
 		}
 		return call(c, "POST", "/sources", body)
+	case "rename":
+		if len(rest) != 2 {
+			return usage("rename needs <id> and <name>", usageText)
+		}
+		return call(c, "PATCH", "/sources/"+url.PathEscape(rest[0]), map[string]any{"name": rest[1]})
 	case "enable", "disable":
 		id, err := oneID(rest, sub)
 		if err != nil {
@@ -143,6 +148,7 @@ func addBody(args []string) (map[string]any, error) {
 		fs.Func(flagName, "", func(v string) error { body[key] = v; return nil })
 	}
 	str("id", "id")
+	str("name", "name")
 	str("type", "type")
 	str("command", "command")
 	str("schedule", "schedule")

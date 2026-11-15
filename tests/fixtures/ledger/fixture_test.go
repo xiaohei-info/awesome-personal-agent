@@ -360,12 +360,14 @@ type pre struct {
 	tables  map[string]int
 	applied []string
 	policy  []string
+	columns []string // 表.列
 }
 
 func snapshot(t *testing.T, st *store.Store) pre {
 	return pre{tableCounts(t, st),
 		strCol(t, st, "SELECT module||'/'||version||'/'||checksum FROM store_migrations ORDER BY 1"),
-		strCol(t, st, "SELECT version||':'||doc FROM policy_version ORDER BY version")}
+		strCol(t, st, "SELECT version||':'||doc FROM policy_version ORDER BY version"),
+		strCol(t, st, "SELECT m.name||'.'||c.name FROM sqlite_master m, pragma_table_info(m.name) c WHERE m.type = 'table' ORDER BY 1")}
 }
 
 // 从版本 2 与每个结构版本的夹具升到主干最新，各自满足 §5.2 里账本层面的要求。
@@ -396,8 +398,18 @@ func TestMigrationChainFromEveryFixtureToLatest(t *testing.T) {
 					t.Errorf("表 %s 行数 %d != 清单 %d", tbl, after.tables[tbl], m.Tables[tbl])
 				}
 			}
-			if v < latest && len(after.tables) <= len(p.tables) {
-				t.Errorf("V%d → V%d 应新增表", v, latest)
+			// 结构只增：升级前的每一列都在，且有新增的表或列（3 → 4 只加列）。
+			had := map[string]bool{}
+			for _, c := range after.columns {
+				had[c] = true
+			}
+			for _, c := range p.columns {
+				if !had[c] {
+					t.Errorf("升级后少了列 %s", c)
+				}
+			}
+			if v < latest && len(after.columns) <= len(p.columns) {
+				t.Errorf("V%d → V%d 应新增表或列", v, latest)
 			}
 			// 不改写历史：每条 Event 的载荷哈希不变，序号从 1 起连续，末尾没有被追加。
 			hs, seqs := eventHashes(t, st)
@@ -555,4 +567,4 @@ func TestManifestMigrationChecksumsMatchSource(t *testing.T) {
 }
 
 // frozenDigest：冻结版本的迁移校验和摘要，取自冻结提交的二进制 init 出的账本（store_migrations 按 module/version/checksum 排序后的 sha256）。
-var frozenDigest = map[int]string{2: "31ac079af2c9a4b100c52c40cffcfd5bd90a3fd23a5c94bf20ad62c9102e2a24"}
+var frozenDigest = map[int]string{2: "31ac079af2c9a4b100c52c40cffcfd5bd90a3fd23a5c94bf20ad62c9102e2a24", 3: "6059c04b42871d5df5973bfba18f80de685e56277443fb350254bd8cabb551a9"}

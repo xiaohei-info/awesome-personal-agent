@@ -136,7 +136,7 @@ func newEnv(t *testing.T, maxBody, rate int) *env {
 // wire 在 x 上登记来源、事项和接入流水线的命令。
 func (e *env) wire(st *store.Store, x *command.Executor) {
 	t := e.t
-	for _, err := range []error{projects.Register(x), items.Register(x, items.NewKinds()), registry.Register(x, registry.Options{Layout: e.lay})} {
+	for _, err := range []error{projects.Register(x), items.Register(x, items.NewKinds()), registry.Register(x, registry.Options{Layout: e.lay, Declared: func(s domain.Source) string { return s.ID }})} {
 		if err != nil {
 			t.Fatal(err)
 		}

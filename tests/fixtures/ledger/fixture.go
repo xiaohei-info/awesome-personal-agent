@@ -17,6 +17,15 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
+// BinaryEnv 是冻结版本 v 的回退用旧主程序与插件包的环境变量名（清单 binary / plugin 字段）。
+// 版本 2 沿用验收文档 ACT-ENV-08 的 APA_V01_*。
+func BinaryEnv(v int) (bin, plugin string) {
+	if v == 2 {
+		return "APA_V01_BIN", "APA_V01_PLUGIN"
+	}
+	return fmt.Sprintf("APA_V%d_BIN", v), fmt.Sprintf("APA_V%d_PLUGIN", v)
+}
+
 // 夹具里所有「秘密」都是合成的固定串，只对夹具有意义。
 const (
 	WebSecret      = "fx-owner-9" // 夹具的 Web 登录口令；10 个字符，v0.1 的下限是 8
@@ -35,8 +44,9 @@ var T0 = time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 
 // Frozen 是已冻结（已被真实账本应用过）的账本结构版本及其冻结提交。
 // 新增一个冻结版本：在这里加一行，再把该版本的二进制取得方式写进 fetch-v01.sh 同类脚本。
-// 版本 3 在第一次有真实账本升级到它之后才冻结，目前只有版本 2。
-var Frozen = map[int]string{2: "bfafc2d0319a983d9b3062ed74acbe507ae5f3ea"} // 结构版本 2 的最后一次变更（sources_runner v2，#254）；v0.1.1 标签早于它，打不开结构版本 2 的账本
+// 2：结构版本 2 的最后一次变更（sources_runner v2，#254）；v0.1.1 标签早于它，打不开结构版本 2 的账本。
+// 3：真实账本（2026-11-14 起）运行的提交（#396），结构版本 3 的迁移以它为准冻结；此后的结构变更进版本 4。
+var Frozen = map[int]string{2: "bfafc2d0319a983d9b3062ed74acbe507ae5f3ea", 3: "05106506287a73b21536220ecccb383ca9969b97"}
 
 // 备份的来源与规模常量：改动它们会改动 manifest 的期望值，生成器与测试都从 manifest 读，不写死。
 const (
@@ -178,7 +188,7 @@ func Generate(dir string, version int) (*Manifest, error) {
 		m.FrozenCommit = c
 		m.MigrationFiles = migrationFiles(version)
 		m.MigrationChecksums = migrationChecksums(reg)
-		m.Binary, m.Plugin = "APA_V01_BIN", "APA_V01_PLUGIN"
+		m.Binary, m.Plugin = BinaryEnv(version)
 	}
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

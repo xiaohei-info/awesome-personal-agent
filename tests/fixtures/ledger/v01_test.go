@@ -16,24 +16,28 @@ import (
 	"time"
 )
 
-// v01Binary 返回旧结构版本的主程序：优先用环境变量 APA_V01_BIN；没有就用 fetch-v01.sh 从冻结提交构建（缓存在系统临时目录）。
+// v01Binary 是结构版本 2 的旧主程序（APA_V01_BIN）。
+func v01Binary(t *testing.T) (bin, plugin string) { return frozenBinary(t, 2) }
+
+// frozenBinary 返回冻结版本 v 的旧主程序：优先用环境变量（BinaryEnv）；没有就用 fetch-v01.sh 从冻结提交构建（缓存在系统临时目录）。
 // 只有「这份克隆里没有冻结提交」（浅克隆）时才跳过；构建失败是失败。
-func v01Binary(t *testing.T) (bin, plugin string) {
+func frozenBinary(t *testing.T, v int) (bin, plugin string) {
 	t.Helper()
-	if b := os.Getenv("APA_V01_BIN"); b != "" {
+	envBin, envPlugin := BinaryEnv(v)
+	if b := os.Getenv(envBin); b != "" {
 		if _, err := os.Stat(b); err != nil {
-			t.Fatalf("APA_V01_BIN=%s: %v", b, err)
+			t.Fatalf("%s=%s: %v", envBin, b, err)
 		}
-		return b, os.Getenv("APA_V01_PLUGIN")
+		return b, os.Getenv(envPlugin)
 	}
-	commit := Frozen[2]
+	commit := Frozen[v]
 	out := filepath.Join(os.TempDir(), "apa-fixture-v01")
 	bin = filepath.Join(out, "apa-"+commit)
 	plugin = filepath.Join(out, "apa-hermes-plugin-"+commit+".tar.gz")
 	if _, err := os.Stat(bin); err == nil {
 		return bin, plugin
 	}
-	cmd := exec.Command("bash", "fetch-v01.sh", out)
+	cmd := exec.Command("bash", "fetch-v01.sh", out, commit)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 3 {
@@ -208,11 +212,17 @@ func loginField(t *testing.T) string {
 	return rest[:strings.Index(rest, "\"")]
 }
 
-// 版本闸与回退，用真实的旧二进制验证：升级后旧二进制起不来且账本不变；迁移中途失败后旧二进制照常打开。
+// 版本闸与回退，对每个冻结版本用它真实的旧二进制验证：升级后旧二进制起不来且账本不变；迁移中途失败后旧二进制照常打开。
 func TestV01BinaryRefusesUpgradedLedgerAndSurvivesFailedUpgrade(t *testing.T) {
-	bin, _ := v01Binary(t)
+	for v := range Frozen {
+		t.Run(fmt.Sprintf("V%d", v), func(t *testing.T) { oldBinaryRefusesUpgraded(t, v) })
+	}
+}
+
+func oldBinaryRefusesUpgraded(t *testing.T, v int) {
+	bin, _ := frozenBinary(t, v)
 	latest := mustLatest(t)
-	dir, m := gen(t, 2)
+	dir, m := gen(t, v)
 
 	// 失败的升级：旧二进制仍能打开（且读到的积压不变）。
 	failed := copyTree(t, dir)

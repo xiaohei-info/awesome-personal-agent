@@ -27,9 +27,13 @@ type env struct {
 	x   *command.Executor
 	au  *auth.Auth
 	dir string
+	// declare 是本次装配的接入层声明（Options.Declared）。
+	declare func(domain.Source) string
 }
 
-func setup(t *testing.T) *env {
+func setup(t *testing.T) *env { t.Helper(); return setupWith(t, declareByID) }
+
+func setupWith(t *testing.T, declare func(domain.Source) string) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, Module} {
@@ -42,9 +46,9 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	e := &env{st: st, au: auth.New(nil), x: command.New(st, nil), dir: t.TempDir()}
+	e := &env{st: st, au: auth.New(nil), x: command.New(st, nil), dir: t.TempDir(), declare: declare}
 	lay := config.LayoutOf(e.dir)
-	if err := Register(e.x, Options{Bundled: []string{"pull-feed", "pull-http"}, Layout: lay}); err != nil {
+	if err := Register(e.x, Options{Bundled: []string{"pull-feed", "pull-http"}, Layout: lay, Declared: e.declare}); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -101,6 +105,10 @@ func exit(err error) int {
 	}
 	return -1
 }
+
+// declareByID 是不关心名字的用例的接入层声明：每个登记都声明一个按实例（id）区分的名字，照常登记多个实例。
+// 名字规则本身在 names_test.go 用 setupWith 换成按 config 取名、且有程序没有声明的情形。
+func declareByID(s domain.Source) string { return "来源 " + s.ID }
 
 func pull(id string) m {
 	return m{"id": id, "type": "pull", "source_type": "feed", "command": "pull-feed", "schedule": "15m", "timeout": 60}

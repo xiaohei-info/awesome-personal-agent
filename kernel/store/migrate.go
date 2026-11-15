@@ -96,6 +96,16 @@ func (r *Registry) Modules() []Module {
 	return ms
 }
 
+// Behind 报告 info 所示的账本是否还有本程序登记的迁移没应用。结构版本相同时也可能有（同一版本内追加的迁移）。
+func (r *Registry) Behind(info Info) bool {
+	for name, m := range r.modules {
+		if info.Modules[name] < len(m.Migrations) {
+			return true
+		}
+	}
+	return false
+}
+
 // SchemaLedger 是登记的全部迁移里最高的账本结构版本，即发布物 `schema.ledger`。
 func (r *Registry) SchemaLedger() int {
 	v := 0

@@ -52,7 +52,7 @@ func setup(t *testing.T) *env {
 	if err := kp.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.Register(e.x, registry.Options{}); err != nil {
+	if err := registry.Register(e.x, registry.Options{Declared: func(s domain.Source) string { return s.ID }}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {

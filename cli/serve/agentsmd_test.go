@@ -50,7 +50,7 @@ func agentsKernel(t *testing.T) *kernel { return agentsKernelFor(t, agmRepo) }
 
 func agentsKernelFor(t *testing.T, remote string) *kernel {
 	k := assembled(t)
-	k.do(t, command.Chain{}, "source.register_script", map[string]any{"id": "src_gh", "type": "script", "source_type": "repo",
+	k.do(t, command.Chain{}, "source.register_script", map[string]any{"id": "src_gh", "name": "仓库", "type": "script", "source_type": "repo",
 		"command": "/bin/true", "schedule": "1h", "timeout": 10, "dedupe_domain": "gh"})
 	var p struct{ ID string }
 	_ = json.Unmarshal(k.do(t, command.Chain{}, "project.create", map[string]any{"name": "widgets"}), &p)

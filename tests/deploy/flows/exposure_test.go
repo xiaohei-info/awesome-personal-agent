@@ -192,7 +192,7 @@ func TestFlowDeployExposure(t *testing.T) {
 		c := proxy.Client()
 
 		const src = "src_dpl_gh"
-		f.Apa(f.DEL, "", "source", "add", "--id", src, "--type", "webhook", "--source-type", "github",
+		f.Apa(f.DEL, "", "source", "add", "--id", src, "--name", src, "--type", "webhook", "--source-type", "github",
 			"--config", `{"scheme":"hmac-sha256-header","mappings":["github-issues"]}`, "--evidence", "owner asked")
 		kr := f.Apa(f.DEL, "", "source", "webhook", "create", src, "--evidence", "owner asked")
 		var key struct {

@@ -218,7 +218,7 @@ func TestFlowRelease(t *testing.T) {
 				_, _ = io.WriteString(w, releaseAtom)
 			}))
 			defer feed.Close()
-			body, _ := json.Marshal(map[string]any{"id": "src_rel_rss", "type": "script", "command": filepath.Join(pkg, "sources", "rss-source"),
+			body, _ := json.Marshal(map[string]any{"id": "src_rel_rss", "name": "src_rel_rss", "type": "script", "command": filepath.Join(pkg, "sources", "rss-source"),
 				"schedule": "1s", "timeout": 20, "source_type": "rss", "config": map[string]string{"url": feed.URL}})
 			if w := e.Web("POST", "/v1/sources", string(body)); w.Code != 201 {
 				t.Fatalf("登记包内 RSS 来源: %d %s", w.Code, w.Body)

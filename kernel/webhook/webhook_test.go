@@ -125,7 +125,7 @@ func newEnv(t *testing.T, mut func(*Options)) *env {
 	if err := lay.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	for _, err := range []error{projects.Register(e.x), items.Register(e.x, items.NewKinds()), registry.Register(e.x, registry.Options{Layout: lay})} {
+	for _, err := range []error{projects.Register(e.x), items.Register(e.x, items.NewKinds()), registry.Register(e.x, registry.Options{Layout: lay, Declared: func(s domain.Source) string { return s.ID }})} {
 		if err != nil {
 			t.Fatal(err)
 		}

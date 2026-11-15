@@ -843,7 +843,7 @@ Event 是账本的追加日志，也是对外事件流。
 
 ### 6.10 Source 登记、来源事件、Ingest
 
-**Source 登记**：`{id, type: pull / script / webhook, source_type?, command?, schedule?, timeout?, credentials_path?, dedupe_domain?, default_project?, outbound, config, cursor, enabled, stats}`。`source_type` 是能力包规则匹配用的语义类型（如 `mail`、`calendar`、`reminder`，以及代码托管来源的类型，取值见附录 D），内核只当字符串比较，不随具体工具变化。`credentials_path` 是该来源的凭据文件或目录，必须在该来源自己的目录（`<APA_HOME>/sources/<id>/`）内；内核只记录路径、不读内容，拉取时经 stdin 交给来源进程（§9.2），来源程序据此找凭据，不依赖 `APA_HOME`。
+**Source 登记**：`{id, name, type: pull / script / webhook, source_type?, command?, schedule?, timeout?, credentials_path?, dedupe_domain?, default_project?, outbound, config, cursor, enabled, stats}`。`source_type` 是能力包规则匹配用的语义类型（如 `mail`、`calendar`、`reminder`，以及代码托管来源的类型，取值见附录 D），内核只当字符串比较，不随具体工具变化。`credentials_path` 是该来源的凭据文件或目录，必须在该来源自己的目录（`<APA_HOME>/sources/<id>/`）内；内核只记录路径、不读内容，拉取时经 stdin 交给来源进程（§9.2），来源程序据此找凭据，不依赖 `APA_HOME`。`name` 是显示名，界面与通知里按它称呼来源，规则见 §9.1。
 
 `default_project` 是该来源的事件缺省归入的项目，规则没有给出项目时使用（§9.3）。`outbound` 是该来源的内容可以送给模型端点的范围，按端点位置分别设置：`{local, external}`，各取 `full`（全文）、`excerpt`（元信息、摘要与正文前 500 字符）、`meta`（类型、标题、发送者、时间、链接域名）或 `none`（不送）；`local` 缺省 `full`，`external` 没有缺省值，登记来源时必须选择，v0.1 登记的来源在升级后为未选择（§14.14）。两者都只在 Web 设置，或由 delegate 附本人原话设置默认项目；外发范围只在 Web。
 
@@ -1496,6 +1496,8 @@ HTTP 层错误的响应体为 `{"error": {"code": "<标识>", "message": "…"}}
 | **定时拉取** | 随发行附带的通用拉取程序：代码托管平台（Issue、PR、通知，并比对默认分支根目录 AGENTS.md 的 blob sha，变化即产出 `repo.agents_md_changed`，§12.5）、RSS/Atom、本地目录监视、通用 HTTP JSON 轮询 | 安装即登记；`apa source auth <id>` 一次认证，凭据存在该来源自己的目录，内核不读 | 外呼调用器按时钟拉起 |
 | **自定义脚本** | 用户自写脚本（内部系统、自建巡检、即时通讯消息的采集），以及对现成工具的薄适配（邮件、日历，§9.7） | 在 Source 登记里填命令、周期、超时、凭据路径；登记命令只在 Web 或主机配置文件（§14.12） | 同上 |
 | **webhook 推送** | 外部系统主动 POST，无游标、无常驻进程 | HTTP API 的接收路由 `POST /ingest/{source_id}`，每个 source 独立 URL + 密钥 | 外部系统推送 |
+
+**显示名**：每个来源有一个本人认得的名字，界面里凡是出现来源的地方都显示它，`id` 只是内部标识、只在"显示原始值"里出现。名字在来源接入层固定：仓库自带的每个来源程序都带一份接入声明，写明它登记出的来源叫什么，中英各一份；一个程序服务多类或多个账户时，声明按 `config` 的某个字段选名字或用 `{字段}` 模板取值，同一程序的多个实例名字天然不同。每个来源接入都必须有名字，取名的先后是：登记时显式给定，其次是接入层声明，都没有就拒绝登记，并说明在登记时带名字或在声明里补上。规则只在登记模块里执行一处，Web、`apa source add`、webhook 来源与主机配置文件 `sources.json` 都经过它：去掉首尾空白，不超过 40 个字符，实例内不重名（不区分大小写），重名拒绝而不是自动加序号，以免名字被悄悄改掉。声明出的名字存进登记，各处显示一致，不在展示时现算；账本只存一种语言的名字，取中文，与通知、简报的语言一致，Web 新登记表单按界面语言预填、本人可改，提交的就是本人看到的那一个。改名经 `source.rename`，记 `source.renamed`，空名改回声明的名字；它只是显示名的变化，没有订阅方。声明随主程序嵌入，由装配方查给登记模块，具体程序与产品名不进内核；仓库之外的来源程序没有声明，登记时必须带名字。对话捕获的内部来源 `capture:<项目>` 不在登记里，按"对话捕获 · 项目名"显示。
 
 **内核调度 + 独立可执行文件**：定时拉取不做常驻进程，也不做内核内插件。轮询周期是时钟语义，归内核才能随账本迁移、统一失败统计；采集逻辑放在可执行文件里，内核不需要插件运行时，两种拉取走同一路径。
 
@@ -2596,7 +2598,7 @@ APA 自身的状态都在一个目录里，默认 `~/.apa`，可用 `APA_HOME` �
 | v0.1 的判断留痕（`run.finished`，`category: judge`） | 原样保留、照常可回放；不计入校准统计 |
 | 策略里没有 `models_paused` | 读作不暂停，旧的策略版本不改写 |
 | 策略里的 `model_endpoint` | 读取时等同 `generate_endpoint`，位置未声明按 `external`。旧的策略版本不改写；本人下一次在 Web 保存端点设置时写成新字段。`/settings/model-endpoints` 在本版同时接受旧的请求形状 |
-| 来源登记 | `default_project` 为空；`outbound.local` 为 `full`，`outbound.external` 为未选择。使用外部端点前，本人要为每个来源选一次范围，健康视图与 `apa doctor` 会提示 |
+| 来源登记 | `default_project` 为空；`outbound.local` 为 `full`，`outbound.external` 为未选择。使用外部端点前，本人要为每个来源选一次范围，健康视图与 `apa doctor` 会提示。显示名为空的来源在 `apa serve` 启动时补名：先用接入层声明的名字（§9.1），取不到声明的为了兼容才按 `source_type` 或来源类型起名（如"邮件""自定义脚本"），名字被占用时按 id 顺序加序号；逐个记 `source.renamed`（操作者 system）。有按类型起名的，另记一条健康说明（对象 `sources:names`），建议本人起名，它按"系统健康"的去向出一条健康类投递；除此之外不触发判断、投递或重判。这是唯一保留按类型起名的地方 |
 | 规则模式 | 内置包的提醒类规则（§14.8）若仍是 v0.1 的初始值 `observe`、本人从未切换过，升级时切到 `auto`，逐条记 `rule.mode_changed` 并合并成一条健康类说明；本人切换过的保持原样；用户覆盖包里显式写了 `observe` 或 `off` 的按包里的写法。动作类规则不变 |
 | 数据目录里覆盖内置包的用户包 | 用到已移除字段（`confidence_threshold`、`escalate_to`）的包被拒绝加载，内置包生效，健康视图给出要改的字段（附录 C.11）。只为改邮件、日历的项目归属而覆盖 `inbound-triage` 的，改用来源的默认项目即可，不再需要覆盖包 |
 | 运行配置 | 旧键全部有效，新键取默认值。监听非本机地址的部署要在升级前补上 https 的 `public_url`，否则新版本拒绝启动（§14.13）；预检会报告 |

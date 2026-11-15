@@ -1,6 +1,7 @@
 // Package sources 是来源的 HTTP 路由（附录 B.2、设计 §9.5、§14.12）：
 //
 //	GET/POST /sources        GET/PATCH /sources/{id}
+//	GET /sources/declared-name          接入层为一份登记声明的显示名（中英），新登记表单预填用
 //	POST /sources/{id}/webhook          创建或轮换 webhook 接收密钥
 //	DELETE /sources/{id}/webhook        吊销该来源的全部接收密钥，并删除 HMAC 密钥文件
 //	GET /sources/{id}/ingests           入站记录
@@ -85,7 +86,11 @@ const (
 	maxEventLimit     = 500
 )
 
+// Namer 返回接入层为登记 s 声明的显示名（中英）；没有声明时 ok 为 false。由装配方给出（§9.1）。
+type Namer func(s domain.Source) (zh, en string, ok bool)
+
 type api struct {
+	nm Namer
 	st *store.Store
 	x  *command.Executor
 	rp Replayer
@@ -94,9 +99,9 @@ type api struct {
 }
 
 // Mount 在 x 上登记本包的两条命令并返回路由分组，挂到 core.Deps.Groups 即生效。
-// x 须已由 registry.Register 登记来源命令；au 用于签发 webhook 密钥。
-func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr Proposer) (core.RouteGroup, error) {
-	a := &api{st: st, x: x, rp: rp, pr: pr, au: au}
+// x 须已由 registry.Register 登记来源命令；au 用于签发 webhook 密钥；nm 为 nil 等于没有任何接入层声明。
+func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr Proposer, nm Namer) (core.RouteGroup, error) {
+	a := &api{st: st, x: x, rp: rp, pr: pr, au: au, nm: nm}
 	for _, s := range []command.Spec{
 		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
 		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
@@ -109,6 +114,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/sources", Handler: readable(a.list)})
 		r.Handle(core.Route{Method: "POST", Path: "/sources", Handler: a.create})
+		r.Handle(core.Route{Method: "GET", Path: "/sources/declared-name", Handler: readable(a.declaredName)})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}", Handler: readable(a.get)})
 		r.Handle(core.Route{Method: "PATCH", Path: "/sources/{id}", Handler: a.patch})
 		r.Handle(core.Route{Method: "POST", Path: "/sources/{id}/webhook", MaxBody: 1 << 10, Handler: a.webhookKey})
@@ -192,6 +198,25 @@ func (a *api) list(w http.ResponseWriter, r *http.Request, _ *core.Principal) er
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"sources": ss})
 }
 
+// declaredName：按查询参数 type、command、source_type、config（JSON 对象）给出接入层声明的名字；没有声明时 name 为 null。
+func (a *api) declaredName(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
+	q := r.URL.Query()
+	s := domain.Source{Type: domain.SourceType(q.Get("type")), Command: q.Get("command"), SourceKind: q.Get("source_type")}
+	if c := q.Get("config"); c != "" {
+		if !json.Valid([]byte(c)) {
+			return invalid("config must be JSON", "fix config")
+		}
+		s.Config = json.RawMessage(c)
+	}
+	var name any
+	if a.nm != nil {
+		if zh, en, ok := a.nm(s); ok {
+			name = map[string]string{"zh": zh, "en": en}
+		}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"name": name})
+}
+
 func (a *api) get(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
 	s, err := a.source(r, r.PathValue("id"))
 	if err != nil {
@@ -238,8 +263,10 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 		return err
 	}
 	enabled, hasEnabled := in["enabled"]
+	name, hasName := in["name"] // 显示名走 source.rename，不进登记内容的更新（类型、命令等）
 	delete(in, "enabled")
-	if len(in) == 0 && !hasEnabled {
+	delete(in, "name")
+	if len(in) == 0 && !hasEnabled && !hasName {
 		return invalid("nothing to update", "send at least one field")
 	}
 	var res command.Result
@@ -250,6 +277,13 @@ func (a *api) patch(w http.ResponseWriter, r *http.Request, p *core.Principal) e
 			cmd = registry.CmdUpdateExec
 		}
 		if res, err = a.run(r, p, cmd, in, true); err != nil {
+			return err
+		}
+	}
+	if hasName {
+		n := map[string]json.RawMessage{"name": name}
+		n["id"], _ = json.Marshal(id)
+		if res, err = a.run(r, p, registry.CmdRename, n, true); err != nil {
 			return err
 		}
 	}

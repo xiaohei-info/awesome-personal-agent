@@ -84,7 +84,7 @@ func newKernel(t *testing.T) *kernel {
 	t.Cleanup(func() { st.Close() })
 	x := command.New(st, nil)
 	au := auth.New(nil)
-	if err := registry.Register(x, registry.Options{Bundled: []string{"fetch-feed"}}); err != nil {
+	if err := registry.Register(x, registry.Options{Bundled: []string{"fetch-feed"}, Declared: declared}); err != nil {
 		t.Fatal(err)
 	}
 	wh, err := webhook.New(webhook.Options{Store: st, Exec: x, Packs: schemes{}, Auth: au, Secrets: webhook.KeyFiles{Dir: filepath.Join(t.TempDir(), "keys"), Auth: au}})
@@ -102,7 +102,7 @@ func newKernel(t *testing.T) *kernel {
 	if err := in.Register(x); err != nil {
 		t.Fatal(err)
 	}
-	grp, err := apisources.Mount(st, x, au, wh, in)
+	grp, err := apisources.Mount(st, x, au, wh, in, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,5 +617,41 @@ func TestBacklogRestoreCommand(t *testing.T) {
 	decode(t, restore(dlg), &res)
 	if res.Restored != 0 || k.events(inbound.EvDisposed) != 2 {
 		t.Fatalf("second restore: %+v", res)
+	}
+}
+
+// 显示名（§9.1）：`apa source add --name` 存下名字；不带时输出里有内核起的名字；重名退出码 6；`apa source rename` 改名。
+// declared 是测试装配的接入层声明（§9.1）：附带的 fetch-feed 与 webhook 来源按实例声明名字，其他程序（如自定义脚本）没有声明。
+func declared(s domain.Source) string {
+	switch {
+	case s.Command == "fetch-feed":
+		return "订阅 " + s.ID
+	case s.Type == domain.SourceWebhook:
+		return "推送 " + s.ID
+	}
+	return ""
+}
+
+func TestAddNameAndRename(t *testing.T) {
+	k := newKernel(t)
+	dlg := k.token(auth.Delegate)
+	var s domain.Source
+	decode(t, k.apa(dlg, "source", "add", "--id", "src_a", "--name", "  订阅  ", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"), &s)
+	if s.Name != "订阅" {
+		t.Fatalf("--name: %+v", s)
+	}
+	decode(t, k.apa(dlg, "source", "add", "--id", "src_b", "--type", "webhook", "--config", `{"scheme":"shared"}`), &s)
+	if s.Name != "推送 src_b" {
+		t.Fatalf("no --name: the output shows the declared name: %+v", s)
+	}
+	if r := k.apa(dlg, "source", "add", "--id", "src_c", "--name", "订阅", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"); r.code != domain.ExitConflict {
+		t.Fatalf("duplicate name: %+v", r)
+	}
+	decode(t, k.apa(dlg, "source", "rename", "src_b", "仓库推送"), &s)
+	if s.Name != "仓库推送" {
+		t.Fatalf("rename: %+v", s)
+	}
+	if r := k.apa(dlg, "source", "rename", "src_b"); r.code != domain.ExitUsage {
+		t.Fatalf("rename without a name: %+v", r)
 	}
 }

@@ -1,0 +1,9 @@
+# 接入声明（主文档 §9.1）：default 是没有模板可用时的名字；登记没给名字时按这里取显示名。一个程序服务邮件、日历、提醒事项三类实例，按 config.kind 区分；
+# 邮件按账户名区分（{account} 取 config.account，即邮件应用里的账户名，如 iCloud）。
+program: apple-pim-source
+by: kind
+names:
+  mail: {zh: "{account} 邮件", en: "{account} Mail"}
+  calendar: {zh: Apple 日历, en: Apple Calendar}
+  reminders: {zh: 提醒事项, en: Reminders}
+default: {zh: Apple 邮件, en: Apple Mail}

@@ -54,7 +54,7 @@ func (f *fx) githubSource(repoURL string) {
 		t.Fatalf("来源目录认证失败: %v %s", err, f.redact(string(out)))
 	}
 	cfg, _ := json.Marshal(map[string]any{"repos": []string{repo}})
-	r := f.Apa(f.DEL, "", "source", "add", "--id", "src_gh", "--type", "pull", "--command", "github-source", "--schedule", "5s",
+	r := f.Apa(f.DEL, "", "source", "add", "--id", "src_gh", "--name", "src_gh", "--type", "pull", "--command", "github-source", "--schedule", "5s",
 		"--timeout", "60", "--source-type", "github", "--credentials-path", cred, "--dedupe-domain", "github", "--config", string(cfg), "--evidence", "登记 GitHub 拉取程序")
 	if r.Code != 0 {
 		t.Fatalf("source add: %d %s %s", r.Code, r.Stdout, r.Stderr)

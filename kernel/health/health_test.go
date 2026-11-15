@@ -58,7 +58,7 @@ func setup(t *testing.T) *env {
 	}
 	t.Cleanup(func() { st.Close() })
 	x := command.New(st, func() time.Time { return t0 })
-	if err := registry.Register(x, registry.Options{Bundled: []string{"pull-feed"}}); err != nil {
+	if err := registry.Register(x, registry.Options{Bundled: []string{"pull-feed"}, Declared: func(s domain.Source) string { return s.ID }}); err != nil {
 		t.Fatal(err)
 	}
 	return &env{t: t, st: st, x: x, q: delivery.New(delivery.Options{Now: func() time.Time { return t0 }})}

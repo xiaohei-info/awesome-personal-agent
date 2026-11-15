@@ -35,14 +35,17 @@ func UpgradeCheck(ctx context.Context, in Input) kdoctor.Report {
 	case openErr != nil:
 		schema.Status, schema.Why, schema.Next = kdoctor.Error, "the ledger cannot be read: "+openErr.Error(), "set APA_HOME to the data directory to upgrade"
 	case l.infoErr != nil && errors.Is(l.infoErr, store.ErrSchemaTooNew):
-		schema.Status, schema.Why, schema.Next = kdoctor.Error, fmt.Sprintf("the ledger is newer than this binary (ledger structure up to %d); an older binary never opens newer data", target), "use the binary that matches the data"
+		schema.Status, schema.Why, schema.Next = kdoctor.Error, fmt.Sprintf("the ledger has migrations this binary does not know (this binary supports ledger structure %d); an older binary never opens newer data", target), "use the binary that matches the data"
 	case l.infoErr != nil:
 		schema.Status, schema.Why, schema.Next = kdoctor.Error, "the ledger is damaged: "+l.infoErr.Error(), "restore a backup before upgrading"
 	default:
 		schema.Data = map[string]any{"current": l.info.Ledger, "target": target}
-		if l.info.Ledger < target {
+		switch {
+		case l.info.Ledger < target:
 			schema.Why = fmt.Sprintf("ledger structure %d → %d: apa serve takes a pre-upgrade snapshot under backups/ and then migrates (additive only)", l.info.Ledger, target)
-		} else {
+		case in.Reg.Behind(l.info):
+			schema.Why = fmt.Sprintf("ledger structure %d stays, but this binary adds migrations within it: apa serve takes a pre-upgrade snapshot under backups/ and then migrates (additive only)", target)
+		default:
 			schema.Why = fmt.Sprintf("ledger structure %d already matches this binary; there is nothing to migrate", l.info.Ledger)
 		}
 		schema.Next = "stop the service, replace the release, start apa serve"

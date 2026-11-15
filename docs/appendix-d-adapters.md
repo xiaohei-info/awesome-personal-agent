@@ -18,6 +18,36 @@
 
 RSS/Atom、通用 HTTP JSON 轮询、本地目录监视三个拉取程序不对应具体产品，不在本表。
 
+**来源的接入声明与显示名**（主文档 §9.1）：每个来源接入都必须有名字。仓库自带的每个来源程序在自己的目录里带一份 `source.yaml`，写明它登记出的来源叫什么；登记（Web、`apa source add`、`sources.json`）不带名字时取声明的名字，带了以带的为准，都没有就拒绝登记。声明随 `apa` 主程序嵌入（`sources/declarations.go`），发布物不另带文件；名字只用于显示，不经 stdin 交给来源程序，适配器不需要处理它。
+
+| 来源程序 | 声明的名字（中文 / 英文） | 同一程序多个实例怎么区分 |
+|---|---|---|
+| `apple-pim-source` | 按 `config.kind`：`mail` 为"`{account}` 邮件 / `{account}` Mail"（如"iCloud 邮件""QQ 邮件"），`calendar` 为"Apple 日历 / Apple Calendar"，`reminders` 为"提醒事项 / Reminders"；邮件没有 `account` 时为"Apple 邮件" | 邮件按账户名；同类日历或提醒事项接多个时登记时起名 |
+| `mail-himalaya` | "`{account}` 邮件 / `{account}` Mail"（`account` 是邮件工具里的账户名，如 `gmail` 得到"gmail 邮件"）；没有 `account` 时为"邮件 / Mail" | 按账户名 |
+| `calendar` | "Google 日历 / Google Calendar" | 登记时起名 |
+| `github-source` | "GitHub"；`source_type` 为 `github` 的 webhook 来源同名 | 登记时起名 |
+| `rss-source` | "RSS 订阅 / RSS feed" | 登记时起名 |
+| `http-json` | "JSON 接口 / JSON endpoint" | 登记时起名 |
+| `dir-watch` | "文件夹 / Folder" | 登记时起名 |
+
+"登记时起名"的程序再登记第二个实例而不带名字时，声明出的名字已被占用，返回 409，提示起名；不会自动加序号。`hosted-reader` 是托管文档读取器，不登记为来源，没有声明。
+
+**来源程序作者**：新增或换掉一个来源程序，在它的目录里写 `source.yaml`，声明显示名是接入的必填项。字段：`program`（`command` 第一个词的文件名部分）、`default`（中英各一份的名字，不含占位，必填）、`name`（可选的名字模板，`{字段}` 取 `config` 里同名的字符串值，取不到值时用 `default`）、`by` 与 `names`（可选：按 `config` 的 `by` 字段取值选模板，优先于 `name`）、`webhook_source_type`（可选：同一 `source_type` 的 webhook 来源也按本声明取名）。例：
+
+```yaml
+program: apple-pim-source
+by: kind
+names:
+  mail: {zh: "{account} 邮件", en: "{account} Mail"}
+  calendar: {zh: Apple 日历, en: Apple Calendar}
+  reminders: {zh: 提醒事项, en: Reminders}
+default: {zh: Apple 邮件, en: Apple Mail}
+```
+
+`sources/declarations_test.go` 要求 `sources/*/cmd/*` 下每个来源程序都有声明。仓库之外的来源程序没有声明位置，登记时必须带名字（`sources.json` 的 `name`、`apa source add --name` 或 Web 的名字一栏）。账本只存一种语言的名字，取中文；Web 新登记表单按界面语言预填，本人可改。
+
+**升级补名**：升级前登记的来源没有名字，`apa serve` 启动时先按上面的声明补；取不到声明的（自定义脚本等）为了兼容按 `source_type` 起名（`cli/serve/assemble.go:sourceKindNames`：`mail` 邮件、`calendar` 日历、`reminder` 提醒事项、`github` GitHub；表里没有的按来源类型称"定时拉取""自定义脚本""外部推送"），同名加序号，并在健康视图留一条"建议起名"的说明。
+
 ## D.2 邮件与日历的工具适配
 
 共同约定见主文档 §9.7，这里是各工具的取数方式与专属约定。
@@ -41,7 +71,7 @@ RSS/Atom、通用 HTTP JSON 轮询、本地目录监视三个拉取程序不对�
 | gog 只读 | gog v0.9 没有只读开关，`--enable-commands` 只能限制到顶层命令（如 `calendar`，其下的 `create`、`delete` 仍可用）。日历适配器带 `--enable-commands=calendar` 挡住其他服务，只读由适配器只调用 `calendar events` 保证 |
 | Google 的时间精度 | 创建时间只到秒，更新时间带毫秒，所以"更新时间按秒晚于创建时间"才算 `event.updated` |
 | himalaya 版本 | JSON 标志在不同版本分别是 `--output json` 和 `--json`；适配器运行时比对 `--version` |
-| Apple 应用 | 一个适配器 `apple-pim-source`，`config.kind` 选 `mail`、`calendar`、`reminders`，各登记一个来源（`source_type` 分别为 `mail`、`calendar`、`reminder`）。`mail` 的 `account` 是邮件应用里的账户名，每个账户一个来源；`calendar` 的 `calendars`（名或 ID，缺省全部）用来只收不与其他日历来源重复的日历；`reminders` 的 `lists` 缺省全部，取未完成且有到期日的 `upcoming` 与 `overdue`。事件类型：邮件 `mail.received`（id 为 Message-ID）；日历 `event.created` / `event.cancelled`（工具不给更新时间，id 为工具日程 id、实例日期与内容摘要，关联键去掉摘要）；提醒事项 `reminder.due`（id 为提醒 id 加内容摘要，关联键为提醒 id）。邮件用 `--engine=sqlite` 只读索引与邮件文件，不经应用，不改已读标记；邮件按 `--since` 最旧优先取，游标推进到已读部分。三个工具没有版本参数，输出契约靠必填字段校验（缺字段、`success` 为 false 返回 2），录制样本在 `sources/applepim/testdata`。`config.bin_dir` 指定工具目录（缺省按 `PATH`） |
+| Apple 应用 | 一个适配器 `apple-pim-source`，`config.kind` 选 `mail`、`calendar`、`reminders`，各登记一个来源（`source_type` 分别为 `mail`、`calendar`、`reminder`；建议带上 `name`，如"Apple 日历"，以便与 Google 日历的来源区分）。`mail` 的 `account` 是邮件应用里的账户名，每个账户一个来源；`calendar` 的 `calendars`（名或 ID，缺省全部）用来只收不与其他日历来源重复的日历；`reminders` 的 `lists` 缺省全部，取未完成且有到期日的 `upcoming` 与 `overdue`。事件类型：邮件 `mail.received`（id 为 Message-ID）；日历 `event.created` / `event.cancelled`（工具不给更新时间，id 为工具日程 id、实例日期与内容摘要，关联键去掉摘要）；提醒事项 `reminder.due`（id 为提醒 id 加内容摘要，关联键为提醒 id）。邮件用 `--engine=sqlite` 只读索引与邮件文件，不经应用，不改已读标记；邮件按 `--since` 最旧优先取，游标推进到已读部分。三个工具没有版本参数，输出契约靠必填字段校验（缺字段、`success` 为 false 返回 2），录制样本在 `sources/applepim/testdata`。`config.bin_dir` 指定工具目录（缺省按 `PATH`） |
 | Apple 应用的系统授权 | 日历和提醒事项的系统授权归启动工具的应用，后台服务拉起时没有可授权的应用。`config.helper_app` 指定辅助应用，填上后适配器经 `open -W -n -a`（`-n`：多个来源并发时各开一个实例，否则运行中的辅助应用收不到参数）让辅助应用成为授权主体；因 `open` 不回传退出码，这条路径以 stdout 为空判失败，stderr 含授权拒绝字样返回 2。授权由本人在系统弹窗或系统设置里给，APA 不代办 |
 
 邮件线程关联键（主文档 §9.7）在各邮件适配器里的取法：事件的 `correlation_keys` 含 `thread:<线程根 Message-ID>`，线程根取 `References` 的第一项，没有则取 `In-Reply-To`，都没有则是邮件自己的 Message-ID；取不到线程头时只给自己的，回信按普通事件处理。himalaya（`sources/mail`，1.x 范围）在读取正文的同一次调用里加 `-H Message-ID -H References -H In-Reply-To`（仍带 `--preview`），输出的头部块按名取值、支持折行；2.x 范围未实测线程头，只给自己的 Message-ID。apple-pim（`sources/applepim`，`config.kind=mail`）取 `mail-cli get` 返回的 `message.references`、`message.inReplyTo`，并按自己 `messageId` 的写法（带不带尖括号）对齐，使原信与回信的键相等。录制样本：`sources/mail/testdata/1.1.0/thread/`（原信、带 References 与 In-Reply-To 的回信、只带 In-Reply-To 的回信、多级回复），`sources/applepim/testdata/messages-thread.json` 与 `get-mid-p*.json`。

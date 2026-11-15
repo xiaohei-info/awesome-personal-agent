@@ -259,7 +259,7 @@ func TestFlowPurge(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(q, "src.sh"), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		reg, _ := json.Marshal(map[string]any{"id": "src_prg05", "type": "script", "source_type": "acc",
+		reg, _ := json.Marshal(map[string]any{"id": "src_prg05", "name": "src_prg05", "type": "script", "source_type": "acc",
 			"command": filepath.Join(q, "src.sh") + " " + q, "schedule": "1s", "timeout": 30, "default_project": f.Projects["acc-open"]})
 		f.webOK("POST", "/sources", string(reg), http.StatusCreated)
 		seq := 0

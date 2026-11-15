@@ -205,7 +205,7 @@ func (l *live) settle(id string, n int) {
 
 func (l *live) register(id, cmd, srcType, dedupe string) {
 	l.t.Helper()
-	body := map[string]any{"id": id, "type": "script", "source_type": srcType, "command": cmd, "schedule": "1s", "timeout": 100, "dedupe_domain": dedupe}
+	body := map[string]any{"id": id, "name": id, "type": "script", "source_type": srcType, "command": cmd, "schedule": "1s", "timeout": 100, "dedupe_domain": dedupe}
 	b, _ := json.Marshal(body)
 	if r := l.Web("POST", "/v1/sources", string(b)); r.Code != 201 {
 		l.t.Fatalf("登记 %s: HTTP %d %s", id, r.Code, r.Body)

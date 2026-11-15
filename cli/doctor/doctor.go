@@ -95,7 +95,7 @@ type ledger struct {
 	st      *store.Store
 	info    store.Info
 	infoErr error
-	current bool // 结构版本等于本二进制的版本
+	current bool // 结构版本等于本二进制的版本，且本二进制的迁移都已应用
 	cleanup func()
 }
 
@@ -119,7 +119,7 @@ func openLedger(ctx context.Context, in Input) (*ledger, error) {
 	if l.infoErr != nil {
 		return l, nil
 	}
-	l.current = l.info.Ledger == in.Reg.SchemaLedger()
+	l.current = l.info.Ledger == in.Reg.SchemaLedger() && !in.Reg.Behind(l.info)
 	if l.st, err = store.OpenSnapshot(snap); err != nil {
 		return l, err
 	}

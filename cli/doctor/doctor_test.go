@@ -317,7 +317,7 @@ func TestDoctorDataDirVersionCases(t *testing.T) {
 	in := e.input()
 	in.Reg = older
 	r := Run(bg, in)
-	if c := find(t, r, kdoctor.DataDir); c.Status != kdoctor.Error || !strings.Contains(c.Why, "newer version") || r.OK {
+	if c := find(t, r, kdoctor.DataDir); c.Status != kdoctor.Error || !strings.Contains(c.Why, "migrated by a newer build") || r.OK {
 		t.Fatalf("newer: %+v", c)
 	}
 	if c := find(t, r, kdoctor.Tier); c.Status != kdoctor.Warning || !strings.Contains(c.Why, "skipped") {
@@ -362,6 +362,85 @@ func TestDoctorOlderLedgerWarnsAndSkips(t *testing.T) {
 }
 
 func fullRegFor(t *testing.T) *store.Registry { return fullReg(t) }
+
+// regWith 是 fullReg 的模块，其中来源登记与来源事件只取各自迁移序列的前 nReg、nRunner 步（0 为全部）。
+func regWith(t *testing.T, nReg, nRunner int) *store.Registry {
+	t.Helper()
+	src, run := registry.Module, runner.Module
+	if nReg > 0 {
+		src.Migrations = src.Migrations[:nReg]
+	}
+	if nRunner > 0 {
+		run.Migrations = run.Migrations[:nRunner]
+	}
+	r := store.NewRegistry()
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, executors.Module,
+		delivery.Module, src, run, kdoctor.Module} {
+		must(t, r.Register(m))
+	}
+	return r
+}
+
+// openLegacy 用 old 建一个数据目录并登记一个没有显示名列的来源。
+func openLegacy(t *testing.T, old *store.Registry) string {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "apa")
+	st, err := store.Open(home, old)
+	must(t, err)
+	must(t, st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO sources_registry_source (id, type, source_type, command, schedule, timeout, credentials_path,
+		dedupe_domain, config, cursor, enabled, stats, default_project, outbound_local, outbound_external) VALUES
+		('src_old', 'script', 'mail', '/bin/sh', '1h', 30, '', '', '', '', 1, '', '', 'full', 'meta')`)
+		return err
+	}))
+	must(t, st.Close())
+	must(t, os.Chmod(home, 0o700))
+	return home
+}
+
+// 结构版本 3 的账本（没有显示名列）遇到结构版本 4 的程序：数据目录项提醒要迁移，依赖账本的检查跳过而不是读出错；
+// 升级预检说明 3 → 4，并能读出没有名字列的旧来源。
+func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
+	home := openLegacy(t, regWith(t, 2, 0))
+	reg := fullReg(t)
+	if reg.SchemaLedger() != 4 {
+		t.Fatalf("precondition: structure 4, got %d", reg.SchemaLedger())
+	}
+	in := Input{Home: home, Reg: reg, Model: &model.Client{}, Now: now}
+	r := Run(bg, in)
+	if c := find(t, r, kdoctor.DataDir); c.Status != kdoctor.Warning || c.Code != kdoctor.CodeLedgerMigrate {
+		t.Fatalf("data dir: %+v", c)
+	}
+	if c := find(t, r, kdoctor.Sources); c.Code != kdoctor.CodeSkipped || c.Data["reason"] != kdoctor.CodeLedgerSchemaDiffers || !r.OK {
+		t.Fatalf("sources: %+v", c)
+	}
+	u := UpgradeCheck(bg, in)
+	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 4") {
+		t.Fatalf("upgrade check: %+v", c)
+	}
+	if c := find(t, u, checkOutbound); c.Status != kdoctor.OK {
+		t.Fatalf("legacy sources read without the name column: %+v", c)
+	}
+}
+
+// 同一结构版本内追加的迁移还没应用（来源事件的后两步都属于结构版本 3）：同样按未迁移处理，而不是当成已是当前版本。
+func TestDoctorSameStructureWithPendingMigrationWarnsAndSkips(t *testing.T) {
+	old, reg := regWith(t, 2, 3), regWith(t, 2, 0)
+	if old.SchemaLedger() != reg.SchemaLedger() {
+		t.Fatalf("precondition: same structure version, got %d and %d", old.SchemaLedger(), reg.SchemaLedger())
+	}
+	in := Input{Home: openLegacy(t, old), Reg: reg, Model: &model.Client{}, Now: now}
+	r := Run(bg, in)
+	if c := find(t, r, kdoctor.DataDir); c.Status != kdoctor.Warning || c.Code != kdoctor.CodeLedgerMigrate {
+		t.Fatalf("data dir: %+v", c)
+	}
+	if c := find(t, r, kdoctor.Sources); c.Code != kdoctor.CodeSkipped || c.Data["reason"] != kdoctor.CodeLedgerSchemaDiffers {
+		t.Fatalf("sources: %+v", c)
+	}
+	if c := find(t, UpgradeCheck(bg, in), checkSchema); !strings.Contains(c.Why, "adds migrations") {
+		t.Fatalf("upgrade check: %+v", c)
+	}
+}
 
 // ACT-DOC-04 与 ACT-DPL-10：监听非本机地址而没有 https 的 public_url 是错误，退出码 1；无法解析的 config.yaml 指明位置。
 func TestDoctorRuntimeConfigErrors(t *testing.T) {

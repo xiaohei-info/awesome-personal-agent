@@ -311,7 +311,7 @@ func quiet() { time.Sleep(4 * time.Second) }
 
 func (k *kit) registerSource(id, defaultProject string) {
 	k.t.Helper()
-	m := map[string]any{"id": id, "type": "script", "source_type": "acc",
+	m := map[string]any{"id": id, "name": id, "type": "script", "source_type": "acc",
 		"command": filepath.Join(k.queue, "inp.sh") + " " + k.queue, "schedule": "1s", "timeout": 30}
 	if defaultProject != "" {
 		m["default_project"] = defaultProject

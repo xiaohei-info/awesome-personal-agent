@@ -362,7 +362,7 @@ func (k *kit) waitEvent(src, mark string, limit time.Duration) SrcEvent {
 
 func (k *kit) registerObd() {
 	k.t.Helper()
-	body, _ := json.Marshal(map[string]any{"id": obdSrc, "type": "script", "source_type": "acc-obd",
+	body, _ := json.Marshal(map[string]any{"id": obdSrc, "name": obdSrc, "type": "script", "source_type": "acc-obd",
 		"command": filepath.Join(k.queue, "obd.sh") + " " + k.queue, "schedule": "1s", "timeout": 30})
 	k.webOK("POST", "/v1/sources", string(body), 201)
 }

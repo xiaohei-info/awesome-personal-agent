@@ -204,7 +204,7 @@ func (f *fx) script(name, body string) string {
 // addScriptSource 在 Web 登记周期脚本来源（脚本来源只能在 Web 登记）。
 func (f *fx) addScriptSource(id, command, schedule string, timeoutSec int) {
 	f.t.Helper()
-	body, _ := json.Marshal(map[string]any{"id": id, "type": "script", "source_type": "acc", "command": command, "schedule": schedule, "timeout": timeoutSec})
+	body, _ := json.Marshal(map[string]any{"id": id, "name": id, "type": "script", "source_type": "acc", "command": command, "schedule": schedule, "timeout": timeoutSec})
 	f.webOK("POST", "/sources", string(body), http.StatusCreated)
 }
 

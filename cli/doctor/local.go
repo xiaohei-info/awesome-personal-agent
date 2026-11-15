@@ -112,7 +112,7 @@ func dataDirCheck(l config.Layout, in Input, led *ledger, openErr error) kdoctor
 	case openErr != nil:
 		return fail(kdoctor.Error, kdoctor.CodeLedgerUnreadable, "the ledger cannot be read: "+openErr.Error(), "check the file permissions and the disk, or restore a backup")
 	case led.infoErr != nil && errors.Is(led.infoErr, store.ErrSchemaTooNew):
-		return fail(kdoctor.Error, kdoctor.CodeLedgerTooNew, fmt.Sprintf("the ledger was written by a newer version than this binary (ledger structure up to %d)", target), "use the binary that matches the data directory; never run an older binary on newer data")
+		return fail(kdoctor.Error, kdoctor.CodeLedgerTooNew, fmt.Sprintf("the ledger has migrations this binary does not know: it was migrated by a newer build (this binary supports ledger structure %d)", target), "use the binary that matches the data directory; never run an older binary on newer data")
 	case led.infoErr != nil:
 		return fail(kdoctor.Error, kdoctor.CodeLedgerDamaged, "the ledger is damaged or not a ledger: "+led.infoErr.Error(), "restore the latest backup with `apa backup restore`")
 	}
@@ -128,6 +128,9 @@ func dataDirCheck(l config.Layout, in Input, led *ledger, openErr error) kdoctor
 	switch {
 	case led.info.Ledger < target:
 		return fail(kdoctor.Warning, kdoctor.CodeLedgerMigrate, fmt.Sprintf("the ledger structure is %d, this binary expects %d; it migrates when apa serve starts (a pre-upgrade snapshot is taken first); %s", led.info.Ledger, target, when),
+			"run `apa doctor --upgrade-check`, then start apa serve")
+	case !led.current: // 结构版本相同，但还有同一版本内追加的迁移没应用
+		return fail(kdoctor.Warning, kdoctor.CodeLedgerMigrate, fmt.Sprintf("the ledger structure is %d, but some of this binary's migrations are not applied yet; they apply when apa serve starts (a pre-upgrade snapshot is taken first); %s", target, when),
 			"run `apa doctor --upgrade-check`, then start apa serve")
 	case led.info.Ledger > target:
 		return fail(kdoctor.Error, kdoctor.CodeLedgerTooNew, fmt.Sprintf("the ledger structure %d is newer than this binary (%d)", led.info.Ledger, target), "use the matching binary")

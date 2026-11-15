@@ -141,7 +141,7 @@ func (e *Env) StubRun(mode string) (item, runDir string, env map[string]string) 
 // RegisterScriptSource 在 Web 登记一个自定义脚本来源（本人身份），脚本由内核按周期拉起。
 func (e *Env) RegisterScriptSource(id, command string) {
 	e.T.Helper()
-	body, _ := json.Marshal(map[string]any{"id": id, "type": "script", "command": command, "schedule": "1s", "timeout": 10})
+	body, _ := json.Marshal(map[string]any{"id": id, "name": id, "type": "script", "command": command, "schedule": "1s", "timeout": 10})
 	e.webOK("POST", "/v1/sources", string(body), 201)
 }
 

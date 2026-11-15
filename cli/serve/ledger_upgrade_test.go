@@ -99,8 +99,8 @@ func TestFrozenMigrationsMatchV01Release(t *testing.T) {
 			t.Errorf("%s: frozen v0.1 migration removed", key)
 		}
 	}
-	if reg.SchemaLedger() != 3 {
-		t.Errorf("schema.ledger = %d, want 3", reg.SchemaLedger())
+	if reg.SchemaLedger() != 4 {
+		t.Errorf("schema.ledger = %d, want 4", reg.SchemaLedger())
 	}
 }
 
@@ -228,8 +228,8 @@ func seedV2(t *testing.T, s *store.Store) {
 	seedExec(t, s, `INSERT INTO apicore_session (id_hash, csrf, created_at, expires_at) VALUES ('h1', 'c', 1, 9223372036854775807)`)
 }
 
-// ACT-UPG-05、ACT-UPG-06：结构版本 2 的账本升到 3，各表行数不减，旧 Event 载荷哈希不变、序号连续。
-func TestUpgradeV2To3KeepsRowsAndHistory(t *testing.T) {
+// ACT-UPG-05、ACT-UPG-06：结构版本 2 的账本升到当前（4），各表行数不减，旧 Event 载荷哈希不变、序号连续。
+func TestUpgradeV2ToLatestKeepsRowsAndHistory(t *testing.T) {
 	home := t.TempDir()
 	old, err := store.Open(home, v01Registry(t))
 	if err != nil {
@@ -248,8 +248,8 @@ func TestUpgradeV2To3KeepsRowsAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if s.SchemaLedger() != 3 {
-		t.Fatalf("ledger = %d, want 3", s.SchemaLedger())
+	if s.SchemaLedger() != 4 {
+		t.Fatalf("ledger = %d, want 4", s.SchemaLedger())
 	}
 	after := take(t, s)
 

@@ -143,7 +143,7 @@ func (k *kit) idOf(r baseline.Result) string {
 func (k *kit) addPull(id, program, sourceType string, extra map[string]any, config any) {
 	k.t.Helper()
 	cfg, _ := json.Marshal(config)
-	args := []string{"source", "add", "--id", id, "--type", "pull", "--command", program, "--schedule", "1s", "--timeout", "20",
+	args := []string{"source", "add", "--id", id, "--name", id, "--type", "pull", "--command", program, "--schedule", "1s", "--timeout", "20",
 		"--source-type", sourceType, "--config", string(cfg), "--evidence", "登记附带的拉取程序"}
 	for flag, v := range extra {
 		args = append(args, "--"+flag, fmt.Sprint(v))

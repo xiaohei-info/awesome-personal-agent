@@ -98,7 +98,7 @@ func newKit(t *testing.T) *kit {
 	k.must(os.MkdirAll(filepath.Join(k.queue, "done"), 0o755))
 	script := filepath.Join(k.queue, "acc-source.sh")
 	k.must(os.WriteFile(script, []byte(accScript), 0o755))
-	body, _ := json.Marshal(map[string]any{"id": srcID, "type": "script", "source_type": "acc",
+	body, _ := json.Marshal(map[string]any{"id": srcID, "name": srcID, "type": "script", "source_type": "acc",
 		"command": script + " " + k.queue, "schedule": "1s", "timeout": 30})
 	k.webOK("POST", "/v1/sources", string(body), 201)
 	return k
