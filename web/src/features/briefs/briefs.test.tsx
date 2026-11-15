@@ -190,7 +190,7 @@ describe("简报页", () => {
     const form = within(await screen.findByRole("form", { name: "新的例行任务" }));
     await userEvent.click(form.getByRole("radio", { name: "让 agent 去做" }));
     expect(await form.findByText(/还没设默认宿主/)).toBeInTheDocument();
-    expect(form.getAllByRole("link", { name: "去设置" })[0]).toHaveAttribute("href", "/settings/access");
+    expect(form.getAllByRole("link", { name: "去设置" })[0]).toHaveAttribute("href", "/settings/agents");
   });
 
   it("修改例行任务：按实例预填；定时没动就原样带回，改了几点仍用原来的时区；PATCH 带 project 与整份 params", async () => {

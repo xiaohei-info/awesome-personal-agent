@@ -281,6 +281,10 @@ func TestInvalidDeclarationsAreRejectedAndStoreNothing(t *testing.T) {
 		}),
 		"bad launch":          mod(func(d *Declaration) { d.MainSession = &MainSession{Launch: "daemon"} }),
 		"empty selfcheck":     mod(func(d *Declaration) { d.Selfcheck = &Selfcheck{} }),
+		"half name":           mod(func(d *Declaration) { d.Name = &Label{Zh: "甲"} }),
+		"tools on undeclared": mod(func(d *Declaration) { d.Headless.Tools = map[string][]Label{"full": {{Zh: "终端", En: "Terminal"}}} }),
+		"half tool":           mod(func(d *Declaration) { d.Headless.Tools = map[string][]Label{"edit": {{Zh: "终端"}}} }),
+		"note on undeclared":  mod(func(d *Declaration) { d.Headless.ToolNotes = map[string]Label{"full": {Zh: "甲", En: "a"}} }),
 		"empty selfcheck arg": mod(func(d *Declaration) { d.Selfcheck = &Selfcheck{Command: []string{"check", ""}} }),
 		"bad kind":            mod(func(d *Declaration) { d.Executors[0].Kind = "robot" }),
 		"empty id":            mod(func(d *Declaration) { d.Executors[0].ID = "" }),
@@ -465,5 +469,50 @@ func TestDeclarationCarriesSelfcheckCommand(t *testing.T) {
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { pending, err = Records(tx, StatePending); return })
 	if len(pending) != 1 || pending[0].Declaration.Selfcheck == nil || pending[0].Declaration.Selfcheck.Command[0] != "acme-selfcheck" {
 		t.Fatalf("selfcheck not stored with the declaration: %+v", pending)
+	}
+}
+
+// 补充 B：插件提交新版本时，仍待确认的旧版本被取代；本人只看到、只确认最新一份。
+func TestPendingRevisionIsSupersededByNewOne(t *testing.T) {
+	e := setup(t)
+	worker := e.bearer(t, auth.Spec{Kind: auth.Worker})
+	e.must(t, worker, "executor.declare", decl("acme", build))
+	d2 := decl("acme", build)
+	d2.Name = &Label{Zh: "Acme", En: "Acme"}
+	d2.Headless.Tools = map[string][]Label{"edit": {{Zh: "终端", En: "Terminal"}}}
+	e.must(t, worker, "executor.declare", d2)
+
+	var pend struct{ Declarations []Record }
+	_ = json.Unmarshal(e.must(t, worker, "executor.pending", "").Value, &pend)
+	if len(pend.Declarations) != 1 || pend.Declarations[0].Rev != 2 || pend.Declarations[0].Declaration.Name.Zh != "Acme" {
+		t.Fatalf("only rev 2 may be pending: %+v", pend.Declarations)
+	}
+	e.must(t, owner, "executor.confirm", ref{"acme", 2})
+	var all []Record
+	_ = e.st.View(bg, func(tx *store.Tx) (err error) { all, err = Records(tx, ""); return })
+	if len(all) != 2 || all[0].State != StateSuperseded || all[1].State != StateActive {
+		t.Fatalf("rev 1 superseded, rev 2 active: %+v", all)
+	}
+}
+
+// 重复提交同样内容不产生新版本：待确认的不重复，已生效的不再要本人确认。
+func TestSameDeclarationDoesNotMakeANewRevision(t *testing.T) {
+	e := setup(t)
+	worker := e.bearer(t, auth.Spec{Kind: auth.Worker})
+	e.must(t, worker, "executor.declare", decl("acme", build))
+	if got := string(e.must(t, worker, "executor.declare", decl("acme", build)).Value); got != `{"harness":"acme","rev":1}` {
+		t.Fatalf("same pending content: %s", got)
+	}
+	e.must(t, owner, "executor.confirm", ref{"acme", 1})
+	if got := string(e.must(t, worker, "executor.declare", decl("acme", build)).Value); got != `{"harness":"acme","rev":1}` {
+		t.Fatalf("same active content: %s", got)
+	}
+	var pend struct{ Declarations []Record }
+	_ = json.Unmarshal(e.must(t, worker, "executor.pending", "").Value, &pend)
+	if len(pend.Declarations) != 0 {
+		t.Fatalf("nothing should wait for the owner: %+v", pend.Declarations)
+	}
+	if n := len(e.eventTypes(t)); n != 2 {
+		t.Fatalf("only declared + confirmed events expected, got %v", e.eventTypes(t))
 	}
 }

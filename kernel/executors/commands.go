@@ -157,6 +157,14 @@ func apply2(f func(*command.Ctx, ref) (any, error)) func(*command.Ctx) (any, err
 }
 
 func declare(c *command.Ctx, d Declaration) (any, error) {
+	// 内容与最新的待确认或已生效版本相同：不产生新版本，本人不必再确认一次（附录 A.2）。
+	for _, st := range []string{StatePending, StateActive} {
+		if cur, ok, err := record(c.Tx, d.Harness, 0, st); err != nil {
+			return nil, err
+		} else if ok && sameDoc(cur.Declaration, d) {
+			return ref{d.Harness, cur.Rev}, nil
+		}
+	}
 	if err := checkCollisions(c.Tx, d.Harness, d.Executors); err != nil {
 		return nil, err
 	}

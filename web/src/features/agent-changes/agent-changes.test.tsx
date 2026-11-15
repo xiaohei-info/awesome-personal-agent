@@ -147,7 +147,7 @@ describe("授权单代答（ACT-AUTH-03、flow-agent-revert）", () => {
     const s = server([viaGrant(1)]);
     mount(s.impl);
     const a = (await screen.findByRole("heading", { name: /要不要发布/ })).closest("article")!;
-    expect(within(a).getByRole("link", { name: "按临时授权" })).toHaveAttribute("href", "/settings/grants#grt_ok");
+    expect(within(a).getByRole("link", { name: "按临时授权" })).toHaveAttribute("href", "/settings/agents#grant-grt_ok");
     await userEvent.click(within(a).getByRole("button", { name: "撤销" }));
     expect(within(a).getByText(/已发出的消息、已提的 PR 不会收回/)).toBeInTheDocument();
     await userEvent.click(within(a).getByRole("button", { name: "确认撤销" }));

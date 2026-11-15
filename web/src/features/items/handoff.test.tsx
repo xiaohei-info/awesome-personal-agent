@@ -76,7 +76,7 @@ describe("事项 › 交给 Agent", () => {
   it.each([
     ["规则关着", { mode: "off", declared: true }, "自动开工没开", "/rules"],
     ["试运行", { mode: "observe", declared: true }, "试运行中，只记录", "/rules"],
-    ["Agent 还不能在后台运行", { mode: "auto", declared: false }, "会在 Agent 能后台运行后开工", "/settings-exec"],
+    ["Agent 还不能在后台运行", { mode: "auto", declared: false }, "会在 Agent 能后台运行后开工", "/settings/agents"],
   ])("开着但前提没满足（%s）：旁边一句状态，链到对应设置", async (_n, o, text, href) => {
     const s = server({ ...o, items: [{ id: "i1", version: 1, kind: "task", phase: "proposed", title: "修复登录", tags: ["agent-ok"] }] });
     mount(s);

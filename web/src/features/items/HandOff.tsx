@@ -30,7 +30,7 @@ export function HandOff({ item, onSave }: { item: Item; onSave: (tags: string[])
   const status: Status = !on ? null
     : mode === "off" ? { text: t.handoffOff, to: "/rules" }
     : mode === "observe" ? { text: t.handoffTrial, to: "/rules" }
-    : declared === false ? { text: t.handoffWaitAgent, to: "/settings-exec" }
+    : declared === false ? { text: t.handoffWaitAgent, to: "/settings/agents" }
     : item.phase === "open" ? { text: t.handoffAlreadyOpen, to: "" }
     : null;
   const next = on ? (item.tags ?? []).filter((x) => x !== HANDOFF_TAG) : [...(item.tags ?? []), HANDOFF_TAG];

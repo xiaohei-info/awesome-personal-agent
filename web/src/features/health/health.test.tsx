@@ -131,7 +131,7 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
     expect(within(main().getByRole("article", { name: "自动规则被退回试运行" })).getByRole("link", { name: "去看规则" })).toHaveAttribute("href", "/rules");
     const rc = main().getByRole("article", { name: "agent 回报失败" });
     expect(within(rc).getByRole("link", { name: "去看操作记录" })).toHaveAttribute("href", "/audit");
-    expect(within(rc).getByRole("link", { name: "去看后台权限" })).toHaveAttribute("href", "/settings/access");
+    expect(within(rc).getByRole("link", { name: "去看 Agent 设置" })).toHaveAttribute("href", "/settings/agents");
     expect(within(main().getByRole("article", { name: "委派久无回音" })).getByRole("link", { name: "去看委派" })).toHaveAttribute("href", "/delegation");
     expect(main().getByText("其余 3 项正常")).toBeInTheDocument();
     expect(main().queryByRole("button", { name: /修复|fix/i })).not.toBeInTheDocument();

@@ -41,7 +41,7 @@ const GO: Partial<Record<DoctorCode, [string, Go]>> = {
   tier_kernel_only: ["/settings/models", "model"],
   tier_paused: ["/settings/models", "resume"],
   models_paused: ["/settings/models", "resume"],
-  tier_no_host: ["/settings-exec", "host"],
+  tier_no_host: ["/settings/agents", "host"],
   models_failing: ["/settings/models", "models"],
   sources_attention: ["/sources", "sources"],
   sources_restored_missing: ["/sources", "sources"],

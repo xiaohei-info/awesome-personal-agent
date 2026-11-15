@@ -73,7 +73,18 @@ type Headless struct {
 	ExitCodes  map[string][]int    `json:"exit_codes,omitempty"`
 	// ExitOutput 收窄 exit_codes 的同名语义：声明后，还要求 stdout 或 stderr 含其中任一片段（附录 A.2）。
 	ExitOutput map[string][]string `json:"exit_output,omitempty"`
+	// Tools 与 ToolNotes 只供界面展示每一档给 Agent 的工具（附录 A.2），内核不解释。
+	Tools     map[string][]Label `json:"tools,omitempty"`
+	ToolNotes map[string]Label   `json:"tool_notes,omitempty"`
 }
+
+// Label 是中英各一份的显示文字。
+type Label struct {
+	Zh string `json:"zh"`
+	En string `json:"en"`
+}
+
+func (l Label) valid() bool { return strings.TrimSpace(l.Zh) != "" && strings.TrimSpace(l.En) != "" }
 
 // Means 判断一次运行的退出是否符合声明里 key 的语义：退出码在 exit_codes[key] 里，
 // 且声明了 exit_output[key] 时 stdout 或 stderr 含其中任一片段（区分分享同一退出码的失败）。
@@ -101,6 +112,7 @@ type MainSession struct {
 // Declaration 是 `apa declare` 提交或主机配置文件登记的整份声明。
 type Declaration struct {
 	Harness     string       `json:"harness"`
+	Name        *Label       `json:"name,omitempty"` // 界面称呼这个 Agent 的名字（附录 A.2）
 	Headless    *Headless    `json:"headless,omitempty"`
 	MainSession *MainSession `json:"main_session,omitempty"`
 	Executors   []Executor   `json:"executors,omitempty"`
@@ -183,6 +195,9 @@ func (d Declaration) validate() error {
 	if d.Harness == "" || strings.ContainsAny(d.Harness, " \t\r\n") {
 		return invalid("harness is required and must not contain whitespace")
 	}
+	if d.Name != nil && !d.Name.valid() {
+		return invalid("name needs both zh and en")
+	}
 	if sc := d.Selfcheck; sc != nil {
 		if len(sc.Command) == 0 || slices.Contains(sc.Command, "") {
 			return invalid("selfcheck.command must list non-empty argv elements")
@@ -255,6 +270,24 @@ func (h *Headless) validate() error {
 	for tier := range h.Access {
 		if !accessTiers[tier] {
 			return invalid("headless.access tier %q is not read, edit or full", tier)
+		}
+	}
+	for tier, labels := range h.Tools {
+		if _, ok := h.Access[tier]; !ok {
+			return invalid("headless.tools.%s needs headless.access.%s", tier, tier)
+		}
+		for _, l := range labels {
+			if !l.valid() {
+				return invalid("headless.tools.%s: each tool needs both zh and en", tier)
+			}
+		}
+	}
+	for tier, l := range h.ToolNotes {
+		if _, ok := h.Access[tier]; !ok {
+			return invalid("headless.tool_notes.%s needs headless.access.%s", tier, tier)
+		}
+		if !l.valid() {
+			return invalid("headless.tool_notes.%s needs both zh and en", tier)
 		}
 	}
 	if h.Credential != "" && h.Credential != "env" && h.Credential != "file" {

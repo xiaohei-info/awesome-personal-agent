@@ -105,8 +105,8 @@ export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDon
       {run && (
         <>
           <label>{t.access}<Pick k="perm" value={access} onChange={setAccess} ids={[...PERM]} /></label>
-          {host && !host.host && <p className="sub">{t.noHost} <Link to="/settings/access">{t.setHost}</Link></p>}
-          {over && <p className="sub">{t.overCap} <Link to="/settings/access">{t.setHost}</Link></p>}
+          {host && !host.host && <p className="sub">{t.noHost} <Link to="/settings/agents">{t.setHost}</Link></p>}
+          {over && <p className="sub">{t.overCap} <Link to="/settings/agents">{t.setHost}</Link></p>}
           <label>{t.output}
             <select value={output} onChange={(e) => setOutput(e.target.value as Output)}>
               {OUTPUTS.map((o) => <option key={o} value={o}>{t.outputs[o]}</option>)}
