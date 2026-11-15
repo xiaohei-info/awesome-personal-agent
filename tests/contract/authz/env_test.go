@@ -18,6 +18,7 @@ import (
 	apiprojects "github.com/xiaohei-info/awesome-personal-agent/api/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
 	settingsexec "github.com/xiaohei-info/awesome-personal-agent/api/settings/exec"
+	settingsgrants "github.com/xiaohei-info/awesome-personal-agent/api/settings/grants"
 	settingspolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	settingspurge "github.com/xiaohei-info/awesome-personal-agent/api/settings/purge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
@@ -37,6 +38,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	kpurge "github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
 )
@@ -60,6 +62,7 @@ type env struct {
 	x      *command.Executor
 	srv    *core.Server
 	secret map[string]string // OBS、WRK、DEL → 凭据明文
+	sev    map[string]string // 合成来源事件的 event_id → 账本 id（事项的 ext.source_event 记它）
 	cookie *http.Cookie
 	csrf   string
 }
@@ -68,7 +71,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, materials.Module, executors.Module, delegation.Module, proc.Module, runidentity.Module, core.Module} {
+		items.Module, materials.Module, executors.Module, delegation.Module, proc.Module, runidentity.Module, runner.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +86,7 @@ func setup(t *testing.T) *env {
 	if err := l.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, st: st, au: auth.New(nil), secret: map[string]string{}}
+	e := &env{t: t, st: st, au: auth.New(nil), secret: map[string]string{}, sev: map[string]string{}}
 	e.x = command.New(st, func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) })
 	must := func(err error) {
 		t.Helper()
@@ -107,8 +110,10 @@ func setup(t *testing.T) *env {
 	must(st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }))
 	cred, err := credentials.Mount(e.x, e.au)
 	must(err)
+	grantRoutes, err := settingsgrants.Mount(e.x, e.au, st)
+	must(err)
 	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{
-		cred, apiitems.Routes(e.x, st), apidelegation.Routes(e.x), apiprojects.Routes(st, e.x), settingspolicy.Routes(st), settingsexec.Routes(st, e.x), settingspurge.Routes(e.x)}})
+		cred, apiitems.Routes(e.x, st), apidelegation.Routes(e.x), apiprojects.Routes(st, e.x), settingspolicy.Routes(st), settingsexec.Routes(st, e.x), settingspurge.Routes(e.x), grantRoutes}})
 	must(err)
 	rec := e.http("POST", "/v1/auth/login", `{"password":"`+ownerPW+`"}`, nil)
 	if rec.Code != 200 {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -19,9 +20,6 @@ import (
 // RiskNormal 是目前唯一的风险上限：只放行未判为 web_only 的对象。
 const RiskNormal = "normal"
 
-// MaxGrantTTL 是授权单有效期的上限（§6.13：最长 90 天）。
-const MaxGrantTTL = 90 * 24 * time.Hour
-
 // GrantableActions 是授权单 actions 的全部可选值：附录 B.1「第二档（可用授权单）」一列。
 // 项目、来源、能力包实例管理只接受本人原话，不在其中。
 var GrantableActions = []string{
@@ -31,17 +29,22 @@ var GrantableActions = []string{
 	"delegate.report", "followmsg.handback",
 }
 
-// Grantee 是被授权方：Credential 必填且是一个 delegate token；Harness 只用于收窄和审计，不是安全边界。
+// Grantee 是被授权方，二选一（§6.13）：Credential 是一个 delegate token（Harness 只用于收窄和审计，不是安全边界）；
+// 或 Agent，一个 harness 标识，判定时只比内核记录的值（凭据的 harness 列、运行记录的 harness）。
+// Background 只在 Agent 式的单上出现：为真时该 Agent 的后台运行也能用这张单。
 type Grantee struct {
-	Credential string `json:"credential"`
+	Credential string `json:"credential,omitempty"`
 	Harness    string `json:"harness,omitempty"`
+	Agent      string `json:"agent,omitempty"`
+	Background bool   `json:"background,omitempty"`
 }
 
-// Scope 的非空项都满足才算命中；至少一项非空。
+// Scope 的非空项都满足才算命中；至少一项非空，或 All 为真（不限对象，与其余三项互斥）。
 type Scope struct {
 	Projects []string `json:"projects"`
 	Kinds    []string `json:"kinds"`
 	Items    []string `json:"items"`
+	All      bool     `json:"all,omitempty"`
 }
 
 // GrantInput 是签发请求；id、主体、签发时间由内核给出。
@@ -50,7 +53,7 @@ type GrantInput struct {
 	Scope       Scope     `json:"scope"`
 	Actions     []string  `json:"actions"`
 	RiskCeiling string    `json:"risk_ceiling,omitempty"` // 空取 normal
-	ExpiresAt   time.Time `json:"expires_at"`
+	ExpiresAt   time.Time `json:"expires_at,omitzero"`    // 零值：长期有效，直到撤销
 	Reason      string    `json:"reason,omitempty"`
 }
 
@@ -62,15 +65,17 @@ type Grant struct {
 	Scope         Scope     `json:"scope"`
 	Actions       []string  `json:"actions"`
 	RiskCeiling   string    `json:"risk_ceiling"`
-	ExpiresAt     time.Time `json:"expires_at"`
+	ExpiresAt     time.Time `json:"expires_at,omitzero"`
 	Reason        string    `json:"reason,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	RevokedAt     time.Time `json:"revoked_at,omitzero"`
 	RevokedReason string    `json:"revoked_reason,omitempty"`
 }
 
-// Active 报告授权单在 at 时刻是否未撤销且未过期。凭据是否仍有效另见 ActiveGrants。
-func (g Grant) Active(at time.Time) bool { return g.RevokedAt.IsZero() && at.Before(g.ExpiresAt) }
+// Active 报告授权单在 at 时刻是否未撤销且未过期（没有有效期的单长期有效）。凭据是否仍有效另见 ActiveGrants。
+func (g Grant) Active(at time.Time) bool {
+	return g.RevokedAt.IsZero() && (g.ExpiresAt.IsZero() || at.Before(g.ExpiresAt))
+}
 
 func webOnlyErr() error {
 	return domain.NewError(domain.CodeWebOnly, "grants can only be issued or revoked by the owner in the Web UI", "ask the owner to use the Web settings")
@@ -89,8 +94,12 @@ func normalizeGrant(tx *store.Tx, a *auth.Auth, now time.Time, in GrantInput) (G
 	g := Grant{Grantee: in.Grantee, Reason: in.Reason, RiskCeiling: in.RiskCeiling, ExpiresAt: in.ExpiresAt.UTC(),
 		Scope:   Scope{Projects: dedupSorted(in.Scope.Projects), Kinds: dedupSorted(in.Scope.Kinds), Items: dedupSorted(in.Scope.Items)},
 		Actions: dedupSorted(in.Actions)}
-	if len(g.Scope.Projects)+len(g.Scope.Kinds)+len(g.Scope.Items) == 0 {
-		return g, invalid("scope needs at least one of projects, kinds, items")
+	g.Scope.All = in.Scope.All
+	switch n := len(g.Scope.Projects) + len(g.Scope.Kinds) + len(g.Scope.Items); {
+	case g.Scope.All && n > 0:
+		return g, invalid("scope.all cannot be combined with projects, kinds or items")
+	case !g.Scope.All && n == 0:
+		return g, invalid("scope needs at least one of projects, kinds, items, or all")
 	}
 	if len(g.Actions) == 0 {
 		return g, invalid("actions is empty")
@@ -106,15 +115,24 @@ func normalizeGrant(tx *store.Tx, a *auth.Auth, now time.Time, in GrantInput) (G
 	if g.RiskCeiling != RiskNormal {
 		return g, invalid("risk_ceiling %q: only %q exists", g.RiskCeiling, RiskNormal)
 	}
-	if in.ExpiresAt.IsZero() {
-		return g, invalid("expires_at is required")
-	}
-	if !g.ExpiresAt.After(now) || g.ExpiresAt.After(now.Add(MaxGrantTTL)) {
-		return g, invalid("expires_at must be in the future and within 90 days")
+	if !in.ExpiresAt.IsZero() && !g.ExpiresAt.After(now) {
+		return g, invalid("expires_at must be in the future; leave it out for a grant that lasts until revoked")
 	}
 	g.Grantee.Harness = strings.TrimSpace(g.Grantee.Harness)
+	if g.Grantee.Agent != "" {
+		switch {
+		case g.Grantee.Credential != "" || g.Grantee.Harness != "":
+			return g, invalid("grantee takes either agent or credential, not both")
+		case strings.ContainsFunc(g.Grantee.Agent, unicode.IsSpace):
+			return g, invalid("grantee.agent must be a harness identifier without spaces")
+		}
+		return g, nil
+	}
+	if g.Grantee.Background {
+		return g, invalid("grantee.background needs grantee.agent: background runs are matched by Agent, not by token")
+	}
 	if g.Grantee.Credential == "" {
-		return g, invalid("grantee.credential is required")
+		return g, invalid("grantee needs credential or agent")
 	}
 	cred, err := a.Get(tx, g.Grantee.Credential)
 	if err != nil {
@@ -145,7 +163,7 @@ func IssueGrant(tx *store.Tx, a *auth.Auth, actor domain.Actor, now time.Time, i
 		return g, err
 	}
 	if _, err := tx.Exec(`INSERT INTO policy_grant (id, credential, doc, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`,
-		g.ID, g.Grantee.Credential, string(doc), g.ExpiresAt.UnixNano(), now.UnixNano()); err != nil {
+		g.ID, g.Grantee.Credential, string(doc), expiresCol(g.ExpiresAt), now.UnixNano()); err != nil {
 		return g, err
 	}
 	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvGrantIssued, Object: g.ID, Actor: actor, Reason: g.Reason, Payload: doc, Grant: g.ID, At: now})
@@ -171,6 +189,14 @@ func RevokeGrant(tx *store.Tx, actor domain.Actor, now time.Time, id, reason str
 	}
 	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvGrantRevoked, Object: g.ID, Actor: actor, Reason: reason, Payload: payload, Grant: g.ID, At: now})
 	return g, err
+}
+
+// expiresCol 是 expires_at 列的取值：长期有效的单存 0。
+func expiresCol(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixNano()
 }
 
 const grantCols = "doc, revoked_at, revoked_reason"
@@ -224,6 +250,53 @@ func GetGrant(tx *store.Tx, id string) (Grant, error) {
 
 // ListGrants 按签发顺序列出全部授权单，含已撤销与已过期（Web 审计用）。
 func ListGrants(tx *store.Tx) ([]Grant, error) { return queryGrants(tx, "") }
+
+// AgentGrants 列出签给 agent（harness 标识）的、在 at 时刻有效的 agent 式授权单；它们不随某一把钥匙失效。
+func AgentGrants(tx *store.Tx, agent string, at time.Time) ([]Grant, error) {
+	all, err := queryGrants(tx, "WHERE credential = '' AND revoked_at = 0")
+	if err != nil {
+		return nil, err
+	}
+	out := []Grant{}
+	for _, g := range all {
+		if g.Grantee.Agent == agent && g.Active(at) {
+			out = append(out, g)
+		}
+	}
+	return out, nil
+}
+
+// ReplaceAgentGrant 是 Agent 卡片的保存（附录 B.2 PUT /settings/agents/{harness}/grant）：在调用方的事务里撤销 agent 名下
+// 全部有效的 agent 式授权单，再按 in 签发新单；in.Actions 为空时只撤销、返回 nil。in.Grantee 只取 Background，被授权方恒为 agent。
+// 签发失败时调用方回滚整个事务，旧单不会被撤掉。
+func ReplaceAgentGrant(tx *store.Tx, a *auth.Auth, actor domain.Actor, now time.Time, agent string, in GrantInput) (revoked []string, issued *Grant, err error) {
+	if actor.Type != domain.ActorHuman || actor.Via != domain.ViaWeb {
+		return nil, nil, webOnlyErr()
+	}
+	if strings.TrimSpace(agent) == "" || strings.ContainsFunc(agent, unicode.IsSpace) {
+		return nil, nil, invalid("agent must be a harness identifier without spaces")
+	}
+	old, err := AgentGrants(tx, agent, now)
+	if err != nil {
+		return nil, nil, err
+	}
+	revoked = []string{}
+	for _, g := range old {
+		if _, err := RevokeGrant(tx, actor, now, g.ID, "replaced"); err != nil {
+			return nil, nil, err
+		}
+		revoked = append(revoked, g.ID)
+	}
+	if len(in.Actions) == 0 {
+		return revoked, nil, nil
+	}
+	in.Grantee = Grantee{Agent: agent, Background: in.Grantee.Background}
+	g, err := IssueGrant(tx, a, actor, now, in)
+	if err != nil {
+		return nil, nil, err
+	}
+	return revoked, &g, nil
+}
 
 // ActiveGrants 列出凭据名下在 at 时刻未撤销、未过期的授权单；凭据本身已吊销或已过期时授权单同时失效，返回空。
 func ActiveGrants(tx *store.Tx, a *auth.Auth, credential string, at time.Time) ([]Grant, error) {

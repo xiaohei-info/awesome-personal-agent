@@ -3,7 +3,8 @@
 //	POST /settings/grants               签发（只有 Web 登录）
 //	POST /settings/grants/{id}/revoke   撤销（只有 Web 登录）
 //	GET  /settings/grants               Web 查看全部授权单，含已撤销与已过期
-//	GET  /grants                        delegate 读取自己名下未撤销、未过期的授权单（只读）
+//	PUT  /settings/agents/{harness}/grant  替换该 Agent 的长期授权单（只有 Web 登录）
+//	GET  /grants                        delegate 与运行凭据读取自己能用的有效授权单（只读）
 //
 // 路由里没有业务规则：校验、记录与 grant.issued / grant.revoked 事件在 kernel/policy。
 // 三条 /settings 命令都按"改设置"登记，由命令管线判定——Web 会话通过，delegate 得到 web_only（退出码 20，留痕），
@@ -28,10 +29,16 @@ import (
 
 // 命令名。
 const (
-	CmdIssue  = "grant.issue"
-	CmdRevoke = "grant.revoke"
-	CmdList   = "grant.list"
+	CmdIssue   = "grant.issue"
+	CmdRevoke  = "grant.revoke"
+	CmdList    = "grant.list"
+	CmdReplace = "grant.replace"
 )
+
+type replaceInput struct {
+	Agent string `json:"agent"`
+	policy.GrantInput
+}
 
 type revokeInput struct {
 	ID     string `json:"id"`
@@ -69,6 +76,15 @@ func Mount(x *command.Executor, a *auth.Auth, st *store.Store) (core.RouteGroup,
 					return nil, domain.NewError(domain.CodeInvalidRequest, "input is not valid JSON", "fix the request and retry")
 				}
 				return policy.RevokeGrant(c.Tx, c.Caller.Actor, c.Now(), in.ID, in.Reason)
+			}},
+		{Name: CmdReplace, Action: authz.ActionChangeSettings, Object: noObject,
+			Apply: func(c *command.Ctx) (any, error) {
+				var in replaceInput
+				if err := json.Unmarshal(c.Input, &in); err != nil {
+					return nil, domain.NewError(domain.CodeInvalidRequest, "input is not a valid grant", "send the grant in the documented shape")
+				}
+				revoked, g, err := policy.ReplaceAgentGrant(c.Tx, a, c.Caller.Actor, c.Now(), in.Agent, in.GrantInput)
+				return map[string]any{"grant": g, "revoked": revoked}, invalid(err)
 			}},
 		{Name: CmdList, Action: authz.ActionChangeSettings, Object: noObject,
 			Apply: func(c *command.Ctx) (any, error) {
@@ -113,24 +129,49 @@ func Mount(x *command.Executor, a *auth.Auth, st *store.Store) (core.RouteGroup,
 				}
 				return revokeInput{ID: r.PathValue("id"), Reason: b.Reason}, nil
 			})})
+		r.Handle(core.Route{Method: "PUT", Path: "/settings/agents/{harness}/grant", MaxBody: 8 << 10,
+			Handler: run(CmdReplace, http.StatusOK, func(r *http.Request) (any, error) {
+				var in replaceInput
+				if err := core.DecodeJSON(r, &in.GrantInput); err != nil {
+					return nil, err
+				}
+				in.Agent = r.PathValue("harness")
+				return in, nil
+			})})
 		r.Handle(core.Route{Method: "GET", Path: "/grants", MaxBody: 1, Handler: mine(a, st)})
 	}, nil
 }
 
-// mine 只给 delegate 凭据：其余一律退出码 4（含 Web 会话——Web 用 /settings/grants）。
-// 只返回该凭据名下的授权单；凭据一旦吊销，认证阶段已拒绝，它的授权单也不再对任何人可见。
+// mine 只给 delegate 凭据与运行凭据：其余一律退出码 4（含 Web 会话——Web 用 /settings/grants）。
+// delegate 得到该凭据名下的单，加上签给凭据所属 Agent 的 agent 式单；凭据一旦吊销，认证阶段已拒绝。
+// 运行凭据只得到签给运行记录所属 Agent、且允许后台使用的单（§14.5）；唤醒租约期间被降级的 delegate 照 delegate 列出，但用不了。
 func mine(a *auth.Auth, st *store.Store) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		if p.Web || p.Caller.Kind != auth.Delegate {
-			return domain.NewError(domain.CodePermissionDenied, "only a delegate credential can list its grants", "do not retry; grants are issued and viewed by the owner in the Web UI")
+		run := p.Caller.Level == authz.LevelRun && p.Caller.RunHarness != ""
+		if p.Web || (p.Caller.Kind != auth.Delegate && !run) {
+			return domain.NewError(domain.CodePermissionDenied, "only a delegate credential or a background run can list its grants", "do not retry; grants are issued and viewed by the owner in the Web UI")
 		}
-		var out []policy.Grant
+		out := []policy.Grant{}
 		err := st.View(r.Context(), func(tx *store.Tx) error {
+			now := clock.Now()
+			if run {
+				gs, err := policy.AgentGrants(tx, p.Caller.RunHarness, now)
+				for _, g := range gs {
+					if g.Grantee.Background {
+						out = append(out, g)
+					}
+				}
+				return err
+			}
 			cred, err := a.Resolve(tx, auth.ParseBearer(r.Header.Get("Authorization")))
 			if err != nil {
 				return err
 			}
-			out, err = policy.ActiveGrants(tx, a, cred.ID, clock.Now())
+			if out, err = policy.ActiveGrants(tx, a, cred.ID, now); err != nil || cred.Harness == "" {
+				return err
+			}
+			gs, err := policy.AgentGrants(tx, cred.Harness, now)
+			out = append(out, gs...)
 			return err
 		})
 		if err != nil {

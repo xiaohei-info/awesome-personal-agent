@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist/trust"
 	"slices"
 	"strings"
 
@@ -370,6 +371,9 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 				return authz.Object{}, err
 			}
 			o, _, err := object(tx, v.ID)
+			if err == nil && name == "proposal.accept" { // 代为接受只限可信发件人带来的建议（§14.5 来源可信）
+				o.OriginTrusted, err = trust.OriginTrusted(tx, v.ID)
+			}
 			return o, err
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist/trust"
 	"slices"
 	"strings"
 
@@ -59,7 +60,8 @@ func RegisterAttach(x *command.Executor) error {
 			if err != nil {
 				return authz.Object{}, err
 			}
-			return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Tags: it.Tags, Project: it.Project}, nil
+			trusted, err := trust.OriginTrusted(tx, it.ID) // 代为补到事项只限可信发件人带来的建议（§14.5 来源可信）
+			return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Tags: it.Tags, Project: it.Project, OriginTrusted: trusted}, err
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parseAttach(in)
