@@ -34,7 +34,8 @@ import (
 
 const (
 	tgChannel  = "acc-chan"
-	tgUser     = "acc-user" // 机器人替身里的账号（回答人白名单里的用户名）
+	tgUser     = "acc-user" // 机器人替身里的账号用户名；回答人按数字 ID（tgUserID）认，不按用户名
+	tgUserID   = "7"
 	tgChatID   = int64(1)
 	tgKernWait = 90 * time.Second
 )
@@ -315,7 +316,7 @@ func TestFlowChannelTelegram(t *testing.T) {
 			"web_only": map[string]any{"categories": []string{"external_commitment", "funds", "irreversible", "permission_change", "spec_activation"},
 				"rules": []map[string]string{{"tag": "acc-finance", "category": "funds"}}}})
 		f.webOK("PUT", "/settings/policy", string(pol), 200)
-		ans, _ := json.Marshal(map[string]any{"channel_answerers": map[string][]string{tgChannel: {tgUser}}})
+		ans, _ := json.Marshal(map[string]any{"channel_answerers": map[string][]string{tgChannel: {tgUserID}}})
 		f.webOK("PUT", "/settings/allowlists", string(ans), 200)
 		f.startExt()
 		if low := strings.ToLower(f.extOut.String()); strings.Contains(low, "hermes") || strings.Contains(low, "harness") {
@@ -352,14 +353,14 @@ func TestFlowChannelTelegram(t *testing.T) {
 		f.until(tgKernWait, "事项被回答", func() bool { return f.item(item).Ask.Resolution != nil })
 		it := f.item(item)
 		r := it.Ask.Resolution
-		if r.ResolvedVia != tgChannel || r.Choice != "A" || r.AnsweredBy != tgUser {
-			t.Errorf("回答记录不符: %+v（期望 resolved_via=%s choice=A answered_by=%s）", r, tgChannel, tgUser)
+		if r.ResolvedVia != tgChannel || r.Choice != "A" || r.AnsweredBy != tgUserID {
+			t.Errorf("回答记录不符: %+v（期望 resolved_via=%s choice=A answered_by=%s）", r, tgChannel, tgUserID)
 		}
 		if it.Phase == "needs_input" {
 			t.Errorf("事项应继续，仍是 %s", it.Phase)
 		}
 		// 回答人在 Event 载荷里，observer 凭据会裁掉；本人（Web）可见完整时间线。
-		if why := f.webOK("GET", "/why/"+item, "", 200); !strings.Contains(why, tgChannel) || !strings.Contains(why, tgUser) {
+		if why := f.webOK("GET", "/why/"+item, "", 200); !strings.Contains(why, tgChannel) || !strings.Contains(why, tgUserID) {
 			t.Errorf("apa why 查不到渠道与回答人: %s", why)
 		}
 		f.until(tgKernWait, "投递 acknowledged", func() bool {

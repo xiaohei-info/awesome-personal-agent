@@ -26,10 +26,10 @@ import (
 //	APA_EXT_CHECK  1 时进入 `apa ext check` 自测模式：用本地 Bot API 替身和临时状态，不碰真实 Telegram 与真实状态
 
 // 自测模式下替身里的"收件人"（与 `apa ext check` 的约定一致，见 cli/ext/check.go）：
-// 标题为 checkAnswerTitle 的投递，收件人以 checkSender 选第一个选项。
+// 标题为 checkAnswerTitle 的投递，用户 ID 为 checkSenderID 的收件人选第一个选项。
 const (
 	checkAnswerTitle = "apa-ext-check:answer"
-	checkSender      = "check-user"
+	checkSenderID    = 4242 // 转达时即 SimSender "4242"
 )
 
 // Main 读取环境并运行到 ctx 结束。st 为 nil 时用状态文件；测试可注入。
@@ -45,7 +45,7 @@ func Main(ctx context.Context, env func(string) string, stderr io.Writer, st Sto
 		defer fb.Close()
 		fb.OnSend = func(b *fakebot.Bot, s fakebot.Sent) {
 			if len(s.Buttons) > 0 && len(s.Text) >= len(checkAnswerTitle) && s.Text[:len(checkAnswerTitle)] == checkAnswerTitle {
-				b.Press(s.Chat, s.ID, models.User{ID: 1, Username: checkSender}, s.Buttons[0])
+				b.Press(s.Chat, s.ID, models.User{ID: checkSenderID, Username: "check-user"}, s.Buttons[0])
 			}
 		}
 		cfg.BotToken, cfg.BotAPI, cfg.Chat, cfg.Wait = "1:check", fb.URL, 1, 1

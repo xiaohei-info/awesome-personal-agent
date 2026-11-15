@@ -214,12 +214,8 @@ func (e *Ext) onUpdate(ctx context.Context, _ *bot.Bot, u *models.Update) {
 	}
 }
 
-func sender(u models.User) string {
-	if u.Username != "" {
-		return u.Username
-	}
-	return strconv.FormatInt(u.ID, 10)
-}
+// sender 是转达给内核的回答人：平台分配、不可更改的数字用户 ID。用户名可改、释放后可被他人注册，不用它认人（§14.6）。
+func sender(u models.User) string { return strconv.FormatInt(u.ID, 10) }
 
 func (e *Ext) onButton(ctx context.Context, q *models.CallbackQuery) {
 	var chat int64

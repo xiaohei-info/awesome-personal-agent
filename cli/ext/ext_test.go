@@ -285,7 +285,7 @@ func TestSimulatorRejectsBadCalls(t *testing.T) {
 		{"POST", "/v1/deliveries/" + dAck + "/answer", `{}`, "wrong", 401},
 		{"POST", "/v1/deliveries/" + dAck + "/answer", `{`, s.key, 400},
 		{"POST", "/v1/deliveries/" + dAck + "/answer", `{}`, s.key, 404},
-		{"POST", "/v1/deliveries/" + dAnswer + "/answer", `{"ref":"r","sender":"check-user","choice":"yes"}`, s.key, 400}, // 未送达
+		{"POST", "/v1/deliveries/" + dAnswer + "/answer", `{"ref":"r","sender":"` + SimSender + `","choice":"yes"}`, s.key, 400}, // 未送达
 	} {
 		if got := do(c.m, c.p, c.b, c.a); got != c.want {
 			t.Errorf("%s %s: got %d want %d", c.m, c.p, got, c.want)
