@@ -110,3 +110,27 @@ func TestDispatchHistory(t *testing.T) {
 		t.Fatalf("responsible: initiator %v, other %v, run on parent %v", mine, foreign, run)
 	}
 }
+
+// 同一例行任务实例建的事项算同一序列（via: instance）；别的实例的不算。
+func TestDispatchHistoryAcrossInstanceRuns(t *testing.T) {
+	e := setup(t)
+	e.withDelegation(t)
+	week := func(inst, title string) string {
+		return e.item(t, map[string]any{"title": title, "origin": map[string]string{"source": domain.OriginInstance, "ref": inst}})
+	}
+	w1 := week("inst_weekly", "周报 W1")
+	c1 := e.id(t, host, "delegate.create", map[string]any{"parent": w1, "assignee": "writer"})
+	d1 := e.dispatch(t, map[string]any{"id": c1, "session": "agt_w1", "resumable": true})
+	other := week("inst_daily", "日报")
+	co := e.id(t, host, "delegate.create", map[string]any{"parent": other, "assignee": "writer"})
+	e.dispatch(t, map[string]any{"id": co, "session": "agt_d"})
+	w2 := week("inst_weekly", "周报 W2")
+
+	r := e.build(t, Request{ItemScope: true, Item: w2, Reader: Reader{Level: authz.LevelDelegate, Principal: "dlg", Harness: "hermes"}})
+	if len(r.History) != 1 || len(r.History[0].Dispatches) != 1 {
+		t.Fatalf("history %+v", r.History)
+	}
+	if d := r.History[0].Dispatches[0]; d.ID != d1 || d.Via != "instance" {
+		t.Fatalf("last week's dispatch via instance: %+v", d)
+	}
+}

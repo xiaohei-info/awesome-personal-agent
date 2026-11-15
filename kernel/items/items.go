@@ -202,6 +202,11 @@ func List(tx *store.Tx, f Filter) ([]domain.Item, error) {
 	return query(tx, where+"ORDER BY id", args...)
 }
 
+// ByOrigin 返回 origin 为 (source, ref) 的事项，新建在前，至多 50 条（委派历史按例行任务实例取同一序列，§6.17）。
+func ByOrigin(tx *store.Tx, source, ref string) ([]domain.Item, error) {
+	return query(tx, `WHERE json_extract(data, '$.origin.source') = ? AND json_extract(data, '$.origin.ref') = ? ORDER BY created_at DESC, id LIMIT 50`, source, ref)
+}
+
 func allRelations(tx *store.Tx, where string, args ...any) ([]domain.Relation, error) {
 	r, err := tx.Query("SELECT type, from_id, to_id FROM item_relations "+where+"ORDER BY type, from_id, to_id", args...)
 	if err != nil {

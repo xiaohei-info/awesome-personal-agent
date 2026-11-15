@@ -92,6 +92,8 @@ func (e *Engine) createItem(_ context.Context, c Call) error {
 	in := map[string]any{"kind": str(c.Action, "kind"), "reason": "rule " + c.Rule}
 	if f := c.Instance; f != nil && c.Item == nil {
 		in["phase"], in["title"] = domain.PhaseOpen, instanceTitle(f)
+		// 同一实例建的事项算同一序列，委派历史据此相连（§6.17）。
+		in["origin"] = map[string]string{"source": domain.OriginInstance, "ref": f.ID}
 		if f.Project != "" {
 			in["project"] = f.Project
 		}

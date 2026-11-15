@@ -16,6 +16,7 @@ import (
 //	item       记录挂在目标事项本身（同一子事项的再次派出、续接；经关联键挂回的跟进消息落在原子事项上）
 //	parent     目标是委派子事项时，同一父事项下的其他委派子事项；目标是父事项时，它的委派子事项
 //	continues  经 continues 接上或被接续的记录（最多追 5 跳）
+//	instance   同一例行任务实例建的事项（事项 origin 记 {source: instance, ref: 实例 id}）及其委派子事项
 //
 // 句柄是给宿主的资料：own 只说明记录是不是本次调用方报告的 harness 写的，不是边界（harness 名是自报的）。
 
@@ -73,6 +74,26 @@ func sequenceItems(tx *store.Tx, it domain.Item) (map[string]string, error) {
 			return nil, err
 		}
 		add(sibs, "parent")
+	}
+	if it.Origin != nil && it.Origin.Source == domain.OriginInstance && it.Origin.Ref != "" {
+		peers, err := items.ByOrigin(tx, domain.OriginInstance, it.Origin.Ref)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range peers {
+			if _, ok := via[p.ID]; !ok {
+				via[p.ID] = "instance"
+			}
+			pk, err := items.Children(tx, p.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range pk {
+				if _, ok := via[c.ID]; !ok && c.Kind == domain.KindDelegation {
+					via[c.ID] = "instance"
+				}
+			}
+		}
 	}
 	return via, nil
 }
