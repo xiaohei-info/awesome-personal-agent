@@ -20,7 +20,7 @@ interface Step {
   evidence?: string;
   resolved_via?: string;
   grant?: string;
-  payload?: { op?: string; reverts?: number; before?: { title?: string }; item?: { title?: string } };
+  payload?: { op?: string; reverts?: number; before?: { title?: string }; item?: { title?: string }; state?: string; category?: string; template?: string };
 }
 
 const VISIT_KEY = "apa.agentChanges.lastVisit";
@@ -39,16 +39,24 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
   // 操作者显示凭据的标签而不是 id；临时授权给出链接，id 只在「显示原始值」里。
   const who = [credential(s.actor.principal), s.actor.on_behalf_of && t.onBehalfOf(s.actor.on_behalf_of), s.resolved_via === "chat" && t.viaChat].filter(Boolean).join(" · ");
   const canRevert = REVERTIBLE.has(s.type) && !reverted;
+  // 起草建议失败是 APA 自己调模型出的错（actor 记的是内核入站），不是 Agent 的后台运行。
+  const draftFailed = s.type === "run.finished" && s.payload?.state === "failed" && s.payload.category === "generate" && s.payload.template === "triage-draft";
 
   return (
-    <article aria-label={`${label("event", s.type)} #${s.seq}`}>
+    <article aria-label={`${draftFailed ? t.draftFailed : label("event", s.type)} #${s.seq}`}>
       <h3>
-        <Val k="event" id={s.type} />
-        {t.colon}
-        {title ?? s.object}
+        {draftFailed ? (
+          t.draftFailed
+        ) : (
+          <>
+            <Val k="event" id={s.type} />
+            {t.colon}
+            {title ?? s.object}
+          </>
+        )}
       </h3>
       <p className="meta">
-        {who}
+        {draftFailed ? t.byApa : who}
         {s.grant && (
           <>
             {" · "}
@@ -59,7 +67,7 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
         {" · "}{new Date(s.at).toLocaleString(locale())}
         {reverted && t.reverted}
       </p>
-      {s.reason && <p>{s.reason}</p>}
+      {draftFailed ? <p>{t.draftFailedWhy}</p> : s.reason && <p>{s.reason}</p>}
       {s.evidence && <blockquote>{s.evidence}</blockquote>}
       {canRevert && !asking && <button onClick={() => setAsking(true)}>{t.revert}</button>}
       {canRevert && asking && (

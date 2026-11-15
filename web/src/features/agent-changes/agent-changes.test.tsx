@@ -155,3 +155,20 @@ describe("授权单代答（ACT-AUTH-03、flow-agent-revert）", () => {
     expect(s.calls.find((c) => c.method === "POST")).toMatchObject({ path: "/v1/items/i3/revert", body: { event: 1 }, csrf: "tok-1" });
   });
 });
+
+describe("起草建议失败（APA 调模型出错，不是 Agent 的后台运行）", () => {
+  const apa = { type: "agent", principal: "kernel:inbound", via: "source" };
+  const run = (seq: number, payload: unknown): Step => ({ seq, type: "run.finished", object: "run_x", actor: apa, at: "2030-01-01T00:00:00Z", reason: "generate failed", payload });
+
+  it("说成起草建议失败，操作者是 APA 自己，写明不是 Agent 的后台运行；别的运行失败仍按原样", async () => {
+    const s = server([run(1, { category: "generate", template: "triage-draft", state: "failed", error: "schema" }), run(2, { category: "background", template: "t", state: "failed" })]);
+    mount(s.impl);
+    const a = (await screen.findByRole("heading", { name: "起草建议失败" })).closest("article")!;
+    expect(within(a).getByText(/APA 自己/)).toBeInTheDocument();
+    expect(within(a).getByText(/不是 Agent 的后台运行/)).toBeInTheDocument();
+    expect(within(a).queryByText("generate failed")).not.toBeInTheDocument();
+    expect(within(a).queryByText(/kernel:inbound/)).not.toBeInTheDocument();
+    const other = screen.getByRole("heading", { name: /后台运行结束/ }).closest("article")!;
+    expect(within(other).getByText("generate failed")).toBeInTheDocument();
+  });
+});
