@@ -1,9 +1,11 @@
-"""APA receipt plugin for Hermes: `post_tool_call` / `subagent_stop` forward an executor's result to the
-ledger as `apa report`. No decisions here: the kernel decides what a report means.
+"""APA receipt plugin for Hermes: after a dispatching tool call it records the dispatch (`apa dispatch add`, design §6.17)
+and forwards the result as `apa report`; `subagent_stop` forwards a sub-agent's result. No decisions here: the kernel
+decides what a dispatch or a report means.
 
-Only executor-class tools whose arguments carry an item id are captured (delegate_task; terminal running a
-configured external-cli executor). No item id, no capture. The report runs detached and prints nothing, so
-the model never sees it; any failure is swallowed and never reaches Hermes.
+Captured only when the arguments carry the id of an item this Hermes session delegated (apa_delegate) or dispatched:
+delegate_task and the paseo commands Hermes knows (tools/dispatch.py) record a dispatch, then report; any other terminal
+command naming such an item only reports, and `apa` itself is never captured. No such item id, no capture. Everything
+runs detached and prints nothing, so the model never sees it; any failure is swallowed and never reaches Hermes.
 
 `done` needs result evidence (PR, commit, branch or link) taken from the executor's output; without any it is
 reported as `progress`. The exit code of `apa report` is watched off the hook thread: every failure goes to a
@@ -22,9 +24,15 @@ import subprocess
 import threading
 import time
 
-_spec = importlib.util.spec_from_file_location("apa_run_context", pathlib.Path(__file__).resolve().parents[1] / "tools" / "run_context.py")
-run_context = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(run_context)
+def _load(name, file):
+    spec = importlib.util.spec_from_file_location(name, pathlib.Path(__file__).resolve().parents[1] / "tools" / file)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+run_context = _load("apa_run_context", "run_context.py")
+dispatch = _load("apa_dispatch", "dispatch.py")  # its per-process state is shared with apa-tools through sys.modules
 
 ITEM_ID = re.compile(r"\bitm_[0-9a-f]+\b")
 SUMMARY_MAX = 2000
@@ -43,17 +51,6 @@ RUN_TIMEOUT = 60  # off the hook thread; only bounds a hung apa
 _lock = threading.Lock()
 _pending = []  # (item, args, env, attempts) kept after exit 7 until the kernel answers; in memory: lost when Hermes exits
 _sent = set()  # (item, outcome): delegate_task fires subagent_stop and then post_tool_call for the same result
-
-
-def _executor_commands():
-    """argv[0] of every external-cli executor in the owner's table (same file the tools plugin reads)."""
-    p = os.environ.get("APA_HERMES_EXECUTORS")
-    p = pathlib.Path(p) if p else pathlib.Path(os.environ.get("HERMES_HOME", pathlib.Path.home() / ".hermes")) / "apa-executors.json"
-    try:
-        items = json.loads(p.read_text())
-        return {os.path.basename(e["command"][0]) for e in items if e.get("kind") == "external-cli" and e.get("command")}
-    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError):
-        return set()
 
 
 def _item(text):
@@ -90,22 +87,29 @@ def _log(item, args, code, reason):
         pass
 
 
-def _run(item, args, env, attempts):
+def _run(item, args, env, attempts, stdin=None, after=None):
+    """One `apa` call off the hook thread. after(stdout) runs on success (a dispatch id to remember)."""
     try:
-        code = subprocess.run(args, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL, timeout=RUN_TIMEOUT, start_new_session=True).returncode
+        p = subprocess.run(args, env=env, input=stdin, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=RUN_TIMEOUT, start_new_session=True, text=True)
+        code = p.returncode
         reason = "kernel unreachable" if code == UNREACHABLE else "rejected by kernel"
     except subprocess.TimeoutExpired:
         code, reason = "-", "apa timed out"
     except OSError as e:
         code, reason = "-", f"cannot run apa: {e.__class__.__name__}"
     if code == 0:
+        if after:
+            try:
+                after(p.stdout)
+            except Exception:
+                pass
         return
     if code == UNREACHABLE:
         with _lock:
             keep = attempts < MAX_RESENDS and len(_pending) < MAX_PENDING
             if keep:
-                _pending.append((item, args, env, attempts + 1))
+                _pending.append((item, args, env, attempts + 1, stdin, after))
         if not keep:
             _log(item, args, code, reason + " (gave up)")
         elif attempts == 0:  # logged once, not on every failed re-send
@@ -114,19 +118,75 @@ def _run(item, args, env, attempts):
     _log(item, args, code, reason + (" (re-send)" if attempts else ""))
 
 
-def _spawn(item, args, env, attempts=0):
-    threading.Thread(target=_run, args=(item, args, env, attempts), daemon=True).start()
+def _spawn(item, args, env, attempts=0, stdin=None, after=None):
+    threading.Thread(target=_run, args=(item, args, env, attempts, stdin, after), daemon=True).start()
+
+
+def _sequence(calls):
+    """Run several `apa` calls in order on one background thread (a dispatch is recorded before its report)."""
+    def go():
+        for c in calls:
+            _run(*c)
+    threading.Thread(target=go, daemon=True).start()
 
 
 def _resend():
     with _lock:
         todo, _pending[:] = list(_pending), []
-    for item, args, env, attempts in todo:
-        _spawn(item, args, env, attempts)  # same args, so the same idempotency key
+    for item, args, env, attempts, stdin, after in todo:
+        _spawn(item, args, env, attempts, stdin, after)  # same args, so the same idempotency key
 
 
-def _report(item, outcome, summary, session_id):
+def _env(item, args, session_id):
+    try:
+        env = run_context.apa_env()
+    except ValueError as e:
+        _log(item, args, "-", str(e).splitlines()[0])
+        return None
+    if session_id:
+        env["APA_SESSION"] = str(session_id)
+    return env
+
+
+def _dispatch_calls(tool_name, args, result, session_id):
+    """`apa dispatch add` / `update --state lost` calls for a dispatching tool call (tools/dispatch.py decides what it is)."""
+    out = []
+    apa = os.environ.get("APA_BIN", "apa")
+    for item, body, lost in dispatch.capture(tool_name, args, result, session_id):
+        if body is None:
+            if lost:
+                argv = [apa, "dispatch", "update", lost, "--state", "lost"]
+                env = _env(item, argv, session_id)
+                if env is not None:
+                    out.append((item, argv, env, 0, None, None))
+            continue
+        key = "hermes-dispatch-" + hashlib.sha1(f"{item}|{json.dumps(body, sort_keys=True)}".encode()).hexdigest()[:16]
+        argv = [apa, "dispatch", "add", item, "--idempotency-key", key]
+        for flag in ("session", "cwd", "continues"):
+            if body.get(flag):
+                argv += ["--" + flag, body[flag]]
+        if body.get("resumable"):
+            argv.append("--resumable")
+        argv += ["--handle", "-"]
+        env = _env(item, argv, session_id)
+        if env is None:
+            continue
+        session = body.get("session")
+
+        def remember(stdout, item=item, session=session):
+            d = json.loads(stdout)
+            dispatch.remember_dispatch(session_id, item, session, d.get("id"))
+
+        dispatch.remember_dispatch(session_id, item, session, None)
+        out.append((item, argv, env, 0, json.dumps(body["handle"]), remember))
+    return out
+
+
+def _report(item, outcome, summary, session_id, before=()):
+    """Report a result; before are calls (dispatch records) that must reach the kernel first."""
     if (item, outcome) in _sent:
+        if before:
+            _sequence(before)
         return
     _sent.add((item, outcome))
     summary = (summary or "").strip()[-SUMMARY_MAX:]
@@ -146,7 +206,7 @@ def _report(item, outcome, summary, session_id):
         args += ["--summary", summary]
     for k, v in ev.items():
         args += [k, v]
-    _spawn(item, args, env)
+    _sequence([*before, (item, args, env, 0, None, None)])
 
 
 def _parsed(result):
@@ -157,29 +217,51 @@ def _parsed(result):
     return v if isinstance(v, dict) else {}
 
 
+def _mine(session_id):
+    return dispatch.delegated(session_id) | dispatch.dispatched(session_id)
+
+
+def _split(calls):
+    by = {}
+    for c in calls:
+        by.setdefault(c[0], []).append(c)
+    return by
+
+
 def _delegate(args, result, session_id):
+    before = _split(_dispatch_calls("delegate_task", args, result, session_id))
     tasks = args.get("tasks") if isinstance(args.get("tasks"), list) else [args]
     entries = {e.get("task_index", i): e for i, e in enumerate(_parsed(result).get("results") or []) if isinstance(e, dict)}
+    mine = _mine(session_id)
     for i, t in enumerate(tasks):
         item = _item(t) if isinstance(t, dict) else None
         e = entries.get(i)
-        if item and e:
+        if item and e and item in mine:
             ok = e.get("status") == "completed"
-            _report(item, "done" if ok else "blocked", e.get("summary") if ok else (e.get("error") or e.get("summary")), session_id)
+            _report(item, "done" if ok else "blocked", e.get("summary") if ok else (e.get("error") or e.get("summary")), session_id,
+                    before.pop(item, ()))
+    for calls in before.values():
+        _sequence(calls)
 
 
 def _terminal(args, result, session_id):
     command = args.get("command") or ""
-    item = _item(command)
     try:
         first = os.path.basename(shlex.split(command)[0])
     except (ValueError, IndexError):
         return
-    if not item or first not in _executor_commands():
+    if first == "apa":
         return
+    before = _split(_dispatch_calls("terminal", args, result, session_id))
+    mine = _mine(session_id)
     r = _parsed(result)
     ok = r.get("exit_code") == 0 and not r.get("error")
-    _report(item, "done" if ok else "blocked", str(r.get("output") or "") if ok else str(r.get("error") or r.get("output") or ""), session_id)
+    for item in dict.fromkeys(ITEM_ID.findall(command)):
+        if item in mine:
+            _report(item, "done" if ok else "blocked", str(r.get("output") or "") if ok else str(r.get("error") or r.get("output") or ""),
+                    session_id, before.pop(item, ()))
+    for calls in before.values():
+        _sequence(calls)
 
 
 def post_tool_call(tool_name="", args=None, result=None, session_id="", **_):

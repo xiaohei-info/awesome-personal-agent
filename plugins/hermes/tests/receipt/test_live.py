@@ -39,7 +39,10 @@ pytestmark = pytest.mark.skipif(bool(_PROBLEM), reason=_PROBLEM or "")
 
 # One Hermes process loads the plugin the normal way and fires the hooks exactly as the agent loop does.
 CHILD = textwrap.dedent("""
-    import json, sys
+    import json, os, sys, threading, types
+    seed = json.loads(os.environ.get("APA_TEST_DELEGATED", "{}"))  # what apa_delegate would have remembered in these sessions
+    sys.modules["apa_hermes_dispatch_state"] = types.SimpleNamespace(lock=threading.Lock(), dispatched={}, by_session={},
+                                                                      delegated={k: set(v) for k, v in seed.items()})
     from hermes_cli import plugins
     plugins.discover_plugins()
     out = []
@@ -88,10 +91,9 @@ def hermes(tmp_path, apa_bin, kernel):
     (home / "plugins").mkdir(parents=True)
     (home / "plugins" / "apa-receipt").symlink_to(RECEIPT)
     (home / "config.yaml").write_text("plugins:\n  enabled:\n    - apa-receipt\n")
-    table = tmp_path / "apa-executors.json"
-    table.write_text(json.dumps([{"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"], "command": ["codex", "exec", "{prompt}"]}]))
+    delegated = {"main-1": [ITEM], "main-2": [ITEM, "itm_ffee00112233"]}
     env = {**os.environ, "HERMES_HOME": str(home), "APA_BIN": apa_bin, "APA_URL": kernel["url"], "APA_TOKEN": "t",
-           "APA_HOME": str(tmp_path / "apahome"), "APA_HERMES_EXECUTORS": str(table)}
+           "APA_HOME": str(tmp_path / "apahome"), "APA_TEST_DELEGATED": json.dumps(delegated)}
 
     def run(*hooks):
         p = subprocess.run([str(HERMES_PY), "-c", CHILD], cwd=HERMES_SRC, env=env, input=json.dumps(hooks),
@@ -104,11 +106,13 @@ def hermes(tmp_path, apa_bin, kernel):
 
 
 def reports(kernel, n, wait=15):
+    """Reports only; dispatch records (POST /items/{id}/dispatches) are written before them and checked elsewhere."""
+    got = lambda: [r for r in kernel["log"] if r["path"].endswith("/report")]
     end = time.time() + wait
-    while time.time() < end and len(kernel["log"]) < n:
+    while time.time() < end and len(got()) < n:
         time.sleep(0.1)
     time.sleep(0.5)  # a surplus report would arrive now
-    return kernel["log"]
+    return got()
 
 
 def delegate(goal, summary, status="completed"):

@@ -107,9 +107,6 @@ func setup(t *testing.T) *live {
 	e.CreateProjects()
 	l.installPlugin()
 	l.declareHermes()
-	// 执行者 work-host.cli 在本 harness 的调用方式（apa-tools 的 apa-executors.json）；账本只看到 id 与 kind。
-	must(t, os.WriteFile(filepath.Join(hhome, "apa-executors.json"),
-		[]byte(`[{"id":"work-host.cli","kind":"external-cli","scenarios":["coding"],"host":"work-host","command":["echo","{prompt}"]}]`), 0o600))
 	t.Cleanup(l.stopGateway)
 	return l
 }

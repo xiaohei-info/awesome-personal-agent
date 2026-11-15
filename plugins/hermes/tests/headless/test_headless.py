@@ -31,7 +31,6 @@ def fake_apa(tmp_path, monkeypatch):
     exe.write_text(f"#!/bin/sh\necho \"$@\" > {tmp_path}/argv\necho \"$APA_HARNESS\" > {tmp_path}/harness\ncat > {out}\necho \"$FAKE_STDERR\" >&2\nexit ${{FAKE_EXIT:-0}}\n")
     exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("APA_BIN", str(exe))
-    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(tmp_path / "none.json"))
     return tmp_path
 
 
@@ -44,26 +43,6 @@ def test_declare_submits_headless_part_via_apa_declare_stdin(fake_apa):
     assert body["headless"]["session"] == {"extract": "$.session_id"}
 
 
-def test_declare_carries_configured_executors_so_activation_does_not_drop_them(fake_apa, monkeypatch):
-    table = fake_apa / "ex.json"
-    table.write_text(json.dumps([{"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"],
-                                  "host": "work-host", "command": ["codex", "exec", "{prompt}"]}]))
-    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(table))
-    json.loads(load_headless()._declare({}))
-    body = json.loads((fake_apa / "stdin.json").read_text())
-    assert body["executors"] == [{"id": "work-host.cli", "kind": "external-cli", "scenarios": ["coding"], "host": "work-host"}]
-    assert "codex" not in json.dumps(body) and "headless" in body
-
-
-def test_malformed_executor_table_fails_the_declare_and_apa_is_not_invoked(fake_apa, monkeypatch):
-    table = fake_apa / "bad.json"
-    table.write_text('[{"id": "x"}]')
-    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(table))
-    out = json.loads(load_headless()._declare({}))
-    assert out["ok"] is False and "each entry needs id and kind" in out["error"]
-    assert not (fake_apa / "argv").exists()
-
-
 def test_declare_passes_the_kernel_verdict_through(fake_apa, monkeypatch):
     monkeypatch.setenv("FAKE_EXIT", "2")
     monkeypatch.setenv("FAKE_STDERR", "bad declaration")
@@ -73,7 +52,6 @@ def test_declare_passes_the_kernel_verdict_through(fake_apa, monkeypatch):
 
 def test_declare_reports_a_missing_apa_binary(monkeypatch, tmp_path):
     monkeypatch.setenv("APA_BIN", str(tmp_path / "nope"))
-    monkeypatch.setenv("APA_HERMES_EXECUTORS", str(tmp_path / "none.json"))
     out = json.loads(load_headless()._declare({}))
     assert out["ok"] is False and "cannot run apa" in out["error"]
 

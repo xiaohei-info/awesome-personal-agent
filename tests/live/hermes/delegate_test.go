@@ -150,13 +150,21 @@ func TestFlowDelegateRecover(t *testing.T) {
 		c6 := f.delegate(p6, "work-host.cli")
 		before := len(f.events("", "delegation.reported"))
 		s6 := f.session(home, work, f.DEL)
-		r := s6.say("委派子事项 " + c6 + " 已经建好（它就是要交给执行者的那一条，不要换成别的事项 id，也不要新建）。请用 apa_executor_call（id 填 " + c6 + "，executor 填 work-host.cli）取调用方式，再用终端直接执行那条命令，命令必须以执行者脚本开头、不要加 cd 或别的前缀。不要自己执行 apa report，回执交给插件。")
+		r := s6.say("委派子事项 " + c6 + " 已经建好（它就是要交给执行者的那一条，不要换成别的事项 id，也不要新建）。先用 apa_item_history 读一下 " + c6 + "，再在终端直接执行：paseo-profile-run work '补测试，账本事项 " + c6 + "'。命令必须以 paseo-profile-run 开头、不要加 cd 或别的前缀。不要自己执行 apa report 或 apa dispatch，委派记录和回执交给插件。")
 		f.waitFor("插件写入回执", 90*time.Second, func() bool { return f.phase(c6) == "done" })
 		reps := f.events(c6, "delegation.reported")
 		if len(reps) != 1 {
 			t.Fatalf("应只捕获 1 次回执，实际 %d；回答 %s", len(reps), r.Final)
 		}
 		contains(t, "插件回执带出的结果证据", toJSON(reps[0].Payload), "pr/6")
+		// 委派记录由插件在回执之前写入：会话是执行者打印的 agent id（§6.17）。
+		var ds struct {
+			Dispatches []struct{ Session, Harness string } `json:"dispatches"`
+		}
+		must(t, json.Unmarshal([]byte(f.webOK("GET", "/dispatches?item="+c6, "", 200)), &ds))
+		if len(ds.Dispatches) != 1 || ds.Dispatches[0].Session != "agt_live6" || ds.Dispatches[0].Harness != "hermes" {
+			t.Errorf("插件应写入一条委派记录（会话 agt_live6）: %+v", ds.Dispatches)
+		}
 		for _, c := range f.calls("report") {
 			if strings.Contains(c.Args, c6) && c.Session == "" {
 				t.Errorf("agent 不应自行运行 apa report（回执应来自插件捕获）: %+v", c)
@@ -165,7 +173,7 @@ func TestFlowDelegateRecover(t *testing.T) {
 		// 再调用一次不带事项 id 的工具：不产生任何回执。
 		mid := len(f.events("", "delegation.reported"))
 		eq(t, "第一次调用只新增 1 条回执", mid, before+1)
-		s6.say("再用 work-host.cli 执行一件和账本无关的小事（没有事项 id）：随便打个招呼。用 apa_executor_call 取调用方式，再用终端执行。")
+		s6.say("再在终端执行一件和账本无关的小事（没有事项 id）：paseo-profile-run work '随便打个招呼'。")
 		time.Sleep(10 * time.Second)
 		eq(t, "第二次调用后的回执数", len(f.events("", "delegation.reported")), mid)
 	})

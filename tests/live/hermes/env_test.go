@@ -33,7 +33,7 @@ type fx struct {
 	hermesPy  string // Hermes venv 的 python（多轮会话驱动用）
 	hermesSrc string
 	seed      string
-	execBin   string // 执行者 work-host.cli 的真实可执行文件
+	execBin   string // 执行者的真实可执行文件：以 paseo-profile-run 的名字放在 PATH 上（插件按这个命令认出派出，§6.17）
 	evidence  map[string]any
 	n         int
 	shimDir   string
@@ -84,11 +84,12 @@ func setup(t *testing.T, serveExtra string) *fx {
 			t.Fatalf("真实 Hermes 不可用（%s）：%v", p, err)
 		}
 	}
-	// 执行者 work-host.cli 是一个真实的外部 CLI 进程：只打印完成说明，不自行 apa report（回执交给插件捕获）。
+	// 执行者是一个真实的外部 CLI 进程：按 Paseo 的输出格式打印 agent id 与完成说明，不自行 apa report（委派记录与回执交给插件捕获）。
 	f.makeShim()
-	f.execBin = filepath.Join(e.Root, "work-host-cli.sh")
+	f.execBin = filepath.Join(f.shimDir, "paseo-profile-run")
 	// 它被调用时在垫片日志里记一行，用来核对“先 apa delegate 再调用执行者”的先后。
-	script := "#!/bin/sh\nprintf '\\n@@CALL session=<> rc=0 cwd=<> args=@@EXECUTOR %s\\n\\n' \"$*\" >> " + f.shimLog + "\necho 'work-host.cli 已处理 PR https://example.invalid/acc/pr/6'\n"
+	script := "#!/bin/sh\nprintf '\\n@@CALL session=<> rc=0 cwd=<> args=@@EXECUTOR %s\\n\\n' \"$*\" >> " + f.shimLog +
+		"\nprintf 'AGENT ID     STATUS\\nagt_live6    idle\\n'\necho '已处理 PR https://example.invalid/acc/pr/6'\n"
 	must(t, os.WriteFile(f.execBin, []byte(script), 0o755))
 	return f
 }
@@ -173,9 +174,6 @@ func (f *fx) hermesHome(name string, plugins ...string) string {
 	for _, p := range plugins {
 		must(t, os.Symlink(filepath.Join(repoRoot(), "plugins", "hermes", p), filepath.Join(home, "plugins", "apa-"+p)))
 	}
-	table, _ := json.Marshal([]map[string]any{{"id": "work-host.cli", "kind": "external-cli", "scenarios": []string{"coding"},
-		"host": "work-host", "command": []string{f.execBin, "{prompt}"}}})
-	must(t, os.WriteFile(filepath.Join(home, "apa-executors.json"), table, 0o600))
 	return home
 }
 

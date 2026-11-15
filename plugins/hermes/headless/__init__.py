@@ -17,19 +17,10 @@ _spec.loader.exec_module(run_context)
 
 
 def declaration():
-    """declaration.json plus the executors the tools plugin has configured.
-
-    One harness holds one declaration (a new one replaces the old), so the executors must travel with it or
-    activating this declaration would drop them from the list.
-    """
+    """declaration.json. Executors are not declared: Hermes registers them when it first delegates (design §6.17), and
+    approving a declaration no longer drops executors already in the list."""
     run_context.require_passthrough()
-    body = json.loads((HERE / "declaration.json").read_text())
-    spec = importlib.util.spec_from_file_location("apa_headless_executors", HERE.parent / "tools" / "executors.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    if mod.load():  # a malformed table raises ValueError to the caller; only a genuinely empty one is skipped
-        body["executors"] = mod.declaration()["executors"]
-    return body
+    return json.loads((HERE / "declaration.json").read_text())
 
 
 def _declare(args, session_id=None, **_):
@@ -49,7 +40,7 @@ def _declare(args, session_id=None, **_):
 
 
 def register(ctx):
-    desc = "Submit this host's headless-run declaration (and configured executors) to the ledger (apa declare); it takes effect after the owner confirms in Web."
+    desc = "Submit this host's headless-run declaration to the ledger (apa declare); it takes effect after the owner confirms in Web."
     ctx.register_tool(name="apa_declare_headless", toolset="apa", description=desc, handler=_declare,
                       schema={"name": "apa_declare_headless", "description": desc,
                               "parameters": {"type": "object", "properties": {}, "required": []}})
