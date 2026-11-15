@@ -265,7 +265,7 @@
 
 ```json
 {"judge_endpoint": {"url": "…", "api_key": "…", "protocol": "system-one", "model": "…", "locality": "external", "timeout_ms": 10000, "max_batch": 32, "max_material_chars": 8000},
- "generate_endpoint": {"url": "…", "api_key": "…", "model": "…", "locality": "external"},
+ "generate_endpoint": {"url": "…", "api_key": "…", "protocol": "chat-completions", "model": "…", "locality": "external"},
  "screening_timeout_ms": 30000,
  "models_paused": false}
 ```
@@ -274,9 +274,11 @@
 
 `judge_endpoint.protocol` 取 `system-one`（原生判断接口，`url` 是接口根，内核追加 `/systemone`）、`probability-judgment/1`（自建分类服务，`url` 是完整路径）或 `chat-logprobs`（Web 不提供）；省略时按 `probability-judgment/1`。`model` 在 `system-one` 与 `chat-logprobs` 下必填，缺失返回 400。Web 新配判断端点时默认 `system-one`，地址与模型名的预填值见附录 D.7，`timeout_ms` 预填 30000；`PUT` 不替调用方填默认协议。
 
-`POST /settings/model-endpoints/models` 取模型列表，请求 `{"endpoint": "generate" | "judge", "url", "api_key"?, "protocol"?}`：按对话补全兼容协议 `GET <url>/models` 读 `data[].id`，去重排序，至多 500 个。`endpoint` 为 `judge` 时只接受 `protocol: system-one`（`GET <接口根>/models`，读 `models[].name`；`url` 末尾带 `/systemone` 的先去掉）与 `chat-logprobs`，`probability-judgment/1` 没有模型列表，返回 400。探测本身的成败是数据，响应恒为 200：成功 `{"ok": true, "models": [...], "truncated": false, "elapsed_ms": 120}`，失败 `{"ok": false, "reason", "status"?, "elapsed_ms"}`，`reason` 取 `unauthorized`、`not_found`、`http_status`（带 `status`）、`timeout`、`bad_response`、`unreachable`、`region_unavailable`（HTTP 451，或 403 且响应体提到地区、国家）。
+`generate_endpoint.protocol` 取 `chat-completions`（对话补全接口）、`messages`（消息接口）或 `responses`（响应接口），其他值 400；省略或为空串按 `chat-completions`，`GET` 总是给出实际取值。三种协议的请求形态、结构化输出方式与解析见主文档 §8.1，带厂商名的版本头与经网关时的选法见附录 D.7。已存的策略版本没有这个键时读作 `chat-completions`，不改写。
 
-`POST /settings/model-endpoints/test` 测试连接，请求 `{"endpoint": "judge" | "generate", "config": {…}}`，`config` 与 `PUT` 里对应端点的形状相同，按保存时的同一套规则校验（不合规返回 400）；生成端点须有 `url` 与 `model`。用 `apa doctor` 的内置示例探测（主文档 §15.5）：判断端点用示例题，生成端点用起草建议模板（`data.sample` 为 `draft`，模板不可用时为 `builtin`），示例内容是固定文本，不取账本内容。响应与 `GET /doctor` 的明细同形：`{"subject", "status", "code", "why", "next"?, "data"}`；`code` 取 `ok`、`unauthorized`、`region_unavailable`（服务在当前网络位置不可用，`next` 提示改用可访问的网关地址或代理）、`protocol_error`、`self_reported`、`invalid_request`、`no_answer`、`timeout`、`http_status`、`schema_mismatch`（`status` 为 `warning`，内置小样例没守结构约束）、`draft_schema`（`status` 为 `error`，起草建议模板的输出约束没守；`data.shape` 是返回内容的形态：`empty`、`markdown_fence`、`truncated`、`malformed_json`、`trailing_data`、`text_around`、`plain_text`，内容本身不返回）、`bad_response`、`unreachable`；`data` 含 `elapsed_ms`、`locality`，判断端点另有 `protocol`、`probability_source` 与端点自报的 `model`。
+`POST /settings/model-endpoints/models` 取模型列表，请求 `{"endpoint": "generate" | "judge", "url", "api_key"?, "protocol"?}`：生成端点按 `protocol`（同 `generate_endpoint.protocol`）放鉴权头，`GET <url>/models` 读 `data[].id`（`messages` 另带 `?limit=1000`），去重排序，至多 500 个。`endpoint` 为 `judge` 时只接受 `protocol: system-one`（`GET <接口根>/models`，读 `models[].name`；`url` 末尾带 `/systemone` 的先去掉）与 `chat-logprobs`，`probability-judgment/1` 没有模型列表，返回 400。探测本身的成败是数据，响应恒为 200：成功 `{"ok": true, "models": [...], "truncated": false, "elapsed_ms": 120}`，失败 `{"ok": false, "reason", "status"?, "elapsed_ms"}`，`reason` 取 `unauthorized`、`not_found`、`http_status`（带 `status`）、`timeout`、`bad_response`、`unreachable`、`region_unavailable`（HTTP 451，或 403 且响应体提到地区、国家）。
+
+`POST /settings/model-endpoints/test` 测试连接，请求 `{"endpoint": "judge" | "generate", "config": {…}}`，`config` 与 `PUT` 里对应端点的形状相同，按保存时的同一套规则校验（不合规返回 400）；生成端点须有 `url` 与 `model`。用 `apa doctor` 的内置示例探测（主文档 §15.5）：判断端点用示例题，生成端点用起草建议模板（`data.sample` 为 `draft`，模板不可用时为 `builtin`），示例内容是固定文本，不取账本内容。响应与 `GET /doctor` 的明细同形：`{"subject", "status", "code", "why", "next"?, "data"}`；`code` 取 `ok`、`unauthorized`、`region_unavailable`（服务在当前网络位置不可用，`next` 提示改用可访问的网关地址或代理）、`protocol_error`、`self_reported`、`invalid_request`、`no_answer`、`timeout`、`http_status`、`schema_mismatch`（`status` 为 `warning`，内置小样例没守结构约束）、`draft_schema`（`status` 为 `error`，起草建议模板的输出约束没守；`data.shape` 是返回内容的形态：`empty`、`markdown_fence`、`truncated`、`malformed_json`、`trailing_data`、`text_around`、`plain_text`、`no_tool_call`（`messages` 的回复里没有调用输出工具），内容本身不返回）、`bad_response`（响应体不是所选协议的形状）、`unreachable`；`data` 含 `elapsed_ms`、`locality`，生成端点另有 `protocol` 与 `structured_output`（`response_format`、`text.format` 或 `tool_use`），判断端点另有 `protocol`、`probability_source` 与端点自报的 `model`。
 
 **自检结果**（`GET /doctor` 与 `apa doctor --json`）：`{"ok", "checks": [{"name", "status", "code", "why", "next", "data"?, "details"?: [{"subject", "status", "code", "why", "next"?, "data"?}]}]}`。`status` 取 `ok`、`warning`、`error`；`why`、`next` 是机制性英文，供 CLI 与 agent 阅读；`code` 是稳定的机器码，取值只增不改，清单在 `kernel/doctor/codes.go`，Web 按 `code` 与 `data` 显示本地化的一句话。一个对象有多处问题时，`code` 是第一处，`data.problems` 按顺序列出全部问题的机器码。各项检查的 `code` 与 `data`：
 
@@ -375,6 +377,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | `GET /health` 的信号数 | 十一项 | 十三项，末尾追加两项 | 前十一项的 id 与顺序不变；按下标取信号的调用方不受影响，按总数断言的要改 |
 | `unjudged_reason` | `model_unavailable`、`undecided` | `model_unavailable`、`models_paused`、`outbound_unset`、`restored` | 旧值原样返回；内核按 `model_unavailable` 对待并参与重判。按枚举穷举判断的调用方要接受三个新值 |
 | 策略的 `models_paused` | 无 | 顶层布尔，经 `/settings/model-endpoints` 读写 | 只增字段：已存的策略版本没有这个键，读作不暂停，不改写旧版本；`GET /health` 的 `model_unavailable.detail` 只增 `paused` 键与取值 `paused` |
+| 生成端点的 `protocol` | 只有对话补全接口 | `generate_endpoint.protocol`：`chat-completions`、`messages`、`responses` | 只增字段：已存的策略版本没有这个键，读作 `chat-completions`，不改写，不迁移；`GET` 总是给出取值。旧二进制解码策略时忽略未知键，回退后按对话补全接口调用，选了另两种协议的端点会失败，在旧二进制里保存设置也不会写回这个键；回退前把协议改回 `chat-completions`，或回退后改用对话补全接口的地址 |
 | `GET /health` 的 `unjudged_backlog.detail` | 各原因计数与 `sources` | 另带 `rejudge_days` | 只增字段，按键取值的调用方不受影响 |
 | `disturb.threshold_judge` | 开启三选一的投递阈值判定 | 开启"可以晚点送吗"的推迟判定 | 键名与类型不变；已开启的继续开启，"只留 Web 未读"这一去向不再由模型选择 |
 | 实例驱动的时钟规则 | `GET /rules` 列出，`PATCH /rules/{id}/mode` 可改，值不生效 | `GET /rules` 不再列出；`PATCH` 返回 404 `not_found`，与规则不存在一致 | 账本里 `rules_state` 已存的行不删不改，内核照旧用它们执行实例到期；只是不再读出给人看。调用方按列表取规则的不受影响，直接对这类规则改模式的要按 404 处理 |

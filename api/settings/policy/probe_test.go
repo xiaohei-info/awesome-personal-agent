@@ -111,6 +111,56 @@ func TestProbeModelsReusesStoredKeyForSameOrigin(t *testing.T) {
 	}
 }
 
+// 生成端点选消息协议：获取模型与测试连接都按该协议的路径与鉴权头走，结论写明协议与结构化输出方式；保存后 GET 读回协议。
+func TestProbeGenerateMessagesProtocol(t *testing.T) {
+	e := setup(t)
+	var heads []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		heads = append(heads, r.Method+" "+r.URL.Path+" "+r.Header.Get("x-api-key")+" "+r.Header.Get("Authorization"))
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/v1/models":
+			fmt.Fprint(w, `{"data":[{"id":"model-a","type":"model"}],"has_more":false}`)
+		case "/v1/messages":
+			var req struct {
+				Tools []struct {
+					InputSchema map[string]any `json:"input_schema"`
+				} `json:"tools"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if len(req.Tools) != 1 || req.Tools[0].InputSchema["type"] != "object" {
+				http.Error(w, `{"error":{"message":"no tool"}}`, 400)
+				return
+			}
+			fmt.Fprint(w, `{"content":[{"type":"thinking","thinking":""},{"type":"tool_use","name":"output","input":{"answer":"yes","sufficient":true}}],"stop_reason":"tool_use"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	url := srv.URL + "/v1"
+	if out := decode(t, e.do("POST", modelsPath, `{"endpoint":"generate","protocol":"messages","url":"`+url+`","api_key":"sk-m"}`, e.web)); out["ok"] != true {
+		t.Fatalf("models %v", out)
+	}
+	rec := e.do("POST", testPath, `{"endpoint":"generate","config":{"url":"`+url+`","protocol":"messages","model":"model-a","api_key":"sk-m","locality":"external"}}`, e.web)
+	out := decode(t, rec)
+	data, _ := out["data"].(map[string]any)
+	if out["code"] != "ok" || data["protocol"] != "messages" || data["structured_output"] != "tool_use" {
+		t.Fatalf("test %s", rec.Body)
+	}
+	if fmt.Sprint(heads) != "[GET /v1/models sk-m  POST /v1/messages sk-m ]" {
+		t.Fatalf("endpoint saw %q", heads)
+	}
+	if rec := e.do("PUT", routes[2], `{"generate_endpoint":{"url":"`+url+`","protocol":"messages","model":"model-a","locality":"external"}}`, e.web); rec.Code != 200 {
+		t.Fatalf("PUT %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("GET", routes[2], "", e.web); !strings.Contains(rec.Body.String(), `"protocol":"messages"`) {
+		t.Fatalf("GET %s", rec.Body)
+	}
+}
+
 // URL 换到另一个源时不沿用已存密钥：返回 400，端点收不到任何请求。
 func TestProbeRefusesStoredKeyForOtherOrigin(t *testing.T) {
 	e := setup(t)

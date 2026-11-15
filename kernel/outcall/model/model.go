@@ -1,5 +1,5 @@
 // Package model 是外呼调用器的模型 HTTP 部分（设计 §7.7、§8.1）：
-// 按 chat completions 兼容协议 + JSON Schema 结构化输出调用用户配置的端点（base_url + api_key）。
+// 生成端点按本人选定的协议（chat-completions、messages、responses，见 wire.go）+ 各自原生的 JSON Schema 结构化输出调用用户配置的端点（base_url + api_key）。
 // 不起子进程、不占额度、不重试、不统计用量；失败如实返回，由调用模块决定降级语义。
 package model
 
@@ -24,7 +24,7 @@ var (
 	ErrPaused = fmt.Errorf("%w: models are paused in settings", ErrNotConfigured)
 	// ErrTimeout 表示调用超过时限。
 	ErrTimeout = errors.New("model: timeout")
-	// ErrBadResponse 表示端点返回了非预期的响应体（不是合法的 chat completions 响应）。
+	// ErrBadResponse 表示端点返回了非预期的响应体（不是所选协议的合法响应）。
 	ErrBadResponse = errors.New("model: bad response")
 	// ErrSchema 表示模型输出不是合法 JSON，或不符合请求的 JSON Schema。
 	ErrSchema = errors.New("model: output violates schema")
@@ -46,6 +46,7 @@ const (
 	ShapeTrailing   = "trailing_data"  // JSON 之后还有别的内容
 	ShapeTextAround = "text_around"    // 文字夹着 JSON
 	ShapePlainText  = "plain_text"     // 没有 JSON，是一段文字
+	ShapeNoToolCall = "no_tool_call"   // 消息协议：回复里没有调用输出工具（端点可能不支持结构化输出）
 )
 
 func (e *SchemaError) Error() string {
@@ -66,8 +67,8 @@ func SchemaShape(err error) string {
 	return ""
 }
 
-// contentShape 判断 content 不是单个 JSON 值时的形态；decodeErr 为 nil 表示解码成功但后面还有内容。
-func contentShape(content string, decodeErr error, finish string) string {
+// contentShape 判断 content 不是单个 JSON 值时的形态；decodeErr 为 nil 表示解码成功但后面还有内容，truncated 表示端点因长度上限截断。
+func contentShape(content string, decodeErr error, truncated bool) string {
 	t := strings.TrimSpace(content)
 	switch {
 	case t == "":
@@ -81,7 +82,7 @@ func contentShape(content string, decodeErr error, finish string) string {
 			return ShapeTextAround
 		}
 		return ShapePlainText
-	case finish == "length":
+	case truncated:
 		return ShapeTruncated
 	}
 	return ShapeMalformed
@@ -129,10 +130,14 @@ type Client struct {
 	Sleep func(ctx context.Context, d time.Duration) error
 }
 
-// Complete 发起一次调用。端点未配置时不发请求，返回 ErrNotConfigured。
+// Complete 发起一次调用。端点未配置时不发请求，返回 ErrNotConfigured。按 ep.Protocol 选请求形态与解析（见 wires）。
 func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req Request) (Response, error) {
 	if ep.URL == "" || ep.Model == "" {
 		return Response{}, ErrNotConfigured
+	}
+	w, ok := wires[policy.GenerateProtocol(ep.Protocol)]
+	if !ok {
+		return Response{}, fmt.Errorf("model: unknown generate protocol %q", ep.Protocol)
 	}
 	var schema map[string]any
 	if len(req.Schema) > 0 {
@@ -143,20 +148,7 @@ func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req R
 			return Response{}, fmt.Errorf("model: unsupported request schema: %w", err)
 		}
 	}
-	body := map[string]any{
-		"model": ep.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": req.System},
-			{"role": "user", "content": req.User},
-		},
-	}
-	if schema != nil {
-		body["response_format"] = map[string]any{
-			"type":        "json_schema",
-			"json_schema": map[string]any{"name": "output", "strict": true, "schema": schema},
-		}
-	}
-	payload, err := json.Marshal(body)
+	payload, err := json.Marshal(w.body(ep.Model, req, schema))
 	if err != nil {
 		return Response{}, err
 	}
@@ -168,14 +160,12 @@ func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req R
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(ep.URL, "/")+"/chat/completions", bytes.NewReader(payload))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(ep.URL, "/")+w.path, bytes.NewReader(payload))
 	if err != nil {
 		return Response{}, fmt.Errorf("model: bad endpoint url: %w", scrub(err, ep.APIKey))
 	}
 	hreq.Header.Set("Content-Type", "application/json")
-	if ep.APIKey != "" {
-		hreq.Header.Set("Authorization", "Bearer "+ep.APIKey)
-	}
+	setAuth(hreq.Header, ep.Protocol, ep.APIKey)
 	hc := c.HTTP
 	if hc == nil {
 		hc = &http.Client{}
@@ -195,30 +185,25 @@ func (c *Client) Complete(ctx context.Context, ep policy.GenerateEndpoint, req R
 	if len(raw) > maxBody {
 		return Response{}, fmt.Errorf("%w: body exceeds %d bytes", ErrBadResponse, maxBody)
 	}
-	var out struct {
-		Choices []struct {
-			Message struct {
-				Content *string `json:"content"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
+	r, err := w.parse(raw, schema != nil)
+	if err != nil {
+		return Response{}, err
 	}
-	if err := json.Unmarshal(raw, &out); err != nil || len(out.Choices) == 0 || out.Choices[0].Message.Content == nil {
-		return Response{}, fmt.Errorf("%w: no choices[0].message.content", ErrBadResponse)
-	}
-	content := *out.Choices[0].Message.Content
 	if schema != nil {
+		if r.missing != "" {
+			return Response{}, &SchemaError{Shape: r.missing, Detail: "no structured output in the reply"}
+		}
 		var v any
-		dec := json.NewDecoder(strings.NewReader(content))
+		dec := json.NewDecoder(strings.NewReader(r.content))
 		dec.UseNumber()
 		if err := dec.Decode(&v); err != nil || dec.More() {
-			return Response{}, &SchemaError{Shape: contentShape(content, err, out.Choices[0].FinishReason), Detail: "content is not a single JSON value"}
+			return Response{}, &SchemaError{Shape: contentShape(r.content, err, r.truncated), Detail: "content is not a single JSON value"}
 		}
 		if err := validate(schema, v, "$"); err != nil {
 			return Response{}, &SchemaError{Detail: err.Error()}
 		}
 	}
-	return Response{Content: content}, nil
+	return Response{Content: r.content}, nil
 }
 
 func transportErr(ctx context.Context, err error, key string) error {

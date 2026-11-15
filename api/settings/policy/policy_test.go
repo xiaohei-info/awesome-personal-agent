@@ -463,7 +463,7 @@ func TestSplitEndpointsDefaultsAndNull(t *testing.T) {
 	var j, g map[string]any
 	_ = json.Unmarshal(out["judge_endpoint"], &j)
 	_ = json.Unmarshal(out["generate_endpoint"], &g)
-	if j["locality"] != "external" || g["locality"] != "external" || j["timeout_ms"] != 10000.0 || j["max_batch"] != 32.0 ||
+	if j["locality"] != "external" || g["locality"] != "external" || g["protocol"] != "chat-completions" || j["timeout_ms"] != 10000.0 || j["max_batch"] != 32.0 ||
 		j["max_material_chars"] != 8000.0 || string(out["screening_timeout_ms"]) != "30000" {
 		t.Fatalf("judge=%v generate=%v out=%s", j, g, out["screening_timeout_ms"])
 	}
@@ -472,7 +472,7 @@ func TestSplitEndpointsDefaultsAndNull(t *testing.T) {
 		t.Fatalf("not cleared: %s %s", out["judge_endpoint"], out["generate_endpoint"])
 	}
 	for _, bad := range []string{`{"judge_endpoint":{"url":""}}`, `{"generate_endpoint":{"url":"ftp://x"}}`, `{"judge_endpoint":{"url":"http://x","locality":"near"}}`,
-		`{"generate_endpoint":{"url":"http://x","bogus":1}}`} {
+		`{"generate_endpoint":{"url":"http://x","bogus":1}}`, `{"generate_endpoint":{"url":"http://x","protocol":"gemini"}}`} {
 		if rec := e.do("PUT", routes[2], bad, e.web); rec.Code != 400 {
 			t.Errorf("%s accepted: %d", bad, rec.Code)
 		}

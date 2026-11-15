@@ -87,6 +87,21 @@ func TestOutcallMayImportNetworkButNotProductNames(t *testing.T) {
 	}
 }
 
+// 协议头名只在模型外呼目录、按整串放行；别处或拼进更长的串仍是违规。
+func TestProtocolHeaderLiteralOnlyInModelOutcall(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "kernel/outcall/model/m.go", "package model\nconst h = \"anthropic-version\"\n")
+	if got := rules(t, root); len(got) != 0 {
+		t.Fatalf("protocol header must be allowed in model outcall: %v", got)
+	}
+	write(t, root, "kernel/outcall/model/n.go", "package model\nconst u = \"anthropic-version-x\"\n")
+	write(t, root, "kernel/inbound/i.go", "package inbound\nconst h = \"anthropic-version\"\n")
+	got := rules(t, root)
+	if !has(got, "kernel-name kernel/outcall/model/n.go") || !has(got, "kernel-name kernel/inbound/i.go") {
+		t.Fatalf("exemption too wide: %v", got)
+	}
+}
+
 func TestKernelProductNames(t *testing.T) {
 	cases := map[string]string{
 		"ident":   "package k\nfunc sendToHermes() {}\n",

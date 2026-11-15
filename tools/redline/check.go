@@ -36,6 +36,12 @@ var (
 		"slack", "discord", "feishu", "dingtalk", "wechat", "github", "typesafe", "jev"}, harnessNames...)
 )
 
+// protocolLiterals 是模型协议契约里带厂商名的固定字面量（设计 §5.3）：只在 kernel/outcall/model 里、按整串精确匹配放行。
+// 协议契约须写全，这类请求头名换不掉；放行只到这一串，其余字符串照旧受产品名规则约束。
+var protocolLiterals = map[string]bool{"anthropic-version": true}
+
+const modelDir = outcallDir + "/model"
+
 // Violation 是一条红线违规。
 type Violation struct {
 	Rule string
@@ -149,6 +155,9 @@ func checkKernelFile(rel string, data []byte) ([]Violation, error) {
 			}
 		case *ast.BasicLit:
 			if x.Kind == token.STRING {
+				if s, err := strconv.Unquote(x.Value); err == nil && protocolLiterals[s] && strings.HasPrefix(rel, modelDir+"/") {
+					return true
+				}
 				if name := firstName(strings.ReplaceAll(x.Value, modulePath, ""), productNames); name != "" {
 					add("kernel-name", x.Pos(), "内核字符串出现产品名 "+name)
 				}

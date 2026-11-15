@@ -152,7 +152,7 @@ Gmail、Google 日历、Google Drive 这类服务要用户自备 OAuth 客户端
 
 ## D.7 模型端点
 
-生成端点讲对话补全兼容协议；判断端点按协议分适配器（主文档 §8.8），本版内置原生判断接口 `system-one` 与自建服务的通用协议 `probability-judgment/1`。端点由用户提供。以下结论由 v0.2.0 的 spike 与本机升级验证写回这里（主文档 §20.4、§21.3）：
+生成端点按本人选定的生成协议调用（主文档 §8.1，对照表见下）；判断端点按协议分适配器（主文档 §8.8），本版内置原生判断接口 `system-one` 与自建服务的通用协议 `probability-judgment/1`。端点由用户提供。以下结论由 v0.2.0 的 spike 与本机升级验证写回这里（主文档 §20.4、§21.3）：
 
 | 项 | 写回什么 | 状态 |
 |---|---|---|
@@ -170,5 +170,28 @@ Gmail、Google 日历、Google Drive 这类服务要用户自备 OAuth 客户端
 | 限制 | 题数不设上限；每请求 64k token（state 加全部题）、每题 32k token；请求体至多 32 MiB；限流按组织计，超出回 429，可带 `retry-after`；过载回 529 |
 | 地区 | 官方接口对部分地区回 451（`Typesafe is not available in your region.`），内核记 `region_unavailable`，"测试连接"提示改用可访问的网关地址或代理 |
 | 超时 | 冷调用约 9.7 秒，Web 新配时 `timeout_ms` 预填 30000 |
+
+**生成协议与它们对应的接口**（2026-11 核对官方文档）：
+
+| 协议 | Web 显示名 | 对应的接口 | 本版的取法 |
+|---|---|---|---|
+| `chat-completions` | OpenAI 兼容 | OpenAI Chat Completions，及讲同一形状的本机推理服务与网关 | 见主文档 §8.1 |
+| `messages` | Anthropic 兼容 | Anthropic Messages API（`/v1/messages`），及讲同一形状的网关 | 版本头 `anthropic-version: 2023-06-01`，密钥放 `x-api-key`；`max_tokens` 固定 4096；输出工具名 `output` |
+| `responses` | OpenAI Responses | OpenAI Responses API（`/v1/responses`） | `instructions` 放系统段，`input` 放用户段，`store: false` |
+
+**消息接口里结构化输出与思考的处理**。依据：[Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)、[Thinking in tool and multi-turn workflows](https://platform.claude.com/docs/en/build-with-claude/thinking-tool-workflows)、[Define tools](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools)、[Claude Haiku 5.5 迁移指南](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide)。
+
+- 显式开启的手动思考（`thinking: {type: "enabled"}`）不接受强制工具调用（`tool_choice` 为 `any` 或指名工具），会返回错误。内核因此不带 `thinking` 字段。
+- Claude 5 系列多数模型默认开着自适应思考。自适应思考下，Claude Haiku 5.5 等模型接受强制工具调用，回复直接从工具调用开始，不带思考块；Claude Opus 5.5、Sonnet 5.5、Fable 5.1/5.2、Mythos 5.1/5.2 对强制工具调用一律返回 400。这几种模型请选另一种协议（经网关时选网关的对话补全或响应接口），"测试连接"会显示 400 和端点给的原因。
+- 内核按块的 `type` 取结果，不按位置：`thinking`、`redacted_thinking` 与工具调用前的 `text` 块都忽略，只取名为 `output` 的 `tool_use` 块的 `input`。`stop_reason` 为 `max_tokens` 时按截断处理，不使用可能不全的工具参数。
+- 不用消息接口的 JSON 输出（`output_config.format`）：它也是原生方式，但网关对这个字段的转发支持不一，工具调用的兼容面更广。
+
+**经网关接入时选哪种协议**。网关在对话补全接口与消息接口之间转换时，`response_format` 没有对应字段，结构化约束会丢掉，思考内容也可能混进正文；这正是"起草建议的输出不合格"的常见原因。选网关对外讲的、与上游模型原生一致的接口：
+
+- 上游是 Claude 模型、网关对外提供 `/v1/messages`（New API、Magpie 这类网关都提供）：选「Anthropic 兼容」，地址填网关的 `…/v1`。上游模型对强制工具调用返回 400 时（见上），改选「OpenAI 兼容」或「OpenAI Responses」并确认网关为它保留结构化约束。
+- 上游是 OpenAI 模型：选「OpenAI Responses」或「OpenAI 兼容」。
+- 本机推理服务一般只讲对话补全接口：选「OpenAI 兼容」。
+
+无论选哪种，先点"测试连接"：它用起草建议模板的真实约束发一次请求，结论写明协议与原生结构化输出方式；不合格时写明返回内容的形态。
 
 自建的分类服务讲 `probability-judgment/1` 即可接入；仓库里用于验收的分类端点替身（同时讲两种协议）可作参照（主文档 §18）。

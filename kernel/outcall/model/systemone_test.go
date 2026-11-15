@@ -262,7 +262,7 @@ func TestSystemOneAgainstClsStub(t *testing.T) {
 	if err != nil || res.Answers[0].PYes != 0.5 || res.Answers[1].PYes != 0.9 || res.Answers[2].ErrCode != CodeMissingResult || res.Answers[0].Model != "cls-stub-1.0" {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
-	ids, _, err := (&Client{}).ListModels(context.Background(), SystemOneBase(ep.URL+"/systemone"), "")
+	ids, _, err := (&Client{}).ListModels(context.Background(), SystemOneBase(ep.URL+"/systemone"), "", "")
 	if err != nil || strings.Join(ids, ",") != "cls-stub-latest" {
 		t.Fatalf("ids=%v err=%v", ids, err)
 	}
@@ -289,7 +289,7 @@ func TestRegionUnavailable(t *testing.T) {
 		}
 	}
 	url := listServer(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(451) })
-	_, _, err := (&Client{}).ListModels(context.Background(), url, "")
+	_, _, err := (&Client{}).ListModels(context.Background(), url, "", "")
 	var se *StatusError
 	if !errors.As(err, &se) || !se.Region {
 		t.Fatalf("err=%v", err)
