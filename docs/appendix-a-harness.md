@@ -34,17 +34,19 @@
 
 ## A.2 无头运行声明
 
-插件经 `apa declare <文件>` 提交，本人在 Web 确认后生效；本人也可以直接写主机配置文件（§14.12）。内核只把它当数据处理，不认识具体 harness。
+插件经 `apa declare <文件>` 提交，本人在 Web 确认后生效；本人也可以直接写主机配置文件（§14.12）。内核只把它当数据处理，不认识具体 harness。界面上它是 Agent 卡片的"允许 APA 在后台拉起它"，按声明里的 `name` 称呼，并按 `headless.tools` 列出每一档给 Agent 的工具（主文档 §4.1）。
 
 | 字段 | 语义 |
 |---|---|
 | `harness` | harness 标识，只用于展示和选择 |
+| `name` | 可选。中英各一份的显示名 `{zh, en}`，界面按它称呼这个 Agent；未声明时界面称"Agent"，`harness` 只在"显示原始值"里 |
 | `headless.command` | 命令模板，占位符 `{prompt}`、`{run_dir}` |
 | `headless.output` | 结构化输出标志 |
 | `headless.session.assign` | 预设会话 id 的标志，与 `extract` 二选一 |
 | `headless.session.extract` | 从 stdout 取会话 id 的路径 |
 | `headless.resume` | 续接标志，未声明表示不支持续接 |
 | `headless.access` | 权限档位到标志的映射：`read`、`edit`、`full`；可只声明部分档位，未声明的档位不会被拉起（§13.6） |
+| `headless.tools` | 可选。每个已声明档位实际给 Agent 的工具，只用于展示：`{档位: [{zh, en}, …]}`，另可给 `notes: {档位: {zh, en}}`（如"不再逐项问你"）。须与 `headless.access` 里的标志一致，由插件作者保证；Web 不解析命令行参数。未声明时界面只显示档位名 |
 | `headless.credential` | 运行凭据的传递方式：`env`（默认）或 `file`（§7.7） |
 | `headless.exit_codes` | 已文档化的退出码语义；未文档化时以回执为准 |
 | `headless.exit_output` | 可选。按语义键收窄 `exit_codes`：声明后，退出码命中且 stdout 或 stderr 含所列任一片段，才算该语义。用于多种失败共用一个退出码的 harness，片段以实测原文为准；未声明时只看退出码 |
@@ -57,6 +59,7 @@
 
 ```yaml
 harness: hermes
+name: {zh: Hermes, en: Hermes}
 headless:
   command: ["hermes", "chat", "--oneshot", "-q", "{prompt}"]
   output: ["--format", "stream-json"]
@@ -67,6 +70,11 @@ headless:
     read: ["-t", "apa,web"]
     edit: ["-t", "apa,web,file,terminal,delegation"]
     full: ["--yolo", "-t", "apa,web,file,terminal,delegation"]
+  tools:
+    read: [{zh: APA, en: APA}, {zh: 网页, en: Web}]
+    edit: [{zh: APA, en: APA}, {zh: 网页, en: Web}, {zh: 文件, en: Files}, {zh: 终端, en: Terminal}, {zh: 委派, en: Delegation}]
+    full: [{zh: APA, en: APA}, {zh: 网页, en: Web}, {zh: 文件, en: Files}, {zh: 终端, en: Terminal}, {zh: 委派, en: Delegation}]
+    notes: {full: {zh: 不再逐项问你, en: Stops asking you each time}}
   exit_codes: {ok: [0], session_missing: [1]}
   exit_output: {session_missing: ["No session found matching"]}
 main_session:
