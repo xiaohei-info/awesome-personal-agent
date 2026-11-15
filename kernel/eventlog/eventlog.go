@@ -226,3 +226,20 @@ func Tombstone(tx *store.Tx, objects ...string) (int64, error) {
 	}
 	return total, nil
 }
+
+// SeenHarness 返回每个操作者最近一次事件里自报的 harness（只作推荐，不参与判定，§14.2）；没有自报过的不出现在结果里。
+// shortcut: 每次调用全表扫描一遍事件日志，事件到数十万条、设置页变慢时改为按操作者建索引或缓存。
+func SeenHarness(tx *store.Tx) (map[string]string, error) {
+	out := map[string]string{}
+	err := queryRows(tx, func(r *store.Rows) error {
+		var p, h string
+		var seq int64
+		if err := r.Scan(&p, &h, &seq); err != nil {
+			return err
+		}
+		out[p] = h
+		return nil
+	}, `SELECT json_extract(actor, '$.principal'), json_extract(actor, '$.harness'), MAX(seq) FROM eventlog_event
+		WHERE json_extract(actor, '$.harness') <> '' GROUP BY json_extract(actor, '$.principal')`)
+	return out, err
+}

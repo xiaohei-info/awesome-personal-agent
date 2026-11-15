@@ -255,6 +255,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     "item.deleted": { label: "永久删除了事项" },
     "run.credential_exchanged": { label: "后台运行领取了钥匙" },
     "timer.fired": { label: "定时器到点" },
+    "credential.assigned": { label: "把钥匙归给了 Agent" },
   },
   materialKind: { minutes: { label: "纪要" }, reference: { label: "参考资料" }, worknote: { label: "工作笔记" }, requirement: { label: "需求" }, design: { label: "方案" }, guideline: { label: "规范" } },
   pack: {
@@ -541,6 +542,7 @@ const en: typeof zh = {
     "item.deleted": { label: "permanently deleted an item" },
     "run.credential_exchanged": { label: "background run picked up its key" },
     "timer.fired": { label: "timer fired" },
+    "credential.assigned": { label: "assigned a key to an Agent" },
   },
   materialKind: { minutes: { label: "Minutes" }, reference: { label: "Reference" }, worknote: { label: "Work notes" }, requirement: { label: "Requirements" }, design: { label: "Design" }, guideline: { label: "Guideline" } },
   pack: {

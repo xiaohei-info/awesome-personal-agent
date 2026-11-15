@@ -324,3 +324,82 @@ func TestMountRejectsDuplicateRegistration(t *testing.T) {
 		t.Fatal("mounting twice on one executor must fail")
 	}
 }
+
+type viewRow struct {
+	auth.Credential
+	SeenHarness string `json:"seen_harness"`
+}
+
+func (e *env) views() map[string]viewRow {
+	e.t.Helper()
+	r := e.web("GET", "/v1/settings/tokens", "")
+	var out struct {
+		Credentials []viewRow `json:"credentials"`
+	}
+	if err := json.Unmarshal(r.Body.Bytes(), &out); err != nil {
+		e.t.Fatal(err)
+	}
+	m := map[string]viewRow{}
+	for _, c := range out.Credentials {
+		m[c.ID] = c
+	}
+	return m
+}
+
+// T9（§14.2）：token 所属 harness 可在签发时给定，旧 token 由本人认领一次；最近一次自报的 harness 只作推荐。
+func TestTokenHarnessIssueAssignOnceAndSeen(t *testing.T) {
+	e := setup(t)
+	if r := e.web("POST", "/v1/settings/tokens", `{"kind":"observer","harness":"hermes"}`); r.Code != 400 {
+		t.Fatalf("harness on observer: %d %s", r.Code, r.Body)
+	}
+	named := e.issue("/v1/settings/tokens", `{"kind":"delegate","harness":"hermes"}`)
+	old := e.issue("/v1/settings/tokens", `{"kind":"delegate","label":"gateway"}`)
+	dlg := old.Secret
+
+	// 自报的 harness 取最近一次：先 other 后 hermes。
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
+		for _, h := range []string{"other", "hermes", ""} {
+			a := domain.Actor{Type: domain.ActorAgent, Principal: old.Credential.ID, Via: domain.ViaCLI, Harness: h}
+			if _, err := eventlog.Append(tx, domain.Event{Type: "item.created", Object: "item_x", Actor: a, Payload: json.RawMessage(`{}`)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v := e.views()
+	if v[named.Credential.ID].Harness != "hermes" || v[old.Credential.ID].Harness != "" || v[old.Credential.ID].SeenHarness != "hermes" {
+		t.Fatalf("list = %+v", v)
+	}
+
+	path := "/v1/settings/tokens/" + old.Credential.ID
+	if r := e.do("PATCH", path, `{"harness":"hermes"}`, bearer(dlg)); r.Code != 403 || errCode(t, r) != domain.CodeWebOnly {
+		t.Fatalf("delegate assign: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("PATCH", path, `{"harness":"hermes"}`); r.Code != 200 {
+		t.Fatalf("assign: %d %s", r.Code, r.Body)
+	}
+	if e.views()[old.Credential.ID].Harness != "hermes" {
+		t.Fatal("assigned harness not listed")
+	}
+	if r := e.web("PATCH", path, `{"harness":"other"}`); r.Code != 409 {
+		t.Fatalf("second assign must conflict: %d %s", r.Code, r.Body)
+	}
+	e.st.View(context.Background(), func(tx *store.Tx) error {
+		evs, err := eventlog.ReadObject(tx, old.Credential.ID)
+		if err != nil || len(evs) != 1 || evs[0].Event.Type != credentials.EvAssigned {
+			t.Fatalf("events = %+v %v", evs, err)
+		}
+		return nil
+	})
+
+	gone := e.issue("/v1/settings/tokens", `{"kind":"worker"}`)
+	e.web("DELETE", "/v1/settings/tokens/"+gone.Credential.ID, "")
+	if r := e.web("PATCH", "/v1/settings/tokens/"+gone.Credential.ID, `{"harness":"hermes"}`); r.Code != 409 {
+		t.Fatalf("revoked assign must conflict: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("PATCH", "/v1/settings/tokens/"+named.Credential.ID, `{"harness":" "}`); r.Code != 400 {
+		t.Fatalf("blank harness: %d %s", r.Code, r.Body)
+	}
+}

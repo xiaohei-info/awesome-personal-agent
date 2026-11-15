@@ -16,6 +16,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -24,7 +25,11 @@ const (
 	CmdIssue  = "credential.issue"
 	CmdList   = "credential.list"
 	CmdRevoke = "credential.revoke"
+	CmdAssign = "credential.assign"
 )
+
+// EvAssigned 记 token 被认领到某个 harness（§14.2）。
+const EvAssigned = "credential.assigned"
 
 // group 是一组路由管理的凭据种类。
 type group struct {
@@ -60,6 +65,7 @@ type input struct {
 	Label    string    `json:"label,omitempty"`
 	Executor string    `json:"executor,omitempty"`
 	Scope    string    `json:"scope,omitempty"`
+	Harness  string    `json:"harness,omitempty"`
 }
 
 func parse(raw json.RawMessage) (input, group, error) {
@@ -94,7 +100,7 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 			},
 			Apply: func(c *command.Ctx) (any, error) {
 				in, _, _ := parse(c.Input)
-				cred, secret, err := a.Issue(c.Tx, auth.Spec{Kind: in.Kind, Label: in.Label, Executor: in.Executor, Scope: in.Scope})
+				cred, secret, err := a.Issue(c.Tx, auth.Spec{Kind: in.Kind, Label: in.Label, Executor: in.Executor, Scope: in.Scope, Harness: in.Harness})
 				if err != nil {
 					return nil, err
 				}
@@ -108,10 +114,19 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 				if err != nil {
 					return nil, err
 				}
-				out := []auth.Credential{}
+				seen, err := eventlog.SeenHarness(c.Tx)
+				if err != nil {
+					return nil, err
+				}
+				out := []view{}
 				for _, cr := range all {
 					if g.has(cr.Kind) {
-						out = append(out, cr)
+						// 事件 actor 的 principal 与 auth.Credential.Actor 同一取法：绑定了执行者时是执行者 id。
+						p := cr.Executor
+						if p == "" {
+							p = cr.ID
+						}
+						out = append(out, view{Credential: cr, SeenHarness: seen[p]})
 					}
 				}
 				return map[string]any{"credentials": out}, nil
@@ -141,6 +156,28 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 				}
 				return nil, domain.NewError(domain.CodeInternal, "revoked credential vanished", "retry")
 			}},
+		{Name: CmdAssign, Action: authz.ActionChangeSettings, Object: noObject,
+			Validate: func(_ *store.Tx, _ authz.Object, raw json.RawMessage) error { _, _, err := parse(raw); return err },
+			Apply: func(c *command.Ctx) (any, error) {
+				in, g, _ := parse(c.Input)
+				if cr, err := a.Get(c.Tx, in.ID); err != nil {
+					return nil, err
+				} else if !g.has(cr.Kind) {
+					return nil, domain.NewError(domain.CodeNotFound, "credential not found", "list credentials and retry")
+				}
+				cr, err := a.Assign(c.Tx, in.ID, in.Harness)
+				if err != nil {
+					return nil, err
+				}
+				payload, err := json.Marshal(map[string]string{"harness": cr.Harness})
+				if err != nil {
+					return nil, err
+				}
+				if _, err := c.Emit(domain.Event{Type: EvAssigned, Object: cr.ID, Reason: "credential assigned to harness", Payload: payload}); err != nil {
+					return nil, err
+				}
+				return map[string]any{"credential": cr}, nil
+			}},
 	} {
 		if err := x.Register(s); err != nil {
 			return nil, err
@@ -156,6 +193,16 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 				return nil
 			})})
 		}
+		r.Handle(core.Route{Method: "PATCH", Path: "/settings/tokens/{id}", MaxBody: 4 << 10, Handler: run(x, CmdAssign, groups[0], http.StatusOK, func(r *http.Request, in *input) error {
+			var b struct {
+				Harness string `json:"harness"`
+			}
+			if err := core.DecodeJSON(r, &b); err != nil {
+				return err
+			}
+			in.ID, in.Harness = r.PathValue("id"), b.Harness
+			return nil
+		})})
 	}, nil
 }
 
@@ -165,11 +212,17 @@ func body(r *http.Request, in *input) error {
 	if err := core.DecodeJSON(r, &b); err != nil {
 		return err
 	}
-	in.Kind, in.Label, in.Executor, in.Scope = b.Kind, b.Label, b.Executor, b.Scope
+	in.Kind, in.Label, in.Executor, in.Scope, in.Harness = b.Kind, b.Label, b.Executor, b.Scope, b.Harness
 	if in.Group == "ext-keys" {
 		in.Kind = auth.Ext
 	}
 	return nil
+}
+
+// view 是列表里的一条：凭据登记加最近一次调用自报的 harness（只作认领推荐）。
+type view struct {
+	auth.Credential
+	SeenHarness string `json:"seen_harness,omitempty"`
 }
 
 func run(x *command.Executor, cmd string, g group, status int, fill func(*http.Request, *input) error) core.Handler {

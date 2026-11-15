@@ -414,6 +414,11 @@ func (r *run) upg05(t *testing.T) {
 			t.Errorf("表 %s 行数减少：%d → %d", tbl, n, got)
 		}
 	}
+	// 结构版本 6 的凭据 harness 列只增不填：升级前的 token 原样保留，归属为空，等本人在 Web 认领（主文档 §16.5）。
+	var claimed int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM auth_credential WHERE harness <> ''`).Scan(&claimed); err != nil || claimed != 0 {
+		t.Errorf("升级后已有 token 不应带归属：%d %v", claimed, err)
+	}
 }
 
 // apiEvents 用观察者凭据按游标取全部可见 Event 信封，直到追上 maxSeq。
