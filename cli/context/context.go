@@ -113,19 +113,32 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// persona 输出当前人格原文；未设定时输出为空（附录 B.1）。
+// persona 输出当前人格：本人写的，没写则是内置默认（附录 B.1）。语言取 --lang，其次进程的区域设置
+// （LC_ALL、LC_MESSAGES、LANG，插件由宿主拉起本进程，天然继承宿主所在机器的设置），都取不到由内核按英文。
 func persona(c *client.Ctx, args []string) error {
-	if len(args) != 0 {
-		return usage("apa persona takes no arguments", "usage: apa persona")
+	fs := flag.NewFlagSet("persona", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	lang := fs.String("lang", "", "")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return usage("invalid arguments for persona", "usage: apa persona [--lang zh|en]")
+	}
+	if *lang == "" {
+		for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+			if v := c.Env.Getenv(k); v != "" {
+				*lang = v
+				break
+			}
+		}
+	}
+	path := "/context/persona"
+	if *lang != "" {
+		path += "?" + url.Values{"lang": {*lang}}.Encode()
 	}
 	var out struct {
 		Persona string `json:"persona"`
 	}
-	if err := c.Do(context.Background(), "GET", "/context/persona", nil, &out); err != nil {
+	if err := c.Do(context.Background(), "GET", path, nil, &out); err != nil {
 		return err
-	}
-	if out.Persona == "" {
-		return nil
 	}
 	_, err := io.WriteString(c.Env.Stdout, out.Persona+"\n")
 	return err

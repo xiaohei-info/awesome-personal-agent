@@ -37,6 +37,7 @@ export function policyServer(opts: { webOnlyDenied?: boolean } = {}) {
     if (url === "/v1/settings/commands") return json(200, { declarations: [{ harness: "hermes", rev: 1, state: "confirmed", declaration: { harness: "hermes", headless: { command: ["hermes"], access: { read: [], edit: [] } } } }] });
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
     if (url.startsWith("/v1/items/")) return json(200, { id: url.slice("/v1/items/".length), title: "Renew domain" });
+    if (url.startsWith("/v1/context/persona")) return json(200, { persona: "decl\n" + doc.persona, default: url.endsWith("lang=zh") ? "Default tone (zh)" : "Default tone (en)" });
     const keys = SECTIONS[url];
     if (!keys) return err(404, "not_found", "no such route");
     if (opts.webOnlyDenied) return err(403, "web_only", "settings can only be used by the owner in the Web UI");

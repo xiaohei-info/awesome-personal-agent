@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHead } from "../../app/page";
-import { browserLang, setChoice, storedChoice, useT, type Choice } from "../../app/i18n";
+import { browserLang, setChoice, storedChoice, useLang, useT, type Choice } from "../../app/i18n";
+import { useSession } from "../../app/session";
 import { LANG_NAMES } from "../../app/strings";
 import { strings } from "./strings";
 import { setRawShown, useRaw } from "../../app/raw";
@@ -62,17 +63,32 @@ export function estimateTokens(s: string): number {
 
 function Persona() {
   const { docs, error, save } = usePolicyDocs(PERSONA_ROUTES);
+  const { api } = useSession();
+  const lang = useLang();
+  // 内置默认原文由内核按界面语言给出（§11.2）；取不到时按空文本处理，编辑框仍可写自己的。
+  const [def, setDef] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.get<{ default?: string }>("/context/persona?lang=" + lang).then((r) => live && setDef(r.default ?? ""), () => live && setDef(""));
+    return () => { live = false; };
+  }, [api, lang]);
   if (error) return <p role="alert">{error}</p>;
-  return docs?.policy ? <PersonaCard doc={docs.policy} save={save} /> : null;
+  return docs?.policy && def !== null ? <PersonaCard doc={docs.policy} def={def} save={save} /> : null;
 }
 const PERSONA_ROUTES = ["policy"] as const;
 
-function PersonaCard({ doc, save }: { doc: Doc; save: Save }) {
+// 策略里的人格为空 = 用内置默认：编辑框显示默认文本并标「默认」；改了就成为自定义，文本等于默认时存回空串，继续跟随新版默认。
+function PersonaCard({ doc, def, save }: { doc: Doc; def: string; save: Save }) {
   const t = useT(strings);
-  const [text, setText] = useDraft(doc.persona, () => (doc.persona as string | undefined) ?? "");
+  const stored = ((doc.persona as string | undefined) ?? "").trim() !== "";
+  const [text, setText] = useDraft(stored ? doc.persona : [doc.persona, def], () => (stored ? (doc.persona as string) : def));
   const n = estimateTokens(text);
+  const isDefault = text === def;
   return (
-    <Card title={t.persona} hint={t.personaHint} onSave={() => save("policy", { persona: text })}>
+    <Card title={t.persona} hint={t.personaHint} onSave={() => save("policy", { persona: isDefault ? "" : text })}>
+      <div className="row">
+        {isDefault ? <span className="badge ok">{t.personaDefault}</span> : <button type="button" onClick={() => setText(def)}>{t.personaRestore}</button>}
+      </div>
       <textarea aria-label={t.persona} value={text} onChange={(e) => setText(e.target.value)} />
       <div className="meter" aria-hidden="true"><b style={{ width: `${Math.min(100, (n / PERSONA_MAX) * 100)}%` }} /></div>
       <p className="sub">{t.personaUsed(n, PERSONA_MAX)}</p>

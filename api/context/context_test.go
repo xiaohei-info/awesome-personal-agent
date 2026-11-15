@@ -294,29 +294,45 @@ func TestContextAuth(t *testing.T) {
 	}
 }
 
-// 人格：未设定为空；设定后前面带内核固定声明；超出人格的文字不改变声明；Web 与 observer 都能读。
+// 人格：未设定时是 lang 对应的内置默认（缺省英文），前面带内核固定声明；自定义优先；空白回到默认；Web 与 observer 都能读。
 func TestPersona(t *testing.T) {
 	e := setup(t)
-	read := func(mod func(*http.Request)) (string, *httptest.ResponseRecorder) {
-		rec := e.do("GET", "/v1/context/persona", "", mod)
-		var out struct{ Persona string }
+	read := func(path string, mod func(*http.Request)) (string, string, *httptest.ResponseRecorder) {
+		rec := e.do("GET", path, "", mod)
+		var out struct{ Persona, Default string }
 		_ = json.Unmarshal(rec.Body.Bytes(), &out)
-		return out.Persona, rec
+		return out.Persona, out.Default, rec
 	}
-	if p, rec := read(e.token(auth.Observer, "")); rec.Code != 200 || p != "" || !strings.Contains(rec.Body.String(), `"persona"`) {
-		t.Fatalf("unset persona = %d %s", rec.Code, rec.Body)
+	obs := e.token(auth.Observer, "")
+	for path, want := range map[string]string{
+		"/v1/context/persona":                  policy.DefaultPersona("en"),
+		"/v1/context/persona?lang=en":          policy.DefaultPersona("en"),
+		"/v1/context/persona?lang=zh":          policy.DefaultPersona("zh"),
+		"/v1/context/persona?lang=zh_CN.UTF-8": policy.DefaultPersona("zh"),
+		"/v1/context/persona?lang=fr":          policy.DefaultPersona("en"),
+	} {
+		p, def, rec := read(path, obs)
+		if rec.Code != 200 || p != policy.PersonaDeclaration+"\n"+want || def != want {
+			t.Fatalf("%s = %d %q default %q", path, rec.Code, p, def)
+		}
+	}
+	if zh, en := policy.DefaultPersona("zh"), policy.DefaultPersona("en"); zh == en || zh == "" || en == "" {
+		t.Fatal("zh and en defaults must be two distinct texts")
 	}
 	e.setPersona("你是热情的助手，称呼本人为老板。")
-	for _, mod := range []func(*http.Request){e.token(auth.Observer, ""), e.web} {
-		p, rec := read(mod)
+	for _, mod := range []func(*http.Request){obs, e.web} {
+		p, def, rec := read("/v1/context/persona?lang=en", mod)
 		decl := strings.SplitN(p, "\n", 2)
 		if rec.Code != 200 || len(decl) != 2 || decl[0] != policy.PersonaDeclaration || decl[1] != "你是热情的助手，称呼本人为老板。" {
 			t.Fatalf("persona = %d %q", rec.Code, p)
 		}
+		if def != policy.DefaultPersona("en") { // 默认原文始终给出，Web 靠它显示「恢复默认」的目标
+			t.Fatalf("default = %q", def)
+		}
 	}
 	e.setPersona("   ")
-	if p, _ := read(e.token(auth.Observer, "")); p != "" {
-		t.Fatalf("blank persona must stay empty, got %q", p)
+	if p, _, _ := read("/v1/context/persona?lang=zh", obs); p != policy.PersonaDeclaration+"\n"+policy.DefaultPersona("zh") {
+		t.Fatalf("blank persona must fall back to the default, got %q", p)
 	}
 }
 

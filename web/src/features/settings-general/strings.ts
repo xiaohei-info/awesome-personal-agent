@@ -14,6 +14,8 @@ const zh = {
   rawHint: "在中文名旁显示系统里的 ID",
   persona: "助手的语气",
   personaHint: "只影响说话方式，不改变任何权限",
+  personaDefault: "默认",
+  personaRestore: "恢复默认",
   personaUsed: (n: number, max: number) => `约 ${n} / ${max}`,
   summary: (lang: string, persona: boolean) => lang + (persona ? " · 已设助手语气" : ""),
 };
@@ -30,6 +32,8 @@ const en: typeof zh = {
   rawHint: "Show system IDs next to names",
   persona: "Assistant's tone",
   personaHint: "Changes how it talks, never what it may do",
+  personaDefault: "Default",
+  personaRestore: "Restore default",
   personaUsed: (n, max) => `about ${n} / ${max}`,
   summary: (lang, persona) => lang + (persona ? " · tone set" : ""),
 };
