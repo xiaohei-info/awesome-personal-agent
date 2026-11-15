@@ -41,6 +41,8 @@ export interface SourceEvent {
   unjudged_reason?: string;
   rejudges?: number;
   score?: number; // 影子打分的预估分数（§9.3）；没打过分时没有
+  sender?: string;
+  sender_verified?: boolean;
 }
 
 export const SCOPES = ["full", "excerpt", "meta", "none"] as const;

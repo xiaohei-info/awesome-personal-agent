@@ -76,6 +76,8 @@ export function AttachedMessages({ itemId }: { itemId: string }) {
                   <Link to={`/sources?open=${encodeURIComponent(m.source)}&add=${encodeURIComponent(m.sender)}#trusted-senders`}>{t.addToList}</Link>
                 </>
               )}
+              {" · "}
+              <Link to={"/sources/events/" + encodeURIComponent(m.id)}>{t.trace}</Link>
               {safeHref(m.link) ? <> · <a href={safeHref(m.link)!} rel="noopener noreferrer">{t.source}</a></> : null}
             </li>
           ))}

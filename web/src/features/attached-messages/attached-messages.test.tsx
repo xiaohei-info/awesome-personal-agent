@@ -18,7 +18,7 @@ function fetchFor(messages: unknown, status = 200) {
   return (async (url: string) => {
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/items") return json(200, { items: [] });
-    if (url.startsWith("/v1/why/")) return json(200, { steps: [] });
+    if (url.endsWith("/trace")) return json(200, { entries: [] });
     if (url === "/v1/items/item_a/messages") return json(status, status === 200 ? { messages } : messages);
     if (url === "/v1/items/item_a") return json(200, { item: { id: "item_a", phase: "open", version: 1, kind: "task", title: "item-a" }, relations: [] });
     return json(404, { code: "not_found", why: "no such route", next: "check" });
@@ -74,8 +74,10 @@ describe("事项页挂靠消息（ACT-FWD-04）", () => {
     const ok = within(rows[0]).getByRole("link", { name: "来源" });
     expect(ok).toHaveAttribute("href", "https://example.com/pr/1");
     expect(ok).toHaveAttribute("rel", "noopener noreferrer");
-    expect(within(rows[1]).queryByRole("link")).toBeNull();
-    expect(within(rows[2]).queryByRole("link")).toBeNull();
+    expect(within(rows[1]).queryByRole("link", { name: "来源" })).toBeNull();
+    expect(within(rows[2]).queryByRole("link", { name: "来源" })).toBeNull();
+    // 每条都能回到它的处理经过（站内链接，不是外部来源）。
+    expect(within(rows[1]).getByRole("link", { name: "处理经过" })).toHaveAttribute("href", "/sources/events/l2");
     expect(document.querySelector('a[href^="javascript"]')).toBeNull();
   });
 

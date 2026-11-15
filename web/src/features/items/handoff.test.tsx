@@ -20,7 +20,7 @@ function server(o: { mode?: string; declared?: boolean; items?: any[] } = {}) {
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/items" || url.startsWith("/v1/items?")) return json(200, { items });
     if (/\/messages$/.test(url)) return json(200, { messages: [] });
-    if (url.startsWith("/v1/why/")) return json(200, { steps: [] });
+    if (url.endsWith("/trace")) return json(200, { entries: [] });
     const it = items.find((i) => url === "/v1/items/" + i.id);
     if (!it) return json(404, { code: "not_found", why: "no item", next: "" });
     if (method === "PATCH") {

@@ -17,6 +17,7 @@ const zh = {
   stateLabel: "处理状态",
   addToList: "加入可读名单",
   source: "来源",
+  trace: "处理经过",
 };
 
 const en: typeof zh = {
@@ -35,6 +36,7 @@ const en: typeof zh = {
   stateLabel: "State",
   addToList: "Add to the readable list",
   source: "source",
+  trace: "what happened",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

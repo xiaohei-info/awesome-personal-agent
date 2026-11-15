@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { COUNTS_EVENT, PageHead } from "../../app/page";
 import { locale, useT } from "../../app/i18n";
@@ -82,7 +82,7 @@ export function SpotCheckPage() {
               <div>
                 <strong>{e.link ? <a href={e.link} target="_blank" rel="noreferrer noopener">{e.subject || t.noSubject}</a> : e.subject || t.noSubject}</strong>
                 <p className="sub">
-                  {source(e.source)} · {new Date(e.judged_at).toLocaleString(locale())}
+                  {source(e.source)} · {new Date(e.judged_at).toLocaleString(locale())} · <Link to={"/sources/events/" + encodeURIComponent(e.event)}>{t.trace}</Link>
                   {raw && <code className="raw-id">{`${e.event} · ${e.template} · ${e.judgment}`}</code>}
                 </p>
               </div>

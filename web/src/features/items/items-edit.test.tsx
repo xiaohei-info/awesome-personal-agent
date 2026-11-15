@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
+import { traceRoute } from "../trace/testing";
 
 // 测试边界替身：按 api/items 的契约应答（POST /items 201、PATCH 带 If-Match 推进 version、POST correlation-keys），
 // 并像服务端一样把每次写入记成 Event（Web 会话 = human/web）。
@@ -13,10 +14,10 @@ const BODY = "## 行程\n- 周五出发\n[航司](https://example.com)\n<script>
 function ledger() {
   const items: any[] = [];
   const keys: { key: string }[] = [];
-  const events: { seq: number; type: string; object: string; actor: any; at: string; chain_depth: number }[] = [];
+  const events: { seq: number; type: string; object: string; actor: any; at: string; chain_depth: number; fields?: string[] }[] = [];
   const calls: { method: string; path: string; body?: any; ifMatch: string | null }[] = [];
-  const ev = (type: string, object: string) =>
-    events.push({ seq: events.length + 1, type, object, actor: { type: "human", principal: "owner", via: "web" }, at: "2030-01-02T00:00:00Z", chain_depth: 0 });
+  const ev = (type: string, object: string, fields?: string[]) =>
+    events.push({ seq: events.length + 1, type, object, actor: { type: "human", principal: "owner", via: "web" }, at: "2030-01-02T00:00:00Z", chain_depth: 0, fields });
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     const body = init.body ? JSON.parse(init.body as string) : undefined;
@@ -31,8 +32,8 @@ function ledger() {
     }
     if (url === "/v1/items" || url.startsWith("/v1/items?")) return json(200, { items });
     if (/\/messages$/.test(url)) return json(200, { messages: [] });
-    const why = url.match(/^\/v1\/why\/(.+)$/);
-    if (why) return json(200, { id: why[1], steps: events.filter((e) => e.object === why[1]) });
+    const tr = traceRoute(url, events);
+    if (tr) return tr;
     const m = url.match(/^\/v1\/items\/([^/]+)(\/correlation-keys)?$/);
     const it = items.find((i) => i.id === m?.[1]);
     if (!m || !it) return json(404, { code: "not_found", why: "item not found", next: "check the id" });
@@ -45,7 +46,7 @@ function ledger() {
     } else {
       Object.assign(it, body);
       it.version++;
-      ev("item.updated", it.id);
+      ev("item.updated", it.id, Object.keys(body).filter((k) => k !== "reason"));
     }
     return json(200, { id: it.id, version: it.version });
   }) as unknown as typeof fetch;
@@ -78,7 +79,7 @@ describe("Web 新建与编辑事项", () => {
     const post = l.calls.find((c) => c.method === "POST" && c.path === "/v1/items")!;
     expect(post.body).toMatchObject({ kind: "task", phase: "open", title: "WB-NEW 订机票", project: "acc-home", planned_for: "2030-03-04", body: BODY });
     expect(post.body.deadline).toBe(new Date("2030-03-05T18:00").toISOString());
-    expect((await timelineText())).toContain("新建了事项");
+    expect((await timelineText())).toContain("新建了");
   });
 
   it("新建缺标题时不发请求", async () => {
@@ -137,7 +138,7 @@ describe("Web 新建与编辑事项", () => {
     // 页面按服务端重读：下一次写入带的是新版本号（版本号本身不再显示）。
     await u.click(screen.getByRole("button", { name: "保存状态标签" }));
     await waitFor(() => expect(l.calls.filter((c) => c.method === "PATCH")[1]?.ifMatch).toBe("4"));
-    expect(await timelineText()).toContain("修改了事项");
+    expect(await timelineText()).toMatch(/改了(标题、正文|事项)/);
   });
 
   it("版本冲突时显示服务端原因，不留本地假状态", async () => {
@@ -167,11 +168,11 @@ describe("Web 新建与编辑事项", () => {
     const post = l.calls.find((c) => c.path === "/v1/items/item_x/correlation-keys")!;
     expect(post.body).toEqual({ key: "fm-thread-5" });
     expect(post.ifMatch).toBe("1");
-    expect(await timelineText()).toContain("修改了事项");
+    expect(await timelineText()).toMatch(/改了(标题、正文|事项)/);
   });
 });
 
 async function timelineText() {
-  await waitFor(() => expect(screen.getByRole("list", { name: "时间线" }).textContent).not.toBe(""));
-  return screen.getByRole("list", { name: "时间线" }).textContent ?? "";
+  await waitFor(() => expect(screen.getByRole("list", { name: "处理经过" }).textContent).not.toBe(""));
+  return screen.getByRole("list", { name: "处理经过" }).textContent ?? "";
 }
