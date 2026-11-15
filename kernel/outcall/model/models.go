@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
 
 const (
@@ -20,18 +22,21 @@ const (
 )
 
 // ListModels 取端点的模型列表：GET <url>/models，读 data[].id 或 models[].name（设计 §4.1 "设置 › 模型"）。
+// protocol 是生成端点的协议，决定鉴权头（同 Complete）；消息协议的列表默认分页，带 limit 取最多一页。判断端点传空串。
 // 请求只带鉴权头，不带任何账本内容。返回去重排序后的 id，至多 MaxModels 个，超出时 truncated 为真。
 // 非 2xx 返回 *StatusError；超时返回 ErrTimeout；响应不是模型列表返回 ErrBadResponse。
-func (c *Client) ListModels(ctx context.Context, url, key string) (ids []string, truncated bool, err error) {
+func (c *Client) ListModels(ctx context.Context, url, key, protocol string) (ids []string, truncated bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, ModelsTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(url, "/")+"/models", nil)
+	target := strings.TrimRight(url, "/") + "/models"
+	if protocol == policy.ProtocolMessages {
+		target += "?limit=1000"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, false, fmt.Errorf("model: bad endpoint url: %w", scrub(err, key))
 	}
-	if key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
-	}
+	setAuth(req.Header, protocol, key)
 	hc := c.HTTP
 	if hc == nil {
 		hc = &http.Client{}
@@ -51,7 +56,7 @@ func (c *Client) ListModels(ctx context.Context, url, key string) (ids []string,
 	if len(raw) > maxListBody {
 		return nil, false, fmt.Errorf("%w: body exceeds %d bytes", ErrBadResponse, maxListBody)
 	}
-	// 对话补全兼容端点给 data[].id；system-one 判断接口给 models[].name。
+	// 生成端点（三种协议）给 data[].id；system-one 判断接口给 models[].name。
 	var out struct {
 		Data *[]struct {
 			ID string `json:"id"`

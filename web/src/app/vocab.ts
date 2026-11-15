@@ -75,11 +75,16 @@ const num = (d: DoctorData, k: string) => Number(d?.[k] ?? 0);
 const DRAFT_SHAPE_ZH: Record<string, string> = {
   empty: "：返回为空", markdown_fence: "：被代码块包着", truncated: "：被截断", malformed_json: "：不是合法 JSON",
   trailing_data: "：JSON 后多了内容", text_around: "：JSON 前后夹着文字", plain_text: "：返回的是一段文字",
+  no_tool_call: "：没有调用输出工具",
 };
 const DRAFT_SHAPE_EN: Record<string, string> = {
   empty: ": empty reply", markdown_fence: ": wrapped in a code block", truncated: ": cut off", malformed_json: ": not valid JSON",
   trailing_data: ": extra text after the JSON", text_around: ": text around the JSON", plain_text: ": plain text, no JSON",
+  no_tool_call: ": the output tool was not called",
 };
+// 这些形态说明端点没守结构化约束：提示换协议。
+const IGNORED_SHAPES = new Set(["markdown_fence", "text_around", "plain_text", "no_tool_call"]);
+const ignored = (d: DoctorData) => IGNORED_SHAPES.has(String(d?.shape));
 const stamp = (loc: string) => (d: DoctorData, k: string) => {
   const v = d?.[k];
   return typeof v === "string" && !v.startsWith("0001") && v !== "never" ? new Date(v).toLocaleString(loc) : "";
@@ -148,7 +153,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
   write: { direct: { label: "直接生效" }, proposed: { label: "先给我看" } },
   muteScope: { source: { label: "来源" }, project: { label: "项目" }, item: { label: "事项" } },
   locality: { local: { label: "我自己的机器" }, external: { label: "外部服务" } },
-  protocol: { "system-one": { label: "原生判断接口" }, "probability-judgment/1": { label: "自建分类服务" } },
+  protocol: { "system-one": { label: "原生判断接口" }, "probability-judgment/1": { label: "自建分类服务" }, "chat-completions": { label: "OpenAI 兼容" }, messages: { label: "Anthropic 兼容" }, responses: { label: "OpenAI Responses" } },
   probSource: { native: { label: "模型原生概率" }, logprobs: { label: "由对数概率换算" }, self_reported: { label: "模型自报（不可用）" } },
   grantAction: {
     "item.create": { label: "新建事项" },
@@ -307,8 +312,8 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     no_answer: () => "端点没有回答示例题",
     http_status: (d) => (d?.status ? `端点返回了错误状态（HTTP ${d.status}）` : "端点返回了错误状态"),
     schema_mismatch: () => "能用，但输出不符合示例的结构化格式，卡片文案可能退化",
-    draft_schema: (d) => `起草建议的输出不合格${DRAFT_SHAPE_ZH[String(d?.shape)] ?? ""}`,
-    bad_response: () => "响应不是对话补全格式",
+    draft_schema: (d) => `起草建议的输出不合格${DRAFT_SHAPE_ZH[String(d?.shape)] ?? ""}${ignored(d) ? "。端点可能不支持结构化输出，试试另一种协议" : ""}`,
+    bad_response: () => "响应不是所选协议的格式，检查协议选得对不对",
     region_unavailable: () => "服务在当前网络位置不可用，请改用可访问的网关地址或代理",
     skipped: (d) => (d?.reason === "ledger_schema_differs" ? "数据版本和程序不一致，这项先不查" : "数据读不到，这项先不查"),
     ledger_unreadable: () => "数据文件读不到：检查权限和磁盘",
@@ -436,7 +441,7 @@ const en: typeof zh = {
   write: { direct: { label: "Takes effect" }, proposed: { label: "Show me first" } },
   muteScope: { source: { label: "Source" }, project: { label: "Project" }, item: { label: "Item" } },
   locality: { local: { label: "My own machine" }, external: { label: "Outside service" } },
-  protocol: { "system-one": { label: "Native judgment API" }, "probability-judgment/1": { label: "Self-hosted classifier" } },
+  protocol: { "system-one": { label: "Native judgment API" }, "probability-judgment/1": { label: "Self-hosted classifier" }, "chat-completions": { label: "OpenAI compatible" }, messages: { label: "Anthropic compatible" }, responses: { label: "OpenAI Responses" } },
   probSource: { native: { label: "Native probability" }, logprobs: { label: "From log-probabilities" }, self_reported: { label: "Self-reported (not usable)" } },
   grantAction: {
     "item.create": { label: "Create items" },
@@ -595,8 +600,8 @@ const en: typeof zh = {
     no_answer: () => "The endpoint did not answer the sample question",
     http_status: (d) => (d?.status ? `The endpoint returned an error status (HTTP ${d.status})` : "The endpoint returned an error status"),
     schema_mismatch: () => "Usable, but the output does not follow the sample's structured format; card copy may degrade",
-    draft_schema: (d) => `Drafted suggestions fail the output check${DRAFT_SHAPE_EN[String(d?.shape)] ?? ""}`,
-    bad_response: () => "The response is not a chat completions response",
+    draft_schema: (d) => `Drafted suggestions fail the output check${DRAFT_SHAPE_EN[String(d?.shape)] ?? ""}${ignored(d) ? ". The endpoint may not support structured output; try another protocol" : ""}`,
+    bad_response: () => "The response does not match the chosen protocol; check the protocol",
     region_unavailable: () => "The service is not available from this network location; use a reachable gateway URL or a proxy",
     skipped: (d) => (d?.reason === "ledger_schema_differs" ? "Data version differs from the program; not checked yet" : "Data can't be read; not checked yet"),
     ledger_unreadable: () => "The data file can't be read: check permissions and the disk",

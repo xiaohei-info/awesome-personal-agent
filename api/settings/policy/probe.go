@@ -101,7 +101,7 @@ func invalidDraft(err error) error {
 	return err
 }
 
-// models：取对话补全兼容端点或 system-one 判断接口的模型列表。探测本身的成败是数据（200 + ok:false + reason），不是 HTTP 错误。
+// models：取生成端点（按所选协议的鉴权头）或判断接口的模型列表。探测本身的成败是数据（200 + ok:false + reason），不是 HTTP 错误。
 func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if err := webOnly(p); err != nil {
 		return err
@@ -115,9 +115,10 @@ func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Princip
 	if err := core.DecodeJSON(r, &in); err != nil {
 		return err
 	}
-	listURL := in.URL
+	listURL, proto := in.URL, ""
 	switch in.Endpoint {
 	case kindGenerate:
+		proto = in.Protocol
 	case kindJudge:
 		switch in.Protocol {
 		case kpolicy.ProtocolChatLogprobs:
@@ -130,7 +131,7 @@ func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Princip
 	default:
 		return badKind()
 	}
-	draft := kpolicy.Policy{GenerateEndpoint: kpolicy.GenerateEndpoint{URL: in.URL}}
+	draft := kpolicy.Policy{GenerateEndpoint: kpolicy.GenerateEndpoint{URL: in.URL, Protocol: proto}}
 	if in.URL == "" {
 		return domain.NewError(domain.CodeInvalidRequest, "url is required", "enter the endpoint URL")
 	}
@@ -147,7 +148,7 @@ func (pr *prober) models(w http.ResponseWriter, r *http.Request, p *core.Princip
 	}
 	defer release()
 	start := clock.Now()
-	ids, truncated, err := pr.env.Model.ListModels(r.Context(), listURL, key)
+	ids, truncated, err := pr.env.Model.ListModels(r.Context(), listURL, key, proto)
 	out := map[string]any{"ok": err == nil, "elapsed_ms": clock.Now().Sub(start).Milliseconds()}
 	if err == nil {
 		out["models"], out["truncated"] = ids, truncated
@@ -211,7 +212,7 @@ func (pr *prober) test(w http.ResponseWriter, r *http.Request, p *core.Principal
 		if c.URL == "" || c.Model == "" {
 			return domain.NewError(domain.CodeInvalidRequest, "generate_endpoint url and model are required for a test", "enter the URL and choose a model")
 		}
-		draft.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: c.URL, Model: c.Model, Locality: c.Locality}
+		draft.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: c.URL, Model: c.Model, Locality: c.Locality, Protocol: c.Protocol}
 		target, key = c.URL, c.APIKey
 	default:
 		return badKind()

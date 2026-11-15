@@ -25,7 +25,7 @@ func TestListModels(t *testing.T) {
 		auth, path = r.Header.Get("Authorization"), r.URL.Path
 		fmt.Fprint(w, `{"object":"list","data":[{"id":"model-b"},{"id":"model-a"},{"id":"model-b"},{"id":""}]}`)
 	})
-	ids, truncated, err := (&Client{}).ListModels(context.Background(), url+"/v1/", "sekret-key")
+	ids, truncated, err := (&Client{}).ListModels(context.Background(), url+"/v1/", "sekret-key", "")
 	if err != nil || truncated || strings.Join(ids, ",") != "model-a,model-b" {
 		t.Fatalf("ids=%v truncated=%v err=%v", ids, truncated, err)
 	}
@@ -47,7 +47,7 @@ func TestListModelsTruncates(t *testing.T) {
 		b.WriteString("]}")
 		fmt.Fprint(w, b.String())
 	})
-	ids, truncated, err := (&Client{}).ListModels(context.Background(), url, "")
+	ids, truncated, err := (&Client{}).ListModels(context.Background(), url, "", "")
 	if err != nil || !truncated || len(ids) != MaxModels {
 		t.Fatalf("len=%d truncated=%v err=%v", len(ids), truncated, err)
 	}
@@ -76,7 +76,7 @@ func TestListModelsFailures(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := (&Client{}).ListModels(context.Background(), listServer(t, c.h), "sekret-key")
+			_, _, err := (&Client{}).ListModels(context.Background(), listServer(t, c.h), "sekret-key", "")
 			if err == nil || !c.want(err) {
 				t.Fatalf("err=%v", err)
 			}
@@ -88,7 +88,7 @@ func TestListModelsTimeout(t *testing.T) {
 	url := listServer(t, func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if _, _, err := (&Client{}).ListModels(ctx, url, ""); !errors.Is(err, ErrTimeout) {
+	if _, _, err := (&Client{}).ListModels(ctx, url, "", ""); !errors.Is(err, ErrTimeout) {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -98,7 +98,7 @@ func TestListModelsNamesShape(t *testing.T) {
 	url := listServer(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"models":[{"name":"jev-preview","description":"d","release_date":"x"},{"name":"jev-latest"}]}`)
 	})
-	ids, _, err := (&Client{}).ListModels(context.Background(), url+"/v1", "k")
+	ids, _, err := (&Client{}).ListModels(context.Background(), url+"/v1", "k", "")
 	if err != nil || strings.Join(ids, ",") != "jev-latest,jev-preview" {
 		t.Fatalf("ids=%v err=%v", ids, err)
 	}

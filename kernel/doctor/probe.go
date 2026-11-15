@@ -128,7 +128,8 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 		d.Code, d.Why = CodeNotConfigured, "not configured (optional); not an error"
 		return d
 	}
-	d.Data = map[string]any{"locality": policy.EffectiveLocality(ep.Locality), "model": ep.Model}
+	proto := policy.GenerateProtocol(ep.Protocol)
+	d.Data = map[string]any{"locality": policy.EffectiveLocality(ep.Locality), "model": ep.Model, "protocol": proto, "structured_output": model.StructuredOutput(proto)}
 	if e.Model == nil {
 		d.Status, d.Code, d.Why = Warning, CodeNoClient, "the model client is not available here, so the endpoint was not probed"
 		return d
@@ -153,7 +154,10 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 			if se.Code == 401 || se.Code == 403 {
 				d.Code = CodeUnauthorized
 			}
-			d.Why = fmt.Sprintf("the endpoint returned HTTP status %d for the structured-output sample request", se.Code)
+			d.Why = fmt.Sprintf("the endpoint returned HTTP status %d for the structured-output sample request (protocol %s)", se.Code, proto)
+			if se.Message != "" {
+				d.Why += ": " + se.Message
+			}
 			if se.Region {
 				d.Code, d.Why, d.Next = CodeRegionUnavailable, regionWhy, regionNext
 			}
@@ -163,7 +167,7 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 			d.Code = CodeDraftSchema
 			d.Data["template"] = DraftPack + "/" + DraftTemplate
 			d.Why = "the endpoint answered, but its output does not follow the JSON schema of the " + DraftTemplate + " template, so drafting fails on every call: " + err.Error()
-			d.Next = "check that the endpoint and model support structured output for this schema; the shape in the message names what the endpoint returned"
+			d.Next = "the endpoint may not support structured output over protocol " + proto + "; try another protocol. The shape in the message names what the endpoint returned"
 			if shape := model.SchemaShape(err); shape != "" {
 				d.Data["shape"] = shape
 			}
@@ -171,16 +175,17 @@ func ProbeGenerate(ctx context.Context, ep policy.GenerateEndpoint, e Env) Detai
 			d.Status, d.Code = Warning, CodeSchemaMismatch
 			d.Why = "the endpoint answered, but its output does not follow the JSON schema of the structured-output sample request"
 		case errors.Is(err, model.ErrBadResponse):
-			d.Code, d.Why = CodeBadResponse, "the endpoint's response is not a valid chat completions response"
+			d.Code, d.Why = CodeBadResponse, "the endpoint's response is not a valid "+proto+" response"
+			d.Next = "check that the endpoint speaks protocol " + proto + ", or choose the protocol it speaks"
 		default:
 			d.Code, d.Why = CodeUnreachable, "the structured-output sample request failed: "+err.Error()
 		}
 		return d
 	}
 	_ = resp
-	d.Why = fmt.Sprintf("answered the structured-output sample request in %d ms", ms)
+	d.Why = fmt.Sprintf("answered the structured-output sample request in %d ms (protocol %s, %s)", ms, proto, model.StructuredOutput(proto))
 	if real {
-		d.Why = fmt.Sprintf("answered the %s structured-output sample request in %d ms", DraftTemplate, ms)
+		d.Why = fmt.Sprintf("answered the %s structured-output sample request in %d ms (protocol %s, %s)", DraftTemplate, ms, proto, model.StructuredOutput(proto))
 	}
 	return d
 }

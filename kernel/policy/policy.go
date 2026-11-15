@@ -172,6 +172,21 @@ const (
 	ProtocolSystemOne = "system-one"
 )
 
+// 生成端点的协议（§8.1）：按接口形态命名。空串等同 ProtocolChatCompletions（旧版本策略文档没有此键）。
+const (
+	ProtocolChatCompletions = "chat-completions"
+	ProtocolMessages        = "messages"
+	ProtocolResponses       = "responses"
+)
+
+// GenerateProtocol 是生成端点协议的实际取值：未写按 chat-completions。
+func GenerateProtocol(p string) string {
+	if p == "" {
+		return ProtocolChatCompletions
+	}
+	return p
+}
+
 // 判断端点的默认值（附录 B.2、§8.8）。
 const (
 	DefaultJudgeTimeoutMs        = 10000
@@ -188,13 +203,14 @@ func EffectiveLocality(l string) string {
 	return LocalityExternal
 }
 
-// GenerateEndpoint 是对话补全兼容的生成端点；空 URL 表示未配置。APIKey 只存账本，不进 Event。
-// Locality 由本人声明端点是否在自己可控的主机上，未声明按 external（§14.14）。
+// GenerateEndpoint 是生成端点；空 URL 表示未配置。APIKey 只存账本，不进 Event。
+// Locality 由本人声明端点是否在自己可控的主机上，未声明按 external（§14.14）。Protocol 见 GenerateProtocol。
 type GenerateEndpoint struct {
 	URL      string `json:"url,omitempty"`
 	APIKey   string `json:"api_key,omitempty"`
 	Model    string `json:"model,omitempty"`
 	Locality string `json:"locality,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
 }
 
 // JudgeEndpoint 是分类（判断）端点；Policy 里为 nil 表示未配置。
@@ -547,6 +563,9 @@ func normalizeEndpoints(p *Policy) (err error) {
 		}
 		if g.Locality, err = normLocality("generate_endpoint", g.Locality); err != nil {
 			return err
+		}
+		if !oneOf(g.Protocol, "", ProtocolChatCompletions, ProtocolMessages, ProtocolResponses) {
+			return invalid("generate_endpoint protocol %q", g.Protocol)
 		}
 	}
 	j := p.JudgeEndpoint

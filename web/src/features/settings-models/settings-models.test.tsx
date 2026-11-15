@@ -86,7 +86,7 @@ describe("设置 › 模型", () => {
 
     await save("写作模型");
     await g.findByText(/已保存/);
-    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://llm.example.com/v1", api_key: "***", model: "model-a", locality: "external" } });
+    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://llm.example.com/v1", api_key: "***", model: "model-a", locality: "external", protocol: "chat-completions" } });
     expect(s.keys.generate_endpoint).toBe("sk-test-key-9f2c"); // 占位沿用原密钥
   });
 
@@ -130,19 +130,45 @@ describe("设置 › 模型", () => {
     expect(s.puts.at(-1)).toEqual({ judge_endpoint: { url: "http://gw.example.invalid/v1", api_key: "ts-key", model: "gw/jev-latest", locality: "external", protocol: "system-one", timeout_ms: 30000, max_batch: 32, max_material_chars: 8000 } });
   });
 
+  it("生成端点的协议在第一项下拉：旧配置没写协议显示 OpenAI 兼容；换协议换地址示例，获取模型、测试与保存都带协议，结果写明原生结构化输出", async () => {
+    const s = server({ generate: null });
+    mount(s.impl);
+    const g = await card("写作模型");
+    await userEvent.click(g.getByRole("checkbox", { name: "配置写作模型" }));
+    const proto = g.getByLabelText("协议");
+    expect(g.getAllByRole("combobox")[0]).toBe(proto); // 第一项
+    expect(proto).toHaveValue("chat-completions");
+    expect(within(proto).getAllByRole("option").map((o) => o.textContent)).toEqual(["OpenAI 兼容", "Anthropic 兼容", "OpenAI Responses"]);
+    expect(g.getByLabelText("地址")).toHaveAttribute("placeholder", "https://llm.example.com/v1");
+    await userEvent.selectOptions(proto, "messages");
+    expect(g.getByLabelText("地址")).toHaveAttribute("placeholder", "https://api.anthropic.com/v1");
+    expect(g.getByLabelText("地址")).toHaveValue(""); // 不预填
+    await userEvent.type(g.getByLabelText("地址"), "https://gw.example.invalid/v1");
+    await userEvent.click(g.getByRole("button", { name: "获取模型" }));
+    expect(s.posts.at(-1)!.body).toMatchObject({ endpoint: "generate", protocol: "messages" });
+    await userEvent.selectOptions(g.getByLabelText("模型"), "model-a");
+    s.setProbe({ subject: "generate_endpoint", status: "ok", code: "ok", why: "answered", data: { elapsed_ms: 900, protocol: "messages", structured_output: "tool_use" } });
+    await userEvent.click(g.getByRole("button", { name: "测试连接" }));
+    expect(await g.findByRole("status", { name: "测试结果" })).toHaveTextContent("Anthropic 兼容 · 原生结构化输出（工具调用）");
+    expect(s.posts.at(-1)!.body.config.protocol).toBe("messages");
+    await userEvent.click(g.getByRole("radio", { name: /外部服务/ }));
+    await save("写作模型");
+    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://gw.example.invalid/v1", api_key: "", model: "model-a", locality: "external", protocol: "messages" } });
+  });
+
   it("获取模型后从列表选择，再测试连接；请求用占位沿用已存密钥", async () => {
     const s = server();
     mount(s.impl);
     const g = await card("写作模型");
     await userEvent.click(g.getByRole("button", { name: "获取模型" }));
     expect(await g.findByText("已从端点取到 2 个模型。")).toBeInTheDocument();
-    expect(s.posts.at(-1)).toEqual({ path: "/v1/settings/model-endpoints/models", body: { endpoint: "generate", url: "https://llm.example.com/v1", api_key: "***" } });
+    expect(s.posts.at(-1)).toEqual({ path: "/v1/settings/model-endpoints/models", body: { endpoint: "generate", url: "https://llm.example.com/v1", api_key: "***", protocol: "chat-completions" } });
     await userEvent.selectOptions(g.getByLabelText("模型"), "model-b");
     await userEvent.click(g.getByRole("button", { name: "测试连接" }));
     const r = await g.findByRole("status", { name: "测试结果" });
     expect(r).toHaveTextContent("✓ 连通，鉴权通过");
     expect(r).toHaveTextContent("耗时 820 ms");
-    expect(s.posts.at(-1)).toEqual({ path: "/v1/settings/model-endpoints/test", body: { endpoint: "generate", config: { url: "https://llm.example.com/v1", api_key: "***", model: "model-b", locality: "external" } } });
+    expect(s.posts.at(-1)).toEqual({ path: "/v1/settings/model-endpoints/test", body: { endpoint: "generate", config: { url: "https://llm.example.com/v1", api_key: "***", model: "model-b", locality: "external", protocol: "chat-completions" } } });
     expect(s.puts).toHaveLength(0); // 获取与测试都不保存
   });
 
@@ -175,7 +201,7 @@ describe("设置 › 模型", () => {
     await userEvent.type(g.getByLabelText("API 密钥"), "sk-other");
     await userEvent.click(g.getByRole("button", { name: "获取模型" }));
     await g.findByText(/已从端点取到/);
-    expect(s.posts.at(-1)!.body).toEqual({ endpoint: "generate", url: "https://other.example.com/v1", api_key: "sk-other" });
+    expect(s.posts.at(-1)!.body).toEqual({ endpoint: "generate", url: "https://other.example.com/v1", api_key: "sk-other", protocol: "chat-completions" });
   });
 
   it("地区不可用：测试连接直接提示改用网关地址或代理，不说协议不符", async () => {

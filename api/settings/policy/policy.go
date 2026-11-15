@@ -127,6 +127,7 @@ type generateReq struct {
 	URL        string  `json:"url"`
 	APIKey     *string `json:"api_key"`
 	APIKeyHint *string `json:"api_key_hint"`
+	Protocol   string  `json:"protocol"`
 	Model      string  `json:"model"`
 	Locality   string  `json:"locality"`
 }
@@ -179,7 +180,7 @@ func getGenerate(p *kpolicy.Policy) any {
 	if g.URL == "" {
 		return nil
 	}
-	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "api_key_hint": keyHint(g.APIKey), "model": g.Model, "locality": g.Locality}
+	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "api_key_hint": keyHint(g.APIKey), "protocol": kpolicy.GenerateProtocol(g.Protocol), "model": g.Model, "locality": g.Locality}
 }
 
 func setGenerate(p *kpolicy.Policy, raw json.RawMessage) error {
@@ -191,7 +192,7 @@ func setGenerate(p *kpolicy.Policy, raw json.RawMessage) error {
 		p.GenerateEndpoint = kpolicy.GenerateEndpoint{}
 		return nil
 	}
-	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: r.Locality}
+	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: r.Locality, Protocol: r.Protocol}
 	return nil
 }
 
@@ -203,7 +204,7 @@ func setLegacy(p *kpolicy.Policy, raw json.RawMessage) error {
 	if err := strictDecode(raw, &r); err != nil {
 		return err
 	}
-	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: kpolicy.LocalityExternal}
+	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: kpolicy.LocalityExternal, Protocol: r.Protocol}
 	p.ScreeningTimeoutMs = r.ScreeningTimeoutMs
 	return nil
 }

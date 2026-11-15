@@ -28,6 +28,14 @@ const PRESETS: Record<string, { url: string; model: string; timeout_ms: string }
   [PJ]: { url: "", model: "", timeout_ms: "10" },
 };
 const MANUAL = "\u0000manual";
+// 生成端点的协议（§8.1）：按接口形态区分，各用原生的结构化输出；旧配置没写协议按 chat-completions。换协议只换地址示例占位，不预填。
+const CHAT = "chat-completions";
+const GEN_PROTOCOLS = [CHAT, "messages", "responses"];
+const GEN_URL_EXAMPLE: Record<string, string> = {
+  [CHAT]: "https://llm.example.com/v1",
+  messages: "https://api.anthropic.com/v1",
+  responses: "https://api.openai.com/v1",
+};
 
 type Kind = "generate" | "judge";
 type Locality = "local" | "external" | "";
@@ -54,7 +62,7 @@ interface ProbeResult {
   code?: string;
   why: string;
   next?: string;
-  data?: { elapsed_ms?: number; model?: string; probability_source?: string; status?: number };
+  data?: { elapsed_ms?: number; model?: string; probability_source?: string; status?: number; protocol?: string; structured_output?: string };
 }
 interface ModelList {
   ok: boolean;
@@ -92,8 +100,9 @@ type Draft = Record<string, string>;
 const JUDGE_NEW: Draft = { ...PRESETS[SYSTEM_ONE], protocol: SYSTEM_ONE, locality: "", max_batch: "32", max_material_chars: "8000" };
 
 function draftOf(kind: Kind, e: Endpoint | null): Draft {
-  if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { url: "", model: "", locality: "" };
+  if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { protocol: CHAT, url: "", model: "", locality: "" };
   const d: Draft = { url: e.url ?? "", model: e.model ?? "", locality: e.locality ?? "" };
+  if (kind === "generate") d.protocol = e.protocol || CHAT;
   if (kind === "judge")
     Object.assign(d, { protocol: e.protocol || PJ, timeout_ms: sec(e.timeout_ms ?? 10000), max_batch: String(e.max_batch ?? 32), max_material_chars: String(e.max_material_chars ?? 8000) });
   return d;
@@ -232,6 +241,7 @@ function useSaver(run: () => Promise<number>) {
 function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; doc: Endpoint | null; paused: boolean; unsetExternal: number | null; save: (e: object | null) => Promise<number> }) {
   const t = useT(strings);
   const { api } = useSession();
+  const label = useLabel();
   const title = kind === "generate" ? t.generate : t.judge;
   const sig = JSON.stringify(doc);
   const [on, setOn] = useState(doc != null);
@@ -282,7 +292,7 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
   const apiKey = keyMode === "keep" ? MASK : key;
   const config = () => {
     const base = { url: d.url.trim(), api_key: apiKey, model: d.model.trim(), locality: d.locality };
-    if (kind === "generate") return base;
+    if (kind === "generate") return { ...base, protocol: d.protocol };
     return { ...base, protocol: d.protocol, timeout_ms: posSec(d.timeout_ms, t.timeoutMs), max_batch: posInt(d.max_batch, t.maxBatch), max_material_chars: posInt(d.max_material_chars, t.maxChars) };
   };
   const saver = useSaver(async () => {
@@ -363,6 +373,14 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
       </label>
       {on && (
         <>
+          {kind === "generate" && (
+            <label>
+              {t.protocol}
+              <select value={d.protocol} onChange={(e) => set("protocol", e.target.value)}>
+                {GEN_PROTOCOLS.map((p) => <option key={p} value={p}>{label("protocol", p)}</option>)}
+              </select>
+            </label>
+          )}
           <fieldset className="choice">
             <legend>{t.where}</legend>
             <label>
@@ -393,7 +411,7 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
           )}
           <label>
             {so ? t.urlSystemOne : kind === "judge" ? t.urlJudge : t.url}
-            <input value={d.url} onChange={(e) => setURL(e.target.value)} placeholder={so ? PRESETS[SYSTEM_ONE].url : kind === "judge" ? "http://127.0.0.1:8090/judge" : "https://llm.example.com/v1"} />
+            <input value={d.url} onChange={(e) => setURL(e.target.value)} placeholder={so ? PRESETS[SYSTEM_ONE].url : kind === "judge" ? "http://127.0.0.1:8090/judge" : GEN_URL_EXAMPLE[d.protocol]} />
           </label>
           {so && d.url.trim() && <small className="sub">{t.willCall(d.url.trim().replace(/\/+$/, "") + "/systemone")}</small>}
           <KeyField
@@ -478,6 +496,7 @@ function ProbeView({ r }: { r: ProbeResult }) {
   if (r.data?.elapsed_ms != null) facts.push(t.elapsed(r.data.elapsed_ms));
   if (r.data?.status && r.code !== "http_status") facts.push(`HTTP ${r.data.status}`); // http_status 的结论里已带状态码
   if (r.data?.model) facts.push(t.modelFact(r.data.model));
+  if (r.data?.structured_output) facts.push(t.structuredFact(label("protocol", r.data.protocol ?? ""), t.structuredNames[r.data.structured_output] ?? r.data.structured_output));
   if (r.data?.probability_source) facts.push(label("probSource", r.data.probability_source));
   return (
     <div role="status" aria-label={t.result} className={"probe " + r.status}>
