@@ -71,14 +71,24 @@ _TERMINAL = frozenset({"", "cli", "tui", "local"})
 # Hermes surfaces that are neither the user's terminal nor a chat with a stated type: who speaks there is not ours to say.
 _NOT_A_CHAT = frozenset({"api_server", "codex", "desktop", "gateway", "kanban", "msgraph_webhook", "tool", "webhook"})
 _GROUP_CHAT = frozenset({"group", "channel", "thread"})
+# Entrances only the owner can speak in. Built in: none yet (SPIKE-SESSION-KIND-OWNCHAT is unmeasured, so the fallback is
+# "unknown"); the owner adds their own with APA_DIRECT_PLATFORMS (appendix A.5), read from the plugin's environment, never the model.
+_OWN_ENTRANCES = frozenset()
+
+
+def _direct_platforms():
+    raw = os.environ.get("APA_DIRECT_PLATFORMS", "")
+    return _OWN_ENTRANCES | {n.strip().lower() for n in raw.split(",") if n.strip()}
 
 
 def session_kind():
     """direct | group | unknown for the session this call belongs to (appendix A.5, SPIKE-SESSION-KIND). Read from
-    Hermes' session binding, never from the model. A terminal session is one person at their own keyboard: direct.
-    A gateway session is what the platform says: a DM is direct, a group/channel/thread is group, and anything the
-    binding does not state (other surfaces such as api_server/webhook, a DM without a sender, an unreadable
-    binding) is unknown, so words in it are not accepted as the owner's."""
+    Hermes' session binding, never from the model. First match wins:
+    1. chat type group/channel/thread: group (nothing below can turn a multi-person session into a private one);
+    2. platform and source both a terminal (empty, cli, tui, local): direct;
+    3. platform or source in the owner-only list (built in + APA_DIRECT_PLATFORMS): direct;
+    4. chat type dm with a sender: direct;
+    5. anything else (non-chat surfaces, dm without sender, nothing readable): unknown."""
     try:
         from gateway.session_context import get_session_env
     except ImportError:
@@ -86,13 +96,15 @@ def session_kind():
     try:
         platform = (get_session_env("HERMES_SESSION_PLATFORM", "") or "").strip().lower()
         source = (get_session_env("HERMES_SESSION_SOURCE", "") or "").strip().lower()
-        if platform in _TERMINAL and source in _TERMINAL:
-            return "direct"
-        if platform in _NOT_A_CHAT or source in _NOT_A_CHAT:
-            return "unknown"
         chat_type = (get_session_env("HERMES_SESSION_CHAT_TYPE", "") or "").strip().lower()
         if chat_type in _GROUP_CHAT:
             return "group"
+        if platform in _TERMINAL and source in _TERMINAL:
+            return "direct"
+        if {platform, source} & _direct_platforms():
+            return "direct"
+        if platform in _NOT_A_CHAT or source in _NOT_A_CHAT:
+            return "unknown"
         if chat_type == "dm" and (get_session_env("HERMES_SESSION_USER_ID", "") or "").strip():
             return "direct"
     except Exception:  # noqa: BLE001 - Hermes' binding layer is not ours; not knowing is the safe answer

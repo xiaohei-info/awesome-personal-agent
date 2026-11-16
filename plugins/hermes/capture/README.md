@@ -21,4 +21,4 @@ original key and the next hook after recovery re-sends it once; a refused re-sen
 
 ## Live gate
 
-`APA_REQUIRE_LIVE=1 python3 -m pytest -q plugins/hermes/tests/capture/test_live.py` (Hermes at `HERMES_SRC`).
+`APA_REQUIRE_LIVE=1 python3 -m pytest -q plugins/hermes/tests/capture/test_capture_live.py` (Hermes at `HERMES_SRC`).

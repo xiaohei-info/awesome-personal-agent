@@ -66,6 +66,16 @@ _CLI_TOOLS = {
                          "reason": _s("Short reason, recorded in the ledger event"), "evidence": _EVIDENCE, "grant": _GRANT}, ["id", "reason"],
                         lambda a: ["item", "update", a["id"], *_flags(a, "title", "summary", "body", "status_label", "priority",
                                                                       "tags", "spec", "reason", "evidence", "grant")]),
+    "apa_attach": ("Attach a proposed item to an existing item on the owner's behalf (apa attach). Deciding for the owner needs "
+                   "the owner's words from this turn (evidence) or a grant. On exit 23 do not rephrase and retry: tell the owner why and give the Web link.",
+                   {"id": _s("Proposal item id"), "to": _s("Existing item id to attach it to"),
+                    "reason": _REASON, "evidence": _EVIDENCE, "grant": _GRANT}, ["id", "to"],
+                   lambda a: ["attach", a["id"], *_flags(a, "to", "reason", "evidence", "grant")]),
+    "apa_item_progress": ("Record a progress note on the owner's item (apa item progress). Doing so for the owner needs the owner's words "
+                          "from this turn (evidence) or a grant, except on the item bound to your own credential. On exit 23 do not rephrase and retry.",
+                          {"id": _s("Item id"), "text": _s("The progress note"), "on": _s("Date it happened (YYYY-MM-DD), not later than today"),
+                           "evidence": _EVIDENCE, "grant": _GRANT}, ["id", "text"],
+                          lambda a: ["item", "progress", a["id"], *_flags(a, "text", "on", "evidence", "grant")]),
 }
 
 
@@ -100,6 +110,28 @@ def _material_commit(args, session_id=None, **_):
     argv = ["material", "commit", *([args["id"]] if args.get("id") else []), "--from", "-",
             *_flags(args, "reason", "kind", "title", "project", "based_on", "tag")]
     return json.dumps(cli.call(argv, session_id, stdin=content))
+
+
+_BATCH_MAX = 200
+_BATCH_DO = ("accept", "attach", "dismiss")
+
+
+def _proposals_apply(args, session_id=None, **_):
+    """apa proposals apply: --recommended, or a disposal list on stdin (--file -), never a temp file."""
+    actions = args.get("actions")
+    if bool(args.get("recommended")) == bool(actions):
+        return json.dumps({"ok": False, "error": "give exactly one of recommended=true and actions"})
+    evidence = _flags(args, "evidence", "grant")
+    if args.get("recommended"):
+        return json.dumps(cli.call(["proposals", "apply", "--recommended", *_flags(args, "source", "project"), *evidence], session_id))
+    if args.get("source") or args.get("project"):
+        return json.dumps({"ok": False, "error": "source and project only narrow recommended"})
+    if not isinstance(actions, list) or len(actions) > _BATCH_MAX:
+        return json.dumps({"ok": False, "error": f"actions must be a list of at most {_BATCH_MAX}"})
+    for a in actions:
+        if not isinstance(a, dict) or not a.get("id") or a.get("do") not in _BATCH_DO or (a["do"] == "attach") != bool(a.get("to")):
+            return json.dumps({"ok": False, "error": "each action needs id and do (accept|attach|dismiss); to goes with attach only"})
+    return json.dumps(cli.call(["proposals", "apply", "--file", "-", *evidence], session_id, stdin=json.dumps({"actions": actions}, ensure_ascii=False)))
 
 
 _DELEGATE_FLAGS = ("parent", "title", "summary", "body", "priority", "project", "reason", "idempotency_key")
@@ -190,6 +222,16 @@ def register(ctx):
     for name, (desc, props, req, build) in _CLI_TOOLS.items():
         ctx.register_tool(name=name, toolset=TOOLSET, schema=_schema(name, desc, props, req),
                           handler=_cli_handler(build), description=desc)
+    desc = ("Handle proposals in bulk on the owner's behalf (apa proposals apply): recommended=true takes each proposal's recommendation "
+            "(narrow with source or project), or actions lists one disposal per proposal ('item 3 dismiss, the rest as recommended' = list the rest explicitly). "
+            "Needs the owner's words from this turn (evidence) or a grant. The result is per proposal; tell the owner each outcome. On exit 23 do not rephrase and retry.")
+    ctx.register_tool(name="apa_proposals_apply", toolset=TOOLSET, handler=_proposals_apply, description=desc, schema=_schema("apa_proposals_apply", desc, {
+        "recommended": {"type": "boolean", "description": "Apply every recommendation in scope"},
+        "actions": {"type": "array", "description": "Explicit disposals, up to 200", "items": {"type": "object", "properties": {
+            "id": _s("Proposal id"), "do": {"type": "string", "enum": list(_BATCH_DO)}, "to": _s("attach: the existing item id"),
+            "reason": _s("Reason")}, "required": ["id", "do"]}},
+        "source": _s("recommended only: narrow to a source"), "project": _s("recommended only: narrow to a project id"),
+        "evidence": _EVIDENCE, "grant": _GRANT}, []))
     desc = ("Create a child item and put the parent in waiting (apa delegate). Run it BEFORE handing work to anyone, then delegate "
             "with your own tools and put the child item id in the task. For an agent give mech (delegate_task, or paseo with host and "
             "profile, or provider and model); the plugin names the executor. For a person give assignee. Exit 21 = not allowed in this project.")

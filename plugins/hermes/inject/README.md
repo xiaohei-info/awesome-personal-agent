@@ -17,5 +17,5 @@ the plugin only passes the session through.
 
 ## Live gate
 
-`APA_REQUIRE_LIVE=1 python3 -m pytest -q plugins/hermes/tests/inject/test_live.py` (Hermes at `HERMES_SRC`, Go installed;
+`APA_REQUIRE_LIVE=1 python3 -m pytest -q plugins/hermes/tests/inject/test_inject_live.py` (Hermes at `HERMES_SRC`, Go installed;
 without the flag it skips with the reason).

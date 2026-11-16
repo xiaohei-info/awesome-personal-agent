@@ -61,7 +61,7 @@ Only the on-behalf tools (`apa_decide`, `apa_accept`, `apa_dismiss`, `apa_item_u
 
 ## Live gate
 
-`APA_REQUIRE_LIVE=1 HERMES_SRC=<hermes checkout> python3 -m pytest -q plugins/hermes/tests/tools/test_live.py`
+`APA_REQUIRE_LIVE=1 HERMES_SRC=<hermes checkout> python3 -m pytest -q plugins/hermes/tests/tools/test_tools_live.py`
 
 ## Read tier (`-t apa,web`)
 

@@ -14,5 +14,5 @@ Verified on Hermes Agent v0.22.5 (commit `eefc4148cb23`); older builds without t
 
 ## Live gate
 
-`APA_REQUIRE_LIVE=1 HERMES_SRC=<hermes checkout> python3 -m pytest -q plugins/hermes/tests/core/test_live.py`
+`APA_REQUIRE_LIVE=1 HERMES_SRC=<hermes checkout> python3 -m pytest -q plugins/hermes/tests/core/test_core_live.py`
 fails (instead of skipping) when Hermes, Go, or the section API is missing. Without the flag it skips with the reason.
