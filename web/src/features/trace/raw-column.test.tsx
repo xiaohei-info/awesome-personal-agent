@@ -200,3 +200,87 @@ describe("送给模型 N / M 字符（ACT-BUD-05）", () => {
     expect(await screen.findByRole("region", { name: "原文" })).toBeInTheDocument();
   });
 });
+
+// ---- 取回与物理删除（ACT-FET-02 / flow-raw-purge）：替身按 POST /source-events/{id}/attachments/{n}/fetch 与 POST /settings/purge 的契约应答 ----
+describe("附件取回与来源事件物理删除", () => {
+  const FETCHABLE = {
+    ...MAIL,
+    event: ev("sev_fetch"),
+    attachments: [
+      { name: "合同.pdf", media_type: "application/pdf", size: 1024, ref: "h1" },
+      { name: "图.png", media_type: "image/png", size: 2048, ref: "h2", blob: "apa://blob/ab" },
+      { name: "外链.zip", size: 5 },
+    ],
+  };
+  let calls: { method: string; url: string; body?: unknown }[] = [];
+  let fetchReply: { status: number; body: unknown } = { status: 200, body: { name: "合同.pdf", media_type: "application/pdf", size: 1024, ref: "h1", blob: "apa://blob/cd" } };
+  const server = (() =>
+    (async (url: string, init: RequestInit = {}) => {
+      const method = init.method ?? "GET";
+      calls.push({ method, url, body: init.body ? JSON.parse(init.body as string) : undefined });
+      if (url === "/v1/projects") return json(200, { projects: [] });
+      if (url === "/v1/sources") return json(200, { sources: [] });
+      if (url === "/v1/source-events/sev_fetch/trace") return json(200, trace("sev_fetch", [arrived]));
+      if (url === "/v1/source-events/sev_fetch") return json(200, FETCHABLE);
+      if (url === "/v1/source-events/sev_fetch/attachments/0/fetch" && method === "POST") return json(fetchReply.status, fetchReply.body);
+      if (url === "/v1/settings/purge" && method === "POST") return json(200, { object: "sev_fetch", kind: "source_event", events: 2 });
+      return json(404, { code: "not_found", why: "no such route", next: "" });
+    }) as unknown as typeof fetch)();
+  const open = () => {
+    sessionStorage.setItem("apa.csrf", "tok-1");
+    render(
+      <MemoryRouter initialEntries={["/sources/events/sev_fetch"]}>
+        <App features={[sources]} fetchImpl={server} />
+      </MemoryRouter>,
+    );
+  };
+  beforeEach(() => {
+    calls = [];
+    fetchReply = { status: 200, body: { name: "合同.pdf", media_type: "application/pdf", size: 1024, ref: "h1", blob: "apa://blob/cd" } };
+  });
+
+  it("只有带取回句柄且未取回的附件有取回按钮；不支持的只显示名字类型大小", async () => {
+    open();
+    const col = await column();
+    const att = await col.findByRole("table", { name: "附件" });
+    expect(within(within(att).getByRole("row", { name: /合同\.pdf/ })).getByRole("button", { name: /取回/ })).toBeInTheDocument();
+    expect(within(within(att).getByRole("row", { name: /图\.png/ })).queryByRole("button")).toBeNull();
+    expect(within(att).getByRole("row", { name: /图\.png.*已取回/ })).toBeInTheDocument();
+    expect(within(within(att).getByRole("row", { name: /外链\.zip/ })).queryByRole("button")).toBeNull();
+  });
+
+  it("取回成功：POST 第 n 项，该行改为已取回", async () => {
+    open();
+    const col = await column();
+    await userEvent.click(await col.findByRole("button", { name: "取回 合同.pdf" }));
+    expect(calls.some((c) => c.method === "POST" && c.url === "/v1/source-events/sev_fetch/attachments/0/fetch")).toBe(true);
+    expect(await col.findByRole("row", { name: /合同\.pdf.*已取回/ })).toBeInTheDocument();
+    expect(col.queryByRole("button", { name: "取回 合同.pdf" })).toBeNull();
+  });
+
+  it.each([[409, "the source program does not support fetching attachments"], [502, "attachment is larger than 32 MiB"]])("取回失败 %i：显示原因，清单不变，仍可重试", async (status, why) => {
+    fetchReply = { status, body: { code: status === 409 ? "conflict" : "upstream_failed", why, next: "open the original message instead" } };
+    open();
+    const col = await column();
+    await userEvent.click(await col.findByRole("button", { name: "取回 合同.pdf" }));
+    expect((await col.findAllByText(new RegExp(why))).length).toBeGreaterThan(0);
+    expect(col.getByRole("button", { name: "取回 合同.pdf" })).toBeEnabled();
+    expect(col.queryByRole("row", { name: /合同\.pdf.*已取回/ })).toBeNull();
+  });
+
+  it("物理删除：确认前不发请求；取消不删；确认后 POST /settings/purge {object: 事件 id} 并显示已删除", async () => {
+    open();
+    const col = await column();
+    await userEvent.click(await col.findByRole("button", { name: "删除这条来源事件…" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("无法找回");
+    expect(calls.some((c) => c.url === "/v1/settings/purge")).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(calls.some((c) => c.url === "/v1/settings/purge")).toBe(false);
+    await userEvent.click(col.getByRole("button", { name: "删除这条来源事件…" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+    expect(calls.find((c) => c.url === "/v1/settings/purge")?.body).toEqual({ object: "sev_fetch" });
+    expect(await col.findByText("这条来源事件已永久删除")).toBeInTheDocument();
+    expect(col.queryByRole("table", { name: "附件" })).toBeNull();
+  });
+});
