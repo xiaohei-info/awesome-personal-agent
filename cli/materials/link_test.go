@@ -93,12 +93,12 @@ func TestMaterialAddLinkProjectFromCheckout(t *testing.T) {
 	cwd, _ := os.Getwd()
 	host, _ := os.Hostname()
 	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
-	for cmd, in := range map[string]string{
-		"project.repo.add":     `{"id":"` + k.prj + `","remote":"git@example.com:me/app.git"}`,
-		"project.checkout.set": `{"id":"` + k.prj + `","remote":"git@example.com:me/app.git","host":"` + host + `","path":"` + cwd + `"}`,
+	for _, c := range [][2]string{ // 有序：checkout 依赖先登记的 remote
+		{"project.repo.add", `{"id":"` + k.prj + `","remote":"git@example.com:me/app.git"}`},
+		{"project.checkout.set", `{"id":"` + k.prj + `","remote":"git@example.com:me/app.git","host":"` + host + `","path":"` + cwd + `"}`},
 	} {
-		if _, err := k.x.Do(context.Background(), command.Request{Identity: owner, Command: cmd, Input: []byte(in)}); err != nil {
-			t.Fatalf("%s: %v", cmd, err)
+		if _, err := k.x.Do(context.Background(), command.Request{Identity: owner, Command: c[0], Input: []byte(c[1])}); err != nil {
+			t.Fatalf("%s: %v", c[0], err)
 		}
 	}
 	r := k.ok(auth.Worker, "material", "add", "--link", "vault:notes/a.md", "--title", "t").json(t)
