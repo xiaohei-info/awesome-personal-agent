@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { HostedMaterial } from "../materials-hosted/HostedMaterial";
+import { LinkWhere, isLink, type LinkInfo } from "../materials-hosted/LinkOpen";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { ItemPick, useNames } from "../../app/names";
@@ -14,7 +15,7 @@ import { Pick, Val } from "../../app/values";
 // POST /v1/revisions/{id}/confirm|reject、GET /v1/materials/search（附录 B.2）。
 // 写入策略（direct/proposed）、基线冲突、规范生效只认 Web、授权都在服务端；本页只提交并如实展示服务端的回答。
 // 托管型的只读展示与发起修改由 features/materials-hosted 负责。
-interface Material {
+interface Material extends LinkInfo {
   id: string;
   project: string;
   kind: string;
@@ -213,7 +214,8 @@ export function MaterialsPage() {
             <ul className="rows">
               {shown.map((m) => (
                 <li key={m.id}>
-                  <button className="link" onClick={() => setSelected(m.id)}>{m.title}</button> <span className="sub"><Val k="materialKind" id={m.kind} /> · {projectName(m.project) || t.global} · {m.location ? t.hosted : t.owned}</span>
+                  <button className="link" onClick={() => setSelected(m.id)}>{m.title}</button> <span className="sub"><Val k="materialKind" id={m.kind} /> · {projectName(m.project) || t.global} · {isLink(m) ? t.linked : m.location ? t.hosted : t.owned}</span>
+                  {isLink(m) && <> <LinkWhere m={m} /></>}
                 </li>
               ))}
             </ul>
@@ -306,6 +308,7 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
   const onChanged = () => cb.current.onChanged();
   const [d, setD] = useState<Detail | null>(null);
   const [hosted, setHosted] = useState(false);
+  const [link, setLink] = useState(false);
   const [draft, setDraft] = useState("");
   const [reason, setReason] = useState("");
   const [open, setOpen] = useState<Record<string, "diff" | "content">>({});
@@ -317,6 +320,7 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
       const relations = (r.relations ?? []).filter((x) => x.to === id);
       const titles: Record<string, string> = {};
       if (relations.length) await api.get<{ items: { id: string; title: string }[] }>("/items").then((l) => l.items.forEach((i) => (titles[i.id] = i.title)), () => {});
+      if (isLink(r.material)) return setLink(true), setD({ material: r.material, relations, titles, revision: null, revisions: [] });
       if (r.material.location) return setHosted(true), setD({ material: r.material, relations, titles, revision: null, revisions: [] });
       const h = await api.get<{ revisions: Revision[] }>(`/materials/${encodeURIComponent(id)}/revisions`);
       const revisions = [...h.revisions].sort((a, b) => b.seq - a.seq);
@@ -357,6 +361,14 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
       </ul>
     </section>
   );
+
+  if (link)
+    return (
+      <>
+        <LinkDetail material={m} onSaved={async () => (onNotice(t.linkSaved), await load(), onChanged())} onError={onError} />
+        {related}
+      </>
+    );
 
   if (hosted)
     return (
@@ -452,6 +464,59 @@ function MaterialDetail(props: { id: string; onNotice: (s: string) => void; onEr
           })}
         </ul>
       </section>
+    </section>
+  );
+}
+
+// 链接型：标题、kind、标签可改，位置不可改（§12.8）；PATCH /materials/{id} 只有 Web 登录能写，授权在服务端。
+function LinkDetail({ material: m, onSaved, onError }: { material: Material; onSaved: () => Promise<void>; onError: (e: unknown) => void }) {
+  const t = useT(strings);
+  const { api } = useSession();
+  const [title, setTitle] = useState(m.title);
+  const [kind, setKind] = useState(m.kind);
+  const [tags, setTags] = useState((m.tags ?? []).join(", "));
+  const save = async () => {
+    try {
+      await api.patch(`/materials/${encodeURIComponent(m.id)}`, {
+        title: title.trim(),
+        kind,
+        tags: tags.split(",").map((x) => x.trim()).filter(Boolean),
+      });
+      await onSaved();
+    } catch (e) {
+      onError(e);
+    }
+  };
+  return (
+    <section role="region" aria-label={t.detail} className="panel">
+      <h3>
+        {m.title} <small>{t.linked}</small>
+      </h3>
+      <p>
+        {t.location}: <LinkWhere m={m} />
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <label>
+          {t.titleField}
+          <input value={title} onChange={(e) => setTitle(e.target.value)} />
+        </label>
+        <label>
+          {t.kind}
+          <Pick k="materialKind" value={kind} onChange={setKind} ids={KINDS.filter((k) => k !== "guideline")} />
+        </label>
+        <label>
+          {t.tags}
+          <input value={tags} onChange={(e) => setTags(e.target.value)} />
+        </label>
+        <div className="actions">
+          <button type="submit" className="primary">{t.saveLink}</button>
+        </div>
+      </form>
     </section>
   );
 }

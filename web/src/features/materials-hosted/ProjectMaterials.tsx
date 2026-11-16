@@ -5,9 +5,10 @@ import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
 import { Val } from "../../app/values";
+import { LinkWhere, isLink, type LinkInfo } from "./LinkOpen";
 
 // 项目页的材料与规范视图：只显示该项目的数据（服务端按 project 过滤），托管型与自有型并列并标明来源。
-interface Mat {
+interface Mat extends LinkInfo {
   id: string;
   project: string;
   kind: string;
@@ -44,8 +45,9 @@ export function ProjectMaterials({ project }: { project: string }) {
           <ul className="rows">
             {rest.map((m) => (
               <li key={m.id}>
-                <button className="link" onClick={() => setOpen(m)}>{m.title}</button> <span className="sub"><Val k="materialKind" id={m.kind} /> · {m.location ? t.hosted : t.owned}
+                <button className="link" onClick={() => setOpen(m)}>{m.title}</button> <span className="sub"><Val k="materialKind" id={m.kind} /> · {isLink(m) ? t.linked : m.location ? t.hosted : t.owned}
                 {m.location && <> · {m.location}</>}</span>
+                {isLink(m) && <> <LinkWhere m={m} /></>}
               </li>
             ))}
           </ul>
