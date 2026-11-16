@@ -417,6 +417,10 @@ var Module = store.Module{Name: "policy", Migrations: []store.Migration{{
 	revoked_reason TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX policy_grant_credential ON policy_grant(credential);`,
+}, {
+	// 导入专用单已写入的累计条数（§6.13、§14.5）：和撤销状态一样是 doc 之外会变的列，只增不减。账本结构版本 8 的一部分。
+	Version: 3, Ledger: 8, Name: "ledger-v8-grant-import-used",
+	SQL: `ALTER TABLE policy_grant ADD COLUMN used_records INTEGER NOT NULL DEFAULT 0;`,
 }}}
 
 func invalid(format string, a ...any) error {
