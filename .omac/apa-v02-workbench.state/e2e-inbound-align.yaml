@@ -1,4 +1,7 @@
-# sha256: 11e463c8fb6feff257838403a98ac412799491f37fc64bcc5654e4b50d748b25
+# sha256: 22385b73270b4178a31c2b2a8bb5974f945e8a04b4c6dd22da42b872987d6f72
 work_item_id: 01a1e5e6-6012-7880-aae0-7e902e1dcfc5
-status: blocked
+status: in_progress
 recovery_marker: true
+retry_note: Previous worker run was terminated by the runtime (agent_error.unknown),
+  not a code failure. Continue from your existing workspace/branch, rebase on origin/main,
+  finish, run contract commands, submit. Do not redo finished work.

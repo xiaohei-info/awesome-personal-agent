@@ -1,4 +1,7 @@
-# sha256: 0f61dd193c73bc7c6ed03a53a8ae8ada8686467f59a111046d18cb497a6d3b74
+# sha256: 190468d8209d37e9194ab0a3eb5702bf81399888e2ba233afe906bee6e0da9ec
 work_item_id: 01a1e5df-7973-765e-b612-b6f1d675518a
-status: blocked
+status: in_progress
 recovery_marker: true
+retry_note: Two reviewer runs finished without submitting a verdict. Implementation
+  is unchanged; re-run the review on the current PR head and submit a verdict. If
+  the PR no longer merges cleanly, send it back for a rebase instead.

@@ -1,3 +1,8 @@
-# sha256: 98be694c5bbd5a8ef977f353fdd71d9486c90358c6e0a259ef5fbd6bf8b3b1ae
+# sha256: badc01f6af85bdae114d00437ad230a43a0d95f66c075f652f18b2e789e76a33
 work_item_id: 01a1e578-c00a-7c9d-882b-9c587ef10eac
-status: blocked
+status: in_progress
+recovery_marker: true
+retry_note: 'CI rework budget was spent; the last round was a merge conflict with
+  main caused by parallel nodes editing kernel/policy. Reuse your existing branch:
+  rebase on origin/main, resolve conflicts by semantics keeping both sides, rerun
+  every contract command, push, resubmit. Do not redo the feature.'
