@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/sources/internal/content"
 )
 
 // 退出码沿用 §9.2。
@@ -32,8 +34,16 @@ const (
 	defaultMax     = 100
 	defaultDays    = 7
 	maxPages       = 100
-	maxDetail      = 16 << 10
+	// defaultOutputMB 是内核 max_source_output_mb 的缺省值（设计 §16.2）；内核不把实际值告诉来源程序，
+	// 调过它的人在来源的 config.max_output_mb 里写同一个数。
+	defaultOutputMB = 32
 )
+
+// fixedHeaders 是逐个用 -H 请求的信头（附录 D.8）：发件人、收件人、抄送、回复地址、日期、主题、Message-ID、
+// In-Reply-To、References、列表头、内容类型。himalaya 不能一次列出全部信头，所以只取这一组固定的。
+var fixedHeaders = []string{"From", "To", "Cc", "Reply-To", "Date", "Subject", "Message-ID", "In-Reply-To", "References",
+	"List-Id", "List-Unsubscribe", "List-Unsubscribe-Post", "List-Post", "List-Help", "List-Subscribe", "List-Archive", "List-Owner",
+	"Content-Type"}
 
 // Supported 声明支持的工具版本范围 [Min, Max) 及该范围内的 JSON 标志（参数在不同版本不同，§9.7）。
 // Sample 是 testdata/ 下对应录制样本目录；放宽范围前必须先加样本（契约测试会检查）。
@@ -86,6 +96,8 @@ type Config struct {
 	// LookbackDays 只用于首次拉取（游标为空且无 window.from）：只看最近 N 天（默认 7）。
 	LookbackDays int `json:"lookback_days,omitempty"`
 	TimeoutSec   int `json:"timeout_sec,omitempty"`
+	// MaxOutputMB 与内核的 max_source_output_mb 取同一个值（默认 32）：一次输出累计到它的四分之三就停下。
+	MaxOutputMB int `json:"max_output_mb,omitempty"`
 }
 
 type event struct {
@@ -94,10 +106,23 @@ type event struct {
 	Subject    string `json:"subject"`
 	Detail     string `json:"detail,omitempty"`
 	OccurredAt string `json:"occurred_at"`
+	// Headers 是固定信头（规范化）；Content 自报取不到的部分：邮件工具只读取信时拿不到 HTML 原文与附件清单。
+	Headers map[string]any `json:"headers,omitempty"`
+	Content *declared      `json:"content,omitempty"`
 	// CorrelationKeys 含 thread:<线程根 Message-ID>，回信与原信共用（§9.4、§9.7）。
 	CorrelationKeys []string `json:"correlation_keys,omitempty"`
 	Sender          string   `json:"sender,omitempty"`
 	// 不设 sender_verified：himalaya 不给出可核实的结论（§9.7）。
+}
+
+type declared struct {
+	State   string    `json:"state"`
+	Missing []missing `json:"missing"`
+}
+
+type missing struct {
+	Part   string `json:"part"`
+	Reason string `json:"reason"`
 }
 
 // Runner 执行外部工具；参数一律 argv，不经 shell。测试边界用它隔离真实工具。
@@ -165,6 +190,9 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 	if cfg.PageSize <= 0 {
 		cfg.PageSize = defaultPage
 	}
+	if cfg.MaxOutputMB <= 0 {
+		cfg.MaxOutputMB = defaultOutputMB
+	}
 	timeout := defaultTimeout
 	if cfg.TimeoutSec > 0 {
 		timeout = time.Duration(cfg.TimeoutSec) * time.Second
@@ -203,6 +231,7 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 		ev  event
 		at  time.Time
 		ref string // himalaya 的信件编号，仅用于 message read
+		att bool   // envelope 的 has_attachment：只用来写明"有附件、未取清单"
 	}
 	// 信件按新到旧分页；翻到出现早于游标的信件、或页不满为止，否则积压会被游标越过而丢失。
 	var items []item
@@ -233,7 +262,7 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 				reachedOld = true
 				continue
 			}
-			items = append(items, item{ev, at, e.ID.String()})
+			items = append(items, item{ev, at, e.ID.String(), e.HasAttachment})
 		}
 		if reachedOld || len(envs) < cfg.PageSize {
 			break
@@ -253,17 +282,21 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 		newest = floor
 	}
 	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
+	batch := content.NewBatcher(cfg.MaxOutputMB)
 	for n, it := range items {
 		if n > 0 && ctx.Err() != nil {
 			break // 单次运行超时：已读部分照常输出，游标只到已读部分，下次接着读
 		}
-		// --preview：不把邮件标为已读（§9.7 只读）。
+		if batch.Full() {
+			break // 输出已到上限的四分之三：游标停在已输出的最后一条，余下的下次再取（§9.2）
+		}
+		// --preview：不把邮件标为已读（§9.7 只读）。不用 message export --full：它会置已读（D.3 MEAS-MAIL-AR）。
 		read := append(base("message", "read"), "--preview")
 		if vr.IDFromRead {
-			// 与读正文同一次调用，不增加往返；References/In-Reply-To 给线程关联键（MEAS-MAIL-THREAD）。
-			read = append(read, "-H", "Message-ID", "-H", "References", "-H", "In-Reply-To")
+			// 与读正文同一次调用，不增加往返；固定信头逐个 -H 请求，其中 References/In-Reply-To 给线程关联键（MEAS-MAIL-THREAD）。
+			for _, h := range fixedHeaders {
+				read = append(read, "-H", h)
+			}
 		}
 		body, err := call(ctx, r, append(append(read, it.ref), vr.JSONFlag...))
 		if err != nil {
@@ -277,18 +310,34 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 			return nil, fail(ExitConfig, "message read 输出不是 JSON 字符串: %v", err)
 		}
 		root := it.ev.ID
+		miss := []missing{{"original", "message read --preview 只给转换后的正文；原始正文需要 message export --full，它会把邮件置为已读"}}
+		if it.att {
+			miss = append(miss, missing{"attachments", "信封标明有附件；附件清单需要 message export --full，它会把邮件置为已读，所以未取清单"})
+		}
 		if vr.IDFromRead {
-			if it.ev.ID, root, text, err = parseRead(text); err != nil {
+			var hs []content.Header
+			if it.ev.ID, root, hs, text, err = parseRead(text); err != nil {
 				return nil, fail(ExitConfig, "message read 输出无法解析: %v", err)
 			}
+			it.ev.Headers = content.NormalizeHeaders(hs)
+		} else {
+			miss = append([]missing{{"headers", "该版本范围的 message read 未按 -H 取信头（未实测）"}}, miss...)
 		}
 		it.ev.CorrelationKeys = []string{"thread:" + root}
-		it.ev.Detail = truncate(text)
+		it.ev.Detail = text
+		it.ev.Content = &declared{State: "partial", Missing: miss}
+		var line bytes.Buffer
+		enc := json.NewEncoder(&line)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(it.ev)
+		if !batch.Add(line.Len()) {
+			break
+		}
+		buf.Write(line.Bytes())
 		// 游标最多到当前时间：发件人控制的 Date 不可信，未来日期不能让后续邮件被永久越过。
 		if at := minTime(it.at, now()); at.After(newest) {
 			newest = at
 		}
-		_ = enc.Encode(it.ev)
 	}
 	cursor := in.Cursor
 	switch {
@@ -299,7 +348,8 @@ func poll(ctx context.Context, stdin io.Reader, r Runner, now func() time.Time) 
 	default:
 		cursor = now().UTC().Format(time.RFC3339Nano)
 	}
-	_ = enc.Encode(map[string]string{"cursor": cursor})
+	cur, _ := json.Marshal(map[string]string{"cursor": cursor})
+	buf.Write(append(cur, '\n'))
 	return buf.Bytes(), nil
 }
 

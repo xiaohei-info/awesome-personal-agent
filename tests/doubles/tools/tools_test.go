@@ -491,3 +491,42 @@ func TestGhRebase(t *testing.T) {
 		t.Fatalf("since 晚于样本时间时不应读到: %s", o)
 	}
 }
+
+// himalaya-long、mail-many-long：长正文、固定信头逐个 -H 返回、附件标记；只读命令。
+func TestLongMailCases(t *testing.T) {
+	bin := newBin(t)
+	call := func(c string, args ...string) string {
+		setCase(t, bin, c)
+		o, _, code := run(t, bin, "himalaya", nil, args...)
+		if code != 0 {
+			t.Fatalf("%s %v 退出码 %d", c, args, code)
+		}
+		return o
+	}
+	var env []struct {
+		ID            string `json:"id"`
+		HasAttachment bool   `json:"has_attachment"`
+	}
+	if err := json.Unmarshal([]byte(call("himalaya-long", "envelope", "list", "--output", "json")), &env); err != nil || len(env) != 1 || !env[0].HasAttachment {
+		t.Fatalf("himalaya-long 应有一封带附件的邮件: %+v %v", env, err)
+	}
+	var got string
+	o := call("himalaya-long", "message", "read", "--preview", "-H", "From", "-H", "Cc", "-H", "List-Id", "-H", "Content-Type", "-H", "References", "31", "--output", "json")
+	if err := json.Unmarshal([]byte(o), &got); err != nil {
+		t.Fatal(err)
+	}
+	head, body, _ := strings.Cut(got, "\n\n")
+	if want := "From: AgentMail <agent@example.com>\nCc: team@example.com\nList-Id: <news.example.com>\nContent-Type: text/plain; charset=utf-8\nReferences: <mid-t1@example.com>"; head != want {
+		t.Errorf("信头按 -H 顺序返回:\n%s", head)
+	}
+	if strings.TrimSuffix(body, "\n") != tools.LongBody("<mid-long@example.com>", tools.LongBodyBytes) || len(body) <= 16<<10 {
+		t.Errorf("正文应是完整的 %d 字节，实际 %d", tools.LongBodyBytes, len(body))
+	}
+	if err := json.Unmarshal([]byte(call("mail-many-long", "envelope", "list", "--output", "json")), &env); err != nil || len(env) != tools.ManyLongCount {
+		t.Fatalf("mail-many-long 应有 %d 封: %d %v", tools.ManyLongCount, len(env), err)
+	}
+	o = call("mail-many-long", "message", "read", "--preview", "-H", "Message-ID", "59", "--output", "json")
+	if err := json.Unmarshal([]byte(o), &got); err != nil || len(got) < tools.ManyLongBytes || !strings.HasPrefix(got, "Message-ID: <mid-ml19@example.com>\n\n") {
+		t.Errorf("mail-many-long 第 20 封: %d 字节 %v", len(got), err)
+	}
+}

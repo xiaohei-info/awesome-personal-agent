@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/sources/internal/content"
 )
 
 var (
@@ -76,8 +78,10 @@ type envelope struct {
 	ID        flexString `json:"id"`
 	MessageID string     `json:"message_id"`
 	Subject   string     `json:"subject"`
-	Date      string     `json:"date"`
-	From      struct {
+	// HasAttachment 只用来在 content.missing 里写明"有附件、未取清单"。
+	HasAttachment bool   `json:"has_attachment"`
+	Date          string `json:"date"`
+	From          struct {
 		Name string `json:"name"`
 		Addr string `json:"addr"`
 	} `json:"from"`
@@ -133,23 +137,25 @@ func (e envelope) toEvent(needID bool) (event, time.Time, error) {
 	return event{ID: id, Type: "mail.received", Subject: subj, OccurredAt: at.UTC().Format(time.RFC3339Nano), Sender: sender}, at, nil
 }
 
-// parseRead 拆开 `message read -H Message-ID -H References -H In-Reply-To` 的输出：
-// "头: 值\n…\n\n正文"（头可折行）。返回自己的 Message-ID 与线程根（设计 §9.7：References 首项，
-// 没有取 In-Reply-To，都没有就是自己）。Message-ID 缺失视为输出无法解析；线程头缺失不是错误。
-func parseRead(s string) (id, root, body string, err error) {
+// parseRead 拆开 `message read -H … ` 的输出："头: 值\n…\n\n正文"（头可折行）。返回自己的 Message-ID、
+// 线程根（设计 §9.7：References 首项，没有取 In-Reply-To，都没有就是自己）、按出现顺序的信头与不截断的正文。
+// Message-ID 缺失视为输出无法解析；其余头缺失不是错误。
+func parseRead(s string) (id, root string, hs []content.Header, body string, err error) {
 	head, body, _ := strings.Cut(s, "\n\n")
 	h := map[string]string{}
-	last := ""
 	for _, ln := range strings.Split(head, "\n") {
-		if ln != "" && (ln[0] == ' ' || ln[0] == '\t') { // 折行续上一个头
-			h[last] += " " + ln
+		if ln != "" && (ln[0] == ' ' || ln[0] == '\t') && len(hs) > 0 { // 折行续上一个头
+			hs[len(hs)-1].Value += " " + ln
 		} else if k, v, ok := strings.Cut(ln, ":"); ok {
-			last = strings.ToLower(strings.TrimSpace(k))
-			h[last] = v
+			hs = append(hs, content.Header{Name: k, Value: v})
 		}
 	}
+	for _, x := range hs {
+		k := strings.ToLower(strings.TrimSpace(x.Name))
+		h[k] += " " + x.Value
+	}
 	if id = strings.Join(strings.Fields(h["message-id"]), ""); id == "" {
-		return "", "", "", errors.New("缺少 Message-ID")
+		return "", "", nil, "", errors.New("缺少 Message-ID")
 	}
 	root = firstMsgID(h["references"])
 	if root == "" {
@@ -158,17 +164,10 @@ func parseRead(s string) (id, root, body string, err error) {
 	if root == "" {
 		root = id
 	}
-	return id, root, body, nil
+	return id, root, hs, body, nil
 }
 
 var msgIDRe = regexp.MustCompile(`<[^<>\s]+>`)
 
 // firstMsgID 取头值里的第一个 <Message-ID>。
 func firstMsgID(v string) string { return msgIDRe.FindString(v) }
-
-func truncate(s string) string {
-	if len(s) <= maxDetail {
-		return s
-	}
-	return strings.ToValidUTF8(s[:maxDetail], "")
-}
