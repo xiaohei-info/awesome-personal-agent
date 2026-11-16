@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/connections"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
@@ -32,6 +33,9 @@ type Env struct {
 	// CommandExists 判断来源登记的命令能否找到；为空按 PATH 与路径查找（内核不拉起进程，只看文件）。
 	CommandExists func(command string) bool
 	Now           func() time.Time
+	// Conns 与 KeyFile 非空时出 secrets、connections 两项检查（§5.6）。
+	Conns   *connections.Service
+	KeyFile string
 }
 
 func (e Env) now() time.Time {
@@ -43,7 +47,11 @@ func (e Env) now() time.Time {
 
 // Kernel 读取账本事实后运行内核一侧的全部检查。
 func Kernel(ctx context.Context, f Facts, e Env) []Check {
-	return []Check{tier(f), modelEndpoint(ctx, f, e), sources(f, e), packCheck(e), channels(f, e)}
+	out := []Check{tier(f), modelEndpoint(ctx, f, e), sources(f, e), packCheck(e), channels(f, e)}
+	if f.ConnectionsRead {
+		out = append(out, secretsCheck(f), connectionsCheck(f))
+	}
+	return out
 }
 
 func ts(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -283,7 +291,8 @@ func channels(f Facts, e Env) Check {
 	}
 	var orphan []string
 	for route, n := range f.Backlog {
-		if strings.HasPrefix(route, "channel:") && !covered[route] && n > 0 {
+		// channel:ch-… 是内置渠道连接的路由，由 connections 检查负责
+		if strings.HasPrefix(route, "channel:") && !strings.HasPrefix(route, "channel:"+connections.IDPrefix) && !covered[route] && n > 0 {
 			orphan = append(orphan, route)
 		}
 	}

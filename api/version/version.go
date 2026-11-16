@@ -8,6 +8,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/conn"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
 
@@ -33,6 +34,7 @@ type Protocols struct {
 	HTTPAPI             string `json:"http_api"`
 	SourceContract      int    `json:"source_contract"`
 	ChannelExt          int    `json:"channel_ext"`
+	ConnectorContract   int    `json:"connector_contract"` // 进程内连接插件接口（§1.4），只增不改
 	ProbabilityJudgment string `json:"probability_judgment"`
 }
 
@@ -41,7 +43,7 @@ func Current(ledger int) Info {
 	return Info{
 		Version: Release, Commit: commit(), TestClock: clock.TestClockBuild,
 		Schema:    Schema{Ledger: ledger},
-		Protocols: Protocols{HTTPAPI: "v1", SourceContract: 1, ChannelExt: 1, ProbabilityJudgment: policy.ProtocolProbability},
+		Protocols: Protocols{HTTPAPI: "v1", SourceContract: 1, ChannelExt: 1, ConnectorContract: conn.Contract, ProbabilityJudgment: policy.ProtocolProbability},
 	}
 }
 

@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/secrets"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 升级预检的检查名（不在 §15.5 的九类里，排在报告末尾）。
+// 升级预检的检查名（不在 §15.5 的检查类里，排在报告末尾）。
 const (
 	checkSchema     = "schema_version"
 	checkPackCompat = "pack_compat"
@@ -49,6 +52,9 @@ func UpgradeCheck(ctx context.Context, in Input) kdoctor.Report {
 			schema.Why = fmt.Sprintf("ledger structure %d already matches this binary; there is nothing to migrate", l.info.Ledger)
 		}
 		schema.Next = "stop the service, replace the release, start apa serve"
+		if _, err := os.Stat(filepath.Join(in.Home, secrets.KeyFile)); errors.Is(err, os.ErrNotExist) {
+			schema.Why += "; apa serve also generates the master key file for connection credentials (master.key, 0600)"
+		}
 	}
 
 	cfgCheck, cfg := configCheck(layout)

@@ -26,10 +26,12 @@ const (
 	HostPlugin    = "host_plugin"
 	Overlaps      = "overlaps"
 	Channels      = "channels"
+	Secrets       = "secrets"
+	Connections   = "connections"
 )
 
 // Order 是检查的输出顺序。
-var Order = []string{DataDir, Config, Tier, ModelEndpoint, Sources, Packs, HostPlugin, Overlaps, Channels}
+var Order = []string{DataDir, Config, Tier, ModelEndpoint, Sources, Packs, HostPlugin, Overlaps, Channels, Secrets, Connections}
 
 // Detail 是一项检查里针对某个对象（来源、端点、包、插件、渠道）的结论。
 type Detail struct {

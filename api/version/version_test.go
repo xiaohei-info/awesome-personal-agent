@@ -57,7 +57,7 @@ func TestGetVersionNeedsNoCredentialAndMatchesCurrent(t *testing.T) {
 	if got["schema"].(map[string]any)["ledger"] != float64(7) {
 		t.Fatalf("schema.ledger must be the value handed in: %v", got["schema"])
 	}
-	wantProto := map[string]any{"http_api": "v1", "source_contract": float64(1), "channel_ext": float64(1), "probability_judgment": "probability-judgment/1"}
+	wantProto := map[string]any{"http_api": "v1", "source_contract": float64(1), "channel_ext": float64(1), "connector_contract": float64(1), "probability_judgment": "probability-judgment/1"}
 	if !reflect.DeepEqual(got["protocols"], wantProto) {
 		t.Fatalf("protocols: %v", got["protocols"])
 	}

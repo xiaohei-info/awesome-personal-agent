@@ -262,6 +262,11 @@ func DoctorRoutes(st *store.Store, env kdoctor.Env) core.RouteGroup {
 			if err != nil {
 				return err
 			}
+			if env.Conns != nil {
+				if err := f.ReadConnections(r.Context(), st, env.Conns, kdoctor.KeyFactOf(env.KeyFile)); err != nil {
+					return err
+				}
+			}
 			checks := kdoctor.Kernel(r.Context(), f, env)
 			if err := recordProbes(r.Context(), st, env.Packs, checks, p.Caller.Actor); err != nil {
 				return err

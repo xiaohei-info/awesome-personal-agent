@@ -77,6 +77,7 @@ func newHome(t *testing.T, events int) string {
 	write(t, filepath.Join(home, "declarations", "d.json"), "{}", 0o644)
 	write(t, filepath.Join(home, "sources", "mail", "cred"), "TOKEN-SECRET", 0o600)
 	write(t, filepath.Join(home, "webhook-keys", "hook"), "HMAC-SECRET", 0o600)
+	write(t, filepath.Join(home, "master.key"), strings.Repeat("k", 32), 0o600)
 	write(t, filepath.Join(home, "runs", "r1", "out"), "run", 0o644)
 	write(t, filepath.Join(home, "run-credentials", "r1"), "rc", 0o600)
 	write(t, filepath.Join(home, "logs", "x.log"), "log", 0o644)
@@ -162,7 +163,7 @@ func TestCreateContentsPermissionsAndManifest(t *testing.T) {
 	out, m := mustCreate(t, home, Options{})
 	l := listing(t, out)
 	for _, want := range []string{"ledger.db", "manifest.json", "config.yaml", "sources.json", "blobs/ab/abcd", "packs/mine/pack.yaml",
-		"declarations/d.json", "sources/mail/cred", "webhook-keys/hook"} {
+		"declarations/d.json", "sources/mail/cred", "webhook-keys/hook", "master.key"} {
 		if !has(l, want) {
 			t.Errorf("backup lacks %s; has %v", want, l)
 		}
@@ -175,8 +176,10 @@ func TestCreateContentsPermissionsAndManifest(t *testing.T) {
 	if fi, _ := os.Stat(out); fi.Mode().Perm() != 0o700 {
 		t.Errorf("backup dir mode = %o, want 700", fi.Mode().Perm())
 	}
-	if fi, _ := os.Stat(filepath.Join(out, "sources", "mail", "cred")); fi.Mode().Perm() != 0o600 {
-		t.Errorf("credential mode = %o, want 600", fi.Mode().Perm())
+	for _, f := range []string{filepath.Join("sources", "mail", "cred"), "master.key"} {
+		if fi, _ := os.Stat(filepath.Join(out, f)); fi.Mode().Perm() != 0o600 {
+			t.Errorf("%s mode = %o, want 600", f, fi.Mode().Perm())
+		}
 	}
 	if m.Schema.Ledger != 3 || m.Schema.Modules["eventlog"] != 2 || m.Schema.Modules["things"] != 1 {
 		t.Errorf("schema = %+v", m.Schema)
@@ -232,10 +235,10 @@ func TestCreateNoSecrets(t *testing.T) {
 	home := newHome(t, 5)
 	out, m := mustCreate(t, home, Options{NoSecrets: true})
 	l := listing(t, out)
-	if has(l, "sources") || has(l, "webhook-keys") || has(l, "sources/mail/cred") || has(l, "webhook-keys/hook") {
+	if has(l, "sources") || has(l, "webhook-keys") || has(l, "sources/mail/cred") || has(l, "webhook-keys/hook") || has(l, "master.key") {
 		t.Errorf("secrets leaked into --no-secrets backup: %v", l)
 	}
-	if !m.NoSecrets || !has(l, "blobs/ab/abcd") {
+	if !m.NoSecrets || !has(l, "blobs/ab/abcd") || !has(m.Withheld, "master.key") {
 		t.Errorf("manifest/no-secrets content wrong: %+v %v", m, l)
 	}
 	for rel := range m.Files {
@@ -702,7 +705,7 @@ func TestRestoreRebasesCredentialsPath(t *testing.T) {
 	}
 }
 
-// ACT-BAK-09：--no-secrets 恢复后留下待办记录，列出没带的凭据目录与接收密钥；普通备份不留。
+// ACT-BAK-09：--no-secrets 恢复后留下待办记录，列出没带的凭据目录、接收密钥与主密钥；普通备份不留。
 func TestRestoreNoSecretsLeavesNotice(t *testing.T) {
 	home := newHome(t, 3)
 	write(t, filepath.Join(home, "sources.json"), fmt.Sprintf(`{"sources":[{"id":"mail","command":"/bin/true","credentials_path":%q}]}`, filepath.Join(home, "sources", "mail", "cred")), 0o644)
@@ -712,7 +715,7 @@ func TestRestoreNoSecretsLeavesNotice(t *testing.T) {
 		t.Fatal(err)
 	}
 	n, ok := ReadNotice(target)
-	if !ok || strings.Join(n.Withheld, ",") != "sources/mail,webhook-keys/hook" {
+	if !ok || strings.Join(n.Withheld, ",") != "master.key,sources/mail,webhook-keys/hook" {
 		t.Fatalf("notice = %+v, %v", n, ok)
 	}
 	if strings.Contains(fmt.Sprint(n), "SECRET") {

@@ -19,6 +19,11 @@ const (
 	modulePath = "github.com/xiaohei-info/awesome-personal-agent"
 	outcallDir = "kernel/outcall" // 唯一外呼出口
 	clockDir   = "kernel/clock"   // 唯一允许直接取系统时间的包
+	// 连接插件（§3、§4.4）：内核不 import 它们；凭据明文只在外呼调用器里解出；渠道发送只经渠道发送器。
+	connectorsDir = "connectors"
+	secretsDir    = "kernel/secrets"
+	senderDir     = "kernel/channel"
+	connPkg       = modulePath + "/" + outcallDir + "/conn"
 )
 
 // 内核（外呼调用器除外）禁止的网络与子进程库；net/url 等纯解析包不发起外呼，放行。
@@ -33,7 +38,7 @@ var (
 	// 设计点名的 harness；Pi、Cursor 词太通用（cursor 还是游标），有意不列入。
 	harnessNames = []string{"hermes", "claude", "codex", "dsh", "gemini", "opencode", "openclaw"}
 	productNames = append([]string{"telegram", "openai", "anthropic", "himalaya", "gog",
-		"slack", "discord", "feishu", "dingtalk", "wechat", "github", "typesafe", "jev"}, harnessNames...)
+		"slack", "discord", "feishu", "lark", "dingtalk", "wechat", "github", "typesafe", "jev", "bark"}, harnessNames...)
 )
 
 // protocolLiterals 是模型协议契约里带厂商名的固定字面量（设计 §5.3）：只在 kernel/outcall/model 里、按整串精确匹配放行。
@@ -82,7 +87,7 @@ func Check(root string) ([]Violation, error) {
 			return nil, err
 		}
 	}
-	for _, dir := range []string{"sources", "ext", "packs"} {
+	for _, dir := range []string{"sources", "ext", "packs", connectorsDir} {
 		err := walk(root, dir, func(rel string, data []byte) error {
 			if bytes.IndexByte(data, 0) >= 0 { // 二进制文件
 				return nil
@@ -135,6 +140,12 @@ func checkKernelFile(rel string, data []byte) ([]Violation, error) {
 		return nil, fmt.Errorf("parse %s: %w", rel, err)
 	}
 	inOutcall := rel == outcallDir || strings.HasPrefix(rel, outcallDir+"/")
+	usesConn := false
+	for _, im := range f.Imports {
+		if p, _ := strconv.Unquote(im.Path.Value); p == connPkg {
+			usesConn = true
+		}
+	}
 	var vs []Violation
 	add := func(rule string, pos token.Pos, msg string) {
 		vs = append(vs, Violation{rule, rel, fset.Position(pos).Line, msg})
@@ -146,8 +157,18 @@ func checkKernelFile(rel string, data []byte) ([]Violation, error) {
 			if !inOutcall && bannedImport(p) {
 				add("kernel-import", x.Pos(), "内核只能经 "+outcallDir+" 外呼，禁止 import "+p)
 			}
+			if p == modulePath+"/"+connectorsDir || strings.HasPrefix(p, modulePath+"/"+connectorsDir+"/") {
+				add("kernel-connectors", x.Pos(), "内核不 import 连接插件，由装配方交给外呼调用器: "+p)
+			}
 			if name := firstName(importWords(p), productNames); name != "" {
 				add("kernel-name", x.Pos(), "内核 import 出现产品名 "+name+": "+p)
+			}
+		case *ast.SelectorExpr:
+			if x.Sel.Name == "Reveal" && !inOutcall && !strings.HasPrefix(rel, secretsDir+"/") {
+				add("kernel-secrets", x.Pos(), "凭据明文只允许外呼调用器（"+outcallDir+"）解出")
+			}
+			if x.Sel.Name == "Send" && usesConn && !inOutcall && !strings.HasPrefix(rel, senderDir+"/") {
+				add("kernel-send", x.Pos(), "渠道发送只经渠道发送器（"+senderDir+"）")
 			}
 		case *ast.Ident:
 			if name := firstName(x.Name, productNames); name != "" {

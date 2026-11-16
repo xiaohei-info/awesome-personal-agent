@@ -111,4 +111,20 @@ const (
 	CodeChannelBacklog = "channel_backlog"
 	CodeChannelOrphan  = "channel_orphan"
 	CodeExportOK       = "export_ok"
+
+	// 凭据保管库（§5.6）；Data["rows"]、["unreadable"]、["other_key"]
+	CodeSecretsNone       = "secrets_none"
+	CodeSecretsOK         = "secrets_ok"
+	CodeSecretsKeyMissing = "secrets_key_missing"
+	CodeSecretsKeyMode    = "secrets_key_mode"
+	CodeSecretsUnreadable = "secrets_unreadable"
+
+	// 连接（§1.6）
+	CodeConnectionsNone    = "connections_none"
+	CodeConnectionsOK      = "connections_ok"
+	CodeConnectionsProblem = "connections_problem"
+	// 连接（对象一级）；Data["name"]、["type"]、["problem"]（问题代码）、["last_ok_at"]、["missing_credentials"]
+	CodeConnectionOK       = "connection_ok"
+	CodeConnectionProblem  = "connection_problem"
+	CodeConnectionDisabled = "connection_disabled"
 )

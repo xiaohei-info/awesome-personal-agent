@@ -82,6 +82,9 @@ func TestInitBuildsCompleteDataDirectoryInsideAPAHome(t *testing.T) {
 			t.Fatalf("%s/ missing: %v", name, err)
 		}
 	}
+	if st, err := os.Stat(filepath.Join(home, "master.key")); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("master.key must exist with 0600: %v", err)
+	}
 	if st, _ := os.Stat(filepath.Join(home, "sources")); st.Mode().Perm() != 0o700 {
 		t.Fatalf("sources/ must be 0700, got %v", st.Mode().Perm())
 	}

@@ -107,6 +107,10 @@ func (s Spec) validate() error {
 	if !scoped && s.Scope != "" {
 		return invalid("scope is only valid for ext and webhook")
 	}
+	// 内置渠道连接的路由是 channel:ch-…（kernel/connections.IDPrefix）；ext 渠道不能占用这个前缀（§8）。
+	if s.Kind == Ext && strings.HasPrefix(s.Scope, "channel.ch-") {
+		return invalid("channel names starting with ch- are reserved for built-in channels")
+	}
 	if s.Executor != "" && s.Kind != Worker {
 		return invalid("executor binding is only valid for worker")
 	}

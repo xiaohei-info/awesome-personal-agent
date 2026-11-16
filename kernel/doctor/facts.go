@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/connections"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/secrets"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -29,6 +31,11 @@ type Facts struct {
 	ExtKeys      []ExtKey
 	Seen         map[string]time.Time // 见 Seen：subject → 最近一次见到
 	Backlog      map[string]int       // 投递路由 → 还没送出的投递数
+	// 连接与凭据（ReadConnections 填写；没读过时不出这两项检查）。
+	ConnectionsRead bool
+	Connections     []connections.Connection
+	Secrets         secrets.Stats
+	Key             KeyFact
 }
 
 // ReadFacts 读取自检需要的账本事实；账本结构必须是当前二进制的结构（旧结构用 LegacySources）。
