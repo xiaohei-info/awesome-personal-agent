@@ -403,3 +403,18 @@ def test_session_kind_order_with_direct_platforms(tools, apa, monkeypatch, env, 
     fake_session_context(monkeypatch, **bound)
     tools["apa_accept"]({"id": "i", "evidence": "x"}, session_id="s")
     assert kinds(apa) == [want]
+
+
+# ACT-CHT-05：名单里的平台加多人会话，三个代答工具都报 group，内核的 23 原样交回、不重试。
+@pytest.mark.parametrize("tool,args", [
+    ("apa_attach", {"id": "p", "to": "i", "evidence": "补到 i"}),
+    ("apa_item_progress", {"id": "i", "text": "t", "evidence": "记一条"}),
+    ("apa_proposals_apply", {"recommended": True, "evidence": "按建议处理"}),
+])
+def test_chat_dispose_tools_in_a_group_session_report_group_and_expose_exit_23(tools, apa, monkeypatch, tool, args):
+    monkeypatch.setenv("APA_DIRECT_PLATFORMS", "telegram")
+    monkeypatch.setenv("FAKE_EXIT", "23")
+    monkeypatch.setenv("FAKE_ERR", '{"code":"session_not_direct"}')
+    fake_session_context(monkeypatch, platform="telegram", chat_type="group", user_id="42")
+    r = json.loads(tools[tool](args, session_id="s"))
+    assert kinds(apa) == ["group"] and r["exit_code"] == 23 and r["stderr"]["code"] == "session_not_direct" and len(calls(apa)) == 1
