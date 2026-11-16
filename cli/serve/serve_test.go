@@ -14,6 +14,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path"
 	"path/filepath"
@@ -1570,5 +1571,39 @@ func TestServeGuidelineCheckDelegatesToConfiguredExecutor(t *testing.T) {
 	}
 	if len(its) != 2 || child == nil || child.Assignee != "wk.cli" {
 		t.Fatalf("want parent + one delegation to wk.cli, got %+v", its)
+	}
+}
+
+// /ingest 的请求体上限取运行配置 max_webhook_body_mb，而不是内核默认的 1 MiB（§9.5）。
+func TestAssembleIngestBodyLimitFollowsConfig(t *testing.T) {
+	post := func(limit int, size int) int {
+		l := config.LayoutOf(filepath.Join(t.TempDir(), "h"))
+		if err := l.Ensure(); err != nil {
+			t.Fatal(err)
+		}
+		reg, err := registry()
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, err := store.Open(l.Home, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st.Close()
+		cfg := config.Default()
+		cfg.MaxWebhookBody = limit
+		k, err := assemble(st, l, cfg, "http://127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		k.srv.Handler().ServeHTTP(rec, httptest.NewRequest("POST", "/ingest/nosuch", strings.NewReader(strings.Repeat("x", size))))
+		return rec.Code
+	}
+	if got := post(2<<20, 1200<<10); got == http.StatusRequestEntityTooLarge {
+		t.Fatalf("1.2 MiB body rejected with 413 although max_webhook_body_mb is 2")
+	}
+	if got := post(1<<20, 1200<<10); got != http.StatusRequestEntityTooLarge {
+		t.Fatalf("1.2 MiB body must exceed the default 1 MiB limit, got %d", got)
 	}
 }
