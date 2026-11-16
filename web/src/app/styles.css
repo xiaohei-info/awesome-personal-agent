@@ -513,3 +513,4 @@ p.field-err[role="alert"] { margin: -6px 0 0; padding: 4px 10px; font-size: 12.5
 [role="alert"].conn-problem { display: flex; align-items: center; gap: 12px; margin: 0; color: var(--ink); background: var(--warn-soft); border-color: transparent; }
 .conn-problem button { margin-left: auto; flex: 0 0 auto; }
 .conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+pre.raw-text { margin: 6px 0; max-height: 32em; overflow: auto; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }

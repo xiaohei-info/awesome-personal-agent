@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
@@ -74,7 +75,7 @@ export function Digest({ source }: { source: string }) {
         <ul className="rows">
           {items.map((v) => (
             <li key={v.id}>
-              <span>{v.subject || v.id}</span> · {when(v.occurred_at)}
+              <span>{v.subject || v.id}</span> · {when(v.occurred_at)} · <Link to={"/sources/events/" + encodeURIComponent(v.id)}>{t.viewRaw}</Link>
               {v.summary && <p>{v.summary}</p>}
               <div role="group" aria-label={t.handle(v.id)}>
                 <button onClick={() => void propose(v.id)}>{t.propose}</button>
