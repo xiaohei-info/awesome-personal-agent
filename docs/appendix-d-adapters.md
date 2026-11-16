@@ -98,6 +98,8 @@ default: {zh: Apple 邮件, en: Apple Mail}
 
 邮件线程关联键（主文档 §9.7）在各邮件适配器里的取法：事件的 `correlation_keys` 含 `thread:<线程根 Message-ID>`，线程根取 `References` 的第一项，没有则取 `In-Reply-To`，都没有则是邮件自己的 Message-ID；取不到线程头时只给自己的，回信按普通事件处理。himalaya（`sources/mail`，1.x 范围）在读取正文的同一次调用里加 `-H Message-ID -H References -H In-Reply-To`（仍带 `--preview`），输出的头部块按名取值、支持折行；2.x 范围未实测线程头，只给自己的 Message-ID。apple-pim（`sources/applepim`，`config.kind=mail`）取 `mail-cli get` 返回的 `message.references`、`message.inReplyTo`，并按自己 `messageId` 的写法（带不带尖括号）对齐，使原信与回信的键相等。录制样本：`sources/mail/testdata/1.1.0/thread/`（原信、带 References 与 In-Reply-To 的回信、只带 In-Reply-To 的回信、多级回复），`sources/applepim/testdata/messages-thread.json` 与 `get-mid-p*.json`。
 
+**没有到期日的提醒事项**（主文档 §21.1 决定 75）：`apple-pim-source` 的 `reminders` 另有配置 `undated_lists`（列表名或 ID 的数组，缺省为空）。列在其中的列表，未完成的提醒不论有没有到期日都产出事件：有到期日的仍是 `reminder.due`，没有到期日的是 `reminder.open`，`occurred_at` 取提醒的创建时间（工具不给时取本次拉取的时刻），`summary` 写列表名。两种类型的事件 id 与关联键构成相同（关联键是提醒 id），所以提醒改了标题仍是同一个关联键，后来补上到期日时按来源对象更新写回原事项。没有列在 `undated_lists` 里的列表行为不变。来源只读：事项完成后不回写、不删除那条提醒。工具取"未完成、不论到期日"的参数待实测（`MEAS-REM-UNDATED`），没有专门的筛选时取该列表的全部未完成提醒，由适配器筛。内置规则 `reminder-open` 把它直接列为建议（附录 C.14）。
+
 ## D.3 工具的实测结论
 
 版本：himalaya v1.1.0（对测试 IMAP 邮箱）、gog v0.9.0（真实 Google 日历，只动带固定测试前缀的临时事件，测后删除）。每行先写被测命题。
@@ -120,8 +122,13 @@ default: {zh: Apple 邮件, en: Apple Mail}
 |---|---|---|
 | `MEAS-MAIL-THREAD` | himalaya 与 `mail-cli` 在读取正文的同一次调用里能否取到 `References`、`In-Reply-To` 头 | **录制样本部分（W1 开发验收）已有结论**：两个适配器的契约测试都断言回信（含只带 `In-Reply-To` 的）的 `correlation_keys` 含原信的 `thread:<Message-ID>`，见 D.2 与 flow-source-mail 的 ACT-MAIL-08/10/12/13。样本版本：himalaya 1.1.0（头部块沿用 1.1.0 实录的 `Message-ID: …` 输出形态，References/In-Reply-To 行按同一形态合成，非真实邮箱实录）；mail-cli 无版本参数，`message.references`/`inReplyTo` 字段为按设计合成。**真实邮件工具上的证实由本机升级验证 L11 承接**（主文档 §20.4），在此之前不得把"能取到"当作已证实 |
 | `MEAS-MAIL-DMARC` | `mail-cli get --include-source` 在 `--engine=sqlite` 下能否返回原始信头、是否改已读标记、字段名；收件服务的标识按账户配置还是按服务推定；`mail-cli accounts` 是否带邮箱地址。`mail-cli auth-check` 只做 DKIM 与 SPF、自带一份发件人名单，不用它 | 把 apple-pim 邮件声明为可信之前的验收（主文档 §21.3） |
+| `MEAS-RAW-MAIL` | himalaya 与 `mail-cli` 能否在不改已读标记的前提下给出完整正文、HTML 原文、全部信头与附件清单（D.8） | 录制样本部分由 W17 的契约测试证实；真实工具由本机升级验证 L15、L16（主文档 §20.4） |
+| `MEAS-RAW-ATTACH` | 两个邮件工具能否按句柄取回单个附件且不改已读标记 | 本机升级验证 L16 |
+| `MEAS-REM-UNDATED` | `reminder-cli items` 有没有"未完成、不论到期日"的筛选值 | 录制样本部分由 W23 的契约测试证实；真实工具由本机升级验证 L23 |
 | `MEAS-ADAPT-GMAIL` | gog 邮件结果的粒度（线程或消息）及其增量查询方式 | 接入该适配器时的验收 |
 | `MEAS-ADAPT-KHAL` | `khal list --json` 没有更新时间字段时如何识别更新；重复事件的展开 | 接入该适配器时的验收 |
+
+**来源原文的实测结论**写回 D.8 的表。
 
 ## D.4 代码托管来源与 webhook 校验方案
 
@@ -208,3 +215,44 @@ Gmail、Google 日历、Google Drive 这类服务要用户自备 OAuth 客户端
 无论选哪种，先点"测试连接"：它用起草建议模板的真实约束发一次请求，结论写明协议与原生结构化输出方式；不合格时写明返回内容的形态。
 
 自建的分类服务讲 `probability-judgment/1` 即可接入；仓库里用于验收的分类端点替身（同时讲两种协议）可作参照（主文档 §18）。
+
+## D.8 来源原文：各来源的取法
+
+账本保存来源事件的完整原文，来源程序不截断（主文档 §6.10、§9.1、§9.2）。下表是各内置来源在工作台能力迭代之前的截断点、本版的取法，以及本版仍取不到的部分。"之前"一列同时说明升级前落盘的事件为什么标为"可能已截断"。
+
+| 来源程序 | 之前 | 本版的取法 | 仍取不到的 |
+|---|---|---|---|
+| `apple-pim-source`（邮件） | 正文按字节截到 16 KiB，没有截断标记；只取主题、发件人、时间、正文与两个线程头 | `mail-cli get` 取正文全文进 `detail`；信头进 `headers`，附件进 `attachments`；正文是 HTML 时原样进 `original`。优先用工具给出的结构化字段；工具只给原始邮件时，适配器用标准库解析信头与 MIME 结构，不自写解析器 | 工具能否在不改已读标记的前提下给出原始邮件待 `MEAS-RAW-MAIL`；做不到时缺的部分以 `partial` 自报 |
+| `mail-himalaya` | 同上，16 KiB；只请求三个线程头 | `message read --preview` 的正文不截断；用 `-H` 逐个请求一组固定的信头（发件人、收件人、抄送、回复地址、日期、主题、Message-ID、`In-Reply-To`、`References`、列表头、内容类型） | 全部信头、HTML 原文与附件清单要 `message export --full`，它会把信置为已读（D.3 `MEAS-MAIL-AR`），所以不用：`original` 与 `attachments` 以 `partial` 自报，信封里的 `has_attachment` 只用来写明"有附件、未取清单" |
+| `github-source` | 摘要截到 200 个字符，正文截到 4000 个字符；正文不超过 200 个字符时不带 `detail` | 正文全文进 `detail`（Markdown 本身就是原文，不另给 `original`），总是带；`summary` 仍是前 200 个字符；作者、标签、状态、仓库与编号进 `headers` | — |
+| `rss-source` | 标题与作者截到 300、摘要 400、正文 4000 个字符，末尾加省略号 | 条目正文（全文字段，没有则取描述）转成文本进 `detail`，HTML 原样进 `original`；标题与作者不截；`summary` 仍可截短；条目的附带文件进 `attachments`（只有地址、类型与大小，不支持取回） | 订阅源本身只给摘要时取不到全文，这是对方的限制，不算 `partial` |
+| `calendar`、`apple-pim-source`（日历） | 描述不截断 | 不变；起止时间、地点、组织者、参与者与状态进 `headers` | — |
+| `apple-pim-source`（提醒事项） | 备注不截断 | 不变；列表、到期日与优先级进 `headers` | — |
+| `http-json` | 字段按映射原样取，不截断 | 不变；被映射的那一条 JSON 原样进 `original` | — |
+| `dir-watch` | 事件只有路径、修改时间与大小 | 不变。事件说的是"文件变了"，原文就是文件本身，留在原处，`link` 指向它；不把文件内容读进账本 | 不适用 |
+| webhook 的字段映射 | 映射没写 `detail` 时，原始 payload 只在接收记录里，30 天后清除 | 请求体作为事件原文的 `original` 永久保存（主文档 §9.5） | — |
+| 对话捕获 | 对话增量全文在 `detail` | 不变 | — |
+| 仓库之外的来源脚本与转换脚本 | 无法盘点 | 契约要求不截断，由脚本作者自查；取不到全文时自报 `content` | — |
+
+内核一侧与原文有关的上限，只有整条拒收或整次失败，没有截取：
+
+| 上限 | 值 | 超过时 |
+|---|---|---|
+| 单条事件的原文 | `max_source_event_mb`，默认 16 | 这一行拒收，原因 `event_too_large`；其余事件照常 |
+| 一次拉取的 stdout | `max_source_output_mb`，默认 32 | 上限内已解析的事件落盘，游标不动，按临时失败计；来源程序应按字节分批（主文档 §9.2） |
+| 一条事件的聚合消息 | 200 条 | 这一行拒收；来源程序应拆成多条事件 |
+| webhook 请求体 | `max_webhook_body_mb`，默认 1 | 回 413，不落盘 |
+| 取回的单个附件 | 32 MiB | 取回失败，清单不变 |
+
+送给模型或 Agent 时的裁剪不在此列：它们只作用于一次调用，不改账本（主文档 §8.4、§14.14）。其中判断端点每题 8000 个字符、生成端点 24000 个字符、外发范围为摘录时正文前 500 个字符、转给执行者的挂靠消息每条 2000 个字符，都是调用一侧的预算。
+
+**HTML 转文本**由来源程序共用的一个包完成，库的选定结论写在主文档 §18。转换要求：链接保留地址，列表、引用与表格保留结构，不执行脚本、不取远程资源；转换失败时 `detail` 留空、`original` 照常保存，并以 `partial` 自报。
+
+**接入声明**（`source.yaml`）新增可选的 `content` 段：
+
+```yaml
+content:
+  attachments: fetch      # 可选：程序支持 fetch 模式，按句柄取回附件（主文档 §9.2）
+```
+
+**实测结论**（`MEAS-RAW-MAIL`、`MEAS-RAW-ATTACH` 证实后写在这里）：尚无。

@@ -109,7 +109,7 @@ func TestRunTiersMatchDesign(t *testing.T) {
 	}
 }
 
-// ACT-REL-10：升级说明含自动快照、回退只有恢复快照一条路（§16.5），并登记升级后本机验证清单 L1–L12（§20.4）。
+// ACT-REL-10：升级说明含自动快照、回退只有恢复快照一条路（§16.5），并登记升级后本机验证清单 L1–L24（§20.4）。
 func TestUpgradeDocMatchesDesign(t *testing.T) {
 	root := repoRoot(t)
 	doc := readDoc(t, root, "docs", "user", "upgrade.md")
@@ -120,8 +120,8 @@ func TestUpgradeDocMatchesDesign(t *testing.T) {
 	}
 	design := readDoc(t, root, "docs", "solution-design.md")
 	rows := tableRows(design, "**升级后本机验证清单**")
-	if len(rows) != 13 {
-		t.Fatalf("设计 §20.4 清单应有 13 项，解析到 %d", len(rows))
+	if len(rows) != 24 {
+		t.Fatalf("设计 §20.4 清单应有 24 项，解析到 %d", len(rows))
 	}
 	for i, r := range rows {
 		id := fmt.Sprintf("L%d", i+1)
