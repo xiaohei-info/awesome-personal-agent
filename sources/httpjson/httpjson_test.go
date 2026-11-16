@@ -78,7 +78,9 @@ func TestMapsItemsToStandardEventsWithCursor(t *testing.T) {
 	}
 }
 
+// equalEvent 比较映射出的字段；original 由专门的测试断言。
 func equalEvent(a, b event) bool {
+	a.Original, b.Original = nil, nil
 	x, _ := json.Marshal(a)
 	y, _ := json.Marshal(b)
 	return bytes.Equal(x, y)
@@ -153,5 +155,50 @@ func TestRootArrayAndFixedType(t *testing.T) {
 	if code != 0 || len(lines) != 2 || !strings.Contains(lines[0], `"id":"7"`) || !strings.Contains(lines[0], `"type":"poll.item"`) ||
 		!strings.Contains(lines[0], `"occurred_at":"2026-05-05T08:00:00Z"`) {
 		t.Fatalf("code=%d out=%q", code, out)
+	}
+}
+
+// 被映射的那一条 JSON 原样（含未映射字段、数字写法、键序）进 original，媒体类型 application/json。
+func TestOriginalIsTheMappedItemVerbatim(t *testing.T) {
+	const item1 = `{"key":"a-1","kind":"k","title":"T","ts":"2026-01-01T00:00:00Z","extra":{"n":1.50,"z":[1,  2]},"big":12345678901234567890}`
+	const item2 = `{ "key" : "a-2", "kind":"k","title":"U","ts":1767312000 }`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"other":1,"items":[` + item1 + `,` + "\n " + item2 + `]}}`))
+	}))
+	defer srv.Close()
+	code, out, _ := do(t, cfg(srv.URL, ""))
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if code != ExitOK || len(lines) != 3 {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	for i, want := range []string{item1, item2} {
+		var ev struct {
+			Original *struct {
+				MediaType string `json:"media_type"`
+				Text      string `json:"text"`
+			} `json:"original"`
+		}
+		if err := json.Unmarshal([]byte(lines[i]), &ev); err != nil || ev.Original == nil {
+			t.Fatalf("line %d: %v %s", i, err, lines[i])
+		}
+		if ev.Original.MediaType != "application/json" || ev.Original.Text != want {
+			t.Errorf("original[%d] = %q %q，期望原样 %q", i, ev.Original.MediaType, ev.Original.Text, want)
+		}
+	}
+	if strings.Contains(lines[2], "original") {
+		t.Errorf("游标行不应带 original: %s", lines[2])
+	}
+}
+
+// 根就是数组时同样取每个元素的原样文本。
+func TestOriginalForRootArray(t *testing.T) {
+	const item = `{"n":7,"t":"hello","at":"2026-05-05T10:00:00+02:00"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("[" + item + "]")) }))
+	defer srv.Close()
+	_, out, _ := do(t, `{"config":{"url":"`+srv.URL+`","event_type":"p","mapping":{"id":"n","subject":"t","occurred_at":"at"}}}`)
+	var ev struct{ Original struct{ Text string } }
+	_ = json.Unmarshal([]byte(strings.SplitN(out, "\n", 2)[0]), &ev)
+	if ev.Original.Text != item {
+		t.Fatalf("original=%q", ev.Original.Text)
 	}
 }
