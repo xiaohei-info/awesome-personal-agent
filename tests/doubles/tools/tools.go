@@ -112,8 +112,8 @@ func dispatch(tool, c string, args []string, root string) out {
 	if !known {
 		return failf(ExitNoRecord, "tool-stub: 未知工具 %q", tool)
 	}
-	if !strings.HasPrefix(c, prefix) {
-		if c2 := strings.SplitN(c, "-", 2)[0]; c2 != "mail" && c2 != "cal" && c2 != "gh" && c2 != "pim" {
+	if !strings.HasPrefix(c, prefix) && !(tool == "himalaya" && strings.HasPrefix(c, "himalaya-")) { // himalaya-long 也是邮件工具的 case
+		if c2 := strings.SplitN(c, "-", 2)[0]; c2 != "himalaya" && c2 != "mail" && c2 != "cal" && c2 != "gh" && c2 != "pim" {
 			return failf(ExitNoCase, "tool-stub: 未知 case %q", c)
 		}
 		return failf(ExitNoRecord, "tool-stub: case %q 没有录制 %s 的输出", c, tool)

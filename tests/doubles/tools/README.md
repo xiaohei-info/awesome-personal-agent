@@ -14,7 +14,7 @@ go build -o /tmp/tool-stub ./tests/doubles/tools/cmd/tool-stub
 
 | 工具 | case |
 |---|---|
-| himalaya | `mail-1.1.0` `mail-2.0.0`（回放 `sources/mail/testdata/<版本>`）、`mail-1.1.0-new`（加 `<mid-7@example.com>`）、`mail-thread-1/-2/mail-thread`（`<mid-t1..t3@example.com>`，按 `-H` 返回 References/In-Reply-To）、`mail-old-reply`/`mail-old-reply-2`（`<mid-o2/o3@example.com>`）、`mail-version-0.1`、`mail-auth-fail`（stderr `Invalid credentials`，退出 1）、`mail-garbled`（无 Message-ID 行）、`mail-garbled-json`（非 JSON） |
+| himalaya | `mail-1.1.0` `mail-2.0.0`（回放 `sources/mail/testdata/<版本>`）、`mail-1.1.0-new`（加 `<mid-7@example.com>`）、`mail-thread-1/-2/mail-thread`（`<mid-t1..t3@example.com>`，按 `-H` 返回 References/In-Reply-To）、`mail-old-reply`/`mail-old-reply-2`（`<mid-o2/o3@example.com>`）、`mail-version-0.1`、`mail-auth-fail`（stderr `Invalid credentials`，退出 1）、`mail-garbled`（无 Message-ID 行）、`mail-garbled-json`（非 JSON）、`himalaya-long`（一封 40 KiB 正文、带附件、固定信头齐全：`<mid-long@example.com>`）、`mail-many-long`（20 封各 110 KiB，每小时一封：`<mid-ml00..19@example.com>`，供按字节分批）；两者的信头按 `-H` 顺序返回，正文是确定的合成文本（`tools.LongBody`） |
 | gog | `cal-base`（`sources/calendar/testdata/0.9.0` 原样）、`cal-updated`、`cal-updated-2`、`cal-new`（派生规则见验收 ACT-CAL）、`cal-version-0.1`、`cal-auth-fail` |
 | mail-cli / calendar-cli / reminder-cli | `pim-mail`、`pim-calendar`、`pim-reminders`（回放 `sources/applepim/testdata`）、`pim-mail-thread-1`、`pim-mail-thread` |
 | gh | `gh-empty`、`gh-issue-opened`、`gh-issue-labeled`、`gh-issue-opened-2`、`gh-issue-opened-3`、`gh-pr-closed`、`gh-pr-updated-7`、`gh-agentsmd-changed`（录制在 `testdata/gh/`，仓库 `acc-org/acc-repo`）、`gh-auth-401`（stderr `Bad credentials (HTTP 401)`） |
