@@ -114,6 +114,9 @@ func TestBriefRawFilesFollowOutboundScope(t *testing.T) {
 			t.Fatalf("%s must be read-only: %v %v", f, err, st)
 		}
 		b, _ := os.ReadFile(dir + "/" + f)
+		if !strings.HasPrefix(string(b), rawNotice) {
+			t.Fatalf("%s must start with the data declaration: %.80s", f, b)
+		}
 		return string(b)
 	}
 	if txt := read("全文邮件"); !strings.Contains(txt, "FULL-BODY-") || !strings.Contains(txt, long) || by["全文邮件"].Raw[0].Material.Scope != "full" || by["全文邮件"].Raw[0].Material.Mode != "none" {
@@ -156,7 +159,7 @@ func TestBriefRawFileTrimmedToFileBudget(t *testing.T) {
 	if n := len([]rune(string(b))); n > maxRawFileChars || r.Material.Mode != "head_tail" || r.Material.Original < 30000 || r.Material.Sent >= r.Material.Original {
 		t.Fatalf("file must stay within %d chars and record the trim: %d %+v", maxRawFileChars, n, r.Material)
 	}
-	if !strings.Contains(string(b), "省略") || !strings.Contains(string(b), "原文") {
+	if !strings.HasPrefix(string(b), rawNotice) || !strings.Contains(string(b), "省略") || !strings.Contains(string(b), "原文") {
 		t.Fatalf("file header must state the trim: %.200s", b)
 	}
 	var stored string
