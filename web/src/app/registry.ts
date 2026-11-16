@@ -31,7 +31,7 @@ export const DIAG: SectionId = "diag";
 /** 设置里的分组（设计 §3.1）：桌面上是设置页的第二列，手机上是「设置首页」列表。按页面 id 归组，没列出的页面排在最后一组。 */
 export const SETTINGS_GROUPS: { title: Text; ids: string[] }[] = [
   { title: { zh: "日常", en: "Everyday" }, ids: ["settings-general", "settings-notify", "settings-policy"] },
-  { title: { zh: "连接", en: "Connections" }, ids: ["settings-channels"] },
+  { title: { zh: "连接", en: "Connections" }, ids: ["settings-channels", "settings-vaults"] },
   { title: { zh: "Agent", en: "Agents" }, ids: ["settings-agents"] },
   { title: { zh: "系统", en: "System" }, ids: ["settings-models", "settings-credentials", "settings-security", "purge"] },
 ];
