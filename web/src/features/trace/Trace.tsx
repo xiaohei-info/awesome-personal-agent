@@ -8,6 +8,7 @@ import { useNames } from "../../app/names";
 import { entryOf, useLabel } from "../../app/values";
 import { HANDOFF_TAG } from "../../app/ids";
 import { strings } from "./strings";
+import { RawColumn } from "./RawColumn";
 
 // 处理经过（设计 §15.1）：GET /v1/source-events/{id}/trace 与 GET /v1/items/{id}/trace 的展示。每行「谁 · 做了什么 · 结果」，
 // 句子由本目录的词表按行的种类与参数生成；相邻的同类机械记录折成一行；时间就近显示；原始记录只在「显示原始值」里。
@@ -76,7 +77,7 @@ function ItemLink({ item }: { item?: TraceEntry["item"] }) {
   return <Link to={"/items/" + encodeURIComponent(item.id)}>{item.title || "—"}</Link>;
 }
 
-interface Level { backend: string; model?: string; p?: number; seg?: string; answer?: string; outcome: string; error?: string }
+interface Level { material?: Mat; backend: string; model?: string; p?: number; seg?: string; answer?: string; outcome: string; error?: string }
 
 /** 一条判断记录按级展开成多行：每行主语是那一级的模型，按答题顺序；各级都没定时末尾补一行系统的保守做法。
  * 试用打分与过保留期的记录不展开。原始记录随最后一行。 */
@@ -200,6 +201,19 @@ function What({ e, subjects }: { e: TraceEntry; subjects?: boolean }) {
   return <>{label("event", type) !== type ? label("event", type) : t.internal}</>;
 }
 
+interface Mat { sent_chars: number; original_chars: number }
+const isMat = (m: unknown): m is Mat => typeof (m as Mat)?.sent_chars === "number" && typeof (m as Mat)?.original_chars === "number";
+
+/** 这一行送给模型的资料裁剪量（§8.4、§15.1）：判断的一级读那一级的 material，处置行读处置载荷的 material；旧数据没有就不显示。 */
+export function materialOf(e: TraceEntry): Mat | null {
+  if (e.kind === "judged") return isMat((e.args?.level as Level | undefined)?.material) ? (e.args!.level as Level).material! : null;
+  for (const s of e.steps) {
+    const m = (s.payload as { material?: unknown } | undefined)?.material;
+    if (s.type === "inbound.disposed" && isMat(m)) return m;
+  }
+  return null;
+}
+
 function Raw({ steps }: { steps: TraceStep[] }) {
   const raw = useRaw();
   if (!raw || !steps.length) return null;
@@ -209,11 +223,14 @@ function Raw({ steps }: { steps: TraceStep[] }) {
 function Line({ e, prev, subjects, extra }: { e: TraceEntry; prev?: string; subjects?: boolean; extra?: ReactNode }) {
   const who = useWho();
   const at = near(e.at, prev);
+  const t = useT(strings);
+  const mat = materialOf(e);
+  const fmt = (n: number) => n.toLocaleString(locale());
   return (
     <li data-kind={e.kind}>
       <div className="trace-line">
         <span className="who">{who(e.who)}</span>
-        <span className="what"><What e={e} subjects={subjects} />{extra}</span>
+        <span className="what"><What e={e} subjects={subjects} />{mat ? ` · ${t.material(fmt(mat.sent_chars), fmt(mat.original_chars))}` : ""}{extra}</span>
         <time className="when" dateTime={e.at} title={new Date(e.at).toLocaleString(locale())}>{at}</time>
       </div>
       <Raw steps={e.steps} />
@@ -292,6 +309,7 @@ export function MessageTracePage() {
     <main>
       <p className="eyebrow"><Link to="/sources">{source(m.source)}</Link></p>
       <h1>{m.link ? <a href={m.link} target="_blank" rel="noreferrer noopener">{m.subject || m.type}</a> : m.subject || m.type}</h1>
+      <RawColumn id={m.id} />
       <h2>{t.title}</h2>
       <TraceList data={data} />
     </main>

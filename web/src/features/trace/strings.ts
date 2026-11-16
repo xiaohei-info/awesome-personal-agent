@@ -110,6 +110,24 @@ const zh = {
     title: "标题", summary: "摘要", body: "正文", priority: "优先级", project: "项目", assignee: "负责人", deadline: "截止",
     planned_for: "计划日期", kind: "类型", spec: "内容", status_label: "状态标签", tags: "标签",
   } as Record<string, string>,
+  // 原文栏（§6.10、§15.1）
+  rawTitle: "原文",
+  rawHead: (size: string, state: string) => `原文 ${size} · ${state}`,
+  rawFull: "完整",
+  rawPartial: (what: string) => `来源程序没能取到全文：${what}`,
+  rawLegacy: "升级前落盘，当时可能已被来源程序截断",
+  rawPurged: "已按保留期清除",
+  rawPartNames: { body: "正文", original: "原始正文", headers: "头部", attachments: "附件清单", messages: "会话消息" } as Record<string, string>,
+  rawHeaders: "头部",
+  rawAttachments: "附件",
+  rawName: "名字",
+  rawType: "类型",
+  rawSize: "大小",
+  rawMessages: "会话消息",
+  rawNoBody: "没有正文",
+  rawFormat: "原始格式",
+  rawPlain: "纯文本",
+  material: (n: string, m: string) => `送给模型 ${n} / ${m} 字符`,
 };
 
 const en: typeof zh = {
@@ -214,6 +232,23 @@ const en: typeof zh = {
     title: "title", summary: "summary", body: "body", priority: "priority", project: "project", assignee: "assignee", deadline: "deadline",
     planned_for: "planned date", kind: "type", spec: "content", status_label: "status label", tags: "tags",
   },
+  rawTitle: "Original",
+  rawHead: (size, state) => `Original ${size} · ${state}`,
+  rawFull: "complete",
+  rawPartial: (what) => `The source could not fetch the whole thing: ${what}`,
+  rawLegacy: "Stored before the upgrade; the source may have truncated it",
+  rawPurged: "Removed after the retention period",
+  rawPartNames: { body: "body", original: "raw body", headers: "headers", attachments: "attachment list", messages: "chat messages" },
+  rawHeaders: "Headers",
+  rawAttachments: "Attachments",
+  rawName: "Name",
+  rawType: "Type",
+  rawSize: "Size",
+  rawMessages: "Chat messages",
+  rawNoBody: "No body",
+  rawFormat: "Raw format",
+  rawPlain: "Plain text",
+  material: (n, m) => `sent to the model ${n} / ${m} chars`,
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

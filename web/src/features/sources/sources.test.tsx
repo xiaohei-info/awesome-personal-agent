@@ -380,6 +380,8 @@ describe("来源归到哪个项目、只进了简报的（§9.1、§9.3）", () 
     expect(region.queryByText(/subject-e1/)).not.toBeInTheDocument();
     expect(region.getAllByText(/subject-d/).map((n) => n.textContent)[0]).toMatch(/subject-d2/); // 最新在前
     expect(b.calls.some((c) => c.path === "/v1/sources/src_rss/events?disposition=digest&sort=recent")).toBe(true);
+    // 知会条目链到该事件的原文与处理经过页（ACT-WRP-04）
+    expect(region.getAllByRole("link", { name: "原文与处理经过" }).map((a) => a.getAttribute("href")).sort()).toEqual(["/sources/events/d1", "/sources/events/d2"]);
     await userEvent.click(within(region.getByRole("group", { name: "处理 d1" })).getByRole("button", { name: "转为建议" }));
     await waitFor(() => expect(region.queryByText(/subject-d1/)).not.toBeInTheDocument());
     expect(b.events.find((e) => e.id === "d1")).toMatchObject({ disposition: "proposed" });
