@@ -374,6 +374,8 @@ func regWith(t *testing.T, nReg, nRunner int) *store.Registry {
 	au.Migrations = au.Migrations[:1] // 也没有结构版本 6 的凭据 harness 列
 	el := eventlog.Module
 	el.Migrations = el.Migrations[:2] // 也没有结构版本 8 的导入标记列
+	pol := policy.Module
+	pol.Migrations = pol.Migrations[:2] // 也没有结构版本 8 的导入单条数列
 	src.Migrations = src.Migrations[:3]
 	if nReg > 0 {
 		src.Migrations = src.Migrations[:nReg]
@@ -383,7 +385,7 @@ func regWith(t *testing.T, nReg, nRunner int) *store.Registry {
 		run.Migrations = run.Migrations[:nRunner]
 	}
 	r := store.NewRegistry()
-	for _, m := range []store.Module{el, au, policy.Module, command.Module, ex,
+	for _, m := range []store.Module{el, au, pol, command.Module, ex,
 		delivery.Module, src, run, kdoctor.Module} {
 		must(t, r.Register(m))
 	}
