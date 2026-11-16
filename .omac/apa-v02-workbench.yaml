@@ -11,21 +11,21 @@ meta:
   - 01a1e544-2000-750d-9c83-0401472cc122
   - 01a1e544-225a-77b1-8b32-0ff70a73da95
   - 01a1e557-c6de-78d2-931b-e83115a95afb
-  amendment_revision: 1
+  amendment_revision: 2
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-3da168e5d75c
+    amendment_id: amend-ce85871f5797
     amendment_file: .omac/apa-v02-workbench.system-amendment.yaml
     nodes:
-      fix.raw-ingest.9159a6:
+      fix.link-material.1160ef:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-365a09a6b99f8fa52e56c445
-      e2e-raw-ingest:
+        expected_review_generation: amendment-5d1c1805cc41e6249d477a12
+      web-link-materials:
         stage: authoring
         state: synced
-        work_item_id: 01a1e5ce-2eb9-7289-a748-d4d2bf8030ca
+        work_item_id: 01a1e616-e36c-7ed4-b8fd-455357e65aee
         baseline:
           status: blocked
           phase: authoring
@@ -40,19 +40,19 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: ed08c36ca3bcdabb88c62b21a7a594a248a9ea868092982405c56b60a08f407c
+          contract_sha256: 8f3026d33c166f69e86a79444368a0b150865280c457ff27b6fc22d819507b14
           worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: ed08c36ca3bcdabb88c62b21a7a594a248a9ea868092982405c56b60a08f407c
+        expected_contract_sha256: 8f3026d33c166f69e86a79444368a0b150865280c457ff27b6fc22d819507b14
         superseded_decision:
           reason_code: worker-decision-required
           gate: worker
           blocker_reason_code: upstream-defect
-          decision_sha256: 97d5ab719095025e8ced51c1d898b49baf3fc9ec02b738c5b4a46f2060342936
-        expected_review_generation: amendment-22361a3d3c144548df85015d
+          decision_sha256: 9211a2f79535a2a4d94f45a09d86d5fc38db8964b4b3efd9c0bea94ba5ff85d5
+        expected_review_generation: amendment-c1768eb1ba8eaed98278be6b
         attempt_baseline:
           status: blocked
           phase: authoring
@@ -67,14 +67,14 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: ed08c36ca3bcdabb88c62b21a7a594a248a9ea868092982405c56b60a08f407c
+          contract_sha256: 8f3026d33c166f69e86a79444368a0b150865280c457ff27b6fc22d819507b14
           worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-22361a3d3c144548df85015d
+          review_generation: amendment-c1768eb1ba8eaed98278be6b
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -86,10 +86,19 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: ed08c36ca3bcdabb88c62b21a7a594a248a9ea868092982405c56b60a08f407c
+          contract_sha256: 8f3026d33c166f69e86a79444368a0b150865280c457ff27b6fc22d819507b14
           worker_handoff_pending: false
+    retained_bounce_baselines:
+      e2e-raw-ingest:
+        amendment_id: amend-3da168e5d75c
+        work_item_id: 01a1e5ce-2eb9-7289-a748-d4d2bf8030ca
+        contract_sha256: ed08c36ca3bcdabb88c62b21a7a594a248a9ea868092982405c56b60a08f407c
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
     system: true
-  last_amendment_id: amend-3da168e5d75c
+  last_amendment_id: amend-ce85871f5797
 nodes:
 - id: schema-v8
   worker: omac-worker-backend
@@ -1987,6 +1996,7 @@ nodes:
   worker: omac-worker-frontend-taiyi
   blocked_by:
   - link-material
+  - fix.link-material.1160ef
   title: Web：材料页与项目材料显示链接型
   description: 产出 web-link-materials-delivery。事项详情的材料分组在 items-web。
   reviewer: omac-reviewer
@@ -5191,4 +5201,104 @@ nodes:
       - migration-chain-v8
     defect_refs:
     - dfx-9159a6ed6765
+    coverage_gate: 80
+- id: fix.link-material.1160ef
+  worker: omac-worker-backend
+  blocked_by:
+  - schema-v8
+  title: 'Fix link-material: dfx-1160ef23f38f'
+  description: "Automatic fix for upstream defect(s) reported by web-link-materials.\n\n-
+    [design-gap] anchors flow-web-vault-materials/ACT-WVM-02 (docs/solution-design.md#128-链接型材料与笔记库)\n
+    \ expected: Design 12.8 says title, kind and tags of a link material can be changed
+    on the Web materials page; a write route must exist.\n  observed: Appendix B.2
+    and the implementation have no route to update title/kind/tags of a material.\n
+    \ where: api/materials/materials.go:Routes; kernel/materials/materials.go\n  repro
+    (the reporter re-runs it after your fix merges; it is not your gate): `grep -n
+    PATCH api/materials/materials.go` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-1160ef23f38f in link-material: Design
+      12.8 says title, kind and tags of a link material can be changed on the Web
+      materials page; a write route must exist.'
+    non_goals:
+    - 结构变更只经 schema-v8；本节点若仍需改结构，在 PR 说明写明并另起新迁移（结构版本 8 首次被真实账本应用后冻结，§16.5）
+    - 不做 Web 页面（web-vaults-page、web-link-materials、items-web）
+    - 不做笔记库文档预览或文件存在检查（REQ-NOT-VAULTPREVIEW）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/materials/... ./kernel/policy/... ./kernel/delegation/...
+    - go test -count=1 ./api/materials/... ./api/settings/... ./cli/materials/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: link-material-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#128-链接型材料与笔记库
+      - docs/solution-design.md#66-materialrevisionguideline
+      - docs/solution-design.md#75-任务委派
+      - docs/solution-design.md#613-配置记录
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: material.link 命令与材料的形态/位置字段（已有材料按原规则推定 hosted/owned、不改写），POST
+        /materials 的 link 分支与 apa material add --link；策略 note_vaults 与 GET /note-vaults、GET/PUT
+        /settings/note-vaults（只 Web 登录、整体替换、记 policy.changed）；回执 links[] 多链接，done
+        回执里落在已登记库内的链接同事务登记为父事项的 output
+      covers:
+      - ACT-LNK-01
+      - ACT-LNK-02
+      - ACT-LNK-03
+      - ACT-LNK-04
+      - ACT-LNK-05
+      - ACT-LNK-06
+      - ACT-RPL-01
+      - ACT-RPL-02
+      - ACT-RPL-03
+      - ACT-RPL-04
+      - ACT-S8-04
+      acceptance_refs:
+      - flow-link-material
+      - flow-report-links
+      - flow-web-vault-materials
+      - flow-prefill-new
+      commands:
+      - go test -count=1 ./kernel/materials/... ./kernel/delegation/...
+      - go test -count=1 ./api/materials/... ./cli/materials/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-web-vault-materials
+    source_of_truth:
+    - docs/solution-design.md#128-链接型材料与笔记库
+    - docs/solution-design.md#66-materialrevisionguideline
+    - docs/solution-design.md#75-任务委派
+    - docs/solution-design.md#613-配置记录
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b4-标准事件类型
+    - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - kernel/materials/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: schema-v8-delivery
+      producer: schema-v8
+      evidence_mode: artifact
+      requires:
+      - ledger-v8-tables
+      - ledger-fixture-v7
+      - migration-chain-v8
+    defect_refs:
+    - dfx-1160ef23f38f
     coverage_gate: 80

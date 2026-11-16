@@ -1,5 +1,3 @@
-# sha256: 74f89c6380f83ba22f9b298501c33e2ca72bb14289083a42ea1e3e48eeaa7a4b
+# sha256: 916e2acb2378b99f8202bb730eae5d555f2913a64fa5a84d2b575346314ef3d8
 work_item_id: 01a1e616-e36c-7ed4-b8fd-455357e65aee
-status: blocked
-recovery_marker: true
-defect_pending: true
+status: todo
