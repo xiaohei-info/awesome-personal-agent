@@ -18,6 +18,7 @@ def _schema(name, desc, props, required):
 _EVIDENCE = _s("The owner's own words, quoted verbatim, that justify acting for them. They must come from this turn: never paraphrase, "
                "reword or invent them. Give this or grant, not both.")
 _GRANT = _s("Id of a grant the owner issued in Web (apa grant list) for when they are absent. Give this or evidence, not both.")
+_EXIT23 = "On exit 23 do not rephrase and retry: tell the owner why and give the Web link."
 _REASON = _s("Short reason, recorded in the ledger event.")
 
 # name -> (description, properties, required, argv builder)
@@ -67,12 +68,12 @@ _CLI_TOOLS = {
                         lambda a: ["item", "update", a["id"], *_flags(a, "title", "summary", "body", "status_label", "priority",
                                                                       "tags", "spec", "reason", "evidence", "grant")]),
     "apa_attach": ("Attach a proposed item to an existing item on the owner's behalf (apa attach). Deciding for the owner needs "
-                   "the owner's words from this turn (evidence) or a grant. On exit 23 do not rephrase and retry: tell the owner why and give the Web link.",
+                   "the owner's words from this turn (evidence) or a grant. " + _EXIT23,
                    {"id": _s("Proposal item id"), "to": _s("Existing item id to attach it to"),
                     "reason": _REASON, "evidence": _EVIDENCE, "grant": _GRANT}, ["id", "to"],
                    lambda a: ["attach", a["id"], *_flags(a, "to", "reason", "evidence", "grant")]),
     "apa_item_progress": ("Record a progress note on the owner's item (apa item progress). Doing so for the owner needs the owner's words "
-                          "from this turn (evidence) or a grant, except on the item bound to your own credential. On exit 23 do not rephrase and retry.",
+                          "from this turn (evidence) or a grant, except on the item bound to your own credential. " + _EXIT23,
                           {"id": _s("Item id"), "text": _s("The progress note"), "on": _s("Date it happened (YYYY-MM-DD), not later than today"),
                            "evidence": _EVIDENCE, "grant": _GRANT}, ["id", "text"],
                           lambda a: ["item", "progress", a["id"], *_flags(a, "text", "on", "evidence", "grant")]),
@@ -224,7 +225,7 @@ def register(ctx):
                           handler=_cli_handler(build), description=desc)
     desc = ("Handle proposals in bulk on the owner's behalf (apa proposals apply): recommended=true takes each proposal's recommendation "
             "(narrow with source or project), or actions lists one disposal per proposal ('item 3 dismiss, the rest as recommended' = list the rest explicitly). "
-            "Needs the owner's words from this turn (evidence) or a grant. The result is per proposal; tell the owner each outcome. On exit 23 do not rephrase and retry.")
+            "Needs the owner's words from this turn (evidence) or a grant. The result is per proposal; tell the owner each outcome. " + _EXIT23)
     ctx.register_tool(name="apa_proposals_apply", toolset=TOOLSET, handler=_proposals_apply, description=desc, schema=_schema("apa_proposals_apply", desc, {
         "recommended": {"type": "boolean", "description": "Apply every recommendation in scope"},
         "actions": {"type": "array", "description": "Explicit disposals, up to 200", "items": {"type": "object", "properties": {
