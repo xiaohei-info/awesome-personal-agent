@@ -214,6 +214,8 @@
 
 `GET /items` 返回 `last_rejections`（事项 id → 最近一次未处理的退出码 23 拒绝：`seq`、`at`、`actor`、`code`、`why`、`grant`），`GET /items/{id}` 返回 `last_rejection`；只对 `needs_input`、`proposed` 事项给出，决策待办与建议流据此标明被拒绝的代答或处理。`GET /audit/events` 可加 `grant=<授权单 id>` 查该授权单的签发、使用与撤销记录。
 
+`GET /audit/events?actor&object&type&grant&limit` 返回 `{"events": [...]}`，缺省按 Event 序号升序，`after=<序号>` 取其后的一页，`limit` 缺省 100、上限 500。加 `order=desc` 改为最新的在前，`before=<序号>` 取序号小于它的一页（缺省从最新开始），游标是 Event 序号，与筛选组合时翻页稳定，不重复、不漏。`order` 取 `asc` 或 `desc`，其他值返回 400；`after` 只配升序、`before` 只配 `order=desc`，混用返回 400。Web 的操作记录页与授权单使用记录用 `order=desc`，CLI 与其他调用方沿用升序的 `after`，不受影响。
+
 事项字段 `created_at`、`updated_at`：`GET /items` 与 `GET /items/{id}` 返回，值为 RFC 3339 时间，只读。`created_at` 是该事项首条事项事件的时间（委派子事项的首条是 `delegation.created`，其余是 `item.created`）；`updated_at` 是最后一条事项事件的时间，与 `version` 同步推进（含关系变更；`item.deadline_passed` 与 `command.rejected` 不算）。
 
 来源的显示名 `name`（主文档 §9.1）：`POST /sources` 可带，去掉首尾空白后不超过 40 个字符、不含控制字符，与实例内其他来源不重名（不区分大小写），重名返回 409 `conflict`；不带时取来源程序接入声明的名字（中文）存下，响应里给出；程序没有声明又不带时返回 400 `invalid_request`，`next` 说明带名字或在声明里补上；声明出的名字被占用同样返回 409，不自动加序号。`PATCH /sources/{id}` 带 `name` 即改名（`source.rename` 命令，记 `source.renamed`，载荷 `{"name", "previous"}`），空串改回接入声明的名字（没有声明时 400）；名字与其他字段同一请求里给出时分别生效。`GET /sources` 与 `GET /sources/{id}` 总带 `name`，另带发件人结论 `sender: {"trust": "verified" | "unverified", "hint"?: {"zh", "en"}, "self"?: "identity"}`（主文档 §9.1）：有接入声明按声明；没有声明的只用映射的 webhook 来源，所用映射里有按验签核实发件人的为 `verified`；其余为 `unverified`。`GET /sources/declared-name?type=&command=&source_type=&config=`（`config` 是 JSON 对象，非法时 400）按同一套声明返回 `{"name": {"zh", "en"}}`，没有声明时 `{"name": null}`，供 Web 新登记表单按界面语言预填；它只读，不登记。
@@ -226,7 +228,7 @@
 
 `GET /sources/{id}/events` 按落盘顺序返回 `{"events": [...], "next_after": 12}`；带 `sort=score` 时按最近一次判断记录的概率从高到低返回（同分保持落盘顺序），没有分数的排在最后；此时 `after`、`next_after` 是已返回的条数（偏移），不是落盘序号；带 `sort=recent` 时从新到旧返回，`after`、`next_after` 同样是偏移；其他 `sort` 值返回 400。每条事件的字段见主文档 §6.10：`id`、`source_id`、`dedupe_key`、`type`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`correlation_keys`、`sender`、`sender_verified`、`disposition`、`item`、`attach_state`、`unjudged_reason`、`rejudges`，以及 v0.2.0 新增的 `metrics`、`merge_key`、`items`、`judgment`、`score`（最近一次判断的概率，没有时省略）。其中 `item` 是挂靠或生成的事项 id，`items` 是一条事件抽出多条候选时的全部事项 id。`disposition` 可选，取值 `pending`、`attached`、`proposed`、`ignored`、`digest`、`alerted`、`unjudged`、`expired`，可逗号分隔多个（来源页的积压用 `unjudged,expired`），其他值返回 400。`unjudged_reason` 取 `model_unavailable`、`models_paused`（本人暂停了模型，主文档 §8.7）、`outbound_unset`、`restored`；v0.1 留下的 `undecided` 与空值原样返回，内核按 `model_unavailable` 对待。`limit` 缺省 100，上限 500；还有下一页时才返回 `next_after`，作为下一次的 `after`。
 
-`GET /sources/{id}/rejects` 按发生顺序返回 `{"rejects": [...], "next_after": 12}`，分页参数与 `events` 相同。每条含 `source_id`、`run_id`、`line`（输出中的行号）、`reason`、`raw`（原始行）、`at`。`raw` 在落账时已截断到 512 字节；含接收密钥明文前缀的行返回 `[redacted]`（与入站记录的请求头同一规则）。来源未登记返回 404。
+`GET /sources/{id}/rejects` 按发生顺序返回 `{"rejects": [...], "next_after": 12}`，分页参数与 `events` 相同；带 `sort=recent` 时从新到旧返回，`after`、`next_after` 是偏移（同 `events`），其他 `sort` 值返回 400。每条含 `source_id`、`run_id`、`line`（输出中的行号）、`reason`、`raw`（原始行）、`at`。`raw` 在落账时已截断到 512 字节；含接收密钥明文前缀的行返回 `[redacted]`（与入站记录的请求头同一规则）。来源未登记返回 404。
 `capture:<项目>` 是对话捕获的内部来源（主文档 §9.3），不在 `GET /sources` 里，Web 按开启捕获的项目拼出 id。Web 登录读它返回同样的结构，其他凭据返回 404（运行凭据仍是 403）。
 
 `POST /source-events/{id}/propose` 不带请求体，成功返回 200 与更新后的来源事件（`disposition` 为 `proposed`，`item` 为新事项 id），事件不是 `unjudged`、`expired` 或 `digest`（简报"知会"一节的条目）时返回 409，不存在时返回 404。事项阶段为 `proposed`，事项的 `item.created` 与来源事件的 `inbound.disposed` 都记调用者为操作者。

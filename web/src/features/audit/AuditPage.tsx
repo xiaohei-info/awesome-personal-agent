@@ -13,6 +13,7 @@ import { strings } from "./strings";
 
 // 诊断 › 操作记录（原「审计」，设计 §5.27）：形状对应 GET /v1/audit/events（附录 B.2，§15.3）。
 // 筛选（actor、object、type 精确匹配）、裁剪、分页都在服务端，本页只搬运条件并显示结果；只读，不提供撤销。
+// 最新的在最前：order=desc，往下翻用 before=<最后一条的序号> 取更早的。
 const PAGE = 100;
 const REJECTED = "command.rejected"; // §6.7：被拒绝的命令记这一类 Event
 const OWNER = "owner"; // Web 上本人的 principal（api/core）
@@ -33,9 +34,9 @@ const groupOf = (type: string): Group => {
 };
 const GROUPS: Group[] = ["items", "agents", "projects", "settings", "sources", "login", "other"];
 
-function query(f: Filter, after: number) {
-  const p = new URLSearchParams({ limit: String(PAGE) });
-  if (after) p.set("after", String(after));
+function query(f: Filter, before: number) {
+  const p = new URLSearchParams({ limit: String(PAGE), order: "desc" });
+  if (before) p.set("before", String(before));
   for (const [k, v] of Object.entries(f)) if (v.trim()) p.set(k, v.trim());
   return "/audit/events?" + p;
 }
@@ -72,12 +73,12 @@ export function AuditPage() {
   const [more, setMore] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
-  const load = useCallback(async (f: Filter, after: number) => {
+  const load = useCallback(async (f: Filter, before: number) => {
     try {
-      const r = await api.get<{ events: AuditEvent[] }>(query(f, after));
+      const r = await api.get<{ events: AuditEvent[] }>(query(f, before));
       setError(null);
       setMore(r.events.length === PAGE);
-      setEvents((prev) => (after ? [...(prev ?? []), ...r.events] : r.events));
+      setEvents((prev) => (before ? [...(prev ?? []), ...r.events] : r.events));
     } catch (e) {
       setEvents(null); // 出错时不保留旧列表，避免把过期结果当成当前筛选的结果
       setMore(false);

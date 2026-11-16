@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
 
-// 测试边界替身：按 api/why 的 GET /v1/audit/events 契约应答（actor/object/type 精确匹配，after/limit 分页，升序，错误体见附录 B.3）。
+// 测试边界替身：按 api/why 的 GET /v1/audit/events 契约应答（actor/object/type 精确匹配，order=desc 时最新在前、before/limit 分页（缺省升序、after 游标），错误体见附录 B.3）。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const A = (type: string, principal: string, via: string) => ({ type, principal, via });
 interface Ev { seq: number; type: string; object: string; actor: ReturnType<typeof A>; at: string; reason?: string; chain_depth: number; redacted?: boolean; grant?: string }
@@ -32,9 +32,11 @@ function ledger(extra: Ev[] = [], fail?: () => Response | null) {
     if (failed) return failed;
     const q = u.searchParams;
     const after = Number(q.get("after") ?? 0);
+    const before = Number(q.get("before") ?? Infinity);
     const limit = Number(q.get("limit") ?? 100);
-    const out = events.filter((e) =>
-      e.seq > after &&
+    const desc = q.get("order") === "desc";
+    const out = (desc ? [...events].reverse() : events).filter((e) =>
+      e.seq > after && e.seq < before &&
       (!q.get("actor") || e.actor.principal === q.get("actor")) &&
       (!q.get("object") || e.object === q.get("object")) &&
       (!q.get("type") || e.type === q.get("type")));
@@ -63,7 +65,7 @@ describe("诊断 › 操作记录", () => {
     const r = await rows();
     await waitFor(() => expect(r.getAllByRole("listitem")).toHaveLength(3));
     expect(r.getAllByLabelText("操作者").map((b) => b.textContent)).toEqual([
-      "agent · 命令行 · del-1", "你 · 网页", "agent · 命令行 · del-2", // 本人与系统不重复显示身份串（共用的 ActorBadge）
+      "agent · 命令行 · del-2", "你 · 网页", "agent · 命令行 · del-1", // 最新在前；本人与系统不重复显示身份串（共用的 ActorBadge）
     ]);
     expect(r.getAllByRole("listitem")[1]).toHaveTextContent(/你 · 网页\s*改了阶段 item_a/);
     expect(r.queryByText(/ship it|#2/)).not.toBeInTheDocument(); // 原始值只在「显示原始值」里
@@ -72,8 +74,8 @@ describe("诊断 › 操作记录", () => {
   it("对象是来源时按名字称呼（§9.1）：改名、停用都写「QQ 邮箱」，不出现 src_", async () => {
     mount(ledger([ev(4, "source.renamed", "src_mail_qq", A("human", "owner", "web")), ev(5, "source.disabled", "src_mail_qq", A("system", "kernel:sources", "clock"))]).impl);
     const r = await rows();
-    await waitFor(() => expect(r.getAllByRole("listitem")[3]).toHaveTextContent(/改了来源名字 QQ 邮箱/));
-    expect(r.getAllByRole("listitem")[4]).toHaveTextContent("QQ 邮箱");
+    await waitFor(() => expect(r.getAllByRole("listitem")[1]).toHaveTextContent(/改了来源名字 QQ 邮箱/));
+    expect(r.getAllByRole("listitem")[0]).toHaveTextContent("QQ 邮箱");
     expect(document.querySelector("main")!.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
   });
 
@@ -123,14 +125,21 @@ describe("诊断 › 操作记录", () => {
     expect((await rows()).getByText(/操作被拒绝/)).toBeInTheDocument();
   });
 
-  it("flow-why-audit: 没有匹配时显示空态；分页用 after 游标加载更多", async () => {
+  it("flow-why-audit: 没有匹配时显示空态；最新的在最前，「加载更多」用 before 游标取更早的", async () => {
     const many = Array.from({ length: 101 }, (_, i) => ev(4 + i, "item.updated", "item_z", A("system", "clock", "clock")));
     const l = ledger(many);
     mount(l.impl);
     await waitFor(async () => expect(await count()).toBe(100));
+    const lis = async () => (await rows()).getAllByRole("listitem");
+    expect(l.queries[0].get("order")).toBe("desc");
+    expect(l.queries[0].get("before")).toBeNull();
+    expect((await lis())[0]).toHaveTextContent("item_z"); // 第一条是最新的（seq 104）
+    expect((await rows()).queryByText(/item_a/)).toBeNull(); // 最早的两条（seq 1、2）还没加载
     await userEvent.click(screen.getByRole("button", { name: "加载更多" }));
     await waitFor(async () => expect(await count()).toBe(104));
-    expect(l.queries.at(-1)!.get("after")).toBe("100");
+    expect(l.queries.at(-1)!.get("before")).toBe("5"); // 第一页最后一条（seq 5）之前的
+    expect(l.queries.at(-1)!.get("after")).toBeNull();
+    expect((await lis()).at(-1)).toHaveTextContent(/新建了事项 item_a/); // 更早的接在后面，最早的在最末，不重复
     expect(screen.queryByRole("button", { name: "加载更多" })).toBeNull();
 
     await userEvent.click(screen.getByText("按对象查"));
@@ -160,7 +169,7 @@ describe("授权单依据（ACT-AUTH-03、flow-why-audit）", () => {
     const r = await rows();
     await waitFor(() => expect(r.getAllByRole("listitem")).toHaveLength(4));
     const items = r.getAllByRole("listitem");
-    expect(within(items[3]).getByRole("link", { name: "按临时授权" })).toHaveAttribute("href", "/settings/agents#grant-grt_ok");
-    expect(within(items[0]).queryByRole("link", { name: "按临时授权" })).toBeNull();
+    expect(within(items[0]).getByRole("link", { name: "按临时授权" })).toHaveAttribute("href", "/settings/agents#grant-grt_ok");
+    expect(within(items[3]).queryByRole("link", { name: "按临时授权" })).toBeNull();
   });
 });

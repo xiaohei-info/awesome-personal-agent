@@ -38,7 +38,7 @@ export function Digest({ source }: { source: string }) {
   const [items, setItems] = useState<SourceEvent[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const base = `/sources/${encodeURIComponent(source)}/events?disposition=digest`;
+  const base = `/sources/${encodeURIComponent(source)}/events?disposition=digest&sort=recent`;
   const load = useCallback(
     (after?: number) =>
       api.get<{ events: SourceEvent[]; next_after?: number }>(base + (after ? `&after=${after}` : "")).then(

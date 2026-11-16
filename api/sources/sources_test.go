@@ -795,7 +795,18 @@ func TestSourceRejectsListPageAndAccess(t *testing.T) {
 		t.Fatalf("page 2: %+v", p2)
 	}
 
-	for _, q := range []string{"limit=0", "limit=501", "after=-1", "after=x"} {
+	// sort=recent：从新到旧，偏移翻页，不重复、不漏。
+	var r1, r2 rejectPage
+	e.do(obs, "GET", "/v1/sources/src_hook/rejects?sort=recent&limit=2", "").into(&r1)
+	if len(r1.Rejects) != 2 || r1.Rejects[0].Reason != "missing type" || r1.Rejects[1].Reason != "missing subject" || r1.NextAfter != 2 {
+		t.Fatalf("recent page 1: %+v", r1)
+	}
+	e.do(obs, "GET", "/v1/sources/src_hook/rejects?sort=recent&limit=2&after=2", "").into(&r2)
+	if len(r2.Rejects) != 1 || r2.Rejects[0].Reason != "invalid JSON" || r2.NextAfter != 0 {
+		t.Fatalf("recent page 2: %+v", r2)
+	}
+
+	for _, q := range []string{"limit=0", "limit=501", "after=-1", "after=x", "sort=score"} {
 		if r := e.do(obs, "GET", "/v1/sources/src_hook/rejects?"+q, ""); r.Code != 400 {
 			t.Errorf("%s: %d", q, r.Code)
 		}

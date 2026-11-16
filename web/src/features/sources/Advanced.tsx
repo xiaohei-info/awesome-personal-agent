@@ -154,7 +154,7 @@ export function Rejects({ source }: { source: Source }) {
 
   const load = useCallback(
     (after?: number) =>
-      api.get<{ rejects: Reject[]; next_after?: number }>(base + (after ? `?after=${after}` : "")).then(
+      api.get<{ rejects: Reject[]; next_after?: number }>(base + "?sort=recent" + (after ? `&after=${after}` : "")).then(
         (r) => {
           setItems((cur) => (after && cur ? [...cur, ...r.rejects] : r.rejects));
           setNext(r.next_after ?? null);

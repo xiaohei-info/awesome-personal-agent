@@ -55,6 +55,12 @@ describe("Web 未读页（flow-hermes-context / ACT-HCTX-06）", () => {
     expect(s.calls.some((c) => c.method === "POST")).toBe(false);
   });
 
+  it("最新的未读在最前", async () => {
+    mount(server([d("old", { content: { title: "较早的" } }), d("new", { content: { title: "较新的" } })]).impl);
+    await screen.findByRole("article", { name: "较新的" });
+    expect(screen.getAllByRole("article").map((a) => a.getAttribute("aria-label"))).toEqual(["较新的", "较早的"]);
+  });
+
   it("已被注入的投递仍然可见，并说明注入不算确认，且不会因此发出确认请求", async () => {
     const s = server([d("a", { injections: [{ injected_to_session: "sess-1", at: "2030-01-01T00:00:00Z" }, { injected_to_session: "sess-2", at: "2030-01-01T00:01:00Z" }] })]);
     mount(s.impl);

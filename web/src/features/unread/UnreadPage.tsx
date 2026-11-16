@@ -30,7 +30,7 @@ export function UnreadPage() {
   const load = useCallback(
     () =>
       api.get<{ deliveries: UnreadDelivery[] }>("/deliveries/unread").then(
-        (r) => setItems(r.deliveries),
+        (r) => setItems([...r.deliveries].reverse()), // 服务端按创建先后返回，未读列表最新在前
         (e) => setError(e),
       ),
     [api],
