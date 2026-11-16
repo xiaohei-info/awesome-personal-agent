@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from helpers import HEADLESS, ROOT, kernel_argv, load_headless
+from headless_helpers import HEADLESS, ROOT, kernel_argv, load_headless
 
 
 @pytest.mark.skipif(not shutil.which("go"), reason="needs Go")

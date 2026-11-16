@@ -196,6 +196,20 @@ func (s *Stub) chat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Script 应用一份脚本（与 POST /_stub/script 等价）。
+func (s *Stub) Script(sc Script) {
+	s.Enqueue(sc.Queue...)
+	if sc.Default != nil {
+		s.SetDefault(*sc.Default)
+	}
+	for _, ru := range sc.Rules {
+		s.When(ru.Match, ru.Reply)
+	}
+	for _, j := range sc.Judges {
+		s.Judge(j)
+	}
+}
+
 func (s *Stub) control(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/_stub/requests" && r.Method == http.MethodGet:
@@ -210,16 +224,7 @@ func (s *Stub) control(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		s.Enqueue(sc.Queue...)
-		if sc.Default != nil {
-			s.SetDefault(*sc.Default)
-		}
-		for _, ru := range sc.Rules {
-			s.When(ru.Match, ru.Reply)
-		}
-		for _, j := range sc.Judges {
-			s.Judge(j)
-		}
+		s.Script(sc)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

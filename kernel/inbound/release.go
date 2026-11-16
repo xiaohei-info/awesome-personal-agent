@@ -298,7 +298,7 @@ func (s *Service) prefetchScreen(ctx context.Context, window []domain.SourceEven
 			continue
 		}
 		calls = append(calls, direct.JudgeCall{Pack: pack, Template: screen, Input: eventInput(src, ev, "", nil),
-			Material: material(ev, o), Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
+			MaterialSource: materialSource(ev, o), Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
 	}
 	if len(calls) > 0 {
 		pf.Prefetch(ctx, calls)

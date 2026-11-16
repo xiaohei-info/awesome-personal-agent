@@ -1153,6 +1153,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 | `project.create`、`project.update`、`project.repos` | 项目与 repos 属性 |
 | `material.add`、`material.commit`、`material.show`、`material.search`、`material.revert` | 托管型登记、自有型提交、读取、检索、回退（回退只在 Web） |
 | `material.link` | 登记链接型材料（§12.8）；同一项目内同一位置幂等 |
+| `material.update` | 改链接型材料的标题、kind 与标签（§12.8）；位置不可改；只在 Web |
 | `import.apply` | 带原始时间的导入（见下文）；预检不写入 |
 | `blob.put`、`blob.get` | 附件 |
 

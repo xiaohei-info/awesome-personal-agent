@@ -62,6 +62,10 @@ func checkSchema(s map[string]any, path string) error {
 			if !schemaTypes[t] {
 				return fmt.Errorf("%s: unsupported type %v", path, v)
 			}
+		case "minimum", "maximum":
+			if _, ok := num(v); !ok {
+				return fmt.Errorf("%s: %s must be a number", path, key)
+			}
 		case "enum":
 			if _, ok := v.([]any); !ok {
 				return fmt.Errorf("%s: enum must be a list", path)
@@ -152,6 +156,14 @@ func validate(s map[string]any, v any, path string) error {
 			return fmt.Errorf("%s: not in enum", path)
 		}
 	}
+	if f, ok := v.(float64); ok {
+		if m, ok := num(s["minimum"]); ok && f < m {
+			return fmt.Errorf("%s: below minimum %v", path, m)
+		}
+		if m, ok := num(s["maximum"]); ok && f > m {
+			return fmt.Errorf("%s: above maximum %v", path, m)
+		}
+	}
 	switch x := v.(type) {
 	case map[string]any:
 		if req, ok := s["required"].([]any); ok {
@@ -215,3 +227,18 @@ func typeMatches(t string, v any) bool {
 // ValidateAgainst 按同一 schema 子集校验任意 JSON 值（已解码）；能力包实例参数复用它，不再造第二份校验器。
 // schema 须已通过 CheckSchema。
 func ValidateAgainst(schema map[string]any, v any) error { return validate(schema, v, "params") }
+
+// num 把 schema 里的数字统一取成 float64：JSON 解码给 float64，能力包 YAML 解码给 int，两种来源都要认。
+func num(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case uint64:
+		return float64(x), true
+	}
+	return 0, false
+}

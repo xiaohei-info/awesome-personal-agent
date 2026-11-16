@@ -1,4 +1,10 @@
-# sha256: b92934067d55860c24794312ad66ffa4be12ca6b935bbce749b8ce3a5a2eacce
+# sha256: 3f1c062e2f45e1f8e1a4eb032568cb2ae1a16279153efbf0e0ccb7b75248d7c4
 work_item_id: 01a1e5ab-15e0-7381-a5c7-efec8a43a62d
 status: in_progress
 recovery_marker: true
+retry_note: CI rework budget was spent; last build failure was cli/materials TestMaterialAddLinkProjectFromCheckout
+  (not your scope). Rebase the existing branch on origin/main first and rerun all
+  contract commands. If that test still fails on your branch only, find whether your
+  change or the test's dependence on the checkout's git remote causes it and fix the
+  real cause (file:function in your submit note); never weaken assertions. Do not
+  redo.

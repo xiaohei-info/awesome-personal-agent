@@ -158,6 +158,7 @@
 | | `POST /materials/{id}/changes` | 对托管型发起修改，生成委派子事项 | Web 登录、delegate；worker、运行凭据须带自己范围内的 `parent` |
 | | `GET/POST /materials/{id}/revisions` | 修订 | observer 读，worker 写 |
 | | `POST /materials/{id}/revert` | 回退一次 `direct` 修订 | 只有 Web 登录 |
+| | `PATCH /materials/{id}` | 改链接型材料的标题、kind 与标签 `{"title"?, "kind"?, "tags"?, "reason"?}`，经 `material.update`；位置不可改，非链接型返回 409 | 只有 Web 登录 |
 | | `POST /revisions/{id}/confirm`，`/reject` | 确认或拒绝 proposed 修订 | Web 登录、delegate（规范生效只有 Web） |
 | | `GET /materials/search` | 检索 | observer |
 | | `PUT/GET /blobs/{hash}` | 附件 | worker 写，observer 读 |
@@ -215,7 +216,7 @@
 | | `GET/PUT /settings/note-vaults` | 笔记库登记：`{"vaults": [{"name", "open_url"}]}`，整体替换；经 `policy.Update`，记 `policy.changed`。名字重复、模板不以协议开头或用了被拒绝的协议返回 400 | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/content-retention` | 来源的原文保留天数：`{"days": 90}`，`null` 为不清理（主文档 §6.15） | 只有 Web 登录 |
 | | 已有路由 POST /settings/grants 的新增请求体 | 【规划中（v0.2.0）】`actions` 为 `["import.apply"]` 时须带 `import: {"source", "max_records"}` 与不超过 7 天的 `expires_at`，不得带 `background`；`actions` 可含 `item.progress` | 只有 Web 登录 |
-| | 已有路由 /settings/model-endpoints 的新增字段 | 【规划中（v0.2.0）】`generate_endpoint.max_material_chars`：生成端点的资料预算，缺省 24000（主文档 §8.4） | 只有 Web 登录 |
+| | 已有路由 /settings/model-endpoints 的新增字段 | `generate_endpoint.max_material_chars`：生成端点的资料预算，缺省 24000（主文档 §8.4） | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/trusted-senders` | 只替换这个来源的转发白名单 `{"senders": [...]}`，经 `policy.Update`，记 `policy.changed` 与 `allowlist.changed`；来源声明为需确认时只接受空名单（清掉以前填的、不生效的条目），非空为 400（`sender_unverifiable`）；名单为空即策略里没有这个键，Web 再次按"从未设置"预填本人 | 只有 Web 登录 |
 | | `GET /settings/sources/{id}/self-sender` | 声明了 `sender.self: identity` 的来源：运行一次来源程序的 `identity` 模式（登记命令的第一个词加 `identity`，超时 10 秒），返回 `{"sender"}` 供预填；不产生来源事件、不写 Event；其他来源 404，程序失败或没给出身份时 409 `conflict` | 只有 Web 登录 |
 | | `PUT /settings/channels/{name}/answerers` | 只替换这个渠道的回答人白名单 `{"answerers": [...]}`，记 `policy.changed` 与 `allowlist.changed` | 只有 Web 登录 |

@@ -354,6 +354,30 @@ func TestPimReplay(t *testing.T) {
 	}
 }
 
+// 长邮件与无到期日提醒的录制 case：回放 sources/applepim/testdata，--list 按列表名过滤。
+func TestPimRawCases(t *testing.T) {
+	bin := newBin(t)
+	for c, want := range map[string]string{"mail-long-html": "report.pdf", "mail-long-legacy": "legacy-long@example.test"} {
+		setCase(t, bin, c)
+		o, _, code := run(t, bin, "mail-cli", nil, "get", "--format=json", "--engine=sqlite", "--id=x")
+		if code != 0 || !strings.Contains(o, want) {
+			t.Errorf("%s get: exit %d %.80s", c, code, o)
+		}
+	}
+	for _, c := range []string{"rem-undated", "rem-undated-renamed", "rem-undated-dated"} {
+		setCase(t, bin, c)
+		o, _, code := run(t, bin, "reminder-cli", nil, "items", "--format=json", "--filter=all", "--list=随手记")
+		if code != 0 || strings.Contains(o, "RW1") || !strings.Contains(o, "RU1") {
+			t.Errorf("%s all --list=随手记: exit %d %s", c, code, o)
+		}
+	}
+	setCase(t, bin, "rem-undated-dated")
+	o, _, _ := run(t, bin, "reminder-cli", nil, "items", "--format=json", "--filter=upcoming")
+	if !strings.Contains(o, `"RU1"`) {
+		t.Errorf("补上到期日后 upcoming 应含 RU1: %s", o)
+	}
+}
+
 // flow-channel-telegram：渠道侧直接复用 ext/telegram/fakebot；机器人替身收到发出的消息并记录。
 func TestChannelBotRecordsMessage(t *testing.T) {
 	b, err := fakebot.New()
@@ -465,5 +489,62 @@ func TestGhRebase(t *testing.T) {
 	}
 	if o := call("2030-01-01T01:00:01Z"); strings.Contains(o, `"number":11`) {
 		t.Fatalf("since 晚于样本时间时不应读到: %s", o)
+	}
+}
+
+// himalaya-long、mail-many-long：长正文、固定信头逐个 -H 返回、附件标记；只读命令。
+func TestLongMailCases(t *testing.T) {
+	bin := newBin(t)
+	call := func(c string, args ...string) string {
+		setCase(t, bin, c)
+		o, _, code := run(t, bin, "himalaya", nil, args...)
+		if code != 0 {
+			t.Fatalf("%s %v 退出码 %d", c, args, code)
+		}
+		return o
+	}
+	var env []struct {
+		ID            string `json:"id"`
+		HasAttachment bool   `json:"has_attachment"`
+	}
+	if err := json.Unmarshal([]byte(call("himalaya-long", "envelope", "list", "--output", "json")), &env); err != nil || len(env) != 1 || !env[0].HasAttachment {
+		t.Fatalf("himalaya-long 应有一封带附件的邮件: %+v %v", env, err)
+	}
+	var got string
+	o := call("himalaya-long", "message", "read", "--preview", "-H", "From", "-H", "Cc", "-H", "List-Id", "-H", "Content-Type", "-H", "References", "31", "--output", "json")
+	if err := json.Unmarshal([]byte(o), &got); err != nil {
+		t.Fatal(err)
+	}
+	head, body, _ := strings.Cut(got, "\n\n")
+	if want := "From: AgentMail <agent@example.com>\nCc: team@example.com\nList-Id: <news.example.com>\nContent-Type: text/plain; charset=utf-8\nReferences: <mid-t1@example.com>"; head != want {
+		t.Errorf("信头按 -H 顺序返回:\n%s", head)
+	}
+	if strings.TrimSuffix(body, "\n") != tools.LongBody("<mid-long@example.com>", tools.LongBodyBytes) || len(body) <= 16<<10 {
+		t.Errorf("正文应是完整的 %d 字节，实际 %d", tools.LongBodyBytes, len(body))
+	}
+	if err := json.Unmarshal([]byte(call("mail-many-long", "envelope", "list", "--output", "json")), &env); err != nil || len(env) != tools.ManyLongCount {
+		t.Fatalf("mail-many-long 应有 %d 封: %d %v", tools.ManyLongCount, len(env), err)
+	}
+	o = call("mail-many-long", "message", "read", "--preview", "-H", "Message-ID", "59", "--output", "json")
+	if err := json.Unmarshal([]byte(o), &got); err != nil || len(got) < tools.ManyLongBytes || !strings.HasPrefix(got, "Message-ID: <mid-ml19@example.com>\n\n") {
+		t.Errorf("mail-many-long 第 20 封: %d 字节 %v", len(got), err)
+	}
+}
+
+// gh-issue-long-body：正文超过旧的 4000 字符截断点，带标签与状态，供来源原文验收。
+func TestGhLongBodySample(t *testing.T) {
+	bin := newBin(t)
+	setCase(t, bin, "gh-issue-long-body")
+	o, _, code := run(t, bin, "gh", nil, "api", "/repos/acc-org/acc-repo/issues?per_page=100&page=1&since=2026-01-01T00:00:00Z")
+	var got []struct {
+		Body   string
+		Labels []struct{ Name string }
+		State  string
+	}
+	if err := json.Unmarshal([]byte(o), &got); code != 0 || err != nil || len(got) != 1 {
+		t.Fatalf("code %d err %v out %.200s", code, err, o)
+	}
+	if n := len([]rune(got[0].Body)); n <= 4000 || len(got[0].Labels) != 2 || got[0].State != "open" {
+		t.Errorf("样本: %d 字符 %+v", n, got[0])
 	}
 }

@@ -1,3 +1,6 @@
-# sha256: 944b1774d5037018107d57a56a7c1e77f7edda5a89fe78eeda8a562ec5009fc9
-work_item_id: null
+# sha256: d725cca03ebcd2abfa0670a9ea14f1db5767de5bce0fe40d04e2a55ee391caa3
+work_item_id: 01a1e615-c21f-7e0e-bcdb-09d721828b8f
 status: todo
+retry_note: Previous worker run was terminated by the runtime (agent_error.unknown),
+  not a code failure. Continue from your existing workspace/branch, rebase on origin/main,
+  finish, run contract commands, submit. Do not redo finished work.

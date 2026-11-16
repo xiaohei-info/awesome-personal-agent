@@ -100,9 +100,9 @@ type Draft = Record<string, string>;
 const JUDGE_NEW: Draft = { ...PRESETS[SYSTEM_ONE], protocol: SYSTEM_ONE, locality: "", max_batch: "32", max_material_chars: "8000" };
 
 function draftOf(kind: Kind, e: Endpoint | null): Draft {
-  if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { protocol: CHAT, url: "", model: "", locality: "" };
+  if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { protocol: CHAT, url: "", model: "", locality: "", max_material_chars: "24000" };
   const d: Draft = { url: e.url ?? "", model: e.model ?? "", locality: e.locality ?? "" };
-  if (kind === "generate") d.protocol = e.protocol || CHAT;
+  if (kind === "generate") Object.assign(d, { protocol: e.protocol || CHAT, max_material_chars: String(e.max_material_chars ?? 24000) });
   if (kind === "judge")
     Object.assign(d, { protocol: e.protocol || PJ, timeout_ms: sec(e.timeout_ms ?? 10000), max_batch: String(e.max_batch ?? 32), max_material_chars: String(e.max_material_chars ?? 8000) });
   return d;
@@ -292,7 +292,7 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
   const apiKey = keyMode === "keep" ? MASK : key;
   const config = () => {
     const base = { url: d.url.trim(), api_key: apiKey, model: d.model.trim(), locality: d.locality };
-    if (kind === "generate") return { ...base, protocol: d.protocol };
+    if (kind === "generate") return { ...base, protocol: d.protocol, max_material_chars: posInt(d.max_material_chars, t.maxChars) };
     return { ...base, protocol: d.protocol, timeout_ms: posSec(d.timeout_ms, t.timeoutMs), max_batch: posInt(d.max_batch, t.maxBatch), max_material_chars: posInt(d.max_material_chars, t.maxChars) };
   };
   const saver = useSaver(async () => {
@@ -432,6 +432,13 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
           </div>
           {models && !manual && <button type="button" className="link" onClick={() => setManual(true)}>{t.manualLink}</button>}
           {listNote && <p className={listNote.ok ? "sub" : "note"} role="status">{listNote.text}</p>}
+          {kind === "generate" && (
+            <details>
+              <summary>{t.advanced}</summary>
+              <label>{t.maxChars}<input type="number" value={d.max_material_chars} onChange={(e) => set("max_material_chars", e.target.value)} /></label>
+              <small className="sub">{t.maxCharsGenerateHint}</small>
+            </details>
+          )}
           {kind === "judge" && (
             <details>
               <summary>{t.advanced}</summary>

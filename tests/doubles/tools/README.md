@@ -14,10 +14,10 @@ go build -o /tmp/tool-stub ./tests/doubles/tools/cmd/tool-stub
 
 | 工具 | case |
 |---|---|
-| himalaya | `mail-1.1.0` `mail-2.0.0`（回放 `sources/mail/testdata/<版本>`）、`mail-1.1.0-new`（加 `<mid-7@example.com>`）、`mail-thread-1/-2/mail-thread`（`<mid-t1..t3@example.com>`，按 `-H` 返回 References/In-Reply-To）、`mail-old-reply`/`mail-old-reply-2`（`<mid-o2/o3@example.com>`）、`mail-version-0.1`、`mail-auth-fail`（stderr `Invalid credentials`，退出 1）、`mail-garbled`（无 Message-ID 行）、`mail-garbled-json`（非 JSON） |
+| himalaya | `mail-1.1.0` `mail-2.0.0`（回放 `sources/mail/testdata/<版本>`）、`mail-1.1.0-new`（加 `<mid-7@example.com>`）、`mail-thread-1/-2/mail-thread`（`<mid-t1..t3@example.com>`，按 `-H` 返回 References/In-Reply-To）、`mail-old-reply`/`mail-old-reply-2`（`<mid-o2/o3@example.com>`）、`mail-version-0.1`、`mail-auth-fail`（stderr `Invalid credentials`，退出 1）、`mail-garbled`（无 Message-ID 行）、`mail-garbled-json`（非 JSON）、`himalaya-long`（一封 40 KiB 正文、带附件、固定信头齐全：`<mid-long@example.com>`）、`mail-many-long`（20 封各 110 KiB，每小时一封：`<mid-ml00..19@example.com>`，供按字节分批）；两者的信头按 `-H` 顺序返回，正文是确定的合成文本（`tools.LongBody`） |
 | gog | `cal-base`（`sources/calendar/testdata/0.9.0` 原样）、`cal-updated`、`cal-updated-2`、`cal-new`（派生规则见验收 ACT-CAL）、`cal-version-0.1`、`cal-auth-fail` |
-| mail-cli / calendar-cli / reminder-cli | `pim-mail`、`pim-calendar`、`pim-reminders`（回放 `sources/applepim/testdata`）、`pim-mail-thread-1`、`pim-mail-thread` |
-| gh | `gh-empty`、`gh-issue-opened`、`gh-issue-labeled`、`gh-issue-opened-2`、`gh-issue-opened-3`、`gh-pr-closed`、`gh-pr-updated-7`、`gh-agentsmd-changed`（录制在 `testdata/gh/`，仓库 `acc-org/acc-repo`）、`gh-auth-401`（stderr `Bad credentials (HTTP 401)`） |
+| mail-cli / calendar-cli / reminder-cli | `pim-mail`、`pim-calendar`、`pim-reminders`（回放 `sources/applepim/testdata`）、`pim-mail-thread-1`、`pim-mail-thread`、`mail-long-html`（正文转文本后 > 16 KiB 的 HTML 邮件，两个附件，`long-html@example.test`）、`mail-long-legacy`（升级前就有的同一封纯文本长信，`legacy-long@example.test`；升级演练夹具里的旧事件 id 须与之相同才能验证去重）、`rem-undated`（"随手记"与"工作"各一条无到期日提醒，另有一条有到期日、一条已完成）、`rem-undated-renamed`（同一条改了标题）、`rem-undated-dated`（同一条补上到期日） |
+| gh | `gh-empty`、`gh-issue-opened`、`gh-issue-labeled`、`gh-issue-opened-2`、`gh-issue-opened-3`、`gh-issue-long-body`（正文超过 4000 字符，带标签与状态）、`gh-pr-closed`、`gh-pr-updated-7`、`gh-agentsmd-changed`（录制在 `testdata/gh/`，仓库 `acc-org/acc-repo`）、`gh-auth-401`（stderr `Bad credentials (HTTP 401)`） |
 
 已知限制：
 - gh 样本的时间固定在 2026-11-10（09:00–14:00Z）；来源的 `window.to` 必须不早于对应时刻事件才会被读到（测试时钟推进即可）。

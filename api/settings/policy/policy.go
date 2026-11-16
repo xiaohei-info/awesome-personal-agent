@@ -135,6 +135,8 @@ type generateReq struct {
 	Protocol   string  `json:"protocol"`
 	Model      string  `json:"model"`
 	Locality   string  `json:"locality"`
+	// 资料预算只有 Web 能改（策略写入口本身要求 Web 登录）；省略时保持已存的值，不让旧形状的请求悄悄重置它。
+	MaxMaterialChars int `json:"max_material_chars"`
 }
 
 // keyHint 是已存密钥的末 4 个字符，供 Web 显示"已设置 ····末 4 位"；短于 12 个字符的密钥不给，免得暴露过大比例。
@@ -151,6 +153,14 @@ func keepKey(in *string, old string) string {
 		return old
 	}
 	return *in
+}
+
+// keepBudget：请求没带预算（0）时沿用已存的值；负数交策略校验拒绝。
+func keepBudget(in, old int) int {
+	if in == 0 {
+		return old
+	}
+	return in
 }
 
 func getJudge(p *kpolicy.Policy) any {
@@ -185,7 +195,8 @@ func getGenerate(p *kpolicy.Policy) any {
 	if g.URL == "" {
 		return nil
 	}
-	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "api_key_hint": keyHint(g.APIKey), "protocol": kpolicy.GenerateProtocol(g.Protocol), "model": g.Model, "locality": g.Locality}
+	return map[string]any{"url": g.URL, "api_key_set": g.APIKey != "", "api_key_hint": keyHint(g.APIKey), "protocol": kpolicy.GenerateProtocol(g.Protocol), "model": g.Model, "locality": g.Locality,
+		"max_material_chars": g.MaterialBudget()}
 }
 
 func setGenerate(p *kpolicy.Policy, raw json.RawMessage) error {
@@ -197,7 +208,8 @@ func setGenerate(p *kpolicy.Policy, raw json.RawMessage) error {
 		p.GenerateEndpoint = kpolicy.GenerateEndpoint{}
 		return nil
 	}
-	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: r.Locality, Protocol: r.Protocol}
+	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: r.Locality, Protocol: r.Protocol,
+		MaxMaterialChars: keepBudget(r.MaxMaterialChars, p.GenerateEndpoint.MaxMaterialChars)}
 	return nil
 }
 
@@ -209,7 +221,8 @@ func setLegacy(p *kpolicy.Policy, raw json.RawMessage) error {
 	if err := strictDecode(raw, &r); err != nil {
 		return err
 	}
-	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: kpolicy.LocalityExternal, Protocol: r.Protocol}
+	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: kpolicy.LocalityExternal, Protocol: r.Protocol,
+		MaxMaterialChars: p.GenerateEndpoint.MaxMaterialChars}
 	p.ScreeningTimeoutMs = r.ScreeningTimeoutMs
 	return nil
 }

@@ -8,6 +8,17 @@
 //	exit1        退出码 1
 //	hang         挂起不退出（STUB_HARNESS_HANG_FOR 可设上限，如 2m）；STUB_HARNESS_SPAWN_CHILD=1 时派生子进程并把 pid 写入 stub-harness-child.pid
 //	summary-only 不调 CLI，只在 stdout 末段写摘要，退出 0
+//	brief        读运行目录的资料文件（materials.json）与原文文件，保存到 STUB_HARNESS_SAVE_DIR（默认运行目录下 stub-harness-saved），
+//	             再用 STUB_HARNESS_APA 指向的 apa 把 {period, sections} 写回提示词里的事项（或 STUB_HARNESS_ITEM）；
+//	             每段资料一节，title 取段名、body 列条目标题，空段写“无”
+//	brief-period 同 brief，但只写回 period（模拟结果字段没写全）
+//
+// receipt 模式的附加开关（都不设时行为与旧版一致）：
+//
+//	STUB_HARNESS_RECEIPT_LINKS  逗号分隔的链接，逐个以 --link <值> 追加到回执命令
+//	STUB_HARNESS_ENTRY          会话入口：terminal、dm、group、listed（名单里的平台）；回执命令带上 APA_SESSION_KIND 与 APA_SESSION
+//	STUB_HARNESS_PLATFORM / STUB_HARNESS_CHAT_TYPE / STUB_HARNESS_SENDER / STUB_HARNESS_DIRECT_PLATFORMS
+//	                            覆盖入口预设；会话类型按附录 A.5 的五条顺序判定
 //
 // 摘要是 stdout 最后一行 JSON：{"session_id":"<STUB_HARNESS_SESSION_ID，默认 stub-session-1>","outcome":"done"}。
 // 启动后立即把收到的环境变量写入运行目录（STUB_HARNESS_RUN_DIR，默认当前目录）的 stub-harness-env.json。
@@ -67,10 +78,29 @@ func Run(args, env []string, dir string, stdout io.Writer) int {
 			fmt.Fprintln(os.Stderr, "stub-harness: STUB_HARNESS_RECEIPT_CMD not set")
 			return 2
 		}
+		for _, l := range strings.Split(e["STUB_HARNESS_RECEIPT_LINKS"], ",") {
+			if l = strings.TrimSpace(l); l != "" {
+				argv = append(argv, "--link", l)
+			}
+		}
+		cmdEnv := env
+		if kind, ok := entryKind(e); ok {
+			cmdEnv = append(env[:len(env):len(env)], "APA_SESSION_KIND="+kind)
+			if e["APA_SESSION"] == "" {
+				cmdEnv = append(cmdEnv, "APA_SESSION=stub-session-1")
+			}
+		}
 		cmd := exec.Command(argv[0], argv[1:]...)
-		cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = dir, env, io.Discard, os.Stderr
+		cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = dir, cmdEnv, io.Discard, os.Stderr
 		if err := cmd.Run(); err != nil {
 			fmt.Fprintln(os.Stderr, "stub-harness: receipt command failed:", err)
+			return 3
+		}
+		summary()
+		return 0
+	case "brief", "brief-period":
+		if err := writeBrief(e, env, args, dir, mode == "brief-period"); err != nil {
+			fmt.Fprintln(os.Stderr, "stub-harness:", err)
 			return 3
 		}
 		summary()

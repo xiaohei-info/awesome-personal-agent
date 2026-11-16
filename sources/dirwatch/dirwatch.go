@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/sources/internal/content"
 )
 
 // 退出码沿用 §9.2 的 Source 契约。
@@ -55,9 +57,9 @@ func (c cursor) before(mtime int64, path string) bool {
 	return mtime > c.MTime || (mtime == c.MTime && path > c.Path)
 }
 
-// outputBudget 是单次 stdout 的字节上限，低于 runner 保留的 64KiB（kernel/sources/runner/parse.go），
-// 超出的文件留到下次运行，游标只推进到已输出的最后一个。
-const outputBudget = 48 << 10
+// outputMB 与内核 max_source_output_mb 的默认值一致（设计 §9.2、§16.2）；来源程序拿不到运行配置里的实际值（shortcut: 配小时改由内核传入）。
+// 单次 stdout 按字节分批，累计到它的四分之三就停下（共用包 content.Batcher），超出的文件留到下次运行，游标只推进到已输出的最后一个。
+var outputMB = 32
 
 type runErr struct {
 	exit int
@@ -156,7 +158,8 @@ func poll(in Input) (*result, error) {
 		return files[i].rel < files[j].rel
 	})
 	var evs []event
-	used, next := 0, prev
+	batch := content.NewBatcher(outputMB)
+	next := prev
 	for _, f := range files {
 		e := event{
 			ID:   "changed:" + f.rel + ":" + strconv.FormatInt(f.mtime.UnixNano(), 10) + ":" + strconv.FormatInt(f.size, 10),
@@ -164,10 +167,9 @@ func poll(in Input) (*result, error) {
 			OccurredAt: f.mtime.UTC(), CorrelationKeys: []string{"dir:" + dir + ":" + f.rel},
 		}
 		line, _ := json.Marshal(e)
-		if len(evs) > 0 && used+len(line)+1 > outputBudget {
+		if !batch.Add(len(line) + 1) {
 			break
 		}
-		used += len(line) + 1
 		evs = append(evs, e)
 		next = cursor{f.mtime.UnixNano(), f.rel}
 	}

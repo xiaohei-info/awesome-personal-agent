@@ -199,3 +199,64 @@ func TestMaterialFormIsInferredForRowsFromBeforeSchema8(t *testing.T) {
 		t.Fatalf("reading rewrote rows: %d still blank, want 2", raw)
 	}
 }
+
+// flow-web-vault-materials：本人在 Web 材料页改链接型材料的标题、kind 与标签；位置不可改。
+func TestUpdateLinkedMaterialTitleKindTagsOnlyByOwner(t *testing.T) {
+	e := setup(t)
+	e.vaults(t, policy.NoteVault{Name: "notes"})
+	r, err := e.link(t, worker, LinkIn{Link: "vault:notes/a.md", Title: "旧标题", Project: e.prj, Tags: []string{"a"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title, kind, tags := "新标题", "minutes", []string{"x", "y"}
+	in := updateIn{ID: r.Material, Title: &title, Kind: &kind, Tags: &tags, Reason: "整理"}
+	// 只在 Web：agent 得到 4，delegate 得到 20。
+	_, err = e.do(worker, "", "material.update", in)
+	code(t, err, domain.CodePermissionDenied)
+	if _, err = e.do(delegate, "本人原话", "material.update", in); err == nil {
+		t.Fatal("delegate must not edit")
+	}
+	e.must(t, owner, "", "material.update", in)
+	var m Material
+	e.view(t, func(tx *store.Tx) (err error) { m, err = Get(tx, r.Material); return })
+	if m.Title != title || m.Kind != kind || len(m.Tags) != 2 || m.Link != "vault:notes/a.md" || m.Form != FormLink {
+		t.Fatalf("after update: %+v", m)
+	}
+	es := e.events(t, m.ID)
+	if last := es[len(es)-1]; last.Type != domain.EvMaterialRevised || last.Reason != "整理" || last.Actor.Principal != "owner" {
+		t.Fatalf("events = %+v", es)
+	}
+	// 只改一项，其余保持。
+	t2 := "仅标题"
+	e.must(t, owner, "", "material.update", updateIn{ID: m.ID, Title: &t2})
+	e.view(t, func(tx *store.Tx) (err error) { m, err = Get(tx, r.Material); return })
+	if m.Title != t2 || m.Kind != kind || len(m.Tags) != 2 {
+		t.Fatalf("partial update: %+v", m)
+	}
+}
+
+func TestUpdateRejections(t *testing.T) {
+	e := setup(t)
+	e.vaults(t, policy.NoteVault{Name: "notes"})
+	r, _ := e.link(t, worker, LinkIn{Link: "vault:notes/a.md", Title: "t", Project: e.prj})
+	blankT, gl, bad := " ", KindGuideline, "nonsense"
+	for name, in := range map[string]updateIn{
+		"nothing to change": {ID: r.Material},
+		"blank title":       {ID: r.Material, Title: &blankT},
+		"guideline":         {ID: r.Material, Kind: &gl},
+		"unknown kind":      {ID: r.Material, Kind: &bad},
+	} {
+		_, err := e.do(owner, "", "material.update", in)
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+			continue
+		}
+		code(t, err, domain.CodeInvalidRequest)
+	}
+	_, err := e.do(owner, "", "material.update", updateIn{ID: "mat_nope", Title: &bad})
+	code(t, err, domain.CodeNotFound)
+	// 自有型不在此改。
+	owned := e.newNote(t, "x")
+	_, err = e.do(owner, "", "material.update", updateIn{ID: owned.Material, Title: &bad})
+	code(t, err, domain.CodeConflict)
+}

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"strings"
 )
 
@@ -29,6 +30,9 @@ func pimCall(tool, c string, args []string, root string) out {
 			return fixture("events.json")
 		}
 	case "reminder-cli":
+		if strings.HasPrefix(c, "rem-undated") && args[0] == "items" {
+			return remCase(root, c, args)
+		}
 		if c == "pim-reminders" && args[0] == "items" {
 			for _, a := range args {
 				if f, ok := strings.CutPrefix(a, "--filter="); ok && (f == "upcoming" || f == "overdue") {
@@ -39,6 +43,11 @@ func pimCall(tool, c string, args []string, root string) out {
 	case "mail-cli":
 		n := 2
 		switch c {
+		case "mail-long-html", "mail-long-legacy": // 正文远超 16 KiB 的信：HTML 带两个附件 / 升级前就存在的同一封纯文本信
+			name := strings.TrimPrefix(c, "mail-")
+			if args[0] == "messages" || args[0] == "get" {
+				return fixture(args[0] + "-" + name + ".json")
+			}
 		case "pim-mail-thread-1":
 			n = 1
 		case "pim-mail-thread":
@@ -89,4 +98,31 @@ func argVal(args []string, prefix string) string {
 		}
 	}
 	return ""
+}
+
+// remCase 回放 rem-undated* case：upcoming、overdue、all 三个筛选各一份录制；--list 按列表名过滤，
+// 与真实工具一致（all 是没有专门筛选时的取法，MEAS-REM-UNDATED 待真实工具证实）。
+func remCase(root, c string, args []string) out {
+	f := argVal(args, "--filter=")
+	b, err := readFixture(root, "sources", "applepim", "testdata", "rem", c, f+".json")
+	if err != nil {
+		return failf(ExitNoCase, "tool-stub: %v", err)
+	}
+	list := argVal(args, "--list=")
+	if list == "" {
+		return ok(string(b))
+	}
+	var o struct {
+		Reminders []map[string]any `json:"reminders"`
+	}
+	if err := json.Unmarshal(b, &o); err != nil {
+		return failf(ExitNoCase, "tool-stub: %v", err)
+	}
+	kept := []map[string]any{}
+	for _, r := range o.Reminders {
+		if r["list"] == list || r["listId"] == list {
+			kept = append(kept, r)
+		}
+	}
+	return ok(string(marshal(map[string]any{"success": true, "filter": f, "count": len(kept), "reminders": kept})) + "\n")
 }

@@ -407,3 +407,32 @@ func TestCredentialsInjectedViaEnvOnlyAndMissingKeyNeedsInput(t *testing.T) {
 		t.Fatalf("code=%d called=%v stderr=%q", code, called, stderr)
 	}
 }
+
+// ACT-OAD-04（日历部分）：起止、地点、组织者、参与者、状态进 headers；描述整段进 detail，不截断。
+func TestHeadersCarryStartEndLocationOrganizerAttendeesStatus(t *testing.T) {
+	version, events := recorded(t, "0.9.0")
+	_, lines, _ := do(t, fakeTool(version, events, nil, ""), in)
+	evs := decode(t, lines)
+	want := map[string]any{
+		"Start": "2026-03-12T09:30:00+08:00", "End": "2026-03-12T10:30:00+08:00", "Location": "市口腔医院",
+		"Organizer": "口腔医院 <clinic@example.com>", "Status": "confirmed",
+		"Attendee": []any{"我 <me@example.com>", "family@example.com"},
+	}
+	b, _ := json.Marshal(evs[1].Headers)
+	w, _ := json.Marshal(want)
+	if string(b) != string(w) {
+		t.Fatalf("headers\n got %s\nwant %s", b, w)
+	}
+	// 全天日程取 date；没有地点、参与者时不带空键。
+	if h := evs[0].Headers; h["Start"] != "2026-03-20" || h["End"] != "2026-03-21" || h["Location"] != nil || h["Attendee"] != nil {
+		t.Fatalf("all-day headers %v", h)
+	}
+	if evs[4].Headers["Status"] != "cancelled" {
+		t.Fatalf("cancelled headers %v", evs[4].Headers)
+	}
+	long := strings.Repeat("长描述。", 20000)
+	_, ll, _ := do(t, fakeTool("0.9.2", `[{"id":"x","iCalUID":"u1","summary":"s","description":"`+long+`","start":{"dateTime":"2026-03-12T09:30:00Z"}}]`, nil, ""), in)
+	if d := decode(t, ll)[0].Detail; d != long {
+		t.Fatalf("描述被截断: %d != %d", len(d), len(long))
+	}
+}

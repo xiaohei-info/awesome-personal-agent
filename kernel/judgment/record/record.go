@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/budget"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -54,6 +55,8 @@ type Level struct {
 	ErrorCode         string   `json:"error_code,omitempty"`
 	DurationMs        int64    `json:"duration_ms"`
 	Reused            bool     `json:"reused,omitempty"`
+	// Material 是这一级实际送出的资料的裁剪量（§8.4）；被外发范围排除、没送出的级没有，升级前的记录也没有。
+	Material *budget.Trace `json:"material,omitempty"`
 }
 
 // Review 是抽检结论；未抽检为 nil。

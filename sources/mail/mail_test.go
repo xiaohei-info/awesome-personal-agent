@@ -302,12 +302,6 @@ func TestFirstRunEmptyMailboxUsesWindowTo(t *testing.T) {
 	}
 }
 
-func TestDetailTruncated(t *testing.T) {
-	if got := truncate(strings.Repeat("好", maxDetail)); len(got) > maxDetail {
-		t.Fatal(len(got))
-	}
-}
-
 // pagedRunner 提供 total 封新到旧的邮件（均晚于游标），按 --page/--page-size 切页。
 func pagedRunner(total int, listCalls *int) Runner {
 	return func(_ context.Context, args []string) ([]byte, []byte, error) {
@@ -499,9 +493,10 @@ func TestThreadCorrelationKeys(t *testing.T) {
 			t.Errorf("%s correlation_keys=%v, want [%s]", id, keys[id], k)
 		}
 	}
-	// 同一次 message read 取三个头，且仍只读。
+	// 同一次 message read 逐个取到三个线程头，且仍只读。
 	for _, c := range calls[2:] {
-		if j := strings.Join(c, " "); !strings.Contains(j, "-H Message-ID -H References -H In-Reply-To") || !strings.Contains(j, "--preview") {
+		j := strings.Join(c, " ")
+		if !strings.Contains(j, "-H Message-ID") || !strings.Contains(j, "-H References") || !strings.Contains(j, "-H In-Reply-To") || !strings.Contains(j, "--preview") {
 			t.Errorf("message read argv=%v", c)
 		}
 	}
@@ -524,5 +519,159 @@ func TestKeysWithoutThreadHeaders(t *testing.T) {
 		if len(ev.Keys) != 1 || ev.Keys[0] != "thread:"+ev.ID {
 			t.Errorf("%s keys=%v id=%s", dir, ev.Keys, ev.ID)
 		}
+	}
+}
+
+// longRunner 回放 n 封各带 bodyLen 字节正文、固定信头与（可选）附件的 1.1.0 形态邮件，新到旧；记录每次 message read 的 argv。
+func longRunner(n, bodyLen int, attach bool, reads *[][]string) Runner {
+	at := func(i int) time.Time {
+		return time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Minute)
+	}
+	return func(_ context.Context, args []string) ([]byte, []byte, error) {
+		switch {
+		case args[0] == "--version":
+			return []byte("himalaya v1.1.0"), nil, nil
+		case args[0] == "envelope":
+			if strings.Contains(strings.Join(args, " "), "--page 2") {
+				return []byte("[]"), nil, nil
+			}
+			var envs []map[string]any
+			for i := n - 1; i >= 0; i-- {
+				envs = append(envs, map[string]any{"id": i + 1, "subject": fmt.Sprintf("long %d", i), "date": at(i).Format(time.RFC3339),
+					"from": map[string]string{"addr": "a@example.com"}, "has_attachment": attach})
+			}
+			b, _ := json.Marshal(envs)
+			return b, nil, nil
+		}
+		*reads = append(*reads, args)
+		i, _ := strconv.Atoi(args[len(args)-3]) // …<编号> --output json
+		hdr := fmt.Sprintf("From: A <a@example.com>\nTo: b@example.com\nCc: c@example.com\nReply-To: r@example.com\nDate: %s\n"+
+			"Subject: =?UTF-8?B?5Lit5paH?= long %d\nMessage-ID: <m%d@example.com>\nIn-Reply-To: <p@example.com>\nReferences: <r@example.com>\n"+
+			"List-Id: <l.example.com>\nList-Unsubscribe: <mailto:u@example.com>\nContent-Type: text/plain; charset=utf-8\n\n", at(i-1).Format(time.RFC1123Z), i-1, i-1)
+		b, _ := json.Marshal(hdr + strings.Repeat("长", bodyLen/3))
+		return b, nil, nil
+	}
+}
+
+type longEvent struct {
+	ID      string         `json:"id"`
+	Detail  string         `json:"detail"`
+	Headers map[string]any `json:"headers"`
+	Content struct {
+		State   string `json:"state"`
+		Missing []struct{ Part, Reason string }
+	} `json:"content"`
+}
+
+func parseEvents(t *testing.T, out string) (evs []longEvent, cursor string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for _, l := range lines[:len(lines)-1] {
+		var e longEvent
+		if err := json.Unmarshal([]byte(l), &e); err != nil {
+			t.Fatal(err)
+		}
+		evs = append(evs, e)
+	}
+	var c map[string]string
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &c); err != nil || c["cursor"] == "" {
+		t.Fatalf("末行不是游标: %q", lines[len(lines)-1])
+	}
+	return evs, c["cursor"]
+}
+
+// ACT-MAD-02：正文不截断；固定信头逐个 -H 请求并规范化进 headers；original 与 attachments 以 partial 自报；只用 --preview。
+func TestLongBodyFixedHeadersAndPartial(t *testing.T) {
+	var reads [][]string
+	code, out, errs := exec1(t, longRunner(1, 40<<10, true, &reads), input(""))
+	if code != ExitOK {
+		t.Fatalf("exit=%d %s", code, errs)
+	}
+	evs, _ := parseEvents(t, out)
+	if len(evs) != 1 {
+		t.Fatalf("events=%d", len(evs))
+	}
+	e := evs[0]
+	if want := strings.Repeat("长", (40<<10)/3); e.Detail != want {
+		t.Errorf("正文被改动：%d 字节，期望 %d", len(e.Detail), len(want))
+	}
+	if e.ID != "<m0@example.com>" {
+		t.Errorf("事件 id 仍取 Message-ID: %q", e.ID)
+	}
+	for _, h := range []string{"From", "To", "Cc", "Reply-To", "Date", "Subject", "Message-Id", "In-Reply-To", "References", "List-Id", "List-Unsubscribe", "Content-Type"} {
+		if e.Headers[h] == nil {
+			t.Errorf("headers 缺 %s: %v", h, e.Headers)
+		}
+	}
+	if e.Headers["Subject"] != "中文 long 0" {
+		t.Errorf("RFC 2047 主题应解码: %v", e.Headers["Subject"])
+	}
+	parts := map[string]bool{}
+	for _, m := range e.Content.Missing {
+		parts[m.Part] = m.Reason != ""
+	}
+	if e.Content.State != "partial" || !parts["original"] || !parts["attachments"] || len(parts) != 2 {
+		t.Errorf("content=%+v", e.Content)
+	}
+	if len(reads) != 1 {
+		t.Fatalf("reads=%v", reads)
+	}
+	j := strings.Join(reads[0], " ")
+	for _, h := range fixedHeaders {
+		if !strings.Contains(j, "-H "+h+" ") {
+			t.Errorf("没有请求信头 %s: %s", h, j)
+		}
+	}
+	if !strings.Contains(j, "--preview") || strings.Contains(j, "export") {
+		t.Errorf("只能用 --preview 读取：%s", j)
+	}
+}
+
+// 没有附件的邮件不自报 attachments 缺失（没有可缺的）。
+func TestNoAttachmentNotReportedMissing(t *testing.T) {
+	var reads [][]string
+	_, out, _ := exec1(t, longRunner(1, 300, false, &reads), input(""))
+	evs, _ := parseEvents(t, out)
+	if m := evs[0].Content.Missing; len(m) != 1 || m[0].Part != "original" {
+		t.Errorf("missing=%+v", m)
+	}
+}
+
+// ACT-MAD-04：max_output_mb=1，20 封各约 100 KiB：每轮事件输出不超过 768 KiB，游标停在已输出的最后一条，
+// 多轮后 20 封全部取到，不丢信、事件 id 不变。
+func TestByteBatchingConvergesWithinBudget(t *testing.T) {
+	const total, size, budget = 20, 100 << 10, 768 << 10
+	seen := map[string]int{}
+	cursor := ""
+	for run := 0; run < 10 && len(seen) < total; run++ {
+		var reads [][]string
+		in := `{"config":{"max_output_mb":1,"max_messages":100,"lookback_days":36500},"cursor":"` + cursor + `"}`
+		code, out, errs := exec1(t, longRunner(total, size, false, &reads), in)
+		if code != ExitOK {
+			t.Fatalf("run %d exit=%d %s", run, code, errs)
+		}
+		evs, cur := parseEvents(t, out)
+		if n := len(out) - len(`{"cursor":"`+cur+`"}`+"\n"); n > budget {
+			t.Errorf("run %d 输出 %d 字节，超过 768 KiB", run, n)
+		}
+		if len(evs) == 0 || len(evs) >= total && run == 0 {
+			t.Errorf("run %d 事件数 %d：第一轮应只输出一部分", run, len(evs))
+		}
+		if last := evs[len(evs)-1]; run == 0 && last.ID != "<m"+strconv.Itoa(len(evs)-1)+"@example.com>" {
+			t.Errorf("首轮应从最旧的一封起顺序输出，最后一条 %s", last.ID)
+		}
+		if len(reads) > len(evs)+1 {
+			t.Errorf("run %d 读了 %d 封却只输出 %d 封：不应继续读取已装不下的信", run, len(reads), len(evs))
+		}
+		if cursor != "" && cur <= cursor {
+			t.Fatalf("run %d 游标未前进 %s -> %s", run, cursor, cur)
+		}
+		cursor = cur
+		for _, e := range evs {
+			seen[e.ID]++
+		}
+	}
+	if len(seen) != total {
+		t.Fatalf("20 封应全部取到，实际 %d", len(seen))
 	}
 }

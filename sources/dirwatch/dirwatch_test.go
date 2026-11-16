@@ -103,7 +103,10 @@ func TestNewAndModifiedFilesBecomeEvents(t *testing.T) {
 func TestBoundedOutputAcrossRuns(t *testing.T) {
 	dir := t.TempDir()
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	const n = 600
+	old := outputMB
+	outputMB = 1 // 预算 768 KiB
+	defer func() { outputMB = old }()
+	const n = 4000
 	for i := 0; i < n; i++ {
 		// 每 3 个文件共用一个 mtime，覆盖水位线上的并列。
 		write(t, filepath.Join(dir, "d", strings.Repeat("x", 60)+"-"+strconv.Itoa(i)+".txt"), "x", t0.Add(time.Duration(i/3)*time.Second))
@@ -118,7 +121,7 @@ func TestBoundedOutputAcrossRuns(t *testing.T) {
 		if code := Run(bytes.NewReader(b), &so, &se); code != 0 {
 			t.Fatalf("exit %d: %s", code, se.String())
 		}
-		if so.Len() >= 48<<10+1024 {
+		if so.Len() > 768<<10+1024 { // 预算 + 游标行
 			t.Fatalf("stdout %d bytes exceeds budget", so.Len())
 		}
 		o := run(t, dir, cursor)

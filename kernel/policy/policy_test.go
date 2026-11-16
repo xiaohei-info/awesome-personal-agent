@@ -504,7 +504,7 @@ func TestEndpointDefaultsAndValidation(t *testing.T) {
 	_, p = current(t, s)
 	j := p.JudgeEndpoint
 	if j.Protocol != ProtocolProbability || j.TimeoutMs != 10000 || j.MaxBatch != 32 || j.MaxMaterialChars != 8000 ||
-		j.Locality != LocalityExternal || p.GenerateEndpoint.Locality != LocalityExternal {
+		j.Locality != LocalityExternal || p.GenerateEndpoint.Locality != LocalityExternal || p.GenerateEndpoint.MaterialBudget() != 24000 {
 		t.Fatalf("judge=%+v generate=%+v", j, p.GenerateEndpoint)
 	}
 	for _, e := range events(t, s) {

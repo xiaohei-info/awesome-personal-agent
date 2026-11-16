@@ -148,7 +148,11 @@ type Task struct {
 	Instruction string
 	Materials   []Material
 	Messages    []Message
-	Actor       domain.Actor // 触发入口（Via 必填），类型记为 agent
+	// Files 是写进运行目录的只读来源原文文件（简报的 digest 与 proposals 引用的来源事件，§7.3）。
+	Files []RawFile
+	// Window 是简报的取材窗口：运行结束时由内核并回事项的 spec.since/until，Agent 整体替换 spec 也不会丢（§7.3）。
+	Window *window
+	Actor  domain.Actor // 触发入口（Via 必填），类型记为 agent
 }
 
 // Outcome 是 Launch 的结果。Run 为空表示没有拉起，事项已进 needs_input，Reason 说明原因。
@@ -311,7 +315,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		if _, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, s.o.Now()); err != nil {
 			return err
 		}
-		return saveResultDecl(tx, runID, resultDecl{Fields: pr.Meta.ResultFields, Material: pr.Meta.ResultMaterial})
+		return saveResultDecl(tx, runID, resultDecl{Fields: pr.Meta.ResultFields, Material: pr.Meta.ResultMaterial, Window: t.Window})
 	})
 	if err != nil {
 		return out, err
@@ -413,6 +417,11 @@ func (s *Service) stage(runDir, matPath, prompt, itemID string, t Task) error {
 	}
 	if err := os.WriteFile(matPath, b, 0o600); err != nil {
 		return err
+	}
+	for _, f := range t.Files {
+		if err := os.WriteFile(filepath.Join(runDir, f.Name), []byte(f.Text), 0o400); err != nil {
+			return err
+		}
 	}
 	if t.Instruction != "" {
 		if err := os.WriteFile(filepath.Join(runDir, instructionFile), []byte(t.Instruction), 0o600); err != nil {
@@ -535,10 +544,11 @@ func (s *Service) traceRun(ctx context.Context, runID, itemID string) (runTrace,
 type resultDecl struct {
 	Fields   []string `json:"fields,omitempty"`
 	Material bool     `json:"material,omitempty"`
+	Window   *window  `json:"window,omitempty"`
 }
 
 func saveResultDecl(tx *store.Tx, runID string, d resultDecl) error {
-	if len(d.Fields) == 0 && !d.Material {
+	if len(d.Fields) == 0 && !d.Material && d.Window == nil {
 		return nil
 	}
 	b, err := json.Marshal(d)
@@ -673,6 +683,12 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 		return err
 	}); err != nil {
 		return err
+	}
+	if decl.Window != nil {
+		var err error
+		if it, err = s.keepWindow(ctx, it, *decl.Window); err != nil {
+			return err
+		}
 	}
 	sm, hasSum := parseSummary(res.Stdout)
 	_ = os.WriteFile(filepath.Join(s.o.RunsDir, run.ID, "output.txt"), res.Stdout, 0o600)
