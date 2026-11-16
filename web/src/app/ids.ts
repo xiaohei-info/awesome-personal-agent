@@ -150,7 +150,7 @@ export const EVENT_INTERNAL = [
   "followmsg.attached", "followmsg.processed", "followmsg.handed_back", "followmsg.released", "executor.declared",
   "executor.confirmed", "executor.rejected", "executor.changed", "executor.removed", "source.registered", "source.updated",
   "source.enabled", "source.disabled", "source.renamed", "item.deleted", "run.credential_exchanged", "timer.fired", "credential.assigned",
-  "agents_md.rendered", "background.launched", "background.refused", "background.skipped", "delegation.dispatched", "delegation.dispatch_updated", "executor.enrolled", "followup.deferred", "followup.reminded", "inbound.spot_reviewed", "purge.executed", "resume.launched", "resume.refused", "resume.session_lost", "rule.skipped", "wake.lease_opened", "wake.lease_released", "source.replay_requested", "source.webhook_key_created", "source.webhook_key_revoked", "source.webhook_key_rotated",
+  "agents_md.rendered", "background.launched", "background.refused", "background.skipped", "delegation.dispatched", "delegation.dispatch_updated", "executor.enrolled", "followup.deferred", "followup.reminded", "inbound.spot_reviewed", "purge.executed", "resume.launched", "resume.refused", "resume.session_lost", "rule.skipped", "wake.lease_opened", "wake.lease_released", "source.replay_requested", "source.webhook_key_created", "source.webhook_key_revoked", "source.webhook_key_rotated", "source.content_purged",
   "connection.created", "connection.configured", "connection.enabled", "connection.disabled", "connection.renamed", "connection.removed",
 ] as const;
 

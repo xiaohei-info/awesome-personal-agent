@@ -951,7 +951,7 @@ func TestPreviousMetricSurvivesRestart(t *testing.T) {
 	sample := func(st *store.Store, id string, v float64) {
 		t.Helper()
 		err := st.Update(bg, func(tx *store.Tx) error {
-			return insertEvent(tx, src, "", parsedEvent{ID: id, Type: "acc.metric", Subject: "s", OccurredAt: t0, CorrelationKeys: []string{"disk-a"}, Metrics: map[string]float64{"value": v}})
+			return insertEvent(tx, src, "", parsedEvent{ID: id, Type: "acc.metric", Subject: "s", OccurredAt: t0, CorrelationKeys: []string{"disk-a"}, Metrics: map[string]float64{"value": v}}, t0)
 		})
 		if err != nil {
 			t.Fatal(err)

@@ -60,7 +60,7 @@ func (r *Runner) applyIngest(c *command.Ctx) (any, error) {
 			rejects = append(rejects, Reject{Line: i + 1, Reason: reason, Raw: string(raw)})
 			continue
 		}
-		if err := insertEvent(c.Tx, src, in.RunID, r.capSender(src, ev)); err != nil {
+		if err := insertEvent(c.Tx, src, in.RunID, r.capSender(src, ev), c.Now()); err != nil {
 			return nil, err
 		}
 		accepted++

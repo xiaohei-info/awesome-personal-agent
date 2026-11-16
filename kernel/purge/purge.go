@@ -23,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -34,8 +35,9 @@ const EvPurged = "purge.executed"
 
 // 被删对象的种类。
 const (
-	KindItem     = "item"
-	KindMaterial = "material"
+	KindItem        = "item"
+	KindMaterial    = "material"
+	KindSourceEvent = "source_event"
 )
 
 // Result 是 purge.object 的结果。
@@ -43,12 +45,15 @@ type Result struct {
 	Object        string   `json:"object"`
 	Kind          string   `json:"kind"`
 	Events        int64    `json:"events"`                   // 新墓碑化的事件条数
+	SourceEvents  []string `json:"source_events,omitempty"`  // 一并删除的来源事件 id（对象是来源事件时为空，对象本身即是）
 	BlobsRemoved  []string `json:"blobs_removed,omitempty"`  // 已删除的 blob 哈希
 	BlobsRetained []string `json:"blobs_retained,omitempty"` // 仍被其他材料引用而保留的 blob 哈希
 }
 
 type in struct {
 	Object string `json:"object"`
+	// WithSourceEvents 只用于事项：连同挂在它上面的来源事件一起删除（§6.15）。
+	WithSourceEvents bool `json:"with_source_events,omitempty"`
 }
 
 func invalid(why string) error {
@@ -81,20 +86,27 @@ func Register(x *command.Executor, blobDir string) error {
 			if err != nil {
 				return nil, err
 			}
-			return apply(c, blobDir, v.Object)
+			return apply(c, blobDir, v)
 		},
 	})
 }
 
-func apply(c *command.Ctx, blobDir, id string) (any, error) {
+func apply(c *command.Ctx, blobDir string, v in) (any, error) {
+	id := v.Object
 	var (
-		kind string
-		refs []string
+		kind    string
+		refs    []string // 删除对象带走的 blob 引用（apa://blob/<hash>）
+		deleted []string // 一并删除的来源事件 id
 	)
 	_, err := items.Get(c.Tx, id)
 	switch {
 	case err == nil:
 		kind = KindItem
+		if v.WithSourceEvents {
+			if deleted, err = runner.EventsOfItem(c.Tx, id); err != nil {
+				return nil, err
+			}
+		}
 		if err := items.Purge(c.Tx, id); err != nil {
 			return nil, err
 		}
@@ -106,22 +118,50 @@ func apply(c *command.Ctx, blobDir, id string) (any, error) {
 			return nil, err
 		}
 	case isNotFound(err):
-		if refs, err = materials.Purge(c.Tx, id); err != nil {
+		if v.WithSourceEvents {
+			return nil, invalid("with_source_events only applies to an item")
+		}
+		if _, err := runner.Event(c.Tx, id); err == nil {
+			kind, deleted = KindSourceEvent, []string{id}
+		} else if !isNotFound(err) {
+			return nil, err
+		} else if refs, err = materials.Purge(c.Tx, id); err != nil {
 			if isNotFound(err) {
-				return nil, domain.NewError(domain.CodeNotFound, "object "+id+" is neither an item nor a material", "list items or materials and retry")
+				return nil, domain.NewError(domain.CodeNotFound, "object "+id+" is neither an item, a material nor a source event", "list items or materials and retry")
 			}
 			return nil, err
+		} else {
+			kind = KindMaterial
 		}
-		kind = KindMaterial
 	default:
 		return nil, err
 	}
 
-	n, err := eventlog.Tombstone(c.Tx, id)
+	// 来源事件：事件行、原文与指向它的判断记录都删，去重键留作墓碑；相关 Event 与其他对象一样墓碑化。
+	for _, ev := range deleted {
+		hs, err := runner.PurgeEvent(c.Tx, ev)
+		if err != nil {
+			return nil, err
+		}
+		for _, h := range hs {
+			refs = append(refs, blobs.Ref(h))
+		}
+		if _, err := record.DeleteBySubject(c.Tx, ev); err != nil {
+			return nil, err
+		}
+	}
+	tomb := append([]string{id}, deleted...) // 来源事件对象时 id 重复一次，墓碑化幂等
+
+	n, err := eventlog.Tombstone(c.Tx, tomb...)
 	if err != nil {
 		return nil, err
 	}
 	res := Result{Object: id, Kind: kind, Events: n}
+	slices.Sort(refs)
+	refs = slices.Compact(refs) // 几封事件可能取回同一个附件
+	if kind == KindItem {
+		res.SourceEvents = deleted
+	}
 	var drop []string
 	for _, ref := range refs {
 		h, err := blobs.ParseRef(ref)
@@ -129,6 +169,9 @@ func apply(c *command.Ctx, blobDir, id string) (any, error) {
 			return nil, err
 		}
 		used, err := materials.BlobReferenced(c.Tx, ref)
+		if err == nil && !used {
+			used, err = runner.BlobReferenced(c.Tx, h)
+		}
 		if err != nil {
 			return nil, err
 		}

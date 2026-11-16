@@ -267,21 +267,23 @@ const (
 
 // Source 是来源登记。SourceKind 是能力包规则匹配用的语义类型，内核只当字符串比较。
 type Source struct {
-	ID              string          `json:"id"`
-	Name            string          `json:"name"` // 显示名（§9.1）：登记时给定或由内核按 source_type 生成，实例内不重名
-	Type            SourceType      `json:"type"`
-	SourceKind      string          `json:"source_type,omitempty"`
-	Command         string          `json:"command,omitempty"`
-	Schedule        string          `json:"schedule,omitempty"`
-	Timeout         int             `json:"timeout,omitempty"`
-	CredentialsPath string          `json:"credentials_path,omitempty"`
-	DedupeDomain    string          `json:"dedupe_domain,omitempty"`
-	DefaultProject  string          `json:"default_project"`
-	Outbound        Outbound        `json:"outbound"`
-	Config          json.RawMessage `json:"config,omitempty"`
-	Cursor          string          `json:"cursor,omitempty"`
-	Enabled         bool            `json:"enabled"`
-	Stats           json.RawMessage `json:"stats,omitempty"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"` // 显示名（§9.1）：登记时给定或由内核按 source_type 生成，实例内不重名
+	Type            SourceType `json:"type"`
+	SourceKind      string     `json:"source_type,omitempty"`
+	Command         string     `json:"command,omitempty"`
+	Schedule        string     `json:"schedule,omitempty"`
+	Timeout         int        `json:"timeout,omitempty"`
+	CredentialsPath string     `json:"credentials_path,omitempty"`
+	DedupeDomain    string     `json:"dedupe_domain,omitempty"`
+	DefaultProject  string     `json:"default_project"`
+	Outbound        Outbound   `json:"outbound"`
+	// ContentRetentionDays 是来源原文保留天数；nil 不清理（默认），只在 Web 设（§6.15）。
+	ContentRetentionDays *int            `json:"content_retention_days,omitempty"`
+	Config               json.RawMessage `json:"config,omitempty"`
+	Cursor               string          `json:"cursor,omitempty"`
+	Enabled              bool            `json:"enabled"`
+	Stats                json.RawMessage `json:"stats,omitempty"`
 }
 
 // Outbound 是来源内容可以送给模型端点的范围，按端点位置分别设置（§6.10、§14.14）。
