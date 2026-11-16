@@ -156,7 +156,7 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 	if !ok || w.Meta.Agent != "task" || w.Meta.Access != "read" {
 		t.Fatalf("write-brief must be a read-only task prompt: %+v", w.Meta)
 	}
-	if !strings.Contains(w.Body, "{item_id}") || !strings.Contains(w.Body, "{materials_path}") || !strings.Contains(w.Body, "按项目分节") {
+	if !strings.Contains(w.Body, "{item_id}") || !strings.Contains(w.Body, "{materials_path}") {
 		t.Fatalf("write-brief body: %s", w.Body)
 	}
 	// spec_schema 的分节键名必须写进提示词，否则运行者会自行发明键（progress/due/decisions），Web 简报页读 body 会显示空分节。
@@ -179,11 +179,11 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 			t.Fatalf("write-brief lacks %q: %s", k, w.Body)
 		}
 	}
-	if got := strings.Join(w.Meta.ResultFields, ","); got != "period,sections[].project,sections[].body" { // 内核按它判定代转 done（§8.4）
+	if got := strings.Join(w.Meta.ResultFields, ","); got != "period,sections[].body" { // 内核按它判定代转 done（§8.4）
 		t.Fatalf("write-brief result_fields: %q", got)
 	}
-	if !strings.Contains(w.Body, "spec.sections[].{project, body}") {
-		t.Fatalf("write-brief must spell out spec.sections[].{project, body}: %s", w.Body)
+	if !strings.Contains(w.Body, "project（或 title）") { // 节可以只有 title（附录 C.13）
+		t.Fatalf("write-brief must spell out project or title per section: %s", w.Body)
 	}
 	v, ok := p.Views["brief"]
 	if !ok || v.Kind != "brief" || len(v.List.Columns) == 0 || len(v.Card.Fields) == 0 {
