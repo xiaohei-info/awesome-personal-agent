@@ -1,0 +1,53 @@
+import type { Dict } from "../../app/i18n";
+import { common } from "../../app/strings";
+
+// 设置 › 存储：只读用量（与 GET /storage 同源）+ 每个来源的原文保留天数。
+const zh = {
+  ...common.zh,
+  title: "存储",
+  summary: (size: string) => `共约 ${size}`,
+  lede: "各部分占了多少空间，原文留多久。",
+  totals: "占用",
+  ledger: "记录文件",
+  blobs: "附件",
+  content: "来源原文",
+  sources: "各来源",
+  empty: "还没有登记来源",
+  source: "来源",
+  events: "事件数",
+  size: "原文大小",
+  oldest: "最早一条",
+  retention: "保留天数",
+  none: "不清理",
+  days: (name: string) => `${name} 保留天数`,
+  placeholder: "留空 = 不清理",
+  saveRow: (name: string) => `保存${name}保留天数`,
+  warn: "超期的原文会被清掉，无法恢复。",
+  bad: "保留天数须是 1 到 36500 的整数，或留空",
+  savedRow: "已保存",
+};
+const en: typeof zh = {
+  ...common.en,
+  title: "Storage",
+  summary: (size) => `About ${size} in all`,
+  lede: "How much space each part takes, and how long originals stay.",
+  totals: "Usage",
+  ledger: "Records file",
+  blobs: "Attachments",
+  content: "Source originals",
+  sources: "By source",
+  empty: "No sources registered",
+  source: "Source",
+  events: "Events",
+  size: "Original size",
+  oldest: "Oldest",
+  retention: "Keep for (days)",
+  none: "Never cleared",
+  days: (name) => `${name} keep days`,
+  placeholder: "Empty = never clear",
+  saveRow: (name) => `Save ${name} keep days`,
+  warn: "Originals past the limit are cleared and cannot be recovered.",
+  bad: "Keep days must be a whole number from 1 to 36500, or empty",
+  savedRow: "Saved",
+};
+export const strings: Dict<typeof zh> = { zh, en };
