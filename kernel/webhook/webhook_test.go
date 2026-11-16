@@ -130,7 +130,12 @@ func newEnv(t *testing.T, mut func(*Options)) *env {
 			t.Fatal(err)
 		}
 	}
-	rn, err := runner.New(runner.Options{Store: st, Exec: e.x, Layout: lay, Now: e.Now,
+	o := Options{Store: st, Exec: e.x, Packs: e.pk, Auth: e.auth, Secrets: e.keys, Now: e.Now, ScriptRoot: e.dir,
+		OnError: func(err error) { e.errs <- err }}
+	if mut != nil {
+		mut(&o)
+	}
+	rn, err := runner.New(runner.Options{Store: st, Exec: e.x, Layout: lay, Now: e.Now, MaxEvent: o.MaxEvent,
 		OnError: func(err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
@@ -144,11 +149,6 @@ func newEnv(t *testing.T, mut func(*Options)) *env {
 	}
 	if err := e.in.Register(e.x); err != nil {
 		t.Fatal(err)
-	}
-	o := Options{Store: st, Exec: e.x, Packs: e.pk, Auth: e.auth, Secrets: e.keys, Now: e.Now, ScriptRoot: e.dir,
-		OnError: func(err error) { e.errs <- err }}
-	if mut != nil {
-		mut(&o)
 	}
 	e.svc, err = New(o)
 	if err != nil {
@@ -767,5 +767,99 @@ func TestConcurrentReceiveLeavesNothingUnprocessed(t *testing.T) {
 	}
 	if got := len(e.ingests()); got != n {
 		t.Fatalf("ingests = %d", got)
+	}
+}
+
+func (e *env) rejects(src string) (out []runner.Reject) {
+	e.t.Helper()
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { out, err = runner.Rejects(tx, src); return }); err != nil {
+		e.t.Fatal(err)
+	}
+	return
+}
+
+func (e *env) original(ev domain.SourceEvent) (p runner.PartData, err error) {
+	e.t.Helper()
+	err = e.st.View(bg, func(tx *store.Tx) (err error) { p, err = runner.ReadPart(tx, ev.ID, runner.PartOriginal); return })
+	return
+}
+
+// ACT-WHK-01：字段映射的 webhook 把请求体原样存成这条事件原文的 original 部分，媒体类型取请求的 Content-Type；
+// 映射没写 detail 就没有正文；接收记录过了 30 天保留期被清掉，原文还在。
+func TestMappedPayloadIsKeptAsOriginalPastIngestRetention(t *testing.T) {
+	e := newEnv(t, nil)
+	e.register("src_hook", m{"scheme": "hmac", "mappings": []string{"issues"}})
+	body := issueBody(7, "opened")
+	status(t, e.post("src_hook", "d-1", body, map[string]string{"Content-Type": "application/json; charset=utf-8"}), 200)
+
+	evs := e.events("src_hook")
+	if len(evs) != 1 || evs[0].Detail != "" {
+		t.Fatalf("events: %+v", evs)
+	}
+	o, err := e.original(evs[0])
+	if err != nil || string(o.Content) != body || o.MediaType != "application/json; charset=utf-8" || o.Bytes != int64(len(body)) {
+		t.Fatalf("original: %+v %v", o, err)
+	}
+	e.now = e.now.Add(31 * 24 * time.Hour)
+	if err := e.svc.Expire(bg); err != nil {
+		t.Fatal(err)
+	}
+	if g := e.ingests()[0]; !g.Purged || len(g.Body) != 0 {
+		t.Fatalf("ingest body should be purged: %+v", g)
+	}
+	if o, err := e.original(evs[0]); err != nil || string(o.Content) != body {
+		t.Fatalf("original must outlive the ingest retention: %v", err)
+	}
+}
+
+// ACT-WHK-02：请求体上限默认 1 MB（此前写死的值），超限回 413 不落盘；在上限内的体照常处理。
+func TestWebhookBodyLimitDefaultsToOneMB(t *testing.T) {
+	e := newEnv(t, nil)
+	e.register("src_hook", m{"scheme": "hmac", "mappings": []string{"issues"}})
+	pad := func(n int) string {
+		return string(js(m{"action": "opened", "issue": m{"number": 1, "title": "t", "pad": strings.Repeat("x", n)}}))
+	}
+	status(t, e.post("src_hook", "d-big", pad(1<<20), nil), 413)
+	status(t, e.post("src_hook", "d-ok", pad(1<<20-200), nil), 200)
+	if gs := e.ingests(); len(gs) != 1 || gs[0].State != StateProcessed {
+		t.Fatalf("ingests: %+v", gs)
+	}
+}
+
+// 请求体合法但作为原文超过单条事件上限：整条拒收并留痕（event_too_large），接收记录记 failed，不留半条事件。
+func TestMappedPayloadOverEventLimitIsRejectedWhole(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.MaxBody, o.MaxEvent = 8<<10, 1<<10 })
+	e.register("src_hook", m{"scheme": "hmac", "mappings": []string{"issues"}})
+	body := string(js(m{"action": "opened", "issue": m{"number": 1, "title": "t", "pad": strings.Repeat("x", 2000)}}))
+	status(t, e.post("src_hook", "d-1", body, nil), 200)
+	g := e.ingests()[0]
+	if g.State != StateFailed || !strings.Contains(g.Reason, "event_too_large") || len(e.events("src_hook")) != 0 {
+		t.Fatalf("ingest=%+v events=%d", g, len(e.events("src_hook")))
+	}
+	if rj := e.rejects("src_hook"); len(rj) != 1 || !strings.HasPrefix(rj[0].Reason, "event_too_large") {
+		t.Fatalf("rejects: %+v", rj)
+	}
+}
+
+// 转换脚本一次出多条事件，其中一条超过上限：这条整行拒收留痕，其余照常入账，接收记录仍是 processed。
+func TestTransformEventOverLimitRejectedOthersIngested(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.MaxEvent = 1 << 10 })
+	cmd := e.script("xform.sh", `cat >/dev/null
+echo '{"id":"x-1","type":"t","subject":"ok","occurred_at":"2026-03-01T00:00:00Z","original":{"media_type":"text/plain","text":"`+strings.Repeat("y", 2000)+`"}}'
+echo '{"id":"x-2","type":"t","subject":"fine","occurred_at":"2026-03-01T00:00:00Z","original":{"media_type":"text/plain","text":"small"}}'
+`)
+	e.register("src_hook", m{"scheme": "hmac", "transform": m{"command": cmd}})
+	status(t, e.post("src_hook", "d-1", "x", nil), 200)
+	e.waitRun()
+	e.svc.Wait()
+	e.noErr()
+	evs := e.events("src_hook")
+	rj := e.rejects("src_hook")
+	if g := e.ingests()[0]; g.State != StateProcessed || g.Events != 1 || len(evs) != 1 || evs[0].Subject != "fine" ||
+		len(rj) != 1 || rj[0].Line != 1 || !strings.HasPrefix(rj[0].Reason, "event_too_large") {
+		t.Fatalf("ingest=%+v events=%+v rejects=%+v", e.ingests()[0], evs, rj)
+	}
+	if o, err := e.original(evs[0]); err != nil || string(o.Content) != "small" {
+		t.Fatalf("script-given original: %v", err)
 	}
 }

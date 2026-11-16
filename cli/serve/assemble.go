@@ -262,12 +262,12 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: att}}); err != nil {
 		return nil, err
 	}
-	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner"), SenderCeiling: senderCeiling, Owner: owner}); err != nil {
+	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, MaxEvent: cfg.MaxSourceEvent, OnError: logErr("source runner"), SenderCeiling: senderCeiling, Owner: owner}); err != nil {
 		return nil, err
 	}
 	a := auth.New(nil)
 	if k.wh, err = webhook.New(webhook.Options{Store: st, Exec: x, Packs: ld, Auth: a, Secrets: webhook.KeyFiles{Dir: l.WebhookKeys, Auth: a},
-		Retention: cfg.IngestRetention, ScriptRoot: l.Sources, OnError: logErr("webhook")}); err != nil {
+		MaxBody: cfg.MaxWebhookBody, MaxEvent: cfg.MaxSourceEvent, Retention: cfg.IngestRetention, ScriptRoot: l.Sources, OnError: logErr("webhook")}); err != nil {
 		return nil, err
 	}
 	if k.ret, err = retention.New(retention.Options{Store: st, Ingest: k.wh, Layout: l, RunRetention: cfg.RunRetention, JudgmentRetention: cfg.JudgmentRetention, KeepJudgments: cfg.JudgmentRetention == 0}); err != nil {

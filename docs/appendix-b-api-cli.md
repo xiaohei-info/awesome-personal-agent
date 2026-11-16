@@ -394,7 +394,7 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 - 登录被限速或锁定时 `POST /auth/login` 返回 429，`code` 为 `login_locked`，带 `Retry-After`。
 - 本人暂停了模型时，需要模型的本人操作（积压的影子打分与放开重判）返回 409，退出码 6，`code` 为 `models_paused`，`next` 提示到"设置 › 模型"恢复（主文档 §8.7）。
 - 【规划中（v0.2.0）】退出码 23 新增原因 `grant_required`：命令只接受授权单（`import.apply`），调用没有带单或只带了本人原话；`import_source_mismatch`、`import_limit_exceeded`：授权单的来源名不符，或累计条数会超过上限。
-- 【规划中（v0.2.0）】来源事件超过单条上限被拒收时，"被拒收的事件"里的原因是 `event_too_large`，带实际字节数。
+- 来源事件超过单条上限被拒收时，"被拒收的事件"里的原因是 `event_too_large`，带实际字节数。
 
 ## B.4 标准事件类型
 

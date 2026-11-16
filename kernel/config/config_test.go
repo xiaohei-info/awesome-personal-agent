@@ -87,6 +87,20 @@ func TestLoadDefaultsWhenMissing(t *testing.T) {
 	}
 }
 
+// §16.2：max_source_event_mb 默认 16（1 到 64），max_webhook_body_mb 默认 1（1 到 32，等于此前写死的值）；旧配置文件不必改。
+func TestRawLimitDefaultsAndBounds(t *testing.T) {
+	d := Default()
+	if d.MaxSourceEvent != 16<<20 || d.MaxWebhookBody != 1<<20 || d.MaxSourceEvent >= d.MaxSourceOutput {
+		t.Fatalf("defaults: %d %d %d", d.MaxSourceEvent, d.MaxWebhookBody, d.MaxSourceOutput)
+	}
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	os.WriteFile(p, []byte("max_source_event_mb: 64\nmax_source_output_mb: 65\nmax_webhook_body_mb: 32\n"), 0o600)
+	c, err := Load(p)
+	if err != nil || c.MaxSourceEvent != 64<<20 || c.MaxWebhookBody != 32<<20 {
+		t.Fatalf("upper bounds: %+v %v", c, err)
+	}
+}
+
 func TestLoadV020Keys(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	os.WriteFile(p, []byte("backlog_release_per_day: 0\njudgment_retention_days: 0\ndelegation_stall_after: 6h\n"), 0o600)
@@ -107,6 +121,8 @@ listen: "0.0.0.0:9000"   # inline
 max_subprocesses: 8
 max_short_subprocesses: 1
 max_source_output_mb: 5
+max_source_event_mb: 4
+max_webhook_body_mb: 2
 ingest_retention_days: 7
 run_retention_days: 3
 delivery_unclaimed_after: 20s
@@ -119,7 +135,7 @@ unjudged_rejudge_days: 0
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Listen != "0.0.0.0:9000" || c.MaxSubprocesses != 8 || c.MaxShortSubprocesses != 1 || c.MaxSourceOutput != 5<<20 ||
+	if c.Listen != "0.0.0.0:9000" || c.MaxSubprocesses != 8 || c.MaxShortSubprocesses != 1 || c.MaxSourceOutput != 5<<20 || c.MaxSourceEvent != 4<<20 || c.MaxWebhookBody != 2<<20 ||
 		c.IngestRetention != 7*24*time.Hour || c.RunRetention != 3*24*time.Hour ||
 		c.DeliveryUnclaimedAfter != 20*time.Second || !reflect.DeepEqual(c.DeliveryBackoff, []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}) ||
 		c.ChainDepthThreshold != 2 || c.GuidelineDraftExecutor != "wk.cli" || c.UnjudgedRejudgeWindow != 0 {
@@ -166,6 +182,12 @@ func TestLoadRejectsBadConfig(t *testing.T) {
 		"negative retain":  "judgment_retention_days: -1\n",
 		"stall no unit":    "delegation_stall_after: 24\n",
 		"zero stall":       "delegation_stall_after: 0s\n",
+		"event zero":       "max_source_event_mb: 0\n",
+		"event over 64":    "max_source_event_mb: 65\nmax_source_output_mb: 128\n",
+		"event ge output":  "max_source_event_mb: 8\nmax_source_output_mb: 8\n",
+		"default ge small": "max_source_output_mb: 16\n", // 事件上限默认 16，必须小于输出上限
+		"webhook zero":     "max_webhook_body_mb: 0\n",
+		"webhook over 32":  "max_webhook_body_mb: 33\n",
 	}
 	for name, body := range cases {
 		p := filepath.Join(t.TempDir(), "config.yaml")

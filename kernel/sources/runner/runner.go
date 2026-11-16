@@ -123,6 +123,11 @@ CREATE TABLE sources_runner_metric (
 ) WITHOUT ROWID;
 ALTER TABLE sources_runner_event ADD COLUMN content_bytes INTEGER;
 ALTER TABLE sources_runner_event ADD COLUMN content_state TEXT NOT NULL DEFAULT 'legacy' CHECK (content_state IN ('full', 'partial', 'legacy', 'purged'));`,
+}, {
+	// 账本结构版本 8（§6.10，GT-389）：来源程序自报 partial 时缺哪一部分与原因（JSON 数组 [{part, reason}]）。
+	// 上一步的清单只有完整程度，放不下 content.missing；空串即没有自报缺失。只增列，已有事件为空串。
+	Version: 7, Ledger: 8, Name: "ledger-v8-content-missing",
+	SQL: `ALTER TABLE sources_runner_event ADD COLUMN content_missing TEXT NOT NULL DEFAULT '';`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。
@@ -170,6 +175,8 @@ type Options struct {
 	OnError func(error)
 	// SenderCeiling 是来源接入声明给这类事件的发件人上限（§9.1），由装配方按声明给出；nil 表示不封顶。
 	SenderCeiling func(src domain.Source, eventType string) SenderCeiling
+	// MaxEvent 是单条来源事件原文的上限（字节，max_source_event_mb）；0 取默认 16 MB。
+	MaxEvent int
 	// Owner 是本人的 principal：来源恢复时以本人登记该来源为依据，代本人结束 runner 自己建的 needs_input 事项。
 	Owner string
 }
@@ -217,6 +224,13 @@ func New(o Options) (*Runner, error) {
 		o.Now = clock.Now
 	}
 	return &Runner{o: o}, nil
+}
+
+func (r *Runner) maxEvent() int {
+	if r.o.MaxEvent > 0 {
+		return r.o.MaxEvent
+	}
+	return DefaultMaxEvent
 }
 
 // Attach 接上外呼调用器（它的 OnResult 又要指向 Handle，所以不能在 New 里给）。
@@ -487,7 +501,7 @@ func (r *Runner) Handle(ctx context.Context, res proc.Result) error {
 	in.Class, in.Reason = classify(run, res.Reason)
 	in.Timeout = run.State == domain.RunTimeout
 	if in.Class == clsOK {
-		p := parse(res.Stdout)
+		p := parse(res.Stdout, r.maxEvent())
 		in.Events, in.Rejects = p.events, p.rejects
 		switch {
 		case res.Overflow: // 末行不是真正的末行，哪怕它长得像游标也不认
@@ -623,11 +637,8 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i, rj := range in.Rejects {
-		if _, err := tx.Exec(`INSERT INTO sources_runner_reject (source_id, run_id, line, reason, raw, at) VALUES (?,?,?,?,?,?)`,
-			in.SourceID, in.RunID, rj.Line, rj.Reason, rj.Raw, in.FinishedAt.UnixNano()); err != nil {
-			return nil, fmt.Errorf("reject %d: %w", i, err)
-		}
+	if err := writeRejects(tx, in.SourceID, in.RunID, in.FinishedAt, in.Rejects); err != nil {
+		return nil, err
 	}
 	for _, ev := range in.Events {
 		if err := insertEvent(tx, src, in.RunID, r.capSender(src, ev)); err != nil {
@@ -748,10 +759,6 @@ func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent) 
 	if err != nil {
 		return err
 	}
-	msgs, err := jsonOrEmpty(ev.Items, len(ev.Items) == 0)
-	if err != nil {
-		return err
-	}
 	series := ""
 	if len(ev.CorrelationKeys) > 0 {
 		series = ev.CorrelationKeys[0]
@@ -760,13 +767,22 @@ func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent) 
 	if err != nil {
 		return err
 	}
+	// 原文各部分与事件行同一事务落盘；行里的 detail 只是正文的预览，messages 列不再写（新事件的消息在原文表，读取先看原文表）。
+	id := "sev_" + hex.EncodeToString(rnd[:])
 	n, err := tx.Exec(`INSERT OR IGNORE INTO sources_runner_event
 		(dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at, correlation_keys, sender, sender_verified,
-		 metrics, merge_key, messages, prev_metrics)
+		 metrics, merge_key, prev_metrics, content_state)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		key.Domain, key.EventID, "sev_"+hex.EncodeToString(rnd[:]), src.ID, runID, ev.Type, ev.Subject, ev.Summary, ev.Detail,
-		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified, metrics, ev.MergeKey, msgs, prev)
-	if err != nil || n == 0 { // 重复事件被忽略：它不是这个序列的新样本，不动上一次取值
+		key.Domain, key.EventID, id, src.ID, runID, ev.Type, ev.Subject, ev.Summary, previewOf(ev.Detail),
+		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified, metrics, ev.MergeKey, prev, StateFull)
+	if err != nil || n == 0 { // 重复事件被忽略：它不是这个序列的新样本，不动上一次取值，也不改写已存的原文
+		return err
+	}
+	size, state, missing, err := storeParts(tx, id, ev)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE sources_runner_event SET content_bytes = ?, content_state = ?, content_missing = ? WHERE id = ?`, size, state, missing, id); err != nil {
 		return err
 	}
 	for name, v := range ev.Metrics {
@@ -805,6 +821,16 @@ func previousMetrics(tx *store.Tx, source, series string, cur map[string]float64
 	return jsonOrEmpty(prev, len(prev) == 0)
 }
 
+func writeRejects(tx *store.Tx, source, run string, at time.Time, rejects []Reject) error {
+	for i, rj := range rejects {
+		if _, err := tx.Exec(`INSERT INTO sources_runner_reject (source_id, run_id, line, reason, raw, at) VALUES (?,?,?,?,?,?)`,
+			source, run, rj.Line, rj.Reason, rj.Raw, at.UnixNano()); err != nil {
+			return fmt.Errorf("reject %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
 func (r *Runner) failed(c *command.Ctx, src domain.Source, in resultIn, kind string) error {
 	payload, _ := json.Marshal(map[string]any{"source_id": src.ID, "run_id": in.RunID, "kind": kind, "reason": in.Reason})
 	_, err := c.Emit(domain.Event{Type: domain.EvSourceFailed, Object: src.ID, Payload: payload})
@@ -821,9 +847,14 @@ func (r *Runner) healthAlert(c *command.Ctx, src domain.Source, in resultIn) err
 
 // ---- 读取（来源页与入站流水线使用；只读） ----
 
-const eventCols = `id, source_id, dedupe_domain, event_id, type, subject, summary, detail, link, occurred_at,
+// 正文与聚合消息先读原文表、没有再回退旧列（升级前落盘的事件），所以内核内部读到的 Detail 是全文，事件行里的预览不外露。
+const eventCols = `id, source_id, dedupe_domain, event_id, type, subject, summary,
+	COALESCE((SELECT CAST(content AS TEXT) FROM sources_runner_event_part p WHERE p.event_id = sources_runner_event.id AND p.part = 'body'), detail),
+	link, occurred_at,
 	correlation_keys, sender, sender_verified, disposition, item, attach_state, unjudged_reason, rejudges,
-	metrics, merge_key, items, judgment, messages, prev_metrics`
+	metrics, merge_key, items, judgment,
+	COALESCE((SELECT CAST(content AS TEXT) FROM sources_runner_event_part p WHERE p.event_id = sources_runner_event.id AND p.part = 'messages'), messages),
+	prev_metrics`
 
 // Events 按落盘顺序返回某来源的来源事件。
 func Events(tx *store.Tx, sourceID string) ([]domain.SourceEvent, error) {
