@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -362,13 +363,14 @@ func TestBadCursorIsConfigFailure(t *testing.T) {
 	}
 }
 
-func sample(t *testing.T, name string) map[string]map[string]any {
+// sample 拉取一份录制样本；样本里的 @REMOTE@ 换成 remote（正文引用的远程资源地址）。
+func sample(t *testing.T, name, remote string) map[string]map[string]any {
 	t.Helper()
 	b, err := os.ReadFile("testdata/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := call(t, in(serve(t, 200, string(b)).URL, "", nil))
+	r := call(t, in(serve(t, 200, strings.ReplaceAll(string(b), "@REMOTE@", remote)).URL, "", nil))
 	if r.code != 0 {
 		t.Fatalf("code=%d", r.code)
 	}
@@ -381,11 +383,22 @@ func sample(t *testing.T, name string) map[string]map[string]any {
 
 // 全文字段转文本进 detail（不截断，链接保留，脚本丢弃）、HTML 原样进 original、标题与作者不截、附带文件进 attachments。
 func TestLongEntryKeepsFullTextOriginalTitleAuthorAndEnclosures(t *testing.T) {
-	e := sample(t, "rss-long.xml")["rss-long-1"]
+	var hits atomic.Int32
+	remote := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	defer remote.Close()
+	e := sample(t, "rss-long.xml", remote.URL)["rss-long-1"]
+	if hits.Load() != 0 {
+		t.Errorf("转换不能取远程资源，实际请求 %d 次", hits.Load())
+	}
 	detail := e["detail"].(string)
 	if len([]rune(detail)) <= maxSummary*10 || !strings.Contains(detail, "THE-END-MARKER") || !strings.Contains(detail, "(https://example.com/p/059)") ||
 		strings.Contains(detail, "alert(1)") || strings.Contains(detail, "<p>") {
 		t.Errorf("detail 应是未截断的转换后文本: %d 字符", len([]rune(detail)))
+	}
+	for _, want := range []string{"| Name  | Qty |", "|-------|-----|", "| apple | 3   |", "(" + remote.URL + "/pixel.png)", "(" + remote.URL + "/more)"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail 缺 %q", want)
+		}
 	}
 	o := e["original"].(map[string]any)
 	if o["media_type"] != "text/html" || !strings.Contains(o["text"].(string), "<script>alert(1)</script>") || !strings.Contains(o["text"].(string), "<p>THE-END-MARKER</p>") {
@@ -399,8 +412,8 @@ func TestLongEntryKeepsFullTextOriginalTitleAuthorAndEnclosures(t *testing.T) {
 	}
 	att := e["attachments"].([]any)
 	a0, a1 := att[0].(map[string]any), att[1].(map[string]any)
-	if len(att) != 2 || a0["name"] != "report.pdf" || a0["media_type"] != "application/pdf" || a0["size"] != float64(123456) || a0["ref"] != nil ||
-		a1["name"] != "audio.mp3" || a1["size"] != float64(0) {
+	if len(att) != 2 || a0["name"] != "https://example.com/files/report.pdf" || a0["media_type"] != "application/pdf" || a0["size"] != float64(123456) || a0["ref"] != nil ||
+		a1["name"] != "https://example.com/files/audio.mp3" || a1["size"] != float64(0) {
 		t.Errorf("attachments: %v", att)
 	}
 	if e["content"] != nil {
@@ -410,7 +423,7 @@ func TestLongEntryKeepsFullTextOriginalTitleAuthorAndEnclosures(t *testing.T) {
 
 // 没有全文字段时取描述；订阅源只给摘要是对方的限制，不算 partial。
 func TestSummaryOnlyFeedUsesDescriptionAndIsNotPartial(t *testing.T) {
-	e := sample(t, "rss-long.xml")["rss-summary-1"]
+	e := sample(t, "rss-long.xml", "http://remote.invalid")["rss-summary-1"]
 	if e["detail"] != "Only a **teaser** here." {
 		t.Errorf("detail: %q", e["detail"])
 	}
@@ -424,7 +437,7 @@ func TestSummaryOnlyFeedUsesDescriptionAndIsNotPartial(t *testing.T) {
 
 // HTML 转换失败：detail 留空、original 照常保存、以 partial 自报 body；事件仍然入账。
 func TestConvertFailureLeavesDetailEmptyKeepsOriginalAndDeclaresPartial(t *testing.T) {
-	e := sample(t, "rss-broken.xml")["rss-broken-1"]
+	e := sample(t, "rss-broken.xml", "")["rss-broken-1"]
 	if e["detail"] != nil {
 		t.Errorf("detail 应为空: %v", e["detail"])
 	}
@@ -449,7 +462,49 @@ func TestAtomEnclosureAndPlainTextContent(t *testing.T) {
 	}
 	att := e["attachments"].([]any)
 	a0, a1 := att[0].(map[string]any), att[1].(map[string]any)
-	if len(att) != 2 || a0["name"] != "dl" || a0["media_type"] != "image/png" || a0["size"] != float64(9) || a1["name"] != "b.zip" || a1["size"] != float64(0) {
+	if len(att) != 2 || a0["name"] != "https://e.com/dl/" || a0["media_type"] != "image/png" || a0["size"] != float64(9) || a1["name"] != "https://e.com/a/b.zip?x=1" || a1["size"] != float64(0) {
 		t.Errorf("attachments: %v", att)
+	}
+}
+
+// 去掉截断后正文可以很大：多条大正文总量超过输出预算时，每次输出不超过预算（四分之三 × max_output_mb），
+// 游标停在已输出的最后一条，多轮后每条恰好输出一次。
+func TestOutputIsBatchedByBytesAndDrainsExactlyOnce(t *testing.T) {
+	var items []string
+	for i := 0; i < 10; i++ { // 10 × ~200 KiB（输出里 detail 与 original 各一份），预算 1 MiB × 3/4
+		body := strings.Repeat(fmt.Sprintf("&lt;p&gt;%d 正文&lt;/p&gt;", i), 20000)
+		items = append(items, fmt.Sprintf(`<item><guid>g%02d</guid><title>t</title><pubDate>Tue, 03 Jan 2023 15:%02d:05 +0000</pubDate><description>%s</description></item>`, i, i, body))
+	}
+	s := serve(t, 200, rss(items...))
+	got, c, rounds := map[string]int{}, "", 0
+	for ; rounds < 30; rounds++ {
+		r := call(t, in(s.URL, c, map[string]any{"max_output_mb": 1}))
+		if r.code != 0 {
+			t.Fatalf("round %d code=%d", rounds, r.code)
+		}
+		if len(r.events) == 0 || len(r.stdout) > 1<<20*3/4+len(r.events[0]["detail"].(string))*3 {
+			t.Fatalf("round %d: %d 个事件 %d 字节，应有进展且不超过预算", rounds, len(r.events), len(r.stdout))
+		}
+		for _, id := range ids(r) {
+			got[id]++
+		}
+		c = r.cursor
+		if !decodeCursor(t, c).More {
+			break
+		}
+	}
+	if rounds < 2 {
+		t.Fatalf("总量超过预算应分多轮，实际 %d 轮", rounds+1)
+	}
+	if len(got) != 10 {
+		t.Fatalf("应取全: %v", got)
+	}
+	for id, n := range got {
+		if n != 1 {
+			t.Fatalf("%s 输出 %d 次", id, n)
+		}
+	}
+	if cc := decodeCursor(t, c); cc.ID != "g09" {
+		t.Fatalf("cursor=%s", c)
 	}
 }

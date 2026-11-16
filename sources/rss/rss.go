@@ -25,7 +25,6 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,6 +55,8 @@ const (
 	maxSummary   = 400 // 只有 summary 截短；标题、作者与正文不截（附录 D.8）
 	maxBody      = 10 << 20
 	fetchTimeout = 30 * time.Second
+	// defaultOutputMB 是内核 max_source_output_mb 的缺省值（设计 §16.2）。
+	defaultOutputMB = 32
 )
 
 // Input 是 stdin 的 Source 契约输入；window 本程序不用，游标已足够。
@@ -64,6 +65,9 @@ type Input struct {
 	Config struct {
 		URL      string `json:"url"`
 		MaxItems int    `json:"max_items"`
+		// MaxOutputMB 与内核的 max_source_output_mb 取同一个值（默认 32，内核不把实际值告诉来源程序）：
+		// 一次输出累计到它的四分之三就停下，余下的下次续读（设计 §9.2）。
+		MaxOutputMB int `json:"max_output_mb"`
 	} `json:"config"`
 }
 
@@ -166,20 +170,37 @@ func pull(ctx context.Context, stdin io.Reader) ([]byte, error) {
 	}
 
 	picked, next := selectEntries(entries, cur, max)
+	outMB := in.Config.MaxOutputMB
+	if outMB <= 0 {
+		outMB = defaultOutputMB
+	}
+	batch := content.NewBatcher(outMB)
 	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	for _, e := range picked {
+	for i, e := range picked {
+		var line bytes.Buffer
+		enc := json.NewEncoder(&line)
+		enc.SetEscapeHTML(false)
 		if err := enc.Encode(e.event); err != nil {
 			return nil, fail(ExitTransient, "编码事件失败: %v", err)
 		}
+		if !batch.Add(line.Len()) {
+			// 放不下：游标停在已输出的最后一条新条目，下次只往后续读（不重发重叠窗口）。
+			next = cursor{T: cur.T, ID: cur.ID, More: true}
+			for _, o := range picked[:i] {
+				if o.dated && cur.before(o) {
+					next.T, next.ID = o.at, o.ID
+				}
+			}
+			break
+		}
+		b.Write(line.Bytes())
 	}
 	c, err := json.Marshal(next)
 	if err != nil {
 		return nil, fail(ExitTransient, "编码游标失败: %v", err)
 	}
-	if err := enc.Encode(map[string]string{"cursor": string(c)}); err != nil {
-		return nil, fail(ExitTransient, "编码游标失败: %v", err)
-	}
+	cl, _ := json.Marshal(map[string]string{"cursor": string(c)})
+	b.Write(append(cl, '\n'))
 	return b.Bytes(), nil
 }
 
@@ -398,23 +419,17 @@ func declaresEncoding(b []byte) bool {
 	return bytes.HasPrefix(b, []byte("<?xml")) && end > 0 && bytes.Contains(b[:end], []byte("encoding"))
 }
 
-// appendAttachment 登记订阅条目的附带文件：名取地址路径的末段（没有就用地址），大小未知或不合法记 0。
+// appendAttachment 登记订阅条目的附带文件：清单里只有 name 能承载地址，所以 name 就是完整地址（没有 ref，不支持取回）；大小未知或不合法记 0。
 func appendAttachment(atts []attachment, rawURL, mediaType, length string) []attachment {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return atts
 	}
-	name := rawURL
-	if u, err := url.Parse(rawURL); err == nil {
-		if b := path.Base(u.Path); b != "." && b != "/" {
-			name = b
-		}
-	}
 	size, err := strconv.ParseInt(strings.TrimSpace(length), 10, 64)
 	if err != nil || size < 0 {
 		size = 0
 	}
-	return append(atts, attachment{Name: name, MediaType: strings.TrimSpace(mediaType), Size: size})
+	return append(atts, attachment{Name: rawURL, MediaType: strings.TrimSpace(mediaType), Size: size})
 }
 
 // toText 把条目里的一段正文变成文本：Atom 声明 type=text 的原样返回，其余按 HTML 转换（附录 D.8）。
