@@ -1,6 +1,7 @@
 // Package retention 按保留期清理运行数据（solution-design §6.15、§16.2）：
 // Ingest 请求体过期只留元数据（默认 30 天），运行目录过期整个删除（默认 14 天）。
 // 判断记录过保留期（默认 180 天）整条删除，命令 Event 里的结论留着，`apa why` 只显示结论（§6.16）。
+// 来源原文按来源的 content_retention_days 清除（content.go，默认不清理）。
 // 账本事实、Event 和 Run 记录不清理；在途（queued、running）运行的目录不动。
 // 本包只删文件系统里的运行目录；Ingest 的清理由 webhook 模块自己的命令执行，不直写其数据。
 package retention
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
@@ -30,6 +32,8 @@ type Options struct {
 	Store  *store.Store
 	Ingest IngestExpirer
 	Layout config.Layout
+	// Exec 执行来源原文清除命令（Register 登记的 retention.purge_content）。
+	Exec *command.Executor
 	// RunRetention 是运行目录保留期，默认 14 天（config.Default）。
 	RunRetention time.Duration
 	// JudgmentRetention 是判断记录保留期，默认 180 天（config.Default）。
@@ -43,8 +47,8 @@ type Options struct {
 type Service struct{ o Options }
 
 func New(o Options) (*Service, error) {
-	if o.Store == nil || o.Ingest == nil || o.Layout.Runs == "" {
-		return nil, errors.New("retention: Store, Ingest and Layout are required")
+	if o.Store == nil || o.Ingest == nil || o.Exec == nil || o.Layout.Runs == "" {
+		return nil, errors.New("retention: Store, Ingest, Exec and Layout are required")
 	}
 	if o.RunRetention <= 0 {
 		o.RunRetention = config.Default().RunRetention
@@ -58,9 +62,9 @@ func New(o Options) (*Service, error) {
 	return &Service{o: o}, nil
 }
 
-// Sweep 先清 Ingest 请求体，再清运行目录和判断记录；三者互不影响，错误合并返回。
+// Sweep 先清 Ingest 请求体，再清运行目录、判断记录和来源原文；互不影响，错误合并返回。
 func (s *Service) Sweep(ctx context.Context) error {
-	return errors.Join(s.o.Ingest.Expire(ctx), s.ExpireRunDirs(ctx), s.ExpireJudgments(ctx))
+	return errors.Join(s.o.Ingest.Expire(ctx), s.ExpireRunDirs(ctx), s.ExpireJudgments(ctx), s.ExpireContent(ctx))
 }
 
 // ExpireJudgments 删除早于保留期的判断记录，返回前不动 Event 与事项。

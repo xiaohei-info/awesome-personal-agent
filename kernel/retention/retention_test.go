@@ -8,12 +8,20 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/webhook"
 )
@@ -37,6 +45,7 @@ type env struct {
 	st  *store.Store
 	lay config.Layout
 	wh  *webhook.Service
+	x   *command.Executor
 	svc *Service
 	now time.Time
 }
@@ -44,7 +53,7 @@ type env struct {
 func newEnv(t *testing.T, ingestKeep, runKeep time.Duration) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{proc.Module, webhook.Module} {
+	for _, m := range []store.Module{proc.Module, webhook.Module, eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, registry.Module, runner.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -59,11 +68,12 @@ func newEnv(t *testing.T, ingestKeep, runKeep time.Duration) *env {
 		t.Fatal(err)
 	}
 	now := func() time.Time { return e.now }
-	if e.wh, err = webhook.New(webhook.Options{Store: st, Exec: command.New(st, now), Packs: noPacks{}, Auth: auth.New(now),
+	e.x = command.New(st, now)
+	if e.wh, err = webhook.New(webhook.Options{Store: st, Exec: e.x, Packs: noPacks{}, Auth: auth.New(now),
 		Secrets: noSecrets{}, Now: now, Retention: ingestKeep}); err != nil {
 		t.Fatal(err)
 	}
-	if e.svc, err = New(Options{Store: st, Ingest: e.wh, Layout: e.lay, RunRetention: runKeep, Now: now}); err != nil {
+	if e.svc, err = New(Options{Store: st, Ingest: e.wh, Layout: e.lay, Exec: e.x, RunRetention: runKeep, Now: now}); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -253,7 +263,7 @@ func TestSweepExpiresJudgmentsByRetention(t *testing.T) {
 	if got := e.judgments(); len(got) != 2 || got[0] != "edge" || got[1] != "new" {
 		t.Fatalf("default retention (180d) kept %v", got)
 	}
-	short, err := New(Options{Store: e.st, Ingest: e.wh, Layout: e.lay, JudgmentRetention: 24 * time.Hour, Now: func() time.Time { return t0 }})
+	short, err := New(Options{Store: e.st, Ingest: e.wh, Layout: e.lay, Exec: e.x, JudgmentRetention: 24 * time.Hour, Now: func() time.Time { return t0 }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +280,7 @@ func TestSweepExpiresJudgmentsByRetention(t *testing.T) {
 func TestKeepJudgmentsDisablesExpiry(t *testing.T) {
 	e := newEnv(t, 30*24*time.Hour, 14*24*time.Hour)
 	e.putJudgment("ancient", t0.Add(-1000*24*time.Hour))
-	keep, err := New(Options{Store: e.st, Ingest: e.wh, Layout: e.lay, KeepJudgments: true, Now: func() time.Time { return t0 }})
+	keep, err := New(Options{Store: e.st, Ingest: e.wh, Layout: e.lay, Exec: e.x, KeepJudgments: true, Now: func() time.Time { return t0 }})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -31,13 +31,14 @@ import (
 
 // 本模块的命令名。
 const (
-	CmdRegister     = "source.register"        // pull、webhook；delegate 可用
-	CmdUpdate       = "source.update"          // pull、webhook
-	CmdRegisterExec = "source.register_script" // script，只 Web
-	CmdUpdateExec   = "source.update_script"   // script，只 Web
-	CmdSetEnabled   = "source.set_enabled"     // 任意类型启停
-	CmdSetOutbound  = "source.set_outbound"    // 外发范围，只 Web（§14.14）
-	CmdRename       = "source.rename"          // 显示名；空名表示改回内核生成的名字
+	CmdRegister     = "source.register"              // pull、webhook；delegate 可用
+	CmdUpdate       = "source.update"                // pull、webhook
+	CmdRegisterExec = "source.register_script"       // script，只 Web
+	CmdUpdateExec   = "source.update_script"         // script，只 Web
+	CmdSetEnabled   = "source.set_enabled"           // 任意类型启停
+	CmdSetOutbound  = "source.set_outbound"          // 外发范围，只 Web（§14.14）
+	CmdRename       = "source.rename"                // 显示名；空名表示改回内核生成的名字
+	CmdSetRetention = "source.set_content_retention" // 原文保留天数，只 Web（§6.15）
 )
 
 // 事件类型是本模块内部的账本记录，不在对外稳定表里。
@@ -213,6 +214,13 @@ func Register(x *command.Executor, o Options) error {
 			},
 			Apply: m.applyRename},
 	}
+	// 与外发范围同档：只在 Web，delegate 得 web_only（退出码 20 并留痕）。
+	specs = append(specs, command.Spec{Name: CmdSetRetention, Action: authz.ActionChangeSettings, Tier: authz.TierNone, Object: objectOf,
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+			_, _, err := planRetention(tx, in)
+			return err
+		},
+		Apply: applyRetention})
 	for _, s := range specs {
 		if err := x.Register(s); err != nil {
 			return err
@@ -648,6 +656,56 @@ func (m *mod) applyOutbound(c *command.Ctx) (any, error) {
 	return s, nil
 }
 
+// RetentionInput 设置来源的原文保留天数：days 必须出现，null 表示不清理。
+type RetentionInput struct {
+	ID   string          `json:"id"`
+	Days json.RawMessage `json:"days"`
+}
+
+// MaxRetentionDays 是保留天数的上限（约 100 年），挡住换算成时间时溢出。
+const MaxRetentionDays = 36500
+
+func planRetention(tx *store.Tx, in json.RawMessage) (domain.Source, *int, error) {
+	var r RetentionInput
+	if err := strict(in, &r); err != nil {
+		return domain.Source{}, nil, err
+	}
+	s, err := Get(tx, r.ID)
+	if err != nil {
+		return s, nil, err
+	}
+	var days *int
+	if r.Days == nil || json.Unmarshal(r.Days, &days) != nil || (days != nil && (*days < 1 || *days > MaxRetentionDays)) {
+		return s, nil, invalid(fmt.Sprintf("days must be an integer from 1 to %d, or null for no clearing", MaxRetentionDays), "fix days")
+	}
+	return s, days, nil
+}
+
+func applyRetention(c *command.Ctx) (any, error) {
+	s, days, err := planRetention(c.Tx, c.Input)
+	if err != nil {
+		return nil, err
+	}
+	if derefIntOr(s.ContentRetentionDays, -1) == derefIntOr(days, -1) { // 未变不记事件（幂等）
+		return s, nil
+	}
+	if _, err := c.Tx.Exec(`UPDATE sources_registry_source SET content_retention_days = ? WHERE id = ?`, days, s.ID); err != nil {
+		return nil, err
+	}
+	s.ContentRetentionDays = days
+	if _, err := c.Emit(domain.Event{Type: EvUpdated, Object: s.ID, Payload: snapshot(s)}); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func derefIntOr(p *int, d int) int {
+	if p == nil {
+		return d
+	}
+	return *p
+}
+
 func sameOutbound(a, b domain.Outbound) bool {
 	return a.Local == b.Local && derefOr(a.External, "-") == derefOr(b.External, "-")
 }
@@ -724,7 +782,7 @@ func save(tx *store.Tx, s domain.Source, insert bool) error {
 
 // ---- 读取（供调度、Ingest 等模块使用；只读） ----
 
-const cols = `id, name, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats`
+const cols = `id, name, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats, COALESCE(content_retention_days, 0)`
 
 func scan(r *store.Rows) (domain.Source, error) {
 	var (
@@ -732,10 +790,15 @@ func scan(r *store.Rows) (domain.Source, error) {
 		typ, cfg, stats  string
 		ext              string
 		timeout, enabled int64
+		retention        int64
 	)
 	if err := r.Scan(&s.ID, &s.Name, &typ, &s.SourceKind, &s.Command, &s.Schedule, &timeout, &s.CredentialsPath,
-		&s.DedupeDomain, &s.DefaultProject, &s.Outbound.Local, &ext, &cfg, &s.Cursor, &enabled, &stats); err != nil {
+		&s.DedupeDomain, &s.DefaultProject, &s.Outbound.Local, &ext, &cfg, &s.Cursor, &enabled, &stats, &retention); err != nil {
 		return s, err
+	}
+	if retention > 0 {
+		d := int(retention)
+		s.ContentRetentionDays = &d
 	}
 	if ext != "" { // 空串即未选择
 		s.Outbound.External = &ext

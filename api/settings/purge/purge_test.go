@@ -27,6 +27,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	kpurge "github.com/xiaohei-info/awesome-personal-agent/kernel/purge"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
 )
@@ -56,7 +57,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, proc.Module, delegation.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module, items.Module, materials.Module, proc.Module, delegation.Module, core.Module, runner.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -279,5 +280,80 @@ func TestPurgeBadRequests(t *testing.T) {
 	// 只开放 POST。
 	if r := e.web("GET", "/v1/settings/purge", ""); r.Code == 200 {
 		t.Fatalf("GET must not be served: %d", r.Code)
+	}
+}
+
+func (e *env) sourceEvent(id, item string) string {
+	e.t.Helper()
+	var sid string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		src := domain.Source{ID: "src_a", DedupeDomain: "dom"}
+		if err := runner.AppendInternal(tx, src, domain.SourceEvent{ID: id, Type: "mail", Subject: "s", Detail: marker, OccurredAt: time.Now()}); err != nil {
+			return err
+		}
+		evs, err := runner.Events(tx, src.ID)
+		for _, ev := range evs {
+			if ev.DedupeKey.EventID == id {
+				sid = ev.ID
+			}
+		}
+		if err == nil && item != "" {
+			err = runner.SetDisposition(tx, sid, domain.DispositionAttached, item, "")
+		}
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return sid
+}
+
+func (e *env) sourceEventExists(sid string) bool {
+	e.t.Helper()
+	var found bool
+	_ = e.st.View(bg, func(tx *store.Tx) error { _, err := runner.Event(tx, sid); found = err == nil; return nil })
+	return found
+}
+
+// ACT-PRG-01 / ACT-PRG-02：Web 会话经同一路由删一条来源事件；非 Web 被拒，事件原样。
+func TestWebSessionPurgesSourceEvent(t *testing.T) {
+	e := setup(t)
+	sid, other := e.sourceEvent("m1", ""), e.sourceEvent("m2", "")
+	for _, kind := range []auth.Kind{auth.Delegate, auth.Worker} {
+		if r := e.do("POST", "/v1/settings/purge", `{"object":"`+sid+`"}`, e.token(kind)); r.Code != 403 {
+			t.Fatalf("%s: %d %s", kind, r.Code, r.Body)
+		}
+	}
+	if !e.sourceEventExists(sid) {
+		t.Fatal("rejected request deleted the event")
+	}
+	r := e.web("POST", "/v1/settings/purge", `{"object":"`+sid+`"}`)
+	if r.Code != 200 || !strings.Contains(r.Body.String(), `"kind":"source_event"`) || strings.Contains(r.Body.String(), marker) {
+		t.Fatalf("purge: %d %s", r.Code, r.Body)
+	}
+	if e.sourceEventExists(sid) || !e.sourceEventExists(other) {
+		t.Fatal("exactly the named event must be deleted")
+	}
+	if r := e.web("POST", "/v1/settings/purge", `{"object":"`+sid+`"}`); r.Code != 404 {
+		t.Fatalf("second purge: %d", r.Code)
+	}
+}
+
+// ACT-PRG-03：删事项时带 with_source_events 才连同来源事件；对非事项带它是 400。
+func TestWebSessionPurgesItemWithSourceEvents(t *testing.T) {
+	e := setup(t)
+	with, without := e.item(), e.item()
+	a, b := e.sourceEvent("a", with), e.sourceEvent("b", without)
+
+	if r := e.web("POST", "/v1/settings/purge", `{"object":"`+a+`","with_source_events":true}`); r.Code != 400 {
+		t.Fatalf("with_source_events on an event: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("POST", "/v1/settings/purge", `{"object":"`+with+`","with_source_events":true}`); r.Code != 200 || !strings.Contains(r.Body.String(), a) {
+		t.Fatalf("purge: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("POST", "/v1/settings/purge", `{"object":"`+without+`"}`); r.Code != 200 {
+		t.Fatalf("purge: %d %s", r.Code, r.Body)
+	}
+	if e.sourceEventExists(a) || !e.sourceEventExists(b) {
+		t.Fatalf("with_source_events: a exists=%v, b exists=%v", e.sourceEventExists(a), e.sourceEventExists(b))
 	}
 }

@@ -128,6 +128,16 @@ ALTER TABLE sources_runner_event ADD COLUMN content_state TEXT NOT NULL DEFAULT 
 	// 上一步的清单只有完整程度，放不下 content.missing；空串即没有自报缺失。只增列，已有事件为空串。
 	Version: 7, Ledger: 8, Name: "ledger-v8-content-missing",
 	SQL: `ALTER TABLE sources_runner_event ADD COLUMN content_missing TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 8（§6.15，GT-395）：保留期按落盘时刻算，事件行此前只有来源自报的发生时刻（NULL 的旧行按发生时刻算）；
+	// 物理删除来源事件后保留去重键，同一事件再被带来时不重新入账（墓碑）。只增列、增表。
+	Version: 8, Ledger: 8, Name: "ledger-v8-ingested-at-tombstone",
+	SQL: `ALTER TABLE sources_runner_event ADD COLUMN ingested_at INTEGER;
+CREATE TABLE sources_runner_tombstone (
+	dedupe_domain TEXT NOT NULL,
+	event_id TEXT NOT NULL,
+	PRIMARY KEY (dedupe_domain, event_id)
+) WITHOUT ROWID;`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。
@@ -641,7 +651,7 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 		return nil, err
 	}
 	for _, ev := range in.Events {
-		if err := insertEvent(tx, src, in.RunID, r.capSender(src, ev)); err != nil {
+		if err := insertEvent(tx, src, in.RunID, r.capSender(src, ev), c.Now()); err != nil {
 			return nil, err
 		}
 	}
@@ -729,7 +739,7 @@ func nextAttempt(at time.Time, schedule string, failures int) time.Time {
 func AppendInternal(tx *store.Tx, src domain.Source, ev domain.SourceEvent) error {
 	return insertEvent(tx, src, "", parsedEvent{ID: ev.ID, Type: ev.Type, Subject: ev.Subject, Summary: ev.Summary,
 		Detail: ev.Detail, Link: ev.Link, OccurredAt: ev.OccurredAt, CorrelationKeys: ev.CorrelationKeys,
-		Sender: ev.Sender, SenderVerified: ev.SenderVerified})
+		Sender: ev.Sender, SenderVerified: ev.SenderVerified}, ev.OccurredAt) // 内核自产事件的发生时刻就是落盘时刻
 }
 
 // jsonOrEmpty 把可选字段存成 JSON；没有时存空串，与迁移的列缺省一致。
@@ -741,8 +751,11 @@ func jsonOrEmpty(v any, empty bool) (string, error) {
 	return string(b), err
 }
 
-func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent) error {
+func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent, at time.Time) error {
 	key := src.DedupeKeyFor(ev.ID)
+	if gone, err := tombstoned(tx, key); err != nil || gone { // 本人物理删除过的事件不重新入账，也不算被拒收（§6.15）
+		return err
+	}
 	var rnd [8]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
 		return err
@@ -771,10 +784,10 @@ func insertEvent(tx *store.Tx, src domain.Source, runID string, ev parsedEvent) 
 	id := "sev_" + hex.EncodeToString(rnd[:])
 	n, err := tx.Exec(`INSERT OR IGNORE INTO sources_runner_event
 		(dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at, correlation_keys, sender, sender_verified,
-		 metrics, merge_key, prev_metrics, content_state)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 metrics, merge_key, prev_metrics, content_state, ingested_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		key.Domain, key.EventID, id, src.ID, runID, ev.Type, ev.Subject, ev.Summary, previewOf(ev.Detail),
-		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified, metrics, ev.MergeKey, prev, StateFull)
+		ev.Link, ev.OccurredAt.UnixNano(), string(keys), ev.Sender, verified, metrics, ev.MergeKey, prev, StateFull, at.UnixNano())
 	if err != nil || n == 0 { // 重复事件被忽略：它不是这个序列的新样本，不动上一次取值，也不改写已存的原文
 		return err
 	}
