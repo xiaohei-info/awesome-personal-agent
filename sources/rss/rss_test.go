@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +133,9 @@ func TestLongSummaryAndDetailAreTruncated(t *testing.T) {
 	r := call(t, in(s.URL, "", nil))
 	if got := []rune(r.events[0]["summary"].(string)); len(got) > maxSummary+1 {
 		t.Fatalf("summary 未截断: %d", len(got))
+	}
+	if got := []rune(r.events[0]["detail"].(string)); len(got) != 5000 {
+		t.Fatalf("detail 不应截断: %d", len(got))
 	}
 }
 
@@ -355,5 +359,97 @@ func TestBadCursorIsConfigFailure(t *testing.T) {
 	s := serve(t, 200, rssFeed)
 	if r := call(t, in(s.URL, "2023-01-01T00:00:00Z", nil)); r.code != ExitBadConfig || r.stdout != "" {
 		t.Fatalf("code=%d out=%q", r.code, r.stdout)
+	}
+}
+
+func sample(t *testing.T, name string) map[string]map[string]any {
+	t.Helper()
+	b, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := call(t, in(serve(t, 200, string(b)).URL, "", nil))
+	if r.code != 0 {
+		t.Fatalf("code=%d", r.code)
+	}
+	out := map[string]map[string]any{}
+	for _, e := range r.events {
+		out[e["id"].(string)] = e
+	}
+	return out
+}
+
+// 全文字段转文本进 detail（不截断，链接保留，脚本丢弃）、HTML 原样进 original、标题与作者不截、附带文件进 attachments。
+func TestLongEntryKeepsFullTextOriginalTitleAuthorAndEnclosures(t *testing.T) {
+	e := sample(t, "rss-long.xml")["rss-long-1"]
+	detail := e["detail"].(string)
+	if len([]rune(detail)) <= maxSummary*10 || !strings.Contains(detail, "THE-END-MARKER") || !strings.Contains(detail, "(https://example.com/p/059)") ||
+		strings.Contains(detail, "alert(1)") || strings.Contains(detail, "<p>") {
+		t.Errorf("detail 应是未截断的转换后文本: %d 字符", len([]rune(detail)))
+	}
+	o := e["original"].(map[string]any)
+	if o["media_type"] != "text/html" || !strings.Contains(o["text"].(string), "<script>alert(1)</script>") || !strings.Contains(o["text"].(string), "<p>THE-END-MARKER</p>") {
+		t.Errorf("original 应是原样 HTML: %v", o["media_type"])
+	}
+	if e["subject"] != strings.Repeat("T", 350) || e["sender"] != strings.Repeat("A", 350) {
+		t.Errorf("标题与作者不应截断: %d %d", len(e["subject"].(string)), len(e["sender"].(string)))
+	}
+	if got := e["summary"].(string); got != "Short teaser only." {
+		t.Errorf("summary 取描述的文本: %q", got)
+	}
+	att := e["attachments"].([]any)
+	a0, a1 := att[0].(map[string]any), att[1].(map[string]any)
+	if len(att) != 2 || a0["name"] != "report.pdf" || a0["media_type"] != "application/pdf" || a0["size"] != float64(123456) || a0["ref"] != nil ||
+		a1["name"] != "audio.mp3" || a1["size"] != float64(0) {
+		t.Errorf("attachments: %v", att)
+	}
+	if e["content"] != nil {
+		t.Errorf("取全了不应自报 partial: %v", e["content"])
+	}
+}
+
+// 没有全文字段时取描述；订阅源只给摘要是对方的限制，不算 partial。
+func TestSummaryOnlyFeedUsesDescriptionAndIsNotPartial(t *testing.T) {
+	e := sample(t, "rss-long.xml")["rss-summary-1"]
+	if e["detail"] != "Only a **teaser** here." {
+		t.Errorf("detail: %q", e["detail"])
+	}
+	if o := e["original"].(map[string]any); o["media_type"] != "text/html" || o["text"] != "<p>Only a <b>teaser</b> here.</p>" {
+		t.Errorf("original: %v", o)
+	}
+	if e["content"] != nil || e["attachments"] != nil {
+		t.Errorf("不应有 content/attachments: %v %v", e["content"], e["attachments"])
+	}
+}
+
+// HTML 转换失败：detail 留空、original 照常保存、以 partial 自报 body；事件仍然入账。
+func TestConvertFailureLeavesDetailEmptyKeepsOriginalAndDeclaresPartial(t *testing.T) {
+	e := sample(t, "rss-broken.xml")["rss-broken-1"]
+	if e["detail"] != nil {
+		t.Errorf("detail 应为空: %v", e["detail"])
+	}
+	if o := e["original"].(map[string]any); o["media_type"] != "text/html" || !strings.HasPrefix(o["text"].(string), "<p>x</p><div>") {
+		t.Errorf("original 应保存: %v", o["media_type"])
+	}
+	c := e["content"].(map[string]any)
+	m := c["missing"].([]any)
+	if c["state"] != "partial" || len(m) != 1 || m[0].(map[string]any)["part"] != "body" || m[0].(map[string]any)["reason"] == "" {
+		t.Errorf("content: %v", c)
+	}
+}
+
+func TestAtomEnclosureAndPlainTextContent(t *testing.T) {
+	s := serve(t, 200, `<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>A</title><id>urn:p</id><updated>2023-02-01T10:00:00Z</updated>
+<link rel="enclosure" href="https://e.com/dl/" type="image/png" length="9"/><link rel="enclosure" href="https://e.com/a/b.zip?x=1" length="abc"/>
+<content type="text">1 * 2 &lt; 3</content></entry></feed>`)
+	r := call(t, in(s.URL, "", nil))
+	e := r.events[0]
+	if e["detail"] != "1 * 2 < 3" || e["original"] != nil {
+		t.Errorf("type=text 的正文不是 HTML，原样进 detail: %v %v", e["detail"], e["original"])
+	}
+	att := e["attachments"].([]any)
+	a0, a1 := att[0].(map[string]any), att[1].(map[string]any)
+	if len(att) != 2 || a0["name"] != "dl" || a0["media_type"] != "image/png" || a0["size"] != float64(9) || a1["name"] != "b.zip" || a1["size"] != float64(0) {
+		t.Errorf("attachments: %v", att)
 	}
 }

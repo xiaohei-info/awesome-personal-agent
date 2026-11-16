@@ -25,11 +25,15 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/net/html/charset"
+
+	"github.com/xiaohei-info/awesome-personal-agent/sources/internal/content"
 )
 
 // 退出码沿用 §9.2 的 Source 契约。
@@ -49,9 +53,7 @@ const (
 	// overlap 是重叠窗口：游标时刻之前这段时间内的条目每次都重发，同刻或迟到出现的条目
 	// 因此不会漏，已发过的由内核去重。重发量受订阅本身大小约束。
 	overlap      = 7 * 24 * time.Hour
-	maxSummary   = 400
-	maxDetail    = 4000
-	maxShort     = 300 // subject、sender 的长度上限
+	maxSummary   = 400 // 只有 summary 截短；标题、作者与正文不截（附录 D.8）
 	maxBody      = 10 << 20
 	fetchTimeout = 30 * time.Second
 )
@@ -74,6 +76,32 @@ type event struct {
 	Link       string `json:"link,omitempty"`
 	OccurredAt string `json:"occurred_at"`
 	Sender     string `json:"sender,omitempty"`
+	// Original 是条目正文的 HTML 原样；Attachments 只有地址、类型与大小（订阅源附带文件，不支持取回）；
+	// Content 在 HTML 转文本失败时自报 partial。订阅源只给摘要时取不到全文，是对方的限制，不算 partial。
+	Original    *original    `json:"original,omitempty"`
+	Attachments []attachment `json:"attachments,omitempty"`
+	Content     *declared    `json:"content,omitempty"`
+}
+
+type original struct {
+	MediaType string `json:"media_type"`
+	Text      string `json:"text"`
+}
+
+type attachment struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type,omitempty"`
+	Size      int64  `json:"size"`
+}
+
+type declared struct {
+	State   string    `json:"state"`
+	Missing []missing `json:"missing"`
+}
+
+type missing struct {
+	Part   string `json:"part"`
+	Reason string `json:"reason"`
 }
 
 type entry struct {
@@ -236,6 +264,7 @@ func fetch(ctx context.Context, rawURL string) ([]byte, string, error) {
 
 // text 取元素的文本；元素里是未转义的 HTML 或 Atom 的 xhtml 时，直接文本为空，改取内部原文。
 type text struct {
+	Type  string `xml:"type,attr"` // Atom：text 表示纯文本，其余（html、xhtml、缺省的 RSS）按 HTML 处理
 	Chars string `xml:",chardata"`
 	Inner string `xml:",innerxml"`
 }
@@ -254,6 +283,11 @@ type rssItem struct {
 	Content     text   `xml:"http://purl.org/rss/1.0/modules/content/ encoded"`
 	Creator     string `xml:"http://purl.org/dc/elements/1.1/ creator"`
 	Author      string `xml:"author"`
+	Enclosures  []struct {
+		URL    string `xml:"url,attr"`
+		Type   string `xml:"type,attr"`
+		Length string `xml:"length,attr"`
+	} `xml:"enclosure"`
 }
 
 type rssDoc struct {
@@ -270,8 +304,10 @@ type atomDoc struct {
 		Summary text   `xml:"summary"`
 		Content text   `xml:"content"`
 		Links   []struct {
-			Rel  string `xml:"rel,attr"`
-			Href string `xml:"href,attr"`
+			Rel    string `xml:"rel,attr"`
+			Href   string `xml:"href,attr"`
+			Type   string `xml:"type,attr"`
+			Length string `xml:"length,attr"`
 		} `xml:"link"`
 		Author struct {
 			Name string `xml:"name"`
@@ -305,8 +341,12 @@ func parseFeed(b []byte, contentType string) ([]entry, error) {
 		}
 		for _, it := range append(doc.Items, doc.RDFItems...) {
 			link := strings.TrimSpace(it.Link)
-			out = append(out, build(first(it.GUID, it.About, link), it.Title.String(), it.Description.String(), it.Content.String(),
-				link, first(it.Creator, it.Author), first(it.PubDate, it.DCDate)))
+			var atts []attachment
+			for _, en := range it.Enclosures {
+				atts = appendAttachment(atts, en.URL, en.Type, en.Length)
+			}
+			out = append(out, build(first(it.GUID, it.About, link), it.Title.String(), it.Description, it.Content,
+				link, first(it.Creator, it.Author), first(it.PubDate, it.DCDate), atts))
 		}
 	case "feed":
 		var doc atomDoc
@@ -315,14 +355,17 @@ func parseFeed(b []byte, contentType string) ([]entry, error) {
 		}
 		for _, it := range doc.Entries {
 			link := ""
+			var atts []attachment
 			for _, l := range it.Links {
-				if l.Rel == "" || l.Rel == "alternate" {
+				switch {
+				case l.Rel == "enclosure":
+					atts = appendAttachment(atts, l.Href, l.Type, l.Length)
+				case link == "" && (l.Rel == "" || l.Rel == "alternate"):
 					link = strings.TrimSpace(l.Href)
-					break
 				}
 			}
-			out = append(out, build(first(it.ID, link), it.Title.String(), it.Summary.String(), it.Content.String(),
-				link, it.Author.Name, first(it.Updated, it.Pub)))
+			out = append(out, build(first(it.ID, link), it.Title.String(), it.Summary, it.Content,
+				link, it.Author.Name, first(it.Updated, it.Pub), atts))
 		}
 	default:
 		return nil, fmt.Errorf("根元素 %q 不是 rss、RDF 或 feed", root.Name.Local)
@@ -355,19 +398,66 @@ func declaresEncoding(b []byte) bool {
 	return bytes.HasPrefix(b, []byte("<?xml")) && end > 0 && bytes.Contains(b[:end], []byte("encoding"))
 }
 
-func build(id, title, summary, detail, link, sender, date string) entry {
-	title, summary, detail = strings.TrimSpace(title), strings.TrimSpace(summary), strings.TrimSpace(detail)
+// appendAttachment 登记订阅条目的附带文件：名取地址路径的末段（没有就用地址），大小未知或不合法记 0。
+func appendAttachment(atts []attachment, rawURL, mediaType, length string) []attachment {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return atts
+	}
+	name := rawURL
+	if u, err := url.Parse(rawURL); err == nil {
+		if b := path.Base(u.Path); b != "." && b != "/" {
+			name = b
+		}
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(length), 10, 64)
+	if err != nil || size < 0 {
+		size = 0
+	}
+	return append(atts, attachment{Name: name, MediaType: strings.TrimSpace(mediaType), Size: size})
+}
+
+// toText 把条目里的一段正文变成文本：Atom 声明 type=text 的原样返回，其余按 HTML 转换（附录 D.8）。
+func toText(t text) (string, error) {
+	if strings.EqualFold(t.Type, "text") {
+		return strings.TrimSpace(t.String()), nil
+	}
+	return content.HTMLToText(t.String())
+}
+
+// build 组装事件。正文取全文字段，没有则取描述；事件 id 的内容哈希仍只用原始文本，与旧版一致（WB-36）。
+func build(id, title string, desc, body text, link, sender, date string, atts []attachment) entry {
+	title = strings.TrimSpace(title)
+	summary, detail := strings.TrimSpace(desc.String()), strings.TrimSpace(body.String())
 	if id = strings.TrimSpace(id); id == "" {
 		h := sha256.Sum256([]byte(title + "\x00" + summary + "\x00" + detail + "\x00" + strings.TrimSpace(date)))
 		id = "sha256:" + hex.EncodeToString(h[:16])
 	}
 	e := entry{event: event{
 		ID: id, Type: EventType,
-		Subject: clip(first(title, link, id), maxShort),
-		Summary: clip(summary, maxSummary),
-		Detail:  clip(detail, maxDetail),
-		Link:    link, Sender: clip(strings.TrimSpace(sender), maxShort),
+		Subject: first(title, link, id),
+		Link:    link, Sender: strings.TrimSpace(sender),
+		Attachments: atts,
 	}}
+	if s, err := toText(desc); err == nil {
+		e.Summary = clip(s, maxSummary)
+	} else {
+		e.Summary = clip(summary, maxSummary)
+	}
+	if main := first(body.String(), desc.String()); main != "" {
+		src := body
+		if strings.TrimSpace(body.String()) == "" {
+			src = desc
+		}
+		if !strings.EqualFold(src.Type, "text") {
+			e.Original = &original{MediaType: "text/html", Text: main}
+		}
+		txt, err := toText(src)
+		if err != nil {
+			e.Content = &declared{State: "partial", Missing: []missing{{Part: "body", Reason: err.Error()}}}
+		}
+		e.Detail = txt
+	}
 	if t, ok := parseDate(date); ok {
 		e.at, e.dated = t.UTC(), true
 		e.OccurredAt = e.at.Format(time.RFC3339)
