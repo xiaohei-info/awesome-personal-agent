@@ -1,0 +1,19 @@
+# sha256: 9dfd3382988c466efe9188a4433aa3e91ede705542fe0d1313b2c55bf4cabdb7
+defects:
+  schema: omac.defect-ledger/v1
+  used_global: 1
+  used_by_reporter:
+    e2e-raw-ingest: 1
+  granted_by_reporter: {}
+  granted_global: 0
+  entries:
+    dfx-9159a6ed6765:
+      suspected: raw-ingest
+      anchors:
+      - flow-raw-webhook/ACT-WHK-02
+      - webhook-original
+      reporters:
+      - e2e-raw-ingest
+      state: fixing
+      fix_node: fix.raw-ingest.9159a6
+  inbox: []

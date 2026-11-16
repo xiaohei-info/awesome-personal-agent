@@ -11,6 +11,85 @@ meta:
   - 01a1e544-2000-750d-9c83-0401472cc122
   - 01a1e544-225a-77b1-8b32-0ff70a73da95
   - 01a1e557-c6de-78d2-931b-e83115a95afb
+  amendment_revision: 1
+  amendment_apply:
+    schema: omac.amendment-apply/v1
+    amendment_id: amend-3da168e5d75c
+    amendment_file: .omac/apa-v02-workbench.system-amendment.yaml
+    nodes:
+      fix.raw-ingest.9159a6:
+        stage: authoring
+        state: synced
+        reason: no existing work item side effect
+        expected_review_generation: amendment-365a09a6b99f8fa52e56c445
+      e2e-raw-ingest:
+        stage: authoring
+        state: synced
+        work_item_id: 01a1e5ce-2eb9-7289-a748-d4d2bf8030ca
+        baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: null
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: ed08c36ca3bcdabb88c62b21a7a594a248a9ea868092982405c56b60a08f407c
+          worker_handoff_pending: true
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
+        expected_contract_sha256: ed08c36ca3bcdabb88c62b21a7a594a248a9ea868092982405c56b60a08f407c
+        superseded_decision:
+          reason_code: worker-decision-required
+          gate: worker
+          blocker_reason_code: upstream-defect
+          decision_sha256: 97d5ab719095025e8ced51c1d898b49baf3fc9ec02b738c5b4a46f2060342936
+        expected_review_generation: amendment-22361a3d3c144548df85015d
+        attempt_baseline:
+          status: blocked
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: null
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline: null
+          decision_required_pending: true
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: ed08c36ca3bcdabb88c62b21a7a594a248a9ea868092982405c56b60a08f407c
+          worker_handoff_pending: true
+        observed:
+          status: todo
+          phase: authoring
+          review_verdict: null
+          review_subject_digest: null
+          review_generation: amendment-22361a3d3c144548df85015d
+          review_ledger_generation: null
+          review_ledger_current: false
+          bounce_baseline:
+            merge: 0
+            review: 0
+            worker: 0
+          decision_required_pending: false
+          review_report_pending: false
+          review_continuation_pending: false
+          reviewer_run_baseline_pending: false
+          delivery_identity_pending: false
+          contract_sha256: ed08c36ca3bcdabb88c62b21a7a594a248a9ea868092982405c56b60a08f407c
+          worker_handoff_pending: false
+    system: true
+  last_amendment_id: amend-3da168e5d75c
 nodes:
 - id: schema-v8
   worker: omac-worker-backend
@@ -4369,6 +4448,7 @@ nodes:
   - raw-ingest
   - raw-read-api
   - doubles-srcstub
+  - fix.raw-ingest.9159a6
   title: e2e：来源原文入账、上限、webhook 与读取范围（替身版）
   description: 产出 e2e-raw-ingest-evidence。全流程 owner：flow-raw-full-ingest, flow-raw-limits,
     flow-raw-webhook, flow-raw-read-scope。按 OMAC-NOTES §3 R10 的前半：200 KiB 正文逐字节读回；超限事件被拒收且同批其余照常、游标推进；token
@@ -5018,3 +5098,97 @@ nodes:
     requirement_refs:
     - REQ-REL-DIAGRAM
     coverage_gate: 0
+- id: fix.raw-ingest.9159a6
+  worker: omac-worker-backend
+  blocked_by:
+  - schema-v8
+  title: 'Fix raw-ingest: dfx-9159a6ed6765'
+  description: "Automatic fix for upstream defect(s) reported by e2e-raw-ingest.\n\n-
+    [design-gap] anchors flow-raw-webhook/ACT-WHK-02, webhook-original (docs/solution-design.md#95-webhook-接收)\n
+    \ expected: The /ingest request body limit is the runtime config max_webhook_body_mb
+    (default 1 MiB); 2 allows a 1.2 MiB body.\n  observed: With max_webhook_body_mb
+    2 a 1.2 MiB POST /ingest/<source> still returns 413 request body too large.\n
+    \ where: cli/serve/assemble.go:452 apiingest.Routes(k.wh, 0); api/ingest/ingest.go:Routes
+    maxBody<=0 falls back to core.DefaultMaxBody\n  repro (the reporter re-runs it
+    after your fix merges; it is not your gate): `go test -tags='e2e apa_testclock'
+    -count=1 -run TestFlowRawWebhook ./tests/e2e/rawingest/` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-9159a6ed6765 in raw-ingest: The /ingest
+      request body limit is the runtime config max_webhook_body_mb (default 1 MiB);
+      2 allows a 1.2 MiB body.'
+    non_goals:
+    - 结构变更只经 schema-v8；本节点若仍需改结构，在 PR 说明写明并另起新迁移（结构版本 8 首次被真实账本应用后冻结，§16.5）
+    - 不做 HTTP 读取路由与列表瘦身（raw-read-api）、保留期与物理删除（raw-retention-purge）、附件取回（attachment-fetch）
+    - 不改各来源程序
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/sources/... ./kernel/webhook/...
+    - go test -count=1 ./kernel/config/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: raw-ingest-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/solution-design.md#92-执行契约
+      - docs/solution-design.md#95-webhook-接收
+      - docs/solution-design.md#614-不变量
+      - docs/solution-design.md#162-数据目录
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      delivery_goal: 解析执行契约的 original/headers/attachments/messages/content 字段，与事件行同一事务按部分完整落盘（媒体类型、字节数、sha256、完整程度
+        full/partial），事件行只留 2000 字符预览；单条超 max_source_event_mb 整条拒收（event_too_large）、聚合消息超
+        200 条拒收、stdout 超 max_source_output_mb 时上限内落盘游标不动；字段映射 webhook 的请求体进 original
+        并受 max_webhook_body_mb 约束；读取先原文表后旧列
+      covers:
+      - ACT-RAW-01
+      - ACT-RAW-02
+      - ACT-RAW-03
+      - ACT-RLIM-02
+      - ACT-RLIM-03
+      - ACT-RLIM-04
+      - ACT-WHK-01
+      - ACT-WHK-02
+      acceptance_refs:
+      - flow-raw-full-ingest
+      - flow-raw-limits
+      - flow-raw-webhook
+      commands:
+      - go test -count=1 ./kernel/sources/... ./kernel/webhook/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-raw-webhook
+    source_of_truth:
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/solution-design.md#92-执行契约
+    - docs/solution-design.md#95-webhook-接收
+    - docs/solution-design.md#614-不变量
+    - docs/solution-design.md#162-数据目录
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    scope_paths:
+    - kernel/sources/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: schema-v8-delivery
+      producer: schema-v8
+      evidence_mode: artifact
+      requires:
+      - ledger-v8-tables
+      - ledger-fixture-v7
+      - migration-chain-v8
+    defect_refs:
+    - dfx-9159a6ed6765
+    coverage_gate: 80
