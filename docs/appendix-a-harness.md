@@ -144,6 +144,27 @@ Hermes 结构化输出的末行是 `result` 事件，只带 `session_id` 和 `ex
 | MEAS-HERMES-TOKEN | 有条件成立 | 命题：`terminal` 子进程保留 `APA_TOKEN`。条件：以客户端环境带 `APA_TOKEN`、`APA_RUN` 启动 `hermes chat -t terminal`，模型在终端里读到二者均已设置；这是实测构建上一次性运行的结果，没有区分进程内执行与共享网关继承（共享网关会留着拉起它的客户端的变量，见上，因此不能证明按运行隔离的凭据到得了终端）。v0.23.0 及以后按运行传值走 `terminal.client_env_passthrough` 与 `APA_RUN_CONTEXT`，未实测。构建与版本号说明同 MEAS-ALL-CRED |
 | MEAS-HOST-CTX | 待实测 | 命题：v0.23.0 及以后，一次性命令的工具跑在共享网关里时，`APA_RUN_CONTEXT` 经 `terminal.client_env_passthrough` 到达插件工具与 `terminal` 子进程，且不同运行互不串值。已读源码确认，未在真实运行中验证。由 v0.2.0 本机升级验证清单 L9（第三档运行形态）证实（主文档 §20.4、§21.3） |
 | SPIKE-SESSION-KIND | 开发部分已定（取法如下）；真实 harness 上的证实由 L9 承接 | 命题：插件能可靠取得会话类型。取法按 Hermes 源码（`gateway/session_context.py`、`gateway/session.py`）确定：网关为每个回合绑定 `HERMES_SESSION_PLATFORM`、`HERMES_SESSION_SOURCE`（CLI、TUI 绑这一项）、`HERMES_SESSION_CHAT_TYPE`（`dm`、`group`、`channel`、`thread`）和 `HERMES_SESSION_USER_ID`，插件经 `get_session_env` 读取，不经模型。规则（`plugins/hermes/tools/run_context.py:session_kind`，所有发出 `apa` 的插件共用）：平台与来源都为空、`cli`、`tui` 或 `local` 的终端会话固定报 `direct`；网关会话的 `chat_type` 为 `dm` 且有发送者时报 `direct`，为 `group`、`channel`、`thread` 时报 `group`；`api_server`、`webhook` 等非聊天入口、`dm` 却没有发送者、类型缺失或不认识、Hermes 的会话模块读不到或读取抛错，一律报 `unknown`。不继承网关进程环境里已有的 `APA_SESSION_KIND`；唤醒回合用运行凭据，不带会话类型。工具 schema 没有会话类型参数。开发验收用 `STUB_HARNESS` 与会话来源替身验证上报（`plugins/hermes/tests/tools/test_tools.py`、`tests/core/test_core.py`、`tests/wake/test_wake.py`），内核一侧见 `tests/contract/authz/session_kind_test.go`。仍待真实 harness 证实：Telegram 观察模式、Slack 共享话题这类"类型是 `dm` 或频道但本人之外的人也能发言"的共享会话是否都被标成 `group`（源码里有 `shared_session` 标记，但没有对应的 `HERMES_SESSION_*` 变量），以及一个允许多个发送者的私聊是否都是本人；L9 在私聊与多人会话各发起一次凭原话的代答，私聊被接受、多人会话被拒（退出码 23）。证实前如发现共享会话被报成 `direct`，插件改为对该平台报 `unknown`，内核不变 |
+| SPIKE-SESSION-KIND-OWNCHAT | 待实测 | 命题：Hermes 自带的一对一聊天界面（宿主的 Bot 聊天入口）上报的平台、来源与聊天类型能与多人会话可靠区分。现行规则把 `api_server`、`desktop`、`gateway` 等入口在看聊天类型之前就判成 `unknown`，这类界面若落在其中，凭原话的代答会被拒。取值由 v0.2.0 本机升级验证清单 L17 实测后写回本行（主文档 §20.4、§21.3）；规则的改法见下文"聊天里处置" |
+
+**聊天里处置**（工作台能力迭代，主文档 §21.1 决定 74）。Hermes 插件在已有的 `apa_decide`、`apa_accept`、`apa_dismiss`、`apa_item_update` 之外补三个代答工具，都是对 CLI 的薄封装，参数里的 `evidence`（本人原话）与 `grant`（授权单 id）二选一，会话引用与会话类型由插件随调用带上，模型改不了：
+
+| 工具 | 对应的 CLI | 用途 |
+|---|---|---|
+| `apa_attach` | `apa attach <建议> --to <事项>` | 把一条建议补到已有事项 |
+| `apa_proposals_apply` | `apa proposals apply --recommended`，或 `--file -` 经标准输入给处置清单 | 按推荐批量处理，或按清单逐条处理（"第 3 条忽略，其余按建议"）；可按来源、项目收窄。输出逐条结果，模型据此向本人复述 |
+| `apa_item_progress` | `apa item progress <事项> --text … [--on <日期>]` | 给本人的事项记一条进展；绑定在该凭据上的事项不要求依据 |
+
+工具的说明里写明：处置建议与给本人的事项记进展属于替本人做决定，要带本人这一回合的原话；退出码 23 时不换说法重试，把原因与 Web 链接告诉本人。
+
+会话类型的判定（`plugins/hermes/tools/run_context.py:session_kind`）按下面的顺序，前一条成立就不再往下看：
+
+1. 聊天类型是 `group`、`channel`、`thread` 之一：`group`。这一条永远最先判，后面任何一条都不能把多人会话变成私聊。
+2. 平台与来源都是终端（空、`cli`、`tui`、`local`）：`direct`。
+3. 平台或来源在"只有本人的入口"名单里，且聊天类型不是第 1 条所列：`direct`。名单由两部分组成：插件内置的值（Hermes 自带的一对一聊天界面，取值待 `SPIKE-SESSION-KIND-OWNCHAT` 实测后写入）；以及本人在插件环境里用 `APA_DIRECT_PLATFORMS`（逗号分隔的平台或来源名）声明的值。
+4. 聊天类型是 `dm` 且有发送者：`direct`。
+5. 其余（非聊天入口、`dm` 却没有发送者、取不到）：`unknown`。
+
+`APA_DIRECT_PLATFORMS` 是本人对自己机器上的入口作的声明，只在本人确知那个入口只有自己能发言时才填；它写在插件的环境里，不经模型，也不进账本。内核的规则不变：只在 `direct` 时接受原话（主文档 §14.5）。用 harness 替身的验收覆盖这五条的顺序，特别是"名单里的平台加多人聊天类型仍是 `group`"。
 
 ## A.6 其余 harness 的落地方式（调研结论）
 
