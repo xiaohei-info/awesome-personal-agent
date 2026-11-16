@@ -201,19 +201,26 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 	}
 	var digest []summaries.DigestEntry
 	var win *window
+	var raw []RawFile
 	if c.Item != nil && c.Item.Kind == domain.KindBrief { // 每份简报带"知会"（摘要出口，§9.3）与按计划日期取的材料（§7.3）
-		var dm, pm Material
-		if dm, digest, pm, err = s.briefSections(ctx); err != nil {
+		var pm Material
+		if pm, digest, err = s.briefSections(ctx); err != nil {
 			return err
 		}
-		mats = append(mats, dm, pm)
+		mats = append(mats, pm)
 		// 五个新段与按实例的取材窗口；窗口写进简报事项的 spec.since/until，下一份取它作起点（§7.3）。
-		w, lm, err := s.briefLedgerSections(ctx, c)
+		w, lm, props, err := s.briefLedgerSections(ctx, c)
 		if err != nil {
 			return err
 		}
 		win = &w
 		mats = append(mats, lm...)
+		// digest 与 proposals 引用的来源事件各带一个按外发范围裁剪的原文文件（§7.3）。
+		var dm Material
+		if dm, raw, err = s.briefRaw(ctx, digest, props); err != nil {
+			return err
+		}
+		mats = append(mats, dm, props.material())
 		if c.Bound {
 			if _, err := c.Do("item.update", map[string]any{"id": c.Item.ID, "spec": w, "reason": "rule " + c.Rule + ": brief window"}); err != nil {
 				return err
@@ -221,7 +228,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 		}
 	}
 	ip := instanceParams(c)
-	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs, Window: win,
+	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
 		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
 	switch {
 	case c.Bound:
@@ -244,7 +251,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 
 // briefSections 是简报独有的两段资料：digest（尚未汇入过简报的摘要出口事件，每条只汇入一次）与 planned（计划今天或更早、
 // 尚未完成的事项，过期不自动改期；计划明天或没有计划日期的不在其中）。两段都只是账本读取，不调模型。
-func (s *Service) briefSections(ctx context.Context) (dm Material, digest []summaries.DigestEntry, pm Material, err error) {
+func (s *Service) briefSections(ctx context.Context) (pm Material, digest []summaries.DigestEntry, err error) {
 	type plannedItem struct {
 		ID         string       `json:"id"`
 		Title      string       `json:"title"`
@@ -267,9 +274,8 @@ func (s *Service) briefSections(ctx context.Context) (dm Material, digest []summ
 	if err != nil {
 		return
 	}
-	db, _ := json.Marshal(map[string]any{"digest": digest})
 	pb, _ := json.Marshal(map[string]any{"planned": planned})
-	return Material{Name: "digest", Body: string(db)}, digest, Material{Name: "planned", Body: string(pb)}, nil
+	return Material{Name: "planned", Body: string(pb)}, digest, nil
 }
 
 // launchDepth 是规则拉起任务型与直接调用的链路深度，规则与后台运行同一处（chain.Next）；超过阈值只记录不派发，over 为真。

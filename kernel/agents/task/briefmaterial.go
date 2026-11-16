@@ -76,13 +76,15 @@ type scheduleEntry struct {
 }
 
 type proposalEntry struct {
-	ID            string `json:"id"`
-	Title         string `json:"title"`
-	Summary       string `json:"summary,omitempty"`
-	Sources       string `json:"sources,omitempty"`
-	Recommend     string `json:"recommend,omitempty"`
-	Reason        string `json:"reason,omitempty"`
-	LowConfidence bool   `json:"low_confidence"`
+	ID            string   `json:"id"`
+	Title         string   `json:"title"`
+	Summary       string   `json:"summary,omitempty"`
+	Sources       string   `json:"sources,omitempty"`
+	Recommend     string   `json:"recommend,omitempty"`
+	Reason        string   `json:"reason,omitempty"`
+	LowConfidence bool     `json:"low_confidence"`
+	Events        []string `json:"-"`             // 引用的来源事件 id，用来出原文文件
+	Raw           []rawRef `json:"raw,omitempty"` // 各来源事件的原文文件名与裁剪量
 }
 
 type decisionEntry struct {
@@ -116,7 +118,7 @@ type projectActivity struct {
 }
 
 // briefLedgerSections 组出取材窗口与五个新段：窗口写进 brief 事项的 spec.since/until（调用方负责），五段各成一份材料。
-func (s *Service) briefLedgerSections(ctx context.Context, c rules.Call) (w window, mats []Material, err error) {
+func (s *Service) briefLedgerSections(ctx context.Context, c rules.Call) (w window, mats []Material, props briefProposals, err error) {
 	now := s.o.Now()
 	inst, self := "", ""
 	var params json.RawMessage
@@ -172,7 +174,7 @@ func (s *Service) briefLedgerSections(ctx context.Context, c rules.Call) (w wind
 		return err
 	})
 	if err != nil {
-		return w, nil, err
+		return w, nil, props, err
 	}
 	for _, m := range []struct {
 		name string
@@ -181,9 +183,7 @@ func (s *Service) briefLedgerSections(ctx context.Context, c rules.Call) (w wind
 		b, _ := json.Marshal(map[string]any{m.name: m.v})
 		mats = append(mats, Material{Name: m.name, Body: string(b)})
 	}
-	pb, _ := json.Marshal(map[string]any{"proposals": proposals, "pending_total": pending})
-	mats = append(mats, Material{Name: "proposals", Body: string(pb)})
-	return w, mats, nil
+	return w, mats, briefProposals{Entries: proposals, Pending: pending}, nil
 }
 
 // scheduleSection：语义类型为 calendar 的来源里，开始时间落在 [今天 0 点, +days 天) 的事件；同一关联键只取最新一版，
@@ -271,6 +271,7 @@ func (s *Service) proposalsSection(tx *store.Tx, all []domain.Item, w window, na
 					}
 					return nil, 0, err
 				}
+				e.Events = append(e.Events, id)
 				if n := names[ev.SourceID]; n != "" && !slices.Contains(ns, n) {
 					ns = append(ns, n)
 				}
