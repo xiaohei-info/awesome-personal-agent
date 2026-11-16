@@ -486,3 +486,18 @@ func TestGenerateOverrideNeverLeavesBriefSilentlyOpen(t *testing.T) {
 		})
 	}
 }
+
+// 附录 C.13：schedule_days 取 1 到 14；经真实包校验，0 与 15 被拒，1 与 14 通过。
+func TestScheduleDaysBoundsEnforcedByRealPack(t *testing.T) {
+	e := newEnv(t, "")
+	for _, bad := range []string{"0", "15", "-1", `"3"`} {
+		if _, err := e.do("instance.create", map[string]any{"pack": "brief", "params": json.RawMessage(`{"schedule":"24h","schedule_days":` + bad + `}`)}); err == nil {
+			t.Errorf("schedule_days %s must be rejected", bad)
+		}
+	}
+	for _, ok := range []string{"1", "14"} {
+		if _, err := e.do("instance.create", map[string]any{"pack": "brief", "params": json.RawMessage(`{"schedule":"24h","schedule_days":` + ok + `}`)}); err != nil {
+			t.Errorf("schedule_days %s must be accepted: %v", ok, err)
+		}
+	}
+}

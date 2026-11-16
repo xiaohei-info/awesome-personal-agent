@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -414,4 +415,24 @@ func activitySection(tx *store.Tx, all []domain.Item, w window) ([]projectActivi
 		out[i].Entries = append(out[i].Entries, en)
 	}
 	return out, nil
+}
+
+// keepWindow 把取材窗口并回事项的 spec.since/until：Agent 写回 {period, sections} 会整体替换 spec，窗口随之丢失，
+// 而下一份简报要取它作起点。窗口以拉起时记下的为准，其余键不动。
+func (s *Service) keepWindow(ctx context.Context, it domain.Item, w window) (domain.Item, error) {
+	m := map[string]json.RawMessage{}
+	if len(it.Spec) > 0 {
+		if err := json.Unmarshal(it.Spec, &m); err != nil {
+			m = map[string]json.RawMessage{} // 不是对象的 spec 由结果判定按缺字段处理
+		}
+	}
+	m["since"], _ = json.Marshal(w.Since)
+	m["until"], _ = json.Marshal(w.Until)
+	spec, _ := json.Marshal(m)
+	in, _ := json.Marshal(map[string]any{"id": it.ID, "spec": json.RawMessage(spec), "reason": "brief window kept"})
+	if _, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: "item.update", Input: in}); err != nil {
+		return it, err
+	}
+	it.Spec = spec
+	return it, nil
 }

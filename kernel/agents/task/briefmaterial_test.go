@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -139,4 +142,44 @@ func materialsOf(e *env, run string) map[string]string {
 		out[m.Name] = m.Body
 	}
 	return out
+}
+
+// 评审阻断项：Agent 写回 {period, sections} 会整体替换 spec；窗口仍要留在 spec 里，下一份简报以它的 until 为起点。
+func TestBriefWindowSurvivesAgentWriteBackAndSeedsNextBrief(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "noOutcome")
+	e.setDefaultHarness("hx")
+	run := func(id string) {
+		if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("write-brief", id)); err != nil {
+			t.Fatal(err)
+		}
+		runDir := e.runs + "/" + func() string { // 运行目录里只有这一次运行
+			ents, _ := os.ReadDir(e.runs)
+			return ents[len(ents)-1].Name()
+		}()
+		agent := runidentity.Identity{Secret: waitFile(t, runDir+"/token")}
+		e.must(agent, "item.update", map[string]any{"id": id, "spec": json.RawMessage(fullSpec), "reason": "write"}) // 只写 period 与 sections
+		e.must(agent, "delegate.report", reportIn(id, "progress"))
+		if err := os.WriteFile(runDir+"/go", nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		e.waitResult()
+	}
+	first := e.openItemWithOrigin("instance:ins_1")
+	run(first)
+	var sp struct {
+		Period       string
+		Since, Until time.Time
+	}
+	if err := json.Unmarshal(e.item(first).Spec, &sp); err != nil || sp.Period == "" || !sp.Until.Equal(t0) || !sp.Since.Equal(t0.Add(-24*time.Hour)) {
+		t.Fatalf("window lost after the agent replaced spec: %v %s", err, e.item(first).Spec)
+	}
+	if e.item(first).Phase != domain.PhaseDone {
+		t.Fatalf("brief must still settle done: %s %+v", e.item(first).Phase, e.item(first).Ask)
+	}
+	var all []domain.Item
+	_ = e.st.View(bg, func(tx *store.Tx) (err error) { all, err = items.List(tx, items.Filter{}); return })
+	if w := briefWindow(all, "ins_1", "next", t0.Add(24*time.Hour)); !w.Since.Equal(t0) {
+		t.Fatalf("next brief must start at the first one's until: %+v", w)
+	}
 }
