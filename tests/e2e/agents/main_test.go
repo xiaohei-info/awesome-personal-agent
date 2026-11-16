@@ -5,6 +5,8 @@ package agents
 import (
 	"os"
 	"testing"
+
+	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
 // TestMain 在启动任何 apa serve 之前设置内核环境里的"机密"与 XDG 变量（ACT-OUT-05）：
@@ -12,5 +14,5 @@ import (
 func TestMain(m *testing.M) {
 	os.Setenv("ACC_SECRET", "leak")
 	os.Setenv("XDG_CONFIG_HOME", "/tmp/acc-xdg-config")
-	os.Exit(m.Run())
+	os.Exit(baseline.Run(m))
 }

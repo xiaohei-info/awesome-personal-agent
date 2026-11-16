@@ -128,6 +128,17 @@ func buildBinaries() (map[string]string, error) {
 	return bin, nil
 }
 
+// Run 跑完 m.Run 后删除本进程构建的二进制目录，用 defer 保证测试 panic 时也清。
+// 每个用到 New/Setup 的测试包在 TestMain 里 os.Exit(baseline.Run(m))；二进制仍是每个进程只构建一次。
+func Run(m *testing.M) int {
+	defer func() {
+		if buildDir != "" {
+			os.RemoveAll(buildDir)
+		}
+	}()
+	return m.Run()
+}
+
 // New 准备目录与二进制，但不启动任何进程；按 StartKernel、IssueCredentials、CreateProjects、StartModelStub、
 // DeclareStubHarness 的顺序逐步建立环境，或直接用 Setup。
 func New(t testing.TB) *Env {
