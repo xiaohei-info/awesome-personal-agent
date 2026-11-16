@@ -177,6 +177,8 @@ type disposeIn struct {
 	Conditions []metrics.Condition `json:"conditions,omitempty"`
 	Alert      bool                `json:"alert,omitempty"`
 	WouldAlert bool                `json:"would_alert,omitempty"`
+	// Placed 是 extract 出口里每条候选各自的合并信息（Item 是它落在的事项）；其余出口用上面内嵌的 mergeFields。
+	Placed []placed `json:"placed,omitempty"`
 	// Draft 是第 5 步起草的结果，只在初筛后进建议流的处置上有（处置载荷的 draft，§9.3）。
 	Draft *Draft `json:"draft,omitempty"`
 }
@@ -231,6 +233,11 @@ func (s *Service) Register(x *command.Executor) error {
 			}
 			if err := applyMerge(c, v.Event, v.Item, v.mergeFields); err != nil {
 				return nil, err
+			}
+			for _, pl := range v.Placed {
+				if err := applyMerge(c, v.Event, pl.Item, pl.mergeFields); err != nil {
+					return nil, err
+				}
 			}
 			payload := map[string]any{"event": v.Event, "disposition": v.Disposition, "item": v.Item, "rule": v.Rule,
 				"unjudged_reason": v.UnjudgedReason, "judgment": v.Judgment, "merged": v.Merge}
@@ -320,8 +327,8 @@ type snapshot struct {
 	made    map[string]string // 来源事件 id → 已为它建出的事项（上一轮中途失败留下的）
 	projs   []domain.Project
 	policy  int
-	locs    []string    // 入站初筛与起草实际会调用的端点的位置：外发范围按它们取
-	open    []candidate // 未关闭的事项：起草时"补到已有事项"的候选来源
+	locs    []string   // 入站初筛与起草实际会调用的端点的位置：外发范围按它们取
+	open    []openItem // 未关闭的事项：预筛、起草、抽取共用清单的来源（§9.3）
 }
 
 func (s *Service) load(ctx context.Context) (sn snapshot, err error) {
@@ -363,9 +370,12 @@ func (sn *snapshot) loadFacts(tx *store.Tx) error {
 	sn.made = map[string]string{}
 	for _, it := range its {
 		if it.Phase == domain.PhaseOpen || it.Phase == domain.PhaseWaiting || it.Phase == domain.PhaseNeedsInput {
-			c := candidate{ID: it.ID, Title: it.Title, Project: it.Project}
+			c := openItem{ID: it.ID, Title: it.Title, Project: it.Project, updated: it.UpdatedAt}
 			if it.Origin != nil {
-				c.Sender = it.Origin.Actor
+				c.sender, c.source = it.Origin.Actor, it.Origin.Source
+			}
+			if it.WaitingOn != nil {
+				c.waitingOn, c.external = it.WaitingOn.Ref, it.WaitingOn.Kind == domain.WaitingExternal
 			}
 			sn.open = append(sn.open, c)
 		}
@@ -515,6 +525,7 @@ type proposal struct {
 	deadline   *time.Time
 	plannedFor string
 	rec        *domain.Proposal
+	body       string // 非空时作事项正文，否则用来源事件的正文（抽取按 refs 取）
 	judgment   string // 初筛的判断记录 id
 	draft      *Draft // 起草的结果；没有起草（规则直出、手动转建议）时为空
 }
@@ -793,9 +804,25 @@ type asked struct {
 }
 
 // ask 经级联问一道是非题（初筛、对话预筛）：分类端点先答，不确定带内由对话端点重答，各级未定取模板的保守默认。
-func (s *Service) ask(ctx context.Context, src domain.Source, ev domain.SourceEvent, pack, tmpl, hint string, o domain.Outbound) (asked, error) {
+// withList 在资料正文之后附"未关闭事项"一节（预筛用，§9.3）；清单按接收端点的位置过滤，随资料一起计入预算。
+func withList(base func(string) (string, bool), list func(locality string) lists) func(string) (string, bool) {
+	return func(locality string) (string, bool) {
+		text, ok := base(locality)
+		if !ok {
+			return "", false
+		}
+		return strings.TrimSpace(text + "\n\n" + list(locality).section()), true
+	}
+}
+
+// ask 的 list 非空时（对话预筛、抽取预筛）在资料后附未关闭事项清单。
+func (s *Service) ask(ctx context.Context, src domain.Source, ev domain.SourceEvent, pack, tmpl, hint string, o domain.Outbound, list func(string) lists) (asked, error) {
+	mat := material(ev, o)
+	if list != nil {
+		mat = withList(mat, list)
+	}
 	v, err := s.o.Judge.Judge(ctx, direct.JudgeCall{Pack: pack, Template: tmpl, Input: eventInput(src, ev, hint, nil),
-		Material: material(ev, o), Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
+		Material: mat, Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
 	if err != nil {
 		return asked{}, err
 	}
@@ -839,7 +866,7 @@ func (s *Service) screenAndDraft(ctx context.Context, sn snapshot, src domain.So
 	if why := outboundGate(o, pol, src); why != "" {
 		return proposal{}, why, nil
 	}
-	a, err := s.ask(ctx, src, ev, screenPack, screen, hint, o)
+	a, err := s.ask(ctx, src, ev, screenPack, screen, hint, o, nil)
 	if err != nil {
 		return proposal{}, "", err
 	}
@@ -865,8 +892,8 @@ func (s *Service) screenAndDraft(ctx context.Context, sn snapshot, src domain.So
 	return p, "", nil
 }
 
-// draftOut 是 triage-draft 的输出。
-type draftOut struct {
+// fieldsOut 是起草（triage-draft）的输出，也是抽取里每条候选的字段（§9.3）：两者同一组字段。
+type fieldsOut struct {
 	Title      string `json:"title"`
 	Summary    string `json:"summary"`
 	Kind       string `json:"kind"`
@@ -888,14 +915,8 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 		p.draft = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}
 		return nil
 	}
-	cands := sn.candidates(ev, p.project)
-	projs := make([]map[string]string, 0, len(sn.projs))
-	for _, pr := range sn.projs {
-		if pr.Status == domain.ProjectActive {
-			projs = append(projs, map[string]string{"id": pr.ID, "name": pr.Name})
-		}
-	}
-	in := eventInput(src, ev, hint, map[string]any{"projects": projs, "candidates": cands, "today": s.o.Now().Format(time.DateOnly)})
+	list := func(loc string) lists { return sn.lists(ev, p.project, loc) }
+	in := eventInput(src, ev, hint, s.listInput(list(locality)))
 	var out direct.Outcome
 	var err error
 	for attempt := 0; ; attempt++ { // 调用时端点位置变了，Judge 拒绝发送：按新位置重裁剪再来
@@ -908,6 +929,7 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 			return err
 		}
 		locality = policy.EffectiveLocality(pol.GenerateEndpoint.Locality)
+		in = eventInput(src, ev, hint, s.listInput(list(locality)))
 		var ok bool
 		if text, ok = material(ev, o)(locality); !ok {
 			p.reason += "; draft skipped: outbound scope excludes the generate endpoint"
@@ -936,13 +958,20 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 		p.draft = &Draft{Outcome: DraftFailed, Code: DraftCodeUnsettled}
 		return nil
 	}
-	var d draftOut
+	var d fieldsOut
 	if json.Unmarshal(out.Final().Result, &d) != nil || d.Title == "" || !validKind(d.Kind) {
 		p.reason += "; draft failed: output does not fit the draft schema"
 		p.draft = &Draft{Outcome: DraftFailed, Code: DraftCodeSchema}
 		return nil
 	}
 	p.draft = &Draft{Outcome: DraftOK}
+	s.fill(sn, p, d, list(locality))
+	return nil
+}
+
+// fill 把起草或抽取候选的一组字段写进 p。模型只能从清单里选：清单之外的项目不归项目，
+// 清单之外的补到目标使推荐作废，都不报错（§9.3）。
+func (s *Service) fill(sn snapshot, p *proposal, d fieldsOut, l lists) {
 	p.title, p.summary, p.kind = d.Title, d.Summary, domain.Kind(d.Kind)
 	if sn.hasProject(d.Project) {
 		p.project = d.Project
@@ -958,12 +987,11 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 	case "accept", "dismiss":
 		p.rec.Recommend = d.Recommend
 	case "attach":
-		if slices.ContainsFunc(cands, func(c candidate) bool { return c.ID == d.AttachTo }) { // 只能从内核给的清单里选，不采纳编造的 id
+		if slices.ContainsFunc(l.OpenItems, func(c listItem) bool { return c.ID == d.AttachTo }) {
 			p.rec.Recommend, p.rec.AttachTo = "attach", d.AttachTo
 		}
 	}
 	p.rec.Reason = d.Reason
-	return nil
 }
 
 // validKind：起草的 kind 只能是内置模板 schema 里列出的值，未知值视同输出不合 schema。
@@ -980,38 +1008,100 @@ func (sn *snapshot) hasProject(id string) bool {
 	return id != "" && slices.ContainsFunc(sn.projs, func(p domain.Project) bool { return p.ID == id && p.Status == domain.ProjectActive })
 }
 
-// candidate 是起草时可推荐"补到"的未关闭事项。
-type candidate struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Project string `json:"project,omitempty"`
-	Sender  string `json:"sender,omitempty"`
-	score   float64
+// openItem 是未关闭事项（open、waiting、needs_input）在清单里的来源；source 是它出自的来源。
+type openItem struct {
+	ID, Title, Project string
+	sender, source     string
+	waitingOn          string
+	external           bool // 在等外部回音
+	updated            time.Time
+	score              float64
 }
 
-const maxCandidates = 8
+// listItem 是送给模型的一条未关闭事项。
+type listItem struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Project   string `json:"project,omitempty"`
+	WaitingOn string `json:"waiting_on,omitempty"`
+}
 
-// candidates 取同项目或同发送者、标题相近的未关闭事项，最像的在前。
-func (sn *snapshot) candidates(ev domain.SourceEvent, project string) []candidate {
-	var out []candidate
-	for _, c := range sn.open {
-		sim := similarity(c.Title, ev.Subject)
-		sameProject := project != "" && c.Project == project
-		sameSender := ev.Sender != "" && c.Sender == ev.Sender
-		if sim < 0.3 && !sameProject && !sameSender {
-			continue
+// maxOpenItems 是清单里未关闭事项的上限（§9.3）。
+const maxOpenItems = 100
+
+// lists 是预筛、起草、抽取共用的清单：活动项目，以及按相关度排序、至多 maxOpenItems 条的未关闭事项。
+// Total 是过滤后的事项总数，被截掉时才写进输入。
+type lists struct {
+	Projects  []map[string]string
+	OpenItems []listItem
+	Total     int
+}
+
+// lists 组出送往 locality 位置端点的清单。事项标题是工作现场的内容（§14.14）：出自外发范围未选择或为 none 的来源的事项不进清单。
+// 相关度：同项目、同发送者、标题相近、正在等外部回音的排前，其余按更新时间。
+func (sn *snapshot) lists(ev domain.SourceEvent, project, locality string) lists {
+	l := lists{Projects: []map[string]string{}}
+	for _, pr := range sn.projs {
+		if pr.Status == domain.ProjectActive {
+			l.Projects = append(l.Projects, map[string]string{"id": pr.ID, "name": pr.Name})
 		}
-		c.score = sim
-		if sameProject {
-			c.score += 0.2
-		}
-		if sameSender {
-			c.score += 0.2
-		}
-		out = append(out, c)
 	}
-	slices.SortStableFunc(out, func(a, b candidate) int { return cmp.Compare(b.score, a.score) })
-	return out[:min(len(out), maxCandidates)]
+	var open []openItem
+	for _, c := range sn.open {
+		if src, err := sn.source(c.source); err == nil { // 不在登记表里的（手动建的、内部来源）不受来源范围约束
+			if sc := registry.ScopeFor(src.Outbound, locality); sc == "" || sc == registry.ScopeNone {
+				continue
+			}
+		}
+		c.score = similarity(c.Title, ev.Subject)
+		if project != "" && c.Project == project {
+			c.score += 0.2
+		}
+		if ev.Sender != "" && c.sender == ev.Sender {
+			c.score += 0.2
+		}
+		if c.external {
+			c.score += 0.2
+		}
+		open = append(open, c)
+	}
+	slices.SortStableFunc(open, func(a, b openItem) int {
+		if c := cmp.Compare(b.score, a.score); c != 0 {
+			return c
+		}
+		return b.updated.Compare(a.updated)
+	})
+	l.Total = len(open)
+	for _, c := range open[:min(len(open), maxOpenItems)] {
+		l.OpenItems = append(l.OpenItems, listItem{ID: c.ID, Title: c.Title, Project: c.Project, WaitingOn: c.waitingOn})
+	}
+	return l
+}
+
+// section 是预筛资料正文后附的"未关闭事项"一节。
+func (l lists) section() string {
+	var b strings.Builder
+	b.WriteString("未关闭事项")
+	if l.Total > len(l.OpenItems) {
+		fmt.Fprintf(&b, "（共 %d 条，只列前 %d 条）", l.Total, len(l.OpenItems))
+	}
+	b.WriteString("：")
+	if len(l.OpenItems) == 0 {
+		b.WriteString("无")
+	}
+	for _, c := range l.OpenItems {
+		fmt.Fprintf(&b, "\n- %s %s", c.ID, c.Title)
+	}
+	return b.String()
+}
+
+// listInput 是起草与抽取的结构化输入里的清单与日期；模板不能改它们的形状（C.7）。
+func (s *Service) listInput(l lists) map[string]any {
+	in := map[string]any{"projects": l.Projects, "open_items": l.OpenItems, "today": s.o.Now().Format(time.DateOnly)}
+	if l.Total > len(l.OpenItems) {
+		in["open_items_total"] = l.Total
+	}
+	return in
 }
 
 // similarity 是两个标题按相邻字符对算出的 Dice 系数（0 到 1）。
@@ -1038,18 +1128,41 @@ func bigrams(s string) map[[2]rune]bool {
 	return out
 }
 
-// extractOut 是 triage-extract 的输出。
+// extractOut 是 triage-extract 的输出：每条候选与起草同一组字段，另有 refs（§9.3）。除 title 与 kind 外都可缺，旧的三字段输出仍被接受。
 type extractOut struct {
 	Candidates []struct {
-		Title   string `json:"title"`
-		Kind    string `json:"kind"`
-		Summary string `json:"summary"`
+		fieldsOut
+		Refs []int `json:"refs"`
 	} `json:"candidates"`
 }
 
 const maxExtracted = 20
 
-// extract 是 extract 出口：先预筛"要不要抽取"，再由生成型抽出零到多条候选，每条候选各自成为 proposed 事项。
+// placed 是 extract 出口里一条候选落在哪个事项上，以及随处置写入的合并信息。
+type placed struct {
+	Item string `json:"item"`
+	mergeFields
+}
+
+// refBody 是候选事项的正文：refs 指到的那几条消息；越界的下标丢弃，没有可用的下标时返回空，由调用方用来源正文。
+func refBody(ev domain.SourceEvent, refs []int) string {
+	var b strings.Builder
+	seen := map[int]bool{}
+	for _, r := range refs {
+		if r < 0 || r >= len(ev.Messages) || seen[r] {
+			continue
+		}
+		seen[r] = true
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "%s: %s", ev.Messages[r].Sender, ev.Messages[r].Text)
+	}
+	return b.String()
+}
+
+// extract 是 extract 出口：先预筛"要不要抽取"（规则写 prescreen: none 时跳过，对话候选捕获除外），再由生成型抽出零到多条候选，
+// 每条候选走与起草结果相同的第 6 步：合并键取规范化标题加发送者，并入 7 天内已有的建议或新建 proposed 事项。
 // 事项的幂等键带候选序号，崩溃后重跑不产生重复事项（模型结果按输入指纹复用）。
 func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, m *matched) error {
 	var pr, ex string
@@ -1065,9 +1178,16 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 	if why := outboundGate(o, pol, src); why != "" {
 		return s.withdraw(ctx, m, ev, proposal{}, why)
 	}
-	a, err := s.ask(ctx, src, ev, prescreenPack, prescreen, "", o)
+	project, err := s.project(sn, src, ev, m)
 	if err != nil {
 		return err
+	}
+	list := func(loc string) lists { return sn.lists(ev, project, loc) }
+	var a asked
+	if pr != packs.NoPrescreen || IsCaptureSource(src.ID) {
+		if a, err = s.ask(ctx, src, ev, prescreenPack, prescreen, "", o, list); err != nil {
+			return err
+		}
 	}
 	if a.unavailable != "" {
 		return s.withdraw(ctx, m, ev, proposal{}, a.unavailable)
@@ -1080,7 +1200,8 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 	if !allowed {
 		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, outboundUnsetPrefix+"the generate endpoint is excluded by the outbound scope")
 	}
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: extractPack, Template: extract, Input: eventInput(src, ev, "", nil), Material: text, RequireLocality: locality,
+	l := list(locality)
+	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: extractPack, Template: extract, Input: eventInput(src, ev, "", s.listInput(l)), Material: text, RequireLocality: locality,
 		Scope: direct.Scope{Source: src.ID}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
 	if errors.Is(err, model.ErrPaused) {
 		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, pausedPrefix+err.Error())
@@ -1095,11 +1216,9 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 	if !out.Settled || json.Unmarshal(out.Final().Result, &x) != nil {
 		return fmt.Errorf("extract template %s/%s gave no usable candidates", extractPack, extract)
 	}
-	project, err := s.project(sn, src, ev, m)
-	if err != nil {
-		return err
-	}
 	var ids []string
+	var places []placed
+	seen := map[string]bool{} // 同一条事件里标题相同的候选只取一条
 	for i, c := range x.Candidates {
 		if i == maxExtracted {
 			break
@@ -1107,20 +1226,38 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 		if strings.TrimSpace(c.Title) == "" || !validKind(c.Kind) {
 			continue
 		}
-		p := proposal{kind: domain.Kind(c.Kind), title: c.Title, summary: c.Summary, reason: "extracted from " + ev.ID, judgment: a.judgment,
-			rec: &domain.Proposal{LowConfidence: a.low, Sources: []string{ev.ID}}}
-		id, err := s.createItemKeyed(ctx, system, m.key(), fmt.Sprintf("inbound:item:%s:%d", ev.ID, i), src, ev, p, project)
+		key := titleKey(c.Title, ev.Sender)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		into, attachTo, err := s.planMerge(ctx, key)
 		if err != nil {
 			return err
 		}
-		ids = append(ids, id)
+		if into != "" {
+			ids, places = append(ids, into), append(places, placed{into, mergeFields{MergeKey: key, Merge: true}})
+			continue
+		}
+		p := proposal{reason: "extracted from " + ev.ID, judgment: a.judgment, body: refBody(ev, c.Refs),
+			rec: &domain.Proposal{LowConfidence: a.low, Sources: []string{ev.ID}}}
+		s.fill(sn, &p, c.fieldsOut, l)
+		cp := p.project
+		if project != "" { // 规则或来源给了项目就用它；候选的项目只在没有时补上
+			cp = project
+		}
+		id, err := s.createItemKeyed(ctx, system, m.key(), fmt.Sprintf("inbound:item:%s:%d", ev.ID, i), src, ev, p, cp)
+		if err != nil {
+			return err
+		}
+		ids, places = append(ids, id), append(places, placed{id, mergeFields{MergeKey: key, New: true, AttachTo: attachTo}})
 	}
 	d := disposeIn{Event: ev.ID, Rule: m.key(), Judgment: a.judgment}
 	if len(ids) == 0 {
 		d.Disposition, d.Reason = domain.DispositionIgnored, "extract found no candidate"
 		return s.dispose(ctx, m, ev, d)
 	}
-	d.Disposition, d.Item, d.Items, d.Reason = domain.DispositionProposed, ids[0], ids, fmt.Sprintf("extracted %d candidate(s)", len(ids))
+	d.Disposition, d.Item, d.Items, d.Placed, d.Reason = domain.DispositionProposed, ids[0], ids, places, fmt.Sprintf("extracted %d candidate(s)", len(ids))
 	return s.dispose(ctx, m, ev, d)
 }
 
@@ -1192,7 +1329,7 @@ func (s *Service) createItemKeyed(ctx context.Context, id command.Identity, rule
 	if ref == "" {
 		ref = ev.ID
 	}
-	in := map[string]any{"kind": p.kind, "title": p.title, "summary": p.summary, "body": ev.Detail, "project": project,
+	in := map[string]any{"kind": p.kind, "title": p.title, "summary": p.summary, "body": orElse(p.body, ev.Detail), "project": project,
 		"origin": domain.Origin{Source: src.ID, Actor: ev.Sender, Ref: ref}, "reason": p.reason,
 		"ext": map[string]string{"source_event": ev.ID}}
 	if p.deadline != nil {

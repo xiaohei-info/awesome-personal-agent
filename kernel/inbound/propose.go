@@ -206,9 +206,14 @@ func mergeKeyOf(ev domain.SourceEvent) string {
 		return "link:" + l
 	}
 	if t := normalizeText(ev.Subject); t != "" {
-		return "title:" + t + "\x1f" + normalizeText(ev.Sender)
+		return titleKey(ev.Subject, ev.Sender)
 	}
 	return ""
+}
+
+// titleKey 是不带链接的合并键：规范化后的标题加发送者。
+func titleKey(title, sender string) string {
+	return "title:" + normalizeText(title) + "\x1f" + normalizeText(sender)
 }
 
 func normalizeText(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
