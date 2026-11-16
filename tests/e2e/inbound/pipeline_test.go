@@ -232,7 +232,7 @@ func TestFlowInboundPipeline(t *testing.T) {
 		k.emit("inp-cand-1", "inp-cand 供应商合同第三版")
 		ev := k.waitEvent(inpSrc, "inp-cand-1", wait)
 		reqs := k.modelAbout("inp-cand 供应商合同第三版", false)
-		if len(reqs) != 1 || !strings.Contains(reqs[0], "candidates") || !strings.Contains(reqs[0], t2) {
+		if len(reqs) != 1 || !strings.Contains(reqs[0], "open_items") || !strings.Contains(reqs[0], t2) {
 			t.Fatalf("起草请求的结构化输入里应有含 T2 的候选清单: %v", reqs)
 		}
 		p := k.item(ev.Item).Proposal

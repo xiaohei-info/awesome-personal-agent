@@ -46,3 +46,20 @@ func TestSourceRuleExitsAndWhereValidation(t *testing.T) {
 		}
 	}
 }
+
+// ACT-XAL-09（附录 C.11）：prescreen: none 只用于 extract 出口；包里不能有名为 none 的提示词模板。
+func TestPrescreenNoneValidation(t *testing.T) {
+	if got := validate(t, rulePack("    then: extract\n    prescreen: none\n"), nil); got != "" {
+		t.Errorf("extract + prescreen none rejected: %s", got)
+	}
+	for _, then := range []string{"screen", "proposed", "ignore", "digest"} {
+		got := validate(t, rulePack("    then: "+then+"\n    prescreen: none\n"), nil)
+		if !strings.Contains(got, "prescreen") {
+			t.Errorf("then %s: error %q should name prescreen", then, got)
+		}
+	}
+	got := validate(t, v2Head, map[string]string{"none": "---\nagent: generate\noutput_schema: {type: object}\n---\nq\n"})
+	if !strings.Contains(got, "none") {
+		t.Errorf("template named none: error %q", got)
+	}
+}

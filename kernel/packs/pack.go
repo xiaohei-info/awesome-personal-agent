@@ -75,6 +75,9 @@ type ClockRule struct {
 	StaleAfter   string `yaml:"stale_after" json:",omitempty"`   // 只用于 stale，默认 14d
 }
 
+// NoPrescreen 是 prescreen 的保留字：extract 出口跳过预筛（附录 C.5）。
+const NoPrescreen = "none"
+
 // Where、Screen、Draft、Prescreen、Extract、OnUpdate 是 v0.2 新字段，带 omitempty 以保持 v0.1 规则 hash 不变（见 ClockRule）。
 type SourceRule struct {
 	ID        string         `yaml:"id"`
@@ -578,6 +581,9 @@ func checkSourceRule(r SourceRule) error {
 	default:
 		return fmt.Errorf("%s: then %q must be proposed, ignore, screen, extract, digest or alert (judge is the old name of screen)", where, r.Then)
 	}
+	if r.Prescreen == NoPrescreen && r.Then != "extract" {
+		return fmt.Errorf("%s: prescreen: %s only applies to then: extract", where, NoPrescreen)
+	}
 	if r.Then == "alert" && len(r.Where) == 0 {
 		return fmt.Errorf("%s: an alert rule must carry where[]: alert cannot hang on every event", where)
 	}
@@ -651,6 +657,10 @@ func loadParts(p *Pack, files map[string][]byte, names []string, schema func(str
 		switch dir {
 		case "prompts/":
 			name := strings.TrimSuffix(base, ".md")
+			if name == NoPrescreen {
+				bad = append(bad, fmt.Sprintf("%s: %q is reserved for prescreen: %s, rename the template", n, name, NoPrescreen))
+				continue
+			}
 			pr, err := parsePrompt(files[n], n, schema)
 			if err != nil {
 				bad = append(bad, fmt.Sprintf("%s: %v", n, err))
