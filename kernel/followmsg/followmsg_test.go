@@ -1005,3 +1005,32 @@ func TestSourceObjectUpdateRefreshesAcceptedItem(t *testing.T) {
 		t.Fatalf("accepted item not refreshed: %+v", it)
 	}
 }
+
+// ACT-BUD-08：来源对象更新刷新事项正文时同样按 4000 字符规则：写新版本的前 4000 个字符并保留"原文较长"与来源原文页链接；账本里的原文不变。
+func TestRefreshWritesAtMost4000CharsOfTheBody(t *testing.T) {
+	e := newEnv(t)
+	long := func(id, lead string) map[string]any {
+		c := comment(id, "obj#long")
+		c["detail"] = lead + strings.Repeat("字", 200*1024/3)
+		return c
+	}
+	e.emit(long("l1", "旧版开头"))
+	item := e.msg("l1").Item
+	e.emit(long("l2", "新版开头"))
+	body := e.item(item).Body
+	if !strings.HasPrefix(body, "新版开头") || strings.Contains(body, "旧版开头") {
+		t.Fatalf("正文没有刷新为新版本：%.30q", body)
+	}
+	if head := []rune(body); !strings.Contains(string(head[4000:]), "原文较长") || !strings.Contains(body, "/sources/events/"+e.msg("l2").ID) || len(head) > 4200 {
+		t.Fatalf("缺少注明/链接或写得过长：%d", len(head))
+	}
+	if n := len([]rune(e.msg("l2").Detail)); n < 60000 {
+		t.Fatalf("来源事件原文被改动：%d", n)
+	}
+	// 短正文照旧完整写入。
+	e.emit(comment("s1", "obj#short"))
+	e.emit(comment("s2", "obj#short"))
+	if got := e.item(e.msg("s1").Item).Body; got != "请改一下命名" {
+		t.Fatalf("短正文被改动：%q", got)
+	}
+}

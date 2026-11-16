@@ -571,3 +571,26 @@ func TestSaveUnchangedOverLegacyWritesNewVersion(t *testing.T) {
 		t.Fatalf("api key lost: %+v", p.GenerateEndpoint)
 	}
 }
+
+// ACT-BUD-01（generate-budget-setting）：生成端点的资料预算未设过读作 24000；Web 保存后读回；
+// 省略该字段的请求（旧形状）不重置已存的值；负数被拒。
+func TestGenerateMaterialBudget(t *testing.T) {
+	e := setup(t)
+	gen := func(out map[string]json.RawMessage) map[string]any {
+		var g map[string]any
+		_ = json.Unmarshal(out["generate_endpoint"], &g)
+		return g
+	}
+	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v1","model":"m"}}`)); g["max_material_chars"] != 24000.0 {
+		t.Fatalf("缺省应读作 24000：%v", g)
+	}
+	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v1","model":"m","max_material_chars":3000}}`)); g["max_material_chars"] != 3000.0 {
+		t.Fatalf("保存后应读回 3000：%v", g)
+	}
+	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v2","model":"m"}}`)); g["max_material_chars"] != 3000.0 {
+		t.Fatalf("省略字段不得重置预算：%v", g)
+	}
+	if rec := e.do("PUT", routes[2], `{"generate_endpoint":{"url":"http://gen.example/v1","max_material_chars":-1}}`, e.web); rec.Code != 400 {
+		t.Fatalf("负数预算被接受：%d", rec.Code)
+	}
+}

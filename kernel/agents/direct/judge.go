@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/budget"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/bands"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
@@ -46,11 +47,15 @@ type JudgeCall struct {
 	// ok 为假表示该位置的端点被外发范围排除，这一级记 skipped 交下一级（§14.14）。为空时两种位置都给 MaterialText。
 	Material     func(locality string) (text string, ok bool)
 	MaterialText string
-	Subject      string // 判断的对象：来源事件、事项或对话增量的 id
-	Source       string // subject 是来源事件时的来源 id
-	Project      string
-	Scope        Scope // event_stats 的统计范围
-	NoStats      bool  // 为真时不附带 Event 统计
+	// MaterialSource 同 Material，但给出带结构的资料（正文、聚合消息、清单），先于 Material 与 MaterialText 采用：
+	// 每一级按自己端点的资料预算裁剪（判断端点 max_material_chars，对话端点 generate_endpoint.max_material_chars），
+	// 聚合消息因此能整条保留（§8.4）。
+	MaterialSource func(locality string) (budget.Source, bool)
+	Subject        string // 判断的对象：来源事件、事项或对话增量的 id
+	Source         string // subject 是来源事件时的来源 id
+	Project        string
+	Scope          Scope // event_stats 的统计范围
+	NoStats        bool  // 为真时不附带 Event 统计
 	// Band 是策略对不确定带的覆盖（只由本人批准，§8.10）；空时取模板的值。
 	Band *record.Band
 	// Shadow 为真时分类端点只记分、不定案：级联按没有它继续，记录标 shadow（§8.3）。
@@ -156,8 +161,9 @@ type pending struct {
 	input   json.RawMessage // 含 Event 统计，送给各级
 	rawIn   json.RawMessage // 不含统计，进指纹
 	stats   *Stats
-	prefix  map[string]*classAns // 分类端点的结果（预取或逐级问到的）
-	firstFP string               // 第一个真正算过指纹的级，作记录的 fingerprint
+	prefix  map[string]*classAns     // 分类端点的结果（预取或逐级问到的）
+	firstFP string                   // 第一个真正算过指纹的级，作记录的 fingerprint
+	traces  map[string]*budget.Trace // 各级送出的资料裁剪量，写进判断记录的 levels[].material
 }
 
 // classAns 是分类端点对一道题的结果（含复用）。
@@ -224,11 +230,31 @@ func (s *Service) prepare(ctx context.Context, c JudgeCall, pol policy.Policy) (
 	return p, nil
 }
 
-func (p *pending) material(locality string) (string, bool) {
-	if p.c.Material != nil {
-		return p.c.Material(locality)
+func (p *pending) source(locality string) (budget.Source, bool) {
+	switch {
+	case p.c.MaterialSource != nil:
+		return p.c.MaterialSource(locality)
+	case p.c.Material != nil:
+		t, ok := p.c.Material(locality)
+		return budget.Source{Body: t}, ok
 	}
-	return p.c.MaterialText, true
+	return budget.Source{Body: p.c.MaterialText}, true
+}
+
+// fit 取某个位置的资料并裁到 max 字符以内，留痕记在这一级上；ok 为假表示该位置被外发范围排除。
+// 外发范围的裁剪已在 source 里做完，这里只做预算（先范围，后预算）。
+func (p *pending) fit(level, locality string, max int) (budget.Result, bool) {
+	src, ok := p.source(locality)
+	if !ok {
+		return budget.Result{}, false
+	}
+	r := budget.Fit(src, max)
+	if p.traces == nil {
+		p.traces = map[string]*budget.Trace{}
+	}
+	t := r.Trace
+	p.traces[level] = &t
+	return r, true
 }
 
 func (p *pending) question() string {
@@ -323,11 +349,12 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 		if p.prefix == nil {
 			p.prefix = map[string]*classAns{}
 		}
-		mat, ok := p.material(loc)
+		res, ok := p.fit("classifier", loc, ep.MaxMaterialChars)
 		if !ok {
 			p.prefix["classifier"] = &classAns{}
 			continue
 		}
+		mat := res.Text
 		fp := p.fp("classifier", judgeEndpointID(&ep), mat)
 		if p.firstFP == "" {
 			p.firstFP = fp
@@ -345,7 +372,7 @@ func (s *Service) classify(ctx context.Context, group []*pending, ep policy.Judg
 			continue
 		}
 		j := &job{fp: fp, q: model.Question{ID: "q" + strconv.Itoa(len(jobs)+1), Question: p.question(), Criteria: p.meta.Criteria,
-			Input: p.input, Material: mat}, owns: []*pending{p}}
+			Input: p.input, Material: mat, Truncated: res.Mode != budget.ModeNone}, owns: []*pending{p}}
 		jobs = append(jobs, j)
 		byFP[fp] = j
 	}
@@ -577,6 +604,7 @@ func (s *Service) classLevel(ctx context.Context, p *pending, pol policy.Policy,
 		return lv, ctx.Err()
 	}
 	lv.DurationMs, lv.Reused, lv.Model = a.elapsed.Milliseconds(), a.reused, firstNonEmpty(a.Model, ep.Model)
+	lv.Material = p.traces["classifier"]
 	if a.ErrCode != "" {
 		lv.Outcome, lv.ErrorCode, lv.asked = record.OutcomeError, a.ErrCode, true
 		return lv, nil
@@ -651,11 +679,13 @@ func (s *Service) chatLevel(ctx context.Context, p *pending, pol policy.Policy) 
 	}
 	loc := policy.EffectiveLocality(ep.Locality)
 	lv.Endpoint, lv.Locality, lv.Model = hostOf(ep.URL), loc, ep.Model
-	mat, ok := p.material(loc)
+	res, ok := p.fit("chat", loc, ep.MaterialBudget())
 	if !ok {
 		lv.ErrorCode = "outbound_scope"
 		return lv, nil
 	}
+	mat := res.Text
+	lv.Material = p.traces["chat"]
 	schema, err := chatSchema(p.meta)
 	if err != nil {
 		return lv, err

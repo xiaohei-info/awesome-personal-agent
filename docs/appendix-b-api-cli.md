@@ -216,7 +216,7 @@
 | | `PUT /settings/sources/{id}/content-retention` | 【规划中（v0.2.0）】来源的原文保留天数：`{"days": 90}`，`null` 为不清理（主文档 §6.15） | 只有 Web 登录 |
 | | 已有路由 POST /settings/purge 的新增请求体 | 【规划中（v0.2.0）】`object` 可以是来源事件 id；删除事项时可带 `"with_source_events": true` 连同它的来源事件一并删除（主文档 §6.15） | 只有 Web 登录 |
 | | 已有路由 POST /settings/grants 的新增请求体 | 【规划中（v0.2.0）】`actions` 为 `["import.apply"]` 时须带 `import: {"source", "max_records"}` 与不超过 7 天的 `expires_at`，不得带 `background`；`actions` 可含 `item.progress` | 只有 Web 登录 |
-| | 已有路由 /settings/model-endpoints 的新增字段 | 【规划中（v0.2.0）】`generate_endpoint.max_material_chars`：生成端点的资料预算，缺省 24000（主文档 §8.4） | 只有 Web 登录 |
+| | 已有路由 /settings/model-endpoints 的新增字段 | `generate_endpoint.max_material_chars`：生成端点的资料预算，缺省 24000（主文档 §8.4） | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/trusted-senders` | 只替换这个来源的转发白名单 `{"senders": [...]}`，经 `policy.Update`，记 `policy.changed` 与 `allowlist.changed`；来源声明为需确认时只接受空名单（清掉以前填的、不生效的条目），非空为 400（`sender_unverifiable`）；名单为空即策略里没有这个键，Web 再次按"从未设置"预填本人 | 只有 Web 登录 |
 | | `GET /settings/sources/{id}/self-sender` | 声明了 `sender.self: identity` 的来源：运行一次来源程序的 `identity` 模式（登记命令的第一个词加 `identity`，超时 10 秒），返回 `{"sender"}` 供预填；不产生来源事件、不写 Event；其他来源 404，程序失败或没给出身份时 409 `conflict` | 只有 Web 登录 |
 | | `PUT /settings/channels/{name}/answerers` | 只替换这个渠道的回答人白名单 `{"answerers": [...]}`，记 `policy.changed` 与 `allowlist.changed` | 只有 Web 登录 |
