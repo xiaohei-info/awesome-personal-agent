@@ -144,8 +144,18 @@ def test_wake_is_opt_in(wake, kernel, monkeypatch):
     assert ctx.injected == [] and len(kernel.deliveries) == 1 and "apa_wake_cli" in ctx.tools
 
 
+def test_loop_does_not_start_while_anything_is_missing(wake, kernel, monkeypatch):
+    kernel.wake()
+    monkeypatch.setenv("APA_WAKE_SESSION_KEY", SESSION)  # Hermes has not allowed injection (no config here)
+    ctx = Ctx()
+    wake.register(ctx)
+    time.sleep(0.3)
+    assert ctx.injected == [] and len(kernel.deliveries) == 1 and "apa_wake_cli" in ctx.tools
+
+
 def test_registered_loop_claims_in_background_and_survives_errors(wake, kernel, monkeypatch):
     monkeypatch.setenv("APA_WAKE_SESSION_KEY", SESSION)
+    monkeypatch.setattr(wake.readiness, "_injection_allowed", lambda key: True)
     monkeypatch.setattr(wake, "LONG_POLL_SECS", 0)
     monkeypatch.setattr(wake, "BACKOFF_SECS", 0.05)
     kernel.wake(run="")      # first delivery fails -> loop must keep going

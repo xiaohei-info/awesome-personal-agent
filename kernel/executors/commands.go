@@ -158,12 +158,17 @@ func apply2(f func(*command.Ctx, ref) (any, error)) func(*command.Ctx) (any, err
 
 func declare(c *command.Ctx, d Declaration) (any, error) {
 	// 内容与最新的待确认或已生效版本相同：不产生新版本，本人不必再确认一次（附录 A.2）。
-	for _, st := range []string{StatePending, StateActive} {
-		if cur, ok, err := record(c.Tx, d.Harness, 0, st); err != nil {
-			return nil, err
-		} else if ok && sameDoc(cur.Declaration, d) {
-			return ref{d.Harness, cur.Rev}, nil
-		}
+	// 与已生效版本相同时，插件已退回到生效的状态，仍待确认的旧版本随之作废（插件自动同步的开→关→又开回）。
+	if cur, ok, err := record(c.Tx, d.Harness, 0, StatePending); err != nil {
+		return nil, err
+	} else if ok && sameDoc(cur.Declaration, d) {
+		return ref{d.Harness, cur.Rev}, nil
+	}
+	if cur, ok, err := record(c.Tx, d.Harness, 0, StateActive); err != nil {
+		return nil, err
+	} else if ok && sameDoc(cur.Declaration, d) {
+		_, err := c.Tx.Exec("UPDATE executors_declaration SET state = ? WHERE harness = ? AND state = ?", StateSuperseded, d.Harness, StatePending)
+		return ref{d.Harness, cur.Rev}, err
 	}
 	if err := checkCollisions(c.Tx, d.Harness, d.Executors); err != nil {
 		return nil, err

@@ -279,7 +279,13 @@ func TestInvalidDeclarationsAreRejectedAndStoreNothing(t *testing.T) {
 			d.Headless.ExitCodes = map[string][]int{"session_missing": {1}}
 			d.Headless.ExitOutput = map[string][]string{"session_missing": {""}}
 		}),
-		"bad launch":          mod(func(d *Declaration) { d.MainSession = &MainSession{Launch: "daemon"} }),
+		"bad launch": mod(func(d *Declaration) { d.MainSession = &MainSession{Launch: "daemon"} }),
+		"missing while wake": mod(func(d *Declaration) {
+			d.MainSession = &MainSession{Wake: true, WakeMissing: []WakeGap{{Label{"甲", "a"}, Label{"乙", "b"}}}}
+		}),
+		"half wake gap": mod(func(d *Declaration) {
+			d.MainSession = &MainSession{WakeMissing: []WakeGap{{Label: Label{"甲", "a"}, How: Label{Zh: "乙"}}}}
+		}),
 		"empty selfcheck":     mod(func(d *Declaration) { d.Selfcheck = &Selfcheck{} }),
 		"half name":           mod(func(d *Declaration) { d.Name = &Label{Zh: "甲"} }),
 		"tools on undeclared": mod(func(d *Declaration) { d.Headless.Tools = map[string][]Label{"full": {{Zh: "终端", En: "Terminal"}}} }),
@@ -514,5 +520,41 @@ func TestSameDeclarationDoesNotMakeANewRevision(t *testing.T) {
 	}
 	if n := len(e.eventTypes(t)); n != 2 {
 		t.Fatalf("only declared + confirmed events expected, got %v", e.eventTypes(t))
+	}
+}
+
+// 插件自动同步：开→关（待确认 wake:false）→又开回（等于已生效）时，过时的待确认版本作废，本人不必处理。
+func TestDeclaringTheActiveContentSupersedesThePendingOne(t *testing.T) {
+	e := setup(t)
+	worker := e.bearer(t, auth.Spec{Kind: auth.Worker})
+	on := decl("acme")
+	on.MainSession = &MainSession{Wake: true}
+	e.must(t, worker, "executor.declare", on)
+	e.must(t, owner, "executor.confirm", ref{"acme", 1})
+	off := decl("acme")
+	off.MainSession = &MainSession{WakeMissing: []WakeGap{{Label{"还没打开唤醒", "Wake-up is off"}, Label{"打开它", "Turn it on"}}}}
+	e.must(t, worker, "executor.declare", off)
+	var pend struct{ Declarations []Record }
+	_ = json.Unmarshal(e.must(t, worker, "executor.pending", "").Value, &pend)
+	if len(pend.Declarations) != 1 || pend.Declarations[0].Declaration.MainSession.WakeMissing[0].How.Zh != "打开它" {
+		t.Fatalf("wake_missing must be stored with the pending declaration: %+v", pend.Declarations)
+	}
+	if got := string(e.must(t, worker, "executor.declare", on).Value); got != `{"harness":"acme","rev":1}` {
+		t.Fatalf("back to the active content: %s", got)
+	}
+	pend.Declarations = nil
+	_ = json.Unmarshal(e.must(t, worker, "executor.pending", "").Value, &pend)
+	if len(pend.Declarations) != 0 {
+		t.Fatalf("the stale pending declaration must be superseded: %+v", pend.Declarations)
+	}
+}
+
+// Web「接入其他 Agent」表单能生成的最小声明（不续接：默认 extract；单档、空参数）被内核接受（web/src/features/settings-agents/declaration-form.ts）。
+func TestFormMinimalDeclarationIsAccepted(t *testing.T) {
+	d, err := ParseDeclaration([]byte(`{"harness":"acme-cli","name":{"zh":"甲","en":"Acme CLI"},
+		"headless":{"command":["acme","run","{prompt}"],"session":{"extract":"$.session_id"},"access":{"read":[]}},
+		"main_session":{"wake":true}}`))
+	if err != nil || !d.MainSession.CanWake() || len(d.Headless.Access) != 1 {
+		t.Fatalf("form declaration: %+v %v", d, err)
 	}
 }

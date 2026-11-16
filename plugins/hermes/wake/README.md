@@ -4,9 +4,12 @@ Install: `ln -s "$PWD" ~/.hermes/plugins/apa-wake`, then `hermes plugins enable 
 Needs `apa` on PATH (or `APA_BIN`), `APA_URL`, and `APA_TOKEN` = the plugin's own worker/delegate token.
 
 Opt-in (default stays headless): set `APA_WAKE_SESSION_KEY` to the main session to wake and allow injection with
-`plugins.entries.apa-wake.allow_gateway_injection: true`. Without the env var only the `apa_wake_cli` tool is registered.
-With it set, `apa_declare_headless` declares `main_session.wake: true`; after the owner confirms that declaration, they pick
-"continue in our chat" on the Agent card in Web (or per rule). Switching back and forth needs no new declaration.
+`plugins.entries.apa-wake.allow_gateway_injection: true`. `readiness.py` is the one judgment of whether waking works
+here: the plugin is enabled, the session key is set, injection is allowed, and `APA_URL`/`APA_TOKEN` are set. The
+loop starts only when nothing is missing (otherwise only the `apa_wake_cli` tool is registered and the log names what
+is missing), and `apa-headless` declares `main_session.wake: true` or the same missing items as `wake_missing` when the
+gateway starts. After the owner confirms that declaration, they pick "continue in our chat" on the Agent card in Web
+(or per rule); the card shows what is missing otherwise. Switching back and forth needs no new declaration.
 
 Flow per `class: wake` delivery: claim → `POST /runs/{id}/credential` → `ctx.inject_message(facts, session_key=…)` → ack
 (`external_ref` = run id). Any failure → `/fail` (kernel backs off and retries); no chat-channel message is sent.
