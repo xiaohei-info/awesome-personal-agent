@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/sources/internal/content"
 )
 
 // 退出码沿用 §9.2。
@@ -71,24 +73,51 @@ type event struct {
 	CorrelationKeys []string `json:"correlation_keys,omitempty"`
 	Sender          string   `json:"sender,omitempty"`
 	MergeKey        string   `json:"merge_key,omitempty"`
+	// Headers 是起止时间、地点、组织者、参与者与状态（附录 D.8）；描述照旧整段进 Detail，不截断。
+	Headers map[string]any `json:"headers,omitempty"`
 }
 
 // gogEvent 是 gog 输出的单个日程（Google Calendar 事件字段）。
 type gogEvent struct {
-	ID                string   `json:"id"`
-	ICalUID           string   `json:"iCalUID"`
-	Status            string   `json:"status"`
-	Summary           string   `json:"summary"`
-	Description       string   `json:"description"`
-	Location          string   `json:"location"`
-	HTMLLink          string   `json:"htmlLink"`
-	Created           string   `json:"created"`
-	Updated           string   `json:"updated"`
-	Start             gogTime  `json:"start"`
-	OriginalStartTime *gogTime `json:"originalStartTime"`
-	Organizer         struct {
-		Email string `json:"email"`
-	} `json:"organizer"`
+	ID                string      `json:"id"`
+	ICalUID           string      `json:"iCalUID"`
+	Status            string      `json:"status"`
+	Summary           string      `json:"summary"`
+	Description       string      `json:"description"`
+	Location          string      `json:"location"`
+	HTMLLink          string      `json:"htmlLink"`
+	Created           string      `json:"created"`
+	Updated           string      `json:"updated"`
+	Start             gogTime     `json:"start"`
+	End               gogTime     `json:"end"`
+	OriginalStartTime *gogTime    `json:"originalStartTime"`
+	Organizer         gogPerson   `json:"organizer"`
+	Attendees         []gogPerson `json:"attendees"`
+}
+
+type gogPerson struct {
+	Email       string `json:"email"`
+	DisplayName string `json:"displayName"`
+}
+
+// String 写成 "名字 <邮箱>"；只有一项时只写那一项。
+func (p gogPerson) String() string {
+	switch {
+	case p.DisplayName != "" && p.Email != "":
+		return p.DisplayName + " <" + p.Email + ">"
+	case p.Email != "":
+		return p.Email
+	}
+	return p.DisplayName
+}
+
+func headers(g gogEvent) map[string]any {
+	hs := []content.Header{{Name: "Start", Value: g.Start.String()}, {Name: "End", Value: g.End.String()}, {Name: "Location", Value: g.Location},
+		{Name: "Organizer", Value: g.Organizer.String()}, {Name: "Status", Value: g.Status}}
+	for _, a := range g.Attendees {
+		hs = append(hs, content.Header{Name: "Attendee", Value: a.String()})
+	}
+	return content.NormalizeHeaders(hs)
 }
 
 type gogTime struct {
@@ -339,7 +368,7 @@ func convert(g gogEvent) (event, time.Time, error) {
 	ev := event{
 		ID: uid + "|" + recurrence + "|" + marker, Type: typ, Subject: subject, Summary: summary,
 		Detail: g.Description, Link: g.HTMLLink, OccurredAt: at.UTC().Format(time.RFC3339Nano),
-		CorrelationKeys: []string{uid + "|" + recurrence}, Sender: g.Organizer.Email,
+		CorrelationKeys: []string{uid + "|" + recurrence}, Sender: g.Organizer.Email, Headers: headers(g),
 		// 来源自带合并键优先于内核的 title+sender 推导（§9.3）：各重复实例各自成事项，同实例各版本合并。
 		MergeKey: uid + "|" + recurrence,
 	}
