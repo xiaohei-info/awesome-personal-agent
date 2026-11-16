@@ -270,3 +270,24 @@ func TestNotifyUrgentHonoursQuietCapAndMute(t *testing.T) {
 		t.Fatalf("muted delivery %+v", muted)
 	}
 }
+
+// 项目静音对紧急建议提醒同样生效：提醒没有事项，按它指向的建议所在项目对照。
+func TestNotifyUrgentHonoursProjectMute(t *testing.T) {
+	e := newEnv(t, true)
+	e.urgentSetup(true, fmt.Sprintf(`{"title":"签合同","kind":"task","project":%q,"reason":"r","urgent":true}`, e.web))
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "mute", func(p *policy.Policy) error {
+			p.Disturb.Routes = map[string]string{"reminder": "channel:bot"}
+			p.Disturb.Mutes = []policy.Mute{{Scope: policy.MuteProject, ID: e.web}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.emit("src_u", "exits", urgentEvent("u1", "https://x.example/1"))
+	ds := e.deliveries()
+	if len(ds) != 1 || ds[0].Suppressed != delivery.SuppressedMuted || ds[0].Route != delivery.RouteWeb {
+		t.Fatalf("deliveries %+v", ds)
+	}
+}

@@ -276,3 +276,21 @@ func TestTodayCountsMatchDailyCap(t *testing.T) {
 		t.Fatalf("a new day starts from zero: %+v", c)
 	}
 }
+
+// 紧急建议提醒没有事项，但静音按它指向的建议（origin.item）对照：事项静音对它生效。
+func TestItemMuteAppliesToOriginItemOfUrgentReminder(t *testing.T) {
+	e := newEnv(t, Options{})
+	pol := capPolicy(0, policy.Mute{Scope: policy.MuteItem, ID: "itm_muted"})
+	for id, wantMuted := range map[string]bool{"itm_muted": true, "itm_other": false} {
+		var d domain.Delivery
+		e.update(func(tx *store.Tx) (err error) {
+			d, _, err = e.q.CreateGated(tx, pol, domain.Delivery{ID: id, Class: domain.DeliveryReminder, Route: "channel:x", Version: 1,
+				Origin:  &domain.DeliveryOrigin{SourceEvent: "ev", Rule: "p/source_rules/r", Source: "s", Item: id},
+				Content: domain.DeliveryContent{Title: id}}, Target{})
+			return
+		})
+		if got := d.Suppressed == SuppressedMuted; got != wantMuted {
+			t.Errorf("%s: suppressed %q, want muted=%v", id, d.Suppressed, wantMuted)
+		}
+	}
+}
