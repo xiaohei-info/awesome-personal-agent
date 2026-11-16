@@ -437,6 +437,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		},
 		Sender:     senderInfo(ld),
 		SelfSender: k.ids.Fetch,
+		BlobsDir:   l.Blobs,
 	})
 	if err != nil {
 		return nil, err

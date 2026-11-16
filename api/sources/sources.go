@@ -8,7 +8,9 @@
 //	DELETE /sources/{id}/webhook        吊销该来源的全部接收密钥，并删除 HMAC 密钥文件
 //	GET /sources/{id}/ingests           入站记录
 //	POST /ingests/{id}/replay           重放
-//	GET /sources/{id}/events            来源事件，可按 disposition 过滤（逗号分隔多个），after + limit 分页
+//	GET /sources/{id}/events            来源事件，可按 disposition 过滤（逗号分隔多个），after + limit 分页；detail 是预览，另带 content 清单
+//	GET /source-events/{id}[?part=]     单条读取来源事件及其原文（Web 全文，token 按外发范围裁剪，运行凭据与 ext 密钥 403）
+//	GET /storage                        存储用量：账本、附件、各来源原文
 //	GET /sources/{id}/rejects           没有入账的输出行及原因，after + limit 分页；sort=recent 从新到旧
 //	GET /source-events/{id}/outbound-preview  一条事件在 full、excerpt、meta 下送给模型的内容（只读）
 //	POST /source-events/{id}/propose    把未判定事件或 digest 事件转为建议
@@ -113,21 +115,28 @@ type Declared struct {
 	Sender func(s domain.Source) Sender
 	// SelfSender 运行来源程序的 identity 模式，返回本人身份（§9.2）。
 	SelfSender func(ctx context.Context, s domain.Source) (string, error)
+	// BlobsDir 是内容寻址附件目录，GET /storage 据此算附件占用；空串按没有附件算。
+	BlobsDir string
 }
 
-// sourceView 是读接口给出的来源：登记加发件人结论。
+// sourceView 是读接口给出的来源：登记加发件人结论；stats 另含事件数与原文字节数（读时汇总，与 /storage 同源）。
 type sourceView struct {
 	domain.Source
-	Sender *Sender `json:"sender,omitempty"`
+	Stats  json.RawMessage `json:"stats"`
+	Sender *Sender         `json:"sender,omitempty"`
 }
 
-func (a *api) view(s domain.Source) sourceView {
-	v := sourceView{Source: s}
+func (a *api) view(s domain.Source, u runner.Usage) (sourceView, error) {
+	stats, err := withStats(s, u)
+	if err != nil {
+		return sourceView{}, err
+	}
+	v := sourceView{Source: s, Stats: stats}
 	if a.dc.Sender != nil {
 		sd := a.dc.Sender(s)
 		v.Sender = &sd
 	}
-	return v
+	return v, nil
 }
 
 type api struct {
@@ -165,6 +174,8 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/ingests", Handler: readable(a.ingests)})
 		r.Handle(core.Route{Method: "POST", Path: "/ingests/{id}/replay", MaxBody: 1 << 10, Handler: a.replay})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/events", Handler: readable(a.events)})
+		r.Handle(core.Route{Method: "GET", Path: "/source-events/{id}", Handler: readable(a.sourceEvent)})
+		r.Handle(core.Route{Method: "GET", Path: "/storage", Handler: readable(a.storage)})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/rejects", Handler: readable(a.rejects)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
@@ -231,13 +242,27 @@ func (a *api) source(r *http.Request, id string) (s domain.Source, err error) {
 // ---- 来源登记 ----
 
 func (a *api) list(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
-	var ss []domain.Source
-	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { ss, err = registry.List(tx); return }); err != nil {
+	var out []sourceView
+	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
+		ss, err := registry.List(tx)
+		if err != nil {
+			return err
+		}
+		usage, err := runner.UsageBySource(tx)
+		if err != nil {
+			return err
+		}
+		out = make([]sourceView, 0, len(ss))
+		for _, s := range ss {
+			v, err := a.view(s, usage[s.ID])
+			if err != nil {
+				return err
+			}
+			out = append(out, v)
+		}
+		return nil
+	}); err != nil {
 		return err
-	}
-	out := make([]sourceView, 0, len(ss))
-	for _, s := range ss {
-		out = append(out, a.view(s))
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"sources": out})
 }
@@ -262,11 +287,22 @@ func (a *api) declaredName(w http.ResponseWriter, r *http.Request, _ *core.Princ
 }
 
 func (a *api) get(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
-	s, err := a.source(r, r.PathValue("id"))
-	if err != nil {
+	var v sourceView
+	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
+		s, err := registry.Get(tx, r.PathValue("id"))
+		if err != nil {
+			return err
+		}
+		usage, err := runner.UsageBySource(tx)
+		if err != nil {
+			return err
+		}
+		v, err = a.view(s, usage[s.ID])
+		return err
+	}); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, a.view(s))
+	return core.WriteJSON(w, http.StatusOK, v)
 }
 
 // selfSender：只对声明了 identity 模式的来源；不落账、不缓存。只 Web：它会在主机上运行来源程序。
@@ -709,6 +745,7 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		evs  []domain.SourceEvent
 		next int64
 		scrd []inbound.Scored
+		out  = map[string]any{}
 	)
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
 		if !(p.Web && inbound.IsCaptureSource(id)) { // 对话内容只给本人；其他凭据和登记外的来源一样是 404
@@ -719,20 +756,23 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		var err error
 		switch bySort {
 		case "score":
-			scrd, next, err = scoredPage(tx, id, ds, after, limit)
+			if scrd, next, err = scoredPage(tx, id, ds, after, limit); err != nil {
+				return err
+			}
+			out["events"], err = viewScored(tx, scrd)
 			return err
 		case "recent": // 从新到旧，after/next_after 是偏移（同 score）
 			evs, next, err = runner.EventPageRecent(tx, id, ds, after, limit)
+		default:
+			evs, next, err = runner.EventPage(tx, id, ds, after, limit)
+		}
+		if err != nil {
 			return err
 		}
-		evs, next, err = runner.EventPage(tx, id, ds, after, limit)
+		out["events"], err = viewEvents(tx, evs) // 正文只给预览与清单，全文经 GET /source-events/{id}
 		return err
 	}); err != nil {
 		return err
-	}
-	out := map[string]any{"events": evs}
-	if bySort == "score" {
-		out["events"] = scrd
 	}
 	if next != 0 {
 		out["next_after"] = next
@@ -771,7 +811,7 @@ func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal)
 	if err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, ev)
+	return a.writeEvent(w, r, ev)
 }
 
 // ignoreOne 忽略一条积压事件，返回更新后的来源事件；不在积压里是 409。
@@ -786,7 +826,16 @@ func (a *api) ignoreOne(w http.ResponseWriter, r *http.Request, p *core.Principa
 	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, id); return }); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, ev)
+	return a.writeEvent(w, r, ev)
+}
+
+// writeEvent 以列表口径（预览加清单）返回一条来源事件：写命令的响应也不带正文全文，全文只经单条读取。
+func (a *api) writeEvent(w http.ResponseWriter, r *http.Request, ev domain.SourceEvent) error {
+	var v eventView
+	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { v, err = viewEvent(tx, ev); return }); err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, v)
 }
 
 // ignoreBatch 忽略积压：请求体 {"source": "<id>"} 只忽略该来源，{"all": true} 忽略全部；返回 {"ignored": n}。
