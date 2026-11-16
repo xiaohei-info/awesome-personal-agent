@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -21,7 +22,8 @@ import (
 // ProbeRoutes 返回"设置 › 模型"的两条探测路由（附录 B.2；设计 §4.1、§15.5）：
 // POST /settings/model-endpoints/models 取模型列表，POST /settings/model-endpoints/test 测试连接。
 //
-// 只放行 Web 会话；只读账本，不写 Event，不改策略（保存仍走 PUT）。探测只经外呼调用器发出，
+// 只放行 Web 会话；不改策略（保存仍走 PUT）。只有测试的正是已保存的端点、测试通过、且该端点有未恢复的失败时，
+// 才记下一次探测通过（经 kernel/health.RecordProbe），健康视图据此清除该端点此前的失败（§15.2）；其余情况不写 Event。探测只经外呼调用器发出，
 // 测试用 doctor 的内置示例题，不带任何账本内容，所以不受来源外发范围约束（§14.14）。
 // 同一类端点同一时刻只跑一个探测，其余返回 409。
 func ProbeRoutes(st *store.Store, env kdoctor.Env) core.RouteGroup {
@@ -240,5 +242,33 @@ func (pr *prober) test(w http.ResponseWriter, r *http.Request, p *core.Principal
 	if r.Context().Err() != nil {
 		return r.Context().Err()
 	}
+	if d.Status == kdoctor.OK && d.Code == kdoctor.CodeOK {
+		if err := pr.recordIfSaved(r.Context(), in.Endpoint, draft, p.Caller.Actor); err != nil {
+			return err
+		}
+	}
 	return core.WriteJSON(w, http.StatusOK, d)
+}
+
+// recordIfSaved：测通的草稿与已保存的端点相同（地址、模型、协议、密钥）时，它证明的是正在用的端点能用，记下探测通过；
+// 测的是还没保存的另一份配置时什么也不写。
+func (pr *prober) recordIfSaved(ctx context.Context, kind string, draft kpolicy.Policy, actor domain.Actor) error {
+	return pr.st.Update(ctx, func(tx *store.Tx) error {
+		_, saved, err := kpolicy.Stored(tx)
+		if err != nil {
+			return err
+		}
+		var same bool
+		if kind == kindJudge {
+			s, d := saved.JudgeEndpoint, draft.JudgeEndpoint
+			same = s != nil && s.URL == d.URL && s.Model == d.Model && s.Protocol == d.Protocol && s.APIKey == d.APIKey
+		} else {
+			s, d := saved.GenerateEndpoint, draft.GenerateEndpoint
+			same = s.URL == d.URL && s.Model == d.Model && s.Protocol == d.Protocol && s.APIKey == d.APIKey
+		}
+		if !same {
+			return nil
+		}
+		return khealth.RecordProbe(tx, pr.env.Packs, kind, actor, clock.Now())
+	})
 }

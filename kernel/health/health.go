@@ -1,5 +1,7 @@
 // Package health 是健康视图的汇总（设计 §15.2）：由既有账本记录与外呼统计读出十三类信号，
 // 长时与短任务两个队列分开给出排队数和最长等待时间。只读、只报不修；不新增存储，不写任何模块的数据。
+// 视图只反映现状：每个信号要么由当前状态直接算出，要么有一个正常使用中一定会被满足的恢复条件；已恢复的告警不再计入，
+// 原事件仍留在事件日志里（操作记录、运行日志照常可见）。
 // 每个信号的修复入口由展示层链接（来源页、运行详情、项目页等），本包不触发任何修复。
 package health
 
@@ -18,6 +20,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/record"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -30,7 +33,11 @@ import (
 const RuleFallbackReason = "rule content changed, back to observe"
 
 // PackHealth 由能力包加载器提供：仍未修复的加载拒绝（加载器保留上一有效版本）。
+// 同时实现 List 的（加载器本身）还用来把模型告警的模板归到判断端点或生成端点。
 type PackHealth interface{ Health() []packs.Rejection }
+
+// StaleAfter 是只能按时间收尾的告警（没有对象可看现状的熔断、其他健康告警、外呼超时）在没有新的同类告警时保留多久。
+const StaleAfter = 24 * time.Hour
 
 // Options 配置汇总；Deliveries 必填，Packs 为空表示没有加载器（该信号恒为空）。
 type Options struct {
@@ -41,7 +48,8 @@ type Options struct {
 	DelegationStallAfter time.Duration
 }
 
-// SourceFailure 是一个来源的失败现状（来源页是修复入口；认证失败带 needs_input 事项）。
+// SourceFailure 是一个来源的失败现状：当前连续失败或已停用（来源页是修复入口；认证失败时带它建的 needs_input 事项）。
+// 最近一次拉取成功即不再出现：runner 在恢复时清掉 NeedsInputItem 并结束它建的事项。
 type SourceFailure struct {
 	Source              string
 	Enabled             bool
@@ -66,27 +74,38 @@ type Outcall struct {
 // 与初筛不同，它出健康类投递（notify.go），同时进"模型不可用"。
 const FollowupKind = "followup"
 
-// ModelIssue 是一次判断型调用失败或超时（含 web_only 初筛、跟进判断）。同一模板之后有成功调用即清除（见 recovered）。
+// ModelIssue 是一次模型调用失败或超时（含 web_only 初筛、跟进判断、起草）。Endpoint 是它所属的端点（EndpointJudge 或
+// EndpointGenerate）；该端点此后有任一次成功的真实调用或探测通过即清除（见 recovered）。
 type ModelIssue struct {
 	Seq      int64
 	Kind     string
 	Object   string
 	Reason   string
-	template string // 写入点记下的提示词模板；空表示无法判定恢复
+	Endpoint string
+	template string // 写入点记下的提示词模板，用来归端点
+	at       time.Time
 }
+
+// 模型告警所属的端点（ModelIssue.Endpoint），与 Run 的 category 同值。
+const (
+	EndpointJudge    = string(domain.RunJudge)
+	EndpointGenerate = string(domain.RunGenerate)
+)
 
 // OtherAlert 是没有专属信号的 health.alert（规则动作失败等）。
 type OtherAlert struct {
 	Seq    int64
 	Object string
 	Reason string
+	at     time.Time
 }
 
 // RuleFallback 是一次规则回退 observe 的事件。
 type RuleFallback struct {
-	Seq  int64
-	Rule string
-	At   time.Time
+	Seq    int64
+	Rule   string
+	At     time.Time
+	object string
 }
 
 // ReceiptFailure 是一次回执或捕获被内核拒绝（退出码 2、4、23）的告警；Credential 是被拒绝的操作者（凭据）。
@@ -160,7 +179,11 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	if v.DeliveryBacklog, err = o.Deliveries.Backlog(tx); err != nil {
 		return View{}, err
 	}
-	if v.ChainTrips, err = chain.Trips(tx); err != nil {
+	trips, err := chain.Trips(tx)
+	if err != nil {
+		return View{}, err
+	}
+	if v.ChainTrips, err = openTrips(tx, trips, now); err != nil {
 		return View{}, err
 	}
 	if v.AgentsMDDrift, err = agentsmd.OpenDrifts(tx); err != nil {
@@ -178,7 +201,7 @@ func Collect(tx *store.Tx, o Options) (View, error) {
 	if v.Judge, v.Generate, v.Endpoint, err = endpoint(tx, v.Unjudged); err != nil {
 		return View{}, err
 	}
-	if v.ModelUnavailable, v.RuleFallbacks, v.ReceiptFailures, v.OtherAlerts, v.ClockLags, err = alerts(tx, now); err != nil {
+	if v.ModelUnavailable, v.RuleFallbacks, v.ReceiptFailures, v.OtherAlerts, v.ClockLags, err = alerts(tx, now, o.Packs); err != nil {
 		return View{}, err
 	}
 	after := o.DelegationStallAfter
@@ -249,7 +272,8 @@ func sourceFailures(tx *store.Tx) ([]SourceFailure, error) {
 		if err != nil {
 			return nil, err
 		}
-		if st.ConsecutiveFailures == 0 && s.Enabled && st.NeedsInputItem == "" {
+		// 只看现状：最近一次拉取成功（连续失败归零）且仍启用即正常，留下的 needs_input 事项由 runner 在恢复时结束。
+		if st.ConsecutiveFailures == 0 && s.Enabled {
 			continue
 		}
 		out = append(out, SourceFailure{Source: s.ID, Enabled: s.Enabled, ConsecutiveFailures: st.ConsecutiveFailures,
@@ -268,8 +292,14 @@ func outcall(tx *store.Tx, now time.Time) (Outcall, error) {
 		return Outcall{}, err
 	}
 	out := Outcall{Long: queueHealth(stats[proc.QueueLong]), Short: queueHealth(stats[proc.QueueShort])}
+	// 超时只在它仍是该目标最近一次运行、且结束不到 StaleAfter 时算现状：之后同一目标再跑一次（不论成败）即被取代。
+	key := func(r domain.Run) string { return orElse(r.Target, r.ID) }
+	latest := map[string]string{}
+	for _, r := range recs { // 按序号升序
+		latest[key(r.Run)] = r.Run.ID
+	}
 	for _, r := range recs {
-		if r.Run.State == domain.RunTimeout {
+		if r.Run.State == domain.RunTimeout && latest[key(r.Run)] == r.Run.ID && (r.Run.FinishedAt == nil || now.Sub(*r.Run.FinishedAt) < StaleAfter) {
 			out.Timeouts = append(out.Timeouts, r.Run)
 		}
 	}
@@ -281,9 +311,10 @@ func queueHealth(s proc.QueueStat) QueueHealth {
 }
 
 // alerts 一遍读完 health.alert 并按来源分到各信号，分类只在这里（熔断由 chain.Trips 读，来源与能力包各有专属信号）：
-// 模型调用失败（kind=screening、followup、decision-card）→ 模型不可用，之后恢复的清除；规则回退 observe；回执与捕获被拒（kind=receipt）→ 回执与捕获失败，同凭据同命令成功即清除；其余 → 通用告警。
+// 模型调用失败（kind=screening、followup、decision-card）→ 模型不可用，所属端点之后成功即清除；规则回退 observe，之后该规则切过模式即清除；
+// 回执与捕获被拒（kind=receipt）→ 回执与捕获失败，同凭据同命令成功或事项已终结即清除；其余 → 通用告警，对象已处理或过了 StaleAfter 即清除。
 // shortcut: 每次读全部健康事件，事件很多时加游标或时间窗。
-func alerts(tx *store.Tx, now time.Time) (model []ModelIssue, rules []RuleFallback, receipts []ReceiptFailure, other []OtherAlert, lags []ClockLag, err error) {
+func alerts(tx *store.Tx, now time.Time, ph PackHealth) (model []ModelIssue, rules []RuleFallback, receipts []ReceiptFailure, other []OtherAlert, lags []ClockLag, err error) {
 	var after int64
 	for {
 		es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvHealthAlert}, after, 500)
@@ -291,8 +322,12 @@ func alerts(tx *store.Tx, now time.Time) (model []ModelIssue, rules []RuleFallba
 			return nil, nil, nil, nil, nil, err
 		}
 		if len(es) == 0 {
-			if model, err = recovered(tx, model); err == nil {
-				receipts, err = receiptsOpen(tx, receipts)
+			if model, err = recovered(tx, model, ph); err == nil {
+				if receipts, err = receiptsOpen(tx, receipts); err == nil {
+					if rules, err = fallbacksOpen(tx, rules); err == nil {
+						other, err = othersOpen(tx, other, now)
+					}
+				}
 			}
 			return model, rules, receipts, other, lags, err
 		}
@@ -317,25 +352,29 @@ func alerts(tx *store.Tx, now time.Time) (model []ModelIssue, rules []RuleFallba
 					lags = append(lags, ClockLag{Seq: e.Seq, Timer: e.Object, At: e.At})
 				}
 			case p.Kind == ScreeningKind || p.Kind == FollowupKind || p.Kind == DraftKind:
-				model = append(model, ModelIssue{Seq: e.Seq, Kind: p.Kind, Object: e.Object, Reason: e.Reason, template: p.Template})
+				model = append(model, ModelIssue{Seq: e.Seq, Kind: p.Kind, Object: e.Object, Reason: e.Reason, template: p.Template, at: e.At})
 			case p.Kind == command.ReceiptKind:
 				receipts = append(receipts, ReceiptFailure{Seq: e.Seq, Object: e.Object, Command: p.Command, Exit: p.Exit, Credential: e.Actor.Principal, at: e.At})
 			case e.Reason == RuleFallbackReason:
-				rules = append(rules, RuleFallback{Seq: e.Seq, Rule: p.Rule, At: e.At})
+				rules = append(rules, RuleFallback{Seq: e.Seq, Rule: p.Rule, At: e.At, object: e.Object})
 			default:
-				other = append(other, OtherAlert{Seq: e.Seq, Object: e.Object, Reason: e.Reason})
+				other = append(other, OtherAlert{Seq: e.Seq, Object: e.Object, Reason: e.Reason, at: e.At})
 			}
 		}
 	}
 }
 
-// receiptsOpen 去掉已清除的回执与捕获告警：告警之后同一凭据又成功执行过同一命令（一次即清除）。
-// 另一凭据或另一命令的成功不算。成功以命令管线为 Receipt 命令留下的最近成功标记为凭，调用方带不带幂等键都一样。
+// receiptsOpen 去掉已清除的回执与捕获告警：告警之后同一凭据又成功执行过同一命令（一次即清除），或被拒回执所指的事项已终结
+// （回执已无处可交，事后再成功的机会不会出现）。另一凭据或另一命令的成功不算。成功以命令管线为 Receipt 命令留下的最近成功标记为凭，
+// 调用方带不带幂等键都一样。
 // shortcut: 每条告警一次查询，告警很多时按凭据与命令合并查询。
 func receiptsOpen(tx *store.Tx, rs []ReceiptFailure) ([]ReceiptFailure, error) {
 	var open []ReceiptFailure
 	for _, r := range rs {
 		ok, err := command.SucceededSince(tx, r.Credential, r.Command, r.at)
+		if err == nil && !ok {
+			ok, err = terminal(tx, r.Object)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -346,20 +385,175 @@ func receiptsOpen(tx *store.Tx, rs []ReceiptFailure) ([]ReceiptFailure, error) {
 	return open, nil
 }
 
-// recovered 去掉已恢复的模型告警：告警之后同一模板有成功的真实调用（run.finished，非复用）即清除。
-// 初筛与起草逐事项只做一次、不重试，所以任一事项的成功即算恢复；其余（跟进判断会对同一事项重试）要求同一事项成功，
-// 否则别的事项成功会盖住仍在失败的事项。model 按序号升序。
-// shortcut: 扫告警之后全部 run.finished，Run 很多时加游标或按模板查询。
-func recovered(tx *store.Tx, model []ModelIssue) ([]ModelIssue, error) {
+// terminal 报告 obj 是已终结（done、dropped）的事项；不是事项为假。
+func terminal(tx *store.Tx, obj string) (bool, error) {
+	it, err := items.Get(tx, obj)
+	if err != nil {
+		if isNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return it.Phase.Terminal(), nil
+}
+
+func isNotFound(err error) bool {
+	var de *domain.Error
+	return errors.As(err, &de) && de.Code == domain.CodeNotFound
+}
+
+// handled 报告告警（序号 seq）所指的对象此后已被处理：是已终结的事项，或本人之后对它做过操作（告警与拒绝不算）。
+// shortcut: 逐条告警读对象的后续事件，告警很多时按对象合并查询。
+func handled(tx *store.Tx, obj string, seq int64) (bool, error) {
+	if ok, err := terminal(tx, obj); ok || err != nil {
+		return ok, err
+	}
+	after := seq
+	for {
+		es, err := eventlog.Query(tx, eventlog.Filter{Object: obj}, after, 500)
+		if err != nil || len(es) == 0 {
+			return false, err
+		}
+		for _, en := range es {
+			after = en.Event.Seq
+			if t := en.Event.Type; !en.Tombstone && en.Event.Actor.Type == domain.ActorHuman && t != domain.EvHealthAlert && t != domain.EvCommandRejected {
+				return true, nil
+			}
+		}
+	}
+}
+
+// openTrips 只留仍是现状的熔断：被拦下的对象之后既没有终结、本人也没处理过；没有对象的命令（Object 是命令名）
+// 无从看现状，过了 StaleAfter 即清除。
+func openTrips(tx *store.Tx, ts []chain.Trip, now time.Time) ([]chain.Trip, error) {
+	var open []chain.Trip
+	for _, t := range ts {
+		if t.Object == t.Command {
+			if now.Sub(t.At) < StaleAfter {
+				open = append(open, t)
+			}
+			continue
+		}
+		ok, err := handled(tx, t.Object, t.Seq)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			open = append(open, t)
+		}
+	}
+	return open, nil
+}
+
+// fallbacksOpen 只留之后没有再切过模式的规则回退：本人重新审阅（切回 auto、改成 off，或其他任何切换）即清除。
+func fallbacksOpen(tx *store.Tx, rs []RuleFallback) ([]RuleFallback, error) {
+	var open []RuleFallback
+	for _, r := range rs {
+		es, err := eventlog.Query(tx, eventlog.Filter{Object: r.object, Type: domain.EvRuleModeChanged}, r.Seq, 1)
+		if err != nil {
+			return nil, err
+		}
+		if len(es) == 0 {
+			open = append(open, r)
+		}
+	}
+	return open, nil
+}
+
+// othersOpen 只留仍是现状的通用告警（规则动作失败、升级说明等）：对象之后已处理（见 handled）或告警已过 StaleAfter 即清除。
+// 这类告警没有能代表现状的状态可读，时间窗保证它们不会永远挂着；同一问题再发生会记新的告警。
+func othersOpen(tx *store.Tx, as []OtherAlert, now time.Time) ([]OtherAlert, error) {
+	var open []OtherAlert
+	for _, a := range as {
+		if now.Sub(a.at) >= StaleAfter {
+			continue
+		}
+		ok, err := handled(tx, a.Object, a.Seq)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			open = append(open, a)
+		}
+	}
+	return open, nil
+}
+
+func orElse(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// recovered 去掉已恢复的模型告警：每条告警先归到端点（模板的 agent 类型：judge → 判断端点，generate → 生成端点；
+// 没有配判断端点时判断型由对话端点即生成端点作答），该端点在告警之后有任一次成功的真实调用（复用缓存不算）或探测通过即清除。
+// 不再要求"同一模板再成功一次"：起草、初筛逐事项只做一次，那件事未必会再发生。model 按序号升序。
+func recovered(tx *store.Tx, model []ModelIssue, ph PackHealth) ([]ModelIssue, error) {
 	if len(model) == 0 {
 		return nil, nil
 	}
-	byTemplate, byObject := map[string]int64{}, map[[2]string]int64{}
-	after := model[0].Seq
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return nil, err
+	}
+	judgeOn := pol.JudgeEndpoint != nil && pol.JudgeEndpoint.URL != ""
+	agents := templateAgents(ph)
+	seqs, ats, err := lastSuccess(tx, model[0].Seq)
+	if err != nil {
+		return nil, err
+	}
+	var open []ModelIssue
+	for _, m := range model {
+		m.Endpoint = attribute(m, agents, judgeOn)
+		if seqs[m.Endpoint] <= m.Seq && !ats[m.Endpoint].After(m.at) {
+			open = append(open, m)
+		}
+	}
+	return open, nil
+}
+
+// templateAgents 取已加载包里各提示词模板的 agent 类型；加载器不可用时为空，由 attribute 按告警的 kind 兜底。
+func templateAgents(ph PackHealth) map[string]string {
+	l, ok := ph.(interface{ List() []*packs.Pack })
+	if !ok {
+		return nil
+	}
+	out := map[string]string{}
+	for _, p := range l.List() {
+		for name, pr := range p.Prompts {
+			if _, dup := out[name]; !dup {
+				out[name] = pr.Meta.Agent
+			}
+		}
+	}
+	return out
+}
+
+func attribute(m ModelIssue, agents map[string]string, judgeOn bool) string {
+	agent := agents[m.template]
+	if agent == "" { // 模板不在已加载的包里：初筛与跟进推迟是判断型，其余起草是生成型
+		agent = EndpointGenerate
+		if m.Kind == ScreeningKind || m.Kind == FollowupKind {
+			agent = EndpointJudge
+		}
+	}
+	if agent == EndpointJudge && judgeOn {
+		return EndpointJudge
+	}
+	return EndpointGenerate
+}
+
+// lastSuccess 取两个端点各自最近一次成功：序号 after 之后成功的 run.finished（生成型调用、探测通过、
+// 写明由哪一级定案的判断）的最大序号，以及判断记录里由分类端点（判断端点）或对话端点（生成端点）定案的最近时刻（记录没有序号）。
+// shortcut: 扫告警之后全部 run.finished，Run 很多时加游标或按类别查询。
+func lastSuccess(tx *store.Tx, after int64) (seqs map[string]int64, ats map[string]time.Time, err error) {
+	seqs, ats = map[string]int64{}, map[string]time.Time{}
+	note := func(ep string, seq int64) { seqs[ep] = max(seqs[ep], seq) }
 	for {
 		es, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvRunFinished}, after, 500)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(es) == 0 {
 			break
@@ -368,26 +562,60 @@ func recovered(tx *store.Tx, model []ModelIssue) ([]ModelIssue, error) {
 			e := en.Event
 			after = e.Seq
 			var p struct {
-				Template string `json:"template"`
-				State    string `json:"state"`
-				Reused   bool   `json:"reused"`
+				Category  string `json:"category"`
+				State     string `json:"state"`
+				Reused    bool   `json:"reused"`
+				Probe     bool   `json:"probe"`
+				DecidedBy string `json:"decided_by"`
 			}
-			if !en.Tombstone && json.Unmarshal(e.Payload, &p) == nil && p.Template != "" && p.State == string(domain.RunSucceeded) && !p.Reused {
-				byTemplate[p.Template], byObject[[2]string{p.Template, e.Object}] = e.Seq, e.Seq
+			if en.Tombstone || json.Unmarshal(e.Payload, &p) != nil || p.State != string(domain.RunSucceeded) || p.Reused {
+				continue
+			}
+			switch {
+			case p.Category == EndpointGenerate, p.Category == EndpointJudge && p.DecidedBy == record.DecidedChat:
+				note(EndpointGenerate, e.Seq)
+			case p.Category == EndpointJudge && (p.Probe || p.DecidedBy == record.DecidedClassifier):
+				note(EndpointJudge, e.Seq)
 			}
 		}
 	}
-	var open []ModelIssue
+	for ep, by := range map[string]string{EndpointJudge: record.DecidedClassifier, EndpointGenerate: record.DecidedChat} {
+		if ats[ep], err = record.LatestDecided(tx, by); err != nil {
+			return nil, nil, err
+		}
+	}
+	return seqs, ats, nil
+}
+
+// ProbeClears 报告端点 ep（EndpointJudge 或 EndpointGenerate）有没有要由探测通过来清除的故障：端点故障标记，或归它的未恢复告警。
+func ProbeClears(tx *store.Tx, ph PackHealth, ep string) (bool, error) {
+	judge, generate, _, err := endpoint(tx, nil)
+	if err != nil {
+		return false, err
+	}
+	if (ep == EndpointJudge && judge == EndpointFailing) || (ep == EndpointGenerate && generate == EndpointFailing) {
+		return true, nil
+	}
+	model, _, _, _, _, err := alerts(tx, clock.Now(), ph)
+	if err != nil {
+		return false, err
+	}
 	for _, m := range model {
-		ok := byObject[[2]string{m.template, m.Object}]
-		if m.Kind == ScreeningKind || m.Kind == DraftKind {
-			ok = byTemplate[m.template]
-		}
-		if m.template == "" || ok < m.Seq {
-			open = append(open, m)
+		if m.Endpoint == ep {
+			return true, nil
 		}
 	}
-	return open, nil
+	return false, nil
+}
+
+// RecordProbe 在本人测试已保存的端点或自检通过后调用：有要清除的故障时经 direct 记下探测通过（清端点故障标记、留一条 run.finished），
+// 没有时什么也不写，查看自检不会每次都留痕。
+func RecordProbe(tx *store.Tx, ph PackHealth, ep string, actor domain.Actor, at time.Time) error {
+	ok, err := ProbeClears(tx, ph, ep)
+	if err != nil || !ok {
+		return err
+	}
+	return direct.RecordProbe(tx, ep, actor, at)
 }
 
 // StalledDelegation 是一个超过 delegation_stall_after 没有回执或进展的委派子事项（修复入口：任务委派页）。

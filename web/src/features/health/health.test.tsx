@@ -93,7 +93,7 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
       delivery_backlog: { ok: false, count: 1, severity: "error", why: "deliveries are queued", detail: ["d1"] },
       chain_trips: { ok: false, count: 1, severity: "error", why: "the breaker stopped", detail: ["itm_3"] },
       pack_rejections: { ok: false, count: 1, severity: "error", why: "a pack failed to load", detail: ["pk"], rejections: [{ pack: "pk", source: "user", reason: "band is required" }] },
-      model_unavailable: { ok: false, count: 2, severity: "error", why: "x", detail: { judge: "", generate: "not_configured", endpoint: "not_configured", screening: ["x"], judgements: [] } },
+      model_unavailable: { ok: false, count: 3, severity: "error", why: "x", detail: { judge: "", generate: "not_configured", endpoint: "not_configured", screening: ["x"], judgements: [{ kind: "decision-card", object: "itm_1", endpoint: "generate" }] } },
       unjudged_backlog: { ok: false, count: 57, severity: "warning", why: "w", detail: { model_unavailable: 50, models_paused: 0, outbound_unset: 3, undecided: 2, restored: 2, expired: 3, sources: [{ source: "src_mail", count: 57 }] } },
       rule_fallbacks: { ok: false, count: 1, severity: "error", why: "fell back to observe", detail: ["rule-1"] },
       receipt_failures: { ok: false, count: 2, severity: "error", why: "rejected", detail: ["itm_7", "itm_8"] },
@@ -102,8 +102,9 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
     mount(serve(() => json(200, report(bad))).impl);
     expect(await screen.findByRole("heading", { level: 1, name: "10 项要处理" })).toBeInTheDocument();
     const src = main().getByRole("article", { name: "来源读取失败" });
-    expect(src).toHaveTextContent("邮件 连续 5 次没读到");
-    expect(within(src).getByRole("link", { name: "去补充" })).toHaveAttribute("href", "/items/itm_9");
+    expect(src).toHaveTextContent("邮件 登录或配置有问题，读不到");
+    expect(src).not.toHaveTextContent("连续"); // 认证失败不说次数，更不会出现「连续 0 次」
+    expect(within(src).getByRole("link", { name: "去看来源" })).toHaveAttribute("href", "/sources?open=src_mail");
     expect(src).not.toHaveTextContent("consecutive pull failures");
     expect(document.querySelector("main")!.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
     const out = main().getByRole("article", { name: "后台任务排队或超时" });
@@ -119,6 +120,8 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
     const m = main().getByRole("article", { name: "模型连不上" });
     expect(m).toHaveTextContent("写作模型还没配置，有消息在等它");
     expect(m).toHaveTextContent("1 次风险判断没完成");
+    expect(m).toHaveTextContent("写作模型 1 次失败"); // 按端点说，不再一律说「打分」
+    expect(m).not.toHaveTextContent("打分");
     expect(within(m).getAllByRole("link", { name: "去看模型" })[0]).toHaveAttribute("href", "/settings/models");
     // 积压按原因分列，各带去处；undecided 按内核口径并进「等模型恢复」
     const b = main().getByRole("article", { name: "积压待处理" });

@@ -35,11 +35,12 @@ function useLines(): (s: Signal, paused: boolean, days?: number) => Line[] {
     const d = s.detail;
     switch (s.id) {
       case "source_failures":
-        return list<{ source: string; enabled: boolean; consecutive_failures: number; needs_input_item?: string }>(d).map((x) =>
-          x.needs_input_item
-            ? { text: t.sourceFail(source(x.source), x.consecutive_failures), to: "/items/" + x.needs_input_item, go: "fill" }
-            : { text: x.enabled ? t.sourceFail(source(x.source), x.consecutive_failures) : t.sourceOff(source(x.source)), to: "/sources", go: "sources" },
-        );
+        // 服务端只报现在还读不到或已停用的来源；去处一律是该来源的详情，认证或配置失败也在那里修。
+        return list<{ source: string; enabled: boolean; consecutive_failures: number; needs_input_item?: string }>(d).map((x) => ({
+          text: !x.enabled ? t.sourceOff(source(x.source)) : x.needs_input_item ? t.sourceAuth(source(x.source)) : t.sourceFail(source(x.source), x.consecutive_failures),
+          to: "/sources?open=" + encodeURIComponent(x.source),
+          go: "sources",
+        }));
       case "outcall": {
         const q = (d as { long?: { queued: number; longest_wait_seconds: number }; short?: { queued: number; longest_wait_seconds: number } }) ?? {};
         const queued = (q.long?.queued ?? 0) + (q.short?.queued ?? 0);
@@ -58,17 +59,18 @@ function useLines(): (s: Signal, paused: boolean, days?: number) => Line[] {
         // 加载器给的原因是英文的字段说明：主界面只列包名，原因随「显示原始值」出现。
         return [{ text: t.packs(s.count) }, ...(s.rejections ?? []).map((r) => ({ text: raw ? `${pack("pack", r.pack)}：${r.reason}` : pack("pack", r.pack) }))];
       case "model_unavailable": {
-        const m = (d ?? {}) as { judge?: string; generate?: string; screening?: unknown[]; judgements?: unknown[] };
+        const m = (d ?? {}) as { judge?: string; generate?: string; screening?: unknown[]; judgements?: { endpoint?: string }[] };
         const ends = (["generate", "judge"] as const).flatMap((k): Line[] => {
           const say = t.endpoint[m[k] ?? ""];
           return say ? [{ text: say(t.models[k]), to: "/settings/models", go: "models" }] : [];
         });
-        const scr = list(m.screening).length, failed = list(m.judgements).length;
-        return [
-          ...ends,
-          ...(scr ? [{ text: t.screening(scr) }] : []),
-          ...(failed ? [{ text: t.judgeFails(failed), to: "/settings/models", go: "models" as Go }] : []),
-        ];
+        // 失败按端点分开说（服务端给出 endpoint；旧服务端没有时按打分模型）。
+        const fails = (["generate", "judge"] as const).flatMap((k): Line[] => {
+          const c = list<{ endpoint?: string }>(m.judgements).filter((j) => (j.endpoint || "judge") === k).length;
+          return c ? [{ text: t.modelFails(t.models[k], c), to: "/settings/models", go: "models" }] : [];
+        });
+        const scr = list(m.screening).length;
+        return [...ends, ...(scr ? [{ text: t.screening(scr) }] : []), ...fails];
       }
       case "unjudged_backlog":
         return [
@@ -120,8 +122,14 @@ export function HealthPage() {
 
   const load = useCallback(() => {
     setError(null);
-    // 自检是补充信息：取不到不影响状态的展示。
-    api.get<DoctorReport>("/doctor").then(setDoctor, () => setDoctor(null));
+    // 自检是补充信息：取不到不影响状态的展示。自检测通了已保存的端点会清掉该端点此前的失败，所以回来后再取一次状态。
+    api.get<DoctorReport>("/doctor").then(
+      (d) => {
+        setDoctor(d);
+        api.get<HealthReport>("/health").then(setReport, () => undefined);
+      },
+      () => setDoctor(null),
+    );
     return api.get<HealthReport>("/health").then(setReport, (e) => setError(e));
   }, [api]);
   useEffect(() => {

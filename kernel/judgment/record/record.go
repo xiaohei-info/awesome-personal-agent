@@ -339,3 +339,22 @@ func DeleteBySubject(tx *store.Tx, subjects ...string) (int64, error) {
 	}
 	return n, nil
 }
+
+// LatestDecided 返回 decided_by 为 by 的最近一条记录的时刻；没有为零值。健康视图据此判断端点此后是否答过题（§15.2）。
+func LatestDecided(tx *store.Tx, by string) (time.Time, error) {
+	r, err := tx.Query(`SELECT COALESCE(MAX(created_at), 0) FROM outcall_judgment WHERE decided_by = ?`, by)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer r.Close()
+	var ns int64
+	if r.Next() {
+		if err := r.Scan(&ns); err != nil {
+			return time.Time{}, err
+		}
+	}
+	if ns == 0 {
+		return time.Time{}, r.Err()
+	}
+	return time.Unix(0, ns), r.Err()
+}

@@ -155,6 +155,8 @@ type Options struct {
 	OnError func(error)
 	// SenderCeiling 是来源接入声明给这类事件的发件人上限（§9.1），由装配方按声明给出；nil 表示不封顶。
 	SenderCeiling func(src domain.Source, eventType string) SenderCeiling
+	// Owner 是本人的 principal：来源恢复时以本人登记该来源为依据，代本人结束 runner 自己建的 needs_input 事项。
+	Owner string
 }
 
 // SenderCeiling 是发件人上限：verified 时保留事件自报的 sender_verified，unverified 时一律未核实，none 时清空发件人。
@@ -488,6 +490,11 @@ func (r *Runner) Handle(ctx context.Context, res proc.Result) error {
 		}
 		in.Item = item
 	}
+	if in.Class == clsOK {
+		if err := r.recovered(ctx, in); err != nil {
+			return err
+		}
+	}
 	body, err := json.Marshal(in)
 	if err != nil {
 		return err
@@ -546,6 +553,46 @@ func (r *Runner) needsInput(ctx context.Context, in resultIn) (string, error) {
 	return ref.ID, nil
 }
 
+// recovered：认证或配置失败之后这次拉取成功，runner 当初建的、仍在 needs_input 的事项按"来源已恢复"转 done。
+// 这个事项的问题是 runner 自己提的（执行者是内核身份），拉取成功就是答案，所以以本人登记该来源为依据、代本人结束它
+// （同 followmsg 的回音唤醒）；理由与这次运行写在阶段变更的 Event 里。命令被拒（如本人把这类事项设为 web_only）时只记日志，
+// 事项留给本人处理，统计里的引用也保留，下次认证失败复用它而不是另建。
+func (r *Runner) recovered(ctx context.Context, in resultIn) error {
+	var item string
+	if err := r.o.Store.View(ctx, func(tx *store.Tx) error {
+		s, err := registry.Get(tx, in.SourceID)
+		if err != nil {
+			return err
+		}
+		st, err := StatsOf(s)
+		if err != nil || st.NeedsInputItem == "" {
+			return err
+		}
+		it, err := items.Get(tx, st.NeedsInputItem)
+		if err == nil && it.Phase == domain.PhaseNeedsInput && it.Assignee == systemPrinc {
+			item = it.ID
+		} else if err != nil && !isNotFound(err) {
+			return err
+		}
+		return nil
+	}); err != nil || item == "" {
+		return err
+	}
+	owner := orElse(r.o.Owner, "owner")
+	body, _ := json.Marshal(map[string]any{"id": item, "to": domain.PhaseDone, "reason": "来源已恢复：拉取 " + in.RunID + " 成功"})
+	_, err := r.o.Exec.Do(ctx, command.Request{
+		Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: systemPrinc, Via: domain.ViaSource, OnBehalfOf: owner}, Level: authz.LevelDelegate},
+		Command:  "item.transition", Input: body, IdemKey: "runner:recovered:" + in.RunID,
+		Evidence: "source " + in.SourceID + " pulled successfully in run " + in.RunID, Owner: owner,
+	})
+	var de *domain.Error
+	if errors.As(err, &de) {
+		r.fail(fmt.Errorf("runner: close needs_input item %s after source %s recovered: %w", item, in.SourceID, err))
+		return nil
+	}
+	return err
+}
+
 // applyResult 在一个事务里落事件、推进游标、更新统计；游标只在事件落盘之后、且末行合法时前进。
 func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 	var in resultIn
@@ -578,6 +625,15 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 		cursor = in.Cursor
 		st.ConsecutiveFailures, st.LastError, st.NextAttemptAt = 0, "", time.Time{}
 		st.LastSuccessAt = in.FinishedAt
+		if st.NeedsInputItem != "" { // 事项已结束（含刚由 recovered 结束的）就不再引用；仍待本人处理的保留，下次失败复用
+			it, err := items.Get(tx, st.NeedsInputItem)
+			if err != nil && !isNotFound(err) {
+				return nil, err
+			}
+			if err != nil || it.Phase != domain.PhaseNeedsInput {
+				st.NeedsInputItem = ""
+			}
+		}
 	} else {
 		st.ConsecutiveFailures++
 		st.LastFailureAt, st.LastError = in.FinishedAt, in.Reason

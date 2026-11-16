@@ -351,6 +351,45 @@ func (e *env) count(sql string, args ...any) (n int64) {
 
 func (e *env) itemCount() int64 { return e.count(`SELECT COUNT(*) FROM items`) }
 
+// 认证失败之后拉取恢复：runner 建的 needs_input 事项按"来源已恢复"转 done，统计里不再引用它；之后再认证失败另建一个。
+func TestRecoveryEndsNeedsInputItem(t *testing.T) {
+	e := setup(t, defaults())
+	flag := filepath.Join(e.dir, "broken")
+	if err := os.WriteFile(flag, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.register("src_cal", e.script("cal.sh", `if [ -e `+flag+` ]; then exit 2; fi
+echo '{"cursor":"c1"}'
+`), nil)
+	e.r.Sync(bg)
+	e.tick(1)
+	_, st := e.source("src_cal")
+	first := st.NeedsInputItem
+	if first == "" {
+		t.Fatalf("no needs_input item: %+v", st)
+	}
+	os.Remove(flag)
+	e.advance(time.Minute)
+	e.tick(1)
+	if _, st = e.source("src_cal"); st.NeedsInputItem != "" || st.ConsecutiveFailures != 0 {
+		t.Fatalf("stats after recovery: %+v", st)
+	}
+	var it domain.Item
+	e.st.View(bg, func(tx *store.Tx) (err error) { it, err = items.Get(tx, first); return })
+	if it.Phase != domain.PhaseDone {
+		t.Fatalf("item not ended: %+v", it)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM eventlog_event WHERE object = ? AND type = ? AND reason LIKE '来源已恢复%'`, first, domain.EvItemPhaseChanged); n != 1 {
+		t.Fatalf("phase change with reason: %d", n)
+	}
+	os.WriteFile(flag, nil, 0o600)
+	e.advance(time.Minute)
+	e.tick(1)
+	if _, st = e.source("src_cal"); st.NeedsInputItem == "" || st.NeedsInputItem == first {
+		t.Fatalf("a new failure should open a new item: %+v", st)
+	}
+}
+
 // ACT-SRC-07：退出码 2 生成一个 needs_input 事项；重复失败不重复建；其他来源不受影响。
 func TestExit2CreatesOneNeedsInputItemOthersUnaffected(t *testing.T) {
 	e := setup(t, defaults())
