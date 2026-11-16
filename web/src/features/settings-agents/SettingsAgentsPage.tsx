@@ -39,7 +39,7 @@ export const GRANT_CATS: [string, string[]][] = [
   ["dismiss", ["proposal.dismiss"]],
   ["accept", ["proposal.accept", "proposal.attach"]],
   ["answer", ["decision.answer"]],
-  ["items", ["item.create", "item.update", "item.transition", "item.relate"]],
+  ["items", ["item.create", "item.update", "item.transition", "item.relate", "item.progress"]],
   ["docs", ["revision.confirm", "revision.reject"]],
   ["reports", ["delegate.report", "followmsg.handback"]],
 ];
