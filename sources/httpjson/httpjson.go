@@ -67,15 +67,22 @@ type Mapping struct {
 }
 
 type event struct {
-	ID              string   `json:"id"`
-	Type            string   `json:"type"`
-	Subject         string   `json:"subject"`
-	Summary         string   `json:"summary,omitempty"`
-	Detail          string   `json:"detail,omitempty"`
-	Link            string   `json:"link,omitempty"`
-	OccurredAt      string   `json:"occurred_at"`
-	CorrelationKeys []string `json:"correlation_keys,omitempty"`
-	Sender          string   `json:"sender,omitempty"`
+	ID              string    `json:"id"`
+	Type            string    `json:"type"`
+	Subject         string    `json:"subject"`
+	Summary         string    `json:"summary,omitempty"`
+	Detail          string    `json:"detail,omitempty"`
+	Link            string    `json:"link,omitempty"`
+	OccurredAt      string    `json:"occurred_at"`
+	CorrelationKeys []string  `json:"correlation_keys,omitempty"`
+	Sender          string    `json:"sender,omitempty"`
+	Original        *original `json:"original,omitempty"`
+}
+
+// original 是被映射的那一条 JSON 的原样文本（设计 §9.2、附录 D.8），内核只存不解析。
+type original struct {
+	MediaType string `json:"media_type"`
+	Text      string `json:"text"`
 }
 
 type runErr struct {
@@ -128,6 +135,11 @@ func poll(ctx context.Context, stdin io.Reader, hc *http.Client, now func() time
 		return nil, err
 	}
 
+	raws, err := rawItems(body, cfg.ItemsPath)
+	if err != nil || len(raws) != len(items) {
+		return nil, fail(ExitTemporary, "无法取得条目原文: %v", err)
+	}
+
 	var floor time.Time
 	if in.Cursor != "" {
 		if floor, err = time.Parse(time.RFC3339Nano, in.Cursor); err != nil {
@@ -149,6 +161,7 @@ func poll(ctx context.Context, stdin io.Reader, hc *http.Client, now func() time
 		if at.After(newest) {
 			newest = at
 		}
+		ev.Original = &original{MediaType: "application/json", Text: string(raws[i])}
 		_ = enc.Encode(ev)
 	}
 
@@ -233,6 +246,29 @@ func itemsOf(doc any, path string) ([]any, error) {
 	items, ok := v.([]any)
 	if !ok {
 		return nil, fail(ExitAuth, "items_path %q 指向的不是数组", path)
+	}
+	return items, nil
+}
+
+// rawItems 沿同一条路径取条目数组里每个元素的原样字节（不重新编码）。
+func rawItems(body []byte, path string) ([]json.RawMessage, error) {
+	cur := json.RawMessage(body)
+	if path != "" {
+		for _, k := range strings.Split(path, ".") {
+			var obj map[string]json.RawMessage
+			var arr []json.RawMessage
+			if json.Unmarshal(cur, &obj) == nil {
+				cur = obj[k]
+			} else if i, err := strconv.Atoi(k); err == nil && json.Unmarshal(cur, &arr) == nil && i >= 0 && i < len(arr) {
+				cur = arr[i]
+			} else {
+				return nil, fmt.Errorf("路径 %q 不存在", path)
+			}
+		}
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(cur, &items); err != nil {
+		return nil, err
 	}
 	return items, nil
 }
