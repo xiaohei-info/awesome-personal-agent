@@ -1,0 +1,4 @@
+# SRC_STUB 的另一份接入声明：不写 content 段，即不支持取回附件（acc-raw-nofetch 用这份，附件只显示元数据）。
+program: src-stub
+default: {zh: 桩来源, en: Stub source}
+sender: {trust: unverified}
