@@ -528,7 +528,7 @@ func Register(x *command.Executor) error { return RegisterWith(x, nil) }
 // 授权（§14.3）：commit 按"修订材料"（observer 得到 4）；confirm 与 reject 按代答（Web 本人可；delegate 必须附本人原话；
 // 规范属 spec_activation，delegate 得到 20；observer、worker、运行凭据得到 4）；revert 只在 Web（delegate 得到 20，其余得到 4）。
 func RegisterWith(x *command.Executor, src PackSource) error {
-	for _, sp := range []command.Spec{commit(src), confirm(), reject(), revert(), summarize(), link(src)} {
+	for _, sp := range []command.Spec{commit(src), confirm(), reject(), revert(), summarize(), link(src), update(src)} {
 		if err := x.Register(sp); err != nil {
 			return err
 		}

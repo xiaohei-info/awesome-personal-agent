@@ -204,3 +204,89 @@ func link(src PackSource) command.Spec {
 		},
 	}
 }
+
+// updateIn 是 material.update 的输入：只改链接型材料的标题、kind 与标签（§12.8），位置不可改；未给的字段保持原值。
+type updateIn struct {
+	ID     string    `json:"id"`
+	Title  *string   `json:"title"`
+	Kind   *string   `json:"kind"`
+	Tags   *[]string `json:"tags"`
+	Reason string    `json:"reason"`
+}
+
+// update 是 Web 本人专属（与 material.revert 同属设置类，delegate 得到 20，其余得到 4）。
+func update(src PackSource) command.Spec {
+	parse := func(in json.RawMessage) (updateIn, error) {
+		var v updateIn
+		return v, decode(in, &v)
+	}
+	return command.Spec{
+		Name: "material.update", Action: authz.ActionChangeSettings,
+		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
+			v, err := parse(in)
+			if err != nil {
+				return authz.Object{}, err
+			}
+			m, err := Get(tx, v.ID)
+			return objectOf(m), err
+		},
+		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
+			v, err := parse(in)
+			if err != nil {
+				return err
+			}
+			if v.Title == nil && v.Kind == nil && v.Tags == nil {
+				return invalid("give at least one of title, kind and tags")
+			}
+			if v.Title != nil && blank(*v.Title) {
+				return invalid("title must not be blank")
+			}
+			if v.Kind != nil && (*v.Kind == KindGuideline || !slices.Contains(Kinds(src), *v.Kind)) {
+				return invalid("kind " + *v.Kind + " is not allowed for a linked material")
+			}
+			m, err := Get(tx, v.ID)
+			if err != nil {
+				return err
+			}
+			if m.Form != FormLink {
+				return conflict("only a linked material's title, kind and tags are edited here", "owned materials change by revision; hosted ones by delegation")
+			}
+			return nil
+		},
+		Apply: func(c *command.Ctx) (any, error) {
+			v, err := parse(c.Input)
+			if err != nil {
+				return nil, err
+			}
+			m, err := Get(c.Tx, v.ID)
+			if err != nil {
+				return nil, err
+			}
+			if v.Title != nil {
+				m.Title = strings.TrimSpace(*v.Title)
+			}
+			if v.Kind != nil {
+				m.Kind = *v.Kind
+			}
+			if v.Tags != nil {
+				m.Tags = *v.Tags
+				if m.Tags == nil {
+					m.Tags = []string{}
+				}
+			}
+			tags, _ := json.Marshal(m.Tags)
+			if _, err := c.Tx.Exec("UPDATE materials SET title = ?, kind = ?, tags = ? WHERE id = ?", m.Title, m.Kind, string(tags), m.ID); err != nil {
+				return nil, err
+			}
+			reason := v.Reason
+			if blank(reason) {
+				reason = "edited linked material " + m.Title
+			}
+			p, _ := json.Marshal(map[string]any{"material": m, "edited": true})
+			if _, err := c.Emit(domain.Event{Type: domain.EvMaterialRevised, Object: m.ID, Reason: reason, Payload: p}); err != nil {
+				return nil, err
+			}
+			return map[string]string{"material": m.ID}, nil
+		},
+	}
+}
