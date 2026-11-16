@@ -179,6 +179,10 @@ type disposeIn struct {
 	WouldAlert bool                `json:"would_alert,omitempty"`
 	// Placed 是 extract 出口里每条候选各自的合并信息（Item 是它落在的事项）；其余出口用上面内嵌的 mergeFields。
 	Placed []placed `json:"placed,omitempty"`
+	// notify_urgent（§9.3）：NotifyUrgent 为真（规则开启）时，这次新建的建议里 proposal.urgent 为真且仍是 proposed 的在同一事务内产出提醒；
+	// WouldNotify 为真（规则在观察档）时只为它们各记一条 rule.observed“本来会提醒”。
+	NotifyUrgent bool `json:"notify_urgent,omitempty"`
+	WouldNotify  bool `json:"would_notify,omitempty"`
 	// Draft 是第 5 步起草的结果，只在初筛后进建议流的处置上有（处置载荷的 draft，§9.3）。
 	Draft *Draft `json:"draft,omitempty"`
 }
@@ -275,6 +279,11 @@ func (s *Service) Register(x *command.Executor) error {
 			}
 			if v.WouldAlert {
 				return nil, s.observeAlert(c, v)
+			}
+			if v.NotifyUrgent || v.WouldNotify {
+				if err := s.urgent(c, v); err != nil {
+					return nil, err
+				}
 			}
 			if v.WouldAccept {
 				p, _ := json.Marshal(map[string]any{"rule": v.Rule, "item": v.Item, "would_do": "accept"})
@@ -656,6 +665,66 @@ func (s *Service) alert(ctx context.Context, sn snapshot, ev domain.SourceEvent,
 	return s.dispose(ctx, m, ev, d)
 }
 
+// urgentMode 按 notify_urgent 规则此刻的模式决定这次处置带不带提醒：auto 提醒，off 什么都不做，其余（含规则状态还没对账）只观察。
+// 规则没声明 notify_urgent 时两个都为假。
+func (s *Service) urgentMode(sn snapshot, m *matched) (notify, would bool, err error) {
+	if m == nil || !m.rule.NotifyUrgent {
+		return false, false, nil
+	}
+	switch sn.modes[m.key()] {
+	case rules.ModeAuto:
+		if s.o.Alert == nil {
+			return false, false, fmt.Errorf("source rule %s declares notify_urgent but no alert handler is configured", m.key())
+		}
+		return true, false, nil
+	case rules.ModeOff:
+		return false, false, nil
+	}
+	return false, true, nil
+}
+
+// urgent 在处置命令里处理这次新建的建议（并入已有建议的不算新）：只有 proposal.urgent 为真（没给判断的不提醒）且仍是 proposed
+// （本人已处置的不提醒）的才提醒或记观察。投递 id 取事项 id，重复处置不会重复提醒。
+func (s *Service) urgent(c *command.Ctx, v disposeIn) error {
+	var ids []string
+	if v.New {
+		ids = append(ids, v.Item)
+	}
+	for _, pl := range v.Placed {
+		if pl.New {
+			ids = append(ids, pl.Item)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	ev, err := runner.Event(c.Tx, v.Event)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		it, err := items.Get(c.Tx, id)
+		if err != nil {
+			return err
+		}
+		if it.Phase != domain.PhaseProposed || it.Proposal == nil || it.Proposal.Urgent == nil || !*it.Proposal.Urgent {
+			continue
+		}
+		if v.NotifyUrgent {
+			if _, err := s.o.Alert.DeliverUrgent(c.Tx, ev, it, v.Rule); err != nil {
+				return err
+			}
+			continue
+		}
+		p, _ := json.Marshal(map[string]any{"rule": v.Rule, "event": v.Event, "item": id, "would_do": "notify_urgent"})
+		if _, err := eventlog.Append(c.Tx, domain.Event{Type: rules.EvObserved, Object: id, Actor: domain.Actor{Type: domain.ActorSystem, Principal: "rule:" + v.Rule, Via: domain.ViaRule},
+			Basis: c.Basis, ChainDepth: c.ChainDepth, Reason: "observe: would notify urgent by " + v.Rule, Payload: p, At: s.o.Now()}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // observeAlert 记 observe 档 alert 规则“本来会提醒”：对象是来源事件，操作者是规则本身，Web 规则设置页按它筛选观察记录。
 func (s *Service) observeAlert(c *command.Ctx, v disposeIn) error {
 	p, _ := json.Marshal(map[string]any{"rule": v.Rule, "event": v.Event, "would_do": "alert", "conditions": v.Conditions})
@@ -903,6 +972,7 @@ type fieldsOut struct {
 	Recommend  string `json:"recommend"`
 	AttachTo   string `json:"attach_to"`
 	Reason     string `json:"reason"`
+	Urgent     *bool  `json:"urgent"` // 今天不处理是否有后果；缺失按"可以等"对待（只供 notify_urgent 规则使用，§9.3）
 }
 
 // draft 是第 5 步。起草失败不挡路：保留 p 里来源事件的标题，摘要留空，失败原因记进理由；只有模板缺失这类配置错误和取消才返回错误。
@@ -992,6 +1062,7 @@ func (s *Service) fill(sn snapshot, p *proposal, d fieldsOut, l lists) {
 		}
 	}
 	p.rec.Reason = d.Reason
+	p.rec.Urgent = d.Urgent
 }
 
 // validKind：起草的 kind 只能是内置模板 schema 里列出的值，未知值视同输出不合 schema。
@@ -1258,6 +1329,9 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 		return s.dispose(ctx, m, ev, d)
 	}
 	d.Disposition, d.Item, d.Items, d.Placed, d.Reason = domain.DispositionProposed, ids[0], ids, places, fmt.Sprintf("extracted %d candidate(s)", len(ids))
+	if d.NotifyUrgent, d.WouldNotify, err = s.urgentMode(sn, m); err != nil {
+		return err
+	}
 	return s.dispose(ctx, m, ev, d)
 }
 
@@ -1371,6 +1445,10 @@ func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain
 		case rules.ModeObserve:
 			d.WouldAccept = true
 		}
+	}
+	var err error
+	if d.NotifyUrgent, d.WouldNotify, err = s.urgentMode(sn, m); err != nil {
+		return err
 	}
 	return s.dispose(ctx, m, ev, d)
 }

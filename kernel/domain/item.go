@@ -176,6 +176,7 @@ type Proposal struct {
 	LowConfidence bool     `json:"low_confidence"`
 	Sources       []string `json:"sources,omitempty"`   // 来源事件 id
 	MergeKey      string   `json:"merge_key,omitempty"` // 合并键（§9.3）：同一件事的后续事件凭它找到这条建议
+	Urgent        *bool    `json:"urgent,omitempty"`    // 起草或抽取对"今天不处理是否有后果"的判断；缺失表示模型没给，只供紧急提醒使用（§9.3）
 }
 
 // ItemKernelState 只由内核维护；子事项的 Unattended 继承自后台运行。

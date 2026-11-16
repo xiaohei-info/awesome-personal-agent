@@ -188,6 +188,43 @@ source_rules:
     then: proposed
 `
 
+const urgentRule = `name: urg
+version: 1.0.0
+description: urgent
+source_rules:
+  - id: mail-urgent
+    match: {source_type: mail-urgent}
+    then: screen
+    notify_urgent: true
+`
+
+// ACT-URG-01/07：声明 notify_urgent 的来源规则是动作类，包内不写 mode 即初始 observe；规则内容变化后（本人已切到 auto）回到 observe，并记 rule.mode_changed。
+func TestNotifyUrgentRuleStartsObserveAndFallsBackOnContentChange(t *testing.T) {
+	e := newEnv(t, map[string]string{"urg/pack.yaml": urgentRule}, nil)
+	k := SourceKey("urg", "mail-urgent")
+	if e.mode(k) != ModeObserve {
+		t.Fatalf("initial mode = %s", e.mode(k))
+	}
+	if err := e.setMode(owner, k, ModeAuto); err != nil || e.mode(k) != ModeAuto {
+		t.Fatalf("owner switch: %v / %s", err, e.mode(k))
+	}
+	e.pack(map[string]string{"urg/pack.yaml": strings.Replace(urgentRule, "{source_type: mail-urgent}", "{source_type: mail-urgent, sender: boss}", 1)})
+	if e.mode(k) != ModeObserve {
+		t.Fatalf("after content change mode = %s", e.mode(k))
+	}
+	var from, to string
+	for _, ev := range e.ofType(domain.EvRuleModeChanged) {
+		var p map[string]string
+		_ = json.Unmarshal(ev.Payload, &p)
+		if p["rule"] == k && p["why"] == "content changed" {
+			from, to = p["from"], p["to"]
+		}
+	}
+	if from != ModeAuto || to != ModeObserve {
+		t.Fatalf("mode_changed from %q to %q", from, to)
+	}
+}
+
 // ACT-TRI-04：accept: auto 的来源规则包内不写 mode 即可加载，初始 observe；Web 切 auto 后才生效。
 func TestAcceptAutoSourceRuleWithoutModeStartsObserve(t *testing.T) {
 	e := newEnv(t, map[string]string{"acc/pack.yaml": autoAcceptNoMode}, nil)

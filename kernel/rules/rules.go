@@ -367,10 +367,10 @@ func defs(src PackSource) []ruleDef {
 				When: r.When, Do: r.Do})
 		}
 	}
-	// 只有 accept: auto 与 then: alert 的来源规则会自动产生动作，需要模式；其余来源规则是确定性映射，没有模式。
+	// 只有 accept: auto、then: alert 与 notify_urgent 的来源规则会自动产生动作，需要模式；其余来源规则是确定性映射，没有模式。
 	for _, p := range src.List() {
 		for _, r := range p.SourceRules {
-			if r.Accept != "auto" && r.Then != "alert" {
+			if r.Accept != "auto" && r.Then != "alert" && !r.NotifyUrgent {
 				continue
 			}
 			k := key(p.Name, groupSource, r.ID)
