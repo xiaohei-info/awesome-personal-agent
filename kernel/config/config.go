@@ -25,6 +25,8 @@ type Config struct {
 	MaxSubprocesses      int           // 长时运行（task、background）额度
 	MaxShortSubprocesses int           // 短任务（source、transform、reader）额度
 	MaxSourceOutput      int           // 来源、转换脚本单次 stdout 的总上限（字节）
+	MaxSourceEvent       int           // 单条来源事件原文的上限（字节），超过整条拒收（§6.10）
+	MaxWebhookBody       int           // webhook 请求体的上限（字节）（§9.5）
 	IngestRetention      time.Duration // Ingest 请求体保留期
 	RunRetention         time.Duration // 运行目录保留期
 	// 投递：无人领取多久转 fallback_web，以及失败后的逐次退避（§6.9）。
@@ -55,6 +57,8 @@ func Default() Config {
 		MaxSubprocesses:      4,
 		MaxShortSubprocesses: 2,
 		MaxSourceOutput:      32 << 20,
+		MaxSourceEvent:       16 << 20,
+		MaxWebhookBody:       1 << 20, // 此前写死的值
 		IngestRetention:      30 * day,
 		RunRetention:         14 * day,
 
@@ -164,6 +168,9 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s:%d: %w", filepath.Base(path), i+1, err)
 		}
 	}
+	if c.MaxSourceEvent >= c.MaxSourceOutput { // 单条事件放不进一次拉取的输出，上限就没有意义（§16.2）
+		return Config{}, fmt.Errorf("%s: max_source_event_mb (%d) 必须小于 max_source_output_mb (%d)", filepath.Base(path), c.MaxSourceEvent>>20, c.MaxSourceOutput>>20)
+	}
 	return c, nil
 }
 
@@ -204,6 +211,10 @@ func apply(c *Config, seen map[string]bool, raw string) error {
 			return err
 		}
 		c.MaxSourceOutput = mb << 20
+	case "max_source_event_mb":
+		return megabytes(k, v, 64, &c.MaxSourceEvent)
+	case "max_webhook_body_mb":
+		return megabytes(k, v, 32, &c.MaxWebhookBody)
 	case "ingest_retention_days":
 		return days(k, v, &c.IngestRetention)
 	case "run_retention_days":
@@ -318,6 +329,19 @@ func positive(k, v string, dst *int) error {
 		return fmt.Errorf("%s 必须是正整数: %q", k, v)
 	}
 	*dst = n
+	return nil
+}
+
+// megabytes 解析 1 到 max 的整数兆字节数，写入 dst（字节）。
+func megabytes(k, v string, max int, dst *int) error {
+	var mb int
+	if err := positive(k, v, &mb); err != nil {
+		return err
+	}
+	if mb > max {
+		return fmt.Errorf("%s 不能超过 %d: %q", k, max, v)
+	}
+	*dst = mb << 20
 	return nil
 }
 

@@ -97,6 +97,8 @@ type Options struct {
 	// MaxBody 是单个请求体上限（字节），RatePerMin 是每个来源每分钟的请求数上限。
 	MaxBody    int
 	RatePerMin int
+	// MaxEvent 是转换脚本输出里单条事件原文的上限（字节，max_source_event_mb）；0 取默认 16 MB。映射出的事件由 runner 按同一上限判定。
+	MaxEvent int
 	// Retention 是原始 payload 的保留期，默认 30 天；过期只留元数据（Expire）。
 	Retention time.Duration
 	// ScriptRoot 是转换脚本允许所在的目录（宿主放脚本的地方）。webhook 来源可由 delegate 登记，
@@ -133,6 +135,9 @@ func New(o Options) (*Service, error) {
 	}
 	if o.MaxBody <= 0 {
 		o.MaxBody = defaultMaxBody
+	}
+	if o.MaxEvent <= 0 {
+		o.MaxEvent = runner.DefaultMaxEvent
 	}
 	if o.RatePerMin <= 0 {
 		o.RatePerMin = defaultRatePerMn
@@ -501,7 +506,7 @@ func (s *Service) one(ctx context.Context, g Ingest) error {
 	if err != nil {
 		return s.settle(ctx, g, StateFailed, err.Error(), 0)
 	}
-	return s.ingest(ctx, g, evs)
+	return s.ingest(ctx, g, evs, nil)
 }
 
 func (s *Service) mapAll(cfg sourceConfig, g Ingest) ([]runner.IngestEvent, error) {
@@ -528,20 +533,33 @@ func (s *Service) mapAll(cfg sourceConfig, g Ingest) ([]runner.IngestEvent, erro
 }
 
 // ingest 经命令模型把事件写进来源事件表（与拉取型同一流水线），再标记 processed。幂等键含代数，重放换新键。
-func (s *Service) ingest(ctx context.Context, g Ingest, evs []runner.IngestEvent) error {
-	in, err := json.Marshal(runner.IngestInput{SourceID: g.SourceID, RunID: g.ID, Events: evs})
+// rejects 是转换脚本输出里没能成为事件的行，随事件同一事务留痕；一条事件也没入账时记 failed，修好后重放。
+func (s *Service) ingest(ctx context.Context, g Ingest, evs []runner.IngestEvent, rejects []runner.Reject) error {
+	in, err := json.Marshal(runner.IngestInput{SourceID: g.SourceID, RunID: g.ID, Events: evs, Rejects: rejects})
 	if err != nil {
 		return err
 	}
-	if _, err := s.o.Exec.Do(ctx, command.Request{Identity: runner.Internal, Command: runner.CmdIngest, Input: in,
-		IdemKey: fmt.Sprintf("webhook:%s:%d", g.ID, g.Gen), Evidence: "webhook " + g.ID, RuleID: ""}); err != nil {
+	res, err := s.o.Exec.Do(ctx, command.Request{Identity: runner.Internal, Command: runner.CmdIngest, Input: in,
+		IdemKey: fmt.Sprintf("webhook:%s:%d", g.ID, g.Gen), Evidence: "webhook " + g.ID, RuleID: ""})
+	if err != nil {
 		var de *domain.Error
 		if errors.As(err, &de) && de.Code == domain.CodeInvalidRequest { // 事件不合标准：数据问题，不是临时故障
 			return s.settle(ctx, g, StateFailed, err.Error(), 0)
 		}
 		return err // 临时错误：保持 received，下次处理或启动恢复时重试
 	}
-	return s.settle(ctx, g, StateProcessed, "", len(evs))
+	var out runner.IngestResult
+	if err := json.Unmarshal(res.Value, &out); err != nil {
+		return fmt.Errorf("webhook: ingest result: %w", err)
+	}
+	if out.Events == 0 && out.Rejected > 0 {
+		reason := "event_too_large: the payload exceeds max_source_event_mb"
+		if len(rejects) > 0 {
+			reason = fmt.Sprintf("script output line %d: %s", rejects[0].Line, rejects[0].Reason)
+		}
+		return s.settle(ctx, g, StateFailed, reason, 0)
+	}
+	return s.settle(ctx, g, StateProcessed, "", out.Events)
 }
 
 type transformStdin struct {
@@ -625,11 +643,8 @@ func (s *Service) Handle(ctx context.Context, res proc.Result) error {
 		if res.Overflow {
 			return s.settle(ctx, g, StateFailed, "script output exceeds max_source_output_mb", 0)
 		}
-		evs, rejects := runner.ParseEvents(res.Stdout)
-		if len(rejects) > 0 && len(evs) == 0 {
-			return s.settle(ctx, g, StateFailed, fmt.Sprintf("script output line %d: %s", rejects[0].Line, rejects[0].Reason), 0)
-		}
-		return s.ingest(ctx, g, evs)
+		evs, rejects := runner.ParseEvents(res.Stdout, s.o.MaxEvent)
+		return s.ingest(ctx, g, evs, rejects)
 	case exit == 2 || exit == 3:
 		return s.settle(ctx, g, StateFailed, fmt.Sprintf("transform exit status %d", exit), 0)
 	default:

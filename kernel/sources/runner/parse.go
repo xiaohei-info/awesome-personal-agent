@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -28,6 +29,11 @@ type parsedEvent struct {
 	Metrics  map[string]float64    `json:"metrics,omitempty"`
 	Items    []domain.EventMessage `json:"items,omitempty"`
 	MergeKey string                `json:"merge_key,omitempty"`
+	// 来源原文字段（§9.2）：都可选，不带的来源程序照常工作；不截断，上限只有单条事件的 max_source_event_mb。
+	Original    *Original       `json:"original,omitempty"`
+	Headers     map[string]any  `json:"headers,omitempty"`
+	Attachments []AttachmentRef `json:"attachments,omitempty"`
+	Content     *Declared       `json:"content,omitempty"`
 }
 
 const (
@@ -58,8 +64,8 @@ const (
 )
 
 // parse 解析 stdout：每行一个标准事件，末个非空行是 {"cursor":"…"}。
-// 末行不是合法游标时 cursorOK 为假，其余事件照常返回。
-func parse(stdout []byte) parsed {
+// 末行不是合法游标时 cursorOK 为假，其余事件照常返回。原文总量超过 maxEvent 字节的事件整行拒收（event_too_large），不截取一段入账。
+func parse(stdout []byte, maxEvent int) parsed {
 	var p parsed
 	lines := bytes.Split(stdout, []byte("\n"))
 	type numbered struct {
@@ -80,6 +86,11 @@ func parse(stdout []byte) parsed {
 	}
 	for _, l := range ls {
 		ev, err := asEvent(l.text)
+		if err == nil {
+			if reason := tooLarge(ev, maxEvent); reason != "" {
+				err = errors.New(reason)
+			}
+		}
 		if err != nil {
 			if len(p.rejects) == maxRejects {
 				continue
@@ -149,5 +160,5 @@ func validateV2(ev parsedEvent) error {
 			return fmt.Errorf("bad field: items[%d].text is empty", i)
 		}
 	}
-	return nil
+	return validateRaw(ev)
 }

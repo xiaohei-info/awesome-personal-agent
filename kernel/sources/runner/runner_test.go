@@ -659,7 +659,7 @@ func TestCredentialsPathPassedOnStdin(t *testing.T) {
 }
 
 func TestParseCapsRejectsPerRun(t *testing.T) {
-	p := parse([]byte(strings.Repeat("not json\n", maxRejects+5) + `{"cursor":"c"}`))
+	p := parse([]byte(strings.Repeat("not json\n", maxRejects+5)+`{"cursor":"c"}`), 1<<20)
 	if len(p.rejects) != maxRejects || !p.cursorOK {
 		t.Fatalf("rejects=%d cursorOK=%v", len(p.rejects), p.cursorOK)
 	}
@@ -756,12 +756,12 @@ func TestInvalidV2FieldsAreRejectedWithReason(t *testing.T) {
 		"items over 200":       {base + `"items":[` + many + `]}`, "at most 200"},
 		"item without text":    {base + `"items":[{"sender":"a","text":" ","at":"2026-03-01T00:00:00Z"}]}`, "items[0].text"},
 	} {
-		p := parse([]byte(tc.line + "\n"))
+		p := parse([]byte(tc.line+"\n"), 1<<20)
 		if len(p.events) != 0 || len(p.rejects) != 1 || !strings.Contains(p.rejects[0].Reason, tc.want) {
 			t.Errorf("%s: events=%d rejects=%+v", name, len(p.events), p.rejects)
 		}
 	}
-	ok := parse([]byte(base + `"metrics":{"` + strings.Repeat("n", 64) + `":1.5}}` + "\n"))
+	ok := parse([]byte(base+`"metrics":{"`+strings.Repeat("n", 64)+`":1.5}}`+"\n"), 1<<20)
 	if len(ok.events) != 1 {
 		t.Fatalf("64-char metric name must pass: %+v", ok.rejects)
 	}

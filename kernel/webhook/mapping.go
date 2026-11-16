@@ -163,6 +163,13 @@ func mapEvent(m packs.WebhookMapping, c exprCtx, body []byte, deliveryKey string
 	default:
 		return ev, fmt.Errorf("correlation_keys must be a list of templates")
 	}
+	// 请求体永久保存为这条事件原文的 original 部分，媒体类型取请求的 Content-Type（§9.5）；它不充当正文。
+	// shortcut: 事件经 JSON 流转，非 UTF-8 的请求体会带替换字符；webhook 载荷实际是 JSON 或表单文本，出现二进制体时再给 original 加编码字段。
+	ct := c.header["content-type"]
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	ev.Original = &runner.Original{MediaType: ct, Text: string(body)}
 	ev.SenderVerified = m.SenderVerified == "on_signature" && signed && ev.Sender != ""
 	return ev, runner.ValidEvent(ev)
 }

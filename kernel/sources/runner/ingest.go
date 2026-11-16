@@ -20,11 +20,13 @@ type IngestInput struct {
 	SourceID string        `json:"source_id"`
 	RunID    string        `json:"run_id"`
 	Events   []IngestEvent `json:"events"`
+	// Rejects 是转换脚本输出里没能成为事件的行（含超过单条上限的），与事件同一事务留痕。
+	Rejects []Reject `json:"rejects,omitempty"`
 }
 
-// ParseEvents 解析转换脚本的 stdout：每行一个标准事件，不含游标行。
-func ParseEvents(stdout []byte) (events []IngestEvent, rejects []Reject) {
-	p := parse(stdout)
+// ParseEvents 解析转换脚本的 stdout：每行一个标准事件，不含游标行；原文总量超过 maxEvent 字节的事件整行拒收。
+func ParseEvents(stdout []byte, maxEvent int) (events []IngestEvent, rejects []Reject) {
+	p := parse(stdout, maxEvent)
 	return p.events, p.rejects
 }
 
@@ -47,15 +49,33 @@ func (r *Runner) applyIngest(c *command.Ctx) (any, error) {
 	if src.Type != domain.SourceWebhook {
 		return nil, domain.NewError(domain.CodeInvalidRequest, "source "+src.ID+" is not a webhook source", "ingest only targets webhook sources")
 	}
-	for _, ev := range in.Events {
+	rejects := in.Rejects
+	accepted := 0
+	for i, ev := range in.Events {
 		if err := ValidEvent(ev); err != nil {
 			return nil, domain.NewError(domain.CodeInvalidRequest, "event "+ev.ID+": "+err.Error(), "fix the mapping or script")
+		}
+		if reason := tooLarge(ev, r.maxEvent()); reason != "" { // 整条拒收并留痕，不截取一段入账
+			raw, _ := json.Marshal(map[string]string{"id": ev.ID})
+			rejects = append(rejects, Reject{Line: i + 1, Reason: reason, Raw: string(raw)})
+			continue
 		}
 		if err := insertEvent(c.Tx, src, in.RunID, r.capSender(src, ev)); err != nil {
 			return nil, err
 		}
+		accepted++
 	}
-	return map[string]any{"source_id": src.ID, "events": len(in.Events)}, nil
+	if err := writeRejects(c.Tx, src.ID, in.RunID, r.o.Now(), rejects); err != nil {
+		return nil, err
+	}
+	return IngestResult{SourceID: src.ID, Events: accepted, Rejected: len(rejects)}, nil
+}
+
+// IngestResult 是 CmdIngest 的返回：落账的事件数与整行拒收的行数。
+type IngestResult struct {
+	SourceID string `json:"source_id"`
+	Events   int    `json:"events"`
+	Rejected int    `json:"rejected"`
 }
 
 // Internal 是内核内部模块（webhook 接收）发 CmdIngest 的身份：来源的调度与落账归内核自己维护。
