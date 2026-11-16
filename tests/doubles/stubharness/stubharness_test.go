@@ -228,3 +228,132 @@ func TestPromptHangChildStaysAliveAndNeverReceipts(t *testing.T) {
 		t.Fatal("child triggered a receipt")
 	}
 }
+
+// flow-report-links: 回执命令带上每个 --link，空项跳过；不设时命令不变。
+func TestReceiptAppendsEveryLink(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "args.txt")
+	cli := filepath.Join(dir, "cli.sh")
+	os.WriteFile(cli, []byte("#!/bin/sh\necho \"$*\" > "+marker+"\n"), 0o755)
+	r := run(t, []string{"STUB_HARNESS_RECEIPT_CMD=" + cli + " report i --outcome done", "STUB_HARNESS_RECEIPT_LINKS=a://x, b://y,,"}, "x")
+	got, _ := os.ReadFile(marker)
+	if r.code != 0 || strings.TrimSpace(string(got)) != "report i --outcome done --link a://x --link b://y" {
+		t.Fatalf("code=%d args=%q", r.code, got)
+	}
+}
+
+// flow-chat-dispose / flow-wb-env: 四种入口的会话类型随回执命令的环境发出；未选入口时不注入。
+func TestEntriesReportSessionKind(t *testing.T) {
+	cases := []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"terminal", []string{"STUB_HARNESS_ENTRY=terminal"}, "direct"},
+		{"dm", []string{"STUB_HARNESS_ENTRY=dm"}, "direct"},
+		{"group", []string{"STUB_HARNESS_ENTRY=group"}, "group"},
+		{"listed platform", []string{"STUB_HARNESS_ENTRY=listed"}, "direct"},
+		{"listed platform + group chat stays group", []string{"STUB_HARNESS_ENTRY=listed", "STUB_HARNESS_CHAT_TYPE=group"}, "group"},
+		{"dm without sender", []string{"STUB_HARNESS_ENTRY=dm", "STUB_HARNESS_SENDER=", "STUB_HARNESS_PLATFORM=webhook"}, "direct"},
+		{"non-chat platform", []string{"STUB_HARNESS_PLATFORM=webhook"}, "unknown"},
+		{"not set", nil, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			marker := filepath.Join(dir, "kind.txt")
+			cli := filepath.Join(dir, "cli.sh")
+			os.WriteFile(cli, []byte("#!/bin/sh\necho \"$APA_SESSION_KIND|$APA_SESSION\" > "+marker+"\n"), 0o755)
+			r := run(t, append([]string{"STUB_HARNESS_RECEIPT_CMD=" + cli}, c.env...), "x")
+			got, _ := os.ReadFile(marker)
+			want := c.want + "|stub-session-1"
+			if c.want == "" {
+				want = "|"
+			}
+			if r.code != 0 || strings.TrimSpace(string(got)) != want {
+				t.Fatalf("code=%d got %q want %q", r.code, got, want)
+			}
+		})
+	}
+}
+
+func fakeAPA(t *testing.T, dir string) (bin, rec string) {
+	t.Helper()
+	rec = filepath.Join(dir, "apa-args.txt")
+	bin = filepath.Join(dir, "apa.sh")
+	os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+rec+"\n"), 0o755)
+	return
+}
+
+func briefRun(t *testing.T, mode string) (result, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	apa, rec := fakeAPA(t, t.TempDir())
+	mat := `{"materials":[{"name":"schedule","body":"{\"schedule\":[{\"title\":\"周会\"},{\"title\":\"评审\"}]}"},{"name":"digest","body":"{\"digest\":[]}"},{"name":"instance_params","body":"{\"schedule\":\"x\"}"}]}`
+	os.WriteFile(filepath.Join(dir, "materials.json"), []byte(mat), 0o600)
+	os.WriteFile(filepath.Join(dir, "instruction.txt"), []byte("要求"), 0o600)
+	os.WriteFile(filepath.Join(dir, "src-1.txt"), []byte("原文"), 0o600)
+	save := filepath.Join(t.TempDir(), "saved")
+	env := []string{"STUB_HARNESS_RUN_DIR=" + dir, "STUB_HARNESS_APA=" + apa, "STUB_HARNESS_SAVE_DIR=" + save}
+	var out bytes.Buffer
+	code := stubharness.Run([]string{"write itm_ab12 STUB_MODE=" + mode}, append([]string{"PATH=" + os.Getenv("PATH")}, env...), t.TempDir(), &out)
+	return result{out.String(), code, dir}, save, rec
+}
+
+// flow-brief-material: 读资料与原文文件、保存副本、按段写回 sections。
+func TestBriefReadsMaterialsSavesFilesAndWritesSections(t *testing.T) {
+	r, save, rec := briefRun(t, "brief")
+	if r.code != 0 {
+		t.Fatalf("exit %d", r.code)
+	}
+	for _, n := range []string{"materials.json", "instruction.txt", "src-1.txt"} {
+		if _, err := os.Stat(filepath.Join(save, n)); err != nil {
+			t.Fatalf("not saved: %s", n)
+		}
+	}
+	args, _ := os.ReadFile(rec)
+	lines := strings.Split(strings.TrimSpace(string(args)), "\n")
+	if len(lines) < 4 || strings.Join(lines[:3], " ") != "item update itm_ab12" || lines[3] != "--spec" {
+		t.Fatalf("apa args %q", args)
+	}
+	var spec struct {
+		Period   string
+		Sections []map[string]string
+	}
+	if err := json.Unmarshal([]byte(lines[4]), &spec); err != nil {
+		t.Fatal(err)
+	}
+	if spec.Period == "" || len(spec.Sections) != 2 ||
+		spec.Sections[0]["title"] != "schedule" || spec.Sections[0]["body"] != "周会；评审" ||
+		spec.Sections[1]["title"] != "digest" || spec.Sections[1]["body"] != "无" {
+		t.Fatalf("spec %s", lines[4])
+	}
+	if lastLine(r.stdout) == "" || !strings.Contains(r.stdout, "session_id") {
+		t.Fatalf("no summary: %q", r.stdout)
+	}
+}
+
+// brief-period 只写 period，不带 sections。
+func TestBriefPeriodOnlyOmitsSections(t *testing.T) {
+	r, _, rec := briefRun(t, "brief-period")
+	args, _ := os.ReadFile(rec)
+	if r.code != 0 || !strings.Contains(string(args), `"period"`) || strings.Contains(string(args), "sections") {
+		t.Fatalf("code=%d args=%q", r.code, args)
+	}
+}
+
+func TestBriefFailsLoudly(t *testing.T) {
+	dir := t.TempDir()
+	if r := run(t, []string{"STUB_HARNESS_RUN_DIR=" + dir, "STUB_HARNESS_MODE=brief"}, "x"); r.code == 0 {
+		t.Fatal("missing materials must fail")
+	}
+	os.WriteFile(filepath.Join(dir, "materials.json"), []byte(`{"materials":[]}`), 0o600)
+	if r := run(t, []string{"STUB_HARNESS_RUN_DIR=" + dir, "STUB_HARNESS_MODE=brief"}, "no item"); r.code == 0 {
+		t.Fatal("missing item/apa must fail")
+	}
+	apa := filepath.Join(dir, "bad.sh")
+	os.WriteFile(apa, []byte("#!/bin/sh\nexit 9\n"), 0o755)
+	if r := run(t, []string{"STUB_HARNESS_RUN_DIR=" + dir, "STUB_HARNESS_MODE=brief", "STUB_HARNESS_APA=" + apa, "STUB_HARNESS_ITEM=itm_1"}, "x"); r.code == 0 {
+		t.Fatal("apa failure must surface")
+	}
+}
