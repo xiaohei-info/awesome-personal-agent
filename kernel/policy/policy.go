@@ -209,6 +209,8 @@ const (
 	DefaultJudgeMaxBatch         = 32
 	DefaultJudgeMaxMaterialChars = 8000
 	DefaultScreeningTimeoutMs    = 30000
+	// DefaultGenerateMaxMaterialChars 是生成端点的资料预算缺省值（§8.4）；默认值是否合适见 SPIKE-GEN-BUDGET。
+	DefaultGenerateMaxMaterialChars = 24000
 )
 
 // EffectiveLocality 是端点位置的实际取值：未声明按 external（§14.14）。
@@ -227,6 +229,16 @@ type GenerateEndpoint struct {
 	Model    string `json:"model,omitempty"`
 	Locality string `json:"locality,omitempty"`
 	Protocol string `json:"protocol,omitempty"`
+	// MaxMaterialChars 是每次调用的资料预算（字符）；已存的策略没有这个键，读作默认值，不改写。
+	MaxMaterialChars int `json:"max_material_chars,omitempty"`
+}
+
+// MaterialBudget 是资料预算的实际取值：未设置按默认值。
+func (g GenerateEndpoint) MaterialBudget() int {
+	if g.MaxMaterialChars <= 0 {
+		return DefaultGenerateMaxMaterialChars
+	}
+	return g.MaxMaterialChars
 }
 
 // JudgeEndpoint 是分类（判断）端点；Policy 里为 nil 表示未配置。
@@ -652,6 +664,12 @@ func normalizeEndpoints(p *Policy) (err error) {
 		}
 		if !oneOf(g.Protocol, "", ProtocolChatCompletions, ProtocolMessages, ProtocolResponses) {
 			return invalid("generate_endpoint protocol %q", g.Protocol)
+		}
+		if g.MaxMaterialChars < 0 {
+			return invalid("generate_endpoint max_material_chars %d < 0", g.MaxMaterialChars)
+		}
+		if g.MaxMaterialChars == 0 {
+			g.MaxMaterialChars = DefaultGenerateMaxMaterialChars
 		}
 	}
 	j := p.JudgeEndpoint

@@ -36,6 +36,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/budget"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -185,6 +186,9 @@ type disposeIn struct {
 	WouldNotify  bool `json:"would_notify,omitempty"`
 	// Draft 是第 5 步起草的结果，只在初筛后进建议流的处置上有（处置载荷的 draft，§9.3）。
 	Draft *Draft `json:"draft,omitempty"`
+	// Material 是起草或抽取这次调用送给生成端点的资料裁剪量：送出字符数、裁剪前字符数与方式（§8.4）。没有调用过的处置没有；
+	// 升级前的处置也没有。
+	Material *budget.Trace `json:"material,omitempty"`
 }
 
 // Draft 是起草的结果：Outcome 为 ok、failed 或 skipped；Code 说明没成的原因。
@@ -250,6 +254,9 @@ func (s *Service) Register(x *command.Executor) error {
 			}
 			if v.Draft != nil {
 				payload["draft"] = v.Draft
+			}
+			if v.Material != nil {
+				payload["material"] = v.Material
 			}
 			if v.Judgment != "" { // 并入结论：记录过了保留期，apa why 仍从这里读出答案与定案者（§6.16）
 				rec, err := record.Get(c.Tx, v.Judgment)
@@ -534,9 +541,10 @@ type proposal struct {
 	deadline   *time.Time
 	plannedFor string
 	rec        *domain.Proposal
-	body       string // 非空时作事项正文，否则用来源事件的正文（抽取按 refs 取）
-	judgment   string // 初筛的判断记录 id
-	draft      *Draft // 起草的结果；没有起草（规则直出、手动转建议）时为空
+	body       string        // 非空时作事项正文，否则用来源事件的正文（抽取按 refs 取）
+	judgment   string        // 初筛的判断记录 id
+	draft      *Draft        // 起草的结果；没有起草（规则直出、手动转建议）时为空
+	material   *budget.Trace // 起草送出的资料的裁剪量；没有起草时为空
 }
 
 func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) error {
@@ -568,7 +576,7 @@ func (s *Service) one(ctx context.Context, sn snapshot, ev domain.SourceEvent) e
 		exit = rules.ExitExtract
 	}
 	if id, ok := sn.made[ev.ID]; ok && exit != rules.ExitExtract { // 上一轮建好了事项却没记完处置：接着做，不再判断、不再建
-		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure", "", nil, s.resumeFields(ctx, ev), nil)
+		return s.finish(ctx, sn, m, ev, id, "resumed after partial failure", "", nil, s.resumeFields(ctx, ev), nil, nil)
 	}
 	var (
 		prop    proposal
@@ -796,11 +804,41 @@ func (s *Service) freshOutbound(ctx context.Context, src domain.Source) (domain.
 	return o, pol, err
 }
 
-// material 是按端点位置裁剪后的资料正文；ok 为假表示该位置的端点被外发范围排除（§14.14）。
-// 聚合事件的消息与正文同等对待：它们也是来源内容。
+// material 是按端点位置裁剪后的资料正文（只做外发范围，不做预算，供外发预览与测试）；ok 为假表示该位置的端点被外发范围排除（§14.14）。
 func material(ev domain.SourceEvent, o domain.Outbound) func(locality string) (string, bool) {
-	body := withMessages(ev)
-	return func(locality string) (string, bool) { return materialAt(body, registry.ScopeFor(o, locality)) }
+	src := materialSource(ev, o)
+	return func(locality string) (string, bool) {
+		s, ok := src(locality)
+		return budget.Fit(s, 0).Text, ok
+	}
+}
+
+// materialSource 是按端点位置裁剪后的结构化资料：先外发范围，预算由调用方按端点再做（budget.Fit）。
+// 聚合事件的消息与正文同等对待，它们也是来源内容。
+func materialSource(ev domain.SourceEvent, o domain.Outbound) func(locality string) (budget.Source, bool) {
+	return func(locality string) (budget.Source, bool) { return materialAt(ev, registry.ScopeFor(o, locality)) }
+}
+
+// materialAt 是按一个外发范围裁剪后的资料；范围不可外发时 ok 为假。
+// 全文范围下聚合消息保持一条一个整体，预算不够时能整条保留；摘录与元信息范围本来就只有开头几百字符，消息并进正文一起截。
+func materialAt(ev domain.SourceEvent, scope string) (budget.Source, bool) {
+	if scope != registry.ScopeFull {
+		ev = withMessages(ev)
+	}
+	t, ok := registry.Trim(ev, scope)
+	if !ok {
+		return budget.Source{}, false
+	}
+	src := budget.Source{Body: t.Summary + "\n" + t.Detail}
+	if scope == registry.ScopeFull {
+		if t.Link != "" {
+			src.Body += "\n" + t.Link // 完整链接只在全文范围内送出，其余范围只有结构化输入里的域名
+		}
+		for _, m := range ev.Messages {
+			src.Messages = append(src.Messages, m.Sender+": "+m.Text)
+		}
+	}
+	return src, true
 }
 
 // withMessages 把聚合事件的消息接到正文后面，与正文一起按范围裁剪。
@@ -815,19 +853,6 @@ func withMessages(ev domain.SourceEvent) domain.SourceEvent {
 	}
 	ev.Detail = b.String()
 	return ev
-}
-
-// materialAt 是按一个外发范围裁剪后的资料正文；范围不可外发时 ok 为假。
-func materialAt(body domain.SourceEvent, scope string) (string, bool) {
-	t, ok := registry.Trim(body, scope)
-	if !ok {
-		return "", false
-	}
-	text := t.Summary + "\n" + t.Detail
-	if scope == registry.ScopeFull && t.Link != "" {
-		text += "\n" + t.Link // 完整链接只在全文范围内送出，其余范围只有结构化输入里的域名
-	}
-	return strings.TrimSpace(text), true
 }
 
 // OutboundView 是一条来源事件在某个外发范围下实际送给模型的内容：前五项是结构化输入里的元信息
@@ -845,11 +870,10 @@ type OutboundView struct {
 // 只读，不调模型；none 与未选择不外发，不在结果里。
 func OutboundPreview(ev domain.SourceEvent) map[string]OutboundView {
 	meta, _ := registry.Trim(ev, registry.ScopeMeta)
-	body := withMessages(ev)
 	out := map[string]OutboundView{}
 	for _, scope := range []string{registry.ScopeFull, registry.ScopeExcerpt, registry.ScopeMeta} {
-		text, _ := materialAt(body, scope)
-		out[scope] = OutboundView{EventType: meta.Type, Subject: meta.Subject, Sender: meta.Sender, OccurredAt: meta.OccurredAt, Link: meta.Link, Material: text}
+		src, _ := materialAt(ev, scope)
+		out[scope] = OutboundView{EventType: meta.Type, Subject: meta.Subject, Sender: meta.Sender, OccurredAt: meta.OccurredAt, Link: meta.Link, Material: budget.Fit(src, 0).Text}
 	}
 	return out
 }
@@ -874,24 +898,25 @@ type asked struct {
 
 // ask 经级联问一道是非题（初筛、对话预筛）：分类端点先答，不确定带内由对话端点重答，各级未定取模板的保守默认。
 // withList 在资料正文之后附"未关闭事项"一节（预筛用，§9.3）；清单按接收端点的位置过滤，随资料一起计入预算。
-func withList(base func(string) (string, bool), list func(locality string) lists) func(string) (string, bool) {
-	return func(locality string) (string, bool) {
-		text, ok := base(locality)
+func withList(base func(string) (budget.Source, bool), list func(locality string) lists) func(string) (budget.Source, bool) {
+	return func(locality string) (budget.Source, bool) {
+		src, ok := base(locality)
 		if !ok {
-			return "", false
+			return budget.Source{}, false
 		}
-		return strings.TrimSpace(text + "\n\n" + list(locality).section()), true
+		src.Suffix = list(locality).section()
+		return src, true
 	}
 }
 
 // ask 的 list 非空时（对话预筛、抽取预筛）在资料后附未关闭事项清单。
 func (s *Service) ask(ctx context.Context, src domain.Source, ev domain.SourceEvent, pack, tmpl, hint string, o domain.Outbound, list func(string) lists) (asked, error) {
-	mat := material(ev, o)
+	mat := materialSource(ev, o)
 	if list != nil {
 		mat = withList(mat, list)
 	}
 	v, err := s.o.Judge.Judge(ctx, direct.JudgeCall{Pack: pack, Template: tmpl, Input: eventInput(src, ev, hint, nil),
-		Material: mat, Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
+		MaterialSource: mat, Subject: ev.ID, Source: src.ID, Scope: direct.Scope{Source: src.ID}, UnjudgedOnUnavailable: true})
 	if err != nil {
 		return asked{}, err
 	}
@@ -979,18 +1004,20 @@ type fieldsOut struct {
 func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev domain.SourceEvent, pack, tmpl, hint string, o domain.Outbound, pol policy.Policy, p *proposal) error {
 	gen := pol.GenerateEndpoint
 	locality := policy.EffectiveLocality(gen.Locality)
-	text, allowed := material(ev, o)(locality)
+	bs, allowed := materialSource(ev, o)(locality)
 	if !allowed {
 		p.reason += "; draft skipped: outbound scope excludes the generate endpoint"
 		p.draft = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}
 		return nil
 	}
+	res := budget.Fit(bs, gen.MaterialBudget()) // 先外发范围，后预算
+	p.material = &res.Trace
 	list := func(loc string) lists { return sn.lists(ev, p.project, loc) }
 	in := eventInput(src, ev, hint, s.listInput(list(locality)))
 	var out direct.Outcome
 	var err error
 	for attempt := 0; ; attempt++ { // 调用时端点位置变了，Judge 拒绝发送：按新位置重裁剪再来
-		out, err = s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: tmpl, Input: in, Material: text, RequireLocality: locality,
+		out, err = s.o.Judge.Do(ctx, direct.Call{Pack: pack, Template: tmpl, Input: in, Material: res.Text, RequireLocality: locality,
 			Scope: direct.Scope{Source: src.ID}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
 		if !errors.Is(err, direct.ErrLocalityChanged) || attempt >= 3 {
 			break
@@ -1000,12 +1027,13 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 		}
 		locality = policy.EffectiveLocality(pol.GenerateEndpoint.Locality)
 		in = eventInput(src, ev, hint, s.listInput(list(locality)))
-		var ok bool
-		if text, ok = material(ev, o)(locality); !ok {
+		if bs, allowed = materialSource(ev, o)(locality); !allowed {
 			p.reason += "; draft skipped: outbound scope excludes the generate endpoint"
-			p.draft = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}
+			p.draft, p.material = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}, nil
 			return nil
 		}
+		res = budget.Fit(bs, pol.GenerateEndpoint.MaterialBudget())
+		p.material = &res.Trace
 	}
 	switch {
 	case errors.Is(err, direct.ErrBadTemplate), ctx.Err() != nil:
@@ -1267,12 +1295,13 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, ChoiceIgnore)
 	}
 	locality := policy.EffectiveLocality(pol.GenerateEndpoint.Locality)
-	text, allowed := material(ev, o)(locality)
+	bs, allowed := materialSource(ev, o)(locality)
 	if !allowed {
 		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, outboundUnsetPrefix+"the generate endpoint is excluded by the outbound scope")
 	}
+	mat := budget.Fit(bs, pol.GenerateEndpoint.MaterialBudget()) // 先外发范围，后预算
 	l := list(locality)
-	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: extractPack, Template: extract, Input: eventInput(src, ev, "", s.listInput(l)), Material: text, RequireLocality: locality,
+	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: extractPack, Template: extract, Input: eventInput(src, ev, "", s.listInput(l)), Material: mat.Text, RequireLocality: locality,
 		Scope: direct.Scope{Source: src.ID}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})
 	if errors.Is(err, model.ErrPaused) {
 		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, pausedPrefix+err.Error())
@@ -1323,7 +1352,7 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 		}
 		ids, places = append(ids, id), append(places, placed{id, mergeFields{MergeKey: key, New: true, AttachTo: attachTo}})
 	}
-	d := disposeIn{Event: ev.ID, Rule: m.key(), Judgment: a.judgment}
+	d := disposeIn{Event: ev.ID, Rule: m.key(), Judgment: a.judgment, Material: &mat.Trace}
 	if len(ids) == 0 {
 		d.Disposition, d.Reason = domain.DispositionIgnored, "extract found no candidate"
 		return s.dispose(ctx, m, ev, d)
@@ -1389,7 +1418,7 @@ func (s *Service) propose(ctx context.Context, sn snapshot, src domain.Source, e
 	if err != nil {
 		return err
 	}
-	return s.finish(ctx, sn, m, ev, item, p.reason, p.judgment, nil, mf, p.draft)
+	return s.finish(ctx, sn, m, ev, item, p.reason, p.judgment, nil, mf, p.draft, p.material)
 }
 
 // createItem 以 id 的身份为来源事件建 proposed 事项；ext.source_event 记下来源事件，供重入时找回已建事项。
@@ -1403,7 +1432,7 @@ func (s *Service) createItemKeyed(ctx context.Context, id command.Identity, rule
 	if ref == "" {
 		ref = ev.ID
 	}
-	in := map[string]any{"kind": p.kind, "title": p.title, "summary": p.summary, "body": orElse(p.body, ev.Detail), "project": project,
+	in := map[string]any{"kind": p.kind, "title": p.title, "summary": p.summary, "body": budget.ProposalBody(orElse(p.body, ev.Detail), ev.ID), "project": project,
 		"origin": domain.Origin{Source: src.ID, Actor: ev.Sender, Ref: ref}, "reason": p.reason,
 		"ext": map[string]string{"source_event": ev.ID}}
 	if p.deadline != nil {
@@ -1427,8 +1456,8 @@ func (s *Service) createItemKeyed(ctx context.Context, id command.Identity, rule
 }
 
 // finish 在事项建好之后按需自动接受，再记处置；对同一事件可重复执行。
-func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason, judgment string, items []string, mf mergeFields, draft *Draft) error {
-	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason, Judgment: judgment, Items: items, mergeFields: mf, Draft: draft}
+func (s *Service) finish(ctx context.Context, sn snapshot, m *matched, ev domain.SourceEvent, item, reason, judgment string, items []string, mf mergeFields, draft *Draft, mat *budget.Trace) error {
+	d := disposeIn{Event: ev.ID, Disposition: domain.DispositionProposed, Item: item, Rule: m.key(), Reason: reason, Judgment: judgment, Items: items, mergeFields: mf, Draft: draft, Material: mat}
 	if m != nil && m.rule.Accept == "auto" && !mf.Merge { // 并入已有建议：它的处置早已定过，不再替它自动接受
 		mode := sn.modes[m.key()]
 		if mode == "" {

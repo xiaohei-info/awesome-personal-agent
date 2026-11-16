@@ -906,3 +906,45 @@ func TestPausedModelsSendNothingAndResumeAtOnce(t *testing.T) {
 		t.Fatal("resumed models must be called again")
 	}
 }
+
+// ACT-BUD-02/04：每一级按自己端点的预算裁剪资料（判断端点 8000、对话端点用生成端点的预算），裁剪量记进判断记录的每一级，
+// 送出的内容是首 3/4 尾 1/4；聚合消息整条保留。
+func TestEachLevelTrimsToItsOwnBudgetAndLeavesTrace(t *testing.T) {
+	e := setupJudge(t, true, true)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "budget", func(p *policy.Policy) error { p.GenerateEndpoint.MaxMaterialChars = 3000; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.cls.SetDefaultPYes(0.4) // 落在 0.15–0.60 带内：两级都问
+	e.chat("budget-key", "yes", true)
+	body := "budget-key " + strings.Repeat("长", 20000)
+	c := jc("screen", "budget-key")
+	c.MaterialText = body
+	v := e.judge(t, c)
+	r := e.saved(t, v.Record.ID)
+	if len(r.Levels) != 2 || r.Levels[0].Material == nil || r.Levels[1].Material == nil {
+		t.Fatalf("两级都应留痕：%+v", r.Levels)
+	}
+	full := len([]rune(body))
+	if m := r.Levels[0].Material; m.Original != full || m.Sent > 8000 || m.Sent < 7900 || m.Mode != "head_tail" {
+		t.Fatalf("判断端点一级：%+v", *m)
+	}
+	if m := r.Levels[1].Material; m.Original != full || m.Sent > 3000 || m.Sent < 2900 || m.Mode != "head_tail" {
+		t.Fatalf("对话端点一级：%+v", *m)
+	}
+	if got := e.cls.Batches()[0].BodyText; !strings.Contains(got, "省略") || strings.Count(got, "长") > 8000 {
+		t.Fatalf("分类端点收到的资料没有裁到 8000 并注明省略")
+	}
+	reqs := e.stub.Requests()
+	if got := reqs[len(reqs)-1].BodyText; !strings.Contains(got, "省略") || strings.Count(got, "长") > 3000 {
+		t.Fatalf("对话端点收到的资料没有裁到 3000 并注明省略")
+	}
+	// 短资料不裁，留痕写 none。
+	e.chat("short-key", "yes", true)
+	v = e.judge(t, jc("screen", "short-key"))
+	if m := e.saved(t, v.Record.ID).Levels[0].Material; m == nil || m.Mode != "none" || m.Sent != m.Original {
+		t.Fatalf("%+v", m)
+	}
+}

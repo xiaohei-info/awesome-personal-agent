@@ -38,6 +38,7 @@ import (
 	"unicode"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/budget"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -334,7 +335,7 @@ func (s *Service) wake(ctx context.Context, item string, ev domain.SourceEvent) 
 // 这些事项没有执行者，写入以本人登记该来源为依据，代本人执行（同入站规则的自动接受）。
 func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEvent) error {
 	patch := map[string]string{"id": item, "reason": "source object updated by " + ev.Type + " " + ev.ID}
-	for k, v := range map[string]string{"title": ev.Subject, "summary": ev.Summary, "body": ev.Detail} {
+	for k, v := range map[string]string{"title": ev.Subject, "summary": ev.Summary, "body": budget.ProposalBody(ev.Detail, ev.ID)} {
 		if v != "" {
 			patch[k] = v
 		}
