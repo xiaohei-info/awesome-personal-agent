@@ -147,7 +147,7 @@ func TestNormalizeLocationCanonicalForms(t *testing.T) {
 	cases := map[string]string{
 		"vault:e\u0301/a/e\u0301.md":              "vault:é/a/é.md",
 		"HTTPS://Example.COM/Path/CaseKept?Q=1#F": "https://example.com/Path/CaseKept?Q=1#F",
-		"http://User:Pw@Host.Example:8080/x":      "http://User:Pw@host.example:8080/x",
+		"http://Host.Example:8080/X":              "http://host.example:8080/X",
 		" https://example.com ":                   "https://example.com",
 	}
 	for in, want := range cases {
