@@ -1,9 +1,8 @@
-# sha256: 1ef201565b12be54e886bfb1587ddade03fa8edfa7adca58d5b33daedc065d11
+# sha256: 4f5b694fbca70da9813bbb8a2a13f0db1f06c97c5ce36793ff1435e1fd69b3b8
 work_item_id: 01a1e5e6-6012-7880-aae0-7e902e1dcfc5
 status: done
 merged: true
 merged_at: '2026-11-16T23:54:27Z'
-recovery_marker: true
 retry_note: Previous worker run was terminated by the runtime (agent_error.unknown),
   not a code failure. Continue from your existing workspace/branch, rebase on origin/main,
   finish, run contract commands, submit. Do not redo finished work.
