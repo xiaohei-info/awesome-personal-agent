@@ -1,0 +1,2147 @@
+---
+schema: omac.acceptance/v3
+requirements:
+# ---------- 验收环境（替身与夹具，节点以 requirement_refs 认领）----------
+- id: REQ-WB-ENV-SRCSTUB
+  source: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3 R10、X3
+  summary: 桩来源脚本 SRC_STUB：按 case 文件输出标准事件，可产出 200 KiB 正文、带 headers/attachments/original/messages 的事件、超单条上限事件、partial 自报，并支持 fetch 模式回固定字节
+  disposition: in-scope
+  verification: technical
+- id: REQ-WB-ENV-FX7
+  source: docs/solution-design.md#20.4 门槛2; OMAC-NOTES.md#3 末段
+  summary: 结构版本 7 的合成账本夹具：带正文恰好 16 KiB 的邮件事件、托管型与自有型材料、带授权单的事件；manifest 给出各表行数与 Event 载荷哈希；登记为冻结版本
+  disposition: in-scope
+  verification: technical
+- id: REQ-WB-ENV-MODEL
+  source: OMAC-NOTES.md#3 X3; docs/appendix-c-capability-pack.md#C.7
+  summary: 对话端点替身 MODEL_STUB 可按模板脚本返回带 refs、attach_to、urgent、project 的抽取与起草结果，也可返回只有 title/kind/summary 的旧输出，并记录请求体（含清单与资料字符数）
+  disposition: in-scope
+  verification: technical
+- id: REQ-WB-ENV-HARNESS
+  source: OMAC-NOTES.md#3 L3、B3、C3
+  summary: STUB_HARNESS 增强：按开关发带多个 --link 的回执；读取简报运行目录的资料与原文文件并写回 sections；按环境变量模拟终端、私聊、多人会话与名单平台四种入口
+  disposition: in-scope
+  verification: technical
+- id: REQ-WB-ENV-TOOLS
+  source: docs/appendix-d-adapters.md#D.8、D.2; OMAC-NOTES.md#1 R8、M1
+  summary: 录制样本：两个邮件适配器的长正文（>16 KiB）、HTML 带附件的信；提醒事项 undated_lists 的无到期日提醒与改标题后的同一提醒；供 TOOL_STUB_BIN 回放
+  disposition: in-scope
+  verification: technical
+- id: REQ-WB-HTML2TEXT
+  source: docs/appendix-d-adapters.md#D.8 HTML 转文本; OMAC-NOTES.md#1 R0
+  summary: 来源程序共用的 HTML 转文本包：库的选定写回设计 §18；保留链接地址、列表、引用、表格结构，不执行脚本不取远程资源；包在 sources/ 一侧，不进内核
+  disposition: in-scope
+  verification: action
+# ---------- W16 结构版本 8 ----------
+- id: REQ-WB-01
+  source: docs/changes-v0.2.0.md#10.1 WB-01; docs/solution-design.md#6.10 来源原文
+  summary: 新增来源原文表，按事件分部分（body/original/headers/attachments/messages）存媒体类型、字节数、哈希与内容；已有事件不搬，读取先原文表后原列
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-02
+  source: docs/changes-v0.2.0.md#10.1 WB-02
+  summary: 来源事件加原文总字节数与完整程度两列；完整程度默认 legacy，新落盘显式写 full/partial；已有事件字节数留空，存储页按原列长度现算
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-03
+  source: docs/changes-v0.2.0.md#10.1 WB-03; docs/solution-design.md#6.7
+  summary: Event 表加导入批次与实际写入时刻两列；已有 Event 为空且载荷不改
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-04
+  source: docs/changes-v0.2.0.md#10.1 WB-04
+  summary: 事项表加导入信息列与按 origin.source、origin.ref 的非唯一表达式索引；已有事项导入信息为空
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-05
+  source: docs/changes-v0.2.0.md#10.1 WB-05; docs/solution-design.md#7.1
+  summary: 导入批次表（来源名、操作者、授权单、条数、时间）与导入对照表（来源名、记录类型、外部 id → 账本对象 id，唯一）
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-06
+  source: docs/changes-v0.2.0.md#10.1 WB-06; docs/solution-design.md#6.6、12.8
+  summary: 材料表加形态（hosted/owned/link）与位置两列；（项目，位置）在链接型上唯一；已有材料形态为空，读取按原规则推定，不改写
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-07
+  source: docs/changes-v0.2.0.md#10.1 WB-07、WB-21; docs/solution-design.md#6.15
+  summary: 来源登记加 content_retention_days 列，已有来源为空即不清理；只经 Web 的 PUT /settings/sources/{id}/content-retention 修改
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-08
+  source: docs/changes-v0.2.0.md#10.1 WB-08; docs/solution-design.md#16.5; docs/appendix-b-api-cli.md#B.5
+  summary: schema.ledger 7→8 一次迁移收齐本迭代表与列；升级自动留快照；旧二进制拒绝打开升级后账本；快照恢复后与升级前一致；8 首次应用后冻结
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-UPG-ROWS
+  source: docs/solution-design.md#20.3 W16、20.4 门槛2
+  summary: 结构版本 7 夹具升级后各表行数不减、Event 序号连续、已有 Event 载荷逐字节不变；16 KiB 邮件事件与托管/自有材料一行不变且照常可读
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-UPG-CHAIN
+  source: docs/solution-design.md#20.4 门槛2; OMAC-NOTES.md#1 S0
+  summary: 迁移链测试加 7→8；每个已冻结结构版本的夹具从它升到主干均通过；迁移中途注入失败整体回滚
+  disposition: in-scope
+  verification: action
+# ---------- 事件载荷、配置 ----------
+- id: REQ-WB-09
+  source: docs/changes-v0.2.0.md#10.2 WB-09; docs/appendix-b-api-cli.md#B.2 路由细节
+  summary: Event 信封新增 imported、recorded_at，只出现在导入事件上；GET /audit/events 返回它们并支持 imported=<批次> 筛选
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-10
+  source: docs/changes-v0.2.0.md#10.2 WB-10; docs/appendix-b-api-cli.md#B.4
+  summary: 新增对外事件类型 import.completed（来源名、新建与已存在条数），每批次结束一条，进对外事件流
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-11
+  source: docs/changes-v0.2.0.md#10.2 WB-11; docs/solution-design.md#8.4
+  summary: 入站处置载荷新增 material：本次送出资料字符数、裁剪前字符数与裁剪方式；旧处置无此字段，处理经过不显示裁剪量
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-12
+  source: docs/changes-v0.2.0.md#10.2 WB-12; docs/solution-design.md#7.5
+  summary: 回执证据新增 links[]，link 仍为第一个；POST /items/{id}/report 的 link 可为字符串或数组，apa report --link 可重复
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-13
+  source: docs/changes-v0.2.0.md#10.2 WB-13; docs/solution-design.md#7.1 时间精度
+  summary: 进展与阶段变更载荷新增可选 precision，只在导入写入时出现；precision 为 day 时 Web 只显示到日
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-14
+  source: docs/changes-v0.2.0.md#10.2 WB-14
+  summary: 原文按保留期清除（按来源按轮一条）、附件取回、链接型材料登记记内部审计事件；紧急提醒观察沿用 rule.observed；都不进对外事件类型表
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-15
+  source: docs/changes-v0.2.0.md#10.3 WB-15; docs/solution-design.md#6.10、9.2
+  summary: 运行配置 max_source_event_mb（默认 16）：单条原文超限整条拒收，原因 event_too_large 带实际字节数，其余事件照常落盘、游标推进
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-16
+  source: docs/changes-v0.2.0.md#10.3 WB-16; docs/solution-design.md#9.5
+  summary: 运行配置 max_webhook_body_mb（默认 1，等于此前写死的 1 MiB），超限回 413 不落盘
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-17
+  source: docs/changes-v0.2.0.md#10.3 WB-17; docs/solution-design.md#12.8
+  summary: 策略新增 note_vaults；GET/PUT /settings/note-vaults 只 Web 登录、整体替换、记 policy.changed；名字重复、模板无协议或用 javascript/data/vbscript/file 返回 400
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-18
+  source: docs/changes-v0.2.0.md#10.3 WB-18; docs/solution-design.md#8.4
+  summary: 生成端点 max_material_chars（默认 24000），旧策略版本读作默认值，只在 Web 的设置 › 模型改；超出时裁剪并留痕
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-19
+  source: docs/changes-v0.2.0.md#10.3 WB-19、10.8; docs/solution-design.md#14.5
+  summary: item.progress 可列入授权单 actions（订正实现）；已签发的单不多出权限
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-19B
+  source: docs/changes-v0.2.0.md#10.3 WB-19; docs/appendix-b-api-cli.md#B.2 POST /settings/grants
+  summary: 导入专用授权单：actions 只有 import.apply，必须带 import {source,max_records} 与不超过 7 天的 expires_at，不得带 background，不能与其他动作同单
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-20
+  source: docs/changes-v0.2.0.md#10.3 WB-20; docs/solution-design.md#14.5 只接受授权单的命令
+  summary: import.apply 只接受授权单：不带单或只带原话为 23 grant_required；来源名不符 import_source_mismatch；累计超上限 import_limit_exceeded；会话类型不影响
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-22
+  source: docs/changes-v0.2.0.md#10.3 WB-22; docs/appendix-d-adapters.md#D.8 接入声明
+  summary: 来源程序接入声明可选 content 段，目前只有 attachments fetch；不写即不支持取回
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-23
+  source: docs/changes-v0.2.0.md#10.3 WB-23; docs/appendix-a-harness.md#A.5
+  summary: 首批 harness 插件环境变量 APA_DIRECT_PLATFORMS（逗号分隔）声明只有本人的入口；不设时判定与此前相同
+  disposition: in-scope
+  verification: action
+# ---------- HTTP API 与 CLI ----------
+- id: REQ-WB-24-IMPORT
+  source: docs/changes-v0.2.0.md#10.4 WB-24; docs/appendix-b-api-cli.md#B.2 POST /import
+  summary: POST /import（x-ndjson，≤500 行、≤8 MiB 否则 413；batch、dry_run、Idempotency-Key；逐行 created/existing/invalid）与 GET /imports（最新在前）
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-24-SRCEVT
+  source: docs/changes-v0.2.0.md#10.4 WB-24; docs/appendix-b-api-cli.md#B.2 GET /source-events/{id}
+  summary: GET /source-events/{id}[?part=] 返回 event、content 清单与各部分，scope 为 full/excerpt/meta 并带 trimmed；Web 登录恒为 full
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-24-FETCH
+  source: docs/changes-v0.2.0.md#10.4 WB-24; docs/solution-design.md#7.6 附件取回
+  summary: POST /source-events/{id}/attachments/{n}/fetch：成功 200 带 blob；不支持 409；失败 502 带原因；Web 登录或 delegate 附原话，运行凭据不可用
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-24-STORAGE
+  source: docs/changes-v0.2.0.md#10.4 WB-24; docs/appendix-b-api-cli.md#B.2 GET /storage
+  summary: GET /storage 返回 ledger_bytes、blobs_bytes、content_bytes 与按来源的 events、content_bytes、oldest、retention_days；来源 stats 新增 events、content_bytes
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-24-VAULTS
+  source: docs/changes-v0.2.0.md#10.4 WB-24; docs/appendix-b-api-cli.md#B.2 GET /note-vaults
+  summary: GET /note-vaults（observer）返回已登记库的 name 与 open_url
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-25
+  source: docs/changes-v0.2.0.md#10.4 WB-25; docs/appendix-b-api-cli.md#B.6
+  summary: GET /sources/{id}/events 与 GET /items/{id}/messages 的 detail 改为至多 2000 字符预览并带 content 清单，聚合消息不在列表；全文改经单条读取
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-26
+  source: docs/changes-v0.2.0.md#10.4 WB-26; docs/solution-design.md#14.14、决定20
+  summary: token 读原文按来源 outbound.external 裁剪：excerpt 只回摘要与正文前 500 字符；meta/none/未选择只回元信息与清单；运行凭据与 ext 密钥 403；挂靠消息按其权限
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-27-ITEMS
+  source: docs/changes-v0.2.0.md#10.4 WB-27; docs/appendix-b-api-cli.md#B.2 GET /items
+  summary: GET /items 的 origin_source、origin_ref 精确筛选（可只给前者）；事项字段 imported{batch,at} 与 proposal.urgent 只读
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-27-PURGE
+  source: docs/changes-v0.2.0.md#10.4 WB-27; docs/solution-design.md#6.15
+  summary: POST /settings/purge 的 object 可为来源事件 id；删事项可带 with_source_events 一并删除；只 Web 登录
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-27-MATAPI
+  source: docs/changes-v0.2.0.md#10.4 WB-27; docs/appendix-b-api-cli.md#B.2 POST /materials
+  summary: POST /materials 带 link 登记链接型（新建 201、已有 200 返回那条）；材料读出带 form，链接型带 link 与 open_url（库已登记时）
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-28
+  source: docs/changes-v0.2.0.md#10.4 WB-28; docs/appendix-b-api-cli.md#B.3
+  summary: 新错误原因 grant_required、import_source_mismatch、import_limit_exceeded（退出码 23）与 event_too_large；不新增退出码，§17.3 表不加行
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-29
+  source: docs/changes-v0.2.0.md#10.5 WB-29; docs/appendix-b-api-cli.md#B.1
+  summary: 新命令 apa import（JSONL 按 500 条分批沿用批次号，逐行输出，--dry-run 不写不占条数，只凭 --grant）与 apa source event [--part]
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-30-ITEM
+  source: docs/changes-v0.2.0.md#10.5 WB-30; docs/appendix-b-api-cli.md#B.1 已有事项命令的新增标志
+  summary: apa item add/update、apa propose 加 --deadline（日期取本机当天 23:59:59，update 空串清除并取消截止定时）、--origin（source 不能以 `import:` 开头）、--ext；apa item list 加 --origin-source/--origin-ref
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-30-APPLY
+  source: docs/changes-v0.2.0.md#10.5 WB-30; docs/appendix-b-api-cli.md#B.1
+  summary: apa proposals apply --file - 从标准输入读处置清单，每条各自成败并逐条输出
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-30-MAT
+  source: docs/changes-v0.2.0.md#10.5 WB-30; docs/appendix-b-api-cli.md#B.1 已有材料命令
+  summary: apa material add --link --title [--project] [--kind]：kind 缺省 reference；apa material show 对链接型只回位置与打开地址
+  disposition: in-scope
+  verification: action
+# ---------- 能力包与来源程序 ----------
+- id: REQ-WB-31
+  source: docs/changes-v0.2.0.md#10.6 WB-31; docs/appendix-c-capability-pack.md#C.5、C.11
+  summary: 来源规则 notify_urgent（只用于 screen/extract，动作类初始 observe）与 prescreen 保留字 none（只用于 extract）；用错出口或包里有名为 none 的模板时加载拒绝
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-32
+  source: docs/changes-v0.2.0.md#10.6 WB-32; docs/appendix-c-capability-pack.md#C.7
+  summary: 抽取候选与起草同一组字段并加 refs，两者加 urgent；只给标题、类别、摘要的旧输出仍被接受
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-33
+  source: docs/changes-v0.2.0.md#10.6 WB-33; docs/appendix-c-capability-pack.md#C.13
+  summary: 简报包加 schedule_days（默认 3，1–14）；result_fields 为 period 与 sections[].body（每节有 project 或 title）；默认内容要求更新；已有实例参数与已有简报不变
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-34
+  source: docs/changes-v0.2.0.md#10.6 WB-34; docs/appendix-c-capability-pack.md#C.14
+  summary: 内置规则 reminder-open：reminder.open 事件直接 proposed
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-35
+  source: docs/changes-v0.2.0.md#10.6 WB-35; docs/solution-design.md#9.2
+  summary: 执行契约新增可选 original、headers、attachments、content（partial 自报 missing）与 fetch 模式；detail 收紧为正文全文；已有来源程序不改也能用
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-36-MAIL
+  source: docs/changes-v0.2.0.md#10.6 WB-36; docs/appendix-d-adapters.md#D.8 邮件两行
+  summary: 两个邮件适配器去掉 16 KiB 截断：正文全文、信头、附件清单、HTML 进 original；himalaya 取不到的 original/attachments 以 partial 自报；读取不改已读标记
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-36-OTHER
+  source: docs/changes-v0.2.0.md#10.6 WB-36; docs/appendix-d-adapters.md#D.8 其余行
+  summary: 代码托管、订阅、日历、提醒事项、http-json 按 D.8 的取法不截断并补 headers/original/attachments；dir-watch 不读文件内容
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-36-ID
+  source: docs/changes-v0.2.0.md#10.6 WB-36
+  summary: 事件 id 算法不变：升级后重新拉到的旧邮件仍被去重，不重复入账，也不回填旧事件
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-36-BATCH
+  source: docs/solution-design.md#9.2; docs/appendix-d-adapters.md#D.8
+  summary: 随发行的来源程序按字节分批：累计输出接近 max_source_output_mb 的四分之三时停下，游标停在已输出的最后一条
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-37
+  source: docs/changes-v0.2.0.md#10.6 WB-37; docs/appendix-d-adapters.md#D.2
+  summary: 提醒事项来源 undated_lists：所列列表的未完成无到期日提醒产出 reminder.open（occurred_at 取创建时间，summary 为列表名，关联键为提醒 id）；其他列表行为不变
+  disposition: in-scope
+  verification: action
+# ---------- 行为变化 ----------
+- id: REQ-WB-38
+  source: docs/changes-v0.2.0.md#10.7 WB-38; docs/solution-design.md#9.3 事项正文与来源原文
+  summary: 建议事项正文：原文 ≤4000 字符照写；超过只写前 4000 字符并注明原文较长、链到来源原文页；来源对象更新刷新正文同此规则；已有事项不改
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-39
+  source: docs/changes-v0.2.0.md#10.7 WB-39; docs/solution-design.md#9.3 抽取的输出
+  summary: 抽取候选走合并路径（合并键取规范化标题加发送者，不取链接），可并入 7 天内已有建议；一条事件至多 20 条候选
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-40
+  source: docs/changes-v0.2.0.md#10.7 WB-40; docs/solution-design.md#7.1 导入之后
+  summary: 导入事项的 waiting 跟进 Timer 从导入时刻起算；久未推进取导入时刻与最后一次非导入变更较晚者；截止 Timer 按 deadline 建立，已过期的照常触发一次 deadline_passed
+  disposition: in-scope
+  verification: action
+- id: REQ-WB-41
+  source: docs/changes-v0.2.0.md#10.7 WB-41; docs/solution-design.md#9.5
+  summary: 只用字段映射的 webhook 来源，请求体作为事件原文 original 永久保存，不受 Ingest 30 天清除影响；只对升级后收到的请求生效
+  disposition: in-scope
+  verification: action
+# ---------- 来源原文（W17）细则 ----------
+- id: REQ-RAW-FULL
+  source: docs/solution-design.md#6.10、20.3 W17; 决定15、16
+  summary: 来源原文完整落盘，与事件行同一事务；200 KiB 正文入账后逐字节读回；各部分记媒体类型、字节数与 sha256；事件行只留前 2000 字符预览
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-PARTIAL
+  source: docs/solution-design.md#6.10 content.state; docs/solution-design.md#9.2 content
+  summary: 来源程序自报 partial 时 content.state 为 partial、content.missing 写明缺哪部分与原因；取全时为 full
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-LEGACY
+  source: docs/solution-design.md#6.10、决定18
+  summary: 结构版本 8 之前落盘的事件 content.state 为 legacy，照常可读，不回填
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-MSGCAP
+  source: docs/appendix-d-adapters.md#D.8 内核上限
+  summary: 单条事件聚合消息超过 200 条时该行拒收；一次拉取 stdout 超 max_source_output_mb 时上限内已解析事件落盘、游标不动、按临时失败计
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-NOWRITE
+  source: docs/solution-design.md#6.14 第19条
+  summary: 派生内容不冒充原文：任何入口都不能改写来源原文；本人改事项正文不影响原文
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-CAPTURE
+  source: docs/solution-design.md#7.6 读取
+  summary: 对话捕获的内部来源原文只对 Web 登录开放
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-BUDGET-CUT
+  source: docs/solution-design.md#8.4 资料预算与裁剪留痕
+  summary: 超预算时单段正文保留开头 3/4 与结尾 1/4 预算，中间一行"省略 N 个字符"；聚合消息从最新往前整条保留并写明省略几条；先按外发范围再按预算
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-BUDGET-TRACE
+  source: docs/solution-design.md#8.4、6.16、15.1
+  summary: 判断记录每一级记送出字符数、裁剪前字符数与方式；处理经过显示"送给模型 N / M 字符"；裁剪不回写来源事件、事项或任何账本字段
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-RETAIN
+  source: docs/solution-design.md#6.15 来源原文的保留
+  summary: 按来源保留天数清除：只清超天数且不挂未关闭事项的事件原文与预览，事件行留元信息与 purged，已取回附件无引用时删除，每轮按来源记一条审计事件
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-PURGE
+  source: docs/solution-design.md#6.15 来源事件的物理删除
+  summary: 物理删除来源事件：事件行、原文、取回附件（无其他引用）与判断记录一并删除，去重键保留为墓碑，同一事件再来不重新入账
+  disposition: in-scope
+  verification: action
+- id: REQ-RAW-FETCH
+  source: docs/solution-design.md#7.6 附件取回
+  summary: 取回经外呼调用器以 fetch 运行来源程序，超时 60 秒、≤32 MiB，存为内容寻址附件并记审计事件；不产生来源事件、不推进游标；失败清单不变
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-RAWPAGE
+  source: docs/solution-design.md#4.1 来源原文
+  summary: 处理经过页 /sources/events/:id 加"原文"栏：正文纯文本、头部成表、附件可取回、逐条消息、原始格式只作文本不加载外部资源、页头写大小与完整程度、送给模型 N/M、可物理删除
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-RAWLINKS
+  source: docs/solution-design.md#4.1 来源原文
+  summary: 建议流的来源、事项详情的来源区、简报知会条目、事项上的挂靠消息都链到来源原文页
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-STORAGE
+  source: docs/solution-design.md#4.1 设置 › 存储
+  summary: 设置 › 存储页（/settings/storage）显示账本、附件、各来源原文占用与事件数、最早时间，可设保留天数并写明清掉不可恢复，数字与 GET /storage 同源
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-MODELBUDGET
+  source: docs/solution-design.md#4.1 设置 › 模型; OMAC-NOTES.md#1 R3
+  summary: 设置 › 模型页的生成端点一块新增资料预算字段，缺省显示 24000，保存后写进 generate_endpoint.max_material_chars
+  disposition: in-scope
+  verification: action
+# ---------- 导入（W18）细则 ----------
+- id: REQ-IMP-TIMELINE
+  source: docs/solution-design.md#7.1 历史、事件标记; 20.3 W18
+  summary: 导入一条带三次阶段转移和五条进展的已完成事项，item.created/phase_changed/progress_added 的 at 与输入一致，created_at/updated_at 由 at 折叠
+  disposition: in-scope
+  verification: action
+- id: REQ-IMP-VALID
+  source: docs/solution-design.md#7.1 来源名、事项记录、历史
+  summary: 校验：来源名格式、history 首条为 created、at 不晚于当前、on 不晚于 at 当天、单条历史≤500、kind 不为 delegation/brief、终态非 needs_input、waiting 带 waiting_on、dropped 带 reason、不可给 assignee
+  disposition: in-scope
+  verification: action
+- id: REQ-IMP-PROJECT
+  source: docs/solution-design.md#7.1 项目记录; changes-v0.2.0.md#10.9 第3条
+  summary: 项目记录先按（来源名，外部 id）对照，否则按名字（去首尾空白、不分大小写）绑定已有项目且不改它，都没有才新建并以 created_at 为 project.created 时刻
+  disposition: in-scope
+  verification: action
+- id: REQ-IMP-IDEMP
+  source: docs/solution-design.md#7.1 幂等、原子性
+  summary: （来源名，外部 id）已有对照时整条跳过不比较内容；同一文件重放新增 0 条；单条记录连同历史一个事务；中途失败已写入的保留，重跑从断点继续
+  disposition: in-scope
+  verification: action
+- id: REQ-IMP-DRYRUN
+  source: docs/solution-design.md#7.1 预检
+  summary: dry_run 做完全部校验与幂等判断，返回会新建/已存在/不合法，不写账本、不建批次、不占授权单条数
+  disposition: in-scope
+  verification: action
+- id: REQ-IMP-ORIGIN
+  source: docs/solution-design.md#7.1 来源名、查询
+  summary: 导入事项 origin 固定为 {source import:<来源名>, ref 外部 id}；`import:` 前缀保留给导入，普通写入不能使用
+  disposition: in-scope
+  verification: action
+- id: REQ-IMP-NOAUTO
+  source: docs/solution-design.md#6.7 导入事件只进账本与折叠; 6.14 第17条
+  summary: 导入事件不触发规则、不产生投递与提醒、不起草摘要、不进注入增量、统计、简报复盘取材与对外事件流（GET /events），事件日志提供全量与"现场"两种读法
+  disposition: in-scope
+  verification: action
+- id: REQ-IMP-AUTH-PATH
+  source: docs/solution-design.md#7.1 末段、14.5
+  summary: 本人在 Web 上传不需要授权单；运行凭据调用返回 403 退出码 4；无人值守路径不能调用；导入事件依据授权单时带 grant
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-IMPORT
+  source: docs/solution-design.md#4.1 设置 › 导入
+  summary: 设置 › 导入页（/settings/import）上传计划文件，先显示预检，确认后分批写入并显示进度，下方列历次批次并可点开看写了哪些事项
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-OPSFOLD
+  source: docs/solution-design.md#6.7 末段
+  summary: 诊断 › 操作记录把一个导入批次折叠成一行"导入 N 条"并可展开；事项自己的时间线按 at 排
+  disposition: in-scope
+  verification: action
+# ---------- 链接型材料与笔记库（W19）细则 ----------
+- id: REQ-LNK-LOCATION
+  source: docs/solution-design.md#12.8 位置的写法
+  summary: 位置只接受 vault:<已登记库名>/<相对路径>（正斜杠、无 ..、按 Unicode 规范化比较）或 http(s) 网址（协议与主机名转小写）；本机绝对路径与 file:// 拒绝
+  disposition: in-scope
+  verification: action
+- id: REQ-LNK-RULES
+  source: docs/solution-design.md#12.8 登记、幂等、修改
+  summary: project 必填，kind 缺省 reference 且不能是 guideline，worker 及以上可登记；同项目同位置只一条且重复登记不改标题与 kind；位置不可改；无正文与修订，标题标签可搜
+  disposition: in-scope
+  verification: action
+- id: REQ-LNK-VAULTDEL
+  source: docs/solution-design.md#12.8 笔记库
+  summary: 删除库登记后指向它的链接型材料保留，只是不再有 open_url；open_url 渲染时 {vault}、{path} 各自 URL 编码
+  disposition: in-scope
+  verification: action
+- id: REQ-LNK-REPORT
+  source: docs/solution-design.md#7.5 回执里的库内链接; 决定26
+  summary: done 回执里落在已登记库内的链接在同一事务经 material.link 登记（项目取父事项、标题取文件名、复用已有）并以 output 关联父事项；库外、网址、父无项目、progress/blocked 回执不登记
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-VAULTS
+  source: docs/solution-design.md#4.1 设置 › 笔记库
+  summary: 设置 › 笔记库页（/settings/note-vaults）每库一行，保存前用示例路径渲染一次打开地址给本人看
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-MATERIALS
+  source: docs/solution-design.md#12.8 与事项的关系; OMAC-NOTES.md#1 L2、W1
+  summary: 材料页与项目材料里链接型显示位置与"打开"；事项详情材料区按依据、产出、纪要分组列出，链接型可打开；标题、kind、标签可在材料页改
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-PREFILL
+  source: docs/solution-design.md#4.1 预填新建页; 决定27
+  summary: /new 与 /items/new 接受 title、body、link、project、planned_for、deadline 预填；未登录先到登录页再回来；点新建前不写账本；超长部分丢弃并提示；link 合法且有项目时登记为依据材料，否则写入正文末尾
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-ITEMDAY
+  source: docs/solution-design.md#7.1 时间精度; OMAC-NOTES.md#1 W1
+  summary: 事项页对 precision 为 day 的导入进展与阶段变更只显示到日，不显示时刻
+  disposition: in-scope
+  verification: action
+# ---------- 简报（W20）细则 ----------
+- id: REQ-BRF-SEGMENTS
+  source: docs/solution-design.md#7.3 简报的资料
+  summary: 资料文件新增 schedule、proposals（≤50 与 pending_total）、decisions（不列 web_only 初筛未返回的）、due_waiting、activity 五段，空段为空数组不报错
+  disposition: in-scope
+  verification: action
+- id: REQ-BRF-SCHEDULE
+  source: docs/solution-design.md#7.3 schedule
+  summary: 日程取 calendar 类来源 occurred_at 落在 schedule_days 窗口内的事件；同一关联键只取最新一版，最新一版是取消的不列；没有日历来源为空
+  disposition: in-scope
+  verification: action
+- id: REQ-BRF-WINDOW
+  source: docs/solution-design.md#7.3 "上一份简报以来"按实例各自计
+  summary: 取材窗口按实例各自计并写进 brief 事项 spec.since/until 与 origin 实例；第一份取 24 小时；知会仍全局只进一份；activity 不计导入事件
+  disposition: in-scope
+  verification: action
+- id: REQ-BRF-RAW
+  source: docs/solution-design.md#7.3 来源原文; 决定20
+  summary: digest 与 proposals 引用事件的原文各写一个只读文件，按 outbound.external 裁剪（全文写全文、摘录写摘录、其余不写）；单文件≤20000、合计≤400000 字符，超出从最旧起只留摘要并记 material
+  disposition: in-scope
+  verification: action
+- id: REQ-WEB-BRIEF
+  source: OMAC-NOTES.md#1 B1; docs/appendix-c-capability-pack.md#C.13
+  summary: 简报页显示带 title 的节（没有 project 的节不丢）；已有按 project 分组的简报原样可读
+  disposition: in-scope
+  verification: action
+# ---------- 入站（W21）细则 ----------
+- id: REQ-X-LIST
+  source: docs/solution-design.md#9.3 清单
+  summary: 预筛、起草、抽取同一份清单：活动项目与至多 100 条按相关度排序的未关闭事项，截掉时写明总数；外发范围未选或 none 的来源的事项不进送往外部端点的清单
+  disposition: in-scope
+  verification: action
+- id: REQ-X-CHOICE
+  source: docs/solution-design.md#9.3 清单
+  summary: 模型只能从清单选：清单外项目不归项目；清单外 attach_to 使推荐作废、候选保留，都不报错
+  disposition: in-scope
+  verification: action
+- id: REQ-X-REFS
+  source: docs/solution-design.md#9.3 抽取的输出
+  summary: 一条含两件事的会话事件抽出两条候选各有项目；候选事项正文是 refs 指到的那几条消息
+  disposition: in-scope
+  verification: action
+- id: REQ-X-PRESCREEN-NONE
+  source: docs/solution-design.md#9.3 跳过预筛
+  summary: prescreen none 时不预筛直接抽取，不产生预筛判断记录；对话候选捕获始终预筛
+  disposition: in-scope
+  verification: action
+- id: REQ-URG-RULE
+  source: docs/solution-design.md#9.3 紧急建议即时提醒; 决定30; changes-v0.2.0.md#10.10
+  summary: notify_urgent 规则初始 observe 只记 rule.observed；Web 切开后 urgent 为真的新建议提醒一次，假或缺失不提醒（模型只让提醒变少，不改不变量 12 的文字）；规则内容变化回到 observe
+  disposition: in-scope
+  verification: action
+- id: REQ-URG-DELIVERY
+  source: docs/solution-design.md#9.3 提醒、只提醒一次、打扰控制
+  summary: 紧急提醒是不带事项的提醒类投递，origin 记事件、规则与建议，投递 id 取建议事项 id；并入已有与已处置的不提醒；受静默、合并、日上限与静音约束，超限留在 Web 未读；事项仍 proposed
+  disposition: in-scope
+  verification: action
+# ---------- 聊天处置（W22）细则 ----------
+- id: REQ-CHAT-TOOLS
+  source: docs/appendix-a-harness.md#A.5 三个代答工具
+  summary: 首批 harness 插件新增 apa_attach、apa_proposals_apply（--recommended 或 --file - 清单，可按来源与项目收窄）、apa_item_progress 三个工具，说明写明要带本人原话且 23 时不换说法重试
+  disposition: in-scope
+  verification: action
+- id: REQ-CHAT-KIND
+  source: docs/appendix-a-harness.md#A.5 会话类型的判定; 决定31
+  summary: session_kind 五条按序判定：group/channel/thread 最先为 group；终端为 direct；名单平台（内置值加 APA_DIRECT_PLATFORMS）且非多人为 direct；dm 有发送者为 direct；其余 unknown
+  disposition: in-scope
+  verification: action
+- id: REQ-CHAT-EVIDENCE
+  source: docs/solution-design.md#14.5; 6.14 第14条
+  summary: 私聊里按推荐批量处理生效且事件带原话与 session_kind direct；清单模式只动点到的几条；记进展凭原话与凭授权单各可成功；多人会话同样调用退出码 23
+  disposition: in-scope
+  verification: action
+# ---------- 发布与收尾（W24、Z1）----------
+- id: REQ-REL-STRICT
+  source: docs/solution-design.md#20.4 门槛1; docs/appendix-b-api-cli.md 开头规划标记
+  summary: 附录 B 与 C.14 的规划标记清零，APA_CONFORMANCE_STRICT=1 下对照测试通过；为加标志而拆出的行全部并回原行
+  disposition: in-scope
+  verification: action
+- id: REQ-REL-E2E
+  source: AGENTS.md#CI 与合并; OMAC-NOTES.md#3
+  summary: 新增 e2e 包都登记到某个 full-*.txt 且 .github/e2e/pkgs.sh check 通过；e2e 只用替身，不连真实账号、不调起浏览器
+  disposition: in-scope
+  verification: action
+- id: REQ-REL-REDLINE
+  source: AGENTS.md#红线检查; OMAC-NOTES.md#5 红线
+  summary: 红线检查通过：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；HTML 转文本不进内核；会话入口识别只在宿主插件目录
+  disposition: in-scope
+  verification: action
+- id: REQ-REL-DOCS
+  source: docs/changes-v0.2.0.md#10.8; OMAC-NOTES.md#4、#1 Z1
+  summary: docs/user/upgrade.md 清单为 L1–L24 且与 §20.4 行数测试一致；用户文档变更记录含必须迁移的条目（WB-25、WB-26 等）；§21.3 每行第三格形状保持；§17.3 不加行
+  disposition: in-scope
+  verification: action
+- id: REQ-REL-DIAGRAM
+  source: OMAC-NOTES.md#5 图; #1 Z1
+  summary: 领域模型图与入站流水线图加上来源原文、导入批次、链接型材料与紧急提醒，HTML 与 PNG 成对更新
+  disposition: in-scope
+  verification: technical
+- id: REQ-REL-COMMENTFIX
+  source: docs/changes-v0.2.0.md#10.8 第2条
+  summary: 订正内置来源程序中"内核只保留 64 KiB 输出"的过时注释为 max_source_output_mb
+  disposition: in-scope
+  verification: technical
+- id: REQ-REL-LEAK
+  source: OMAC-NOTES.md#4 泄漏扫描; AGENTS.md#语言与提交
+  summary: 泄漏扫描覆盖 docs/ 与 .omac/ 通过：示例无本机路径、真实邮箱与内网地址；主文档不写具体笔记应用名
+  disposition: in-scope
+  verification: action
+- id: REQ-REL-NOREGRESS
+  source: docs/solution-design.md#20.4 门槛1
+  summary: v0.2.0 既有验收（.omac/apa-v02.acceptance.yaml 各流程）与 v0.1 验收项不回退；CI build 与冒烟 e2e 全绿
+  disposition: in-scope
+  verification: action
+# ---------- 不在本计划：本机升级验证（L14–L24）----------
+- id: REQ-L14
+  source: docs/solution-design.md#20.4 L14
+  summary: 真实部署上结构版本 8 的升级与回退
+  disposition: out-of-scope
+  verification: action
+  reason: 本机升级验证由本人在升级后执行，不进开发编排（决定 33；OMAC-NOTES 范围边界）；替身版本由 flow-wb-schema8-upgrade 覆盖
+- id: REQ-L15
+  source: docs/solution-design.md#20.4 L15
+  summary: 真实邮件原文在 Web 可见且未截断
+  disposition: out-of-scope
+  verification: action
+  reason: 需要真实邮箱与本人到场（决定 33）；替身版本由 flow-raw-* 与 flow-mail-adapters-raw 覆盖
+- id: REQ-L16
+  source: docs/solution-design.md#20.4 L16
+  summary: 真实邮件工具取原文与附件的能力
+  disposition: out-of-scope
+  verification: action
+  reason: 需要真实邮件工具与测试邮箱（决定 33）
+- id: REQ-L17
+  source: docs/solution-design.md#20.4 L17
+  summary: 真实宿主各一对一入口上报的会话类型
+  disposition: out-of-scope
+  verification: action
+  reason: 需要真实宿主与即时通讯账号（决定 33）；判定顺序由 flow-chat-session-kind 用替身覆盖
+- id: REQ-L18
+  source: docs/solution-design.md#20.4 L18
+  summary: 真实宿主聊天里处置建议与记进展
+  disposition: out-of-scope
+  verification: action
+  reason: 需要真实宿主与本人原话（决定 33）
+- id: REQ-L19
+  source: docs/solution-design.md#20.4 L19
+  summary: 简报在真实宿主上出一份并推送到手机
+  disposition: out-of-scope
+  verification: action
+  reason: 需要真实宿主与推送渠道（决定 33）
+- id: REQ-L20
+  source: docs/solution-design.md#20.4 L20
+  summary: 紧急建议真实推送与手机一次性表单
+  disposition: out-of-scope
+  verification: action
+  reason: 需要真实推送渠道与测试邮箱（决定 33）
+- id: REQ-L21
+  source: docs/solution-design.md#20.4 L21
+  summary: 在备份副本实例上的真实导入演练
+  disposition: out-of-scope
+  verification: action
+  reason: 本人在副本实例上执行（决定 33）；替身版本由 flow-import-* 覆盖
+- id: REQ-L22
+  source: docs/solution-design.md#20.4 L22
+  summary: 真实笔记应用打开链接型材料与手机预填页
+  disposition: out-of-scope
+  verification: action
+  reason: 需要真实笔记应用与手机（决定 33）
+- id: REQ-L23
+  source: docs/solution-design.md#20.4 L23
+  summary: 真实提醒事项工具的无到期日列表
+  disposition: out-of-scope
+  verification: action
+  reason: 需要真实提醒事项工具（决定 33）
+- id: REQ-L24
+  source: docs/solution-design.md#20.4 L24
+  summary: 真实生成端点下的资料预算与抽取质量
+  disposition: out-of-scope
+  verification: action
+  reason: 需要真实生成端点（决定 33）
+# ---------- 实测项（本版只用录制样本或替身，结论由本机验证写回）----------
+- id: REQ-MEAS-RAW
+  source: docs/solution-design.md#21.3 MEAS-RAW-MAIL、MEAS-RAW-ATTACH
+  summary: 真实邮件工具能给出多少原文、能否按句柄取回附件
+  disposition: deferred
+  verification: action
+  reason: 结论来自 L15、L16；开发验收按录制样本与 partial 兜底实现
+- id: REQ-SPIKE-OWNCHAT
+  source: docs/solution-design.md#21.3 SPIKE-SESSION-KIND-OWNCHAT
+  summary: 宿主自带一对一聊天界面上报的平台、来源与聊天类型的内置取值
+  disposition: deferred
+  verification: action
+  reason: 结论来自 L17；未写入内置值前判为 unknown，本人可用 APA_DIRECT_PLATFORMS 声明
+- id: REQ-MEAS-REM
+  source: docs/solution-design.md#21.3 MEAS-REM-UNDATED
+  summary: 提醒事项工具"未完成、不论到期日"的筛选参数
+  disposition: deferred
+  verification: action
+  reason: 结论来自 L23；没有专门筛选时取列表全部未完成由适配器筛
+- id: REQ-SPIKE-BUDGET
+  source: docs/solution-design.md#21.3 SPIKE-GEN-BUDGET
+  summary: 生成端点资料预算默认值 24000 是否合适
+  disposition: deferred
+  verification: action
+  reason: 结论来自 L24；预算可在 Web 改
+# ---------- 明确不做（§20.5、§12.8、§7.1 不做）----------
+- id: REQ-NOT-VAULTPREVIEW
+  source: docs/solution-design.md#12.8 Web 只读预览不在本版; 20.5
+  summary: 笔记库文档的 Web 只读预览与文件存在检查
+  disposition: out-of-scope
+  verification: action
+  reason: 要内核读本机文件，信任边界另设计（决定 25、68）
+- id: REQ-NOT-RAWEXTRA
+  source: docs/solution-design.md#20.5 来源原文的后续
+  summary: 原文全文检索、入账自动保存小附件、重新拉取升级前截断事件、抽取超预算分段调用
+  disposition: out-of-scope
+  verification: action
+  reason: 列入 §20.5 后续，先有本版大小统计与裁剪留痕
+- id: REQ-NOT-IMPORTEXTRA
+  source: docs/solution-design.md#7.1 不做
+  summary: 导入材料、委派、决策、Timer 与投递；更新已导入事项；撤销整个批次
+  disposition: out-of-scope
+  verification: action
+  reason: 前者导入后用普通命令登记，更新走普通写入，撤销用导入前备份（§7.1）
+flows:
+- id: flow-wb-env
+  name: 工作台迭代的替身验收环境就绪：沿用 v0.2.0 基线环境，另备桩来源、内容替身、增强的 harness 替身、录制样本与结构版本 7 夹具，全程不连真实账号
+  actions:
+  - id: ACT-WBENV-01
+    kind: flow-step
+    step: 建立基线环境
+    how: |-
+      负责人：验收执行者。时机：执行本文任何其他流程前。
+      按 `.omac/apa-v02.acceptance.yaml` 的 flow-env-baseline 依次执行 ACT-ENV-01 至 ACT-ENV-10（测试构建 `-tags apa_testclock`、隔离 APA_HOME、`apa serve`、凭据 OBS/WRK/DEL/CHAN、项目 acc-work/acc-open/acc-home、CLS_STUB、MODEL_STUB、STUB_HARNESS、TOOL_STUB_BIN、测试时钟 `tc_advance`）。
+      另把 Web 登录的会话 cookie 存为 `$WEB_COOKIE`，下文"WEB 调用"指 `curl -b $WEB_COOKIE $APA_URL/v1/...`。
+      在执行者 shell 默认导出 `APA_SESSION_KIND=direct`、`APA_SESSION=acc-session-1`；测非私聊时在命令前覆盖。
+    expected: |-
+      通过：ACT-ENV-01..10 各自的 expected 全部达成；WEB 调用 `GET /v1/settings/policy` 返回 200；`apa version` 的 `schema.ledger` 为 8、`test_clock` 为 true。
+      失败：任一步未达成，本文其余流程不得开始。
+  - id: ACT-WBENV-02
+    kind: flow-step
+    step: 准备桩来源 SRC_STUB 并登记两个来源
+    how: |-
+      负责人：验收执行者，使用 R10 节点交付的仓库内桩来源脚本（`tests/doubles/` 下）。时机：ACT-WBENV-01 之后。
+      SRC_STUB 每次运行读 case 文件 `$SRC_CASE` 并输出标准事件 JSONL；可产出：正文 200 KiB 的事件（`big-body`）、带 headers/attachments（每项带 `ref`）/original（text/html）的事件（`mail-like`）、带 `messages` 的会话事件（`chat-two-things`，含两件事、每条带 sender）、原文总量超过 `max_source_event_mb` 的事件夹在两条正常事件之间（`oversize-mid`）、带 `content: {state: partial, missing: [...]}` 的事件（`partial`）、201 条 messages 的事件（`too-many-msgs`）、60 条各约 100 字符的会话事件（`chat-long`）、正文 3000 字符的事件（`mid-body`），case 可由执行者追加；以 `fetch` 为唯一参数运行时按 stdin 的 `attachment.ref` 回一段固定字节（可配失败与超过 32 MiB），并在接入声明写 `content.attachments: fetch`。
+      在 Web 来源页登记两个脚本来源：`acc-raw`（运行 SRC_STUB，source_type 为 `mail`，外发范围 local=full、external=full，周期 1 分钟）与 `acc-raw-nofetch`（同一脚本但接入声明不写 content 段）。
+    expected: |-
+      通过：把 `$SRC_CASE` 设为 `mail-like` 后 2 分钟内 `APA_TOKEN=$OBS apa source events acc-raw` 列出该事件；对同一事件 id 手工运行 `echo '<stdin JSON>' | SRC_STUB fetch` 输出固定字节且退出码 0。
+      失败：来源不运行、事件不出现或 fetch 模式不可用；依赖 SRC_STUB 的流程不得开始。
+  - id: ACT-WBENV-03
+    kind: flow-step
+    step: 准备结构版本 7 夹具与旧二进制
+    how: |-
+      负责人：验收执行者，使用 S0 节点交付的夹具。时机：执行 flow-wb-schema8-upgrade 前。
+      运行 `go run ./tests/fixtures/ledger/cmd/gen -version 7 -out $FX7` 得到结构版本 7 夹具，导出 `LEDGER_FIXTURE_V7=$FX7`；导出 `APA_V7_BIN`（结构版本 7 冻结提交构建的主程序，`tests/fixtures/ledger/fetch-v01.sh <目录> <冻结提交>`）。
+      夹具 `manifest.json` 必须含：各表行数（含来源事件、Event、事项、材料）、event_max_seq、event_payload_sha256、16 KiB 邮件事件的 id 与正文哈希、托管型与自有型材料 id、带授权单（grant）的 Event 序号。
+    expected: |-
+      通过：`APA_HOME=<夹具副本> $APA_V7_BIN serve` 能打开副本；manifest.json 含上述全部键；正文恰好 16 KiB（16384 字节）的邮件事件至少 3 条。
+      失败：夹具缺任一类数据或键，或旧二进制打不开。
+  - id: ACT-WBENV-04
+    kind: flow-step
+    step: 配置模型替身的工作台用例
+    how: |-
+      负责人：验收执行者。时机：执行 flow-material-budget、flow-extract-align、flow-urgent-notify 前。
+      在 `$MODEL_CASES` 为 `triage-extract` 配三种脚本：`two-refs`（两条候选，各带 project、refs、一条带 attach_to 指向清单内事项）、`bad-target`（attach_to 为不存在的事项 id、project 为不存在的项目）、`legacy3`（候选只有 title/kind/summary）；为 `triage-draft` 配 `urgent-true`、`urgent-false`、`urgent-missing` 三种输出。确认 MODEL_LOG 记录完整请求体（含 open_items 清单与资料正文）。
+    expected: |-
+      通过：用 curl 对 MODEL_STUB 发一条 triage-extract 请求，按匹配键分别得到三种脚本输出；MODEL_LOG 有请求体。
+      失败：无法按匹配键返回脚本输出。
+- id: flow-wb-schema8-upgrade
+  name: 结构版本 7 的账本升级到 8 不丢数据、旧数据照常可读，旧二进制拒绝打开升级后的账本，用快照能回到升级前
+  actions:
+  - id: ACT-S8-01
+    kind: business-action
+    step: 用主干二进制打开结构版本 7 夹具副本完成升级
+    how: |-
+      `cp -R $LEDGER_FIXTURE_V7 $FX_HOME`；`APA_HOME=$FX_HOME apa serve`；随后 `APA_HOME=$FX_HOME apa version` 与 `ls $FX_HOME/backups/`。
+    expected: |-
+      通过：服务启动成功；`apa version` 的 `schema.ledger` 为 8；`backups/` 下新增一份升级前自动快照且 `apa backup verify <快照>` 退出码 0。
+      失败：启动失败、版本不是 8，或没有快照。
+    requirement_ids: [REQ-WB-08]
+  - id: ACT-S8-02
+    kind: business-action
+    step: 核对升级后行数、Event 序号与载荷
+    how: |-
+      服务停止后用 `sqlite3 $FX_HOME/ledger.db` 只读统计各表行数与最大 Event 序号，并按 manifest.json 的 payload_hash_method 重算已有 Event 载荷哈希，与 manifest 比对。
+    expected: |-
+      通过：每张表行数 ≥ manifest 值；Event 序号从 1 连续到 event_max_seq 且无空洞；已有 Event 载荷哈希与 manifest 逐条相同；新加的 Event 两列（导入批次、实际写入时刻）在已有行上为空。
+      失败：任一表行数减少、序号不连续或任一载荷哈希不同。
+    requirement_ids: [REQ-WB-UPG-ROWS, REQ-WB-03]
+  - id: ACT-S8-03
+    kind: business-action
+    step: 升级前的 16 KiB 邮件事件照常可读并标为升级前落盘
+    how: |-
+      对 manifest 里的一条 16 KiB 邮件事件：WEB 调用 `GET /v1/source-events/<id>`；再 WEB 调用 `GET /v1/storage`。
+    expected: |-
+      通过：响应 `content.state` 为 `legacy`，`body` 的 sha256 与 manifest 中该事件正文哈希相同（读的是原列）；`GET /storage` 该来源的 `content_bytes` 按原列长度计入（不为 0）。
+      失败：读不到正文、state 不是 legacy，或正文与升级前不同。
+    requirement_ids: [REQ-RAW-LEGACY, REQ-WB-01, REQ-WB-02]
+  - id: ACT-S8-04
+    kind: business-action
+    step: 升级前的材料形态按原规则推定
+    how: |-
+      `APA_TOKEN=$OBS` 调用 `GET /v1/materials/<托管型 id>` 与 `GET /v1/materials/<自有型 id>`（id 取自 manifest）。
+    expected: |-
+      通过：前者 `form` 为 `hosted`、后者为 `owned`；sqlite3 只读查看材料表这两行的形态列仍为空（未改写）。
+      失败：form 错误或已有行被改写。
+    requirement_ids: [REQ-WB-06, REQ-WB-UPG-ROWS]
+  - id: ACT-S8-05
+    kind: business-action
+    step: 已有来源、事项与授权单事件不受新列影响
+    how: |-
+      `APA_TOKEN=$OBS apa source list --json` 看各来源的 `content_retention_days`；`GET /v1/items?origin_source=import:any` 与 `GET /v1/audit/events?imported=imp_none`；`apa why <manifest 中带 grant 的事件对象>`。
+    expected: |-
+      通过：所有已有来源的 `content_retention_days` 为空（不清理）；两个查询都返回空列表；带授权单的事件回放仍显示原授权单 id。
+      失败：已有来源被设了保留天数、旧事项出现导入信息，或授权单事件回放失败。
+    requirement_ids: [REQ-WB-07, REQ-WB-04, REQ-WB-05, REQ-WB-UPG-ROWS]
+  - id: ACT-S8-06
+    kind: business-action
+    step: 旧二进制拒绝打开升级后的账本，快照恢复后与升级前一致
+    how: |-
+      停服务；`APA_HOME=$FX_HOME $APA_V7_BIN serve`；再把 ACT-S8-01 的快照按 §16.5 恢复到新目录 `$FX_RESTORE` 并 `APA_HOME=$FX_RESTORE $APA_V7_BIN serve`，用 sqlite3 统计行数与最大 Event 序号。
+    expected: |-
+      通过：第一次启动失败并报账本结构版本比程序新（退出码非 0，账本文件哈希不变）；恢复后用旧二进制能启动，各表行数与 event_max_seq 与 manifest 完全一致。
+      失败：旧二进制能打开升级后的账本，或恢复结果与升级前不一致。
+    requirement_ids: [REQ-WB-08]
+  - id: ACT-S8-07
+    kind: business-action
+    step: 迁移链与失败回滚测试通过
+    how: |-
+      运行 `go test -tags apa_testclock ./tests/fixtures/... ./kernel/store/...`，并在一份新的结构版本 7 副本上以 `APA_TEST_MIGRATION_FAIL_AFTER=1 apa serve` 启动一次。
+    expected: |-
+      通过：测试全部通过且包含 7→8 的升级用例与每个已冻结版本到主干的用例；注入失败时启动报错，副本的 ledger.db 哈希与注入前相同、结构版本仍为 7。
+      失败：缺 7→8 用例、任一冻结版本升级失败，或注入失败后账本被部分改动。
+    requirement_ids: [REQ-WB-UPG-CHAIN]
+- id: flow-raw-full-ingest
+  name: 来源事件的完整原文按部分入账，单条读取逐字节读回，事件列表只带预览与清单
+  actions:
+  - id: ACT-RAW-01
+    kind: business-action
+    step: 200 KiB 正文的事件完整入账并逐字节读回
+    how: |-
+      `$SRC_CASE` 设为 `big-body`，等一轮拉取；记下 SRC_STUB 输出正文的 sha256；WEB 调用 `GET /v1/source-events/<id>?part=body` 与 `GET /v1/source-events/<id>`。
+    expected: |-
+      通过：body 长度为 204800 字节且 sha256 与 SRC_STUB 输出相同；`content.state` 为 `full`，`content.parts` 有 body 项（media_type、bytes=204800、sha256）；`scope` 为 `full`。
+      失败：正文被截断、哈希不同，或清单缺字段。
+    requirement_ids: [REQ-RAW-FULL, REQ-WB-01, REQ-WB-24-SRCEVT]
+  - id: ACT-RAW-02
+    kind: business-action
+    step: 头部、附件清单、原始正文与逐条消息各自成部分
+    how: |-
+      `$SRC_CASE` 依次设为 `mail-like` 与 `chat-two-things`，各等一轮；WEB 调用 `GET /v1/source-events/<id>` 与 `?part=headers|attachments|original|messages`。
+    expected: |-
+      通过：mail-like 的 `headers` 与输出一致（同名多值为数组）、`attachments` 每项有 name/media_type/size/ref 且无 blob、`original` 为 `{media_type: text/html, text}` 原样；chat-two-things 的 `messages` 每条 sender/text/at 与输出一致不截断；各部分在 `content.parts` 里有 bytes 与 sha256。
+      失败：任一部分缺失、被改写或截断。
+    requirement_ids: [REQ-RAW-FULL, REQ-WB-35]
+  - id: ACT-RAW-03
+    kind: business-action
+    step: partial 自报被如实记录
+    how: |-
+      `$SRC_CASE` 设为 `partial`（missing 为 original 与 attachments，各带原因），等一轮；WEB 调用 `GET /v1/source-events/<id>`。
+    expected: |-
+      通过：`content.state` 为 `partial`，`content.missing` 逐项列出 part 与 reason，与输出一致；其余部分照常保存。
+      失败：state 记成 full，或 missing 丢失。
+    requirement_ids: [REQ-RAW-PARTIAL]
+  - id: ACT-RAW-04
+    kind: business-action
+    step: 事件列表与挂靠消息列表只带 2000 字符预览与原文清单
+    how: |-
+      `APA_TOKEN=$OBS` 调用 `GET /v1/sources/<acc-raw id>/events`；把 big-body 事件经 Web 建议流接受成事项后，再让 SRC_STUB 输出一条同关联键的 big-body 回信使其挂靠，调用 `GET /v1/items/<事项 id>/messages`。
+    expected: |-
+      通过：两个列表里该事件的 `detail` 不超过 2000 个字符且是正文开头，另带 `content`（各部分字节数、总字节数、state，不含内容）；列表不返回 messages 内容；用单条读取能拿到全文。
+      失败：列表带全文、缺 content，或预览不是正文开头。
+    requirement_ids: [REQ-WB-25]
+  - id: ACT-RAW-05
+    kind: business-action
+    step: CLI 读单条来源事件
+    how: |-
+      `APA_TOKEN=$OBS apa source event <big-body 事件 id>` 与 `APA_TOKEN=$OBS apa source event <mail-like 事件 id> --part headers`。
+    expected: |-
+      通过：前者输出事件、原文清单与正文并写明所用范围（acc-raw 的 external 为 full 时为 full）与裁剪量；后者只输出 headers；退出码 0。
+      失败：命令不存在、输出缺范围说明，或 --part 输出了其他部分。
+    requirement_ids: [REQ-WB-29]
+  - id: ACT-RAW-06
+    kind: business-action
+    step: 任何入口都不能改写来源原文
+    how: |-
+      对 ACT-RAW-04 接受的事项用 `APA_TOKEN=$WRK apa item update <事项> --body "改过的正文"`（或 Web 编辑正文）；再 WEB 调用 `GET /v1/source-events/<big-body id>?part=body`；检查附录 B.2 没有任何写来源原文的路由。
+    expected: |-
+      通过：事项正文变了，来源事件 body 的 sha256 与 ACT-RAW-01 相同；不存在可写来源原文的命令或路由。
+      失败：改事项正文影响了原文，或存在改写原文的入口。
+    requirement_ids: [REQ-RAW-NOWRITE]
+- id: flow-raw-limits
+  name: 超过单条上限的事件整条拒收并留痕，同批其余事件照常落盘；内核不截取一段入账
+  actions:
+  - id: ACT-RLIM-01
+    kind: flow-step
+    step: 调低单条上限便于验证
+    how: |-
+      在运行配置里把 `max_source_event_mb` 设为 1 并重启 `apa serve`（§16.2）。本流程结束时改回缺省 16 并重启。
+    expected: |-
+      通过：重启后 `apa doctor --json` 无配置错误。失败：配置不被接受。
+  - id: ACT-RLIM-02
+    kind: business-action
+    step: 超限事件被拒收，前后两条照常入账，游标推进
+    how: |-
+      `$SRC_CASE` 设为 `oversize-mid`（第 2 条原文合计约 1.5 MiB，第 1、3 条正常），等一轮；`APA_TOKEN=$OBS apa source rejects acc-raw`；`APA_TOKEN=$OBS apa source events acc-raw`；`apa source list --json` 看 acc-raw 的游标。
+    expected: |-
+      通过：被拒收的事件里有该行，原因 `event_too_large` 并带实际字节数；第 1、3 条都在事件列表且 state 为 full；游标推进到第 3 条之后；账本里不存在第 2 条的任何截取片段。
+      失败：整批失败、截取一段入账、原因不是 event_too_large，或游标没推进。
+    requirement_ids: [REQ-WB-15, REQ-WB-28]
+  - id: ACT-RLIM-03
+    kind: business-action
+    step: 聚合消息超过 200 条的事件整行拒收
+    how: |-
+      `$SRC_CASE` 设为 `too-many-msgs`，等一轮；`APA_TOKEN=$OBS apa source rejects acc-raw`。
+    expected: |-
+      通过：该行进被拒收的事件并写明原因；同批其余行照常。
+      失败：该行入账或只存了前 200 条。
+    requirement_ids: [REQ-RAW-MSGCAP]
+  - id: ACT-RLIM-04
+    kind: business-action
+    step: 一次拉取的 stdout 超过 max_source_output_mb 时的处置
+    how: |-
+      把 `max_source_output_mb` 临时设为 1 并重启；让 SRC_STUB 一次输出 10 条各 200 KiB 的事件；看事件列表、游标与来源页的最近失败；结束后改回缺省并重启。
+    expected: |-
+      通过：上限内已解析的事件落盘，末尾半行丢弃，游标不动，本次记为临时失败且原因写明超限。
+      失败：一条都不落盘、游标被推进，或半行被入账。
+    requirement_ids: [REQ-RAW-MSGCAP]
+- id: flow-raw-webhook
+  name: 只用字段映射的 webhook 来源把请求体作为原文永久保存，请求体上限可配
+  actions:
+  - id: ACT-WHK-01
+    kind: business-action
+    step: 字段映射 webhook 的请求体进原文 original
+    how: |-
+      在 Web 来源页登记一个只用字段映射（映射不写 detail）的 webhook 来源 `acc-hook`；用其接收密钥向 `/ingest/<acc-hook>` POST 一段 JSON；WEB 调用 `GET /v1/source-events/<转换出的事件 id>?part=original`；`tc_advance 2678400`（31 天）后再读一次。
+    expected: |-
+      通过：`original.text` 与请求体逐字节相同，media_type 为 application/json；31 天后 Ingest 请求体按 30 天被清掉，但来源事件的 original 仍在。
+      失败：original 缺失，或随 Ingest 一起被清。
+    requirement_ids: [REQ-WB-41]
+  - id: ACT-WHK-02
+    kind: business-action
+    step: max_webhook_body_mb 缺省 1 且可改
+    how: |-
+      不改配置时 POST 一个 1.2 MiB 的请求体；再把 `max_webhook_body_mb` 设为 2 并重启，重发同一请求；结束后删掉该配置项并重启。
+    expected: |-
+      通过：缺省时返回 413 且不落盘（来源事件与 Ingest 都没有新行）；设为 2 后同一请求被接收并转换。
+      失败：缺省值不是 1 MiB，或配置不生效。
+    requirement_ids: [REQ-WB-16]
+- id: flow-raw-read-scope
+  name: 本人在 Web 读到全文，token 读到的原文不超过该来源对外部端点的外发范围，运行凭据与 ext 密钥读不到
+  actions:
+  - id: ACT-RSC-01
+    kind: flow-step
+    step: 准备四种外发范围的来源与读取凭据
+    how: |-
+      负责人：验收执行者。时机：本流程其他动作前。在 Web 来源页再登记三个运行 SRC_STUB 的来源：`acc-raw-ex`（external=excerpt）、`acc-raw-meta`（external=meta）、`acc-raw-none`（external=none），local 都为 full；把三者与 acc-raw 的 `$SRC_CASE` 都设为 `mail-like` 并等一轮。
+      取运行凭据 RUNTOK：在 Web 对 acc-home 的一件事项发起一次 acc-stub 后台运行，从运行目录的环境变量记录里取 `APA_TOKEN`（运行期间有效）。ext 密钥用基线的 CHAN。
+      外部范围未选择的来源取 flow-wb-schema8-upgrade 升级后夹具副本里任一 v0.1 登记的来源（manifest 标明其 outbound.external 未选择），在该副本实例上执行 ACT-RSC-04 的未选择部分。
+    expected: |-
+      通过：四个来源各有一条 mail-like 事件；RUNTOK 能调 `GET /v1/today`。失败：任一来源无事件或 RUNTOK 无效。
+  - id: ACT-RSC-02
+    kind: business-action
+    step: Web 登录读到全文
+    how: |-
+      WEB 调用 `GET /v1/source-events/<acc-raw-none 的事件 id>`。
+    expected: |-
+      通过：`scope` 为 `full`，返回 body 全文、original、headers、attachments；无 trimmed。
+      失败：Web 登录被按外发范围裁剪。
+    requirement_ids: [REQ-WB-24-SRCEVT, REQ-WB-26]
+  - id: ACT-RSC-03
+    kind: business-action
+    step: token 按 excerpt 范围读到摘录
+    how: |-
+      `curl -H "Authorization: Bearer $OBS" $APA_URL/v1/source-events/<acc-raw-ex 的事件 id>`；对 acc-raw 的事件同样读一次。
+    expected: |-
+      通过：acc-raw-ex 的 `scope` 为 `excerpt`，只回摘要与正文前 500 个字符，不回 original、headers、messages，`trimmed` 写明 total_chars 与 returned_chars；acc-raw 的 `scope` 为 `full` 并回全部部分。
+      失败：excerpt 时返回超过 500 字符的正文或任一被排除的部分。
+    requirement_ids: [REQ-WB-26]
+  - id: ACT-RSC-04
+    kind: business-action
+    step: token 在 meta、none 与未选择时只读到元信息
+    how: |-
+      用 OBS 分别读 acc-raw-meta、acc-raw-none 的事件；在夹具副本实例上用夹具的 observer token 读未选择外部范围的来源的一条事件。
+    expected: |-
+      通过：三者都只回 `event` 的元信息与 `content` 清单，没有 body、original、headers、attachments、messages；scope 为 `meta`。
+      失败：任一返回正文或部分内容。
+    requirement_ids: [REQ-WB-26]
+  - id: ACT-RSC-05
+    kind: business-action
+    step: 运行凭据与 ext 密钥不能读来源原文
+    how: |-
+      用 RUNTOK 与 CHAN 各调用一次 `GET /v1/source-events/<acc-raw 的事件 id>`；`APA_TOKEN=$RUNTOK apa source event <id>`。
+    expected: |-
+      通过：两次 HTTP 都是 403；CLI 退出码 4。
+      失败：任一返回 200。
+    requirement_ids: [REQ-WB-26, REQ-WB-24-SRCEVT]
+  - id: ACT-RSC-06
+    kind: business-action
+    step: 已接受事项上的挂靠消息按挂靠消息权限读，不按外发范围裁剪
+    how: |-
+      把 acc-raw-none 的那条事件在 Web 建议流接受为事项，再让 SRC_STUB 对 acc-raw-none 输出一条同关联键的回信使其挂靠；用 OBS 调 `GET /v1/source-events/<回信事件 id>`。
+    expected: |-
+      通过：回信按 `GET /items/{id}/messages` 的权限返回正文全文（不因 none 被裁成元信息）。
+      失败：被按外发范围裁剪，或 OBS 无权读。
+    requirement_ids: [REQ-WB-26]
+  - id: ACT-RSC-07
+    kind: business-action
+    step: 对话捕获的内部来源原文只对 Web 登录开放
+    how: |-
+      用 STUB_HARNESS 提交一段对话增量产生一条对话捕获事件；用 OBS 与 WEB 各读一次 `GET /v1/source-events/<该事件 id>`。
+    expected: |-
+      通过：WEB 返回全文；OBS 返回 403。
+      失败：token 读到对话捕获原文。
+    requirement_ids: [REQ-RAW-CAPTURE]
+- id: flow-storage
+  name: 存储用量可查，按来源列出事件数与原文字节数，Web 设置 › 存储页与 GET /storage 同源
+  actions:
+  - id: ACT-STO-01
+    kind: business-action
+    step: 读取存储用量
+    how: |-
+      `APA_TOKEN=$OBS curl $APA_URL/v1/storage`（带 Authorization 头）；`APA_TOKEN=$OBS apa source list --json` 看 acc-raw 的 stats。
+    expected: |-
+      通过：返回 ledger_bytes、blobs_bytes、content_bytes 与 sources 数组；acc-raw 项的 events 等于事件列表条数，content_bytes 等于各事件 content.bytes 之和，oldest 为最早一条时间；来源 stats 含 events 与 content_bytes 且与 /storage 一致。
+      失败：缺字段或数字与逐条累加不符。
+    requirement_ids: [REQ-WB-24-STORAGE]
+  - id: ACT-STO-02
+    kind: business-action
+    step: Web 存储页显示同样的数字
+    how: |-
+      浏览器打开 Web 的"设置 › 存储"（`/settings/storage`）。
+    expected: |-
+      通过：账本文件、内容寻址附件、各来源原文占用与按来源的事件数、原文字节数、最早时间与 GET /storage 一致；每个来源有保留天数设置项，默认显示不清理，并写明清掉的原文不可恢复。
+      失败：页面不存在、数字不一致或缺保留天数设置。
+    requirement_ids: [REQ-WEB-STORAGE]
+- id: flow-material-budget
+  name: 调用模型时按外发范围和资料预算裁剪并留痕，账本原文不变，建议事项正文不整份复制原文
+  actions:
+  - id: ACT-BUD-01
+    kind: business-action
+    step: 生成端点的资料预算缺省 24000 且只在 Web 可改
+    how: |-
+      WEB 调用 `GET /v1/settings/model-endpoints`；浏览器打开"设置 › 模型"看生成端点一块；在页面把资料预算改为 3000 保存；再用 DEL 调 `PUT /v1/settings/model-endpoints`。
+    expected: |-
+      通过：未设过时 `generate_endpoint.max_material_chars` 读作 24000，页面显示 24000；保存后读回 3000 并记 policy.changed；DEL 的 PUT 被拒（403）。
+      失败：缺省不是 24000、页面无此字段，或非 Web 能改。
+    requirement_ids: [REQ-WB-18, REQ-WEB-MODELBUDGET]
+  - id: ACT-BUD-02
+    kind: business-action
+    step: 超预算的长正文按首 3/4 尾 1/4 裁剪送给起草
+    how: |-
+      保持预算 3000；`$SRC_CASE` 设为 `big-body`（acc-raw 命中内置 mail-received 规则，走初筛与起草），把 CLS_STUB 对该事件的初筛配为 p_yes=0.95；等事件处理完后查看 MODEL_LOG 中 triage-draft 请求的资料正文。
+    expected: |-
+      通过：资料正文不超过 3000 个字符，开头约 2250 个字符等于原文开头、结尾约 750 个字符等于原文结尾，中间是一行"省略 N 个字符"且 N 等于被省略的字符数。
+      失败：超出预算、只截头不留尾，或省略数不对。
+    requirement_ids: [REQ-RAW-BUDGET-CUT, REQ-WB-18]
+  - id: ACT-BUD-03
+    kind: business-action
+    step: 聚合消息从最新一条往前整条保留
+    how: |-
+      先按 flow-extract-align 的 ACT-XAL-01 准备 acc-chat 来源与 extract 规则；把 acc-chat 的 `$SRC_CASE` 设为 `chat-long`（60 条、每条约 100 字符），等处理完后查看 MODEL_LOG 中 triage-extract 请求的资料。
+    expected: |-
+      通过：送出的是最新的若干条完整消息，没有被切开的消息，并有一行写明省略了更早的几条，条数正确。
+      失败：消息被从中间切断，或保留的是最旧的消息。
+    requirement_ids: [REQ-RAW-BUDGET-CUT]
+  - id: ACT-BUD-04
+    kind: business-action
+    step: 裁剪量在判断记录、处置载荷与处理经过里可见，原文不变
+    how: |-
+      对 ACT-BUD-02 的事件：`APA_TOKEN=$OBS apa why <事件生成的建议事项>`；`GET /v1/audit/events` 找该事件的入站处置 Event；浏览器打开该事件的处理经过页 `/sources/events/<id>`；WEB 读 `GET /v1/source-events/<id>?part=body` 的 sha256。
+    expected: |-
+      通过：判断记录的初筛一级记有送出字符数、裁剪前字符数与方式（判断端点预算 8000）；处置载荷带 `material`（送出、裁剪前字符数与方式）；处理经过页显示"送给模型 N / M 字符"与载荷一致；body 的 sha256 与 SRC_STUB 输出相同。
+      失败：任一处缺裁剪量，或原文被改。
+    requirement_ids: [REQ-RAW-BUDGET-TRACE, REQ-WB-11]
+  - id: ACT-BUD-05
+    kind: business-action
+    step: 旧处置不显示裁剪量
+    how: |-
+      在升级后的结构版本 7 夹具副本上打开一条升级前已处置事件的处理经过页，并读其处置 Event 载荷。
+    expected: |-
+      通过：载荷没有 material，页面不显示"送给模型 N / M 字符"也不报错。
+      失败：页面报错或显示伪造的裁剪量。
+    requirement_ids: [REQ-WB-11]
+  - id: ACT-BUD-06
+    kind: business-action
+    step: 外发范围先于预算生效
+    how: |-
+      把生成端点的位置改为 external（Web 设置 › 模型），对 acc-raw-ex 输出一条 big-body 事件；查看 MODEL_LOG 的资料正文；流程结束改回 local。
+    expected: |-
+      通过：送出的正文不超过 500 个字符（excerpt），不出现"省略 N 个字符"之外的超范围内容。
+      失败：外部端点收到超出外发范围的内容。
+    requirement_ids: [REQ-RAW-BUDGET-CUT]
+  - id: ACT-BUD-07
+    kind: business-action
+    step: 建议事项正文超过 4000 字符时只写前 4000 并链到原文
+    how: |-
+      对 ACT-BUD-02 生成的建议事项 `APA_TOKEN=$OBS apa item show <id> --json`；另对一条正文 3000 字符的事件（`$SRC_CASE` 设为 `mid-body`）生成的建议同样查看。
+    expected: |-
+      通过：长事件的事项 body 是原文前 4000 个字符，末尾注明"原文较长"并带来源原文页链接，`proposal.sources[]` 含该来源事件 id；短事件的 body 是完整原文。
+      失败：长正文被整份复制，或短正文被截。
+    requirement_ids: [REQ-WB-38]
+  - id: ACT-BUD-08
+    kind: business-action
+    step: 来源对象更新刷新事项正文时同样按 4000 规则
+    how: |-
+      让 SRC_STUB 对 ACT-BUD-07 的长事件输出一条同关联键的更新版本（正文仍 200 KiB、开头改动），等处理；查看事项 body。
+    expected: |-
+      通过：事项 body 刷新为新版本的前 4000 个字符并保留"原文较长"与链接。
+      失败：刷新时整份复制或不刷新。
+    requirement_ids: [REQ-WB-38]
+- id: flow-raw-retention
+  name: 本人可按来源设原文保留天数，后台按天数清掉不挂未关闭事项的原文，事件行留元信息
+  actions:
+  - id: ACT-RET-01
+    kind: business-action
+    step: 保留天数只在 Web 设置
+    how: |-
+      WEB 调用 `PUT /v1/settings/sources/<acc-raw-ex id>/content-retention` 请求体 `{"days": 1}`；用 DEL 调同一路由；再 WEB 以 `{"days": null}` 设 acc-raw-meta。
+    expected: |-
+      通过：WEB 返回 200，来源登记的 `content_retention_days` 为 1，并记一条 Event；DEL 被拒（403）；null 读回为空（不清理）。
+      失败：非 Web 能设，或设置不生效。
+    requirement_ids: [REQ-WB-07]
+  - id: ACT-RET-02
+    kind: business-action
+    step: 超过天数且不挂未关闭事项的原文被清，挂在未关闭事项上的保留
+    how: |-
+      acc-raw-ex 上准备两条事件：E1 无关联事项，E2 已在 Web 接受为事项且事项为 open；先对 E1 在来源原文页取回一个附件（见 flow-attachment-fetch 的做法）；`tc_advance 172800`，等一轮维护循环；WEB 读两条 `GET /v1/source-events/<id>`；`GET /v1/audit/events` 看清除记录。
+    expected: |-
+      通过：E1 的 `content.state` 为 `purged`，没有 body 与其他部分，事件行仍有类型、标题、发送者、时间、链接与处置；E1 取回的附件已删除；E2 原文完整；本轮对 acc-raw-ex 记一条内部审计事件写明条数与字节数（不逐条记），该事件不出现在 `GET /v1/events`。
+      失败：E2 被清、E1 未清、事件行被删，或逐条记审计。
+    requirement_ids: [REQ-RAW-RETAIN, REQ-WB-14]
+  - id: ACT-RET-03
+    kind: business-action
+    step: 未设保留天数的来源不清理
+    how: |-
+      同一时间推进后读 acc-raw 与 acc-raw-meta 的最早事件。
+    expected: |-
+      通过：两者 state 不是 purged，原文完整。
+      失败：默认被清理。
+    requirement_ids: [REQ-RAW-RETAIN]
+- id: flow-raw-purge
+  name: 本人可在 Web 物理删除一条来源事件或连同事项一并删除，删除后同一事件不重新入账
+  actions:
+  - id: ACT-PRG-01
+    kind: business-action
+    step: 在来源原文页物理删除一条来源事件
+    how: |-
+      对 acc-raw 的一条已有判断记录的 mail-like 事件，在浏览器打开 `/sources/events/<id>` 点删除并确认（等价于 WEB `POST /v1/settings/purge` 的 `object` 为该事件 id）；然后 WEB 读 `GET /v1/source-events/<id>`、`apa why` 该事件原先的判断记录。用 DEL 对另一条事件调 `POST /v1/settings/purge`。
+    expected: |-
+      通过：单条读取 404；原文各部分、无其他引用的取回附件与指向它的判断记录都不在；另记一条删除事件；DEL 调用被拒（403）。
+      失败：任一残留，或非 Web 能删。
+    requirement_ids: [REQ-RAW-PURGE, REQ-WB-27-PURGE]
+  - id: ACT-PRG-02
+    kind: business-action
+    step: 去重键墓碑阻止同一事件重新入账
+    how: |-
+      让 SRC_STUB 再次输出 ACT-PRG-01 删除的那条事件（同一事件 id），等一轮；`apa source events acc-raw`。
+    expected: |-
+      通过：该事件没有重新出现，也不进被拒收的事件。
+      失败：被重新入账。
+    requirement_ids: [REQ-RAW-PURGE]
+  - id: ACT-PRG-03
+    kind: business-action
+    step: 删除事项时连同它的来源事件
+    how: |-
+      对一个由 acc-raw 事件生成的事项，WEB 调 `POST /v1/settings/purge`，`object` 为事项 id 且带 `"with_source_events": true`（Web 物理删除事项时勾选"连同它的来源事件"）；再对另一事项不带此键删除。
+    expected: |-
+      通过：前者的来源事件单条读取 404；后者的来源事件仍在且原文完整。
+      失败：勾选不生效，或不勾选也删了来源事件。
+    requirement_ids: [REQ-WB-27-PURGE, REQ-RAW-PURGE]
+- id: flow-attachment-fetch
+  name: 来源程序声明支持取回时，本人可按需取回一个附件；不支持或失败时只报原因，清单不变
+  actions:
+  - id: ACT-FET-01
+    kind: business-action
+    step: 在来源原文页取回附件
+    how: |-
+      浏览器打开 acc-raw 一条 mail-like 事件的 `/sources/events/<id>`，在"原文"栏的附件清单对第 0 个附件点"取回"（等价于 WEB `POST /v1/source-events/<id>/attachments/0/fetch`）；记下 SRC_STUB 对该 ref 的固定字节的 sha256；之后 `apa source events acc-raw` 与来源游标对比取回前。
+    expected: |-
+      通过：返回 200，清单这一项带 `blob`，blob 内容 sha256 与固定字节相同；记一条内部审计事件；没有新的来源事件、游标不变。
+      失败：哈希不同、产生来源事件或游标移动。
+    requirement_ids: [REQ-WB-24-FETCH, REQ-RAW-FETCH, REQ-WB-22]
+  - id: ACT-FET-02
+    kind: business-action
+    step: 不支持取回的来源返回 409，页面只显示元数据
+    how: |-
+      对 acc-raw-nofetch 的 mail-like 事件 WEB 调 `POST .../attachments/0/fetch`；浏览器打开其 `/sources/events/<id>`。
+    expected: |-
+      通过：返回 409；页面附件只显示名字、类型与大小，没有"取回"。
+      失败：返回 200 或页面有取回按钮。
+    requirement_ids: [REQ-WB-24-FETCH, REQ-WB-22]
+  - id: ACT-FET-03
+    kind: business-action
+    step: 取回失败与超限返回 502 并保持清单不变
+    how: |-
+      把 SRC_STUB 的 fetch 配为退出码 1（stderr 一句原因），再配为输出 33 MiB；各取回一次。
+    expected: |-
+      通过：两次都返回 502 并带原因；清单该项没有 blob；不产生来源事件。
+      失败：返回成功或清单被改。
+    requirement_ids: [REQ-WB-24-FETCH, REQ-RAW-FETCH]
+  - id: ACT-FET-04
+    kind: business-action
+    step: delegate 附原话可取回，运行凭据与 observer 不可
+    how: |-
+      DEL 调 `POST .../attachments/1/fetch` 带 `X-APA-Evidence` 原话；DEL 不带原话再调一次；RUNTOK 与 OBS 各调一次。
+    expected: |-
+      通过：带原话成功（200）；不带依据为 403 退出码 23；RUNTOK 与 OBS 为 403。
+      失败：运行凭据或 observer 能取回。
+    requirement_ids: [REQ-WB-24-FETCH]
+- id: flow-web-raw-page
+  name: 本人在 Web 的来源原文页看到完整原文与完整程度，原始格式只作文本显示，各处来源链接都到这一页
+  actions:
+  - id: ACT-WRP-01
+    kind: business-action
+    step: 原文栏的显示
+    how: |-
+      浏览器打开 acc-raw 的 mail-like 与 chat-two-things 事件的处理经过页 `/sources/events/<id>`，看"原文"栏。
+    expected: |-
+      通过：正文按纯文本显示并保留换行与缩进；头部字段成表；附件列出名字、类型与大小；会话事件逐条列出发送者、时刻与文字；页头标明原文大小与"完整"。
+      失败：缺"原文"栏或任一部分显示错误。
+    requirement_ids: [REQ-WEB-RAWPAGE]
+  - id: ACT-WRP-02
+    kind: business-action
+    step: 原始格式只作文本、不加载外部资源
+    how: |-
+      SRC_STUB 的 mail-like 原始 HTML 里放一个指向本机记录服务器的 `<img src>` 与一段 `<script>`；在原文栏切到"原始格式"；看记录服务器是否收到请求。
+    expected: |-
+      通过：HTML 源码作为文本原样显示，脚本不执行，记录服务器没有收到任何请求。
+      失败：HTML 被渲染或有外部请求。
+    requirement_ids: [REQ-WEB-RAWPAGE]
+  - id: ACT-WRP-03
+    kind: business-action
+    step: 页头写明四种完整程度
+    how: |-
+      依次打开 partial 事件、升级后夹具里的 legacy 事件、ACT-RET-02 的 purged 事件。
+    expected: |-
+      通过：partial 写明来源程序没取到哪一部分及原因；legacy 写"升级前落盘，可能已截断"；purged 写已按保留期清除。
+      失败：任一状态显示错误或无说明。
+    requirement_ids: [REQ-WEB-RAWPAGE, REQ-RAW-LEGACY]
+  - id: ACT-WRP-04
+    kind: business-action
+    step: 各处来源链接到来源原文页
+    how: |-
+      在 Web 的建议流里点一条 acc-raw 建议的"来源"；在事项详情的来源区点来源事件；在一份含 acc-raw 知会的简报的知会条目上点链接；在事项的挂靠消息上点链接。
+    expected: |-
+      通过：四处都打开对应事件的 `/sources/events/<id>`。
+      失败：任一处没有链接或链到别处。
+    requirement_ids: [REQ-WEB-RAWLINKS]
+- id: flow-mail-adapters-raw
+  name: 随发行附带的两个邮件来源程序取全正文、信头、附件清单与 HTML 原文，取不到的部分如实标 partial
+  actions:
+  - id: ACT-MAD-01
+    kind: business-action
+    step: 桌面应用邮件适配器取全原文
+    how: |-
+      在 Web 来源页登记 `apple-pim-source`（config.kind=mail，PATH 前缀 TOOL_STUB_BIN），把 `$TOOL_STUB_BIN/case` 设为录制样本 `mail-long-html`（正文 > 16 KiB 的 HTML 邮件带两个附件）；等一轮；WEB 读该事件。
+    expected: |-
+      通过：body 是完整的转换后文本，长度与样本一致（大于 16384 字节）；headers 含发件人、收件人、日期、主题、Message-ID 等工具给出的全部信头；attachments 两项名字与大小与样本一致；original 是原样 HTML；state 为 full（或样本声明的 partial 及 missing）。
+      失败：正文仍在 16 KiB 截断，或缺信头、附件、original。
+    requirement_ids: [REQ-WB-36-MAIL]
+  - id: ACT-MAD-02
+    kind: business-action
+    step: himalaya 适配器取全正文与固定信头，original 与 attachments 以 partial 自报
+    how: |-
+      在 Web 来源页登记 `mail-himalaya` 来源（PATH 前缀 TOOL_STUB_BIN），case 设为 `himalaya-long`；等一轮；WEB 读该事件；查看 `$TOOL_LOG` 的 argv。
+    expected: |-
+      通过：body 全文不截断；headers 含发件人、收件人、抄送、回复地址、日期、主题、Message-ID、In-Reply-To、References、列表头、内容类型；`content.state` 为 partial，missing 列出 original 与 attachments 及原因；TOOL_LOG 里读取命令都带 `--preview`，没有 `message export --full`。
+      失败：截断、缺固定信头、未标 partial，或调用了会置已读的命令。
+    requirement_ids: [REQ-WB-36-MAIL]
+  - id: ACT-MAD-03
+    kind: business-action
+    step: 旧邮件重新拉到时仍被去重
+    how: |-
+      在升级后的结构版本 7 夹具副本上，把邮件来源指到 TOOL_STUB_BIN 并用回放升级前同一封信（同 Message-ID、正文更长）的 case；等一轮；查看该来源事件数与那条 legacy 事件。
+    expected: |-
+      通过：事件数不变，没有新的入账行；原 legacy 事件内容不变（不回填）。
+      失败：同一封信重复入账，或旧事件被改写。
+    requirement_ids: [REQ-WB-36-ID]
+  - id: ACT-MAD-04
+    kind: business-action
+    step: 来源程序按字节分批
+    how: |-
+      把 `max_source_output_mb` 设为 1 并重启；邮件工具替身回放 `mail-many-long`（20 封各约 100 KiB）；连续等三轮；看每轮落盘条数、游标与来源页失败记录；结束后改回缺省并重启。
+    expected: |-
+      通过：每轮输出不超过约 768 KiB 即停下，游标停在已输出的最后一条，多轮后 20 封全部入账，没有一轮因超限记为临时失败。
+      失败：一次输出超过上限触发临时失败，或有邮件丢失。
+    requirement_ids: [REQ-WB-36-BATCH]
+- id: flow-other-adapters-raw
+  name: 其余内置来源程序按附录 D.8 的取法不截断并补头部与原始正文，HTML 转文本保留结构
+  actions:
+  - id: ACT-OAD-01
+    kind: business-action
+    step: 代码托管来源正文全文且总是带 detail
+    how: |-
+      登记 `github-source`（PATH 前缀 TOOL_STUB_BIN），case 依次为正文 6000 字符的 issue 与正文 100 字符的 issue；WEB 读两条事件。
+    expected: |-
+      通过：两条都带 detail 且为正文全文（不在 4000 截断）；summary 不超过 200 字符；headers 含作者、标签、状态、仓库与编号；无 original。
+      失败：截断、短正文缺 detail，或缺 headers。
+    requirement_ids: [REQ-WB-36-OTHER]
+  - id: ACT-OAD-02
+    kind: business-action
+    step: 订阅来源把 HTML 条目转文本并保存原文与附带文件
+    how: |-
+      用 `python3 -m http.server` 在本机提供录制订阅源 `rss-long.xml`（条目正文为含链接、列表、引用、表格与一段 script 的 HTML，带一个 enclosure，标题 400 字符）；登记 `rss-source` 指向它；等一轮；WEB 读该事件。
+    expected: |-
+      通过：detail 是转换后的文本，链接保留地址、列表、引用与表格保留结构，没有脚本内容；original 是原样 HTML；标题与作者不截断；attachments 有 enclosure 的地址、类型与大小；本机记录服务器没收到正文里远程资源的请求。
+      失败：截断、结构丢失、执行脚本或取远程资源。
+    requirement_ids: [REQ-WB-36-OTHER, REQ-WB-HTML2TEXT]
+  - id: ACT-OAD-03
+    kind: business-action
+    step: HTML 转换失败时 detail 留空、original 保存并标 partial
+    how: |-
+      订阅源换成一条正文为无法解析的畸形 HTML 的条目（录制样本 `rss-broken.xml`）；等一轮；WEB 读该事件。
+    expected: |-
+      通过：detail 为空，original 原样保存，content.state 为 partial 并写明 body 的原因。
+      失败：事件被拒收或 original 丢失。
+    requirement_ids: [REQ-WB-HTML2TEXT, REQ-RAW-PARTIAL]
+  - id: ACT-OAD-04
+    kind: business-action
+    step: 日历、提醒事项、http-json、dir-watch 的原文
+    how: |-
+      分别登记 `calendar`（录制日程）、`apple-pim-source`（config.kind=reminders）、`http-json`（本机 http.server 提供一段 JSON 数组）、`dir-watch`（监视一个临时目录并写入一个文件），各等一轮后 WEB 读事件。
+    expected: |-
+      通过：日程 headers 含起止、地点、组织者、参与者与状态；提醒 headers 含列表、到期日与优先级；http-json 的 original 是被映射的那一条 JSON 原样；dir-watch 事件只有路径、修改时间与大小，账本里没有文件内容。
+      失败：任一缺对应部分，或 dir-watch 读入了文件内容。
+    requirement_ids: [REQ-WB-36-OTHER]
+  - id: ACT-OAD-05
+    kind: business-action
+    step: HTML 转文本包位于来源程序一侧并已写回设计
+    how: |-
+      `grep -rn "<选定库的 import 路径>" kernel/` 与 `go run ./tools/redline`；查看 docs/solution-design.md §18 的选型记录。
+    expected: |-
+      通过：内核没有 import 该库，红线检查通过；§18 写明选定的库、理由与换掉它要改哪里。
+      失败：内核依赖该库，或 §18 未写回。
+    requirement_ids: [REQ-WB-HTML2TEXT]
+- id: flow-import-apply
+  name: 本人把带原始时间线的项目与事项导入账本，时间线与输入一致，重放不重复，预检不写账本
+  actions:
+  - id: ACT-IMP-01
+    kind: flow-step
+    step: 准备导入计划文件
+    how: |-
+      负责人：验收执行者。时机：本流程其他动作前。写 `$IMP_PLAN`（JSONL，三行）：
+      ① `type: project`，external_id `acc/alpha`，name `Alpha Imp`，status active，created_at 为 2026-03-02T09:00:00+08:00；
+      ② `type: project`，external_id `acc/home`，name `  ACC-HOME `（与已有项目 acc-home 只差空白与大小写）；
+      ③ `type: item`，external_id `T-0001`，project `acc/alpha`，item 为 kind task、终态 done、deadline null，history 共 9 条：created（phase open，2026-10-01T09:00:00+08:00）、五条 progress（10-02 至 10-06，`on` 为当天，前三条 `precision: day` 时刻 12:00、后两条给精确时刻）、transition to dropped（带 reason，10-07）、transition to open（10-08）、transition to done（10-09T18:00:00+08:00，`precision: day`）；
+      ④ `type: item`，external_id `T-0002`，project `acc/home`，kind task，终态 waiting（带 waiting_on），deadline 为当前时刻前一天，history 只有 created（10-10）与 transition to waiting（10-11）。
+      导入用来源名 `acc-imp`。导入前用 sqlite3 只读记下 deliveries、Timer、Event 的行数与最大序号，作为 flow-import-no-automation 的基线。
+    expected: |-
+      通过：文件 4 行，每行是合法 JSON。失败：文件无法解析。
+  - id: ACT-IMP-02
+    kind: business-action
+    step: 预检只报结果、不写账本
+    how: |-
+      WEB 调用 `POST /v1/import?source=acc-imp&dry_run=1`，`Content-Type: application/x-ndjson`，请求体为 `$IMP_PLAN`；前后各对 ledger.db 做一次只读的行数统计与最大 Event 序号。
+    expected: |-
+      通过：响应逐行给出 outcome：①③④为 created，②的 object 为已有项目 acc-home 的 id；`created`/`existing`/`invalid` 计数正确，没有 `batch`；前后行数与最大序号完全相同，`GET /v1/imports` 没有新批次。
+      失败：预检写了账本、建了批次或计数不对。
+    requirement_ids: [REQ-IMP-DRYRUN, REQ-WB-24-IMPORT]
+  - id: ACT-IMP-03
+    kind: business-action
+    step: 本人在 Web 登录下导入，不需要授权单
+    how: |-
+      WEB 调用 `POST /v1/import?source=acc-imp`，请求体同上，不带任何授权头；随后 `GET /v1/imports`。
+    expected: |-
+      通过：200，返回 `batch`（imp_ 开头），四行 outcome 与预检一致；GET /imports 最新一条为该批次，来源 acc-imp、actor 为本人、无 grant、条数正确。
+      失败：被要求授权单，或结果与预检不一致。
+    requirement_ids: [REQ-WB-24-IMPORT, REQ-IMP-AUTH-PATH, REQ-WB-05]
+  - id: ACT-IMP-04
+    kind: business-action
+    step: 时间线与输入一致
+    how: |-
+      `APA_TOKEN=$OBS apa item list --origin-source import:acc-imp --origin-ref T-0001 --json` 取事项 id；`APA_TOKEN=$OBS apa item show <id> --json`；`GET /v1/audit/events?imported=<batch>`。
+    expected: |-
+      通过：恰好一条；`origin` 为 `{source: import:acc-imp, ref: T-0001}`，`imported` 为 `{batch, at}`；进展 5 条、阶段变更 3 次，每条事件的 `at` 等于输入时刻，按 at 排列；`created_at` 为 10-01 09:00、`updated_at` 为 10-09 18:00；每条 Event 带 `imported`（批次号）与 `recorded_at`（实际写入时刻），precision 为 day 的进展与终态转移载荷带 `precision: day`；阶段为 done。
+      失败：时刻被改为写入时刻、条数不符或缺导入标记。
+    requirement_ids: [REQ-IMP-TIMELINE, REQ-WB-09, REQ-WB-13, REQ-WB-27-ITEMS, REQ-IMP-ORIGIN]
+  - id: ACT-IMP-05
+    kind: business-action
+    step: 项目记录按对照、名字绑定或新建
+    how: |-
+      `APA_TOKEN=$OBS apa project list --json`；`apa project show acc-home`。
+    expected: |-
+      通过：新建了项目 Alpha Imp，其 `project.created` 的时刻为 2026-03-02T09:00:00+08:00，未设 allowed_executors、repos 与对话捕获；②绑定到已有 acc-home，acc-home 的名字与其他字段未改；没有多出名为 ACC-HOME 的项目。
+      失败：重复建项目或改了已有项目。
+    requirement_ids: [REQ-IMP-PROJECT]
+  - id: ACT-IMP-06
+    kind: business-action
+    step: 原样重放新增 0 条
+    how: |-
+      WEB 再调用一次 `POST /v1/import?source=acc-imp`，请求体同上；比较前后事项数与 Event 数。
+    expected: |-
+      通过：四行都是 existing，created 为 0；除一条 `import.completed` 外事项与 Event 数不变；已有事项内容未被比较或更新。
+      失败：新增事项或更新已导入的事项。
+    requirement_ids: [REQ-IMP-IDEMP]
+  - id: ACT-IMP-07
+    kind: business-action
+    step: 不合法的记录逐行报 invalid，其余照常
+    how: |-
+      用来源名 `acc-imp2` 提交一份 11 行的文件，每行各犯一项：history 首条不是 created；某条 at 晚于当前时刻；progress 的 on 晚于 at 所在日；kind 为 delegation；kind 为 brief；终态 needs_input；waiting 无 waiting_on；dropped 无 reason；带 assignee；单条 history 501 条；外加 1 行合法记录。再分别以来源名 `Acc_Imp`、长度 33 的来源名提交一行合法记录。
+    expected: |-
+      通过：前 10 行各为 invalid 且 `code`/`why` 指出对应规则，合法那行 created；不合法行没有写入任何事件（单条原子）；两个非法来源名的请求被拒（400，退出码 2），不写账本。
+      失败：任一不合法行被写入、合法行被连累，或非法来源名被接受。
+    requirement_ids: [REQ-IMP-VALID, REQ-IMP-IDEMP]
+  - id: ACT-IMP-08
+    kind: business-action
+    step: 请求体超过 500 行或 8 MiB 返回 413，多批沿用批次号
+    how: |-
+      提交 501 行与一份 9 MiB 的文件各一次；再把 600 条合法记录拆成 500 + 100 两次提交，第二次带第一次返回的 `batch`；再用另一个来源名带同一 batch 提交一次。
+    expected: |-
+      通过：前两次 413；拆分后两次属于同一批次，GET /imports 该批次 created 为 600；来源名不同时带该 batch 被拒（4xx，why 写明批次不属于该来源名），不写账本。
+      失败：超限被接受，或批次号可跨来源名复用。
+    requirement_ids: [REQ-WB-24-IMPORT]
+  - id: ACT-IMP-09
+    kind: business-action
+    step: 中途失败后重跑从断点继续
+    how: |-
+      提交一份 300 条的文件时在服务端第 150 条左右停掉 `apa serve`（kill 该 PID）；重启后原样再提交一次。
+    expected: |-
+      通过：重启后已写入的事项各自完整（每条历史条数与输入一致，没有只写了一半的事项）；重跑结果为已写入的 existing、其余 created，总数 300。
+      失败：出现半条记录，或重跑重复写入。
+    requirement_ids: [REQ-IMP-IDEMP]
+  - id: ACT-IMP-10
+    kind: business-action
+    step: 按 origin 查询
+    how: |-
+      `curl -H "Authorization: Bearer $OBS" "$APA_URL/v1/items?origin_source=import:acc-imp"` 与加 `&origin_ref=T-0002`；`APA_TOKEN=$OBS apa item list --origin-source import:acc-imp --origin-ref T-0002`。
+    expected: |-
+      通过：只给来源时返回 acc-imp 批次的全部事项；加 ref 后只有 T-0002；CLI 输出与 HTTP 一致。
+      失败：筛选不精确或 CLI 不支持。
+    requirement_ids: [REQ-WB-27-ITEMS, REQ-WB-04, REQ-WB-30-ITEM]
+  - id: ACT-IMP-11
+    kind: business-action
+    step: 批次结束记 import.completed 并进对外事件流
+    how: |-
+      `curl -H "Authorization: Bearer $OBS" "$APA_URL/v1/events?after=<导入前最大序号>"`（事件订阅）。
+    expected: |-
+      通过：每次真实导入（不含预检）各有一条 `import.completed`，载荷含来源名、新建与已存在条数；订阅里没有任何带 imported 的事件。
+      失败：缺 import.completed，或导入事件出现在订阅流。
+    requirement_ids: [REQ-WB-10, REQ-IMP-NOAUTO]
+- id: flow-import-no-automation
+  name: 导入写下的历史事件只进账本与折叠，不触发规则、提醒、跟进、摘要、注入、统计、简报与对外事件流；导入的未完成事项从导入时刻起算
+  actions:
+  - id: ACT-INA-01
+    kind: business-action
+    step: 导入前后各订阅方没有新增
+    how: |-
+      以 flow-import-apply 的 ACT-IMP-01 基线为准，在 ACT-IMP-03 之后立即：sqlite3 只读统计投递表、规则触发与观察记录、Timer、摘要起草运行；`GET /v1/deliveries/today`；`APA_TOKEN=$DEL apa context` 的增量；`GET /v1/events?after=<基线序号>`。
+    expected: |-
+      通过：投递、规则触发与 rule.observed、摘要起草、注入增量、对外事件流（除 import.completed）都没有因导入新增；Timer 只多出 T-0002 的截止 Timer 与第一轮跟进 Timer。
+      失败：任一订阅方因导入事件产生了新行。
+    requirement_ids: [REQ-IMP-NOAUTO]
+  - id: ACT-INA-02
+    kind: business-action
+    step: 导入事件在账本、审计与回放里都读得到
+    how: |-
+      `APA_TOKEN=$OBS apa why <T-0001 事项 id>`；`GET /v1/audit/events?imported=<batch>`；`GET /v1/audit/events` 不带筛选看同一序号段。
+    expected: |-
+      通过：apa why 回放出完整时间线；带筛选只返回该批次事件且都带 imported 与 recorded_at；不带筛选的审计也包含它们。
+      失败：导入事件在审计或回放里缺失。
+    requirement_ids: [REQ-IMP-NOAUTO, REQ-WB-09]
+  - id: ACT-INA-03
+    kind: business-action
+    step: 已过期截止照常触发一次，跟进从导入时刻起算
+    how: |-
+      导入后等一次时钟扫描；`GET /v1/audit/events?type=item.deadline_passed`；再按策略的跟进梯度 `tc_advance <第一轮间隔秒数>`，看 T-0002 的跟进提醒。
+    expected: |-
+      通过：T-0002 恰好有一条 `item.deadline_passed`（普通事件，不带 imported）；第一轮跟进提醒在导入时刻加第一轮间隔后到达，而不是从 10-11 起算立即到达。
+      失败：截止被屏蔽、触发多次，或跟进按原始时刻立刻提醒。
+    requirement_ids: [REQ-WB-40]
+  - id: ACT-INA-04
+    kind: business-action
+    step: 未完成的导入事项不立刻进久未推进
+    how: |-
+      导入后立刻看 Web"今天"视图与 `GET /v1/today` 的久未推进部分；再 `tc_advance` 到久未推进阈值之后看一次。
+    expected: |-
+      通过：导入后立刻没有 T-0002；阈值以导入时刻起算过后才出现。
+      失败：一导入就进久未推进。
+    requirement_ids: [REQ-WB-40]
+  - id: ACT-INA-05
+    kind: business-action
+    step: 当天活动与简报取材不计导入事件
+    how: |-
+      导入后立刻对一个 brief 实例点"立即跑一次"（Web 简报页），用 STUB_HARNESS 读运行目录的资料文件。
+    expected: |-
+      通过：activity 段没有 T-0001 的进展与完成；导入的事项本身可出现在 planned 等按事项取的段里。
+      失败：导入的历史事件进了 activity。
+    requirement_ids: [REQ-IMP-NOAUTO, REQ-BRF-WINDOW]
+- id: flow-import-grant
+  name: Agent 只能凭本人在 Web 签发的导入专用授权单导入，原话不够，来源名与条数受单约束
+  actions:
+  - id: ACT-IGR-01
+    kind: business-action
+    step: 导入专用授权单的签发规则
+    how: |-
+      WEB 依次调用 `POST /v1/settings/grants`：A `actions: ["import.apply"]`、`import: {source: acc-imp3, max_records: 3}`、expires_at 为 6 天后、grantee 为 DEL；B 同 A 但 expires_at 为 8 天后；C 同 A 但不带 import 段；D 同 A 但带 `background: true`；E `actions: ["import.apply", "item.progress"]`；F 同 A 但不带 expires_at。再用 DEL 调一次 A。
+    expected: |-
+      通过：A 成功；B、C、D、E、F 都返回 400 且 why 指出对应规则；DEL 签发被拒（403），签发只在 Web。
+      失败：任一违规单被签发，或非 Web 能签。
+    requirement_ids: [REQ-WB-19B]
+  - id: ACT-IGR-02
+    kind: business-action
+    step: 不带单与只带原话都是 23 grant_required
+    how: |-
+      `APA_TOKEN=$DEL apa import --file $IMP3 --source acc-imp3`（不带 --grant）；`APA_TOKEN=$DEL apa import --file $IMP3 --source acc-imp3 --evidence "我说导入"`；`$IMP3` 为 2 条合法事项。分别在 `APA_SESSION_KIND=direct` 与 `group` 下各执行一次。
+    expected: |-
+      通过：四次都退出码 23，code 为 `grant_required`；会话类型不改变结果；账本无新增。
+      失败：凭原话导入成功，或退出码不是 23。
+    requirement_ids: [REQ-WB-20, REQ-WB-28]
+  - id: ACT-IGR-03
+    kind: business-action
+    step: 凭单导入成功，事件带授权单 id
+    how: |-
+      `APA_TOKEN=$DEL apa import --file $IMP3 --source acc-imp3 --grant <A 的 id>`；`GET /v1/audit/events?imported=<该批次>`。
+    expected: |-
+      通过：退出码 0，逐行输出 created；每条导入事件带 imported、recorded_at 与 grant（A 的 id）；GET /imports 该批次 grant 为 A。
+      失败：缺 grant 或写入失败。
+    requirement_ids: [REQ-WB-20, REQ-IMP-AUTH-PATH, REQ-WB-29]
+  - id: ACT-IGR-04
+    kind: business-action
+    step: 来源名不符与累计超上限被拒
+    how: |-
+      用 A 以来源名 `acc-other` 导入 1 条；再用 A 以 acc-imp3 导入 2 条（已用 2，上限 3）。
+    expected: |-
+      通过：前者 23，code `import_source_mismatch`；后者 23，code `import_limit_exceeded`，账本无新增。
+      失败：任一被放行或原因不对。
+    requirement_ids: [REQ-WB-20, REQ-WB-28]
+  - id: ACT-IGR-05
+    kind: business-action
+    step: 预检不占授权单条数
+    how: |-
+      用 A 以 acc-imp3 `--dry-run` 预检 1 条三次，再真实导入 1 条。
+    expected: |-
+      通过：三次预检退出码 0 且不写账本；真实导入 1 条成功（累计 3，未超上限）。
+      失败：预检占用了条数导致真实导入被拒。
+    requirement_ids: [REQ-IMP-DRYRUN, REQ-WB-29]
+  - id: ACT-IGR-06
+    kind: business-action
+    step: 运行凭据不能导入
+    how: |-
+      用 RUNTOK 调 `POST /v1/import?source=acc-imp3` 带 `X-APA-Grant: <A 的 id>`。
+    expected: |-
+      通过：403，退出码 4。
+      失败：后台运行能导入。
+    requirement_ids: [REQ-IMP-AUTH-PATH]
+  - id: ACT-IGR-07
+    kind: business-action
+    step: CLI 按 500 条分批并沿用批次号
+    how: |-
+      新签一张 acc-imp4、max_records 1200 的导入单；`APA_TOKEN=$DEL apa import --file <1100 条合法事项> --source acc-imp4 --grant <id>`；`GET /v1/imports`。
+    expected: |-
+      通过：CLI 逐行输出 created；GET /imports 只有一个 acc-imp4 批次且 created 为 1100（CLI 分 3 次请求、同一批次号）。
+      失败：产生多个批次或条数不对。
+    requirement_ids: [REQ-WB-29]
+  - id: ACT-IGR-08
+    kind: business-action
+    step: item.progress 可列入授权单并凭单记进展
+    how: |-
+      WEB `POST /v1/settings/grants` 签一张 `actions: ["item.progress"]`、scope 为 acc-home 的单给 DEL；`APA_TOKEN=$DEL apa item progress <acc-home 里本人的事项> --text 进展 --grant <id>`；同一命令对 acc-work 的事项再执行一次。
+    expected: |-
+      通过：签发成功；acc-home 的进展写入，Event 带 grant 与 on_behalf_of；acc-work 的为 23（不在 scope）。
+      失败：item.progress 不能列入授权单，或越出 scope 被放行。
+    requirement_ids: [REQ-WB-19]
+- id: flow-web-import
+  name: 本人在 Web 的设置 › 导入页上传计划文件，先看预检再分批写入，并能查看历次批次；操作记录把一个批次折叠成一行
+  actions:
+  - id: ACT-WIM-01
+    kind: business-action
+    step: 上传、预检、确认、分批写入
+    how: |-
+      浏览器打开"设置 › 导入"（`/settings/import`），填来源名 acc-web，上传一份 700 条（含 2 行不合法）的计划文件。
+    expected: |-
+      通过：先显示预检结果（会新建 698、已存在 0、不合法 2 及原因），此时账本无变化；点确认后逐批显示进度，完成后 GET /imports 有 acc-web 批次 created 698、invalid 2。
+      失败：未经预检直接写入，或无进度。
+    requirement_ids: [REQ-WEB-IMPORT]
+  - id: ACT-WIM-02
+    kind: business-action
+    step: 批次列表与批次明细
+    how: |-
+      在同一页下方看历次导入批次并点开 acc-web 那一批。
+    expected: |-
+      通过：列出来源名、条数、时间、操作者与授权单（ACT-IGR-03 的批次显示授权单 A），最新在前；点开列出这一批写了哪些事项并可跳到事项页。
+      失败：缺列或点不开。
+    requirement_ids: [REQ-WEB-IMPORT]
+  - id: ACT-WIM-03
+    kind: business-action
+    step: 操作记录折叠导入批次
+    how: |-
+      打开"诊断 › 操作记录"。
+    expected: |-
+      通过：acc-web 批次显示为一行"导入 N 条"，可展开看逐条；其余事件照常一条一行。
+      失败：几百条导入事件平铺，或无法展开。
+    requirement_ids: [REQ-WEB-OPSFOLD]
+  - id: ACT-WIM-04
+    kind: business-action
+    step: 事项页对只知日期的条目只显示到日
+    how: |-
+      打开 T-0001 的事项详情。
+    expected: |-
+      通过：precision 为 day 的三条进展与完成转移只显示日期，不显示 12:00 或 18:00；精确时刻的两条进展显示时刻；时间线按 at 先后排列。
+      失败：显示了约定时刻，或顺序按写入顺序。
+    requirement_ids: [REQ-WEB-ITEMDAY, REQ-WEB-OPSFOLD]
+- id: flow-link-material
+  name: 本人或 Agent 把笔记库内文档或网址登记为项目的链接型材料，同一位置只有一条，不合法的位置被拒
+  actions:
+  - id: ACT-LNK-01
+    kind: business-action
+    step: 在 Web 登记笔记库，非法模板被拒
+    how: |-
+      WEB 调用 `PUT /v1/settings/note-vaults`，请求体 `{"vaults": [{"name": "acc-vault", "open_url": "notes://open?vault={vault}&file={path}"}]}`；再分别提交：两个同名库、`open_url` 为 `open?file={path}`（无协议）、以 `javascript:`、`data:`、`vbscript:`、`file:` 开头的模板；用 DEL 调一次合法请求；`APA_TOKEN=$OBS curl $APA_URL/v1/note-vaults`。
+    expected: |-
+      通过：合法请求 200 并记 `policy.changed`；六个非法请求都 400；DEL 被拒（403）；GET /note-vaults 返回 acc-vault 与其 open_url。
+      失败：非法模板被保存，或非 Web 能改。
+    requirement_ids: [REQ-WB-17, REQ-WB-24-VAULTS]
+  - id: ACT-LNK-02
+    kind: business-action
+    step: 登记库内文档与网址两种链接型材料
+    how: |-
+      `APA_TOKEN=$WRK apa material add --link "vault:acc-vault/项目/方案 A.md" --title 方案A --project acc-work`；`APA_TOKEN=$WRK apa material add --link "HTTPS://Example.INVALID/doc" --title 外部文档 --project acc-work --kind minutes`；`APA_TOKEN=$OBS apa material show <第一条 id>`；`GET /v1/materials/<id>`。
+    expected: |-
+      通过：两条都创建（HTTP 201）；第一条 kind 为 reference、`form` 为 `link`、`link` 为原位置、`open_url` 为模板渲染结果且 `{vault}`、`{path}` 各自 URL 编码；第二条位置的协议与主机名已转小写；`apa material show` 对链接型只输出位置与打开地址；记一条内部审计事件。
+      失败：form 不是 link、open_url 编码错误或网址未规范化。
+    requirement_ids: [REQ-WB-27-MATAPI, REQ-WB-30-MAT, REQ-LNK-LOCATION, REQ-WB-14]
+  - id: ACT-LNK-03
+    kind: business-action
+    step: 同一项目同一位置重复登记返回已有的那条
+    how: |-
+      以不同标题与 kind 再登记 `vault:acc-vault/项目/方案 A.md` 到 acc-work；以 `https://example.invalid/doc` 再登记一次；把同一库内位置登记到 acc-home。
+    expected: |-
+      通过：前两次返回已有那条（HTTP 200），标题与 kind 未改；acc-home 新建一条（不同项目可各有一条）。
+      失败：同项目同位置产生第二条，或已有条被改。
+    requirement_ids: [REQ-LNK-RULES, REQ-WB-27-MATAPI]
+  - id: ACT-LNK-04
+    kind: business-action
+    step: 不合法的位置与参数被拒
+    how: |-
+      分别登记：`vault:unknown/a.md`（未登记库）、`/Users/x/a.md`（本机绝对路径）、`file:///tmp/a.md`、`vault:acc-vault/../a.md`、`ftp://example.invalid/a`、`--kind guideline`、不带 --project 且当前目录没有项目映射；用 OBS 登记一条合法位置。
+    expected: |-
+      通过：前七个都被拒（退出码 2）且 why 指出规则；OBS 被拒（退出码 4）。
+      失败：任一被登记。
+    requirement_ids: [REQ-LNK-LOCATION, REQ-LNK-RULES]
+  - id: ACT-LNK-05
+    kind: business-action
+    step: 与事项关联并按关系读出
+    how: |-
+      `APA_TOKEN=$WRK apa item relate <acc-work 的事项> --to <方案A 材料 id>`，关系类型取 basis（§6.3 的类型化关系）；`APA_TOKEN=$OBS apa item show <事项> --json`；`apa item list --q 方案A`。
+    expected: |-
+      通过：事项的材料关系里有 basis → 方案A；全文搜索按标题命中该事项关联或材料；链接型材料没有正文与修订。
+      失败：关联失败或链接型带了正文、修订。
+    requirement_ids: [REQ-LNK-RULES]
+  - id: ACT-LNK-06
+    kind: business-action
+    step: 删除库登记后材料保留，只是不再有打开地址
+    how: |-
+      WEB `PUT /v1/settings/note-vaults` 为空列表；`GET /v1/materials/<方案A id>`；之后恢复 acc-vault 的登记。
+    expected: |-
+      通过：材料仍在，form 为 link、link 不变，没有 open_url。
+      失败：材料被删或报错。
+    requirement_ids: [REQ-LNK-VAULTDEL]
+- id: flow-report-links
+  name: 执行者完成委派时回执里的库内链接自动登记为父事项的产出，库外链接不登记
+  actions:
+  - id: ACT-RPL-01
+    kind: business-action
+    step: done 回执的多个链接，库内的登记为产出
+    how: |-
+      在 acc-work 建一件事项并 `APA_TOKEN=$DEL apa delegate --parent <该事项> --assignee work-host.cli`，得到委派子事项；`APA_TOKEN=$WRK apa report <子事项> --outcome done --summary 完成 --link "vault:acc-vault/产出/报告.md" --link "https://example.invalid/pr/1" --link "vault:acc-vault/产出/附录.md"`；`apa item show <父事项> --json`；`GET /v1/audit/events` 看回执事件。
+    expected: |-
+      通过：回执证据 `link` 为第一个、`links[]` 含全部三个；父事项新增两条 `output` 关系，分别指向新登记的链接型材料"报告.md"与"附录.md"（项目 acc-work、kind reference、标题为文件名），操作者为 system 且 Basis 记策略版本与内置规则；网址没有登记。
+      失败：库内链接未登记、网址被登记或 links[] 缺失。
+    requirement_ids: [REQ-LNK-REPORT, REQ-WB-12]
+  - id: ACT-RPL-02
+    kind: business-action
+    step: 已登记的位置复用，progress 与 blocked 回执不登记
+    how: |-
+      另一委派子事项先 `apa report <子事项> --outcome progress --summary 进行中 --link "vault:acc-vault/产出/草稿.md"`，再 `--outcome blocked --summary 受阻 --link "vault:acc-vault/产出/草稿2.md"`，最后 `--outcome done --summary 完成 --link "vault:acc-vault/产出/报告.md"`。
+    expected: |-
+      通过：草稿与草稿2 没有登记成材料；done 时"报告.md"复用已有材料（材料数不增），父事项多一条 output 关系指向它。
+      失败：progress/blocked 回执登记了材料，或重复建材料。
+    requirement_ids: [REQ-LNK-REPORT]
+  - id: ACT-RPL-03
+    kind: business-action
+    step: 父事项没有项目时不登记
+    how: |-
+      对一件没有项目的事项委派并报 done，带 `vault:acc-vault/x.md`。
+    expected: |-
+      通过：只记在回执证据里，不登记材料、不建关系，回执成功。
+      失败：回执失败或建了材料。
+    requirement_ids: [REQ-LNK-REPORT]
+  - id: ACT-RPL-04
+    kind: business-action
+    step: 本人可在 Web 移除自动建立的产出关系
+    how: |-
+      在 Web 父事项详情的材料区对"报告.md"的产出关系点移除。
+    expected: |-
+      通过：关系移除，材料本身保留，记一条 Event。
+      失败：无法移除或连材料一起删了。
+    requirement_ids: [REQ-LNK-REPORT]
+- id: flow-web-vault-materials
+  name: 本人在 Web 登记笔记库、在材料页与事项详情看到链接型材料并能打开
+  actions:
+  - id: ACT-WVM-01
+    kind: business-action
+    step: 设置 › 笔记库页
+    how: |-
+      浏览器打开"设置 › 笔记库"（`/settings/note-vaults`），新加一行库 acc-vault2 与打开方式模板。
+    expected: |-
+      通过：每个库一行；保存前页面用示例路径渲染出一个打开地址给本人看；保存后 GET /note-vaults 含 acc-vault2；非法模板页面提示并不保存。
+      失败：页面不存在或没有渲染预览。
+    requirement_ids: [REQ-WEB-VAULTS]
+  - id: ACT-WVM-02
+    kind: business-action
+    step: 材料页与项目材料显示链接型
+    how: |-
+      打开 Web 材料页与 acc-work 的项目页材料区，找到"方案A"。
+    expected: |-
+      通过：显示为链接型，带位置与"打开"，打开的地址是 open_url；可在材料页改标题、kind 与标签，位置不可改；网址型的"打开"是网址本身。
+      失败：链接型显示成普通材料，或位置可改。
+    requirement_ids: [REQ-WEB-MATERIALS]
+  - id: ACT-WVM-03
+    kind: business-action
+    step: 事项详情按关系分组列材料
+    how: |-
+      打开 ACT-RPL-01 的父事项与 ACT-LNK-05 的事项详情页。
+    expected: |-
+      通过：材料区按依据、产出、纪要分组；链接型带"打开"；来源区的来源事件链到 `/sources/events/<id>`。
+      失败：不分组或缺"打开"。
+    requirement_ids: [REQ-WEB-MATERIALS, REQ-WEB-RAWLINKS]
+- id: flow-prefill-new
+  name: 外部工具里的一个链接打开预填好的新建页，本人点新建才写入，未登录先登录
+  actions:
+  - id: ACT-PRE-01
+    kind: business-action
+    step: 未登录时先到登录页再回到预填表单
+    how: |-
+      在一个未登录的浏览器打开 `$APA_URL/new?title=买票&body=第一行&project=acc-work&planned_for=2026-12-01&deadline=2026-12-03&link=vault:acc-vault/行程.md`，登录。
+    expected: |-
+      通过：先到登录页，登录后回到新建表单，各字段已填，页头标明"内容由链接预填"；此时账本事项数不变（sqlite3 只读统计前后一致）。
+      失败：未登录直接写入、登录后丢失参数，或打开即写入。
+    requirement_ids: [REQ-WEB-PREFILL]
+  - id: ACT-PRE-02
+    kind: business-action
+    step: 点新建后写入并登记依据材料
+    how: |-
+      在 ACT-PRE-01 的表单点"新建"；查看新事项详情与 `GET /v1/materials`。
+    expected: |-
+      通过：事项创建，planned_for 与 deadline 正确；`vault:acc-vault/行程.md` 被登记为 acc-work 的链接型材料并以 basis 关联到新事项。
+      失败：材料未登记或关系错误。
+    requirement_ids: [REQ-WEB-PREFILL]
+  - id: ACT-PRE-03
+    kind: business-action
+    step: 不合法或无项目的 link 写进正文，超长部分丢弃，项目认不出留空
+    how: |-
+      已登录打开 `/items/new?title=<250 个字符>&body=<4500 个字符>&project=不存在的项目&link=file:///tmp/a.md` 并新建；再打开 `/new?project=<acc-home 的 id>&link=https://example.invalid/x` 但不选项目以外的改动直接新建。
+    expected: |-
+      通过：第一份标题只保留前 200 个字符、正文前 4000 个字符并有提示，项目为空，link 作为一行写在正文末尾、不登记材料；第二份按 id 认出 acc-home 并把网址登记为依据材料。
+      失败：超长被保留、非法位置被登记，或项目认不出时报错。
+    requirement_ids: [REQ-WEB-PREFILL]
+- id: flow-brief-material
+  name: 简报的资料文件按实例窗口带上日程、新增建议、待决策、到期与等待、当天活动与来源原文，早晚两个实例互不影响
+  actions:
+  - id: ACT-BRF-01
+    kind: flow-step
+    step: 准备简报夹具状态与两个实例
+    how: |-
+      负责人：验收执行者，或直接使用 B3 节点交付的固定账本夹具。时机：本流程其他动作前。在实例上造出：
+      两个日历来源（`calendar` 与 `apple-pim-source` config.kind=calendar，TOOL_STUB_BIN 回放）：三天内的日程 C1、C2，其中 C1 有一条改期后的新版本，另有一条最新版本为取消的 C3，还有一条在第 5 天的 C4；
+      建议流里 3 条未处置建议（一条把握低、各带推荐与理由）；2 条 needs_input 事项（一条为 web_only 且初筛未返回）；今天与明天到期、已过期、刚从 waiting 回 open、跟进已到期仍在等、久未推进的事项各一；
+      今天完成的事项与写下的进展各若干；一批导入的历史事件（flow-import-apply 已有）；
+      用户能力包 acc-wb 里一条 `then: digest` 规则作用于 source_type `digest-src`，并在三个 SRC_STUB 来源 `acc-dg-full`、`acc-dg-ex`、`acc-dg-none`（external 分别 full、excerpt、none，source_type digest-src）各产出两条正文 30000 字符的知会事件；
+      建两个 brief 实例：`brief-am`（instruction 写"只写日程与待决策"）与 `brief-pm`（不写 instruction，schedule_days 为 3），运行者为 STUB_HARNESS（读资料文件、把各段原样写回 sections[].body，每节带 title）。
+    expected: |-
+      通过：`apa item list --kind brief` 为空；建议流 3 条；`GET /v1/today` 可见上述到期与等待事项。失败：任一条状态没造出来。
+  - id: ACT-BRF-02
+    kind: business-action
+    step: 资料文件各段与账本一致
+    how: |-
+      在 Web 简报页对 brief-pm 点"立即跑一次"；运行结束后读 STUB_HARNESS 保存的运行目录资料文件。
+    expected: |-
+      通过：schedule 有 C1（只取改期后的最新版）、C2，没有 C3（已取消）与 C4（超出 3 天），每条带标题、起止、地点与来源名；proposals 为 3 条且 pending_total 为 3，每条带推荐、理由与把握低标记；decisions 只有非 web_only 那条；due_waiting 含今天与明天到期、已过期、回 open、跟进到期、久未推进各条；activity 按项目分组且没有导入事件；所有空段为空数组。
+      失败：任一段条目与夹具不一致。
+    requirement_ids: [REQ-BRF-SEGMENTS, REQ-BRF-SCHEDULE]
+  - id: ACT-BRF-03
+    kind: business-action
+    step: 没有日历来源时日程为空，schedule_days 生效
+    how: |-
+      停用两个日历来源后再跑一次 brief-pm；把 brief-pm 的 schedule_days 改为 7 后恢复日历来源再跑；尝试把 schedule_days 设为 15。
+    expected: |-
+      通过：停用后 schedule 为空数组且不报错；7 天时 C4 出现；15 被加载校验拒绝。
+      失败：报错、窗口不变或 15 被接受。
+    requirement_ids: [REQ-BRF-SCHEDULE, REQ-WB-33]
+  - id: ACT-BRF-04
+    kind: business-action
+    step: 两个实例各有自己的窗口与内容要求，知会只进先跑的一份
+    how: |-
+      在 Web 依次对 brief-am、brief-pm 点"立即跑一次"；读两个 brief 事项的 `spec.since`、`spec.until`、`origin` 与两次运行的资料文件；brief-am 的 instruction 文件内容。
+    expected: |-
+      通过：brief-am 是该实例第一份，窗口为 24 小时；brief-pm 的 since 等于它上一份的 until；两个事项的 origin 各记所属实例；acc-dg-* 的知会只出现在 brief-am 的资料里；brief-am 的 instruction 文件是本人写的要求，brief-pm 的是更新后的 default_instruction。
+      失败：两个实例共用窗口，或同一知会进了两份。
+    requirement_ids: [REQ-BRF-WINDOW, REQ-WB-33]
+  - id: ACT-BRF-05
+    kind: business-action
+    step: 来源原文文件按外发范围与字符预算
+    how: |-
+      查看 brief-am 运行目录里 digest 与 proposals 条目给出的原文文件名与文件内容。
+    expected: |-
+      通过：acc-dg-full 的两条各有一个文件，内容是原文、不超过 20000 个字符且文件头写明裁剪量，条目的 material 记同样的数；acc-dg-ex 的是摘录（正文前 500 个字符）；acc-dg-none 没有原文文件；文件只读；全部文件合计不超过 400000 个字符。
+      失败：超出外发范围或预算，或 none 来源有原文文件。
+    requirement_ids: [REQ-BRF-RAW]
+  - id: ACT-BRF-06
+    kind: business-action
+    step: 合计超过 400000 字符时从最旧的条目起只留摘要
+    how: |-
+      让 acc-dg-full 再产出 25 条各 30000 字符的知会，新建一个 brief 实例 brief-big 并跑一次。
+    expected: |-
+      通过：原文文件合计不超过 400000 个字符；被跳过的是最旧的条目，这些条目只留摘要且 material 写明裁剪。
+      失败：超出合计上限，或跳过的是最新的条目。
+    requirement_ids: [REQ-BRF-RAW]
+  - id: ACT-BRF-07
+    kind: business-action
+    step: 结果字段与简报页显示带标题的节
+    how: |-
+      查看 brief-pm 事项的 `spec` 与 Web 简报页；让 STUB_HARNESS 对新的一份只写 period、不写 sections 后退出；打开结构版本 7 夹具副本里一份按 project 分组的旧简报。
+    expected: |-
+      通过：sections 每节有 title（无 project）时运行代转 done，简报页按节标题显示；只写 period 时转 needs_input 并写明缺 `sections[].body`；旧简报原样可读。
+      失败：没有 project 的节被丢弃或判为没写全，或旧简报显示异常。
+    requirement_ids: [REQ-WEB-BRIEF, REQ-WB-33]
+  - id: ACT-BRF-08
+    kind: business-action
+    step: 运行凭据仍不能经 API 读来源事件
+    how: |-
+      在 brief-pm 的运行中，让 STUB_HARNESS 用自己的运行凭据调 `GET /v1/source-events/<acc-dg-full 的事件 id>`。
+    expected: |-
+      通过：403；简报只能经资料文件拿到原文。
+      失败：运行凭据读到原文。
+    requirement_ids: [REQ-WB-26, REQ-BRF-RAW]
+- id: flow-extract-align
+  name: 按会话聚合的消息里的多件事被抽成各自的建议，能对上已有事项的推荐补到，同一件事不重复成建议
+  actions:
+  - id: ACT-XAL-01
+    kind: flow-step
+    step: 准备会话来源与用户能力包规则
+    how: |-
+      负责人：验收执行者。时机：本流程其他动作前。在 `<APA_HOME>/packs/acc-wb/` 放用户能力包（附录 C.5 来源规则）：规则 `chat-extract`（source_type `chat`，`then: extract`）、`chat-np`（source_type `chat-np`，`then: extract`，`prescreen: none`）；重启 `apa serve`。在 Web 登记 SRC_STUB 来源 `acc-chat`（source_type chat）与 `acc-chat-np`（source_type chat-np），外发范围 local=full、external=full。在 acc-work 建一件 open 事项 X1（标题"发布 v2 文档"），供清单命中。CLS_STUB 对 capture-prescreen 配 p_yes=0.95。
+    expected: |-
+      通过：`apa doctor --json` 显示 acc-wb 包已加载无拒绝；两来源各能跑一轮。失败：包被拒绝或来源不运行。
+  - id: ACT-XAL-02
+    kind: business-action
+    step: 一条含两件事的事件抽出两条候选并各归项目
+    how: |-
+      MODEL_STUB 对 triage-extract 用 `two-refs`（候选 A 的 project 为 acc-work、refs [0,1]，attach_to 为 X1；候选 B 的 project 为 acc-home、refs [2]）；acc-chat 的 `$SRC_CASE` 设为 `chat-two-things`；等处理完；`apa source events acc-chat --json` 与 `apa item show <每条建议> --json`。
+    expected: |-
+      通过：事件 disposition 为 proposed，`items[]` 两条、`item` 为第一条；A 在 acc-work 并推荐补到 X1，B 在 acc-home；A 的事项正文是 messages[0]、[1] 两条消息，B 的是 messages[2]。
+      失败：只有一条建议、项目丢失，或正文不是 refs 指到的消息。
+    requirement_ids: [REQ-X-REFS, REQ-WB-32]
+  - id: ACT-XAL-03
+    kind: business-action
+    step: 三步共用同一份清单，且清单有界、按外发范围过滤
+    how: |-
+      查看 ACT-XAL-02 的 MODEL_LOG 与 CLS_LOG：capture-prescreen 与 triage-extract 的结构化输入；再在 acc-work 造 130 件 open 事项并把一件来自 acc-raw-none 的事项设为 open，生成端点位置改为 external 后再跑一次 chat-two-things，看请求；结束后改回 local。
+    expected: |-
+      通过：预筛资料正文后附"未关闭事项"一节，抽取的 open_items 与之是同一份并带活动项目清单；事项多时至多 100 条且写明总数，X1 排在前面；端点为 external 时清单里没有出自 acc-raw-none 的事项。
+      失败：预筛不带清单、超过 100 条，或外发范围为 none 的事项进了外部端点的清单。
+    requirement_ids: [REQ-X-LIST]
+  - id: ACT-XAL-04
+    kind: business-action
+    step: 清单外的目标与项目被丢弃，候选保留
+    how: |-
+      MODEL_STUB 改用 `bad-target`；对 acc-chat 输出一条新的会话事件；等处理完。
+    expected: |-
+      通过：候选照常成为建议；推荐补到作废（建议没有 attach 推荐）；项目为空；不报错，处理经过里没有错误。
+      失败：建议被丢弃、报错，或采纳了清单外的目标。
+    requirement_ids: [REQ-X-CHOICE]
+  - id: ACT-XAL-05
+    kind: business-action
+    step: 同一件事第二次抽出时并入已有建议
+    how: |-
+      不处置 ACT-XAL-02 的建议，`tc_advance 86400`；对 acc-chat 再输出一条事件，消息内容与发送者重复 A 那件事；MODEL_STUB 返回与 A 同标题的候选；等处理完。
+    expected: |-
+      通过：没有新增建议，A 的 proposal.sources[] 多了这条事件，事件的 item 指向 A。
+      失败：同一件事成了两条建议。
+    requirement_ids: [REQ-WB-39]
+  - id: ACT-XAL-06
+    kind: business-action
+    step: prescreen none 跳过预筛且不产生预筛判断记录
+    how: |-
+      清空 CLS_LOG；acc-chat-np 输出 chat-two-things；等处理完；`apa why <生成的建议>`。
+    expected: |-
+      通过：CLS_LOG 与 MODEL_LOG 都没有 capture-prescreen 请求；判断记录里没有预筛一级；抽取照常产出建议。对一段对话增量（STUB_HARNESS 提交）仍有预筛请求。
+      失败：仍预筛，或对话候选捕获跳过了预筛。
+    requirement_ids: [REQ-X-PRESCREEN-NONE]
+  - id: ACT-XAL-07
+    kind: business-action
+    step: 旧的三字段输出仍被接受
+    how: |-
+      MODEL_STUB 改用 `legacy3`；acc-chat 输出一条会话事件。
+    expected: |-
+      通过：候选成为建议，标题、类别、摘要正确，没有推荐与 urgent，不报错。
+      失败：旧输出被判为不符合 schema。
+    requirement_ids: [REQ-WB-32]
+  - id: ACT-XAL-08
+    kind: business-action
+    step: 一条事件至多取 20 条候选
+    how: |-
+      MODEL_STUB 返回 25 条候选；acc-chat 输出一条会话事件。
+    expected: |-
+      通过：只产生 20 条建议。
+      失败：超过 20 条。
+    requirement_ids: [REQ-WB-39]
+  - id: ACT-XAL-09
+    kind: business-action
+    step: 能力包加载拒绝误用
+    how: |-
+      依次在 acc-wb 里：加一个名为 `none` 的提示词模板；给一条 `then: screen` 规则写 `prescreen: none`；给一条 `then: proposed` 规则写 `notify_urgent: true`；每次重启后 `apa doctor --json`，验完撤销。
+    expected: |-
+      通过：三次 acc-wb 都被整包拒绝且原因指出对应字段，同名内置包照常生效。
+      失败：任一误用被加载。
+    requirement_ids: [REQ-WB-31]
+- id: flow-urgent-notify
+  name: 本人开启紧急提醒的规则后，当天必须处理的新建议即时提醒一次；可以等的与模型没答的不提醒，打扰上限与静音照常生效
+  actions:
+  - id: ACT-URG-01
+    kind: flow-step
+    step: 准备紧急提醒规则
+    how: |-
+      负责人：验收执行者。时机：本流程其他动作前。在 acc-wb 加规则 `mail-urgent`（source_type `mail-urgent`，`then: screen`，`notify_urgent: true`，不写 mode）；重启；登记 SRC_STUB 来源 `acc-urg`（source_type mail-urgent，外发范围 full）；CLS_STUB 对 triage-screen 配 p_yes=0.95；渠道 ext CHAN_EXT 与机器人替身在线。
+    expected: |-
+      通过：Web 的自动规则页显示 mail-urgent 为动作类、模式为只观察。失败：规则被当成提醒类或初始为开。
+  - id: ACT-URG-02
+    kind: business-action
+    step: 观察模式只记"本来会提醒"
+    how: |-
+      MODEL_STUB 对 triage-draft 用 `urgent-true`；acc-urg 输出一条事件；等处理完；查 `GET /v1/audit/events?type=rule.observed` 与机器人替身记录。
+    expected: |-
+      通过：生成一条建议且 `proposal.urgent` 为 true；有一条 rule.observed 记"本来会提醒"；没有投递，机器人替身没收到消息。
+      失败：观察模式下产生了投递。
+    requirement_ids: [REQ-URG-RULE, REQ-WB-14, REQ-WB-27-ITEMS]
+  - id: ACT-URG-03
+    kind: business-action
+    step: 切到开后 urgent 为真的提醒一次，事项仍是建议
+    how: |-
+      在 Web 自动规则页把 mail-urgent 切到开（auto）；acc-urg 再输出一条新事件（urgent-true）；等处理完；看机器人替身、`GET /v1/deliveries/today` 与建议状态。
+    expected: |-
+      通过：机器人替身收到一条提醒，内容是标题、摘要、起草理由与指向建议流这一条的 Web 链接；投递不带事项，origin 记来源事件、规则与建议，投递 id 等于建议事项 id；建议仍为 proposed，不计承诺。
+      失败：没有提醒、提醒带了事项，或建议被自动接受。
+    requirement_ids: [REQ-URG-RULE, REQ-URG-DELIVERY]
+  - id: ACT-URG-04
+    kind: business-action
+    step: 可以等的与没给判断的不提醒
+    how: |-
+      MODEL_STUB 依次用 `urgent-false`、`urgent-missing`，再让起草失败（5xx），各对 acc-urg 输出一条新事件。
+    expected: |-
+      通过：三条都成为建议，机器人替身没有新消息，投递数不变。
+      失败：任一条产生提醒。
+    requirement_ids: [REQ-URG-RULE]
+  - id: ACT-URG-05
+    kind: business-action
+    step: 同一条只提醒一次，并入的与已处置的不提醒
+    how: |-
+      让 SRC_STUB 对 ACT-URG-03 的事件输出一条合并键相同的新事件（urgent-true）；再在 Web 处置另一条 urgent 建议后让其来源对象更新一次。
+    expected: |-
+      通过：并入已有建议，没有第二条提醒；已处置的没有提醒。
+      失败：重复提醒。
+    requirement_ids: [REQ-URG-DELIVERY]
+  - id: ACT-URG-06
+    kind: business-action
+    step: 日上限与静音照常生效
+    how: |-
+      WEB `PUT /v1/settings/policy` 把 `disturb.daily_cap` 设为当前已推送数；再对 acc-urg 输出一条 urgent-true 新事件；之后在 Web 静音 acc-urg 来源并恢复日上限，再输出一条。
+    expected: |-
+      通过：两条都不推送到机器人替身，留在 Web 未读提醒里；`GET /v1/deliveries/today` 的 suppressed_daily_cap 与 suppressed_muted 各加 1。
+      失败：超限或静音时仍推送。
+    requirement_ids: [REQ-URG-DELIVERY]
+  - id: ACT-URG-07
+    kind: business-action
+    step: 规则内容变化后回到观察
+    how: |-
+      修改 acc-wb 里 mail-urgent 的匹配条件并重启；看自动规则页的模式。
+    expected: |-
+      通过：模式回到只观察，并记一条 `rule.mode_changed`。
+      失败：仍为开。
+    requirement_ids: [REQ-URG-RULE]
+- id: flow-cli-fields
+  name: CLI 能写截止、来源与扩展字段并读回一致，清空截止会取消截止定时；处置清单可从标准输入给
+  actions:
+  - id: ACT-CLI-01
+    kind: business-action
+    step: 三个标志写入后回读一致
+    how: |-
+      `APA_TOKEN=$WRK apa item add --title t1 --project acc-work --deadline 2026-12-24 --origin '{"source":"acc-cli","ref":"X-1"}' --ext '{"k":1}'`；`apa item show <id> --json`；`APA_TOKEN=$OBS apa propose --title p1 --deadline 2026-12-25T10:00:00+08:00`。
+    expected: |-
+      通过：deadline 为本机时区 2026-12-24T23:59:59；origin 与 ext 与输入一致；建立了截止 Timer；propose 的 deadline 为给定时刻；`apa item list --origin-source acc-cli --origin-ref X-1` 只返回 t1。
+      失败：任一字段不一致或无截止 Timer。
+    requirement_ids: [REQ-WB-30-ITEM]
+  - id: ACT-CLI-02
+    kind: business-action
+    step: 清空截止后定时取消
+    how: |-
+      `APA_TOKEN=$WRK apa item update <t1> --deadline ""`；`apa item show <t1> --json`；`tc_advance` 越过原截止。
+    expected: |-
+      通过：deadline 为空，截止 Timer 已取消，越过原时刻后没有 `item.deadline_passed`。
+      失败：截止仍触发。
+    requirement_ids: [REQ-WB-30-ITEM]
+  - id: ACT-CLI-03
+    kind: business-action
+    step: import 前缀与非法值被拒
+    how: |-
+      `apa item add --title t2 --origin '{"source":"import:x"}'`；`--deadline 2026-13-40`；`--origin '不是 JSON'`。
+    expected: |-
+      通过：三次都退出码 2 且 why 指出字段；没有写入。
+      失败：任一被接受。
+    requirement_ids: [REQ-WB-30-ITEM, REQ-IMP-ORIGIN]
+  - id: ACT-CLI-04
+    kind: business-action
+    step: 处置清单从标准输入读
+    how: |-
+      建议流里有三条建议；`printf '<处置清单 JSON>' | APA_TOKEN=$DEL apa proposals apply --file - --evidence "第一条接受，第二条忽略"`，清单只列第一、二条。
+    expected: |-
+      通过：只动这两条，逐条输出结果，各有 Event 带原话；第三条不变。
+      失败：不支持 `-` 或动了未列出的建议。
+    requirement_ids: [REQ-WB-30-APPLY]
+- id: flow-chat-dispose
+  name: 本人在与 Agent 的私聊里处置建议与记进展，凭原话的代答只在私聊里成立，多人会话一律被拒
+  actions:
+  - id: ACT-CHT-01
+    kind: business-action
+    step: 插件提供三个代答工具及说明
+    how: |-
+      `python3 -m pytest plugins/hermes/tests`；查看 `plugins/hermes/tools/plugin.yaml` 与 `plugins/hermes/tools/README.md`。
+    expected: |-
+      通过：测试通过；注册了 apa_attach、apa_proposals_apply、apa_item_progress，分别调用 `apa attach`、`apa proposals apply --recommended` 或 `--file -`（可按来源、项目收窄）、`apa item progress`；工具说明写明要带本人这一回合的原话、退出码 23 时不换说法重试并告诉本人原因与 Web 链接。
+      失败：缺工具或说明缺上述要求。
+    requirement_ids: [REQ-CHAT-TOOLS]
+  - id: ACT-CHT-02
+    kind: business-action
+    step: 会话类型按五条顺序判定，多人优先
+    how: |-
+      运行 `plugins/hermes/tests` 中 `session_kind` 的用例（STUB_HARNESS 的四种入口加 APA_DIRECT_PLATFORMS 组合）：聊天类型 group/channel/thread；平台与来源为空、cli、tui、local；平台在 `APA_DIRECT_PLATFORMS=acc-own` 里且聊天类型为 dm 或空；同一平台但聊天类型为 group；dm 有发送者；dm 无发送者；取不到。
+    expected: |-
+      通过：依次为 group；direct；direct；group（名单平台加多人仍是 group）；direct；unknown；unknown。不设 APA_DIRECT_PLATFORMS 时名单平台的结果与此前相同。
+      失败：任一顺序错误，特别是名单平台加多人判成 direct。
+    requirement_ids: [REQ-CHAT-KIND, REQ-WB-23]
+  - id: ACT-CHT-03
+    kind: business-action
+    step: 私聊里按推荐批量处理与按清单处理
+    how: |-
+      用 STUB_HARNESS 模拟即时通讯私聊入口（dm 带发送者），经 apa_proposals_apply 以 `--recommended --evidence "按建议处理"` 执行；再以清单模式只列一条忽略执行。
+    expected: |-
+      通过：带推荐的建议各自按推荐处置，每条 Event 的操作者是 Agent、带原话与 session_kind direct；清单模式只动列出的那一条。
+      失败：被拒、缺原话或动了未列出的。
+    requirement_ids: [REQ-CHAT-EVIDENCE]
+  - id: ACT-CHT-04
+    kind: business-action
+    step: 私聊里补到已有事项与记进展
+    how: |-
+      私聊入口下经 apa_attach 把一条建议补到 X1（带原话）；经 apa_item_progress 给本人的事项记一条进展（带原话）；再在不带原话的情况下凭 ACT-IGR-08 的 item.progress 授权单记一条。
+    expected: |-
+      通过：三次都成功；Event 分别带原话或授权单 id。
+      失败：任一被拒。
+    requirement_ids: [REQ-CHAT-EVIDENCE, REQ-WB-19]
+  - id: ACT-CHT-05
+    kind: business-action
+    step: 多人会话里同样的调用被拒
+    how: |-
+      STUB_HARNESS 模拟多人会话入口（聊天类型 group，平台在 APA_DIRECT_PLATFORMS 里），重复 ACT-CHT-03 与 ACT-CHT-04 的凭原话调用。
+    expected: |-
+      通过：每次退出码 23，code 为 `session_not_direct`；账本无变化。
+      失败：任一凭原话的调用成功。
+    requirement_ids: [REQ-CHAT-EVIDENCE, REQ-CHAT-KIND]
+- id: flow-reminder-open
+  name: 指定列表里没有到期日的提醒事项也进建议流，改标题仍是同一条，其他列表行为不变
+  actions:
+  - id: ACT-REM-01
+    kind: business-action
+    step: undated_lists 里的无到期日提醒产出 reminder.open
+    how: |-
+      在 Web 来源页登记 `apple-pim-source`（config.kind=reminders，`undated_lists: ["随手记"]`，PATH 前缀 TOOL_STUB_BIN），case 设为录制样本 `rem-undated`（"随手记"与"工作"两个列表各有一条无到期日提醒，另有一条有到期日的）；等一轮；`apa source events <该来源> --json`。
+    expected: |-
+      通过："随手记"的无到期日提醒为 `reminder.open`，occurred_at 为创建时间，summary 为列表名，关联键为提醒 id；有到期日的仍是 `reminder.due`；"工作"列表的无到期日提醒没有事件。
+      失败：类型错误或其他列表行为改变。
+    requirement_ids: [REQ-WB-37]
+  - id: ACT-REM-02
+    kind: business-action
+    step: 内置规则 reminder-open 直接进建议流
+    how: |-
+      看 ACT-REM-01 的 reminder.open 事件的处置与建议流。
+    expected: |-
+      通过：disposition 为 proposed，命中规则 reminder-open，没有调用模型（CLS_LOG、MODEL_LOG 无新请求）。
+      失败：交初筛或未进建议流。
+    requirement_ids: [REQ-WB-34]
+  - id: ACT-REM-03
+    kind: business-action
+    step: 改标题后回到同一条事项
+    how: |-
+      把 case 换成 `rem-undated-renamed`（同一提醒改了标题）；等一轮；再换成 `rem-undated-dated`（补上到期日）；等一轮。
+    expected: |-
+      通过：两次都按来源对象更新写回原建议，不产生第二条事项；补上到期日后事件类型为 reminder.due，关联键不变。
+      失败：产生第二条事项。
+    requirement_ids: [REQ-WB-37]
+  - id: ACT-REM-04
+    kind: business-action
+    step: 不配 undated_lists 时行为不变
+    how: |-
+      另登记一个不带 undated_lists 的 reminders 来源回放同一 case。
+    expected: |-
+      通过：只有 reminder.due 事件，无 reminder.open。
+      失败：产出 reminder.open。
+    requirement_ids: [REQ-WB-37]
+- id: flow-wb-release
+  name: 工作台迭代收尾：规划标记清零、对照测试严格模式通过、e2e 登记齐全、红线与泄漏扫描通过、用户文档与清单同步
+  actions:
+  - id: ACT-WREL-01
+    kind: business-action
+    step: 对照测试以严格模式通过，规划标记清零
+    how: |-
+      在候选提交的干净检出上 `APA_CONFORMANCE_STRICT=1 go test ./tests/conformance/... ./cli/serve/...`；`grep -rn '规划中（v0.2.0）' docs/appendix-b-api-cli.md docs/appendix-c-capability-pack.md`。
+    expected: |-
+      通过：测试通过；grep 只命中附录 B 开头对规划标记机制的说明，没有任何条目带标记；B.1、B.2、C.14 里为放行而拆出的"已有命令的新增标志/已有路由的新增参数"等行已并回原行。
+      失败：仍有带标记的条目或拆出的行，或严格模式失败。
+    requirement_ids: [REQ-REL-STRICT]
+  - id: ACT-WREL-02
+    kind: business-action
+    step: e2e 包登记齐全且只用替身
+    how: |-
+      `.github/e2e/pkgs.sh check`；对本迭代新增的 e2e 包 `grep -rn` 真实服务地址与浏览器驱动。
+    expected: |-
+      通过：检查通过，新包都在某个 full-*.txt；新包不连真实账号、不调起浏览器。
+      失败：有未登记的包，或依赖真实外部服务。
+    requirement_ids: [REQ-REL-E2E]
+  - id: ACT-WREL-03
+    kind: business-action
+    step: 红线检查与泄漏扫描通过
+    how: |-
+      `go run ./tools/redline`；运行仓库的泄漏扫描测试（覆盖 docs/ 与 .omac/）；评审检查主文档没有具体笔记应用名。
+    expected: |-
+      通过：红线与泄漏扫描都退出码 0；内核不出现笔记应用、邮件工具或宿主名；会话入口识别只在 `plugins/hermes`。
+      失败：任一检查失败。
+    requirement_ids: [REQ-REL-REDLINE, REQ-REL-LEAK]
+  - id: ACT-WREL-04
+    kind: business-action
+    step: 用户文档与清单同步
+    how: |-
+      查看 `docs/user/upgrade.md`、用户文档的变更记录、§20.4 清单与写死行数的发布测试（`go test ./tests/release/...`）、§17.3 退出码表、§21.3。
+    expected: |-
+      通过：upgrade.md 的清单标题与正文为 L1–L24，发布测试通过；变更记录单列必须迁移的条目（至少 WB-25 列表不带全文、WB-26 token 读原文收紧、WB-28 新错误原因、WB-31 名为 none 的模板被拒、WB-34 覆盖包需自加 reminder-open）；§17.3 没有新增行；§21.3 每行第三格保持规定形状。
+      失败：任一不同步。
+    requirement_ids: [REQ-REL-DOCS]
+  - id: ACT-WREL-05
+    kind: business-action
+    step: CI 与全量 e2e 全绿
+    how: |-
+      运行 `.github/workflows/ci.yml` 的步骤（web 构建与单测、`go build ./...`、`go test ./...`、红线）与冒烟 e2e；手动触发 `release` 工作流跑全量 e2e。
+    expected: |-
+      通过：全部退出码 0；没有为变绿而删除或跳过的测试。
+      失败：任一失败。
+    requirement_ids: [REQ-REL-NOREGRESS]
+- id: flow-wb-regression
+  name: 工作台迭代不使 v0.2.0 已有验收与 v0.1 验收项回退
+  actions:
+  - id: ACT-WREG-01
+    kind: business-action
+    step: 重跑 v0.2.0 既有验收
+    how: |-
+      在本迭代候选提交上按 `.omac/apa-v02.acceptance.yaml` 的全部流程逐条执行（其环境即 ACT-WBENV-01）。
+    expected: |-
+      通过：每个 action 达到其 expected；因本迭代有意改变而不再成立的（如列表 detail 改为预览、token 读原文受外发范围约束、抽取候选走合并路径）必须能指出 changes-v0.2.0.md 第十节的条目编号，且该文档已按修订流程同步。
+      失败：任一 action 未通过且没有对应的 WB 条目。
+    requirement_ids: [REQ-REL-NOREGRESS]

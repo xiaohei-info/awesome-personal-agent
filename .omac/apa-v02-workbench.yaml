@@ -1,0 +1,5020 @@
+meta:
+  name: apa-v02-workbench
+  pr_base: main
+  closeout_node: closeout
+  omac_schema: 3
+  plan_id: p-70acf5e3
+  acceptance_required: true
+  plan_scale: standard
+  acceptance_file: apa-v02-workbench.acceptance.yaml
+  source_issues:
+  - 01a1e544-2000-750d-9c83-0401472cc122
+  - 01a1e544-225a-77b1-8b32-0ff70a73da95
+  - 01a1e557-c6de-78d2-931b-e83115a95afb
+nodes:
+- id: schema-v8
+  worker: omac-worker-backend
+  blocked_by: []
+  title: 账本结构版本 8：本迭代全部表与列一次迁移
+  description: 产出 schema-v8-delivery。关键路径第一个节点，必须最先合入。合入前对照 changes-v0.2.0 §10.1 WB-01–WB-08
+    逐条核：来源原文表、来源事件两列（完整程度默认 legacy）、Event 两列、事项导入信息列与 origin 非唯一表达式索引、导入批次与对照两表、材料形态与位置两列（链接型（项目，位置）唯一）、来源登记
+    content_retention_days；附录 B.5 schema.ledger 改为 8。结构版本 7 夹具由 `go run ./tests/fixtures/ledger/cmd/gen
+    -version 7` 生成，带 ≥3 条正文恰好 16384 字节的邮件事件、托管型与自有型材料、带授权单的 Event、一个外部外发范围未选择的 v0.1
+    来源，manifest.json 含 ACT-WBENV-03 列出的全部键，并登记为冻结版本。
+  reviewer: omac-reviewer
+  contract:
+    objective: 一次迁移把账本结构由 7 升到 8，收齐 WB-01–WB-08 的全部表、列与索引（旧行不改写，新列按“没有”读），并交付冻结的结构版本
+      7 合成夹具与 7→8 升级链、失败回滚测试
+    non_goals:
+    - 不实现原文落盘、导入、链接型材料、保留期清除等业务读写；只建结构并保证旧二进制拒绝打开升级后账本
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./kernel/store/...
+    - go test -tags apa_testclock -count=1 ./tests/fixtures/...
+    - go test -count=1 ./kernel/invariants/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: schema-v8-gate
+      layer: L1
+      source_of_truth:
+      - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+      - docs/solution-design.md#165-备份升级回退与卸载
+      - docs/solution-design.md#204-v020发布门槛
+      - docs/appendix-b-api-cli.md#b5-协议与版本
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/solution-design.md#67-event-与-actor
+      delivery_goal: 一次迁移把账本结构由 7 升到 8，收齐 WB-01–WB-08 的全部表、列与索引（旧行不改写，新列按“没有”读），并交付冻结的结构版本
+        7 合成夹具与 7→8 升级链、失败回滚测试
+      covers:
+      - ACT-S8-01
+      - ACT-S8-02
+      - ACT-S8-06
+      - ACT-S8-07
+      acceptance_refs:
+      - flow-wb-schema8-upgrade
+      - flow-wb-env
+      commands:
+      - go test -count=1 ./kernel/store/...
+      - go test -tags apa_testclock -count=1 ./tests/fixtures/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-wb-schema8-upgrade
+      action_ids:
+      - ACT-S8-01
+      - ACT-S8-02
+      - ACT-S8-06
+      - ACT-S8-07
+    acceptance_refs:
+    - flow-wb-schema8-upgrade
+    - flow-wb-env
+    source_of_truth:
+    - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    - docs/solution-design.md#165-备份升级回退与卸载
+    - docs/solution-design.md#204-v020发布门槛
+    - docs/appendix-b-api-cli.md#b5-协议与版本
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/solution-design.md#67-event-与-actor
+    - docs/solution-design.md#63-item事项
+    - docs/solution-design.md#66-materialrevisionguideline
+    - docs/solution-design.md#615-物理删除与保留
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#2-依赖关键路径与并行
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    scope_paths:
+    - kernel/store/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: schema-v8-delivery
+      provides:
+      - id: ledger-v8-tables
+        ref: docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+      - id: ledger-fixture-v7
+        ref: docs/solution-design.md#204-v020发布门槛
+      - id: migration-chain-v8
+        ref: docs/solution-design.md#165-备份升级回退与卸载
+    consumes: []
+    requirement_refs:
+    - REQ-WB-ENV-FX7
+    coverage_gate: 80
+- id: source-htmltext
+  worker: omac-worker-backend-oracle
+  blocked_by: []
+  title: 来源程序共用内容包：HTML 转文本、信头规范化、按字节分批
+  description: 产出 source-htmltext-delivery。包放在 sources/ 一侧（sources/internal/ 下），内核不得
+    import（红线检查覆盖）；新增依赖与 §18 的选型记录同一 PR，写明许可证。按字节分批：累计输出接近 max_source_output_mb 的四分之三时停下、游标停在已输出的最后一条（REQ-WB-36-BATCH，由各来源节点调用）。
+  reviewer: omac-reviewer
+  contract:
+    objective: 交付来源程序共用的内容包：HTML 转文本（链接保留地址，列表、引用、表格保留结构，不执行脚本、不取远程资源，失败返回明确错误供调用方标
+      partial）、信头规范化与按字节分批工具，并把选定的库与理由写回设计 §18
+    non_goals:
+    - 不改任何具体来源程序（source-applepim-raw、source-himalaya-raw、source-github-raw、source-rss-raw
+      等来源节点负责）
+    - HTML 转文本不进 kernel/
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./sources/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: source-htmltext-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/solution-design.md#18-技术选型
+      - docs/solution-design.md#92-执行契约
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#1-节点一览
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#5-其他提醒
+      - AGENTS.md#红线检查
+      delivery_goal: 交付来源程序共用的内容包：HTML 转文本（链接保留地址，列表、引用、表格保留结构，不执行脚本、不取远程资源，失败返回明确错误供调用方标
+        partial）、信头规范化与按字节分批工具，并把选定的库与理由写回设计 §18
+      covers:
+      - ACT-OAD-05
+      acceptance_refs:
+      - flow-other-adapters-raw
+      - flow-mail-adapters-raw
+      commands:
+      - go test -count=1 ./sources/...
+      - go run ./tools/redline
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-other-adapters-raw
+      action_ids:
+      - ACT-OAD-05
+    acceptance_refs:
+    - flow-other-adapters-raw
+    - flow-mail-adapters-raw
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/solution-design.md#18-技术选型
+    - docs/solution-design.md#92-执行契约
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#1-节点一览
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#5-其他提醒
+    - AGENTS.md#红线检查
+    scope_paths:
+    - sources/internal/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: source-htmltext-delivery
+      provides:
+      - id: html-to-text
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - id: header-normalize
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - id: byte-batching
+        ref: docs/solution-design.md#92-执行契约
+    consumes: []
+    coverage_gate: 80
+- id: grant-import
+  worker: omac-worker-backend
+  blocked_by: []
+  title: 授权单：导入专用单、只接受授权单的判定、item.progress 可授权
+  description: 产出 grant-import-delivery。订正 WB-19：附录 B.1 已把 item.progress 列为可用授权单，实现放行它；已签发的单内容不变、不多出权限。条数扣减接口供
+    import-apply 调用（预检不扣）。凭单记进展越出 scope 返回 23。
+  reviewer: omac-reviewer
+  contract:
+    objective: 授权单支持导入专用单（actions 只有 import.apply、必须带 import{source,max_records} 与不超过
+      7 天的有效期、不能 background、不与其他动作同单）、第二档“只接受授权单”的判定与条数原子扣减接口，并把 item.progress 列入可授权动作，经
+      Web 的 POST /settings/grants 签发
+    non_goals:
+    - 不实现 import.apply 本身（import-apply）
+    - 不放行 delegate.dispatch 等其他订正动作
+    - 不改已签发授权单的内容
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/policy/... ./kernel/authz/...
+    - go test -count=1 ./api/settings/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: grant-import-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#613-配置记录
+      - docs/changes-v0.2.0.md#103-配置策略与授权
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/appendix-b-api-cli.md#b3-错误响应
+      delivery_goal: 授权单支持导入专用单（actions 只有 import.apply、必须带 import{source,max_records}
+        与不超过 7 天的有效期、不能 background、不与其他动作同单）、第二档“只接受授权单”的判定与条数原子扣减接口，并把 item.progress
+        列入可授权动作，经 Web 的 POST /settings/grants 签发
+      covers:
+      - ACT-IGR-01
+      - ACT-IGR-08
+      acceptance_refs:
+      - flow-import-grant
+      - flow-chat-dispose
+      commands:
+      - go test -count=1 ./kernel/policy/... ./kernel/authz/...
+      - go test -count=1 ./api/settings/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-import-grant
+      action_ids:
+      - ACT-IGR-01
+      - ACT-IGR-08
+    acceptance_refs:
+    - flow-import-grant
+    - flow-chat-dispose
+    source_of_truth:
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#613-配置记录
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b3-错误响应
+    - docs/solution-design.md#173-退出码
+    scope_paths:
+    - kernel/policy/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: grant-import-delivery
+      provides:
+      - id: import-grant
+        ref: docs/solution-design.md#145-代理授权
+      - id: grant-only-gate
+        ref: docs/solution-design.md#145-代理授权
+      - id: progress-grantable
+        ref: docs/appendix-b-api-cli.md#b1-cli
+    consumes: []
+    coverage_gate: 80
+- id: extract-align
+  worker: omac-worker-backend-oracle
+  blocked_by: []
+  title: 抽取与起草对齐：共用清单、同组字段与 refs、候选走合并路径、prescreen none
+  description: '产出 extract-align-delivery。入站流水线主文件按 extract-align → urgent-notify
+    → material-budget 依次修改，本节点最先。模型只能从清单选：清单外 project 不归项目、清单外 attach_to 使推荐作废而候选保留，都不报错；只给
+    title/kind/summary 的旧输出仍被接受；对话候选捕获始终预筛。名为 none 的用户模板与 then 非 extract 的 prescreen:
+    none 加载被拒；notify_urgent 的加载校验在 urgent-notify。'
+  reviewer: omac-reviewer
+  contract:
+    objective: '预筛、起草、抽取共用一份有界清单（活动项目与至多 100 条按相关度排序的未关闭事项，截掉时写明总数，按外发范围过滤），抽取候选与起草同一组字段并加
+      refs，候选走合并路径（合并键取规范化标题加发送者、一条事件至多 20 条），支持 prescreen: none 与对应加载校验，内置模板同步更新'
+    non_goals:
+    - 不做紧急判断与提醒（urgent-notify）、资料预算裁剪（material-budget）
+    - 不改对话捕获始终预筛的行为
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/inbound/...
+    - go test -count=1 ./kernel/packs/... ./packs/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: extract-align-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#93-事件到事项
+      - docs/solution-design.md#84-输入输出契约
+      - docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+      - docs/appendix-c-capability-pack.md#c7-提示词模板
+      - docs/appendix-c-capability-pack.md#c11-加载与校验
+      - docs/changes-v0.2.0.md#106-能力包与来源程序
+      delivery_goal: '预筛、起草、抽取共用一份有界清单（活动项目与至多 100 条按相关度排序的未关闭事项，截掉时写明总数，按外发范围过滤），抽取候选与起草同一组字段并加
+        refs，候选走合并路径（合并键取规范化标题加发送者、一条事件至多 20 条），支持 prescreen: none 与对应加载校验，内置模板同步更新'
+      covers:
+      - ACT-XAL-02
+      - ACT-XAL-03
+      - ACT-XAL-04
+      - ACT-XAL-05
+      - ACT-XAL-06
+      - ACT-XAL-07
+      - ACT-XAL-08
+      acceptance_refs:
+      - flow-extract-align
+      commands:
+      - go test -count=1 ./kernel/inbound/...
+      - go test -count=1 ./kernel/packs/... ./packs/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-extract-align
+      action_ids:
+      - ACT-XAL-02
+      - ACT-XAL-03
+      - ACT-XAL-04
+      - ACT-XAL-05
+      - ACT-XAL-06
+      - ACT-XAL-07
+      - ACT-XAL-08
+    acceptance_refs:
+    - flow-extract-align
+    source_of_truth:
+    - docs/solution-design.md#93-事件到事项
+    - docs/solution-design.md#84-输入输出契约
+    - docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+    - docs/appendix-c-capability-pack.md#c7-提示词模板
+    - docs/appendix-c-capability-pack.md#c11-加载与校验
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    - docs/changes-v0.2.0.md#107-行为变化
+    - docs/changes-v0.2.0.md#109-与需求分析不一致的地方
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#21-会撞文件的地方依赖边里已经排开请不要并行
+    scope_paths:
+    - kernel/inbound/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: extract-align-delivery
+      provides:
+      - id: shared-open-items-list
+        ref: docs/solution-design.md#93-事件到事项
+      - id: extract-output-v2
+        ref: docs/appendix-c-capability-pack.md#c7-提示词模板
+      - id: prescreen-none
+        ref: docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+    consumes: []
+    coverage_gate: 80
+- id: cli-fields
+  worker: omac-worker-backend
+  blocked_by: []
+  title: CLI 字段补齐：--deadline/--origin/--ext 与 proposals apply --file -
+  description: '产出 cli-fields-delivery。全流程 owner：flow-cli-fields。日期形式的 --deadline
+    取本机当天 23:59:59；非法日期与非 JSON 的 --origin/--ext 按附录 B.3 报错。import: 前缀在内核事项写入命令处拒绝（CLI
+    与 API 同一校验，REQ-IMP-ORIGIN 的写入侧），import-apply 的导入写入是唯一例外。本节点是 flow-cli-fields 的全流程
+    owner，门槛用测试构建的 CLI 对真实 apa serve 执行。'
+  reviewer: omac-reviewer
+  contract:
+    objective: 'apa item add/update 与 apa propose 支持 --deadline/--origin/--ext（update
+      空串清除截止并取消截止定时），apa proposals apply --file - 从标准输入读处置清单并逐条输出，普通写入拒绝 import: 前缀的
+      origin.source'
+    non_goals:
+    - 不实现 import.apply 与 apa item list 的 origin 筛选（import-apply）
+    - 不改 proposals apply 的处置语义
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./cli/items/...
+    - go test -count=1 ./kernel/items/... ./api/items/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: cli-fields-gate
+      layer: L2
+      source_of_truth:
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b3-错误响应
+      - docs/changes-v0.2.0.md#105-cli
+      - docs/solution-design.md#71-事项中心
+      - docs/solution-design.md#68-timer
+      delivery_goal: 'apa item add/update 与 apa propose 支持 --deadline/--origin/--ext（update
+        空串清除截止并取消截止定时），apa proposals apply --file - 从标准输入读处置清单并逐条输出，普通写入拒绝 import:
+        前缀的 origin.source'
+      covers:
+      - ACT-CLI-01
+      - ACT-CLI-02
+      - ACT-CLI-03
+      - ACT-CLI-04
+      acceptance_refs:
+      - flow-cli-fields
+      commands:
+      - go test -count=1 ./cli/items/...
+      - go test -count=1 ./kernel/items/... ./api/items/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-cli-fields
+    acceptance_contributions:
+    - flow_id: flow-cli-fields
+      action_ids:
+      - ACT-CLI-01
+      - ACT-CLI-02
+      - ACT-CLI-03
+      - ACT-CLI-04
+    acceptance_refs:
+    - flow-cli-fields
+    source_of_truth:
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b3-错误响应
+    - docs/changes-v0.2.0.md#105-cli
+    - docs/solution-design.md#71-事项中心
+    - docs/solution-design.md#68-timer
+    scope_paths:
+    - cli/items/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: cli-fields-delivery
+      provides:
+      - id: item-cli-v2-flags
+        ref: docs/appendix-b-api-cli.md#b1-cli
+      - id: proposals-apply-file
+        ref: docs/appendix-b-api-cli.md#b1-cli
+      - id: import-origin-reserved
+        ref: docs/solution-design.md#71-事项中心
+    consumes: []
+    coverage_gate: 80
+- id: doubles-srcstub
+  worker: omac-worker-backend-oracle
+  blocked_by: []
+  title: 桩来源脚本 SRC_STUB（含 fetch 模式）
+  description: 产出 doubles-srcstub-delivery。OMAC-NOTES 把桩来源脚本放在 R10；为让 e2e-inbound-align
+    与各原文 e2e 节点并行，这里提前为独立节点（位置仍在 tests/doubles/，ACT-WBENV-02 的用法不变）。输出字段按 §9.2 执行契约与附录
+    D.8：original、headers、attachments（每项带 ref）、messages（每条带 sender）、content.state partial
+    与 missing。
+  reviewer: omac-reviewer
+  contract:
+    objective: '交付桩来源脚本 SRC_STUB（tests/doubles/ 下可构建的命令）：读 $SRC_CASE 输出标准事件 JSONL，内置
+      ACT-WBENV-02 列出的 big-body、mail-like、chat-two-things、oversize-mid、partial、too-many-msgs、chat-long、mid-body
+      等 case（可追加），以 fetch 为唯一参数时按 stdin 的 attachment.ref 回固定字节（可配失败与超过 32 MiB），并附带写
+      content.attachments: fetch 与不写 content 段的两份接入声明'
+    non_goals:
+    - 不改内核与其他替身
+    - 替身不进发布构建
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./tests/doubles/srcstub/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: doubles-srcstub-gate
+      layer: L1
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/solution-design.md#92-执行契约
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      delivery_goal: '交付桩来源脚本 SRC_STUB（tests/doubles/ 下可构建的命令）：读 $SRC_CASE 输出标准事件
+        JSONL，内置 ACT-WBENV-02 列出的 big-body、mail-like、chat-two-things、oversize-mid、partial、too-many-msgs、chat-long、mid-body
+        等 case（可追加），以 fetch 为唯一参数时按 stdin 的 attachment.ref 回固定字节（可配失败与超过 32 MiB），并附带写
+        content.attachments: fetch 与不写 content 段的两份接入声明'
+      covers:
+      - REQ-WB-ENV-SRCSTUB
+      acceptance_refs:
+      - flow-wb-env
+      - flow-raw-full-ingest
+      - flow-raw-limits
+      - flow-attachment-fetch
+      - flow-extract-align
+      commands:
+      - go test -count=1 ./tests/doubles/srcstub/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-wb-env
+    - flow-raw-full-ingest
+    - flow-raw-limits
+    - flow-attachment-fetch
+    - flow-extract-align
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/solution-design.md#92-执行契约
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    scope_paths:
+    - tests/doubles/srcstub/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: doubles-srcstub-delivery
+      provides:
+      - id: src-stub-cases
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - id: src-stub-fetch
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    consumes: []
+    requirement_refs:
+    - REQ-WB-ENV-SRCSTUB
+    coverage_gate: 80
+- id: doubles-modelstub
+  worker: omac-worker-backend
+  blocked_by: []
+  title: 对话端点替身 MODEL_STUB：工作台脚本样例与请求体记录
+  description: 产出 doubles-modelstub-delivery。已有 modelstub 支持 rules/queue 匹配；本节点补齐
+    ACT-WBENV-04 需要的脚本样例与完整请求体记录，保持现有 e2e 包的用法不变。
+  reviewer: omac-reviewer
+  contract:
+    objective: MODEL_STUB 能按 $MODEL_CASES 的匹配键为 triage-extract 返回 two-refs、bad-target、legacy3
+      与 25 条候选，为 triage-draft 返回 urgent-true/urgent-false/urgent-missing，并在 MODEL_LOG
+      完整记录请求体（含 open_items 清单与资料正文）
+    non_goals:
+    - 不改分类端点替身的判断协议行为
+    - 不改已有 e2e 包
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./tests/doubles/modelstub/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: doubles-modelstub-gate
+      layer: L1
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/appendix-c-capability-pack.md#c7-提示词模板
+      delivery_goal: MODEL_STUB 能按 $MODEL_CASES 的匹配键为 triage-extract 返回 two-refs、bad-target、legacy3
+        与 25 条候选，为 triage-draft 返回 urgent-true/urgent-false/urgent-missing，并在 MODEL_LOG
+        完整记录请求体（含 open_items 清单与资料正文）
+      covers:
+      - REQ-WB-ENV-MODEL
+      acceptance_refs:
+      - flow-wb-env
+      - flow-extract-align
+      - flow-urgent-notify
+      - flow-material-budget
+      commands:
+      - go test -count=1 ./tests/doubles/modelstub/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-wb-env
+    - flow-extract-align
+    - flow-urgent-notify
+    - flow-material-budget
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/appendix-c-capability-pack.md#c7-提示词模板
+    scope_paths:
+    - tests/doubles/modelstub/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: doubles-modelstub-delivery
+      provides:
+      - id: model-stub-wb-scripts
+        ref: docs/appendix-c-capability-pack.md#c7-提示词模板
+      - id: model-stub-request-log
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes: []
+    requirement_refs:
+    - REQ-WB-ENV-MODEL
+    coverage_gate: 80
+- id: doubles-harness
+  worker: omac-worker-backend-oracle
+  blocked_by: []
+  title: STUB_HARNESS 增强：多链接回执、简报资料读写、四种会话入口
+  description: 产出 doubles-harness-delivery。供 e2e-link-material、e2e-brief、e2e-chat-dispose、e2e-import
+    使用；旧开关行为不变。
+  reviewer: omac-reviewer
+  contract:
+    objective: STUB_HARNESS 按开关发带多个 --link 的回执；读取简报运行目录的资料文件与原文文件并按开关写回 sections（含只写
+      period 的变体）、保存读到的文件；按环境变量模拟终端、私聊、多人会话与名单平台四种入口
+    non_goals:
+    - 不改 plugins/hermes 与内核
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./tests/doubles/stubharness/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: doubles-harness-gate
+      layer: L1
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/solution-design.md#75-任务委派
+      - docs/appendix-c-capability-pack.md#c13-示例简报包
+      - docs/appendix-a-harness.md#a5-插件组合参考
+      delivery_goal: STUB_HARNESS 按开关发带多个 --link 的回执；读取简报运行目录的资料文件与原文文件并按开关写回 sections（含只写
+        period 的变体）、保存读到的文件；按环境变量模拟终端、私聊、多人会话与名单平台四种入口
+      covers:
+      - REQ-WB-ENV-HARNESS
+      acceptance_refs:
+      - flow-wb-env
+      - flow-report-links
+      - flow-brief-material
+      - flow-chat-dispose
+      - flow-import-no-automation
+      commands:
+      - go test -count=1 ./tests/doubles/stubharness/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-wb-env
+    - flow-report-links
+    - flow-brief-material
+    - flow-chat-dispose
+    - flow-import-no-automation
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/solution-design.md#75-任务委派
+    - docs/appendix-c-capability-pack.md#c13-示例简报包
+    - docs/appendix-a-harness.md#a5-插件组合参考
+    scope_paths:
+    - tests/doubles/stubharness/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: doubles-harness-delivery
+      provides:
+      - id: harness-multi-link-report
+        ref: docs/solution-design.md#75-任务委派
+      - id: harness-brief-files
+        ref: docs/appendix-c-capability-pack.md#c13-示例简报包
+      - id: harness-session-entries
+        ref: docs/appendix-a-harness.md#a5-插件组合参考
+    consumes: []
+    requirement_refs:
+    - REQ-WB-ENV-HARNESS
+    coverage_gate: 80
+- id: web-brief-sections
+  worker: omac-worker-frontend
+  blocked_by: []
+  title: Web：简报页按带标题的节显示
+  description: 产出 web-brief-sections-delivery。只依赖附录 C.13 的 result_fields 契约，用组件测试覆盖新旧两种结果；后端结果字段与运行代转在
+    brief-material，ACT-BRF-07 由它负责。web-raw-trace 之后会在本页知会条目加原文链接。
+  reviewer: omac-reviewer
+  contract:
+    objective: 简报页按带 title 的节显示（没有 project 的节不丢），已有按 project 分组的旧简报原样可读（REQ-WEB-BRIEF）
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/briefs
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    integration_gates:
+    - name: web-brief-sections-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-c-capability-pack.md#c13-示例简报包
+      - docs/changes-v0.2.0.md#106-能力包与来源程序
+      - docs/solution-design.md#73-主动服务
+      delivery_goal: 简报页按带 title 的节显示（没有 project 的节不丢），已有按 project 分组的旧简报原样可读（REQ-WEB-BRIEF）
+      covers:
+      - flow-brief-material
+      acceptance_refs:
+      - flow-brief-material
+      commands:
+      - npm --prefix web run test -- --run src/features/briefs
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-brief-material
+    source_of_truth:
+    - docs/appendix-c-capability-pack.md#c13-示例简报包
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    - docs/solution-design.md#73-主动服务
+    scope_paths:
+    - web/src/features/briefs/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-brief-sections-delivery
+      provides:
+      - id: brief-sections-view
+        ref: docs/appendix-c-capability-pack.md#c13-示例简报包
+    consumes: []
+    coverage_gate: 70
+- id: raw-ingest
+  worker: omac-worker-backend
+  blocked_by:
+  - schema-v8
+  title: 来源原文完整落盘与入账上限
+  description: 产出 raw-ingest-delivery。不变量：入账路径上没有任何“截到 N 个字符”的代码（§6.14 第 18 条）。新增运行配置
+    max_source_event_mb（默认 16）与 max_webhook_body_mb（默认 1，等于此前写死值）。为 raw-read-api 等提供内核读取函数（按部分、清单、legacy
+    兜底）。
+  reviewer: omac-reviewer
+  contract:
+    objective: 解析执行契约的 original/headers/attachments/messages/content 字段，与事件行同一事务按部分完整落盘（媒体类型、字节数、sha256、完整程度
+      full/partial），事件行只留 2000 字符预览；单条超 max_source_event_mb 整条拒收（event_too_large）、聚合消息超
+      200 条拒收、stdout 超 max_source_output_mb 时上限内落盘游标不动；字段映射 webhook 的请求体进 original
+      并受 max_webhook_body_mb 约束；读取先原文表后旧列
+    non_goals:
+    - 结构变更只经 schema-v8；本节点若仍需改结构，在 PR 说明写明并另起新迁移（结构版本 8 首次被真实账本应用后冻结，§16.5）
+    - 不做 HTTP 读取路由与列表瘦身（raw-read-api）、保留期与物理删除（raw-retention-purge）、附件取回（attachment-fetch）
+    - 不改各来源程序
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/sources/... ./kernel/webhook/...
+    - go test -count=1 ./kernel/config/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: raw-ingest-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/solution-design.md#92-执行契约
+      - docs/solution-design.md#95-webhook-接收
+      - docs/solution-design.md#614-不变量
+      - docs/solution-design.md#162-数据目录
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      delivery_goal: 解析执行契约的 original/headers/attachments/messages/content 字段，与事件行同一事务按部分完整落盘（媒体类型、字节数、sha256、完整程度
+        full/partial），事件行只留 2000 字符预览；单条超 max_source_event_mb 整条拒收（event_too_large）、聚合消息超
+        200 条拒收、stdout 超 max_source_output_mb 时上限内落盘游标不动；字段映射 webhook 的请求体进 original
+        并受 max_webhook_body_mb 约束；读取先原文表后旧列
+      covers:
+      - ACT-RAW-01
+      - ACT-RAW-02
+      - ACT-RAW-03
+      - ACT-RLIM-02
+      - ACT-RLIM-03
+      - ACT-RLIM-04
+      - ACT-WHK-01
+      - ACT-WHK-02
+      acceptance_refs:
+      - flow-raw-full-ingest
+      - flow-raw-limits
+      - flow-raw-webhook
+      commands:
+      - go test -count=1 ./kernel/sources/... ./kernel/webhook/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-raw-full-ingest
+      action_ids:
+      - ACT-RAW-01
+      - ACT-RAW-02
+      - ACT-RAW-03
+    - flow_id: flow-raw-limits
+      action_ids:
+      - ACT-RLIM-02
+      - ACT-RLIM-03
+      - ACT-RLIM-04
+    - flow_id: flow-raw-webhook
+      action_ids:
+      - ACT-WHK-01
+      - ACT-WHK-02
+    acceptance_refs:
+    - flow-raw-full-ingest
+    - flow-raw-limits
+    - flow-raw-webhook
+    source_of_truth:
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/solution-design.md#92-执行契约
+    - docs/solution-design.md#95-webhook-接收
+    - docs/solution-design.md#614-不变量
+    - docs/solution-design.md#162-数据目录
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    scope_paths:
+    - kernel/sources/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: raw-ingest-delivery
+      provides:
+      - id: raw-content-store
+        ref: docs/solution-design.md#610-source-登记来源事件ingest
+      - id: raw-limits
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - id: webhook-original
+        ref: docs/solution-design.md#95-webhook-接收
+      - id: raw-read-compat
+        ref: docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    consumes:
+    - artifact_id: schema-v8-delivery
+      producer: schema-v8
+      evidence_mode: artifact
+      requires:
+      - ledger-v8-tables
+      - ledger-fixture-v7
+      - migration-chain-v8
+    coverage_gate: 80
+- id: eventlog-live-read
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - schema-v8
+  title: 事件日志的“现场”读法与导入标记
+  description: '产出 eventlog-live-read-delivery。内核没有统一分发点（changes §10.9 #1），逐个订阅方改调用：PR
+    说明列出改过的每个订阅方及其测试，e2e-import 按这份清单逐个断言。之后新增的事件读取方默认用“现场”读法。'
+  reviewer: omac-reviewer
+  contract:
+    objective: Event 的 imported/recorded_at 两列读写；事件日志提供全量与“现场”两种读法，规则、触达、跟进、摘要、注入增量、统计、对外事件流、提交后回调全部改用“现场”读法；GET
+      /audit/events 返回新字段并支持 imported 筛选；久未推进取导入时刻与最后一次非导入变更较晚者起算
+    non_goals:
+    - 结构变更只经 schema-v8；本节点若仍需改结构，在 PR 说明写明并另起新迁移（结构版本 8 首次被真实账本应用后冻结，§16.5）
+    - 不实现 import.apply 与批次（import-apply）
+    - 不改已有 Event 载荷
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/eventlog/... ./kernel/eventfeed/... ./kernel/rules/...
+      ./kernel/delivery/...
+    - go test -count=1 ./kernel/proactive/... ./kernel/summaries/... ./kernel/context/...
+    - go test -count=1 ./api/events/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: eventlog-live-read-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#67-event-与-actor
+      - docs/solution-design.md#71-事项中心
+      - docs/solution-design.md#73-主动服务
+      - docs/appendix-b-api-cli.md#b4-标准事件类型
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+      delivery_goal: Event 的 imported/recorded_at 两列读写；事件日志提供全量与“现场”两种读法，规则、触达、跟进、摘要、注入增量、统计、对外事件流、提交后回调全部改用“现场”读法；GET
+        /audit/events 返回新字段并支持 imported 筛选；久未推进取导入时刻与最后一次非导入变更较晚者起算
+      covers:
+      - ACT-INA-01
+      - ACT-INA-02
+      - ACT-INA-04
+      acceptance_refs:
+      - flow-import-no-automation
+      - flow-import-apply
+      commands:
+      - go test -count=1 ./kernel/eventlog/... ./kernel/eventfeed/...
+      - go test -count=1 ./api/events/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-import-no-automation
+      action_ids:
+      - ACT-INA-01
+      - ACT-INA-02
+      - ACT-INA-04
+    acceptance_refs:
+    - flow-import-no-automation
+    - flow-import-apply
+    source_of_truth:
+    - docs/solution-design.md#67-event-与-actor
+    - docs/solution-design.md#71-事项中心
+    - docs/solution-design.md#73-主动服务
+    - docs/appendix-b-api-cli.md#b4-标准事件类型
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/changes-v0.2.0.md#107-行为变化
+    - docs/changes-v0.2.0.md#109-与需求分析不一致的地方
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#5-其他提醒
+    scope_paths:
+    - kernel/eventlog/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: eventlog-live-read-delivery
+      provides:
+      - id: eventlog-live-reader
+        ref: docs/changes-v0.2.0.md#109-与需求分析不一致的地方
+      - id: imported-envelope
+        ref: docs/appendix-b-api-cli.md#b4-标准事件类型
+      - id: stale-from-import
+        ref: docs/solution-design.md#73-主动服务
+    consumes:
+    - artifact_id: schema-v8-delivery
+      producer: schema-v8
+      evidence_mode: artifact
+      requires:
+      - ledger-v8-tables
+      - ledger-fixture-v7
+      - migration-chain-v8
+    coverage_gate: 80
+- id: link-material
+  worker: omac-worker-backend
+  blocked_by:
+  - schema-v8
+  title: 链接型材料、笔记库登记与回执链接自动登记
+  description: 产出 link-material-delivery。位置只接受 vault:<已登记库名>/<相对路径> 或 http(s) 网址（REQ-LNK-LOCATION），open_url
+    渲染时 {vault}、{path} 各自 URL 编码；删除库登记后材料保留但无 open_url。ACT-RPL-04 的接口侧（移除关系保留材料、记
+    Event）在本节点，Web 按钮在 items-web。策略文件与 grant-import 同改 kernel/policy，各改不同段。
+  reviewer: omac-reviewer
+  contract:
+    objective: material.link 命令与材料的形态/位置字段（已有材料按原规则推定 hosted/owned、不改写），POST /materials
+      的 link 分支与 apa material add --link；策略 note_vaults 与 GET /note-vaults、GET/PUT
+      /settings/note-vaults（只 Web 登录、整体替换、记 policy.changed）；回执 links[] 多链接，done 回执里落在已登记库内的链接同事务登记为父事项的
+      output
+    non_goals:
+    - 结构变更只经 schema-v8；本节点若仍需改结构，在 PR 说明写明并另起新迁移（结构版本 8 首次被真实账本应用后冻结，§16.5）
+    - 不做 Web 页面（web-vaults-page、web-link-materials、items-web）
+    - 不做笔记库文档预览或文件存在检查（REQ-NOT-VAULTPREVIEW）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/materials/... ./kernel/policy/... ./kernel/delegation/...
+    - go test -count=1 ./api/materials/... ./api/settings/... ./cli/materials/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: link-material-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#128-链接型材料与笔记库
+      - docs/solution-design.md#66-materialrevisionguideline
+      - docs/solution-design.md#75-任务委派
+      - docs/solution-design.md#613-配置记录
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: material.link 命令与材料的形态/位置字段（已有材料按原规则推定 hosted/owned、不改写），POST
+        /materials 的 link 分支与 apa material add --link；策略 note_vaults 与 GET /note-vaults、GET/PUT
+        /settings/note-vaults（只 Web 登录、整体替换、记 policy.changed）；回执 links[] 多链接，done
+        回执里落在已登记库内的链接同事务登记为父事项的 output
+      covers:
+      - ACT-LNK-01
+      - ACT-LNK-02
+      - ACT-LNK-03
+      - ACT-LNK-04
+      - ACT-LNK-05
+      - ACT-LNK-06
+      - ACT-RPL-01
+      - ACT-RPL-02
+      - ACT-RPL-03
+      - ACT-RPL-04
+      - ACT-S8-04
+      acceptance_refs:
+      - flow-link-material
+      - flow-report-links
+      - flow-web-vault-materials
+      - flow-prefill-new
+      commands:
+      - go test -count=1 ./kernel/materials/... ./kernel/delegation/...
+      - go test -count=1 ./api/materials/... ./cli/materials/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-link-material
+      action_ids:
+      - ACT-LNK-01
+      - ACT-LNK-02
+      - ACT-LNK-03
+      - ACT-LNK-04
+      - ACT-LNK-05
+      - ACT-LNK-06
+    - flow_id: flow-report-links
+      action_ids:
+      - ACT-RPL-01
+      - ACT-RPL-02
+      - ACT-RPL-03
+      - ACT-RPL-04
+    - flow_id: flow-wb-schema8-upgrade
+      action_ids:
+      - ACT-S8-04
+    acceptance_refs:
+    - flow-link-material
+    - flow-report-links
+    - flow-web-vault-materials
+    - flow-prefill-new
+    source_of_truth:
+    - docs/solution-design.md#128-链接型材料与笔记库
+    - docs/solution-design.md#66-materialrevisionguideline
+    - docs/solution-design.md#75-任务委派
+    - docs/solution-design.md#613-配置记录
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b4-标准事件类型
+    - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - kernel/materials/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: link-material-delivery
+      provides:
+      - id: material-link-command
+        ref: docs/solution-design.md#128-链接型材料与笔记库
+      - id: note-vaults-policy
+        ref: docs/solution-design.md#128-链接型材料与笔记库
+      - id: report-links-output
+        ref: docs/solution-design.md#75-任务委派
+      - id: material-form-read
+        ref: docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    consumes:
+    - artifact_id: schema-v8-delivery
+      producer: schema-v8
+      evidence_mode: artifact
+      requires:
+      - ledger-v8-tables
+      - ledger-fixture-v7
+      - migration-chain-v8
+    coverage_gate: 80
+- id: urgent-notify
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - extract-align
+  title: 紧急建议即时提醒：notify_urgent 规则与提醒投递
+  description: 产出 urgent-notify-delivery。不变量 12 按 changes §10.10 采用的表述（本人开启的规则决定提醒，模型只剔除可以等的），不改不变量文字。投递
+    id 取建议事项 id，只提醒一次；超日上限的留在 Web 未读。改入站流水线处置收尾处，排在 extract-align 之后、material-budget
+    之前。
+  reviewer: omac-reviewer
+  contract:
+    objective: 来源规则 notify_urgent（只用于 screen/extract、动作类初始 observe）与类别推定，起草/抽取输出的
+      urgent 写入建议信息（proposal.urgent），开启后 urgent 为真的新建议发一次不带事项的提醒类投递（受静默、合并、日上限与静音约束），观察模式只记
+      rule.observed，并入已有与已处置的不提醒，规则内容变化后回到观察，误用加载被拒
+    non_goals:
+    - 不改不变量 12 的文字
+    - 不做资料预算（material-budget）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/rules/... ./kernel/inbound/... ./kernel/delivery/...
+    - go test -count=1 ./kernel/packs/... ./packs/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: urgent-notify-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+      - docs/appendix-c-capability-pack.md#c7-提示词模板
+      - docs/appendix-c-capability-pack.md#c11-加载与校验
+      - docs/solution-design.md#74-触达
+      - docs/solution-design.md#148-观察模式与规则的两类初始值
+      - docs/solution-design.md#93-事件到事项
+      delivery_goal: 来源规则 notify_urgent（只用于 screen/extract、动作类初始 observe）与类别推定，起草/抽取输出的
+        urgent 写入建议信息（proposal.urgent），开启后 urgent 为真的新建议发一次不带事项的提醒类投递（受静默、合并、日上限与静音约束），观察模式只记
+        rule.observed，并入已有与已处置的不提醒，规则内容变化后回到观察，误用加载被拒
+      covers:
+      - ACT-URG-02
+      - ACT-URG-03
+      - ACT-URG-04
+      - ACT-URG-05
+      - ACT-URG-06
+      - ACT-URG-07
+      - ACT-XAL-09
+      acceptance_refs:
+      - flow-urgent-notify
+      - flow-extract-align
+      commands:
+      - go test -count=1 ./kernel/rules/... ./kernel/inbound/... ./kernel/delivery/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-urgent-notify
+      action_ids:
+      - ACT-URG-02
+      - ACT-URG-03
+      - ACT-URG-04
+      - ACT-URG-05
+      - ACT-URG-06
+      - ACT-URG-07
+    - flow_id: flow-extract-align
+      action_ids:
+      - ACT-XAL-09
+    acceptance_refs:
+    - flow-urgent-notify
+    - flow-extract-align
+    source_of_truth:
+    - docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+    - docs/appendix-c-capability-pack.md#c7-提示词模板
+    - docs/appendix-c-capability-pack.md#c11-加载与校验
+    - docs/solution-design.md#74-触达
+    - docs/solution-design.md#148-观察模式与规则的两类初始值
+    - docs/solution-design.md#93-事件到事项
+    - docs/solution-design.md#614-不变量
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    - docs/changes-v0.2.0.md#1010-留给计划确认的一点
+    scope_paths:
+    - kernel/rules/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: urgent-notify-delivery
+      provides:
+      - id: notify-urgent-rule
+        ref: docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+      - id: urgent-delivery
+        ref: docs/solution-design.md#74-触达
+    consumes:
+    - artifact_id: extract-align-delivery
+      producer: extract-align
+      evidence_mode: artifact
+      requires:
+      - shared-open-items-list
+      - extract-output-v2
+      - prescreen-none
+    coverage_gate: 80
+- id: hermes-chat-tools
+  worker: omac-worker-backend
+  blocked_by:
+  - cli-fields
+  title: 首批 harness 插件：三个代答工具与会话类型判定
+  description: 产出 hermes-chat-tools-delivery。宿主自带聊天界面的识别只写在插件目录（红线）；内置名单取值待 SPIKE-SESSION-KIND-OWNCHAT，先按设计写明的兜底。工具调用
+    cli-fields 交付的 apa proposals apply --file -。
+  reviewer: omac-reviewer
+  contract:
+    objective: 首批 harness 插件新增 apa_attach、apa_proposals_apply（--recommended 或经 --file
+      - 的清单）、apa_item_progress 三个代答工具与说明，session_kind 按五条顺序判定（group/channel/thread
+      最先为 group，终端为 direct，内置名单与 APA_DIRECT_PLATFORMS，dm 有无发送者），不设 APA_DIRECT_PLATFORMS
+      时判定与此前相同
+    non_goals:
+    - 不改内核的会话类型校验与退出码
+    - 不连真实宿主（L17、L18）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - python3 -m pytest plugins/hermes/tests
+    - go test -count=1 ./plugins/hermes/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: hermes-chat-tools-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-a-harness.md#a5-插件组合参考
+      - docs/solution-design.md#145-代理授权
+      - docs/solution-design.md#143-操作分级
+      - docs/changes-v0.2.0.md#103-配置策略与授权
+      - docs/appendix-b-api-cli.md#b1-cli
+      delivery_goal: 首批 harness 插件新增 apa_attach、apa_proposals_apply（--recommended
+        或经 --file - 的清单）、apa_item_progress 三个代答工具与说明，session_kind 按五条顺序判定（group/channel/thread
+        最先为 group，终端为 direct，内置名单与 APA_DIRECT_PLATFORMS，dm 有无发送者），不设 APA_DIRECT_PLATFORMS
+        时判定与此前相同
+      covers:
+      - ACT-CHT-01
+      - ACT-CHT-02
+      - ACT-CHT-03
+      - ACT-CHT-04
+      - ACT-CHT-05
+      acceptance_refs:
+      - flow-chat-dispose
+      commands:
+      - python3 -m pytest plugins/hermes/tests
+      - go test -count=1 ./plugins/hermes/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-chat-dispose
+      action_ids:
+      - ACT-CHT-01
+      - ACT-CHT-02
+      - ACT-CHT-03
+      - ACT-CHT-04
+      - ACT-CHT-05
+    acceptance_refs:
+    - flow-chat-dispose
+    source_of_truth:
+    - docs/appendix-a-harness.md#a5-插件组合参考
+    - docs/solution-design.md#145-代理授权
+    - docs/solution-design.md#143-操作分级
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/appendix-b-api-cli.md#b1-cli
+    scope_paths:
+    - plugins/hermes/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: hermes-chat-tools-delivery
+      provides:
+      - id: chat-dispose-tools
+        ref: docs/appendix-a-harness.md#a5-插件组合参考
+      - id: session-kind-order
+        ref: docs/appendix-a-harness.md#a5-插件组合参考
+    consumes:
+    - artifact_id: cli-fields-delivery
+      producer: cli-fields
+      evidence_mode: artifact
+      requires:
+      - item-cli-v2-flags
+      - proposals-apply-file
+      - import-origin-reserved
+    coverage_gate: 80
+- id: raw-read-api
+  worker: omac-worker-backend
+  blocked_by:
+  - raw-ingest
+  title: 来源原文读取接口、列表瘦身与存储统计
+  description: 产出 raw-read-api-delivery。WB-25、WB-26 是调用方要改的收紧，没有兼容期（用户文档的迁移条目由 closeout
+    汇总）。升级前事件读原列并报 legacy；/storage 对它们按原列长度现算。附录 B.2 不新增任何写原文的路由，本人改事项正文不影响原文（ACT-RAW-06）。
+  reviewer: omac-reviewer
+  contract:
+    objective: GET /source-events/{id}[?part=]（Web 登录全文；token 按来源 outbound.external
+      裁剪；运行凭据与 ext 密钥 403；对话捕获只对 Web 登录；已接受事项的挂靠消息按挂靠消息权限），GET /sources/{id}/events
+      与 GET /items/{id}/messages 的 detail 改为至多 2000 字符预览并带 content 清单，apa source event，GET
+      /storage 与来源 stats
+    non_goals:
+    - 不做附件取回（attachment-fetch）、物理删除与保留期（raw-retention-purge）
+    - 不做 Web 页面
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./api/sources/... ./api/items/... ./cli/sources/...
+    - go test -count=1 ./kernel/sources/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: raw-read-api-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/solution-design.md#1414-外发控制
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/changes-v0.2.0.md#104-http-api
+      delivery_goal: GET /source-events/{id}[?part=]（Web 登录全文；token 按来源 outbound.external
+        裁剪；运行凭据与 ext 密钥 403；对话捕获只对 Web 登录；已接受事项的挂靠消息按挂靠消息权限），GET /sources/{id}/events
+        与 GET /items/{id}/messages 的 detail 改为至多 2000 字符预览并带 content 清单，apa source
+        event，GET /storage 与来源 stats
+      covers:
+      - ACT-RAW-04
+      - ACT-RAW-05
+      - ACT-RAW-06
+      - ACT-RSC-02
+      - ACT-RSC-03
+      - ACT-RSC-04
+      - ACT-RSC-05
+      - ACT-RSC-06
+      - ACT-RSC-07
+      - ACT-STO-01
+      - ACT-S8-03
+      acceptance_refs:
+      - flow-raw-full-ingest
+      - flow-raw-read-scope
+      - flow-storage
+      - flow-wb-schema8-upgrade
+      commands:
+      - go test -count=1 ./api/sources/... ./api/items/... ./cli/sources/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-raw-full-ingest
+      action_ids:
+      - ACT-RAW-04
+      - ACT-RAW-05
+      - ACT-RAW-06
+    - flow_id: flow-raw-read-scope
+      action_ids:
+      - ACT-RSC-02
+      - ACT-RSC-03
+      - ACT-RSC-04
+      - ACT-RSC-05
+      - ACT-RSC-06
+      - ACT-RSC-07
+    - flow_id: flow-storage
+      action_ids:
+      - ACT-STO-01
+    - flow_id: flow-wb-schema8-upgrade
+      action_ids:
+      - ACT-S8-03
+    acceptance_refs:
+    - flow-raw-full-ingest
+    - flow-raw-read-scope
+    - flow-storage
+    - flow-wb-schema8-upgrade
+    source_of_truth:
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/solution-design.md#1414-外发控制
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/changes-v0.2.0.md#104-http-api
+    - docs/changes-v0.2.0.md#105-cli
+    scope_paths:
+    - api/sources/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: raw-read-api-delivery
+      provides:
+      - id: source-event-read-api
+        ref: docs/appendix-b-api-cli.md#b2-http-api
+      - id: outbound-scoped-read
+        ref: docs/solution-design.md#1414-外发控制
+      - id: storage-stats
+        ref: docs/appendix-b-api-cli.md#b2-http-api
+      - id: slim-event-lists
+        ref: docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+    consumes:
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    coverage_gate: 80
+- id: raw-retention-purge
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - raw-ingest
+  title: 原文保留期清除与来源事件物理删除
+  description: 产出 raw-retention-purge-delivery。与 raw-ingest 共用来源事件存取代码，排在其后；attachment-fetch
+    排在本节点之后，附件删除按引用关系实现并用夹具覆盖。未设天数即不清理。
+  reviewer: omac-reviewer
+  contract:
+    objective: 按来源的 content_retention_days（只经 Web 的 PUT /settings/sources/{id}/content-retention，记
+      Event）与维护循环清除（只清超天数且不挂未关闭事项的原文与预览，事件行留元信息并标 purged，无引用的已取回附件删除，每轮按来源记一条审计事件）；POST
+      /settings/purge 物理删除来源事件（连同原文、无引用附件与判断记录）与 with_source_events 随事项删除，去重键保留为墓碑
+    non_goals:
+    - 结构变更只经 schema-v8；本节点若仍需改结构，在 PR 说明写明并另起新迁移（结构版本 8 首次被真实账本应用后冻结，§16.5）
+    - 不做 Web 入口（web-storage-page、web-raw-actions）
+    - 不改默认值：默认不清理
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./kernel/retention/... ./kernel/purge/... ./kernel/sources/...
+    - go test -count=1 ./api/settings/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: raw-retention-purge-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#615-物理删除与保留
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+      - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+      - docs/changes-v0.2.0.md#103-配置策略与授权
+      delivery_goal: 按来源的 content_retention_days（只经 Web 的 PUT /settings/sources/{id}/content-retention，记
+        Event）与维护循环清除（只清超天数且不挂未关闭事项的原文与预览，事件行留元信息并标 purged，无引用的已取回附件删除，每轮按来源记一条审计事件）；POST
+        /settings/purge 物理删除来源事件（连同原文、无引用附件与判断记录）与 with_source_events 随事项删除，去重键保留为墓碑
+      covers:
+      - ACT-RET-01
+      - ACT-RET-02
+      - ACT-RET-03
+      - ACT-PRG-01
+      - ACT-PRG-02
+      - ACT-PRG-03
+      acceptance_refs:
+      - flow-raw-retention
+      - flow-raw-purge
+      commands:
+      - go test -count=1 ./kernel/retention/... ./kernel/purge/...
+      - go test -count=1 ./api/settings/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-raw-retention
+      action_ids:
+      - ACT-RET-01
+      - ACT-RET-02
+      - ACT-RET-03
+    - flow_id: flow-raw-purge
+      action_ids:
+      - ACT-PRG-01
+      - ACT-PRG-02
+      - ACT-PRG-03
+    acceptance_refs:
+    - flow-raw-retention
+    - flow-raw-purge
+    source_of_truth:
+    - docs/solution-design.md#615-物理删除与保留
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - kernel/retention/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: raw-retention-purge-delivery
+      provides:
+      - id: content-retention
+        ref: docs/solution-design.md#615-物理删除与保留
+      - id: source-event-purge
+        ref: docs/solution-design.md#615-物理删除与保留
+      - id: dedup-tombstone
+        ref: docs/solution-design.md#615-物理删除与保留
+    consumes:
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    coverage_gate: 80
+- id: material-budget
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - raw-ingest
+  - urgent-notify
+  title: 资料预算、裁剪留痕与建议事项正文 4000 字符规则
+  description: 产出 material-budget-delivery。裁剪规则收在新的内核包 kernel/budget（先外发范围再预算、单段首
+    3/4 尾 1/4、聚合消息从新往旧整条保留），入站流水线与 brief-raw 都调用它，不各写一份；入站流水线 kernel/inbound 的资料组装是支持性改动，排在
+    urgent-notify 之后（三节点改同一段）。裁剪不回写来源事件、事项或任何账本字段；判断端点每题 8000 字符沿用。处理经过页的显示在 web-raw-trace，设置页字段在
+    web-model-budget。
+  reviewer: omac-reviewer
+  contract:
+    objective: 生成端点 max_material_chars（默认 24000，旧策略读作默认，只经 Web 的 /settings/model-endpoints
+      改）与调用模型时的资料裁剪（先外发范围再预算；单段正文留首 3/4 尾 1/4、中间一行注明省略字符数，聚合消息从最新往前整条保留并注明省略条数），判断记录每一级与入站处置载荷
+      material 留痕，建议事项正文超 4000 字符只写前 4000 并注明较长、链到来源原文页（来源对象更新刷新同此规则）
+    non_goals:
+    - 不做 Web 页面（web-model-budget、web-raw-trace）
+    - 不做超预算分段调用（REQ-NOT-RAWEXTRA）
+    - 已有事项正文不改
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/budget/... ./kernel/inbound/... ./kernel/judgment/...
+      ./kernel/outcall/...
+    - go test -count=1 ./api/settings/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: material-budget-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#84-输入输出契约
+      - docs/solution-design.md#616-判断记录
+      - docs/solution-design.md#93-事件到事项
+      - docs/solution-design.md#1414-外发控制
+      - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+      - docs/changes-v0.2.0.md#103-配置策略与授权
+      delivery_goal: 生成端点 max_material_chars（默认 24000，旧策略读作默认，只经 Web 的 /settings/model-endpoints
+        改）与调用模型时的资料裁剪（先外发范围再预算；单段正文留首 3/4 尾 1/4、中间一行注明省略字符数，聚合消息从最新往前整条保留并注明省略条数），判断记录每一级与入站处置载荷
+        material 留痕，建议事项正文超 4000 字符只写前 4000 并注明较长、链到来源原文页（来源对象更新刷新同此规则）
+      covers:
+      - ACT-BUD-02
+      - ACT-BUD-03
+      - ACT-BUD-04
+      - ACT-BUD-06
+      - ACT-BUD-07
+      - ACT-BUD-08
+      acceptance_refs:
+      - flow-material-budget
+      commands:
+      - go test -count=1 ./kernel/budget/... ./kernel/inbound/... ./kernel/judgment/...
+      - go test -count=1 ./api/settings/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-material-budget
+      action_ids:
+      - ACT-BUD-02
+      - ACT-BUD-03
+      - ACT-BUD-04
+      - ACT-BUD-06
+      - ACT-BUD-07
+      - ACT-BUD-08
+    acceptance_refs:
+    - flow-material-budget
+    source_of_truth:
+    - docs/solution-design.md#84-输入输出契约
+    - docs/solution-design.md#616-判断记录
+    - docs/solution-design.md#93-事件到事项
+    - docs/solution-design.md#1414-外发控制
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/changes-v0.2.0.md#107-行为变化
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - kernel/budget/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: material-budget-delivery
+      provides:
+      - id: material-budget-trim
+        ref: docs/solution-design.md#84-输入输出契约
+      - id: trim-trace
+        ref: docs/solution-design.md#616-判断记录
+      - id: proposal-body-4000
+        ref: docs/solution-design.md#93-事件到事项
+      - id: generate-budget-setting
+        ref: docs/changes-v0.2.0.md#103-配置策略与授权
+    consumes:
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    - artifact_id: urgent-notify-delivery
+      producer: urgent-notify
+      evidence_mode: artifact
+      requires:
+      - notify-urgent-rule
+      - urgent-delivery
+    coverage_gate: 80
+- id: import-apply
+  worker: omac-worker-backend
+  blocked_by:
+  - eventlog-live-read
+  - grant-import
+  - cli-fields
+  title: 导入命令：import.apply、批次与对照、POST /import、apa import、按 origin 查询
+  description: 产出 import-apply-delivery。导入事件写 imported/recorded_at，依赖 eventlog-live-read
+    的“现场”读法不触发自动化；条数扣减用 grant-import 的接口（预检不扣）。apa item list 的 origin 筛选与 cli-fields
+    同一文件，排在其后。API 路由可放 api/items 或新分组，按附录 B.2。
+  reviewer: omac-reviewer
+  contract:
+    objective: import.apply 命令（批次与对照、逐行校验、（来源名，外部 id）幂等、单条一事务、断点续跑、项目按对照/名字绑定/新建、origin
+      固定为 import:<来源名>、截止 Timer 与 waiting 跟进从导入时刻起算、批次结束 import.completed），只接受授权单（Web
+      登录除外，运行凭据 403），POST /import（x-ndjson、≤500 行、≤8 MiB、dry_run、Idempotency-Key）、GET
+      /imports、apa import（按 500 条分批沿用批次号），GET /items 的 origin_source/origin_ref 与
+      apa item list --origin-source/--origin-ref
+    non_goals:
+    - 结构变更只经 schema-v8；本节点若仍需改结构，在 PR 说明写明并另起新迁移（结构版本 8 首次被真实账本应用后冻结，§16.5）
+    - 不做 Web 导入页（web-import-page）
+    - 不导入材料、委派、决策与投递；不更新已导入事项、不撤销批次（REQ-NOT-IMPORTEXTRA）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./kernel/imports/... ./kernel/items/...
+    - go test -count=1 ./api/items/... ./cli/items/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: import-apply-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#71-事项中心
+      - docs/solution-design.md#145-代理授权
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/appendix-b-api-cli.md#b3-错误响应
+      - docs/appendix-b-api-cli.md#b4-标准事件类型
+      delivery_goal: import.apply 命令（批次与对照、逐行校验、（来源名，外部 id）幂等、单条一事务、断点续跑、项目按对照/名字绑定/新建、origin
+        固定为 import:<来源名>、截止 Timer 与 waiting 跟进从导入时刻起算、批次结束 import.completed），只接受授权单（Web
+        登录除外，运行凭据 403），POST /import（x-ndjson、≤500 行、≤8 MiB、dry_run、Idempotency-Key）、GET
+        /imports、apa import（按 500 条分批沿用批次号），GET /items 的 origin_source/origin_ref
+        与 apa item list --origin-source/--origin-ref
+      covers:
+      - ACT-IMP-02
+      - ACT-IMP-03
+      - ACT-IMP-04
+      - ACT-IMP-05
+      - ACT-IMP-06
+      - ACT-IMP-07
+      - ACT-IMP-08
+      - ACT-IMP-09
+      - ACT-IMP-10
+      - ACT-IMP-11
+      - ACT-IGR-02
+      - ACT-IGR-03
+      - ACT-IGR-04
+      - ACT-IGR-05
+      - ACT-IGR-06
+      - ACT-IGR-07
+      - ACT-INA-03
+      acceptance_refs:
+      - flow-import-apply
+      - flow-import-grant
+      - flow-import-no-automation
+      commands:
+      - go test -count=1 ./kernel/imports/... ./kernel/items/...
+      - go test -count=1 ./api/items/... ./cli/items/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-import-apply
+      action_ids:
+      - ACT-IMP-02
+      - ACT-IMP-03
+      - ACT-IMP-04
+      - ACT-IMP-05
+      - ACT-IMP-06
+      - ACT-IMP-07
+      - ACT-IMP-08
+      - ACT-IMP-09
+      - ACT-IMP-10
+      - ACT-IMP-11
+    - flow_id: flow-import-grant
+      action_ids:
+      - ACT-IGR-02
+      - ACT-IGR-03
+      - ACT-IGR-04
+      - ACT-IGR-05
+      - ACT-IGR-06
+      - ACT-IGR-07
+    - flow_id: flow-import-no-automation
+      action_ids:
+      - ACT-INA-03
+    acceptance_refs:
+    - flow-import-apply
+    - flow-import-grant
+    - flow-import-no-automation
+    source_of_truth:
+    - docs/solution-design.md#71-事项中心
+    - docs/solution-design.md#145-代理授权
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b3-错误响应
+    - docs/appendix-b-api-cli.md#b4-标准事件类型
+    - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/changes-v0.2.0.md#104-http-api
+    - docs/changes-v0.2.0.md#105-cli
+    - docs/changes-v0.2.0.md#107-行为变化
+    - docs/changes-v0.2.0.md#109-与需求分析不一致的地方
+    scope_paths:
+    - kernel/imports/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: import-apply-delivery
+      provides:
+      - id: import-apply-command
+        ref: docs/solution-design.md#71-事项中心
+      - id: import-api
+        ref: docs/appendix-b-api-cli.md#b2-http-api
+      - id: import-cli
+        ref: docs/appendix-b-api-cli.md#b1-cli
+      - id: origin-query
+        ref: docs/appendix-b-api-cli.md#b2-http-api
+    consumes:
+    - artifact_id: eventlog-live-read-delivery
+      producer: eventlog-live-read
+      evidence_mode: artifact
+      requires:
+      - eventlog-live-reader
+      - imported-envelope
+      - stale-from-import
+    - artifact_id: grant-import-delivery
+      producer: grant-import
+      evidence_mode: artifact
+      requires:
+      - import-grant
+      - grant-only-gate
+      - progress-grantable
+    - artifact_id: cli-fields-delivery
+      producer: cli-fields
+      evidence_mode: artifact
+      requires:
+      - item-cli-v2-flags
+      - proposals-apply-file
+      - import-origin-reserved
+    coverage_gate: 80
+- id: brief-material
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - eventlog-live-read
+  title: 简报资料五个新段、按实例的取材窗口与简报包更新
+  description: 产出 brief-material-delivery。主要归属是简报包 packs/brief（模板、默认内容要求、result_fields
+    与 schedule_days 参数）；资料组装 kernel/agents/task 的五段与窗口是支持性改动，brief-raw 在同一函数里加原文文件并以它为主要归属，排在本节点之后。知会仍全局只进一份；第一份取
+    24 小时。简报页显示在 web-brief-sections。
+  reviewer: omac-reviewer
+  contract:
+    objective: 简报资料文件新增 schedule、proposals（≤50 与 pending_total）、decisions、due_waiting、activity
+      五段（activity 用“现场”读法不计导入事件），按实例的取材窗口写进 brief 事项 spec.since/until 与 origin，schedule_days（默认
+      3，1–14），简报包模板、默认内容要求与 result_fields（period 与 sections[].body，节可无 project；只写
+      period 时转 needs_input）
+    non_goals:
+    - 不写来源原文文件（brief-raw）
+    - 不改简报页（web-brief-sections）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./kernel/agents/... ./kernel/summaries/...
+    - go test -count=1 ./packs/... ./kernel/packs/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: brief-material-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-c-capability-pack.md#c13-示例简报包
+      - docs/solution-design.md#73-主动服务
+      - docs/changes-v0.2.0.md#106-能力包与来源程序
+      - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+      delivery_goal: 简报资料文件新增 schedule、proposals（≤50 与 pending_total）、decisions、due_waiting、activity
+        五段（activity 用“现场”读法不计导入事件），按实例的取材窗口写进 brief 事项 spec.since/until 与 origin，schedule_days（默认
+        3，1–14），简报包模板、默认内容要求与 result_fields（period 与 sections[].body，节可无 project；只写
+        period 时转 needs_input）
+      covers:
+      - ACT-BRF-02
+      - ACT-BRF-03
+      - ACT-BRF-04
+      - ACT-BRF-07
+      - ACT-INA-05
+      acceptance_refs:
+      - flow-brief-material
+      - flow-import-no-automation
+      commands:
+      - go test -count=1 ./kernel/agents/...
+      - go test -count=1 ./packs/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-brief-material
+      action_ids:
+      - ACT-BRF-02
+      - ACT-BRF-03
+      - ACT-BRF-04
+      - ACT-BRF-07
+    - flow_id: flow-import-no-automation
+      action_ids:
+      - ACT-INA-05
+    acceptance_refs:
+    - flow-brief-material
+    - flow-import-no-automation
+    source_of_truth:
+    - docs/appendix-c-capability-pack.md#c13-示例简报包
+    - docs/solution-design.md#73-主动服务
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    scope_paths:
+    - packs/brief/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: brief-material-delivery
+      provides:
+      - id: brief-segments
+        ref: docs/appendix-c-capability-pack.md#c13-示例简报包
+      - id: brief-window
+        ref: docs/solution-design.md#73-主动服务
+      - id: brief-pack-v2
+        ref: docs/appendix-c-capability-pack.md#c13-示例简报包
+    consumes:
+    - artifact_id: eventlog-live-read-delivery
+      producer: eventlog-live-read
+      evidence_mode: artifact
+      requires:
+      - eventlog-live-reader
+      - imported-envelope
+      - stale-from-import
+    coverage_gate: 80
+- id: web-vaults-page
+  worker: omac-worker-frontend
+  blocked_by:
+  - link-material
+  title: Web：设置 › 笔记库页
+  description: 产出 web-vaults-page-delivery。新页面目录，导航登记加一行。文案不写具体笔记应用名。
+  reviewer: omac-reviewer
+  contract:
+    objective: 设置 › 笔记库页（/settings/note-vaults）每库一行可增删改，保存前用示例路径渲染一次打开地址给本人看，经 PUT
+      /settings/note-vaults 整体替换
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/settings-vaults
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    integration_gates:
+    - name: web-vaults-page-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#128-链接型材料与笔记库
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/solution-design.md#41-web-中台
+      delivery_goal: 设置 › 笔记库页（/settings/note-vaults）每库一行可增删改，保存前用示例路径渲染一次打开地址给本人看，经
+        PUT /settings/note-vaults 整体替换
+      covers:
+      - ACT-WVM-01
+      acceptance_refs:
+      - flow-web-vault-materials
+      commands:
+      - npm --prefix web run test -- --run src/features/settings-vaults
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-web-vault-materials
+      action_ids:
+      - ACT-WVM-01
+    acceptance_refs:
+    - flow-web-vault-materials
+    source_of_truth:
+    - docs/solution-design.md#128-链接型材料与笔记库
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/solution-design.md#41-web-中台
+    scope_paths:
+    - web/src/features/settings-vaults/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-vaults-page-delivery
+      provides:
+      - id: vaults-settings-page
+        ref: docs/solution-design.md#128-链接型材料与笔记库
+    consumes:
+    - artifact_id: link-material-delivery
+      producer: link-material
+      evidence_mode: artifact
+      requires:
+      - material-link-command
+      - note-vaults-policy
+      - report-links-output
+      - material-form-read
+    coverage_gate: 70
+- id: web-link-materials
+  worker: omac-worker-frontend-taiyi
+  blocked_by:
+  - link-material
+  title: Web：材料页与项目材料显示链接型
+  description: 产出 web-link-materials-delivery。事项详情的材料分组在 items-web。
+  reviewer: omac-reviewer
+  contract:
+    objective: 材料页与项目材料组件显示链接型材料的位置与“打开”（库内为 open_url，网址型为网址本身），标题、kind、标签可在材料页改，位置不可改
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不改事项详情（items-web）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/materials
+    - npm --prefix web run test -- --run src/features/projects
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    integration_gates:
+    - name: web-link-materials-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#128-链接型材料与笔记库
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/solution-design.md#66-materialrevisionguideline
+      delivery_goal: 材料页与项目材料组件显示链接型材料的位置与“打开”（库内为 open_url，网址型为网址本身），标题、kind、标签可在材料页改，位置不可改
+      covers:
+      - ACT-WVM-02
+      acceptance_refs:
+      - flow-web-vault-materials
+      commands:
+      - npm --prefix web run test -- --run src/features/materials
+      - npm --prefix web run test -- --run src/features/projects
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-web-vault-materials
+      action_ids:
+      - ACT-WVM-02
+    acceptance_refs:
+    - flow-web-vault-materials
+    source_of_truth:
+    - docs/solution-design.md#128-链接型材料与笔记库
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/solution-design.md#66-materialrevisionguideline
+    scope_paths:
+    - web/src/features/materials/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-link-materials-delivery
+      provides:
+      - id: link-material-view
+        ref: docs/solution-design.md#128-链接型材料与笔记库
+    consumes:
+    - artifact_id: link-material-delivery
+      producer: link-material
+      evidence_mode: artifact
+      requires:
+      - material-link-command
+      - note-vaults-policy
+      - report-links-output
+      - material-form-read
+    coverage_gate: 70
+- id: e2e-link-material
+  worker: omac-worker-backend
+  blocked_by:
+  - link-material
+  - doubles-harness
+  title: e2e：链接型材料与回执链接（替身版）
+  description: 产出 e2e-link-material-evidence。全流程 owner：flow-link-material, flow-report-links。按
+    OMAC-NOTES §3 L3：同一项目同一位置重复登记返回同一条；带库内链接的 done 回执使父事项多一条 output，库外链接与 progress/blocked
+    回执不登记；未登记库名与本机绝对路径被拒。
+  reviewer: omac-reviewer
+  contract:
+    objective: 在替身环境上用测试构建的真实二进制独立执行并证明 flow-link-material、flow-report-links 全流程
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/linkmaterial/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    integration_gates:
+    - name: e2e-link-material-gate
+      layer: L2
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/solution-design.md#128-链接型材料与笔记库
+      - docs/solution-design.md#75-任务委派
+      delivery_goal: 在替身环境上用测试构建的真实二进制独立执行并证明 flow-link-material、flow-report-links
+        全流程
+      covers:
+      - flow-link-material
+      - flow-report-links
+      acceptance_refs:
+      - flow-link-material
+      - flow-report-links
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/linkmaterial/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-link-material
+    - flow-report-links
+    acceptance_refs:
+    - flow-link-material
+    - flow-report-links
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/solution-design.md#128-链接型材料与笔记库
+    - docs/solution-design.md#75-任务委派
+    scope_paths:
+    - tests/e2e/linkmaterial/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-link-material-evidence
+      provides:
+      - id: link-material-flow-evidence
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes:
+    - artifact_id: link-material-delivery
+      producer: link-material
+      evidence_mode: artifact
+      requires:
+      - material-link-command
+      - note-vaults-policy
+      - report-links-output
+      - material-form-read
+    - artifact_id: doubles-harness-delivery
+      producer: doubles-harness
+      evidence_mode: artifact
+      requires:
+      - harness-multi-link-report
+      - harness-brief-files
+      - harness-session-entries
+    coverage_gate: 0
+- id: e2e-inbound-align
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - urgent-notify
+  - doubles-srcstub
+  - doubles-modelstub
+  title: e2e：抽取对齐与紧急提醒（替身版）
+  description: 产出 e2e-inbound-align-evidence。全流程 owner：flow-extract-align, flow-urgent-notify。按
+    OMAC-NOTES §3 X3 的断言清单；用 SRC_STUB 的按会话聚合事件与 MODEL_STUB 的脚本输出。
+  reviewer: omac-reviewer
+  contract:
+    objective: 在替身环境上用测试构建的真实二进制独立执行并证明 flow-extract-align、flow-urgent-notify 全流程
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/extractalign/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    integration_gates:
+    - name: e2e-inbound-align-gate
+      layer: L2
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/solution-design.md#93-事件到事项
+      - docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+      - docs/appendix-c-capability-pack.md#c7-提示词模板
+      delivery_goal: 在替身环境上用测试构建的真实二进制独立执行并证明 flow-extract-align、flow-urgent-notify
+        全流程
+      covers:
+      - flow-extract-align
+      - flow-urgent-notify
+      acceptance_refs:
+      - flow-extract-align
+      - flow-urgent-notify
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/extractalign/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-extract-align
+    - flow-urgent-notify
+    acceptance_refs:
+    - flow-extract-align
+    - flow-urgent-notify
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/solution-design.md#93-事件到事项
+    - docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+    - docs/appendix-c-capability-pack.md#c7-提示词模板
+    scope_paths:
+    - tests/e2e/extractalign/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-inbound-align-evidence
+      provides:
+      - id: inbound-align-flow-evidence
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes:
+    - artifact_id: urgent-notify-delivery
+      producer: urgent-notify
+      evidence_mode: artifact
+      requires:
+      - notify-urgent-rule
+      - urgent-delivery
+    - artifact_id: doubles-srcstub-delivery
+      producer: doubles-srcstub
+      evidence_mode: artifact
+      requires:
+      - src-stub-cases
+      - src-stub-fetch
+    - artifact_id: doubles-modelstub-delivery
+      producer: doubles-modelstub
+      evidence_mode: artifact
+      requires:
+      - model-stub-wb-scripts
+      - model-stub-request-log
+    - artifact_id: extract-align-delivery
+      producer: extract-align
+      evidence_mode: artifact
+      requires:
+      - shared-open-items-list
+      - extract-output-v2
+      - prescreen-none
+    coverage_gate: 0
+- id: e2e-chat-dispose
+  worker: omac-worker-backend
+  blocked_by:
+  - hermes-chat-tools
+  - grant-import
+  - doubles-harness
+  title: e2e：聊天里处置建议与记进展（替身版）
+  description: 产出 e2e-chat-dispose-evidence。全流程 owner：flow-chat-dispose。按 OMAC-NOTES
+    §3 C3：私聊里按推荐批量处理生效且事件带原话与 direct；清单模式只动点到的；记进展凭原话与凭 item.progress 授权单各成功一次；多人会话同样调用退出码
+    23；名单平台加多人聊天类型仍报 group。用例加在已有的 tests/e2e/hostplugin 包。
+  reviewer: omac-reviewer
+  contract:
+    objective: 在替身环境上用测试构建的真实二进制与 STUB_HARNESS 的四种入口独立执行并证明 flow-chat-dispose 全流程
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/hostplugin/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    - python3 -m pytest plugins/hermes/tests
+    integration_gates:
+    - name: e2e-chat-dispose-gate
+      layer: L2
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/appendix-a-harness.md#a5-插件组合参考
+      - docs/solution-design.md#145-代理授权
+      delivery_goal: 在替身环境上用测试构建的真实二进制与 STUB_HARNESS 的四种入口独立执行并证明 flow-chat-dispose
+        全流程
+      covers:
+      - flow-chat-dispose
+      acceptance_refs:
+      - flow-chat-dispose
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/hostplugin/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-chat-dispose
+    acceptance_refs:
+    - flow-chat-dispose
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/appendix-a-harness.md#a5-插件组合参考
+    - docs/solution-design.md#145-代理授权
+    scope_paths:
+    - tests/e2e/hostplugin/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-chat-dispose-evidence
+      provides:
+      - id: chat-dispose-flow-evidence
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes:
+    - artifact_id: hermes-chat-tools-delivery
+      producer: hermes-chat-tools
+      evidence_mode: artifact
+      requires:
+      - chat-dispose-tools
+      - session-kind-order
+    - artifact_id: grant-import-delivery
+      producer: grant-import
+      evidence_mode: artifact
+      requires:
+      - import-grant
+      - grant-only-gate
+      - progress-grantable
+    - artifact_id: doubles-harness-delivery
+      producer: doubles-harness
+      evidence_mode: artifact
+      requires:
+      - harness-multi-link-report
+      - harness-brief-files
+      - harness-session-entries
+    - artifact_id: cli-fields-delivery
+      producer: cli-fields
+      evidence_mode: artifact
+      requires:
+      - proposals-apply-file
+    coverage_gate: 0
+- id: source-applepim-raw
+  worker: omac-worker-backend
+  blocked_by:
+  - source-htmltext
+  - raw-ingest
+  title: apple-pim-source：邮件取全原文，日历与提醒事项补 headers
+  description: 产出 source-applepim-raw-delivery。一个程序服务邮件、日历、提醒事项三类实例，本包只由本节点改（按包切分，W23
+    的 undated_lists 也在这里）；内置规则 reminder-open 在 reminder-open-rule。提醒事项的筛选参数待 MEAS-REM-UNDATED，按录制样本实现。支持取回时实现
+    fetch，取不到按 MEAS-RAW-ATTACH 兜底为 partial。日历与提醒事项的 headers 是 ACT-OAD-04 的一部分，由 e2e-source-raw
+    统一验收。支持性改动：录制样本放 tests/doubles/tools（或包内 testdata），并在 tests/e2e/sourcesv2 新增本节点自己的一个测试文件（不改他人的文件），e2e-source-raw
+    在同一包里串起全流程。
+  reviewer: omac-reviewer
+  contract:
+    objective: apple-pim-source 的邮件去掉 16 KiB 截断：mail-cli get 的正文全文进 detail、信头进 headers、附件进
+      attachments、HTML 原样进 original（取不到的以 partial 自报，工具只给原始邮件时用标准库解析信头与 MIME），用共用包按字节分批，事件
+      id 算法不变（升级后重新拉到的旧邮件仍被去重）；同一程序的日历（起止、地点、组织者、参与者、状态）与提醒事项（列表、到期日、优先级）补 headers；提醒事项来源
+      undated_lists 让所列列表的未完成无到期日提醒产出 reminder.open（occurred_at 取创建时间，改标题仍是同一关联键，不配时行为不变）；交付
+      mail-long-html、升级前同一封信长版本与 rem-undated、rem-undated-renamed、rem-undated-dated
+      录制样本
+    non_goals:
+    - 只改本节点拥有的来源程序包；其他来源程序由各自节点负责
+    - 不回填、不改写已落盘的事件，不改事件 id 算法（WB-36）
+    - 不加内置规则（reminder-open-rule）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./sources/applepim/...
+    - go test -count=1 ./tests/doubles/tools/...
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: source-applepim-raw-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+      - docs/solution-design.md#92-执行契约
+      - docs/solution-design.md#97-工具适配邮件与日历
+      - docs/changes-v0.2.0.md#106-能力包与来源程序
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#5-其他提醒
+      delivery_goal: apple-pim-source 的邮件去掉 16 KiB 截断：mail-cli get 的正文全文进 detail、信头进
+        headers、附件进 attachments、HTML 原样进 original（取不到的以 partial 自报，工具只给原始邮件时用标准库解析信头与
+        MIME），用共用包按字节分批，事件 id 算法不变（升级后重新拉到的旧邮件仍被去重）；同一程序的日历（起止、地点、组织者、参与者、状态）与提醒事项（列表、到期日、优先级）补
+        headers；提醒事项来源 undated_lists 让所列列表的未完成无到期日提醒产出 reminder.open（occurred_at 取创建时间，改标题仍是同一关联键，不配时行为不变）；交付
+        mail-long-html、升级前同一封信长版本与 rem-undated、rem-undated-renamed、rem-undated-dated
+        录制样本
+      covers:
+      - ACT-MAD-01
+      - ACT-MAD-03
+      - ACT-REM-01
+      - ACT-REM-03
+      - ACT-REM-04
+      acceptance_refs:
+      - flow-mail-adapters-raw
+      - flow-other-adapters-raw
+      - flow-reminder-open
+      commands:
+      - go test -count=1 ./sources/applepim/...
+      - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-mail-adapters-raw
+      action_ids:
+      - ACT-MAD-01
+      - ACT-MAD-03
+    - flow_id: flow-reminder-open
+      action_ids:
+      - ACT-REM-01
+      - ACT-REM-03
+      - ACT-REM-04
+    acceptance_refs:
+    - flow-mail-adapters-raw
+    - flow-other-adapters-raw
+    - flow-reminder-open
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+    - docs/solution-design.md#92-执行契约
+    - docs/solution-design.md#97-工具适配邮件与日历
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#5-其他提醒
+    scope_paths:
+    - sources/applepim/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: source-applepim-raw-delivery
+      provides:
+      - id: applepim-mail-raw
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - id: applepim-pim-headers
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - id: reminder-open-events
+        ref: docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+    consumes:
+    - artifact_id: source-htmltext-delivery
+      producer: source-htmltext
+      evidence_mode: artifact
+      requires:
+      - html-to-text
+      - header-normalize
+      - byte-batching
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    requirement_refs:
+    - REQ-WB-ENV-TOOLS
+    coverage_gate: 80
+- id: source-himalaya-raw
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - source-htmltext
+  - raw-ingest
+  title: mail-himalaya：正文全文与固定信头，original/attachments 以 partial 自报
+  description: 产出 source-himalaya-raw-delivery。不用 message export --full（会把信置为已读，D.3
+    MEAS-MAIL-AR）。支持性改动：录制样本放 tests/doubles/tools（或包内 testdata），并在 tests/e2e/sourcesv2
+    新增本节点自己的一个测试文件（不改他人的文件），e2e-source-raw 在同一包里串起全流程。
+  reviewer: omac-reviewer
+  contract:
+    objective: mail-himalaya 的 message read --preview 正文不截断，用 -H 逐个请求一组固定信头（发件人、收件人、抄送、回复地址、日期、主题、Message-ID、In-Reply-To、References、列表头、内容类型），original
+      与 attachments 以 partial 自报（has_attachment 只写明有附件、未取清单），按字节分批（累计接近 max_source_output_mb
+      四分之三时停下、游标停在已输出的最后一条），事件 id 算法不变；交付 himalaya-long、mail-many-long 录制样本
+    non_goals:
+    - 只改本节点拥有的来源程序包；其他来源程序由各自节点负责
+    - 不回填、不改写已落盘的事件，不改事件 id 算法（WB-36）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./sources/mail/...
+    - go test -count=1 ./tests/doubles/tools/...
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: source-himalaya-raw-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+      - docs/solution-design.md#92-执行契约
+      - docs/changes-v0.2.0.md#106-能力包与来源程序
+      delivery_goal: mail-himalaya 的 message read --preview 正文不截断，用 -H 逐个请求一组固定信头（发件人、收件人、抄送、回复地址、日期、主题、Message-ID、In-Reply-To、References、列表头、内容类型），original
+        与 attachments 以 partial 自报（has_attachment 只写明有附件、未取清单），按字节分批（累计接近 max_source_output_mb
+        四分之三时停下、游标停在已输出的最后一条），事件 id 算法不变；交付 himalaya-long、mail-many-long 录制样本
+      covers:
+      - ACT-MAD-02
+      - ACT-MAD-04
+      acceptance_refs:
+      - flow-mail-adapters-raw
+      commands:
+      - go test -count=1 ./sources/mail/...
+      - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-mail-adapters-raw
+      action_ids:
+      - ACT-MAD-02
+      - ACT-MAD-04
+    acceptance_refs:
+    - flow-mail-adapters-raw
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+    - docs/solution-design.md#92-执行契约
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    scope_paths:
+    - sources/mail/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: source-himalaya-raw-delivery
+      provides:
+      - id: himalaya-mail-raw
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    consumes:
+    - artifact_id: source-htmltext-delivery
+      producer: source-htmltext
+      evidence_mode: artifact
+      requires:
+      - html-to-text
+      - header-normalize
+      - byte-batching
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    requirement_refs:
+    - REQ-WB-ENV-TOOLS
+    coverage_gate: 80
+- id: source-github-raw
+  worker: omac-worker-backend
+  blocked_by:
+  - raw-ingest
+  title: github-source：正文全文且总是带 detail
+  description: 产出 source-github-raw-delivery。不依赖 HTML 转文本包。支持性改动：录制样本放 tests/doubles/tools（或包内
+    testdata），并在 tests/e2e/sourcesv2 新增本节点自己的一个测试文件（不改他人的文件），e2e-source-raw 在同一包里串起全流程。
+  reviewer: omac-reviewer
+  contract:
+    objective: github-source 的正文全文进 detail（Markdown 即原文，不另给 original）且总是带，summary
+      仍是前 200 个字符，作者、标签、状态、仓库与编号进 headers
+    non_goals:
+    - 只改本节点拥有的来源程序包；其他来源程序由各自节点负责
+    - 不回填、不改写已落盘的事件，不改事件 id 算法（WB-36）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./sources/github/...
+    - go test -count=1 ./tests/doubles/tools/...
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: source-github-raw-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/solution-design.md#92-执行契约
+      - docs/changes-v0.2.0.md#106-能力包与来源程序
+      delivery_goal: github-source 的正文全文进 detail（Markdown 即原文，不另给 original）且总是带，summary
+        仍是前 200 个字符，作者、标签、状态、仓库与编号进 headers
+      covers:
+      - ACT-OAD-01
+      acceptance_refs:
+      - flow-other-adapters-raw
+      commands:
+      - go test -count=1 ./sources/github/...
+      - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-other-adapters-raw
+      action_ids:
+      - ACT-OAD-01
+    acceptance_refs:
+    - flow-other-adapters-raw
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/solution-design.md#92-执行契约
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    scope_paths:
+    - sources/github/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: source-github-raw-delivery
+      provides:
+      - id: github-raw-output
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    consumes:
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    coverage_gate: 80
+- id: source-rss-raw
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - source-htmltext
+  - raw-ingest
+  title: rss-source：HTML 条目转文本并保存原文与附带文件
+  description: 产出 source-rss-raw-delivery。订阅源本身只给摘要时取不到全文，不算 partial。支持性改动：录制样本放 tests/doubles/tools（或包内
+    testdata），并在 tests/e2e/sourcesv2 新增本节点自己的一个测试文件（不改他人的文件），e2e-source-raw 在同一包里串起全流程。
+  reviewer: omac-reviewer
+  contract:
+    objective: rss-source 的条目正文（全文字段，没有则取描述）经共用包转文本进 detail、HTML 原样进 original，标题与作者不截，附带文件进
+      attachments（只有地址、类型与大小，不支持取回）；HTML 转换失败时 detail 留空、original 保存并以 partial 自报；交付
+      rss-long.xml、rss-broken.xml 录制样本
+    non_goals:
+    - 只改本节点拥有的来源程序包；其他来源程序由各自节点负责
+    - 不回填、不改写已落盘的事件，不改事件 id 算法（WB-36）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./sources/rss/...
+    - go test -count=1 ./tests/doubles/tools/...
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: source-rss-raw-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/solution-design.md#92-执行契约
+      - docs/changes-v0.2.0.md#106-能力包与来源程序
+      delivery_goal: rss-source 的条目正文（全文字段，没有则取描述）经共用包转文本进 detail、HTML 原样进 original，标题与作者不截，附带文件进
+        attachments（只有地址、类型与大小，不支持取回）；HTML 转换失败时 detail 留空、original 保存并以 partial 自报；交付
+        rss-long.xml、rss-broken.xml 录制样本
+      covers:
+      - ACT-OAD-02
+      - ACT-OAD-03
+      acceptance_refs:
+      - flow-other-adapters-raw
+      commands:
+      - go test -count=1 ./sources/rss/...
+      - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-other-adapters-raw
+      action_ids:
+      - ACT-OAD-02
+      - ACT-OAD-03
+    acceptance_refs:
+    - flow-other-adapters-raw
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/solution-design.md#92-执行契约
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    scope_paths:
+    - sources/rss/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: source-rss-raw-delivery
+      provides:
+      - id: rss-raw-output
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    consumes:
+    - artifact_id: source-htmltext-delivery
+      producer: source-htmltext
+      evidence_mode: artifact
+      requires:
+      - html-to-text
+      - header-normalize
+      - byte-batching
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    coverage_gate: 80
+- id: source-calendar-raw
+  worker: omac-worker-backend
+  blocked_by:
+  - raw-ingest
+  title: calendar 来源：起止、地点、组织者、参与者与状态进 headers
+  description: 产出 source-calendar-raw-delivery。ACT-OAD-04 的日历部分，由 e2e-source-raw 统一验收。支持性改动：录制样本放
+    tests/doubles/tools（或包内 testdata），并在 tests/e2e/sourcesv2 新增本节点自己的一个测试文件（不改他人的文件），e2e-source-raw
+    在同一包里串起全流程。
+  reviewer: omac-reviewer
+  contract:
+    objective: calendar 来源程序描述照旧不截断，起止时间、地点、组织者、参与者与状态进 headers
+    non_goals:
+    - 只改本节点拥有的来源程序包；其他来源程序由各自节点负责
+    - 不回填、不改写已落盘的事件，不改事件 id 算法（WB-36）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./sources/calendar/...
+    - go test -count=1 ./tests/doubles/tools/...
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: source-calendar-raw-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/solution-design.md#92-执行契约
+      delivery_goal: calendar 来源程序描述照旧不截断，起止时间、地点、组织者、参与者与状态进 headers
+      covers:
+      - flow-other-adapters-raw
+      acceptance_refs:
+      - flow-other-adapters-raw
+      commands:
+      - go test -count=1 ./sources/calendar/...
+      - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-other-adapters-raw
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/solution-design.md#92-执行契约
+    scope_paths:
+    - sources/calendar/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: source-calendar-raw-delivery
+      provides:
+      - id: calendar-headers
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    consumes:
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    coverage_gate: 80
+- id: source-httpjson-raw
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - raw-ingest
+  title: http-json 来源：被映射的那一条 JSON 原样进 original
+  description: 产出 source-httpjson-raw-delivery。ACT-OAD-04 的 http-json 部分，由 e2e-source-raw
+    统一验收。支持性改动：录制样本放 tests/doubles/tools（或包内 testdata），并在 tests/e2e/sourcesv2 新增本节点自己的一个测试文件（不改他人的文件），e2e-source-raw
+    在同一包里串起全流程。
+  reviewer: omac-reviewer
+  contract:
+    objective: http-json 来源程序字段仍按映射原样取，被映射的那一条 JSON 原样进 original
+    non_goals:
+    - 只改本节点拥有的来源程序包；其他来源程序由各自节点负责
+    - 不回填、不改写已落盘的事件，不改事件 id 算法（WB-36）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./sources/httpjson/...
+    - go test -count=1 ./tests/doubles/tools/...
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: source-httpjson-raw-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/solution-design.md#92-执行契约
+      delivery_goal: http-json 来源程序字段仍按映射原样取，被映射的那一条 JSON 原样进 original
+      covers:
+      - flow-other-adapters-raw
+      acceptance_refs:
+      - flow-other-adapters-raw
+      commands:
+      - go test -count=1 ./sources/httpjson/...
+      - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-other-adapters-raw
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/solution-design.md#92-执行契约
+    scope_paths:
+    - sources/httpjson/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: source-httpjson-raw-delivery
+      provides:
+      - id: httpjson-original
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    consumes:
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    coverage_gate: 80
+- id: source-dirwatch-raw
+  worker: omac-worker-backend
+  blocked_by:
+  - source-htmltext
+  - raw-ingest
+  title: dir-watch：输出预算对齐 max_source_output_mb 并订正过时注释
+  description: 产出 source-dirwatch-raw-delivery。其他来源程序测试里提到旧 64KB 的历史评审注释不改。ACT-OAD-04
+    的 dir-watch 部分由 e2e-source-raw 统一验收。支持性改动：录制样本放 tests/doubles/tools（或包内 testdata），并在
+    tests/e2e/sourcesv2 新增本节点自己的一个测试文件（不改他人的文件），e2e-source-raw 在同一包里串起全流程。
+  reviewer: omac-reviewer
+  contract:
+    objective: dir-watch 事件照旧只有路径、修改时间与大小且 link 指向文件、不把文件内容读进账本；把 outputBudget 的依据由“runner
+      保留的 64KiB”改为 max_source_output_mb 并用共用包按字节分批，订正 sources/dirwatch/dirwatch.go
+      中的过时注释（REQ-REL-COMMENTFIX）
+    non_goals:
+    - 只改本节点拥有的来源程序包；其他来源程序由各自节点负责
+    - 不回填、不改写已落盘的事件，不改事件 id 算法（WB-36）
+    - 不把文件内容读进账本
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./sources/dirwatch/...
+    - go test -count=1 ./tests/doubles/tools/...
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    - go run ./tools/redline
+    integration_gates:
+    - name: source-dirwatch-raw-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/solution-design.md#92-执行契约
+      - docs/changes-v0.2.0.md#108-订正不计入上面的条数
+      delivery_goal: dir-watch 事件照旧只有路径、修改时间与大小且 link 指向文件、不把文件内容读进账本；把 outputBudget
+        的依据由“runner 保留的 64KiB”改为 max_source_output_mb 并用共用包按字节分批，订正 sources/dirwatch/dirwatch.go
+        中的过时注释（REQ-REL-COMMENTFIX）
+      covers:
+      - REQ-REL-COMMENTFIX
+      acceptance_refs:
+      - flow-other-adapters-raw
+      commands:
+      - go test -count=1 ./sources/dirwatch/...
+      - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-other-adapters-raw
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/solution-design.md#92-执行契约
+    - docs/changes-v0.2.0.md#108-订正不计入上面的条数
+    scope_paths:
+    - sources/dirwatch/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: source-dirwatch-raw-delivery
+      provides:
+      - id: dirwatch-output-budget
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    consumes:
+    - artifact_id: source-htmltext-delivery
+      producer: source-htmltext
+      evidence_mode: artifact
+      requires:
+      - html-to-text
+      - header-normalize
+      - byte-batching
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    requirement_refs:
+    - REQ-REL-COMMENTFIX
+    coverage_gate: 80
+- id: e2e-source-raw
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - source-applepim-raw
+  - source-himalaya-raw
+  - source-github-raw
+  - source-rss-raw
+  - source-calendar-raw
+  - source-httpjson-raw
+  - source-dirwatch-raw
+  - source-htmltext
+  - reminder-open-rule
+  title: e2e：内置来源程序取原文（替身版）
+  description: 产出 e2e-source-raw-evidence。全流程 owner：flow-mail-adapters-raw, flow-other-adapters-raw,
+    flow-reminder-open。主要归属是已有 tests/e2e/sourcesv2 包里串起全流程的测试文件；各来源节点在同一包里各自新增的测试文件不由本节点改写。
+  reviewer: omac-reviewer
+  contract:
+    objective: 用 TOOL_STUB_BIN 回放录制样本与本机 http.server，独立执行并证明 flow-mail-adapters-raw、flow-other-adapters-raw、flow-reminder-open
+      全流程；ACT-OAD-04 横跨日历、提醒事项、http-json、dir-watch 四个来源程序，由本节点在它们都合入后统一断言
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    integration_gates:
+    - name: e2e-source-raw-gate
+      layer: L2
+      source_of_truth:
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      delivery_goal: 用 TOOL_STUB_BIN 回放录制样本与本机 http.server，独立执行并证明 flow-mail-adapters-raw、flow-other-adapters-raw、flow-reminder-open
+        全流程；ACT-OAD-04 横跨日历、提醒事项、http-json、dir-watch 四个来源程序，由本节点在它们都合入后统一断言
+      covers:
+      - ACT-OAD-04
+      acceptance_refs:
+      - flow-mail-adapters-raw
+      - flow-other-adapters-raw
+      - flow-reminder-open
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/sourcesv2/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-mail-adapters-raw
+    - flow-other-adapters-raw
+    - flow-reminder-open
+    acceptance_contributions:
+    - flow_id: flow-other-adapters-raw
+      action_ids:
+      - ACT-OAD-04
+    acceptance_refs:
+    - flow-mail-adapters-raw
+    - flow-other-adapters-raw
+    - flow-reminder-open
+    source_of_truth:
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    scope_paths:
+    - tests/e2e/sourcesv2/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-source-raw-evidence
+      provides:
+      - id: source-raw-flow-evidence
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes:
+    - artifact_id: source-applepim-raw-delivery
+      producer: source-applepim-raw
+      evidence_mode: artifact
+      requires:
+      - applepim-mail-raw
+      - applepim-pim-headers
+      - reminder-open-events
+    - artifact_id: source-himalaya-raw-delivery
+      producer: source-himalaya-raw
+      evidence_mode: artifact
+      requires:
+      - himalaya-mail-raw
+    - artifact_id: source-github-raw-delivery
+      producer: source-github-raw
+      evidence_mode: artifact
+      requires:
+      - github-raw-output
+    - artifact_id: source-rss-raw-delivery
+      producer: source-rss-raw
+      evidence_mode: artifact
+      requires:
+      - rss-raw-output
+    - artifact_id: source-calendar-raw-delivery
+      producer: source-calendar-raw
+      evidence_mode: artifact
+      requires:
+      - calendar-headers
+    - artifact_id: source-httpjson-raw-delivery
+      producer: source-httpjson-raw
+      evidence_mode: artifact
+      requires:
+      - httpjson-original
+    - artifact_id: source-dirwatch-raw-delivery
+      producer: source-dirwatch-raw
+      evidence_mode: artifact
+      requires:
+      - dirwatch-output-budget
+    - artifact_id: source-htmltext-delivery
+      producer: source-htmltext
+      evidence_mode: artifact
+      requires:
+      - html-to-text
+      - header-normalize
+      - byte-batching
+    - artifact_id: reminder-open-rule-delivery
+      producer: reminder-open-rule
+      evidence_mode: artifact
+      requires:
+      - reminder-open-rule
+    coverage_gate: 0
+- id: attachment-fetch
+  worker: omac-worker-backend
+  blocked_by:
+  - raw-read-api
+  - raw-retention-purge
+  title: 附件按需取回
+  description: 产出 attachment-fetch-delivery。来源 API 路由分组与 raw-read-api 同文件，事件读写与 raw-retention-purge
+    同代码，均排在其后。Web 的“取回”按钮在 web-raw-actions。
+  reviewer: omac-reviewer
+  contract:
+    objective: '接入声明的 content.attachments: fetch，经外呼调用器以 fetch 模式运行来源程序（超时 60 秒、≤32
+      MiB）、存为内容寻址附件并记内部审计事件，POST /source-events/{id}/attachments/{n}/fetch（成功 200
+      带 blob、不支持 409、失败与超限 502 且清单不变；delegate 附原话可取回，运行凭据与 observer 不可）与 source.fetch_attachment；不产生来源事件、不推进游标'
+    non_goals:
+    - 不做 Web 页面（web-raw-actions）
+    - 不做入账自动保存小附件（REQ-NOT-RAWEXTRA）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/outcall/... ./kernel/sources/...
+    - go test -count=1 ./api/sources/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: attachment-fetch-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#92-执行契约
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+      - docs/changes-v0.2.0.md#103-配置策略与授权
+      delivery_goal: '接入声明的 content.attachments: fetch，经外呼调用器以 fetch 模式运行来源程序（超时 60
+        秒、≤32 MiB）、存为内容寻址附件并记内部审计事件，POST /source-events/{id}/attachments/{n}/fetch（成功
+        200 带 blob、不支持 409、失败与超限 502 且清单不变；delegate 附原话可取回，运行凭据与 observer 不可）与 source.fetch_attachment；不产生来源事件、不推进游标'
+      covers:
+      - ACT-FET-01
+      - ACT-FET-03
+      - ACT-FET-04
+      acceptance_refs:
+      - flow-attachment-fetch
+      commands:
+      - go test -count=1 ./kernel/outcall/... ./kernel/sources/...
+      - go test -count=1 ./api/sources/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-attachment-fetch
+      action_ids:
+      - ACT-FET-01
+      - ACT-FET-03
+      - ACT-FET-04
+    acceptance_refs:
+    - flow-attachment-fetch
+    source_of_truth:
+    - docs/solution-design.md#92-执行契约
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - kernel/outcall/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: attachment-fetch-delivery
+      provides:
+      - id: attachment-fetch-api
+        ref: docs/appendix-b-api-cli.md#b2-http-api
+      - id: fetch-declaration
+        ref: docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    consumes:
+    - artifact_id: raw-read-api-delivery
+      producer: raw-read-api
+      evidence_mode: artifact
+      requires:
+      - source-event-read-api
+      - outbound-scoped-read
+      - storage-stats
+      - slim-event-lists
+    - artifact_id: raw-retention-purge-delivery
+      producer: raw-retention-purge
+      evidence_mode: artifact
+      requires:
+      - content-retention
+      - source-event-purge
+      - dedup-tombstone
+    coverage_gate: 80
+- id: web-raw-trace
+  worker: omac-worker-frontend
+  blocked_by:
+  - raw-read-api
+  - material-budget
+  - web-brief-sections
+  title: Web：处理经过页的原文栏、裁剪量与各处来源链接
+  description: 产出 web-raw-trace-delivery。依赖 web-brief-sections 只因同改简报页（知会条目链接）。事项详情来源区的链接在
+    items-web。取回与删除入口在 web-raw-actions。
+  reviewer: omac-reviewer
+  contract:
+    objective: 处理经过页 /sources/events/:id 加“原文”栏（正文纯文本保留换行缩进、头部成表、附件清单、会话逐条消息、原始格式只作文本且不加载任何外部资源、页头写大小与
+      full/partial/legacy/purged 的说明）与“送给模型 N / M 字符”（旧处置不显示），并在建议流来源、简报知会条目与挂靠消息组件上链到该页
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不做取回与删除操作（web-raw-actions）
+    - 不改事项页（items-web）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/trace
+    - npm --prefix web run test -- --run src/features/proposals
+    - npm --prefix web run test -- --run src/features/attached-messages
+    - npm --prefix web run test -- --run src/features/briefs
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    integration_gates:
+    - name: web-raw-trace-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/solution-design.md#616-判断记录
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+      - docs/solution-design.md#41-web-中台
+      - docs/changes-v0.2.0.md#104-http-api
+      delivery_goal: 处理经过页 /sources/events/:id 加“原文”栏（正文纯文本保留换行缩进、头部成表、附件清单、会话逐条消息、原始格式只作文本且不加载任何外部资源、页头写大小与
+        full/partial/legacy/purged 的说明）与“送给模型 N / M 字符”（旧处置不显示），并在建议流来源、简报知会条目与挂靠消息组件上链到该页
+      covers:
+      - ACT-WRP-01
+      - ACT-WRP-02
+      - ACT-WRP-03
+      - ACT-BUD-05
+      acceptance_refs:
+      - flow-web-raw-page
+      - flow-material-budget
+      commands:
+      - npm --prefix web run test -- --run src/features/trace
+      - npm --prefix web run test -- --run src/features/attached-messages
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-web-raw-page
+      action_ids:
+      - ACT-WRP-01
+      - ACT-WRP-02
+      - ACT-WRP-03
+    - flow_id: flow-material-budget
+      action_ids:
+      - ACT-BUD-05
+    acceptance_refs:
+    - flow-web-raw-page
+    - flow-material-budget
+    source_of_truth:
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/solution-design.md#616-判断记录
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
+    - docs/solution-design.md#41-web-中台
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - web/src/features/trace/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-raw-trace-delivery
+      provides:
+      - id: raw-column-view
+        ref: docs/solution-design.md#610-source-登记来源事件ingest
+      - id: trim-display
+        ref: docs/solution-design.md#616-判断记录
+      - id: raw-page-links
+        ref: docs/appendix-b-api-cli.md#b2-http-api
+    consumes:
+    - artifact_id: raw-read-api-delivery
+      producer: raw-read-api
+      evidence_mode: artifact
+      requires:
+      - source-event-read-api
+      - outbound-scoped-read
+      - storage-stats
+      - slim-event-lists
+    - artifact_id: material-budget-delivery
+      producer: material-budget
+      evidence_mode: artifact
+      requires:
+      - material-budget-trim
+      - trim-trace
+      - proposal-body-4000
+      - generate-budget-setting
+    - artifact_id: web-brief-sections-delivery
+      producer: web-brief-sections
+      evidence_mode: artifact
+      requires:
+      - brief-sections-view
+    coverage_gate: 70
+- id: web-storage-page
+  worker: omac-worker-frontend-taiyi
+  blocked_by:
+  - raw-read-api
+  - raw-retention-purge
+  title: Web：设置 › 存储页与保留天数
+  description: 产出 web-storage-page-delivery。全流程 owner：flow-storage。新页面目录，导航登记加一行。门槛同时跑
+    raw-read-api 的 /storage 接口测试与本页组件测试。
+  reviewer: omac-reviewer
+  contract:
+    objective: 设置 › 存储页（/settings/storage）显示账本、附件、各来源原文占用、事件数与最早时间（数字与 GET /storage
+      同源），每个来源可设保留天数（默认不清理）并写明清掉的原文不可恢复；作为 flow-storage 的全流程 owner 同时验证接口与页面一致
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/settings-storage
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    - go test -count=1 ./api/sources/...
+    integration_gates:
+    - name: web-storage-page-gate
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#615-物理删除与保留
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/solution-design.md#41-web-中台
+      - docs/changes-v0.2.0.md#104-http-api
+      delivery_goal: 设置 › 存储页（/settings/storage）显示账本、附件、各来源原文占用、事件数与最早时间（数字与 GET /storage
+        同源），每个来源可设保留天数（默认不清理）并写明清掉的原文不可恢复；作为 flow-storage 的全流程 owner 同时验证接口与页面一致
+      covers:
+      - ACT-STO-02
+      acceptance_refs:
+      - flow-storage
+      - flow-raw-retention
+      commands:
+      - npm --prefix web run test -- --run src/features/settings-storage
+      - go test -count=1 ./api/sources/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-storage
+    acceptance_contributions:
+    - flow_id: flow-storage
+      action_ids:
+      - ACT-STO-02
+    acceptance_refs:
+    - flow-storage
+    - flow-raw-retention
+    source_of_truth:
+    - docs/solution-design.md#615-物理删除与保留
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/solution-design.md#41-web-中台
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - web/src/features/settings-storage/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-storage-page-delivery
+      provides:
+      - id: storage-settings-page
+        ref: docs/solution-design.md#615-物理删除与保留
+    consumes:
+    - artifact_id: raw-read-api-delivery
+      producer: raw-read-api
+      evidence_mode: artifact
+      requires:
+      - source-event-read-api
+      - outbound-scoped-read
+      - storage-stats
+      - slim-event-lists
+    - artifact_id: raw-retention-purge-delivery
+      producer: raw-retention-purge
+      evidence_mode: artifact
+      requires:
+      - content-retention
+      - source-event-purge
+      - dedup-tombstone
+    coverage_gate: 70
+- id: web-model-budget
+  worker: omac-worker-frontend
+  blocked_by:
+  - material-budget
+  title: Web：设置 › 模型的资料预算字段
+  description: 产出 web-model-budget-delivery。接口与默认值在 material-budget；本节点只做页面并覆盖缺省与保存两种情况。
+  reviewer: omac-reviewer
+  contract:
+    objective: 设置 › 模型页生成端点一块新增资料预算字段，缺省显示 24000，保存后写进 generate_endpoint.max_material_chars（只
+      Web 可改）
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/settings-models
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    integration_gates:
+    - name: web-model-budget-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#84-输入输出契约
+      - docs/changes-v0.2.0.md#103-配置策略与授权
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 设置 › 模型页生成端点一块新增资料预算字段，缺省显示 24000，保存后写进 generate_endpoint.max_material_chars（只
+        Web 可改）
+      covers:
+      - ACT-BUD-01
+      acceptance_refs:
+      - flow-material-budget
+      commands:
+      - npm --prefix web run test -- --run src/features/settings-models
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-material-budget
+      action_ids:
+      - ACT-BUD-01
+    acceptance_refs:
+    - flow-material-budget
+    source_of_truth:
+    - docs/solution-design.md#84-输入输出契约
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - web/src/features/settings-models/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-model-budget-delivery
+      provides:
+      - id: model-budget-field
+        ref: docs/solution-design.md#84-输入输出契约
+    consumes:
+    - artifact_id: material-budget-delivery
+      producer: material-budget
+      evidence_mode: artifact
+      requires:
+      - material-budget-trim
+      - trim-trace
+      - proposal-body-4000
+      - generate-budget-setting
+    coverage_gate: 70
+- id: brief-raw
+  worker: omac-worker-backend
+  blocked_by:
+  - brief-material
+  - raw-ingest
+  - material-budget
+  title: 简报带来源原文文件
+  description: 产出 brief-raw-delivery。主要归属是资料组装 kernel/agents/task；与 brief-material
+    同一函数，排在其后。裁剪调用 material-budget 交付的 kernel/budget 包，不另写一份。
+  reviewer: omac-reviewer
+  contract:
+    objective: 知会与新增建议引用的来源事件原文各写一个只读资料文件，按 outbound.external 裁剪（全文写全文、摘录写摘录、其余不写）并受单文件与合计字符预算约束（合计超
+      400000 字符时从最旧条目起只留摘要），运行凭据仍不能经 API 读来源事件
+    non_goals:
+    - 不改 brief-material 交付的五段与窗口语义
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./kernel/agents/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: brief-raw-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-c-capability-pack.md#c13-示例简报包
+      - docs/solution-design.md#73-主动服务
+      - docs/solution-design.md#1414-外发控制
+      - docs/solution-design.md#84-输入输出契约
+      - docs/changes-v0.2.0.md#106-能力包与来源程序
+      delivery_goal: 知会与新增建议引用的来源事件原文各写一个只读资料文件，按 outbound.external 裁剪（全文写全文、摘录写摘录、其余不写）并受单文件与合计字符预算约束（合计超
+        400000 字符时从最旧条目起只留摘要），运行凭据仍不能经 API 读来源事件
+      covers:
+      - ACT-BRF-05
+      - ACT-BRF-06
+      - ACT-BRF-08
+      acceptance_refs:
+      - flow-brief-material
+      commands:
+      - go test -count=1 ./kernel/agents/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-brief-material
+      action_ids:
+      - ACT-BRF-05
+      - ACT-BRF-06
+      - ACT-BRF-08
+    acceptance_refs:
+    - flow-brief-material
+    source_of_truth:
+    - docs/appendix-c-capability-pack.md#c13-示例简报包
+    - docs/solution-design.md#73-主动服务
+    - docs/solution-design.md#1414-外发控制
+    - docs/solution-design.md#84-输入输出契约
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    scope_paths:
+    - kernel/agents/task/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: brief-raw-delivery
+      provides:
+      - id: brief-raw-files
+        ref: docs/appendix-c-capability-pack.md#c13-示例简报包
+    consumes:
+    - artifact_id: brief-material-delivery
+      producer: brief-material
+      evidence_mode: artifact
+      requires:
+      - brief-segments
+      - brief-window
+      - brief-pack-v2
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    - artifact_id: material-budget-delivery
+      producer: material-budget
+      evidence_mode: artifact
+      requires:
+      - material-budget-trim
+      - trim-trace
+      - proposal-body-4000
+      - generate-budget-setting
+    coverage_gate: 80
+- id: web-import-page
+  worker: omac-worker-frontend-taiyi
+  blocked_by:
+  - import-apply
+  - grant-import
+  title: Web：设置 › 导入页
+  description: 产出 web-import-page-delivery。新页面目录，导航登记加一行。
+  reviewer: omac-reviewer
+  contract:
+    objective: 设置 › 导入页（/settings/import）上传计划文件、先显示预检（dry_run）、确认后按 500 条分批写入并显示进度，下方列历次批次并可点开看写了哪些事项，并提供签发导入授权单的入口
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/settings-import
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    integration_gates:
+    - name: web-import-page-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#71-事项中心
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/solution-design.md#41-web-中台
+      - docs/changes-v0.2.0.md#104-http-api
+      delivery_goal: 设置 › 导入页（/settings/import）上传计划文件、先显示预检（dry_run）、确认后按 500 条分批写入并显示进度，下方列历次批次并可点开看写了哪些事项，并提供签发导入授权单的入口
+      covers:
+      - ACT-WIM-01
+      - ACT-WIM-02
+      acceptance_refs:
+      - flow-web-import
+      commands:
+      - npm --prefix web run test -- --run src/features/settings-import
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-web-import
+      action_ids:
+      - ACT-WIM-01
+      - ACT-WIM-02
+    acceptance_refs:
+    - flow-web-import
+    source_of_truth:
+    - docs/solution-design.md#71-事项中心
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/solution-design.md#41-web-中台
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - web/src/features/settings-import/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-import-page-delivery
+      provides:
+      - id: import-settings-page
+        ref: docs/solution-design.md#71-事项中心
+    consumes:
+    - artifact_id: import-apply-delivery
+      producer: import-apply
+      evidence_mode: artifact
+      requires:
+      - import-apply-command
+      - import-api
+      - import-cli
+      - origin-query
+    - artifact_id: grant-import-delivery
+      producer: grant-import
+      evidence_mode: artifact
+      requires:
+      - import-grant
+      - grant-only-gate
+      - progress-grantable
+    coverage_gate: 70
+- id: web-audit-fold
+  worker: omac-worker-frontend
+  blocked_by:
+  - import-apply
+  title: Web：操作记录折叠导入批次
+  description: 产出 web-audit-fold-delivery。按 GET /audit/events 的 imported 字段折叠。
+  reviewer: omac-reviewer
+  contract:
+    objective: 诊断 › 操作记录把一个导入批次折叠成一行“导入 N 条”并可展开看逐条，其余事件照常一条一行
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/audit
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    integration_gates:
+    - name: web-audit-fold-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+      - docs/solution-design.md#41-web-中台
+      delivery_goal: 诊断 › 操作记录把一个导入批次折叠成一行“导入 N 条”并可展开看逐条，其余事件照常一条一行
+      covers:
+      - ACT-WIM-03
+      acceptance_refs:
+      - flow-web-import
+      commands:
+      - npm --prefix web run test -- --run src/features/audit
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-web-import
+      action_ids:
+      - ACT-WIM-03
+    acceptance_refs:
+    - flow-web-import
+    source_of_truth:
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/solution-design.md#41-web-中台
+    scope_paths:
+    - web/src/features/audit/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-audit-fold-delivery
+      provides:
+      - id: audit-import-fold
+        ref: docs/appendix-b-api-cli.md#b2-http-api
+    consumes:
+    - artifact_id: import-apply-delivery
+      producer: import-apply
+      evidence_mode: artifact
+      requires:
+      - import-apply-command
+      - import-api
+      - import-cli
+      - origin-query
+    - artifact_id: eventlog-live-read-delivery
+      producer: eventlog-live-read
+      evidence_mode: artifact
+      requires:
+      - imported-envelope
+    coverage_gate: 70
+- id: e2e-import
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - import-apply
+  - brief-material
+  - doubles-harness
+  title: e2e：带原始时间的导入、授权单与不触发自动化（替身版）
+  description: 产出 e2e-import-evidence。全流程 owner：flow-import-apply, flow-import-no-automation,
+    flow-import-grant。按 OMAC-NOTES §3 I5：导入前后投递表、规则触发记录、跟进 Timer、摘要起草、注入增量、对外事件流（import.completed
+    除外）逐个订阅方断言无新增（清单取 eventlog-live-read 的 PR 说明）；授权单经 Web 登录的 API 签发。
+  reviewer: omac-reviewer
+  contract:
+    objective: 在替身环境上用测试构建的真实二进制独立执行并证明 flow-import-apply、flow-import-no-automation、flow-import-grant
+      全流程
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/importwb/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    integration_gates:
+    - name: e2e-import-gate
+      layer: L2
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/solution-design.md#71-事项中心
+      - docs/solution-design.md#145-代理授权
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#5-其他提醒
+      delivery_goal: 在替身环境上用测试构建的真实二进制独立执行并证明 flow-import-apply、flow-import-no-automation、flow-import-grant
+        全流程
+      covers:
+      - flow-import-apply
+      - flow-import-no-automation
+      - flow-import-grant
+      acceptance_refs:
+      - flow-import-apply
+      - flow-import-no-automation
+      - flow-import-grant
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/importwb/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-import-apply
+    - flow-import-no-automation
+    - flow-import-grant
+    acceptance_refs:
+    - flow-import-apply
+    - flow-import-no-automation
+    - flow-import-grant
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/solution-design.md#71-事项中心
+    - docs/solution-design.md#145-代理授权
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#5-其他提醒
+    scope_paths:
+    - tests/e2e/importwb/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-import-evidence
+      provides:
+      - id: import-flow-evidence
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes:
+    - artifact_id: import-apply-delivery
+      producer: import-apply
+      evidence_mode: artifact
+      requires:
+      - import-apply-command
+      - import-api
+      - import-cli
+      - origin-query
+    - artifact_id: brief-material-delivery
+      producer: brief-material
+      evidence_mode: artifact
+      requires:
+      - brief-segments
+      - brief-window
+      - brief-pack-v2
+    - artifact_id: doubles-harness-delivery
+      producer: doubles-harness
+      evidence_mode: artifact
+      requires:
+      - harness-multi-link-report
+      - harness-brief-files
+      - harness-session-entries
+    - artifact_id: eventlog-live-read-delivery
+      producer: eventlog-live-read
+      evidence_mode: artifact
+      requires:
+      - eventlog-live-reader
+      - imported-envelope
+      - stale-from-import
+    - artifact_id: grant-import-delivery
+      producer: grant-import
+      evidence_mode: artifact
+      requires:
+      - import-grant
+      - grant-only-gate
+      - progress-grantable
+    coverage_gate: 0
+- id: e2e-schema8-upgrade
+  worker: omac-worker-backend
+  blocked_by:
+  - schema-v8
+  - raw-read-api
+  - raw-retention-purge
+  - link-material
+  - import-apply
+  title: e2e：结构版本 7 → 8 升级与回退演练
+  description: 产出 e2e-schema8-upgrade-evidence。全流程 owner：flow-wb-schema8-upgrade。ACT-S8-05
+    跨多个新接口（来源的 content_retention_days、事项 origin 查询、审计 imported 筛选、带授权单事件的回放），由本节点在升级后的夹具上直接断言。用例加在已有的
+    tests/e2e/upgrade 包。
+  reviewer: omac-reviewer
+  contract:
+    objective: 用结构版本 7 夹具与旧二进制独立执行并证明 flow-wb-schema8-upgrade 全流程：升级后行数不减、Event 序号连续与载荷不变、旧数据经新接口照常可读、旧二进制拒绝打开、快照恢复与升级前一致、迁移中途失败整体回滚
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/upgrade/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    integration_gates:
+    - name: e2e-schema8-upgrade-gate
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#204-v020发布门槛
+      - docs/solution-design.md#165-备份升级回退与卸载
+      - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      delivery_goal: 用结构版本 7 夹具与旧二进制独立执行并证明 flow-wb-schema8-upgrade 全流程：升级后行数不减、Event
+        序号连续与载荷不变、旧数据经新接口照常可读、旧二进制拒绝打开、快照恢复与升级前一致、迁移中途失败整体回滚
+      covers:
+      - ACT-S8-05
+      acceptance_refs:
+      - flow-wb-schema8-upgrade
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/upgrade/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-wb-schema8-upgrade
+    acceptance_contributions:
+    - flow_id: flow-wb-schema8-upgrade
+      action_ids:
+      - ACT-S8-05
+    acceptance_refs:
+    - flow-wb-schema8-upgrade
+    source_of_truth:
+    - docs/solution-design.md#204-v020发布门槛
+    - docs/solution-design.md#165-备份升级回退与卸载
+    - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    scope_paths:
+    - tests/e2e/upgrade/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-schema8-upgrade-evidence
+      provides:
+      - id: schema8-upgrade-evidence
+        ref: docs/solution-design.md#204-v020发布门槛
+    consumes:
+    - artifact_id: schema-v8-delivery
+      producer: schema-v8
+      evidence_mode: artifact
+      requires:
+      - ledger-v8-tables
+      - ledger-fixture-v7
+      - migration-chain-v8
+    - artifact_id: raw-read-api-delivery
+      producer: raw-read-api
+      evidence_mode: artifact
+      requires:
+      - source-event-read-api
+      - outbound-scoped-read
+      - storage-stats
+      - slim-event-lists
+    - artifact_id: raw-retention-purge-delivery
+      producer: raw-retention-purge
+      evidence_mode: artifact
+      requires:
+      - content-retention
+      - source-event-purge
+      - dedup-tombstone
+    - artifact_id: link-material-delivery
+      producer: link-material
+      evidence_mode: artifact
+      requires:
+      - material-link-command
+      - note-vaults-policy
+      - report-links-output
+      - material-form-read
+    - artifact_id: import-apply-delivery
+      producer: import-apply
+      evidence_mode: artifact
+      requires:
+      - import-apply-command
+      - import-api
+      - import-cli
+      - origin-query
+    coverage_gate: 0
+- id: reminder-open-rule
+  worker: omac-worker-backend
+  blocked_by:
+  - urgent-notify
+  title: 内置规则 reminder-open：reminder.open 直接进建议流
+  description: 产出 reminder-open-rule-delivery。入站包的规则与提示词按 extract-align → urgent-notify
+    → 本节点依次修改。事件本身由 source-applepim-raw 的 undated_lists 产出；全流程由 e2e-source-raw 验收。
+  reviewer: omac-reviewer
+  contract:
+    objective: 入站包新增内置规则 reminder-open：reminder.open 事件直接 proposed、不调模型，并去掉附录 C.14
+      对应条目的规划标记
+    non_goals:
+    - 不改其他内置规则与提示词模板
+    - 不改来源程序
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./packs/... ./kernel/packs/...
+    - go test -count=1 ./kernel/inbound/... ./kernel/rules/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: reminder-open-rule-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-c-capability-pack.md#c14-内置包声明的内容
+      - docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+      - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+      - docs/changes-v0.2.0.md#106-能力包与来源程序
+      delivery_goal: 入站包新增内置规则 reminder-open：reminder.open 事件直接 proposed、不调模型，并去掉附录
+        C.14 对应条目的规划标记
+      covers:
+      - ACT-REM-02
+      acceptance_refs:
+      - flow-reminder-open
+      commands:
+      - go test -count=1 ./packs/... ./kernel/packs/...
+      - go test -count=1 ./kernel/inbound/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-reminder-open
+      action_ids:
+      - ACT-REM-02
+    acceptance_refs:
+    - flow-reminder-open
+    source_of_truth:
+    - docs/appendix-c-capability-pack.md#c14-内置包声明的内容
+    - docs/appendix-c-capability-pack.md#c5-source_ruleswebhook_schemeswebhook_mappings
+    - docs/appendix-d-adapters.md#d2-邮件与日历的工具适配
+    - docs/changes-v0.2.0.md#106-能力包与来源程序
+    scope_paths:
+    - packs/inbound-triage/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: reminder-open-rule-delivery
+      provides:
+      - id: reminder-open-rule
+        ref: docs/appendix-c-capability-pack.md#c14-内置包声明的内容
+    consumes:
+    - artifact_id: urgent-notify-delivery
+      producer: urgent-notify
+      evidence_mode: artifact
+      requires:
+      - notify-urgent-rule
+      - urgent-delivery
+    coverage_gate: 80
+- id: web-raw-actions
+  worker: omac-worker-frontend-taiyi
+  blocked_by:
+  - web-raw-trace
+  - attachment-fetch
+  title: Web：来源原文页的附件取回与物理删除入口
+  description: 产出 web-raw-actions-delivery。主要归属是物理删除入口 web/src/features/purge（来源事件删除与“连同它的来源事件”勾选）；处理经过页
+    trace 的“取回”与删除按钮是支持性改动，该页先由 web-raw-trace 出只读内容，本节点排在其后。接口 409/502 语义由 attachment-fetch
+    提供。
+  reviewer: omac-reviewer
+  contract:
+    objective: 处理经过页原文栏的附件“取回”（只在来源声明支持取回时出现；不支持时只显示名字、类型与大小，失败显示原因）与物理删除入口（确认后删除该来源事件；物理删除事项时可勾选“连同它的来源事件”）
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/trace
+    - npm --prefix web run test -- --run src/features/purge
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    integration_gates:
+    - name: web-raw-actions-gate
+      layer: L1
+      source_of_truth:
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/solution-design.md#615-物理删除与保留
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/solution-design.md#41-web-中台
+      delivery_goal: 处理经过页原文栏的附件“取回”（只在来源声明支持取回时出现；不支持时只显示名字、类型与大小，失败显示原因）与物理删除入口（确认后删除该来源事件；物理删除事项时可勾选“连同它的来源事件”）
+      covers:
+      - ACT-FET-02
+      acceptance_refs:
+      - flow-attachment-fetch
+      - flow-raw-purge
+      commands:
+      - npm --prefix web run test -- --run src/features/trace
+      - npm --prefix web run test -- --run src/features/purge
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_contributions:
+    - flow_id: flow-attachment-fetch
+      action_ids:
+      - ACT-FET-02
+    acceptance_refs:
+    - flow-attachment-fetch
+    - flow-raw-purge
+    source_of_truth:
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/solution-design.md#615-物理删除与保留
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/solution-design.md#41-web-中台
+    scope_paths:
+    - web/src/features/purge/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: web-raw-actions-delivery
+      provides:
+      - id: raw-page-actions
+        ref: docs/appendix-b-api-cli.md#b2-http-api
+    consumes:
+    - artifact_id: web-raw-trace-delivery
+      producer: web-raw-trace
+      evidence_mode: artifact
+      requires:
+      - raw-column-view
+      - trim-display
+      - raw-page-links
+    - artifact_id: attachment-fetch-delivery
+      producer: attachment-fetch
+      evidence_mode: artifact
+      requires:
+      - attachment-fetch-api
+      - fetch-declaration
+    coverage_gate: 70
+- id: items-web
+  worker: omac-worker-frontend
+  blocked_by:
+  - link-material
+  - import-apply
+  - raw-read-api
+  - web-raw-trace
+  - web-import-page
+  - web-audit-fold
+  - web-vaults-page
+  - web-link-materials
+  title: Web：事项页（预填新建、材料分组、来源链接、只到日的导入条目）
+  description: 产出 items-web-delivery。全流程 owner：flow-web-raw-page, flow-web-import,
+    flow-web-vault-materials, flow-prefill-new。事项页的列表、详情、新建在同一文件，所以收在一个节点并排在三组接口与相关
+    Web 页面之后：依赖 web-raw-trace、web-import-page、web-audit-fold、web-vaults-page、web-link-materials
+    是因为本节点对 flow-web-raw-page、flow-web-import、flow-web-vault-materials 负全流程责任，需在它们合入后用组件测试串起整条流程。
+  reviewer: omac-reviewer
+  contract:
+    objective: 事项页：/new 与 /items/new 接受 title、body、link、project、planned_for、deadline
+      预填（未登录先登录再回来，点新建才写入并把合法 link 登记为依据材料），事项详情材料区按依据、产出、纪要分组且链接型可打开、可移除自动建立的产出关系，来源区链到
+      /sources/events/<id>，precision 为 day 的导入进展与阶段变更只显示到日；并作为四个 Web 流程的全流程 owner
+    non_goals:
+    - 只改本节点页面与必要的导航登记、文案；导航登记的逐行冲突按行解决，不重排其他页面
+    - 不改后端命令、路由与权限语义；接口不符合设计时回流对应后端节点
+    - 不改材料页、笔记库页、导入页、操作记录页与处理经过页本身
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run test -- --run src/features/items
+    - npm --prefix web run test -- --run src/features/trace
+    - npm --prefix web run test -- --run src/features/settings-import
+    - npm --prefix web run test -- --run src/features/audit
+    - npm --prefix web run test -- --run src/features/settings-vaults
+    - npm --prefix web run test -- --run src/features/materials
+    - npm --prefix web run test -- --run src/app
+    - npm --prefix web run build
+    integration_gates:
+    - name: items-web-gate
+      layer: L2
+      source_of_truth:
+      - docs/solution-design.md#71-事项中心
+      - docs/solution-design.md#128-链接型材料与笔记库
+      - docs/solution-design.md#41-web-中台
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/changes-v0.2.0.md#104-http-api
+      delivery_goal: 事项页：/new 与 /items/new 接受 title、body、link、project、planned_for、deadline
+        预填（未登录先登录再回来，点新建才写入并把合法 link 登记为依据材料），事项详情材料区按依据、产出、纪要分组且链接型可打开、可移除自动建立的产出关系，来源区链到
+        /sources/events/<id>，precision 为 day 的导入进展与阶段变更只显示到日；并作为四个 Web 流程的全流程 owner
+      covers:
+      - ACT-WRP-04
+      - ACT-WIM-04
+      - ACT-WVM-03
+      - ACT-PRE-01
+      - ACT-PRE-02
+      - ACT-PRE-03
+      acceptance_refs:
+      - flow-web-raw-page
+      - flow-web-import
+      - flow-web-vault-materials
+      - flow-prefill-new
+      - flow-report-links
+      commands:
+      - npm --prefix web run test -- --run src/features/items
+      - npm --prefix web run test -- --run src/features/trace
+      - npm --prefix web run test -- --run src/features/settings-import
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-web-raw-page
+    - flow-web-import
+    - flow-web-vault-materials
+    - flow-prefill-new
+    acceptance_contributions:
+    - flow_id: flow-web-raw-page
+      action_ids:
+      - ACT-WRP-04
+    - flow_id: flow-web-import
+      action_ids:
+      - ACT-WIM-04
+    - flow_id: flow-web-vault-materials
+      action_ids:
+      - ACT-WVM-03
+    - flow_id: flow-prefill-new
+      action_ids:
+      - ACT-PRE-01
+      - ACT-PRE-02
+      - ACT-PRE-03
+    acceptance_refs:
+    - flow-web-raw-page
+    - flow-web-import
+    - flow-web-vault-materials
+    - flow-prefill-new
+    - flow-report-links
+    source_of_truth:
+    - docs/solution-design.md#71-事项中心
+    - docs/solution-design.md#128-链接型材料与笔记库
+    - docs/solution-design.md#41-web-中台
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - web/src/features/items/**
+    evidence_mode: fixture
+    produces:
+    - artifact_id: items-web-delivery
+      provides:
+      - id: items-page-wb
+        ref: docs/solution-design.md#71-事项中心
+    consumes:
+    - artifact_id: link-material-delivery
+      producer: link-material
+      evidence_mode: artifact
+      requires:
+      - material-link-command
+      - note-vaults-policy
+      - report-links-output
+      - material-form-read
+    - artifact_id: import-apply-delivery
+      producer: import-apply
+      evidence_mode: artifact
+      requires:
+      - import-apply-command
+      - import-api
+      - import-cli
+      - origin-query
+    - artifact_id: raw-read-api-delivery
+      producer: raw-read-api
+      evidence_mode: artifact
+      requires:
+      - source-event-read-api
+      - outbound-scoped-read
+      - storage-stats
+      - slim-event-lists
+    - artifact_id: web-raw-trace-delivery
+      producer: web-raw-trace
+      evidence_mode: artifact
+      requires:
+      - raw-column-view
+      - trim-display
+      - raw-page-links
+    - artifact_id: web-import-page-delivery
+      producer: web-import-page
+      evidence_mode: artifact
+      requires:
+      - import-settings-page
+    - artifact_id: web-audit-fold-delivery
+      producer: web-audit-fold
+      evidence_mode: artifact
+      requires:
+      - audit-import-fold
+    - artifact_id: web-vaults-page-delivery
+      producer: web-vaults-page
+      evidence_mode: artifact
+      requires:
+      - vaults-settings-page
+    - artifact_id: web-link-materials-delivery
+      producer: web-link-materials
+      evidence_mode: artifact
+      requires:
+      - link-material-view
+    - artifact_id: eventlog-live-read-delivery
+      producer: eventlog-live-read
+      evidence_mode: artifact
+      requires:
+      - imported-envelope
+    coverage_gate: 70
+- id: e2e-brief
+  worker: omac-worker-backend
+  blocked_by:
+  - brief-raw
+  - doubles-harness
+  - web-brief-sections
+  title: e2e：简报资料扩展（替身版）
+  description: 产出 e2e-brief-evidence。全流程 owner：flow-brief-material。按 OMAC-NOTES §3
+    B3：各段条目与夹具一致；日程不含已取消的且取最新一版；导入的事件不进当天活动；没有日历来源时日程为空；两个实例各有窗口，同一条知会只进先跑的一份；原文文件不超过外发范围与预算。简报页显示由
+    web-brief-sections 的组件测试覆盖。
+  reviewer: omac-reviewer
+  contract:
+    objective: 用固定账本夹具与 STUB_HARNESS 读写资料文件，独立执行并证明 flow-brief-material 全流程
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/briefwb/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    integration_gates:
+    - name: e2e-brief-gate
+      layer: L2
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/appendix-c-capability-pack.md#c13-示例简报包
+      - docs/solution-design.md#73-主动服务
+      delivery_goal: 用固定账本夹具与 STUB_HARNESS 读写资料文件，独立执行并证明 flow-brief-material 全流程
+      covers:
+      - flow-brief-material
+      acceptance_refs:
+      - flow-brief-material
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/briefwb/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-brief-material
+    acceptance_refs:
+    - flow-brief-material
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/appendix-c-capability-pack.md#c13-示例简报包
+    - docs/solution-design.md#73-主动服务
+    scope_paths:
+    - tests/e2e/briefwb/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-brief-evidence
+      provides:
+      - id: brief-flow-evidence
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes:
+    - artifact_id: brief-raw-delivery
+      producer: brief-raw
+      evidence_mode: artifact
+      requires:
+      - brief-raw-files
+    - artifact_id: doubles-harness-delivery
+      producer: doubles-harness
+      evidence_mode: artifact
+      requires:
+      - harness-multi-link-report
+      - harness-brief-files
+      - harness-session-entries
+    - artifact_id: web-brief-sections-delivery
+      producer: web-brief-sections
+      evidence_mode: artifact
+      requires:
+      - brief-sections-view
+    - artifact_id: brief-material-delivery
+      producer: brief-material
+      evidence_mode: artifact
+      requires:
+      - brief-segments
+      - brief-window
+      - brief-pack-v2
+    coverage_gate: 0
+- id: e2e-material-budget
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - material-budget
+  - web-model-budget
+  - web-raw-trace
+  - doubles-srcstub
+  - doubles-modelstub
+  title: e2e：资料预算与裁剪留痕（替身版）
+  description: 产出 e2e-material-budget-evidence。全流程 owner：flow-material-budget。Web
+    页面部分（设置字段、处理经过显示）由 web-model-budget、web-raw-trace 的组件测试覆盖；本节点用等价 HTTP 调用断言。
+  reviewer: omac-reviewer
+  contract:
+    objective: 用 SRC_STUB、CLS_STUB 与 MODEL_STUB 独立执行并证明 flow-material-budget 全流程：裁剪量出现在判断记录与处置载荷里、账本原文不变、先外发范围再预算、建议正文
+      4000 字符规则
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/materialbudget/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    integration_gates:
+    - name: e2e-material-budget-gate
+      layer: L2
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/solution-design.md#84-输入输出契约
+      - docs/solution-design.md#616-判断记录
+      - docs/solution-design.md#93-事件到事项
+      delivery_goal: 用 SRC_STUB、CLS_STUB 与 MODEL_STUB 独立执行并证明 flow-material-budget
+        全流程：裁剪量出现在判断记录与处置载荷里、账本原文不变、先外发范围再预算、建议正文 4000 字符规则
+      covers:
+      - flow-material-budget
+      acceptance_refs:
+      - flow-material-budget
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/materialbudget/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-material-budget
+    acceptance_refs:
+    - flow-material-budget
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/solution-design.md#84-输入输出契约
+    - docs/solution-design.md#616-判断记录
+    - docs/solution-design.md#93-事件到事项
+    scope_paths:
+    - tests/e2e/materialbudget/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-material-budget-evidence
+      provides:
+      - id: material-budget-flow-evidence
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes:
+    - artifact_id: material-budget-delivery
+      producer: material-budget
+      evidence_mode: artifact
+      requires:
+      - material-budget-trim
+      - trim-trace
+      - proposal-body-4000
+      - generate-budget-setting
+    - artifact_id: web-model-budget-delivery
+      producer: web-model-budget
+      evidence_mode: artifact
+      requires:
+      - model-budget-field
+    - artifact_id: web-raw-trace-delivery
+      producer: web-raw-trace
+      evidence_mode: artifact
+      requires:
+      - raw-column-view
+      - trim-display
+      - raw-page-links
+    - artifact_id: doubles-srcstub-delivery
+      producer: doubles-srcstub
+      evidence_mode: artifact
+      requires:
+      - src-stub-cases
+      - src-stub-fetch
+    - artifact_id: doubles-modelstub-delivery
+      producer: doubles-modelstub
+      evidence_mode: artifact
+      requires:
+      - model-stub-wb-scripts
+      - model-stub-request-log
+    coverage_gate: 0
+- id: e2e-raw-ingest
+  worker: omac-worker-backend
+  blocked_by:
+  - raw-ingest
+  - raw-read-api
+  - doubles-srcstub
+  title: e2e：来源原文入账、上限、webhook 与读取范围（替身版）
+  description: 产出 e2e-raw-ingest-evidence。全流程 owner：flow-raw-full-ingest, flow-raw-limits,
+    flow-raw-webhook, flow-raw-read-scope。按 OMAC-NOTES §3 R10 的前半：200 KiB 正文逐字节读回；超限事件被拒收且同批其余照常、游标推进；token
+    读到的不超过外发范围，Web 登录读全文，运行凭据 403；升级前事件为 legacy 且照常可读。
+  reviewer: omac-reviewer
+  contract:
+    objective: 用 SRC_STUB 与结构版本 7 夹具独立执行并证明 flow-raw-full-ingest、flow-raw-limits、flow-raw-webhook、flow-raw-read-scope
+      全流程
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/rawingest/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    integration_gates:
+    - name: e2e-raw-ingest-gate
+      layer: L2
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/solution-design.md#1414-外发控制
+      - docs/solution-design.md#95-webhook-接收
+      delivery_goal: 用 SRC_STUB 与结构版本 7 夹具独立执行并证明 flow-raw-full-ingest、flow-raw-limits、flow-raw-webhook、flow-raw-read-scope
+        全流程
+      covers:
+      - flow-raw-full-ingest
+      - flow-raw-limits
+      - flow-raw-webhook
+      - flow-raw-read-scope
+      acceptance_refs:
+      - flow-raw-full-ingest
+      - flow-raw-limits
+      - flow-raw-webhook
+      - flow-raw-read-scope
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/rawingest/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-raw-full-ingest
+    - flow-raw-limits
+    - flow-raw-webhook
+    - flow-raw-read-scope
+    acceptance_refs:
+    - flow-raw-full-ingest
+    - flow-raw-limits
+    - flow-raw-webhook
+    - flow-raw-read-scope
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/solution-design.md#1414-外发控制
+    - docs/solution-design.md#95-webhook-接收
+    scope_paths:
+    - tests/e2e/rawingest/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-raw-ingest-evidence
+      provides:
+      - id: raw-ingest-flow-evidence
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes:
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    - artifact_id: raw-read-api-delivery
+      producer: raw-read-api
+      evidence_mode: artifact
+      requires:
+      - source-event-read-api
+      - outbound-scoped-read
+      - storage-stats
+      - slim-event-lists
+    - artifact_id: doubles-srcstub-delivery
+      producer: doubles-srcstub
+      evidence_mode: artifact
+      requires:
+      - src-stub-cases
+      - src-stub-fetch
+    - artifact_id: schema-v8-delivery
+      producer: schema-v8
+      evidence_mode: artifact
+      requires:
+      - ledger-fixture-v7
+    coverage_gate: 0
+- id: e2e-raw-lifecycle
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - raw-retention-purge
+  - attachment-fetch
+  - web-raw-actions
+  - doubles-srcstub
+  title: e2e：原文保留期、物理删除与附件取回（替身版）
+  description: 产出 e2e-raw-lifecycle-evidence。全流程 owner：flow-raw-retention, flow-raw-purge,
+    flow-attachment-fetch。按 OMAC-NOTES §3 R10 的后半：附件取回后哈希一致、不产生来源事件、游标不变；不支持 409、失败与超限
+    502 清单不变；清除之后事件行还在、原文不在；物理删除后墓碑阻止重新入账。依赖 web-raw-actions 是因为 ACT-FET-02 的页面部分由它负责，本节点对该流程负全流程责任；页面断言由其组件测试覆盖，本节点用等价
+    HTTP 调用。
+  reviewer: omac-reviewer
+  contract:
+    objective: 用 SRC_STUB（含 fetch 模式）与测试时钟独立执行并证明 flow-raw-retention、flow-raw-purge、flow-attachment-fetch
+      全流程
+    non_goals:
+    - 不把节点级单元测试当作全流程证据；e2e 只用替身与合成夹具，不调起浏览器，Web 步骤用等价的 HTTP 调用
+    - 产品缺陷回流对应实现节点，不改断言迁就实现，不跳过、过滤或注释用例
+    - 新的 e2e 包登记进 .github/e2e/full-*.txt 之一（pkgs.sh check 通过）；默认不进 smoke.txt
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - go build -tags apa_testclock ./...
+    - go test -tags=e2e -count=1 ./tests/e2e/rawlifecycle/...
+    - .github/e2e/pkgs.sh check
+    - go run ./tools/redline
+    integration_gates:
+    - name: e2e-raw-lifecycle-gate
+      layer: L2
+      source_of_truth:
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+      - docs/solution-design.md#615-物理删除与保留
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/appendix-b-api-cli.md#b2-http-api
+      delivery_goal: 用 SRC_STUB（含 fetch 模式）与测试时钟独立执行并证明 flow-raw-retention、flow-raw-purge、flow-attachment-fetch
+        全流程
+      covers:
+      - flow-raw-retention
+      - flow-raw-purge
+      - flow-attachment-fetch
+      acceptance_refs:
+      - flow-raw-retention
+      - flow-raw-purge
+      - flow-attachment-fetch
+      commands:
+      - go test -tags=e2e -count=1 ./tests/e2e/rawlifecycle/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-raw-retention
+    - flow-raw-purge
+    - flow-attachment-fetch
+    acceptance_refs:
+    - flow-raw-retention
+    - flow-raw-purge
+    - flow-attachment-fetch
+    source_of_truth:
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    - docs/solution-design.md#615-物理删除与保留
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/appendix-b-api-cli.md#b2-http-api
+    scope_paths:
+    - tests/e2e/rawlifecycle/**
+    evidence_mode: live
+    produces:
+    - artifact_id: e2e-raw-lifecycle-evidence
+      provides:
+      - id: raw-lifecycle-flow-evidence
+        ref: .omac/apa-v02-workbench.design/OMAC-NOTES.md#3-e2e-节点替身与合成夹具
+    consumes:
+    - artifact_id: raw-retention-purge-delivery
+      producer: raw-retention-purge
+      evidence_mode: artifact
+      requires:
+      - content-retention
+      - source-event-purge
+      - dedup-tombstone
+    - artifact_id: attachment-fetch-delivery
+      producer: attachment-fetch
+      evidence_mode: artifact
+      requires:
+      - attachment-fetch-api
+      - fetch-declaration
+    - artifact_id: web-raw-actions-delivery
+      producer: web-raw-actions
+      evidence_mode: artifact
+      requires:
+      - raw-page-actions
+    - artifact_id: doubles-srcstub-delivery
+      producer: doubles-srcstub
+      evidence_mode: artifact
+      requires:
+      - src-stub-cases
+      - src-stub-fetch
+    coverage_gate: 0
+- id: closeout
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - schema-v8
+  - source-htmltext
+  - grant-import
+  - extract-align
+  - cli-fields
+  - doubles-srcstub
+  - doubles-modelstub
+  - doubles-harness
+  - web-brief-sections
+  - raw-ingest
+  - eventlog-live-read
+  - link-material
+  - urgent-notify
+  - hermes-chat-tools
+  - raw-read-api
+  - raw-retention-purge
+  - material-budget
+  - import-apply
+  - brief-material
+  - web-vaults-page
+  - web-link-materials
+  - e2e-link-material
+  - e2e-inbound-align
+  - e2e-chat-dispose
+  - source-applepim-raw
+  - source-himalaya-raw
+  - source-github-raw
+  - source-rss-raw
+  - source-calendar-raw
+  - source-httpjson-raw
+  - source-dirwatch-raw
+  - e2e-source-raw
+  - attachment-fetch
+  - web-raw-trace
+  - web-storage-page
+  - web-model-budget
+  - brief-raw
+  - web-import-page
+  - web-audit-fold
+  - e2e-import
+  - e2e-schema8-upgrade
+  - reminder-open-rule
+  - web-raw-actions
+  - items-web
+  - e2e-brief
+  - e2e-material-budget
+  - e2e-raw-ingest
+  - e2e-raw-lifecycle
+  title: 工作台迭代收尾：规划标记清零、文档与图、发布门槛 1–4 收口
+  description: 产出 closeout-evidence。全流程 owner：flow-wb-env, flow-wb-release, flow-wb-regression。汇总所有流程结果；§21.3
+    每行第三格保持规定形状，§17.3 退出码表不加行。L14–L24 不建节点、不作收口条件，只在交付说明里列出交给本人。
+  reviewer: omac-reviewer
+  contract:
+    objective: 整张 DAG 的唯一收口：附录 B、C.14 的规划标记清零且 APA_CONFORMANCE_STRICT=1 对照测试通过、拆出的行全部并回；用户文档变更记录含必须迁移的条目（WB-25、WB-26、WB-28、WB-31、WB-34）且
+      upgrade.md 清单为 L1–L24 并与发布测试一致；领域模型图与入站流水线图加上来源原文、导入批次、链接型材料与紧急提醒（HTML 与 PNG
+      成对）；红线与泄漏扫描通过；flow-wb-env 环境可复现；v0.2.0 既有验收与 v0.1 验收不回退，CI 与全量 e2e 全绿
+    non_goals:
+    - 不实现产品功能；门槛不过时回流对应节点
+    - L14–L24 与 deferred 实测项（MEAS-RAW、SPIKE-OWNCHAT、MEAS-REM、SPIKE-BUDGET）不在开发编排里执行，只在交付说明列出
+    - 不为通过门槛而跳过、过滤或注释 e2e 用例
+    - 不经 OMAC 以外的途径改缺陷账本或平台状态
+    - 全量 e2e 的执行环境须有 PATH 上真实的 sqlite3 CLI、python3+pytest、已构建的 web/dist 与含完整历史的 git
+      检出，不新增 shim 或跳过逻辑
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - npm --prefix web ci
+    - npm --prefix web run build
+    - npm --prefix web run test -- --run src
+    - go build ./...
+    - go build -tags apa_testclock ./...
+    - go test ./...
+    - go test -tags e2e -count=1 -timeout 45m ./tests/e2e/...
+    - go run ./tools/redline
+    - APA_CONFORMANCE_STRICT=1 go test ./tests/conformance/ ./cli/serve/
+    - .github/e2e/pkgs.sh check
+    - go test -count=1 ./tests/release/...
+    - python3 -m pytest plugins/hermes/tests
+    integration_gates:
+    - name: closeout-gate
+      layer: L3
+      source_of_truth:
+      - docs/solution-design.md#204-v020发布门槛
+      - docs/solution-design.md#203-v020工作组与依赖
+      - docs/solution-design.md#213-需实测的事项
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#4-规划标记与对照测试
+      - .omac/apa-v02-workbench.design/OMAC-NOTES.md#5-其他提醒
+      - docs/changes-v0.2.0.md#108-订正不计入上面的条数
+      delivery_goal: 整张 DAG 的唯一收口：附录 B、C.14 的规划标记清零且 APA_CONFORMANCE_STRICT=1 对照测试通过、拆出的行全部并回；用户文档变更记录含必须迁移的条目（WB-25、WB-26、WB-28、WB-31、WB-34）且
+        upgrade.md 清单为 L1–L24 并与发布测试一致；领域模型图与入站流水线图加上来源原文、导入批次、链接型材料与紧急提醒（HTML 与 PNG
+        成对）；红线与泄漏扫描通过；flow-wb-env 环境可复现；v0.2.0 既有验收与 v0.1 验收不回退，CI 与全量 e2e 全绿
+      covers:
+      - ACT-WREL-01
+      - ACT-WREL-02
+      - ACT-WREL-03
+      - ACT-WREL-04
+      - ACT-WREL-05
+      - ACT-WREG-01
+      acceptance_refs:
+      - flow-wb-env
+      - flow-wb-release
+      - flow-wb-regression
+      commands:
+      - APA_CONFORMANCE_STRICT=1 go test ./tests/conformance/ ./cli/serve/
+      - go run ./tools/redline
+      - go test ./...
+      - go test -tags e2e -count=1 -timeout 45m ./tests/e2e/...
+      - .github/e2e/pkgs.sh check
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_claims:
+    - flow-wb-env
+    - flow-wb-release
+    - flow-wb-regression
+    acceptance_contributions:
+    - flow_id: flow-wb-release
+      action_ids:
+      - ACT-WREL-01
+      - ACT-WREL-02
+      - ACT-WREL-03
+      - ACT-WREL-04
+      - ACT-WREL-05
+    - flow_id: flow-wb-regression
+      action_ids:
+      - ACT-WREG-01
+    acceptance_refs:
+    - flow-wb-env
+    - flow-wb-release
+    - flow-wb-regression
+    source_of_truth:
+    - docs/solution-design.md#204-v020发布门槛
+    - docs/solution-design.md#203-v020工作组与依赖
+    - docs/solution-design.md#213-需实测的事项
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#4-规划标记与对照测试
+    - .omac/apa-v02-workbench.design/OMAC-NOTES.md#5-其他提醒
+    - docs/changes-v0.2.0.md#108-订正不计入上面的条数
+    - AGENTS.md#红线检查
+    scope_paths:
+    - docs/**
+    evidence_mode: live
+    produces:
+    - artifact_id: closeout-evidence
+      provides:
+      - id: workbench-closeout-evidence
+        ref: docs/solution-design.md#204-v020发布门槛
+    consumes:
+    - artifact_id: schema-v8-delivery
+      producer: schema-v8
+      evidence_mode: artifact
+      requires:
+      - ledger-v8-tables
+      - ledger-fixture-v7
+      - migration-chain-v8
+    - artifact_id: source-htmltext-delivery
+      producer: source-htmltext
+      evidence_mode: artifact
+      requires:
+      - html-to-text
+      - header-normalize
+      - byte-batching
+    - artifact_id: grant-import-delivery
+      producer: grant-import
+      evidence_mode: artifact
+      requires:
+      - import-grant
+      - grant-only-gate
+      - progress-grantable
+    - artifact_id: extract-align-delivery
+      producer: extract-align
+      evidence_mode: artifact
+      requires:
+      - shared-open-items-list
+      - extract-output-v2
+      - prescreen-none
+    - artifact_id: cli-fields-delivery
+      producer: cli-fields
+      evidence_mode: artifact
+      requires:
+      - item-cli-v2-flags
+      - proposals-apply-file
+      - import-origin-reserved
+    - artifact_id: doubles-srcstub-delivery
+      producer: doubles-srcstub
+      evidence_mode: artifact
+      requires:
+      - src-stub-cases
+      - src-stub-fetch
+    - artifact_id: doubles-modelstub-delivery
+      producer: doubles-modelstub
+      evidence_mode: artifact
+      requires:
+      - model-stub-wb-scripts
+      - model-stub-request-log
+    - artifact_id: doubles-harness-delivery
+      producer: doubles-harness
+      evidence_mode: artifact
+      requires:
+      - harness-multi-link-report
+      - harness-brief-files
+      - harness-session-entries
+    - artifact_id: web-brief-sections-delivery
+      producer: web-brief-sections
+      evidence_mode: artifact
+      requires:
+      - brief-sections-view
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    - artifact_id: eventlog-live-read-delivery
+      producer: eventlog-live-read
+      evidence_mode: artifact
+      requires:
+      - eventlog-live-reader
+      - imported-envelope
+      - stale-from-import
+    - artifact_id: link-material-delivery
+      producer: link-material
+      evidence_mode: artifact
+      requires:
+      - material-link-command
+      - note-vaults-policy
+      - report-links-output
+      - material-form-read
+    - artifact_id: urgent-notify-delivery
+      producer: urgent-notify
+      evidence_mode: artifact
+      requires:
+      - notify-urgent-rule
+      - urgent-delivery
+    - artifact_id: hermes-chat-tools-delivery
+      producer: hermes-chat-tools
+      evidence_mode: artifact
+      requires:
+      - chat-dispose-tools
+      - session-kind-order
+    - artifact_id: raw-read-api-delivery
+      producer: raw-read-api
+      evidence_mode: artifact
+      requires:
+      - source-event-read-api
+      - outbound-scoped-read
+      - storage-stats
+      - slim-event-lists
+    - artifact_id: raw-retention-purge-delivery
+      producer: raw-retention-purge
+      evidence_mode: artifact
+      requires:
+      - content-retention
+      - source-event-purge
+      - dedup-tombstone
+    - artifact_id: material-budget-delivery
+      producer: material-budget
+      evidence_mode: artifact
+      requires:
+      - material-budget-trim
+      - trim-trace
+      - proposal-body-4000
+      - generate-budget-setting
+    - artifact_id: import-apply-delivery
+      producer: import-apply
+      evidence_mode: artifact
+      requires:
+      - import-apply-command
+      - import-api
+      - import-cli
+      - origin-query
+    - artifact_id: brief-material-delivery
+      producer: brief-material
+      evidence_mode: artifact
+      requires:
+      - brief-segments
+      - brief-window
+      - brief-pack-v2
+    - artifact_id: web-vaults-page-delivery
+      producer: web-vaults-page
+      evidence_mode: artifact
+      requires:
+      - vaults-settings-page
+    - artifact_id: web-link-materials-delivery
+      producer: web-link-materials
+      evidence_mode: artifact
+      requires:
+      - link-material-view
+    - artifact_id: e2e-link-material-evidence
+      producer: e2e-link-material
+      evidence_mode: artifact
+      requires:
+      - link-material-flow-evidence
+    - artifact_id: e2e-inbound-align-evidence
+      producer: e2e-inbound-align
+      evidence_mode: artifact
+      requires:
+      - inbound-align-flow-evidence
+    - artifact_id: e2e-chat-dispose-evidence
+      producer: e2e-chat-dispose
+      evidence_mode: artifact
+      requires:
+      - chat-dispose-flow-evidence
+    - artifact_id: source-applepim-raw-delivery
+      producer: source-applepim-raw
+      evidence_mode: artifact
+      requires:
+      - applepim-mail-raw
+      - applepim-pim-headers
+      - reminder-open-events
+    - artifact_id: source-himalaya-raw-delivery
+      producer: source-himalaya-raw
+      evidence_mode: artifact
+      requires:
+      - himalaya-mail-raw
+    - artifact_id: source-github-raw-delivery
+      producer: source-github-raw
+      evidence_mode: artifact
+      requires:
+      - github-raw-output
+    - artifact_id: source-rss-raw-delivery
+      producer: source-rss-raw
+      evidence_mode: artifact
+      requires:
+      - rss-raw-output
+    - artifact_id: source-calendar-raw-delivery
+      producer: source-calendar-raw
+      evidence_mode: artifact
+      requires:
+      - calendar-headers
+    - artifact_id: source-httpjson-raw-delivery
+      producer: source-httpjson-raw
+      evidence_mode: artifact
+      requires:
+      - httpjson-original
+    - artifact_id: source-dirwatch-raw-delivery
+      producer: source-dirwatch-raw
+      evidence_mode: artifact
+      requires:
+      - dirwatch-output-budget
+    - artifact_id: e2e-source-raw-evidence
+      producer: e2e-source-raw
+      evidence_mode: artifact
+      requires:
+      - source-raw-flow-evidence
+    - artifact_id: attachment-fetch-delivery
+      producer: attachment-fetch
+      evidence_mode: artifact
+      requires:
+      - attachment-fetch-api
+      - fetch-declaration
+    - artifact_id: web-raw-trace-delivery
+      producer: web-raw-trace
+      evidence_mode: artifact
+      requires:
+      - raw-column-view
+      - trim-display
+      - raw-page-links
+    - artifact_id: web-storage-page-delivery
+      producer: web-storage-page
+      evidence_mode: artifact
+      requires:
+      - storage-settings-page
+    - artifact_id: web-model-budget-delivery
+      producer: web-model-budget
+      evidence_mode: artifact
+      requires:
+      - model-budget-field
+    - artifact_id: brief-raw-delivery
+      producer: brief-raw
+      evidence_mode: artifact
+      requires:
+      - brief-raw-files
+    - artifact_id: web-import-page-delivery
+      producer: web-import-page
+      evidence_mode: artifact
+      requires:
+      - import-settings-page
+    - artifact_id: web-audit-fold-delivery
+      producer: web-audit-fold
+      evidence_mode: artifact
+      requires:
+      - audit-import-fold
+    - artifact_id: e2e-import-evidence
+      producer: e2e-import
+      evidence_mode: artifact
+      requires:
+      - import-flow-evidence
+    - artifact_id: e2e-schema8-upgrade-evidence
+      producer: e2e-schema8-upgrade
+      evidence_mode: artifact
+      requires:
+      - schema8-upgrade-evidence
+    - artifact_id: reminder-open-rule-delivery
+      producer: reminder-open-rule
+      evidence_mode: artifact
+      requires:
+      - reminder-open-rule
+    - artifact_id: web-raw-actions-delivery
+      producer: web-raw-actions
+      evidence_mode: artifact
+      requires:
+      - raw-page-actions
+    - artifact_id: items-web-delivery
+      producer: items-web
+      evidence_mode: artifact
+      requires:
+      - items-page-wb
+    - artifact_id: e2e-brief-evidence
+      producer: e2e-brief
+      evidence_mode: artifact
+      requires:
+      - brief-flow-evidence
+    - artifact_id: e2e-material-budget-evidence
+      producer: e2e-material-budget
+      evidence_mode: artifact
+      requires:
+      - material-budget-flow-evidence
+    - artifact_id: e2e-raw-ingest-evidence
+      producer: e2e-raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-ingest-flow-evidence
+    - artifact_id: e2e-raw-lifecycle-evidence
+      producer: e2e-raw-lifecycle
+      evidence_mode: artifact
+      requires:
+      - raw-lifecycle-flow-evidence
+    requirement_refs:
+    - REQ-REL-DIAGRAM
+    coverage_gate: 0
