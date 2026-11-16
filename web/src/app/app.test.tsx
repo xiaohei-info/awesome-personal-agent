@@ -306,12 +306,12 @@ describe("状态灯（设计 §3.1）", () => {
 });
 
 describe("设置的分组（设计 §3.1）", () => {
-  it("桌面：设置页左侧按 日常 / Agent / 系统 分组列出，当前页高亮，永久删除排最后", async () => {
+  it("桌面：设置页左侧按 日常 / 连接 / Agent / 系统 分组列出，当前页高亮，永久删除排最后", async () => {
     await openAt("/settings/notify");
     const sub = await screen.findByRole("navigation", { name: "设置页签" });
-    expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "Agent", "系统"]);
+    expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "连接", "Agent", "系统"]);
     expect(within(sub).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "通用", "提醒与打扰", "我来拍板", "Agent", "渠道", "模型", "扩展程序", "登录与会话", "永久删除",
+      "通用", "提醒与打扰", "我来拍板", "提醒渠道", "Agent", "模型", "扩展程序", "登录与会话", "永久删除",
     ]);
     expect(within(sub).getByRole("link", { name: "提醒与打扰" })).toHaveAttribute("aria-current", "page");
   });
@@ -324,7 +324,7 @@ describe("设置的分组（设计 §3.1）", () => {
       await userEvent.click(within(nav).getByRole("button", { name: "更多" }));
       await userEvent.click(within(screen.getByRole("dialog")).getByRole("link", { name: "设置" }));
       expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("设置");
-      expect(screen.getAllByRole("list").filter((l) => ["日常", "Agent", "系统"].includes(l.getAttribute("aria-label") ?? ""))).toHaveLength(3);
+      expect(screen.getAllByRole("list").filter((l) => ["日常", "连接", "Agent", "系统"].includes(l.getAttribute("aria-label") ?? ""))).toHaveLength(4);
       await userEvent.click(within(screen.getByRole("list", { name: "日常" })).getByRole("link", { name: /提醒与打扰/ }));
       expect(await screen.findByRole("heading", { name: "提醒与打扰 页面" })).toBeInTheDocument();
       await userEvent.click(screen.getByRole("link", { name: /‹ 设置/ }));

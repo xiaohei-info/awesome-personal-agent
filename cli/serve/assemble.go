@@ -43,6 +43,7 @@ import (
 	apisources "github.com/xiaohei-info/awesome-personal-agent/api/sources"
 	apiversion "github.com/xiaohei-info/awesome-personal-agent/api/version"
 	apiwhy "github.com/xiaohei-info/awesome-personal-agent/api/why"
+	"github.com/xiaohei-info/awesome-personal-agent/connectors/bark"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct/rulejudge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/task"
@@ -138,7 +139,7 @@ func storedName(s domain.Source) string { return declaredName(s, "zh") }
 var sourceKindNames = map[string]string{"mail": "邮件", "calendar": "日历", "reminder": "提醒事项", "github": "GitHub"}
 
 // builtinConnectors 是随主程序编译的连接插件（connectors/<类型>/，§3）；内核不 import 它们，由这里交给外呼调用器。
-var builtinConnectors = func() []conn.Plugin { return nil }
+var builtinConnectors = func() []conn.Plugin { return []conn.Plugin{bark.Plugin()} }
 
 // senderInterval 是渠道发送器领取投递的间隔。
 const senderInterval = 2 * time.Second
@@ -235,7 +236,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	conns := kconnections.New(vault, caller.Decl)
 	q := delivery.New(delivery.Options{UnclaimedAfter: cfg.DeliveryUnclaimedAfter, Backoff: cfg.DeliveryBackoff, Deliverable: kconnections.Deliverable})
-	att := attention.New(attention.Options{Queue: q, Drafter: screenJudge})
+	att := attention.New(attention.Options{Queue: q, Drafter: screenJudge, ViewOnly: conns.ViewOnly})
 	sum, err := summaries.New(summaries.Options{Store: st, Exec: x, Gen: judge, Owner: owner})
 	if err != nil {
 		return nil, err

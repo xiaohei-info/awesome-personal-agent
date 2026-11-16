@@ -4,7 +4,7 @@ import { strings } from "./strings";
 
 export const feature: Feature = {
   id: "settings-channels",
-  title: { zh: "渠道", en: "Channels" },
+  title: { zh: "提醒渠道", en: "Reminder channels" },
   path: "settings/channels",
   order: 7,
   section: "settings",

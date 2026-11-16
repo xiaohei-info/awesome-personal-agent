@@ -50,10 +50,11 @@ func hashOf(token string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// IssueForm 在调用方事务里为决策投递发放令牌并返回明文。路由不是只能发文字的渠道，或决策属于 web_only 时不发放，返回空串。
-func IssueForm(tx *store.Tx, pol policy.Policy, it domain.Item, route string, version int64, now time.Time) (string, error) {
+// IssueForm 在调用方事务里为决策投递发放令牌并返回明文。只能看的渠道才发放：ext 渠道看策略的 text_only，
+// 内置渠道连接由能力声明推出（viewOnly，§2.3）。路由不是渠道、渠道收得了回答，或决策属于 web_only 时不发放，返回空串。
+func IssueForm(tx *store.Tx, pol policy.Policy, it domain.Item, route string, version int64, now time.Time, viewOnly bool) (string, error) {
 	name, ok := strings.CutPrefix(route, routePrefix)
-	if !ok || !pol.Channels[name].TextOnly || it.Ask == nil {
+	if !ok || !(pol.Channels[name].TextOnly || viewOnly) || it.Ask == nil {
 		return "", nil
 	}
 	if authz.WebOnly(pol, authz.Object{Kind: string(it.Kind), Tags: it.Tags, Project: it.Project, Category: it.Ask.RiskClass}) {

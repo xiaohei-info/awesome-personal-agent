@@ -91,6 +91,8 @@ type Options struct {
 	FormURL   func(token string) string // 投递里的一次性表单链接，默认 /forms/<令牌>
 	// Drafter 起草决策卡片文案与做投递推迟判定；为空时投递内容与路由只按规则。
 	Drafter Drafter
+	// ViewOnly 判断路由指向的渠道是否只能看（内置渠道连接的能力声明推出，§2.3）；为空时只看策略的 text_only。
+	ViewOnly func(tx *store.Tx, route string) (bool, error)
 }
 
 // Attention 的状态都在账本里；draftDue 只是"有待起草"的唤醒信号。
@@ -657,7 +659,13 @@ func (a *Attention) attachForm(tx *store.Tx, pol policy.Policy, d *domain.Delive
 	if err != nil {
 		return err
 	}
-	token, err := channel.IssueForm(tx, pol, it, d.Route, d.Version, a.o.Now())
+	viewOnly := false
+	if a.o.ViewOnly != nil {
+		if viewOnly, err = a.o.ViewOnly(tx, d.Route); err != nil {
+			return err
+		}
+	}
+	token, err := channel.IssueForm(tx, pol, it, d.Route, d.Version, a.o.Now(), viewOnly)
 	if err != nil || token == "" {
 		return err
 	}

@@ -120,8 +120,8 @@ func TestUpgradeDocMatchesDesign(t *testing.T) {
 	}
 	design := readDoc(t, root, "docs", "solution-design.md")
 	rows := tableRows(design, "**升级后本机验证清单**")
-	if len(rows) != 12 {
-		t.Fatalf("设计 §20.4 清单应有 12 项，解析到 %d", len(rows))
+	if len(rows) != 13 {
+		t.Fatalf("设计 §20.4 清单应有 13 项，解析到 %d", len(rows))
 	}
 	for i, r := range rows {
 		id := fmt.Sprintf("L%d", i+1)

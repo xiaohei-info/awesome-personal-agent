@@ -4,9 +4,10 @@ import { useSession } from "../../app/session";
 import { errorText as msg, useT } from "../../app/i18n";
 import { Card, PolicyPage, TagInput, useDraft, usePolicyDocs, type Doc } from "../settings-policy/shared";
 import { strings } from "./strings";
+import { Connections } from "./Connections";
 
-// 设置 › 渠道（§4.1、§14.6）。渠道没有独立实体：名字取自 scope 为 channel.<名> 的 ext 密钥，属性在策略的 channels 段，
-// 回答人在 channel_answerers。回答人只经 PUT /settings/channels/{名}/answerers 改这一个键；
+// 设置 › 提醒渠道（§4.1、§14.6）。上半是内置渠道连接（Connections.tsx）；底部折叠的「用自己的程序接入」是 ext 渠道：
+// 没有独立实体，名字取自 scope 为 channel.<名> 的 ext 密钥，属性在策略的 channels 段，回答人在 channel_answerers。回答人只经 PUT /settings/channels/{名}/answerers 改这一个键；
 // "识别我的 ID"只在内存里，本人点"加上"才写名单。web_only、回答人校验都在服务端。
 
 interface Key { id: string; label?: string; scope?: string; revoked_at?: string }
@@ -17,9 +18,13 @@ async function extKeys(api: ApiClient): Promise<Key[]> {
   return (await api.get<{ credentials: Key[] }>("/settings/ext-keys")).credentials.filter((k) => k.scope?.startsWith(CH));
 }
 
-/** 已接入的渠道：没吊销的渠道密钥。 */
+/** 已接入的渠道：内置渠道连接与没吊销的渠道密钥。 */
 export async function channelNames(api: ApiClient): Promise<string[]> {
-  return [...new Set((await extKeys(api)).filter((k) => !k.revoked_at).map((k) => k.scope!.slice(CH.length)))];
+  const [conns, keys] = await Promise.all([
+    api.get<{ connections: { name: string }[] }>("/connections?direction=channel").then((r) => r.connections, () => []),
+    extKeys(api),
+  ]);
+  return [...conns.map((c) => c.name), ...new Set(keys.filter((k) => !k.revoked_at).map((k) => k.scope!.slice(CH.length)))];
 }
 
 export function SettingsChannelsPage() {
@@ -45,13 +50,21 @@ export function SettingsChannelsPage() {
           <div><button onClick={() => setSecret(null)}>{t.savedIt}</button></div>
         </div>
       )}
-      {pol && al && names.length === 0 && <p className="sub">{t.none}</p>}
-      {pol && al && names.map((n) => (
-        <ChannelCard key={n} name={n} pol={pol} al={al} keys={keys.filter((k) => k.scope === CH + n)}
-          onSaved={() => void load()} onKeys={() => void loadKeys()}
-          savePolicy={(body) => save("policy", body)} />
-      ))}
-      <NewChannel onSecret={(s) => { setSecret(s); void loadKeys(); }} />
+      {pol && (
+        <Connections routes={pol.disturb?.routes ?? {}}
+          saveRoutes={(routes) => save("policy", { disturb: { ...pol.disturb, routes } })} />
+      )}
+      <details open={names.length > 0}>
+        <summary>{t.ownProgram}</summary>
+        <div className="stack">
+          {pol && al && names.map((n) => (
+            <ChannelCard key={n} name={n} pol={pol} al={al} keys={keys.filter((k) => k.scope === CH + n)}
+              onSaved={() => void load()} onKeys={() => void loadKeys()}
+              savePolicy={(body) => save("policy", body)} />
+          ))}
+          <NewChannel onSecret={(s) => { setSecret(s); void loadKeys(); }} />
+        </div>
+      </details>
     </PolicyPage>
   );
 }

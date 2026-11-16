@@ -1,0 +1,40 @@
+type: bark
+direction: channel
+title: {zh: Bark, en: Bark}
+tagline: {zh: 推送到 iPhone，只能看，回答走网页链接, en: "Push to iPhone; view only, answer through a web link"}
+default: {zh: 我的 iPhone, en: My iPhone}
+via: {zh: 提醒的标题与摘要会经过 Bark 服务器和苹果的推送通道，自建服务器也一样, en: "Reminder titles and summaries pass through the Bark server and Apple's push service, even with your own server"}
+capabilities: {buttons: false, reply: false, identify: false}
+fields:
+  - key: server
+    kind: url
+    label: {zh: 服务器地址, en: Server}
+    hint: {zh: 用官方服务就保留默认值, en: Keep the default to use the official server}
+    default: "https://api.day.app"
+    required: true
+  - key: device_key
+    kind: secret
+    label: {zh: 设备密钥, en: Device key}
+    required: true
+  - key: time_sensitive
+    kind: toggle
+    label: {zh: 等你决定的提醒用时效性通知, en: Use time-sensitive alerts for decisions}
+    default: "true"
+  - key: group
+    kind: text
+    label: {zh: 通知分组, en: Notification group}
+    default: APA
+    group: advanced
+  - key: auth_user
+    kind: text
+    label: {zh: 登录名, en: Login name}
+    hint: {zh: 自建服务器开了登录验证才填, en: Only if your own server asks for a login}
+    group: advanced
+  - key: auth_secret
+    kind: secret
+    label: {zh: 登录密码, en: Login secret}
+    group: advanced
+guide:
+  - {zh: 在 iPhone 上安装并打开 Bark, en: Install and open Bark on the iPhone}
+  - {zh: 首页示例地址里，服务器地址后面的那一段就是设备密钥, en: "In the sample address on the home screen, the part after the server address is the device key"}
+  - {zh: 想让手机点通知就能打开作答页面，APA 要配好外部地址, en: "For a tap on the notification to open the answer page, APA needs its public address configured"}
