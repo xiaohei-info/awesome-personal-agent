@@ -158,6 +158,7 @@
 | | `POST /materials/{id}/changes` | 对托管型发起修改，生成委派子事项 | Web 登录、delegate；worker、运行凭据须带自己范围内的 `parent` |
 | | `GET/POST /materials/{id}/revisions` | 修订 | observer 读，worker 写 |
 | | `POST /materials/{id}/revert` | 回退一次 `direct` 修订 | 只有 Web 登录 |
+| | `PATCH /materials/{id}` | 改链接型材料的标题、kind 与标签 `{"title"?, "kind"?, "tags"?, "reason"?}`，经 `material.update`；位置不可改，非链接型返回 409 | 只有 Web 登录 |
 | | `POST /revisions/{id}/confirm`，`/reject` | 确认或拒绝 proposed 修订 | Web 登录、delegate（规范生效只有 Web） |
 | | `GET /materials/search` | 检索 | observer |
 | | `PUT/GET /blobs/{hash}` | 附件 | worker 写，observer 读 |

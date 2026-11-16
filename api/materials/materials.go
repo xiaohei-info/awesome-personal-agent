@@ -1,6 +1,6 @@
 // Package materials 是材料分组的 HTTP 路由（附录 B.2、设计 §12.4）：
 //
-//	GET/POST /materials          GET /materials/{id}          GET /materials/search
+//	GET/POST /materials          GET/PATCH /materials/{id}          GET /materials/search
 //	GET/POST /materials/{id}/revisions     POST /materials/{id}/revert
 //	POST /revisions/{id}/confirm|reject
 //	GET /materials/{id}/content  POST /materials/{id}/changes   （托管型，需要 hosted.Service）
@@ -54,6 +54,7 @@ func Routes(st *store.Store, x *command.Executor, hs *hosted.Service) core.Route
 		r.Handle(core.Route{Method: "POST", Path: "/materials", Handler: h.create})
 		r.Handle(core.Route{Method: "GET", Path: "/materials/search", Handler: h.search})
 		r.Handle(core.Route{Method: "GET", Path: "/materials/{id}", Handler: h.get})
+		r.Handle(core.Route{Method: "PATCH", Path: "/materials/{id}", Handler: h.write("material.update", http.StatusOK)})
 		r.Handle(core.Route{Method: "GET", Path: "/materials/{id}/revisions", Handler: h.revisions})
 		r.Handle(core.Route{Method: "POST", Path: "/materials/{id}/revisions", Handler: h.write("material.commit", http.StatusCreated)})
 		r.Handle(core.Route{Method: "POST", Path: "/materials/{id}/revert", Handler: h.write("material.revert", http.StatusOK)})

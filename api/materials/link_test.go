@@ -152,3 +152,37 @@ func TestNoteVaultsReadIsOpenToAgentsButNotToExtOrAnonymous(t *testing.T) {
 	want(t, e.do("ext", "GET", "/v1/note-vaults", ""), 403, "permission_denied")
 	want(t, e.do("export", "GET", "/v1/note-vaults", ""), 200, "")
 }
+
+// flow-web-vault-materials：PATCH /materials/{id} 只有 Web 登录能改标题、kind 与标签，位置不可改。
+func TestPatchLinkedMaterialWebOnly(t *testing.T) {
+	e := setup(t)
+	e.setVaults(policy.NoteVault{Name: "notes"})
+	rec := e.do("wrk", "POST", "/v1/materials", `{"link":"vault:notes/a.md","title":"旧","project":"`+e.prj+`"}`)
+	want(t, rec, 201, "")
+	var c struct{ Material string }
+	into(t, rec, &c)
+	url := "/v1/materials/" + c.Material
+	body := `{"title":"新","kind":"minutes","tags":["x"],"reason":"整理"}`
+
+	for _, who := range []string{"obs", "wrk", "dlg"} {
+		if rec := e.do(who, "PATCH", url, body); rec.Code != 403 {
+			t.Fatalf("%s PATCH = %d %s", who, rec.Code, rec.Body)
+		}
+	}
+	want(t, e.do("web", "PATCH", url, body), 200, "")
+	s := e.shown("obs", c.Material)
+	if s.Material.Title != "新" || s.Material.Kind != "minutes" || len(s.Material.Tags) != 1 || s.Material.Link != "vault:notes/a.md" {
+		t.Fatalf("after patch: %+v", s.Material)
+	}
+	// 位置不可改；体里不许带 id；自有型不在此改。
+	if rec := e.do("web", "PATCH", url, `{"link":"vault:notes/b.md"}`); rec.Code != 400 {
+		t.Fatalf("link patch = %d", rec.Code)
+	}
+	if rec := e.do("web", "PATCH", url, `{"id":"x","title":"t"}`); rec.Code != 400 {
+		t.Fatalf("id in body = %d", rec.Code)
+	}
+	owned, _ := e.commit("wrk", `{"project":"`+e.prj+`","kind":"minutes","title":"N","content":"x","reason":"r"}`)
+	if rec := e.do("web", "PATCH", "/v1/materials/"+owned.Material, `{"title":"t"}`); rec.Code != 409 {
+		t.Fatalf("owned patch = %d %s", rec.Code, rec.Body)
+	}
+}
