@@ -236,3 +236,31 @@ func TestTimeNowAllowedInClockTestsAndNonProduction(t *testing.T) {
 		t.Fatalf("false positive: %v", got)
 	}
 }
+
+// 连接插件的四条（§4.4）：内核不 import connectors/；connectors/ 不出现 harness 名；凭据明文只在外呼调用器解出；
+// 渠道发送只经渠道发送器。插件目录里可以有厂商名。
+func TestConnectorRules(t *testing.T) {
+	root := t.TempDir()
+	const m = "github.com/xiaohei-info/awesome-personal-agent"
+	write(t, root, "kernel/attention/x.go", "package attention\nimport _ \""+m+"/connectors/sample\"\n")
+	write(t, root, "connectors/sample/connector.yaml", "type: sample\n# 不要像 hermes 那样\n")
+	write(t, root, "connectors/sample/sample.go", "package sample\n\nconst server = \"https://api.day.app\" // bark 厂商名只在插件里\n")
+	write(t, root, "kernel/items/y.go", "package items\nfunc f(v interface{ Reveal() }) { v.Reveal() }\n")
+	write(t, root, "kernel/outcall/conn/c.go", "package conn\nfunc f(v interface{ Reveal() }) { v.Reveal() }\n")
+	write(t, root, "kernel/rules/z.go", "package rules\nimport conn \""+m+"/kernel/outcall/conn\"\nfunc f(c *conn.Caller) { c.Send(nil, conn.Target{}, conn.Message{}) }\n")
+	write(t, root, "kernel/channel/s.go", "package channel\nimport conn \""+m+"/kernel/outcall/conn\"\nfunc f(c *conn.Caller) { c.Send(nil, conn.Target{}, conn.Message{}) }\n")
+	got := rules(t, root)
+	for _, want := range []string{"kernel-connectors kernel/attention/x.go", "harness-name connectors/sample/connector.yaml",
+		"kernel-secrets kernel/items/y.go", "kernel-send kernel/rules/z.go"} {
+		if !has(got, want) {
+			t.Errorf("missing %q in %v", want, got)
+		}
+	}
+	for _, bad := range []string{"kernel/outcall/conn/c.go", "kernel/channel/s.go", "connectors/sample/sample.go"} {
+		for _, g := range got {
+			if strings.HasSuffix(g, " "+bad) {
+				t.Errorf("false positive: %s", g)
+			}
+		}
+	}
+}

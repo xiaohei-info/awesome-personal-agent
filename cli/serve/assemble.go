@@ -18,6 +18,7 @@ import (
 	apiagentsmd "github.com/xiaohei-info/awesome-personal-agent/api/agentsmd"
 	apicapture "github.com/xiaohei-info/awesome-personal-agent/api/capture"
 	apichannel "github.com/xiaohei-info/awesome-personal-agent/api/channel"
+	apiconnections "github.com/xiaohei-info/awesome-personal-agent/api/connections"
 	apicontext "github.com/xiaohei-info/awesome-personal-agent/api/context"
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apidecisions "github.com/xiaohei-info/awesome-personal-agent/api/decisions"
@@ -55,6 +56,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	kconnections "github.com/xiaohei-info/awesome-personal-agent/kernel/connections"
 	kdecisions "github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
@@ -70,6 +72,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/spotcheck"
 	kmaterials "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/metrics"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/conn"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
@@ -83,6 +86,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	kscreening "github.com/xiaohei-info/awesome-personal-agent/kernel/screening"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/secrets"
 	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -133,6 +137,12 @@ func storedName(s domain.Source) string { return declaredName(s, "zh") }
 // 没列的 source_type 由内核按来源类型起名。
 var sourceKindNames = map[string]string{"mail": "邮件", "calendar": "日历", "reminder": "提醒事项", "github": "GitHub"}
 
+// builtinConnectors 是随主程序编译的连接插件（connectors/<类型>/，§3）；内核不 import 它们，由这里交给外呼调用器。
+var builtinConnectors = func() []conn.Plugin { return nil }
+
+// senderInterval 是渠道发送器领取投递的间隔。
+const senderInterval = 2 * time.Second
+
 // hostedReader 是只读读取器的 argv；托管文档与 AGENTS.md 触发共用，按名字解析（PATH）。
 var hostedReader = []string{"hosted-reader"}
 
@@ -165,6 +175,7 @@ type kernel struct {
 	agmWG  sync.WaitGroup  // 事件触发的 AGENTS.md 检测；测试收尾时等它们结束
 	ids    identityFetcher // 来源 identity 模式（§9.2）
 	wk     *wake.Service
+	send   *kchannel.Sender // 渠道发送器：内置渠道连接领取投递并经外呼调用器发送（§2.2）
 
 	resumeMu  sync.Mutex
 	resumeDue []string // 决策到期按默认值决定的事项：时钟事务提交后再续接
@@ -210,13 +221,31 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 
-	q := delivery.New(delivery.Options{UnclaimedAfter: cfg.DeliveryUnclaimedAfter, Backoff: cfg.DeliveryBackoff})
+	// 连接（§1.5）：凭据保管库的主密钥缺失时生成新的，照常启动，旧凭据显示要重新填写（§5.5）。
+	vault, created, err := secrets.Open(context.Background(), st, l.Home)
+	if err != nil {
+		return nil, err
+	}
+	if created {
+		slog.Info("generated a new master key for connection credentials", "file", secrets.KeyFile)
+	}
+	caller, err := conn.New(conn.Options{Store: st, Vault: vault, Plugins: builtinConnectors()})
+	if err != nil {
+		return nil, err
+	}
+	conns := kconnections.New(vault, caller.Decl)
+	q := delivery.New(delivery.Options{UnclaimedAfter: cfg.DeliveryUnclaimedAfter, Backoff: cfg.DeliveryBackoff, Deliverable: kconnections.Deliverable})
 	att := attention.New(attention.Options{Queue: q, Drafter: screenJudge})
 	sum, err := summaries.New(summaries.Options{Store: st, Exec: x, Gen: judge, Owner: owner})
 	if err != nil {
 		return nil, err
 	}
+	base := cfg.PublicURL
+	if base == "" {
+		base = apiURL
+	}
 	k := &kernel{st: st, x: x, layout: l, scr: scr, att: att, sum: sum, hn: khealth.NewNotifier(q), packs: ld,
+		send:  &kchannel.Sender{Store: st, Queue: q, Conns: conns, Call: caller, Base: base},
 		drain: make(chan struct{}, 1), draft: make(chan struct{}, 1), summarize: make(chan struct{}, 1)}
 
 	// 跟进消息归属与入站流水线互相接线：拦截在判断之前，退回后立即唤醒入站流水线。
@@ -353,6 +382,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		kitems.Register(x, kinds),
 		kdecisions.RegisterWith(x, scr),
 		kchannel.Register(x, kchannel.Options{Queue: q}),
+		conns.Register(x),
 		kprojects.Register(x),
 		executors.Register(x, executors.Options{Owner: owner, Project: kprojects.Get}),
 		delegation.Register(x, delegation.Options{Owner: owner, OnError: func(c command.Commit, err error) {
@@ -416,9 +446,9 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Guard: wk.Identity, Groups: []core.RouteGroup{
 		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), creds, grants,
-		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)),
+		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)), apiconnections.Routes(st, x, conns, caller, k.send),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, 0), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
+		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
@@ -599,6 +629,20 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 				k.syncHealth(ctx, report)
 			case <-tk.C:
 				maintain()
+			}
+		}
+	}()
+	wg.Add(1)
+	go func() { // 渠道发送器：发送走网络，单独一个循环，不占时钟与后台循环
+		defer wg.Done()
+		tk := time.NewTicker(senderInterval)
+		defer tk.Stop()
+		for {
+			report("channel sender", k.send.Drain(ctx))
+			select {
+			case <-ctx.Done():
+				return
+			case <-tk.C:
 			}
 		}
 	}()

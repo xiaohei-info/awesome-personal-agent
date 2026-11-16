@@ -21,6 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/secrets"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -28,6 +29,7 @@ func init() {
 	client.Register("init", initCmd)
 	client.Register("serve", serveCmd)
 	doctor.UseRegistry(registry)
+	doctor.UseConnectors(builtinConnectors)
 	backup.UseRegistry(registry) // `apa backup` 与启动时的升级前快照认同一份迁移链
 }
 
@@ -83,6 +85,9 @@ func initCmd(c *client.Ctx, args []string) error {
 		return err
 	}
 	defer st.Close()
+	if _, _, err := secrets.Open(context.Background(), st, home); err != nil { // 连接凭据的主密钥（§5.1），已有就不动
+		return err
+	}
 	if err := st.Update(context.Background(), func(tx *store.Tx) error {
 		if err := core.SetOwnerPassword(tx, pw); err != nil {
 			return err

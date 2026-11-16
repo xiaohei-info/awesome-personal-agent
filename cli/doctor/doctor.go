@@ -8,21 +8,27 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/connections"
 	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/conn"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	kpacks "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/secrets"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 )
@@ -30,6 +36,11 @@ import (
 func init() { client.Register("doctor", doctorCmd) }
 
 var registryFn func() (*store.Registry, error)
+
+// UseConnectors 登记取内置连接插件的函数；由 cli/serve 在 init 里登记（插件在 connectors/，只有装配方认识）。
+func UseConnectors(f func() []conn.Plugin) { connectorsFn = f }
+
+var connectorsFn = func() []conn.Plugin { return nil }
 
 // UseRegistry 登记取迁移注册表的函数；由 cli/serve 在 init 里登记（它是唯一装配内核的地方）。
 func UseRegistry(f func() (*store.Registry, error)) { registryFn = f }
@@ -128,7 +139,7 @@ func openLedger(ctx context.Context, in Input) (*ledger, error) {
 	return l, nil
 }
 
-// Run 是 `apa doctor`：九类检查，每类一项结论。
+// Run 是 `apa doctor`：十一类检查，每类一项结论。
 func Run(ctx context.Context, in Input) kdoctor.Report {
 	layout := config.LayoutOf(in.Home)
 	cfgCheck, _ := configCheck(layout)
@@ -140,7 +151,7 @@ func Run(ctx context.Context, in Input) kdoctor.Report {
 		if l.st != nil {
 			why, reason = "the ledger structure differs from this binary; an older one migrates when apa serve starts", kdoctor.CodeLedgerSchemaDiffers
 		}
-		for _, n := range []string{kdoctor.Tier, kdoctor.ModelEndpoint, kdoctor.Sources, kdoctor.Packs, kdoctor.HostPlugin, kdoctor.Overlaps, kdoctor.Channels} {
+		for _, n := range []string{kdoctor.Tier, kdoctor.ModelEndpoint, kdoctor.Sources, kdoctor.Packs, kdoctor.HostPlugin, kdoctor.Overlaps, kdoctor.Channels, kdoctor.Secrets, kdoctor.Connections} {
 			checks = append(checks, kdoctor.Check{Name: n, Status: kdoctor.Warning, Code: kdoctor.CodeSkipped, Data: map[string]any{"reason": reason}, Why: "skipped: " + why,
 				Next: "fix the data directory check first; run apa doctor --upgrade-check before upgrading"})
 		}
@@ -150,6 +161,9 @@ func Run(ctx context.Context, in Input) kdoctor.Report {
 	if err != nil {
 		checks = append(checks, kdoctor.Check{Name: kdoctor.Tier, Status: kdoctor.Error, Code: kdoctor.CodeFactsUnreadable, Why: "the ledger facts cannot be read: " + err.Error(), Next: "restore from a backup (apa backup restore)"})
 		return kdoctor.Assemble(checks...)
+	}
+	if err := readConnections(ctx, in.Home, l.st, &facts); err != nil {
+		checks = append(checks, kdoctor.Check{Name: kdoctor.Connections, Status: kdoctor.Error, Code: kdoctor.CodeFactsUnreadable, Why: "the connections cannot be read: " + err.Error(), Next: "restore from a backup (apa backup restore)"})
 	}
 	ld := offlinePacks(layout)
 	kernel := kdoctor.Kernel(ctx, facts, kdoctor.Env{Model: in.Model, Packs: ld, Now: func() time.Time { return clock.Now() }})
@@ -161,6 +175,22 @@ func Run(ctx context.Context, in Input) kdoctor.Report {
 	}
 	host, overlaps := hostChecks(ctx, in, facts)
 	return kdoctor.Assemble(append(append(checks, kernel...), host, overlaps)...)
+}
+
+// readConnections 读连接与密文概况（只读，不生成主密钥）；主密钥缺失时用一个临时密钥，全部密文按解不开报告。
+func readConnections(ctx context.Context, home string, st *store.Store, f *kdoctor.Facts) error {
+	v, err := secrets.Load(home)
+	if errors.Is(err, fs.ErrNotExist) {
+		v, err = secrets.Generate(), nil
+	}
+	if err != nil {
+		return err
+	}
+	call, err := conn.New(conn.Options{Plugins: connectorsFn()})
+	if err != nil {
+		return err
+	}
+	return f.ReadConnections(ctx, st, connections.New(v, call.Decl), kdoctor.KeyFactOf(filepath.Join(home, secrets.KeyFile)))
 }
 
 // offlinePacks 以与 apa serve 相同的方式读取内置包与数据目录包（只读文件）。

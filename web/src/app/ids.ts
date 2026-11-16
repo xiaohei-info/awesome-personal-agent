@@ -112,7 +112,7 @@ export const HEALTH_SIGNAL = [
   "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag",
 ] as const;
 /** 自检项：kernel/doctor/report.go Order */
-export const DOCTOR_CHECK = ["data_dir", "config", "tier", "model_endpoint", "sources", "packs", "host_plugin", "overlaps", "channels"] as const;
+export const DOCTOR_CHECK = ["data_dir", "config", "tier", "model_endpoint", "sources", "packs", "host_plugin", "overlaps", "channels", "secrets", "connections"] as const;
 /** 自检结论的机器码：kernel/doctor/codes.go Code*（Check.code、Detail.code、data.problems） */
 export const DOCTOR_CODE = [
   "ok", "not_configured", "no_client", "unreachable", "timeout", "unauthorized", "protocol_error", "self_reported", "invalid_request",
@@ -130,6 +130,8 @@ export const DOCTOR_CODE = [
   "host_no_session_kind", "host_hook_missing",
   "overlaps_skipped", "overlaps_none", "overlaps_found", "overlap",
   "channels_none", "channels_ok", "channels_backlog", "channel_ok", "channel_backlog", "channel_orphan", "export_ok",
+  "secrets_none", "secrets_ok", "secrets_key_missing", "secrets_key_mode", "secrets_unreadable",
+  "connections_none", "connections_ok", "connections_problem", "connection_ok", "connection_problem", "connection_disabled",
 ] as const;
 export type DoctorCode = (typeof DOCTOR_CODE)[number];
 
@@ -149,6 +151,7 @@ export const EVENT_INTERNAL = [
   "executor.confirmed", "executor.rejected", "executor.changed", "executor.removed", "source.registered", "source.updated",
   "source.enabled", "source.disabled", "source.renamed", "item.deleted", "run.credential_exchanged", "timer.fired", "credential.assigned",
   "agents_md.rendered", "background.launched", "background.refused", "background.skipped", "delegation.dispatched", "delegation.dispatch_updated", "executor.enrolled", "followup.deferred", "followup.reminded", "inbound.spot_reviewed", "purge.executed", "resume.launched", "resume.refused", "resume.session_lost", "rule.skipped", "wake.lease_opened", "wake.lease_released", "source.replay_requested", "source.webhook_key_created", "source.webhook_key_revoked", "source.webhook_key_rotated",
+  "connection.created", "connection.configured", "connection.enabled", "connection.disabled", "connection.renamed", "connection.removed",
 ] as const;
 
 // 以下是开放集合：能力包可以扩展，词表只登记内置的，查不到时显示原值。

@@ -18,7 +18,8 @@
 | `apa declare <文件>` | 提交插件声明（无头运行；旧插件的 `executors[]` 仍被接受，确认后并入执行者名录），本人在 Web 确认后生效 | worker | 4 |
 | `apa version` | 版本号、构建提交、各模块数据结构版本与各协议版本 | 无 | |
 | `apa doctor [--json] [--upgrade-check]` | 自检（主文档 §15.5）；`--upgrade-check` 是升级前的只读预检（主文档 §16.5） | 主机本地；内核一侧的检查需 observer | 1 |
-| `apa backup create/verify/restore` | `create [--out <目录>] [--no-secrets]` 备份；`verify <备份>` 校验；`restore <备份> --home <目录>` 恢复到空目录（主文档 §16.5） | 主机本地 | 1、6 |
+| `apa backup create/verify/restore` | `create [--out <目录>] [--no-secrets]` 备份（默认带连接凭据的主密钥 `master.key`，`--no-secrets` 不带）；`verify <备份>` 校验；`restore <备份> --home <目录>` 恢复到空目录（主文档 §16.5） | 主机本地 | 1、6 |
+| `apa secrets rekey` | 换连接凭据的主密钥：全部可解的密文用新密钥重新加密，再原子替换 `master.key`；只在服务停止时运行，服务仍在监听时拒绝；账本还没迁移到本二进制时拒绝（主文档 §14.2、§16.5） | 主机本地 | 2、6 |
 | **上下文** | | | |
 | `apa context [--session] [--scope project/cwd/item/all] [--item <id>] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息；`--scope item` 见主文档 §7.6 | observer | 3、5、7 |
 | `apa persona [--lang zh\|en]` | 读取当前人格，供插件在新会话开始时注入；本人没写时是内置默认语气（主文档 §11.2）；语言：`--lang` > Web 里选的助手语言 > `LC_ALL`、`LC_MESSAGES`、`LANG` > 英文 | observer | 3、7 |
@@ -197,6 +198,14 @@
 | | `GET /settings/sources/{id}/self-sender` | 声明了 `sender.self: identity` 的来源：运行一次来源程序的 `identity` 模式（登记命令的第一个词加 `identity`，超时 10 秒），返回 `{"sender"}` 供预填；不产生来源事件、不写 Event；其他来源 404，程序失败或没给出身份时 409 `conflict` | 只有 Web 登录 |
 | | `PUT /settings/channels/{name}/answerers` | 只替换这个渠道的回答人白名单 `{"answerers": [...]}`，记 `policy.changed` 与 `allowlist.changed` | 只有 Web 登录 |
 | | `POST /settings/channels/{name}/identify`，`GET /settings/channels/{name}/identify` | 开始识别：返回一次性口令 `{code, expires_at}`（10 分钟，同一渠道同时一个，只在内存里，重启作废）；查看：`{state: waiting \| got \| expired, sender?, display?}` | 只有 Web 登录 |
+| 连接 | `GET /connections?direction=` | 列出连接（渠道或输出），按创建顺序：`{"connections": [{"id", "direction", "type", "name", "config", "secrets": {"<字段>": true/false}, "enabled", "state": ok/problem/disabled, "problem"?, "detail"?, "last_ok_at"?, "last_error_at"?, "created_at", "updated_at"}]}`。凭据只回是否已设置且可用（主文档 §14.2）；必填凭据不可用时 `problem` 为 `credentials_missing` | 只有 Web 登录 |
+| | `GET /connections/types?direction=` | 内置连接类型的接入声明（选类型与渲染表单用）：`{"types": [{"type", "direction", "title", "tagline", "default", "via", "capabilities", "fields", "guide"?}]}`；文字都是 `{zh, en}` | 只有 Web 登录 |
+| | `POST /connections` | 新建（`connection.create`）：`{"type", "name"?, "config"?, "secrets"?, "enabled"?}`；`name` 缺省取声明的默认名，重名 409；配置按声明的字段表校验，必填缺失或字段不符 400。返回 201 与连接 | 只有 Web 登录 |
+| | `PUT /connections/{id}` | 改配置与凭据（`connection.configure`）：`{"config"?, "secrets"?}`；`config` 给出时整体替换非凭据配置；`secrets` 里出现的字段非空即替换、空串即清除，没出现的保持 | 只有 Web 登录 |
+| | `POST /connections/{id}/rename`，`POST /connections/{id}/enable`，`POST /connections/{id}/disable` | 改名 `{"name"}`（`connection.rename`）、启用（`connection.enable`）、停用（`connection.disable`）；状态未变不记事件。停用后，路由到它的投递直接进 Web 未读 | 只有 Web 登录 |
+| | `DELETE /connections/{id}` | 删除（`connection.remove`）：只对已停用的连接，否则 409；配置、凭据与现状一起删 | 只有 Web 登录 |
+| | `POST /connections/test` | 测表单里未保存的草稿 `{"type", "id"?, "config"?, "secrets"?, "send"?}`：插件自检，`send` 为真时再发一条内容固定的测试消息；带 `id` 时没给出的凭据用已保存的。不改账本。返回 `{"ok", "problem"?, "detail"?}`，`problem` 是问题代码（主文档 §7.6），`detail` 已脱敏 | 只有 Web 登录 |
+| | `POST /connections/{id}/test` | 对已保存的连接发一条测试消息，结果写进连接现状；返回同上 | 只有 Web 登录 |
 | | `PATCH /settings/tokens/{id}` | 认领 token 所属的 harness `{"harness"}`（非空、不含空白，同无头运行声明的 `harness`）：只能从空设一次，已有值或已吊销为 409（`credential.assign`，记 `credential.assigned`，载荷 `{"harness"}`）；只对 worker、delegate。`POST /settings/tokens` 可带同一字段，在签发时给定；其他种类带它为 400。`GET /settings/tokens` 每条带 `harness`（空为未认领）与 `seen_harness`（该凭据最近一次事件里自报的 harness，没有时省略，只作认领推荐，不参与判定） | 只有 Web 登录 |
 | | `PUT /settings/agents/{harness}/grant` | 替换该 Agent 的长期授权单：同一事务撤销它名下现有的 `grantee.agent` 式有效单（撤销原因 `replaced`）并按请求体 `{grantee: {background}, scope, actions, expires_at?, reason?}` 签发新单，记 `grant.revoked` 与 `grant.issued`；`actions` 为空即只撤销。响应 `{"grant": 新单或 null, "revoked": [被撤销的单 id]}`；新单校验失败为 400，旧单不动 | 只有 Web 登录 |
 | 认证 | `POST /auth/login`、`/logout` | Web 会话。连续失败的限速与锁定见主文档 §14.13，锁定期间返回 429 | |
@@ -299,6 +308,8 @@
 | `host_plugin` | `host_none`、`host_ok`、`host_attention` | `host_ready`、`host_ready_no_selfcheck`、`host_headless_missing`、`host_selfcheck_failed`、`host_no_session_kind`、`host_hook_missing` | `last_call_at`、`plugin_version`、`missing_hooks`、`problems` |
 | `overlaps` | `overlaps_skipped`、`overlaps_none`、`overlaps_found` | `overlap` | `harness`、`kind`、`name` |
 | `channels` | `channels_none`、`channels_ok`、`channels_backlog` | `channel_ok`、`channel_backlog`、`channel_orphan`、`export_ok` | `kind`、`backlog`、`last_seen_at` |
+| `secrets` | `secrets_none`、`secrets_ok`、`secrets_key_missing`、`secrets_key_mode`、`secrets_unreadable` | — | `rows`、`unreadable`、`other_key`、`key_file`、`mode` |
+| `connections` | `connections_none`、`connections_ok`、`connections_problem` | `connection_ok`、`connection_problem`、`connection_disabled` | 检查一级 `count`；对象一级 `direction`、`type`、`name`、`enabled`、`problem`、`last_ok_at`、`missing_credentials` |
 
 `apa doctor` 在数据目录不可读或数据结构与二进制不符时只做前两项，其余各项为 `warning`，`code` 为 `skipped`，`data.reason` 取 `ledger_unreadable` 或 `ledger_schema_differs`。升级预检（`--upgrade-check`）的专用项只在 CLI 输出，不带 `code`。
 
@@ -360,6 +371,8 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 `proposal.attached`。
 
+连接登记的事件（连接的新建、改配置、启用、停用、改名、删除）是内部类型，不进订阅流，不在本表。
+
 已有类型的信封不变；`item.updated` 的载荷新增可选的 `planned_for`，入站处置类事件的载荷新增可选的 `judgment`（判断记录 id）。v0.1 写下的 `run.finished`（`category: judge`）仍可回放，新的判断不再产生它（主文档 §8.6）。
 
 ## B.5 协议与版本
@@ -367,16 +380,21 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 `apa version` 与 `GET /version` 返回同一份内容：
 
 ```json
-{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 6}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "probability_judgment": "probability-judgment/1"}}
+{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 7}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
 ```
 
-`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，主干现为 4。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
+`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 7（新增连接与凭据保管的三张表）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
 
 ## B.6 v0.2.0 对已有契约的改动
 
 除下表外，v0.2.0 对 v0.1 的命令、路由、字段和事件都只做加法。
 
 | 改动 | v0.1 | v0.2.0 | 兼容 |
+| 连接与凭据保管 | 无 | 新增 `/connections` 路由与 `connection.*` 命令（只在 Web）；新增 `apa secrets rekey` | 只增：已有路由、命令与 ext 协议不变 |
+| 自检的检查项 | 九项 | 十一项：末尾追加 `secrets`、`connections` | 前九项的名字与顺序不变；`channels` 不再把内置渠道连接的路由 `channel:ch-…` 报成无密钥积压 |
+| 账本结构版本 | 6 | 7：只增 `connections_connection`、`connections_status`、`secrets_value` 三张表 | 升级时自动留快照；旧二进制拒绝打开新账本，回退用快照 |
+| 数据目录与备份 | 无主密钥 | `master.key`（0600）在升级后第一次启动时生成；`apa backup create` 默认带上，`--no-secrets` 不带并列入待办记录 | 恢复不带主密钥的备份时服务照常启动，连接显示要重新填写凭据 |
+| 渠道 ext 的名字 | 任意 | 不能以 `ch-` 开头（留给内置渠道连接的路由） | 已签发的密钥不受影响；新签发时拒绝这个前缀 |
 |---|---|---|---|
 | 凭原话的第二档命令 | 只要求原话与会话引用非空 | 另要求 `X-APA-Session-Kind: direct` | 没有兼容期：缺这个头即退出码 23。harness 插件须与内核一同升级 |
 | `/settings/model-endpoints` | 一个 `model_endpoint` | `judge_endpoint`、`generate_endpoint`、顶层 `screening_timeout_ms` | 本版 `PUT` 仍接受旧形状；已存的策略版本不改写，读取时等同 `generate_endpoint` |

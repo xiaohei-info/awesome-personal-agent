@@ -79,6 +79,9 @@ type Options struct {
 	Lease          time.Duration   // 领取租约，默认 60 秒
 	UnclaimedAfter time.Duration   // 无人领取多久转 fallback_web，默认 30 分钟
 	Now            func() time.Time
+	// Deliverable 非空时，入队前据它判断路由有没有消费方：为假时路由改为 web、直接落 Web 未读，
+	// 不等无人领取（路由指向已停用或已删除的渠道连接，§2.3）。由装配方接到连接登记。
+	Deliverable func(tx *store.Tx, route string) (bool, error)
 }
 
 // Queue 是投递队列；无状态，所有状态在账本里。
@@ -234,6 +237,15 @@ func (q *Queue) Create(tx *store.Tx, d domain.Delivery) (domain.Delivery, bool, 
 			return d, false, err
 		}
 		origin = string(b)
+	}
+	if d.Route != RouteWeb && q.o.Deliverable != nil {
+		ok, err := q.o.Deliverable(tx, d.Route)
+		if err != nil {
+			return d, false, err
+		}
+		if !ok {
+			d.Route = RouteWeb
+		}
 	}
 	now := ns(q.o.Now())
 	state := domain.DeliveryPending

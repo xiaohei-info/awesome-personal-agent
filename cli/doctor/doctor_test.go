@@ -21,6 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/connections"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -28,6 +29,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/secrets"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -43,7 +45,7 @@ func fullReg(t *testing.T) *store.Registry {
 	t.Helper()
 	r := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, executors.Module,
-		delivery.Module, registry.Module, runner.Module, kdoctor.Module} {
+		delivery.Module, registry.Module, runner.Module, kdoctor.Module, connections.Module, secrets.Module} {
 		if err := r.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -238,7 +240,7 @@ esac
 	return e, cls, gen
 }
 
-// ACT-DOC-01 与 ACT-DOC-02：健康实例九类检查都有结论、没有错误、退出码 0，JSON 字段齐全；只读且不含账本里的用户内容。
+// ACT-DOC-01 与 ACT-DOC-02：健康实例每类检查都有结论、没有错误、退出码 0，JSON 字段齐全；只读且不含账本里的用户内容。
 func TestDoctorHealthyInstanceIsReadOnlyAndFreeOfLedgerContent(t *testing.T) {
 	e, _, _ := healthy(t)
 	e.update(func(tx *store.Tx) error {
@@ -258,7 +260,7 @@ func TestDoctorHealthyInstanceIsReadOnlyAndFreeOfLedgerContent(t *testing.T) {
 	}
 	var rep kdoctor.Report
 	must(t, json.Unmarshal(out.Bytes(), &rep))
-	if !rep.OK || len(rep.Checks) != 9 {
+	if !rep.OK || len(rep.Checks) != len(kdoctor.Order) {
 		t.Fatalf("report: %s", out.String())
 	}
 	for i, n := range kdoctor.Order {
@@ -406,8 +408,8 @@ func openLegacy(t *testing.T, old *store.Registry) string {
 func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
 	home := openLegacy(t, regWith(t, 2, 0))
 	reg := fullReg(t)
-	if reg.SchemaLedger() != 6 {
-		t.Fatalf("precondition: structure 6, got %d", reg.SchemaLedger())
+	if reg.SchemaLedger() != 7 {
+		t.Fatalf("precondition: structure 7, got %d", reg.SchemaLedger())
 	}
 	in := Input{Home: home, Reg: reg, Model: &model.Client{}, Now: now}
 	r := Run(bg, in)
@@ -418,7 +420,7 @@ func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
 		t.Fatalf("sources: %+v", c)
 	}
 	u := UpgradeCheck(bg, in)
-	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 6") {
+	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 7") {
 		t.Fatalf("upgrade check: %+v", c)
 	}
 	if c := find(t, u, checkOutbound); c.Status != kdoctor.OK {

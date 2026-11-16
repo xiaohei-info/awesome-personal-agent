@@ -21,6 +21,7 @@ import (
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/secrets"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -34,6 +35,8 @@ var (
 	plainFiles = []string{"config.yaml", "sources.json"}
 	plainDirs  = []string{"blobs", "packs", "declarations"}
 	secretDirs = []string{"sources", "webhook-keys"} // 来源凭据与接收密钥明文；--no-secrets 不含
+	// 连接凭据的主密钥（§5.5）：密文本来就在账本里，带上它恢复后连接照常可用；--no-secrets 不含，恢复后连接显示要重填。
+	secretFiles = []string{secrets.KeyFile}
 )
 
 // Manifest 是 manifest.json。
@@ -141,10 +144,16 @@ func Create(ctx context.Context, home string, o Options, reg *store.Registry, no
 		files, dirs = []string{"config.yaml"}, nil
 	} else if !o.NoSecrets {
 		dirs = append(append([]string{}, dirs...), secretDirs...)
+		files = append(append([]string{}, files...), secretFiles...)
 	}
 	for _, f := range files {
 		if err := copyFile(filepath.Join(home, f), filepath.Join(out, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return m, err
+		}
+		if f == secrets.KeyFile {
+			if err := os.Chmod(filepath.Join(out, f), 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return m, err
+			}
 		}
 	}
 	for _, d := range dirs {
@@ -179,6 +188,11 @@ func secretEntries(home string) (out []string) {
 		ents, _ := os.ReadDir(filepath.Join(home, d))
 		for _, e := range ents {
 			out = append(out, d+"/"+e.Name())
+		}
+	}
+	for _, f := range secretFiles {
+		if _, err := os.Stat(filepath.Join(home, f)); err == nil {
+			out = append(out, f)
 		}
 	}
 	return out
@@ -428,7 +442,7 @@ func Restore(dir, target string, reg *store.Registry) (res Result, err error) {
 	}
 	for rel := range m.Files {
 		perm := os.FileMode(0o644)
-		if top, _, _ := strings.Cut(rel, "/"); top == "sources" || top == "webhook-keys" || rel == store.LedgerFile {
+		if top, _, _ := strings.Cut(rel, "/"); top == "sources" || top == "webhook-keys" || rel == store.LedgerFile || rel == secrets.KeyFile {
 			perm = 0o600
 		}
 		dst := filepath.Join(target, filepath.FromSlash(rel))
