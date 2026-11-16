@@ -1,0 +1,1 @@
+{"count": 1, "engine": "sqlite", "mailbox": "INBOX", "success": true, "totalInMailbox": 1, "messages": [{"dateReceived": "2026-01-03T10:00:00.000Z", "isRead": false, "messageId": "long-html@example.test", "sender": "Sender <sender@example.test>", "senderAddress": "sender@example.test", "senderName": "Sender", "subject": "Quarterly report"}]}
