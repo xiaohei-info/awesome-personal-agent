@@ -1,4 +1,4 @@
-# sha256: f3dbdb4eaa28bf5cb536f35ae33f7b528d63891dc4a8380d46ea63032c8a3ba8
+# sha256: 74c0ef3d28f8bed3ca350467172558d5330bdd1a4c1be980f9d4b91167c78e2e
 defects:
   schema: omac.defect-ledger/v1
   used_global: 2
@@ -15,7 +15,7 @@ defects:
       - webhook-original
       reporters:
       - e2e-raw-ingest
-      state: fixing
+      state: fixed
       fix_node: fix.raw-ingest.9159a6
     dfx-1160ef23f38f:
       suspected: link-material
