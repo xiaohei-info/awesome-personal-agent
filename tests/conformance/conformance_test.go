@@ -152,6 +152,18 @@ var (
 	buildErr  error
 )
 
+func TestMain(m *testing.M) { os.Exit(runMain(m)) }
+
+// runMain 用 defer 删除 buildAPA 建的目录，测试 panic 时也清。
+func runMain(m *testing.M) int {
+	defer func() {
+		if apaBin != "" {
+			os.RemoveAll(filepath.Dir(apaBin))
+		}
+	}()
+	return m.Run()
+}
+
 func buildAPA(t *testing.T) string {
 	t.Helper()
 	buildOnce.Do(func() {
