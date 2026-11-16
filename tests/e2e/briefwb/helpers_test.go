@@ -56,6 +56,23 @@ type fx struct {
 	stubs   map[string]string // 来源 id → 该来源专用的 SRC_STUB 所在目录
 	seenRun map[string]bool   // 已读过的 STUB_HARNESS 保存目录
 	mode    string            // 简报替身的模式文件
+	offset  int64             // 测试时钟已推进的秒数（内核时间 = 真实时间 + offset）
+}
+
+// advance 推进测试时钟并记账，fixture 的"今天"以内核时间为准。
+func (f *fx) advance(sec int64) {
+	f.TCAdvance(sec)
+	f.offset += sec
+	f.WebLogin() // 推进得久了，登录会话已过期
+}
+
+// now 是内核此刻的时间。
+func (f *fx) now() time.Time { return time.Now().Add(time.Duration(f.offset) * time.Second) }
+
+// at 是内核本地日期 + days 天的 hour 点整。
+func (f *fx) at(days, hour int) time.Time {
+	y, m, d := f.now().Date()
+	return time.Date(y, m, d+days, hour, 0, 0, 0, time.Local)
 }
 
 func (f *fx) step(name string, fn func(t *testing.T)) {
@@ -304,7 +321,7 @@ func (f *fx) addInstance(want int, params ...string) string {
 // runResult 是一次简报运行：简报事项与 STUB_HARNESS 保存下来的运行目录文件（资料文件、指令文件、原文文件）。
 type runResult struct {
 	Item  item
-	Dir   string
+	Dir   string            // 保存目录；运行目录是它的上一层
 	Mats  map[string]string // 段名 → 该段的 JSON（materials.json 里每段一份）
 	Files map[string]string // 运行目录里的其余文件（instruction.txt、source-event-NNN.txt）
 }
@@ -359,6 +376,13 @@ func (f *fx) runBrief(inst string, wantPhase string) runResult {
 		if e.Name() == "materials.json" {
 			continue
 		}
+		// 原文文件在运行目录里是只读的（ACT-BRF-05）；instruction.txt 内核写成 0600，不在验收的只读范围内，这里不断言。
+		if strings.HasPrefix(e.Name(), "source-event-") {
+			st, err := os.Stat(filepath.Join(filepath.Dir(res.Dir), e.Name()))
+			if err != nil || st.Mode().Perm()&0o222 != 0 {
+				f.t.Errorf("运行目录里的原文文件 %s 应只读: %v %v", e.Name(), st, err)
+			}
+		}
 		b, err := os.ReadFile(filepath.Join(res.Dir, e.Name()))
 		if err != nil {
 			f.t.Fatal(err)
@@ -383,7 +407,7 @@ func (f *fx) seedImported(doneItem, openItem string) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	now := time.Now()
+	now := f.now()
 	actor := domain.Actor{Type: domain.ActorSystem, Principal: "kernel:import", Via: domain.ViaSource, OnBehalfOf: "owner"}
 	err = st.Update(context.Background(), func(tx *store.Tx) error {
 		prog, _ := json.Marshal(map[string]any{"progress": domain.Progress{ID: "prg_imported", Text: importedNote, At: now.Add(-time.Hour)}})
