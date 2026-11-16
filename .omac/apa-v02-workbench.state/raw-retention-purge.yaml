@@ -1,9 +1,8 @@
-# sha256: 27fbcff099a3470c0308a1188b2607ca90807aff0a3eea0717d1cec093183e87
+# sha256: 75e27efe93accd04e5b49ad85e88b1cafa1f4eef28d6aeafbdcd739bf9525ec6
 work_item_id: 01a1e5ab-15e0-7381-a5c7-efec8a43a62d
 status: done
 merged: true
 merged_at: '2026-11-16T23:28:50Z'
-recovery_marker: true
 retry_note: CI rework budget was spent; last build failure was cli/materials TestMaterialAddLinkProjectFromCheckout
   (not your scope). Rebase the existing branch on origin/main first and rerun all
   contract commands. If that test still fails on your branch only, find whether your
