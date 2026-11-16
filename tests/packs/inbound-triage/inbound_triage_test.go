@@ -559,6 +559,22 @@ func TestReminderDueBecomesProposedTaskWithoutModel(t *testing.T) {
 	}
 }
 
+// flow-reminder-open / ACT-REM-02：没有到期日的提醒事项（reminder.open）由 reminder-open 直接成为建议，不调模型。
+func TestReminderOpenBecomesProposedTaskWithoutModel(t *testing.T) {
+	e := newEnv(t, false, nil)
+	e.emit("src_rem", "reminder", ev("rem2", "reminder.open", "整理书架", map[string]any{"correlation_keys": []string{"rem-2"}}))
+	evs := e.events("src_rem")
+	if len(evs) != 1 || evs[0].Disposition != domain.DispositionProposed {
+		t.Fatalf("events %+v", evs)
+	}
+	if it := e.item(evs[0].Item); it.Kind != "task" || it.Project != "" || it.Title != "整理书架" || it.Phase != domain.PhaseProposed {
+		t.Fatalf("item %+v", it)
+	}
+	if n := len(e.stub.Requests()); n != 0 {
+		t.Fatalf("model was called %d times", n)
+	}
+}
+
 // ACT-IRL-24、ACT-GH-08、ACT-GH-10：没有事项登记过关联键的 PR 状态变化、评论与规范文件变化只记 ignored，不调模型，不进建议流。
 func TestPRActivityAndAgentsMDChangeAreIgnoredByRules(t *testing.T) {
 	e := newEnv(t, true, nil)
@@ -586,7 +602,7 @@ func TestPRActivityAndAgentsMDChangeAreIgnoredByRules(t *testing.T) {
 // 规则 id 是对外契约：why 与来源页按它显示命中规则。
 func TestStructuredRulesDeclareExitsAndSemanticTypes(t *testing.T) {
 	want := map[string]struct{ typ, then string }{
-		"reminder-due": {"reminder", "proposed"}, "agents-md-changed": {"github", "ignore"}, "pr-activity": {"github", "ignore"}}
+		"reminder-due": {"reminder", "proposed"}, "reminder-open": {"reminder", "proposed"}, "agents-md-changed": {"github", "ignore"}, "pr-activity": {"github", "ignore"}}
 	got := 0
 	for _, r := range loadBuiltin(t).SourceRules {
 		if w, ok := want[r.ID]; ok {

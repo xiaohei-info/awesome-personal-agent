@@ -23,6 +23,12 @@ source_rules:
     kind: task
     project_by: none
     then: proposed
+  # 没有到期日的提醒事项只在来源配了 undated_lists 时才有；同样直接成为建议。
+  - id: reminder-open
+    match: {source_type: reminder, event_type: [reminder.open]}
+    kind: task
+    project_by: none
+    then: proposed
   - id: agents-md-changed
     match: {source_type: github, event_type: [repo.agents_md_changed]}
     then: ignore
