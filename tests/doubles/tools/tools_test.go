@@ -354,6 +354,30 @@ func TestPimReplay(t *testing.T) {
 	}
 }
 
+// 长邮件与无到期日提醒的录制 case：回放 sources/applepim/testdata，--list 按列表名过滤。
+func TestPimRawCases(t *testing.T) {
+	bin := newBin(t)
+	for c, want := range map[string]string{"mail-long-html": "report.pdf", "mail-long-legacy": "legacy-long@example.test"} {
+		setCase(t, bin, c)
+		o, _, code := run(t, bin, "mail-cli", nil, "get", "--format=json", "--engine=sqlite", "--id=x")
+		if code != 0 || !strings.Contains(o, want) {
+			t.Errorf("%s get: exit %d %.80s", c, code, o)
+		}
+	}
+	for _, c := range []string{"rem-undated", "rem-undated-renamed", "rem-undated-dated"} {
+		setCase(t, bin, c)
+		o, _, code := run(t, bin, "reminder-cli", nil, "items", "--format=json", "--filter=all", "--list=随手记")
+		if code != 0 || strings.Contains(o, "RW1") || !strings.Contains(o, "RU1") {
+			t.Errorf("%s all --list=随手记: exit %d %s", c, code, o)
+		}
+	}
+	setCase(t, bin, "rem-undated-dated")
+	o, _, _ := run(t, bin, "reminder-cli", nil, "items", "--format=json", "--filter=upcoming")
+	if !strings.Contains(o, `"RU1"`) {
+		t.Errorf("补上到期日后 upcoming 应含 RU1: %s", o)
+	}
+}
+
 // flow-channel-telegram：渠道侧直接复用 ext/telegram/fakebot；机器人替身收到发出的消息并记录。
 func TestChannelBotRecordsMessage(t *testing.T) {
 	b, err := fakebot.New()

@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/sources/internal/content"
 )
 
 // 退出码沿用 §9.2。
@@ -36,8 +38,12 @@ const (
 	defaultDays    = 7
 	defaultHorizon = 30
 	listLimit      = 500
-	maxDetail      = 16 << 10
+	// undatedFilter：MEAS-REM-UNDATED 未实测，没有专门筛选时取列表全部提醒，由适配器筛未完成。
+	undatedFilter = "all"
 )
+
+// outputMB 与内核 max_source_output_mb 的默认值一致；来源程序拿不到运行配置里的实际值（shortcut: 配小时改由内核传入）。
+var outputMB = 32
 
 // Input 是 stdin 的 Source 契约输入。
 type Input struct {
@@ -68,21 +74,57 @@ type Config struct {
 	Calendars   []string `json:"calendars,omitempty"`    // calendar：日历名或 ID；缺省全部
 	HorizonDays int      `json:"horizon_days,omitempty"` // calendar：向前看多少天，缺省 30
 	Lists       []string `json:"lists,omitempty"`        // reminders：列表名或 ID；缺省全部
+	// UndatedLists：列在其中的列表，未完成的提醒不论有无到期日都产出事件（无到期日的是 reminder.open）。
+	UndatedLists []string `json:"undated_lists,omitempty"`
 
 	TimeoutSec int `json:"timeout_sec,omitempty"`
 }
 
 type event struct {
-	ID              string   `json:"id"`
-	Type            string   `json:"type"`
-	Subject         string   `json:"subject"`
-	Summary         string   `json:"summary,omitempty"`
-	Detail          string   `json:"detail,omitempty"`
-	Link            string   `json:"link,omitempty"`
-	OccurredAt      string   `json:"occurred_at"`
-	CorrelationKeys []string `json:"correlation_keys,omitempty"`
-	Sender          string   `json:"sender,omitempty"`
+	ID              string         `json:"id"`
+	Type            string         `json:"type"`
+	Subject         string         `json:"subject"`
+	Summary         string         `json:"summary,omitempty"`
+	Detail          string         `json:"detail,omitempty"`
+	Link            string         `json:"link,omitempty"`
+	OccurredAt      string         `json:"occurred_at"`
+	CorrelationKeys []string       `json:"correlation_keys,omitempty"`
+	Sender          string         `json:"sender,omitempty"`
+	Original        *original      `json:"original,omitempty"`
+	Headers         map[string]any `json:"headers,omitempty"`
+	Attachments     []attachment   `json:"attachments,omitempty"`
+	Content         *declared      `json:"content,omitempty"`
 	// 不设 sender_verified：邮件应用不给可核实的结论（§9.7）。
+}
+
+type original struct {
+	MediaType string `json:"media_type"`
+	Text      string `json:"text"`
+}
+
+type attachment struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type,omitempty"`
+	Size      int64  `json:"size"`
+	Inline    bool   `json:"inline,omitempty"`
+}
+
+type missing struct {
+	Part   string `json:"part"`
+	Reason string `json:"reason"`
+}
+
+// declared 是事件的 content 字段：没取全的部分自报为 partial（设计 §9.2）。
+type declared struct {
+	State   string    `json:"state"`
+	Missing []missing `json:"missing"`
+}
+
+func partial(m []missing) *declared {
+	if len(m) == 0 {
+		return nil
+	}
+	return &declared{State: "partial", Missing: m}
 }
 
 // Runner 运行一个 apple-pim 工具（cli 如 "mail-cli"），参数一律 argv，不经 shell。
@@ -169,6 +211,12 @@ type mailMsg struct {
 	// get 的 message 带线程头（MEAS-MAIL-THREAD）；缺失时只给自己的 Message-ID。
 	References string `json:"references"`
 	InReplyTo  string `json:"inReplyTo"`
+	// get 的结构化原文字段（MEAS-RAW-MAIL 未实测，形态按设计合成，见 testdata/README.md）：
+	// 缺失（nil）与"确实没有"（空）要区分，前者以 partial 自报。
+	Headers     []mailHeader `json:"headers"`
+	HTMLContent *string      `json:"htmlContent"`
+	Attachments *[]mailAtt   `json:"attachments"`
+	Source      *string      `json:"source"` // 工具只给原始邮件时的 RFC 5322 全文
 }
 
 func pollMail(ctx context.Context, r Runner, cfg Config, in Input, now time.Time) ([]event, string, error) {
@@ -227,9 +275,10 @@ func pollMail(ctx context.Context, r Runner, cfg Config, in Input, now time.Time
 		newest = floor
 	}
 	var evs []event
+	batch := content.NewBatcher(outputMB)
 	for n, it := range items {
-		if n > 0 && ctx.Err() != nil {
-			break // 超时：已读部分照常输出，游标只到已读部分
+		if n > 0 && (ctx.Err() != nil || batch.Full()) {
+			break // 超时或输出预算用尽：已读部分照常输出，游标只到已读部分
 		}
 		raw, err := call(ctx, r, "mail-cli", "get", "--format=json", "--engine=sqlite", "--account="+cfg.Account,
 			"--mailbox="+cfg.Mailbox, "--id="+it.m.MessageID)
@@ -253,9 +302,11 @@ func pollMail(ctx context.Context, r Runner, cfg Config, in Input, now time.Time
 		if sender == "" {
 			sender = it.m.Sender
 		}
-		evs = append(evs, event{ID: it.m.MessageID, Type: "mail.received", Subject: subj, Detail: truncate(got.Message.Content),
-			OccurredAt: it.at.UTC().Format(time.RFC3339Nano), Sender: sender,
-			CorrelationKeys: []string{"thread:" + threadRoot(it.m.MessageID, got.Message)}})
+		ev := buildMail(it.m, got.Message, subj, sender, it.at)
+		if !batch.Add(eventSize(ev)) {
+			break
+		}
+		evs = append(evs, ev)
 		// 游标最多到当前时间：发件人控制的日期不可信，未来日期不能让后续邮件被永久越过。
 		if at := minTime(it.at, now); at.After(newest) {
 			newest = at
@@ -265,6 +316,34 @@ func pollMail(ctx context.Context, r Runner, cfg Config, in Input, now time.Time
 		newest = now
 	}
 	return evs, newest.UTC().Format(time.RFC3339Nano), nil
+}
+
+// buildMail 把一封邮件的原文各部分装进事件；事件 id 仍是 Message-ID（WB-36）。
+func buildMail(list, got mailMsg, subj, sender string, at time.Time) event {
+	p := collectMail(list, got)
+	ev := event{ID: list.MessageID, Type: "mail.received", Subject: subj, Detail: p.text,
+		OccurredAt: at.UTC().Format(time.RFC3339Nano), Sender: sender,
+		CorrelationKeys: []string{"thread:" + threadRoot(list.MessageID, got)}}
+	if p.html != "" {
+		ev.Original = &original{MediaType: "text/html", Text: p.html}
+		if txt, err := content.HTMLToText(p.html); err != nil {
+			ev.Detail = ""
+			p.missing = append(p.missing, missing{"body", err.Error()})
+		} else {
+			ev.Detail = txt
+		}
+	}
+	ev.Headers = content.NormalizeHeaders(p.headers)
+	if p.attachments != nil {
+		ev.Attachments = *p.attachments
+	}
+	ev.Content = partial(p.missing)
+	return ev
+}
+
+func eventSize(ev event) int {
+	b, _ := json.Marshal(ev)
+	return len(b) + 1
 }
 
 var msgIDRe = regexp.MustCompile(`<([^<>\s]+)>`)
@@ -296,6 +375,37 @@ type calEvent struct {
 	Location       string `json:"location"`
 	Notes          string `json:"notes"`
 	URL            string `json:"url"`
+	// 组织者与参与者：字符串，或带 name/email 的对象（形态未实测，两种都收）。
+	Organizer json.RawMessage   `json:"organizer"`
+	Attendees []json.RawMessage `json:"attendees"`
+}
+
+// person 把组织者、参与者的字符串或对象形态统一成 "名字 <邮箱>"。
+func person(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	var o struct{ Name, Email string }
+	if json.Unmarshal(raw, &o) != nil {
+		return ""
+	}
+	switch {
+	case o.Name != "" && o.Email != "":
+		return o.Name + " <" + o.Email + ">"
+	case o.Email != "":
+		return o.Email
+	}
+	return o.Name
+}
+
+func calHeaders(e calEvent) map[string]any {
+	hs := []content.Header{{Name: "Start", Value: e.StartDate}, {Name: "End", Value: e.EndDate}, {Name: "Location", Value: e.Location},
+		{Name: "Organizer", Value: person(e.Organizer)}, {Name: "Status", Value: e.Status}}
+	for _, a := range e.Attendees {
+		hs = append(hs, content.Header{Name: "Attendee", Value: person(a)})
+	}
+	return content.NormalizeHeaders(hs)
 }
 
 func pollCalendar(ctx context.Context, r Runner, cfg Config, in Input, now time.Time) ([]event, string, error) {
@@ -356,7 +466,7 @@ func pollCalendar(ctx context.Context, r Runner, cfg Config, in Input, now time.
 			evs = append(evs, event{
 				ID: e.ID + "|" + occ + "|" + digest(e.Status, e.Title, e.Notes, e.Location, e.StartDate, e.EndDate), Type: typ,
 				Subject: subject, Summary: strings.TrimSpace(summary), Detail: e.Notes, Link: e.URL,
-				OccurredAt: at.UTC().Format(time.RFC3339Nano), CorrelationKeys: []string{e.ID + "|" + occ},
+				OccurredAt: at.UTC().Format(time.RFC3339Nano), CorrelationKeys: []string{e.ID + "|" + occ}, Headers: calHeaders(e),
 			})
 		}
 	}
@@ -371,6 +481,10 @@ type reminder struct {
 	List    string `json:"list"`
 	DueDate string `json:"dueDate"`
 	Notes   string `json:"notes"`
+	// 未完成、创建时间与优先级；创建时间工具不给时取本次拉取的时刻。
+	IsCompleted  bool   `json:"isCompleted"`
+	CreationDate string `json:"creationDate"`
+	Priority     *int   `json:"priority"`
 }
 
 func pollReminders(ctx context.Context, r Runner, cfg Config, now time.Time) ([]event, string, error) {
@@ -381,56 +495,93 @@ func pollReminders(ctx context.Context, r Runner, cfg Config, now time.Time) ([]
 	// upcoming 只含未完成且有到期日的提醒；overdue 单列，两者合并去重。
 	seen := map[string]bool{}
 	var evs []event
+	collect := func(list, filter string, undated bool) error {
+		args := []string{"items", "--format=json", "--filter=" + filter, "--limit=" + strconv.Itoa(listLimit)}
+		if list != "" {
+			args = append(args, "--list="+list)
+		}
+		raw, err := call(ctx, r, "reminder-cli", args...)
+		if err != nil {
+			return err
+		}
+		var out struct {
+			Reminders []reminder `json:"reminders"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return fail(ExitConfig, "items 输出无法解析: %v", err)
+		}
+		if len(out.Reminders) >= listLimit {
+			return fail(ExitConfig, "提醒事项达到 %d 条上限，请用 lists 缩小范围", listLimit)
+		}
+		for i, x := range out.Reminders {
+			if x.ID == "" {
+				return fail(ExitConfig, "第 %d 条提醒缺少 id", i)
+			}
+			if seen[x.ID] || x.IsCompleted {
+				continue
+			}
+			ev, err := reminderEvent(x, now, undated)
+			if err != nil {
+				return err
+			}
+			seen[x.ID] = true
+			evs = append(evs, ev)
+		}
+		return nil
+	}
 	for _, l := range scopes {
 		for _, f := range []string{"upcoming", "overdue"} {
-			args := []string{"items", "--format=json", "--filter=" + f, "--limit=" + strconv.Itoa(listLimit)}
-			if l != "" {
-				args = append(args, "--list="+l)
-			}
-			raw, err := call(ctx, r, "reminder-cli", args...)
-			if err != nil {
+			if err := collect(l, f, false); err != nil {
 				return nil, "", err
-			}
-			var out struct {
-				Reminders []reminder `json:"reminders"`
-			}
-			if err := json.Unmarshal(raw, &out); err != nil {
-				return nil, "", fail(ExitConfig, "items 输出无法解析: %v", err)
-			}
-			if len(out.Reminders) >= listLimit {
-				return nil, "", fail(ExitConfig, "提醒事项达到 %d 条上限，请用 lists 缩小范围", listLimit)
-			}
-			for i, x := range out.Reminders {
-				if x.ID == "" {
-					return nil, "", fail(ExitConfig, "第 %d 条提醒缺少 id", i)
-				}
-				if seen[x.ID] {
-					continue
-				}
-				seen[x.ID] = true
-				due, err := parseDue(x.DueDate)
-				if x.DueDate != "" && err != nil {
-					return nil, "", fail(ExitConfig, "提醒 dueDate 无法解析: %q", x.DueDate)
-				}
-				if x.DueDate == "" {
-					due = now
-				}
-				subject := strings.TrimSpace(x.Title)
-				if subject == "" {
-					subject = "(无标题)"
-				}
-				summary := "到期 " + x.DueDate
-				if x.List != "" {
-					summary += " · " + x.List
-				}
-				evs = append(evs, event{
-					ID: x.ID + "|" + digest(x.Title, x.DueDate, x.Notes, x.List), Type: "reminder.due", Subject: subject,
-					Summary: summary, Detail: x.Notes, OccurredAt: due.UTC().Format(time.RFC3339Nano), CorrelationKeys: []string{x.ID},
-				})
 			}
 		}
 	}
+	// 没有到期日的提醒不在 upcoming、overdue 里：undated_lists 里的列表另取全部，由 collect 筛掉已完成的。
+	for _, l := range cfg.UndatedLists {
+		if err := collect(l, undatedFilter, true); err != nil {
+			return nil, "", err
+		}
+	}
 	return evs, now.UTC().Format(time.RFC3339Nano), nil
+}
+
+// reminderEvent：有到期日是 reminder.due；undated_lists 的取数里没有到期日的是 reminder.open。
+// 两者 id 的构成与关联键相同，改标题仍是同一个关联键，补上到期日后按来源对象更新写回原事项。
+func reminderEvent(x reminder, now time.Time, undatedList bool) (event, error) {
+	subject := strings.TrimSpace(x.Title)
+	if subject == "" {
+		subject = "(无标题)"
+	}
+	ev := event{ID: x.ID + "|" + digest(x.Title, x.DueDate, x.Notes, x.List), Subject: subject, Detail: x.Notes, CorrelationKeys: []string{x.ID}}
+	hs := []content.Header{{Name: "List", Value: x.List}, {Name: "Due", Value: x.DueDate}}
+	if x.Priority != nil {
+		hs = append(hs, content.Header{Name: "Priority", Value: strconv.Itoa(*x.Priority)})
+	}
+	ev.Headers = content.NormalizeHeaders(hs)
+	if x.DueDate == "" && undatedList {
+		at := now
+		if x.CreationDate != "" {
+			t, err := parseDue(x.CreationDate)
+			if err != nil {
+				return ev, fail(ExitConfig, "提醒 creationDate 无法解析: %q", x.CreationDate)
+			}
+			at = t
+		}
+		ev.Type, ev.Summary, ev.OccurredAt = "reminder.open", x.List, at.UTC().Format(time.RFC3339Nano)
+		return ev, nil
+	}
+	due := now // 不在 undated_lists 里取到的无到期日提醒：沿用旧行为
+	if x.DueDate != "" {
+		var err error
+		if due, err = parseDue(x.DueDate); err != nil {
+			return ev, fail(ExitConfig, "提醒 dueDate 无法解析: %q", x.DueDate)
+		}
+	}
+	ev.Type, ev.Summary, ev.OccurredAt = "reminder.due", "到期 "+x.DueDate, due.UTC().Format(time.RFC3339Nano)
+	if x.List != "" {
+		ev.Summary += " · " + x.List
+	}
+	return ev, nil
 }
 
 func parseDue(s string) (time.Time, error) {
@@ -542,11 +693,4 @@ func minTime(a, b time.Time) time.Time {
 		return b
 	}
 	return a
-}
-
-func truncate(s string) string {
-	if len(s) <= maxDetail {
-		return s
-	}
-	return strings.ToValidUTF8(s[:maxDetail], "")
 }

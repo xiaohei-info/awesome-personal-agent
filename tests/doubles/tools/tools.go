@@ -112,8 +112,12 @@ func dispatch(tool, c string, args []string, root string) out {
 	if !known {
 		return failf(ExitNoRecord, "tool-stub: 未知工具 %q", tool)
 	}
+	// 验收文档指定的 apple-pim case 名不带 pim- 前缀：mail-long-html 等只有 mail-cli 回放，rem-* 只有 reminder-cli 回放。
+	if tool == "mail-cli" && (c == "mail-long-html" || c == "mail-long-legacy") || tool == "reminder-cli" && strings.HasPrefix(c, "rem-undated") {
+		return pimCall(tool, c, args, root)
+	}
 	if !strings.HasPrefix(c, prefix) && !(tool == "himalaya" && strings.HasPrefix(c, "himalaya-")) { // himalaya-long 也是邮件工具的 case
-		if c2 := strings.SplitN(c, "-", 2)[0]; c2 != "himalaya" && c2 != "mail" && c2 != "cal" && c2 != "gh" && c2 != "pim" {
+		if c2 := strings.SplitN(c, "-", 2)[0]; c2 != "himalaya" && c2 != "mail" && c2 != "cal" && c2 != "gh" && c2 != "pim" && c2 != "rem" {
 			return failf(ExitNoCase, "tool-stub: 未知 case %q", c)
 		}
 		return failf(ExitNoRecord, "tool-stub: case %q 没有录制 %s 的输出", c, tool)
