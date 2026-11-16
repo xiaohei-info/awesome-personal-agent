@@ -76,18 +76,37 @@ function ItemLink({ item }: { item?: TraceEntry["item"] }) {
   return <Link to={"/items/" + encodeURIComponent(item.id)}>{item.title || "—"}</Link>;
 }
 
+interface Level { backend: string; model?: string; p?: number; seg?: string; answer?: string; outcome: string; error?: string }
+
+/** 一条判断记录按级展开成多行：每行主语是那一级的模型，按答题顺序；各级都没定时末尾补一行系统的保守做法。
+ * 试用打分与过保留期的记录不展开。原始记录随最后一行。 */
+export function expand(es: TraceEntry[]): TraceEntry[] {
+  return es.flatMap((e) => {
+    const a = e.args ?? {};
+    if (e.kind !== "judged" || a.expired || a.shadow) return [e];
+    const ls = (a.levels ?? []) as Level[];
+    const rows: TraceEntry[] = ls.map((l, i) => ({ ...e, who: { kind: "model", role: "judge", name: l.model || undefined }, args: { level: l, more: i < ls.length - 1, low: a.low, high: a.high }, steps: [] }));
+    if (a.decided_by === "default" || !rows.length) rows.push({ ...e, who: { kind: "system" }, args: { undecided: true }, steps: [] });
+    rows[rows.length - 1].steps = e.steps;
+    return rows;
+  });
+}
+
 function judged(t: T, a: Record<string, unknown>): string {
   if (a.expired) return a.answer === "no" ? t.expiredNo : t.expiredYes;
-  const levels = (a.levels ?? []) as { backend: string; p?: number; seg?: string; answer?: string; outcome: string }[];
+  if (a.shadow) return t.shadow(pct(((a.levels ?? []) as Level[]).find((l) => l.p !== undefined)?.p ?? 0));
+  const lv = a.level as Level | undefined;
+  if (!lv) return t.undecided;
+  const next = a.more ? t.passOn : "";
+  if (lv.outcome === "error" || lv.outcome === "skipped") return t.levelFailed(t.levelWhy[lv.error ?? ""] ?? t.levelWhy.error) + next;
   const lo = pct(a.low), hi = pct(a.high);
-  if (a.shadow) return t.shadow(pct(levels.find((l) => l.p !== undefined)?.p ?? 0));
-  if (a.decided_by === "default") return t.undecided;
-  const lv = levels.find((l) => l.outcome === "decided") ?? levels[levels.length - 1];
-  if (!lv || lv.outcome === "error" || lv.outcome === "skipped") return t.levelFailed;
-  if (lv.p === undefined) return lv.answer === "no" ? t.chatNo : t.chatYes;
+  if (lv.p === undefined) {
+    if (lv.outcome === "uncertain") return t.chatUnsure + next;
+    return lv.answer === "no" ? t.chatNo : t.chatYes;
+  }
   if (lv.seg === "below") return t.below(pct(lv.p), lo);
   if (lv.seg === "above") return t.above(pct(lv.p), hi);
-  return t.between(pct(lv.p), lo, hi);
+  return t.between(pct(lv.p), lo, hi) + next;
 }
 
 /** 一行的「做了什么 · 结果」。 */
@@ -215,7 +234,7 @@ export function TraceList({ data }: { data: TraceData }) {
   const origins = data.origins ?? [];
   // 事项经过里的来源消息写出标题，并能单独打开那条消息的经过。
   const from = (o: TraceData) => o.entries.map((e) => (e.kind === "arrived" && o.message ? { ...e, args: { ...e.args, subject: o.message.subject, origin: o.message.id } } : e));
-  const entries = [...origins.flatMap(from), ...data.entries];
+  const entries = expand([...origins.flatMap(from), ...data.entries]);
   if (!entries.length) return <p className="sub">{t.empty}</p>;
   const subjects = origins.length > 0;
   const groups = fold(entries);

@@ -380,3 +380,62 @@ func TestTraceGenerateCallIsNotARule(t *testing.T) {
 		t.Fatalf("alert %+v", a)
 	}
 }
+
+// 逐级展示的数据来源：一条判断记录的每一级（后端、模型、概率与门槛段、答案、错误码）原样进 args.levels，
+// 由 Web 按级展开；定案者与取保守默认由 decided_by 说明。
+func TestTraceJudgedKeepsEveryLevel(t *testing.T) {
+	p := 0.31
+	cases := map[string]struct {
+		levels    []record.Level
+		decidedBy string
+		answer    string
+		check     func(t *testing.T, lv []map[string]any)
+	}{
+		"分类拿不准，对话定案": {
+			levels: []record.Level{
+				{Backend: record.BackendClassifier, Model: "jev-1", PYes: &p, Outcome: record.OutcomeUncertain},
+				{Backend: record.BackendChat, Model: "chat-1", Answer: "no", Outcome: record.OutcomeDecided},
+			},
+			decidedBy: record.DecidedChat, answer: "no",
+			check: func(t *testing.T, lv []map[string]any) {
+				if lv[0]["seg"] != "between" || lv[0]["p"] != p || lv[0]["outcome"] != "uncertain" || lv[1]["answer"] != "no" || lv[1]["model"] != "chat-1" {
+					t.Fatalf("levels %+v", lv)
+				}
+			},
+		},
+		"对话报错，取保守默认": {
+			levels: []record.Level{
+				{Backend: record.BackendClassifier, Model: "jev-1", PYes: &p, Outcome: record.OutcomeUncertain},
+				{Backend: record.BackendChat, Model: "chat-1", Outcome: record.OutcomeError, ErrorCode: "schema"},
+			},
+			decidedBy: record.DecidedDefault, answer: "yes",
+			check: func(t *testing.T, lv []map[string]any) {
+				if lv[1]["outcome"] != "error" || lv[1]["error"] != "schema" || lv[1]["model"] != "chat-1" {
+					t.Fatalf("levels %+v", lv)
+				}
+			},
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := traceEnv(t)
+			e.msg("sev_l", "mail.received", "季度报表", "bob", true)
+			e.do(func(tx *store.Tx) error {
+				return record.Put(tx, record.Record{ID: "jdg_l", Use: "inbound_screen", Template: "inbound-triage/triage-screen@x", Subject: "sev_l", Fingerprint: "f",
+					Band: record.Band{Low: 0.15, High: 0.6}, DecidedBy: c.decidedBy, Answer: c.answer, LowConfidence: c.decidedBy == record.DecidedDefault, CreatedAt: t0, Levels: c.levels})
+			})
+			e.ev(time.Second, evDisposed, "sev_l", inbound, "screened",
+				map[string]any{"disposition": "proposed", "rule": "inbound-triage/source_rules/mail-received", "judgment": "jdg_l", "answer": c.answer, "decided_by": c.decidedBy})
+			var j Entry
+			for _, x := range e.trace("sev_l", authz.LevelWeb).Entries {
+				if x.Kind == KJudged {
+					j = x
+				}
+			}
+			if j.Args["decided_by"] != c.decidedBy {
+				t.Fatalf("judged %+v", j)
+			}
+			c.check(t, j.Args["levels"].([]map[string]any))
+		})
+	}
+}

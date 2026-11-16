@@ -57,7 +57,21 @@ const GAPS: TraceData = {
     { at: "2030-01-01T10:21:00Z", who: { kind: "model", role: "generate" }, kind: "generated", mech: true, args: { state: "failed", template: "one-line-summary" }, steps: [] },
   ],
 };
-const TRACES: Record<string, TraceData> = { sev_a: RULE, sev_b: MODEL, sev_c: PROPOSED, sev_d: GAPS };
+// E：分类端点拿不准、交给对话端点定案；F：对话端点出错，各级都没定，取保守默认。
+const JUDGE_AT = "2030-01-01T09:20:00Z";
+const LEVELS = (levels: unknown[], decided_by: string, answer: string): TraceData => ({
+  message: { id: "sev_x", source: "src_mail", type: "mail.received", subject: "季度报表", sender: "bob", sender_verified: true, disposition: "ignored", occurred_at: "2030-01-01T09:00:00Z" },
+  entries: [{ at: JUDGE_AT, who: { kind: "model", name: "jev-1", role: "judge" }, kind: "judged", args: { levels, low: 0.15, high: 0.6, decided_by, answer }, steps: [step(1, "inbound.disposed", "sev_x")] }],
+});
+const UNSURE_THEN_CHAT = LEVELS([
+  { backend: "classifier", model: "jev-1", p: 0.31, seg: "between", outcome: "uncertain" },
+  { backend: "chat", model: "haiku-5", answer: "no", outcome: "decided" },
+], "chat", "no");
+const CHAT_FAILS = LEVELS([
+  { backend: "classifier", model: "jev-1", p: 0.31, seg: "between", outcome: "uncertain" },
+  { backend: "chat", model: "haiku-5", outcome: "error", error: "schema" },
+], "default", "yes");
+const TRACES: Record<string, TraceData> = { sev_a: RULE, sev_b: MODEL, sev_c: PROPOSED, sev_d: GAPS, sev_e: UNSURE_THEN_CHAT, sev_f: CHAT_FAILS };
 
 function backend() {
   return (async (url: string) => {
@@ -100,6 +114,23 @@ describe("一条消息的处理经过（/sources/events/:id）", () => {
     expect(l[1]).toMatch(/^APA 规则「邮件交给判断模型」交给判断模型/);
     expect(l[2]).toMatch(/^判断模型 jev-1值得看的可能 11%，低于 15%：把握高，直接忽略/);
     expect(l[3]).toMatch(/^你抽查时点了「确实不用」/);
+  });
+
+  it("分类拿不准、对话定案：逐级一行，主语是各自的模型", async () => {
+    mount("/sources/events/sev_e");
+    const l = await lines();
+    expect(l[0]).toMatch(/^判断模型 jev-1值得看的可能 31%，在 15%–60% 之间：拿不准，交给下一级/);
+    expect(l[1]).toMatch(/^判断模型 haiku-5答「不用看」，直接忽略/);
+    expect(l).toHaveLength(2);
+  });
+
+  it("对话报错、各级都没定：写明哪一级为什么没答上，末行取保守做法，不露错误码", async () => {
+    mount("/sources/events/sev_f");
+    const l = await lines();
+    expect(l[0]).toMatch(/拿不准，交给下一级/);
+    expect(l[1]).toMatch(/^判断模型 haiku-5回答格式不对，没答上/);
+    expect(l[2]).toMatch(/^系统各级都拿不准，按保守做法提成建议（把握低）/);
+    expect(l.join()).not.toMatch(/schema/);
   });
 
   it("成了建议并被驳回：链到建议、起草失败如实写、同类后续消息折成一行可展开", async () => {
