@@ -186,7 +186,7 @@
 | | `GET /source-events/{id}/outbound-preview` | 外发预览：这条事件按 `full`、`excerpt`、`meta` 裁剪后实际送给模型的内容，与外发同源（主文档 §14.14）；只读，不写 Event | observer；运行凭据不可用（返回 403）；内部来源 `capture:<项目>` 的事件只有 Web 登录能读 |
 | | `POST /source-events/restore` | 把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate（附本人原话） |
 | | `GET /source-events/{id}` | 单条读取来源事件及其原文，见下 | Web 登录读全文；token 按外发范围裁剪；运行凭据、ext 密钥不可用（403） |
-| | `POST /source-events/{id}/attachments/{n}/fetch` | 【规划中（v0.2.0）】取回第 n 个附件（`source.fetch_attachment`，主文档 §7.6）：成功返回 200 与更新后的附件清单项（带 `blob`）；来源程序不支持取回是 409，取回失败是 502 并带原因 | Web 登录、delegate（附本人原话） |
+| | `POST /source-events/{id}/attachments/{n}/fetch` | 取回第 n 个附件（`source.fetch_attachment`，主文档 §7.6）：成功返回 200 与更新后的附件清单项（带 `blob`）；来源程序不支持取回是 409，取回失败是 502 并带原因 | Web 登录、delegate（附本人原话） |
 | | `GET /storage` | 存储用量：`{"ledger_bytes", "blobs_bytes", "content_bytes", "sources": [{"id", "name", "events", "content_bytes", "oldest", "retention_days"?}]}` | observer |
 | | 已有路由 GET /sources/{id}/events 与 GET /items/{id}/messages 的改动 | 列表不再带正文全文：每条事件的 `detail` 是前 2000 个字符的预览，另带 `content`（原文清单：各部分的字节数、总字节数、`state`、`missing?`）；全文经上面的单条读取（见 B.6） | 同原路由 |
 | 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |

@@ -851,3 +851,21 @@ func TestCommitSeqsExcludeImportedEvents(t *testing.T) {
 		t.Fatalf("commit must carry only the live seq: %+v", e.commits)
 	}
 }
+
+// 预检：授权与校验照常跑，通过时不写账本、不 Apply、不通知；没有权限的调用者照样被拒并留痕。
+func TestPreflightChecksAuthorizationButWritesNothing(t *testing.T) {
+	e := setup(t)
+	if _, err := e.x.Do(bg, Request{Identity: owner, Command: "note.write", Input: in(noteIn{ID: "n1", Body: "hi"}), Preflight: true}); err != nil {
+		t.Fatal(err)
+	}
+	if e.noteCount(t) != 0 || e.applied != 0 || len(e.events(t)) != 0 || len(e.commits) != 0 {
+		t.Fatal("preflight must not write, apply or notify")
+	}
+	obs := e.bearer(t, auth.Spec{Kind: auth.Observer})
+	if _, err := e.x.Do(bg, Request{Identity: obs, Command: "note.write", Input: in(noteIn{ID: "n1", Body: "hi"}), Preflight: true}); exit(err) != domain.ExitPermissionDenied {
+		t.Fatalf("observer must be denied at preflight: %v", err)
+	}
+	if e.applied != 0 || e.noteCount(t) != 0 {
+		t.Fatal("denied preflight must not apply")
+	}
+}

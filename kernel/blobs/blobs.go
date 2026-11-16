@@ -128,6 +128,10 @@ func Register(x *command.Executor, dir string) error {
 	})
 }
 
+// Put 把内容存为内容寻址附件，与 blob.put 同一实现；给内核内部在命令之外先落文件的调用方用（取回的附件，§7.6）。
+// 没有被任何命令引用的 blob 只是一个孤立文件，不影响账本。
+func Put(dir string, content []byte) (PutResult, error) { return put(dir, content) }
+
 func put(dir string, content []byte) (PutResult, error) {
 	sum := sha256.Sum256(content)
 	h := hex.EncodeToString(sum[:])

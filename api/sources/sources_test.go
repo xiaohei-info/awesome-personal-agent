@@ -72,6 +72,9 @@ type env struct {
 	dir   string // 账本目录
 	keys  string // HMAC 接收密钥文件目录
 	blobs string // 内容寻址附件目录（GET /storage 读它）
+	// 附件取回的装配方替身（真实的外呼调用器在 cli/serve 里端到端测）：canFetch 是声明了 fetch 的来源，fetcher 是 fetch 模式的运行。
+	canFetch map[string]bool
+	fetcher  func(s domain.Source, ev domain.SourceEvent, n int, att runner.AttachmentRef) ([]byte, error)
 }
 
 func (e *env) clock() time.Time { return e.now }
@@ -130,6 +133,10 @@ func setup(t *testing.T) *env {
 		},
 		SelfSender: func(_ context.Context, s domain.Source) (string, error) { return "me-on-" + s.ID, nil },
 		BlobsDir:   e.blobs,
+		CanFetch:   func(s domain.Source) bool { return e.canFetch[s.ID] },
+		FetchAttachment: func(_ context.Context, s domain.Source, ev domain.SourceEvent, n int, att runner.AttachmentRef) ([]byte, error) {
+			return e.fetcher(s, ev, n, att)
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

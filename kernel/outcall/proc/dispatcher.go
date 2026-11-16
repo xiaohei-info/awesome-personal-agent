@@ -309,7 +309,9 @@ func (d *Dispatcher) run(rec Record) {
 	defer d.wg.Done()
 	var errb tail
 	var out stdoutSink = &tail{}
-	if eventStream(rec.Run.Category) {
+	if rec.Spec.StdoutLimit > 0 {
+		out = &rawBytes{limit: rec.Spec.StdoutLimit}
+	} else if eventStream(rec.Run.Category) {
 		out = &whole{limit: d.maxOutput}
 	}
 	state, exit, reason := d.exec(rec, out, &errb)
@@ -449,6 +451,31 @@ func (w *whole) result() ([]byte, bool) {
 		return append([]byte(nil), w.buf...), false
 	}
 	return append([]byte(nil), w.buf[:bytes.LastIndexByte(w.buf, '\n')+1]...), true
+}
+
+// rawBytes 保留 limit 字节内的全部输出，超过后只丢不存并标记溢出；不做任何行处理，二进制内容原样交回。
+type rawBytes struct {
+	mu    sync.Mutex
+	buf   []byte
+	limit int
+	over  bool
+}
+
+func (w *rawBytes) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	keep := p
+	if room := w.limit - len(w.buf); len(p) > room {
+		keep, w.over = p[:max(room, 0)], true
+	}
+	w.buf = append(w.buf, keep...)
+	return len(p), nil
+}
+
+func (w *rawBytes) result() ([]byte, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]byte(nil), w.buf...), w.over
 }
 
 // tail 只保留最后 tailLimit 字节。
