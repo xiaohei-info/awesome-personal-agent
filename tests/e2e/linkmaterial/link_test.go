@@ -2,7 +2,10 @@
 
 package linkmaterial
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // TestFlowLinkMaterial 对应验收 flow-link-material（§12.8）：笔记库登记后登记链接型材料；
 // 同一项目同一位置重复登记返回同一条；未登记的库名与本机绝对路径被拒。
@@ -72,7 +75,7 @@ func TestFlowLinkMaterial(t *testing.T) {
 		before := len(f.materials(open))
 		for name, link := range map[string]string{
 			"未登记的库名":   "vault:nope/docs/x.md",
-			"本机绝对路径":   "/home/someone/notes/x.md",
+			"本机绝对路径":   string(filepath.Separator) + filepath.Join("abs", "notes", "x.md"),
 			"file 协议":  "file:///etc/hosts",
 			"库内路径含 ..": "vault:notes/../x.md",
 		} {
