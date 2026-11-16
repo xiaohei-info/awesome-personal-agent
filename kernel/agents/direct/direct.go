@@ -750,3 +750,23 @@ func (s *Service) setHealthIn(ctx context.Context, table, errMsg string) error {
 		return err
 	})
 }
+
+// ProbeObject 是测试连接留痕的对象："models:judge" 或 "models:generate"。
+func ProbeObject(endpoint string) string { return "models:" + endpoint }
+
+// RecordProbe 记下本人测试连接或自检对已保存端点的探测通过（endpoint 为 judge 或 generate）：清除该端点的故障标记，
+// 并追加一条 run.finished（category 为端点、probe 为真、state succeeded）。健康视图据此清除该端点此前的失败（§15.2）。
+// 调用方只在确有要清除的故障时调用，免得每次查看都写一条。
+func RecordProbe(tx *store.Tx, endpoint string, actor domain.Actor, at time.Time) error {
+	table := "direct_health"
+	if endpoint == string(domain.RunJudge) {
+		table = "direct_judge_health"
+	}
+	if _, err := tx.Exec(`DELETE FROM ` + table + ` WHERE id = 1`); err != nil {
+		return err
+	}
+	p, _ := json.Marshal(map[string]any{"category": endpoint, "state": domain.RunSucceeded, "probe": true})
+	_, err := eventlog.Append(tx, domain.Event{Type: domain.EvRunFinished, Object: ProbeObject(endpoint), Actor: actor,
+		Reason: endpoint + " endpoint probe succeeded", Payload: p, At: at})
+	return err
+}

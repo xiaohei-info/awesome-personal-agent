@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,7 +39,7 @@ type env struct {
 func setup(t *testing.T, extra ...core.RouteGroup) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, kpolicy.Module, command.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, kpolicy.Module, command.Module, core.Module, direct.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}

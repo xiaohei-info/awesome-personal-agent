@@ -168,8 +168,9 @@ func TestSourceFailuresIncludeDisabledAndNeedsInput(t *testing.T) {
 	e := setup(t)
 	e.source("src_ok", true, runner.Stats{Runs: 5})
 	e.source("src_flaky", true, runner.Stats{ConsecutiveFailures: 3, LastError: "http 502"})
-	e.source("src_auth", true, runner.Stats{NeedsInputItem: "item_auth"})
+	e.source("src_auth", true, runner.Stats{ConsecutiveFailures: 1, NeedsInputItem: "item_auth"})
 	e.source("src_off", false, runner.Stats{LastError: "exit 3"})
+	e.source("src_back", true, runner.Stats{Runs: 9, NeedsInputItem: "item_old"}) // 最近一次拉取已成功：不是现状
 	v := e.collect(nil)
 	got := map[string]SourceFailure{}
 	for _, f := range v.SourceFailures {
@@ -233,84 +234,115 @@ func TestEventBackedSignals(t *testing.T) {
 	}
 }
 
-// flow-follow-up / ACT-FUP-06：跟进判断失败进"模型不可用"并使视图不健康；同一事项之后同模板成功即清除。
-func TestFollowupFailureSurfacesAndRecovers(t *testing.T) {
+// flow-follow-up / ACT-FUP-06：跟进判断失败进"模型不可用"并使视图不健康。没有配判断端点时判断型由生成端点作答，
+// 告警归生成端点；该端点之后任一次真实成功调用即清除，失败、复用缓存或告警之前的成功都不算；再失败重新出现。
+func TestFollowupFailureSurfacesAndRecoversOnEndpoint(t *testing.T) {
 	e := setup(t)
-	fail := func(item string) {
-		e.event(domain.EvHealthAlert, item, "follow-up judgement failed, will retry: model 500",
-			map[string]string{"kind": FollowupKind, "template": "judge-follow", "item": item})
+	run := func(cat, state string, reused bool) {
+		e.event(domain.EvRunFinished, "item_9", cat+" "+state, map[string]any{"category": cat, "template": "other", "state": state, "reused": reused})
 	}
-	ok := func(item, state string, reused bool) {
-		e.event(domain.EvRunFinished, item, "judge "+state, map[string]any{"template": "judge-follow", "state": state, "reused": reused})
-	}
-	ok("item_1", "succeeded", false) // 失败之前的成功不算恢复
-	fail("item_1")
-	fail("item_2")
+	run("generate", "succeeded", false) // 失败之前的成功不算恢复
+	e.event(domain.EvHealthAlert, "item_1", "follow-up judgement failed", map[string]string{"kind": FollowupKind, "template": "judge-follow"})
 	v := e.collect(nil)
-	if v.Healthy() || len(v.ModelUnavailable) != 2 || v.ModelUnavailable[0].Kind != FollowupKind {
+	if v.Healthy() || len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Endpoint != EndpointGenerate {
 		t.Fatalf("not surfaced: %+v", v.ModelUnavailable)
 	}
-	ok("item_1", "failed", false)
-	ok("item_1", "succeeded", true) // 复用缓存没有真实调用
-	if v = e.collect(nil); len(v.ModelUnavailable) != 2 {
-		t.Fatalf("failed/reused call cleared the signal: %+v", v.ModelUnavailable)
+	run("generate", "failed", false)
+	run("generate", "succeeded", true)
+	run("judge", "succeeded", false) // 没写明哪一级定案的判断型不算任一端点
+	if v = e.collect(nil); len(v.ModelUnavailable) != 1 {
+		t.Fatalf("failed/reused/unattributed call cleared the signal: %+v", v.ModelUnavailable)
 	}
-	ok("item_1", "succeeded", false)
-	// item_1 恢复；item_2 仍在失败，不能被 item_1 的成功盖住。
-	if v = e.collect(nil); len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Object != "item_2" || v.Healthy() {
-		t.Fatalf("after item_1 recovered: %+v", v.ModelUnavailable)
-	}
-	ok("item_2", "succeeded", false)
+	run("generate", "succeeded", false) // 别的模板、别的事项也算：恢复看端点，不等同一件事再发生
 	if v = e.collect(nil); !v.Healthy() {
-		t.Fatalf("not cleared after recovery: %+v", v)
+		t.Fatalf("not cleared after endpoint recovered: %+v", v.ModelUnavailable)
 	}
-	// 再次失败重新出现。
-	fail("item_1")
+	e.event(domain.EvHealthAlert, "item_1", "follow-up judgement failed", map[string]string{"kind": FollowupKind, "template": "judge-follow"})
 	if v = e.collect(nil); len(v.ModelUnavailable) != 1 {
 		t.Fatalf("new failure hidden: %+v", v.ModelUnavailable)
 	}
 }
 
-// 初筛不重试：任一事项之后同模板成功即算恢复；模板不同的成功不算。
-func TestScreeningRecoversOnLaterSuccessOfSameTemplate(t *testing.T) {
-	e := setup(t)
-	e.event(domain.EvHealthAlert, "item_1", "web_only screening did not complete: timeout", map[string]any{"kind": ScreeningKind, "template": "screen"})
-	e.event(domain.EvRunFinished, "item_9", "judge succeeded", map[string]any{"template": "other", "state": "succeeded"})
-	if v := e.collect(nil); len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Kind != ScreeningKind {
-		t.Fatalf("%+v", v.ModelUnavailable)
+type promptPacks map[string]string // 模板名 → agent
+
+func (promptPacks) Health() []packs.Rejection { return nil }
+func (p promptPacks) List() []*packs.Pack {
+	pk := &packs.Pack{Name: "decision-card", Prompts: map[string]packs.Prompt{}}
+	for name, agent := range p {
+		pk.Prompts[name] = packs.Prompt{Meta: packs.PromptMeta{Agent: agent}}
 	}
-	e.event(domain.EvRunFinished, "item_2", "judge succeeded", map[string]any{"template": "screen", "state": "succeeded"})
-	if v := e.collect(nil); !v.Healthy() {
-		t.Fatalf("%+v", v.ModelUnavailable)
+	return []*packs.Pack{pk}
+}
+
+// 配了判断端点时，告警按模板的 agent 类型分到两个端点，各自恢复：写作告警不因判断端点答题而清除，反之亦然。
+func TestModelAlertsSplitByEndpoint(t *testing.T) {
+	e := setup(t)
+	e.setJudgeEndpoint(true)
+	ph := promptPacks{"decision-card-copy": "generate", "delivery-defer": "judge"}
+	e.event(domain.EvHealthAlert, "item_1", "decision-card-copy draft failed", map[string]string{"kind": DraftKind, "template": "decision-card-copy"})
+	e.event(domain.EvHealthAlert, "item_1", "delivery-defer draft failed", map[string]string{"kind": DraftKind, "template": "delivery-defer"})
+	e.event(domain.EvHealthAlert, "item_2", "web_only screening did not complete", map[string]any{"kind": ScreeningKind, "template": "unknown-template"})
+	v := e.collect(ph)
+	got := map[string]string{}
+	for _, m := range v.ModelUnavailable {
+		got[m.Reason] = m.Endpoint
+	}
+	if len(got) != 3 || got["decision-card-copy draft failed"] != EndpointGenerate || got["delivery-defer draft failed"] != EndpointJudge ||
+		got["web_only screening did not complete"] != EndpointJudge {
+		t.Fatalf("attribution: %+v", v.ModelUnavailable)
+	}
+	// 由对话端点定案的判断是生成端点在答题；由分类端点定案的才是判断端点。
+	e.event(domain.EvRunFinished, "item_3", "judge succeeded", map[string]any{"category": "judge", "state": "succeeded", "decided_by": "chat"})
+	if v = e.collect(ph); len(v.ModelUnavailable) != 2 || v.ModelUnavailable[0].Endpoint != EndpointJudge {
+		t.Fatalf("after chat answered: %+v", v.ModelUnavailable)
+	}
+	e.event(domain.EvRunFinished, "item_3", "judge succeeded", map[string]any{"category": "judge", "state": "succeeded", "decided_by": "classifier"})
+	if v = e.collect(ph); !v.Healthy() {
+		t.Fatalf("after classifier answered: %+v", v.ModelUnavailable)
 	}
 }
 
-// decision-card 起草失败进"模型不可用"并使视图不健康；起草逐事项一次、不重试，之后任一事项同模板的真实成功调用即清除，
-// 复用缓存、失败或别的模板（卡片文案与阈值判定各自恢复）都不算。
-func TestDraftFailureSurfacesAndRecoversOnSameTemplate(t *testing.T) {
+// 写作告警之后本人测试已保存的生成端点通过：生成端点的告警消失；判断端点仍在失败时它的信号保留，测通后也消失。
+func TestProbeClearsOnlyItsEndpoint(t *testing.T) {
 	e := setup(t)
+	e.setJudgeEndpoint(true)
+	e.recordJudgeFault()
 	e.event(domain.EvHealthAlert, "item_1", "decision-card-copy draft failed", map[string]string{"kind": DraftKind, "template": "decision-card-copy"})
-	e.event(domain.EvHealthAlert, "item_1", "delivery-defer draft failed", map[string]string{"kind": DraftKind, "template": "delivery-defer"})
-	if v := e.collect(nil); v.Healthy() || len(v.ModelUnavailable) != 2 || v.ModelUnavailable[0].Kind != DraftKind {
-		t.Fatalf("not surfaced: %+v", v.ModelUnavailable)
+	e.event(domain.EvHealthAlert, "item_2", "web_only screening did not complete", map[string]any{"kind": ScreeningKind, "template": "web-only-screening"})
+	probe := func(ep string) {
+		e.update(func(tx *store.Tx) error { return RecordProbe(tx, nil, ep, owner.Actor, t0) })
 	}
-	run := func(item, tmpl, state string, reused bool) {
-		e.event(domain.EvRunFinished, item, "generate "+state, map[string]any{"template": tmpl, "state": state, "reused": reused})
+	probe(EndpointGenerate)
+	v := e.collect(nil)
+	if len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Endpoint != EndpointJudge || v.Judge != EndpointFailing || v.Healthy() {
+		t.Fatalf("after generate probe: %+v judge=%q", v.ModelUnavailable, v.Judge)
 	}
-	run("item_2", "decision-card-copy", "failed", false)
-	run("item_2", "decision-card-copy", "succeeded", true)
-	run("item_2", "one-line-summary", "succeeded", false)
-	if v := e.collect(nil); len(v.ModelUnavailable) != 2 {
-		t.Fatalf("failed/reused/other-template call cleared the signal: %+v", v.ModelUnavailable)
+	probe(EndpointJudge)
+	if v = e.collect(nil); !v.Healthy() || v.Judge != "" {
+		t.Fatalf("after judge probe: %+v judge=%q", v.ModelUnavailable, v.Judge)
 	}
-	run("item_2", "decision-card-copy", "succeeded", false)
-	if v := e.collect(nil); len(v.ModelUnavailable) != 1 || v.ModelUnavailable[0].Reason != "delivery-defer draft failed" || v.Healthy() {
-		t.Fatalf("after card recovered: %+v", v.ModelUnavailable)
+	// 没有要清除的故障时探测通过不留痕：查看自检不会每次都写一条。
+	before := e.count(domain.EvRunFinished)
+	probe(EndpointGenerate)
+	if e.count(domain.EvRunFinished) != before {
+		t.Fatal("probe with nothing to clear wrote an event")
 	}
-	run("item_3", "delivery-defer", "succeeded", false)
-	if v := e.collect(nil); !v.Healthy() {
-		t.Fatalf("not cleared after recovery: %+v", v.ModelUnavailable)
+}
+
+func (e *env) count(typ string) (n int64) {
+	e.t.Helper()
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		r, err := tx.Query(`SELECT COUNT(*) FROM eventlog_event WHERE type = ?`, typ)
+		if err != nil {
+			return err
+		}
+		defer r.Close()
+		r.Next()
+		return r.Scan(&n)
+	}); err != nil {
+		e.t.Fatal(err)
 	}
+	return
 }
 
 func TestDriftPackAndUnjudgedBacklog(t *testing.T) {

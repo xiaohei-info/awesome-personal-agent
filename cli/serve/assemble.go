@@ -232,7 +232,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		Series: metrics.Series{}, Alert: &metrics.Alerter{Attention: att}}); err != nil {
 		return nil, err
 	}
-	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner"), SenderCeiling: senderCeiling}); err != nil {
+	if k.rn, err = runner.New(runner.Options{Store: st, Exec: x, Layout: l, OnError: logErr("source runner"), SenderCeiling: senderCeiling, Owner: owner}); err != nil {
 		return nil, err
 	}
 	a := auth.New(nil)

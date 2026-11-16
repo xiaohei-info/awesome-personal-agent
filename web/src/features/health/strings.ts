@@ -18,6 +18,7 @@ const zh = {
   doctorGo: { model: "去接模型", resume: "去恢复", host: "去接 Agent", models: "去看模型", sources: "去看来源", notify: "去看提醒设置" },
   // 结论
   sourceFail: (src: string, n: number) => `${src} 连续 ${n} 次没读到`,
+  sourceAuth: (src: string) => `${src} 登录或配置有问题，读不到`,
   sourceOff: (src: string) => `${src} 已停用`,
   outcall: (n: number) => `后台任务超时 ${n} 次`,
   queue: (n: number, s: number) => `还有 ${n} 个在排队，最久等了 ${s} 秒`,
@@ -28,7 +29,7 @@ const zh = {
   endpoint: { not_configured: (m: string) => `${m}还没配置，有消息在等它`, failing: (m: string) => `${m}连续调用失败` } as Record<string, (m: string) => string>,
   models: { judge: "打分模型", generate: "写作模型" } as Record<string, string>,
   screening: (n: number) => `${n} 次风险判断没完成`,
-  judgeFails: (n: number) => `${n} 次打分失败`,
+  modelFails: (m: string, n: number) => `${m} ${n} 次失败`,
   waitModel: (n: number) => `${n} 条等模型恢复`,
   waitScope: (n: number) => `${n} 条等你选外发范围`,
   waitPaused: (n: number) => `${n} 条是模型暂停期间积下的`,
@@ -53,7 +54,6 @@ const zh = {
     audit: "去看操作记录",
     access: "去看 Agent 设置",
     delegation: "去看委派",
-    fill: "去补充",
   },
 };
 
@@ -72,6 +72,7 @@ const en: typeof zh = {
   exportExt: "Export",
   doctorGo: { model: "Connect a model", resume: "Resume", host: "Connect an Agent", models: "Open models", sources: "Open sources", notify: "Open notifications" },
   sourceFail: (src, n) => `${src} failed ${n} times in a row`,
+  sourceAuth: (src) => `${src} can't be read: sign-in or settings need fixing`,
   sourceOff: (src) => `${src} is turned off`,
   outcall: (n) => `Background tasks timed out ${n} times`,
   queue: (n, s) => `${n} still queued, the longest for ${s} s`,
@@ -82,7 +83,7 @@ const en: typeof zh = {
   endpoint: { not_configured: (m) => `${m} isn't set up and messages are waiting for it`, failing: (m) => `${m} keeps failing` },
   models: { judge: "The scoring model", generate: "The writing model" },
   screening: (n) => `${n} risk checks didn't finish`,
-  judgeFails: (n) => `${n} scoring calls failed`,
+  modelFails: (m, n) => `${m} failed ${n} times`,
   waitModel: (n) => `${n} waiting for the model`,
   waitScope: (n) => `${n} waiting for you to choose what is sent`,
   waitPaused: (n) => `${n} held while models were paused`,
@@ -106,7 +107,6 @@ const en: typeof zh = {
     audit: "Open activity log",
     access: "Open Agent settings",
     delegation: "Open delegations",
-    fill: "Fill in",
   },
 };
 

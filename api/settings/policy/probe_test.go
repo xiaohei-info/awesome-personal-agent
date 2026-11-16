@@ -3,6 +3,8 @@ package policy
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -105,9 +107,32 @@ func TestProbeModelsReusesStoredKeyForSameOrigin(t *testing.T) {
 	if rec.Code != 200 || out["status"] != "ok" || out["code"] != "ok" {
 		t.Fatalf("test %d %s", rec.Code, rec.Body)
 	}
-	// 探测只读：不写 Event，不产生策略版本。
+	// 没有要清除的失败：不写 Event，不产生策略版本。
 	if after := len(e.eventTypes()); after != before {
 		t.Fatalf("events %d → %d", before, after)
+	}
+	// 生成端点有故障标记时测通已保存的配置：清掉标记并留一条探测通过；测未保存的另一份配置什么也不写。
+	fault := func() {
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			_, err := tx.Exec(`INSERT OR REPLACE INTO direct_health (id, since, last_error) VALUES (1, 1, 'schema')`)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fault()
+	if rec = e.do("POST", testPath, `{"endpoint":"generate","config":{"url":"`+f.srv.URL+`/v1","model":"model-b","locality":"local"}}`, e.web); rec.Code != 200 || len(e.eventTypes()) != before {
+		t.Fatalf("unsaved draft recorded a probe: %d %v", rec.Code, e.eventTypes())
+	}
+	if rec = e.do("POST", testPath, `{"endpoint":"generate","config":{"url":"`+f.srv.URL+`/v1","model":"model-a","locality":"local"}}`, e.web); rec.Code != 200 {
+		t.Fatalf("test %d %s", rec.Code, rec.Body)
+	}
+	if got := e.eventTypes(); len(got) != before+1 || got[len(got)-1] != "run.finished" {
+		t.Fatalf("saved endpoint probe not recorded: %v", got)
+	}
+	var h direct.Health
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { h, err = direct.HealthIn(tx); return }); err != nil || h.Unavailable {
+		t.Fatalf("fault not cleared: %+v %v", h, err)
 	}
 }
 

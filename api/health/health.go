@@ -7,6 +7,7 @@
 package health
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agentsmd"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -117,15 +119,16 @@ func build(v khealth.View, rejudgeDays int) Report {
 	outcall := map[string]any{"long": queue(v.Outcall.Long), "short": queue(v.Outcall.Short),
 		"timeouts": ids(v.Outcall.Timeouts, func(r domain.Run) string { return r.ID })}
 	type modelDetail struct {
-		Kind   string `json:"kind"`
-		Object string `json:"object"`
+		Kind     string `json:"kind"`
+		Object   string `json:"object"`
+		Endpoint string `json:"endpoint"` // judge 或 generate：这次失败归哪个端点
 	}
 	screening, judgements := []string{}, []modelDetail{}
 	for _, m := range v.ModelUnavailable {
 		if m.Kind == khealth.ScreeningKind {
 			screening = append(screening, m.Object)
 		} else {
-			judgements = append(judgements, modelDetail{m.Kind, m.Object})
+			judgements = append(judgements, modelDetail{m.Kind, m.Object, m.Endpoint})
 		}
 	}
 	endpointDown := 0
@@ -170,28 +173,28 @@ func build(v khealth.View, rejudgeDays int) Report {
 		return s
 	}
 	rep := Report{Healthy: v.Healthy(), Signals: []Signal{
-		sig("source_failures", len(v.SourceFailures), "a source has consecutive pull failures, is disabled, or needs input",
-			"source page; auth failures have a needs_input item", srcs),
-		sig("outcall", len(v.Outcall.Timeouts), "outcall runs timed out; queue depth and longest wait are in detail",
+		sig("source_failures", len(v.SourceFailures), "a source's latest pulls are failing (its auth or config failures have a needs_input item), or it is disabled; a successful pull clears it",
+			"source page: open the source and fix its credentials or config", srcs),
+		sig("outcall", len(v.Outcall.Timeouts), "an outcall run timed out and is still the latest run of its target (within 24 hours); queue depth and longest wait are in detail",
 			"run detail; if queues stay backed up, raise the matching quota in run settings", outcall),
 		sig("delivery_backlog", len(v.DeliveryBacklog), "deliveries are queued or retrying without being sent",
 			"channel ext and interruption policy", ids(v.DeliveryBacklog, func(d domain.Delivery) string { return d.ID })),
-		sig("chain_trips", len(v.ChainTrips), "the chain-depth breaker stopped a command or background run",
+		sig("chain_trips", len(v.ChainTrips), "the chain-depth breaker stopped a command or background run, and the owner has not handled that item since (objectless trips clear after 24 hours)",
 			"item detail; re-delegate by hand", ids(v.ChainTrips, func(t chain.Trip) string { return t.Object })),
 		sig("agentsmd_drift", len(v.AgentsMDDrift), "a rendered AGENTS.md no longer matches the repo file",
 			"project page", ids(v.AgentsMDDrift, func(d agentsmd.OpenDrift) string { return d.Item })),
 		sig("pack_rejections", len(v.PackRejections), "a pack failed to load; the last valid version is kept",
 			"fix the pack, then hot-reload", ids(v.PackRejections, func(r packs.Rejection) string { return r.Pack })),
-		sig("model_unavailable", len(v.ModelUnavailable)+endpointDown, "the model endpoint is not configured while events wait for it, keeps failing, or a judge call failed and has not succeeded since",
+		sig("model_unavailable", len(v.ModelUnavailable)+endpointDown, "the model endpoint is not configured while events wait for it, keeps failing, or a model call failed and that endpoint has not succeeded since (a real call or a passing test of the saved endpoint clears it)",
 			"settings page: model endpoint", map[string]any{"judge": v.Judge, "generate": v.Generate, "endpoint": v.Endpoint, "paused": v.Generate == khealth.EndpointPaused,
 				"screening": screening, "judgements": judgements}),
 		backlogSig,
-		sig("rule_fallbacks", len(v.RuleFallbacks), "a rule fell back to observe after its content changed",
+		sig("rule_fallbacks", len(v.RuleFallbacks), "a rule fell back to observe after its content changed and its mode has not been set since",
 			"re-review the rule in Web", ids(v.RuleFallbacks, func(f khealth.RuleFallback) string { return f.Rule })),
-		sig("receipt_failures", len(v.ReceiptFailures), "a receipt or capture was rejected by the kernel (exit 2, 4 or 23) and has not succeeded since for that credential and command",
+		sig("receipt_failures", len(v.ReceiptFailures), "a receipt or capture was rejected by the kernel (exit 2, 4 or 23), has not succeeded since for that credential and command, and its item has not ended",
 			"audit page; credential or basis problems go to settings, a receipt turned needs_input is handled in decision todos",
 			ids(v.ReceiptFailures, func(r khealth.ReceiptFailure) string { return r.Object })),
-		sig("other_alerts", len(v.OtherAlerts), "a health alert without a dedicated signal was recorded, such as a failed rule action",
+		sig("other_alerts", len(v.OtherAlerts), "a health alert without a dedicated signal was recorded in the last 24 hours, such as a failed rule action, and its object has not been handled since",
 			"audit page; open the object named in detail", ids(v.OtherAlerts, func(a khealth.OtherAlert) string { return a.Object })),
 		warn(sig("stalled_delegations", len(v.StalledDelegations), "a delegated item has had no receipt or progress for longer than delegation_stall_after",
 			"delegations page: nudge, reassign or delegate again", ids(v.StalledDelegations, func(d khealth.StalledDelegation) string { return d.Item }))),
@@ -214,6 +217,39 @@ func withRejections(rep Report, rs []packs.Rejection) Report {
 	return rep
 }
 
+// recordProbes：自检对已保存端点的探测通过时，经 kernel/health.RecordProbe 记下（只在该端点确有未恢复的失败时写），
+// 诊断页因此在自检通过后不再显示该端点此前的失败（§15.2）。
+func recordProbes(ctx context.Context, st *store.Store, ph khealth.PackHealth, checks []kdoctor.Check, actor domain.Actor) error {
+	var eps []string
+	for _, c := range checks {
+		if c.Name != kdoctor.ModelEndpoint {
+			continue
+		}
+		for _, d := range c.Details {
+			if d.Status != kdoctor.OK || d.Code != kdoctor.CodeOK {
+				continue
+			}
+			switch d.Subject {
+			case "judge_endpoint":
+				eps = append(eps, khealth.EndpointJudge)
+			case "generate_endpoint":
+				eps = append(eps, khealth.EndpointGenerate)
+			}
+		}
+	}
+	if len(eps) == 0 {
+		return nil
+	}
+	return st.Update(ctx, func(tx *store.Tx) error {
+		for _, ep := range eps {
+			if err := khealth.RecordProbe(tx, ph, ep, actor, clock.Now()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // DoctorRoutes 返回 GET /doctor（附录 B.2，设计 §15.5）：内核一侧的自检结果，与 `apa doctor` 的对应项同一份代码。
 // 涉及本机文件与宿主的检查（数据目录、运行配置、宿主插件、重复提醒）只在 CLI 里做，这里没有。
 func DoctorRoutes(st *store.Store, env kdoctor.Env) core.RouteGroup {
@@ -226,7 +262,11 @@ func DoctorRoutes(st *store.Store, env kdoctor.Env) core.RouteGroup {
 			if err != nil {
 				return err
 			}
-			return core.WriteJSON(w, http.StatusOK, kdoctor.Assemble(kdoctor.Kernel(r.Context(), f, env)...))
+			checks := kdoctor.Kernel(r.Context(), f, env)
+			if err := recordProbes(r.Context(), st, env.Packs, checks, p.Caller.Actor); err != nil {
+				return err
+			}
+			return core.WriteJSON(w, http.StatusOK, kdoctor.Assemble(checks...))
 		}})
 	}
 }
