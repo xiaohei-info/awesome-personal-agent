@@ -915,3 +915,96 @@ func TestAgentsMDIDsDistinctWhenShaReturnsToHistory(t *testing.T) {
 		t.Errorf("duplicate ids: %v", ids)
 	}
 }
+
+// D.8：正文全文进 detail 且总是带（含短正文与空正文外的所有情形），summary 仍是前 200 个字符，
+// 作者、标签、状态、仓库与编号进 headers；不再有 4000 字符截断。
+func TestBodyGoesWholeIntoDetailWithHeaders(t *testing.T) {
+	long := strings.Repeat("长", 5000) + "\n```go\nfmt.Println()\n```"
+	short := "短正文"
+	mk := func(n int, body, state string, labels ...string) string {
+		var ls []map[string]string
+		for _, l := range labels {
+			ls = append(ls, map[string]string{"name": l})
+		}
+		b, _ := json.Marshal(map[string]any{"number": n, "title": "t", "body": body, "state": state, "labels": ls,
+			"html_url": fmt.Sprintf("https://github.com/o/r/issues/%d", n), "created_at": at(time.Hour), "updated_at": at(time.Hour),
+			"user": map[string]string{"login": "alice"}})
+		return string(b)
+	}
+	api := &upstream{}
+	api.set(1, mk(1, long, "open", "bug", "p1"))
+	api.set(2, mk(2, short, "open"))
+	o := pullOnce(t, api, repoCfg, "")
+	got := map[string]map[string]any{}
+	for _, ev := range o.events {
+		got[ev["id"].(string)] = ev
+	}
+	e1, e2 := got["issue-o-r#1-opened"], got["issue-o-r#2-opened"]
+	if e1["detail"] != long {
+		t.Errorf("长正文应原样进 detail，得到 %d 个字符", len([]rune(fmt.Sprint(e1["detail"]))))
+	}
+	if s := []rune(e1["summary"].(string)); len(s) != 200 || string(s) != string([]rune(long)[:200]) {
+		t.Errorf("summary 应是前 200 个字符: %d", len(s))
+	}
+	if e2["detail"] != short || e2["summary"] != short {
+		t.Errorf("短正文也要带 detail: %v", e2)
+	}
+	h, _ := e1["headers"].(map[string]any)
+	labels, _ := h["Labels"].([]any)
+	if h["Author"] != "alice" || h["State"] != "open" || h["Repository"] != "o/r" || h["Number"] != "1" || len(labels) != 2 || labels[0] != "bug" || labels[1] != "p1" {
+		t.Errorf("headers: %v", h)
+	}
+	if h2, _ := e2["headers"].(map[string]any); h2["Labels"] != nil {
+		t.Errorf("没有标签时不带 Labels: %v", h2)
+	}
+	if _, has := e1["original"]; has {
+		t.Error("Markdown 即原文，不另给 original")
+	}
+}
+
+func TestMergedPRStateAndCommentFullDetail(t *testing.T) {
+	long := strings.Repeat("c", 4500)
+	api := &upstream{comments: map[string][]string{"issues": {strings.Replace(comment(11, "issues/3", at(time.Hour), "bob"), `"body":`, `"body":"`+long+`","x":`, 1)}}}
+	api.set(4, item(4, at(time.Hour), at(3*time.Hour), "", at(2*time.Hour), "合并说明"))
+	o := pullOnce(t, api, repoCfg, "")
+	for _, ev := range o.events {
+		h, _ := ev["headers"].(map[string]any)
+		switch ev["id"] {
+		case "pr-o-r#4-merged":
+			if h["State"] != "merged" || h["Number"] != "4" {
+				t.Errorf("已合并 PR 的 State 应是 merged: %v", h)
+			}
+		case "comment-o-r-11":
+			if ev["detail"] != long || h["Author"] != "bob" || h["Number"] != "3" || h["Repository"] != "o/r" {
+				t.Errorf("评论: %v", ev)
+			}
+		}
+	}
+}
+
+// 正文不再截断后输出体积靠额度控制：大正文的积压分多次运行发完，每次都有进展，总输出不丢不重。
+func TestHugeBodiesSpreadAcrossRunsWithoutLoss(t *testing.T) {
+	api := &upstream{}
+	body := strings.Repeat("x", 1<<20) // 每个约 1MB
+	for i := 1; i <= 60; i++ {
+		api.set(i, item(i, at(time.Hour), at(time.Duration(i)*time.Minute+time.Hour), "", "", body))
+	}
+	seen := map[string]bool{}
+	cursor := ""
+	for run := 0; run < 10 && len(seen) < 60; run++ {
+		o := pullOnce(t, api, repoCfg, cursor)
+		if len(o.events) == 0 || o.bytes > 32<<20 {
+			t.Fatalf("run %d: %d events, %d bytes", run, len(o.events), o.bytes)
+		}
+		for _, id := range o.ids() {
+			if seen[id] {
+				t.Fatalf("重复发出 %s", id)
+			}
+			seen[id] = true
+		}
+		cursor = o.cursor
+	}
+	if len(seen) < 60 {
+		t.Fatalf("只发出 %d 个", len(seen))
+	}
+}

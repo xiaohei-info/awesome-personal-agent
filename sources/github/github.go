@@ -36,8 +36,11 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xiaohei-info/awesome-personal-agent/sources/internal/content"
 )
 
 // 退出码沿用 §9.2 的 Source 契约。
@@ -49,12 +52,13 @@ const (
 )
 
 const (
-	perPage   = 100
-	bodyLimit = 4000
-	sumLimit  = 200
+	perPage  = 100
+	sumLimit = 200 // 只限 summary；正文全文进 detail，来源程序不截断（附录 D.8），上限由内核的 max_source_event_mb 管
 	// maxItems 是一次运行处理的新对象数（所有仓库合计，按页检查，可能多出不到一页）。积压更多时下次续传。
-	// 它控制单次运行的 API 调用数和耗时；按单对象最坏约 38KB 算，输出低于内核默认的 32MB 上限。
-	maxItems = 500
+	// 它控制单次运行的 API 调用数和耗时。正文不再截断后，一个事件按 1 + 字节数/itemBytes 计入额度：
+	// 500 × 48KB 约 24MB，低于内核默认 32MB 的输出上限；单个事件超大时本次只发它（第一个总被接收），游标照常前进。
+	maxItems  = 500
+	itemBytes = 48 << 10
 	// maxNotifPages 是一个通知时间窗一次能读的页数；超过就缩小时间窗（通知只能倒序读，见 sweepNotifications）。
 	maxNotifPages = 20
 	notifStream   = "notifications"
@@ -95,16 +99,18 @@ type Config struct {
 }
 
 type event struct {
-	ID              string   `json:"id"`
-	Type            string   `json:"type"`
-	Subject         string   `json:"subject"`
-	Summary         string   `json:"summary,omitempty"`
-	Detail          string   `json:"detail,omitempty"`
-	Link            string   `json:"link,omitempty"`
-	OccurredAt      string   `json:"occurred_at"`
-	CorrelationKeys []string `json:"correlation_keys,omitempty"`
-	Sender          string   `json:"sender,omitempty"`
-	SenderVerified  bool     `json:"sender_verified,omitempty"`
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Subject string `json:"subject"`
+	Summary string `json:"summary,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	// Headers 是作者、标签、状态、仓库与编号（D.8）；取值与 mail 来源同一规范化。
+	Headers         map[string]any `json:"headers,omitempty"`
+	Link            string         `json:"link,omitempty"`
+	OccurredAt      string         `json:"occurred_at"`
+	CorrelationKeys []string       `json:"correlation_keys,omitempty"`
+	Sender          string         `json:"sender,omitempty"`
+	SenderVerified  bool           `json:"sender_verified,omitempty"`
 }
 
 var repoRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
@@ -333,7 +339,13 @@ func sweep(ctx context.Context, api API, prefix string, s *stream, to time.Time,
 			}
 			if evs := s.admit(updated, evs); len(evs) > 0 {
 				out = append(out, evs...)
-				used++
+				for _, ev := range evs {
+					b, _ := json.Marshal(ev)
+					used += 1 + len(b)/itemBytes
+				}
+				if used >= budget && len(evs) > 0 && bytesOver(out) { // 大正文：不等页读完，体积先到额度就停
+					return out, used, nil
+				}
 			}
 		}
 		if len(items) < perPage {
@@ -396,17 +408,33 @@ func agentsEvent(ctx context.Context, api API, repo string, s *stream, to time.T
 }
 
 type issueRaw struct {
-	Number      int                    `json:"number"`
-	Title       string                 `json:"title"`
-	Body        string                 `json:"body"`
-	HTMLURL     string                 `json:"html_url"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	ClosedAt    time.Time              `json:"closed_at"`
-	User        struct{ Login string } `json:"user"`
+	Number      int                     `json:"number"`
+	Title       string                  `json:"title"`
+	Body        string                  `json:"body"`
+	HTMLURL     string                  `json:"html_url"`
+	CreatedAt   time.Time               `json:"created_at"`
+	UpdatedAt   time.Time               `json:"updated_at"`
+	ClosedAt    time.Time               `json:"closed_at"`
+	State       string                  `json:"state"`
+	Labels      []struct{ Name string } `json:"labels"`
+	User        struct{ Login string }  `json:"user"`
 	PullRequest *struct {
 		MergedAt time.Time `json:"merged_at"`
 	} `json:"pull_request"`
+}
+
+// headers 是对象的作者、标签、状态、仓库与编号；已合并的 PR 状态写 merged（接口的 state 只有 open、closed）。
+func (it issueRaw) headers(repo string) map[string]any {
+	state := it.State
+	if it.PullRequest != nil && !it.PullRequest.MergedAt.IsZero() {
+		state = "merged"
+	}
+	hs := []content.Header{{Name: "Author", Value: it.User.Login}, {Name: "State", Value: state},
+		{Name: "Repository", Value: repo}, {Name: "Number", Value: strconv.Itoa(it.Number)}}
+	for _, l := range it.Labels {
+		hs = append(hs, content.Header{Name: "Labels", Value: l.Name})
+	}
+	return content.NormalizeHeaders(hs)
 }
 
 // issueEvents 把对象当前的状态映射成事件（规则见包注释），只发不早于 floor 的。
@@ -433,9 +461,7 @@ func issueEvents(repo string, it issueRaw, floor time.Time) []event {
 		if typ == "opened" && it.User.Login != "" {
 			ev.Sender, ev.SenderVerified = it.User.Login, true
 		}
-		if len([]rune(it.Body)) > sumLimit { // 摘要已含全文时不重复，省事件体积
-			ev.Detail = clip(it.Body, bodyLimit)
-		}
+		ev.Detail, ev.Headers = it.Body, it.headers(repo)
 		evs = append(evs, ev)
 	}
 	latest := it.CreatedAt
@@ -499,9 +525,9 @@ func commentEvent(repo, typ string, raw json.RawMessage) (time.Time, []event, er
 	if c.User.Login != "" {
 		ev.Sender, ev.SenderVerified = c.User.Login, true
 	}
-	if len([]rune(c.Body)) > sumLimit {
-		ev.Detail = clip(c.Body, bodyLimit)
-	}
+	ev.Detail = c.Body
+	ev.Headers = content.NormalizeHeaders([]content.Header{{Name: "Author", Value: c.User.Login},
+		{Name: "Repository", Value: repo}, {Name: "Number", Value: m[2]}})
 	return c.UpdatedAt, []event{ev}, nil
 }
 
@@ -646,4 +672,14 @@ func Identity(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, ne
 	}
 	_ = json.NewEncoder(stdout).Encode(map[string]string{"sender": u.Login})
 	return ExitOK
+}
+
+// bytesOver 表示已出事件的体积到了本次额度（maxItems × itemBytes）。
+func bytesOver(evs []event) bool {
+	n := 0
+	for _, ev := range evs {
+		b, _ := json.Marshal(ev)
+		n += len(b)
+	}
+	return n >= maxItems*itemBytes
 }

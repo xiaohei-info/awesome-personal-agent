@@ -528,5 +528,21 @@ func TestLongMailCases(t *testing.T) {
 	o = call("mail-many-long", "message", "read", "--preview", "-H", "Message-ID", "59", "--output", "json")
 	if err := json.Unmarshal([]byte(o), &got); err != nil || len(got) < tools.ManyLongBytes || !strings.HasPrefix(got, "Message-ID: <mid-ml19@example.com>\n\n") {
 		t.Errorf("mail-many-long 第 20 封: %d 字节 %v", len(got), err)
+
+// gh-issue-long-body：正文超过旧的 4000 字符截断点，带标签与状态，供来源原文验收。
+func TestGhLongBodySample(t *testing.T) {
+	bin := newBin(t)
+	setCase(t, bin, "gh-issue-long-body")
+	o, _, code := run(t, bin, "gh", nil, "api", "/repos/acc-org/acc-repo/issues?per_page=100&page=1&since=2026-01-01T00:00:00Z")
+	var got []struct {
+		Body   string
+		Labels []struct{ Name string }
+		State  string
+	}
+	if err := json.Unmarshal([]byte(o), &got); code != 0 || err != nil || len(got) != 1 {
+		t.Fatalf("code %d err %v out %.200s", code, err, o)
+	}
+	if n := len([]rune(got[0].Body)); n <= 4000 || len(got[0].Labels) != 2 || got[0].State != "open" {
+		t.Errorf("样本: %d 字符 %+v", n, got[0])
 	}
 }
