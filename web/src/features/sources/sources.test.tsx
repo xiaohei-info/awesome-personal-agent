@@ -110,13 +110,15 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
       if (p[2] === "/ingests") return json(200, { ingests });
       if (p[2] === "/rejects") {
         const after = Number(u.searchParams.get("after") ?? 0);
-        const page = rejects.slice(after, after + 2);
-        return json(200, after + 2 < rejects.length ? { rejects: page, next_after: after + 2 } : { rejects: page });
+        const list = u.searchParams.get("sort") === "recent" ? [...rejects].reverse() : rejects; // after 是偏移
+        const page = list.slice(after, after + 2);
+        return json(200, after + 2 < list.length ? { rejects: page, next_after: after + 2 } : { rejects: page });
       }
       if (p[2] === "/events") {
         const d = u.searchParams.get("disposition");
         const after = Number(u.searchParams.get("after") ?? 0);
         const all = events.filter((e) => d === null || d.split(",").includes(e.disposition));
+        if (u.searchParams.get("sort") === "recent") all.reverse(); // 从新到旧，after 是偏移
         if (u.searchParams.get("sort") === "score") all.sort((a, b) => (b.score ?? -1) - (a.score ?? -1)); // 没有分数的排最后
         const size = d === null ? 500 : 2; // 预览按最近一页取全部事件；积压列表两条一页，好测分页
         const page = all.slice(after, after + size);
@@ -376,7 +378,8 @@ describe("来源归到哪个项目、只进了简报的（§9.1、§9.3）", () 
     expect(await region.findByText(/subject-d1/)).toBeInTheDocument();
     expect(region.getByText(/subject-d2/)).toBeInTheDocument();
     expect(region.queryByText(/subject-e1/)).not.toBeInTheDocument();
-    expect(b.calls.some((c) => c.path === "/v1/sources/src_rss/events?disposition=digest")).toBe(true);
+    expect(region.getAllByText(/subject-d/).map((n) => n.textContent)[0]).toMatch(/subject-d2/); // 最新在前
+    expect(b.calls.some((c) => c.path === "/v1/sources/src_rss/events?disposition=digest&sort=recent")).toBe(true);
     await userEvent.click(within(region.getByRole("group", { name: "处理 d1" })).getByRole("button", { name: "转为建议" }));
     await waitFor(() => expect(region.queryByText(/subject-d1/)).not.toBeInTheDocument());
     expect(b.events.find((e) => e.id === "d1")).toMatchObject({ disposition: "proposed" });
@@ -453,13 +456,13 @@ describe("读取失败的记录（ACT-SRC-04）", () => {
     await details("新闻订阅");
     await openAdvanced(within(await screen.findByRole("region", { name: "来源 新闻订阅" })));
     const region = within(await screen.findByRole("region", { name: "读取失败的记录" }));
-    expect(await region.findByText(/reason-1/)).toBeInTheDocument();
-    expect(region.getByText("{bad-1")).toBeInTheDocument();
+    expect(await region.findByText(/reason-3/)).toBeInTheDocument(); // 最新在前
+    expect(region.getByText("{bad-3")).toBeInTheDocument();
     expect(region.getByText(/第 2 行 · reason-2/)).toBeInTheDocument();
-    expect(region.queryByText(/reason-3/)).not.toBeInTheDocument();
+    expect(region.queryByText(/reason-1/)).not.toBeInTheDocument();
     await userEvent.click(region.getByRole("button", { name: "加载更多" }));
-    expect(await region.findByText(/reason-3/)).toBeInTheDocument();
-    expect(b.calls.some((c) => c.path === "/v1/sources/src_rss/rejects?after=2")).toBe(true);
+    expect(await region.findByText(/reason-1/)).toBeInTheDocument();
+    expect(b.calls.some((c) => c.path === "/v1/sources/src_rss/rejects?sort=recent&after=2")).toBe(true);
     expect(region.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
   });
 

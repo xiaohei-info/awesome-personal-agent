@@ -334,7 +334,7 @@ function Decide({ h, grants, reload }: { h: string; grants: Grant[]; reload: () 
       <p className="sub" data-testid={"grant-preview-" + h}>{cats.length ? t.preview(what, where, when) : t.previewRevoke}</p>
       {cur && count != null && (
         <p className="sub">
-          {t.used(count)} · <button type="button" className="link" onClick={() => api.get<{ events: { seq: number; type: string; object: string; at: string }[] }>("/audit/events?" + new URLSearchParams({ grant: cur.id, limit: "100" })).then((r) => setUsage(r.events), () => setUsage([]))}>{t.showUsage}</button>
+          {t.used(count)} · <button type="button" className="link" onClick={() => api.get<{ events: { seq: number; type: string; object: string; at: string }[] }>("/audit/events?" + new URLSearchParams({ grant: cur.id, limit: "100", order: "desc" })).then((r) => setUsage(r.events), () => setUsage([]))}>{t.showUsage}</button>
         </p>
       )}
       {usage && (usage.length === 0 ? <p className="sub">{t.noUsage}</p> : (

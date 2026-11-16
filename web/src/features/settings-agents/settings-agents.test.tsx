@@ -202,6 +202,16 @@ describe("设置 › Agent", () => {
     expect(writes(s, "/grant")[0].body.actions).toEqual([]);
   });
 
+  it("授权单的使用记录最新在前（请求 order=desc）", async () => {
+    const g = { id: "grt_1", grantee: { agent: "hermes", background: true }, scope: { all: true }, actions: ["proposal.accept"], created_at: "2030-01-01T00:00:00Z" };
+    const s = server({ live: [hermes(1, "active")], grants: [g] });
+    const urls: string[] = [];
+    mount(((u: string, i?: RequestInit) => (urls.push(u), s.impl(u, i))) as unknown as typeof fetch);
+    const d = within((await card()).getByRole("region", { name: "Agent 可以替我决定" }));
+    await userEvent.click(await d.findByRole("button", { name: "看记录" }));
+    await waitFor(() => expect(urls.some((u) => u.startsWith("/v1/audit/events?") && u.includes("grant=grt_1") && u.includes("order=desc"))).toBe(true));
+  });
+
   it("T15：旧地址 /settings/grants#<id> 落到这一页，旧授权单展开可见", async () => {
     const g = { id: "grt_old", grantee: { credential: "k1" }, scope: { projects: ["acc-home"] }, actions: ["decision.answer"], expires_at: "2099-01-01T00:00:00Z", created_at: "2030-01-01T00:00:00Z" };
     const s = server({ live: [hermes(1, "active")], grants: [g], tokens: [{ id: "k1", kind: "delegate", label: "old key" }] });

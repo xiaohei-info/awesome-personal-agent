@@ -219,7 +219,9 @@ type AuditRequest struct {
 	Actor   domain.Actor
 	Level   authz.Level
 	Filter  eventlog.Filter
-	After   int64
+	After   int64 // 升序翻页游标：只要序号大于它的
+	Before  int64 // 降序翻页游标：只要序号小于它的；0 表示从最新开始
+	Desc    bool  // 最新的在前；与 After 互斥
 	Limit   int
 	Pending map[string]bool
 }
@@ -227,10 +229,10 @@ type AuditRequest struct {
 // MaxAuditLimit 是单页上限。
 const MaxAuditLimit = 500
 
-// Audit 返回满足条件的 Event 页，按序号升序，内容按 r.Level 裁剪。Limit 为 0 用 100。
+// Audit 返回满足条件的 Event 页，默认按序号升序，Desc 时降序（最新在前），内容按 r.Level 裁剪。Limit 为 0 用 100。
 func Audit(tx *store.Tx, p policy.Policy, r AuditRequest) ([]Step, error) {
-	if r.Limit < 0 || r.Limit > MaxAuditLimit || r.After < 0 {
-		return nil, domain.NewError(domain.CodeInvalidRequest, "after or limit is out of range", "use after >= 0 and 1 <= limit <= 500")
+	if r.Limit < 0 || r.Limit > MaxAuditLimit || r.After < 0 || r.Before < 0 || (r.Desc && r.After != 0) || (!r.Desc && r.Before != 0) {
+		return nil, domain.NewError(domain.CodeInvalidRequest, "after, before or limit is out of range", "use after with ascending order, before with order=desc, and 1 <= limit <= 500")
 	}
 	if r.Limit == 0 {
 		r.Limit = 100
@@ -240,12 +242,18 @@ func Audit(tx *store.Tx, p policy.Policy, r AuditRequest) ([]Step, error) {
 	}
 	steps := []Step{}
 	for len(steps) < r.Limit {
-		entries, err := eventlog.Query(tx, r.Filter, r.After, r.Limit)
+		var entries []eventlog.Entry
+		var err error
+		if r.Desc {
+			entries, err = eventlog.QueryBefore(tx, r.Filter, r.Before, r.Limit)
+		} else {
+			entries, err = eventlog.Query(tx, r.Filter, r.After, r.Limit)
+		}
 		if err != nil {
 			return nil, err
 		}
 		for _, en := range entries {
-			r.After = en.Event.Seq
+			r.After, r.Before = en.Event.Seq, en.Event.Seq
 			if r.Level != authz.LevelWeb && r.Pending[en.Event.Object] {
 				continue
 			}

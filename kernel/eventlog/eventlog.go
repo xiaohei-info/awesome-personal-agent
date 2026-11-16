@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock/wall"
@@ -197,16 +198,28 @@ type Filter struct {
 
 // Query 返回序号大于 after、满足 f 的至多 limit 条事件，按序号升序（审计页用）。
 func Query(tx *store.Tx, f Filter, after int64, limit int) ([]Entry, error) {
+	return query(tx, f, "seq > ?", after, "seq", limit)
+}
+
+// QueryBefore 返回序号小于 before（0 表示不限）、满足 f 的至多 limit 条事件，按序号降序，最新的在前（审计页用）。
+func QueryBefore(tx *store.Tx, f Filter, before int64, limit int) ([]Entry, error) {
+	if before == 0 {
+		before = math.MaxInt64
+	}
+	return query(tx, f, "seq < ?", before, "seq DESC", limit)
+}
+
+func query(tx *store.Tx, f Filter, cursor string, bound int64, order string, limit int) ([]Entry, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	sql, args := "SELECT "+cols+" FROM eventlog_event WHERE seq > ?", []any{after}
+	sql, args := "SELECT "+cols+" FROM eventlog_event WHERE "+cursor, []any{bound}
 	for _, c := range []struct{ col, val string }{{"json_extract(actor, '$.principal')", f.Actor}, {"object", f.Object}, {"type", f.Type}, {"grant_id", f.Grant}} {
 		if c.val != "" {
 			sql, args = sql+" AND "+c.col+" = ?", append(args, c.val)
 		}
 	}
-	return collect(tx, sql+" ORDER BY seq LIMIT ?", append(args, int64(limit))...)
+	return collect(tx, sql+" ORDER BY "+order+" LIMIT ?", append(args, int64(limit))...)
 }
 
 // Head 返回当前最大序号，空日志为 0。

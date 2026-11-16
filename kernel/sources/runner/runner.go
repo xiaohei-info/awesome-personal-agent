@@ -1250,10 +1250,26 @@ func Rejects(tx *store.Tx, sourceID string) ([]Reject, error) {
 
 // RejectPage 按发生顺序返回某来源 after 之后的至多 limit 条拒收记录；还有下一页时 next 是下一次的 after，否则为 0（与 EventPage 同一约定）。
 func RejectPage(tx *store.Tx, sourceID string, after int64, limit int) ([]Reject, int64, error) {
-	rows, err := tx.Query(`SELECT seq, source_id, run_id, line, reason, raw, at FROM sources_runner_reject WHERE source_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
-		sourceID, after, limit+1)
+	out, seqs, err := queryRejects(tx, `AND seq > ? ORDER BY seq LIMIT ?`, sourceID, after, limit+1)
+	if err != nil || len(out) <= limit {
+		return out, 0, err
+	}
+	return out[:limit], seqs[limit-1], nil
+}
+
+// RejectPageRecent 从新到旧返回拒收记录；与 EventPageRecent 同一约定：offset 是已返回的条数，还有下一页时 next 是下一次的 offset。
+func RejectPageRecent(tx *store.Tx, sourceID string, offset int64, limit int) ([]Reject, int64, error) {
+	out, _, err := queryRejects(tx, `ORDER BY seq DESC LIMIT ? OFFSET ?`, sourceID, limit+1, offset)
+	if err != nil || len(out) <= limit {
+		return out, 0, err
+	}
+	return out[:limit], offset + int64(limit), nil
+}
+
+func queryRejects(tx *store.Tx, tail, sourceID string, args ...any) ([]Reject, []int64, error) {
+	rows, err := tx.Query(`SELECT seq, source_id, run_id, line, reason, raw, at FROM sources_runner_reject WHERE source_id = ? `+tail, append([]any{sourceID}, args...)...)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var (
@@ -1266,19 +1282,12 @@ func RejectPage(tx *store.Tx, sourceID string, after int64, limit int) ([]Reject
 			seq, line, at int64
 		)
 		if err := rows.Scan(&seq, &j.SourceID, &j.RunID, &line, &j.Reason, &j.Raw, &at); err != nil {
-			return nil, 0, err
+			return nil, nil, err
 		}
 		j.Line, j.At = int(line), time.Unix(0, at).UTC()
 		out, seqs = append(out, j), append(seqs, seq)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-	var next int64
-	if len(out) > limit {
-		next, out = seqs[limit-1], out[:limit]
-	}
-	return out, next, nil
+	return out, seqs, rows.Err()
 }
 
 // Unjudged 按落盘顺序返回判断型初筛未能判定的来源事件（disposition 为 unjudged）；健康视图只读。

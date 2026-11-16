@@ -20,8 +20,8 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	kwhy "github.com/xiaohei-info/awesome-personal-agent/kernel/why"
 )
@@ -94,11 +94,23 @@ func (h *handlers) audit(w http.ResponseWriter, r *http.Request, p *core.Princip
 	if err != nil {
 		return err
 	}
+	before, err := num("before")
+	if err != nil {
+		return err
+	}
 	limit, err := num("limit")
 	if err != nil {
 		return err
 	}
-	req := kwhy.AuditRequest{Actor: p.Caller.Actor, Level: p.Caller.Level, After: after, Limit: int(limit),
+	var desc bool
+	switch q.Get("order") {
+	case "", "asc":
+	case "desc":
+		desc = true
+	default:
+		return domain.NewError(domain.CodeInvalidRequest, "order must be asc or desc", "send order=desc for newest first")
+	}
+	req := kwhy.AuditRequest{Actor: p.Caller.Actor, Level: p.Caller.Level, After: after, Before: before, Desc: desc, Limit: int(limit),
 		Filter: eventlog.Filter{Actor: q.Get("actor"), Object: q.Get("object"), Type: q.Get("type"), Grant: q.Get("grant")}}
 	var steps []kwhy.Step
 	if err := h.st.View(r.Context(), func(tx *store.Tx) error {

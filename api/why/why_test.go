@@ -404,3 +404,61 @@ func (e *env) runCredential(item string) string {
 	}
 	return run
 }
+
+func TestAuditNewestFirstPagesByBefore(t *testing.T) {
+	e := setup(t)
+	a := e.createItem("alpha")
+	e.createItem("beta")
+	e.createItem("gamma")
+	e.createItem("delta")
+	all, _ := e.get("/v1/audit/events", e.web)
+	n := len(all.Events)
+	if n < 4 {
+		t.Fatalf("need >= 4 events, got %d", n)
+	}
+	// 倒序第一页是最新的，序号严格递减。
+	first, rec := e.get("/v1/audit/events?order=desc&limit=2", e.web)
+	if rec.Code != 200 || len(first.Events) != 2 || first.Events[0].Seq != all.Events[n-1].Seq || first.Events[1].Seq != all.Events[n-2].Seq {
+		t.Fatalf("desc first page = %d %s", rec.Code, rec.Body)
+	}
+	// before 翻页：接着是更早的，不重复、不漏，翻到头与升序全量互为逆序。
+	var got []int64
+	for _, ev := range first.Events {
+		got = append(got, ev.Seq)
+	}
+	for cursor := got[len(got)-1]; ; {
+		pg, _ := e.get("/v1/audit/events?order=desc&limit=2&before="+itoa(cursor), e.web)
+		if len(pg.Events) == 0 {
+			break
+		}
+		for _, ev := range pg.Events {
+			got = append(got, ev.Seq)
+		}
+		cursor = pg.Events[len(pg.Events)-1].Seq
+	}
+	if len(got) != n {
+		t.Fatalf("desc paging got %d of %d", len(got), n)
+	}
+	for i, seq := range got {
+		if seq != all.Events[n-1-i].Seq {
+			t.Fatalf("desc paging out of order at %d: %v", i, got)
+		}
+	}
+	// 与筛选组合。
+	byObj, _ := e.get("/v1/audit/events?order=desc&object="+a, e.web)
+	for i, ev := range byObj.Events {
+		if ev.Object != a || (i > 0 && ev.Seq >= byObj.Events[i-1].Seq) {
+			t.Fatalf("desc+object = %+v", byObj.Events)
+		}
+	}
+	// 旧语义不变：order=asc 等同缺省；游标与顺序混用、未知顺序是 400。
+	asc, _ := e.get("/v1/audit/events?order=asc", e.web)
+	if len(asc.Events) != n || asc.Events[0].Seq != all.Events[0].Seq {
+		t.Fatal("order=asc must equal the default")
+	}
+	for _, bad := range []string{"order=desc&after=1", "before=5", "order=sideways", "order=desc&before=x"} {
+		if _, rec := e.get("/v1/audit/events?"+bad, e.web); rec.Code != 400 {
+			t.Fatalf("%s = %d", bad, rec.Code)
+		}
+	}
+}

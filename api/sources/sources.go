@@ -9,7 +9,7 @@
 //	GET /sources/{id}/ingests           入站记录
 //	POST /ingests/{id}/replay           重放
 //	GET /sources/{id}/events            来源事件，可按 disposition 过滤（逗号分隔多个），after + limit 分页
-//	GET /sources/{id}/rejects           没有入账的输出行及原因，after + limit 分页
+//	GET /sources/{id}/rejects           没有入账的输出行及原因，after + limit 分页；sort=recent 从新到旧
 //	GET /source-events/{id}/outbound-preview  一条事件在 full、excerpt、meta 下送给模型的内容（只读）
 //	POST /source-events/{id}/propose    把未判定事件或 digest 事件转为建议
 //	POST /source-events/{id}/ignore     忽略一条未判定事件
@@ -923,6 +923,10 @@ func (a *api) rejects(w http.ResponseWriter, r *http.Request, p *core.Principal)
 	if err != nil {
 		return err
 	}
+	recent := r.URL.Query().Get("sort") == "recent" // 从新到旧，after/next_after 是偏移（同 events）
+	if sort := r.URL.Query().Get("sort"); sort != "" && !recent {
+		return invalid("sort is not valid", "use sort=recent for newest first, or leave it out for the order the lines were rejected in")
+	}
 	id := r.PathValue("id")
 	var (
 		rs   []runner.Reject
@@ -933,7 +937,11 @@ func (a *api) rejects(w http.ResponseWriter, r *http.Request, p *core.Principal)
 			return err
 		}
 		var err error
-		rs, next, err = runner.RejectPage(tx, id, after, limit)
+		if recent {
+			rs, next, err = runner.RejectPageRecent(tx, id, after, limit)
+		} else {
+			rs, next, err = runner.RejectPage(tx, id, after, limit)
+		}
 		return err
 	}); err != nil {
 		return err
