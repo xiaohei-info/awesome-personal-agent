@@ -47,6 +47,24 @@ func TestSourceRuleExitsAndWhereValidation(t *testing.T) {
 	}
 }
 
+// ACT-XAL-09（附录 C.11）：notify_urgent 只用于 screen、extract 出口，用在其他出口上整包拒绝并指出该字段。
+func TestNotifyUrgentOnlyOnScreenAndExtract(t *testing.T) {
+	for _, then := range []string{"screen", "judge", "extract"} {
+		if got := validate(t, rulePack("    then: "+then+"\n    notify_urgent: true\n"), nil); got != "" {
+			t.Errorf("then %s + notify_urgent rejected: %s", then, got)
+		}
+	}
+	for _, rule := range []string{"    then: proposed\n", "    then: ignore\n", "    then: digest\n", "    then: alert\n    where: [{field: sender, op: eq, value: a}]\n", ""} {
+		got := validate(t, rulePack(rule+"    notify_urgent: true\n"), nil)
+		if !strings.Contains(got, "notify_urgent") {
+			t.Errorf("%q: error %q should name notify_urgent", rule, got)
+		}
+	}
+	if got := validate(t, rulePack("    then: screen\n    notify_urgent: true\n    mode: auto\n"), nil); !strings.Contains(got, "auto") {
+		t.Errorf("notify_urgent with mode auto: error %q", got)
+	}
+}
+
 // ACT-XAL-09（附录 C.11）：prescreen: none 只用于 extract 出口；包里不能有名为 none 的提示词模板。
 func TestPrescreenNoneValidation(t *testing.T) {
 	if got := validate(t, rulePack("    then: extract\n    prescreen: none\n"), nil); got != "" {

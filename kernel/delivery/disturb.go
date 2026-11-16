@@ -42,7 +42,11 @@ func (q *Queue) CreateGated(tx *store.Tx, pol policy.Policy, d domain.Delivery, 
 	}
 	if d.Class != domain.DeliveryHealth && d.Class != domain.DeliveryWake {
 		now := q.o.Now()
-		if d.Route != RouteWeb && muted(pol.Disturb.Mutes, d.Item, t, now) {
+		item := d.Item
+		if item == "" && d.Origin != nil { // 没有事项的紧急建议提醒：事项静音按它指向的那条建议对照
+			item = d.Origin.Item
+		}
+		if d.Route != RouteWeb && muted(pol.Disturb.Mutes, item, t, now) {
 			d.Route, d.Suppressed = RouteWeb, SuppressedMuted
 		} else if over, err := q.overCap(tx, pol, d, t, now); err != nil {
 			return d, false, err

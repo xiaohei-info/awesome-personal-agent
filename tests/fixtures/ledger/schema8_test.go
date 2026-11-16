@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -235,5 +236,29 @@ func TestV8IndexesAndConstraints(t *testing.T) {
 		if err := exec(`UPDATE sources_runner_event SET content_state = ? WHERE id = (SELECT id FROM sources_runner_event LIMIT 1)`, s); err != nil {
 			t.Errorf("完整程度 %s 应可写: %v", s, err)
 		}
+	}
+}
+
+// ACT-S8-04：升级后的旧材料读取时按原规则推定形态（有仓库位置的是托管型，其余是自有型），读取不改写已有行。
+func TestUpgradedMaterialsReadWithInferredForm(t *testing.T) {
+	dir, m := gen(t, 7)
+	st := open(t, copyTree(t, dir), 8)
+	defer st.Close()
+
+	got := map[string]string{}
+	if err := st.View(context.Background(), func(tx *store.Tx) error {
+		ms, err := materials.List(tx, "")
+		for _, x := range ms {
+			got[x.ID] = x.Form
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got[m.HostedMaterial] != materials.FormHosted || got[m.OwnedMaterial] != materials.FormOwned || len(got) != m.Tables["materials"] {
+		t.Fatalf("inferred forms = %v (hosted %s, owned %s)", got, m.HostedMaterial, m.OwnedMaterial)
+	}
+	if n := count(t, st, "SELECT COUNT(*) FROM materials WHERE form = ''"); n != m.Tables["materials"] {
+		t.Errorf("读取改写了已有行: 仍为空的 %d / %d", n, m.Tables["materials"])
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"golang.org/x/text/unicode/norm"
 )
 
 // ErrInvalid 表示提议的策略不满足约束，未写入任何版本。
@@ -298,6 +300,59 @@ type Policy struct {
 	// ModelsPaused 为真时两个端点的配置与密钥原样保留，但内核按两者都未配置运行（Current 给出的就是这个视图，§8.7）。
 	// 没有任何端点时规整为假。只在 Web 改。
 	ModelsPaused bool `json:"models_paused"`
+	// NoteVaults 是笔记库登记（§6.13、§12.8）：名字在实例内唯一，OpenURL 是"在笔记应用打开"的 URL 模板。
+	// 已存的策略版本没有这个键，读作没有登记，不改写。只在 Web 改。
+	NoteVaults []NoteVault `json:"note_vaults"`
+}
+
+// NoteVault 是一个已登记的笔记库。OpenURL 的占位符 {vault}（库名）与 {path}（库内相对路径）渲染时各自做 URL 编码；
+// 为空表示只登记名字、没有打开方式。内核只做字符串替换，不认识任何笔记应用。
+type NoteVault struct {
+	Name    string `json:"name"`
+	OpenURL string `json:"open_url"`
+}
+
+// 打开方式模板不接受的协议：脚本类与文件类（§12.8、风险 43）。
+var forbiddenOpenSchemes = []string{"javascript", "data", "vbscript", "file"}
+
+var schemePrefix = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9+.-]*):`)
+
+func normalizeNoteVaults(vs []NoteVault) ([]NoteVault, error) {
+	out := []NoteVault{}
+	seen := map[string]bool{}
+	for i, v := range vs {
+		name := norm.NFC.String(strings.TrimSpace(v.Name))
+		if name == "" || strings.ContainsAny(name, "/\\") || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+			return nil, invalid("note_vaults %d: name is empty or contains a slash or control character", i)
+		}
+		if seen[name] {
+			return nil, invalid("note_vaults %d: name %q is listed twice", i, name)
+		}
+		seen[name] = true
+		tpl := v.OpenURL
+		if tpl != "" {
+			m := schemePrefix.FindStringSubmatch(tpl)
+			if m == nil || strings.IndexFunc(tpl, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+				return nil, invalid("note_vaults %d (%s): open_url must start with a protocol and contain no whitespace", i, name)
+			}
+			if oneOf(strings.ToLower(m[1]), forbiddenOpenSchemes...) {
+				return nil, invalid("note_vaults %d (%s): protocol %q is not allowed in open_url", i, name, m[1])
+			}
+		}
+		out = append(out, NoteVault{Name: name, OpenURL: tpl})
+	}
+	return out, nil
+}
+
+// OpenURL 按库名与库内相对路径渲染"在笔记应用打开"的地址：{vault}、{path} 各自做 URL 编码（斜杠也编码）。
+// 库未登记或没有打开方式时返回空串。
+func (p Policy) OpenURL(vault, path string) string {
+	for _, v := range p.NoteVaults {
+		if v.Name == vault && v.OpenURL != "" {
+			return strings.NewReplacer("{vault}", url.PathEscape(vault), "{path}", url.PathEscape(path)).Replace(v.OpenURL)
+		}
+	}
+	return ""
 }
 
 // Default 是版本 0 的配置：默认类别、权限上限 read、人格与白名单为空。
@@ -324,6 +379,7 @@ func Default() Policy {
 		ForwardAllowlist:   map[string][]string{},
 		ChannelAnswerers:   map[string][]string{},
 		Channels:           map[string]Channel{},
+		NoteVaults:         []NoteVault{},
 		Judgment:           Judgment{Bands: []JudgmentBand{}, Shadow: []string{}, SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}},
 	}
 }
@@ -517,6 +573,10 @@ func normalize(p Policy) (Policy, error) {
 	}
 	if !oneOf(p.PersonaLang, "", "zh", "en") {
 		return p, invalid("persona_lang %q", p.PersonaLang)
+	}
+	var err error
+	if p.NoteVaults, err = normalizeNoteVaults(p.NoteVaults); err != nil {
+		return p, err
 	}
 	p.ForwardAllowlist = normList(p.ForwardAllowlist)
 	p.ChannelAnswerers = normList(p.ChannelAnswerers)

@@ -75,12 +75,53 @@ func decode(in json.RawMessage, v any) error {
 
 func blank(s string) bool { return strings.TrimSpace(s) == "" }
 
-// Evidence 是回执证据。
+// Evidence 是回执证据。Link 是第一个链接（旧字段，含义不变）；给了链接时 Links 是全部链接（含第一个）。
+// 输入里的 link 可以是字符串或字符串数组（§7.5、附录 B.2）。
 type Evidence struct {
-	Commit string `json:"commit,omitempty"`
-	PR     string `json:"pr,omitempty"`
-	Branch string `json:"branch,omitempty"`
-	Link   string `json:"link,omitempty"`
+	Commit string   `json:"commit,omitempty"`
+	PR     string   `json:"pr,omitempty"`
+	Branch string   `json:"branch,omitempty"`
+	Link   string   `json:"link,omitempty"`
+	Links  []string `json:"links,omitempty"`
+}
+
+// UnmarshalJSON 接受 link 为字符串或数组；读回已存事件时 links 也照收。
+func (e *Evidence) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Commit string          `json:"commit"`
+		PR     string          `json:"pr"`
+		Branch string          `json:"branch"`
+		Link   json.RawMessage `json:"link"`
+		Links  []string        `json:"links"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	links := raw.Links
+	if len(links) == 0 && len(raw.Link) > 0 && string(raw.Link) != "null" { // 已存的事件两个键都有，以 links 为准
+		var one string
+		var many []string
+		switch err := json.Unmarshal(raw.Link, &one); {
+		case err == nil:
+			links = []string{one}
+		case json.Unmarshal(raw.Link, &many) == nil:
+			links = many
+		default:
+			return invalid("link must be a string or an array of strings")
+		}
+	}
+	*e = Evidence{Commit: raw.Commit, PR: raw.PR, Branch: raw.Branch}
+	for _, l := range links {
+		if l = strings.TrimSpace(l); l != "" {
+			e.Links = append(e.Links, l)
+		}
+	}
+	if len(e.Links) > 0 {
+		e.Link = e.Links[0]
+	}
+	return nil
 }
 
 func (e Evidence) empty() bool {
@@ -355,6 +396,9 @@ func report() command.Spec {
 				return nil, err
 			}
 			if v.Outcome == OutcomeDone && child.Kind == domain.KindDelegation {
+				if err := registerVaultLinks(c, child, v.Evidence.Links); err != nil {
+					return nil, err
+				}
 				if parent, ok, err := reopenable(c.Tx, child.ID); err != nil {
 					return nil, err
 				} else if ok {

@@ -406,6 +406,19 @@ func (a *Attention) Alert(tx *store.Tx, o domain.DeliveryOrigin, content domain.
 		version: 1, content: content, origin: &o})
 }
 
+// Urgent 让 notify_urgent 规则产生的新建议即时提醒（§9.3）：投递 id 取建议事项 id，同一条建议只提醒一次；
+// 与 Alert 一样不带事项（建议仍是 proposed，不计承诺），origin 记来源事件、规则与这条建议；受静默、日上限和静音约束。
+// 内容的 Web 链接指向这条建议。在调用方的事务里运行。
+func (a *Attention) Urgent(tx *store.Tx, o domain.DeliveryOrigin, content domain.DeliveryContent) error {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return err
+	}
+	content.WebURL = a.o.WebURL(o.Item)
+	return a.offer(tx, pol, held{id: o.Item, class: domain.DeliveryReminder, priority: domain.PriorityNormal,
+		version: 1, content: content, origin: &o})
+}
+
 func (a *Attention) remind(tx *store.Tx, pol policy.Policy, it domain.Item, kind string, due time.Time, title, summary string, options ...string) error {
 	ver, err := command.Version(tx, it.ID)
 	if err != nil {
@@ -574,7 +587,7 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 			if err != nil {
 				return err
 			}
-			if a.o.Queue.Muted(pol, h.item, t) {
+			if a.o.Queue.Muted(pol, orElse(h.item, originItem(h.origin)), t) {
 				if err := a.deliver(tx, pol, []held{h}); err != nil {
 					return err
 				}
@@ -629,11 +642,15 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 // target 取一条提醒对应事项的项目与来源，供日上限与静音对照；事项已不存在时只剩事项 id。
 func (a *Attention) target(tx *store.Tx, h held) (delivery.Target, error) {
 	t := delivery.Target{Exempt: h.exempt}
-	if h.origin != nil { // 没有事项：只能按来源对照静音
+	id := h.item
+	if h.origin != nil { // 没有事项：来源取出处；紧急建议提醒另按它指向的建议对照项目与事项静音
 		t.Source = h.origin.Source
-		return t, nil
+		if h.origin.Item == "" {
+			return t, nil
+		}
+		id = h.origin.Item
 	}
-	it, err := items.Get(tx, h.item)
+	it, err := items.Get(tx, id)
 	if isNotFound(err) {
 		return t, nil
 	}
@@ -641,10 +658,24 @@ func (a *Attention) target(tx *store.Tx, h held) (delivery.Target, error) {
 		return t, err
 	}
 	t.Project = it.Project
-	if it.Origin != nil {
+	if it.Origin != nil && h.origin == nil {
 		t.Source = it.Origin.Source
 	}
 	return t, nil
+}
+
+func originItem(o *domain.DeliveryOrigin) string {
+	if o == nil {
+		return ""
+	}
+	return o.Item
+}
+
+func orElse(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // attachForm 在写入决策投递时发放一次性表单链接（§10.3）。放在这里而不是暂存时，令牌只为真正写入的投递发放。

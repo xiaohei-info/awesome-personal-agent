@@ -18,6 +18,7 @@ import (
 	apictx "github.com/xiaohei-info/awesome-personal-agent/api/context"
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apimat "github.com/xiaohei-info/awesome-personal-agent/api/materials"
+	apiproj "github.com/xiaohei-info/awesome-personal-agent/api/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/context"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/materials"
@@ -43,6 +44,8 @@ import (
 // 真实账本 + 命令管线 + 材料 HTTP 路由；CLI 经真实 HTTP 调用。
 type kernel struct {
 	t      *testing.T
+	x      *command.Executor
+	st     *store.Store
 	url    string
 	tokens map[auth.Kind]string
 	prj    string
@@ -69,13 +72,13 @@ func newKernel(t *testing.T) *kernel {
 		}
 	}
 	au := auth.New(nil)
-	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{apimat.Routes(st, x, nil), apictx.Routes(st)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: au, Groups: []core.RouteGroup{apimat.Routes(st, x, nil), apictx.Routes(st), apiproj.Routes(st, x)}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	k := &kernel{t: t, url: ts.URL, tokens: map[auth.Kind]string{}}
+	k := &kernel{t: t, st: st, x: x, url: ts.URL, tokens: map[auth.Kind]string{}}
 	for _, kind := range []auth.Kind{auth.Observer, auth.Worker} {
 		if err := st.Update(context.Background(), func(tx *store.Tx) error {
 			_, s, err := au.Issue(tx, auth.Spec{Kind: kind})

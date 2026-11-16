@@ -20,7 +20,7 @@ import (
 )
 
 const usageText = "usage: apa source list | show <id> | add --id ID [--name N] [--type pull|webhook|script] [--command C] [--schedule D] [--timeout S] [--source-type T] [--credentials-path P] [--dedupe-domain D] [--default-project P] [--config JSON] [--enabled=false] | " +
-	"rename <id> <name> | enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] --evidence <words> | backlog rejudge [--source ID] [--limit N] --evidence <words> | backlog restore --from T --to T [--source ID] [--dry-run | --evidence <words>] | auth <id>"
+	"rename <id> <name> | enable <id> | disable <id> | webhook create|rotate|revoke <id> | ingests <id> | event <event-id> [--part body|original|headers|attachments|messages] | rejects <id> [--after N] [--limit N] | replay <ingest-id> | backlog list [--source ID] [--sort score] | backlog rules|score [--source ID] --evidence <words> | backlog rejudge [--source ID] [--limit N] --evidence <words> | backlog restore --from T --to T [--source ID] [--dry-run | --evidence <words>] | auth <id>"
 
 func init() { client.Register("source", source) }
 
@@ -79,6 +79,12 @@ func source(c *client.Ctx, args []string) error {
 			return err
 		}
 		return call(c, "GET", "/sources/"+url.PathEscape(id)+"/ingests", nil)
+	case "event":
+		path, err := eventPath(rest)
+		if err != nil {
+			return err
+		}
+		return call(c, "GET", path, nil)
 	case "rejects":
 		path, err := rejectsPath(rest)
 		if err != nil {
@@ -115,6 +121,25 @@ func oneID(args []string, sub string) (string, error) {
 		return "", usage(sub+" takes exactly one id", usageText)
 	}
 	return args[0], nil
+}
+
+// eventPath 解析 `event <事件 id> [--part 部分]`：读单条来源事件及其原文。范围（scope）与裁剪量（trimmed）在响应里，原样输出；
+// token 读到的内容按来源的外发范围裁剪，运行凭据由内核拒绝（退出码 4）。部分名由内核校验。
+func eventPath(args []string) (string, error) {
+	if len(args) == 0 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+		return "", usage("event takes an event id first", usageText)
+	}
+	fs := flag.NewFlagSet("source event", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	part := fs.String("part", "", "")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+		return "", usage("invalid arguments for source event", usageText)
+	}
+	path := "/source-events/" + url.PathEscape(args[0])
+	if *part != "" {
+		path += "?part=" + url.QueryEscape(*part)
+	}
+	return path, nil
 }
 
 // rejectsPath 解析 `rejects <id> [--after N] [--limit N]`；分页取值由内核校验，next_after 原样给下一次的 --after。

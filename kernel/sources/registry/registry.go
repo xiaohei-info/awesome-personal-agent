@@ -918,3 +918,24 @@ func apply(ctx context.Context, x *command.Executor, id command.Identity, s Sour
 	_, err = x.Do(ctx, command.Request{Identity: id, Command: CmdSetEnabled, Input: e})
 	return err
 }
+
+// ContentRetentionDays 返回设了原文保留天数的来源（NULL 即不清理，不在结果里）。只读；写入在保留期的命令里。
+func ContentRetentionDays(tx *store.Tx) (map[string]int, error) {
+	r, err := tx.Query(`SELECT id, content_retention_days FROM sources_registry_source WHERE content_retention_days IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	out := map[string]int{}
+	for r.Next() {
+		var (
+			id string
+			n  int64
+		)
+		if err := r.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = int(n)
+	}
+	return out, r.Err()
+}

@@ -115,6 +115,15 @@ source_rules:
     match: {source_type: exits, event_type: x.chat_np}
     then: extract
     prescreen: none
+  - id: x-urgent
+    match: {source_type: exits, event_type: x.urgent}
+    then: screen
+    notify_urgent: true
+  - id: x-urgent-ex
+    match: {source_type: exits, event_type: x.urgent_ex}
+    then: extract
+    prescreen: none
+    notify_urgent: true
   - id: x-alert
     match: {source_type: exits, event_type: x.metric}
     where: [{field: metrics.value, op: crosses_above, value: 90}]

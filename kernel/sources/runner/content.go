@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -37,6 +38,9 @@ const (
 )
 
 var partNames = []string{PartBody, PartOriginal, PartHeaders, PartAttachments, PartMessages}
+
+// Parts 是原文各部分的名字，按固定顺序。
+var Parts = partNames
 
 // Original 是未经转换的原始正文与它的媒体类型（HTML 邮件的 HTML、接口返回的那一条 JSON、webhook 的请求体）。内核只存不解析。
 type Original struct {
@@ -320,4 +324,40 @@ func ReadPart(tx *store.Tx, id, part string) (PartData, error) {
 		}
 	}
 	return PartData{}, domain.NewError(domain.CodeNotFound, fmt.Sprintf("source event %s has no %s part (content %s)", id, part, c.state), "read the content manifest for the parts it has")
+}
+
+// Preview 是列表里 detail 的预览：全文的前 PreviewChars 个字符。升级前落盘的事件，行里的 detail 是全文，读出后也经它截取。
+func Preview(s string) string { return previewOf(s) }
+
+// Usage 是一个来源的原文占用（GET /storage 与来源 stats）。
+type Usage struct {
+	Events       int64
+	ContentBytes int64
+	Oldest       time.Time // 最早一条的发生时间；没有事件为零值
+}
+
+// UsageBySource 按来源汇总事件数与原文字节数。升级前落盘的事件没有记字节数（NULL），按原列（正文与聚合消息）的长度现算，
+// 与 ContentOf 对这类事件的清单同一口径。
+func UsageBySource(tx *store.Tx) (map[string]Usage, error) {
+	rows, err := tx.Query(`SELECT source_id, COUNT(*),
+		COALESCE(SUM(COALESCE(content_bytes, LENGTH(CAST(detail AS BLOB)) + LENGTH(CAST(messages AS BLOB)))), 0), MIN(occurred_at)
+		FROM sources_runner_event GROUP BY source_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]Usage{}
+	for rows.Next() {
+		var (
+			id     string
+			u      Usage
+			oldest int64
+		)
+		if err := rows.Scan(&id, &u.Events, &u.ContentBytes, &oldest); err != nil {
+			return nil, err
+		}
+		u.Oldest = time.Unix(0, oldest).UTC()
+		out[id] = u
+	}
+	return out, rows.Err()
 }

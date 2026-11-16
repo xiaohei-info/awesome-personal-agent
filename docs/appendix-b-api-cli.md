@@ -46,7 +46,7 @@
 | `apa dispatch add <子事项> [--session] [--resumable] [--cwd] [--repo] [--handle <JSON 文件或 ->] [--continues <记录>] [--idempotency-key]` | 在委派子事项上写一条委派记录，输出该记录；`harness` 取 `APA_HARNESS`，必填；`--resumable` 要有 `--session`；同一子事项上已有运行中、harness 与会话都相同的记录时不新增，返回已有记录；句柄规则见主文档 §6.17 | 同 `apa report` | 2、4、5、6、23 |
 | `apa dispatch update <记录> [--state ended\|lost] [--resumable true\|false]` | 推进委派记录；`lost` 同时置 `resumable` 为假，终态不可改 | 同 `apa report` | 2、4、5、6、23 |
 | `apa report <id> --outcome --summary [--pr --commit --branch --link] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`done` 必须带结果证据（`--pr`、`--commit`、`--branch`、`--link` 至少一项），附不出只能报 `progress` 或 `blocked` | 绑定该 assignee 的 worker、该运行的运行凭据、发起该委派的 delegate；其他 delegate 附 `--evidence` 或 `--grant` | 2、4、6、23 |
-| 已有回执命令的新增用法 | 【规划中（v0.2.0）】`apa report` 的 `--link` 可重复给出多个；报 `done` 时落在已登记笔记库内的链接（`vault:<库名>/<路径>`）自动登记为链接型材料并以"产出"关联到父事项（主文档 §7.5） | 同原命令 | 2 |
+| 已有回执命令的新增用法 | `apa report` 的 `--link` 可重复给出多个；报 `done` 时落在已登记笔记库内的链接（`vault:<库名>/<路径>`）自动登记为链接型材料并以"产出"关联到父事项（主文档 §7.5） | 同原命令 | 2 |
 | `apa handback <消息> --reason` | 把挂靠消息交回一次 | 同上 | 4、6 |
 | **项目** | | | |
 | `apa project list/show` | 读项目，含 repos 与允许的执行者 | observer | |
@@ -54,7 +54,7 @@
 | `apa project repos add/remove` | 增改本机检出（worker）或远程地址（delegate） | worker | 4 |
 | **材料与规范** | | | |
 | `apa material add --repo --path [--project] [--kind]` | 登记托管型；project 缺省取登记了该仓库的项目，kind 缺省 `design` | worker | |
-| 已有材料命令的新增用法 | 【规划中（v0.2.0）】`apa material add --link <位置> --title <标题> [--project] [--kind]` 登记链接型材料（主文档 §12.8）：位置是 `vault:<库名>/<库内相对路径>` 或网址，kind 缺省 `reference`；同一项目内同一位置重复登记返回已有的那条。`apa material show` 对链接型只回位置与打开地址 | worker | 2、5 |
+| 已有材料命令的新增用法 | `apa material add --link <位置> --title <标题> [--project] [--kind]` 登记链接型材料（主文档 §12.8）：位置是 `vault:<库名>/<库内相对路径>` 或网址，kind 缺省 `reference`；同一项目内同一位置重复登记返回已有的那条。`apa material show` 对链接型只回位置与打开地址 | worker | 2、5 |
 | `apa material commit <id> --from --reason [--kind]` | 提交自有型修订 | worker | 6 |
 | `apa material list` | 列出材料，可按项目、kind、标签筛选 | observer | |
 | `apa material show <id> [--rev]` | 读当前或指定修订；托管型只回位置 | observer | 5 |
@@ -71,7 +71,7 @@
 | `apa source webhook create/rotate/revoke` | 创建、轮换、吊销 webhook 接收密钥 | delegate | |
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
 | `apa source rejects <id> [--after N] [--limit N]` | 查看没有入账的输出行及原因（`next_after` 作为下一次的 `--after`） | observer | |
-| `apa source event <事件 id> [--part body\|original\|headers\|attachments\|messages]` | 【规划中（v0.2.0）】读一条来源事件及其原文（主文档 §7.6）：不带 `--part` 输出事件、原文清单与正文，带时只输出那一部分。token 读到的内容按该来源对外部端点的外发范围裁剪，输出写明所用范围与裁剪量；运行凭据不可用 | observer | 4、5 |
+| `apa source event <事件 id> [--part body\|original\|headers\|attachments\|messages]` | 读一条来源事件及其原文（主文档 §7.6）：不带 `--part` 输出事件、原文清单与正文，带时只输出那一部分。token 读到的内容按该来源对外部端点的外发范围裁剪，输出写明所用范围与裁剪量；运行凭据不可用 | observer | 4、5 |
 | `apa source replay <入站记录>` | 重放 | delegate | |
 | `apa source backlog list [--source] [--sort score]` | 列出积压（未判定与已到期），旧原因 `undecided`、空原样返回；`--sort score` 按影子分数从高到低排（各来源合并后统一排序，同分保持来源顺序），每条带 `score`，没有分数的排最后 | observer | |
 | `apa source backlog rules [--source] --evidence` | 积压只跑规则：重走归属与确定性规则，能挂靠的挂靠、规则有明确出口的按出口处置，其余原样；不调模型，不受 `unjudged_rejudge_days` 限制，输出 `attached`、`disposed`、`remaining`（主文档 §9.3） | delegate | 23 |
@@ -161,8 +161,8 @@
 | | `POST /revisions/{id}/confirm`，`/reject` | 确认或拒绝 proposed 修订 | Web 登录、delegate（规范生效只有 Web） |
 | | `GET /materials/search` | 检索 | observer |
 | | `PUT/GET /blobs/{hash}` | 附件 | worker 写，observer 读 |
-| | 已有路由 POST /materials 的新增请求体 | 【规划中（v0.2.0）】带 `link` 键时登记链接型材料：`{"link", "title", "project", "kind"?, "tags"?}`，经 `material.link`；已有同项目同位置的返回 200 与那一条，新建返回 201。`GET /materials` 与 `GET /materials/{id}` 的每条材料加只读字段 `form`（`hosted`、`owned`、`link`），链接型另带 `link` 与 `open_url`（库已登记打开方式时） | worker 写，observer 读 |
-| | `GET /note-vaults` | 【规划中（v0.2.0）】已登记的笔记库：`{"vaults": [{"name", "open_url"}]}` | observer |
+| | 已有路由 POST /materials 的新增请求体 | 带 `link` 键时登记链接型材料：`{"link", "title", "project", "kind"?, "tags"?}`，经 `material.link`；已有同项目同位置的返回 200 与那一条，新建返回 201。`GET /materials` 与 `GET /materials/{id}` 的每条材料加只读字段 `form`（`hosted`、`owned`、`link`），链接型另带 `link` 与 `open_url`（库已登记打开方式时） | worker 写，observer 读 |
+| | `GET /note-vaults` | 已登记的笔记库：`{"vaults": [{"name", "open_url"}]}` | observer |
 | 规范 | `GET /agents-md?repo` | 取渲染结果，带最近一次检查状态 | observer |
 | | `POST /agents-md/check` | 上报文件 hash，返回三态 | observer |
 | 上下文 | `GET /context` | 账本增量投影 | observer |
@@ -184,10 +184,10 @@
 | | `GET /source-events/restorable?from&to&source` | 预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer；运行凭据不可用 |
 | | `GET /source-events/{id}/outbound-preview` | 外发预览：这条事件按 `full`、`excerpt`、`meta` 裁剪后实际送给模型的内容，与外发同源（主文档 §14.14）；只读，不写 Event | observer；运行凭据不可用（返回 403）；内部来源 `capture:<项目>` 的事件只有 Web 登录能读 |
 | | `POST /source-events/restore` | 把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate（附本人原话） |
-| | `GET /source-events/{id}` | 【规划中（v0.2.0）】单条读取来源事件及其原文，见下 | Web 登录读全文；token 按外发范围裁剪；运行凭据、ext 密钥不可用（403） |
+| | `GET /source-events/{id}` | 单条读取来源事件及其原文，见下 | Web 登录读全文；token 按外发范围裁剪；运行凭据、ext 密钥不可用（403） |
 | | `POST /source-events/{id}/attachments/{n}/fetch` | 【规划中（v0.2.0）】取回第 n 个附件（`source.fetch_attachment`，主文档 §7.6）：成功返回 200 与更新后的附件清单项（带 `blob`）；来源程序不支持取回是 409，取回失败是 502 并带原因 | Web 登录、delegate（附本人原话） |
-| | `GET /storage` | 【规划中（v0.2.0）】存储用量：`{"ledger_bytes", "blobs_bytes", "content_bytes", "sources": [{"id", "name", "events", "content_bytes", "oldest", "retention_days"?}]}` | observer |
-| | 已有路由 GET /sources/{id}/events 与 GET /items/{id}/messages 的改动 | 【规划中（v0.2.0）】列表不再带正文全文：每条事件的 `detail` 是前 2000 个字符的预览，另带 `content`（原文清单：各部分的字节数、总字节数、`state`、`missing?`）；全文经上面的单条读取（见 B.6） | 同原路由 |
+| | `GET /storage` | 存储用量：`{"ledger_bytes", "blobs_bytes", "content_bytes", "sources": [{"id", "name", "events", "content_bytes", "oldest", "retention_days"?}]}` | observer |
+| | 已有路由 GET /sources/{id}/events 与 GET /items/{id}/messages 的改动 | 列表不再带正文全文：每条事件的 `detail` 是前 2000 个字符的预览，另带 `content`（原文清单：各部分的字节数、总字节数、`state`、`missing?`）；全文经上面的单条读取（见 B.6） | 同原路由 |
 | 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |
 | | `GET /judgments/stats?use&template&source&since` | 各级调用次数与四项指标（主文档 §8.10） | observer |
 | | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
@@ -212,7 +212,7 @@
 | | `/settings/judgment` | 不确定带与影子模式 | 只有 Web 登录 |
 | | `POST /settings/model-endpoints/models`、`POST /settings/model-endpoints/test` | "设置 › 模型"的获取模型与测试连接：不改策略；只有测试的正是已保存的端点、测试通过且该端点有未恢复的失败时，记一条探测通过的 `run.finished`（见下文"测试连接"），其余情况不写 Event；同一类端点同一时刻只跑一个，其余返回 409（主文档 §4.1、§15.2、§15.5） | 只有 Web 登录 |
 | | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围 | 只有 Web 登录 |
-| | `GET/PUT /settings/note-vaults` | 【规划中（v0.2.0）】笔记库登记：`{"vaults": [{"name", "open_url"}]}`，整体替换；经 `policy.Update`，记 `policy.changed`。名字重复、模板不以协议开头或用了被拒绝的协议返回 400 | 只有 Web 登录 |
+| | `GET/PUT /settings/note-vaults` | 笔记库登记：`{"vaults": [{"name", "open_url"}]}`，整体替换；经 `policy.Update`，记 `policy.changed`。名字重复、模板不以协议开头或用了被拒绝的协议返回 400 | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/content-retention` | 来源的原文保留天数：`{"days": 90}`，`null` 为不清理（主文档 §6.15） | 只有 Web 登录 |
 | | 已有路由 POST /settings/grants 的新增请求体 | 【规划中（v0.2.0）】`actions` 为 `["import.apply"]` 时须带 `import: {"source", "max_records"}` 与不超过 7 天的 `expires_at`，不得带 `background`；`actions` 可含 `item.progress` | 只有 Web 登录 |
 | | 已有路由 /settings/model-endpoints 的新增字段 | 【规划中（v0.2.0）】`generate_endpoint.max_material_chars`：生成端点的资料预算，缺省 24000（主文档 §8.4） | 只有 Web 登录 |
@@ -294,7 +294,7 @@
 
 `POST /runs/{id}/credential` 不带请求体，成功返回 200：`{"run": "...", "token": "apa_run_…", "expires_at": "<RFC 3339>"}`。`token` 只出现这一次，不进幂等结果表。运行不存在返回 404，不是未结束的 `launch: wake` 后台运行返回 409，其他凭据返回 403。用 delegate token 换取时，同时为该 token 开唤醒租约（§13.6）。
 
-`GET /deliveries/next` 返回的投递：`content.recommend` 是决策的推荐选项，未给推荐时省略；`content.form_url` 是一次性表单链接，只出现在只能发文字的渠道上的非 web_only 决策里；`content.web_only` 为 `true` 表示这是 web_only 决策：内容只有标题、摘要与 `web_url`，不含 `options`、`recommend`、`form_url`，渠道只发 Web 链接、不渲染可点选项，也不要把回答转达给 `POST /deliveries/{id}/answer`（内核拒绝并回 Web 链接）；内核按事项的风险类别在写入投递时填写，初筛升级后产生的新版本投递同样带它；`run` 只出现在唤醒类投递上。规则 `alert` 出口的提醒没有事项：`item` 为空，带 `origin`（`{source_event, rule, source}`，触发它的来源事件、规则 id 与来源 id），`content` 取来源事件的标题、摘要与链接，不带选项；渠道 ext 须能处理空的 `item`（主文档 §6.9）。
+`GET /deliveries/next` 返回的投递：`content.recommend` 是决策的推荐选项，未给推荐时省略；`content.form_url` 是一次性表单链接，只出现在只能发文字的渠道上的非 web_only 决策里；`content.web_only` 为 `true` 表示这是 web_only 决策：内容只有标题、摘要与 `web_url`，不含 `options`、`recommend`、`form_url`，渠道只发 Web 链接、不渲染可点选项，也不要把回答转达给 `POST /deliveries/{id}/answer`（内核拒绝并回 Web 链接）；内核按事项的风险类别在写入投递时填写，初筛升级后产生的新版本投递同样带它；`run` 只出现在唤醒类投递上。规则 `alert` 出口的提醒没有事项：`item` 为空，带 `origin`（`{source_event, rule, source}`，触发它的来源事件、规则 id 与来源 id），`content` 取来源事件的标题、摘要与链接，不带选项；`notify_urgent` 规则的紧急建议提醒同样没有事项，投递 id 等于建议事项 id，`origin` 另带 `item`（这条建议），`content` 是建议的标题、摘要、起草理由与指向它的 Web 链接；渠道 ext 须能处理空的 `item`（主文档 §6.9）。
 
 `/settings/policy` 的 `channels` 段是渠道的登记属性：`{"<渠道名>": {"text_only": true}}`。`persona_lang` 段是助手说哪种语言：`"zh"`、`"en"`，空串为跟随系统（默认；旧策略版本没有这个键，读作空串），其他值 400。`default_harness` 段是规则未指定 harness 时任务型与后台运行用的 harness，值为 harness 名，空串表示未设置（主文档 §13.6）。`main_session_launch` 段是以 Agent 本人身份做事时的拉起方式：`{"by_harness": {"<harness>": "<方式>"}, "by_rule": {"<规则键>": "<方式>"}}`，方式取 `headless` 或 `wake`，没有的键表示没选，其他值 400；取值顺序是规则、Agent、声明初始值、无头（主文档 §13.6）。旧策略版本没有这个段，读作两份空表。`disturb` 段在 v0.2.0 新增三个键，旧键不变：`daily_cap`（整数，默认 20，`0` 不限）、`mutes`（`[{"scope": "source" \| "project" \| "item", "id", "until"?}]`）、`followup_defer`（布尔，默认 `false`）；`threshold_judge` 保留，含义改为"是否开启投递推迟判定"（主文档 §7.4）。
 

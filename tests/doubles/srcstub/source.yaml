@@ -1,0 +1,7 @@
+# SRC_STUB 的接入声明（主文档 §9.1、附录 D.8）：程序支持 fetch 模式，按 ref 取回附件。
+# 登记时 command 第一个词为 src-stub（acc-raw 用这份）。仅用于测试与验收，不进发布构建。
+program: src-stub
+default: {zh: 桩来源, en: Stub source}
+sender: {trust: unverified}
+content:
+  attachments: fetch

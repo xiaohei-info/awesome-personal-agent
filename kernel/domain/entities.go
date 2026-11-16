@@ -193,6 +193,7 @@ type DeliveryOrigin struct {
 	SourceEvent string `json:"source_event"`
 	Rule        string `json:"rule"`
 	Source      string `json:"source,omitempty"`
+	Item        string `json:"item,omitempty"` // 紧急建议提醒（notify_urgent）：触发它的那条建议；提醒本身仍不带事项
 }
 
 // ---- Run（§6.11） ----
