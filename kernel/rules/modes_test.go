@@ -85,6 +85,14 @@ func TestClassesFollowTheLoaderInference(t *testing.T) {
 	}
 }
 
+// Runners 只标出拉起后台运行的规则及其运行者：Web 据此只在以 Agent 本人身份运行的规则上提供拉起方式的覆盖（§13.6）。
+func TestRunnersMarkBackgroundRules(t *testing.T) {
+	e := newEnv(t, map[string]string{"bg/pack.yaml": bgRule, "bg/prompts/handle.md": "---\nrun_as: main_session\ntimeout: 30m\n---\n处理 {item_id}\n", "cat/pack.yaml": reminderPack}, nil)
+	if got := Runners(e.loads); len(got) != 1 || got["bg/event_rules/run"] != "main_session" {
+		t.Fatalf("runners = %v", got)
+	}
+}
+
 // ACT-RULE-12：提醒类规则本人关掉后，内容变化保持本人的选择，不回退 observe、不产生告警；动作类仍回 observe（见 TestContentChangeFallsBackToObserve）。
 func TestReminderRuleKeepsOwnersChoiceOnContentChange(t *testing.T) {
 	e := newEnv(t, map[string]string{"cat/pack.yaml": reminderPack}, nil)

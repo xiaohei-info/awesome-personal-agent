@@ -82,6 +82,7 @@ var (
 		sect("persona_lang", func(p *kpolicy.Policy) *string { return &p.PersonaLang }),
 		sect("channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
 		sect("default_harness", func(p *kpolicy.Policy) *string { return &p.DefaultHarness }),
+		sect("main_session_launch", func(p *kpolicy.Policy) *kpolicy.MainSessionLaunch { return &p.MainSessionLaunch }),
 	}
 	allowlistSections = []section{
 		sect("forward_allowlist", func(p *kpolicy.Policy) *map[string][]string { return &p.ForwardAllowlist }),

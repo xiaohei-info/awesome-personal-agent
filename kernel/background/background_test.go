@@ -881,6 +881,90 @@ func TestWakeDeclarationLaunchesWakeRun(t *testing.T) {
 	}
 }
 
+// §13.6：main_session 的拉起方式 = 规则覆盖 ?? Agent 设置 ?? 声明初始值 ?? 无头；选了唤醒而声明不支持时按无头运行，
+// 不拒绝、事项不转 needs_input，原因写进 background.launched。换选择不需要重新提交或确认声明。
+func TestMainSessionLaunchChoice(t *testing.T) {
+	const rule = "bgr/event_rules/main"
+	for name, c := range map[string]struct {
+		ms        map[string]any
+		byHarness string
+		byRule    string
+		launch    string
+		from      string
+		fallback  bool
+	}{
+		"default headless":                 {nil, "", "", "headless", FromDefault, false},
+		"agent picks wake":                 {map[string]any{"wake": true}, "wake", "", "wake", FromAgent, false},
+		"rule overrides back to headless":  {map[string]any{"wake": true}, "wake", "headless", "headless", FromRule, false},
+		"wake chosen but not declared":     {map[string]any{}, "wake", "", "headless", FromAgent, true},
+		"rule picks wake but not declared": {nil, "", "wake", "headless", FromRule, true},
+		"old launch: wake is the initial":  {map[string]any{"launch": "wake"}, "", "", "wake", FromDeclaration, false},
+		"agent overrides old launch: wake": {map[string]any{"launch": "wake"}, "headless", "", "headless", FromAgent, false},
+		"wake supported, nothing chosen":   {map[string]any{"wake": true}, "", "", "headless", FromDefault, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t, 0)
+			e.setPolicy(func(p *policy.Policy) {
+				p.PermissionCap.Default, p.DefaultHarness = policy.PermEdit, "hx"
+				if c.byHarness != "" {
+					p.MainSessionLaunch.ByHarness["hx"] = c.byHarness
+				}
+				if c.byRule != "" {
+					p.MainSessionLaunch.ByRule[rule] = c.byRule
+				}
+			})
+			decl := map[string]any{"harness": "hx", "headless": map[string]any{"command": []string{"true"}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string]any{"edit": []string{}}}}
+			if c.ms != nil {
+				decl["main_session"] = c.ms
+			}
+			e.must(owner, "executor.register", decl)
+			e.auto("main")
+			e.gate.paused.Store(true) // 只看拉起时的决定
+			id := e.newItem("a", []string{"agent-ok"}, nil)
+			e.open(id)
+
+			rs := e.runList()
+			if len(rs) != 1 || rs[0].Run.Launch != c.launch || rs[0].Run.Runner != "main_session" {
+				t.Fatalf("runs = %+v, want one %s run", rs, c.launch)
+			}
+			ev := e.ofType(EvLaunched)
+			var p struct {
+				From     string `json:"launch_from"`
+				Fallback bool   `json:"launch_fallback"`
+			}
+			if len(ev) != 1 || json.Unmarshal(ev[0].Payload, &p) != nil || p.From != c.from || p.Fallback != c.fallback {
+				t.Fatalf("launched = %+v", ev)
+			}
+			if c.fallback != strings.Contains(ev[0].Reason, "no wake support") {
+				t.Fatalf("reason = %q", ev[0].Reason)
+			}
+			if len(e.ofType(EvRefused)) != 0 || e.item(id).Phase != domain.PhaseOpen {
+				t.Fatalf("must launch, not refuse: %s", e.item(id).Phase)
+			}
+		})
+	}
+}
+
+// task 运行者不受拉起方式的选择影响：永远无头运行，事件里没有 launch_from。
+func TestTaskRunnerIgnoresLaunchChoice(t *testing.T) {
+	e := setup(t, 0)
+	e.configure("receipt")
+	e.setPolicy(func(p *policy.Policy) {
+		p.MainSessionLaunch.ByHarness["hx"] = policy.LaunchWake
+		p.MainSessionLaunch.ByRule["bgr/event_rules/taskr"] = policy.LaunchWake
+	})
+	e.auto("taskr")
+	e.gate.paused.Store(true)
+	e.open(e.newItem("修复", []string{"taskr"}, map[string]any{"project": e.project("work-host.cli")}))
+	rs := e.runList()
+	if len(rs) != 1 || rs[0].Run.Runner != "task" || rs[0].Run.Launch != "headless" {
+		t.Fatalf("runs = %+v", rs)
+	}
+	if ev := e.ofType(EvLaunched); len(ev) != 1 || strings.Contains(string(ev[0].Payload), "launch_from") {
+		t.Fatalf("launched = %+v", ev)
+	}
+}
+
 func TestNewRequiresDependencies(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("New accepted empty options")

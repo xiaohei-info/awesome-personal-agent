@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/background"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
@@ -344,6 +345,7 @@ func TestTraceEventTypesMatchProducers(t *testing.T) {
 		evDisposed: kinbound.EvDisposed, evRequeued: kinbound.EvRequeued, evCaptured: kinbound.EvCaptured, evSpotReviewed: spotcheck.EvReviewed,
 		evFollowAttach: followmsg.EvAttached, evFollowDone: followmsg.EvProcessed, evFollowBack: followmsg.EvHandedBack, evFollowRelease: followmsg.EvReleased,
 		evObserved: rules.EvObserved, evDispatched: delegation.EvDispatched, evDispatchUpd: delegation.EvDispatchUpdated,
+		evBgLaunched: background.EvLaunched,
 	} {
 		if got != want {
 			t.Errorf("%q != %q", got, want)
@@ -378,6 +380,25 @@ func TestTraceGenerateCallIsNotARule(t *testing.T) {
 	}
 	if a := tr.Entries[2]; a.Who.Kind != WhoSystem {
 		t.Fatalf("alert %+v", a)
+	}
+}
+
+// 后台运行拉起的一行写明这次怎么做、来自哪一级设置；选了唤醒却改按无头运行时带 fallback（§13.6）。
+func TestTraceLaunchedSaysHowAndWhy(t *testing.T) {
+	e := traceEnv(t)
+	it := e.item("修登录", domain.PhaseOpen, "", 0, owner, "created")
+	rule := domain.Actor{Type: domain.ActorAgent, Principal: "rule:background-run/event_rules/handle", Via: domain.ViaRule}
+	e.do(func(tx *store.Tx) error {
+		_, err := eventlog.Append(tx, domain.Event{Type: background.EvLaunched, Object: it, Actor: rule, Reason: "rule x: background run",
+			Payload: json.RawMessage(`{"runner":"main_session","launch":"headless","launch_from":"agent","launch_fallback":true}`), Basis: &domain.Basis{RuleID: "background-run/event_rules/handle"}, At: t0.Add(time.Minute)})
+		return err
+	})
+	tr := e.trace(it, authz.LevelWeb)
+	if got := kinds(tr.Entries); got != "created,run" {
+		t.Fatalf("kinds %s", got)
+	}
+	if a := tr.Entries[1].Args; a["state"] != "launched" || a["launch"] != "headless" || a["from"] != "agent" || a["fallback"] != true || a["runner"] != "main_session" {
+		t.Fatalf("launched %+v", a)
 	}
 }
 

@@ -134,6 +134,37 @@ describe("设置 › Agent", () => {
     await waitFor(() => expect(s.puts.at(-1)).toMatchObject({ path: "/v1/settings/access-limits", body: { permission_cap: { default: "read", by_harness: { other: "edit", hermes: "full" } } } }));
   });
 
+  it("以 Agent 本人身份做事：没装唤醒插件时「在对话里」不可选并说明原因；默认单独后台会话", async () => {
+    mount(server({ live: [hermes(1, "active")] }).impl);
+    const c = within((await card()).getByRole("region", { name: "Agent 自己动手时在哪里做" }));
+    expect(c.getByRole("radio", { name: "单独开一个后台会话（不打扰对话）" })).toBeChecked();
+    expect(c.getByRole("radio", { name: "在和你的对话里接着做" })).toBeDisabled();
+    expect(c.getByText("Agent 没装唤醒插件")).toBeInTheDocument();
+  });
+
+  it("以 Agent 本人身份做事：声明支持唤醒时可选「在对话里」，保存只写这个 Agent 的选择，按规则的覆盖原样带回，不重新确认声明", async () => {
+    const live = hermes(1, "active");
+    (live.declaration as any).main_session = { wake: true };
+    const s = server({ live: [live] });
+    s.doc.main_session_launch = { by_harness: { other: "headless" }, by_rule: { "p/event_rules/r": "headless" } };
+    mount(s.impl);
+    const c = within((await card()).getByRole("region", { name: "Agent 自己动手时在哪里做" }));
+    expect(c.queryByText("Agent 没装唤醒插件")).toBeNull();
+    await userEvent.click(c.getByRole("radio", { name: "在和你的对话里接着做" }));
+    await userEvent.click(c.getByRole("button", { name: "保存Agent 自己动手时在哪里做" }));
+    await waitFor(() => expect(s.puts.at(-1)).toMatchObject({ path: "/v1/settings/policy",
+      body: { main_session_launch: { by_harness: { other: "headless", hermes: "wake" }, by_rule: { "p/event_rules/r": "headless" } } } }));
+    expect(writes(s, "/declarations")).toHaveLength(0);
+  });
+
+  it("以 Agent 本人身份做事：旧声明 launch: wake 没选过时显示为「在对话里」", async () => {
+    const live = hermes(1, "active");
+    (live.declaration as any).main_session = { launch: "wake" };
+    mount(server({ live: [live] }).impl);
+    const c = within((await card()).getByRole("region", { name: "Agent 自己动手时在哪里做" }));
+    expect(c.getByRole("radio", { name: "在和你的对话里接着做" })).toBeChecked();
+  });
+
   it("T14：六类默认都不勾、不签单；勾两类后保存只调一次替换路由，动作是并集映射，默认全部项目、长期、后台可用", async () => {
     const s = server({ live: [hermes(1, "active")] });
     mount(s.impl);

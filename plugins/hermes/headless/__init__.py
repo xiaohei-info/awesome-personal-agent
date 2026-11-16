@@ -18,9 +18,13 @@ _spec.loader.exec_module(run_context)
 
 def declaration():
     """declaration.json. Executors are not declared: Hermes registers them when it first delegates (design §6.17), and
-    approving a declaration no longer drops executors already in the list."""
+    approving a declaration no longer drops executors already in the list. It only says what this Agent can do: with
+    apa-wake turned on here (APA_WAKE_SESSION_KEY, see wake/README.md) it can also continue in the chat; which one to
+    use is the owner's choice in Web."""
     run_context.require_passthrough()
-    return json.loads((HERE / "declaration.json").read_text())
+    body = json.loads((HERE / "declaration.json").read_text())
+    body["main_session"]["wake"] = bool(os.environ.get("APA_WAKE_SESSION_KEY"))
+    return body
 
 
 def _declare(args, session_id=None, **_):

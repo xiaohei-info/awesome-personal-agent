@@ -113,10 +113,10 @@ const (
 	KAttachTo  = "attach_to" // 这条建议补到了 item
 	KProgress  = "progress"  // args: text
 	KDeadline  = "deadline_passed"
-	KDecision  = "decision" // args: state（requested、resolved）
-	KFollow    = "follow"   // 后续消息；args: message, subject, state（attached、processed、handed_back、released）
-	KObserved  = "observed" // 规则试运行；args: rule
-	KRun       = "run"      // Agent 后台运行；args: state（started、finished）
+	KDecision  = "decision"  // args: state（requested、resolved）
+	KFollow    = "follow"    // 后续消息；args: message, subject, state（attached、processed、handed_back、released）
+	KObserved  = "observed"  // 规则试运行；args: rule
+	KRun       = "run"       // Agent 后台运行；args: state（launched、started、finished）；launched 另有 runner、launch、from?、fallback?
 	KGenerated = "generated" // 写作模型的一次生成（如一句话摘要）；args: state（succeeded、failed）、template
 	KAlert     = "alert"     // 系统告警（详情在健康视图）
 	KDelegated = "delegated"
@@ -140,6 +140,7 @@ const (
 	evObserved      = "rule.observed"
 	evDispatched    = "delegation.dispatched"
 	evDispatchUpd   = "delegation.dispatch_updated"
+	evBgLaunched    = "background.launched"
 )
 
 // kernelInbound、kernelFollow 是入站与跟进消息归属代写事项时的操作者。
@@ -728,6 +729,20 @@ func (b builder) item(id string, fromMessage bool) ([]Entry, error) {
 			e.Kind, e.Mech = KObserved, true
 			if e.Who.Kind != WhoRule {
 				e.Who = Who{Kind: WhoRule, Name: ruleName(observedRule(en.Event.Payload))}
+			}
+		case t == evBgLaunched: // 这次怎么拉起、来自哪一级设置（§13.6），选了唤醒却改按无头运行时带 fallback
+			var lp struct {
+				Runner, Launch string
+				From           string `json:"launch_from"`
+				Fallback       bool   `json:"launch_fallback"`
+			}
+			_ = json.Unmarshal(en.Event.Payload, &lp)
+			e.Kind, e.Args = KRun, map[string]any{"state": "launched", "runner": lp.Runner, "launch": lp.Launch}
+			if lp.From != "" {
+				e.Args["from"] = lp.From
+			}
+			if lp.Fallback {
+				e.Args["fallback"] = true
 			}
 		case t == domain.EvRunStarted || t == domain.EvRunFinished:
 			var rp struct{ Category, State, Template string }

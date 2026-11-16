@@ -88,6 +88,9 @@ type State struct {
 	Hash  string `json:"hash"`
 	// Class 是规则类别（§14.8），只在读取时按当前已加载的能力包填写，不存账本；规则已不在加载的包里时为空。
 	Class string `json:"class,omitempty"`
+	// Runner 是规则拉起后台运行时的运行者（start_background_run 的 runner），同样只在读取时填写；不拉起后台运行的规则为空。
+	// 为 main_session 的规则可在 Web 覆盖拉起方式（§13.6）。
+	Runner string `json:"runner,omitempty"`
 }
 
 // 规则类别（§14.8）：提醒类开箱 auto，动作类初始 observe。由加载器从规则类型与动作推定，能力包不能自报。
@@ -103,6 +106,19 @@ func Classes(src PackSource) map[string]string {
 		out[d.Key] = ClassAction
 		if d.Reminder {
 			out[d.Key] = ClassReminder
+		}
+	}
+	return out
+}
+
+// Runners 返回当前已加载能力包里每条拉起后台运行的规则的运行者，键是规则键。
+func Runners(src PackSource) map[string]string {
+	out := map[string]string{}
+	for _, d := range defs(src) {
+		for _, a := range d.Do {
+			if r, _ := a["runner"].(string); a["action"] == "start_background_run" && r != "" {
+				out[d.Key] = r
+			}
 		}
 	}
 	return out

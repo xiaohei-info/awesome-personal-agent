@@ -43,6 +43,15 @@ def test_declare_submits_headless_part_via_apa_declare_stdin(fake_apa):
     assert body["headless"]["session"] == {"extract": "$.session_id"}
 
 
+def test_declare_offers_wake_only_when_apa_wake_is_on(fake_apa, monkeypatch):
+    monkeypatch.delenv("APA_WAKE_SESSION_KEY", raising=False)
+    load_headless()._declare({})
+    assert json.loads((fake_apa / "stdin.json").read_text())["main_session"] == {"wake": False}
+    monkeypatch.setenv("APA_WAKE_SESSION_KEY", "agent:main")
+    load_headless()._declare({})
+    assert json.loads((fake_apa / "stdin.json").read_text())["main_session"] == {"wake": True}
+
+
 def test_declare_passes_the_kernel_verdict_through(fake_apa, monkeypatch):
     monkeypatch.setenv("FAKE_EXIT", "2")
     monkeypatch.setenv("FAKE_STDERR", "bad declaration")

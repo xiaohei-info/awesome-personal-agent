@@ -259,9 +259,9 @@ func (a *api) listRules(w http.ResponseWriter, r *http.Request, _ *core.Principa
 		return err
 	}
 	l = rules.Visible(a.ps, l)
-	cls := rules.Classes(a.ps)
+	cls, run := rules.Classes(a.ps), rules.Runners(a.ps)
 	for i := range l {
-		l[i].Class = cls[l[i].Key]
+		l[i].Class, l[i].Runner = cls[l[i].Key], run[l[i].Key]
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"rules": l})
 }
@@ -283,6 +283,6 @@ func (a *api) setMode(w http.ResponseWriter, r *http.Request, p *core.Principal)
 	if err := json.Unmarshal(res.Value, &st); err != nil {
 		return err
 	}
-	st.Class = rules.Classes(a.ps)[st.Key]
+	st.Class, st.Runner = rules.Classes(a.ps)[st.Key], rules.Runners(a.ps)[st.Key]
 	return core.WriteJSON(w, http.StatusOK, st)
 }

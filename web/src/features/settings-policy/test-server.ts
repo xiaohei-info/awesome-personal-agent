@@ -6,7 +6,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "fix it; nothing was saved" });
 
 export const SECTIONS: Record<string, string[]> = {
-  "/v1/settings/policy": ["web_only", "disturb", "material_write", "persona", "persona_lang", "channels", "default_harness"],
+  "/v1/settings/policy": ["web_only", "disturb", "material_write", "persona", "persona_lang", "channels", "default_harness", "main_session_launch"],
   "/v1/settings/allowlists": ["forward_allowlist", "channel_answerers"],
   "/v1/settings/access-limits": ["permission_cap"],
 };
@@ -20,6 +20,7 @@ export function initialDoc(): Record<string, any> {
     persona_lang: "",
     channels: {},
     default_harness: "",
+    main_session_launch: { by_harness: {}, by_rule: {} },
     forward_allowlist: { telegram: ["alice"] },
     channel_answerers: {},
     permission_cap: { default: "read", by_harness: {} },
