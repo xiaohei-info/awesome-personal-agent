@@ -206,6 +206,17 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 			return err
 		}
 		mats = append(mats, dm, pm)
+		// 五个新段与按实例的取材窗口；窗口写进简报事项的 spec.since/until，下一份取它作起点（§7.3）。
+		w, lm, err := s.briefLedgerSections(ctx, c)
+		if err != nil {
+			return err
+		}
+		mats = append(mats, lm...)
+		if c.Bound {
+			if _, err := c.Do("item.update", map[string]any{"id": c.Item.ID, "spec": w, "reason": "rule " + c.Rule + ": brief window"}); err != nil {
+				return err
+			}
+		}
 	}
 	ip := instanceParams(c)
 	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs,

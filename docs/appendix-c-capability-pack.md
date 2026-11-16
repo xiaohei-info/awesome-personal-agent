@@ -424,7 +424,7 @@ default_instruction: |-
 用 apa item update 把 spec 写回事项。写回成功就是回执，直接结束；声明的字段没写全时事项转给本人（§8.4）。
 ```
 
-简报的资料文件除账本快照外，还带由内核读账本组出的几段材料，不调模型：`digest`（摘要出口 `then: digest` 的来源事件，每条只汇入一份简报一次，写进"知会"一节）、`planned`（按 `planned_for` 取的、计划今天或更早且未完成的事项），以及工作台能力迭代新增的 `schedule`（日程）、`proposals`（上一份简报以来的新增建议与未处置总数）、`decisions`（待决策）、`due_waiting`（到期与等待）、`activity`（当天活动）；`digest` 与 `proposals` 引用的来源事件另带按外发范围裁剪的原文文件。各段的取法见主文档 §7.3"简报的资料"。【规划中（v0.2.0）】上面的 `schedule_days`、不带 `sections[].project` 的 `result_fields` 与新的 `default_instruction` 随这些段一起实现；在那之前，内置包仍是每节必须有 `project` 的写法。
+简报的资料文件除账本快照外，还带由内核读账本组出的几段材料，不调模型：`digest`（摘要出口 `then: digest` 的来源事件，每条只汇入一份简报一次，写进"知会"一节）、`planned`（按 `planned_for` 取的、计划今天或更早且未完成的事项），以及工作台能力迭代新增的 `schedule`（日程）、`proposals`（上一份简报以来的新增建议与未处置总数）、`decisions`（待决策）、`due_waiting`（到期与等待）、`activity`（当天活动）；`digest` 与 `proposals` 引用的来源事件另带按外发范围裁剪的原文文件。各段的取法见主文档 §7.3"简报的资料"。
 
 建实例：`apa instance add brief --param schedule="0 8 * * 1-5"`，到期落为 Timer。到期后内核建好 `brief` 事项，任务型在这个事项上运行，harness 用 Web 设置的默认 harness，资料文件带实例参数（含项目范围），`instruction.txt` 是实例的 `instruction`，没写时是 `default_instruction`。实例由本人建或是开箱的默认安排，这条规则只写回自身事项，且运行不超过 Web 设置的权限上限，所以不走观察模式，省略 `mode`。Agent 还不能后台运行时这次到期跳过，记 `rule.skipped`，不建事项（主文档 §7.3）。
 
@@ -434,7 +434,7 @@ default_instruction: |-
 
 | 包 | 声明的内容 |
 |---|---|
-| `brief` | kind `brief`；实例参数（周期、项目范围、内容要求 `instruction`）；周期时钟规则；任务型提示词（带 `default_instruction`，经 `instruction_path` 读内容要求）；列表与卡片视图。开箱默认安排工作日 08:30 |
+| `brief` | kind `brief`；实例参数（周期、项目范围、内容要求 `instruction`）；周期时钟规则；任务型提示词（带 `default_instruction`，经 `instruction_path` 读内容要求；`result_fields` 为 `period` 与 `sections[].body`，每节有 `project` 或 `title` 之一）；实例参数 `schedule_days`；列表与卡片视图。开箱默认安排工作日 08:30 |
 | `review` | 实例参数（周期、项目范围、内容要求 `instruction`）；周期时钟规则；任务型提示词（带 `default_instruction`）；写回 `brief` kind，由 `spec.period` 区分周期。开箱默认安排每周五 17:30 |
 | `follow-up` | 跟进梯度时钟规则 `follow-up-interval`（`follow_up`，72 小时一轮，`remind_rounds: 2`，`defer_with: follow-up-defer`；规则 id 沿用 v0.1）；久未推进规则 `stale-check`（`stale`，每天检查，`stale_after: 14d`）；判断型提示词 `follow-up-defer`（是非题，上限 0.85，未定取"否"即照常提醒）。v0.1 的三选一判断型模板与逐级升级用的生成型、任务型模板移除 |
 | `decision-card` | 生成型提示词（决策卡片文案，选项按事项上的选项 id 对齐；一句话摘要；材料修订摘要）；判断型提示词 `delivery-defer`（是非题"这条决策可以晚点送吗"，`single_shot`，上限 0.85，未定取"否"；取代 v0.1 的三选一模板 `delivery-threshold`，"只留 Web 未读"这一去向不再由模型决定）与 `web-only-screening`（是非题，`single_shot`，下限 0.20，未定取"是"即升级）。消费方都是内核：触达（卡片文案、投递推迟，主文档 §7.4）、事项中心的摘要起草（一句话摘要、修订摘要，主文档 §6.3、§12.4）、决策（初筛，主文档 §14.4） |
@@ -444,5 +444,4 @@ default_instruction: |-
 | `inbound-triage` | 来源规则，按语义类型匹配，包内不出现工具名，适配器换了规则不用改（主文档 §9.7、附录 D）。沿用 v0.1 规则 id 的三条：`github-issue`（代码托管来源的 Issue 新建与打标签，`screen`，按仓库归项目）、`calendar-event`（日程新建与更新，`proposed`）、`mail-received`（邮件，`screen`，`project_by: draft`，`on_update: attach`）。新增的结构化规则：`reminder-due`（到期的提醒事项，`proposed`）、`agents-md-changed`（规范文件变化事件，`ignore`，已由规范检测消费）、`pr-activity`（PR 的合并、关闭与更新，`ignore`：能按关联键挂靠的已在规则之前挂靠，并刷新它建出的事项）、`pr-discussion`（PR 上的评论与评审，`ignore`，`on_update: attach`）、`issue-comment`（issue 上的评论，`screen`，`on_update: attach`）；评论与评审挂到已有事项时只记为挂靠消息，不改事项的标题、正文与摘要；issue 更新没有规则，交初筛。webhook 校验方案与字段映射（`github-issues`，以及评论与评审的 `github-issue-comments`、`github-pr-reviews`、`github-pr-review-comments`）。判断型提示词 `triage-screen`（是非题，下限 0.15、上限 0.60，未定取"是"，声明 `event_stats`）与 `capture-prescreen`（是非题，下限 0.10，未定取"是"；问"有没有需要记下的事，或与所列未关闭事项有关的进展"）；生成型提示词 `triage-draft`（标题、摘要、kind、项目、日期、推荐处置、`urgent`）与 `triage-extract`（一段内容抽出零到多条候选，每条与起草同一组字段并带 `refs`）。v0.1 的 `triage`（三选一）与 `triage-title` 模板移除 |
 | `delegation-verify` | 响应 `delegation.reported` 的事件规则，初始 `observe`；判断型提示词 `delegation-screen`（是非题"这份回执需要本人核实吗"，下限 0.20，未定取"是"）。命中后在父事项上生成决策请求交本人；拉起任务型用工具查证不在本版（主文档 §20.5） |
 | `routine` | kind `routine`（`spec.result`）；实例参数（`schedule`、`mode`、`title`、`instruction`、`access`、`output`；归属项目是实例自己的字段，见 C.10）；实例驱动的时钟规则（建事项，`mode: run` 时再调任务型；`mode: create_item` 时 `call_agent` 不执行）；任务型提示词 `run-routine`（正文只有固定模板，任务说明经 `instruction_path` 读取，声明 `result_fields`）；列表与卡片视图 |
-| brief（工作台能力迭代新增部分） | 【规划中（v0.2.0）】实例参数加 `schedule_days`；任务型提示词的 `result_fields` 改为 `period` 与 `sections[].body`（每节有 `project` 或 `title` 之一），正文加上新资料段与来源原文文件的读法，`default_instruction` 更新（C.13、主文档 §7.3）。实现时把这一行并回上面的 `brief` 行并去掉标记 |
 | inbound-triage（工作台能力迭代新增部分） | 【规划中（v0.2.0）】新增结构化规则 `reminder-open`（没有到期日的提醒事项 `reminder.open`，`proposed`）。实现时把这一行并回上面的 `inbound-triage` 行并去掉标记 |

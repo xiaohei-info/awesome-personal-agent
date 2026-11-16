@@ -32,6 +32,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
@@ -150,7 +151,7 @@ func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		items.Module, executors.Module, runner.Module, proc.Module, runidentity.Module, delegation.Module, materials.Module, summaries.Module, Module} {
+		items.Module, executors.Module, runner.Module, registry.Module, proc.Module, runidentity.Module, delegation.Module, materials.Module, summaries.Module, Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -593,6 +594,9 @@ func TestDeclaredResultFieldsDecideDone(t *testing.T) {
 					t.Fatalf("want needs_input: %s", it.Phase)
 				}
 				for _, f := range tc.want {
+					if tmpl == "write-brief" && f == "spec.sections[].project" {
+						continue // 简报的节可以只有 title（附录 C.13）：result_fields 只要求 body
+					}
 					if !strings.Contains(it.Ask.Question, f) {
 						t.Errorf("question must name %s: %s", f, it.Ask.Question)
 					}

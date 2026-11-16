@@ -62,6 +62,10 @@ func checkSchema(s map[string]any, path string) error {
 			if !schemaTypes[t] {
 				return fmt.Errorf("%s: unsupported type %v", path, v)
 			}
+		case "minimum", "maximum":
+			if _, ok := v.(float64); !ok {
+				return fmt.Errorf("%s: %s must be a number", path, key)
+			}
 		case "enum":
 			if _, ok := v.([]any); !ok {
 				return fmt.Errorf("%s: enum must be a list", path)
@@ -150,6 +154,14 @@ func validate(s map[string]any, v any, path string) error {
 		}
 		if !found {
 			return fmt.Errorf("%s: not in enum", path)
+		}
+	}
+	if f, ok := v.(float64); ok {
+		if m, ok := s["minimum"].(float64); ok && f < m {
+			return fmt.Errorf("%s: below minimum %v", path, m)
+		}
+		if m, ok := s["maximum"].(float64); ok && f > m {
+			return fmt.Errorf("%s: above maximum %v", path, m)
 		}
 	}
 	switch x := v.(type) {
