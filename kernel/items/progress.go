@@ -151,6 +151,10 @@ func TodayItemsAfter(tx *store.Tx, now time.Time, staleAfter time.Duration) (Tod
 		return l, err
 	}
 	today := Today(now)
+	imported, err := importedAt(tx)
+	if err != nil {
+		return l, err
+	}
 	for _, it := range all {
 		if it.PlannedFor != "" && it.PlannedFor <= today && active(it) {
 			l.Planned = append(l.Planned, it)
@@ -162,10 +166,43 @@ func TodayItemsAfter(tx *store.Tx, now time.Time, staleAfter time.Duration) (Tod
 			l.Pending = append(l.Pending, it)
 		}
 		if it.Phase == domain.PhaseOpen && (it.Kind == domain.KindTask || it.Kind == domain.KindCommitment) &&
-			now.Sub(it.UpdatedAt) > staleAfter && it.PlannedFor <= today {
+			now.Sub(laterOf(it.UpdatedAt, imported[it.ID])) > staleAfter && it.PlannedFor <= today {
 			l.Stale = append(l.Stale, it)
 		}
 	}
 	slices.SortStableFunc(l.Planned, func(a, b domain.Item) int { return strings.Compare(a.PlannedFor, b.PlannedFor) })
 	return l, nil
+}
+
+// importedAt 返回导入事项的实际写入时刻（items.imported 里的 at）；非导入事项不在表里。
+func importedAt(tx *store.Tx) (map[string]time.Time, error) {
+	r, err := tx.Query(`SELECT id, imported FROM items WHERE imported <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	out := map[string]time.Time{}
+	for r.Next() {
+		var id, raw string
+		if err := r.Scan(&id, &raw); err != nil {
+			return nil, err
+		}
+		var im struct {
+			At time.Time `json:"at"`
+		}
+		if err := json.Unmarshal([]byte(raw), &im); err != nil {
+			return nil, fmt.Errorf("items: %s: corrupt imported: %w", id, err)
+		}
+		out[id] = im.At
+	}
+	return out, r.Err()
+}
+
+// laterOf 取较晚者：久未推进从导入时刻与最后一次非导入变更中较晚的一个起算（§7.3）。
+// 事项的 updated_at 按事件的 at 折叠，导入事件的 at 是过去的原始时刻，所以与导入时刻取较晚者即可。
+func laterOf(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }

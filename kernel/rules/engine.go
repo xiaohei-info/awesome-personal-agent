@@ -176,7 +176,7 @@ func (e *Engine) pass(ctx context.Context) (int, error) {
 		if err != nil {
 			return err
 		}
-		if events, err = eventlog.Read(tx, cur, batch); err != nil {
+		if events, err = eventlog.ReadLive(tx, cur, batch); err != nil {
 			return err
 		}
 		if fires, err = loadFires(tx); err != nil {

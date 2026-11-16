@@ -33,7 +33,7 @@ func proposalStats(tx *store.Tx, sc Scope, now time.Time, window time.Duration) 
 	since := now.Add(-window)
 	var after int64
 	for {
-		page, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvItemPhaseChanged}, after, 500)
+		page, err := eventlog.Query(tx, eventlog.Filter{Type: domain.EvItemPhaseChanged, Live: true}, after, 500)
 		if err != nil {
 			return st, err
 		}

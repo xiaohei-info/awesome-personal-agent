@@ -277,7 +277,7 @@ func proposalOutcome(tx *store.Tx, subject string) (item, outcome string, err er
 	if ev.Item == "" {
 		return "", "", nil
 	}
-	es, err := eventlog.ReadObject(tx, ev.Item)
+	es, err := eventlog.ReadObjectLive(tx, ev.Item)
 	if err != nil {
 		return "", "", err
 	}

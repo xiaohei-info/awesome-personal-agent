@@ -59,7 +59,7 @@ func titleOf(typ string, payload json.RawMessage) string {
 func Read(tx *store.Tx, after int64, limit int) (Page, error) {
 	page := Page{Next: after}
 	for limit > 0 && len(page.Envelopes) < limit {
-		batch, err := eventlog.Read(tx, page.Next, limit)
+		batch, err := eventlog.ReadLive(tx, page.Next, limit)
 		if err != nil {
 			return Page{}, err
 		}

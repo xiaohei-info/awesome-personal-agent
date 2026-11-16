@@ -351,3 +351,68 @@ func TestDrainSendsNothingToExternalEndpointWhileScopeNotChosen(t *testing.T) {
 		t.Fatalf("after choosing full: requests = %d, want 1", n)
 	}
 }
+
+// 导入的事项不进摘要起草（§6.7 "现场"读法）：把一条事项的事件改记为导入写入，Drain 不为它调用模型，
+// 同账本里的普通事项照常起草。
+func TestDrainSkipsImportedItems(t *testing.T) {
+	reg := store.NewRegistry()
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
+		items.Module, materials.Module, Module} {
+		if err := reg.Register(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := store.Open(t.TempDir(), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	x := command.New(st, time.Now)
+	if err := errors.Join(projects.Register(x), items.Register(x, items.NewKinds()), materials.Register(x)); err != nil {
+		t.Fatal(err)
+	}
+	gen := &fakeGen{}
+	s, err := New(Options{Store: st, Exec: x, Gen: gen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(title string) string {
+		b, _ := json.Marshal(map[string]any{"title": title, "kind": "task", "phase": "open", "body": "正文"})
+		r, err := x.Do(bg, command.Request{Identity: owner, Command: "item.create", Input: b, Owner: "owner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ref struct{ ID string }
+		_ = json.Unmarshal(r.Value, &ref)
+		return ref.ID
+	}
+	hist, live := create("历史事项"), create("当下事项")
+	if err := st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE eventlog_event SET import_batch = 'imp_1', recorded_at = at WHERE object = ?`, hist)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Drain(bg); err != nil {
+		t.Fatal(err)
+	}
+	if len(gen.calls) != 1 {
+		t.Fatalf("only the live item may be drafted, got %d calls", len(gen.calls))
+	}
+	if err := st.View(bg, func(tx *store.Tx) error {
+		h, err := items.Get(tx, hist)
+		if err != nil {
+			return err
+		}
+		l, err := items.Get(tx, live)
+		if err != nil {
+			return err
+		}
+		if h.Summary != "" || l.Summary == "" {
+			t.Fatalf("imported summary %q, live summary %q", h.Summary, l.Summary)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

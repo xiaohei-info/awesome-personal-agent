@@ -184,7 +184,7 @@ func (a *Attention) Sync(tx *store.Tx) error {
 	var order []string
 	seen := map[string]bool{}
 	for {
-		es, err := eventlog.Read(tx, after, 500)
+		es, err := eventlog.ReadLive(tx, after, 500)
 		if err != nil {
 			return err
 		}

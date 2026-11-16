@@ -449,7 +449,7 @@ func changes(tx *store.Tx, after, head int64, project string) (ids []string, att
 	attached = map[string]bool{}
 	byMat := map[string]matChange{}
 	for after < head {
-		es, err := eventlog.Read(tx, after, 500)
+		es, err := eventlog.ReadLive(tx, after, 500)
 		if err != nil {
 			return nil, nil, false, nil, err
 		}

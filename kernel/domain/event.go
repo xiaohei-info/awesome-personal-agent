@@ -66,6 +66,10 @@ type Event struct {
 	Evidence    string          `json:"evidence,omitempty"`
 	Grant       string          `json:"grant,omitempty"` // 依据授权单写入时的授权单 id（§6.7、§14.5）
 	At          time.Time       `json:"at"`
+	// Imported 是导入批次 id，只有导入写下的事件才有；RecordedAt 是实际写入账本的时刻，只在与 At 不同时记录，即导入事件（§6.7）。
+	// 带 Imported 的事件只进账本与折叠，自动化一律走 eventlog 的"现场"读法。
+	Imported   string    `json:"imported,omitempty"`
+	RecordedAt time.Time `json:"recorded_at,omitzero"`
 }
 
 // 标准事件类型（附录 B.4）；对外事件类型只增不改。

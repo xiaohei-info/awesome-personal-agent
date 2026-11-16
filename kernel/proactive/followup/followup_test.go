@@ -798,3 +798,53 @@ func TestSettleValidationAndPackWithoutRule(t *testing.T) {
 		t.Fatalf("reminders=%d pending=%d", len(e.reminders(id)), e.pending())
 	}
 }
+
+// 导入的进展不重置跟进轮次（§7.3、§6.7 "现场"读法）：同一条 item.progress_added 按普通事件写入会把轮次清零，
+// 带导入标记写入则不动。
+func TestImportedProgressDoesNotResetRounds(t *testing.T) {
+	e := setup(t, false)
+	id := e.waiting(domain.WaitingExternal, "装修公司报价")
+	e.round() // 第一轮提醒后才有轮次记录
+	rounds := func() (n int64) {
+		e.t.Helper()
+		if err := e.st.View(bg, func(tx *store.Tx) error {
+			r, err := tx.Query(`SELECT rounds FROM followup_state WHERE item = ?`, id)
+			if err != nil {
+				return err
+			}
+			defer r.Close()
+			if !r.Next() {
+				t.Fatal("follow-up state missing")
+			}
+			return r.Scan(&n)
+		}); err != nil {
+			e.t.Fatal(err)
+		}
+		return n
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE followup_state SET rounds = 2 WHERE item = ?`, id)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	progress := func(batch string) {
+		t.Helper()
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemProgressAdded, Object: id, Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Payload: json.RawMessage(`{}`), Imported: batch}); err != nil {
+				return err
+			}
+			return e.svc.Sync(tx)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	progress("imp_1")
+	if got := rounds(); got != 2 {
+		t.Fatalf("imported progress reset rounds to %d", got)
+	}
+	progress("")
+	if got := rounds(); got != 0 {
+		t.Fatalf("control: live progress must reset rounds, got %d", got)
+	}
+}

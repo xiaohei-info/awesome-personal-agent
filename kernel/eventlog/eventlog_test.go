@@ -359,3 +359,121 @@ func TestQueryFiltersByActorObjectType(t *testing.T) {
 		}
 	}
 }
+
+func imp(typ, obj, batch string) domain.Event {
+	e := ev(typ, obj)
+	e.Imported, e.At = batch, time.Date(2024, 3, 1, 9, 0, 0, 0, time.UTC)
+	return e
+}
+
+func TestImportedMarkersRoundTripAndPlainEventsStayUnmarked(t *testing.T) {
+	s := open(t)
+	rec := time.Date(2026, 11, 16, 8, 0, 0, 0, time.UTC)
+	i := imp("item.created", "x", "imp_1")
+	i.RecordedAt = rec
+	appendAll(t, s, ev("item.created", "x"), i)
+	got := read(t, s, 0, 10)
+	if p := got[0].Event; p.Imported != "" || !p.RecordedAt.IsZero() {
+		t.Fatalf("plain event must carry no import marks: %+v", p)
+	}
+	if p := got[1].Event; p.Imported != "imp_1" || !p.RecordedAt.Equal(rec) || !p.At.Equal(i.At) {
+		t.Fatalf("imported marks lost: %+v", p)
+	}
+	if b, _ := json.Marshal(got[0].Event); strings.Contains(string(b), "imported") || strings.Contains(string(b), "recorded_at") {
+		t.Fatalf("plain event JSON changed: %s", b)
+	}
+}
+
+func TestImportedWithoutRecordedAtGetsWriteTime(t *testing.T) {
+	s := open(t)
+	appendAll(t, s, imp("item.created", "x", "imp_1"))
+	e := read(t, s, 0, 1)[0].Event
+	if e.RecordedAt.IsZero() || !e.RecordedAt.After(e.At) {
+		t.Fatalf("recorded_at must default to the actual write time: %+v", e)
+	}
+}
+
+func TestRecordedAtWithoutImportedIsRejected(t *testing.T) {
+	s := open(t)
+	e := ev("item.created", "x")
+	e.RecordedAt = time.Now()
+	err := s.Update(ctx, func(tx *store.Tx) error { _, err := Append(tx, e); return err })
+	if !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("want ErrInvalidEvent, got %v", err)
+	}
+}
+
+// 全量读法看得见导入事件，"现场"读法跳过它们；游标语义不变，尾部被跳过的导入事件不让订阅方卡住。
+func TestLiveReadsSkipImportedWhileFullReadsKeepThem(t *testing.T) {
+	s := open(t)
+	seqs := appendAll(t, s, ev("a", "o1"), imp("b", "o1", "imp_1"), ev("c", "o2"), imp("d", "o2", "imp_1"))
+	err := s.View(ctx, func(tx *store.Tx) error {
+		full, err := Read(tx, 0, 10)
+		if err != nil || len(full) != 4 {
+			t.Fatalf("full read: %d %v", len(full), err)
+		}
+		live, err := ReadLive(tx, 0, 10)
+		if err != nil || len(live) != 2 || live[0].Event.Seq != seqs[0] || live[1].Event.Seq != seqs[2] {
+			t.Fatalf("live read: %+v %v", live, err)
+		}
+		if page, _ := ReadLive(tx, 0, 1); len(page) != 1 || page[0].Event.Seq != seqs[0] {
+			t.Fatalf("limit applies after filtering: %+v", page)
+		}
+		if tail, _ := ReadLive(tx, seqs[2], 10); len(tail) != 0 {
+			t.Fatalf("trailing imported event must not be returned: %+v", tail)
+		}
+		if o, _ := ReadObject(tx, "o2"); len(o) != 2 {
+			t.Fatalf("ReadObject is the full read: %d", len(o))
+		}
+		if o, _ := ReadObjectLive(tx, "o2"); len(o) != 1 || o[0].Event.Type != "c" {
+			t.Fatalf("ReadObjectLive: %+v", o)
+		}
+		if n, _ := ReadLive(tx, 0, 0); n != nil {
+			t.Fatal("limit 0 reads nothing")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestQueryFilterLiveAndImportedBatch(t *testing.T) {
+	s := open(t)
+	appendAll(t, s, ev("a", "o"), imp("b", "o", "imp_1"), imp("c", "o", "imp_2"))
+	err := s.View(ctx, func(tx *store.Tx) error {
+		count := func(f Filter) int {
+			es, err := Query(tx, f, 0, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if desc, _ := QueryBefore(tx, f, 0, 10); len(desc) != len(es) {
+				t.Fatalf("asc/desc disagree for %+v", f)
+			}
+			return len(es)
+		}
+		for _, c := range []struct {
+			f    Filter
+			want int
+		}{{Filter{}, 3}, {Filter{Live: true}, 1}, {Filter{Imported: "imp_1"}, 1}, {Filter{Imported: "imp_2", Object: "o"}, 1}, {Filter{Imported: "imp_1", Live: true}, 0}} {
+			if got := count(c.f); got != c.want {
+				t.Fatalf("%+v: got %d want %d", c.f, got, c.want)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTombstoneKeepsImportMarks(t *testing.T) {
+	s := open(t)
+	appendAll(t, s, imp("b", "o", "imp_1"))
+	if err := s.Update(ctx, func(tx *store.Tx) error { _, err := Tombstone(tx, "o"); return err }); err != nil {
+		t.Fatal(err)
+	}
+	if e := read(t, s, 0, 1)[0]; !e.Tombstone || e.Event.Imported != "imp_1" || e.Event.RecordedAt.IsZero() {
+		t.Fatalf("envelope marks must survive tombstoning: %+v", e)
+	}
+}

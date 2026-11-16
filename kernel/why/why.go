@@ -36,7 +36,9 @@ type Step struct {
 	ChainDepth  int             `json:"chain_depth"`
 	Basis       *domain.Basis   `json:"basis,omitempty"`
 	ResolvedVia string          `json:"resolved_via,omitempty"`
-	Grant       string          `json:"grant,omitempty"` // 依据授权单写入时的授权单 id，属授权依据，各级可见
+	Grant       string          `json:"grant,omitempty"`       // 依据授权单写入时的授权单 id，属授权依据，各级可见
+	Imported    string          `json:"imported,omitempty"`    // 导入批次 id，只有导入事件才有；信封字段，各级可见
+	RecordedAt  string          `json:"recorded_at,omitempty"` // 导入事件实际写入账本的时刻
 	Reason      string          `json:"reason,omitempty"`
 	Payload     json.RawMessage `json:"payload,omitempty"`
 	Evidence    string          `json:"evidence,omitempty"`
@@ -199,7 +201,10 @@ func judgmentOf(tx *store.Tx, en eventlog.Entry) (*Judgment, error) {
 func StepOf(en eventlog.Entry, l authz.Level) Step {
 	e, vis := en.Event, visible(l)
 	s := Step{Seq: e.Seq, Type: e.Type, Object: e.Object, Actor: e.Actor, At: e.At.Format("2006-01-02T15:04:05.999999999Z07:00"),
-		ChainDepth: e.ChainDepth, Basis: e.Basis, ResolvedVia: e.ResolvedVia, Grant: e.Grant, Tombstone: en.Tombstone}
+		ChainDepth: e.ChainDepth, Basis: e.Basis, ResolvedVia: e.ResolvedVia, Grant: e.Grant, Imported: e.Imported, Tombstone: en.Tombstone}
+	if !e.RecordedAt.IsZero() {
+		s.RecordedAt = e.RecordedAt.Format("2006-01-02T15:04:05.999999999Z07:00")
+	}
 	if vis.reason {
 		s.Reason = e.Reason
 	}

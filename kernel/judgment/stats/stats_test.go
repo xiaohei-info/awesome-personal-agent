@@ -293,3 +293,23 @@ func TestTemplateNameFilterMatchesPackQualified(t *testing.T) {
 		}
 	}
 }
+
+// 导入的事件不进统计（§6.7 "现场"读法）：同样的接受，事项的变更事件带导入标记后不再计入采纳率。
+func TestAcceptanceIgnoresImportedDecisions(t *testing.T) {
+	e := newEnv(t)
+	high, _, _ := e.seedJRC()
+	f := Filter{Use: "inbound_screen", Template: "triage-screen", Source: "src_1"}
+	e.do("proposal.accept", map[string]any{"id": high})
+	if r := e.stats(f).Rates[0]; !near(r.Acceptance, 1) {
+		t.Fatalf("control: live acceptance counts: %+v", r)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE eventlog_event SET import_batch = 'imp_1', recorded_at = at WHERE object = ? AND type = ?`, high, domain.EvItemPhaseChanged)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.stats(f).Rates[0]; r.Acceptance != 0 {
+		t.Fatalf("imported decision must not count: %+v", r)
+	}
+}

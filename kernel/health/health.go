@@ -410,7 +410,7 @@ func handled(tx *store.Tx, obj string, seq int64) (bool, error) {
 	}
 	after := seq
 	for {
-		es, err := eventlog.Query(tx, eventlog.Filter{Object: obj}, after, 500)
+		es, err := eventlog.Query(tx, eventlog.Filter{Object: obj, Live: true}, after, 500)
 		if err != nil || len(es) == 0 {
 			return false, err
 		}
