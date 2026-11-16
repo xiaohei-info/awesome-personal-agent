@@ -2,8 +2,10 @@ package sources
 
 import (
 	"encoding/json"
+	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +101,31 @@ func TestSenderForMatchesDeclaredTypes(t *testing.T) {
 	for _, c := range cases {
 		if got := c.d.SenderFor(c.typ); got != c.want {
 			t.Errorf("%s %s: got %s, want %s", c.d.Program, c.typ, got, c.want)
+		}
+	}
+}
+
+// content 段可选，目前只有 attachments: fetch；写了别的值是构建缺陷。仓库自带的程序没有实测过取回（MEAS-RAW-ATTACH），都不声明。
+func TestContentSectionAcceptsOnlyFetch(t *testing.T) {
+	var d Declaration
+	dec := yaml.NewDecoder(strings.NewReader("program: x\ncontent:\n  attachments: fetch\n"))
+	dec.KnownFields(true)
+	if err := dec.Decode(&d); err != nil || !d.FetchesAttachments() || validContent(d.Content) != nil {
+		t.Fatalf("fetch declaration: %+v err=%v", d, err)
+	}
+	if (Declaration{}).FetchesAttachments() || validContent(Content{}) != nil {
+		t.Fatal("no content section means no fetch")
+	}
+	if validContent(Content{Attachments: "auto"}) == nil {
+		t.Fatal("unknown attachments value must be rejected")
+	}
+	ds, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range ds {
+		if b.FetchesAttachments() {
+			t.Errorf("%s declares fetch before MEAS-RAW-ATTACH confirms it", b.Program)
 		}
 	}
 }

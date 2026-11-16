@@ -752,3 +752,31 @@ func TestRecoverRemovesTheContextFileOfADeadRun(t *testing.T) {
 		t.Fatalf("context file survived recovery: %v", err)
 	}
 }
+
+// StdoutLimit 模式（来源程序 fetch 取回附件）：stdout 是不透明字节，原样整段交回（含 NUL、无换行结尾）；
+// 超限时标明 overflow 并只留限内的字节，不按行裁。
+func TestRawStdoutKeepsBinaryAndFlagsOverflow(t *testing.T) {
+	h := newHarness(t, 1, 2, Options{})
+	enqueueRaw := func(target string, limit int, script string) Result {
+		err := h.st.Update(ctx, func(tx *store.Tx) error {
+			_, err := Enqueue(tx, Request{
+				Run:  domain.Run{Category: domain.RunSource, Target: target, TimeoutSec: 30},
+				Spec: Spec{Command: []string{"/bin/sh", "-c", script}, StdoutLimit: limit},
+			}, time.Now())
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.dispatch()
+		return h.next()
+	}
+	res := enqueueRaw("ok", 64, `printf 'a\0b\nc'`)
+	if res.Overflow || string(res.Stdout) != "a\x00b\nc" {
+		t.Fatalf("overflow=%v stdout=%q", res.Overflow, res.Stdout)
+	}
+	res = enqueueRaw("big", 10, `head -c 1000 /dev/zero | tr '\0' 'x'`)
+	if !res.Overflow || res.Run.State != domain.RunSucceeded || string(res.Stdout) != "xxxxxxxxxx" {
+		t.Fatalf("overflow=%v state=%s stdout=%q", res.Overflow, res.Run.State, res.Stdout)
+	}
+}

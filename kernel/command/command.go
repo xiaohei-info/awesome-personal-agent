@@ -150,6 +150,9 @@ type Request struct {
 	Grant         string // 第二档的另一条依据：授权单 id；与 Evidence 不能同时携带
 	Owner         string
 	WebURL        string
+	// Preflight 为真时只跑到校验为止：认证、授权与 Validate 通过则返回空结果，不写账本（授权被拒的留痕照常）。
+	// 给"先做一件耗时的事、再提交命令"的调用方用，让没有权限的调用者触发不了那件事（取回附件，§7.6）。
+	Preflight bool
 }
 
 // Ctx 是 Apply 的上下文。
@@ -441,6 +444,9 @@ func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
 		res, commit, err = x.pipeline(tx, spec, req, &tr)
 		return err
 	})
+	if err == errPreflight {
+		return Result{}, nil
+	}
 	if err != nil {
 		rj, isRej := err.(*rejected)
 		orig := err
@@ -647,6 +653,9 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 			return Result{}, Commit{}, err
 		}
 	}
+	if req.Preflight {
+		return Result{}, Commit{}, errPreflight
+	}
 	// 规则动作必须继承（§14.9）；只有本人显式发起才开新链路。
 	if caller.Actor.Via == domain.ViaRule && req.Chain.Mode == ChainAuto {
 		return Result{}, Commit{}, invalid("rule action must inherit chain depth from a source object")
@@ -731,6 +740,9 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 	}
 	return out, Commit{Command: spec.Name, Actor: caller.Actor, Object: obj.ID, Seqs: live, Input: req.Input, Value: out.Value}, nil
 }
+
+// errPreflight 让预检在校验通过后回滚事务；Do 把它当作成功。
+var errPreflight = errors.New("command: preflight passed")
 
 // lastOKKey 是 Receipt 命令"最近成功"标记的键；含 NUL，HTTP 头与 CLI 参数都带不出来，不会与调用方的幂等键冲突。
 const lastOKKey = "\x00last-ok"

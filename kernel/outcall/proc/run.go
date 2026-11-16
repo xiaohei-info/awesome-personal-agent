@@ -104,6 +104,9 @@ type Spec struct {
 	// ContextName 是运行上下文文件名，默认运行 id。续接同一会话时沿用上一次运行的（Record.ContextName）：
 	// harness 在建会话时冻结客户端环境，续接后工具侧拿到的还是原来那条路径。
 	ContextName string `json:"context_name,omitempty"`
+	// StdoutLimit 大于 0 表示 stdout 是不透明的字节（来源程序 fetch 模式取回的附件，§9.2）：整段保留到该字节数，
+	// 不按行切、不裁末尾；超过即 Result.Overflow，超出部分丢弃。
+	StdoutLimit int `json:"stdout_limit,omitempty"`
 }
 
 // Request 是入队请求。Run.ID 为空时自动生成；State 总是被置为 queued。

@@ -51,6 +51,8 @@ const (
 	CmdWebhookKey    = "source.webhook_key"
 	CmdWebhookRevoke = "source.webhook_revoke"
 	CmdReplay        = "source.replay"
+	// CmdFetchAttachment 记取回的附件：本人在 Web 或 delegate 附本人原话发起（§7.6、§14.5）。
+	CmdFetchAttachment = "source.fetch_attachment"
 )
 
 // 事件类型：只记机制信息，不含密钥与 payload。
@@ -59,6 +61,8 @@ const (
 	EvWebhookRotated = "source.webhook_key_rotated"
 	EvWebhookRevoked = "source.webhook_key_revoked"
 	EvReplayed       = "source.replay_requested"
+	// EvAttachmentFetched 是内部审计事件（不进对外事件类型表）：载荷 {"event", "n", "name", "blob", "size"}，不含附件内容。
+	EvAttachmentFetched = "source.attachment_fetched"
 )
 
 // webhookKeyPrefix 是 kernel/auth 签发 webhook 接收密钥的明文前缀（auth 未导出它）。
@@ -115,6 +119,11 @@ type Declared struct {
 	Sender func(s domain.Source) Sender
 	// SelfSender 运行来源程序的 identity 模式，返回本人身份（§9.2）。
 	SelfSender func(ctx context.Context, s domain.Source) (string, error)
+	// CanFetch 报告来源的程序是否在接入声明里写了 content.attachments: fetch（附录 D.8）；nil 等于都不支持。
+	CanFetch func(s domain.Source) bool
+	// FetchAttachment 经外呼调用器运行来源程序的 fetch 模式，返回第 n 个附件的字节（§7.6）：超时 60 秒、不超过 32 MiB；
+	// 运行失败、超时与超限返回 fetch_failed（502）。
+	FetchAttachment func(ctx context.Context, s domain.Source, ev domain.SourceEvent, n int, att runner.AttachmentRef) ([]byte, error)
 	// BlobsDir 是内容寻址附件目录，GET /storage 据此算附件占用；空串按没有附件算。
 	BlobsDir string
 }
@@ -156,6 +165,8 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
 		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
 		{Name: CmdReplay, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
+		{Name: CmdFetchAttachment, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, KeepVersion: true,
+			Validate: a.validateFetch, Apply: a.applyFetch},
 	} {
 		if err := x.Register(s); err != nil {
 			return nil, err
@@ -176,6 +187,7 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/events", Handler: readable(a.events)})
 		r.Handle(core.Route{Method: "GET", Path: "/source-events/{id}", Handler: readable(a.sourceEvent)})
 		r.Handle(core.Route{Method: "GET", Path: "/storage", Handler: readable(a.storage)})
+		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/attachments/{n}/fetch", MaxBody: 1 << 10, Handler: a.fetchAttachment})
 		r.Handle(core.Route{Method: "GET", Path: "/sources/{id}/rejects", Handler: readable(a.rejects)})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/propose", MaxBody: 1 << 10, Handler: a.propose})
 		r.Handle(core.Route{Method: "POST", Path: "/source-events/{id}/ignore", MaxBody: 1 << 10, Handler: a.ignoreOne})
@@ -232,6 +244,15 @@ func (a *api) run(r *http.Request, p *core.Principal, cmd string, in map[string]
 		req.IdemKey = r.Header.Get(IdempotencyHeader)
 	}
 	return a.x.Do(r.Context(), req)
+}
+
+// runInput 以结构体输入执行命令；preflight 为真时只做认证、授权与校验，不写账本。
+func (a *api) runInput(r *http.Request, p *core.Principal, cmd string, in any, preflight bool) (command.Result, error) {
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return command.Result{}, err
+	}
+	return a.x.Do(r.Context(), command.Request{Identity: p.Identity, Command: cmd, Input: raw, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL, Preflight: preflight})
 }
 
 func (a *api) source(r *http.Request, id string) (s domain.Source, err error) {

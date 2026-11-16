@@ -40,7 +40,7 @@ export const SESSION_KIND = ["direct", "group", "unknown"] as const;
 /** 错误码：kernel/domain/errors.go Code。models_paused 由「暂停模型」改动新增 */
 export const ERROR_CODE = [
   "invalid_request", "unauthenticated", "permission_denied", "web_only", "executor_not_allowed", "risk_screening_pending",
-  "basis_required", "session_not_direct", "not_found", "conflict", "login_locked", "internal", "models_paused",
+  "basis_required", "session_not_direct", "not_found", "conflict", "login_locked", "internal", "models_paused", "fetch_failed",
 ] as const;
 /** 错误码里只说了类别、要靠服务端 why 才说得清的：显示「类别：why」 */
 export const GENERIC_ERROR: readonly string[] = ["invalid_request", "conflict", "internal"];
@@ -150,7 +150,7 @@ export const EVENT_INTERNAL = [
   "followmsg.attached", "followmsg.processed", "followmsg.handed_back", "followmsg.released", "executor.declared",
   "executor.confirmed", "executor.rejected", "executor.changed", "executor.removed", "source.registered", "source.updated",
   "source.enabled", "source.disabled", "source.renamed", "item.deleted", "run.credential_exchanged", "timer.fired", "credential.assigned",
-  "agents_md.rendered", "background.launched", "background.refused", "background.skipped", "delegation.dispatched", "delegation.dispatch_updated", "executor.enrolled", "followup.deferred", "followup.reminded", "inbound.spot_reviewed", "purge.executed", "resume.launched", "resume.refused", "resume.session_lost", "rule.skipped", "wake.lease_opened", "wake.lease_released", "source.replay_requested", "source.webhook_key_created", "source.webhook_key_revoked", "source.webhook_key_rotated", "source.content_purged",
+  "agents_md.rendered", "background.launched", "background.refused", "background.skipped", "delegation.dispatched", "delegation.dispatch_updated", "executor.enrolled", "followup.deferred", "followup.reminded", "inbound.spot_reviewed", "purge.executed", "resume.launched", "resume.refused", "resume.session_lost", "rule.skipped", "wake.lease_opened", "wake.lease_released", "source.replay_requested", "source.webhook_key_created", "source.webhook_key_revoked", "source.webhook_key_rotated", "source.content_purged", "source.attachment_fetched",
   "connection.created", "connection.configured", "connection.enabled", "connection.disabled", "connection.renamed", "connection.removed",
 ] as const;
 

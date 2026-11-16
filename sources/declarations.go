@@ -32,8 +32,21 @@ type Declaration struct {
 	By                string          `yaml:"by"`    // 按 config 的这个字段区分实例
 	Names             map[string]Text `yaml:"names"` // By 字段的取值 → 名字模板，优先于 Name
 	Default           Text            `yaml:"default"`
-	Sender            Sender          `yaml:"sender"` // 发件人是否可信（§9.1），必填
+	Sender            Sender          `yaml:"sender"`  // 发件人是否可信（§9.1），必填
+	Content           Content         `yaml:"content"` // 原文取回能力（附录 D.8），可选
 }
+
+// Content 是接入声明的可选 content 段。
+type Content struct {
+	// Attachments 为 fetch 时，程序支持 fetch 模式：按清单里的句柄取回附件（主文档 §9.2）。不写即不支持。
+	Attachments string `yaml:"attachments"`
+}
+
+// FetchesAttachments 报告程序是否声明了附件取回。
+func (d Declaration) FetchesAttachments() bool { return d.Content.Attachments == AttachmentsFetch }
+
+// AttachmentsFetch 是 content.attachments 唯一的取值。
+const AttachmentsFetch = "fetch"
 
 // 发件人信任的取值（§9.1）：声明的结论只有前两种；Types 可再把某类事件标为不带发件人。
 const (
@@ -63,6 +76,13 @@ func (d Declaration) SenderFor(eventType string) string {
 		}
 	}
 	return out
+}
+
+func validContent(c Content) error {
+	if c.Attachments != "" && c.Attachments != AttachmentsFetch {
+		return fmt.Errorf("content.attachments must be %q or empty, got %q", AttachmentsFetch, c.Attachments)
+	}
+	return nil
 }
 
 func validSender(s Sender) error {
@@ -115,6 +135,9 @@ func Load() ([]Declaration, error) {
 		}
 		if (d.By == "") != (len(d.Names) == 0) {
 			return nil, fmt.Errorf("sources: %s: by and names go together", n)
+		}
+		if err := validContent(d.Content); err != nil {
+			return nil, fmt.Errorf("sources: %s: %w", n, err)
 		}
 		if err := validSender(d.Sender); err != nil {
 			return nil, fmt.Errorf("sources: %s: %w", n, err)

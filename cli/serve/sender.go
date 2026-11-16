@@ -74,7 +74,7 @@ func signedMapping(ld *kpacks.Loader, c webhookConfig) bool {
 	return false
 }
 
-// identityFetcher 经外呼调用器运行来源程序的 identity 模式（§9.2），同步等结果；结果不落事件。
+// identityFetcher 经外呼调用器运行来源程序的 identity 与 fetch 模式（§9.2），同步等结果；结果不落事件。
 type identityFetcher struct {
 	st   *store.Store
 	disp *proc.Dispatcher
@@ -86,7 +86,7 @@ type identityFetcher struct {
 
 // deliver 截下 identity 运行的结果；不是它的返回 false。
 func (f *identityFetcher) deliver(res proc.Result) bool {
-	if res.Run.Category != domain.RunSource || !strings.HasPrefix(res.Run.Target, runner.IdentityPrefix) {
+	if res.Run.Category != domain.RunSource || !strings.HasPrefix(res.Run.Target, runner.IdentityPrefix) && !strings.HasPrefix(res.Run.Target, runner.FetchPrefix) {
 		return false
 	}
 	f.mu.Lock()
@@ -103,6 +103,15 @@ func (f *identityFetcher) Fetch(ctx context.Context, s domain.Source) (string, e
 	if err != nil {
 		return "", err
 	}
+	res, err := f.run(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return identityOf(res)
+}
+
+// run 入队一次运行并同步等它的终态结果。
+func (f *identityFetcher) run(ctx context.Context, req proc.Request) (proc.Result, error) {
 	ch := make(chan proc.Result, 1)
 	f.mu.Lock()
 	if f.waiting == nil {
@@ -112,17 +121,50 @@ func (f *identityFetcher) Fetch(ctx context.Context, s domain.Source) (string, e
 	f.mu.Unlock()
 	defer func() { f.mu.Lock(); delete(f.waiting, req.Run.ID); f.mu.Unlock() }()
 	if err := f.st.Update(ctx, func(tx *store.Tx) error { _, err := proc.Enqueue(tx, req, clock.Now()); return err }); err != nil {
-		return "", err
+		return proc.Result{}, err
 	}
 	if err := f.disp.Dispatch(ctx); err != nil {
-		return "", err
+		return proc.Result{}, err
 	}
 	select {
 	case res := <-ch:
-		return identityOf(res)
+		return res, nil
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return proc.Result{}, ctx.Err()
 	}
+}
+
+// FetchAttachment 运行来源程序的 fetch 模式取回第 n 个附件（§7.6）。失败、超时与超限都是 fetch_failed，原因取自程序的 stderr 末行。
+func (f *identityFetcher) FetchAttachment(ctx context.Context, s domain.Source, ev domain.SourceEvent, n int, att runner.AttachmentRef) ([]byte, error) {
+	req, err := f.rn.FetchPlan(s, ev, n, att, clock.Now())
+	if err != nil {
+		return nil, err
+	}
+	res, err := f.run(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case res.Overflow:
+		return nil, fetchFailed("the attachment is larger than the 32 MiB limit")
+	case res.Run.State != domain.RunSucceeded:
+		why := res.Reason
+		if line := lastLine(res.Stderr); line != "" {
+			why = line
+		}
+		return nil, fetchFailed("the source program could not fetch it: " + why)
+	}
+	return res.Stdout, nil
+}
+
+func fetchFailed(why string) error {
+	return domain.NewError(domain.CodeFetchFailed, why, "check that the message still exists in the source, or open the original message instead")
+}
+
+// lastLine 是 stderr 的最后一行非空文本（程序以 stderr 的一句话说明失败原因，§9.2）。
+func lastLine(b []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // identityOf 取 stdout 末行的 {"sender"}；运行失败或没有给出时报错，前端据此不预填。

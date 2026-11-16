@@ -55,6 +55,7 @@ type AttachmentRef struct {
 	Size      int64  `json:"size"`
 	Inline    bool   `json:"inline,omitempty"`
 	Ref       string `json:"ref,omitempty"`
+	Blob      string `json:"blob,omitempty"` // 本人取回之后才有：内容寻址附件的引用 apa://blob/<hash>（§7.6）
 }
 
 // Missing 是来源程序自报没能取到的一部分与原因。

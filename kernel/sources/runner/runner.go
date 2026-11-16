@@ -501,7 +501,7 @@ func orElse(a, b string) string {
 // 非来源类别的 Run 原样忽略。
 func (r *Runner) Handle(ctx context.Context, res proc.Result) error {
 	run := res.Run
-	if run.Category != domain.RunSource || strings.HasPrefix(run.Target, IdentityPrefix) {
+	if run.Category != domain.RunSource || strings.HasPrefix(run.Target, IdentityPrefix) || strings.HasPrefix(run.Target, FetchPrefix) {
 		return nil
 	}
 	in := resultIn{SourceID: run.Target, RunID: run.ID, FinishedAt: r.o.Now()}

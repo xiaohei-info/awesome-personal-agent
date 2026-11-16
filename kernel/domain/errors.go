@@ -16,6 +16,7 @@ const (
 	CodeConflict             Code = "conflict"               // 409 → 6
 	CodeModelsPaused         Code = "models_paused"          // 409 → 6：本人暂停了模型，需要模型的本人操作被拒（§8.7）
 	CodeLoginLocked          Code = "login_locked"           // 429 → 1：登录被限速或锁定（§14.13），带 Retry-After
+	CodeFetchFailed          Code = "fetch_failed"           // 502 → 1：来源程序取回附件失败或超限（§7.6），清单不变
 	CodeInternal             Code = "internal"               // 其余 → 1
 )
 
@@ -50,6 +51,7 @@ var codeHTTP = map[Code]int{
 	CodeConflict:             409,
 	CodeModelsPaused:         409,
 	CodeLoginLocked:          429,
+	CodeFetchFailed:          502,
 	CodeInternal:             500,
 }
 

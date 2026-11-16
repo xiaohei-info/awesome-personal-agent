@@ -439,7 +439,12 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		},
 		Sender:     senderInfo(ld),
 		SelfSender: k.ids.Fetch,
-		BlobsDir:   l.Blobs,
+		CanFetch: func(s domain.Source) bool {
+			d, ok := srcdecl.Find(sourceDecls, string(s.Type), s.Command, s.SourceKind)
+			return ok && d.FetchesAttachments()
+		},
+		FetchAttachment: k.ids.FetchAttachment,
+		BlobsDir:        l.Blobs,
 	})
 	if err != nil {
 		return nil, err
