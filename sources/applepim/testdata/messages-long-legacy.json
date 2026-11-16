@@ -1,0 +1,1 @@
+{"count": 1, "engine": "sqlite", "mailbox": "INBOX", "success": true, "totalInMailbox": 1, "messages": [{"dateReceived": "2026-01-02T09:00:00.000Z", "isRead": true, "messageId": "legacy-long@example.test", "sender": "Sender <sender@example.test>", "senderAddress": "sender@example.test", "senderName": "Sender", "subject": "Legacy long mail"}]}
