@@ -235,6 +235,13 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 		} else {
 			d.Data["last_call_at"] = "never"
 		}
+		if ms := rec.Declaration.MainSession; ms != nil && len(ms.WakeMissing) > 0 {
+			var gaps []string // 只告知：本人选了在对话里而不可用时，处理经过里已有 launch_fallback
+			for _, g := range ms.WakeMissing {
+				gaps = append(gaps, g.En)
+			}
+			d.Data["wake_missing"] = gaps
+		}
 		if h := rec.Declaration.Headless; h != nil && !kdoctor.CommandExists(h.Command[0]) {
 			d.Status = kdoctor.Error
 			problems = append(problems, kdoctor.CodeHostHeadlessMissing)

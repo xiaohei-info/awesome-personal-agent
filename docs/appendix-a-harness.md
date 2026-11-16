@@ -34,7 +34,7 @@
 
 ## A.2 无头运行声明
 
-插件经 `apa declare <文件>` 提交，本人在 Web 确认后生效；本人也可以直接写主机配置文件（§14.12）。内核只把它当数据处理，不认识具体 harness。界面上它是 Agent 卡片的"允许 APA 在后台拉起它"，按声明里的 `name` 称呼，并按 `headless.tools` 列出每一档给 Agent 的工具（主文档 §4.1）。同一 harness 再次提交时，新版本取代仍待确认的旧版本（旧版本转 `superseded`），待确认的始终只有最新一份；内容与最新的待确认或已生效版本相同时不产生新版本，返回原版本号，本人不必再确认。`name` 与 `headless.tools`、`headless.tool_notes` 的中英文字都必填，`tools` 与 `tool_notes` 只能写在 `headless.access` 已声明的档位上。
+插件经 `apa declare <文件>` 提交，本人在 Web 确认后生效；本人也可以直接写主机配置文件（§14.12）。内核只把它当数据处理，不认识具体 harness。界面上它是 Agent 卡片的"允许 APA 在后台拉起它"，按声明里的 `name` 称呼，并按 `headless.tools` 列出每一档给 Agent 的工具（主文档 §4.1）。同一 harness 再次提交时，新版本取代仍待确认的旧版本（旧版本转 `superseded`），待确认的始终只有最新一份；内容与最新的待确认或已生效版本相同时不产生新版本，返回原版本号，本人不必再确认；与已生效版本相同时，仍待确认的旧版本随之作废（插件按实际情况自动重交时，退回到已生效的状态不留下过时的待确认）。`name` 与 `headless.tools`、`headless.tool_notes` 的中英文字都必填，`tools` 与 `tool_notes` 只能写在 `headless.access` 已声明的档位上。
 
 | 字段 | 语义 |
 |---|---|
@@ -52,6 +52,7 @@
 | `headless.exit_codes` | 已文档化的退出码语义；未文档化时以回执为准 |
 | `headless.exit_output` | 可选。按语义键收窄 `exit_codes`：声明后，退出码命中且 stdout 或 stderr 含所列任一片段，才算该语义。用于多种失败共用一个退出码的 harness，片段以实测原文为准；未声明时只看退出码 |
 | `main_session.wake` | 可选，布尔。为真表示 Agent 侧装了唤醒插件，以 Agent 本人身份做事时也能在真实主会话里接着做；只有带网关的 harness 可声明。只说能力：用哪种由本人在 Web 按 Agent 或按规则选（主文档 §13.6），换选择不需要重新提交声明。无头运行总是支持 |
+| `main_session.wake_missing` | 可选，只在不能唤醒时允许。插件按实际启用情况判定的、唤醒还缺的各项：`[{zh, en, how: {zh, en}}]`，`zh`/`en` 是给本人看的一句话（不写配置键），`how` 是怎么打开（可写配置键与命令）。Agent 卡片上"在和你的对话里接着做"置灰时显示第一项，"怎么打开"折叠列出全部 `how`；`apa doctor` 在该 Agent 的详情里带出英文原因。内核只存取，不解释 |
 | `main_session.launch` | 旧字段，兼容读取：`wake` 视为 `wake: true`，并作为本人没选过时的初始值；`headless` 或未写不表达选择。新插件不写 |
 | `main_session.args` | 可选。让无头运行加载主会话同一份指令与技能所需的额外标志，未声明时沿用 `headless.command` |
 | `executors[]` | 可选，兼容旧插件：`{id, kind, host?, scenarios[]}`。本人确认后并入执行者名录，不删除已登记的条目（主文档 §6.17）。新插件不提交，执行者在第一次委派时登记 |
@@ -79,8 +80,7 @@ headless:
   tool_notes: {full: {zh: 不再逐项问你, en: Stops asking you each time}}
   exit_codes: {ok: [0], session_missing: [1]}
   exit_output: {session_missing: ["No session found matching"]}
-main_session:
-  wake: false   # 插件在 apa-wake 开着时提交 true（plugins/hermes/headless）
+main_session: {}   # 文件里不写；插件按唤醒插件的实际启用情况提交 wake: true，或 wake_missing（plugins/hermes/wake/readiness.py）
 ```
 
 ## A.3 各 harness 的无头运行细节

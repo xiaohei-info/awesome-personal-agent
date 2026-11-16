@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { errorText as msg, locale, useLang, useT } from "../../app/i18n";
 import { PERM } from "../../app/ids";
 import { EntityPick, useNamed, useNames } from "../../app/names";
 import { useRaw } from "../../app/raw";
-import { Pick, Val, useLabel } from "../../app/values";
+import { Val, useLabel } from "../../app/values";
+import { Onboard } from "./OnboardForm";
 import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
 import { strings } from "./strings";
 
@@ -19,7 +20,7 @@ interface Declaration {
   harness: string;
   name?: Label;
   headless?: { command?: string[]; access?: Record<string, unknown>; tools?: Record<string, Label[]>; tool_notes?: Record<string, Label> };
-  main_session?: { wake?: boolean; launch?: string };
+  main_session?: { wake?: boolean; launch?: string; wake_missing?: (Label & { how: Label })[] };
 }
 interface Rec { harness: string; rev: number; state: string; declaration: Declaration }
 interface Credential { id: string; kind: string; label?: string; harness?: string; seen_harness?: string; revoked_at?: string }
@@ -111,6 +112,7 @@ export function SettingsAgentsPage() {
           {agents.map((h) => (
             <AgentCard key={h} h={h} data={data} pol={pol} lim={lim} save={save} reload={load} onError={setError} onSecret={setSecret} />
           ))}
+          <Onboard taken={agents} reload={load} />
           <Other data={data} agents={agents} reload={load} onError={setError} onSecret={setSecret} />
         </>
       )}
@@ -167,6 +169,7 @@ function AgentCard({ h, data, pol, lim, save, reload, onError, onSecret }: {
       </ul>
       {pending && (
         <div>
+          <WakeChange from={live?.declaration} to={pending.declaration} />
           <p>{t.wantsToRun(name)}<code>{(pending.declaration.headless?.command ?? []).join(" ")}</code></p>
           <div className="actions">
             <button className="danger" onClick={() => void decide("confirm")}>{t.allow}</button> <button onClick={() => void decide("reject")}>{t.reject}</button>
@@ -178,7 +181,7 @@ function AgentCard({ h, data, pol, lim, save, reload, onError, onSecret }: {
         {t.useDefault}
       </label>
       <Tools h={h} live={live?.declaration} lim={lim} save={save} />
-      {live && <Launch h={h} live={live.declaration} pol={pol} save={save} />}
+      {live && <Launch h={h} name={name} live={live.declaration} pol={pol} save={save} />}
       <Decide h={h} grants={data.grants.filter((g) => g.grantee.agent === h)} reload={reload} />
       <details>
         <summary>{t.advanced}</summary>
@@ -235,10 +238,20 @@ function Tools({ h, live, lim, save }: { h: string; live?: Declaration; lim: Doc
 /** 声明能不能在对话里接着做：新字段 wake，或旧声明 launch: wake（§13.6）。 */
 export const canWake = (d?: Declaration) => !!(d?.main_session?.wake || d?.main_session?.launch === "wake");
 
+/** 待确认的声明相对已生效的，能不能在对话里接着做变了没有；没变不显示。 */
+function WakeChange({ from, to }: { from?: Declaration; to: Declaration }) {
+  const t = useT(strings);
+  const lang = useLang();
+  if (canWake(from) === canWake(to)) return null;
+  return <p>{canWake(to) ? t.changeWakeOn : t.changeWakeOff(to.main_session?.wake_missing?.[0]?.[lang] ?? "")}</p>;
+}
+
 // 以 Agent 本人身份做事时在哪里做：写 main_session_launch.by_harness[h]，按规则的覆盖原样带回（PUT 按段替换）。
 // 没选过时显示旧声明留下的初始值，再没有就是单独后台会话；换选择不用重新确认声明。声明生效前不出现。
-function Launch({ h, live, pol, save }: { h: string; live: Declaration; pol: Doc; save: Save }) {
+function Launch({ h, name, live, pol, save }: { h: string; name: string; live: Declaration; pol: Doc; save: Save }) {
   const t = useT(strings);
+  const lang = useLang();
+  const missing = live.main_session?.wake_missing ?? [];
   const cur = (pol.main_session_launch ?? {}) as { by_harness?: Record<string, string>; by_rule?: Record<string, string> };
   const initial = cur.by_harness?.[h] ?? (live.main_session?.launch === "wake" ? "wake" : "headless");
   const [how, setHow] = useDraft(pol.main_session_launch, () => initial);
@@ -254,7 +267,13 @@ function Launch({ h, live, pol, save }: { h: string; live: Declaration; pol: Doc
           </label>
         ))}
       </fieldset>
-      {!wake && <p className="sub">{t.noWake}</p>}
+      {!wake && <p className="sub">{missing.length ? t.wakeOff(name, missing[0][lang]) : t.wakeUnsupported(name)}</p>}
+      {!wake && missing.length > 0 && (
+        <details>
+          <summary>{t.howToOpen}</summary>
+          <ul>{missing.map((g) => <li key={g.en}>{g.how[lang]}</li>)}</ul>
+        </details>
+      )}
     </Card>
   );
 }
@@ -370,7 +389,7 @@ function Keys({ h, keys, reload, onError, onSecret }: { h: string; keys: Credent
       <h3>{t.keys}</h3>
       <KeyList keys={keys} reload={reload} onError={onError} />
       <form className="panel" onSubmit={(e) => { e.preventDefault(); void issue(); }}>
-        <label>{t.keyFor} <Pick k="credKind" value={kind} onChange={setKind} ids={AGENT_KINDS} /></label>
+        <KindChoice kinds={AGENT_KINDS} value={kind} onChange={setKind} />
         <label>{t.note} <input value={note} onChange={(e) => setNote(e.target.value)} /></label>
         <div><button type="submit">{t.issueKey}</button></div>
       </form>
@@ -402,16 +421,31 @@ function KeyList({ keys, reload, onError }: { keys: Credential[]; reload: () => 
   );
 }
 
-// 页面级的高级：没归属的钥匙、以前按钥匙签的临时授权（锚点 #grant-<id>）、手写登记。
+/** 「给谁」：每种钥匙一个用途名和一句能做什么、不能做什么（§14.2）。 */
+function KindChoice({ kinds, value, onChange }: { kinds: string[]; value: string; onChange: (k: string) => void }) {
+  const t = useT(strings);
+  const id = useId();
+  return (
+    <fieldset className="choice">
+      <legend>{t.keyFor}</legend>
+      {kinds.map((k) => (
+        <label key={k}>
+          <input type="radio" name={id} checked={value === k} onChange={() => onChange(k)} />
+          <span>{t.purpose[k].name}<small>{t.purpose[k].can}</small></span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+// 页面级、很少用到的：给脚本和执行者的钥匙（含没归属的旧钥匙）、以前按钥匙签的临时授权（锚点 #grant-<id>）。
 function Other({ data, agents, reload, onError, onSecret }: { data: Data; agents: string[]; reload: () => Promise<void>; onError: (m: string | null) => void; onSecret: (s: string) => void }) {
   const t = useT(strings);
   const { api } = useSession();
   const { hash } = useLocation();
-  const [text, setText] = useState("");
   const [kind, setKind] = useState("observer");
   const [note, setNote] = useState("");
   const [executor, setExecutor] = useState("");
-  // 给执行者或其他程序的钥匙（只看、干活的，可绑定执行者）：不属于某个 Agent。
   const issue = async () => {
     onError(null);
     const body: Record<string, string> = { kind };
@@ -428,31 +462,15 @@ function Other({ data, agents, reload, onError, onSecret }: { data: Data; agents
   };
   const orphan = data.tokens.filter((c) => !c.harness && !(c.seen_harness && agents.includes(c.seen_harness)));
   const legacy = data.grants.filter((g) => !g.grantee.agent);
-  const register = async () => {
-    onError(null);
-    let body: unknown;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      return onError(t.badJSON);
-    }
-    try {
-      await api.post("/settings/commands", body);
-      setText("");
-    } catch (e) {
-      onError(msg(e));
-    }
-    await reload();
-  };
   return (
     <details className="panel" open={!!hash && legacy.some((g) => g.id === grantAnchor(hash))}>
-      <summary>{t.other}</summary>
+      <summary>{t.rarely}</summary>
       <h3>{t.otherKeys}</h3>
       {orphan.length > 0 && <KeyList keys={orphan} reload={reload} onError={onError} />}
       <form className="panel" aria-label={t.otherKeys} onSubmit={(e) => { e.preventDefault(); void issue(); }}>
-        <label>{t.keyFor} <Pick k="credKind" value={kind} onChange={setKind} ids={["observer", "worker"]} /></label>
-        <label>{t.note} <input value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        <KindChoice kinds={["observer", "worker"]} value={kind} onChange={setKind} />
         {kind === "worker" && <label>{t.executor} <EntityPick kind="executor" value={executor} onChange={setExecutor} empty={t.noExecutor} /></label>}
+        <label>{t.note} <input value={note} onChange={(e) => setNote(e.target.value)} /></label>
         <div><button type="submit">{t.issueKey}</button></div>
       </form>
       {legacy.length > 0 && (
@@ -461,10 +479,6 @@ function Other({ data, agents, reload, onError, onSecret }: { data: Data; agents
           <ul className="rows">{legacy.map((g) => <LegacyGrant key={g.id} g={g} reload={reload} onError={onError} />)}</ul>
         </>
       )}
-      <form onSubmit={(e) => { e.preventDefault(); void register(); }}>
-        <label>{t.declaration}<textarea aria-label={t.declaration} rows={6} value={text} onChange={(e) => setText(e.target.value)} /></label>
-        <div><button type="submit" disabled={!text.trim()}>{t.registerBtn}</button></div>
-      </form>
     </details>
   );
 }

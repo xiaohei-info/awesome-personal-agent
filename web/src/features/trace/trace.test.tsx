@@ -71,7 +71,7 @@ const CHAT_FAILS = LEVELS([
   { backend: "classifier", model: "jev-1", p: 0.31, seg: "between", outcome: "uncertain" },
   { backend: "chat", model: "haiku-5", outcome: "error", error: "schema" },
 ], "default", "yes");
-// G：以 Agent 本人身份拉起时写明在哪里做、按哪一级设置；选了对话里却没装唤醒插件；专属任务照旧一句。
+// G：以 Agent 本人身份拉起时写明在哪里做、按哪一级设置；选了对话里却还没打开唤醒；专属任务照旧一句。
 const launched = (args: Record<string, unknown>) => ({ at: "2030-01-01T09:30:00Z", who: { kind: "rule", name: "background-run/handle" }, kind: "run", args: { state: "launched", ...args }, steps: [] });
 const LAUNCH: TraceData = {
   message: { id: "sev_g", source: "src_gh", type: "issue.opened", subject: "修", disposition: "proposed", sender_verified: false, occurred_at: "2030-01-01T09:00:00Z" },
@@ -167,11 +167,11 @@ describe("一条消息的处理经过（/sources/events/:id）", () => {
     expect(l[4]).toMatch(/^写作模型一句话摘要没写出来，留空/); // 写作模型的一次生成，不是规则，也不是 Agent 运行
   });
 
-  it("Agent 开工时写明在哪里做、按哪一级设置；没装唤醒插件改为单独后台会话时说原因", async () => {
+  it("Agent 开工时写明在哪里做、按哪一级设置；还没打开唤醒、改为单独后台会话时说原因", async () => {
     mount("/sources/events/sev_g");
     const l = await lines();
     expect(l[0]).toMatch(/Agent 在和你的对话里接着做 · 按 Agent 设置/);
-    expect(l[1]).toMatch(/Agent 单独开了一个后台会话 · 按这条规则的设置 · Agent 没装唤醒插件，改为单独后台会话/);
+    expect(l[1]).toMatch(/Agent 单独开了一个后台会话 · 按这条规则的设置 · Agent 还没打开唤醒，改为单独后台会话/);
     expect(l[2]).toMatch(/让 Agent 后台开工/);
     expect(l.join()).not.toMatch(/wake|headless|main_session/);
   });

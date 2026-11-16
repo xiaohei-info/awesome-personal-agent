@@ -107,10 +107,18 @@ func (h Headless) Means(key string, code int, stdout, stderr []byte) bool {
 // MainSession 声明以 Agent 本人身份运行时能怎么拉起（§13.6、附录 A.2）：无头运行必有；Wake 为真表示 Agent 侧装了唤醒插件，
 // 也能在真实主会话里接着做。用哪种由本人在 Web 选（策略的 main_session_launch），不在声明里。
 // Launch 是旧声明的单值：wake 视为支持唤醒，并作为本人没选时的初始值；headless 或空不表达任何选择。
+// WakeMissing 是插件按实际启用情况判定的、唤醒还缺的项（显示文字与打开方法），只供界面与自检展示，内核不解释。
 type MainSession struct {
-	Wake   bool     `json:"wake,omitempty"`
-	Launch string   `json:"launch,omitempty"`
-	Args   []string `json:"args,omitempty"`
+	Wake        bool      `json:"wake,omitempty"`
+	Launch      string    `json:"launch,omitempty"`
+	Args        []string  `json:"args,omitempty"`
+	WakeMissing []WakeGap `json:"wake_missing,omitempty"`
+}
+
+// WakeGap 是唤醒缺的一项：一句产品语言的说明，加怎么打开。
+type WakeGap struct {
+	Label
+	How Label `json:"how"`
 }
 
 // CanWake：声明支持唤醒（新字段 wake，或旧声明 launch: wake）。
@@ -230,6 +238,16 @@ func (d Declaration) validate() error {
 	}
 	if m := d.MainSession; m != nil && m.Launch != "" && m.Launch != "headless" && m.Launch != "wake" {
 		return invalid("main_session.launch must be headless or wake")
+	}
+	if m := d.MainSession; m != nil && len(m.WakeMissing) > 0 {
+		if m.CanWake() {
+			return invalid("main_session.wake_missing is only for a declaration that cannot wake")
+		}
+		for _, g := range m.WakeMissing {
+			if !g.valid() || !g.How.valid() {
+				return invalid("main_session.wake_missing: each item needs zh, en and how {zh, en}")
+			}
+		}
 	}
 	seen := map[string]bool{}
 	for _, e := range d.Executors {

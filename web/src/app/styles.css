@@ -493,3 +493,15 @@ ol.rows.trace .link { font-size: 12.5px; }
   .trace-line { grid-template-columns: minmax(0, 1fr) auto; }
   .trace-line .what { grid-column: 1 / -1; }
 }
+
+/* 设置 › Agent：接入其他 Agent */
+fieldset.onboard { max-width: none; padding: 0; border: 0; }
+fieldset.onboard .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+fieldset.onboard .tier-row { display: grid; grid-template-columns: 9em 1fr; gap: 10px; align-items: center; }
+.tokens { display: flex; flex-wrap: wrap; gap: 6px; }
+.tokens button.quiet { font: 12px var(--mono); border: 1px solid var(--line-2); }
+pre.preview { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.seg .seg-label { align-self: center; padding: 0 8px; font-size: 12.5px; color: var(--ink-3); }
+.stack-tight { display: grid; gap: 6px; }
+p.field-err[role="alert"] { margin: -6px 0 0; padding: 4px 10px; font-size: 12.5px; }
+.stack-tight .seg { justify-self: start; }

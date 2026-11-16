@@ -43,13 +43,38 @@ def test_declare_submits_headless_part_via_apa_declare_stdin(fake_apa):
     assert body["headless"]["session"] == {"extract": "$.session_id"}
 
 
-def test_declare_offers_wake_only_when_apa_wake_is_on(fake_apa, monkeypatch):
-    monkeypatch.delenv("APA_WAKE_SESSION_KEY", raising=False)
-    load_headless()._declare({})
-    assert json.loads((fake_apa / "stdin.json").read_text())["main_session"] == {"wake": False}
-    monkeypatch.setenv("APA_WAKE_SESSION_KEY", "agent:main")
-    load_headless()._declare({})
+def test_declaration_follows_apa_wake_readiness(fake_apa, monkeypatch):
+    h = load_headless()
+    monkeypatch.setattr(h.readiness, "current", lambda: ["injection_denied"])
+    h._declare({})
+    ms = json.loads((fake_apa / "stdin.json").read_text())["main_session"]
+    assert "wake" not in ms and [g["zh"] for g in ms["wake_missing"]] == ["Hermes 还没允许插件在对话里开始一轮"]
+    assert "allow_gateway_injection" in ms["wake_missing"][0]["how"]["zh"]
+    monkeypatch.setattr(h.readiness, "current", lambda: [])
+    h._declare({})
     assert json.loads((fake_apa / "stdin.json").read_text())["main_session"] == {"wake": True}
+
+
+def test_start_up_sync_submits_only_inside_a_live_gateway(fake_apa, monkeypatch):
+    h = load_headless()
+    monkeypatch.setattr(h.readiness, "current", lambda: [])
+    monkeypatch.setattr(h, "_in_gateway", lambda: False)
+    assert h._sync(sleep=lambda s: None) is None and not (fake_apa / "stdin.json").exists()
+    seen = iter([False, True])
+    monkeypatch.setattr(h, "_in_gateway", lambda: next(seen))
+    assert h._sync(sleep=lambda s: None)["ok"] and (fake_apa / "argv").read_text().strip() == "declare -"
+
+
+def test_start_up_sync_retries_only_while_the_kernel_is_unreachable(fake_apa, monkeypatch):
+    h = load_headless()
+    monkeypatch.setattr(h.readiness, "current", lambda: [])
+    monkeypatch.setattr(h, "_in_gateway", lambda: True)
+    waits = []
+    monkeypatch.setenv("FAKE_EXIT", "7")
+    assert h._sync(sleep=waits.append)["exit_code"] == 7 and waits == [0, *h.RETRY_SECS]
+    waits.clear()
+    monkeypatch.setenv("FAKE_EXIT", "4")
+    assert h._sync(sleep=waits.append)["exit_code"] == 4 and waits == [0]
 
 
 def test_declare_passes_the_kernel_verdict_through(fake_apa, monkeypatch):
@@ -72,7 +97,9 @@ def test_register_exposes_one_tool_in_the_apa_toolset():
         def register_tool(self, **kw):
             seen.append(kw)
 
-    load_headless().register(Ctx())
+    h = load_headless()
+    h._sync = lambda: None  # the start-up thread is covered above
+    h.register(Ctx())
     assert [(k["name"], k["toolset"]) for k in seen] == [("apa_declare_headless", "apa")]
 
 

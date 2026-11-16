@@ -178,7 +178,7 @@ function What({ e, subjects }: { e: TraceEntry; subjects?: boolean }) {
     }
     case "observed": return <>{t.observed}</>;
     case "run": {
-      // 以 Agent 本人身份运行时写明这次在哪里做、按哪一级设置；选了对话里却没装唤醒插件时说原因（§13.6）。
+      // 以 Agent 本人身份运行时写明这次在哪里做、按哪一级设置；选了对话里却还没打开唤醒时说原因（§13.6）。
       if (a.state !== "launched" || a.runner !== "main_session") return <>{t.run[String(a.state)] ?? t.internal}</>;
       const how = t.launched[String(a.launch)] ?? t.run.launched;
       const from = t.launchFrom[String(a.from)];

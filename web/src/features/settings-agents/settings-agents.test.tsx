@@ -134,12 +134,40 @@ describe("设置 › Agent", () => {
     await waitFor(() => expect(s.puts.at(-1)).toMatchObject({ path: "/v1/settings/access-limits", body: { permission_cap: { default: "read", by_harness: { other: "edit", hermes: "full" } } } }));
   });
 
-  it("以 Agent 本人身份做事：没装唤醒插件时「在对话里」不可选并说明原因；默认单独后台会话", async () => {
+  it("以 Agent 本人身份做事：声明不支持唤醒时「在对话里」不可选并说明；默认单独后台会话", async () => {
     mount(server({ live: [hermes(1, "active")] }).impl);
     const c = within((await card()).getByRole("region", { name: "Agent 自己动手时在哪里做" }));
     expect(c.getByRole("radio", { name: "单独开一个后台会话（不打扰对话）" })).toBeChecked();
     expect(c.getByRole("radio", { name: "在和你的对话里接着做" })).toBeDisabled();
-    expect(c.getByText("Agent 没装唤醒插件")).toBeInTheDocument();
+    expect(c.getByText("Hermes 不支持在对话里接着做")).toBeInTheDocument();
+    expect(c.queryByText("怎么打开")).toBeNull();
+  });
+
+  it("以 Agent 本人身份做事：唤醒还缺什么用产品语言说，怎么打开收在折叠里", async () => {
+    const live = hermes(1, "active");
+    (live.declaration as any).main_session = { wake_missing: [
+      { ...L("Hermes 还没允许插件在对话里开始一轮", "not allowed"), how: L("在 config.yaml 里加 allow_gateway_injection: true", "add it") },
+      { ...L("还没指定要唤醒哪个对话", "no chat"), how: L("设 APA_WAKE_SESSION_KEY", "set it") },
+    ] };
+    mount(server({ live: [live] }).impl);
+    const c = within((await card()).getByRole("region", { name: "Agent 自己动手时在哪里做" }));
+    expect(c.getByRole("radio", { name: "在和你的对话里接着做" })).toBeDisabled();
+    const line = c.getByText("Hermes 还没打开唤醒：Hermes 还没允许插件在对话里开始一轮");
+    expect(line.textContent).not.toMatch(/APA_|allow_gateway/);
+    const how = c.getByText("怎么打开").closest("details")!;
+    expect(how).not.toHaveAttribute("open");
+    expect(how).toHaveTextContent("allow_gateway_injection: true");
+    expect(how).toHaveTextContent("APA_WAKE_SESSION_KEY");
+  });
+
+  it("待确认的声明改了能不能在对话里接着做时，卡片上说明这次变化", async () => {
+    const live = hermes(1, "active");
+    (live.declaration as any).main_session = { wake: true };
+    const pending = hermes(2, "pending");
+    (pending.declaration as any).main_session = { wake_missing: [{ ...L("还没指定要唤醒哪个对话", "no chat"), how: L("设", "set") }] };
+    mount(server({ live: [live], pending: [pending] }).impl);
+    const c = await card();
+    expect(c.getByText("这次变化：不能在对话里接着做了（还没指定要唤醒哪个对话）")).toBeInTheDocument();
   });
 
   it("以 Agent 本人身份做事：声明支持唤醒时可选「在对话里」，保存只写这个 Agent 的选择，按规则的覆盖原样带回，不重新确认声明", async () => {
@@ -149,7 +177,7 @@ describe("设置 › Agent", () => {
     s.doc.main_session_launch = { by_harness: { other: "headless" }, by_rule: { "p/event_rules/r": "headless" } };
     mount(s.impl);
     const c = within((await card()).getByRole("region", { name: "Agent 自己动手时在哪里做" }));
-    expect(c.queryByText("Agent 没装唤醒插件")).toBeNull();
+    expect(c.queryByText(/不支持在对话里接着做|还没打开唤醒/)).toBeNull();
     await userEvent.click(c.getByRole("radio", { name: "在和你的对话里接着做" }));
     await userEvent.click(c.getByRole("button", { name: "保存Agent 自己动手时在哪里做" }));
     await waitFor(() => expect(s.puts.at(-1)).toMatchObject({ path: "/v1/settings/policy",
@@ -231,20 +259,107 @@ describe("设置 › Agent", () => {
       v.unmount();
     }
   });
-  it("ACT-BOOT-04：卡片里生成的钥匙带上这个 Agent；给执行者的钥匙在「其他」里签，可绑定执行者；明文只显示一次", async () => {
+  it("ACT-BOOT-04：卡片里生成的钥匙带上这个 Agent；给执行者的钥匙在「很少用到」里签，可绑定执行者；明文只显示一次", async () => {
     const s = server({ live: [hermes(1, "active")] });
     mount(s.impl);
     const c = await card();
     await userEvent.click(c.getByRole("button", { name: "生成钥匙" }));
     expect(await screen.findByText("apa_dlg_SECRET")).toBeInTheDocument();
     expect(writes(s, "/settings/tokens")[0]).toEqual({ method: "POST", url: "/v1/settings/tokens", body: { kind: "delegate", harness: "hermes" } });
-    const other = within(screen.getByRole("form", { name: "给执行者和其他程序的钥匙" }));
-    await userEvent.selectOptions(other.getByLabelText("给谁"), "worker");
+    const other = within(screen.getByRole("form", { name: "给脚本和执行者的钥匙" }));
+    expect(other.getByRole("radio", { name: /只读的程序（脚本、看板）/ })).toBeChecked();
+    expect(other.getByText("能看事项和材料、提一条等你确认的新事项；不能改事项")).toBeInTheDocument();
+    expect(other.queryByLabelText("回报给哪个执行者")).toBeNull();
+    await userEvent.click(other.getByRole("radio", { name: /执行者回报结果/ }));
+    expect(other.getByText("能更新派给它的事项、提问、交材料；碰不到别的事项，不能替你决定")).toBeInTheDocument();
+    expect(other.getByText("回报给哪个执行者")).toBeInTheDocument();
     await userEvent.type(other.getByLabelText("备注"), "ci");
     await userEvent.click(other.getByRole("button", { name: "生成钥匙" }));
     await waitFor(() => expect(writes(s, "/settings/tokens")).toHaveLength(2));
     expect(writes(s, "/settings/tokens")[1].body).toEqual({ kind: "worker", label: "ci" });
     await userEvent.click(screen.getByRole("button", { name: "我已保存" }));
     expect(document.body.textContent).not.toContain("apa_dlg_SECRET");
+  });
+});
+
+describe("设置 › Agent：接入其他 Agent", () => {
+  const open = async () => {
+    await userEvent.click(await screen.findByRole("button", { name: "＋ 接入其他 Agent" }));
+    return within(screen.getByRole("region", { name: "接入其他 Agent" }));
+  };
+
+  it("逐项填写，命令下方实时拼出每一档的运行命令；提交的声明与手写 JSON 相同", async () => {
+    const s = server({ live: [hermes(1, "active")] });
+    mount(s.impl);
+    const f = await open();
+    await userEvent.type(f.getByLabelText("名字"), "克劳德");
+    await userEvent.type(f.getByLabelText("英文名"), "Claude Code");
+    await userEvent.type(f.getByLabelText("本机运行命令"), "claude -p ");
+    await userEvent.click(f.getByRole("button", { name: "{prompt} 任务说明" }));
+    await userEvent.click(f.getByRole("checkbox", { name: "只看" }));
+    await userEvent.type(f.getByLabelText("只看 · 追加的参数，可不填"), "--permission-mode plan");
+    await userEvent.click(f.getByRole("checkbox", { name: "可改文件" }));
+    await userEvent.type(f.getByLabelText("可改文件 · 追加的参数，可不填"), "--permission-mode acceptEdits");
+    await userEvent.click(f.getByRole("checkbox", { name: "需要时续接上次的会话" }));
+    expect(f.getByRole("radio", { name: "它运行完会告诉 APA 会话编号" })).toBeChecked();
+    await userEvent.type(f.getByLabelText("让它输出会话编号的参数"), "--output-format json");
+    await userEvent.type(f.getByLabelText("续接参数"), "--resume {{session_id}");
+
+    const pv = f.getByTestId("onboard-preview");
+    expect(within(pv).getByRole("group", { name: "预览：" })).toBeInTheDocument();
+    expect(pv).toHaveTextContent("新开：claude -p {prompt} --output-format json --permission-mode plan");
+    await userEvent.click(within(pv).getByRole("button", { name: "可改文件" }));
+    expect(pv).toHaveTextContent("续接：claude -p {prompt} --output-format json --permission-mode acceptEdits --resume {session_id}");
+    expect(within(pv).getByRole("button", { name: "完全放开" })).toBeDisabled();
+
+    await userEvent.click(f.getByRole("button", { name: "接入" }));
+    await waitFor(() => expect(writes(s, "/settings/commands")).toHaveLength(1));
+    expect(writes(s, "/settings/commands")[0].body).toEqual(JSON.parse(`{
+      "harness": "claude-code",
+      "name": {"zh": "克劳德", "en": "Claude Code"},
+      "headless": {
+        "command": ["claude", "-p", "{prompt}"],
+        "output": ["--output-format", "json"],
+        "session": {"extract": "$.session_id"},
+        "resume": ["--resume", "{session_id}"],
+        "access": {"read": ["--permission-mode", "plan"], "edit": ["--permission-mode", "acceptEdits"]}
+      }
+    }`));
+  });
+
+  it("填错时就地提示，不提交", async () => {
+    const s = server({ live: [hermes(1, "active")] });
+    mount(s.impl);
+    const f = await open();
+    await userEvent.type(f.getByLabelText("英文名"), "Hermes");
+    expect(f.getByText(/已经有叫这个名字的 Agent/)).toBeInTheDocument();
+    await userEvent.type(f.getByLabelText("本机运行命令"), "acme run");
+    expect(f.getByText(/命令里要有 \{prompt\}，APA 用它放任务说明/)).toBeInTheDocument();
+    await userEvent.type(f.getByLabelText("本机运行命令"), " {{token}");
+    expect(f.getByText(/不认识的占位：\{token\}/)).toBeInTheDocument();
+    await userEvent.click(f.getByRole("button", { name: "接入" }));
+    expect(f.getByText(/至少勾一档权限/)).toBeInTheDocument();
+    expect(f.getByText(/中文名和英文名都要填/)).toBeInTheDocument();
+    expect(writes(s, "/settings/commands")).toHaveLength(0);
+  });
+
+  it("直接编辑声明与表单二选一：改为直接编辑后表单置灰，提交的是手改的 JSON", async () => {
+    const s = server({ live: [hermes(1, "active")] });
+    mount(s.impl);
+    const f = await open();
+    await userEvent.type(f.getByLabelText("英文名"), "Acme");
+    await userEvent.click(f.getByText("直接编辑声明"));
+    expect(f.getByTestId("onboard-json")).toHaveTextContent('"harness": "acme"');
+    await userEvent.click(f.getByRole("button", { name: "改为直接编辑" }));
+    expect(f.getByLabelText("英文名")).toBeDisabled();
+    const box = f.getByRole("textbox", { name: "直接编辑声明" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "{{bad");
+    await userEvent.click(f.getByRole("button", { name: "接入" }));
+    expect(f.getByText("声明不是合法的 JSON")).toBeInTheDocument();
+    await userEvent.clear(box);
+    await userEvent.type(box, '{{"harness":"x"}');
+    await userEvent.click(f.getByRole("button", { name: "接入" }));
+    await waitFor(() => expect(writes(s, "/settings/commands")).toEqual([{ method: "POST", url: "/v1/settings/commands", body: { harness: "x" } }]));
   });
 });

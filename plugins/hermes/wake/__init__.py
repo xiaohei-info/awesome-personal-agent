@@ -8,8 +8,9 @@ The plugin only
   4. keeps the credential in memory and hands it only to `apa_wake_cli`, which runs `apa` with APA_RUN/APA_TOKEN.
 The credential is never put in the message, the environment of the gateway, or other tools.
 
-Explicit opt-in: nothing starts unless APA_WAKE_SESSION_KEY (the main session to wake) is set, and Hermes must allow it
-with plugins.entries.apa-wake.allow_gateway_injection: true. Without that the harness stays headless-only.
+Explicit opt-in: the loop starts only when readiness.py finds nothing missing (APA_WAKE_SESSION_KEY names the main
+session to wake, plugins.entries.apa-wake.allow_gateway_injection: true, APA_URL and APA_TOKEN). The same judgment is
+what apa-headless declares, so the ledger never offers waking that would fail. Otherwise the harness stays headless-only.
 Any failure leaves Hermes untouched: the loop logs, backs off, and the kernel retries a failed delivery.
 """
 import importlib.util
@@ -27,6 +28,9 @@ from datetime import datetime, timezone
 _spec = importlib.util.spec_from_file_location("apa_run_context", pathlib.Path(__file__).resolve().parents[1] / "tools" / "run_context.py")
 run_context = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(run_context)
+_spec = importlib.util.spec_from_file_location("apa_wake_readiness", pathlib.Path(__file__).resolve().parent / "readiness.py")
+readiness = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(readiness)
 
 log = logging.getLogger("apa.wake")
 
@@ -171,7 +175,9 @@ SCHEMA = {"name": "apa_wake_cli",
 
 def register(ctx):
     ctx.register_tool(name="apa_wake_cli", toolset="apa", description=SCHEMA["description"], handler=_cli, schema=SCHEMA)
-    key = os.environ.get("APA_WAKE_SESSION_KEY", "")
-    if not key:  # waking is declared explicitly; default stays headless
+    gaps = readiness.current(enabled=True, key=getattr(ctx, "plugin_id", None))
+    if gaps:  # default stays headless; apa-headless declares the same gaps
+        log.info("apa-wake: not waking sessions, missing: %s", ", ".join(gaps))
         return
+    key = os.environ["APA_WAKE_SESSION_KEY"]
     threading.Thread(target=_loop, args=(ctx, key, stop), daemon=True, name="apa-wake").start()

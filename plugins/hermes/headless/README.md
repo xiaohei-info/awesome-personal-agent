@@ -1,7 +1,12 @@
 # apa-headless (Hermes plugin)
 
 Install: `ln -s "$PWD" ~/.hermes/plugins/apa-headless`, then `hermes plugins enable apa-headless`.
-Submit: the `apa_declare_headless` tool runs `apa declare -` with `declaration.json`. It takes effect after the owner confirms it in Web.
+Submit: the `apa_declare_headless` tool runs `apa declare -` with `declaration.json` plus `main_session` (below), and the
+plugin submits the same once each time the gateway starts (it waits until the gateway has published its message
+injector, so `hermes chat` / `--oneshot` clients never submit). The kernel drops a submission equal to the latest
+pending or confirmed one, so an unchanged declaration never asks the owner again; a changed one takes effect after
+the owner confirms it in Web. Only at gateway start: a later change of `allow_gateway_injection` waits for the next
+restart or an `apa_declare_headless` call.
 Executors are not declared: Hermes registers them when it first delegates (`apa_delegate`, see `tools/README.md`).
 It refuses when the Hermes profile lacks `terminal.client_env_passthrough: [APA_RUN_CONTEXT]`, or the config cannot be read (see `tools/README.md`, Run identity).
 
@@ -16,4 +21,4 @@ Measured on Hermes v0.22.5 (not copied from appendix A). From v0.23.0 `--oneshot
 | `access.edit` / `full` | adds `file,terminal,delegation`; `full` adds `--yolo` |
 | credential `env` | `APA_RUN`/`APA_TOKEN`/`APA_URL` reach the `apa_*` tools (live test: delegate/ask/report carry `Bearer <run credential>`) **and** the `terminal` subprocess (live test `test_terminal_tool_credential_visibility_is_measured` asserts the shell printed `MARK_TOKEN_VISIBLE`), so a bare `apa` in `terminal` works with the edit/full tiers; no `env_passthrough` needed on this host config |
 | `main_session.args` | not declared: enabled plugins (apa-tools) load in `--oneshot`, verified live |
-| `main_session.wake` | `false` in the file; `apa_declare_headless` sends `true` when `APA_WAKE_SESSION_KEY` is set (apa-wake on), so the owner can pick "continue in our chat" in Web. Not a launch choice: the owner picks per Agent and per rule |
+| `main_session.wake` | not in the file. The plugin asks apa-wake's `wake/readiness.py` (the one judgment, also used to start the wake loop): with nothing missing it sends `wake: true`, so the owner can pick "continue in our chat" in Web; otherwise `wake_missing` lists what is missing (plugin not enabled, no `APA_WAKE_SESSION_KEY`, no `plugins.entries.apa-wake.allow_gateway_injection: true`, no `APA_URL`/`APA_TOKEN`) in the owner's words, with how to fix each. Not a launch choice: the owner picks per Agent and per rule |
