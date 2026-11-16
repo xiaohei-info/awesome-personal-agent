@@ -10,11 +10,11 @@ import { Pick } from "../../app/values";
 import { RoutineForm, type Instance } from "./Routine";
 import { ScheduleCard, When } from "./ScheduleCard";
 
-// 形状对应 GET /v1/items?kind=brief（spec.period、spec.sections[{project,body}]、origin.source）、GET/POST /v1/instances（列表带 agent_ready）、
+// 形状对应 GET /v1/items?kind=brief（spec.period、spec.sections[{project|title,body}]、origin.source）、GET/POST /v1/instances（列表带 agent_ready）、
 // PATCH /v1/instances/{id}（enabled 走 instance.toggle）、POST /v1/instances/{id}/run、GET /v1/packs（default_instruction）（附录 B.2、C.10）。
 // 简报与复盘都是 brief 事项（packs/review 写回 brief kind，以 spec.period 区分周期），本页不猜类型，统一按周期列出；分节与定时校验都由服务端与包负责，本页只展示并搬运输入。
 // 简报与复盘开箱各有一个默认安排（§7.3），每个实例一张卡；例行任务由本人自己建。
-interface Section { project: string; body: string }
+interface Section { project?: string; title?: string; body: string } // 附录 C.13：每节有 project 或 title 之一；旧简报只有 project
 interface Brief { id: string; title: string; created_at?: string; origin?: { source?: string }; spec?: { period?: string; sections?: Section[] } }
 interface Pack { name: string; default_instruction?: string }
 
@@ -32,7 +32,7 @@ function BriefCard({ b }: { b: Brief }) {
       {!sections.length && <p>{t.noSections}</p>}
       {sections.map((s, i) => (
         <section key={i}>
-          <h5>{projectName(s.project)}</h5>
+          <h5>{s.title ?? projectName(s.project ?? "")}</h5>
           <p>{s.body}</p>
         </section>
       ))}
