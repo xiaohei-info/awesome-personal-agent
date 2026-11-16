@@ -229,7 +229,7 @@ func (s *Service) Sync(tx *store.Tx) error {
 	flags := map[string]int{}
 	resolvedAt := map[string]int64{}
 	for {
-		es, err := eventlog.Read(tx, after, 500)
+		es, err := eventlog.ReadLive(tx, after, 500)
 		if err != nil {
 			return err
 		}

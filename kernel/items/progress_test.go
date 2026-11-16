@@ -224,3 +224,42 @@ func TestPlannedForKeepsPhaseInvariants(t *testing.T) {
 		t.Fatal("rejected updates changed the items")
 	}
 }
+
+// 久未推进对导入事项从导入时刻起算（§7.1、§7.3）：事项的 updated_at 是原始时刻（很久以前），
+// 但导入时刻在阈值之内就不算久未推进；导入时刻也过了阈值才列入；之后的普通变更照常刷新。
+func TestStaleCountsFromImportTimeForImportedItems(t *testing.T) {
+	e := setup(t)
+	old := e.create(t, owner, map[string]any{"title": "旧", "phase": "open"})
+	imported := e.create(t, owner, map[string]any{"title": "导入", "phase": "open"})
+	e.now = e.now.Add(StaleAfter + time.Hour)
+	mark := func(id string, at time.Time) {
+		t.Helper()
+		b, _ := json.Marshal(map[string]any{"batch": "imp_1", "at": at})
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			_, err := tx.Exec(`UPDATE items SET imported = ? WHERE id = ?`, string(b), id)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale := func() map[string]bool {
+		t.Helper()
+		var l TodayList
+		if err := e.st.View(bg, func(tx *store.Tx) (err error) { l, err = TodayItems(tx, e.now); return }); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, it := range l.Stale {
+			out[it.ID] = true
+		}
+		return out
+	}
+	mark(imported, e.now.Add(-time.Hour)) // 一小时前才导入
+	if got := stale(); !got[old] || got[imported] {
+		t.Fatalf("imported item counts from import time, plain old item is stale: %v", got)
+	}
+	mark(imported, e.now.Add(-StaleAfter-time.Minute)) // 导入也已超过阈值
+	if got := stale(); !got[imported] {
+		t.Fatalf("import time past the threshold must list it: %v", got)
+	}
+}

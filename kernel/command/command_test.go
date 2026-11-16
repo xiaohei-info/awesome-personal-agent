@@ -824,3 +824,30 @@ func TestReceiptCommandRejectionsRecordHealthAlert(t *testing.T) {
 		t.Fatalf("unexpected alerts: %+v", alerts())
 	}
 }
+
+// 提交后回调只看到"现场"事件：导入事件写进账本，但不出现在 Commit.Seqs。
+func TestCommitSeqsExcludeImportedEvents(t *testing.T) {
+	e := setup(t)
+	if err := e.x.Register(Spec{Name: "note.import", Action: authz.ActionUpdateOwn,
+		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) { return authz.Object{ID: "n1"}, nil },
+		Apply: func(c *Ctx) (any, error) {
+			for _, batch := range []string{"imp_1", ""} {
+				if _, err := c.Emit(domain.Event{Type: domain.EvItemUpdated, Object: "n1", Payload: json.RawMessage(`{}`), Imported: batch}); err != nil {
+					return nil, err
+				}
+			}
+			return nil, nil
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.x.Do(bg, Request{Identity: owner, Command: "note.import", Input: json.RawMessage(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	es := e.events(t)
+	if len(es) != 2 || es[0].Event.Imported != "imp_1" || es[1].Event.Imported != "" {
+		t.Fatalf("both events belong in the ledger: %+v", es)
+	}
+	if len(e.commits) != 1 || len(e.commits[0].Seqs) != 1 || e.commits[0].Seqs[0] != es[1].Event.Seq {
+		t.Fatalf("commit must carry only the live seq: %+v", e.commits)
+	}
+}

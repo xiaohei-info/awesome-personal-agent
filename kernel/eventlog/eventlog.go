@@ -1,5 +1,7 @@
 // Package eventlog 是账本的追加日志（设计 §6.7、§6.15、§10.1）：
 // Append 在调用方事务内写入并分配单调序号，Read 按序号游标读取，
+// 读法只有两种：全量（Read、ReadObject、Query 默认），与跳过导入事件的"现场"读法（ReadLive、ReadObjectLive、Filter.Live）。
+// 折叠、校验、审计、回放用全量；规则、触达、跟进、摘要、注入增量、统计、对外事件流、提交后回调等自动化一律用"现场"读法，新增的事件读取方也默认如此（§6.7、changes §10.9）。
 // Tombstone 物理删除时把相关事件的内容字段替换为墓碑，序号与信封保留。
 // 本包只管 Event 表；投影与命令由各模块经命令模型完成。
 package eventlog
@@ -69,6 +71,8 @@ func validate(e domain.Event) error {
 		return invalid("chain_depth %d < 0", e.ChainDepth)
 	case !json.Valid(e.Payload):
 		return invalid("payload is not valid JSON")
+	case e.Imported == "" && !e.RecordedAt.IsZero():
+		return invalid("recorded_at requires imported")
 	}
 	switch e.Actor.Type {
 	case domain.ActorHuman, domain.ActorAgent, domain.ActorSystem:
@@ -107,11 +111,19 @@ func Append(tx *store.Tx, e domain.Event) (int64, error) {
 			return 0, err
 		}
 	}
+	// recorded_at 只记导入事件的实际写入时刻；普通事件为 0，读出时即 at。
+	var recorded int64
+	if e.Imported != "" {
+		if e.RecordedAt.IsZero() {
+			e.RecordedAt = wall.Now()
+		}
+		recorded = e.RecordedAt.UnixNano()
+	}
 	if _, err := tx.Exec(`INSERT INTO eventlog_event
-		(type, object, actor, reason, payload, chain_depth, basis, resolved_via, evidence, grant_id, at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		(type, object, actor, reason, payload, chain_depth, basis, resolved_via, evidence, grant_id, at, import_batch, recorded_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.Type, e.Object, string(actor), e.Reason, string(e.Payload), int64(e.ChainDepth),
-		string(basis), e.ResolvedVia, e.Evidence, e.Grant, at.UnixNano()); err != nil {
+		string(basis), e.ResolvedVia, e.Evidence, e.Grant, at.UnixNano(), e.Imported, recorded); err != nil {
 		return 0, err
 	}
 	var seq int64
@@ -121,7 +133,7 @@ func Append(tx *store.Tx, e domain.Event) (int64, error) {
 	return seq, nil
 }
 
-const cols = "seq, type, object, actor, reason, payload, chain_depth, basis, resolved_via, evidence, grant_id, at, tombstone"
+const cols = "seq, type, object, actor, reason, payload, chain_depth, basis, resolved_via, evidence, grant_id, at, tombstone, import_batch, recorded_at"
 
 func queryRows(tx *store.Tx, each func(*store.Rows) error, sql string, args ...any) error {
 	r, err := tx.Query(sql, args...)
@@ -144,9 +156,10 @@ func collect(tx *store.Tx, sql string, args ...any) ([]Entry, error) {
 			e                  Entry
 			actor, payload, bs string
 			depth, at, tomb    int64
+			recorded           int64
 		)
 		if err := r.Scan(&e.Event.Seq, &e.Event.Type, &e.Event.Object, &actor, &e.Event.Reason, &payload,
-			&depth, &bs, &e.Event.ResolvedVia, &e.Event.Evidence, &e.Event.Grant, &at, &tomb); err != nil {
+			&depth, &bs, &e.Event.ResolvedVia, &e.Event.Evidence, &e.Event.Grant, &at, &tomb, &e.Event.Imported, &recorded); err != nil {
 			return err
 		}
 		if err := json.Unmarshal([]byte(actor), &e.Event.Actor); err != nil {
@@ -161,6 +174,9 @@ func collect(tx *store.Tx, sql string, args ...any) ([]Entry, error) {
 		e.Event.Payload = json.RawMessage(payload)
 		e.Event.ChainDepth = int(depth)
 		e.Event.At = time.Unix(0, at).UTC()
+		if recorded != 0 {
+			e.Event.RecordedAt = time.Unix(0, recorded).UTC()
+		}
 		e.Tombstone = tomb != 0
 		out = append(out, e)
 		return nil
@@ -176,9 +192,26 @@ func Read(tx *store.Tx, after int64, limit int) ([]Entry, error) {
 	return collect(tx, "SELECT "+cols+" FROM eventlog_event WHERE seq > ? ORDER BY seq LIMIT ?", after, int64(limit))
 }
 
+// live 是"现场"读法的过滤条件：跳过导入事件。
+const live = " AND import_batch = ''"
+
+// ReadLive 同 Read，但跳过导入事件（"现场"读法）。游标语义不变：订阅方把返回的最后一条序号当作新游标；
+// 尾部被跳过的导入事件不会返回，下次读取时在服务端再次跳过。
+func ReadLive(tx *store.Tx, after int64, limit int) ([]Entry, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	return collect(tx, "SELECT "+cols+" FROM eventlog_event WHERE seq > ?"+live+" ORDER BY seq LIMIT ?", after, int64(limit))
+}
+
 // ReadObject 返回某对象的全部事件，按序号升序（事项时间线与回放用）。
 func ReadObject(tx *store.Tx, object string) ([]Entry, error) {
 	return collect(tx, "SELECT "+cols+" FROM eventlog_event WHERE object = ? ORDER BY seq", object)
+}
+
+// ReadObjectLive 同 ReadObject，但跳过导入事件（统计等自动化读取用）。
+func ReadObjectLive(tx *store.Tx, object string) ([]Entry, error) {
+	return collect(tx, "SELECT "+cols+" FROM eventlog_event WHERE object = ?"+live+" ORDER BY seq", object)
 }
 
 // ReadDisposedFor 返回把 item 建成（或并入）建议事项的入站处置事件（payload.item 或 payload.items 含它），按序号升序。
@@ -196,9 +229,11 @@ func ReadMentioning(tx *store.Tx, message string) ([]Entry, error) {
 		AND tombstone = 0 AND (json_extract(payload, '$.message') = ?1 OR EXISTS (SELECT 1 FROM json_each(payload, '$.messages') WHERE value = ?1)) ORDER BY seq`, message)
 }
 
-// Filter 是审计查询条件；空字段不限。Actor 匹配操作者 principal，Grant 匹配依据的授权单 id（授权单的使用记录）。
+// Filter 是审计查询条件；空字段不限。Actor 匹配操作者 principal，Grant 匹配依据的授权单 id（授权单的使用记录），
+// Imported 只取某个导入批次的事件。Live 为真走"现场"读法，跳过导入事件；与 Imported 同时给出没有结果。
 type Filter struct {
-	Actor, Object, Type, Grant string
+	Actor, Object, Type, Grant, Imported string
+	Live                                 bool
 }
 
 // Query 返回序号大于 after、满足 f 的至多 limit 条事件，按序号升序（审计页用）。
@@ -219,10 +254,13 @@ func query(tx *store.Tx, f Filter, cursor string, bound int64, order string, lim
 		return nil, nil
 	}
 	sql, args := "SELECT "+cols+" FROM eventlog_event WHERE "+cursor, []any{bound}
-	for _, c := range []struct{ col, val string }{{"json_extract(actor, '$.principal')", f.Actor}, {"object", f.Object}, {"type", f.Type}, {"grant_id", f.Grant}} {
+	for _, c := range []struct{ col, val string }{{"json_extract(actor, '$.principal')", f.Actor}, {"object", f.Object}, {"type", f.Type}, {"grant_id", f.Grant}, {"import_batch", f.Imported}} {
 		if c.val != "" {
 			sql, args = sql+" AND "+c.col+" = ?", append(args, c.val)
 		}
+	}
+	if f.Live {
+		sql += live
 	}
 	return collect(tx, sql+" ORDER BY "+order+" LIMIT ?", append(args, int64(limit))...)
 }

@@ -145,12 +145,14 @@ type steps struct {
 		Tombstone bool
 	}
 	Events []struct {
-		Seq      int64
-		Type     string
-		Object   string
-		Actor    domain.Actor
-		Reason   string
-		Redacted bool
+		Seq        int64
+		Type       string
+		Object     string
+		Actor      domain.Actor
+		Reason     string
+		Redacted   bool
+		Imported   string
+		RecordedAt string `json:"recorded_at"`
 	}
 }
 
@@ -460,5 +462,45 @@ func TestAuditNewestFirstPagesByBefore(t *testing.T) {
 		if _, rec := e.get("/v1/audit/events?"+bad, e.web); rec.Code != 400 {
 			t.Fatalf("%s = %d", bad, rec.Code)
 		}
+	}
+}
+
+// GET /audit/events 返回导入事件的 imported、recorded_at，并可按 imported=<批次> 只取一个批次；普通事件不带这两个字段。
+func TestAuditShowsImportMarksAndFiltersByBatch(t *testing.T) {
+	e := setup(t)
+	a := e.createItem("alpha")
+	rec := time.Date(2026, 11, 16, 8, 0, 0, 0, time.UTC)
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		for _, batch := range []string{"imp_1", "imp_2"} {
+			if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemProgressAdded, Object: a, Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb},
+				Payload: json.RawMessage(`{}`), Imported: batch, RecordedAt: rec, At: rec.AddDate(-1, 0, 0)}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	one, rec2 := e.get("/v1/audit/events?imported=imp_1", e.web)
+	if rec2.Code != 200 || len(one.Events) != 1 || one.Events[0].Imported != "imp_1" || one.Events[0].RecordedAt == "" {
+		t.Fatalf("batch filter = %d %s", rec2.Code, rec2.Body)
+	}
+	if !strings.Contains(rec2.Body.String(), `"recorded_at":"2026-11-16T08:00:00Z"`) {
+		t.Fatalf("recorded_at missing: %s", rec2.Body)
+	}
+	all, _ := e.get("/v1/audit/events", e.web)
+	marked, plain := 0, 0
+	for _, ev := range all.Events {
+		if ev.Imported != "" {
+			marked++
+		} else if ev.RecordedAt == "" {
+			plain++
+		}
+	}
+	if marked != 2 || plain == 0 {
+		t.Fatalf("unfiltered audit is the full read: marked=%d plain=%d", marked, plain)
+	}
+	if none, _ := e.get("/v1/audit/events?imported=nope", e.web); len(none.Events) != 0 {
+		t.Fatalf("unknown batch: %+v", none.Events)
 	}
 }

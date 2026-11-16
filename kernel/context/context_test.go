@@ -504,3 +504,27 @@ func TestInFlightRunIsHinted(t *testing.T) {
 		t.Fatalf("idle item hinted: %q", r.Inject())
 	}
 }
+
+// 导入的事件不进注入增量（§6.7 "现场"读法）：同一会话的下一次读取不带导入写入的变更，普通事件则照常带出。
+func TestImportedEventsStayOutOfTheDelta(t *testing.T) {
+	e := setup(t)
+	a := e.item(t, map[string]any{"title": "A"})
+	e.build(t, Request{Session: "s1"})
+	touch := func(batch string) {
+		t.Helper()
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			_, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemUpdated, Object: a, Actor: owner.Actor, Payload: json.RawMessage(`{}`), Imported: batch})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	touch("imp_1")
+	if r := e.build(t, Request{Session: "s1"}); len(r.Items) != 0 || r.Inject() != "" {
+		t.Fatalf("imported change leaked into the delta: %v %q", ids(r), r.Inject())
+	}
+	touch("")
+	if r := e.build(t, Request{Session: "s1"}); !eq(ids(r), []string{a}) {
+		t.Fatalf("control: live change must appear in the delta: %v", ids(r))
+	}
+}

@@ -961,3 +961,39 @@ func TestNewRequiresDependencies(t *testing.T) {
 		t.Fatal("missing dependencies accepted")
 	}
 }
+
+// 导入的事件不触发规则（§6.7 "现场"读法）：同一条 item.phase_changed 按普通事件写入会被规则命中，
+// 带导入标记写入则引擎的游标越过它、没有任何规则记录。
+func TestImportedEventsDoNotTriggerRules(t *testing.T) {
+	e := newEnv(t, map[string]string{"acc/pack.yaml": tagRule}, nil)
+	id := e.newItem(map[string]any{"tags": []string{"acc-rule"}})
+	e.open(id)
+	if len(e.ofType(EvObserved)) != 1 {
+		t.Fatalf("setup: live event must be observed once, got %d", len(e.ofType(EvObserved)))
+	}
+	var tmpl domain.Event
+	for _, ev := range e.events() {
+		if ev.Type == domain.EvItemPhaseChanged {
+			tmpl = ev
+		}
+	}
+	replay := func(batch string) {
+		t.Helper()
+		ev := tmpl
+		ev.Imported = batch
+		if err := e.st.Update(bg, func(tx *store.Tx) error { _, err := eventlog.Append(tx, ev); return err }); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.eng.Drain(bg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	replay("imp_1")
+	if got := len(e.ofType(EvObserved)); got != 1 {
+		t.Fatalf("imported event triggered a rule: observed = %d", got)
+	}
+	replay("")
+	if got := len(e.ofType(EvObserved)); got != 2 {
+		t.Fatalf("control: the same event written as live must trigger, observed = %d", got)
+	}
+}

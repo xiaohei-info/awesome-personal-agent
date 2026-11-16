@@ -299,3 +299,19 @@ func TestTitlelessTypesStayEmpty(t *testing.T) {
 		t.Fatalf("expected events missing: %v", seen)
 	}
 }
+
+// 对外事件流用"现场"读法：导入事件不出现，游标越过它们，不卡住订阅方。
+func TestFeedSkipsImportedEvents(t *testing.T) {
+	s := open(t)
+	imported := ev(domain.EvItemCreated, "imp-item", `{"item":{"title":"历史"}}`)
+	imported.Imported = "imp_1"
+	appendAll(t, s, ev(domain.EvItemCreated, "live-1", `{}`), imported, imported, ev(domain.EvItemCreated, "live-2", `{}`))
+	p := read(t, s, 0, 10)
+	if len(p.Envelopes) != 2 || p.Envelopes[0].Object != "live-1" || p.Envelopes[1].Object != "live-2" {
+		t.Fatalf("feed leaked imported events: %+v", p.Envelopes)
+	}
+	appendAll(t, s, imported)
+	if idle := read(t, s, p.Next, 10); len(idle.Envelopes) != 0 {
+		t.Fatalf("imported tail leaked: %+v", idle)
+	}
+}

@@ -1366,3 +1366,34 @@ func TestCardDraftOutboundBlockedIsNotAFailure(t *testing.T) {
 		t.Fatalf("draft calls = %d, want exactly 1 (no retry)", len(f.calls))
 	}
 }
+
+// 导入的事件不触发触达（§6.7 "现场"读法）：事项现状变了而没有普通事件时，带导入标记的 item.updated 不会让触达重算它
+// （待决投递原样保留）；同样的事件按普通事件写入则重算并作废投递，作对照。
+func TestImportedEventsDoNotReconcileDeliveries(t *testing.T) {
+	e := setup(t)
+	e.policy(func(p *policy.Policy) { p.Disturb.Routes["decision"] = "web" })
+	id := e.asked(nil)
+	if len(e.unread()) != 1 {
+		t.Fatalf("setup: want one unread delivery, got %+v", e.unread())
+	}
+	e.update(func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE items SET phase = 'done', data = json_set(data, '$.phase', 'done') WHERE id = ?`, id)
+		return err
+	})
+	touch := func(batch string) {
+		t.Helper()
+		e.update(func(tx *store.Tx) error {
+			_, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemUpdated, Object: id, Actor: owner.Actor, Payload: json.RawMessage(`{}`), Imported: batch})
+			return err
+		})
+		e.update(e.a.Sync)
+	}
+	touch("imp_1")
+	if u := e.unread(); len(u) != 1 {
+		t.Fatalf("imported event re-triggered delivery reconcile: %+v", u)
+	}
+	touch("")
+	if u := e.unread(); len(u) != 0 {
+		t.Fatalf("control: live event must reconcile and supersede, got %+v", u)
+	}
+}

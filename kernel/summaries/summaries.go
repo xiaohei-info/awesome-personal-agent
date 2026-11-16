@@ -127,7 +127,7 @@ func (s *Service) Drain(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			batch, err = eventlog.Read(tx, after, 100)
+			batch, err = eventlog.ReadLive(tx, after, 100)
 			return err
 		}); err != nil || len(batch) == 0 {
 			return err

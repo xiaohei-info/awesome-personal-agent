@@ -111,7 +111,7 @@ func (h *handlers) audit(w http.ResponseWriter, r *http.Request, p *core.Princip
 		return domain.NewError(domain.CodeInvalidRequest, "order must be asc or desc", "send order=desc for newest first")
 	}
 	req := kwhy.AuditRequest{Actor: p.Caller.Actor, Level: p.Caller.Level, After: after, Before: before, Desc: desc, Limit: int(limit),
-		Filter: eventlog.Filter{Actor: q.Get("actor"), Object: q.Get("object"), Type: q.Get("type"), Grant: q.Get("grant")}}
+		Filter: eventlog.Filter{Actor: q.Get("actor"), Object: q.Get("object"), Type: q.Get("type"), Grant: q.Get("grant"), Imported: q.Get("imported")}}
 	var steps []kwhy.Step
 	if err := h.st.View(r.Context(), func(tx *store.Tx) error {
 		_, pol, err := policy.Current(tx)

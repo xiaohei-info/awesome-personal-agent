@@ -699,6 +699,12 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 		return Result{}, Commit{}, err
 	}
 	out.Seqs = c.seqs
+	var live []int64 // 提交后回调只看"现场"事件：导入事件不进任何自动化（§6.7）
+	for _, e := range c.events {
+		if e.Imported == "" {
+			live = append(live, e.Seq)
+		}
+	}
 	if req.IdemKey != "" {
 		if _, err := tx.Exec(`INSERT INTO command_idem (principal, command, key, input_hash, result, version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			caller.Actor.Principal, spec.Name, req.IdemKey, inHash, string(out.Value), out.Version, x.now().UnixNano()); err != nil {
@@ -712,7 +718,7 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 			return Result{}, Commit{}, err
 		}
 	}
-	return out, Commit{Command: spec.Name, Actor: caller.Actor, Object: obj.ID, Seqs: out.Seqs, Input: req.Input, Value: out.Value}, nil
+	return out, Commit{Command: spec.Name, Actor: caller.Actor, Object: obj.ID, Seqs: live, Input: req.Input, Value: out.Value}, nil
 }
 
 // lastOKKey 是 Receipt 命令"最近成功"标记的键；含 NUL，HTTP 头与 CLI 参数都带不出来，不会与调用方的幂等键冲突。
