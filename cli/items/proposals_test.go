@@ -1,6 +1,12 @@
 package items_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	"os"
 	"path/filepath"
 	"testing"
@@ -90,5 +96,31 @@ func TestProposalsApplyFile(t *testing.T) {
 	r = k.ok(auth.Delegate, "proposals", "apply", "--recommended", "--evidence", "按推荐")
 	if res, _ := r.json(t)["results"].([]any); len(res) != 0 || k.phase(e4) != "proposed" {
 		t.Fatalf("recommended with no recommendations: %s", r.out)
+	}
+}
+
+// ACT-CLI-04：--file - 从标准输入读处置清单，逐条输出，与读文件同结果。
+func TestProposalsApplyFileFromStdin(t *testing.T) {
+	k := newKernel(t)
+	e1 := k.proposal("e1")
+	var out, errb bytes.Buffer
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[auth.Delegate], "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": t.TempDir()}
+	plan := `{"actions":[{"id":"` + e1 + `","do":"accept"},{"id":"itm-not-exist","do":"accept"}]}`
+	code := client.Main([]string{"proposals", "apply", "--file", "-", "--evidence", "按我说的"}, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
+		Stdin: strings.NewReader(plan), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errb.String())
+	}
+	var res struct{ Results []map[string]any }
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil || len(res.Results) != 2 || res.Results[0]["ok"] != true || res.Results[1]["ok"] != false {
+		t.Fatalf("results: %s", out.String())
+	}
+	if k.phase(e1) != "open" {
+		t.Fatal("stdin plan not applied")
+	}
+	code = client.Main([]string{"proposals", "apply", "--file", "-"}, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
+		Stdin: strings.NewReader("not json"), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
+	if code != 2 {
+		t.Fatalf("bad stdin plan: exit %d", code)
 	}
 }

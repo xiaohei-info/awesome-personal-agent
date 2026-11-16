@@ -151,7 +151,9 @@ func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item,
 		case "planned_for":
 			err = put(raw, &it.PlannedFor)
 		case "origin":
-			err = put(raw, &it.Origin)
+			if err = put(raw, &it.Origin); err == nil {
+				err = checkOrigin(it.Origin)
+			}
 		case "spec":
 			err = put(raw, &it.Spec)
 		case "ext":
@@ -175,6 +177,14 @@ func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item,
 		}
 	}
 	return it, nil
+}
+
+// checkOrigin：import: 前缀的 origin.source 只由导入写入（§7.1），普通创建与更新都拒绝。
+func checkOrigin(o *domain.Origin) error {
+	if o != nil && strings.HasPrefix(o.Source, "import:") {
+		return invalid("origin.source must not start with import: (reserved for imports)")
+	}
+	return nil
 }
 
 func transit(cur domain.Item, in transitionIn) (domain.Item, error) {
@@ -457,6 +467,9 @@ func (s *svc) create() command.Spec {
 		Validate: func(tx *store.Tx, o authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
 			it := v.item(o.ID)
+			if err := checkOrigin(it.Origin); err != nil {
+				return err
+			}
 			reason := v.Reason
 			if reason == "" {
 				reason = "created"

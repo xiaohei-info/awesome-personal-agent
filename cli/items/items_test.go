@@ -643,3 +643,63 @@ func TestRelateKeyRegistersAndRemoves(t *testing.T) {
 		t.Fatalf("key with --to: %+v", r)
 	}
 }
+
+// ACT-CLI-01/02：--deadline 取 RFC 3339 或日期（本机当天 23:59:59）；update 传空串清除并取消到期定时。
+func TestItemDeadlineFlag(t *testing.T) {
+	k := newKernel(t)
+	want := time.Date(2026, 3, 5, 23, 59, 59, 0, time.Local)
+	id := k.idOf(k.ok(auth.Worker, "item", "add", "--kind", "task", "--title", "d", "--phase", "open", "--assignee", "wrk1", "--deadline", "2026-03-05"))
+	got, _ := time.Parse(time.RFC3339, k.item(id)["deadline"].(string))
+	if !got.Equal(want) {
+		t.Fatalf("date deadline = %v, want %v", got, want)
+	}
+	k.ok(auth.Worker, "item", "update", id, "--deadline", "2026-01-01T00:30:00Z", "--reason", "r", "--evidence", "e")
+	if k.item(id)["deadline"] != "2026-01-01T00:30:00Z" {
+		t.Fatalf("rfc3339 deadline: %v", k.item(id)["deadline"])
+	}
+	k.ok(auth.Worker, "item", "update", id, "--deadline", "", "--reason", "r", "--evidence", "e")
+	if k.item(id)["deadline"] != nil {
+		t.Fatalf("deadline not cleared: %v", k.item(id))
+	}
+	if n := k.advance(time.Hour); n != 0 {
+		t.Fatalf("cleared deadline still fired: %d", n)
+	}
+	if r := k.apa(auth.Worker, "propose", "--kind", "task", "--title", "p", "--deadline", "tomorrow"); r.code != 2 {
+		t.Fatalf("bad deadline: exit %d %s", r.code, r.errOut)
+	}
+	p := k.idOf(k.ok(auth.Worker, "propose", "--kind", "task", "--title", "p", "--deadline", "2026-03-05T10:00:00Z"))
+	if k.item(p)["deadline"] != "2026-03-05T10:00:00Z" {
+		t.Fatalf("propose deadline: %v", k.item(p))
+	}
+}
+
+// ACT-CLI-03：--origin/--ext 是 JSON，非 JSON 退出码 2；import: 前缀被内核拒绝（退出码 2），item 不创建。
+func TestItemOriginAndExtFlags(t *testing.T) {
+	k := newKernel(t)
+	id := k.idOf(k.ok(auth.Worker, "propose", "--kind", "task", "--title", "o", "--origin", `{"source":"notes","actor":"me","ref":"n-1"}`, "--ext", `{"k":"v"}`))
+	it := k.item(id)
+	if o := it["origin"].(map[string]any); o["source"] != "notes" || o["ref"] != "n-1" || o["actor"] != "me" {
+		t.Fatalf("origin = %v", o)
+	}
+	if it["ext"].(map[string]any)["k"] != "v" {
+		t.Fatalf("ext = %v", it["ext"])
+	}
+	for _, args := range [][]string{
+		{"propose", "--kind", "task", "--title", "x", "--origin", "notjson"},
+		{"propose", "--kind", "task", "--title", "x", "--ext", "{"},
+		{"propose", "--kind", "task", "--title", "x", "--origin", `{"source":"import:notes"}`},
+		{"item", "add", "--kind", "task", "--title", "x", "--origin", `{"source":"import:notes"}`},
+	} {
+		if r := k.apa(auth.Worker, args...); r.code != 2 {
+			t.Errorf("%v: exit %d, want 2 (%s)", args, r.code, r.errOut)
+		}
+	}
+	oid := k.openItem()
+	if r := k.apa(auth.Worker, "item", "update", oid, "--origin", `{"source":"import:notes"}`, "--reason", "r", "--evidence", "e"); r.code != 2 {
+		t.Fatalf("update import origin: exit %d %s", r.code, r.errOut)
+	}
+	k.ok(auth.Worker, "item", "update", oid, "--origin", `{"source":"manual"}`, "--ext", `{"a":1}`, "--reason", "r", "--evidence", "e")
+	if k.item(oid)["origin"].(map[string]any)["source"] != "manual" {
+		t.Fatalf("origin not updated: %v", k.item(oid))
+	}
+}
