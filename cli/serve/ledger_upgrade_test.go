@@ -99,8 +99,8 @@ func TestFrozenMigrationsMatchV01Release(t *testing.T) {
 			t.Errorf("%s: frozen v0.1 migration removed", key)
 		}
 	}
-	if reg.SchemaLedger() != 7 {
-		t.Errorf("schema.ledger = %d, want 7", reg.SchemaLedger())
+	if reg.SchemaLedger() != 8 {
+		t.Errorf("schema.ledger = %d, want 8", reg.SchemaLedger())
 	}
 }
 
@@ -248,8 +248,8 @@ func TestUpgradeV2ToLatestKeepsRowsAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if s.SchemaLedger() != 7 {
-		t.Fatalf("ledger = %d, want 7", s.SchemaLedger())
+	if s.SchemaLedger() != 8 {
+		t.Fatalf("ledger = %d, want 8", s.SchemaLedger())
 	}
 	after := take(t, s)
 

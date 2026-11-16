@@ -348,7 +348,7 @@ func TestDoctorDataDirVersionCases(t *testing.T) {
 func TestDoctorOlderLedgerWarnsAndSkips(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "apa")
 	old := store.NewRegistry()
-	must(t, old.Register(eventlog.Module))
+	must(t, old.Register(store.Module{Name: eventlog.Module.Name, Migrations: eventlog.Module.Migrations[:2]})) // 结构版本 8 之前的事件日志
 	st, err := store.Open(home, old)
 	must(t, err)
 	must(t, st.Close())
@@ -365,21 +365,25 @@ func TestDoctorOlderLedgerWarnsAndSkips(t *testing.T) {
 
 func fullRegFor(t *testing.T) *store.Registry { return fullReg(t) }
 
-// regWith 是 fullReg 的模块，其中来源登记与来源事件只取各自迁移序列的前 nReg、nRunner 步（0 为全部）。
+// regWith 是 fullReg 的模块，其中来源登记与来源事件只取各自迁移序列的前 nReg、nRunner 步（0 为全部结构版本 7 以前的步）。
 func regWith(t *testing.T, nReg, nRunner int) *store.Registry {
 	t.Helper()
 	src, run, ex := registry.Module, runner.Module, executors.Module
 	ex.Migrations = ex.Migrations[:1] // 旧账本：没有结构版本 5 的执行者列
 	au := auth.Module
 	au.Migrations = au.Migrations[:1] // 也没有结构版本 6 的凭据 harness 列
+	el := eventlog.Module
+	el.Migrations = el.Migrations[:2] // 也没有结构版本 8 的导入标记列
+	src.Migrations = src.Migrations[:3]
 	if nReg > 0 {
 		src.Migrations = src.Migrations[:nReg]
 	}
+	run.Migrations = run.Migrations[:5]
 	if nRunner > 0 {
 		run.Migrations = run.Migrations[:nRunner]
 	}
 	r := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, au, policy.Module, command.Module, ex,
+	for _, m := range []store.Module{el, au, policy.Module, command.Module, ex,
 		delivery.Module, src, run, kdoctor.Module} {
 		must(t, r.Register(m))
 	}
@@ -408,8 +412,8 @@ func openLegacy(t *testing.T, old *store.Registry) string {
 func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
 	home := openLegacy(t, regWith(t, 2, 0))
 	reg := fullReg(t)
-	if reg.SchemaLedger() != 7 {
-		t.Fatalf("precondition: structure 7, got %d", reg.SchemaLedger())
+	if reg.SchemaLedger() != 8 {
+		t.Fatalf("precondition: structure 8, got %d", reg.SchemaLedger())
 	}
 	in := Input{Home: home, Reg: reg, Model: &model.Client{}, Now: now}
 	r := Run(bg, in)
@@ -420,7 +424,7 @@ func TestDoctorOlderStructureWarnsAndReadsLegacySources(t *testing.T) {
 		t.Fatalf("sources: %+v", c)
 	}
 	u := UpgradeCheck(bg, in)
-	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 7") {
+	if c := find(t, u, checkSchema); !strings.Contains(c.Why, "3 → 8") {
 		t.Fatalf("upgrade check: %+v", c)
 	}
 	if c := find(t, u, checkOutbound); c.Status != kdoctor.OK {

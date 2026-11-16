@@ -108,6 +108,21 @@ CREATE TABLE sources_runner_metric (
 	// 入账时同序列上一次的取值（JSON：指标名到数值），变化类条件与 apa why 据此回放（§9.2、§9.3）。
 	Version: 5, Ledger: 3, Name: "event-prev-metrics",
 	SQL: `ALTER TABLE sources_runner_event ADD COLUMN prev_metrics TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 8（§6.10、§16.5，变更清单 WB-01、WB-02）：来源原文表（每行是一条事件的一个部分）；事件行加原文总字节数与完整程度。
+	// 只增不改：已有事件的正文仍在 detail 列，字节数留空（NULL，存储页按原列现算），完整程度取默认 legacy（升级前落盘）。
+	Version: 6, Ledger: 8, Name: "ledger-v8-source-content",
+	SQL: `CREATE TABLE sources_runner_event_part (
+	event_id TEXT NOT NULL,
+	part TEXT NOT NULL CHECK (part IN ('body', 'original', 'headers', 'attachments', 'messages')),
+	media_type TEXT NOT NULL,
+	bytes INTEGER NOT NULL,
+	sha256 TEXT NOT NULL,
+	content BLOB NOT NULL,
+	PRIMARY KEY (event_id, part)
+) WITHOUT ROWID;
+ALTER TABLE sources_runner_event ADD COLUMN content_bytes INTEGER;
+ALTER TABLE sources_runner_event ADD COLUMN content_state TEXT NOT NULL DEFAULT 'legacy' CHECK (content_state IN ('full', 'partial', 'legacy', 'purged'));`,
 }}}
 
 // Stats 是登记表 stats 列的内容（来源页读取）。

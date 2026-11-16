@@ -41,13 +41,32 @@ type Manifest struct {
 	Sources           []string          `json:"sources"`
 	WaitingItems      []string          `json:"waiting_items"`
 	Proposed          []string          `json:"proposed_events"`
-	FrozenCommit      string            `json:"frozen_commit,omitempty"`
-	MigrationFiles    []string          `json:"migration_files,omitempty"` // 迁移所在源文件（定位用；整文件会随后续版本的迁移追加而变，不能逐字节比对）
+	// 以下是 ACT-WBENV-03 要求的升级演练数据（结构版本 7 夹具；各版本同内容）。
+	Mail16K                  []MailEvent  `json:"mail_16k_events"`            // 正文恰好 16384 字节的邮件事件
+	HostedMaterial           string       `json:"hosted_material_id"`         // 托管型材料（有仓库位置）
+	OwnedMaterial            string       `json:"owned_material_id"`          // 自有型材料（有修订，无仓库位置）
+	GrantEvents              []GrantEvent `json:"grant_events"`               // 带授权单的 Event
+	ExternalUnselectedSource string       `json:"external_unselected_source"` // 外部外发范围未选择的 v0.1 来源
+	FrozenCommit             string       `json:"frozen_commit,omitempty"`
+	MigrationFiles           []string     `json:"migration_files,omitempty"` // 迁移所在源文件（定位用；整文件会随后续版本的迁移追加而变，不能逐字节比对）
 	// MigrationChecksums 是冻结版本含有的每一步迁移的校验和（module/version/checksum）。迁移 SQL 一经冻结不再变，
 	// 这才是可核对的冻结证据：从当前源码重算必须逐条相等（见 TestManifestMigrationChecksumsMatchSource）。
 	MigrationChecksums []string `json:"migration_checksums,omitempty"`
 	Binary             string   `json:"binary,omitempty"` // 回退用的旧版本主程序：环境变量名
 	Plugin             string   `json:"plugin,omitempty"`
+}
+
+// MailEvent 是一条正文恰好 16384 字节的邮件事件：id 与正文（detail 列）的 sha256。
+type MailEvent struct {
+	ID         string `json:"id"`
+	BodySHA256 string `json:"body_sha256"`
+}
+
+// GrantEvent 是带授权单的 Event：序号、对象与授权单 id。
+type GrantEvent struct {
+	Seq    int64  `json:"seq"`
+	Object string `json:"object"`
+	Grant  string `json:"grant"`
 }
 
 type Backlog struct {

@@ -77,6 +77,10 @@ ALTER TABLE sources_registry_source ADD COLUMN outbound_external TEXT NOT NULL D
 	// 旧来源读出为空名，由 apa serve 启动时的 Backfill 按同一套规则补上。
 	Version: 3, Ledger: 4, Name: "ledger-v4-source-name",
 	SQL: `ALTER TABLE sources_registry_source ADD COLUMN name TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 8（§6.15，变更清单 WB-07）：来源原文保留天数。NULL 即不清理，已有来源都是 NULL。
+	Version: 4, Ledger: 8, Name: "ledger-v8-content-retention",
+	SQL: `ALTER TABLE sources_registry_source ADD COLUMN content_retention_days INTEGER;`,
 }}}
 
 // Options 是登记所需的外部事实。
