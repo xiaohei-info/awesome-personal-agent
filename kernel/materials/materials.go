@@ -86,6 +86,14 @@ BEGIN SELECT RAISE(ABORT, 'revision content is append-only'); END;`,
 	Version: 2, Name: "add-revision-summary",
 	// 变更摘要由生成型在修订写入后起草，写入一次；不在追加不改的列里。
 	SQL: `ALTER TABLE revisions ADD COLUMN summary TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 8（§6.6、§12.8，变更清单 WB-06）：形态（hosted、owned、link）与链接型的位置。
+	// 只增列：已有材料的形态为空，读取时按原规则推定（有仓库位置的是托管型，其余是自有型），不改写已有行。
+	// 位置只对链接型有值；同一项目内同一位置只登记一条，唯一性只约束链接型。
+	Version: 3, Ledger: 8, Name: "ledger-v8-material-form",
+	SQL: `ALTER TABLE materials ADD COLUMN form TEXT NOT NULL DEFAULT '' CHECK (form IN ('', 'hosted', 'owned', 'link'));
+ALTER TABLE materials ADD COLUMN link_location TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX materials_link_location ON materials (project, link_location) WHERE form = 'link';`,
 }}}
 
 // Material 是材料登记。Location 非空表示托管型（"仓库:路径"），无 Revision。

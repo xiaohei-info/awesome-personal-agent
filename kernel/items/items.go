@@ -79,6 +79,27 @@ CREATE TABLE item_correlation (
 	PRIMARY KEY (item, domain, key)
 ) WITHOUT ROWID;
 CREATE INDEX item_correlation_key ON item_correlation(domain, key);`,
+}, {
+	// 账本结构版本 8（§6.3、§7.1，变更清单 WB-04、WB-05）：事项的导入信息（JSON {batch, at}，空串即非导入写入）；
+	// 按 origin.source、origin.ref 的表达式索引（不要求唯一，建在已有数据上）；导入批次表与（来源名，记录类型，外部 id）→ 账本对象 id 的对照表（幂等用，唯一）。
+	Version: 4, Ledger: 8, Name: "ledger-v8-import",
+	SQL: `ALTER TABLE items ADD COLUMN imported TEXT NOT NULL DEFAULT '';
+CREATE INDEX items_origin ON items(json_extract(data, '$.origin.source'), json_extract(data, '$.origin.ref'));
+CREATE TABLE item_import_batch (
+	id TEXT PRIMARY KEY,
+	source TEXT NOT NULL,
+	actor TEXT NOT NULL,
+	grant_id TEXT NOT NULL DEFAULT '',
+	count INTEGER NOT NULL,
+	at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE item_import_map (
+	source TEXT NOT NULL,
+	record_type TEXT NOT NULL,
+	external_id TEXT NOT NULL,
+	object_id TEXT NOT NULL,
+	PRIMARY KEY (source, record_type, external_id)
+) WITHOUT ROWID;`,
 }}}
 
 func invalid(why string) error {

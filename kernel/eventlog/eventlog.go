@@ -40,6 +40,11 @@ CREATE INDEX eventlog_event_object ON eventlog_event(object, seq);`,
 }, {
 	Version: 2, Name: "add-event-grant",
 	SQL: `ALTER TABLE eventlog_event ADD COLUMN grant_id TEXT NOT NULL DEFAULT '';`,
+}, {
+	// 账本结构版本 8（§6.7，变更清单 WB-03）：导入批次与实际写入时刻。只增列：已有事件为空串与 0，即普通事件，载荷不改。
+	Version: 3, Ledger: 8, Name: "ledger-v8-event-import",
+	SQL: `ALTER TABLE eventlog_event ADD COLUMN import_batch TEXT NOT NULL DEFAULT '';
+ALTER TABLE eventlog_event ADD COLUMN recorded_at INTEGER NOT NULL DEFAULT 0;`,
 }}}
 
 // Entry 是读出的事件；Tombstone 为真表示内容字段已被物理删除抹除。

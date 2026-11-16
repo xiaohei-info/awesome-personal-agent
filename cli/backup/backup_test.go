@@ -30,7 +30,7 @@ var thingsMod = store.Module{Name: "things", Migrations: []store.Migration{
 func reg(t *testing.T, withV3 bool) *store.Registry {
 	t.Helper()
 	r := store.NewRegistry()
-	mods := []store.Module{eventlog.Module}
+	mods := []store.Module{{Name: eventlog.Module.Name, Migrations: eventlog.Module.Migrations[:2]}} // 结构版本 8 之前
 	if withV3 {
 		mods = append(mods, thingsMod)
 	}

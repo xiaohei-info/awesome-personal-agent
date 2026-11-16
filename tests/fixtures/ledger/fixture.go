@@ -48,8 +48,9 @@ var T0 = time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 // 3：真实账本（2026-11-14 起）运行的提交（#396），结构版本 3 的迁移以它为准冻结；此后的结构变更进版本 4。
 // 4：真实账本（2026-11-15 起）运行的提交（#405），结构版本 4 的迁移以它为准冻结；此后的结构变更进版本 5（执行者与委派记录）。
 // 5：真实账本（2026-11-15 起）运行的提交（#412），结构版本 5 的迁移以它为准冻结；此后的结构变更进版本 6（凭据所属 harness）。
+// 7：结构版本 7（连接与凭据保管，#440）的最后一个代码提交（#441）；此后的结构变更进版本 8（工作台能力迭代，一次迁移收齐，§16.5）。
 var Frozen = map[int]string{2: "bfafc2d0319a983d9b3062ed74acbe507ae5f3ea", 3: "05106506287a73b21536220ecccb383ca9969b97", 4: "ce5c504bca21827be001caa5f8c4e67e1609dbc7",
-	5: "9d7fe0706666d6a84d25b87e806a04b9b626de19"}
+	5: "9d7fe0706666d6a84d25b87e806a04b9b626de19", 7: "778f9bffde390bb773b3c1985157a20aeba06ad2"}
 
 // 备份的来源与规模常量：改动它们会改动 manifest 的期望值，生成器与测试都从 manifest 读，不写死。
 const (
@@ -98,6 +99,7 @@ type fx struct {
 type evRow struct {
 	typ, object, actor, reason, payload, basis, evidence string
 	at                                                   time.Time
+	grant                                                string // 授权单 id（授权单签发的代答）；缺省为空
 }
 
 func js(v any) string {
@@ -116,7 +118,7 @@ func actorSystem(principal, via string) string {
 }
 
 func (f *fx) emit(typ, object, actor, reason string, payload any, at time.Time, basis, evidence string) {
-	f.events = append(f.events, evRow{typ, object, actor, reason, js(payload), basis, evidence, at})
+	f.events = append(f.events, evRow{typ, object, actor, reason, js(payload), basis, evidence, at, ""})
 }
 
 func (f *fx) exec(q string, a ...any) {
@@ -219,6 +221,9 @@ func (f *fx) populate() {
 	f.backlog()
 	f.items()
 	f.rulesState()
+	f.mail16K()
+	f.materials()
+	f.grantEvent()
 }
 
 // owner：Web 口令（固定盐，逐字节可重复）、一个登录会话有效、一个已过期、观察与委托 token。
@@ -472,7 +477,7 @@ func (f *fx) backlog() {
 		rule := "inbound-triage/source_rules/github-issue"
 		f.events = append(f.events, evRow{sourceDisposed, e.id, actorSystem("rule:"+rule, "rule"),
 			"rule ignore", js(map[string]any{"event": e.id, "disposition": "ignored", "item": "", "rule": rule, "unjudged_reason": ""}),
-			js(map[string]any{"policy_version": 1, "rule_id": rule}), "", e.at.Add(time.Second)})
+			js(map[string]any{"policy_version": 1, "rule_id": rule}), "", e.at.Add(time.Second), ""})
 		f.m.RuleIgnored = append(f.m.RuleIgnored, e.id)
 	}
 	for k := 0; k < nUserIgnored; k++ {
@@ -598,7 +603,20 @@ func (f *fx) flushEvents() {
 	sort.SliceStable(f.events, func(a, b int) bool { return f.events[a].at.Before(f.events[b].at) })
 	for _, e := range f.events {
 		f.exec(`INSERT INTO eventlog_event (type, object, actor, reason, payload, chain_depth, basis, resolved_via, evidence, grant_id, at)
-			VALUES (?, ?, ?, ?, ?, 0, ?, '', ?, '', ?)`, e.typ, e.object, e.actor, e.reason, e.payload, e.basis, e.evidence, e.at.UnixNano())
+			VALUES (?, ?, ?, ?, ?, 0, ?, '', ?, ?, ?)`, e.typ, e.object, e.actor, e.reason, e.payload, e.basis, e.evidence, e.grant, e.at.UnixNano())
+		if e.grant != "" {
+			var seq int64
+			r, err := f.tx.Query(`SELECT MAX(seq) FROM eventlog_event`)
+			if err != nil {
+				panic(err)
+			}
+			r.Next()
+			if err := r.Scan(&seq); err != nil {
+				panic(err)
+			}
+			r.Close()
+			f.m.GrantEvents = append(f.m.GrantEvents, GrantEvent{Seq: seq, Object: e.object, Grant: e.grant})
+		}
 	}
 }
 
@@ -684,4 +702,43 @@ func migrationChecksums(reg *store.Registry) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// mail16K：升级演练要读回的长正文：三条正文恰好 16384 字节（升级前各来源把正文截在 16 KiB）的邮件事件。
+// 只用版本 2 就有的列；已处置为挂靠，不进积压与忽略的计数。
+func (f *fx) mail16K() {
+	for k := 0; k < 3; k++ {
+		id := fmt.Sprintf("sev_fx_mail16k_%02d", k)
+		line := fmt.Sprintf("synthetic 16 KiB mail body %d: the quick brown fox jumps over the lazy dog.\n", k)
+		body := strings.Repeat(line, 16384/len(line)+1)[:16384]
+		at := T0.Add(-time.Duration(60+k*3) * time.Hour)
+		e := sevent{id: id, source: "src_mail_work", typ: "mail.received", subject: fmt.Sprintf("Long mail %d", k), keys: []string{fmt.Sprintf("thread:fx-long-%d", k)},
+			at: at, disp: "attached", item: "itm_fx_prop_01", attach: "attached", sender: "fixture@example.invalid", detail: body}
+		f.insertEvent(e)
+		f.emit(sourceDisposed, id, actorSystem(system, "source"), "attached by correlation key",
+			map[string]any{"event": id, "disposition": "attached", "item": e.item, "rule": "", "unjudged_reason": ""}, at.Add(time.Second), "", "")
+		f.m.Mail16K = append(f.m.Mail16K, MailEvent{ID: id, BodySHA256: sha(body)})
+	}
+	f.m.ExternalUnselectedSource = "src_mail_personal" // v0.1 登记的来源：升级后外部外发范围仍是“未选择”（§14.14）
+}
+
+// materials：一件托管型（有仓库位置与 hosted_material 行）、一件自有型（有一条当前修订）。结构版本 8 之前没有形态列，靠位置推定。
+func (f *fx) materials() {
+	at := T0.Add(-20 * 24 * time.Hour)
+	f.exec(`INSERT INTO materials (id, project, kind, title, tags, location, current_rev) VALUES ('mat_fx_hosted', ?, 'design', 'Fixture hosted design', '[]', 'fixture-repo:docs/design.md', '')`, idProjectMain)
+	f.exec(`INSERT INTO hosted_material (material, repo, path, last_commit) VALUES ('mat_fx_hosted', 'fixture-repo', 'docs/design.md', 'c0ffee')`)
+	f.exec(`INSERT INTO materials (id, project, kind, title, tags, location, current_rev) VALUES ('mat_fx_owned', ?, 'reference', 'Fixture owned note', '[]', '', 'rev_fx_owned_1')`, idProjectMain)
+	f.exec(`INSERT INTO revisions (id, material, seq, content, actor, reason, based_on, state, created_at, summary) VALUES ('rev_fx_owned_1', 'mat_fx_owned', 1, 'synthetic owned material content', ?, 'owner wrote', '', 'current', ?, '')`, actorHuman(), at.UnixNano())
+	f.m.HostedMaterial, f.m.OwnedMaterial = "mat_fx_hosted", "mat_fx_owned"
+}
+
+// grantEvent：一张授权单与一条凭它写下的 Event（代答）；升级后 apa why 回放仍要显示原授权单 id。
+func (f *fx) grantEvent() {
+	at := T0.Add(-5 * 24 * time.Hour)
+	doc := js(map[string]any{"id": "grt_fx_1", "principal": "owner", "grantee": map[string]string{"credential": "cred_fx_delegate"},
+		"scope": map[string]any{"projects": []string{idProjectMain}, "kinds": []string{}, "items": []string{}}, "actions": []string{"item.update"}, "risk_ceiling": "normal",
+		"created_at": at.UTC().Format(time.RFC3339)})
+	f.exec(`INSERT INTO policy_grant (id, credential, doc, expires_at, created_at) VALUES ('grt_fx_1', 'cred_fx_delegate', ?, 0, ?)`, doc, at.UnixNano())
+	f.events = append(f.events, evRow{"item.updated", "itm_fx_prop_01", js(map[string]string{"type": "agent", "principal": "cred_fx_delegate", "via": "api"}),
+		"updated under grant", js(map[string]any{"id": "itm_fx_prop_01", "version": 3}), js(map[string]any{"grant": "grt_fx_1"}), "", at.Add(time.Hour), "grt_fx_1"})
 }

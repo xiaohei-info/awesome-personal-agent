@@ -21,7 +21,8 @@ func v2Home(t *testing.T) (home string, newer *store.Registry) {
 	t.Helper()
 	oldSrc := store.Module{Name: registry.Module.Name, Migrations: registry.Module.Migrations[:1]}
 	old := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, policy.Module, oldSrc} {
+	oldEvents := store.Module{Name: eventlog.Module.Name, Migrations: eventlog.Module.Migrations[:2]} // 结构版本 8 之前
+	for _, m := range []store.Module{oldEvents, policy.Module, oldSrc} {
 		must(t, old.Register(m))
 	}
 	home = filepath.Join(t.TempDir(), "apa")

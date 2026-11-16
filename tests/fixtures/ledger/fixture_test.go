@@ -568,4 +568,5 @@ func TestManifestMigrationChecksumsMatchSource(t *testing.T) {
 
 // frozenDigest：冻结版本的迁移校验和摘要，取自冻结提交的二进制 init 出的账本（store_migrations 按 module/version/checksum 排序后的 sha256）。
 var frozenDigest = map[int]string{2: "31ac079af2c9a4b100c52c40cffcfd5bd90a3fd23a5c94bf20ad62c9102e2a24", 3: "6059c04b42871d5df5973bfba18f80de685e56277443fb350254bd8cabb551a9",
-	4: "c2317e33a0dd3f36a89d5d1603f1bb76fbc7251611e38a1b7f33c83082252d85", 5: "80e72558ecf0c4ea12a0916e26ba9d801ecbb6080e5f414da41e38c547b0986e"}
+	4: "c2317e33a0dd3f36a89d5d1603f1bb76fbc7251611e38a1b7f33c83082252d85", 5: "80e72558ecf0c4ea12a0916e26ba9d801ecbb6080e5f414da41e38c547b0986e",
+	7: "7ce6583725c7975c0553a31d45e6e54a52bc9e16924c4b79227199d6f73124ff"}
