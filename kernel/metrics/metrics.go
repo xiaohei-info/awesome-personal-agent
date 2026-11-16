@@ -57,6 +57,21 @@ func Explain(r packs.SourceRule, ev domain.SourceEvent) []Condition {
 	return out
 }
 
+// DeliverUrgent 为 notify_urgent 规则产生的新建议 it（来源事件 ev）产出即时提醒，返回投递 id（即建议事项 id）。
+// 内容是标题、摘要、起草给的理由与指向这条建议的 Web 链接；同一条建议重复调用不会重复提醒。
+func (a Alerter) DeliverUrgent(tx *store.Tx, ev domain.SourceEvent, it domain.Item, rule string) (string, error) {
+	summary := it.Summary
+	if it.Proposal != nil && it.Proposal.Reason != "" {
+		if summary != "" {
+			summary += "\n"
+		}
+		summary += it.Proposal.Reason
+	}
+	err := a.Attention.Urgent(tx, domain.DeliveryOrigin{SourceEvent: ev.ID, Rule: rule, Source: ev.SourceID, Item: it.ID},
+		domain.DeliveryContent{Title: it.Title, Summary: summary})
+	return it.ID, err
+}
+
 // Alerter 产出 alert 出口的提醒。
 type Alerter struct{ Attention *attention.Attention }
 

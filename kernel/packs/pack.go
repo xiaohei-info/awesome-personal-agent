@@ -95,6 +95,8 @@ type SourceRule struct {
 	OnUpdate        string   `yaml:"on_update" json:",omitempty"` // refresh | attach：关联键命中本人未委派的事项时（§9.4）；省略按来源对象型处理
 	Accept          string   `yaml:"accept"`
 	Mode            string   `yaml:"mode"`
+	// NotifyUrgent 只用于 screen、extract 出口（C.5）：规则开启后它产生的新建议，起草或抽取判为 urgent 的即时提醒。
+	NotifyUrgent bool `yaml:"notify_urgent" json:",omitempty"`
 }
 
 type WebhookScheme struct {
@@ -583,6 +585,9 @@ func checkSourceRule(r SourceRule) error {
 	}
 	if r.Prescreen == NoPrescreen && r.Then != "extract" {
 		return fmt.Errorf("%s: prescreen: %s only applies to then: extract", where, NoPrescreen)
+	}
+	if r.NotifyUrgent && r.Then != "screen" && r.Then != "judge" && r.Then != "extract" {
+		return fmt.Errorf("%s: notify_urgent only applies to then: screen or then: extract", where)
 	}
 	if r.Then == "alert" && len(r.Where) == 0 {
 		return fmt.Errorf("%s: an alert rule must carry where[]: alert cannot hang on every event", where)

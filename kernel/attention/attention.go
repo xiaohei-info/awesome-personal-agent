@@ -406,6 +406,19 @@ func (a *Attention) Alert(tx *store.Tx, o domain.DeliveryOrigin, content domain.
 		version: 1, content: content, origin: &o})
 }
 
+// Urgent 让 notify_urgent 规则产生的新建议即时提醒（§9.3）：投递 id 取建议事项 id，同一条建议只提醒一次；
+// 与 Alert 一样不带事项（建议仍是 proposed，不计承诺），origin 记来源事件、规则与这条建议；受静默、日上限和静音约束。
+// 内容的 Web 链接指向这条建议。在调用方的事务里运行。
+func (a *Attention) Urgent(tx *store.Tx, o domain.DeliveryOrigin, content domain.DeliveryContent) error {
+	_, pol, err := policy.Current(tx)
+	if err != nil {
+		return err
+	}
+	content.WebURL = a.o.WebURL(o.Item)
+	return a.offer(tx, pol, held{id: o.Item, class: domain.DeliveryReminder, priority: domain.PriorityNormal,
+		version: 1, content: content, origin: &o})
+}
+
 func (a *Attention) remind(tx *store.Tx, pol policy.Policy, it domain.Item, kind string, due time.Time, title, summary string, options ...string) error {
 	ver, err := command.Version(tx, it.ID)
 	if err != nil {
