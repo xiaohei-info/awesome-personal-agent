@@ -3,6 +3,7 @@ module github.com/xiaohei-info/awesome-personal-agent
 go 1.26.0
 
 require (
+	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/go-telegram/bot v1.27.0
 	golang.org/x/net v0.62.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -10,6 +11,7 @@ require (
 )
 
 require (
+	github.com/JohannesKaufmann/dom v0.3.1 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
