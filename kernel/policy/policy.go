@@ -161,6 +161,20 @@ type PermissionCap struct {
 	ByHarness map[string]string `json:"by_harness"`
 }
 
+// MainSessionLaunch 是以 Agent 本人身份做事时怎么拉起（§13.6）：按 Agent（harness）与按规则（规则键）各一份，
+// 值是 headless（单独开一个后台会话）或 wake（在和本人的对话里接着做）；没有的键表示没选，按下一级取。只在 Web 改。
+// 旧版本策略文档没有这个段，读作两份空表。
+type MainSessionLaunch struct {
+	ByHarness map[string]string `json:"by_harness"`
+	ByRule    map[string]string `json:"by_rule"`
+}
+
+// 拉起方式的两个取值，与 domain.Run.Launch 一致。
+const (
+	LaunchHeadless = "headless"
+	LaunchWake     = "wake"
+)
+
 // 端点位置与判断协议（§6.13、§8.8）。
 const (
 	LocalityLocal    = "local"
@@ -278,8 +292,9 @@ type Policy struct {
 	ChannelAnswerers map[string][]string `json:"channel_answerers"`
 	Channels         map[string]Channel  `json:"channels"`
 	// DefaultHarness 是规则未指定 harness 时任务型与后台运行用的 harness（§13.6）；为空表示未设置，任务型转 needs_input。
-	DefaultHarness string   `json:"default_harness"`
-	Judgment       Judgment `json:"judgment"`
+	DefaultHarness    string            `json:"default_harness"`
+	MainSessionLaunch MainSessionLaunch `json:"main_session_launch"`
+	Judgment          Judgment          `json:"judgment"`
 	// ModelsPaused 为真时两个端点的配置与密钥原样保留，但内核按两者都未配置运行（Current 给出的就是这个视图，§8.7）。
 	// 没有任何端点时规整为假。只在 Web 改。
 	ModelsPaused bool `json:"models_paused"`
@@ -304,6 +319,7 @@ func Default() Policy {
 			"requirement": WriteProposed, "design": WriteProposed, "guideline": WriteProposed,
 		}},
 		PermissionCap:      PermissionCap{Default: PermRead, ByHarness: map[string]string{}},
+		MainSessionLaunch:  MainSessionLaunch{ByHarness: map[string]string{}, ByRule: map[string]string{}},
 		ScreeningTimeoutMs: DefaultScreeningTimeoutMs,
 		ForwardAllowlist:   map[string][]string{},
 		ChannelAnswerers:   map[string][]string{},
@@ -474,6 +490,16 @@ func normalize(p Policy) (Policy, error) {
 	}
 	if p.PermissionCap.ByHarness == nil {
 		p.PermissionCap.ByHarness = map[string]string{}
+	}
+	for field, m := range map[string]*map[string]string{"by_harness": &p.MainSessionLaunch.ByHarness, "by_rule": &p.MainSessionLaunch.ByRule} {
+		if *m == nil {
+			*m = map[string]string{}
+		}
+		for k, v := range *m {
+			if k == "" || !oneOf(v, LaunchHeadless, LaunchWake) {
+				return p, invalid("main_session_launch %s %q launch %q", field, k, v)
+			}
+		}
 	}
 
 	if p.ScreeningTimeoutMs <= 0 {

@@ -387,6 +387,26 @@ func TestStoredDocWithoutDailyCapDefaultsTo20(t *testing.T) {
 	}
 }
 
+// 升级前的策略文档没有 main_session_launch：读作两份空表（都没选，按声明与无头运行），不改写存储；取值只能是两种拉起方式。
+func TestMainSessionLaunchOldDocAndValues(t *testing.T) {
+	p, _, err := decode(legacyDoc)
+	if err != nil || p.MainSessionLaunch.ByHarness == nil || p.MainSessionLaunch.ByRule == nil || len(p.MainSessionLaunch.ByHarness)+len(p.MainSessionLaunch.ByRule) != 0 {
+		t.Fatalf("old doc: %v %+v", err, p.MainSessionLaunch)
+	}
+	ok := Default()
+	ok.MainSessionLaunch.ByHarness["hx"], ok.MainSessionLaunch.ByRule["p/event_rules/r"] = LaunchWake, LaunchHeadless
+	if _, err := normalize(ok); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []map[string]string{{"hx": "chat"}, {"": "wake"}} {
+		q := Default()
+		q.MainSessionLaunch.ByRule = bad
+		if _, err := normalize(q); err == nil {
+			t.Fatalf("accepted %v", bad)
+		}
+	}
+}
+
 // 旧账本里存的是 v0.1 的单一 model_endpoint 文档（flow-upgrade-rollback / flow-endpoint-config）。
 const legacyDoc = `{"web_only":{"categories":["funds"],"rules":[]},"disturb":{"routes":{"decision":"inject"},"merge_window_sec":0,"remind_on_deadline":true},
 "material_write":{"default":"proposed","kinds":{}},"permission_cap":{"default":"read","by_harness":{}},

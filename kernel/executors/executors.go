@@ -104,9 +104,24 @@ func (h Headless) Means(key string, code int, stdout, stderr []byte) bool {
 	return false
 }
 
+// MainSession 声明以 Agent 本人身份运行时能怎么拉起（§13.6、附录 A.2）：无头运行必有；Wake 为真表示 Agent 侧装了唤醒插件，
+// 也能在真实主会话里接着做。用哪种由本人在 Web 选（策略的 main_session_launch），不在声明里。
+// Launch 是旧声明的单值：wake 视为支持唤醒，并作为本人没选时的初始值；headless 或空不表达任何选择。
 type MainSession struct {
+	Wake   bool     `json:"wake,omitempty"`
 	Launch string   `json:"launch,omitempty"`
 	Args   []string `json:"args,omitempty"`
+}
+
+// CanWake：声明支持唤醒（新字段 wake，或旧声明 launch: wake）。
+func (m *MainSession) CanWake() bool { return m != nil && (m.Wake || m.Launch == "wake") }
+
+// Initial 是旧声明 launch: wake 留下的初始选择；其余为空。
+func (m *MainSession) Initial() string {
+	if m != nil && m.Launch == "wake" {
+		return "wake"
+	}
+	return ""
 }
 
 // Declaration 是 `apa declare` 提交或主机配置文件登记的整份声明。

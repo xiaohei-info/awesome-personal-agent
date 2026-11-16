@@ -362,8 +362,8 @@ func (s *Service) decide(tx *store.Tx, itemID string, sessionLost bool) (Outcome
 		reason = "规则没有指定 harness，Web 设置里也没有默认 harness"
 	case !f.declared:
 		reason = "没有已确认的无头运行声明：" + harness
-	case runner == "main_session" && f.rec.Declaration.MainSession != nil && f.rec.Declaration.MainSession.Launch == "wake":
-		reason = "harness " + harness + " 声明了唤醒真实主会话，不是无头运行"
+	case f.base.Run.Launch == policy.LaunchWake: // 续接只接无头运行；唤醒回合的会话在真实主会话里（§13.6）
+		reason = "原运行是在对话里接着做的（唤醒 " + harness + "），不是无头运行"
 	case hl.Access[tier] == nil:
 		reason = "无头运行声明未提供权限档位：" + tier
 	case tierRank[tier] == 0 || tierRank[tier] > tierRank[limit]:

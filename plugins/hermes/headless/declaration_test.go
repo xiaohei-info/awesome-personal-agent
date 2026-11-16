@@ -46,7 +46,8 @@ func TestDeclarationIsAcceptedByKernel(t *testing.T) {
 			t.Errorf("%s: session_missing = %v, want %v", name, got, c.want)
 		}
 	}
-	if d.MainSession == nil || d.MainSession.Launch != "headless" {
-		t.Fatalf("main_session must be headless: %+v", d.MainSession)
+	// The file only states capability; wake is switched on by the plugin when apa-wake runs, never a launch choice.
+	if d.MainSession == nil || d.MainSession.CanWake() || d.MainSession.Launch != "" {
+		t.Fatalf("main_session must declare no wake and no launch choice: %+v", d.MainSession)
 	}
 }

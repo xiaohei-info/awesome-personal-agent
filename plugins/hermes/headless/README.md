@@ -16,3 +16,4 @@ Measured on Hermes v0.22.5 (not copied from appendix A). From v0.23.0 `--oneshot
 | `access.edit` / `full` | adds `file,terminal,delegation`; `full` adds `--yolo` |
 | credential `env` | `APA_RUN`/`APA_TOKEN`/`APA_URL` reach the `apa_*` tools (live test: delegate/ask/report carry `Bearer <run credential>`) **and** the `terminal` subprocess (live test `test_terminal_tool_credential_visibility_is_measured` asserts the shell printed `MARK_TOKEN_VISIBLE`), so a bare `apa` in `terminal` works with the edit/full tiers; no `env_passthrough` needed on this host config |
 | `main_session.args` | not declared: enabled plugins (apa-tools) load in `--oneshot`, verified live |
+| `main_session.wake` | `false` in the file; `apa_declare_headless` sends `true` when `APA_WAKE_SESSION_KEY` is set (apa-wake on), so the owner can pick "continue in our chat" in Web. Not a launch choice: the owner picks per Agent and per rule |

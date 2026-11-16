@@ -11,7 +11,10 @@ import { strings } from "./strings";
 
 // 形状对应 GET /v1/rules（含 class）、PATCH /v1/rules/{id}/mode（附录 B.2）、GET /v1/packs 与 GET /v1/audit/events（§14.8）。
 // 谁能切、切到什么、观察记录怎么产生都由服务端判定；本页只搬运选择，被拒绝时模式保持原值。只改模式，不编辑规则内容。
-interface Rule { key: string; pack: string; group: string; id: string; mode: string; class?: "reminder" | "action" }
+// 以 Agent 本人身份运行的规则（runner=main_session）另可覆盖 Agent 在哪里做：写 /settings/policy 的 main_session_launch.by_rule，
+// 按 Agent 的设置原样带回；没覆盖就沿用 Agent 设置（§13.6）。
+interface Rule { key: string; pack: string; group: string; id: string; mode: string; class?: "reminder" | "action"; runner?: string }
+interface Launch { by_harness?: Record<string, string>; by_rule?: Record<string, string> }
 interface Pack { name: string; description?: string }
 interface Observed { seq: number; object: string; at: string; reason?: string; payload?: { would_do?: unknown } }
 
@@ -72,6 +75,15 @@ function Modes({ id, name, value, onChange }: { id: string; name: string; value:
   );
 }
 
+function LaunchPick({ name, value, onChange }: { name: string; value: string; onChange: (v: string) => void }) {
+  const t = useT(strings);
+  return (
+    <select aria-label={t.launchOf(name)} value={value || "inherit"} onChange={(e) => onChange(e.target.value === "inherit" ? "" : e.target.value)}>
+      {["inherit", "headless", "wake"].map((v) => <option key={v} value={v}>{t.launchHow[v]}</option>)}
+    </select>
+  );
+}
+
 export function RulesPage() {
   const { api } = useSession();
   const lang = useLang();
@@ -92,6 +104,21 @@ export function RulesPage() {
   }, [api]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { api.get<{ packs: Pack[] }>("/packs").then((r) => setPacks(r.packs), () => setPacks([])); }, [api]);
+  const [launch, setLaunch] = useState<Launch | null>(null);
+  useEffect(() => { api.get<{ main_session_launch?: Launch }>("/settings/policy").then((p) => setLaunch(p.main_session_launch ?? {}), () => setLaunch(null)); }, [api]);
+
+  async function setRuleLaunch(r: Rule, v: string) {
+    const by_rule = { ...(launch?.by_rule ?? {}) };
+    if (v) by_rule[r.key] = v;
+    else delete by_rule[r.key];
+    try {
+      const next = await api.put<{ main_session_launch: Launch }>("/settings/policy", { main_session_launch: { by_harness: launch?.by_harness ?? {}, by_rule } });
+      setLaunch(next.main_session_launch);
+      setError(null);
+    } catch (e) {
+      setError(e); // 选择框的值仍是服务端未改动的原值
+    }
+  }
 
   async function setMode(r: Rule, mode: string) {
     try {
@@ -130,6 +157,7 @@ export function RulesPage() {
                       {raw && <code className="raw-id">{r.key}</code>}
                     </p>
                     {r.mode === "observe" && <Trial rule={r} name={name} />}
+                    {r.runner === "main_session" && launch && <LaunchPick name={name} value={launch.by_rule?.[r.key] ?? ""} onChange={(v) => void setRuleLaunch(r, v)} />}
                   </div>
                   <Modes id={r.key} name={name} value={r.mode} onChange={(m) => void setMode(r, m)} />
                 </li>

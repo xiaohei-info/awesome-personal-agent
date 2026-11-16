@@ -19,6 +19,7 @@ interface Declaration {
   harness: string;
   name?: Label;
   headless?: { command?: string[]; access?: Record<string, unknown>; tools?: Record<string, Label[]>; tool_notes?: Record<string, Label> };
+  main_session?: { wake?: boolean; launch?: string };
 }
 interface Rec { harness: string; rev: number; state: string; declaration: Declaration }
 interface Credential { id: string; kind: string; label?: string; harness?: string; seen_harness?: string; revoked_at?: string }
@@ -177,6 +178,7 @@ function AgentCard({ h, data, pol, lim, save, reload, onError, onSecret }: {
         {t.useDefault}
       </label>
       <Tools h={h} live={live?.declaration} lim={lim} save={save} />
+      {live && <Launch h={h} live={live.declaration} pol={pol} save={save} />}
       <Decide h={h} grants={data.grants.filter((g) => g.grantee.agent === h)} reload={reload} />
       <details>
         <summary>{t.advanced}</summary>
@@ -226,6 +228,33 @@ function Tools({ h, live, lim, save }: { h: string; live?: Declaration; lim: Doc
       ) : (
         live && <p data-testid={"tools-" + h}>{[...tools(tier), note(tier)].filter(Boolean).join(" · ")}</p>
       )}
+    </Card>
+  );
+}
+
+/** 声明能不能在对话里接着做：新字段 wake，或旧声明 launch: wake（§13.6）。 */
+export const canWake = (d?: Declaration) => !!(d?.main_session?.wake || d?.main_session?.launch === "wake");
+
+// 以 Agent 本人身份做事时在哪里做：写 main_session_launch.by_harness[h]，按规则的覆盖原样带回（PUT 按段替换）。
+// 没选过时显示旧声明留下的初始值，再没有就是单独后台会话；换选择不用重新确认声明。声明生效前不出现。
+function Launch({ h, live, pol, save }: { h: string; live: Declaration; pol: Doc; save: Save }) {
+  const t = useT(strings);
+  const cur = (pol.main_session_launch ?? {}) as { by_harness?: Record<string, string>; by_rule?: Record<string, string> };
+  const initial = cur.by_harness?.[h] ?? (live.main_session?.launch === "wake" ? "wake" : "headless");
+  const [how, setHow] = useDraft(pol.main_session_launch, () => initial);
+  const wake = canWake(live);
+  const submit = () => save("policy", { main_session_launch: { by_harness: { ...(cur.by_harness ?? {}), [h]: how }, by_rule: cur.by_rule ?? {} } });
+  return (
+    <Card title={t.launchTitle} onSave={submit}>
+      <fieldset className="seg-radio" role="radiogroup" aria-label={t.launchTitle}>
+        {["headless", "wake"].map((v) => (
+          <label key={v}>
+            <input type="radio" name={"launch-" + h} value={v} checked={how === v} disabled={v === "wake" && !wake} onChange={() => setHow(v)} />
+            {t.launchHow[v]}
+          </label>
+        ))}
+      </fieldset>
+      {!wake && <p className="sub">{t.noWake}</p>}
     </Card>
   );
 }

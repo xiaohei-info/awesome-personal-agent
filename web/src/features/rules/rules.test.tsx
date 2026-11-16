@@ -11,6 +11,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const K1 = "brief/event_rules/tag-hit"; // 不在词表里：名字取包的说明
 const K2 = "follow-up/clock_rules/stale-check"; // 内置规则：名字取词表
 const K3 = "gone/event_rules/x"; // 包已不在：没有 class
+const K4 = "background-run/event_rules/handle"; // 以 Agent 本人身份运行
 const N1 = "周期简报", N2 = "14 天没动静的事项问我一声";
 
 function server(opts: { denied?: boolean; auditFails?: boolean } = {}) {
@@ -18,7 +19,10 @@ function server(opts: { denied?: boolean; auditFails?: boolean } = {}) {
     { key: K1, pack: "brief", group: "event_rules", id: "tag-hit", mode: "observe", hash: "h1", class: "action" },
     { key: K2, pack: "follow-up", group: "clock_rules", id: "stale-check", mode: "auto", hash: "h2", class: "reminder" },
     { key: K3, pack: "gone", group: "event_rules", id: "x", mode: "off", hash: "h3" },
+    { key: K4, pack: "background-run", group: "event_rules", id: "handle", mode: "auto", hash: "h4", class: "action", runner: "main_session" },
   ];
+  let launch: any = { by_harness: { hermes: "wake" }, by_rule: {} };
+  const puts: any[] = [];
   const now = Date.now();
   const observed = [
     { seq: 7, type: "rule.observed", object: "itm_a", actor: { type: "system", principal: "rule:" + K1, via: "rule" }, at: new Date(now - 3600e3).toISOString(), chain_depth: 0, reason: "observe", payload: { would_do: [{ action: "create_timer" }] } },
@@ -33,6 +37,13 @@ function server(opts: { denied?: boolean; auditFails?: boolean } = {}) {
     if (url === "/v1/packs") return json(200, { packs: [{ name: "brief", description: N1 }, { name: "follow-up", description: "跟进" }] });
     if (url === "/v1/items/itm_a") return json(200, { item: { id: "itm_a", title: "续保材料确认" } });
     if (url === "/v1/rules" && method === "GET") return json(200, { rules });
+    if (url === "/v1/settings/policy") {
+      if (method === "PUT") {
+        puts.push(JSON.parse(init.body as string));
+        launch = puts.at(-1).main_session_launch;
+      }
+      return json(200, { version: 1, main_session_launch: launch });
+    }
     const m = /^\/v1\/rules\/([^/]+)\/mode$/.exec(url);
     if (m && method === "PATCH") {
       const body = JSON.parse(init.body as string);
@@ -53,7 +64,7 @@ function server(opts: { denied?: boolean; auditFails?: boolean } = {}) {
     if (url.startsWith("/v1/items/")) return json(404, { code: "not_found", why: "no", next: "" });
     return json(404, { code: "not_found", why: "no such route", next: "" });
   }) as unknown as typeof fetch;
-  return { impl, patches, audits, rules };
+  return { impl, patches, audits, rules, puts };
 }
 
 function mount(fetchImpl: typeof fetch) {
@@ -124,6 +135,18 @@ describe("自动规则 › 规则", () => {
     await screen.findByRole("region", { name: "提醒我" });
     await waitFor(() => expect(s.audits.length).toBe(1));
     expect(s.audits.map((a) => a.get("actor"))).toEqual(["rule:" + K1]);
+  });
+
+  it("以 Agent 本人身份运行的规则可覆盖在哪里做：默认沿用 Agent 设置；改选只写这条规则，Agent 的设置原样带回；改回沿用即删掉覆盖", async () => {
+    const s = server();
+    mount(s.impl);
+    const pick = (await screen.findAllByRole("combobox"));
+    expect(pick).toHaveLength(1); // 只有 runner=main_session 的规则有
+    expect(pick[0]).toHaveValue("inherit");
+    await userEvent.selectOptions(pick[0], "单独后台会话");
+    await waitFor(() => expect(s.puts.at(-1)).toEqual({ main_session_launch: { by_harness: { hermes: "wake" }, by_rule: { [K4]: "headless" } } }));
+    await userEvent.selectOptions(screen.getByRole("combobox"), "沿用 Agent 设置");
+    await waitFor(() => expect(s.puts.at(-1)).toEqual({ main_session_launch: { by_harness: { hermes: "wake" }, by_rule: {} } }));
   });
 
   it("ACT-RULE-03: 观察记录读取失败显示错误", async () => {

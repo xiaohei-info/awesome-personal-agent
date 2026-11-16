@@ -51,7 +51,8 @@
 | `headless.credential` | 运行凭据的传递方式：`env`（默认）或 `file`（§7.7） |
 | `headless.exit_codes` | 已文档化的退出码语义；未文档化时以回执为准 |
 | `headless.exit_output` | 可选。按语义键收窄 `exit_codes`：声明后，退出码命中且 stdout 或 stderr 含所列任一片段，才算该语义。用于多种失败共用一个退出码的 harness，片段以实测原文为准；未声明时只看退出码 |
-| `main_session.launch` | `headless` 或 `wake`，二者择一；只有带网关的 harness 可声明 `wake`；默认 `headless` |
+| `main_session.wake` | 可选，布尔。为真表示 Agent 侧装了唤醒插件，以 Agent 本人身份做事时也能在真实主会话里接着做；只有带网关的 harness 可声明。只说能力：用哪种由本人在 Web 按 Agent 或按规则选（主文档 §13.6），换选择不需要重新提交声明。无头运行总是支持 |
+| `main_session.launch` | 旧字段，兼容读取：`wake` 视为 `wake: true`，并作为本人没选过时的初始值；`headless` 或未写不表达选择。新插件不写 |
 | `main_session.args` | 可选。让无头运行加载主会话同一份指令与技能所需的额外标志，未声明时沿用 `headless.command` |
 | `executors[]` | 可选，兼容旧插件：`{id, kind, host?, scenarios[]}`。本人确认后并入执行者名录，不删除已登记的条目（主文档 §6.17）。新插件不提交，执行者在第一次委派时登记 |
 | `selfcheck.command` | 可选。自检命令，输出格式见 A.1。由 `apa doctor` 在 APA 主机上以运行它的账号执行，不经外呼调用器；与声明的其余部分一样，经本人在 Web 确认后才会被执行 |
@@ -79,7 +80,7 @@ headless:
   exit_codes: {ok: [0], session_missing: [1]}
   exit_output: {session_missing: ["No session found matching"]}
 main_session:
-  launch: headless
+  wake: false   # 插件在 apa-wake 开着时提交 true（plugins/hermes/headless）
 ```
 
 ## A.3 各 harness 的无头运行细节

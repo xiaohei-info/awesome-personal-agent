@@ -2,8 +2,8 @@
 // 命中后依次做前置校验——该事项已有在途运行则跳过并记 Event；链路深度超限只记录不派发；
 // 按当前策略复核（规则仍是 auto、权限档位不超过 Web 设置的上限且声明已提供、task 运行者的执行者在项目名单内）
 // 不通过则转 needs_input——通过后在同一事务写 Run 和 Event（策略版本、规则 id），再按声明的拉起方式启动：
-// 无头运行经外呼调用器拉起（Run 为 queued）；main_session 落到声明了 launch: wake 的 harness 时，Run 写为外部运行（running，
-// 不占额度、不起进程），同一事务交唤醒模块产出 class=wake 投递，由网关插件领取。
+// 无头运行经外呼调用器拉起（Run 为 queued）；main_session 的拉起方式取规则覆盖 ?? Agent 设置 ?? 声明初始值 ?? 无头（launchOf），
+// 为唤醒时 Run 写为外部运行（running，不占额度、不起进程），同一事务交唤醒模块产出 class=wake 投递，由网关插件领取。
 // 运行结束仍 open、失败或超时，事项转 needs_input，不重试。
 //
 // 运行参数（runner、harness、access、cwd、executor）只来自规则动作、提示词模板和 Web 设置，不来自触发事件的内容（§14.10）。
@@ -94,7 +94,7 @@ type Options struct {
 	DefaultTimeout time.Duration
 	// MaxChainDepth 是链路深度阈值，默认与命令管线一致（§14.9）。
 	MaxChainDepth int
-	// Wake 产出唤醒投递；为空时声明了 launch: wake 的 harness 不拉起，转 needs_input。
+	// Wake 产出唤醒投递；为空时选了唤醒的 main_session 运行不拉起，转 needs_input。
 	Wake *wake.Service
 	// OnError 接收 Settle 里无法交给调用方的错误（落账失败等）；可为空。
 	OnError func(runID string, err error)
@@ -336,7 +336,11 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 		}
 	}
 	workDir, noCheckout := projects.WorkDir(sp.cwd, f.project, s.o.Host)
-	wakes := sp.runner == "main_session" && ms.Launch == runidentity.LaunchWake // 拉起方式由声明决定，二者择一（§13.6）
+	var how launchChoice
+	if sp.runner == "main_session" {
+		how = launchOf(f.pol, c.Rule, harness, &ms)
+	}
+	wakes := how.launch == policy.LaunchWake
 	var reason string
 	switch {
 	case f.mode != rules.ModeAuto:
@@ -346,7 +350,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	case !f.declared:
 		reason = "没有已确认的无头运行声明：" + harness
 	case wakes && s.o.Wake == nil:
-		reason = "harness " + harness + " 声明了唤醒真实主会话，但内核没有接入唤醒"
+		reason = "选了在对话里接着做（唤醒 " + harness + "），但内核没有接入唤醒"
 	case headless.Access[sp.access] == nil:
 		reason = "无头运行声明未提供权限档位：" + sp.access
 	case !withinCap(f.pol, harness, sp.access):
@@ -366,7 +370,38 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 			return err
 		}
 	}
-	return s.launch(ctx, c, f, sp, harness, headless, ms, wakes, target, workDir)
+	return s.launch(ctx, c, f, sp, harness, headless, ms, how, target, workDir)
+}
+
+// 拉起方式来自哪一级（§13.6），写进 background.launched 的载荷供处理经过与 `apa why` 展示。
+const (
+	FromRule        = "rule"        // 规则上的覆盖
+	FromAgent       = "agent"       // 该 Agent 的设置
+	FromDeclaration = "declaration" // 旧声明 launch: wake 留下的初始值
+	FromDefault     = "default"     // 都没有，无头运行
+)
+
+// launchChoice 是 main_session 这次的拉起方式；fallback 为真表示选了唤醒但声明不支持，改按无头运行。task 运行者为零值。
+type launchChoice struct {
+	launch, from string
+	fallback     bool
+}
+
+// launchOf：规则覆盖 ?? Agent 设置 ?? 声明初始值 ?? 无头（§13.6）。选了唤醒而声明不支持时不拒绝，按无头运行并留下原因。
+func launchOf(pol policy.Policy, rule, harness string, ms *executors.MainSession) launchChoice {
+	ch := launchChoice{launch: policy.LaunchHeadless, from: FromDefault}
+	switch {
+	case pol.MainSessionLaunch.ByRule[rule] != "":
+		ch = launchChoice{launch: pol.MainSessionLaunch.ByRule[rule], from: FromRule}
+	case pol.MainSessionLaunch.ByHarness[harness] != "":
+		ch = launchChoice{launch: pol.MainSessionLaunch.ByHarness[harness], from: FromAgent}
+	case ms.Initial() != "":
+		ch = launchChoice{launch: ms.Initial(), from: FromDeclaration}
+	}
+	if ch.launch == policy.LaunchWake && !ms.CanWake() {
+		ch.launch, ch.fallback = policy.LaunchHeadless, true
+	}
+	return ch
 }
 
 // createChild 经 delegate.create 建委派子事项（与 `apa delegate` 同一路径：项目名单校验、父事项转 waiting），
@@ -412,7 +447,7 @@ func renderPrompt(body, item, run, project string) string {
 	return strings.NewReplacer(pairs...).Replace(body)
 }
 
-func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, harness string, hl executors.Headless, ms executors.MainSession, wakes bool, target, workDir string) error {
+func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, harness string, hl executors.Headless, ms executors.MainSession, how launchChoice, target, workDir string) error {
 	runID, err := newRunID()
 	if err != nil {
 		return err
@@ -420,9 +455,9 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}
 	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
 		Harness: harness, Access: sp.access, Basis: basis, ChainDepth: f.depth, TimeoutSec: int(sp.timeout / time.Second)}
-	if wakes { // 进程在真实主会话所在处：不写运行目录与命令，凭据由网关插件换取（§13.6）
+	if how.launch == policy.LaunchWake { // 进程在真实主会话所在处：不写运行目录与命令，凭据由网关插件换取（§13.6）
 		run.Launch = runidentity.LaunchWake
-		return s.enqueue(ctx, c, f, proc.Request{Run: run, External: true}, func(tx *store.Tx) error {
+		return s.enqueue(ctx, c, f, how, proc.Request{Run: run, External: true}, func(tx *store.Tx) error {
 			_, err := s.o.Wake.Open(tx, runID)
 			return err
 		})
@@ -449,11 +484,11 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 		run.SessionID = runID
 		argv = append(argv, expand(hl.Session.Assign, "{session_id}", run.SessionID)...)
 	}
-	return s.enqueue(ctx, c, f, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, nil)
+	return s.enqueue(ctx, c, f, how, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, nil)
 }
 
 // enqueue 在一个事务里写 Run、运行关联与 launched 审计记录（与 also 一起提交），再交调度器。
-func (s *Service) enqueue(ctx context.Context, c rules.Call, f facts, req proc.Request, also func(*store.Tx) error) error {
+func (s *Service) enqueue(ctx context.Context, c rules.Call, f facts, how launchChoice, req proc.Request, also func(*store.Tx) error) error {
 	run := req.Run
 	err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		if _, err := proc.Enqueue(tx, req, s.o.Now()); err != nil {
@@ -467,10 +502,20 @@ func (s *Service) enqueue(ctx context.Context, c rules.Call, f facts, req proc.R
 				return err
 			}
 		}
-		body, _ := json.Marshal(map[string]any{"run_id": run.ID, "rule": c.Rule, "runner": run.Runner, "launch": run.Launch,
-			"harness": run.Harness, "access": run.Access, "target": run.Target})
+		p := map[string]any{"run_id": run.ID, "rule": c.Rule, "runner": run.Runner, "launch": run.Launch,
+			"harness": run.Harness, "access": run.Access, "target": run.Target}
+		reason := "rule " + c.Rule + ": background run"
+		if how.from != "" {
+			p["launch_from"] = how.from
+			reason += ", launch " + run.Launch + " from " + how.from + " setting"
+		}
+		if how.fallback {
+			p["launch_fallback"] = true
+			reason += " (wake was chosen but the declaration has no wake support, ran headless)"
+		}
+		body, _ := json.Marshal(p)
 		_, err := eventlog.Append(tx, domain.Event{Type: EvLaunched, Object: f.item.ID, Actor: ruleActor(c.Rule), Basis: run.Basis,
-			Reason: "rule " + c.Rule + ": background run", Payload: body, ChainDepth: f.depth, At: s.o.Now()})
+			Reason: reason, Payload: body, ChainDepth: f.depth, At: s.o.Now()})
 		return err
 	})
 	if err != nil {
