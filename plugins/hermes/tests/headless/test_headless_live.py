@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 import yaml
 
-from helpers import HEADLESS, ROOT, kernel_argv
+from headless_helpers import HEADLESS, ROOT, kernel_argv
 
 REAL_HOME = pathlib.Path(os.environ.get("HERMES_HOME", pathlib.Path.home() / ".hermes"))
 REQUIRE_LIVE = os.environ.get("APA_REQUIRE_LIVE") == "1"

@@ -25,4 +25,4 @@ any failure, missing binary or exception is swallowed. The kernel judges the rec
 
 ## Live gate
 
-`APA_REQUIRE_LIVE=1 python3 -m pytest -q plugins/hermes/tests/receipt/test_live.py` (Hermes at `HERMES_SRC`, Go installed).
+`APA_REQUIRE_LIVE=1 python3 -m pytest -q plugins/hermes/tests/receipt/test_receipt_live.py` (Hermes at `HERMES_SRC`, Go installed).
