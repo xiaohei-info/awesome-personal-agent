@@ -1,9 +1,8 @@
-# sha256: 6c755d426306a7a76a8d096506e1ebd5a2cc2a035b1f036c9577a5d0152ba178
+# sha256: af36b13629c993d85fb3729f30304db8384e12dfcdc87d8c5dd7e9d300b87dda
 work_item_id: 01a1e5df-7973-765e-b612-b6f1d675518a
 status: done
 merged: true
 merged_at: '2026-11-16T23:19:52Z'
-recovery_marker: true
 retry_note: Two reviewer runs finished without submitting a verdict. Implementation
   is unchanged; re-run the review on the current PR head and submit a verdict. If
   the PR no longer merges cleanly, send it back for a rebase instead.

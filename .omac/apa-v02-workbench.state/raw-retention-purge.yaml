@@ -1,6 +1,7 @@
-# sha256: 9d0807a5db3343c12137d6da2a92d4472b597d85f5bccd83cce72f814f4ae078
+# sha256: 9201edaf49d77db3e4adb3b1f5f46d68b05082618c7a2c0e6de2b56f5de62903
 work_item_id: 01a1e5ab-15e0-7381-a5c7-efec8a43a62d
-status: in_progress
+status: in_review
+recovery_marker: true
 retry_note: CI rework budget was spent; last build failure was cli/materials TestMaterialAddLinkProjectFromCheckout
   (not your scope). Rebase the existing branch on origin/main first and rerun all
   contract commands. If that test still fails on your branch only, find whether your
