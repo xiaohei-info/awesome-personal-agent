@@ -72,8 +72,8 @@ kinds:
 | `on_update` | 关联键命中本人名下未委派、未关闭的事项时怎样处理：`refresh`（默认，用新事件刷新原事项）或 `attach`（作为挂靠消息记在原事项上，等待中的事项回到 `open`），见主文档 §9.4 |
 | `correlation_keys` | 从事件字段得到关联键的模板；来源程序已给出时可省略。关联键标识来源对象，同一对象的各版本应得到同一个键 |
 | `merge_key` | 合并键模板；省略时内核按链接或"标题加发送者"推导（主文档 §9.3） |
-| `screen`、`draft`、`prescreen`、`extract` | 各步所用的提示词模板名，省略时依次取内置的 `triage-screen`、`triage-draft`、`capture-prescreen`、`triage-extract`。`prescreen` 另可取保留字 `none`：`extract` 出口跳过预筛，直接抽取，不产生预筛的判断记录（主文档 §9.3）；包里不能有名为 `none` 的提示词模板 |
-| `notify_urgent` | `true` 时，这条规则产生的新建议即时提醒本人，起草或抽取判为"可以等"的与没有给出判断的不提醒（主文档 §9.3）。只用于 `then: screen` 与 `then: extract`。声明它的规则是动作类，`mode` 可省略（初始 `observe`） |
+| `screen`、`draft`、`prescreen`、`extract` | 各步所用的提示词模板名，省略时依次取内置的 `triage-screen`、`triage-draft`、`capture-prescreen`、`triage-extract`。【规划中（v0.2.0）】`prescreen` 另可取保留字 `none`：`extract` 出口跳过预筛，直接抽取，不产生预筛的判断记录（主文档 §9.3）；包里不能有名为 `none` 的提示词模板 |
+| `notify_urgent` | 【规划中（v0.2.0）】`true` 时，这条规则产生的新建议即时提醒本人，起草或抽取判为"可以等"的与没有给出判断的不提醒（主文档 §9.3）。只用于 `then: screen` 与 `then: extract`。声明它的规则是动作类，`mode` 可省略（初始 `observe`） |
 | `accept` | 接受方式，默认 `manual`。声明 `auto` 的规则是动作类，`mode` 可省略（初始 `observe`） |
 | `mode` | `accept: auto`、`then: alert` 与 `notify_urgent: true` 的规则需要：它们是动作类规则，初始只能是 `off` 或 `observe`（缺省 `observe`）。`observe` 时只记录"本来会自动接受"或"本来会提醒"，在 Web 切 `auto` 后才生效。`alert` 规则必须带 `where[]` |
 
@@ -235,7 +235,7 @@ criteria: 涉及真实资金、对外承诺、不可逆操作或权限变更的�
 
 `instruction_path` 的文件由任务型在拉起时写进这次运行的运行目录（文件名 `instruction.txt`，权限 0600），不进提示词正文；包的 `instance_params` 没有字符串参数 `instruction` 时，用了这个占位符的包加载时拒绝；实例没有任务说明时：模板声明了 `default_instruction` 就写它；没有声明则不拉起，事项转 `needs_input`（`SPIKE-ROUTINE`，主文档 §13.5）。实例参数 `instruction` 不超过 2000 字，超过时建实例与改实例都被拒绝。
 
-**入站模板的结构化输入与输出**（主文档 §9.3）。起草（`triage-draft`）、抽取（`triage-extract`）与预筛（`capture-prescreen`）的结构化输入除事件元信息外，都带内核组出的两份清单；模板不必声明，也不能改它们的形状：
+**入站模板的结构化输入与输出**（【规划中（v0.2.0）】其中 `open_items`、`urgent`、`refs` 与抽取候选的整组字段随工作台能力迭代实现；主文档 §9.3）。起草（`triage-draft`）、抽取（`triage-extract`）与预筛（`capture-prescreen`）的结构化输入除事件元信息外，都带内核组出的两份清单；模板不必声明，也不能改它们的形状：
 
 | 输入键 | 内容 |
 |---|---|
@@ -306,7 +306,7 @@ Markdown 模板，占位符由连接模块提供。`agents-md` 包的 `templates
 | `relay_to` 声明在生成型以外的模板上，或指向的不是任务型模板 | 拒绝 |
 | 模板带已移除的字段（`confidence_threshold`、`escalate_to`） | 拒绝，并给出 C.7 的对应写法 |
 | 来源规则的 `then` 不在枚举内；`alert` 没有 `where[]`；`where[]` 的 `op` 不在枚举内，或变化类 `op` 用在 `metrics` 以外的字段上 | 拒绝 |
-| `notify_urgent` 用在 `screen`、`extract` 以外的出口上；`prescreen: none` 用在 `extract` 以外的出口上；包里有名为 `none` 的提示词模板 | 拒绝 |
+| 【规划中（v0.2.0）】`notify_urgent` 用在 `screen`、`extract` 以外的出口上；`prescreen: none` 用在 `extract` 以外的出口上；包里有名为 `none` 的提示词模板 | 拒绝 |
 | `follow_up`、`stale` 规则带 `do[]`；`remind_rounds` 小于 1 | 拒绝 |
 | 包里自报规则类别，或声明不确定带的策略覆盖、外发范围、打扰上限 | 拒绝（属于策略字段） |
 | 动作不在枚举内 | 拒绝 |
@@ -423,13 +423,13 @@ default_instruction: |-
 用 apa item update 把 spec 写回事项。写回成功就是回执，直接结束；声明的字段没写全时事项转给本人（§8.4）。
 ```
 
-简报的资料文件除账本快照外，还带由内核读账本组出的几段材料，不调模型：`digest`（摘要出口 `then: digest` 的来源事件，每条只汇入一份简报一次，写进"知会"一节）、`planned`（按 `planned_for` 取的、计划今天或更早且未完成的事项），以及工作台能力迭代新增的 `schedule`（日程）、`proposals`（上一份简报以来的新增建议与未处置总数）、`decisions`（待决策）、`due_waiting`（到期与等待）、`activity`（当天活动）；`digest` 与 `proposals` 引用的来源事件另带按外发范围裁剪的原文文件。各段的取法见主文档 §7.3"简报的资料"。上面的 `schedule_days`、不带 `sections[].project` 的 `result_fields` 与新的 `default_instruction` 随这些段一起实现；在那之前，内置包仍是每节必须有 `project` 的写法。
+简报的资料文件除账本快照外，还带由内核读账本组出的几段材料，不调模型：`digest`（摘要出口 `then: digest` 的来源事件，每条只汇入一份简报一次，写进"知会"一节）、`planned`（按 `planned_for` 取的、计划今天或更早且未完成的事项），以及工作台能力迭代新增的 `schedule`（日程）、`proposals`（上一份简报以来的新增建议与未处置总数）、`decisions`（待决策）、`due_waiting`（到期与等待）、`activity`（当天活动）；`digest` 与 `proposals` 引用的来源事件另带按外发范围裁剪的原文文件。各段的取法见主文档 §7.3"简报的资料"。【规划中（v0.2.0）】上面的 `schedule_days`、不带 `sections[].project` 的 `result_fields` 与新的 `default_instruction` 随这些段一起实现；在那之前，内置包仍是每节必须有 `project` 的写法。
 
 建实例：`apa instance add brief --param schedule="0 8 * * 1-5"`，到期落为 Timer。到期后内核建好 `brief` 事项，任务型在这个事项上运行，harness 用 Web 设置的默认 harness，资料文件带实例参数（含项目范围），`instruction.txt` 是实例的 `instruction`，没写时是 `default_instruction`。实例由本人建或是开箱的默认安排，这条规则只写回自身事项，且运行不超过 Web 设置的权限上限，所以不走观察模式，省略 `mode`。Agent 还不能后台运行时这次到期跳过，记 `rule.skipped`，不建事项（主文档 §7.3）。
 
 ## C.14 内置包声明的内容
 
-说明开头带 `【规划中（v0.2.0）】` 的包属于 v0.2.0 设计、尚未实现，含义与测试规则见附录 B 开头的"规划标记"。
+说明开头带 `【规划中（v0.2.0）】` 的包属于 v0.2.0 设计、尚未实现，含义与测试规则见附录 B 开头的"规划标记"。C.5、C.7、C.11、C.13 里带同一标记的句子同理：对照测试不解析这几节，但发布前的严格模式要求整个附录的标记清零。
 
 | 包 | 声明的内容 |
 |---|---|
