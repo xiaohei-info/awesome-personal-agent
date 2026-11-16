@@ -528,6 +528,8 @@ func TestLongMailCases(t *testing.T) {
 	o = call("mail-many-long", "message", "read", "--preview", "-H", "Message-ID", "59", "--output", "json")
 	if err := json.Unmarshal([]byte(o), &got); err != nil || len(got) < tools.ManyLongBytes || !strings.HasPrefix(got, "Message-ID: <mid-ml19@example.com>\n\n") {
 		t.Errorf("mail-many-long 第 20 封: %d 字节 %v", len(got), err)
+	}
+}
 
 // gh-issue-long-body：正文超过旧的 4000 字符截断点，带标签与状态，供来源原文验收。
 func TestGhLongBodySample(t *testing.T) {
