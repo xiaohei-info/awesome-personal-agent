@@ -11,6 +11,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const items = [
   { id: "b1", kind: "brief", title: "周一简报", created_at: "2030-01-01T00:00:00Z", origin: { source: "instance:ins_1" }, spec: { period: "2030-W01", sections: [{ project: "home", body: "家里进展" }, { project: "work", body: "工作进展" }] } },
   { id: "b2", kind: "brief", title: "周复盘", created_at: "2030-01-07T00:00:00Z", spec: { period: "2030-W02-review", sections: [{ project: "work", body: "复盘工作" }] } },
+  { id: "b4", kind: "brief", title: "新简报", created_at: "2030-01-09T00:00:00Z", spec: { period: "2030-W03", sections: [{ title: "日程", body: "今天 10:00 站会" }, { project: "home", body: "家里新进展" }, { title: "知会", body: "无" }] } },
   { id: "b3", kind: "brief", title: "空简报", created_at: "2030-01-08T00:00:00Z", spec: {} },
 ];
 const DEF = "每个项目一节，写进展。";
@@ -67,6 +68,18 @@ describe("简报页", () => {
     expect(await a.findByRole("heading", { name: "工作" })).toBeInTheDocument();
     expect(a.getByText("工作进展")).toBeInTheDocument();
     expect(a.getByText(/2030-W01/)).toBeInTheDocument();
+  });
+
+  it("flow-brief-material: 带 title 的节按标题显示（无 project 也不丢），与按项目的节同卡并存", async () => {
+    mount(server());
+    const a = within(await screen.findByLabelText("简报 新简报"));
+    expect(a.getByRole("heading", { name: "日程" })).toBeInTheDocument();
+    expect(a.getByText("今天 10:00 站会")).toBeInTheDocument();
+    expect(a.getByRole("heading", { name: "知会" })).toBeInTheDocument();
+    expect(a.getByText("无")).toBeInTheDocument();
+    expect(await a.findByRole("heading", { name: "家务" })).toBeInTheDocument();
+    expect(a.getByText("家里新进展")).toBeInTheDocument();
+    expect(a.queryByText("暂无分节内容")).not.toBeInTheDocument();
   });
 
   it("简报与复盘（同为 brief 事项）合并在同一列表，不按猜测的后缀分栏", async () => {
