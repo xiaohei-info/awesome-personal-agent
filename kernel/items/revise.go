@@ -100,3 +100,26 @@ func ParentOf(tx *store.Tx, id string) (parent string, ok bool, err error) {
 	}
 	return rs[0].To, true, nil
 }
+
+// Relate 是其他模块在自己事务里加一条"事项 <type> 终点"关系的入口（终点可以是事项或材料，§6.3），
+// 与 item.relate 同一落法：关系边、事项版本戳与折叠用的事件载荷。关系已存在时返回 (nil, false)，什么都不写。
+// 事件（item.updated）由调用方在同一事务追加，并对 from 做一次 command.Bump；at 必须等于那条事件的 At。
+func Relate(tx *store.Tx, from, to, typ string, at time.Time) (json.RawMessage, bool, error) {
+	cur, err := Get(tx, from)
+	if err != nil {
+		return nil, false, err
+	}
+	rel := domain.Relation{Type: typ, From: from, To: to}
+	if has, err := hasRelation(tx, rel); err != nil || has {
+		return nil, false, err
+	}
+	if err := setRelation(tx, rel, false); err != nil {
+		return nil, false, err
+	}
+	cur = stamped(cur, at)
+	if err := save(tx, cur); err != nil {
+		return nil, false, err
+	}
+	b, err := marshalPayload(payload{Op: "relate", Item: cur, Relation: &rel})
+	return b, err == nil, err
+}

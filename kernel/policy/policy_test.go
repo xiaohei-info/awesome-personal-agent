@@ -578,3 +578,58 @@ func TestModelsPausedKeepsEndpointsButCurrentSeesNone(t *testing.T) {
 		t.Fatal("models_paused must normalize to false without any endpoint")
 	}
 }
+
+func TestNoteVaultsValidationAndRender(t *testing.T) {
+	s := open(t)
+	set := func(vs ...NoteVault) error {
+		_, err := update(t, s, owner, func(p *Policy) error { p.NoteVaults = vs; return nil })
+		return err
+	}
+	for name, vs := range map[string][]NoteVault{
+		"duplicate name":    {{Name: "a", OpenURL: "x://{vault}"}, {Name: "a"}},
+		"no protocol":       {{Name: "a", OpenURL: "{vault}/{path}"}},
+		"leading space":     {{Name: "a", OpenURL: " obsidian://open"}},
+		"javascript":        {{Name: "a", OpenURL: "JavaScript:alert({path})"}},
+		"data":              {{Name: "a", OpenURL: "data:text/html,{path}"}},
+		"vbscript":          {{Name: "a", OpenURL: "vbscript:x"}},
+		"file":              {{Name: "a", OpenURL: "file:///{path}"}},
+		"slash in name":     {{Name: "a/b"}},
+		"empty name":        {{Name: " "}},
+		"newline in scheme": {{Name: "a", OpenURL: "java\nscript:x"}},
+	} {
+		if err := set(vs...); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: want ErrInvalid, got %v", name, err)
+		}
+	}
+	if err := set(NoteVault{Name: "notes", OpenURL: "obsidian://open?vault={vault}&file={path}"}, NoteVault{Name: "bare"}); err != nil {
+		t.Fatal(err)
+	}
+	var p Policy
+	_ = s.View(ctx, func(tx *store.Tx) (err error) { _, p, err = Current(tx); return })
+	if got := p.OpenURL("notes", "项目/a b.md"); got != "obsidian://open?vault=notes&file=%E9%A1%B9%E7%9B%AE%2Fa%20b.md" {
+		t.Fatalf("open url = %q", got)
+	}
+	if p.OpenURL("bare", "x.md") != "" || p.OpenURL("gone", "x.md") != "" {
+		t.Fatal("a vault without open_url or an unregistered vault has no open url")
+	}
+	var evs int
+	_ = s.View(ctx, func(tx *store.Tx) error {
+		es, _ := eventlog.Query(tx, eventlog.Filter{Type: domain.EvPolicyChanged}, 0, 100)
+		evs = len(es)
+		return nil
+	})
+	if evs != 1 {
+		t.Fatalf("policy.changed events = %d, want 1", evs)
+	}
+	// 旧版本策略文档没有 note_vaults：读作没有登记。
+	if err := s.Update(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec("INSERT INTO policy_version (version, doc, at) VALUES (99, ?, 0)", `{"web_only":{"categories":["funds"],"rules":[]},"disturb":{"routes":{"decision":"inject"},"merge_window_sec":0},"material_write":{"default":"proposed","kinds":{}},"permission_cap":{"default":"read","by_harness":{}},"screening_timeout_ms":1000}`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.View(ctx, func(tx *store.Tx) (err error) { _, p, err = Current(tx); return })
+	if p.NoteVaults == nil || len(p.NoteVaults) != 0 {
+		t.Fatalf("old document should read as no vaults, got %#v", p.NoteVaults)
+	}
+}

@@ -97,7 +97,12 @@ func delegate(c *client.Ctx, args []string) error {
 	return send(c, idem(*key), "POST", "/delegations", body)
 }
 
-const reportUsage = "usage: apa report <id> --outcome <progress|done|blocked> --summary <text> [--pr --commit --branch --link] [--ack-cursor <c> --reason <t> --version <n> --idempotency-key <k>]"
+type linkFlag []string
+
+func (l *linkFlag) String() string     { return strings.Join(*l, ",") }
+func (l *linkFlag) Set(v string) error { *l = append(*l, v); return nil }
+
+const reportUsage = "usage: apa report <id> --outcome <progress|done|blocked> --summary <text> [--pr --commit --branch --link]... [--ack-cursor <c> --reason <t> --version <n> --idempotency-key <k>]"
 
 func report(c *client.Ctx, args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -108,9 +113,11 @@ func report(c *client.Ctx, args []string) error {
 	outcome, summary := fs.String("outcome", "", ""), fs.String("summary", "", "")
 	cursor, reason, version, key := fs.String("ack-cursor", "", ""), fs.String("reason", "", ""), fs.String("version", "", ""), fs.String("idempotency-key", "", "")
 	ev := map[string]*string{}
-	for _, n := range []string{"pr", "commit", "branch", "link"} {
+	for _, n := range []string{"pr", "commit", "branch"} {
 		ev[n] = fs.String(n, "", "")
 	}
+	var links linkFlag // --link 可重复：库内链接在报 done 时由内核登记为产出（主文档 §7.5）
+	fs.Var(&links, "link", "")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		return usage("invalid arguments for report", reportUsage)
 	}
@@ -123,7 +130,18 @@ func report(c *client.Ctx, args []string) error {
 			evidence[n] = *s
 		}
 	}
-	body := map[string]any{"outcome": *outcome, "summary": *summary, "evidence": evidence}
+	evBody := map[string]any{}
+	for n, v := range evidence {
+		evBody[n] = v
+	}
+	switch len(links) { // 只给一个时保持原来的字符串形状
+	case 0:
+	case 1:
+		evBody["link"] = links[0]
+	default:
+		evBody["link"] = []string(links)
+	}
+	body := map[string]any{"outcome": *outcome, "summary": *summary, "evidence": evBody}
 	if *cursor != "" {
 		body["cursor"] = *cursor
 	}
