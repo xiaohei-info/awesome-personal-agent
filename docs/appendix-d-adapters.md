@@ -8,6 +8,7 @@
 |---|---|---|---|
 | 首批 harness（界面称 Agent） | Hermes | `plugins/hermes` | harness 插件接口（主文档 §11.2、附录 A） |
 | 即时通讯渠道 ext | Telegram，用成熟的 Bot SDK | `ext/telegram` | 渠道 ext 协议（主文档 §10.3） |
+| 推送渠道（内置连接插件） | Bark（官方服务或自建服务器） | `connectors/bark` | 渠道接口（主文档 §10.3）；字段映射与实测项见 D.5 |
 | 导出 ext | Markdown 目录 | `ext/export` | 事件订阅与只读 API（主文档 §10.3） |
 | webhook 转发 ext | 通用的签名 POST | `ext/webhookforward` | 事件订阅（主文档 §10.3）；可选 `APA_WEBHOOK_TYPES`（逗号分隔的事件类型）只转发所列类型，缺省转发全部，未选中的事件不投递但游标照常推进 |
 | 代码托管平台来源 | GitHub（`source_type: github`） | `sources/` | Source 执行契约（主文档 §9.2） |
@@ -145,6 +146,18 @@ default: {zh: Apple 邮件, en: Apple Mail}
 - 旧版本写着用户名的回答人条目升级后不再匹配，按主文档 §16.5 识别一次。
 
 其他渠道（企业协作工具、其他聊天应用、邮件发信）按同一份渠道 ext 协议实现，不改内核。
+
+**内置渠道：Bark**（`connectors/bark`，主文档 §10.3）。推送到苹果设备，只用标准库调用 Bark 推送服务的 HTTP 接口：`POST <服务器>/push`（JSON），自检用 `GET <服务器>/ping`。服务端以 `bark-server`（MIT）为准，官方公共服务是默认地址，自建服务器开了登录验证时按 HTTP Basic Auth 带登录名与密码。
+
+| 项 | 内容 |
+|---|---|
+| 能力 | 都为假，只能看：决策提醒带一次性表单链接，web_only 的决策只带 Web 链接 |
+| 配置 | 服务器地址（默认官方服务）、等你决定的提醒是否用时效性通知（默认是）；高级里是通知分组（默认 `APA`）、登录名 |
+| 凭据 | 设备密钥；登录密码（自建服务器开了登录验证时） |
+| 字段映射 | `title` ← 标题；`body` ← 摘要与推荐（截断到 600 字）；`group` ← 通知分组；`url` ← 表单链接，没有就用 Web 链接；`level` ← 决策且开了时效性通知时为 `timeSensitive`；`id` ← 幂等键（投递 id + 版本）。没有值的字段不发 |
+| 问题代码 | 401、403 → `auth_failed`；429 → `rate_limited`；5xx 与连不上 → `unreachable`；其他非 2xx 或返回体 `code` 不是 200 → `rejected`（多是设备密钥不对） |
+| 已知限制 | 只有苹果设备；服务端回 200 只表示已交给苹果的推送服务；标题与摘要经过推送服务器和苹果的推送通道，自建服务器也一样（首版不做端到端加密推送）；表单链接要求手机能打开 APA 的外部地址 |
+| 未实测 | `SPIKE-PUSH-PARAMS`、`SPIKE-PUSH-FORM`（主文档 §21.3）。仓库里的契约测试只对本地替身服务，不连真实服务 |
 
 ## D.6 服务商一侧的鉴权摩擦
 

@@ -505,3 +505,11 @@ pre.preview { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .stack-tight { display: grid; gap: 6px; }
 p.field-err[role="alert"] { margin: -6px 0 0; padding: 4px 10px; font-size: 12.5px; }
 .stack-tight .seg { justify-self: start; }
+
+/* 设置 › 提醒渠道：连接卡片（features/settings-channels/Connections.tsx） */
+.conn-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.conn-head h2 { margin: 0; }
+.conn-head .grow { flex: 1 1 auto; }
+[role="alert"].conn-problem { display: flex; align-items: center; gap: 12px; margin: 0; color: var(--ink); background: var(--warn-soft); border-color: transparent; }
+.conn-problem button { margin-left: auto; flex: 0 0 auto; }
+.conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }

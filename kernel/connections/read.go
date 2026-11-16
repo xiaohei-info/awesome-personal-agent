@@ -201,6 +201,24 @@ func Deliverable(tx *store.Tx, route string) (bool, error) {
 	return err == nil && r.Enabled, err
 }
 
+// ViewOnly 判断路由是否指向一个启用中的、只能看的渠道连接（能力声明的三项都为假，§2.3）：
+// 触达据它为决策投递发放一次性表单链接。不是渠道连接的路由返回假（ext 渠道看策略的 text_only）。
+func (s *Service) ViewOnly(tx *store.Tx, route string) (bool, error) {
+	id, ok := strings.CutPrefix(route, "channel:")
+	if !ok || !strings.HasPrefix(id, IDPrefix) {
+		return false, nil
+	}
+	r, err := get(tx, id)
+	if isNotFound(err) {
+		return false, nil
+	}
+	if err != nil || !r.Enabled {
+		return false, err
+	}
+	d, ok := s.decl(r.Type)
+	return ok && d.Capabilities.ViewOnly(), nil
+}
+
 // SetStatus 覆盖写连接现状：problem 为空表示成功（清掉问题、记最近成功），否则记问题代码与不含凭据的细节。
 // 不记 Event（与 doctor_seen 同类）；连接已删除时什么也不写。供渠道发送器在自己的事务里调用。
 func SetStatus(tx *store.Tx, id, problem, detail string, now time.Time) error {

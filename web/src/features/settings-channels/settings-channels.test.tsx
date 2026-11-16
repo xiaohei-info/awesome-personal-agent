@@ -10,12 +10,47 @@ import { policyServer } from "../settings-policy/test-server";
 // PUT /settings/channels/{名}/answerers（只改这一个键）与识别（只在内存里，不写名单）。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
+// 内置渠道连接的替身：按 api/connections 的契约应答；凭据只回是否已设置。
+const BARK = {
+  type: "bark", direction: "channel", title: { zh: "Bark", en: "Bark" }, tagline: { zh: "推送到 iPhone", en: "Push to iPhone" },
+  default: { zh: "我的 iPhone", en: "My iPhone" }, via: { zh: "推送服务器", en: "the push server" },
+  capabilities: { buttons: false, reply: false, identify: false },
+  fields: [
+    { key: "server", kind: "url", label: { zh: "服务器地址", en: "Server" }, default: "https://api.day.app", required: true },
+    { key: "device_key", kind: "secret", label: { zh: "设备密钥", en: "Device key" }, required: true },
+    { key: "group", kind: "text", label: { zh: "通知分组", en: "Group" }, default: "APA", group: "advanced" },
+  ],
+};
+function connServer() {
+  const list: any[] = [];
+  const calls: { method: string; url: string; body?: any }[] = [];
+  const impl = async (url: string, init: RequestInit = {}) => {
+    const method = init.method ?? "GET";
+    const body = init.body ? JSON.parse(init.body as string) : undefined;
+    if (method !== "GET") calls.push({ method, url, body });
+    if (url.startsWith("/v1/connections/types")) return json(200, { types: [BARK] });
+    if (url === "/v1/connections/test") return json(200, { ok: true });
+    if (url === "/v1/connections" && method === "POST") {
+      const c = { id: "ch-new1", type: body.type, name: body.name, config: body.config, secrets: { device_key: !!body.secrets?.device_key }, enabled: body.enabled, state: body.enabled ? "ok" : "disabled" };
+      list.push(c);
+      return json(201, c);
+    }
+    if (url.startsWith("/v1/connections")) return json(200, { connections: list });
+    return json(404, { code: "not_found", why: "no", next: "no" });
+  };
+  return { list, calls, impl };
+}
+const conns = connServer();
+
 function server() {
+  conns.list.length = 0;
+  conns.calls.length = 0;
   const s = policyServer();
   const ident: { state: string; sender?: string; display?: string } = { state: "waiting" };
   const calls: { method: string; url: string; body?: any }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
+    if (url.startsWith("/v1/connections")) return conns.impl(url, init);
     const m = /^\/v1\/settings\/channels\/([^/]+)\/(answerers|identify)$/.exec(url);
     if (!m) return s.impl(url, init);
     const body = init.body ? JSON.parse(init.body as string) : undefined;
@@ -27,7 +62,7 @@ function server() {
     if (method === "POST") return json(200, { code: "apa-7K3Q", expires_at: "2030-01-01T00:10:00Z" });
     return json(200, ident);
   }) as unknown as typeof fetch;
-  return { ...s, impl, ident, calls };
+  return { ...s, impl, ident, calls, conns };
 }
 
 function mount(f: typeof fetch) {
@@ -41,7 +76,51 @@ function mount(f: typeof fetch) {
 
 beforeEach(() => sessionStorage.clear());
 
-describe("设置 › 渠道", () => {
+describe("设置 › 提醒渠道：内置渠道", () => {
+  it("卡片只显示现状：在用、有问题（一句话加重新填写）、已停用；不露连接 id 与问题代码", async () => {
+    const s = server();
+    conns.list.push(
+      { id: "ch-a1", type: "bark", name: "我的 iPhone", config: {}, secrets: { device_key: true }, enabled: true, state: "ok", last_ok_at: "2030-01-01T10:42:00Z" },
+      { id: "ch-b2", type: "bark", name: "备用手机", config: {}, secrets: { device_key: false }, enabled: true, state: "problem", problem: "credentials_missing" },
+      { id: "ch-c3", type: "bark", name: "旧手机", config: {}, secrets: { device_key: true }, enabled: false, state: "disabled" },
+    );
+    s.doc.disturb.routes.decision = "channel:ch-a1";
+    mount(s.impl);
+    const a = within(await screen.findByRole("region", { name: "我的 iPhone" }));
+    expect(a.getByText("在用")).toBeInTheDocument();
+    expect(a.getByText("只能看")).toBeInTheDocument();
+    expect(a.getByText(/用来送：等你决定/)).toBeInTheDocument();
+    const b = within(screen.getByRole("region", { name: "备用手机" }));
+    expect(b.getByText("有问题")).toBeInTheDocument();
+    expect(b.getByRole("alert")).toHaveTextContent("凭据没填或已失效，重新填写");
+    expect(b.getByRole("button", { name: "重新填写" })).toBeInTheDocument();
+    const c = within(screen.getByRole("region", { name: "旧手机" }));
+    expect(c.getByText("已停用")).toBeInTheDocument();
+    expect(c.getByRole("button", { name: "删除" })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/ch-a1|ch-b2|credentials_missing/);
+  });
+
+  it("添加四步：选类型 → 填表单 → 发一条测试 → 启用；「用它来送」写打扰策略的路由", async () => {
+    const s = server();
+    mount(s.impl);
+    await userEvent.click(await screen.findByRole("button", { name: "+ 添加渠道" }));
+    await userEvent.click(screen.getByRole("button", { name: /Bark/ }));
+    expect(screen.getByLabelText("名字")).toHaveValue("我的 iPhone");
+    await userEvent.type(screen.getByLabelText(/设备密钥/), "dev-1");
+    await userEvent.click(screen.getByRole("button", { name: "下一步" }));
+    await userEvent.click(screen.getByRole("button", { name: "发一条测试" }));
+    expect(await screen.findByText("已送达，去手机上看看")).toBeInTheDocument();
+    expect(conns.calls[0]).toEqual({ method: "POST", url: "/v1/connections/test", body: { type: "bark", config: {}, secrets: { device_key: "dev-1" }, send: true } });
+    await userEvent.click(screen.getByRole("button", { name: "下一步" }));
+    await userEvent.click(screen.getByLabelText("系统状态"));
+    await userEvent.click(screen.getByRole("button", { name: "启用" }));
+    expect(await screen.findByRole("region", { name: "我的 iPhone" })).toBeInTheDocument();
+    expect(conns.calls[1]).toEqual({ method: "POST", url: "/v1/connections", body: { type: "bark", name: "我的 iPhone", config: {}, secrets: { device_key: "dev-1" }, enabled: true } });
+    expect(s.puts.at(-1)!.body.disturb.routes).toEqual({ decision: "channel:ch-new1", reminder: "channel:ch-new1", health: "channel:ch-new1" });
+  });
+});
+
+describe("设置 › 提醒渠道：用自己的程序接入", () => {
   it("每个渠道一张卡：回答人只改这个渠道；只能发文字写回 channels 段，别的渠道原样带回", async () => {
     const s = server();
     s.doc.channels = { old: { text_only: true } };
