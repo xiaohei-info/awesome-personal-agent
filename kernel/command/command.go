@@ -179,6 +179,17 @@ func (c *Ctx) Emit(e domain.Event) (int64, error) {
 	if c.Grant != "" {
 		e.Grant = c.Grant
 	}
+	return c.append(e)
+}
+
+// EmitAs 在同一事务内以内核自己的名义追加事件：actor 与 basis 由调用的内核模块给定（内置规则的自动动作，
+// 如回执里库内链接的自动登记，操作者是 system，§7.5），不是命令的调用者，也不带调用者的授权单。链路深度照旧由内核维护。
+func (c *Ctx) EmitAs(actor domain.Actor, basis *domain.Basis, e domain.Event) (int64, error) {
+	e.Actor, e.ChainDepth, e.Basis = actor, c.ChainDepth, basis
+	return c.append(e)
+}
+
+func (c *Ctx) append(e domain.Event) (int64, error) {
 	if e.At.IsZero() {
 		e.At = c.now()
 	}

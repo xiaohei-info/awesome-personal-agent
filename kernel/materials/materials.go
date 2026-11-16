@@ -105,6 +105,9 @@ type Material struct {
 	Tags       []string `json:"tags,omitempty"`
 	Location   string   `json:"location,omitempty"`
 	CurrentRev string   `json:"current_rev,omitempty"`
+	// Form 是形态（hosted、owned、link）；Link 是链接型的位置（§12.8）。只读：升级前的材料表里 form 为空，读取时推定。
+	Form string `json:"form"`
+	Link string `json:"link,omitempty"`
 }
 
 // Revision 是一条追加不改的修订：完整 Markdown 快照。
@@ -159,14 +162,20 @@ func newID(prefix string) (string, error) {
 
 // ---- 读 ----
 
-const matCols = "id, project, kind, title, tags, location, current_rev"
+const matCols = "id, project, kind, title, tags, location, current_rev, form, link_location"
 const revCols = "id, material, seq, content, actor, reason, based_on, state, created_at, summary"
 
 func scanMaterial(r *store.Rows) (Material, error) {
 	var m Material
 	var tags string
-	if err := r.Scan(&m.ID, &m.Project, &m.Kind, &m.Title, &tags, &m.Location, &m.CurrentRev); err != nil {
+	if err := r.Scan(&m.ID, &m.Project, &m.Kind, &m.Title, &tags, &m.Location, &m.CurrentRev, &m.Form, &m.Link); err != nil {
 		return m, err
+	}
+	if m.Form == "" { // 升级前的材料：有仓库位置的是托管型，其余是自有型，不改写已有行
+		m.Form = FormOwned
+		if m.Location != "" {
+			m.Form = FormHosted
+		}
 	}
 	if err := json.Unmarshal([]byte(tags), &m.Tags); err != nil {
 		return m, fmt.Errorf("materials: corrupt row %s: %w", m.ID, err)
@@ -381,7 +390,7 @@ func AddHosted(tx *store.Tx, project, kind, title string, tags []string, locatio
 	if err != nil {
 		return Material{}, err
 	}
-	m := Material{ID: id, Project: project, Kind: kind, Title: strings.TrimSpace(title), Tags: tags, Location: location}
+	m := Material{ID: id, Project: project, Kind: kind, Title: strings.TrimSpace(title), Tags: tags, Location: location, Form: FormHosted}
 	return m, insertMaterial(tx, m)
 }
 
@@ -398,8 +407,8 @@ func SetLocation(tx *store.Tx, id, location string) error {
 
 func insertMaterial(tx *store.Tx, m Material) error {
 	tags, _ := json.Marshal(m.Tags)
-	_, err := tx.Exec("INSERT INTO materials ("+matCols+") VALUES (?, ?, ?, ?, ?, ?, ?)",
-		m.ID, m.Project, m.Kind, m.Title, string(tags), m.Location, m.CurrentRev)
+	_, err := tx.Exec("INSERT INTO materials ("+matCols+") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		m.ID, m.Project, m.Kind, m.Title, string(tags), m.Location, m.CurrentRev, m.Form, m.Link)
 	return err
 }
 
@@ -511,7 +520,7 @@ type Result struct {
 	State    string `json:"state"`
 }
 
-// Register 登记 material.commit、revision.confirm、revision.reject、material.revert、revision.summarize，kind 只接受内置集合。
+// Register 登记 material.commit、material.link、revision.confirm、revision.reject、material.revert、revision.summarize，kind 只接受内置集合。
 func Register(x *command.Executor) error { return RegisterWith(x, nil) }
 
 // RegisterWith 同 Register；src 里能力包声明的 material_kinds 也接受，默认写入策略取包声明（Web 按 kind 设置的优先）。
@@ -519,7 +528,7 @@ func Register(x *command.Executor) error { return RegisterWith(x, nil) }
 // 授权（§14.3）：commit 按"修订材料"（observer 得到 4）；confirm 与 reject 按代答（Web 本人可；delegate 必须附本人原话；
 // 规范属 spec_activation，delegate 得到 20；observer、worker、运行凭据得到 4）；revert 只在 Web（delegate 得到 20，其余得到 4）。
 func RegisterWith(x *command.Executor, src PackSource) error {
-	for _, sp := range []command.Spec{commit(src), confirm(), reject(), revert(), summarize()} {
+	for _, sp := range []command.Spec{commit(src), confirm(), reject(), revert(), summarize(), link(src)} {
 		if err := x.Register(sp); err != nil {
 			return err
 		}
@@ -642,7 +651,7 @@ func commit(src PackSource) command.Spec {
 				if err != nil {
 					return nil, err
 				}
-				m = Material{ID: id, Project: in.Project, Kind: in.Kind, Title: strings.TrimSpace(in.Title), Tags: in.Tags}
+				m = Material{ID: id, Project: in.Project, Kind: in.Kind, Title: strings.TrimSpace(in.Title), Tags: in.Tags, Form: FormOwned}
 				if err := insertMaterial(c.Tx, m); err != nil {
 					return nil, err
 				}

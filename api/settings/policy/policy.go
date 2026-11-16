@@ -1,5 +1,5 @@
 // Package policy 是策略设置分组的 HTTP 路由（附录 B.2，设计 §14.3、§14.4、§11.2）：
-// /settings/policy、/settings/allowlists、/settings/model-endpoints、/settings/access-limits、/settings/judgment。
+// /settings/policy、/settings/allowlists、/settings/model-endpoints、/settings/access-limits、/settings/judgment、/settings/note-vaults。
 //
 // 路由里没有业务规则：校验、规整、人格长度、新版本与事件全部由内核 kernel/policy.Update 判定。
 // 本层只做两件事：只放行 Web 会话（任何 Bearer 凭据，无论级别，一律 web_only，退出码 20），
@@ -90,6 +90,10 @@ var (
 	}
 	accessLimitSections = []section{
 		sect("permission_cap", func(p *kpolicy.Policy) *kpolicy.PermissionCap { return &p.PermissionCap }),
+	}
+	// 笔记库登记（§12.8）：整体替换；名字重复、模板不以协议开头或用了被拒绝的协议由内核判为 400。
+	noteVaultSections = []section{
+		sect("vaults", func(p *kpolicy.Policy) *[]kpolicy.NoteVault { return &p.NoteVaults }),
 	}
 	judgmentSections = []section{
 		sect("bands", func(p *kpolicy.Policy) *[]kpolicy.JudgmentBand { return &p.Judgment.Bands }),
@@ -219,6 +223,7 @@ func Routes(st *store.Store) core.RouteGroup {
 			"/settings/model-endpoints": modelEndpointSections,
 			"/settings/access-limits":   accessLimitSections,
 			"/settings/judgment":        judgmentSections,
+			"/settings/note-vaults":     noteVaultSections,
 		} {
 			r.Handle(core.Route{Method: "GET", Path: path, Handler: read(st, secs)})
 			r.Handle(core.Route{Method: "PUT", Path: path, Handler: write(st, path, secs)})

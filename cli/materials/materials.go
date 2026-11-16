@@ -19,6 +19,7 @@ import (
 )
 
 const materialUsage = "usage: apa material add --repo R --path P [--project ID] [--kind K] [--title T] [--tag T]... [--commit SHA] [--reason S] | " +
+	"add --link <vault:NAME/PATH|URL> --title T [--project ID] [--kind K] [--tag T]... [--reason S] | " +
 	"commit <id> --from FILE|- --reason S [--based-on REV] | commit --from FILE|- --reason S --kind K --title T [--project ID] [--tag T]... | " +
 	"list [--project ID] | show <id> [--rev REV] | search <query> [--project ID] [--kind K] [--tag T]... [--limit N]"
 
@@ -108,9 +109,16 @@ func add(c *client.Ctx, args []string) error {
 	repo, path := fs.String("repo", "", ""), fs.String("path", "", "")
 	project, kind, title := fs.String("project", "", ""), fs.String("kind", "", ""), fs.String("title", "", "")
 	commitSHA, reason := fs.String("commit", "", ""), fs.String("reason", "", "")
+	link := fs.String("link", "", "")
 	fs.Var(&tags, "tag", "")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *repo == "" || *path == "" {
-		return usage("material add needs --repo and --path", materialUsage)
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+		return usage("invalid arguments for material add", materialUsage)
+	}
+	if *link != "" {
+		return addLink(c, *link, *project, *kind, *title, *reason, tags, *repo != "" || *path != "" || *commitSHA != "")
+	}
+	if *repo == "" || *path == "" {
+		return usage("material add needs --repo and --path, or --link and --title", materialUsage)
 	}
 	body := map[string]any{"repo": *repo, "path": *path}
 	for k, v := range map[string]string{"project": *project, "kind": *kind, "title": *title, "commit": *commitSHA, "reason": *reason} {
@@ -122,6 +130,52 @@ func add(c *client.Ctx, args []string) error {
 		body["tags"] = []string(tags)
 	}
 	return call(c, "POST", "/materials", body)
+}
+
+// addLink 登记链接型材料（material.link，§12.8）：project 缺省取 APA_PROJECT，其次当前目录到项目的映射；kind 缺省由内核补 reference。
+func addLink(c *client.Ctx, link, project, kind, title, reason string, tags multi, mixed bool) error {
+	if mixed || title == "" {
+		return usage("material add --link takes --title and no --repo, --path or --commit", materialUsage)
+	}
+	if project == "" {
+		var err error
+		if project, err = defaultProject(c); err != nil {
+			return err
+		}
+	}
+	body := map[string]any{"link": link, "title": title, "project": project}
+	for k, v := range map[string]string{"kind": kind, "reason": reason} {
+		if v != "" {
+			body[k] = v
+		}
+	}
+	if len(tags) > 0 {
+		body["tags"] = []string(tags)
+	}
+	return call(c, "POST", "/materials", body)
+}
+
+// defaultProject 是缺省项目：APA_PROJECT，其次当前目录到项目的映射（主文档 §12.8）；都没有时要求显式 --project，不猜。
+func defaultProject(c *client.Ctx) (string, error) {
+	if p := c.Project(); p != "" {
+		return p, nil
+	}
+	cwd, _ := os.Getwd()
+	host, _ := os.Hostname()
+	if cwd != "" && host != "" {
+		var out struct {
+			Project *struct {
+				ID string `json:"id"`
+			} `json:"project"`
+		}
+		if err := c.Do(context.Background(), "GET", "/projects/resolve"+query(url.Values{"path": {cwd}, "host": {host}}), nil, &out); err != nil {
+			return "", err
+		}
+		if out.Project != nil && out.Project.ID != "" {
+			return out.Project.ID, nil
+		}
+	}
+	return "", usage("no project: the current directory belongs to none", "pass --project <id> or set APA_PROJECT")
 }
 
 // commit 提交自有型修订：有 <id> 时是对已有材料的新修订，没有时（带 --kind/--title）新建材料的首条修订。

@@ -148,7 +148,7 @@ func (e *env) eventTypes() []string {
 	return out
 }
 
-var routes = []string{"/v1/settings/policy", "/v1/settings/allowlists", "/v1/settings/model-endpoints", "/v1/settings/access-limits"}
+var routes = []string{"/v1/settings/policy", "/v1/settings/allowlists", "/v1/settings/model-endpoints", "/v1/settings/access-limits", "/v1/settings/note-vaults"}
 
 // flow-web-only：所有设置路由，非 Web 凭据（含 observer/worker/delegate/ext/webhook、无凭据）读写都被拒，且不写任何版本。
 func TestSettingsRejectNonWebCallers(t *testing.T) {

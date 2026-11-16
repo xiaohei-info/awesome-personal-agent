@@ -5,6 +5,7 @@
 //	POST /revisions/{id}/confirm|reject
 //	GET /materials/{id}/content  POST /materials/{id}/changes   （托管型，需要 hosted.Service）
 //	PUT/GET /blobs/{hash}
+//	GET /note-vaults             （已登记的笔记库，§12.8）
 //
 // 路由里没有业务规则：写入全部映射到内核命令（material.commit/add、revision.confirm|reject、material.revert、blob.put|get），
 // 授权（回退与规范生效只认 Web、delegate 代答须附本人原话）、写入策略、基线冲突、幂等都由命令管线判定。
@@ -31,6 +32,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/hosted"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
+	kpolicy "github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/search"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -61,6 +63,7 @@ func Routes(st *store.Store, x *command.Executor, hs *hosted.Service) core.Route
 			r.Handle(core.Route{Method: "GET", Path: "/materials/{id}/content", Handler: h.content})
 			r.Handle(core.Route{Method: "POST", Path: "/materials/{id}/changes", Handler: h.changes})
 		}
+		r.Handle(core.Route{Method: "GET", Path: "/note-vaults", Handler: h.noteVaults})
 		r.Handle(core.Route{Method: "PUT", Path: "/blobs/{hash}", MaxBody: MaxBlob, Handler: h.putBlob})
 		r.Handle(core.Route{Method: "GET", Path: "/blobs/{hash}", Handler: h.getBlob})
 	}
@@ -142,14 +145,17 @@ func (h *handlers) write(cmd string, status int) core.Handler {
 	}
 }
 
-// create：带 repo 或 path 是登记托管型（material.add），否则是新建自有型的首条修订（material.commit）。
+// create：带 link 是登记链接型（material.link，已有同项目同位置的返回 200 与那一条）；
+// 带 repo 或 path 是登记托管型（material.add），否则是新建自有型的首条修订（material.commit）。
 func (h *handlers) create(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	in, err := object(r)
 	if err != nil {
 		return err
 	}
 	cmd := "material.commit"
-	if _, ok := in["repo"]; ok {
+	if _, ok := in["link"]; ok {
+		cmd = "material.link"
+	} else if _, ok := in["repo"]; ok {
 		cmd = "material.add"
 	} else if _, ok := in["path"]; ok {
 		cmd = "material.add"
@@ -161,19 +167,72 @@ func (h *handlers) create(w http.ResponseWriter, r *http.Request, p *core.Princi
 	if err != nil {
 		return err
 	}
+	if cmd == "material.link" {
+		var out km.LinkResult
+		if err := json.Unmarshal(res.Value, &out); err != nil {
+			return err
+		}
+		if !out.Created {
+			return core.WriteJSON(w, http.StatusOK, json.RawMessage(res.Value))
+		}
+	}
 	return reply(w, http.StatusCreated, res)
+}
+
+// materialView 是读出的材料：登记本身加只读的 open_url（链接型、库已登记打开方式时才有，§12.8）。
+type materialView struct {
+	km.Material
+	OpenURL string `json:"open_url,omitempty"`
+}
+
+func views(tx *store.Tx, ms []km.Material) ([]materialView, error) {
+	_, pol, err := kpolicy.Current(tx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]materialView, len(ms))
+	for i, m := range ms {
+		out[i] = materialView{m, km.OpenURL(pol, m)}
+	}
+	return out, nil
+}
+
+// noteVaults 返回已登记的笔记库（名字与打开方式），供 agent 拼位置、供渠道与导出使用；只读，observer 及以上。
+func (h *handlers) noteVaults(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if err := readable(p); err != nil {
+		return err
+	}
+	var vs []kpolicy.NoteVault
+	if err := h.st.View(r.Context(), func(tx *store.Tx) error {
+		_, pol, err := kpolicy.Current(tx)
+		vs = pol.NoteVaults
+		return err
+	}); err != nil {
+		return err
+	}
+	if vs == nil {
+		vs = []kpolicy.NoteVault{}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"vaults": vs})
 }
 
 func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if err := readable(p); err != nil {
 		return err
 	}
-	var ms []km.Material
-	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) { ms, err = km.List(tx, r.URL.Query().Get("project")); return }); err != nil {
+	var ms []materialView
+	if err := h.st.View(r.Context(), func(tx *store.Tx) error {
+		all, err := km.List(tx, r.URL.Query().Get("project"))
+		if err != nil {
+			return err
+		}
+		ms, err = views(tx, all)
+		return err
+	}); err != nil {
 		return err
 	}
 	if ms == nil {
-		ms = []km.Material{}
+		ms = []materialView{}
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"materials": ms})
 }
@@ -190,7 +249,11 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 		if err != nil {
 			return err
 		}
-		out["material"] = m
+		vs, err := views(tx, []km.Material{m})
+		if err != nil {
+			return err
+		}
+		out["material"] = vs[0]
 		// 事项与材料的类型化关系（item.relate 以材料为终点的边），材料一侧同样可见。
 		if out["relations"], err = items.Relations(tx, id); err != nil {
 			return err
@@ -200,6 +263,9 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 			e, err := hosted.Get(tx, id)
 			out["hosted"] = e
 			return err
+		case m.Form == km.FormLink && rev == "":
+			out["revision"] = nil // 链接型只有位置与打开地址，没有修订
+			return nil
 		case m.CurrentRev == "" && rev == "":
 			out["revision"] = nil // 只有待确认的修订
 			return nil

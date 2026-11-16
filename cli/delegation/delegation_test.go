@@ -28,6 +28,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -60,7 +61,7 @@ func newWorld(t *testing.T) *world {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		kitems.Module, executors.Module, kdel.Module, core.Module} {
+		kitems.Module, km.Module, executors.Module, kdel.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -453,4 +454,72 @@ func TestDispatchCommands(t *testing.T) {
 	if r := w.apa(dlg, "", "dispatch"); r.code != 2 {
 		t.Fatalf("missing subcommand: %+v", r)
 	}
+}
+
+// ACT-RPL-01..03：--link 可重复；库内链接在 done 时登记为产出，单个 --link 的证据形状不变，另带 links[]。
+func TestReportRepeatedLinksRegisterVaultOutputs(t *testing.T) {
+	w := newWorld(t)
+	if err := w.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "vaults", func(p *policy.Policy) error {
+			p.NoteVaults = []policy.NoteVault{{Name: "notes", OpenURL: "app://{vault}/{path}"}}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	proj := w.project(nil)
+	parent := w.parent(proj)
+	child := idOf(t, w.apa(w.token(auth.Delegate, ""), "", "delegate", "--parent", parent, "--assignee", workHost))
+	wrk := w.token(auth.Worker, workHost)
+
+	r := w.apa(wrk, "", "report", child, "--outcome", "done", "--summary", "shipped",
+		"--link", "vault:notes/a.md", "--link", "https://example.com/pr/1", "--link", "vault:notes/dir/b.md", "--link", "vault:elsewhere/c.md")
+	if r.code != 0 {
+		t.Fatalf("done: %+v", r)
+	}
+	var outputs []string
+	var linked []km.Material
+	_ = w.st.View(bg, func(tx *store.Tx) error {
+		rs, _ := kitems.Relations(tx, parent)
+		for _, rel := range rs {
+			if rel.Type == domain.RelOutput {
+				outputs = append(outputs, rel.To)
+			}
+		}
+		linked, _ = km.List(tx, proj)
+		return nil
+	})
+	if len(outputs) != 2 || len(linked) != 2 {
+		t.Fatalf("outputs=%v materials=%+v", outputs, linked)
+	}
+	titles := []string{linked[0].Title, linked[1].Title}
+	slices.Sort(titles)
+	if titles[0] != "a.md" || titles[1] != "b.md" {
+		t.Fatalf("titles = %v", titles)
+	}
+	_ = w.st.View(bg, func(tx *store.Tx) error {
+		rs, err := kdel.Reports(tx, child)
+		if err != nil || len(rs) != 1 || rs[0].Evidence.Link != "vault:notes/a.md" || len(rs[0].Evidence.Links) != 4 {
+			t.Fatalf("evidence = %+v %v", rs, err)
+		}
+		return nil
+	})
+
+	// 单个 --link：证据里 link 不变，另带 links[]；库外链接不登记。
+	p2 := w.parent(proj)
+	c2 := idOf(t, w.apa(w.token(auth.Delegate, ""), "", "delegate", "--parent", p2, "--assignee", workHost))
+	if r := w.apa(wrk, "", "report", c2, "--outcome", "done", "--summary", "s", "--link", "https://example.com/doc"); r.code != 0 {
+		t.Fatalf("single link: %+v", r)
+	}
+	_ = w.st.View(bg, func(tx *store.Tx) error {
+		rs, _ := kdel.Reports(tx, c2)
+		if len(rs) != 1 || rs[0].Evidence.Link != "https://example.com/doc" || len(rs[0].Evidence.Links) != 1 {
+			t.Fatalf("single link evidence = %+v", rs)
+		}
+		if ms, _ := km.List(tx, proj); len(ms) != 2 {
+			t.Fatalf("a plain URL is not registered: %d materials", len(ms))
+		}
+		return nil
+	})
 }
