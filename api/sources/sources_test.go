@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	apifollowmsg "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -61,15 +62,16 @@ func (noJudge) Do(context.Context, direct.Call) (direct.Outcome, error) {
 }
 
 type env struct {
-	t    *testing.T
-	st   *store.Store
-	au   *auth.Auth
-	srv  *core.Server
-	wh   *webhook.Service
-	x    *command.Executor
-	now  time.Time
-	dir  string // 账本目录
-	keys string // HMAC 接收密钥文件目录
+	t     *testing.T
+	st    *store.Store
+	au    *auth.Auth
+	srv   *core.Server
+	wh    *webhook.Service
+	x     *command.Executor
+	now   time.Time
+	dir   string // 账本目录
+	keys  string // HMAC 接收密钥文件目录
+	blobs string // 内容寻址附件目录（GET /storage 读它）
 }
 
 func (e *env) clock() time.Time { return e.now }
@@ -89,7 +91,7 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	e := &env{t: t, st: st, now: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), dir: dir, keys: filepath.Join(t.TempDir(), "webhook-keys")}
+	e := &env{t: t, st: st, now: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), dir: dir, keys: filepath.Join(t.TempDir(), "webhook-keys"), blobs: t.TempDir()}
 	x := command.New(st, e.clock)
 	e.x = x
 	e.au = auth.New(e.clock)
@@ -127,6 +129,7 @@ func setup(t *testing.T) *env {
 			return Sender{Trust: "unverified"}
 		},
 		SelfSender: func(_ context.Context, s domain.Source) (string, error) { return "me-on-" + s.ID, nil },
+		BlobsDir:   e.blobs,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +137,7 @@ func setup(t *testing.T) *env {
 	if err := st.Update(context.Background(), func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Now: e.clock, Groups: []core.RouteGroup{grp}})
+	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Now: e.clock, Groups: []core.RouteGroup{grp, apifollowmsg.Routes(x)}})
 	if err != nil {
 		t.Fatal(err)
 	}

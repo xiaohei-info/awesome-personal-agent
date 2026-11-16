@@ -194,3 +194,32 @@ func Remove(dir, h string) error {
 	}
 	return nil
 }
+
+// Bytes 返回内容寻址附件目录占用的字节数（GET /storage）。目录不存在算 0；上传中的临时文件也计入。
+func Bytes(dir string) (int64, error) {
+	if dir == "" {
+		return 0, nil
+	}
+	ents, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		fi, err := e.Info()
+		if errors.Is(err, os.ErrNotExist) { // 临时文件刚被改名
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		n += fi.Size()
+	}
+	return n, nil
+}

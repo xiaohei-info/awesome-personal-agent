@@ -655,3 +655,89 @@ func TestAddNameAndRename(t *testing.T) {
 		t.Fatalf("rename without a name: %+v", r)
 	}
 }
+
+// ACT-RAW-05、ACT-RSC-05：`apa source event <id>` 输出事件、原文清单与正文并写明所用范围与裁剪量；--part 只输出那一部分；
+// token 读到的内容按来源的外发范围裁剪；运行凭据得退出码 4，未知事件得 5，未知部分得 2。
+func TestSourceEventReadsContentScopedAndPartwise(t *testing.T) {
+	k := newKernel(t)
+	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	k.apa(dlg, "source", "add", "--id", "src_mail", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60")
+	body := strings.Repeat("正文", 400) // 800 个字符
+	var id string
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		if err := runner.AppendInternal(tx, domain.Source{ID: "src_mail"}, domain.SourceEvent{ID: "m1", Type: "mail.received", Subject: "s", Detail: body, OccurredAt: time.Now()}); err != nil {
+			return err
+		}
+		evs, err := runner.Events(tx, "src_mail")
+		if err != nil {
+			return err
+		}
+		id = evs[0].ID
+		_, err = tx.Exec(`INSERT INTO sources_runner_event_part (event_id, part, media_type, bytes, sha256, content) VALUES (?, 'headers', 'application/json', 12, 'h', ?)`, id, []byte(`{"From":"a"}`))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setExternal := func(scope string) {
+		t.Helper()
+		if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+			_, err := tx.Exec(`UPDATE sources_registry_source SET outbound_external = ? WHERE id = 'src_mail'`, scope)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type out struct {
+		Scope   string          `json:"scope"`
+		Body    *string         `json:"body"`
+		Headers json.RawMessage `json:"headers"`
+		Trimmed *struct {
+			TotalChars    int `json:"total_chars"`
+			ReturnedChars int `json:"returned_chars"`
+		} `json:"trimmed"`
+		Content struct {
+			Parts []struct{ Part string } `json:"parts"`
+		} `json:"content"`
+	}
+
+	setExternal("full")
+	var full out
+	decode(t, k.apa(obs, "source", "event", id), &full)
+	if full.Scope != "full" || full.Body == nil || *full.Body != body || full.Trimmed != nil || len(full.Content.Parts) != 2 {
+		t.Fatalf("full: %+v", full)
+	}
+	var hdr out
+	decode(t, k.apa(obs, "source", "event", id, "--part", "headers"), &hdr)
+	if string(hdr.Headers) != `{"From":"a"}` || hdr.Body != nil {
+		t.Fatalf("--part headers must print only headers: %+v", hdr)
+	}
+
+	setExternal("excerpt")
+	var ex out
+	decode(t, k.apa(obs, "source", "event", id), &ex)
+	if ex.Scope != "excerpt" || ex.Body == nil || len([]rune(*ex.Body)) != 500 || ex.Trimmed == nil || ex.Trimmed.TotalChars != 800 || ex.Trimmed.ReturnedChars != 500 || ex.Headers != nil {
+		t.Fatalf("excerpt: %+v", ex)
+	}
+
+	if r := k.apa(obs, "source", "event", "sev_nope"); r.code != domain.ExitNotFound {
+		t.Fatalf("unknown event: %+v", r)
+	}
+	if r := k.apa(obs, "source", "event", id, "--part", "bogus"); r.code != domain.ExitUsage {
+		t.Fatalf("unknown part: %+v", r)
+	}
+	var ext string
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) (err error) {
+		_, ext, err = k.au.Issue(tx, auth.Spec{Kind: auth.Ext, Scope: "chan"})
+		return
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r := k.apa(ext, "source", "event", id); r.code != domain.ExitPermissionDenied {
+		t.Fatalf("ext credential: %+v", r)
+	}
+	for _, args := range [][]string{{"source", "event"}, {"source", "event", "--part", "body"}, {"source", "event", id, "extra"}} {
+		if r := k.apa(obs, args...); r.code != domain.ExitUsage {
+			t.Fatalf("%v: %+v", args, r)
+		}
+	}
+}

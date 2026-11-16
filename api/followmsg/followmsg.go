@@ -17,8 +17,15 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
+
+// messageView 是事项页的一条挂靠消息：detail 至多 2000 个字符，content 是原文清单（不含内容）。
+type messageView struct {
+	allowlist.Attached
+	Content runner.Manifest `json:"content"`
+}
 
 // IdempotencyHeader 携带幂等键；同键同输入重放首次结果。
 const IdempotencyHeader = "Idempotency-Key"
@@ -30,10 +37,22 @@ func Routes(x *command.Executor) core.RouteGroup {
 			if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
 				return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read attached messages", "use an owner or agent credential")
 			}
-			var msgs []allowlist.Attached
-			if err := x.Store().View(r.Context(), func(tx *store.Tx) (err error) {
-				msgs, err = allowlist.Messages(tx, r.PathValue("id"), p.Caller.Level)
-				return err
+			var msgs []messageView
+			if err := x.Store().View(r.Context(), func(tx *store.Tx) error {
+				as, err := allowlist.Messages(tx, r.PathValue("id"), p.Caller.Level)
+				if err != nil {
+					return err
+				}
+				msgs = make([]messageView, len(as))
+				for i, m := range as { // 列表只带正文预览与原文清单；全文经 GET /source-events/{id}，按挂靠消息自己的权限取（§7.6）
+					mf, err := runner.ContentOf(tx, m.ID)
+					if err != nil {
+						return err
+					}
+					m.Detail = runner.Preview(m.Detail)
+					msgs[i] = messageView{Attached: m, Content: mf}
+				}
+				return nil
 			}); err != nil {
 				return err
 			}
