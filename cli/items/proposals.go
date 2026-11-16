@@ -42,7 +42,7 @@ func attach(c *client.Ctx, args []string) error {
 	return c.Print(out)
 }
 
-const proposalsUsage = "usage: apa proposals apply (--recommended | --file <plan.json>) [--source <id>] [--project <id>] [--evidence <owner's words> | --grant <id>]"
+const proposalsUsage = "usage: apa proposals apply (--recommended | --file <plan.json|->) [--source <id>] [--project <id>] [--evidence <owner's words> | --grant <id>]"
 
 // proposals apply：批量处理建议，POST /proposals/batch。每条各自成败，输出内核返回的逐条结果。
 func proposals(c *client.Ctx, args []string) error {
@@ -76,7 +76,13 @@ func proposals(c *client.Ctx, args []string) error {
 		if source != "" || project != "" {
 			return usage("--source and --project only apply to --recommended", proposalsUsage)
 		}
-		raw, err := os.ReadFile(file)
+		var raw []byte
+		var err error
+		if file == "-" {
+			raw, err = io.ReadAll(c.Env.Stdin)
+		} else {
+			raw, err = os.ReadFile(file)
+		}
 		if err != nil {
 			return usage("cannot read the plan file: "+err.Error(), proposalsUsage)
 		}

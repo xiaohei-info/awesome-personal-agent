@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -115,7 +116,14 @@ func (f *form) body(hint string) (map[string]any, error) {
 				return
 			}
 			m[key] = map[string]string{"kind": k, "ref": ref}
-		case fl.Name == "ask" || fl.Name == "spec":
+		case fl.Name == "deadline":
+			t, err := parseDeadline(*v)
+			if err != nil {
+				bad = usage("--deadline must be an RFC 3339 time or YYYY-MM-DD", hint)
+				return
+			}
+			m[key] = t
+		case fl.Name == "ask" || fl.Name == "spec" || fl.Name == "origin" || fl.Name == "ext":
 			if !json.Valid([]byte(*v)) {
 				bad = usage("--"+fl.Name+" must be valid JSON", hint)
 				return
@@ -126,6 +134,18 @@ func (f *form) body(hint string) (map[string]any, error) {
 		}
 	})
 	return m, bad
+}
+
+// parseDeadline：RFC 3339 原样给内核；只给日期时取本机时区当天 23:59:59（§6.8）。
+func parseDeadline(v string) (string, error) {
+	if _, err := time.Parse(time.RFC3339, v); err == nil {
+		return v, nil
+	}
+	d, err := time.ParseInLocation("2006-01-02", v, time.Local)
+	if err != nil {
+		return "", err
+	}
+	return time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 0, time.Local).Format(time.RFC3339), nil
 }
 
 // headers：--version → If-Match，--idempotency-key → Idempotency-Key（--evidence 是全局参数，由 client 以 X-APA-Evidence 头发出）。
@@ -139,11 +159,11 @@ func (f *form) headers() map[string]string {
 	return h
 }
 
-var itemFields = []string{"kind", "title", "summary", "body", "status-label", "priority", "project", "tags", "assignee", "waiting-on", "ask", "spec", "planned-for", "reason"}
+var itemFields = []string{"kind", "title", "summary", "body", "status-label", "priority", "project", "tags", "assignee", "waiting-on", "ask", "spec", "planned-for", "deadline", "origin", "ext", "reason"}
 
 // add 实现 item add 与 propose：POST /items。propose 不带 --phase，由内核缺省为 proposed。
 func add(c *client.Ctx, args []string, name string) error {
-	hint := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --reason]"
+	hint := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --deadline <RFC 3339|YYYY-MM-DD> --origin <JSON> --ext <JSON> --reason]"
 	fields := itemFields
 	if name == "item add" {
 		fields = append([]string{"phase"}, fields...)
@@ -172,7 +192,7 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	switch sub {
 	case "update":
 		fields = itemFields[1:]
-		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD>] --reason <r> [--evidence <text> | --grant <id> --version <n>]"
+		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--evidence <text> | --grant <id> --version <n>]"
 	case "progress":
 		fields = []string{"text", "on"}
 		hint = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>] [--evidence <text> | --grant <id>]"

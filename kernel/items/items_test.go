@@ -1202,3 +1202,19 @@ func TestProposalIsWritableOnlyByTheKernel(t *testing.T) {
 	}
 	e.verify(t)
 }
+
+// §7.1：import: 开头的 origin.source 只由导入写入；普通创建与更新都拒绝，其他来源与无关更新照常。
+func TestImportOriginPrefixRejectedOnOrdinaryWrites(t *testing.T) {
+	e := setup(t)
+	if _, err := e.do(owner, "item.create", map[string]any{"kind": "task", "title": "x", "origin": map[string]any{"source": "import:notes"}}); exit(err) != domain.ExitUsage {
+		t.Fatalf("create with import: origin: %v", err)
+	}
+	id := e.create(t, owner, map[string]any{"origin": map[string]any{"source": "manual", "ref": "r1"}})
+	if _, err := e.do(owner, "item.update", map[string]any{"id": id, "origin": map[string]any{"source": "import:notes"}}); exit(err) != domain.ExitUsage {
+		t.Fatalf("update to import: origin: %v", err)
+	}
+	if got := e.get(t, id).Origin; got == nil || got.Source != "manual" {
+		t.Fatalf("origin changed by a rejected update: %+v", got)
+	}
+	e.must(t, owner, "item.update", map[string]any{"id": id, "origin": map[string]any{"source": "other"}})
+}
