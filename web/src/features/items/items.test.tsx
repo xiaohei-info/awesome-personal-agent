@@ -191,9 +191,9 @@ describe("关联与按 tag 筛选（ACT-ITEM-12）", () => {
     l.rels.push({ type: "basis", from: "item_a", to: "mat_x" });
     await userEvent.selectOptions(screen.getByLabelText("关联事项"), "item_b");
     await userEvent.click(screen.getByRole("button", { name: "建立关联" }));
-    const rels = within(await screen.findByRole("list", { name: "关系" }));
-    expect(rels.getByText(/依据/)).toBeInTheDocument();
-    expect(rels.getByRole("link", { name: "mat_x" })).toHaveAttribute("href", "/materials?id=mat_x");
+    // 指向材料的依据关系进材料区的“依据”组（读不到材料时按 id 显示），链接指向材料页。
+    const basis = within(await screen.findByRole("group", { name: "依据" }));
+    expect(basis.getByRole("link", { name: "mat_x" })).toHaveAttribute("href", "/materials?id=mat_x");
   });
 
   it("按 tag 筛选只留下带该 tag 的事项；按阶段筛选走服务端", async () => {

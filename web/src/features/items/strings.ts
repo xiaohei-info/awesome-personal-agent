@@ -74,6 +74,16 @@ const zh = {
   registerKey: "登记关联",
   loadImage: (what: string) => `加载图片：${what}`,
   relation: common.zh.relation,
+  prefilled: "内容由链接预填",
+  linkField: "链接",
+  cutTitle: "标题超过 200 个字符，多出的部分已去掉",
+  cutBody: "正文超过 4000 个字符，多出的部分已去掉",
+  materials: "材料",
+  matGroups: { basis: "依据", output: "产出", minutes: "纪要" } as Record<string, string>,
+  remove: "移除",
+  removeRel: (title: string, group: string) => `移除${group}：${title}`,
+  linkNotSaved: "事项已创建，但链接没能登记为材料",
+  openCreated: "打开新事项",
 };
 
 const en: typeof zh = {
@@ -149,6 +159,16 @@ const en: typeof zh = {
   registerKey: "Register",
   loadImage: (what) => `Load image: ${what}`,
   relation: common.en.relation,
+  prefilled: "Prefilled from a link",
+  linkField: "Link",
+  cutTitle: "The title was over 200 characters; the extra was dropped",
+  cutBody: "The body was over 4000 characters; the extra was dropped",
+  materials: "Materials",
+  matGroups: { basis: "Basis", output: "Outputs", minutes: "Minutes" },
+  remove: "Remove",
+  removeRel: (title, group) => `Remove from ${group}: ${title}`,
+  linkNotSaved: "The item was created, but the link was not saved as a material",
+  openCreated: "Open the new item",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };
