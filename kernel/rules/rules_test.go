@@ -997,3 +997,12 @@ func TestImportedEventsDoNotTriggerRules(t *testing.T) {
 		t.Fatalf("control: the same event written as live must trigger, observed = %d", got)
 	}
 }
+
+// 实例到期建的事项标题按实例定时的时区写到期时刻：每天 08:00（东八区）的简报不再显示成 00:00。
+func TestInstanceTitleUsesScheduleZone(t *testing.T) {
+	due := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
+	f := &Fired{Pack: "brief", Params: json.RawMessage(`{"schedule":"CRON_TZ=Asia/Shanghai 0 8 * * *"}`), Due: due}
+	if got := instanceTitle(f); got != "brief 2026-11-17 08:00" {
+		t.Fatalf("title: %q", got)
+	}
+}

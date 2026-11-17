@@ -1,6 +1,6 @@
 name: brief
 version: 1.0.0
-description: 周期简报，按项目分节
+description: 周期简报
 kinds:
   - name: brief
     title: 简报

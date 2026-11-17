@@ -12,6 +12,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -22,23 +23,62 @@ var kernel = command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Princ
 func TestBriefWindowStartsFromPreviousBriefOfSameInstance(t *testing.T) {
 	now := t0.Add(48 * time.Hour)
 	prev := t0.Add(30 * time.Hour)
-	mk := func(id, origin string, until time.Time) domain.Item {
+	first := now.Add(-7 * 24 * time.Hour)
+	mk := func(id, origin string, until time.Time, phase domain.Phase) domain.Item {
 		sp, _ := json.Marshal(map[string]any{"until": until})
-		return domain.Item{ID: id, Kind: domain.KindBrief, Origin: &domain.Origin{Source: origin}, Spec: sp}
+		it := domain.Item{ID: id, Kind: domain.KindBrief, Phase: phase, Origin: &domain.Origin{Source: origin}, Spec: sp}
+		it.CreatedAt = until
+		return it
 	}
-	all := []domain.Item{mk("a", "instance:ins_1", t0), mk("b", "instance:ins_1", prev), mk("c", "instance:other", now.Add(-time.Hour)), mk("self", "instance:ins_1", now)}
-	if w := briefWindow(all, "ins_1", "self", now); !w.Since.Equal(prev) || !w.Until.Equal(now) {
-		t.Fatalf("window must start at the latest earlier brief of this instance only: %+v", w)
+	failed := mk("f", "instance:ins_1", now.Add(-2*time.Hour), domain.PhaseNeedsInput) // 失败的那份写过窗口，但不作起点
+	all := []domain.Item{mk("a", "instance:ins_1", t0, domain.PhaseDone), mk("b", "instance:ins_1", prev, domain.PhaseDone), failed,
+		mk("c", "instance:other", now.Add(-time.Hour), domain.PhaseDone), mk("self", "instance:ins_1", now, domain.PhaseOpen)}
+	w, prior := briefWindow(all, "ins_1", "self", now, first, nil)
+	if !w.Since.Equal(prev) || !w.Until.Equal(now) || prior == nil || prior.ID != "b" {
+		t.Fatalf("window and prior must come from the latest successful brief of this instance only: %+v %+v", w, prior)
 	}
-	if w := briefWindow(nil, "ins_1", "self", now); !w.Since.Equal(now.Add(-24 * time.Hour)) {
-		t.Fatalf("first brief of an instance takes 24h: %+v", w)
+	if w, prior := briefWindow([]domain.Item{failed}, "ins_1", "self", now, first, nil); !w.Since.Equal(first) || prior != nil {
+		t.Fatalf("an instance with no successful brief starts at the previous scheduled tick: %+v %+v", w, prior)
+	}
+}
+
+// 第一份的起点是本次到期之前的上一个调度节拍：每周、工作日跨周末、立即跑一次都按真实定时；时区取 CRON_TZ。
+func TestPlanUsesRealSchedulePeriodAndZone(t *testing.T) {
+	sh, _ := time.LoadLocation("Asia/Shanghai")
+	call := func(params string, due time.Time) rules.Call {
+		return rules.Call{Instance: &rules.Fired{ID: "i", Params: json.RawMessage(params), Due: due}}
+	}
+	fri := time.Date(2026, 11, 20, 17, 30, 0, 0, time.Local)
+	p := planFor(call(`{"schedule":"30 17 * * 5"}`, fri), wants(nil), "", fri)
+	if !p.first.Equal(fri.AddDate(0, 0, -7)) || p.period != 7*24*time.Hour || p.days != 7 {
+		t.Fatalf("weekly review: first %v period %v days %d", p.first, p.period, p.days)
+	}
+	mon := time.Date(2026, 11, 23, 8, 0, 0, 0, sh)
+	p = planFor(call(`{"schedule":"CRON_TZ=Asia/Shanghai 0 8 * * 1-5"}`, mon), wants(nil), "", mon)
+	if !p.first.Equal(mon.AddDate(0, 0, -3)) || p.loc.String() != "Asia/Shanghai" || p.days != 3 {
+		t.Fatalf("weekday brief on Monday covers the weekend in the cron zone: first %v loc %v days %d", p.first, p.loc, p.days)
+	}
+	wed := time.Date(2026, 11, 18, 10, 0, 0, 0, time.Local) // 立即跑一次：到期即当时
+	p = planFor(call(`{"schedule":"30 17 * * 5"}`, wed), wants(nil), "", wed)
+	if !p.first.Equal(time.Date(2026, 11, 13, 17, 30, 0, 0, time.Local)) || p.period != 7*24*time.Hour {
+		t.Fatalf("run now starts at the last scheduled tick: %v %v", p.first, p.period)
+	}
+	month := time.Date(2026, 12, 1, 9, 0, 0, 0, time.Local) // 月度：窗口不被日程前瞻的 14 天截短
+	p = planFor(call(`{"schedule":"0 9 1 * *"}`, month), wants(nil), "", month)
+	if !p.first.Equal(time.Date(2026, 11, 1, 9, 0, 0, 0, time.Local)) || p.days != 14 {
+		t.Fatalf("monthly: first %v days %d", p.first, p.days)
 	}
 }
 
 func TestScheduleDaysDefaultsAndBounds(t *testing.T) {
-	for in, want := range map[string]int{`{}`: 3, `{"schedule_days":7}`: 7, `{"schedule_days":0}`: 3, `{"schedule_days":15}`: 3} {
-		if got := scheduleDays(json.RawMessage(in)); got != want {
-			t.Fatalf("%s: %d want %d", in, got, want)
+	day, week := 24*time.Hour, 7*24*time.Hour
+	for _, c := range []struct {
+		param  int
+		period time.Duration
+		want   int
+	}{{0, day, 3}, {7, day, 7}, {15, day, 3}, {0, week, 7}, {2, week, 2}, {0, 31 * day, 14}} {
+		if got := scheduleDays(c.param, c.period); got != c.want {
+			t.Fatalf("%+v: %d", c, got)
 		}
 	}
 }
@@ -179,7 +219,7 @@ func TestBriefWindowSurvivesAgentWriteBackAndSeedsNextBrief(t *testing.T) {
 	}
 	var all []domain.Item
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { all, err = items.List(tx, items.Filter{}); return })
-	if w := briefWindow(all, "ins_1", "next", t0.Add(24*time.Hour)); !w.Since.Equal(t0) {
+	if w, _ := briefWindow(all, "ins_1", "next", t0.Add(24*time.Hour), t0, []string{"period", "sections[].body"}); !w.Since.Equal(t0) {
 		t.Fatalf("next brief must start at the first one's until: %+v", w)
 	}
 }

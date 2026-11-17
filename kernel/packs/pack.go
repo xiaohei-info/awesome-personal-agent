@@ -160,7 +160,13 @@ type PromptMeta struct {
 
 	// DefaultInstruction 是任务型模板在实例没写 instruction 时交给运行者的默认内容要求（C.7）：随发行更新，不写进账本。
 	DefaultInstruction string `yaml:"default_instruction"`
+	// Materials 是任务型模板要的资料段（C.7）：只组装、只查询列出的段，没列的 digest 不被汇入；不写时取原有的一套。
+	Materials []string `yaml:"materials"`
 }
+
+// MaterialNames 是 materials 可列的资料段（C.7）。context、prior、open_items 只有声明时才给。
+var MaterialNames = []string{"instance_params", "ledger_snapshot", "context", "prior", "schedule", "decisions", "due_waiting",
+	"planned", "activity", "open_items", "proposals", "digest", "spot_check"}
 
 // Band 是不确定带 {low, high}（C.7）；只写一端时另一端取相同的值。
 type Band struct {
@@ -827,6 +833,13 @@ func checkPromptMeta(m *PromptMeta, file string, schema func(string, map[string]
 		return errors.New("default_instruction is only for task prompts")
 	case utf8.RuneCountInString(m.DefaultInstruction) > MaxInstructionRunes:
 		return fmt.Errorf("default_instruction is longer than %d characters", MaxInstructionRunes)
+	case len(m.Materials) > 0 && m.Agent != "task":
+		return errors.New("materials is only for task prompts")
+	}
+	for _, n := range m.Materials {
+		if !slices.Contains(MaterialNames, n) {
+			return fmt.Errorf("materials %q is not one of %s", n, strings.Join(MaterialNames, ", "))
+		}
 	}
 	for _, f := range m.ResultFields {
 		if !resultField.MatchString(f) {

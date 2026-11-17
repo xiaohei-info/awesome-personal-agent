@@ -8,12 +8,12 @@ import (
 )
 
 func TestBriefContentSummarizesSectionsWithoutBody(t *testing.T) {
-	spec := json.RawMessage(`{"period":"2026-11-09 08:00","sections":[{"project":"alpha","body":"SECRET-BODY"},{"project":"知会","body":"x"}]}`)
+	spec := json.RawMessage(`{"period":"2026-11-09 08:00","sections":[{"project":"alpha","body":"SECRET-BODY"},{"title":"知会","body":"x"}]}`)
 	c := BriefContent(domain.Item{ID: "i1", Title: "每日简报", Spec: spec}, "/items/i1")
 	if c.Title != "每日简报" || c.WebURL != "/items/i1" {
 		t.Fatalf("title/url: %+v", c)
 	}
-	if c.Summary != "按项目分节：alpha、知会" {
+	if c.Summary != "分节：alpha、知会" { // 按 title 分的节同样列出（附录 C.13）
 		t.Fatalf("summary: %q", c.Summary)
 	}
 }

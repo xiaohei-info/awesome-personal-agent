@@ -143,16 +143,20 @@ func TestReviewPackDeclaresWhatC14Lists(t *testing.T) {
 	if !ok || w.Meta.Agent != "task" || w.Meta.Access != "read" {
 		t.Fatalf("write-review must be a read-only task prompt: %+v", w.Meta)
 	}
-	if got := strings.Join(w.Meta.ResultFields, ","); got != "period,sections[].project,sections[].body" { // 内核按它判定代转 done（§8.4）
+	if got := strings.Join(w.Meta.ResultFields, ","); got != "period,sections[].body" { // 内核按它判定代转 done（§8.4）；节可以只有 title
 		t.Fatalf("write-review result_fields: %q", got)
 	}
 	// spec.period 取到期时刻才分得开周期；分节键名与简报同一 schema；写回即回执，提示词不能再让运行者报 done（附不出证据，§8.4）。
-	for _, s := range []string{"本期完成", "没有完成及原因", "下期要决定的事"} { // 可改的默认要求
+	// 复盘不带知会与抽检，不会把它们从日报里吃掉（附录 C.13）。
+	if got := strings.Join(w.Meta.Materials, ","); got != "context,prior,activity,open_items,due_waiting,decisions,planned,schedule" {
+		t.Fatalf("write-review materials: %q", got)
+	}
+	for _, s := range []string{"完成了什么", "没完成的", "原因未记录", "上一份复盘的下期关注", "下期关注"} { // 可改的默认要求
 		if !strings.Contains(w.Meta.DefaultInstruction, s) {
 			t.Errorf("write-review default_instruction lacks %q: %s", s, w.Meta.DefaultInstruction)
 		}
 	}
-	for _, s := range []string{"{item_id}", "{materials_path}", "{instruction_path}", "spec.period", "item.title", "spec.sections[].{project, body}", "按项目分节", "写回成功就是回执"} {
+	for _, s := range []string{"{item_id}", "{materials_path}", "{instruction_path}", "spec.period", "item.title", "title 与 body", "open_items", "context.sources", "fetch 为 push", "以最新的为准", "不等于还没结束", "web_url", "写回成功就是回执"} {
 		if !strings.Contains(w.Body, s) {
 			t.Errorf("write-review body lacks %q: %s", s, w.Body)
 		}

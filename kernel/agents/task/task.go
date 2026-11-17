@@ -35,6 +35,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 )
 
 // ErrBadTemplate 表示提示词模板不存在或不是任务型。
@@ -78,6 +79,8 @@ type Options struct {
 	RunsDir string
 	// APIURL 经 APA_URL 交给运行者的 CLI。
 	APIURL string
+	// WebBase 是本人打开 Web 的地址（与渠道链接同源）；简报资料据此给条目 web_url，空时不给链接。
+	WebBase string
 	// Host 是 APA 主机名，用来判断项目在本机有没有检出；空时取 os.Hostname()，取不到按没有本机检出拒绝。
 	Host string
 	Now  func() time.Time
@@ -150,6 +153,8 @@ type Task struct {
 	Messages    []Message
 	// Files 是写进运行目录的只读来源原文文件（简报的 digest 与 proposals 引用的来源事件，§7.3）。
 	Files []RawFile
+	// Digest 是本次简报选取的"知会"来源事件：运行成功（事项转 done）后才记为已汇入，失败或没写全时下一份仍会取到（§7.3）。
+	Digest []string
 	// Window 是简报的取材窗口：运行结束时由内核并回事项的 spec.since/until，Agent 整体替换 spec 也不会丢（§7.3）。
 	Window *window
 	Actor  domain.Actor // 触发入口（Via 必填），类型记为 agent
@@ -315,7 +320,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		if _, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, s.o.Now()); err != nil {
 			return err
 		}
-		return saveResultDecl(tx, runID, resultDecl{Fields: pr.Meta.ResultFields, Material: pr.Meta.ResultMaterial, Window: t.Window})
+		return saveResultDecl(tx, runID, resultDecl{Fields: pr.Meta.ResultFields, Material: pr.Meta.ResultMaterial, Window: t.Window, Digest: t.Digest})
 	})
 	if err != nil {
 		return out, err
@@ -545,10 +550,11 @@ type resultDecl struct {
 	Fields   []string `json:"fields,omitempty"`
 	Material bool     `json:"material,omitempty"`
 	Window   *window  `json:"window,omitempty"`
+	Digest   []string `json:"digest,omitempty"` // 选取的"知会"来源事件，成功后才汇入
 }
 
 func saveResultDecl(tx *store.Tx, runID string, d resultDecl) error {
-	if len(d.Fields) == 0 && !d.Material && d.Window == nil {
+	if len(d.Fields) == 0 && !d.Material && d.Window == nil && len(d.Digest) == 0 {
 		return nil
 	}
 	b, err := json.Marshal(d)
@@ -590,6 +596,12 @@ func (d resultDecl) judge(tr runTrace, spec json.RawMessage) (evidence string, a
 		return "spec", nil
 	}
 	return "", absent
+}
+
+// validResult 是"这份结果有效"的唯一判据：事项已完成，且模板声明的结果字段写全（没声明字段的模板，完成即有效）。
+// 知会的汇入、下一份简报的起点与 prior 都按它，只用 CLI 回执报完成却没写结果的那份三者都不算（§7.3）。
+func validResult(it domain.Item, fields []string) bool {
+	return it.Phase == domain.PhaseDone && len(missingFields(it.Spec, fields)) == 0
 }
 
 // missingFields 返回 spec 里没写全的声明字段。字段是顶层键，或 a[].b：a 是非空数组且每个元素的 b 都有内容。
@@ -699,7 +711,7 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 
 	evidence, absent := decl.judge(tr, it.Spec)
 
-	via, failure := "cli", ""
+	via, failure, done := "cli", "", it.Phase == domain.PhaseDone
 	switch {
 	case run.State != domain.RunSucceeded:
 		failure = "运行" + string(run.State) + "：" + res.Reason
@@ -710,6 +722,7 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 		if _, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: "item.transition", Input: in}); err != nil {
 			return err
 		}
+		done = true
 	case !hasSum:
 		failure = tr.missing(run.ID, absent)
 	case sm.Outcome != "done":
@@ -720,6 +733,20 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 		via = "stdout"
 		in, _ := json.Marshal(map[string]any{"id": it.ID, "to": domain.PhaseDone, "reason": "task run summary", "evidence": "run " + run.ID + " stdout summary"})
 		if _, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: "item.transition", Input: in}); err != nil {
+			return err
+		}
+		done = true
+	}
+	if done {
+		it.Phase = domain.PhaseDone
+	}
+	// "知会"只在这份简报是有效结果时才算汇入；崩溃在转 done 与这里之间时，下一份会再列一次，不会丢（§7.3）。
+	if failure == "" && validResult(it, decl.Fields) && len(decl.Digest) > 0 {
+		es := make([]summaries.DigestEntry, len(decl.Digest))
+		for i, id := range decl.Digest {
+			es[i].Event = id
+		}
+		if err := s.o.Store.Update(ctx, func(tx *store.Tx) error { return summaries.MarkDigested(tx, it.ID, es, s.o.Now()) }); err != nil {
 			return err
 		}
 	}

@@ -7,63 +7,156 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/budget"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 )
 
-// 简报资料的五个新段（设计 §7.3"简报的资料"）：schedule、proposals、decisions、due_waiting、activity。
-// 全部是账本读取，不调模型；没有内容时是空数组。
+// 简报与复盘的资料（设计 §7.3"简报的资料"）：全部是账本读取，不调模型；没有内容时是空数组。
+// 模板的 materials 决定组哪些段：没声明的段不查询、不写原文文件，digest 也不汇入（附录 C.7）。
 const (
 	defaultScheduleDays = 3
+	maxScheduleDays     = 14
 	maxProposals        = 50
-	firstBriefWindow    = 24 * time.Hour
+	firstBriefWindow    = 24 * time.Hour // 定时读不出上一个节拍时，第一份的窗口
 	calendarKind        = "calendar"
 	echoReasonPrefix    = "收到回音"
 	eventPage           = 500
+	followShown         = 3   // 后续事件给最新几条
+	followSummaryChars  = 300 // 每条后续事件摘要的字符预算
 )
+
+// legacyMaterials 是模板没写 materials 时组的段，与引入 materials 之前一致。
+var legacyMaterials = []string{"instance_params", "ledger_snapshot", "spot_check", "digest", "planned", "schedule", "decisions", "due_waiting", "activity", "proposals"}
+
+func wants(declared []string) func(string) bool {
+	if len(declared) == 0 {
+		declared = legacyMaterials
+	}
+	return func(name string) bool { return slices.Contains(declared, name) }
+}
 
 type window struct {
 	Since time.Time `json:"since"`
 	Until time.Time `json:"until"`
 }
 
-// briefWindow 取本份简报的取材窗口：起点是同一实例上一份简报的 until，没有（实例的第一份）取 24 小时；
-// 被跳过的周期不产生简报，窗口自然变长。简报事项的 origin 记所属实例（规则建事项时写入）。
-func briefWindow(all []domain.Item, instance, self string, now time.Time) window {
-	w := window{Since: now.Add(-firstBriefWindow), Until: now}
+// briefPlan 是一份简报取材所需的实例信息。时区以实例定时的 CRON_TZ 为准，没有时取本机时区（与调度器解释 cron 同源）；
+// first 是本次到期之前的上一个调度时刻（实例第一份的起点），period 是定时的一个周期（上一个节拍到其后一拍）。
+type briefPlan struct {
+	want   func(string) bool
+	loc    *time.Location
+	first  time.Time
+	period time.Duration
+	days   int             // 日程前瞻天数
+	scope  map[string]bool // 实例的项目范围；空表示全部
+	base   string          // Web 地址，拼条目的 web_url；空时不给链接
+	fields []string        // 模板声明的结果字段：上一份简报是否有效按它判（validResult）
+}
+
+func planFor(c rules.Call, want func(string) bool, base string, now time.Time) briefPlan {
+	p := briefPlan{want: want, loc: time.Local, first: now.Add(-firstBriefWindow), period: firstBriefWindow, base: strings.TrimRight(base, "/")}
+	var params struct {
+		Schedule string   `json:"schedule"`
+		Projects []string `json:"projects"`
+		Days     int      `json:"schedule_days"`
+	}
+	due := now
+	if c.Instance != nil {
+		_ = json.Unmarshal(c.Instance.Params, &params) // 参数已按包的 instance_params 校验
+		if !c.Instance.Due.IsZero() {
+			due = c.Instance.Due // 立即跑一次的到期时刻就是当时
+		}
+	}
+	if sc, err := clock.ParseSchedule(params.Schedule); err == nil {
+		p.loc = sc.Location()
+		if prev := sc.Prev(due); !prev.IsZero() {
+			p.first = prev
+			if next := sc.Next(prev); next.After(prev) {
+				p.period = next.Sub(prev)
+			}
+		}
+	}
+	p.days = scheduleDays(params.Days, p.period)
+	if len(params.Projects) > 0 {
+		p.scope = map[string]bool{}
+		for _, id := range params.Projects {
+			p.scope[id] = true
+		}
+	}
+	return p
+}
+
+// scheduleDays：实例参数 schedule_days 合法（1 到 14）时用它；否则取一个周期的天数，至少 3 天，至多 14 天。
+func scheduleDays(param int, period time.Duration) int {
+	if param >= 1 && param <= maxScheduleDays {
+		return param
+	}
+	d := int((period + 24*time.Hour - 1) / (24 * time.Hour))
+	return min(max(d, defaultScheduleDays), maxScheduleDays)
+}
+
+func (p briefPlan) inScope(it domain.Item) bool { return p.scope == nil || p.scope[it.Project] }
+
+func (p briefPlan) itemURL(id string) string {
+	if p.base == "" {
+		return ""
+	}
+	return p.base + "/items/" + id
+}
+
+func (p briefPlan) at(t time.Time) time.Time { return t.In(p.loc) }
+
+func (p briefPlan) atp(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	v := t.In(p.loc)
+	return &v
+}
+
+// zoneName 是给 Agent 的时区：有 IANA 名时用名字，本机时区读不出名字时写成 UTC 偏移。
+func zoneName(loc *time.Location, now time.Time) string {
+	if n := loc.String(); n != "Local" && n != "" {
+		return n
+	}
+	return "UTC" + now.In(loc).Format("-07:00")
+}
+
+// briefWindow 取本份的取材窗口与上一份：二者是同一份简报，即同一实例里窗口最晚的一份有效结果（validResult）。
+// 失败、受阻、只报了完成却没写结果的那份都不作起点也不当 prior；没有有效的取 first。简报事项的 origin 记所属实例。
+func briefWindow(all []domain.Item, instance, self string, now, first time.Time, fields []string) (window, *domain.Item) {
+	w := window{Since: first, Until: now}
 	var latest time.Time
-	for _, it := range all {
-		if it.ID == self || it.Kind != domain.KindBrief || it.Origin == nil || it.Origin.Source != domain.OriginInstancePrefix+instance {
+	var prior *domain.Item
+	for i, it := range all {
+		if it.ID == self || it.Kind != domain.KindBrief || it.Origin == nil || it.Origin.Source != domain.OriginInstancePrefix+instance || !validResult(it, fields) {
 			continue
 		}
 		var sp struct {
 			Until time.Time `json:"until"`
 		}
-		if json.Unmarshal(it.Spec, &sp) == nil && sp.Until.After(latest) {
-			latest = sp.Until
+		_ = json.Unmarshal(it.Spec, &sp)
+		if prior == nil || sp.Until.After(latest) || sp.Until.Equal(latest) && it.CreatedAt.After(prior.CreatedAt) {
+			prior, latest = &all[i], sp.Until
 		}
 	}
 	if !latest.IsZero() && latest.Before(now) {
 		w.Since = latest
 	}
-	return w
-}
-
-// scheduleDays 取实例参数 schedule_days：缺省 3，合法范围 1 到 14（包的参数校验已拦截越界值，这里兜底取缺省）。
-func scheduleDays(params json.RawMessage) int {
-	var p struct {
-		Days int `json:"schedule_days"`
+	if !w.Since.Before(now) {
+		w.Since = now.Add(-firstBriefWindow)
 	}
-	if json.Unmarshal(params, &p) != nil || p.Days < 1 || p.Days > 14 {
-		return defaultScheduleDays
-	}
-	return p.Days
+	return w, prior
 }
 
 type scheduleEntry struct {
@@ -76,31 +169,58 @@ type scheduleEntry struct {
 }
 
 type proposalEntry struct {
-	ID            string   `json:"id"`
-	Title         string   `json:"title"`
-	Summary       string   `json:"summary,omitempty"`
-	Sources       string   `json:"sources,omitempty"`
-	Recommend     string   `json:"recommend,omitempty"`
-	Reason        string   `json:"reason,omitempty"`
-	LowConfidence bool     `json:"low_confidence"`
-	Events        []string `json:"-"`             // 引用的来源事件 id，用来出原文文件
-	Raw           []rawRef `json:"raw,omitempty"` // 各来源事件的原文文件名与裁剪量
+	ID            string    `json:"id"`
+	Title         string    `json:"title"`
+	Summary       string    `json:"summary,omitempty"`
+	Sources       string    `json:"sources,omitempty"`
+	Recommend     string    `json:"recommend,omitempty"`
+	Reason        string    `json:"reason,omitempty"`
+	LowConfidence bool      `json:"low_confidence"`
+	WebURL        string    `json:"web_url,omitempty"`
+	FollowedBy    *followUp `json:"followed_by,omitempty"`
+	Events        []string  `json:"-"`             // 引用的来源事件 id，用来出原文文件
+	Raw           []rawRef  `json:"raw,omitempty"` // 各来源事件的原文文件名与裁剪量
+}
+
+// followUp 是建议引用的来源事件之后，同一来源里共用关联键（同一对象）的后续事件：数目，加最新几条按该来源外发范围裁剪的内容。
+// 后续只说明对象后来有过变化，不代表已经解决；外发范围不允许时只给数目。
+type followUp struct {
+	Count  int          `json:"count"`
+	Latest []laterEvent `json:"latest,omitempty"`
+}
+
+type laterEvent struct {
+	Type    string `json:"type"`
+	At      string `json:"at,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Link    string `json:"link,omitempty"`
+}
+
+type progressNote struct {
+	Text string    `json:"text"`
+	At   time.Time `json:"at"`
 }
 
 type decisionEntry struct {
 	ID       string     `json:"id"`
 	Title    string     `json:"title"`
+	Project  string     `json:"project,omitempty"`
 	Question string     `json:"question,omitempty"`
 	Deadline *time.Time `json:"deadline,omitempty"`
 	WebOnly  bool       `json:"web_only"`
+	WebURL   string     `json:"web_url,omitempty"`
 }
 
 type dueEntry struct {
-	ID       string     `json:"id"`
-	Title    string     `json:"title"`
-	Project  string     `json:"project,omitempty"`
-	Reason   string     `json:"reason"` // due_today、due_tomorrow、overdue、echo、follow_up_due、stale
-	Deadline *time.Time `json:"deadline,omitempty"`
+	ID           string        `json:"id"`
+	Title        string        `json:"title"`
+	Project      string        `json:"project,omitempty"`
+	Phase        domain.Phase  `json:"phase"`
+	Reason       string        `json:"reason"` // due_today、due_tomorrow、due_next、overdue、echo、follow_up_due、stale
+	Deadline     *time.Time    `json:"deadline,omitempty"`
+	LastProgress *progressNote `json:"last_progress,omitempty"`
+	WebURL       string        `json:"web_url,omitempty"`
 }
 
 type activityEntry struct {
@@ -110,6 +230,7 @@ type activityEntry struct {
 	Text    string    `json:"text,omitempty"`
 	At      time.Time `json:"at"`
 	Project string    `json:"project,omitempty"`
+	WebURL  string    `json:"web_url,omitempty"`
 }
 
 type projectActivity struct {
@@ -117,31 +238,67 @@ type projectActivity struct {
 	Entries []activityEntry `json:"entries"`
 }
 
-// briefLedgerSections 组出取材窗口与五个新段：窗口写进 brief 事项的 spec.since/until（调用方负责），五段各成一份材料。
-func (s *Service) briefLedgerSections(ctx context.Context, c rules.Call) (w window, mats []Material, props briefProposals, err error) {
+type plannedEntry struct {
+	ID         string       `json:"id"`
+	Title      string       `json:"title"`
+	Project    string       `json:"project,omitempty"`
+	Phase      domain.Phase `json:"phase"`
+	PlannedFor string       `json:"planned_for"`
+	WebURL     string       `json:"web_url,omitempty"`
+}
+
+type openEntry struct {
+	Title        string        `json:"title"`
+	Project      string        `json:"project,omitempty"`
+	Phase        domain.Phase  `json:"phase"`
+	Deadline     *time.Time    `json:"deadline,omitempty"`
+	PlannedFor   string        `json:"planned_for,omitempty"`
+	UpdatedAt    time.Time     `json:"updated_at"`
+	Question     string        `json:"question,omitempty"`
+	LastProgress *progressNote `json:"last_progress,omitempty"`
+	WebURL       string        `json:"web_url,omitempty"`
+}
+
+// sourceCoverage 是一个已登记来源在本期的覆盖：拉取状况与 doctor 的来源检查同一口径（runner.StatsOf），
+// 另给窗口内落盘的条数与还在积压里（未判定、过期）没有进初筛结果的条数。三者是不同的事实，不能互相代替。
+type sourceCoverage struct {
+	Name        string     `json:"name"`
+	Type        string     `json:"type,omitempty"` // 语义类型（mail、calendar……）
+	Via         string     `json:"via"`            // 接入方式：pull、script（定时拉取）或 webhook（对方推送）
+	Fetch       string     `json:"fetch"`          // ok、failing、never、disabled、unknown；推送来源为 push
+	Failures    int        `json:"consecutive_failures,omitempty"`
+	LastSuccess *time.Time `json:"last_success_at,omitempty"`
+	Ingested    int        `json:"ingested_in_window"`
+	Backlog     int        `json:"not_screened"`
+}
+
+// briefOut 是一份简报的账本资料：窗口、上一份、各段，以及本次选取的 digest 条目（运行成功后才汇入）。
+type briefOut struct {
+	w      window
+	prior  *domain.Item
+	mats   []Material
+	props  briefProposals
+	digest []summaries.DigestEntry
+}
+
+// briefLedger 按 plan 组出各段。窗口写进 brief 事项的 spec.since/until 由调用方负责。
+func (s *Service) briefLedger(ctx context.Context, c rules.Call, p briefPlan) (out briefOut, err error) {
 	now := s.o.Now()
 	inst, self := "", ""
-	var params json.RawMessage
 	if c.Instance != nil {
-		inst, params = c.Instance.ID, c.Instance.Params
+		inst = c.Instance.ID
 	}
 	if c.Item != nil {
 		self = c.Item.ID
 	}
-	var (
-		schedule  = []scheduleEntry{}
-		proposals = []proposalEntry{}
-		pending   int
-		decisions = []decisionEntry{}
-		due       = []dueEntry{}
-		activity  = []projectActivity{}
-	)
+	want := p.want
+	seg := map[string]any{}
 	err = s.o.Store.View(ctx, func(tx *store.Tx) error {
 		all, err := items.List(tx, items.Filter{})
 		if err != nil {
 			return err
 		}
-		w = briefWindow(all, inst, self, now)
+		out.w, out.prior = briefWindow(all, inst, self, now, p.first, p.fields)
 		srcs, err := registry.List(tx)
 		if err != nil {
 			return err
@@ -150,48 +307,169 @@ func (s *Service) briefLedgerSections(ctx context.Context, c rules.Call) (w wind
 		for _, src := range srcs {
 			names[src.ID] = src.Name
 		}
-		if schedule, err = scheduleSection(tx, srcs, now, scheduleDays(params)); err != nil {
+		pnames, err := projectNames(tx)
+		if err != nil {
 			return err
 		}
-		if proposals, pending, err = s.proposalsSection(tx, all, w, names); err != nil {
-			return err
-		}
+		pname := func(id string) string { return pnames[id] }
 		td, err := items.TodayItems(tx, now)
 		if err != nil {
 			return err
 		}
-		for _, it := range td.Pending {
-			d := decisionEntry{ID: it.ID, Title: it.Title}
-			if it.Ask != nil {
-				d.Question, d.Deadline, d.WebOnly = it.Ask.Question, it.Ask.Deadline, it.Ask.RiskClass == domain.RiskClassWebOnly
+		if want("context") {
+			if seg["context"], err = contextSection(tx, srcs, p, out.w, now); err != nil {
+				return err
 			}
-			decisions = append(decisions, d)
 		}
-		if due, err = dueSection(tx, all, td, w, now); err != nil {
-			return err
+		if want("prior") {
+			seg["prior"] = priorSection(out.prior, p)
 		}
-		activity, err = activitySection(tx, all, w)
-		return err
+		if want("schedule") {
+			if seg["schedule"], err = scheduleSection(tx, srcs, now, p); err != nil {
+				return err
+			}
+		}
+		if want("proposals") {
+			if out.props, err = proposalsSection(tx, all, out.w, names, p); err != nil {
+				return err
+			}
+		}
+		if want("decisions") {
+			ds := []decisionEntry{}
+			for _, it := range td.Pending {
+				if !p.inScope(it) {
+					continue
+				}
+				d := decisionEntry{ID: it.ID, Title: it.Title, Project: pname(it.Project), WebURL: p.itemURL(it.ID)}
+				if it.Ask != nil {
+					d.Question, d.Deadline, d.WebOnly = it.Ask.Question, p.atp(it.Ask.Deadline), it.Ask.RiskClass == domain.RiskClassWebOnly
+				}
+				ds = append(ds, d)
+			}
+			seg["decisions"] = ds
+		}
+		if want("due_waiting") {
+			if seg["due_waiting"], err = dueSection(tx, all, td, out.w, now, p, pname); err != nil {
+				return err
+			}
+		}
+		if want("planned") {
+			pl := []plannedEntry{}
+			for _, it := range td.Planned {
+				if p.inScope(it) {
+					pl = append(pl, plannedEntry{it.ID, it.Title, pname(it.Project), it.Phase, it.PlannedFor, p.itemURL(it.ID)})
+				}
+			}
+			seg["planned"] = pl
+		}
+		if want("activity") {
+			if seg["activity"], err = activitySection(tx, all, out.w, p, pname); err != nil {
+				return err
+			}
+		}
+		if want("open_items") {
+			if seg["open_items"], err = openItemsSection(tx, all, now, p, pname); err != nil {
+				return err
+			}
+		}
+		if want("digest") {
+			if out.digest, err = summaries.PendingDigest(tx); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
-		return w, nil, props, err
+		return out, err
 	}
-	for _, m := range []struct {
-		name string
-		v    any
-	}{{"schedule", schedule}, {"decisions", decisions}, {"due_waiting", due}, {"activity", activity}} {
-		b, _ := json.Marshal(map[string]any{m.name: m.v})
-		mats = append(mats, Material{Name: m.name, Body: string(b)})
+	for _, name := range []string{"context", "prior", "schedule", "decisions", "due_waiting", "planned", "activity", "open_items"} {
+		if v, ok := seg[name]; ok {
+			b, _ := json.Marshal(map[string]any{name: v})
+			out.mats = append(out.mats, Material{Name: name, Body: string(b)})
+		}
 	}
-	return w, mats, briefProposals{Entries: proposals, Pending: pending}, nil
+	return out, nil
 }
 
-// scheduleSection：语义类型为 calendar 的来源里，开始时间落在 [今天 0 点, +days 天) 的事件；同一关联键只取最新一版，
-// 最新一版是取消的不列。结束时间与地点取原文 headers 部分的 end、location（来源没带就不写）。
-func scheduleSection(tx *store.Tx, srcs []domain.Source, now time.Time, days int) ([]scheduleEntry, error) {
-	y, m, d := now.In(time.Local).Date()
-	from := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
-	to := from.AddDate(0, 0, days)
+func projectNames(tx *store.Tx) (map[string]string, error) {
+	ps, err := projects.List(tx)
+	out := map[string]string{}
+	for _, p := range ps {
+		out[p.ID] = p.Name
+	}
+	return out, err
+}
+
+// contextSection：时刻与时区、窗口、范围内的项目名、各已登记来源的覆盖，以及抽检与 Web 的入口。
+func contextSection(tx *store.Tx, srcs []domain.Source, p briefPlan, w window, now time.Time) (map[string]any, error) {
+	ps, err := projects.List(tx)
+	if err != nil {
+		return nil, err
+	}
+	scoped := []string{}
+	for _, pr := range ps {
+		if p.scope != nil && p.scope[pr.ID] || p.scope == nil && pr.Status != domain.ProjectArchived {
+			scoped = append(scoped, pr.Name)
+		}
+	}
+	cov := []sourceCoverage{}
+	for _, src := range srcs {
+		c := sourceCoverage{Name: src.Name, Type: src.SourceKind, Via: string(src.Type), Fetch: "ok"}
+		if c.Via == "" { // 历史登记行没写类型，登记模块按脚本来源对待（registry.go 的 exec 判定）
+			c.Via = string(domain.SourceScript)
+		}
+		st, err := runner.StatsOf(src)
+		switch {
+		case !src.Enabled:
+			c.Fetch = "disabled"
+		case src.Type == domain.SourceWebhook: // 推送来源没有拉取记录：只看本期收到多少，不当成"从未拉取"
+			c.Fetch = "push"
+		case err != nil:
+			c.Fetch = "unknown"
+		case st.Runs == 0 && st.LastSuccessAt.IsZero() && st.LastFailureAt.IsZero():
+			c.Fetch = "never"
+		case st.ConsecutiveFailures > 0:
+			c.Fetch, c.Failures = "failing", st.ConsecutiveFailures
+		}
+		if err == nil && !st.LastSuccessAt.IsZero() {
+			c.LastSuccess = p.atp(&st.LastSuccessAt)
+		}
+		if c.Ingested, c.Backlog, err = runner.Counts(tx, src.ID, w.Since, w.Until); err != nil {
+			return nil, err
+		}
+		cov = append(cov, c)
+	}
+	ctx := map[string]any{"now": p.at(now), "timezone": zoneName(p.loc, now), "window": window{p.at(w.Since), p.at(w.Until)},
+		"period_start": p.at(p.first), "projects": scoped, "sources": cov}
+	_, off := now.In(p.loc).Zone()
+	if _, host := now.In(time.Local).Zone(); off != host {
+		ctx["host_timezone"] = zoneName(time.Local, now) // "今天""明天"与计划日期按主机日界（与今天视图一致）
+	}
+	if p.base != "" {
+		ctx["web_base"], ctx["spot_check_url"] = p.base, p.base+"/spot-check"
+	}
+	return ctx, nil
+}
+
+// priorSection：同一实例上一份有效的简报（与窗口起点是同一份）（正文原样），用来避免重复播报没有变化的普通信息；没有时为 null。
+func priorSection(it *domain.Item, p briefPlan) any {
+	if it == nil {
+		return nil
+	}
+	var sp struct {
+		Period   string          `json:"period"`
+		Sections json.RawMessage `json:"sections"`
+	}
+	_ = json.Unmarshal(it.Spec, &sp)
+	return map[string]any{"period": sp.Period, "created_at": p.at(it.CreatedAt), "sections": sp.Sections}
+}
+
+// scheduleSection：语义类型为 calendar 的来源里，开始时间落在 [今天 0 点, +days 天) 的事件（日界按实例时区）；
+// 同一关联键只取最新一版，最新一版是取消的不列。结束时间与地点取原文 headers 部分的 end、location（来源没带就不写）。
+func scheduleSection(tx *store.Tx, srcs []domain.Source, now time.Time, p briefPlan) ([]scheduleEntry, error) {
+	y, m, d := now.In(p.loc).Date()
+	from := time.Date(y, m, d, 0, 0, 0, 0, p.loc)
+	to := from.AddDate(0, 0, p.days)
 	out := []scheduleEntry{}
 	for _, src := range srcs {
 		if src.SourceKind != calendarKind {
@@ -218,10 +496,10 @@ func scheduleSection(tx *store.Tx, srcs []domain.Source, now time.Time, days int
 			if e.Type == "event.cancelled" || e.OccurredAt.Before(from) || !e.OccurredAt.Before(to) {
 				continue
 			}
-			en := scheduleEntry{Title: e.Subject, Start: e.OccurredAt, Source: src.Name, Link: e.Link}
-			if p, err := runner.ReadPart(tx, e.ID, runner.PartHeaders); err == nil {
+			en := scheduleEntry{Title: e.Subject, Start: p.at(e.OccurredAt), Source: src.Name, Link: e.Link}
+			if part, err := runner.ReadPart(tx, e.ID, runner.PartHeaders); err == nil {
 				var h map[string]any
-				if json.Unmarshal(p.Content, &h) == nil {
+				if json.Unmarshal(part.Content, &h) == nil {
 					en.End, _ = h["end"].(string)
 					en.Location, _ = h["location"].(string)
 				}
@@ -240,12 +518,13 @@ func isNotFoundErr(err error) bool {
 	return ok && de.Code == domain.CodeNotFound
 }
 
-// proposalsSection：窗口内新建且仍是 proposed 的建议，最新的至多 50 条；pending_total 是全部未处置的建议数。
-func (s *Service) proposalsSection(tx *store.Tx, all []domain.Item, w window, names map[string]string) ([]proposalEntry, int, error) {
+// proposalsSection：窗口内新建且仍是 proposed 的建议（范围内），最新的至多 50 条；pending_total 是范围内全部未处置的建议数。
+// 每条带引用来源事件的后续（followUp）。
+func proposalsSection(tx *store.Tx, all []domain.Item, w window, names map[string]string, p briefPlan) (briefProposals, error) {
 	var cand []domain.Item
 	total := 0
 	for _, it := range all {
-		if it.Phase != domain.PhaseProposed {
+		if it.Phase != domain.PhaseProposed || !p.inScope(it) {
 			continue
 		}
 		total++
@@ -259,40 +538,85 @@ func (s *Service) proposalsSection(tx *store.Tx, all []domain.Item, w window, na
 	}
 	out := []proposalEntry{}
 	for _, it := range cand {
-		e := proposalEntry{ID: it.ID, Title: it.Title, Summary: it.Summary}
-		if p := it.Proposal; p != nil {
-			e.Recommend, e.Reason, e.LowConfidence = p.Recommend, p.Reason, p.LowConfidence
+		e := proposalEntry{ID: it.ID, Title: it.Title, Summary: it.Summary, WebURL: p.itemURL(it.ID)}
+		if pr := it.Proposal; pr != nil {
+			e.Recommend, e.Reason, e.LowConfidence = pr.Recommend, pr.Reason, pr.LowConfidence
 			var ns []string
-			for _, id := range p.Sources {
+			var later []domain.SourceEvent
+			for _, id := range pr.Sources {
 				ev, err := runner.Event(tx, id)
 				if err != nil {
 					if isNotFoundErr(err) {
 						continue
 					}
-					return nil, 0, err
+					return briefProposals{}, err
 				}
 				e.Events = append(e.Events, id)
 				if n := names[ev.SourceID]; n != "" && !slices.Contains(ns, n) {
 					ns = append(ns, n)
 				}
+				ls, err := runner.Later(tx, id)
+				if err != nil {
+					return briefProposals{}, err
+				}
+				for _, l := range ls {
+					if !slices.Contains(pr.Sources, l.ID) && !slices.ContainsFunc(later, func(x domain.SourceEvent) bool { return x.ID == l.ID }) {
+						later = append(later, l)
+					}
+				}
 			}
 			e.Sources = strings.Join(ns, "、")
+			e.FollowedBy = followOf(tx, later, p)
 		}
 		out = append(out, e)
 	}
-	return out, total, nil
+	return briefProposals{Entries: out, Pending: total}, nil
+}
+
+// followOf 把后续事件按发生时刻排好，给数目与最新几条；每条按该来源对外部端点的外发范围裁剪（§14.14），摘要另按字符预算裁。
+func followOf(tx *store.Tx, later []domain.SourceEvent, p briefPlan) *followUp {
+	if len(later) == 0 {
+		return nil
+	}
+	slices.SortStableFunc(later, func(a, b domain.SourceEvent) int { return b.OccurredAt.Compare(a.OccurredAt) })
+	f := &followUp{Count: len(later)}
+	for _, ev := range later[:min(followShown, len(later))] {
+		tr, ok := registry.Trim(ev, rawScope(tx, ev))
+		if !ok {
+			continue // 外发范围不允许：只计数
+		}
+		l := laterEvent{Type: tr.Type, Subject: tr.Subject, Link: tr.Link, Summary: budget.Fit(budget.Source{Body: tr.Summary}, followSummaryChars).Text}
+		if !ev.OccurredAt.IsZero() {
+			l.At = p.at(ev.OccurredAt).Format(time.RFC3339)
+		}
+		f.Latest = append(f.Latest, l)
+	}
+	return f
+}
+
+func lastProgress(tx *store.Tx, id string, p briefPlan) (*progressNote, error) {
+	ps, err := items.Progress(tx, id)
+	if err != nil || len(ps) == 0 {
+		return nil, err
+	}
+	last := ps[len(ps)-1]
+	return &progressNote{Text: last.Text, At: p.at(last.At)}, nil
 }
 
 // dueSection 与"今天"视图同一口径：今天与明天到期的、已过期未完成的；窗口内收到回音回到 open 的；
 // 跟进到期仍在等的（等待事项的 follow-up 轮次提醒已记 followup.reminded 且之后没有进展）；久未推进的。
-func dueSection(tx *store.Tx, all []domain.Item, td items.TodayList, w window, now time.Time) ([]dueEntry, error) {
+// 周期超过两天的实例（复盘）另给下一个周期内到期的（due_next）。每条带当前阶段与最近一条进展。
+func dueSection(tx *store.Tx, all []domain.Item, td items.TodayList, w window, now time.Time, p briefPlan, pname func(string) string) ([]dueEntry, error) {
 	out := []dueEntry{}
 	today, tomorrow := items.Today(now), items.Today(now.AddDate(0, 0, 1))
+	horizon := now.Add(p.period)
 	seen := map[string]bool{}
+	var adds []domain.Item
+	var reasons []string
 	add := func(it domain.Item, reason string) {
-		if !seen[it.ID+reason] {
+		if p.inScope(it) && !seen[it.ID+reason] {
 			seen[it.ID+reason] = true
-			out = append(out, dueEntry{ID: it.ID, Title: it.Title, Project: it.Project, Reason: reason, Deadline: it.Deadline})
+			adds, reasons = append(adds, it), append(reasons, reason)
 		}
 	}
 	byID := map[string]domain.Item{}
@@ -308,16 +632,18 @@ func dueSection(tx *store.Tx, all []domain.Item, td items.TodayList, w window, n
 			add(it, "due_tomorrow")
 		case day < today:
 			add(it, "overdue")
+		case p.period > 48*time.Hour && !it.Deadline.After(horizon):
+			add(it, "due_next")
 		}
 	}
 	// 回音：窗口内由 followmsg 把 waiting 转回 open 的规则性转移（§9.4）。
 	err := eachLive(tx, domain.EvItemPhaseChanged, w, func(e domain.Event) {
-		var p struct {
+		var pl struct {
 			Before *domain.Item `json:"before"`
 			Item   domain.Item  `json:"item"`
 		}
-		if json.Unmarshal(e.Payload, &p) != nil || p.Before == nil || p.Before.Phase != domain.PhaseWaiting ||
-			p.Item.Phase != domain.PhaseOpen || !strings.HasPrefix(e.Reason, echoReasonPrefix) {
+		if json.Unmarshal(e.Payload, &pl) != nil || pl.Before == nil || pl.Before.Phase != domain.PhaseWaiting ||
+			pl.Item.Phase != domain.PhaseOpen || !strings.HasPrefix(e.Reason, echoReasonPrefix) {
 			return
 		}
 		if cur, ok := byID[e.Object]; ok && cur.Phase == domain.PhaseOpen {
@@ -338,6 +664,14 @@ func dueSection(tx *store.Tx, all []domain.Item, td items.TodayList, w window, n
 	}
 	for _, it := range td.Stale {
 		add(it, "stale")
+	}
+	for i, it := range adds {
+		lp, err := lastProgress(tx, it.ID, p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, dueEntry{ID: it.ID, Title: it.Title, Project: pname(it.Project), Phase: it.Phase, Reason: reasons[i],
+			Deadline: p.atp(it.Deadline), LastProgress: lp, WebURL: p.itemURL(it.ID)})
 	}
 	return out, nil
 }
@@ -369,7 +703,8 @@ func eachLive(tx *store.Tx, typ string, w window, fn func(domain.Event)) error {
 }
 
 // activitySection：窗口内完成的事项与写下的进展条目，按项目分组；按事件的 at 取，导入事件不计（"现场"读法）。
-func activitySection(tx *store.Tx, all []domain.Item, w window) ([]projectActivity, error) {
+// 简报与复盘自己（brief 事项）不算活动。
+func activitySection(tx *store.Tx, all []domain.Item, w window, p briefPlan, pname func(string) string) ([]projectActivity, error) {
 	byID := map[string]domain.Item{}
 	for _, it := range all {
 		byID[it.ID] = it
@@ -377,28 +712,28 @@ func activitySection(tx *store.Tx, all []domain.Item, w window) ([]projectActivi
 	var got []activityEntry
 	add := func(e domain.Event, en activityEntry) {
 		it, ok := byID[e.Object]
-		if !ok {
+		if !ok || it.Kind == domain.KindBrief || !p.inScope(it) {
 			return
 		}
-		en.Item, en.Title, en.Project, en.At = it.ID, it.Title, it.Project, e.At
+		en.Item, en.Title, en.Project, en.At, en.WebURL = it.ID, it.Title, pname(it.Project), p.at(e.At), p.itemURL(it.ID)
 		got = append(got, en)
 	}
 	if err := eachLive(tx, domain.EvItemPhaseChanged, w, func(e domain.Event) {
-		var p struct {
+		var pl struct {
 			Item domain.Item `json:"item"`
 		}
-		if json.Unmarshal(e.Payload, &p) == nil && p.Item.Phase == domain.PhaseDone {
+		if json.Unmarshal(e.Payload, &pl) == nil && pl.Item.Phase == domain.PhaseDone {
 			add(e, activityEntry{Kind: "done"})
 		}
 	}); err != nil {
 		return nil, err
 	}
 	if err := eachLive(tx, domain.EvItemProgressAdded, w, func(e domain.Event) {
-		var p struct {
+		var pl struct {
 			Progress *domain.Progress `json:"progress"`
 		}
-		if json.Unmarshal(e.Payload, &p) == nil && p.Progress != nil {
-			add(e, activityEntry{Kind: "progress", Text: p.Progress.Text})
+		if json.Unmarshal(e.Payload, &pl) == nil && pl.Progress != nil {
+			add(e, activityEntry{Kind: "progress", Text: pl.Progress.Text})
 		}
 	}); err != nil {
 		return nil, err
@@ -416,6 +751,54 @@ func activitySection(tx *store.Tx, all []domain.Item, w window) ([]projectActivi
 		out[i].Entries = append(out[i].Entries, en)
 	}
 	return out, nil
+}
+
+// openItemsSection：范围内全部在途事项（open、waiting、needs_input；不含建议与简报，初筛未返回的待决不列），不截断，带 total。
+// 排序让该先看的在前：等本人决定、已逾期或今明到期、在等别人、久未推进、其余；同档按更新时间从旧到新，卡得最久的不被挤掉。
+// shortcut: 与账本快照同样不分页；在途事项多到撑爆资料文件时再按档位裁剪并在条目里写明裁了多少。
+func openItemsSection(tx *store.Tx, all []domain.Item, now time.Time, p briefPlan, pname func(string) string) (map[string]any, error) {
+	tomorrow := items.Today(now.AddDate(0, 0, 1))
+	rank := func(it domain.Item) int {
+		switch {
+		case it.Phase == domain.PhaseNeedsInput:
+			return 0
+		case it.Deadline != nil && items.Today(*it.Deadline) <= tomorrow:
+			return 1
+		case it.Phase == domain.PhaseWaiting:
+			return 2
+		case now.Sub(it.UpdatedAt) > items.StaleAfter:
+			return 3
+		}
+		return 4
+	}
+	var sel []domain.Item
+	for _, it := range all {
+		if it.Kind == domain.KindBrief || !p.inScope(it) || !(it.Phase == domain.PhaseOpen || it.Phase == domain.PhaseWaiting || it.Phase == domain.PhaseNeedsInput) ||
+			it.Phase == domain.PhaseNeedsInput && it.Ask != nil && it.Ask.ScreeningPending {
+			continue
+		}
+		sel = append(sel, it)
+	}
+	slices.SortStableFunc(sel, func(a, b domain.Item) int {
+		if ra, rb := rank(a), rank(b); ra != rb {
+			return ra - rb
+		}
+		return a.UpdatedAt.Compare(b.UpdatedAt)
+	})
+	es := []openEntry{}
+	for _, it := range sel {
+		lp, err := lastProgress(tx, it.ID, p)
+		if err != nil {
+			return nil, err
+		}
+		e := openEntry{Title: it.Title, Project: pname(it.Project), Phase: it.Phase, Deadline: p.atp(it.Deadline), PlannedFor: it.PlannedFor,
+			UpdatedAt: p.at(it.UpdatedAt), LastProgress: lp, WebURL: p.itemURL(it.ID)}
+		if it.Ask != nil {
+			e.Question = it.Ask.Question
+		}
+		es = append(es, e)
+	}
+	return map[string]any{"total": len(es), "items": es}, nil
 }
 
 // keepWindow 把取材窗口并回事项的 spec.since/until：Agent 写回 {period, sections} 会整体替换 spec，窗口随之丢失，

@@ -393,7 +393,7 @@ func TestFlowBriefMaterial(t *testing.T) {
 		}
 		sameSet(t, "due_waiting", gotDue, []string{"今天到期/due_today", "明天到期/due_tomorrow", "已过期/overdue",
 			"等房东确认的事项/echo", "跟进到期仍在等的事项/follow_up_due", "久未推进的事项/stale"})
-		// 当天活动：按项目分组，导入事件不计。
+		// 当天活动：按项目分组（组名是项目名，给 Agent 直接用），导入事件不计。
 		act := decode[struct {
 			Activity []struct {
 				Project string `json:"project"`
@@ -406,8 +406,8 @@ func TestFlowBriefMaterial(t *testing.T) {
 				byProject[g.Project] = append(byProject[g.Project], e.Kind+":"+e.Title+":"+e.Text)
 			}
 		}
-		sameSet(t, "acc-work 的活动", byProject[f.Projects["acc-work"]], []string{"progress:今天完成 W:进展 W1", "done:今天完成 W:"})
-		sameSet(t, "acc-open 的活动", byProject[f.Projects["acc-open"]], []string{"progress:今天完成 O:进展 O1", "done:今天完成 O:"})
+		sameSet(t, "acc-work 的活动", byProject["acc-work"], []string{"progress:今天完成 W:进展 W1", "done:今天完成 W:"})
+		sameSet(t, "acc-open 的活动", byProject["acc-open"], []string{"progress:今天完成 O:进展 O1", "done:今天完成 O:"})
 		if len(byProject) != 2 {
 			t.Errorf("活动应只分两个项目（导入的事项不计）: %v", byProject)
 		}
@@ -451,11 +451,19 @@ func TestFlowBriefMaterial(t *testing.T) {
 
 	f.step("ACT-BRF-04 两个实例各有自己的窗口、内容要求与所属实例", func(t *testing.T) {
 		amW, pmW := windowOf(t, am), windowOf(t, pm1)
-		if d := amW.Until.Sub(amW.Since); d != 24*time.Hour {
-			t.Errorf("brief-am 是该实例第一份，窗口应为 24 小时: %v", d)
+		// 实例的第一份从本次到期之前的上一个调度节拍起（验收实例的定时是每年 1 月 1 日 03:00，主机时区）。
+		prevTick := func(until time.Time) time.Time {
+			at := time.Date(until.In(time.Local).Year(), 1, 1, 3, 0, 0, 0, time.Local)
+			if !at.Before(until) {
+				at = at.AddDate(-1, 0, 0)
+			}
+			return at
 		}
-		if d := pmW.Until.Sub(pmW.Since); d != 24*time.Hour {
-			t.Errorf("brief-pm 的第一份窗口也是 24 小时（不借用 brief-am 的）: %v", d)
+		if want := prevTick(amW.Until); !amW.Since.Equal(want) {
+			t.Errorf("brief-am 是该实例第一份，窗口应从上一个调度节拍 %v 起: %v", want, amW.Since)
+		}
+		if want := prevTick(pmW.Until); !pmW.Since.Equal(want) {
+			t.Errorf("brief-pm 的第一份同样从自己定时的上一个节拍起（不借用 brief-am 的）: %v ≠ %v", pmW.Since, want)
 		}
 		pm2 := f.runBrief(pmInst, "done")
 		if w := windowOf(t, pm2); !w.Since.Equal(pmW.Until) {

@@ -358,7 +358,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	k.rn.Attach(k.disp)
 	k.wh.Attach(k.disp)
-	if tk, err = task.New(task.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL,
+	if tk, err = task.New(task.Options{Store: st, Exec: x, Packs: ld, Queue: k.disp, RunsDir: l.Runs, APIURL: apiURL, WebBase: base,
 		OnError: func(run string, err error) { slog.Error("task run", "run", run, "err", err) }}); err != nil {
 		return nil, err
 	}

@@ -164,7 +164,8 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 	if !strings.Contains(w.Body, "{instruction_path}") {
 		t.Fatalf("write-brief must read the instruction file: %s", w.Body)
 	}
-	for _, k := range []string{"进展", "到期事项", "待本人决定的事"} {
+	// 可改的默认要求定组织方式（按轻重，不机械分栏）；固定正文只定事实规则与写回格式（附录 C.13）。
+	for _, k := range []string{"要我处理或拍板", "日程", "进展", "建议", "没读到"} {
 		if !strings.Contains(w.Meta.DefaultInstruction, k) {
 			t.Fatalf("write-brief default_instruction lacks %q: %s", k, w.Meta.DefaultInstruction)
 		}
@@ -174,7 +175,8 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 			t.Fatalf("write-brief must name %q for spec.sections[].{project, body}: %s", k, w.Body)
 		}
 	}
-	for _, k := range []string{"item.title", "写回成功就是回执"} { // 周期分得开、写回即回执（§8.4）
+	// 周期分得开、写回即回执（§8.4）；事实规则：后续不等于解决、来源覆盖分层、不露 id、只用资料给的链接。
+	for _, k := range []string{"item.title", "写回成功就是回执", "followed_by", "未核实", "以最新的为准", "曾关闭，之后又有动静", "不等于还没结束", "occurred_at", "context.sources", "not_screened", "fetch 为 push", "web_url", "不出现任何 id"} {
 		if !strings.Contains(w.Body, k) {
 			t.Fatalf("write-brief lacks %q: %s", k, w.Body)
 		}
@@ -182,8 +184,11 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 	if got := strings.Join(w.Meta.ResultFields, ","); got != "period,sections[].body" { // 内核按它判定代转 done（§8.4）
 		t.Fatalf("write-brief result_fields: %q", got)
 	}
-	if !strings.Contains(w.Body, "project（或 title）") { // 节可以只有 title（附录 C.13）
-		t.Fatalf("write-brief must spell out project or title per section: %s", w.Body)
+	if !strings.Contains(w.Body, "title 与 body") || !strings.Contains(w.Body, "project 写项目名") { // 节可以只有 title（附录 C.13）
+		t.Fatalf("write-brief must spell out title (or project) per section: %s", w.Body)
+	}
+	if got := strings.Join(w.Meta.Materials, ","); got != "context,prior,schedule,decisions,due_waiting,planned,activity,proposals,digest,spot_check" {
+		t.Fatalf("write-brief materials: %q", got)
 	}
 	v, ok := p.Views["brief"]
 	if !ok || v.Kind != "brief" || len(v.List.Columns) == 0 || len(v.Card.Fields) == 0 {

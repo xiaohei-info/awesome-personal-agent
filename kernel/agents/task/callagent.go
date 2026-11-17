@@ -22,7 +22,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/summaries"
 )
 
 // Generator 是生成型入口（*direct.Service 满足它）。
@@ -94,7 +93,7 @@ func instanceParams(c rules.Call) (p instParams) {
 	return p
 }
 
-// callMaterials 是 call_agent 给任务型与生成型的通用资料：实例参数加账本快照（§8.4、§10），同一处组装。
+// callMaterials 是 call_agent 给生成型的通用资料：实例参数加账本快照（§8.4、§10）。任务型按模板的 materials 在 callTask 里组装。
 func (s *Service) callMaterials(ctx context.Context, c rules.Call) ([]Material, error) {
 	snap, err := s.ledgerSnapshot(ctx)
 	if err != nil {
@@ -180,56 +179,77 @@ func (s *Service) spotCheckMaterial(ctx context.Context) (Material, error) {
 }
 
 // callTask 拉起任务型；prior 是接力时上一步的定案结果（结构化输入，§8.3），msgs 是接力时事项上的挂靠消息。
+// 资料按模板的 materials 组装（附录 C.7）：没声明的段不查询；简报选取的 digest 条目记在本次运行上，运行成功才汇入。
 func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string, msgs []Message, prior json.RawMessage) error {
 	depth, over, err := s.launchDepth(ctx, c)
 	if err != nil || over {
 		return err
 	}
-	mats, err := s.callMaterials(ctx, c)
-	if err != nil {
-		return err
+	var declared, fields []string
+	if pk, ok := s.o.Packs.Get(pack); ok {
+		declared, fields = pk.Prompts[tmpl].Meta.Materials, pk.Prompts[tmpl].Meta.ResultFields
+	}
+	want := wants(declared)
+	var mats []Material
+	if c.Instance != nil && want("instance_params") {
+		mats = append(mats, Material{Name: "instance_params", Body: string(c.Instance.Params)})
+	}
+	if want("ledger_snapshot") {
+		snap, err := s.ledgerSnapshot(ctx)
+		if err != nil {
+			return err
+		}
+		mats = append(mats, Material{Name: "ledger_snapshot", Body: snap})
 	}
 	if len(prior) > 0 {
 		mats = append(mats, Material{Name: "relay_input", Body: string(prior)})
 	}
-	if c.Item != nil && c.Item.Kind == domain.KindBrief { // 每份简报带抽检条目（§8.10）
-		sc, err := s.spotCheckMaterial(ctx)
-		if err != nil {
-			return err
-		}
-		mats = append(mats, sc)
-	}
-	var digest []summaries.DigestEntry
+	var digest []string
 	var win *window
 	var raw []RawFile
-	if c.Item != nil && c.Item.Kind == domain.KindBrief { // 每份简报带"知会"（摘要出口，§9.3）与按计划日期取的材料（§7.3）
-		var pm Material
-		if pm, digest, err = s.briefSections(ctx); err != nil {
-			return err
+	if c.Item != nil && c.Item.Kind == domain.KindBrief {
+		if want("spot_check") { // 每份简报带抽检条目（§8.10）
+			sc, err := s.spotCheckMaterial(ctx)
+			if err != nil {
+				return err
+			}
+			mats = append(mats, sc)
 		}
-		mats = append(mats, pm)
-		// 五个新段与按实例的取材窗口；窗口写进简报事项的 spec.since/until，下一份取它作起点（§7.3）。
-		w, lm, props, err := s.briefLedgerSections(ctx, c)
+		// 各段与按实例的取材窗口；窗口写进简报事项的 spec.since/until，下一份成功的简报以它为起点（§7.3）。
+		p := planFor(c, want, s.o.WebBase, s.o.Now())
+		p.fields = fields
+		b, err := s.briefLedger(ctx, c, p)
 		if err != nil {
 			return err
 		}
-		win = &w
-		mats = append(mats, lm...)
-		// digest 与 proposals 引用的来源事件各带一个按外发范围裁剪的原文文件（§7.3）。
-		var dm Material
-		if dm, raw, err = s.briefRaw(ctx, digest, props); err != nil {
-			return err
+		win = &b.w
+		mats = append(mats, b.mats...)
+		if want("digest") || want("proposals") {
+			// digest 与 proposals 引用的来源事件各带一个按外发范围裁剪的原文文件（§7.3）。
+			dm, files, err := s.briefRaw(ctx, b.digest, b.props, p.loc)
+			if err != nil {
+				return err
+			}
+			raw = files
+			if want("digest") {
+				mats = append(mats, dm)
+			}
+			if want("proposals") {
+				mats = append(mats, b.props.material())
+			}
 		}
-		mats = append(mats, dm, props.material())
+		for _, d := range b.digest {
+			digest = append(digest, d.Event)
+		}
 		if c.Bound {
-			if _, err := c.Do("item.update", map[string]any{"id": c.Item.ID, "spec": w, "reason": "rule " + c.Rule + ": brief window"}); err != nil {
+			if _, err := c.Do("item.update", map[string]any{"id": c.Item.ID, "spec": b.w, "reason": "rule " + c.Rule + ": brief window"}); err != nil {
 				return err
 			}
 		}
 	}
 	ip := instanceParams(c)
 	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
-		Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
+		Digest: digest, Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
 	switch {
 	case c.Bound:
 		if c.Item.Assignee != systemPrincipal {
@@ -241,41 +261,8 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 	case c.Item != nil:
 		t.Title, t.Project, t.From = c.Item.Title, c.Item.Project, c.Item.ID
 	}
-	out, err := s.Launch(ctx, t) // 没拉起时事项已转 needs_input 并带原因，不是规则失败
-	if err != nil || out.Run == "" || len(digest) == 0 {
-		return err
-	}
-	// 运行已入队才记"已汇入"：拉起失败时这些条目留给下一份简报。崩溃在两步之间只会重复一次，不会丢。
-	return s.o.Store.Update(ctx, func(tx *store.Tx) error { return summaries.MarkDigested(tx, out.Item, digest, s.o.Now()) })
-}
-
-// briefSections 是简报独有的两段资料：digest（尚未汇入过简报的摘要出口事件，每条只汇入一次）与 planned（计划今天或更早、
-// 尚未完成的事项，过期不自动改期；计划明天或没有计划日期的不在其中）。两段都只是账本读取，不调模型。
-func (s *Service) briefSections(ctx context.Context) (pm Material, digest []summaries.DigestEntry, err error) {
-	type plannedItem struct {
-		ID         string       `json:"id"`
-		Title      string       `json:"title"`
-		Project    string       `json:"project,omitempty"`
-		Phase      domain.Phase `json:"phase"`
-		PlannedFor string       `json:"planned_for"`
-	}
-	planned := []plannedItem{}
-	err = s.o.Store.View(ctx, func(tx *store.Tx) error {
-		var verr error
-		if digest, verr = summaries.PendingDigest(tx); verr != nil {
-			return verr
-		}
-		l, verr := items.TodayItems(tx, s.o.Now())
-		for _, it := range l.Planned {
-			planned = append(planned, plannedItem{it.ID, it.Title, it.Project, it.Phase, it.PlannedFor})
-		}
-		return verr
-	})
-	if err != nil {
-		return
-	}
-	pb, _ := json.Marshal(map[string]any{"planned": planned})
-	return Material{Name: "planned", Body: string(pb)}, digest, nil
+	_, err = s.Launch(ctx, t) // 没拉起时事项已转 needs_input 并带原因，不是规则失败
+	return err
 }
 
 // launchDepth 是规则拉起任务型与直接调用的链路深度，规则与后台运行同一处（chain.Next）；超过阈值只记录不派发，over 为真。

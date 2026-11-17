@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/budget"
@@ -49,7 +50,8 @@ type rawRef struct {
 
 type digestOut struct {
 	summaries.DigestEntry
-	Raw []rawRef `json:"raw,omitempty"`
+	OccurredAt *time.Time `json:"occurred_at,omitempty"` // 来源事件的发生时刻，按报告时区；来源没给时不写
+	Raw        []rawRef   `json:"raw,omitempty"`
 }
 
 type briefProposals struct {
@@ -71,7 +73,7 @@ type rawItem struct {
 
 // briefRaw 为 digest 与 proposals 引用的来源事件各出一个原文文件，并把文件名与裁剪量写进条目。
 // 只读账本，不碰来源事件；运行凭据仍不能经 API 读来源事件（§14.3）。
-func (s *Service) briefRaw(ctx context.Context, digest []summaries.DigestEntry, props briefProposals) (dm Material, files []RawFile, err error) {
+func (s *Service) briefRaw(ctx context.Context, digest []summaries.DigestEntry, props briefProposals, loc *time.Location) (dm Material, files []RawFile, err error) {
 	ids := []string{}
 	for _, d := range digest {
 		ids = append(ids, d.Event)
@@ -139,6 +141,10 @@ func (s *Service) briefRaw(ctx context.Context, digest []summaries.DigestEntry, 
 	out := make([]digestOut, 0, len(digest))
 	for _, d := range digest {
 		o := digestOut{DigestEntry: d}
+		if !d.OccurredAt.IsZero() {
+			at := d.OccurredAt.In(loc)
+			o.OccurredAt = &at
+		}
 		if r, ok := ref(d.Event); ok {
 			o.Raw = []rawRef{r}
 		}
