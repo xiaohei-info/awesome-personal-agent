@@ -1,0 +1,179 @@
+# v0.2.0 工作台迭代 follow-up 处置清单
+
+收口节点（GT-437）对 `omac dag followups .omac/apa-v02-workbench.yaml` 列出的 173 条逐条处置。fix 指本次已改（给出位置），defer 指不阻塞发布、转发布后维护清单，drop 指无需处理（给出理由）。L14–L24 与 MEAS-RAW、SPIKE-OWNCHAT、MEAS-REM、SPIKE-BUDGET 不在此列，由本人升级后执行（设计 §20.4、§21.3）。
+
+共 fix 22、defer 109、drop 42。
+
+- `schema-v8#1`: drop - 必要支撑文件，非越界，仅记录
+- `schema-v8#2`: drop - 验收文档措辞由 PM 维护，非迁移缺陷
+- `schema-v8#3`: drop - 评审环境说明，与交付无关
+- `source-htmltext#1`: fix - docs/solution-design.md §18 HTML 转文本行，改为真实理由
+- `source-htmltext#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-htmltext#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-htmltext#4`: drop - 设计 §18 已声明输出为 CommonMark，可接受
+- `source-htmltext#5`: drop - 符合设计（调用方标 partial）
+- `grant-import#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `grant-import#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `grant-import#3`: defer - Web 词汇补齐属 Web 代码，转发布后维护清单
+- `grant-import#4`: drop - 评审环境限制；本节点 web 556 测试与全量 e2e 已通过
+- `extract-align#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `extract-align#2`: fix - docs/appendix-c-capability-pack.md C.7 入站模板输入段，预筛只带未结清单
+- `extract-align#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `extract-align#4`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `extract-align#5`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `extract-align#6`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `extract-align#7`: fix - C.11 拆出的行已并回，规划标记清零（严格模式对照测试通过）
+- `extract-align#8`: drop - 评审环境限制；本节点全量 e2e 已通过
+- `cli-fields#1`: fix - docs/appendix-b-api-cli.md B.1 item add/update 行补分隔
+- `cli-fields#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `cli-fields#3`: drop - 已由 cli/serve 测试与全量 e2e 覆盖
+- `doubles-srcstub#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `doubles-srcstub#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `doubles-srcstub#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `doubles-modelstub#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `doubles-modelstub#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `doubles-modelstub#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `doubles-harness#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `doubles-harness#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `doubles-harness#3`: drop - 评审环境说明（GOFLAGS），与交付无关
+- `web-brief-sections#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-brief-sections#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-brief-sections#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `raw-ingest#1`: fix - docs/solution-design.md §16.5 升级表改为三列（含 content_missing）
+- `raw-ingest#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `raw-ingest#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `raw-ingest#4`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `raw-ingest#5`: fix - docs/user/changelog.md 新增迁移条目 M-20（max_source_output_mb 须大于 max_source_event_mb）
+- `eventlog-live-read#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `eventlog-live-read#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `eventlog-live-read#3`: fix - docs/appendix-b-api-cli.md GET /audit/events 路由签名补 imported
+- `eventlog-live-read#4`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `eventlog-live-read#5`: drop - 覆盖率说明，达标，无需处理
+- `link-material#1`: fix - docs/appendix-b-api-cli.md 只在 Web 的操作一行，标记已去掉
+- `link-material#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `link-material#3`: drop - 设计只要求协议与主机名转小写，不构成缺陷
+- `link-material#4`: drop - 评审环境限制；本节点环境已跑通 tests/fixtures 与全量 e2e
+- `urgent-notify#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `urgent-notify#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `urgent-notify#3`: drop - 评审环境说明（GOFLAGS），与交付无关
+- `hermes-chat-tools#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `hermes-chat-tools#2`: fix - docs/appendix-a-harness.md SPIKE-SESSION-KIND-OWNCHAT 行改为与五条判定顺序一致
+- `hermes-chat-tools#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `raw-read-api#1`: fix - docs/user/changelog.md M-15 写明外发预览不受此限
+- `raw-read-api#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `raw-read-api#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `raw-read-api#4`: drop - 在规格内（ACT-RSC-03），无需改动
+- `raw-retention-purge#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `raw-retention-purge#2`: drop - 覆盖率说明，达标，无需处理
+- `raw-retention-purge#3`: fix - docs/solution-design.md 来源原文的保留一段，补尚未判定的事件不清
+- `raw-retention-purge#4`: fix - docs/solution-design.md 同段，补空轮不记审计事件
+- `raw-retention-purge#5`: drop - 评审环境限制；本节点环境全量 e2e 与 go test ./... 已通过，L14 由本人升级后执行
+- `material-budget#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `material-budget#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `material-budget#3`: defer - 设计 §8.4 写“每次模型调用”，而其他生成型调用尚未受预算约束，属设计范围取舍，需 architect 决定是扩展实现还是收窄文字；转发布后维护清单
+- `material-budget#4`: drop - 实现与设计一致，仅提醒验收执行者
+- `import-apply#1`: fix - docs/solution-design.md §7.1 完成通知行与 docs/changes-v0.2.0.md WB-10 改为每个请求一条、含 invalid
+- `import-apply#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `import-apply#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `import-apply#4`: drop - 评审环境说明，与交付无关
+- `brief-material#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `brief-material#2`: defer - 键名 end、location 与来源程序实际写入的 headers 键需对齐，涉及适配器代码与 D.8，转发布后维护清单，L14–L24 实测时一并核对
+- `brief-material#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-vaults-page#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-vaults-page#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-vaults-page#3`: fix - docs/solution-design.md §4.1 设置分组，连接组列出笔记库
+- `web-link-materials#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-link-materials#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-link-materials#3`: drop - 必要支撑改动，仅记录
+- `e2e-link-material#1`: drop - 协议被拒的入参，不是本机路径，redline 通过
+- `e2e-inbound-align#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-inbound-align#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-inbound-align#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-chat-dispose#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-applepim-raw#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-applepim-raw#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-applepim-raw#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-applepim-raw#4`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-himalaya-raw#1`: fix - docs/appendix-d-adapters.md 一次拉取 stdout 行，写明邮件适配器的 config.max_output_mb
+- `source-himalaya-raw#2`: drop - 验收文档数值由 PM 维护；测试已注明偏离理由
+- `source-himalaya-raw#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-himalaya-raw#4`: drop - 评审环境说明，与交付无关
+- `source-github-raw#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-github-raw#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-github-raw#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-github-raw#4`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-rss-raw#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-rss-raw#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-rss-raw#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-calendar-raw#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-calendar-raw#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-httpjson-raw#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-httpjson-raw#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-httpjson-raw#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-dirwatch-raw#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `source-dirwatch-raw#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-source-raw#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-source-raw#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-source-raw#3`: drop - 既有状态，非本迭代引入
+- `attachment-fetch#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `attachment-fetch#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `attachment-fetch#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `attachment-fetch#4`: fix - docs/appendix-b-api-cli.md B.3 补 fetch_failed
+- `attachment-fetch#5`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `attachment-fetch#6`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-raw-trace#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-raw-trace#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-raw-trace#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-raw-trace#4`: fix - docs/user/troubleshooting.md 处理经过一段补“原文”栏
+- `web-storage-page#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-storage-page#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-model-budget#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-model-budget#2`: fix - docs/appendix-b-api-cli.md generate_endpoint 示例补 max_material_chars
+- `web-model-budget#3`: drop - 覆盖率说明，达标，无需处理
+- `brief-raw#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `brief-raw#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `brief-raw#3`: drop - 测试侧 CI 抖动修复，已接受
+- `brief-raw#4`: drop - L14–L24 由本人执行，按非目标不在本节点
+- `web-import-page#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-import-page#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-import-page#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-audit-fold#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-audit-fold#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-audit-fold#3`: fix - docs/user/changelog.md 工作台能力迭代一节补操作记录折叠导入批次
+- `e2e-import#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-import#2`: drop - 评审环境说明，与交付无关
+- `e2e-schema8-upgrade#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-schema8-upgrade#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-schema8-upgrade#3`: drop - 提交说明已随合入的 squash 为准，本节点不改历史
+- `e2e-schema8-upgrade#4`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `reminder-open-rule#1`: drop - 验证映射说明，行为已独立证实
+- `reminder-open-rule#2`: drop - 覆盖率口径说明，本变更无新增 Go 生产代码
+- `reminder-open-rule#3`: drop - 合入顺序已完成，无冲突
+- `reminder-open-rule#4`: fix - docs/appendix-c-capability-pack.md C.14 开头说明句改为已实现表述
+- `web-raw-actions#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-raw-actions#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `web-raw-actions#3`: drop - manifest 声明缺口，不由本节点改
+- `web-raw-actions#4`: fix - docs/appendix-b-api-cli.md 同一行，标记已去掉
+- `web-raw-actions#5`: drop - 可接受，有先例
+- `items-web#1`: drop - manifest 声明缺口，不由本节点改
+- `items-web#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `items-web#3`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `items-web#4`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-brief#1`: drop - 以设计 C.13 与实现为准，验收文档措辞随 OMAC 验收材料由 PM 维护
+- `e2e-brief#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-material-budget#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-raw-ingest#1`: drop - 验收文档数值由 PM 维护；测试已注明偏离理由
+- `e2e-raw-ingest#2`: drop - 判据不受凭据影响，非阻塞
+- `e2e-raw-lifecycle#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-raw-lifecycle#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `e2e-raw-lifecycle#3`: drop - HTTP 等价路径，非阻塞
+- `e2e-raw-lifecycle#4`: drop - 仅 apa_testclock 构建，发布构建不含，已在文件头说明
+- `fix.raw-ingest.9159a6#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `fix.raw-ingest.9159a6#2`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `fix.link-material.1160ef#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `fix.link-material.1160ef#2`: fix - docs/changes-v0.2.0.md WB-27 补 PATCH /materials/{id}
+- `fix.link-material.1160ef#3`: defer - material.update 已在同一变更里修订设计与附录 B，是否接受由维护者在发布前确认
+- `fix.attachment-fetch.9d7d14#1`: defer - 代码或测试层的改进建议，本节点只改 docs/**；不阻塞发布门槛，转发布后维护清单
+- `fix.attachment-fetch.9d7d14#2`: drop - RawColumn 只在清单项带 ref 时显示取回按钮（web/src/features/trace/RawColumn.tsx）
+- `fix.raw-retention-purge.24d53a#1`: drop - 修复落点在 kernel/doctor，由缺陷自身的位置决定，已接受
+- `fix.raw-retention-purge.24d53a#2`: drop - 覆盖率说明，分支门槛已满足

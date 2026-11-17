@@ -235,7 +235,7 @@ criteria: 涉及真实资金、对外承诺、不可逆操作或权限变更的�
 
 `instruction_path` 的文件由任务型在拉起时写进这次运行的运行目录（文件名 `instruction.txt`，权限 0600），不进提示词正文；包的 `instance_params` 没有字符串参数 `instruction` 时，用了这个占位符的包加载时拒绝；实例没有任务说明时：模板声明了 `default_instruction` 就写它；没有声明则不拉起，事项转 `needs_input`（`SPIKE-ROUTINE`，主文档 §13.5）。实例参数 `instruction` 不超过 2000 字，超过时建实例与改实例都被拒绝。
 
-**入站模板的结构化输入与输出**（主文档 §9.3）。起草（`triage-draft`）、抽取（`triage-extract`）与预筛（`capture-prescreen`）的结构化输入除事件元信息外，都带内核组出的两份清单；模板不必声明，也不能改它们的形状：
+**入站模板的结构化输入与输出**（主文档 §9.3）。起草（`triage-draft`）、抽取（`triage-extract`）与预筛（`capture-prescreen`）的结构化输入除事件元信息外，起草与抽取带内核组出的两份清单，预筛只带未结事项清单（以文本段附在资料后，不带项目清单）；模板不必声明，也不能改它们的形状：
 
 | 输入键 | 内容 |
 |---|---|

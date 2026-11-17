@@ -28,7 +28,7 @@
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建；可带 `--deadline`、`--origin`、`--ext`（规则同 `apa item add`） | observer | |
 | `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 5 |
-| `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` `add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐。 | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
+| `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>`；`add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐。 | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
 | `apa item progress <id> --text [--on <日期>]` | 追加一条进展，不改阶段；`--on` 不能晚于今天 | worker（自己的事项）；delegate（绑定的事项不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、23 |
 | `apa import --file <计划文件> --source <来源名> [--dry-run] --grant <id>` | 带原始时间的导入（主文档 §7.1）：计划文件是 JSONL，CLI 按 500 条一批提交并沿用同一个批次号，逐行输出 `created`、`existing` 或 `invalid`；`--dry-run` 只预检，不写账本、不占授权单的条数 | delegate，只凭授权单（`--evidence` 不被接受） | 2、4、23 |
 | **决策** | | | |
@@ -243,7 +243,7 @@
 
 `GET /items` 返回 `last_rejections`（事项 id → 最近一次未处理的退出码 23 拒绝：`seq`、`at`、`actor`、`code`、`why`、`grant`），`GET /items/{id}` 返回 `last_rejection`；只对 `needs_input`、`proposed` 事项给出，决策待办与建议流据此标明被拒绝的代答或处理。`GET /audit/events` 可加 `grant=<授权单 id>` 查该授权单的签发、使用与撤销记录。
 
-`GET /audit/events?actor&object&type&grant&limit` 返回 `{"events": [...]}`，缺省按 Event 序号升序，`after=<序号>` 取其后的一页，`limit` 缺省 100、上限 500。加 `order=desc` 改为最新的在前，`before=<序号>` 取序号小于它的一页（缺省从最新开始），游标是 Event 序号，与筛选组合时翻页稳定，不重复、不漏。`order` 取 `asc` 或 `desc`，其他值返回 400；`after` 只配升序、`before` 只配 `order=desc`，混用返回 400。Web 的操作记录页与授权单使用记录用 `order=desc`，CLI 与其他调用方沿用升序的 `after`，不受影响。
+`GET /audit/events?actor&object&type&grant&imported&limit` 返回 `{"events": [...]}`，缺省按 Event 序号升序，`after=<序号>` 取其后的一页，`limit` 缺省 100、上限 500。加 `order=desc` 改为最新的在前，`before=<序号>` 取序号小于它的一页（缺省从最新开始），游标是 Event 序号，与筛选组合时翻页稳定，不重复、不漏。`order` 取 `asc` 或 `desc`，其他值返回 400；`after` 只配升序、`before` 只配 `order=desc`，混用返回 400。Web 的操作记录页与授权单使用记录用 `order=desc`，CLI 与其他调用方沿用升序的 `after`，不受影响。
 
 事项字段 `created_at`、`updated_at`：`GET /items` 与 `GET /items/{id}` 返回，值为 RFC 3339 时间，只读。`created_at` 是该事项首条事项事件的时间（委派子事项的首条是 `delegation.created`，其余是 `item.created`）；`updated_at` 是最后一条事项事件的时间，与 `version` 同步推进（含关系变更；`item.deadline_passed` 与 `command.rejected` 不算）。
 
@@ -300,7 +300,7 @@
 
 ```json
 {"judge_endpoint": {"url": "…", "api_key": "…", "protocol": "system-one", "model": "…", "locality": "external", "timeout_ms": 10000, "max_batch": 32, "max_material_chars": 8000},
- "generate_endpoint": {"url": "…", "api_key": "…", "protocol": "chat-completions", "model": "…", "locality": "external"},
+ "generate_endpoint": {"url": "…", "api_key": "…", "protocol": "chat-completions", "model": "…", "locality": "external", "max_material_chars": 24000},
  "screening_timeout_ms": 30000,
  "models_paused": false}
 ```
@@ -391,6 +391,7 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 - 登录被限速或锁定时 `POST /auth/login` 返回 429，`code` 为 `login_locked`，带 `Retry-After`。
 - 本人暂停了模型时，需要模型的本人操作（积压的影子打分与放开重判）返回 409，退出码 6，`code` 为 `models_paused`，`next` 提示到"设置 › 模型"恢复（主文档 §8.7）。
 - 退出码 23 新增原因 `grant_required`：命令只接受授权单（`import.apply`），调用没有带单或只带了本人原话；`import_source_mismatch`、`import_limit_exceeded`：授权单的来源名不符，或累计条数会超过上限。
+- 取回附件失败（来源程序报错、超时或超出输出上限）返回 502，退出码 1，`code` 为 `fetch_failed`，`why` 取自来源程序 stderr 的末行；附件清单不变（主文档 §7.6）。
 - 来源事件超过单条上限被拒收时，"被拒收的事件"里的原因是 `event_too_large`，带实际字节数。
 
 ## B.4 标准事件类型

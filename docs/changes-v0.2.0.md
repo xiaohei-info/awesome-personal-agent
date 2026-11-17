@@ -307,7 +307,7 @@ v0.2.0 发布前追加的一个迭代，补齐"把 APA 当作唯一的工作台"
 
 - **WB-09 信封新增 `imported`、`recorded_at`。** 只出现在导入事件上。§6.7、附录 B.4。
   **迁移**：只增字段。订阅流不含导入事件，订阅方不需要改；读 `GET /audit/events` 的调用方会看到两个新的可选字段。
-- **WB-10 新增对外事件类型 `import.completed`。** 附录 B.4。
+- **WB-10 新增对外事件类型 `import.completed`。** 每个导入请求记一条，载荷含 `source`、`created`、`existing`、`invalid`；同一批次分几次请求提交时每次各记一条。附录 B.4。
   **迁移**：事件类型只增不改；遇到不处理的类型应跳过并推进游标，与此前的约定相同。
 - **WB-11 入站处置载荷新增 `material`。** 这次调用送出的资料字符数、裁剪前的字符数与裁剪方式。§8.4。
   **迁移**：只增字段；已落盘的处置没有它，处理经过对旧数据不显示裁剪量。
@@ -347,7 +347,7 @@ v0.2.0 发布前追加的一个迭代，补齐"把 APA 当作唯一的工作台"
   **迁移**：**调用方要改**：从列表里读全文的脚本与插件改用 `GET /source-events/{id}`。升级前落盘的事件在单条读取里照常返回原来的内容。
 - **WB-26 token 读来源原文受外发范围约束。** 附录 B.6、§14.14。
   **迁移**：收紧，没有兼容期。需要 Agent 读到全文的来源，由本人把该来源对外部端点的范围选为全文。挂靠消息与已接受事项的内容不受影响。
-- **WB-27 已有路由的新增参数与字段。** `GET /items` 的 `origin_source`、`origin_ref`；`POST /materials` 带 `link`；材料的 `form`、`link`、`open_url`；事项的 `imported`、`proposal.urgent`；`POST /items/{id}/report` 的 `link` 可为数组；`POST /settings/purge` 可删来源事件；`POST /settings/grants` 的 `import` 段；`/settings/model-endpoints` 的 `generate_endpoint.max_material_chars`；`GET /audit/events` 的 `imported` 筛选。附录 B.2。
+- **WB-27 已有路由的新增参数与字段。** `GET /items` 的 `origin_source`、`origin_ref`；`POST /materials` 带 `link`；`PATCH /materials/{id}` 改链接型材料的标题、kind 与标签；材料的 `form`、`link`、`open_url`；事项的 `imported`、`proposal.urgent`；`POST /items/{id}/report` 的 `link` 可为数组；`POST /settings/purge` 可删来源事件；`POST /settings/grants` 的 `import` 段；`/settings/model-endpoints` 的 `generate_endpoint.max_material_chars`；`GET /audit/events` 的 `imported` 筛选。附录 B.2。
   **迁移**：只增；不带新参数时行为同前。
 - **WB-28 新的错误原因。** 退出码 23 的 `grant_required`、`import_source_mismatch`、`import_limit_exceeded`；被拒收事件的 `event_too_large`。附录 B.3。
   **迁移**：没有新增退出码；按 `code` 穷举判断的调用方要接受新值。

@@ -239,7 +239,7 @@ Gmail、Google 日历、Google Drive 这类服务要用户自备 OAuth 客户端
 | 上限 | 值 | 超过时 |
 |---|---|---|
 | 单条事件的原文 | `max_source_event_mb`，默认 16 | 这一行拒收，原因 `event_too_large`；其余事件照常 |
-| 一次拉取的 stdout | `max_source_output_mb`，默认 32 | 上限内已解析的事件落盘，游标不动，按临时失败计；来源程序应按字节分批（主文档 §9.2） |
+| 一次拉取的 stdout | `max_source_output_mb`，默认 32 | 上限内已解析的事件落盘，游标不动，按临时失败计；来源程序应按字节分批（主文档 §9.2）；内核不把这个值传给来源程序，邮件适配器按自己的 `config.max_output_mb`（默认 32）分批，调过 `max_source_output_mb` 时要写成同一个数 |
 | 一条事件的聚合消息 | 200 条 | 这一行拒收；来源程序应拆成多条事件 |
 | webhook 请求体 | `max_webhook_body_mb`，默认 1 | 回 413，不落盘 |
 | 取回的单个附件 | 32 MiB | 取回失败，清单不变 |
