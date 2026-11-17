@@ -227,7 +227,9 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string,
 	req.Header.Set("Authorization", "Bearer "+cr.Token)
 	req.Header.Set("Accept", "application/json")
 	if isRaw {
-		req.Header.Set("Content-Type", "application/octet-stream")
+		if req.Header.Get("Content-Type") == "" { // 调用方可经 hdr 指定媒体类型（如导入的 application/x-ndjson）
+			req.Header.Set("Content-Type", "application/octet-stream")
+		}
 	} else if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -284,5 +286,6 @@ func decodeError(status int, data []byte) error {
 var knownCodes = map[domain.Code]struct{}{
 	domain.CodeInvalidRequest: {}, domain.CodeUnauthenticated: {}, domain.CodePermissionDenied: {},
 	domain.CodeWebOnly: {}, domain.CodeExecutorNotAllowed: {}, domain.CodeRiskScreeningPending: {}, domain.CodeBasisRequired: {}, domain.CodeSessionNotDirect: {},
+	domain.CodeGrantRequired: {}, domain.CodeImportSourceMismatch: {}, domain.CodeImportLimitExceeded: {},
 	domain.CodeNotFound: {}, domain.CodeConflict: {}, domain.CodeInternal: {},
 }

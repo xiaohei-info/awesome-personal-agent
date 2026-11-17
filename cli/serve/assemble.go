@@ -68,6 +68,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/followmsg"
 	khealth "github.com/xiaohei-info/awesome-personal-agent/kernel/health"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/hosted"
+	kimports "github.com/xiaohei-info/awesome-personal-agent/kernel/imports"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -406,6 +407,11 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	); err != nil {
 		return nil, err
 	}
+	// 导入（§7.1）：waiting 的导入事项从导入时刻起排第一轮跟进（导入事件不进跟进的"现场"读法）。
+	imp, err := kimports.Register(x, kimports.Options{Kinds: kinds, Waiting: k.fu.ArmImported})
+	if err != nil {
+		return nil, err
+	}
 	x.OnCommit(scr.OnCommit)
 	att.Attach(x, st, logErr("attention"))
 	x.OnCommit(func(command.Commit) { k.sumDue.Store(true) })
@@ -454,7 +460,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Guard: wk.Identity, Groups: []core.RouteGroup{
-		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), creds, grants,
+		apiitems.Routes(x, st, k.stale.After), apiitems.ImportRoutes(st, imp), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), creds, grants,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)), apiconnections.Routes(st, x, conns, caller, k.send),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, int64(cfg.MaxWebhookBody)), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
 		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {

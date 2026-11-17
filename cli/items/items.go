@@ -29,7 +29,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee --tag --q --sort --planned-for] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee --tag --q --sort --planned-for --origin-source --origin-ref] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
 
 func item(c *client.Ctx, args []string) error {
 	if len(args) == 0 {
@@ -277,8 +277,8 @@ func show(c *client.Ctx, args []string) error {
 }
 
 func list(c *client.Ctx, args []string) error {
-	f, _ := newForm("item list", []string{"phase", "kind", "project", "assignee", "tag", "q", "sort", "planned-for"}, nil, nil)
-	if _, err := f.parse(args, false, "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>] [--tag <t>] [--q <text>] [--sort updated|deadline|planned_for|priority] [--planned-for <YYYY-MM-DD>]"); err != nil {
+	f, _ := newForm("item list", []string{"phase", "kind", "project", "assignee", "tag", "q", "sort", "planned-for", "origin-source", "origin-ref"}, nil, nil)
+	if _, err := f.parse(args, false, "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>] [--tag <t>] [--q <text>] [--sort updated|deadline|planned_for|priority] [--planned-for <YYYY-MM-DD>] [--origin-source <source, e.g. import:notes>] [--origin-ref <external id>]"); err != nil {
 		return err
 	}
 	q := url.Values{}

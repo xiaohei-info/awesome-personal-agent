@@ -30,8 +30,8 @@
 | `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>` | observer | 5 |
 | `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` `add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐。 | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
 | `apa item progress <id> --text [--on <日期>]` | 追加一条进展，不改阶段；`--on` 不能晚于今天 | worker（自己的事项）；delegate（绑定的事项不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、23 |
-| `apa import --file <计划文件> --source <来源名> [--dry-run] --grant <id>` | 【规划中（v0.2.0）】带原始时间的导入（主文档 §7.1）：计划文件是 JSONL，CLI 按 500 条一批提交并沿用同一个批次号，逐行输出 `created`、`existing` 或 `invalid`；`--dry-run` 只预检，不写账本、不占授权单的条数 | delegate，只凭授权单（`--evidence` 不被接受） | 2、4、23 |
-| 已有事项命令的新增标志 | 【规划中（v0.2.0）】`apa item list` 加 `--origin-source <来源>`、`--origin-ref <外部 id>` | 同原命令 | 2 |
+| `apa import --file <计划文件> --source <来源名> [--dry-run] --grant <id>` | 带原始时间的导入（主文档 §7.1）：计划文件是 JSONL，CLI 按 500 条一批提交并沿用同一个批次号，逐行输出 `created`、`existing` 或 `invalid`；`--dry-run` 只预检，不写账本、不占授权单的条数 | delegate，只凭授权单（`--evidence` 不被接受） | 2、4、23 |
+| 已有事项命令的新增标志 | `apa item list` 加 `--origin-source <来源>`、`--origin-ref <外部 id>` | 同原命令 | 2 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
 | `apa decide <id> --option [--evidence \| --grant]` | 代答决策；本人原话或授权单二选一 | delegate | 2、4、6、20、22、23 |
@@ -129,9 +129,9 @@
 |---|---|---|---|
 | 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for` | 按 §14.3；导出 ext 密钥可 `GET` |
 | | `GET /today` | 今天的清单，四组：`planned`、`due`、`pending`、`stale` | observer |
-| | 已有路由 GET /items 的新增查询参数 | 【规划中（v0.2.0）】`origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
-| 导入 | `POST /import` | 【规划中（v0.2.0）】带原始时间的导入，请求体是 JSONL，见下 | Web 登录；delegate 只凭授权单 |
-| | `GET /imports` | 【规划中（v0.2.0）】导入批次：`{"batches": [{"id", "source", "created", "existing", "invalid", "started_at", "actor", "grant"?}]}`，最新在前 | observer |
+| | 已有路由 GET /items 的新增查询参数 | `origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
+| 导入 | `POST /import` | 带原始时间的导入，请求体是 JSONL，见下 | Web 登录；delegate 只凭授权单 |
+| | `GET /imports` | 导入批次：`{"batches": [{"id", "source", "created", "existing", "invalid", "started_at", "actor", "grant"?}]}`，最新在前 | observer |
 | | `POST /items/{id}/progress` | 追加进展 `{text, on?}`；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate 按 §14.5 |
 | | `POST /items/{id}/correlation-keys`，`DELETE /items/{id}/correlation-keys` | 登记或移除关联键 `{key, domain?}`（经 `item.relate`；`GET /items/{id}` 返回 `correlation_keys[]`） | 同 `relations` |
 | | `GET /items/{id}/messages` | 事项的全部挂靠消息 | observer；运行身份和无人值守事项按转发白名单过滤；ext 密钥不可用 |
@@ -412,9 +412,9 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 `proposal.attached`。
 
-工作台能力迭代新增一个类型（下一行）：一个导入批次结束，对象是批次，载荷是来源名与新建、已存在的条数。带导入标记的事项事件不进订阅流，订阅方要拿到导入的内容，在收到它之后按 `origin` 经只读 API 取（主文档 §7.1）。
+工作台能力迭代新增一个类型（下一行）：一个导入请求写完，对象是批次，载荷是来源名与新建、已存在、不合法的条数（`source`、`created`、`existing`、`invalid`）；同一批次分几次请求提交时每次各记一条。带导入标记的事项事件不进订阅流，订阅方要拿到导入的内容，在收到它之后按 `origin` 经只读 API 取（主文档 §7.1）。
 
-【规划中（v0.2.0）】`import.completed`。
+`import.completed`。
 
 连接登记的事件（连接的新建、改配置、启用、停用、改名、删除）是内部类型，不进订阅流，不在本表。
 

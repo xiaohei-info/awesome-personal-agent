@@ -98,6 +98,7 @@ const (
 	EvRunStarted                     = "run.started"
 	EvRunFinished                    = "run.finished"
 	EvSourceFailed                   = "source.failed"
+	EvImportCompleted                = "import.completed" // 一个导入请求写完：对象是批次，载荷是来源名与新建、已存在、不合法的条数（§7.1）
 	EvHealthAlert                    = "health.alert"
 
 	// 登录审计（§14.13）：载荷不含口令。
@@ -118,7 +119,7 @@ var RegisteredEventTypes = []string{
 	EvRuleModeChanged, EvAllowlistChanged, EvPolicyChanged, EvGrantIssued, EvGrantRevoked,
 	EvRunStarted, EvRunFinished, EvSourceFailed, EvHealthAlert,
 	EvAuthLogin, EvAuthLoginLocked, EvAuthPasswordChanged, EvAuthSessionRevoked,
-	EvItemProgressAdded, EvProposalAttached,
+	EvItemProgressAdded, EvProposalAttached, EvImportCompleted,
 }
 
 var registered = func() map[string]bool {

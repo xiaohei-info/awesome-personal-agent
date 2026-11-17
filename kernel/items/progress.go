@@ -39,14 +39,14 @@ type progressIn struct {
 }
 
 func insertProgress(tx *store.Tx, item string, p domain.Progress) error {
-	_, err := tx.Exec(`INSERT INTO item_progress (id, item, text, on_date, actor, at) VALUES (?, ?, ?, ?, ?, ?)`,
-		p.ID, item, p.Text, p.On, p.Actor, p.At.UnixNano())
+	_, err := tx.Exec(`INSERT INTO item_progress (id, item, text, on_date, actor, at, precision) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, item, p.Text, p.On, p.Actor, p.At.UnixNano(), p.Precision)
 	return err
 }
 
 // Progress 按记录先后返回事项的进展；没有时返回 nil。
 func Progress(tx *store.Tx, item string) ([]domain.Progress, error) {
-	r, err := tx.Query(`SELECT id, text, on_date, actor, at FROM item_progress WHERE item = ? ORDER BY at, id`, item)
+	r, err := tx.Query(`SELECT id, text, on_date, actor, at, precision FROM item_progress WHERE item = ? ORDER BY at, id`, item)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func Progress(tx *store.Tx, item string) ([]domain.Progress, error) {
 	for r.Next() {
 		var p domain.Progress
 		var at int64
-		if err := r.Scan(&p.ID, &p.Text, &p.On, &p.Actor, &at); err != nil {
+		if err := r.Scan(&p.ID, &p.Text, &p.On, &p.Actor, &at, &p.Precision); err != nil {
 			return nil, err
 		}
 		p.At = time.Unix(0, at).UTC()

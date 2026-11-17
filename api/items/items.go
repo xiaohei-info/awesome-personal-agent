@@ -85,7 +85,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	}
 	q := r.URL.Query()
 	f := kitems.Filter{Phase: domain.Phase(q.Get("phase")), Kind: domain.Kind(q.Get("kind")),
-		Project: q.Get("project"), Assignee: q.Get("assignee")}
+		Project: q.Get("project"), Assignee: q.Get("assignee"), OriginSource: q.Get("origin_source"), OriginRef: q.Get("origin_ref")}
 	sq := search.ItemQuery{Text: q.Get("q"), Tag: q.Get("tag"), PlannedFor: q.Get("planned_for"), Sort: q.Get("sort")}
 	var (
 		its  []domain.Item
