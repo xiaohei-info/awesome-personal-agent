@@ -21,7 +21,7 @@ var subscribers = []struct {
 	{"规则（触发记录）", []string{"rules_fire"}},
 	{"摘要起草（已摘要的事件与起草）", []string{"summaries_digested", "attention_draft", "attention_held", "attention_done"}},
 	{"跟进与久未推进（待跟进与轮次状态）", []string{"followup_pending", "followup_state", "followup_resume"}},
-	{"判断与外调", []string{"judgments_j", "outcall_judgment", "outcall_run"}},
+	{"判断与外调", []string{"outcall_judgment", "outcall_run"}},
 	{"委派与后台运行", []string{"delegation_dispatch", "delegation_link", "background_run", "agenttask_result", "agenttask_session", "resume_run"}},
 	{"Agent 自检与健康统计", []string{"direct_result", "direct_health", "direct_judge_health"}},
 	{"链式触发", []string{"chain_cursor"}},
@@ -39,6 +39,9 @@ func (f *fx) noAutomation(base map[string]int, seq0 int64, t2 string) {
 	after := f.tableCounts()
 	for _, s := range subscribers {
 		for _, tb := range s.tables {
+			if _, ok := base[tb]; !ok {
+				f.t.Errorf("订阅方「%s」的表 %s 不存在：表名改了要同步这份清单，否则断言会空过", s.name, tb)
+			}
 			if after[tb] != base[tb] {
 				f.t.Errorf("订阅方「%s」的表 %s 因导入新增了行: %d -> %d", s.name, tb, base[tb], after[tb])
 			}
