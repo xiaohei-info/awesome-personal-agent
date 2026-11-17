@@ -8,7 +8,7 @@ import { feature } from "./index";
 // 测试边界替身：按 api/why 的 GET /v1/audit/events 契约应答（actor/object/type 精确匹配，order=desc 时最新在前、before/limit 分页（缺省升序、after 游标），错误体见附录 B.3）。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const A = (type: string, principal: string, via: string) => ({ type, principal, via });
-interface Ev { seq: number; type: string; object: string; actor: ReturnType<typeof A>; at: string; reason?: string; chain_depth: number; redacted?: boolean; grant?: string }
+interface Ev { seq: number; type: string; object: string; actor: ReturnType<typeof A>; at: string; reason?: string; chain_depth: number; redacted?: boolean; grant?: string; imported?: string; recorded_at?: string }
 
 const ev = (seq: number, type: string, object: string, actor: Ev["actor"], reason?: string): Ev =>
   ({ seq, type, object, actor, at: "2030-01-01T00:00:00Z", reason, chain_depth: 0 });
@@ -171,5 +171,37 @@ describe("授权单依据（ACT-AUTH-03、flow-why-audit）", () => {
     const items = r.getAllByRole("listitem");
     expect(within(items[0]).getByRole("link", { name: "按临时授权" })).toHaveAttribute("href", "/settings/agents#grant-grt_ok");
     expect(within(items[3]).queryByRole("link", { name: "按临时授权" })).toBeNull();
+  });
+});
+
+describe("导入批次折叠（ACT-WIM-03、flow-web-import）", () => {
+  const imp = (seq: number, type: string, batch: string): Ev => ({ ...ev(seq, type, "item_i" + seq, A("human", "owner", "cli")), imported: batch, recorded_at: "2030-06-01T00:00:00Z" });
+
+  it("一个批次的连续事件折叠成一行「导入 N 条」，展开看逐条；其余事件照常一条一行", async () => {
+    mount(ledger([imp(4, "item.created", "imp_1"), imp(5, "item.phase_changed", "imp_1"), imp(6, "item.progress_added", "imp_1"), ev(7, "item.updated", "item_a", A("human", "owner", "web"))]).impl);
+    const r = await rows();
+    await waitFor(() => expect(r.getByText(/导入 3 条/)).toBeInTheDocument());
+    const top = r.getAllByRole("listitem").filter((li) => !li.parentElement!.closest("li"));
+    expect(top).toHaveLength(5); // 普通 3 + 新 1 + 折叠 1
+    expect(top[1]).toHaveTextContent("导入 3 条"); // seq 7 在最前，折叠组位于 seq 3 之前
+    const group = top[1].querySelector("details")!;
+    expect(group.open).toBe(false);
+    expect(group.querySelectorAll("li")).toHaveLength(3);
+    await userEvent.click(within(top[1]).getByText(/导入 3 条/));
+    expect(group.open).toBe(true);
+    expect(within(top[1]).getByText(/新建了事项 item_i4/)).toBeInTheDocument();
+  });
+
+  it("不同批次分开折叠", async () => {
+    mount(ledger([imp(4, "item.created", "imp_1"), imp(5, "item.created", "imp_2"), imp(6, "item.created", "imp_2")]).impl);
+    const r = await rows();
+    await waitFor(() => expect(r.getByText(/导入 2 条/)).toBeInTheDocument());
+    expect(r.getByText(/导入 1 条/)).toBeInTheDocument();
+  });
+
+  it("没有导入事件时与原来一样，不出现折叠", async () => {
+    mount(ledger().impl);
+    await waitFor(async () => expect(await count()).toBe(3));
+    expect(document.querySelector("details.import-fold")).toBeNull();
   });
 });

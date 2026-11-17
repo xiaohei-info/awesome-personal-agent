@@ -17,7 +17,7 @@ import { strings } from "./strings";
 const PAGE = 100;
 const REJECTED = "command.rejected"; // §6.7：被拒绝的命令记这一类 Event
 const OWNER = "owner"; // Web 上本人的 principal（api/core）
-interface AuditEvent extends Step { object: string; chain_depth: number; grant?: string; redacted?: boolean; tombstone?: boolean }
+interface AuditEvent extends Step { object: string; chain_depth: number; grant?: string; redacted?: boolean; tombstone?: boolean; imported?: string; recorded_at?: string }
 interface Filter { actor: string; object: string; type: string }
 const EMPTY: Filter = { actor: "", object: "", type: "" };
 
@@ -56,6 +56,35 @@ function Row({ e }: { e: AuditEvent }) {
         {e.redacted || e.tombstone ? ` · ${t.hidden}` : ""}
       </span>
       {raw && <code className="raw-id">{[`#${e.seq}`, e.type, e.object, e.reason, e.grant].filter(Boolean).join(" · ")}</code>}
+    </li>
+  );
+}
+
+// 导入事件在序号上是连续的一段（设计 §6.7），所以相邻且批次相同的事件折成一组；普通事件各自一组。
+type Entry = { batch?: string; list: AuditEvent[] };
+const fold = (events: AuditEvent[]): Entry[] => {
+  const out: Entry[] = [];
+  for (const e of events) {
+    const last = out[out.length - 1];
+    if (e.imported && last?.batch === e.imported) last.list.push(e);
+    else out.push({ batch: e.imported || undefined, list: [e] });
+  }
+  return out;
+};
+
+function ImportFold({ entry }: { entry: Entry }) {
+  const t = useT(strings);
+  const raw = useRaw();
+  const rec = entry.list[0].recorded_at;
+  return (
+    <li>
+      <details className="import-fold">
+        <summary>
+          {t.imported(entry.list.length)}{rec ? ` · ${new Date(rec).toLocaleString(locale())}` : ""}
+          {raw && <code className="raw-id">{entry.batch}</code>}
+        </summary>
+        <ul className="rows">{entry.list.map((e) => <Row key={e.seq} e={e} />)}</ul>
+      </details>
     </li>
   );
 }
@@ -140,7 +169,7 @@ export function AuditPage() {
       {events && !events.length && <p className="empty">{t.empty}</p>}
       {events && events.length > 0 && (
         <ul aria-label={t.events} className="rows">
-          {events.map((e) => <Row key={e.seq} e={e} />)}
+          {fold(events).map((g) => g.batch ? <ImportFold key={g.list[0].seq} entry={g} /> : <Row key={g.list[0].seq} e={g.list[0]} />)}
         </ul>
       )}
       {more && events && <button onClick={() => void load(applied, events[events.length - 1].seq)}>{t.more}</button>}
