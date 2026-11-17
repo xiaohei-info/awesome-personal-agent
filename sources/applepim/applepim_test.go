@@ -206,28 +206,81 @@ func TestMailThreadCorrelationKeys(t *testing.T) {
 	}
 }
 
-// 上一轮还未完成、这一轮不在未完成列表里的提醒发 reminder.closed（同一关联键）；旧格式游标只建立基线，不发。
-func TestRemindersClosedByDifference(t *testing.T) {
+// 离开未完成集合的提醒逐条按 id 核实：已完成的发 reminder.completed（时刻取完成时间）；仍未完成（移出拉取范围）
+// 或找不到的发 reminder.out_of_view，类型本身不表示完成。其他读失败整轮失败、不出游标。
+func TestRemindersLeavingTheOpenSetAreVerified(t *testing.T) {
 	var calls [][]string
-	_, lines, _ := exec1(t, replay(t, &calls), `{"config":{"kind":"reminders"},"cursor":"{\"open\":{\"R1\":\"x\",\"RX\":\"旧提醒\"}}"}`)
-	var closed []map[string]any
-	for _, l := range lines {
-		if l["type"] == "reminder.closed" {
-			closed = append(closed, l)
+	base := replay(t, &calls)
+	transient := false
+	mk := func(c Config) Runner {
+		r := base(c)
+		return func(ctx context.Context, cli string, a ...string) ([]byte, []byte, error) {
+			if a[0] != "get" {
+				return r(ctx, cli, a...)
+			}
+			switch argVal(a, "--id=") {
+			case "RX":
+				return []byte(`{"success":true,"reminder":{"id":"RX","title":"旧提醒","isCompleted":true,"completionDate":"2026-01-03T09:30:00Z"}}`), nil, nil
+			case "RY":
+				return []byte(`{"success":true,"reminder":{"id":"RY","title":"改了到期日","isCompleted":false,"dueDate":"2026-03-01"}}`), nil, nil
+			case "RZ":
+				if transient {
+					return nil, []byte("boom"), errors.New("exit 1")
+				}
+				return nil, []byte("Error: Reminder not found: RZ"), errors.New("exit 1")
+			}
+			t.Fatalf("unexpected get %v", a)
+			return nil, nil, nil
 		}
 	}
-	if len(closed) != 1 || closed[0]["subject"] != "旧提醒" || closed[0]["correlation_keys"].([]any)[0] != "RX" {
-		t.Fatalf("closed: %v", closed)
-	}
-	cur := lines[len(lines)-1]["cursor"].(string)
-	var c reminderCursor
-	if err := json.Unmarshal([]byte(cur), &c); err != nil || c.Open["R1"] == "" || c.Open["RX"] != "" {
-		t.Fatalf("cursor must list the open reminders: %v %s", err, cur)
-	}
-	_, lines, _ = exec1(t, replay(t, &calls), `{"config":{"kind":"reminders"},"cursor":"2026-01-01T00:00:00Z"}`)
+	in := `{"config":{"kind":"reminders"},"cursor":"{\"scope\":\"[null,null]\",\"open\":{\"R1\":\"x\",\"RX\":\"旧提醒\",\"RY\":\"改了到期日\",\"RZ\":\"删了的\"}}"}`
+	code, lines, _ := exec1(t, mk, in)
+	got := map[string]map[string]any{}
 	for _, l := range lines {
-		if l["type"] == "reminder.closed" {
-			t.Fatalf("an old cursor only sets the baseline: %v", l)
+		if k, _ := l["correlation_keys"].([]any); len(k) == 1 && l["type"] != "reminder.due" && l["type"] != "reminder.open" {
+			got[k[0].(string)] = l
+		}
+	}
+	if code != ExitOK || len(got) != 3 || got["R1"] != nil {
+		t.Fatalf("code=%d left-open events: %v", code, got)
+	}
+	if x := got["RX"]; x["type"] != "reminder.completed" || x["occurred_at"] != "2026-01-03T09:30:00Z" || x["subject"] != "旧提醒" {
+		t.Errorf("completed: %v", x)
+	}
+	for _, id := range []string{"RY", "RZ"} {
+		if x := got[id]; x["type"] != "reminder.out_of_view" || strings.Contains(x["type"].(string), "complet") || strings.Contains(x["type"].(string), "close") {
+			t.Errorf("%s only left the view: %v", id, x)
+		}
+	}
+	var cur struct{ Open map[string]string }
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]["cursor"].(string)), &cur); err != nil || cur.Open["R1"] == "" || cur.Open["RX"] != "" {
+		t.Fatalf("cursor must list the open reminders: %v %v", err, lines[len(lines)-1])
+	}
+	transient = true
+	if code, lines, _ := exec1(t, mk, in); code != ExitTemporary || len(lines) != 0 {
+		t.Fatalf("a failed verification must fail the poll without a cursor: code=%d lines=%v", code, lines)
+	}
+}
+
+// 首次、旧格式游标、拉取范围（lists、undated_lists）变了：这一轮只建立基线，不把旧集合报成离开。
+func TestRemindersBaselineOnlyWhenNotComparable(t *testing.T) {
+	for name, cursor := range map[string]string{
+		"首次":    ``,
+		"旧时间游标": `2026-01-01T00:00:00Z`,
+		"范围变了":  `{"scope":"[[\"Work\"],null]","open":{"RX":"别的列表里的"}}`,
+	} {
+		var calls [][]string
+		b, _ := json.Marshal(map[string]any{"config": map[string]any{"kind": "reminders"}, "cursor": cursor})
+		_, lines, _ := exec1(t, replay(t, &calls), string(b))
+		for _, l := range lines {
+			if typ, _ := l["type"].(string); typ != "" && typ != "reminder.due" && typ != "reminder.open" {
+				t.Errorf("%s: only the baseline is set, got %v", name, l)
+			}
+		}
+		for _, c := range calls {
+			if c[1] == "get" {
+				t.Errorf("%s: nothing to verify, got %v", name, c)
+			}
 		}
 	}
 }

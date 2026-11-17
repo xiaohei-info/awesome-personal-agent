@@ -17,8 +17,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -483,16 +483,58 @@ type reminder struct {
 	DueDate string `json:"dueDate"`
 	Notes   string `json:"notes"`
 	// 未完成、创建时间与优先级；创建时间工具不给时取本次拉取的时刻。
-	IsCompleted  bool   `json:"isCompleted"`
-	CreationDate string `json:"creationDate"`
-	Priority     *int   `json:"priority"`
+	IsCompleted    bool   `json:"isCompleted"`
+	CompletionDate string `json:"completionDate"`
+	CreationDate   string `json:"creationDate"`
+	Priority       *int   `json:"priority"`
 }
 
-// reminderCursor 是提醒事项的游标：上一轮看到的未完成提醒（id 到标题）。这一轮不再出现的发一条 reminder.closed，
-// 让建议与简报知道它已不在未完成列表里（工具的 completed 过滤返回全部历史，按它取会触发条数上限，所以按差集判断）。
-// 旧游标（时间串）读不出时不发 closed，这一轮只建立基线。
+// reminderCursor 是提醒事项的游标：拉取范围的指纹，与上一轮看到的未完成提醒（id 到标题）。
+// 这一轮不在未完成集合里的，逐条按 id 读一次核实（工具的 completed 过滤返回全部历史、会触发条数上限，所以不用它）：
+// 读到已完成的发 reminder.completed；仍未完成（到期日或列表变了，移出了拉取范围）或已读不到（删除或不再允许读取）的
+// 发 reminder.out_of_view，它不表示完成。旧游标（时间串）读不出、或拉取范围变了时，这一轮只建立基线，不发。
 type reminderCursor struct {
-	Open map[string]string `json:"open"`
+	Scope string            `json:"scope"`
+	Open  map[string]string `json:"open"`
+}
+
+func reminderScope(cfg Config) string {
+	b, _ := json.Marshal([][]string{cfg.Lists, cfg.UndatedLists})
+	return string(b)
+}
+
+// leftOpen 核实一条已不在未完成集合里的提醒。找不到或这一条不允许读（同一轮的列表读取已经成功，系统授权没问题）
+// 记为读不到；其他读失败返回错误：整轮失败，游标不前进。
+func leftOpen(ctx context.Context, r Runner, id, title string, now time.Time) (event, error) {
+	ev := event{Type: "reminder.out_of_view", Subject: title, OccurredAt: now.UTC().Format(time.RFC3339Nano), CorrelationKeys: []string{id}}
+	out, err := call(ctx, r, "reminder-cli", "get", "--format=json", "--id="+id)
+	switch {
+	case err != nil && (strings.Contains(strings.ToLower(err.Error()), "not found") || authRe.MatchString(err.Error())):
+		ev.Summary = "已读不到：可能已删除，或不再允许读取；不表示已完成"
+	case err != nil:
+		return ev, err
+	default:
+		var got struct {
+			Reminder reminder `json:"reminder"`
+		}
+		if json.Unmarshal(out, &got) != nil || got.Reminder.ID == "" {
+			return ev, fail(ExitConfig, "get 输出无法解析")
+		}
+		if !got.Reminder.IsCompleted {
+			ev.Summary = "仍未完成，但已不在拉取范围内（到期日或列表变了）"
+			break
+		}
+		ev.Type, ev.Summary = "reminder.completed", "已完成"
+		if got.Reminder.CompletionDate != "" {
+			at, err := parseDue(got.Reminder.CompletionDate)
+			if err != nil {
+				return ev, fail(ExitConfig, "提醒 completionDate 无法解析: %q", got.Reminder.CompletionDate)
+			}
+			ev.OccurredAt = at.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	ev.ID = id + "|" + ev.Type + "|" + now.UTC().Format(time.RFC3339)
+	return ev, nil
 }
 
 func pollReminders(ctx context.Context, r Runner, cfg Config, cursor string, now time.Time) ([]event, string, error) {
@@ -552,20 +594,25 @@ func pollReminders(ctx context.Context, r Runner, cfg Config, cursor string, now
 	}
 	var prev reminderCursor
 	_ = json.Unmarshal([]byte(cursor), &prev)
-	next := reminderCursor{Open: map[string]string{}}
+	next := reminderCursor{Scope: reminderScope(cfg), Open: map[string]string{}}
 	for _, ev := range evs {
 		next.Open[ev.CorrelationKeys[0]] = ev.Subject
 	}
 	gone := make([]string, 0)
-	for id := range prev.Open {
-		if _, ok := next.Open[id]; !ok {
-			gone = append(gone, id)
+	if prev.Scope == next.Scope { // 范围变了：旧集合与这一轮不可比，只建立基线
+		for id := range prev.Open {
+			if _, ok := next.Open[id]; !ok {
+				gone = append(gone, id)
+			}
 		}
 	}
 	slices.Sort(gone)
 	for _, id := range gone {
-		evs = append(evs, event{ID: id + "|closed|" + now.UTC().Format(time.RFC3339), Type: "reminder.closed", Subject: prev.Open[id],
-			Summary: "不再是未完成：已完成、已删除，或移出了拉取范围", OccurredAt: now.UTC().Format(time.RFC3339Nano), CorrelationKeys: []string{id}})
+		ev, err := leftOpen(ctx, r, id, prev.Open[id], now)
+		if err != nil {
+			return nil, "", err
+		}
+		evs = append(evs, ev)
 	}
 	b, err := json.Marshal(next)
 	if err != nil {
