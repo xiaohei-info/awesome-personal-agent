@@ -4,6 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
+import { OBSIDIAN, render as renderURL } from "./SettingsVaultsPage";
+import cases from "./open-url-cases.json";
 
 // 替身只回答 GET/PUT /v1/settings/note-vaults：整体替换，重名 / 脚本类协议返回 400 且什么都不存。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -43,19 +45,39 @@ describe("设置 › 笔记库", () => {
     mount(s.impl);
     const c = await card();
     expect(c.getByLabelText("库1 名称")).toHaveValue("notes");
+    expect(c.getByLabelText("库1 打开方式")).toHaveValue("custom"); // 旧的自定义模板显示为自定义并原样保留
     expect(c.getByLabelText("库1 示例地址")).toHaveTextContent("app://open?v=notes&f=folder%2Fexample%20note.md");
 
-    await userEvent.clear(c.getByLabelText("库1 打开方式"));
-    await userEvent.type(c.getByLabelText("库1 打开方式"), "https://wiki.example/{{vault}/{{path}");
+    await userEvent.clear(c.getByLabelText("库1 自定义地址"));
+    await userEvent.type(c.getByLabelText("库1 自定义地址"), "https://wiki.example/{{vault}/{{path}");
     expect(c.getByLabelText("库1 示例地址")).toHaveTextContent("https://wiki.example/notes/folder%2Fexample%20note.md");
     await userEvent.click(c.getByRole("button", { name: "删除库 2" }));
     await userEvent.click(c.getByRole("button", { name: "＋ 添加笔记库" }));
     await userEvent.type(c.getByLabelText("库2 名称"), " a b ");
-    await userEvent.type(c.getByLabelText("库2 打开方式"), "app://{{vault}");
     expect(s.puts).toHaveLength(0); // 保存前没有写任何东西
     await save();
     await c.findByRole("status");
-    expect(s.puts).toEqual([{ vaults: [{ name: "notes", open_url: "https://wiki.example/{vault}/{path}" }, { name: "a b", open_url: "app://{vault}" }] }]);
+    expect(s.puts).toEqual([{ vaults: [{ name: "notes", open_url: "https://wiki.example/{vault}/{path}" }, { name: "a b", open_url: OBSIDIAN }] }]);
+  });
+
+  it("新建默认用 Obsidian：只填库名，地址自动生成；可改成只登记名字", async () => {
+    const s = server([{ name: "same", open_url: OBSIDIAN }]);
+    mount(s.impl);
+    const c = await card();
+    expect(c.getByLabelText("库1 打开方式")).toHaveValue("obsidian"); // 与预设逐字相同的旧值显示为预设
+    await userEvent.click(c.getByRole("button", { name: "＋ 添加笔记库" }));
+    expect(c.getByLabelText("库2 打开方式")).toHaveValue("obsidian");
+    await userEvent.type(c.getByLabelText("库2 名称"), "工作 笔记");
+    expect(c.getByLabelText("库2 示例地址")).toHaveTextContent("obsidian://open?vault=%E5%B7%A5%E4%BD%9C%20%E7%AC%94%E8%AE%B0&file=folder%2Fexample%20note.md");
+    await userEvent.selectOptions(c.getByLabelText("库1 打开方式"), "none");
+    expect(c.queryByLabelText("库1 示例地址")).toBeNull();
+    await save();
+    await c.findByRole("status");
+    expect(s.puts).toEqual([{ vaults: [{ name: "same", open_url: "" }, { name: "工作 笔记", open_url: OBSIDIAN }] }]);
+  });
+
+  it("预览与服务端同一编码规则（open-url-cases.json，内核测试跑同一份）", () => {
+    for (const c of cases) expect(renderURL(c.template, c.vault, c.path)).toBe(c.want);
   });
 
   it("全部删掉也能保存：PUT 空数组", async () => {
@@ -87,10 +109,10 @@ describe("设置 › 笔记库", () => {
     const c = await card();
     await userEvent.click(c.getByRole("button", { name: "＋ 添加笔记库" }));
     await userEvent.type(c.getByLabelText("库1 名称"), "bad");
-    await userEvent.type(c.getByLabelText("库1 打开方式"), "javascript:alert(1)");
+    await userEvent.type(c.getByLabelText("库1 自定义地址"), "javascript:alert(1)");
     await save();
     expect(await c.findByRole("alert")).toHaveTextContent("open_url protocol is not allowed");
-    expect(c.getByLabelText("库1 打开方式")).toHaveValue("javascript:alert(1)");
+    expect(c.getByLabelText("库1 自定义地址")).toHaveValue("javascript:alert(1)");
   });
 
   it("读取失败给原因和重试", async () => {
