@@ -12,12 +12,14 @@ import type { Instance } from "./Routine";
 
 // 简报、复盘实例的卡片（§4.1 简报页）：收起时一行摘要，展开后改「什么时候、看哪些项目、跑什么」，并可启停、立即跑一次。
 // 改动走 PATCH /v1/instances/{id}（instance.update 整体替换 params，其余参数原样带回）；立即跑一次走 POST /v1/instances/{id}/run。
-// 「跑什么」是实例参数 instruction：没写时用包的 default_instruction（GET /v1/packs），随新版默认更新；写回与默认相同即视为没写。
-// 资料信封、写回格式与权限是模板的固定部分，不在这里。
+// 「让 Agent 写什么」是实例参数 instruction：没写时用包的 default_instruction（GET /v1/packs），随新版默认更新；写回与默认相同即视为没写。
+// 资料信封、写回格式与权限是模板的固定部分，不在这里。表单与服务端返回的实例不一致（有没保存的改动）时不能「立即跑一次」，
+// 免得跑的是旧配置；保存成功后以服务端返回的实例为准，改动标记随之清掉。
 export const MAX_INSTRUCTION = 2000; // 与内核 packs.MaxInstructionRunes 一致
 
-export function ScheduleCard({ i, fallback, agentReady, last, onChange }: {
+export function ScheduleCard({ i, fallback, agentReady, last, open, onChange }: {
   i: Instance;
+  open?: boolean; // 从已生成的简报点来源进来时展开
   fallback: string; // 包的默认内容要求
   agentReady: boolean;
   last?: { id: string; at?: string };
@@ -37,12 +39,14 @@ export function ScheduleCard({ i, fallback, agentReady, last, onChange }: {
   const [error, setError] = useState<unknown>(null);
   const custom = text.trim() !== "" && text.trim() !== fallback.trim();
   const name = label("pack", i.pack);
+  // 没改哪几天与几点就原样带回；改了沿用原来的时区（开箱默认不带时区，即 APA 主机时区）。
+  const same = parsed && days === parsed.days && time === parsed.time;
+  const schedule = raw.trim() || (same ? i.params.schedule! : time ? toCron(days, time, parsed ? parsed.zone : browserZone()) : "");
+  const dirty = schedule !== (i.params.schedule ?? "") || [...projects].sort().join() !== [...(i.params.projects ?? [])].sort().join() ||
+    (custom ? text.trim() : "") !== (i.params.instruction ?? "").trim();
 
   async function save(e: FormEvent) {
     e.preventDefault();
-    // 没改哪几天与几点就原样带回；改了沿用原来的时区（开箱默认不带时区，即 APA 主机时区）。
-    const same = parsed && days === parsed.days && time === parsed.time;
-    const schedule = raw.trim() || (same ? i.params.schedule! : time ? toCron(days, time, parsed ? parsed.zone : browserZone()) : "");
     if (!schedule) return setError(new Error(t.needSchedule));
     const { projects: _p, instruction: _i, ...rest } = i.params;
     try {
@@ -74,7 +78,7 @@ export function ScheduleCard({ i, fallback, agentReady, last, onChange }: {
   }
 
   return (
-    <details className="panel" aria-label={name}>
+    <details className="panel" aria-label={name} open={open || undefined}>
       <summary>
         <strong>{name}</strong> <When schedule={i.params.schedule} /> · {i.enabled ? t.on : t.off}
         {!agentReady && i.enabled && <> · <span className="sub">{t.waitingAgent}</span> <Link to="/settings/agents">{t.setHost}</Link></>}
@@ -100,8 +104,8 @@ export function ScheduleCard({ i, fallback, agentReady, last, onChange }: {
           </fieldset>
         )}
         <label>
-          {t.what} {!custom && <span className="sub">{t.defaultTag}</span>}
-          <textarea rows={3} maxLength={MAX_INSTRUCTION} value={text} onChange={(e) => setText(e.target.value)} />
+          {t.what} <span className="sub">{custom ? t.customTag : t.defaultTag}</span>
+          <textarea rows={8} maxLength={MAX_INSTRUCTION} value={text} onChange={(e) => setText(e.target.value)} />
         </label>
         {custom && <button type="button" onClick={() => setText(fallback)}>{t.restore}</button>}
         <details>
@@ -111,8 +115,8 @@ export function ScheduleCard({ i, fallback, agentReady, last, onChange }: {
         <div className="actions">
           <button type="submit">{t.save}</button>
           <button type="button" aria-pressed={i.enabled} onClick={() => void toggle()}>{i.enabled ? t.pause : t.resume}</button>
-          <button type="button" disabled={!agentReady} onClick={() => void runNow()}>{t.runNow}</button>
-          {note && <span role="status" className="sub">{note}</span>}
+          <button type="button" disabled={!agentReady || dirty} onClick={() => void runNow()}>{t.runNow}</button>
+          {dirty ? <span className="sub">{t.saveFirst}</span> : note && <span role="status" className="sub">{note}</span>}
         </div>
       </form>
       {last && <p className="sub"><Link to={`/briefs/${encodeURIComponent(last.id)}`}>{t.last(last.at ? new Date(last.at).toLocaleString(locale()) : "")}</Link></p>}

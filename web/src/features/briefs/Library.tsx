@@ -44,7 +44,8 @@ export function Library() {
   // 早、晚等不同安排各自的简报：来源实例的包名 + 定时。
   const origin = (b: Brief) => {
     const i = instances.find((x) => b.origin?.source === `instance:${x.id}`);
-    return i ? <>{label("pack", i.pack)} · <When schedule={i.params.schedule} /></> : null;
+    // 点来源进安排页并展开这张卡片：改内容要求的入口就在读简报的地方。实例 id 走路由 state，不进地址栏。
+    return i ? <Link to="schedule" state={{ open: i.id }}>{label("pack", i.pack)} · <When schedule={i.params.schedule} /></Link> : null;
   };
   const [latest, ...older] = briefs;
   const pages = Math.max(1, Math.ceil(older.length / PAGE));

@@ -57,7 +57,8 @@ function Schedule() {
   const allProjects = useNamed("project");
   const projectName = useNames("project");
   const submitRef = useRef<HTMLButtonElement>(null);
-  const fromEmpty = (useLocation().state as { suggest?: boolean } | null)?.suggest;
+  const nav = useLocation().state as { suggest?: boolean; open?: string } | null;
+  const fromEmpty = nav?.suggest;
   // 空状态的下一步：把表单预填成「每天 08:00 的简报」，本人再点一次「安排」才创建。
   const suggest = () => {
     setPack("brief");
@@ -143,7 +144,7 @@ function Schedule() {
         <div aria-label={t.instanceList}>
           {scheduled.map((i) => {
             const last = lastOf(i.id);
-            return <ScheduleCard key={i.id} i={i} fallback={defaults[i.pack] ?? ""} agentReady={agentReady} last={last && { id: last.id, at: last.created_at }} onChange={replace} />;
+            return <ScheduleCard key={i.id} i={i} fallback={defaults[i.pack] ?? ""} agentReady={agentReady} open={nav?.open === i.id} last={last && { id: last.id, at: last.created_at }} onChange={replace} />;
           })}
         </div>
         <More open={!scheduled.length} label={t.more}>
