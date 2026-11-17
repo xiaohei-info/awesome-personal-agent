@@ -10,11 +10,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -118,6 +120,12 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 				if err != nil {
 					return nil, err
 				}
+				var last map[string]time.Time
+				if g.has(auth.Ext) {
+					if last, err = kdoctor.LastSeen(c.Tx); err != nil {
+						return nil, err
+					}
+				}
 				out := []view{}
 				for _, cr := range all {
 					if g.has(cr.Kind) {
@@ -126,7 +134,11 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 						if p == "" {
 							p = cr.ID
 						}
-						out = append(out, view{Credential: cr, SeenHarness: seen[p]})
+						v := view{Credential: cr, SeenHarness: seen[p]}
+						if at, ok := last[kdoctor.SubjectExt+cr.Scope]; ok {
+							v.LastSeenAt = &at
+						}
+						out = append(out, v)
 					}
 				}
 				return map[string]any{"credentials": out}, nil
@@ -223,6 +235,8 @@ func body(r *http.Request, in *input) error {
 type view struct {
 	auth.Credential
 	SeenHarness string `json:"seen_harness,omitempty"`
+	// LastSeenAt 只对 ext 密钥：同一 scope 的密钥最近一次经认证调用内核的时间（与 apa doctor 同源）。
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
 }
 
 func run(x *command.Executor, cmd string, g group, status int, fill func(*http.Request, *input) error) core.Handler {
