@@ -246,6 +246,16 @@ func TestLegacySourcesWithoutScopeColumns(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].Outbound.External != nil || got[0].Outbound.Local != "full" {
 		t.Fatalf("%+v %v", got, err)
 	}
+	// 结构 4/5/7：有显示名和外发范围，只缺保留天数列，升级预检仍能列出来源。
+	st3 := newStore(t)
+	addSource(t, st3, "src_v7", "script", "", "c", "meta", "")
+	upd(t, st3, func(tx *store.Tx) error {
+		_, err := tx.Exec(`ALTER TABLE sources_registry_source DROP COLUMN content_retention_days`)
+		return err
+	})
+	if got, err := LegacySources(bg, st3); err != nil || len(got) != 1 || got[0].ID != "src_v7" || got[0].Outbound.External == nil {
+		t.Fatalf("%+v %v", got, err)
+	}
 	// 新结构直接读。
 	st2 := newStore(t)
 	addSource(t, st2, "src_new", "script", "", "c", "meta", "")

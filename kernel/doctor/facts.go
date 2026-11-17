@@ -83,16 +83,20 @@ func LegacySources(ctx context.Context, st *store.Store) (out []domain.Source, e
 		if err != nil {
 			return err
 		}
-		if cols["name"] {
+		if cols["name"] && cols["content_retention_days"] {
 			out, err = registry.List(tx)
 			return err
 		}
-		// 显示名之前的结构：外发范围列可能有也可能没有，名字一律为空（启动时补上）。
+		// 当前结构之前的账本（结构 4/5/7 只缺保留天数列）：外发范围列可能有也可能没有；名字列没有时为空（启动时补上）。
+		name := `''`
+		if cols["name"] {
+			name = `name`
+		}
 		outbound := `'full', ''`
 		if cols["outbound_external"] {
 			outbound = `outbound_local, outbound_external`
 		}
-		r, err := tx.Query(`SELECT id, type, source_type, command, enabled, stats, ` + outbound + ` FROM sources_registry_source ORDER BY id`)
+		r, err := tx.Query(`SELECT id, ` + name + `, type, source_type, command, enabled, stats, ` + outbound + ` FROM sources_registry_source ORDER BY id`)
 		if err != nil {
 			return err
 		}
@@ -101,7 +105,7 @@ func LegacySources(ctx context.Context, st *store.Store) (out []domain.Source, e
 			var s domain.Source
 			var typ, stats, ext string
 			var enabled int64
-			if err := r.Scan(&s.ID, &typ, &s.SourceKind, &s.Command, &enabled, &stats, &s.Outbound.Local, &ext); err != nil {
+			if err := r.Scan(&s.ID, &s.Name, &typ, &s.SourceKind, &s.Command, &enabled, &stats, &s.Outbound.Local, &ext); err != nil {
 				return err
 			}
 			s.Type, s.Enabled = domain.SourceType(typ), enabled != 0
