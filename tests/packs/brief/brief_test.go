@@ -176,7 +176,7 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 		}
 	}
 	// 周期分得开、写回即回执（§8.4）；事实规则：后续不等于解决、来源覆盖分层、不露 id、只用资料给的链接。
-	for _, k := range []string{"item.title", "写回成功就是回执", "followed_by", "未核实", "以最新的为准", "曾关闭，之后又有动静", "context.sources", "not_screened", "fetch 为 push", "web_url", "不出现任何 id"} {
+	for _, k := range []string{"item.title", "写回成功就是回执", "followed_by", "未核实", "以最新的为准", "曾关闭，之后又有动静", "不等于还没结束", "occurred_at", "context.sources", "not_screened", "fetch 为 push", "web_url", "不出现任何 id"} {
 		if !strings.Contains(w.Body, k) {
 			t.Fatalf("write-brief lacks %q: %s", k, w.Body)
 		}

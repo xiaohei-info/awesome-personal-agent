@@ -319,3 +319,36 @@ func TestOnlyAValidBriefConsumesDigestAndSeedsNext(t *testing.T) {
 		t.Fatalf("prior must be the last valid brief and the unconsumed digest must still be offered: %s | %s", m["prior"], m["digest"])
 	}
 }
+
+// 知会条目带来源事件自己的发生时刻，按实例时区写；外发范围只给元数据（没有原文文件）时也有；没有时间就不写，
+// 不拿落盘或生成简报的时刻顶替（外部来源入账时 occurred_at 必填，零值只会出现在条目自己没带时间时）。
+func TestDigestEntriesCarryOccurredAtInReportZone(t *testing.T) {
+	e := setup(t)
+	at := time.Date(2026, 2, 28, 13, 14, 43, 0, time.UTC)
+	e.digest(e.rawSource("src_bank", "meta", domain.SourceEvent{ID: "b1", Type: "notice", Subject: "入账", OccurredAt: at})...)
+	e.harness("hx", "summary")
+	e.setDefaultHarness("hx")
+	id := e.openItemWithOrigin("instance:ins_1")
+	c := e.call("write-brief", id)
+	c.Instance.Params = json.RawMessage(`{"schedule":"CRON_TZ=America/New_York 0 8 * * *"}`)
+	if err := e.svc.CallAgent(AgentOptions{})(bg, c); err != nil {
+		t.Fatal(err)
+	}
+	var d struct {
+		Digest []struct {
+			Title      string  `json:"title"`
+			OccurredAt *string `json:"occurred_at"`
+			Raw        []struct{ File string }
+		} `json:"digest"`
+	}
+	if err := json.Unmarshal([]byte(materialsOf(e, e.waitResult().Run.ID)["digest"]), &d); err != nil || len(d.Digest) != 1 {
+		t.Fatalf("digest: %v %+v", err, d)
+	}
+	if x := d.Digest[0]; x.OccurredAt == nil || *x.OccurredAt != "2026-02-28T08:14:43-05:00" || len(x.Raw) != 1 || x.Raw[0].File != "" {
+		t.Errorf("a meta-scope entry still carries its own time in the report zone: %+v", x)
+	}
+	dm, _, err := e.svc.briefRaw(bg, []summaries.DigestEntry{{Event: "gone", Title: "无时间"}}, briefProposals{}, time.UTC)
+	if err != nil || strings.Contains(dm.Body, "occurred_at") {
+		t.Errorf("an entry without a time must not get one filled in: %v %s", err, dm.Body)
+	}
+}

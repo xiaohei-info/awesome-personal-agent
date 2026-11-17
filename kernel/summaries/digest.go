@@ -15,6 +15,8 @@ type DigestEntry struct {
 	Title   string `json:"title"`
 	Summary string `json:"summary,omitempty"`
 	Link    string `json:"link,omitempty"`
+	// OccurredAt 是来源事件自己的发生时刻（不是落盘或汇入的时刻）；来源没给时为零。简报资料按报告时区另行写出。
+	OccurredAt time.Time `json:"-"`
 }
 
 // PendingDigest 按落盘顺序返回处置仍是 digest、且还没汇入过任何简报的来源事件。
@@ -43,7 +45,7 @@ func PendingDigest(tx *store.Tx) ([]DigestEntry, error) {
 	out := []DigestEntry{}
 	for _, e := range evs {
 		if !done[e.ID] {
-			out = append(out, DigestEntry{Event: e.ID, Source: e.SourceID, Title: e.Subject, Summary: e.Summary, Link: e.Link})
+			out = append(out, DigestEntry{Event: e.ID, Source: e.SourceID, Title: e.Subject, Summary: e.Summary, Link: e.Link, OccurredAt: e.OccurredAt})
 		}
 	}
 	return out, nil

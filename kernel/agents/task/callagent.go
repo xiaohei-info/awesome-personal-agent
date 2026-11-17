@@ -226,7 +226,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 		mats = append(mats, b.mats...)
 		if want("digest") || want("proposals") {
 			// digest 与 proposals 引用的来源事件各带一个按外发范围裁剪的原文文件（§7.3）。
-			dm, files, err := s.briefRaw(ctx, b.digest, b.props)
+			dm, files, err := s.briefRaw(ctx, b.digest, b.props, p.loc)
 			if err != nil {
 				return err
 			}
