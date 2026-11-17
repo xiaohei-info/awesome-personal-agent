@@ -484,7 +484,23 @@ func (s *Service) applyDraftTest(c *command.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !isWeb(c.Caller) && keepsLiveSecrets(d) && slices.ContainsFunc(d.Changes, func(k string) bool { return k != "routes" }) {
+		return nil, domain.NewError(domain.CodeWebOnly,
+			"draft_test_kept_secrets: the draft reuses the connection's saved credentials with a changed address or receiver; they only go where the owner has confirmed",
+			"give every credential again in a new draft to test it, or ask the owner to confirm it in the Web settings")
+	}
 	return DraftTarget{ID: d.ID, Type: d.Type, Settings: d.Config}, nil
+}
+
+// keepsLiveSecrets：草稿沿用了已有连接的生效凭据（提交时复制到草稿名下）。这些凭据只发往本人确认过的去处，
+// 所以草稿的配置或任一凭据与现用值不同时（只改路由除外），Agent 不能测，本人确认后才发（§7.6）。
+func keepsLiveSecrets(d Draft) bool {
+	for _, p := range d.Secrets {
+		if p.Action == SecretKeep {
+			return true
+		}
+	}
+	return false
 }
 
 // SetDraftTest 记下草稿最近一次测试的结果（覆盖写、不记 Event，与连接现状同类）。草稿已不存在时什么也不写。

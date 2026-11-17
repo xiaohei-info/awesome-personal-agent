@@ -83,7 +83,7 @@
 | `apa connection list [--direction channel\|output]` | 列出连接（内置渠道与输出）：id、方向、类型、名字、启停、状态、问题代码与最近成功、失败的时间；不含配置值与凭据（主文档 §7.6）。就是 `GET /connections` | observer | |
 | `apa connection propose --type <类型> [--name <名字>] [--connection <id>] [--set <键>=<值>]... [--route <类别>]... [--secret-stdin]` | 提交一份待本人确认的渠道草稿（`connection.propose`，主文档 §7.6）：`--connection` 为改已有连接；`--route` 可重复，取 `decision`、`brief`、`reminder`、`health`；`--secret-stdin` 从标准输入读一个 JSON 对象 `{"<凭据字段>": "<值>"}`，空串表示清除，不回显。返回草稿与它的 Web 地址；本人确认前什么都不生效 | worker | 2、4 |
 | `apa connection drafts` | 列出待确认与最近结束的草稿（不含凭据） | worker | |
-| `apa connection test-draft <草稿 id>` | 对自己提交的草稿发一条内容固定的测试，只发到草稿里的目标；不启用、不改路由 | worker（只限自己提交的） | 4、6 |
+| `apa connection test-draft <草稿 id>` | 对自己提交的草稿发一条内容固定的测试，只发到草稿里的目标；不启用、不改路由。草稿沿用了已有连接的凭据、又改了配置或任一凭据时不发，退出码 20（`draft_test_kept_secrets`），凭据全部重新给出或等本人确认后再测 | worker（只限自己提交的） | 4、6、20 |
 | `apa connection discard <草稿 id>` | 撤回自己提交的草稿，连同它的凭据删除 | worker（只限自己提交的） | 4、6 |
 | **自动化** | | | |
 | `apa instance add/list/enable/disable` | 能力包实例 | delegate（`list` 为 observer） | |
@@ -234,7 +234,7 @@
 | | `POST /connections/{id}/test` | 对已保存的连接发一条测试消息，结果写进连接现状；返回同上 | 只有 Web 登录 |
 | | `POST /connections/drafts` | 提交渠道草稿（`connection.propose`，主文档 §7.6）：`{"type", "name"?, "connection"?, "config"?, "secrets"?, "routes"?: ["decision", …]}`。配置按声明校验（与 `POST /connections` 同一份代码）；同一目标已有待确认草稿时旧的转为 `superseded`。返回 201 与草稿（不含凭据），带 `web_path` | worker 及以上的 token、Web 登录；运行凭据不可 |
 | | `GET /connections/drafts` | 待确认与最近 7 天内结束的草稿：`{"drafts": [{"id", "type", "name", "connection"?, "config", "routes", "secrets": {"<字段>": {"action": set/clear/keep, "hint"?}}, "state": pending/confirmed/superseded/discarded/expired, "proposed_by", "created_at", "expires_at", "test"?: {"ok", "problem"?, "at"}, "changes"?}]}`。`hint` 只对声明里标识接收目标的凭据字段给出，只含首尾各 3 个字符或长度；`changes` 是改配置草稿与现用值不同的字段名 | worker 及以上的 token 只看到自己提交的；Web 登录看全部 |
-| | `POST /connections/drafts/{id}/test` | 对草稿发一条内容固定的测试，目标只能是草稿里的目标；结果记在草稿上；不启用、不改路由。草稿不是待确认时 409。返回 `{"ok", "problem"?, "detail"?}` | 提交它的凭据、Web 登录；其他凭据 404 |
+| | `POST /connections/drafts/{id}/test` | 对草稿发一条内容固定的测试，目标只能是草稿里的目标；结果记在草稿上；不启用、不改路由。草稿不是待确认时 409。改已有连接的草稿沿用了已保存的凭据、又改了配置或任一凭据（只改路由除外）时，只有 Web 本人能测，其他凭据 403 `web_only`，原因以 `draft_test_kept_secrets` 开头，不发请求。返回 `{"ok", "problem"?, "detail"?}` | 提交它的凭据、Web 登录；其他凭据 404 |
 | | `POST /connections/drafts/{id}/confirm` | 本人确认这一份草稿（`connection.confirm`）：同一事务里新建或改连接、搬凭据、写路由、启用。已取代、已确认、已丢弃、已过期、目标连接在草稿之后被改过或名字已被占用时 409，`why` 开头是 `draft_superseded`、`draft_confirmed`、`draft_discarded`、`draft_expired`、`connection_changed`、`name_taken` 之一。返回连接 | 只有 Web 登录（delegate 退出码 20） |
 | | `DELETE /connections/drafts/{id}` | 丢弃草稿（`connection.discard`），连同它的凭据删除；不是待确认时 409 | 提交它的凭据、Web 登录 |
 | | 已有路由 GET /settings/ext-keys 的新增字段 | 每把密钥带 `last_seen_at`：同一权限范围（`channel.<名>`、`export` 等）的密钥最近一次经认证调用内核的时间，从未调用过时省略（与 `apa doctor` 的 `last_seen_at` 同源） | 只有 Web 登录 |

@@ -308,3 +308,41 @@ func TestConfigureDraftKeepsLiveValuesUntilConfirmed(t *testing.T) {
 		t.Fatalf("routes: %v", r)
 	}
 }
+
+// 沿用生效凭据又改了去处或接收目标的草稿：Agent 测试得 web_only（draft_test_kept_secrets），本人可测；
+// 只改路由、或凭据全部重新给出的草稿，Agent 照常可测。
+func TestAgentCannotTestKeptSecretsAgainstChangedTarget(t *testing.T) {
+	e := setup(t)
+	var lc Connection
+	json.Unmarshal(e.must(t, web, CmdCreate, map[string]any{"type": "push", "name": "现用", "secrets": map[string]string{"device_key": "live-device-key-000001", "password": "pw-1"}, "enabled": true}), &lc)
+	w := e.bearer(t, auth.Worker)
+	test := func(id command.Identity, in map[string]any) error {
+		d := e.draft(t, e.must(t, w, CmdPropose, in))
+		_, err := e.do(id, CmdDraftTest, map[string]string{"id": d.ID})
+		return err
+	}
+	for name, in := range map[string]map[string]any{
+		"server moved":     {"connection": lc.ID, "config": map[string]string{"server": "https://other.example"}},
+		"device replaced":  {"connection": lc.ID, "secrets": map[string]string{"device_key": devKey}},
+		"password cleared": {"connection": lc.ID, "secrets": map[string]string{"password": ""}},
+	} {
+		if err := test(w, in); code(err) != domain.CodeWebOnly || !strings.Contains(err.Error(), "draft_test_kept_secrets") {
+			t.Errorf("%s: agent test = %v", name, err)
+		}
+		if err := test(web, in); err != nil {
+			t.Errorf("%s: owner test = %v", name, err)
+		}
+	}
+	for name, in := range map[string]map[string]any{
+		"routes only": {"connection": lc.ID, "routes": []string{"decision"}},
+		"all new":     {"connection": lc.ID, "config": map[string]string{"server": "https://other.example"}, "secrets": map[string]string{"device_key": devKey, "password": ""}},
+		"new channel": {"type": "push", "name": "新的", "secrets": map[string]string{"device_key": devKey}},
+	} {
+		if err := test(w, in); err != nil {
+			t.Errorf("%s: agent test = %v", name, err)
+		}
+	}
+	if s := e.reveal(t, lc.ID); s["device_key"] != "live-device-key-000001" || s["password"] != "pw-1" {
+		t.Fatal("drafts must not change the live connection's secrets")
+	}
+}
