@@ -18,6 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	kimports "github.com/xiaohei-info/awesome-personal-agent/kernel/imports"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -65,11 +66,15 @@ func setup(t *testing.T, staleAfter ...func() time.Duration) *env {
 	if err := inbound.RegisterAttach(x); err != nil {
 		t.Fatal(err)
 	}
+	imp, err := kimports.Register(x, kimports.Options{Kinds: kitems.NewKinds()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	a := auth.New(nil)
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(x, st, staleAfter...)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(x, st, staleAfter...), ImportRoutes(st, imp)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,3 +666,33 @@ func TestListSearchSortFilterOverHTTP(t *testing.T) {
 }
 
 func sorted(s ...string) []string { sort.Strings(s); return s }
+
+// ACT-IMP-10：GET /items 按 origin.source 与 origin.ref 精确筛选，可只给来源；筛选与其他条件同时满足。
+func TestListFilterByOrigin(t *testing.T) {
+	e := setup(t)
+	a := e.create(e.web, `{"kind":"task","title":"a","origin":{"source":"hook","ref":"A-1"}}`)
+	b := e.create(e.web, `{"kind":"task","title":"b","origin":{"source":"hook","ref":"B-1"}}`)
+	e.create(e.web, `{"kind":"task","title":"c","origin":{"source":"other","ref":"A-1"}}`)
+	e.create(e.web, `{"kind":"task","title":"d"}`)
+	ids := func(q string) []string {
+		var l struct{ Items []struct{ ID string } }
+		_ = json.Unmarshal(e.do("GET", "/v1/items?"+q, "", e.web).Body.Bytes(), &l)
+		var out []string
+		for _, it := range l.Items {
+			out = append(out, it.ID)
+		}
+		sort.Strings(out)
+		return out
+	}
+	both := []string{a.ID, b.ID}
+	sort.Strings(both)
+	if got := ids("origin_source=hook"); strings.Join(got, ",") != strings.Join(both, ",") {
+		t.Fatalf("by source: %v want %v", got, both)
+	}
+	if got := ids("origin_source=hook&origin_ref=B-1"); len(got) != 1 || got[0] != b.ID {
+		t.Fatalf("by source and ref: %v", got)
+	}
+	if got := ids("origin_source=nothing"); len(got) != 0 {
+		t.Fatalf("unknown source: %v", got)
+	}
+}

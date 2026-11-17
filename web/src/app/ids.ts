@@ -137,7 +137,7 @@ export type DoctorCode = (typeof DOCTOR_CODE)[number];
 
 /** 对外事件类型：kernel/domain/event.go Ev*（附录 B.4） */
 export const EVENT = [
-  "item.created", "item.updated", "item.phase_changed", "item.deadline_passed", "item.progress_added", "proposal.attached",
+  "item.created", "item.updated", "item.phase_changed", "item.deadline_passed", "item.progress_added", "proposal.attached", "import.completed",
   "decision.requested", "decision.resolved", "delegation.created", "delegation.reported", "command.rejected",
   "material.revised", "material.revision_proposed", "guideline.activated", "project.updated", "project.allowed_executors_changed",
   "rule.mode_changed", "allowlist.changed", "policy.changed", "grant.issued", "grant.revoked", "run.started", "run.finished",

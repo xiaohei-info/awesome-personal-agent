@@ -186,6 +186,14 @@ type ItemKernelState struct {
 	Unattended bool      `json:"unattended,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitzero"`
 	UpdatedAt  time.Time `json:"updated_at,omitzero"`
+	// Imported 只有导入写下的事项才有：导入批次与实际写入时刻。跟进与久未推进以它和最后一次非导入变更中较晚的一个起算（§7.1、§7.3）。
+	Imported *ImportInfo `json:"imported,omitempty"`
+}
+
+// ImportInfo 是事项的导入信息（§6.3）：批次号与实际写入账本的时刻。
+type ImportInfo struct {
+	Batch string    `json:"batch"`
+	At    time.Time `json:"at"`
 }
 
 // Item 是一切事务的统一表示（§6.3）。
@@ -238,4 +246,6 @@ type Progress struct {
 	On    string    `json:"on,omitempty"`
 	Actor string    `json:"actor"`
 	At    time.Time `json:"at"`
+	// Precision 为 day 表示只知道日期（导入时给了当天的一个时刻），界面只显示到日（§7.1）；空为精确时刻。
+	Precision string `json:"precision,omitempty"`
 }

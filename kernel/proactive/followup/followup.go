@@ -291,6 +291,16 @@ func (s *Service) Sync(tx *store.Tx) error {
 	return err
 }
 
+// ArmImported 为导入的 waiting 事项排第一轮跟进，从 now（导入时刻）起算（§7.1）。导入事件不进 Sync（"现场"读法，§6.7），
+// 所以由导入命令在写入事项的同一事务里调用；之后的阶段变化照常由 Sync 重排。不该被跟进的事项与规则未加载时什么也不做。
+func (s *Service) ArmImported(tx *store.Tx, it domain.Item, now time.Time) error {
+	r, ok := s.rule()
+	if !ok || !following(it) {
+		return nil
+	}
+	return arm(tx, r, it.ID, now)
+}
+
 // resolveAsk 处理一条决策被回答：只关心本模块存过等待对象的事项（即本模块发起的去留询问）。
 func resolveAsk(tx *store.Tx, it domain.Item, gone bool, seq int64) error {
 	if gone || it.Ask == nil || it.Ask.Resolution == nil {

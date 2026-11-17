@@ -848,3 +848,51 @@ func TestImportedProgressDoesNotResetRounds(t *testing.T) {
 		t.Fatalf("control: live progress must reset rounds, got %d", got)
 	}
 }
+
+// ArmImported：导入的 waiting 事项（导入事件不进 Sync）由导入命令排第一轮，从给定的导入时刻起算，不从事项的原始时刻起算。
+func TestArmImportedStartsFromTheImportTime(t *testing.T) {
+	e := setup(t, false)
+	id := e.waiting(domain.WaitingExternal, "供应商")
+	timerAt := func(id string) (time.Time, bool) {
+		var at time.Time
+		var ok bool
+		if err := e.st.View(bg, func(tx *store.Tx) (err error) {
+			var tm domain.Timer
+			tm, ok, err = clock.Get(tx, timerID(id))
+			at = tm.At
+			return
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return at, ok
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error { return clock.Cancel(tx, timerID(id)) }); err != nil {
+		t.Fatal(err)
+	}
+	importedAt := e.now.Add(72 * time.Hour)
+	it := e.get(id)
+	if err := e.st.Update(bg, func(tx *store.Tx) error { return e.svc.ArmImported(tx, it, importedAt) }); err != nil {
+		t.Fatal(err)
+	}
+	if at, ok := timerAt(id); !ok || !at.Equal(importedAt.Add(first)) {
+		t.Fatalf("first round at %v (armed %v), want import time + %v", at, ok, first)
+	}
+	// 等时间的 waiting 与不在 waiting 的事项不被跟进。
+	timeWait := e.waiting(domain.WaitingTime, e.now.Add(time.Hour).Format(time.RFC3339))
+	open, tw := e.get(id), e.get(timeWait)
+	open.ID, open.Phase = "itm_open", domain.PhaseOpen
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		if err := e.svc.ArmImported(tx, tw, importedAt); err != nil {
+			return err
+		}
+		return e.svc.ArmImported(tx, open, importedAt)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := timerAt(timeWait); ok {
+		t.Fatal("waiting on a time is not followed up")
+	}
+	if _, ok := timerAt("itm_open"); ok {
+		t.Fatal("an open item is not followed up")
+	}
+}

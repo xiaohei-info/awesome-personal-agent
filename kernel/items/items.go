@@ -100,6 +100,10 @@ CREATE TABLE item_import_map (
 	object_id TEXT NOT NULL,
 	PRIMARY KEY (source, record_type, external_id)
 ) WITHOUT ROWID;`,
+}, {
+	// 导入的进展只知道日期时带 precision（§7.1）；空串即精确时刻，已有行不变。
+	Version: 5, Ledger: 8, Name: "ledger-v8-progress-precision",
+	SQL: `ALTER TABLE item_progress ADD COLUMN precision TEXT NOT NULL DEFAULT '';`,
 }}}
 
 func invalid(why string) error {
@@ -202,6 +206,9 @@ type Filter struct {
 	Kind     domain.Kind
 	Project  string
 	Assignee string
+	// OriginSource、OriginRef 精确匹配 origin.source 与 origin.ref；可只给前者（§7.1）。
+	OriginSource string
+	OriginRef    string
 }
 
 // List 按 id 排序返回命中的事项。
@@ -213,6 +220,12 @@ func List(tx *store.Tx, f Filter) ([]domain.Item, error) {
 	} {
 		if c.val != "" {
 			conds = append(conds, c.col+" = ?")
+			args = append(args, c.val)
+		}
+	}
+	for _, c := range []struct{ path, val string }{{"$.origin.source", f.OriginSource}, {"$.origin.ref", f.OriginRef}} {
+		if c.val != "" {
+			conds = append(conds, "json_extract(data, '"+c.path+"') = ?")
 			args = append(args, c.val)
 		}
 	}
@@ -287,9 +300,18 @@ func save(tx *store.Tx, it domain.Item) error {
 		}
 		prop, attachTo, mergeKey = string(pb), p.AttachTo, p.MergeKey
 	}
-	_, err = tx.Exec(`INSERT OR REPLACE INTO items (id, phase, kind, project, assignee, planned_for, data, created_at, updated_at, proposal, proposal_attach_to, merge_key)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		it.ID, string(it.Phase), string(it.Kind), it.Project, it.Assignee, it.PlannedFor, string(b), it.CreatedAt.UnixNano(), it.UpdatedAt.UnixNano(), prop, attachTo, mergeKey)
+	// imported 列是 Item.Imported 的索引副本（空串即非导入写入）。
+	var imported string
+	if it.Imported != nil {
+		ib, err := json.Marshal(it.Imported)
+		if err != nil {
+			return err
+		}
+		imported = string(ib)
+	}
+	_, err = tx.Exec(`INSERT OR REPLACE INTO items (id, phase, kind, project, assignee, planned_for, data, created_at, updated_at, proposal, proposal_attach_to, merge_key, imported)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		it.ID, string(it.Phase), string(it.Kind), it.Project, it.Assignee, it.PlannedFor, string(b), it.CreatedAt.UnixNano(), it.UpdatedAt.UnixNano(), prop, attachTo, mergeKey, imported)
 	return err
 }
 
@@ -318,6 +340,10 @@ func Purge(tx *store.Tx, id string) error {
 			return err
 		}
 	}
-	_, err = tx.Exec(`DELETE FROM item_relations WHERE from_id = ? OR to_id = ?`, id, id)
+	if _, err = tx.Exec(`DELETE FROM item_relations WHERE from_id = ? OR to_id = ?`, id, id); err != nil {
+		return err
+	}
+	// 物理删除同时清掉导入对照，之后可以重导（§7.1）。
+	_, err = tx.Exec(`DELETE FROM item_import_map WHERE object_id = ?`, id)
 	return err
 }
