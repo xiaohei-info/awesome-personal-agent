@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -182,7 +183,7 @@ func poll(ctx context.Context, stdin io.Reader, mk func(Config) Runner, now func
 	case "calendar":
 		events, cursor, err = pollCalendar(ctx, r, cfg, in, now())
 	case "reminders":
-		events, cursor, err = pollReminders(ctx, r, cfg, now())
+		events, cursor, err = pollReminders(ctx, r, cfg, in.Cursor, now())
 	default:
 		return nil, fail(ExitConfig, "config.kind 必须是 mail、calendar 或 reminders，现为 %q", cfg.Kind)
 	}
@@ -487,7 +488,14 @@ type reminder struct {
 	Priority     *int   `json:"priority"`
 }
 
-func pollReminders(ctx context.Context, r Runner, cfg Config, now time.Time) ([]event, string, error) {
+// reminderCursor 是提醒事项的游标：上一轮看到的未完成提醒（id 到标题）。这一轮不再出现的发一条 reminder.closed，
+// 让建议与简报知道它已不在未完成列表里（工具的 completed 过滤返回全部历史，按它取会触发条数上限，所以按差集判断）。
+// 旧游标（时间串）读不出时不发 closed，这一轮只建立基线。
+type reminderCursor struct {
+	Open map[string]string `json:"open"`
+}
+
+func pollReminders(ctx context.Context, r Runner, cfg Config, cursor string, now time.Time) ([]event, string, error) {
 	scopes := cfg.Lists
 	if len(scopes) == 0 {
 		scopes = []string{""}
@@ -542,7 +550,28 @@ func pollReminders(ctx context.Context, r Runner, cfg Config, now time.Time) ([]
 			return nil, "", err
 		}
 	}
-	return evs, now.UTC().Format(time.RFC3339Nano), nil
+	var prev reminderCursor
+	_ = json.Unmarshal([]byte(cursor), &prev)
+	next := reminderCursor{Open: map[string]string{}}
+	for _, ev := range evs {
+		next.Open[ev.CorrelationKeys[0]] = ev.Subject
+	}
+	gone := make([]string, 0)
+	for id := range prev.Open {
+		if _, ok := next.Open[id]; !ok {
+			gone = append(gone, id)
+		}
+	}
+	slices.Sort(gone)
+	for _, id := range gone {
+		evs = append(evs, event{ID: id + "|closed|" + now.UTC().Format(time.RFC3339), Type: "reminder.closed", Subject: prev.Open[id],
+			Summary: "不再是未完成：已完成、已删除，或移出了拉取范围", OccurredAt: now.UTC().Format(time.RFC3339Nano), CorrelationKeys: []string{id}})
+	}
+	b, err := json.Marshal(next)
+	if err != nil {
+		return nil, "", err
+	}
+	return evs, string(b), nil
 }
 
 // reminderEvent：有到期日是 reminder.due；undated_lists 的取数里没有到期日的是 reminder.open。

@@ -205,3 +205,29 @@ func TestMailThreadCorrelationKeys(t *testing.T) {
 		}
 	}
 }
+
+// 上一轮还未完成、这一轮不在未完成列表里的提醒发 reminder.closed（同一关联键）；旧格式游标只建立基线，不发。
+func TestRemindersClosedByDifference(t *testing.T) {
+	var calls [][]string
+	_, lines, _ := exec1(t, replay(t, &calls), `{"config":{"kind":"reminders"},"cursor":"{\"open\":{\"R1\":\"x\",\"RX\":\"旧提醒\"}}"}`)
+	var closed []map[string]any
+	for _, l := range lines {
+		if l["type"] == "reminder.closed" {
+			closed = append(closed, l)
+		}
+	}
+	if len(closed) != 1 || closed[0]["subject"] != "旧提醒" || closed[0]["correlation_keys"].([]any)[0] != "RX" {
+		t.Fatalf("closed: %v", closed)
+	}
+	cur := lines[len(lines)-1]["cursor"].(string)
+	var c reminderCursor
+	if err := json.Unmarshal([]byte(cur), &c); err != nil || c.Open["R1"] == "" || c.Open["RX"] != "" {
+		t.Fatalf("cursor must list the open reminders: %v %s", err, cur)
+	}
+	_, lines, _ = exec1(t, replay(t, &calls), `{"config":{"kind":"reminders"},"cursor":"2026-01-01T00:00:00Z"}`)
+	for _, l := range lines {
+		if l["type"] == "reminder.closed" {
+			t.Fatalf("an old cursor only sets the baseline: %v", l)
+		}
+	}
+}
