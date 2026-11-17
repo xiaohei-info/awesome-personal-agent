@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -609,6 +611,9 @@ func TestNoteVaultsValidationAndRender(t *testing.T) {
 	if got := p.OpenURL("notes", "项目/a b.md"); got != "obsidian://open?vault=notes&file=%E9%A1%B9%E7%9B%AE%2Fa%20b.md" {
 		t.Fatalf("open url = %q", got)
 	}
+	if got := p.OpenURL("notes", "a&b=c+d.md"); got != "obsidian://open?vault=notes&file=a%26b%3Dc%2Bd.md" {
+		t.Fatalf("query delimiters in the path must be encoded: %q", got)
+	}
 	if p.OpenURL("bare", "x.md") != "" || p.OpenURL("gone", "x.md") != "" {
 		t.Fatal("a vault without open_url or an unregistered vault has no open url")
 	}
@@ -631,5 +636,23 @@ func TestNoteVaultsValidationAndRender(t *testing.T) {
 	_ = s.View(ctx, func(tx *store.Tx) (err error) { _, p, err = Current(tx); return })
 	if p.NoteVaults == nil || len(p.NoteVaults) != 0 {
 		t.Fatalf("old document should read as no vaults, got %#v", p.NoteVaults)
+	}
+}
+
+// TestOpenURLMatchesWebPreview：内核渲染与 Web 预览（settings-vaults 的 render）跑同一份用例，逐字一致。
+func TestOpenURLMatchesWebPreview(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "features", "settings-vaults", "open-url-cases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct{ Template, Vault, Path, Want string }
+	if err := json.Unmarshal(raw, &cases); err != nil || len(cases) == 0 {
+		t.Fatalf("cases: %v (%d)", err, len(cases))
+	}
+	for _, c := range cases {
+		p := Policy{NoteVaults: []NoteVault{{Name: c.Vault, OpenURL: c.Template}}}
+		if got := p.OpenURL(c.Vault, c.Path); got != c.Want {
+			t.Errorf("%q in %q: got %q, want %q", c.Path, c.Vault, got, c.Want)
+		}
 	}
 }

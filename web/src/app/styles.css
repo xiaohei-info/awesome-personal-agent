@@ -428,6 +428,12 @@ button[aria-pressed="true"] { font-weight: 600; }
 .line select, .line input:not([type=checkbox]):not([type=radio]), .sentence select, .sentence input:not([type=checkbox]):not([type=radio]), .chips input { width: auto; min-width: 0; max-width: 100%; }
 .line > select, .line > .sentence { flex: 0 1 auto; }
 .sentence input[type=number] { width: 7em; }
+/* 笔记库一行（只用于设置 › 笔记库）：窄屏时库名独占一行，打开方式与删除换到下一行；预览地址任意处折行，不撑宽卡片 */
+.vault-row { min-width: 0; }
+.vault-row .line > input:not([type=checkbox]) { flex: 1 1 12rem; }
+.vault-row .line > select { flex: 1 1 9rem; }
+.vault-row .line > button { flex: none; }
+.vault-row code { overflow-wrap: anywhere; }
 .chips input { flex: 1 1 140px; }
 .chips .badge button { padding: 0 2px; border: 0; background: none; box-shadow: none; }
 .meter { height: 6px; border-radius: 3px; background: var(--sunken); overflow: hidden; }

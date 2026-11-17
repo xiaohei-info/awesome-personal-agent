@@ -173,6 +173,28 @@ func (s *Service) List(tx *store.Tx, direction string) ([]Connection, error) {
 	return out, nil
 }
 
+// Summary 是给 token 的只读现状（§7.6）：逐项列出可给的字段，不含配置值、凭据状态与问题细节。
+// 用白名单结构而不是在 Connection 上清空字段，Connection 以后加字段也不会顺带漏给 token。
+type Summary struct {
+	ID          string     `json:"id"`
+	Direction   string     `json:"direction"`
+	Type        string     `json:"type"`
+	Name        string     `json:"name"`
+	Enabled     bool       `json:"enabled"`
+	State       string     `json:"state"`
+	Problem     string     `json:"problem,omitempty"`
+	LastOKAt    *time.Time `json:"last_ok_at,omitempty"`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// Summary 取连接的只读现状。
+func (c Connection) Summary() Summary {
+	return Summary{ID: c.ID, Direction: c.Direction, Type: c.Type, Name: c.Name, Enabled: c.Enabled, State: c.State, Problem: c.Problem,
+		LastOKAt: c.LastOKAt, LastErrorAt: c.LastErrorAt, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
+}
+
 // Get 按 id 读一个连接。
 func (s *Service) Get(tx *store.Tx, id string) (Connection, error) {
 	r, err := get(tx, id)

@@ -1,0 +1,44 @@
+[
+  {
+    "template": "obsidian://open?vault={vault}&file={path}",
+    "vault": "My Vault",
+    "path": "a&b=c+d.md",
+    "want": "obsidian://open?vault=My%20Vault&file=a%26b%3Dc%2Bd.md"
+  },
+  {
+    "template": "obsidian://open?vault={vault}&file={path}",
+    "vault": "工作 笔记",
+    "path": "项目/会议 纪要.md",
+    "want": "obsidian://open?vault=%E5%B7%A5%E4%BD%9C%20%E7%AC%94%E8%AE%B0&file=%E9%A1%B9%E7%9B%AE%2F%E4%BC%9A%E8%AE%AE%20%E7%BA%AA%E8%A6%81.md"
+  },
+  {
+    "template": "obsidian://open?vault={vault}&file={path}",
+    "vault": "v",
+    "path": "100% done/ready?.md",
+    "want": "obsidian://open?vault=v&file=100%25%20done%2Fready%3F.md"
+  },
+  {
+    "template": "obsidian://open?vault={vault}&file={path}",
+    "vault": "v",
+    "path": "it's (draft)!*~.md",
+    "want": "obsidian://open?vault=v&file=it's%20(draft)!*~.md"
+  },
+  {
+    "template": "obsidian://open?vault={vault}&file={path}",
+    "vault": "a+b",
+    "path": "x;y,z:@$#.md",
+    "want": "obsidian://open?vault=a%2Bb&file=x%3By%2Cz%3A%40%24%23.md"
+  },
+  {
+    "template": "obsidian://open?vault={vault}&file={path}",
+    "vault": "v",
+    "path": "dir/sub dir/文件 #1.md",
+    "want": "obsidian://open?vault=v&file=dir%2Fsub%20dir%2F%E6%96%87%E4%BB%B6%20%231.md"
+  },
+  {
+    "template": "https://notes.example.com/{vault}/{path}",
+    "vault": "Team Notes",
+    "path": "a/b c.md",
+    "want": "https://notes.example.com/Team%20Notes/a%2Fb%20c.md"
+  }
+]

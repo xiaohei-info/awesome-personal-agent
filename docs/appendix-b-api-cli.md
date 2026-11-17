@@ -80,6 +80,7 @@
 | `apa ext list` | 列出仓库提供的 ext | 无 | |
 | `apa ext run <名>` | 本机启动 ext | ext 密钥（由 ext 读取） | |
 | `apa ext check` | 协议一致性自测 | 无 | |
+| `apa connection list [--direction channel\|output]` | 列出连接（内置渠道与输出）：id、方向、类型、名字、启停、状态、问题代码与最近成功、失败的时间；不含配置值与凭据（主文档 §7.6）。就是 `GET /connections` | observer | |
 | **自动化** | | | |
 | `apa instance add/list/enable/disable` | 能力包实例 | delegate（`list` 为 observer） | |
 | `apa pack list` | 列出已加载能力包 | observer | |
@@ -218,7 +219,7 @@
 | | `GET /settings/sources/{id}/self-sender` | 声明了 `sender.self: identity` 的来源：运行一次来源程序的 `identity` 模式（登记命令的第一个词加 `identity`，超时 10 秒），返回 `{"sender"}` 供预填；不产生来源事件、不写 Event；其他来源 404，程序失败或没给出身份时 409 `conflict` | 只有 Web 登录 |
 | | `PUT /settings/channels/{name}/answerers` | 只替换这个渠道的回答人白名单 `{"answerers": [...]}`，记 `policy.changed` 与 `allowlist.changed` | 只有 Web 登录 |
 | | `POST /settings/channels/{name}/identify`，`GET /settings/channels/{name}/identify` | 开始识别：返回一次性口令 `{code, expires_at}`（10 分钟，同一渠道同时一个，只在内存里，重启作废）；查看：`{state: waiting \| got \| expired, sender?, display?}` | 只有 Web 登录 |
-| 连接 | `GET /connections?direction=` | 列出连接（渠道或输出），按创建顺序：`{"connections": [{"id", "direction", "type", "name", "config", "secrets": {"<字段>": true/false}, "enabled", "state": ok/problem/disabled, "problem"?, "detail"?, "last_ok_at"?, "last_error_at"?, "created_at", "updated_at"}]}`。凭据只回是否已设置且可用（主文档 §14.2）；必填凭据不可用时 `problem` 为 `credentials_missing` | 只有 Web 登录 |
+| 连接 | `GET /connections?direction=` | 列出连接（渠道或输出），按创建顺序：`{"connections": [{"id", "direction", "type", "name", "config", "secrets": {"<字段>": true/false}, "enabled", "state": ok/problem/disabled, "problem"?, "detail"?, "last_ok_at"?, "last_error_at"?, "created_at", "updated_at"}]}`。凭据只回是否已设置且可用（主文档 §14.2）；必填凭据不可用时 `problem` 为 `credentials_missing`。token 读到的每条不含 `config`、`secrets`、`detail`（主文档 §7.6） | observer 读裁剪后的字段；Web 登录读全部；ext 与 webhook 密钥不可 |
 | | `GET /connections/types?direction=` | 内置连接类型的接入声明（选类型与渲染表单用）：`{"types": [{"type", "direction", "title", "tagline", "default", "via", "capabilities", "fields", "guide"?}]}`；文字都是 `{zh, en}` | 只有 Web 登录 |
 | | `POST /connections` | 新建（`connection.create`）：`{"type", "name"?, "config"?, "secrets"?, "enabled"?}`；`name` 缺省取声明的默认名，重名 409；配置按声明的字段表校验，必填缺失或字段不符 400。返回 201 与连接 | 只有 Web 登录 |
 | | `PUT /connections/{id}` | 改配置与凭据（`connection.configure`）：`{"config"?, "secrets"?}`；`config` 给出时整体替换非凭据配置；`secrets` 里出现的字段非空即替换、空串即清除，没出现的保持 | 只有 Web 登录 |
@@ -226,6 +227,7 @@
 | | `DELETE /connections/{id}` | 删除（`connection.remove`）：只对已停用的连接，否则 409；配置、凭据与现状一起删 | 只有 Web 登录 |
 | | `POST /connections/test` | 测表单里未保存的草稿 `{"type", "id"?, "config"?, "secrets"?, "send"?}`：插件自检，`send` 为真时再发一条内容固定的测试消息；带 `id` 时没给出的凭据用已保存的。不改账本。返回 `{"ok", "problem"?, "detail"?}`，`problem` 是问题代码（主文档 §7.6），`detail` 已脱敏 | 只有 Web 登录 |
 | | `POST /connections/{id}/test` | 对已保存的连接发一条测试消息，结果写进连接现状；返回同上 | 只有 Web 登录 |
+| | 已有路由 GET /settings/ext-keys 的新增字段 | 每把密钥带 `last_seen_at`：同一权限范围（`channel.<名>`、`export` 等）的密钥最近一次经认证调用内核的时间，从未调用过时省略（与 `apa doctor` 的 `last_seen_at` 同源） | 只有 Web 登录 |
 | | `PATCH /settings/tokens/{id}` | 认领 token 所属的 harness `{"harness"}`（非空、不含空白，同无头运行声明的 `harness`）：只能从空设一次，已有值或已吊销为 409（`credential.assign`，记 `credential.assigned`，载荷 `{"harness"}`）；只对 worker、delegate。`POST /settings/tokens` 可带同一字段，在签发时给定；其他种类带它为 400。`GET /settings/tokens` 每条带 `harness`（空为未认领）与 `seen_harness`（该凭据最近一次事件里自报的 harness，没有时省略，只作认领推荐，不参与判定） | 只有 Web 登录 |
 | | `PUT /settings/agents/{harness}/grant` | 替换该 Agent 的长期授权单：同一事务撤销它名下现有的 `grantee.agent` 式有效单（撤销原因 `replaced`）并按请求体 `{grantee: {background}, scope, actions, expires_at?, reason?}` 签发新单，记 `grant.revoked` 与 `grant.issued`；`actions` 为空即只撤销。响应 `{"grant": 新单或 null, "revoked": [被撤销的单 id]}`；新单校验失败为 400，旧单不动 | 只有 Web 登录 |
 | 认证 | `POST /auth/login`、`/logout` | Web 会话。连续失败的限速与锁定见主文档 §14.13，锁定期间返回 429 | |
@@ -481,4 +483,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 材料的形态 | 两种，由有没有仓库位置区分 | 三种，新增只读字段 `form`；`POST /materials` 带 `link` 时登记链接型 | 只增；已有材料的 `form` 在读取时推定，不改写 |
 | 简报的写回结构 | `spec.sections[]` 每节必须有 `project` | 每节有 `project` 或 `title` 之一；`spec` 另有内核写入的 `since`、`until` | 已有简报原样可读。自定义的简报视图若按 `project` 分组，要能处理没有 `project` 的节 |
 | 提醒事项来源的事件类型 | 只有 `reminder.due` | 配了 `undated_lists` 时另有 `reminder.open` | 不配就没有变化；按事件类型匹配的用户规则若要处理没有到期日的提醒，加上新类型 |
+| `GET /connections` 的权限 | 只有 Web 登录 | observer 及以上的 token 读裁剪后的字段（不含 `config`、`secrets`、`detail`）；新增 `apa connection list` | 只增：Web 读到的内容不变；写命令仍只在 Web |
+| 笔记库打开地址的编码 | `{vault}`、`{path}` 按路径段编码：`&`、`=`、`+`、`$`、`:`、`@` 不编码，与 Web 预览不一致 | 按 URI 组件编码，内核与 Web 预览一致（主文档 §12.8） | 只改渲染结果，不迁移、不改存储；路径含这些字符时原来生成的是坏链接，修复后正确；另外 `!`、`'`、`(`、`)`、`*` 由百分号编码改为原样，两种写法等价；其余路径的结果不变 |
+| `GET /settings/ext-keys` | 没有最近调用时间 | 每把密钥另带 `last_seen_at` | 只增字段 |
 | 生成端点的资料长度 | 资料原样拼进提示词，没有预算 | 受 `generate_endpoint.max_material_chars` 约束（默认 24000），超出时裁剪并留痕 | 已存的策略版本没有这个键，读作默认值，不改写 |
