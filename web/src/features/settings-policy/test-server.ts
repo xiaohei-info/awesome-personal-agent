@@ -27,15 +27,17 @@ export function initialDoc(): Record<string, any> {
   };
 }
 
-export function policyServer(opts: { webOnlyDenied?: boolean } = {}) {
+export function policyServer(opts: { webOnlyDenied?: boolean; connections?: { id: string; name: string; enabled: boolean }[]; routes?: Record<string, string>; extKeys?: Record<string, unknown>[] } = {}) {
   let version = 1;
   const doc = initialDoc();
+  if (opts.routes) doc.disturb.routes = opts.routes;
   const puts: { path: string; body: any; csrf?: string }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/v1/projects") return json(200, { projects: [{ id: "acc-home", name: "Home" }] });
     if (url === "/v1/sources") return json(200, { sources: [{ id: "src_cal_apple", name: "Apple Calendar" }, { id: "src_mail_qq", name: "QQ Mail" }] });
-    if (url === "/v1/settings/ext-keys") return json(200, { credentials: [{ id: "k1", kind: "ext", scope: "channel.slack" }, { id: "k2", kind: "ext", scope: "channel.old", revoked_at: "x" }] });
+    if (url === "/v1/settings/ext-keys") return json(200, { credentials: opts.extKeys ?? [{ id: "k1", kind: "ext", scope: "channel.slack" }, { id: "k2", kind: "ext", scope: "channel.old", revoked_at: "x" }] });
+    if (url === "/v1/connections?direction=channel") return json(200, { connections: opts.connections ?? [] });
     if (url === "/v1/settings/commands") return json(200, { declarations: [{ harness: "hermes", rev: 1, state: "confirmed", declaration: { harness: "hermes", headless: { command: ["hermes"], access: { read: [], edit: [] } } } }] });
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
     if (url.startsWith("/v1/items/")) return json(200, { id: url.slice("/v1/items/".length), title: "Renew domain" });

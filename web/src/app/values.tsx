@@ -44,12 +44,14 @@ export function Pick({ k, value, onChange, ids, label, ...rest }: {
   disabled?: boolean;
   /** 放在最前的空选项的文字（如「全部」）；省略则没有空选项。 */
   empty?: string;
+  /** 词表之外的显示名（如内置渠道连接的名字），优先于词表。 */
+  names?: Readonly<Record<string, string>>;
 }) {
   const lang = useLang();
   const raw = useRaw();
   const list = ids ?? Object.keys(vocab[lang][k]);
   const text = (id: string) => {
-    const name = entryOf(lang, k, id)?.label ?? id;
+    const name = rest.names?.[id] ?? entryOf(lang, k, id)?.label ?? id;
     return raw && name !== id ? `${name} · ${id}` : name;
   };
   return (
