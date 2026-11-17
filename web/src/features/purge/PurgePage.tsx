@@ -10,6 +10,7 @@ interface Result {
   object: string;
   kind: string;
   events: number;
+  source_events?: string[];
   blobs_removed?: string[];
   blobs_retained?: string[];
 }
@@ -22,6 +23,7 @@ export function PurgePage() {
   const [picked, setPicked] = useState<Hit | null>(null);
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [withEvents, setWithEvents] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ r: Result; name: string } | null>(null);
@@ -48,10 +50,11 @@ export function PurgePage() {
     setError(null);
     setResult(null);
     try {
-      setResult({ r: await api.post<Result>("/settings/purge", { object }), name });
+      setResult({ r: await api.post<Result>("/settings/purge", withEvents && picked?.kind !== "material" ? { object, with_source_events: true } : { object }), name });
       setText("");
       setPicked(null);
       setHits(null);
+      setWithEvents(false);
     } catch (e) {
       setError(msg(e));
     } finally {
@@ -72,6 +75,7 @@ export function PurgePage() {
             <p className="sub">
               <code>{result.r.object}</code> · {t.detailEvents(result.r.events)}
             </p>
+            {result.r.source_events?.length ? <p className="sub">{t.sourceEventsGone(result.r.source_events.length)}</p> : null}
             {result.r.blobs_removed?.length ? <p className="sub">{t.blobsRemoved(result.r.blobs_removed.join(", "))}</p> : null}
             {result.r.blobs_retained?.length ? <p className="sub">{t.blobsRetained(result.r.blobs_retained.join(", "))}</p> : null}
           </details>
@@ -115,6 +119,11 @@ export function PurgePage() {
             ))}
           </fieldset>
         ))}
+        {picked?.kind !== "material" && (
+          <label>
+            <input type="checkbox" checked={withEvents} onChange={(e) => setWithEvents(e.target.checked)} disabled={confirming} /> {t.withEvents}
+          </label>
+        )}
         <div>
           <button type="submit" className="danger" disabled={!object || confirming}>{t.delete}</button>
         </div>
@@ -125,6 +134,7 @@ export function PurgePage() {
             {t.warn1}
             <strong>{name}</strong>
             {t.warn2}
+            {withEvents && picked?.kind !== "material" && <> {t.warnEvents}</>}
           </p>
           <div className="actions">
             <button className="danger" onClick={purge} disabled={busy}>{t.confirm}</button> <button onClick={() => setConfirming(false)} disabled={busy}>{t.cancel}</button>

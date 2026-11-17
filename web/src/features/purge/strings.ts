@@ -20,6 +20,12 @@ const zh = {
   warn1: "永久删除「",
   warn2: "」，无法找回；只留下「这里有过一条记录」。",
   confirm: "确认永久删除",
+  withEvents: "连同它的来源事件一起删除",
+  warnEvents: "挂在它上面的来源事件（原文、取回的附件与判断记录）也会一并删除。",
+  sourceEventsGone: (n: number) => `连同删除了 ${n} 条来源事件`,
+  eventDelete: "删除这条来源事件…",
+  eventWarn1: "永久删除来源事件「",
+  eventWarn2: "」的原文、取回的附件与判断记录，无法找回；同一事件再被来源带来时不会重新入账。",
 };
 
 const en: typeof zh = {
@@ -40,6 +46,12 @@ const en: typeof zh = {
   warn1: "Permanently delete \"",
   warn2: "\"? It cannot be recovered; only a note that something was here remains.",
   confirm: "Delete permanently",
+  withEvents: "Also delete its source events",
+  warnEvents: "The source events attached to it (original text, fetched attachments and judgment records) are deleted too.",
+  sourceEventsGone: (n) => `${n} source events deleted with it`,
+  eventDelete: "Delete this source event…",
+  eventWarn1: "Permanently delete the original text, fetched attachments and judgment records of source event \"",
+  eventWarn2: "\"? It cannot be recovered; if the source brings the same event again it will not be taken in.",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

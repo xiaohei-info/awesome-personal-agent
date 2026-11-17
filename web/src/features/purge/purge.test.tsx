@@ -20,7 +20,7 @@ function server(o: { deny?: boolean } = {}) {
     if (url === "/v1/settings/purge" && method === "POST") {
       if (o.deny) return json(403, { code: "web_only", why: "purge can only be used by the owner in the Web UI", next: "open the Web UI" });
       if (body.object === "mat-1") return json(200, { object: "mat-1", kind: "material", events: 3, blobs_removed: ["aa11"], blobs_retained: ["bb22"] });
-      if (body.object === "it-1") return json(200, { object: "it-1", kind: "item", events: 5 });
+      if (body.object === "it-1") return json(200, { object: "it-1", kind: "item", events: body.with_source_events ? 7 : 5, ...(body.with_source_events ? { source_events: ["sev_1", "sev_2"] } : {}) });
       return json(404, { code: "not_found", why: "object not found", next: "check the id" });
     }
     return json(404, { code: "not_found", why: "no such route", next: "-" });
@@ -112,5 +112,28 @@ describe("物理删除（flow-purge / ACT-PRG-01）", () => {
     await userEvent.click(screen.getByRole("button", { name: "删除…" }));
     await userEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("object not found");
+  });
+});
+
+describe("连同来源事件（flow-raw-purge）", () => {
+  it("勾选后请求带 with_source_events，并写明连同删除了几条来源事件；不勾选则不带", async () => {
+    const s = server();
+    mount(s.impl);
+    await userEvent.type(await screen.findByLabelText("要删除的事项或材料（标题或编号）"), "it-1");
+    await userEvent.click(screen.getByLabelText("连同它的来源事件一起删除"));
+    await userEvent.click(screen.getByRole("button", { name: "删除…" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("来源事件");
+    await userEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+    expect(posts(s)[0].body).toEqual({ object: "it-1", with_source_events: true });
+    expect(await screen.findByText("连同删除了 2 条来源事件")).toBeInTheDocument();
+  });
+
+  it("不勾选：请求只带 object", async () => {
+    const s = server();
+    mount(s.impl);
+    await userEvent.type(await screen.findByLabelText("要删除的事项或材料（标题或编号）"), "it-1");
+    await userEvent.click(screen.getByRole("button", { name: "删除…" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+    expect(posts(s)[0].body).toEqual({ object: "it-1" });
   });
 });
