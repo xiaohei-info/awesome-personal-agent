@@ -1,4 +1,4 @@
-# sha256: c515c86211d038083c916dc7a80ecfecd2b135137e6f9723fed3399dfbc52f57
+# sha256: 7aa5c22b1b0c7b357c566e581605c7d6b1001dd2374b480ce63d90a5c380e18f
 defects:
   schema: omac.defect-ledger/v1
   used_global: 4
@@ -41,6 +41,6 @@ defects:
       - flow-attachment-fetch/ACT-FET-02
       reporters:
       - web-raw-actions
-      state: fixing
+      state: fixed
       fix_node: fix.attachment-fetch.7f1703
   inbox: []
