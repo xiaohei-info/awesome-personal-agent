@@ -159,7 +159,7 @@ default: {zh: Apple 邮件, en: Apple Mail}
 
 其他渠道（企业协作工具、其他聊天应用、邮件发信）按同一份渠道 ext 协议实现，不改内核。
 
-**规划中的内置渠道**（主文档 §20.3 W25.3、W25.4）：Telegram 从上述 ext 搬进 `connectors/telegram`；飞书（官方 `oapi-sdk-go/v3` 的长连接，仅企业自建应用）进 `connectors/feishu`。主文档 §21.3 的 `SPIKE-IM-WS`、`SPIKE-IM-SETUP`、`SPIKE-IM-DEDUPE`、`SPIKE-IM-SIZE` 指的就是飞书：长连接收事件与卡片回传交互并 3 秒内应答、最少开通步骤与权限名、发消息的 `uuid` 去重、SDK 带来的二进制增量。未实测；实测需要一个专供测试的企业自建应用，不用任何生产应用。
+**规划中的内置渠道**（主文档 §20.3 W25.2、W25.3）：Telegram 从上述 ext 搬进 `connectors/telegram`；飞书（官方 `oapi-sdk-go/v3` 的长连接，仅企业自建应用）进 `connectors/feishu`。主文档 §21.3 的 `SPIKE-IM-WS`、`SPIKE-IM-SETUP`、`SPIKE-IM-DEDUPE`、`SPIKE-IM-SIZE` 指的就是飞书：长连接收事件与卡片回传交互并 3 秒内应答、最少开通步骤与权限名、发消息的 `uuid` 去重、SDK 带来的二进制增量。未实测；实测需要一个专供测试的企业自建应用，不用任何生产应用。
 
 **内置渠道：Bark**（`connectors/bark`，主文档 §10.3）。推送到苹果设备，只用标准库调用 Bark 推送服务的 HTTP 接口：`POST <服务器>/push`（JSON），自检用 `GET <服务器>/ping`。服务端以 `bark-server`（MIT）为准，官方公共服务是默认地址，自建服务器开了登录验证时按 HTTP Basic Auth 带登录名与密码。
 
