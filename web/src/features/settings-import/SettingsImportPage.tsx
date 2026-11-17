@@ -8,6 +8,7 @@ import { strings } from "./strings";
 // 设置 › 导入：POST /import（application/x-ndjson，每次至多 500 行）、GET /imports、GET /audit/events?imported=、POST /settings/grants（附录 B.2）。
 // 页面只切片与汇总；校验、幂等、批次与授权都在服务端，被拒绝时原因原样显示。
 const CHUNK = 500;
+const PAGE = 500;
 const SOURCE = /^[a-z0-9-]{1,32}$/;
 const NDJSON = { "Content-Type": "application/x-ndjson" };
 
@@ -140,10 +141,16 @@ function BatchRow({ b }: { b: Batch }) {
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     if (!open || objs) return;
-    api.get<{ events: { object: string }[] }>("/audit/events?" + new URLSearchParams({ imported: b.id, type: "item.created", limit: "500" })).then(
-      (r) => setObjs(r.events.map((e) => e.object)),
-      (e) => setErr(errorText(e)),
-    );
+    // 一个批次可含多个 500 条的请求：按 seq 游标翻页（附录 B.2），取到不足一页为止。
+    (async () => {
+      const out: string[] = [];
+      for (let after = 0; ; ) {
+        const { events } = await api.get<{ events: { seq: number; object: string }[] }>("/audit/events?" + new URLSearchParams({ imported: b.id, type: "item.created", limit: String(PAGE), after: String(after) }));
+        out.push(...events.map((e) => e.object));
+        if (events.length < PAGE) return out;
+        after = events[events.length - 1].seq;
+      }
+    })().then(setObjs, (e) => setErr(errorText(e)));
   }, [open, objs, api, b.id]);
   return (
     <div role="group" aria-label={b.id} className="stack">
@@ -156,7 +163,7 @@ function BatchRow({ b }: { b: Batch }) {
       {open && objs && (
         <ul aria-label={t.written(b.id)} className="rows">
           {objs.length === 0 && <li className="sub">{t.noWritten}</li>}
-          {objs.map((id) => <li key={id}><Link to={"/items/" + id}>{id}</Link></li>)}
+          {objs.map((id) => <li key={id}><Link to={"/items/" + encodeURIComponent(id)}>{id}</Link></li>)}
         </ul>
       )}
     </div>

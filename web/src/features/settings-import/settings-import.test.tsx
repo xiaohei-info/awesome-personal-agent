@@ -7,7 +7,7 @@ import { feature } from "./index";
 
 // 替身只回答 POST /v1/import、GET /v1/imports、GET /v1/audit/events、POST /v1/settings/grants，形状同附录 B.2。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-const BATCHES = [{ id: "imp_old", source: "legacy", created: 3, existing: 1, invalid: 0, started_at: "2026-10-01T02:00:00Z", actor: "owner", grant: "gr_1" }];
+const BATCHES = [{ id: "imp_big", source: "big", created: 520, existing: 0, invalid: 0, started_at: "2026-10-02T02:00:00Z", actor: "owner" }, { id: "imp_old", source: "legacy", created: 3, existing: 1, invalid: 0, started_at: "2026-10-01T02:00:00Z", actor: "owner", grant: "gr_1" }];
 
 function server(opts: { failChunk?: number } = {}) {
   const posts: { url: string; lines: number; ct: string | null }[] = [];
@@ -19,7 +19,12 @@ function server(opts: { failChunk?: number } = {}) {
     if (url === "/v1/imports") return json(200, { batches: BATCHES });
     if (url.startsWith("/v1/audit/events?")) {
       const q = new URL(url, "http://x").searchParams;
-      return json(200, { events: q.get("imported") === "imp_old" && q.get("type") === "item.created" ? [{ object: "itm_a" }, { object: "itm_b" }] : [] });
+      if (q.get("imported") === "imp_big") { // 520 条，升序，limit 500，after=<seq> 取其后一页（B.2）
+        const after = Number(q.get("after") ?? 0), lim = Number(q.get("limit"));
+        const all = Array.from({ length: 520 }, (_, i) => ({ seq: i + 1, object: `itm_${i + 1}` }));
+        return json(200, { events: all.filter((e) => e.seq > after).slice(0, lim) });
+      }
+      return json(200, { events: q.get("imported") === "imp_old" && q.get("type") === "item.created" ? [{ seq: 1, object: "itm_a" }, { seq: 2, object: "itm_b" }] : [] });
     }
     if (url.startsWith("/v1/import?")) {
       const q = new URL(url, "http://x").searchParams;
@@ -110,6 +115,16 @@ describe("设置 › 导入", () => {
     const list = await screen.findByRole("list", { name: "批次 imp_old 写入的事项" });
     expect(within(list).getByRole("link", { name: "itm_a" })).toHaveAttribute("href", "/items/itm_a");
     expect(within(list).getByRole("link", { name: "itm_b" })).toBeInTheDocument();
+  });
+
+  it("ACT-WIM-02: 一个批次超过 500 条事项时翻页取全，不截断", async () => {
+    mount(server().impl);
+    const row = within(await screen.findByRole("group", { name: "imp_big" }));
+    await userEvent.click(row.getByRole("button", { name: "查看批次 imp_big" }));
+    const list = await screen.findByRole("list", { name: "批次 imp_big 写入的事项" });
+    await waitFor(() => expect(within(list).getAllByRole("link")).toHaveLength(520));
+    expect(within(list).getByRole("link", { name: "itm_501" })).toBeInTheDocument();
+    expect(within(list).getByRole("link", { name: "itm_520" })).toBeInTheDocument();
   });
 
   it("ACT-WIM-02: 签发导入授权单：只含 import.apply，带来源名、条数上限与有效期（≤7 天）", async () => {
