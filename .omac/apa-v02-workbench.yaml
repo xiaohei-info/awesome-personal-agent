@@ -11,70 +11,65 @@ meta:
   - 01a1e544-2000-750d-9c83-0401472cc122
   - 01a1e544-225a-77b1-8b32-0ff70a73da95
   - 01a1e557-c6de-78d2-931b-e83115a95afb
-  amendment_revision: 2
+  amendment_revision: 3
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-ce85871f5797
+    amendment_id: amend-9419061dd3b2
     amendment_file: .omac/apa-v02-workbench.system-amendment.yaml
     nodes:
-      fix.link-material.1160ef:
+      fix.attachment-fetch.9d7d14:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-5d1c1805cc41e6249d477a12
-      web-link-materials:
+        expected_review_generation: amendment-f1815c2a76a913a5add416a3
+      web-raw-actions:
         stage: authoring
         state: synced
-        work_item_id: 01a1e616-e36c-7ed4-b8fd-455357e65aee
+        work_item_id: 01a1e6ca-5a0d-797e-9a15-2ce8527428d9
         baseline:
           status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
+          phase: review
+          review_verdict: reject
+          review_subject_digest: 66fd7721cf8e54acac13dbd074d60126db4f8dc557e32473bdefafde57d0307d
           review_generation: null
           review_ledger_generation: null
-          review_ledger_current: false
+          review_ledger_current: true
           bounce_baseline: null
           decision_required_pending: true
-          review_report_pending: false
+          review_report_pending: true
           review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 8f3026d33c166f69e86a79444368a0b150865280c457ff27b6fc22d819507b14
-          worker_handoff_pending: true
+          reviewer_run_baseline_pending: true
+          delivery_identity_pending: true
+          contract_sha256: 9f2ddafcf4f78859fa9a1a220cbb5cd95cb2802d7e6be36d3fb012e5c83c1354
+          worker_handoff_pending: false
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: 8f3026d33c166f69e86a79444368a0b150865280c457ff27b6fc22d819507b14
-        superseded_decision:
-          reason_code: worker-decision-required
-          gate: worker
-          blocker_reason_code: upstream-defect
-          decision_sha256: 9211a2f79535a2a4d94f45a09d86d5fc38db8964b4b3efd9c0bea94ba5ff85d5
-        expected_review_generation: amendment-c1768eb1ba8eaed98278be6b
+        expected_contract_sha256: 9f2ddafcf4f78859fa9a1a220cbb5cd95cb2802d7e6be36d3fb012e5c83c1354
+        expected_review_generation: amendment-e3cd436a38d5bee0be28b578
         attempt_baseline:
           status: blocked
-          phase: authoring
-          review_verdict: null
-          review_subject_digest: null
+          phase: review
+          review_verdict: reject
+          review_subject_digest: 66fd7721cf8e54acac13dbd074d60126db4f8dc557e32473bdefafde57d0307d
           review_generation: null
           review_ledger_generation: null
-          review_ledger_current: false
+          review_ledger_current: true
           bounce_baseline: null
           decision_required_pending: true
-          review_report_pending: false
+          review_report_pending: true
           review_continuation_pending: false
-          reviewer_run_baseline_pending: false
-          delivery_identity_pending: false
-          contract_sha256: 8f3026d33c166f69e86a79444368a0b150865280c457ff27b6fc22d819507b14
-          worker_handoff_pending: true
+          reviewer_run_baseline_pending: true
+          delivery_identity_pending: true
+          contract_sha256: 9f2ddafcf4f78859fa9a1a220cbb5cd95cb2802d7e6be36d3fb012e5c83c1354
+          worker_handoff_pending: false
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-c1768eb1ba8eaed98278be6b
+          review_generation: amendment-e3cd436a38d5bee0be28b578
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -86,7 +81,7 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 8f3026d33c166f69e86a79444368a0b150865280c457ff27b6fc22d819507b14
+          contract_sha256: 9f2ddafcf4f78859fa9a1a220cbb5cd95cb2802d7e6be36d3fb012e5c83c1354
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-raw-ingest:
@@ -97,8 +92,16 @@ meta:
           merge: 0
           review: 0
           worker: 0
+      web-link-materials:
+        amendment_id: amend-ce85871f5797
+        work_item_id: 01a1e616-e36c-7ed4-b8fd-455357e65aee
+        contract_sha256: 8f3026d33c166f69e86a79444368a0b150865280c457ff27b6fc22d819507b14
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
     system: true
-  last_amendment_id: amend-ce85871f5797
+  last_amendment_id: amend-9419061dd3b2
 nodes:
 - id: schema-v8
   worker: omac-worker-backend
@@ -4009,6 +4012,7 @@ nodes:
   blocked_by:
   - web-raw-trace
   - attachment-fetch
+  - fix.attachment-fetch.9d7d14
   title: Web：来源原文页的附件取回与物理删除入口
   description: 产出 web-raw-actions-delivery。主要归属是物理删除入口 web/src/features/purge（来源事件删除与“连同它的来源事件”勾选）；处理经过页
     trace 的“取回”与删除按钮是支持性改动，该页先由 web-raw-trace 出只读内容，本节点排在其后。接口 409/502 语义由 attachment-fetch
@@ -5301,4 +5305,96 @@ nodes:
       - migration-chain-v8
     defect_refs:
     - dfx-1160ef23f38f
+    coverage_gate: 80
+- id: fix.attachment-fetch.9d7d14
+  worker: omac-worker-backend
+  blocked_by:
+  - raw-read-api
+  - raw-retention-purge
+  title: 'Fix attachment-fetch: dfx-9d7d14d814b7'
+  description: "Automatic fix for upstream defect(s) reported by web-raw-actions.\n\n-
+    [design-gap] anchors acceptance-action:flow-attachment-fetch:ACT-FET-02 (docs/appendix-b-api-cli.md#b2-http-api)\n
+    \ expected: 最小修复在后端读接口（attachment-fetch 节点）：GET /source-events/{id} 在来源不支持取回（CanFetch
+    为假）时不返回清单项的 ref，或返回设计内允许的、仅描述该能力的字段并写入附录 B B2；然后本节点补一个用例：来源不支持取回、清单项带 ref 的响应下页面没有取回按钮（对应
+    acc-raw-nofetch）。若定为新增响应字段，须先走设计修改（本节点非目标禁止自行新增）。\n  observed: “取回”按钮只按附件清单项是否带
+    ref 显示，而读接口不告诉 Web 来源是否声明了 content.attachments: fetch；带 ref 但不支持取回的来源会显示取回按钮\n
+    \ where: api/sources/rawread.go 的 eventRead 只透传清单，没有来源可取回的信息；api/sources/fetch.go
+    是否可取回由 CanFetch(src)（接入声明）决定，409 只在点击后才出现。tests/doubles/srcstub/srcstub.go:11"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-9d7d14d814b7 in attachment-fetch: 最小修复在后端读接口（attachment-fetch
+      节点）：GET /source-events/{id} 在来源不支持取回（CanFetch 为假）时不返回清单项的 ref，或返回设计内允许的、仅描述该能力的字段并写入附录
+      B B2；然后本节点补一个用例：来源不支持取回、清单项带 ref 的响应下页面没有取回按钮（对应 acc-raw-nofetch）。若定为新增响应字段，须先走设计修改（本节点非目标禁止自行新增）。'
+    non_goals:
+    - 不做 Web 页面（web-raw-actions）
+    - 不做入账自动保存小附件（REQ-NOT-RAWEXTRA）
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build ./...
+    - go test -count=1 ./kernel/outcall/... ./kernel/sources/...
+    - go test -count=1 ./api/sources/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: attachment-fetch-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#92-执行契约
+      - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/appendix-b-api-cli.md#b1-cli
+      - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+      - docs/changes-v0.2.0.md#103-配置策略与授权
+      delivery_goal: '接入声明的 content.attachments: fetch，经外呼调用器以 fetch 模式运行来源程序（超时 60
+        秒、≤32 MiB）、存为内容寻址附件并记内部审计事件，POST /source-events/{id}/attachments/{n}/fetch（成功
+        200 带 blob、不支持 409、失败与超限 502 且清单不变；delegate 附原话可取回，运行凭据与 observer 不可）与 source.fetch_attachment；不产生来源事件、不推进游标'
+      covers:
+      - ACT-FET-01
+      - ACT-FET-03
+      - ACT-FET-04
+      acceptance_refs:
+      - flow-attachment-fetch
+      commands:
+      - go test -count=1 ./kernel/outcall/... ./kernel/sources/...
+      - go test -count=1 ./api/sources/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-attachment-fetch
+    source_of_truth:
+    - docs/solution-design.md#92-执行契约
+    - docs/appendix-d-adapters.md#d8-来源原文各来源的取法
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/appendix-b-api-cli.md#b1-cli
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - kernel/outcall/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: raw-read-api-delivery
+      producer: raw-read-api
+      evidence_mode: artifact
+      requires:
+      - source-event-read-api
+      - outbound-scoped-read
+      - storage-stats
+      - slim-event-lists
+    - artifact_id: raw-retention-purge-delivery
+      producer: raw-retention-purge
+      evidence_mode: artifact
+      requires:
+      - content-retention
+      - source-event-purge
+      - dedup-tombstone
+    defect_refs:
+    - dfx-9d7d14d814b7
     coverage_gate: 80
