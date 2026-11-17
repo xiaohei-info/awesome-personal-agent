@@ -9,8 +9,9 @@ import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save 
 import { strings } from "./strings";
 
 // 设置 › 提醒与打扰：策略的 disturb 段（§7.4）。PUT 替换整段，所以保存时带上整段：没在这页改过的字段原样带回。
-// 路由只能选合法值：下次聊天时告诉我（inject）、只放网页未读（web）、已接入的渠道（channel:<名>，取自渠道扩展的密钥）；
-// 唤醒宿主（wake）不是提醒本人，只在「高级」里出现。文档里已有的其他取值保留为选项，不丢。
+// 路由只能选合法值：下次聊天时告诉我（inject）、只放网页未读（web）、启用中的内置渠道（channel:<连接 id>，按连接名字显示）、
+// 自写程序的渠道（channel:<名>，取自渠道扩展的密钥）；唤醒宿主（wake）不是提醒本人，只在「高级」里出现。
+// 文档里已有的其他取值保留为选项，不丢；指向已停用或已删除连接的路由照样显示并标明。
 const ROUTES = ["policy"] as const;
 const CLASSES = ["decision", "brief", "reminder", "health"] as const;
 const MERGE_MIN = [0, 15, 30, 60];
@@ -27,18 +28,29 @@ export function SettingsNotifyPage() {
   );
 }
 
-/** 已接入的渠道名：ext 密钥里 scope 为 channel.<名> 且没吊销的。 */
-function useChannels(): string[] {
+interface Channels { ids: string[]; names: Record<string, string> }
+
+/** 可选的渠道：启用中的内置渠道连接按名字列出，没吊销的渠道扩展密钥按渠道名列出。取不到就只给内置的两种。 */
+function useChannels(): Channels {
+  const t = useT(strings);
   const { api } = useSession();
-  const [names, setNames] = useState<string[]>([]);
+  const [conns, setConns] = useState<{ id: string; name: string; enabled: boolean }[]>([]);
+  const [ext, setExt] = useState<string[]>([]);
   useEffect(() => {
+    api.get<{ connections: { id: string; name: string; enabled: boolean }[] }>("/connections?direction=channel").then((r) => setConns(r.connections), () => setConns([]));
     api.get<{ credentials: { scope?: string; revoked_at?: string }[] }>("/settings/ext-keys").then(
-      (r) => setNames([...new Set(r.credentials.filter((c) => !c.revoked_at && c.scope?.startsWith("channel.")).map((c) => c.scope!.slice("channel.".length)))]),
-      () => setNames([]), // 渠道只用来列选项，取不到就只给内置的两种
+      (r) => setExt([...new Set(r.credentials.filter((c) => !c.revoked_at && c.scope?.startsWith("channel.")).map((c) => c.scope!.slice("channel.".length)))]),
+      () => setExt([]),
     );
   }, [api]);
-  return names;
+  const names: Record<string, string> = {};
+  for (const c of conns) names[CHANNEL_PREFIX + c.id] = c.enabled ? t.pushTo(c.name) : t.pushToOff(c.name);
+  const ids = [...conns.filter((c) => c.enabled).map((c) => CHANNEL_PREFIX + c.id), ...ext.map((n) => CHANNEL_PREFIX + n)];
+  return { ids, names };
 }
+
+/** 内置渠道连接的路由（channel:ch-…）在列表里找不到时：连接已删除，不显示原始 id。 */
+const isConnRoute = (id: string) => id.startsWith(CHANNEL_PREFIX + "ch-");
 
 interface Today { pushed: number; cap: number }
 function useToday(): Today | null {
@@ -60,7 +72,7 @@ const toLocalInput = (iso?: string) => {
 };
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
-function DisturbCard({ doc, channels, save }: { doc: Doc; channels: string[]; save: Save }) {
+function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; save: Save }) {
   const t = useT(strings);
   const label = useLabel();
   const today = useToday();
@@ -76,9 +88,11 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: string[]; sa
   const set = (k: string, v: unknown) => setPatch({ ...patch, [k]: v });
 
   const routeIds = (cur: string, withWake = false) => {
-    const ids = ["inject", "web", ...(withWake ? ["wake"] : []), ...channels.map((c) => CHANNEL_PREFIX + c)];
+    const ids = ["inject", "web", ...(withWake ? ["wake"] : []), ...channels.ids];
     return cur && !ids.includes(cur) ? [...ids, cur] : ids;
   };
+  const names: Record<string, string> = { ...channels.names };
+  for (const r of [...Object.values(routesIn)]) if (isConnRoute(r) && !names[r]) names[r] = t.pushToGone;
   const setOverride = (i: number, j: number, v: string) => setOverrides(overrides.map((o, n) => (n === i ? (o.map((x, m) => (m === j ? v : x)) as Override) : o)));
   const setMute = (i: number, j: number, v: string) => setMutes(mutes.map((r, n) => (n === i ? (r.map((x, m) => (m === j ? v : j === 0 && m === 1 ? "" : x)) as Mute) : r)));
   const quiet = val("quiet") as { start: string; end: string; zone?: string } | undefined;
@@ -106,7 +120,7 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: string[]; sa
         {CLASSES.map((c) => (
           <div key={c} className="line">
             <span>{label("deliveryClass", c)}</span>
-            <Pick k="route" label={label("deliveryClass", c)} value={base[c] ?? "web"} ids={routeIds(base[c] ?? "web")} onChange={(v) => setBase({ ...base, [c]: v })} />
+            <Pick k="route" names={names} label={label("deliveryClass", c)} value={base[c] ?? "web"} ids={routeIds(base[c] ?? "web")} onChange={(v) => setBase({ ...base, [c]: v })} />
           </div>
         ))}
         {overrides.map(([cls, prio, route], i) => (
@@ -115,7 +129,7 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: string[]; sa
               <Pick k="deliveryClass" label={t.overrideClass(i + 1)} value={cls} ids={[...CLASSES, ...(CLASSES as readonly string[]).includes(cls) ? [] : [cls]]} onChange={(v) => setOverride(i, 0, v)} />
               <Pick k="priority" label={t.overridePrio(i + 1)} value={prio} ids={(PRIORITY as readonly string[]).includes(prio) ? PRIORITY : [...PRIORITY, prio]} onChange={(v) => setOverride(i, 1, v)} />
             </span>
-            <Pick k="route" label={t.overrideRoute(i + 1)} value={route} ids={routeIds(route)} onChange={(v) => setOverride(i, 2, v)} />
+            <Pick k="route" names={names} label={t.overrideRoute(i + 1)} value={route} ids={routeIds(route)} onChange={(v) => setOverride(i, 2, v)} />
             <button type="button" aria-label={t.delOverride(i + 1)} onClick={() => setOverrides(overrides.filter((_, n) => n !== i))}>✕</button>
           </div>
         ))}
@@ -186,7 +200,7 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: string[]; sa
           <label><input type="checkbox" checked={!!val("followup_defer")} onChange={(e) => set("followup_defer", e.target.checked)} /> {t.followupDefer}</label>
           <label>
             {t.wake}
-            <Pick k="route" value={base.wake ?? "web"} ids={routeIds(base.wake ?? "web", true)} onChange={(v) => setBase({ ...base, wake: v })} />
+            <Pick k="route" names={names} value={base.wake ?? "web"} ids={routeIds(base.wake ?? "web", true)} onChange={(v) => setBase({ ...base, wake: v })} />
           </label>
         </div>
       </details>
