@@ -1,7 +1,6 @@
-# sha256: 899df62d280ddfba3b66a0ac90445828a7f2ce8ea65d43fdb42e2cc3c6ede212
+# sha256: 863e7332b1d36f7f905f467314d6640ce6dcf5361288d4dcdda24218067753c1
 work_item_id: 01a1e578-c00a-7c9d-882b-9c587ef10eac
 status: in_progress
-recovery_marker: true
 retry_note: 'The PR #445 head 9035d327b conflicts with main and has not changed since
   18:16; the previous retry re-ran the CI gate on that same head without any new worker
   run. You must do real work this time: check out the existing branch agent/omac-worker-backend/GT-387-grant-import,
