@@ -2,6 +2,8 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -60,12 +62,50 @@ func TestConnectionsOverHTTPAndMissingMasterKey(t *testing.T) {
 	if len(p.got) != 1 || !p.got[0].Test {
 		t.Fatalf("test message not sent: %+v", p.got)
 	}
-	// Bearer 凭据不能管理连接：没有会话直接 401
+	// 没有凭据直接 401
 	resp, err := http.Get("http://" + addr.String() + "/v1/connections")
 	if err != nil || resp.StatusCode != 401 {
 		t.Fatalf("anonymous list: %v %v", resp, err)
 	}
 	resp.Body.Close()
+	// token 只读现状（§7.6）：observer 读到名字、类型、状态，读不到配置值与凭据；不能写；ext 密钥读不到。
+	bearer := func(kind, scope, method, path, body string) (int, string) {
+		t.Helper()
+		req := `{"kind":"` + kind + `"}`
+		group := "/settings/tokens"
+		if kind == "ext" {
+			req, group = `{"scope":"`+scope+`"}`, "/settings/ext-keys"
+		}
+		code, b := s.do("POST", group, req)
+		var out struct{ Secret string }
+		if code != 201 || json.Unmarshal([]byte(b), &out) != nil {
+			t.Fatalf("issue %s: %d %s", kind, code, b)
+		}
+		r, _ := http.NewRequest(method, "http://"+addr.String()+"/v1"+path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+out.Secret)
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		rb, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(rb)
+	}
+	code, b = bearer("observer", "", "GET", "/connections?direction=channel", "")
+	if code != 200 || !strings.Contains(b, `"name":"我的手机"`) || !strings.Contains(b, `"state":"ok"`) || !strings.Contains(b, `"type":"sample"`) {
+		t.Fatalf("observer list: %d %s", code, b)
+	}
+	for _, leak := range []string{`"config"`, `"secrets"`, `"token"`, `"detail"`, plainSecret} {
+		if strings.Contains(b, leak) {
+			t.Fatalf("observer list leaks %s: %s", leak, b)
+		}
+	}
+	if code, b := bearer("delegate", "", "POST", "/connections", `{"type":"sample","name":"x"}`); code != 403 || !strings.Contains(b, "web_only") {
+		t.Fatalf("delegate create must stay web_only: %d %s", code, b)
+	}
+	if code, b := bearer("ext", "channel.mine", "GET", "/connections", ""); code != 403 {
+		t.Fatalf("ext key list: %d %s", code, b)
+	}
 	stop()
 
 	if err := os.Remove(filepath.Join(home, "master.key")); err != nil {
