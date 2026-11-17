@@ -16,6 +16,11 @@ export interface Conn {
   state: "ok" | "problem" | "disabled"; problem?: string; detail?: string; last_ok_at?: string;
 }
 interface TestResult { ok: boolean; problem?: string; detail?: string }
+interface SecretPlan { action: "set" | "clear" | "keep"; hint?: string; length?: number }
+export interface Draft {
+  id: string; type: string; name: string; connection?: string; config: Record<string, string>; routes: string[];
+  secrets: Record<string, SecretPlan>; changes?: string[]; state: string; expires_at: string; test?: { ok: boolean; problem?: string; at: string };
+}
 
 export const CLASSES = ["decision", "reminder", "brief", "health"] as const;
 const DEFAULT_ROUTE: Record<string, string> = { decision: "inject", reminder: "inject", brief: "inject", health: "web" };
@@ -35,10 +40,13 @@ const usedFor = (routes: Record<string, string>, id: string) => CLASSES.filter((
 const viewOnly = (d?: Decl) => !!d && !d.capabilities.buttons && !d.capabilities.reply;
 export const time = (s?: string) => (s ? new Date(s).toLocaleString(undefined, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
-export function Connections({ routes, saveRoutes }: { routes: Record<string, string>; saveRoutes: (r: Record<string, string>) => Promise<unknown> }) {
+export function Connections({ routes, saveRoutes, onRoutesChanged }: {
+  routes: Record<string, string>; saveRoutes: (r: Record<string, string>) => Promise<unknown>; onRoutesChanged: () => void;
+}) {
   const t = useT(strings);
   const { api } = useSession();
   const [conns, setConns] = useState<Conn[] | null>(null);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
   const [types, setTypes] = useState<Decl[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -53,6 +61,8 @@ export function Connections({ routes, saveRoutes }: { routes: Record<string, str
     } catch (e) {
       setError(msg(e));
     }
+    // 草稿只用来显示待确认卡；取不到时不挡住渠道卡片
+    api.get<{ drafts: Draft[] }>("/connections/drafts").then((r) => setDrafts((r.drafts ?? []).filter((x) => x.state === "pending")), () => setDrafts([]));
   }, [api]);
   useEffect(() => void load(), [load]);
   if (error) return <p role="alert">{error}</p>;
@@ -60,6 +70,9 @@ export function Connections({ routes, saveRoutes }: { routes: Record<string, str
   const decl = (type: string) => types.find((d) => d.type === type);
   return (
     <>
+      {drafts.map((x) => (
+        <DraftCard key={x.id} x={x} d={decl(x.type)} conns={conns} onDone={() => { void load(); onRoutesChanged(); }} />
+      ))}
       {conns.map((c) => (
         <ConnCard key={c.id} c={c} d={decl(c.type)} routes={routes} saveRoutes={saveRoutes} onChange={() => void load()} />
       ))}
@@ -138,6 +151,58 @@ function ConnCard({ c, d, routes, saveRoutes, onChange }: {
       {editing && d && (
         <EditForm c={c} d={d} routes={routes} saveRoutes={saveRoutes} onDone={() => { setEditing(false); onChange(); }} />
       )}
+    </section>
+  );
+}
+
+/** Agent 准备的草稿（§7.6）：原样列出将要生效的值，凭据只给"已提供"与掩码；本人确认才新建或改连接、写路由。 */
+function DraftCard({ x, d, conns, onDone }: { x: Draft; d?: Decl; conns: Conn[]; onDone: () => void }) {
+  const t = useT(strings);
+  const lang = useLang();
+  const { api } = useSession();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = (f: () => Promise<unknown>) => async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await f();
+      onDone();
+    } catch (e) {
+      setError(msg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const label = (k: string) => d?.fields.find((f) => f.key === k)?.label[lang] ?? k;
+  const secret = (p: SecretPlan) =>
+    p.action === "clear" ? t.draftCleared : p.action === "keep" ? t.draftKept : p.hint ? t.draftProvidedHint(p.hint) : p.length ? t.draftProvidedLen(p.length) : t.draftProvided;
+  const target = x.connection ? conns.find((c) => c.id === x.connection)?.name ?? x.name : null;
+  const rows: [string, string][] = [
+    ...(d?.fields ?? []).filter((f) => f.kind !== "secret" && x.config[f.key] !== undefined)
+      .map((f): [string, string] => [f.label[lang], f.kind === "toggle" ? (x.config[f.key] === "true" ? t.yes : t.no) : x.config[f.key]]),
+    ...Object.entries(x.secrets).map(([k, p]): [string, string] => [label(k), secret(p)]),
+  ];
+  const sep = lang === "zh" ? "、" : ", ";
+  return (
+    <section id={"draft-" + x.id} aria-label={t.draftCard(x.name)} className="panel stack">
+      <div className="conn-head">
+        <h2>{x.name}</h2> {d && <span className="sub">{d.title[lang]}</span>} <span className="badge warn">{t.draftWaiting}</span>
+      </div>
+      <p className="sub">{target ? t.draftChanges(target, (x.changes ?? []).map((k) => (k === "routes" ? t.useFor : label(k))).join(sep)) : t.draftNew}</p>
+      <ul className="rows">
+        {[...rows, [t.useFor, x.routes.length ? x.routes.map((r) => t.classes[r] ?? r).join(sep) : t.notUsed] as [string, string]].map(([k, v]) => (
+          <li key={k}><span className="sub">{k}</span> {v}</li>
+        ))}
+      </ul>
+      <p className="sub">{[x.test ? (x.test.ok ? t.draftTestOk : t.draftTestFailed(t.draftProblem[x.test.problem ?? ""] ?? t.draftProblem.temporary)) : t.draftUntested, t.draftExpires(time(x.expires_at))].join(" · ")}</p>
+      <div className="line">
+        <button type="button" className="primary" disabled={busy} onClick={run(() => api.post(`/connections/drafts/${encodeURIComponent(x.id)}/confirm`, {}))}>
+          {x.connection ? t.draftConfirmChange : t.draftConfirm}
+        </button>
+        <button type="button" disabled={busy} onClick={run(() => api.del(`/connections/drafts/${encodeURIComponent(x.id)}`))}>{t.draftDrop}</button>
+      </div>
+      {error && <p role="alert">{error}</p>}
     </section>
   );
 }

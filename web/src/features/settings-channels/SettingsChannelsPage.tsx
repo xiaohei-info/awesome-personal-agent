@@ -52,7 +52,7 @@ export function SettingsChannelsPage() {
       )}
       {pol && (
         <Connections routes={pol.disturb?.routes ?? {}}
-          saveRoutes={(routes) => save("policy", { disturb: { ...pol.disturb, routes } })} />
+          saveRoutes={(routes) => save("policy", { disturb: { ...pol.disturb, routes } })} onRoutesChanged={() => void load()} />
       )}
       <details open={names.length > 0}>
         <summary>{t.ownProgram}</summary>

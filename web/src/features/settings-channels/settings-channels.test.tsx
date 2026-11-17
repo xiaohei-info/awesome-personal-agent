@@ -23,6 +23,7 @@ const BARK = {
 };
 function connServer() {
   const list: any[] = [];
+  const drafts: any[] = [];
   const calls: { method: string; url: string; body?: any }[] = [];
   const impl = async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -30,6 +31,14 @@ function connServer() {
     if (method !== "GET") calls.push({ method, url, body });
     if (url.startsWith("/v1/connections/types")) return json(200, { types: [BARK] });
     if (url === "/v1/connections/test") return json(200, { ok: true });
+    if (url === "/v1/connections/drafts") return json(200, { drafts });
+    const dm = /^\/v1\/connections\/drafts\/([^/]+)(\/confirm)?$/.exec(url);
+    if (dm) {
+      const i = drafts.findIndex((x) => x.id === dm[1]);
+      drafts.splice(i, 1);
+      if (dm[2]) list.push({ id: "ch-conf", type: "bark", name: "Agent 的手机", config: {}, secrets: { device_key: true }, enabled: true, state: "ok" });
+      return json(200, dm[2] ? list.at(-1) : { id: dm[1], state: "discarded" });
+    }
     if (url === "/v1/connections" && method === "POST") {
       const c = { id: "ch-new1", type: body.type, name: body.name, config: body.config, secrets: { device_key: !!body.secrets?.device_key }, enabled: body.enabled, state: body.enabled ? "ok" : "disabled" };
       list.push(c);
@@ -38,12 +47,13 @@ function connServer() {
     if (url.startsWith("/v1/connections")) return json(200, { connections: list });
     return json(404, { code: "not_found", why: "no", next: "no" });
   };
-  return { list, calls, impl };
+  return { list, drafts, calls, impl };
 }
 const conns = connServer();
 
 function server(extKeys?: Record<string, unknown>[]) {
   conns.list.length = 0;
+  conns.drafts.length = 0;
   conns.calls.length = 0;
   const s = policyServer({ extKeys });
   const ident: { state: string; sender?: string; display?: string } = { state: "waiting" };
@@ -117,6 +127,29 @@ describe("设置 › 提醒渠道：内置渠道", () => {
     expect(await screen.findByRole("region", { name: "我的 iPhone" })).toBeInTheDocument();
     expect(conns.calls[1]).toEqual({ method: "POST", url: "/v1/connections", body: { type: "bark", name: "我的 iPhone", config: {}, secrets: { device_key: "dev-1" }, enabled: true } });
     expect(s.puts.at(-1)!.body.disturb.routes).toEqual({ decision: "channel:ch-new1", reminder: "channel:ch-new1", health: "channel:ch-new1" });
+  });
+});
+
+describe("设置 › 提醒渠道：Agent 准备的草稿", () => {
+  it("待确认卡原样列出将要生效的值，凭据只给掩码；确认前不出现在渠道里；确认走 confirm 路由并重读路由", async () => {
+    const s = server();
+    conns.drafts.push({
+      id: "dr-1", type: "bark", name: "Agent 的手机", config: { server: "https://push.example", group: "APA" }, routes: ["decision", "health"],
+      secrets: { device_key: { action: "set", hint: "abc…xyz", length: 22 } }, state: "pending", expires_at: "2030-01-02T09:00:00Z",
+      test: { ok: true, at: "2030-01-01T09:05:00Z" },
+    });
+    mount(s.impl);
+    const card = within(await screen.findByRole("region", { name: "等你确认：Agent 的手机" }));
+    expect(card.getByText("https://push.example")).toBeInTheDocument();
+    expect(card.getByText("Agent 已提供（abc…xyz）")).toBeInTheDocument();
+    expect(card.getByText("等你决定、系统状态")).toBeInTheDocument();
+    expect(card.getByText(/Agent 测过，已送达/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Agent 的手机" })).toBeNull(); // 还不是渠道
+    expect(document.body.textContent).not.toMatch(/dr-1|device_key/);
+    await userEvent.click(card.getByRole("button", { name: "确认并启用" }));
+    expect(await screen.findByRole("region", { name: "Agent 的手机" })).toBeInTheDocument();
+    expect(conns.calls.at(-1)).toEqual({ method: "POST", url: "/v1/connections/drafts/dr-1/confirm", body: {} });
+    expect(screen.queryByRole("region", { name: "等你确认：Agent 的手机" })).toBeNull();
   });
 });
 
