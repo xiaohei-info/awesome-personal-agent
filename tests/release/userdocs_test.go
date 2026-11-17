@@ -150,12 +150,17 @@ func TestChangelogLanguageAndMigrations(t *testing.T) {
 			t.Errorf("语言限制缺少 %q", k)
 		}
 	}
-	// 至少四项必须迁移的变更，各自要有可检索的特征词。
+	// 至少九项必须迁移的变更，各自要有可检索的特征词。
 	for name, kw := range map[string][]string{
-		"外发范围需在 Web 选择":  {"外发范围", "Web", "outbound_unset"},
-		"宿主插件须与内核同时升级": {"宿主插件", "同时升级", "session_not_direct"},
-		"升级后登录会话失效":     {"登录会话", "失效", "重新登录"},
-		"日上限默认生效":       {"disturb.daily_cap", "20", "0"},
+		"外发范围需在 Web 选择":      {"外发范围", "Web", "outbound_unset"},
+		"宿主插件须与内核同时升级":       {"宿主插件", "同时升级", "session_not_direct"},
+		"升级后登录会话失效":          {"登录会话", "失效", "重新登录"},
+		"日上限默认生效":            {"disturb.daily_cap", "20", "0"},
+		"来源事件列表不带全文":         {"WB-25", "detail", "/source-events/"},
+		"token 读原文受外发范围":     {"WB-26", "外发范围", "token"},
+		"退出码 23 的新原因":        {"WB-28", "grant_required", "event_too_large"},
+		"提示词模板不能叫 none":      {"WB-31", "none", "notify_urgent"},
+		"内置规则 reminder-open": {"WB-34", "reminder-open", "undated_lists"},
 	} {
 		found := false
 		for _, l := range strings.Split(sec, "\n") {

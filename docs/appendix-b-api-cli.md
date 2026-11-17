@@ -27,11 +27,10 @@
 | `apa today` | 今天的清单：计划今天或更早且未完成的、今天到期的、待决的、久未推进的（主文档 §4.1） | observer | |
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建；可带 `--deadline`、`--origin`、`--ext`（规则同 `apa item add`） | observer | |
-| `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>` | observer | 5 |
+| `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 5 |
 | `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` `add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐。 | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
 | `apa item progress <id> --text [--on <日期>]` | 追加一条进展，不改阶段；`--on` 不能晚于今天 | worker（自己的事项）；delegate（绑定的事项不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、23 |
 | `apa import --file <计划文件> --source <来源名> [--dry-run] --grant <id>` | 带原始时间的导入（主文档 §7.1）：计划文件是 JSONL，CLI 按 500 条一批提交并沿用同一个批次号，逐行输出 `created`、`existing` 或 `invalid`；`--dry-run` 只预检，不写账本、不占授权单的条数 | delegate，只凭授权单（`--evidence` 不被接受） | 2、4、23 |
-| 已有事项命令的新增标志 | `apa item list` 加 `--origin-source <来源>`、`--origin-ref <外部 id>` | 同原命令 | 2 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
 | `apa decide <id> --option [--evidence \| --grant]` | 代答决策；本人原话或授权单二选一 | delegate | 2、4、6、20、22、23 |
@@ -45,16 +44,14 @@
 | `apa delegate --parent --assignee` | 建子事项，校验项目允许的执行者。`--executor <JSON 文件或 ->`（`kind`、`host`、`label`、`handle`）在同一事务里登记或更新执行者，`harness` 取 `APA_HARNESS`；`assignee` 不必先在名录里；身份字段冲突或名录已满返回 6 | worker（自己的事项）；delegate（任意） | 2、4、5、6、21 |
 | `apa dispatch add <子事项> [--session] [--resumable] [--cwd] [--repo] [--handle <JSON 文件或 ->] [--continues <记录>] [--idempotency-key]` | 在委派子事项上写一条委派记录，输出该记录；`harness` 取 `APA_HARNESS`，必填；`--resumable` 要有 `--session`；同一子事项上已有运行中、harness 与会话都相同的记录时不新增，返回已有记录；句柄规则见主文档 §6.17 | 同 `apa report` | 2、4、5、6、23 |
 | `apa dispatch update <记录> [--state ended\|lost] [--resumable true\|false]` | 推进委派记录；`lost` 同时置 `resumable` 为假，终态不可改 | 同 `apa report` | 2、4、5、6、23 |
-| `apa report <id> --outcome --summary [--pr --commit --branch --link] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`done` 必须带结果证据（`--pr`、`--commit`、`--branch`、`--link` 至少一项），附不出只能报 `progress` 或 `blocked` | 绑定该 assignee 的 worker、该运行的运行凭据、发起该委派的 delegate；其他 delegate 附 `--evidence` 或 `--grant` | 2、4、6、23 |
-| 已有回执命令的新增用法 | `apa report` 的 `--link` 可重复给出多个；报 `done` 时落在已登记笔记库内的链接（`vault:<库名>/<路径>`）自动登记为链接型材料并以"产出"关联到父事项（主文档 §7.5） | 同原命令 | 2 |
+| `apa report <id> --outcome --summary [--pr --commit --branch --link] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`done` 必须带结果证据（`--pr`、`--commit`、`--branch`、`--link` 至少一项），附不出只能报 `progress` 或 `blocked`。`--link` 可重复给出多个；报 `done` 时落在已登记笔记库内的链接（`vault:<库名>/<路径>`）自动登记为链接型材料并以"产出"关联到父事项（主文档 §7.5） | 绑定该 assignee 的 worker、该运行的运行凭据、发起该委派的 delegate；其他 delegate 附 `--evidence` 或 `--grant` | 2、4、6、23 |
 | `apa handback <消息> --reason` | 把挂靠消息交回一次 | 同上 | 4、6 |
 | **项目** | | | |
 | `apa project list/show` | 读项目，含 repos 与允许的执行者 | observer | |
 | `apa project create/update` | 建项目、改基本信息。`allowed_executors` 不能改 | delegate | 20 |
 | `apa project repos add/remove` | 增改本机检出（worker）或远程地址（delegate） | worker | 4 |
 | **材料与规范** | | | |
-| `apa material add --repo --path [--project] [--kind]` | 登记托管型；project 缺省取登记了该仓库的项目，kind 缺省 `design` | worker | |
-| 已有材料命令的新增用法 | `apa material add --link <位置> --title <标题> [--project] [--kind]` 登记链接型材料（主文档 §12.8）：位置是 `vault:<库名>/<库内相对路径>` 或网址，kind 缺省 `reference`；同一项目内同一位置重复登记返回已有的那条。`apa material show` 对链接型只回位置与打开地址 | worker | 2、5 |
+| `apa material add --repo --path [--project] [--kind]` | 登记托管型；project 缺省取登记了该仓库的项目，kind 缺省 `design`。`apa material add --link <位置> --title <标题> [--project] [--kind]` 登记链接型材料（主文档 §12.8）：位置是 `vault:<库名>/<库内相对路径>` 或网址，kind 缺省 `reference`；同一项目内同一位置重复登记返回已有的那条。`apa material show` 对链接型只回位置与打开地址 | worker | 2、5 |
 | `apa material commit <id> --from --reason [--kind]` | 提交自有型修订 | worker | 6 |
 | `apa material list` | 列出材料，可按项目、kind、标签筛选 | observer | |
 | `apa material show <id> [--rev]` | 读当前或指定修订；托管型只回位置 | observer | 5 |
@@ -97,7 +94,7 @@
 
 **只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、移除执行者名录条目、规则切 `auto`、运行权限上限、判断端点与生成端点、不确定带与影子模式、抽检结论、打扰上限与静音、来源与对话捕获的外发范围、登录口令与在线会话、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效、签发和撤销授权单。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
 
-**工作台能力迭代新增的只在 Web 的操作**：【规划中（v0.2.0）】笔记库登记（名字与打开方式）、来源的原文保留天数、来源事件的物理删除、导入用授权单的签发。本人在 Web 上传导入计划文件不需要授权单。
+**工作台能力迭代新增的只在 Web 的操作**：笔记库登记（名字与打开方式）、来源的原文保留天数、来源事件的物理删除、导入用授权单的签发。本人在 Web 上传导入计划文件不需要授权单。
 
 **代理写命令清单**：delegate 调用写命令时按动作归属分三档（主文档 §14.5）。其他凭据与 Web 本人不经这张表；只读命令不在清单内。
 
@@ -364,7 +361,7 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 {"views": {"brief": {"kind": "brief", "list": {"columns": ["title", "project", "created_at"], "filters": ["project", "tag"]}, "card": {"fields": ["summary", "spec.period"]}}}}
 ```
 
-**工作台能力迭代的路由细节**（【规划中（v0.2.0）】，随对应条目实现）：
+**工作台能力迭代的路由细节**：
 
 `POST /import?source=<来源名>[&batch=<批次>][&dry_run=1]`：请求体 `Content-Type: application/x-ndjson`，一行一条记录（主文档 §7.1），不超过 500 行、8 MiB，超限返回 413。响应 200：`{"batch": "imp_…", "results": [{"line": 1, "external_id": "…", "outcome": "created" | "existing" | "invalid", "object"?: "<事项或项目 id>", "code"?, "why"?}], "created", "existing", "invalid"}`。`dry_run` 时不返回 `batch`，不写账本。`batch` 用于把多次请求归入同一批次，必须是同一来源名、同一调用者此前返回的值。delegate 须带 `X-APA-Grant`；不带、只带 `X-APA-Evidence`、授权单不是导入专用单、来源名不符或累计条数会超过 `max_records` 时返回 403（退出码 23），`why` 写明哪一项；运行凭据返回 403（退出码 4）。可带 `Idempotency-Key`。
 
