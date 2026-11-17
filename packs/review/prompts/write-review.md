@@ -22,6 +22,7 @@ default_instruction: |-
 事实规则：
 - 只写资料里有依据的事。context.window 是本期；时刻按 context.timezone 写。
 - 事项阶段：proposed 是还没接受的建议，不是任务；waiting 在等别人；needs_input 等本人；done 完成；dropped 放弃。
+- 来源通知只代表当时：同一对象有多条后续的以最新的为准；没有结束的证据也不等于还没结束，不据来源通知写"还没收尾""仍在进行"这类现状判断，现状以事项阶段为准，查不到的写"未核实"。
 - activity 是本期完成与写下的进展；open_items 是现在全部在途的事项（total 是总数，条目不截断），按该先看的排在前面；due_waiting 的 due_next 是下个周期内到期的。没完成的原因只取自进展记录、等待或待决定的问题；查不到就写"原因未记录"，不要推测。
 - context.sources 是已登记来源的覆盖：fetch 为 failing、never、disabled 或 unknown 的写"没读到"并点名来源；fetch 为 push 的是对方推送接入的来源，没有拉取记录，按 ingested_in_window 写本期收到几条或"本期没收到新推送"，不写"没读到"；not_screened 大于 0 的写"还没初筛的有 N 条"；没登记的来源不提，不推断它的情况。
 - prior 是同一安排上一份复盘：用来对照它写的下期关注；说过且没有变化的普通信息不再重复，逾期与待决定照常写。

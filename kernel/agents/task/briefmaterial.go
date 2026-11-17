@@ -415,6 +415,9 @@ func contextSection(tx *store.Tx, srcs []domain.Source, p briefPlan, w window, n
 	cov := []sourceCoverage{}
 	for _, src := range srcs {
 		c := sourceCoverage{Name: src.Name, Type: src.SourceKind, Via: string(src.Type), Fetch: "ok"}
+		if c.Via == "" { // 历史登记行没写类型，登记模块按脚本来源对待（registry.go 的 exec 判定）
+			c.Via = string(domain.SourceScript)
+		}
 		st, err := runner.StatsOf(src)
 		switch {
 		case !src.Enabled:

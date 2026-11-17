@@ -156,7 +156,7 @@ func TestReviewPackDeclaresWhatC14Lists(t *testing.T) {
 			t.Errorf("write-review default_instruction lacks %q: %s", s, w.Meta.DefaultInstruction)
 		}
 	}
-	for _, s := range []string{"{item_id}", "{materials_path}", "{instruction_path}", "spec.period", "item.title", "title 与 body", "open_items", "context.sources", "fetch 为 push", "web_url", "写回成功就是回执"} {
+	for _, s := range []string{"{item_id}", "{materials_path}", "{instruction_path}", "spec.period", "item.title", "title 与 body", "open_items", "context.sources", "fetch 为 push", "以最新的为准", "不等于还没结束", "web_url", "写回成功就是回执"} {
 		if !strings.Contains(w.Body, s) {
 			t.Errorf("write-review body lacks %q: %s", s, w.Body)
 		}

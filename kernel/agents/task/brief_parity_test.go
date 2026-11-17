@@ -158,6 +158,7 @@ func TestContextCoverageScopeAndOpenItems(t *testing.T) {
 			{"src_ok", "script", `{"runs":9,"last_success_at":"2026-02-28T23:00:00Z"}`},
 			{"src_hook", "webhook", ``},  // 推送来源：统计永远为空
 			{"src_hook0", "webhook", ``}, // 本期没有推送
+			{"src_legacy", "", ``},       // 历史登记行没写类型：按脚本来源
 		} {
 			if _, err := tx.Exec(`INSERT INTO sources_registry_source
 				(id, name, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats)
@@ -229,6 +230,9 @@ func TestContextCoverageScopeAndOpenItems(t *testing.T) {
 	}
 	if fetch["名-src_never"].Fetch != "never" || fetch["名-src_never"].Ingested != 0 || fetch["名-src_never"].Via != "script" {
 		t.Errorf("never/ok sources: %+v", fetch)
+	}
+	if l := fetch["名-src_legacy"]; l.Via != "script" || l.Fetch != "never" {
+		t.Errorf("an untyped legacy row is a script source: %+v", l)
 	}
 	if h, h0 := fetch["名-src_hook"], fetch["名-src_hook0"]; h.Fetch != "push" || h.Via != "webhook" || h.Ingested != 1 || h0.Fetch != "push" || h0.Ingested != 0 {
 		t.Errorf("webhook sources are push, judged by what arrived in the window, never as unfetched: %+v %+v", h, h0)
