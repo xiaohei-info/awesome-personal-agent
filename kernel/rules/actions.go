@@ -144,15 +144,21 @@ func (e *Engine) createItem(_ context.Context, c Call) error {
 }
 
 // instanceTitle 是实例到期建的事项的标题：实例参数 title 是模板，{date} 换成到期日（本机时区，与 cron 同一时区）；
-// 没有 title 参数时取包名加到期时刻。
+// 没有 title 参数时取包名加到期时刻，时刻按实例定时的时区（CRON_TZ，没有时本机时区），与本人看到的"每天 08:00"一致。
 func instanceTitle(f *Fired) string {
 	var p struct {
-		Title string `json:"title"`
+		Title    string `json:"title"`
+		Schedule string `json:"schedule"`
 	}
-	if json.Unmarshal(f.Params, &p) == nil && strings.TrimSpace(p.Title) != "" {
+	_ = json.Unmarshal(f.Params, &p)
+	if strings.TrimSpace(p.Title) != "" {
 		return strings.ReplaceAll(p.Title, "{date}", f.Due.In(time.Local).Format("2006-01-02"))
 	}
-	return f.Pack + " " + f.Due.UTC().Format("2006-01-02 15:04")
+	loc := time.Local
+	if sc, err := clock.ParseSchedule(p.Schedule); err == nil {
+		loc = sc.Location()
+	}
+	return f.Pack + " " + f.Due.In(loc).Format("2006-01-02 15:04")
 }
 
 // createTimer：after（时长）或 at（RFC 3339）建一次性提醒，schedule（时长或 cron）建周期 Timer。

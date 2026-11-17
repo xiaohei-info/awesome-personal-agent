@@ -199,7 +199,7 @@ func setup(t *testing.T) *env {
 		OnResult: func(r proc.Result) { svc.Settle(bg, r); e.done <- r },
 	})
 	t.Cleanup(e.disp.Close)
-	svc, err = New(Options{Store: st, Exec: e.x, Packs: ld, Queue: e.disp, RunsDir: e.runs, APIURL: "http://apa.local", Host: "this-host", Now: func() time.Time { return t0 },
+	svc, err = New(Options{Store: st, Exec: e.x, Packs: ld, Queue: e.disp, RunsDir: e.runs, APIURL: "http://apa.local", WebBase: "http://web.example", Host: "this-host", Now: func() time.Time { return t0 },
 		OnError: func(_ string, err error) { e.errs <- err }})
 	if err != nil {
 		t.Fatal(err)
@@ -566,7 +566,7 @@ func TestDeclaredResultFieldsDecideDone(t *testing.T) {
 		want []string // 空表示转 done
 	}{
 		"complete":        {fullSpec, nil},
-		"only period":     {`{"period":"x"}`, []string{"spec.sections[].project", "spec.sections[].body"}},
+		"only period":     {`{"period":"x"}`, []string{"spec.sections[].body"}}, // 节可以只有 title（附录 C.13）：只要求 body
 		"only sections":   {`{"sections":[{"project":"p","body":"b"}]}`, []string{"spec.period"}},
 		"blank period":    {`{"period":"  ","sections":[{"project":"p","body":"b"}]}`, []string{"spec.period"}},
 		"no sections":     {`{"period":"x","sections":[]}`, []string{"spec.sections[].body"}},
@@ -594,9 +594,6 @@ func TestDeclaredResultFieldsDecideDone(t *testing.T) {
 					t.Fatalf("want needs_input: %s", it.Phase)
 				}
 				for _, f := range tc.want {
-					if tmpl == "write-brief" && f == "spec.sections[].project" {
-						continue // 简报的节可以只有 title（附录 C.13）：result_fields 只要求 body
-					}
 					if !strings.Contains(it.Ask.Question, f) {
 						t.Errorf("question must name %s: %s", f, it.Ask.Question)
 					}
@@ -989,7 +986,7 @@ func (e *env) setDefaultHarness(h string) {
 func (e *env) call(prompt, item string) rules.Call {
 	it := e.item(item)
 	return rules.Call{Rule: "tk/clock_rules/r", Action: packs.Action{"action": "call_agent", "prompt": prompt}, Item: &it, Bound: true,
-		Instance: &rules.Fired{ID: "ins_1", Pack: "tk", Params: json.RawMessage(`{"schedule":"24h","projects":["p1"]}`), Due: t0},
+		Instance: &rules.Fired{ID: "ins_1", Pack: "tk", Params: json.RawMessage(`{"schedule":"24h"}`), Due: t0},
 		Do:       func(cmd string, in any) (command.Result, error) { return e.do(owner, cmd, in) }}
 }
 
@@ -1015,7 +1012,7 @@ func TestCallAgentRunsTaskOnRuleItemOnce(t *testing.T) {
 	if res.Run.Target != id || res.Run.Harness != "hx" || e.item(id).Phase != domain.PhaseDone || e.item(id).Assignee != systemPrincipal {
 		t.Fatalf("run %+v item %+v", res.Run, e.item(id))
 	}
-	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); !strings.Contains(m, `\"projects\":[\"p1\"]`) {
+	if m := read(t, filepath.Join(e.runs, res.Run.ID, "materials.json")); !strings.Contains(m, `\"schedule\":\"24h\"`) {
 		t.Fatalf("materials lack instance params: %s", m)
 	}
 	if err := h(bg, e.call("brief", id)); err != nil || len(e.runList()) != 1 {

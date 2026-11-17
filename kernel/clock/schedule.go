@@ -115,6 +115,32 @@ func (s Schedule) Next(after time.Time) time.Time {
 	return time.Time{}
 }
 
+// Location 是解释 cron 的时区：CRON_TZ 给出的时区，否则本机时区；固定时长的节拍不涉及时区，同样取本机时区。
+func (s Schedule) Location() *time.Location {
+	if s.loc == nil {
+		return time.Local
+	}
+	return s.loc
+}
+
+// Prev 返回严格早于 before 的上一个节拍：时长是 before 减时长；cron 从一小时起逐级加倍往回看，再用 Next 前推，
+// 所以工作日、跨周、跨月与夏令时都与 Next 同一口径。最多回看约 8 年，找不到返回零值。
+func (s Schedule) Prev(before time.Time) time.Time {
+	if s.every > 0 {
+		return before.Add(-s.every)
+	}
+	for span := time.Hour; span < 9*366*24*time.Hour; span *= 2 {
+		var last time.Time
+		for t := s.Next(before.Add(-span)); !t.IsZero() && t.Before(before); t = s.Next(t) {
+			last = t
+		}
+		if !last.IsZero() {
+			return last
+		}
+	}
+	return time.Time{}
+}
+
 func (s Schedule) dayOK(t time.Time) bool {
 	d, w := s.dom&(1<<t.Day()) != 0, s.dow&(1<<int(t.Weekday())) != 0
 	if s.domStar || s.dowStar {

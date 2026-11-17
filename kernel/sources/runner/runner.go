@@ -884,6 +884,39 @@ func ByDisposition(tx *store.Tx, d domain.Disposition) ([]domain.SourceEvent, er
 	return queryEvents(tx, `WHERE disposition = ?`, string(d))
 }
 
+// Later 按落盘顺序返回同一来源里排在 id 之后、与它共用任一关联键的来源事件（简报资料的"后续"，§7.3）。
+// 只认来源程序给出的对象关联键，不按链接或标题推测；没有关联键的事件没有后续。
+// shortcut: 关联键存在 JSON 列里，按来源扫描；单个来源事件上十万时再加关联键索引。
+func Later(tx *store.Tx, id string) ([]domain.SourceEvent, error) {
+	return queryEvents(tx, `WHERE source_id = (SELECT source_id FROM sources_runner_event WHERE id = ?1)
+		AND seq > (SELECT seq FROM sources_runner_event WHERE id = ?1)
+		AND EXISTS (SELECT 1 FROM json_each(CASE WHEN correlation_keys = '' THEN '[]' ELSE correlation_keys END) a,
+			json_each((SELECT CASE WHEN correlation_keys = '' THEN '[]' ELSE correlation_keys END FROM sources_runner_event WHERE id = ?1)) b
+			WHERE a.value = b.value)`, id)
+}
+
+// Counts 返回某来源在 (since, until] 内落盘的来源事件数，以及当前在积压里（unjudged、expired）没有进入初筛结果的数目。
+func Counts(tx *store.Tx, sourceID string, since, until time.Time) (ingested, backlog int, err error) {
+	var in, bl int64 // store 只扫描 int64
+	r, err := tx.Query(`SELECT
+		COALESCE(SUM(CASE WHEN ingested_at > ? AND ingested_at <= ? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN disposition IN (?, ?) THEN 1 ELSE 0 END), 0)
+		FROM sources_runner_event WHERE source_id = ?`, since.UnixNano(), until.UnixNano(),
+		string(domain.DispositionUnjudged), string(domain.DispositionExpired), sourceID)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer r.Close()
+	if r.Next() {
+		err = r.Scan(&in, &bl)
+	}
+	ingested, backlog = int(in), int(bl)
+	if err == nil {
+		err = r.Err()
+	}
+	return
+}
+
 // SetDisposition 在调用方事务内给一条还是 pending 的来源事件写处置结果与（若有）建出的事项；
 // d 为 unjudged 时 reason 是未判定的原因（domain.Unjudged*），其余处置忽略 reason。
 // 这些列只由入站流水线经本函数与下面的积压函数维护；不记事件，调用方自己负责留痕。

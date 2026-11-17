@@ -313,3 +313,26 @@ func TestCommandLateIsMeasuredFromScheduledTime(t *testing.T) {
 		t.Fatalf("late: %+v", f.got)
 	}
 }
+
+// Prev 与 Next 同一口径：工作日定时的周一往回是上周五，跨夏令时按墙上时间；时长节拍直接减；Location 取 CRON_TZ。
+func TestSchedulePrevAndLocation(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	s, err := ParseSchedule("CRON_TZ=America/New_York 0 9 * * 1-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mon := time.Date(2026, 11, 2, 9, 0, 0, 0, ny) // 前一天夏令时结束
+	if got, want := s.Prev(mon), time.Date(2026, 10, 30, 9, 0, 0, 0, ny); !got.Equal(want) || !s.Next(got).Equal(mon) {
+		t.Fatalf("prev of Monday: %v want %v", got, want)
+	}
+	if s.Location().String() != "America/New_York" {
+		t.Fatalf("location: %v", s.Location())
+	}
+	d, _ := ParseSchedule("24h")
+	if at := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC); !d.Prev(at).Equal(at.Add(-24*time.Hour)) || d.Location() != time.Local {
+		t.Fatal("duration schedule")
+	}
+}

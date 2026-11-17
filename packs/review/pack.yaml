@@ -1,6 +1,6 @@
 name: review
 version: 1.0.0
-description: 周期复盘，按项目分节，写回 brief 事项并以 spec.period 区分周期
+description: 周期复盘，写回 brief 事项并以 spec.period 区分周期
 instance_params:
   type: object
   required: [schedule]
@@ -8,6 +8,7 @@ instance_params:
     schedule: {type: string}
     projects: {type: array, items: {type: string}}
     instruction: {type: string}
+    schedule_days: {type: integer, minimum: 1, maximum: 14}
 clock_rules:
   - id: scheduled-review
     type: recur

@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"cmp"
 	"encoding/json"
 	"strings"
 
@@ -20,6 +21,7 @@ func BriefContent(it domain.Item, webURL string) domain.DeliveryContent {
 	var spec struct {
 		Sections []struct {
 			Project string `json:"project"`
+			Title   string `json:"title"`
 		} `json:"sections"`
 	}
 	if json.Unmarshal(it.Spec, &spec) != nil {
@@ -27,12 +29,12 @@ func BriefContent(it domain.Item, webURL string) domain.DeliveryContent {
 	}
 	var names []string
 	for _, s := range spec.Sections {
-		if s.Project != "" {
-			names = append(names, s.Project)
+		if n := cmp.Or(s.Title, s.Project); n != "" { // 每节有 title 或 project 之一（附录 C.13）
+			names = append(names, n)
 		}
 	}
 	if len(names) > 0 {
-		c.Summary = "按项目分节：" + strings.Join(names, "、")
+		c.Summary = "分节：" + strings.Join(names, "、")
 	}
 	return c
 }
