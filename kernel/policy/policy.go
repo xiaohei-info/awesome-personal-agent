@@ -356,15 +356,30 @@ func normalizeNoteVaults(vs []NoteVault) ([]NoteVault, error) {
 	return out, nil
 }
 
-// OpenURL 按库名与库内相对路径渲染"在笔记应用打开"的地址：{vault}、{path} 各自做 URL 编码（斜杠也编码）。
-// 库未登记或没有打开方式时返回空串。
+// OpenURL 按库名与库内相对路径渲染"在笔记应用打开"的地址：{vault}、{path} 各自按 URI 组件编码（§12.8），
+// 占位符因此既能放在路径里也能放在查询参数里。库未登记或没有打开方式时返回空串。
 func (p Policy) OpenURL(vault, path string) string {
 	for _, v := range p.NoteVaults {
 		if v.Name == vault && v.OpenURL != "" {
-			return strings.NewReplacer("{vault}", url.PathEscape(vault), "{path}", url.PathEscape(path)).Replace(v.OpenURL)
+			return strings.NewReplacer("{vault}", uriComponent(vault), "{path}", uriComponent(path)).Replace(v.OpenURL)
 		}
 	}
 	return ""
+}
+
+// uriComponent 与 Web 的 encodeURIComponent 同一规则：字母、数字与 -_.!~*'() 原样，其余字节按 %XX 编码
+// （& = + 空格 / % 都编码）。两端用同一组用例守住（settings-vaults/open-url-cases.json）。
+func uriComponent(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || strings.IndexByte("-_.!~*'()", c) >= 0 {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
 }
 
 // Default 是版本 0 的配置：默认类别、权限上限 read、人格与白名单为空。
