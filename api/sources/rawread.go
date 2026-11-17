@@ -205,6 +205,11 @@ func (a *api) sourceEvent(w http.ResponseWriter, r *http.Request, p *core.Princi
 				out.Headers = pd.Content
 			case runner.PartAttachments:
 				out.Attachments = pd.Content
+				if src, err := registry.Get(tx, ev.SourceID); err == nil && (a.dc.CanFetch == nil || !a.dc.CanFetch(src)) {
+					if out.Attachments, err = withoutRefs(pd.Content); err != nil { // 来源不支持取回：不给取回句柄，Web 不显示"取回"
+						return err
+					}
+				}
 			case runner.PartMessages:
 				out.Messages = pd.Content
 			}
@@ -225,6 +230,18 @@ func (a *api) sourceEvent(w http.ResponseWriter, r *http.Request, p *core.Princi
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, out)
+}
+
+// withoutRefs 去掉附件清单每一项的 ref，其余字段原样保留。
+func withoutRefs(raw json.RawMessage) (json.RawMessage, error) {
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, err
+	}
+	for _, it := range items {
+		delete(it, "ref")
+	}
+	return json.Marshal(items)
 }
 
 // partAllowed 报告 scope 是否允许回这个部分：excerpt 不回 original、headers、messages；meta 一个部分也不回。

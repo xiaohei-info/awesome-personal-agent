@@ -257,3 +257,35 @@ func TestFetchOfAnEventPurgedMeanwhileLeavesNoOrphanBlob(t *testing.T) {
 		t.Fatal("no orphan blob and no audit event may remain")
 	}
 }
+
+// acc-raw-nofetch（ACT-FET-02）：来源没声明 content.attachments: fetch 时，读接口不给清单项的 ref，Web 据此不显示"取回"；
+// 声明了的来源原样给出 ref 与其余字段。
+func TestReadHidesFetchHandleWhenSourceCannotFetch(t *testing.T) {
+	e, id, _ := fetchEnv(t) // src_mail 可取回
+	e.registerRaw("src_plain")
+	plain := e.seedRaw("src_plain", "msg-2", rawEvent{body: "hello", attachments: fetchAtts})
+
+	refs := func(id string) (out []string) {
+		var items []map[string]any
+		if err := json.Unmarshal(read(t, e.web("GET", "/v1/source-events/"+id, "")).Attachments, &items); err != nil || len(items) != 3 {
+			t.Fatalf("attachments of %s: %v %v", id, items, err)
+		}
+		for _, it := range items {
+			s, _ := it["ref"].(string)
+			out = append(out, s)
+		}
+		if items[2]["extra"] != "keep" || items[2]["name"] != "b.txt" {
+			t.Fatalf("other fields must be kept: %v", items[2])
+		}
+		return
+	}
+	if got := refs(id); got[0] != "h-1" || got[1] != "" || got[2] != "h-2" {
+		t.Errorf("fetchable source keeps refs: %v", got)
+	}
+	if got := refs(plain); got[0] != "" || got[1] != "" || got[2] != "" {
+		t.Errorf("non-fetchable source must not expose refs: %v", got)
+	}
+	if r := e.web("POST", "/v1/source-events/"+plain+"/attachments/0/fetch", ""); r.Code != 409 {
+		t.Errorf("fetch on non-fetchable source: %d", r.Code)
+	}
+}
