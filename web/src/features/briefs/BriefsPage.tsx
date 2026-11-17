@@ -1,7 +1,8 @@
+import { Route, Routes, useLocation } from "react-router-dom";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
-import { locale, useT } from "../../app/i18n";
+import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { useNamed, useNames } from "../../app/names";
 import { DAYS, browserZone, toCron, type Days } from "./schedule";
@@ -9,43 +10,36 @@ import { strings } from "./strings";
 import { Pick } from "../../app/values";
 import { RoutineForm, type Instance } from "./Routine";
 import { ScheduleCard, When } from "./ScheduleCard";
+import { BriefDetail } from "./BriefDetail";
+import { Library, Tabs } from "./Library";
+import type { Brief } from "./BriefBody";
 
 // 形状对应 GET /v1/items?kind=brief（spec.period、spec.sections[{project|title,body}]、origin.source）、GET/POST /v1/instances（列表带 agent_ready）、
 // PATCH /v1/instances/{id}（enabled 走 instance.toggle）、POST /v1/instances/{id}/run、GET /v1/packs（default_instruction）（附录 B.2、C.10）。
 // 简报与复盘都是 brief 事项（packs/review 写回 brief kind，以 spec.period 区分周期），本页不猜类型，统一按周期列出；分节与定时校验都由服务端与包负责，本页只展示并搬运输入。
 // 简报与复盘开箱各有一个默认安排（§7.3），每个实例一张卡；例行任务由本人自己建。
-interface Section { project?: string; title?: string; body: string } // 附录 C.13：每节有 project 或 title 之一；旧简报只有 project
-interface Brief { id: string; title: string; created_at?: string; origin?: { source?: string }; spec?: { period?: string; sections?: Section[] } }
 interface Pack { name: string; default_instruction?: string }
 
 const BRIEF_PACKS = ["brief", "review"]; // 产出 brief 事项的内置包
 const ROUTINE = "routine"; // 例行任务：结果也进本页（§13.5）
-
-function BriefCard({ b }: { b: Brief }) {
-  const t = useT(strings);
-  const projectName = useNames("project");
-  const sections = b.spec?.sections ?? [];
-  return (
-    <article aria-label={t.brief(b.title)}>
-      <h4>{b.title}</h4>
-      <p className="meta">{[b.spec?.period, b.created_at && new Date(b.created_at).toLocaleString(locale())].filter(Boolean).join(" · ")}</p>
-      {!sections.length && <p>{t.noSections}</p>}
-      {sections.map((s, i) => (
-        <section key={i}>
-          <h5>{s.title ?? projectName(s.project ?? "")}</h5>
-          <p>{s.body}</p>
-        </section>
-      ))}
-    </article>
-  );
-}
 
 /** 已有安排时「再安排一个」收起；一个都没有时直接展开表单。 */
 function More({ open, label, children }: { open: boolean; label: string; children: ReactNode }) {
   return open ? <>{children}</> : <details><summary>{label}</summary>{children}</details>;
 }
 
+/** 简报页：/briefs 读已生成的（最新 + 历史），/briefs/:id 一份完整简报，/briefs/schedule 管定时安排。 */
 export function BriefsPage() {
+  return (
+    <Routes>
+      <Route index element={<Library />} />
+      <Route path="schedule" element={<Schedule />} />
+      <Route path=":id" element={<BriefDetail />} />
+    </Routes>
+  );
+}
+
+function Schedule() {
   const { api } = useSession();
   const t = useT(strings);
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
@@ -63,6 +57,7 @@ export function BriefsPage() {
   const allProjects = useNamed("project");
   const projectName = useNames("project");
   const submitRef = useRef<HTMLButtonElement>(null);
+  const fromEmpty = (useLocation().state as { suggest?: boolean } | null)?.suggest;
   // 空状态的下一步：把表单预填成「每天 08:00 的简报」，本人再点一次「安排」才创建。
   const suggest = () => {
     setPack("brief");
@@ -71,6 +66,8 @@ export function BriefsPage() {
     setRaw("");
     submitRef.current?.focus();
   };
+
+  useEffect(() => { if (fromEmpty) suggest(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
     try {
@@ -139,16 +136,8 @@ export function BriefsPage() {
   return (
     <main>
       <PageHead>{t.title}</PageHead>
+      <Tabs />
       {error != null && <ErrorNote error={error} />}
-      <section aria-label={t.title}>
-        <h2>{t.briefs}</h2>
-        {!briefs.length && (
-          <p className="sub">
-            {t.none} {!scheduled.length && packs.includes("brief") && <button type="button" onClick={suggest}>{t.suggest}</button>}
-          </p>
-        )}
-        {briefs.map((b) => <BriefCard key={b.id} b={b} />)}
-      </section>
       <section aria-label={t.instances}>
         <h2>{t.scheduled}</h2>
         <div aria-label={t.instanceList}>

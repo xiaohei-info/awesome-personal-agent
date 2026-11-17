@@ -514,3 +514,18 @@ p.field-err[role="alert"] { margin: -6px 0 0; padding: 4px 10px; font-size: 12.5
 .conn-problem button { margin-left: auto; flex: 0 0 auto; }
 .conn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 pre.raw-text { margin: 6px 0; max-height: 32em; overflow: auto; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 简报：分节正文、历史列表、页内导航 */
+.subnav { display: flex; gap: 6px; margin: 0 0 16px; }
+.subnav a { padding: 6px 12px; border-radius: 8px; color: var(--ink-2); text-decoration: none; }
+.subnav a.active { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
+.brief-title { margin-top: 0; }
+.brief-body section { margin-top: 18px; }
+.brief-body h3 { margin: 0 0 6px; }
+.markdown { overflow-wrap: anywhere; }
+.markdown :is(ul, ol) { margin: 0 0 12px; padding-left: 1.4em; }
+.markdown :is(ul, ol) :is(ul, ol) { margin: 4px 0 0; }
+.markdown blockquote { margin: 0 0 12px; padding-left: 12px; border-left: 3px solid var(--line-2); color: var(--ink-2); }
+.markdown hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+.md-table { overflow-x: auto; margin: 0 0 12px; }
+.pager { display: flex; align-items: center; gap: 12px; }

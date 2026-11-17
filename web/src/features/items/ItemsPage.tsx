@@ -5,6 +5,7 @@ import { PageHead } from "../../app/page";
 import { isMaterialId } from "../../app/relations";
 import { AttachedMessages } from "../attached-messages";
 import { Markdown } from "./Markdown";
+import { BriefBody } from "../briefs/BriefBody";
 import { ProgressForm } from "../today/ProgressForm";
 import { locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
@@ -33,6 +34,7 @@ export interface Item {
   deadline?: string | null;
   planned_for?: string;
   body?: string;
+  spec?: { sections?: { project?: string; title?: string; body: string }[] };
   waiting_on?: { kind: string; ref: string };
 }
 interface Relation { type: string; from: string; to: string }
@@ -236,6 +238,7 @@ function ItemDetail() {
         {item.tags?.some((x) => x !== HANDOFF_TAG) ? <p>{t.tags(item.tags.filter((x) => x !== HANDOFF_TAG).join(t.listSep))}</p> : null}
       </div>
       {item.body ? <Markdown source={item.body} /> : null}
+      {item.kind === "brief" && <BriefBody spec={item.spec} />}
       {actErr != null && <ErrorNote error={actErr} />}
 
       <h2>{t.edit}</h2>

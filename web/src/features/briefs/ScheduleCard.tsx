@@ -115,7 +115,7 @@ export function ScheduleCard({ i, fallback, agentReady, last, onChange }: {
           {note && <span role="status" className="sub">{note}</span>}
         </div>
       </form>
-      {last && <p className="sub"><Link to={`/items/${encodeURIComponent(last.id)}`}>{t.last(last.at ? new Date(last.at).toLocaleString(locale()) : "")}</Link></p>}
+      {last && <p className="sub"><Link to={`/briefs/${encodeURIComponent(last.id)}`}>{t.last(last.at ? new Date(last.at).toLocaleString(locale()) : "")}</Link></p>}
     </details>
   );
 }
