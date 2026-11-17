@@ -74,7 +74,7 @@ function VaultsCard({ doc, save }: { doc: Doc; save: (v: Vault[]) => Promise<num
       {rows.map((r, i) => {
         const mode = modeOf(r.open_url.trim());
         return (
-          <div key={i} className="stack">
+          <div key={i} className="stack vault-row">
             <div className="line">
               <input aria-label={t.name(i + 1)} placeholder={t.namePh} value={r.name} onChange={(e) => edit(i, { name: e.target.value })} />
               <select aria-label={t.url(i + 1)} value={mode} onChange={(e) => edit(i, { open_url: e.target.value === "obsidian" ? OBSIDIAN : "" })}>
