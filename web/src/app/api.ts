@@ -35,7 +35,8 @@ export function createClient(o: ClientOptions) {
 
   async function request<T>(method: string, path: string, body?: unknown, extra?: Record<string, string>): Promise<T> {
     const headers: Record<string, string> = { ...extra };
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const text = typeof body === "string";
+    if (body !== undefined && !text) headers["Content-Type"] = "application/json";
     if (!SAFE.has(method)) {
       const t = o.getCsrf();
       if (t) headers["X-CSRF-Token"] = t;
@@ -44,7 +45,7 @@ export function createClient(o: ClientOptions) {
       method,
       headers,
       credentials: "same-origin",
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : text ? body : JSON.stringify(body),
     });
     if (!res.ok) {
       const err = new ApiError(res.status, await readError(res));
@@ -58,6 +59,8 @@ export function createClient(o: ClientOptions) {
     get: <T>(path: string) => request<T>("GET", path),
     /** headers 用于 If-Match / Idempotency-Key 等请求头。 */
     post: <T>(path: string, body?: unknown, headers?: Record<string, string>) => request<T>("POST", path, body ?? {}, headers),
+    /** 原样发送文本请求体（如 POST /import 的 application/x-ndjson）；headers 里给 Content-Type。 */
+    postText: <T>(path: string, text: string, headers: Record<string, string>) => request<T>("POST", path, text, headers),
     patch: <T>(path: string, body: unknown, headers?: Record<string, string>) => request<T>("PATCH", path, body, headers),
     put: <T>(path: string, body: unknown, headers?: Record<string, string>) => request<T>("PUT", path, body, headers),
     del: <T>(path: string) => request<T>("DELETE", path),
