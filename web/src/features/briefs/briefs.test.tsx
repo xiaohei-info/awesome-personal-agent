@@ -20,7 +20,7 @@ const routines = [{ id: "ins_r", pack: "routine", params: { schedule: "CRON_TZ=U
 const instances = [{ id: "ins_1", pack: "brief", params: { schedule: "30 8 * * 1-5" }, enabled: true }, { id: "ins_2", pack: "follow-up", params: {}, enabled: true }];
 
 interface Calls { posts: { body: unknown; csrf: string | null }[]; urls: string[]; patches?: { url: string; body: unknown }[] }
-function server(o: { fail?: boolean; items?: unknown[]; reject?: boolean; routine?: boolean; host?: string; caps?: Record<string, string>; ready?: boolean; instances?: unknown[] } = {}, calls: Calls = { posts: [], urls: [] }) {
+function server(o: { patchFail?: boolean; fail?: boolean; items?: unknown[]; reject?: boolean; routine?: boolean; host?: string; caps?: Record<string, string>; ready?: boolean; instances?: unknown[] } = {}, calls: Calls = { posts: [], urls: [] }) {
   const f = (async (url: string, init?: RequestInit) => {
     calls.urls.push(url);
     if (url === "/v1/projects") return json(200, { projects: [{ id: "home", name: "家务" }, { id: "work", name: "工作" }] });
@@ -37,6 +37,7 @@ function server(o: { fail?: boolean; items?: unknown[]; reject?: boolean; routin
     const ip = url.match(/^\/v1\/instances\/([^/]+)$/);
     if (ip && init?.method === "PATCH") {
       const body = JSON.parse(init.body as string);
+      if (o.patchFail) return json(400, { code: "invalid_request", why: "instruction is too long", next: "shorten it" });
       (calls.patches ??= []).push({ url, body });
       const cur = [...instances, ...routines].find((x) => x.id === decodeURIComponent(ip[1]))!;
       return json(200, { ...cur, ...body, params: body.params ?? cur.params, enabled: body.enabled ?? cur.enabled });
@@ -124,9 +125,9 @@ describe("简报页", () => {
     const latest = within(await screen.findByRole("region", { name: "最新一份" }));
     expect(latest.getByLabelText("简报 晚报")).toBeInTheDocument();
     const hist = within(await screen.findByRole("list", { name: "历史简报列表" }));
-    const names = hist.getAllByRole("link").map((l) => l.textContent);
+    const names = hist.getAllByRole("link").filter((l) => !l.getAttribute("href")!.endsWith("/schedule")).map((l) => l.textContent);
     expect(names).toEqual(["新简报", "空简报", "周复盘", "周一简报"]); // 按 created_at 从新到旧，与返回顺序无关
-    expect(hist.getByText(/简报 · 工作日 08:30/)).toBeInTheDocument(); // 周一简报来自 ins_1
+    expect(hist.getByRole("link", { name: /简报 · 工作日 08:30/ })).toHaveAttribute("href", "/briefs/schedule"); // 周一简报来自 ins_1，来源可点进安排
     expect(screen.queryByText("家里进展")).not.toBeInTheDocument(); // 历史只列标题与时间
   });
 
@@ -198,26 +199,68 @@ describe("简报页", () => {
     expect(card.getByRole("button", { name: "立即跑一次" })).toBeDisabled();
   });
 
-  it("展开改「跑什么」：没改时显示默认并标「默认」；改了带 instruction，恢复默认后不带；定时没动原样带回", async () => {
+  it("展开改「让 Agent 写什么」：没改时显示默认并标「默认」；改了标「已改」并带 instruction，恢复默认后不带；定时没动原样带回", async () => {
     const calls: Calls = { posts: [], urls: [], patches: [] };
     mount(server({ ready: true }, calls));
     const card = within(await screen.findByRole("group", { name: "简报" }));
     await userEvent.click(card.getByText("简报"));
-    const box = card.getByRole("textbox", { name: /跑什么/ });
+    const box = card.getByRole("textbox", { name: /让 Agent 写什么/ });
     expect(box).toHaveValue(DEF);
     expect(card.getByText("默认")).toBeInTheDocument();
     expect(card.queryByRole("button", { name: "恢复默认" })).toBeNull();
     await userEvent.clear(box);
     await userEvent.type(box, "只写风险");
     expect(card.queryByText("默认")).toBeNull();
+    expect(card.getByText("已改")).toBeInTheDocument();
     await userEvent.click(card.getByRole("button", { name: "保存" }));
     expect(calls.patches!.at(-1)).toEqual({ url: "/v1/instances/ins_1", body: { params: { schedule: "30 8 * * 1-5", instruction: "只写风险" } } });
-    expect(await card.findByText("已保存，下次运行生效")).toBeInTheDocument();
+    expect(await card.findByText("已保存，之后的运行都按这份")).toBeInTheDocument();
     await userEvent.click(card.getByRole("button", { name: "恢复默认" }));
     expect(box).toHaveValue(DEF);
     await userEvent.selectOptions(card.getByLabelText("哪几天"), "每周五");
     await userEvent.click(card.getByRole("button", { name: "保存" }));
     expect(calls.patches!.at(-1)).toEqual({ url: "/v1/instances/ins_1", body: { params: { schedule: "30 8 * * 5" } } });
+  });
+
+  it("有没保存的改动时不能立即跑一次（免得跑旧配置）；保存成功后改动标记清掉、可以跑；保存失败不显示已保存", async () => {
+    const calls: Calls = { posts: [], urls: [], patches: [] };
+    mount(server({ ready: true, patchFail: true }, calls));
+    const card = within(await screen.findByRole("group", { name: "简报" }));
+    await userEvent.click(card.getByText("简报"));
+    const run = card.getByRole("button", { name: "立即跑一次" });
+    expect(run).toBeEnabled();
+    await userEvent.type(card.getByRole("textbox", { name: /让 Agent 写什么/ }), "再写风险");
+    expect(run).toBeDisabled();
+    expect(card.getByText("先保存")).toBeInTheDocument();
+    await userEvent.click(card.getByRole("button", { name: "保存" }));
+    expect((await card.findAllByText(/instruction is too long/)).length).toBeGreaterThan(0);
+    expect(card.queryByText("已保存，之后的运行都按这份")).toBeNull();
+    expect(run).toBeDisabled();
+    expect(calls.posts).toEqual([]);
+  });
+
+  it("保存成功后以服务端返回的实例为准：改动标记清掉，立即跑一次用的就是刚存的配置", async () => {
+    const calls: Calls = { posts: [], urls: [], patches: [] };
+    mount(server({ ready: true }, calls));
+    const card = within(await screen.findByRole("group", { name: "简报" }));
+    await userEvent.click(card.getByText("简报"));
+    await userEvent.selectOptions(card.getByLabelText("哪几天"), "每周五");
+    expect(card.getByRole("button", { name: "立即跑一次" })).toBeDisabled();
+    await userEvent.click(card.getByRole("button", { name: "保存" }));
+    expect(await card.findByText("已保存，之后的运行都按这份")).toBeInTheDocument();
+    expect(card.queryByText("先保存")).toBeNull();
+    await userEvent.click(card.getByRole("button", { name: "立即跑一次" }));
+    expect(calls.patches!.at(-1)!.body).toEqual({ params: { schedule: "30 8 * * 5" } });
+    expect(calls.posts).toEqual([{ body: "/v1/instances/ins_1/run", csrf: "tok-1" }]);
+  });
+
+  it("读简报时点来源进入对应安排，卡片已展开，能直接改内容要求", async () => {
+    mount(server({ items: [LONG, ...items] }), "/briefs");
+    const latest = within(await screen.findByRole("region", { name: "最新一份" }));
+    await userEvent.click(latest.getByRole("link", { name: /简报 · 工作日 08:30/ }));
+    const card = await screen.findByRole("group", { name: "简报" });
+    expect(card).toHaveAttribute("open");
+    expect(within(card).getByRole("textbox", { name: /让 Agent 写什么/ })).toBeVisible();
   });
 
   it("Agent 可用时可以立即跑一次；卡片链到这个安排最近一次的简报", async () => {
