@@ -64,8 +64,8 @@ function mount(f: typeof fetch, path = "/briefs/schedule") {
 beforeEach(() => sessionStorage.clear());
 
 const LONG = { id: "b9", kind: "brief", title: "晚报", created_at: "2030-02-01T12:00:00Z", origin: { source: "instance:ins_1" }, spec: { period: "2030-W05", sections: [
-  { title: "要点", body: "# 要点\n## 小标题\n第一行\n第二行\n\n- 事项一\n  - 子项\n- 事项二\n\n1. 先做\n2. 再做\n\n| 名称 | 状态 |\n| --- | --- |\n| 报告 | **完成** |\n\n```\nnpm test\n```\n\n> 引用一句\n\n看 [文档](https://example.org/a) 与 https://example.org/b。" },
-  { title: "危险", body: "<script>alert(1)</script> [点我](javascript:alert(1)) ![x](https://example.org/p.png)" },
+  { title: "要点", body: "# 要点\n## 小标题\n第一行\n第二行\n\n- 事项一\n  - 子项\n- 事项二\n\n1. 先做\n2. 再做\n\n| 名称 | 状态 |\n| --- | --- |\n| 报告 | **完成** |\n\n```\nnpm test\n```\n\n> 引用一句\n\n看 [文档](https://example.org/a) 与 https://example.org/b.\n\n- [x] 已完成项\n- [ ] 待办项\n\n1. 步骤一\n\n   步骤一的第二段\n\n       缩进代码行\n\n2. 步骤二\n\n**粗体里的 [嵌套链接](https://example.org/n) 与 *斜体***" },
+  { title: "危险", body: "<script>alert(1)</script>\n\n[点我](javascript:alert(1)) [数据](data:text/html;base64,AAAA) [相对](/judgments/x)\n\n![x](https://example.org/p.png) ![y](javascript:alert(2))" },
 ] } };
 const old = (n: number) => ({ id: `o${String(n).padStart(2, "0")}`, kind: "brief", title: `旧简报${n}`, created_at: `2029-12-${String(n).padStart(2, "0")}T08:00:00Z`, spec: { sections: [{ title: "回顾", body: `内容${n}` }] } });
 
@@ -76,8 +76,8 @@ describe("简报页", () => {
     expect(a.getByRole("heading", { level: 3, name: "要点" })).toBeInTheDocument();
     expect(a.getAllByRole("heading", { name: "要点" })).toHaveLength(1); // 正文开头重复的同名标题不再画一遍
     expect(a.getByRole("heading", { level: 5, name: "小标题" })).toBeInTheDocument(); // 正文 ## 落在节标题之下
-    expect(a.getByText(/第一行/).innerHTML).toContain("<br>");
-    expect(within(a.getAllByRole("list")[0]).getAllByRole("listitem")[0]).toHaveTextContent("事项一子项");
+    expect(a.getByText(/第一行/).innerHTML).toContain("<br>"); // 单个换行保留
+    expect(within(a.getAllByRole("list")[0]).getAllByRole("listitem")[0]).toHaveTextContent("事项一 子项");
     expect(a.getByText("子项").closest("ul")!.parentElement!.tagName).toBe("LI");
     expect(a.getAllByRole("list")[2].tagName).toBe("OL"); // [0] 无序列表 [1] 其子列表
     expect(a.getByRole("columnheader", { name: "状态" })).toBeInTheDocument();
@@ -88,15 +88,35 @@ describe("简报页", () => {
     expect(a.getByRole("link", { name: "https://example.org/b" })).toHaveAttribute("href", "https://example.org/b"); // 句号不进链接
   });
 
+  it("成熟解析库覆盖的写法：任务清单、列表项内多段、缩进代码、嵌套强调与链接", async () => {
+    mount(server({ items: [LONG] }), "/briefs");
+    const a = within(await screen.findByLabelText("简报 晚报"));
+    const boxes = a.getAllByRole("checkbox");
+    expect(boxes.map((b) => (b as HTMLInputElement).checked)).toEqual([true, false]);
+    expect(boxes[0]).toBeDisabled();
+    const step = a.getByText("步骤一").closest("li")!;
+    expect(step.querySelectorAll("p")).toHaveLength(2); // 同一项里两段
+    expect(within(step).getByText("步骤一的第二段")).toBeInTheDocument();
+    expect(step.querySelector("pre code")).toHaveTextContent("缩进代码行");
+    const strong = a.getByRole("link", { name: "嵌套链接" }).closest("strong")!;
+    expect(strong.querySelector("em")).toHaveTextContent("斜体");
+    expect(strong.querySelector("a")).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  });
+
   it("HTML 与脚本只显示为文本，危险链接不可点，外部图片点开前不请求", async () => {
     const { container } = mount(server({ items: [LONG] }), "/briefs");
     const a = within(await screen.findByLabelText("简报 晚报"));
     expect(a.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
     expect(container.querySelector("script")).toBeNull();
     expect(a.queryByRole("link", { name: "点我" })).toBeNull();
-    expect(a.getByText(/\[点我\]\(javascript:alert\(1\)\)/)).toBeInTheDocument();
+    expect(a.getByText(/点我 数据 相对/)).toBeInTheDocument(); // 不放行的协议与相对路径只显示文字
+    expect(a.queryByRole("link", { name: /数据|相对/ })).toBeNull();
+    expect(container.querySelector("a[href^='javascript'], a[href^='data']")).toBeNull();
     expect(container.querySelector("img")).toBeNull();
     expect(a.getByRole("button", { name: "加载图片：x" })).toBeInTheDocument();
+    expect(a.queryByRole("button", { name: "加载图片：y" })).toBeNull(); // 非 http(s) 图片不给点
+    await userEvent.click(a.getByRole("button", { name: "加载图片：x" }));
+    expect(container.querySelector("img")).toHaveAttribute("src", "https://example.org/p.png");
   });
 
   it("最新一份整份展开，旧的按时间倒排列在历史里，不重复展开；带来源安排便于区分早晚", async () => {
