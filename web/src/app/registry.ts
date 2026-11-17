@@ -63,8 +63,9 @@ export interface Feature {
   hidden?: boolean;
 }
 
-export function collectFeatures(modules: Record<string, { feature?: Feature }>): Feature[] {
-  const out = Object.values(modules).flatMap((m) => (m.feature ? [m.feature] : []));
+/** 一个模块导出 `feature`；要多登记路由（如隐藏的别名入口）时导出 `features`。 */
+export function collectFeatures(modules: Record<string, { feature?: Feature; features?: Feature[] }>): Feature[] {
+  const out = Object.values(modules).flatMap((m) => m.features ?? (m.feature ? [m.feature] : []));
   const ids = new Set<string>();
   for (const f of out) {
     if (ids.has(f.id)) throw new Error(`duplicate feature id: ${f.id}`);
@@ -74,7 +75,7 @@ export function collectFeatures(modules: Record<string, { feature?: Feature }>):
 }
 
 export const features: Feature[] = collectFeatures(
-  import.meta.glob<{ feature?: Feature }>("../features/*/index.{ts,tsx}", { eager: true }),
+  import.meta.glob<{ feature?: Feature; features?: Feature[] }>("../features/*/index.{ts,tsx}", { eager: true }),
 );
 
 /** 导航上的一个入口（文字已按当前语言取好）：页面已按入口内顺序排好，第一个是默认页。 */

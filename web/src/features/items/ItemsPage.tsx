@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
@@ -15,6 +15,8 @@ import { EntityPick, useItemTitle, useNames } from "../../app/names";
 import { ViewTable, useViews } from "./TypeViews";
 import { HandOff, tagName } from "./HandOff";
 import { TraceView } from "../trace/Trace";
+import { ItemMaterials, MATERIAL_RELATIONS, type MaterialRel, type MaterialRow } from "./ItemMaterials";
+import { linkTitle, readPrefill, registrable, withLink, type Vault } from "./prefill";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -161,7 +163,11 @@ function ItemList() {
   );
 }
 
-interface Detail { item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string }[] }
+// 导入的条目只知道日期时 precision 为 day：只显示到日，不显示约定的 12:00 或 18:00（§7.1）。
+const when = (at: string, precision?: string) => (precision === "day" ? new Date(at).toLocaleDateString(locale()) : new Date(at).toLocaleString(locale()));
+const grouped = (r: Relation, from: string) => r.from === from && isMaterialId(r.to) && (MATERIAL_RELATIONS as readonly string[]).includes(r.type);
+
+interface Detail { item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string; precision?: string }[]; materials: MaterialRel[] }
 
 function ItemDetail() {
   const t = useT(strings);
@@ -181,7 +187,16 @@ function ItemDetail() {
       api.get<{ item: Item; relations: Relation[]; correlation_keys?: { key: string; domain?: string }[]; progress?: Detail["progress"] }>("/items/" + eid),
       api.get<{ items: Item[] }>("/items"),
     ]);
-    setD({ item: it.item, relations: it.relations, keys: it.correlation_keys ?? [], progress: it.progress ?? [], others: list.items.filter((i) => i.id !== id) });
+    // 材料区的关系：依据、产出、纪要三类指向材料的边；材料读不到时按 id 显示，不丢这条关系。
+    const materials = await Promise.all(
+      it.relations.filter((r) => grouped(r, it.item.id)).map(async (r): Promise<MaterialRel> => {
+        const material = await api.get<{ material: MaterialRow }>("/materials/" + encodeURIComponent(r.to)).then((m) => m.material, (): MaterialRow => ({ id: r.to, title: r.to }));
+        return { type: r.type, to: r.to, material };
+      }),
+    );
+    // 进展按发生时刻排：导入的历史条目不按写入顺序。
+    const progress = [...(it.progress ?? [])].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    setD({ item: it.item, relations: it.relations, keys: it.correlation_keys ?? [], progress, materials, others: list.items.filter((i) => i.id !== id) });
   }, [api, id]);
 
   useEffect(() => {
@@ -244,7 +259,7 @@ function ItemDetail() {
       <section aria-label={t.relationsLabel}>
         <h2>{t.relations}</h2>
         <ul aria-label={t.relations} className="rows">
-          {d.relations.map((r, n) => {
+          {d.relations.filter((r) => !grouped(r, item.id)).map((r, n) => {
             const out = r.from === item.id;
             const other = out ? r.to : r.from;
             const type = label("relation", r.type);
@@ -254,6 +269,8 @@ function ItemDetail() {
         </ul>
         <RelateForm others={d.others} onSubmit={(b) => act(() => api.post(path + "/relations", b))} />
       </section>
+
+      <ItemMaterials rels={d.materials} onRemove={(r) => act(() => api.post(path + "/relations", { to: r.to, type: r.type, remove: true }))} />
 
       {/* 关联键是来源线程或对象的标识（§9.4），平时用不到，收在高级里。 */}
       <details aria-label={t.sourcesLabel}>
@@ -270,7 +287,7 @@ function ItemDetail() {
         <h2>{t.progress}</h2>
         <ul aria-label={t.progress} className="rows">
           {d.progress.map((p) => (
-            <li key={p.id}>{p.text} <span className="sub">{[p.on && t.pointsTo(p.on), credential(p.actor), new Date(p.at).toLocaleString(locale())].filter(Boolean).join(" · ")}</span></li>
+            <li key={p.id}>{p.text} <span className="sub">{[p.on && t.pointsTo(p.on), credential(p.actor), when(p.at, p.precision)].filter(Boolean).join(" · ")}</span></li>
           ))}
         </ul>
         <ProgressForm onSubmit={(b) => act(() => api.post(path + "/progress", b))} />
@@ -396,46 +413,81 @@ function ContentForm({ initial, submitLabel, onSubmit, onCancel, extra }: {
 }
 
 // 新建直接进 open（本人创建，不走建议流）；校验与授权在服务端，这里只拦空标题。
+// /new 与 /items/new 的查询参数只作初值（§4.1）：不提交、不带凭据，点"创建"才写入。
+export function NewItemPage() {
+  return <NewItem />;
+}
+
 function NewItem() {
   const t = useT(strings);
   const { api } = useSession();
   const nav = useNavigate();
+  const [params] = useSearchParams();
+  const pre = useMemo(() => readPrefill(params), [params]);
   const [projects, setProjects] = useState<{ id: string; name?: string }[]>([]);
-  const [project, setProject] = useState("");
-  const [deadline, setDeadline] = useState("");
-  const [plannedFor, setPlannedFor] = useState("");
+  const [vaults, setVaults] = useState<Vault[]>([]);
+  // null：本人还没动过项目选择，显示预填认出的那个。
+  const [picked, setPicked] = useState<string | null>(null);
+  const [deadline, setDeadline] = useState(pre.deadline);
+  const [plannedFor, setPlannedFor] = useState(pre.plannedFor);
   const [err, setErr] = useState<unknown>(null);
+  const [created, setCreated] = useState<string | null>(null);
   useEffect(() => void api.get<{ projects: { id: string; name?: string }[] }>("/projects").then((r) => setProjects(r.projects), () => {}), [api]);
+  useEffect(() => void api.get<{ vaults: Vault[] }>("/note-vaults").then((r) => setVaults(r.vaults ?? []), () => {}), [api]);
+
+  // project 可以是 id 或名字，认不出就留空。
+  const known = projects.find((p) => p.id === pre.project) ?? projects.find((p) => p.name === pre.project);
+  const project = picked ?? known?.id ?? "";
 
   const create = async (c: Content) => {
+    setErr(null);
+    setCreated(null);
+    const asMaterial = !!pre.link && !!project && registrable(pre.link, vaults);
+    let id: string;
     try {
       const r = await api.post<{ id: string }>("/items", {
         kind: "task",
         phase: "open",
         title: c.title,
-        ...(c.body ? { body: c.body } : {}),
+        ...(asMaterial ? (c.body ? { body: c.body } : {}) : withLink(c.body, pre.link) ? { body: withLink(c.body, pre.link) } : {}),
         ...(project ? { project } : {}),
         ...(deadline ? { deadline: new Date(deadline).toISOString() } : {}),
         ...(plannedFor ? { planned_for: plannedFor } : {}),
       });
-      nav("../" + encodeURIComponent(r.id));
+      id = r.id;
     } catch (e) {
-      setErr(e);
+      return setErr(e);
     }
+    if (asMaterial) {
+      try {
+        const m = await api.post<{ material: string }>("/materials", { link: pre.link, title: linkTitle(pre.link), project });
+        await api.post("/items/" + encodeURIComponent(id) + "/relations", { to: m.material, type: "basis" });
+      } catch (e) {
+        // 事项已经写入：不重复创建，说明链接没登记上并给出新事项的入口。
+        setErr(e);
+        return setCreated(id);
+      }
+    }
+    nav("/items/" + encodeURIComponent(id));
   };
 
   return (
     <main>
-      <p className="eyebrow"><Link to="..">{t.back}</Link></p>
+      <p className="eyebrow"><Link to="/items">{t.back}</Link></p>
       <PageHead>{t.newItem}</PageHead>
+      {pre.any && <p className="badge plain" role="status">{t.prefilled}</p>}
+      {pre.cutTitle && <p role="status">{t.cutTitle}</p>}
+      {pre.cutBody && <p role="status">{t.cutBody}</p>}
       {err != null && <ErrorNote error={err} />}
+      {created && <p role="alert">{t.linkNotSaved} · <Link to={"/items/" + encodeURIComponent(created)}>{t.openCreated}</Link></p>}
       <ContentForm
-        initial={{ title: "", body: "" }}
+        initial={{ title: pre.title, body: pre.body }}
         submitLabel={t.createSubmit}
         onSubmit={create}
         extra={
           <>
-            <label>{t.projectField} <select value={project} onChange={(e) => setProject(e.target.value)}><option value="">{t.noProject}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name ?? p.id}</option>)}</select></label>
+            {pre.link && <p>{t.linkField}: <code>{pre.link}</code></p>}
+            <label>{t.projectField} <select value={project} onChange={(e) => setPicked(e.target.value)}><option value="">{t.noProject}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name ?? p.id}</option>)}</select></label>
             <label>{t.deadlineField} <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
             <label>{t.plannedDate} <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} /></label>
           </>

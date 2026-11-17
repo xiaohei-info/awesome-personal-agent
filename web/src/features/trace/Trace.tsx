@@ -222,7 +222,9 @@ function Raw({ steps }: { steps: TraceStep[] }) {
 
 function Line({ e, prev, subjects, extra }: { e: TraceEntry; prev?: string; subjects?: boolean; extra?: ReactNode }) {
   const who = useWho();
-  const at = near(e.at, prev);
+  // 导入的变更只知道日期时（payload.precision 为 day）只显示到日（§7.1）。
+  const day = e.steps.some((x) => (x.payload as { precision?: string } | undefined)?.precision === "day");
+  const at = day ? new Date(e.at).toLocaleDateString(locale()) : near(e.at, prev);
   const t = useT(strings);
   const mat = materialOf(e);
   const fmt = (n: number) => n.toLocaleString(locale());
@@ -231,7 +233,7 @@ function Line({ e, prev, subjects, extra }: { e: TraceEntry; prev?: string; subj
       <div className="trace-line">
         <span className="who">{who(e.who)}</span>
         <span className="what"><What e={e} subjects={subjects} />{mat ? ` · ${t.material(fmt(mat.sent_chars), fmt(mat.original_chars))}` : ""}{extra}</span>
-        <time className="when" dateTime={e.at} title={new Date(e.at).toLocaleString(locale())}>{at}</time>
+        <time className="when" dateTime={e.at} title={day ? at : new Date(e.at).toLocaleString(locale())}>{at}</time>
       </div>
       <Raw steps={e.steps} />
     </li>
@@ -257,7 +259,7 @@ export function TraceList({ data }: { data: TraceData }) {
   const origins = data.origins ?? [];
   // 事项经过里的来源消息写出标题，并能单独打开那条消息的经过。
   const from = (o: TraceData) => o.entries.map((e) => (e.kind === "arrived" && o.message ? { ...e, args: { ...e.args, subject: o.message.subject, origin: o.message.id } } : e));
-  const entries = expand([...origins.flatMap(from), ...data.entries]);
+  const entries = expand([...origins.flatMap(from), ...[...data.entries].sort((a, b) => Date.parse(a.at) - Date.parse(b.at))]);
   if (!entries.length) return <p className="sub">{t.empty}</p>;
   const subjects = origins.length > 0;
   const groups = fold(entries);
