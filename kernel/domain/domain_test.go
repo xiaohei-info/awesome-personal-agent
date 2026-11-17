@@ -109,6 +109,9 @@ func TestLedgerErrorContractMapping(t *testing.T) {
 		{CodeExecutorNotAllowed, 403, 21},
 		{CodeRiskScreeningPending, 403, 22},
 		{CodeBasisRequired, 403, 23},
+		{CodeGrantRequired, 403, 23},
+		{CodeImportSourceMismatch, 403, 23},
+		{CodeImportLimitExceeded, 403, 23},
 		{CodeInternal, 500, 1},
 		{Code("never_registered"), 500, 1},
 	}

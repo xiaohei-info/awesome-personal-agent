@@ -12,6 +12,9 @@ const (
 	CodeRiskScreeningPending Code = "risk_screening_pending" // 403 → 22
 	CodeBasisRequired        Code = "basis_required"         // 403 → 23：替本人做决定的依据不足（§14.5）
 	CodeSessionNotDirect     Code = "session_not_direct"     // 403 → 23：凭原话的代答，会话不是与本人的私聊（§14.5）
+	CodeGrantRequired        Code = "grant_required"         // 403 → 23：命令只接受授权单（import.apply），没有带单或只带了本人原话（§14.5）
+	CodeImportSourceMismatch Code = "import_source_mismatch" // 403 → 23：导入授权单的来源名不符（§14.5）
+	CodeImportLimitExceeded  Code = "import_limit_exceeded"  // 403 → 23：累计条数会超过导入授权单的上限（§14.5）
 	CodeNotFound             Code = "not_found"              // 404 → 5
 	CodeConflict             Code = "conflict"               // 409 → 6
 	CodeModelsPaused         Code = "models_paused"          // 409 → 6：本人暂停了模型，需要模型的本人操作被拒（§8.7）
@@ -47,6 +50,9 @@ var codeHTTP = map[Code]int{
 	CodeRiskScreeningPending: 403,
 	CodeBasisRequired:        403,
 	CodeSessionNotDirect:     403,
+	CodeGrantRequired:        403,
+	CodeImportSourceMismatch: 403,
+	CodeImportLimitExceeded:  403,
 	CodeNotFound:             404,
 	CodeConflict:             409,
 	CodeModelsPaused:         409,
@@ -64,6 +70,9 @@ var codeExit = map[Code]int{
 	CodeRiskScreeningPending: ExitScreeningPending,
 	CodeBasisRequired:        ExitBasisRequired,
 	CodeSessionNotDirect:     ExitBasisRequired,
+	CodeGrantRequired:        ExitBasisRequired,
+	CodeImportSourceMismatch: ExitBasisRequired,
+	CodeImportLimitExceeded:  ExitBasisRequired,
 	CodeNotFound:             ExitNotFound,
 	CodeConflict:             ExitConflict,
 	CodeModelsPaused:         ExitConflict,

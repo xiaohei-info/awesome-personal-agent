@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -17,16 +18,23 @@ import (
 // 授权单（设计 §6.13、§14.5）：本人在 Web 事先签发的代理授权。本包只管记录本身——签发、撤销、列出；
 // 授权单何时放行命令是授权判定的事，这里不判定。内容不可改，要改就撤销后重签。
 
+// ImportApply 是只接受授权单的导入命令（§14.5）；授权单要放行它必须是专用单（见 normalizeGrant）。
+const ImportApply = "import.apply"
+
+// MaxImportGrantTTL 是导入专用单有效期的上限（§6.13）。
+const MaxImportGrantTTL = 7 * 24 * time.Hour
+
 // RiskNormal 是目前唯一的风险上限：只放行未判为 web_only 的对象。
 const RiskNormal = "normal"
 
 // GrantableActions 是授权单 actions 的全部可选值：附录 B.1「第二档（可用授权单）」一列。
 // 项目、来源、能力包实例管理只接受本人原话，不在其中。
 var GrantableActions = []string{
-	"item.create", "item.update", "item.transition", "item.relate",
+	"item.create", "item.update", "item.transition", "item.relate", "item.progress",
 	"decision.answer", "proposal.accept", "proposal.dismiss", "proposal.attach",
 	"revision.confirm", "revision.reject",
 	"delegate.report", "followmsg.handback",
+	ImportApply,
 }
 
 // Grantee 是被授权方，二选一（§6.13）：Credential 是一个 delegate token（Harness 只用于收窄和审计，不是安全边界）；
@@ -47,29 +55,37 @@ type Scope struct {
 	All      bool     `json:"all,omitempty"`
 }
 
+// ImportScope 是导入专用单的 import 段：允许导入的来源名与累计条数上限（§6.13）。
+type ImportScope struct {
+	Source     string `json:"source"`
+	MaxRecords int    `json:"max_records"`
+}
+
 // GrantInput 是签发请求；id、主体、签发时间由内核给出。
 type GrantInput struct {
-	Grantee     Grantee   `json:"grantee"`
-	Scope       Scope     `json:"scope"`
-	Actions     []string  `json:"actions"`
-	RiskCeiling string    `json:"risk_ceiling,omitempty"` // 空取 normal
-	ExpiresAt   time.Time `json:"expires_at,omitzero"`    // 零值：长期有效，直到撤销
-	Reason      string    `json:"reason,omitempty"`
+	Grantee     Grantee      `json:"grantee"`
+	Scope       Scope        `json:"scope"`
+	Actions     []string     `json:"actions"`
+	Import      *ImportScope `json:"import,omitempty"`       // 仅 actions 为 [import.apply] 时出现且必填
+	RiskCeiling string       `json:"risk_ceiling,omitempty"` // 空取 normal
+	ExpiresAt   time.Time    `json:"expires_at,omitzero"`    // 零值：长期有效，直到撤销
+	Reason      string       `json:"reason,omitempty"`
 }
 
 // Grant 是一张授权单。撤销字段是唯一会变的部分。
 type Grant struct {
-	ID            string    `json:"id"`
-	Principal     string    `json:"principal"`
-	Grantee       Grantee   `json:"grantee"`
-	Scope         Scope     `json:"scope"`
-	Actions       []string  `json:"actions"`
-	RiskCeiling   string    `json:"risk_ceiling"`
-	ExpiresAt     time.Time `json:"expires_at,omitzero"`
-	Reason        string    `json:"reason,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	RevokedAt     time.Time `json:"revoked_at,omitzero"`
-	RevokedReason string    `json:"revoked_reason,omitempty"`
+	ID            string       `json:"id"`
+	Principal     string       `json:"principal"`
+	Grantee       Grantee      `json:"grantee"`
+	Scope         Scope        `json:"scope"`
+	Actions       []string     `json:"actions"`
+	Import        *ImportScope `json:"import,omitempty"`
+	RiskCeiling   string       `json:"risk_ceiling"`
+	ExpiresAt     time.Time    `json:"expires_at,omitzero"`
+	Reason        string       `json:"reason,omitempty"`
+	CreatedAt     time.Time    `json:"created_at"`
+	RevokedAt     time.Time    `json:"revoked_at,omitzero"`
+	RevokedReason string       `json:"revoked_reason,omitempty"`
 }
 
 // Active 报告授权单在 at 时刻是否未撤销且未过期（没有有效期的单长期有效）。凭据是否仍有效另见 ActiveGrants。
@@ -80,6 +96,35 @@ func (g Grant) Active(at time.Time) bool {
 func webOnlyErr() error {
 	return domain.NewError(domain.CodeWebOnly, "grants can only be issued or revoked by the owner in the Web UI", "ask the owner to use the Web settings")
 }
+
+// normalizeImport 校验导入专用单（§6.13）：actions 只有 import.apply，必带 import 段与不超过 7 天的有效期，scope 记为 all，
+// 不对后台运行生效；其余单不得带 import 段。
+func normalizeImport(g *Grant, in GrantInput, now time.Time) error {
+	if !contains(g.Actions, ImportApply) {
+		if in.Import != nil {
+			return invalid("import is only for a grant whose actions is [%q]", ImportApply)
+		}
+		return nil
+	}
+	imp := in.Import
+	switch {
+	case len(g.Actions) != 1:
+		return invalid("%s cannot share a grant with other actions", ImportApply)
+	case imp == nil || strings.TrimSpace(imp.Source) == "" || imp.MaxRecords < 1:
+		return invalid("an import grant needs import.source and import.max_records of at least 1")
+	case in.ExpiresAt.IsZero() || in.ExpiresAt.After(now.Add(MaxImportGrantTTL)):
+		return invalid("an import grant needs expires_at within 7 days")
+	case in.Grantee.Background:
+		return invalid("an import grant cannot be used by background runs")
+	case len(g.Scope.Projects)+len(g.Scope.Kinds)+len(g.Scope.Items) > 0:
+		return invalid("an import grant has no scope other than all")
+	}
+	g.Import = &ImportScope{Source: strings.TrimSpace(imp.Source), MaxRecords: imp.MaxRecords}
+	g.Scope.All = true
+	return nil
+}
+
+func contains(set []string, v string) bool { return oneOf(v, set...) }
 
 func newGrantID() (string, error) {
 	b := make([]byte, 8)
@@ -95,6 +140,9 @@ func normalizeGrant(tx *store.Tx, a *auth.Auth, now time.Time, in GrantInput) (G
 		Scope:   Scope{Projects: dedupSorted(in.Scope.Projects), Kinds: dedupSorted(in.Scope.Kinds), Items: dedupSorted(in.Scope.Items)},
 		Actions: dedupSorted(in.Actions)}
 	g.Scope.All = in.Scope.All
+	if err := normalizeImport(&g, in, now); err != nil {
+		return g, err
+	}
 	switch n := len(g.Scope.Projects) + len(g.Scope.Kinds) + len(g.Scope.Items); {
 	case g.Scope.All && n > 0:
 		return g, invalid("scope.all cannot be combined with projects, kinds or items")
@@ -321,4 +369,87 @@ func ActiveGrants(tx *store.Tx, a *auth.Auth, credential string, at time.Time) (
 		}
 	}
 	return out, nil
+}
+
+func basisErr(why string) error {
+	return domain.NewError(domain.CodeBasisRequired, why, "do not retry; give the Web link to the owner so they can issue a new import grant")
+}
+
+// importGrant 取一张可用的导入专用单并核对来源名：不是导入单（含不存在）为 grant_required，已撤销或已过期为 basis_required，
+// 来源名不符为 import_source_mismatch。三者都是退出码 23，why 写明哪一项。
+func importGrant(tx *store.Tx, id, source string, at time.Time) (Grant, error) {
+	g, err := GetGrant(tx, id)
+	if e, ok := err.(*domain.Error); ok && e.Code == domain.CodeNotFound {
+		return g, domain.NewError(domain.CodeGrantRequired, "grant "+id+" does not exist", "import.apply only accepts an import grant the owner issued in Web")
+	} else if err != nil {
+		return g, err
+	}
+	switch {
+	case g.Import == nil || !contains(g.Actions, ImportApply):
+		return g, domain.NewError(domain.CodeGrantRequired, "grant is not an import grant", "import.apply only accepts an import grant the owner issued in Web")
+	case !g.RevokedAt.IsZero():
+		return g, basisErr("grant was revoked")
+	case !g.Active(at):
+		return g, basisErr("grant has expired")
+	case g.Import.Source != source:
+		return g, domain.NewError(domain.CodeImportSourceMismatch, "import source does not match the grant's source", "import the source named on the grant, or ask the owner for a new grant")
+	}
+	return g, nil
+}
+
+func limitErr(max int) error {
+	return domain.NewError(domain.CodeImportLimitExceeded, fmt.Sprintf("this import would exceed the grant's record limit of %d", max), "send fewer records, or ask the owner for a new grant")
+}
+
+// ImportUsed 返回导入单名下已写入的累计条数。
+func ImportUsed(tx *store.Tx, id string) (int, error) {
+	r, err := tx.Query("SELECT used_records FROM policy_grant WHERE id = ?", id)
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+	var n int64
+	if r.Next() {
+		if err := r.Scan(&n); err != nil {
+			return 0, err
+		}
+	}
+	return int(n), r.Err()
+}
+
+// CheckImport 是预检：校验导入单、来源名与"已写入 + n 不超过上限"，不扣条数（dry_run 用）。
+func CheckImport(tx *store.Tx, id, source string, n int, at time.Time) error {
+	g, err := importGrant(tx, id, source, at)
+	if err != nil {
+		return err
+	}
+	used, err := ImportUsed(tx, id)
+	if err != nil {
+		return err
+	}
+	if used+n > g.Import.MaxRecords {
+		return limitErr(g.Import.MaxRecords)
+	}
+	return nil
+}
+
+// ConsumeImport 在调用方的写事务里为导入单扣 n 条：校验同 CheckImport，扣减是一条带上限条件的 UPDATE，
+// 并发导入的合计不会超过 max_records。调用方在同一事务里写入记录，失败回滚时扣减一并撤销。
+func ConsumeImport(tx *store.Tx, id, source string, n int, at time.Time) error {
+	if n < 1 {
+		return invalid("records to consume must be at least 1")
+	}
+	g, err := importGrant(tx, id, source, at)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Exec(`UPDATE policy_grant SET used_records = used_records + ? WHERE id = ? AND used_records + ? <= ?`,
+		n, id, n, g.Import.MaxRecords)
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return limitErr(g.Import.MaxRecords)
+	}
+	return nil
 }

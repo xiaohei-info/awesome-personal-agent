@@ -169,6 +169,15 @@ func Decide(p policy.Policy, r Request) Decision {
 	if r.Action == ActionChannelAnswer {
 		return decideChannel(p, r)
 	}
+	// 导入不对运行凭据开放：不论带单与否都是 permission_denied（退出码 4）。
+	if r.Command == policy.ImportApply && r.Level == LevelRun {
+		return denied()
+	}
+	// 只接受授权单的命令（§14.5）：delegate 不带单，或只带本人原话，是 grant_required；会话类型不参与。
+	if r.Command == policy.ImportApply && r.GrantID == "" && r.Level == LevelDelegate {
+		return Decision{Verdict: Deny, Err: withLink(domain.CodeGrantRequired, "import.apply only accepts a grant the owner issued in Web, not the owner's words",
+			"do not retry with other wording; give the Web link to the owner so they can issue an import grant", r.WebURL)}
+	}
 	if r.GrantID != "" {
 		switch r.Level {
 		case LevelDelegate:

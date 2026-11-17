@@ -40,7 +40,7 @@ export const SESSION_KIND = ["direct", "group", "unknown"] as const;
 /** 错误码：kernel/domain/errors.go Code。models_paused 由「暂停模型」改动新增 */
 export const ERROR_CODE = [
   "invalid_request", "unauthenticated", "permission_denied", "web_only", "executor_not_allowed", "risk_screening_pending",
-  "basis_required", "session_not_direct", "not_found", "conflict", "login_locked", "internal", "models_paused", "fetch_failed",
+  "basis_required", "session_not_direct", "grant_required", "import_source_mismatch", "import_limit_exceeded", "not_found", "conflict", "login_locked", "internal", "models_paused", "fetch_failed",
 ] as const;
 /** 错误码里只说了类别、要靠服务端 why 才说得清的：显示「类别：why」 */
 export const GENERIC_ERROR: readonly string[] = ["invalid_request", "conflict", "internal"];
@@ -74,7 +74,7 @@ export const PROTOCOL = ["system-one", "probability-judgment/1", "chat-completio
 export const PROB_SOURCE = ["native", "logprobs", "self_reported"] as const;
 /** 可授权的动作：kernel/policy/grant.go GrantableActions */
 export const GRANT_ACTION = [
-  "item.create", "item.update", "item.transition", "item.relate", "decision.answer", "proposal.accept", "proposal.dismiss",
+  "item.create", "item.update", "item.transition", "item.relate", "item.progress", "decision.answer", "proposal.accept", "proposal.dismiss",
   "proposal.attach", "revision.confirm", "revision.reject", "delegate.report", "followmsg.handback",
 ] as const;
 /** 授权单状态（Web 由 revoked_at、expires_at 推出） */
