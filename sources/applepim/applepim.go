@@ -35,6 +35,8 @@ const (
 
 const (
 	defaultTimeout = 60 * time.Second
+	// maxVerify 是每轮按 id 核实的提醒数上限：停用很久后一次离开几百条时，单轮不会超时；其余留在游标里下轮再核。
+	maxVerify      = 20
 	defaultMax     = 50
 	defaultDays    = 7
 	defaultHorizon = 30
@@ -503,13 +505,13 @@ func reminderScope(cfg Config) string {
 	return string(b)
 }
 
-// leftOpen 核实一条已不在未完成集合里的提醒。找不到或这一条不允许读（同一轮的列表读取已经成功，系统授权没问题）
+// leftOpen 核实一条已不在未完成集合里的提醒（输出形态与找不到时的文本见 testdata 与附录 D.3 MEAS-REM-GET）。找不到或这一条不允许读（同一轮的列表读取已经成功，系统授权没问题）
 // 记为读不到；其他读失败返回错误：整轮失败，游标不前进。
 func leftOpen(ctx context.Context, r Runner, id, title string, now time.Time) (event, error) {
 	ev := event{Type: "reminder.out_of_view", Subject: title, OccurredAt: now.UTC().Format(time.RFC3339Nano), CorrelationKeys: []string{id}}
 	out, err := call(ctx, r, "reminder-cli", "get", "--format=json", "--id="+id)
 	switch {
-	case err != nil && (strings.Contains(strings.ToLower(err.Error()), "not found") || authRe.MatchString(err.Error())):
+	case err != nil && (strings.Contains(strings.ToLower(err.Error()), "reminder not found") || authRe.MatchString(err.Error())):
 		ev.Summary = "已读不到：可能已删除，或不再允许读取；不表示已完成"
 	case err != nil:
 		return ev, err
@@ -607,7 +609,11 @@ func pollReminders(ctx context.Context, r Runner, cfg Config, cursor string, now
 		}
 	}
 	slices.Sort(gone)
-	for _, id := range gone {
+	for i, id := range gone {
+		if i >= maxVerify {
+			next.Open[id] = prev.Open[id] // 这一轮没核实：仍按"上一轮看到过"留着，下一轮再算离开
+			continue
+		}
 		ev, err := leftOpen(ctx, r, id, prev.Open[id], now)
 		if err != nil {
 			return nil, "", err

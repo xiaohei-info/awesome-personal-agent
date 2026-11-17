@@ -100,7 +100,7 @@ default: {zh: Apple 邮件, en: Apple Mail}
 
 **没有到期日的提醒事项**（主文档 §21.1 决定 75）：`apple-pim-source` 的 `reminders` 另有配置 `undated_lists`（列表名或 ID 的数组，缺省为空）。列在其中的列表，未完成的提醒不论有没有到期日都产出事件：有到期日的仍是 `reminder.due`，没有到期日的是 `reminder.open`，`occurred_at` 取提醒的创建时间（工具不给时取本次拉取的时刻），`summary` 写列表名。两种类型的事件 id 与关联键构成相同（关联键是提醒 id），所以提醒改了标题仍是同一个关联键，后来补上到期日时按来源对象更新写回原事项。没有列在 `undated_lists` 里的列表行为不变。来源只读：事项完成后不回写、不删除那条提醒。工具取"未完成、不论到期日"的参数待实测（`MEAS-REM-UNDATED`），没有专门的筛选时取该列表的全部未完成提醒，由适配器筛。内置规则 `reminder-open` 把它直接列为建议（附录 C.14）。
 
-**离开未完成集合的提醒**：提醒事项工具的"已完成"筛选返回全部历史，按它取会触发条数上限，所以适配器按差集找出变化、再逐条核实。游标记着拉取范围的指纹（`lists` 与 `undated_lists`）和上一轮看到的未完成提醒（id 到标题）；这一轮不在未完成集合里的，各用只读的按 id 读取（`get`）核实一次：读到已完成的发 `reminder.completed`（`occurred_at` 取完成时间）；仍未完成的（到期日移出了 `upcoming`、去掉了到期日、换了列表）与找不到或这一条不允许读的，发 `reminder.out_of_view`，`summary` 写明原因并注明不表示完成。两种事件的关联键都是提醒 id，标题沿用上一轮。类型本身就区分"已完成"与"只是看不到了"，所以来源的外发范围只给元数据时，简报也不会把后者读成已完成。核实时其他读失败（超时、工具报错）整轮失败，游标不前进，下一轮重试。首次拉取、升级前的时间串游标、拉取范围变了时，这一轮只建立基线，不发。内置规则 `reminder-status` 把两种事件作为挂靠消息记在这条提醒建出的事项上，不改标题与正文，也不关闭事项；没有事项的只记 `ignored`。工具区分不了删除与移到不允许读的列表，两者都记为读不到。
+**离开未完成集合的提醒**：提醒事项工具的"已完成"筛选返回全部历史，按它取会触发条数上限，所以适配器按差集找出变化、再逐条核实。游标记着拉取范围的指纹（`lists` 与 `undated_lists`）和上一轮看到的未完成提醒（id 到标题）；这一轮不在未完成集合里的，各用只读的按 id 读取（`get`）核实一次：读到已完成的发 `reminder.completed`（`occurred_at` 取完成时间）；仍未完成的（到期日移出了 `upcoming`、去掉了到期日、换了列表）与找不到或这一条不允许读的，发 `reminder.out_of_view`，`summary` 写明原因并注明不表示完成。两种事件的关联键都是提醒 id，标题沿用上一轮。类型本身就区分"已完成"与"只是看不到了"，所以来源的外发范围只给元数据时，简报也不会把后者读成已完成。每轮至多核实 20 条，其余留在游标里下一轮再核；核实时其他读失败（超时、工具报错）整轮失败，游标不前进，下一轮重试。工具的读取契约见 D.3 `MEAS-REM-GET`。首次拉取、升级前的时间串游标、拉取范围变了时，这一轮只建立基线，不发。内置规则 `reminder-status` 把两种事件作为挂靠消息记在这条提醒建出的事项上，不改标题与正文，也不关闭事项；没有事项的只记 `ignored`。工具区分不了删除与移到不允许读的列表，两者都记为读不到。
 
 
 ## D.3 工具的实测结论
@@ -118,6 +118,7 @@ default: {zh: Apple 邮件, en: Apple Mail}
 | `MEAS-CAL-RECUR` | 成立 | 命题：重复事件按窗口展开为实例。`FREQ=DAILY;COUNT=3` 的日程在窗口内列出 3 个实例，id 为主日程 id 加 `_<开始时间>`，`iCalUID` 相同，`originalStartTime` 各异；删除后窗口内不再出现。创建命令无法关闭日历默认提醒。gog v0.9.0 |
 | `MEAS-CAL-AUTH` | 成立 | 命题：认证失败可识别。账号没有令牌：退出码 1，stderr `No auth for calendar <账号>`；keyring 口令不对：退出码 1，stderr 含 `integrity check failed`。没有专用退出码，适配器按 stderr 识别并返回 2。gog v0.9.0 |
 | `MEAS-CAL-FLAGS` | 成立 | 命题：gog 没有只读开关。传入 `--readonly` 即以 `unknown flag` 失败；`--enable-commands` 只认顶层命令，写成 `calendar.events` 之类的子命令会连 `calendar` 一起禁用。API 命令要 `--account`（或 gog 自己的缺省账号），使用文件 keyring 时还要 `GOG_KEYRING_PASSWORD`。gog v0.9.0 |
+| `MEAS-REM-GET` | 成立 | 命题：`reminder-cli get --format=json --id=<id>` 只读返回单条提醒，带完成状态与完成时间，找不到可识别。输出为 `{"success":true,"reminder":{…}}`，`reminder` 含 `id`、`title`、`isCompleted`、`list`、`listId`、`priority`，按需含 `dueDate`、`notes`、`alarms`，已完成的含 `completionDate`（UTC，形如 `2026-01-03T09:30:00Z`）；找不到时退出码 1、stdout 为空、stderr 为 `Error: Reminder not found: <id>`，适配器按 `reminder not found` 识别。apple-pim 的 reminder-cli（无版本参数），本机只读实测一条已完成的提醒与一个不存在的 id，未改任何提醒；去除个人内容的样本在 `sources/applepim/testdata` |
 
 尚未证实的条目，以及由谁证实：
 

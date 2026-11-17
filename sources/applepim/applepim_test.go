@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -219,15 +220,17 @@ func TestRemindersLeavingTheOpenSetAreVerified(t *testing.T) {
 				return r(ctx, cli, a...)
 			}
 			switch argVal(a, "--id=") {
-			case "RX":
-				return []byte(`{"success":true,"reminder":{"id":"RX","title":"旧提醒","isCompleted":true,"completionDate":"2026-01-03T09:30:00Z"}}`), nil, nil
-			case "RY":
-				return []byte(`{"success":true,"reminder":{"id":"RY","title":"改了到期日","isCompleted":false,"dueDate":"2026-03-01"}}`), nil, nil
+			case "RX", "RY": // 录制样本（MEAS-REM-GET）
+				return r(ctx, cli, a...)
 			case "RZ":
 				if transient {
 					return nil, []byte("boom"), errors.New("exit 1")
 				}
-				return nil, []byte("Error: Reminder not found: RZ"), errors.New("exit 1")
+				stderr, err := os.ReadFile("testdata/get-notfound.stderr")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return nil, stderr, errors.New("exit status 1")
 			}
 			t.Fatalf("unexpected get %v", a)
 			return nil, nil, nil
@@ -282,5 +285,34 @@ func TestRemindersBaselineOnlyWhenNotComparable(t *testing.T) {
 				t.Errorf("%s: nothing to verify, got %v", name, c)
 			}
 		}
+	}
+}
+
+// 每轮至多核实 maxVerify 条；没核实的仍留在游标里，下一轮再核，不会被当成已处理。
+func TestRemindersVerifyAtMostMaxPerPoll(t *testing.T) {
+	var calls [][]string
+	base := replay(t, &calls)
+	gets := 0
+	mk := func(c Config) Runner {
+		r := base(c)
+		return func(ctx context.Context, cli string, a ...string) ([]byte, []byte, error) {
+			if a[0] != "get" {
+				return r(ctx, cli, a...)
+			}
+			gets++
+			return []byte(`{"success":true,"reminder":{"id":"` + argVal(a, "--id=") + `","isCompleted":true}}`), nil, nil
+		}
+	}
+	open := map[string]string{"R1": "x"}
+	for i := range maxVerify + 2 {
+		open[fmt.Sprintf("G%02d", i)] = "离开的"
+	}
+	cur, _ := json.Marshal(map[string]any{"scope": "[null,null]", "open": open})
+	in, _ := json.Marshal(map[string]any{"config": map[string]any{"kind": "reminders"}, "cursor": string(cur)})
+	code, lines, _ := exec1(t, mk, string(in))
+	var c struct{ Open map[string]string }
+	_ = json.Unmarshal([]byte(lines[len(lines)-1]["cursor"].(string)), &c)
+	if code != ExitOK || gets != maxVerify || c.Open["G00"] != "" || c.Open[fmt.Sprintf("G%02d", maxVerify)] == "" || c.Open[fmt.Sprintf("G%02d", maxVerify+1)] == "" {
+		t.Fatalf("code=%d gets=%d cursor=%v", code, gets, c.Open)
 	}
 }
