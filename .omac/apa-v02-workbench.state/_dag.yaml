@@ -1,4 +1,4 @@
-# sha256: 2ac09caeff2d4af32872858b523e640a5ce22c0d6b19993727771e20e0f2b31d
+# sha256: b56a5a7dd65163e67364dfab086b17a5c2263d7bf2d32feab034ce02df599ebb
 defects:
   schema: omac.defect-ledger/v1
   used_global: 5
@@ -50,6 +50,6 @@ defects:
       - content-retention
       reporters:
       - e2e-schema8-upgrade
-      state: fixing
+      state: fixed
       fix_node: fix.raw-retention-purge.24d53a
   inbox: []
