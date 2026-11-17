@@ -26,6 +26,11 @@ function server(o: { fail?: boolean; items?: unknown[]; reject?: boolean; routin
     if (url === "/v1/projects") return json(200, { projects: [{ id: "home", name: "家务" }, { id: "work", name: "工作" }] });
     if (o.fail) return json(500, { code: "internal", why: "ledger unavailable", next: "retry" });
     if (url === "/v1/items?kind=brief") return json(200, { items: o.items ?? items });
+    const one = url.match(/^\/v1\/items\/([^/?]+)$/);
+    if (one) {
+      const it = (o.items ?? items).find((x) => (x as { id: string }).id === decodeURIComponent(one[1]));
+      return it ? json(200, { item: it, relations: [] }) : json(404, { code: "not_found", why: "no such item", next: "" });
+    }
     if (url === "/v1/packs") return json(200, { packs: o.routine ? [...packs, { name: "routine", instance_params: {} }] : packs });
     if (url === "/v1/settings/policy") return json(200, { version: 1, default_harness: o.host ?? "" });
     if (url === "/v1/settings/access-limits") return json(200, { version: 1, permission_cap: { default: "read", by_harness: o.caps ?? {} } });
@@ -51,54 +56,128 @@ function server(o: { fail?: boolean; items?: unknown[]; reject?: boolean; routin
   }) as unknown as typeof fetch;
   return f;
 }
-function mount(f: typeof fetch) {
+function mount(f: typeof fetch, path = "/briefs/schedule") {
   sessionStorage.setItem("apa.csrf", "tok-1");
-  return render(<MemoryRouter initialEntries={["/briefs"]}><App features={[feature]} fetchImpl={f} /></MemoryRouter>);
+  return render(<MemoryRouter initialEntries={[path]}><App features={[feature]} fetchImpl={f} /></MemoryRouter>);
 }
 
 beforeEach(() => sessionStorage.clear());
 
+const LONG = { id: "b9", kind: "brief", title: "晚报", created_at: "2030-02-01T12:00:00Z", origin: { source: "instance:ins_1" }, spec: { period: "2030-W05", sections: [
+  { title: "要点", body: "# 要点\n## 小标题\n第一行\n第二行\n\n- 事项一\n  - 子项\n- 事项二\n\n1. 先做\n2. 再做\n\n| 名称 | 状态 |\n| --- | --- |\n| 报告 | **完成** |\n\n```\nnpm test\n```\n\n> 引用一句\n\n看 [文档](https://example.org/a) 与 https://example.org/b.\n\n- [x] 已完成项\n- [ ] 待办项\n\n1. 步骤一\n\n   步骤一的第二段\n\n       缩进代码行\n\n2. 步骤二\n\n**粗体里的 [嵌套链接](https://example.org/n) 与 *斜体***" },
+  { title: "危险", body: "<script>alert(1)</script>\n\n[点我](javascript:alert(1)) [数据](data:text/html;base64,AAAA) [相对](/judgments/x)\n\n![x](https://example.org/p.png) ![y](javascript:alert(2))" },
+] } };
+const old = (n: number) => ({ id: `o${String(n).padStart(2, "0")}`, kind: "brief", title: `旧简报${n}`, created_at: `2029-12-${String(n).padStart(2, "0")}T08:00:00Z`, spec: { sections: [{ title: "回顾", body: `内容${n}` }] } });
+
 describe("简报页", () => {
-  it("flow-brief: 每份简报按项目分节显示正文", async () => {
-    mount(server());
+  it("正文按 Markdown 渲染：标题下移、段落换行、嵌套列表、表格、代码、引用、链接", async () => {
+    mount(server({ items: [LONG, ...items] }), "/briefs");
+    const a = within(await screen.findByLabelText("简报 晚报"));
+    expect(a.getByRole("heading", { level: 3, name: "要点" })).toBeInTheDocument();
+    expect(a.getAllByRole("heading", { name: "要点" })).toHaveLength(1); // 正文开头重复的同名标题不再画一遍
+    expect(a.getByRole("heading", { level: 5, name: "小标题" })).toBeInTheDocument(); // 正文 ## 落在节标题之下
+    expect(a.getByText(/第一行/).innerHTML).toContain("<br>"); // 单个换行保留
+    expect(within(a.getAllByRole("list")[0]).getAllByRole("listitem")[0]).toHaveTextContent("事项一 子项");
+    expect(a.getByText("子项").closest("ul")!.parentElement!.tagName).toBe("LI");
+    expect(a.getAllByRole("list")[2].tagName).toBe("OL"); // [0] 无序列表 [1] 其子列表
+    expect(a.getByRole("columnheader", { name: "状态" })).toBeInTheDocument();
+    expect(a.getByRole("cell", { name: "完成" }).querySelector("strong")).not.toBeNull();
+    expect(a.getByText("npm test").tagName).toBe("CODE");
+    expect(a.getByText("引用一句").closest("blockquote")).not.toBeNull();
+    expect(a.getByRole("link", { name: "文档" })).toHaveAttribute("href", "https://example.org/a");
+    expect(a.getByRole("link", { name: "https://example.org/b" })).toHaveAttribute("href", "https://example.org/b"); // 句号不进链接
+  });
+
+  it("成熟解析库覆盖的写法：任务清单、列表项内多段、缩进代码、嵌套强调与链接", async () => {
+    mount(server({ items: [LONG] }), "/briefs");
+    const a = within(await screen.findByLabelText("简报 晚报"));
+    const boxes = a.getAllByRole("checkbox");
+    expect(boxes.map((b) => (b as HTMLInputElement).checked)).toEqual([true, false]);
+    expect(boxes[0]).toBeDisabled();
+    const step = a.getByText("步骤一").closest("li")!;
+    expect(step.querySelectorAll("p")).toHaveLength(2); // 同一项里两段
+    expect(within(step).getByText("步骤一的第二段")).toBeInTheDocument();
+    expect(step.querySelector("pre code")).toHaveTextContent("缩进代码行");
+    const strong = a.getByRole("link", { name: "嵌套链接" }).closest("strong")!;
+    expect(strong.querySelector("em")).toHaveTextContent("斜体");
+    expect(strong.querySelector("a")).toHaveAttribute("rel", expect.stringContaining("noopener"));
+  });
+
+  it("HTML 与脚本只显示为文本，危险链接不可点，外部图片点开前不请求", async () => {
+    const { container } = mount(server({ items: [LONG] }), "/briefs");
+    const a = within(await screen.findByLabelText("简报 晚报"));
+    expect(a.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument();
+    expect(container.querySelector("script")).toBeNull();
+    expect(a.queryByRole("link", { name: "点我" })).toBeNull();
+    expect(a.getByText(/点我 数据 相对/)).toBeInTheDocument(); // 不放行的协议与相对路径只显示文字
+    expect(a.queryByRole("link", { name: /数据|相对/ })).toBeNull();
+    expect(container.querySelector("a[href^='javascript'], a[href^='data']")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+    expect(a.getByRole("button", { name: "加载图片：x" })).toBeInTheDocument();
+    expect(a.queryByRole("button", { name: "加载图片：y" })).toBeNull(); // 非 http(s) 图片不给点
+    await userEvent.click(a.getByRole("button", { name: "加载图片：x" }));
+    expect(container.querySelector("img")).toHaveAttribute("src", "https://example.org/p.png");
+  });
+
+  it("最新一份整份展开，旧的按时间倒排列在历史里，不重复展开；带来源安排便于区分早晚", async () => {
+    mount(server({ items: [LONG, ...items] }), "/briefs");
+    const latest = within(await screen.findByRole("region", { name: "最新一份" }));
+    expect(latest.getByLabelText("简报 晚报")).toBeInTheDocument();
+    const hist = within(await screen.findByRole("list", { name: "历史简报列表" }));
+    const names = hist.getAllByRole("link").map((l) => l.textContent);
+    expect(names).toEqual(["新简报", "空简报", "周复盘", "周一简报"]); // 按 created_at 从新到旧，与返回顺序无关
+    expect(hist.getByText(/简报 · 工作日 08:30/)).toBeInTheDocument(); // 周一简报来自 ins_1
+    expect(screen.queryByText("家里进展")).not.toBeInTheDocument(); // 历史只列标题与时间
+  });
+
+  it("历史简报可打开完整内容，刷新（按 id 重读）后仍在；打不开的 id 显示原因", async () => {
+    const { unmount } = mount(server({ items: [LONG, ...items] }), "/briefs/b1");
     const a = within(await screen.findByLabelText("简报 周一简报"));
-    // 分节标题是项目名：名字异步取到后替换 id，等名字出现再断言，避免与加载先后赛跑。
     expect(await a.findByRole("heading", { name: "家务" })).toBeInTheDocument();
     expect(a.getByText("家里进展")).toBeInTheDocument();
-    expect(await a.findByRole("heading", { name: "工作" })).toBeInTheDocument();
     expect(a.getByText("工作进展")).toBeInTheDocument();
-    expect(a.getByText(/2030-W01/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "← 返回简报" })).toHaveAttribute("href", "/briefs");
+    unmount();
+    mount(server({ items: [] }), "/briefs/nope");
+    expect(await screen.findByRole("alert")).toHaveTextContent("no such item");
   });
 
-  it("flow-brief-material: 带 title 的节按标题显示（无 project 也不丢），与按项目的节同卡并存", async () => {
-    mount(server());
-    const a = within(await screen.findByLabelText("简报 新简报"));
-    expect(a.getByRole("heading", { name: "日程" })).toBeInTheDocument();
-    expect(a.getByText("今天 10:00 站会")).toBeInTheDocument();
-    expect(a.getByRole("heading", { name: "知会" })).toBeInTheDocument();
-    expect(a.getByText("无")).toBeInTheDocument();
-    expect(await a.findByRole("heading", { name: "家务" })).toBeInTheDocument();
-    expect(a.getByText("家里新进展")).toBeInTheDocument();
-    expect(a.queryByText("暂无分节内容")).not.toBeInTheDocument();
+  it("历史分页：每页 20 条，翻页与按页码进入都能找到旧简报", async () => {
+    const many = Array.from({ length: 25 }, (_, n) => old(n + 1)); // 12-01…12-25，加一份最新的
+    mount(server({ items: [LONG, ...many] }), "/briefs");
+    const hist = within(await screen.findByRole("list", { name: "历史简报列表" }));
+    expect(hist.getAllByRole("link")).toHaveLength(20);
+    expect(hist.getAllByRole("link")[0]).toHaveTextContent("旧简报25");
+    expect(screen.getByText("第 1 / 2 页")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(within(await screen.findByRole("list", { name: "历史简报列表" })).getAllByRole("link").map((l) => l.textContent)).toEqual(["旧简报5", "旧简报4", "旧简报3", "旧简报2", "旧简报1"]);
+    expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
   });
 
-  it("简报与复盘（同为 brief 事项）合并在同一列表，不按猜测的后缀分栏", async () => {
-    mount(server());
-    const list = within(await screen.findByRole("region", { name: "简报" }));
-    expect(list.getByLabelText("简报 周一简报")).toBeInTheDocument();
-    expect(list.getByLabelText("简报 周复盘")).toBeInTheDocument();
-    expect(list.getByText("复盘工作")).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "复盘" })).not.toBeInTheDocument();
+  it("旧简报缺少 created_at 与来源时仍可读、可打开", async () => {
+    mount(server({ items: [{ id: "x1", kind: "brief", title: "很早的简报", spec: { sections: [{ project: "home", body: "旧写法" }] } }, items[0]] }), "/briefs");
+    expect(await screen.findByLabelText("简报 周一简报")).toBeInTheDocument();
+    const hist = within(await screen.findByRole("list", { name: "历史简报列表" }));
+    expect(hist.getByText("生成时间未记录")).toBeInTheDocument();
+    await userEvent.click(hist.getByRole("link", { name: "很早的简报" }));
+    expect(await screen.findByText("旧写法")).toBeInTheDocument();
   });
 
   it("没有分节内容的简报显示空状态", async () => {
-    mount(server());
+    mount(server({ items: [items[3]] }), "/briefs");
     expect(within(await screen.findByLabelText("简报 空简报")).getByText("暂无分节内容")).toBeInTheDocument();
   });
 
   it("没有任何简报时显示空状态", async () => {
-    mount(server({ items: [] }));
+    mount(server({ items: [] }), "/briefs");
     expect(await screen.findByText("还没有简报")).toBeInTheDocument();
+  });
+
+  it("简报页把「已生成的」与「定时安排」分开，安排页不再混着简报正文", async () => {
+    mount(server());
+    expect(await screen.findByRole("group", { name: "简报" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("简报 周一简报")).toBeNull();
+    expect(screen.getByRole("link", { name: "已生成的简报" })).toHaveAttribute("href", "/briefs");
   });
 
   it("flow-brief: 只列出简报类能力包的实例；每个一张卡，收起时一行摘要，不露 cron 串", async () => {
@@ -146,7 +225,7 @@ describe("简报页", () => {
     mount(server({ ready: true }, calls));
     const card = within(await screen.findByRole("group", { name: "简报" }));
     expect(card.queryByText("等 Agent 接入后开始")).toBeNull();
-    expect(card.getByRole("link", { name: /最近一次/ })).toHaveAttribute("href", "/items/b1");
+    expect(card.getByRole("link", { name: /最近一次/ })).toHaveAttribute("href", "/briefs/b1");
     await userEvent.click(card.getByRole("button", { name: "立即跑一次" }));
     expect(calls.posts).toEqual([{ body: "/v1/instances/ins_1/run", csrf: "tok-1" }]);
     expect(await card.findByText("已开始")).toBeInTheDocument();
@@ -190,8 +269,8 @@ describe("简报页", () => {
     const calls: Calls = { posts: [], urls: [] };
     const f = (async (url: string, init?: RequestInit) =>
       url === "/v1/items?kind=brief" ? json(200, { items: [] }) : url === "/v1/instances" && init?.method !== "POST" ? json(200, { instances: [] }) : server({}, calls)(url, init)) as unknown as typeof fetch;
-    mount(f);
-    await userEvent.click(await screen.findByRole("button", { name: "每天早上给我一份" }));
+    mount(f, "/briefs");
+    await userEvent.click(await screen.findByRole("link", { name: "每天早上给我一份" }));
     expect(calls.posts).toEqual([]);
     expect(screen.getByLabelText("哪几天")).toHaveValue("*");
     expect(screen.getByLabelText("几点")).toHaveValue("08:00");

@@ -62,6 +62,15 @@ const field = (name: string) => screen.findByLabelText(name);
 beforeEach(() => sessionStorage.clear());
 
 describe("Web 新建与编辑事项", () => {
+  it("简报事项的详情页按 Markdown 显示分节正文，不只显示 body", async () => {
+    const l = ledger();
+    l.items.push({ id: "b1", version: 1, kind: "brief", phase: "open", title: "晨报", spec: { sections: [{ title: "日程", body: "- 10:00 站会\n- **周五**出发" }] } });
+    mount(l, "/items/b1");
+    expect(await screen.findByRole("heading", { level: 3, name: "日程" })).toBeInTheDocument();
+    expect(screen.getByText("周五").tagName).toBe("STRONG");
+    expect(screen.getByText("10:00 站会").tagName).toBe("LI");
+  });
+
   it("ACT-WBN-02 新建事项直接 open，同时写入项目、截止、计划日期与正文，并跳到详情", async () => {
     const l = ledger();
     const u = userEvent.setup();
