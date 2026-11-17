@@ -1,11 +1,12 @@
-# sha256: 7aa5c22b1b0c7b357c566e581605c7d6b1001dd2374b480ce63d90a5c380e18f
+# sha256: 2ac09caeff2d4af32872858b523e640a5ce22c0d6b19993727771e20e0f2b31d
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 4
+  used_global: 5
   used_by_reporter:
     e2e-raw-ingest: 1
     web-link-materials: 1
     web-raw-actions: 2
+    e2e-schema8-upgrade: 1
   granted_by_reporter: {}
   granted_global: 0
   entries:
@@ -43,4 +44,12 @@ defects:
       - web-raw-actions
       state: fixed
       fix_node: fix.attachment-fetch.7f1703
+    dfx-24d53a81486f:
+      suspected: raw-retention-purge
+      anchors:
+      - content-retention
+      reporters:
+      - e2e-schema8-upgrade
+      state: fixing
+      fix_node: fix.raw-retention-purge.24d53a
   inbox: []

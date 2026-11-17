@@ -11,76 +11,70 @@ meta:
   - 01a1e544-2000-750d-9c83-0401472cc122
   - 01a1e544-225a-77b1-8b32-0ff70a73da95
   - 01a1e557-c6de-78d2-931b-e83115a95afb
-  amendment_revision: 4
+  amendment_revision: 5
   amendment_apply:
     schema: omac.amendment-apply/v1
-    amendment_id: amend-117e60d1db72
+    amendment_id: amend-a06463d5fab4
     amendment_file: .omac/apa-v02-workbench.system-amendment.yaml
     nodes:
-      fix.attachment-fetch.7f1703:
+      fix.raw-retention-purge.24d53a:
         stage: authoring
         state: synced
         reason: no existing work item side effect
-        expected_review_generation: amendment-639af10109f98a5e45afca81
-      web-raw-actions:
+        expected_review_generation: amendment-4be6103d1aefac66675bd7f8
+      e2e-schema8-upgrade:
         stage: authoring
         state: synced
-        work_item_id: 01a1e6ca-5a0d-797e-9a15-2ce8527428d9
+        work_item_id: 01a1e743-7c5a-75bc-a718-b30acbde7ef6
         baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-e3cd436a38d5bee0be28b578
+          review_generation: null
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
+          bounce_baseline: null
           decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 9f2ddafcf4f78859fa9a1a220cbb5cd95cb2802d7e6be36d3fb012e5c83c1354
+          contract_sha256: 467e8cba6287c86c9cba037745141d72b51a58742e357269a4f819e770932fed
           worker_handoff_pending: true
         bounce_baseline:
           merge: 0
           review: 0
           worker: 0
-        expected_contract_sha256: 9f2ddafcf4f78859fa9a1a220cbb5cd95cb2802d7e6be36d3fb012e5c83c1354
+        expected_contract_sha256: 467e8cba6287c86c9cba037745141d72b51a58742e357269a4f819e770932fed
         superseded_decision:
           reason_code: worker-decision-required
           gate: worker
           blocker_reason_code: upstream-defect
-          decision_sha256: e652b42e4726185ff9fbe8b30c8c79eacbf59fb6f67dc0bb7682b79fe29e8fc6
-        expected_review_generation: amendment-4f701b37b4c758147e7e1977
+          decision_sha256: d93b9dc6e168f4fcc9d068139aca1855e999a6d4dc7affd7ee0d17066fc39590
+        expected_review_generation: amendment-9c10e984c383996d144160b9
         attempt_baseline:
           status: blocked
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-e3cd436a38d5bee0be28b578
+          review_generation: null
           review_ledger_generation: null
           review_ledger_current: false
-          bounce_baseline:
-            merge: 0
-            review: 0
-            worker: 0
+          bounce_baseline: null
           decision_required_pending: true
           review_report_pending: false
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 9f2ddafcf4f78859fa9a1a220cbb5cd95cb2802d7e6be36d3fb012e5c83c1354
+          contract_sha256: 467e8cba6287c86c9cba037745141d72b51a58742e357269a4f819e770932fed
           worker_handoff_pending: true
         observed:
           status: todo
           phase: authoring
           review_verdict: null
           review_subject_digest: null
-          review_generation: amendment-4f701b37b4c758147e7e1977
+          review_generation: amendment-9c10e984c383996d144160b9
           review_ledger_generation: null
           review_ledger_current: false
           bounce_baseline:
@@ -92,7 +86,7 @@ meta:
           review_continuation_pending: false
           reviewer_run_baseline_pending: false
           delivery_identity_pending: false
-          contract_sha256: 9f2ddafcf4f78859fa9a1a220cbb5cd95cb2802d7e6be36d3fb012e5c83c1354
+          contract_sha256: 467e8cba6287c86c9cba037745141d72b51a58742e357269a4f819e770932fed
           worker_handoff_pending: false
     retained_bounce_baselines:
       e2e-raw-ingest:
@@ -111,8 +105,16 @@ meta:
           merge: 0
           review: 0
           worker: 0
+      web-raw-actions:
+        amendment_id: amend-117e60d1db72
+        work_item_id: 01a1e6ca-5a0d-797e-9a15-2ce8527428d9
+        contract_sha256: 9f2ddafcf4f78859fa9a1a220cbb5cd95cb2802d7e6be36d3fb012e5c83c1354
+        bounce_baseline:
+          merge: 0
+          review: 0
+          worker: 0
     system: true
-  last_amendment_id: amend-117e60d1db72
+  last_amendment_id: amend-a06463d5fab4
 nodes:
 - id: schema-v8
   worker: omac-worker-backend
@@ -3839,6 +3841,7 @@ nodes:
   - raw-retention-purge
   - link-material
   - import-apply
+  - fix.raw-retention-purge.24d53a
   title: e2e：结构版本 7 → 8 升级与回退演练
   description: 产出 e2e-schema8-upgrade-evidence。全流程 owner：flow-wb-schema8-upgrade。ACT-S8-05
     跨多个新接口（来源的 content_retention_days、事项 origin 查询、审计 imported 筛选、带授权单事件的回放），由本节点在升级后的夹具上直接断言。用例加在已有的
@@ -5501,4 +5504,97 @@ nodes:
       - dedup-tombstone
     defect_refs:
     - dfx-7f170357a7d4
+    coverage_gate: 80
+- id: fix.raw-retention-purge.24d53a
+  worker: omac-worker-backend-oracle
+  blocked_by:
+  - raw-ingest
+  title: 'Fix raw-retention-purge: dfx-24d53a81486f'
+  description: "Automatic fix for upstream defect(s) reported by e2e-schema8-upgrade.\n\n-
+    [design-gap] anchors content-retention (docs/solution-design.md#165-备份升级回退与卸载)\n
+    \ expected: apa doctor --upgrade-check (read-only, run before the upgrade, §16.5
+    step 1) lists every source without an external outbound scope on a structure-version
+    4/5/7 ledger, as ACT-UPG-02 asserts.\n  observed: source_outbound status=error,
+    why \"the source registrations cannot be read: store: query: SQL logic error:
+    no such column: content_retention_days (1)\"; details empty.\n  where: kernel/doctor/facts.go:LegacySources;
+    kernel/sources/registry/registry.go:cols\n  repro (the reporter re-runs it after
+    your fix merges; it is not your gate): `go test -tags=e2e -count=1 -run TestUpgradeChain/V7
+    ./tests/e2e/upgrade/...` (exit 1)"
+  reviewer: omac-reviewer
+  contract:
+    objective: 'Fix the upstream defect(s) dfx-24d53a81486f in raw-retention-purge:
+      apa doctor --upgrade-check (read-only, run before the upgrade, §16.5 step 1)
+      lists every source without an external outbound scope on a structure-version
+      4/5/7 ledger, as ACT-UPG-02 asserts.'
+    non_goals:
+    - 结构变更只经 schema-v8；本节点若仍需改结构，在 PR 说明写明并另起新迁移（结构版本 8 首次被真实账本应用后冻结，§16.5）
+    - 不做 Web 入口（web-storage-page、web-raw-actions）
+    - 不改默认值：默认不清理
+    - 不实现其他节点负责的 action；跨节点只经已合入的命令模型、HTTP API 与本 DAG 声明的产物协作
+    - 不新增本迭代设计（附录 A–D、changes-v0.2.0 第十节）之外的命令、路由、事件类型、配置项或退出码；与设计冲突时先提设计修改（§17.3
+      退出码表不加行）
+    - 替身、夹具、测试时钟与迁移失败注入只进测试构建与测试目录，不进发布构建的生产路径，也不作为生产降级或假数据兜底
+    - 不连接真实模型端点、真实宿主、真实渠道账号或真实邮箱/提醒事项工具；L14–L24 由本人在升级后执行，不进本节点
+    - 红线：内核不出现笔记应用、邮件工具或宿主名，不 import connectors；示例里不写本机路径、真实邮箱与内网地址
+    - 去掉规划标记时只动本节点条目所在的行（附录 B、C）；为加标志拆出的行并回原行并删掉拆出的行（OMAC-NOTES §4）
+    verification_commands:
+    - go build -tags apa_testclock ./...
+    - go test -count=1 ./kernel/retention/... ./kernel/purge/... ./kernel/sources/...
+    - go test -count=1 ./api/settings/...
+    - go test -count=1 ./tests/conformance/ ./cli/serve/
+    - go run ./tools/redline
+    integration_gates:
+    - name: raw-retention-purge-gate
+      layer: L1
+      source_of_truth:
+      - docs/solution-design.md#615-物理删除与保留
+      - docs/solution-design.md#610-source-登记来源事件ingest
+      - docs/appendix-b-api-cli.md#b2-http-api
+      - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+      - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+      - docs/changes-v0.2.0.md#103-配置策略与授权
+      delivery_goal: 按来源的 content_retention_days（只经 Web 的 PUT /settings/sources/{id}/content-retention，记
+        Event）与维护循环清除（只清超天数且不挂未关闭事项的原文与预览，事件行留元信息并标 purged，无引用的已取回附件删除，每轮按来源记一条审计事件）；POST
+        /settings/purge 物理删除来源事件（连同原文、无引用附件与判断记录）与 with_source_events 随事项删除，去重键保留为墓碑
+      covers:
+      - ACT-RET-01
+      - ACT-RET-02
+      - ACT-RET-03
+      - ACT-PRG-01
+      - ACT-PRG-02
+      - ACT-PRG-03
+      acceptance_refs:
+      - flow-raw-retention
+      - flow-raw-purge
+      commands:
+      - go test -count=1 ./kernel/retention/... ./kernel/purge/...
+      - go test -count=1 ./api/settings/...
+      required_metrics: {}
+      artifacts: []
+    pr_base: main
+    acceptance_refs:
+    - flow-raw-retention
+    - flow-raw-purge
+    source_of_truth:
+    - docs/solution-design.md#615-物理删除与保留
+    - docs/solution-design.md#610-source-登记来源事件ingest
+    - docs/appendix-b-api-cli.md#b2-http-api
+    - docs/changes-v0.2.0.md#101-账本结构全部收在结构版本-7--8-一次迁移里
+    - docs/changes-v0.2.0.md#102-事件载荷与事件类型
+    - docs/changes-v0.2.0.md#103-配置策略与授权
+    - docs/changes-v0.2.0.md#104-http-api
+    scope_paths:
+    - kernel/retention/**
+    evidence_mode: fixture
+    consumes:
+    - artifact_id: raw-ingest-delivery
+      producer: raw-ingest
+      evidence_mode: artifact
+      requires:
+      - raw-content-store
+      - raw-limits
+      - webhook-original
+      - raw-read-compat
+    defect_refs:
+    - dfx-24d53a81486f
     coverage_gate: 80
