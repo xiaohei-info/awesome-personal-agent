@@ -559,6 +559,29 @@ func TestReminderDueBecomesProposedTaskWithoutModel(t *testing.T) {
 	}
 }
 
+// 提醒离开未完成集合（核实完成，或只是移出拉取范围）：挂到它建出的建议上作为后续消息，不改标题、不关闭、不调模型；没有事项的只记 ignored。
+func TestReminderStatusAttachesToItsSuggestion(t *testing.T) {
+	e := newEnv(t, false, nil)
+	e.emit("src_rem", "reminder", ev("rem1", "reminder.due", "交水费", map[string]any{"correlation_keys": []string{"rem-1"}}))
+	item := e.events("src_rem")[0].Item
+	e.emit("src_rem", "reminder",
+		ev("rem1|ov", "reminder.out_of_view", "交水费", map[string]any{"summary": "仍未完成，但已不在拉取范围内", "correlation_keys": []string{"rem-1"}}),
+		ev("rem9|done", "reminder.completed", "没建过的", map[string]any{"correlation_keys": []string{"rem-9"}}))
+	evs := e.events("src_rem")
+	if evs[1].Disposition != domain.DispositionAttached || evs[1].Item != item {
+		t.Fatalf("a reminder that left the open set must attach to its suggestion: %+v", evs[1])
+	}
+	if evs[2].Disposition != domain.DispositionIgnored || evs[2].Item != "" {
+		t.Fatalf("a completed reminder without an item is ignored: %+v", evs[2])
+	}
+	if it := e.item(item); it.Title != "交水费" || it.Phase != domain.PhaseProposed {
+		t.Fatalf("item rewritten: %+v", it)
+	}
+	if n := len(e.stub.Requests()); n != 0 {
+		t.Fatalf("model was called %d times", n)
+	}
+}
+
 // flow-reminder-open / ACT-REM-02：没有到期日的提醒事项（reminder.open）由 reminder-open 直接成为建议，不调模型。
 func TestReminderOpenBecomesProposedTaskWithoutModel(t *testing.T) {
 	e := newEnv(t, false, nil)
@@ -602,7 +625,7 @@ func TestPRActivityAndAgentsMDChangeAreIgnoredByRules(t *testing.T) {
 // 规则 id 是对外契约：why 与来源页按它显示命中规则。
 func TestStructuredRulesDeclareExitsAndSemanticTypes(t *testing.T) {
 	want := map[string]struct{ typ, then string }{
-		"reminder-due": {"reminder", "proposed"}, "reminder-open": {"reminder", "proposed"}, "agents-md-changed": {"github", "ignore"}, "pr-activity": {"github", "ignore"}}
+		"reminder-due": {"reminder", "proposed"}, "reminder-open": {"reminder", "proposed"}, "reminder-status": {"reminder", "ignore"}, "agents-md-changed": {"github", "ignore"}, "pr-activity": {"github", "ignore"}}
 	got := 0
 	for _, r := range loadBuiltin(t).SourceRules {
 		if w, ok := want[r.ID]; ok {

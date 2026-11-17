@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -203,5 +204,115 @@ func TestMailThreadCorrelationKeys(t *testing.T) {
 		if lines[i]["id"] != id || len(ks) != 1 || ks[0] != "thread:mid-p1@example.test" {
 			t.Errorf("%s: %v", id, lines[i])
 		}
+	}
+}
+
+// 离开未完成集合的提醒逐条按 id 核实：已完成的发 reminder.completed（时刻取完成时间）；仍未完成（移出拉取范围）
+// 或找不到的发 reminder.out_of_view，类型本身不表示完成。其他读失败整轮失败、不出游标。
+func TestRemindersLeavingTheOpenSetAreVerified(t *testing.T) {
+	var calls [][]string
+	base := replay(t, &calls)
+	transient := false
+	mk := func(c Config) Runner {
+		r := base(c)
+		return func(ctx context.Context, cli string, a ...string) ([]byte, []byte, error) {
+			if a[0] != "get" {
+				return r(ctx, cli, a...)
+			}
+			switch argVal(a, "--id=") {
+			case "RX", "RY": // 录制样本（MEAS-REM-GET）
+				return r(ctx, cli, a...)
+			case "RZ":
+				if transient {
+					return nil, []byte("boom"), errors.New("exit 1")
+				}
+				stderr, err := os.ReadFile("testdata/get-notfound.stderr")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return nil, stderr, errors.New("exit status 1")
+			}
+			t.Fatalf("unexpected get %v", a)
+			return nil, nil, nil
+		}
+	}
+	in := `{"config":{"kind":"reminders"},"cursor":"{\"scope\":\"[null,null]\",\"open\":{\"R1\":\"x\",\"RX\":\"旧提醒\",\"RY\":\"改了到期日\",\"RZ\":\"删了的\"}}"}`
+	code, lines, _ := exec1(t, mk, in)
+	got := map[string]map[string]any{}
+	for _, l := range lines {
+		if k, _ := l["correlation_keys"].([]any); len(k) == 1 && l["type"] != "reminder.due" && l["type"] != "reminder.open" {
+			got[k[0].(string)] = l
+		}
+	}
+	if code != ExitOK || len(got) != 3 || got["R1"] != nil {
+		t.Fatalf("code=%d left-open events: %v", code, got)
+	}
+	if x := got["RX"]; x["type"] != "reminder.completed" || x["occurred_at"] != "2026-01-03T09:30:00Z" || x["subject"] != "旧提醒" {
+		t.Errorf("completed: %v", x)
+	}
+	for _, id := range []string{"RY", "RZ"} {
+		if x := got[id]; x["type"] != "reminder.out_of_view" || strings.Contains(x["type"].(string), "complet") || strings.Contains(x["type"].(string), "close") {
+			t.Errorf("%s only left the view: %v", id, x)
+		}
+	}
+	var cur struct{ Open map[string]string }
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]["cursor"].(string)), &cur); err != nil || cur.Open["R1"] == "" || cur.Open["RX"] != "" {
+		t.Fatalf("cursor must list the open reminders: %v %v", err, lines[len(lines)-1])
+	}
+	transient = true
+	if code, lines, _ := exec1(t, mk, in); code != ExitTemporary || len(lines) != 0 {
+		t.Fatalf("a failed verification must fail the poll without a cursor: code=%d lines=%v", code, lines)
+	}
+}
+
+// 首次、旧格式游标、拉取范围（lists、undated_lists）变了：这一轮只建立基线，不把旧集合报成离开。
+func TestRemindersBaselineOnlyWhenNotComparable(t *testing.T) {
+	for name, cursor := range map[string]string{
+		"首次":    ``,
+		"旧时间游标": `2026-01-01T00:00:00Z`,
+		"范围变了":  `{"scope":"[[\"Work\"],null]","open":{"RX":"别的列表里的"}}`,
+	} {
+		var calls [][]string
+		b, _ := json.Marshal(map[string]any{"config": map[string]any{"kind": "reminders"}, "cursor": cursor})
+		_, lines, _ := exec1(t, replay(t, &calls), string(b))
+		for _, l := range lines {
+			if typ, _ := l["type"].(string); typ != "" && typ != "reminder.due" && typ != "reminder.open" {
+				t.Errorf("%s: only the baseline is set, got %v", name, l)
+			}
+		}
+		for _, c := range calls {
+			if c[1] == "get" {
+				t.Errorf("%s: nothing to verify, got %v", name, c)
+			}
+		}
+	}
+}
+
+// 每轮至多核实 maxVerify 条；没核实的仍留在游标里，下一轮再核，不会被当成已处理。
+func TestRemindersVerifyAtMostMaxPerPoll(t *testing.T) {
+	var calls [][]string
+	base := replay(t, &calls)
+	gets := 0
+	mk := func(c Config) Runner {
+		r := base(c)
+		return func(ctx context.Context, cli string, a ...string) ([]byte, []byte, error) {
+			if a[0] != "get" {
+				return r(ctx, cli, a...)
+			}
+			gets++
+			return []byte(`{"success":true,"reminder":{"id":"` + argVal(a, "--id=") + `","isCompleted":true}}`), nil, nil
+		}
+	}
+	open := map[string]string{"R1": "x"}
+	for i := range maxVerify + 2 {
+		open[fmt.Sprintf("G%02d", i)] = "离开的"
+	}
+	cur, _ := json.Marshal(map[string]any{"scope": "[null,null]", "open": open})
+	in, _ := json.Marshal(map[string]any{"config": map[string]any{"kind": "reminders"}, "cursor": string(cur)})
+	code, lines, _ := exec1(t, mk, string(in))
+	var c struct{ Open map[string]string }
+	_ = json.Unmarshal([]byte(lines[len(lines)-1]["cursor"].(string)), &c)
+	if code != ExitOK || gets != maxVerify || c.Open["G00"] != "" || c.Open[fmt.Sprintf("G%02d", maxVerify)] == "" || c.Open[fmt.Sprintf("G%02d", maxVerify+1)] == "" {
+		t.Fatalf("code=%d gets=%d cursor=%v", code, gets, c.Open)
 	}
 }

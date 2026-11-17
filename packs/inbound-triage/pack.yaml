@@ -29,6 +29,12 @@ source_rules:
     kind: task
     project_by: none
     then: proposed
+  # 提醒离开了未完成集合：核实为已完成（reminder.completed），或只是移出拉取范围、已读不到（reminder.out_of_view，不表示完成）。
+  # 挂到它建出的事项上作为后续消息，不改标题与正文，不关闭事项；没有事项的不处理。
+  - id: reminder-status
+    match: {source_type: reminder, event_type: [reminder.completed, reminder.out_of_view]}
+    then: ignore
+    on_update: attach
   - id: agents-md-changed
     match: {source_type: github, event_type: [repo.agents_md_changed]}
     then: ignore

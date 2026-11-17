@@ -1,0 +1,26 @@
+{
+  "reminder" : {
+    "alarms" : [
+      {
+        "location" : {
+          "latitude" : 0,
+          "longitude" : 0,
+          "name" : "地点",
+          "proximity" : "arrive",
+          "radius" : 100
+        },
+        "relativeOffset" : 0
+      }
+    ],
+    "completionDate" : "2026-01-03T09:30:00Z",
+    "dueDate" : "2026-01-03",
+    "id" : "RX",
+    "isCompleted" : true,
+    "list" : "Home",
+    "listId" : "L1",
+    "notes" : "备注",
+    "priority" : 0,
+    "title" : "旧提醒"
+  },
+  "success" : true
+}
