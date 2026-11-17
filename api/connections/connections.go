@@ -1,6 +1,6 @@
 // Package connections 是连接（渠道、输出）的 HTTP 路由（附录 B.2，设计 §1.5、§7）：
 //
-//	GET    /connections?direction=        列出连接（凭据只回是否已设置）
+//	GET    /connections?direction=        列出连接（凭据只回是否已设置）；token（observer 及以上）只得到现状摘要
 //	GET    /connections/types?direction=  接入声明：选类型与渲染表单用
 //	POST   /connections                   新建（connection.create）
 //	PUT    /connections/{id}              改配置与凭据（connection.configure）
@@ -11,8 +11,9 @@
 //	POST   /connections/test              测未保存的草稿：自检，send 为真时再发一条测试；不改账本
 //	POST   /connections/{id}/test         对已保存的连接发一条测试，结果写进连接现状
 //
-// 路由里没有业务规则：校验、授权与事件都在内核命令；测试经渠道发送器调外呼调用器。全部只放行 Web 会话
-// （与其他设置相同，任何 Bearer 凭据得 web_only，退出码 20）。凭据永不出现在响应里。
+// 路由里没有业务规则：校验、授权与事件都在内核命令；测试经渠道发送器调外呼调用器。除列表外全部只放行 Web 会话
+// （与其他设置相同，任何 Bearer 凭据得 web_only，退出码 20）。列表对 token 只给 kconn.Summary（不含配置值、凭据与细节，§7.6），
+// ext 与 webhook 密钥读不到。凭据永不出现在响应里。
 package connections
 
 import (
@@ -20,6 +21,7 @@ import (
 	"net/http"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	kconn "github.com/xiaohei-info/awesome-personal-agent/kernel/connections"
@@ -41,7 +43,7 @@ func Routes(st *store.Store, x *command.Executor, cs *kconn.Service, call *conn.
 	a := &api{st, x, cs, call, s}
 	return func(r *core.Router) {
 		for _, rt := range []core.Route{
-			{Method: "GET", Path: "/connections", Handler: web(a.list)},
+			{Method: "GET", Path: "/connections", Handler: a.list},
 			{Method: "GET", Path: "/connections/types", Handler: web(a.types)},
 			{Method: "POST", Path: "/connections", MaxBody: 16 << 10, Handler: web(a.create)},
 			{Method: "PUT", Path: "/connections/{id}", MaxBody: 16 << 10, Handler: web(a.cmd(kconn.CmdConfigure))},
@@ -66,12 +68,22 @@ func web(h core.Handler) core.Handler {
 	}
 }
 
-func (a *api) list(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
+func (a *api) list(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if !p.Web && (p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook) {
+		return domain.NewError(domain.CodePermissionDenied, "this credential kind cannot read connections", "use an owner or agent credential")
+	}
 	var cs []kconn.Connection
 	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { cs, err = a.cs.List(tx, r.URL.Query().Get("direction")); return }); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"connections": cs})
+	if p.Web {
+		return core.WriteJSON(w, http.StatusOK, map[string]any{"connections": cs})
+	}
+	out := make([]kconn.Summary, len(cs))
+	for i, c := range cs {
+		out[i] = c.Summary()
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"connections": out})
 }
 
 func (a *api) types(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
