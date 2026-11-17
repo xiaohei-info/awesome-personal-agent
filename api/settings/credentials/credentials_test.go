@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -35,7 +36,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, core.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, core.Module, kdoctor.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -401,5 +402,32 @@ func TestTokenHarnessIssueAssignOnceAndSeen(t *testing.T) {
 	}
 	if r := e.web("PATCH", "/v1/settings/tokens/"+named.Credential.ID, `{"harness":" "}`); r.Code != 400 {
 		t.Fatalf("blank harness: %d %s", r.Code, r.Body)
+	}
+}
+
+// 渠道钥匙的"还没连上过 / 最近使用"取自真实调用：签发后没有 last_seen_at，钥匙调用一次内核后才有。
+func TestExtKeyListShowsLastSeen(t *testing.T) {
+	e := setup(t)
+	ext := e.issue("/v1/settings/ext-keys", `{"scope":"channel.mine"}`)
+	lastSeen := func() *string {
+		r := e.web("GET", "/v1/settings/ext-keys", "")
+		var out struct {
+			Credentials []struct {
+				LastSeenAt *string `json:"last_seen_at"`
+			} `json:"credentials"`
+		}
+		if err := json.Unmarshal(r.Body.Bytes(), &out); err != nil || len(out.Credentials) != 1 {
+			t.Fatalf("list: %s", r.Body)
+		}
+		return out.Credentials[0].LastSeenAt
+	}
+	if got := lastSeen(); got != nil {
+		t.Fatalf("a key that never called must have no last_seen_at, got %s", *got)
+	}
+	if r := e.do("GET", "/v1/echo", "", bearer(ext.Secret)); r.Code != 200 {
+		t.Fatalf("ext call: %d %s", r.Code, r.Body)
+	}
+	if got := lastSeen(); got == nil {
+		t.Fatal("after one authenticated call the key must report last_seen_at")
 	}
 }

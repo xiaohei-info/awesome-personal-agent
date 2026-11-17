@@ -42,10 +42,10 @@ function connServer() {
 }
 const conns = connServer();
 
-function server() {
+function server(extKeys?: Record<string, unknown>[]) {
   conns.list.length = 0;
   conns.calls.length = 0;
-  const s = policyServer();
+  const s = policyServer({ extKeys });
   const ident: { state: string; sender?: string; display?: string } = { state: "waiting" };
   const calls: { method: string; url: string; body?: any }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
@@ -135,6 +135,16 @@ describe("设置 › 提醒渠道：用自己的程序接入", () => {
     expect(s.calls.at(-1)).toEqual({ method: "PUT", url: "/v1/settings/channels/slack/answerers", body: { answerers: ["4242"] } });
     expect(s.puts.at(-1)!.body).toEqual({ channels: { old: { text_only: true }, slack: { text_only: true } } });
     expect(s.doc.channel_answerers.old).toEqual(["1"]);
+  });
+
+  it("只签了钥匙不算接通：按钥匙最近一次真实调用显示「还没连上过 / 最近使用」", async () => {
+    const s = server([{ id: "k1", kind: "ext", scope: "channel.slack" }, { id: "k3", kind: "ext", scope: "channel.mine", last_seen_at: "2030-01-01T10:42:00Z" }]);
+    mount(s.impl);
+    const a = within(await screen.findByRole("region", { name: "slack" }));
+    expect(a.getByLabelText("连接状态")).toHaveTextContent("还没连上过");
+    const b = within(screen.getByRole("region", { name: "mine" }));
+    expect(b.getByLabelText("连接状态")).toHaveTextContent(/^最近使用 /);
+    expect(screen.getByRole("form", { name: "给自己写的程序发钥匙" })).toBeInTheDocument();
   });
 
   it("T7 识别我的 ID：给出口令；收到后显示是谁，点「加上」才写名单", async () => {

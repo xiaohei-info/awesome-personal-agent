@@ -56,6 +56,9 @@ func (s *Seen) Note(ctx context.Context, st *store.Store, subject string, now ti
 	})
 }
 
+// LastSeen 返回全部对象最近一次被见到的时间（键带 SubjectExt、SubjectHarness 前缀），供设置页显示"还没连上过 / 最近使用"。
+func LastSeen(tx *store.Tx) (map[string]time.Time, error) { return readSeen(tx) }
+
 func readSeen(tx *store.Tx) (map[string]time.Time, error) {
 	r, err := tx.Query("SELECT subject, at FROM doctor_seen")
 	if err != nil {

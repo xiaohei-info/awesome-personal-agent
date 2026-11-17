@@ -33,7 +33,7 @@ export function withRoutes(routes: Record<string, string>, id: string, checked: 
 
 const usedFor = (routes: Record<string, string>, id: string) => CLASSES.filter((c) => routes[c] === routeOf(id));
 const viewOnly = (d?: Decl) => !!d && !d.capabilities.buttons && !d.capabilities.reply;
-const time = (s?: string) => (s ? new Date(s).toLocaleString(undefined, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
+export const time = (s?: string) => (s ? new Date(s).toLocaleString(undefined, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
 
 export function Connections({ routes, saveRoutes }: { routes: Record<string, string>; saveRoutes: (r: Record<string, string>) => Promise<unknown> }) {
   const t = useT(strings);

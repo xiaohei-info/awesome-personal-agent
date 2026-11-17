@@ -4,13 +4,13 @@ import { useSession } from "../../app/session";
 import { errorText as msg, useT } from "../../app/i18n";
 import { Card, PolicyPage, TagInput, useDraft, usePolicyDocs, type Doc } from "../settings-policy/shared";
 import { strings } from "./strings";
-import { Connections } from "./Connections";
+import { Connections, time } from "./Connections";
 
 // 设置 › 提醒渠道（§4.1、§14.6）。上半是内置渠道连接（Connections.tsx）；底部折叠的「用自己的程序接入」是 ext 渠道：
 // 没有独立实体，名字取自 scope 为 channel.<名> 的 ext 密钥，属性在策略的 channels 段，回答人在 channel_answerers。回答人只经 PUT /settings/channels/{名}/answerers 改这一个键；
 // "识别我的 ID"只在内存里，本人点"加上"才写名单。web_only、回答人校验都在服务端。
 
-interface Key { id: string; label?: string; scope?: string; revoked_at?: string }
+interface Key { id: string; label?: string; scope?: string; revoked_at?: string; last_seen_at?: string }
 const CH = "channel.";
 const ROUTES = ["policy", "allowlists"] as const;
 
@@ -78,6 +78,8 @@ function ChannelCard({ name, pol, al, keys, onSaved, onKeys, savePolicy }: {
   const storedAns = ((al.channel_answerers ?? {}) as Record<string, string[]>)[name] ?? [];
   const [textOnly, setTextOnly] = useDraft(pol.channels, () => !!stored[name]?.text_only);
   const [ans, setAns] = useDraft(al.channel_answerers, () => storedAns);
+  // 只签了钥匙不算接通：按钥匙最近一次真实调用内核的时间区分"还没连上过 / 最近使用"。
+  const seen = keys.filter((k) => !k.revoked_at && k.last_seen_at).map((k) => k.last_seen_at!).sort().at(-1);
   const putAnswerers = (list: string[]) => api.put<{ version: number }>(`/settings/channels/${encodeURIComponent(name)}/answerers`, { answerers: list });
   const submit = async () => {
     let v = (await putAnswerers(ans)).version;
@@ -91,6 +93,7 @@ function ChannelCard({ name, pol, al, keys, onSaved, onKeys, savePolicy }: {
   };
   return (
     <Card title={name} onSave={submit}>
+      <p className="sub" aria-label={t.linkState}>{seen ? t.lastUsed(time(seen)) : t.neverConnected}</p>
       <label><input type="checkbox" checked={textOnly} onChange={(e) => setTextOnly(e.target.checked)} /> {t.textOnly}</label>
       {textOnly && <p className="sub">{t.textOnlyHint}</p>}
       <h3>{t.answerers}</h3>
@@ -176,7 +179,7 @@ function Identify({ channel, onAdd }: { channel: string; onAdd: (id: string) => 
   );
 }
 
-/** 新建渠道：签一把 scope 为 channel.<名> 的 ext 密钥；明文只显示一次。 */
+/** 开发者入口：给自己写的渠道程序签一把 scope 为 channel.<名> 的 ext 密钥；明文只显示一次。签了不等于接通，卡片按真实调用显示状态。 */
 function NewChannel({ onSecret }: { onSecret: (s: string) => void }) {
   const t = useT(strings);
   const { api } = useSession();
