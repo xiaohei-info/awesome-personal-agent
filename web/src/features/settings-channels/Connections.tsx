@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT, type Lang } from "../../app/i18n";
 import { useRaw } from "../../app/raw";
+import { useLabel } from "../../app/values";
 import { strings } from "./strings";
 
 // 设置 › 提醒渠道的内置渠道（设计 §7）：卡片只显示现状；添加走四步：选类型 → 填表单 → 测试 → 启用。
@@ -20,6 +21,8 @@ interface SecretPlan { action: "set" | "clear" | "keep"; hint?: string; length?:
 export interface Draft {
   id: string; type: string; name: string; connection?: string; config: Record<string, string>; routes: string[];
   secrets: Record<string, SecretPlan>; changes?: string[]; state: string; expires_at: string; test?: { ok: boolean; problem?: string; at: string };
+  /** 确认会改动的类别级路由在提交时的原值（类别 → 路由值）；确认时服务端核对它没变。 */
+  routes_from?: Record<string, string>;
 }
 
 export const CLASSES = ["decision", "reminder", "brief", "health"] as const;
@@ -177,7 +180,15 @@ function DraftCard({ x, d, conns, onDone }: { x: Draft; d?: Decl; conns: Conn[];
   const label = (k: string) => d?.fields.find((f) => f.key === k)?.label[lang] ?? k;
   const secret = (p: SecretPlan) =>
     p.action === "clear" ? t.draftCleared : p.action === "keep" ? t.draftKept : p.hint ? t.draftProvidedHint(p.hint) : p.length ? t.draftProvidedLen(p.length) : t.draftProvided;
+  const routeLabel = useLabel();
   const target = x.connection ? conns.find((c) => c.id === x.connection)?.name ?? x.name : null;
+  // 路由值按名字显示：渠道用连接名（草稿自己的目标用草稿名），其余用词表；没设的按「只放网页未读」（与提醒与打扰页一致）
+  const where = (v: string) =>
+    v.startsWith("channel:") ? (v === routeOf(x.connection ?? "") ? x.name : conns.find((c) => routeOf(c.id) === v)?.name ?? t.routeGone) : routeLabel("route", v || "web");
+  const moves = Object.entries(x.routes_from ?? {})
+    .map(([cl, from]): [string, string, string] => [cl, from, x.routes.includes(cl) ? routeOf(x.connection ?? "") : DEFAULT_ROUTE[cl]])
+    .filter(([, from, to]) => from !== to)
+    .map(([cl, from]) => `${t.classes[cl] ?? cl}：${where(from)} → ${x.routes.includes(cl) ? x.name : where(DEFAULT_ROUTE[cl])}`);
   const rows: [string, string][] = [
     ...(d?.fields ?? []).filter((f) => f.kind !== "secret" && x.config[f.key] !== undefined)
       .map((f): [string, string] => [f.label[lang], f.kind === "toggle" ? (x.config[f.key] === "true" ? t.yes : t.no) : x.config[f.key]]),
@@ -191,13 +202,15 @@ function DraftCard({ x, d, conns, onDone }: { x: Draft; d?: Decl; conns: Conn[];
       </div>
       <p className="sub">{target ? t.draftChanges(target, (x.changes ?? []).map((k) => (k === "routes" ? t.useFor : label(k))).join(sep)) : t.draftNew}</p>
       <ul className="rows">
-        {[...rows, [t.useFor, x.routes.length ? x.routes.map((r) => t.classes[r] ?? r).join(sep) : t.notUsed] as [string, string]].map(([k, v]) => (
+        {[...rows, [t.defaultFor, x.routes.length ? x.routes.map((r) => t.classes[r] ?? r).join(sep) : t.notUsed] as [string, string]].map(([k, v]) => (
           <li key={k}><span className="sub">{k}</span> {v}</li>
         ))}
+        {moves.length > 0 && <li><span className="sub">{t.routeMoves}</span> {moves.join(sep)}</li>}
       </ul>
       <p className="sub">{[x.test ? (x.test.ok ? t.draftTestOk : t.draftTestFailed(t.draftProblem[x.test.problem ?? ""] ?? t.draftProblem.temporary)) : t.draftUntested, t.draftExpires(time(x.expires_at))].join(" · ")}</p>
       <div className="line">
-        <button type="button" className="primary" disabled={busy} onClick={run(() => api.post(`/connections/drafts/${encodeURIComponent(x.id)}/confirm`, {}))}>
+        {!d && <span className="sub">{t.draftNoType}</span>}
+        <button type="button" className="primary" disabled={busy || !d} onClick={run(() => api.post(`/connections/drafts/${encodeURIComponent(x.id)}/confirm`, {}))}>
           {x.connection ? t.draftConfirmChange : t.draftConfirm}
         </button>
         <button type="button" disabled={busy} onClick={run(() => api.del(`/connections/drafts/${encodeURIComponent(x.id)}`))}>{t.draftDrop}</button>

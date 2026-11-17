@@ -234,7 +234,7 @@ func (a *api) drafts(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 }
 
 // testDraftSaved 先经 connection.draft_test 验明调用者能测这份待确认草稿（提交者或 Web 本人），拿到草稿里的目标，
-// 再发一条内容固定的测试（凭据按草稿 id 从保管库取）；结果记在草稿上，不改连接与路由。
+// 再发一条内容固定的测试（凭据按草稿 id 从保管库取）；结果记在草稿上，不改连接与路由。Agent 的测试受冷却限制（内核预占）。
 func (a *api) testDraftSaved(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	in, _ := json.Marshal(map[string]string{"id": r.PathValue("id")})
 	v, err := a.do(r, p, kconn.CmdDraftTest, in)
@@ -249,6 +249,9 @@ func (a *api) testDraftSaved(w http.ResponseWriter, r *http.Request, p *core.Pri
 	res := result(err)
 	if uerr := a.st.Update(r.Context(), func(tx *store.Tx) error { return kconn.SetDraftTest(tx, t.ID, res.OK, res.Problem, clock.Now()) }); uerr != nil {
 		return uerr
+	}
+	if !p.Web {
+		res.Detail = "" // 对方服务器的回话只给 Web 本人看；Agent 只拿稳定的问题码
 	}
 	return core.WriteJSON(w, http.StatusOK, res)
 }

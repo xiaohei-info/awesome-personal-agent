@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"slices"
 	"sort"
 	"time"
@@ -58,6 +59,9 @@ const DraftTTL = 24 * time.Hour
 
 // draftShown 是已结束的草稿在列表里保留的时长。
 const draftShown = 7 * 24 * time.Hour
+
+// DraftTesting 是测试已开始、结果还没写回时草稿上的问题码。
+const DraftTesting = "testing"
 
 // 凭据在草稿里的处置。
 const (
@@ -121,9 +125,38 @@ type Draft struct {
 	ExpiresAt  time.Time             `json:"expires_at"`
 	ClosedAt   *time.Time            `json:"closed_at,omitempty"`
 	WebPath    string                `json:"web_path"`
-	base       string                // 改配置草稿提交时目标连接的指纹（名字、配置、凭据密文行），确认时比对
+	// RoutesFrom 是提交时这份草稿会改动的类别级路由的原值（类别 → 路由值，未设为空串）；确认时在同一事务里比对（§7.6）。
+	RoutesFrom map[string]string `json:"routes_from,omitempty"`
+	base       string            // 改配置草稿提交时目标连接的指纹（名字、配置、凭据密文行），确认时比对
 	target     string
 }
+
+// AgentDraft 是非 Web 调用者看到的草稿：不含有效配置、凭据处置与路由（§7.6，与连接摘要同一边界）。
+type AgentDraft struct {
+	ID         string     `json:"id"`
+	Type       string     `json:"type"`
+	Name       string     `json:"name"`
+	Connection string     `json:"connection,omitempty"`
+	Changes    []string   `json:"changes,omitempty"`
+	State      string     `json:"state"`
+	Test       *DraftTest `json:"test,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	ClosedAt   *time.Time `json:"closed_at,omitempty"`
+	WebPath    string     `json:"web_path"`
+}
+
+// viewFor 按调用者给出草稿：Web 本人看完整的待确认内容，其他凭据只看 AgentDraft。
+func viewFor(c command.Caller, d Draft) any {
+	if isWeb(c) {
+		return d
+	}
+	return AgentDraft{ID: d.ID, Type: d.Type, Name: d.Name, Connection: d.Connection, Changes: d.Changes, State: d.State, Test: d.Test,
+		CreatedAt: d.CreatedAt, ExpiresAt: d.ExpiresAt, ClosedAt: d.ClosedAt, WebPath: d.WebPath}
+}
+
+// DraftTestCooldown 是 Agent 对同一份草稿两次测试的最短间隔（§7.6）：测试会推到本人设备上，不能被循环调用。
+const DraftTestCooldown = time.Minute
 
 type proposeInput struct {
 	Type       string            `json:"type"`
@@ -307,6 +340,9 @@ func (s *Service) applyPropose(c *command.Ctx) (any, error) {
 	default:
 		d.Routes = []string{}
 	}
+	if d.RoutesFrom, err = routeSnapshot(c.Tx, d.Connection, d.Routes); err != nil {
+		return nil, err
+	}
 	d.Type = decl.Type
 	if d.ID, err = newDraftID(c.Tx); err != nil {
 		return nil, err
@@ -358,7 +394,7 @@ func (s *Service) applyPropose(c *command.Ctx) (any, error) {
 	if _, err := c.Emit(domain.Event{Type: EvProposed, Object: d.ID, Payload: draftPayload(d, changed)}); err != nil {
 		return nil, err
 	}
-	return d, nil
+	return viewFor(c.Caller, d), nil
 }
 
 // diff 列出改配置草稿与现用值不同的字段名（凭据只按"替换或清除"算）。
@@ -404,6 +440,10 @@ func (s *Service) supersede(c *command.Ctx, target string) error {
 		return err
 	}
 	for _, o := range old {
+		if !isWeb(c.Caller) && o.ProposedBy != proposer(c.Caller) {
+			return domain.NewError(domain.CodeConflict, "draft_taken: another proposer's draft for this channel is waiting for the owner",
+				"wait until the owner confirms or discards it, or ask the owner")
+		}
 		if err := closeDraft(c.Tx, o.ID, DraftSuperseded, c.Now()); err != nil {
 			return err
 		}
@@ -429,10 +469,10 @@ func (s *Service) applyDrafts(c *command.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := []Draft{}
+	out := []any{}
 	for _, d := range ds {
 		if isWeb(c.Caller) || d.ProposedBy == proposer(c.Caller) {
-			out = append(out, d)
+			out = append(out, viewFor(c.Caller, d))
 		}
 	}
 	return map[string]any{"drafts": out}, nil
@@ -488,6 +528,16 @@ func (s *Service) applyDraftTest(c *command.Ctx) (any, error) {
 		return nil, domain.NewError(domain.CodeWebOnly,
 			"draft_test_kept_secrets: the draft reuses the connection's saved credentials with a changed address or receiver; they only go where the owner has confirmed",
 			"give every credential again in a new draft to test it, or ask the owner to confirm it in the Web settings")
+	}
+	if !isWeb(c.Caller) {
+		if d.Test != nil && c.Now().Before(d.Test.At.Add(DraftTestCooldown)) {
+			return nil, domain.NewError(domain.CodeConflict, "draft_test_cooldown: this draft was tested less than a minute ago",
+				"wait a minute before testing it again")
+		}
+		// 在发送前、同一事务里记下这次尝试：并发的第二次在上面被拒
+		if err := SetDraftTest(c.Tx, d.ID, false, DraftTesting, c.Now()); err != nil {
+			return nil, err
+		}
 	}
 	return DraftTarget{ID: d.ID, Type: d.Type, Settings: d.Config}, nil
 }
@@ -587,6 +637,11 @@ func (s *Service) applyConfirm(c *command.Ctx) (any, error) {
 			return nil, err
 		}
 	}
+	if cur, err := routeSnapshot(c.Tx, d.Connection, d.Routes); err != nil {
+		return nil, err
+	} else if !maps.Equal(cur, d.RoutesFrom) {
+		return nil, domain.NewError(domain.CodeConflict, "routes_changed: the routes this draft would change were changed after it was proposed", "ask the Agent to propose again")
+	}
 	if err := s.v.Move(c.Tx, d.ID, r.ID, moved, now); err != nil {
 		return nil, err
 	}
@@ -616,6 +671,23 @@ func (s *Service) applyConfirm(c *command.Ctx) (any, error) {
 		return nil, err
 	}
 	return s.view(c.Tx, r)
+}
+
+// routeSnapshot 是确认会改动的类别级路由的现值：草稿要指向这个连接的类别，加上现在指向它的类别（确认时可能被改回默认）。
+// 新建草稿只有前者。其余类别与按优先级的覆盖不在内。
+func routeSnapshot(tx *store.Tx, id string, want []string) (map[string]string, error) {
+	_, p, err := policy.Current(tx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, cl := range classes {
+		v := p.Disturb.Routes[cl]
+		if slices.Contains(want, cl) || (id != "" && v == "channel:"+id) {
+			out[cl] = v
+		}
+	}
+	return out, nil
 }
 
 // setRoutes 让草稿里的类别指向这个连接；原来指向它而草稿没勾的类别回到默认路由。经策略模块写入（本人 Web 操作）。
@@ -682,9 +754,15 @@ func insertDraft(tx *store.Tx, d Draft) error {
 	}
 	_, err := tx.Exec(`INSERT INTO connections_draft (id, target, connection, base, type, name, config, routes, secrets, changes, state, proposed_by, created_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.ID, d.target, d.Connection, d.base, d.Type, d.Name, enc(d.Config), enc(d.Routes), enc(d.Secrets), enc(d.Changes), d.State, d.ProposedBy,
+		d.ID, d.target, d.Connection, enc(baseRow{d.base, d.RoutesFrom}), d.Type, d.Name, enc(d.Config), enc(d.Routes), enc(d.Secrets), enc(d.Changes), d.State, d.ProposedBy,
 		d.CreatedAt.UnixNano(), d.ExpiresAt.UnixNano())
 	return err
+}
+
+// baseRow 是 base 列的内容：确认时要核对的提交时现值。
+type baseRow struct {
+	Connection string            `json:"connection,omitempty"`
+	Routes     map[string]string `json:"routes"`
 }
 
 func listDrafts(tx *store.Tx, where string, args ...any) ([]Draft, error) {
@@ -700,15 +778,17 @@ func listDrafts(tx *store.Tx, where string, args ...any) ([]Draft, error) {
 			d                               Draft
 			cfg, routes, sec, changes, test string
 			created, expires, closed        int64
+			base                            baseRow
+			baseRaw                         string
 		)
-		if err := rs.Scan(&d.ID, &d.target, &d.Connection, &d.base, &d.Type, &d.Name, &cfg, &routes, &sec, &changes, &d.State, &d.ProposedBy, &test,
+		if err := rs.Scan(&d.ID, &d.target, &d.Connection, &baseRaw, &d.Type, &d.Name, &cfg, &routes, &sec, &changes, &d.State, &d.ProposedBy, &test,
 			&created, &expires, &closed); err != nil {
 			return nil, err
 		}
 		for _, x := range []struct {
 			raw string
 			v   any
-		}{{cfg, &d.Config}, {routes, &d.Routes}, {sec, &d.Secrets}, {changes, &d.Changes}} {
+		}{{cfg, &d.Config}, {routes, &d.Routes}, {sec, &d.Secrets}, {changes, &d.Changes}, {baseRaw, &base}} {
 			if err := json.Unmarshal([]byte(x.raw), x.v); err != nil {
 				return nil, err
 			}
@@ -719,6 +799,7 @@ func listDrafts(tx *store.Tx, where string, args ...any) ([]Draft, error) {
 				return nil, err
 			}
 		}
+		d.base, d.RoutesFrom = base.Connection, base.Routes
 		d.CreatedAt, d.ExpiresAt, d.ClosedAt = time.Unix(0, created).UTC(), time.Unix(0, expires).UTC(), at(closed)
 		d.WebPath = webPath(d.ID)
 		out = append(out, d)

@@ -84,8 +84,16 @@ func TestAgentDraftTestCannotCarryKeptSecretsToNewTarget(t *testing.T) {
 		}
 	}
 
-	// 1. 沿用旧凭据 + 服务器改到别处：不发请求
-	moved := propose(worker, `{"connection":"`+c.ID+`","config":{"server":"`+other.URL+`"}}`)
+	// 1. 沿用旧凭据 + 服务器改到别处：不发请求；Agent 拿到的草稿与列表里没有现用服务器、登录名与配置
+	code, b = as.do(worker, "POST", "/connections/drafts", `{"connection":"`+c.ID+`","config":{"server":"`+other.URL+`"}}`)
+	var mv struct{ ID string }
+	if code != 201 || json.Unmarshal([]byte(b), &mv) != nil || strings.Contains(b, live.URL) || strings.Contains(b, other.URL) || strings.Contains(b, `"config"`) || strings.Contains(b, `"secrets"`) {
+		t.Fatalf("agent propose view: %d %s", code, b)
+	}
+	moved := mv.ID
+	if code, b := as.do(worker, "GET", "/connections/drafts", ""); code != 200 || strings.Contains(b, live.URL) || strings.Contains(b, `"config"`) || strings.Contains(b, `"routes`) {
+		t.Fatalf("agent draft list: %d %s", code, b)
+	}
 	refused("server moved", moved)
 	// 2. 他人的草稿：按不存在处理，不发
 	if code, b := as.do(worker2, "POST", "/connections/drafts/"+moved+"/test", `{}`); code != 404 {
@@ -113,6 +121,22 @@ func TestAgentDraftTestCannotCarryKeptSecretsToNewTarget(t *testing.T) {
 	}
 	if h, old := other.seen(); h == 0 || old != 0 {
 		t.Fatalf("other server: %d requests, %d with old credentials", h, old)
+	}
+	// 对方服务器的回话只给 Web 本人：Agent 只拿问题码
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		io.WriteString(w, `{"code":400,"message":"remote-body-marker"}`)
+	}))
+	defer bad.Close()
+	rej := propose(worker2, `{"type":"bark","name":"拒收的","config":{"server":"`+bad.URL+`"},"secrets":{"device_key":"`+agentKey+`"}}`)
+	if code, b := as.do(worker2, "POST", "/connections/drafts/"+rej+"/test", `{}`); code != 200 || !strings.Contains(b, `"problem":"rejected"`) || strings.Contains(b, "remote-body-marker") || strings.Contains(b, "detail") {
+		t.Fatalf("agent test result: %d %s", code, b)
+	}
+	if code, b := as.do(worker2, "POST", "/connections/drafts/"+rej+"/test", `{}`); code != 409 || !strings.Contains(b, "draft_test_cooldown") {
+		t.Fatalf("agent test again within a minute: %d %s", code, b)
+	}
+	if code, b := s.do("POST", "/connections/drafts/"+rej+"/test", `{}`); code != 200 || !strings.Contains(b, "remote-body-marker") {
+		t.Fatalf("owner test result keeps the detail: %d %s", code, b)
 	}
 	// 原连接保持原值
 	if code, b := s.do("GET", "/connections?direction=channel", ""); code != 200 || !strings.Contains(b, live.URL) {

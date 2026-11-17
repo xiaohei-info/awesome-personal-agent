@@ -41,6 +41,8 @@ type env struct {
 	au  *auth.Auth
 	v   *secrets.Vault
 	now time.Time
+	// hideDecl 模拟当前构建里没有这个类型的接入声明
+	hideDecl bool
 }
 
 func setup(t *testing.T) *env {
@@ -58,7 +60,7 @@ func setup(t *testing.T) *env {
 	t.Cleanup(func() { st.Close() })
 	e := &env{st: st, au: auth.New(nil), v: secrets.Generate(), now: time.Date(2030, 1, 1, 9, 0, 0, 0, time.UTC)}
 	e.x = command.New(st, func() time.Time { return e.now })
-	s := New(e.v, func(typ string) (conn.Decl, bool) { return pushDecl, typ == "push" })
+	s := New(e.v, func(typ string) (conn.Decl, bool) { return pushDecl, typ == "push" && !e.hideDecl })
 	if err := s.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +106,20 @@ func (e *env) draft(t *testing.T, v json.RawMessage) Draft {
 		t.Fatal(err)
 	}
 	return d
+}
+
+// webDraft 是 Web 本人看到的完整草稿。
+func (e *env) webDraft(t *testing.T, id string) Draft {
+	t.Helper()
+	var list struct{ Drafts []Draft }
+	json.Unmarshal(e.must(t, web, CmdDrafts, map[string]string{}), &list)
+	for _, d := range list.Drafts {
+		if d.ID == id {
+			return d
+		}
+	}
+	t.Fatalf("draft %s not in the web list", id)
+	return Draft{}
 }
 
 func (e *env) count(t *testing.T, q string, args ...any) int64 {
@@ -162,9 +178,12 @@ func TestProposeThenConfirmNewChannel(t *testing.T) {
 	worker := e.bearer(t, auth.Worker)
 	before := e.routes(t)
 	v := e.must(t, worker, CmdPropose, map[string]any{"type": "push", "name": "我的手机", "secrets": map[string]string{"device_key": devKey}, "routes": []string{"decision", "health"}})
-	d := e.draft(t, v)
-	if strings.Contains(string(v), devKey) || d.Secrets["device_key"].Hint != "PLA…789" || d.Secrets["device_key"].Length != len(devKey) || d.Config["server"] != "https://push.example" {
-		t.Fatalf("draft view: %s", v)
+	if strings.Contains(string(v), devKey) || strings.Contains(string(v), `"config"`) || strings.Contains(string(v), `"secrets"`) || strings.Contains(string(v), `"routes`) {
+		t.Fatalf("agent view must not carry config, secrets or routes: %s", v)
+	}
+	d := e.webDraft(t, e.draft(t, v).ID)
+	if d.Secrets["device_key"].Hint != "PLA…789" || d.Secrets["device_key"].Length != len(devKey) || d.Config["server"] != "https://push.example" {
+		t.Fatalf("web draft view: %+v", d)
 	}
 	if n := e.count(t, "SELECT COUNT(*) FROM connections_connection"); n != 0 {
 		t.Fatalf("a draft must not create a connection before confirmation: %d", n)
@@ -252,7 +271,7 @@ func TestExpiredDraftIsRefusedAndCleanedWithoutTouchingLiveSecrets(t *testing.T)
 	live := e.must(t, web, CmdCreate, map[string]any{"type": "push", "name": "现用", "secrets": map[string]string{"device_key": "live-device-key-000001"}, "enabled": true})
 	var lc Connection
 	json.Unmarshal(live, &lc)
-	d := e.draft(t, e.must(t, e.bearer(t, auth.Worker), CmdPropose, map[string]any{"connection": lc.ID, "config": map[string]string{"server": "https://other.example"}}))
+	d := e.webDraft(t, e.draft(t, e.must(t, e.bearer(t, auth.Worker), CmdPropose, map[string]any{"connection": lc.ID, "config": map[string]string{"server": "https://other.example"}})).ID)
 	if d.Secrets["device_key"].Action != SecretKeep || len(e.reveal(t, d.ID)) != 1 {
 		t.Fatalf("a kept credential must be copied to the draft: %+v", d.Secrets)
 	}
@@ -344,5 +363,95 @@ func TestAgentCannotTestKeptSecretsAgainstChangedTarget(t *testing.T) {
 	}
 	if s := e.reveal(t, lc.ID); s["device_key"] != "live-device-key-000001" || s["password"] != "pw-1" {
 		t.Fatal("drafts must not change the live connection's secrets")
+	}
+}
+
+// 另一个提交者不能取代、作废本人正在看的草稿（draft_taken），原草稿与它的凭据不变；Web 本人可以。
+func TestOtherProposerCannotSupersedeAPendingDraft(t *testing.T) {
+	e := setup(t)
+	a, b := e.bearer(t, auth.Worker), e.bearer(t, auth.Worker)
+	first := e.draft(t, e.must(t, a, CmdPropose, map[string]any{"type": "push", "name": "手机", "secrets": map[string]string{"device_key": devKey}}))
+	if _, err := e.do(b, CmdPropose, map[string]any{"type": "push", "name": "手机", "secrets": map[string]string{"device_key": "other-device-key-0002"}}); code(err) != domain.CodeConflict || !strings.Contains(err.Error(), "draft_taken") {
+		t.Fatalf("other proposer: %v", err)
+	}
+	if d := e.webDraft(t, first.ID); d.State != DraftPending || e.reveal(t, first.ID)["device_key"] != devKey {
+		t.Fatalf("the first draft changed: %+v", d)
+	}
+	if n := e.count(t, "SELECT COUNT(*) FROM connections_draft"); n != 1 {
+		t.Fatalf("the refused proposal left a draft: %d", n)
+	}
+	e.must(t, web, CmdPropose, map[string]any{"type": "push", "name": "手机", "secrets": map[string]string{"device_key": devKey}})
+	if d := e.webDraft(t, first.ID); d.State != DraftSuperseded {
+		t.Fatalf("the owner may replace it: %+v", d)
+	}
+}
+
+// 确认会改动的类别级路由在提交后被本人改过时为 routes_changed，不覆盖；新建草稿同样核对；无关类别的改动不挡确认。
+func TestConfirmRefusesRoutesChangedAfterProposal(t *testing.T) {
+	e := setup(t)
+	w := e.bearer(t, auth.Worker)
+	setRoute := func(cl, v string) {
+		t.Helper()
+		if err := e.st.Update(bg, func(tx *store.Tx) error {
+			_, err := policy.Update(tx, web.Actor, "test", func(p *policy.Policy) error { p.Disturb.Routes[cl] = v; return nil })
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := e.draft(t, e.must(t, w, CmdPropose, map[string]any{"type": "push", "name": "新的", "secrets": map[string]string{"device_key": devKey}, "routes": []string{"decision"}}))
+	if from := e.webDraft(t, d.ID).RoutesFrom; len(from) != 1 {
+		t.Fatalf("routes_from: %v", from)
+	}
+	setRoute("decision", "web")
+	if _, err := e.do(web, CmdConfirm, map[string]string{"id": d.ID}); code(err) != domain.CodeConflict || !strings.Contains(err.Error(), "routes_changed") {
+		t.Fatalf("confirm after the owner changed the route: %v", err)
+	}
+	if e.routes(t)["decision"] != "web" || e.count(t, "SELECT COUNT(*) FROM connections_connection") != 0 {
+		t.Fatal("a refused confirmation must change nothing")
+	}
+	d = e.draft(t, e.must(t, w, CmdPropose, map[string]any{"type": "push", "name": "新的", "secrets": map[string]string{"device_key": devKey}, "routes": []string{"decision"}}))
+	setRoute("brief", "web") // 草稿不碰的类别
+	var c Connection
+	json.Unmarshal(e.must(t, web, CmdConfirm, map[string]string{"id": d.ID}), &c)
+	if r := e.routes(t); r["decision"] != "channel:"+c.ID || r["brief"] != "web" {
+		t.Fatalf("routes after confirm: %v", r)
+	}
+	// 改已有连接：本人在提交后把另一类也指到它，确认（会把没勾的类别改回默认）同样是 routes_changed
+	d = e.draft(t, e.must(t, w, CmdPropose, map[string]any{"connection": c.ID, "routes": []string{"decision"}}))
+	setRoute("health", "channel:"+c.ID)
+	if _, err := e.do(web, CmdConfirm, map[string]string{"id": d.ID}); code(err) != domain.CodeConflict || !strings.Contains(err.Error(), "routes_changed") {
+		t.Fatalf("confirm after the owner routed another class here: %v", err)
+	}
+}
+
+// Agent 测试同一份草稿有一分钟冷却，在发送前预占；Web 本人不受限。
+func TestAgentDraftTestCooldown(t *testing.T) {
+	e := setup(t)
+	w := e.bearer(t, auth.Worker)
+	d := e.draft(t, e.must(t, w, CmdPropose, map[string]any{"type": "push", "name": "新的", "secrets": map[string]string{"device_key": devKey}}))
+	e.must(t, w, CmdDraftTest, map[string]string{"id": d.ID})
+	if got := e.webDraft(t, d.ID).Test; got == nil || got.Problem != DraftTesting {
+		t.Fatalf("the attempt must be recorded before sending: %+v", got)
+	}
+	if _, err := e.do(w, CmdDraftTest, map[string]string{"id": d.ID}); code(err) != domain.CodeConflict || !strings.Contains(err.Error(), "draft_test_cooldown") {
+		t.Fatalf("second test within a minute: %v", err)
+	}
+	e.must(t, web, CmdDraftTest, map[string]string{"id": d.ID})
+	e.now = e.now.Add(DraftTestCooldown)
+	e.must(t, w, CmdDraftTest, map[string]string{"id": d.ID})
+}
+
+// 当前构建没有这个类型的接入声明时，确认在写入前被拒。
+func TestConfirmWithoutDeclarationWritesNothing(t *testing.T) {
+	e := setup(t)
+	d := e.draft(t, e.must(t, e.bearer(t, auth.Worker), CmdPropose, map[string]any{"type": "push", "name": "新的", "secrets": map[string]string{"device_key": devKey}, "routes": []string{"decision"}}))
+	before := e.routes(t)
+	e.hideDecl = true
+	if _, err := e.do(web, CmdConfirm, map[string]string{"id": d.ID}); code(err) != domain.CodeInvalidRequest {
+		t.Fatalf("confirm without a declaration: %v", err)
+	}
+	if e.count(t, "SELECT COUNT(*) FROM connections_connection") != 0 || e.routes(t)["decision"] != before["decision"] || e.webDraft(t, d.ID).State != DraftPending {
+		t.Fatal("a refused confirmation must change nothing")
 	}
 }

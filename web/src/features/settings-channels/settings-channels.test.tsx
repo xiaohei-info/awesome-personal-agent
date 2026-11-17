@@ -136,7 +136,7 @@ describe("设置 › 提醒渠道：Agent 准备的草稿", () => {
     conns.drafts.push({
       id: "dr-1", type: "bark", name: "Agent 的手机", config: { server: "https://push.example", group: "APA" }, routes: ["decision", "health"],
       secrets: { device_key: { action: "set", hint: "abc…xyz", length: 22 } }, state: "pending", expires_at: "2030-01-02T09:00:00Z",
-      test: { ok: true, at: "2030-01-01T09:05:00Z" },
+      test: { ok: true, at: "2030-01-01T09:05:00Z" }, routes_from: { decision: "inject", health: "web" },
     });
     mount(s.impl);
     const card = within(await screen.findByRole("region", { name: "等你确认：Agent 的手机" }));
@@ -144,12 +144,25 @@ describe("设置 › 提醒渠道：Agent 准备的草稿", () => {
     expect(card.getByText("Agent 已提供（abc…xyz）")).toBeInTheDocument();
     expect(card.getByText("等你决定、系统状态")).toBeInTheDocument();
     expect(card.getByText(/Agent 测过，已送达/)).toBeInTheDocument();
+    expect(card.getByText("默认用它来送")).toBeInTheDocument();
+    expect(card.getByText("等你决定：下次聊天时告诉我 → Agent 的手机、系统状态：只放网页未读 → Agent 的手机")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Agent 的手机" })).toBeNull(); // 还不是渠道
     expect(document.body.textContent).not.toMatch(/dr-1|device_key/);
     await userEvent.click(card.getByRole("button", { name: "确认并启用" }));
     expect(await screen.findByRole("region", { name: "Agent 的手机" })).toBeInTheDocument();
     expect(conns.calls.at(-1)).toEqual({ method: "POST", url: "/v1/connections/drafts/dr-1/confirm", body: {} });
     expect(screen.queryByRole("region", { name: "等你确认：Agent 的手机" })).toBeNull();
+  });
+});
+
+describe("设置 › 提醒渠道：没有接入声明的草稿", () => {
+  it("当前版本没有这个类型时不能确认，并给一句原因", async () => {
+    const s = server();
+    conns.drafts.push({ id: "dr-2", type: "gone", name: "旧类型", config: {}, routes: [], secrets: {}, state: "pending", expires_at: "2030-01-02T09:00:00Z" });
+    mount(s.impl);
+    const card = within(await screen.findByRole("region", { name: "等你确认：旧类型" }));
+    expect(card.getByRole("button", { name: "确认并启用" })).toBeDisabled();
+    expect(card.getByText("当前版本没有这个渠道类型，不能确认")).toBeInTheDocument();
   });
 });
 
