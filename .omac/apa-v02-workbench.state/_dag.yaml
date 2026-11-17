@@ -1,11 +1,11 @@
-# sha256: 2d1f3a3376f5f48309230f1054aa7db2cb3a09917d9eefac2e5bd1f34e5e1353
+# sha256: c515c86211d038083c916dc7a80ecfecd2b135137e6f9723fed3399dfbc52f57
 defects:
   schema: omac.defect-ledger/v1
-  used_global: 3
+  used_global: 4
   used_by_reporter:
     e2e-raw-ingest: 1
     web-link-materials: 1
-    web-raw-actions: 1
+    web-raw-actions: 2
   granted_by_reporter: {}
   granted_global: 0
   entries:
@@ -34,4 +34,13 @@ defects:
       - web-raw-actions
       state: fixed
       fix_node: fix.attachment-fetch.9d7d14
+    dfx-7f170357a7d4:
+      suspected: attachment-fetch
+      anchors:
+      - fetch-declaration
+      - flow-attachment-fetch/ACT-FET-02
+      reporters:
+      - web-raw-actions
+      state: fixing
+      fix_node: fix.attachment-fetch.7f1703
   inbox: []
