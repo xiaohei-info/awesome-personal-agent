@@ -220,16 +220,19 @@ describe("附件取回与来源事件物理删除", () => {
       calls.push({ method, url, body: init.body ? JSON.parse(init.body as string) : undefined });
       if (url === "/v1/projects") return json(200, { projects: [] });
       if (url === "/v1/sources") return json(200, { sources: [] });
+      if (url === "/v1/source-events/sev_nofetch/trace") return json(200, trace("sev_nofetch", [arrived]));
+      if (url === "/v1/source-events/sev_nofetch") return json(200, NOFETCH);
       if (url === "/v1/source-events/sev_fetch/trace") return json(200, trace("sev_fetch", [arrived]));
       if (url === "/v1/source-events/sev_fetch") return json(200, FETCHABLE);
       if (url === "/v1/source-events/sev_fetch/attachments/0/fetch" && method === "POST") return json(fetchReply.status, fetchReply.body);
       if (url === "/v1/settings/purge" && method === "POST") return json(200, { object: "sev_fetch", kind: "source_event", events: 2 });
       return json(404, { code: "not_found", why: "no such route", next: "" });
     }) as unknown as typeof fetch)();
-  const open = () => {
+  const NOFETCH = { ...MAIL, event: ev("sev_nofetch"), attachments: [{ name: "report.pdf", media_type: "application/pdf", size: 1024 }, { name: "logo.png", media_type: "image/png", size: 2048 }] };
+  const open = (id = "sev_fetch") => {
     sessionStorage.setItem("apa.csrf", "tok-1");
     render(
-      <MemoryRouter initialEntries={["/sources/events/sev_fetch"]}>
+      <MemoryRouter initialEntries={["/sources/events/" + id]}>
         <App features={[sources]} fetchImpl={server} />
       </MemoryRouter>,
     );
@@ -247,6 +250,14 @@ describe("附件取回与来源事件物理删除", () => {
     expect(within(within(att).getByRole("row", { name: /图\.png/ })).queryByRole("button")).toBeNull();
     expect(within(att).getByRole("row", { name: /图\.png.*已取回/ })).toBeInTheDocument();
     expect(within(within(att).getByRole("row", { name: /外链\.zip/ })).queryByRole("button")).toBeNull();
+  });
+
+  it("来源不支持取回（读接口不带 ref，如 acc-raw-nofetch）：整张附件表没有取回按钮，只有名字、类型与大小", async () => {
+    open("sev_nofetch");
+    const col = await column();
+    const att = await col.findByRole("table", { name: "附件" });
+    expect(within(att).getByRole("row", { name: /report\.pdf\s*application\/pdf\s*1\.0 KiB/ })).toBeInTheDocument();
+    expect(within(att).queryByRole("button")).toBeNull();
   });
 
   it("取回成功：POST 第 n 项，该行改为已取回", async () => {
