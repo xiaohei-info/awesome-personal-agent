@@ -36,19 +36,24 @@ func code(d Decision) domain.Code {
 // ACT-IGR-01 / WB-20：import.apply 只接受授权单。
 func TestImportApplyOnlyAcceptsGrant(t *testing.T) {
 	p := pol()
-	for _, l := range []Level{LevelDelegate, LevelRun} {
-		r := grantReq(l, policy.ImportApply, nil)
-		r.RunHarness = "hermes"
-		if d := Decide(p, r); code(d) != domain.CodeGrantRequired || d.ExitCode() != 23 {
-			t.Errorf("%s without grant: %+v", l, d)
-		}
-		r.Evidence = "owner said so" // 只带本人原话，同样 23；会话为 direct 也一样
-		if d := Decide(p, r); code(d) != domain.CodeGrantRequired || d.ExitCode() != 23 {
-			t.Errorf("%s with words: %+v", l, d)
+	r := grantReq(LevelDelegate, policy.ImportApply, nil)
+	if d := Decide(p, r); code(d) != domain.CodeGrantRequired || d.ExitCode() != 23 {
+		t.Errorf("delegate without grant: %+v", d)
+	}
+	r.Evidence = "owner said so" // 只带本人原话，同样 23；会话为 direct 也一样
+	if d := Decide(p, r); code(d) != domain.CodeGrantRequired || d.ExitCode() != 23 {
+		t.Errorf("delegate with words: %+v", d)
+	}
+	// 运行凭据不论带单、带原话与否都是 permission_denied（退出码 4）。
+	for _, ev := range []string{"", "owner said so"} {
+		r := grantReq(LevelRun, policy.ImportApply, nil)
+		r.RunHarness, r.Evidence = "hermes", ev
+		if d := Decide(p, r); code(d) != domain.CodePermissionDenied || d.ExitCode() != 4 {
+			t.Errorf("run credential (evidence %q): %+v", ev, d)
 		}
 	}
 	// 对照：同样只带原话的 item.progress 在 direct 会话里照常放行。
-	r := grantReq(LevelDelegate, "item.progress", nil)
+	r = grantReq(LevelDelegate, "item.progress", nil)
 	r.Evidence = "owner said so"
 	if d := Decide(p, r); d.Err != nil {
 		t.Fatalf("words still work for other commands: %+v", d)
@@ -98,7 +103,7 @@ func TestImportGrantDoesNotWiden(t *testing.T) {
 	r := grantReq(LevelRun, policy.ImportApply, g)
 	r.RunHarness, r.TriggerTrusted = "hermes", true
 	r.Object.InRunScope = true
-	if d := Decide(p, r); code(d) != domain.CodeBasisRequired {
+	if d := Decide(p, r); code(d) != domain.CodePermissionDenied || d.ExitCode() != 4 {
 		t.Fatalf("background run: %+v", d)
 	}
 }
