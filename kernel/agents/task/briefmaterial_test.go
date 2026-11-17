@@ -33,11 +33,11 @@ func TestBriefWindowStartsFromPreviousBriefOfSameInstance(t *testing.T) {
 	failed := mk("f", "instance:ins_1", now.Add(-2*time.Hour), domain.PhaseNeedsInput) // 失败的那份写过窗口，但不作起点
 	all := []domain.Item{mk("a", "instance:ins_1", t0, domain.PhaseDone), mk("b", "instance:ins_1", prev, domain.PhaseDone), failed,
 		mk("c", "instance:other", now.Add(-time.Hour), domain.PhaseDone), mk("self", "instance:ins_1", now, domain.PhaseOpen)}
-	w, prior := briefWindow(all, "ins_1", "self", now, first)
+	w, prior := briefWindow(all, "ins_1", "self", now, first, nil)
 	if !w.Since.Equal(prev) || !w.Until.Equal(now) || prior == nil || prior.ID != "b" {
 		t.Fatalf("window and prior must come from the latest successful brief of this instance only: %+v %+v", w, prior)
 	}
-	if w, prior := briefWindow([]domain.Item{failed}, "ins_1", "self", now, first); !w.Since.Equal(first) || prior != nil {
+	if w, prior := briefWindow([]domain.Item{failed}, "ins_1", "self", now, first, nil); !w.Since.Equal(first) || prior != nil {
 		t.Fatalf("an instance with no successful brief starts at the previous scheduled tick: %+v %+v", w, prior)
 	}
 }
@@ -219,7 +219,7 @@ func TestBriefWindowSurvivesAgentWriteBackAndSeedsNextBrief(t *testing.T) {
 	}
 	var all []domain.Item
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { all, err = items.List(tx, items.Filter{}); return })
-	if w, _ := briefWindow(all, "ins_1", "next", t0.Add(24*time.Hour), t0); !w.Since.Equal(t0) {
+	if w, _ := briefWindow(all, "ins_1", "next", t0.Add(24*time.Hour), t0, []string{"period", "sections[].body"}); !w.Since.Equal(t0) {
 		t.Fatalf("next brief must start at the first one's until: %+v", w)
 	}
 }

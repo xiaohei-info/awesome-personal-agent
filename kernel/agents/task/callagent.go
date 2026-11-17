@@ -185,9 +185,9 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 	if err != nil || over {
 		return err
 	}
-	var declared []string
+	var declared, fields []string
 	if pk, ok := s.o.Packs.Get(pack); ok {
-		declared = pk.Prompts[tmpl].Meta.Materials
+		declared, fields = pk.Prompts[tmpl].Meta.Materials, pk.Prompts[tmpl].Meta.ResultFields
 	}
 	want := wants(declared)
 	var mats []Material
@@ -216,7 +216,9 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 			mats = append(mats, sc)
 		}
 		// 各段与按实例的取材窗口；窗口写进简报事项的 spec.since/until，下一份成功的简报以它为起点（§7.3）。
-		b, err := s.briefLedger(ctx, c, planFor(c, want, s.o.WebBase, s.o.Now()))
+		p := planFor(c, want, s.o.WebBase, s.o.Now())
+		p.fields = fields
+		b, err := s.briefLedger(ctx, c, p)
 		if err != nil {
 			return err
 		}

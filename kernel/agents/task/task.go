@@ -598,6 +598,12 @@ func (d resultDecl) judge(tr runTrace, spec json.RawMessage) (evidence string, a
 	return "", absent
 }
 
+// validResult 是"这份结果有效"的唯一判据：事项已完成，且模板声明的结果字段写全（没声明字段的模板，完成即有效）。
+// 知会的汇入、下一份简报的起点与 prior 都按它，只用 CLI 回执报完成却没写结果的那份三者都不算（§7.3）。
+func validResult(it domain.Item, fields []string) bool {
+	return it.Phase == domain.PhaseDone && len(missingFields(it.Spec, fields)) == 0
+}
+
 // missingFields 返回 spec 里没写全的声明字段。字段是顶层键，或 a[].b：a 是非空数组且每个元素的 b 都有内容。
 func missingFields(spec json.RawMessage, fields []string) []string {
 	var m map[string]any
@@ -731,8 +737,11 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 		}
 		done = true
 	}
-	// "知会"只在这份简报真的完成后才算汇入；崩溃在转 done 与这里之间时，下一份会再列一次，不会丢（§7.3）。
-	if failure == "" && done && len(decl.Digest) > 0 {
+	if done {
+		it.Phase = domain.PhaseDone
+	}
+	// "知会"只在这份简报是有效结果时才算汇入；崩溃在转 done 与这里之间时，下一份会再列一次，不会丢（§7.3）。
+	if failure == "" && validResult(it, decl.Fields) && len(decl.Digest) > 0 {
 		es := make([]summaries.DigestEntry, len(decl.Digest))
 		for i, id := range decl.Digest {
 			es[i].Event = id

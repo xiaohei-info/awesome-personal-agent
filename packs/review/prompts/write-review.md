@@ -23,7 +23,7 @@ default_instruction: |-
 - 只写资料里有依据的事。context.window 是本期；时刻按 context.timezone 写。
 - 事项阶段：proposed 是还没接受的建议，不是任务；waiting 在等别人；needs_input 等本人；done 完成；dropped 放弃。
 - activity 是本期完成与写下的进展；open_items 是现在全部在途的事项（total 是总数，条目不截断），按该先看的排在前面；due_waiting 的 due_next 是下个周期内到期的。没完成的原因只取自进展记录、等待或待决定的问题；查不到就写"原因未记录"，不要推测。
-- context.sources 是已登记来源的覆盖：fetch 为 failing、never、disabled 或 unknown 的写"没读到"并点名来源；not_screened 大于 0 的写"还没初筛的有 N 条"；没登记的来源不提，不推断它的情况。
+- context.sources 是已登记来源的覆盖：fetch 为 failing、never、disabled 或 unknown 的写"没读到"并点名来源；fetch 为 push 的是对方推送接入的来源，没有拉取记录，按 ingested_in_window 写本期收到几条或"本期没收到新推送"，不写"没读到"；not_screened 大于 0 的写"还没初筛的有 N 条"；没登记的来源不提，不推断它的情况。
 - prior 是同一安排上一份复盘：用来对照它写的下期关注；说过且没有变化的普通信息不再重复，逾期与待决定照常写。
 - 正文不出现任何 id 与资料字段名；要指向某条时，用条目的 web_url 做 Markdown 链接，只用资料里给出的地址。
 - 不建事项、不改其他事项、不替本人决定。

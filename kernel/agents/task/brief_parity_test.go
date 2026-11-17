@@ -147,21 +147,26 @@ func TestProposalFollowedByLaterEventsOfSameObject(t *testing.T) {
 	}
 }
 
-// context 把来源覆盖分成三层：拉取（失败、从未、正常）、窗口内落盘数、未初筛积压；时刻带实例时区。
+// context 把来源覆盖分成三层：拉取（失败、从未、正常；推送来源不按拉取算）、窗口内落盘数、未初筛积压；时刻带实例时区。
 // 项目范围真正过滤事项类段；简报自己不算活动；在途事项不截断，等本人决定的排最前。
 func TestContextCoverageScopeAndOpenItems(t *testing.T) {
 	e := setup(t)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		for _, s := range []struct{ id, stats string }{
-			{"src_fail", `{"runs":5,"consecutive_failures":3,"last_success_at":"2026-02-27T00:00:00Z"}`},
-			{"src_never", ``},
-			{"src_ok", `{"runs":9,"last_success_at":"2026-02-28T23:00:00Z"}`},
+		for _, s := range []struct{ id, typ, stats string }{
+			{"src_fail", "script", `{"runs":5,"consecutive_failures":3,"last_success_at":"2026-02-27T00:00:00Z"}`},
+			{"src_never", "script", ``},
+			{"src_ok", "script", `{"runs":9,"last_success_at":"2026-02-28T23:00:00Z"}`},
+			{"src_hook", "webhook", ``},  // 推送来源：统计永远为空
+			{"src_hook0", "webhook", ``}, // 本期没有推送
 		} {
 			if _, err := tx.Exec(`INSERT INTO sources_registry_source
 				(id, name, type, source_type, command, schedule, timeout, credentials_path, dedupe_domain, default_project, outbound_local, outbound_external, config, cursor, enabled, stats)
-				VALUES (?, ?, 'script', 'mail', '', '', 0, '', '', '', 'full', 'full', '', '', 1, ?)`, s.id, "名-"+s.id, s.stats); err != nil {
+				VALUES (?, ?, ?, 'mail', '', '', 0, '', '', '', 'full', 'full', '', '', 1, ?)`, s.id, "名-"+s.id, s.typ, s.stats); err != nil {
 				return err
 			}
+		}
+		if err := runner.AppendInternal(tx, domain.Source{ID: "src_hook"}, domain.SourceEvent{ID: "h1", Type: "mail", Subject: "推送", OccurredAt: t0}); err != nil {
+			return err
 		}
 		// 正常拉取的来源收到一条、还没初筛：落盘数与积压分开计
 		if err := runner.AppendInternal(tx, domain.Source{ID: "src_ok"}, domain.SourceEvent{ID: "q1", Type: "mail", Subject: "积压", OccurredAt: t0}); err != nil {
@@ -222,8 +227,11 @@ func TestContextCoverageScopeAndOpenItems(t *testing.T) {
 	if ok := fetch["名-src_ok"]; ok.Fetch != "ok" || ok.Ingested != 1 || ok.Backlog != 1 {
 		t.Errorf("ok source with backlog: %+v", ok)
 	}
-	if fetch["名-src_never"].Fetch != "never" || fetch["名-src_never"].Ingested != 0 {
+	if fetch["名-src_never"].Fetch != "never" || fetch["名-src_never"].Ingested != 0 || fetch["名-src_never"].Via != "script" {
 		t.Errorf("never/ok sources: %+v", fetch)
+	}
+	if h, h0 := fetch["名-src_hook"], fetch["名-src_hook0"]; h.Fetch != "push" || h.Via != "webhook" || h.Ingested != 1 || h0.Fetch != "push" || h0.Ingested != 0 {
+		t.Errorf("webhook sources are push, judged by what arrived in the window, never as unfetched: %+v %+v", h, h0)
 	}
 	if strings.Contains(m["due_waiting"], "范围外") || strings.Contains(m["open_items"], "范围外") {
 		t.Fatalf("project scope must filter item sections: %s %s", m["due_waiting"], m["open_items"])
@@ -247,34 +255,67 @@ func TestContextCoverageScopeAndOpenItems(t *testing.T) {
 	}
 }
 
-// 失败的那份简报不作下一份的起点：窗口从最近一份成功的简报算起，资料里的 prior 也是那份。
-func TestFailedBriefDoesNotMoveWindowOrPrior(t *testing.T) {
+// 有效结果是同一个判据：事项完成且写全了模板声明的结果字段。只用 CLI 回执报完成（带链接、不写正文）、
+// 写全了却报受阻、运行失败的那份，都不汇入知会、不作下一份的起点，也不当 prior；下一份仍从上一份真正有效的简报接着。
+func TestOnlyAValidBriefConsumesDigestAndSeedsNext(t *testing.T) {
 	e := setup(t)
-	e.harness("hx", "summary")
-	e.setDefaultHarness("hx")
-	ok, _ := e.runCall("brief") // 成功：窗口 [t0-24h, t0]
+	e.harness("hx", "noOutcome")
 	e.harness("hf", "exit1")
-	e.setDefaultHarness("hf")
-	e.svc.o.Now = func() time.Time { return t0.Add(30 * time.Minute) }
-	bad, _ := e.runCall("brief") // 失败，但拉起时写了窗口 [t0, t0+30m]
-	if e.item(ok).Phase != domain.PhaseDone || e.item(bad).Phase != domain.PhaseNeedsInput {
-		t.Fatalf("setup: %s %s", e.item(ok).Phase, e.item(bad).Phase)
+	run := func(at time.Time, act func(agent runidentity.Identity, id string)) (string, map[string]string) {
+		e.setDefaultHarness("hx")
+		if act == nil {
+			e.setDefaultHarness("hf")
+		}
+		e.svc.o.Now = func() time.Time { return at }
+		id := e.openItemWithOrigin("instance:ins_1")
+		if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("write-brief", id)); err != nil {
+			t.Fatal(err)
+		}
+		if act != nil {
+			rs := e.runList()
+			runDir := e.runs + "/" + rs[len(rs)-1].Run.ID
+			act(runidentity.Identity{Secret: waitFile(t, runDir+"/token")}, id)
+			if err := os.WriteFile(runDir+"/go", nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return id, materialsOf(e, e.waitResult().Run.ID)
 	}
-	e.setDefaultHarness("hx")
-	e.svc.o.Now = func() time.Time { return t0.Add(time.Hour) }
-	_, m := e.runCall("write-brief")
+	write := func(agent runidentity.Identity, id string) {
+		e.must(agent, "item.update", map[string]any{"id": id, "spec": json.RawMessage(`{"period":"VALID","sections":[{"title":"t","body":"b"}]}`), "reason": "write"})
+	}
+	e.digest(e.rawSource("src_news", "full", domain.SourceEvent{ID: "n1", Type: "news", Subject: "资讯一", OccurredAt: t0})...)
+	a, _ := run(t0, write) // 有效：写全后由内核转 done
+	if e.item(a).Phase != domain.PhaseDone || e.pendingDigest() != 0 {
+		t.Fatalf("valid brief: %s pending=%d", e.item(a).Phase, e.pendingDigest())
+	}
+	e.digest(e.rawSource("src_news2", "full", domain.SourceEvent{ID: "n2", Type: "news", Subject: "资讯二", OccurredAt: t0})...)
+	cliOnly, _ := run(t0.Add(30*time.Minute), func(agent runidentity.Identity, id string) {
+		e.must(agent, "delegate.report", map[string]any{"id": id, "outcome": "done", "summary": "s", "evidence": map[string]any{"link": "https://example.invalid/x"}})
+	})
+	if e.item(cliOnly).Phase != domain.PhaseDone || e.pendingDigest() != 1 {
+		t.Fatalf("CLI-only done without the declared fields must not consume digest: %s pending=%d", e.item(cliOnly).Phase, e.pendingDigest())
+	}
+	blocked, _ := run(t0.Add(45*time.Minute), func(agent runidentity.Identity, id string) {
+		write(agent, id)
+		e.must(agent, "delegate.report", reportIn(id, "blocked"))
+	})
+	if e.item(blocked).Phase == domain.PhaseDone || e.pendingDigest() != 1 {
+		t.Fatalf("blocked brief: %s pending=%d", e.item(blocked).Phase, e.pendingDigest())
+	}
+	if failed, _ := run(t0.Add(50*time.Minute), nil); e.item(failed).Phase != domain.PhaseNeedsInput || e.pendingDigest() != 1 {
+		t.Fatalf("failed run: %s pending=%d", e.item(failed).Phase, e.pendingDigest())
+	}
+	_, m := run(t0.Add(time.Hour), write)
 	var ctx struct {
 		Context struct {
 			Window window `json:"window"`
 		} `json:"context"`
 	}
-	var pr struct {
-		Prior *struct{ CreatedAt time.Time } `json:"prior"`
-	}
 	if err := json.Unmarshal([]byte(m["context"]), &ctx); err != nil || !ctx.Context.Window.Since.Equal(t0) {
-		t.Fatalf("window must start at the successful brief's until: %v %+v", err, ctx.Context.Window)
+		t.Fatalf("window must start at the last valid brief's until (t0): %v %+v", err, ctx.Context.Window)
 	}
-	if err := json.Unmarshal([]byte(m["prior"]), &pr); err != nil || pr.Prior == nil {
-		t.Fatalf("prior must be the successful brief: %v %s", err, m["prior"])
+	if !strings.Contains(m["prior"], "VALID") || !strings.Contains(m["digest"], "资讯二") {
+		t.Fatalf("prior must be the last valid brief and the unconsumed digest must still be offered: %s | %s", m["prior"], m["digest"])
 	}
 }

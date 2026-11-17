@@ -60,6 +60,7 @@ type briefPlan struct {
 	days   int             // 日程前瞻天数
 	scope  map[string]bool // 实例的项目范围；空表示全部
 	base   string          // Web 地址，拼条目的 web_url；空时不给链接
+	fields []string        // 模板声明的结果字段：上一份简报是否有效按它判（validResult）
 }
 
 func planFor(c rules.Call, want func(string) bool, base string, now time.Time) briefPlan {
@@ -131,24 +132,22 @@ func zoneName(loc *time.Location, now time.Time) string {
 	return "UTC" + now.In(loc).Format("-07:00")
 }
 
-// briefWindow 取本份的取材窗口与上一份：只看同一实例里已完成（done）的简报，失败、受阻、没写全的那份不作起点，
-// 窗口因此一直从最近一份成功的简报算起；没有成功过的取 first。简报事项的 origin 记所属实例（规则建事项时写入）。
-func briefWindow(all []domain.Item, instance, self string, now, first time.Time) (window, *domain.Item) {
+// briefWindow 取本份的取材窗口与上一份：二者是同一份简报，即同一实例里窗口最晚的一份有效结果（validResult）。
+// 失败、受阻、只报了完成却没写结果的那份都不作起点也不当 prior；没有有效的取 first。简报事项的 origin 记所属实例。
+func briefWindow(all []domain.Item, instance, self string, now, first time.Time, fields []string) (window, *domain.Item) {
 	w := window{Since: first, Until: now}
 	var latest time.Time
 	var prior *domain.Item
 	for i, it := range all {
-		if it.ID == self || it.Kind != domain.KindBrief || it.Phase != domain.PhaseDone || it.Origin == nil || it.Origin.Source != domain.OriginInstancePrefix+instance {
+		if it.ID == self || it.Kind != domain.KindBrief || it.Origin == nil || it.Origin.Source != domain.OriginInstancePrefix+instance || !validResult(it, fields) {
 			continue
-		}
-		if prior == nil || it.CreatedAt.After(prior.CreatedAt) {
-			prior = &all[i]
 		}
 		var sp struct {
 			Until time.Time `json:"until"`
 		}
-		if json.Unmarshal(it.Spec, &sp) == nil && sp.Until.After(latest) {
-			latest = sp.Until
+		_ = json.Unmarshal(it.Spec, &sp)
+		if prior == nil || sp.Until.After(latest) || sp.Until.Equal(latest) && it.CreatedAt.After(prior.CreatedAt) {
+			prior, latest = &all[i], sp.Until
 		}
 	}
 	if !latest.IsZero() && latest.Before(now) {
@@ -264,8 +263,9 @@ type openEntry struct {
 // 另给窗口内落盘的条数与还在积压里（未判定、过期）没有进初筛结果的条数。三者是不同的事实，不能互相代替。
 type sourceCoverage struct {
 	Name        string     `json:"name"`
-	Type        string     `json:"type,omitempty"`
-	Fetch       string     `json:"fetch"` // ok、failing、never、disabled、unknown
+	Type        string     `json:"type,omitempty"` // 语义类型（mail、calendar……）
+	Via         string     `json:"via"`            // 接入方式：pull、script（定时拉取）或 webhook（对方推送）
+	Fetch       string     `json:"fetch"`          // ok、failing、never、disabled、unknown；推送来源为 push
 	Failures    int        `json:"consecutive_failures,omitempty"`
 	LastSuccess *time.Time `json:"last_success_at,omitempty"`
 	Ingested    int        `json:"ingested_in_window"`
@@ -298,7 +298,7 @@ func (s *Service) briefLedger(ctx context.Context, c rules.Call, p briefPlan) (o
 		if err != nil {
 			return err
 		}
-		out.w, out.prior = briefWindow(all, inst, self, now, p.first)
+		out.w, out.prior = briefWindow(all, inst, self, now, p.first, p.fields)
 		srcs, err := registry.List(tx)
 		if err != nil {
 			return err
@@ -414,11 +414,13 @@ func contextSection(tx *store.Tx, srcs []domain.Source, p briefPlan, w window, n
 	}
 	cov := []sourceCoverage{}
 	for _, src := range srcs {
-		c := sourceCoverage{Name: src.Name, Type: src.SourceKind, Fetch: "ok"}
+		c := sourceCoverage{Name: src.Name, Type: src.SourceKind, Via: string(src.Type), Fetch: "ok"}
 		st, err := runner.StatsOf(src)
 		switch {
 		case !src.Enabled:
 			c.Fetch = "disabled"
+		case src.Type == domain.SourceWebhook: // 推送来源没有拉取记录：只看本期收到多少，不当成"从未拉取"
+			c.Fetch = "push"
 		case err != nil:
 			c.Fetch = "unknown"
 		case st.Runs == 0 && st.LastSuccessAt.IsZero() && st.LastFailureAt.IsZero():
@@ -446,7 +448,7 @@ func contextSection(tx *store.Tx, srcs []domain.Source, p briefPlan, w window, n
 	return ctx, nil
 }
 
-// priorSection：同一实例上一份已完成的简报（正文原样），用来避免重复播报没有变化的普通信息；没有时为 null。
+// priorSection：同一实例上一份有效的简报（与窗口起点是同一份）（正文原样），用来避免重复播报没有变化的普通信息；没有时为 null。
 func priorSection(it *domain.Item, p briefPlan) any {
 	if it == nil {
 		return nil
