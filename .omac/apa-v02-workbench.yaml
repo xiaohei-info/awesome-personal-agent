@@ -285,7 +285,7 @@ nodes:
     consumes: []
     coverage_gate: 80
 - id: grant-import
-  worker: omac-worker-backend
+  worker: omac-worker-backend-oracle
   blocked_by: []
   title: 授权单：导入专用单、只接受授权单的判定、item.progress 可授权
   description: 产出 grant-import-delivery。订正 WB-19：附录 B.1 已把 item.progress 列为可用授权单，实现放行它；已签发的单内容不变、不多出权限。条数扣减接口供

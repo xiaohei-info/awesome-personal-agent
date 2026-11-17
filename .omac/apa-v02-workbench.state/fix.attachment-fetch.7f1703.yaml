@@ -1,4 +1,3 @@
-# sha256: 167cca4fd6d9f932504e1ab7e0088fe7918d514f1c68f6b5f370da8aab31df22
+# sha256: 264171ff2c0b0a3654db4df15e4254eb5317930c74499dcdd6de396bca8cbcec
 work_item_id: 01a1e6e0-dcb2-756e-bce5-33b263857654
-status: blocked
-recovery_marker: true
+status: abandoned
