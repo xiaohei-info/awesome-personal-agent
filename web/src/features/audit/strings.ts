@@ -21,6 +21,7 @@ const zh = {
   byGrant: "按临时授权",
   hidden: "内容已删除",
   more: "加载更多",
+  imported: (n: number) => `导入 ${n} 条`,
 };
 
 const en: typeof zh = {
@@ -43,6 +44,7 @@ const en: typeof zh = {
   byGrant: "via a grant",
   hidden: "content deleted",
   more: "Load more",
+  imported: (n: number) => `Imported ${n}`,
 };
 
 export const strings: Dict<typeof zh> = { zh, en };
