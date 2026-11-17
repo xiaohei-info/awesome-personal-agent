@@ -10,6 +10,11 @@
 //	DELETE /connections/{id}              删除已停用的连接（connection.remove）
 //	POST   /connections/test              测未保存的草稿：自检，send 为真时再发一条测试；不改账本
 //	POST   /connections/{id}/test         对已保存的连接发一条测试，结果写进连接现状
+//	POST   /connections/drafts            Agent 提交渠道草稿（connection.propose，worker 及以上）
+//	GET    /connections/drafts            草稿列表（connection.drafts；token 只看到自己提交的）
+//	POST   /connections/drafts/{id}/test  对草稿发一条内容固定的测试，只到草稿里的目标（先过 connection.draft_test 的授权）
+//	POST   /connections/drafts/{id}/confirm  本人确认（connection.confirm，只在 Web）
+//	DELETE /connections/drafts/{id}       撤回或不要（connection.discard）
 //
 // 路由里没有业务规则：校验、授权与事件都在内核命令；测试经渠道发送器调外呼调用器。除列表外全部只放行 Web 会话
 // （与其他设置相同，任何 Bearer 凭据得 web_only，退出码 20）。列表对 token 只给 kconn.Summary（不含配置值、凭据与细节，§7.6），
@@ -23,6 +28,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	kconn "github.com/xiaohei-info/awesome-personal-agent/kernel/connections"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -53,6 +59,11 @@ func Routes(st *store.Store, x *command.Executor, cs *kconn.Service, call *conn.
 			{Method: "DELETE", Path: "/connections/{id}", Handler: web(a.cmd(kconn.CmdRemove))},
 			{Method: "POST", Path: "/connections/test", MaxBody: 16 << 10, Handler: web(a.testDraft)},
 			{Method: "POST", Path: "/connections/{id}/test", MaxBody: 1 << 10, Handler: web(a.testSaved)},
+			{Method: "POST", Path: "/connections/drafts", MaxBody: 16 << 10, Handler: a.propose},
+			{Method: "GET", Path: "/connections/drafts", Handler: a.drafts},
+			{Method: "POST", Path: "/connections/drafts/{id}/test", MaxBody: 1 << 10, Handler: a.testDraftSaved},
+			{Method: "POST", Path: "/connections/drafts/{id}/confirm", MaxBody: 1 << 10, Handler: web(a.cmd(kconn.CmdConfirm))},
+			{Method: "DELETE", Path: "/connections/drafts/{id}", Handler: a.cmd(kconn.CmdDiscard)},
 		} {
 			r.Handle(rt)
 		}
@@ -199,4 +210,45 @@ func (a *api) testSaved(w http.ResponseWriter, r *http.Request, _ *core.Principa
 	}
 	err := a.tests.Probe(r.Context(), kconn.Target(c), nil, true, true)
 	return core.WriteJSON(w, http.StatusOK, result(err))
+}
+
+// propose 交给内核命令：授权（worker 及以上）、校验、凭据入保管库都在 connection.propose。
+func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in json.RawMessage
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	v, err := a.do(r, p, kconn.CmdPropose, in)
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusCreated, v)
+}
+
+func (a *api) drafts(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	v, err := a.do(r, p, kconn.CmdDrafts, []byte(`{}`))
+	if err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, v)
+}
+
+// testDraftSaved 先经 connection.draft_test 验明调用者能测这份待确认草稿（提交者或 Web 本人），拿到草稿里的目标，
+// 再发一条内容固定的测试（凭据按草稿 id 从保管库取）；结果记在草稿上，不改连接与路由。
+func (a *api) testDraftSaved(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	in, _ := json.Marshal(map[string]string{"id": r.PathValue("id")})
+	v, err := a.do(r, p, kconn.CmdDraftTest, in)
+	if err != nil {
+		return err
+	}
+	var t kconn.DraftTarget
+	if err := json.Unmarshal(v, &t); err != nil {
+		return err
+	}
+	err = a.tests.Probe(r.Context(), conn.Target{ID: t.ID, Type: t.Type, Settings: t.Settings}, nil, true, false)
+	res := result(err)
+	if uerr := a.st.Update(r.Context(), func(tx *store.Tx) error { return kconn.SetDraftTest(tx, t.ID, res.OK, res.Problem, clock.Now()) }); uerr != nil {
+		return uerr
+	}
+	return core.WriteJSON(w, http.StatusOK, res)
 }

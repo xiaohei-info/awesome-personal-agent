@@ -26,7 +26,7 @@ Commands:
   delegation   executors, delegate, dispatch, report, handback   (run apa delegate before handing work to anyone)
   projects     project, material, blob, agents sync|check
   sources      source (auth, webhook, ingests, replay)
-  outward      events --follow, ext run|check, connection list (read-only)
+  outward      events --follow, ext run|check, connection list (read-only), connection propose (owner confirms in Web)
   automation   instance, pack
   observe      why, health, run
 

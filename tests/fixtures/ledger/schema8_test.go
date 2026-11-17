@@ -70,8 +70,8 @@ func TestV7FixtureCarriesTheUpgradeRehearsalData(t *testing.T) {
 // 7 → 8（WB-01..WB-08）：逐表逐列核对，旧行不改写、新列按“没有”读，旧二进制被版本闸拒绝。
 func TestUpgradeV7ToV8AddsEverySchemaPieceWithoutRewritingRows(t *testing.T) {
 	latest := mustLatest(t)
-	if latest != 8 {
-		t.Fatalf("schema.ledger = %d, 想要 8", latest)
+	if latest < 8 {
+		t.Fatalf("schema.ledger = %d, 想要至少 8", latest)
 	}
 	dir, m := gen(t, 7)
 	home := copyTree(t, dir)

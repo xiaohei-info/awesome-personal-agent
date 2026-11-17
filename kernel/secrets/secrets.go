@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -199,6 +200,58 @@ func (v *Vault) Usable(tx *store.Tx, owner string) (map[string]bool, error) {
 		out[f] = id == v.id
 	}
 	return out, r.Err()
+}
+
+// Move 把 from 名下的指定字段换到 to 名下（覆盖 to 已有的同名字段），再删掉 from 的这些字段。
+// 解密与重新加密都在本包内完成，明文不出保管库；解不开的字段不搬，按缺凭据处理（§7.6 连接草稿的确认）。
+func (v *Vault) Move(tx *store.Tx, from, to string, fields []string, now time.Time) error {
+	if err := v.Copy(tx, from, to, fields, now); err != nil {
+		return err
+	}
+	for _, f := range fields {
+		if err := Delete(tx, from, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Copy 把 from 名下的指定字段复制到 to 名下（覆盖），from 不变；明文不出保管库。
+func (v *Vault) Copy(tx *store.Tx, from, to string, fields []string, now time.Time) error {
+	want := map[string]bool{}
+	for _, f := range fields {
+		want[f] = true
+	}
+	rs, err := rows(tx, "WHERE owner = ?", from)
+	if err != nil {
+		return err
+	}
+	for _, x := range rs {
+		if !want[x.field] || x.keyID != v.id {
+			continue
+		}
+		p, err := v.open(x.owner, x.field, x.nonce, x.ct)
+		if err != nil {
+			continue
+		}
+		if err := v.Put(tx, to, x.field, p, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Stamp 是属主名下密文行的版本戳（字段名与 nonce；每次写入换 nonce），不含任何明文或密文，供"在此之后有没有改过"的比对。
+func Stamp(tx *store.Tx, owner string) (string, error) {
+	rs, err := rows(tx, "WHERE owner = ? ORDER BY field", owner)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, x := range rs {
+		b.WriteString(x.field + "=" + x.nonce + ";")
+	}
+	return b.String(), nil
 }
 
 type row struct{ owner, field, keyID, nonce, ct string }

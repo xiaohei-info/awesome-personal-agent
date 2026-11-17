@@ -625,6 +625,8 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 			report("inbound rejudge", k.in.Rejudge(ctx)) // 模型恢复后重判积压、到期的转 expired（§9.3）
 			report("webhook", k.wh.Process(ctx))
 			report("retention", k.ret.Sweep(ctx))
+			// 过期的连接草稿连同它的凭据删除（§7.6）
+			report("connection drafts", kconnections.ExpireDrafts(ctx, k.st, clock.Now()))
 			report("wake receipts", k.wk.Settle(ctx, k.st, k.result)) // 补上重启前漏掉的回执，先于调度器的超时判定
 			report("dispatch", k.disp.Dispatch(ctx))
 			report("rules", k.eng.Drain(ctx))

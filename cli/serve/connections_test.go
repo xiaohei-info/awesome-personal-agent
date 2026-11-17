@@ -106,6 +106,69 @@ func TestConnectionsOverHTTPAndMissingMasterKey(t *testing.T) {
 	if code, b := bearer("ext", "channel.mine", "GET", "/connections", ""); code != 403 {
 		t.Fatalf("ext key list: %d %s", code, b)
 	}
+	// Agent 草稿（§7.6）：worker 提交并测试，确认前不建连接；delegate 确认得 web_only；Web 确认后启用并写路由。
+	const draftSecret = "DRAFT-plain-secret-77"
+	issue := func(kind string) string {
+		code, b := s.do("POST", "/settings/tokens", `{"kind":"`+kind+`"}`)
+		var out struct{ Secret string }
+		if code != 201 || json.Unmarshal([]byte(b), &out) != nil {
+			t.Fatalf("issue %s: %d %s", kind, code, b)
+		}
+		return out.Secret
+	}
+	as := func(secret, method, path, body string) (int, string) {
+		r, _ := http.NewRequest(method, "http://"+addr.String()+"/v1"+path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+secret)
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		rb, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(rb)
+	}
+	worker, delegate, observer := issue("worker"), issue("delegate"), issue("observer")
+	if code, b := as(observer, "POST", "/connections/drafts", `{"type":"sample","name":"x","secrets":{"token":"t"}}`); code != 403 {
+		t.Fatalf("observer propose: %d %s", code, b)
+	}
+	code, b = as(worker, "POST", "/connections/drafts", `{"type":"sample","name":"Agent 的手机","secrets":{"token":"`+draftSecret+`"},"routes":["decision"]}`)
+	var dr struct {
+		ID      string
+		WebPath string `json:"web_path"`
+	}
+	if code != 201 || strings.Contains(b, draftSecret) || json.Unmarshal([]byte(b), &dr) != nil || !strings.HasPrefix(dr.ID, "dr-") || dr.WebPath != "/settings/channels#draft-"+dr.ID {
+		t.Fatalf("propose: %d %s", code, b)
+	}
+	sent := len(p.got)
+	if code, b := as(worker, "POST", "/connections/drafts/"+dr.ID+"/test", `{}`); code != 200 || !strings.Contains(b, `"ok":true`) || len(p.got) != sent+1 || !p.got[sent].Test {
+		t.Fatalf("draft test: %d %s (%d sent)", code, b, len(p.got)-sent)
+	}
+	if code, b := as(delegate, "POST", "/connections/drafts/"+dr.ID+"/test", `{}`); code != 404 || len(p.got) != sent+1 {
+		t.Fatalf("another agent tested the draft: %d %s", code, b)
+	}
+	if code, b := s.do("GET", "/connections?direction=channel", ""); code != 200 || strings.Contains(b, "Agent 的手机") {
+		t.Fatalf("a draft must not be a connection yet: %d %s", code, b)
+	}
+	if code, b := as(delegate, "POST", "/connections/drafts/"+dr.ID+"/confirm", `{}`); code != 403 || !strings.Contains(b, "web_only") {
+		t.Fatalf("delegate confirm: %d %s", code, b)
+	}
+	if code, b := s.do("GET", "/connections/drafts", ""); code != 200 || strings.Contains(b, draftSecret) || !strings.Contains(b, `"state":"pending"`) {
+		t.Fatalf("web drafts: %d %s", code, b)
+	}
+	code, b = s.do("POST", "/connections/drafts/"+dr.ID+"/confirm", `{}`)
+	var cc struct {
+		ID      string
+		Enabled bool
+	}
+	if code != 200 || json.Unmarshal([]byte(b), &cc) != nil || !cc.Enabled || strings.Contains(b, draftSecret) {
+		t.Fatalf("confirm: %d %s", code, b)
+	}
+	if code, b := s.do("GET", "/settings/policy", ""); code != 200 || !strings.Contains(b, `"decision":"channel:`+cc.ID+`"`) {
+		t.Fatalf("route after confirm: %d %s", code, b)
+	}
+	if code, b := s.do("POST", "/connections/drafts/"+dr.ID+"/confirm", `{}`); code != 409 || !strings.Contains(b, "draft_confirmed") {
+		t.Fatalf("second confirm: %d %s", code, b)
+	}
 	stop()
 
 	if err := os.Remove(filepath.Join(home, "master.key")); err != nil {

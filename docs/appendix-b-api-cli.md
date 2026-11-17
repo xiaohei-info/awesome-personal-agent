@@ -81,10 +81,10 @@
 | `apa ext run <名>` | 本机启动 ext | ext 密钥（由 ext 读取） | |
 | `apa ext check` | 协议一致性自测 | 无 | |
 | `apa connection list [--direction channel\|output]` | 列出连接（内置渠道与输出）：id、方向、类型、名字、启停、状态、问题代码与最近成功、失败的时间；不含配置值与凭据（主文档 §7.6）。就是 `GET /connections` | observer | |
-| `apa connection propose --type <类型> [--name <名字>] [--connection <id>] [--set <键>=<值>]... [--route <类别>]... [--secret-stdin]` | 【规划中（v0.2.0）】提交一份待本人确认的渠道草稿（`connection.propose`，主文档 §7.6）：`--connection` 为改已有连接；`--route` 可重复，取 `decision`、`brief`、`reminder`、`health`；`--secret-stdin` 从标准输入读一个 JSON 对象 `{"<凭据字段>": "<值>"}`，空串表示清除，不回显。返回草稿与它的 Web 地址；本人确认前什么都不生效 | worker | 2、4 |
-| `apa connection drafts` | 【规划中（v0.2.0）】列出待确认与最近结束的草稿（不含凭据） | worker | |
-| `apa connection test-draft <草稿 id>` | 【规划中（v0.2.0）】对自己提交的草稿发一条内容固定的测试，只发到草稿里的目标；不启用、不改路由 | worker（只限自己提交的） | 4、6 |
-| `apa connection discard <草稿 id>` | 【规划中（v0.2.0）】撤回自己提交的草稿，连同它的凭据删除 | worker（只限自己提交的） | 4、6 |
+| `apa connection propose --type <类型> [--name <名字>] [--connection <id>] [--set <键>=<值>]... [--route <类别>]... [--secret-stdin]` | 提交一份待本人确认的渠道草稿（`connection.propose`，主文档 §7.6）：`--connection` 为改已有连接；`--route` 可重复，取 `decision`、`brief`、`reminder`、`health`；`--secret-stdin` 从标准输入读一个 JSON 对象 `{"<凭据字段>": "<值>"}`，空串表示清除，不回显。返回草稿与它的 Web 地址；本人确认前什么都不生效 | worker | 2、4 |
+| `apa connection drafts` | 列出待确认与最近结束的草稿（不含凭据） | worker | |
+| `apa connection test-draft <草稿 id>` | 对自己提交的草稿发一条内容固定的测试，只发到草稿里的目标；不启用、不改路由 | worker（只限自己提交的） | 4、6 |
+| `apa connection discard <草稿 id>` | 撤回自己提交的草稿，连同它的凭据删除 | worker（只限自己提交的） | 4、6 |
 | **自动化** | | | |
 | `apa instance add/list/enable/disable` | 能力包实例 | delegate（`list` 为 observer） | |
 | `apa pack list` | 列出已加载能力包 | observer | |
@@ -119,6 +119,7 @@
 | 材料 | `material.commit`、`material.add`、`blob.put` | `revision.confirm`、`revision.reject` | |
 | 委派 | `delegate.create`；`delegate.report`、`delegate.dispatch`、`delegate.dispatch_update`、`followmsg.handback`（绑定的事项）；`executor.declare` | `delegate.report`、`delegate.dispatch`、`delegate.dispatch_update`、`followmsg.handback`（其他事项） | |
 | 项目 | `project.checkout.set`、`project.checkout.remove` | | `project.create`、`project.update`、`project.repo.add`、`project.repo.remove` |
+| 连接 | `connection.propose`；`connection.draft_test`、`connection.discard`（自己提交的草稿）。确认 `connection.confirm` 与其余连接命令属第三档 | | |
 | 来源与能力包 | | | `source.register`、`source.update`、`source.set_enabled`、`source.webhook_key`、`source.webhook_revoke`、`source.replay`、`inbound.backlog_rules`、`inbound.backlog_score`、`inbound.backlog_rejudge`、`inbound.backlog_restore`、`instance.create`、`instance.update`、`instance.toggle`、`instance.run` |
 
 授权单的 `actions` 只能取"可用授权单"一列的命令；`import.apply` 不能与其他动作出现在同一张单上。运行凭据只能使用签给本次运行所属 Agent（`grantee.agent` 等于运行记录的 harness）且允许后台使用的单，`apa grant list` 与 `GET /grants` 对运行凭据只列出这些单（凭据归属某个 Agent 的 delegate 另能看到签给该 Agent 的单），对象须同时在运行范围内，触发不可信时为退出码 23（`untrusted_trigger`）；`grantee.agent` 式的单放行 `proposal.accept`、`proposal.attach` 时，建议须来自可信发件人（`untrusted_origin`，主文档 §14.5）。
@@ -231,11 +232,11 @@
 | | `DELETE /connections/{id}` | 删除（`connection.remove`）：只对已停用的连接，否则 409；配置、凭据与现状一起删 | 只有 Web 登录 |
 | | `POST /connections/test` | 测表单里未保存的草稿 `{"type", "id"?, "config"?, "secrets"?, "send"?}`：插件自检，`send` 为真时再发一条内容固定的测试消息；带 `id` 时没给出的凭据用已保存的。不改账本。返回 `{"ok", "problem"?, "detail"?}`，`problem` 是问题代码（主文档 §7.6），`detail` 已脱敏 | 只有 Web 登录 |
 | | `POST /connections/{id}/test` | 对已保存的连接发一条测试消息，结果写进连接现状；返回同上 | 只有 Web 登录 |
-| | `POST /connections/drafts` | 【规划中（v0.2.0）】提交渠道草稿（`connection.propose`，主文档 §7.6）：`{"type", "name"?, "connection"?, "config"?, "secrets"?, "routes"?: ["decision", …]}`。配置按声明校验（与 `POST /connections` 同一份代码）；同一目标已有待确认草稿时旧的转为 `superseded`。返回 201 与草稿（不含凭据），带 `web_path` | worker 及以上的 token、Web 登录；运行凭据不可 |
-| | `GET /connections/drafts` | 【规划中（v0.2.0）】待确认与最近 7 天内结束的草稿：`{"drafts": [{"id", "type", "name", "connection"?, "config", "routes", "secrets": {"<字段>": {"action": set/clear/keep, "hint"?}}, "state": pending/confirmed/superseded/discarded/expired, "proposed_by", "created_at", "expires_at", "test"?: {"ok", "problem"?, "at"}, "changes"?}]}`。`hint` 只对声明里标识接收目标的凭据字段给出，只含首尾各 3 个字符或长度；`changes` 是改配置草稿与现用值不同的字段名 | worker 及以上的 token 只看到自己提交的；Web 登录看全部 |
-| | `POST /connections/drafts/{id}/test` | 【规划中（v0.2.0）】对草稿发一条内容固定的测试，目标只能是草稿里的目标；结果记在草稿上；不启用、不改路由。草稿不是待确认时 409。返回 `{"ok", "problem"?, "detail"?}` | 提交它的凭据、Web 登录；其他凭据 404 |
-| | `POST /connections/drafts/{id}/confirm` | 【规划中（v0.2.0）】本人确认这一份草稿（`connection.confirm`）：同一事务里新建或改连接、搬凭据、写路由、启用。已取代、已确认、已丢弃、已过期、目标连接在草稿之后被改过或名字已被占用时 409，`why` 开头是 `draft_superseded`、`draft_confirmed`、`draft_discarded`、`draft_expired`、`connection_changed`、`name_taken` 之一。返回连接 | 只有 Web 登录（delegate 退出码 20） |
-| | `DELETE /connections/drafts/{id}` | 【规划中（v0.2.0）】丢弃草稿（`connection.discard`），连同它的凭据删除；不是待确认时 409 | 提交它的凭据、Web 登录 |
+| | `POST /connections/drafts` | 提交渠道草稿（`connection.propose`，主文档 §7.6）：`{"type", "name"?, "connection"?, "config"?, "secrets"?, "routes"?: ["decision", …]}`。配置按声明校验（与 `POST /connections` 同一份代码）；同一目标已有待确认草稿时旧的转为 `superseded`。返回 201 与草稿（不含凭据），带 `web_path` | worker 及以上的 token、Web 登录；运行凭据不可 |
+| | `GET /connections/drafts` | 待确认与最近 7 天内结束的草稿：`{"drafts": [{"id", "type", "name", "connection"?, "config", "routes", "secrets": {"<字段>": {"action": set/clear/keep, "hint"?}}, "state": pending/confirmed/superseded/discarded/expired, "proposed_by", "created_at", "expires_at", "test"?: {"ok", "problem"?, "at"}, "changes"?}]}`。`hint` 只对声明里标识接收目标的凭据字段给出，只含首尾各 3 个字符或长度；`changes` 是改配置草稿与现用值不同的字段名 | worker 及以上的 token 只看到自己提交的；Web 登录看全部 |
+| | `POST /connections/drafts/{id}/test` | 对草稿发一条内容固定的测试，目标只能是草稿里的目标；结果记在草稿上；不启用、不改路由。草稿不是待确认时 409。返回 `{"ok", "problem"?, "detail"?}` | 提交它的凭据、Web 登录；其他凭据 404 |
+| | `POST /connections/drafts/{id}/confirm` | 本人确认这一份草稿（`connection.confirm`）：同一事务里新建或改连接、搬凭据、写路由、启用。已取代、已确认、已丢弃、已过期、目标连接在草稿之后被改过或名字已被占用时 409，`why` 开头是 `draft_superseded`、`draft_confirmed`、`draft_discarded`、`draft_expired`、`connection_changed`、`name_taken` 之一。返回连接 | 只有 Web 登录（delegate 退出码 20） |
+| | `DELETE /connections/drafts/{id}` | 丢弃草稿（`connection.discard`），连同它的凭据删除；不是待确认时 409 | 提交它的凭据、Web 登录 |
 | | 已有路由 GET /settings/ext-keys 的新增字段 | 每把密钥带 `last_seen_at`：同一权限范围（`channel.<名>`、`export` 等）的密钥最近一次经认证调用内核的时间，从未调用过时省略（与 `apa doctor` 的 `last_seen_at` 同源） | 只有 Web 登录 |
 | | `PATCH /settings/tokens/{id}` | 认领 token 所属的 harness `{"harness"}`（非空、不含空白，同无头运行声明的 `harness`）：只能从空设一次，已有值或已吊销为 409（`credential.assign`，记 `credential.assigned`，载荷 `{"harness"}`）；只对 worker、delegate。`POST /settings/tokens` 可带同一字段，在签发时给定；其他种类带它为 400。`GET /settings/tokens` 每条带 `harness`（空为未认领）与 `seen_harness`（该凭据最近一次事件里自报的 harness，没有时省略，只作认领推荐，不参与判定） | 只有 Web 登录 |
 | | `PUT /settings/agents/{harness}/grant` | 替换该 Agent 的长期授权单：同一事务撤销它名下现有的 `grantee.agent` 式有效单（撤销原因 `replaced`）并按请求体 `{grantee: {background}, scope, actions, expires_at?, reason?}` 签发新单，记 `grant.revoked` 与 `grant.issued`；`actions` 为空即只撤销。响应 `{"grant": 新单或 null, "revoked": [被撤销的单 id]}`；新单校验失败为 400，旧单不动 | 只有 Web 登录 |
@@ -434,10 +435,10 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 `apa version` 与 `GET /version` 返回同一份内容：
 
 ```json
-{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 8}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
+{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 9}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
 ```
 
-`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 8（版本 7 新增连接与凭据保管的三张表，已冻结）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。工作台能力迭代的全部结构变更收在一次迁移里，已合入，主干为 8（主文档 §16.5）；结构版本 8 在第一次被真实账本应用后冻结。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
+`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 9（版本 7 新增连接与凭据保管的三张表，已冻结）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。工作台能力迭代的全部结构变更收在一次迁移里（结构版本 8，已被真实账本应用，冻结）。结构版本 9 只增连接草稿表 `connections_draft`（主文档 §7.6），主干现为 9；同一发布批次里其他模块的只增迁移也归 9，在第一次被真实账本应用后冻结。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
 
 ## B.6 v0.2.0 对已有契约的改动
 
@@ -490,6 +491,8 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 材料的形态 | 两种，由有没有仓库位置区分 | 三种，新增只读字段 `form`；`POST /materials` 带 `link` 时登记链接型 | 只增；已有材料的 `form` 在读取时推定，不改写 |
 | 简报的写回结构 | `spec.sections[]` 每节必须有 `project` | 每节有 `project` 或 `title` 之一；`spec` 另有内核写入的 `since`、`until` | 已有简报原样可读。自定义的简报视图若按 `project` 分组，要能处理没有 `project` 的节 |
 | 提醒事项来源的事件类型 | 只有 `reminder.due` | 配了 `undated_lists` 时另有 `reminder.open` | 不配就没有变化；按事件类型匹配的用户规则若要处理没有到期日的提醒，加上新类型 |
+| 连接草稿 | 无 | 新增 `/connections/drafts` 路由、`connection.propose/drafts/draft_test/confirm/discard` 命令与 `apa connection propose/drafts/test-draft/discard`；接入声明的凭据字段可带 `target`（推送渠道的设备密钥带上） | 只增：已有连接命令仍只在 Web；确认只在 Web |
+| 账本结构版本（连接草稿） | 8 | 9：只增 `connections_draft` 表 | 升级时自动留快照；旧二进制拒绝打开新账本，回退用快照；回退会丢掉升级后提交的草稿（草稿本来 24 小时过期） |
 | `GET /connections` 的权限 | 只有 Web 登录 | observer 及以上的 token 读裁剪后的字段（不含 `config`、`secrets`、`detail`）；新增 `apa connection list` | 只增：Web 读到的内容不变；写命令仍只在 Web |
 | 笔记库打开地址的编码 | `{vault}`、`{path}` 按路径段编码：`&`、`=`、`+`、`$`、`:`、`@` 不编码，与 Web 预览不一致 | 按 URI 组件编码，内核与 Web 预览一致（主文档 §12.8） | 只改渲染结果，不迁移、不改存储；路径含这些字符时原来生成的是坏链接，修复后正确；另外 `!`、`'`、`(`、`)`、`*` 由百分号编码改为原样，两种写法等价；其余路径的结果不变 |
 | `GET /settings/ext-keys` | 没有最近调用时间 | 每把密钥另带 `last_seen_at` | 只增字段 |

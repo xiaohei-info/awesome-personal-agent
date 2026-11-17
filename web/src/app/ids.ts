@@ -152,6 +152,7 @@ export const EVENT_INTERNAL = [
   "source.enabled", "source.disabled", "source.renamed", "item.deleted", "run.credential_exchanged", "timer.fired", "credential.assigned",
   "agents_md.rendered", "background.launched", "background.refused", "background.skipped", "delegation.dispatched", "delegation.dispatch_updated", "executor.enrolled", "followup.deferred", "followup.reminded", "inbound.spot_reviewed", "purge.executed", "resume.launched", "resume.refused", "resume.session_lost", "rule.skipped", "wake.lease_opened", "wake.lease_released", "source.replay_requested", "source.webhook_key_created", "source.webhook_key_revoked", "source.webhook_key_rotated", "source.content_purged", "source.attachment_fetched",
   "connection.created", "connection.configured", "connection.enabled", "connection.disabled", "connection.renamed", "connection.removed",
+  "connection.proposed", "connection.draft_superseded", "connection.confirmed", "connection.draft_discarded", "connection.draft_expired",
 ] as const;
 
 // 以下是开放集合：能力包可以扩展，词表只登记内置的，查不到时显示原值。

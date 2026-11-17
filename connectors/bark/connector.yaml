@@ -16,6 +16,7 @@ fields:
     kind: secret
     label: {zh: 设备密钥, en: Device key}
     required: true
+    target: true
   - key: time_sensitive
     kind: toggle
     label: {zh: 等你决定的提醒用时效性通知, en: Use time-sensitive alerts for decisions}

@@ -42,6 +42,8 @@ type Field struct {
 	Required bool     `yaml:"required,omitempty" json:"required,omitempty"`
 	Group    string   `yaml:"group,omitempty" json:"group,omitempty"` // advanced 折叠
 	Choices  []Choice `yaml:"choices,omitempty" json:"choices,omitempty"`
+	// Target 只用于凭据字段：它标识接收目标（如推送的设备密钥）。Agent 的草稿在本人确认时显示它的掩码（§7.6）。
+	Target bool `yaml:"target,omitempty" json:"target,omitempty"`
 }
 
 // Decl 是一种连接类型的接入声明（connector.yaml），构建期数据。
@@ -91,6 +93,8 @@ func (d Decl) Check() error {
 			return fmt.Errorf("connector %s: field %s: choices only and always for select", d.Type, f.Key)
 		case f.Kind == KindSecret && f.Default != "":
 			return fmt.Errorf("connector %s: secret field %s cannot have a default", d.Type, f.Key)
+		case f.Target && f.Kind != KindSecret:
+			return fmt.Errorf("connector %s: field %s: target is only for secret fields", d.Type, f.Key)
 		case f.Group != "" && f.Group != "advanced":
 			return fmt.Errorf("connector %s: field %s group %q", d.Type, f.Key, f.Group)
 		}

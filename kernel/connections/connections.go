@@ -1,7 +1,8 @@
 // Package connections 是连接登记（设计 §1.5、§7.6）：本人配好的渠道与输出实例——名字、配置、启停、凭据与现状。
 // 本包只登记与读，不发送、不调用插件；凭据经 kernel/secrets 加密保管，配置与凭据在同一事务里保存和删除。
 //
-// 权限：全部命令只在 Web（与改策略同级，ActionChangeSettings：delegate 得 web_only 退出码 20，其他凭据得 4）。
+// 权限：六条连接命令只在 Web（与改策略同级，ActionChangeSettings：delegate 得 web_only 退出码 20，其他凭据得 4）；
+// Agent 只能提交、测试、撤回待本人确认的草稿（drafts.go，§7.6），确认同样只在 Web。
 // Event 载荷不含凭据值，只列改了哪些凭据字段的名字。现状（connections_status）只存最近一次，覆盖写、不记 Event。
 // 来源不在这里：来源登记留在 kernel/sources/registry（§1.2 不合表）。
 package connections
@@ -57,7 +58,7 @@ const IDPrefix = "ch-"
 // MaxName 是名字的上限（字符数），与来源一致。
 const MaxName = 40
 
-// Module 登记连接表与现状表（账本结构版本 7，只增表）。
+// Module 登记连接表与现状表（账本结构版本 7，只增表），以及 Agent 草稿表（结构版本 9，drafts.go）。
 var Module = store.Module{Name: "connections", Migrations: []store.Migration{{
 	Version: 1, Ledger: 7, Name: "ledger-v7-connections",
 	SQL: `CREATE TABLE connections_connection (
@@ -80,7 +81,7 @@ CREATE TABLE connections_status (
     cursor TEXT NOT NULL DEFAULT '',
     counters TEXT NOT NULL DEFAULT '{}'
 ) WITHOUT ROWID;`,
-}}}
+}, DraftMigration}}
 
 // Connection 是读接口的形状。凭据只回是否已设置且可用，不回值、不回末几位（§5.3）。
 type Connection struct {
@@ -153,7 +154,7 @@ type renameInput struct {
 	Name string `json:"name"`
 }
 
-// Register 登记六条命令。
+// Register 登记六条命令与草稿的五条命令（drafts.go）。
 func (s *Service) Register(x *command.Executor) error {
 	spec := func(name string, apply func(*command.Ctx) (any, error)) command.Spec {
 		return command.Spec{Name: name, Action: authz.ActionChangeSettings, Tier: authz.TierNone, Object: objectOf, Apply: apply}
@@ -168,7 +169,7 @@ func (s *Service) Register(x *command.Executor) error {
 			return err
 		}
 	}
-	return nil
+	return s.registerDrafts(x)
 }
 
 func objectOf(_ *store.Tx, in json.RawMessage) (authz.Object, error) {

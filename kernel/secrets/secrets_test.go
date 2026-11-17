@@ -134,3 +134,22 @@ func TestRekeyAndResumeAfterCrash(t *testing.T) {
 		t.Fatal(".new left behind")
 	}
 }
+
+// Move 换属主：新属主能解开、旧属主的字段没了，未列出的字段与别的属主不受影响。
+func TestMoveRebindsWithoutTouchingOthers(t *testing.T) {
+	st, _ := open(t)
+	v := Generate()
+	put(t, st, v, "dr-1", "device_key", "dev-secret-value")
+	put(t, st, v, "dr-1", "other", "left-alone")
+	put(t, st, v, "ch-live", "device_key", "live-value")
+	put(t, st, v, "ch-live", "auth_secret", "live-auth")
+	if err := st.Update(ctx, func(tx *store.Tx) error { return v.Move(tx, "dr-1", "ch-live", []string{"device_key"}, time.Now()) }); err != nil {
+		t.Fatal(err)
+	}
+	if got := reveal(t, st, v, "ch-live", "device_key", "auth_secret"); got["device_key"] != "dev-secret-value" || got["auth_secret"] != "live-auth" {
+		t.Fatalf("after move: %v", got)
+	}
+	if got := reveal(t, st, v, "dr-1", "device_key", "other"); got["device_key"] != "" || got["other"] != "left-alone" {
+		t.Fatalf("source after move: %v", got)
+	}
+}
