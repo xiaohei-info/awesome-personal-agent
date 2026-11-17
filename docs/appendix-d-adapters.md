@@ -9,6 +9,7 @@
 | 首批 harness（界面称 Agent） | Hermes | `plugins/hermes` | harness 插件接口（主文档 §11.2、附录 A） |
 | 即时通讯渠道 ext | Telegram，用成熟的 Bot SDK | `ext/telegram` | 渠道 ext 协议（主文档 §10.3） |
 | 推送渠道（内置连接插件） | Bark（官方服务或自建服务器） | `connectors/bark` | 渠道接口（主文档 §10.3）；字段映射与实测项见 D.5 |
+| 笔记库打开方式的预设 | Obsidian：`obsidian://open?vault={vault}&file={path}`（默认选中） | `web/src/features/settings-vaults` | 笔记库的 `open_url` 模板（主文档 §12.8）。只是前端的一条预设字符串，内核不认识它；换应用只改这一项，或在高级里写自定义模板。参数值按 URI 组件编码是该应用帮助文档的要求，官方页未直接核实；在应用里真实打开由本机升级验证 L22 覆盖 |
 | 导出 ext | Markdown 目录 | `ext/export` | 事件订阅与只读 API（主文档 §10.3） |
 | webhook 转发 ext | 通用的签名 POST | `ext/webhookforward` | 事件订阅（主文档 §10.3）；可选 `APA_WEBHOOK_TYPES`（逗号分隔的事件类型）只转发所列类型，缺省转发全部，未选中的事件不投递但游标照常推进 |
 | 代码托管平台来源 | GitHub（`source_type: github`） | `sources/` | Source 执行契约（主文档 §9.2） |
@@ -153,6 +154,8 @@ default: {zh: Apple 邮件, en: Apple Mail}
 - 旧版本写着用户名的回答人条目升级后不再匹配，按主文档 §16.5 识别一次。
 
 其他渠道（企业协作工具、其他聊天应用、邮件发信）按同一份渠道 ext 协议实现，不改内核。
+
+**规划中的内置渠道**（主文档 §20.3 W25.3、W25.4）：Telegram 从上述 ext 搬进 `connectors/telegram`；飞书（官方 `oapi-sdk-go/v3` 的长连接，仅企业自建应用）进 `connectors/feishu`。主文档 §21.3 的 `SPIKE-IM-WS`、`SPIKE-IM-SETUP`、`SPIKE-IM-DEDUPE`、`SPIKE-IM-SIZE` 指的就是飞书：长连接收事件与卡片回传交互并 3 秒内应答、最少开通步骤与权限名、发消息的 `uuid` 去重、SDK 带来的二进制增量。未实测；实测需要一个专供测试的企业自建应用，不用任何生产应用。
 
 **内置渠道：Bark**（`connectors/bark`，主文档 §10.3）。推送到苹果设备，只用标准库调用 Bark 推送服务的 HTTP 接口：`POST <服务器>/push`（JSON），自检用 `GET <服务器>/ping`。服务端以 `bark-server`（MIT）为准，官方公共服务是默认地址，自建服务器开了登录验证时按 HTTP Basic Auth 带登录名与密码。
 
