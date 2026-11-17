@@ -57,12 +57,12 @@ func (f *fx) cdEvents(object, typ string) []cdEvent {
 	return out.Events
 }
 
-// cdLedger 是账本里"代理改了东西"的事件数：被拒绝的命令只留 command.rejected，内核代写的待决（§14.5，退出码 23 时事项转 needs_input
-// 并附 web_only 的 ask）也不是代理的变更，二者都不计。
+// cdLedger 是账本里"代理改了东西"的事件数：只数 actor.type=agent 且不是 command.rejected 的事件。
+// 后台系统事件（内核代写的待决、定时器、来源拉取等）不是代理的变更，且会异步出现，不计。
 func (f *fx) cdLedger() (n int, last int64) {
 	f.t.Helper()
 	for _, e := range f.cdEvents("", "") {
-		if e.Type != "command.rejected" && !(e.Type == "decision.requested" && e.Actor.Type == "system") {
+		if e.Actor.Type == "agent" && e.Type != "command.rejected" {
 			n++
 		}
 		last = max(last, e.Seq)
