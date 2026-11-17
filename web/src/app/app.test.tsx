@@ -311,7 +311,7 @@ describe("设置的分组（设计 §3.1）", () => {
     const sub = await screen.findByRole("navigation", { name: "设置页签" });
     expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "连接", "Agent", "系统"]);
     expect(within(sub).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "通用", "提醒与打扰", "我来拍板", "提醒渠道", "笔记库", "Agent", "模型", "扩展程序", "登录与会话", "存储", "永久删除",
+      "通用", "提醒与打扰", "我来拍板", "提醒渠道", "笔记库", "Agent", "模型", "扩展程序", "登录与会话", "存储", "导入", "永久删除",
     ]);
     expect(within(sub).getByRole("link", { name: "提醒与打扰" })).toHaveAttribute("aria-current", "page");
   });
