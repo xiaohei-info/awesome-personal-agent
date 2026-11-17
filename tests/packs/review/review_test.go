@@ -151,12 +151,12 @@ func TestReviewPackDeclaresWhatC14Lists(t *testing.T) {
 	if got := strings.Join(w.Meta.Materials, ","); got != "context,prior,activity,open_items,due_waiting,decisions,planned,schedule" {
 		t.Fatalf("write-review materials: %q", got)
 	}
-	for _, s := range []string{"完成了什么", "没完成的", "原因未记录", "上一份复盘的下期关注", "下期关注"} { // 可改的默认要求
+	for _, s := range []string{"完成了什么", "没完成的", "原因未记录", "上一份复盘的下期关注", "下期关注", "只在一节里详写", "久未推进", "最多列停得最久的 5 条", "建议先做", "对照上一份：没有可对照的"} { // 可改的默认要求
 		if !strings.Contains(w.Meta.DefaultInstruction, s) {
 			t.Errorf("write-review default_instruction lacks %q: %s", s, w.Meta.DefaultInstruction)
 		}
 	}
-	for _, s := range []string{"{item_id}", "{materials_path}", "{instruction_path}", "spec.period", "item.title", "title 与 body", "open_items", "context.sources", "fetch 为 push", "以最新的为准", "不等于还没结束", "web_url", "写回成功就是回执"} {
+	for _, s := range []string{"{item_id}", "{materials_path}", "{instruction_path}", "spec.period", "item.title", "title 与 body", "open_items", "context.sources", "fetch 为 push", "以最新的为准", "不等于还没结束", "web_url", "写回成功就是回执", "距今多久", "请确认是否关闭", "以最新一条为现状", "以条目自己的", "last_success_at"} {
 		if !strings.Contains(w.Body, s) {
 			t.Errorf("write-review body lacks %q: %s", s, w.Body)
 		}

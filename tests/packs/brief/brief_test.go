@@ -165,7 +165,7 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 		t.Fatalf("write-brief must read the instruction file: %s", w.Body)
 	}
 	// 可改的默认要求定组织方式（按轻重，不机械分栏）；固定正文只定事实规则与写回格式（附录 C.13）。
-	for _, k := range []string{"要我处理或拍板", "日程", "进展", "建议", "没读到"} {
+	for _, k := range []string{"要我处理或拍板", "日程", "进展", "建议", "没读到", "判断依据", "先读原文确认金额", "给合计", "安静的一天", "对照上一份：没有可对照的"} {
 		if !strings.Contains(w.Meta.DefaultInstruction, k) {
 			t.Fatalf("write-brief default_instruction lacks %q: %s", k, w.Meta.DefaultInstruction)
 		}
@@ -176,7 +176,8 @@ func TestBriefPackDeclaresWhatC14Lists(t *testing.T) {
 		}
 	}
 	// 周期分得开、写回即回执（§8.4）；事实规则：后续不等于解决、来源覆盖分层、不露 id、只用资料给的链接。
-	for _, k := range []string{"item.title", "写回成功就是回执", "followed_by", "未核实", "以最新的为准", "曾关闭，之后又有动静", "不等于还没结束", "occurred_at", "context.sources", "not_screened", "fetch 为 push", "web_url", "不出现任何 id"} {
+	for _, k := range []string{"item.title", "写回成功就是回执", "followed_by", "未核实", "以最新的为准", "曾关闭，之后又有动静", "不等于还没结束", "occurred_at", "context.sources", "not_screened", "fetch 为 push", "web_url", "不出现任何 id",
+		"raw[].file", "只读到摘录", "请去看看", "距今多久", "请确认是否关闭", "以最新一条为现状", "以条目自己的", "之后有动静，现状未核实", "建议还没处置", "last_success_at"} {
 		if !strings.Contains(w.Body, k) {
 			t.Fatalf("write-brief lacks %q: %s", k, w.Body)
 		}
