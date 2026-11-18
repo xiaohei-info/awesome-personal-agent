@@ -53,7 +53,7 @@ func setup(t *testing.T, extra ...core.RouteGroup) *env {
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: append([]core.RouteGroup{Routes(st), ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}})}, extra...)})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: append([]core.RouteGroup{Routes(st, a), ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}})}, extra...)})
 	if err != nil {
 		t.Fatal(err)
 	}

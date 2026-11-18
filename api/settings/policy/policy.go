@@ -15,8 +15,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -227,8 +229,8 @@ func setLegacy(p *kpolicy.Policy, raw json.RawMessage) error {
 	return nil
 }
 
-// Routes 返回策略设置路由分组，交给 core.Deps.Groups。
-func Routes(st *store.Store) core.RouteGroup {
+// Routes 返回策略设置路由分组，交给 core.Deps.Groups。a 用于删除自写程序渠道时吊销它的密钥。
+func Routes(st *store.Store, a *auth.Auth) core.RouteGroup {
 	return func(r *core.Router) {
 		for path, secs := range map[string][]section{
 			"/settings/policy":          policySections,
@@ -242,6 +244,60 @@ func Routes(st *store.Store) core.RouteGroup {
 			r.Handle(core.Route{Method: "PUT", Path: path, Handler: write(st, path, secs)})
 		}
 		r.Handle(core.Route{Method: "PUT", Path: "/settings/channels/{name}/answerers", Handler: answerers(st)})
+		r.Handle(core.Route{Method: "DELETE", Path: "/settings/channels/{name}", MaxBody: 1, Handler: removeChannel(st, a)})
+	}
+}
+
+// channelsRoutePrefix 是渠道 ext 名字不能占用的前缀：channel.ch-… 是内置渠道连接的路由（kernel/connections.IDPrefix）。
+const channelsRoutePrefix = "ch-"
+
+// removeChannel 删除一个自写程序渠道（§4.1）：在同一个事务里吊销该渠道所有未吊销的渠道密钥，
+// 再从策略的 channels 段与 channel_answerers 里删掉这个名字。要么三件都成，要么都不动。
+// 名字本来就不在时不报错（幂等），返回当前策略版本号与本次吊销的钥匙数。
+// 指向它的提醒路由不动：路由按「提醒与打扰」的现有规则列出并标明（§7.4）。
+func removeChannel(st *store.Store, a *auth.Auth) core.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+		path := "/settings/channels/{name}"
+		if err := webOnly(p); err != nil {
+			auditRejected(st, r, p, path)
+			return err
+		}
+		name := r.PathValue("name")
+		if strings.HasPrefix(name, channelsRoutePrefix) {
+			return domain.NewError(domain.CodeInvalidRequest, "channel names starting with "+channelsRoutePrefix+" are built-in connections", "delete a built-in channel from its own card")
+		}
+		var (
+			v       int
+			revoked int
+		)
+		err := st.Update(detached(r), func(tx *store.Tx) error {
+			creds, err := a.List(tx)
+			if err != nil {
+				return err
+			}
+			for _, cr := range creds {
+				if cr.Kind != auth.Ext || cr.Scope != "channel."+name || !cr.RevokedAt.IsZero() {
+					continue
+				}
+				if err := a.Revoke(tx, cr.ID); err != nil {
+					return err
+				}
+				revoked++
+			}
+			v, err = kpolicy.Update(tx, p.Caller.Actor, "web settings: delete channel "+name, func(np *kpolicy.Policy) error {
+				delete(np.Channels, name)
+				delete(np.ChannelAnswerers, name)
+				return nil
+			})
+			return err
+		})
+		if errors.Is(err, kpolicy.ErrInvalid) {
+			return domain.NewError(domain.CodeInvalidRequest, err.Error(), "fix the setting and send it again; nothing was saved")
+		}
+		if err != nil {
+			return err
+		}
+		return core.WriteJSON(w, http.StatusOK, map[string]any{"version": v, "revoked": revoked})
 	}
 }
 

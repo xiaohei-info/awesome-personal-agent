@@ -104,6 +104,7 @@ function ConnCard({ c, d, routes, saveRoutes, onChange }: {
   });
   const remove = () => run(async () => {
     if (!window.confirm(t.confirmRemove(c.name))) return;
+    if (c.enabled) await api.post(`/connections/${encodeURIComponent(c.id)}/disable`); // 先停止发送，再删
     await api.del(`/connections/${encodeURIComponent(c.id)}`);
     if (usedFor(routes, c.id).length) await saveRoutes(withRoutes(routes, c.id, []));
     onChange();
@@ -118,7 +119,7 @@ function ConnCard({ c, d, routes, saveRoutes, onChange }: {
         {c.enabled && <button type="button" disabled={busy} onClick={() => void test()}>{t.sendTest}</button>}
         <button type="button" disabled={busy} onClick={() => setEditing(!editing)}>{t.edit}</button>
         <button type="button" disabled={busy} onClick={() => void toggle()}>{c.enabled ? t.disable : t.enable}</button>
-        {!c.enabled && <button type="button" className="danger" disabled={busy} onClick={() => void remove()}>{t.remove}</button>}
+        <button type="button" className="danger" disabled={busy} onClick={() => void remove()}>{t.remove}</button>
       </div>
       {d && <Caps d={d} t={t} />}
       {c.state === "problem" && c.problem && (
