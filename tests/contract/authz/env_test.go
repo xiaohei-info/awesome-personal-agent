@@ -113,7 +113,7 @@ func setup(t *testing.T) *env {
 	grantRoutes, err := settingsgrants.Mount(e.x, e.au, st)
 	must(err)
 	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{
-		cred, apiitems.Routes(e.x, st), apidelegation.Routes(e.x), apiprojects.Routes(st, e.x), settingspolicy.Routes(st), settingsexec.Routes(st, e.x), settingspurge.Routes(e.x), grantRoutes}})
+		cred, apiitems.Routes(e.x, st), apidelegation.Routes(e.x), apiprojects.Routes(st, e.x), settingspolicy.Routes(st, e.au), settingsexec.Routes(st, e.x), settingspurge.Routes(e.x), grantRoutes}})
 	must(err)
 	rec := e.http("POST", "/v1/auth/login", `{"password":"`+ownerPW+`"}`, nil)
 	if rec.Code != 200 {
