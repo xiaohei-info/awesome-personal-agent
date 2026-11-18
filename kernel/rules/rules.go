@@ -114,11 +114,24 @@ func Classes(src PackSource) map[string]string {
 // Runners 返回当前已加载能力包里每条拉起后台运行的规则的运行者，键是规则键。
 func Runners(src PackSource) map[string]string {
 	out := map[string]string{}
-	for _, d := range defs(src) {
-		for _, a := range d.Do {
-			if r, _ := a["runner"].(string); a["action"] == "start_background_run" && r != "" {
-				out[d.Key] = r
+	for _, p := range src.List() {
+		collect := func(rule string, actions []packs.Action) {
+			for _, a := range actions {
+				if runner, _ := a["runner"].(string); a["action"] == "start_background_run" && runner != "" {
+					out[rule] = runner
+					return
+				}
+				prompt, _ := a["prompt"].(string)
+				if a["action"] == "call_agent" && p.Prompts[prompt].Meta.Agent == "task" {
+					out[rule] = "task"
+				}
 			}
+		}
+		for _, r := range p.EventRules {
+			collect(key(p.Name, groupEvent, r.ID), r.Do)
+		}
+		for _, r := range p.ClockRules {
+			collect(key(p.Name, groupClock, r.ID), r.Do)
 		}
 	}
 	return out

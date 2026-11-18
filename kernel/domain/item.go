@@ -198,8 +198,9 @@ type ImportInfo struct {
 
 // Item 是一切事务的统一表示（§6.3）。
 type Item struct {
-	ID    string `json:"id"`
-	Phase Phase  `json:"phase"`
+	PreferredAgentID string `json:"preferred_agent_id,omitempty"`
+	ID               string `json:"id"`
+	Phase            Phase  `json:"phase"`
 	ItemKernelState
 	Version     int64           `json:"version"` // 乐观并发
 	Kind        Kind            `json:"kind"`

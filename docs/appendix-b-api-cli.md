@@ -57,6 +57,7 @@
 | `apa material show <id> [--rev]` | 读当前或指定修订；托管型只回位置 | observer | 5 |
 | `apa material search <查询>` | 检索，只回 id、标题、片段 | observer | |
 | `apa blob put/get` | 附件 | worker / observer | |
+| `apa agents list` | 查看 Agent 卡、默认选择与可用原因 | observer | — |
 | `apa agents check` | 比对工作区 AGENTS.md | observer | 10、11 |
 | `apa agents sync` | 写入工作区；漂移时不覆盖并返回 6，本人选择"覆盖"后才写入 | observer | 6 |
 | **来源** | | | |
@@ -191,7 +192,9 @@
 | | `GET /judgments/stats?use&template&source&since` | 各级调用次数与四项指标（主文档 §8.10） | observer |
 | | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
-| 事件 | `GET /events?cursor=` | SSE 或长轮询 | observer、导出和转发 ext 密钥 |
+| Agent | `GET /agents` | 卡片列表与选择预览（`rule`、`runner`、`schedule`、`item_agent`、`harness`），本人可见实例参数 | observer |
+| 设置 | `POST /settings/agents` | 创建或更新卡片，更新时须带原 `id`、`harness` 和 `rev`。同时修改权限上限时传 `permission_cap` 和 `policy_version`，在同一事务生效 | 只有 Web 登录 |
+| 事件 | `GET /events?cursor=` | JSON 长轮询 | observer、导出和转发 ext 密钥 |
 | 投递 | `GET /deliveries/next?wait=` | 长轮询领取；有租约 | 渠道 ext 密钥；网关插件 token（worker 及以上，只领唤醒类投递） |
 | | `POST /deliveries/{id}/ack`，`/fail`，`/answer` | 送达、失败、转达回答 | 同上 |
 | | `POST /channels/identify` | 渠道 ext 上报谁发来了识别口令：`{code, sender, display}`。`sender` 是平台用户 ID；ext 密钥的渠道须与发起识别的渠道一致，口令不符、已用过或过期返回 404。不写名单 | ext（channel） |
@@ -297,7 +300,7 @@
 
 `GET /deliveries/next` 返回的投递：`content.recommend` 是决策的推荐选项，未给推荐时省略；`content.form_url` 是一次性表单链接，只出现在只能发文字的渠道上的非 web_only 决策里；`content.web_only` 为 `true` 表示这是 web_only 决策：内容只有标题、摘要与 `web_url`，不含 `options`、`recommend`、`form_url`，渠道只发 Web 链接、不渲染可点选项，也不要把回答转达给 `POST /deliveries/{id}/answer`（内核拒绝并回 Web 链接）；内核按事项的风险类别在写入投递时填写，初筛升级后产生的新版本投递同样带它；`run` 只出现在唤醒类投递上。规则 `alert` 出口的提醒没有事项：`item` 为空，带 `origin`（`{source_event, rule, source}`，触发它的来源事件、规则 id 与来源 id），`content` 取来源事件的标题、摘要与链接，不带选项；`notify_urgent` 规则的紧急建议提醒同样没有事项，投递 id 等于建议事项 id，`origin` 另带 `item`（这条建议），`content` 是建议的标题、摘要、起草理由与指向它的 Web 链接；渠道 ext 须能处理空的 `item`（主文档 §6.9）。
 
-`/settings/policy` 的 `channels` 段是渠道的登记属性：`{"<渠道名>": {"text_only": true}}`。`persona_lang` 段是助手说哪种语言：`"zh"`、`"en"`，空串为跟随系统（默认；旧策略版本没有这个键，读作空串），其他值 400。`default_harness` 段是规则未指定 harness 时任务型与后台运行用的 harness，值为 harness 名，空串表示未设置（主文档 §13.6）。`main_session_launch` 段是以 Agent 本人身份做事时的拉起方式：`{"by_harness": {"<harness>": "<方式>"}, "by_rule": {"<规则键>": "<方式>"}}`，方式取 `headless` 或 `wake`，没有的键表示没选，其他值 400；取值顺序是规则、Agent、声明初始值、无头（主文档 §13.6）。旧策略版本没有这个段，读作两份空表。`disturb` 段在 v0.2.0 新增三个键，旧键不变：`daily_cap`（整数，默认 20，`0` 不限）、`mutes`（`[{"scope": "source" \| "project" \| "item", "id", "until"?}]`）、`followup_defer`（布尔，默认 `false`）；`threshold_judge` 保留，含义改为"是否开启投递推迟判定"（主文档 §7.4）。
+`/settings/policy` 的 `channels` 段是渠道的登记属性：`{"<渠道名>": {"text_only": true}}`。`persona_lang` 段是助手说哪种语言：`"zh"`、`"en"`，空串为跟随系统（默认；旧策略版本没有这个键，读作空串），其他值 400。兼容模式的 `default_harness` 段是规则未指定 harness 时任务型与后台运行用的 harness，值为 harness 名，空串表示未设置（主文档 §13.6）。`main_session_launch` 段是以 Agent 本人身份做事时的拉起方式：`{"by_harness": {"<harness>": "<方式>"}, "by_rule": {"<规则键>": "<方式>"}}`，方式取 `headless` 或 `wake`，没有的键表示没选，其他值 400；取值顺序是规则、Agent、声明初始值、无头（主文档 §13.6）。旧策略版本没有这个段，读作两份空表。`disturb` 段在 v0.2.0 新增三个键，旧键不变：`daily_cap`（整数，默认 20，`0` 不限）、`mutes`（`[{"scope": "source" \| "project" \| "item", "id", "until"?}]`）、`followup_defer`（布尔，默认 `false`）；`threshold_judge` 保留，含义改为"是否开启投递推迟判定"（主文档 §7.4）。
 
 `/settings/model-endpoints`：`GET` 返回、`PUT` 接受下面的形状，两个端点都可为 `null`；`api_key` 只写不读，`GET` 以 `api_key_set` 表示是否已设置，以 `api_key_hint` 给出已存密钥的末 4 个字符（密钥短于 12 个字符时为空串）；`api_key_hint` 只读，照 `GET` 的形状回传时 `PUT` 忽略它。字段语义见主文档 §6.13、§8.8。
 
@@ -380,6 +383,24 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 `GET /context`、`GET /today` 与简报的资料文件不含导入事件产生的增量；导入的事项本身照常出现在事项列表与"今天"里。
 
+### 拉取事件
+
+在「设置 › Agent」的脚本钥匙管理区为每个消费程序签发一把 observer 钥匙。程序携带 `Authorization: Bearer <token>` 请求 `GET /v1/events?cursor=40&limit=100&wait=30`。worker、delegate、本人 Web 会话及具有 export 或 forward 作用域（含 `.<名>`）的 ext 也可读。
+
+| 参数 | 缺省 | 十进制整数范围（含边界） |
+|---|---:|---|
+| `cursor` | 0 | 0 至 2^62。0 从可读历史开头拉取。 |
+| `limit` | 100 | 1 至 500，按可见信封数计。 |
+| `wait` | 0 秒 | 0 至 2^31 秒，实际最多等待 60 秒。有新事件即返回。 |
+
+HTTP 200 返回登记过的现场事件，按 `seq > cursor` 升序排列，允许跳号。信封只含元信息，可选的 `title` 随对象提供。正文按对象接口的权限另取。
+
+```json
+{"events":[{"seq":42,"type":"item.created","object":"item_example","title":"核对简报","actor":{"type":"user","principal":"owner","via":"web"},"at":"2026-11-18T08:30:00Z"}],"next":43}
+```
+
+消费者按账本与 `seq` 去重，整页处理成功后才持久化响应中的 `next`。上例处理完 42 应保存 43。空页如 `{"events":[],"next":43}` 也保存 `next`。中途失败或保存游标前退出，从上次成功游标重读，因此是至少一次投递。网络或服务端故障按原游标退避重试。HTTP 400 时修正参数，401 时检查钥匙，403 时检查凭据类型和作用域。
+
 ## B.3 错误响应
 
 ```json
@@ -401,7 +422,7 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 对外事件类型只增不改。初始集合：
 
-`item.created`、`item.updated`、`item.phase_changed`、`item.deadline_passed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`command.rejected`、`material.revised`、`material.revision_proposed`、`guideline.activated`、`project.updated`、`project.allowed_executors_changed`、`rule.mode_changed`、`allowlist.changed`、`policy.changed`、`grant.issued`、`grant.revoked`、`run.started`、`run.finished`、`source.failed`、`health.alert`。
+`item.created`、`item.updated`、`item.phase_changed`、`item.deadline_passed`、`decision.requested`、`decision.resolved`、`delegation.created`、`delegation.reported`、`command.rejected`、`material.revised`、`material.revision_proposed`、`guideline.activated`、`project.updated`、`project.allowed_executors_changed`、`rule.mode_changed`、`allowlist.changed`、`policy.changed`、`grant.issued`、`grant.revoked`、`agent.configured`、`agent.queued`、`run.started`、`run.finished`、`source.failed`、`health.alert`。
 
 v0.2.0 新增四个登录审计类型（主文档 §14.13），对象是 `owner`，载荷不含口令：登录成功、同一来源地址失败锁定、改口令（Web 或主机上 `apa init --reset-password`）、吊销会话（逐个或全部）。
 
@@ -426,12 +447,15 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 `apa version` 与 `GET /version` 返回同一份内容：
 
 ```json
-{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 8}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
+{"version": "0.2.0", "commit": "…", "test_clock": false, "schema": {"ledger": 9}, "protocols": {"http_api": "v1", "source_contract": 1, "channel_ext": 1, "connector_contract": 1, "probability_judgment": "probability-judgment/1"}}
 ```
 
-`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 8（版本 7 新增连接与凭据保管的三张表，已冻结）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。工作台能力迭代的全部结构变更收在一次迁移里，已合入，主干为 8（主文档 §16.5）；结构版本 8 在第一次被真实账本应用后冻结。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
+`commit` 是构建所在的提交（不是从提交构建时为 `unknown`）；`test_clock` 在 `apa_testclock` 测试构建里为 true，发布构建恒为 false。`schema` 是各存储模块的数据结构版本，随发行只增；旧版本的二进制拒绝打开版本更高的账本（主文档 §16.5）。账本结构版本 3 在第一次有真实账本升级到它之后冻结，此后的结构变更另起迁移、版本依次递增，所以发布物里的 `ledger` 是发布时主干上的最新版本：来源显示名一列在版本 3 冻结之后加入，此后每次结构变更各占一个版本，主干现为 9（版本 7 新增连接与凭据保管的三张表，已冻结）。`connector_contract` 是进程内连接插件接口的版本（主文档 §10.3），仓库内只增不改。工作台能力迭代的全部结构变更收在一次迁移里，已合入，主干为 8（主文档 §16.5）；结构版本 8 在第一次被真实账本应用后冻结。概率判断协议以主文档 §8.8 为权威定义，本附录不重复字段。
 
 ## B.6 v0.2.0 对已有契约的改动
+
+账本结构版本 9 新增 Agent 实例表与钥匙的 `agent_id`。升级时每份已确认声明呈现一张 `legacy:<harness>` 兼容卡。旧 Run、Event、授权和默认设置保留原值。本人首次同时保存 `default_agent_id`、`main_agent_id` 与 `version` 后，即使清空角色也按未设置处理。旧客户端再写 `default_harness` 返回冲突。新增卡按 ID 匹配钥匙、授权与权限上限。
+
 
 除下表外，v0.2.0 对 v0.1 的命令、路由、字段和事件都只做加法。
 

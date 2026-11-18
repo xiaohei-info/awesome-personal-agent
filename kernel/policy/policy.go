@@ -159,6 +159,7 @@ type MaterialWrite struct {
 
 // PermissionCap 是运行权限上限：按 harness 设置，未设置的用 Default。
 type PermissionCap struct {
+	ByAgent   map[string]string `json:"by_agent,omitempty"`
 	Default   string            `json:"default"`
 	ByHarness map[string]string `json:"by_harness"`
 }
@@ -167,6 +168,7 @@ type PermissionCap struct {
 // 值是 headless（单独开一个后台会话）或 wake（在和本人的对话里接着做）；没有的键表示没选，按下一级取。只在 Web 改。
 // 旧版本策略文档没有这个段，读作两份空表。
 type MainSessionLaunch struct {
+	ByAgent   map[string]string `json:"by_agent,omitempty"`
 	ByHarness map[string]string `json:"by_harness"`
 	ByRule    map[string]string `json:"by_rule"`
 }
@@ -307,6 +309,9 @@ type Policy struct {
 	Channels         map[string]Channel  `json:"channels"`
 	// DefaultHarness 是规则未指定 harness 时任务型与后台运行用的 harness（§13.6）；为空表示未设置，任务型转 needs_input。
 	DefaultHarness    string            `json:"default_harness"`
+	DefaultAgentID    *string           `json:"default_agent_id,omitempty"`
+	MainAgentID       *string           `json:"main_agent_id,omitempty"`
+	RuleAgent         map[string]string `json:"rule_agent,omitempty"`
 	MainSessionLaunch MainSessionLaunch `json:"main_session_launch"`
 	Judgment          Judgment          `json:"judgment"`
 	// ModelsPaused 为真时两个端点的配置与密钥原样保留，但内核按两者都未配置运行（Current 给出的就是这个视图，§8.7）。
@@ -570,6 +575,11 @@ func normalize(p Policy) (Policy, error) {
 	if !oneOf(p.PermissionCap.Default, PermRead, PermEdit, PermFull) {
 		return p, invalid("permission_cap default %q", p.PermissionCap.Default)
 	}
+	for h, v := range p.PermissionCap.ByAgent {
+		if h == "" || !oneOf(v, PermRead, PermEdit, PermFull) {
+			return p, invalid("permission_cap agent %q level %q", h, v)
+		}
+	}
 	for h, v := range p.PermissionCap.ByHarness {
 		if h == "" || !oneOf(v, PermRead, PermEdit, PermFull) {
 			return p, invalid("permission_cap harness %q level %q", h, v)
@@ -578,7 +588,7 @@ func normalize(p Policy) (Policy, error) {
 	if p.PermissionCap.ByHarness == nil {
 		p.PermissionCap.ByHarness = map[string]string{}
 	}
-	for field, m := range map[string]*map[string]string{"by_harness": &p.MainSessionLaunch.ByHarness, "by_rule": &p.MainSessionLaunch.ByRule} {
+	for field, m := range map[string]*map[string]string{"by_harness": &p.MainSessionLaunch.ByHarness, "by_rule": &p.MainSessionLaunch.ByRule, "by_agent": &p.MainSessionLaunch.ByAgent} {
 		if *m == nil {
 			*m = map[string]string{}
 		}

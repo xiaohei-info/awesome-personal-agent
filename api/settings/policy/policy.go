@@ -83,6 +83,9 @@ var (
 		sect("persona", func(p *kpolicy.Policy) *string { return &p.Persona }),
 		sect("persona_lang", func(p *kpolicy.Policy) *string { return &p.PersonaLang }),
 		sect("channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
+		sect("default_agent_id", func(p *kpolicy.Policy) **string { return &p.DefaultAgentID }),
+		sect("main_agent_id", func(p *kpolicy.Policy) **string { return &p.MainAgentID }),
+		sect("rule_agent", func(p *kpolicy.Policy) *map[string]string { return &p.RuleAgent }),
 		sect("default_harness", func(p *kpolicy.Policy) *string { return &p.DefaultHarness }),
 		sect("main_session_launch", func(p *kpolicy.Policy) *kpolicy.MainSessionLaunch { return &p.MainSessionLaunch }),
 	}
@@ -428,6 +431,12 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 		if len(body) == 0 { // 含 JSON null 与空对象
 			return domain.NewError(domain.CodeInvalidRequest, "request body must be a non-empty JSON object", "send the sections to replace")
 		}
+		version := body["version"]
+		delete(body, "version")
+		roles := body["default_agent_id"] != nil || body["main_agent_id"] != nil
+		if roles && (version == nil || body["default_agent_id"] == nil || body["main_agent_id"] == nil || string(body["default_agent_id"]) == "null" || string(body["main_agent_id"]) == "null" || body["default_harness"] != nil) {
+			return domain.NewError(domain.CodeInvalidRequest, "请同时保存两种角色及策略版本", "重新载入设置")
+		}
 		known := map[string]section{}
 		for _, s := range secs {
 			known[s.key] = s
@@ -446,8 +455,30 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 		)
 		err := st.Update(detached(r), func(tx *store.Tx) error {
 			var err error
+			if version != nil {
+				var expected int
+				if err := json.Unmarshal(version, &expected); err != nil {
+					return domain.NewError(domain.CodeInvalidRequest, "版本必须是整数", "重新载入设置")
+				}
+				current, _, err := kpolicy.Stored(tx)
+				if err != nil {
+					return err
+				}
+				if current != expected {
+					return domain.NewError(domain.CodeConflict, "设置已变更", "重新载入设置")
+				}
+			}
 			v, err = kpolicy.Update(tx, p.Caller.Actor, "web settings: PUT "+path, func(np *kpolicy.Policy) error {
+				if np.DefaultAgentID != nil && body["default_harness"] != nil {
+					return domain.NewError(domain.CodeConflict, "已启用 Agent 角色设置", "请用新的角色入口")
+				}
 				for k, raw := range body {
+					if k == "permission_cap" && len(np.PermissionCap.ByAgent) > 0 || k == "main_session_launch" && len(np.MainSessionLaunch.ByAgent) > 0 {
+						var fields map[string]json.RawMessage
+						if json.Unmarshal(raw, &fields) == nil && fields["by_agent"] == nil {
+							return domain.NewError(domain.CodeConflict, "请重新载入 Agent 设置以保留实例策略", "reload Agent settings")
+						}
+					}
 					if err := known[k].set(np, raw); err != nil {
 						return err
 					}

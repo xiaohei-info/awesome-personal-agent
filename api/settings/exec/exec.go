@@ -18,9 +18,11 @@ import (
 	"strconv"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	kexec "github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	kp "github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -35,6 +37,8 @@ func Routes(st *store.Store, x *command.Executor) core.RouteGroup {
 	a := &api{st, x}
 	return func(r *core.Router) {
 		for _, rt := range []core.Route{
+			{Method: "GET", Path: "/agents", Handler: a.agents},
+			{Method: "POST", Path: "/settings/agents", Handler: a.saveAgent},
 			{Method: "POST", Path: "/settings/executors", Handler: a.putExecutor},
 			{Method: "GET", Path: "/settings/declarations", Handler: web(a.declarations(""))},
 			{Method: "POST", Path: "/settings/declarations/{harness}/{rev}/confirm", MaxBody: 1, Handler: a.decide("executor.confirm")},
@@ -47,6 +51,42 @@ func Routes(st *store.Store, x *command.Executor) core.RouteGroup {
 			r.Handle(rt)
 		}
 	}
+}
+
+func (a *api) agents(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if !p.Web && p.Caller.Kind != auth.Observer && p.Caller.Kind != auth.Worker && p.Caller.Kind != auth.Delegate {
+		return domain.NewError(domain.CodePermissionDenied, "use an observer key", "reload Agent settings")
+	}
+	var cards []kexec.Card
+	var selected kexec.Selected
+	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) {
+		cards, err = kexec.Cards(tx)
+		if err != nil {
+			return err
+		}
+		_, pol, err := policy.Current(tx)
+		if err != nil {
+			return err
+		}
+		q := r.URL.Query()
+		selected, err = kexec.Resolve(tx, pol, kexec.Selection{Rule: q.Get("rule"), Runner: q.Get("runner"), Schedule: q.Get("schedule"), Item: q.Get("item_agent"), Harness: q.Get("harness")})
+		return err
+	}); err != nil {
+		return err
+	}
+	if !p.Web {
+		for i := range cards {
+			cards[i].Values = nil
+		}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"agents": cards, "selected": selected.Snapshot, "reason": selected.Reason})
+}
+func (a *api) saveAgent(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	var in json.RawMessage
+	if err := core.DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	return a.run(w, r, p, http.StatusOK, "agent.configure", in)
 }
 
 // web 只放行 Web 会话：设置的读取不走授权命令，agent 不需要看。

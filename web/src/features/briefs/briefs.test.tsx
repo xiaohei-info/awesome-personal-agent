@@ -32,8 +32,7 @@ function server(o: { patchFail?: boolean; fail?: boolean; items?: unknown[]; rej
       return it ? json(200, { item: it, relations: [] }) : json(404, { code: "not_found", why: "no such item", next: "" });
     }
     if (url === "/v1/packs") return json(200, { packs: o.routine ? [...packs, { name: "routine", instance_params: {} }] : packs });
-    if (url === "/v1/settings/policy") return json(200, { version: 1, default_harness: o.host ?? "" });
-    if (url === "/v1/settings/access-limits") return json(200, { version: 1, permission_cap: { default: "read", by_harness: o.caps ?? {} } });
+    if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: { agent_name: o.host, permission_cap: o.caps?.[o.host ?? ""] ?? "read" }, reason: "" });
     const ip = url.match(/^\/v1\/instances\/([^/]+)$/);
     if (ip && init?.method === "PATCH") {
       const body = JSON.parse(init.body as string);

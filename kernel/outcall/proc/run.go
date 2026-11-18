@@ -96,9 +96,11 @@ CREATE INDEX outcall_judgment_source ON outcall_judgment(source, created_at) WHE
 
 // Spec 是子进程的统一契约："命令 + stdin JSON → 退出码 + stdout"。
 type Spec struct {
-	Command []string        `json:"command"` // argv，Command[0] 是可执行文件
-	Stdin   json.RawMessage `json:"stdin"`   // 必须是合法 JSON；空则传 {}
-	Dir     string          `json:"dir"`     // 工作目录：运行目录，或模板声明的项目检出（projects.WorkDir）
+	Agent     *domain.AgentSnapshot `json:"agent,omitempty"`
+	OptionEnv map[string]string     `json:"option_env,omitempty"`
+	Command   []string              `json:"command"` // argv，Command[0] 是可执行文件
+	Stdin     json.RawMessage       `json:"stdin"`   // 必须是合法 JSON；空则传 {}
+	Dir       string                `json:"dir"`     // 工作目录：运行目录，或模板声明的项目检出（projects.WorkDir）
 	// RunDir 是 agent 运行的运行目录，非空才写运行上下文文件（§7.7）。
 	RunDir string `json:"run_dir,omitempty"`
 	// ContextName 是运行上下文文件名，默认运行 id。续接同一会话时沿用上一次运行的（Record.ContextName）：
@@ -195,6 +197,7 @@ func Enqueue(tx *store.Tx, req Request, now time.Time) (domain.Run, error) {
 		r.State, r.StartedAt, started = domain.RunRunning, &now, now.UnixNano()
 	}
 	spec := req.Spec
+	spec.Agent = r.AgentSnapshot
 	if len(spec.Stdin) == 0 {
 		spec.Stdin = json.RawMessage(`{}`)
 	}
@@ -245,6 +248,7 @@ func scan(rows *store.Rows) (Record, error) {
 	if err := json.Unmarshal([]byte(spec), &rec.Spec); err != nil {
 		return rec, fmt.Errorf("proc: run %s spec: %w", id, err)
 	}
+	r.AgentSnapshot = rec.Spec.Agent
 	if n, ok := exit.(int64); ok {
 		c := int(n)
 		r.ExitCode = &c

@@ -134,6 +134,9 @@ func Exchange(tx *store.Tx, c command.Caller, runID string, now time.Time) (stri
 	if rec.Run.Category != domain.RunBackground || rec.Run.Launch != LaunchWake {
 		return "", time.Time{}, domain.NewError(domain.CodeConflict, "run "+runID+" is not a wake run", "only wake runs get their credential by exchange")
 	}
+	if rec.Run.InstanceID() != c.CredentialAgentID {
+		return "", time.Time{}, domain.NewError(domain.CodePermissionDenied, "gateway is not bound to this Agent", "reload Agent settings")
+	}
 	ttl := DefaultExchangeTTL
 	if rec.Run.TimeoutSec > 0 {
 		ttl = time.Duration(rec.Run.TimeoutSec) * time.Second
@@ -194,6 +197,7 @@ func (i Identity) Authenticate(tx *store.Tx) (command.Caller, error) {
 	if rec.Run.State.Terminal() {
 		return command.Caller{}, unauthenticated()
 	}
+	agentID := rec.Run.InstanceID()
 	harness := i.Origin.Harness
 	if harness == "" {
 		harness = rec.Run.Harness
@@ -205,7 +209,7 @@ func (i Identity) Authenticate(tx *store.Tx) (command.Caller, error) {
 		RunScope: scope(target),
 		RunDepth: rec.Run.ChainDepth,
 		// 授权单只按运行记录的 harness 匹配；Actor.Harness 可以是调用方自报的，只作留痕（§14.5）。
-		RunHarness: rec.Run.Harness,
+		RunHarness: rec.Run.Harness, RunAgentID: agentID,
 		RunTrusted: func(tx *store.Tx) (bool, error) { return trust.TriggerTrusted(tx, target.ID) },
 	}, nil
 }

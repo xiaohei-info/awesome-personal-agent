@@ -140,7 +140,7 @@ export const EVENT = [
   "item.created", "item.updated", "item.phase_changed", "item.deadline_passed", "item.progress_added", "proposal.attached", "import.completed",
   "decision.requested", "decision.resolved", "delegation.created", "delegation.reported", "command.rejected",
   "material.revised", "material.revision_proposed", "guideline.activated", "project.updated", "project.allowed_executors_changed",
-  "rule.mode_changed", "allowlist.changed", "policy.changed", "grant.issued", "grant.revoked", "run.started", "run.finished",
+  "rule.mode_changed", "allowlist.changed", "policy.changed", "grant.issued", "grant.revoked", "agent.configured", "agent.queued", "run.started", "run.finished",
   "source.failed", "health.alert", "auth.login", "auth.login_locked", "auth.password_changed", "auth.session_revoked",
 ] as const;
 /** 内部审计事件类型（各模块写入，不在对外清单里；查不到的显示原值） */

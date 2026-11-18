@@ -23,7 +23,7 @@ import (
 func init() { client.Register("agents", cmd) }
 
 const (
-	usageHint  = "usage: apa agents check|sync [--repo <remote url>] [--file <path>] [--host <name>]"
+	usageHint  = "usage: apa agents list|check|sync [--repo <remote url>] [--file <path>] [--host <name>]"
 	fileName   = "AGENTS.md"
 	timeout    = 30 * time.Second
 	stateStale = "stale"
@@ -57,6 +57,17 @@ func cmd(c *client.Ctx, args []string) error {
 	}
 	var sync bool
 	switch args[0] {
+	case "list":
+		if len(args) != 1 {
+			return usage("unexpected arguments")
+		}
+		var out any
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		if err := c.Do(ctx, "GET", "/agents", nil, &out); err != nil {
+			return err
+		}
+		return c.Print(out)
 	case "check":
 	case "sync":
 		sync = true

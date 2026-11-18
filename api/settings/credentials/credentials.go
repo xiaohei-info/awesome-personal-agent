@@ -19,6 +19,7 @@ import (
 	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -61,6 +62,7 @@ func invalid(why string) error {
 
 // input 是命令输入；group 由路由写入，不来自请求体。
 type input struct {
+	AgentID  string    `json:"agent_id,omitempty"`
 	Group    string    `json:"group"`
 	ID       string    `json:"id,omitempty"`
 	Kind     auth.Kind `json:"kind,omitempty"`
@@ -102,7 +104,16 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 			},
 			Apply: func(c *command.Ctx) (any, error) {
 				in, _, _ := parse(c.Input)
-				cred, secret, err := a.Issue(c.Tx, auth.Spec{Kind: in.Kind, Label: in.Label, Executor: in.Executor, Scope: in.Scope, Harness: in.Harness})
+				if in.AgentID != "" {
+					card, err := executors.StoredCard(c.Tx, in.AgentID)
+					if err != nil {
+						return nil, err
+					}
+					if !card.Enabled || card.Harness != in.Harness {
+						return nil, invalid("select an enabled Agent of this harness")
+					}
+				}
+				cred, secret, err := a.Issue(c.Tx, auth.Spec{Kind: in.Kind, Label: in.Label, Executor: in.Executor, Scope: in.Scope, Harness: in.Harness, AgentID: in.AgentID})
 				if err != nil {
 					return nil, err
 				}
@@ -224,6 +235,7 @@ func body(r *http.Request, in *input) error {
 	if err := core.DecodeJSON(r, &b); err != nil {
 		return err
 	}
+	in.AgentID = b.AgentID
 	in.Kind, in.Label, in.Executor, in.Scope, in.Harness = b.Kind, b.Label, b.Executor, b.Scope, b.Harness
 	if in.Group == "ext-keys" {
 		in.Kind = auth.Ext

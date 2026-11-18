@@ -59,6 +59,7 @@ type Caller struct {
 	Credential string
 	// CredentialHarness 是凭据上内核记录的所属 harness（§14.2），仅凭据入口有值；不是调用方自报的 Actor.Harness。
 	CredentialHarness string
+	CredentialAgentID string
 	// RunScope 只有运行凭据有值：据账本判断授权对象是否在运行范围内（目标事项及其子事项 / 目标事项所属项目）。
 	// 管线用它填 authz.Object 的 InRunScope、InRunProject，命令自己不必也无法声明。
 	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
@@ -67,6 +68,7 @@ type Caller struct {
 	// RunHarness 只有运行凭据有值：运行记录上内核记的 harness，agent 式授权单按它匹配（§14.5），不是自报的 Actor.Harness。
 	// 唤醒租约期间被降级的 delegate 没有它，所以用不了授权单。
 	RunHarness string
+	RunAgentID string
 	// RunTrusted 只有运行凭据有值：据账本判断触发这次运行的内容是否可信（§14.5）；只在运行带着授权单时调用。
 	RunTrusted func(tx *store.Tx) (bool, error)
 }
@@ -102,7 +104,7 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	if l == authz.LevelDelegate {
 		a.OnBehalfOf = b.OnBehalfOf
 	}
-	return Caller{Actor: a, Level: l, Kind: c.Kind, Credential: c.ID, CredentialHarness: c.Harness}, nil
+	return Caller{Actor: a, Level: l, Kind: c.Kind, Credential: c.ID, CredentialHarness: c.Harness, CredentialAgentID: c.AgentID}, nil
 }
 
 // Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。
@@ -589,7 +591,7 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
 			Evidence: req.Evidence, Tier: tier, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender,
 			Command: spec.Name, GrantID: req.Grant, Grant: grant, Credential: caller.Credential, Now: x.now(),
-			CredentialHarness: caller.CredentialHarness, RunHarness: caller.RunHarness, TriggerTrusted: trigger}
+			CredentialAgentID: caller.CredentialAgentID, CredentialHarness: caller.CredentialHarness, RunAgentID: caller.RunAgentID, RunHarness: caller.RunHarness, TriggerTrusted: trigger}
 		d := authz.Decide(pol, ar)
 		if d.Err == nil {
 			decided = max(decided, authz.TierOf(ar))

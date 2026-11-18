@@ -6,6 +6,8 @@ import { PERM } from "../../app/ids";
 import { EntityPick, useNamed, useNames } from "../../app/names";
 import { useRaw } from "../../app/raw";
 import { Val, useLabel } from "../../app/values";
+import { AgentEditor, type Options } from "./AgentEditor";
+import type { Agent, AgentView } from "./AgentPick";
 import { Onboard } from "./OnboardForm";
 import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
 import { strings } from "./strings";
@@ -17,16 +19,17 @@ import { strings } from "./strings";
 
 type Label = { zh: string; en: string };
 interface Declaration {
+  instance_options?: Options;
   harness: string;
   name?: Label;
   headless?: { command?: string[]; access?: Record<string, unknown>; tools?: Record<string, Label[]>; tool_notes?: Record<string, Label> };
   main_session?: { wake?: boolean; launch?: string; wake_missing?: (Label & { how: Label })[] };
 }
 interface Rec { harness: string; rev: number; state: string; declaration: Declaration }
-interface Credential { id: string; kind: string; label?: string; harness?: string; seen_harness?: string; revoked_at?: string }
+interface Credential { agent_id?: string; id: string; kind: string; label?: string; harness?: string; seen_harness?: string; revoked_at?: string }
 export interface Grant {
   id: string;
-  grantee: { credential?: string; harness?: string; agent?: string; background?: boolean };
+  grantee: { instance?: boolean; credential?: string; harness?: string; agent?: string; background?: boolean };
   scope: { projects?: string[]; kinds?: string[]; items?: string[]; all?: boolean };
   actions: string[];
   expires_at?: string;
@@ -90,6 +93,14 @@ export function SettingsAgentsPage() {
   const [secret, setSecret] = useState<string | null>(null);
   const { hash } = useLocation();
   const pol = docs?.policy, lim = docs?.["access-limits"];
+  const { api } = useSession();
+  const [cards, setCards] = useState<Agent[]>([]);
+  const [editing, setEditing] = useState<Partial<Agent> | null>(null);
+  const loadCards = useCallback(async () => {
+    try { setCards((await api.get<AgentView>("/agents")).agents); } catch (err) { setError(msg(err)); }
+  }, [api, setError]);
+  useEffect(() => { void loadCards(); }, [loadCards, data]);
+  const roles = { default_agent_id: pol?.default_agent_id ?? (pol?.default_harness ? "legacy:" + pol.default_harness : ""), main_agent_id: pol?.main_agent_id ?? (pol?.default_harness ? "legacy:" + pol.default_harness : "") };
   const agents = data ? agentsOf(data) : [];
   useEffect(() => {
     if (!data || !hash) return;
@@ -108,9 +119,14 @@ export function SettingsAgentsPage() {
       )}
       {data && pol && lim && (
         <>
-          {agents.length === 0 && <p className="sub">{t.none}</p>}
+          <div className="actions">{(["default_agent_id", "main_agent_id"] as const).map((role, i) => <label key={role}>{i === 0 ? t.dailyRole : t.mainRole}
+            <select value={roles[role]} onChange={e => void save("policy", { ...roles, [role]: e.target.value, version: pol.version }).catch(err => setError(msg(err)))}><option value="">{t.cardNotSet}</option>{cards?.map(a => <option value={a.id} key={a.id} disabled={!a.enabled}>{a.name}</option>)}</select></label>)}</div>
+          {agents.length === 0 && <p className="sub">{t.emptyCards}</p>}
+          <button onClick={() => setEditing({})}>{t.cardAddAgent}</button>
+          {editing && <AgentEditor key={editing.id ?? editing.name ?? "new"} initial={editing} initialCap={lim.permission_cap.by_agent?.[editing.id ?? ""] ?? "read"} policyVersion={lim.version} hosts={data.live.map(r => r.declaration)} onDone={saved => {setEditing(null); if (saved) { void loadCards(); void loadPol(); }}} />}
+          {cards?.filter(a => a.rev > 0).map(a => <AgentCard key={a.id} agent={a} edit={setEditing} h={a.harness} data={data} pol={pol} lim={lim} save={save} reload={load} onError={setError} onSecret={setSecret} />)}
           {agents.map((h) => (
-            <AgentCard key={h} h={h} data={data} pol={pol} lim={lim} save={save} reload={load} onError={setError} onSecret={setSecret} />
+            <AgentCard key={h} edit={setEditing} h={h} data={data} pol={pol} lim={lim} save={save} reload={load} onError={setError} onSecret={setSecret} />
           ))}
           <Onboard taken={agents} reload={load} />
           <Other data={data} agents={agents} reload={load} onError={setError} onSecret={setSecret} />
@@ -126,8 +142,8 @@ function useName(): (d?: Declaration) => string {
   return (d) => d?.name?.[lang] || t.agent;
 }
 
-function AgentCard({ h, data, pol, lim, save, reload, onError, onSecret }: {
-  h: string; data: Data; pol: Doc; lim: Doc; save: Save; reload: () => Promise<void>; onError: (m: string | null) => void; onSecret: (s: string) => void;
+function AgentCard({ agent, edit, h, data, pol, lim, save, reload, onError, onSecret }: {
+  agent?: Agent; edit: (a: Partial<Agent>) => void; h: string; data: Data; pol: Doc; lim: Doc; save: Save; reload: () => Promise<void>; onError: (m: string | null) => void; onSecret: (s: string) => void;
 }) {
   const t = useT(strings);
   const { api } = useSession();
@@ -135,11 +151,13 @@ function AgentCard({ h, data, pol, lim, save, reload, onError, onSecret }: {
   const nameOf = useName();
   const pending = data.pending.find((r) => r.harness === h);
   const live = data.live.find((r) => r.harness === h);
-  const name = nameOf(live?.declaration ?? pending?.declaration);
-  const keys = data.tokens.filter((c) => c.harness === h);
-  const unclaimed = data.tokens.filter((c) => !c.harness && c.seen_harness === h && !c.revoked_at && AGENT_KINDS.includes(c.kind));
+  const name = agent?.name ?? nameOf(live?.declaration ?? pending?.declaration);
+  const model = Object.entries(live?.declaration.instance_options?.fields ?? {}).find(([, f]) => f.display_as === "model")?.[0];
+  const identity = agent?.id ?? h;
+  const keys = data.tokens.filter((c) => c.harness === h && c.agent_id === agent?.id);
+  const unclaimed = agent ? [] : data.tokens.filter((c) => !c.harness && c.seen_harness === h && !c.revoked_at && AGENT_KINDS.includes(c.kind));
   const connected = keys.some((c) => !c.revoked_at);
-  const isDefault = pol.default_harness === h;
+  const isDefault = pol.default_agent_id == null ? !agent && pol.default_harness === h : pol.default_agent_id === (agent?.id ?? "legacy:" + h);
 
   const act = async (f: () => Promise<unknown>) => {
     onError(null);
@@ -153,11 +171,13 @@ function AgentCard({ h, data, pol, lim, save, reload, onError, onSecret }: {
   const decide = (verb: "confirm" | "reject") => act(() => api.post(`/settings/declarations/${encodeURIComponent(h)}/${pending!.rev}/${verb}`));
 
   return (
-    <section aria-label={name} className="panel stack" id={"agent-" + h}>
+    <section aria-label={name} className="panel stack" id={"agent-" + identity}>
       <h2>
         {name} {isDefault && <span className="badge plain">{t.isDefault}</span>}
         {raw && <code className="raw-id">{h}</code>}
       </h2>
+      <p>{model && agent?.values?.[model] || t.cardAgentDefault}{agent && !agent.enabled && t.cardDisabled}{pol.main_agent_id === (agent?.id ?? "legacy:" + h) && t.cardMainAgent}</p>
+      <div className="actions">{agent && <button onClick={() => edit(agent)}>{t.cardEdit}</button>}{live && <button onClick={() => edit({ harness: h, name: name + t.cardCopy, values: agent?.values })}>{t.cardDuplicate}</button>}</div>
       <ul className="plain">
         <li>{connected ? "● " + t.connected : "○ " + t.notConnected}</li>
         {unclaimed.map((c) => (
@@ -167,8 +187,12 @@ function AgentCard({ h, data, pol, lim, save, reload, onError, onSecret }: {
         ))}
         <li>{pending ? "○ " + t.launch.pending : live ? "● " + t.launch.active : "○ " + t.launch.none}</li>
       </ul>
-      {pending && (
+      {!agent && pending && (
         <div>
+          <details><summary>{t.cardCompareActiveAndProposedLaunchDeclarations}</summary>
+            {live && <pre>{JSON.stringify(live.declaration, null, 2)}</pre>}
+            <pre>{JSON.stringify(pending.declaration, null, 2)}</pre>
+          </details>
           <WakeChange from={live?.declaration} to={pending.declaration} />
           <p>{t.wantsToRun(name)}<code>{(pending.declaration.headless?.command ?? []).join(" ")}</code></p>
           <div className="actions">
@@ -176,16 +200,16 @@ function AgentCard({ h, data, pol, lim, save, reload, onError, onSecret }: {
           </div>
         </div>
       )}
-      <label>
+      {!agent && pol.default_agent_id == null && <label>
         <input type="checkbox" checked={isDefault} onChange={(e) => void save("policy", { default_harness: e.target.checked ? h : "" }).catch((err) => onError(msg(err)))} />
         {t.useDefault}
-      </label>
-      <Tools h={h} live={live?.declaration} lim={lim} save={save} />
-      {live && <Launch h={h} name={name} live={live.declaration} pol={pol} save={save} />}
-      <Decide h={h} grants={data.grants.filter((g) => g.grantee.agent === h)} reload={reload} />
+      </label>}
+      <Tools instance={!!agent} h={identity} live={live?.declaration} lim={lim} save={save} />
+      {live && <Launch instance={!!agent} h={identity} name={name} live={live.declaration} pol={pol} save={save} />}
+      <Decide instance={!!agent} h={identity} grants={data.grants.filter((g) => !!g.grantee.instance === !!agent && g.grantee.agent === identity)} reload={reload} />
       <details>
         <summary>{t.advanced}</summary>
-        <Keys h={h} keys={keys} reload={reload} onError={onError} onSecret={onSecret} />
+        <Keys agent={agent?.id} h={h} keys={keys} reload={reload} onError={onError} onSecret={onSecret} />
         {(live ?? pending) && (
           <details>
             <summary>{t.fullDecl}</summary>
@@ -198,12 +222,13 @@ function AgentCard({ h, data, pol, lim, save, reload, onError, onSecret }: {
 }
 
 // 权限上限：写 permission_cap.by_harness[h]，其余 Agent 的与默认值原样带回（PUT 按段替换）。
-function Tools({ h, live, lim, save }: { h: string; live?: Declaration; lim: Doc; save: Save }) {
+function Tools({ instance, h, live, lim, save }: { instance: boolean; h: string; live?: Declaration; lim: Doc; save: Save }) {
   const t = useT(strings);
   const lang = useLang();
   const label = useLabel();
-  const cap = lim.permission_cap as { default: string; by_harness?: Record<string, string> };
-  const [tier, setTier] = useDraft(lim.permission_cap, () => cap.by_harness?.[h] ?? cap.default);
+  const scope = instance ? "by_agent" : "by_harness";
+  const cap = lim.permission_cap as { by_agent?: Record<string,string>; default: string; by_harness?: Record<string, string> };
+  const [tier, setTier] = useDraft(lim.permission_cap, () => cap[scope]?.[h] ?? (instance ? "read" : cap.default));
   const [asking, setAsking] = useState(false);
   const offered = Object.keys(live?.headless?.access ?? {});
   const tools = (p: string) => (live?.headless?.tools?.[p] ?? []).map((x) => x[lang]);
@@ -211,7 +236,7 @@ function Tools({ h, live, lim, save }: { h: string; live?: Declaration; lim: Doc
   const choose = (p: string) => (p === "full" && tier !== "full" ? setAsking(true) : (setAsking(false), setTier(p)));
   const submit = () => {
     if (!live) return reject(t.allowFirst);
-    return save("access-limits", { permission_cap: { default: cap.default, by_harness: { ...(cap.by_harness ?? {}), [h]: tier } } });
+    return save("access-limits", { permission_cap: { ...cap, [scope]: { ...(cap[scope] ?? {}), [h]: tier } } });
   };
   return (
     <Card title={t.tools} hint={live ? undefined : t.allowFirst} onSave={submit}>
@@ -248,15 +273,16 @@ function WakeChange({ from, to }: { from?: Declaration; to: Declaration }) {
 
 // 以 Agent 本人身份做事时在哪里做：写 main_session_launch.by_harness[h]，按规则的覆盖原样带回（PUT 按段替换）。
 // 没选过时显示旧声明留下的初始值，再没有就是单独后台会话；换选择不用重新确认声明。声明生效前不出现。
-function Launch({ h, name, live, pol, save }: { h: string; name: string; live: Declaration; pol: Doc; save: Save }) {
+function Launch({ instance, h, name, live, pol, save }: { instance: boolean; h: string; name: string; live: Declaration; pol: Doc; save: Save }) {
   const t = useT(strings);
   const lang = useLang();
   const missing = live.main_session?.wake_missing ?? [];
-  const cur = (pol.main_session_launch ?? {}) as { by_harness?: Record<string, string>; by_rule?: Record<string, string> };
-  const initial = cur.by_harness?.[h] ?? (live.main_session?.launch === "wake" ? "wake" : "headless");
+  const scope = instance ? "by_agent" : "by_harness";
+  const cur = (pol.main_session_launch ?? {}) as { by_agent?: Record<string,string>; by_harness?: Record<string, string>; by_rule?: Record<string, string> };
+  const initial = cur[scope]?.[h] ?? (!instance && live.main_session?.launch === "wake" ? "wake" : "headless");
   const [how, setHow] = useDraft(pol.main_session_launch, () => initial);
-  const wake = canWake(live);
-  const submit = () => save("policy", { main_session_launch: { by_harness: { ...(cur.by_harness ?? {}), [h]: how }, by_rule: cur.by_rule ?? {} } });
+  const wake = !instance && canWake(live);
+  const submit = () => save("policy", { main_session_launch: { ...cur, [scope]: { ...(cur[scope] ?? {}), [h]: how }, by_rule: cur.by_rule ?? {} } });
   return (
     <Card title={t.launchTitle} onSave={submit}>
       <fieldset className="seg-radio" role="radiogroup" aria-label={t.launchTitle}>
@@ -279,7 +305,7 @@ function Launch({ h, name, live, pol, save }: { h: string; name: string; live: D
 }
 
 // Agent 可以替我决定：六类默认都不勾；一类都没勾且没有在用的单时不签单。保存即整体替换（全部取消即只撤销）。
-function Decide({ h, grants, reload }: { h: string; grants: Grant[]; reload: () => Promise<void> }) {
+function Decide({ instance, h, grants, reload }: { instance: boolean; h: string; grants: Grant[]; reload: () => Promise<void> }) {
   const t = useT(strings);
   const { api } = useSession();
   const projects = useNamed("project");
@@ -306,7 +332,7 @@ function Decide({ h, grants, reload }: { h: string; grants: Grant[]; reload: () 
     const body: Record<string, unknown> = {
       actions: GRANT_CATS.filter(([c]) => cats.includes(c)).flatMap(([, a]) => a),
       scope: all ? { all: true } : { projects: picked },
-      background: bg,
+      grantee: { ...(instance ? { instance: true } : {}), background: bg },
     };
     if (until) body.expires_at = new Date(until + "T23:59:59").toISOString();
     await api.put("/settings/agents/" + encodeURIComponent(h) + "/grant", body);
@@ -367,7 +393,7 @@ function Decide({ h, grants, reload }: { h: string; grants: Grant[]; reload: () 
   );
 }
 
-function Keys({ h, keys, reload, onError, onSecret }: { h: string; keys: Credential[]; reload: () => Promise<void>; onError: (m: string | null) => void; onSecret: (s: string) => void }) {
+function Keys({ agent, h, keys, reload, onError, onSecret }: { agent?: string; h: string; keys: Credential[]; reload: () => Promise<void>; onError: (m: string | null) => void; onSecret: (s: string) => void }) {
   const t = useT(strings);
   const { api } = useSession();
   const [kind, setKind] = useState("delegate");
@@ -376,6 +402,7 @@ function Keys({ h, keys, reload, onError, onSecret }: { h: string; keys: Credent
     onError(null);
     try {
       const body: Record<string, string> = { kind, harness: h };
+      if (agent) body.agent_id = agent;
       if (note.trim()) body.label = note.trim();
       onSecret((await api.post<{ secret: string }>("/settings/tokens", body)).secret);
       setNote("");

@@ -41,6 +41,7 @@ var GrantableActions = []string{
 // 或 Agent，一个 harness 标识，判定时只比内核记录的值（凭据的 harness 列、运行记录的 harness）。
 // Background 只在 Agent 式的单上出现：为真时该 Agent 的后台运行也能用这张单。
 type Grantee struct {
+	Instance   bool   `json:"instance,omitempty"`
 	Credential string `json:"credential,omitempty"`
 	Harness    string `json:"harness,omitempty"`
 	Agent      string `json:"agent,omitempty"`
@@ -176,6 +177,9 @@ func normalizeGrant(tx *store.Tx, a *auth.Auth, now time.Time, in GrantInput) (G
 		}
 		return g, nil
 	}
+	if g.Grantee.Instance {
+		return g, invalid("instance requires agent")
+	}
 	if g.Grantee.Background {
 		return g, invalid("grantee.background needs grantee.agent: background runs are matched by Agent, not by token")
 	}
@@ -301,13 +305,16 @@ func ListGrants(tx *store.Tx) ([]Grant, error) { return queryGrants(tx, "") }
 
 // AgentGrants 列出签给 agent（harness 标识）的、在 at 时刻有效的 agent 式授权单；它们不随某一把钥匙失效。
 func AgentGrants(tx *store.Tx, agent string, at time.Time) ([]Grant, error) {
+	return AgentIdentityGrants(tx, agent, at, false)
+}
+func AgentIdentityGrants(tx *store.Tx, agent string, at time.Time, instance bool) ([]Grant, error) {
 	all, err := queryGrants(tx, "WHERE credential = '' AND revoked_at = 0")
 	if err != nil {
 		return nil, err
 	}
 	out := []Grant{}
 	for _, g := range all {
-		if g.Grantee.Agent == agent && g.Active(at) {
+		if g.Grantee.Instance == instance && g.Grantee.Agent == agent && g.Active(at) {
 			out = append(out, g)
 		}
 	}
@@ -324,7 +331,7 @@ func ReplaceAgentGrant(tx *store.Tx, a *auth.Auth, actor domain.Actor, now time.
 	if strings.TrimSpace(agent) == "" || strings.ContainsFunc(agent, unicode.IsSpace) {
 		return nil, nil, invalid("agent must be a harness identifier without spaces")
 	}
-	old, err := AgentGrants(tx, agent, now)
+	old, err := AgentIdentityGrants(tx, agent, now, in.Grantee.Instance)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -338,7 +345,7 @@ func ReplaceAgentGrant(tx *store.Tx, a *auth.Auth, actor domain.Actor, now time.
 	if len(in.Actions) == 0 {
 		return revoked, nil, nil
 	}
-	in.Grantee = Grantee{Agent: agent, Background: in.Grantee.Background}
+	in.Grantee = Grantee{Agent: agent, Instance: in.Grantee.Instance, Background: in.Grantee.Background}
 	g, err := IssueGrant(tx, a, actor, now, in)
 	if err != nil {
 		return nil, nil, err

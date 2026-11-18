@@ -51,6 +51,7 @@ type Result struct {
 
 // Options 是调度器的依赖与扩展点；零值字段取默认。
 type Options struct {
+	CheckAgent func(*store.Tx, domain.Run) error
 	// Environ 返回内核环境，默认 os.Environ；只有白名单变量会传给子进程。
 	Environ func() []string
 	// Env 返回某次运行额外注入的变量（APA_URL、APA_TOKEN、APA_PROJECT 等）。
@@ -235,6 +236,9 @@ func (d *Dispatcher) environ(rec Record) ([]string, error) {
 		}
 	}
 	env = append(env, "APA_RUN="+rec.Run.ID)
+	for key, value := range rec.Spec.OptionEnv {
+		env = append(env, key+"="+value)
+	}
 	var extra map[string]string
 	if d.opt.Env != nil {
 		extra = d.opt.Env(rec.Run)
@@ -339,6 +343,11 @@ func (d *Dispatcher) run(rec Record) {
 }
 
 func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState, *int, string) {
+	if d.opt.CheckAgent != nil && rec.Run.AgentSnapshot != nil {
+		if err := d.st.View(d.ctx, func(tx *store.Tx) error { return d.opt.CheckAgent(tx, rec.Run) }); err != nil {
+			return domain.RunFailed, nil, err.Error()
+		}
+	}
 	spec := rec.Spec
 	if spec.Dir != "" { // 工作目录不存在时 Start 只报命令 no such file，原因要指向目录
 		if _, err := os.Stat(spec.Dir); err != nil {

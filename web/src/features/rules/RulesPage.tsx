@@ -13,6 +13,8 @@ import { strings } from "./strings";
 // 谁能切、切到什么、观察记录怎么产生都由服务端判定；本页只搬运选择，被拒绝时模式保持原值。只改模式，不编辑规则内容。
 // 以 Agent 本人身份运行的规则（runner=main_session）另可覆盖 Agent 在哪里做：写 /settings/policy 的 main_session_launch.by_rule，
 // 按 Agent 的设置原样带回；没覆盖就沿用 Agent 设置（§13.6）。
+import { AgentPick } from "../settings-agents/AgentPick";
+
 interface Rule { key: string; pack: string; group: string; id: string; mode: string; class?: "reminder" | "action"; runner?: string }
 interface Launch { by_harness?: Record<string, string>; by_rule?: Record<string, string> }
 interface Pack { name: string; description?: string }
@@ -104,16 +106,22 @@ export function RulesPage() {
   }, [api]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { api.get<{ packs: Pack[] }>("/packs").then((r) => setPacks(r.packs), () => setPacks([])); }, [api]);
+  const [ruleAgents, setRuleAgents] = useState<Record<string,string>>({});
+  const [version, setVersion] = useState<number>();
   const [launch, setLaunch] = useState<Launch | null>(null);
-  useEffect(() => { api.get<{ main_session_launch?: Launch }>("/settings/policy").then((p) => setLaunch(p.main_session_launch ?? {}), () => setLaunch(null)); }, [api]);
+  useEffect(() => { api.get<{ version:number; rule_agent?:Record<string,string>; main_session_launch?: Launch }>("/settings/policy").then((p) => {setRuleAgents(p.rule_agent ?? {}); setVersion(p.version); setLaunch(p.main_session_launch ?? {});}, () => setLaunch(null)); }, [api]);
 
+  async function setAgent(key: string, id: string) {
+    const next = {...ruleAgents}; if (id) next[key] = id; else delete next[key];
+    try {const p = await api.put<{rule_agent: Record<string,string>; version:number}>("/settings/policy", {rule_agent:next, version}); setRuleAgents(p.rule_agent ?? {});setVersion(p.version);} catch(e) {setError(e);}
+  }
   async function setRuleLaunch(r: Rule, v: string) {
     const by_rule = { ...(launch?.by_rule ?? {}) };
     if (v) by_rule[r.key] = v;
     else delete by_rule[r.key];
     try {
-      const next = await api.put<{ main_session_launch: Launch }>("/settings/policy", { main_session_launch: { by_harness: launch?.by_harness ?? {}, by_rule } });
-      setLaunch(next.main_session_launch);
+      const next = await api.put<{ main_session_launch: Launch; version:number }>("/settings/policy", { main_session_launch: { ...launch, by_harness: launch?.by_harness ?? {}, by_rule } });
+      setLaunch(next.main_session_launch);setVersion(next.version);
       setError(null);
     } catch (e) {
       setError(e); // 选择框的值仍是服务端未改动的原值
@@ -157,6 +165,7 @@ export function RulesPage() {
                       {raw && <code className="raw-id">{r.key}</code>}
                     </p>
                     {r.mode === "observe" && <Trial rule={r} name={name} />}
+                    {r.runner && <AgentPick inheritRule={false} main={r.runner === "main_session"} value={ruleAgents[r.key] ?? ""} onChange={id => void setAgent(r.key,id)} />}
                     {r.runner === "main_session" && launch && <LaunchPick name={name} value={launch.by_rule?.[r.key] ?? ""} onChange={(v) => void setRuleLaunch(r, v)} />}
                   </div>
                   <Modes id={r.key} name={name} value={r.mode} onChange={(m) => void setMode(r, m)} />

@@ -131,12 +131,13 @@ type Material struct {
 
 // Task 是一次任务型调用。
 type Task struct {
-	Pack     string // 能力包名
-	Template string // 提示词模板名，必须是 agent: task
-	Title    string // 目标事项标题（内核或规则给出，不是外部正文）
-	Project  string // 目标事项所属项目，可空
-	Parent   string // 目标事项的父事项，可空
-	From     string // 链路深度继承自哪个对象，可空表示新链路
+	Selection executors.Selection
+	Pack      string // 能力包名
+	Template  string // 提示词模板名，必须是 agent: task
+	Title     string // 目标事项标题（内核或规则给出，不是外部正文）
+	Project   string // 目标事项所属项目，可空
+	Parent    string // 目标事项的父事项，可空
+	From      string // 链路深度继承自哪个对象，可空表示新链路
 	// Depth 是规则拉起的运行深度（触发事件深度加一，chain.Next）；0 表示不是规则拉起，运行沿用目标事项当前深度。
 	Depth int
 	// Target 是已建好的目标事项（执行者须已是内核身份，见 CallAgent）；为空时由 Launch 新建。
@@ -213,21 +214,21 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	}
 
 	var hl executors.Headless
-	var declared, forwarded, ran bool
+	var selected executors.Selected
+	var forwarded, ran bool
 	var pol policy.Policy
 	var project *domain.Project
 	err := s.o.Store.View(ctx, func(tx *store.Tx) (err error) {
 		if _, pol, err = policy.Current(tx); err != nil {
 			return err
 		}
-		if t.Harness == "" {
-			t.Harness = pol.DefaultHarness
-		}
+		t.Selection.Harness = t.Harness
 		if t.Target != "" {
 			it, err := items.Get(tx, t.Target)
 			if err != nil {
 				return err
 			}
+			t.Selection.Item = it.PreferredAgentID
 			t.Title, t.Project = it.Title, it.Project
 			if ran, err = proc.HasRun(tx, t.Target); err != nil || ran {
 				return err
@@ -240,8 +241,10 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 			}
 			project = &p
 		}
-		if t.Harness != "" {
-			hl, declared, err = executors.ActiveHeadless(tx, t.Harness)
+		selected, err = executors.Resolve(tx, pol, t.Selection)
+		t.Harness = selected.Card.Harness
+		if selected.Record.Declaration.Headless != nil {
+			hl = *selected.Record.Declaration.Headless
 		}
 		return err
 	})
@@ -260,18 +263,16 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		}
 	}
 	out := Outcome{Item: itemID}
-	workDir, noCheckout := projects.WorkDir(pr.Meta.Cwd, project, s.o.Host)
+	cwd := pr.Meta.Cwd
+	if cwd == "" {
+		cwd = selected.Card.Values["cwd"]
+	}
+	workDir, noCheckout := projects.WorkDir(cwd, project, s.o.Host)
 	switch {
 	case packs.UsesPlaceholder(pr.Body, "instruction_path") && t.Instruction == "":
 		out.Reason = "实例没有任务说明（instruction），模板要求经 instruction_path 交给运行者"
-	case t.Harness == "":
-		out.Reason = "规则没有指定 harness，Web 设置里也没有默认 harness"
-	case !declared:
-		out.Reason = "没有已确认的无头运行声明：" + t.Harness
-	case !hasTier(hl, access):
-		out.Reason = "无头运行声明未提供权限档位：" + access
-	case !withinCap(pol, t.Harness, access):
-		out.Reason = "权限档位 " + access + " 超过 Web 设置的上限"
+	case selected.AccessReason(access) != "":
+		out.Reason = selected.AccessReason(access)
 	case !forwarded:
 		out.Reason = "输入含未进转发白名单的挂靠消息，不交给任务型"
 	case noCheckout != "":
@@ -299,6 +300,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	}
 	sessionID := ""
 	argv := expand(hl.Command, "{prompt}", prompt, "{run_dir}", runDir)
+	argv = append(argv, selected.Args...)
 	argv = append(argv, hl.Output...)
 	argv = append(argv, hl.Access[access]...)
 	if len(hl.Session.Assign) > 0 {
@@ -306,7 +308,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		argv = append(argv, expand(hl.Session.Assign, "{session_id}", sessionID)...)
 	}
 
-	run := domain.Run{ID: runID, Category: domain.RunTask, Target: itemID, Harness: t.Harness, SessionID: sessionID,
+	run := domain.Run{AgentSnapshot: &selected.Snapshot, Runner: "task", Launch: "headless", ID: runID, Category: domain.RunTask, Target: itemID, Harness: t.Harness, SessionID: sessionID,
 		Access: access, TimeoutSec: int(timeout / time.Second)}
 	err = s.o.Store.Update(ctx, func(tx *store.Tx) error {
 		it, err := items.Get(tx, itemID)
@@ -317,7 +319,17 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		if t.Depth > 0 {
 			run.ChainDepth = t.Depth
 		}
-		if _, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, s.o.Now()); err != nil {
+		if err := executors.CheckRun(tx, run); err != nil {
+			return err
+		}
+		if _, err = proc.Enqueue(tx, proc.Request{Run: run, Spec: proc.Spec{OptionEnv: selected.Env, Command: argv, Dir: dir, RunDir: runDir}}, s.o.Now()); err != nil {
+			return err
+		}
+		body, err := json.Marshal(run)
+		if err != nil {
+			return err
+		}
+		if _, err = eventlog.Append(tx, domain.Event{Type: domain.EvAgentQueued, Object: itemID, Actor: system.Actor, ChainDepth: run.ChainDepth, Payload: body, At: s.o.Now()}); err != nil {
 			return err
 		}
 		return saveResultDecl(tx, runID, resultDecl{Fields: pr.Meta.ResultFields, Material: pr.Meta.ResultMaterial, Window: t.Window, Digest: t.Digest})
@@ -327,19 +339,6 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 	}
 	out.Run = runID
 	return out, s.o.Queue.Dispatch(ctx)
-}
-
-func hasTier(h executors.Headless, tier string) bool { _, ok := h.Access[tier]; return ok }
-
-var tierRank = map[string]int{policy.PermRead: 1, policy.PermEdit: 2, policy.PermFull: 3}
-
-// withinCap：档位不超过本人在 Web 按 harness 设的上限，未按 harness 设置的用默认上限（§13.6）。
-func withinCap(pol policy.Policy, harness, tier string) bool {
-	limit := pol.PermissionCap.ByHarness[harness]
-	if limit == "" {
-		limit = pol.PermissionCap.Default
-	}
-	return tierRank[tier] != 0 && tierRank[tier] <= tierRank[limit]
 }
 
 // expand 对每个元素做单遍占位符替换；被替换进去的值不会再被扫描。

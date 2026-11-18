@@ -19,6 +19,66 @@ import (
 
 var bg = context.Background()
 
+func TestSameHostCardsResolveIndependently(t *testing.T) {
+	e := setup(t)
+	declaration := decl("host")
+	declaration.MainSession = &MainSession{Args: []string{"--main"}}
+	declaration.InstanceOptions = &InstanceOptions{
+		Fields: map[string]OptionField{"variant": {Type: "enum", Label: Label{"模型", "Model"}, Choices: []string{"small", "large"}, DisplayAs: "model"}},
+		Args:   map[string][]string{"variant": {"--model", "{variant}"}}, Env: map[string]map[string]string{"variant": {"HOST_MODEL": "{variant}"}},
+	}
+	e.must(t, owner, "executor.register", declaration)
+	create := func(model string) Card {
+		var card Card
+		result := e.must(t, owner, "agent.configure", Card{Name: model, Harness: "host", Enabled: true, Values: map[string]string{"variant": model}})
+		if err := json.Unmarshal(result.Value, &card); err != nil {
+			t.Fatal(err)
+		}
+		return card
+	}
+	daily, main := create("small"), create("large")
+	pol := policy.Default()
+	pol.DefaultHarness = "host"
+	pol.DefaultAgentID, pol.MainAgentID = &daily.ID, &main.ID
+	pol.PermissionCap.Default = "full"
+	pol.RuleAgent = map[string]string{"handoff": daily.ID}
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		for _, test := range []struct {
+			sel        Selection
+			id, source string
+		}{
+			{Selection{}, daily.ID, "default"}, {Selection{Runner: "main_session"}, main.ID, "main"},
+			{Selection{Rule: "handoff", Runner: "main_session"}, daily.ID, "rule"}, {Selection{Rule: "handoff", Schedule: main.ID}, main.ID, "schedule"},
+			{Selection{Schedule: main.ID, Item: daily.ID}, daily.ID, "item"}, {Selection{Harness: "host"}, "legacy:host", "rule"},
+		} {
+			selected, err := Resolve(tx, pol, test.sel)
+			if err != nil {
+				return err
+			}
+			if selected.Reason != "" || selected.Snapshot.AgentID != test.id || selected.Snapshot.SelectionSource != test.source {
+				t.Fatalf("%+v: %+v", test, selected)
+			}
+			if selected.Card.Rev > 0 && (selected.AccessReason("edit") == "" || len(selected.Args) != 2 || selected.Args[1] != selected.Snapshot.ConfiguredModel || selected.Env["HOST_MODEL"] != selected.Card.Name) {
+				t.Fatalf("wrong options or inherited privileges: %+v", selected)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	daily.Enabled = false
+	e.must(t, owner, "agent.configure", daily)
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		selected, err := Resolve(tx, pol, Selection{Item: daily.ID, Schedule: main.ID})
+		if selected.Reason == "" || selected.Snapshot.AgentID != daily.ID {
+			t.Fatalf("disabled explicit selection: %+v", selected)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
 
 type env struct {

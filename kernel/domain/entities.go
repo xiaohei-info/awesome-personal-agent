@@ -237,6 +237,7 @@ func (s RunState) CanTransition(to RunState) bool {
 }
 
 type Run struct {
+	*AgentSnapshot
 	ID          string      `json:"id"`
 	Category    RunCategory `json:"category"`
 	Runner      string      `json:"runner,omitempty"` // 后台运行：task 或 main_session
@@ -253,6 +254,23 @@ type Run struct {
 	FinishedAt  *time.Time  `json:"finished_at,omitempty"`
 	TimeoutSec  int         `json:"timeout,omitempty"`
 	Fingerprint string      `json:"fingerprint,omitempty"` // 判断型与生成型的输入指纹
+}
+
+func (r Run) InstanceID() string {
+	if r.AgentSnapshot == nil || r.ConfigRev == 0 {
+		return ""
+	}
+	return r.AgentID
+}
+
+type AgentSnapshot struct {
+	AgentID         string `json:"agent_id"`
+	AgentName       string `json:"agent_name"`
+	DeclarationRev  int64  `json:"declaration_rev"`
+	ConfigRev       int64  `json:"config_rev"`
+	SelectionSource string `json:"selection_source"`
+	PermissionCap   string `json:"permission_cap"`
+	ConfiguredModel string `json:"configured_model,omitempty"`
 }
 
 // ---- Source 登记、来源事件（§6.10） ----

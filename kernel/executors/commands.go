@@ -43,6 +43,7 @@ type Options struct {
 // 登记、确认、维护都按"改设置"授权：只有 Web 上的本人可做，delegate 得到退出码 20，CLI 凭据得到退出码 4（§14.12）。
 func Register(x *command.Executor, o Options) error {
 	for _, s := range []command.Spec{
+		{Name: "agent.configure", Action: authz.ActionChangeSettings, Object: noObject, Apply: saveCard},
 		{Name: "executor.list", Action: authz.ActionRead, Object: noObject, Apply: o.list},
 		{Name: "executor.declare", Action: authz.ActionSubmitPlugin, Tier: authz.TierWork, Object: declObject, Apply: apply(declare)},
 		{Name: "executor.pending", Action: authz.ActionSubmitPlugin, Object: noObject, Apply: pending},

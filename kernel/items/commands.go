@@ -128,6 +128,8 @@ func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item,
 	for k, raw := range patch {
 		var err error
 		switch k {
+		case "preferred_agent_id":
+			err = put(raw, &it.PreferredAgentID)
 		case "title":
 			err = put(raw, &it.Title)
 		case "summary":
@@ -525,7 +527,11 @@ func (s *svc) update() command.Spec {
 			_, _, _, patch, _ := plan(tx, in)
 			_, a := patch["assignee"]
 			_, p := patch["project"]
-			return editActions(c, o, boundOr(tx, c, o), a, p)
+			actions := editActions(c, o, boundOr(tx, c, o), a, p)
+			if _, chosen := patch["preferred_agent_id"]; chosen {
+				actions = append(actions, authz.ActionChangeSettings)
+			}
+			return actions
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			cur, next, _, _, err := plan(tx, in)

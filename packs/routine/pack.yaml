@@ -13,6 +13,7 @@ instance_params:
   required: [schedule, mode]
   additionalProperties: false
   properties:
+    agent_id: {type: string}
     schedule: {type: string}
     mode: {type: string, enum: [run, create_item]}
     title: {type: string}
