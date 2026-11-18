@@ -1,7 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setChoice } from "../../app/i18n";
 import { App } from "../../app/App";
 import { feature } from "./index";
 import { policyServer } from "../settings-policy/test-server";
@@ -46,11 +47,24 @@ function server(extKeys?: Record<string, unknown>[]) {
   conns.list.length = 0;
   conns.calls.length = 0;
   const s = policyServer({ extKeys });
+  // 删除一个自写程序渠道的替身：按 api/settings/policy 的契约，吊销该渠道的钥匙并删掉策略里的两处。
+  const keys = (extKeys ?? [{ id: "k1", kind: "ext", scope: "channel.slack" }, { id: "k2", kind: "ext", scope: "channel.old", revoked_at: "x" }]).map((k) => ({ ...k }));
+  const dels: string[] = [];
   const ident: { state: string; sender?: string; display?: string } = { state: "waiting" };
   const calls: { method: string; url: string; body?: any }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url.startsWith("/v1/connections")) return conns.impl(url, init);
+    if (url === "/v1/settings/ext-keys" && method === "GET") return json(200, { credentials: keys });
+    const del = /^\/v1\/settings\/channels\/([^/]+)$/.exec(url);
+    if (del && method === "DELETE") {
+      const name = decodeURIComponent(del[1]);
+      dels.push(name);
+      for (const k of keys) if (k.scope === "channel." + name && !k.revoked_at) k.revoked_at = "2030-01-01T00:00:00Z";
+      delete s.doc.channels[name];
+      delete s.doc.channel_answerers[name];
+      return json(200, { version: 2, revoked: 1 });
+    }
     const m = /^\/v1\/settings\/channels\/([^/]+)\/(answerers|identify)$/.exec(url);
     if (!m) return s.impl(url, init);
     const body = init.body ? JSON.parse(init.body as string) : undefined;
@@ -62,7 +76,7 @@ function server(extKeys?: Record<string, unknown>[]) {
     if (method === "POST") return json(200, { code: "apa-7K3Q", expires_at: "2030-01-01T00:10:00Z" });
     return json(200, ident);
   }) as unknown as typeof fetch;
-  return { ...s, impl, ident, calls, conns };
+  return { ...s, impl, ident, calls, conns, keys, dels };
 }
 
 function mount(f: typeof fetch) {
@@ -169,5 +183,80 @@ describe("设置 › 提醒渠道：用自己的程序接入", () => {
     await userEvent.click(c.getByRole("button", { name: "识别我的 ID" }));
     expect(await c.findByText("没收到")).toBeInTheDocument();
     expect(c.getByRole("button", { name: "再试一次" })).toBeInTheDocument();
+  });
+});
+
+describe("设置 › 提醒渠道：删除", () => {
+  it("启用中的内置渠道也能删除：先停止发送，再删除，并把路由解绑", async () => {
+    const s = server();
+    conns.list.push({ id: "ch-a1", type: "bark", name: "我的 iPhone", config: {}, secrets: { device_key: true }, enabled: true, state: "ok" });
+    s.doc.disturb.routes.decision = "channel:ch-a1";
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mount(s.impl);
+    const c = within(await screen.findByRole("region", { name: "我的 iPhone" }));
+    await userEvent.click(c.getByRole("button", { name: "删除" }));
+    await waitFor(() => expect(conns.calls).toEqual([
+      { method: "POST", url: "/v1/connections/ch-a1/disable", body: {} },
+      { method: "DELETE", url: "/v1/connections/ch-a1", body: undefined },
+    ]));
+    expect(confirm.mock.calls[0][0]).toMatch(/会先停止发送/);
+    expect(s.puts.at(-1)!.body.disturb.routes.decision).toBe("inject");
+    confirm.mockRestore();
+  });
+
+  it("删除一个自写程序渠道：一个请求吊销钥匙并删掉两处名字，卡片随之消失；取消则什么都不做", async () => {
+    const s = server([
+      { id: "k1", kind: "ext", scope: "channel.slack" },
+      { id: "k2", kind: "ext", scope: "channel.keep" },
+    ]);
+    s.doc.channels = { slack: { text_only: true }, keep: {} };
+    s.doc.channel_answerers = { slack: ["1"], keep: ["2"] };
+    s.doc.disturb.routes.decision = "channel:slack";
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    mount(s.impl);
+    const card = within(await screen.findByRole("region", { name: "slack" }));
+
+    await userEvent.click(card.getByRole("button", { name: "删除" }));
+    expect(s.dels).toEqual([]); // 确认框点了取消
+    expect(screen.getByRole("region", { name: "slack" })).toBeInTheDocument();
+
+    confirm.mockReturnValue(true);
+    await userEvent.click(card.getByRole("button", { name: "删除" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "slack" })).not.toBeInTheDocument());
+    expect(confirm.mock.calls.at(-1)![0]).toMatch(/钥匙全部停用/);
+    expect(s.dels).toEqual(["slack"]);
+    expect(s.calls).toEqual([]); // 页面不发拼状态的第二次请求
+    expect(screen.getByRole("region", { name: "keep" })).toBeInTheDocument();
+    expect(s.doc.channels.keep).toBeDefined();
+    expect(s.doc.channel_answerers.keep).toEqual(["2"]);
+    expect(s.doc.disturb.routes.decision).toBe("channel:slack"); // 路由不动，由「提醒与打扰」标明
+    confirm.mockRestore();
+  });
+});
+
+describe("设置 › 提醒渠道：给自己写的程序发钥匙的说明", () => {
+  it("中文：适用场景、签了不等于接通、与内置渠道的区别、最小示例", async () => {
+    const s = server();
+    mount(s.impl);
+    const f = within(await screen.findByRole("form", { name: "给自己写的程序发钥匙" }));
+    expect(f.getByText(/你自己的脚本或机器人想收提醒/)).toBeInTheDocument();
+    expect(f.getByText(/签了钥匙不等于接通/)).toBeInTheDocument();
+    expect(f.getByText(/「添加渠道」接的是 APA 自带渠道/)).toBeInTheDocument();
+    expect(f.getByText("怎么调（最小示例）")).toBeInTheDocument();
+    expect(f.getByText(/\/v1\/deliveries\/next\?wait=60/)).toBeInTheDocument();
+    expect(f.getByText(/Authorization: Bearer/)).toBeInTheDocument();
+    expect(f.getByText(/"ref":"msg-1"/)).toBeInTheDocument();
+  });
+
+  it("英文：同一份说明的英文文案", async () => {
+    setChoice("en");
+    const s = server();
+    mount(s.impl);
+    const f = within(await screen.findByRole("form", { name: "Issue a key for my own program" }));
+    expect(f.getByText(/Your own script or bot that receives reminders/)).toBeInTheDocument();
+    expect(f.getByText(/A key is not a connection/)).toBeInTheDocument();
+    expect(f.getByText(/is for the types APA ships/)).toBeInTheDocument();
+    expect(f.getByText("How to call it (minimal example)")).toBeInTheDocument();
+    expect(f.getByText(/\/v1\/deliveries\/next\?wait=60/)).toBeInTheDocument();
   });
 });

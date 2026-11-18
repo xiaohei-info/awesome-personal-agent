@@ -45,12 +45,10 @@ function useChannels(): Channels {
   }, [api]);
   const names: Record<string, string> = {};
   for (const c of conns) names[CHANNEL_PREFIX + c.id] = c.enabled ? t.pushTo(c.name) : t.pushToOff(c.name);
+  for (const n of ext) names[CHANNEL_PREFIX + n] = t.pushTo(n);
   const ids = [...conns.filter((c) => c.enabled).map((c) => CHANNEL_PREFIX + c.id), ...ext.map((n) => CHANNEL_PREFIX + n)];
   return { ids, names };
 }
-
-/** 内置渠道连接的路由（channel:ch-…）在列表里找不到时：连接已删除，不显示原始 id。 */
-const isConnRoute = (id: string) => id.startsWith(CHANNEL_PREFIX + "ch-");
 
 interface Today { pushed: number; cap: number }
 function useToday(): Today | null {
@@ -92,7 +90,8 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; sa
     return cur && !ids.includes(cur) ? [...ids, cur] : ids;
   };
   const names: Record<string, string> = { ...channels.names };
-  for (const r of [...Object.values(routesIn)]) if (isConnRoute(r) && !names[r]) names[r] = t.pushToGone;
+  // 列表里没有的渠道路由：连接或自写程序渠道已删除，照样列出并标明，不显示原始 id。
+  for (const r of [...Object.values(routesIn)]) if (r.startsWith(CHANNEL_PREFIX) && !names[r]) names[r] = t.pushToGone;
   const setOverride = (i: number, j: number, v: string) => setOverrides(overrides.map((o, n) => (n === i ? (o.map((x, m) => (m === j ? v : x)) as Override) : o)));
   const setMute = (i: number, j: number, v: string) => setMutes(mutes.map((r, n) => (n === i ? (r.map((x, m) => (m === j ? v : j === 0 && m === 1 ? "" : x)) as Mute) : r)));
   const quiet = val("quiet") as { start: string; end: string; zone?: string } | undefined;

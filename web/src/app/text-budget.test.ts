@@ -11,6 +11,7 @@ const BARE_BACKGROUND_RUN = /(?<!Agent )后台运行/;
 /** 有意保留的长文字：键名（各页文案展开了共用文案，所以按键名，不按文件）→ 理由。 */
 const EXEMPT: Record<string, string> = {
   loginSub: "登录页的产品介绍，不是功能说明（设计 §5.1）",
+  ownProgramSample: "调用示例是代码块，不是说明文字（设计 §4.1 要求给出最小可跑示例）",
 };
 const ALLOWED_PATH = /\.(advanced|raw|diag)\w*(\.|$)/i;
 

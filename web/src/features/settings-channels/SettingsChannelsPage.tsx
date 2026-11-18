@@ -78,6 +78,7 @@ function ChannelCard({ name, pol, al, keys, onSaved, onKeys, savePolicy }: {
   const storedAns = ((al.channel_answerers ?? {}) as Record<string, string[]>)[name] ?? [];
   const [textOnly, setTextOnly] = useDraft(pol.channels, () => !!stored[name]?.text_only);
   const [ans, setAns] = useDraft(al.channel_answerers, () => storedAns);
+  const [error, setError] = useState<string | null>(null);
   // 只签了钥匙不算接通：按钥匙最近一次真实调用内核的时间区分"还没连上过 / 最近使用"。
   const seen = keys.filter((k) => !k.revoked_at && k.last_seen_at).map((k) => k.last_seen_at!).sort().at(-1);
   const putAnswerers = (list: string[]) => api.put<{ version: number }>(`/settings/channels/${encodeURIComponent(name)}/answerers`, { answerers: list });
@@ -90,6 +91,18 @@ function ChannelCard({ name, pol, al, keys, onSaved, onKeys, savePolicy }: {
   const revoke = async (id: string) => {
     await api.del(`/settings/ext-keys/${encodeURIComponent(id)}`).catch(() => undefined);
     onKeys(); // 以服务端状态为准
+  };
+  // 删除这个渠道：服务端一个动作吊销它的全部钥匙、删掉 channels 段与回答人名单；重复点不报错。
+  const remove = async () => {
+    if (!window.confirm(t.confirmDelete(name))) return;
+    setError(null);
+    try {
+      await api.del(`/settings/channels/${encodeURIComponent(name)}`);
+      onKeys();
+      onSaved();
+    } catch (e) {
+      setError(msg(e));
+    }
   };
   return (
     <Card title={name} onSave={submit}>
@@ -113,6 +126,10 @@ function ChannelCard({ name, pol, al, keys, onSaved, onKeys, savePolicy }: {
           </ul>
         </details>
       )}
+      <div className="conn-actions">
+        <button type="button" className="danger" onClick={() => void remove()}>{t.remove}</button>
+      </div>
+      {error && <p role="alert">{error}</p>}
     </Card>
   );
 }
@@ -198,6 +215,13 @@ function NewChannel({ onSecret }: { onSecret: (s: string) => void }) {
   return (
     <form className="panel" aria-label={t.newChannel} onSubmit={(e) => { e.preventDefault(); void create(); }}>
       <h2>{t.newChannel}</h2>
+      <p>{t.ownProgramWhy}</p>
+      <p className="sub">{t.ownProgramNotConnected}</p>
+      <p className="sub">{t.ownProgramVsAdd}</p>
+      <details>
+        <summary>{t.ownProgramHow}</summary>
+        <pre><code>{t.ownProgramSample}</code></pre>
+      </details>
       <label>{t.channelName} <input value={name} onChange={(e) => setName(e.target.value)} /></label>{" "}
       <button type="submit" disabled={!name.trim()}>{t.create}</button>
       {error && <p role="alert">{error}</p>}

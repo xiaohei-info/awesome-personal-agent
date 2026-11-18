@@ -52,6 +52,16 @@ describe("设置 › 提醒与打扰", () => {
     expect(s.puts.at(-1)!.body.disturb.routes).toEqual({ decision: "channel:ch-1a2b", brief: "channel:ch-1a2b", reminder: "channel:ch-gone", health: "web" });
   });
 
+  it("指向已删除的自写程序渠道的路由照样显示并标明；还在的渠道按名字显示", async () => {
+    const s = policyServer({ routes: { decision: "channel:gone1", reminder: "channel:slack", brief: "web", health: "web" } });
+    mount(s.impl);
+    const d = await card();
+    const decision = d.getByLabelText("决策");
+    await waitFor(() => expect(options(decision)).toEqual(["inject", "web", "channel:slack", "channel:gone1"]));
+    expect(within(decision).getByRole("option", { name: "推送到已删除的渠道（先放网页未读）" })).toBeInTheDocument();
+    expect(within(d.getByLabelText("提醒")).getByRole("option", { name: "推送到 slack" })).toBeInTheDocument();
+  });
+
   it("ACT-DLV-16/24: 在 Web 设置日上限与暂停提醒并保存；今天已推送的条数显示在上限下面", async () => {
     const s = policyServer();
     mount(s.impl);

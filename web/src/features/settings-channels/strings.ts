@@ -64,7 +64,7 @@ const zh = {
   webOnlyNote: "需要你在网页确认的决定，这里只收到链接",
   enableNow: "启用",
   keepOff: "先存着，不启用",
-  confirmRemove: (name: string) => `删除「${name}」？`,
+  confirmRemove: (name: string) => `删除「${name}」？会先停止发送，提醒改为放在网页未读。`,
   rawId: (id: string, type: string) => `id ${id} · type ${type}`,
   textOnly: "只能发文字",
   textOnlyHint: "决策会附一个网页表单链接",
@@ -82,6 +82,23 @@ const zh = {
   revoke: "停用",
   revoked: "已停用",
   newChannel: "给自己写的程序发钥匙",
+  ownProgramWhy: "你自己的脚本或机器人想收提醒、还能回答，就用这个。",
+  ownProgramNotConnected: "签了钥匙不等于接通：程序调通一次前，卡片显示「还没连上过」。",
+  ownProgramVsAdd: "「添加渠道」接的是 APA 自带渠道；自己写的程序走这里。",
+  ownProgramHow: "怎么调（最小示例）",
+  ownProgramSample: `# 领一条要送的提醒（没有就等 60 秒，然后返回 204）
+curl -H "Authorization: Bearer <钥匙>" "http://<host>:<port>/v1/deliveries/next?wait=60"
+
+# 发出去以后回报送达，version 用领到的那条
+curl -X POST -H "Authorization: Bearer <钥匙>" -H "Content-Type: application/json" \\
+  -d '{"version":1,"external_ref":"msg-1"}' \\
+  "http://<host>:<port>/v1/deliveries/<id>/ack"
+
+# 那边的人回答了就转达；sender 要先在这个渠道的回答人名单里
+curl -X POST -H "Authorization: Bearer <钥匙>" -H "Content-Type: application/json" \\
+  -d '{"ref":"msg-1","sender":"<对方的用户 ID>","text":"好"}' \\
+  "http://<host>:<port>/v1/deliveries/<id>/answer"`,
+  confirmDelete: (name: string) => `删除「${name}」？它的钥匙全部停用，设置与回答人名单一起删。`,
   channelName: "渠道名",
   create: "发钥匙",
   linkState: "连接状态",
@@ -153,7 +170,7 @@ const en: typeof zh = {
   webOnlyNote: "Decisions you confirm on the web only get a link here",
   enableNow: "Enable",
   keepOff: "Save without enabling",
-  confirmRemove: (name) => `Delete "${name}"?`,
+  confirmRemove: (name) => `Delete "${name}"? Sending stops; reminders go to Web unread.`,
   rawId: (id, type) => `id ${id} · type ${type}`,
   textOnly: "Text only",
   textOnlyHint: "Decisions come with a web form link",
@@ -171,6 +188,23 @@ const en: typeof zh = {
   revoke: "Revoke",
   revoked: "Revoked",
   newChannel: "Issue a key for my own program",
+  ownProgramWhy: "Your own script or bot that receives reminders and answers, goes here.",
+  ownProgramNotConnected: "A key is not a connection: until it calls once, the card says \"Never connected\".",
+  ownProgramVsAdd: "\"Add a channel\" is for the types APA ships; your own program goes here.",
+  ownProgramHow: "How to call it (minimal example)",
+  ownProgramSample: `# Claim one delivery (waits 60 seconds, then returns 204)
+curl -H "Authorization: Bearer <key>" "http://<host>:<port>/v1/deliveries/next?wait=60"
+
+# Report it delivered once it is sent; version comes from the claimed delivery
+curl -X POST -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \\
+  -d '{"version":1,"external_ref":"msg-1"}' \\
+  "http://<host>:<port>/v1/deliveries/<id>/ack"
+
+# Pass on an answer from the other side; sender must be in this channel's answerer list
+curl -X POST -H "Authorization: Bearer <key>" -H "Content-Type: application/json" \\
+  -d '{"ref":"msg-1","sender":"<their user ID>","text":"OK"}' \\
+  "http://<host>:<port>/v1/deliveries/<id>/answer"`,
+  confirmDelete: (name) => `Delete "${name}"? Its keys stop working; settings and answerers go too.`,
   channelName: "Channel name",
   create: "Issue key",
   linkState: "Connection state",
