@@ -21,27 +21,17 @@ type Output = (typeof OUTPUTS)[number];
 
 export interface Instance { id: string; pack: string; agent_ready?: boolean; agent_reason?: string; project?: string; params: { agent_id?: string; schedule?: string; projects?: string[]; mode?: string; title?: string; instruction?: string; access?: string; output?: string }; enabled: boolean }
 
-/** 到点运行时用哪个宿主、它的上限是多少（§13.6）：规则不指定宿主，所以取默认宿主；读不到时为 null，不提示。 */
 function useHostCap(agent: string): { host: string; cap: string } | null {
   const { api } = useSession();
   const [v, setV] = useState<{ host: string; cap: string } | null>(null);
   useEffect(() => {
     let active = true;
-    api.get<AgentView>("/agents?rule=routine%2Fclock_rules%2Fscheduled-routine&schedule=" + encodeURIComponent(agent)).then(view => {
-      if (active && view.selected) setV({host: view.selected.agent_name ?? "", cap: view.selected.permission_cap ?? "read"});
-    }, () => {});
-    if (agent) return () => { active = false; };
-    Promise.all([
-      api.get<{ default_harness?: string }>("/settings/policy"),
-      api.get<{ permission_cap?: { default?: string; by_harness?: Record<string, string> } }>("/settings/access-limits"),
-    ]).then(
-      ([p, l]) => {
-        const host = p.default_harness ?? "";
-        if (active) setV(previous => previous ?? { host, cap: l.permission_cap?.by_harness?.[host] ?? l.permission_cap?.default ?? "read" });
-      },
+    setV(null);
+    api.get<AgentView>("/agents?rule=routine%2Fclock_rules%2Fscheduled-routine&schedule=" + encodeURIComponent(agent)).then(
+      view => { if (active) setV({ host: view.selected.agent_name ?? "", cap: view.selected.permission_cap ?? "read" }); },
       () => {},
     );
-    return () => {active = false;};
+    return () => { active = false; };
   }, [api, agent]);
   return v;
 }

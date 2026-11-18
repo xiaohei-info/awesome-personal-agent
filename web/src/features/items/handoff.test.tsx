@@ -16,7 +16,7 @@ function server(o: { mode?: string; declared?: boolean; items?: any[] } = {}) {
     const method = init.method ?? "GET";
     const h = (init.headers ?? {}) as Record<string, string>;
     if (url === "/v1/rules") return json(200, { rules: o.mode ? [{ key: RULE, pack: "background-run", group: "event_rules", id: "handle-labelled", mode: o.mode, hash: "h" }] : [] });
-    if (url === "/v1/settings/commands") return json(200, { declarations: o.declared ? [{ harness: "hx", declaration: { headless: { access: {} } } }] : [] });
+    if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: o.declared ? { agent_id: "legacy:hx" } : {}, reason: o.declared ? "" : "还没选主 Agent" });
     if (url === "/v1/projects") return json(200, { projects: [] });
     if (url === "/v1/items" || url.startsWith("/v1/items?")) return json(200, { items });
     if (/\/messages$/.test(url)) return json(200, { messages: [] });

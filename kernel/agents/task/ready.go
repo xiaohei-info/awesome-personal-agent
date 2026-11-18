@@ -64,7 +64,7 @@ func (s *Service) Gate(ctx context.Context, rule string, do []packs.Action, para
 	if err != nil || selected.Reason == "" {
 		return "", err
 	}
-	if p.AgentID != "" || selected.Card.ID != "" {
+	if selected.Snapshot.AgentID != "" {
 		return SkipAgentNotReady + "：" + selected.Reason, nil
 	}
 	return SkipAgentNotReady, nil

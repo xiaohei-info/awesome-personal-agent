@@ -94,7 +94,6 @@ export function SettingsAgentsPage() {
   const { hash } = useLocation();
   const pol = docs?.policy, lim = docs?.["access-limits"];
   const { api } = useSession();
-  const lang = useLang();
   const [cards, setCards] = useState<Agent[]>([]);
   const [editing, setEditing] = useState<Partial<Agent> | null>(null);
   const loadCards = useCallback(async () => {
@@ -120,11 +119,11 @@ export function SettingsAgentsPage() {
       )}
       {data && pol && lim && (
         <>
-          <div className="actions">{(["default_agent_id", "main_agent_id"] as const).map((role, i) => <label key={role}>{[{zh:"日常工作交给",en:"Daily work"},{zh:"需要主 Agent 时交给",en:"Main Agent work"}][i][lang]}
-            <select value={roles[role]} onChange={e => void save("policy", { ...roles, [role]: e.target.value, version: pol.version }).catch(err => setError(msg(err)))}><option value="">{({ zh: "未设置", en: "Not set" })[lang]}</option>{cards?.map(a => <option value={a.id} key={a.id} disabled={!a.enabled}>{a.name}</option>)}</select></label>)}</div>
-          {agents.length === 0 && <p className="sub">{({ zh:"还没有 Agent。你可以继续在这里管理事项。", en:t.none })[lang]}</p>}
-          <button onClick={() => setEditing({})}>{({ zh: "添加 Agent", en: "Add Agent" })[lang]}</button>
-          {editing && <AgentEditor key={editing.id ?? editing.name ?? "new"} initial={editing} hosts={data.live.map(r => r.declaration)} onDone={saved => {setEditing(null); if (saved) void loadCards();}} />}
+          <div className="actions">{(["default_agent_id", "main_agent_id"] as const).map((role, i) => <label key={role}>{i === 0 ? t.dailyRole : t.mainRole}
+            <select value={roles[role]} onChange={e => void save("policy", { ...roles, [role]: e.target.value, version: pol.version }).catch(err => setError(msg(err)))}><option value="">{t.cardNotSet}</option>{cards?.map(a => <option value={a.id} key={a.id} disabled={!a.enabled}>{a.name}</option>)}</select></label>)}</div>
+          {agents.length === 0 && <p className="sub">{t.emptyCards}</p>}
+          <button onClick={() => setEditing({})}>{t.cardAddAgent}</button>
+          {editing && <AgentEditor key={editing.id ?? editing.name ?? "new"} initial={editing} initialCap={lim.permission_cap.by_agent?.[editing.id ?? ""] ?? "read"} policyVersion={lim.version} hosts={data.live.map(r => r.declaration)} onDone={saved => {setEditing(null); if (saved) { void loadCards(); void loadPol(); }}} />}
           {cards?.filter(a => a.rev > 0).map(a => <AgentCard key={a.id} agent={a} edit={setEditing} h={a.harness} data={data} pol={pol} lim={lim} save={save} reload={load} onError={setError} onSecret={setSecret} />)}
           {agents.map((h) => (
             <AgentCard key={h} edit={setEditing} h={h} data={data} pol={pol} lim={lim} save={save} reload={load} onError={setError} onSecret={setSecret} />
@@ -152,7 +151,6 @@ function AgentCard({ agent, edit, h, data, pol, lim, save, reload, onError, onSe
   const nameOf = useName();
   const pending = data.pending.find((r) => r.harness === h);
   const live = data.live.find((r) => r.harness === h);
-  const lang = useLang();
   const name = agent?.name ?? nameOf(live?.declaration ?? pending?.declaration);
   const model = Object.entries(live?.declaration.instance_options?.fields ?? {}).find(([, f]) => f.display_as === "model")?.[0];
   const identity = agent?.id ?? h;
@@ -178,8 +176,8 @@ function AgentCard({ agent, edit, h, data, pol, lim, save, reload, onError, onSe
         {name} {isDefault && <span className="badge plain">{t.isDefault}</span>}
         {raw && <code className="raw-id">{h}</code>}
       </h2>
-      <p>{model && agent?.values?.[model] || (({ zh: "跟随 Agent 设置", en: "Agent default" })[lang])}{agent && !agent.enabled && (({ zh: " · 已停用", en: " · Disabled" })[lang])}{pol.main_agent_id === (agent?.id ?? "legacy:" + h) && (({ zh: " · 主 Agent", en: " · Main Agent" })[lang])}</p>
-      <div className="actions">{agent && <button onClick={() => edit(agent)}>{({ zh: "编辑", en: "Edit" })[lang]}</button>}{live && <button onClick={() => edit({ harness: h, name: name + (({ zh: " 副本", en: " copy" })[lang]), values: agent?.values })}>{({ zh: "复制", en: "Duplicate" })[lang]}</button>}</div>
+      <p>{model && agent?.values?.[model] || t.cardAgentDefault}{agent && !agent.enabled && t.cardDisabled}{pol.main_agent_id === (agent?.id ?? "legacy:" + h) && t.cardMainAgent}</p>
+      <div className="actions">{agent && <button onClick={() => edit(agent)}>{t.cardEdit}</button>}{live && <button onClick={() => edit({ harness: h, name: name + t.cardCopy, values: agent?.values })}>{t.cardDuplicate}</button>}</div>
       <ul className="plain">
         <li>{connected ? "● " + t.connected : "○ " + t.notConnected}</li>
         {unclaimed.map((c) => (
@@ -191,6 +189,10 @@ function AgentCard({ agent, edit, h, data, pol, lim, save, reload, onError, onSe
       </ul>
       {!agent && pending && (
         <div>
+          <details><summary>{t.cardCompareActiveAndProposedLaunchDeclarations}</summary>
+            {live && <pre>{JSON.stringify(live.declaration, null, 2)}</pre>}
+            <pre>{JSON.stringify(pending.declaration, null, 2)}</pre>
+          </details>
           <WakeChange from={live?.declaration} to={pending.declaration} />
           <p>{t.wantsToRun(name)}<code>{(pending.declaration.headless?.command ?? []).join(" ")}</code></p>
           <div className="actions">
@@ -330,7 +332,7 @@ function Decide({ instance, h, grants, reload }: { instance: boolean; h: string;
     const body: Record<string, unknown> = {
       actions: GRANT_CATS.filter(([c]) => cats.includes(c)).flatMap(([, a]) => a),
       scope: all ? { all: true } : { projects: picked },
-      ...(instance ? { grantee: { instance: true, background: bg } } : { background: bg }),
+      grantee: { ...(instance ? { instance: true } : {}), background: bg },
     };
     if (until) body.expires_at = new Date(until + "T23:59:59").toISOString();
     await api.put("/settings/agents/" + encodeURIComponent(h) + "/grant", body);

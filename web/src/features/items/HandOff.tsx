@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
 import { HANDOFF_RULE, HANDOFF_TAG } from "../../app/ids";
-import { AgentPick } from "../settings-agents/AgentPick";
+import { AgentPick, type AgentView } from "../settings-agents/AgentPick";
 import { strings } from "./strings";
 import type { Item } from "./ItemsPage";
 
@@ -21,17 +21,24 @@ export function HandOff({ item, onSave, onAgent }: { onAgent: (v: string) => voi
   const { api } = useSession();
   const on = !!item.tags?.includes(HANDOFF_TAG);
   const [mode, setMode] = useState<string | null>(null);
-  const [declared, setDeclared] = useState<boolean | null>(null);
+  const [preview, setPreview] = useState<AgentView | null>(null);
   useEffect(() => {
     if (!on) return;
     api.get<{ rules: { key: string; mode: string }[] }>("/rules").then((r) => setMode(r.rules.find((x) => x.key === HANDOFF_RULE)?.mode ?? "off"), () => setMode(null));
-    api.get<{ declarations: { declaration?: { headless?: unknown } }[] }>("/settings/commands").then((r) => setDeclared(r.declarations.some((d) => d.declaration?.headless != null)), () => setDeclared(null));
   }, [api, on]);
+  useEffect(() => {
+    if (!on) return;
+    let active = true;
+    setPreview(null);
+    const query = new URLSearchParams({ runner: "main_session", rule: HANDOFF_RULE, item_agent: item.preferred_agent_id ?? "" });
+    api.get<AgentView>("/agents?" + query).then(view => { if (active) setPreview(view); }, () => {});
+    return () => { active = false; };
+  }, [api, on, item.preferred_agent_id]);
 
   const status: Status = !on ? null
     : mode === "off" ? { text: t.handoffOff, to: "/rules" }
     : mode === "observe" ? { text: t.handoffTrial, to: "/rules" }
-    : declared === false ? { text: t.handoffWaitAgent, to: "/settings/agents" }
+    : preview?.reason ? { text: preview.selected.agent_id ? preview.reason : t.handoffWaitAgent, to: "/settings/agents" }
     : item.phase === "open" ? { text: t.handoffAlreadyOpen, to: "" }
     : null;
   const next = on ? (item.tags ?? []).filter((x) => x !== HANDOFF_TAG) : [...(item.tags ?? []), HANDOFF_TAG];

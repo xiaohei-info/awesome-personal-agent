@@ -193,7 +193,7 @@
 | | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
 | Agent | `GET /agents` | 卡片列表与选择预览（`rule`、`runner`、`schedule`、`item_agent`、`harness`），本人可见实例参数 | observer |
-| 设置 | `POST /settings/agents` | 创建或更新卡片，更新时须带原 `id`、`harness` 和 `rev` | 只有 Web 登录 |
+| 设置 | `POST /settings/agents` | 创建或更新卡片，更新时须带原 `id`、`harness` 和 `rev`。同时修改权限上限时传 `permission_cap` 和 `policy_version`，在同一事务生效 | 只有 Web 登录 |
 | 事件 | `GET /events?cursor=` | JSON 长轮询 | observer、导出和转发 ext 密钥 |
 | 投递 | `GET /deliveries/next?wait=` | 长轮询领取；有租约 | 渠道 ext 密钥；网关插件 token（worker 及以上，只领唤醒类投递） |
 | | `POST /deliveries/{id}/ack`，`/fail`，`/answer` | 送达、失败、转达回答 | 同上 |
@@ -358,8 +358,6 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 `POST /materials/{id}/changes` 只用于托管型，自有型返回 409。请求体 `{"assignee": "<执行者 id>", "request": "<修改要求>", "parent": "<事项 id，可选>"}`，可带 `Idempotency-Key`。成功返回 201：`{"item": "<子事项 id>", "parent": "<父事项 id>"}`。子事项带材料的 project、仓库和路径，委派成功后父事项以 `output` 关联该材料；`assignee` 不在项目允许范围内返回 403（退出码 21）；`parent` 不属于材料所在项目返回 400。父事项来源见主文档 §12.3。
 
-外部事件订阅程序各用一把 observer 钥匙，通过 `Authorization: Bearer <token>` 请求 `GET /v1/events?cursor=40&limit=100&wait=30`。HTTP 200 返回 `{"events":[…],"next":43}`。信封按 `seq > cursor` 升序，序号可跳过，空页的 `events` 为 `[]`。`cursor` 缺省 0，`limit` 缺省 100（1–500），`wait` 缺省 0，最长实际等待 60 秒。消费者按账本与 `seq` 幂等处理，整页成功后才持久化 `next`，空页同样推进。失败时从上次成功游标重试，形成至少一次投递。
-
 `GET /agents-md?repo` 返回 `{"content": "…", "hash": "…", "rendered_at": "…", "last_check": {"state": "current|stale|drift", "file_hash": "…", "host": "…", "checked_at": "…"}}`。`last_check` 来自同一仓库最近一次 `POST /agents-md/check`，从未检查过时为 `null`。这两条路由的 `repo` 接受同一仓库的任一写法（主文档 §6.5）。
 
 `GET /packs` 的每个包带 `views`，键是视图文件名去掉 `.yaml`，值只是声明性配置（附录 C.8），不含提示词正文与模板；未声明的列表返回 `[]`，没有视图的包返回 `{}`：
@@ -383,6 +381,24 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 `POST /items/{id}/report` 的 `link` 可以是字符串或字符串数组；回执事件的证据里 `link` 仍是第一个，另带 `links[]`。
 
 `GET /context`、`GET /today` 与简报的资料文件不含导入事件产生的增量；导入的事项本身照常出现在事项列表与"今天"里。
+
+### 拉取事件
+
+在「设置 › Agent」的脚本钥匙管理区为每个消费程序签发一把 observer 钥匙。程序携带 `Authorization: Bearer <token>` 请求 `GET /v1/events?cursor=40&limit=100&wait=30`。worker、delegate、本人 Web 会话及具有 export 或 forward 作用域（含 `.<名>`）的 ext 也可读。
+
+| 参数 | 缺省 | 十进制整数范围（含边界） |
+|---|---:|---|
+| `cursor` | 0 | 0 至 2^62。0 从可读历史开头拉取。 |
+| `limit` | 100 | 1 至 500，按可见信封数计。 |
+| `wait` | 0 秒 | 0 至 2^31 秒，实际最多等待 60 秒。有新事件即返回。 |
+
+HTTP 200 返回登记过的现场事件，按 `seq > cursor` 升序排列，允许跳号。信封只含元信息，可选的 `title` 随对象提供。正文按对象接口的权限另取。
+
+```json
+{"events":[{"seq":42,"type":"item.created","object":"item_example","title":"核对简报","actor":{"type":"user","principal":"owner","via":"web"},"at":"2026-11-18T08:30:00Z"}],"next":43}
+```
+
+消费者按账本与 `seq` 去重，整页处理成功后才持久化响应中的 `next`。上例处理完 42 应保存 43。空页如 `{"events":[],"next":43}` 也保存 `next`。中途失败或保存游标前退出，从上次成功游标重读，因此是至少一次投递。网络或服务端故障按原游标退避重试。HTTP 400 时修正参数，401 时检查钥匙，403 时检查凭据类型和作用域。
 
 ## B.3 错误响应
 

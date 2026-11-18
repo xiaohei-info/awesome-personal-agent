@@ -72,10 +72,15 @@ func Cards(tx *store.Tx) ([]Card, error) {
 }
 
 func saveCard(c *command.Ctx) (any, error) {
-	var card Card
-	if err := decode(c.Input, &card); err != nil {
+	var input struct {
+		Card
+		PermissionCap string `json:"permission_cap,omitempty"`
+		PolicyVersion *int   `json:"policy_version,omitempty"`
+	}
+	if err := decode(c.Input, &input); err != nil {
 		return nil, err
 	}
+	card := input.Card
 	card.Name = strings.TrimSpace(card.Name)
 	if card.Name == "" || len([]rune(card.Name)) > 80 {
 		return nil, invalid("Agent 名字须为 1 至 80 个字")
@@ -105,6 +110,31 @@ func saveCard(c *command.Ctx) (any, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if cap := input.PermissionCap; cap != "" {
+		if rec.Declaration.Headless == nil {
+			return nil, invalid("此声明没有后台权限档位")
+		}
+		if _, ok := rec.Declaration.Headless.Access[cap]; !ok {
+			return nil, invalid("声明未提供此权限档位")
+		}
+		version, _, err := policy.Current(c.Tx)
+		if err != nil {
+			return nil, err
+		}
+		if input.PolicyVersion == nil || *input.PolicyVersion != version {
+			return nil, conflict("权限设置已变更，请重新载入")
+		}
+		_, err = policy.Update(c.Tx, c.Caller.Actor, "agent.configure", func(pol *policy.Policy) error {
+			if pol.PermissionCap.ByAgent == nil {
+				pol.PermissionCap.ByAgent = map[string]string{}
+			}
+			pol.PermissionCap.ByAgent[card.ID] = cap
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	_, err = c.Emit(domain.Event{Type: domain.EvAgentConfigured, Object: card.ID, Payload: payload(card)})
 	return card, err

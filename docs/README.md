@@ -17,7 +17,7 @@ v0.1 已实现并在主干运行；这里是 v0.2.0 的设计，也是 v0.2.0 �
 
 ## 开发者接入
 
-用只读钥匙[拉取事件](appendix-b-api-cli.md#b2-http-api)，消费程序自行保存游标。可用 `apa events --follow` 调试。
+用只读钥匙[拉取事件](appendix-b-api-cli.md#拉取事件)，消费程序自行保存游标。可用 `apa events --follow` 调试。
 
 ## 用户文档
 

@@ -4,7 +4,6 @@ import (
 	"maps"
 	"regexp"
 	"slices"
-	"strings"
 )
 
 type OptionField struct {
@@ -23,7 +22,8 @@ type InstanceOptions struct {
 }
 
 var fieldName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-var envName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*_(MODEL|PROFILE)$`)
+var envName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+var reservedEnv = regexp.MustCompile(`^(APA_|LD_|DYLD_|LC_|XDG_|PYTHON|NODE_|RUBY|PERL|BASH|GIT_|SSH_|JAVA_|JDK_|GCONV_|GLIBC_|SSL_|GODEBUG$|GOFLAGS$|PATH$|HOME$|USER$|LOGNAME$|LANG$|TZ$|TMPDIR$|TMP$|TEMP$|ENV$|SHELL$|IFS$)|(_PATH|_PROXY|_OPTIONS)$`)
 var optionValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,199}$`)
 var optionFlag = regexp.MustCompile(`^--?[a-zA-Z][a-zA-Z0-9_-]*$`)
 var sensitive = regexp.MustCompile(`(?i)pass(?:word|wd)|secret|credential|token|api_?key|private_?key`)
@@ -69,7 +69,7 @@ func (o *InstanceOptions) validate() error {
 	seen := map[string]bool{}
 	for key, env := range o.Env {
 		for name, value := range env {
-			if _, ok := o.Fields[key]; !ok || !envName.MatchString(name) || strings.HasPrefix(name, "APA_") || sensitive.MatchString(name) || value != "{"+key+"}" || seen[name] {
+			if _, ok := o.Fields[key]; !ok || !envName.MatchString(name) || reservedEnv.MatchString(name) || sensitive.MatchString(name) || value != "{"+key+"}" || seen[name] {
 				return invalid("invalid env_if_set for %s", key)
 			}
 			seen[name] = true

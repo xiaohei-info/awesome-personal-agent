@@ -176,6 +176,26 @@ func TestSettingsRejectNonWebCallers(t *testing.T) {
 	}
 }
 
+func TestRoleSwitchDoesNotReviveOldDefault(t *testing.T) {
+	e := setup(t)
+	put := func(body string, status int) {
+		t.Helper()
+		rec := e.do("PUT", routes[0], body, e.web)
+		if rec.Code != status {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	put(`{"default_harness":"host"}`, 200)
+	put(`{"version":0,"default_agent_id":"legacy:host","main_agent_id":"legacy:host"}`, 409)
+	put(`{"version":1,"default_agent_id":"legacy:host","main_agent_id":"legacy:host"}`, 200)
+	put(`{"version":2,"default_agent_id":"","main_agent_id":""}`, 200)
+	put(`{"default_harness":"host"}`, 409)
+	version, pol := e.current()
+	if version != 3 || pol.DefaultAgentID == nil || *pol.DefaultAgentID != "" || pol.MainAgentID == nil || *pol.MainAgentID != "" {
+		t.Fatalf("role switch lost: %+v", pol.DefaultAgentID)
+	}
+}
+
 // ACT-WEB-01：Web 上配置 web_only 规则生成新版本，事件流有 policy.changed，默认类别仍在。
 func TestWebWritesNewPolicyVersionAndEvent(t *testing.T) {
 	e := setup(t)

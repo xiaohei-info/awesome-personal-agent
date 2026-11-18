@@ -115,20 +115,23 @@ func Classes(src PackSource) map[string]string {
 func Runners(src PackSource) map[string]string {
 	out := map[string]string{}
 	for _, p := range src.List() {
-		for _, r := range p.EventRules {
-			for _, a := range r.Do {
+		collect := func(rule string, actions []packs.Action) {
+			for _, a := range actions {
+				if runner, _ := a["runner"].(string); a["action"] == "start_background_run" && runner != "" {
+					out[rule] = runner
+					return
+				}
 				prompt, _ := a["prompt"].(string)
 				if a["action"] == "call_agent" && p.Prompts[prompt].Meta.Agent == "task" {
-					out[key(p.Name, groupEvent, r.ID)] = "task"
+					out[rule] = "task"
 				}
 			}
 		}
-	}
-	for _, d := range defs(src) {
-		for _, a := range d.Do {
-			if r, _ := a["runner"].(string); a["action"] == "start_background_run" && r != "" {
-				out[d.Key] = r
-			}
+		for _, r := range p.EventRules {
+			collect(key(p.Name, groupEvent, r.ID), r.Do)
+		}
+		for _, r := range p.ClockRules {
+			collect(key(p.Name, groupClock, r.ID), r.Do)
 		}
 	}
 	return out

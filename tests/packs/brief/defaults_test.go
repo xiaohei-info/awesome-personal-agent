@@ -67,7 +67,6 @@ func (e *env) events(object, typ string) (out []eventlog.Entry) {
 	return
 }
 
-// agentReady 登记一个已确认的无头运行声明并设为默认 Agent。
 func (e *env) registerHost() {
 	e.t.Helper()
 	if _, err := e.do("executor.register", map[string]any{"harness": "hx", "headless": map[string]any{
@@ -76,6 +75,7 @@ func (e *env) registerHost() {
 	}
 }
 
+// agentReady 登记一个已确认的无头运行声明并设为默认 Agent。
 func (e *env) agentReady() {
 	e.registerHost()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {

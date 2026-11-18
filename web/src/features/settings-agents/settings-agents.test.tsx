@@ -212,7 +212,7 @@ describe("设置 › Agent", () => {
     await waitFor(() => expect(writes(s, "/grant")).toHaveLength(1));
     expect(writes(s, "/grant")[0]).toEqual({
       method: "PUT", url: "/v1/settings/agents/hermes/grant",
-      body: { actions: ["proposal.dismiss", "decision.answer"], scope: { all: true }, background: true },
+      body: { actions: ["proposal.dismiss", "decision.answer"], scope: { all: true }, grantee: { background: true } },
     });
   });
 
