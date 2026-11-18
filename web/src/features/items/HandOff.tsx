@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
 import { HANDOFF_RULE, HANDOFF_TAG } from "../../app/ids";
+import { AgentPick } from "../settings-agents/AgentPick";
 import { strings } from "./strings";
 import type { Item } from "./ItemsPage";
 
@@ -15,7 +16,7 @@ type Status = { text: string; to: string } | null;
  * 「交给 Agent 处理」：给任务事项加/去掉 agent-ok 标签（走 PATCH /items/{id}，服务端记 Event）。
  * 开着时用一句状态说明前提没满足的原因：规则没开、试运行、Agent 还不能在后台运行；读不到时不说。
  */
-export function HandOff({ item, onSave }: { item: Item; onSave: (tags: string[]) => void }) {
+export function HandOff({ item, onSave, onAgent }: { onAgent: (v: string) => void; item: Item; onSave: (tags: string[]) => void }) {
   const t = useT(strings);
   const { api } = useSession();
   const on = !!item.tags?.includes(HANDOFF_TAG);
@@ -37,6 +38,7 @@ export function HandOff({ item, onSave }: { item: Item; onSave: (tags: string[])
   return (
     <p className="panel">
       <label><input type="checkbox" checked={on} onChange={() => onSave(next)} /> {t.handoff}</label>
+      <AgentPick item main rule={HANDOFF_RULE} value={item.preferred_agent_id ?? ""} onChange={onAgent} />
       {status && <span className="sub"> {status.to ? <Link to={status.to}>{status.text} ›</Link> : status.text}</span>}
     </p>
   );

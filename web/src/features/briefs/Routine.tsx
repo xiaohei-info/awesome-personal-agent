@@ -7,6 +7,7 @@ import { EntityPick } from "../../app/names";
 import { PERM } from "../../app/ids";
 import { Pick } from "../../app/values";
 import { DAYS, browserZone, parseCron, toCron, type Days } from "./schedule";
+import { AgentPick, type AgentView } from "../settings-agents/AgentPick";
 import { strings } from "./strings";
 
 // 例行任务实例（routine 包，§13.5）：POST /v1/instances {pack:"routine", project?, params}；修改走 PATCH /v1/instances/{id} {project, params}
@@ -18,24 +19,30 @@ export const OUTPUTS = ["item", "item_and_material"] as const;
 type Mode = (typeof MODES)[number];
 type Output = (typeof OUTPUTS)[number];
 
-export interface Instance { id: string; pack: string; project?: string; params: { schedule?: string; projects?: string[]; mode?: string; title?: string; instruction?: string; access?: string; output?: string }; enabled: boolean }
+export interface Instance { id: string; pack: string; agent_ready?: boolean; agent_reason?: string; project?: string; params: { agent_id?: string; schedule?: string; projects?: string[]; mode?: string; title?: string; instruction?: string; access?: string; output?: string }; enabled: boolean }
 
 /** 到点运行时用哪个宿主、它的上限是多少（§13.6）：规则不指定宿主，所以取默认宿主；读不到时为 null，不提示。 */
-function useHostCap(): { host: string; cap: string } | null {
+function useHostCap(agent: string): { host: string; cap: string } | null {
   const { api } = useSession();
   const [v, setV] = useState<{ host: string; cap: string } | null>(null);
   useEffect(() => {
+    let active = true;
+    api.get<AgentView>("/agents?rule=routine%2Fclock_rules%2Fscheduled-routine&schedule=" + encodeURIComponent(agent)).then(view => {
+      if (active && view.selected) setV({host: view.selected.agent_name ?? "", cap: view.selected.permission_cap ?? "read"});
+    }, () => {});
+    if (agent) return () => { active = false; };
     Promise.all([
       api.get<{ default_harness?: string }>("/settings/policy"),
       api.get<{ permission_cap?: { default?: string; by_harness?: Record<string, string> } }>("/settings/access-limits"),
     ]).then(
       ([p, l]) => {
         const host = p.default_harness ?? "";
-        setV({ host, cap: l.permission_cap?.by_harness?.[host] ?? l.permission_cap?.default ?? "read" });
+        if (active) setV(previous => previous ?? { host, cap: l.permission_cap?.by_harness?.[host] ?? l.permission_cap?.default ?? "read" });
       },
-      () => setV(null),
+      () => {},
     );
-  }, [api]);
+    return () => {active = false;};
+  }, [api, agent]);
   return v;
 }
 
@@ -43,7 +50,8 @@ function useHostCap(): { host: string; cap: string } | null {
 export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDone: (i: Instance) => void; onCancel?: () => void }) {
   const t = useT(strings);
   const { api } = useSession();
-  const host = useHostCap();
+  const [agent,setAgent] = useState(edit?.params.agent_id ?? "");
+  const host = useHostCap(agent);
   const p = edit?.params ?? {};
   const cron = p.schedule ? parseCron(p.schedule) : null;
   const [mode, setMode] = useState<Mode>((p.mode as Mode) ?? "create_item");
@@ -69,6 +77,7 @@ export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDon
         schedule: edit?.params.schedule && !timed ? edit.params.schedule : toCron(days, time, cron?.zone ?? browserZone()),
         mode,
         ...(title.trim() ? { title: title.trim() } : {}),
+        ...(run && agent ? {agent_id: agent} : {}),
         ...(run ? { instruction: instruction.trim(), access, output } : {}),
       };
       if (edit) return onDone(await api.patch<Instance>(`/instances/${encodeURIComponent(edit.id)}`, { project, params }));
@@ -104,6 +113,7 @@ export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDon
       <label>{t.routineProject}<EntityPick kind="project" value={project} onChange={setProject} empty={t.noProject} /></label>
       {run && (
         <>
+          <AgentPick value={agent} onChange={setAgent} rule="routine/clock_rules/scheduled-routine" />
           <label>{t.access}<Pick k="perm" value={access} onChange={setAccess} ids={[...PERM]} /></label>
           {host && !host.host && <p className="sub">{t.noHost} <Link to="/settings/agents">{t.setHost}</Link></p>}
           {over && <p className="sub">{t.overCap} <Link to="/settings/agents">{t.setHost}</Link></p>}

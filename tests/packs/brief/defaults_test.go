@@ -68,17 +68,69 @@ func (e *env) events(object, typ string) (out []eventlog.Entry) {
 }
 
 // agentReady 登记一个已确认的无头运行声明并设为默认 Agent。
-func (e *env) agentReady() {
+func (e *env) registerHost() {
 	e.t.Helper()
 	if _, err := e.do("executor.register", map[string]any{"harness": "hx", "headless": map[string]any{
 		"command": []string{"true", "{prompt}"}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string][]string{"read": {}}}}); err != nil {
 		e.t.Fatal(err)
 	}
+}
+
+func (e *env) agentReady() {
+	e.registerHost()
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.DefaultHarness = "hx"; return nil })
 		return err
 	}); err != nil {
 		e.t.Fatal(err)
+	}
+}
+
+func TestBriefScheduleSelectsAgentWithoutDefault(t *testing.T) {
+	e := newEnv(t, "")
+	eng, _ := e.gated()
+	e.registerHost()
+	result, err := e.do("agent.configure", executors.Card{Name: "日报", Harness: "hx", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var card executors.Card
+	if err := json.Unmarshal(result.Value, &card); err != nil {
+		t.Fatal(err)
+	}
+	instance, err := e.do("instance.create", map[string]any{"pack": "brief", "params": map[string]string{"schedule": "24h", "agent_id": card.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.fire(eng, t0.Add(24*time.Hour))
+	var ref struct{ ID string }
+	if err := json.Unmarshal(instance.Value, &ref); err != nil {
+		t.Fatal(err)
+	}
+	e.now = t0.Add(25 * time.Hour)
+	if _, err := e.do("instance.run", map[string]string{"id": ref.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Drain(bg); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.View(bg, func(tx *store.Tx) error {
+		runs, err := proc.List(tx)
+		if err != nil {
+			return err
+		}
+		if len(runs) != 2 {
+			t.Fatalf("expected scheduled and immediate runs, got %d", len(runs))
+		}
+		for _, record := range runs {
+			run := record.Run
+			if run.AgentSnapshot == nil || run.AgentID != card.ID || run.SelectionSource != "schedule" || run.PermissionCap != "read" {
+				t.Fatalf("unexpected agent snapshot: %+v", run.AgentSnapshot)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

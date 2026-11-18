@@ -25,7 +25,7 @@ func newStub(t *testing.T) *modelstub.Stub {
 // 升级后行数不减、Event 序号连续且载荷不变、旧数据经新接口照常可读、旧二进制拒绝打开、升级前快照恢复后与升级前一致、
 // 迁移中途失败整体回滚。只用合成夹具与旧版本二进制，模型端点是替身；Web 步骤用等价的 HTTP 调用。
 func TestSchema8Upgrade(t *testing.T) {
-	r := &run{lab: newLab(t), v: 7, latest: 8}
+	r := &run{lab: newLab(t), v: 7, latest: 9}
 	r.stub = newStub(t)
 
 	r.step(t, "ACT-S8-00 结构版本 7 夹具与旧二进制", func(t *testing.T) {
@@ -38,8 +38,8 @@ func TestSchema8Upgrade(t *testing.T) {
 
 	r.step(t, "ACT-S8-01 主干二进制打开夹具副本完成升级并留快照", func(t *testing.T) {
 		r.upg04(t) // 启动、恰一份 pre-upgrade 快照且 backup verify 通过、apa version 与 /v1/version 都是 latest
-		if r.latest != 8 {
-			t.Fatalf("主干账本结构版本 = %d，期望 8", r.latest)
+		if r.latest != 9 {
+			t.Fatalf("主干账本结构版本 = %d，期望 9", r.latest)
 		}
 		r.srv.stop()
 	})

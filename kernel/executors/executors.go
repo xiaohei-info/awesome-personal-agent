@@ -134,12 +134,13 @@ func (m *MainSession) Initial() string {
 
 // Declaration 是 `apa declare` 提交或主机配置文件登记的整份声明。
 type Declaration struct {
-	Harness     string       `json:"harness"`
-	Name        *Label       `json:"name,omitempty"` // 界面称呼这个 Agent 的名字（附录 A.2）
-	Headless    *Headless    `json:"headless,omitempty"`
-	MainSession *MainSession `json:"main_session,omitempty"`
-	Executors   []Executor   `json:"executors,omitempty"`
-	Selfcheck   *Selfcheck   `json:"selfcheck,omitempty"`
+	InstanceOptions *InstanceOptions `json:"instance_options,omitempty"`
+	Harness         string           `json:"harness"`
+	Name            *Label           `json:"name,omitempty"` // 界面称呼这个 Agent 的名字（附录 A.2）
+	Headless        *Headless        `json:"headless,omitempty"`
+	MainSession     *MainSession     `json:"main_session,omitempty"`
+	Executors       []Executor       `json:"executors,omitempty"`
+	Selfcheck       *Selfcheck       `json:"selfcheck,omitempty"`
 }
 
 // Selfcheck 是插件的自检命令（A.1、A.2）：只作数据保存，由 `apa doctor` 在 APA 主机上执行，内核不执行。
@@ -178,6 +179,8 @@ CREATE TABLE executors_declaration (
 	SQL: `ALTER TABLE executors_entry ADD COLUMN label TEXT NOT NULL DEFAULT '';
 ALTER TABLE executors_entry ADD COLUMN handle TEXT NOT NULL DEFAULT '';
 ALTER TABLE executors_entry ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;`,
+}, {
+	Version: 3, Ledger: 9, Name: "agent-cards", SQL: `CREATE TABLE executors_agent (id TEXT PRIMARY KEY, harness TEXT NOT NULL, name TEXT NOT NULL, options TEXT NOT NULL, enabled INTEGER NOT NULL, rev INTEGER NOT NULL) WITHOUT ROWID;`,
 }}}
 
 func invalid(format string, a ...any) error {
@@ -211,10 +214,16 @@ func ParseDeclaration(data []byte) (Declaration, error) {
 	if err := decode(data, &d); err != nil {
 		return Declaration{}, err
 	}
+	if o := d.InstanceOptions; o != nil && len(o.Fields)+len(o.Args)+len(o.Env)+len(o.Cwd) == 0 {
+		d.InstanceOptions = nil
+	}
 	return d, d.validate()
 }
 
 func (d Declaration) validate() error {
+	if err := d.InstanceOptions.validate(); err != nil {
+		return err
+	}
 	if d.Harness == "" || strings.ContainsAny(d.Harness, " \t\r\n") {
 		return invalid("harness is required and must not contain whitespace")
 	}
@@ -543,6 +552,17 @@ func putEntry(tx *store.Tx, e Executor, harness string) error {
 // activate 让 d 生效：声明里的执行者并入名录（新增或更新），不删除该 harness 已登记的其他条目（§6.17）。
 // 调用方先做冲突检查。
 func activate(tx *store.Tx, d Declaration) error {
+	cards, err := storedCards(tx, d.Harness)
+	if err != nil {
+		return err
+	}
+	for _, card := range cards {
+		if card.Enabled {
+			if err := d.InstanceOptions.check(card.Values); err != nil {
+				return conflict("%s: %v", card.Name, err)
+			}
+		}
+	}
 	for _, e := range d.Executors {
 		if err := putEntry(tx, e, d.Harness); err != nil {
 			return err

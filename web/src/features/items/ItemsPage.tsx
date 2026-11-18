@@ -22,6 +22,7 @@ import { linkTitle, readPrefill, registrable, withLink, type Vault } from "./pre
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
 export interface Item {
+  preferred_agent_id?: string;
   id: string;
   phase: string;
   version: number;
@@ -253,7 +254,7 @@ function ItemDetail() {
         <p><button type="button" onClick={() => setEditing(true)}>{t.edit}</button></p>
       )}
       {item.kind === "task" && !["done", "dropped"].includes(item.phase) && (
-        <HandOff key={"h" + item.version} item={item} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
+        <HandOff key={"h" + item.version} item={item} onAgent={id => act(() => api.patch(path, { preferred_agent_id:id, reason:t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
       )}
       <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
       <DeadlineForm key={"d" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { deadline: v }, ifMatch))} />

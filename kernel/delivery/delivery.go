@@ -26,6 +26,13 @@ const (
 )
 
 // ChannelRoute 是渠道 ext 的路由；渠道由 ext 密钥确定（§10.3）。
+func WakeRoute(agentID string) string {
+	if agentID == "" {
+		return RouteWake
+	}
+	return RouteWake + ":" + agentID
+}
+
 func ChannelRoute(name string) string { return "channel:" + name }
 
 // AllVersions 传给 Supersede 表示作废该事项的所有未终结投递。

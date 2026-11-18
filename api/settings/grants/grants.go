@@ -155,7 +155,11 @@ func mine(a *auth.Auth, st *store.Store) core.Handler {
 		err := st.View(r.Context(), func(tx *store.Tx) error {
 			now := clock.Now()
 			if run {
-				gs, err := policy.AgentGrants(tx, p.Caller.RunHarness, now)
+				key := p.Caller.RunHarness
+				if p.Caller.RunAgentID != "" {
+					key = p.Caller.RunAgentID
+				}
+				gs, err := policy.AgentIdentityGrants(tx, key, now, p.Caller.RunAgentID != "")
 				for _, g := range gs {
 					if g.Grantee.Background {
 						out = append(out, g)
@@ -170,7 +174,11 @@ func mine(a *auth.Auth, st *store.Store) core.Handler {
 			if out, err = policy.ActiveGrants(tx, a, cred.ID, now); err != nil || cred.Harness == "" {
 				return err
 			}
-			gs, err := policy.AgentGrants(tx, cred.Harness, now)
+			key := cred.Harness
+			if cred.AgentID != "" {
+				key = cred.AgentID
+			}
+			gs, err := policy.AgentIdentityGrants(tx, key, now, cred.AgentID != "")
 			out = append(out, gs...)
 			return err
 		})

@@ -14,6 +14,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/judgment/spotcheck"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
@@ -81,6 +82,7 @@ const modeCreateItem = "create_item"
 
 // instParams 是实例参数里内核认的三个：mode、instruction（本人写的任务说明）、access（权限档位）。其余参数只作资料。
 type instParams struct {
+	AgentID     string `json:"agent_id"`
 	Mode        string `json:"mode"`
 	Instruction string `json:"instruction"`
 	Access      string `json:"access"`
@@ -248,7 +250,8 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 		}
 	}
 	ip := instanceParams(c)
-	t := Task{Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
+	harness, _ := c.Action["harness"].(string)
+	t := Task{Selection: executors.Selection{Rule: c.Rule, Schedule: ip.AgentID}, Harness: harness, Pack: pack, Template: tmpl, Title: c.Rule, Materials: mats, Depth: depth, Access: ip.Access, Instruction: ip.Instruction, Messages: msgs, Window: win, Files: raw,
 		Digest: digest, Actor: domain.Actor{Type: domain.ActorAgent, Principal: "rule:" + c.Rule, Via: domain.ViaRule}}
 	switch {
 	case c.Bound:
@@ -259,6 +262,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 		}
 		t.Target = c.Item.ID
 	case c.Item != nil:
+		t.Selection.Item = c.Item.PreferredAgentID
 		t.Title, t.Project, t.From = c.Item.Title, c.Item.Project, c.Item.ID
 	}
 	_, err = s.Launch(ctx, t) // 没拉起时事项已转 needs_input 并带原因，不是规则失败

@@ -20,8 +20,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	kp "github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -149,28 +151,84 @@ func (a *api) packs(w http.ResponseWriter, _ *http.Request, _ *core.Principal) e
 
 // ---- 实例 ----
 
-func (a *api) instance(r *http.Request, id string) (in instances.Instance, err error) {
-	err = a.st.View(r.Context(), func(tx *store.Tx) (e error) { in, e = instances.Get(tx, id); return })
-	return
+type instanceView struct {
+	instances.Instance
+	Ready  *bool  `json:"agent_ready,omitempty"`
+	Reason string `json:"agent_reason,omitempty"`
 }
 
-// listInstances 另带 agent_ready：Agent 能否后台运行（§13.6）。为假时周期简报到点跳过（§7.3），Web 据它显示等待状态。
-func (a *api) listInstances(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
-	var l []instances.Instance
-	var ready bool
-	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) {
-		if l, err = instances.List(tx); err != nil {
+func (a *api) preview(tx *store.Tx, in instances.Instance) (instanceView, error) {
+	v := instanceView{Instance: in}
+	var params struct {
+		Agent string `json:"agent_id"`
+		Mode  string
+	}
+	if err := json.Unmarshal(in.Params, &params); err != nil {
+		return v, err
+	}
+	if params.Mode == "create_item" {
+		return v, nil
+	}
+	for _, pack := range a.ps.List() {
+		if pack.Name != in.Pack {
+			continue
+		}
+		for _, rule := range pack.ClockRules {
+			if !strings.Contains(rule.Schedule, "{instance.") {
+				continue
+			}
+			for _, action := range rule.Do {
+				prompt, _ := action["prompt"].(string)
+				if action["action"] != "call_agent" || pack.Prompts[prompt].Meta.Agent != "task" {
+					continue
+				}
+				harness, _ := action["harness"].(string)
+				_, pol, err := policy.Current(tx)
+				if err != nil {
+					return v, err
+				}
+				selected, err := executors.Resolve(tx, pol, executors.Selection{Schedule: params.Agent, Rule: pack.Name + "/clock_rules/" + rule.ID, Harness: harness})
+				ready := selected.Reason == ""
+				v.Ready = &ready
+				v.Reason = selected.Reason
+				return v, err
+			}
+		}
+	}
+	return v, nil
+}
+func (a *api) instance(r *http.Request, id string) (out instanceView, err error) {
+	err = a.st.View(r.Context(), func(tx *store.Tx) error {
+		in, err := instances.Get(tx, id)
+		if err != nil {
 			return err
+		}
+		out, err = a.preview(tx, in)
+		return err
+	})
+	return
+}
+func (a *api) listInstances(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
+	out := []instanceView{}
+	var ready bool
+	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
+		list, err := instances.List(tx)
+		if err != nil {
+			return err
+		}
+		for _, in := range list {
+			v, err := a.preview(tx, in)
+			if err != nil {
+				return err
+			}
+			out = append(out, v)
 		}
 		ready, err = task.AgentReady(tx)
 		return err
 	}); err != nil {
 		return err
 	}
-	if l == nil {
-		l = []instances.Instance{}
-	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"instances": l, "agent_ready": ready})
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"instances": out, "agent_ready": ready})
 }
 
 // runInstance 立即跑一次（instance.run）：到期时刻取当前时刻，由规则执行照常处理。

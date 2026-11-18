@@ -95,6 +95,8 @@ const (
 	EvPolicyChanged                  = "policy.changed"
 	EvGrantIssued                    = "grant.issued"
 	EvGrantRevoked                   = "grant.revoked"
+	EvAgentConfigured                = "agent.configured"
+	EvAgentQueued                    = "agent.queued"
 	EvRunStarted                     = "run.started"
 	EvRunFinished                    = "run.finished"
 	EvSourceFailed                   = "source.failed"
@@ -117,7 +119,7 @@ var RegisteredEventTypes = []string{
 	EvMaterialRevised, EvMaterialRevisionProposed, EvGuidelineActivated,
 	EvProjectUpdated, EvProjectAllowedExecutorsChanged,
 	EvRuleModeChanged, EvAllowlistChanged, EvPolicyChanged, EvGrantIssued, EvGrantRevoked,
-	EvRunStarted, EvRunFinished, EvSourceFailed, EvHealthAlert,
+	EvAgentConfigured, EvAgentQueued, EvRunStarted, EvRunFinished, EvSourceFailed, EvHealthAlert,
 	EvAuthLogin, EvAuthLoginLocked, EvAuthPasswordChanged, EvAuthSessionRevoked,
 	EvItemProgressAdded, EvProposalAttached, EvImportCompleted,
 }

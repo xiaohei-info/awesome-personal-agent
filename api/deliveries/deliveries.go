@@ -80,7 +80,7 @@ func route(p *core.Principal) (string, error) {
 		}
 		return delivery.ChannelRoute(name), nil
 	case auth.Worker, auth.Delegate:
-		return delivery.RouteWake, nil
+		return delivery.WakeRoute(p.Caller.CredentialAgentID), nil
 	}
 	return "", denied("credential kind cannot use the delivery protocol", "use a channel ext key or a gateway plugin token")
 }

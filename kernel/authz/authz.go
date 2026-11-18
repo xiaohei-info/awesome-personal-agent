@@ -116,7 +116,9 @@ type Request struct {
 	// agent 式授权单的匹配只用内核记录的值（§14.5）：CredentialHarness 是凭据的 harness 列，RunHarness 是运行记录的 harness；
 	// 都不是调用方自报的 Actor.Harness。RunHarness 为空的运行级调用（唤醒租约期间被降级的 delegate）不能用授权单。
 	CredentialHarness string
+	CredentialAgentID string
 	RunHarness        string
+	RunAgentID        string
 	// TriggerTrusted：触发这次运行的内容可信（§14.5 后台运行使用授权单）；只对运行凭据有意义，由管线据账本填。
 	TriggerTrusted bool
 }
@@ -302,15 +304,19 @@ func grantMismatch(p policy.Policy, r Request) string {
 	switch {
 	case g == nil:
 		return "grant " + r.GrantID + " does not exist"
+	case g.Grantee.Instance && (run && g.Grantee.Agent != r.RunAgentID || !run && g.Grantee.Agent != r.CredentialAgentID):
+		return "grant was issued to another Agent instance"
+	case !g.Grantee.Instance && (r.RunAgentID != "" || r.CredentialAgentID != "" && g.Grantee.Agent != ""):
+		return "grant was not issued to this Agent instance"
 	case g.Grantee.Agent == "" && run:
 		return "grant_not_for_background: the grant was issued to a token, not to this Agent's background runs"
 	case g.Grantee.Agent == "" && g.Grantee.Credential != r.Credential:
 		return "grant was issued to another credential"
 	case g.Grantee.Agent == "" && g.Grantee.Harness != "" && g.Grantee.Harness != r.Actor.Harness:
 		return "grant is limited to another harness"
-	case g.Grantee.Agent != "" && !run && g.Grantee.Agent != r.CredentialHarness:
+	case !g.Grantee.Instance && g.Grantee.Agent != "" && !run && g.Grantee.Agent != r.CredentialHarness:
 		return "grant was issued to another Agent"
-	case g.Grantee.Agent != "" && run && g.Grantee.Agent != r.RunHarness:
+	case !g.Grantee.Instance && g.Grantee.Agent != "" && run && g.Grantee.Agent != r.RunHarness:
 		return "grant was issued to another Agent"
 	case run && !g.Grantee.Background:
 		return "grant_not_for_background: the owner did not allow this grant in background runs"

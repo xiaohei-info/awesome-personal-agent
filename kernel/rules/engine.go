@@ -323,7 +323,7 @@ func (e *Engine) instance(ctx context.Context, rs []ruleDef, en eventlog.Entry) 
 		t := &trigger{entry: en, instance: &f, object: f.ID, depth: en.Event.ChainDepth,
 			ref: fmt.Sprintf("i%s:%d", f.ID, f.Due.UnixNano())}
 		if e.o.Gate != nil {
-			skip, err := e.o.Gate(ctx, d.Pack, d.Do, f.Params)
+			skip, err := e.o.Gate(ctx, d.Key, d.Do, f.Params)
 			if err != nil {
 				return err
 			}

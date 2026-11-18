@@ -375,6 +375,8 @@ timeout: 30m
 
 ## C.13 示例：简报包
 
+简报、复盘和例行安排的实例参数支持 `agent_id`。省略时沿用规则或角色选择。例行安排的 `create_item` 模式只创建事项。
+
 ```yaml
 name: brief
 version: 1.0.0

@@ -107,7 +107,7 @@ func (s *Service) Open(tx *store.Tx, runID string) (domain.Delivery, error) {
 		return domain.Delivery{}, err
 	}
 	d, _, err := s.o.Delivery.Create(tx, domain.Delivery{ID: DeliveryID(runID), Item: r.Target, Run: runID,
-		Class: domain.DeliveryWake, Route: delivery.RouteWake, Version: delivery.AllVersions,
+		Class: domain.DeliveryWake, Route: delivery.WakeRoute(r.InstanceID()), Version: delivery.AllVersions,
 		Content: domain.DeliveryContent{Title: "wake " + runID}})
 	return d, err
 }

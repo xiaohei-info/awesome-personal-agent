@@ -377,6 +377,30 @@ func TestEnv(t *testing.T) {
 }
 
 // 唤醒运行的 id 换运行凭据（§13.6）：只认 worker、delegate token，只限未结束的唤醒运行，到期或再次换取后旧凭据失效，不留明文。
+func TestWakeCredentialBoundToOneAgent(t *testing.T) {
+	e := setup(t)
+	target := e.newItem(t, map[string]any{})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		run := domain.Run{AgentSnapshot: &domain.AgentSnapshot{AgentID: "agent_first", ConfigRev: 1}, Category: domain.RunBackground, Launch: LaunchWake, Harness: "host", Target: target, TimeoutSec: 60}
+		rec, err := proc.Enqueue(tx, proc.Request{Run: run, External: true}, now)
+		if err != nil {
+			return err
+		}
+		caller := command.Caller{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "gateway", Via: domain.ViaCLI, Harness: "host"}, Kind: auth.Worker}
+		for _, id := range []string{"", "agent_other"} {
+			caller.CredentialAgentID = id
+			if _, _, err := Exchange(tx, caller, rec.ID, now); exitOf(err) != domain.ExitPermissionDenied {
+				t.Fatalf("binding %q: %v", id, err)
+			}
+		}
+		caller.CredentialAgentID = run.AgentID
+		_, _, err = Exchange(tx, caller, rec.ID, now)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExchangeForWakeRun(t *testing.T) {
 	e := setup(t)
 	target := e.newItem(t, map[string]any{})

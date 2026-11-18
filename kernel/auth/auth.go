@@ -48,10 +48,11 @@ var Module = store.Module{Name: "auth", Migrations: []store.Migration{{
 	// 账本结构版本 6：token 所属的 harness（§14.2）。已有行为空，由本人在 Web 认领一次。
 	Version: 2, Ledger: 6, Name: "ledger-v6-credential-harness",
 	SQL: `ALTER TABLE auth_credential ADD COLUMN harness TEXT NOT NULL DEFAULT '';`,
-}}}
+}, {Version: 3, Ledger: 9, Name: "credential-agent-instance", SQL: `ALTER TABLE auth_credential ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''; CREATE INDEX auth_credential_agent ON auth_credential(agent_id);`}}}
 
 // Credential 是凭据登记，不含明文也不对外暴露哈希。
 type Credential struct {
+	AgentID   string    `json:"agent_id,omitempty"`
 	ID        string    `json:"id"`
 	Kind      Kind      `json:"kind"`
 	Label     string    `json:"label,omitempty"`
@@ -70,6 +71,7 @@ func IsExportExt(kind Kind, principal string) bool {
 
 // Spec 是签发参数。
 type Spec struct {
+	AgentID  string
 	Kind     Kind
 	Label    string
 	Executor string // 只对 worker 有意义（回执据此校验）；delegate 无需绑定
@@ -113,6 +115,9 @@ func (s Spec) validate() error {
 	}
 	if s.Executor != "" && s.Kind != Worker {
 		return invalid("executor binding is only valid for worker")
+	}
+	if s.AgentID != "" && s.Harness == "" {
+		return invalid("instance binding requires its harness")
 	}
 	if s.Harness != "" {
 		if s.Kind != Worker && s.Kind != Delegate {
@@ -158,21 +163,21 @@ func (a *Auth) Issue(tx *store.Tx, s Spec) (Credential, string, error) {
 		return Credential{}, "", err
 	}
 	secret := prefix[s.Kind] + body
-	c := Credential{ID: "cred_" + id, Kind: s.Kind, Label: s.Label, Executor: s.Executor, Scope: s.Scope, Harness: s.Harness, CreatedAt: a.now()}
-	if _, err := tx.Exec(`INSERT INTO auth_credential (id, kind, hash, label, executor, scope, harness, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, string(c.Kind), hashOf(secret), c.Label, c.Executor, c.Scope, c.Harness, c.CreatedAt.UnixNano()); err != nil {
+	c := Credential{ID: "cred_" + id, Kind: s.Kind, Label: s.Label, Executor: s.Executor, Scope: s.Scope, Harness: s.Harness, AgentID: s.AgentID, CreatedAt: a.now()}
+	if _, err := tx.Exec(`INSERT INTO auth_credential (id, kind, hash, label, executor, scope, harness, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, string(c.Kind), hashOf(secret), c.Label, c.Executor, c.Scope, c.Harness, c.AgentID, c.CreatedAt.UnixNano()); err != nil {
 		return Credential{}, "", err
 	}
 	return c, secret, nil
 }
 
-const cols = "id, kind, label, executor, scope, harness, created_at, expires_at, revoked_at"
+const cols = "id, kind, label, executor, scope, harness,agent_id, created_at, expires_at, revoked_at"
 
 func scan(r *store.Rows) (Credential, error) {
 	var c Credential
 	var kind string
 	var created, expires, revoked int64
-	if err := r.Scan(&c.ID, &kind, &c.Label, &c.Executor, &c.Scope, &c.Harness, &created, &expires, &revoked); err != nil {
+	if err := r.Scan(&c.ID, &kind, &c.Label, &c.Executor, &c.Scope, &c.Harness, &c.AgentID, &created, &expires, &revoked); err != nil {
 		return c, err
 	}
 	c.Kind, c.CreatedAt = Kind(kind), time.Unix(0, created)
@@ -244,7 +249,7 @@ func (a *Auth) Rotate(tx *store.Tx, id string, grace time.Duration) (Credential,
 	if grace < 0 {
 		return Credential{}, "", invalid("grace must not be negative")
 	}
-	c, secret, err := a.Issue(tx, Spec{Kind: old.Kind, Label: old.Label, Executor: old.Executor, Scope: old.Scope, Harness: old.Harness})
+	c, secret, err := a.Issue(tx, Spec{Kind: old.Kind, Label: old.Label, Executor: old.Executor, Scope: old.Scope, Harness: old.Harness, AgentID: old.AgentID})
 	if err != nil {
 		return Credential{}, "", err
 	}

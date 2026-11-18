@@ -136,17 +136,6 @@ func invalid(why string) error {
 	return domain.NewError(domain.CodeInvalidRequest, why, "fix the rule or the prompt template")
 }
 
-var tierRank = map[string]int{policy.PermRead: 1, policy.PermEdit: 2, policy.PermFull: 3}
-
-// withinCap：档位不超过本人在 Web 按 harness 设的上限，未按 harness 设置的用默认上限（§13.6）。
-func withinCap(pol policy.Policy, harness, tier string) bool {
-	limit := pol.PermissionCap.ByHarness[harness]
-	if limit == "" {
-		limit = pol.PermissionCap.Default
-	}
-	return tierRank[tier] != 0 && tierRank[tier] <= tierRank[limit]
-}
-
 func str(a map[string]any, k string) string {
 	s, _ := a[k].(string)
 	return s
@@ -188,15 +177,13 @@ func (s *Service) parse(c rules.Call) (spec, error) {
 	if sp.access == "" {
 		sp.access = policy.PermRead
 	}
-	if tierRank[sp.access] == 0 {
+	if sp.access != policy.PermRead && sp.access != policy.PermEdit && sp.access != policy.PermFull {
 		return sp, invalid("access must be read, edit or full")
 	}
 	if sp.cwd == "" {
 		sp.cwd = pr.Meta.Cwd
 	}
-	if sp.cwd == "" {
-		sp.cwd = "run_dir"
-	}
+
 	if pr.Meta.Timeout != "" {
 		d, err := time.ParseDuration(pr.Meta.Timeout)
 		if err != nil || d <= 0 {
@@ -209,6 +196,7 @@ func (s *Service) parse(c rules.Call) (spec, error) {
 
 // facts 是拉起前一次性读出的账本事实。
 type facts struct {
+	selected executors.Selected
 	pv       int
 	pol      policy.Policy
 	mode     string
@@ -252,21 +240,22 @@ func (s *Service) read(ctx context.Context, c rules.Call, sp spec) (f facts, err
 		if f.executor, err = executors.Ref(tx, sp.executor); err != nil {
 			return err
 		}
-		if sp.harness == "" {
-			sp.harness = f.pol.DefaultHarness
+		sel := executors.Selection{Item: f.item.PreferredAgentID, Rule: c.Rule, Harness: sp.harness, Runner: sp.runner}
+		if c.Instance != nil {
+			var params struct {
+				AgentID string `json:"agent_id"`
+			}
+			if err := json.Unmarshal(c.Instance.Params, &params); err != nil {
+				return err
+			}
+			sel.Schedule = params.AgentID
 		}
-		if sp.harness == "" {
-			return nil
-		}
-		recs, err := executors.Records(tx, executors.StateActive)
+		f.selected, err = executors.Resolve(tx, f.pol, sel)
 		if err != nil {
 			return err
 		}
-		for _, r := range recs {
-			if r.Harness == sp.harness && r.Declaration.Headless != nil {
-				f.rec, f.declared = r, true
-			}
-		}
+		f.rec = f.selected.Record
+		f.declared = f.rec.Declaration.Headless != nil
 		return nil
 	})
 	return f, err
@@ -324,10 +313,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	if f.depth > s.o.MaxChainDepth { // 与命令管线同一口径：超过阈值只记录不派发，健康类投递由 kernel/health 据该事件统一产出
 		return chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, f.item.ID, f.depth, s.o.MaxChainDepth)
 	}
-	harness := sp.harness
-	if harness == "" {
-		harness = f.pol.DefaultHarness
-	}
+	harness := f.selected.Card.Harness
 	headless, ms := executors.Headless{}, executors.MainSession{}
 	if f.declared {
 		headless = *f.rec.Declaration.Headless
@@ -335,26 +321,33 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 			ms = *m
 		}
 	}
+	if sp.cwd == "" {
+		sp.cwd = f.selected.Card.Values["cwd"]
+	}
 	workDir, noCheckout := projects.WorkDir(sp.cwd, f.project, s.o.Host)
 	var how launchChoice
 	if sp.runner == "main_session" {
-		how = launchOf(f.pol, c.Rule, harness, &ms)
+		launchPolicy := f.pol
+		if value := f.pol.MainSessionLaunch.ByAgent[f.selected.Card.ID]; value != "" || f.selected.Card.Rev > 0 {
+			launchPolicy.MainSessionLaunch.ByHarness = map[string]string{harness: value}
+			if ms.CanWake() {
+				ms.Wake = true
+			}
+			ms.Launch = ""
+		}
+		how = launchOf(launchPolicy, c.Rule, harness, &ms)
 	}
 	wakes := how.launch == policy.LaunchWake
 	var reason string
 	switch {
 	case f.mode != rules.ModeAuto:
 		reason = "规则已不是 auto"
-	case harness == "":
-		reason = "规则没有指定 harness，Web 设置里也没有默认 harness"
-	case !f.declared:
-		reason = "没有已确认的无头运行声明：" + harness
+	case f.selected.AccessReason(sp.access) != "":
+		reason = f.selected.AccessReason(sp.access)
+	case f.selected.Card.Rev > 0 && (wakes || how.fallback):
+		reason = "这张卡尚未绑定已有对话"
 	case wakes && s.o.Wake == nil:
 		reason = "选了在对话里接着做（唤醒 " + harness + "），但内核没有接入唤醒"
-	case headless.Access[sp.access] == nil:
-		reason = "无头运行声明未提供权限档位：" + sp.access
-	case !withinCap(f.pol, harness, sp.access):
-		reason = "权限档位 " + sp.access + " 超过 Web 设置的上限"
 	case sp.runner == "task" && (f.project != nil && !f.project.ExecutorAllowed(f.executor, s.o.Owner)):
 		reason = "执行者 " + sp.executor + " 不在项目允许的执行者名单内"
 	case noCheckout != "":
@@ -453,7 +446,7 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 		return err
 	}
 	basis := &domain.Basis{PolicyVersion: f.pv, RuleID: c.Rule}
-	run := domain.Run{ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
+	run := domain.Run{AgentSnapshot: &f.selected.Snapshot, ID: runID, Category: domain.RunBackground, Runner: sp.runner, Launch: "headless", Target: target,
 		Harness: harness, Access: sp.access, Basis: basis, ChainDepth: f.depth, TimeoutSec: int(sp.timeout / time.Second)}
 	if how.launch == policy.LaunchWake { // 进程在真实主会话所在处：不写运行目录与命令，凭据由网关插件换取（§13.6）
 		run.Launch = runidentity.LaunchWake
@@ -475,6 +468,7 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 		dir = workDir
 	}
 	argv := expand(hl.Command, "{prompt}", prompt, "{run_dir}", runDir)
+	argv = append(argv, f.selected.Args...)
 	argv = append(argv, hl.Output...)
 	if sp.runner == "main_session" {
 		argv = append(argv, ms.Args...)
@@ -484,13 +478,16 @@ func (s *Service) launch(ctx context.Context, c rules.Call, f facts, sp spec, ha
 		run.SessionID = runID
 		argv = append(argv, expand(hl.Session.Assign, "{session_id}", run.SessionID)...)
 	}
-	return s.enqueue(ctx, c, f, how, proc.Request{Run: run, Spec: proc.Spec{Command: argv, Dir: dir, RunDir: runDir}}, nil)
+	return s.enqueue(ctx, c, f, how, proc.Request{Run: run, Spec: proc.Spec{OptionEnv: f.selected.Env, Command: argv, Dir: dir, RunDir: runDir}}, nil)
 }
 
 // enqueue 在一个事务里写 Run、运行关联与 launched 审计记录（与 also 一起提交），再交调度器。
 func (s *Service) enqueue(ctx context.Context, c rules.Call, f facts, how launchChoice, req proc.Request, also func(*store.Tx) error) error {
 	run := req.Run
 	err := s.o.Store.Update(ctx, func(tx *store.Tx) error {
+		if err := executors.CheckRun(tx, run); err != nil {
+			return err
+		}
 		if _, err := proc.Enqueue(tx, req, s.o.Now()); err != nil {
 			return err
 		}
@@ -502,7 +499,7 @@ func (s *Service) enqueue(ctx context.Context, c rules.Call, f facts, how launch
 				return err
 			}
 		}
-		p := map[string]any{"run_id": run.ID, "rule": c.Rule, "runner": run.Runner, "launch": run.Launch,
+		p := map[string]any{"agent": run.AgentSnapshot, "run_id": run.ID, "rule": c.Rule, "runner": run.Runner, "launch": run.Launch,
 			"harness": run.Harness, "access": run.Access, "target": run.Target}
 		reason := "rule " + c.Rule + ": background run"
 		if how.from != "" {
