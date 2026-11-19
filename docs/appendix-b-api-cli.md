@@ -81,7 +81,7 @@
 | `apa ext list` | 列出仓库提供的 ext | 无 | |
 | `apa ext run <名>` | 本机启动 ext | ext 密钥（由 ext 读取） | |
 | `apa ext check` | 协议一致性自测 | 无 | |
-| `apa connection list [--direction channel\|output]` | 列出连接（内置渠道与输出）：id、方向、类型、名字、启停、状态、问题代码与最近成功、失败的时间；不含配置值与凭据（主文档 §7.6）。就是 `GET /connections` | observer | |
+| `apa connection list [--direction channel\|output]` | 列出连接（内置渠道；输出方向目前没有内置类型）：id、方向、类型、名字、启停、状态、问题代码与最近成功、失败的时间；不含配置值与凭据（主文档 §7.6）。就是 `GET /connections` | observer | |
 | **自动化** | | | |
 | `apa instance add/list/enable/disable` | 能力包实例 | delegate（`list` 为 observer） | |
 | `apa pack list` | 列出已加载能力包 | observer | |
@@ -511,5 +511,5 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | `GET /connections` 的权限 | 只有 Web 登录 | observer 及以上的 token 读裁剪后的字段（不含 `config`、`secrets`、`detail`）；新增 `apa connection list` | 只增：Web 读到的内容不变；写命令仍只在 Web |
 | 笔记库打开地址的编码 | `{vault}`、`{path}` 按路径段编码：`&`、`=`、`+`、`$`、`:`、`@` 不编码，与 Web 预览不一致 | 按 URI 组件编码，内核与 Web 预览一致（主文档 §12.8） | 只改渲染结果，不迁移、不改存储；路径含这些字符时原来生成的是坏链接，修复后正确；另外 `!`、`'`、`(`、`)`、`*` 由百分号编码改为原样，两种写法等价；其余路径的结果不变 |
 | `GET /settings/ext-keys` | 没有最近调用时间 | 每把密钥另带 `last_seen_at` | 只增字段 |
-| 导出与转发密钥的 Web 入口 | 独立设置页（"扩展程序"，`/settings-credentials`） | 设置 › 系统 › 对外接口（`/settings/outward-api`），与"提醒渠道"平级，不混列渠道钥匙；是长期对外能力，与内置输出并行，不随其上线而下线（主文档 §4.1、决定 77） | 旧地址不保留别名。已签发密钥、授权范围和 HTTP API 不变，无需迁移 |
+| 导出与转发密钥的 Web 入口 | 独立设置页（"扩展程序"，`/settings-credentials`） | 设置 › 系统 › 对外接口（`/settings/outward-api`），与"提醒渠道"平级，不混列渠道钥匙；是长期对外能力（主文档 §4.1、决定 77）；内置输出已取消（决定 78） | 旧地址不保留别名。已签发密钥、授权范围和 HTTP API 不变，无需迁移 |
 | 生成端点的资料长度 | 资料原样拼进提示词，没有预算 | 受 `generate_endpoint.max_material_chars` 约束（默认 24000），超出时裁剪并留痕 | 已存的策略版本没有这个键，读作默认值，不改写 |
