@@ -39,7 +39,7 @@ func TestConnectionListPassesThrough(t *testing.T) {
 	if len(got) != 1 || got[0] != "GET /v1/connections?direction=channel" {
 		t.Fatalf("requests = %v", got)
 	}
-	for _, args := range [][]string{{"connection"}, {"connection", "add"}, {"connection", "list", "extra"}} {
+	for _, args := range [][]string{{"connection"}, {"connection", "add"}, {"connection", "list", "extra"}, {"connection", "list", "--direction", "output"}} {
 		if code, out := apa(args...); code != 2 || !strings.Contains(out, "usage: apa connection list") {
 			t.Errorf("%v: %d %s", args, code, out)
 		}

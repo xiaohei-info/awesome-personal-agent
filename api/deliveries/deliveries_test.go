@@ -406,7 +406,7 @@ func TestRevokedKeyIsRejectedImmediately(t *testing.T) {
 	}
 }
 
-// ACT-CHP-09 / ACT-EXP-02：渠道密钥读不了、写不了账本；导出与转发 ext 密钥、webhook 密钥碰不到投递协议。
+// ACT-CHP-09：渠道密钥读不了、写不了账本；导出与转发 ext 密钥、webhook 密钥碰不到投递协议。
 func TestExtKeysStayInTheirLane(t *testing.T) {
 	e := setup(t, delivery.Options{})
 	e.enqueue("d1", delivery.ChannelRoute("c"), 1)

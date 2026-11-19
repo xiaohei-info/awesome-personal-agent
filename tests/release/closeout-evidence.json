@@ -405,15 +405,6 @@
    "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/events 通过"
   },
   {
-   "id": "flow-export-ext",
-   "mode": "hermetic",
-   "status": "pass",
-   "evidence": [
-    "tests/release/evidence/e2e-linux.txt"
-   ],
-   "note": "linux/amd64 上 go test -tags e2e ./tests/e2e/events 通过"
-  },
-  {
    "id": "flow-channel-telegram",
    "mode": "live",
    "status": "pass",

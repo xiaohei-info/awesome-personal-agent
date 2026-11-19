@@ -2207,38 +2207,6 @@ flows:
         expected: |-
           通过：所有 type 都在 B.4 清单中。失败：出现未登记类型。
 
-  - id: flow-export-ext
-    name: 把事项变化同步到外部，只用只读密钥
-    actions:
-      - id: ACT-EXP-01
-        kind: business-action
-        step: 导出 ext 单向写到目标
-        how: |-
-          运行 `apa ext list` 找到仓库提供的导出 ext，用只读 ext 密钥和 `apa ext run <名>` 启动，目标设为本地目录。新建和修改事项。
-        expected: |-
-          通过：目标目录出现对应内容；ext 重启后按自持游标续接，无遗漏；同一事件不写坏目标。失败：有遗漏，或重启后重写出错。
-      - id: ACT-EXP-02
-        kind: business-action
-        step: 只读密钥不能写
-        how: |-
-          用导出 ext 密钥 `POST /v1/items`，再 `POST /v1/deliveries/{id}/ack`。
-        expected: |-
-          通过：都被拒绝。失败：写入成功。
-      - id: ACT-EXP-03
-        kind: business-action
-        step: webhook 转发 ext 签名外发
-        how: |-
-          运行 `apa ext run <webhook 转发 ext 名>`，目标设为本地接收器；产生事件。先让接收器返回 500 三次再恢复。
-        expected: |-
-          通过：接收器收到签名有效的 POST；500 时退避重试；同一事件 id 可能多次到达，事件 id 不变。失败：签名错，或事件丢失。
-      - id: ACT-EXP-04
-        kind: business-action
-        step: 内核不主动外发
-        how: |-
-          在 ACT-EXP-01 的导出 ext 和 ACT-EXP-03 的 webhook 转发 ext 都运行、并新建和修改事项产生事件期间，用 `lsof -i -a -p <apa serve pid>` 观察内核进程的外连。
-        expected: |-
-          通过：内核没有到接收器的连接，外发都由 ext 进程发起。失败：内核直接外呼。
-
   - id: flow-channel-telegram
     name: 提醒送到 Telegram，本人回复后事项继续，不依赖任何 harness（场景八）
     actions:

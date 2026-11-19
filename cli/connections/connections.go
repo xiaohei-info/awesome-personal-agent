@@ -15,7 +15,7 @@ import (
 
 func init() { client.Register("connection", run) }
 
-const usageHint = "usage: apa connection list [--direction channel|output]"
+const usageHint = "usage: apa connection list [--direction channel]"
 
 func usage(why string) error { return domain.NewError(domain.CodeInvalidRequest, why, usageHint) }
 
@@ -36,6 +36,9 @@ func list(c *client.Ctx, args []string) error {
 	dir := fs.String("direction", "", "")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		return usage("invalid arguments")
+	}
+	if *dir != "" && *dir != "channel" {
+		return usage("direction must be channel")
 	}
 	path := "/connections"
 	if *dir != "" {

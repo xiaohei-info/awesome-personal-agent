@@ -4912,102 +4912,16 @@ nodes:
     requirement_refs:
     - REQ-G1-5
     coverage_gate: 70
-- id: export-ext-v2
-  worker: omac-worker-frontend-taiyi
-  blocked_by:
-  - item-planned-progress
-  title: 导出 ext：路径模板、字段映射、进展与计划日期、生成标记、手改检测
-  description: 产出 export-ext-v2-delivery。负责 12 个 business-action（flow-export-ext）。要点：单向写目录、自持游标续接、只读密钥；路径模板按事项字段落位（标题清洗、重名追加
-    id），front matter 按映射写出、未映射不写，正文带进展与计划日期变化，每个文件带生成标记；手改过的不静默覆盖，未手改的正常覆盖；改标题/换项目移动文件，不再满足
-    select 时归档，物理删除随之删除；简报、复盘与例行任务结果各一个文件；web_only 初筛中的决策、挂靠消息与来源事件正文不导出。
-  reviewer: omac-reviewer
-  contract:
-    objective: 交付导出 ext：路径模板、字段映射、进展与计划日期、生成标记、手改检测，使本节点负责的 12 条 business-action 在替身环境下按验收文档
-      expected 可复现通过
-    non_goals:
-    - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
-    - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
-    - 不修改已被真实账本应用过的迁移；结构变更只经 ledger-schema-v3 或另起新迁移并在说明里写明
-    - 不在本节点实现其他节点负责的 action；需要时在 PR 说明里写明依赖
-    - 不为通过验收而接触真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库（本轮只做替身验收）
-    verification_commands:
-    - go build ./...
-    - go run ./tools/redline
-    - go test -count=1 ./ext/export/...
-    integration_gates:
-    - name: export-ext-v2-gate
-      layer: L1
-      source_of_truth:
-      - docs/solution-design.md#103-ext-契约
-      - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
-      delivery_goal: 导出 ext：路径模板、字段映射、进展与计划日期、生成标记、手改检测；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一
-        PR 去掉其标记（REQ-G1-5），对照测试通过
-      covers:
-      - ACT-EXP-01
-      - ACT-EXP-02
-      - ACT-EXP-05
-      - ACT-EXP-06
-      - ACT-EXP-07
-      - ACT-EXP-08
-      - ACT-EXP-09
-      - ACT-EXP-10
-      - ACT-EXP-11
-      - ACT-EXP-12
-      - ACT-EXP-13
-      - ACT-EXP-18
-      acceptance_refs:
-      - flow-export-ext
-      commands:
-      - go test -count=1 ./ext/export/...
-    pr_base: main
-    acceptance_contributions:
-    - flow_id: flow-export-ext
-      action_ids:
-      - ACT-EXP-01
-      - ACT-EXP-02
-      - ACT-EXP-05
-      - ACT-EXP-06
-      - ACT-EXP-07
-      - ACT-EXP-08
-      - ACT-EXP-09
-      - ACT-EXP-10
-      - ACT-EXP-11
-      - ACT-EXP-12
-      - ACT-EXP-13
-      - ACT-EXP-18
-    acceptance_refs:
-    - flow-export-ext
-    source_of_truth:
-    - docs/solution-design.md#103-ext-契约
-    - docs/appendix-b-api-cli.md#b6-v020-对已有契约的改动
-    scope_paths:
-    - ext/export/**
-    evidence_mode: fixture
-    produces:
-    - artifact_id: export-ext-v2-delivery
-      provides:
-      - id: export-ext-v2
-        ref: docs/solution-design.md#103-ext-契约
-    consumes:
-    - artifact_id: item-planned-progress-delivery
-      producer: item-planned-progress
-      evidence_mode: artifact
-      requires:
-      - item-planned-progress
-    requirement_refs:
-    - REQ-G1-5
-    coverage_gate: 80
 - id: action-links
   worker: omac-worker-frontend
   blocked_by:
-  - export-ext-v2
   - login-hardening
   title: 动作链接与 Web 确认页
-  description: 产出 action-links-delivery。负责 4 个 business-action（flow-export-ext）。要点：动作链接只含事项地址与动作参数、不含凭据，未配置
+  description: 产出 action-links-delivery。负责动作链接与 Web 确认页（导出 ext 已移除，决定 79）。要点：动作链接只含事项地址与动作参数、不含凭据，未配置
     public_url 时不写；未登录打开先登录再到确认页，在确认页完成动作记 Web 身份的 Event。
   reviewer: omac-reviewer
   contract:
-    objective: 交付动作链接与 Web 确认页，使本节点负责的 4 条 business-action 在替身环境下按验收文档 expected 可复现通过
+    objective: 交付动作链接与 Web 确认页，使其在替身环境下可复现通过
     non_goals:
     - 不改动本节点 objective 以外的业务模块语义；跨模块协作只经命令模型与已有 HTTP API
     - 不新增本轮之外的命令、路由、事件类型或配置项；契约以附录 B/C 为准，与设计冲突时先提设计修改
@@ -5018,7 +4932,6 @@ nodes:
     - npm --prefix web ci
     - npm --prefix web run build
     - npm --prefix web run test -- --run src/features/action-confirm
-    - go test -count=1 ./ext/export/...
     integration_gates:
     - name: action-links-gate
       layer: L1
@@ -5027,26 +4940,9 @@ nodes:
       - docs/solution-design.md#212-风险与治理
       - docs/solution-design.md#1413-web-入口
       delivery_goal: 动作链接与 Web 确认页；实现了附录 B/C.14 中带【规划中（v0.2.0）】的哪个条目，就在同一 PR 去掉其标记（REQ-G1-5），对照测试通过
-      covers:
-      - ACT-EXP-14
-      - ACT-EXP-15
-      - ACT-EXP-16
-      - ACT-EXP-17
-      acceptance_refs:
-      - flow-export-ext
       commands:
       - npm --prefix web run test -- --run src/features/action-confirm
-      - go test -count=1 ./ext/export/...
     pr_base: main
-    acceptance_contributions:
-    - flow_id: flow-export-ext
-      action_ids:
-      - ACT-EXP-14
-      - ACT-EXP-15
-      - ACT-EXP-16
-      - ACT-EXP-17
-    acceptance_refs:
-    - flow-export-ext
     source_of_truth:
     - docs/solution-design.md#103-ext-契约
     - docs/solution-design.md#212-风险与治理
@@ -5060,11 +4956,6 @@ nodes:
       - id: action-links
         ref: docs/solution-design.md#103-ext-契约
     consumes:
-    - artifact_id: export-ext-v2-delivery
-      producer: export-ext-v2
-      evidence_mode: artifact
-      requires:
-      - export-ext-v2
     - artifact_id: login-hardening-delivery
       producer: login-hardening
       evidence_mode: artifact
@@ -7334,75 +7225,6 @@ nodes:
       requires:
       - doctor
     coverage_gate: 0
-- id: e2e-export
-  worker: omac-worker-frontend-taiyi
-  blocked_by:
-  - e2e-env-baseline
-  - export-ext-v2
-  - action-links
-  title: 导出映射与动作链接全流程
-  description: 产出 e2e-export-flow-evidence。是 flow-export-ext 的唯一全流程 owner，并负责其中 2
-    个 v0.1 继承或跨模块 business-action。要点：手机浏览器步骤用 ego-browser 仿真。
-  reviewer: omac-reviewer
-  contract:
-    objective: 在 flow-env-baseline 的替身环境上用测试构建的真实二进制独立执行并证明完整流程：flow-export-ext
-    non_goals:
-    - 只为本节点自身负责的 v0.1 继承 action 做必要的回归修复；其他产品功能缺陷回流对应实现节点，不改断言迁就实现
-    - 不把节点级单元测试当作全流程证据
-    - 不使用真实模型端点、真实宿主、真实渠道账号或测试邮箱日历仓库；离不开真实依赖的断言注明由本机升级验证 L1–L12 承接
-    - 不引入 Playwright；Web 步骤用项目规定的 ego-browser
-    verification_commands:
-    - go build -tags apa_testclock ./...
-    - go test -tags=e2e -count=1 ./tests/e2e/events/...
-    integration_gates:
-    - name: e2e-export-flow
-      layer: L2
-      source_of_truth:
-      - docs/solution-design.md#103-ext-契约
-      delivery_goal: 在 flow-env-baseline 的替身环境上用测试构建的真实二进制独立执行并证明完整流程：flow-export-ext
-      covers:
-      - flow-export-ext
-      acceptance_refs:
-      - flow-export-ext
-      commands:
-      - go test -tags=e2e -count=1 ./tests/e2e/events/...
-    pr_base: main
-    acceptance_claims:
-    - flow-export-ext
-    acceptance_contributions:
-    - flow_id: flow-export-ext
-      action_ids:
-      - ACT-EXP-03
-      - ACT-EXP-04
-    acceptance_refs:
-    - flow-export-ext
-    source_of_truth:
-    - docs/solution-design.md#103-ext-契约
-    scope_paths:
-    - tests/e2e/events/**
-    evidence_mode: live
-    produces:
-    - artifact_id: e2e-export-flow-evidence
-      provides:
-      - id: e2e-export-evidence
-        ref: docs/solution-design.md#103-ext-契约
-    consumes:
-    - artifact_id: e2e-env-baseline-env
-      producer: e2e-env-baseline
-      evidence_mode: artifact
-      requires:
-      - acc-env-helpers
-    - artifact_id: export-ext-v2-delivery
-      producer: export-ext-v2
-      evidence_mode: artifact
-      requires:
-      - export-ext-v2
-    - artifact_id: action-links-delivery
-      producer: action-links
-      evidence_mode: artifact
-      requires:
-      - action-links
-    coverage_gate: 0
 - id: e2e-release-doctor
   worker: omac-worker-backend
   blocked_by:
@@ -8637,7 +8459,6 @@ nodes:
   - wake-lease-recheck
   - login-hardening
   - web-settings-security
-  - export-ext-v2
   - action-links
   - apa-version
   - backup-restore
@@ -8663,7 +8484,6 @@ nodes:
   - e2e-session-authz
   - e2e-hostplugin
   - e2e-login-deploy
-  - e2e-export
   - e2e-release-doctor
   - e2e-v01-ledger
   - e2e-v01-decisions
@@ -9029,11 +8849,6 @@ nodes:
       evidence_mode: artifact
       requires:
       - web-security-settings
-    - artifact_id: export-ext-v2-delivery
-      producer: export-ext-v2
-      evidence_mode: artifact
-      requires:
-      - export-ext-v2
     - artifact_id: action-links-delivery
       producer: action-links
       evidence_mode: artifact
@@ -9159,11 +8974,6 @@ nodes:
       evidence_mode: artifact
       requires:
       - e2e-login-deploy-evidence
-    - artifact_id: e2e-export-flow-evidence
-      producer: e2e-export
-      evidence_mode: artifact
-      requires:
-      - e2e-export-evidence
     - artifact_id: e2e-release-doctor-flow-evidence
       producer: e2e-release-doctor
       evidence_mode: artifact

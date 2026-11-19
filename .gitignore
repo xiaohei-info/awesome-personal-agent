@@ -49,4 +49,3 @@ __pycache__/
 .venv/
 
 # 本地构建产物
-/ext/export/export

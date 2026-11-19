@@ -4916,7 +4916,7 @@ nodes:
   - api-context
   - api-settings-credentials
   title: 投递领取协议 API
-  description: 产出 api-deliveries-routes。负责 9 个 business-action（flow-delivery-control、flow-proposal-triage、flow-channel-protocol、flow-export-ext）。
+  description: 产出 api-deliveries-routes。负责 8 个 business-action（flow-delivery-control、flow-proposal-triage、flow-channel-protocol）。
   reviewer: omac-reviewer
   contract:
     objective: /deliveries/next、ack、fail、unread、read 可用，渠道由密钥确定，ext 密钥只能做对应动作，吊销立即生效，版本作废返回冲突
@@ -4946,12 +4946,10 @@ nodes:
       - ACT-CHP-04
       - ACT-CHP-08
       - ACT-CHP-09
-      - ACT-EXP-02
       acceptance_refs:
       - flow-delivery-control
       - flow-proposal-triage
       - flow-channel-protocol
-      - flow-export-ext
       commands:
       - go test -count=1 ./api/deliveries/... ./api/decisions/... ./api/context/...
     pr_base: main
@@ -4970,14 +4968,10 @@ nodes:
       - ACT-CHP-04
       - ACT-CHP-08
       - ACT-CHP-09
-    - flow_id: flow-export-ext
-      action_ids:
-      - ACT-EXP-02
     acceptance_refs:
     - flow-delivery-control
     - flow-proposal-triage
     - flow-channel-protocol
-    - flow-export-ext
     source_of_truth:
     - docs/solution-design.md#103-ext-契约
     - docs/appendix-b-api-cli.md#b2-http-api
@@ -8827,13 +8821,11 @@ nodes:
       - apa ext list/run/check
       acceptance_refs:
       - flow-channel-protocol
-      - flow-export-ext
       commands:
       - go test -count=1 ./cli/ext/...
     pr_base: main
     acceptance_refs:
     - flow-channel-protocol
-    - flow-export-ext
     source_of_truth:
     - docs/appendix-b-api-cli.md#b1-cli
     - docs/solution-design.md#103-ext-契约
@@ -8951,131 +8943,6 @@ nodes:
       evidence_mode: artifact
     - artifact_id: api-deliveries-routes
       producer: api-deliveries
-      evidence_mode: artifact
-    - artifact_id: repo-ci-redline-tooling
-      producer: repo-ci-redline
-      evidence_mode: artifact
-    - artifact_id: kernel-domain-module
-      producer: kernel-domain
-      evidence_mode: artifact
-    coverage_gate: 70
-- id: ext-export
-  worker: omac-worker-backend
-  blocked_by:
-  - cli-ext
-  - api-events
-  title: 导出 ext
-  description: 产出 ext-export-ext。负责 1 个 business-action（flow-export-ext）。
-  reviewer: omac-reviewer
-  contract:
-    objective: 导出 ext 用只读密钥订阅事件、按需读 API，单向写到本地目录并自持游标
-    non_goals:
-    - 不写账本
-    - 不依赖笔记软件存储
-    - ext 是独立进程，只经 HTTP API 接入，不直接写存储，也不依赖任何 harness
-    verification_commands:
-    - go build ./...
-    - go test -count=1 ./ext/export/...
-    - go run ./tools/redline
-    integration_gates:
-    - name: ext-export-gate
-      layer: L1
-      source_of_truth:
-      - docs/solution-design.md#103-ext-契约
-      - docs/solution-design.md#104-消费路径汇总
-      delivery_goal: 导出 ext 用只读密钥订阅事件、按需读 API，单向写到本地目录并自持游标
-      covers:
-      - ACT-EXP-01
-      acceptance_refs:
-      - flow-export-ext
-      commands:
-      - go test -count=1 ./ext/export/...
-    pr_base: main
-    acceptance_contributions:
-    - flow_id: flow-export-ext
-      action_ids:
-      - ACT-EXP-01
-    acceptance_refs:
-    - flow-export-ext
-    source_of_truth:
-    - docs/solution-design.md#103-ext-契约
-    - docs/solution-design.md#104-消费路径汇总
-    scope_paths:
-    - ext/export/**
-    evidence_mode: fixture
-    produces:
-    - artifact_id: ext-export-ext
-    consumes:
-    - artifact_id: cli-ext-commands
-      producer: cli-ext
-      evidence_mode: artifact
-    - artifact_id: api-events-routes
-      producer: api-events
-      evidence_mode: artifact
-    - artifact_id: repo-ci-redline-tooling
-      producer: repo-ci-redline
-      evidence_mode: artifact
-    - artifact_id: kernel-domain-module
-      producer: kernel-domain
-      evidence_mode: artifact
-    coverage_gate: 70
-- id: ext-webhook-forward
-  worker: omac-worker-backend
-  blocked_by:
-  - cli-ext
-  - api-events
-  - ext-export
-  title: webhook 转发 ext
-  description: 产出 ext-webhook-forward-ext。负责 2 个 business-action（flow-export-ext）。
-  reviewer: omac-reviewer
-  contract:
-    objective: webhook 转发 ext 订阅事件后签名 POST，至少一次、退避重试，并验证内核进程没有外发连接
-    non_goals:
-    - 出站 webhook 不进内核
-    - ext 是独立进程，只经 HTTP API 接入，不直接写存储，也不依赖任何 harness
-    verification_commands:
-    - go build ./...
-    - go test -count=1 ./ext/webhookforward/...
-    - go run ./tools/redline
-    integration_gates:
-    - name: ext-webhook-forward-gate
-      layer: L1
-      source_of_truth:
-      - docs/solution-design.md#103-ext-契约
-      - docs/solution-design.md#52-五条原则
-      delivery_goal: webhook 转发 ext 订阅事件后签名 POST，至少一次、退避重试，并验证内核进程没有外发连接
-      covers:
-      - ACT-EXP-03
-      - ACT-EXP-04
-      acceptance_refs:
-      - flow-export-ext
-      commands:
-      - go test -count=1 ./ext/webhookforward/...
-    pr_base: main
-    acceptance_contributions:
-    - flow_id: flow-export-ext
-      action_ids:
-      - ACT-EXP-03
-      - ACT-EXP-04
-    acceptance_refs:
-    - flow-export-ext
-    source_of_truth:
-    - docs/solution-design.md#103-ext-契约
-    - docs/solution-design.md#52-五条原则
-    scope_paths:
-    - ext/webhookforward/**
-    evidence_mode: fixture
-    produces:
-    - artifact_id: ext-webhook-forward-ext
-    consumes:
-    - artifact_id: cli-ext-commands
-      producer: cli-ext
-      evidence_mode: artifact
-    - artifact_id: api-events-routes
-      producer: api-events
-      evidence_mode: artifact
-    - artifact_id: ext-export-ext
-      producer: ext-export
       evidence_mode: artifact
     - artifact_id: repo-ci-redline-tooling
       producer: repo-ci-redline
@@ -11865,17 +11732,14 @@ nodes:
   blocked_by:
   - cli-events
   - api-events
-  - ext-export
   - api-deliveries
-  - ext-webhook-forward
   - e2e-env-baseline
   - cli-init-serve
-  title: 事件订阅与导出 ext
-  description: 产出 e2e-events-export-flow-evidence。是 flow-event-subscribe、flow-export-ext
-    的唯一全流程 owner。
+  title: 事件订阅
+  description: 产出 e2e-events-export-flow-evidence。是 flow-event-subscribe 的唯一全流程 owner（导出与转发 ext 已移除，决定 79）。
   reviewer: omac-reviewer
   contract:
-    objective: 用替身和真实二进制独立执行并证明完整流程：flow-event-subscribe、flow-export-ext
+    objective: 用替身和真实二进制独立执行并证明完整流程：flow-event-subscribe
     non_goals:
     - 不实现或修改产品功能，发现缺陷回到对应实现节点
     - 不把节点级测试当作全流程证据
@@ -11888,22 +11752,18 @@ nodes:
       source_of_truth:
       - docs/solution-design.md#101-事件订阅
       - docs/solution-design.md#103-ext-契约
-      delivery_goal: 用替身和真实二进制独立执行并证明完整流程：flow-event-subscribe、flow-export-ext
+      delivery_goal: 用替身和真实二进制独立执行并证明完整流程：flow-event-subscribe
       covers:
       - flow-event-subscribe
-      - flow-export-ext
       acceptance_refs:
       - flow-event-subscribe
-      - flow-export-ext
       commands:
       - go test -tags=e2e -count=1 ./tests/e2e/events/...
     pr_base: main
     acceptance_claims:
     - flow-event-subscribe
-    - flow-export-ext
     acceptance_refs:
     - flow-event-subscribe
-    - flow-export-ext
     source_of_truth:
     - docs/solution-design.md#101-事件订阅
     - docs/solution-design.md#103-ext-契约
@@ -11919,14 +11779,8 @@ nodes:
     - artifact_id: api-events-routes
       producer: api-events
       evidence_mode: artifact
-    - artifact_id: ext-export-ext
-      producer: ext-export
-      evidence_mode: artifact
     - artifact_id: api-deliveries-routes
       producer: api-deliveries
-      evidence_mode: artifact
-    - artifact_id: ext-webhook-forward-ext
-      producer: ext-webhook-forward
       evidence_mode: artifact
     - artifact_id: e2e-env-baseline-flow-evidence
       producer: e2e-env-baseline

@@ -19,7 +19,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/version"
@@ -291,7 +290,7 @@ func writeTarball(dir, out string) error {
 }
 
 // required 是 §16.6 表里每一类内容在包内必须存在的代表文件。
-var required = []string{"bin/apa", "sources/rss-source", "ext/export/ext.yaml", "ext/telegram/ext.yaml", "ext/webhookforward/ext.yaml",
+var required = []string{"bin/apa", "sources/rss-source", "ext/telegram/ext.yaml",
 	"plugins/hermes/core/plugin.yaml", "plugins/hermes/core/README.md", "deploy/systemd/apa.service", "deploy/nginx/apa.conf.example",
 	"deploy/caddy/Caddyfile.example", "deploy/tunnel/cloudflared.yml.example", "docs/user/quickstart.md", "docs/user/run-tiers.md", "docs/user/troubleshooting.md",
 	"docs/user/security.md", "docs/user/upgrade.md", "docs/user/uninstall.md", "docs/user/changelog.md", manifestName}
@@ -300,7 +299,7 @@ const atomFeed = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"
 	`<entry><id>a</id><title>release-verify</title><link href="http://x/a"/><updated>2030-01-01T00:00:00Z</updated></entry></feed>`
 
 // VerifyPackage 在干净环境里只用包内文件验收一个发布包：内容齐全、哈希清单通过、所有二进制不带 apa_testclock、
-// 主程序 init/serve/Web/版本（Verify）、用包内路径登记 RSS 来源并拉到事件、`apa ext run export` 写出文件。
+// 主程序 init/serve/Web/版本（Verify）、用包内路径登记 RSS 来源并拉到事件、签发的导出密钥能读事件流。
 func VerifyPackage(dir string) error {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
@@ -355,7 +354,7 @@ func VerifyPackage(dir string) error {
 	if err := in.pullPackagedRSS(filepath.Join(dir, "sources", "rss-source")); err != nil {
 		return err
 	}
-	return in.runPackagedExport(dir)
+	return in.checkPackagedExportKey()
 }
 
 // pullPackagedRSS 用包内来源程序登记 RSS 来源（指向本机静态 Atom），等它拉到事件。
@@ -382,47 +381,29 @@ func (in *instance) pullPackagedRSS(program string) error {
 	})
 }
 
-// runPackagedExport 在包根目录运行 `apa ext run export`（默认 ext 目录），等它在导出目录写出文件。
-func (in *instance) runPackagedExport(pkg string) error {
+// checkPackagedExportKey 签发一把导出密钥，确认它能经对外接口读事件流（对外接口随主程序，不依赖任何随包客户端）。
+func (in *instance) checkPackagedExportKey() error {
 	code, body, err := in.do("POST", "/v1/settings/ext-keys", map[string]string{"label": "REL", "scope": "export"})
 	var key struct {
 		Secret string `json:"secret"`
 	}
 	if err != nil || code != http.StatusCreated || json.Unmarshal([]byte(body), &key) != nil || key.Secret == "" {
-		return fmt.Errorf("issue export ext key: status %d: %v %s", code, err, body)
+		return fmt.Errorf("issue export key: status %d: %v %s", code, err, body)
 	}
-	exportDir, err := os.MkdirTemp("", "apa-release-export-")
+	req, err := http.NewRequest("GET", in.base+"/v1/events", nil)
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(exportDir)
-	var log strings.Builder
-	cmd := exec.Command(in.bin, "ext", "run", "export")
-	cmd.Dir, cmd.Stdout, cmd.Stderr = pkg, &log, &log
-	cmd.Env = append(in.env, "APA_URL="+in.base, "APA_EXT_KEY="+key.Secret, "APA_EXPORT_DIR="+exportDir)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("apa ext run export: %w", err)
+	req.Header.Set("Authorization", "Bearer "+key.Secret)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
 	}
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-	defer func() {
-		_ = cmd.Process.Signal(syscall.SIGTERM)
-		select {
-		case <-exited:
-		case <-time.After(10 * time.Second):
-			_ = cmd.Process.Kill()
-			<-exited
-		}
-	}()
-	return until(30*time.Second, "export ext writes a file", func() (bool, error) {
-		select {
-		case err := <-exited:
-			return false, fmt.Errorf("apa ext run export exited early: %v: %s", err, log.String())
-		default:
-		}
-		ents, _ := os.ReadDir(exportDir)
-		return len(ents) > 0, nil
-	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("export key GET /v1/events: status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func until(d time.Duration, what string, cond func() (bool, error)) error {

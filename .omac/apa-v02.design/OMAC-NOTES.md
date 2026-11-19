@@ -182,7 +182,7 @@ W14 建议拆成门槛 1–4 四个节点，全部依赖 W1–W13。
 | `flow-capture` | 改为预筛加抽取，一段多条 |
 | `flow-chat-answer`、`flow-authz-matrix`、`flow-decision-answer`、`flow-data-not-instructions` | 凭原话的用例都要带会话类型 `direct`；新增非私聊被拒的用例 |
 | `flow-hermes-context` | 新增插件上报会话类型的用例；`ACT-HCTX-09` 见第 4 节 |
-| `flow-export-ext` | 新增路径模板、字段映射、生成标记、手改检测、动作链接 |
+| `flow-export-ext` | 已移除（导出 ext 删除，决定 79） |
 | `flow-deploy-exposure` | 新增监听非本机地址而没有 `public_url` 时拒绝启动、登录限速 |
 | `flow-release` | 发布物清单扩为设计 §16.6 的全部内容；`apa version`；用户文档 |
 | `flow-first-day`、`flow-life-renewal` | 本轮不改写、不执行，不建节点；内容由设计 §20.4 清单 L10、L11 承接（第 3 节） |

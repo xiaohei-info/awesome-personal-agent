@@ -636,19 +636,14 @@ func TestFlowProposalHandling(t *testing.T) {
 		eq(t, "新增处置 Event", len(k.disposals(0)), disposals)
 	})
 
-	k.step("ACT-PRH-18 事件订阅能取到新的稳定事件，随包订阅方跳过不处理的类型", func(t *testing.T) {
+	k.step("ACT-PRH-18 事件订阅能取到新的稳定事件", func(t *testing.T) {
 		k.apa(k.DEL, 0, "item", "progress", t3, "--text", "prh 已发回意见", "--evidence", "记一下进展")
 		types := map[string]bool{}
-		var progressSeq int64
 		for _, e := range k.feedLines(k.OBS, "events", "--cursor", c0) {
 			types[e.Type] = true
-			if e.Type == "item.progress_added" {
-				progressSeq = max(progressSeq, e.Seq)
-			}
 		}
 		if !types["proposal.attached"] || !types["item.progress_added"] {
 			t.Errorf("事件流应含 proposal.attached 与 item.progress_added: %v", types)
 		}
-		k.forwardOnlyCreated(progressSeq)
 	})
 }

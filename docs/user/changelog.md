@@ -94,6 +94,7 @@ v0.2.0 发布前追加的迭代，逐条设计依据见 `docs/changes-v0.2.0.md`
 | M-18 | 内置规则 `reminder-open` 随 `inbound-triage` 包提供：来源配了 `undated_lists` 才有 `reminder.open` 事件（WB-34） | 数据目录里覆盖了 `inbound-triage` 的用户包自己加这条规则，否则这类事件按没有规则命中交初筛 |
 | M-19 | 账本数据结构版本升到 8（只增）：来源原文、导入批次、链接型材料等的表与列一次迁移；旧版本二进制拒绝打开升级后的账本 | 升级前备份；回退只有恢复升级前快照一条路；升级前落盘的来源事件完整程度记 `legacy`，照常可读，不回填 |
 | M-20 | 单条来源事件上限 `max_source_event_mb` 默认 16 MiB，必须小于 `max_source_output_mb`：旧配置里把 `max_source_output_mb` 设为 16 或更小的，升级后 `apa serve` 拒绝启动 | 升级前把 `max_source_output_mb` 调到大于 `max_source_event_mb`（默认 32），或同时调小后者；升级前自行核对运行配置 |
+| M-21 | 发布包不再附带导出 ext 与 webhook 转发 ext；`apa connection list --direction` 只接受 `channel` | 需要导出或转发的，自己写程序接“设置 › 对外接口”签发的密钥（接口与密钥不变）；已在运行的旧版程序照常可用；脚本里用过 `--direction output` 的去掉这个参数 |
 
 没有迁移要求的变更是纯加法或只改文档。
 

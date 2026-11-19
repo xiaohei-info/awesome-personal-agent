@@ -21,6 +21,10 @@ const (
 	exitBasis  = 23 // 代答缺依据
 )
 
+func judgeYes(key string) modelstub.ChatJudge {
+	return modelstub.ChatJudge{Key: modelstub.Key{Contains: key}, Answer: "yes"}
+}
+
 type kit struct {
 	*baseline.Env
 	t      *testing.T

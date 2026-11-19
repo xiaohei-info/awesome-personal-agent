@@ -15,10 +15,7 @@ import (
 const Contract = 1
 
 // 方向。
-const (
-	DirectionChannel = "channel"
-	DirectionOutput  = "output"
-)
+const DirectionChannel = "channel"
 
 // Capabilities 是渠道的能力声明，与 connector.yaml 的 capabilities 一致；内核据它决定给什么内容。
 // 三项都为假即「只能看」：决策提醒带一次性表单链接（§2.3）。

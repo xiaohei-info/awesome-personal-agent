@@ -1,7 +1,7 @@
 //go:build e2e
 
-// Package events 按验收文档 flow-event-subscribe（ACT-EVT-01..04）与 flow-export-ext（ACT-EXP-01..04）
-// 用真实 apa 二进制、仓库提供的导出 ext 与 webhook 转发 ext 独立执行"订阅账本变化、至少一次、游标自持"。
+// Package events 按验收文档 flow-event-subscribe（ACT-EVT-01..04）
+// 用真实 apa 二进制与对外接口的密钥验证"订阅账本变化、至少一次、游标自持"与导出密钥只读。
 // 环境来自 flow-env-baseline 的共用脚本；接收器是测试内的本地 HTTP 服务（替身），其余全是真实进程与真实 HTTP。
 //
 // 只改测试，不改产品代码。

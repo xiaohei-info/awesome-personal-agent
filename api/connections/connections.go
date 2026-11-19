@@ -1,4 +1,4 @@
-// Package connections 是连接（渠道、输出）的 HTTP 路由（附录 B.2，设计 §1.5、§7）：
+// Package connections 是连接（渠道）的 HTTP 路由（附录 B.2，设计 §1.5、§7）：
 //
 //	GET    /connections?direction=        列出连接（凭据只回是否已设置）；token（observer 及以上）只得到现状摘要
 //	GET    /connections/types?direction=  接入声明：选类型与渲染表单用

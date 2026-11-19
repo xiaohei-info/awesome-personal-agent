@@ -81,7 +81,7 @@
 | `apa ext list` | 列出仓库提供的 ext | 无 | |
 | `apa ext run <名>` | 本机启动 ext | ext 密钥（由 ext 读取） | |
 | `apa ext check` | 协议一致性自测 | 无 | |
-| `apa connection list [--direction channel\|output]` | 列出连接（内置渠道；输出方向目前没有内置类型）：id、方向、类型、名字、启停、状态、问题代码与最近成功、失败的时间；不含配置值与凭据（主文档 §7.6）。就是 `GET /connections` | observer | |
+| `apa connection list [--direction channel]` | 列出连接（内置渠道）：id、方向、类型、名字、启停、状态、问题代码与最近成功、失败的时间；不含配置值与凭据（主文档 §7.6）。就是 `GET /connections` | observer | |
 | **自动化** | | | |
 | `apa instance add/list/enable/disable` | 能力包实例 | delegate（`list` 为 observer） | |
 | `apa pack list` | 列出已加载能力包 | observer | |
@@ -223,7 +223,7 @@
 | | `PUT /settings/channels/{name}/answerers` | 只替换这个渠道的回答人白名单 `{"answerers": [...]}`，记 `policy.changed` 与 `allowlist.changed` | 只有 Web 登录 |
 | | `DELETE /settings/channels/{name}` | 删除一个自写程序渠道：同一事务里吊销该渠道 `channel.<名>` 的全部未吊销渠道密钥，并从策略的 `channels` 与 `channel_answerers` 里删掉这个名字；要么三件都成、要么都不动，重复删除返回 `{"version": 当前版本, "revoked": 0}`，记 `policy.changed`（改到回答人时另记 `allowlist.changed`）。指向它的打扰路由不动。内置渠道的名字前缀 `ch-` 为 400 | 只有 Web 登录 |
 | | `POST /settings/channels/{name}/identify`，`GET /settings/channels/{name}/identify` | 开始识别：返回一次性口令 `{code, expires_at}`（10 分钟，同一渠道同时一个，只在内存里，重启作废）；查看：`{state: waiting \| got \| expired, sender?, display?}` | 只有 Web 登录 |
-| 连接 | `GET /connections?direction=` | 列出连接（渠道或输出），按创建顺序：`{"connections": [{"id", "direction", "type", "name", "config", "secrets": {"<字段>": true/false}, "enabled", "state": ok/problem/disabled, "problem"?, "detail"?, "last_ok_at"?, "last_error_at"?, "created_at", "updated_at"}]}`。凭据只回是否已设置且可用（主文档 §14.2）；必填凭据不可用时 `problem` 为 `credentials_missing`。token 读到的每条不含 `config`、`secrets`、`detail`（主文档 §7.6） | observer 读裁剪后的字段；Web 登录读全部；ext 与 webhook 密钥不可 |
+| 连接 | `GET /connections?direction=` | 列出连接（渠道），按创建顺序：`{"connections": [{"id", "direction", "type", "name", "config", "secrets": {"<字段>": true/false}, "enabled", "state": ok/problem/disabled, "problem"?, "detail"?, "last_ok_at"?, "last_error_at"?, "created_at", "updated_at"}]}`。凭据只回是否已设置且可用（主文档 §14.2）；必填凭据不可用时 `problem` 为 `credentials_missing`。token 读到的每条不含 `config`、`secrets`、`detail`（主文档 §7.6） | observer 读裁剪后的字段；Web 登录读全部；ext 与 webhook 密钥不可 |
 | | `GET /connections/types?direction=` | 内置连接类型的接入声明（选类型与渲染表单用）：`{"types": [{"type", "direction", "title", "tagline", "default", "via", "capabilities", "fields", "guide"?}]}`；文字都是 `{zh, en}` | 只有 Web 登录 |
 | | `POST /connections` | 新建（`connection.create`）：`{"type", "name"?, "config"?, "secrets"?, "enabled"?}`；`name` 缺省取声明的默认名，重名 409；配置按声明的字段表校验，必填缺失或字段不符 400。返回 201 与连接 | 只有 Web 登录 |
 | | `PUT /connections/{id}` | 改配置与凭据（`connection.configure`）：`{"config"?, "secrets"?}`；`config` 给出时整体替换非凭据配置；`secrets` 里出现的字段非空即替换、空串即清除，没出现的保持 | 只有 Web 登录 |
@@ -511,5 +511,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | `GET /connections` 的权限 | 只有 Web 登录 | observer 及以上的 token 读裁剪后的字段（不含 `config`、`secrets`、`detail`）；新增 `apa connection list` | 只增：Web 读到的内容不变；写命令仍只在 Web |
 | 笔记库打开地址的编码 | `{vault}`、`{path}` 按路径段编码：`&`、`=`、`+`、`$`、`:`、`@` 不编码，与 Web 预览不一致 | 按 URI 组件编码，内核与 Web 预览一致（主文档 §12.8） | 只改渲染结果，不迁移、不改存储；路径含这些字符时原来生成的是坏链接，修复后正确；另外 `!`、`'`、`(`、`)`、`*` 由百分号编码改为原样，两种写法等价；其余路径的结果不变 |
 | `GET /settings/ext-keys` | 没有最近调用时间 | 每把密钥另带 `last_seen_at` | 只增字段 |
-| 导出与转发密钥的 Web 入口 | 独立设置页（"扩展程序"，`/settings-credentials`） | 设置 › 系统 › 对外接口（`/settings/outward-api`），与"提醒渠道"平级，不混列渠道钥匙；是长期对外能力（主文档 §4.1、决定 77）；内置输出已取消（决定 78） | 旧地址不保留别名。已签发密钥、授权范围和 HTTP API 不变，无需迁移 |
+| 导出与转发密钥的 Web 入口 | 独立设置页（"扩展程序"，`/settings-credentials`） | 设置 › 系统 › 对外接口（`/settings/outward-api`），与"提醒渠道"平级，不混列渠道钥匙；是长期对外能力（主文档 §4.1、决定 77）；内置输出已取消（决定 78），仓库不再附带导出与转发客户端（决定 79） | 旧地址不保留别名。已签发密钥、授权范围和 HTTP API 不变，无需迁移 |
+| 随发行附带的导出 ext 与 webhook 转发 ext | 发布包的 `ext/` 下附带 | 不再附带，需要的人自己写客户端接对外接口（主文档决定 79） | 导出与转发密钥、事件订阅、只读 API 与 ext 协议不变；已在运行的旧版程序照常可用，无需迁移 |
+| `apa connection list --direction` 与连接的方向 | 取值 `channel`、`output` | 只接受 `channel`；`output` 返回用法错误（退出码 2）。`GET /connections?direction=output` 返回空列表 | 从未有过输出类型的连接，账本里没有方向为 `output` 的连接记录或事件，无需迁移；`direction` 列保持原样（只增不改） |
 | 生成端点的资料长度 | 资料原样拼进提示词，没有预算 | 受 `generate_endpoint.max_material_chars` 约束（默认 24000），超出时裁剪并留痕 | 已存的策略版本没有这个键，读作默认值，不改写 |

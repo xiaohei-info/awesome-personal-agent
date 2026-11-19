@@ -10,8 +10,6 @@
 | 即时通讯渠道 ext | Telegram，用成熟的 Bot SDK | `ext/telegram` | 渠道 ext 协议（主文档 §10.3） |
 | 推送渠道（内置连接插件） | Bark（官方服务或自建服务器） | `connectors/bark` | 渠道接口（主文档 §10.3）；字段映射与实测项见 D.5 |
 | 笔记库打开方式的预设 | Obsidian：`obsidian://open?vault={vault}&file={path}`（默认选中） | `web/src/features/settings-vaults` | 笔记库的 `open_url` 模板（主文档 §12.8）。只是前端的一条预设字符串，内核不认识它；换应用只改这一项，或在高级里写自定义模板。参数值按 URI 组件编码是该应用帮助文档的要求，官方页未直接核实；在应用里真实打开由本机升级验证 L22 覆盖 |
-| 导出 ext | Markdown 目录 | `ext/export` | 事件订阅与只读 API（主文档 §10.3） |
-| webhook 转发 ext | 通用的签名 POST | `ext/webhookforward` | 事件订阅（主文档 §10.3）；可选 `APA_WEBHOOK_TYPES`（逗号分隔的事件类型）只转发所列类型，缺省转发全部，未选中的事件不投递但游标照常推进 |
 | 代码托管平台来源 | GitHub（`source_type: github`） | `sources/` | Source 执行契约（主文档 §9.2） |
 | 邮件 CLI | himalaya | `sources/` | Source 执行契约，自定义脚本（主文档 §9.7） |
 | 日历 CLI | gog calendar（Google 日历） | `sources/` | 同上 |

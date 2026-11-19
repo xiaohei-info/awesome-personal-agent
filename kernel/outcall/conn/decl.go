@@ -66,7 +66,7 @@ func (d Decl) Check() error {
 	switch {
 	case !keyRe.MatchString(d.Type):
 		return fmt.Errorf("connector type %q is not a valid identifier", d.Type)
-	case d.Direction != DirectionChannel && d.Direction != DirectionOutput:
+	case d.Direction != DirectionChannel:
 		return fmt.Errorf("connector %s: direction %q", d.Type, d.Direction)
 	case !d.Title.ok() || !d.Tagline.ok() || !d.Default.ok() || !d.Via.ok():
 		return fmt.Errorf("connector %s: title, tagline, default and via need both zh and en", d.Type)

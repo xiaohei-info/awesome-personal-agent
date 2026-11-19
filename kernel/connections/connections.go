@@ -1,4 +1,4 @@
-// Package connections 是连接登记（设计 §1.5、§7.6）：本人配好的渠道与输出实例——名字、配置、启停、凭据与现状。
+// Package connections 是连接登记（设计 §1.5、§7.6）：本人配好的渠道实例——名字、配置、启停、凭据与现状。
 // 本包只登记与读，不发送、不调用插件；凭据经 kernel/secrets 加密保管，配置与凭据在同一事务里保存和删除。
 //
 // 权限：全部命令只在 Web（与改策略同级，ActionChangeSettings：delegate 得 web_only 退出码 20，其他凭据得 4）。
@@ -203,17 +203,13 @@ func nameFree(tx *store.Tx, name, except string) error {
 	return r.Err()
 }
 
-func newID(tx *store.Tx, direction string) (string, error) {
-	prefix := IDPrefix
-	if direction == conn.DirectionOutput {
-		prefix = "out-"
-	}
+func newID(tx *store.Tx) (string, error) {
 	for {
 		b := make([]byte, 4)
 		if _, err := rand.Read(b); err != nil {
 			return "", err
 		}
-		id := prefix + hex.EncodeToString(b)
+		id := IDPrefix + hex.EncodeToString(b)
 		if _, err := get(tx, id); isNotFound(err) {
 			return id, nil
 		} else if err != nil {
@@ -300,7 +296,7 @@ func (s *Service) applyCreate(c *command.Ctx) (any, error) {
 	if err := nameFree(c.Tx, name, ""); err != nil {
 		return nil, err
 	}
-	id, err := newID(c.Tx, d.Direction)
+	id, err := newID(c.Tx)
 	if err != nil {
 		return nil, err
 	}

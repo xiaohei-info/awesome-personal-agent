@@ -40,7 +40,7 @@ const writes = (s: ReturnType<typeof server>) => s.calls.filter((c) => c.method 
 
 beforeEach(() => sessionStorage.clear());
 
-describe("动作链接与确认页（flow-export-ext / ACT-EXP-16、17）", () => {
+describe("动作链接与确认页", () => {
   it("未登录打开：先出现登录页且不读不写；登录后直接到该事项的完成确认页，点确认前阶段不变", async () => {
     const s = server();
     mount(s, "/act/it-1?do=done", false);

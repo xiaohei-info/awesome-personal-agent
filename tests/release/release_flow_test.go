@@ -163,7 +163,7 @@ func TestFlowRelease(t *testing.T) {
 
 		t.Run("ACT-REL-06 发布包内容齐全，哈希清单可校验", func(t *testing.T) {
 			must := []string{"bin/apa", "sources/rss-source", "sources/mail-himalaya", "sources/calendar", "sources/github-source", // 来源程序与工具适配器
-				"ext/telegram/ext.yaml", "ext/export/ext.yaml", "ext/webhookforward/ext.yaml", // 渠道 ext、导出 ext、webhook 转发 ext
+				"ext/telegram/ext.yaml",                                            // 渠道 ext
 				"plugins/hermes/core/plugin.yaml", "plugins/hermes/core/README.md", // 首批宿主插件包与安装说明
 				"deploy/systemd/apa.service", "deploy/nginx/apa.conf.example", "deploy/caddy/Caddyfile.example", // 系统服务单元与反向代理样例
 				"SHA256SUMS", "docs/user/quickstart.md", "docs/user/run-tiers.md", "docs/user/troubleshooting.md", "docs/user/security.md",
@@ -237,33 +237,18 @@ func TestFlowRelease(t *testing.T) {
 				Secret string `json:"secret"`
 			}
 			if w.Code != 201 || json.Unmarshal([]byte(w.Body), &key) != nil || key.Secret == "" {
-				t.Fatalf("签发导出 ext 密钥: %d %s", w.Code, w.Body)
+				t.Fatalf("签发导出密钥: %d %s", w.Code, w.Body)
 			}
-			exportDir := t.TempDir()
-			cmd := exec.Command(apa(), "ext", "run", "export")
-			cmd.Dir = pkg
-			var log strings.Builder
-			cmd.Stdout, cmd.Stderr = &log, &log
-			cmd.Env = append(os.Environ(), "APA_URL="+e.URL, "APA_EXT_KEY="+key.Secret, "APA_EXPORT_DIR="+exportDir)
-			if err := cmd.Start(); err != nil {
+			// 导出密钥能经对外接口读事件流（仓库不再附带导出客户端）。
+			req, _ := http.NewRequest("GET", e.URL+"/v1/events", nil)
+			req.Header.Set("Authorization", "Bearer "+key.Secret)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
 				t.Fatal(err)
 			}
-			done := make(chan error, 1)
-			go func() { done <- cmd.Wait() }()
-			defer func() {
-				_ = cmd.Process.Signal(os.Interrupt)
-				select {
-				case <-done:
-				case <-time.After(10 * time.Second):
-					_ = cmd.Process.Kill()
-					<-done
-				}
-			}()
-			if !e.WaitFor(30*time.Second, func() bool {
-				ents, _ := os.ReadDir(exportDir)
-				return len(ents) > 0
-			}) {
-				t.Fatalf("导出 ext 没有写出文件: %s", log.String())
+			resp.Body.Close()
+			if resp.StatusCode != 200 {
+				t.Fatalf("导出密钥读事件流: HTTP %d", resp.StatusCode)
 			}
 		})
 
