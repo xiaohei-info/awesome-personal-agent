@@ -128,3 +128,82 @@
 ### 上线
 
 `~/app/apa/src` 快进到 `56532475b`；`npm --prefix web run build`、`go build -o ~/.local/bin/apa ./cli/apa`、`launchctl kickstart -k`。PID **96667 → 26213**；`curl -I http://127.0.0.1:7777/` 返回 `HTTP/1.1 200 OK`；首页引用的 `assets/index-LFkYdzmp.js` 与 `web/dist` 逐字节一致（前端代码未变）。未 push。
+
+## 9. 收掉输出方向与删除附带 ext
+
+本人定：连接接口的「输出」方向作为死代码删除；`ext/export` 与 `ext/webhookforward` 整目录删除；一起上线。提交 `a772adecf`。
+
+### 一、输出方向
+
+**先查数据（只读）**：对运行中的 `~/.apa/ledger.db` 用 `sqlite3 -readonly` 查询：`connections_connection` 里 `direction` 只有 `channel` 一行（1 条），`id LIKE 'out-%'` 为 0；`eventlog_event` 里 `connection.*` 事件共 3 条（created / enabled / disabled），载荷里没有 `"direction":"output"` 或 `out-` 前缀。连接目录里只有一种连接类型，方向为 `channel`（`connectors/bark/connector.yaml`），没有任何输出类型能被登记过。**结论：没有历史数据使用 output 方向，无需停下，也没有迁移。**`direction` 列保持原样（迁移只增不改）。
+
+**枚举与 CLI**
+
+| 位置 | 改动 |
+|---|---|
+| `kernel/outcall/conn/conn.go` | 删除 `DirectionOutput`；常量组改为单个 `DirectionChannel` |
+| `kernel/outcall/conn/decl.go:Decl.Check` | 方向校验只认 `DirectionChannel` |
+| `kernel/connections/connections.go:newID` | 去掉 `direction` 参数与 `out-` 前缀分支，调用处同步 |
+| `cli/connections/connections.go:list` | 用法提示改为 `[--direction channel]`；`--direction` 取其他值（含 `output`）返回用法错误（退出码 2）。`cli/connections/connections_test.go` 加了 `--direction output` 的用例 |
+| 注释 | `kernel/connections`、`api/connections`、`connectors` 包注释去掉「输出」 |
+| `docs/appendix-b-api-cli.md` | `apa connection list` 与 `GET /connections` 两行去掉 output；B.6 新增一行：取值收窄、`?direction=output` 返回空列表、无数据迁移 |
+| `docs/user/changelog.md` | 新增迁移项 M-21 |
+
+**设计文档**：§5.2 原则 2 的「连接接口（来源拉取、渠道发送、输出写出）」改为「（来源拉取、渠道发送）」；「只送达本人」条款从「两种动作：送渠道、写输出」改为「只有一种：把提醒送到本人配置的渠道；账本变化只经对外接口（事件订阅与只读 API）由对方来取」；§14.2 同步；决定 78 写明「输出」方向（枚举值与 CLI 取值）一并删除。
+
+**AGENTS.md 红线文字变更（用户已批准）**，`AGENTS.md` 第 30 行「内核只经连接接口对外」，只改了第一句：
+
+改动前：
+
+> - **内核只经连接接口对外。** 内核可以主动把提醒送到本人配置的渠道、把账本变化写到本人配置的输出，但只经外呼调用器、按统一的连接接口调用；接了哪些渠道、渠道怎么用，内核不管。连接插件在 `connectors/`，内核不 import 它；厂商名只出现在插件里。接口上没有收件人参数，规则（何时、送哪、内容、能否回答）全部在调用前由内核判定；插件拿不到账本，只拿到这一次调用的内容、本连接的配置和本连接声明过的凭据。以本人名义对第三方行事（发信、评论、付款）不属于内核与连接插件。连接的写命令只在 Web；读连接现状对 observer 开放，但不含配置值与凭据。凭据密文进账本，明文只在外呼调用器里解出。自写程序经 ext 协议接入：ext 是独立程序，只经 HTTP 接入，持独立密钥。渠道（内置或 ext）不复用任何 harness 的网关，也不依赖任何 harness。
+
+改动后：
+
+> - **内核只经连接接口对外。** 内核可以主动把提醒送到本人配置的渠道；账本变化只经对外接口读取，或送到本人配置的渠道。送到渠道只经外呼调用器、按统一的连接接口调用；接了哪些渠道、渠道怎么用，内核不管。连接插件在 `connectors/`，内核不 import 它；厂商名只出现在插件里。接口上没有收件人参数，规则（何时、送哪、内容、能否回答）全部在调用前由内核判定；插件拿不到账本，只拿到这一次调用的内容、本连接的配置和本连接声明过的凭据。以本人名义对第三方行事（发信、评论、付款）不属于内核与连接插件。连接的写命令只在 Web；读连接现状对 observer 开放，但不含配置值与凭据。凭据密文进账本，明文只在外呼调用器里解出。自写程序经 ext 协议接入：ext 是独立程序，只经 HTTP 接入，持独立密钥。渠道（内置或 ext）不复用任何 harness 的网关，也不依赖任何 harness。
+
+其余句子逐字未动。
+
+### 二、删除两个 ext
+
+**删除**：`ext/export`（9 个文件：README、config、export、export_test、ext.yaml、flow_test、main、render、state）、`ext/webhookforward`（4 个文件：ext.yaml、forward、forward_test、main），共 **13 个文件**。`ext/telegram` 未动，`ext/` 下只剩它。同一提交里另删 7 个文件：`tests/e2e/events/export_test.go`、`export_v2_test.go`、`tests/e2e/proposals/ext_test.go`，以及 `.omac` 里 4 份已失去对象的节点状态文件。全提交合计 50 个文件、约 4.5 千行净删除。
+
+**引用清扫**
+
+| 位置 | 处理 |
+|---|---|
+| `tools/release/pack.go` | 必备文件清单去掉两个 ext 的 `ext.yaml`；包内验收原来跑 `apa ext run export`，改为：签发一把导出密钥并用它读 `GET /v1/events`，要求 200（不再依赖附带客户端）；同步 `pack_test.go` |
+| `tests/release/release_flow_test.go` | ACT-REL-06 清单去掉两个 ext；ACT-REL-07 同样改为用导出密钥读事件流 |
+| `tests/e2e/events` | 删两个依赖 ext 的测试文件；保留导出密钥只读的权限用例，改为不依赖 ext 的 `outward_key_test.go:TestOutwardExportKeyReadOnly`（写事项与 ack 被拒） |
+| `tests/e2e/proposals` | 删 `forwardOnlyCreated` 与 ext 测试文件；`ACT-PRH-18` 保留事件订阅断言，去掉「随包订阅方」部分；`judgeYes` 挪进 `helpers_test.go` |
+| `tests/release/closeout-evidence.json` | 去掉 `flow-export-ext` 条目（`TestCloseoutEvidenceIsTraceable` 要求与验收文档一致） |
+| `.gitignore` | 去掉 `/ext/export/export` |
+| `.omac` | `apa.yaml`、`apa-v02.yaml` 删节点 `ext-export`、`ext-webhook-forward`、`export-ext-v2`、`e2e-export` 及所有 blocked_by、consumes、acceptance 引用；`apa.acceptance.yaml`、`apa-v02.acceptance.yaml` 删 `flow-export-ext` 整流程；保留的节点 `action-links`、`e2e-events-export`、`api-deliveries` 改写描述与命令（去掉 `go test ./ext/export/...`）；`apa-v02.design/OMAC-NOTES.md` 标注已移除；删节点状态文件。用 PyYAML（含重复键检查）解析四份文件：`apa.yaml` 206 个节点、`apa-v02.yaml` 120 个，没有悬挂的 `blocked_by` 或 `producer` |
+| `docs/solution-design.md` | §4.1、§4.4、§10.3（原「Markdown 目录导出」整段配置表与手改检测规则换成「自写导出与转发程序的约束」四条：导出范围、单向、动作链接不含凭据、事件订阅语义）、§10.4、§16.6、§14.2 数据流向表、M6、W11、W25.4、风险 31、决定 77、78 改写，新增**决定 79**；凡「随发行附带导出 ext、webhook 转发 ext」改为「不再附带，需自行实现」；`docs/appendix-d-adapters.md` D.1 删两行；`docs/user/README.md`、`run-tiers.md`（与 §2.4 保持一致）同步 |
+| 保留 | 对外接口页、导出与转发密钥、事件订阅与只读 API、ext 协议、`apa ext check`、`ext/telegram` 及其 conformance 测试 |
+
+**清扫命令与命中数**
+
+```sh
+grep -rIEn 'ext/export|ext/webhookforward|webhookforward|ext run export|APA_EXPORT_DIR|APA_WEBHOOK_|flow-export-ext|ACT-EXP-(0[0-9]|1[0-9])|e2e-export|ext-export|ext-webhook-forward|export-ext-v2|DirectionOutput' \
+  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=reports --exclude=BRIEF-OUTWARD-API.md .
+```
+
+最终命中 **4 处**，都是有意保留的说明或历史记录，不指向存在的路径：`docs/solution-design.md` 决定 79（写明删除了这两个目录）、`.omac/apa-v02.design/OMAC-NOTES.md`（标注「已移除」）、`tests/release/evidence/go-test-all-linux.txt` 两行（留存的历史测试输出，不改写）。清扫前同一命令命中数百处（仅 `.omac` 里就有 105 行）。
+
+**没有改的**：`docs/diagrams/architecture.html` 与 `.png` 里的「导出扩展」「Webhook 转发扩展」两个方框表示「自己写的 ext 的类别」，不是附带程序，没有动（改图要成对重绘 HTML 与 PNG）。如果你希望图上也去掉，需要另做。`kernel/auth` 等处代码注释里的「导出 ext 密钥」指密钥种类，保留。
+
+### 三、构建与测试
+
+- `go build ./...`、`go vet ./...`、`go run ./tools/redline`：通过（redline: ok）。
+- `go test ./...`：全部通过，除两项与本次改动无关：`kernel/sources/runner` 的 `TestTimeoutIsTransientFailure` 在并行全量跑时偶发失败（单独跑与全包重跑均通过）；`tests/doubles/stubharness` 的 `TestPromptHangChildStaysAliveAndNeverReceipts` 读 `/proc`，本机（macOS）上本来就不通过，与本次无关。初次全量运行中暴露的 `tests/release`（`closeout-evidence.json` 与 `run-tiers.md` 两处）已修正，修正后 `tests/release`、`tests/conformance`、`tools/...`、`cli/...`、`api/...` 全部通过；`ext/telegram` 的 conformance 随 `./...` 通过。
+- `go vet -tags e2e ./tests/e2e/...` 通过；`go test -tags e2e ./tests/e2e/events/`（5.9s）与 `./tests/e2e/proposals/`（19.3s，`-run Handling|ACT-PRH`）通过；`.github/e2e/pkgs.sh check` 通过（包清单仍完整）。
+- 前端：`npm --prefix web run test -- --run` 50 个文件、579 项通过；`npm --prefix web run build` 通过。
+
+### 四、上线
+
+`~/app/apa/src` 快进到 `a772adecf`（`ext/` 下只剩 telegram）；`npm --prefix web run build`、`go build -o ~/.local/bin/apa ./cli/apa`、`launchctl kickstart -k gui/$(id -u)/info.xiaohei.apa`。PID **26213 → 59040**；`curl -I http://127.0.0.1:7777/` 返回 `HTTP/1.1 200 OK`；首页引用的 `assets/index-LFkYdzmp.js` 与 `web/dist` 逐字节一致（前端代码未变）。上线后 `apa connection list --direction output` 返回 `direction must be channel` 与用法提示；运行中的账本仍是 1 条 `channel` 连接。未 push。
+
+### 五、需要你知晓
+
+- 发行包里不再有导出与转发客户端；之前若有人在本机自己起过 `apa ext run export` 或 `webhookforward`，那是从仓库的 `ext/` 目录或旧发行包启动的，新二进制不再能找到它们（`apa ext run export` 会失败）。对外接口页签发的密钥和事件订阅接口不变，旧程序若已在别处运行仍可使用。
+- 全文已没有任何地方暗示内置输出或附带客户端将来会上线（设计文档里相关的「内置输出」仅 6 处，全带「已取消」或明确说没有）。
