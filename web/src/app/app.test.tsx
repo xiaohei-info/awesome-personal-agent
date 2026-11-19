@@ -204,7 +204,7 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "被忽略的，抽几条看看"],
     ["/rules", "自动规则", "规则"], ["/judgment", "自动规则", "筛选门槛"],
     ["/health", "诊断", "状态"], ["/audit", "诊断", "操作记录"],
-    ["/settings", "设置", "我来拍板"], ["/settings/channels", "设置", "提醒渠道"], ["/settings-exec", "设置", "Agent"],
+    ["/settings", "设置", "我来拍板"], ["/settings/channels", "设置", "提醒渠道"], ["/settings/outward-api", "设置", "对外接口"], ["/settings-exec", "设置", "Agent"],
     ["/settings/grants", "设置", "Agent"], ["/settings/agents", "设置", "Agent"], ["/settings-security", "设置", "登录与会话"], ["/purge", "设置", "永久删除"],
     ["/settings/general", "设置", "通用"], ["/settings/notify", "设置", "提醒与打扰"], ["/settings/access", "设置", "Agent"], ["/settings/models", "设置", "模型"], ["/settings/note-vaults", "设置", "笔记库"], ["/settings/storage", "设置", "存储"],
   ];
@@ -311,7 +311,7 @@ describe("设置的分组（设计 §3.1）", () => {
     const sub = await screen.findByRole("navigation", { name: "设置页签" });
     expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "连接", "Agent", "系统"]);
     expect(within(sub).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "通用", "提醒与打扰", "我来拍板", "提醒渠道", "笔记库", "Agent", "模型", "登录与会话", "存储", "导入", "永久删除",
+      "通用", "提醒与打扰", "我来拍板", "提醒渠道", "笔记库", "Agent", "模型", "登录与会话", "存储", "对外接口", "导入", "永久删除",
     ]);
     expect(within(sub).getByRole("link", { name: "提醒与打扰" })).toHaveAttribute("aria-current", "page");
   });

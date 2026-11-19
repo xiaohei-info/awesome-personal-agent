@@ -2440,12 +2440,12 @@ nodes:
   blocked_by:
   - web-shell
   - api-settings-credentials
-  title: 提醒渠道内的导出与转发密钥
+  title: 对外接口页的导出与转发密钥
   description: 产出 web-settings-output-keys-panel。负责 2 个 business-action（flow-bootstrap、flow-authz-matrix）。
     涉及 CLI 的步骤在测试里用同一 HTTP API 准备，完整 CLI 路径由全流程 owner 证明。
   reviewer: omac-reviewer
   contract:
-    objective: 提醒渠道页可签发和吊销导出与转发密钥，明文只显示一次
+    objective: 设置 › 对外接口页可签发和吊销导出与转发密钥，明文只显示一次
     non_goals:
     - 不把明文写入日志、状态存储或数据目录
     - Web 只调 HTTP API，不承载业务规则
@@ -2453,14 +2453,14 @@ nodes:
     verification_commands:
     - npm --prefix web ci
     - npm --prefix web run build
-    - npm --prefix web run test -- --run src/features/settings-channels/output-keys.test.tsx
+    - npm --prefix web run test -- --run src/features/settings-outward-api
     integration_gates:
     - name: web-settings-output-keys-gate
       layer: L1
       source_of_truth:
       - docs/solution-design.md#41-web-中台
       - docs/solution-design.md#142-身份与凭据
-      delivery_goal: 提醒渠道页可签发和吊销导出与转发密钥，明文只显示一次
+      delivery_goal: 设置 › 对外接口页可签发和吊销导出与转发密钥，明文只显示一次
       covers:
       - ACT-BOOT-04
       - ACT-AUTH-04
@@ -2468,7 +2468,7 @@ nodes:
       - flow-bootstrap
       - flow-authz-matrix
       commands:
-      - npm --prefix web run test -- --run src/features/settings-channels/output-keys.test.tsx
+      - npm --prefix web run test -- --run src/features/settings-outward-api
     pr_base: main
     acceptance_contributions:
     - flow_id: flow-bootstrap
@@ -2484,7 +2484,7 @@ nodes:
     - docs/solution-design.md#41-web-中台
     - docs/solution-design.md#142-身份与凭据
     scope_paths:
-    - web/src/features/settings-channels/**
+    - web/src/features/settings-outward-api/**
     evidence_mode: fixture
     produces:
     - artifact_id: web-settings-output-keys-panel

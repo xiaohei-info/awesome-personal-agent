@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
+import { setChoice } from "../../app/i18n";
 import { feature } from "./index";
+import { feature as channels } from "../settings-channels/index";
 
 // 测试边界替身：策略与连接只读，密钥操作按 /settings/ext-keys 的契约应答。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -41,38 +43,42 @@ function server(initial: Cred[] = [], deny?: Response, failRevoke?: Response) {
   return { impl, calls };
 }
 
-function mount(fetchImpl: typeof fetch, at = "/settings/channels") {
+function mount(fetchImpl: typeof fetch, at = "/settings/outward-api") {
   sessionStorage.setItem("apa.csrf", "tok-1");
   return render(
     <MemoryRouter initialEntries={[at]}>
-      <App features={[feature]} fetchImpl={fetchImpl} />
+      <App features={[feature, channels]} fetchImpl={fetchImpl} />
     </MemoryRouter>,
   );
 }
 
 const cred = (id: string, scope: string, over: Partial<Cred> = {}): Cred => ({ id, scope, label: "L-" + id, ...over });
-const toggle = () => screen.findByText("导出与转发密钥", { selector: "summary" });
-const openKeys = async () => userEvent.click(await toggle());
 
 beforeEach(() => sessionStorage.clear());
 
-describe("设置 › 提醒渠道 › 导出与转发密钥（flow-bootstrap / flow-authz-matrix）", () => {
-  it("ACT-BOOT-04：从设置首页可打开，列表只列导出与转发密钥并标出已吊销的", async () => {
+describe("设置 › 系统 › 对外接口 › 导出与转发密钥（flow-bootstrap / flow-authz-matrix）", () => {
+  it("ACT-BOOT-04：从设置首页「系统」组可打开，列表只列导出与转发密钥并标出已吊销的；文案分清取数据与收提醒", async () => {
     const s = server([cred("e", "export", { label: "vault" }), cred("f", "forward", { revoked_at: "2026-01-02T00:00:00Z" }), cred("c", "channel.tg", { label: "channel-key" })]);
     mount(s.impl, "/settings/home");
-    const entry = within(await screen.findByRole("list", { name: "连接" })).getByRole("link", { name: /提醒渠道/ });
+    const entry = within(await screen.findByRole("list", { name: "系统" })).getByRole("link", { name: /对外接口/ });
     await userEvent.click(entry);
-    expect(screen.queryByText("vault")).not.toBeInTheDocument();
-    await openKeys();
     expect(await screen.findByText("vault")).toBeVisible();
     expect(screen.getByText("L-f").closest("li")).toHaveTextContent("已停用");
-    expect(within((await toggle()).parentElement!).queryByText("channel-key")).not.toBeInTheDocument();
+    expect(screen.queryByText("channel-key")).not.toBeInTheDocument();
+    expect(screen.getByText("程序由你自己写，APA 只提供接口和钥匙。")).toBeVisible();
+    expect(screen.getByText(/要接收提醒并回答的程序，不在这里/)).toBeVisible();
+  });
+
+  it("英文界面有同样的区分", async () => {
+    setChoice("en");
+    mount(server().impl);
+    expect(await screen.findByText(/A program that receives reminders and answers is not here/)).toBeVisible();
+    setChoice("zh");
   });
 
   it("ACT-BOOT-04：用途按类型拼成 scope；明文只显示一次，关闭后不再可见、不落存储", async () => {
     const s = server();
     mount(s.impl);
-    await openKeys();
     await userEvent.type(await screen.findByLabelText("名称（可选）"), "vault");
     await userEvent.click(screen.getByRole("button", { name: "签发" }));
     const alert = await screen.findByRole("alert");
@@ -90,15 +96,13 @@ describe("设置 › 提醒渠道 › 导出与转发密钥（flow-bootstrap / f
     expect(document.body.textContent).not.toContain("apa_SECRET");
   });
 
-  it("收起再展开不会显示刚签发的明文", async () => {
+  it("离开页面再回来不会显示刚签发的明文", async () => {
     const s = server();
-    mount(s.impl);
-    await openKeys();
+    const first = mount(s.impl);
     await userEvent.click(await screen.findByRole("button", { name: "签发" }));
     expect(await screen.findByText("apa_SECRET_1")).toBeVisible();
-    await userEvent.click(await toggle());
-    await waitFor(() => expect(screen.queryByText("apa_SECRET_1")).not.toBeInTheDocument());
-    await openKeys();
+    first.unmount();
+    mount(s.impl);
     expect(await screen.findByText("cred_1")).toBeVisible();
     expect(screen.queryByText("apa_SECRET_1")).not.toBeInTheDocument();
   });
@@ -106,7 +110,6 @@ describe("设置 › 提醒渠道 › 导出与转发密钥（flow-bootstrap / f
   it("ACT-AUTH-04：吊销 → DELETE 带 CSRF，随后列表显示已吊销且无吊销按钮", async () => {
     const s = server([cred("a", "export")]);
     mount(s.impl);
-    await openKeys();
     const li = (await screen.findByText("L-a")).closest("li")!;
     await userEvent.click(within(li).getByRole("button", { name: "停用" }));
     await screen.findByText(/已停用/);
@@ -117,7 +120,6 @@ describe("设置 › 提醒渠道 › 导出与转发密钥（flow-bootstrap / f
   it("ACT-AUTH-04：非 Web 会话被服务端拒绝（web_only）时，展示服务端原因，不显示成功", async () => {
     const s = server([], json(403, { code: "web_only", why: "this change is Web-session only", next: "do it in the Web UI" }));
     mount(s.impl);
-    await openKeys();
     expect(await screen.findByRole("alert")).toHaveTextContent("Web-session only");
     await userEvent.click(screen.getByRole("button", { name: "签发" }));
     await waitFor(() => expect(s.calls.some((c) => c.method === "POST")).toBe(true));
@@ -127,7 +129,6 @@ describe("设置 › 提醒渠道 › 导出与转发密钥（flow-bootstrap / f
   it("ACT-AUTH-04：吊销失败（404）展示服务端原因，凭据仍按服务端状态显示", async () => {
     const s = server([cred("a", "export")], undefined, json(404, { code: "not_found", why: "credential not found", next: "list credentials and retry" }));
     mount(s.impl);
-    await openKeys();
     const li = (await screen.findByText("L-a")).closest("li")!;
     await userEvent.click(within(li).getByRole("button", { name: "停用" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("credential not found");

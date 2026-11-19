@@ -242,6 +242,7 @@ describe("设置 › 提醒渠道：给自己写的程序发钥匙的说明", ()
     expect(f.getByText(/你自己的脚本或机器人想收提醒/)).toBeInTheDocument();
     expect(f.getByText(/签了钥匙不等于接通/)).toBeInTheDocument();
     expect(f.getByText(/「添加渠道」接的是 APA 自带渠道/)).toBeInTheDocument();
+    expect(f.getByText(/想让程序来取事项或接转发/)).toBeInTheDocument();
     expect(f.getByText("怎么调（最小示例）")).toBeInTheDocument();
     expect(f.getByText(/\/v1\/deliveries\/next\?wait=60/)).toBeInTheDocument();
     expect(f.getByText(/Authorization: Bearer/)).toBeInTheDocument();
@@ -256,7 +257,17 @@ describe("设置 › 提醒渠道：给自己写的程序发钥匙的说明", ()
     expect(f.getByText(/Your own script or bot that receives reminders/)).toBeInTheDocument();
     expect(f.getByText(/A key is not a connection/)).toBeInTheDocument();
     expect(f.getByText(/is for the types APA ships/)).toBeInTheDocument();
+    expect(f.getByText(/Want a program to pull items or take forwards/)).toBeInTheDocument();
     expect(f.getByText("How to call it (minimal example)")).toBeInTheDocument();
     expect(f.getByText(/\/v1\/deliveries\/next\?wait=60/)).toBeInTheDocument();
+  });
+});
+
+describe("设置 › 提醒渠道：不再放导出与转发密钥", () => {
+  it("页面上没有导出与转发密钥的入口，「用自己的程序接入」仍在", async () => {
+    mount(server().impl);
+    expect(await screen.findByText("用自己的程序接入", { selector: "summary" })).toBeVisible();
+    expect(screen.queryByText("导出与转发密钥")).not.toBeInTheDocument();
+    expect(screen.queryByText("导出到文件夹")).not.toBeInTheDocument();
   });
 });
