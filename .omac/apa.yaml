@@ -2435,17 +2435,17 @@ nodes:
       producer: repo-ci-redline
       evidence_mode: artifact
     coverage_gate: 70
-- id: web-settings-credentials
+- id: web-settings-output-keys
   worker: omac-worker-frontend
   blocked_by:
   - web-shell
   - api-settings-credentials
-  title: 凭据设置页
-  description: 产出 web-settings-credentials-page。负责 2 个 business-action（flow-bootstrap、flow-authz-matrix）。
+  title: 提醒渠道内的导出与转发密钥
+  description: 产出 web-settings-output-keys-panel。负责 2 个 business-action（flow-bootstrap、flow-authz-matrix）。
     涉及 CLI 的步骤在测试里用同一 HTTP API 准备，完整 CLI 路径由全流程 owner 证明。
   reviewer: omac-reviewer
   contract:
-    objective: 设置页可签发 token 与 ext 密钥，明文只显示一次，吊销立即生效
+    objective: 提醒渠道页可签发和吊销导出与转发密钥，明文只显示一次
     non_goals:
     - 不把明文写入日志、状态存储或数据目录
     - Web 只调 HTTP API，不承载业务规则
@@ -2453,14 +2453,14 @@ nodes:
     verification_commands:
     - npm --prefix web ci
     - npm --prefix web run build
-    - npm --prefix web run test -- --run src/features/settings-credentials
+    - npm --prefix web run test -- --run src/features/settings-channels/output-keys.test.tsx
     integration_gates:
-    - name: web-settings-credentials-gate
+    - name: web-settings-output-keys-gate
       layer: L1
       source_of_truth:
       - docs/solution-design.md#41-web-中台
       - docs/solution-design.md#142-身份与凭据
-      delivery_goal: 设置页可签发 token 与 ext 密钥，明文只显示一次，吊销立即生效
+      delivery_goal: 提醒渠道页可签发和吊销导出与转发密钥，明文只显示一次
       covers:
       - ACT-BOOT-04
       - ACT-AUTH-04
@@ -2468,7 +2468,7 @@ nodes:
       - flow-bootstrap
       - flow-authz-matrix
       commands:
-      - npm --prefix web run test -- --run src/features/settings-credentials
+      - npm --prefix web run test -- --run src/features/settings-channels/output-keys.test.tsx
     pr_base: main
     acceptance_contributions:
     - flow_id: flow-bootstrap
@@ -2484,10 +2484,10 @@ nodes:
     - docs/solution-design.md#41-web-中台
     - docs/solution-design.md#142-身份与凭据
     scope_paths:
-    - web/src/features/settings-credentials/**
+    - web/src/features/settings-channels/**
     evidence_mode: fixture
     produces:
-    - artifact_id: web-settings-credentials-page
+    - artifact_id: web-settings-output-keys-panel
     consumes:
     - artifact_id: web-shell-page
       producer: web-shell
@@ -10713,7 +10713,7 @@ nodes:
   blocked_by:
   - test-doubles
   - cli-init-serve
-  - web-settings-credentials
+  - web-settings-output-keys
   - web-settings-exec
   - web-settings-policy
   - web-projects
@@ -10765,8 +10765,8 @@ nodes:
     - artifact_id: cli-init-serve-commands
       producer: cli-init-serve
       evidence_mode: artifact
-    - artifact_id: web-settings-credentials-page
-      producer: web-settings-credentials
+    - artifact_id: web-settings-output-keys-panel
+      producer: web-settings-output-keys
       evidence_mode: artifact
     - artifact_id: web-settings-exec-page
       producer: web-settings-exec
@@ -10792,7 +10792,7 @@ nodes:
   blocked_by:
   - cli-init-serve
   - web-shell
-  - web-settings-credentials
+  - web-settings-output-keys
   - cli-guide
   - cli-client
   - e2e-env-baseline
@@ -10841,8 +10841,8 @@ nodes:
     - artifact_id: web-shell-page
       producer: web-shell
       evidence_mode: artifact
-    - artifact_id: web-settings-credentials-page
-      producer: web-settings-credentials
+    - artifact_id: web-settings-output-keys-panel
+      producer: web-settings-output-keys
       evidence_mode: artifact
     - artifact_id: cli-guide-commands
       producer: cli-guide
@@ -11059,7 +11059,7 @@ nodes:
   worker: omac-worker-backend-oracle
   blocked_by:
   - authz-matrix-suite
-  - web-settings-credentials
+  - web-settings-output-keys
   - cli-projects
   - cli-delegation
   - web-delegation
@@ -11123,8 +11123,8 @@ nodes:
     - artifact_id: authz-matrix-suite-suite
       producer: authz-matrix-suite
       evidence_mode: artifact
-    - artifact_id: web-settings-credentials-page
-      producer: web-settings-credentials
+    - artifact_id: web-settings-output-keys-panel
+      producer: web-settings-output-keys
       evidence_mode: artifact
     - artifact_id: cli-projects-commands
       producer: cli-projects
@@ -15121,7 +15121,7 @@ nodes:
   blocked_by:
   - api-proxy-basis
   - web-shell
-  - web-settings-credentials
+  - web-settings-output-keys
   title: Web 设置：授权单页（签发、撤销、使用记录）
   description: 按 web/src/app/registry.ts 的约定新增 feature 目录，路由 settings/grants，不改中心路由表。
   reviewer: omac-reviewer
@@ -15173,8 +15173,8 @@ nodes:
     - artifact_id: web-shell-page
       producer: web-shell
       evidence_mode: artifact
-    - artifact_id: web-settings-credentials-page
-      producer: web-settings-credentials
+    - artifact_id: web-settings-output-keys-panel
+      producer: web-settings-output-keys
       evidence_mode: artifact
     - artifact_id: repo-ci-redline-tooling
       producer: repo-ci-redline

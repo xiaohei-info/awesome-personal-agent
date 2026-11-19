@@ -40,6 +40,10 @@ const save = async () => userEvent.click((await card()).getByRole("button", { na
 beforeEach(() => sessionStorage.clear());
 
 describe("设置 › 笔记库", () => {
+  it("未登记任何库时也会说明文档链接的用途", async () => {
+    mount(server([]).impl);
+    expect(await screen.findByText("把库里的文档挂到事项上，点链接回笔记应用读原文。")).toBeVisible();
+  });
   it("ACT-WVM-01: 每库一行可增删改；保存前先看到用示例路径渲染的打开地址；PUT 整体替换", async () => {
     const s = server([{ name: "notes", open_url: "app://open?v={vault}&f={path}" }, { name: "old", open_url: "https://x.example/{path}" }]);
     mount(s.impl);

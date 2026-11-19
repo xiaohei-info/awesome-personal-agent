@@ -5,6 +5,7 @@ import { errorText as msg, useT } from "../../app/i18n";
 import { Card, PolicyPage, TagInput, useDraft, usePolicyDocs, type Doc } from "../settings-policy/shared";
 import { strings } from "./strings";
 import { Connections, time } from "./Connections";
+import { OutputKeys } from "./OutputKeys";
 
 // 设置 › 提醒渠道（§4.1、§14.6）。上半是内置渠道连接（Connections.tsx）；底部折叠的「用自己的程序接入」是 ext 渠道：
 // 没有独立实体，名字取自 scope 为 channel.<名> 的 ext 密钥，属性在策略的 channels 段，回答人在 channel_answerers。回答人只经 PUT /settings/channels/{名}/answerers 改这一个键；
@@ -32,6 +33,7 @@ export function SettingsChannelsPage() {
   const { api } = useSession();
   const { docs, error, load, save } = usePolicyDocs(ROUTES);
   const [keys, setKeys] = useState<Key[]>([]);
+  const [outputsOpen, setOutputsOpen] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const loadKeys = useCallback(() => extKeys(api).then(setKeys, () => setKeys([])), [api]);
   useEffect(() => void loadKeys(), [loadKeys]);
@@ -64,6 +66,10 @@ export function SettingsChannelsPage() {
           ))}
           <NewChannel onSecret={(s) => { setSecret(s); void loadKeys(); }} />
         </div>
+      </details>
+      <details onToggle={(e) => setOutputsOpen(e.currentTarget.open)}>
+        <summary>{t.outputKeys.title}</summary>
+        {outputsOpen && <OutputKeys />}
       </details>
     </PolicyPage>
   );
