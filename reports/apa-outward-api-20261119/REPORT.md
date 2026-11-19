@@ -178,7 +178,7 @@
 | `tests/release/closeout-evidence.json` | 去掉 `flow-export-ext` 条目（`TestCloseoutEvidenceIsTraceable` 要求与验收文档一致） |
 | `.gitignore` | 去掉 `/ext/export/export` |
 | `.omac` | `apa.yaml`、`apa-v02.yaml` 删节点 `ext-export`、`ext-webhook-forward`、`export-ext-v2`、`e2e-export` 及所有 blocked_by、consumes、acceptance 引用；`apa.acceptance.yaml`、`apa-v02.acceptance.yaml` 删 `flow-export-ext` 整流程；保留的节点 `action-links`、`e2e-events-export`、`api-deliveries` 改写描述与命令（去掉 `go test ./ext/export/...`）；`apa-v02.design/OMAC-NOTES.md` 标注已移除；删节点状态文件。用 PyYAML（含重复键检查）解析四份文件：`apa.yaml` 206 个节点、`apa-v02.yaml` 120 个，没有悬挂的 `blocked_by` 或 `producer` |
-| `docs/solution-design.md` | §4.1、§4.4、§10.3（原「Markdown 目录导出」整段配置表与手改检测规则换成「自写导出与转发程序的约束」四条：导出范围、单向、动作链接不含凭据、事件订阅语义）、§10.4、§16.6、§14.2 数据流向表、M6、W11、W25.4、风险 31、决定 77、78 改写，新增**决定 79**；凡「随发行附带导出 ext、webhook 转发 ext」改为「不再附带，需自行实现」；`docs/appendix-d-adapters.md` D.1 删两行；`docs/user/README.md`、`run-tiers.md`（与 §2.4 保持一致）同步 |
+| `docs/solution-design.md` | §4.1、§4.4、§10.3（原「Markdown 目录导出」整段配置表与手改检测规则换成「自写导出与转发程序的约束」四条：导出范围、单向、动作链接不含凭据、事件订阅语义）、§10.4、§16.6、§17.1 HTTP API 分组表、§2.4 运行档位表、M6、W11、W25.4、风险 31、决定 77、78 改写，新增**决定 79**；凡「随发行附带导出 ext、webhook 转发 ext」改为「不再附带，需自行实现」；`docs/appendix-d-adapters.md` D.1 删两行；`docs/user/README.md`、`run-tiers.md`（与 §2.4 保持一致）同步 |
 | 保留 | 对外接口页、导出与转发密钥、事件订阅与只读 API、ext 协议、`apa ext check`、`ext/telegram` 及其 conformance 测试 |
 
 **清扫命令与命中数**
@@ -188,7 +188,7 @@ grep -rIEn 'ext/export|ext/webhookforward|webhookforward|ext run export|APA_EXPO
   --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=reports --exclude=BRIEF-OUTWARD-API.md .
 ```
 
-最终命中 **4 处**，都是有意保留的说明或历史记录，不指向存在的路径：`docs/solution-design.md` 决定 79（写明删除了这两个目录）、`.omac/apa-v02.design/OMAC-NOTES.md`（标注「已移除」）、`tests/release/evidence/go-test-all-linux.txt` 两行（留存的历史测试输出，不改写）。清扫前同一命令命中数百处（仅 `.omac` 里就有 105 行）。
+最终命中 **4 处**，都是有意保留的说明或历史记录，不指向存在的路径：`docs/solution-design.md` 决定 79（写明删除了这两个目录）、`.omac/apa-v02.design/OMAC-NOTES.md`（标注「已移除」）、`tests/release/evidence/go-test-all-linux.txt` 两行（留存的历史测试输出，不改写）。清扫前同一命令命中数百处（仅 `.omac` 里就有 143 行）。
 
 **没有改的**：`docs/diagrams/architecture.html` 与 `.png` 里的「导出扩展」「Webhook 转发扩展」两个方框表示「自己写的 ext 的类别」，不是附带程序，没有动（改图要成对重绘 HTML 与 PNG）。如果你希望图上也去掉，需要另做。`kernel/auth` 等处代码注释里的「导出 ext 密钥」指密钥种类，保留。
 
