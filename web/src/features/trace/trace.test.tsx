@@ -171,7 +171,7 @@ describe("一条消息的处理经过（/sources/events/:id）", () => {
     mount("/sources/events/sev_g");
     const l = await lines();
     expect(l[0]).toMatch(/Agent 在和你的对话里接着做 · 按 Agent 设置/);
-    expect(l[1]).toMatch(/Agent 单独开了一个后台会话 · 按这条规则的设置 · Agent 还没打开唤醒，改为单独在后台做/);
+    expect(l[1]).toMatch(/Agent 单独在后台做 · 按这条规则的设置 · Agent 还没打开唤醒，改为单独在后台做/);
     expect(l[2]).toMatch(/在后台启动 Agent/);
     expect(l.join()).not.toMatch(/wake|headless|main_session/);
   });

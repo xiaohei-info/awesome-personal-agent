@@ -92,7 +92,7 @@ const zh = {
   followCount: (n: number) => `（${n} 条）`,
   observed: "试运行：本来会动手",
   run: { started: "Agent 后台运行开始", finished: "Agent 后台运行结束", launched: "在后台启动 Agent" } as Record<string, string>,
-  launched: { headless: "Agent 单独开了一个后台会话", wake: "Agent 在和你的对话里接着做" } as Record<string, string>,
+  launched: { headless: "Agent 单独在后台做", wake: "Agent 在和你的对话里接着做" } as Record<string, string>,
   launchFrom: { rule: "按这条规则的设置", agent: "按 Agent 设置", declaration: "按 Agent 原来的设置", default: "默认" } as Record<string, string>,
   launchFallback: "Agent 还没打开唤醒，改为单独在后台做",
   generated: { succeeded: "写好了一段内容", failed: "没写出来，留空" } as Record<string, string>,
