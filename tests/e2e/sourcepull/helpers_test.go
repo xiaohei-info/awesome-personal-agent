@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -106,6 +107,7 @@ type srcState struct {
 		LastSuccessAt       string `json:"last_success_at"`
 		LastError           string `json:"last_error"`
 		NeedsInputItem      string `json:"needs_input_item"`
+		LastFailureKind     string `json:"last_failure_kind"`
 	} `json:"stats"`
 }
 
@@ -213,6 +215,15 @@ func (f *fx) get(path string) string {
 		f.t.Fatalf("GET %s: HTTP %d %s", path, r.Code, r.Body)
 	}
 	return r.Body
+}
+
+// authFailed：来源最近一次失败是认证或配置失败，且只作为事件出现——统计带类别、诊断页的来源失败信号带 kind，
+// 不建 needs_input 事项（2026-11-20 起，§9.2）。
+func (f *fx) authFailed(id string) bool {
+	f.t.Helper()
+	s := f.show(id)
+	return s.Stats.LastFailureKind == "auth_or_config" && s.Stats.NeedsInputItem == "" &&
+		regexp.MustCompile(`"source":"`+regexp.QuoteMeta(id)+`","enabled":true,"consecutive_failures":\d+,"kind":"auth_or_config"`).MatchString(f.get("/v1/health"))
 }
 
 func (f *fx) needsInputOf(item string) bool {

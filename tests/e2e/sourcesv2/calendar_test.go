@@ -197,25 +197,24 @@ func TestFlowSourceCalendar(t *testing.T) {
 		eq(t, "建议流之外没有新建事项：事项总数", len(k.itemIDs()), 4-boolInt(c1First == c1Second))
 	})
 
-	// failsAs 把工具替身切到 c，等日历来源再跑一次并确认：退出码 2、生成 needs_input、游标不动。
+	// failsAs 把工具替身切到 c，等日历来源再跑一次并确认：退出码 2、记为认证或配置失败（不建事项）、游标不动。
 	failsAs := func(t *testing.T, c string) SrcState {
 		before := k.show(src)
 		k.SetToolCase(c)
 		var s SrcState
-		k.until("case "+c+" 的拉取失败并生成 needs_input", func() bool {
+		k.until("case "+c+" 的拉取失败并记为认证或配置失败", func() bool {
 			s = k.show(src)
 			return s.Stats.Runs > before.Stats.Runs && strings.HasPrefix(s.Stats.LastError, exitConfig)
 		})
 		if s.Cursor != before.Cursor {
 			t.Errorf("游标不应前进: %q → %q", before.Cursor, s.Cursor)
 		}
-		if s.Stats.NeedsInputItem == "" || k.item(s.Stats.NeedsInputItem).Phase != "needs_input" {
-			t.Errorf("应生成 needs_input 事项: %+v", s.Stats)
-		}
+		// 2026-11-20 改写（清单第 8 条）：原断言生成 needs_input 事项；认证或配置失败只记为事件、诊断页指向来源。
+		k.authNotice(t, s, src)
 		return s
 	}
 
-	k.step("ACT-CAL-04 工具未安装时生成 needs_input", func(t *testing.T) {
+	k.step("ACT-CAL-04 工具未安装时记为认证或配置失败（不建事项）", func(t *testing.T) {
 		events := len(k.events(src))
 		bin, off := filepath.Join(k.ToolBin, "gog"), filepath.Join(k.ToolBin, "gog.off")
 		if err := os.Rename(bin, off); err != nil {
@@ -251,7 +250,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-CAL-06 版本不在声明范围时生成 needs_input", func(t *testing.T) {
+	k.step("ACT-CAL-06 版本不在声明范围时记为认证或配置失败（不建事项）", func(t *testing.T) {
 		k.clearToolLog()
 		s := failsAs(t, "cal-version-0.1")
 		if !strings.Contains(s.Stats.LastError, "exit status 2") {
@@ -264,7 +263,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-CAL-07 认证失败时生成 needs_input", func(t *testing.T) {
+	k.step("ACT-CAL-07 认证失败时记为认证或配置失败（不建事项）", func(t *testing.T) {
 		events := len(k.events(src))
 		failsAs(t, "cal-auth-fail")
 		k.SetToolCase("cal-updated")
@@ -301,8 +300,9 @@ func TestFlowSourceCalendar(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := failsAs(t, "cal-updated")
+		// 2026-11-20 改写（清单第 8 条）：原来还查 needs_input 事项标题不回显；不再建事项，改查诊断页正文不回显。
 		if strings.Contains(s.Stats.LastError, "do-not-echo-me") || strings.Contains(k.ServiceLog(), "do-not-echo-me") ||
-			strings.Contains(k.item(s.Stats.NeedsInputItem).Raw["title"].(string), "do-not-echo-me") {
+			strings.Contains(k.authNotice(t, s, src), "do-not-echo-me") {
 			t.Error("报错不应带文件内容")
 		}
 		if err := os.WriteFile(cred, []byte("GOG_KEYRING_PASSWORD="+password+"\n"), 0o600); err != nil {

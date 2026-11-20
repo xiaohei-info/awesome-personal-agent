@@ -515,3 +515,45 @@ func (e *Env) DeclareStubHarness() {
 		e.webOK("POST", "/v1/settings/declarations/"+harness+"/1/confirm", "", 200)
 	}
 }
+
+// Notice 是诊断页 other_alerts 的一条"动作没能完成"（GET /health 的 notices）：规则动作失败、运行没拉起（2026-11-20 起这些是事件不是问题）。
+type Notice struct {
+	Object  string            `json:"object"`
+	Rule    string            `json:"rule"`
+	Code    string            `json:"code"`
+	Params  map[string]string `json:"params"`
+	Item    string            `json:"item"`
+	Dropped bool              `json:"dropped"`
+}
+
+// Notices 读诊断页当前的"动作没能完成"通知。
+func (e *Env) Notices() []Notice {
+	e.T.Helper()
+	var rep struct {
+		Signals []struct {
+			ID      string   `json:"id"`
+			Notices []Notice `json:"notices"`
+		} `json:"signals"`
+	}
+	if err := json.Unmarshal([]byte(e.webOK("GET", "/v1/health", "", 200)), &rep); err != nil {
+		e.T.Fatal(err)
+	}
+	for _, s := range rep.Signals {
+		if s.ID == "other_alerts" {
+			return s.Notices
+		}
+	}
+	return nil
+}
+
+// NoticeWith 返回类别码为 code、原因（params.detail）含 detail 的通知数。
+func (e *Env) NoticeWith(code, detail string) int {
+	e.T.Helper()
+	n := 0
+	for _, x := range e.Notices() {
+		if x.Code == code && strings.Contains(x.Params["detail"], detail) {
+			n++
+		}
+	}
+	return n
+}

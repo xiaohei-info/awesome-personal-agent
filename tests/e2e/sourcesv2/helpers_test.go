@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -164,7 +165,20 @@ type SrcState struct {
 		ConsecutiveFailures int    `json:"consecutive_failures"`
 		LastError           string `json:"last_error"`
 		NeedsInputItem      string `json:"needs_input_item"`
+		LastFailureKind     string `json:"last_failure_kind"`
 	} `json:"stats"`
+}
+
+// authNotice 断言来源这次认证或配置失败只作为事件出现（2026-11-20 起，§9.2）：统计带 kind=auth_or_config、
+// 不建 needs_input 事项，诊断页的来源失败信号指向这个来源并带同一 kind；返回诊断页正文供调用方查回显。
+func (k *kit) authNotice(t *testing.T, s SrcState, src string) string {
+	t.Helper()
+	health := k.webOK("GET", "/health", "", 200)
+	if s.Stats.LastFailureKind != "auth_or_config" || s.Stats.NeedsInputItem != "" ||
+		!regexp.MustCompile(`"source":"`+regexp.QuoteMeta(src)+`","enabled":true,"consecutive_failures":\d+,"kind":"auth_or_config"`).MatchString(health) {
+		t.Errorf("认证或配置失败应只记为事件（不建事项），诊断页指向来源 %s: %+v", src, s.Stats)
+	}
+	return health
 }
 
 func (k *kit) show(id string) SrcState {

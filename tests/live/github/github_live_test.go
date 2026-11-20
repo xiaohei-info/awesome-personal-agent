@@ -65,9 +65,10 @@ type srcState struct {
 	Cursor          string `json:"cursor"`
 	CredentialsPath string `json:"credentials_path"`
 	Stats           struct {
-		Runs           int    `json:"runs"`
-		LastError      string `json:"last_error"`
-		NeedsInputItem string `json:"needs_input_item"`
+		Runs            int    `json:"runs"`
+		LastError       string `json:"last_error"`
+		NeedsInputItem  string `json:"needs_input_item"`
+		LastFailureKind string `json:"last_failure_kind"`
 	} `json:"stats"`
 }
 
@@ -524,9 +525,10 @@ func TestFlowSourceGitHub(t *testing.T) {
 		stub.Reset()
 		stub.SetDefault(modelstub.Reply{Content: `{"choice":"task","confidence":0.95}`})
 		title, _ := l.newIssue("authfail")
-		l.until("以退出码 2 失败并生成 needs_input", func() bool {
+		// 2026-11-20 改写（本人批准的清单第 9 条，live 只改不跑）：原断言生成 needs_input 事项；认证或配置失败只记为事件，统计带 kind=auth_or_config、不建事项。
+		l.until("以退出码 2 失败并记为认证或配置失败", func() bool {
 			st := l.show()
-			return st.Stats.NeedsInputItem != "" && strings.Contains(st.Stats.LastError, "exit status 2")
+			return st.Stats.LastFailureKind == "auth_or_config" && st.Stats.NeedsInputItem == "" && strings.Contains(st.Stats.LastError, "exit status 2")
 		})
 		st := l.show()
 		if !strings.Contains(st.Stats.LastError, "exit status 2") {

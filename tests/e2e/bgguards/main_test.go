@@ -148,8 +148,17 @@ $APA report "$ITEM" --outcome progress --summary 已委派 > "$OUT/progress.out"
 		eq(t, "Run 数", len(rs), 1)
 		f.waitFor("事项转 needs_input", 20*time.Second, func() bool { return f.phase(id) == "needs_input" })
 		a, _ := f.item(id)["ask"].(map[string]any)
-		if opts, _ := a["options"].([]any); len(opts) < 3 {
-			t.Errorf("应给出重新运行、改派、放弃三个选项: %+v", a)
+		// 2026-11-20 改写（本人批准的清单第 3 条）：原断言至少三个选项（重新运行、改派、放弃）；前两个没有消费者，
+		// 改为选项 id 恰为 handle（我来处理）、drop（放弃）。
+		var ids []string
+		opts, _ := a["options"].([]any)
+		for _, o := range opts {
+			m, _ := o.(map[string]any)
+			id, _ := m["id"].(string)
+			ids = append(ids, id)
+		}
+		if strings.Join(ids, ",") != "handle,drop" {
+			t.Errorf("应给出我来处理、放弃两个选项: %+v", a)
 		}
 		time.Sleep(5 * time.Second)
 		eq(t, "不自动再次拉起，Run 数", len(f.runsOf(id)), 1)

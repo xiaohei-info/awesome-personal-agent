@@ -53,7 +53,9 @@ $APA report "$ITEM" --outcome done --summary 任务型完成 --link https://exam
 	f.step("ACT-BGT-02 执行者不在名单时不拉起", func(t *testing.T) {
 		before := len(f.runs())
 		id := f.task("bgt-other", "acc-work", "acc-task-other")
-		f.waitFor("事项转 needs_input", 20*1e9, func() bool { return f.phase(id) == "needs_input" })
+		// 2026-11-20 改写：原等待事项转 needs_input；没拉起是事件：事项留在 open，诊断页有 background_refused 通知。
+		f.waitFor("诊断页记下没拉起", 20*1e9, func() bool { return f.notified(id, "background_refused") })
+		eq(t, "事项阶段（不转 needs_input）", f.phase(id), "open")
 		eq(t, "新增 Run 数", len(f.runs())-before, 0)
 		ev := f.events(id, "background.refused")
 		if len(ev) != 1 || !strings.Contains(ev[0].Reason+" "+toJSON(ev[0].Payload), "other-host.cli") {

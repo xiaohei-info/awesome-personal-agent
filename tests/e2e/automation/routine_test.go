@@ -258,14 +258,21 @@ func TestFlowRoutine(t *testing.T) {
 			"instruction": "越权", "access": "edit", "output": "item"})
 		t.Logf("access=edit 实例建立结果: HTTP %d %s", status, body)
 		if status == 201 {
-			// 实例可建，但到期时 Run 不得以 edit 档拉起：事项转 needs_input 并写明超出上限。
+			// 实例可建，但到期时 Run 不得以 edit 档拉起：这一份转 dropped 并写明超出上限。
+			// 2026-11-20 改写（本人裁决：规则建的事项没拉起转 dropped，不挂问题）：原等待事项转 needs_input；
+			// 改为等待转 dropped、阶段变更理由（apa why）含被拒的档位 edit（超出上限或声明没有该档位都会写出它；
+			// 原断言没有检查原因内容）。不拉起 Run、不以高档位运行两条不变。
 			instances = append(instances, id)
 			before := routineItems()
 			tick(1)
 			it := waitNew(before, "access=edit 实例到期", func(it ledgerItem) bool { return strings.HasPrefix(it.Title, "acc 越权 ") })
 			var raw string
-			if !k.WaitFor(45*time.Second, func() bool { var cur ledgerItem; cur, raw = k.show(it.ID); return cur.Phase == "needs_input" }) {
-				t.Fatalf("超出上限时事项应转 needs_input: %s", raw)
+			if !k.WaitFor(45*time.Second, func() bool {
+				var cur ledgerItem
+				cur, raw = k.show(it.ID)
+				return cur.Phase == "dropped" && strings.Contains(k.apa(e.DEL, 0, "why", it.ID).Stdout, "edit")
+			}) {
+				t.Fatalf("超出上限时这一份应转 dropped 并写明被拒的档位: %s", raw)
 			}
 			t.Logf("超出上限的事项: %s", raw)
 			time.Sleep(3 * time.Second)

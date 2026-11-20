@@ -320,7 +320,11 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.When("ACCRELAYGEN", reply(`{"insufficient_info":true}`))
 		id := relay("cas10")
 		_ = id
-		f.waitFor("接力终止于 needs_input", 20*time.Second, func() bool { return f.hasPhase("cas10", "needs_input") })
+		// 2026-11-20 改写：原等待接力终止于 needs_input；任务型没拉起是事件：诊断页有原因含 harness 的 task_refused 通知，事项不转 needs_input。
+		f.waitFor("接力终止于没拉起的通知", 20*time.Second, func() bool { return f.NoticeWith("task_refused", "harness") >= 1 })
+		if f.hasPhase("cas10", "needs_input") {
+			t.Errorf("没拉起不应把事项转 needs_input")
+		}
 		manual := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "cas10-ledger", "--phase", "open", "--project", f.Projects["acc-open"], "--evidence", "账本照常")
 		mid := jsonMap(t, manual.Stdout)["id"].(string)
 		f.apa(f.DEL, 0, "item", "transition", mid, "--to", "dropped", "--reason", "harness 不可用时 CLI 照常", "--evidence", "账本照常")
@@ -515,13 +519,14 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.apa(f.DEL, 0, "item", "update", child, "--tags", "acc-relay-open", "--reason", "触发接力", "--evidence", "验收")
 		f.apa(f.DEL, 0, "item", "transition", child, "--to", "waiting", "--waiting-on", "external:cas20", "--reason", "go", "--evidence", "验收")
 		f.apa(f.DEL, 0, "item", "transition", child, "--to", "open", "--reason", "go", "--evidence", "触发接力")
-		// 接力另建目标事项（与触发事项同名），它转 needs_input 交本人。
-		f.waitFor("接力转交本人", 60*time.Second, func() bool { return f.hasPhase("cas20-child", "needs_input") })
+		// 2026-11-20 改写（本人裁决："没拉起"类改为事件）：原等待接力另建的同名目标事项转 needs_input、needs_input 列表写明"白名单"；
+		// 复核挪到建目标事项之前：不另建事项，诊断页有一条 task_refused 通知、原因写明"白名单"。"不应拉起任务型"不变。
+		f.waitFor("接力没拉起的通知", 60*time.Second, func() bool { return f.NoticeWith("task_refused", "白名单") >= 1 })
 		if n := len(f.runs("--category", "task")); n != before {
 			t.Errorf("不应拉起任务型：Run %d → %d", before, n)
 		}
-		if !strings.Contains(f.apa(f.OBS, 0, "item", "list", "--phase", "needs_input").Stdout, "白名单") {
-			t.Error("needs_input 应写明原因是存在未进白名单的挂靠消息")
+		if f.hasPhase("cas20-child", "needs_input") {
+			t.Error("没拉起不应把事项转 needs_input")
 		}
 	})
 

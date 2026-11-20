@@ -822,13 +822,15 @@ printf '%s\n' '{"id":"t1","type":"acc.event","subject":"tool event","occurred_at
 		t.Error("apa why 无输出")
 	}
 	// 工具适配来源需要重新认证：生成 needs_input，内核不崩溃，其他功能照常。
-	f.until(waitKern, "工具来源因认证失效生成 needs_input", func() bool {
+	// 2026-11-20 改写（本人批准的清单第 9 条，live 只改不跑）：原断言生成 needs_input 事项；认证或配置失败只记为事件，统计带 kind=auth_or_config、不建事项。
+	f.until(waitKern, "工具来源因认证失效记为认证或配置失败", func() bool {
 		select {
 		case <-done:
 			t.Fatalf("apa serve 崩溃: %s", logs.String())
 		default:
 		}
-		return strings.Contains(cli(e.OBS, 0, "source", "show", "src_dpl_tool").Stdout, `"needs_input_item":"itm_`)
+		out := cli(e.OBS, 0, "source", "show", "src_dpl_tool").Stdout
+		return strings.Contains(out, `"last_failure_kind":"auth_or_config"`) && !strings.Contains(out, `"needs_input_item":"itm_`)
 	})
 	select {
 	case <-done:

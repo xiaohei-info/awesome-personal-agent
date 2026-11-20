@@ -219,6 +219,17 @@ func (f *fx) outFile(name string) string {
 	return strings.TrimSpace(string(b))
 }
 
+// notified：诊断页有一条类别码为 code、指向事项 id 的"动作没能完成"通知（2026-11-20 起没拉起、续接被拒是事件不是问题）。
+func (f *fx) notified(id, code string) bool {
+	f.t.Helper()
+	for _, n := range f.Notices() {
+		if n.Code == code && n.Item == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *fx) webOK(method, path, body string, want int) string {
 	f.t.Helper()
 	r := f.Web(method, "/v1"+path, body)

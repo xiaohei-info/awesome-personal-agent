@@ -248,8 +248,9 @@ func TestFlowBgMainSession(t *testing.T) {
 		eq(t, "Run 数", len(rs), 1)
 		eq(t, "事项阶段", l.phase(id), "needs_input")
 		a := l.askOf(id)
-		if len(a.Options) < 3 {
-			t.Errorf("应给出重新运行、改派、放弃三个选项: %+v", a)
+		// 2026-11-20 改写（本人批准的清单第 4 条，live 只改不跑）：原断言至少三个选项；改为选项 id 恰为 handle、drop。
+		if len(a.Options) != 2 || a.Options[0].ID != "handle" || a.Options[1].ID != "drop" {
+			t.Errorf("应给出我来处理、放弃两个选项: %+v", a)
 		}
 		time.Sleep(20 * time.Second)
 		eq(t, "不自动再次拉起，Run 数", len(l.runs(id)), 1)
