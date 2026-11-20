@@ -396,23 +396,25 @@ func (e *env) engine() *rules.Engine {
 	return eng
 }
 
-// ACT-BRF-05：覆盖为生成型后，到期的简报有结果就转 done；模型端点缺失、调用失败、输出不合规、信息不足、
-// 结果过不了 kind 的 schema，都转 needs_input 并说明原因，不留在 open。
+// ACT-BRF-05：覆盖为生成型后，到期的简报有结果就转 done；模型端点缺失、调用失败、输出不合规、
+// 结果过不了 kind 的 schema 是动作失败，这一份转 dropped 并在阶段变更里说明原因；信息不足是跑完了没结论，转 needs_input 问本人。都不留在 open。
+// 2026-11-20 改写（本人裁决：规则建的事项失败后转 dropped，不挂问题）：原断言四种失败都转 needs_input、问题说明原因；
+// 改为转 dropped、阶段变更的理由说明同样的原因。"信息不足"一行与"不给重新运行"的检查不变。
 func TestGenerateOverrideNeverLeavesBriefSilentlyOpen(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		endpoint bool
 		reply    modelstub.Reply
 		phase    domain.Phase
-		ask      string // needs_input 的问题要说明的内容
+		ask      string // needs_input 的问题、或转 dropped 的理由要说明的内容
 		finished string // 这次调用的 run.finished 状态；空表示没有调用模型
 	}{
 		{name: "result", endpoint: true, reply: modelstub.Reply{Content: `{"insufficient_info":false,"summary":"s"}`}, phase: domain.PhaseDone, finished: "succeeded"},
-		{name: "no endpoint", phase: domain.PhaseNeedsInput, ask: "模型端点"},
-		{name: "endpoint refuses", endpoint: true, reply: modelstub.Reply{Status: 400}, phase: domain.PhaseNeedsInput, ask: "status 400", finished: "failed"},
-		{name: "output violates schema", endpoint: true, reply: modelstub.Reply{Content: "```json\n{}\n```"}, phase: domain.PhaseNeedsInput, ask: "schema", finished: "failed"},
+		{name: "no endpoint", phase: domain.PhaseDropped, ask: "模型端点"},
+		{name: "endpoint refuses", endpoint: true, reply: modelstub.Reply{Status: 400}, phase: domain.PhaseDropped, ask: "status 400", finished: "failed"},
+		{name: "output violates schema", endpoint: true, reply: modelstub.Reply{Content: "```json\n{}\n```"}, phase: domain.PhaseDropped, ask: "schema", finished: "failed"},
 		{name: "insufficient info", endpoint: true, reply: modelstub.Reply{Content: `{"insufficient_info":true}`}, phase: domain.PhaseNeedsInput, ask: "insufficient_info", finished: "succeeded"},
-		{name: "kind schema rejects result", endpoint: true, reply: modelstub.Reply{Content: `{"insufficient_info":false,"period":7}`}, phase: domain.PhaseNeedsInput, ask: "period", finished: "succeeded"},
+		{name: "kind schema rejects result", endpoint: true, reply: modelstub.Reply{Content: `{"insufficient_info":false,"period":7}`}, phase: domain.PhaseDropped, ask: "period", finished: "succeeded"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t, generateOverride(t))
@@ -457,7 +459,17 @@ func TestGenerateOverrideNeverLeavesBriefSilentlyOpen(t *testing.T) {
 				t.Fatalf("brief = %+v, want phase %s", its, c.phase)
 			}
 			it := its[0]
-			if c.ask == "" {
+			if c.phase == domain.PhaseDropped {
+				reason := ""
+				for _, en := range es {
+					if en.Event.Type == domain.EvItemPhaseChanged && strings.Contains(en.Event.Reason, "作废") {
+						reason = en.Event.Reason
+					}
+				}
+				if it.Ask != nil || !strings.Contains(reason, c.ask) {
+					t.Fatalf("drop reason must name %q: %q %+v", c.ask, reason, it.Ask)
+				}
+			} else if c.ask == "" {
 				if !strings.Contains(string(it.Spec), `"summary"`) {
 					t.Fatalf("result not written to spec: %s", it.Spec)
 				}

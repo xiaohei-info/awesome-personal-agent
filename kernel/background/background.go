@@ -544,24 +544,17 @@ func (s *Service) audit(ctx context.Context, c rules.Call, f facts, typ, object,
 	})
 }
 
-// refuse 记拒绝记录，并把触发事项转 needs_input 交本人：附原因，选项含重新运行、改派、放弃（§8.3、§13.6）。
+// refuse 记拒绝记录，交回带类别码的错误：没拉起是故障不是问题，事项阶段不变、不挂问题，由规则引擎记告警，
+// 诊断页据它给出这件事与下一步（§6.14 第 20 条、§8.3、§13.6）。规则自己建的事项由规则引擎收掉。
 func (s *Service) refuse(ctx context.Context, c rules.Call, f facts, reason string) error {
 	if err := s.audit(ctx, c, f, EvRefused, f.item.ID, reason, nil); err != nil {
 		return err
 	}
-	if f.item.Phase == domain.PhaseNeedsInput {
-		return nil
-	}
-	if _, err := c.Do("item.update", map[string]any{"id": f.item.ID, "ask": askFor(domain.AskBackgroundRefused, reason), "reason": reason}); err != nil {
-		return err
-	}
-	_, err := c.Do("item.transition", map[string]any{"id": f.item.ID, "to": domain.PhaseNeedsInput, "reason": reason})
-	return err
+	return &domain.NotStarted{Code: domain.NoticeBackgroundRefused, Detail: reason, Item: f.item.ID}
 }
 
 func askFor(code domain.AskCode, reason string) map[string]any {
-	return map[string]any{"question": "后台运行未完成：" + reason, "code": code, "params": map[string]string{"detail": reason}, "options": []domain.AskOption{
-		{ID: "rerun", Label: "重新运行"}, {ID: "reassign", Label: "改派"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
+	return map[string]any{"question": "后台运行未完成：" + reason, "code": code, "params": map[string]string{"detail": reason}, "options": domain.HandleOrDrop()}
 }
 
 // Env 供 proc.Options.Env 使用：运行启动时为后台运行签发运行凭据并注入环境变量，凭据明文不入账本（落盘只在运行上下文文件，§7.7）。

@@ -149,8 +149,12 @@ type Stats struct {
 	LastFailureAt       time.Time `json:"last_failure_at,omitzero"`
 	LastError           string    `json:"last_error,omitempty"`
 	NextAttemptAt       time.Time `json:"next_attempt_at,omitzero"` // 退避：此前到期的定时拉取被跳过
-	NeedsInputItem      string    `json:"needs_input_item,omitempty"`
-	TimerPeriod         string    `json:"timer_period,omitempty"` // 当前登记的定时节拍；与 schedule 不同说明要重建
+	// NeedsInputItem 是升级前认证失败时建的 needs_input 事项（现在认证失败只记事件与健康信号，不再建事项）；
+	// 保留引用，来源恢复时照旧由内核收尾。
+	NeedsInputItem string `json:"needs_input_item,omitempty"`
+	// LastFailureKind 是最近一次失败的稳定类别：transient、auth_or_config、permanent；成功后清空。健康视图据它说人话。
+	LastFailureKind string `json:"last_failure_kind,omitempty"`
+	TimerPeriod     string `json:"timer_period,omitempty"` // 当前登记的定时节拍；与 schedule 不同说明要重建
 }
 
 // StatsOf 取来源的统计；还没跑过为零值。
@@ -466,7 +470,6 @@ type resultIn struct {
 	Events     []parsedEvent `json:"events,omitempty"`
 	Rejects    []Reject      `json:"rejects,omitempty"`
 	Cursor     string        `json:"cursor,omitempty"`
-	Item       string        `json:"item,omitempty"` // 退出码 2 时为本人建的 needs_input 事项
 }
 
 // classify 把 Run 的终态映射成处置类别（§9.2 的退出码表）。
@@ -522,13 +525,6 @@ func (r *Runner) Handle(ctx context.Context, res proc.Result) error {
 			in.Cursor = p.cursor
 		}
 	}
-	if in.Class == clsNeedsHuman {
-		item, err := r.needsInput(ctx, in)
-		if err != nil {
-			return err
-		}
-		in.Item = item
-	}
 	if in.Class == clsOK {
 		if err := r.recovered(ctx, in); err != nil {
 			return err
@@ -542,59 +538,7 @@ func (r *Runner) Handle(ctx context.Context, res proc.Result) error {
 	return err
 }
 
-// needsInput 为认证或配置失败建一个 needs_input 事项找本人；来源已有未处理的这类事项时复用，不重复建。
-func (r *Runner) needsInput(ctx context.Context, in resultIn) (string, error) {
-	var open string
-	err := r.o.Store.View(ctx, func(tx *store.Tx) error {
-		s, err := registry.Get(tx, in.SourceID)
-		if err != nil {
-			return err
-		}
-		st, err := StatsOf(s)
-		if err != nil || st.NeedsInputItem == "" {
-			return err
-		}
-		it, err := items.Get(tx, st.NeedsInputItem)
-		if err == nil && it.Phase == domain.PhaseNeedsInput {
-			open = it.ID
-		} else if err != nil && !isNotFound(err) {
-			return err
-		}
-		return nil
-	})
-	if err != nil || open != "" {
-		return open, err
-	}
-	body, err := json.Marshal(map[string]any{
-		"kind": domain.KindTask, "phase": domain.PhaseNeedsInput,
-		"title":    "来源 " + in.SourceID + " 认证或配置失败",
-		"assignee": systemPrinc, // 内核身份，使这次写入属于"改自己的事项"（同任务型的做法）
-		"origin":   map[string]string{"source": in.SourceID, "ref": in.RunID},
-		"ask": map[string]any{
-			"question":  "来源 " + in.SourceID + " 的拉取返回了认证或配置失败（退出码 2），请检查凭据与配置后再启用或等待下次拉取。",
-			"code":      domain.AskSourceAuthFailed,
-			"params":    map[string]string{"source": in.SourceID},
-			"free_text": true,
-		},
-		"reason": "source run " + in.RunID,
-	})
-	if err != nil {
-		return "", err
-	}
-	res, err := r.o.Exec.Do(ctx, command.Request{Identity: system, Command: "item.create", Input: body, IdemKey: in.RunID})
-	if err != nil {
-		return "", err
-	}
-	var ref struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(res.Value, &ref); err != nil || ref.ID == "" {
-		return "", fmt.Errorf("runner: item.create returned no id: %v", err)
-	}
-	return ref.ID, nil
-}
-
-// recovered：认证或配置失败之后这次拉取成功，runner 当初建的、仍在 needs_input 的事项按"来源已恢复"转 done。
+// recovered：认证或配置失败之后这次拉取成功，runner 当初（升级前）建的、仍在 needs_input 的事项按"来源已恢复"转 done。
 // 这个事项的问题是 runner 自己提的（执行者是内核身份），拉取成功就是答案，所以以本人登记该来源为依据、代本人结束它
 // （同 followmsg 的回音唤醒）；理由与这次运行写在阶段变更的 Event 里。命令被拒（如本人把这类事项设为 web_only）时只记日志，
 // 事项留给本人处理，统计里的引用也保留，下次认证失败复用它而不是另建。
@@ -661,7 +605,7 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 	st.Runs++
 	if in.Class == clsOK {
 		cursor = in.Cursor
-		st.ConsecutiveFailures, st.LastError, st.NextAttemptAt = 0, "", time.Time{}
+		st.ConsecutiveFailures, st.LastError, st.LastFailureKind, st.NextAttemptAt = 0, "", "", time.Time{}
 		st.LastSuccessAt = in.FinishedAt
 		if st.NeedsInputItem != "" { // 事项已结束（含刚由 recovered 结束的）就不再引用；仍待本人处理的保留，下次失败复用
 			it, err := items.Get(tx, st.NeedsInputItem)
@@ -681,13 +625,16 @@ func (r *Runner) applyResult(c *command.Ctx) (any, error) {
 		st.NextAttemptAt = time.Time{}
 		switch in.Class {
 		case clsTransient:
+			st.LastFailureKind = "transient"
 			st.NextAttemptAt = nextAttempt(in.FinishedAt, src.Schedule, st.ConsecutiveFailures)
 		case clsNeedsHuman:
-			st.NeedsInputItem = in.Item
+			// 认证或配置失败是故障不是问题：记 source.failed，健康视图的来源失败信号带"去来源页修"，不建 needs_input 事项（§6.14 第 20 条、§9.2）。
+			st.LastFailureKind = "auth_or_config"
 			if err := r.failed(c, src, in, "auth_or_config"); err != nil {
 				return nil, err
 			}
 		case clsPermanent:
+			st.LastFailureKind = "permanent"
 			st.TimerPeriod = ""
 			if err := cancelTimer(tx, timerID(src.ID)); err != nil {
 				return nil, err

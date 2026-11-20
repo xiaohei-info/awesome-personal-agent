@@ -769,10 +769,13 @@ echo '{"cursor":"c1"}'
 	if code, body := s.do("GET", "/packs", ""); code != 200 || !strings.Contains(body, "inbound-triage") {
 		t.Fatalf("builtin packs not loaded: %d %s", code, body)
 	}
-	// 实例到期 → instance.fired → 规则执行建 routine 事项 → 任务型。没有设默认 harness，所以转 needs_input 交本人（§8.7）。
+	// 实例到期 → instance.fired → 规则执行建 routine 事项 → 任务型。没有设默认 harness，所以没拉起（§8.7）。
+	// 2026-11-20 改写：原断言 routine 事项转 needs_input、问题含"默认 harness"；没拉起是事件不是问题：
+	// 这一份转 dropped，诊断页 other_alerts 的通知带 task_refused 与同样的原因。
 	for {
 		code, body := s.do("GET", "/items?kind=routine", "")
-		if code == 200 && strings.Contains(body, `"phase":"needs_input"`) && strings.Contains(body, "默认 harness") {
+		hc, health := s.do("GET", "/health", "")
+		if code == 200 && strings.Contains(body, `"phase":"dropped"`) && hc == 200 && strings.Contains(health, `"code":"task_refused"`) && strings.Contains(health, "默认 harness") {
 			break
 		}
 		if time.Now().After(deadline) {

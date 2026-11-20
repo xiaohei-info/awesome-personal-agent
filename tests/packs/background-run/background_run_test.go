@@ -371,7 +371,9 @@ func TestHandoffTagWrittenByItemUpdateDrivesTheRule(t *testing.T) {
 		_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "task", "title": title, "phase": "proposed"}), &out)
 		return out.ID
 	}
-	open := func(id string) { e.must(owner, "item.transition", map[string]any{"id": id, "to": "open", "reason": "go"}) }
+	open := func(id string) {
+		e.must(owner, "item.transition", map[string]any{"id": id, "to": "open", "reason": "go"})
+	}
 	tag := func(id string, tags []string) {
 		e.must(owner, "item.update", map[string]any{"id": id, "tags": tags, "reason": "交给 Agent 处理"})
 	}
@@ -428,7 +430,9 @@ func TestTaskRunnerPromptWorksOnChild(t *testing.T) {
 	}
 }
 
-// flow-bg-task-runner（ACT-BGT-02）：执行者不在项目名单内：不拉起，事项转 needs_input。
+// flow-bg-task-runner（ACT-BGT-02）：执行者不在项目名单内：不拉起。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含 "other-host.cli"；没拉起是事件：事项不变、不挂问题，
+// 健康告警带 background_refused、原因含 "other-host.cli"。
 func TestTaskRunnerExecutorOutsideAllowlistIsRefused(t *testing.T) {
 	e := newEnv(t, "other-host.cli")
 	e.auto(taskRule)
@@ -437,8 +441,19 @@ func TestTaskRunnerExecutorOutsideAllowlistIsRefused(t *testing.T) {
 	e.must(owner, "project.allowed_executors.set", map[string]any{"id": p.ID, "executors": []string{"work-host.cli"}})
 	parent := e.newOpen("修复", []string{"run-it"}, map[string]any{"project": p.ID})
 	it := e.item(parent)
-	if len(e.runs_()) != 0 || it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "other-host.cli") {
+	if len(e.runs_()) != 0 || it.Phase != domain.PhaseOpen || it.Ask != nil {
 		t.Fatalf("runs=%d item=%+v", len(e.runs_()), it)
+	}
+	found := false
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, parent)
+		for _, en := range es {
+			found = found || (en.Event.Type == domain.EvHealthAlert && strings.Contains(string(en.Event.Payload), `"code":"background_refused"`) && strings.Contains(string(en.Event.Payload), "other-host.cli"))
+		}
+		return err
+	})
+	if !found {
+		t.Fatal("no background_refused alert naming the executor")
 	}
 }
 

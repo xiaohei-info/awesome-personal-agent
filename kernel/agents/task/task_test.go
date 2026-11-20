@@ -732,6 +732,16 @@ func assertFaultEvent(t *testing.T, e *env, item string, code domain.RunFaultCod
 	t.Fatalf("no run.finished on %s", item)
 }
 
+// notStarted 断言没拉起：交回带类别码的错误，不建目标事项、不挂问题（2026-11-20：没拉起是事件不是问题，§6.14 第 20 条）。
+func notStarted(t *testing.T, err error, code domain.NoticeCode) *domain.NotStarted {
+	t.Helper()
+	var ns *domain.NotStarted
+	if !errors.As(err, &ns) || ns.Code != code {
+		t.Fatalf("want a %s notice, got %v", code, err)
+	}
+	return ns
+}
+
 // ACT-CMD-02：声明经 declare 提交但未确认时不执行；确认后才拉起。
 func TestUnconfirmedDeclarationDoesNotRun(t *testing.T) {
 	e := setup(t)
@@ -741,14 +751,12 @@ func TestUnconfirmedDeclarationDoesNotRun(t *testing.T) {
 	e.must(plugin, "executor.declare", d)
 
 	out, err := e.svc.Launch(bg, e.task("hy", "brief"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	notStarted(t, err, domain.NoticeTaskRefused)
 	if out.Run != "" || out.Reason == "" {
 		t.Fatalf("launched without confirmation: %+v", out)
 	}
-	if it := e.item(out.Item); it.Phase != domain.PhaseNeedsInput {
-		t.Fatalf("phase %s", it.Phase)
+	if out.Item != "" { // 2026-11-20 改写：原断言目标事项转 needs_input；没拉起不再另建事项、不挂问题
+		t.Fatalf("a refused launch created item %s", out.Item)
 	}
 	if n := len(e.runList()); n != 0 {
 		t.Fatalf("runs: %d", n)
@@ -758,23 +766,21 @@ func TestUnconfirmedDeclarationDoesNotRun(t *testing.T) {
 	}
 }
 
-// §8.7、§5.6：声明没有模板要的权限档位时不拉起，转 needs_input。
+// §8.7、§5.6：声明没有模板要的权限档位时不拉起（2026-11-20 起交回 task_refused，不转 needs_input）。
 func TestMissingAccessTierDoesNotRun(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary", "read")
 	out, err := e.svc.Launch(bg, e.task("hx", "full"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	notStarted(t, err, domain.NoticeTaskRefused)
 	if out.Run != "" || !strings.Contains(out.Reason, "full") {
 		t.Fatalf("outcome: %+v", out)
 	}
-	if it := e.item(out.Item); it.Phase != domain.PhaseNeedsInput {
-		t.Fatalf("phase %s", it.Phase)
+	if out.Item != "" { // 2026-11-20 改写：原断言目标事项转 needs_input
+		t.Fatalf("a refused launch created item %s", out.Item)
 	}
 }
 
-// §8.3 末行：输入含未进转发白名单的挂靠消息，改转 needs_input；白名单内的消息作为资料进入资料文件。
+// §8.3 末行：输入含未进转发白名单的挂靠消息不拉起（2026-11-20 起交回 task_refused）；白名单内的消息作为资料进入资料文件。
 func TestUnlistedMessageHandsOffToOwner(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "summary")
@@ -792,11 +798,11 @@ func TestUnlistedMessageHandsOffToOwner(t *testing.T) {
 	tk.Messages = []Message{{Source: "mail", Sender: "boss@example.com", Verified: true, Body: "ok"},
 		{Source: "mail", Sender: "stranger@example.com", Verified: true, Body: injection}}
 	out, err := e.svc.Launch(bg, tk)
-	if err != nil || out.Run != "" || !strings.Contains(out.Reason, "白名单") {
+	if ns := notStarted(t, err, domain.NoticeTaskRefused); out.Run != "" || !strings.Contains(out.Reason, "白名单") || !strings.Contains(ns.Detail, "白名单") {
 		t.Fatalf("outcome: %+v %v", out, err)
 	}
-	if it := e.item(out.Item); it.Phase != domain.PhaseNeedsInput {
-		t.Fatalf("phase %s", it.Phase)
+	if out.Item != "" { // 2026-11-20 改写：原断言目标事项转 needs_input
+		t.Fatalf("a refused launch created item %s", out.Item)
 	}
 
 	tk.Messages = tk.Messages[:1]
@@ -908,7 +914,7 @@ func TestTemplateCheckoutCwd(t *testing.T) {
 	}
 }
 
-// 没有项目、或检出都在别的机器：不拉起，事项转 needs_input 写明原因。
+// 没有项目、或检出都在别的机器：不拉起，交回写明原因的 task_refused（2026-11-20 前是转 needs_input）。
 func TestTemplateCheckoutCwdRefusedWithoutLocalCheckout(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "pwd")
@@ -916,12 +922,10 @@ func TestTemplateCheckoutCwdRefusedWithoutLocalCheckout(t *testing.T) {
 		tk := e.task("hx", "co")
 		tk.Project = project
 		out, err := e.svc.Launch(bg, tk)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		it := e.item(out.Item)
-		if out.Run != "" || it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "检出目录") || !strings.Contains(it.Ask.Question, "this-host") {
-			t.Fatalf("%s: outcome %+v item %+v", name, out, it)
+		// 2026-11-20 改写：原断言事项转 needs_input、问题含"检出目录""this-host"；改为没拉起的通知里含同样两处原因，不另建事项
+		ns := notStarted(t, err, domain.NoticeTaskRefused)
+		if out.Run != "" || out.Item != "" || !strings.Contains(ns.Detail, "检出目录") || !strings.Contains(ns.Detail, "this-host") {
+			t.Fatalf("%s: outcome %+v notice %+v", name, out, ns)
 		}
 	}
 	if n := len(e.runList()); n != 0 {
@@ -979,20 +983,22 @@ func TestCommandFollowsDeclaration(t *testing.T) {
 	}
 }
 
-// 没有指定 harness、Web 也没设默认 harness，或档位超过上限：不拉起，事项转 needs_input 并带原因（§8.7、§13.6）。
+// 没有指定 harness、Web 也没设默认 harness，或档位超过上限：不拉起，交回带原因的 task_refused（§8.7、§13.6）。
 func TestLaunchWithoutHarnessOrOverCapGoesToOwner(t *testing.T) {
 	e := setup(t)
 	if _, err := e.svc.Launch(bg, Task{Pack: "tk", Template: "brief"}); err == nil {
 		t.Fatal("no title and no target accepted")
 	}
 	out, err := e.svc.Launch(bg, e.task("", "brief"))
-	if err != nil || out.Run != "" || !strings.Contains(out.Reason, "默认 harness") || e.item(out.Item).Phase != domain.PhaseNeedsInput {
+	notStarted(t, err, domain.NoticeTaskRefused)
+	if out.Run != "" || !strings.Contains(out.Reason, "默认 harness") || out.Item != "" { // 2026-11-20 改写：原断言目标事项转 needs_input
 		t.Fatalf("no harness: %+v %v", out, err)
 	}
 	e.harness("hx", "summary", "read", "full")
 	e.setDefaultHarness("hx")
 	out, err = e.svc.Launch(bg, e.task("", "full"))
-	if err != nil || out.Run != "" || !strings.Contains(out.Reason, "上限") || e.item(out.Item).Phase != domain.PhaseNeedsInput {
+	notStarted(t, err, domain.NoticeTaskRefused)
+	if out.Run != "" || !strings.Contains(out.Reason, "上限") || out.Item != "" { // 2026-11-20 改写：同上
 		t.Fatalf("over cap: %+v %v", out, err)
 	}
 	if n := len(e.runList()); n != 0 {
@@ -1118,7 +1124,7 @@ func TestCallAgentGenerateBlockedByOutboundScope(t *testing.T) {
 	}
 }
 
-// 规则建的事项在链路熔断时不派发运行，也不留在 open：转 needs_input 写明原因。
+// 规则建的事项在链路熔断时不派发运行：交回 chain_tripped，规则引擎把它转 dropped（不留在 open，§8.7）。
 func TestChainTripOnRuleItemAsksOwner(t *testing.T) {
 	e := setup(t)
 	e.x.MaxChainDepth = 1
@@ -1126,11 +1132,11 @@ func TestChainTripOnRuleItemAsksOwner(t *testing.T) {
 	c := e.call("gen", id)
 	c.Depth = 1
 	gen := fakeGen{direct.Outcome{Settled: true, Steps: []direct.Step{{RunID: "run_g", Result: json.RawMessage(`{}`)}}}, e.st}
-	if err := e.svc.CallAgent(AgentOptions{Generate: gen})(bg, c); err != nil {
-		t.Fatal(err)
-	}
-	if it := e.item(id); it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "链路深度") {
-		t.Fatalf("item %+v", it)
+	// 2026-11-20 改写：原断言事项转 needs_input、问题含"链路深度"；熔断是事件：交回 chain_tripped（原因含"链路深度"），
+	// 由规则引擎把规则建的事项转 dropped 并记告警（rules_test 覆盖），这里事项未被本处理器改动
+	ns := notStarted(t, e.svc.CallAgent(AgentOptions{Generate: gen})(bg, c), domain.NoticeChainTripped)
+	if it := e.item(id); it.Phase != domain.PhaseOpen || it.Ask != nil || !strings.Contains(ns.Detail, "链路深度") {
+		t.Fatalf("item %+v notice %+v", it, ns)
 	}
 }
 
@@ -1402,7 +1408,7 @@ func (e *env) attach(item, id, sender string, verified bool) {
 	}
 }
 
-// ACT-CAS-20：生成型信息不足接力到任务型时，事项上含未进转发白名单的挂靠消息就不拉起任务型，事项转 needs_input 并写明原因；
+// ACT-CAS-20：生成型信息不足接力到任务型时，事项上含未进转发白名单的挂靠消息就不拉起任务型，交回写明原因的 task_refused；
 // 白名单内的消息照常作为资料交给任务型。
 func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 	e := setup(t)
@@ -1423,11 +1429,10 @@ func TestRelayWithUnlistedAttachedMessageHandsOffToOwner(t *testing.T) {
 	blocked := e.openItem()
 	e.attach(blocked, "m1", "boss@example.com", true)
 	e.attach(blocked, "m2", "stranger@example.com", true)
-	if err := h(bg, e.call("gen", blocked)); err != nil {
-		t.Fatal(err)
-	}
+	// 2026-11-20 改写：原断言事项转 needs_input、问题含"白名单"；改为交回 task_refused（原因含"白名单"），事项不挂问题
+	ns := notStarted(t, h(bg, e.call("gen", blocked)), domain.NoticeTaskRefused)
 	it := e.item(blocked)
-	if len(e.runList()) != 0 || it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "白名单") {
+	if len(e.runList()) != 0 || it.Phase != domain.PhaseOpen || it.Ask != nil || !strings.Contains(ns.Detail, "白名单") {
 		t.Fatalf("task agent must not run: runs %d item %+v", len(e.runList()), it)
 	}
 
