@@ -178,7 +178,8 @@ func TestFlowWakeLease(t *testing.T) {
 		f.asRun(run1, cred1, 3, nil, "inbox")
 	})
 
-	f.step("ACT-WAK-07 运行超时也释放租约，事项转 needs_input", func(t *testing.T) {
+	// 2026-11-20 改写：超时是运行故障（事件），事项阶段不变、不挂问题；租约照样释放。
+	f.step("ACT-WAK-07 运行超时也释放租约，事项阶段不变", func(t *testing.T) {
 		i2 := f.tagged("WAK-I2", "acc-wake-short")
 		r := f.waitRun(i2)
 		if r.Launch != "wake" || r.Timeout != 60 {
@@ -189,9 +190,9 @@ func TestFlowWakeLease(t *testing.T) {
 		f.delAnswer(d3, 4) // 租约内
 		f.TCAdvance(120)   // 不回执，等待 2 分钟（测试时钟）
 		f.waitRunState(r.ID, "timeout")
-		var ph string
-		if !f.WaitFor(30*time.Second, func() bool { ph = f.phase(i2); return ph == "needs_input" }) {
-			t.Errorf("超时后 WAK-I2 应转 needs_input: %s", ph)
+		time.Sleep(2 * time.Second) // 等超时收尾落账
+		if ph := f.phase(i2); ph != "open" {
+			t.Errorf("超时后 WAK-I2 应留在 open（运行故障不是问题）: %s", ph)
 		}
 		f.delAnswer(d3, 0)
 	})

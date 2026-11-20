@@ -129,6 +129,7 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		eq(t, "超时的 Run 数", len(f.runsOf(id2)), 1)
 	})
 
+	// 2026-11-20 改写：重启时中断是运行故障（lost）：Run 转 failed，事项阶段不变、不挂问题。
 	f.step("ACT-BGG-05 重启时无存活进程按失败", func(t *testing.T) {
 		f.mode("hang", preamble+`echo $PPID > "$OUT/stub.pid"
 `)
@@ -145,7 +146,8 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		f.mode("summary-only", "")
 		f.StartKernelAgain()
 		f.waitFor("Run 转 failed", 30*time.Second, func() bool { return f.runsOf(id)[0].State == "failed" })
-		f.waitFor("事项转 needs_input", 30*time.Second, func() bool { return f.phase(id) == "needs_input" })
+		time.Sleep(time.Second) // 等恢复收尾落账
+		eq(t, "中断后的事项阶段（不转 needs_input）", f.phase(id), "open")
 		eq(t, "Run 数", len(f.runsOf(id)), 1)
 	})
 
