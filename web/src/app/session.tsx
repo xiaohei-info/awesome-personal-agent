@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError, createClient, type ApiClient } from "./api";
+import { Reauth } from "./Reauth";
 
 type Status = "loading" | "anon" | "authed" | "error";
 
@@ -34,9 +35,21 @@ export function SessionProvider({ children, fetchImpl }: { children: ReactNode; 
     setStatus("anon");
   }, []);
 
+  // 3b 动作要再输口令时弹框；同时撞上的几条请求共用一次输入，结果一起交回。
+  const waiting = useRef<((ok: boolean) => void)[]>([]);
+  const [asking, setAsking] = useState(false);
+  const onReauth = useCallback(() => new Promise<boolean>((resolve) => {
+    waiting.current.push(resolve);
+    setAsking(true);
+  }), []);
+  const answered = useCallback((ok: boolean) => {
+    waiting.current.splice(0).forEach((f) => f(ok));
+    setAsking(false);
+  }, []);
+
   const api = useMemo(
-    () => createClient({ fetch: fetchImpl, getCsrf: () => csrf.current, onUnauthenticated: drop }),
-    [fetchImpl, drop],
+    () => createClient({ fetch: fetchImpl, getCsrf: () => csrf.current, onUnauthenticated: drop, onReauth }),
+    [fetchImpl, drop, onReauth],
   );
 
   const boot = useCallback(() => {
@@ -74,5 +87,10 @@ export function SessionProvider({ children, fetchImpl }: { children: ReactNode; 
     drop();
   }, [api, drop]);
 
-  return <Ctx.Provider value={{ status, error, api, login, logout, retry: boot }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={{ status, error, api, login, logout, retry: boot }}>
+      {children}
+      {asking && <Reauth api={api} done={answered} />}
+    </Ctx.Provider>
+  );
 }

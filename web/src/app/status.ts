@@ -97,14 +97,12 @@ export function rowsOf(s: Signal): Row[] {
     case "pack_rejections":
       return [row("packs", true, s.count)]; // 动作在本机：修好包文件后自动重新加载
     case "model_unavailable": {
-      const m = (d ?? {}) as { judge?: string; generate?: string; screening?: unknown[]; judgements?: { endpoint?: string }[] };
+      const m = (d ?? {}) as { judge?: string; generate?: string; judgements?: { endpoint?: string }[] };
       const out: Row[] = [];
       for (const k of ["generate", "judge"] as const) {
         const fails = list<{ endpoint?: string }>(m.judgements).filter((j) => (j.endpoint || "judge") === k).length;
         if (m[k] === "not_configured" || m[k] === "failing" || fails) out.push(row(m[k] === "not_configured" ? "modelUnset:" + k : "modelFail:" + k, true, fails, "/settings/models"));
       }
-      const scr = list(m.screening).length;
-      if (scr) out.push(row("screening", true, scr, "/settings/models"));
       return out.length ? out : [row("modelFail:generate", true, s.count, "/settings/models")];
     }
     case "unjudged_backlog":

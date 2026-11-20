@@ -54,7 +54,6 @@ interface Doc {
   version: number;
   judge_endpoint: Endpoint | null;
   generate_endpoint: Endpoint | null;
-  screening_timeout_ms: number;
   models_paused?: boolean;
 }
 interface ProbeResult {
@@ -162,7 +161,6 @@ export function SettingsModelsPage() {
       <EndpointCard kind="judge" doc={doc.judge_endpoint} paused={paused} unsetExternal={unsetExternal} save={(e) => save({ judge_endpoint: e as Endpoint | null })} />
       <details className="panel">
         <summary>{t.advanced}</summary>
-        <ScreeningTimeoutCard value={doc.screening_timeout_ms} save={(n) => save({ screening_timeout_ms: n })} />
       </details>
     </main>
   );
@@ -518,17 +516,3 @@ function ProbeView({ r }: { r: ProbeResult }) {
   );
 }
 
-function ScreeningTimeoutCard({ value, save }: { value: number; save: (n: number) => Promise<number> }) {
-  const t = useT(strings);
-  const [v, setV] = useState(sec(value));
-  useEffect(() => setV(sec(value)), [value]);
-  const saver = useSaver(() => save(posSec(v, t.screening)));
-  return (
-    <section aria-label={t.screening} className="panel stack">
-      <h2>{t.screening}</h2>
-      <p className="sub">{t.screeningHint}</p>
-      <label>{t.screeningMs}<input type="number" value={v} onChange={(e) => setV(e.target.value)} /></label>
-      <SaveLine busy={saver.busy} status={saver.status} onSave={saver.save} label={t.saveCard(t.screening)} />
-    </section>
-  );
-}

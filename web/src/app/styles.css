@@ -552,3 +552,11 @@ pre.raw-text { margin: 6px 0; max-height: 32em; overflow: auto; font: 13px/1.5 v
 
 /* 事项详情 › 排期：版本冲突后与最新值不同的项 */
 .differs { outline: 2px solid var(--warn); outline-offset: 4px; border-radius: 6px; }
+
+/* Agent 页：左栏钥匙（能碰哪些事）、右栏档位（能做到哪一档）；窄屏自动叠成一列 */
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.split > .panel { margin: 0; }
+/* 规矩改动：改前、改后两栏 */
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin: 6px 0; }
+.pair dt { color: var(--ink-3); font-size: 12px; }
+.pair dd { margin: 0; overflow-wrap: anywhere; }

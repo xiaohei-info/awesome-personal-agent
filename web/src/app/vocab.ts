@@ -36,15 +36,12 @@ export interface Vocab {
   outboundScope: Closed<typeof I.OUTBOUND_SCOPE>;
   backlogStep: Closed<typeof I.BACKLOG_STEP>;
   attachState: Closed<typeof I.ATTACH_STATE>;
-  webOnly: Closed<typeof I.WEB_ONLY>;
   perm: Closed<typeof I.PERM>;
   write: Closed<typeof I.WRITE>;
   muteScope: Closed<typeof I.MUTE_SCOPE>;
   locality: Closed<typeof I.LOCALITY>;
   protocol: Closed<typeof I.PROTOCOL>;
   probSource: Closed<typeof I.PROB_SOURCE>;
-  grantAction: Closed<typeof I.GRANT_ACTION>;
-  grantStatus: Closed<typeof I.GRANT_STATUS>;
   credKind: Closed<typeof I.CRED_KIND>;
   executorKind: Closed<typeof I.EXECUTOR_KIND>;
   ruleMode: Closed<typeof I.RULE_MODE>;
@@ -59,6 +56,9 @@ export interface Vocab {
   healthSignal: Closed<typeof I.HEALTH_SIGNAL>;
   doctorCheck: Closed<typeof I.DOCTOR_CHECK>;
   grantReason: Closed<typeof I.GRANT_REASON>;
+  rejectReason: Closed<typeof I.REJECT_REASON>;
+  agentTier: Closed<typeof I.AGENT_TIER>;
+  revertWhy: Closed<typeof I.REVERT_WHY>;
   event: Closed<typeof I.EVENT> & Closed<typeof I.EVENT_INTERNAL>;
   materialKind: Closed<typeof I.MATERIAL_KIND> & Open;
   pack: Closed<typeof I.PACK> & Open;
@@ -130,6 +130,8 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     unauthenticated: { label: "登录已失效，请重新登录" },
     permission_denied: { label: "没有权限做这件事" },
     web_only: { label: "这件事只能你亲自确认，请在网页上定" },
+    reauth_required: { label: "要再输一次口令才能做" },
+    tier_closed: { label: "这个 Agent 的档位没放开，等你确认" },
     executor_not_allowed: { label: "这个项目不允许派给该执行者" },
     risk_screening_pending: { label: "正在判断风险，判完前只能你在网页上回答" },
     basis_required: { label: "缺少你的原话或授权" },
@@ -157,35 +159,12 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
   outboundScope: { full: { label: "全部内容" }, excerpt: { label: "摘要和开头" }, meta: { label: "只有标题" }, none: { label: "不发送" } },
   backlogStep: { rules: { label: "先按规则处理" }, score: { label: "试打分" }, bands: { label: "定自动处理的线" }, rejudge: { label: "放进建议" }, restore: { label: "找回被跳过的消息" } },
   attachState: { pending: { label: "待转给 Agent" }, forwarded: { label: "已转给 Agent" }, processed: { label: "已处理" }, handed_back: { label: "已交回给你" }, released: { label: "已交回自动判断" } },
-  webOnly: {
-    funds: { label: "资金", hint: "涉及真实付款或收款" },
-    external_commitment: { label: "对外承诺" },
-    irreversible: { label: "不可逆" },
-    permission_change: { label: "权限变更" },
-    spec_activation: { label: "规范生效" },
-  },
   perm: { read: { label: "只看" }, edit: { label: "可改文件" }, full: { label: "完全放开", hint: "不再逐项问你" } },
   write: { direct: { label: "直接生效" }, proposed: { label: "先给我看" } },
   muteScope: { source: { label: "来源" }, project: { label: "项目" }, item: { label: "事项" } },
   locality: { local: { label: "我自己的机器" }, external: { label: "外部服务" } },
   protocol: { "system-one": { label: "原生判断接口" }, "probability-judgment/1": { label: "自建分类服务" }, "chat-completions": { label: "OpenAI 兼容" }, messages: { label: "Anthropic 兼容" }, responses: { label: "OpenAI Responses" } },
   probSource: { native: { label: "模型原生概率" }, logprobs: { label: "由对数概率换算" }, self_reported: { label: "模型自报（不可用）" } },
-  grantAction: {
-    "item.create": { label: "新建事项" },
-    "item.update": { label: "修改事项" },
-    "item.transition": { label: "改阶段或标完成" },
-    "item.relate": { label: "建立关联" },
-    "item.progress": { label: "记进展" },
-    "decision.answer": { label: "回答决策" },
-    "proposal.accept": { label: "接受建议" },
-    "proposal.dismiss": { label: "忽略建议" },
-    "proposal.attach": { label: "把建议补到事项" },
-    "revision.confirm": { label: "确认文档修改" },
-    "revision.reject": { label: "拒绝文档修改" },
-    "delegate.report": { label: "替执行者交回结果" },
-    "followmsg.handback": { label: "交回跟进消息" },
-  },
-  grantStatus: { active: { label: "有效" }, expired: { label: "已过期" }, revoked: { label: "已撤销" } },
   credKind: { observer: { label: "只读程序" }, worker: { label: "执行者" }, delegate: { label: "Agent" }, ext: { label: "扩展程序" }, webhook: { label: "来源的接收钥匙" } },
   executorKind: { "native-subagent": { label: "Agent 的子 agent" }, "external-cli": { label: "外部命令行工具" }, "remote-agent": { label: "别处的 agent" }, human: { label: "人" } },
   ruleMode: { off: { label: "关" }, observe: { label: "试运行", hint: "只记录，不动手" }, auto: { label: "开" } },
@@ -226,6 +205,23 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     stalled_delegations: { label: "委派久无回音" },
     clock_lag: { label: "定时器迟到" },
   },
+  rejectReason: {
+    hard_line: { label: "只有你本人能做" },
+    reauth_required: { label: "要再输一次口令" },
+    tier_closed: { label: "等你确认：它的档位没放开" },
+    out_of_scope: { label: "超出它的钥匙能碰的范围" },
+  },
+  agentTier: {
+    organize: { label: "只整理", hint: "改事项、记进展、提建议，都能撤回" },
+    decide: { label: "也替我拍板", hint: "立项、回答问题、确认修改，你在改动页能撤回" },
+    rules: { label: "连日常规矩也替我改", hint: "安排、提醒、来源启停这类改得回来的设置" },
+  },
+  revertWhy: {
+    run_started: { label: "已拉起的运行撤不回" },
+    data_purged: { label: "已清除的数据撤不回" },
+    superseded: { label: "之后又改过，撤回会盖掉后来的改动" },
+    not_revertible: { label: "没记下改前的值，去设置页改回" },
+  },
   grantReason: {
     grant_screening_pending: { label: "这个事项的分类结果还在回来，先把卡片里那件事处理掉，或者等一会儿再试", hint: "授权本身没问题；卡处理后同一张授权自动恢复可用" },
     grant_risk_ceiling: { label: "这类事只能你亲自确认，授权管不到" },
@@ -233,7 +229,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     untrusted_origin: { label: "这条建议不是来自你信任的发件人，只能你自己接受" },
     untrusted_trigger: { label: "这次运行由不受信任的内容触发，不能用授权" },
   },
-  doctorCheck: { data_dir: { label: "数据目录" }, config: { label: "配置文件" }, tier: { label: "运行形态" }, model_endpoint: { label: "模型" }, sources: { label: "来源" }, packs: { label: "能力包" }, host_plugin: { label: "Agent 插件" }, overlaps: { label: "重叠检查" }, channels: { label: "聊天渠道" }, secrets: { label: "密钥保管" }, connections: { label: "提醒渠道与导出" } },
+  doctorCheck: { data_dir: { label: "数据目录" }, config: { label: "配置文件" }, tier: { label: "运行形态" }, model_endpoint: { label: "模型" }, sources: { label: "来源" }, packs: { label: "能力包" }, host_plugin: { label: "Agent 插件" }, overlaps: { label: "重叠检查" }, channels: { label: "聊天渠道" }, secrets: { label: "密钥保管" }, connections: { label: "提醒渠道与导出" }, authz: { label: "权限模型" } },
   event: {
     "item.created": { label: "新建了事项" },
     "item.updated": { label: "修改了事项" },
@@ -258,6 +254,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     "policy.changed": { label: "改了设置" },
     "grant.issued": { label: "签发了授权" },
     "grant.revoked": { label: "撤销了授权" },
+    "authz.switched": { label: "切换到三档权限" },
     "agent.configured": { label: "更新了 Agent 卡" },
     "agent.queued": { label: "Agent 任务已排队" },
     "run.started": { label: "Agent 后台运行开始" },
@@ -399,6 +396,8 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
   },
   doctorCode: {
     ok: () => "连通，鉴权通过，示例请求得到了回答",
+    authz_switched: () => "已切换到三档权限",
+    authz_not_switched: () => "还没切换到三档权限，用新版本重启服务",
     not_configured: () => "未接入",
     no_client: () => "这里没法测试连接",
     unreachable: () => "连不上端点：检查地址与网络",
@@ -464,7 +463,6 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     host_ready_no_selfcheck: () => "已确认，能正常调用；插件不带自检",
     host_headless_missing: () => "找不到 Agent 的启动命令",
     host_selfcheck_failed: () => "插件自检没跑通",
-    host_no_session_kind: () => "插件不报会话类型，代你回答会被拒，要升级",
     host_hook_missing: (d) => `${len(d, "missing_hooks")} 个钩子没装`,
     overlaps_skipped: () => "插件不带自检，这项不查",
     overlaps_none: () => "Agent 那边没有重复的提醒",
@@ -517,6 +515,8 @@ const en: typeof zh = {
     unauthenticated: { label: "Signed out, please sign in again" },
     permission_denied: { label: "Not allowed to do this" },
     web_only: { label: "Only you can confirm this, on the web" },
+    reauth_required: { label: "Enter your password again to do this" },
+    tier_closed: { label: "This Agent's tier isn't open; waiting for you" },
     executor_not_allowed: { label: "This project does not allow that executor" },
     risk_screening_pending: { label: "Risk check in progress; only you can answer on the web" },
     basis_required: { label: "Needs your own words or a temporary grant" },
@@ -543,35 +543,12 @@ const en: typeof zh = {
   outboundScope: { full: { label: "Everything" }, excerpt: { label: "Summary and opening" }, meta: { label: "Title only" }, none: { label: "Nothing" } },
   backlogStep: { rules: { label: "Apply rules first" }, score: { label: "Trial scoring" }, bands: { label: "Set the auto-handling lines" }, rejudge: { label: "Release to proposals" }, restore: { label: "Recover skipped messages" } },
   attachState: { pending: { label: "To hand to the Agent" }, forwarded: { label: "Handed to the Agent" }, processed: { label: "Processed" }, handed_back: { label: "Handed back to you" }, released: { label: "Back to automatic judgment" } },
-  webOnly: {
-    funds: { label: "Money", hint: "Involves real payments" },
-    external_commitment: { label: "Commitments to others" },
-    irreversible: { label: "Irreversible" },
-    permission_change: { label: "Permission changes" },
-    spec_activation: { label: "Guideline activation" },
-  },
   perm: { read: { label: "Read only" }, edit: { label: "Can edit files" }, full: { label: "Fully open", hint: "Stops asking you each time" } },
   write: { direct: { label: "Takes effect" }, proposed: { label: "Show me first" } },
   muteScope: { source: { label: "Source" }, project: { label: "Project" }, item: { label: "Item" } },
   locality: { local: { label: "My own machine" }, external: { label: "Outside service" } },
   protocol: { "system-one": { label: "Native judgment API" }, "probability-judgment/1": { label: "Self-hosted classifier" }, "chat-completions": { label: "OpenAI compatible" }, messages: { label: "Anthropic compatible" }, responses: { label: "OpenAI Responses" } },
   probSource: { native: { label: "Native probability" }, logprobs: { label: "From log-probabilities" }, self_reported: { label: "Self-reported (not usable)" } },
-  grantAction: {
-    "item.create": { label: "Create items" },
-    "item.update": { label: "Edit items" },
-    "item.transition": { label: "Change phase or mark done" },
-    "item.relate": { label: "Link items" },
-    "item.progress": { label: "Add progress" },
-    "decision.answer": { label: "Answer decisions" },
-    "proposal.accept": { label: "Accept proposals" },
-    "proposal.dismiss": { label: "Dismiss proposals" },
-    "proposal.attach": { label: "Add proposals to items" },
-    "revision.confirm": { label: "Confirm document changes" },
-    "revision.reject": { label: "Reject document changes" },
-    "delegate.report": { label: "Report for an executor" },
-    "followmsg.handback": { label: "Hand back follow-ups" },
-  },
-  grantStatus: { active: { label: "Active" }, expired: { label: "Expired" }, revoked: { label: "Revoked" } },
   credKind: { observer: { label: "Read-only program" }, worker: { label: "Executor" }, delegate: { label: "Agent" }, ext: { label: "Extension" }, webhook: { label: "Source intake key" } },
   executorKind: { "native-subagent": { label: "Agent sub-agent" }, "external-cli": { label: "Command-line tool" }, "remote-agent": { label: "Remote agent" }, human: { label: "Person" } },
   ruleMode: { off: { label: "Off" }, observe: { label: "Trial", hint: "Records only, does nothing" }, auto: { label: "On" } },
@@ -612,6 +589,23 @@ const en: typeof zh = {
     stalled_delegations: { label: "Delegations gone quiet" },
     clock_lag: { label: "Timers running late" },
   },
+  rejectReason: {
+    hard_line: { label: "Only you can do this" },
+    reauth_required: { label: "Needs your password again" },
+    tier_closed: { label: "Waiting for you: its tier isn't open" },
+    out_of_scope: { label: "Outside what its key can reach" },
+  },
+  agentTier: {
+    organize: { label: "Organize only", hint: "Edit items, log progress, suggest; all undoable" },
+    decide: { label: "Also decide for me", hint: "Commit to items, answer questions, confirm edits; undoable on Changes" },
+    rules: { label: "Also change everyday rules", hint: "Schedules, reminders, source on/off and other settings you can change back" },
+  },
+  revertWhy: {
+    run_started: { label: "A run that already started can't be undone" },
+    data_purged: { label: "Data already purged can't be restored" },
+    superseded: { label: "Changed again later; undoing would overwrite that" },
+    not_revertible: { label: "The earlier value wasn't kept; change it back in settings" },
+  },
   grantReason: {
     grant_screening_pending: { label: "This item's risk check is still coming back; handle the card on it first, or try again in a moment", hint: "The grant itself is fine; it works again once the card is handled" },
     grant_risk_ceiling: { label: "Only you can confirm this kind of thing; a grant can't cover it" },
@@ -619,7 +613,7 @@ const en: typeof zh = {
     untrusted_origin: { label: "This proposal didn't come from a sender you trust, so only you can accept it" },
     untrusted_trigger: { label: "This run was started by untrusted content, so it can't use grants" },
   },
-  doctorCheck: { data_dir: { label: "Data directory" }, config: { label: "Config file" }, tier: { label: "Run tier" }, model_endpoint: { label: "Models" }, sources: { label: "Sources" }, packs: { label: "Capability packs" }, host_plugin: { label: "Agent plugin" }, overlaps: { label: "Overlap check" }, channels: { label: "Chat channels" }, secrets: { label: "Credential vault" }, connections: { label: "Channels and exports" } },
+  doctorCheck: { data_dir: { label: "Data directory" }, config: { label: "Config file" }, tier: { label: "Run tier" }, model_endpoint: { label: "Models" }, sources: { label: "Sources" }, packs: { label: "Capability packs" }, host_plugin: { label: "Agent plugin" }, overlaps: { label: "Overlap check" }, channels: { label: "Chat channels" }, secrets: { label: "Credential vault" }, connections: { label: "Channels and exports" }, authz: { label: "Permission model" } },
   event: {
     "item.created": { label: "created an item" },
     "item.updated": { label: "edited an item" },
@@ -644,6 +638,7 @@ const en: typeof zh = {
     "policy.changed": { label: "changed settings" },
     "grant.issued": { label: "issued a temporary grant" },
     "grant.revoked": { label: "revoked a temporary grant" },
+    "authz.switched": { label: "switched to the three-tier permission model" },
     "agent.configured": { label: "Agent settings updated" },
     "agent.queued": { label: "Agent task queued" },
     "run.started": { label: "Agent background run started" },
@@ -785,6 +780,8 @@ const en: typeof zh = {
   },
   doctorCode: {
     ok: () => "Reachable, authenticated, and the sample request was answered",
+    authz_switched: () => "Switched to the three-tier permission model",
+    authz_not_switched: () => "Not switched to the three-tier model yet; restart the service with the new version",
     not_configured: () => "Not connected",
     no_client: () => "Connection can't be tested here",
     unreachable: () => "Cannot reach the endpoint: check the URL and network",
@@ -850,7 +847,6 @@ const en: typeof zh = {
     host_ready_no_selfcheck: () => "Approved and callable; the plugin has no self-check",
     host_headless_missing: () => "The Agent's start command can't be found",
     host_selfcheck_failed: () => "The plugin self-check didn't run",
-    host_no_session_kind: () => "The plugin doesn't report the session type, so answering for you is refused; upgrade it",
     host_hook_missing: (d) => `${len(d, "missing_hooks")} hooks not installed`,
     overlaps_skipped: () => "No plugin self-check, so not checked",
     overlaps_none: () => "No duplicate reminders on the Agent",

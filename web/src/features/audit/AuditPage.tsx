@@ -17,7 +17,8 @@ import { strings } from "./strings";
 const PAGE = 100;
 const REJECTED = "command.rejected"; // §6.7：被拒绝的命令记这一类 Event
 const OWNER = "owner"; // Web 上本人的 principal（api/core）
-interface AuditEvent extends Step { object: string; chain_depth: number; grant?: string; redacted?: boolean; tombstone?: boolean; imported?: string; recorded_at?: string }
+// basis.via 是这条记录凭什么生效（设计 §14.3）；grant 只出现在切换前的旧模型记录里。
+interface AuditEvent extends Step { object: string; chain_depth: number; basis?: { via?: string }; grant?: string; redacted?: boolean; tombstone?: boolean; imported?: string; recorded_at?: string }
 interface Filter { actor: string; object: string; type: string }
 const EMPTY: Filter = { actor: "", object: "", type: "" };
 
@@ -27,7 +28,7 @@ const groupOf = (type: string): Group => {
   if (["item", "proposal", "decision", "command"].includes(p)) return "items";
   if (["delegation", "run", "followmsg", "timer"].includes(p)) return "agents";
   if (["material", "guideline", "project"].includes(p)) return "projects";
-  if (["rule", "policy", "allowlist", "grant", "executor", "instance"].includes(p)) return "settings";
+  if (["rule", "policy", "allowlist", "grant", "executor", "instance", "authz"].includes(p)) return "settings";
   if (["source", "inbound", "health"].includes(p)) return "sources";
   if (p === "auth") return "login";
   return "other";
@@ -52,7 +53,7 @@ function Row({ e }: { e: AuditEvent }) {
     <li>
       <span>
         <ActorBadge actor={e.actor} /> <Val k="event" id={e.type} /> {what} · {new Date(e.at).toLocaleString(locale())}
-        {e.grant ? <> · <Link to={"/settings/agents#grant-" + encodeURIComponent(e.grant)}>{t.byGrant}</Link></> : null}
+        {e.basis?.via && t.basis[e.basis.via] ? ` · ${t.basis[e.basis.via]}` : e.grant ? ` · ${t.legacy}` : ""}
         {e.redacted || e.tombstone ? ` · ${t.hidden}` : ""}
       </span>
       {raw && <code className="raw-id">{[`#${e.seq}`, e.type, e.object, e.reason, e.grant].filter(Boolean).join(" · ")}</code>}

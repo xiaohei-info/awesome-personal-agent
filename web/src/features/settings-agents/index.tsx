@@ -8,7 +8,7 @@ export const feature: Feature = {
   path: "settings/agents",
   order: 3,
   section: "settings",
-  // 旧的四个入口（后台权限、临时授权、宿主接入）改写到这里，保留锚点：/settings/grants#<id> 由 App 改写为 #grant-<id>。
+  // 旧的入口（后台权限、已取消的临时授权、宿主接入）改写到这里。
   aliases: ["settings/access", "settings/grants", "settings-exec"],
   summary: async (api, lang) => {
     const [p, c] = await Promise.all([

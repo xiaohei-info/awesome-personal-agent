@@ -16,7 +16,6 @@ function server(init: { judge?: any; generate?: any; days?: number } = {}) {
   const doc: Record<string, any> = {
     judge_endpoint: "judge" in init ? init.judge : { url: "http://cls.local/judge", api_key_set: false, api_key_hint: "", protocol: "probability-judgment/1", model: "", locality: "local", timeout_ms: 10000, max_batch: 32, max_material_chars: 8000 },
     generate_endpoint: "generate" in init ? init.generate : { url: "https://llm.example.com/v1", api_key_set: true, api_key_hint: "9f2c", model: "model-a", locality: "external" },
-    screening_timeout_ms: 30000,
     models_paused: false,
   };
   const puts: any[] = [];
@@ -42,7 +41,6 @@ function server(init: { judge?: any; generate?: any; days?: number } = {}) {
         if (api_key !== undefined && api_key !== "***") keys[k] = api_key;
         doc[k] = { ...rest, api_key_set: keys[k] !== "", api_key_hint: keys[k].length >= 12 ? keys[k].slice(-4) : "" };
       }
-      if ("screening_timeout_ms" in body) doc.screening_timeout_ms = body.screening_timeout_ms;
       if ("models_paused" in body) doc.models_paused = body.models_paused;
       version++;
     }
@@ -282,7 +280,7 @@ describe("设置 › 模型", () => {
     expect(j.getByText(/已保存/)).toBeInTheDocument(); // 保存成功只说「已保存」，不带版本号（界面设计 §6.2）
   });
 
-  it("flow-endpoint-config: 服务端拒绝时显示原因，草稿保留；筛选超时单独保存，非法值本地提示", async () => {
+  it("flow-endpoint-config: 服务端拒绝时显示原因，草稿保留", async () => {
     const s = server();
     mount(s.impl);
     const g = await card("写作模型");
@@ -294,16 +292,6 @@ describe("设置 › 模型", () => {
     expect(await g.findByRole("alert")).toHaveTextContent("bad endpoint url");
     expect(url).toHaveValue("not a url");
 
-    const t = await card("高风险检查");
-    await userEvent.clear(t.getByLabelText("高风险检查最多等（秒）"));
-    await userEvent.type(t.getByLabelText("高风险检查最多等（秒）"), "0");
-    await save("高风险检查");
-    expect(await t.findByRole("alert")).toHaveTextContent("高风险检查必须是大于 0 的秒数");
-    await userEvent.clear(t.getByLabelText("高风险检查最多等（秒）"));
-    await userEvent.type(t.getByLabelText("高风险检查最多等（秒）"), "45");
-    await save("高风险检查");
-    await t.findByRole("status");
-    expect(s.puts.at(-1)).toEqual({ screening_timeout_ms: 45000 });
   });
 
   it("暂停开关：运行中 ↔ 已暂停只发 models_paused；暂停时两张卡片照常可编辑并标出已暂停；没有端点时不显示开关", async () => {

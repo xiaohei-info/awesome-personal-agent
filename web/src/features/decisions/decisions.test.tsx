@@ -53,7 +53,7 @@ function mount(fetchImpl: typeof fetch) {
 
 beforeEach(() => sessionStorage.clear());
 
-const rej = (over: object = {}) => ({ seq: 9, at: "2030-01-01T00:00:00Z", actor: { type: "agent", principal: "DEL", via: "cli" }, code: "basis_required", why: "the grant does not cover this action", grant: "grt_bad", ...over });
+const rej = (over: object = {}) => ({ seq: 9, at: "2030-01-01T00:00:00Z", actor: { type: "agent", principal: "DEL", via: "cli" }, code: "tier_closed", reason: "tier_closed", why: "the Agent's tier does not open this", ...over });
 
 describe("排序", () => {
   it("先按截止（无截止最后），再按优先级", () => {
@@ -179,42 +179,24 @@ describe("键盘拍板", () => {
   });
 });
 
-describe("web_only 决策（flow-web-only、flow-life-renewal、flow-first-day）", () => {
-  const wo = item("w", { title: "续费 1000 元", ask: { question: "续费吗？", risk_class: "web_only" } });
-
-  it("标明只能在 Web 确认，且可在此回答", async () => {
-    const s = server([wo]);
-    mount(s.impl);
-    const card = (await screen.findByText("续费吗？")).closest("article")!;
-    expect(within(card).getByText("只能你亲自确认")).toBeInTheDocument();
-    expect(within(card).getByText("这类事只能你在这里定。")).toBeInTheDocument();
-    await userEvent.click(within(card).getByRole("button", { name: "同意" }));
-    await screen.findByText("没有等你决定的事");
-    expect(s.calls.find((c) => c.path === "/v1/items/w/decide")!.body).toEqual({ choice: "yes" });
-  });
-
-  it("非 web_only 不显示该标记", async () => {
-    mount(server([item("a")]).impl);
-    await screen.findByText("问题 a");
-    expect(screen.queryByText("只能你亲自确认")).not.toBeInTheDocument();
-  });
-});
-
-describe("被拒绝的代答（ACT-AUTH-03、flow-decision-answer）", () => {
-  it("标明被拒绝的代答：操作者、原因与授权单 id；没有拒绝的卡片不带标注", async () => {
+describe("被拒绝的替你回答（档位没放开，设计 §14.3）", () => {
+  it("标明谁被拒、按口径说原因、给你来处理与去放开档位；没有拒绝的卡片不带标注", async () => {
     mount(server([item("a"), item("b")], undefined, { a: rej() }).impl);
     const a = (await screen.findByRole("article", { name: "事项 a" }));
-    const note = within(a).getByRole("note", { name: "被拒绝的代答" });
+    const note = within(a).getByRole("note", { name: "被拒绝的替你回答" });
     expect(note).toHaveTextContent("DEL");
-    expect(note).toHaveTextContent("the grant does not cover this action");
-    expect(note).toHaveTextContent("授权 grt_bad");
+    expect(note).toHaveTextContent("等你确认：它的档位没放开");
+    expect(note).toHaveTextContent("the Agent's tier does not open this");
+    expect(within(note).getByRole("link", { name: "你来处理" })).toHaveAttribute("href", "/items/a");
+    expect(within(note).getByRole("link", { name: "去放开它的档位" })).toHaveAttribute("href", "/settings/agents");
     expect(within(screen.getByRole("article", { name: "事项 b" })).queryByRole("note")).toBeNull();
   });
 
-  it("没有授权单时不显示授权单 id", async () => {
-    mount(server([item("a")], undefined, { a: rej({ grant: undefined }) }).impl);
-    const note = await screen.findByRole("note", { name: "被拒绝的代答" });
-    expect(note).not.toHaveTextContent(" · 授权 ");
+  it("切换前的旧拒绝记录（缺原话）照旧能读，同样指向档位", async () => {
+    mount(server([item("a")], undefined, { a: rej({ code: "basis_required", reason: undefined, why: "needs the owner's words" }) }).impl);
+    const note = await screen.findByRole("note", { name: "被拒绝的替你回答" });
+    expect(note).toHaveTextContent("缺少你的原话或授权");
+    expect(within(note).getByRole("link", { name: "去放开它的档位" })).toBeInTheDocument();
   });
 });
 
@@ -233,18 +215,5 @@ describe("内核问题的类别码与旧格式", () => {
     expect(within(card).queryByRole("button", { name: /继续/ })).toBeNull();
     await userEvent.click(within(card).getByRole("button", { name: "我知道了" }));
     await waitFor(() => expect(s.calls.find((c) => c.method === "POST")?.body).toEqual({ choice: "continue" }));
-  });
-});
-
-// 本人 2026-11-20 裁决：授权单因初筛待定暂不可用时，说准原因并指到那张卡，不说"风险超过上限"、不叫人去签授权。
-describe("授权单暂不可用的原因", () => {
-  it("初筛待定：显示「分类结果还在回来」并给「先处理这件事的卡」", async () => {
-    mount(server([item("s")], undefined, { s: rej({ reason: "grant_screening_pending", why: "grant_screening_pending: a decision request on this item is still being risk-screened" }) }).impl);
-    const card = await screen.findByRole("article", { name: "事项 s" });
-    const note = within(card).getByRole("note");
-    expect(note).toHaveTextContent("这个事项的分类结果还在回来，先把卡片里那件事处理掉，或者等一会儿再试");
-    expect(note).not.toHaveTextContent("缺少你的原话或授权");
-    expect(within(note).getByRole("link", { name: "先处理这件事的卡" })).toHaveAttribute("href", "/items/s");
-    expect(within(note).queryByRole("link", { name: "去签发授权" })).toBeNull();
   });
 });

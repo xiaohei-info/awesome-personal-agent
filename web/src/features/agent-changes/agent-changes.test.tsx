@@ -9,10 +9,10 @@ import { feature } from "./index";
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 interface Step { seq: number; type: string; object: string; actor: { type: string; principal: string; via: string; on_behalf_of?: string }; at: string; reason?: string; evidence?: string; resolved_via?: string; grant?: string; payload?: any }
-const agent = { type: "agent", principal: "DEL", via: "cli", on_behalf_of: "owner" };
+const agent = { type: "agent", principal: "DEL", via: "cli" };
 const owner = { type: "human", principal: "owner", via: "web" };
-const upd = (seq: number, at: string, over: Partial<Step> = {}): Step => ({ seq, type: "item.updated", object: "i1", actor: agent, at, reason: "改标题", evidence: "本人说：改成新标题", payload: { op: "update", before: { title: "旧标题" }, item: { title: "新标题" } }, ...over });
-const dec = (seq: number, at: string): Step => ({ seq, type: "decision.resolved", object: "i2", actor: agent, at, resolved_via: "chat", evidence: "本人说：选 A", payload: { item: { title: "要不要上线" } } });
+const upd = (seq: number, at: string, over: Partial<Step> = {}): Step => ({ seq, type: "item.updated", object: "i1", actor: agent, at, reason: "改标题", payload: { op: "update", before: { title: "旧标题" }, item: { title: "新标题" } }, ...over });
+const dec = (seq: number, at: string): Step => ({ seq, type: "decision.resolved", object: "i2", actor: agent, at, resolved_via: "agent", payload: { item: { title: "要不要上线" } } });
 
 function server(initial: Step[], revert?: (body: any) => Response | undefined) {
   const events = [...initial];
@@ -52,17 +52,15 @@ beforeEach(() => {
 });
 
 describe("agent 变更视图（flow-agent-revert）", () => {
-  it("ACT-REV-01：列出 agent 的标题修改与聊天代答，带操作者与证据；人的操作不在列表", async () => {
+  it("ACT-REV-01：列出 agent 的标题修改与它替你答的问题，带操作者与说明；人的操作不在列表", async () => {
     const s = server([upd(1, "2030-01-01T00:00:00Z"), dec(2, "2030-01-01T00:01:00Z"), upd(3, "2030-01-01T00:02:00Z", { actor: owner, reason: "人改的" }), upd(4, "2030-01-01T00:03:00Z", { type: "command.rejected", reason: "被拒" })]);
     mount(s.impl);
     const a = (await screen.findByRole("heading", { name: /新标题/ })).closest("article")!;
     expect(within(a).getByText(/DEL/)).toBeInTheDocument();
-    expect(within(a).getByText(/代 owner/)).toBeInTheDocument();
-    expect(within(a).getByText(/本人说：改成新标题/)).toBeInTheDocument();
-    const d = screen.getByRole("heading", { name: /要不要上线/ }).closest("article")!;
-    expect(within(d).getByText(/凭你在聊天里的原话/)).toBeInTheDocument();
-    expect(within(d).getByText(/本人说：选 A/)).toBeInTheDocument();
-    expect(within(d).getByRole("button", { name: "撤销" })).toBeEnabled(); // 聊天代答的决策可撤销（§6.4）
+    expect(within(a).getByText("改标题")).toBeInTheDocument();
+    const d = screen.getByRole("heading", { name: "Agent 替你答了「要不要上线」" }).closest("article")!;
+    expect(within(d).getByRole("button", { name: "撤销" })).toBeEnabled(); // Agent 自答可按次撤回（设计 §14.3）
+    expect(within(d).queryByText(/已拉起的运行撤不回/)).toBeNull();
     expect(screen.queryByText("人改的")).not.toBeInTheDocument();
     expect(screen.queryByText("被拒")).not.toBeInTheDocument();
     expect(screen.getAllByRole("article")).toHaveLength(2);
@@ -140,18 +138,25 @@ describe("agent 变更视图（flow-agent-revert）", () => {
   });
 });
 
-describe("授权单代答（ACT-AUTH-03、flow-agent-revert）", () => {
-  const viaGrant = (seq: number): Step => ({ seq, type: "decision.resolved", object: "i3", actor: agent, at: "2030-01-01T00:05:00Z", resolved_via: "grant", grant: "grt_ok", payload: { item: { title: "要不要发布" } } });
+describe("Agent 自答之后续接了运行；切换前的旧记录", () => {
+  it("回答后为这件事续接了运行：行上写明已拉起的运行撤不回，回答仍可撤销", async () => {
+    const resumed: Step = { seq: 3, type: "resume.launched", object: "i2", actor: { type: "system", principal: "rule:x", via: "rule" }, at: "2030-01-01T00:02:00Z" };
+    const s = server([dec(2, "2030-01-01T00:01:00Z"), resumed]);
+    mount(s.impl);
+    const d = (await screen.findByRole("heading", { name: "Agent 替你答了「要不要上线」" })).closest("article")!;
+    expect(within(d).getByText(/已拉起的运行撤不回/)).toBeInTheDocument();
+    expect(within(d).getByRole("button", { name: "撤销" })).toBeEnabled();
+  });
 
-  it("标明按授权（链接到这张授权单）并可撤销；确认里提示外部副作用不撤销，撤销后标记已撤销", async () => {
-    const s = server([viaGrant(1)]);
+  it("切换前凭授权单或原话的记录标为旧模型记录，仍可撤销", async () => {
+    const old: Step = { seq: 1, type: "decision.resolved", object: "i3", actor: { ...agent, on_behalf_of: "owner" }, at: "2030-01-01T00:05:00Z", resolved_via: "grant", grant: "grt_ok", payload: { item: { title: "要不要发布" } } };
+    const s = server([old]);
     mount(s.impl);
     const a = (await screen.findByRole("heading", { name: /要不要发布/ })).closest("article")!;
-    expect(within(a).getByRole("link", { name: "按授权" })).toHaveAttribute("href", "/settings/agents#grant-grt_ok");
+    expect(within(a).getByText(/旧模型记录/)).toBeInTheDocument();
+    expect(within(a).queryByRole("link")).toBeNull();
     await userEvent.click(within(a).getByRole("button", { name: "撤销" }));
-    expect(within(a).getByText(/已发出的消息、已提的 PR 不会收回/)).toBeInTheDocument();
     await userEvent.click(within(a).getByRole("button", { name: "确认撤销" }));
-    expect(await within(a).findByText(/已撤销/)).toBeInTheDocument();
     expect(s.calls.find((c) => c.method === "POST")).toMatchObject({ path: "/v1/items/i3/revert", body: { event: 1 }, csrf: "tok-1" });
   });
 });

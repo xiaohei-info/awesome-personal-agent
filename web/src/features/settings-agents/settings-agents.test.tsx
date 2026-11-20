@@ -3,14 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
-import { GRANT_ACTION } from "../../app/ids";
 import { policyServer } from "../settings-policy/test-server";
 import { feature } from "./index";
-import { GRANT_CATS } from "./SettingsAgentsPage";
 
 const PAGE = "/settings/agents/legacy:hermes";
 
-// 测试边界替身：策略三条路由用 policyServer；声明、钥匙、授权单按 api/settings/{exec,credentials,grants} 的契约应答。
+// 测试边界替身：策略三条路由用 policyServer；声明、钥匙、档位按 api/settings/{exec,credentials,policy} 的契约应答。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 const L = (zh: string, en: string) => ({ zh, en });
@@ -31,10 +29,10 @@ function hermes(rev: number, state: string, access = ["read", "edit", "full"]) {
   };
 }
 
-interface Opts { pending?: any[]; live?: any[]; tokens?: any[]; grants?: any[] }
+interface Opts { pending?: any[]; live?: any[]; tokens?: any[]; cards?: any[] }
 function server(o: Opts = {}) {
   const s = policyServer();
-  const st = { pending: o.pending ?? [], live: o.live ?? [], tokens: o.tokens ?? [], grants: o.grants ?? [] };
+  const st = { pending: o.pending ?? [], live: o.live ?? [], tokens: o.tokens ?? [], cards: o.cards ?? [] };
   const calls: { method: string; url: string; body?: any }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
@@ -56,13 +54,11 @@ function server(o: Opts = {}) {
       st.tokens = st.tokens.map((c) => (c.id === m![1] ? { ...c, harness: body.harness } : c));
       return json(200, { credential: st.tokens.find((c) => c.id === m![1]) });
     }
-    if (url === "/v1/settings/grants") return json(200, { grants: st.grants });
-    m = /^\/v1\/settings\/agents\/([^/]+)\/grant$/.exec(url);
+    if (url === "/v1/agents") return json(200, { agents: st.cards, selected: {}, reason: "" });
+    m = /^\/v1\/settings\/agents\/([^/]+)\/tier$/.exec(url);
     if (m) {
-      st.grants = st.grants.map((g) => (g.grantee.agent === m![1] && !g.revoked_at ? { ...g, revoked_at: "2030-01-01T00:00:00Z" } : g));
-      const g = body.actions.length ? { id: "grt_new", grantee: { agent: m[1], background: body.background }, scope: body.scope, actions: body.actions, created_at: "2030-01-01T00:00:00Z" } : null;
-      if (g) st.grants = [...st.grants, g];
-      return json(200, { grant: g, revoked: [] });
+      st.cards = st.cards.map((c) => (c.id === m![1] ? { ...c, tier: body.tier, tier_projects: body.projects } : c));
+      return json(200, { version: 2 });
     }
     if (url.startsWith("/v1/audit/events")) return json(200, { events: [{ seq: 1, type: "item.phase_changed", object: "it_1", at: "2030-01-01T00:00:00Z" }] });
     if (url === "/v1/executors") return json(200, { executors: [] });
@@ -86,10 +82,6 @@ const writes = (s: { calls: { method: string; url: string; body?: any }[] }, par
 beforeEach(() => sessionStorage.clear());
 
 describe("设置 › Agent", () => {
-  it("六类决定合起来正好是可授权动作全集", () => {
-    expect(GRANT_CATS.flatMap(([, a]) => a).sort()).toEqual([...GRANT_ACTION].sort());
-  });
-
   it("T13：声明待确认时显示待确认并能允许；允许前不能选档位；钥匙最近由它使用时一键归给它", async () => {
     const s = server({ pending: [hermes(2, "pending")], tokens: [{ id: "k1", kind: "delegate", label: "hermes-default-gateway", seen_harness: "hermes" }] });
     mount(s.impl, PAGE);
@@ -201,62 +193,37 @@ describe("设置 › Agent", () => {
     expect(c.getByRole("radio", { name: "在和你的对话里接着做" })).toBeChecked();
   });
 
-  it("T14：六类默认都不勾、不签单；勾两类后保存只调一次替换路由，动作是并集映射，默认全部项目、长期、后台可用", async () => {
+  it("档位：旧设置迁移来的 Agent 恒为只整理，不能改；钥匙在左、档位在右，下方写明硬线", async () => {
     const s = server({ live: [hermes(1, "active")] });
     mount(s.impl, PAGE);
     const c = await card();
-    const d = within(c.getByRole("region", { name: "可以替我决定" }));
-    expect(d.getByText("还没允许它替你做决定")).toBeInTheDocument();
-    for (const box of d.getAllByRole("checkbox")) expect(box).not.toBeChecked();
-    expect(d.queryByRole("button", { name: "保存可以替我决定" })).toBeNull();
-    expect(writes(s, "/grant")).toHaveLength(0);
-
-    await userEvent.click(d.getByLabelText("忽略建议"));
-    const d2 = within(c.getByRole("region", { name: "可以替我决定" }));
-    await userEvent.click(d2.getByLabelText("回答普通问题"));
-    expect(d2.getByTestId("grant-preview-hermes")).toHaveTextContent("将允许：忽略建议、回答普通问题 · 全部项目 · 一直有效");
-    expect(d2.getByLabelText("Agent 后台运行时也可以")).toBeChecked();
-    await userEvent.click(d2.getByRole("button", { name: "保存可以替我决定" }));
-    await waitFor(() => expect(writes(s, "/grant")).toHaveLength(1));
-    expect(writes(s, "/grant")[0]).toEqual({
-      method: "PUT", url: "/v1/settings/agents/hermes/grant",
-      body: { actions: ["proposal.dismiss", "decision.answer"], scope: { all: true }, grantee: { background: true } },
-    });
+    expect(c.getByRole("region", { name: "钥匙" })).toBeInTheDocument();
+    const d = within(c.getByRole("region", { name: "能做到哪一档" }));
+    expect(d.getByRole("radio", { name: /只整理/ })).toBeChecked();
+    for (const r of d.getAllByRole("radio")) expect(r).toBeDisabled();
+    expect(d.getByText("发钥匙、填凭据、改工具权限，只能你本人做")).toBeInTheDocument();
+    expect(writes(s, "/tier")).toHaveLength(0);
   });
 
-  it("T14：已有的单回填勾选；全部取消再保存即只撤销", async () => {
-    const g = { id: "grt_1", grantee: { agent: "hermes", background: true }, scope: { all: true }, actions: ["proposal.accept", "proposal.attach"], created_at: "2030-01-01T00:00:00Z" };
-    const s = server({ live: [hermes(1, "active")], grants: [g] });
-    mount(s.impl, PAGE);
-    const d = within((await card()).getByRole("region", { name: "可以替我决定" }));
-    expect(d.getByLabelText("接受信任发件人带来的建议")).toBeChecked();
-    expect(await d.findByText(/用过 1 次/)).toBeInTheDocument();
-    await userEvent.click(d.getByLabelText("接受信任发件人带来的建议"));
-    expect(d.getByTestId("grant-preview-hermes")).toHaveTextContent("确认后不再允许它替你决定");
-    await userEvent.click(d.getByRole("button", { name: "保存可以替我决定" }));
-    await waitFor(() => expect(writes(s, "/grant")).toHaveLength(1));
-    expect(writes(s, "/grant")[0].body.actions).toEqual([]);
+  it("档位：本人建的 Agent 改成「也替我拍板」，保存只调一次档位路由，默认全部项目", async () => {
+    const card1 = { id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1, tier: "organize", tier_projects: [] };
+    const s = server({ live: [hermes(1, "active")], cards: [card1] });
+    mount(s.impl, "/settings/agents/agent_1");
+    const c = await card("日常");
+    const d = within(c.getByRole("region", { name: "能做到哪一档" }));
+    expect(d.getByRole("radio", { name: /只整理/ })).toBeChecked();
+    expect(d.getByRole("button", { name: "保存能做到哪一档" })).toBeDisabled();
+    await userEvent.click(d.getByRole("radio", { name: /也替我拍板/ }));
+    expect(d.getByLabelText("全部项目")).toBeChecked();
+    await userEvent.click(d.getByRole("button", { name: "保存能做到哪一档" }));
+    await waitFor(() => expect(writes(s, "/tier")).toHaveLength(1));
+    expect(writes(s, "/tier")[0]).toMatchObject({ method: "PUT", url: "/v1/settings/agents/agent_1/tier", body: { tier: "decide", projects: [] } });
   });
 
-  it("授权单的使用记录最新在前（请求 order=desc）", async () => {
-    const g = { id: "grt_1", grantee: { agent: "hermes", background: true }, scope: { all: true }, actions: ["proposal.accept"], created_at: "2030-01-01T00:00:00Z" };
-    const s = server({ live: [hermes(1, "active")], grants: [g] });
-    const urls: string[] = [];
-    mount(((u: string, i?: RequestInit) => (urls.push(u), s.impl(u, i))) as unknown as typeof fetch, PAGE);
-    const d = within((await card()).getByRole("region", { name: "可以替我决定" }));
-    await userEvent.click(await d.findByRole("button", { name: "看记录" }));
-    await waitFor(() => expect(urls.some((u) => u.startsWith("/v1/audit/events?") && u.includes("grant=grt_1") && u.includes("order=desc"))).toBe(true));
-  });
-
-  it("T15：旧地址 /settings/grants#<id> 落到这一页，旧授权单展开可见", async () => {
-    const g = { id: "grt_old", grantee: { credential: "k1" }, scope: { projects: ["acc-home"] }, actions: ["decision.answer"], expires_at: "2099-01-01T00:00:00Z", created_at: "2030-01-01T00:00:00Z" };
-    const s = server({ live: [hermes(1, "active")], grants: [g], tokens: [{ id: "k1", kind: "delegate", label: "old key" }] });
-    const { container } = mount(s.impl, "/settings/grants#grt_old");
-    await screen.findByRole("listitem", { name: "Hermes" });
-    const row = container.querySelector("#grant-grt_old")!;
-    expect(row).not.toBeNull();
-    expect(row.closest("details")).toHaveAttribute("open");
-    expect(row).toHaveTextContent("有效");
+  it("T15：旧地址 /settings/grants 落到 Agent 列表", async () => {
+    const s = server({ live: [hermes(1, "active")] });
+    mount(s.impl, "/settings/grants");
+    expect(await screen.findByRole("listitem", { name: "Hermes" })).toBeInTheDocument();
   });
 
   it("T15：旧的后台权限、宿主接入地址也改写到这一页", async () => {

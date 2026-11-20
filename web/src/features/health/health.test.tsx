@@ -98,15 +98,15 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01；界面设计 §5.3）",
       delivery_backlog: { ok: false, count: 1, severity: "error", why: "deliveries are queued", detail: ["d1"] },
       chain_trips: { ok: false, count: 1, severity: "error", why: "the breaker stopped", detail: ["itm_3"] },
       pack_rejections: { ok: false, count: 1, severity: "error", why: "a pack failed to load", detail: ["pk"], rejections: [{ pack: "pk", source: "user", reason: "band is required" }] },
-      model_unavailable: { ok: false, count: 3, severity: "error", why: "x", detail: { judge: "", generate: "not_configured", endpoint: "not_configured", screening: ["x"], judgements: [{ kind: "decision-card", object: "itm_1", endpoint: "generate" }] } },
+      model_unavailable: { ok: false, count: 3, severity: "error", why: "x", detail: { judge: "", generate: "not_configured", endpoint: "not_configured", judgements: [{ kind: "decision-card", object: "itm_1", endpoint: "generate" }] } },
       unjudged_backlog: { ok: false, count: 57, severity: "warning", why: "w", detail: { model_unavailable: 50, models_paused: 0, outbound_unset: 3, undecided: 2, restored: 2, expired: 3, sources: [{ source: "src_mail", count: 57 }] } },
       rule_fallbacks: { ok: false, count: 1, severity: "error", why: "fell back to observe", detail: ["p/event_rules/rule-1"] },
       receipt_failures: { ok: false, count: 2, severity: "error", why: "rejected", detail: ["itm_7", "itm_8"] },
       stalled_delegations: { ok: false, count: 1, severity: "warning", why: "stalled", detail: ["itm_5"] },
     };
     mount(serve(() => json(200, report(bad))).impl);
-    // 来源 1（停用的那个只是知晓）+ 超时 2 + 提醒 1 + 连锁 1 + 能力包 1 + 模型 2 + 外发范围 1 + 放开 1 + 规则 1 + 交回 1 + 久无回音 1 = 13
-    expect(await screen.findByRole("heading", { level: 1, name: "13 件要处理" })).toBeInTheDocument();
+    // 来源 1（停用的那个只是知晓）+ 超时 2 + 提醒 1 + 连锁 1 + 能力包 1 + 模型 1 + 外发范围 1 + 放开 1 + 规则 1 + 交回 1 + 久无回音 1 = 12
+    expect(await screen.findByRole("heading", { level: 1, name: "12 件要处理" })).toBeInTheDocument();
     const src = row(/邮件 要重新登录/);
     expect(src).toHaveTextContent("这个来源的新消息进不来");
     expect(src).not.toHaveTextContent("连续"); // 认证失败不说次数，更不会出现「连续 0 次」
@@ -122,13 +122,12 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01；界面设计 §5.3）",
     const gen = row(/写作模型还没配置/);
     expect(gen).toHaveTextContent("建议和简报暂时写不出来");
     expect(within(gen).getByRole("link", { name: "去配置" })).toHaveAttribute("href", "/settings/models");
-    expect(row(/1 次风险判断没完成/)).toBeInTheDocument();
     expect(within(row(/3 条消息在等你选发给模型多少内容/)).getByRole("link", { name: "去选" })).toHaveAttribute("href", "/sources");
     expect(within(row(/2 条找回的消息等你放进建议/)).getByRole("link", { name: "去放开" })).toHaveAttribute("href", "/sources");
     expect(within(row(/已退回试运行/)).getByRole("link", { name: "去重新打开" })).toHaveAttribute("href", "/rules#rule-p%2Fevent_rules%2Frule-1");
     const rc = row(/交回的结果被拒了 2 次/);
     expect(within(rc).getByRole("link", { name: "看被拒的原因" })).toHaveAttribute("href", "/audit");
-    expect(within(rc).getByRole("link", { name: "看这个 Agent 的钥匙与授权" })).toHaveAttribute("href", "/settings/agents");
+    expect(within(rc).getByRole("link", { name: "看这个 Agent 的钥匙与档位" })).toHaveAttribute("href", "/settings/agents");
     expect(within(row(/没回音/)).getByRole("link", { name: "去催或改派" })).toHaveAttribute("href", "/delegation#d-itm_5");
     // 仅供知晓：本人停用的来源、排队、等模型恢复、已过期——不计数
     expect(info().getByText("新来源 已停用")).toBeInTheDocument();
@@ -271,7 +270,7 @@ describe("自检结论词表 doctorCode", () => {
 // 2026-11-20 根因整改：运行故障与被拒的交回是事件，带原因码；诊断页要说清原因、结果没落账，并给一个可点的下一步。
 describe("运行故障与被拒的交回说人话（界面设计 §5.3）", () => {
   const act = () => within(main().getByRole("region", { name: "要你处理" }));
-  it("退出码 126：说「执行程序无法启动（没有运行权限）」与下一步，不给重新运行；被拒的交回写原因与「去签发授权」", async () => {
+  it("退出码 126：说「执行程序无法启动（没有运行权限）」与下一步，不给重新运行；被拒的交回写原因与「去放开它的档位」", async () => {
     const bad = {
       outcall: { ok: false, count: 1, severity: "error", why: "x", detail: { long: { running: 0, queued: 0, longest_wait_seconds: 0 }, short: { running: 0, queued: 0, longest_wait_seconds: 0 }, timeouts: [],
         failures: [{ run: "run_1", target: "itm_brief", category: "task", fault: { code: "exec_denied", params: { exit: "126" } } }] } },
@@ -285,7 +284,7 @@ describe("运行故障与被拒的交回说人话（界面设计 §5.3）", () =
     expect(within(fault).queryByRole("button", { name: /重新运行/ })).toBeNull();
     const rej = act().getByText(/交回结果被拒：缺少你的原话或授权/).closest("li")!;
     expect(rej).toHaveTextContent("结果没有落账");
-    expect(within(rej).getByRole("link", { name: "去签发授权" })).toHaveAttribute("href", "/settings/agents");
+    expect(within(rej).getByRole("link", { name: "去放开它的档位" })).toHaveAttribute("href", "/settings/agents");
     expect(within(rej).getByRole("link", { name: "看被拒的原因" })).toHaveAttribute("href", "/audit?object=itm_7");
     expect(main().queryByText(/exit status|basis_required/)).toBeNull();
   });

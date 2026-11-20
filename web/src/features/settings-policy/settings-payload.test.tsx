@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
-import { feature as confirm } from "./index";
 import { feature as notify } from "../settings-notify";
 import { feature as agents } from "../settings-agents";
 import { policyServer } from "./test-server";
@@ -11,17 +10,14 @@ import { policyServer } from "./test-server";
 // 改版前后 PUT 载荷逐字段一致（界面设计 §6.1）：「策略与人格」拆成「我来拍板 / 提醒与打扰 / 通用」（权限上限的载荷见 settings-agents.test）后，
 // 每张卡片「不改直接保存」与「做一次与改版前测试相同的编辑再保存」发出的请求体，都必须与改版前的组件
 // （origin/feat/ux-vocab 的 SettingsPolicyPage.tsx）对同一夹具发出的请求体深度相等。期望值按改版前组件的行为写成固定 JSON：
-// web_only 规则四个字段都发、空的发空串；disturb 整段带回、routes/daily_cap/mutes 覆盖；其余段只发自己。
+// disturb 整段带回、routes/daily_cap/mutes 覆盖；其余段只发自己。
 const DISTURB = { routes: { decision: "inject", health: "web" }, merge_window_sec: 1800, quiet_exempt: true, daily_cap: 20, mutes: [] };
-const RULE1 = { kind: "payment", tag: "", project: "", category: "funds" };
 
 type Edit = (c: ReturnType<typeof within>) => Promise<void>;
 interface Case { name: string; at: string; card: string; edit?: Edit; path: string; body: unknown }
 
 const CASES: Case[] = [
   // 不改直接保存
-  { name: "web_only（未改）", at: "/settings", card: "只能我亲自确认的事", path: "/v1/settings/policy", body: { web_only: { categories: ["funds", "irreversible"], rules: [RULE1] } } },
-  { name: "材料写入（未改）", at: "/settings", card: "Agent 写的文档，哪些先给我过目", path: "/v1/settings/policy", body: { material_write: { default: "proposed", kinds: { minutes: "direct" } } } },
   // 对我说话的语言与语气移到设置 › Agent（界面设计 §4），按 §6.1 没有改动时不能保存，所以只比改过之后的载荷。
   {
     name: "Agent 的语言：改选", at: "/settings/agents", card: "对我说话的语言", path: "/v1/settings/policy",
@@ -29,16 +25,6 @@ const CASES: Case[] = [
     body: { persona_lang: "en" },
   },
   // 与改版前测试相同的编辑
-  {
-    name: "web_only：加类别与一条规则", at: "/settings", card: "只能我亲自确认的事", path: "/v1/settings/policy",
-    edit: async (c) => {
-      await userEvent.click(c.getByLabelText("对外承诺"));
-      await userEvent.click(c.getByRole("button", { name: "＋ 再加一条" }));
-      await userEvent.type(c.getByLabelText("规则2 标签"), "legal");
-      await userEvent.selectOptions(c.getByLabelText("规则2 类别"), "external_commitment");
-    },
-    body: { web_only: { categories: ["funds", "irreversible", "external_commitment"], rules: [RULE1, { kind: "", tag: "legal", project: "", category: "external_commitment" }] } },
-  },
   {
     name: "打扰策略：加一条「类别:优先级」路由", at: "/settings/notify", card: "各类提醒怎么送", path: "/v1/settings/policy",
     edit: async (c) => {
@@ -69,14 +55,6 @@ const CASES: Case[] = [
     body: { disturb: { ...DISTURB, mutes: [{ scope: "project", id: "acc-home" }] } },
   },
   {
-    name: "材料写入：默认与单个类型", at: "/settings", card: "Agent 写的文档，哪些先给我过目", path: "/v1/settings/policy",
-    edit: async (c) => {
-      await userEvent.click(within(c.getByRole("group", { name: "其他类型" })).getByRole("button", { name: "直接生效" }));
-      await userEvent.click(within(c.getByRole("group", { name: "纪要" })).getByRole("button", { name: "先给我看" }));
-    },
-    body: { material_write: { default: "direct", kinds: { minutes: "proposed" } } },
-  },
-  {
     name: "人格：改写", at: "/settings/agents", card: "对我说话的语气", path: "/v1/settings/policy",
     edit: async (c) => {
       const box = c.getByRole("textbox", { name: "对我说话的语气" });
@@ -95,7 +73,7 @@ describe("改版前后 PUT 载荷逐字段一致", () => {
     sessionStorage.setItem("apa.csrf", "tok-1");
     render(
       <MemoryRouter initialEntries={[at]}>
-        <App features={[confirm, notify, agents]} fetchImpl={s.impl} />
+        <App features={[notify, agents]} fetchImpl={s.impl} />
       </MemoryRouter>,
     );
     const c = within(await screen.findByRole("region", { name: card }));

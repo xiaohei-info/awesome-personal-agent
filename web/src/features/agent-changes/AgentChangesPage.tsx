@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { ErrorNote } from "../../app/errors";
 import { useNames } from "../../app/names";
-import { useRaw } from "../../app/raw";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { Val, useLabel } from "../../app/values";
-import { useAgentName } from "../settings-agents/SettingsAgentsPage";
 
 // 形状对应 GET /v1/audit/events 返回的 Step。哪些能撤销、是否最新、授权都由服务端的 item.revert 判定。
 interface Step {
@@ -18,8 +15,9 @@ interface Step {
   actor: { type: string; principal: string; via: string; on_behalf_of?: string; harness?: string };
   at: string;
   reason?: string;
-  evidence?: string;
   resolved_via?: string;
+  // 以下三项只出现在切换前的旧模型记录里（本人原话、代本人、授权单），新事件不再写：只用来标「旧模型记录」。
+  evidence?: string;
   grant?: string;
   payload?: { op?: string; reverts?: number; before?: { title?: string }; item?: { title?: string }; state?: string; category?: string; template?: string };
 }
@@ -29,19 +27,19 @@ const PAGE = 500;
 const REVERTIBLE = new Set(["item.updated", "item.phase_changed", "decision.resolved"]);
 
 
-function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: (s: Step) => Promise<void> }) {
+function Row({ s, reverted, resumed, onRevert }: { s: Step; reverted: boolean; resumed: boolean; onRevert: (s: Step) => Promise<void> }) {
   const t = useT(strings);
   const label = useLabel();
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(false);
   const credential = useNames("credential");
-  const raw = useRaw();
-  const agentName = useAgentName();
   const title = s.payload?.item?.title;
-  // Agent 后台运行凭授权单替本人做的事：直说是后台运行替你做的，并指向那张授权（§14.5）。
-  const byRun = s.actor.principal.startsWith("run:") && !!s.grant;
-  // 操作者显示凭据的标签而不是 id；临时授权给出链接，id 只在「显示原始值」里。
-  const who = [credential(s.actor.principal), s.actor.on_behalf_of && t.onBehalfOf(s.actor.on_behalf_of), s.resolved_via === "chat" && t.viaChat].filter(Boolean).join(" · ");
+  // Agent 替你回答了问题（二档放开，设计 §14.3）：直说它替你答了什么，可按次撤回；后台运行做的说是后台运行。
+  const answered = s.type === "decision.resolved" && s.resolved_via === "agent";
+  const byRun = s.actor.principal.startsWith("run:");
+  const legacy = !!(s.grant || s.evidence || s.actor.on_behalf_of || s.resolved_via === "chat" || s.resolved_via === "grant");
+  // 操作者显示凭据的标签而不是 id。
+  const who = [credential(s.actor.principal), legacy && t.legacy].filter(Boolean).join(" · ");
   const canRevert = REVERTIBLE.has(s.type) && !reverted;
   // 起草建议失败是 APA 自己调模型出的错（actor 记的是内核入站），不是 Agent 的后台运行。
   const draftFailed = s.type === "run.finished" && s.payload?.state === "failed" && s.payload.category === "generate" && s.payload.template === "triage-draft";
@@ -51,6 +49,8 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
       <h3>
         {draftFailed ? (
           t.draftFailed
+        ) : answered ? (
+          t.answered(title ?? s.object)
         ) : byRun ? (
           t.runDid(label("event", s.type), title ?? s.object)
         ) : (
@@ -62,19 +62,12 @@ function Row({ s, reverted, onRevert }: { s: Step; reverted: boolean; onRevert: 
         )}
       </h3>
       <p className="meta">
-        {draftFailed ? t.byApa : byRun ? "" : who}
-        {s.grant && (
-          <>
-            {byRun ? "" : " · "}
-            <Link to={"/settings/agents#grant-" + encodeURIComponent(s.grant)}>{byRun ? t.viaAgentGrant(agentName(s.actor.harness)) : t.viaGrant}</Link>
-            {raw && <code className="raw-id">{s.grant}</code>}
-          </>
-        )}
+        {draftFailed ? t.byApa : who}
         {" · "}{new Date(s.at).toLocaleString(locale())}
         {reverted && t.reverted}
       </p>
       {draftFailed ? <p>{t.draftFailedWhy}</p> : s.reason && <p>{s.reason}</p>}
-      {s.evidence && <blockquote>{s.evidence}</blockquote>}
+      {answered && resumed && <p className="sub">{t.resumed}</p>}
       {canRevert && !asking && <button onClick={() => setAsking(true)}>{t.revert}</button>}
       {canRevert && asking && (
         <div className="actions">
@@ -143,6 +136,8 @@ export function AgentChangesPage() {
 
   const mine = (steps ?? []).filter((s) => s.actor.type === "agent" && s.type !== "command.rejected");
   const reverted = new Set((steps ?? []).flatMap((s) => (s.payload?.op === "revert" && s.payload.reverts ? [s.payload.reverts] : [])));
+  // 回答之后内核为这件事续接了运行：撤回只撤账本里的回答，已拉起的运行撤不回，行上直说。
+  const resumedAfter = (s: Step) => (steps ?? []).some((e) => e.type === "resume.launched" && e.object === s.object && e.seq > s.seq);
   const shown = (showOlder || !since ? mine : mine.filter((s) => Date.parse(s.at) > Date.parse(since))).slice().reverse();
 
   return (
@@ -172,7 +167,7 @@ export function AgentChangesPage() {
       ) : shown.length === 0 ? (
         <p className="empty">{t.empty}</p>
       ) : (
-        shown.map((s) => <Row key={s.seq} s={s} reverted={reverted.has(s.seq)} onRevert={revert} />)
+        shown.map((s) => <Row key={s.seq} s={s} reverted={reverted.has(s.seq)} resumed={resumedAfter(s)} onRevert={revert} />)
       )}
     </main>
   );

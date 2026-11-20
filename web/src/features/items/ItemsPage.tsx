@@ -376,7 +376,8 @@ function TransitionForm({ onSubmit }: { onSubmit: (b: Record<string, unknown>) =
     >
       <label>{t.targetPhase} <Pick k="phase" value={to} onChange={setTo} ids={PHASE} /></label>
       <label>{t.reason} <input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-      <label>{t.evidence} <input value={evidence} onChange={(e) => setEvidence(e.target.value)} /></label>
+      {/* 结果证据：委派完成必须带（链接、提交等）；只作记录，不参与权限判定 */}
+      {to === "done" && <label>{t.evidence} <input value={evidence} onChange={(e) => setEvidence(e.target.value)} /></label>}
       {to === "waiting" && (
         <>
           <label>{t.waitKind} <Pick k="waiting" value={wKind} onChange={pickKind} ids={WAITING} /></label>

@@ -1,5 +1,5 @@
 import type { Feature } from "../../app/registry";
-import type { Doc } from "./shared";
+import type { AgentView } from "../settings-agents/AgentPick";
 import { SettingsPolicyPage } from "./SettingsPolicyPage";
 import { strings } from "./strings";
 
@@ -11,8 +11,8 @@ export const feature: Feature = {
   order: 2,
   section: "settings",
   summary: async (api, lang) => {
-    const p = await api.get<Doc>("/settings/policy");
-    const n = (p.web_only?.categories ?? []).length;
+    const v = await api.get<AgentView>("/agents");
+    const n = v.agents.filter((a) => a.rev > 0 && a.tier && a.tier !== "organize").length;
     return strings[lang].summary(n);
   },
   element: <SettingsPolicyPage />,

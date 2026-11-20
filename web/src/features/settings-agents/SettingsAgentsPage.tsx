@@ -1,26 +1,21 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Route, Routes } from "react-router-dom";
 import { useSession } from "../../app/session";
-import { errorText as msg, locale, useLang, useT } from "../../app/i18n";
-import { EntityPick, useNames } from "../../app/names";
+import { errorText as msg, useLang, useT } from "../../app/i18n";
+import { EntityPick } from "../../app/names";
 import { useLabel } from "../../app/values";
 import { AddAgent } from "./AgentEditor";
 import { AgentPage, KeyList, KindChoice, Secret } from "./AgentPage";
 import { Persona } from "./Persona";
 import { PolicyPage, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
-import { active, entries, hasKey, LEGACY, ready, useData, type Data, type Entry, type Grant, type Rec } from "./data";
+import { entries, hasKey, LEGACY, ready, useData, type Data, type Entry, type Rec } from "./data";
 import { strings } from "./strings";
 
 // 设置 › Agent（界面设计 §4、§6.3）：列表加单页。列表上：分工（日常 Agent、主 Agent）、Agent 一行一个（名字、分工标记、一句状态加按钮）、
 // 所有 Agent 共用的语言与语气、折叠的「很少用到」。一个 Agent 的全部属性只在它自己的页面（/settings/agents/<id>）改。
 // 判定都在服务端；本页只搬运选择并以服务端状态为准。
 
-export { GRANT_CATS } from "./AgentPage";
 export { agentsOf } from "./data";
-export type { Grant } from "./data";
-
-/** 锚点里的授权单 id：新地址 #grant-<id>，旧地址 /settings/grants#<id> 改写过来时是 #<id>。 */
-export const grantAnchor = (hash: string) => decodeURIComponent(hash.slice(1)).replace(/^grant-/, "");
 
 export function SettingsAgentsPage() {
   return (
@@ -41,18 +36,10 @@ function AgentList() {
   const t = useT(strings);
   const { docs, error: polError, load: loadPol, save } = usePolicyDocs(["policy", "access-limits"] as const);
   const { data, error, setError, load } = useData();
-  const { hash } = useLocation();
   const [adding, setAdding] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const pol = docs?.policy;
   const list = data ? entries(data) : [];
-
-  // 旧的授权单链接（/settings/grants#<id>、#grant-<id>）：签给某个 Agent 的落到它的页面；按钥匙签的旧授权在下面「很少用到」里。
-  const target = data && hash ? data.grants.find((g) => g.id === grantAnchor(hash)) : undefined;
-  if (target?.grantee.agent) {
-    const id = target.grantee.instance ? target.grantee.agent : LEGACY + target.grantee.agent;
-    return <Navigate replace to={"/settings/agents/" + encodeURIComponent(id) + "#grant-" + target.id} />;
-  }
 
   return (
     <PolicyPage title={t.title} lede={t.lede} error={polError} ready={!!pol} onRetry={() => { void loadPol(); void load(); }}>
@@ -121,6 +108,7 @@ function Roles({ pol, save, list }: { pol: Doc; save: Save; list: Entry[] }) {
 function Row({ e, pol }: { e: Entry; pol: Doc }) {
   const t = useT(strings);
   const nameOf = useEntryName();
+  const label = useLabel();
   const roleId = (k: string) => pol[k] ?? (pol.default_harness ? LEGACY + pol.default_harness : "");
   const to = "/settings/agents/" + encodeURIComponent(e.id);
   const step = !hasKey(e) ? t.stepKey : !e.live ? (e.pending ? t.stepLaunch : t.stepNoRequest) : "";
@@ -132,19 +120,18 @@ function Row({ e, pol }: { e: Entry; pol: Doc }) {
           {roleId("default_agent_id") === e.id && <span className="badge plain">{t.isDaily}</span>}{" "}
           {roleId("main_agent_id") === e.id && <span className="badge plain">{t.isMain}</span>}
         </span>
-        <span className="sub">{e.card && !e.card.enabled ? t.stateOff : ready(e) ? t.stateReady : t.stateMissing(step)}</span>
+        <span className="sub">{e.card && !e.card.enabled ? t.stateOff : ready(e) ? t.stateReady : t.stateMissing(step)} · {label("agentTier", (e.instance && e.card?.tier) || "organize")}</span>
       </div>
       {ready(e) ? <Link className="btn" to={to}>{t.open}</Link> : <Link className="btn" to={to + "#connect"}>{t.goConnect}</Link>}
     </li>
   );
 }
 
-// 页面级、很少用到的：给脚本和执行者的钥匙（含没归属的旧钥匙）、以前按钥匙签的临时授权（锚点 #grant-<id>）。
+// 页面级、很少用到的：给脚本和执行者的钥匙（含没归属的旧钥匙）。
 // 是否挪到「对外接口」本版不动（界面设计 §4）。
 function Other({ data, list, reload, onError, secret, onSecret }: { data: Data; list: Entry[]; reload: () => Promise<void>; onError: (m: string | null) => void; secret: string | null; onSecret: (s: string | null) => void }) {
   const t = useT(strings);
   const { api } = useSession();
-  const { hash } = useLocation();
   const [kind, setKind] = useState("observer");
   const [note, setNote] = useState("");
   const [executor, setExecutor] = useState("");
@@ -164,9 +151,8 @@ function Other({ data, list, reload, onError, secret, onSecret }: { data: Data; 
   };
   const harnesses = list.map((e) => e.harness);
   const orphan = data.tokens.filter((c) => !c.harness && !(c.seen_harness && harnesses.includes(c.seen_harness)));
-  const legacy = data.grants.filter((g) => !g.grantee.agent);
   return (
-    <details className="panel" open={!!hash && legacy.some((g) => g.id === grantAnchor(hash))}>
+    <details className="panel">
       <summary>{t.rarely}</summary>
       <h3>{t.otherKeys}</h3>
       {orphan.length > 0 && <KeyList keys={orphan} reload={reload} onError={onError} />}
@@ -177,44 +163,7 @@ function Other({ data, list, reload, onError, secret, onSecret }: { data: Data; 
         <div><button type="submit">{t.issueKey}</button></div>
         {secret && <Secret secret={secret} onDone={() => onSecret(null)} />}
       </form>
-      {legacy.length > 0 && (
-        <>
-          <h3>{t.legacy}</h3>
-          <ul className="rows">{legacy.map((g) => <LegacyGrant key={g.id} g={g} reload={reload} onError={onError} />)}</ul>
-        </>
-      )}
     </details>
-  );
-}
-
-function LegacyGrant({ g, reload, onError }: { g: Grant; reload: () => Promise<void>; onError: (m: string | null) => void }) {
-  const t = useT(strings);
-  const { api } = useSession();
-  const label = useLabel();
-  const cred = useNames("credential");
-  const [reason, setReason] = useState("");
-  const st = g.revoked_at ? "revoked" : active(g) ? "active" : "expired";
-  const revoke = async () => {
-    onError(null);
-    try {
-      await api.post("/settings/grants/" + encodeURIComponent(g.id) + "/revoke", { reason: reason.trim() });
-    } catch (e) {
-      onError(msg(e));
-    }
-    await reload();
-  };
-  return (
-    <li id={"grant-" + g.id} data-grant={g.id}>
-      <strong>{t.legacyCan(cred(g.grantee.credential ?? ""), g.actions.map((a) => label("grantAction", a)).join(t.listSep))}</strong>{" "}
-      <span className="badge">{t.status[st]}</span>
-      {g.expires_at && <span className="sub"> {t.untilDate(new Date(g.expires_at).toLocaleDateString(locale()))}</span>}
-      {st === "active" && (
-        <div className="actions full">
-          <label>{t.revokeReason}<input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-          <button className="danger" disabled={!reason.trim()} onClick={() => void revoke()}>{t.revokeGrant}</button>
-        </div>
-      )}
-    </li>
   );
 }
 

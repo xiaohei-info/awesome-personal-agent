@@ -3,6 +3,7 @@ import { useSession } from "../../app/session";
 import { Go, PageHead } from "../../app/page";
 import { useLang, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
+import { REJECT_REASON } from "../../app/ids";
 import { useItemTitle, useNames } from "../../app/names";
 import { useRaw } from "../../app/raw";
 import { entryOf, useLabel } from "../../app/values";
@@ -23,8 +24,10 @@ interface Run { id: string; target: string }
 /** 一行的问题、影响、主按钮与落点。 */
 interface Said { problem: string; impact?: string; button?: string; to?: string; second?: { button: string; to: string } }
 
-// 被拒原因码 → 下一步：缺依据的去签发授权（Agent 页的「可以替我决定」），没权限的看钥匙，其余看操作记录。
-const GRANT_CODES = new Set(["basis_required", "session_not_direct", "grant_required"]);
+// 被拒原因 → 下一步（设计 §14.3）：档位没放开的去 Agent 页放开档位，钥匙范围外的看钥匙，只有本人能做的看操作记录。
+// basis_required 等是切换前旧模型的码，读旧记录时同样指向档位。
+const TIER_CODES = new Set(["tier_closed", "basis_required", "session_not_direct", "grant_required"]);
+const isReason = (r?: string) => !!r && (REJECT_REASON as readonly string[]).includes(r);
 
 function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: Status) => Said {
   const t = useT(strings);
@@ -52,7 +55,6 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
       case "packs": return { problem: t.packs(r.n), impact: t.packsImpact, button: undefined, to: undefined };
       case "modelUnset": return { problem: t.modelUnset(model), impact: t.modelImpact[sub] ?? "", button: t.setupModel, to: r.to };
       case "modelFail": return { problem: t.modelFail(model), impact: t.modelImpact[sub] ?? "", button: t.testModel, to: r.to };
-      case "screening": return { problem: t.screening(r.n), impact: t.screeningImpact, button: t.testModel, to: r.to };
       case "waitScope": return { problem: t.waitScope(r.n), impact: t.waitScopeImpact, button: t.choose, to: r.to };
       case "restored": return { problem: t.restored(r.n), button: t.release, to: r.to };
       case "waitModel": return { problem: [t.waitModel(r.n), rejudgeHint(lang, "model_unavailable", st.rejudgeDays)].filter(Boolean).join(" · ") };
@@ -65,17 +67,14 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
       }
       case "receipt": {
         const reason = r.params?.reason;
-        const why = reason ? label("grantReason", reason) : r.code ? label("error", r.code) : t.receiptNoReason;
-        // 初筛待定：授权本身没问题，第一步是去处理那件事上的卡
-        if (reason === "grant_screening_pending" && r.obj)
-          return { problem: t.receiptOne(credential(r.who ?? ""), t.receiptCmd[r.cmd ?? ""] ?? r.cmd ?? "", why), impact: t.receiptImpact, button: t.goCard, to: "/items/" + encodeURIComponent(r.obj),
-            second: { button: t.seeWhy, to: "/audit?object=" + encodeURIComponent(r.obj) } };
-        const grant = !!r.code && GRANT_CODES.has(r.code);
+        const why = isReason(reason) ? label("rejectReason", reason!) : reason ? label("grantReason", reason) : r.code ? label("error", r.code) : t.receiptNoReason;
+        const tier = reason === "tier_closed" || (!!r.code && TIER_CODES.has(r.code));
+        const scope = reason === "out_of_scope" || r.code === "permission_denied";
         return {
           problem: t.receiptOne(credential(r.who ?? ""), t.receiptCmd[r.cmd ?? ""] ?? r.cmd ?? "", why),
           impact: t.receiptImpact,
-          button: grant ? t.goGrant : r.code === "permission_denied" ? t.seeKey : t.seeWhy,
-          to: grant || r.code === "permission_denied" ? "/settings/agents" : r.to,
+          button: tier ? t.goTier : scope ? t.seeKey : t.seeWhy,
+          to: tier || scope ? "/settings/agents" : r.to,
           second: { button: t.seeWhy, to: r.obj ? "/audit?object=" + encodeURIComponent(r.obj) : "/audit" },
         };
       }

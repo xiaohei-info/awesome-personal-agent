@@ -41,6 +41,7 @@ export const SESSION_KIND = ["direct", "group", "unknown"] as const;
 export const ERROR_CODE = [
   "invalid_request", "unauthenticated", "permission_denied", "web_only", "executor_not_allowed", "risk_screening_pending",
   "basis_required", "session_not_direct", "grant_required", "import_source_mismatch", "import_limit_exceeded", "not_found", "conflict", "login_locked", "internal", "models_paused", "fetch_failed",
+  "reauth_required", "tier_closed",
 ] as const;
 /** 错误码里只说了类别、要靠服务端 why 才说得清的：显示「类别：why」 */
 export const GENERIC_ERROR: readonly string[] = ["invalid_request", "conflict", "internal"];
@@ -58,8 +59,6 @@ export const BACKLOG_STEP = ["rules", "score", "bands", "rejudge", "restore"] as
 /** 挂靠消息状态：kernel/sources/runner/runner.go Attach* */
 export const ATTACH_STATE = ["pending", "forwarded", "processed", "handed_back", "released"] as const;
 
-/** web_only 默认类别：kernel/policy/policy.go Category* */
-export const WEB_ONLY = ["funds", "external_commitment", "irreversible", "permission_change", "spec_activation"] as const;
 /** 运行权限档：kernel/policy/policy.go Perm* */
 export const PERM = ["read", "edit", "full"] as const;
 /** 材料写入策略：kernel/policy/policy.go Write* */
@@ -72,13 +71,6 @@ export const LOCALITY = ["local", "external"] as const;
 export const PROTOCOL = ["system-one", "probability-judgment/1", "chat-completions", "messages", "responses"] as const;
 /** 概率来源（§8.8；内核按字面量写入） */
 export const PROB_SOURCE = ["native", "logprobs", "self_reported"] as const;
-/** 可授权的动作：kernel/policy/grant.go GrantableActions */
-export const GRANT_ACTION = [
-  "item.create", "item.update", "item.transition", "item.relate", "item.progress", "decision.answer", "proposal.accept", "proposal.dismiss",
-  "proposal.attach", "revision.confirm", "revision.reject", "delegate.report", "followmsg.handback",
-] as const;
-/** 授权单状态（Web 由 revoked_at、expires_at 推出） */
-export const GRANT_STATUS = ["active", "expired", "revoked"] as const;
 
 /** 凭据种类：kernel/auth/auth.go Kind */
 export const CRED_KIND = ["observer", "worker", "delegate", "ext", "webhook"] as const;
@@ -112,7 +104,7 @@ export const HEALTH_SIGNAL = [
   "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag",
 ] as const;
 /** 自检项：kernel/doctor/report.go Order */
-export const DOCTOR_CHECK = ["data_dir", "config", "tier", "model_endpoint", "sources", "packs", "host_plugin", "overlaps", "channels", "secrets", "connections"] as const;
+export const DOCTOR_CHECK = ["data_dir", "config", "tier", "model_endpoint", "sources", "packs", "host_plugin", "overlaps", "channels", "secrets", "connections", "authz"] as const;
 /** 自检结论的机器码：kernel/doctor/codes.go Code*（Check.code、Detail.code、data.problems） */
 export const DOCTOR_CODE = [
   "ok", "not_configured", "no_client", "unreachable", "timeout", "unauthorized", "protocol_error", "self_reported", "invalid_request",
@@ -121,13 +113,14 @@ export const DOCTOR_CODE = [
   "data_dir_ok", "data_dir_no_backup", "data_dir_missing", "data_dir_permissions", "ledger_missing", "ledger_damaged", "ledger_too_new", "ledger_migrate",
   "config_ok", "config_invalid", "config_exposed", "host_file_invalid",
   "tier_paused", "tier_kernel_only", "tier_no_host", "tier_full",
+  "authz_switched", "authz_not_switched",
   "models_paused", "models_none", "models_ok", "models_failing",
   "sources_none", "sources_ok", "sources_attention", "sources_restored_missing",
   "source_ok", "source_command_missing", "source_outbound_unset", "source_outbound_full", "source_last_failed", "source_tool_timeout",
   "source_tool_version", "source_tool_missing", "source_tool_config", "source_tool_failed", "source_creds_missing", "source_webhook_key_missing",
   "packs_no_loader", "packs_ok", "packs_rejected", "pack_rejected",
   "host_none", "host_ok", "host_attention", "host_ready", "host_ready_no_selfcheck", "host_headless_missing", "host_selfcheck_failed",
-  "host_no_session_kind", "host_hook_missing",
+  "host_hook_missing",
   "overlaps_skipped", "overlaps_none", "overlaps_found", "overlap",
   "channels_none", "channels_ok", "channels_backlog", "channel_ok", "channel_backlog", "channel_orphan", "export_ok",
   "secrets_none", "secrets_ok", "secrets_key_missing", "secrets_key_mode", "secrets_unreadable",
@@ -147,7 +140,15 @@ export type RunFault = (typeof RUN_FAULT)[number];
 /** 动作没能完成的类别码：kernel/domain/notice.go NoticeCode（other_alerts 的 notices，设计 §6.14 第 20 条、§15.2）。 */
 export const NOTICE_CODE = ["task_refused", "background_refused", "resume_refused", "model_unset", "models_paused", "outbound_blocked", "chain_tripped", "action_rejected", "action_failed"] as const;
 export type NoticeCode = (typeof NOTICE_CODE)[number];
-/** 授权单不可用的细分原因：kernel/domain/errors.go GrantReason*（错误体与拒绝记录的 reason，设计 §14.5）。 */
+/** 拒绝的三种口径：kernel/domain/errors.go Reason*（错误体与拒绝记录的 reason，设计 §14.3）；reauth_required 是硬线下网页还没再输口令 */
+export const REJECT_REASON = ["hard_line", "reauth_required", "tier_closed", "out_of_scope"] as const;
+export const REAUTH = "reauth_required";
+/** Agent 的档位：kernel/policy/policy.go Allow*（设计 §14.3） */
+export const AGENT_TIER = ["organize", "decide", "rules"] as const;
+export type AgentTier = (typeof AGENT_TIER)[number];
+/** 规矩改动撤不回的原因：kernel/why/rulechanges.go Revert* */
+export const REVERT_WHY = ["run_started", "data_purged", "superseded", "not_revertible"] as const;
+/** 旧模型授权单不可用的细分原因（只读历史值） */
 export const GRANT_REASON = ["grant_screening_pending", "grant_risk_ceiling", "grant_not_for_background", "untrusted_origin", "untrusted_trigger"] as const;
 
 /** 对外事件类型：kernel/domain/event.go Ev*（附录 B.4）；import.completed 是导入取消后只读的历史值 */
@@ -156,7 +157,7 @@ export const EVENT = [
   "decision.requested", "decision.resolved", "delegation.created", "delegation.reported", "command.rejected",
   "material.revised", "material.revision_proposed", "guideline.activated", "project.updated", "project.allowed_executors_changed",
   "rule.mode_changed", "allowlist.changed", "policy.changed", "grant.issued", "grant.revoked", "agent.configured", "agent.queued", "run.started", "run.finished",
-  "source.failed", "health.alert", "auth.login", "auth.login_locked", "auth.password_changed", "auth.session_revoked",
+  "source.failed", "health.alert", "auth.login", "auth.login_locked", "auth.password_changed", "auth.session_revoked", "authz.switched",
 ] as const;
 /** 内部审计事件类型（各模块写入，不在对外清单里；查不到的显示原值） */
 export const EVENT_INTERNAL = [

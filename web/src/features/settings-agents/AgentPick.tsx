@@ -8,6 +8,8 @@ import { strings } from "./strings";
 
 export interface Agent {
   id: string; harness: string; name: string; enabled: boolean; rev: number; values?: Record<string, string>;
+  /** 档位与二档的项目范围（GET /agents，设计 §14.3）；缺省是只整理。 */
+  tier?: string; tier_projects?: string[];
 }
 export interface AgentView {
   agents: Agent[];

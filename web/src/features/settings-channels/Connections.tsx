@@ -216,7 +216,6 @@ function UseFor({ checked, setChecked }: { checked: string[]; setChecked: (c: st
             onChange={(e) => setChecked(e.target.checked ? [...checked, c] : checked.filter((x) => x !== c))} /> {t.classes[c]}</label>
         ))}
       </div>
-      <p className="sub">{t.webOnlyNote}</p>
     </fieldset>
   );
 }

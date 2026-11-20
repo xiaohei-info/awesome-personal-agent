@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { Go, PageHead } from "../../app/page";
 import { useSession } from "../../app/session";
 import { refreshCounts, useAttention } from "../../app/attention";
-import { ScreeningBadge } from "../decision-screening/ScreeningBadge";
 import { RejectionNote, type Rejection } from "./RejectionNote";
 import { locale, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
@@ -36,8 +35,6 @@ export interface DecisionItem {
     recommend?: string;
     free_text?: boolean;
     deadline?: string;
-    risk_class?: string;
-    screening_pending?: boolean;
     resolution?: unknown;
   };
 }
@@ -155,13 +152,7 @@ export function QuestionCard({ item, focused, onFocus, rejection, onAnswer, inIt
         {inItem ? null : <Link to={"/items/" + encodeURIComponent(item.id)}>{item.title}</Link>}
         {item.project && <span className={inItem ? undefined : "dot"}>{project(item.project)}</span>}
         {item.priority && item.priority !== "normal" && <span className="dot"><Val k="priority" id={item.priority} /></span>}
-        <ScreeningBadge pending={ask.screening_pending} />
       </p>
-      {ask.risk_class === "web_only" && (
-        <p className="sub">
-          <span className="badge bad plain">{t.webOnly}</span> {t.webOnlyWhy} <Go to="/settings">{t.why}</Go>
-        </p>
-      )}
       <Asker id={item.id} code={ask.code} />
       <RejectionNote rejection={rejection} what="answer" item={item.id} />
       {single && <p className="sub">{t.ackWhy}</p>}
