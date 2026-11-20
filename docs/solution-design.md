@@ -1156,6 +1156,7 @@ Web、CLI、ext、时钟、规则动作都走同一条路径：
 | `item.create`、`item.update`、`item.transition`、`item.relate` | 事项增改、阶段转移、关联；observer 只能以 `proposed` 新建 |
 | `item.progress` | 给事项追加一条进展，不改阶段；worker 限自己的事项，delegate 对绑定的事项不要求依据（§14.5） |
 | `item.revert` | 撤销一次 agent 变更，写反向命令；只在 Web |
+| `item.start` | 本人让一件进行中的事项"现在开工"，类比定时安排的"立即跑一次"：记一条 `item.start_requested`，由规则引擎执行能为它拉起后台运行的规则（§13.6）；事项须是 `open`；只在 Web |
 | `project.create`、`project.update`、`project.repos` | 项目与 repos 属性 |
 | `material.add`、`material.commit`、`material.show`、`material.search`、`material.revert` | 托管型登记、自有型提交、读取、检索、回退（回退只在 Web） |
 | `material.link` | 登记链接型材料（§12.8）；同一项目内同一位置幂等 |
@@ -2453,6 +2454,8 @@ v0.1 落盘的邮件事件没有线程关联键，也无法补出：对这些旧
 4. 无头运行：外呼调用器按插件声明拉起，注入运行凭据和运行目录。唤醒：产出唤醒类投递，由网关插件领取。
 5. 运行者工作，回执经 CLI 写回，事项记会话 id。
 6. 结束：`done` 带证据；或 `waiting`（已委派）；或 `needs_input`。失败、超时，或运行结束时事项仍是 `open`，都转 `needs_input`，不再重试。
+
+**本人"现在开工"**：事件规则只在事项**进入** `open` 时命中，已经在进行中的事项再交给 Agent 不会自己开工。本人在 Web 的事项详情里点"现在开工"（`item.start`，`POST /items/{id}/start`，只有 Web 登录）时，内核记一条内部事件 `item.start_requested`（对象是事项，不改事项、不计版本）；规则引擎据它挑出带 `start_background_run` 动作、去掉 `event`、`to_phase`、`from_phase` 之后条件仍匹配这件事的事件规则，只执行其中的 `start_background_run`。这是本人的显式指令，所以不看规则模式（与"立即跑一次"不看实例启停同理），其余照常：拉起流程第 2 步的在途运行跳过、链路深度超限只记录、权限档位不超过上限、`task` 运行者的执行者在项目名单内、项目检出，不通过照旧转 `needs_input`。没有一条规则能为它拉起时记 `health.alert`，不假装成功。
 
 **委派后的接续**：运行者委派后通常先结束。子事项回执到达时，若原后台会话已结束，由下一次后台运行（事件规则命中，链路深度加一）或主会话注入接续。同一事项同时只有一个运行；有在途运行时 `apa context` 会提示，避免本人在场的主会话重复处理。
 

@@ -1,7 +1,7 @@
 // Package items 是事项分组的 HTTP 路由（附录 B.2，设计 §7.1、§14.3）：
-// GET/POST /items、GET/PATCH /items/{id}、POST /items/{id}/transition|relations|progress|revert、GET /today。
+// GET/POST /items、GET/PATCH /items/{id}、POST /items/{id}/transition|relations|progress|revert|start、GET /today。
 //
-// 路由里没有业务规则：写入全部映射到内核命令（item.create/update/transition/relate/revert），
+// 路由里没有业务规则：写入全部映射到内核命令（item.create/update/transition/relate/revert/start），
 // 授权（含"只有 Web 登录才能撤销"）、校验、内核字段防写、乐观版本与幂等都由命令管线判定。
 // 本层只做 HTTP 到命令请求的搬运：
 //   - 路径里的 id 注入请求体（体里不许再写 id/from，避免两处不一致）；
@@ -59,6 +59,7 @@ func Routes(x *command.Executor, st *store.Store, staleAfter ...func() time.Dura
 		r.Handle(core.Route{Method: "POST", Path: "/proposals/batch", Handler: h.batch})
 		r.Handle(core.Route{Method: "GET", Path: "/today", Handler: h.today})
 		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/revert", Handler: h.write("item.revert", "id", http.StatusOK)})
+		r.Handle(core.Route{Method: "POST", Path: "/items/{id}/start", Handler: h.write("item.start", "id", http.StatusAccepted)})
 	}
 }
 

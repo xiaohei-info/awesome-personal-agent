@@ -35,7 +35,9 @@ type Call struct {
 	Instance *Fired
 	// Bound 为真表示 Item 是本次执行里 create_item 建的事项（实例驱动的规则），后续动作以它为对象。
 	Bound bool
-	bind  func(id string) error
+	// Requested 为真表示这次是本人在 Web 点了“现在开工”（item.start_requested）：动作不再看规则模式，其余复核照旧（§13.6）。
+	Requested bool
+	bind      func(id string) error
 }
 
 // Ask 以规则的身份把事项转 needs_input 交本人（级联终止于 needs_input，§8.7）。
@@ -257,19 +259,25 @@ func (e *Engine) fire(ctx context.Context, rs []ruleDef, modes map[string]string
 
 // trigger 是一次规则命中的上下文。
 type trigger struct {
-	entry    eventlog.Entry
-	instance *Fired
-	bound    bool
-	item     *domain.Item
-	before   *domain.Item
-	object   string // 链路深度的来源对象，也是观察记录挂靠的对象
-	ref      string // 幂等键里的触发标识
-	depth    int
+	entry     eventlog.Entry
+	instance  *Fired
+	bound     bool
+	item      *domain.Item
+	before    *domain.Item
+	object    string // 链路深度的来源对象，也是观察记录挂靠的对象
+	requested bool   // 本人“现在开工”
+	ref       string // 幂等键里的触发标识
+	depth     int
 }
 
 func (e *Engine) event(ctx context.Context, rs []ruleDef, modes map[string]string, en eventlog.Entry) error {
 	if !en.Tombstone && en.Event.Type == instances.EvFired {
 		if err := e.instance(ctx, rs, en); err != nil {
+			return err
+		}
+	}
+	if !en.Tombstone && en.Event.Type == items.EvStartRequested {
+		if err := e.startNow(ctx, rs, en); err != nil {
 			return err
 		}
 	}
@@ -373,6 +381,51 @@ func (e *Engine) skipped(ctx context.Context, d ruleDef, t *trigger, f Fired, wh
 			Basis: &domain.Basis{PolicyVersion: pv, RuleID: d.Key}, Reason: why, Payload: b, ChainDepth: t.depth, At: e.now()})
 		return err
 	})
+}
+
+// startNow 执行本人“现在开工”：只挑事件规则里的 start_background_run 动作，规则条件去掉事件与阶段转移后仍匹配这件事（如 kind、tag）才执行；
+// 不看规则模式（本人的显式指令，与“立即跑一次”同理），权限上限、项目允许的执行者、链路深度与在途运行由动作处理器照旧复核。
+// 没有一条规则能为它拉起时记一条告警，不假装成功。
+func (e *Engine) startNow(ctx context.Context, rs []ruleDef, en eventlog.Entry) error {
+	t, err := e.trigger(ctx, en)
+	if err != nil {
+		return err
+	}
+	t.ref = fmt.Sprintf("s%d", en.Event.Seq)
+	t.requested = true
+	ran := false
+	for _, d := range rs {
+		if d.Group != groupEvent {
+			continue
+		}
+		var do []packs.Action
+		for _, a := range d.Do {
+			if a["action"] == "start_background_run" {
+				do = append(do, a)
+			}
+		}
+		if len(do) == 0 {
+			continue
+		}
+		when := map[string]any{}
+		for k, v := range d.When {
+			if k != "event" && k != "to_phase" && k != "from_phase" {
+				when[k] = v
+			}
+		}
+		if ok, err := match(when, t); err != nil || !ok {
+			continue
+		}
+		ran = true
+		d.Do = do
+		if err := e.execute(ctx, d, t); err != nil {
+			return err
+		}
+	}
+	if ran {
+		return nil
+	}
+	return e.fail(ctx, ruleDef{State: State{Key: "item.start"}}, t, "start", invalid("no rule can start a background run for item "+en.Event.Object))
 }
 
 func instanceDriven(d ruleDef) bool {
@@ -504,7 +557,7 @@ func (e *Engine) execute(ctx context.Context, d ruleDef, t *trigger) error {
 			err = invalid("action " + name + " has no registered handler")
 		} else {
 			n := 0
-			err = h(ctx, Call{Rule: d.Key, Action: a, Item: t.item, Seq: t.entry.Event.Seq, Depth: t.depth, Instance: t.instance, Bound: t.bound,
+			err = h(ctx, Call{Rule: d.Key, Action: a, Item: t.item, Seq: t.entry.Event.Seq, Depth: t.depth, Instance: t.instance, Bound: t.bound, Requested: t.requested,
 				Do: func(cmd string, input any) (command.Result, error) {
 					n++
 					return e.do(ctx, d.Key, t, fmt.Sprintf("%s:%d:%d", t.ref, i, n), cmd, input)

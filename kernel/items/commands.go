@@ -425,10 +425,10 @@ func syncTimer(tx *store.Tx, cur, it domain.Item) error {
 //
 // 授权（§14.3）：以 proposed 新建所有级别可；其余写入改自己的事项为 update_own、改他人的为 edit_any_item；
 // 离开 proposed（接受或丢弃建议）与离开 needs_input（决定）按代答（answer_decision）判定，使 worker、
-// 运行身份不能自己确认；item.revert 只在 Web（change_settings）。assignee 与 project 的写入都过名单校验。
+// 运行身份不能自己确认；item.revert 与 item.start 只在 Web（change_settings）。assignee 与 project 的写入都过名单校验。
 func Register(x *command.Executor, kinds *Kinds) error {
 	s := &svc{kinds: kinds}
-	for _, sp := range []command.Spec{s.create(), s.update(), s.transition(), s.relate(), s.revert(), s.progress()} {
+	for _, sp := range []command.Spec{s.create(), s.update(), s.transition(), s.relate(), s.revert(), s.progress(), s.start()} {
 		if err := x.Register(sp); err != nil {
 			return err
 		}

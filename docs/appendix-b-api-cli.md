@@ -136,6 +136,7 @@
 | | `GET /items/{id}/messages` | 事项的全部挂靠消息 | observer；运行身份和无人值守事项按转发白名单过滤；ext 密钥不可用 |
 | | `POST /items/{id}/transition`，`POST /items/{id}/relations` | 转阶段、关联 | 同上 |
 | | `POST /items/{id}/revert` | 撤销 agent 变更 | 只有 Web 登录 |
+| | `POST /items/{id}/start` | 现在开工（`item.start`，主文档 §13.6）：事项须是 `open`，否则 409；记内部事件 `item.start_requested`，规则引擎随后执行能为它拉起后台运行的规则，不看规则模式，权限上限、项目允许的执行者、链路深度与在途运行照常复核；返回 202 与 `{"id"}` | 只有 Web 登录 |
 | 决策 | `POST /items/{id}/ask` | 写入决策请求 | worker |
 | | `POST /items/{id}/decide`，`/accept`，`/dismiss` | 回答或处理建议；delegate 带 `X-APA-Evidence` 或 `X-APA-Grant`，二选一 | Web 登录、delegate |
 | | `POST /items/{id}/attach` | 把建议补到已有事项，请求体 `{to, reason?}`；依据同上 | Web 登录、delegate |

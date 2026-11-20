@@ -1033,3 +1033,47 @@ func TestLoopThroughRunCredentialTripsAtThreshold(t *testing.T) {
 		return err
 	})
 }
+
+// 本人"现在开工"（item.start，§13.6）：规则仍是试运行也拉起，复核照旧（权限上限超出转 needs_input）；
+// 只有 Web 登录能发起，事项须是 open；没有规则能为它拉起时记告警，不假装成功。
+func TestOwnerStartNow(t *testing.T) {
+	e := setup(t, 0)
+	e.configure("silent")
+	id := e.newItem("t", []string{"agent-ok"}, nil)
+	e.open(id) // 规则是 observe：只留观察记录
+	if n := len(e.runList()); n != 0 {
+		t.Fatalf("observe launched %d runs", n)
+	}
+
+	delegate := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "d"}, Level: authz.LevelDelegate}
+	if _, err := e.do(delegate, "item.start", map[string]any{"id": id}, command.Chain{}); err == nil {
+		t.Fatal("a delegate started a run")
+	}
+	e.must(owner, "item.start", map[string]any{"id": id})
+	rs := e.runList()
+	if len(rs) != 1 || rs[0].Run.Target != id || rs[0].Run.Access != "edit" || rs[0].Run.Basis == nil || rs[0].Run.Basis.RuleID != "bgr/event_rules/main" {
+		t.Fatalf("runs = %+v", rs)
+	}
+
+	over := e.newItem("over", []string{"full"}, nil) // full 超出上限 edit
+	e.open(over)
+	e.must(owner, "item.start", map[string]any{"id": over})
+	if it := e.item(over); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "上限") {
+		t.Fatalf("over cap: %+v", it)
+	}
+
+	if _, err := e.do(owner, "item.start", map[string]any{"id": over}, command.Chain{}); err == nil {
+		t.Fatal("started an item that is not open")
+	}
+
+	plain := e.newItem("plain", nil, nil)
+	e.open(plain)
+	alerts := len(e.ofType(domain.EvHealthAlert))
+	e.must(owner, "item.start", map[string]any{"id": plain})
+	if n := len(e.runList()); n != 1 {
+		t.Fatalf("runs = %d", n)
+	}
+	if n := len(e.ofType(domain.EvHealthAlert)); n != alerts+1 {
+		t.Fatalf("alerts = %d, want %d", n, alerts+1)
+	}
+}

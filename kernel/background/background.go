@@ -1,6 +1,6 @@
 // Package background 是后台运行触发（设计 §13.6、§14.11、附录 C.6）：规则动作 start_background_run 的处理器。
 // 命中后依次做前置校验——该事项已有在途运行则跳过并记 Event；链路深度超限只记录不派发；
-// 按当前策略复核（规则仍是 auto、权限档位不超过 Web 设置的上限且声明已提供、task 运行者的执行者在项目名单内）
+// 按当前策略复核（规则仍是 auto，本人“现在开工”时不看这一项；权限档位不超过 Web 设置的上限且声明已提供、task 运行者的执行者在项目名单内）
 // 不通过则转 needs_input——通过后在同一事务写 Run 和 Event（策略版本、规则 id），再按声明的拉起方式启动：
 // 无头运行经外呼调用器拉起（Run 为 queued）；main_session 的拉起方式取规则覆盖 ?? Agent 设置 ?? 声明初始值 ?? 无头（launchOf），
 // 为唤醒时 Run 写为外部运行（running，不占额度、不起进程），同一事务交唤醒模块产出 class=wake 投递，由网关插件领取。
@@ -340,7 +340,7 @@ func (s *Service) start(ctx context.Context, c rules.Call) error {
 	wakes := how.launch == policy.LaunchWake
 	var reason string
 	switch {
-	case f.mode != rules.ModeAuto:
+	case f.mode != rules.ModeAuto && !c.Requested: // 本人“现在开工”不看规则模式，其余复核照旧
 		reason = "规则已不是 auto"
 	case f.selected.AccessReason(sp.access) != "":
 		reason = f.selected.AccessReason(sp.access)
