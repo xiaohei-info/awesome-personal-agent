@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature as confirm } from "./index";
 import { feature as notify } from "../settings-notify";
-import { feature as general } from "../settings-general";
+import { feature as agents } from "../settings-agents";
 import { policyServer } from "./test-server";
 
 // 改版前后 PUT 载荷逐字段一致（设计 §8.1 PR 2）：「策略与人格」拆成「我来拍板 / 提醒与打扰 / 通用」（权限上限的载荷见 settings-agents.test）后，
@@ -23,8 +23,12 @@ const CASES: Case[] = [
   { name: "web_only（未改）", at: "/settings", card: "只能我在网页上亲自确认", path: "/v1/settings/policy", body: { web_only: { categories: ["funds", "irreversible"], rules: [RULE1] } } },
   { name: "材料写入（未改）", at: "/settings", card: "Agent 写的文档，哪些先给我过目", path: "/v1/settings/policy", body: { material_write: { default: "proposed", kinds: { minutes: "direct" } } } },
   { name: "打扰策略（未改）", at: "/settings/notify", card: "怎么找我", path: "/v1/settings/policy", body: { disturb: DISTURB } },
-  { name: "助手语言（未改）", at: "/settings/general", card: "助手说哪种语言", path: "/v1/settings/policy", body: { persona_lang: "" } },
-  { name: "人格（未改）", at: "/settings/general", card: "助手的语气", path: "/v1/settings/policy", body: { persona: "Be brief." } },
+  // 对我说话的语言与语气移到设置 › Agent（界面设计 §4），按 §6.1 没有改动时不能保存，所以只比改过之后的载荷。
+  {
+    name: "Agent 的语言：改选", at: "/settings/agents", card: "对我说话的语言", path: "/v1/settings/policy",
+    edit: async (c) => { await userEvent.click(c.getByRole("button", { name: "English" })); },
+    body: { persona_lang: "en" },
+  },
   // 与改版前测试相同的编辑
   {
     name: "web_only：加类别与一条规则", at: "/settings", card: "只能我在网页上亲自确认", path: "/v1/settings/policy",
@@ -67,9 +71,9 @@ const CASES: Case[] = [
     body: { material_write: { default: "direct", kinds: { minutes: "proposed" } } },
   },
   {
-    name: "人格：改写", at: "/settings/general", card: "助手的语气", path: "/v1/settings/policy",
+    name: "人格：改写", at: "/settings/agents", card: "对我说话的语气", path: "/v1/settings/policy",
     edit: async (c) => {
-      const box = c.getByRole("textbox", { name: "助手的语气" });
+      const box = c.getByRole("textbox", { name: "对我说话的语气" });
       await userEvent.clear(box);
       await userEvent.type(box, "直接");
     },
@@ -85,7 +89,7 @@ describe("改版前后 PUT 载荷逐字段一致", () => {
     sessionStorage.setItem("apa.csrf", "tok-1");
     render(
       <MemoryRouter initialEntries={[at]}>
-        <App features={[confirm, notify, general]} fetchImpl={s.impl} />
+        <App features={[confirm, notify, agents]} fetchImpl={s.impl} />
       </MemoryRouter>,
     );
     const c = within(await screen.findByRole("region", { name: card }));
@@ -99,23 +103,23 @@ describe("改版前后 PUT 载荷逐字段一致", () => {
   });
 });
 
-describe("设置 › 通用 › 助手的语气", () => {
+describe("设置 › Agent › 对我说话的语气（所有 Agent 共用）", () => {
   it("flow-bg-guards ACT-BGG-08: 超限被服务端拒绝，显示原因且不保存，草稿保留；计数按同一规则估算", async () => {
     const s = policyServer();
     sessionStorage.setItem("apa.csrf", "tok-1");
     render(
-      <MemoryRouter initialEntries={["/settings/general"]}>
-        <App features={[general]} fetchImpl={s.impl} />
+      <MemoryRouter initialEntries={["/settings/agents"]}>
+        <App features={[agents]} fetchImpl={s.impl} />
       </MemoryRouter>,
     );
-    const c = within(await screen.findByRole("region", { name: "助手的语气" }));
-    const box = c.getByRole("textbox", { name: "助手的语气" });
+    const c = within(await screen.findByRole("region", { name: "对我说话的语气" }));
+    const box = c.getByRole("textbox", { name: "对我说话的语气" });
     expect(c.getByText("约 2 / 400")).toBeInTheDocument(); // "Be brief."：8 个非空白 ASCII → (8+3)/4 = 2，同 kernel/policy.EstimateTokens
     await userEvent.clear(box);
     await userEvent.click(box);
     await userEvent.paste("长".repeat(500));
     expect(c.getByText("约 500 / 400")).toBeInTheDocument();
-    await userEvent.click(c.getByRole("button", { name: "保存助手的语气" }));
+    await userEvent.click(c.getByRole("button", { name: "保存对我说话的语气" }));
     expect(await c.findByRole("alert")).toHaveTextContent("limit 400");
     expect(s.doc.persona).toBe("Be brief.");
     expect(box).toHaveValue("长".repeat(500));
@@ -126,36 +130,35 @@ describe("设置 › 通用 › 助手的语气", () => {
     s.doc.persona = persona;
     sessionStorage.setItem("apa.csrf", "tok-1");
     render(
-      <MemoryRouter initialEntries={["/settings/general"]}>
-        <App features={[general]} fetchImpl={s.impl} />
+      <MemoryRouter initialEntries={["/settings/agents"]}>
+        <App features={[agents]} fetchImpl={s.impl} />
       </MemoryRouter>,
     );
-    const c = within(await screen.findByRole("region", { name: "助手的语气" }));
-    const box = await c.findByRole("textbox", { name: "助手的语气" });
+    const c = within(await screen.findByRole("region", { name: "对我说话的语气" }));
+    const box = await c.findByRole("textbox", { name: "对我说话的语气" });
     await waitFor(() => expect(box).toHaveValue(persona || "Default tone (zh)"));
     return { s, c, box };
   }
 
-  it("没自定义：显示内置默认并标「默认」，没有「恢复默认」；原样保存仍存空串", async () => {
+  it("没自定义：显示内置默认并标「默认」，没有「恢复默认」；没改动时不能保存（界面设计 §6.1），不写任何东西", async () => {
     const { s, c } = await open("");
     expect(c.getByText("默认")).toBeInTheDocument();
     expect(c.queryByRole("button", { name: "恢复默认" })).toBeNull();
-    await userEvent.click(c.getByRole("button", { name: "保存助手的语气" }));
-    await c.findByRole("status");
-    expect(s.puts[0].body).toEqual({ persona: "" });
+    expect(c.getByRole("button", { name: "保存对我说话的语气" })).toBeDisabled();
+    expect(s.puts).toHaveLength(0);
   });
 
   it("改了就是自定义（「默认」标记换成「恢复默认」）；恢复默认后回到默认并存回空串", async () => {
     const { s, c, box } = await open("");
     await userEvent.type(box, "!");
     expect(c.queryByText("默认")).toBeNull();
-    await userEvent.click(c.getByRole("button", { name: "保存助手的语气" }));
+    await userEvent.click(c.getByRole("button", { name: "保存对我说话的语气" }));
     await c.findByRole("status");
     expect(s.puts[0].body).toEqual({ persona: "Default tone (zh)!" });
     await userEvent.click(await c.findByRole("button", { name: "恢复默认" }));
     expect(box).toHaveValue("Default tone (zh)");
     expect(c.getByText("默认")).toBeInTheDocument();
-    await userEvent.click(c.getByRole("button", { name: "保存助手的语气" }));
+    await userEvent.click(c.getByRole("button", { name: "保存对我说话的语气" }));
     await waitFor(() => expect(s.puts).toHaveLength(2));
     expect(s.puts[1].body).toEqual({ persona: "" });
     expect(s.doc.persona).toBe("");
@@ -163,15 +166,15 @@ describe("设置 › 通用 › 助手的语气", () => {
 
   it("助手语言：只发自己的段；存下后没自定义的默认文字换成那种语言，已改的不动", async () => {
     const { s, c, box } = await open("");
-    const l = within(screen.getByRole("region", { name: "助手说哪种语言" }));
+    const l = within(screen.getByRole("region", { name: "对我说话的语言" }));
     await userEvent.click(l.getByRole("button", { name: "English" }));
-    await userEvent.click(l.getByRole("button", { name: "保存助手说哪种语言" }));
+    await userEvent.click(l.getByRole("button", { name: "保存对我说话的语言" }));
     await waitFor(() => expect(s.puts).toHaveLength(1));
     expect(s.puts[0].body).toEqual({ persona_lang: "en" });
     await waitFor(() => expect(box).toHaveValue("Default tone (en)"));
     await userEvent.type(box, "!");
     await userEvent.click(l.getByRole("button", { name: "中文" }));
-    await userEvent.click(l.getByRole("button", { name: "保存助手说哪种语言" }));
+    await userEvent.click(l.getByRole("button", { name: "保存对我说话的语言" }));
     await waitFor(() => expect(s.puts).toHaveLength(2));
     expect(s.puts[1].body).toEqual({ persona_lang: "zh" });
     expect(box).toHaveValue("Default tone (en)!");

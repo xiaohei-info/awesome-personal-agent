@@ -6,15 +6,15 @@ import { useLabel } from "../../app/values";
 import { check, commandLine, emptyForm, harnessOf, TIERS, toDeclaration, type Field, type OnboardForm, type Tier } from "./declaration-form";
 import { strings } from "./strings";
 
-// 接入其他 Agent（附录 A.2）：逐项填写，声明由 declaration-form.ts 生成；「直接编辑声明」与表单二选一，不双向同步——
+// 接入新的程序（附录 A.2；界面设计 §4 并进「添加 Agent」的第一步）：逐项填写，声明由 declaration-form.ts 生成；「直接编辑声明」与表单二选一，不双向同步——
 // 表单只覆盖声明的一部分字段，反解任意 JSON 会丢掉其余字段。提交走 executor.register，内核校验是最终把关。
-export function Onboard({ taken, reload }: { taken: string[]; reload: () => Promise<void> }) {
+export function Onboard({ taken, reload, startOpen }: { taken: string[]; reload: () => Promise<void>; startOpen?: boolean }) {
   const t = useT(strings);
   const { api } = useSession();
   const raw = useRaw();
   const label = useLabel();
   const id = useId();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!startOpen);
   const [f, setF] = useState<OnboardForm>(emptyForm);
   const [tier, setTier] = useState<Tier>("read");
   const [json, setJson] = useState<string | null>(null);
