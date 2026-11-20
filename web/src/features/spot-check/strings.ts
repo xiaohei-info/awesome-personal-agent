@@ -3,7 +3,7 @@ import { common } from "../../app/strings";
 
 const zh = {
   ...common.zh,
-  title: "被忽略的，抽几条看看",
+  title: "被跳过的，抽几条看看",
   lede: "被自动跳过的消息里，有没有该看的？",
   list: "待抽查",
   trace: "处理经过",

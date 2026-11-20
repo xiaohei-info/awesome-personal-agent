@@ -46,7 +46,7 @@ function mount(fetchImpl: typeof fetch, at = "/spot-check") {
 }
 beforeEach(() => sessionStorage.clear());
 
-describe("消息来源 › 被忽略的，抽几条看看", () => {
+describe("消息来源 › 被跳过的，抽几条看看", () => {
   // ACT-JRC-17..19：逐条给结论，结论发给服务端，条目消失。
   it("每条显示标题、来源与本地时间，两个按钮；点「该看」记结论并移走", async () => {
     const be = backend({ pool: [{ judgment: "j1", subject: "续保材料" }, { judgment: "j2", subject: "周末活动" }] });

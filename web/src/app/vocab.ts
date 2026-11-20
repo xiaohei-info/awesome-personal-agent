@@ -144,7 +144,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     models_paused: { label: "模型已暂停" },
   },
   outboundScope: { full: { label: "全部内容" }, excerpt: { label: "摘要和开头" }, meta: { label: "只有标题" }, none: { label: "不发送" } },
-  backlogStep: { rules: { label: "先按规则处理" }, score: { label: "试打分" }, bands: { label: "定自动处理的线" }, rejudge: { label: "放进建议" }, restore: { label: "找回被忽略的消息" } },
+  backlogStep: { rules: { label: "先按规则处理" }, score: { label: "试打分" }, bands: { label: "定自动处理的线" }, rejudge: { label: "放进建议" }, restore: { label: "找回被跳过的消息" } },
   attachState: { pending: { label: "待转给 Agent" }, forwarded: { label: "已转给 Agent" }, processed: { label: "已处理" }, handed_back: { label: "已交回给你" }, released: { label: "已交回自动判断" } },
   webOnly: {
     funds: { label: "资金", hint: "涉及真实付款或收款" },
@@ -294,7 +294,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     "executor.enrolled": { label: "登记了执行者" },
     "followup.deferred": { label: "推迟了跟进提醒" },
     "followup.reminded": { label: "提醒了跟进" },
-    "inbound.spot_reviewed": { label: "抽查了被忽略的消息" },
+    "inbound.spot_reviewed": { label: "抽查了被跳过的消息" },
     "purge.executed": { label: "永久删除了数据" },
     "source.content_purged": { label: "按保留期清除了来源原文" },
     "source.attachment_fetched": { label: "取回了来源附件" },
