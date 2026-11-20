@@ -222,7 +222,8 @@ def test_cli_tool_in_a_run_without_its_context_errors_and_never_runs_apa(gateway
     load_tools().register(ctx)
     with missing_line_session(gateway):
         r = json.loads(ctx.tools["apa_decide"][1]({"id": "i1", "option": "A", "evidence": "x"}, session_id="s1"))
-    assert r["ok"] is False and "client_env_passthrough: [APA_RUN_CONTEXT]" in r["error"] and "gateway's own credential" in r["error"]
+    # 2026-11-20 改写（本人批准的清单第 10 条）：必须放行的变量多了 APA_RUN，报错里给出的配置行随之变为 [APA_RUN_CONTEXT, APA_RUN]
+    assert r["ok"] is False and "client_env_passthrough: [APA_RUN_CONTEXT, APA_RUN]" in r["error"] and "gateway's own credential" in r["error"]
     assert_no_apa(gateway)
 
 
@@ -231,7 +232,8 @@ def test_file_tool_in_a_run_without_its_context_names_the_missing_line(gateway):
     load_tools().register(ctx)
     with missing_line_session(gateway):
         r = json.loads(ctx.tools["apa_read_file"][1]({"path": "README.md"}))
-    assert r["ok"] is False and "did not reach Hermes" in r["error"] and "client_env_passthrough: [APA_RUN_CONTEXT]" in r["error"]
+    # 2026-11-20 改写（本人批准的清单第 10 条）：必须放行的变量多了 APA_RUN，报错里给出的配置行随之变为 [APA_RUN_CONTEXT, APA_RUN]
+    assert r["ok"] is False and "did not reach Hermes" in r["error"] and "client_env_passthrough: [APA_RUN_CONTEXT, APA_RUN]" in r["error"]
 
 
 def test_hooks_in_a_run_without_its_context_never_run_apa(gateway, tmp_path, monkeypatch):
@@ -251,6 +253,34 @@ def test_hooks_in_a_run_without_its_context_never_run_apa(gateway, tmp_path, mon
     assert not popen  # capture's helper would have posted with the gateway's credential
     assert "did not reach Hermes" in (tmp_path / "receipt.log").read_text()
     assert "did not reach Hermes" in (tmp_path / "capture" / "capture.log").read_text()
+
+
+def test_run_whose_launcher_rewrote_path_still_errors_on_its_apa_run_and_never_uses_the_gateway_credential(gateway, tmp_path, monkeypatch):
+    """2026-11-20: a launcher script that sets PATH (not extends it) drops the run marker; the client's APA_RUN still says
+    this is a run. Its tools, hooks and capture must fail loudly instead of running `apa` under the gateway's token."""
+    monkeypatch.setenv("APA_RECEIPT_LOG", str(tmp_path / "receipt.log"))
+    monkeypatch.delenv("APA_RUN")  # a gateway not started by a run: its env holds only the resident token
+    monkeypatch.setenv("APA_TOKEN", "resident-token")
+    ctx = Ctx()
+    load_tools().register(ctx)
+    receipt = load_plugin("receipt")
+    with gateway["session"](None, gateway["work"], client_path="/usr/bin:/bin", client_run="run_diag"):
+        r = json.loads(ctx.tools["apa_report"][1]({"id": "i1", "outcome": "blocked", "summary": "s", "reason": "r"}, session_id="s1"))
+        f = json.loads(ctx.tools["apa_read_file"][1]({"path": "README.md"}))
+        receipt._report("itm_1", "progress", "working", "s1")
+    assert r["ok"] is False and "gateway's own credential" in r["error"] and "APA_RUN" in r["error"]
+    assert f["ok"] is False and "did not reach Hermes" in f["error"]
+    assert_no_apa(gateway)
+    assert "did not reach Hermes" in (tmp_path / "receipt.log").read_text()
+
+
+def test_declaring_without_apa_run_in_the_line_is_refused(gateway):
+    headless = load_plugin("headless")
+    gateway["session"].config = {"terminal": {"client_env_passthrough": ["APA_RUN_CONTEXT"]}}
+    with gateway["session"](None, gateway["work"]):
+        r = json.loads(headless._declare({}, session_id="s1"))
+    assert r["ok"] is False and "does not pass APA_RUN " in r["error"] and "client_env_passthrough: [APA_RUN_CONTEXT, APA_RUN]" in r["error"]
+    assert_no_apa(gateway)
 
 
 def test_run_with_its_context_works_normally_whatever_the_path_says(gateway):
@@ -282,7 +312,8 @@ def test_declaring_without_the_line_is_refused_and_says_what_to_add(gateway):
         gateway["session"].config = config
         with gateway["session"](None, gateway["work"]):
             r = json.loads(headless._declare({}, session_id="s1"))
-        assert r["ok"] is False and "terminal:\n  client_env_passthrough: [APA_RUN_CONTEXT]" in r["error"], config
+        # 2026-11-20 改写（本人批准的清单第 10 条）：必须放行的变量多了 APA_RUN，报错里给出的配置行随之变为 [APA_RUN_CONTEXT, APA_RUN]
+        assert r["ok"] is False and "terminal:\n  client_env_passthrough: [APA_RUN_CONTEXT, APA_RUN]" in r["error"], config
     assert_no_apa(gateway)
 
 
@@ -299,7 +330,8 @@ def test_declaring_with_an_unreadable_config_is_refused(gateway):
 
 def test_declaring_with_the_line_goes_through(gateway):
     headless = load_plugin("headless")
-    gateway["session"].config = {"terminal": {"client_env_passthrough": ["GEM_HOME", "APA_RUN_CONTEXT"]}}
+    # 2026-11-20（清单第 11 条）：夹具配置补上 APA_RUN；断言"声明成功"不变
+    gateway["session"].config = {"terminal": {"client_env_passthrough": ["GEM_HOME", "APA_RUN_CONTEXT", "APA_RUN"]}}
     with gateway["session"](None, gateway["work"]):
         r = json.loads(headless._declare({}, session_id="owner"))
     assert r["ok"] is True
@@ -318,3 +350,5 @@ def test_the_variable_name_survives_hermes_client_env_secret_filter():
     from_kernel = 'EnvRunContext = "APA_RUN_CONTEXT"'
     assert from_kernel in (ROOT / "kernel" / "outcall" / "proc" / "dispatcher.go").read_text()
     assert not [s for s in secret if s in "APA_RUN_CONTEXT"]
+    assert 'EnvRun            = "APA_RUN"' in (ROOT / "cli" / "client" / "client.go").read_text()
+    assert not [s for s in secret if s in "APA_RUN"]

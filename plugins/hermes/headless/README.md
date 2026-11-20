@@ -8,7 +8,7 @@ pending or confirmed one, so an unchanged declaration never asks the owner again
 the owner confirms it in Web. Only at gateway start: a later change of `allow_gateway_injection` waits for the next
 restart or an `apa_declare_headless` call.
 Executors are not declared: Hermes registers them when it first delegates (`apa_delegate`, see `tools/README.md`).
-It refuses when the Hermes profile lacks `terminal.client_env_passthrough: [APA_RUN_CONTEXT]`, or the config cannot be read (see `tools/README.md`, Run identity).
+It refuses when the Hermes profile lacks `terminal.client_env_passthrough: [APA_RUN_CONTEXT, APA_RUN]`, or the config cannot be read (see `tools/README.md`, Run identity).
 
 Measured on Hermes v0.22.5 (not copied from appendix A). From v0.23.0 `--oneshot` is a client of the shared gateway; the `credential env` row no longer holds there, see `tools/README.md` (Run identity):
 

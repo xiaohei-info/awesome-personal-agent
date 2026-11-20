@@ -41,10 +41,12 @@ def fake_gateway(monkeypatch):
     agent.session_client_env, agent.runtime_cwd = client_env, runtime_cwd
 
     @contextlib.contextmanager
-    def session(context_file=None, session_cwd="", client_path=None):
+    def session(context_file=None, session_cwd="", client_path=None, client_run=None):
         env = {"APA_RUN_CONTEXT": str(context_file)} if context_file else {}
         if client_path is not None:
             env["PATH"] = client_path
+        if client_run is not None:
+            env["APA_RUN"] = client_run
         tokens = bound.set(env), cwd.set(str(session_cwd))
         try:
             yield
@@ -52,7 +54,7 @@ def fake_gateway(monkeypatch):
             bound.reset(tokens[0])
             cwd.reset(tokens[1])
 
-    session.config = {"terminal": {"client_env_passthrough": ["APA_RUN_CONTEXT"]}}
+    session.config = {"terminal": {"client_env_passthrough": ["APA_RUN_CONTEXT", "APA_RUN"]}}
 
     def load_config(path=None, *, fail_closed=False):
         assert fail_closed  # a torn config must not pass as "last known good"

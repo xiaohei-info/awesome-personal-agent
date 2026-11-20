@@ -227,7 +227,8 @@ def test_run_whose_context_did_not_arrive_errors_and_sends_nothing(hermes, kerne
     hermes.client_env = {"PATH": "/usr/bin:/somewhere/run-credentials/.apa-run"}
     out = hermes(("apa_read_file", {"path": "README.md"}, "s1"), ("apa_propose", {"kind": "task", "title": "t"}, "s1"))
     assert out["results"][0]["ok"] is False and "did not reach Hermes" in out["results"][0]["error"]
-    assert out["results"][1]["ok"] is False and "client_env_passthrough: [APA_RUN_CONTEXT]" in out["results"][1]["error"]
+    # 2026-11-20 改写（本人批准的清单第 12 条，live 只改不跑）：报错里的配置行变为 [APA_RUN_CONTEXT, APA_RUN]
+    assert out["results"][1]["ok"] is False and "client_env_passthrough: [APA_RUN_CONTEXT, APA_RUN]" in out["results"][1]["error"]
     assert not kernel["log"]
 
 
@@ -238,9 +239,10 @@ def test_passthrough_check_reads_the_real_profile_config(hermes, tmp_path):
     run = lambda: subprocess.run([str(HERMES_PY), "-c", check, str(TOOLS / "run_context.py")], cwd=HERMES_SRC, env=hermes.env,
                                  capture_output=True, text=True, timeout=120)
     missing = run()
-    assert missing.returncode != 0 and "client_env_passthrough: [APA_RUN_CONTEXT]" in missing.stderr
+    # 2026-11-20 改写（本人批准的清单第 12 条，live 只改不跑）：报错里的配置行变为 [APA_RUN_CONTEXT, APA_RUN]
+    assert missing.returncode != 0 and "client_env_passthrough: [APA_RUN_CONTEXT, APA_RUN]" in missing.stderr
     config = tmp_path / "hermes_home" / "config.yaml"
-    config.write_text(config.read_text() + "terminal:\n  client_env_passthrough: [APA_RUN_CONTEXT]\n")
+    config.write_text(config.read_text() + "terminal:\n  client_env_passthrough: [APA_RUN_CONTEXT, APA_RUN]\n")
     allowed = run()
     assert allowed.returncode == 0, allowed.stderr
 
