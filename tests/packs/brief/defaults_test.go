@@ -224,7 +224,9 @@ func TestBriefSkipsUntilAgentCanRunInBackground(t *testing.T) {
 	}
 }
 
-// 例行任务不受跳过检查：到点照常建事项，没有 Agent 时转 needs_input 问本人（§13.5）。
+// 例行任务不受跳过检查：到点照常建事项（§13.5）；没有 Agent 时这一份没拉起，转 dropped 并记告警。
+// 2026-11-20 改写：原断言事项转 needs_input；没拉起是事件不是问题，规则建的这一份转 dropped（不留在 open，§8.7）。
+// "照常建事项"（恰有一件 routine）这条不变。
 func TestRoutineIsNotSkippedWithoutAgent(t *testing.T) {
 	e := newEnv(t, "")
 	eng, _ := e.gated()
@@ -234,7 +236,7 @@ func TestRoutineIsNotSkippedWithoutAgent(t *testing.T) {
 	e.fire(eng, t0.Add(24*time.Hour))
 	var its []domain.Item
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { its, err = items.List(tx, items.Filter{Kind: "routine"}); return })
-	if len(its) != 1 || its[0].Phase != domain.PhaseNeedsInput {
+	if len(its) != 1 || its[0].Phase != domain.PhaseDropped || its[0].Ask != nil {
 		t.Fatalf("routine = %+v", its)
 	}
 }

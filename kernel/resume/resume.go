@@ -61,7 +61,7 @@ type Outcome string
 const (
 	Resumed Outcome = "resumed" // 同一会话 id 续接
 	Fresh   Outcome = "fresh"   // 新会话加事项上下文
-	Refused Outcome = "refused" // 复核不通过，事项已转 needs_input
+	Refused Outcome = "refused" // 复核不通过：记拒绝与告警，事项不挂问题
 	Skipped Outcome = "skipped" // 无需续接：不是等待续接的已回答决策、已有在途运行、同一回答已处理或超过链路深度
 )
 
@@ -221,6 +221,11 @@ func (s *Service) read(tx *store.Tx, itemID string, retry bool) (f facts, err er
 	f.handled = r.Next()
 	if err := r.Close(); err != nil {
 		return f, err
+	}
+	if !f.handled { // 同一回答已被复核拒绝过也算处理过：拒绝不挂新问题，不能让同一回答每次复核都再拒一次、再告警一次
+		if f.handled, err = refusedSince(tx, itemID, f.it.Ask.Resolution.ResolvedAt); err != nil {
+			return f, err
+		}
 	}
 	if f.handled && !retry {
 		return f, nil
@@ -382,6 +387,20 @@ func (s *Service) decide(tx *store.Tx, itemID string, sessionLost bool) (Outcome
 	return s.launch(tx, f, harness, hl, sessionLost)
 }
 
+// refusedSince 报告这件事在本人这次回答之后有没有续接拒绝记录。
+func refusedSince(tx *store.Tx, itemID string, answered time.Time) (bool, error) {
+	es, err := eventlog.ReadObject(tx, itemID)
+	if err != nil {
+		return false, err
+	}
+	for _, en := range es {
+		if en.Event.Type == EvRefused && !en.Event.At.Before(answered) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func expand(in []string, pairs ...string) []string {
 	r := strings.NewReplacer(pairs...)
 	out := make([]string, len(in))
@@ -500,30 +519,15 @@ func (s *Service) audit(tx *store.Tx, f facts, typ, reason string, extra map[str
 	return err
 }
 
-// refuse 记拒绝记录，并把事项转 needs_input 交本人：附原因，选项含重新运行、改派、放弃（§13.6、§14.7）。
-// 在调用方的事务里经 items.Revise 写入（同回答一起提交）；新问题整体替换已回答的旧请求，本人才答得了新问题。
+// refuse 记拒绝记录与一条带类别码的 health.alert：续接没通过复核是故障不是问题，事项停在本人回答后的阶段、不挂问题，
+// 诊断页据告警给出这件事与原因；本人之后处理过这件事（或它终结）告警即清除（§6.14 第 20 条、§13.6、§14.7）。
+// 在调用方的事务里写入（同回答一起提交）。
 func (s *Service) refuse(tx *store.Tx, f facts, reason string) error {
 	if err := s.audit(tx, f, EvRefused, reason, nil); err != nil {
 		return err
 	}
-	ask := domain.AskInput{Question: "续接未执行：" + reason, Code: domain.AskResumeRefused, Params: map[string]string{"detail": reason}, Options: []domain.AskOption{
-		{ID: "rerun", Label: "重新运行"}, {ID: "reassign", Label: "改派"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
-	now := s.o.Now()
-	_, _, snap, err := items.Revise(tx, f.it.ID, "transition", now, func(it *domain.Item) error {
-		it.Ask, it.Phase, it.WaitingOn = &domain.Ask{AskInput: ask}, domain.PhaseNeedsInput, nil
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if _, err := command.Bump(tx, f.it.ID); err != nil {
-		return err
-	}
-	a := system
-	a.OnBehalfOf = s.o.Owner
-	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvItemPhaseChanged, Object: f.it.ID, Actor: a, Reason: "resume: " + reason,
-		Payload: snap, ChainDepth: f.depth, At: now})
-	return err
+	return s.audit(tx, f, domain.EvHealthAlert, "resume refused: "+reason, map[string]any{
+		"code": domain.NoticeResumeRefused, "params": map[string]string{"detail": reason}, "item": f.it.ID})
 }
 
 // Settle 在运行结束后调用（先于 background.Settle，供 proc.Options.OnResult 链式使用）。

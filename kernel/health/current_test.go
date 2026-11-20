@@ -1,10 +1,13 @@
 package health
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/chain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -13,7 +16,9 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 诊断页只显示现状：来源认证失败后最近一次拉取成功，信号消失，runner 建的 needs_input 事项被结束。
+// 诊断页只显示现状：来源认证失败后最近一次拉取成功，信号消失，升级前 runner 建的 needs_input 事项被结束。
+// 2026-11-20 改写（本人批准的清单第 7 条）：原断言认证失败后信号带 runner 新建的 needs_input 事项；认证失败不再建事项，
+// 改为信号带类别 kind=auth_or_config；"恢复后结束旧事项"改用种入的升级前事项验（断言不变）。
 func TestSourceRecoveryClearsSignalAndEndsItem(t *testing.T) {
 	e := setup(t)
 	if err := items.Register(e.x, items.NewKinds()); err != nil {
@@ -26,17 +31,17 @@ func TestSourceRecoveryClearsSignalAndEndsItem(t *testing.T) {
 	if err := r.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
-	e.source("src_cal", true, runner.Stats{})
+	item := e.legacyAuthItem()
+	e.source("src_cal", true, runner.Stats{NeedsInputItem: item})
 	code := 2
 	at := t0
 	if err := r.Handle(bg, proc.Result{Run: domain.Run{ID: "run_a", Category: domain.RunSource, Target: "src_cal", State: domain.RunFailed, ExitCode: &code, FinishedAt: &at}}); err != nil {
 		t.Fatal(err)
 	}
 	v := e.collect(nil)
-	if len(v.SourceFailures) != 1 || v.SourceFailures[0].NeedsInputItem == "" || v.SourceFailures[0].ConsecutiveFailures != 1 {
+	if len(v.SourceFailures) != 1 || v.SourceFailures[0].Kind != "auth_or_config" || v.SourceFailures[0].ConsecutiveFailures != 1 {
 		t.Fatalf("auth failure: %+v", v.SourceFailures)
 	}
-	item := v.SourceFailures[0].NeedsInputItem
 	if err := r.Handle(bg, proc.Result{Run: domain.Run{ID: "run_b", Category: domain.RunSource, Target: "src_cal", State: domain.RunSucceeded, FinishedAt: &at},
 		Stdout: []byte(`{"cursor":"c1"}` + "\n")}); err != nil {
 		t.Fatal(err)
@@ -49,6 +54,21 @@ func TestSourceRecoveryClearsSignalAndEndsItem(t *testing.T) {
 	if it.Phase != domain.PhaseDone {
 		t.Fatalf("item not ended: %+v", it)
 	}
+}
+
+// legacyAuthItem 种入一件升级前认证失败时 runner 建的 needs_input 事项（执行者是 runner 的内核身份）。
+func (e *env) legacyAuthItem() string {
+	e.t.Helper()
+	body, _ := json.Marshal(map[string]any{"kind": domain.KindTask, "phase": domain.PhaseNeedsInput, "title": "来源 src_cal 认证或配置失败",
+		"assignee": "kernel:sources-runner", "ask": map[string]any{"question": "认证或配置失败", "free_text": true}, "reason": "source run run_old"})
+	res, err := e.x.Do(bg, command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "kernel:sources-runner", Via: domain.ViaSource}, Level: authz.LevelWorker},
+		Command: "item.create", Input: body})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var ref struct{ ID string }
+	_ = json.Unmarshal(res.Value, &ref)
+	return ref.ID
 }
 
 // 外呼超时：同一目标之后又跑过一次即被取代；没有再跑的，过了 StaleAfter 也不再算现状。
@@ -143,5 +163,21 @@ func TestAgentRunFailuresListedWithFaultCode(t *testing.T) {
 	settle(e.enqueue(domain.RunTask, "item_brief", t0), domain.RunSucceeded, nil, "")
 	if v := e.collect(nil); len(v.Outcall.Failures) != 0 {
 		t.Fatalf("superseded: %+v", v.Outcall.Failures)
+	}
+}
+
+// 动作没能完成的告警（规则动作失败、运行没拉起）带类别码、机制参数与受影响的事项，诊断页据它逐条说人话、给下一步；
+// 规则建的那一份被收掉（dropped）后告警仍是现状：它挂在实例上，本人对实例做过操作（如立即跑一次）才清除。
+func TestNoticeAlertsCarryCodeAndItem(t *testing.T) {
+	e := setup(t)
+	e.event(domain.EvHealthAlert, "ins_1", "rule action failed: generate: model: endpoint not configured",
+		map[string]any{"rule": "brief/clock_rules/scheduled", "code": domain.NoticeModelUnset, "item": "itm_b", "dropped": true})
+	v := e.collect(nil)
+	if len(v.OtherAlerts) != 1 {
+		t.Fatalf("other = %+v", v.OtherAlerts)
+	}
+	a := v.OtherAlerts[0]
+	if a.Object != "ins_1" || a.Code != domain.NoticeModelUnset || a.Item != "itm_b" || !a.Dropped || a.Rule != "brief/clock_rules/scheduled" {
+		t.Fatalf("notice = %+v", a)
 	}
 }

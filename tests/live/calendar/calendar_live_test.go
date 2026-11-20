@@ -161,9 +161,10 @@ type srcState struct {
 	Cursor          string `json:"cursor"`
 	CredentialsPath string `json:"credentials_path"`
 	Stats           struct {
-		Runs           int    `json:"runs"`
-		LastError      string `json:"last_error"`
-		NeedsInputItem string `json:"needs_input_item"`
+		Runs            int    `json:"runs"`
+		LastError       string `json:"last_error"`
+		NeedsInputItem  string `json:"needs_input_item"`
+		LastFailureKind string `json:"last_failure_kind"`
 	} `json:"stats"`
 }
 
@@ -493,8 +494,9 @@ func TestFlowSourceCalendar(t *testing.T) {
 		l.settle(2)
 		s := l.show()
 		cursorUnchanged(t, before)
-		if s.Stats.NeedsInputItem == "" || !strings.Contains(s.Stats.LastError, "exit status 2") {
-			t.Fatalf("应以退出码 2 生成 needs_input: item=%q last_error=%q", s.Stats.NeedsInputItem, s.Stats.LastError)
+		// 2026-11-20 改写（本人批准的清单第 9 条，live 只改不跑）：原断言生成 needs_input 事项；认证或配置失败只记为事件，统计带 kind=auth_or_config、不建事项。
+		if s.Stats.LastFailureKind != "auth_or_config" || s.Stats.NeedsInputItem != "" || !strings.Contains(s.Stats.LastError, "exit status 2") {
+			t.Fatalf("应以退出码 2 记为认证或配置失败、不建事项: item=%q last_error=%q", s.Stats.NeedsInputItem, s.Stats.LastError)
 		}
 		if se := l.adapterRefuses(adapterPath, adapterIn); !strings.Contains(strings.ToLower(se), strings.ToLower(wantErr)) {
 			t.Errorf("适配器 stderr 应说明原因 %q: %q", wantErr, se)

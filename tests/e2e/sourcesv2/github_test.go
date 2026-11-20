@@ -189,9 +189,10 @@ func TestFlowSourceGithub(t *testing.T) {
 		before := k.show(src)
 		k.SetToolCase("gh-auth-401")
 		var s SrcState
-		k.until("401 的拉取生成 needs_input 事项", func() bool {
+		// 2026-11-20 改写（清单第 8 条）：原等待并断言生成 needs_input 事项；认证失败只记为事件、诊断页指向来源。
+		k.until("401 的拉取记为认证失败", func() bool {
 			s = k.show(src)
-			return s.Stats.NeedsInputItem != "" && s.Stats.Runs > before.Stats.Runs
+			return s.Stats.LastFailureKind == "auth_or_config" && s.Stats.Runs > before.Stats.Runs
 		})
 		if !strings.HasPrefix(s.Stats.LastError, exitConfig) {
 			t.Errorf("拉取程序退出码应为 2: %+v", s.Stats)
@@ -199,10 +200,7 @@ func TestFlowSourceGithub(t *testing.T) {
 		if s.Cursor != before.Cursor {
 			t.Errorf("游标不应前进: %q → %q", before.Cursor, s.Cursor)
 		}
-		ni := k.item(s.Stats.NeedsInputItem)
-		if ni.Phase != "needs_input" {
-			t.Errorf("应生成 needs_input 事项: %+v", ni)
-		}
+		k.authNotice(t, s, src)
 		// 恢复后，401 期间到期的事件入账，不漏。
 		k.ghAt("gh-issue-opened-3", hOpened3)
 		ev := k.settled(src, "issue-acc-org-acc-repo#14-opened")

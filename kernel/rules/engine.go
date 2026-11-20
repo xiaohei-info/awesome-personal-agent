@@ -18,6 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -40,13 +41,13 @@ type Call struct {
 	bind      func(id string) error
 }
 
-// Ask 以规则的身份把事项转 needs_input 交本人（级联终止于 needs_input，§8.7）。
+// Ask 以规则的身份把事项转 needs_input 交本人：只用于"跑完了但没有结论"、要本人决定怎么收尾的情形（§8.7）；
+// 动作没能完成（故障、没拉起、被拦下）返回错误即可，规则引擎记告警，规则建的事项转 dropped。
 func (c Call) Ask(itemID, reason string) error { return askOwner(c.Do, itemID, reason) }
 
 // askOwner 的选项不含"重新运行"：回答不会再次执行规则动作，给这个选项只会让事项回到 open 后无人处理。
 func askOwner(do func(string, any) (command.Result, error), itemID, reason string) error {
-	q := map[string]any{"question": reason, "code": domain.AskRuleActionFailed, "params": map[string]string{"detail": reason}, "options": []domain.AskOption{
-		{ID: "handle", Label: "我来处理"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
+	q := map[string]any{"question": reason, "code": domain.AskRuleActionFailed, "params": map[string]string{"detail": reason}, "options": domain.HandleOrDrop()}
 	if _, err := do("item.update", map[string]any{"id": itemID, "ask": q, "reason": reason}); err != nil {
 		return err
 	}
@@ -546,8 +547,8 @@ func (e *Engine) observe(ctx context.Context, d ruleDef, t *trigger) error {
 	})
 }
 
-// execute 依次执行 do[]；某个动作失败就停止，失败记 health.alert（授权类拒绝已由命令管线留痕，不重复记）；
-// create_item 已建好事项时，事项同时转 needs_input（fail）。
+// execute 依次执行 do[]；某个动作失败就停止，失败记带类别码的 health.alert；create_item 已建好事项时，
+// 这一份事项转 dropped 并写明原因（fail）。失败是事件不是问题（§6.14 第 20 条、§8.7）。
 func (e *Engine) execute(ctx context.Context, d ruleDef, t *trigger) error {
 	for i, a := range d.Do {
 		name, _ := a["action"].(string)
@@ -603,26 +604,41 @@ func (e *Engine) do(ctx context.Context, k string, t *trigger, idem, cmd string,
 }
 
 func (e *Engine) fail(ctx context.Context, d ruleDef, t *trigger, action string, cause error) error {
-	handed := true
-	if t.bound { // 这个事项只有规则知道：规则停在这里，就没有人会再推进它（§8.7）
-		if err := e.handBack(ctx, d, t, action, cause); err != nil {
-			handed = false
-			cause = fmt.Errorf("%w; item %s stays open, needs_input failed: %v", cause, t.item.ID, err)
+	code, params := noticeOf(cause)
+	dropped := false
+	if t.bound { // 这个事项只有规则知道：规则停在这里，就没有人会再推进它，不留在 open（§8.7）
+		var err error
+		if dropped, err = e.handBack(ctx, d, t, action, code, cause); err != nil {
+			cause = fmt.Errorf("%w; item %s stays open, drop failed: %v", cause, t.item.ID, err)
 		}
 	}
-	var de *domain.Error
-	if handed && errors.As(cause, &de) {
-		switch de.ExitCode() {
-		case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending:
-			return nil // 命令管线已经记了 command.rejected
+	switch {
+	case dropped || t.bound: // 事项被收掉时一律记告警：拒绝本身的留痕在事项上，事项终结后诊断页要靠这条告诉本人
+	case code == domain.NoticeChainTripped:
+		return nil // chain.Record 已记熔断，链路熔断信号报告它
+	case code == domain.NoticeActionRejected:
+		var de *domain.Error
+		if errors.As(cause, &de) {
+			switch de.ExitCode() {
+			case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending:
+				return nil // 命令管线已经记了 command.rejected，本人的事项详情里看得到
+			}
 		}
+	}
+	item := ""
+	if t.item != nil {
+		item = t.item.ID
+	}
+	var ns *domain.NotStarted
+	if errors.As(cause, &ns) && item == "" {
+		item = ns.Item
 	}
 	return e.o.Store.Update(ctx, func(tx *store.Tx) error {
 		pv, _, err := policy.Current(tx)
 		if err != nil {
 			return err
 		}
-		p, _ := json.Marshal(map[string]string{"rule": d.Key, "action": action, "error": cause.Error()})
+		p, _ := json.Marshal(map[string]any{"rule": d.Key, "action": action, "error": cause.Error(), "code": code, "params": params, "item": item, "dropped": dropped})
 		_, err = eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: t.object, Actor: ruleActor(d.Key),
 			Basis: &domain.Basis{PolicyVersion: pv, RuleID: d.Key}, Reason: "rule action failed: " + cause.Error(),
 			Payload: p, ChainDepth: t.depth, At: e.now()})
@@ -630,18 +646,37 @@ func (e *Engine) fail(ctx context.Context, d ruleDef, t *trigger, action string,
 	})
 }
 
-// handBack 把规则建的事项转 needs_input 并写明原因；动作已自行让事项离开 open（如任务型转 needs_input、回执转 done）时不动它。
-func (e *Engine) handBack(ctx context.Context, d ruleDef, t *trigger, action string, cause error) error {
+// noticeOf 把动作失败归到稳定类别码（domain.NoticeCode）；params 只放内核生成的机制值，不放错误原文（它可能夹着账本内容）。
+func noticeOf(cause error) (domain.NoticeCode, map[string]string) {
+	var ns *domain.NotStarted
+	var de *domain.Error
+	switch {
+	case errors.As(cause, &ns):
+		if ns.Detail == "" {
+			return ns.Code, nil
+		}
+		return ns.Code, map[string]string{"detail": ns.Detail}
+	case errors.Is(cause, model.ErrNotConfigured):
+		return domain.NoticeModelUnset, nil
+	case errors.As(cause, &de) && de.Code == domain.CodeModelsPaused:
+		return domain.NoticeModelsPaused, nil
+	case errors.As(cause, &de) && de.HTTPStatus() == 403:
+		return domain.NoticeActionRejected, map[string]string{"code": string(de.Code)}
+	}
+	return domain.NoticeActionFailed, nil
+}
+
+// handBack 把规则建的、仍在 open 的事项转 dropped 并写明原因（这一份作废，下一周期或"立即跑一次"照常生成，旧的可以重开）；
+// 动作已自行让事项离开 open（如回执转 done）时不动它。dropped 报告是否收掉了。
+func (e *Engine) handBack(ctx context.Context, d ruleDef, t *trigger, action string, code domain.NoticeCode, cause error) (bool, error) {
 	var it domain.Item
 	if err := e.o.Store.View(ctx, func(tx *store.Tx) (err error) { it, err = items.Get(tx, t.item.ID); return }); err != nil {
-		return err
+		return false, err
 	}
 	if it.Phase != domain.PhaseOpen {
-		return nil
+		return false, nil
 	}
-	n := 0
-	return askOwner(func(cmd string, input any) (command.Result, error) {
-		n++
-		return e.do(ctx, d.Key, t, fmt.Sprintf("%s:fail:%d", t.ref, n), cmd, input)
-	}, it.ID, "规则动作 "+action+" 没有完成："+cause.Error())
+	_, err := e.do(ctx, d.Key, t, t.ref+":fail:1", "item.transition", map[string]any{"id": it.ID, "to": domain.PhaseDropped,
+		"reason": "规则动作 " + action + " 没有完成（" + string(code) + "），这一份作废：" + cause.Error()})
+	return err == nil, err
 }

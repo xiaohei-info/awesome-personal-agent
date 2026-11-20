@@ -9,7 +9,7 @@ import { entryOf, useLabel } from "../../app/values";
 import { rejudgeHint } from "../../app/strings";
 import { assess, type HealthReport, type Row, type Status } from "../../app/status";
 import { strings } from "./strings";
-import { useFaultSay } from "../../app/notice";
+import { useFaultSay, useNoticeSay } from "../../app/notice";
 import { DoctorDetails, type DoctorReport } from "./Doctor";
 
 // 诊断 › 状态（界面设计 §5.3）：形状对应 GET /v1/health 与 GET /v1/doctor（附录 B.2），判定全在服务端，这里只归类与措辞。
@@ -33,6 +33,7 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
   const credential = useNames("credential");
   const label = useLabel();
   const fault = useFaultSay();
+  const notice = useNoticeSay();
   return (r, st) => {
     const [kind, sub] = r.kind.split(":");
     const model = sub ? t.models[sub] : "";
@@ -79,6 +80,15 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
         };
       }
       case "receipts": return { problem: t.receipts(r.n), impact: t.receiptsImpact, button: t.seeWhy, to: r.to, second: { button: t.seeAccess, to: "/settings/agents" } };
+      case "notice": {
+        // 动作没能完成：一句话 + 这件事；有更具体的修法（去接模型等）时它是主按钮，"看这件事"退为次按钮。
+        const n = notice(r.code, r.params);
+        const why = r.code === "action_rejected" && r.params?.code ? `${n?.say ?? ""}：${label("error", r.params.code)}` : n?.say ?? t.noticeUnknown;
+        const impact = sub === "dropped" ? t.noticeDropped : t.noticeKept;
+        return n?.go
+          ? { problem: why, impact, button: n.go.label, to: n.go.to, second: { button: t.seeItem, to: r.to ?? "/audit" } }
+          : { problem: why, impact, button: t.seeItem, to: r.to };
+      }
       case "others": return { problem: t.others(r.n), button: t.look, to: r.to };
       case "stalled": return { problem: t.stalled, impact: t.stalledImpact, button: t.nudge, to: r.to };
       case "lag": return { problem: t.lag(r.n) };

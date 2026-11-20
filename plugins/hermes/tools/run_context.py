@@ -6,16 +6,21 @@ and APA_TOKEN for life). The only per-session value Hermes carries over is the c
 with the session and bound to its turns in a ContextVar. The kernel puts one name there, APA_RUN_CONTEXT: the path of the
 0600 file it wrote at launch with this run's id, credential and directories, removed when the run ends (design §7.7).
 
-That name only travels if the profile allows it. PATH always travels, so the kernel also appends a marker entry to the
-run's PATH: a session whose client PATH has the marker but no context is a run with the line missing. It gets an error,
-never the gateway's own credential. A session without the marker cannot be told from an ordinary one and stays as it is.
+That name only travels if the profile allows it, and so does APA_RUN, which the kernel sets on every run (with or without
+a context file) and which is the CLI's own "this is a run" signal: the profile must pass both. PATH travels too, so the
+kernel also appends a marker entry to the run's PATH; but a launcher script that sets PATH instead of extending it drops
+the marker, so it is a second signal only. A session whose client env has APA_RUN or the marker but no context is a run
+whose context is missing: it gets an error, never the gateway's own credential. A session with neither cannot be told
+from an ordinary one and stays as it is.
 """
 import json
 import os
 
 VAR = "APA_RUN_CONTEXT"
+RUN = "APA_RUN"  # cli/client.EnvRun: set by the kernel on every run
+PASSTHROUGH = (VAR, RUN)
 RUN_MARK = ".apa-run"  # kernel/outcall/proc.RunMark
-LINE = f"terminal:\n  client_env_passthrough: [{VAR}]"
+LINE = f"terminal:\n  client_env_passthrough: [{', '.join(PASSTHROUGH)}]"
 SETUP = f"add this to the Hermes profile's config.yaml:\n{LINE}"
 
 
@@ -38,10 +43,14 @@ def _marked(path):
 
 
 def _missing_in_run():
-    """True when the kernel launched this session but its run context did not arrive. Reads the session's PATH,
-    not the gateway's: a gateway started by a run's client keeps that run's marker for life."""
+    """True when this session belongs to an APA run (its client env has APA_RUN or the PATH marker) but the run context
+    did not arrive. Reads the session's env, not the gateway's: a gateway started by a run's client keeps that run's
+    APA_RUN and marker for life."""
     m = _client_env()
-    return bool(m) and not context_file() and _marked((m.bound_client_env() or {}).get("PATH"))
+    if not m or context_file():
+        return False
+    bound = m.bound_client_env() or {}
+    return bool(bound.get(RUN)) or _marked(bound.get("PATH"))
 
 
 def load():
@@ -152,8 +161,9 @@ def require_passthrough():
         names = m.configured_names(load_user_config_effective(get_config_path(), fail_closed=True))
     except Exception as e:  # Hermes' config layer raises parser-specific errors: anything here means "not confirmed"
         raise ValueError(f"cannot confirm the Hermes profile allows {VAR} ({type(e).__name__}); it must contain:\n{LINE}") from None
-    if VAR not in names:
-        raise ValueError(f"the Hermes profile does not pass {VAR} to the gateway, so runs would not get their identity; {SETUP}")
+    missing = [n for n in PASSTHROUGH if n not in names]
+    if missing:
+        raise ValueError(f"the Hermes profile does not pass {', '.join(missing)} to the gateway, so runs would not get their identity; {SETUP}")
 
 
 def session_cwd():

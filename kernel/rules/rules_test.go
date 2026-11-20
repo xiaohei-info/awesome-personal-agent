@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/health"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
@@ -793,8 +795,11 @@ event_rules:
 	}
 }
 
-// 实例驱动的规则建好事项后动作失败：事项转 needs_input 并写明原因，告警照记；动作已让事项离开 open 时不动它；
-// 授权类拒绝同样交本人，留痕仍是命令管线的那条。包里已没有实例驱动的规则时，实例到期留告警。
+// 实例驱动的规则建好事项后动作失败：这一份转 dropped 并写明原因（不留在 open，§8.7），告警带类别码与事项；
+// 动作已让事项离开 open 时不动它；授权类拒绝同样收掉这一份并记告警。包里已没有实例驱动的规则时，实例到期留告警。
+// 2026-11-20 改写（本人裁决：规则建的事项失败后转 dropped，不挂问题）：原断言事项转 needs_input、问题含原因，
+// 授权类拒绝"不重复记告警"；改为事项转 dropped、阶段变更的理由含原因，告警带 code、item、dropped；
+// 授权类拒绝时事项终结后本人只能从诊断页看到它，所以这里记一条 action_rejected 告警（拒绝原因码在 params.code）。
 func TestBoundItemIsHandedBackWhenActionFails(t *testing.T) {
 	files := map[string]string{"bf/pack.yaml": `name: bf
 version: 1.0.0
@@ -833,13 +838,39 @@ clock_rules:
 		return out[len(out)-1]
 	}
 
+	notice := func(ev domain.Event) (p struct {
+		Code    domain.NoticeCode `json:"code"`
+		Params  map[string]string `json:"params"`
+		Item    string            `json:"item"`
+		Dropped bool              `json:"dropped"`
+	}) {
+		_ = json.Unmarshal(ev.Payload, &p)
+		return p
+	}
+	dropReason := func(id string) string {
+		for _, ev := range e.ofType(domain.EvItemPhaseChanged) {
+			if ev.Object == id && strings.Contains(ev.Reason, "作废") {
+				return ev.Reason
+			}
+		}
+		return ""
+	}
 	h = func(context.Context, Call) error { return errors.New("no model") }
 	it := fire()
-	if it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "no model") {
-		t.Fatalf("failed action must hand the item back: %+v", it)
+	if it.Phase != domain.PhaseDropped || it.Ask != nil || !strings.Contains(dropReason(it.ID), "no model") {
+		t.Fatalf("failed action must drop this round's item with the reason: %+v", it)
 	}
-	if al := e.ofType(domain.EvHealthAlert); len(al) != 1 || al[0].Object != ins.ID {
+	if al := e.ofType(domain.EvHealthAlert); len(al) != 1 || al[0].Object != ins.ID ||
+		notice(al[0]).Code != domain.NoticeActionFailed || notice(al[0]).Item != it.ID || !notice(al[0]).Dropped {
 		t.Fatalf("alerts = %+v", al)
+	}
+
+	h = func(context.Context, Call) error { return fmt.Errorf("generate: %w", model.ErrNotConfigured) }
+	if it = fire(); it.Phase != domain.PhaseDropped {
+		t.Fatalf("model unset: %+v", it)
+	}
+	if al := e.ofType(domain.EvHealthAlert); notice(al[len(al)-1]).Code != domain.NoticeModelUnset || notice(al[len(al)-1]).Item != it.ID {
+		t.Fatalf("model unset must be coded: %s", al[len(al)-1].Payload)
 	}
 
 	h = func(_ context.Context, c Call) error {
@@ -856,11 +887,11 @@ clock_rules:
 		return domain.NewError(domain.CodeWebOnly, "web only", "use the web ui")
 	}
 	alerts := len(e.ofType(domain.EvHealthAlert))
-	if it = fire(); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "web only") {
-		t.Fatalf("a rejected action must hand the item back: %+v", it)
+	if it = fire(); it.Phase != domain.PhaseDropped || !strings.Contains(dropReason(it.ID), "web only") {
+		t.Fatalf("a rejected action must drop this round's item: %+v", it)
 	}
-	if n := len(e.ofType(domain.EvHealthAlert)); n != alerts {
-		t.Fatalf("rejection recorded twice: %d alerts, was %d", n, alerts)
+	if al := e.ofType(domain.EvHealthAlert); len(al) != alerts+1 || notice(al[alerts]).Code != domain.NoticeActionRejected || notice(al[alerts]).Params["code"] != string(domain.CodeWebOnly) {
+		t.Fatalf("a dropped item's rejection must reach the health page once: %+v", al)
 	}
 
 	e.pack(map[string]string{"bf/pack.yaml": `name: bf

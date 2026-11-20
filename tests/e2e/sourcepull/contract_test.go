@@ -200,14 +200,15 @@ func TestFlowSourceContract(t *testing.T) {
 		}
 	})
 
-	step("ACT-SRC-07 退出码 2 生成 needs_input", func(t *testing.T) {
+	// 2026-11-20 改写（清单第 8 条）：原断言退出码 2 生成 needs_input 事项；认证或配置失败是事件：
+	// 改为记为 auth_or_config、诊断页带 kind、不建事项；游标不动、其他来源照常两条不变。
+	step("ACT-SRC-07 退出码 2 记为认证或配置失败", func(t *testing.T) {
 		other = f.register("src_accother", dir, 30, "")
 		other.out(lines(ev("o1", "不受影响"), cursorLine("o1")), 0)
 		a.out("", 2)
-		f.until("a 生成 needs_input 事项", func() bool { return f.show("src_acca").Stats.NeedsInputItem != "" })
-		item := f.show("src_acca").Stats.NeedsInputItem
-		if !f.needsInputOf(item) {
-			t.Errorf("事项 %s 应在 needs_input", item)
+		f.until("a 记为认证或配置失败", func() bool { return f.show("src_acca").Stats.LastFailureKind == "auth_or_config" })
+		if !f.authFailed("src_acca") {
+			t.Errorf("src_acca 应只记为认证失败、不建事项: %+v", f.show("src_acca"))
 		}
 		if f.show("src_acca").Cursor != "c3" {
 			t.Errorf("游标不动")

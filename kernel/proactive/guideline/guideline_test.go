@@ -331,15 +331,30 @@ func TestDisallowedExecutorFailsLoudlyAndOthersContinue(t *testing.T) {
 	}
 }
 
-// 本机声明不可用：任务型不拉起，事项进 needs_input 交本人，且不会每轮重复建事项。
+// 本机声明不可用：任务型不拉起，且不会每轮重复建事项。
+// 2026-11-20 改写：原断言"恰有一个 needs_input 事项、没有运行"；没拉起是事件不是问题：不建事项、没有运行，
+// 每轮检测记一条带 task_refused 类别码的告警（同"起草入口失败"，下一轮仍会重试）。
 func TestUnusableHarnessHandsOffToOwnerOnce(t *testing.T) {
 	e := newEnvWith(t, func(o *Options) { o.Harness = "undeclared" })
 	p := e.project("alpha", "git.example/alpha", true)
 	e.tick()
 	e.tick()
 	its := e.items(p)
-	if len(its) != 1 || its[0].Phase != domain.PhaseNeedsInput || len(e.runs()) != 0 {
-		t.Fatalf("want one needs_input item and no run, got %+v", its)
+	if len(its) != 0 || len(e.runs()) != 0 {
+		t.Fatalf("want no item and no run, got %+v", its)
+	}
+	n := 0
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.Read(tx, 0, 1000)
+		for _, x := range es {
+			if x.Event.Type == domain.EvHealthAlert && strings.Contains(string(x.Event.Payload), `"code":"task_refused"`) {
+				n++
+			}
+		}
+		return err
+	})
+	if n != 2 {
+		t.Fatalf("want a task_refused alert per check, got %d", n)
 	}
 }
 

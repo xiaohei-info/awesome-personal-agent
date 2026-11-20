@@ -158,6 +158,11 @@ func TestFlowBgResume(t *testing.T) {
 		time.Sleep(2 * time.Second)
 		eq(t, "不续接，Run 数", len(f.runsOf(child)), before)
 		eq(t, "resume.launched 数", len(f.resumeEvents(child)), 0)
-		eq(t, "子事项阶段", f.phase(child), "needs_input")
+		// 2026-11-20 改写：原断言子事项转 needs_input（挂一张续接被拒的问题）；续接被拒是事件：子事项停在回答后的 open、
+		// 不挂新问题，诊断页有 resume_refused 通知。"不续接、Run 数不变、没有 resume.launched"不变。
+		eq(t, "子事项阶段", f.phase(child), "open")
+		if !f.notified(child, "resume_refused") {
+			t.Errorf("诊断页应有续接被拒的通知: %+v", f.Notices())
+		}
 	})
 }

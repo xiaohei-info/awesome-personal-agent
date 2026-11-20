@@ -42,7 +42,7 @@ type AgentOptions struct {
 //   - task：拉起任务型。对象是本次规则执行里 create_item 建的事项（实例到期，C.13）时，就在这个事项上运行，
 //     先把它指派给内核身份，回执与失败才属于"改自己的事项"；否则按 §8.4 另建目标事项。
 //   - generate：账本快照作资料调生成型，结果写进事项 spec 并转 done；要升级到任务型时照任务型处理；
-//     没有可用结果时转 needs_input（§8.7）；调用失败返回错误，规则建的事项由规则引擎转 needs_input。
+//     没有可用结果时转 needs_input 问本人怎么收尾（§8.7）；调用失败返回错误，规则建的事项由规则引擎转 dropped。
 //   - judge：交给 Judge。
 //
 // 能力包取规则键的包名；harness 用 Web 设置的默认 harness（§13.6）。
@@ -265,7 +265,7 @@ func (s *Service) callTask(ctx context.Context, c rules.Call, pack, tmpl string,
 		t.Selection.Item = c.Item.PreferredAgentID
 		t.Title, t.Project, t.From = c.Item.Title, c.Item.Project, c.Item.ID
 	}
-	_, err = s.Launch(ctx, t) // 没拉起时事项已转 needs_input 并带原因，不是规则失败
+	_, err = s.Launch(ctx, t) // 没拉起时返回带类别码的错误，规则引擎记告警、收掉规则建的事项
 	return err
 }
 
@@ -280,7 +280,7 @@ func (s *Service) launchDepth(ctx context.Context, c rules.Call) (depth int, ove
 		if err := chain.Record(ctx, s.o.Store, s.o.Now(), c.Rule, object, depth, max); err != nil || !c.Bound {
 			return depth, true, err
 		}
-		return depth, true, c.Ask(c.Item.ID, fmt.Sprintf("链路深度 %d 超过阈值 %d，规则没有派发运行", depth, max))
+		return depth, true, &domain.NotStarted{Code: domain.NoticeChainTripped, Detail: fmt.Sprintf("链路深度 %d 超过阈值 %d，规则没有派发运行", depth, max)}
 	}
 	return depth, false, nil
 }
@@ -344,7 +344,7 @@ func (s *Service) callGenerate(ctx context.Context, g Generator, c rules.Call, p
 	case errors.Is(err, model.ErrNotConfigured):
 		return fmt.Errorf("生成型需要模型端点，请在 Web 设置里配置: %w", err)
 	case errors.Is(err, direct.ErrOutboundBlocked):
-		return fmt.Errorf("外发范围不允许把该来源的内容送往生成端点，请在来源页选择外发范围后重试: %w", err)
+		return &domain.NotStarted{Code: domain.NoticeOutboundBlocked, Detail: "外发范围不允许把该来源的内容送往生成端点，请在来源页选择外发范围后重试", Cause: err}
 	case err != nil:
 		return fmt.Errorf("生成型调用失败: %w", err)
 	case out.HandoffTask != "":

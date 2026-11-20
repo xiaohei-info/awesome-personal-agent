@@ -351,7 +351,30 @@ func (e *env) count(sql string, args ...any) (n int64) {
 
 func (e *env) itemCount() int64 { return e.count(`SELECT COUNT(*) FROM items`) }
 
-// 认证失败之后拉取恢复：runner 建的 needs_input 事项按"来源已恢复"转 done，统计里不再引用它；之后再认证失败另建一个。
+// legacyAuthItem 种入一件升级前认证失败时 runner 建的 needs_input 事项，并让来源统计引用它（2026-11-20 起不再新建这类事项，
+// 但已有部署的账本里有，恢复时仍由内核收尾）。
+func (e *env) legacyAuthItem(src string) string {
+	e.t.Helper()
+	body, _ := json.Marshal(map[string]any{"kind": domain.KindTask, "phase": domain.PhaseNeedsInput, "title": "来源 " + src + " 认证或配置失败",
+		"assignee": systemPrinc, "origin": map[string]string{"source": src, "ref": "run_old"},
+		"ask": map[string]any{"question": "来源 " + src + " 的拉取返回了认证或配置失败（退出码 2）", "free_text": true}, "reason": "source run run_old"})
+	res, err := e.x.Do(bg, command.Request{Identity: system, Command: "item.create", Input: body})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	var ref struct{ ID string }
+	_ = json.Unmarshal(res.Value, &ref)
+	s, st := e.source(src)
+	st.NeedsInputItem = ref.ID
+	if err := e.st.Update(bg, func(tx *store.Tx) error { return registry.SetRunState(tx, src, s.Cursor, encode(st)) }); err != nil {
+		e.t.Fatal(err)
+	}
+	return ref.ID
+}
+
+// 认证失败之后拉取恢复：升级前 runner 建的 needs_input 事项按"来源已恢复"转 done，统计里不再引用它。
+// 2026-11-20 改写（本人批准的清单第 5 条）：原来由这次认证失败新建事项，并断言"之后再认证失败另建一个"；
+// 认证失败不再建事项，改为种入升级前的旧事项验恢复收尾（断言不变），末段改为"再认证失败不建事项、只记类别"。
 func TestRecoveryEndsNeedsInputItem(t *testing.T) {
 	e := setup(t, defaults())
 	flag := filepath.Join(e.dir, "broken")
@@ -364,10 +387,10 @@ echo '{"cursor":"c1"}'
 	e.r.Sync(bg)
 	e.tick(1)
 	_, st := e.source("src_cal")
-	first := st.NeedsInputItem
-	if first == "" {
-		t.Fatalf("no needs_input item: %+v", st)
+	if st.NeedsInputItem != "" || st.LastFailureKind != "auth_or_config" || e.itemCount() != 0 {
+		t.Fatalf("an auth failure must not open an item: %+v", st)
 	}
+	first := e.legacyAuthItem("src_cal")
 	os.Remove(flag)
 	e.advance(time.Minute)
 	e.tick(1)
@@ -385,12 +408,15 @@ echo '{"cursor":"c1"}'
 	os.WriteFile(flag, nil, 0o600)
 	e.advance(time.Minute)
 	e.tick(1)
-	if _, st = e.source("src_cal"); st.NeedsInputItem == "" || st.NeedsInputItem == first {
-		t.Fatalf("a new failure should open a new item: %+v", st)
+	if _, st = e.source("src_cal"); st.NeedsInputItem != "" || st.LastFailureKind != "auth_or_config" || e.itemCount() != 1 {
+		t.Fatalf("a new failure must not open another item: %+v", st)
 	}
 }
 
-// ACT-SRC-07：退出码 2 生成一个 needs_input 事项；重复失败不重复建；其他来源不受影响。
+// ACT-SRC-07：退出码 2 是认证或配置失败；其他来源不受影响。
+// 2026-11-20 改写（本人批准的清单第 6 条）：原断言生成恰一个 needs_input 事项（标题含来源名、阶段 needs_input）、重复失败不重复建；
+// 认证失败是故障不是问题：改为不建事项，每次失败记一条 kind=auth_or_config 的 source.failed，统计带类别；游标不动、连续失败 2 次、仍启用、
+// 其他来源照常，这几条原样保留。
 func TestExit2CreatesOneNeedsInputItemOthersUnaffected(t *testing.T) {
 	e := setup(t, defaults())
 	e.register("src_bad", e.script("bad.sh", `echo 'token expired' >&2; exit 2`), nil)
@@ -400,17 +426,15 @@ func TestExit2CreatesOneNeedsInputItemOthersUnaffected(t *testing.T) {
 	e.advance(time.Minute)
 	e.tick(2)
 
-	if n := e.itemCount(); n != 1 {
-		t.Fatalf("want exactly one needs_input item, got %d", n)
+	if n := e.itemCount(); n != 0 {
+		t.Fatalf("an auth failure must not open items, got %d", n)
 	}
 	s, st := e.source("src_bad")
-	if s.Cursor != "" || st.NeedsInputItem == "" || st.ConsecutiveFailures != 2 || !s.Enabled {
+	if s.Cursor != "" || st.NeedsInputItem != "" || st.LastFailureKind != "auth_or_config" || st.ConsecutiveFailures != 2 || !s.Enabled {
 		t.Fatalf("bad source: %q %+v", s.Cursor, st)
 	}
-	var it domain.Item
-	e.st.View(bg, func(tx *store.Tx) (err error) { it, err = items.Get(tx, st.NeedsInputItem); return })
-	if it.Phase != domain.PhaseNeedsInput || it.Origin == nil || it.Origin.Source != "src_bad" || !strings.Contains(it.Ask.Question, "src_bad") {
-		t.Fatalf("item: %+v", it)
+	if n := e.count(`SELECT COUNT(*) FROM eventlog_event WHERE object = 'src_bad' AND type = ? AND json_extract(payload, '$.kind') = 'auth_or_config'`, domain.EvSourceFailed); n != 2 {
+		t.Fatalf("source.failed auth_or_config events: %d", n)
 	}
 	if s, st := e.source("src_ok"); s.Cursor != "c1" || st.ConsecutiveFailures != 0 {
 		t.Fatalf("healthy source affected: %q %+v", s.Cursor, st)

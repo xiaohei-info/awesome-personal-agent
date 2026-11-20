@@ -73,6 +73,8 @@ export type NoticeParams = Record<string, string> | undefined;
 type AskSay = Record<I.AskCode, (p: NoticeParams) => string>;
 /** 运行故障（设计 §6.11）：出了什么事一句（say），下一步做什么一句（next）。 */
 type FaultSay = Record<I.RunFault, { say: (p: NoticeParams) => string; next: string }>;
+/** go：下一步去哪修（按钮文字与地址）；没有时下一步就是看这件事。 */
+type NoticeSay = Record<I.NoticeCode, { say: (p: NoticeParams) => string; go?: { label: string; to: string } }>;
 const mins = (p: NoticeParams) => Math.max(1, Math.round(Number(p?.timeout ?? 0) / 60));
 
 /** 自检结论的可变参数（kernel/doctor 的 data，附录 B.2）。 */
@@ -104,7 +106,7 @@ const len = (d: DoctorData, k: string) => (Array.isArray(d?.[k]) ? (d![k] as unk
 /** 渠道路由 channel:<名> 的显示名。 */
 export const CHANNEL_PREFIX = "channel:";
 
-const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSay; askCode: AskSay; runFault: FaultSay; captureSource: string } = {
+const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSay; askCode: AskSay; runFault: FaultSay; notice: NoticeSay; captureSource: string } = {
   phase: { proposed: { label: "建议" }, open: { label: "进行中" }, waiting: { label: "等待中" }, needs_input: { label: "等你决定" }, done: { label: "已完成" }, dropped: { label: "已放弃" } },
   priority: { low: { label: "低" }, normal: { label: "普通" }, high: { label: "高" }, urgent: { label: "紧急" } },
   itemKind: { task: { label: "任务" }, commitment: { label: "承诺" }, decision: { label: "决策" }, delegation: { label: "委派" }, brief: { label: "简报" }, routine: { label: "例行任务" } },
@@ -374,6 +376,17 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     hosted_missing: (p) => `托管文档 ${p?.path ?? ""} 在仓库里找不到了`,
     verify_delegation: (p) => `「${p?.title ?? ""}」交回说做完了，要不要采信？`,
     followup_rounds_used: (p) => `「${p?.title ?? ""}」已提醒 ${p?.rounds ?? ""} 轮仍没进展，怎么办？`,
+  },
+  notice: {
+    task_refused: { say: (p) => `没能开始：${p?.detail ?? "配置不允许"}` },
+    background_refused: { say: (p) => `没能开始：${p?.detail ?? "配置不允许"}` },
+    resume_refused: { say: (p) => `你回答后没能接着做：${p?.detail ?? "配置已变"}` },
+    model_unset: { say: () => "需要的模型还没接", go: { label: "去接模型", to: "/settings/models" } },
+    models_paused: { say: () => "模型已暂停，这一步做不了", go: { label: "去恢复", to: "/settings/models" } },
+    outbound_blocked: { say: () => "外发范围不允许把内容送往模型", go: { label: "去选外发范围", to: "/sources" } },
+    chain_tripped: { say: () => "连锁触发太深，已停下" },
+    action_rejected: { say: () => "这一步被授权规则拦下" },
+    action_failed: { say: () => "这一步没完成" },
   },
   runFault: {
     start_failed: { say: () => "执行程序没能启动", next: "检查这个 Agent 的工作目录与设置，修好后再开始" },
@@ -749,6 +762,17 @@ const en: typeof zh = {
     hosted_missing: (p) => `The hosted document ${p?.path ?? ""} is gone from the repo`,
     verify_delegation: (p) => `"${p?.title ?? ""}" was reported done. Accept the result?`,
     followup_rounds_used: (p) => `"${p?.title ?? ""}" had ${p?.rounds ?? ""} reminders and no progress. What now?`,
+  },
+  notice: {
+    task_refused: { say: (p) => `Couldn't start: ${p?.detail ?? "not allowed by settings"}` },
+    background_refused: { say: (p) => `Couldn't start: ${p?.detail ?? "not allowed by settings"}` },
+    resume_refused: { say: (p) => `Couldn't continue after your answer: ${p?.detail ?? "settings changed"}` },
+    model_unset: { say: () => "The model it needs isn't connected", go: { label: "Connect a model", to: "/settings/models" } },
+    models_paused: { say: () => "Models are paused, so this step can't run", go: { label: "Resume", to: "/settings/models" } },
+    outbound_blocked: { say: () => "The outbound scope doesn't allow sending this to a model", go: { label: "Choose outbound scope", to: "/sources" } },
+    chain_tripped: { say: () => "Too many chained triggers; stopped" },
+    action_rejected: { say: () => "This step was stopped by an authorization rule" },
+    action_failed: { say: () => "This step didn't finish" },
   },
   runFault: {
     start_failed: { say: () => "The program could not start", next: "Check this Agent's working directory and settings, then start again" },

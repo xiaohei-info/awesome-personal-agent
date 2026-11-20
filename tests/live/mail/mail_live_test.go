@@ -149,9 +149,10 @@ type srcState struct {
 	Enabled bool   `json:"enabled"`
 	Cursor  string `json:"cursor"`
 	Stats   struct {
-		Runs           int    `json:"runs"`
-		LastError      string `json:"last_error"`
-		NeedsInputItem string `json:"needs_input_item"`
+		Runs            int    `json:"runs"`
+		LastError       string `json:"last_error"`
+		NeedsInputItem  string `json:"needs_input_item"`
+		LastFailureKind string `json:"last_failure_kind"`
 	} `json:"stats"`
 }
 
@@ -373,7 +374,11 @@ func TestFlowSourceMail(t *testing.T) {
 		c := l.show(src).Cursor
 		l.setPath("/usr/bin:/bin")
 		runs := l.show(other).Stats.Runs
-		l.until("生成 needs_input", func() bool { return l.show(src).Stats.NeedsInputItem != "" })
+		// 2026-11-20 改写（本人批准的清单第 9 条，live 只改不跑）：原断言生成 needs_input 事项；认证或配置失败只记为事件，统计带 kind=auth_or_config、不建事项。
+		l.until("记为认证或配置失败", func() bool {
+			s := l.show(src)
+			return s.Stats.LastFailureKind == "auth_or_config" && s.Stats.NeedsInputItem == ""
+		})
 		cursorUnchanged(t, c)
 		l.until("其他来源照常运行", func() bool { return l.show(other).Stats.Runs > runs+1 })
 		l.adapterRefuses("/usr/bin:/bin", "himalaya")
@@ -395,8 +400,9 @@ func TestFlowSourceMail(t *testing.T) {
 		l.settle(src, 2)
 		s := l.show(src)
 		cursorUnchanged(t, c)
-		if s.Stats.NeedsInputItem == "" || !strings.Contains(s.Stats.LastError, "exit status 2") {
-			t.Fatalf("应以退出码 2 生成 needs_input: item=%q last_error=%q", s.Stats.NeedsInputItem, s.Stats.LastError)
+		// 2026-11-20 改写（本人批准的清单第 9 条，live 只改不跑）：原断言生成 needs_input 事项；认证或配置失败只记为事件，统计带 kind=auth_or_config、不建事项。
+		if s.Stats.LastFailureKind != "auth_or_config" || s.Stats.NeedsInputItem != "" || !strings.Contains(s.Stats.LastError, "exit status 2") {
+			t.Fatalf("应以退出码 2 记为认证或配置失败、不建事项: item=%q last_error=%q", s.Stats.NeedsInputItem, s.Stats.LastError)
 		}
 		l.adapterRefuses(path, wantErr)
 	}
@@ -426,8 +432,9 @@ func TestFlowSourceMail(t *testing.T) {
 		l.settle(src, 2)
 		s := l.show(src)
 		cursorUnchanged(t, c)
-		if s.Stats.NeedsInputItem == "" {
-			t.Errorf("认证失败应生成 needs_input: last_error=%q", s.Stats.LastError)
+		// 2026-11-20 改写（本人批准的清单第 9 条，live 只改不跑）：原断言生成 needs_input 事项；认证或配置失败只记为事件，统计带 kind=auth_or_config、不建事项。
+		if s.Stats.LastFailureKind != "auth_or_config" || s.Stats.NeedsInputItem != "" {
+			t.Errorf("认证失败应记为 auth_or_config、不建事项: last_error=%q", s.Stats.LastError)
 		}
 		if err := os.WriteFile(l.pwFn, []byte(pw), 0o600); err != nil {
 			t.Fatal(err)

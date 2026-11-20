@@ -154,7 +154,10 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 	f.step("ACT-BGG-06 权限档位超过上限不拉起", func(t *testing.T) {
 		f.auto("main-edit")
 		id := f.task("bgg-06", "acc-work", "acc-edit")
-		f.waitFor("事项转 needs_input", 20*time.Second, func() bool { return f.phase(id) == "needs_input" })
+		// 2026-11-20 改写：原等待事项转 needs_input；没拉起是事件：事项留在 open、不挂问题，诊断页有 background_refused 通知。
+		// Run 数为 0、拒绝记录写明档位两条不变。
+		f.waitFor("诊断页记下没拉起", 20*time.Second, func() bool { return f.notified(id, "background_refused") })
+		eq(t, "事项阶段（不转 needs_input）", f.phase(id), "open")
 		eq(t, "Run 数", len(f.runsOf(id)), 0)
 		ev := f.events(id, "background.refused")
 		if len(ev) != 1 || !strings.Contains(ev[0].Reason+toJSON(ev[0].Payload), "edit") {
@@ -171,7 +174,9 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		f.webOK("PUT", "/settings/access-limits", `{"permission_cap":{"default":"read","by_harness":{"acc-read-only":"full"}}}`, 200)
 		f.auto("ro-edit")
 		id := f.task("bgg-07", "acc-work", "acc-ro")
-		f.waitFor("事项转 needs_input", 20*time.Second, func() bool { return f.phase(id) == "needs_input" })
+		// 2026-11-20 改写：同 ACT-BGG-06，原等待事项转 needs_input。
+		f.waitFor("诊断页记下没拉起", 20*time.Second, func() bool { return f.notified(id, "background_refused") })
+		eq(t, "事项阶段（不转 needs_input）", f.phase(id), "open")
 		eq(t, "Run 数（不回退到其他档位）", len(f.runsOf(id)), 0)
 		eq(t, "拒绝记录", len(f.events(id, "background.refused")), 1)
 	})
@@ -189,10 +194,15 @@ $APA ask "$ITEM" --question 选哪个 --option A=甲 --option B=乙 --resume-not
 		f.waitFor("复核不通过", 20*time.Second, func() bool { return len(f.events(id, "resume.refused")) == 1 })
 		time.Sleep(2 * time.Second)
 		eq(t, "不续接，Run 数", len(f.runsOf(id)), len(rs))
-		eq(t, "事项仍 needs_input", f.phase(id), "needs_input")
-		// 通知本人：事项带"续接未执行"的待办，出现在本人的待办流（apa inbox 与 Web 决策待办同源）里。
-		if inbox := f.apa(f.OBS, 0, "inbox").Stdout; !strings.Contains(inbox, id) || !strings.Contains(inbox, "续接未执行") {
-			t.Errorf("复核不通过应在待办里通知本人: %s", inbox)
+		// 2026-11-20 改写（本人裁决："没拉起"类改为事件）：原断言事项仍 needs_input、待办流里有"续接未执行"的新问题；
+		// 续接被拒不再挂问题：事项停在本人回答后的 open，诊断页有一条 resume_refused 通知（原因写明规则已不是 auto）告诉本人，
+		// 待办流里不再有这件事。"不续接、Run 数不变"不变。
+		eq(t, "事项阶段（回答后，不再转 needs_input）", f.phase(id), "open")
+		if f.NoticeWith("resume_refused", "auto") != 1 || !f.notified(id, "resume_refused") {
+			t.Errorf("复核不通过应在诊断页通知本人: %+v", f.Notices())
+		}
+		if inbox := f.apa(f.OBS, 0, "inbox").Stdout; strings.Contains(inbox, id) {
+			t.Errorf("复核不通过不应再进待办: %s", inbox)
 		}
 	})
 }

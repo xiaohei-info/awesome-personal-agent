@@ -16,7 +16,7 @@ import (
 )
 
 // ACT-BRF-05：真实 apa serve，没有声明任何 harness；brief 包按验收的做法覆盖为生成型，实例经 `apa instance add` 建。
-// 端点未配置、端点拒绝时事项转 needs_input 并写明原因，配好后转 done，全程没有无头运行。
+// 端点未配置、端点拒绝时这一份转 dropped 并写明原因（2026-11-20 前是转 needs_input），配好后转 done，全程没有无头运行。
 func TestBriefGenerateOverrideLeavesOpen(t *testing.T) {
 	e := baseline.New(t)
 	e.Init()
@@ -63,23 +63,25 @@ func TestBriefGenerateOverrideLeavesOpen(t *testing.T) {
 		})
 		return b
 	}
-	asks := func(b brief, want string) {
+	// 2026-11-20 改写（本人裁决：规则建的事项动作失败转 dropped，不挂问题）：原断言这一份转 needs_input、问题含 want；
+	// 改为转 dropped、不挂问题，阶段变更的理由（apa why 可见）含 want。
+	dropped := func(b brief, want string) bool {
 		t.Helper()
-		if b.Phase != "needs_input" || b.Ask == nil || !strings.Contains(b.Ask.Question, want) {
-			t.Fatalf("brief %+v must be needs_input naming %q", b, want)
-		}
+		return b.Phase == "dropped" && b.Ask == nil && strings.Contains(f.apa(f.DEL, 0, "why", b.ID).Stdout, want)
 	}
 
 	f.apa(f.DEL, 0, "--evidence", "验证生成型模板", "instance", "add", "brief", "--param", "schedule=2s")
-	asks(next("端点未配置时转 needs_input"), "模型端点")
+	if b := next("端点未配置时这一份作废"); !dropped(b, "模型端点") {
+		t.Fatalf("brief %+v must be dropped naming %q", b, "模型端点")
+	}
 
 	e.StartModelStub()
 	e.ModelStub.SetDefault(modelstub.Reply{Status: 400})
 	f.waitFor("端点被调用", 30*time.Second, func() bool { return len(e.ModelStub.Requests()) > 0 })
 	var b brief
-	f.waitFor("端点拒绝时转 needs_input", 30*time.Second, func() bool {
+	f.waitFor("端点拒绝时这一份作废", 30*time.Second, func() bool {
 		b = next("下一份简报")
-		return b.Ask != nil && strings.Contains(b.Ask.Question, "status 400")
+		return dropped(b, "status 400")
 	})
 
 	e.ModelStub.SetDefault(reply(`{"insufficient_info":false,"summary":"s"}`))

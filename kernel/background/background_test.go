@@ -3,6 +3,7 @@ package background
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -462,19 +463,42 @@ func TestRuleHarnessOverridesDefault(t *testing.T) {
 	}
 }
 
-// 规则没有 harness、Web 也没有默认 harness：不拉起，事项转 needs_input 并说明原因。
+// refused 断言一次没拉起是事件不是问题（2026-11-20，§6.14 第 20 条）：事项阶段不变、不挂问题，
+// 有一条带 background_refused 类别码、原因含 want 的健康告警指向这件事。
+func (e *env) refused(id, want string) {
+	e.t.Helper()
+	if it := e.item(id); it.Phase != domain.PhaseOpen || it.Ask != nil {
+		e.t.Fatalf("a refused launch changed the item: %+v", it)
+	}
+	for _, a := range e.ofType(domain.EvHealthAlert) {
+		var p struct {
+			Code   domain.NoticeCode `json:"code"`
+			Params map[string]string `json:"params"`
+			Item   string            `json:"item"`
+		}
+		_ = json.Unmarshal(a.Payload, &p)
+		if p.Code == domain.NoticeBackgroundRefused && p.Item == id && strings.Contains(p.Params["detail"], want) {
+			return
+		}
+	}
+	e.t.Fatalf("no background_refused alert on %s naming %q: %+v", id, want, e.ofType(domain.EvHealthAlert))
+}
+
+// 规则没有 harness、Web 也没有默认 harness：不拉起，并说明原因。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含 "harness"；改为事项不变，告警原因含 "harness"。
 func TestNoHarnessGoesToNeedsInput(t *testing.T) {
 	e := setup(t, 0)
 	e.auto("readonly")
 	id := e.newItem("a", []string{"readonly"}, nil)
 	e.open(id)
-	it := e.item(id)
-	if len(e.runList()) != 0 || it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "harness") {
-		t.Fatalf("runs=%d item=%+v", len(e.runList()), it)
+	if len(e.runList()) != 0 {
+		t.Fatalf("runs=%d", len(e.runList()))
 	}
+	e.refused(id, "harness")
 }
 
-// ACT-BGM-08：运行结束时事项仍是 open：转 needs_input，选项为重新运行、改派、放弃；不自动再次拉起。
+// ACT-BGM-08：运行结束时事项仍是 open：转 needs_input，选项为我来处理、放弃；不自动再次拉起。
+// 2026-11-20 改写（本人批准的清单第 1 条）：原断言选项 id 为 rerun、reassign、drop，前两个没有消费者，是假选项。
 func TestStillOpenAfterRunGoesToNeedsInput(t *testing.T) {
 	e := setup(t, 0)
 	e.configure("silent")
@@ -483,7 +507,7 @@ func TestStillOpenAfterRunGoesToNeedsInput(t *testing.T) {
 	e.open(id)
 	e.waitResult()
 	it := e.item(id)
-	if it.Phase != domain.PhaseNeedsInput || !slices.Equal(askIDs(it), []string{"rerun", "reassign", "drop"}) || !strings.Contains(it.Ask.Question, "open") {
+	if it.Phase != domain.PhaseNeedsInput || !slices.Equal(askIDs(it), []string{"handle", "drop"}) || !strings.Contains(it.Ask.Question, "open") {
 		t.Fatalf("item = %+v", it)
 	}
 	if n := len(e.runList()); n != 1 {
@@ -543,7 +567,8 @@ func TestInFlightRunSkipsSecondTrigger(t *testing.T) {
 	e.waitResult()
 }
 
-// ACT-BGG-06、ACT-BGG-07：档位超过 Web 上限、声明未提供该档位：都不拉起，事项转 needs_input 并有拒绝记录。
+// ACT-BGG-06、ACT-BGG-07：档位超过 Web 上限、声明未提供该档位：都不拉起，有拒绝记录。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含"上限"/"档位"；改为事项不变、告警原因含同样的词。
 func TestPermissionTierGuards(t *testing.T) {
 	e := setup(t, 0)
 	e.harness("hx", "silent", "read", "edit")
@@ -552,16 +577,12 @@ func TestPermissionTierGuards(t *testing.T) {
 	e.auto("full")
 	over := e.newItem("a", []string{"agent-ok"}, nil)
 	e.open(over)
-	if it := e.item(over); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "上限") {
-		t.Fatalf("over cap: %+v", it)
-	}
+	e.refused(over, "上限")
 
 	e.setPolicy(func(p *policy.Policy) { p.PermissionCap.Default = policy.PermFull })
 	undeclared := e.newItem("b", []string{"full"}, nil)
 	e.open(undeclared)
-	if it := e.item(undeclared); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "档位") {
-		t.Fatalf("undeclared tier: %+v", it)
-	}
+	e.refused(undeclared, "档位")
 	if n := len(e.runList()); n != 0 {
 		t.Fatalf("runs = %d", n)
 	}
@@ -583,7 +604,9 @@ func noDo(t *testing.T) func(string, any) (command.Result, error) {
 	}
 }
 
-// 按当前策略复核：处理器被调用时规则已不是 auto，不拉起，经命令模型把事项转 needs_input。
+// 按当前策略复核：处理器被调用时规则已不是 auto，不拉起。
+// 2026-11-20 改写：原断言处理器无错、经命令模型发出 item.update 与 item.transition（转 needs_input）；
+// 改为交回 background_refused、不发任何命令（事项不挂问题），拒绝记录照旧。
 func TestRuleNoLongerAutoIsRefused(t *testing.T) {
 	e := setup(t, 0)
 	e.configure("silent")
@@ -596,7 +619,8 @@ func TestRuleNoLongerAutoIsRefused(t *testing.T) {
 			cmds = append(cmds, cmd)
 			return command.Result{}, nil
 		})
-	if err != nil || len(e.runList()) != 0 || !slices.Equal(cmds, []string{"item.update", "item.transition"}) {
+	var ns *domain.NotStarted
+	if !errors.As(err, &ns) || ns.Code != domain.NoticeBackgroundRefused || len(e.runList()) != 0 || len(cmds) != 0 {
 		t.Fatalf("err=%v runs=%d cmds=%v", err, len(e.runList()), cmds)
 	}
 	if ev := e.ofType(EvRefused); len(ev) != 1 || !strings.Contains(ev[0].Reason, "auto") {
@@ -745,7 +769,8 @@ func (e *env) parentOf(id string) (string, bool) {
 	return p, ok
 }
 
-// ACT-BGT-02：task 运行者的执行者不在项目名单内：不拉起、不建子事项，事项转 needs_input，有拒绝记录。
+// ACT-BGT-02：task 运行者的执行者不在项目名单内：不拉起、不建子事项，有拒绝记录。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含 "other-host.cli"；改为事项不变、告警原因含它。
 func TestTaskRunnerExecutorNotAllowed(t *testing.T) {
 	e := setup(t, 0)
 	e.configure("silent")
@@ -753,9 +778,7 @@ func TestTaskRunnerExecutorNotAllowed(t *testing.T) {
 	proj := e.project("work-host.cli")
 	parent := e.newItem("修复", []string{"taskbad"}, map[string]any{"project": proj})
 	e.open(parent)
-	if it := e.item(parent); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "other-host.cli") {
-		t.Fatalf("item = %+v", it)
-	}
+	e.refused(parent, "other-host.cli")
 	if len(e.runList()) != 0 || len(e.ofType(EvRefused)) != 1 || len(e.ofType(domain.EvItemCreated)) != 1 {
 		t.Fatalf("runs=%d refused=%d created=%d", len(e.runList()), len(e.ofType(EvRefused)), len(e.ofType(domain.EvItemCreated)))
 	}
@@ -825,9 +848,7 @@ func TestProjectCheckoutCwd(t *testing.T) {
 	proj := e.project()
 	bare := e.newItem("a", []string{"co"}, map[string]any{"project": proj})
 	e.open(bare)
-	if it := e.item(bare); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "检出") {
-		t.Fatalf("no checkout: %+v", it)
-	}
+	e.refused(bare, "检出") // 2026-11-20 改写：原断言事项转 needs_input、问题含"检出"
 
 	co, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -837,9 +858,7 @@ func TestProjectCheckoutCwd(t *testing.T) {
 	e.must(owner, "project.checkout.set", map[string]any{"id": proj, "remote": "https://example.com/r.git", "host": "other", "path": "/elsewhere/r"})
 	remote := e.newItem("c", []string{"co"}, map[string]any{"project": proj})
 	e.open(remote)
-	if it := e.item(remote); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "检出") {
-		t.Fatalf("checkout on another host only: %+v", it)
-	}
+	e.refused(remote, "检出") // 2026-11-20 改写：原断言事项转 needs_input、问题含"检出"
 	e.must(owner, "project.checkout.set", map[string]any{"id": proj, "remote": "https://example.com/r.git", "host": "h", "path": co})
 	ok := e.newItem("b", []string{"co"}, map[string]any{"project": proj})
 	e.open(ok)
@@ -1088,10 +1107,11 @@ func TestOwnerStartNow(t *testing.T) {
 	over := e.newItem("over", []string{"full"}, nil) // full 超出上限 edit
 	e.open(over)
 	e.must(owner, "item.start", map[string]any{"id": over})
-	if it := e.item(over); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "上限") {
-		t.Fatalf("over cap: %+v", it)
-	}
+	e.refused(over, "上限") // 2026-11-20 改写：原断言事项转 needs_input、问题含"上限"
 
+	// 不在 open 的事项不能"现在开工"。2026-11-20 改写：原来靠上一步把事项转成 needs_input 制造这个前提，
+	// 没拉起不再改阶段，这里显式把它转 dropped 再验同一条拒绝。
+	e.must(owner, "item.transition", map[string]any{"id": over, "to": "dropped", "reason": "not now"})
 	if _, err := e.do(owner, "item.start", map[string]any{"id": over}, command.Chain{}); err == nil {
 		t.Fatal("started an item that is not open")
 	}

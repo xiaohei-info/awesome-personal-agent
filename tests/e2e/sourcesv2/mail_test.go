@@ -111,25 +111,24 @@ func TestFlowSourceMail(t *testing.T) {
 	}
 	k.RegisterScriptSource("src_other", other)
 
-	// failsAs 把工具替身切到 c，等邮件来源再跑一次并确认：退出码 2、生成 needs_input、游标不动。
+	// failsAs 把工具替身切到 c，等邮件来源再跑一次并确认：退出码 2、记为认证或配置失败（不建事项）、游标不动。
 	failsAs := func(t *testing.T, c string) (SrcState, SrcState) {
 		before := k.show(src)
 		k.SetToolCase(c)
 		var s SrcState
-		k.until("case "+c+" 的拉取失败并生成 needs_input", func() bool {
+		k.until("case "+c+" 的拉取失败并记为认证或配置失败", func() bool {
 			s = k.show(src)
 			return s.Stats.Runs > before.Stats.Runs && strings.HasPrefix(s.Stats.LastError, exitConfig)
 		})
 		if s.Cursor != before.Cursor {
 			t.Errorf("游标不应前进: %q → %q", before.Cursor, s.Cursor)
 		}
-		if s.Stats.NeedsInputItem == "" || k.item(s.Stats.NeedsInputItem).Phase != "needs_input" {
-			t.Errorf("应生成 needs_input 事项: %+v", s.Stats)
-		}
+		// 2026-11-20 改写（清单第 8 条）：原断言生成 needs_input 事项；认证或配置失败只记为事件、诊断页指向来源。
+		k.authNotice(t, s, src)
 		return before, s
 	}
 
-	k.step("ACT-MAIL-04 工具未安装时生成 needs_input", func(t *testing.T) {
+	k.step("ACT-MAIL-04 工具未安装时记为认证或配置失败（不建事项）", func(t *testing.T) {
 		otherRuns := k.show("src_other").Stats.Runs
 		bin, off := filepath.Join(k.ToolBin, "himalaya"), filepath.Join(k.ToolBin, "himalaya.off")
 		if err := os.Rename(bin, off); err != nil {
@@ -149,7 +148,7 @@ func TestFlowSourceMail(t *testing.T) {
 		eq(t, "来源事件数", len(k.events(src)), 3)
 	})
 
-	k.step("ACT-MAIL-05 版本不在声明范围时生成 needs_input", func(t *testing.T) {
+	k.step("ACT-MAIL-05 版本不在声明范围时记为认证或配置失败（不建事项）", func(t *testing.T) {
 		k.clearToolLog()
 		_, s := failsAs(t, "mail-version-0.1")
 		if !strings.Contains(s.Stats.LastError, "exit status 2") {
@@ -160,12 +159,11 @@ func TestFlowSourceMail(t *testing.T) {
 				t.Errorf("版本查询之后不应再调用取数命令: %v", argv)
 			}
 		}
-		if !strings.Contains(k.item(s.Stats.NeedsInputItem).Raw["title"].(string), src) {
-			t.Errorf("needs_input 事项应指向来源 %s", src)
-		}
+		// 2026-11-20 改写（清单第 8 条）：原断言 needs_input 事项标题指向来源；改为诊断页的来源失败信号指向来源（authNotice 已查）。
+		k.authNotice(t, s, src)
 	})
 
-	k.step("ACT-MAIL-06 认证失败时生成 needs_input", func(t *testing.T) {
+	k.step("ACT-MAIL-06 认证失败时记为认证或配置失败（不建事项）", func(t *testing.T) {
 		failsAs(t, "mail-auth-fail")
 		k.SetToolCase("mail-1.1.0-new")
 		ev := k.settled(src, "<mid-7@example.com>")

@@ -39,6 +39,19 @@ type Signal struct {
 	// Receipts 只有 receipt_failures 给：逐条列出被拒的命令、退出码与原因码，展示层据原因码说人话、给下一步。
 	// detail 仍是对象 id 列表。
 	Receipts []ReceiptRejection `json:"receipts,omitempty"`
+	// Notices 只有 other_alerts 给：逐条列出动作没能完成的类别码与机制参数、受影响的事项，展示层据类别码说人话、给下一步。
+	// detail 仍是对象 id 列表；升级前的告警没有类别码。
+	Notices []Notice `json:"notices,omitempty"`
+}
+
+// Notice 是 other_alerts 的一条（规则动作失败、运行没拉起）。只含类别码与内核生成的机制参数，不带错误原文。
+type Notice struct {
+	Object  string            `json:"object"`
+	Rule    string            `json:"rule,omitempty"`
+	Code    domain.NoticeCode `json:"code,omitempty"`
+	Params  map[string]string `json:"params,omitempty"`
+	Item    string            `json:"item,omitempty"`
+	Dropped bool              `json:"dropped,omitempty"`
 }
 
 // ReceiptRejection 是 receipt_failures 的一条：只含机制（命令、退出码、稳定的原因码、凭据），不带告警里的原因原文——
@@ -129,11 +142,12 @@ func build(v khealth.View, rejudgeDays int) Report {
 		Source              string `json:"source"`
 		Enabled             bool   `json:"enabled"`
 		ConsecutiveFailures int    `json:"consecutive_failures"`
+		Kind                string `json:"kind,omitempty"` // 最近一次失败的类别：transient、auth_or_config、permanent
 		NeedsInputItem      string `json:"needs_input_item,omitempty"`
 	}
 	srcs := make([]sourceDetail, 0, len(v.SourceFailures))
 	for _, f := range v.SourceFailures {
-		srcs = append(srcs, sourceDetail{f.Source, f.Enabled, f.ConsecutiveFailures, f.NeedsInputItem})
+		srcs = append(srcs, sourceDetail{f.Source, f.Enabled, f.ConsecutiveFailures, f.Kind, f.NeedsInputItem})
 	}
 	queue := func(q khealth.QueueHealth) map[string]any {
 		return map[string]any{"running": q.Running, "queued": q.Queued, "longest_wait_seconds": int64(q.LongestWait.Seconds())}
@@ -199,7 +213,7 @@ func build(v khealth.View, rejudgeDays int) Report {
 		return s
 	}
 	rep := Report{Healthy: v.Healthy(), Signals: []Signal{
-		sig("source_failures", len(v.SourceFailures), "a source's latest pulls are failing (its auth or config failures have a needs_input item), or it is disabled; a successful pull clears it",
+		sig("source_failures", len(v.SourceFailures), "a source's latest pulls are failing (kind says whether it is an auth or config failure), or it is disabled; a successful pull clears it",
 			"source page: open the source and fix its credentials or config", srcs),
 		sig("outcall", len(v.Outcall.Timeouts)+len(v.Outcall.Failures), "an outcall run timed out, or an Agent run failed (did not start, exited non-zero), and it is still the latest run of its target (within 24 hours); its result was not recorded and the item was not changed; queue depth, longest wait and each failure's fault code are in detail",
 			"run detail or the item; fix what the fault code names on the host, then start it again from the item or the schedule; if queues stay backed up, raise the matching quota in run settings", outcall),
@@ -220,8 +234,8 @@ func build(v khealth.View, rejudgeDays int) Report {
 		sig("receipt_failures", len(v.ReceiptFailures), "a receipt or capture was rejected by the kernel (exit 2, 4 or 23), has not succeeded since for that credential and command, and its item has not ended",
 			"audit page; credential or basis problems go to settings, a receipt turned needs_input is handled in decision todos",
 			ids(v.ReceiptFailures, func(r khealth.ReceiptFailure) string { return r.Object })),
-		sig("other_alerts", len(v.OtherAlerts), "a health alert without a dedicated signal was recorded in the last 24 hours, such as a failed rule action, and its object has not been handled since",
-			"audit page; open the object named in detail", ids(v.OtherAlerts, func(a khealth.OtherAlert) string { return a.Object })),
+		sig("other_alerts", len(v.OtherAlerts), "a health alert without a dedicated signal was recorded in the last 24 hours, such as a failed rule action or a run that was not started, and its object has not been handled since; each notice has a stable code",
+			"open the item named in the notice and fix what its code names (connect a model, adjust executors or checkout), then run it again from the schedule; a dropped item can be reopened", ids(v.OtherAlerts, func(a khealth.OtherAlert) string { return a.Object })),
 		warn(sig("stalled_delegations", len(v.StalledDelegations), "a delegated item has had no receipt or progress for longer than delegation_stall_after",
 			"delegations page: nudge, reassign or delegate again", ids(v.StalledDelegations, func(d khealth.StalledDelegation) string { return d.Item }))),
 		warn(sig("clock_lag", len(v.ClockLags), "a timer fired 5 minutes or more after its scheduled time (including timers missed while the kernel was down); clears after an hour without lateness",
@@ -229,6 +243,11 @@ func build(v khealth.View, rejudgeDays int) Report {
 	}}
 	rep = withRejections(rep, v.PackRejections)
 	for i := range rep.Signals {
+		if rep.Signals[i].ID == "other_alerts" {
+			for _, a := range v.OtherAlerts {
+				rep.Signals[i].Notices = append(rep.Signals[i].Notices, Notice{a.Object, a.Rule, a.Code, a.Params, a.Item, a.Dropped})
+			}
+		}
 		if rep.Signals[i].ID == "receipt_failures" {
 			for _, r := range v.ReceiptFailures {
 				rep.Signals[i].Receipts = append(rep.Signals[i].Receipts, ReceiptRejection{r.Object, r.Command, r.Exit, r.Code, r.Reason, r.Credential})

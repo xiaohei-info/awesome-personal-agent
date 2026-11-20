@@ -226,10 +226,12 @@ func TestFlowSourceHTTPJSON(t *testing.T) {
 			t.Fatalf("500 应按临时失败处理（不动游标、不找本人、不停用）: %+v", s)
 		}
 		srv.set(401, "text/plain", "no")
-		f.until("401 生成 needs_input", func() bool { return f.show("src_http").Stats.NeedsInputItem != "" })
+		// 2026-11-20 改写（本人批准的清单第 8 条）：原断言 401 生成 needs_input 事项；认证失败是事件：
+		// 改为统计与诊断页带 kind=auth_or_config、不建事项；游标不动、没有新事件两条不变。
+		f.until("401 记为认证失败", func() bool { return f.show("src_http").Stats.LastFailureKind == "auth_or_config" })
 		s = f.show("src_http")
-		if !f.needsInputOf(s.Stats.NeedsInputItem) || s.Cursor != before.Cursor || len(f.events("src_http")) != n {
-			t.Fatalf("401 应生成 needs_input 且游标不动: %+v", s)
+		if !f.authFailed("src_http") || s.Cursor != before.Cursor || len(f.events("src_http")) != n {
+			t.Fatalf("401 应记为认证失败（不建事项）且游标不动: %+v", s)
 		}
 	})
 }
@@ -278,10 +280,11 @@ func TestFlowSourceDirWatch(t *testing.T) {
 	step("ACT-DIR-02 目录不存在时报告配置失败", func(t *testing.T) {
 		before, n := f.show("src_dir"), len(f.events("src_dir"))
 		f.patchConfig("src_dir", map[string]any{"dir": filepath.Join(dir, "missing")})
-		f.until("生成 needs_input", func() bool { return f.show("src_dir").Stats.NeedsInputItem != "" })
+		// 2026-11-20 改写（清单第 8 条）：原断言生成 needs_input 事项；改为记为认证或配置失败、不建事项；游标不动、无新事件不变。
+		f.until("记为配置失败", func() bool { return f.show("src_dir").Stats.LastFailureKind == "auth_or_config" })
 		s := f.show("src_dir")
-		if !f.needsInputOf(s.Stats.NeedsInputItem) || s.Cursor != before.Cursor || len(f.events("src_dir")) != n {
-			t.Fatalf("应生成 needs_input 且游标不动、无新事件: %+v", s)
+		if !f.authFailed("src_dir") || s.Cursor != before.Cursor || len(f.events("src_dir")) != n {
+			t.Fatalf("应记为配置失败（不建事项）且游标不动、无新事件: %+v", s)
 		}
 	})
 }

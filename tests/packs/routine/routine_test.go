@@ -490,7 +490,23 @@ func TestRunModeGivesInstructionThroughFileInRunDir(t *testing.T) {
 	}
 }
 
-// ACT-RTN-09：access 高于 Web 设置的上限时不以高档位运行：没有 Run，事项转 needs_input 并指出超出上限。
+// dropReason 是规则把这一份事项转 dropped 时写的理由（2026-11-20 起动作失败、没拉起不再挂问题）。
+func (e *env) dropReason(id string) (reason string) {
+	e.t.Helper()
+	_ = e.st.View(bg, func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, id)
+		for _, en := range es {
+			if en.Event.Type == domain.EvItemPhaseChanged && strings.Contains(en.Event.Reason, "作废") {
+				reason = en.Event.Reason
+			}
+		}
+		return err
+	})
+	return reason
+}
+
+// ACT-RTN-09：access 高于 Web 设置的上限时不以高档位运行：没有 Run，事项转 dropped 并指出超出上限。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含"上限"；改为转 dropped、理由含"上限"。
 func TestRunModeNeverRunsAboveThePermissionCap(t *testing.T) {
 	e := newEnv(t)
 	e.harness("receipt") // acc-stub 声明了 read、edit，上限仍是 read
@@ -500,7 +516,7 @@ func TestRunModeNeverRunsAboveThePermissionCap(t *testing.T) {
 	if len(items) != 1 || len(e.runList()) != 0 {
 		t.Fatalf("items %d runs %d", len(items), len(e.runList()))
 	}
-	if it := e.item(items[0].ID); it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "上限") {
+	if it := e.item(items[0].ID); it.Phase != domain.PhaseDropped || it.Ask != nil || !strings.Contains(e.dropReason(it.ID), "上限") {
 		t.Fatalf("item: %s %+v", it.Phase, it.Ask)
 	}
 }
@@ -547,7 +563,8 @@ func TestRunModeWithoutResultNeedsInput(t *testing.T) {
 	}
 }
 
-// run 模式的实例没有任务说明：不拉起运行，事项转 needs_input 并说明缺什么，不用空文件冒充任务说明。
+// run 模式的实例没有任务说明：不拉起运行，事项转 dropped 并说明缺什么，不用空文件冒充任务说明。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含"任务说明"；改为转 dropped、理由含"任务说明"。
 func TestRunModeWithoutInstructionNeedsInput(t *testing.T) {
 	e := newEnv(t)
 	e.harness("silent")
@@ -557,7 +574,7 @@ func TestRunModeWithoutInstructionNeedsInput(t *testing.T) {
 	if len(items) != 1 || len(e.runList()) != 0 {
 		t.Fatalf("items %d runs %d", len(items), len(e.runList()))
 	}
-	if it := e.item(items[0].ID); it.Phase != domain.PhaseNeedsInput || it.Ask == nil || !strings.Contains(it.Ask.Question, "任务说明") {
+	if it := e.item(items[0].ID); it.Phase != domain.PhaseDropped || it.Ask != nil || !strings.Contains(e.dropReason(it.ID), "任务说明") {
 		t.Fatalf("item: %s %+v", it.Phase, it.Ask)
 	}
 }

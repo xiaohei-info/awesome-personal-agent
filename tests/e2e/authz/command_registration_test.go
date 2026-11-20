@@ -80,18 +80,6 @@ func (k *kit) triggerRun() string {
 	return id
 }
 
-// needsInputWith 返回阶段为 needs_input、且其事件理由含 reason 的事项数（任务型没被拉起时事项转 needs_input 并带原因）。
-func (k *kit) needsInputWith(reason string) int {
-	k.t.Helper()
-	n := 0
-	for _, ev := range k.audit(url.Values{"type": {"item.phase_changed"}}) {
-		if strings.Contains(ev.Reason, reason) {
-			n++
-		}
-	}
-	return n
-}
-
 // TestFlowCommandRegistration 按验收文档 flow-command-registration 的顺序执行 ACT-CMD-01..05：
 // 可执行命令只有本人能登记，agent 不能借此在主机上执行任意命令。
 func TestFlowCommandRegistration(t *testing.T) {
@@ -140,7 +128,8 @@ func TestFlowCommandRegistration(t *testing.T) {
 
 		k.triggerRun()
 		const why = "没有已确认的无头运行声明"
-		k.waitFor("任务型因声明未确认没有被拉起", 15*time.Second, func() bool { return k.needsInputWith(why) == 1 })
+		// 2026-11-20 改写：原等待恰一件事项转 needs_input 且理由含 why；没拉起是事件：诊断页恰一条 task_refused 通知、原因含 why。
+		k.waitFor("任务型因声明未确认没有被拉起", 15*time.Second, func() bool { return k.NoticeWith("task_refused", why) == 1 })
 		time.Sleep(time.Second) // 给错误地拉起留出时间
 		if exists(marker) {
 			t.Fatal("声明未确认就执行了")

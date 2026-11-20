@@ -256,13 +256,7 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		forwarded = forwarded && authz.ForwardAllowed(pol, m.Source, m.Sender, m.Verified)
 	}
 
-	itemID := t.Target
-	if itemID == "" {
-		if itemID, err = s.createTarget(ctx, t); err != nil {
-			return Outcome{}, err
-		}
-	}
-	out := Outcome{Item: itemID}
+	out := Outcome{Item: t.Target}
 	cwd := pr.Meta.Cwd
 	if cwd == "" {
 		cwd = selected.Card.Values["cwd"]
@@ -279,7 +273,16 @@ func (s *Service) Launch(ctx context.Context, t Task) (Outcome, error) {
 		out.Reason = noCheckout
 	}
 	if out.Reason != "" {
-		return out, s.needsInput(ctx, itemID, domain.AskTaskRefused, out.Reason)
+		// 没拉起是故障不是问题：不挂问题，交回带类别码的错误，由调用方（规则引擎）记告警（§6.14 第 20 条）。
+		// 复核在建目标事项之前，所以没拉起时不会另建一个空壳；对象是规则建的事项时由规则引擎收掉它。
+		return out, &domain.NotStarted{Code: domain.NoticeTaskRefused, Detail: out.Reason, Item: t.Target}
+	}
+	itemID := t.Target
+	if itemID == "" {
+		if itemID, err = s.createTarget(ctx, t); err != nil {
+			return Outcome{}, err
+		}
+		out.Item = itemID
 	}
 
 	runID, err := newRunID()
@@ -763,10 +766,9 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 	return s.record(ctx, run, it.ID, sm.SessionID, via, failure)
 }
 
-// needsInput 把事项转 needs_input：附类别码与原因，选项含重新运行、改派、放弃（§8.3）。
+// needsInput 把事项转 needs_input：附类别码与原因，选项为我来处理、放弃（§8.3）。
 func (s *Service) needsInput(ctx context.Context, itemID string, code domain.AskCode, reason string) error {
-	ask := map[string]any{"question": "任务型运行未完成：" + reason, "code": code, "params": map[string]string{"detail": reason}, "options": []domain.AskOption{
-		{ID: "rerun", Label: "重新运行"}, {ID: "reassign", Label: "改派"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
+	ask := map[string]any{"question": "任务型运行未完成：" + reason, "code": code, "params": map[string]string{"detail": reason}, "options": domain.HandleOrDrop()}
 	upd, _ := json.Marshal(map[string]any{"id": itemID, "ask": ask, "reason": "task agent failed"})
 	if _, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: "item.update", Input: upd}); err != nil {
 		return err

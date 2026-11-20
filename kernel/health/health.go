@@ -48,13 +48,15 @@ type Options struct {
 	DelegationStallAfter time.Duration
 }
 
-// SourceFailure 是一个来源的失败现状：当前连续失败或已停用（来源页是修复入口；认证失败时带它建的 needs_input 事项）。
+// SourceFailure 是一个来源的失败现状：当前连续失败或已停用（来源页是修复入口）。Kind 是最近一次失败的类别
+// （transient、auth_or_config、permanent）；NeedsInputItem 只出现在升级前认证失败建的事项上。
 // 最近一次拉取成功即不再出现：runner 在恢复时清掉 NeedsInputItem 并结束它建的事项。
 type SourceFailure struct {
 	Source              string
 	Enabled             bool
 	ConsecutiveFailures int
 	LastError           string
+	Kind                string
 	NeedsInputItem      string
 }
 
@@ -95,12 +97,18 @@ const (
 	EndpointGenerate = string(domain.RunGenerate)
 )
 
-// OtherAlert 是没有专属信号的 health.alert（规则动作失败等）。
+// OtherAlert 是没有专属信号的 health.alert（规则动作失败、运行没拉起等）。Code 与 Params 是"动作没能完成"的稳定类别码
+// （domain.NoticeCode）与机制参数，Item 是受影响的事项，Dropped 表示规则建的那一份已被收掉；升级前的告警这几项为空。
 type OtherAlert struct {
-	Seq    int64
-	Object string
-	Reason string
-	at     time.Time
+	Seq     int64
+	Object  string
+	Reason  string
+	Rule    string
+	Code    domain.NoticeCode
+	Params  map[string]string
+	Item    string
+	Dropped bool
+	at      time.Time
 }
 
 // RuleFallback 是一次规则回退 observe 的事件。
@@ -285,7 +293,7 @@ func sourceFailures(tx *store.Tx) ([]SourceFailure, error) {
 			continue
 		}
 		out = append(out, SourceFailure{Source: s.ID, Enabled: s.Enabled, ConsecutiveFailures: st.ConsecutiveFailures,
-			LastError: st.LastError, NeedsInputItem: st.NeedsInputItem})
+			LastError: st.LastError, Kind: st.LastFailureKind, NeedsInputItem: st.NeedsInputItem})
 	}
 	return out, nil
 }
@@ -351,14 +359,17 @@ func alerts(tx *store.Tx, now time.Time, ph PackHealth) (model []ModelIssue, rul
 				continue
 			}
 			var p struct {
-				Kind     string      `json:"kind"`
-				Rule     string      `json:"rule"`
-				Template string      `json:"template"`
-				Command  string      `json:"command"`
-				Exit     int         `json:"exit"`
-				Code     domain.Code `json:"code"`
-				Reason   string      `json:"reason"`
-				Why      string      `json:"why"`
+				Kind     string            `json:"kind"`
+				Rule     string            `json:"rule"`
+				Template string            `json:"template"`
+				Command  string            `json:"command"`
+				Exit     int               `json:"exit"`
+				Code     domain.Code       `json:"code"`
+				Reason   string            `json:"reason"`
+				Why      string            `json:"why"`
+				Params   map[string]string `json:"params"`
+				Item     string            `json:"item"`
+				Dropped  bool              `json:"dropped"`
 			}
 			_ = json.Unmarshal(e.Payload, &p)
 			switch {
@@ -379,7 +390,8 @@ func alerts(tx *store.Tx, now time.Time, ph PackHealth) (model []ModelIssue, rul
 			case e.Reason == RuleFallbackReason:
 				rules = append(rules, RuleFallback{Seq: e.Seq, Rule: p.Rule, At: e.At, object: e.Object})
 			default:
-				other = append(other, OtherAlert{Seq: e.Seq, Object: e.Object, Reason: e.Reason, at: e.At})
+				other = append(other, OtherAlert{Seq: e.Seq, Object: e.Object, Reason: e.Reason, Rule: p.Rule, Code: domain.NoticeCode(p.Code),
+					Params: p.Params, Item: p.Item, Dropped: p.Dropped, at: e.At})
 			}
 		}
 	}

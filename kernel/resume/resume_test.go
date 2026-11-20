@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -467,7 +466,30 @@ func TestOtherResumeFailureIsNotRetried(t *testing.T) {
 	}
 }
 
-// ACT-RES-05：等待续接时 runner=task 的执行者被移出项目名单：不续接，事项转 needs_input，有拒绝记录。
+// refusedNotice 断言续接没通过复核是事件不是问题（2026-11-20，§6.14 第 20 条）：事项停在本人回答后的阶段、
+// 保留本人的回答、不挂新问题；有一条带 resume_refused 类别码、原因含 want 的健康告警指向这件事。
+func (e *env) refusedNotice(id, want string) {
+	e.t.Helper()
+	if it := e.item(id); it.Phase != domain.PhaseOpen || it.Ask == nil || it.Ask.Resolution == nil {
+		e.t.Fatalf("a refused resume changed the item or replaced the answer: %+v", it)
+	}
+	for _, a := range e.ofType(domain.EvHealthAlert) {
+		var p struct {
+			Code   domain.NoticeCode `json:"code"`
+			Params map[string]string `json:"params"`
+			Item   string            `json:"item"`
+		}
+		_ = json.Unmarshal(a.Payload, &p)
+		if a.Object == id && p.Code == domain.NoticeResumeRefused && p.Item == id && strings.Contains(p.Params["detail"], want) {
+			return
+		}
+	}
+	e.t.Fatalf("no resume_refused alert on %s naming %q: %+v", id, want, e.ofType(domain.EvHealthAlert))
+}
+
+// ACT-RES-05：等待续接时 runner=task 的执行者被移出项目名单：不续接，有拒绝记录。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含 "work-host.cli"、选项为 rerun、reassign、drop（本人批准的清单第 2 条）；
+// 续接被拒不再挂问题，改为事项不变、告警原因含 "work-host.cli"。
 func TestExecutorRemovedFromProjectIsRefused(t *testing.T) {
 	e := setup(t)
 	e.harness(true, false)
@@ -480,11 +502,7 @@ func TestExecutorRemovedFromProjectIsRefused(t *testing.T) {
 	if err != nil || out != Refused {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}
-	it := e.item(child)
-	if it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "work-host.cli") ||
-		!slices.Equal([]string{it.Ask.Options[0].ID, it.Ask.Options[1].ID, it.Ask.Options[2].ID}, []string{"rerun", "reassign", "drop"}) {
-		t.Fatalf("item = %+v", it)
-	}
+	e.refusedNotice(child, "work-host.cli")
 	if n := len(e.runList()); n != 1 {
 		t.Fatalf("runs = %d", n)
 	}
@@ -493,7 +511,8 @@ func TestExecutorRemovedFromProjectIsRefused(t *testing.T) {
 	}
 }
 
-// ACT-BGG-09：运行结束后规则切回 observe，再回答：复核不通过，不续接，事项转 needs_input。
+// ACT-BGG-09：运行结束后规则切回 observe，再回答：复核不通过，不续接。
+// 2026-11-20 改写：原断言事项转 needs_input、问题含 "auto"；改为事项不变、告警原因含 "auto"。
 func TestRuleSwitchedBackToObserveIsRefused(t *testing.T) {
 	e := setup(t)
 	e.harness(true, false)
@@ -505,9 +524,7 @@ func TestRuleSwitchedBackToObserveIsRefused(t *testing.T) {
 	if err != nil || out != Refused {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}
-	if it := e.item(id); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "auto") {
-		t.Fatalf("item = %+v", it)
-	}
+	e.refusedNotice(id, "auto")
 	if n := len(e.runList()); n != 1 {
 		t.Fatalf("runs = %d", n)
 	}
@@ -526,9 +543,7 @@ func TestPermissionCapLoweredIsRefused(t *testing.T) {
 	if out, err := e.svc.Resume(bg, id); err != nil || out != Refused {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}
-	if it := e.item(id); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "上限") {
-		t.Fatalf("item = %+v", it)
-	}
+	e.refusedNotice(id, "上限") // 2026-11-20 改写：原断言事项转 needs_input、问题含"上限"
 }
 
 // 不是等待续接的已回答决策：没有后台运行、没有 resume_note、还没回答，都跳过且不改事项。
@@ -594,7 +609,10 @@ func TestAnswerEnqueuesTheResumeRunInTheSameTransaction(t *testing.T) {
 	e.waitResult()
 }
 
-// 复核不通过：同一事务里转 needs_input，回答提交后的第一个消费者就看到新问题；没有入队任何 Run。
+// 复核不通过：拒绝与告警和回答在同一事务里提交，回答提交后的第一个消费者就看到它们；没有入队任何 Run。
+// 2026-11-20 改写：原断言提交后第一时间看到事项转 needs_input、新问题含 "auto"，并能回答新问题（choice rerun）；
+// 续接被拒不再挂问题，改为提交后第一时间看到告警（原因含 "auto"）、事项停在回答后的 open 并保留回答；
+// "版本没有被回调打乱"改由本人随即能照常改这件事来验。
 func TestRefusedAnswerTurnsNeedsInputInTheSameTransaction(t *testing.T) {
 	e := setup(t)
 	e.harness(true, false)
@@ -603,19 +621,21 @@ func TestRefusedAnswerTurnsNeedsInputInTheSameTransaction(t *testing.T) {
 	e.must(owner, "rule.set_mode", map[string]string{"rule": "bgr/event_rules/main", "mode": "observe"})
 	e.svc.Attach(e.x)
 	var phase domain.Phase
-	e.x.OnCommit(func(command.Commit) { phase = e.item(id).Phase })
+	var alerts int
+	e.x.OnCommit(func(command.Commit) { phase, alerts = e.item(id).Phase, len(e.ofType(domain.EvHealthAlert)) })
 	e.must(owner, "decision.answer", map[string]any{"id": id, "choice": "B"})
-	if it := e.item(id); phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "auto") || it.Ask.Resolution != nil {
-		t.Fatalf("phase right after commit = %s, item = %+v", phase, it)
+	if phase != domain.PhaseOpen || alerts == 0 {
+		t.Fatalf("phase right after commit = %s, alerts = %d", phase, alerts)
 	}
+	e.refusedNotice(id, "auto")
 	if n := len(e.runList()); n != 1 {
 		t.Fatalf("runs = %d", n)
 	}
 	if ev := e.ofType(EvRefused); len(ev) != 1 || ev[0].Object != id {
 		t.Fatalf("refused = %+v", ev)
 	}
-	// 本人能回答新问题（版本没有被回调打乱）。
-	e.must(owner, "decision.answer", map[string]any{"id": id, "choice": "rerun"})
+	// 本人随即能照常改这件事（版本没有被回调打乱）。
+	e.must(owner, "item.update", map[string]any{"id": id, "summary": "接着改", "reason": "owner edit"})
 }
 
 func TestNewRequiresDependencies(t *testing.T) {
@@ -641,11 +661,10 @@ func TestFreeTextAnswerAndMissingDeclaration(t *testing.T) {
 	if out, err := e.svc.Resume(bg, root); err != nil || out != Refused {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}
-	if it := e.item(root); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "gone-harness") {
-		t.Fatalf("item = %+v", it)
-	}
+	// 2026-11-20 改写：原断言事项转 needs_input、问题含 "gone-harness"，再回答那张拒绝卡（choice rerun）后复核为 Skipped；
+	// 续接被拒不再挂问题：改为事项不变、告警原因含 "gone-harness"，同一回答再复核为 Skipped（同一回答已处理，不重复拉起）。
+	e.refusedNotice(root, "gone-harness")
 	e.setPolicy(func(p *policy.Policy) { p.DefaultHarness = "" })
-	e.must(owner, "decision.answer", map[string]any{"id": root, "choice": "rerun"})
 	if out, err := e.svc.Resume(bg, root); err != nil || out != Skipped {
 		t.Fatalf("outcome=%s err=%v", out, err)
 	}
