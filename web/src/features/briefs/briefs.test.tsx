@@ -368,9 +368,12 @@ describe("简报页", () => {
     expect(calls.posts).toEqual([]);
     await userEvent.type(form.getByLabelText("要它做的事"), "按本周完成的事写周报草稿");
     await userEvent.selectOptions(form.getByLabelText("Agent 能用什么"), "full");
-    expect(await form.findByText(/超出 Agent 的上限/)).toBeInTheDocument();
+    // 上限只读、写明是谁的上限；超出时说后果并给「去改上限」，落到该 Agent 的页面（界面设计 §4）
+    expect(form.getByText("hermes 的上限：可改文件")).toBeInTheDocument();
+    expect(await form.findByText(/超出 hermes 的上限（可改文件），到点会停下来问你/)).toBeInTheDocument();
+    expect(form.getByRole("link", { name: "去改上限" })).toHaveAttribute("href", expect.stringMatching(/^\/settings\/agents\//));
     await userEvent.selectOptions(form.getByLabelText("Agent 能用什么"), "edit");
-    expect(form.queryByText(/超出 Agent 的上限/)).not.toBeInTheDocument();
+    expect(form.queryByText(/超出 hermes 的上限/)).not.toBeInTheDocument();
     await userEvent.selectOptions(form.getByLabelText("结果写到哪"), "item_and_material");
     await userEvent.click(form.getByRole("button", { name: "安排例行任务" }));
     expect(calls.posts).toEqual([{ body: { pack: "routine", params: { schedule: `CRON_TZ=${browserZone()} 0 9 * * 1`, mode: "run", instruction: "按本周完成的事写周报草稿", access: "edit", output: "item_and_material" } }, csrf: "tok-1" }]);
@@ -381,7 +384,7 @@ describe("简报页", () => {
     const form = within(await screen.findByRole("form", { name: "新的例行任务" }));
     await userEvent.click(form.getByRole("radio", { name: "让 Agent 去做" }));
     expect(await form.findByText(/还没设默认 Agent/)).toBeInTheDocument();
-    expect(form.getAllByRole("link", { name: "去设置" })[0]).toHaveAttribute("href", "/settings/agents");
+    expect(form.getAllByRole("link", { name: "去设置" })[0]).toHaveAttribute("href", "/settings/agents#roles");
   });
 
   it("修改例行任务：按实例预填；定时没动就原样带回，改了几点仍用原来的时区；PATCH 带 project 与整份 params", async () => {

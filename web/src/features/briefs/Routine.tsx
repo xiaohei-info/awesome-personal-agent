@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { EntityPick } from "../../app/names";
 import { PERM } from "../../app/ids";
-import { Pick } from "../../app/values";
+import { Pick, useLabel } from "../../app/values";
+import { Go } from "../../app/page";
 import { DAYS, browserZone, parseCron, toCron, type Days } from "./schedule";
 import { AgentPick, type AgentView } from "../settings-agents/AgentPick";
 import { strings } from "./strings";
@@ -21,14 +21,14 @@ type Output = (typeof OUTPUTS)[number];
 
 export interface Instance { id: string; pack: string; agent_ready?: boolean; agent_reason?: string; project?: string; params: { agent_id?: string; schedule?: string; projects?: string[]; mode?: string; title?: string; instruction?: string; access?: string; output?: string }; enabled: boolean }
 
-function useHostCap(agent: string): { host: string; cap: string } | null {
+function useHostCap(agent: string): { host: string; id: string; cap: string } | null {
   const { api } = useSession();
-  const [v, setV] = useState<{ host: string; cap: string } | null>(null);
+  const [v, setV] = useState<{ host: string; id: string; cap: string } | null>(null);
   useEffect(() => {
     let active = true;
     setV(null);
     api.get<AgentView>("/agents?rule=routine%2Fclock_rules%2Fscheduled-routine&schedule=" + encodeURIComponent(agent)).then(
-      view => { if (active) setV({ host: view.selected.agent_name ?? "", cap: view.selected.permission_cap ?? "read" }); },
+      view => { if (active) setV({ host: view.selected.agent_name ?? "", id: view.selected.agent_id ?? "", cap: view.selected.permission_cap ?? "read" }); },
       () => {},
     );
     return () => { active = false; };
@@ -39,6 +39,7 @@ function useHostCap(agent: string): { host: string; cap: string } | null {
 /** 新建（无 edit）或修改一个实例；修改时按实例预填，调用方用 key 换实例。 */
 export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDone: (i: Instance) => void; onCancel?: () => void }) {
   const t = useT(strings);
+  const label = useLabel();
   const { api } = useSession();
   const [agent,setAgent] = useState(edit?.params.agent_id ?? "");
   const host = useHostCap(agent);
@@ -105,8 +106,10 @@ export function RoutineForm({ edit, onDone, onCancel }: { edit?: Instance; onDon
         <>
           <AgentPick value={agent} onChange={setAgent} rule="routine/clock_rules/scheduled-routine" />
           <label>{t.access}<Pick k="perm" value={access} onChange={setAccess} ids={[...PERM]} /></label>
-          {host && !host.host && <p className="sub">{t.noHost} <Link to="/settings/agents">{t.setHost}</Link></p>}
-          {over && <p className="sub">{t.overCap} <Link to="/settings/agents">{t.setHost}</Link></p>}
+          {/* 权限上限只在该 Agent 页的后台权限里改（界面设计 §4）；这里只读，超出时说清楚并给去改的落点。 */}
+          {host?.host && <p className="sub">{t.capOf(host.host, label("perm", host.cap))}</p>}
+          {host && !host.host && <p className="sub">{t.noHost} <Go to="/settings/agents#roles">{t.setHost}</Go></p>}
+          {over && host && <p className="sub">{t.overCapOf(host.host, label("perm", host.cap))} <Go to={"/settings/agents/" + encodeURIComponent(host.id)}>{t.raiseCap}</Go></p>}
           <label>{t.output}
             <select value={output} onChange={(e) => setOutput(e.target.value as Output)}>
               {OUTPUTS.map((o) => <option key={o} value={o}>{t.outputs[o]}</option>)}

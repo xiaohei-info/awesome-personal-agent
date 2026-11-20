@@ -292,3 +292,45 @@ describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
     expect(screen.getByRole("button", { name: /^按推荐处理 \d+ 条$/ })).toBeDisabled();
   });
 });
+
+// 主流程路径一（界面设计 §7）：建议卡上直接「接受并交给 Agent」。
+describe("接受并交给 Agent", () => {
+  const RULE = "background-run/event_rules/handle-labelled";
+  function wrap(mode: string, ready: boolean) {
+    const s = server([{ ...prop("a"), version: 4, tags: ["mine"] } as P, prop("b")]);
+    const order: string[] = [];
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      const method = init.method ?? "GET";
+      if (url === "/v1/rules") return json(200, { rules: [{ key: RULE, mode }] });
+      if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: ready ? { agent_id: "agt_1", agent_name: "小黑" } : {}, reason: ready ? "" : "还没选主 Agent" });
+      if (method !== "GET") order.push(method + " " + url + (init.body ? " " + init.body : "") + ((init.headers as Record<string, string>)?.["If-Match"] ? " If-Match:" + (init.headers as Record<string, string>)["If-Match"] : ""));
+      if (method === "PATCH") return json(200, { id: "a", version: 5 });
+      return s.impl(url, init);
+    }) as unknown as typeof fetch;
+    return { impl, order };
+  }
+
+  it("前提都满足：先给建议加上「交给 Agent」再接受；卡片收成回执，链到事项的 Agent 处理", async () => {
+    const w = wrap("auto", true);
+    mount(w.impl);
+    const card = (await screen.findByText("建议 a")).closest("article")!;
+    await waitFor(() => expect(within(card).getByRole("button", { name: "接受并交给 Agent" })).toHaveClass("primary"));
+    await userEvent.click(within(card).getByRole("button", { name: "接受并交给 Agent" }));
+    const receipt = (await screen.findByText(/已接受 · 已交给 小黑，排队中/)).closest("li")!;
+    expect(within(receipt).getByRole("link", { name: "查看事项" })).toHaveAttribute("href", "/items/a#agent");
+    expect(w.order).toEqual([
+      'PATCH /v1/items/a {"tags":["mine","agent-ok"],"reason":"交给 Agent 处理"} If-Match:4',
+      "POST /v1/items/a/accept {}",
+    ]);
+  });
+
+  it("前提没满足：只接受、不交出，回执写明，并列出还差的几步", async () => {
+    const w = wrap("observe", true);
+    mount(w.impl);
+    const card = (await screen.findByText("建议 a")).closest("article")!;
+    await userEvent.click(within(card).getByRole("button", { name: "接受并交给 Agent" }));
+    const receipt = (await screen.findByText(/已接受，还没交给 Agent/)).closest("li")!;
+    expect(within(receipt).getByRole("link", { name: "去打开" })).toHaveAttribute("href", "/rules#rule-" + encodeURIComponent(RULE));
+    expect(w.order).toEqual(["POST /v1/items/a/accept {}"]);
+  });
+});

@@ -6,7 +6,8 @@ import { common } from "../../app/strings";
 import { codeText, lang, locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
 import { Val, useLabel } from "../../app/values";
-import { useNames } from "../../app/names";
+import { useItemTitle, useNames } from "../../app/names";
+import { Link } from "react-router-dom";
 
 // 形状对应 GET /v1/items?kind=delegation、GET /v1/audit/events?type=delegation.reported、GET /v1/executors?project=、
 // PATCH /v1/items/{id}（改派，If-Match）、POST /v1/delegations（重新委派）。
@@ -83,7 +84,7 @@ function Row({ c, report, kinds, stalled, onDone }: { c: Child; report?: Step; k
   };
 
   return (
-    <article aria-label={c.title}>
+    <article aria-label={c.title} id={"d-" + c.id}>
       <h3>{c.title}</h3>
       <p className="meta">
         {t.executor}
@@ -137,6 +138,27 @@ function Row({ c, report, kinds, stalled, onDone }: { c: Child; report?: Step; k
   );
 }
 
+interface Run { id: string; target: string; category: string; state: string; agent_name?: string; started_at?: string; finished_at?: string }
+const FLIGHT = new Set(["queued", "running"]);
+
+/** Agent 在后台做的一件事：按事项列最近一次运行——谁在做、排队还是在做、做完没有。点进去是事项详情的 Agent 处理。 */
+function RunRow({ run }: { run: Run }) {
+  const t = useT(strings);
+  const label = useLabel();
+  const title = useItemTitle(run.target);
+  const at = run.finished_at ?? run.started_at;
+  return (
+    <li className="act-row">
+      <div>
+        <Link to={"/items/" + encodeURIComponent(run.target) + "#agent"}>{title}</Link>
+        <span className="sub">{[run.agent_name, label("runState", run.state), at && new Date(at).toLocaleString(locale())].filter(Boolean).join(" · ")}</span>
+      </div>
+    </li>
+  );
+}
+
+// Agent 工作 › 进行中（界面设计 §3.5）：我交出去的事现在怎样。上面是 APA 在后台启动 Agent 做的事（GET /v1/runs，按事项取最近一次，
+// 在途的在前），下面是派给执行者的活（委派子事项）。判定都在服务端，本页只读并提供改派、重新委派。
 export function DelegationPage() {
   const { api } = useSession();
   const t = useT(strings);
@@ -144,6 +166,7 @@ export function DelegationPage() {
   const [reports, setReports] = useState<Map<string, Step>>(new Map());
   const [kinds, setKinds] = useState<Map<string, string>>(new Map());
   const [stalled, setStalled] = useState<Set<string>>(new Set());
+  const [runs, setRuns] = useState<Run[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -169,6 +192,11 @@ export function DelegationPage() {
   }, [load]);
   // 执行者种类与「久无回音」只是显示上的补充：取不到就不显示，不挡列表。久无回音的判定在内核（健康信号 stalled_delegations）。
   useEffect(() => {
+    api.get<{ runs: Run[] }>("/runs?category=background,task&limit=100").then((r) => {
+      const latest = new Map<string, Run>();
+      for (const x of r.runs) latest.set(x.target, x); // 升序，后者覆盖前者
+      setRuns([...latest.values()].reverse().sort((a, b) => Number(FLIGHT.has(b.state)) - Number(FLIGHT.has(a.state))));
+    }, () => {});
     api.get<{ executors: Executor[] }>("/executors").then((r) => setKinds(new Map(r.executors.map((x) => [x.id, x.kind]))), () => {});
     api.get<{ signals: { id: string; detail?: unknown }[] }>("/health").then((r) => {
       const d = r.signals.find((s) => s.id === "stalled_delegations")?.detail;
@@ -184,6 +212,13 @@ export function DelegationPage() {
           {error} <button onClick={load}>{t.retry}</button>
         </div>
       )}
+      {runs.length > 0 && (
+        <section aria-label={t.background} className="panel">
+          <h2>{t.background}</h2>
+          <ul className="rows">{runs.map((r) => <RunRow key={r.id} run={r} />)}</ul>
+        </section>
+      )}
+      <h2>{t.delegated}</h2>
       {items === null ? (
         !error && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (

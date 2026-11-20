@@ -89,7 +89,7 @@ describe("事项列表与详情（ACT-ITEM-01）", () => {
   it("CLI 建的事项在 Web 可见：标题、阶段 open，经过里一句「Agent（凭据名）· 新建了」", async () => {
     mount(ledger().impl);
     await userEvent.click(await screen.findByRole("link", { name: "item-a" }));
-    expect(await screen.findByText("阶段：进行中")).toBeInTheDocument();
+    expect(await screen.findByText(/现在：进行中/)).toBeInTheDocument();
     const tl = await timeline();
     expect(tl.getAllByRole("listitem")).toHaveLength(1);
     expect(tl.getByRole("listitem")).toHaveTextContent(/^Agent（del-1）新建了/);
@@ -140,12 +140,12 @@ describe("转阶段", () => {
     await userEvent.type(screen.getByLabelText("原因"), "等报价");
     await userEvent.click(screen.getByRole("button", { name: "转阶段" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("waiting phase requires waiting_on");
-    expect(screen.getByText("阶段：进行中")).toBeInTheDocument();
+    expect(screen.getByText(/现在：进行中/)).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText("等待对象类别"), "external");
     await userEvent.type(screen.getByLabelText("等待对象"), "报价单");
     await userEvent.click(screen.getByRole("button", { name: "转阶段" }));
-    expect(await screen.findByText("阶段：等待中")).toBeInTheDocument();
+    expect(await screen.findByText(/现在：等待中/)).toBeInTheDocument();
     expect(l.calls.filter((c) => c.path.endsWith("/transition")).at(-1)!.body).toEqual({ to: "waiting", reason: "等报价", waiting_on: { kind: "external", ref: "报价单" } });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });

@@ -9,6 +9,7 @@ import { entryOf } from "../../app/values";
 import { RULE_MODE } from "../../app/ids";
 import { strings } from "./strings";
 
+// 自动规则 › 规则（界面设计 §3.1、§6.1）：模式、用哪个 Agent、在哪里做都是即改即存，旁边写「已保存」；用哪个 Agent 默认收起成一行。
 // 形状对应 GET /v1/rules（含 class）、PATCH /v1/rules/{id}/mode（附录 B.2）、GET /v1/packs 与 GET /v1/audit/events（§14.8）。
 // 谁能切、切到什么、观察记录怎么产生都由服务端判定；本页只搬运选择，被拒绝时模式保持原值。只改模式，不编辑规则内容。
 // 以 Agent 本人身份运行的规则（runner=main_session）另可覆盖 Agent 在哪里做：写 /settings/policy 的 main_session_launch.by_rule，
@@ -109,11 +110,12 @@ export function RulesPage() {
   const [ruleAgents, setRuleAgents] = useState<Record<string,string>>({});
   const [version, setVersion] = useState<number>();
   const [launch, setLaunch] = useState<Launch | null>(null);
+  const [saved, setSaved] = useState<string | null>(null); // 即改即存：刚存好的那条规则旁短暂写「已保存」
   useEffect(() => { api.get<{ version:number; rule_agent?:Record<string,string>; main_session_launch?: Launch }>("/settings/policy").then((p) => {setRuleAgents(p.rule_agent ?? {}); setVersion(p.version); setLaunch(p.main_session_launch ?? {});}, () => setLaunch(null)); }, [api]);
 
   async function setAgent(key: string, id: string) {
     const next = {...ruleAgents}; if (id) next[key] = id; else delete next[key];
-    try {const p = await api.put<{rule_agent: Record<string,string>; version:number}>("/settings/policy", {rule_agent:next, version}); setRuleAgents(p.rule_agent ?? {});setVersion(p.version);} catch(e) {setError(e);}
+    try {const p = await api.put<{rule_agent: Record<string,string>; version:number}>("/settings/policy", {rule_agent:next, version}); setRuleAgents(p.rule_agent ?? {});setVersion(p.version);setSaved(key);} catch(e) {setError(e);}
   }
   async function setRuleLaunch(r: Rule, v: string) {
     const by_rule = { ...(launch?.by_rule ?? {}) };
@@ -123,6 +125,7 @@ export function RulesPage() {
       const next = await api.put<{ main_session_launch: Launch; version:number }>("/settings/policy", { main_session_launch: { ...launch, by_harness: launch?.by_harness ?? {}, by_rule } });
       setLaunch(next.main_session_launch);setVersion(next.version);
       setError(null);
+      setSaved(r.key);
     } catch (e) {
       setError(e); // 选择框的值仍是服务端未改动的原值
     }
@@ -133,6 +136,7 @@ export function RulesPage() {
       const next = await api.patch<Rule>(`/rules/${encodeURIComponent(r.key)}/mode`, { mode });
       setRules((l) => l!.map((x) => (x.key === r.key ? { ...x, ...next } : x)));
       setError(null);
+      setSaved(r.key);
     } catch (e) {
       setError(e); // 单选的值仍是 r.mode，即服务端未改动的原模式
     }
@@ -157,7 +161,7 @@ export function RulesPage() {
             {list.map((r) => {
               const name = nameOf(r);
               return (
-                <li key={r.key} className="rule">
+                <li key={r.key} className="rule" id={"rule-" + r.key}>
                   <div>
                     <strong>{name}</strong>
                     <p className="sub">
@@ -165,10 +169,13 @@ export function RulesPage() {
                       {raw && <code className="raw-id">{r.key}</code>}
                     </p>
                     {r.mode === "observe" && <Trial rule={r} name={name} />}
-                    {r.runner && <AgentPick inheritRule={false} main={r.runner === "main_session"} value={ruleAgents[r.key] ?? ""} onChange={id => void setAgent(r.key,id)} />}
+                    {r.runner && <AgentPick collapsed inheritRule={false} main={r.runner === "main_session"} value={ruleAgents[r.key] ?? ""} onChange={id => void setAgent(r.key,id)} />}
                     {r.runner === "main_session" && launch && <LaunchPick name={name} value={launch.by_rule?.[r.key] ?? ""} onChange={(v) => void setRuleLaunch(r, v)} />}
                   </div>
-                  <Modes id={r.key} name={name} value={r.mode} onChange={(m) => void setMode(r, m)} />
+                  <div>
+                    <Modes id={r.key} name={name} value={r.mode} onChange={(m) => void setMode(r, m)} />
+                    {saved === r.key && <span role="status" className="saved-note">{t.saved()}</span>}
+                  </div>
                 </li>
               );
             })}

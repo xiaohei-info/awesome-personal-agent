@@ -14,7 +14,8 @@ import { Pick, Val, useLabel } from "../../app/values";
 import { ErrorNote } from "../../app/errors";
 import { EntityPick, useItemTitle, useNames } from "../../app/names";
 import { ViewTable, useViews } from "./TypeViews";
-import { HandOff, tagName } from "./HandOff";
+import { AgentBlock, tagName } from "./HandOff";
+import { QuestionCard, useAnswer, type DecisionItem } from "../decisions/DecisionsPage";
 import { TraceView } from "../trace/Trace";
 import { ItemMaterials, MATERIAL_RELATIONS, type MaterialRel, type MaterialRow } from "./ItemMaterials";
 import { linkTitle, readPrefill, registrable, withLink, type Vault } from "./prefill";
@@ -37,6 +38,7 @@ export interface Item {
   body?: string;
   spec?: { sections?: { project?: string; title?: string; body: string }[] };
   waiting_on?: { kind: string; ref: string };
+  ask?: DecisionItem["ask"];
 }
 interface Relation { type: string; from: string; to: string }
 export interface Step {
@@ -183,6 +185,7 @@ function ItemDetail() {
   const projectName = useNames("project");
   const credential = useNames("credential");
   const [editing, setEditing] = useState(false);
+  const post = useAnswer(setActErr);
 
   const load = useCallback(async () => {
     const eid = encodeURIComponent(id);
@@ -226,23 +229,43 @@ function ItemDetail() {
   const path = "/items/" + encodeURIComponent(id);
   const ifMatch = { "If-Match": String(item.version) };
 
+  const answer = async (iid: string, body: { choice: string } | { text: string }) => {
+    const ok = await post(iid, body);
+    await load().catch(() => undefined);
+    return ok;
+  };
+  const ended = ["done", "dropped"].includes(item.phase);
+
+  // 自上而下（界面设计 §3.5）：①标题、状态一句与随阶段变化的主操作（等你决定时直接是问题卡）②Agent 处理 ③正文
+  // ④进展与经过 ⑤「更多操作」折叠：状态标签、截止、转阶段、关联、材料、关联键。
   return (
     <main>
       <p className="eyebrow"><Link to="..">{t.back}</Link></p>
       <h1>{item.title}</h1>
-      <div className="panel facts">
-        <p>{t.phase(label("phase", item.phase))}</p>
-        <p>{t.label(item.status_label || t.notSet)}</p>
-        <p>{t.deadline(item.deadline ? new Date(item.deadline).toLocaleString(locale()) : t.notSet)}</p>
-        {item.project ? <p>{t.project(projectName(item.project))}</p> : null}
-        {item.planned_for ? <p>{t.planned(item.planned_for)}</p> : null}
-        {item.tags?.some((x) => x !== HANDOFF_TAG) ? <p>{t.tags(item.tags.filter((x) => x !== HANDOFF_TAG).join(t.listSep))}</p> : null}
-      </div>
+      <p className="lede">
+        {[t.phaseNow(label("phase", item.phase)), item.project && projectName(item.project), item.deadline && t.due(new Date(item.deadline).toLocaleString(locale())), item.planned_for && t.planned(item.planned_for)].filter(Boolean).join(" · ")}
+      </p>
+      {actErr != null && <ErrorNote error={actErr} />}
+      {item.phase === "needs_input" && item.ask && !item.ask.resolution && (
+        <QuestionCard item={item as DecisionItem} onAnswer={answer} inItem />
+      )}
+      {item.phase === "proposed" && (
+        <div className="actions">
+          <button type="button" className="primary" onClick={() => act(() => api.post(path + "/accept", {}))}>{t.accept}</button>
+          <button type="button" onClick={() => act(() => api.post(path + "/dismiss", {}))}>{t.dismiss}</button>
+        </div>
+      )}
+      {item.phase === "open" && (
+        <div className="actions">
+          <button type="button" className="primary" onClick={() => act(() => api.post(path + "/transition", { to: "done", reason: t.doneReason }, ifMatch))}>{t.done}</button>
+        </div>
+      )}
+      {item.kind === "task" && !ended && (
+        <AgentBlock key={"h" + item.version} item={item} onAgent={(aid) => act(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
+      )}
+
       {item.body ? <Markdown source={item.body} /> : null}
       {item.kind === "brief" && <BriefBody spec={item.spec} />}
-      {actErr != null && <ErrorNote error={actErr} />}
-
-      <h2>{t.edit}</h2>
       {editing ? (
         <ContentForm
           initial={{ title: item.title, body: item.body ?? "" }}
@@ -253,37 +276,6 @@ function ItemDetail() {
       ) : (
         <p><button type="button" onClick={() => setEditing(true)}>{t.edit}</button></p>
       )}
-      {item.kind === "task" && !["done", "dropped"].includes(item.phase) && (
-        <HandOff key={"h" + item.version} item={item} onAgent={id => act(() => api.patch(path, { preferred_agent_id:id, reason:t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
-      )}
-      <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
-      <DeadlineForm key={"d" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { deadline: v }, ifMatch))} />
-      <TransitionForm key={"t" + item.version} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />
-
-      <section aria-label={t.relationsLabel}>
-        <h2>{t.relations}</h2>
-        <ul aria-label={t.relations} className="rows">
-          {d.relations.filter((r) => !grouped(r, item.id)).map((r, n) => {
-            const out = r.from === item.id;
-            const other = out ? r.to : r.from;
-            const type = label("relation", r.type);
-            const to = isMaterialId(other) ? "/materials?id=" + encodeURIComponent(other) : "../" + encodeURIComponent(other);
-            return <li key={n}>{out ? `${type} →` : `← ${type}`} <Link to={to}>{isMaterialId(other) ? other : <ItemTitle id={other} />}</Link></li>;
-          })}
-        </ul>
-        <RelateForm others={d.others} onSubmit={(b) => act(() => api.post(path + "/relations", b))} />
-      </section>
-
-      <ItemMaterials rels={d.materials} onRemove={(r) => act(() => api.post(path + "/relations", { to: r.to, type: r.type, remove: true }))} />
-
-      {/* 关联键是来源线程或对象的标识（§9.4），平时用不到，收在高级里。 */}
-      <details aria-label={t.sourcesLabel}>
-        <summary>{t.advancedKeys}</summary>
-        <ul aria-label={t.keys} className="rows">
-          {d.keys.map((k, n) => <li key={n}>{k.key}</li>)}
-        </ul>
-        <KeyForm key={"k" + item.version} onSubmit={(key) => act(() => api.post(path + "/correlation-keys", { key }, ifMatch))} />
-      </details>
 
       <AttachedMessages itemId={id} />
 
@@ -301,6 +293,43 @@ function ItemDetail() {
         <h2>{t.timeline}</h2>
         <TraceView path={path + "/trace"} rev={item.version} />
       </section>
+
+      <details className="panel" aria-label={t.moreActions}>
+        <summary>{t.moreActions}</summary>
+        <div className="panel facts">
+          <p>{t.label(item.status_label || t.notSet)}</p>
+          <p>{t.deadline(item.deadline ? new Date(item.deadline).toLocaleString(locale()) : t.notSet)}</p>
+          {item.tags?.some((x) => x !== HANDOFF_TAG) ? <p>{t.tags(item.tags.filter((x) => x !== HANDOFF_TAG).join(t.listSep))}</p> : null}
+        </div>
+        <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
+        <DeadlineForm key={"d" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { deadline: v }, ifMatch))} />
+        <TransitionForm key={"t" + item.version} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />
+
+        <section aria-label={t.relationsLabel}>
+          <h2>{t.relations}</h2>
+          <ul aria-label={t.relations} className="rows">
+            {d.relations.filter((r) => !grouped(r, item.id)).map((r, n) => {
+              const out = r.from === item.id;
+              const other = out ? r.to : r.from;
+              const type = label("relation", r.type);
+              const to = isMaterialId(other) ? "/materials?id=" + encodeURIComponent(other) : "../" + encodeURIComponent(other);
+              return <li key={n}>{out ? `${type} →` : `← ${type}`} <Link to={to}>{isMaterialId(other) ? other : <ItemTitle id={other} />}</Link></li>;
+            })}
+          </ul>
+          <RelateForm others={d.others} onSubmit={(b) => act(() => api.post(path + "/relations", b))} />
+        </section>
+
+        <ItemMaterials rels={d.materials} onRemove={(r) => act(() => api.post(path + "/relations", { to: r.to, type: r.type, remove: true }))} />
+
+        {/* 关联键是来源线程或对象的标识（§9.4），平时用不到，收在高级里。 */}
+        <details aria-label={t.sourcesLabel}>
+          <summary>{t.advancedKeys}</summary>
+          <ul aria-label={t.keys} className="rows">
+            {d.keys.map((k, n) => <li key={n}>{k.key}</li>)}
+          </ul>
+          <KeyForm key={"k" + item.version} onSubmit={(key) => act(() => api.post(path + "/correlation-keys", { key }, ifMatch))} />
+        </details>
+      </details>
     </main>
   );
 }

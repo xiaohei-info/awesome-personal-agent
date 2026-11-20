@@ -9,10 +9,16 @@ import { ErrorNote } from "../../app/errors";
 import { strings } from "./strings";
 import { useNames } from "../../app/names";
 import { Val } from "../../app/values";
+import { HANDOFF_TAG } from "../../app/ids";
+import { Prereqs } from "../../app/Prereqs";
+import { handoffPrereqs, useHandoff } from "../items/HandOff";
+import { strings as itemStrings } from "../items/strings";
 
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。是否可接受/丢弃、授权与只认第一次处理都在服务端。
 export interface Proposal {
   id: string;
+  version?: number;
+  tags?: string[];
   title: string;
   summary?: string;
   priority?: string;
@@ -22,12 +28,14 @@ export interface Proposal {
   proposal?: { recommend?: "accept" | "attach" | "dismiss"; attach_to?: string; reason?: string; low_confidence: boolean; sources?: string[] };
 }
 
-type Action = "accept" | "dismiss" | "attach";
+type Action = "accept" | "dismiss" | "attach" | "handoff";
+/** 处理完的一行回执：说清结果，并给去处（界面设计 §5.2、§7 路径一）。 */
+interface Receipt { id: string; title: string; text: string; to?: string; missing?: boolean }
 interface BatchResult { id: string; do: string; ok: boolean; why?: string }
 
 
 
-function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejection?: Rejection; candidates: () => Promise<Proposal[]>; onAct: (id: string, action: Action, body: object) => Promise<void> }) {
+function Card({ item, rejection, candidates, onAct, ready }: { item: Proposal; rejection?: Rejection; candidates: () => Promise<Proposal[]>; onAct: (id: string, action: Action, body: object) => Promise<void>; ready: boolean }) {
   const t = useT(strings);
   const [mode, setMode] = useState<"dismiss" | "attach" | null>(null);
   const [reason, setReason] = useState("");
@@ -83,11 +91,12 @@ function Card({ item, rejection, candidates, onAct }: { item: Proposal; rejectio
           ) : (
             <span>{t.sources(0)}</span>
           )}
-          {p.low_confidence && <> · <strong>{t.lowConfidence}</strong></>}
+          {p.low_confidence && <> · <strong title={t.lowConfidenceWhy}>{t.lowConfidence}</strong> <span className="sub">{t.lowConfidenceWhy}</span></>}
         </p>
       )}
       <RejectionNote rejection={rejection} what="handle" />
       <div className="actions">
+        <button disabled={busy} className={ready ? "primary" : undefined} onClick={() => act("handoff", {})}>{t.acceptHandoff}</button>
         <button disabled={busy} onClick={() => act("accept", {})}>{t.do.accept}</button>
         <button disabled={busy} onClick={openAttach}>{t.do.attach}</button>
         <button disabled={busy} onClick={() => setMode("dismiss")}>{t.do.dismiss}</button>
@@ -133,6 +142,11 @@ export function ProposalsPage() {
   const [confirming, setConfirming] = useState(false);
   const [batching, setBatching] = useState(false);
   const [outcome, setOutcome] = useState<{ done: number; skipped: { title: string; why: string }[] } | null>(null);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const it = useT(itemStrings);
+  const handoff = useHandoff();
+  const pre = handoffPrereqs(it, handoff, true);
+  const ready = pre.every((x) => x.ok);
 
   const load = useCallback(
     () =>
@@ -163,10 +177,24 @@ export function ProposalsPage() {
     [api],
   );
 
+  // 处理完收成一行回执。「接受并交给 Agent」先给这条建议加上「交给 Agent」再接受：事项进入进行中时带着标记，规则得以触发；
+  // 前提没满足时只接受、不交出，回执写明，下面列出还差的几步（只是两个现有接口，判定都在服务端）。
   const act = async (id: string, action: Action, body: object) => {
     setError(null);
+    const item = (items ?? []).find((i) => i.id === id);
+    const title = item?.title ?? id;
+    const path = "/items/" + encodeURIComponent(id);
     try {
-      await api.post("/items/" + encodeURIComponent(id) + "/" + action, body);
+      if (action === "handoff") {
+        if (ready) await api.patch(path, { tags: [...(item?.tags ?? []).filter((x) => x !== HANDOFF_TAG), HANDOFF_TAG], reason: it.handoff }, item?.version ? { "If-Match": String(item.version) } : undefined);
+        await api.post(path + "/accept", {});
+        const who = handoff.preview?.selected?.agent_name;
+        setReceipts((r) => [...r, { id, title, to: "/items/" + encodeURIComponent(id) + "#agent", text: ready ? t.handedTo(who || t.agent) : t.acceptedNotHanded, missing: !ready }]);
+      } else {
+        await api.post(path + "/" + action, body);
+        const target = action === "attach" ? (body as { to: string }).to : id;
+        setReceipts((r) => [...r, { id, title, text: t.did[action], to: action === "dismiss" ? undefined : "/items/" + encodeURIComponent(target) }]);
+      }
     } catch (e) {
       setError(e); // 含 409：已有人先处理 / 目标已终结，刷新后以服务端为准
     }
@@ -244,6 +272,16 @@ export function ProposalsPage() {
           )}
         </div>
       )}
+      {receipts.length > 0 && (
+        <ul className="rows" aria-label={t.receipts}>
+          {receipts.map((r) => (
+            <li key={r.id} role="status">
+              {r.title}{t.colon}{r.text}{r.to && <> · <Link to={r.to}>{t.seeItem}</Link></>}
+              {r.missing && <Prereqs label={it.prereqs} items={pre} />}
+            </li>
+          ))}
+        </ul>
+      )}
       {items === null ? (
         error == null && <p role="status">{t.loading}</p>
       ) : items.length === 0 ? (
@@ -280,7 +318,7 @@ export function ProposalsPage() {
             )}
           </div>
           {shown.map((i) => (
-            <Card key={i.id} item={i} rejection={rejections[i.id]} candidates={candidates} onAct={act} />
+            <Card key={i.id} item={i} rejection={rejections[i.id]} candidates={candidates} onAct={act} ready={ready} />
           ))}
         </>
       )}

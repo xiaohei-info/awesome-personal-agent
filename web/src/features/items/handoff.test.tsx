@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ const RULE = "background-run/event_rules/handle-labelled";
 function server(o: { mode?: string; declared?: boolean; items?: any[] } = {}) {
   const items = o.items ?? [{ id: "i1", version: 1, kind: "task", phase: "proposed", title: "修复登录", tags: ["mine"] }];
   const patches: { body: any; ifMatch: string | null }[] = [];
+  const posts: string[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     const h = (init.headers ?? {}) as Record<string, string>;
@@ -21,6 +22,7 @@ function server(o: { mode?: string; declared?: boolean; items?: any[] } = {}) {
     if (url === "/v1/items" || url.startsWith("/v1/items?")) return json(200, { items });
     if (/\/messages$/.test(url)) return json(200, { messages: [] });
     if (url.endsWith("/trace")) return json(200, { entries: [] });
+    if (url.endsWith("/start") && method === "POST") { posts.push(url); return json(202, { id: "i1" }); }
     const it = items.find((i) => url === "/v1/items/" + i.id);
     if (!it) return json(404, { code: "not_found", why: "no item", next: "" });
     if (method === "PATCH") {
@@ -31,7 +33,7 @@ function server(o: { mode?: string; declared?: boolean; items?: any[] } = {}) {
     }
     return json(200, { item: it, relations: [] });
   }) as unknown as typeof fetch;
-  return { impl, patches, items };
+  return { impl, patches, items, posts };
 }
 
 function mount(s: ReturnType<typeof server>, path = "/items/i1") {
@@ -73,21 +75,25 @@ describe("事项 › 交给 Agent", () => {
     expect(screen.queryByRole("checkbox", { name: "交给 Agent 处理" })).not.toBeInTheDocument();
   });
 
+  const RULE_AT = "/rules#rule-" + encodeURIComponent(RULE);
   it.each([
-    ["规则关着", { mode: "off", declared: true }, "自动开工没开", "/rules"],
-    ["试运行", { mode: "observe", declared: true }, "试运行中，只记录", "/rules"],
-    ["Agent 还不能在后台运行", { mode: "auto", declared: false }, "会在允许 Agent 后台运行后开工", "/settings/agents"],
-  ])("开着但前提没满足（%s）：旁边一句状态，链到对应设置", async (_n, o, text, href) => {
+    ["规则关着", { mode: "off", declared: true }, "「我交给 Agent 的事自动开始」关着", "去打开", RULE_AT],
+    ["试运行", { mode: "observe", declared: true }, "「我交给 Agent 的事自动开始」在试运行，只记录", "去打开", RULE_AT],
+    ["还没有能在后台运行的 Agent", { mode: "auto", declared: false }, "还没选主 Agent", "去选", "/settings/agents#roles"],
+  ])("开着但前提没满足（%s）：前提清单一行状态加一个按钮，落到对应位置（界面设计 §3.2）", async (_n, o, text, button, href) => {
     const s = server({ ...o, items: [{ id: "i1", version: 1, kind: "task", phase: "proposed", title: "修复登录", tags: ["agent-ok"] }] });
     mount(s);
-    const link = await screen.findByRole("link", { name: text + " ›" });
-    expect(link).toHaveAttribute("href", href);
+    const row = (await screen.findByText(text)).closest("li")!;
+    expect(within(row).getByRole("link", { name: button })).toHaveAttribute("href", href);
   });
 
-  it("已经在进行中的事项：说明不会补开工，没有链接", async () => {
-    const s = server({ mode: "auto", declared: true, items: [{ id: "i1", version: 1, kind: "task", phase: "open", title: "修复登录", tags: ["agent-ok"] }] });
+  it("已经在进行中的事项：不再说「不会补开工」，而是给「现在开始」，点了发本人专用的 item.start（K1）", async () => {
+    const s = server({ mode: "observe", declared: true, items: [{ id: "i1", version: 1, kind: "task", phase: "open", title: "修复登录", tags: ["agent-ok"] }] });
     mount(s);
-    expect(await screen.findByText("已在进行中，不会自动开工")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "现在开始" }));
+    await waitFor(() => expect(s.posts).toEqual(["/v1/items/i1/start"]));
+    expect(await screen.findByText("已让 Agent 开始，排队中")).toBeInTheDocument();
+    expect(screen.queryByText(/不会自动开工/)).not.toBeInTheDocument();
   });
 
   it("没交出去时不显示状态；列表和标签筛选里 agent-ok 显示为「交给 Agent」", async () => {

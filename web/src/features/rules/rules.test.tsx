@@ -137,15 +137,16 @@ describe("自动规则 › 规则", () => {
     expect(s.audits.map((a) => a.get("actor"))).toEqual(["rule:" + K1]);
   });
 
-  it("以 Agent 本人身份运行的规则可覆盖在哪里做：默认沿用 Agent 设置；改选只写这条规则，Agent 的设置原样带回；改回沿用即删掉覆盖", async () => {
+  it("以 Agent 本人身份运行的规则可覆盖在哪里做：默认跟随默认；改选只写这条规则，Agent 的设置原样带回；改回跟随即删掉覆盖", async () => {
     const s = server();
     mount(s.impl);
     const pick = (await screen.findAllByRole("combobox"));
     expect(pick).toHaveLength(1); // 只有 runner=main_session 的规则有
     expect(pick[0]).toHaveValue("inherit");
-    await userEvent.selectOptions(pick[0], "单独后台会话");
+    await userEvent.selectOptions(pick[0], "单独在后台做");
     await waitFor(() => expect(s.puts.at(-1)).toEqual({ main_session_launch: { by_harness: { hermes: "wake" }, by_rule: { [K4]: "headless" } } }));
-    await userEvent.selectOptions(screen.getByRole("combobox"), "沿用 Agent 设置");
+    expect(await screen.findByText("已保存")).toBeInTheDocument(); // 即改即存，就地写「已保存」（界面设计 §6.1）
+    await userEvent.selectOptions(screen.getByRole("combobox"), "跟随默认");
     await waitFor(() => expect(s.puts.at(-1)).toEqual({ main_session_launch: { by_harness: { hermes: "wake" }, by_rule: {} } }));
   });
 

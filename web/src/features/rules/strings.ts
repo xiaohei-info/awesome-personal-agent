@@ -14,7 +14,7 @@ const zh = {
   noObservations: "还没有记录",
   observed: (title: string, at: string) => `${at} · ${title}`,
   launchOf: (name: string) => `${name}：Agent 在哪里做`,
-  launchHow: { inherit: "沿用 Agent 设置", headless: "单独后台会话", wake: "在对话里" } as Record<string, string>,
+  launchHow: { inherit: "跟随默认", headless: "单独在后台做", wake: "在对话里接着做" } as Record<string, string>,
 };
 
 const en: typeof zh = {
@@ -30,7 +30,7 @@ const en: typeof zh = {
   noObservations: "Nothing recorded yet",
   observed: (title, at) => `${at} · ${title}`,
   launchOf: (name) => `${name}: where the Agent works`,
-  launchHow: { inherit: "Same as the Agent setting", headless: "Separate background session", wake: "In your chat" },
+  launchHow: { inherit: "Follow the default", headless: "On its own in the background", wake: "Continue in your chat" },
 };
 
 export const strings: Dict<typeof zh> = { zh, en };
