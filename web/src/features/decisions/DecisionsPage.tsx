@@ -163,7 +163,7 @@ export function QuestionCard({ item, focused, onFocus, rejection, onAnswer, inIt
         </p>
       )}
       <Asker id={item.id} code={ask.code} />
-      <RejectionNote rejection={rejection} what="answer" />
+      <RejectionNote rejection={rejection} what="answer" item={item.id} />
       {single && <p className="sub">{t.ackWhy}</p>}
       {/* 选项一律同等样式：不替本人暗示选哪个 */}
       <div role="group" aria-label={t.options} className="options">

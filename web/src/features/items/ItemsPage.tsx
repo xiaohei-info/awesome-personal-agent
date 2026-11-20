@@ -251,7 +251,7 @@ function ItemDetail() {
       {item.phase === "needs_input" && item.ask && !item.ask.resolution ? (
         <QuestionCard item={item as DecisionItem} rejection={d.rejection} onAnswer={answer} inItem />
       ) : (
-        <RejectionNote rejection={d.rejection} what="edit" />
+        <RejectionNote rejection={d.rejection} what="edit" item={item.id} />
       )}
       {!ended && <LastRunNote item={item.id} />}
       {item.phase === "proposed" && (

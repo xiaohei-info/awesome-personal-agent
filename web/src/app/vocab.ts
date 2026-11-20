@@ -58,6 +58,7 @@ export interface Vocab {
   spotResult: Closed<typeof I.SPOT_RESULT>;
   healthSignal: Closed<typeof I.HEALTH_SIGNAL>;
   doctorCheck: Closed<typeof I.DOCTOR_CHECK>;
+  grantReason: Closed<typeof I.GRANT_REASON>;
   event: Closed<typeof I.EVENT> & Closed<typeof I.EVENT_INTERNAL>;
   materialKind: Closed<typeof I.MATERIAL_KIND> & Open;
   pack: Closed<typeof I.PACK> & Open;
@@ -222,6 +223,13 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     other_alerts: { label: "其他告警" },
     stalled_delegations: { label: "委派久无回音" },
     clock_lag: { label: "定时器迟到" },
+  },
+  grantReason: {
+    grant_screening_pending: { label: "这个事项的分类结果还在回来，先把卡片里那件事处理掉，或者等一会儿再试", hint: "授权本身没问题；卡处理后同一张授权自动恢复可用" },
+    grant_risk_ceiling: { label: "这类事只能你亲自确认，授权管不到" },
+    grant_not_for_background: { label: "这张授权没允许 Agent 后台运行时使用" },
+    untrusted_origin: { label: "这条建议不是来自你信任的发件人，只能你自己接受" },
+    untrusted_trigger: { label: "这次运行由不受信任的内容触发，不能用授权" },
   },
   doctorCheck: { data_dir: { label: "数据目录" }, config: { label: "配置文件" }, tier: { label: "运行形态" }, model_endpoint: { label: "模型" }, sources: { label: "来源" }, packs: { label: "能力包" }, host_plugin: { label: "Agent 插件" }, overlaps: { label: "重叠检查" }, channels: { label: "聊天渠道" }, secrets: { label: "密钥保管" }, connections: { label: "提醒渠道与导出" } },
   event: {
@@ -590,6 +598,13 @@ const en: typeof zh = {
     other_alerts: { label: "Other alerts" },
     stalled_delegations: { label: "Delegations gone quiet" },
     clock_lag: { label: "Timers running late" },
+  },
+  grantReason: {
+    grant_screening_pending: { label: "This item's risk check is still coming back; handle the card on it first, or try again in a moment", hint: "The grant itself is fine; it works again once the card is handled" },
+    grant_risk_ceiling: { label: "Only you can confirm this kind of thing; a grant can't cover it" },
+    grant_not_for_background: { label: "This grant isn't allowed in background runs" },
+    untrusted_origin: { label: "This proposal didn't come from a sender you trust, so only you can accept it" },
+    untrusted_trigger: { label: "This run was started by untrusted content, so it can't use grants" },
   },
   doctorCheck: { data_dir: { label: "Data directory" }, config: { label: "Config file" }, tier: { label: "Run tier" }, model_endpoint: { label: "Models" }, sources: { label: "Sources" }, packs: { label: "Capability packs" }, host_plugin: { label: "Agent plugin" }, overlaps: { label: "Overlap check" }, channels: { label: "Chat channels" }, secrets: { label: "Credential vault" }, connections: { label: "Channels and exports" } },
   event: {

@@ -235,3 +235,16 @@ describe("内核问题的类别码与旧格式", () => {
     await waitFor(() => expect(s.calls.find((c) => c.method === "POST")?.body).toEqual({ choice: "continue" }));
   });
 });
+
+// 本人 2026-11-20 裁决：授权单因初筛待定暂不可用时，说准原因并指到那张卡，不说"风险超过上限"、不叫人去签授权。
+describe("授权单暂不可用的原因", () => {
+  it("初筛待定：显示「分类结果还在回来」并给「先处理这件事的卡」", async () => {
+    mount(server([item("s")], undefined, { s: rej({ reason: "grant_screening_pending", why: "grant_screening_pending: a decision request on this item is still being risk-screened" }) }).impl);
+    const card = await screen.findByRole("article", { name: "事项 s" });
+    const note = within(card).getByRole("note");
+    expect(note).toHaveTextContent("这个事项的分类结果还在回来，先把卡片里那件事处理掉，或者等一会儿再试");
+    expect(note).not.toHaveTextContent("缺少你的原话或授权");
+    expect(within(note).getByRole("link", { name: "先处理这件事的卡" })).toHaveAttribute("href", "/items/s");
+    expect(within(note).queryByRole("link", { name: "去签发授权" })).toBeNull();
+  });
+});

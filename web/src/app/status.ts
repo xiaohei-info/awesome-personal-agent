@@ -13,7 +13,7 @@ export interface Signal {
   detail?: unknown;
   rejections?: { pack: string; source: string; reason: string }[];
   /** receipt_failures 的逐条原因（api/health.ReceiptRejection）：命令、退出码、原因码、凭据。 */
-  receipts?: { object: string; command: string; exit: number; code?: string; credential: string }[];
+  receipts?: { object: string; command: string; exit: number; code?: string; reason?: string; credential: string }[];
 }
 export interface HealthReport {
   healthy: boolean;
@@ -121,7 +121,7 @@ export function rowsOf(s: Signal): Row[] {
       // 逐条说清谁的什么操作被拒、为什么、下一步（原因码在服务端给出）；没有逐条明细的旧接口退回一行计数。
       const rs = s.receipts ?? [];
       return rs.length
-        ? rs.map((x) => ({ ...row("receipt", true, 1, "/audit", x.object), code: x.code, who: x.credential, cmd: x.command }))
+        ? rs.map((x) => ({ ...row("receipt", true, 1, "/audit", x.object), code: x.code, params: x.reason ? { reason: x.reason } : undefined, who: x.credential, cmd: x.command }))
         : [row("receipts", true, s.count, "/audit")];
     }
     case "other_alerts":

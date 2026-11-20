@@ -63,7 +63,12 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
         return { problem: f?.say ?? t.outcallItem, impact: t.runFailImpact(f?.next ?? ""), button: t.seeItem, to: r.to };
       }
       case "receipt": {
-        const why = r.code ? label("error", r.code) : t.receiptNoReason;
+        const reason = r.params?.reason;
+        const why = reason ? label("grantReason", reason) : r.code ? label("error", r.code) : t.receiptNoReason;
+        // 初筛待定：授权本身没问题，第一步是去处理那件事上的卡
+        if (reason === "grant_screening_pending" && r.obj)
+          return { problem: t.receiptOne(credential(r.who ?? ""), t.receiptCmd[r.cmd ?? ""] ?? r.cmd ?? "", why), impact: t.receiptImpact, button: t.goCard, to: "/items/" + encodeURIComponent(r.obj),
+            second: { button: t.seeWhy, to: "/audit?object=" + encodeURIComponent(r.obj) } };
         const grant = !!r.code && GRANT_CODES.has(r.code);
         return {
           problem: t.receiptOne(credential(r.who ?? ""), t.receiptCmd[r.cmd ?? ""] ?? r.cmd ?? "", why),

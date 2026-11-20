@@ -39,6 +39,7 @@ const zh = {
   notApplied: "事项未被修改（未生效）",
   rejectedGrant: (g: string) => ` · 授权 ${g}`,
   goGrant: "去签发授权",
+  goCard: "先处理这件事的卡",
   // 内核问题（按类别码渲染）与旧格式
   details: "详情",
   legacy: "旧格式",
@@ -84,6 +85,7 @@ const en: typeof zh = {
   notApplied: "The item was not changed (did not take effect)",
   rejectedGrant: (g) => ` · grant ${g}`,
   goGrant: "Issue a grant",
+  goCard: "Handle this item's card first",
   details: "Details",
   legacy: "Old format",
   legacyWhy: "Created before the upgrade; shown as written",

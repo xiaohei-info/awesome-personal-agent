@@ -95,6 +95,7 @@ const CASES: [string, string, () => string[]][] = [
   ["DOCTOR_CODE", "doctorCode", () => named("kernel/doctor/codes.go", "Code")],
   ["ASK_CODE", "askCode", () => typed("domain/notice.go", "AskCode")],
   ["RUN_FAULT", "runFault", () => typed("domain/notice.go", "RunFaultCode")],
+  ["GRANT_REASON", "grantReason", () => named("domain/errors.go", "GrantReason")],
   ["EVENT", "event", () => named("domain/event.go", "Ev")],
 ];
 
