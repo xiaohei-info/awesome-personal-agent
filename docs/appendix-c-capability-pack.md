@@ -192,7 +192,7 @@ front matter 二选一：`agent` 声明专属 agent 类别，或 `run_as` 声明
 | `event_stats` | 判断型、生成型 | 要附带的 Event 统计，当前只有 `proposal_outcome`：同一来源、kind、项目下，建议被本人接受和丢弃的次数，默认统计最近 90 天（主文档 §8.4）。web_only 初筛不附带统计 |
 | `timeout` | 全部 | 超时。判断型走分类端点时以判断端点的 `timeout_ms` 为准 |
 | `access` | 任务型 | 经 `call_agent` 调用任务型时需要的权限档位。后台运行以规则动作里的声明为准 |
-| `cwd` | 任务型 | 工作目录：`run_dir`（默认）或 `project_checkout`（项目在 APA 主机上的检出，即检出的 Host 等于 APA 主机名）。没有这样的检出时不拉起，事项转 `needs_input` 并写明原因。后台运行同样解析，规则动作的 `cwd` 优先 |
+| `cwd` | 任务型 | 工作目录：`run_dir`（默认）或 `project_checkout`（项目在 APA 主机上的检出，即检出的 Host 等于 APA 主机名）。没有这样的检出时不拉起，记带类别码的告警写明原因；规则建的事项转 `dropped`，本人的事项阶段不变（主文档 §8.7）。后台运行同样解析，规则动作的 `cwd` 优先 |
 | `result_fields` | 任务型 | 结果写在目标事项 `spec` 里时要写全的字段，每项是顶层键（`period`）或数组元素的键（`sections[].body`：数组非空，每个元素的这个键都有内容）。写全后内核代为转 `done`，没写全转 `needs_input` 并写明缺哪些字段（主文档 §8.4） |
 | `default_instruction` | 任务型 | 实例没写 `instruction` 时写进 `instruction_path` 文件的默认内容要求，不超过 2000 字。正文必须用 `instruction_path`。随发行更新，不写进账本；Web 经 `GET /packs` 的 `default_instruction` 显示它（主文档 §13.5）。它只放组织方式、排序与取舍这类可由本人改写的要求；事实规则（什么能写成已结束、时间与原文怎么取、覆盖怎么说）写在正文里，个人偏好留给实例的 `instruction` |
 | `materials` | 任务型 | 要的资料段，取值为 `instance_params`、`ledger_snapshot`、`context`、`prior`、`schedule`、`decisions`、`due_waiting`、`planned`、`activity`、`open_items`、`proposals`、`digest`、`spot_check`（各段见主文档 §7.3"简报的资料"；`ledger_snapshot`、`instance_params` 以外的段只在目标是 `brief` 事项时组出）。只组、只查询列出的段，没列 `digest` 的模板不汇入"知会"。不写时取 `context`、`prior`、`open_items` 以外的各段，与引入本字段之前一致 |
@@ -234,7 +234,7 @@ criteria: 涉及真实资金、对外承诺、不可逆操作或权限变更的�
 
 正文只写固定模板和占位符。占位符只有内核提供的固定集合：`item_id`、`run_id`、`project_id`、`materials_path`（资料文件路径）、`instruction_path`（实例里本人写的任务说明所在的文件路径，只在由带 `instruction` 参数的实例驱动的任务型运行里可用，主文档 §13.5）。外部内容经资料段或资料文件附带，由内核组织，模板不能把外部字段插到指令段。
 
-`instruction_path` 的文件由任务型在拉起时写进这次运行的运行目录（文件名 `instruction.txt`，权限 0600），不进提示词正文；包的 `instance_params` 没有字符串参数 `instruction` 时，用了这个占位符的包加载时拒绝；实例没有任务说明时：模板声明了 `default_instruction` 就写它；没有声明则不拉起，事项转 `needs_input`（`SPIKE-ROUTINE`，主文档 §13.5）。实例参数 `instruction` 不超过 2000 字，超过时建实例与改实例都被拒绝。
+`instruction_path` 的文件由任务型在拉起时写进这次运行的运行目录（文件名 `instruction.txt`，权限 0600），不进提示词正文；包的 `instance_params` 没有字符串参数 `instruction` 时，用了这个占位符的包加载时拒绝；实例没有任务说明时：模板声明了 `default_instruction` 就写它；没有声明则不拉起，规则建的这一份转 `dropped` 并记带 `task_refused` 的告警（`SPIKE-ROUTINE`，主文档 §8.7、§13.5）。实例参数 `instruction` 不超过 2000 字，超过时建实例与改实例都被拒绝。
 
 **入站模板的结构化输入与输出**（主文档 §9.3）。起草（`triage-draft`）、抽取（`triage-extract`）与预筛（`capture-prescreen`）的结构化输入除事件元信息外，起草与抽取带内核组出的两份清单，预筛只带未结事项清单（以文本段附在资料后，不带项目清单）；模板不必声明，也不能改它们的形状：
 
