@@ -169,8 +169,8 @@ describe("授权单依据（ACT-AUTH-03、flow-why-audit）", () => {
     const r = await rows();
     await waitFor(() => expect(r.getAllByRole("listitem")).toHaveLength(4));
     const items = r.getAllByRole("listitem");
-    expect(within(items[0]).getByRole("link", { name: "按临时授权" })).toHaveAttribute("href", "/settings/agents#grant-grt_ok");
-    expect(within(items[3]).queryByRole("link", { name: "按临时授权" })).toBeNull();
+    expect(within(items[0]).getByRole("link", { name: "按授权" })).toHaveAttribute("href", "/settings/agents#grant-grt_ok");
+    expect(within(items[3]).queryByRole("link", { name: "按授权" })).toBeNull();
   });
 });
 

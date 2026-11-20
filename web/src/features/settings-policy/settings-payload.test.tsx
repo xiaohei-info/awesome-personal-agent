@@ -20,9 +20,8 @@ interface Case { name: string; at: string; card: string; edit?: Edit; path: stri
 
 const CASES: Case[] = [
   // 不改直接保存
-  { name: "web_only（未改）", at: "/settings", card: "只能我在网页上亲自确认", path: "/v1/settings/policy", body: { web_only: { categories: ["funds", "irreversible"], rules: [RULE1] } } },
+  { name: "web_only（未改）", at: "/settings", card: "只能我亲自确认的事", path: "/v1/settings/policy", body: { web_only: { categories: ["funds", "irreversible"], rules: [RULE1] } } },
   { name: "材料写入（未改）", at: "/settings", card: "Agent 写的文档，哪些先给我过目", path: "/v1/settings/policy", body: { material_write: { default: "proposed", kinds: { minutes: "direct" } } } },
-  { name: "打扰策略（未改）", at: "/settings/notify", card: "怎么找我", path: "/v1/settings/policy", body: { disturb: DISTURB } },
   // 对我说话的语言与语气移到设置 › Agent（界面设计 §4），按 §6.1 没有改动时不能保存，所以只比改过之后的载荷。
   {
     name: "Agent 的语言：改选", at: "/settings/agents", card: "对我说话的语言", path: "/v1/settings/policy",
@@ -31,7 +30,7 @@ const CASES: Case[] = [
   },
   // 与改版前测试相同的编辑
   {
-    name: "web_only：加类别与一条规则", at: "/settings", card: "只能我在网页上亲自确认", path: "/v1/settings/policy",
+    name: "web_only：加类别与一条规则", at: "/settings", card: "只能我亲自确认的事", path: "/v1/settings/policy",
     edit: async (c) => {
       await userEvent.click(c.getByLabelText("对外承诺"));
       await userEvent.click(c.getByRole("button", { name: "＋ 再加一条" }));
@@ -41,7 +40,7 @@ const CASES: Case[] = [
     body: { web_only: { categories: ["funds", "irreversible", "external_commitment"], rules: [RULE1, { kind: "", tag: "legal", project: "", category: "external_commitment" }] } },
   },
   {
-    name: "打扰策略：加一条「类别:优先级」路由", at: "/settings/notify", card: "怎么找我", path: "/v1/settings/policy",
+    name: "打扰策略：加一条「类别:优先级」路由", at: "/settings/notify", card: "各类提醒怎么送", path: "/v1/settings/policy",
     edit: async (c) => {
       await userEvent.click(c.getByRole("button", { name: "＋ 按优先级单独设" }));
       await userEvent.selectOptions(c.getByLabelText("单独设1 类别"), "reminder");
@@ -50,17 +49,24 @@ const CASES: Case[] = [
     },
     body: { disturb: { ...DISTURB, routes: { decision: "inject", health: "web", "reminder:high": "web" } } },
   },
+  // 提醒与打扰拆成各自保存的小节（界面设计 §6.1）：每节发整段 disturb，只换自己改过的字段。
   {
-    name: "打扰策略：日上限与静音", at: "/settings/notify", card: "怎么找我", path: "/v1/settings/policy",
+    name: "打扰策略：日上限", at: "/settings/notify", card: "每天最多发几条", path: "/v1/settings/policy",
     edit: async (c) => {
-      await userEvent.clear(c.getByLabelText("每天最多推送（条）"));
-      await userEvent.type(c.getByLabelText("每天最多推送（条）"), "3");
+      await userEvent.clear(c.getByLabelText("每天最多发（条）"));
+      await userEvent.type(c.getByLabelText("每天最多发（条）"), "3");
+    },
+    body: { disturb: { ...DISTURB, daily_cap: 3 } },
+  },
+  {
+    name: "打扰策略：暂停提醒", at: "/settings/notify", card: "暂停提醒", path: "/v1/settings/policy",
+    edit: async (c) => {
       await userEvent.click(c.getByRole("button", { name: "＋ 暂停一个" }));
       await userEvent.selectOptions(c.getByLabelText("暂停1 类型"), "project");
       await waitFor(() => expect(within(c.getByLabelText("暂停1 对象")).getByRole("option", { name: "Home" })).toBeInTheDocument());
       await userEvent.selectOptions(c.getByLabelText("暂停1 对象"), "acc-home");
     },
-    body: { disturb: { ...DISTURB, daily_cap: 3, mutes: [{ scope: "project", id: "acc-home" }] } },
+    body: { disturb: { ...DISTURB, mutes: [{ scope: "project", id: "acc-home" }] } },
   },
   {
     name: "材料写入：默认与单个类型", at: "/settings", card: "Agent 写的文档，哪些先给我过目", path: "/v1/settings/policy",

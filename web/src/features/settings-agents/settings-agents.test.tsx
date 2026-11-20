@@ -140,7 +140,7 @@ describe("设置 › Agent", () => {
     await waitFor(() => expect(s.puts.at(-1)).toMatchObject({ path: "/v1/settings/access-limits", body: { permission_cap: { default: "read", by_harness: { other: "edit", hermes: "full" } } } }));
   });
 
-  it("以 Agent 本人身份做事：声明不支持唤醒时「在对话里」不可选并说明；默认单独后台会话", async () => {
+  it("以 Agent 本人身份做事：声明不支持唤醒时「在对话里」不可选并说明；默认单独在后台做", async () => {
     mount(server({ live: [hermes(1, "active")] }).impl, PAGE);
     const c = within((await card()).getByRole("region", { name: "在哪里做" }));
     expect(c.getByRole("radio", { name: "单独在后台做（不打扰对话）" })).toBeChecked();

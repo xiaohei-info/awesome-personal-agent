@@ -32,7 +32,7 @@ describe("取值词表", () => {
     rerender(<p><Val k="materialKind" id="pack-made-kind" /></p>);
     expect(container).toHaveTextContent("pack-made-kind");
     rerender(<p><Val k="route" id="channel:chat" /></p>);
-    expect(container).toHaveTextContent("推送到 chat");
+    expect(container).toHaveTextContent("发到 chat");
     act(() => setChoice("en"));
     rerender(<p><Val k="phase" id="needs_input" /></p>);
     expect(container).toHaveTextContent("Needs you");
@@ -54,7 +54,7 @@ describe("按错误码显示错误", () => {
   const e = (code: string, why = "only from a Web session", next = "open the web") => new ApiError(403, { code, why, next });
 
   it("已知码：当前语言的一句话加服务端原因；未知码：原样显示 why 与 next", () => {
-    expect(errorText(e("web_only"))).toBe("这件事需要你在网页上亲自确认（only from a Web session）");
+    expect(errorText(e("web_only"))).toBe("这件事只能你亲自确认，请在网页上定（only from a Web session）");
     expect(errorText(e("future_code"))).toBe("only from a Web session（open the web）");
     act(() => setChoice("en"));
     expect(errorText(e("not_found", "no such item"))).toBe("Record not found (no such item)");
@@ -63,7 +63,7 @@ describe("按错误码显示错误", () => {
   it("ErrorNote：说得清的码主行只有那句话，原因收进详情；只说了类别的码主行带上原因", () => {
     const { rerender } = render(<ErrorNote error={e("web_only")} />);
     const alert = screen.getByRole("alert");
-    expect(alert.querySelector("p")).toHaveTextContent(/^这件事需要你在网页上亲自确认$/);
+    expect(alert.querySelector("p")).toHaveTextContent(/^这件事只能你亲自确认，请在网页上定$/);
     expect(within(alert).getByText("详情")).toBeInTheDocument();
     expect(alert).toHaveTextContent("only from a Web session（open the web）");
     rerender(<ErrorNote error={e("invalid_request", "title is empty")} />);

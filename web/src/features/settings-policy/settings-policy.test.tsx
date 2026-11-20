@@ -16,7 +16,7 @@ function mount(fetchImpl: typeof fetch) {
 }
 const card = async (name: string) => within(await screen.findByRole("region", { name }));
 const save = async (name: string) => userEvent.click((await card(name)).getByRole("button", { name: `保存${name}` }));
-const WEB_ONLY = "只能我在网页上亲自确认";
+const WEB_ONLY = "只能我亲自确认的事";
 const DOCS = "Agent 写的文档，哪些先给我过目";
 
 beforeEach(() => sessionStorage.clear());
@@ -39,7 +39,7 @@ describe("设置 › 我来拍板（原「策略与人格」的地址 /settings�
     expect(d.queryByRole("group", { name: "规范" })).toBeNull();
     expect(d.getByText(/始终先给我看/)).toBeInTheDocument();
     // 打扰、权限、人格不在这一页
-    expect(screen.queryByRole("region", { name: "怎么找我" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "各类提醒怎么送" })).toBeNull();
   });
 
   it("flow-bg-guards ACT-BGG-08: 编辑类别与规则，服务端拒绝未登记类别；规则的类别只能从已选类别里选", async () => {

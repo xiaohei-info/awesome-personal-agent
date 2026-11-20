@@ -8,9 +8,10 @@ import { CHANNEL_PREFIX } from "../../app/vocab";
 import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
 import { strings } from "./strings";
 
-// 设置 › 提醒与打扰：策略的 disturb 段（§7.4）。PUT 替换整段，所以保存时带上整段：没在这页改过的字段原样带回。
-// 路由只能选合法值：下次聊天时告诉我（inject）、只放网页未读（web）、启用中的内置渠道（channel:<连接 id>，按连接名字显示）、
-// 自写程序的渠道（channel:<名>，取自渠道扩展的密钥）；唤醒宿主（wake）不是提醒本人，只在「高级」里出现。
+// 设置 › 提醒与打扰：策略的 disturb 段（§7.4）。按使用者的一件事拆成几节、各自保存（界面设计 §6.1）：怎么送、每天上限、暂停、安静时段、更多。
+// PUT 替换整段，所以每节保存时带上整段：已保存的原样带回，只换这一节改过的字段。
+// 路由只能选合法值：下次聊天时告诉我（inject）、只放在今天页的提醒里（web）、启用中的内置渠道（channel:<连接 id>，按连接名字显示）、
+// 自写程序的渠道（channel:<名>，取自渠道扩展的密钥）；唤醒 Agent（wake）不是提醒本人，只在「高级」里出现。
 // 文档里已有的其他取值保留为选项，不丢；指向已停用或已删除连接的路由照样显示并标明。
 const ROUTES = ["policy"] as const;
 const CLASSES = ["decision", "brief", "reminder", "health"] as const;
@@ -70,51 +71,50 @@ const toLocalInput = (iso?: string) => {
 };
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
-function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; save: Save }) {
-  const t = useT(strings);
-  const label = useLabel();
-  const today = useToday();
-  const routesIn = doc.disturb.routes as Record<string, string>;
-  // 类别级路由（含文档里的其他键，如 wake）与「类别:优先级」级分开编辑，保存时合并；两行写到同一个键时在本地报重复。
-  const [base, setBase] = useDraft(doc.disturb, () => Object.fromEntries(Object.entries(routesIn).filter(([k]) => !k.includes(":"))));
-  const [overrides, setOverrides] = useDraft(doc.disturb, () => Object.entries(routesIn).filter(([k]) => k.includes(":")).map(([k, v]): Override => [k.split(":")[0], k.split(":")[1], v]));
-  const [cap, setCap] = useDraft(doc.disturb, () => String(doc.disturb.daily_cap ?? 20));
-  const [mutes, setMutes] = useDraft(doc.disturb, () => ((doc.disturb.mutes ?? []) as { scope: string; id: string; until?: string }[]).map((m): Mute => [m.scope, m.id, toLocalInput(m.until)]));
-  // 其余字段只在改过时才写进请求体，没改的随整段原样带回。
-  const [patch, setPatch] = useDraft<Record<string, unknown>>(doc.disturb, () => ({}));
-  const val = (k: string) => (k in patch ? patch[k] : doc.disturb[k]);
-  const set = (k: string, v: unknown) => setPatch({ ...patch, [k]: v });
+/** 每一节保存时发整段 disturb：已保存的内容加上这一节自己的改动；别的节没保存的草稿不带上（界面设计 §6.1）。 */
+type Put = (fields: Record<string, unknown>) => Promise<number>;
 
+function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; save: Save }) {
+  const put: Put = (fields) => save("policy", { disturb: { ...doc.disturb, ...fields } });
+  const t = useT(strings);
+  const routesIn = doc.disturb.routes as Record<string, string>;
+  const names: Record<string, string> = { ...channels.names };
+  // 列表里没有的渠道路由：连接或自写程序渠道已删除，照样列出并标明，不显示原始 id。
+  for (const r of Object.values(routesIn)) if (r.startsWith(CHANNEL_PREFIX) && !names[r]) names[r] = t.pushToGone;
   const routeIds = (cur: string, withWake = false) => {
     const ids = ["inject", "web", ...(withWake ? ["wake"] : []), ...channels.ids];
     return cur && !ids.includes(cur) ? [...ids, cur] : ids;
   };
-  const names: Record<string, string> = { ...channels.names };
-  // 列表里没有的渠道路由：连接或自写程序渠道已删除，照样列出并标明，不显示原始 id。
-  for (const r of [...Object.values(routesIn)]) if (r.startsWith(CHANNEL_PREFIX) && !names[r]) names[r] = t.pushToGone;
-  const setOverride = (i: number, j: number, v: string) => setOverrides(overrides.map((o, n) => (n === i ? (o.map((x, m) => (m === j ? v : x)) as Override) : o)));
-  const setMute = (i: number, j: number, v: string) => setMutes(mutes.map((r, n) => (n === i ? (r.map((x, m) => (m === j ? v : j === 0 && m === 1 ? "" : x)) as Mute) : r)));
-  const quiet = val("quiet") as { start: string; end: string; zone?: string } | undefined;
-  const mergeMin = Math.round(((val("merge_window_sec") as number) ?? 0) / 60);
+  return (
+    <>
+      <Routes doc={doc} names={names} routeIds={routeIds} put={put} />
+      <Cap doc={doc} put={put} />
+      <Mutes doc={doc} put={put} />
+      <Quiet doc={doc} put={put} />
+      <More doc={doc} names={names} routeIds={routeIds} put={put} />
+    </>
+  );
+}
 
+// 各类提醒怎么送：类别级路由（含文档里的其他键，如 wake）与「类别:优先级」级分开编辑，保存时合并；两行写到同一个键时在本地报重复。
+function Routes({ doc, names, routeIds, put }: { doc: Doc; names: Record<string, string>; routeIds: (cur: string) => string[]; put: Put }) {
+  const t = useT(strings);
+  const label = useLabel();
+  const routesIn = doc.disturb.routes as Record<string, string>;
+  const [base, setBase, d1] = useDraft(doc.disturb.routes, () => Object.fromEntries(Object.entries(routesIn).filter(([k]) => !k.includes(":"))));
+  const [overrides, setOverrides, d2] = useDraft(doc.disturb.routes, () => Object.entries(routesIn).filter(([k]) => k.includes(":")).map(([k, v]): Override => [k.split(":")[0], k.split(":")[1], v]));
+  const setOverride = (i: number, j: number, v: string) => setOverrides(overrides.map((o, n) => (n === i ? (o.map((x, m) => (m === j ? v : x)) as Override) : o)));
   const submit = () => {
-    const n = Number(cap);
-    if (cap.trim() === "" || !Number.isInteger(n) || n < 0) return reject(t.capInvalid);
     const routes: Record<string, string> = { ...base };
     for (const [cls, prio, route] of overrides) {
       const k = cls + ":" + prio;
       if (k in routes) return reject(t.dup(`${label("deliveryClass", cls)} · ${label("priority", prio)}`));
       routes[k] = route;
     }
-    const list = mutes
-      .filter(([, id]) => id.trim())
-      .map(([scope, id, until]) => ({ scope, id: id.trim(), ...(until ? { until: new Date(until).toISOString() } : {}) }));
-    return save("policy", { disturb: { ...doc.disturb, routes, daily_cap: n, mutes: list, ...patch } });
+    return put({ routes });
   };
-
-  const capN = Number(cap);
   return (
-    <Card title={t.card} onSave={submit}>
+    <Card title={t.card} onSave={submit} dirty={d1 || d2}>
       <div>
         {CLASSES.map((c) => (
           <div key={c} className="line">
@@ -134,8 +134,21 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; sa
         ))}
         <button type="button" className="link" onClick={() => setOverrides([...overrides, ["decision", "urgent", base.decision ?? "web"]])}>{t.addOverride}</button>
       </div>
+    </Card>
+  );
+}
 
-      <h3>{t.capHead}</h3>
+function Cap({ doc, put }: { doc: Doc; put: Put }) {
+  const t = useT(strings);
+  const today = useToday();
+  const [cap, setCap, dirty] = useDraft(doc.disturb.daily_cap, () => String(doc.disturb.daily_cap ?? 20));
+  const capN = Number(cap);
+  const submit = () => {
+    if (cap.trim() === "" || !Number.isInteger(capN) || capN < 0) return reject(t.capInvalid);
+    return put({ daily_cap: capN });
+  };
+  return (
+    <Card title={t.capHead} onSave={submit} dirty={dirty}>
       <div className="sentence">
         <input type="number" min={0} aria-label={t.cap} value={capN === 0 && cap.trim() !== "" ? "" : cap} disabled={capN === 0 && cap.trim() !== ""} onChange={(e) => setCap(e.target.value)} />
         <label>
@@ -148,8 +161,18 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; sa
           <p className="sub">{t.today(today.pushed)}{capN > 0 ? ` · ${t.overflow}` : ""}</p>
         </div>
       )}
+    </Card>
+  );
+}
 
-      <h3>{t.mutes}</h3>
+function Mutes({ doc, put }: { doc: Doc; put: Put }) {
+  const t = useT(strings);
+  const [mutes, setMutes, dirty] = useDraft(doc.disturb.mutes, () => ((doc.disturb.mutes ?? []) as { scope: string; id: string; until?: string }[]).map((m): Mute => [m.scope, m.id, toLocalInput(m.until)]));
+  const setMute = (i: number, j: number, v: string) => setMutes(mutes.map((r, n) => (n === i ? (r.map((x, m) => (m === j ? v : j === 0 && m === 1 ? "" : x)) as Mute) : r)));
+  const submit = () =>
+    put({ mutes: mutes.filter(([, id]) => id.trim()).map(([scope, id, until]) => ({ scope, id: id.trim(), ...(until ? { until: new Date(until).toISOString() } : {}) })) });
+  return (
+    <Card title={t.mutes} hint={t.mutesHint} onSave={submit} dirty={dirty}>
       {mutes.map(([scope, id, until], i) => (
         <div key={i} role="group" aria-label={t.mute(i + 1)} className="line">
           <span className="sentence">
@@ -163,9 +186,26 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; sa
       <div>
         <button type="button" className="link" onClick={() => setMutes([...mutes, ["source", "", ""]])}>{t.addMute}</button>
       </div>
-      <p className="sub">{t.mutesHint}</p>
+    </Card>
+  );
+}
 
-      <h3>{t.quiet}</h3>
+/** 只在改过时才写进请求体，没改的随整段原样带回。 */
+function usePatch(doc: Doc, keys: string[]) {
+  const sig = keys.map((k) => doc.disturb[k]);
+  const [patch, setPatch] = useDraft<Record<string, unknown>>(sig, () => ({}));
+  const val = (k: string) => (k in patch ? patch[k] : doc.disturb[k]);
+  const set = (k: string, v: unknown) => setPatch({ ...patch, [k]: v });
+  const dirty = Object.keys(patch).some((k) => JSON.stringify(patch[k]) !== JSON.stringify(doc.disturb[k]));
+  return { patch, val, set, dirty };
+}
+
+function Quiet({ doc, put }: { doc: Doc; put: Put }) {
+  const t = useT(strings);
+  const { patch, val, set, dirty } = usePatch(doc, ["quiet", "quiet_exempt"]);
+  const quiet = val("quiet") as { start: string; end: string; zone?: string } | undefined;
+  return (
+    <Card title={t.quiet} onSave={() => put(patch)} dirty={dirty}>
       <label>
         <input type="checkbox" checked={!!quiet} onChange={(e) => set("quiet", e.target.checked ? { start: "22:00", end: "08:00", zone: zone() } : undefined)} /> {t.quietOn}
       </label>
@@ -182,9 +222,21 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; sa
           </label>
         </>
       )}
+    </Card>
+  );
+}
 
-      <details>
-        <summary>{t.more}</summary>
+// 更多：合并窗口、截止后再提醒、两个只减不增的判断开关；唤醒 Agent 不是提醒本人，只在这里出现。
+function More({ doc, names, routeIds, put }: { doc: Doc; names: Record<string, string>; routeIds: (cur: string, withWake?: boolean) => string[]; put: Put }) {
+  const t = useT(strings);
+  const { patch, val, set, dirty: d1 } = usePatch(doc, ["merge_window_sec", "remind_on_deadline", "threshold_judge", "followup_defer"]);
+  const routesIn = doc.disturb.routes as Record<string, string>;
+  const [wake, setWake, d2] = useDraft(routesIn.wake, () => routesIn.wake ?? "web");
+  const mergeMin = Math.round(((val("merge_window_sec") as number) ?? 0) / 60);
+  return (
+    <details className="panel">
+      <summary>{t.more}</summary>
+      <Card title={t.more} onSave={() => put({ ...patch, ...(d2 ? { routes: { ...routesIn, wake } } : {}) })} dirty={d1 || d2}>
         <div className="stack">
           <label>
             {t.merge}
@@ -199,11 +251,11 @@ function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; sa
           <label><input type="checkbox" checked={!!val("followup_defer")} onChange={(e) => set("followup_defer", e.target.checked)} /> {t.followupDefer}</label>
           <label>
             {t.wake}
-            <Pick k="route" names={names} value={base.wake ?? "web"} ids={routeIds(base.wake ?? "web", true)} onChange={(v) => setBase({ ...base, wake: v })} />
+            <Pick k="route" names={names} value={wake} ids={routeIds(wake, true)} onChange={setWake} />
           </label>
         </div>
-      </details>
-    </Card>
+      </Card>
+    </details>
   );
 }
 

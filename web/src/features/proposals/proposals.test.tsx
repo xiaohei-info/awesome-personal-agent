@@ -142,7 +142,7 @@ describe("被拒绝的处理（ACT-PROP-05、flow-proposal-triage）", () => {
     const a = await screen.findByRole("article", { name: "建议 a" });
     const note = within(a).getByRole("note", { name: "被拒绝的处理" });
     expect(note).toHaveTextContent("no basis for dismiss");
-    expect(note).toHaveTextContent("授权单 grt_bad");
+    expect(note).toHaveTextContent("授权 grt_bad");
     expect(within(screen.getByRole("article", { name: "建议 b" })).queryByRole("note")).toBeNull();
     expect(within(a).getByRole("button", { name: "接受" })).toBeEnabled();
   });

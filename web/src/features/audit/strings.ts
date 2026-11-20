@@ -18,7 +18,7 @@ const zh = {
   clear: "清除",
   empty: "没有符合条件的记录",
   events: "操作记录",
-  byGrant: "按临时授权",
+  byGrant: "按授权",
   hidden: "内容已删除",
   more: "加载更多",
   imported: (n: number) => `导入 ${n} 条`,

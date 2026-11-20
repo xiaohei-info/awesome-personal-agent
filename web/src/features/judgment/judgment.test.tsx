@@ -96,9 +96,9 @@ describe("自动规则 › 筛选门槛", () => {
     expect(within(rates).getByText("打分模型")).toBeInTheDocument();
     expect(within(rates).getByText("写作模型")).toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "各问题的比例" })).getByText("25.0%")).toBeInTheDocument();
-    expect((await card()).getByRole("status")).toHaveTextContent("最近 30 天：约丢掉 10 · 交给写作模型 0 · 直接起草 3");
+    expect((await card()).getByRole("status")).toHaveTextContent("最近 30 天：约跳过 10 · 交给写作模型 0 · 直接起草 3");
     await userEvent.selectOptions(screen.getByLabelText("看最近"), "7");
-    await waitFor(async () => expect((await card()).getByRole("status")).toHaveTextContent("最近 7 天：约丢掉 4"));
+    await waitFor(async () => expect((await card()).getByRole("status")).toHaveTextContent("最近 7 天：约跳过 4"));
     expect(be.calls.some((c) => c.path.includes("since=7d"))).toBe(true);
     await userEvent.selectOptions(screen.getByLabelText("来源"), "src_b");
     expect(await (await card()).findByText("还没有打分记录")).toBeInTheDocument();
@@ -110,7 +110,7 @@ describe("自动规则 › 筛选门槛", () => {
     expect(c.getByRole("button", { name: "保存这两条线" })).toBeDisabled();
     expect(c.getByText(/下线 0.15 · 上线 0.60（默认）/)).toBeInTheDocument();
     slide(c, "下线", 0.01);
-    expect(c.getByRole("status")).toHaveTextContent("约丢掉 0 · 交给写作模型 10 · 直接起草 3");
+    expect(c.getByRole("status")).toHaveTextContent("约跳过 0 · 交给写作模型 10 · 直接起草 3");
     expect(c.getByRole("button", { name: "保存这两条线" })).toBeEnabled();
   });
 
@@ -164,11 +164,11 @@ describe("自动规则 › 筛选门槛", () => {
   it("试用开关保存到服务端", async () => {
     const be = backend();
     mount(be.impl);
-    const box = (await card()).getByRole("checkbox", { name: "试用：只打分，不影响结果" });
+    const box = (await card()).getByRole("checkbox", { name: "试运行：只打分，不影响结果" });
     await userEvent.click(box);
     await waitFor(() => expect(be.settings.shadow).toEqual(["triage-screen"]));
     expect(puts(be)).toEqual([{ shadow: ["triage-screen"] }]);
-    await userEvent.click((await card()).getByRole("checkbox", { name: "试用：只打分，不影响结果" }));
+    await userEvent.click((await card()).getByRole("checkbox", { name: "试运行：只打分，不影响结果" }));
     await waitFor(() => expect(be.settings.shadow).toEqual([]));
   });
 });

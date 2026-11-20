@@ -6,7 +6,7 @@ const zh = {
   title: "改动",
   onBehalfOf: (p: string) => `代 ${p}`,
   viaChat: "凭你在聊天里的原话",
-  viaGrant: "按临时授权",
+  viaGrant: "按授权",
   runDid: (what: string, title: string) => `Agent 后台运行替你${what}「${title}」`,
   viaAgentGrant: (name: string) => `按你给 ${name} 的授权`,
   reverted: " · 已撤销",

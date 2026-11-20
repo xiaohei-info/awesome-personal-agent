@@ -1,7 +1,7 @@
 import type { Dict } from "../../app/i18n";
 import { common } from "../../app/strings";
 
-// 设置 › 导入：上传计划文件 → 预检 → 确认后分批写入；历次批次；签发导入授权单（设计 §7.1、§4.1）。
+// 设置 › 导入：上传计划文件 → 预检 → 确认后分批写入；历次批次；签发导入用的授权（设计 §7.1、§4.1）。
 const zh = {
   ...common.zh,
   title: "导入",
@@ -31,17 +31,17 @@ const zh = {
   cInvalid: "不合法",
   cTime: "时间",
   cActor: "操作者",
-  cGrant: "授权单",
+  cGrant: "授权",
   open: (id: string) => `查看批次 ${id}`,
   written: (id: string) => `批次 ${id} 写入的事项`,
   noWritten: "这一批没有写入事项",
-  grantTitle: "签发导入授权单",
+  grantTitle: "签发导入用的授权",
   grantAgent: "给哪个 Agent",
   grantMax: "条数上限",
   grantHours: "有效小时数",
   grantIssue: "签发",
   grantBad: "条数上限与有效小时数须是正整数，有效期最长 168 小时",
-  grantDone: (id: string) => `已签发授权单 ${id}`,
+  grantDone: (id: string) => `已签发授权 ${id}`,
 };
 const en: typeof zh = {
   ...common.en,

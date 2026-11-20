@@ -45,15 +45,15 @@ function mount(fetchImpl: typeof fetch) {
   );
 }
 
-const lines = () => within(screen.getByRole("list", { name: "运行日志" })).getAllByRole("button").map((b) => b.textContent ?? "");
+const lines = () => within(screen.getByRole("list", { name: "运行记录" })).getAllByRole("button").map((b) => b.textContent ?? "");
 
 beforeEach(() => sessionStorage.clear());
 afterEach(() => localStorage.removeItem("apa.raw"));
 
-describe("诊断 › 运行日志（flow-bg-main-session、flow-outcall-limits）", () => {
+describe("诊断 › 运行记录（flow-bg-main-session、flow-outcall-limits）", () => {
   it("一行一条、最新在上：用用户的话说做了什么，结果带状态，用时在行尾；没有「详情」按钮", async () => {
     mount(server([failed, q1, bg]).impl);
-    expect(await screen.findByRole("heading", { name: "运行日志" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "运行记录" })).toBeInTheDocument();
     await screen.findByText("拉取 Gmail");
     const rows = lines();
     expect(rows).toHaveLength(3);

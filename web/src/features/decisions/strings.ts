@@ -4,7 +4,7 @@ import { common } from "../../app/strings";
 const zh = {
   ...common.zh,
   title: "等你决定",
-  none: "没有要你决定的事",
+  none: "没有等你决定的事",
   hint1: "按数字键直接回答，",
   hint2: "上下切换。",
   countPre: "",
@@ -35,7 +35,7 @@ const zh = {
   rejectedWhat: { answer: "代答", handle: "处理" },
   rejected: (what: string) => `被拒绝的${what}`,
   rejectedBody: (who: string, what: string) => `${who} 的${what}未生效`,
-  rejectedGrant: (g: string) => ` · 授权单 ${g}`,
+  rejectedGrant: (g: string) => ` · 授权 ${g}`,
 };
 
 const en: typeof zh = {

@@ -130,7 +130,7 @@ describe("决策待办页（flow-decision-answer）", () => {
 
   it("空列表与加载失败各有状态", async () => {
     mount(server([]).impl);
-    expect(await screen.findByText("没有要你决定的事")).toBeInTheDocument();
+    expect(await screen.findByText("没有等你决定的事")).toBeInTheDocument();
   });
 
   it("列表读取失败：显示错误并可重试", async () => {
@@ -168,7 +168,7 @@ describe("键盘拍板", () => {
     expect(s.calls.find((c) => c.path === "/v1/items/b/decide")!.body).toEqual({ choice: "no" });
 
     await userEvent.keyboard("k1"); // 只剩一张卡：焦点回到它
-    await screen.findByText("没有要你决定的事");
+    await screen.findByText("没有等你决定的事");
     expect(s.calls.find((c) => c.path === "/v1/items/a/decide")!.body).toEqual({ choice: "yes" });
   });
 
@@ -189,7 +189,7 @@ describe("web_only 决策（flow-web-only、flow-life-renewal、flow-first-day�
     expect(within(card).getByText("只能你亲自确认")).toBeInTheDocument();
     expect(within(card).getByText("这类事只能你在这里定。")).toBeInTheDocument();
     await userEvent.click(within(card).getByRole("button", { name: "同意" }));
-    await screen.findByText("没有要你决定的事");
+    await screen.findByText("没有等你决定的事");
     expect(s.calls.find((c) => c.path === "/v1/items/w/decide")!.body).toEqual({ choice: "yes" });
   });
 
@@ -207,13 +207,13 @@ describe("被拒绝的代答（ACT-AUTH-03、flow-decision-answer）", () => {
     const note = within(a).getByRole("note", { name: "被拒绝的代答" });
     expect(note).toHaveTextContent("DEL");
     expect(note).toHaveTextContent("the grant does not cover this action");
-    expect(note).toHaveTextContent("授权单 grt_bad");
+    expect(note).toHaveTextContent("授权 grt_bad");
     expect(within(screen.getByRole("article", { name: "事项 b" })).queryByRole("note")).toBeNull();
   });
 
   it("没有授权单时不显示授权单 id", async () => {
     mount(server([item("a")], undefined, { a: rej({ grant: undefined }) }).impl);
     const note = await screen.findByRole("note", { name: "被拒绝的代答" });
-    expect(note).not.toHaveTextContent("授权单");
+    expect(note).not.toHaveTextContent(" · 授权 ");
   });
 });

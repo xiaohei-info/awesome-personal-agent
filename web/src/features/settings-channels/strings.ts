@@ -31,13 +31,13 @@ const zh = {
   refill: "重新填写",
   testSent: "已送达，去手机上看看",
   problem: {
-    auth_failed: "凭据被拒，提醒暂时只放在网页未读里",
-    unreachable: "连不上服务器，提醒暂时只放在网页未读里",
+    auth_failed: "密钥被拒，提醒暂时只放在今天页的提醒里",
+    unreachable: "连不上服务器，提醒暂时只放在今天页的提醒里",
     rejected: "对方拒收了，检查填写的内容",
     rate_limited: "发得太频繁，稍后会再试",
     recipient_missing: "还没认识你，先完成识别",
     config_invalid: "设置有误，重新填写",
-    credentials_missing: "凭据没填或已失效，重新填写",
+    credentials_missing: "密钥没填或已失效，重新填写",
     target_not_writable: "写不进去，检查目标",
     not_listening: "收听断开了，回答先走网页",
     temporary: "暂时没送出去，稍后会再试",
@@ -64,7 +64,7 @@ const zh = {
   webOnlyNote: "需要你在网页确认的决定，这里只收到链接",
   enableNow: "启用",
   keepOff: "先存着，不启用",
-  confirmRemove: (name: string) => `删除「${name}」？会先停止发送，提醒改为放在网页未读。`,
+  confirmRemove: (name: string) => `删除「${name}」？会先停止发送，提醒改为放在今天页的提醒里。`,
   rawId: (id: string, type: string) => `id ${id} · type ${type}`,
   textOnly: "只能发文字",
   textOnlyHint: "决策会附一个网页表单链接",
@@ -83,14 +83,14 @@ const zh = {
   revoked: "已停用",
   newChannel: "给自己写的程序发钥匙",
   ownProgramWhy: "你自己的脚本或机器人想收提醒、还能回答，就用这个。",
-  ownProgramNotConnected: "签了钥匙不等于接通：程序调通一次前，卡片显示「还没连上过」。",
+  ownProgramNotConnected: "签了钥匙不等于接通：程序调通一次前，卡片显示「还没连通过」。",
   ownProgramVsAdd: "「添加渠道」接的是 APA 自带渠道；自己写的程序走这里。",
   ownProgramVsOutward: "想让程序来取事项或接转发？那是另一回事，去「设置 › 对外接口」。",
   ownProgramHow: "怎么调（最小示例）",
   ownProgramSample: `# 领一条要送的提醒（没有就等 60 秒，然后返回 204）
 curl -H "Authorization: Bearer <钥匙>" "http://<host>:<port>/v1/deliveries/next?wait=60"
 
-# 发出去以后回报送达，version 用领到的那条
+# 发出去以后报告送达，version 用领到的那条
 curl -X POST -H "Authorization: Bearer <钥匙>" -H "Content-Type: application/json" \\
   -d '{"version":1,"external_ref":"msg-1"}' \\
   "http://<host>:<port>/v1/deliveries/<id>/ack"
@@ -103,7 +103,7 @@ curl -X POST -H "Authorization: Bearer <钥匙>" -H "Content-Type: application/j
   channelName: "渠道名",
   create: "发钥匙",
   linkState: "连接状态",
-  neverConnected: "还没连上过",
+  neverConnected: "还没连通过",
   lastUsed: (at: string) => `最近使用 ${at}`,
   secretOnce: "只显示这一次，请立即保存：",
   savedIt: "我已保存",

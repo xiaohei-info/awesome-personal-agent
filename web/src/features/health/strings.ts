@@ -54,7 +54,7 @@ const zh = {
   driftImpact: "Agent 在这些仓库里看到的规范可能是旧的",
   packsImpact: "修好包文件后会自动重新加载",
   modelImpact: { judge: "新消息暂时筛不了", generate: "建议和简报暂时写不出来" } as Record<string, string>,
-  screeningImpact: "这些问题先按需要你亲自确认处理",
+  screeningImpact: "这些问题先按只能你亲自确认处理",
   waitScopeImpact: "选之前这些消息不会被筛",
   fallbackImpact: "它现在只记录，不动手",
   receiptsImpact: "它做的结果没有记上",

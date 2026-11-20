@@ -24,7 +24,7 @@ const zh = {
   title: "我来拍板",
   summary: (n: number) => `${n} 类只能你确认`,
   lede: "这些事 Agent 只能问，不能替你定。",
-  webOnly: "只能我在网页上亲自确认",
+  webOnly: "只能我亲自确认的事",
   custom: "自定义类别",
   addCustom: "添加",
   rulesHead: "另外，以下事项也算：",

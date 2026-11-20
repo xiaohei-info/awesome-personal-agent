@@ -645,7 +645,7 @@ describe("处理积压四步（§9.3、设计 §6.5）", () => {
     expect(screen.queryByRole("region", { name: /积压的/ })).not.toBeInTheDocument();
   });
 
-  it("按顺序走完：规则 → 试打分 → 定线 → 放进建议流；当天放不完时说余下明天", async () => {
+  it("按顺序走完：规则 → 试打分 → 定线 → 放进建议；当天放不完时说余下明天", async () => {
     const b = backend({ sources: [rss], backlog: { count: 5 }, models: { judge: true, generate: true }, release: { requeued: 2, deferred: 1 } });
     mount(b.impl);
     const f = await flow();
@@ -658,7 +658,7 @@ describe("处理积压四步（§9.3、设计 §6.5）", () => {
     expect(await f.findByText("打了 3 条分")).toBeInTheDocument();
     expect(f.getByRole("link", { name: "去定这条线" })).toHaveAttribute("href", "/judgment");
     await userEvent.click(f.getByRole("button", { name: "定好了" }));
-    await userEvent.click(f.getByRole("button", { name: "放进建议流" }));
+    await userEvent.click(f.getByRole("button", { name: "放进建议" }));
     expect(await f.findByText("今天先放 2 条，余下 1 条明天")).toBeInTheDocument();
     expect(posts(b)).toEqual(["rules", "score", "rejudge"]);
     expect(b.calls.find((c) => c.path === "/v1/source-events/rules")!.csrf).toBe("tok-1");
@@ -678,15 +678,15 @@ describe("处理积压四步（§9.3、设计 §6.5）", () => {
     expect(posts(b)).toEqual(["rules"]);
   });
 
-  it("没有打分模型：第 2 步可跳过，直接到放进建议流，不调打分", async () => {
+  it("没有打分模型：第 2 步可跳过，直接到放进建议，不调打分", async () => {
     const b = backend({ sources: [rss], backlog: { count: 5 }, models: { generate: true } });
     mount(b.impl);
     const f = await flow();
     await userEvent.click(f.getByRole("button", { name: "开始" }));
     expect(await f.findByText("没有打分模型")).toBeInTheDocument();
     await userEvent.click(f.getByRole("button", { name: "跳过" }));
-    expect(f.getByText("第 4 步：放进建议流")).toHaveAttribute("aria-current", "step");
-    await userEvent.click(f.getByRole("button", { name: "放进建议流" }));
+    expect(f.getByText("第 4 步：放进建议")).toHaveAttribute("aria-current", "step");
+    await userEvent.click(f.getByRole("button", { name: "放进建议" }));
     expect(await f.findByText("放进了 3 条")).toBeInTheDocument();
     expect(posts(b)).toEqual(["rules", "rejudge"]);
   });
@@ -702,7 +702,7 @@ describe("处理积压四步（§9.3、设计 §6.5）", () => {
     localStorage.setItem("apa.backlog", JSON.stringify({ step: 3, rules: { done: 2, remaining: 3 } }));
     mount(b.impl);
     const f2 = await flow();
-    expect(f2.getByRole("button", { name: "放进建议流" })).toBeDisabled();
+    expect(f2.getByRole("button", { name: "放进建议" })).toBeDisabled();
     expect(f2.getByRole("link", { name: "去恢复" })).toBeInTheDocument();
     expect(posts(b)).toEqual(["rules"]);
   });

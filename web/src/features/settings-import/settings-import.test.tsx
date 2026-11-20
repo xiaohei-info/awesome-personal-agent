@@ -110,7 +110,7 @@ describe("设置 › 导入", () => {
     const row = within(await screen.findByRole("group", { name: "imp_old" }));
     expect(row.getByText(/legacy/)).toBeInTheDocument();
     expect(row.getByText(/新建: 3 · 已存在: 1 · 不合法: 0/)).toBeInTheDocument();
-    expect(row.getByText(/操作者: owner · 授权单: gr_1/)).toBeInTheDocument();
+    expect(row.getByText(/操作者: owner · 授权: gr_1/)).toBeInTheDocument();
     await userEvent.click(row.getByRole("button", { name: "查看批次 imp_old" }));
     const list = await screen.findByRole("list", { name: "批次 imp_old 写入的事项" });
     expect(within(list).getByRole("link", { name: "itm_a" })).toHaveAttribute("href", "/items/itm_a");
@@ -127,16 +127,16 @@ describe("设置 › 导入", () => {
     expect(within(list).getByRole("link", { name: "itm_520" })).toBeInTheDocument();
   });
 
-  it("ACT-WIM-02: 签发导入授权单：只含 import.apply，带来源名、条数上限与有效期（≤7 天）", async () => {
+  it("ACT-WIM-02: 签发导入用的授权：只含 import.apply，带来源名、条数上限与有效期（≤7 天）", async () => {
     const s = server();
     mount(s.impl);
-    const form = within(await screen.findByRole("form", { name: "签发导入授权单" }));
+    const form = within(await screen.findByRole("form", { name: "签发导入用的授权" }));
     await userEvent.type(form.getByLabelText("给哪个 Agent"), "codex");
     await userEvent.type(form.getByLabelText("来源名"), "legacy");
     await userEvent.type(form.getByLabelText("条数上限"), "1000");
     const before = Date.now();
     await userEvent.click(form.getByRole("button", { name: "签发" }));
-    expect(await form.findByText("已签发授权单 gr_9")).toBeInTheDocument();
+    expect(await form.findByText("已签发授权 gr_9")).toBeInTheDocument();
     const g = s.grants[0] as { grantee: unknown; actions: string[]; import: unknown; expires_at: string };
     expect(g.actions).toEqual(["import.apply"]);
     expect(g.grantee).toEqual({ agent: "codex" });
@@ -148,7 +148,7 @@ describe("设置 › 导入", () => {
   it("授权单的有效期超过 168 小时时不发请求", async () => {
     const s = server();
     mount(s.impl);
-    const form = within(await screen.findByRole("form", { name: "签发导入授权单" }));
+    const form = within(await screen.findByRole("form", { name: "签发导入用的授权" }));
     await userEvent.type(form.getByLabelText("给哪个 Agent"), "codex");
     await userEvent.type(form.getByLabelText("来源名"), "legacy");
     await userEvent.type(form.getByLabelText("条数上限"), "10");

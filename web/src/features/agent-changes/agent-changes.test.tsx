@@ -143,11 +143,11 @@ describe("agent 变更视图（flow-agent-revert）", () => {
 describe("授权单代答（ACT-AUTH-03、flow-agent-revert）", () => {
   const viaGrant = (seq: number): Step => ({ seq, type: "decision.resolved", object: "i3", actor: agent, at: "2030-01-01T00:05:00Z", resolved_via: "grant", grant: "grt_ok", payload: { item: { title: "要不要发布" } } });
 
-  it("标明按临时授权（链接到这张授权单）并可撤销；确认里提示外部副作用不撤销，撤销后标记已撤销", async () => {
+  it("标明按授权（链接到这张授权单）并可撤销；确认里提示外部副作用不撤销，撤销后标记已撤销", async () => {
     const s = server([viaGrant(1)]);
     mount(s.impl);
     const a = (await screen.findByRole("heading", { name: /要不要发布/ })).closest("article")!;
-    expect(within(a).getByRole("link", { name: "按临时授权" })).toHaveAttribute("href", "/settings/agents#grant-grt_ok");
+    expect(within(a).getByRole("link", { name: "按授权" })).toHaveAttribute("href", "/settings/agents#grant-grt_ok");
     await userEvent.click(within(a).getByRole("button", { name: "撤销" }));
     expect(within(a).getByText(/已发出的消息、已提的 PR 不会收回/)).toBeInTheDocument();
     await userEvent.click(within(a).getByRole("button", { name: "确认撤销" }));

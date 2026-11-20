@@ -13,7 +13,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 
 // 内置渠道连接的替身：按 api/connections 的契约应答；凭据只回是否已设置。
 const BARK = {
-  type: "bark", direction: "channel", title: { zh: "Bark", en: "Bark" }, tagline: { zh: "推送到 iPhone", en: "Push to iPhone" },
+  type: "bark", direction: "channel", title: { zh: "Bark", en: "Bark" }, tagline: { zh: "发到 iPhone", en: "Push to iPhone" },
   default: { zh: "我的 iPhone", en: "My iPhone" }, via: { zh: "推送服务器", en: "the push server" },
   capabilities: { buttons: false, reply: false, identify: false },
   fields: [
@@ -106,7 +106,7 @@ describe("设置 › 提醒渠道：内置渠道", () => {
     expect(a.getByText(/用来送：等你决定/)).toBeInTheDocument();
     const b = within(screen.getByRole("region", { name: "备用手机" }));
     expect(b.getByText("有问题")).toBeInTheDocument();
-    expect(b.getByRole("alert")).toHaveTextContent("凭据没填或已失效，重新填写");
+    expect(b.getByRole("alert")).toHaveTextContent("密钥没填或已失效，重新填写");
     expect(b.getByRole("button", { name: "重新填写" })).toBeInTheDocument();
     const c = within(screen.getByRole("region", { name: "旧手机" }));
     expect(c.getByText("已停用")).toBeInTheDocument();
@@ -151,11 +151,11 @@ describe("设置 › 提醒渠道：用自己的程序接入", () => {
     expect(s.doc.channel_answerers.old).toEqual(["1"]);
   });
 
-  it("只签了钥匙不算接通：按钥匙最近一次真实调用显示「还没连上过 / 最近使用」", async () => {
+  it("只签了钥匙不算接通：按钥匙最近一次真实调用显示「还没连通过 / 最近使用」", async () => {
     const s = server([{ id: "k1", kind: "ext", scope: "channel.slack" }, { id: "k3", kind: "ext", scope: "channel.mine", last_seen_at: "2030-01-01T10:42:00Z" }]);
     mount(s.impl);
     const a = within(await screen.findByRole("region", { name: "slack" }));
-    expect(a.getByLabelText("连接状态")).toHaveTextContent("还没连上过");
+    expect(a.getByLabelText("连接状态")).toHaveTextContent("还没连通过");
     const b = within(screen.getByRole("region", { name: "mine" }));
     expect(b.getByLabelText("连接状态")).toHaveTextContent(/^最近使用 /);
     expect(screen.getByRole("form", { name: "给自己写的程序发钥匙" })).toBeInTheDocument();

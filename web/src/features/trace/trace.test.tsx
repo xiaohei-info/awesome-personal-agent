@@ -23,7 +23,7 @@ const RULE: TraceData = {
     { at: "2030-01-01T09:20:00Z", who: { kind: "rule", name: "inbound-triage/pr-activity" }, kind: "rule", args: { then: "ignore" }, steps: [step(1, "inbound.disposed", "sev_a")] },
   ],
 };
-// B：判断模型忽略，之后抽查「确实不用」；另一条的判断记录已过保留期。
+// B：打分模型忽略，之后抽查「确实不用」；另一条的判断记录已过保留期。
 const MODEL: TraceData = {
   message: { id: "sev_b", source: "src_mail", type: "mail.received", subject: "领取奖励", sender: "x@example.invalid", sender_verified: false, disposition: "ignored", occurred_at: "2030-01-01T09:00:00Z" },
   entries: [
@@ -33,7 +33,7 @@ const MODEL: TraceData = {
     { at: "2030-01-02T10:00:00Z", who: { kind: "owner" }, kind: "spot", args: { verdict: "correct" }, steps: [step(3, "inbound.spot_reviewed", "sev_b", OWNER)] },
   ],
 };
-// C：判断模型提成建议，起草失败，同一 PR 的三条后续消息挂上（机械记录，折叠），本人驳回。
+// C：打分模型提成建议，起草失败，同一 PR 的三条后续消息挂上（机械记录，折叠），本人驳回。
 const follow = (n: number) => ({ at: `2030-01-01T09:2${n}:00Z`, who: { kind: "source", name: "src_gh" }, kind: "follow", mech: true, args: { state: "attached", subject: `评论 ${n}` }, steps: [step(10 + n, "followmsg.attached", "itm_1")] });
 const PROPOSED: TraceData = {
   message: { id: "sev_c", source: "src_gh", type: "pr.opened", subject: "修登录超时", sender: "alice", sender_verified: true, disposition: "proposed", occurred_at: "2030-01-01T09:00:00Z" },
@@ -115,22 +115,22 @@ describe("一条消息的处理经过（/sources/events/:id）", () => {
   it("被规则忽略：从哪进来、命中的规则用名字称呼、直接忽略", async () => {
     mount("/sources/events/sev_a");
     expect(await screen.findByRole("heading", { name: "改为选填" })).toBeInTheDocument();
-    expect(await lines()).toEqual([expect.stringMatching(/^GitHub收到 alice 的消息 · 未核实/), expect.stringMatching(/^APA 规则「PR 的合并、关闭与更新不用看」直接忽略/)]);
+    expect(await lines()).toEqual([expect.stringMatching(/^GitHub收到 alice 的消息 · 未核实/), expect.stringMatching(/^APA 规则「PR 的合并、关闭与更新直接跳过」直接忽略/)]);
   });
 
-  it("被判断模型忽略：模型名、把握与门槛段用人话写，之后本人抽查「确实不用」", async () => {
+  it("被打分模型忽略：模型名、把握与门槛段用人话写，之后本人抽查「确实不用」", async () => {
     mount("/sources/events/sev_b");
     const l = await lines();
-    expect(l[1]).toMatch(/^APA 规则「邮件交给判断模型」交给判断模型/);
-    expect(l[2]).toMatch(/^判断模型 jev-1值得看的可能 11%，低于 15%：把握高，直接忽略/);
+    expect(l[1]).toMatch(/^APA 规则「邮件交给模型筛」交给模型筛/);
+    expect(l[2]).toMatch(/^打分模型 jev-1值得看的可能 11%，低于 15%：把握高，直接忽略/);
     expect(l[3]).toMatch(/^你抽查时点了「确实不用」/);
   });
 
   it("分类拿不准、对话定案：逐级一行，主语是各自的模型", async () => {
     mount("/sources/events/sev_e");
     const l = await lines();
-    expect(l[0]).toMatch(/^判断模型 jev-1值得看的可能 31%，在 15%–60% 之间：拿不准，交给下一级/);
-    expect(l[1]).toMatch(/^判断模型 haiku-5答「不用看」，直接忽略/);
+    expect(l[0]).toMatch(/^打分模型 jev-1值得看的可能 31%，在 15%–60% 之间：拿不准，交给下一级/);
+    expect(l[1]).toMatch(/^打分模型 haiku-5答「跳过」，直接跳过/);
     expect(l).toHaveLength(2);
   });
 
@@ -138,7 +138,7 @@ describe("一条消息的处理经过（/sources/events/:id）", () => {
     mount("/sources/events/sev_f");
     const l = await lines();
     expect(l[0]).toMatch(/拿不准，交给下一级/);
-    expect(l[1]).toMatch(/^判断模型 haiku-5回答格式不对，没答上/);
+    expect(l[1]).toMatch(/^打分模型 haiku-5回答格式不对，没答上/);
     expect(l[2]).toMatch(/^系统各级都拿不准，按保守做法提成建议（把握低）/);
     expect(l.join()).not.toMatch(/schema/);
   });
@@ -161,18 +161,18 @@ describe("一条消息的处理经过（/sources/events/:id）", () => {
     mount("/sources/events/sev_d");
     const l = await lines();
     expect(l[0]).toMatch(/^GitHub收到一条消息/);
-    expect(l[1]).toMatch(/还没判断：模型连不上，在积压里/);
+    expect(l[1]).toMatch(/还没筛：模型连不上，在积压里/);
     expect(l[2]).toMatch(/判断记录已过保留期，结论是提成建议/);
     expect(l[3]).toMatch(/不清楚是否起草/);
     expect(l[4]).toMatch(/^写作模型一句话摘要没写出来，留空/); // 写作模型的一次生成，不是规则，也不是 Agent 运行
   });
 
-  it("Agent 开工时写明在哪里做、按哪一级设置；还没打开唤醒、改为单独后台会话时说原因", async () => {
+  it("Agent 开工时写明在哪里做、按哪一级设置；还没打开唤醒、改为单独在后台做时说原因", async () => {
     mount("/sources/events/sev_g");
     const l = await lines();
     expect(l[0]).toMatch(/Agent 在和你的对话里接着做 · 按 Agent 设置/);
-    expect(l[1]).toMatch(/Agent 单独开了一个后台会话 · 按这条规则的设置 · Agent 还没打开唤醒，改为单独后台会话/);
-    expect(l[2]).toMatch(/让 Agent 后台开工/);
+    expect(l[1]).toMatch(/Agent 单独开了一个后台会话 · 按这条规则的设置 · Agent 还没打开唤醒，改为单独在后台做/);
+    expect(l[2]).toMatch(/在后台启动 Agent/);
     expect(l.join()).not.toMatch(/wake|headless|main_session/);
   });
 

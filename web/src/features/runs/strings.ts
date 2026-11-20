@@ -3,11 +3,11 @@ import { common } from "../../app/strings";
 
 const zh = {
   ...common.zh,
-  mainRole:"主角色", taskRole:"普通任务", wake:"已有对话", headless:"独立会话", cap:(v:string)=>`权限上限 ${v}`, configuredModel:(v:string)=>`配置模型 ${v}`,
-  sources:{item:"事项选择",schedule:"安排选择",rule:"规则选择",main:"主角色默认",default:"日常默认",resume:"续接原卡"},
-  title: "运行日志",
-  lede: "APA 每次拉起外部程序的记录。",
-  log: "运行日志",
+  mainRole:"主 Agent", taskRole:"日常 Agent", wake:"在对话里接着做", headless:"单独在后台做", cap:(v:string)=>`权限上限 ${v}`, configuredModel:(v:string)=>`配置模型 ${v}`,
+  sources:{item:"事项选择",schedule:"安排选择",rule:"规则选择",main:"跟随主 Agent",default:"跟随日常 Agent",resume:"续接原卡"},
+  title: "运行记录",
+  lede: "APA 每次启动外部程序的记录。",
+  log: "运行记录",
   kind: "类型",
   kinds: { all: "全部", source: "来源拉取", agent: "Agent 任务" },
   failedOnly: "只看失败",
