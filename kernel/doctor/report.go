@@ -28,10 +28,11 @@ const (
 	Channels      = "channels"
 	Secrets       = "secrets"
 	Connections   = "connections"
+	Authz         = "authz"
 )
 
 // Order 是检查的输出顺序。
-var Order = []string{DataDir, Config, Tier, ModelEndpoint, Sources, Packs, HostPlugin, Overlaps, Channels, Secrets, Connections}
+var Order = []string{DataDir, Config, Tier, ModelEndpoint, Sources, Packs, HostPlugin, Overlaps, Channels, Secrets, Connections, Authz}
 
 // Detail 是一项检查里针对某个对象（来源、端点、包、插件、渠道）的结论。
 type Detail struct {

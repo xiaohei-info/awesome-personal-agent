@@ -6,7 +6,7 @@
 // 被拒绝的错误由骨干渲染成统一错误体。本层只做 HTTP 到命令请求的搬运：
 //   - 路径里的 id 注入请求体（体里不许再写 id）；
 //   - Idempotency-Key 头 → 幂等键；If-Match 头 → 期望版本；
-//   - X-APA-Evidence 头（缺省取体里的 evidence）→ 代答所需的本人原话；
+//   - 体里的 evidence（旧客户端的本人原话）被忽略，不参与判定（§14.3）；
 //   - 事项的 Web 链接交给命令请求，由管线在 20/22 拒绝时随错误返回。
 package decisions
 
@@ -73,16 +73,9 @@ func (h *handlers) write(cmd string) core.Handler {
 			}
 		}
 		req := command.Request{Identity: p.Identity, Command: cmd, WebURL: h.webURL(r),
-			IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant}
-		// evidence 是请求元数据，不是命令输入；命令对未知字段严格拒绝，所以从体里取出。
-		if raw, ok := body["evidence"]; ok {
-			delete(body, "evidence")
-			if req.Evidence == "" {
-				if err := json.Unmarshal(raw, &req.Evidence); err != nil {
-					return domain.NewError(domain.CodeInvalidRequest, "evidence must be a string", "send the owner's words as a string")
-				}
-			}
-		}
+			IdemKey: r.Header.Get(IdempotencyHeader)}
+		// 旧客户端带的本人原话（evidence）不参与任何判定（§14.3）：忽略，不报错。
+		delete(body, "evidence")
 		body["id"], _ = json.Marshal(r.PathValue("id"))
 		in, err := json.Marshal(body)
 		if err != nil {

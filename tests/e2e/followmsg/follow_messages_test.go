@@ -87,8 +87,8 @@ func (k *kit) itemCount() int {
 func (k *kit) delegated(title, pr string) string {
 	k.t.Helper()
 	parent := k.idOf("item add", k.Apa(k.DEL, "", "item", "add", "--kind", "task", "--title", title, "--phase", "open",
-		"--project", k.Projects["acc-work"], "--evidence", "e2e 准备父事项"))
-	child := k.idOf("delegate", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", workHost, "--evidence", "e2e 委派"))
+		"--project", k.Projects["acc-work"]))
+	child := k.idOf("delegate", k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", workHost))
 	k.expect("report --pr", k.Apa(k.WRK, "", "report", child, "--outcome", "progress", "--summary", "已开 PR", "--pr", pr), 0)
 	return child
 }
@@ -107,8 +107,8 @@ func TestFlowFollowMessages(t *testing.T) {
 		}
 		// 同一个 PR 不能登记在第二个事项上，说明它已作为关联键登记在 child 上。
 		other := k.idOf("item add", k.Apa(k.DEL, "", "item", "add", "--kind", "task", "--title", "另一个", "--phase", "open",
-			"--project", k.Projects["acc-work"], "--evidence", "e2e"))
-		dup := k.idOf("delegate", k.Apa(k.DEL, "", "delegate", "--parent", other, "--assignee", workHost, "--evidence", "e2e 委派"))
+			"--project", k.Projects["acc-work"]))
+		dup := k.idOf("delegate", k.Apa(k.DEL, "", "delegate", "--parent", other, "--assignee", workHost))
 		k.expect("同一 PR 登记到另一事项", k.Apa(k.WRK, "", "report", dup, "--outcome", "progress", "--summary", "x", "--pr", pr1), exitConflict)
 	})
 
@@ -191,7 +191,10 @@ func TestFlowFollowMessages(t *testing.T) {
 			t.Fatalf("应挂靠且未处理: %+v", ev)
 		}
 		before := len(k.ModelStub.Requests())
-		k.expect("transition done", k.Apa(k.DEL, "", "item", "transition", child, "--to", "done", "--reason", "完成", "--evidence", "e2e 关闭子事项"), 0)
+		// 委派子事项进入 done 要带结果证据：CLI 已不收 --evidence（它是本人原话的旧参数），经 HTTP 体的 evidence 字段给出。
+		if r := k.APIRaw("POST", "/v1/items/"+child+"/transition", `{"to":"done","reason":"完成","evidence":"https://example.invalid/pr/1"}`, k.DEL); r.Code != 200 {
+			t.Fatalf("transition done: %d %s", r.Code, r.Body)
+		}
 		k.waitFor("退回的消息进判断流", 20*1e9, func() bool { return len(k.ModelStub.Requests()) > before })
 		ev, _ := k.event(id)
 		if ev.AttachState != "released" {

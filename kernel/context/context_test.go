@@ -29,7 +29,7 @@ import (
 )
 
 var bg = context.Background()
-var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 var worker = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelWorker}
 
 type env struct {
@@ -199,48 +199,6 @@ func TestInjectEnvelopeIsDataOnly(t *testing.T) {
 	}
 }
 
-// §14.4：web_only 初筛未返回的决策请求不带；web_only 待决不建议代答并提示不要替本人执行；普通待决建议 decide。
-func TestDecisionsHiddenAndWebOnlyNotice(t *testing.T) {
-	e := setup(t)
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-			p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Tag: "funds", Category: policy.CategoryFunds})
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	q := map[string]any{"question": "go?", "options": []map[string]any{{"id": "A", "label": "yes"}, {"id": "A2", "label": "other"}}}
-	plain := e.item(t, map[string]any{"title": "plain", "assignee": "wrk"})
-	risky := e.item(t, map[string]any{"title": "risky", "assignee": "wrk", "tags": []string{"funds"}})
-	hidden := e.item(t, map[string]any{"title": "hidden", "assignee": "wrk"})
-	for _, id := range []string{plain, risky, hidden} {
-		e.do(t, worker, "decision.request", map[string]any{"id": id, "ask": q})
-	}
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, _, _, err := items.Revise(tx, hidden, "test", time.Now(), func(it *domain.Item) error { it.Ask.ScreeningPending = true; return nil })
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	r := e.build(t, Request{Session: "s"})
-	if !eq(ids(r), []string{plain, risky}) {
-		t.Fatalf("screening-pending request must not appear: %v", ids(r))
-	}
-	out := r.Inject()
-	if !strings.Contains(out, webOnlyNotice) {
-		t.Fatalf("web_only notice missing:\n%s", out)
-	}
-	if !strings.Contains(out, "建议：apa decide "+plain) || strings.Contains(out, "apa decide "+risky) {
-		t.Fatalf("decide only for non-web_only:\n%s", out)
-	}
-	if strings.Contains(out, hidden) {
-		t.Fatalf("hidden request leaked:\n%s", out)
-	}
-}
-
 // 指令版本：插件持有旧版本时提示更新，即使没有事项增量；未上报或同版本不提示。
 func TestInstructionVersion(t *testing.T) {
 	e := setup(t)
@@ -365,11 +323,12 @@ func TestProjectMaterialsTitleAndSummaryOnly(t *testing.T) {
 	e := setup(t)
 	pid := e.project(t, "P", "https://git.example/p.git", "box", "/w/p")
 	other := e.project(t, "O", "https://git.example/o.git", "box", "/w/o")
-	commit := func(in map[string]any) materials.Result {
+	commitAs := func(id command.Identity, in map[string]any) materials.Result {
 		var r materials.Result
-		_ = json.Unmarshal(e.do(t, worker, "material.commit", in), &r)
+		_ = json.Unmarshal(e.do(t, id, "material.commit", in), &r)
 		return r
 	}
+	commit := func(in map[string]any) materials.Result { return commitAs(worker, in) }
 	m := commit(map[string]any{"project": pid, "kind": "minutes", "title": "周会纪要", "content": "SECRET-MATERIAL-BODY", "reason": "首版纪要"})
 	commit(map[string]any{"project": other, "kind": "minutes", "title": "别的项目", "content": "x", "reason": "r"})
 	req := Request{Session: "s", Scope: projects.Scope{Flag: pid}}
@@ -385,44 +344,18 @@ func TestProjectMaterialsTitleAndSummaryOnly(t *testing.T) {
 	if r2 := e.build(t, req); len(r2.Materials) != 0 {
 		t.Fatalf("unchanged material must not be resent: %+v", r2.Materials)
 	}
-	v2 := commit(map[string]any{"id": m.Material, "content": "v2", "reason": "补充结论", "based_on": m.Revision})
+	// 改已有材料：本人直接生效（档位只整理的 Agent 会留待确认，那不算变更）。
+	v2 := commitAs(owner, map[string]any{"id": m.Material, "content": "v2", "reason": "补充结论", "based_on": m.Revision})
 	if r3 := e.build(t, req); len(r3.Materials) != 1 || r3.Materials[0].Summary != "补充结论" {
 		t.Fatalf("changed material must be resent with its summary: %+v", r3.Materials)
 	}
 	// 生成型起草了变更摘要的修订，变更摘要取它，不再取修订理由。
-	v3 := commit(map[string]any{"id": m.Material, "content": "v3", "reason": "改结论", "based_on": v2.Revision})
-	e.do(t, worker, "revision.summarize", map[string]any{"id": v3.Revision, "summary": "结论由 A 改为 B"})
+	v3 := commitAs(owner, map[string]any{"id": m.Material, "content": "v3", "reason": "改结论", "based_on": v2.Revision})
+	system := command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "summaries", Via: domain.ViaClock}, Level: authz.LevelDelegate}
+	e.do(t, system, "revision.summarize", map[string]any{"id": v3.Revision, "summary": "结论由 A 改为 B"})
 	if r4 := e.build(t, req); len(r4.Materials) != 1 || r4.Materials[0].Summary != "结论由 A 改为 B" {
 		t.Fatalf("drafted revision summary not used: %+v", r4.Materials)
 	}
-}
-
-// 跨项目视图里的 web_only 提示：即使 cwd 映射到另一个项目，别的项目里待 Web 确认的高风险决策也要提示。
-func TestAllScopeWebOnlyNoticeSpansProjects(t *testing.T) {
-	e := setup(t)
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-			p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Tag: "funds", Category: policy.CategoryFunds})
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	a := e.project(t, "A", "https://git.example/a.git", "box", "/w/a")
-	b := e.project(t, "B", "https://git.example/b.git", "box", "/w/b")
-	risky := e.item(t, map[string]any{"title": "risky", "project": b, "assignee": "wrk", "tags": []string{"funds"}})
-	e.do(t, worker, "decision.request", map[string]any{"id": risky, "ask": map[string]any{"question": "go?", "options": []map[string]any{{"id": "A", "label": "y"}, {"id": "A2", "label": "other"}}}})
-	cwdA := projects.Scope{Cwd: "/w/a", Host: "box"}
-
-	if r := e.build(t, Request{Scope: cwdA}); r.WebOnlyPending || len(r.Items) != 0 {
-		t.Fatalf("scoped to A: B's decision is out of scope: %+v", r)
-	}
-	r := e.build(t, Request{All: true, Scope: cwdA})
-	if !eq(ids(r), []string{risky}) || !r.WebOnlyPending || !strings.Contains(r.Inject(), webOnlyNotice) {
-		t.Fatalf("all-scope lists B's decision, so the notice must be given: %+v", r)
-	}
-	_ = a
 }
 
 // ACT-DLV-05：路由为注入的投递经 apa context 带出；每个会话只给一次并记 injected_to_session，

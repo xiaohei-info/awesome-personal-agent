@@ -89,11 +89,9 @@ func (r resp) code() string {
 
 func (e *env) do(secret, method, path, body string, hdr ...string) resp {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	req.Header.Set(core.EvidenceHeader, "owner: go ahead") // delegate 代理写需要证据；其他凭据不读
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
 		req.Header.Set("X-APA-Session", "s1")
-		req.Header.Set("X-APA-Session-Kind", "direct")
 	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
@@ -198,8 +196,8 @@ func TestAllowedExecutorsCannotBeWrittenThroughProjectRoutes(t *testing.T) {
 	if r := e.do(dlg, "PATCH", "/v1/projects/"+id, body); r.Code != 403 || r.code() != "web_only" {
 		t.Fatalf("delegate PATCH with allowed_executors must be web_only: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(wrk, "PATCH", "/v1/projects/"+id, body); r.Code != 403 || r.code() != "permission_denied" {
-		t.Fatalf("worker PATCH with allowed_executors must be permission_denied: %d %s", r.Code, r.Body)
+	if r := e.do(wrk, "PATCH", "/v1/projects/"+id, body); r.Code != 403 || r.code() != "web_only" {
+		t.Fatalf("worker PATCH with allowed_executors hits the hard line before scope: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(dlg, "POST", "/v1/projects", `{"name":"y","allowed_executors":[]}`); r.Code != 403 || r.code() != "web_only" {
 		t.Fatalf("POST with allowed_executors: %d %s", r.Code, r.Body)
@@ -220,9 +218,27 @@ func TestAllowedExecutorsCannotBeWrittenThroughProjectRoutes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if rejected != 1 {
-		t.Fatalf("want exactly 1 rejection event, got %d", rejected)
+	if rejected != 2 { // 硬线拒绝一律留痕：delegate 与 worker 的 PATCH 各一条
+		t.Fatalf("want exactly 2 rejection events, got %d", rejected)
 	}
+}
+
+// web 以本人 Web 会话（登录即刚验过口令）发请求。
+func (e *env) web(method, path, body string) resp {
+	login := httptest.NewRequest("POST", "/v1/auth/login", strings.NewReader(`{"password":"`+ownerPW+`"}`))
+	login.RemoteAddr = "127.0.0.1:50000"
+	lrec := httptest.NewRecorder()
+	e.srv.Handler().ServeHTTP(lrec, login)
+	var out struct {
+		CSRF string `json:"csrf_token"`
+	}
+	resp{lrec}.into(&out)
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.AddCookie(lrec.Result().Cookies()[0])
+	req.Header.Set(core.CSRFHeader, out.CSRF)
+	rec := httptest.NewRecorder()
+	e.srv.Handler().ServeHTTP(rec, req)
+	return resp{rec}
 }
 
 func TestWebOwnerPatchWithAllowedExecutorsIsStillRejected(t *testing.T) {
@@ -255,7 +271,7 @@ func TestWebOwnerPatchWithAllowedExecutorsIsStillRejected(t *testing.T) {
 	}
 }
 
-func TestReposWorkerEditsCheckoutsDelegateEditsRemotes(t *testing.T) {
+func TestReposWorkerEditsCheckoutsOwnerEditsRemotes(t *testing.T) {
 	e := setup(t)
 	dlg, wrk, obs := e.token(auth.Delegate), e.token(auth.Worker), e.token(auth.Observer)
 	id := e.create(dlg)
@@ -271,10 +287,14 @@ func TestReposWorkerEditsCheckoutsDelegateEditsRemotes(t *testing.T) {
 			t.Fatalf("worker %s: %d %s", body, r.Code, r.Body)
 		}
 	}
-	if r := e.do(dlg, "POST", path, `{"op":"add_remote","remote":"`+remote+`"}`); r.Code != 200 {
+	// 远程仓库是外部接入（3b）：Agent 钥匙一律硬线，只有 Web 本人能增删。
+	if r := e.do(dlg, "POST", path, `{"op":"add_remote","remote":"`+remote+`"}`); r.Code != 403 || r.code() != "web_only" {
 		t.Fatalf("delegate add_remote: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "POST", path, `{"op":"add_remote","remote":"`+remote+`"}`); r.Code != 409 {
+	if r := e.web("POST", path, `{"op":"add_remote","remote":"`+remote+`"}`); r.Code != 200 {
+		t.Fatalf("web add_remote: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("POST", path, `{"op":"add_remote","remote":"`+remote+`"}`); r.Code != 409 {
 		t.Fatalf("duplicate remote: %d %s", r.Code, r.Body)
 	}
 	// worker 可增改本机检出
@@ -306,7 +326,10 @@ func TestReposWorkerEditsCheckoutsDelegateEditsRemotes(t *testing.T) {
 	if got := e.project(obs, id); len(got.Repos[0].Checkouts) != 0 {
 		t.Fatalf("checkout not removed: %+v", got.Repos)
 	}
-	if r := e.do(dlg, "POST", path, `{"op":"remove_remote","remote":"`+remote+`"}`); r.Code != 200 {
+	if r := e.do(dlg, "POST", path, `{"op":"remove_remote","remote":"`+remote+`"}`); r.Code != 403 || r.code() != "web_only" {
+		t.Fatalf("delegate remove_remote: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("POST", path, `{"op":"remove_remote","remote":"`+remote+`"}`); r.Code != 200 {
 		t.Fatalf("remove_remote: %d %s", r.Code, r.Body)
 	}
 	if got := e.project(obs, id); len(got.Repos) != 0 {
@@ -319,7 +342,7 @@ func TestResolveMapsDirectoryToProject(t *testing.T) {
 	dlg, wrk, obs := e.token(auth.Delegate), e.token(auth.Worker), e.token(auth.Observer)
 	id := e.create(dlg)
 	path := "/v1/projects/" + id + "/repos"
-	e.do(dlg, "POST", path, `{"op":"add_remote","remote":"git@h:a/b.git"}`)
+	e.web("POST", path, `{"op":"add_remote","remote":"git@h:a/b.git"}`)
 	e.do(wrk, "POST", path, `{"op":"set_checkout","remote":"git@h:a/b.git","host":"mac","path":"/src/app"}`)
 
 	resolve := func(q string) (int, struct{ Project *domain.Project }) {

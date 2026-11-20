@@ -50,13 +50,13 @@ func lacks(t *testing.T, what, s string, subs ...string) {
 // delegate 用 DEL 代本人在账本里建子事项。
 func (f *fx) delegate(parent, assignee string) string {
 	f.t.Helper()
-	return idOf(f.t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", assignee, "--evidence", "把它交给 "+assignee).Stdout)
+	return idOf(f.t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", assignee).Stdout)
 }
 
 func (f *fx) workItem(title string) string {
 	f.t.Helper()
 	return idOf(f.t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open",
-		"--project", f.Projects["acc-work"], "--evidence", "验收准备").Stdout)
+		"--project", f.Projects["acc-work"]).Stdout)
 }
 
 // TestFlowDelegateRecover 对应验收文档 flow-delegate-recover（ACT-DLG-02..10；ACT-DLG-01 是 flow-step，归环境基线）：
@@ -70,7 +70,7 @@ func TestFlowDelegateRecover(t *testing.T) {
 
 	t.Run("ACT-DLG-02 建立委派子事项", func(t *testing.T) {
 		parent = f.workItem("DLG2 修复登录超时")
-		code, out, errs := f.apaEnv(f.DEL, "", session, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--evidence", "把它交给 work-host.cli")
+		code, out, errs := f.apaEnv(f.DEL, "", session, "delegate", "--parent", parent, "--assignee", "work-host.cli")
 		if code != 0 {
 			t.Fatalf("apa delegate 退出码 %d: %s%s", code, out, errs)
 		}
@@ -158,7 +158,7 @@ func TestFlowDelegateRecover(t *testing.T) {
 		f.apa(f.WRK, 0, "ask", b, "--question", "需要本人决定", "--option", "A=继续", "--option", "B=放弃")
 		eq(t, "一个 done 一个 needs_input 时的子事项", f.phase(b), "needs_input")
 		eq(t, "一个 done 一个 needs_input 时父事项", f.phase(p8), "waiting")
-		f.apa(f.DEL, 0, "item", "transition", b, "--to", "dropped", "--reason", "不做了", "--evidence", "不做了")
+		f.apa(f.DEL, 0, "item", "transition", b, "--to", "dropped", "--reason", "不做了")
 		eq(t, "两者都到终态后父事项", f.phase(p8), "open")
 	})
 

@@ -94,7 +94,7 @@ func TestBacklogRejudgeOnUpgradedFixture(t *testing.T) {
 		}
 		return
 	}
-	words := map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "direct", "X-APA-Evidence": "本人：放开"}
+	words := map[string]string{"X-APA-Session": "s1"} // 积压各步是一档：delegate 不要本人原话
 
 	// 本人在 Web 配上两个端点。
 	lg, _ := json.Marshal(map[string]string{"password": m.WebSecret})
@@ -131,10 +131,7 @@ func TestBacklogRejudgeOnUpgradedFixture(t *testing.T) {
 	cls.PYes(modelstub.Key{Contains: "[FX-MID]"}, 0.40)
 	cls.PYes(modelstub.Key{Contains: "[FX-LOW]"}, 0.05)
 
-	// 缺本人原话、observer、负的 limit 都被拒，积压不变。
-	if code, _ := do("POST", "/source-events/rejudge", m.Tokens["delegate"], map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "direct"}, `{}`); code != 403 {
-		t.Fatalf("rejudge without words: %d", code)
-	}
+	// observer、负的 limit 都被拒，积压不变。
 	if code, _ := do("POST", "/source-events/rejudge", m.Tokens["observer"], words, `{}`); code != 403 {
 		t.Fatalf("observer rejudge: %d", code)
 	}

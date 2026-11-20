@@ -81,7 +81,7 @@ func idOf(t *testing.T, stdout string) string {
 func (f *fx) add(project, title, phase string, extra ...string) string {
 	f.t.Helper()
 	args := append([]string{"item", "add", "--kind", "task", "--title", title, "--phase", phase, "--assignee", "work-host.cli",
-		"--project", f.Projects[project], "--evidence", "验收建事项"}, extra...)
+		"--project", f.Projects[project]}, extra...)
 	return idOf(f.t, f.apa(f.DEL, 0, args...).Stdout)
 }
 
@@ -184,7 +184,7 @@ func (f *fx) declareSelfcheck(harness string, selfcheck []string) {
 			"resume": []string{bin, "--resume", "{prompt}"},
 			"access": map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}}},
 		"selfcheck": map[string]any{"command": selfcheck}})
-	r := f.Apa(f.DEL, string(decl), "declare", "-", "--evidence", "提交带自检命令的声明")
+	r := f.Apa(f.DEL, string(decl), "declare", "-")
 	var out struct {
 		Rev int `json:"rev"`
 	}

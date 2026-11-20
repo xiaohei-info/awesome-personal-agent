@@ -142,10 +142,11 @@ func TestFlowDigestAlert(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-DGA-06 alert 规则只能在 Web 切到 auto", func(t *testing.T) {
+	// 2026-11-20 改写：切规则模式是 3a，档位未放开的 Agent（DELO）得 23（403 tier_closed）。
+	k.step("ACT-DGA-06 alert 规则不能由档位未放开的 Agent 切到 auto", func(t *testing.T) {
 		path := "/v1/rules/" + url.PathEscape(ruleKey) + "/mode"
-		if r := e.APIRaw("PATCH", path, `{"mode":"auto"}`, e.DEL); r.Code != 403 {
-			t.Errorf("DEL 切 auto 应 403，实际 %d %s", r.Code, r.Body)
+		if r := e.APIRaw("PATCH", path, `{"mode":"auto"}`, e.DELO); r.Code != 403 || !strings.Contains(r.Body, "tier_closed") {
+			t.Errorf("只整理的 DEL 切 auto 应 403 tier_closed，实际 %d %s", r.Code, r.Body)
 		}
 		if s := rules(t, e)["metric-over-limit"]; s.Mode != "observe" {
 			t.Errorf("被拒后应仍为 observe: %+v", s)
@@ -277,8 +278,8 @@ func TestFlowDigestAlert(t *testing.T) {
 		defer k.setDisturb(map[string]any{"routes": map[string]string{"decision": "acc-chan", "reminder": "acc-chan", "brief": "web", "health": "web", "wake": "web"},
 			"merge_window_sec": 0, "daily_cap": 20})
 		// 用掉当天额度：一个即将到期的事项产生普通提醒
-		r := e.Apa(e.WRK, "", "item", "add", "--kind", "task", "--title", "acc-cap-deadline", "--summary", "占用当天提醒额度", "--phase", "open", "--assignee", "work-host.cli",
-			"--project", e.Projects["acc-work"], "--evidence", "占用额度")
+		r := e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--title", "acc-cap-deadline", "--summary", "占用当天提醒额度", "--phase", "open", "--assignee", "work-host.cli",
+			"--project", e.Projects["acc-work"])
 		var created ledgerItem
 		if r.Code != 0 {
 			t.Fatalf("建事项: %d %s%s", r.Code, r.Stdout, r.Stderr)
@@ -338,13 +339,13 @@ func TestFlowDigestAlert(t *testing.T) {
 		k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"acc-stub-brief"}`, 200)
 		plan := func(title string, extra ...string) {
 			args := append([]string{"item", "add", "--kind", "task", "--title", title, "--summary", title, "--phase", "open", "--assignee", "work-host.cli",
-				"--project", e.Projects["acc-home"], "--evidence", "准备计划日期数据"}, extra...)
-			k.apa(e.WRK, 0, args...)
+				"--project", e.Projects["acc-home"]}, extra...)
+			k.apa(e.DEL, 0, args...) // 直接新建为进行中的事项是二档：由档位放开的 Agent 建（2026-11-20）
 		}
 		plan("acc-plan-today", "--planned-for", today)
 		plan("acc-plan-tomorrow", "--planned-for", tomorrow)
 		plan("acc-plan-none")
-		r := k.apa(e.DEL, 0, "--evidence", "owner: 建简报实例", "instance", "add", "brief", "--param", "schedule=* * * * *")
+		r := k.apa(e.DEL, 0, "instance", "add", "brief", "--param", "schedule=* * * * *")
 		var inst struct {
 			ID string `json:"id"`
 		}
@@ -475,7 +476,7 @@ func TestFlowDigestAlert(t *testing.T) {
 		}
 		k.must(os.RemoveAll(filepath.Join(packs, "acc-watch")))
 		k.restart()
-		k.apa(e.DEL, 0, "--evidence", "owner: 停用简报实例", "instance", "disable", briefInstance)
+		k.apa(e.DEL, 0, "instance", "disable", briefInstance)
 		if _, ok := packList(t, e)["acc-watch"]; ok {
 			t.Error("acc-watch 不应在 pack list 中")
 		}

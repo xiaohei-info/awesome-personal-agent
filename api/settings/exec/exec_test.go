@@ -140,7 +140,7 @@ const declJSON = `{"harness":"acme","headless":{"command":["acme","run","{prompt
 
 func (e *env) project(name string) string {
 	e.t.Helper()
-	res, err := e.x.Do(bg, command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb},
+	res, err := e.x.Do(bg, command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true},
 		Command: "project.create", Input: json.RawMessage(`{"name":"` + name + `"}`)})
 	if err != nil {
 		e.t.Fatal(err)
@@ -165,8 +165,8 @@ func TestAllowedExecutorsWebOnlyAndAudited(t *testing.T) {
 		t.Fatalf("each change must be recorded as an event, got %d", n)
 	}
 
-	// 非 Web 入口：delegate 得 web_only(403)，worker/observer 得 permission_denied，名单不变。
-	for kind, want := range map[auth.Kind]domain.Code{auth.Delegate: domain.CodeWebOnly, auth.Worker: domain.CodePermissionDenied, auth.Observer: domain.CodePermissionDenied} {
+	// 非 Web 入口：项目允许的执行者是 3b，任何 Agent 钥匙都是硬线 web_only(403，先于范围)，名单不变。
+	for kind, want := range map[auth.Kind]domain.Code{auth.Delegate: domain.CodeWebOnly, auth.Worker: domain.CodeWebOnly, auth.Observer: domain.CodeWebOnly} {
 		r := e.do("PUT", path, `{"executors":null}`, e.token(kind))
 		if r.Code < 400 || code(t, r) != want {
 			t.Fatalf("%s PUT: %d %s, want %s", kind, r.Code, r.Body, want)
@@ -229,8 +229,8 @@ func TestDeclarationsAndCommandRegistration(t *testing.T) {
 	if r := e.web("GET", "/v1/settings/commands", ""); strings.Contains(r.Body.String(), "acme") {
 		t.Fatalf("pending declaration must not be an active command: %s", r.Body)
 	}
-	// worker 凭据不能确认；delegate 得 web_only。
-	if r := e.do("POST", "/v1/settings/declarations/acme/1/confirm", "", plugin); r.Code != 403 || code(t, r) != domain.CodePermissionDenied {
+	// 确认接入声明是 3b：worker 与 delegate 都得 web_only。
+	if r := e.do("POST", "/v1/settings/declarations/acme/1/confirm", "", plugin); r.Code != 403 || code(t, r) != domain.CodeWebOnly {
 		t.Fatalf("worker confirm: %d %s", r.Code, r.Body)
 	}
 	if r := e.do("POST", "/v1/settings/declarations/acme/1/confirm", "", e.token(auth.Delegate)); r.Code != 403 || code(t, r) != domain.CodeWebOnly {
@@ -309,18 +309,15 @@ func (e *env) listed(id string) bool {
 	return ok
 }
 
-// 项目名单的匹配规则经同一路由读写（§14.7）。
-func TestAllowedExecutorsMatchRoundTrip(t *testing.T) {
+// 按主机与宿主维度的匹配规则已取消（§14.7）：名单只认执行者 id，带 match 的写入是 400，名单不变；读回不再给 match。
+func TestAllowedExecutorsMatchIsRejected(t *testing.T) {
 	e := setup(t)
 	pid := e.project("acc-work")
-	r := e.web("PUT", "/v1/settings/projects/"+pid+"/allowed-executors", `{"executors":[],"match":[{"host":"mbp"}]}`)
-	if r.Code != 200 || !strings.Contains(r.Body.String(), `"match":[{"host":"mbp"}]`) {
+	path := "/v1/settings/projects/" + pid + "/allowed-executors"
+	if r := e.web("PUT", path, `{"executors":[],"match":[{"host":"mbp"}]}`); r.Code != 400 || code(t, r) != domain.CodeInvalidRequest {
 		t.Fatalf("put match: %d %s", r.Code, r.Body)
 	}
-	if r := e.web("PUT", "/v1/settings/projects/"+pid+"/allowed-executors", `{"executors":null,"match":[{}]}`); r.Code != 400 {
-		t.Fatalf("empty match rule: %d %s", r.Code, r.Body)
-	}
-	if r := e.web("GET", "/v1/settings/projects/"+pid+"/allowed-executors", ""); !strings.Contains(r.Body.String(), `"host":"mbp"`) {
-		t.Fatalf("get: %s", r.Body)
+	if r := e.web("GET", path, ""); r.Code != 200 || strings.Contains(r.Body.String(), "mbp") || !strings.Contains(r.Body.String(), `"allowed_executors":null`) {
+		t.Fatalf("get: %d %s", r.Code, r.Body)
 	}
 }

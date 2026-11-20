@@ -168,7 +168,7 @@ func TestDLV07(t *testing.T) {
 	ver := old[strings.LastIndex(old, ":")+1:]
 
 	// 本人（DEL）改了事项的无关字段，待决决策以更高版本重发，old 成为低于当前版本的旧投递。
-	f.apa(f.DEL, 0, "item", "update", id, "--title", "dlv-07-v2", "--reason", "改名", "--evidence", "事项变化")
+	f.apa(f.DEL, 0, "item", "update", id, "--title", "dlv-07-v2", "--reason", "改名")
 	cur := f.waitBacklog("decision:" + id + ":")
 	for end := time.Now().Add(settle); cur == old && time.Now().Before(end); time.Sleep(time.Second) {
 		cur = f.waitBacklog("decision:" + id + ":")

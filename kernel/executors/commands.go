@@ -40,18 +40,19 @@ type Options struct {
 //	executor.register  本人直接登记声明（主机配置文件走这里），立即生效
 //	executor.put / executor.remove       本人维护清单项
 //
-// 登记、确认、维护都按"改设置"授权：只有 Web 上的本人可做，delegate 得到退出码 20，CLI 凭据得到退出码 4（§14.12）。
+// 登记、确认、维护与 Agent 卡片都是 3b（造新权力，§14.3）：只有 Web 上的本人、再输一次口令后可做；
+// delegate 得到退出码 20（硬线），其余钥匙得到退出码 4（范围外）。
 func Register(x *command.Executor, o Options) error {
 	for _, s := range []command.Spec{
-		{Name: "agent.configure", Action: authz.ActionChangeSettings, Object: noObject, Apply: saveCard},
-		{Name: "executor.list", Action: authz.ActionRead, Object: noObject, Apply: o.list},
-		{Name: "executor.declare", Action: authz.ActionSubmitPlugin, Tier: authz.TierWork, Object: declObject, Apply: apply(declare)},
-		{Name: "executor.pending", Action: authz.ActionSubmitPlugin, Object: noObject, Apply: pending},
-		{Name: "executor.confirm", Action: authz.ActionChangeSettings, Object: refObject, Apply: apply2(confirm)},
-		{Name: "executor.reject", Action: authz.ActionChangeSettings, Object: refObject, Apply: apply2(reject)},
-		{Name: "executor.register", Action: authz.ActionChangeSettings, Object: declObject, Apply: apply(register)},
-		{Name: "executor.put", Action: authz.ActionChangeSettings, Object: putObject, Apply: put},
-		{Name: "executor.remove", Action: authz.ActionChangeSettings, Object: idObject, Apply: remove},
+		{Name: "agent.configure", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: noObject, Apply: saveCard},
+		{Name: "executor.list", Action: authz.ActionRead, Tier: authz.TierRead, Object: noObject, Apply: o.list},
+		{Name: "executor.declare", Action: authz.ActionSubmitPlugin, Tier: authz.TierOrganize, Object: declObject, Apply: apply(declare)},
+		{Name: "executor.pending", Action: authz.ActionSubmitPlugin, Tier: authz.TierRead, Object: noObject, Apply: pending},
+		{Name: "executor.confirm", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: refObject, Apply: apply2(confirm)},
+		{Name: "executor.reject", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: refObject, Apply: apply2(reject)},
+		{Name: "executor.register", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: declObject, Apply: apply(register)},
+		{Name: "executor.put", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/executors", Object: putObject, Apply: put},
+		{Name: "executor.remove", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/executors", Object: idObject, Apply: remove},
 	} {
 		if err := x.Register(s); err != nil {
 			return err

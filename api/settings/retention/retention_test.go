@@ -68,7 +68,7 @@ func setup(t *testing.T) *env {
 			e.cookie = c
 		}
 	}
-	web := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	web := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	for cmd, in := range map[string]string{
 		registry.CmdRegisterExec: `{"id":"src_ret","command":"echo","schedule":"1m","timeout":30}`,
 	} {

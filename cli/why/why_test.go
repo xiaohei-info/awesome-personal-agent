@@ -225,16 +225,18 @@ func TestWhyEscapesIDInPath(t *testing.T) {
 	}
 }
 
-// --pretty 对自动动作、代答、抹除与初筛中的回放逐项标注，不丢授权依据。
-func TestRenderShowsBasisChainErasureAndScreening(t *testing.T) {
-	tl := kwhy.Timeline{ID: "item_1", ScreeningPending: true, Steps: []kwhy.Step{
+// --pretty 对自动动作、旧模型的代答、抹除逐项标注，不丢授权依据；新事件写明凭什么（basis via 与档）。
+func TestRenderShowsBasisChainAndErasure(t *testing.T) {
+	tl := kwhy.Timeline{ID: "item_1", Steps: []kwhy.Step{
 		{Seq: 7, At: "2026-01-01T00:00:00Z", Type: "item.stage_changed", ChainDepth: 2, ResolvedVia: "chat",
 			Actor: domain.Actor{Type: domain.ActorAgent, Principal: "bot", Via: domain.ViaCLI, OnBehalfOf: "owner"},
 			Basis: &domain.Basis{PolicyVersion: 12, RuleID: "r1"}, Evidence: "ok go", Payload: json.RawMessage(`{"to":"doing"}`)},
 		{Seq: 8, Type: "item.created", Tombstone: true, Redacted: true},
+		{Seq: 9, Type: "decision.resolved", Actor: domain.Actor{Type: domain.ActorAgent, Principal: "bot", Via: domain.ViaCLI},
+			Basis: &domain.Basis{PolicyVersion: 13, Via: domain.BasisAllowance, Tier: "decide"}},
 	}}
 	out := render(tl)
-	for _, want := range []string{"screening pending", "policy v12 rule r1", "depth 2", "resolved via chat", "on behalf of owner",
+	for _, want := range []string{"basis " + domain.BasisAllowance + " tier decide", "policy v12 rule r1", "depth 2", "resolved via chat", "on behalf of owner",
 		"evidence: ok go", `payload: {"to":"doing"}`, "[erased]", "[redacted]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)

@@ -19,6 +19,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/instances"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
@@ -105,17 +106,38 @@ func (k *kernel) token(kind auth.Kind) string {
 	return secret
 }
 
+// rulesAgent 签一把归属 Agent 的 delegate 钥匙，并由本人把它放开到「连日常规矩也替我改」：安排是 3a。
+func (k *kernel) rulesAgent() string {
+	k.t.Helper()
+	var secret string
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, s, err := k.au.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_r", Harness: "h"})
+		if err != nil {
+			return err
+		}
+		secret = s
+		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent["agent_r"] = policy.AgentAllowance{Tier: policy.AllowRules}
+			return nil
+		})
+		return err
+	}); err != nil {
+		k.t.Fatal(err)
+	}
+	return secret
+}
+
 type result struct {
 	code        int
 	out, errOut string
 }
 
 func run(url, token string, args ...string) result {
-	vars := map[string]string{"APA_URL": url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct"}
+	vars := map[string]string{"APA_URL": url, "APA_TOKEN": token, "APA_SESSION": "s1"}
 	var out, errb bytes.Buffer
 	env := client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: "/nonexistent",
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient}
-	return result{client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), env), out.String(), errb.String()}
+	return result{client.Main(args, env), out.String(), errb.String()}
 }
 
 func (k *kernel) apa(token string, args ...string) result { return run(k.url, token, args...) }
@@ -142,9 +164,13 @@ func TestPackListShowsLoadedPacks(t *testing.T) {
 }
 
 // ACT-PACK-02/06：add 把 --param 交给内核按 instance_params 校验；list/enable/disable 驱动实例状态。
+// 安排是 3a：只整理的 delegate 为 23，放开到日常规矩的 Agent 可以做。
 func TestInstanceLifecycle(t *testing.T) {
 	k := newKernel(t)
-	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	dlg, obs := k.rulesAgent(), k.token(auth.Observer)
+	if r := k.apa(k.token(auth.Delegate), "instance", "add", "brief", "--param", "schedule=24h"); r.code != 23 {
+		t.Fatalf("organize-only add: %+v", r)
+	}
 
 	r := k.apa(dlg, "instance", "add", "brief", "--param", "schedule=24h", "--param", "limit=3")
 	in := r.instance(t)
@@ -171,7 +197,7 @@ func TestInstanceLifecycle(t *testing.T) {
 
 func TestInstanceFailureSemantics(t *testing.T) {
 	k := newKernel(t)
-	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	dlg, obs := k.rulesAgent(), k.token(auth.Observer)
 	real := k.apa(dlg, "instance", "add", "brief", "--param", "schedule=24h").instance(t)
 	cases := []struct {
 		name  string

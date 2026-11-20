@@ -58,7 +58,7 @@ func TestFlowClockDue(t *testing.T) {
 		for _, title := range []string{"missed-1", "missed-2", "missed-3"} {
 			// 低优先级提醒才进合并窗口。
 			id := f.idOf(f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--priority", "low",
-				"--project", f.Projects["acc-work"], "--evidence", "建个任务"))
+				"--project", f.Projects["acc-work"]))
 			f.setDeadline(id, due)
 			ids = append(ids, id)
 		}

@@ -33,7 +33,7 @@ func Routes(x *command.Executor) core.RouteGroup {
 			if err != nil {
 				return err
 			}
-			res, err := x.Do(r.Context(), command.Request{Identity: p.Identity, Command: registry.CmdSetRetention, Input: raw, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL})
+			res, err := x.Do(r.Context(), command.Request{Identity: p.Identity, Command: registry.CmdSetRetention, Input: raw, WebURL: p.WebURL})
 			if err != nil {
 				return err
 			}

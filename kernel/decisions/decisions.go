@@ -1,17 +1,15 @@
-// Package decisions 是决策模块（设计 §7.2、§14.4、§14.5）：决策请求、回答、接受或丢弃建议，
-// 以及到期按默认值决定。事项投影归事项中心，本包经 items.Revise 修改、经命令模型落事件，不直写其表。
-// 授权由命令管线统一判定：web_only 拒绝（退出码 20）、初筛未返回（22）、运行身份（4）以及代答证据，
-// 被拒绝的各类都由管线记 command.rejected。只认第一次回答：后到的回答返回退出码 6。
+// Package decisions 是决策模块（设计 §7.2、§14.3）：决策请求、回答、接受或丢弃建议。
+// 事项投影归事项中心，本包经 items.Revise 修改、经命令模型落事件，不直写其表。
+// 授权由命令管线统一判定：提问是一档；回答与处理建议是二档（Agent 的档位放开才行）。问题永不超时代答。
+// 只认第一次回答：后到的回答返回退出码 6。
 //
-// 本包不做判断型初筛、不决定何时提醒、不处理材料修订（revision.confirm / reject）、不处理渠道转达。
+// 本包不决定何时提醒、不处理材料修订（revision.confirm / reject）、不处理渠道转达。
 package decisions
 
 import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist/trust"
-	"slices"
 	"strings"
 	"time"
 
@@ -21,13 +19,14 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 决定入口（Resolution.ResolvedVia，§6.3）。
+// 决定入口（Resolution.ResolvedVia，§6.3）：web 是本人在 Web；agent 是档位放开的 Agent 替本人答；渠道回答记渠道名。
+// chat（凭本人原话代答）、timeout（超时默认）、grant（授权单）是旧模型的取值，不再产生，只为读旧记录保留。
 const (
 	ViaWeb     = "web"
+	ViaAgent   = "agent"
 	ViaChat    = "chat"
 	ViaTimeout = "timeout"
 	ViaGrant   = domain.ResolvedViaGrant
@@ -74,20 +73,10 @@ type ref struct {
 
 // Register 在命令执行器上登记 decision.request、decision.answer、proposal.accept、proposal.dismiss。
 //
-// 授权（§14.3）：提交决策请求按"更新自己的事项"；回答、接受、丢弃按代答：Web 本人可，delegate 必须附本人原话，
-// web_only 得到 20、初筛未返回得到 22，观察者、worker 与运行凭据得到 4。
-func Register(x *command.Executor) error { return RegisterWith(x, nil) }
-
-// Screening 是 web_only 初筛模块在 decision.request 事务内的两个接入点（§14.4）。
-// 判断与模型调用都不在这里：Needed 只据账本回答"这条请求要不要初筛"，Begin 在同一事务写下判断型 Run 的起点。
-type Screening interface {
-	Needed(tx *store.Tx, it domain.Item) (bool, error)
-	Begin(c *command.Ctx, it domain.Item) error
-}
-
-// RegisterWith 同 Register；s 非空时，决策请求按 s.Needed 在同一事务置 screening_pending 并调 s.Begin。
-func RegisterWith(x *command.Executor, s Screening) error {
-	for _, sp := range []command.Spec{request(s), answer(), proposal("proposal.accept", domain.PhaseOpen, "proposal accepted"),
+// 档位（§14.3）：提交决策请求是一档；回答、接受、丢弃是二档，AGENTS.md 漂移问题的回答是 3a（改以后同步写进仓库的内容）。
+// observer 得到 4（范围外）。
+func Register(x *command.Executor) error {
+	for _, sp := range []command.Spec{request(), answer(), proposal("proposal.accept", domain.PhaseOpen, "proposal accepted"),
 		proposal("proposal.dismiss", domain.PhaseDropped, "proposal dismissed")} {
 		if err := x.Register(sp); err != nil {
 			return err
@@ -96,7 +85,7 @@ func RegisterWith(x *command.Executor, s Screening) error {
 	return nil
 }
 
-// object 解析授权对象：全部字段来自账本（含内核维护的风险类别与初筛状态），不来自输入。
+// object 解析授权对象：全部字段来自账本，不来自输入。
 func object(tx *store.Tx, id string) (authz.Object, domain.Item, error) {
 	if blank(id) {
 		return authz.Object{}, domain.Item{}, invalid("item id is required")
@@ -105,22 +94,15 @@ func object(tx *store.Tx, id string) (authz.Object, domain.Item, error) {
 	if err != nil {
 		return authz.Object{}, it, err
 	}
-	o := authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Tags: it.Tags, Project: it.Project}
-	if a := it.Ask; a != nil {
-		o.Category, o.ScreeningPending = a.RiskClass, a.ScreeningPending
-	}
-	return o, it, nil
+	return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Project: it.Project}, it, nil
 }
 
-// viaOf：Web 上的本人记 web，依据授权单的记 grant，其余（附证据的 delegate）记 chat（§14.5）。
+// viaOf：Web 上的本人记 web，其余（档位放开的 Agent、内核）记 agent：Agent 替本人答的每一条都可见、可按次撤回（§14.3）。
 func viaOf(c *command.Ctx) string {
 	if c.Caller.Level == authz.LevelWeb {
 		return ViaWeb
 	}
-	if c.Grant != "" {
-		return ViaGrant
-	}
-	return ViaChat
+	return ViaAgent
 }
 
 func reasonOr(r, def string) string {
@@ -132,23 +114,12 @@ func reasonOr(r, def string) string {
 
 // ---- decision.request ----
 
-// riskClass 按策略规则定出风险类别（§14.4）：取第一条命中的规则；判定与调用方写的任何字段无关。
-func riskClass(p policy.Policy, it domain.Item) string {
-	for _, r := range p.WebOnly.Rules {
-		if (r.Kind == "" || r.Kind == string(it.Kind)) && (r.Tag == "" || slices.Contains(it.Tags, r.Tag)) &&
-			(r.Project == "" || r.Project == it.Project) {
-			return r.Category
-		}
-	}
-	return ""
-}
-
-func request(scr Screening) command.Spec {
+func request() command.Spec {
 	parse := func(in json.RawMessage) (requestIn, error) {
 		var v requestIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "decision.request", Action: authz.ActionUpdateOwn, Tier: authz.TierWork,
+	return command.Spec{Name: "decision.request", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -170,41 +141,16 @@ func request(scr Screening) command.Spec {
 			default:
 				return conflict("decision requests can only be made on open or waiting items", "re-read the item")
 			}
-			if err := checkAsk(v.Ask, it); err != nil {
-				return err
-			}
-			if v.Ask.DefaultOnTimeout != "" {
-				_, pol, err := policy.Current(tx)
-				if err != nil {
-					return err
-				}
-				cls := riskClass(pol, it)
-				if authz.WebOnly(pol, authz.Object{Kind: string(it.Kind), Tags: it.Tags, Project: it.Project, Category: cls}) {
-					return invalid("web_only decisions cannot have default_on_timeout")
-				}
-			}
-			return nil
+			return checkAsk(v.Ask, it)
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
 			if (v.Ask.Code != "" || v.Ask.Params != nil) && c.Caller.Actor.Type != domain.ActorSystem && c.Caller.Level != authz.LevelWeb {
 				return nil, invalid("ask.code and ask.params are written by the kernel only")
 			}
-			_, pol, err := policy.Current(c.Tx)
-			if err != nil {
-				return nil, err
-			}
-			screen := false
 			_, it, snap, err := items.Revise(c.Tx, v.ID, "decision.request", c.Now(), func(it *domain.Item) error {
-				it.Ask = &domain.Ask{AskInput: v.Ask, AskKernelState: domain.AskKernelState{RiskClass: riskClass(pol, *it)}}
+				it.Ask = &domain.Ask{AskInput: v.Ask}
 				it.Phase, it.WaitingOn = domain.PhaseNeedsInput, nil
-				if scr != nil {
-					var err error
-					if screen, err = scr.Needed(c.Tx, *it); err != nil {
-						return err
-					}
-					it.Ask.ScreeningPending = screen
-				}
 				return nil
 			})
 			if err != nil {
@@ -213,22 +159,12 @@ func request(scr Screening) command.Spec {
 			if err := cancelTimer(c.Tx, it.ID); err != nil {
 				return nil, err
 			}
-			if v.Ask.DefaultOnTimeout != "" {
-				if _, err := clock.Add(c.Tx, domain.Timer{ID: TimerID(it.ID), Target: it.ID, Kind: domain.TimerDue, At: *v.Ask.Deadline}); err != nil {
-					return nil, err
-				}
-			}
-			if _, err = c.Emit(domain.Event{Type: domain.EvDecisionRequested, Object: it.ID, Reason: reasonOr(v.Reason, "decision requested"), Payload: snap}); err != nil {
-				return nil, err
-			}
-			if screen {
-				err = scr.Begin(c, it)
-			}
+			_, err = c.Emit(domain.Event{Type: domain.EvDecisionRequested, Object: it.ID, Reason: reasonOr(v.Reason, "decision requested"), Payload: snap})
 			return ref{it.ID}, err
 		}}
 }
 
-// checkAsk 校验决策请求自身：问题、选项、推荐、下一阶段与超时默认值。
+// checkAsk 校验决策请求自身：问题、选项、推荐与下一阶段。问题只有本人或档位放开的 Agent 能答，没有超时默认。
 func checkAsk(a domain.AskInput, it domain.Item) error {
 	if e := domain.CheckAsk(a); e != nil { // 问题的最小语义：至少两个真实选项或允许写别的想法（§6.14 第 20 条）
 		return e
@@ -250,12 +186,7 @@ func checkAsk(a domain.AskInput, it domain.Item) error {
 		return invalid("recommend must be an option id")
 	}
 	if a.DefaultOnTimeout != "" {
-		if !ids[a.DefaultOnTimeout] {
-			return invalid("default_on_timeout must be an option id")
-		}
-		if a.Deadline == nil || a.Deadline.IsZero() {
-			return invalid("default_on_timeout requires a deadline")
-		}
+		return invalid("default_on_timeout is no longer accepted: a question waits for an answer and never resolves itself")
 	}
 	return nil
 }
@@ -267,7 +198,14 @@ func answer() command.Spec {
 		var v answerIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
+	return command.Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, Page: "/decisions",
+		TierFor: func(tx *store.Tx, _ command.Caller, o authz.Object, _ json.RawMessage) (authz.Tier, error) {
+			it, err := items.Get(tx, o.ID)
+			if err == nil && it.Ask != nil && it.Ask.Code == domain.AskAgentsMDDrift {
+				return authz.TierRules, nil // 这个回答改的是以后同步写进仓库的 AGENTS.md（§14.3）
+			}
+			return authz.TierDecide, err
+		},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -291,17 +229,17 @@ func answer() command.Spec {
 		}}
 }
 
-// Answer 在命令事务里落下决定：写结果、移出 needs_input、撤销超时 Timer、记 decision.resolved。
+// Answer 在命令事务里落下决定：写结果、移出 needs_input、记 decision.resolved。
 // via 是决定入口（Resolution.ResolvedVia），by 是回答人。已有结果或事项不在等待决定返回退出码 6，只认第一次。
 // 授权由调用方的命令管线负责；渠道回答（channel.answer）经它落账，决策的写入仍只有本模块。
 func Answer(c *command.Ctx, id, choice, text, via, by, reason string) error {
-	res := domain.Resolution{Choice: choice, Text: text, ResolvedVia: via, AnsweredBy: by, Evidence: c.Evidence, Grant: c.Grant, ResolvedAt: c.Now()}
+	res := domain.Resolution{Choice: choice, Text: text, ResolvedVia: via, AnsweredBy: by, ResolvedAt: c.Now()}
 	it, err := settle(c.Tx, answerIn{ID: id, Choice: choice, Text: text}, res)
 	if err != nil {
 		return err
 	}
 	_, err = c.Emit(domain.Event{Type: domain.EvDecisionResolved, Object: it.id, Reason: reasonOr(reason, "decision answered"),
-		Payload: it.snap, ResolvedVia: res.ResolvedVia, Evidence: res.Evidence})
+		Payload: it.snap, ResolvedVia: res.ResolvedVia})
 	return err
 }
 
@@ -333,7 +271,7 @@ type settled struct {
 	snap json.RawMessage
 }
 
-// settle 写入决定结果、移出 needs_input，并撤销超时 Timer。
+// settle 写入决定结果、移出 needs_input，并清掉旧模型可能留下的超时 Timer。
 func settle(tx *store.Tx, v answerIn, res domain.Resolution) (settled, error) {
 	_, it, snap, err := items.Revise(tx, v.ID, "decision.answer", res.ResolvedAt, func(it *domain.Item) error {
 		next, err := resolve(*it, v)
@@ -358,16 +296,13 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 		var v proposalIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: name, Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
+	return command.Spec{Name: name, Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, Page: "/proposals",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
 				return authz.Object{}, err
 			}
 			o, _, err := object(tx, v.ID)
-			if err == nil && name == "proposal.accept" { // 代为接受只限可信发件人带来的建议（§14.5 来源可信）
-				o.OriginTrusted, err = trust.OriginTrusted(tx, v.ID)
-			}
 			return o, err
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
@@ -391,7 +326,7 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 				return nil, err
 			}
 			_, err = c.Emit(domain.Event{Type: domain.EvItemPhaseChanged, Object: it.ID, Reason: reasonOr(v.Reason, def),
-				Payload: snap, ResolvedVia: viaOf(c), Evidence: c.Evidence})
+				Payload: snap, ResolvedVia: viaOf(c)})
 			return ref{it.ID}, err
 		}}
 }
@@ -472,12 +407,66 @@ func WithdrawProxyRejectionAsks(tx *store.Tx, now time.Time) ([]string, error) {
 	return done, nil
 }
 
-// ---- 超时默认值 ----
+// ClearLegacyAskState 是权限模型切换的一步（§16.5）：未答问题上旧模型留下的初筛标记、风险类别与超时默认一律清掉，
+// 超时 Timer 撤掉，问题照旧等本人。每个改动记一条 item.updated（操作者 authz-switch）。返回改过的事项 id。
+func ClearLegacyAskState(tx *store.Tx, actor domain.Actor, now time.Time) ([]string, error) {
+	ids, err := LegacyAskItems(tx)
+	if err != nil {
+		return nil, err
+	}
+	done := []string{}
+	for _, id := range ids {
+		it, err := items.Get(tx, id)
+		if err != nil {
+			return nil, err
+		}
+		depth, err := items.ChainDepth(tx, it.ID)
+		if err != nil {
+			return nil, err
+		}
+		_, _, body, err := items.Revise(tx, it.ID, "authz-switch", now, func(x *domain.Item) error {
+			x.Ask.DefaultOnTimeout, x.Ask.RiskClass, x.Ask.ScreeningPending = "", "", false
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := cancelTimer(tx, it.ID); err != nil {
+			return nil, err
+		}
+		if _, err := command.Bump(tx, it.ID); err != nil {
+			return nil, err
+		}
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemUpdated, Object: it.ID, Actor: actor, ChainDepth: depth,
+			Reason: "permission model switch: legacy screening and timeout default cleared", Payload: body, At: now}); err != nil {
+			return nil, err
+		}
+		done = append(done, it.ID)
+	}
+	return done, nil
+}
 
-// TimerID 是事项决策超时 Timer 的 id；一个事项同时只有一个未决请求，所以一个 id 足够。
+// LegacyAskItems 是还带旧模型状态（初筛标记、风险类别、超时默认）的未答问题。
+func LegacyAskItems(tx *store.Tx) ([]string, error) {
+	its, err := items.List(tx, items.Filter{Phase: domain.PhaseNeedsInput})
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, it := range its {
+		if a := it.Ask; a != nil && a.Resolution == nil && (a.DefaultOnTimeout != "" || a.RiskClass != "" || a.ScreeningPending) {
+			out = append(out, it.ID)
+		}
+	}
+	return out, nil
+}
+
+// ---- 旧模型的超时 Timer ----
+
+// TimerID 是旧模型决策超时 Timer 的 id（"ask_"+事项）。超时默认已取消（2026-11-20，§14.3）：不再新建这种 Timer。
 func TimerID(item string) string { return "ask_" + item }
 
-// Owns 判断时钟交来的命令是否归本模块：到期的决策超时。组装处据它在处理器间分派。
+// Owns 判断时钟交来的命令是否是旧模型留下的决策超时 Timer。组装处据它在处理器间分派。
 func Owns(c clock.Command) bool { return c.Kind == domain.TimerDue && c.TimerID == TimerID(c.Target) }
 
 func cancelTimer(tx *store.Tx, item string) error {
@@ -489,53 +478,10 @@ func cancelTimer(tx *store.Tx, item string) error {
 	return nil
 }
 
-// HandleTimer 处理决策超时：按默认值决定，resolved_via 为 timeout，actor 为 system（时钟交来的身份）。
-// 它在时钟交来的事务里工作，不经 command.Do（Do 自己开写事务会死锁）；版本仍走 command.Bump。
-//
-// 已被回答、离开 needs_input、没有默认值或事项已不在时，Timer 已过期：返回 nil 让时钟清掉它，事项继续等本人。
-// 现在属于 web_only（策略后来变了）同样不自动决定。初筛未返回时返回错误，时钟保留 Timer 下次重试，
-// 初筛结束后再判定（§14.4）。
-// shortcut: 初筛未返回时靠时钟每次扫描重试，初筛超时默认 30 秒，量大时改为初筛结束后主动唤醒。
-func HandleTimer(tx *store.Tx, c clock.Command) error {
+// HandleTimer 处理旧模型留下的决策超时 Timer：什么也不决定，返回 nil 让时钟清掉它，问题继续等回答。
+func HandleTimer(_ *store.Tx, c clock.Command) error {
 	if !Owns(c) {
 		return invalid("timer " + c.TimerID + " is not a decision timeout")
 	}
-	it, err := items.Get(tx, c.Target)
-	var de *domain.Error
-	if errors.As(err, &de) && de.Code == domain.CodeNotFound {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	a := it.Ask
-	if it.Phase != domain.PhaseNeedsInput || a == nil || a.Resolution != nil || a.DefaultOnTimeout == "" {
-		return nil
-	}
-	if a.ScreeningPending {
-		return conflict("web_only screening has not returned; the timeout default waits for it", "retry after screening ends")
-	}
-	_, pol, err := policy.Current(tx)
-	if err != nil {
-		return err
-	}
-	if authz.WebOnly(pol, authz.Object{Kind: string(it.Kind), Tags: it.Tags, Project: it.Project, Category: a.RiskClass}) {
-		return nil
-	}
-	v := answerIn{ID: it.ID, Choice: a.DefaultOnTimeout}
-	res := domain.Resolution{Choice: v.Choice, ResolvedVia: ViaTimeout, AnsweredBy: c.Actor.Principal, ResolvedAt: c.Due}
-	s, err := settle(tx, v, res)
-	if err != nil {
-		return err
-	}
-	if _, err := command.Bump(tx, it.ID); err != nil {
-		return err
-	}
-	depth, err := items.ChainDepth(tx, it.ID)
-	if err != nil {
-		return err
-	}
-	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvDecisionResolved, Object: it.ID, Actor: c.Actor, Reason: "decision deadline passed; default applied",
-		Payload: s.snap, ChainDepth: depth, ResolvedVia: ViaTimeout, At: c.Due})
-	return err
+	return nil
 }

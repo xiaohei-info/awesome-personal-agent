@@ -1089,7 +1089,7 @@ func assembled(t *testing.T, extra ...string) *kernel {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { k.disp.Close(); k.scr.Wait(); k.wh.Wait() })
+	t.Cleanup(func() { k.disp.Close(); k.wh.Wait() })
 	if err := k.start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1430,7 +1430,7 @@ func TestServeDraftsDecisionCardAndSummaries(t *testing.T) {
 	stub.When("写一张决策卡片", modelstub.Reply{Content: `{"insufficient_info":false,"title":"卡片标题","question":"现在下单吗？"}`})
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
 		_, err := policy.Update(tx, hostOwner.Actor, "model", func(p *policy.Policy) error {
-			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: stub.URL(), Model: "m"}, 5000
+			p.GenerateEndpoint = policy.GenerateEndpoint{URL: stub.URL(), Model: "m"}
 			return nil
 		})
 		return err
@@ -1456,8 +1456,7 @@ func TestServeDraftsDecisionCardAndSummaries(t *testing.T) {
 
 	k.do(t, command.Chain{}, "decision.request", map[string]any{"id": it.ID,
 		"ask": map[string]any{"question": "下单？", "options": []map[string]any{{"id": "A", "label": "下单"}, {"id": "B", "label": "再等"}}}})
-	k.scr.Wait()
-	report("attention sync", k.st.Update(ctx, k.att.Sync)) // 初筛写回不经命令，下一次追赶才看到
+	report("attention sync", k.st.Update(ctx, k.att.Sync))
 	if !k.att.DraftDue() {
 		t.Fatal("decision did not wait for its card draft")
 	}

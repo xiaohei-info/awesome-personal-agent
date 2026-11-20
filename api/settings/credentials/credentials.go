@@ -91,7 +91,7 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 		return authz.Object{ID: "settings:credentials"}, nil
 	}
 	for _, s := range []command.Spec{
-		{Name: CmdIssue, Action: authz.ActionChangeSettings, Object: noObject,
+		{Name: CmdIssue, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: noObject,
 			Validate: func(_ *store.Tx, _ authz.Object, raw json.RawMessage) error {
 				in, g, err := parse(raw)
 				if err != nil {
@@ -119,7 +119,7 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 				}
 				return map[string]any{"credential": cred, "secret": secret}, nil
 			}},
-		{Name: CmdList, Action: authz.ActionChangeSettings, Object: noObject,
+		{Name: CmdList, Action: authz.ActionWebRead, Tier: authz.TierRead, Object: noObject,
 			Validate: func(_ *store.Tx, _ authz.Object, raw json.RawMessage) error { _, _, err := parse(raw); return err },
 			Apply: func(c *command.Ctx) (any, error) {
 				_, g, _ := parse(c.Input)
@@ -154,7 +154,7 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 				}
 				return map[string]any{"credentials": out}, nil
 			}},
-		{Name: CmdRevoke, Action: authz.ActionChangeSettings, Object: noObject,
+		{Name: CmdRevoke, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: noObject,
 			Validate: func(_ *store.Tx, _ authz.Object, raw json.RawMessage) error { _, _, err := parse(raw); return err },
 			Apply: func(c *command.Ctx) (any, error) {
 				in, g, _ := parse(c.Input)
@@ -179,7 +179,7 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 				}
 				return nil, domain.NewError(domain.CodeInternal, "revoked credential vanished", "retry")
 			}},
-		{Name: CmdAssign, Action: authz.ActionChangeSettings, Object: noObject,
+		{Name: CmdAssign, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: noObject,
 			Validate: func(_ *store.Tx, _ authz.Object, raw json.RawMessage) error { _, _, err := parse(raw); return err },
 			Apply: func(c *command.Ctx) (any, error) {
 				in, g, _ := parse(c.Input)

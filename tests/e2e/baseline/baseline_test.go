@@ -397,7 +397,7 @@ func TestFlowEnvBaseline(t *testing.T) {
 
 	step("ACT-ENV-10 测试时钟 TEST_CLOCK", func(t *testing.T) {
 		task := func(title string, deadline time.Time) string {
-			r := e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--phase", "open", "--title", title, "--evidence", "owner: add "+title)
+			r := e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--phase", "open", "--title", title)
 			var m struct {
 				ID string `json:"id"`
 			}

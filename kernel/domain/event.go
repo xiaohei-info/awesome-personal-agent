@@ -26,7 +26,7 @@ const (
 	ViaExt    Via = "ext"
 )
 
-// 会话类型（§14.5）：只有 SessionDirect 时，内核接受凭本人原话的代理写入。
+// 会话类型：旧模型里凭本人原话的代理写入要求 SessionDirect；现在不参与任何判定，只为读旧事件保留。
 const (
 	SessionDirect  = "direct"
 	SessionGroup   = "group"
@@ -40,7 +40,7 @@ type Actor struct {
 	Via       Via       `json:"via"`
 	Harness   string    `json:"harness,omitempty"`
 	Session   string    `json:"session,omitempty"`
-	// SessionKind 是接入方自报的会话类型（SessionDirect、SessionGroup、SessionUnknown；§14.5）；空表示没有上报。
+	// SessionKind 是旧模型里接入方自报的会话类型；新事件不写，只为解码旧事件保留。
 	SessionKind string `json:"session_kind,omitempty"`
 	Run         string `json:"run,omitempty"`
 	OnBehalfOf  string `json:"on_behalf_of,omitempty"`
@@ -50,7 +50,22 @@ type Actor struct {
 type Basis struct {
 	PolicyVersion int    `json:"policy_version"`
 	RuleID        string `json:"rule_id,omitempty"`
+	// Via 是"凭什么"（§14.3 审计）：owner_web、owner_channel、organize（一档）、allowance（Agent 档位放开）、rule。
+	Via string `json:"via,omitempty"`
+	// Command、Tier、Agent 由命令管线填：哪条命令、它这次的档位、调用者所属的 Agent。规矩改动清单（3a）与按 Agent 撤回据此取。
+	Command string `json:"command,omitempty"`
+	Tier    string `json:"tier,omitempty"`
+	Agent   string `json:"agent,omitempty"`
 }
+
+// Basis.Via 的取值。
+const (
+	BasisOwnerWeb     = "owner_web"
+	BasisOwnerChannel = "owner_channel"
+	BasisOrganize     = "organize"
+	BasisAllowance    = "allowance"
+	BasisRule         = "rule"
+)
 
 // Event 是账本的追加日志，也是对外事件流（§6.7）。
 type Event struct {
@@ -102,6 +117,9 @@ const (
 	EvSourceFailed                   = "source.failed"
 	EvImportCompleted                = "import.completed" // 只读的历史值：导入已取消（§7.1），不再写入；旧账本里的这类事件照常读出
 	EvHealthAlert                    = "health.alert"
+	// EvAuthzSwitched 记权限模型第二版的一次性切换（§16.5）：撤了哪些授权单、清了哪些问题、写了哪一版策略。
+	// 内部事件，不在 B.4 的对外稳定集合里。
+	EvAuthzSwitched = "authz.switched"
 
 	// 登录审计（§14.13）：载荷不含口令。
 	EvAuthLogin           = "auth.login"

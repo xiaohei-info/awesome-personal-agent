@@ -62,8 +62,8 @@ func TestFlowChainDepth(t *testing.T) {
 	f.step("ACT-DEP-01 深度沿规则和回执继承", func(t *testing.T) {
 		f.mode("summary-only", loopScript)
 		looped = idOf(t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "dep-loop", "--phase", "proposed",
-			"--project", f.Projects["acc-work"], "--tags", "acc-loop", "--evidence", "验收触发").Stdout)
-		f.apa(f.DEL, 0, "item", "transition", looped, "--to", "open", "--reason", "开始回环", "--evidence", "e2e 开始回环")
+			"--project", f.Projects["acc-work"], "--tags", "acc-loop").Stdout)
+		f.apa(f.DEL, 0, "item", "transition", looped, "--to", "open", "--reason", "开始回环")
 		for rounds < 3 {
 			rounds++
 			if f.round(looped, rounds) == "" {
@@ -181,22 +181,6 @@ $APA ask "$ITEM" --question 选哪个 --option A=甲 --option B=乙 > "$OUT/ask.
 			}
 		}
 
-		// 经定时：决策超时的 Timer 到期按默认值决定，不清零。
-		f.mode("summary-only", preamble+`
-DL=$(date -u -d '+3 seconds' +%Y-%m-%dT%H:%M:%SZ)
-$APA ask "$ITEM" --question 超时默认 --option A=甲 --option B=乙 --deadline "$DL" --default-on-timeout B > "$OUT/timer.out" 2>&1; rc timer
-`)
-		timed := taskChild("dep-timer")
-		eq(t, "运行内带 deadline 的 apa ask 退出码 "+f.outFile("timer.out"), f.outFile("timer.rc"), "0")
-		t0 := f.depth(timed)
-		f.waitFor("定时到期按默认值决定", 40*time.Second, func() bool { return len(f.events(timed, "decision.resolved")) == 1 })
-		if got := f.depth(timed); got < t0 {
-			t.Errorf("定时到期后深度被清零: %d → %d", t0, got)
-		}
-		for _, e := range f.events(timed, "decision.resolved") {
-			if e.ChainDepth < t0 {
-				t.Errorf("定时产生的事件深度被清零: %+v", e)
-			}
-		}
+		// 原"经定时：决策超时的 Timer 到期按默认值决定，不清零"随超时默认取消（2026-11-20）删除。
 	})
 }

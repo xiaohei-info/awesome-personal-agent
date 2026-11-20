@@ -27,7 +27,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 type env struct {
@@ -70,7 +70,7 @@ func setup(t *testing.T) *env {
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so", WebURL: "http://web"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web"})
 }
 
 func (e *env) must(t *testing.T, id command.Identity, cmd string, in any) json.RawMessage {
@@ -106,7 +106,7 @@ func (e *env) token(t *testing.T, kind auth.Kind) (credID, secret string, id com
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return credID, secret, e.svc.Identity(onBehalf{command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Harness: "h", Session: "other", SessionKind: "direct"}}})
+	return credID, secret, e.svc.Identity(onBehalf{command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Harness: "h", Session: "other"}}})
 }
 
 // onBehalf 补上传输层为 delegate 填的 on_behalf_of。
@@ -188,98 +188,6 @@ func (e *env) state(t *testing.T, runID string) domain.RunState {
 		t.Fatal(err)
 	}
 	return rec.Run.State
-}
-
-// ACT-WAK-04：网关插件用 delegate 换取凭据即为该 token 开租约；租约期间同一 DEL 的另一会话代答是退出码 4，
-// 本人在 Web 仍可决定；回执（目标事项离开 open）后运行按成功结束、租约释放，DEL 恢复代答。
-func TestLeaseBlocksDelegateAnswerUntilReceipt(t *testing.T) {
-	e := setup(t)
-	credID, dlg := e.delegate(t)
-	answer := func(id command.Identity, item string) error {
-		_, err := e.do(id, "decision.answer", map[string]any{"id": item, "choice": "A"})
-		return err
-	}
-
-	before := e.asked(t)
-	if err := answer(dlg, before); err != nil { // 无租约：delegate 带本人原话可以代答
-		t.Fatalf("answer before lease: %v", err)
-	}
-
-	runID, target := e.wakeRun(t, "wake", 600)
-	if _, err := e.open(t, runID); err != nil {
-		t.Fatal(err)
-	}
-	if err := answer(dlg, e.asked(t)); err != nil { // 投递产出但还没人换取：没有租约
-		t.Fatalf("answer before exchange: %v", err)
-	}
-	secret, err := e.exchange(t, dlg, runID)
-	if err != nil || !runidentity.IsSecret(secret) {
-		t.Fatalf("exchange: %q %v", secret, err)
-	}
-	other := e.asked(t)
-	if err := answer(dlg, other); exitOf(err) != domain.ExitPermissionDenied {
-		t.Fatalf("answer during lease: want exit 4, got %v", err)
-	}
-	if _, err := e.do(dlg, "proposal.accept", map[string]any{"id": other}); exitOf(err) != domain.ExitPermissionDenied {
-		t.Fatalf("accept during lease: %v", err)
-	}
-	// 授权单对租约期间的 token 同样无效：仍是退出码 4，不是 23。
-	var g policy.Grant
-	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
-		g, err = policy.IssueGrant(tx, e.au, owner.Actor, e.now, policy.GrantInput{Grantee: policy.Grantee{Credential: credID},
-			Scope: policy.Scope{Kinds: []string{"task"}}, Actions: []string{"decision.answer"}, ExpiresAt: e.now.Add(time.Hour)})
-		return
-	}); err != nil {
-		t.Fatal(err)
-	}
-	in, _ := json.Marshal(map[string]any{"id": other, "choice": "A"})
-	if _, err := e.x.Do(bg, command.Request{Identity: dlg, Command: "decision.answer", Input: in, Grant: g.ID}); exitOf(err) != domain.ExitPermissionDenied {
-		t.Fatalf("grant during lease: want exit 4, got %v", err)
-	}
-	renewed, err := e.exchange(t, dlg, runID) // 租约内插件仍可续换，旧凭据随即作废
-	if err != nil {
-		t.Fatalf("re-exchange during lease: %v", err)
-	}
-	if _, err := e.do(runidentity.Identity{Secret: secret, Now: func() time.Time { return e.now }}, "item.update",
-		map[string]any{"id": target, "summary": "s"}); exitOf(err) != domain.ExitUnauthenticated {
-		t.Fatalf("old credential after re-exchange: %v", err)
-	}
-	e.must(t, owner, "decision.answer", map[string]any{"id": other, "choice": "A"}) // 本人仍可在 Web 决定
-
-	var ended []proc.Result
-	settle := func() {
-		t.Helper()
-		if err := e.svc.Settle(bg, e.st, func(r proc.Result) { ended = append(ended, r) }); err != nil {
-			t.Fatal(err)
-		}
-	}
-	settle()
-	if len(ended) != 0 || e.state(t, runID) != domain.RunRunning {
-		t.Fatalf("target still open must not end the run: %+v", ended)
-	}
-	// 运行者以运行凭据回执：目标事项转 done
-	e.must(t, runidentity.Identity{Secret: renewed, Now: func() time.Time { return e.now }}, "item.transition",
-		map[string]any{"id": target, "to": "done", "reason": "handled"})
-	settle()
-	if len(ended) != 1 || ended[0].Run.ID != runID || ended[0].Run.State != domain.RunSucceeded {
-		t.Fatalf("receipt must end the run once: %+v", ended)
-	}
-	settle()
-	if len(ended) != 1 {
-		t.Fatal("settle must not end a run twice")
-	}
-	if err := answer(dlg, e.asked(t)); err != nil {
-		t.Fatalf("answer after receipt: %v", err)
-	}
-	if n := countEvents(t, e, EvOpened); n != 1 {
-		t.Fatalf("opened events: %d", n)
-	}
-	if n := countEvents(t, e, EvReleased); n != 1 {
-		t.Fatalf("released events: %d", n)
-	}
-	if n := countEvents(t, e, domain.EvCommandRejected); n < 1 {
-		t.Fatal("rejected delegate answer left no audit event")
-	}
 }
 
 // Attach 把回执收尾挂在命令提交后：运行者一回执，运行即结束并交回 onEnd。

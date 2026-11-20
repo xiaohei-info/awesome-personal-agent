@@ -148,7 +148,7 @@ func parseDeadline(v string) (string, error) {
 	return time.Date(d.Year(), d.Month(), d.Day(), 23, 59, 59, 0, time.Local).Format(time.RFC3339), nil
 }
 
-// headers：--version → If-Match，--idempotency-key → Idempotency-Key（--evidence 是全局参数，由 client 以 X-APA-Evidence 头发出）。
+// headers：--version → If-Match，--idempotency-key → Idempotency-Key。
 func (f *form) headers() map[string]string {
 	h := map[string]string{}
 	for flagName, header := range map[string]string{"version": "If-Match", "idempotency-key": "Idempotency-Key"} {
@@ -169,7 +169,7 @@ func add(c *client.Ctx, args []string, name string) error {
 		fields = append([]string{"phase"}, fields...)
 		hint += " [--phase <phase>]"
 	}
-	hint += " [--evidence <text> | --grant <id>]"
+	hint += " [--evidence <note or result evidence>]"
 	f, _ := newForm(name, fields, []string{"idempotency-key"}, nil)
 	if _, err := f.parse(args, false, hint); err != nil {
 		return err
@@ -178,9 +178,7 @@ func add(c *client.Ctx, args []string, name string) error {
 	if err != nil {
 		return err
 	}
-	if c.Evidence != "" {
-		body["evidence"] = c.Evidence // 创建的体收 evidence；头同样有效
-	}
+	withNote(c, body)
 	return send(c, f, "POST", "/items", body)
 }
 
@@ -192,16 +190,16 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	switch sub {
 	case "update":
 		fields = itemFields[1:]
-		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--evidence <text> | --grant <id> --version <n>]"
+		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--version <n>]"
 	case "progress":
 		fields = []string{"text", "on"}
-		hint = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>] [--evidence <text> | --grant <id>]"
+		hint = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>]"
 	case "transition":
 		fields = []string{"to", "reason", "waiting-on"}
-		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <text> | --grant <id> --version <n>]"
+		hint = "usage: apa item transition <id> --to <proposed|open|waiting|needs_input|done|dropped> --reason <r> [--waiting-on <kind>:<ref> --evidence <note or result evidence> --version <n>]"
 	case "relate":
 		fields, bools = []string{"to", "type", "reason", "key", "domain"}, []string{"remove"}
-		hint = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --evidence <text> | --grant <id> --version <n>]\n   or: apa item relate <from> --key <correlation key> [--domain <dedupe domain>] [--remove] [--evidence <text> | --grant <id>]"
+		hint = "usage: apa item relate <from> --to <item or material id> --type <parent|blocks|derived_from|supersedes|relates|basis|output|minutes> [--remove] [--reason <r> --version <n>]\n   or: apa item relate <from> --key <correlation key> [--domain <dedupe domain>] [--remove]"
 	}
 	f, rm := newForm("item "+sub, fields, []string{"version", "idempotency-key"}, bools)
 	id, err := f.parse(args, true, hint)
@@ -215,14 +213,11 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	if sub == "progress" && body["text"] == nil {
 		return usage("--text is required", hint)
 	}
-	if sub == "transition" && body["to"] == nil {
-		return usage("--to is required", hint)
-	}
 	if sub == "transition" {
-		// 转阶段的体收 evidence（头同样有效）；update 只走头。
-		if c.Evidence != "" {
-			body["evidence"] = c.Evidence
+		if body["to"] == nil {
+			return usage("--to is required", hint)
 		}
+		withNote(c, body)
 	}
 	if sub == "relate" {
 		if body["key"] != nil { // 登记或移除关联键：POST / DELETE …/correlation-keys
@@ -306,14 +301,7 @@ func today(c *client.Ctx, args []string) error {
 	return c.Print(out)
 }
 
-type inboxItem struct {
-	ID  string `json:"id"`
-	Ask *struct {
-		ScreeningPending bool `json:"screening_pending"`
-	} `json:"ask"`
-}
-
-// inbox：待决 = needs_input，建议 = proposed。web_only 初筛未返回的决策请求不列出（附录 B.1）。
+// inbox：待决 = needs_input，建议 = proposed。
 func inbox(c *client.Ctx, args []string) error {
 	if len(args) != 0 {
 		return usage("inbox takes no arguments", "usage: apa inbox")
@@ -326,14 +314,14 @@ func inbox(c *client.Ctx, args []string) error {
 		if err := c.Do(bg, "GET", "/items?phase="+phase, nil, &l); err != nil {
 			return err
 		}
-		res[key] = []json.RawMessage{}
-		for _, raw := range l.Items {
-			var it inboxItem
-			if json.Unmarshal(raw, &it) == nil && it.Ask != nil && it.Ask.ScreeningPending {
-				continue
-			}
-			res[key] = append(res[key], raw)
-		}
+		res[key] = append([]json.RawMessage{}, l.Items...)
 	}
 	return c.Print(res)
+}
+
+// withNote 把 --evidence 作为说明或结果证据放进请求体（委派进入 done 必须带证据）；它不参与权限判定。
+func withNote(c *client.Ctx, body map[string]any) {
+	if c.Note != "" {
+		body["evidence"] = c.Note
+	}
 }

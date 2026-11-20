@@ -19,7 +19,7 @@ Tools and hooks run in Hermes' shared gateway process, so its cwd and environmen
 Registers toolset `apa`: `apa_propose`, `apa_ask`, `apa_decide`, `apa_accept`, `apa_dismiss`, `apa_executors`, `apa_delegate`, `apa_report`,
 `apa_attach`, `apa_proposals_apply`, `apa_item_progress`, `apa_dispatch`, `apa_item_history`, and the read-tier set `apa_read_file`, `apa_list_dir`, `apa_item_update`, `apa_material_commit`. Every CLI tool runs `apa` with `APA_SESSION=<Hermes session_id>`,
 so the ledger audits to the session. The result is `{exit_code, ok, stdout, stderr}` with the kernel's verdict untouched
-(exit 20 web_only, 21 executor not allowed, ... are the model's cue to stop; nothing is retried or faked).
+(exit 20 hard line, 21 executor not allowed, 23 tier closed, ... are the model's cue to stop; nothing is retried or faked).
 
 ## Delegation (design §6.17)
 
@@ -57,7 +57,7 @@ Hermes decides how to delegate, with its own tools. There is no "executor id -> 
   shapes, how to resume with `terminal` (`paseo send ...`) or start anew the same way; everything else is
   `reference only`. The hint is advice; the model still decides and Hermes' own permissions apply.
 
-Only the on-behalf tools (`apa_decide`, `apa_accept`, `apa_dismiss`, `apa_item_update`, `apa_attach`, `apa_proposals_apply`, `apa_item_progress`) take optional `evidence` (the owner's own words from this turn, never reworded) or `grant`, passed verbatim to `--evidence` / `--grant`; propose, ask, delegate, report and declare tools have neither.
+No tool takes the owner's words, a grant or a session kind: the kernel decides from the key's scope and the tier the owner opened for this Agent in Web, nothing the caller reports (design §14.3).
 
 ## Live gate
 
@@ -73,10 +73,6 @@ Hermes has no read-only file toolset, and task runs with `access: read` (brief, 
 - `apa_item_update`: `apa item update <id> --spec <json> --reason ...`; the kernel's run identity still limits it to the run's own item.
 - `apa_material_commit`: `apa material commit [<id>] --from - --reason ... [--kind --title --project]`; the text travels on stdin, never in a shell. It only creates a pending revision the owner confirms.
 
-## Chat disposal tools and session kind
+## Chat disposal tools
 
-`apa_attach` (`apa attach <id> --to <item>`), `apa_proposals_apply` (`--recommended` with optional `source`/`project`, or a list of `{id, do: accept|attach|dismiss, to?, reason?}` sent to `apa proposals apply --file -` on stdin, never a temp file) and `apa_item_progress` (`apa item progress <id> --text [--on]`) act for the owner, so they need `evidence` or `grant`. On exit 23 the model must not rephrase and retry: it tells the owner why and gives the Web link.
-
-Every `apa` call carries `APA_SESSION_KIND`, decided by `run_context.session_kind` in this order (first match wins): 1. chat type group/channel/thread: `group`; 2. platform and source both a terminal (empty, cli, tui, local): `direct`; 3. platform or source in the owner-only list: `direct`; 4. chat type `dm` with a sender: `direct`; 5. anything else: `unknown`.
-
-`APA_DIRECT_PLATFORMS` (comma-separated platform or source names, case-insensitive) is set in the plugin's environment by the owner, never by the model, and only for entrances where only the owner can speak. It adds to the built-in list, which is empty until SPIKE-SESSION-KIND-OWNCHAT is measured. Group chat types still win: a listed platform in a group stays `group`. Unset, behavior is the same as before.
+`apa_attach` (`apa attach <id> --to <item>`) and `apa_proposals_apply` (`--recommended` with optional `source`/`project`, or a list of `{id, do: accept|attach|dismiss, to?, reason?}` sent to `apa proposals apply --file -` on stdin, never a temp file) decide for the owner (tier 2): they only take effect if the owner opened the decide tier for this Agent, and each entry of a batch is judged on its own. `apa_item_progress` (`apa item progress <id> --text [--on]`) is tier 1 and always applies. On exit 23 the model must not retry: it asks the owner (`apa_ask`) or gives the Web link.

@@ -540,7 +540,7 @@ func (s *Service) ingest(ctx context.Context, g Ingest, evs []runner.IngestEvent
 		return err
 	}
 	res, err := s.o.Exec.Do(ctx, command.Request{Identity: runner.Internal, Command: runner.CmdIngest, Input: in,
-		IdemKey: fmt.Sprintf("webhook:%s:%d", g.ID, g.Gen), Evidence: "webhook " + g.ID, RuleID: ""})
+		IdemKey: fmt.Sprintf("webhook:%s:%d", g.ID, g.Gen), RuleID: ""})
 	if err != nil {
 		var de *domain.Error
 		if errors.As(err, &de) && de.Code == domain.CodeInvalidRequest { // 事件不合标准：数据问题，不是临时故障

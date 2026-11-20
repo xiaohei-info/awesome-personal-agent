@@ -62,7 +62,7 @@ func (f *fx) webOK(method, path, body string, want int) string {
 func (f *fx) task(title string, extra ...string) string {
 	f.t.Helper()
 	args := append([]string{"item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", f.Projects["acc-work"], "--evidence", "建个任务"}, extra...)
+		"--project", f.Projects["acc-work"]}, extra...)
 	var m struct {
 		ID string `json:"id"`
 	}
@@ -74,12 +74,12 @@ func (f *fx) task(title string, extra ...string) string {
 
 func (f *fx) retitle(id, title string) {
 	f.t.Helper()
-	f.apa(f.DEL, 0, "item", "update", id, "--title", title, "--reason", "改标题", "--evidence", "验收")
+	f.apa(f.DEL, 0, "item", "update", id, "--title", title, "--reason", "改标题")
 }
 
 func (f *fx) transition(id, to string) {
 	f.t.Helper()
-	f.apa(f.DEL, 0, "item", "transition", id, "--to", to, "--reason", "推进", "--evidence", "验收")
+	f.apa(f.DEL, 0, "item", "transition", id, "--to", to, "--reason", "推进")
 }
 
 // extKey 在 Web 设置里签发一把 ext 密钥，返回明文。

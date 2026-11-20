@@ -627,7 +627,7 @@ func (s *Service) run(ctx context.Context, r rule, item, idem, cmd string, input
 	a := r.actor()
 	a.OnBehalfOf = s.o.Owner
 	return s.o.Exec.Do(ctx, command.Request{Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate}, Command: cmd, Input: b,
-		IdemKey: idem, Chain: command.Chain{Mode: command.ChainInherit, From: item}, RuleID: r.key, Evidence: "rule " + r.key, Owner: s.o.Owner})
+		IdemKey: idem, Chain: command.Chain{Mode: command.ChainInherit, From: item}, RuleID: r.key, Owner: s.o.Owner})
 }
 
 func (s *Service) clear(ctx context.Context, id int64) error {
@@ -673,14 +673,14 @@ func (s *Service) Register() error {
 		}
 		return
 	}
-	return s.o.Exec.Register(command.Spec{Name: "followup.settle", Action: authz.ActionUpdateOwn,
+	return s.o.Exec.Register(command.Spec{Name: "followup.settle", Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
 				return authz.Object{}, err
 			}
 			it, err := items.Get(tx, v.ID)
-			return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Tags: it.Tags, Project: it.Project}, err
+			return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Project: it.Project}, err
 		},
 		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, err := parse(in)

@@ -59,13 +59,14 @@ func TestFlowProposalTriage(t *testing.T) {
 		eq(t, "重开后阶段", f.phase(b), "open")
 	})
 
-	t.Run("ACT-PROP-05 delegate 附本人原话代为接受", func(t *testing.T) {
+	// 2026-11-20 改写（权限模型第二版）：接受建议是二档，DEL 所属 Agent 已放开档位；记成 Agent 自己做的，不带代本人与原话。
+	t.Run("ACT-PROP-05 档位放开的 Agent 代为接受", func(t *testing.T) {
 		c := f.proposal("prop-c")
-		f.apa(f.DEL, 0, "accept", c, "--evidence", "这个接了")
+		f.apa(f.DEL, 0, "accept", c)
 		eq(t, "阶段", f.phase(c), "open")
 		ev := f.last(c, "item.phase_changed")
-		if ev.Actor.OnBehalfOf != "owner" || ev.Ev != "这个接了" {
-			t.Errorf("Event 缺 on_behalf_of 或证据: %+v", ev)
+		if ev.Actor.Type != "agent" || ev.Actor.OnBehalfOf != "" || ev.Ev != "" {
+			t.Errorf("Event 应记 Agent 自己、不带代本人与原话: %+v", ev)
 		}
 		found := false
 		for _, s := range f.agentChanges(c) {
@@ -76,18 +77,14 @@ func TestFlowProposalTriage(t *testing.T) {
 		}
 	})
 
-	t.Run("ACT-PROP-06 / 07 无证据代答和低级别凭据被拒绝", func(t *testing.T) {
+	t.Run("ACT-PROP-06 / 07 档位未放开的代答和低级别凭据被拒绝", func(t *testing.T) {
 		d := f.proposal("prop-d")
-		f.apa(f.DEL, 23, "accept", d)
-		f.apa(f.DEL, 23, "dismiss", d, "--reason", "重复")
-		eq(t, "无证据后阶段", f.phase(d), "proposed")
-		f.NoSession = true // 只带原话、不带会话引用，同样是 23
-		f.apa(f.DEL, 23, "accept", d, "--evidence", "本人说接受")
-		f.NoSession = false
-		eq(t, "无会话后阶段", f.phase(d), "proposed")
+		f.apa(f.DELO, 23, "accept", d)
+		f.apa(f.DELO, 23, "dismiss", d, "--reason", "重复")
+		eq(t, "只整理被拒后阶段", f.phase(d), "proposed")
 		for name, tok := range map[string]string{"OBS": f.OBS, "WRK": f.WRK} {
-			f.apa(tok, 4, "accept", d, "--evidence", "x")
-			f.apa(tok, 4, "dismiss", d, "--reason", "x", "--evidence", "x")
+			f.apa(tok, 4, "accept", d)
+			f.apa(tok, 4, "dismiss", d, "--reason", "x")
 			eq(t, name+" 之后阶段", f.phase(d), "proposed")
 		}
 	})
@@ -135,16 +132,16 @@ func TestFlowDecisionAnswer(t *testing.T) {
 		eq(t, "按选项声明前进", f.phase(declared), "done")
 	})
 
-	t.Run("ACT-DEC-03 delegate 附证据代答", func(t *testing.T) {
+	t.Run("ACT-DEC-03 档位放开的 Agent 代答", func(t *testing.T) {
 		id := f.task("dec-3", "acc-work")
 		f.ask(id)
-		f.apa(f.DEL, 0, "decide", id, "--option", "B", "--evidence", "就选方案 B")
+		f.apa(f.DEL, 0, "decide", id, "--option", "B")
 		r := f.resolution(id)
 		eq(t, "choice", r["choice"], "B")
-		eq(t, "resolved_via", r["resolved_via"], "chat")
+		eq(t, "resolved_via", r["resolved_via"], "agent")
 		ev := f.last(id, "decision.resolved")
-		if ev.Actor.OnBehalfOf != "owner" || ev.Ev != "就选方案 B" {
-			t.Errorf("Event 缺 on_behalf_of 或证据: %+v", ev)
+		if ev.Actor.Type != "agent" || ev.Actor.OnBehalfOf != "" || ev.Ev != "" {
+			t.Errorf("Event 应记 Agent 自己、不带代本人与原话: %+v", ev)
 		}
 		found := false
 		for _, s := range f.agentChanges(id) {
@@ -155,16 +152,13 @@ func TestFlowDecisionAnswer(t *testing.T) {
 		}
 	})
 
-	t.Run("ACT-DEC-04/05 无证据代答与 worker 回答被拒绝", func(t *testing.T) {
+	// worker 的事项在它的范围内，但它的钥匙不归属 Agent，档位恒为只整理：23（2026-11-20 前为 4）。
+	t.Run("ACT-DEC-04/05 档位未放开的代答与 worker 回答被拒绝", func(t *testing.T) {
 		id := f.task("dec-4", "acc-work")
 		f.ask(id)
-		f.apa(f.DEL, 23, "decide", id, "--option", "A")
-		eq(t, "无证据后阶段", f.phase(id), "needs_input")
-		f.NoSession = true // 只带原话、不带会话引用，同样是 23
-		f.apa(f.DEL, 23, "decide", id, "--option", "A", "--evidence", "本人说选 A")
-		f.NoSession = false
-		eq(t, "无会话后阶段", f.phase(id), "needs_input")
-		f.apa(f.WRK, 4, "decide", id, "--option", "A", "--evidence", "x")
+		f.apa(f.DELO, 23, "decide", id, "--option", "A")
+		eq(t, "只整理被拒后阶段", f.phase(id), "needs_input")
+		f.apa(f.WRK, 23, "decide", id, "--option", "A")
 		eq(t, "worker 回答后阶段", f.phase(id), "needs_input")
 		if f.resolution(id) != nil {
 			t.Error("决策不应生效")
@@ -174,8 +168,8 @@ func TestFlowDecisionAnswer(t *testing.T) {
 	t.Run("ACT-DEC-06 只认第一次回答", func(t *testing.T) {
 		id := f.task("dec-6a", "acc-work")
 		f.ask(id)
-		f.apa(f.DEL, 0, "decide", id, "--option", "A", "--evidence", "先")
-		late := f.apa(f.DEL, 6, "decide", id, "--option", "B", "--evidence", "x")
+		f.apa(f.DEL, 0, "decide", id, "--option", "A")
+		late := f.apa(f.DEL, 6, "decide", id, "--option", "B")
 		if !strings.Contains(late.Stderr, "conflict") {
 			t.Errorf("后到者应返回冲突说明: %s", late.Stderr)
 		}
@@ -189,7 +183,7 @@ func TestFlowDecisionAnswer(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				codes[i] = f.Apa(f.DEL, "", "decide", race, "--option", opt, "--evidence", "并发"+opt).Code
+				codes[i] = f.Apa(f.DEL, "", "decide", race, "--option", opt).Code
 			}()
 		}
 		wg.Wait()

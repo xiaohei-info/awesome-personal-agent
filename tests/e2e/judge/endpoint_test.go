@@ -61,9 +61,12 @@ func TestFlowEndpointConfig(t *testing.T) {
 			eq(t, "judge_endpoint."+k, j[k], want)
 		}
 		eq(t, "generate_endpoint.locality", sub(got, "generate_endpoint")["locality"], "external")
-		eq(t, "screening_timeout_ms（顶层）", got["screening_timeout_ms"], 30000.0)
+		// 初筛超时随初筛取消（2026-11-20）：设置里不再有 screening_timeout_ms，顶层与端点里都没有。
+		if _, top := got["screening_timeout_ms"]; top {
+			t.Error("设置里不应再有 screening_timeout_ms")
+		}
 		if _, nested := sub(got, "generate_endpoint")["screening_timeout_ms"]; nested {
-			t.Error("screening_timeout_ms 应在顶层，不在端点里")
+			t.Error("端点里不应有 screening_timeout_ms")
 		}
 		jd := jsonMap(t, f.webOK("GET", "/settings/judgment", "", 200))
 		eq(t, "spot_check.per_brief", sub(jd, "spot_check")["per_brief"], 5.0)
@@ -178,7 +181,7 @@ func TestFlowEndpointConfig(t *testing.T) {
 		}
 		// 决策请求不做初筛，立即按规则进入决策流。
 		task := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "epc-ask", "--phase", "open", "--assignee", "work-host.cli",
-			"--project", e.Projects["acc-work"], "--evidence", "建任务").Stdout
+			"--project", e.Projects["acc-work"]).Stdout
 		taskID := jsonMap(t, task)["id"].(string)
 		f.apa(e.WRK, 0, "ask", taskID, "--question", "选哪个方案", "--option", "A=方案A", "--option", "B=方案B", "--recommend", "A")
 		item := f.Web("GET", "/v1/items/"+taskID, "")

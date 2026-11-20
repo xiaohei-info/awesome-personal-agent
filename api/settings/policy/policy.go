@@ -2,7 +2,7 @@
 // /settings/policy、/settings/allowlists、/settings/model-endpoints、/settings/access-limits、/settings/judgment、/settings/note-vaults。
 //
 // 路由里没有业务规则：校验、规整、人格长度、新版本与事件全部由内核 kernel/policy.Update 判定。
-// 本层只做两件事：只放行 Web 会话（任何 Bearer 凭据，无论级别，一律 web_only，退出码 20），
+// 本层只做两件事：按段的档位判权（3a 改日常看 Agent 档位，3b 只给刚输过口令的 Web 本人，Authorize），
 // 以及把 HTTP 体按"段"搬进/搬出策略文档。
 //
 // 每条路由是策略文档的几个顶层段：GET 返回 {version, <段>...}；PUT 只替换请求体里出现的段，
@@ -32,9 +32,11 @@ const maskedKey = "***"
 
 // section 是策略文档的一个顶层段。get 取出用于响应，set 严格解码请求体并替换该段。
 type section struct {
-	key string
-	get func(*kpolicy.Policy) any
-	set func(*kpolicy.Policy, json.RawMessage) error
+	key  string
+	tier authz.Tier // 3a 改日常或 3b 造新权力（§14.3）；同一次 PUT 取其中最高的一档判
+	page string     // 该段所在的 Web 设置页，拒绝时 web_url 落在这里
+	get  func(*kpolicy.Policy) any
+	set  func(*kpolicy.Policy, json.RawMessage) error
 }
 
 func strictDecode(raw json.RawMessage, v any) error {
@@ -46,9 +48,9 @@ func strictDecode(raw json.RawMessage, v any) error {
 	return nil
 }
 
-func sect[T any](key string, field func(*kpolicy.Policy) *T) section {
+func sect[T any](key string, tier authz.Tier, page string, field func(*kpolicy.Policy) *T) section {
 	return section{
-		key: key,
+		key: key, tier: tier, page: page,
 		get: func(p *kpolicy.Policy) any { return *field(p) },
 		set: func(p *kpolicy.Policy, raw json.RawMessage) error {
 			var v T
@@ -63,7 +65,7 @@ func sect[T any](key string, field func(*kpolicy.Policy) *T) section {
 
 // disturbSection 与 sect 相同，但请求体缺 daily_cap 时取缺省 20，而不是被当成"不限"。
 var disturbSection = section{
-	key: "disturb",
+	key: "disturb", tier: authz.TierRules, page: "/settings/notify",
 	get: func(p *kpolicy.Policy) any { return p.Disturb },
 	set: func(p *kpolicy.Policy, raw json.RawMessage) error {
 		v := kpolicy.Disturb{DailyCap: kpolicy.DefaultDailyCap}
@@ -75,44 +77,46 @@ var disturbSection = section{
 	},
 }
 
+const (
+	rules = authz.TierRules
+	power = authz.TierPower
+)
+
 var (
 	policySections = []section{
-		sect("web_only", func(p *kpolicy.Policy) *kpolicy.WebOnly { return &p.WebOnly }),
 		disturbSection,
-		sect("material_write", func(p *kpolicy.Policy) *kpolicy.MaterialWrite { return &p.MaterialWrite }),
-		sect("persona", func(p *kpolicy.Policy) *string { return &p.Persona }),
-		sect("persona_lang", func(p *kpolicy.Policy) *string { return &p.PersonaLang }),
-		sect("channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
-		sect("default_agent_id", func(p *kpolicy.Policy) **string { return &p.DefaultAgentID }),
-		sect("main_agent_id", func(p *kpolicy.Policy) **string { return &p.MainAgentID }),
-		sect("rule_agent", func(p *kpolicy.Policy) *map[string]string { return &p.RuleAgent }),
-		sect("default_harness", func(p *kpolicy.Policy) *string { return &p.DefaultHarness }),
-		sect("main_session_launch", func(p *kpolicy.Policy) *kpolicy.MainSessionLaunch { return &p.MainSessionLaunch }),
+		sect("persona", rules, "/settings/general", func(p *kpolicy.Policy) *string { return &p.Persona }),
+		sect("persona_lang", rules, "/settings/general", func(p *kpolicy.Policy) *string { return &p.PersonaLang }),
+		sect("channels", rules, "/settings/channels", func(p *kpolicy.Policy) *map[string]kpolicy.Channel { return &p.Channels }),
+		sect("default_agent_id", power, "/settings/agents", func(p *kpolicy.Policy) **string { return &p.DefaultAgentID }),
+		sect("main_agent_id", power, "/settings/agents", func(p *kpolicy.Policy) **string { return &p.MainAgentID }),
+		sect("rule_agent", power, "/settings/agents", func(p *kpolicy.Policy) *map[string]string { return &p.RuleAgent }),
+		sect("default_harness", power, "/settings/agents", func(p *kpolicy.Policy) *string { return &p.DefaultHarness }),
+		sect("main_session_launch", power, "/settings/agents", func(p *kpolicy.Policy) *kpolicy.MainSessionLaunch { return &p.MainSessionLaunch }),
 	}
 	allowlistSections = []section{
-		sect("forward_allowlist", func(p *kpolicy.Policy) *map[string][]string { return &p.ForwardAllowlist }),
-		sect("channel_answerers", func(p *kpolicy.Policy) *map[string][]string { return &p.ChannelAnswerers }),
+		sect("forward_allowlist", rules, "/sources", func(p *kpolicy.Policy) *map[string][]string { return &p.ForwardAllowlist }),
+		sect("channel_answerers", power, "/settings/channels", func(p *kpolicy.Policy) *map[string][]string { return &p.ChannelAnswerers }),
 	}
 	accessLimitSections = []section{
-		sect("permission_cap", func(p *kpolicy.Policy) *kpolicy.PermissionCap { return &p.PermissionCap }),
+		sect("permission_cap", power, "/settings/agents", func(p *kpolicy.Policy) *kpolicy.PermissionCap { return &p.PermissionCap }),
 	}
 	// 笔记库登记（§12.8）：整体替换；名字重复、模板不以协议开头或用了被拒绝的协议由内核判为 400。
 	noteVaultSections = []section{
-		sect("vaults", func(p *kpolicy.Policy) *[]kpolicy.NoteVault { return &p.NoteVaults }),
+		sect("vaults", power, "/settings/note-vaults", func(p *kpolicy.Policy) *[]kpolicy.NoteVault { return &p.NoteVaults }),
 	}
 	judgmentSections = []section{
-		sect("bands", func(p *kpolicy.Policy) *[]kpolicy.JudgmentBand { return &p.Judgment.Bands }),
-		sect("shadow", func(p *kpolicy.Policy) *[]string { return &p.Judgment.Shadow }),
-		sect("spot_check", func(p *kpolicy.Policy) *kpolicy.SpotCheck { return &p.Judgment.SpotCheck }),
+		sect("bands", rules, "/judgment", func(p *kpolicy.Policy) *[]kpolicy.JudgmentBand { return &p.Judgment.Bands }),
+		sect("shadow", rules, "/judgment", func(p *kpolicy.Policy) *[]string { return &p.Judgment.Shadow }),
+		sect("spot_check", rules, "/judgment", func(p *kpolicy.Policy) *kpolicy.SpotCheck { return &p.Judgment.SpotCheck }),
 	}
 	modelEndpointSections = []section{
-		{key: "judge_endpoint", get: getJudge, set: setJudge},
-		{key: "generate_endpoint", get: getGenerate, set: setGenerate},
-		sect("screening_timeout_ms", func(p *kpolicy.Policy) *int { return &p.ScreeningTimeoutMs }),
+		{key: "judge_endpoint", tier: power, page: "/settings/models", get: getJudge, set: setJudge},
+		{key: "generate_endpoint", tier: power, page: "/settings/models", get: getGenerate, set: setGenerate},
 		// 暂停模型：两个端点原样保留，内核按未配置运行（§8.7）；没有端点时内核规整为 false。
-		sect("models_paused", func(p *kpolicy.Policy) *bool { return &p.ModelsPaused }),
+		sect("models_paused", rules, "/settings/models", func(p *kpolicy.Policy) *bool { return &p.ModelsPaused }),
 		// v0.1 的请求形状：只在 PUT 里被接受（等同只设生成端点，位置 external），响应一律是新形状（附录 B.2）。
-		{key: legacyKey, set: setLegacy},
+		{key: legacyKey, tier: power, page: "/settings/models", set: setLegacy},
 	}
 )
 
@@ -228,8 +232,7 @@ func setLegacy(p *kpolicy.Policy, raw json.RawMessage) error {
 	}
 	p.GenerateEndpoint = kpolicy.GenerateEndpoint{URL: r.URL, APIKey: keepKey(r.APIKey, p.GenerateEndpoint.APIKey), Model: r.Model, Locality: kpolicy.LocalityExternal, Protocol: r.Protocol,
 		MaxMaterialChars: p.GenerateEndpoint.MaxMaterialChars}
-	p.ScreeningTimeoutMs = r.ScreeningTimeoutMs
-	return nil
+	return nil // screening_timeout_ms 随初筛取消，旧形状里带了也忽略
 }
 
 // Routes 返回策略设置路由分组，交给 core.Deps.Groups。a 用于删除自写程序渠道时吊销它的密钥。
@@ -243,10 +246,11 @@ func Routes(st *store.Store, a *auth.Auth) core.RouteGroup {
 			"/settings/judgment":        judgmentSections,
 			"/settings/note-vaults":     noteVaultSections,
 		} {
-			r.Handle(core.Route{Method: "GET", Path: path, Handler: read(st, secs)})
+			r.Handle(core.Route{Method: "GET", Path: path, Handler: read(st, path, secs)})
 			r.Handle(core.Route{Method: "PUT", Path: path, Handler: write(st, path, secs)})
 		}
 		r.Handle(core.Route{Method: "PUT", Path: "/settings/channels/{name}/answerers", Handler: answerers(st)})
+		r.Handle(core.Route{Method: "PUT", Path: "/settings/agents/{agent}/tier", Handler: agentTier(st)})
 		r.Handle(core.Route{Method: "DELETE", Path: "/settings/channels/{name}", MaxBody: 1, Handler: removeChannel(st, a)})
 	}
 }
@@ -260,9 +264,8 @@ const channelsRoutePrefix = "ch-"
 // 指向它的提醒路由不动：路由按「提醒与打扰」的现有规则列出并标明（§7.4）。
 func removeChannel(st *store.Store, a *auth.Auth) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		path := "/settings/channels/{name}"
-		if err := webOnly(p); err != nil {
-			auditRejected(st, r, p, path)
+		basis, err := Authorize(st, r, p, authz.TierPower, "/settings/channels", "settings:/settings/channels/{name}")
+		if err != nil {
 			return err
 		}
 		name := r.PathValue("name")
@@ -273,7 +276,7 @@ func removeChannel(st *store.Store, a *auth.Auth) core.Handler {
 			v       int
 			revoked int
 		)
-		err := st.Update(detached(r), func(tx *store.Tx) error {
+		err = st.Update(detached(r), func(tx *store.Tx) error {
 			creds, err := a.List(tx)
 			if err != nil {
 				return err
@@ -287,7 +290,7 @@ func removeChannel(st *store.Store, a *auth.Auth) core.Handler {
 				}
 				revoked++
 			}
-			v, err = kpolicy.Update(tx, p.Caller.Actor, "web settings: delete channel "+name, func(np *kpolicy.Policy) error {
+			v, err = kpolicy.UpdateWith(tx, p.Caller.Actor, basis, "settings: delete channel "+name, func(np *kpolicy.Policy) error {
 				delete(np.Channels, name)
 				delete(np.ChannelAnswerers, name)
 				return nil
@@ -307,9 +310,8 @@ func removeChannel(st *store.Store, a *auth.Auth) core.Handler {
 // answerers 只替换一个渠道的回答人白名单（§14.6），其余渠道不动；空名单即清空。
 func answerers(st *store.Store) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		path := "/settings/channels/{name}/answerers"
-		if err := webOnly(p); err != nil {
-			auditRejected(st, r, p, path)
+		basis, err := Authorize(st, r, p, authz.TierPower, "/settings/channels", "settings:/settings/channels/{name}/answerers")
+		if err != nil {
 			return err
 		}
 		var in struct {
@@ -323,7 +325,7 @@ func answerers(st *store.Store) core.Handler {
 			return err
 		}
 		name := r.PathValue("name")
-		v, pol, err := UpdateKey(st, r, p, "web settings: answerers of channel "+name, func(np *kpolicy.Policy) {
+		v, pol, err := UpdateKey(st, r, p, basis, "settings: answerers of channel "+name, func(np *kpolicy.Policy) {
 			if np.ChannelAnswerers == nil {
 				np.ChannelAnswerers = map[string][]string{}
 			}
@@ -333,6 +335,62 @@ func answerers(st *store.Store) core.Handler {
 			return err
 		}
 		return core.WriteJSON(w, http.StatusOK, map[string]any{"version": v, "answerers": nonNil(pol.ChannelAnswerers[name])})
+	}
+}
+
+// agentTier 设一个 Agent 的档位（§14.3）：只整理 / 也替我拍板（可限项目）/ 连日常规矩也替我改。设档位本身是 3b。
+// 可带 version 做乐观并发。Agent 是否存在不在这里校验：没有卡片的 id 不会被任何调用者匹配到。
+func agentTier(st *store.Store) core.Handler {
+	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+		basis, err := Authorize(st, r, p, authz.TierPower, "/settings/agents", "settings:/settings/agents/{agent}/tier")
+		if err != nil {
+			return err
+		}
+		var in struct {
+			Tier     string   `json:"tier"`
+			Projects []string `json:"projects"`
+			Version  *int     `json:"version"`
+		}
+		raw, err := readBody(r)
+		if err != nil {
+			return err
+		}
+		if err := strictDecode(raw, &in); err != nil {
+			return err
+		}
+		agent := r.PathValue("agent")
+		var (
+			v   int
+			pol kpolicy.Policy
+		)
+		err = st.Update(detached(r), func(tx *store.Tx) error {
+			cur, _, err := kpolicy.Stored(tx)
+			if err != nil {
+				return err
+			}
+			if in.Version != nil && cur != *in.Version {
+				return domain.NewError(domain.CodeConflict, "settings changed", "reload Agent settings")
+			}
+			if v, err = kpolicy.UpdateWith(tx, p.Caller.Actor, basis, "settings: tier of agent "+agent, func(np *kpolicy.Policy) error {
+				if np.AgentTier.ByAgent == nil {
+					np.AgentTier.ByAgent = map[string]kpolicy.AgentAllowance{}
+				}
+				np.AgentTier.ByAgent[agent] = kpolicy.AgentAllowance{Tier: in.Tier, Projects: in.Projects}
+				return nil
+			}); err != nil {
+				return err
+			}
+			_, pol, err = kpolicy.Stored(tx)
+			return err
+		})
+		if errors.Is(err, kpolicy.ErrInvalid) {
+			return domain.NewError(domain.CodeInvalidRequest, err.Error(), "fix the setting and send it again; nothing was saved")
+		}
+		if err != nil {
+			return err
+		}
+		al := pol.Allowance(agent)
+		return core.WriteJSON(w, http.StatusOK, map[string]any{"version": v, "tier": al.Tier, "projects": nonNil(al.Projects)})
 	}
 }
 
@@ -352,15 +410,15 @@ func nonNil(v []string) []string {
 }
 
 // UpdateKey 经 kernel/policy.Update 改策略里的一处（如白名单的一个键），返回新版本号与存储的策略。
-// 调用方须先确认是 Web 会话；内核仍会再判一次。
-func UpdateKey(st *store.Store, r *http.Request, p *core.Principal, reason string, mutate func(*kpolicy.Policy)) (int, kpolicy.Policy, error) {
+// 调用方须先经 Authorize 判权。
+func UpdateKey(st *store.Store, r *http.Request, p *core.Principal, basis *domain.Basis, reason string, mutate func(*kpolicy.Policy)) (int, kpolicy.Policy, error) {
 	var (
 		v   int
 		pol kpolicy.Policy
 	)
 	err := st.Update(detached(r), func(tx *store.Tx) error {
 		var err error
-		if v, err = kpolicy.Update(tx, p.Caller.Actor, reason, func(np *kpolicy.Policy) error { mutate(np); return nil }); err != nil {
+		if v, err = kpolicy.UpdateWith(tx, p.Caller.Actor, basis, reason, func(np *kpolicy.Policy) error { mutate(np); return nil }); err != nil {
 			return err
 		}
 		_, pol, err = kpolicy.Stored(tx)
@@ -372,7 +430,7 @@ func UpdateKey(st *store.Store, r *http.Request, p *core.Principal, reason strin
 	return v, pol, err
 }
 
-// webOnly：设置只有 Web 会话能碰（读也算：模型端点、白名单属于账本之外的配置，agent 不需要看）。
+// webOnly：只读的探测类路由（模型端点测试）只给 Web 本人。
 func webOnly(p *core.Principal) error {
 	if p.Web {
 		return nil
@@ -380,16 +438,49 @@ func webOnly(p *core.Principal) error {
 	return domain.NewError(domain.CodeWebOnly, "settings can only be used by the owner in the Web UI", "ask the owner to change it in the Web settings")
 }
 
-// auditRejected 与命令管线一致地记 command.rejected（§6.7）：授权判定决定是否应记账（delegate 的退出码 20 记，worker、observer 的 4 不记）。
-// 记账失败不改变拒绝结果。
-func auditRejected(st *store.Store, r *http.Request, p *core.Principal, path string) {
-	ar := authz.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, Action: authz.ActionChangeSettings, Object: authz.Object{ID: "settings:" + path}}
-	ev, ok := authz.RejectionEvent(ar, authz.Decide(kpolicy.Default(), ar))
-	if !ok {
-		return
+// Authorize 判一次不走命令管线的设置写入（§14.3）：与命令同一个 authz.Decide——3b 硬线（Web 本人且刚输过口令），
+// 3a 看调用者所属 Agent 的档位。被拒的按同一条留痕路径记 command.rejected（§6.7）；记账失败不改变拒绝结果。
+// object 是留痕用的对象名（如 settings:/settings/policy）。
+func Authorize(st *store.Store, r *http.Request, p *core.Principal, tier authz.Tier, page, object string) (*domain.Basis, error) {
+	if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
+		return nil, domain.NewError(domain.CodePermissionDenied, "credential kind cannot change settings", "use an owner or agent credential")
 	}
-	ev.At = clock.Now()
-	_ = st.Update(detached(r), func(tx *store.Tx) error { _, err := eventlog.Append(tx, ev); return err })
+	var (
+		pv  int
+		pol = kpolicy.Default()
+	)
+	if !p.Web { // Agent 的档位在策略里；Web 本人不看档位，不必先读（读不出的策略交给写入报 400）
+		if err := st.View(r.Context(), func(tx *store.Tx) (err error) { pv, pol, err = kpolicy.Current(tx); return }); err != nil {
+			return nil, err
+		}
+	}
+	agent := p.Caller.Agent()
+	ar := authz.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, Action: authz.ActionChangeSettings, Tier: tier, Fresh: p.Caller.Fresh,
+		Agent: agent, Allowance: pol.Allowance(agent), Page: page, Object: authz.Object{ID: object}}
+	d := authz.Decide(pol, ar)
+	if d.Err == nil {
+		via := domain.BasisAllowance
+		if p.Web {
+			via = domain.BasisOwnerWeb
+		}
+		return &domain.Basis{PolicyVersion: pv, Via: via, Tier: tier.String(), Agent: agent}, nil
+	}
+	if ev, ok := authz.RejectionEvent(ar, d); ok {
+		ev.At = clock.Now()
+		_ = st.Update(detached(r), func(tx *store.Tx) error { _, err := eventlog.Append(tx, ev); return err })
+	}
+	return nil, d.Err
+}
+
+// top 是一组段里最高的档与它所在的页（同档取第一个）。
+func top(secs []section) (authz.Tier, string) {
+	t, page := authz.TierRules, ""
+	for _, s := range secs {
+		if page == "" || s.tier > t {
+			t, page = s.tier, s.page
+		}
+	}
+	return t, page
 }
 
 func render(version int, pol kpolicy.Policy, secs []section) map[string]any {
@@ -402,10 +493,25 @@ func render(version int, pol kpolicy.Policy, secs []section) map[string]any {
 	return out
 }
 
-func read(st *store.Store, secs []section) core.Handler {
+func read(st *store.Store, path string, secs []section) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		if err := webOnly(p); err != nil {
-			return err
+		// 读：Web 本人看全部段；档位放开到 3a 的 Agent 只看 3a 段（改之前要知道现值），3b 段不给。
+		// 只有 3b 段的路由对 Agent 是硬线；拒绝与写入同一条留痕路径。
+		shown := secs
+		if !p.Web {
+			shown = nil
+			for _, s := range secs {
+				if s.tier == authz.TierRules {
+					shown = append(shown, s)
+				}
+			}
+			tier, page := authz.TierPower, secs[0].page
+			if len(shown) > 0 {
+				tier, page = authz.TierRules, shown[0].page
+			}
+			if _, err := Authorize(st, r, p, tier, page, "settings:"+path); err != nil {
+				return err
+			}
 		}
 		var (
 			v   int
@@ -414,14 +520,20 @@ func read(st *store.Store, secs []section) core.Handler {
 		if err := st.View(r.Context(), func(tx *store.Tx) (err error) { v, pol, err = kpolicy.Stored(tx); return }); err != nil {
 			return err
 		}
-		return core.WriteJSON(w, http.StatusOK, render(v, pol, secs))
+		return core.WriteJSON(w, http.StatusOK, render(v, pol, shown))
 	}
 }
 
 func write(st *store.Store, path string, secs []section) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		if err := webOnly(p); err != nil {
-			auditRejected(st, r, p, path)
+		// 先按这条路由最低的一档判：连最低一档都做不了的调用者，不论请求体是什么都先拒绝（不给它探请求形状）。
+		low, lowPage := authz.TierPower, ""
+		for _, s := range secs {
+			if s.tier <= low {
+				low, lowPage = s.tier, s.page
+			}
+		}
+		if _, err := Authorize(st, r, p, low, lowPage, "settings:"+path); err != nil {
 			return err
 		}
 		var body map[string]json.RawMessage
@@ -444,16 +556,24 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 		if _, old := body[legacyKey]; old && len(body) > 1 && known[legacyKey].set != nil {
 			return domain.NewError(domain.CodeInvalidRequest, "model_endpoint (v0.1 shape) cannot be combined with the new sections", "send either the old shape or the new one")
 		}
+		var touched []section
 		for k := range body {
-			if _, ok := known[k]; !ok {
+			s, ok := known[k]
+			if !ok {
 				return domain.NewError(domain.CodeInvalidRequest, "section "+k+" does not belong to this settings route", "see the API list for which route owns it")
 			}
+			touched = append(touched, s)
+		}
+		tier, page := top(touched)
+		basis, err := Authorize(st, r, p, tier, page, "settings:"+path)
+		if err != nil {
+			return err
 		}
 		var (
 			v   int
 			pol kpolicy.Policy
 		)
-		err := st.Update(detached(r), func(tx *store.Tx) error {
+		err = st.Update(detached(r), func(tx *store.Tx) error {
 			var err error
 			if version != nil {
 				var expected int
@@ -468,7 +588,7 @@ func write(st *store.Store, path string, secs []section) core.Handler {
 					return domain.NewError(domain.CodeConflict, "设置已变更", "重新载入设置")
 				}
 			}
-			v, err = kpolicy.Update(tx, p.Caller.Actor, "web settings: PUT "+path, func(np *kpolicy.Policy) error {
+			v, err = kpolicy.UpdateWith(tx, p.Caller.Actor, basis, "settings: PUT "+path, func(np *kpolicy.Policy) error {
 				if np.DefaultAgentID != nil && body["default_harness"] != nil {
 					return domain.NewError(domain.CodeConflict, "已启用 Agent 角色设置", "请用新的角色入口")
 				}

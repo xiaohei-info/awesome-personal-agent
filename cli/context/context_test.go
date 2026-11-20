@@ -21,6 +21,7 @@ import (
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/items"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/background"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -45,6 +46,7 @@ type kernel struct {
 	au  *auth.Auth
 	url string
 	tok string
+	x   *command.Executor
 }
 
 func newKernel(t *testing.T) *kernel {
@@ -74,7 +76,7 @@ func newKernel(t *testing.T) *kernel {
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	k := &kernel{t: t, st: st, au: au, url: ts.URL}
+	k := &kernel{t: t, st: st, au: au, url: ts.URL, x: x}
 	k.tok = k.token(auth.Delegate)
 	return k
 }
@@ -106,7 +108,7 @@ func (k *kernel) apaTok(token string, vars map[string]string, args ...string) re
 	var out, errb bytes.Buffer
 	env := client.Env{Getenv: func(s string) string { return v[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient}
-	return result{client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), env), out.String(), errb.String()}
+	return result{client.Main(args, env), out.String(), errb.String()}
 }
 
 func (k *kernel) apa(args ...string) result { return k.apaTok(k.tok, nil, args...) }
@@ -120,34 +122,33 @@ func (k *kernel) must(args ...string) result {
 	return r
 }
 
-// mustAsOwner 建项目、加 repos 是替本人做决定的第二档：除了本人原话（apaTok 已带）还要会话引用。
-// 不放进 apa：APA_SESSION 会让 context 记游标，改变那些测试要看的完整投影。
-func (k *kernel) mustAsOwner(args ...string) result {
+// owner 以 Web 本人（刚验过口令）执行一条命令：远程仓库是外部接入（3b），只有本人能加，CLI 的 Agent 钥匙做不了。
+func (k *kernel) owner(cmd string, in any) {
 	k.t.Helper()
-	r := k.apaTok(k.tok, map[string]string{"APA_SESSION": "setup", "APA_SESSION_KIND": "direct"}, args...)
-	if r.code != 0 {
-		k.t.Fatalf("%v: %+v", args, r)
+	b, _ := json.Marshal(in)
+	if _, err := k.x.Do(bg, command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb},
+		Level: authz.LevelWeb, Fresh: true}, Command: cmd, Input: b}); err != nil {
+		k.t.Fatalf("%s: %v", cmd, err)
 	}
-	return r
 }
 
 func (k *kernel) project(name, host, dir string) string {
 	k.t.Helper()
 	var p domain.Project
-	if err := json.Unmarshal([]byte(k.mustAsOwner("project", "create", "--name", name).out), &p); err != nil {
+	if err := json.Unmarshal([]byte(k.must("project", "create", "--name", name).out), &p); err != nil {
 		k.t.Fatal(err)
 	}
 	if dir != "" {
 		remote := "https://example.com/" + name + ".git"
-		k.mustAsOwner("project", "repos", "add", p.ID, "--remote", remote)
-		k.mustAsOwner("project", "repos", "add", p.ID, "--remote", remote, "--host", host, "--path", dir)
+		k.owner("project.repo.add", map[string]string{"id": p.ID, "remote": remote})
+		k.must("project", "repos", "add", p.ID, "--remote", remote, "--host", host, "--path", dir)
 	}
 	return p.ID
 }
 
 func (k *kernel) item(title, projectID string) string {
 	k.t.Helper()
-	args := []string{"item", "add", "--kind", "task", "--title", title, "--reason", "r", "--evidence", "owner: add it"}
+	args := []string{"item", "add", "--kind", "task", "--title", title, "--reason", "r"}
 	if projectID != "" {
 		args = append(args, "--project", projectID)
 	}

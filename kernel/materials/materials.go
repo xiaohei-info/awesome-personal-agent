@@ -525,8 +525,8 @@ func Register(x *command.Executor) error { return RegisterWith(x, nil) }
 
 // RegisterWith 同 Register；src 里能力包声明的 material_kinds 也接受，默认写入策略取包声明（Web 按 kind 设置的优先）。
 //
-// 授权（§14.3）：commit 按"修订材料"（observer 得到 4）；confirm 与 reject 按代答（Web 本人可；delegate 必须附本人原话；
-// 规范属 spec_activation，delegate 得到 20；observer、worker、运行凭据得到 4）；revert 只在 Web（delegate 得到 20，其余得到 4）。
+// 档位（§14.3）：commit、link 是一档（生效还是留待确认见 writeMode）；confirm 与 reject 是二档，规范类是 3a（规范生效）；
+// revert 与改材料信息是 3a。observer 得到 4（范围外）。
 func RegisterWith(x *command.Executor, src PackSource) error {
 	for _, sp := range []command.Spec{commit(src), confirm(), reject(), revert(), summarize(), link(src), update(src)} {
 		if err := x.Register(sp); err != nil {
@@ -536,26 +536,27 @@ func RegisterWith(x *command.Executor, src PackSource) error {
 	return nil
 }
 
-// writeMode 返回 kind 的写入策略：规范恒为 proposed；其次 Web 按 kind 的设置、能力包声明的默认、Web 的总默认。
-func writeMode(p policy.Policy, kind, packDefault string) string {
-	if kind == KindGuideline {
+// writeMode 返回一次提交的写入方式（§12.4）：规范恒留待确认；新建材料直接生效；改已有材料，Web 本人直接生效，
+// Agent 看档位（放开二档且项目在范围内才直接生效），内核自己按能力包声明的默认，没有声明留待确认。
+func writeMode(c *command.Ctx, p policy.Policy, m Material, isNew bool, packDefault string) string {
+	switch {
+	case m.Kind == KindGuideline:
 		return policy.WriteProposed
+	case isNew, c.Caller.Level == authz.LevelWeb:
+		return policy.WriteDirect
+	case c.Caller.Actor.Type == domain.ActorSystem:
+		if packDefault != "" {
+			return packDefault
+		}
+		return policy.WriteProposed
+	case authz.DecideOpen(p.Allowance(c.Caller.Agent()), m.Project):
+		return policy.WriteDirect
 	}
-	if m, ok := p.MaterialWrite.Kinds[kind]; ok {
-		return m
-	}
-	if packDefault != "" {
-		return packDefault
-	}
-	return p.MaterialWrite.Default
+	return policy.WriteProposed
 }
 
 func objectOf(m Material) authz.Object {
-	o := authz.Object{ID: m.ID, Kind: m.Kind, Project: m.Project, Tags: m.Tags}
-	if m.Kind == KindGuideline {
-		o.Category = policy.CategorySpecActivation
-	}
-	return o
+	return authz.Object{ID: m.ID, Kind: m.Kind, Project: m.Project}
 }
 
 // revisionObject 为 confirm 与 reject 解析授权对象：全部字段来自账本。
@@ -578,14 +579,14 @@ func hostedConflict(m Material) error {
 
 func commit(src PackSource) command.Spec {
 	return command.Spec{
-		Name: "material.commit", Action: authz.ActionReviseMaterial, Tier: authz.TierWork,
+		Name: "material.commit", Action: authz.ActionReviseMaterial, Tier: authz.TierOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v commitIn
 			if err := decode(in, &v); err != nil {
 				return authz.Object{}, err
 			}
 			if v.ID == "" {
-				return authz.Object{Kind: v.Kind, Project: v.Project, Tags: v.Tags}, nil
+				return authz.Object{Kind: v.Kind, Project: v.Project}, nil
 			}
 			m, err := Get(tx, v.ID)
 			return objectOf(m), err
@@ -665,7 +666,7 @@ func commit(src PackSource) command.Spec {
 			if err != nil {
 				return nil, err
 			}
-			mode := writeMode(pol, m.Kind, packKinds(src)[m.Kind])
+			mode := writeMode(c, pol, m, in.ID == "", packKinds(src)[m.Kind])
 			extra := map[string]any{"write_policy": mode, "policy_version": pv}
 			if mode == policy.WriteDirect {
 				if in.BasedOn != m.CurrentRev {
@@ -698,6 +699,14 @@ func commit(src PackSource) command.Spec {
 	}
 }
 
+// revisionTier：确认或拒绝修订是二档；规范的修订是规范生效，属 3a（§14.3）。
+func revisionTier(_ *store.Tx, _ command.Caller, o authz.Object, _ json.RawMessage) (authz.Tier, error) {
+	if o.Kind == KindGuideline {
+		return authz.TierRules, nil
+	}
+	return authz.TierDecide, nil
+}
+
 func orNone(s string) string {
 	if s == "" {
 		return "(none)"
@@ -707,7 +716,7 @@ func orNone(s string) string {
 
 func confirm() command.Spec {
 	return command.Spec{
-		Name: "revision.confirm", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
+		Name: "revision.confirm", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, TierFor: revisionTier, Page: "/materials",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v confirmIn
 			if err := decode(in, &v); err != nil {
@@ -776,7 +785,7 @@ func confirm() command.Spec {
 
 func reject() command.Spec {
 	return command.Spec{
-		Name: "revision.reject", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
+		Name: "revision.reject", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide, TierFor: revisionTier, Page: "/materials",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v rejectIn
 			if err := decode(in, &v); err != nil {
@@ -822,7 +831,7 @@ func reject() command.Spec {
 
 func revert() command.Spec {
 	return command.Spec{
-		Name: "material.revert", Action: authz.ActionChangeSettings, // Web 本人专属：delegate 得到 20，其余得到 4
+		Name: "material.revert", Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/materials",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v revertIn
 			if err := decode(in, &v); err != nil {
@@ -896,7 +905,7 @@ func summarize() command.Spec {
 		return v, decode(in, &v)
 	}
 	return command.Spec{
-		Name: "revision.summarize", Action: authz.ActionReviseMaterial,
+		Name: "revision.summarize", Action: authz.ActionReviseMaterial, Tier: authz.TierInternal,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

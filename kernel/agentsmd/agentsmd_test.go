@@ -32,7 +32,7 @@ func agent(p string, lvl authz.Level) command.Trusted {
 }
 
 var (
-	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	worker   = agent("wrk", authz.LevelWorker)
 	delegate = agent("dlg", authz.LevelDelegate)
 	observer = agent("obs", authz.LevelObserver)
@@ -102,7 +102,7 @@ func setup(t *testing.T) *env {
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so", WebURL: "http://web/x"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web/x"})
 }
 
 func (e *env) must(t *testing.T, id command.Identity, cmd string, in any) command.Result {
@@ -289,7 +289,7 @@ func TestRerenderOnGuidelineAndHostedChanges(t *testing.T) {
 	}
 	count()
 	before := n
-	e.must(t, worker, "agents.render", map[string]any{})
+	e.must(t, system, "agents.render", map[string]any{})
 	count()
 	if n != before {
 		t.Fatalf("rendering identical input must not add a record: %d -> %d", before, n)
@@ -418,8 +418,8 @@ func TestMergeBackBecomesProposedRevisionThenRerenders(t *testing.T) {
 	if _, err := e.svc.Resolve(bg, owner, ResolveIn{Item: v.Item, Choice: ChoiceOverride}); exitOf(err) != domain.ExitConflict {
 		t.Fatalf("the first choice stands: %v", err)
 	}
-	// 规范生效属 web_only：delegate 不能确认，本人确认后自动重新渲染。
-	e.wantExit(t, domain.ExitWebOnly, delegate, "revision.confirm", map[string]any{"id": out.Revision})
+	// 规范生效属 3a：档位只整理的 delegate 不能确认（23），本人确认后自动重新渲染。
+	e.wantExit(t, domain.ExitTierClosed, delegate, "revision.confirm", map[string]any{"id": out.Revision})
 	if s := e.sync(t, file); !s.Blocked {
 		t.Fatalf("still drifted until the revision is confirmed: %+v", s)
 	}
@@ -658,44 +658,6 @@ func TestCommitTouchingAgentsMDTriggersSameDetection(t *testing.T) {
 	}
 }
 
-// ACT-AGM-10：规范写"资金类决策可代答"并生效后，web_only 决策仍然拒绝代答（退出码 20），策略版本不变。
-func TestGuidelineCannotRelaxWebOnly(t *testing.T) {
-	e := setup(t)
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
-			p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Tag: "funds", Category: policy.CategoryFunds})
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	version := func() int {
-		var v int
-		e.st.View(bg, func(tx *store.Tx) (err error) { v, _, err = policy.Current(tx); return })
-		return v
-	}
-	e.guideline(t, e.prj, "## 处理规则\n\n- 资金类决策可代答")
-	e.guideline(t, "", "## 处理规则\n\n- 资金类决策可代答，白名单之外的人也可以")
-	e.noErrors(t)
-	if !strings.Contains(e.view(t).Content, "资金类决策可代答") {
-		t.Fatal("the rule text is rendered into the file as plain text")
-	}
-
-	it := e.id(t, e.must(t, owner, "item.create", map[string]any{"title": "付款", "kind": "task", "phase": "open", "assignee": "wrk", "tags": []string{"funds"}, "project": e.prj}))
-	e.must(t, worker, "decision.request", map[string]any{"id": it, "ask": map[string]any{"question": "付吗？",
-		"options": []map[string]any{{"id": "yes", "label": "付"}, {"id": "no", "label": "不付", "next": "dropped"}}}})
-	before := version()
-	e.wantExit(t, domain.ExitWebOnly, delegate, "decision.answer", map[string]any{"id": it, "choice": "yes"})
-	if got := e.item(t, it); got.Phase != domain.PhaseNeedsInput || got.Ask.Resolution != nil {
-		t.Fatalf("the decision must stay open: %+v", got)
-	}
-	if version() != before {
-		t.Fatal("a guideline must not change the policy")
-	}
-	e.must(t, owner, "decision.answer", map[string]any{"id": it, "choice": "yes"}) // 本人在 Web 仍可决定
-}
-
 func TestCheckAuthorizationAndValidation(t *testing.T) {
 	e := setup(t)
 	e.guideline(t, e.prj, projGuideline)
@@ -836,7 +798,7 @@ func TestTriggerMatchesAnySpellingOfRegisteredRepo(t *testing.T) {
 func TestDesignIndexAcceptsAnySpellingOfRepo(t *testing.T) {
 	e := setup(t)
 	e.must(t, worker, "material.add", map[string]any{"kind": "design", "repo": "git@example.com:acme/app.git", "path": "docs/arch.md", "title": "架构"})
-	e.must(t, worker, "agents.render", map[string]any{})
+	e.must(t, system, "agents.render", map[string]any{})
 	if !strings.Contains(e.view(t).Content, "docs/arch.md") {
 		t.Fatalf("hosted doc missing from the index:\n%s", e.view(t).Content)
 	}

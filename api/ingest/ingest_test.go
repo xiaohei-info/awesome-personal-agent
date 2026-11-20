@@ -43,7 +43,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 const secret = "s3cret"
@@ -180,7 +180,7 @@ func (e *env) serve(maxBody int) {
 
 func (e *env) register(id string, cfg m) {
 	e.t.Helper()
-	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: registry.CmdRegister, Owner: "owner", Evidence: "x",
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: registry.CmdRegister, Owner: "owner",
 		Input: js(m{"id": id, "type": "webhook", "source_type": "forge", "config": cfg})}); err != nil {
 		e.t.Fatal(err)
 	}

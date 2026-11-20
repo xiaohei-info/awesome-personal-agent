@@ -40,7 +40,7 @@ func (e *scoreEnv) configure(judgeEndpoint bool) {
 }
 
 func (e *scoreEnv) score(id command.Identity, evidence, source string) (ScoreResult, error) {
-	return e.svc.BacklogScore(bg, command.Request{Identity: id, Evidence: evidence, Owner: "owner"}, source)
+	return e.svc.BacklogScore(bg, command.Request{Identity: id, Owner: "owner"}, source)
 }
 
 func (e *scoreEnv) records(event string) (out []record.Record) {
@@ -168,9 +168,9 @@ func TestBacklogScoreRefusals(t *testing.T) {
 	e.emit("src_t", "plain", ev("a", "ticket.other", "x", nil))
 	e.backlogged("src_t", "ticket", "a", domain.DispositionUnjudged, "")
 	e.configure(true)
-	deleg := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
-	if _, err := e.score(deleg, "", ""); err == nil || code(err) != domain.CodeBasisRequired {
-		t.Fatalf("without words: %v", err)
+	obs := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "obs", Via: domain.ViaCLI}, Level: authz.LevelObserver}
+	if _, err := e.score(obs, "", ""); err == nil || code(err) != domain.CodePermissionDenied {
+		t.Fatalf("observer: %v", err)
 	}
 	if len(e.cls.Batches()) != 0 {
 		t.Fatal("refused call reached the classifier")

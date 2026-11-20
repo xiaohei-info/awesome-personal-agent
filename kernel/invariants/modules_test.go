@@ -47,7 +47,7 @@ func open(t *testing.T, mods ...store.Module) *store.Store {
 func do(t *testing.T, x *command.Executor, id command.Identity, cmd string, in any) (command.Result, error) {
 	t.Helper()
 	b, _ := json.Marshal(in)
-	return x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so", WebURL: "http://web"})
+	return x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web"})
 }
 
 func mustDo(t *testing.T, x *command.Executor, id command.Identity, cmd string, in any) json.RawMessage {
@@ -310,8 +310,9 @@ func TestInv9RevisionsAreAppendOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	prj := idOf(mustDo(t, x, owner, "project.create", map[string]any{"name": "inv"}))
+	// 本人提交：改已有材料直接生效（Agent 档位只整理时会留待确认，不影响追加不改这一点）。
 	commit := func(in map[string]any) (r struct{ Material, Revision string }) {
-		_ = json.Unmarshal(mustDo(t, x, worker, "material.commit", in), &r)
+		_ = json.Unmarshal(mustDo(t, x, owner, "material.commit", in), &r)
 		return
 	}
 	r1 := commit(map[string]any{"project": prj, "kind": "minutes", "title": "周会", "content": "v1", "reason": "first"})

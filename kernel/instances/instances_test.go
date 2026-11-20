@@ -3,6 +3,7 @@ package instances
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -23,7 +24,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 // 附录 C.13 的简报包：schedule 必填，projects 是字符串数组。
@@ -94,7 +95,7 @@ func setup(t *testing.T) *env {
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"})
 }
 
 func (e *env) must(t *testing.T, cmd string, in any) command.Result {
@@ -370,16 +371,37 @@ func TestNonStringScheduleIsRejected(t *testing.T) {
 	}
 }
 
+// 安排是 3a：observer 在钥匙范围外；档位只整理的 delegate 得到 23；本人把它调到「连日常规矩也替我改」后可以建。
 func TestDelegateManagesObserverDenied(t *testing.T) {
 	e := setup(t)
 	lvl := func(l authz.Level) command.Trusted {
-		return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "a", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: l}
+		return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "a", Via: domain.ViaCLI}, Level: l, CredentialAgentID: "agent_a"}
 	}
 	in := map[string]any{"pack": "brief", "params": json.RawMessage(`{"schedule":"24h"}`)}
-	if _, err := e.do(lvl(authz.LevelObserver), "instance.create", in); err == nil {
-		t.Fatal("observer created an instance")
+	if _, err := e.do(lvl(authz.LevelObserver), "instance.create", in); exitOf(err) != domain.ExitPermissionDenied {
+		t.Fatalf("observer: %v", err)
+	}
+	if _, err := e.do(lvl(authz.LevelDelegate), "instance.create", in); exitOf(err) != domain.ExitTierClosed {
+		t.Fatalf("organize-only delegate: %v", err)
+	}
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent["agent_a"] = policy.AgentAllowance{Tier: policy.AllowRules}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := e.do(lvl(authz.LevelDelegate), "instance.create", in); err != nil {
-		t.Fatalf("delegate denied: %v", err)
+		t.Fatalf("delegate with rules tier: %v", err)
 	}
+}
+
+func exitOf(err error) int {
+	var de *domain.Error
+	if errors.As(err, &de) {
+		return de.ExitCode()
+	}
+	return -1
 }

@@ -100,7 +100,7 @@ func TestFlowPurge(t *testing.T) {
 
 	step(t, "ACT-PRG-01 物理删除事项与材料，内容不可再搜到", func(t *testing.T) {
 		r := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "待删事项", "--phase", "open", "--project", f.Projects["acc-open"],
-			"--body", "正文 "+marker, "--evidence", "证据 "+marker)
+			"--body", "正文 "+marker)
 		itemID = decode[struct {
 			ID string `json:"id"`
 		}](t, r.Stdout).ID
@@ -230,7 +230,8 @@ func TestFlowPurge(t *testing.T) {
 	step(t, "ACT-PRG-04 物理删除只在 Web", func(t *testing.T) {
 		keep := f.material("不可被代删", "保留 KEEP-MATERIAL")
 		for _, c := range []struct{ name, token, code string }{
-			{"DEL", f.DEL, "web_only"}, {"WRK", f.WRK, "permission_denied"}, {"OBS", f.OBS, "permission_denied"},
+			// 物理删除是 3b：硬线先于钥匙范围，任何钥匙都是 web_only（hard_line）（2026-11-20）。
+			{"DEL", f.DEL, "web_only"}, {"WRK", f.WRK, "web_only"}, {"OBS", f.OBS, "web_only"},
 		} {
 			r := f.APIRaw("POST", "/v1/settings/purge", `{"object":"`+keep+`"}`, c.token)
 			if r.Code != http.StatusForbidden || !strings.Contains(r.Body, `"code":"`+c.code+`"`) {

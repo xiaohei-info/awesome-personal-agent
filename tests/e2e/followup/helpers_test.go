@@ -127,7 +127,7 @@ func (f *fx) show(id string) item {
 func (f *fx) newItem(title string, extra ...string) string {
 	f.t.Helper()
 	args := append([]string{"item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", f.Projects["acc-work"], "--evidence", "验收建事项"}, extra...)
+		"--project", f.Projects["acc-work"]}, extra...)
 	return decode[struct {
 		ID string `json:"id"`
 	}](f.t, f.apa(f.DEL, 0, args...).Stdout).ID
@@ -136,7 +136,7 @@ func (f *fx) newItem(title string, extra ...string) string {
 // wait 把事项转 waiting（等外部），token 为空取 WRK。
 func (f *fx) wait(id string) {
 	f.t.Helper()
-	f.apa(f.WRK, 0, "item", "transition", id, "--to", "waiting", "--waiting-on", "external:装修公司报价", "--reason", "等报价", "--evidence", "等装修公司报价")
+	f.apa(f.WRK, 0, "item", "transition", id, "--to", "waiting", "--waiting-on", "external:装修公司报价", "--reason", "等报价")
 }
 
 // ---- 规则 ----

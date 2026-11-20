@@ -132,7 +132,7 @@ func TestFlowSourceGithub(t *testing.T) {
 		k.webOK("POST", "/items/"+accepted+"/accept", `{}`, 200)
 		eq(t, "接受后阶段", k.item(accepted).Phase, "open")
 		// 接受后的事项没有指派；worker 只能对自己的事项提问，先由本人（DEL 附原话）指给 work-host.cli。
-		k.apa(k.DEL, 0, "item", "update", accepted, "--assignee", "work-host.cli", "--evidence", "这个交给 work-host 处理")
+		k.apa(k.DEL, 0, "item", "update", accepted, "--assignee", "work-host.cli")
 		k.apa(k.WRK, 0, "ask", accepted, "--question", "这个 Issue 先处理哪部分", "--option", "A=先排查", "--option", "B=先回复", "--next", "A=done", "--recommend", "A", "--free-text")
 		eq(t, "ask 后阶段", k.item(accepted).Phase, "needs_input")
 		k.until("渠道 ext 把决策发到机器人替身", func() bool {
@@ -228,8 +228,8 @@ func TestFlowSourceGithub(t *testing.T) {
 
 	k.step("ACT-GH-09 PR 更新与评论命中已委派事项的关联键时挂靠", func(t *testing.T) {
 		parent := k.idOf(k.apa(k.DEL, 0, "item", "add", "--kind", "task", "--title", "补充导出单测", "--phase", "open",
-			"--project", k.Projects["acc-work"], "--evidence", "建父事项"))
-		child := k.idOf(k.apa(k.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--evidence", "委派"))
+			"--project", k.Projects["acc-work"]))
+		child := k.idOf(k.apa(k.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli"))
 		k.apa(k.WRK, 0, "report", child, "--outcome", "progress", "--summary", "PR 已开", "--pr", prRef)
 		sug := len(k.suggestions())
 		k.ghAt("gh-pr-updated-7", hPRUpdated7)

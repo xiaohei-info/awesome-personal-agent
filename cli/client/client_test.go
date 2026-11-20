@@ -157,7 +157,7 @@ func TestExitCodeMapping(t *testing.T) {
 	want := map[domain.Code]int{
 		domain.CodeInternal: 1, domain.CodeInvalidRequest: 2, domain.CodeUnauthenticated: 3,
 		domain.CodePermissionDenied: 4, domain.CodeNotFound: 5, domain.CodeConflict: 6,
-		domain.CodeWebOnly: 20, domain.CodeExecutorNotAllowed: 21, domain.CodeRiskScreeningPending: 22,
+		domain.CodeWebOnly: 20, domain.CodeReauthRequired: 20, domain.CodeExecutorNotAllowed: 21, domain.CodeTierClosed: 23,
 	}
 	for code, exit := range want {
 		r := apa(t, env, t.TempDir(), "", "fail", string(code))
@@ -292,74 +292,51 @@ func TestSessionHeaderAndProject(t *testing.T) {
 	if gotHarness != "" {
 		t.Fatalf("harness header sent without APA_HARNESS: %q", gotHarness)
 	}
-	// APA_SESSION_KIND 原样以 X-APA-Session-Kind 发出；没设置就不发（内核按未上报处理，§14.5）。
+	// 会话类型不再参与判定：设了 APA_SESSION_KIND 也不发 X-APA-Session-Kind（§14.3）。
 	var gotKind string
 	kindSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKind = r.Header.Get("X-APA-Session-Kind")
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer kindSrv.Close()
-	apa(t, map[string]string{"APA_URL": kindSrv.URL, "APA_TOKEN": "t", "APA_SESSION_KIND": "group"}, t.TempDir(), "", "items")
-	if gotKind != "group" {
-		t.Fatalf("session kind header: %q", gotKind)
-	}
-	apa(t, map[string]string{"APA_URL": kindSrv.URL, "APA_TOKEN": "t"}, t.TempDir(), "", "items")
+	apa(t, map[string]string{"APA_URL": kindSrv.URL, "APA_TOKEN": "t", "APA_SESSION_KIND": "direct"}, t.TempDir(), "", "items")
 	if gotKind != "" {
-		t.Fatalf("session kind header sent without APA_SESSION_KIND: %q", gotKind)
+		t.Fatalf("session kind header must not be sent: %q", gotKind)
 	}
 	if (&Ctx{Env: Env{Getenv: func(string) string { return "p" }}}).Project() != "p" {
 		t.Fatal("project")
 	}
 }
 
-// 全局 --evidence 在任意位置、两种写法下都进 X-APA-Evidence 头，且不传给子命令。
-func TestGlobalEvidenceFlagBecomesHeader(t *testing.T) {
+// 旧的全局 --evidence、--grant 在任意位置、两种写法下都被剥掉且不传给子命令（旧提示词不至于失败），也不发任何头：
+// 本人原话与授权单不再是依据（§14.3）。
+func TestOldEvidenceAndGrantFlagsAreDropped(t *testing.T) {
 	var got []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = append(got, r.Header.Get("X-APA-Evidence"))
+		got = append(got, r.Header.Get("X-APA-Evidence")+r.Header.Get("X-APA-Grant"))
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 	env := map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t"}
-	for _, args := range [][]string{{"--evidence", "owner: ok", "items"}, {"items", "--evidence=owner: ok"}, {"items"}} {
+	for _, args := range [][]string{{"--evidence", "owner: ok", "items"}, {"items", "--evidence=owner: ok"}, {"--grant", "grt_1", "items"}, {"items", "--grant=grt_2"}} {
 		if r := apa(t, env, t.TempDir(), "", args...); r.code != 0 {
 			t.Fatalf("%v: %+v", args, r)
 		}
 	}
-	if len(got) != 3 || got[0] != "owner: ok" || got[1] != "owner: ok" || got[2] != "" {
-		t.Fatalf("evidence headers: %q", got)
+	if len(got) != 4 || strings.Join(got, "") != "" {
+		t.Fatalf("headers sent: %q", got)
 	}
 }
 
-// 全局 --grant 两种写法都进 X-APA-Grant 头且不传给子命令；与 --evidence 同带时两个头都发，二选一由内核判定（退出码 2）。
-func TestGlobalGrantFlagBecomesHeader(t *testing.T) {
-	var got [][2]string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = append(got, [2]string{r.Header.Get("X-APA-Grant"), r.Header.Get("X-APA-Evidence")})
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-	env := map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t"}
-	for _, args := range [][]string{{"--grant", "grt_1", "items"}, {"items", "--grant=grt_2"}, {"items"}, {"--grant", "grt_3", "--evidence", "ok", "items"}} {
-		if r := apa(t, env, t.TempDir(), "", args...); r.code != 0 {
-			t.Fatalf("%v: %+v", args, r)
-		}
-	}
-	want := [][2]string{{"grt_1", ""}, {"grt_2", ""}, {"", ""}, {"grt_3", "ok"}}
-	if len(got) != 4 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
-		t.Fatalf("grant/evidence headers: %q", got)
-	}
-}
-
-// 内核的 403 basis_required 还原为退出码 23，why/next 原样交给 stderr。
-func TestBasisRequiredIsExit23(t *testing.T) {
+// 内核的 403 tier_closed（档位未放开）还原为退出码 23，why/next 原样交给 stderr。
+func TestTierClosedIsExit23(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(403)
-		_, _ = w.Write([]byte(`{"code":"basis_required","why":"grant revoked","next":"ask the owner"}`))
+		_, _ = w.Write([]byte(`{"code":"tier_closed","reason":"tier_closed","why":"this Agent may not decide this for the owner","next":"hand the Web link to the owner"}`))
 	}))
 	defer srv.Close()
-	r := apa(t, map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t"}, t.TempDir(), "", "--grant", "g", "items")
-	if r.code != 23 || !strings.Contains(r.errOut, "grant revoked") {
+	r := apa(t, map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t"}, t.TempDir(), "", "items")
+	if r.code != 23 || !strings.Contains(r.errOut, "may not decide") {
 		t.Fatalf("%+v", r)
 	}
 }

@@ -103,12 +103,12 @@ def test_register_exposes_one_tool_in_the_apa_toolset():
     assert [(k["name"], k["toolset"]) for k in seen] == [("apa_declare_headless", "apa")]
 
 
-# ACT-HCTX-14：自检命令只读、输出附录 A.1 的 JSON，并报告本插件上报会话类型。
-def test_selfcheck_reports_session_kind_as_json():
+# ACT-HCTX-14：自检命令只读、输出附录 A.1 的 JSON；会话类型已取消，不再报告。
+def test_selfcheck_reports_json():
     import json
     import subprocess
     import sys
     out = subprocess.run([sys.executable, str(HEADLESS / "selfcheck.py")], capture_output=True, text=True, timeout=5, check=True).stdout
     r = json.loads(out)
-    assert r["reports_session_kind"] is True and r["overlaps"] == [] and r["plugin_version"]
+    assert "reports_session_kind" not in r and r["overlaps"] == [] and r["plugin_version"]
     assert {"name": "tools", "installed": True} in r["hooks"]

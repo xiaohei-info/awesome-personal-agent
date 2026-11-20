@@ -45,7 +45,7 @@ func (e *Env) EnableStubRuns() {
 		"session": map[string]any{"extract": "$.session_id"},
 		"access":  map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}},
 	}})
-	if r := e.Apa(e.DEL, string(decl), "declare", "-", "--evidence", "环境基线声明回执替身"); r.Code != 0 {
+	if r := e.Apa(e.DEL, string(decl), "declare", "-"); r.Code != 0 {
 		e.fatal("apa declare %s: %d %s%s", receiptHN, r.Code, r.Stdout, r.Stderr)
 	}
 	e.webOK("POST", "/v1/settings/declarations/"+receiptHN+"/1/confirm", "", 200)
@@ -91,16 +91,15 @@ func (e *Env) StubRun(mode string) (item, runDir string, env map[string]string) 
 		seen[f] = true
 	}
 	r := e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--title", "run-"+mode, "--phase", "proposed",
-		"--assignee", "work-host.cli", "--project", e.Projects["acc-open"], "--tags", "acc-run-"+mode, "--evidence", "环境基线触发")
+		"--assignee", "work-host.cli", "--project", e.Projects["acc-open"], "--tags", "acc-run-"+mode)
 	var m struct {
 		ID string `json:"id"`
 	}
 	if r.Code != 0 || json.Unmarshal([]byte(r.Stdout), &m) != nil || m.ID == "" {
 		e.fatal("item add: %d %s %s", r.Code, r.Stdout, r.Stderr)
 	}
-	if r := e.Apa(e.DEL, "", "item", "transition", m.ID, "--to", "open", "--reason", "go", "--evidence", "环境基线触发"); r.Code != 0 {
-		e.fatal("item transition: %d %s %s", r.Code, r.Stdout, r.Stderr)
-	}
+	// 让建议离开 proposed 是立项（二档）：由本人在 Web 做，夹具环境里的 delegate 不归属 Agent、只整理（2026-11-20）。
+	e.webOK("POST", "/v1/items/"+m.ID+"/transition", `{"to":"open","reason":"go"}`, 200)
 	// 替身用 os.WriteFile 非原子写入：文件出现不等于内容写完，轮询到可解析为止。
 	var file string
 	var readErr, parseErr error

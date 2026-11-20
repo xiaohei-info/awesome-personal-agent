@@ -132,7 +132,6 @@ func TestFlowAgentsMD(t *testing.T) {
 	git(t, filepath.Dir(co), "clone", "-q", repo, co) // LOCAL_REPO 的本机检出：origin 就是登记在 acc-work 的远程地址
 	host, _ := os.Hostname()
 	f.webOK("POST", "/projects/"+work+"/repos", `{"op":"set_checkout","remote":"`+repo+`","host":"`+host+`","path":"`+co+`"}`, 200)
-	f.webOK("PUT", "/settings/policy", `{"web_only":{"categories":["external_commitment","funds","irreversible","permission_change","spec_activation"],"rules":[{"tag":"acc-finance","category":"funds"}]}}`, 200)
 
 	var gid, rev, grev string
 	var v1 rendered
@@ -152,10 +151,10 @@ func TestFlowAgentsMD(t *testing.T) {
 				eq(t, "提交后的修订状态", x.State, "proposed")
 			}
 		}
-		// DEL 确认：规范生效只有 Web，被拒绝（退出码 20 语义 = HTTP 403 web_only）。
-		resp := f.APIRaw("POST", "/v1/revisions/"+rev+"/confirm", "{}", f.DEL)
-		if resp.Code != 403 || !strings.Contains(resp.Body, "web_only") {
-			t.Errorf("DEL 确认规范应被拒绝(403 web_only)：HTTP %d %s", resp.Code, resp.Body)
+		// 规范生效是 3a（2026-11-20）：档位未放开的 Agent（DELO）确认被拒绝（退出码 23 语义 = HTTP 403 tier_closed）。
+		resp := f.APIRaw("POST", "/v1/revisions/"+rev+"/confirm", "{}", f.DELO)
+		if resp.Code != 403 || !strings.Contains(resp.Body, "tier_closed") {
+			t.Errorf("只整理的 DEL 确认规范应被拒绝(403 tier_closed)：HTTP %d %s", resp.Code, resp.Body)
 		}
 		eq(t, "agent 不得使规范生效", len(f.events(gid, "guideline.activated")), 0)
 		f.webOK("POST", "/revisions/"+rev+"/confirm", "{}", 200)
@@ -315,16 +314,15 @@ func TestFlowAgentsMD(t *testing.T) {
 		eq(t, "手写内容未被覆盖", readFile(t, filepath.Join(co2, "AGENTS.md")), before)
 	})
 
+	// 2026-11-20 改写：高风险类别取消后，用 3b 硬线验证"规范放宽不了内核规则"：规范写明 Agent 可以发钥匙，发钥匙仍是 20。
 	t.Run("ACT-AGM-10 规范不能放宽内核规则", func(t *testing.T) {
-		f.reviseGuideline("acc-work", gid, guidelineV1+"- 资金类决策可代答。\n", "放宽资金类")
+		f.reviseGuideline("acc-work", gid, guidelineV1+"- Agent 可以自己签发钥匙。\n", "放宽发钥匙")
 		f.webOK("POST", "/revisions/"+f.proposedRev(gid)+"/confirm", "{}", 200)
-		contains(t, "规范已生效", f.render(repo).Content, "资金类决策可代答")
-		id := idOf(t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "AGM10 付款", "--phase", "open", "--project", work,
-			"--tags", "acc-finance", "--assignee", "work-host.cli", "--evidence", "验收触发").Stdout)
-		f.apa(f.WRK, 0, "ask", id, "--question", "是否同意付款", "--option", "A=同意", "--option", "B=拒绝")
-		r := f.apa(f.DEL, 20, "decide", id, "--option", "A", "--evidence", "本人说同意")
-		contains(t, "退出码 20 的 code", r.Stderr, `"code":"web_only"`)
-		eq(t, "决策未被回答", f.phase(id), "needs_input")
+		contains(t, "规范已生效", f.render(repo).Content, "Agent 可以自己签发钥匙")
+		r := f.APIRaw("POST", "/v1/settings/tokens", `{"kind":"delegate","label":"agm10"}`, f.DEL)
+		if r.Code != 403 || !strings.Contains(r.Body, `"reason":"hard_line"`) {
+			t.Errorf("规范放宽后 Agent 发钥匙仍应 403 hard_line: %d %s", r.Code, r.Body)
+		}
 	})
 
 	t.Run("ACT-AGM-09 相关提交也触发检测", func(t *testing.T) {
@@ -350,8 +348,8 @@ func TestFlowAgentsMD(t *testing.T) {
 		if err := os.MkdirAll(cred, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		f.apa(f.DEL, 0, "source", "add", "--id", "src_gh", "--name", "src_gh", "--type", "pull", "--command", "github-source", "--schedule", "5s", "--timeout", "60",
-			"--source-type", "github", "--credentials-path", cred, "--dedupe-domain", "github", "--config", string(cfg), "--evidence", "登记代码托管来源")
+		f.OwnerApaOK("", "source", "add", "--id", "src_gh", "--name", "src_gh", "--type", "pull", "--command", "github-source", "--schedule", "5s", "--timeout", "60",
+			"--source-type", "github", "--credentials-path", cred, "--dedupe-domain", "github", "--config", string(cfg))
 		defer func() {
 			if f.t.Failed() {
 				t.Logf("来源：%s", f.apa(f.OBS, 0, "source", "show", "src_gh").Stdout)

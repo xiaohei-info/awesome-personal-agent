@@ -16,6 +16,7 @@ import (
 
 const (
 	exitDenied     = "4"
+	exitTierClosed = "23"
 	exitNotAllowed = "21"
 )
 
@@ -34,8 +35,9 @@ $APA dismiss "$ITEM" --reason x --evidence x > "$OUT/dismiss.out" 2>&1; rc dismi
 		id := f.task("bgg-01", "acc-work", "acc-main")
 		f.settled(id, 1)
 		eq(t, "运行者自己 ask（对照，应成功）", f.outFile("ask.rc"), "0")
+		// 2026-11-20：运行凭据随所属 Agent 的档位；这次运行不归属放开了档位的 Agent，目标事项在范围内、档位未放开，得 23。
 		for _, c := range []string{"decide", "accept", "dismiss"} {
-			eq(t, "apa "+c+" 退出码", f.outFile(c+".rc"), exitDenied)
+			eq(t, "apa "+c+" 退出码", f.outFile(c+".rc"), exitTierClosed)
 		}
 		if n := len(f.events(id, "command.rejected")); n < 3 {
 			t.Errorf("应各记一条拒绝事件（至少 3 条），实际 %d", n)
@@ -72,7 +74,7 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 			return len(rs) == 1 && rs[0].State == "running"
 		})
 		// 同一事项再次命中规则（item.updated）。
-		f.apa(f.DEL, 0, "item", "update", id, "--title", "bgg-03 改名", "--reason", "再次触发", "--evidence", "e2e 再次触发")
+		f.apa(f.DEL, 0, "item", "update", id, "--title", "bgg-03 改名", "--reason", "再次触发")
 		f.waitFor("跳过并记 Event", 20*time.Second, func() bool { return len(f.events(id, "background.skipped")) == 1 })
 		eq(t, "Run 数", len(f.runsOf(id)), 1)
 		ctx := f.apa(f.OBS, 0, "context", "--scope", "item", "--item", id).Stdout
@@ -98,7 +100,7 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		f.waitFor("占满额度的运行在跑", 20*time.Second, func() bool { rs := f.runsOf(first); return len(rs) == 1 && rs[0].State == "running" })
 		second := f.task("bgg-03b-second", "acc-work", "acc-hang")
 		f.waitFor("第二个事项的 Run 排队", 20*time.Second, func() bool { rs := f.runsOf(second); return len(rs) == 1 && rs[0].State == "queued" })
-		f.apa(f.DEL, 0, "item", "update", second, "--title", "bgg-03b 改名", "--reason", "再次触发", "--evidence", "e2e 再次触发")
+		f.apa(f.DEL, 0, "item", "update", second, "--title", "bgg-03b 改名", "--reason", "再次触发")
 		f.waitFor("排队中的也跳过", 20*time.Second, func() bool { return len(f.events(second, "background.skipped")) == 1 })
 		eq(t, "排队事项的 Run 数", len(f.runsOf(second)), 1)
 		f.setMode("hang-b", "observe")

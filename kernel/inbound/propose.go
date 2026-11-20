@@ -20,7 +20,7 @@ import (
 const CmdProposeUnjudged = "inbound.propose_unjudged"
 
 func registerPropose(x *command.Executor) error {
-	return x.Register(command.Spec{Name: CmdProposeUnjudged, Action: authz.ActionManageSource,
+	return x.Register(command.Spec{Name: CmdProposeUnjudged, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseDispose(in)
 			return authz.Object{ID: v.Event}, err
@@ -192,7 +192,7 @@ func applyMerge(c *command.Ctx, event, item string, m mergeFields) error {
 	if _, err := command.Bump(c.Tx, w.Object); err != nil {
 		return err
 	}
-	_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "merged source event " + ev.ID, Evidence: c.Evidence})
+	_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "merged source event " + ev.ID})
 	return err
 }
 

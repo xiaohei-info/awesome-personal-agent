@@ -312,7 +312,7 @@ func TestFlowSourceCalendar(t *testing.T) {
 	})
 
 	k.step("ACT-CAL-09 已关闭事项不再被刷新，新版本按普通事件处理", func(t *testing.T) {
-		k.apa(k.DEL, 0, "item", "transition", a1Item, "--to", "done", "--reason", "保险已处理", "--evidence", "本人：保险这事办完了")
+		k.apa(k.DEL, 0, "item", "transition", a1Item, "--to", "done", "--reason", "保险已处理")
 		sug := len(k.suggestions())
 		k.SetToolCase("cal-updated-2")
 		var ev SrcEvent

@@ -68,7 +68,7 @@ func TestFlowRoutine(t *testing.T) {
 	}
 	disable := func(id string) {
 		t.Helper()
-		k.apa(e.DEL, 0, "--evidence", "owner: 停用 routine 实例", "instance", "disable", id)
+		k.apa(e.DEL, 0, "instance", "disable", id)
 	}
 	var instances []string
 
@@ -155,11 +155,11 @@ func TestFlowRoutine(t *testing.T) {
 
 	k.step("ACT-RTN-06 实例参数不合法时拒绝", func(t *testing.T) {
 		before := k.apa(e.OBS, 0, "instance", "list").Stdout
-		r := e.Apa(e.DEL, "", "--evidence", "owner: 建 routine 实例", "instance", "add", "routine", "--param", "schedule=* * * * *", "--param", "mode=sometimes", "--param", "title=x")
+		r := e.Apa(e.DEL, "", "instance", "add", "routine", "--param", "schedule=* * * * *", "--param", "mode=sometimes", "--param", "title=x")
 		if r.Code == 0 || !strings.Contains(r.Stderr, "mode") {
 			t.Errorf("mode 不合法应被拒绝并指出 mode: %d %s%s", r.Code, r.Stdout, r.Stderr)
 		}
-		r = e.Apa(e.DEL, "", "--evidence", "owner: 建 routine 实例", "instance", "add", "routine", "--param", "mode=create_item", "--param", "title=x")
+		r = e.Apa(e.DEL, "", "instance", "add", "routine", "--param", "mode=create_item", "--param", "title=x")
 		if r.Code == 0 || !strings.Contains(r.Stderr, "schedule") {
 			t.Errorf("缺 schedule 应被拒绝并指出 schedule: %d %s%s", r.Code, r.Stdout, r.Stderr)
 		}
@@ -349,7 +349,7 @@ func TestFlowRoutine(t *testing.T) {
 		// 结论：create_item 零模型调用（ACT-RTN-02 已断言）、instruction_path 文件写入且可读（ACT-RTN-07 已断言）；
 		// run 模式在真实宿主里可读由本机升级验证 L12 承接。
 		for _, id := range instances {
-			e.Apa(e.DEL, "", "--evidence", "owner: 清理 routine 实例", "instance", "disable", id) // 已停用的再停用不算错
+			e.Apa(e.DEL, "", "instance", "disable", id) // 已停用的再停用不算错
 		}
 		h.Mode("routine")
 		if l := k.apa(e.OBS, 0, "instance", "list").Stdout; len(stillEnabled(t, l, instances...)) > 0 {

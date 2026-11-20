@@ -108,7 +108,7 @@ func setup(t *testing.T) *env {
 		}
 	}
 	e.csrf = out.CSRF
-	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	var prj struct{ ID string }
 	e.kernel(owner, "project.create", map[string]any{"name": "acc-work"}, &prj)
 	e.kernel(owner, "project.repo.add", map[string]any{"id": prj.ID, "remote": repo}, nil)
@@ -118,7 +118,7 @@ func setup(t *testing.T) *env {
 func (e *env) kernel(id command.Identity, cmd string, in any, out any) {
 	e.t.Helper()
 	b, _ := json.Marshal(in)
-	r, err := e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so", WebURL: "http://web/x"})
+	r, err := e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web/x"})
 	if err != nil {
 		e.t.Fatalf("%s: %v", cmd, err)
 	}

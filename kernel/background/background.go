@@ -657,7 +657,7 @@ func (s *Service) needsInput(ctx context.Context, itemID, reason string) error {
 		a := system
 		a.OnBehalfOf = s.o.Owner
 		_, err := s.o.Exec.Do(ctx, command.Request{Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate},
-			Command: step.cmd, Input: b, Evidence: "background run " + itemID, Owner: s.o.Owner})
+			Command: step.cmd, Input: b, Owner: s.o.Owner})
 		if err != nil {
 			return err
 		}

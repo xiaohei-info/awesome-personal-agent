@@ -102,7 +102,7 @@ func (e *env) setExternal(source, scope string) {
 	}
 }
 
-var webIdentity = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+var webIdentity = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 
 type readResp struct {
 	Event struct {
@@ -131,9 +131,8 @@ func read(t *testing.T, r resp) readResp {
 
 func (e *env) registerRaw(ids ...string) {
 	e.t.Helper()
-	dlg := e.token(auth.Delegate)
 	for _, id := range ids {
-		if r := e.do(dlg, "POST", "/v1/sources", `{"id":"`+id+`","type":"webhook","source_type":"mail","config":{"scheme":"shared"}}`); r.Code != 201 {
+		if r := e.web("POST", "/v1/sources", `{"id":"`+id+`","type":"webhook","source_type":"mail","config":{"scheme":"shared"}}`); r.Code != 201 {
 			e.t.Fatalf("register %s: %d %s", id, r.Code, r.Body)
 		}
 	}

@@ -36,9 +36,6 @@ func run(c *client.Ctx, args []string) error {
 func render(tl kwhy.Timeline) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", tl.ID)
-	if tl.ScreeningPending {
-		b.WriteString("  (web_only screening pending: details are only visible in Web)\n")
-	}
 	for _, s := range tl.Steps {
 		fmt.Fprintf(&b, "  #%d %s  %s  %s/%s via %s", s.Seq, s.At, s.Type, s.Actor.Type, s.Actor.Principal, s.Actor.Via)
 		if s.Actor.OnBehalfOf != "" {
@@ -48,6 +45,12 @@ func render(tl kwhy.Timeline) string {
 			fmt.Fprintf(&b, "  policy v%d", s.Basis.PolicyVersion)
 			if s.Basis.RuleID != "" {
 				fmt.Fprintf(&b, " rule %s", s.Basis.RuleID)
+			}
+			if s.Basis.Via != "" { // 凭什么：一档 / 档位放开 / 本人在 Web 或渠道 / 规则（§14.3）
+				fmt.Fprintf(&b, " basis %s", s.Basis.Via)
+				if s.Basis.Tier != "" {
+					fmt.Fprintf(&b, " tier %s", s.Basis.Tier)
+				}
 			}
 		}
 		if s.ChainDepth > 0 {

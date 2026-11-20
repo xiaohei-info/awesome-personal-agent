@@ -1,134 +1,117 @@
-// Package authz 是统一授权判定（设计 §7.7、§14.3、§14.4）：输入 Actor、动作、对象，
-// 输出允许、拒绝（带退出码与原因）或需要 Web。纯函数，无 I/O，不写任何数据。
-// web_only 的判断型初筛不在这里（那是初筛模块的事）；初筛的结果经 Object 传入。
+// Package authz 是统一授权判定（设计 §7.7、§14.3）：输入调用者、动作、档位、对象，
+// 输出允许或拒绝（带退出码与原因）。纯函数，无 I/O，不写任何数据。
+//
+// 判定顺序固定：硬线（3b，不读档位）→ 钥匙范围 → 档位 → 项目允许的执行者。
+// 钥匙只决定能碰哪些对象；档位只决定能做到哪一档。调用方自报的原话、会话类型、宿主名都不是输入。
 package authz
 
 import (
 	"encoding/json"
-	"strings"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 )
 
-// Level 是调用者的信任级（§14.2）。LevelWeb 只授予 Web 上的本人。
+// Level 是调用者的钥匙种类（§14.2）。LevelWeb 只授予 Web 上的本人。
 type Level string
 
 const (
 	LevelObserver Level = "observer"
 	LevelWorker   Level = "worker"
 	LevelDelegate Level = "delegate"
-	LevelRun      Level = "run" // 运行凭据：worker 级，绑定一次运行；只凭允许后台使用的 agent 式授权单代本人决定（§14.5）
+	LevelRun      Level = "run" // 运行钥匙：绑定一次运行，写范围是本次目标事项及其子事项
 	LevelWeb      Level = "web"
 )
 
-// Action 对应 §14.3 的一行（或一个校验点）。
+// Action 决定钥匙范围（能碰哪些对象），与档位无关。
 type Action string
 
 const (
 	ActionRead            Action = "read"
+	ActionWebRead         Action = "web_read" // 只有 Web 本人能读（钥匙清单、待确认的接入声明）
 	ActionCreateProposed  Action = "create_proposed"
-	ActionUpdateOwn       Action = "update_own" // 更新自己的事项、回执、建子事项与 Timer、提交决策请求
+	ActionUpdateOwn       Action = "update_own" // 自己的事项、回执、建子事项与 Timer、提交决策请求
 	ActionReviseMaterial  Action = "revise_material"
 	ActionDelegate        Action = "delegate"
 	ActionEditCheckout    Action = "edit_checkout"
 	ActionSubmitPlugin    Action = "submit_plugin"
 	ActionEditAnyItem     Action = "edit_any_item"
-	ActionAnswerDecision  Action = "answer_decision" // 含接受或丢弃建议
-	ActionManageProject   Action = "manage_project"  // 建项目、改项目信息、增删 repos 远程地址
-	ActionManageSource    Action = "manage_source"   // 来源、webhook 密钥、能力包实例等
-	ActionChangeSettings  Action = "change_settings" // 策略、信任级、token、白名单、允许的执行者等
-	ActionChannelAnswer   Action = "channel_answer"  // 渠道里的回答，凭渠道回答人白名单
+	ActionAnswerDecision  Action = "answer_decision" // 回答问题、处理建议、确认修订
+	ActionManageProject   Action = "manage_project"
+	ActionManageSource    Action = "manage_source"
+	ActionChangeSettings  Action = "change_settings"
+	ActionChannelAnswer   Action = "channel_answer" // 本人经已配对渠道回答，凭渠道回答人名单
 	ActionReassign        Action = "reassign"
 	ActionMoveIntoProject Action = "move_into_project"
 	ActionRuleCreateChild Action = "rule_create_child"
 	ActionRunnerTask      Action = "runner_task"
 )
 
-// Tier 是 delegate 凭据代理写入的档位（§14.5）。第三档（高风险与设置类）由动作本身判定，不在这里。
+// Tier 是动作按后果固定的档（§14.3）。零值无效：每条命令必须登记一档。
 type Tier int
 
 const (
-	TierNone   Tier = iota // 不是代理写命令
-	TierWork               // 一：agent 自己的工作，凭身份和对象绑定放行
-	TierDecide             // 二：替本人做决定，要本人原话加会话引用
-	TierWords              // 二中只接受本人原话的管理命令（项目、来源、能力包实例）
+	TierUnset    Tier = iota
+	TierRead          // 只读
+	TierOrganize      // 一档 整理：永远开，可撤回
+	TierDecide        // 二档 拍板：Agent 档位 ≥ decide 且对象项目在范围内
+	TierRules         // 3a 改日常：Agent 档位 = rules
+	TierPower         // 3b 造新权力：永不放开，只有 Web 本人且刚再输过口令
+	TierInternal      // 系统内部：只有内核自己（与 Web 本人）能调，Agent 一律硬线
 )
 
-// Object 是动作的对象。全部字段来自账本或内核，没有任何字段可由事项创建者声明来降低门槛。
+var tierNames = map[Tier]string{TierRead: "read", TierOrganize: "organize", TierDecide: "decide", TierRules: "rules", TierPower: "power", TierInternal: "internal"}
+
+func (t Tier) String() string { return tierNames[t] }
+
+// Object 是动作的对象。全部字段来自账本或内核，不来自调用方。
 type Object struct {
 	ID       string
 	Assignee string // 事项当前的执行者
-	// 运行凭据的范围由内核据账本解析：对象是否为目标事项或其子事项 / 是否属于目标事项所属项目。
+	// 运行钥匙的范围由内核据账本解析：对象是否为目标事项或其子事项 / 是否属于目标事项所属项目。
 	InRunScope   bool
 	InRunProject bool
 
-	// web_only 匹配（§14.4）：kind、tag、项目由账本给出；Category 由内核归类；
-	// ScreenedWebOnly 是判断型初筛的单调升级结果；ScreeningPending 表示初筛未返回。
-	Kind             string
-	Tags             []string
-	Project          string
-	Category         string
-	ScreenedWebOnly  bool
-	ScreeningPending bool
+	Kind    string
+	Project string // 二档的项目限定按它比对
 
 	// 执行者校验点（§14.7）。ProjectInfo 为 nil 表示无项目，不校验。
 	ProjectInfo *domain.Project
 	Executor    string
-	// ExecutorHost、ExecutorHarness 是名录里该执行者登记的机器与 harness（新登记时取将要登记的值），供按维度匹配；
-	// Candidates 是名录里当前命中名单的执行者 id，只随拒绝返回。三者都由内核据账本填，不来自调用方。
-	ExecutorHost, ExecutorHarness string
-	Candidates                    []string
+	// Candidates 是名录里当前在名单内的执行者 id，只随拒绝返回。
+	Candidates []string
 
-	// ToProject 非 nil 表示命令要把对象移入该项目（空串为移出）：授权单要求来源和目标都在范围内（§14.5）。
+	// ToProject 非 nil 表示命令要把对象移入该项目（空串为移出）：二档的项目限定要求来源与目标都在范围内。
 	ToProject *string
 
-	// OriginTrusted：对象（建议）来自一条发件人已核实且在该来源转发白名单内的来源事件（§14.5 来源可信）。
-	// 由登记命令的模块据账本填；agent 自己提出的、对话捕获产生的都为假。
-	OriginTrusted bool
-
-	// Creator 仅供调用方留痕；判定从不读取它（§14.4 判定不来自事项创建者）。
+	// Creator 仅供调用方留痕；判定从不读取它。
 	Creator domain.Actor
 }
 
 // Request 是一次判定的全部输入。
 type Request struct {
-	Actor    domain.Actor
-	Level    Level
-	Action   Action
-	Object   Object
-	Evidence string // 第二档的本人原话；会话引用取 Actor.Session
-	Tier     Tier   // 命令管线据命令登记与对象绑定定出的代理写档位（§14.5）；零值不是代理写
-	Owner    string // 本人的执行者 id，指派给本人始终允许
-	WebURL   string // 对象在 Web 的链接，随 20/22 拒绝返回
-	Channel  string // ActionChannelAnswer：渠道
-	Sender   string // ActionChannelAnswer：回答人
-
-	// 授权单依据（§14.5 第二档的另一条路）：管线据账本填。GrantID 是请求携带的授权单 id；
-	// Grant 为 nil 表示账本里没有这张单。Command 是授权单 actions 里的命令名，Credential 是调用者的凭据 id。
-	Command    string
-	GrantID    string
-	Grant      *policy.Grant
-	Credential string
-	Now        time.Time
-
-	// agent 式授权单的匹配只用内核记录的值（§14.5）：CredentialHarness 是凭据的 harness 列，RunHarness 是运行记录的 harness；
-	// 都不是调用方自报的 Actor.Harness。RunHarness 为空的运行级调用（唤醒租约期间被降级的 delegate）不能用授权单。
-	CredentialHarness string
-	CredentialAgentID string
-	RunHarness        string
-	RunAgentID        string
-	// TriggerTrusted：触发这次运行的内容可信（§14.5 后台运行使用授权单）；只对运行凭据有意义，由管线据账本填。
-	TriggerTrusted bool
+	Actor  domain.Actor
+	Level  Level
+	Action Action
+	Tier   Tier
+	Object Object
+	// Fresh：Web 会话刚再输过一次口令（3b 要求，§14.3）。只由内核的会话层给出。
+	Fresh bool
+	// Agent 与 Allowance：调用者所属的 Agent（内核记录的凭据归属或运行记录）与它的档位；没有归属时为只整理。
+	Agent     string
+	Allowance policy.AgentAllowance
+	Owner     string // 本人的执行者 id，指派给本人始终允许
+	WebURL    string // 对象在 Web 的页面，二档拒绝时返回
+	Page      string // 动作所在的设置页，3a/3b 拒绝时返回；空则用 WebURL
+	Channel   string // ActionChannelAnswer：渠道
+	Sender    string // ActionChannelAnswer：回答人
 }
 
 type Verdict string
 
 const (
-	Allow   Verdict = "allow"
-	Deny    Verdict = "deny"
-	NeedWeb Verdict = "need_web"
+	Allow Verdict = "allow"
+	Deny  Verdict = "deny"
 )
 
 // Decision 是判定结果；Err 在 Allow 时为 nil。
@@ -147,78 +130,70 @@ func (d Decision) ExitCode() int {
 
 var allow = Decision{Verdict: Allow}
 
-func deny(code domain.Code, why, next string) Decision {
-	return Decision{Verdict: Deny, Err: domain.NewError(code, why, next)}
-}
-
-func denied() Decision {
-	return deny(domain.CodePermissionDenied, "credential level does not allow this action", "do not retry; turn the item to needs_input if a decision is needed")
-}
-
-func withLink(code domain.Code, why, next, webURL string) *domain.Error {
+func reject(code domain.Code, reason, why, next, link string) Decision {
 	e := domain.NewError(code, why, next)
-	if webURL != "" {
-		e.WebURL = &webURL
+	e.Reason = reason
+	if link != "" {
+		e.WebURL = &link
 	}
-	return e
+	return Decision{Verdict: Deny, Err: e}
 }
 
-// Decide 对 r 给出判定。p 是当前生效的策略版本。
+func outOfScope() Decision {
+	return reject(domain.CodePermissionDenied, domain.ReasonOutOfScope, "this key cannot reach this object", "do not retry with this key", "")
+}
+
+func pick(page, url string) string {
+	if page != "" {
+		return page
+	}
+	return url
+}
+
+// Decide 对 r 给出判定。p 是当前生效的策略版本（只用到渠道回答人名单）。
 func Decide(p policy.Policy, r Request) Decision {
 	if !validLevel(r) {
-		return denied()
+		return outOfScope()
 	}
 	if r.Action == ActionChannelAnswer {
 		return decideChannel(p, r)
 	}
-	if r.GrantID != "" {
-		switch r.Level {
-		case LevelDelegate:
-			if strings.TrimSpace(r.Evidence) != "" {
-				return deny(domain.CodeInvalidRequest, "give either the owner's words or a grant, not both", "resend with only one basis")
-			}
-		case LevelWeb: // 本人在 Web 不需要授权单，忽略
-		case LevelRun:
-			if r.RunHarness == "" {
-				return denied() // 唤醒租约期间被降级的 delegate：没有运行记录，先换取运行凭据（§13.6、§14.5）
-			}
+	if r.Tier == TierUnset {
+		return reject(domain.CodeInvalidRequest, "", "command has no tier", "report this as a kernel bug", "")
+	}
+	// 1 硬线：3b 不读档位，任何设置都放不开。
+	if r.Tier == TierPower {
+		switch {
+		case r.Level == LevelWeb && r.Fresh:
+		case r.Level == LevelWeb:
+			return reject(domain.CodeReauthRequired, domain.ReasonReauthRequired, "this action creates new authority and needs the password entered again",
+				"enter the password again and retry", "")
 		default:
-			return denied() // observer、worker 没有代答能力
+			return reject(domain.CodeWebOnly, domain.ReasonHardLine, "only the owner can do this, in the Web UI; no setting opens it to an Agent",
+				"give the Web link to the owner and stop; do not retry", pick(r.Page, r.WebURL))
 		}
 	}
-	var d Decision
-	switch r.Action {
-	case ActionRead, ActionCreateProposed:
-		d = allow
-	case ActionUpdateOwn:
-		d = byLevel(r, own(r), true, r.Object.InRunScope)
-	case ActionReviseMaterial, ActionSubmitPlugin:
-		d = byLevel(r, true, true, r.Action == ActionReviseMaterial)
-	case ActionEditCheckout:
-		d = byLevel(r, true, true, r.Object.InRunProject)
-	case ActionDelegate:
-		d = byLevel(r, own(r), true, r.Object.InRunScope)
-	case ActionEditAnyItem:
-		d = byLevel(r, false, true, runGrant(r))
-	case ActionAnswerDecision:
-		d = answerDecision(p, r)
-	case ActionManageProject, ActionManageSource:
-		d = byLevel(r, false, true, false)
-	case ActionChangeSettings:
-		d = byLevel(r, false, false, false)
-		if r.Level == LevelDelegate {
-			d = needWeb(r, "this change can only be made by the owner in the Web UI")
+	// 2 钥匙范围。
+	if !inScope(r) {
+		return outOfScope()
+	}
+	// 3 档位：Web 本人与内核自己（规则、时钟，依据是本人开启的规则模式）不看档位。
+	if r.Level != LevelWeb && r.Actor.Type != domain.ActorSystem {
+		switch r.Tier {
+		case TierDecide:
+			if !decideOpen(r) {
+				return reject(domain.CodeTierClosed, domain.ReasonTierClosed, "this Agent may not decide this for the owner",
+					"do not retry; hand the Web link to the owner, or ask the question with apa ask", r.WebURL)
+			}
+		case TierRules:
+			if r.Allowance.Tier != policy.AllowRules {
+				return reject(domain.CodeTierClosed, domain.ReasonTierClosed, "this Agent may not change everyday rules",
+					"do not retry; give the Web link to the owner", pick(r.Page, r.WebURL))
+			}
+		case TierInternal: // 只给内核自己：外部钥匙调不到，也不能被档位放开
+			return reject(domain.CodeWebOnly, domain.ReasonHardLine, "this command is run by the kernel itself",
+				"do not call it", "")
 		}
-	case ActionReassign, ActionMoveIntoProject, ActionRuleCreateChild, ActionRunnerTask:
-		d = allow // 这些只是 §14.7 的校验点，权限本身由发起它们的命令判定
-	default:
-		return deny(domain.CodeInvalidRequest, "unknown action "+string(r.Action), "see apa guide")
-	}
-	if d.Verdict == Allow && (r.Level == LevelDelegate || runGrant(r)) && TierOf(r) >= TierDecide {
-		d = needBasis(p, r)
-	}
-	if d.Verdict != Allow {
-		return d
 	}
 	return checkExecutor(r)
 }
@@ -233,162 +208,69 @@ func validLevel(r Request) bool {
 	return false
 }
 
-// runGrant：运行凭据带着授权单。放行与否由 needBasis 里的授权单校验决定（含运行范围），这里只是不按"运行凭据没有代答能力"直接拒绝。
-func runGrant(r Request) bool { return r.Level == LevelRun && r.GrantID != "" }
-
 func own(r Request) bool { return r.Object.Assignee != "" && r.Object.Assignee == r.Actor.Principal }
 
-// byLevel 把一行矩阵落成判定（observer 在这些行恒不可）：worker/delegate 为是否可；run 为运行凭据的范围条件。Web 本人始终可。
-func byLevel(r Request, worker, delegate, run bool) Decision {
-	ok := false
-	switch r.Level {
-	case LevelWeb:
-		ok = true
-	case LevelWorker:
-		ok = worker
-	case LevelDelegate:
-		ok = delegate
-	case LevelRun:
-		ok = run
-	}
-	if !ok {
-		return denied()
-	}
-	return allow
-}
-
-// TierOf 是本次判定实际适用的档位：代答与改他人事项的动作本身属于第二档，不论命令登记了什么，
-// 所以绑定的执行者借 item.transition 把 proposed、needs_input 事项推出去也要本人原话。
-func TierOf(r Request) Tier {
-	if r.Action == ActionAnswerDecision || r.Action == ActionEditAnyItem {
-		return max(r.Tier, TierDecide)
-	}
-	return r.Tier
-}
-
-// needBasis 校验第二档的依据：本人原话与会话引用都非空（内核不能校验真伪，§21.2）。
-func needBasis(p policy.Policy, r Request) Decision {
-	if r.GrantID != "" {
-		if reason, why := grantMismatch(p, r); why != "" {
-			next := "do not retry; give the Web link to the owner so they can decide or issue a grant"
-			if reason == domain.GrantReasonScreeningPending {
-				next = "the grant itself is fine: open the item in Web (web_url) and handle the decision card waiting on it, or retry in a moment; the same grant works again once the card is handled"
-			}
-			e := withLink(domain.CodeBasisRequired, why, next, r.WebURL)
-			e.Reason = reason
-			return Decision{Verdict: Deny, Err: e}
-		}
-		return allow // 授权单是本人事先划定的，不需要会话引用
-	}
-	switch {
-	case strings.TrimSpace(r.Evidence) == "":
-		return basisMissing(r, "this action decides for the owner and needs the owner's own words as evidence")
-	// 本人原话只在与本人的私聊里成立；group、unknown、未上报一律拒绝，不设开关（§14.5）。
-	case r.Actor.Type == domain.ActorAgent && r.Actor.SessionKind != domain.SessionDirect:
-		return Decision{Verdict: Deny, Err: withLink(domain.CodeSessionNotDirect, "the session is not a private chat with the owner, so the owner's words in it cannot be accepted",
-			"do not retry with other wording; give the Web link to the owner, or use a grant the owner issued in Web", r.WebURL)}
-	// 会话引用是 harness 里的 agent 才有的；规则与内核服务（system）的依据是自己带的证据与规则登记。
-	case r.Actor.Type == domain.ActorAgent && strings.TrimSpace(r.Actor.Session) == "":
-		return basisMissing(r, "the owner's own words need a session reference (APA_SESSION)")
-	}
-	return allow
-}
-
-// grantMismatch 按 §14.5 的顺序逐项校验授权单，返回第一个不符的原因（why）；空串表示放行。
-// reason 是有稳定原因码（domain.GrantReason*）的那几类，其余为空。
-func grantMismatch(p policy.Policy, r Request) (reason, why string) {
-	g, o := r.Grant, r.Object
-	run := r.Level == LevelRun
-	switch {
-	case g == nil:
-		return "", "grant " + r.GrantID + " does not exist"
-	case g.Grantee.Instance && (run && g.Grantee.Agent != r.RunAgentID || !run && g.Grantee.Agent != r.CredentialAgentID):
-		return "", "grant was issued to another Agent instance"
-	case !g.Grantee.Instance && (r.RunAgentID != "" || r.CredentialAgentID != "" && g.Grantee.Agent != ""):
-		return "", "grant was not issued to this Agent instance"
-	case g.Grantee.Agent == "" && run:
-		return domain.GrantReasonNotForBackground, "grant_not_for_background: the grant was issued to a token, not to this Agent's background runs"
-	case g.Grantee.Agent == "" && g.Grantee.Credential != r.Credential:
-		return "", "grant was issued to another credential"
-	case g.Grantee.Agent == "" && g.Grantee.Harness != "" && g.Grantee.Harness != r.Actor.Harness:
-		return "", "grant is limited to another harness"
-	case !g.Grantee.Instance && g.Grantee.Agent != "" && !run && g.Grantee.Agent != r.CredentialHarness:
-		return "", "grant was issued to another Agent"
-	case !g.Grantee.Instance && g.Grantee.Agent != "" && run && g.Grantee.Agent != r.RunHarness:
-		return "", "grant was issued to another Agent"
-	case run && !g.Grantee.Background:
-		return domain.GrantReasonNotForBackground, "grant_not_for_background: the owner did not allow this grant in background runs"
-	case !g.RevokedAt.IsZero():
-		return "", "grant was revoked"
-	case !g.ExpiresAt.IsZero() && !r.Now.Before(g.ExpiresAt):
-		return "", "grant has expired"
-	case !contains(g.Actions, r.Command):
-		return "", "grant does not cover " + r.Command
-	case !inScope(g.Scope, o.Kind, o.Project, o.ID) || (o.ToProject != nil && !inScope(g.Scope, o.Kind, *o.ToProject, o.ID)):
-		return "", "object is outside the grant scope"
-	case run && !o.InRunScope:
-		return "", "object is outside this run's scope: a grant does not widen what a background run may write"
-	case g.RiskCeiling == policy.RiskNormal && WebOnly(p, o):
-		return domain.GrantReasonRiskCeiling, "object risk exceeds the grant's risk ceiling: it is web_only, which no grant covers"
-	// 初筛未返回时风险类别还没定，单子"暂不可用"而不是"超过上限"：原因说准，判定本身不变（§14.4、§14.5）。
-	case g.RiskCeiling == policy.RiskNormal && o.ScreeningPending:
-		return domain.GrantReasonScreeningPending, "grant_screening_pending: a decision request on this item is still being risk-screened, so its risk is not known yet and the grant cannot be used until that card is handled"
-	case g.Grantee.Agent != "" && (r.Command == "proposal.accept" || r.Command == "proposal.attach") && !o.OriginTrusted:
-		return domain.GrantReasonUntrustedOrigin, "untrusted_origin: this proposal did not come from a trusted sender, so it can only be accepted by the owner"
-	case run && !r.TriggerTrusted:
-		return domain.GrantReasonUntrustedTrigger, "untrusted_trigger: this run was started by content from an untrusted sender, so it cannot use grants"
-	}
-	return "", ""
-}
-
-// inScope：scope 的非空项都命中才算在范围内。授权单不继承到子事项，所以只比对象自己的字段。
-func inScope(s policy.Scope, kind, project, id string) bool {
-	if s.All {
+// inScope 是钥匙范围（§14.2）：observer 只读与提建议；worker 自己的事项；运行钥匙本次目标；delegate 全部；Web 本人全部。
+func inScope(r Request) bool {
+	if r.Level == LevelWeb {
 		return true
 	}
-	return (len(s.Projects) == 0 || contains(s.Projects, project)) &&
-		(len(s.Kinds) == 0 || contains(s.Kinds, kind)) &&
-		(len(s.Items) == 0 || contains(s.Items, id))
+	o := r.Object
+	switch r.Action {
+	case ActionRead, ActionCreateProposed:
+		return true
+	case ActionWebRead:
+		return false
+	case ActionReassign, ActionMoveIntoProject, ActionRuleCreateChild, ActionRunnerTask:
+		return true // 只是 §14.7 的校验点，范围由发起它们的命令判定
+	}
+	switch r.Level {
+	case LevelWorker:
+		switch r.Action {
+		case ActionUpdateOwn, ActionDelegate, ActionAnswerDecision:
+			return own(r)
+		case ActionReviseMaterial, ActionSubmitPlugin, ActionEditCheckout:
+			return true
+		}
+	case LevelDelegate:
+		return true
+	case LevelRun:
+		switch r.Action {
+		case ActionUpdateOwn, ActionDelegate, ActionEditAnyItem, ActionAnswerDecision:
+			return o.InRunScope
+		case ActionReviseMaterial:
+			// shortcut: 材料与附件的写范围还没收到本次目标（方案 A05），沿用旧口径；要收窄先给材料解析出所属事项。
+			return true
+		case ActionEditCheckout:
+			return o.InRunProject
+		}
+	}
+	return false
 }
 
-func basisMissing(r Request, why string) Decision {
-	return Decision{Verdict: Deny, Err: withLink(domain.CodeBasisRequired, why, "do not retry with other wording; give the Web link to the owner and wait", r.WebURL)}
+// decideOpen：档位放开二档，且设了项目限定时要移入的项目也在名单内。
+func decideOpen(r Request) bool {
+	return DecideOpen(r.Allowance, r.Object.Project) && (r.Object.ToProject == nil || DecideOpen(r.Allowance, *r.Object.ToProject))
 }
 
-func needWeb(r Request, why string) Decision {
-	return Decision{Verdict: NeedWeb, Err: withLink(domain.CodeWebOnly, why, "give the Web link to the owner and stop; do not continue", r.WebURL)}
+// DecideOpen 报告档位 a 是否在项目 project 上放开了二档（替本人拍板）；设了项目限定时对象的项目须在名单内。
+// 材料"改已有直接生效还是留待确认"也按它（§12.4）。
+func DecideOpen(a policy.AgentAllowance, project string) bool {
+	if a.Tier != policy.AllowDecide && a.Tier != policy.AllowRules {
+		return false
+	}
+	return len(a.Projects) == 0 || contains(a.Projects, project)
 }
 
-func answerDecision(p policy.Policy, r Request) Decision {
-	if r.Level == LevelWeb {
-		return allow
-	}
-	if r.Level != LevelDelegate && !runGrant(r) {
-		return denied() // observer/worker/不带授权单的运行凭据：没有代答能力（运行凭据为退出码 4）
-	}
-	if WebOnly(p, r.Object) {
-		return needWeb(r, "this decision is web_only and can only be answered by the owner in the Web UI")
-	}
-	if r.Object.ScreeningPending {
-		return Decision{Verdict: Deny, Err: withLink(domain.CodeRiskScreeningPending, "web_only screening has not returned; delegate answers are not accepted yet", "do not treat the answer as in effect; retry later or hand the Web link to the owner", r.WebURL)}
-	}
-	return allow
-}
-
+// decideChannel：本人经已配对渠道回答。回答人在名单内即是本人，不看档位；名单为空等于这个渠道不能回答。
 func decideChannel(p policy.Policy, r Request) Decision {
 	if r.Sender == "" || !contains(p.ChannelAnswerers[r.Channel], r.Sender) {
-		return deny(domain.CodePermissionDenied, "sender is not an allowed answerer for this channel", "ask the owner to answer in the Web UI")
-	}
-	if WebOnly(p, r.Object) {
-		return needWeb(r, "this decision is web_only and cannot be answered from a channel")
-	}
-	if r.Object.ScreeningPending {
-		return Decision{Verdict: Deny, Err: withLink(domain.CodeRiskScreeningPending, "web_only screening has not returned; channel answers are not accepted yet", "retry later or use the Web link", r.WebURL)}
+		return reject(domain.CodePermissionDenied, domain.ReasonOutOfScope, "sender is not an allowed answerer for this channel", "ask the owner to answer in the Web UI", r.WebURL)
 	}
 	return allow
 }
 
-// checkExecutor 是 §14.7 的硬约束，对所有级别（含 Web）生效。
+// checkExecutor 是 §14.7 的硬约束，对所有调用者（含 Web）生效；只按执行者 id 名单。
 func checkExecutor(r Request) Decision {
 	switch r.Action {
 	case ActionDelegate, ActionReassign, ActionMoveIntoProject, ActionRuleCreateChild, ActionRunnerTask:
@@ -396,53 +278,35 @@ func checkExecutor(r Request) Decision {
 		return allow
 	}
 	pr := r.Object.ProjectInfo
-	if pr == nil || pr.ExecutorAllowed(domain.ExecutorRef{ID: r.Object.Executor, Host: r.Object.ExecutorHost, Harness: r.Object.ExecutorHarness}, r.Owner) {
+	if pr == nil || pr.ExecutorAllowed(domain.ExecutorRef{ID: r.Object.Executor}, r.Owner) {
 		return allow
 	}
 	e := domain.NewError(domain.CodeExecutorNotAllowed, "executor is not allowed in this project", "pick one of the candidates or an allowed executor, or turn the item to needs_input")
+	e.Reason = domain.ReasonOutOfScope
 	e.Allowed = append([]string{}, pr.AllowedExecutors...)
-	e.AllowedMatch = append([]domain.ExecutorMatch{}, pr.AllowedExecutorMatch...)
 	e.Candidates = append([]string{}, r.Object.Candidates...)
 	return Decision{Verdict: Deny, Err: e}
 }
 
-// WebOnly 按策略判断决策是否属于 web_only（§14.4）：规则按 kind、tag、项目匹配（非空字段须全部满足），
-// 或对象类别在策略的 web_only 类别内，或初筛已升级。只升不降。
-func WebOnly(p policy.Policy, o Object) bool {
-	if o.ScreenedWebOnly || o.Category == domain.RiskClassWebOnly || (o.Category != "" && contains(p.WebOnly.Categories, o.Category)) {
-		return true
-	}
-	for _, rule := range p.WebOnly.Rules {
-		if (rule.Kind == "" || rule.Kind == o.Kind) &&
-			(rule.Tag == "" || contains(o.Tags, rule.Tag)) &&
-			(rule.Project == "" || rule.Project == o.Project) {
-			return true
-		}
-	}
-	return false
-}
-
-// ForwardAllowed 是转发白名单（§14.6）：发送者缺失或未核实，按不在白名单处理。
+// ForwardAllowed 是信任的发件人名单（§14.6）：发送者缺失或未核实，按不在名单处理。
 func ForwardAllowed(p policy.Policy, source, sender string, verified bool) bool {
 	return sender != "" && verified && contains(p.ForwardAllowlist[source], sender)
 }
 
-// RejectionEvent 构造应记账的拒绝事件（§6.7）：退出码 20、21、22、23，以及运行身份被拒绝的决策命令、回答人不在白名单的渠道回答。
+// RejectionEvent 构造应记账的拒绝事件（§6.7）：硬线（20）、档位未放开（23）、钥匙范围外（4，限范围判定）、
+// 项目不允许的执行者（21），一条留痕路径。再输口令（reauth_required）是本人还没完成的操作，不记。
 // 判定本身无副作用，由调用方在自己的事务里追加。
 func RejectionEvent(r Request, d Decision) (domain.Event, bool) {
 	if d.Err == nil {
 		return domain.Event{}, false
 	}
-	switch d.ExitCode() {
-	case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending, domain.ExitBasisRequired:
-	case domain.ExitPermissionDenied:
-		if (r.Level != LevelRun || r.Action != ActionAnswerDecision) && r.Action != ActionChannelAnswer && r.GrantID == "" {
-			return domain.Event{}, false
-		}
+	switch {
+	case d.Err.Code == domain.CodeWebOnly, d.Err.Code == domain.CodeTierClosed, d.Err.Code == domain.CodeExecutorNotAllowed:
+	case d.Err.Code == domain.CodePermissionDenied && d.Err.Reason == domain.ReasonOutOfScope:
 	default:
 		return domain.Event{}, false
 	}
-	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "code": d.Err.Code, "reason": d.Err.Reason, "exit": d.ExitCode(), "why": d.Err.Why, "grant": r.GrantID, "session": r.Actor.Session, "session_kind": r.Actor.SessionKind})
+	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "tier": r.Tier.String(), "code": d.Err.Code, "reason": d.Err.Reason, "exit": d.ExitCode(), "why": d.Err.Why, "agent": r.Agent})
 	return domain.Event{Type: domain.EvCommandRejected, Object: r.Object.ID, Actor: r.Actor, Reason: d.Err.Why, Payload: payload}, true
 }
 

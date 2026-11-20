@@ -36,8 +36,8 @@ func (k *kit) newOpenItem(title string) string {
 	var m struct {
 		ID string `json:"id"`
 	}
-	k.must(json.Unmarshal([]byte(k.apa(k.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--project", k.Projects["acc-open"], "--evidence", "记一下").Stdout), &m))
-	k.apa(k.DEL, 0, "item", "transition", m.ID, "--to", "open", "--reason", "go", "--evidence", "记一下")
+	k.must(json.Unmarshal([]byte(k.apa(k.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--project", k.Projects["acc-open"]).Stdout), &m))
+	k.apa(k.DEL, 0, "item", "transition", m.ID, "--to", "open", "--reason", "go")
 	return m.ID
 }
 
@@ -83,7 +83,7 @@ func TestFlowInboundPipeline(t *testing.T) {
 	var t1 string
 	k.step("ACT-INP-03 第 2 步归属：命中关联键的事件挂靠到原事项，不进初筛与起草", func(t *testing.T) {
 		t1 = k.newOpenItem("inp-thread 合同修订")
-		k.apa(k.DEL, 0, "item", "relate", t1, "--key", "inp-thread-1", "--evidence", "这个线程归到合同修订")
+		k.apa(k.DEL, 0, "item", "relate", t1, "--key", "inp-thread-1")
 		before := len(k.proposed())
 		k.clear()
 		k.emit("inp-att-1", "inp-att 回复：合同第二版", func(e *Ev) { e.Keys = []string{"inp-thread-1"} })
@@ -333,7 +333,7 @@ func TestFlowInboundUpgradeKeepsOldProposals(t *testing.T) {
 	k.step("ACT-INP-13 在 v0.1 账本副本上准备一条旧建议", func(t *testing.T) {
 		v01 := k.V01Bin()
 		srv, stop := k.serveHome(v01, fx.Home)
-		out, code := k.cli(v01, srv, del, "propose", "--kind", "task", "--title", "v01-prop 旧建议", "--body", "旧正文", "--evidence", "升级演练前的旧建议")
+		out, code := k.cli(v01, srv, del, "propose", "--kind", "task", "--title", "v01-prop 旧建议", "--body", "旧正文")
 		if code != 0 {
 			t.Fatalf("v0.1 apa propose 退出码 %d: %s", code, out)
 		}
@@ -362,9 +362,8 @@ func TestFlowInboundUpgradeKeepsOldProposals(t *testing.T) {
 		}
 		hdr := map[string]string{"Cookie": cookies[0].Name + "=" + cookies[0].Value, "X-CSRF-Token": login.CSRF}
 		ep, _ := json.Marshal(map[string]any{
-			"judge_endpoint":       map[string]any{"url": k.Cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1", "locality": "local"},
-			"generate_endpoint":    map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": "local"},
-			"screening_timeout_ms": 2000,
+			"judge_endpoint":    map[string]any{"url": k.Cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1", "locality": "local"},
+			"generate_endpoint": map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": "local"},
 		})
 		if code, body, _ := k.fixtureHTTP(base, "PUT", "/v1/settings/model-endpoints", "", string(ep), hdr); code != 200 {
 			t.Fatalf("夹具接线端点: %d %s", code, body)

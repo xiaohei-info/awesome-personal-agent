@@ -115,9 +115,9 @@ func TestBackupRestore(t *testing.T) {
 		}
 		b.apa(e.WRK, 0, "material", "commit", "--from", note, "--reason", "备份演练", "--kind", "minutes", "--title", "备份演练纪要", "--project", open)
 		// 一个 webhook 来源（有接收密钥文件）与一个自定义脚本来源（凭据目录非空）。
-		b.apa(e.DEL, 0, "source", "add", "--id", hookSource, "--name", hookSource, "--type", "webhook", "--source-type", "github",
-			"--config", `{"scheme":"hmac-sha256-header","mappings":["github-issues"]}`, "--evidence", "备份演练登记 webhook 来源")
-		k := decode[struct{ Secret string }](t, b.apa(e.DEL, 0, "source", "webhook", "create", hookSource, "--evidence", "备份演练签发接收密钥").Stdout)
+		e.OwnerApaOK("", "source", "add", "--id", hookSource, "--name", hookSource, "--type", "webhook", "--source-type", "github",
+			"--config", `{"scheme":"hmac-sha256-header","mappings":["github-issues"]}`)
+		k := decode[struct{ Secret string }](t, e.OwnerApaOK("", "source", "webhook", "create", hookSource).Stdout)
 		if k.Secret == "" {
 			t.Fatal("没有签发接收密钥")
 		}

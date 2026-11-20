@@ -117,7 +117,7 @@ func (f *tg) webOK(method, path, body string, want int) string {
 func (f *tg) task(title string, tags ...string) string {
 	f.t.Helper()
 	args := []string{"item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", f.Projects["acc-work"], "--evidence", "建个任务"}
+		"--project", f.Projects["acc-work"]}
 	if len(tags) > 0 {
 		args = append(args, "--tags", strings.Join(tags, ","))
 	}
@@ -309,12 +309,10 @@ func TestFlowChannelTelegram(t *testing.T) {
 		if err != nil || !strings.Contains(string(out), "telegram") || !strings.Contains(string(out), "channel") {
 			t.Fatalf("apa ext list 没有列出 telegram 渠道 ext: %v %s", err, out)
 		}
-		// 决策路由到该渠道；web_only 的规则按标签 acc-finance 归 funds；回答人白名单在 Web 设置。
+		// 决策路由到该渠道；回答人白名单在 Web 设置（高风险类别 2026-11-20 取消，问题一个口径）。
 		pol, _ := json.Marshal(map[string]any{
 			"disturb": map[string]any{"merge_window_sec": 2,
-				"routes": map[string]string{"decision": tgChannel, "reminder": "web", "brief": "web", "health": "web", "wake": "web"}},
-			"web_only": map[string]any{"categories": []string{"external_commitment", "funds", "irreversible", "permission_change", "spec_activation"},
-				"rules": []map[string]string{{"tag": "acc-finance", "category": "funds"}}}})
+				"routes": map[string]string{"decision": tgChannel, "reminder": "web", "brief": "web", "health": "web", "wake": "web"}}})
 		f.webOK("PUT", "/settings/policy", string(pol), 200)
 		ans, _ := json.Marshal(map[string]any{"channel_answerers": map[string][]string{tgChannel: {tgUserID}}})
 		f.webOK("PUT", "/settings/allowlists", string(ans), 200)
@@ -369,32 +367,7 @@ func TestFlowChannelTelegram(t *testing.T) {
 		})
 	})
 
-	step("ACT-TG-04 web_only 只给 Web 链接", func(t *testing.T) {
-		fin := f.task("tg web_only", "acc-finance")
-		f.ask(fin, "TG04 付款？")
-		f.until(tgKernWait, "web_only 投递 delivered", func() bool {
-			ds := f.deliveries(fin)
-			return len(ds) > 0 && ds[0].State == "delivered" && ds[0].Ref != ""
-		})
-		msgs := f.sentWith("TG04")
-		if len(msgs) != 1 {
-			t.Fatalf("web_only 决策应只发 1 条消息: %+v", f.bot.Sent())
-		}
-		m := msgs[0]
-		if !strings.Contains(m.Text, "/items/"+fin) || strings.Contains(m.Text, "选项：") || strings.Contains(m.Text, "作答链接") ||
-			strings.Contains(m.Text, "/forms/") || len(m.Buttons) != 0 {
-			t.Errorf("web_only 消息应只带 Web 链接，不带选项、按钮或表单链接:\n%s %v", m.Text, m.Buttons)
-		}
-		f.bot.Reply(tgChatID, m.ID, tgAccount, "同意")
-		f.until(tgKernWait, "ext 对回复给出 Web 链接", func() bool { return len(f.sentWith("不能在 Telegram 回答")) > 0 })
-		if note := f.sentWith("不能在 Telegram 回答")[0]; !strings.Contains(note.Text, "/items/"+fin) {
-			t.Errorf("拒绝回复应带 Web 链接:\n%s", note.Text)
-		}
-		time.Sleep(2 * time.Second) // 让可能的误采纳落盘后再看
-		if it := f.item(fin); it.Phase != "needs_input" || it.Ask.Resolution != nil {
-			t.Errorf("决策不应生效: phase=%s resolution=%+v", it.Phase, it.Ask.Resolution)
-		}
-	})
+	// ACT-TG-04「web_only 只给 Web 链接」随高风险类别取消（2026-11-20，§14.4）删除：渠道回答人名单内的回复对所有问题同样有效。
 
 	step("ACT-TG-05 ext 不用 harness 网关", func(t *testing.T) {
 		cmd := exec.Command("go", "list", "-deps", "./ext/telegram/...")

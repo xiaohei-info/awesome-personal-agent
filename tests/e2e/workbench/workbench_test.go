@@ -290,7 +290,7 @@ out.imgSrc = await page.evaluate(() => document.querySelector(".markdown img").g
 		}
 		eq(t, "WB-F 进展不变", len(k.progress(wbF)), n)
 		eq(t, "WB-B 进展不变", len(k.progress(wbB)), nb)
-		k.apa(k.DEL, 0, "item", "progress", wbB, "--text", "本人说已订", "--evidence", "已订好了")
+		k.apa(k.DEL, 0, "item", "progress", wbB, "--text", "本人说已订")
 		eq(t, "WB-B 进展落账", len(k.progress(wbB)), nb+1)
 		// 缺依据（退出码 23）的拒绝由命令管线记 command.rejected；越权（退出码 4）在授权层被挡，不落账。
 		basis := false

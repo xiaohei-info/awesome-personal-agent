@@ -34,7 +34,7 @@ var bg = context.Background()
 const marker = "MARKER-PURGE"
 
 var (
-	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	worker   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelWorker}
 	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
 )
@@ -78,7 +78,7 @@ func setup(t *testing.T) *env {
 
 func (e *env) do(id command.Identity, cmd string, in any) (map[string]any, error) {
 	b, _ := json.Marshal(in)
-	r, err := e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	r, err := e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"})
 	var out map[string]any
 	if err == nil {
 		_ = json.Unmarshal(r.Value, &out)
@@ -262,14 +262,14 @@ func TestPurgeKeepsBlobStillReferencedByAnotherMaterial(t *testing.T) {
 	}
 }
 
-// ACT-PRG-04 的内核侧：只有 Web 本人能执行；delegate 退出码 20，worker 被拒，内容不变。
+// ACT-PRG-04 的内核侧：物理删除是 3b，只有 Web 本人能执行；任何钥匙都是硬线 20，内容不变。
 func TestPurgeOnlyOwnerOnWeb(t *testing.T) {
 	e := setup(t)
 	id := e.must(t, owner, "item.create", map[string]any{"title": marker, "kind": "task"})["id"].(string)
 	for _, c := range []struct {
 		id   command.Identity
 		want int
-	}{{delegate, domain.ExitWebOnly}, {worker, domain.ExitPermissionDenied}} {
+	}{{delegate, domain.ExitWebOnly}, {worker, domain.ExitWebOnly}} {
 		if _, err := e.do(c.id, Command, map[string]any{"object": id}); exit(err) != c.want {
 			t.Fatalf("exit %d want %d (%v)", exit(err), c.want, err)
 		}

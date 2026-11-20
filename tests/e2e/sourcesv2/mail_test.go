@@ -267,7 +267,7 @@ echo '{"cursor":"'"$cursor"'"}'
 
 	// waitFor 把事项转 waiting（等外部回音）。
 	waitExternal := func(item string) {
-		k.apa(k.DEL, 0, "item", "transition", item, "--to", "waiting", "--reason", "等对方回信", "--waiting-on", "external:报价", "--evidence", "本人：等对方回信")
+		k.apa(k.DEL, 0, "item", "transition", item, "--to", "waiting", "--reason", "等对方回信", "--waiting-on", "external:报价")
 		eq(k.t, "转 waiting 后阶段", k.item(item).Phase, "waiting")
 	}
 	// reminded 报告事项是否被跟进梯度提醒过（followup.reminded）。
@@ -277,7 +277,7 @@ echo '{"cursor":"'"$cursor"'"}'
 		k.webOK("POST", "/items/"+root+"/accept", `{}`, 200)
 		waitExternal(root)
 		// 对照事项：同样等外部回音但没有回信。跟进定时没有 API 可读，用测试时钟推过 72 小时间隔，看谁被提醒。
-		ctl := k.idOf(k.apa(k.DEL, 0, "item", "add", "--kind", "task", "--title", "对照等待事项", "--phase", "open", "--project", home, "--evidence", "对照"))
+		ctl := k.idOf(k.apa(k.DEL, 0, "item", "add", "--kind", "task", "--title", "对照等待事项", "--phase", "open", "--project", home))
 		waitExternal(ctl)
 		before := k.item(root)
 		sug := len(k.suggestions())
@@ -382,7 +382,7 @@ echo '{"cursor":"'"$cursor"'"}'
 	var old, o2Suggestion string
 	k.step("ACT-MAIL-14 没有线程关联键的旧事项收到回信时成为带补到候选的新建议", func(t *testing.T) {
 		old = k.idOf(k.apa(k.DEL, 0, "item", "add", "--kind", "task", "--title", "等王经理回复报价", "--body", "已发报价给王经理 wang@example.com，等他回复。",
-			"--phase", "open", "--project", home, "--evidence", "本人：等王经理回复报价"))
+			"--phase", "open", "--project", home))
 		waitExternal(old)
 		k.clsYes("Re: 报价", 0.9)
 		k.draft("Re: 报价", map[string]any{"title": "王经理回复了报价", "kind": "task", "recommend": "attach", "attach_to": old})
@@ -414,11 +414,9 @@ echo '{"cursor":"'"$cursor"'"}'
 		// 本人不采纳"补到旧事项"，丢弃这条回信建议，改为登记线程键（验收文档在 ACT-MAIL-14 与 15 之间没写这一步）。
 		// 不处置它，同线程键会同时命中"旧事项"和这条仍是 proposed 的建议两个未关闭事项，内核不猜（设计 §9.4 "不猜"），
 		// 后续回信只会并进那条建议；而 attach 会替本人把键登记到旧事项上，之后 relate 就是冲突（退出码 6）。
-		k.apa(k.DEL, 0, "dismiss", o2Suggestion, "--reason", "改为登记线程键", "--evidence", "本人：这封线程我自己登记到报价事项")
+		k.apa(k.DEL, 0, "dismiss", o2Suggestion, "--reason", "改为登记线程键")
 		sug := len(k.suggestions())
-		k.SessionKind = "direct"
-		k.apa(k.DEL, 0, "item", "relate", old, "--key", "thread:<mid-o1@example.com>", "--domain", "acc-mail", "--evidence", "本人原话：这封线程归到报价事项")
-		k.SessionKind = ""
+		k.apa(k.DEL, 0, "item", "relate", old, "--key", "thread:<mid-o1@example.com>", "--domain", "acc-mail")
 		var detail struct {
 			Keys []struct{ Domain, Key string } `json:"correlation_keys"`
 		}

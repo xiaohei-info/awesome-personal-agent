@@ -104,7 +104,7 @@ func newKernel(t *testing.T) *kernel {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	var prj struct{ ID string }
 	k.do(owner, "project.create", map[string]any{"name": "acc-work"}, &prj)
 	k.do(owner, "project.repo.add", map[string]any{"id": prj.ID, "remote": repo}, nil)
@@ -114,7 +114,7 @@ func newKernel(t *testing.T) *kernel {
 func (k *kernel) do(id command.Identity, cmd string, in, out any) {
 	k.t.Helper()
 	b, _ := json.Marshal(in)
-	r, err := k.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so", WebURL: "http://web/x"})
+	r, err := k.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web/x"})
 	if err != nil {
 		k.t.Fatalf("%s: %v", cmd, err)
 	}
@@ -243,7 +243,7 @@ func TestSyncDriftBlockedUntilOverride(t *testing.T) {
 		t.Fatalf("drift sync output: %+v", r)
 	}
 	item, _ := verdict(t, k.apa("agents", "check", "--repo", repo, "--file", f))["item"].(string)
-	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	if _, err := k.svc.Resolve(bg, owner, agentsmd.ResolveIn{Item: item, Choice: agentsmd.ChoiceOverride}); err != nil {
 		t.Fatal(err)
 	}

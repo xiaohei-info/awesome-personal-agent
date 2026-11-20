@@ -131,7 +131,7 @@ func (f *bg) declare(name, wrapper, arg string, resume bool) {
 func (f *bg) declareRaw(name string, h map[string]any) {
 	f.t.Helper()
 	b, _ := json.Marshal(map[string]any{"harness": name, "headless": h})
-	if r := f.Apa(f.DEL, string(b), "declare", "-", "--evidence", "验收声明替身 harness"); r.Code != 0 {
+	if r := f.Apa(f.DEL, string(b), "declare", "-"); r.Code != 0 {
 		f.t.Fatalf("apa declare %s: %d %s%s", name, r.Code, r.Stdout, r.Stderr)
 	}
 	f.webOK("POST", "/settings/declarations/"+name+"/1/confirm", "", 200)
@@ -189,7 +189,7 @@ func (f *bg) setMode(rule, mode string) {
 func (f *bg) task(title, project string, tags ...string) string {
 	f.t.Helper()
 	r := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open",
-		"--project", f.Projects[project], "--tags", strings.Join(tags, ","), "--evidence", "验收触发")
+		"--project", f.Projects[project], "--tags", strings.Join(tags, ","))
 	return idOf(f.t, r.Stdout)
 }
 

@@ -348,7 +348,7 @@ func TestFlowProposalHandling(t *testing.T) {
 		eq(t, "第二条 low_confidence", k.getItem(r2)["proposal"].(map[string]any)["low_confidence"], true)
 	})
 
-	k.step("ACT-PRH-08 delegate 附本人原话把建议补到已有事项", func(t *testing.T) {
+	k.step("ACT-PRH-08 档位放开的 Agent 把建议补到已有事项", func(t *testing.T) {
 		c0 = itoa(k.head()) // 事件游标 C0
 		k.draftDefault("prh 合同第二版意见")
 		k.emit(srcA, Ev{ID: "prh-att-1", Subject: "prh 合同第二版意见", Summary: "第二版的修改意见", Keys: []string{"prh-thread-9"}})
@@ -356,7 +356,7 @@ func TestFlowProposalHandling(t *testing.T) {
 		t3 = k.openItem("prh 合同谈判")
 		prog0 := len(k.progress(t3))
 		paItem := k.item(pa)
-		k.apa(k.DEL, 0, "attach", pa, "--to", t3, "--evidence", "这条补到合同谈判")
+		k.apa(k.DEL, 0, "attach", pa, "--to", t3)
 		eq(t, "PA 阶段", k.phase(pa), "dropped")
 		if reason := k.last(pa, "item.phase_changed").Reason; !strings.Contains(reason, t3) {
 			t.Errorf("PA 的 reason 应记并入 T3: %q", reason)
@@ -384,16 +384,15 @@ func TestFlowProposalHandling(t *testing.T) {
 		if len(evs) != 1 {
 			t.Fatalf("应有一条 proposal.attached: %d", len(evs))
 		}
-		eq(t, "on_behalf_of", evs[0].Actor.OnBehalfOf, "owner")
-		eq(t, "evidence", evs[0].Ev, "这条补到合同谈判")
-		eq(t, "会话类型", evs[0].Actor.SessionKind, "direct")
+		eq(t, "on_behalf_of", evs[0].Actor.OnBehalfOf, "")
+		eq(t, "依据", evs[0].Basis.Via, "allowance")
 		var why struct {
 			Steps []step `json:"steps"`
 		}
 		k.must(json.Unmarshal([]byte(k.apa(k.OBS, 0, "why", pa).Stdout), &why))
 		last := why.Steps[len(why.Steps)-1]
-		if last.Type != "item.phase_changed" || last.Actor.OnBehalfOf != "owner" || last.Actor.SessionKind != "direct" {
-			t.Errorf("apa why PA 的最后一步应是带 on_behalf_of 与会话类型 direct 的并入: %+v", last)
+		if last.Type != "item.phase_changed" || last.Actor.Type != "agent" || last.Actor.OnBehalfOf != "" {
+			t.Errorf("apa why PA 的最后一步应是 Agent 自己做的并入: %+v", last)
 		}
 	})
 
@@ -439,7 +438,7 @@ func TestFlowProposalHandling(t *testing.T) {
 		k.emit(srcA, Ev{ID: "prh-att-4", Subject: "prh-att-4"})
 		pc = k.proposalFrom(srcA, "prh-att-4")
 		doneItem := k.openItem("prh 已终结事项")
-		k.apa(k.DEL, 0, "item", "transition", doneItem, "--to", "done", "--reason", "做完了", "--evidence", "做完了")
+		k.apa(k.DEL, 0, "item", "transition", doneItem, "--to", "done", "--reason", "做完了")
 		anotherProposed := k.proposal("prh 另一条建议")
 		before := len(k.attachedEvents(pc, pc)) + len(k.events("", "proposal.attached"))
 		if r := k.Web("POST", "/v1/items/"+pc+"/attach", `{"to":"`+doneItem+`"}`); r.Code != 409 {
@@ -525,7 +524,7 @@ func TestFlowProposalHandling(t *testing.T) {
 		k.emit(srcA, Ev{ID: "prh-skip-2", Subject: "prh-skip-2"})
 		s1, s2 := k.proposalFrom(srcA, "prh-skip-1"), k.proposalFrom(srcA, "prh-skip-2")
 		eq(t, "prh-skip-1 的推荐目标", k.proposalOf(s1)["attach_to"], t4)
-		k.apa(k.DEL, 0, "item", "transition", t4, "--to", "done", "--reason", "做完了", "--evidence", "做完了")
+		k.apa(k.DEL, 0, "item", "transition", t4, "--to", "done", "--reason", "做完了")
 		res := parseResults(t, k.webOK("POST", "/proposals/batch", `{"mode":"recommended","filter":{"ids":["`+s1+`","`+s2+`"]}}`, 200))
 		if res[s1].OK || res[s1].Why == "" {
 			t.Errorf("prh-skip-1 应失败并给出 why: %+v", res[s1])
@@ -553,7 +552,7 @@ func TestFlowProposalHandling(t *testing.T) {
 		file := filepath.Join(k.Root, "plan.json")
 		k.must(os.WriteFile(file, plan, 0o644))
 		s := k.maxSeq()
-		r := k.apa(k.DEL, 0, "proposals", "apply", "--file", file, "--evidence", "这几条按我说的处理")
+		r := k.apa(k.DEL, 0, "proposals", "apply", "--file", file)
 		res := parseResults(t, r.Stdout)
 		for _, id := range []string{e1, e2, e3} {
 			if !res[id].OK {
@@ -579,9 +578,8 @@ func TestFlowProposalHandling(t *testing.T) {
 			}
 			if e.Type == "item.phase_changed" || e.Type == "proposal.attached" {
 				got[prop] = true
-				eq(t, "on_behalf_of", e.Actor.OnBehalfOf, "owner")
-				eq(t, "证据", e.Ev, "这几条按我说的处理")
-				eq(t, "会话类型", e.Actor.SessionKind, "direct")
+				eq(t, "on_behalf_of", e.Actor.OnBehalfOf, "")
+				eq(t, "依据", e.Basis.Via, "allowance")
 			}
 		}
 		eq(t, "有处置 Event 的成功条数", len(got), 3)
@@ -612,10 +610,14 @@ func TestFlowProposalHandling(t *testing.T) {
 		eq(t, "E3", k.phase(e3), "dropped")
 	})
 
-	k.step("ACT-PRH-17 批量处理缺依据或超过上限时整批不生效", func(t *testing.T) {
+	// 2026-11-20 改写：批量等于逐条，档位未放开的 Agent（DELO）每条都得 tier_closed，没有一条生效。
+	k.step("ACT-PRH-17 档位未放开的批量或超过上限时整批不生效", func(t *testing.T) {
 		before := k.stream()
 		disposals := len(k.disposals(0))
-		k.apa(k.DEL, exitBasis, "proposals", "apply", "--recommended", "--source", srcA)
+		r0 := k.Apa(k.DELO, "", "proposals", "apply", "--recommended", "--source", srcA)
+		if r0.Code != 0 && r0.Code != exitBasis || !strings.Contains(r0.Stdout+r0.Stderr, "tier_closed") {
+			t.Errorf("只整理的批量应逐条 tier_closed: %d %s%s", r0.Code, r0.Stdout, r0.Stderr)
+		}
 		var acts []map[string]any
 		for i := 0; i < 201; i++ {
 			acts = append(acts, map[string]any{"id": b[4], "do": "accept"})
@@ -637,7 +639,7 @@ func TestFlowProposalHandling(t *testing.T) {
 	})
 
 	k.step("ACT-PRH-18 事件订阅能取到新的稳定事件", func(t *testing.T) {
-		k.apa(k.DEL, 0, "item", "progress", t3, "--text", "prh 已发回意见", "--evidence", "记一下进展")
+		k.apa(k.DEL, 0, "item", "progress", t3, "--text", "prh 已发回意见")
 		types := map[string]bool{}
 		for _, e := range k.feedLines(k.OBS, "events", "--cursor", c0) {
 			types[e.Type] = true

@@ -43,7 +43,7 @@ const (
 
 var (
 	bg    = context.Background()
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 // world 是真实内核（账本、命令管线、委派/执行者/事项路由）经 HTTP 对外，CLI 以各级凭据调用它。

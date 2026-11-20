@@ -288,7 +288,7 @@ func TestExchangeWakeRunCredentialRoute(t *testing.T) {
 	if err := kitems.Register(x, kitems.NewKinds()); err != nil {
 		t.Fatal(err)
 	}
-	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	res, err := x.Do(bg, command.Request{Identity: owner, Command: "item.create", Input: json.RawMessage(`{"kind":"task","title":"t"}`)})
 	if err != nil {
 		t.Fatal(err)

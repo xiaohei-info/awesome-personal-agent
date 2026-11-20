@@ -99,54 +99,26 @@ func TestFlowHermesContext(t *testing.T) {
 		lacks(t, "注入信封（不得带正文、不得混入其他项目）", out, marker, other)
 	})
 
-	f.step("ACT-HCTX-09 会话身份与会话类型透传到审计", func(t *testing.T) {
+	// 2026-11-20 改写（权限模型第二版，§14.3 原则一）：会话身份（宿主名、会话引用）只进审计作展示，不参与判定；
+	// 会话类型、本人原话与授权单不再上报，也不入账。
+	f.step("ACT-HCTX-09 会话身份透传到审计，会话类型不再上报", func(t *testing.T) {
 		plugin := map[string]string{"APA_HARNESS": "acc-stub", "APA_SESSION": "hctx-s9", "APA_SESSION_KIND": "direct"}
 		proposed := idOf(t, f.apaEnv(f.DEL, 0, plugin, "propose", "--kind", "task", "--title", "hctx9", "--project", f.Projects["acc-open"]).Stdout)
 		dec := f.decision("acc-open", "hctx9-decision")
-		f.apaEnv(f.DEL, 0, plugin, "decide", dec, "--option", "A", "--evidence", "选 A")
+		f.apaEnv(f.DEL, 0, plugin, "decide", dec, "--option", "A")
 
 		for _, a := range []actor{f.stepActor(proposed, "item.created"), f.stepActor(dec, "decision.resolved")} {
 			if a.Harness != "acc-stub" || a.Session != "hctx-s9" {
 				t.Errorf("Event 的 actor 应含 harness=acc-stub 与 session=hctx-s9: %+v", a)
 			}
 		}
-		if a := f.stepActor(dec, "decision.resolved"); a.SessionKind != "direct" || a.OnBehalfOf != "owner" {
-			t.Errorf("代答 Event 应记会话类型 direct 与 on_behalf_of=owner: %+v", a)
+		if a := f.stepActor(dec, "decision.resolved"); a.SessionKind != "" || a.OnBehalfOf != "" {
+			t.Errorf("Agent 的回答记成它自己做的，不记会话类型与代本人: %+v", a)
 		}
-		out := pytest(t, "plugins/hermes/tests/tools/test_tools.py",
-			"test_every_tool_schema_has_no_session_kind_parameter", "test_decide_carries_hermes_session_and_evidence", "test_cli_calls_carry_harness_hermes")
-		_ = out
-		pytest(t, "plugins/hermes/tests/core/test_core.py", "test_hook_calls_carry_session_identity_and_kind")
-	})
-
-	f.step("ACT-HCTX-12 终端会话上报 direct", func(t *testing.T) {
-		pytest(t, "plugins/hermes/tests/tools/test_tools.py", "test_terminal_session_calls_carry_session_kind_direct")
-		pytest(t, "plugins/hermes/tests/core/test_core.py", "test_hook_calls_carry_session_identity_and_kind")
-	})
-
-	f.step("ACT-HCTX-13 网关会话按 SPIKE-SESSION-KIND 的取法上报，取不到报 unknown", func(t *testing.T) {
-		// 附录 A.5 的 SPIKE-SESSION-KIND 行已给出取法（不再是"待实测"），所以用例须按平台判定。
-		spike := ""
-		doc, err := os.ReadFile(filepath.Join(repoRoot(), "docs", "appendix-a-harness.md"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, line := range strings.Split(string(doc), "\n") {
-			if strings.HasPrefix(line, "| SPIKE-SESSION-KIND |") {
-				spike = line
-			}
-		}
-		if spike == "" || strings.Contains(spike, "| 待实测 |") {
-			t.Fatalf("附录 A.5 的 SPIKE-SESSION-KIND 行缺失或仍是待实测，网关会话只能报 unknown，此处断言需要随结论更新: %q", spike)
-		}
-		contains(t, "A.5 SPIKE-SESSION-KIND", spike, "direct", "group", "unknown")
-		out := pytest(t, "plugins/hermes/tests/tools/test_tools.py",
-			"test_unreadable_gateway_binding_is_unknown", "test_no_hermes_session_module_is_unknown",
-			"test_session_kind_is_not_inherited_from_the_gateway_environment", "test_every_tool_schema_has_no_session_kind_parameter")
-		for _, kind := range []string{"direct", "group", "unknown"} { // 网关会话类型用例：direct、group、unknown 各有
-			contains(t, "网关会话类型用例", out, "test_gateway_session_kind_follows_the_platform[", "-"+kind+"] PASSED")
-		}
-		pytest(t, "plugins/hermes/tests/wake/test_wake.py", "test_wake_cli_does_not_report_or_inherit_a_session_kind")
+		pytest(t, "plugins/hermes/tests/tools/test_tools.py",
+			"test_no_tool_offers_evidence_grant_session_kind_or_timeout_default", "test_decide_carries_hermes_session_and_never_evidence",
+			"test_cli_calls_carry_harness_hermes", "test_plugin_does_not_report_a_session_kind")
+		pytest(t, "plugins/hermes/tests/core/test_core.py", "test_hook_calls_carry_session_identity")
 		// 原生工具的参数 schema 里没有模型可填的会话类型参数。
 		for _, name := range []string{"cli.py", "__init__.py"} {
 			src, err := os.ReadFile(filepath.Join(repoRoot(), "plugins", "hermes", "tools", name))
@@ -159,45 +131,38 @@ func TestFlowHermesContext(t *testing.T) {
 		}
 	})
 
-	f.step("ACT-HCTX-14 插件与内核同批：自检上报会话类型，凭原话的代答端到端可用", func(t *testing.T) {
+	f.step("ACT-HCTX-14 插件与内核同批：自检正常，经插件包装的代答端到端可用", func(t *testing.T) {
 		selfcheck := filepath.Join(repoRoot(), "plugins", "hermes", "headless", "selfcheck.py")
-		out, code := py(t, selfcheck)
-		var rep struct {
-			ReportsSessionKind bool `json:"reports_session_kind"`
-		}
-		if code != 0 || json.Unmarshal([]byte(out), &rep) != nil || !rep.ReportsSessionKind {
-			t.Fatalf("自检 JSON 应含 reports_session_kind:true（退出码 %d）: %s", code, out)
+		if out, code := py(t, selfcheck); code != 0 || !json.Valid([]byte(out)) {
+			t.Fatalf("自检应输出 JSON（退出码 %d）: %s", code, out)
 		}
 		f.declareSelfcheck("acc-stub", []string{"python3", selfcheck})
 		if st := f.hostPluginStatus("acc-stub"); st != "ok" {
 			t.Errorf("doctor 的宿主插件项应正常，实际 %s", st)
 		}
-
-		// 经插件包的 CLI 包装（终端会话替身）发起凭原话的代答。
+		// 经插件包的 CLI 包装（终端会话替身）发起代答：DEL 所属 Agent 的档位已放开。
 		dec := f.decision("acc-open", "hctx14-decision")
-		calls := f.pluginWrapper(filepath.Join(repoRoot(), "plugins", "hermes"), "hctx-s14", f.DEL, "decide", dec, "--option", "A", "--evidence", "选 A")
+		calls := f.pluginWrapper(filepath.Join(repoRoot(), "plugins", "hermes"), "hctx-s14", f.DEL, "decide", dec, "--option", "A")
 		if calls.ExitCode != 0 {
 			t.Fatalf("经包装工具的代答应退出码 0: %+v", calls)
 		}
-		if a := f.stepActor(dec, "decision.resolved"); a.SessionKind != "direct" || a.Session != "hctx-s14" || a.Harness != "hermes" {
-			t.Errorf("Event 应记 harness=hermes、session=hctx-s14、会话类型 direct: %+v", a)
+		if a := f.stepActor(dec, "decision.resolved"); a.Session != "hctx-s14" || a.Harness != "hermes" || a.SessionKind != "" {
+			t.Errorf("Event 应记 harness=hermes、session=hctx-s14，不记会话类型: %+v", a)
 		}
-		if env := f.wrapperEnvLog(); !strings.Contains(env, "APA_SESSION_KIND=direct") || !strings.Contains(env, "APA_HARNESS=hermes") || !strings.Contains(env, "APA_SESSION=hctx-s14") {
+		if env := f.wrapperEnvLog(); strings.Contains(env, "APA_SESSION_KIND=") || !strings.Contains(env, "APA_HARNESS=hermes") || !strings.Contains(env, "APA_SESSION=hctx-s14") {
 			t.Errorf("宿主上下文替身记录到的 apa 调用环境不对: %s", env)
 		}
 	})
 
-	f.step("ACT-HCTX-15 只升内核不升插件：凭原话的代答被拒，读取与回执不受影响", func(t *testing.T) {
+	// 旧插件仍会带会话类型等自报内容：内核一律忽略，结果与新插件相同（§17.4）。
+	f.step("ACT-HCTX-15 只升内核不升插件：自报内容被忽略，代答、读取与回执照常", func(t *testing.T) {
 		old := f.extractV01Plugin()
 		dec := f.decision("acc-open", "hctx15-decision")
 		parent := f.add("acc-work", "hctx15-parent", "open")
-		child := idOf(t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--evidence", "把它交给 work-host.cli").Stdout)
+		child := idOf(t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli").Stdout)
 
-		if r := f.pluginWrapper(old, "hctx-s15", f.DEL, "decide", dec, "--option", "A", "--evidence", "选 A"); r.ExitCode != 23 || !strings.Contains(string(r.Stderr), "session_not_direct") {
-			t.Errorf("旧插件的代答应被拒（退出码 23、session_not_direct）: %+v", r)
-		}
-		if env := f.wrapperEnvLog(); strings.Contains(env, "APA_SESSION_KIND=direct") {
-			t.Errorf("v0.1 插件不应上报会话类型，调用环境: %s", env)
+		if r := f.pluginWrapper(old, "hctx-s15", f.DEL, "decide", dec, "--option", "A"); r.ExitCode != 0 {
+			t.Errorf("旧插件经档位放开的 Agent 代答应成功: %+v", r)
 		}
 		if r := f.pluginWrapper(old, "hctx-s15", f.DEL, "context", "--format", "inject"); r.ExitCode != 0 {
 			t.Errorf("旧插件的读取应不受影响: %+v", r)
@@ -205,20 +170,8 @@ func TestFlowHermesContext(t *testing.T) {
 		if r := f.pluginWrapper(old, "hctx-s15", f.WRK, "report", child, "--outcome", "progress", "--summary", "x"); r.ExitCode != 0 {
 			t.Errorf("旧插件对绑定子事项的回执应不受影响: %+v", r)
 		}
-		if got := f.apa(f.OBS, 0, "item", "show", dec).Stdout; !strings.Contains(got, "needs_input") {
-			t.Errorf("被拒的代答不应使决策生效，事项应仍在 needs_input: %s", got)
-		}
-
-		// 旧插件的自检不带 reports_session_kind：doctor 指出需要与内核一同升级。
-		sc := filepath.Join(f.Root, "old-plugin-selfcheck.sh")
-		if err := os.WriteFile(sc, []byte("#!/bin/sh\necho '{\"plugin_version\":\"0.1.1\",\"hooks\":[{\"name\":\"inject\",\"installed\":true}],\"overlaps\":[]}'\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		f.declareSelfcheck("acc-stub", []string{sc})
-		why := f.hostPluginWhy("acc-stub")
-		contains(t, "doctor 的宿主插件项", why, "does not report the session type", "upgrade the plugin together with the kernel")
-		if st := f.hostPluginStatus("acc-stub"); st != "warning" {
-			t.Errorf("旧插件的宿主插件项应为 warning，实际 %s", st)
+		if a := f.stepActor(dec, "decision.resolved"); a.SessionKind != "" || a.OnBehalfOf != "" {
+			t.Errorf("旧插件自报的会话类型不应入账: %+v", a)
 		}
 	})
 

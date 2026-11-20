@@ -1,6 +1,6 @@
 //go:build e2e
 
-package screening
+package packloader
 
 import (
 	"os"

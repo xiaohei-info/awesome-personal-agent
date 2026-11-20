@@ -114,12 +114,10 @@ func TestFlowAttachmentFetch(t *testing.T) {
 		k.setFetch("src_acc_raw", "ok")
 	})
 
-	k.step("ACT-FET-04 delegate 附原话可取回，不附原话、运行凭据与 observer 不可", func(t *testing.T) {
+	// 2026-11-20 改写（权限模型第二版）：取回附件是一档，delegate 不要本人原话；自报的原话与私聊头被忽略；运行凭据与 observer 在范围外。
+	k.step("ACT-FET-04 delegate 一档可取回，运行凭据与 observer 不可", func(t *testing.T) {
 		path := "/v1/source-events/" + ev.ID + "/attachments/1/fetch"
 		direct := map[string]string{"X-APA-Evidence": "本人：把第二个附件取回来", "X-APA-Session": "fet-session", "X-APA-Session-Kind": "direct"}
-		if r := k.APIRaw("POST", path, "", k.DEL); r.Code != 403 || !strings.Contains(r.Body, "basis_required") {
-			t.Errorf("DEL 不带原话应为 403（退出码 23，basis_required）: %d %s", r.Code, r.Body)
-		}
 		_, _, env := k.StubRun("hang")
 		runTok := env["APA_TOKEN"]
 		if runTok == "" {
@@ -133,9 +131,9 @@ func TestFlowAttachmentFetch(t *testing.T) {
 		if m := k.attachments(ev.ID); m[1].Blob != "" {
 			t.Fatalf("被拒的调用不应取回: %+v", m[1])
 		}
-		r := k.APIRawHeaders("POST", path, "", k.DEL, direct)
+		r := k.APIRaw("POST", path, "", k.DELO)
 		if r.Code != 200 {
-			t.Fatalf("DEL 附原话应成功: %d %s", r.Code, r.Body)
+			t.Fatalf("只整理的 delegate 不带原话应成功: %d %s", r.Code, r.Body)
 		}
 		if m := k.attachments(ev.ID); m[1].Blob == "" || !exists(k.blobFile(m[1].Blob)) {
 			t.Errorf("取回后清单第 1 项应带 blob 且文件在: %+v", m[1])

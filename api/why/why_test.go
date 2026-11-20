@@ -132,9 +132,8 @@ func (e *env) createItem(title string) string {
 }
 
 type steps struct {
-	ID               string `json:"id"`
-	ScreeningPending bool   `json:"screening_pending"`
-	Steps            []struct {
+	ID    string `json:"id"`
+	Steps []struct {
 		Seq       int64
 		Type      string
 		Reason    string
@@ -234,53 +233,6 @@ func TestWhyRunID(t *testing.T) {
 	s, rec := e.get("/v1/why/run_1", e.token(auth.Observer))
 	if rec.Code != 200 || len(s.Steps) != 1 || s.Steps[0].Type != domain.EvRunStarted {
 		t.Fatalf("run why = %d %s", rec.Code, rec.Body)
-	}
-}
-
-// web_only 初筛未返回：非 Web 凭据只拿到标记，Web 本人仍看到全部；审计同样不泄漏该事项的事件。
-func TestScreeningPendingHidesTimelineFromNonWeb(t *testing.T) {
-	e := setup(t)
-	id := e.createItem("pay vendor")
-	other := e.createItem("other")
-	rec := e.do("POST", "/v1/items/"+id+"/transition", `{"to":"open","reason":"go"}`, e.web)
-	if rec.Code != 200 {
-		t.Fatalf("open: %d %s", rec.Code, rec.Body)
-	}
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		it, err := kitems.Get(tx, id)
-		if err != nil {
-			return err
-		}
-		it.Version = 0
-		it.Ask = &domain.Ask{AskKernelState: domain.AskKernelState{ScreeningPending: true}}
-		b, _ := json.Marshal(it)
-		_, err = tx.Exec(`UPDATE items SET data = ? WHERE id = ?`, string(b), id)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	obs, rec := e.get("/v1/why/"+id, e.token(auth.Observer))
-	if rec.Code != 200 || !obs.ScreeningPending || len(obs.Steps) != 0 {
-		t.Fatalf("observer = %d %s", rec.Code, rec.Body)
-	}
-	if web, _ := e.get("/v1/why/"+id, e.web); web.ScreeningPending || len(web.Steps) == 0 {
-		t.Fatalf("web must see timeline: %+v", web)
-	}
-	aud, rec := e.get("/v1/audit/events", e.token(auth.Observer))
-	if rec.Code != 200 || len(aud.Events) == 0 {
-		t.Fatalf("audit = %d %s", rec.Code, rec.Body)
-	}
-	for _, ev := range aud.Events {
-		if ev.Object == id {
-			t.Fatalf("audit leaks pending item event: %+v", ev)
-		}
-	}
-	if aud, _ := e.get("/v1/audit/events?object="+other, e.token(auth.Observer)); len(aud.Events) == 0 {
-		t.Fatal("unrelated item must stay visible")
-	}
-	if aud, _ := e.get("/v1/audit/events?object="+id, e.web); len(aud.Events) == 0 {
-		t.Fatal("web audit must include pending item")
 	}
 }
 

@@ -27,7 +27,7 @@ import (
 var (
 	bg    = context.Background()
 	now   = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 const (
@@ -74,7 +74,7 @@ func setup(t *testing.T) *env {
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "x", WebURL: "http://web"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web"})
 }
 
 func (e *env) must(t *testing.T, id command.Identity, cmd string, in any) json.RawMessage {

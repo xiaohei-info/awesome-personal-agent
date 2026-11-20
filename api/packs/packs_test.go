@@ -135,7 +135,6 @@ func (e *env) do(method, path, body string, mod func(*http.Request)) *httptest.R
 	e.t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:5000"
-	req.Header.Set(core.EvidenceHeader, "owner: go ahead") // delegate 代理写需要证据；其他凭据不读
 	if mod != nil {
 		mod(req)
 	}
@@ -166,8 +165,28 @@ func (e *env) bearer(kind auth.Kind) func(*http.Request) {
 	return func(r *http.Request) {
 		r.Header.Set("Authorization", "Bearer "+secret)
 		r.Header.Set("X-APA-Session", "s1")
-		r.Header.Set("X-APA-Session-Kind", "direct")
 	}
+}
+
+// agent 签一把归属 Agent id 的 delegate 钥匙，并由本人把该 Agent 的档位设为 tier。
+func (e *env) agent(id, tier string) func(*http.Request) {
+	e.t.Helper()
+	var secret string
+	if err := e.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, s, err := e.au.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: id, Harness: "h"})
+		if err != nil {
+			return err
+		}
+		secret = s
+		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent[id] = policy.AgentAllowance{Tier: tier}
+			return nil
+		})
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+secret) }
 }
 
 func decode[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
@@ -230,10 +249,14 @@ func TestReadsAreClosedToExtAndWebhookAndAnonymous(t *testing.T) {
 	}
 }
 
-// flow-pack-loader：实例经 API 建立、读取、改参数、停用，参数按包声明校验。
+// flow-pack-loader：实例经 API 建立、读取、改参数、停用，参数按包声明校验。安排是 3a：只整理的 Agent 为 23，
+// 放开「连日常规矩也替我改」的 Agent 可以做。
 func TestInstanceLifecycleThroughAPI(t *testing.T) {
 	e := setup(t)
-	dlg, obs := e.bearer(auth.Delegate), e.bearer(auth.Observer)
+	dlg, obs := e.agent("agent_r", policy.AllowRules), e.bearer(auth.Observer)
+	if rec := e.do("POST", "/v1/instances", `{"pack":"brief","params":{"schedule":"24h"}}`, e.bearer(auth.Delegate)); rec.Code != 403 || decode[domain.Error](t, rec).Code != domain.CodeTierClosed {
+		t.Fatalf("organize-only create: %d %s", rec.Code, rec.Body)
+	}
 
 	if rec := e.do("GET", "/v1/instances", "", obs); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"instances":[]`) {
 		t.Fatalf("empty list: %d %s", rec.Code, rec.Body)
@@ -343,8 +366,9 @@ func TestWebSessionSwitchesRuleModeAndRecordsEvent(t *testing.T) {
 	}
 }
 
-// 非目标：没有把规则切 auto 的 token 路径。任何级别的 token 都是 web_only（403），模式不变、不留 mode_changed。
-func TestNoTokenCanSwitchRuleMode(t *testing.T) {
+// 规则模式是 3a：档位没放开到「连日常规矩也替我改」的钥匙都切不了（403），模式不变、不留 mode_changed；
+// 放开的 Agent 可以切。
+func TestRuleModeFollowsAgentTier(t *testing.T) {
 	e := setup(t)
 	for name, kind := range map[string]auth.Kind{"delegate": auth.Delegate, "worker": auth.Worker, "observer": auth.Observer} {
 		for _, mode := range []string{"auto", "off"} {
@@ -363,6 +387,9 @@ func TestNoTokenCanSwitchRuleMode(t *testing.T) {
 	}
 	if n := len(e.events(domain.EvRuleModeChanged)); n != 0 {
 		t.Fatalf("%d mode_changed events from rejected calls", n)
+	}
+	if rec := e.do("PATCH", rulePath, `{"mode":"auto"}`, e.agent("agent_r", policy.AllowRules)); rec.Code != 200 {
+		t.Fatalf("rules-tier Agent: %d %s", rec.Code, rec.Body)
 	}
 }
 
@@ -386,7 +413,7 @@ func TestRuleModeFailureSemantics(t *testing.T) {
 // 评审阻塞项：非法 enabled 不能让 params 先落地再报错。
 func TestPatchInstanceBadEnabledChangesNothing(t *testing.T) {
 	e := setup(t)
-	dlg := e.bearer(auth.Delegate)
+	dlg := e.agent("agent_r", policy.AllowRules)
 	in := decode[instances.Instance](t, e.do("POST", "/v1/instances", `{"pack":"brief","params":{"schedule":"24h"}}`, dlg))
 	for _, bad := range []string{`"yes"`, `null`, `1`} {
 		rec := e.do("PATCH", "/v1/instances/"+in.ID, `{"params":{"schedule":"48h"},"enabled":`+bad+`}`, dlg)

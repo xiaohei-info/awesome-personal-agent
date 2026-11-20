@@ -25,7 +25,6 @@ const (
 	EnvProject        = "APA_PROJECT"
 	EnvSession        = "APA_SESSION"
 	EnvHarness        = "APA_HARNESS"
-	EnvSessionKind    = "APA_SESSION_KIND"
 	EnvRun            = "APA_RUN"
 	EnvRunCredentials = "APA_RUN_CREDENTIAL_FILE"
 	EnvRunContext     = "APA_RUN_CONTEXT"
@@ -69,11 +68,8 @@ func Register(name string, cmd Command) {
 type Ctx struct {
 	Env    Env
 	Pretty bool
-	// Evidence 是全局 --evidence：delegate 代理操作的本人原话，随每个请求以 X-APA-Evidence 头发出（§14.3）。
-	Evidence string
-	// Grant 是全局 --grant：本人事先在 Web 签发的授权单 id，随每个请求以 X-APA-Grant 头发出（§14.5）。
-	// 与 --evidence 二选一的判定、档位与范围校验都在内核，客户端原样转发。
-	Grant string
+	// Note 是全局 --evidence 的值：只作为说明或结果证据随 item add/transition 进请求体（委派完成须带证据），不参与任何权限判定（§14.3）。
+	Note  string
 	creds *Credentials // 懒解析
 }
 
@@ -130,16 +126,15 @@ func Main(args []string, env Env) int {
 		switch a := args[i]; {
 		case a == "--pretty":
 			c.Pretty = true
+		// 本人原话与授权单已取消（§14.3）：--grant 拿掉不发；--evidence 只留作说明/结果证据（Note），不发任何头。
 		case a == "--evidence" && i+1 < len(args):
 			i++
-			c.Evidence = args[i]
+			c.Note = args[i]
 		case strings.HasPrefix(a, "--evidence="):
-			c.Evidence = strings.TrimPrefix(a, "--evidence=")
+			c.Note = strings.TrimPrefix(a, "--evidence=")
 		case a == "--grant" && i+1 < len(args):
 			i++
-			c.Grant = args[i]
 		case strings.HasPrefix(a, "--grant="):
-			c.Grant = strings.TrimPrefix(a, "--grant=")
 		default:
 			rest = append(rest, a)
 		}
@@ -215,12 +210,6 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string,
 	if err != nil {
 		return usage("APA_URL is not a valid URL", "set APA_URL (or run `apa login --url`) to the kernel address, e.g. http://127.0.0.1:7777")
 	}
-	if c.Evidence != "" {
-		req.Header.Set("X-APA-Evidence", c.Evidence)
-	}
-	if c.Grant != "" {
-		req.Header.Set("X-APA-Grant", c.Grant)
-	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}
@@ -235,9 +224,6 @@ func (c *Ctx) doWith(ctx context.Context, cr Credentials, hdr map[string]string,
 	}
 	if s := c.Env.Getenv(EnvSession); s != "" {
 		req.Header.Set("X-APA-Session", s)
-	}
-	if k := c.Env.Getenv(EnvSessionKind); k != "" {
-		req.Header.Set("X-APA-Session-Kind", k)
 	}
 	if h := c.Env.Getenv(EnvHarness); h != "" {
 		req.Header.Set("X-APA-Harness", h)
@@ -285,7 +271,6 @@ func decodeError(status int, data []byte) error {
 
 var knownCodes = map[domain.Code]struct{}{
 	domain.CodeInvalidRequest: {}, domain.CodeUnauthenticated: {}, domain.CodePermissionDenied: {},
-	domain.CodeWebOnly: {}, domain.CodeExecutorNotAllowed: {}, domain.CodeRiskScreeningPending: {}, domain.CodeBasisRequired: {}, domain.CodeSessionNotDirect: {},
-	domain.CodeGrantRequired: {}, domain.CodeImportSourceMismatch: {}, domain.CodeImportLimitExceeded: {},
+	domain.CodeWebOnly: {}, domain.CodeReauthRequired: {}, domain.CodeTierClosed: {}, domain.CodeExecutorNotAllowed: {},
 	domain.CodeNotFound: {}, domain.CodeConflict: {}, domain.CodeInternal: {},
 }

@@ -36,7 +36,7 @@ var (
 	bg = context.Background()
 	t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
 )
 
@@ -129,7 +129,7 @@ func (e *env) pack(files map[string]string) {
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"})
 }
 
 func (e *env) must(id command.Identity, cmd string, in any) command.Result {
@@ -253,10 +253,10 @@ func TestObserveRecordsWouldDoWithoutChangingState(t *testing.T) {
 	}
 }
 
-// ACT-RULE-03：只有 Web 本人能切模式；token 被拒绝且模式不变；Web 切换记 rule.mode_changed。
+// ACT-RULE-03：规则模式是 3a；档位未放开的 delegate 得到 23，worker 在钥匙范围外，模式不变；Web 切换记 rule.mode_changed。
 func TestSetModeIsWebOnly(t *testing.T) {
 	e := newEnv(t, map[string]string{"acc/pack.yaml": tagRule}, nil)
-	if err := e.setMode(delegate, tagKey, ModeAuto); exit(err) != domain.ExitWebOnly {
+	if err := e.setMode(delegate, tagKey, ModeAuto); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("delegate set auto: %v", err)
 	}
 	worker := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "w", Via: domain.ViaCLI}, Level: authz.LevelWorker}

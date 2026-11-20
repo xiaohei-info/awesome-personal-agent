@@ -20,7 +20,7 @@ import (
 
 var bg = context.Background()
 
-var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 
 type env struct {
 	st  *store.Store
@@ -63,7 +63,7 @@ func (e *env) bearer(t *testing.T, k auth.Kind) command.Bearer {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Session: "s1"}}
 }
 
 func js(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
@@ -71,7 +71,7 @@ func js(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 type m = map[string]any
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: js(in), Evidence: "owner said so"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: js(in)})
 }
 
 func (e *env) get(t *testing.T, id string) domain.Source {
@@ -216,37 +216,43 @@ func TestEnableDisableIsIdempotentAndRecorded(t *testing.T) {
 	}
 }
 
+// 来源登记与修改是 3b：Agent 一律硬线（20，留痕）；启停是 3a，档位未放开得 23。
+// 通用登记只接受随发行附带的程序，本人在 Web 也一样；自定义命令只能走专用命令，不能借通用命令绕过。
 func TestDelegateMayOnlyRegisterBundledPrograms(t *testing.T) {
 	e := setup(t)
 	dlg := e.bearer(t, auth.Delegate)
-	if _, err := e.do(dlg, CmdRegister, pull("src_feed")); err != nil {
+	if _, err := e.do(dlg, CmdRegister, pull("src_feed")); exit(err) != domain.ExitWebOnly {
+		t.Fatalf("delegate register: %v", err)
+	}
+	if _, err := e.do(dlg, CmdRegisterExec, script("src_sh")); exit(err) != domain.ExitWebOnly {
+		t.Fatalf("delegate register_script: %v", err)
+	}
+	if _, err := e.do(owner, CmdRegister, pull("src_feed")); err != nil {
 		t.Fatalf("bundled pull: %v", err)
 	}
-	if _, err := e.do(dlg, CmdRegister, m{"id": "src_hook", "type": "webhook"}); err != nil {
+	if _, err := e.do(owner, CmdRegister, m{"id": "src_hook", "type": "webhook"}); err != nil {
 		t.Fatalf("webhook: %v", err)
 	}
-	if _, err := e.do(dlg, CmdUpdate, m{"id": "src_feed", "schedule": "30m"}); err != nil {
-		t.Fatalf("update bundled: %v", err)
+	if _, err := e.do(dlg, CmdUpdate, m{"id": "src_feed", "schedule": "30m"}); exit(err) != domain.ExitWebOnly {
+		t.Fatalf("delegate update: %v", err)
 	}
-	if _, err := e.do(dlg, CmdSetEnabled, m{"id": "src_feed", "enabled": false}); err != nil {
-		t.Fatalf("disable: %v", err)
+	if _, err := e.do(dlg, CmdSetEnabled, m{"id": "src_feed", "enabled": false}); exit(err) != domain.ExitTierClosed {
+		t.Fatalf("delegate disable: %v", err)
+	}
+	if got := e.get(t, "src_feed"); got.Schedule != "15m" {
+		t.Fatalf("source changed by delegate: %+v", got)
 	}
 
 	bad := pull("src_evil")
 	bad["command"] = "/bin/sh -c evil"
-	if _, err := e.do(dlg, CmdRegister, bad); exit(err) != domain.ExitUsage {
+	if _, err := e.do(owner, CmdRegister, bad); exit(err) != domain.ExitUsage {
 		t.Fatalf("non-bundled pull: %v", err)
 	}
-	if _, err := e.do(dlg, CmdUpdate, m{"id": "src_feed", "command": "/bin/sh"}); exit(err) != domain.ExitUsage {
+	if _, err := e.do(owner, CmdUpdate, m{"id": "src_feed", "command": "/bin/sh"}); exit(err) != domain.ExitUsage {
 		t.Fatalf("retarget to arbitrary command: %v", err)
 	}
-	// 自定义命令：专用命令对 delegate 是 web_only（退出码 20，留痕）。
-	if _, err := e.do(dlg, CmdRegisterExec, script("src_sh")); exit(err) != domain.ExitWebOnly {
-		t.Fatalf("delegate register_script: %v", err)
-	}
-	// 不能借通用命令绕过。
-	if _, err := e.do(dlg, CmdRegister, script("src_sh")); exit(err) != domain.ExitUsage {
-		t.Fatalf("delegate register as script: %v", err)
+	if _, err := e.do(owner, CmdRegister, script("src_sh")); exit(err) != domain.ExitUsage {
+		t.Fatalf("register as script via generic: %v", err)
 	}
 	rejected := 0
 	for _, ty := range e.types(t) {
@@ -254,8 +260,8 @@ func TestDelegateMayOnlyRegisterBundledPrograms(t *testing.T) {
 			rejected++
 		}
 	}
-	if rejected != 1 {
-		t.Fatalf("web_only rejection must be recorded once, got %d", rejected)
+	if rejected != 4 {
+		t.Fatalf("each refusal must be recorded once, got %d", rejected)
 	}
 }
 
@@ -268,8 +274,8 @@ func TestScriptSourcesAreWebOnlyAfterRegistration(t *testing.T) {
 	if _, err := e.do(dlg, CmdUpdateExec, m{"id": "src_sh", "command": "/bin/rm -rf /"}); exit(err) != domain.ExitWebOnly {
 		t.Fatalf("delegate update_script: %v", err)
 	}
-	if _, err := e.do(dlg, CmdUpdate, m{"id": "src_sh", "schedule": "2h"}); exit(err) != domain.ExitUsage {
-		t.Fatalf("delegate update script via generic: %v", err)
+	if _, err := e.do(owner, CmdUpdate, m{"id": "src_sh", "schedule": "2h"}); exit(err) != domain.ExitUsage {
+		t.Fatalf("update script via generic: %v", err)
 	}
 	if got := e.get(t, "src_sh"); got.Command != "/opt/check.sh --all" || got.Schedule != "1h" {
 		t.Fatalf("script changed by delegate: %+v", got)
@@ -293,10 +299,10 @@ func TestWorkerObserverAndScopedCredentialsCannotRegister(t *testing.T) {
 	e := setup(t)
 	for _, k := range []auth.Kind{auth.Worker, auth.Observer} {
 		b := e.bearer(t, k)
-		if _, err := e.do(b, CmdRegister, pull("src_feed")); exit(err) != domain.ExitPermissionDenied {
+		if _, err := e.do(b, CmdRegister, pull("src_feed")); exit(err) != domain.ExitWebOnly {
 			t.Fatalf("%s: %v", k, err)
 		}
-		if _, err := e.do(b, CmdRegisterExec, script("src_sh")); exit(err) != domain.ExitPermissionDenied {
+		if _, err := e.do(b, CmdRegisterExec, script("src_sh")); exit(err) != domain.ExitWebOnly {
 			t.Fatalf("%s script: %v", k, err)
 		}
 	}

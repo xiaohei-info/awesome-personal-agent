@@ -42,7 +42,7 @@ import (
 var (
 	bg     = context.Background()
 	t0     = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	owner  = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner  = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	plugin = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "plugin", Via: domain.ViaCLI}, Level: authz.LevelWorker}
 	ruleA  = domain.Actor{Type: domain.ActorAgent, Principal: "rule", Via: domain.ViaRule}
 )
@@ -210,7 +210,7 @@ func setup(t *testing.T) *env {
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "x", WebURL: "http://web"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web"})
 }
 
 func (e *env) must(id command.Identity, cmd string, in any) command.Result {
@@ -1336,29 +1336,6 @@ func TestTaskRunMaterialsCarryLedgerSnapshot(t *testing.T) {
 	// 三节：无项目事项（规则建的简报事项）加两个活跃项目
 	if len(snap.Projects) != 3 || got[""] != "tk 2026-03-01" || got[alpha] != "alpha-事项" || got[beta] != "beta-事项" || strings.Contains(raw, "归档项目事项") {
 		t.Fatalf("snapshot %+v", snap)
-	}
-}
-
-// 屏蔽：初筛未返回的待决事项不进快照（与账本读取同一过滤，§14.4）。
-func TestLedgerSnapshotHidesScreeningPendingAsk(t *testing.T) {
-	e := setup(t)
-	alpha, _ := e.snapshotEnv()
-	var ref struct{ ID string }
-	_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "task", "title": "待初筛决策", "phase": "open", "project": alpha}).Value, &ref)
-	e.st.Update(bg, func(tx *store.Tx) error { // 直接置位内核维护的标记以模拟初筛未返回
-		_, _, _, err := items.Revise(tx, ref.ID, "test", t0, func(it *domain.Item) error {
-			it.Phase = domain.PhaseNeedsInput
-			it.Ask = &domain.Ask{AskInput: domain.AskInput{Question: "q", FreeText: true}, AskKernelState: domain.AskKernelState{ScreeningPending: true}}
-			return nil
-		})
-		return err
-	})
-	b, err := e.svc.ledgerSnapshot(bg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(b, "待初筛决策") || !strings.Contains(b, "alpha-事项") {
-		t.Fatalf("snapshot %s", b)
 	}
 }
 

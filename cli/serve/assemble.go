@@ -36,7 +36,6 @@ import (
 	apiruns "github.com/xiaohei-info/awesome-personal-agent/api/runs"
 	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
 	apiexec "github.com/xiaohei-info/awesome-personal-agent/api/settings/exec"
-	apigrants "github.com/xiaohei-info/awesome-personal-agent/api/settings/grants"
 	apioutbound "github.com/xiaohei-info/awesome-personal-agent/api/settings/outbound"
 	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	apipurge "github.com/xiaohei-info/awesome-personal-agent/api/settings/purge"
@@ -87,7 +86,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/resume"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/retention"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/rules"
-	kscreening "github.com/xiaohei-info/awesome-personal-agent/kernel/screening"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/secrets"
 	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
@@ -149,7 +147,9 @@ const senderInterval = 2 * time.Second
 var hostedReader = []string{"hosted-reader"}
 
 // hostOwner 是启动流程读主机配置文件时的身份：本人在主机上写的配置，与 Web 上的本人同级（§14.12）。
-var hostOwner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: owner, Via: domain.ViaWeb}, Level: authz.LevelWeb}
+// 主机终端是恢复通道，按"刚验过口令"处理，3b 的登记照旧生效。
+// shortcut: 方案要求主机文件里新增或改动的可执行登记进"等你确认"；还没做，文件改动仍在启动时直接生效。
+var hostOwner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: owner, Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 
 // kernel 是装配好的内核：assemble 只构造和登记，不写账本、不起进程，这些都在 start 与 runLoops。
 type kernel struct {
@@ -167,7 +167,6 @@ type kernel struct {
 	eng    *rules.Engine
 	fu     *followup.Service
 	stale  *stale.Service
-	scr    *kscreening.Service
 	att    *attention.Attention
 	hn     *khealth.Notifier
 	rs     *resume.Service
@@ -213,12 +212,8 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if err != nil {
 		return nil, err
 	}
-	// 初筛失败不重试（§14.4），要单独一个 Attempts=1 的实例；决策卡片文案与投递阈值挡在投递前，同样不重试。
+	// 决策卡片文案与投递阈值挡在投递前，失败不重试，要单独一个 Attempts=1 的实例。
 	screenJudge, err := direct.New(direct.Options{Store: st, Packs: ld, Model: &model.Client{}, Attempts: 1})
-	if err != nil {
-		return nil, err
-	}
-	scr, err := kscreening.New(kscreening.Options{Store: st, Judge: screenJudge})
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +232,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	}
 	conns := kconnections.New(vault, caller.Decl)
 	q := delivery.New(delivery.Options{UnclaimedAfter: cfg.DeliveryUnclaimedAfter, Backoff: cfg.DeliveryBackoff, Deliverable: kconnections.Deliverable})
-	att := attention.New(attention.Options{Queue: q, Drafter: screenJudge, ViewOnly: conns.ViewOnly})
+	att := attention.New(attention.Options{Queue: q, Drafter: screenJudge})
 	sum, err := summaries.New(summaries.Options{Store: st, Exec: x, Gen: judge, Owner: owner})
 	if err != nil {
 		return nil, err
@@ -246,7 +241,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	if base == "" {
 		base = apiURL
 	}
-	k := &kernel{st: st, x: x, layout: l, scr: scr, att: att, sum: sum, hn: khealth.NewNotifier(q), packs: ld,
+	k := &kernel{st: st, x: x, layout: l, att: att, sum: sum, hn: khealth.NewNotifier(q), packs: ld,
 		send:  &kchannel.Sender{Store: st, Queue: q, Conns: conns, Call: caller, Base: base},
 		drain: make(chan struct{}, 1), draft: make(chan struct{}, 1), summarize: make(chan struct{}, 1)}
 
@@ -382,7 +377,7 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 
 	if err := errors.Join(
 		kitems.Register(x, kinds),
-		kdecisions.RegisterWith(x, scr),
+		kdecisions.Register(x),
 		kchannel.Register(x, kchannel.Options{Queue: q}),
 		conns.Register(x),
 		kprojects.Register(x),
@@ -406,7 +401,6 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	); err != nil {
 		return nil, err
 	}
-	x.OnCommit(scr.OnCommit)
 	att.Attach(x, st, logErr("attention"))
 	x.OnCommit(func(command.Commit) { k.sumDue.Store(true) })
 	k.hn.Attach(x, st, logErr("health delivery"))
@@ -425,10 +419,6 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 	x.OnCommit(triggerAgentsMD(agmSvc, &k.agmWG)) // 来源报告默认分支 AGENTS.md 变化 → 同一检测（§12.5）
 
 	creds, err := credentials.Mount(x, a)
-	if err != nil {
-		return nil, err
-	}
-	grants, err := apigrants.Mount(x, a, st)
 	if err != nil {
 		return nil, err
 	}
@@ -454,10 +444,10 @@ func assemble(st *store.Store, l config.Layout, cfg config.Config, apiURL string
 		return nil, err
 	}
 	if k.srv, err = core.New(core.Deps{Store: st, Auth: a, Web: web.Handler(), Guard: wk.Identity, Groups: []core.RouteGroup{
-		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st, a), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), creds, grants,
+		apiitems.Routes(x, st, k.stale.After), apidecisions.Routes(x, ""), apiprojects.Routes(st, x), apipolicy.Routes(st, a), apipolicy.ProbeRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld}), creds,
 		apicapture.Routes(x), apicontext.Routes(st), apidelegation.Routes(x), apideliveries.Routes(st, q, 0), apichannel.Routes(x, st, nil), apichannel.IdentifyRoutes(kchannel.NewIdentifier(nil)), apiconnections.Routes(st, x, conns, caller, k.send),
 		apifollowmsg.Routes(x), apiingest.Routes(k.wh, int64(cfg.MaxWebhookBody)), apipacks.Routes(st, x, ld), apiruns.Routes(st, wk), apievents.Routes(st, 0),
-		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x), sources, apiwhy.Routes(st), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
+		apiexec.Routes(st, x), apioutbound.Routes(st, x), apipurge.Routes(x), apiretention.Routes(x), sources, apiwhy.Routes(st), apiwhy.RuleChangeRoutes(st, x), apijudgments.Routes(st, &spotcheck.Service{Store: st, Exec: x, Proposer: k.in, Clock: clock.Now}), apihealth.Routes(st, q, ld, cfg.DelegationStallAfter, cfg.UnjudgedRejudgeWindow), apihealth.DoctorRoutes(st, kdoctor.Env{Model: &model.Client{}, Packs: ld, Conns: conns, KeyFile: vault.Path()}), apimaterials.Routes(st, x, hs), apiagentsmd.Routes(x, k.agm), apiversion.Routes(ledger)}}); err != nil {
 		return nil, err
 	}
 	k.clk, err = clock.New(st, k.handleTimer, nil)
@@ -478,18 +468,8 @@ func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 	switch {
 	case k.att.Owns(c):
 		return k.att.HandleTimer(tx, c)
-	case kdecisions.Owns(c):
-		// 到期按默认值决定也是回答：同一个时钟事务里入队续接（未决定的由续接自己跳过），提交后由时钟循环拉起进程
-		if err := kdecisions.HandleTimer(tx, c); err != nil {
-			return err
-		}
-		if _, err := k.rs.ResumeIn(tx, c.Target); err != nil {
-			return err
-		}
-		k.resumeMu.Lock()
-		k.resumeDue = append(k.resumeDue, c.Target)
-		k.resumeMu.Unlock()
-		return nil
+	case kdecisions.Owns(c): // 旧模型留下的超时 Timer：只清掉，不代答
+		return kdecisions.HandleTimer(tx, c)
 	case k.rn.Owns(c):
 		return k.rn.HandleTimer(tx, c)
 	case instances.Owns(c):
@@ -510,6 +490,9 @@ func (k *kernel) handleTimer(tx *store.Tx, c clock.Command) error {
 // start 按序做启动时的一次性工作：对齐规则与能力包 → 读主机配置 → 对齐时间轮 → 恢复上次进程遗留的状态。
 // 这里只做快操作；可能调模型的补处理放在后台循环，不挡服务启动。
 func (k *kernel) start(ctx context.Context) error {
+	if err := switchAuthz(ctx, k.st, clock.Now); err != nil { // 权限模型第二版的一次性切换，幂等（§16.5）
+		return err
+	}
 	// 无法落成 Timer 的 schedule 是某个包的问题，规则状态已登记，不挡启动。
 	if err := k.eng.Reconcile(ctx); err != nil {
 		slog.Error("rules reconcile", "err", err)
@@ -559,8 +542,7 @@ func (k *kernel) start(ctx context.Context) error {
 		// shortcut: 存活的进程组没有接管逻辑，继续占额度直到下次重启判定；后台运行续接落地时接管。
 		slog.Warn("run still alive after restart", "run", r.ID)
 	}
-	_, err = k.scr.Recover(ctx)
-	return err
+	return nil
 }
 
 // loadHostFiles 读本人在主机上写的登记（§14.12）：文件不存在就跳过；内容有误拒绝启动，不带着半份配置运行。
@@ -678,7 +660,6 @@ func (k *kernel) runLoops(ctx context.Context) (stopped func()) {
 	return func() {
 		wg.Wait()
 		k.disp.Close()
-		k.scr.Wait()
 		k.wh.Wait()
 	}
 }

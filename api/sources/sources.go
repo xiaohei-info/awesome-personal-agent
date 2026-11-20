@@ -162,10 +162,10 @@ type api struct {
 func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr Proposer, dc Declared) (core.RouteGroup, error) {
 	a := &api{st: st, x: x, rp: rp, pr: pr, au: au, dc: dc}
 	for _, s := range []command.Spec{
-		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
-		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
-		{Name: CmdReplay, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
-		{Name: CmdFetchAttachment, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: idObject, KeepVersion: true,
+		{Name: CmdWebhookKey, Action: authz.ActionManageSource, Tier: authz.TierPower, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookKey},
+		{Name: CmdWebhookRevoke, Action: authz.ActionManageSource, Tier: authz.TierPower, Page: "/sources", Object: idObject, Validate: a.validateWebhookKey, Apply: a.applyWebhookRevoke},
+		{Name: CmdReplay, Action: authz.ActionManageSource, Tier: authz.TierOrganize, Object: idObject, Validate: a.validateReplay, Apply: a.applyReplay},
+		{Name: CmdFetchAttachment, Action: authz.ActionManageSource, Tier: authz.TierOrganize, Object: idObject, KeepVersion: true,
 			Validate: a.validateFetch, Apply: a.applyFetch},
 	} {
 		if err := x.Register(s); err != nil {
@@ -239,7 +239,7 @@ func (a *api) run(r *http.Request, p *core.Principal, cmd string, in map[string]
 	if err != nil {
 		return command.Result{}, err
 	}
-	req := command.Request{Identity: p.Identity, Command: cmd, Input: raw, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
+	req := command.Request{Identity: p.Identity, Command: cmd, Input: raw, WebURL: p.WebURL}
 	if idem {
 		req.IdemKey = r.Header.Get(IdempotencyHeader)
 	}
@@ -252,7 +252,7 @@ func (a *api) runInput(r *http.Request, p *core.Principal, cmd string, in any, p
 	if err != nil {
 		return command.Result{}, err
 	}
-	return a.x.Do(r.Context(), command.Request{Identity: p.Identity, Command: cmd, Input: raw, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL, Preflight: preflight})
+	return a.x.Do(r.Context(), command.Request{Identity: p.Identity, Command: cmd, Input: raw, WebURL: p.WebURL, Preflight: preflight})
 }
 
 func (a *api) source(r *http.Request, id string) (s domain.Source, err error) {
@@ -350,8 +350,10 @@ func (a *api) selfSender(w http.ResponseWriter, r *http.Request, p *core.Princip
 // trustedSenders 只替换这个来源的转发白名单（§14.6）。需确认的来源只接受空名单（清掉以前填的、本来就不生效的条目），
 // 非空返回 sender_unverifiable：名单在那里不会生效，不让人以为填了有用。
 func (a *api) trustedSenders(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if !p.Web {
-		return domain.NewError(domain.CodeWebOnly, "trusted senders can only be changed by the owner in the Web UI", "open the source in the Web UI")
+	// 信任的发件人属 3a 改日常（§14.3）：Web 本人，或档位放开到 3a 的 Agent。
+	basis, err := apipolicy.Authorize(a.st, r, p, authz.TierRules, "/sources/"+r.PathValue("id"), "settings:/settings/sources/{id}/trusted-senders")
+	if err != nil {
+		return err
 	}
 	s, err := a.source(r, r.PathValue("id"))
 	if err != nil {
@@ -366,7 +368,7 @@ func (a *api) trustedSenders(w http.ResponseWriter, r *http.Request, p *core.Pri
 	if len(in.Senders) > 0 && (a.dc.Sender == nil || a.dc.Sender(s).Trust != "verified") {
 		return invalid("sender_unverifiable: source "+s.ID+" cannot verify who sent a message, so a trusted-sender list would have no effect", "only clear the list for this source")
 	}
-	v, pol, err := apipolicy.UpdateKey(a.st, r, p, "web settings: trusted senders of source "+s.ID, func(np *kpolicy.Policy) {
+	v, pol, err := apipolicy.UpdateKey(a.st, r, p, basis, "settings: trusted senders of source "+s.ID, func(np *kpolicy.Policy) {
 		if np.ForwardAllowlist == nil {
 			np.ForwardAllowlist = map[string][]string{}
 		}
@@ -890,7 +892,7 @@ func (a *api) backlogRules(w http.ResponseWriter, r *http.Request, p *core.Princ
 	if err := core.DecodeJSON(r, &in); err != nil {
 		return err
 	}
-	res, err := a.pr.BacklogRules(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source)
+	res, err := a.pr.BacklogRules(r.Context(), command.Request{Identity: p.Identity, WebURL: p.WebURL}, in.Source)
 	if err != nil {
 		return err
 	}
@@ -905,7 +907,7 @@ func (a *api) backlogScore(w http.ResponseWriter, r *http.Request, p *core.Princ
 	if err := core.DecodeJSON(r, &in); err != nil {
 		return err
 	}
-	res, err := a.pr.BacklogScore(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source)
+	res, err := a.pr.BacklogScore(r.Context(), command.Request{Identity: p.Identity, WebURL: p.WebURL}, in.Source)
 	if err != nil {
 		return err
 	}
@@ -924,7 +926,7 @@ func (a *api) backlogRejudge(w http.ResponseWriter, r *http.Request, p *core.Pri
 	if in.Limit < 0 {
 		return invalid("limit must not be negative", "leave limit out, or give a positive number")
 	}
-	res, err := a.pr.BacklogRejudge(r.Context(), command.Request{Identity: p.Identity, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}, in.Source, in.Limit)
+	res, err := a.pr.BacklogRejudge(r.Context(), command.Request{Identity: p.Identity, WebURL: p.WebURL}, in.Source, in.Limit)
 	if err != nil {
 		return err
 	}

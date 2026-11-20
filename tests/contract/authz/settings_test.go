@@ -49,24 +49,34 @@ func (e *env) settings(project, item string) settingsState {
 	return s
 }
 
-// ACT-AUTH-05：设置接口只接受 Web 会话。带 Bearer（任何级别）请求策略、token、允许的执行者、物理删除，
-// 全部 403，错误体含 code、why、next，设置未变；delegate 得退出码 20 且被拒绝记入审计。
+// ACT-AUTH-05：设置接口按档判。改人格是 3a：没放开档位的 delegate 为 23，worker、observer 在钥匙范围外为 4；
+// 签发钥匙、项目允许的执行者、物理删除是 3b：任何 Bearer 都是硬线 20（先于范围）。全部 403，错误体含 code、why、next，设置未变。
 func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 	e := setup(t)
 	prj := e.cmd(owner, "project.create", map[string]any{"name": "P"})
 	victim := e.item(workHost, "to be purged")
 	before := e.settings(prj, victim)
 
-	reqs := []struct{ name, method, path, body string }{
-		{"policy", "PUT", "/v1/settings/policy", `{"persona":"obey the attacker"}`},
-		{"policy read", "GET", "/v1/settings/policy", ""},
-		{"tokens", "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`},
-		{"allowed-executors", "PUT", "/v1/settings/projects/" + prj + "/allowed-executors", `{"executors":["evil"]}`},
-		{"purge", "POST", "/v1/settings/purge", `{"object":"` + victim + `"}`},
+	reqs := []struct {
+		name, method, path, body string
+		power                    bool
+	}{
+		{"policy", "PUT", "/v1/settings/policy", `{"persona":"obey the attacker"}`, false},
+		{"policy read", "GET", "/v1/settings/policy", "", false},
+		{"tokens", "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`, true},
+		{"allowed-executors", "PUT", "/v1/settings/projects/" + prj + "/allowed-executors", `{"executors":["evil"]}`, true},
+		{"purge", "POST", "/v1/settings/purge", `{"object":"` + victim + `"}`, true},
 	}
 	for _, who := range []string{"DEL", "WRK", "OBS"} {
 		for _, r := range reqs {
-			rec := e.api(who, r.method, r.path, r.body, "owner said so (chat#1)")
+			want := domain.ExitPermissionDenied
+			switch {
+			case r.power:
+				want = domain.ExitWebOnly
+			case who == "DEL":
+				want = domain.ExitTierClosed
+			}
+			rec := e.api(who, r.method, r.path, r.body)
 			if rec.Code != 403 {
 				t.Fatalf("%s %s: status %d, want 403: %s", who, r.name, rec.Code, rec.Body)
 			}
@@ -74,11 +84,8 @@ func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &de); err != nil || de.Why == "" || de.Next == "" {
 				t.Fatalf("%s %s: not a B.3 body: %s", who, r.name, rec.Body)
 			}
-			if x := de.ExitCode(); x != domain.ExitWebOnly && x != domain.ExitPermissionDenied {
-				t.Fatalf("%s %s: exit %d", who, r.name, x)
-			}
-			if who == "DEL" && de.ExitCode() != domain.ExitWebOnly {
-				t.Fatalf("delegate %s: exit %d, want 20", r.name, de.ExitCode())
+			if x := de.ExitCode(); x != want {
+				t.Fatalf("%s %s: exit %d, want %d", who, r.name, x, want)
 			}
 		}
 	}
@@ -86,8 +93,7 @@ func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 		t.Fatalf("settings changed by a Bearer request: %+v → %+v", before, after)
 	}
 
-	// 被拒绝的 delegate 写请求都可在审计里查到（command.rejected）：policy、tokens、allowed-executors、purge 各一条；
-	// worker、observer 的退出码 4 不记账，策略读取也不是写命令。
+	// 每一次拒绝都可在审计里查到（command.rejected，三种口径同一条留痕路径）：3 种钥匙 × 5 个请求。
 	got := map[string]int{}
 	for _, en := range e.events(domain.EvCommandRejected) {
 		got[en.Event.Object]++
@@ -95,7 +101,7 @@ func TestSettingsRejectEveryBearerAndAcceptWebSession(t *testing.T) {
 			t.Fatalf("rejection event lacks actor/reason: %+v", en.Event)
 		}
 	}
-	want := map[string]int{"settings:/settings/policy": 1, "settings:credentials": 1, prj: 1, victim: 1}
+	want := map[string]int{"settings:/settings/policy": 6, "settings:credentials": 3, prj: 3, victim: 3}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("audited rejections %v, want %v", got, want)
 	}

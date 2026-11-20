@@ -97,8 +97,19 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e := &env{t: t, st: st, au: au, srv: srv, sec: map[string]string{}}
+	// dlgD 归属 agent_d，本人把它放开到「也替我拍板」；dlg 没有归属，只整理。
+	if err := st.Update(context.Background(), func(tx *store.Tx) error {
+		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent["agent_d"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for name, s := range map[string]auth.Spec{"obs": {Kind: auth.Observer}, "wrk": {Kind: auth.Worker}, "dlg": {Kind: auth.Delegate},
-		"ext": {Kind: auth.Ext, Scope: "src_1"}, "export": {Kind: auth.Ext, Scope: "export"}} {
+		"dlgD": {Kind: auth.Delegate, AgentID: "agent_d", Harness: "h"},
+		"ext":  {Kind: auth.Ext, Scope: "src_1"}, "export": {Kind: auth.Ext, Scope: "export"}} {
 		if err := st.Update(context.Background(), func(tx *store.Tx) error {
 			_, secret, err := au.Issue(tx, s)
 			e.sec[name] = secret
@@ -121,7 +132,7 @@ func setup(t *testing.T) *env {
 		t.Fatalf("login: %d %s", rec.Code, rec.Body)
 	}
 	e.csrf = out.CSRF
-	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	res, err := x.Do(context.Background(), command.Request{Identity: owner, Command: "project.create", Input: []byte(`{"name":"Work","intro":"x"}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +170,6 @@ func (e *env) doBytes(who, method, path string, body []byte, hdr ...string) *htt
 	default:
 		req.Header.Set("Authorization", "Bearer "+e.sec[who])
 		req.Header.Set("X-APA-Session", "s1")
-		req.Header.Set("X-APA-Session-Kind", "direct")
 	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
@@ -205,7 +215,7 @@ func (e *env) commit(who, body string) (result, *httptest.ResponseRecorder) {
 	return r, rec
 }
 
-// flow-material-owned：自有型材料的创建、修订、基线冲突、回退（只认 Web）、确认与拒绝、规范生效（只认 Web）。
+// flow-material-owned：自有型材料的创建（直接生效）、修订（按档位）、基线冲突、回退（3a）、确认与拒绝（二档）、规范生效（3a）。
 func TestOwnedMaterialLifecycle(t *testing.T) {
 	e := setup(t)
 	prj := e.project(t)
@@ -240,54 +250,65 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 		t.Fatalf("list: %+v", list)
 	}
 
-	// 追加修订：基线对才生效，旧基线是冲突；id 不能出现在体里。
+	// 改已有材料看档位：只整理的钥匙提交的修订留待确认；放开拍板的 Agent 直接生效，基线对才生效，旧基线是冲突；id 不能出现在体里。
 	rev := "/v1/materials/" + r1.Material + "/revisions"
-	r2res := e.do("wrk", "POST", rev, `{"content":"v2 beta","reason":"edit","based_on":"`+r1.Revision+`"}`)
+	var pw result
+	into(t, e.do("wrk", "POST", rev, `{"content":"v2 worker","reason":"edit","based_on":"`+r1.Revision+`"}`), &pw)
+	if pw.State != "proposed" {
+		t.Fatalf("an organize-only key editing an existing material must leave it for confirmation: %+v", pw)
+	}
+	want(t, e.do("web", "POST", "/v1/revisions/"+pw.Revision+"/reject", `{"reason":"no"}`), 200, "")
+	r2res := e.do("dlgD", "POST", rev, `{"content":"v2 beta","reason":"edit","based_on":"`+r1.Revision+`"}`)
 	want(t, r2res, 201, "")
 	var r2 result
 	into(t, r2res, &r2)
-	want(t, e.do("wrk", "POST", rev, `{"content":"v3","reason":"edit","based_on":"`+r1.Revision+`"}`), 409, "conflict")
-	want(t, e.do("wrk", "POST", rev, `{"id":"x","content":"v3","reason":"edit"}`), 400, "invalid_request")
+	if r2.State != "current" {
+		t.Fatalf("an Agent opened to decide edits directly: %+v", r2)
+	}
+	want(t, e.do("dlgD", "POST", rev, `{"content":"v3","reason":"edit","based_on":"`+r1.Revision+`"}`), 409, "conflict")
+	want(t, e.do("dlgD", "POST", rev, `{"id":"x","content":"v3","reason":"edit"}`), 400, "invalid_request")
 	var hist struct{ Revisions []km.Revision }
 	into(t, e.do("obs", "GET", rev, ""), &hist)
-	if len(hist.Revisions) != 2 || hist.Revisions[0].ID != r1.Revision || hist.Revisions[1].State != "current" || hist.Revisions[0].State != "superseded" {
+	if len(hist.Revisions) != 3 || hist.Revisions[0].ID != r1.Revision || hist.Revisions[2].State != "current" || hist.Revisions[0].State != "superseded" {
 		t.Fatalf("history: %+v", hist)
 	}
 
-	// 回退：只有 Web。worker 得到 permission_denied，delegate 得到 web_only，Web 本人成功并新增一条修订。
+	// 回退是 3a：worker 得到 permission_denied，只整理的 Agent 得到 tier_closed，Web 本人成功并新增一条修订。
 	revert := "/v1/materials/" + r1.Material + "/revert"
 	revBody := `{"to":"` + r1.Revision + `","reason":"undo"}`
 	want(t, e.do("wrk", "POST", revert, revBody), 403, "permission_denied")
-	want(t, e.do("dlg", "POST", revert, revBody, core.EvidenceHeader, "owner: undo it"), 403, "web_only")
+	want(t, e.do("dlg", "POST", revert, revBody), 403, "tier_closed")
 	rec = e.do("web", "POST", revert, revBody)
 	want(t, rec, 200, "")
 	into(t, e.do("obs", "GET", rev, ""), &hist)
-	if len(hist.Revisions) != 3 || hist.Revisions[2].Content != "v1 alpha" || hist.Revisions[2].State != "current" {
+	if len(hist.Revisions) != 4 || hist.Revisions[3].Content != "v1 alpha" || hist.Revisions[3].State != "current" {
 		t.Fatalf("revert must append a revision with the old content: %+v", hist)
 	}
 	want(t, e.do("web", "POST", revert, `{"to":"`+r2.Revision+`","reason":"x"}`, "Origin", "http://evil.example"), 403, "permission_denied")
 
-	// design 是 proposed：创建后没有当前修订，Web 确认才生效；确认第二次是冲突。
-	p1, rec := e.commit("wrk", body("design", "design v1"))
+	// design：新建即生效；只整理的钥匙改它留待确认。确认是二档：只整理的 Agent 为 23，放开拍板的 Agent 生效；确认第二次是冲突。
+	p0, rec := e.commit("wrk", body("design", "design v1"))
 	want(t, rec, 201, "")
-	if p1.State != "proposed" {
-		t.Fatalf("design must be proposed: %+v", p1)
+	if p0.State != "current" {
+		t.Fatalf("a new material takes effect at once: %+v", p0)
 	}
-	shown = showT{}
-	into(t, e.do("obs", "GET", "/v1/materials/"+p1.Material, ""), &shown)
-	if shown.Revision != nil || shown.Material.CurrentRev != "" {
-		t.Fatalf("a proposed-only material has no current revision: %+v", shown)
+	p1res := e.do("wrk", "POST", "/v1/materials/"+p0.Material+"/revisions", `{"content":"design v1.1","reason":"tweak","based_on":"`+p0.Revision+`"}`)
+	want(t, p1res, 201, "")
+	var p1 result
+	into(t, p1res, &p1)
+	if p1.State != "proposed" {
+		t.Fatalf("design edit by organize-only key must be proposed: %+v", p1)
 	}
 	// 全站待确认的修订：observer 可读，带所属材料；确认之后不再列出。
 	var pend struct{ Pending []km.Pending }
 	into(t, e.do("obs", "GET", "/v1/revisions/pending", ""), &pend)
-	if len(pend.Pending) != 1 || pend.Pending[0].Revision.ID != p1.Revision || pend.Pending[0].Material.ID != p1.Material {
+	if len(pend.Pending) != 1 || pend.Pending[0].Revision.ID != p1.Revision || pend.Pending[0].Material.ID != p0.Material {
 		t.Fatalf("pending: %+v", pend)
 	}
 	confirm := "/v1/revisions/" + p1.Revision + "/confirm"
 	want(t, e.do("wrk", "POST", confirm, `{}`), 403, "permission_denied")
-	want(t, e.do("dlg", "POST", confirm, `{}`), 403, "basis_required") // 第二档：delegate 必须附本人原话
-	want(t, e.do("dlg", "POST", confirm, `{}`, core.EvidenceHeader, "owner: yes, adopt the design"), 200, "")
+	want(t, e.do("dlg", "POST", confirm, `{}`), 403, "tier_closed")
+	want(t, e.do("dlgD", "POST", confirm, `{}`), 200, "")
 	pend.Pending = nil
 	into(t, e.do("obs", "GET", "/v1/revisions/pending", ""), &pend)
 	if len(pend.Pending) != 0 {
@@ -296,23 +317,27 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 	want(t, e.do("web", "POST", confirm, `{}`), 409, "conflict")
 
 	// 拒绝：被拒绝的修订不生效，再拒绝是冲突。
-	p2res := e.do("wrk", "POST", "/v1/materials/"+p1.Material+"/revisions", `{"content":"design v2","reason":"tweak","based_on":"`+p1.Revision+`"}`)
+	p2res := e.do("wrk", "POST", "/v1/materials/"+p0.Material+"/revisions", `{"content":"design v2","reason":"tweak","based_on":"`+p1.Revision+`"}`)
 	want(t, p2res, 201, "")
 	var p2 result
 	into(t, p2res, &p2)
 	want(t, e.do("web", "POST", "/v1/revisions/"+p2.Revision+"/reject", `{"reason":"no"}`), 200, "")
 	want(t, e.do("web", "POST", "/v1/revisions/"+p2.Revision+"/reject", `{}`), 409, "conflict")
-	into(t, e.do("obs", "GET", "/v1/materials/"+p1.Material, ""), &shown)
-	if shown.Revision == nil || shown.Revision.Content != "design v1" {
-		t.Fatalf("rejected revision must not become current: %+v", shown)
+	var shown2 showT
+	into(t, e.do("obs", "GET", "/v1/materials/"+p0.Material, ""), &shown2)
+	if shown2.Revision == nil || shown2.Revision.Content != "design v1.1" {
+		t.Fatalf("rejected revision must not become current: %+v", shown2)
 	}
 	want(t, e.do("web", "POST", "/v1/revisions/rev_nope/confirm", `{}`), 404, "not_found")
 
-	// 规范：生效只有 Web，delegate 带着本人原话也得到 web_only。
+	// 规范：新建也留待确认；规范生效是 3a，放开拍板的 Agent 也得到 tier_closed，Web 本人生效。
 	g, rec := e.commit("wrk", `{"project":"`+prj+`","kind":"guideline","title":"Rules","content":"be kind","reason":"new"}`)
 	want(t, rec, 201, "")
+	if g.State != "proposed" {
+		t.Fatalf("a guideline always waits for confirmation: %+v", g)
+	}
 	gc := "/v1/revisions/" + g.Revision + "/confirm"
-	want(t, e.do("dlg", "POST", gc, `{}`, core.EvidenceHeader, "owner: activate it"), 403, "web_only")
+	want(t, e.do("dlgD", "POST", gc, `{}`), 403, "tier_closed")
 	want(t, e.do("web", "POST", gc, `{}`), 200, "")
 	into(t, e.do("obs", "GET", "/v1/materials/"+g.Material, ""), &shown)
 	if shown.Revision == nil || shown.Revision.Content != "be kind" {
@@ -501,9 +526,9 @@ func TestHostedMaterial(t *testing.T) {
 	if k1.Body.String() != k2.Body.String() {
 		t.Fatalf("replay must return the first parent and child: %s vs %s", k1.Body, k2.Body)
 	}
-	want(t, e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"no words"}`), 403, "basis_required")
-	rec = e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"by delegate"}`, core.EvidenceHeader, "owner: please update the design doc")
-	want(t, rec, 201, "")
+	// 发起修改会立一件进行中的事（二档）：只整理的 Agent 为 23，放开拍板的 Agent 不带 parent 也能发起。
+	want(t, e.do("dlg", "POST", changes, `{"assignee":"other.cli","request":"closed"}`), 403, "tier_closed")
+	want(t, e.do("dlgD", "POST", changes, `{"assignee":"other.cli","request":"by delegate"}`), 201, "")
 
 	// 自有型材料：content 与 changes 都是冲突，让调用者去读修订。
 	own, rec := e.commit("wrk", `{"project":"`+prj+`","kind":"minutes","title":"m","content":"x","reason":"r"}`)
@@ -518,7 +543,6 @@ func TestWriteRequestShape(t *testing.T) {
 	want(t, e.do("wrk", "POST", "/v1/materials", `null`), 400, "invalid_request")
 	want(t, e.do("wrk", "POST", "/v1/materials", `{"id":"mat_x","kind":"minutes"}`), 400, "invalid_request")
 	want(t, e.do("wrk", "POST", "/v1/materials", `{"project":"`+prj+`","kind":"nope","title":"t","content":"x","reason":"r"}`), 400, "invalid_request")
-	want(t, e.do("wrk", "POST", "/v1/materials", `{"project":"`+prj+`","kind":"minutes","title":"t","content":"x","reason":"r","evidence":7}`), 400, "invalid_request")
 	want(t, e.do("wrk", "POST", "/v1/materials", `{"project":"`+prj+`","kind":"minutes","title":"t","content":"x"}`), 400, "invalid_request")
 
 	// 幂等：同键同输入重放首次结果（200 而非 201），不重复创建。

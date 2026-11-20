@@ -88,7 +88,22 @@ func newKernel(t *testing.T) *kernel {
 			t.Fatal(err)
 		}
 	}
-	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
+	// decider：归属 agent_d、本人放开到「也替我拍板」的 delegate 钥匙，改已有材料直接生效。
+	if err := st.Update(context.Background(), func(tx *store.Tx) error {
+		_, s, err := au.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_d", Harness: "h"})
+		if err != nil {
+			return err
+		}
+		k.tokens[decider] = s
+		_, err = policy.Update(tx, owner.Actor, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent["agent_d"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	res, err := x.Do(context.Background(), command.Request{Identity: owner, Command: "project.create", Input: []byte(`{"name":"Work","intro":"x"}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +113,9 @@ func newKernel(t *testing.T) *kernel {
 	k.prj = pr.ID
 	return k
 }
+
+// decider 是测试里的伪种类：tokens 里放开了二档的那把 delegate 钥匙。
+const decider auth.Kind = "decider"
 
 type run struct {
 	code        int
@@ -140,7 +158,8 @@ func write(t *testing.T, body string) string {
 	return p
 }
 
-// flow-material-owned：新建自有型、追加修订、读回当前与指定修订、列表与检索。
+// flow-material-owned：新建自有型（直接生效）、追加修订（只整理的钥匙留待确认，放开拍板的 Agent 直接生效）、
+// 读回当前与指定修订、列表与检索。
 func TestOwnedMaterialLifecycle(t *testing.T) {
 	k := newKernel(t)
 	r1 := k.ok(auth.Worker, "material", "commit", "--from", write(t, "alpha policy v1"), "--reason", "first", "--kind", "reference", "--title", "Policy", "--project", k.prj, "--tag", "ops").json(t)
@@ -148,8 +167,11 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 	if id == "" || rev1 == "" {
 		t.Fatalf("commit result: %v", r1)
 	}
-	k.ok(auth.Worker, "material", "commit", id, "--from", "-", "--reason", "second", "--based-on", rev1)
-	if r := k.apa(auth.Worker, "material", "commit", id, "--from", write(t, "late"), "--reason", "stale", "--based-on", rev1); r.code != domain.ExitConflict {
+	if st := k.ok(auth.Worker, "material", "commit", id, "--from", write(t, "worker edit"), "--reason", "edit", "--based-on", rev1).json(t)["state"]; st != "proposed" {
+		t.Fatalf("an organize-only key editing an existing material must leave it for confirmation: %v", st)
+	}
+	k.ok(decider, "material", "commit", id, "--from", "-", "--reason", "second", "--based-on", rev1)
+	if r := k.apa(decider, "material", "commit", id, "--from", write(t, "late"), "--reason", "stale", "--based-on", rev1); r.code != domain.ExitConflict {
 		t.Fatalf("stale base must exit 6: %d %s", r.code, r.errOut)
 	}
 

@@ -368,12 +368,19 @@ func TestAssembleOrdersChecksAndComputesOK(t *testing.T) {
 		t.Fatal("error must clear OK")
 	}
 	all := Kernel(bg, Facts{Policy: policy.Default()}, Env{})
-	if len(all) != 5 || byName(all, Tier).Name == "" {
+	if len(all) != 6 || byName(all, Tier).Name == "" || byName(all, Authz).Status != OK {
 		t.Fatalf("%+v", all)
 	}
 	requireCodes(t, "codes.go", all...)
 	if c := byName(all, Sources); c.Code != CodeSourcesNone {
 		t.Fatalf("no sources: %+v", c)
+	}
+	// 账本里还留着旧权限模型的东西（策略旧段或有效授权单）而没切换：错误。
+	if c := authzCheck(Facts{ActiveGrants: 1}); c.Status != Error || c.Code != CodeAuthzNotSwitched {
+		t.Fatalf("unswitched: %+v", c)
+	}
+	if c := authzCheck(Facts{AuthzSwitched: true, LegacyPolicy: []string{"web_only"}}); c.Status != Error {
+		t.Fatalf("legacy sections left: %+v", c)
 	}
 }
 

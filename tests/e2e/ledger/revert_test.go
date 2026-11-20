@@ -20,8 +20,8 @@ func TestFlowAgentRevert(t *testing.T) {
 
 	var renameSeq int64
 	t.Run("ACT-REV-01 查看 agent 变更视图", func(t *testing.T) {
-		ok(t, e.Apa(e.DEL, "", "item", "update", target, "--title", "renamed-by-agent", "--reason", "clearer title", "--evidence", "owner: rename it"), "改标题")
-		ok(t, e.Apa(e.DEL, "", "decide", decided, "--option", "yes", "--evidence", "owner: yes, ship it"), "代答")
+		ok(t, e.Apa(e.DEL, "", "item", "update", target, "--title", "renamed-by-agent", "--reason", "clearer title"), "改标题")
+		ok(t, e.Apa(e.DEL, "", "decide", decided, "--option", "yes"), "代答")
 
 		// 视图读 GET /v1/audit/events，按 actor.type=agent 过滤；自上次访问以来 = seq 大于游标。
 		var mine []step
@@ -43,8 +43,9 @@ func TestFlowAgentRevert(t *testing.T) {
 			t.Fatalf("agent 变更视图缺记录（改标题 %v，代答 %v）: %+v", rename != nil, decide != nil, mine)
 		}
 		for _, s := range []*step{rename, decide} {
-			if s.Actor.Principal == "" || s.Actor.OnBehalfOf != "owner" || s.Evidence == "" {
-				t.Errorf("应带操作者与证据: %+v", *s)
+			// 2026-11-20：Agent 做的永远记成 Agent 自己做的，不再带"代本人"与本人原话（§14.3 审计）。
+			if s.Actor.Principal == "" || s.Actor.OnBehalfOf != "" || s.Evidence != "" {
+				t.Errorf("应带操作者、不带代本人与原话: %+v", *s)
 			}
 		}
 		if n := len(mine); n != 2 {
@@ -94,11 +95,12 @@ func TestFlowAgentRevert(t *testing.T) {
 		}
 	})
 
-	t.Run("ACT-REV-03 撤销只在 Web", func(t *testing.T) {
-		ok(t, e.Apa(e.DEL, "", "item", "update", target, "--title", "second-title", "--reason", "again", "--evidence", "owner: again"), "再改一次")
+	// 2026-11-20 改写：撤销 Agent 的改动是 3a；档位未放开的 delegate（DELO）得 403 tier_closed，worker 与 observer 在范围外。
+	t.Run("ACT-REV-03 撤销不对档位未放开的钥匙开放", func(t *testing.T) {
+		ok(t, e.Apa(e.DEL, "", "item", "update", target, "--title", "second-title", "--reason", "again"), "再改一次")
 		evs := audit(t, e, "object="+target)
 		last := evs[len(evs)-1]
-		for name, tok := range map[string]string{"DEL": e.DEL, "WRK": e.WRK, "OBS": e.OBS} {
+		for name, tok := range map[string]string{"DELO": e.DELO, "WRK": e.WRK, "OBS": e.OBS} {
 			r := e.APIRaw("POST", "/v1/items/"+target+"/revert", `{"event":`+itoa(last.Seq)+`}`, tok)
 			if r.Code != 403 {
 				t.Errorf("%s 请求撤销应被拒绝(403)，实际 %d %s", name, r.Code, r.Body)

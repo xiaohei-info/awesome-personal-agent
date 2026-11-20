@@ -59,12 +59,13 @@ func (a *api) agents(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 	}
 	var cards []kexec.Card
 	var selected kexec.Selected
+	var pol policy.Policy
 	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		cards, err = kexec.Cards(tx)
 		if err != nil {
 			return err
 		}
-		_, pol, err := policy.Current(tx)
+		_, pol, err = policy.Current(tx)
 		if err != nil {
 			return err
 		}
@@ -74,12 +75,21 @@ func (a *api) agents(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 	}); err != nil {
 		return err
 	}
-	if !p.Web {
-		for i := range cards {
-			cards[i].Values = nil
-		}
+	// 每张卡带它的档位（§14.3）：判定读的就是这一份，页面照它显示。
+	type agentOut struct {
+		kexec.Card
+		Tier     string   `json:"tier"`
+		Projects []string `json:"tier_projects"`
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"agents": cards, "selected": selected.Snapshot, "reason": selected.Reason})
+	out := make([]agentOut, len(cards))
+	for i, c := range cards {
+		if !p.Web {
+			c.Values = nil
+		}
+		al := pol.Allowance(c.ID)
+		out[i] = agentOut{Card: c, Tier: al.Tier, Projects: append([]string{}, al.Projects...)}
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"agents": out, "selected": selected.Snapshot, "reason": selected.Reason})
 }
 func (a *api) saveAgent(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	var in json.RawMessage

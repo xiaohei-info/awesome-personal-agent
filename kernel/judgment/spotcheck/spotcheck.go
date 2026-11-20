@@ -152,7 +152,7 @@ func parse(in json.RawMessage) (reviewIn, error) {
 
 // Register 登记 judgment.review。
 func Register(x *command.Executor) error {
-	return x.Register(command.Spec{Name: CmdReview, Action: authz.ActionChangeSettings,
+	return x.Register(command.Spec{Name: CmdReview, Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/spot-check",
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return authz.Object{ID: v.Judgment}, err
@@ -233,7 +233,7 @@ func (s *Service) Review(ctx context.Context, id command.Identity, judgment, res
 	}
 	do := func(in reviewIn) error {
 		b, _ := json.Marshal(in)
-		_, err := s.Exec.Do(ctx, command.Request{Identity: id, Command: CmdReview, Input: b, Evidence: "spot-check", WebURL: webURL})
+		_, err := s.Exec.Do(ctx, command.Request{Identity: id, Command: CmdReview, Input: b, WebURL: webURL})
 		return err
 	}
 	in := reviewIn{Judgment: judgment, Result: result}

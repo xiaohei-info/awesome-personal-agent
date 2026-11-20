@@ -170,7 +170,7 @@ func RegisterWith(x *command.Executor, src materials.PackSource) error {
 }
 
 func objectOf(m materials.Material) authz.Object {
-	return authz.Object{ID: m.ID, Kind: m.Kind, Project: m.Project, Tags: m.Tags}
+	return authz.Object{ID: m.ID, Kind: m.Kind, Project: m.Project}
 }
 
 func materialObject(tx *store.Tx, id string) (authz.Object, error) {
@@ -216,10 +216,10 @@ func add(src materials.PackSource) command.Spec {
 		return v, v.fill(tx)
 	}
 	return command.Spec{
-		Name: "material.add", Action: authz.ActionReviseMaterial, Tier: authz.TierWork,
+		Name: "material.add", Action: authz.ActionReviseMaterial, Tier: authz.TierOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(tx, in)
-			return authz.Object{Kind: v.Kind, Project: v.Project, Tags: v.Tags}, err
+			return authz.Object{Kind: v.Kind, Project: v.Project}, err
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(tx, in)
@@ -270,7 +270,7 @@ func refresh() command.Spec {
 		return v, decode(in, &v)
 	}
 	return command.Spec{
-		Name: "material.refresh", Action: authz.ActionReviseMaterial,
+		Name: "material.refresh", Action: authz.ActionReviseMaterial, Tier: authz.TierInternal,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -402,7 +402,7 @@ func relocate() command.Spec {
 		return v, decode(in, &v)
 	}
 	return command.Spec{
-		Name: "material.relocate", Action: authz.ActionReviseMaterial,
+		Name: "material.relocate", Action: authz.ActionReviseMaterial, Tier: authz.TierInternal,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {

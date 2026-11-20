@@ -254,7 +254,7 @@ func (o Options) dispatchable(tx *store.Tx, id string) (domain.Item, error) {
 }
 
 func itemObject(it domain.Item) authz.Object {
-	return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Tags: it.Tags, Project: it.Project}
+	return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Project: it.Project}
 }
 
 func (o Options) dispatch() command.Spec {
@@ -265,7 +265,7 @@ func (o Options) dispatch() command.Spec {
 		}
 		return v, v.check()
 	}
-	return command.Spec{Name: "delegate.dispatch", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound, Receipt: true, KeepVersion: true,
+	return command.Spec{Name: "delegate.dispatch", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Receipt: true, KeepVersion: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -350,7 +350,7 @@ func (o Options) dispatchUpdate() command.Spec {
 		}
 		return v, nil
 	}
-	return command.Spec{Name: "delegate.dispatch_update", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound, Receipt: true, KeepVersion: true,
+	return command.Spec{Name: "delegate.dispatch_update", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Receipt: true, KeepVersion: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -420,7 +420,7 @@ type dispatchListIn struct {
 
 // dispatchList 是只读命令：列委派记录（Web 的执行者视图、apa 读取）。运行凭据只能按范围内的事项读。
 func dispatchList() command.Spec {
-	return command.Spec{Name: "delegate.dispatch_list", Action: authz.ActionRead,
+	return command.Spec{Name: "delegate.dispatch_list", Action: authz.ActionRead, Tier: authz.TierRead,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v dispatchListIn
 			return authz.Object{}, decode(in, &v)

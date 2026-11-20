@@ -34,7 +34,7 @@ const triAutoRule = "acc-tri-rules/source_rules/tri-auto"
 // endpoints 在 Web 设置页写两个端点：空串表示清除该端点，否则指向对应替身（local）。
 func (k *kit) setEndpoints(judge, generate bool) {
 	k.t.Helper()
-	body := map[string]any{"screening_timeout_ms": 2000}
+	body := map[string]any{}
 	if judge {
 		body["judge_endpoint"] = map[string]any{"url": k.Cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1", "locality": "local"}
 	} else {

@@ -111,8 +111,7 @@ func (k *kit) wire(judge, generate string, maxBatch int) {
 		j["max_batch"] = maxBatch
 	}
 	body, _ := json.Marshal(map[string]any{"judge_endpoint": j,
-		"generate_endpoint":    map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": generate},
-		"screening_timeout_ms": 30000})
+		"generate_endpoint": map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": generate}})
 	k.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
 	k.settleSummaries()
 }
@@ -148,8 +147,7 @@ func (k *kit) wireGenerateOnly() {
 	k.t.Helper()
 	k.ModelStub = modelstub.NewAt("127.0.0.1:0")
 	body, _ := json.Marshal(map[string]any{"judge_endpoint": nil,
-		"generate_endpoint":    map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": "local"},
-		"screening_timeout_ms": 30000})
+		"generate_endpoint": map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": "local"}})
 	k.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
 }
 

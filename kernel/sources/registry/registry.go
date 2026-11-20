@@ -186,17 +186,18 @@ func Register(x *command.Executor, o Options) error {
 	specs := []command.Spec{
 		m.spec(CmdRegister, authz.ActionManageSource, opRegister, false),
 		m.spec(CmdUpdate, authz.ActionManageSource, opUpdate, false),
-		// ActionChangeSettings：delegate 得 web_only（退出码 20 并留痕），worker/observer 得 4。
+		// 来源的登记与修改是外部接入，3b：delegate 得硬线（退出码 20 并留痕），worker/observer 得 4。
 		m.spec(CmdRegisterExec, authz.ActionChangeSettings, opRegister, true),
 		m.spec(CmdUpdateExec, authz.ActionChangeSettings, opUpdate, true),
-		// ActionChangeSettings、不带代理写档位：外发范围只在 Web，delegate 得 web_only（退出码 20 并留痕）。
-		{Name: CmdSetOutbound, Action: authz.ActionChangeSettings, Tier: authz.TierNone, Object: objectOf,
+		// 外发范围是数据去向，3b（裁决 3）。
+		{Name: CmdSetOutbound, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/sources", Object: objectOf,
 			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 				_, err := planOutbound(tx, in)
 				return err
 			},
 			Apply: m.applyOutbound},
-		{Name: CmdSetEnabled, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: objectOf,
+		// 登记后的启停与改名是 3a（改日常）。
+		{Name: CmdSetEnabled, Action: authz.ActionManageSource, Tier: authz.TierRules, Page: "/sources", Object: objectOf,
 			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var e enabledInput
 				if err := strict(in, &e); err != nil {
@@ -206,16 +207,15 @@ func Register(x *command.Executor, o Options) error {
 				return err
 			},
 			Apply: m.applyEnabled},
-		// 与来源的其他管理命令同档：delegate 改名要带本人原话。
-		{Name: CmdRename, Action: authz.ActionManageSource, Tier: authz.TierWords, Object: objectOf,
+		{Name: CmdRename, Action: authz.ActionManageSource, Tier: authz.TierRules, Page: "/sources", Object: objectOf,
 			Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 				_, _, err := m.planRename(tx, in)
 				return err
 			},
 			Apply: m.applyRename},
 	}
-	// 与外发范围同档：只在 Web，delegate 得 web_only（退出码 20 并留痕）。
-	specs = append(specs, command.Spec{Name: CmdSetRetention, Action: authz.ActionChangeSettings, Tier: authz.TierNone, Object: objectOf,
+	// 原文保留期是 3a（改日常）。
+	specs = append(specs, command.Spec{Name: CmdSetRetention, Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/sources", Object: objectOf,
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			_, _, err := planRetention(tx, in)
 			return err
@@ -242,11 +242,7 @@ const (
 )
 
 func (m *mod) spec(name string, a authz.Action, o op, exec bool) command.Spec {
-	tier := authz.TierWords // 登记可执行命令的是设置类（第三档），不是代理写
-	if exec {
-		tier = authz.TierNone
-	}
-	return command.Spec{Name: name, Action: a, Tier: tier, Object: objectOf,
+	return command.Spec{Name: name, Action: a, Tier: authz.TierPower, Page: "/sources", Object: objectOf,
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			_, _, err := m.plan(tx, o, exec, in)
 			return err

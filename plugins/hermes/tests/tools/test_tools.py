@@ -58,14 +58,15 @@ def test_registers_the_apa_tools(tools):
 
 
 def test_cli_calls_carry_harness_hermes(tools, apa):
-    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s")
+    tools["apa_decide"]({"id": "i1", "option": "B"}, session_id="s")
     assert (apa / "log.harness").read_text().split() == ["hermes"]
 
 
-def test_decide_carries_hermes_session_and_evidence(tools, apa, monkeypatch):
+# 本人原话不再是依据（§14.3）：模型塞进来的 evidence、grant 不会出现在命令行上。
+def test_decide_carries_hermes_session_and_never_evidence(tools, apa, monkeypatch):
     monkeypatch.setenv("FAKE_OUT", '{"state":"done"}')
-    r = json.loads(tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "就选方案 B"}, session_id="sess-9"))
-    assert calls(apa) == [{"argv": ["decide", "i1", "--option", "B", "--evidence", "就选方案 B"], "session": "sess-9"}]
+    r = json.loads(tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "就选方案 B", "grant": "g1"}, session_id="sess-9"))
+    assert calls(apa) == [{"argv": ["decide", "i1", "--option", "B"], "session": "sess-9"}]
     assert r == {"exit_code": 0, "ok": True, "stdout": {"state": "done"}, "stderr": None}
 
 
@@ -81,9 +82,8 @@ def test_web_only_refusal_is_returned_untouched_and_not_retried(tools, apa, monk
     ("apa_propose", {"kind": "task", "title": "T", "tags": "a,b"}, ["propose", "--kind", "task", "--title", "T", "--tags", "a,b"]),
     ("apa_ask", {"id": "i", "question": "Q?", "option": ["A=yes", "B=no"], "next": ["A=open"], "free_text": True,
                  "default_on_timeout": "A"},
-     ["ask", "i", "--question", "Q?", "--option", "A=yes", "--option", "B=no", "--next", "A=open", "--free-text",
-      "--default-on-timeout", "A"]),
-    ("apa_accept", {"id": "i", "evidence": "ok"}, ["accept", "i", "--evidence", "ok"]),
+     ["ask", "i", "--question", "Q?", "--option", "A=yes", "--option", "B=no", "--next", "A=open", "--free-text"]),
+    ("apa_accept", {"id": "i", "evidence": "ok"}, ["accept", "i"]),
     ("apa_dismiss", {"id": "i", "reason": "dup"}, ["dismiss", "i", "--reason", "dup"]),
     ("apa_executors", {"project": "p1"}, ["executors", "--project", "p1"]),
     ("apa_delegate", {"parent": "a", "assignee": "owner-friend", "idempotency_key": "k"},
@@ -145,8 +145,7 @@ def test_material_commit_rejects_incomplete_calls_without_running_apa(tools, apa
     assert r["ok"] is False and why in r["error"] and not (apa / "log").exists()
 
 
-TIER2 = ["apa_decide", "apa_accept", "apa_dismiss", "apa_item_update", "apa_attach", "apa_proposals_apply", "apa_item_progress"]
-TIER1 = ["apa_propose", "apa_ask", "apa_delegate", "apa_report", "apa_dispatch", "apa_item_history", "apa_executors", "apa_material_commit"]
+DECIDE = ["apa_decide", "apa_accept", "apa_dismiss", "apa_attach", "apa_proposals_apply"]
 
 
 @pytest.fixture
@@ -156,102 +155,39 @@ def schemas():
     return {n: s for n, (s, _) in ctx.tools.items()}
 
 
-@pytest.mark.parametrize("tool", TIER2)
-def test_second_tier_tools_offer_optional_evidence_and_grant(schemas, tool):
-    sc = schemas[tool]
-    assert {"evidence", "grant"} <= set(sc["parameters"]["properties"])
-    assert not {"evidence", "grant"} & set(sc["parameters"]["required"])
-    assert "this turn" in sc["parameters"]["properties"]["evidence"]["description"]
-    assert "never" in sc["parameters"]["properties"]["evidence"]["description"].lower()
+# 原话、授权单、会话类型、超时默认都不再是参数：没有任何工具让模型填它们。
+def test_no_tool_offers_evidence_grant_session_kind_or_timeout_default(schemas):
+    for name, sc in schemas.items():
+        assert not {"evidence", "grant", "default_on_timeout"} & set(sc["parameters"]["properties"]), name
+    assert "session_kind" not in json.dumps(list(schemas.values()))
 
 
-@pytest.mark.parametrize("tool", TIER1)
-def test_first_tier_tools_have_no_evidence_or_grant(schemas, tool):
-    assert not {"evidence", "grant"} & set(schemas[tool]["parameters"]["properties"])
+# 二档工具的说明告诉模型：只有本人在 Web 放开了拍板才生效，回答本人可见可撤回；23 不重试，去问或给链接。
+@pytest.mark.parametrize("tool", DECIDE)
+def test_decide_tier_descriptions_explain_exit_23(schemas, tool):
+    d = schemas[tool]["description"]
+    assert "decide tier" in d and "exit 23" in d and "do not retry" in d and "Web link" in d
 
 
-@pytest.mark.parametrize("tool,args,argv", [
-    ("apa_decide", {"id": "i", "option": "B", "grant": "g1"}, ["decide", "i", "--option", "B", "--grant", "g1"]),
-    ("apa_accept", {"id": "i", "grant": "g1"}, ["accept", "i", "--grant", "g1"]),
-    ("apa_dismiss", {"id": "i", "grant": "g1", "reason": "dup"}, ["dismiss", "i", "--reason", "dup", "--grant", "g1"]),
-    ("apa_item_update", {"id": "i", "reason": "r", "grant": "g1"}, ["item", "update", "i", "--reason", "r", "--grant", "g1"]),
-    ("apa_item_update", {"id": "i", "reason": "r", "evidence": "原话"}, ["item", "update", "i", "--reason", "r", "--evidence", "原话"]),
-])
-def test_second_tier_passes_grant_and_evidence_through_with_session(tools, apa, tool, args, argv):
-    tools[tool](args, session_id="s7")
-    assert calls(apa) == [{"argv": argv, "session": "s7"}]
-    assert (apa / "log.harness").read_text().split() == ["hermes"]
-
-
-def test_grant_refusal_exit_23_is_exposed(tools, apa, monkeypatch):
+def test_tier_closed_exit_23_is_exposed_not_retried(tools, apa, monkeypatch):
     monkeypatch.setenv("FAKE_EXIT", "23")
-    r = json.loads(tools["apa_decide"]({"id": "i", "option": "B", "grant": "g"}, session_id="s"))
-    assert r["exit_code"] == 23 and r["ok"] is False
+    monkeypatch.setenv("FAKE_ERR", '{"code":"tier_closed","reason":"tier_closed"}')
+    r = json.loads(tools["apa_decide"]({"id": "i", "option": "B"}, session_id="s"))
+    assert r["exit_code"] == 23 and r["ok"] is False and r["stderr"]["code"] == "tier_closed" and len(calls(apa)) == 1
 
 
 def kinds(tmp):
     return (tmp / "log.kind").read_text().split()
 
 
-# ACT-HCTX-12：终端会话的 apa 调用带 APA_SESSION_KIND=direct（附录 A.5，SPIKE-SESSION-KIND）。
-@pytest.mark.parametrize("bound", [{}, {"source": "cli"}, {"source": "tui"}, {"platform": "local", "source": "local"}])
-def test_terminal_session_calls_carry_session_kind_direct(tools, apa, monkeypatch, bound):
+# 会话类型不参与判定（§14.3）：插件不再从 Hermes 的会话绑定推算它，也不设 APA_SESSION_KIND。
+@pytest.mark.parametrize("bound", [{}, {"platform": "telegram", "chat_type": "dm", "user_id": "42"}, {"platform": "telegram", "chat_type": "group"}])
+def test_plugin_does_not_report_a_session_kind(tools, apa, monkeypatch, bound):
+    monkeypatch.delenv("APA_SESSION_KIND", raising=False)
     fake_session_context(monkeypatch, **bound)
-    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "就选方案 B"}, session_id="s1")
-    assert kinds(apa) == ["direct"]
+    tools["apa_accept"]({"id": "i1"}, session_id="s1")
+    assert kinds(apa) == ["-"]
     assert calls(apa)[0]["session"] == "s1" and (apa / "log.harness").read_text().split() == ["hermes"]
-
-
-# ACT-HCTX-13：网关会话按平台给出的会话来源报：私聊 direct、群/频道/话题 group，取不到 unknown。
-@pytest.mark.parametrize("bound,want", [
-    ({"platform": "telegram", "chat_type": "dm", "user_id": "42"}, "direct"),
-    ({"platform": "telegram", "chat_type": "group", "user_id": "42"}, "group"),
-    ({"platform": "slack", "chat_type": "channel", "user_id": "U1"}, "group"),
-    ({"platform": "discord", "chat_type": "thread", "user_id": "U1"}, "group"),
-    ({"platform": "telegram", "chat_type": "dm"}, "unknown"),          # 私聊却没有发送者：看不出是谁
-    ({"platform": "telegram", "chat_type": "weird", "user_id": "42"}, "unknown"),
-    ({"platform": "telegram", "user_id": "42"}, "unknown"),            # 没有会话类型
-    ({"platform": "api_server", "chat_type": "dm", "user_id": "42"}, "unknown"),  # 非聊天入口：不替它说话
-    ({"platform": "webhook", "chat_type": "group", "user_id": "42"}, "group"),  # rule 1 first: a multi-person type is never unknown
-    ({"source": "gateway"}, "unknown"),
-])
-def test_gateway_session_kind_follows_the_platform(tools, apa, monkeypatch, bound, want):
-    fake_session_context(monkeypatch, **bound)
-    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s1")
-    assert kinds(apa) == [want]
-
-
-def test_unreadable_gateway_binding_is_unknown(tools, apa, monkeypatch):
-    import sys
-    import types
-    mod = types.ModuleType("gateway.session_context")
-    mod.get_session_env = lambda *a, **k: 1 / 0
-    monkeypatch.setitem(sys.modules, "gateway", types.ModuleType("gateway"))
-    monkeypatch.setitem(sys.modules, "gateway.session_context", mod)
-    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s1")
-    assert kinds(apa) == ["unknown"]
-
-
-def test_no_hermes_session_module_is_unknown(tools, apa, monkeypatch):
-    import sys
-    monkeypatch.setitem(sys.modules, "gateway", None)  # import raises ImportError
-    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s1")
-    assert kinds(apa) == ["unknown"]
-
-
-def test_session_kind_is_not_inherited_from_the_gateway_environment(tools, apa, monkeypatch):
-    monkeypatch.setenv("APA_SESSION_KIND", "direct")  # what a gateway started from a terminal would carry
-    fake_session_context(monkeypatch, platform="telegram", chat_type="group", user_id="42")
-    tools["apa_decide"]({"id": "i1", "option": "B", "evidence": "x"}, session_id="s1")
-    assert kinds(apa) == ["group"]
-
-
-def test_every_tool_schema_has_no_session_kind_parameter():
-    ctx = Ctx()
-    load_tools().register(ctx)
-    for name, (schema, _) in ctx.tools.items():
-        assert not any("kind" in p and "session" in p for p in schema["parameters"]["properties"]), name
-    assert "session_kind" not in json.dumps([s for s, _ in ctx.tools.values()])
 
 
 # ---- 执行者与委派记录（§6.17）：执行者 id 由插件按派法生成；句柄只认 Hermes 自己的形状 ----
@@ -348,23 +284,22 @@ def stdin_text(tmp):
 
 @pytest.mark.parametrize("tool,args,argv", [
     ("apa_attach", {"id": "p1", "to": "i9", "reason": "same topic", "evidence": "补到 i9"},
-     ["attach", "p1", "--to", "i9", "--reason", "same topic", "--evidence", "补到 i9"]),
+     ["attach", "p1", "--to", "i9", "--reason", "same topic"]),
     ("apa_item_progress", {"id": "i1", "text": "done A", "on": "2026-11-01", "grant": "g1"},
-     ["item", "progress", "i1", "--text", "done A", "--on", "2026-11-01", "--grant", "g1"]),
+     ["item", "progress", "i1", "--text", "done A", "--on", "2026-11-01"]),
     ("apa_proposals_apply", {"recommended": True, "source": "s1", "project": "p1", "evidence": "都按建议"},
-     ["proposals", "apply", "--recommended", "--source", "s1", "--project", "p1", "--evidence", "都按建议"]),
+     ["proposals", "apply", "--recommended", "--source", "s1", "--project", "p1"]),
 ])
 def test_chat_dispose_tools_map_to_cli_with_session(tools, apa, tool, args, argv):
     tools[tool](args, session_id="s3")
     assert calls(apa) == [{"argv": argv, "session": "s3"}]
-    assert kinds(apa) == ["direct"] or kinds(apa) == ["unknown"]
 
 
 def test_proposals_apply_list_goes_through_stdin_not_a_file(tools, apa, monkeypatch):
     monkeypatch.setenv("FAKE_OUT", '{"results":[{"id":"a","do":"dismiss","ok":true}]}')
     acts = [{"id": "a", "do": "dismiss", "reason": "no"}, {"id": "b", "do": "attach", "to": "i2"}, {"id": "c", "do": "accept"}]
-    r = json.loads(tools["apa_proposals_apply"]({"actions": acts, "evidence": "第 1 条忽略，其余按建议"}, session_id="s"))
-    assert calls(apa)[0]["argv"] == ["proposals", "apply", "--file", "-", "--evidence", "第 1 条忽略，其余按建议"]
+    r = json.loads(tools["apa_proposals_apply"]({"actions": acts}, session_id="s"))
+    assert calls(apa)[0]["argv"] == ["proposals", "apply", "--file", "-"]
     assert json.loads(stdin_text(apa)) == {"actions": acts}
     assert r["stdout"]["results"][0]["ok"] is True
 
@@ -382,45 +317,5 @@ def test_proposals_apply_rejects_bad_calls_without_running_apa(tools, apa, args)
 
 def test_chat_dispose_refusal_exit_23_is_exposed_not_retried(tools, apa, monkeypatch):
     monkeypatch.setenv("FAKE_EXIT", "23")
-    r = json.loads(tools["apa_attach"]({"id": "p", "to": "i", "evidence": "x"}, session_id="s"))
+    r = json.loads(tools["apa_attach"]({"id": "p", "to": "i"}, session_id="s"))
     assert r["exit_code"] == 23 and len(calls(apa)) == 1
-
-
-# 附录 A.5 五条顺序；APA_DIRECT_PLATFORMS 只在本人声明时生效。
-@pytest.mark.parametrize("env,bound,want", [
-    ("telegram", {"platform": "telegram", "chat_type": "group", "user_id": "1"}, "group"),   # 名单里的平台加多人类型仍是 group
-    ("local,cli", {"platform": "local", "source": "local", "chat_type": "thread"}, "group"),  # 终端加多人类型也是 group
-    ("Bot-Chat", {"platform": "bot-chat"}, "direct"),                                          # 名单（不分大小写）
-    (" a , bot ", {"source": "bot", "platform": "x"}, "direct"),                              # 来源在名单里
-    ("api_server", {"platform": "api_server"}, "direct"),                                      # 本人声明的入口
-    ("other", {"platform": "api_server"}, "unknown"),
-    ("", {"platform": "bot-chat"}, "unknown"),                                                  # 不设：与此前相同
-    ("other", {"platform": "telegram", "chat_type": "dm"}, "unknown"),                         # 第 4 条要发送者
-    ("other", {"platform": "telegram", "chat_type": "dm", "user_id": "7"}, "direct"),
-])
-def test_session_kind_order_with_direct_platforms(tools, apa, monkeypatch, env, bound, want):
-    monkeypatch.setenv("APA_DIRECT_PLATFORMS", env)
-    fake_session_context(monkeypatch, **bound)
-    tools["apa_accept"]({"id": "i", "evidence": "x"}, session_id="s")
-    assert kinds(apa) == [want]
-
-
-# ACT-CHT-05：名单里的平台加多人会话，三个代答工具都报 group，内核的 23 原样交回、不重试。
-@pytest.mark.parametrize("tool,args", [
-    ("apa_attach", {"id": "p", "to": "i", "evidence": "补到 i"}),
-    ("apa_item_progress", {"id": "i", "text": "t", "evidence": "记一条"}),
-    ("apa_proposals_apply", {"recommended": True, "evidence": "按建议处理"}),
-])
-def test_chat_dispose_tools_in_a_group_session_report_group_and_expose_exit_23(tools, apa, monkeypatch, tool, args):
-    monkeypatch.setenv("APA_DIRECT_PLATFORMS", "telegram")
-    monkeypatch.setenv("FAKE_EXIT", "23")
-    monkeypatch.setenv("FAKE_ERR", '{"code":"session_not_direct"}')
-    fake_session_context(monkeypatch, platform="telegram", chat_type="group", user_id="42")
-    r = json.loads(tools[tool](args, session_id="s"))
-    assert kinds(apa) == ["group"] and r["exit_code"] == 23 and r["stderr"]["code"] == "session_not_direct" and len(calls(apa)) == 1
-
-
-@pytest.mark.parametrize("tool", ["apa_attach", "apa_item_progress", "apa_proposals_apply"])
-def test_chat_dispose_descriptions_tell_the_model_what_to_do_on_exit_23(schemas, tool):
-    d = schemas[tool]["description"]
-    assert "this turn" in d and "evidence" in d and "exit 23" in d and "do not rephrase and retry" in d and "Web link" in d

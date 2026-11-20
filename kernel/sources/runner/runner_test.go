@@ -27,7 +27,7 @@ import (
 
 var (
 	bg    = context.Background()
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	t0    = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 )
 

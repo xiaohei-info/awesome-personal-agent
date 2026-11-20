@@ -86,60 +86,6 @@ func types(es []eventlog.Entry) (out []string) {
 	return
 }
 
-// flow-web-only：默认类别、权限上限 read、白名单与人格为空；规则扩展落入新版本。
-func TestDefaultsAndWebOnlyRules(t *testing.T) {
-	s := open(t)
-	v, p := current(t, s)
-	if v != 0 || p.PermissionCap.Default != PermRead || p.Persona != "" ||
-		len(p.ForwardAllowlist) != 0 || len(p.ChannelAnswerers) != 0 {
-		t.Fatalf("defaults: v=%d %+v", v, p)
-	}
-	want := []string{CategoryExternalCommitment, CategoryFunds, CategoryIrreversible, CategoryPermissionChange, CategorySpecActivation}
-	if strings.Join(p.WebOnly.Categories, ",") != strings.Join(want, ",") {
-		t.Fatalf("categories = %v", p.WebOnly.Categories)
-	}
-
-	v = must(t, s, func(p *Policy) error {
-		p.WebOnly.Rules = append(p.WebOnly.Rules, WebOnlyRule{Kind: "decision", Tag: "tax", Category: CategoryFunds})
-		return nil
-	})
-	if v != 1 {
-		t.Fatalf("version = %d", v)
-	}
-	_, p = current(t, s)
-	if len(p.WebOnly.Rules) != 1 || p.WebOnly.Rules[0].Tag != "tax" {
-		t.Fatalf("rules = %+v", p.WebOnly.Rules)
-	}
-
-	for name, bad := range map[string]func(*Policy) error{
-		"rule matches nothing": func(p *Policy) error { p.WebOnly.Rules = []WebOnlyRule{{Category: CategoryFunds}}; return nil },
-		"unknown category":     func(p *Policy) error { p.WebOnly.Rules = []WebOnlyRule{{Kind: "x", Category: "nope"}}; return nil },
-		"no categories":        func(p *Policy) error { p.WebOnly.Categories = nil; return nil },
-	} {
-		if _, err := update(t, s, owner, bad); !errors.Is(err, ErrInvalid) {
-			t.Errorf("%s: err = %v", name, err)
-		}
-	}
-	if v, _ := current(t, s); v != 1 {
-		t.Fatalf("rejected change moved version to %d", v)
-	}
-}
-
-// web_only 分类只能在 Web 由本人改：agent、能力包、CLI 一律退出码 20，且不留版本与事件。
-func TestOnlyOwnerOnWebCanWrite(t *testing.T) {
-	s := open(t)
-	for _, a := range []domain.Actor{agent, pack, cli} {
-		_, err := update(t, s, a, func(p *Policy) error { p.Persona = "pirate"; return nil })
-		var de *domain.Error
-		if !errors.As(err, &de) || de.Code != domain.CodeWebOnly || de.ExitCode() != domain.ExitWebOnly {
-			t.Fatalf("%v: err = %v", a.Via, err)
-		}
-	}
-	if v, _ := current(t, s); v != 0 || len(events(t, s)) != 0 {
-		t.Fatal("rejected write left a version or event")
-	}
-}
-
 // flow-forward-allowlist：两份白名单默认空、相互独立，变更立即生效并记两类事件。
 func TestAllowlistsIndependent(t *testing.T) {
 	s := open(t)
@@ -171,7 +117,7 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 	s := open(t)
 	steps := []func(*Policy) error{
 		func(p *Policy) error { p.Disturb.Routes["decision:urgent"] = "wake"; return nil },
-		func(p *Policy) error { p.MaterialWrite.Kinds["minutes"] = WriteProposed; return nil },
+		func(p *Policy) error { p.AgentTier.ByAgent["agent_a"] = AgentAllowance{Tier: AllowDecide}; return nil },
 		func(p *Policy) error { p.PermissionCap.ByHarness["h1"] = PermEdit; return nil },
 		func(p *Policy) error {
 			p.GenerateEndpoint = GenerateEndpoint{URL: "http://127.0.0.1:9/v1", Model: "m", APIKey: "sk-secret"}
@@ -184,7 +130,7 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 		}
 	}
 	_, p := current(t, s)
-	if p.Disturb.Routes["decision:urgent"] != "wake" || p.MaterialWrite.Kinds["minutes"] != WriteProposed ||
+	if p.Disturb.Routes["decision:urgent"] != "wake" || p.Allowance("agent_a").Tier != AllowDecide ||
 		p.PermissionCap.ByHarness["h1"] != PermEdit || p.GenerateEndpoint.APIKey != "sk-secret" {
 		t.Fatalf("policy = %+v", p)
 	}
@@ -214,9 +160,8 @@ func TestEachChangeIsNewVersionWithEvent(t *testing.T) {
 		"cap":      func(p *Policy) error { p.PermissionCap.Default = "root"; return nil },
 		"route":    func(p *Policy) error { p.Disturb.Routes["mystery"] = "x"; return nil },
 		"priority": func(p *Policy) error { p.Disturb.Routes["decision:meh"] = "x"; return nil },
-		"material": func(p *Policy) error { p.MaterialWrite.Default = "maybe"; return nil },
+		"tier":     func(p *Policy) error { p.AgentTier.ByAgent["a"] = AgentAllowance{Tier: "boss"}; return nil },
 		"url":      func(p *Policy) error { p.GenerateEndpoint.URL = "ftp://x"; return nil },
-		"timeout":  func(p *Policy) error { p.ScreeningTimeoutMs = 0; return nil },
 		"mutate":   func(p *Policy) error { return errors.New("boom") },
 	} {
 		if _, err := update(t, s, owner, bad); err == nil {
@@ -454,7 +399,7 @@ func TestLegacyModelEndpointReadsAsGenerateEndpoint(t *testing.T) {
 	v, p := current(t, s)
 	g := p.GenerateEndpoint
 	if v != 1 || g.URL != "http://127.0.0.1:9/v1" || g.Model != "old-m" || g.APIKey != "sk-old" || g.Locality != LocalityExternal ||
-		p.JudgeEndpoint != nil || p.ScreeningTimeoutMs != 45000 {
+		p.JudgeEndpoint != nil {
 		t.Fatalf("v=%d policy=%+v", v, p)
 	}
 	if d := storedDocs(t, s); len(d) != 1 || d[0] != legacyDoc {
@@ -474,10 +419,13 @@ func TestSaveOverLegacyWritesNewFieldsAndKeepsOldVersion(t *testing.T) {
 	if err := json.Unmarshal([]byte(d[1]), &m); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := m["model_endpoint"]; ok {
-		t.Fatalf("new version still has model_endpoint: %s", d[1])
+	// 旧形状与已取消的段（初筛超时等）不再写进新版本。
+	for _, k := range []string{"model_endpoint", "screening_timeout_ms", "web_only", "material_write"} {
+		if _, ok := m[k]; ok {
+			t.Fatalf("new version still has %s: %s", k, d[1])
+		}
 	}
-	for _, k := range []string{"judge_endpoint", "generate_endpoint", "screening_timeout_ms"} {
+	for _, k := range []string{"judge_endpoint", "generate_endpoint", "agent_tier"} {
 		if _, ok := m[k]; !ok {
 			t.Fatalf("new version lacks %s: %s", k, d[1])
 		}
@@ -495,7 +443,7 @@ func TestSaveOverLegacyWritesNewFieldsAndKeepsOldVersion(t *testing.T) {
 func TestEndpointDefaultsAndValidation(t *testing.T) {
 	s := open(t)
 	_, p := current(t, s)
-	if p.JudgeEndpoint != nil || p.GenerateEndpoint.URL != "" || p.ScreeningTimeoutMs != 30000 {
+	if p.JudgeEndpoint != nil || p.GenerateEndpoint.URL != "" {
 		t.Fatalf("defaults = %+v", p)
 	}
 	must(t, s, func(p *Policy) error {
@@ -523,7 +471,6 @@ func TestEndpointDefaultsAndValidation(t *testing.T) {
 		"judge batch":      func(p *Policy) { p.JudgeEndpoint.MaxBatch = -1 },
 		"gen url":          func(p *Policy) { p.GenerateEndpoint.URL = "ftp://x" },
 		"gen locality":     func(p *Policy) { p.GenerateEndpoint.Locality = "nearby" },
-		"timeout":          func(p *Policy) { p.ScreeningTimeoutMs = 0 },
 	} {
 		if _, err := update(t, s, owner, func(p *Policy) error { bad(p); return nil }); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: err = %v", name, err)

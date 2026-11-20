@@ -61,11 +61,13 @@ func (noJudge) JudgeBatch(context.Context, []direct.JudgeCall) ([]direct.Verdict
 
 // kernel 是真实账本、命令管线、授权与来源路由，经 httptest 暴露；CLI 经真实 HTTP 调它。
 type kernel struct {
-	t   *testing.T
-	st  *store.Store
-	au  *auth.Auth
-	wh  *webhook.Service
-	url string
+	t    *testing.T
+	st   *store.Store
+	au   *auth.Auth
+	wh   *webhook.Service
+	url  string
+	web  *http.Cookie // 本人的 Web 会话：来源登记、接收密钥是 3b，只有它能做
+	csrf string
 }
 
 func newKernel(t *testing.T) *kernel {
@@ -112,7 +114,71 @@ func newKernel(t *testing.T) *kernel {
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return &kernel{t, st, au, wh, ts.URL}
+	k := &kernel{t: t, st: st, au: au, wh: wh, url: ts.URL}
+	const pw = "correct horse battery"
+	if err := st.Update(context.Background(), func(tx *store.Tx) error { return core.SetOwnerPassword(tx, pw) }); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]string{"pass" + "word": pw})
+	resp, err := http.Post(ts.URL+"/v1/auth/login", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		CSRF string `json:"csrf_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || resp.StatusCode != 200 || len(resp.Cookies()) == 0 {
+		t.Fatalf("login: %d %v", resp.StatusCode, err)
+	}
+	k.web, k.csrf = resp.Cookies()[0], out.CSRF
+	return k
+}
+
+// owner 以本人 Web 会话（登录即刚验过口令）发请求，返回状态与响应体。
+func (k *kernel) owner(method, path, body string) (int, []byte) {
+	k.t.Helper()
+	req, _ := http.NewRequest(method, k.url+path, strings.NewReader(body))
+	req.AddCookie(k.web)
+	req.Header.Set(core.CSRFHeader, k.csrf)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		k.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var b bytes.Buffer
+	_, _ = b.ReadFrom(resp.Body)
+	return resp.StatusCode, b.Bytes()
+}
+
+// ownerOK 同 owner，状态须是 2xx，响应体解进 v（v 可为 nil）。
+func (k *kernel) ownerOK(method, path, body string, v any) {
+	k.t.Helper()
+	code, b := k.owner(method, path, body)
+	if code/100 != 2 || (v != nil && json.Unmarshal(b, v) != nil) {
+		k.t.Fatalf("%s %s: %d %s", method, path, code, b)
+	}
+}
+
+// rulesAgent 签一把归属 Agent 的 delegate 钥匙，本人把它放开到「连日常规矩也替我改」：来源启停与改名是 3a。
+func (k *kernel) rulesAgent() string {
+	k.t.Helper()
+	var secret string
+	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
+		_, s, err := k.au.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_r", Harness: "h"})
+		if err != nil {
+			return err
+		}
+		secret = s
+		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent["agent_r"] = policy.AgentAllowance{Tier: policy.AllowRules}
+			return nil
+		})
+		return err
+	}); err != nil {
+		k.t.Fatal(err)
+	}
+	return secret
 }
 
 func (k *kernel) token(kind auth.Kind) string {
@@ -134,9 +200,9 @@ type result struct {
 
 func (k *kernel) apa(token string, args ...string) result {
 	k.t.Helper()
-	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": k.t.TempDir()}
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_HOME": k.t.TempDir()}
 	var out, errb bytes.Buffer
-	code := client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
+	code := client.Main(args, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return result{code, out.String(), errb.String()}
 }
@@ -164,7 +230,7 @@ func decode(t *testing.T, r result, v any) {
 	}
 }
 
-// ACT-CMD-01：delegate 带自定义命令登记来源得 20 并留痕，来源未登记；ACT-CMD-05：附带拉取程序和 webhook 可登记。
+// ACT-CMD-01：登记来源是 3b：Agent 钥匙带不带自定义命令都得 20 并留痕，来源未登记；ACT-CMD-05：本人可登记附带拉取程序和 webhook。
 func TestAddRejectsCustomCommandAndAcceptsBundledProgram(t *testing.T) {
 	k := newKernel(t)
 	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
@@ -186,18 +252,19 @@ func TestAddRejectsCustomCommandAndAcceptsBundledProgram(t *testing.T) {
 		t.Fatalf("rejected source was stored: %+v", list.Sources)
 	}
 
+	for _, tok := range []string{dlg, obs} {
+		if r := k.apa(tok, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"); r.code != domain.ExitWebOnly {
+			t.Fatalf("Agent key registering a bundled source: %+v", r)
+		}
+	}
 	var feed, hook domain.Source
-	decode(t, k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60",
-		"--config", `{"url":"http://x"}`), &feed)
-	decode(t, k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &hook)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_feed","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60,"config":{"url":"http://x"}}`, &feed)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_hook","type":"webhook","source_type":"forge","config":{"scheme":"shared"}}`, &hook)
 	if feed.Command != "fetch-feed" || !feed.Enabled || hook.Type != domain.SourceWebhook || hook.SourceKind != "forge" {
 		t.Fatalf("registered: %+v %+v", feed, hook)
 	}
-	if r := k.apa(obs, "source", "add", "--id", "src_o", "--type", "webhook"); r.code != domain.ExitPermissionDenied {
-		t.Fatalf("observer add: %+v", r)
-	}
-	if r := k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"); r.code != domain.ExitConflict {
-		t.Fatalf("duplicate: %+v", r)
+	if code, _ := k.owner("POST", "/v1/sources", `{"id":"src_feed","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`); code != http.StatusConflict {
+		t.Fatalf("duplicate: %d", code)
 	}
 	for _, args := range [][]string{
 		{"source", "add"}, {"source", "add", "--id", "src_a", "--timeout", "x"}, {"source", "add", "--id", "src_a", "--config", "{"},
@@ -209,11 +276,15 @@ func TestAddRejectsCustomCommandAndAcceptsBundledProgram(t *testing.T) {
 	}
 }
 
-// list/show 对 observer 开放；ACT-SRC-10：disable/enable 翻转 enabled，其余字段不动。
+// list/show 对 observer 开放；ACT-SRC-10：disable/enable 翻转 enabled，其余字段不动。启停是 3a：只整理的 delegate 得 23，
+// 放开到日常规矩的 Agent 可以做。
 func TestListShowEnableDisable(t *testing.T) {
 	k := newKernel(t)
-	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
-	k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60")
+	dlg, obs := k.rulesAgent(), k.token(auth.Observer)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_feed","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`, nil)
+	if r := k.apa(k.token(auth.Delegate), "source", "disable", "src_feed"); r.code != domain.ExitTierClosed {
+		t.Fatalf("organize-only disable: %+v", r)
+	}
 
 	var s domain.Source
 	decode(t, k.apa(dlg, "source", "disable", "src_feed"), &s)
@@ -248,21 +319,26 @@ func TestListShowEnableDisable(t *testing.T) {
 	}
 }
 
-// ACT-HOOK-01：create 返回 URL 与只显示一次的密钥并记 Event，observer 得 4；ACT-HOOK-11：rotate 换密钥，并存期内新旧都收，之后旧的失效。
-// ingests 展示原始 payload 与状态；ACT-HOOK-10：replay 重放同一条入站记录，代数加一并记 Event。
+// ACT-HOOK-01：接收密钥是 3b：Agent 钥匙经 CLI create/rotate 都得 20；本人 create 返回 URL 与只显示一次的密钥并记 Event；
+// ACT-HOOK-11：rotate 换密钥，并存期内新旧都收，之后旧的失效。ingests 展示原始 payload 与状态；
+// ACT-HOOK-10：replay 是一档，delegate 重放同一条入站记录，代数加一并记 Event。
 func TestWebhookCreateRotateIngestsReplay(t *testing.T) {
 	k := newKernel(t)
 	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
-	k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--config", `{"scheme":"shared"}`)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_hook","type":"webhook","config":{"scheme":"shared"}}`, nil)
 
-	if r := k.apa(obs, "source", "webhook", "create", "src_hook"); r.code != domain.ExitPermissionDenied {
-		t.Fatalf("observer create: %+v", r)
+	for _, args := range [][]string{{"source", "webhook", "create", "src_hook"}, {"source", "webhook", "rotate", "src_hook"}} {
+		for _, tok := range []string{obs, dlg} {
+			if r := k.apa(tok, args...); r.code != domain.ExitWebOnly {
+				t.Fatalf("%v by an Agent key: %+v", args, r)
+			}
+		}
 	}
 	var k1 struct {
 		Secret, URL string
 		Rotated     bool
 	}
-	decode(t, k.apa(dlg, "source", "webhook", "create", "src_hook"), &k1)
+	k.ownerOK("POST", "/v1/sources/src_hook/webhook", "", &k1)
 	if !strings.HasPrefix(k1.Secret, "apa_whk_") || k1.URL != "/ingest/src_hook" || k1.Rotated || k.events("source.webhook_key_created") != 1 {
 		t.Fatalf("create: %+v", k1)
 	}
@@ -279,7 +355,7 @@ func TestWebhookCreateRotateIngestsReplay(t *testing.T) {
 		Secret  string
 		Rotated bool
 	}
-	decode(t, k.apa(dlg, "source", "webhook", "rotate", "src_hook"), &k2)
+	k.ownerOK("POST", "/v1/sources/src_hook/webhook", "", &k2)
 	if !k2.Rotated || k2.Secret == k1.Secret || k.events("source.webhook_key_rotated") != 1 {
 		t.Fatalf("rotate: %+v", k2)
 	}
@@ -310,14 +386,14 @@ func TestWebhookCreateRotateIngestsReplay(t *testing.T) {
 		t.Fatalf("replay: %+v", rp)
 	}
 	k.wh.Wait()
-	for _, args := range [][]string{{"source", "replay", "ing_none"}, {"source", "ingests", "src_none"}, {"source", "webhook", "create", "src_none"}} {
+	for _, args := range [][]string{{"source", "replay", "ing_none"}, {"source", "ingests", "src_none"}} {
 		if r := k.apa(dlg, args...); r.code != domain.ExitNotFound {
 			t.Fatalf("%v: %+v", args, r)
 		}
 	}
-	k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60")
-	if r := k.apa(dlg, "source", "webhook", "create", "src_feed"); r.code != domain.ExitUsage {
-		t.Fatalf("webhook key for pull source: %+v", r)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_feed","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`, nil)
+	if code, b := k.owner("POST", "/v1/sources/src_feed/webhook", ""); code != http.StatusBadRequest {
+		t.Fatalf("webhook key for pull source: %d %s", code, b)
 	}
 	for _, args := range [][]string{{"source", "webhook"}, {"source", "webhook", "bogus", "src_hook"}, {"source", "webhook", "create"}, {"source", "ingests"}, {"source", "replay"}} {
 		if r := k.apa(dlg, args...); r.code != domain.ExitUsage {
@@ -326,14 +402,14 @@ func TestWebhookCreateRotateIngestsReplay(t *testing.T) {
 	}
 }
 
-// 附录 B.1 `apa source webhook revoke`：delegate 吊销该来源全部接收密钥（含宽限期内的旧密钥）并记 Event，之后接收被拒；observer 得 4。
+// 附录 B.1 `apa source webhook revoke`：吊销是 3b，Agent 钥匙都得 20；本人吊销该来源全部接收密钥（含宽限期内的旧密钥）并记 Event，之后接收被拒。
 func TestWebhookRevokeDropsEveryKey(t *testing.T) {
 	k := newKernel(t)
 	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
-	k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--config", `{"scheme":"shared"}`)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_hook","type":"webhook","config":{"scheme":"shared"}}`, nil)
 	var k1, k2 struct{ Secret string }
-	decode(t, k.apa(dlg, "source", "webhook", "create", "src_hook"), &k1)
-	decode(t, k.apa(dlg, "source", "webhook", "rotate", "src_hook"), &k2)
+	k.ownerOK("POST", "/v1/sources/src_hook/webhook", "", &k1)
+	k.ownerOK("POST", "/v1/sources/src_hook/webhook", "", &k2)
 	recv := func(key, delivery string) int {
 		return k.wh.Receive(context.Background(), webhook.Request{SourceID: "src_hook",
 			Header: map[string]string{"X-Hook-Key": key, "X-Delivery": delivery}, Body: []byte(`{"n":1}`)}).Status
@@ -342,27 +418,29 @@ func TestWebhookRevokeDropsEveryKey(t *testing.T) {
 		t.Fatal("both keys must work before revoke")
 	}
 	k.wh.Wait()
-	if r := k.apa(obs, "source", "webhook", "revoke", "src_hook"); r.code != domain.ExitPermissionDenied {
-		t.Fatalf("observer revoke: %+v", r)
+	for _, tok := range []string{obs, dlg} {
+		if r := k.apa(tok, "source", "webhook", "revoke", "src_hook"); r.code != domain.ExitWebOnly {
+			t.Fatalf("Agent key revoke: %+v", r)
+		}
 	}
 	var rv struct{ Revoked int }
-	decode(t, k.apa(dlg, "source", "webhook", "revoke", "src_hook"), &rv)
+	k.ownerOK("DELETE", "/v1/sources/src_hook/webhook", "", &rv)
 	if rv.Revoked != 2 || k.events("source.webhook_key_revoked") == 0 {
 		t.Fatalf("revoke: %+v", rv)
 	}
 	if recv(k1.Secret, "d3") == 200 || recv(k2.Secret, "d4") == 200 {
 		t.Fatal("revoked keys must be rejected")
 	}
-	if r := k.apa(dlg, "source", "webhook", "revoke", "src_none"); r.code != domain.ExitNotFound {
-		t.Fatalf("revoke unknown source: %+v", r)
+	if code, _ := k.owner("DELETE", "/v1/sources/src_none/webhook", ""); code != http.StatusNotFound {
+		t.Fatalf("revoke unknown source: %d", code)
 	}
 }
 
 // `apa source rejects <id>`：observer 可读被拒收的输出行，--after/--limit 翻页；未登记来源得 3，缺 id 或多余参数得 2。
 func TestRejectsListsAndPages(t *testing.T) {
 	k := newKernel(t)
-	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
-	k.apa(dlg, "source", "add", "--id", "src_feed", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60")
+	obs := k.token(auth.Observer)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_feed","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`, nil)
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
 		for i, why := range []string{"invalid JSON", "missing type"} {
 			if _, err := tx.Exec(`INSERT INTO sources_runner_reject (source_id, run_id, line, reason, raw, at) VALUES (?,?,?,?,?,?)`, "src_feed", "run_1", i+1, why, "raw"+why, 1); err != nil {
@@ -404,7 +482,7 @@ func TestRejectsListsAndPages(t *testing.T) {
 }
 
 // 验收 ACT-OBD-11：`apa source add --default-project` 登记成功，show 显示默认项目、本机范围 full、外部范围未选择；
-// 默认项目不存在时返回 not_found，不静默丢弃。
+// 默认项目不存在时返回 not_found，不静默丢弃。登记是 3b：CLI 的 Agent 钥匙得 20，本人经 Web 登记。
 func TestSourceAddWithDefaultProject(t *testing.T) {
 	k := newKernel(t)
 	dlg := k.token(auth.Delegate)
@@ -415,12 +493,16 @@ func TestSourceAddWithDefaultProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := []string{"source", "add", "--id", "src_rss", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"}
-	if r := k.apa(dlg, append(base, "--default-project", "nope")...); r.code != domain.ExitNotFound {
-		t.Fatalf("unknown project: %+v", r)
+	if r := k.apa(dlg, append(base, "--default-project", "acc-home")...); r.code != domain.ExitWebOnly {
+		t.Fatalf("Agent key add: %+v", r)
 	}
-	if r := k.apa(dlg, append(base, "--default-project", "acc-home")...); r.code != 0 {
-		t.Fatalf("add: %+v", r)
+	reg := func(prj string) string {
+		return `{"id":"src_rss","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60,"default_project":"` + prj + `"}`
 	}
+	if code, _ := k.owner("POST", "/v1/sources", reg("nope")); code != http.StatusNotFound {
+		t.Fatalf("unknown project: %d", code)
+	}
+	k.ownerOK("POST", "/v1/sources", reg("acc-home"), nil)
 	var s domain.Source
 	decode(t, k.apa(k.token(auth.Observer), "source", "show", "src_rss"), &s)
 	if s.DefaultProject != "acc-home" || s.Outbound.Local != "full" || s.Outbound.External != nil {
@@ -428,13 +510,12 @@ func TestSourceAddWithDefaultProject(t *testing.T) {
 	}
 }
 
-// ACT-BKL-02、ACT-BKL-04：`apa source backlog list` 列出积压且旧原因原样；`rules` 缺本人原话得 23、observer 得 4，积压不变；
-// 带原话时返回 attached/disposed/remaining（此内核没有来源规则，全部留在积压里）。
+// ACT-BKL-02、ACT-BKL-04：`apa source backlog list` 列出积压且旧原因原样；`rules` 是一档：observer 得 4、积压不变，
+// delegate 直接跑，返回 attached/disposed/remaining（此内核没有来源规则，全部留在积压里）。
 func TestBacklogListAndRulesCommands(t *testing.T) {
 	k := newKernel(t)
 	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
-	var hook domain.Source
-	decode(t, k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &hook)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_hook","type":"webhook","source_type":"forge","config":{"scheme":"shared"}}`, nil)
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
 		for i, row := range []struct{ disp, reason string }{{"unjudged", "undecided"}, {"unjudged", ""}, {"expired", ""}, {"proposed", ""}} {
 			if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
@@ -465,15 +546,6 @@ func TestBacklogListAndRulesCommands(t *testing.T) {
 		t.Fatalf("list --source: %+v", list)
 	}
 
-	// 不带 --evidence：直接用 client 跑，k.apa 总是带原话。
-	noWords := func(token, step string) int {
-		vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": t.TempDir()}
-		return client.Main([]string{"source", "backlog", step}, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
-			Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, HTTP: http.DefaultClient})
-	}
-	if code := noWords(dlg, "rules"); code != domain.ExitBasisRequired {
-		t.Fatalf("rules without words: %d", code)
-	}
 	if r := k.apa(obs, "source", "backlog", "rules"); r.code != domain.ExitPermissionDenied {
 		t.Fatalf("observer rules: %+v", r)
 	}
@@ -482,19 +554,16 @@ func TestBacklogListAndRulesCommands(t *testing.T) {
 	if res.Attached != 0 || res.Disposed != 0 || res.Remaining != 3 {
 		t.Fatalf("rules: %+v", res)
 	}
-	// ACT-BKL-16：影子打分同样需要本人原话；没有判断端点时被拒，退出码 6，不外呼（noJudge 一调就 panic）。
+	// ACT-BKL-16：影子打分同为一档；没有判断端点时被拒，退出码 6，不外呼（noJudge 一调就 panic）。
 	if r := k.apa(obs, "source", "backlog", "score"); r.code != domain.ExitPermissionDenied {
 		t.Fatalf("observer score: %+v", r)
 	}
 	if r := k.apa(dlg, "source", "backlog", "score"); r.code != domain.ExitConflict || !strings.Contains(r.out+r.errOut, "judge endpoint") {
 		t.Fatalf("score without a judge endpoint: %+v", r)
 	}
-	// 放开重判（第 4 步）同样只接受本人原话；observer 被拒，且在碰账本之前（noJudge 一调就 panic）。
+	// 放开重判（第 4 步）：observer 被拒，且在碰账本之前（noJudge 一调就 panic）。
 	if r := k.apa(obs, "source", "backlog", "rejudge", "--limit", "3"); r.code != domain.ExitPermissionDenied {
 		t.Fatalf("observer rejudge: %+v", r)
-	}
-	if code := noWords(dlg, "rejudge"); code != domain.ExitBasisRequired {
-		t.Fatalf("rejudge without words: %d", code)
 	}
 	for _, args := range [][]string{{"source", "backlog"}, {"source", "backlog", "rejudge", "--limit", "-1"}, {"source", "backlog", "rules", "--limit", "3"},
 		{"source", "backlog", "list", "extra"}, {"source", "backlog", "score", "--sort", "score"}, {"source", "backlog", "list", "--sort", "name"}} {
@@ -507,9 +576,9 @@ func TestBacklogListAndRulesCommands(t *testing.T) {
 // ACT-BKL-06：`backlog list --sort score` 把各来源的积压合起来按分数从高到低排，每条带分数，没有分数的在最后。
 func TestBacklogListSortsByScoreAcrossSources(t *testing.T) {
 	k := newKernel(t)
-	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
+	obs := k.token(auth.Observer)
 	for _, id := range []string{"src_a", "src_b"} {
-		decode(t, k.apa(dlg, "source", "add", "--id", id, "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &domain.Source{})
+		k.ownerOK("POST", "/v1/sources", `{"id":"`+id+`","type":"webhook","source_type":"forge","config":{"scheme":"shared"}}`, nil)
 	}
 	scores := map[string]*float64{"a1": ptr(0.40), "a2": nil, "b1": ptr(0.90), "b2": ptr(0.05)}
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
@@ -553,12 +622,12 @@ func TestBacklogListSortsByScoreAcrossSources(t *testing.T) {
 
 func ptr(f float64) *float64 { return &f }
 
-// ACT-RST-03、05、06、09：`apa source backlog restore --dry-run` 是 observer 可用的只读预览；执行缺本人原话得 23、observer 得 4；
-// 带原话放回 1 条旧级联忽略的事件，再放回得 0 条。
+// ACT-RST-03、05、06、09：`apa source backlog restore --dry-run` 是 observer 可用的只读预览；执行是一档：observer 得 4，
+// delegate 放回 1 条旧级联忽略的事件，再放回得 0 条。
 func TestBacklogRestoreCommand(t *testing.T) {
 	k := newKernel(t)
 	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
-	decode(t, k.apa(dlg, "source", "add", "--id", "src_hook", "--type", "webhook", "--source-type", "forge", "--config", `{"scheme":"shared"}`), &domain.Source{})
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_hook","type":"webhook","source_type":"forge","config":{"scheme":"shared"}}`, nil)
 	at := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
 		if _, err := tx.Exec(`INSERT INTO sources_runner_event (dedupe_domain, event_id, id, source_id, run_id, type, subject, summary, detail, link, occurred_at,
@@ -576,11 +645,6 @@ func TestBacklogRestoreCommand(t *testing.T) {
 	restore := func(token string, extra ...string) result {
 		return k.apa(token, append(append([]string{"source", "backlog", "restore"}, win...), extra...)...)
 	}
-	noWords := func(token string) int {
-		vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": t.TempDir()}
-		return client.Main(append([]string{"source", "backlog", "restore"}, win...), client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
-			Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, HTTP: http.DefaultClient})
-	}
 
 	var pv inbound.RestorePreview
 	decode(t, restore(obs, "--dry-run"), &pv)
@@ -593,9 +657,6 @@ func TestBacklogRestoreCommand(t *testing.T) {
 	}
 	if r := restore(obs, "--dry-run", "--source", "nope"); r.code != domain.ExitNotFound {
 		t.Fatalf("unknown source: %+v", r)
-	}
-	if code := noWords(dlg); code != domain.ExitBasisRequired {
-		t.Fatalf("without words: %d", code)
 	}
 	if r := restore(obs); r.code != domain.ExitPermissionDenied {
 		t.Fatalf("observer: %+v", r)
@@ -632,20 +693,24 @@ func declared(s domain.Source) string {
 	return ""
 }
 
+// 登记（3b）由本人经 Web 做；改名是 3a：只整理的 delegate 得 23，放开到日常规矩的 Agent 经 CLI 改名。
 func TestAddNameAndRename(t *testing.T) {
 	k := newKernel(t)
-	dlg := k.token(auth.Delegate)
+	dlg := k.rulesAgent()
 	var s domain.Source
-	decode(t, k.apa(dlg, "source", "add", "--id", "src_a", "--name", "  订阅  ", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"), &s)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_a","name":"  订阅  ","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`, &s)
 	if s.Name != "订阅" {
 		t.Fatalf("--name: %+v", s)
 	}
-	decode(t, k.apa(dlg, "source", "add", "--id", "src_b", "--type", "webhook", "--config", `{"scheme":"shared"}`), &s)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_b","type":"webhook","config":{"scheme":"shared"}}`, &s)
 	if s.Name != "推送 src_b" {
 		t.Fatalf("no --name: the output shows the declared name: %+v", s)
 	}
-	if r := k.apa(dlg, "source", "add", "--id", "src_c", "--name", "订阅", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60"); r.code != domain.ExitConflict {
-		t.Fatalf("duplicate name: %+v", r)
+	if code, _ := k.owner("POST", "/v1/sources", `{"id":"src_c","name":"订阅","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`); code != http.StatusConflict {
+		t.Fatalf("duplicate name: %d", code)
+	}
+	if r := k.apa(k.token(auth.Delegate), "source", "rename", "src_b", "x"); r.code != domain.ExitTierClosed {
+		t.Fatalf("organize-only rename: %+v", r)
 	}
 	decode(t, k.apa(dlg, "source", "rename", "src_b", "仓库推送"), &s)
 	if s.Name != "仓库推送" {
@@ -660,8 +725,8 @@ func TestAddNameAndRename(t *testing.T) {
 // token 读到的内容按来源的外发范围裁剪；运行凭据得退出码 4，未知事件得 5，未知部分得 2。
 func TestSourceEventReadsContentScopedAndPartwise(t *testing.T) {
 	k := newKernel(t)
-	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
-	k.apa(dlg, "source", "add", "--id", "src_mail", "--type", "pull", "--command", "fetch-feed", "--schedule", "15m", "--timeout", "60")
+	obs := k.token(auth.Observer)
+	k.ownerOK("POST", "/v1/sources", `{"id":"src_mail","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`, nil)
 	body := strings.Repeat("正文", 400) // 800 个字符
 	var id string
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {

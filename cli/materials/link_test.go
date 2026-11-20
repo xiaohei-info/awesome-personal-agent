@@ -92,7 +92,7 @@ func TestMaterialAddLinkProjectFromCheckout(t *testing.T) {
 	k.vaults(t, "notes", "")
 	cwd, _ := os.Getwd()
 	host, _ := os.Hostname()
-	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	for _, c := range [][2]string{ // 有序：checkout 依赖先登记的 remote
 		{"project.repo.add", `{"id":"` + k.prj + `","remote":"git@example.com:me/app.git"}`},
 		{"project.checkout.set", `{"id":"` + k.prj + `","remote":"git@example.com:me/app.git","host":"` + host + `","path":"` + cwd + `"}`},

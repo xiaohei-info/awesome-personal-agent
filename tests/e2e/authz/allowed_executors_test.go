@@ -127,7 +127,7 @@ func TestFlowAllowedExecutors(t *testing.T) {
 	k.step("ACT-ALW-05 改派也校验", func(t *testing.T) {
 		target := k.addItem("acc-work", workHost)
 		before := k.version(target)
-		r := k.Apa(k.DEL, "", "item", "update", target, "--assignee", otherHost, "--reason", "reassign", "--evidence", "owner asked")
+		r := k.Apa(k.DEL, "", "item", "update", target, "--assignee", otherHost, "--reason", "reassign")
 		k.expect("CLI 改派", r, exitNotAllow)
 		w := k.Web("PATCH", "/v1/items/"+target, `{"assignee":"`+otherHost+`","reason":"reassign"}`)
 		var e map[string]any
@@ -142,7 +142,7 @@ func TestFlowAllowedExecutors(t *testing.T) {
 	k.step("ACT-ALW-06 不能先建后移入项目", func(t *testing.T) {
 		free := k.addItem("", otherHost)
 		before := k.version(free)
-		k.expect("移入 acc-work", k.Apa(k.DEL, "", "item", "update", free, "--project", work, "--reason", "move", "--evidence", "owner asked"), exitNotAllow)
+		k.expect("移入 acc-work", k.Apa(k.DEL, "", "item", "update", free, "--project", work, "--reason", "move"), exitNotAllow)
 		if p, ok := k.item(free)["project"]; ok || k.version(free) != before {
 			t.Errorf("project 应不变，实际 %v", p)
 		}
@@ -158,7 +158,7 @@ func TestFlowAllowedExecutors(t *testing.T) {
 		if got := k.item(child)["project"]; got != work {
 			t.Fatalf("子事项应继承父事项的项目，实际 %v", got)
 		}
-		if r := k.Apa(k.DEL, "", "item", "update", child, "--project", open, "--reason", "move", "--evidence", "owner asked"); r.Code == 0 {
+		if r := k.Apa(k.DEL, "", "item", "update", child, "--project", open, "--reason", "move"); r.Code == 0 {
 			t.Error("改子事项的 project 不应成功")
 		}
 		if got := k.item(child)["project"]; got != work {
@@ -173,7 +173,7 @@ func TestFlowAllowedExecutors(t *testing.T) {
 
 	k.step("ACT-ALW-08 只在 Web 改名单", func(t *testing.T) {
 		listBefore := k.allowed("acc-work")
-		r := k.Apa(k.DEL, "", "project", "update", work, "--allowed-executors", otherHost, "--evidence", "owner asked")
+		r := k.Apa(k.DEL, "", "project", "update", work, "--allowed-executors", otherHost)
 		k.expect("CLI 改名单", r, exitWebOnly)
 		w := k.APIRaw("PATCH", "/v1/projects/"+work, `{"allowed_executors":["`+otherHost+`"]}`, k.DEL)
 		if w.Code != http.StatusForbidden {
@@ -203,8 +203,8 @@ func TestFlowAllowedExecutors(t *testing.T) {
 		k.webOK("PATCH", "/v1/rules/"+url.PathEscape(spawnRule)+"/mode", `{"mode":"auto"}`, 200)
 		before := k.childrenCount("acc-work")
 		trigger := k.idOf("触发事项", k.Apa(k.DEL, "", "item", "add", "--kind", "task", "--title", "trigger", "--phase", "proposed",
-			"--project", work, "--tags", "acc-spawn", "--evidence", "e2e setup"))
-		k.expect("触发规则", k.Apa(k.DEL, "", "item", "transition", trigger, "--to", "open", "--reason", "go", "--evidence", "owner asked"), 0)
+			"--project", work, "--tags", "acc-spawn"))
+		k.expect("触发规则", k.Apa(k.DEL, "", "item", "transition", trigger, "--to", "open", "--reason", "go"), 0)
 		k.waitFor("规则动作被拒绝", 15*time.Second, func() bool {
 			for _, ev := range k.audit(url.Values{"type": {"command.rejected"}}) {
 				if ev.Payload["exit"] == float64(exitNotAllow) && strings.Contains(ev.Reason, "not allowed") && ev.Actor["principal"] != nil &&
@@ -224,8 +224,8 @@ func TestFlowAllowedExecutors(t *testing.T) {
 		}
 		// 对照：同一条规则在名单未设置的 acc-open 里会建出指派给 other-host.cli 的事项，证明上面的拒绝来自名单而不是规则本身无效。
 		openTrigger := k.idOf("对照触发事项", k.Apa(k.DEL, "", "item", "add", "--kind", "task", "--title", "trigger-open", "--phase", "proposed",
-			"--project", open, "--tags", "acc-spawn", "--evidence", "e2e setup"))
-		k.expect("触发对照", k.Apa(k.DEL, "", "item", "transition", openTrigger, "--to", "open", "--reason", "go", "--evidence", "owner asked"), 0)
+			"--project", open, "--tags", "acc-spawn"))
+		k.expect("触发对照", k.Apa(k.DEL, "", "item", "transition", openTrigger, "--to", "open", "--reason", "go"), 0)
 		k.waitFor("规则在未限制的项目里建出事项", 15*time.Second, func() bool {
 			for _, assignee := range k.itemsOf("acc-open") {
 				if assignee == otherHost {

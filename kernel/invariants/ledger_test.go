@@ -10,9 +10,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
-	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
 // 不变量 1（ACT-LED-02）：账本事实变更与它的 Event 在同一事务提交。
@@ -20,7 +18,7 @@ import (
 func TestInv1LedgerChangeAndEventCommitTogether(t *testing.T) {
 	e := newLedger(t)
 	err := e.x.Register(command.Spec{
-		Name: "invariants.emit_then_fail", Action: authz.ActionEditAnyItem,
+		Name: "invariants.emit_then_fail", Action: authz.ActionEditAnyItem, Tier: authz.TierOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var p struct{ ID string }
 			_ = json.Unmarshal(in, &p)
@@ -136,75 +134,6 @@ func TestInv3PhaseEntryConstraints(t *testing.T) {
 		t.Fatalf("delegation done with evidence: %v", err)
 	}
 	e.verify(t)
-}
-
-// 不变量 4：web_only 由策略规则给出，初筛只升不降，创建时的字段不能降低门槛，初筛返回前不投递、不接受代答。
-func TestInv4WebOnlyOnlyEscalates(t *testing.T) {
-	t.Run("pending screening blocks delivery and delegate answers, then escalation sticks", func(t *testing.T) {
-		e := newLedger(t)
-		e.cls.SetDefaultPYes(0.95)
-		e.cls.SetFault(modelstub.ClsFault{DelayMS: 300})
-		id := e.newItem(t, nil)
-		e.must(t, worker, "decision.request", map[string]any{"id": id, "ask": ask(map[string]any{"default_on_timeout": "A", "deadline": t0.Add(time.Hour)})})
-		if it := e.get(t, id); !it.Ask.ScreeningPending {
-			t.Fatalf("request must commit with screening pending: %+v", it.Ask)
-		}
-		_, err := e.do(delegate, "decision.answer", "owner said A", map[string]any{"id": id, "choice": "A"})
-		if exit(err) != domain.ExitScreeningPending {
-			t.Fatalf("answer before screening returns: want 22, got %v", err)
-		}
-		if ds := e.deliveriesFor(t, id); len(ds) != 0 {
-			t.Fatalf("delivery while screening pending: %+v", ds)
-		}
-		e.scr.Wait()
-		it := e.get(t, id)
-		if it.Ask.RiskClass != domain.RiskClassWebOnly || it.Ask.ScreeningPending || it.Ask.DefaultOnTimeout != "" {
-			t.Fatalf("escalation: %+v", it.Ask)
-		}
-		_, err = e.do(delegate, "decision.answer", "owner said A", map[string]any{"id": id, "choice": "A"})
-		if exit(err) != domain.ExitWebOnly {
-			t.Fatalf("answer after escalation: want 20, got %v", err)
-		}
-		for _, d := range e.deliveriesFor(t, id) {
-			if !d.Content.WebOnly || len(d.Content.Options) != 0 {
-				t.Fatalf("escalated delivery must only link to Web: %+v", d)
-			}
-		}
-	})
-	t.Run("a rule-given class is never downgraded by a calm model", func(t *testing.T) {
-		e := newLedger(t)
-		if err := e.st.Update(bg, func(tx *store.Tx) error {
-			_, err := policy.Update(tx, owner.Actor, "rule", func(p *policy.Policy) error {
-				p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Tag: "inv-finance", Category: policy.CategoryFunds})
-				return nil
-			})
-			return err
-		}); err != nil {
-			t.Fatal(err)
-		}
-		id := e.newItem(t, map[string]any{"tags": []string{"inv-finance"}})
-		e.must(t, worker, "decision.request", map[string]any{"id": id, "ask": ask(nil)})
-		e.scr.Wait()
-		if it := e.get(t, id); it.Ask.RiskClass != policy.CategoryFunds || it.Ask.ScreeningPending {
-			t.Fatalf("rule class must stay: %+v", it.Ask)
-		}
-		_, err := e.do(delegate, "decision.answer", "owner said A", map[string]any{"id": id, "choice": "A"})
-		if exit(err) != domain.ExitWebOnly {
-			t.Fatalf("want 20, got %v", err)
-		}
-	})
-	t.Run("fields written at creation cannot lower the bar", func(t *testing.T) {
-		e := newLedger(t)
-		for _, k := range []string{"risk_class", "screening_pending"} {
-			in := map[string]any{"title": "t", "kind": "task", "phase": "open", "ask": map[string]any{"question": "q", k: "none"}}
-			if k == "screening_pending" {
-				in["ask"] = map[string]any{"question": "q", k: false}
-			}
-			if _, err := e.do(owner, "item.create", "", in); exit(err) != domain.ExitUsage {
-				t.Fatalf("%s at creation must be refused, got %v", k, err)
-			}
-		}
-	})
 }
 
 // 不变量 5：项目设置了 allowed_executors 时，任何入口都不能把事项指派给名单外的执行者。

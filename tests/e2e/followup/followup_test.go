@@ -190,11 +190,11 @@ func TestFlowFollowUp(t *testing.T) {
 	step(t, "ACT-FUP-07 新进展让轮次清零", func(t *testing.T) {
 		fu5 := decode[struct {
 			ID string `json:"id"`
-		}](t, f.apa(f.WRK, 0, "item", "add", "--kind", "task", "--title", "FU-5", "--phase", "open", "--assignee", "work-host.cli",
-			"--project", f.Projects["acc-work"], "--evidence", "WRK 建事项").Stdout).ID
+		}](t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "FU-5", "--phase", "open", "--assignee", "work-host.cli",
+			"--project", f.Projects["acc-work"]).Stdout).ID
 		f.wait(fu5)
 		f.advanceUntilReminded(fu5, 1)
-		f.apa(f.WRK, 0, "item", "progress", fu5, "--text", "对方说周五给", "--evidence", "对方说周五给")
+		f.apa(f.WRK, 0, "item", "progress", fu5, "--text", "对方说周五给")
 		f.advanceUntilReminded(fu5, 2)
 		f.advanceUntilReminded(fu5, 3)
 		f.TCAdvance(65)
@@ -208,7 +208,7 @@ func TestFlowFollowUp(t *testing.T) {
 		fu6 := f.newItem("FU-6")
 		child := decode[struct {
 			ID string `json:"id"`
-		}](t, f.apa(f.DEL, 0, "delegate", "--parent", fu6, "--assignee", "work-host.cli", "--title", "FU-6 子事项", "--reason", "委派", "--evidence", "owner asked").Stdout).ID
+		}](t, f.apa(f.DEL, 0, "delegate", "--parent", fu6, "--assignee", "work-host.cli", "--title", "FU-6 子事项", "--reason", "委派").Stdout).ID
 		if p := f.show(fu6).Phase; p != "waiting" {
 			t.Fatalf("委派后父事项应进入 waiting（等执行者），实际 %s", p)
 		}
@@ -429,9 +429,8 @@ func TestFlowFollowUpUpgrade(t *testing.T) {
 		n := startInst(t, e.Bin["apa"], fx.Home, "")
 		n.login(fx.M.WebSecret)
 		endpoints, _ := json.Marshal(map[string]any{
-			"judge_endpoint":       map[string]any{"url": cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1", "locality": "local"},
-			"generate_endpoint":    map[string]any{"url": model.URL(), "api_key": "stub-key", "model": "acc-model", "locality": "local"},
-			"screening_timeout_ms": 2000,
+			"judge_endpoint":    map[string]any{"url": cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1", "locality": "local"},
+			"generate_endpoint": map[string]any{"url": model.URL(), "api_key": "stub-key", "model": "acc-model", "locality": "local"},
 		})
 		must := func(code int, body string) {
 			t.Helper()

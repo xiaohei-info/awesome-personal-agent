@@ -21,12 +21,10 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/model"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/outcall/proc"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/screening"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	rootpacks "github.com/xiaohei-info/awesome-personal-agent/packs"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
@@ -35,9 +33,9 @@ import (
 var (
 	bg       = context.Background()
 	t0       = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
-	worker   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelWorker}
-	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
+	worker   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, Session: "s1"}, Level: authz.LevelWorker, CredentialAgentID: "agent_wrk"}
+	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1"}, Level: authz.LevelDelegate, CredentialAgentID: "agent_dlg"}
 )
 
 func exit(err error) int {
@@ -55,7 +53,6 @@ type ledger struct {
 	clk  *clock.Clock
 	stub *modelstub.Stub
 	cls  *modelstub.ClsStub // 判断端点：web_only 初筛先问它
-	scr  *screening.Service
 	q    *delivery.Queue
 	att  *attention.Attention
 	now  time.Time
@@ -90,18 +87,9 @@ func newLedger(t *testing.T) *ledger {
 	if rej, err := ld.Load(); err != nil || len(rej) != 0 {
 		t.Fatalf("load packs: %v %+v", err, rej)
 	}
-	judge, err := direct.New(direct.Options{Store: st, Packs: ld, Model: &model.Client{}, Now: now, Attempts: 1,
-		Sleep: func(context.Context, time.Duration) error { t.Error("screening must not retry"); return nil }})
-	if err != nil {
+	if err := decisions.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
-	if e.scr, err = screening.New(screening.Options{Store: st, Judge: judge, Now: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := decisions.RegisterWith(e.x, e.scr); err != nil {
-		t.Fatal(err)
-	}
-	e.x.OnCommit(e.scr.OnCommit)
 	e.q = delivery.New(delivery.Options{Now: now, UnclaimedAfter: 5 * time.Minute, Lease: 24 * time.Hour})
 	e.att = attention.New(attention.Options{Queue: e.q, Now: now})
 	if e.clk, err = clock.New(st, func(tx *store.Tx, c clock.Command) error {
@@ -121,7 +109,7 @@ func newLedger(t *testing.T) *ledger {
 	ep := policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}
 	if err := st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.GenerateEndpoint, p.ScreeningTimeoutMs = ep, 5000
+			p.GenerateEndpoint = ep
 			p.JudgeEndpoint = &policy.JudgeEndpoint{URL: e.cls.URL(), Protocol: policy.ProtocolProbability, Locality: policy.LocalityLocal, TimeoutMs: 5000}
 			return nil
 		})
@@ -134,7 +122,7 @@ func newLedger(t *testing.T) *ledger {
 
 func (e *ledger) do(id command.Identity, cmd, evidence string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: evidence, WebURL: "http://web/items"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web/items"})
 }
 
 func (e *ledger) must(t *testing.T, id command.Identity, cmd string, in any) command.Result {

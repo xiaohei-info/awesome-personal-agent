@@ -38,7 +38,7 @@ import (
 
 var (
 	bg    = context.Background()
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 const (
@@ -83,7 +83,7 @@ func setup(t *testing.T) *env {
 	}
 	if err := st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}, 1000
+			p.GenerateEndpoint = policy.GenerateEndpoint{URL: stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}
 			return nil
 		})
 		return err
@@ -133,7 +133,7 @@ func setup(t *testing.T) *env {
 func (e *env) setCapture(on bool) {
 	e.t.Helper()
 	b, _ := json.Marshal(map[string]any{"id": e.proj, "capture": on})
-	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: "project.update", Input: b, Owner: "owner", Evidence: "owner said so"}); err != nil {
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: "project.update", Input: b, Owner: "owner"}); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -154,7 +154,7 @@ func (e *env) token(kind auth.Kind, scope string) string {
 // runSecret 为一个事项入队后台运行并签发运行凭据（与内核拉起运行同一条路径）。
 func (e *env) runSecret() string {
 	e.t.Helper()
-	r0, err := e.x.Do(bg, command.Request{Identity: owner, Command: "item.create", Owner: "owner", Evidence: "owner said so",
+	r0, err := e.x.Do(bg, command.Request{Identity: owner, Command: "item.create", Owner: "owner",
 		Input: []byte(`{"kind":"task","title":"target","project":"` + e.proj + `"}`)})
 	if err != nil {
 		e.t.Fatal(err)

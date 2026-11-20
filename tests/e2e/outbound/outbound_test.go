@@ -152,9 +152,8 @@ func TestOutboundScope(t *testing.T) {
 
 	k.step("ACT-OBD-09 端点位置未声明时按 external 处理", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
-			"judge_endpoint":       map[string]any{"url": k.Cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1"},
-			"generate_endpoint":    map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model"},
-			"screening_timeout_ms": 2000,
+			"judge_endpoint":    map[string]any{"url": k.Cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1"},
+			"generate_endpoint": map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model"},
 		})
 		k.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
 		v := k.endpointView()
@@ -206,8 +205,8 @@ func TestOutboundScope(t *testing.T) {
 		top.Cleanup(feed.Close) // 订阅服务要活到整条流程结束，不随本步骤的子测试退出
 		k.installRSS()
 		cfg, _ := json.Marshal(map[string]any{"url": feed.URL + "/feed.xml"})
-		k.apa(k.DEL, 0, "source", "add", "--id", rssID, "--name", rssID, "--type", "pull", "--command", "rss-source", "--schedule", "5s", "--timeout", "30",
-			"--config", string(cfg), "--default-project", k.Projects["acc-home"], "--evidence", "登记 RSS 来源，默认归入 acc-home")
+		k.OwnerApaOK("", "source", "add", "--id", rssID, "--name", rssID, "--type", "pull", "--command", "rss-source", "--schedule", "5s", "--timeout", "30",
+			"--config", string(cfg), "--default-project", k.Projects["acc-home"])
 		s := k.sourceShow(rssID)
 		if s.DefaultProject != k.Projects["acc-home"] || s.Outbound.Local != "full" || s.Outbound.External != nil {
 			t.Fatalf("show 应是 default_project=acc-home、local=full、external 未选择: %+v", s)
@@ -390,7 +389,7 @@ func TestOutboundScope(t *testing.T) {
 		k.endpoints("local", "local")
 		k.webOK("PATCH", "/v1/projects/"+open(), `{"capture":false}`, 200)
 		for _, s := range []string{obdSrc, rssID} {
-			k.apa(k.DEL, 0, "source", "disable", s, "--evidence", "流程结束，停用验收来源")
+			k.apa(k.DEL, 0, "source", "disable", s)
 		}
 		v := k.endpointView()
 		if v.Judge.Locality != "local" || v.Generate.Locality != "local" {

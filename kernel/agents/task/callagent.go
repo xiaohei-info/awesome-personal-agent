@@ -144,7 +144,7 @@ func (s *Service) ledgerSnapshot(ctx context.Context) (string, error) {
 		}
 		for _, it := range all {
 			i, ok := at[it.Project]
-			if it.Project != "" && !ok || it.Phase == domain.PhaseNeedsInput && it.Ask != nil && it.Ask.ScreeningPending {
+			if it.Project != "" && !ok {
 				continue
 			}
 			secs[i].Items = append(secs[i].Items, itemSummary{it.ID, it.Kind, it.Title, it.Phase, it.UpdatedAt})

@@ -69,7 +69,7 @@ func setup(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	must(Spec{Name: "note.write", Action: authz.ActionUpdateOwn, Object: object,
+	must(Spec{Name: "note.write", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Object: object,
 		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 			if parse(in).Body == "" {
 				return domain.NewError(domain.CodeInvalidRequest, "body required", "add body")
@@ -92,21 +92,33 @@ func setup(t *testing.T) *env {
 			}
 			return map[string]string{"id": n.ID}, nil
 		}})
-	must(Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision,
+	must(Spec{Name: "decision.answer", Action: authz.ActionAnswerDecision, Tier: authz.TierDecide,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
-			return authz.Object{ID: parse(in).ID, Category: policy.CategoryFunds}, nil
+			return authz.Object{ID: parse(in).ID, Project: parse(in).Body}, nil
 		},
 		Apply: func(c *Ctx) (any, error) { e.applied++; return "ok", nil }})
-	must(Spec{Name: "item.assign", Action: authz.ActionReassign,
+	must(Spec{Name: "rule.change", Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/rules", Object: object,
+		Apply: func(c *Ctx) (any, error) {
+			e.applied++
+			_, err := c.Emit(domain.Event{Type: domain.EvItemUpdated, Object: c.Object.ID, Payload: json.RawMessage(`{}`)})
+			return nil, err
+		}})
+	must(Spec{Name: "key.issue", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: object,
+		Apply: func(c *Ctx) (any, error) {
+			e.applied++
+			_, err := c.Emit(domain.Event{Type: domain.EvItemUpdated, Object: c.Object.ID, Payload: json.RawMessage(`{}`)})
+			return nil, err
+		}})
+	must(Spec{Name: "item.assign", Action: authz.ActionReassign, Tier: authz.TierOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			return authz.Object{ID: parse(in).ID, Executor: "stranger", ProjectInfo: &domain.Project{AllowedExecutors: []string{"a"}}}, nil
 		},
 		Apply: func(c *Ctx) (any, error) { e.applied++; return nil, nil }})
-	must(Spec{Name: "ext.ping", Action: authz.ActionSubmitPlugin, Kinds: []auth.Kind{auth.Ext}, Object: object,
+	must(Spec{Name: "ext.ping", Action: authz.ActionSubmitPlugin, Tier: authz.TierOrganize, Kinds: []auth.Kind{auth.Ext}, Object: object,
 		Apply: func(c *Ctx) (any, error) { return "pong", nil }})
-	must(Spec{Name: "ext.nokind", Action: authz.ActionSubmitPlugin, Object: object,
+	must(Spec{Name: "ext.nokind", Action: authz.ActionSubmitPlugin, Tier: authz.TierOrganize, Object: object,
 		Apply: func(c *Ctx) (any, error) { return nil, nil }})
-	must(Spec{Name: "note.versioned", Action: authz.ActionUpdateOwn, Object: object, RequireVersion: true,
+	must(Spec{Name: "note.versioned", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Object: object, RequireVersion: true,
 		Apply: func(c *Ctx) (any, error) { return nil, nil }})
 	return e
 }
@@ -128,6 +140,17 @@ func (e *env) bearer(t *testing.T, s auth.Spec) Bearer {
 }
 
 var owner = Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+
+// setTier 以本人身份写 agent 的档位（3b 设置，测试里直接写策略）。
+func (e *env) setTier(t *testing.T, agent string, a policy.AgentAllowance) {
+	t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.AgentTier.ByAgent[agent] = a; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func in(v noteIn) json.RawMessage { b, _ := json.Marshal(v); return b }
 
@@ -212,46 +235,43 @@ func TestAuthentication(t *testing.T) {
 	}
 }
 
-func TestAuthorizationDenyAndRejectionTrail(t *testing.T) {
+// 三种拒绝口径各留一条 command.rejected：范围外 4、硬线 20、档位未放开 23；执行者不在名单 21 同一条路径。
+func TestRejectionsShareOneTrail(t *testing.T) {
 	e := setup(t)
-	obs := e.bearer(t, auth.Spec{Kind: auth.Observer})
 	before := len(e.events(t))
+	obs := e.bearer(t, auth.Spec{Kind: auth.Observer})
 	if _, err := e.x.Do(bg, Request{Identity: obs, Command: "note.write", Input: in(noteIn{ID: "n", Body: "b"})}); exit(err) != domain.ExitPermissionDenied {
 		t.Fatalf("observer: %v", err)
 	}
-	if len(e.events(t)) != before || e.applied != 0 {
-		t.Fatal("plain denial must not write")
-	}
-
-	// delegate 回答 web_only：退出码 20，不执行，并留一条 command.rejected。
 	dlg := e.token(t, auth.Spec{Kind: auth.Delegate})
-	d := Bearer{Auth: e.au, Secret: dlg.Label, Origin: auth.Origin{Session: "s1", SessionKind: "direct"}}
-	if _, err := e.x.Do(bg, Request{Identity: d, Command: "decision.answer", Input: in(noteIn{ID: "d1"}), Evidence: "yes", WebURL: "https://w/d1"}); exit(err) != domain.ExitWebOnly {
-		t.Fatalf("web_only: %v", err)
+	d := Bearer{Auth: e.au, Secret: dlg.Label, Origin: auth.Origin{Session: "s1"}}
+	if _, err := e.x.Do(bg, Request{Identity: d, Command: "key.issue", Input: in(noteIn{ID: "k1"})}); exit(err) != domain.ExitWebOnly {
+		t.Fatalf("hard line: %v", err)
 	}
-	// 运行身份回答决策：退出码 4，也留痕。
-	run := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "w", Via: domain.ViaCLI, Run: "r1"}, Level: authz.LevelRun}
-	if _, err := e.x.Do(bg, Request{Identity: run, Command: "decision.answer", Input: in(noteIn{ID: "d2"})}); exit(err) != domain.ExitPermissionDenied {
-		t.Fatalf("run: %v", err)
+	if _, err := e.x.Do(bg, Request{Identity: d, Command: "decision.answer", Input: in(noteIn{ID: "d1"}), WebURL: "https://w/d1"}); exit(err) != domain.ExitTierClosed {
+		t.Fatalf("tier closed: %v", err)
 	}
-	// 执行者不在项目名单：退出码 21。
 	if _, err := e.x.Do(bg, Request{Identity: owner, Command: "item.assign", Input: in(noteIn{ID: "i1"}), Owner: "me"}); exit(err) != domain.ExitExecutorNotAllowed {
 		t.Fatalf("executor: %v", err)
 	}
 	rej := e.events(t)[before:]
-	if len(rej) != 3 || e.applied != 0 {
-		t.Fatalf("want 3 rejection events and no apply, got %d / applied %d", len(rej), e.applied)
+	if len(rej) != 4 || e.applied != 0 || len(e.commits) != 0 {
+		t.Fatalf("want 4 rejection events and nothing applied, got %d / applied %d", len(rej), e.applied)
 	}
+	reasons := []string{}
 	for _, r := range rej {
+		var pl struct{ Reason string }
+		_ = json.Unmarshal(r.Event.Payload, &pl)
 		if r.Event.Type != domain.EvCommandRejected {
 			t.Fatalf("type %s", r.Event.Type)
 		}
+		reasons = append(reasons, pl.Reason)
 	}
-	if rej[0].Event.Actor.Session != "s1" || rej[0].Event.Object != "d1" {
-		t.Fatalf("trail must name who tried what: %+v", rej[0].Event)
+	if reasons[0] != domain.ReasonOutOfScope || reasons[1] != domain.ReasonHardLine || reasons[2] != domain.ReasonTierClosed {
+		t.Fatalf("reasons = %v", reasons)
 	}
-	if len(e.commits) != 0 {
-		t.Fatal("rejected commands must not notify consumers")
+	if rej[2].Event.Actor.Session != "s1" || rej[2].Event.Object != "d1" {
+		t.Fatalf("trail must name who tried what: %+v", rej[2].Event)
 	}
 }
 
@@ -493,7 +513,7 @@ func TestChainDepthOverThresholdOnlyRecords(t *testing.T) {
 func TestChainDepthResolvedByCaller(t *testing.T) {
 	e := setup(t)
 	e.x.MaxChainDepth = 4
-	if err := e.x.Register(Spec{Name: "note.delegate", Action: authz.ActionDelegate,
+	if err := e.x.Register(Spec{Name: "note.delegate", Action: authz.ActionDelegate, Tier: authz.TierOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			return authz.Object{ID: parse(in).ID}, nil
 		},
@@ -551,8 +571,11 @@ func TestRegisterValidationAndTrustedLevel(t *testing.T) {
 	if err := e.x.Register(Spec{Name: "note.write"}); err == nil {
 		t.Fatal("incomplete spec must be rejected")
 	}
-	if err := e.x.Register(Spec{Name: "note.write", Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil }, Apply: func(*Ctx) (any, error) { return nil, nil }}); err == nil {
+	if err := e.x.Register(Spec{Name: "note.write", Tier: authz.TierOrganize, Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil }, Apply: func(*Ctx) (any, error) { return nil, nil }}); err == nil {
 		t.Fatal("duplicate must be rejected")
+	}
+	if err := e.x.Register(Spec{Name: "no.tier", Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil }, Apply: func(*Ctx) (any, error) { return nil, nil }}); err == nil {
+		t.Fatal("a command without a tier must be rejected")
 	}
 	// 伪造的 Web 级别（非人类）被统一授权拒绝。
 	fake := Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "x", Via: domain.ViaCLI}, Level: authz.LevelWeb}
@@ -571,7 +594,7 @@ func TestRejectedAttemptDoesNotResetChainDepth(t *testing.T) {
 	}
 	// 在 deep（深度 1）上被拒绝的尝试会追加 depth 0 的 command.rejected。
 	dlg := e.bearer(t, auth.Spec{Kind: auth.Delegate})
-	if _, err := e.x.Do(bg, Request{Identity: dlg, Command: "decision.answer", Input: in(noteIn{ID: "deep"}), Evidence: "x"}); exit(err) != domain.ExitWebOnly {
+	if _, err := e.x.Do(bg, Request{Identity: dlg, Command: "decision.answer", Input: in(noteIn{ID: "deep"})}); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("setup rejection: %v", err)
 	}
 	es := e.events(t)
@@ -603,7 +626,7 @@ func TestMultipleActionsAllMustPass(t *testing.T) {
 		"ok":     {authz.ActionUpdateOwn, authz.ActionRead},
 		"checks": {authz.ActionRead, authz.ActionReassign},
 	} {
-		if err := e.x.Register(Spec{Name: "multi." + name, Action: authz.ActionRead, Actions: acts(as...), Object: obj,
+		if err := e.x.Register(Spec{Name: "multi." + name, Action: authz.ActionRead, Tier: authz.TierOrganize, Actions: acts(as...), Object: obj,
 			Apply: func(*Ctx) (any, error) { applied++; return nil, nil }}); err != nil {
 			t.Fatal(err)
 		}
@@ -640,77 +663,75 @@ func TestBumpSharesVersionSequence(t *testing.T) {
 	}
 }
 
-// §14.5：档位只在管线一处判定。命令只声明 Tier，对象绑定（Bound，据账本）把第二档降到第一档；
-// 第一档的 Event 不带 on_behalf_of，第二档要原话加会话，缺失为 23 并记 command.rejected。
-func TestProxyTiersAreDecidedInThePipeline(t *testing.T) {
+// §14.3：档位只在管线一处判定。硬线先于档位且不读档位；档位按凭据归属的 Agent 取，二档可按项目限定；
+// 运行钥匙随所属 Agent 的档位；内核自己（system）与 Web 本人不看档位；3b 对 Web 也要刚再输过口令。
+func TestTiersAreDecidedInThePipeline(t *testing.T) {
 	e := setup(t)
-	object := func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
-		n := parse(in)
-		return authz.Object{ID: n.ID, Assignee: n.Assign}, nil
-	}
-	apply := func(c *Ctx) (any, error) {
-		_, err := c.Emit(domain.Event{Type: domain.EvItemUpdated, Object: c.Object.ID, Payload: json.RawMessage(`{}`), Evidence: c.Evidence})
-		return nil, err
-	}
-	for _, s := range []Spec{
-		{Name: "tier.work", Action: authz.ActionUpdateOwn, Tier: authz.TierWork, Object: object, Apply: apply},
-		{Name: "tier.decide", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Object: object, Apply: apply},
-		{Name: "tier.bound", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Object: object, Apply: apply,
-			Bound: func(_ *store.Tx, c Caller, o authz.Object, _ json.RawMessage) (bool, error) {
-				return o.Assignee == c.Actor.Principal, nil
-			}},
-	} {
-		if err := e.x.Register(s); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if tier, ok := e.x.Tier("tier.bound"); !ok || tier != authz.TierDecide {
-		t.Fatalf("declared tier = %v %v", tier, ok)
-	}
 	c := e.token(t, auth.Spec{Kind: auth.Delegate})
-	me := Bearer{Auth: e.au, Secret: c.Label, Origin: auth.Origin{Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
-	noSession := Bearer{Auth: e.au, Secret: c.Label, OnBehalfOf: "owner"}
-	lastActor := func() domain.Actor { es := e.events(t); return es[len(es)-1].Event.Actor }
-	do := func(id Identity, cmd, ev string, n noteIn) error {
-		_, err := e.x.Do(bg, Request{Identity: id, Command: cmd, Input: in(n), Evidence: ev})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := tx.Exec(`UPDATE auth_credential SET agent_id = 'agent_a' WHERE id = ?`, c.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	me := Bearer{Auth: e.au, Secret: c.Label}
+	do := func(id Identity, cmd string, n noteIn) error {
+		_, err := e.x.Do(bg, Request{Identity: id, Command: cmd, Input: in(n)})
 		return err
 	}
+	lastBasis := func() string { es := e.events(t); return es[len(es)-1].Event.Basis.Via }
 
-	// 第一档：不要原话，actor 是 agent 本身。
-	if err := do(me, "tier.work", "", noteIn{ID: "a"}); err != nil || lastActor().OnBehalfOf != "" {
-		t.Fatalf("tier one: %v %+v", err, lastActor())
+	// 一档永远开。
+	if err := do(me, "note.write", noteIn{ID: "a", Body: "x"}); err != nil || lastBasis() != domain.BasisOrganize {
+		t.Fatalf("organize: %v %s", err, lastBasis())
 	}
-	// 第二档：缺原话、缺会话都是 23，各记一条 command.rejected，不执行。
-	before, applied := len(e.events(t)), e.applied
-	for _, id := range []Identity{me, noSession} {
-		ev := ""
-		if id == Identity(noSession) {
-			ev = "owner: ok"
-		}
-		if err := do(id, "tier.decide", ev, noteIn{ID: "b"}); exit(err) != domain.ExitBasisRequired {
-			t.Fatalf("tier two without full basis: %v", err)
-		}
+	// 只整理：二档、3a 是 23，3b 是 20。
+	if exit(do(me, "decision.answer", noteIn{ID: "q"})) != domain.ExitTierClosed || exit(do(me, "rule.change", noteIn{ID: "r"})) != domain.ExitTierClosed {
+		t.Fatal("closed tiers must be 23")
 	}
-	rej := e.events(t)[before:]
-	if len(rej) != 2 || rej[0].Event.Type != domain.EvCommandRejected || rej[0].Event.Object != "b" || e.applied != applied {
-		t.Fatalf("rejections = %+v", rej)
+	// 放开二档，限定项目 p1：p1 上放行并记 allowance，别的项目仍 23；3a 仍 23。
+	e.setTier(t, "agent_a", policy.AgentAllowance{Tier: policy.AllowDecide, Projects: []string{"p1"}})
+	if err := do(me, "decision.answer", noteIn{ID: "q", Body: "p1"}); err != nil {
+		t.Fatalf("decide on p1: %v", err)
 	}
-	if err := do(me, "tier.decide", "owner: ok", noteIn{ID: "b"}); err != nil {
-		t.Fatalf("tier two with words and session: %v", err)
+	if exit(do(me, "decision.answer", noteIn{ID: "q", Body: "p2"})) != domain.ExitTierClosed || exit(do(me, "rule.change", noteIn{ID: "r"})) != domain.ExitTierClosed {
+		t.Fatal("project limit and 3a must still refuse")
 	}
-	if a := lastActor(); a.OnBehalfOf != "owner" || a.Session != "s1" {
-		t.Fatalf("tier two actor = %+v", a)
+	// 全部放开：二档、3a 放行；3b 仍是硬线 20，带设置页链接。
+	e.setTier(t, "agent_a", policy.AgentAllowance{Tier: policy.AllowRules})
+	if err := do(me, "rule.change", noteIn{ID: "r"}); err != nil || lastBasis() != domain.BasisAllowance {
+		t.Fatalf("rules open: %v", err)
 	}
-	// 绑定降档：assignee 即该凭据时按第一档；别人的事项仍按第二档。
-	if err := do(me, "tier.bound", "", noteIn{ID: "c", Assign: c.ID}); err != nil || lastActor().OnBehalfOf != "" {
-		t.Fatalf("bound: %v %+v", err, lastActor())
+	err := do(me, "key.issue", noteIn{ID: "k"})
+	var de *domain.Error
+	if !errors.As(err, &de) || de.ExitCode() != domain.ExitWebOnly || de.Reason != domain.ReasonHardLine || de.WebURL == nil || *de.WebURL != "/settings/agents" {
+		t.Fatalf("hard line even when fully open: %+v", err)
 	}
-	if err := do(me, "tier.bound", "", noteIn{ID: "d", Assign: "someone"}); exit(err) != domain.ExitBasisRequired {
-		t.Fatalf("unbound: %v", err)
+	// 运行钥匙随运行所属 Agent 的档位；没有归属的运行只整理。
+	run := func(agent string) Trusted {
+		return Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run:r", Via: domain.ViaCLI, Run: "r"}, Level: authz.LevelRun, RunAgentID: agent,
+			RunScope: func(*store.Tx, authz.Object) (bool, bool, error) { return true, true, nil }}
 	}
-	// 绑定只来自账本：输入里自称不算（assignee 不等于凭据）。
-	if err := do(me, "tier.bound", "", noteIn{ID: "e", Assign: "owner"}); exit(err) != domain.ExitBasisRequired {
-		t.Fatalf("claimed binding: %v", err)
+	if err := do(run("agent_a"), "decision.answer", noteIn{ID: "q"}); err != nil {
+		t.Fatalf("run follows its agent: %v", err)
+	}
+	if exit(do(run(""), "decision.answer", noteIn{ID: "q"})) != domain.ExitTierClosed {
+		t.Fatal("a run without an agent only organizes")
+	}
+	// 内核自己不看档位；3b 对内核也是硬线。
+	sys := Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: "system:x", Via: domain.ViaClock}, Level: authz.LevelDelegate}
+	if err := do(sys, "rule.change", noteIn{ID: "r"}); err != nil || exit(do(sys, "key.issue", noteIn{ID: "k"})) != domain.ExitWebOnly {
+		t.Fatalf("system: %v", err)
+	}
+	// Web 本人：3b 要刚再输过口令，否则 reauth_required（20，不留痕）。
+	before := len(e.events(t))
+	if err := do(owner, "key.issue", noteIn{ID: "k"}); !errors.As(err, &de) || de.Code != domain.CodeReauthRequired || len(e.events(t)) != before {
+		t.Fatalf("web without reauth: %v", err)
+	}
+	fresh := owner
+	fresh.Fresh = true
+	if err := do(fresh, "key.issue", noteIn{ID: "k"}); err != nil || lastBasis() != domain.BasisOwnerWeb {
+		t.Fatalf("web with reauth: %v", err)
 	}
 }
 
@@ -734,12 +755,12 @@ func TestOnRejectRunsInTheRejectionTransaction(t *testing.T) {
 		return hookErr
 	})
 	c := e.bearer(t, auth.Spec{Kind: auth.Delegate})
-	c.Origin = auth.Origin{Session: "s1", SessionKind: "direct"}
+	c.Origin = auth.Origin{Session: "s1"}
 	do := func() error {
 		_, err := e.x.Do(bg, Request{Identity: c, Command: "tier.decide", Input: in(noteIn{ID: "o1"})})
 		return err
 	}
-	if exit(do()) != domain.ExitBasisRequired || len(got) != 1 || got[0].Object != "o1" || got[0].Exit != domain.ExitBasisRequired {
+	if exit(do()) != domain.ExitTierClosed || len(got) != 1 || got[0].Object != "o1" || got[0].Exit != domain.ExitTierClosed {
 		t.Fatalf("hook not called with the rejection: %+v", got)
 	}
 	types := map[string]int{}
@@ -751,7 +772,7 @@ func TestOnRejectRunsInTheRejectionTransaction(t *testing.T) {
 	}
 	// 回调失败：拒绝留痕、告警、回调写入一并回滚。
 	hookErr = errors.New("boom")
-	if err := do(); err == nil || exit(err) == domain.ExitBasisRequired {
+	if err := do(); err == nil || exit(err) == domain.ExitTierClosed {
 		t.Fatalf("hook failure must surface, got %v", err)
 	}
 	n := 0
@@ -768,7 +789,7 @@ func TestOnRejectRunsInTheRejectionTransaction(t *testing.T) {
 func TestReceiptCommandRejectionsRecordHealthAlert(t *testing.T) {
 	e := setup(t)
 	reg := func(name string, receipt bool) {
-		if err := e.x.Register(Spec{Name: name, Action: authz.ActionUpdateOwn, Receipt: receipt,
+		if err := e.x.Register(Spec{Name: name, Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Receipt: receipt,
 			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 				return authz.Object{ID: parse(in).ID}, nil
 			},
@@ -828,7 +849,7 @@ func TestReceiptCommandRejectionsRecordHealthAlert(t *testing.T) {
 // 提交后回调只看到"现场"事件：导入事件写进账本，但不出现在 Commit.Seqs。
 func TestCommitSeqsExcludeImportedEvents(t *testing.T) {
 	e := setup(t)
-	if err := e.x.Register(Spec{Name: "note.import", Action: authz.ActionUpdateOwn,
+	if err := e.x.Register(Spec{Name: "note.import", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) { return authz.Object{ID: "n1"}, nil },
 		Apply: func(c *Ctx) (any, error) {
 			for _, batch := range []string{"imp_1", ""} {

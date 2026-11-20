@@ -24,7 +24,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 const workHost = "work-host.cli"
@@ -82,12 +82,12 @@ func setup(t *testing.T, max int) *env {
 }
 
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1"}}
 }
 
 func (e *env) try(id command.Identity, cmd string, in any, chain command.Chain) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so", Chain: chain})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Chain: chain})
 }
 
 func (e *env) do(id command.Identity, cmd string, in any, chain command.Chain) command.Result {

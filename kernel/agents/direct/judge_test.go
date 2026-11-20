@@ -79,7 +79,6 @@ func setupJudge(t *testing.T, judgeURL, chatURL bool) *jenv {
 			if chatURL {
 				p.GenerateEndpoint = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}
 			}
-			p.ScreeningTimeoutMs = 1000
 			return nil
 		})
 		return err

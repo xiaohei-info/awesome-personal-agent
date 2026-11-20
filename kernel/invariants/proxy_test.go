@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
@@ -97,16 +96,16 @@ func TestInv3ReportDoneNeedsResultEvidence(t *testing.T) {
 	}
 }
 
-// 不变量 11：替本人做决定的代理写入必有依据——本人原话与会话引用，缺一不可；web_only 不因依据放行；运行凭据没有代答能力。
-// 每次依据不足记 command.rejected，事项不变。（授权单放行与撤销由授权单节点验证。）
+// 不变量 11（2026-11-20 改写）：替本人拍板的写入只在档位放开时生效，调用方填报的任何内容都不是依据。
+// 档位只整理的 delegate 与运行凭据（随所属 Agent 的档位，未归属即只整理）都得 23、留痕、事项不变；
+// 放开二档后生效，事件记 Agent 自己（resolved_via=agent、依据为档位放开），不写 on_behalf_of。
 func TestInv11ProxyDecisionsNeedWordsAndSession(t *testing.T) {
 	st, x, now := proxyKernel(t)
 	asked := idOf(mustDo(t, x, owner, "item.create", map[string]any{"title": "t", "kind": "task", "phase": "open"}))
 	mustDo(t, x, owner, "decision.request", map[string]any{"id": asked, "ask": ask(nil)})
 	proposed := idOf(mustDo(t, x, owner, "item.create", map[string]any{"title": "p", "kind": "task", "phase": "proposed"}))
-	noSession := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
-	call := func(id command.Identity, ev, cmd string, in map[string]any) error {
-		_, err := x.Do(bg, command.Request{Identity: id, Command: cmd, Input: jsonOf(t, in), Owner: "owner", Evidence: ev, WebURL: "http://web"})
+	call := func(id command.Identity, cmd string, in map[string]any) error {
+		_, err := x.Do(bg, command.Request{Identity: id, Command: cmd, Input: jsonOf(t, in), Owner: "owner", WebURL: "http://web"})
 		return err
 	}
 	cases := []struct {
@@ -118,39 +117,42 @@ func TestInv11ProxyDecisionsNeedWordsAndSession(t *testing.T) {
 		{"proposal.accept", map[string]any{"id": proposed}, func() bool { return getItem(t, st, proposed).Phase == domain.PhaseProposed }},
 	}
 	for _, c := range cases {
-		for name, a := range map[string]struct {
-			id command.Identity
-			ev string
-		}{"no words": {delegate, ""}, "blank words": {delegate, "  "}, "words without session": {noSession, "owner: yes"}} {
-			before := rejectedCount(t, st)
-			if err := call(a.id, a.ev, c.cmd, c.in); exit(err) != domain.ExitBasisRequired {
-				t.Errorf("%s/%s: want exit 23, got %v", c.cmd, name, err)
-			}
-			if rejectedCount(t, st) != before+1 || !c.held() {
-				t.Errorf("%s/%s: want one command.rejected and an unchanged item", c.cmd, name)
-			}
+		before := rejectedCount(t, st)
+		if err := call(delegate, c.cmd, c.in); exit(err) != domain.ExitTierClosed {
+			t.Errorf("%s: want exit 23, got %v", c.cmd, err)
+		}
+		if rejectedCount(t, st) != before+1 || !c.held() {
+			t.Errorf("%s: want one command.rejected and an unchanged item", c.cmd)
 		}
 	}
-	// 运行凭据：带齐原话也是 4。
 	run := runCredential(t, st, now, asked)
-	if err := call(run, "owner: yes", "decision.answer", cases[0].in); exit(err) != domain.ExitPermissionDenied {
-		t.Errorf("run credential: want exit 4, got %v", err)
+	if err := call(run, "decision.answer", cases[0].in); exit(err) != domain.ExitTierClosed || !cases[0].held() {
+		t.Errorf("run credential without an Agent tier: want exit 23, got %v", err)
 	}
-	// 原话加会话：放行，Event 带 on_behalf_of、原话与会话。
-	if err := call(delegate, "owner: yes", "decision.answer", cases[0].in); err != nil {
-		t.Fatalf("words and session: %v", err)
+	if err := st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent["agent_dlg"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := call(delegate, "decision.answer", cases[0].in); err != nil {
+		t.Fatalf("decide tier: %v", err)
 	}
 	var ok bool
 	_ = st.View(bg, func(tx *store.Tx) error {
 		es, _ := eventlog.ReadObject(tx, asked)
 		for _, en := range es {
-			a := en.Event.Actor
-			ok = ok || (en.Event.ResolvedVia == "chat" && a.OnBehalfOf == "owner" && a.Session == "s1" && en.Event.Evidence == "owner: yes")
+			ev := en.Event
+			ok = ok || (ev.Type == domain.EvDecisionResolved && ev.ResolvedVia == decisions.ViaAgent && ev.Actor.OnBehalfOf == "" &&
+				ev.Actor.Principal == "dlg" && ev.Basis != nil && ev.Basis.Via == domain.BasisAllowance)
 		}
 		return nil
 	})
 	if !ok {
-		t.Error("the answer Event must carry on_behalf_of, the owner's words and the session")
+		t.Error("the answer Event must name the Agent and the allowance, not the owner")
 	}
 }
 

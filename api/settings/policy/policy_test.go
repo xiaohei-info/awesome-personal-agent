@@ -158,7 +158,7 @@ func TestSettingsRejectNonWebCallers(t *testing.T) {
 		for _, p := range routes {
 			for _, m := range []string{"GET", "PUT"} {
 				rec := e.do(m, p, `{"persona":"x"}`, mod)
-				if rec.Code != 403 || errCode(t, rec) != domain.CodeWebOnly {
+				if rec.Code != 403 || !refused(errCode(t, rec)) {
 					t.Fatalf("%s %s as %s: %d %s", m, p, kind, rec.Code, rec.Body)
 				}
 			}
@@ -207,25 +207,25 @@ func TestWebWritesNewPolicyVersionAndEvent(t *testing.T) {
 		} `json:"web_only"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if rec.Code != 200 || got.Version != 0 || len(got.WebOnly.Categories) != 5 {
+	if rec.Code != 200 || got.Version != 0 {
 		t.Fatalf("initial GET: %d %s", rec.Code, rec.Body)
 	}
 
-	body := `{"web_only":{"categories":["funds","external_commitment","irreversible","permission_change","spec_activation"],"rules":[{"tag":"acc-finance","category":"funds"}]}}`
+	body := `{"persona":"简洁"}`
 	rec = e.do("PUT", routes[0], body, e.web)
 	if rec.Code != 200 {
 		t.Fatalf("PUT: %d %s", rec.Code, rec.Body)
 	}
 	v, p := e.current()
-	if v != 1 || len(p.WebOnly.Categories) != 5 || len(p.WebOnly.Rules) != 1 || p.WebOnly.Rules[0].Tag != "acc-finance" {
-		t.Fatalf("stored v%d %+v", v, p.WebOnly)
+	if v != 1 || p.Persona != "简洁" {
+		t.Fatalf("stored v%d %+v", v, p.Persona)
 	}
 	if ev := e.eventTypes(); len(ev) != 1 || ev[0] != string(domain.EvPolicyChanged) {
 		t.Fatalf("events %v", ev)
 	}
-	// 新版本被授权内核实际采用：该 tag 的决策属于 web_only。
-	if !authz.WebOnly(p, authz.Object{Tags: []string{"acc-finance"}}) {
-		t.Fatal("authz does not see the new rule")
+	// 已取消的段（web_only、material_write）不再接受。
+	if rec := e.do("PUT", routes[0], `{"web_only":{"categories":["funds"]}}`, e.web); rec.Code != 400 {
+		t.Fatalf("cancelled section: %d %s", rec.Code, rec.Body)
 	}
 	// 同内容再 PUT 不产生新版本。
 	e.do("PUT", routes[0], body, e.web)
@@ -237,14 +237,14 @@ func TestWebWritesNewPolicyVersionAndEvent(t *testing.T) {
 // 未出现的段不动；persona 写入后可读回。
 func TestPartialPutKeepsOtherSections(t *testing.T) {
 	e := setup(t)
-	e.do("PUT", routes[0], `{"material_write":{"default":"direct","kinds":{}}}`, e.web)
+	e.do("PUT", routes[0], `{"persona_lang":"en"}`, e.web)
 	rec := e.do("PUT", routes[0], `{"persona":"简洁、直接"}`, e.web)
 	if rec.Code != 200 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 	v, p := e.current()
-	if v != 2 || p.Persona != "简洁、直接" || p.MaterialWrite.Default != "direct" {
-		t.Fatalf("v%d persona=%q mw=%+v", v, p.Persona, p.MaterialWrite)
+	if v != 2 || p.Persona != "简洁、直接" || p.PersonaLang != "en" {
+		t.Fatalf("v%d persona=%q lang=%q", v, p.Persona, p.PersonaLang)
 	}
 	rec = e.do("GET", routes[0], "", e.web)
 	if !strings.Contains(rec.Body.String(), "简洁、直接") {
@@ -348,7 +348,13 @@ func TestAccessLimitsAndModelEndpointSecret(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 
-	rec = e.do("PUT", routes[2], `{"generate_endpoint":{"url":"https://m.example/v1","model":"m","api_key":"sk-secret"},"screening_timeout_ms":5000}`, e.web)
+	// 随旧权限模型取消的段：带上就是 400，不写新版本。
+	for _, c := range [][2]string{{routes[2], `{"screening_timeout_ms":5000}`}, {routes[0], `{"web_only":{"categories":["funds"],"rules":[]}}`}, {routes[0], `{"material_write":{"default":"direct","kinds":{}}}`}} {
+		if rec := e.do("PUT", c[0], c[1], e.web); rec.Code != 400 {
+			t.Errorf("removed section %s accepted: %d %s", c[1], rec.Code, rec.Body)
+		}
+	}
+	rec = e.do("PUT", routes[2], `{"generate_endpoint":{"url":"https://m.example/v1","model":"m","api_key":"sk-secret"}}`, e.web)
 	if rec.Code != 200 || strings.Contains(rec.Body.String(), "sk-secret") {
 		t.Fatalf("PUT leaked key: %d %s", rec.Code, rec.Body)
 	}
@@ -422,7 +428,7 @@ func TestDailyCapAndMutesAreWebOnly(t *testing.T) {
 	e := setup(t)
 	body := `{"disturb":{"routes":{"decision":"web","brief":"web","reminder":"web","health":"web","wake":"web"},"merge_window_sec":0,"remind_on_deadline":true,"daily_cap":0,"mutes":[{"scope":"project","id":"p"}],"followup_defer":false}}`
 	rec := e.do("PUT", routes[0], body, e.bearer(auth.Delegate))
-	if rec.Code != 403 || errCode(t, rec) != domain.CodeWebOnly {
+	if rec.Code != 403 || errCode(t, rec) != domain.CodeTierClosed { // 提醒设置是 3a：没放开档位的 Agent 得 23
 		t.Fatalf("delegate PUT: %d %s", rec.Code, rec.Body)
 	}
 	if v, p := e.current(); v != 0 || p.Disturb.DailyCap != 20 || len(p.Disturb.Mutes) != 0 {
@@ -485,8 +491,8 @@ func TestSplitEndpointsDefaultsAndNull(t *testing.T) {
 	_ = json.Unmarshal(out["judge_endpoint"], &j)
 	_ = json.Unmarshal(out["generate_endpoint"], &g)
 	if j["locality"] != "external" || g["locality"] != "external" || g["protocol"] != "chat-completions" || j["timeout_ms"] != 10000.0 || j["max_batch"] != 32.0 ||
-		j["max_material_chars"] != 8000.0 || string(out["screening_timeout_ms"]) != "30000" {
-		t.Fatalf("judge=%v generate=%v out=%s", j, g, out["screening_timeout_ms"])
+		j["max_material_chars"] != 8000.0 || out["screening_timeout_ms"] != nil {
+		t.Fatalf("judge=%v generate=%v out=%v", j, g, out)
 	}
 	out = e.endpoints(`{"judge_endpoint":null,"generate_endpoint":null}`)
 	if string(out["judge_endpoint"]) != "null" || string(out["generate_endpoint"]) != "null" {
@@ -515,7 +521,7 @@ func TestLegacyShapeReadAndPut(t *testing.T) {
 	}
 	rec := e.do("GET", routes[2], "", e.web)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"url":"http://old.example/v1"`) || !strings.Contains(rec.Body.String(), `"locality":"external"`) ||
-		!strings.Contains(rec.Body.String(), `"judge_endpoint":null`) || !strings.Contains(rec.Body.String(), `"screening_timeout_ms":45000`) ||
+		!strings.Contains(rec.Body.String(), `"judge_endpoint":null`) || strings.Contains(rec.Body.String(), "screening_timeout_ms") ||
 		strings.Contains(rec.Body.String(), "model_endpoint") || strings.Contains(rec.Body.String(), "sk-old") {
 		t.Fatalf("GET: %d %s", rec.Code, rec.Body)
 	}
@@ -523,12 +529,12 @@ func TestLegacyShapeReadAndPut(t *testing.T) {
 		t.Fatalf("read created a version: %d", v)
 	}
 
-	// 先设判断端点 J，再用旧形状 PUT：生成端点按所给值（external），超时提到顶层，J 不变，旧密钥可经占位保留。
+	// 先设判断端点 J，再用旧形状 PUT：生成端点按所给值（external），旧形状里的初筛超时随初筛取消而忽略，J 不变，旧密钥可经占位保留。
 	e.endpoints(`{"judge_endpoint":{"url":"http://cls.example/j","api_key":"sk-j"}}`)
 	out := e.endpoints(`{"model_endpoint":{"url":"http://stub.example/v1","model":"acc-model","api_key":"k1","screening_timeout_ms":45000}}`)
 	var g map[string]any
 	_ = json.Unmarshal(out["generate_endpoint"], &g)
-	if g["url"] != "http://stub.example/v1" || g["model"] != "acc-model" || g["locality"] != "external" || string(out["screening_timeout_ms"]) != "45000" ||
+	if g["url"] != "http://stub.example/v1" || g["model"] != "acc-model" || g["locality"] != "external" || out["screening_timeout_ms"] != nil ||
 		!strings.Contains(string(out["judge_endpoint"]), "http://cls.example/j") {
 		t.Fatalf("generate=%v out=%v", g, out)
 	}
@@ -575,7 +581,7 @@ func TestSaveUnchangedOverLegacyWritesNewVersion(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	same := `{"judge_endpoint":null,"generate_endpoint":{"url":"http://old.example/v1","model":"old-m","locality":"external"},"screening_timeout_ms":45000}`
+	same := `{"judge_endpoint":null,"generate_endpoint":{"url":"http://old.example/v1","model":"old-m","locality":"external"}}`
 	var out map[string]json.RawMessage
 	for i, want := range []string{"2", "2"} {
 		rec := e.do("PUT", routes[2], same, e.web)

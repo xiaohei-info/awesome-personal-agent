@@ -91,8 +91,26 @@ func newKernel(t *testing.T) *kernel {
 			t.Fatal(err)
 		}
 	}
+	// decider 是归属 agent_d、本人放开到「也替我拍板」的 delegate 钥匙；auth.Delegate 那把没有归属，只整理。
+	if err := st.Update(bg, func(tx *store.Tx) error {
+		_, s, err := k.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_d", Harness: "h"})
+		if err != nil {
+			return err
+		}
+		k.tokens[decider] = s
+		_, err = policy.Update(tx, owner.Actor, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent["agent_d"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	return k
 }
+
+// decider 是测试里的伪种类：tokens 里放开了二档的那把 delegate 钥匙。
+const decider auth.Kind = "decider"
 
 // restartClock 模拟内核重启：新建时钟实例，Timer 在账本里。
 func (k *kernel) restartClock() {
@@ -130,7 +148,7 @@ func (r run) json(t *testing.T) map[string]any {
 func (k *kernel) apa(kind auth.Kind, args ...string) run {
 	k.t.Helper()
 	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": k.t.TempDir()}
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": k.tokens[kind], "APA_SESSION": "s1", "APA_HOME": k.t.TempDir()}
 	code := client.Main(args, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return run{code, out.String(), errb.String()}
@@ -160,13 +178,13 @@ func (k *kernel) errCode(r run) string {
 	return e.Code
 }
 
-var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 
 // own 以本人身份直接走内核命令（Web 才能做的事：开项目、确认建议、指派他人）。
 func (k *kernel) own(cmd string, in map[string]any) command.Result {
 	k.t.Helper()
 	b, _ := json.Marshal(in)
-	r, err := k.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner", Evidence: "owner"})
+	r, err := k.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner"})
 	if err != nil {
 		k.t.Fatal(err)
 	}
@@ -203,14 +221,14 @@ func TestProposeCreatesProposedItemAndShowReadsItBack(t *testing.T) {
 func TestTransitionToWaitingNeedsWaitingOn(t *testing.T) {
 	k := newKernel(t)
 	id := k.openItem()
-	r := k.apa(auth.Delegate, "item", "transition", id, "--to", "waiting", "--reason", "quote", "--evidence", "owner said so")
+	r := k.apa(auth.Delegate, "item", "transition", id, "--to", "waiting", "--reason", "quote")
 	if r.code == 0 || k.phase(id) != "open" {
 		t.Fatalf("waiting without waiting_on must fail and keep the phase: %+v", r)
 	}
 	if e := (map[string]any{}); json.Unmarshal([]byte(r.errOut), &e) != nil || e["code"] == nil || e["why"] == nil || e["next"] == nil {
 		t.Fatalf("error body must carry code/why/next: %q", r.errOut)
 	}
-	k.ok(auth.Delegate, "item", "transition", id, "--to", "waiting", "--reason", "quote", "--waiting-on", "external:报价单", "--evidence", "owner said so")
+	k.ok(auth.Delegate, "item", "transition", id, "--to", "waiting", "--reason", "quote", "--waiting-on", "external:报价单")
 	it := k.item(id)
 	if it["phase"] != "waiting" || it["waiting_on"].(map[string]any)["ref"] != "报价单" {
 		t.Fatalf("item = %v", it)
@@ -221,11 +239,11 @@ func TestTransitionToWaitingNeedsWaitingOn(t *testing.T) {
 func TestTransitionToNeedsInputNeedsAsk(t *testing.T) {
 	k := newKernel(t)
 	id := k.openItem()
-	if r := k.apa(auth.Delegate, "item", "transition", id, "--to", "needs_input", "--reason", "q", "--evidence", "owner said so"); r.code == 0 || k.phase(id) != "open" {
+	if r := k.apa(auth.Delegate, "item", "transition", id, "--to", "needs_input", "--reason", "q"); r.code == 0 || k.phase(id) != "open" {
 		t.Fatalf("needs_input without ask must fail and keep the phase: %+v", r)
 	}
-	k.ok(auth.Delegate, "item", "update", id, "--ask", `{"question":"which one?","free_text":true}`, "--reason", "need a choice", "--evidence", "owner said so")
-	k.ok(auth.Delegate, "item", "transition", id, "--to", "needs_input", "--reason", "q", "--evidence", "owner said so")
+	k.ok(auth.Delegate, "item", "update", id, "--ask", `{"question":"which one?","free_text":true}`, "--reason", "need a choice")
+	k.ok(auth.Delegate, "item", "transition", id, "--to", "needs_input", "--reason", "q")
 	it := k.item(id)
 	if it["phase"] != "needs_input" || it["ask"].(map[string]any)["question"] != "which one?" {
 		t.Fatalf("item = %v", it)
@@ -236,16 +254,16 @@ func TestTransitionToNeedsInputNeedsAsk(t *testing.T) {
 func TestDroppedNeedsReasonAndTerminalItemsReopen(t *testing.T) {
 	k := newKernel(t)
 	dropped, done := k.openItem(), k.openItem()
-	if r := k.apa(auth.Delegate, "item", "transition", dropped, "--to", "dropped", "--evidence", "owner said so"); r.code == 0 || k.phase(dropped) != "open" {
+	if r := k.apa(auth.Delegate, "item", "transition", dropped, "--to", "dropped"); r.code == 0 || k.phase(dropped) != "open" {
 		t.Fatalf("dropped without reason must fail: %+v", r)
 	}
-	k.ok(auth.Delegate, "item", "transition", dropped, "--to", "dropped", "--reason", "obsolete", "--evidence", "owner said so")
-	k.ok(auth.Delegate, "item", "transition", done, "--to", "done", "--reason", "finished", "--evidence", "owner said so")
+	k.ok(auth.Delegate, "item", "transition", dropped, "--to", "dropped", "--reason", "obsolete")
+	k.ok(auth.Delegate, "item", "transition", done, "--to", "done", "--reason", "finished")
 	if k.phase(dropped) != "dropped" || k.phase(done) != "done" {
 		t.Fatal("terminal items must stay queryable in their terminal phase")
 	}
 	for _, id := range []string{dropped, done} {
-		k.ok(auth.Delegate, "item", "transition", id, "--to", "open", "--reason", "back again", "--evidence", "owner said so")
+		k.ok(auth.Delegate, "item", "transition", id, "--to", "open", "--reason", "back again")
 		if k.phase(id) != "open" {
 			t.Fatalf("%s did not reopen", id)
 		}
@@ -303,41 +321,35 @@ func TestRelateAndListFilters(t *testing.T) {
 	}
 }
 
-// delegate 经 CLI 改他人事项的标题与建关系是第二档：缺 --evidence 退出码 23、账本不变；带了则 Event 记证据与 on_behalf_of。
-func TestDelegateUpdateAndRelateCarryEvidence(t *testing.T) {
+// delegate 经 CLI 改他人事项的标题与建关系是一档：直接生效，不要本人原话；Event 记的是 Agent 自己，不带 on_behalf_of，
+// 依据记为一档整理。
+func TestDelegateUpdateAndRelateAreOrganize(t *testing.T) {
 	k := newKernel(t)
 	a, b := k.openItem(), k.openItem()
-	for _, args := range [][]string{
-		{"item", "update", a, "--title", "new", "--reason", "r"},
-		{"item", "relate", a, "--to", b, "--type", "relates", "--reason", "r"},
-	} {
-		if r := k.apa(auth.Delegate, args...); r.code != 23 || k.item(a)["title"] != "t" {
-			t.Fatalf("%v without evidence: %+v", args, r)
-		}
+	k.ok(auth.Delegate, "item", "update", a, "--title", "new", "--reason", "r")
+	k.ok(auth.Delegate, "item", "relate", a, "--to", b, "--type", "relates", "--reason", "r")
+	if k.item(a)["title"] != "new" {
+		t.Fatal("tier-1 update must apply")
 	}
-	k.ok(auth.Delegate, "item", "update", a, "--title", "new", "--reason", "r", "--evidence", "owner: rename it")
-	k.ok(auth.Delegate, "item", "relate", a, "--to", b, "--type", "relates", "--reason", "r", "--evidence", "owner: link them")
-	var evs []domain.Event
+	var n int
 	if err := k.st.View(bg, func(tx *store.Tx) error {
 		es, err := eventlog.ReadObject(tx, a)
 		for _, e := range es {
-			evs = append(evs, e.Event)
+			if e.Event.Type != domain.EvItemUpdated {
+				continue
+			}
+			n++
+			if e.Event.Actor.Type != domain.ActorAgent || e.Event.Actor.OnBehalfOf != "" || e.Event.Evidence != "" ||
+				e.Event.Basis == nil || e.Event.Basis.Via != domain.BasisOrganize {
+				t.Fatalf("event %d must record the Agent itself on tier 1: %+v", e.Event.Seq, e.Event)
+			}
 		}
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for _, e := range evs {
-		if e.Type == domain.EvItemUpdated {
-			if e.Actor.OnBehalfOf == "" {
-				t.Fatalf("event %d has no on_behalf_of", e.Seq)
-			}
-			got = append(got, e.Evidence)
-		}
-	}
-	if len(got) != 2 || got[0] != "owner: rename it" || got[1] != "owner: link them" {
-		t.Fatalf("evidence on item.updated events = %q", got)
+	if n != 2 {
+		t.Fatalf("item.updated events = %d", n)
 	}
 }
 
@@ -406,7 +418,7 @@ func TestMovingIntoProjectWithDisallowedExecutorExits21(t *testing.T) {
 	k.own("project.allowed_executors.set", map[string]any{"id": p.ID, "executors": []string{"work-host.codex"}})
 
 	id := k.openItem(map[string]any{"assignee": "other-host.cli"})
-	r := k.apa(auth.Delegate, "item", "update", id, "--project", p.ID, "--reason", "move", "--evidence", "owner said so")
+	r := k.apa(auth.Delegate, "item", "update", id, "--project", p.ID, "--reason", "move")
 	if r.code != 21 || k.errCode(r) != "executor_not_allowed" {
 		t.Fatalf("%+v", r)
 	}
@@ -430,28 +442,6 @@ func TestInboxListsPendingAndSuggestions(t *testing.T) {
 	}
 	if p, s := ids("pending"), ids("suggestions"); len(p) != 1 || p[0] != ask || len(s) != 1 || s[0] != sug {
 		t.Fatalf("inbox = %s", k.apa(auth.Observer, "inbox").out)
-	}
-}
-
-// web_only 初筛未返回的决策请求不进 inbox（附录 B.1）；过滤只看内核给的 screening_pending 标记。
-func TestInboxHidesScreeningPendingAsks(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Query().Get("phase") {
-		case "needs_input":
-			_, _ = w.Write([]byte(`{"items":[{"id":"shown","phase":"needs_input","ask":{"question":"q"}},{"id":"hidden","phase":"needs_input","ask":{"question":"q","screening_pending":true}}]}`))
-		case "proposed":
-			_, _ = w.Write([]byte(`{"items":[]}`))
-		default:
-			w.WriteHeader(400)
-		}
-	}))
-	defer srv.Close()
-	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": srv.URL, "APA_TOKEN": "t"}
-	code := client.Main([]string{"inbox"}, client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: t.TempDir(),
-		Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
-	if code != 0 || strings.Contains(out.String(), "hidden") || !strings.Contains(out.String(), "shown") {
-		t.Fatalf("code=%d out=%s err=%s", code, out.String(), errb.String())
 	}
 }
 
@@ -488,7 +478,7 @@ func TestItemAddWritesFieldsAndKernelGuardsPhase(t *testing.T) {
 func TestUpdateEmptyValueClearsField(t *testing.T) {
 	k := newKernel(t)
 	id := k.openItem(map[string]any{"summary": "old"})
-	k.ok(auth.Worker, "item", "update", id, "--summary", "", "--reason", "clear", "--evidence", "e")
+	k.ok(auth.Worker, "item", "update", id, "--summary", "", "--reason", "clear")
 	if k.item(id)["summary"] != nil {
 		t.Fatalf("summary not cleared: %v", k.item(id))
 	}
@@ -501,16 +491,18 @@ func TestUpdateWithoutChangesIsRejectedByKernel(t *testing.T) {
 	}
 }
 
-// delegate 改他人的事项不带本人原话时被内核拒绝（23）；带上后同一动作成功——on_behalf_of 由 API 层补齐。
-func TestDelegateNeedsEvidence(t *testing.T) {
+// 让事项成为承诺是二档：只整理的 delegate 直接建 open 事项为 23，账本不变；放开拍板的 Agent 可以，建议照旧谁都能提。
+func TestCommitmentNeedsDecideTier(t *testing.T) {
 	k := newKernel(t)
-	id := k.openItem(map[string]any{"assignee": "other-host.cli"})
-	if r := k.apa(auth.Delegate, "item", "update", id, "--title", "x", "--reason", "r"); r.code != 23 {
-		t.Fatalf("delegate without evidence: %+v", r)
+	add := []string{"item", "add", "--kind", "task", "--title", "c", "--phase", "open", "--reason", "r"}
+	if r := k.apa(auth.Delegate, add...); r.code != 23 || k.errCode(r) != string(domain.CodeTierClosed) {
+		t.Fatalf("organize-only commit: %+v", r)
 	}
-	k.ok(auth.Delegate, "item", "update", id, "--title", "x", "--reason", "r", "--evidence", "owner said so")
-	if k.item(id)["title"] != "x" {
-		t.Fatal("update with evidence must apply")
+	if id := k.idOf(k.ok(decider, add...)); k.phase(id) != "open" {
+		t.Fatal("decide-tier commit must apply")
+	}
+	if id := k.idOf(k.ok(auth.Delegate, "propose", "--kind", "task", "--title", "p", "--reason", "r")); k.phase(id) != "proposed" {
+		t.Fatal("proposals stay open to every Agent")
 	}
 }
 
@@ -571,12 +563,10 @@ func TestItemProgress(t *testing.T) {
 	if r := k.apa(auth.Worker, "item", "progress", other, "--text", "x"); r.code != 4 {
 		t.Fatalf("worker on another's item: exit %d %s", r.code, r.errOut)
 	}
-	if r := k.apa(auth.Delegate, "item", "progress", other, "--text", "x"); r.code != 23 {
-		t.Fatalf("delegate without basis: exit %d %s", r.code, r.errOut)
-	}
-	k.ok(auth.Delegate, "item", "progress", other, "--text", "本人说已订", "--evidence", "已订好了")
+	// 写进展是一档：delegate 对任何事项都直接可写。
+	k.ok(auth.Delegate, "item", "progress", other, "--text", "已订")
 	if len(k.progress(other)) != 1 {
-		t.Fatal("authorized progress missing")
+		t.Fatal("delegate progress missing")
 	}
 	var seen bool
 	_ = k.st.View(bg, func(tx *store.Tx) error {
@@ -612,7 +602,7 @@ func TestToday(t *testing.T) {
 	}
 }
 
-// ACT-MSG-14/17：apa item relate --key 登记与移除关联键，show 看到；观察者退出码 4，delegate 缺依据退出码 23，账本不变。
+// ACT-MSG-14/17：apa item relate --key 登记与移除关联键，show 看到；观察者退出码 4、账本不变；delegate 是一档直接可做。
 func TestRelateKeyRegistersAndRemoves(t *testing.T) {
 	k := newKernel(t)
 	id := k.openItem()
@@ -621,13 +611,10 @@ func TestRelateKeyRegistersAndRemoves(t *testing.T) {
 	if r := k.apa(auth.Observer, "item", "relate", id, "--key", "fm-x"); r.code != 4 {
 		t.Fatalf("observer: %+v", r)
 	}
-	if r := k.apa(auth.Delegate, "item", "relate", id, "--key", "fm-y"); r.code != 23 {
-		t.Fatalf("delegate without evidence: %+v", r)
-	}
 	if len(keys()) != 0 {
 		t.Fatalf("rejected registrations left keys: %v", keys())
 	}
-	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm", "--evidence", "本人原话：归到这件事")
+	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm")
 	got := keys()
 	if len(got) != 1 || got[0].(map[string]any)["key"] != "fm-thread-1" || got[0].(map[string]any)["domain"] != "acc-fm" {
 		t.Fatalf("keys = %v", got)
@@ -635,7 +622,7 @@ func TestRelateKeyRegistersAndRemoves(t *testing.T) {
 	if r := k.apa(auth.Worker, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm"); r.code != 6 {
 		t.Fatalf("duplicate: %+v", r)
 	}
-	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm", "--remove", "--evidence", "本人原话：解除关联")
+	k.ok(auth.Delegate, "item", "relate", id, "--key", "fm-thread-1", "--domain", "acc-fm", "--remove")
 	if len(keys()) != 0 {
 		t.Fatalf("key not removed: %v", keys())
 	}
@@ -648,16 +635,16 @@ func TestRelateKeyRegistersAndRemoves(t *testing.T) {
 func TestItemDeadlineFlag(t *testing.T) {
 	k := newKernel(t)
 	want := time.Date(2026, 3, 5, 23, 59, 59, 0, time.Local)
-	id := k.idOf(k.ok(auth.Worker, "item", "add", "--kind", "task", "--title", "d", "--phase", "open", "--assignee", "wrk1", "--deadline", "2026-03-05"))
+	id := k.idOf(k.ok(decider, "item", "add", "--kind", "task", "--title", "d", "--phase", "open", "--assignee", "wrk1", "--deadline", "2026-03-05"))
 	got, _ := time.Parse(time.RFC3339, k.item(id)["deadline"].(string))
 	if !got.Equal(want) {
 		t.Fatalf("date deadline = %v, want %v", got, want)
 	}
-	k.ok(auth.Worker, "item", "update", id, "--deadline", "2026-01-01T00:30:00Z", "--reason", "r", "--evidence", "e")
+	k.ok(auth.Worker, "item", "update", id, "--deadline", "2026-01-01T00:30:00Z", "--reason", "r")
 	if k.item(id)["deadline"] != "2026-01-01T00:30:00Z" {
 		t.Fatalf("rfc3339 deadline: %v", k.item(id)["deadline"])
 	}
-	k.ok(auth.Worker, "item", "update", id, "--deadline", "", "--reason", "r", "--evidence", "e")
+	k.ok(auth.Worker, "item", "update", id, "--deadline", "", "--reason", "r")
 	if k.item(id)["deadline"] != nil {
 		t.Fatalf("deadline not cleared: %v", k.item(id))
 	}
@@ -719,10 +706,10 @@ func TestItemOriginAndExtFlags(t *testing.T) {
 		}
 	}
 	oid := k.openItem()
-	if r := k.apa(auth.Worker, "item", "update", oid, "--origin", `{"source":"import:notes"}`, "--reason", "r", "--evidence", "e"); r.code != 2 {
+	if r := k.apa(auth.Worker, "item", "update", oid, "--origin", `{"source":"import:notes"}`, "--reason", "r"); r.code != 2 {
 		t.Fatalf("update import origin: exit %d %s", r.code, r.errOut)
 	}
-	k.ok(auth.Worker, "item", "update", oid, "--origin", `{"source":"manual"}`, "--ext", `{"a":1}`, "--reason", "r", "--evidence", "e")
+	k.ok(auth.Worker, "item", "update", oid, "--origin", `{"source":"manual"}`, "--ext", `{"a":1}`, "--reason", "r")
 	if k.item(oid)["origin"].(map[string]any)["source"] != "manual" {
 		t.Fatalf("origin not updated: %v", k.item(oid))
 	}

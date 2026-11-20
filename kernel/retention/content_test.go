@@ -18,7 +18,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-var web = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+var web = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 
 const rawBody = "RAW-BODY-MARKER"
 
@@ -36,7 +36,7 @@ func newContentEnv(t *testing.T) *env {
 func (e *env) do(cmd string, in any) map[string]any {
 	e.t.Helper()
 	b, _ := json.Marshal(in)
-	r, err := e.x.Do(bg, command.Request{Identity: web, Command: cmd, Input: b, Evidence: "owner said so"})
+	r, err := e.x.Do(bg, command.Request{Identity: web, Command: cmd, Input: b})
 	if err != nil {
 		e.t.Fatalf("%s: %v", cmd, err)
 	}

@@ -599,7 +599,7 @@ func (e *Engine) do(ctx context.Context, k string, t *trigger, idem, cmd string,
 		Identity: command.Trusted{Actor: a, Level: authz.LevelDelegate},
 		Command:  cmd, Input: b, IdemKey: "rule:" + k + ":" + idem,
 		Chain:  command.Chain{Mode: command.ChainInherit, From: t.object},
-		RuleID: k, Evidence: "rule " + k, Owner: owner,
+		RuleID: k, Owner: owner,
 	})
 }
 
@@ -620,7 +620,7 @@ func (e *Engine) fail(ctx context.Context, d ruleDef, t *trigger, action string,
 		var de *domain.Error
 		if errors.As(cause, &de) {
 			switch de.ExitCode() {
-			case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitScreeningPending:
+			case domain.ExitWebOnly, domain.ExitExecutorNotAllowed, domain.ExitTierClosed:
 				return nil // 命令管线已经记了 command.rejected，本人的事项详情里看得到
 			}
 		}

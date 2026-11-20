@@ -47,7 +47,7 @@ func (e Env) now() time.Time {
 
 // Kernel 读取账本事实后运行内核一侧的全部检查。
 func Kernel(ctx context.Context, f Facts, e Env) []Check {
-	out := []Check{tier(f), modelEndpoint(ctx, f, e), sources(f, e), packCheck(e), channels(f, e)}
+	out := []Check{tier(f), modelEndpoint(ctx, f, e), sources(f, e), packCheck(e), channels(f, e), authzCheck(f)}
 	if f.ConnectionsRead {
 		out = append(out, secretsCheck(f), connectionsCheck(f))
 	}
@@ -91,6 +91,19 @@ func tier(f Facts) Check {
 		c.Next = "nothing to do"
 	}
 	return c
+}
+
+// ---- 权限模型（§14.3、§16.5） ----
+
+// authzCheck：账本里不能还留着旧权限模型的东西（策略旧段、有效授权单）；服务启动时自动切换，所以这一项出错说明切换没跑成。
+// 新建的账本没有旧东西，没切换也不算错。
+func authzCheck(f Facts) Check {
+	if len(f.LegacyPolicy) == 0 && (f.AuthzSwitched || f.ActiveGrants == 0) {
+		return Check{Name: Authz, Status: OK, Code: CodeAuthzSwitched, Why: "the ledger uses the three-tier permission model", Next: "nothing to do"}
+	}
+	return Check{Name: Authz, Status: Error, Code: CodeAuthzNotSwitched, Data: map[string]any{"switched": f.AuthzSwitched, "legacy_policy": f.LegacyPolicy, "active_grants": f.ActiveGrants},
+		Why:  "the ledger has not been switched to the three-tier permission model, or the policy still has old-model sections",
+		Next: "restart the service with this binary (it switches on start) and check the log for the switch error"}
 }
 
 // ---- 模型端点（§8.8） ----

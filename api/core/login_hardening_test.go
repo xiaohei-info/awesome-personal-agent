@@ -279,11 +279,7 @@ func TestSessionAndPasswordManagementIsWebOnly(t *testing.T) {
 	e := setup(t)
 	c, _ := e.login()
 	del := e.issue(auth.Delegate)
-	bearer := func(r *http.Request) {
-		r.Header.Set("Authorization", "Bearer "+del)
-		r.Header.Set(EvidenceHeader, "按本人原话")
-		r.Header.Set("X-APA-Session-Kind", "direct")
-	}
+	bearer := func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+del) }
 	for _, rq := range [][3]string{{"GET", "/v1/auth/sessions", ""}, {"DELETE", "/v1/auth/sessions", ""},
 		{"POST", "/v1/auth/password", `{"current":"` + ownerPW + `","new":"a-brand-new-passphrase"}`}} {
 		if r := e.do(rq[0], rq[1], rq[2], bearer); r.Code != 403 {

@@ -180,11 +180,9 @@ func (r resp) code() string {
 
 func (e *env) do(secret, method, path, body string, hdr ...string) resp {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	req.Header.Set(core.EvidenceHeader, "owner: go ahead") // delegate 代理写需要证据；其他凭据不读
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
 		req.Header.Set("X-APA-Session", "s1")
-		req.Header.Set("X-APA-Session-Kind", "direct")
 	}
 	for i := 0; i+1 < len(hdr); i += 2 {
 		req.Header.Set(hdr[i], hdr[i+1])
@@ -254,19 +252,23 @@ func TestSourceRegistrationContract(t *testing.T) {
 	if r := e.do(obs, "POST", "/v1/sources", hook); r.Code != 403 {
 		t.Fatalf("observer register: %d", r.Code)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 201 {
-		t.Fatalf("delegate webhook register: %d %s", r.Code, r.Body)
+	// 登记来源是 3b：Agent 钥匙一律硬线（20），只有 Web 本人能登记。
+	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 403 || r.code() != "web_only" || !strings.Contains(r.Body.String(), `"reason":"hard_line"`) {
+		t.Fatalf("delegate register must hit the hard line: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources", pull); r.Code != 201 {
-		t.Fatalf("delegate bundled pull register: %d %s", r.Code, r.Body)
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
+		t.Fatalf("web webhook register: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 409 {
+	if r := e.web("POST", "/v1/sources", pull); r.Code != 201 {
+		t.Fatalf("web bundled pull register: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 409 {
 		t.Fatalf("duplicate: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources", `[1]`); r.Code != 400 {
+	if r := e.web("POST", "/v1/sources", `[1]`); r.Code != 400 {
 		t.Fatalf("non-object: %d", r.Code)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources", `null`); r.Code != 400 {
+	if r := e.web("POST", "/v1/sources", `null`); r.Code != 400 {
 		t.Fatalf("null body: %d", r.Code)
 	}
 
@@ -292,21 +294,28 @@ func TestSourceRegistrationContract(t *testing.T) {
 	}
 
 	// PATCH：改字段、启停、空体、未知字段、类型不可改
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"schedule":"1h","enabled":false}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"schedule":"1h"`) || !strings.Contains(r.Body.String(), `"enabled":false`) {
+	if r := e.web("PATCH", "/v1/sources/src_feed", `{"schedule":"1h","enabled":false}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"schedule":"1h"`) || !strings.Contains(r.Body.String(), `"enabled":false`) {
 		t.Fatalf("patch: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"enabled":true}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"enabled":true`) {
+	if r := e.web("PATCH", "/v1/sources/src_feed", `{"enabled":true}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"enabled":true`) {
 		t.Fatalf("enable only: %d %s", r.Code, r.Body)
 	}
 	for body, want := range map[string]int{`{}`: 400, `{"type":"script"}`: 400, `{"cursor":"x"}`: 400, `{"enabled":"yes"}`: 400} {
-		if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", body); r.Code != want {
+		if r := e.web("PATCH", "/v1/sources/src_feed", body); r.Code != want {
 			t.Fatalf("patch %s: %d %s", body, r.Code, r.Body)
 		}
+	}
+	// 改来源配置是 3b（硬线）；只启停是 3a，Agent 档位未放开为 23。
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"schedule":"2h"}`); r.Code != 403 || r.code() != "web_only" {
+		t.Fatalf("delegate config patch: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"enabled":false}`); r.Code != 403 || r.code() != "tier_closed" {
+		t.Fatalf("delegate enable patch without rules tier: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(obs, "PATCH", "/v1/sources/src_feed", `{"schedule":"2h"}`); r.Code != 403 {
 		t.Fatalf("observer patch: %d", r.Code)
 	}
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_nope", `{"schedule":"2h"}`); r.Code != 404 {
+	if r := e.web("PATCH", "/v1/sources/src_nope", `{"schedule":"2h"}`); r.Code != 404 {
 		t.Fatalf("patch missing: %d", r.Code)
 	}
 }
@@ -321,13 +330,13 @@ func TestCustomCommandsRejectedForTokensAcceptedInWeb(t *testing.T) {
 	if r.Code != 403 || r.code() != "web_only" {
 		t.Fatalf("delegate script register must be web_only: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(wrk, "POST", "/v1/sources", script); r.Code != 403 || r.code() != "permission_denied" {
-		t.Fatalf("worker script register: %d %s", r.Code, r.Body)
+	if r := e.do(wrk, "POST", "/v1/sources", script); r.Code != 403 || r.code() != "web_only" {
+		t.Fatalf("worker script register hits the hard line before scope: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources", `{"id":"src_x","type":"pull","command":"/bin/sh -c evil","schedule":"1h","timeout":5}`); r.Code != 400 {
+	if r := e.web("POST", "/v1/sources", `{"id":"src_x","type":"pull","command":"/bin/sh -c evil","schedule":"1h","timeout":5}`); r.Code != 400 {
 		t.Fatalf("non-bundled pull command: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources", `{"id":"src_y","type":"webhook","command":"/bin/evil"}`); r.Code != 400 {
+	if r := e.web("POST", "/v1/sources", `{"id":"src_y","type":"webhook","command":"/bin/evil"}`); r.Code != 400 {
 		t.Fatalf("webhook with command: %d %s", r.Code, r.Body)
 	}
 	if got := e.do(dlg, "GET", "/v1/sources", ""); strings.Contains(got.Body.String(), "src_mail") || strings.Contains(got.Body.String(), "src_x") {
@@ -347,8 +356,8 @@ func TestCustomCommandsRejectedForTokensAcceptedInWeb(t *testing.T) {
 	if r := e.web("PATCH", "/v1/sources/src_mail", `{"command":"/opt/other"}`); r.Code != 200 || !strings.Contains(r.Body.String(), "/opt/other") {
 		t.Fatalf("web script patch: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_mail", `{"enabled":false}`); r.Code != 200 {
-		t.Fatalf("delegate may still disable a script source: %d %s", r.Code, r.Body)
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_mail", `{"enabled":false}`); r.Code != 403 || r.code() != "tier_closed" {
+		t.Fatalf("delegate disabling a source is 3a, closed by default: %d %s", r.Code, r.Body)
 	}
 }
 
@@ -360,22 +369,20 @@ func receive(e *env, id, key, body, delivery string) webhook.Response {
 func TestWebhookKeyIngestsAndReplay(t *testing.T) {
 	e := setup(t)
 	obs, wrk, dlg := e.token(auth.Observer), e.token(auth.Worker), e.token(auth.Delegate)
-	e.do(dlg, "POST", "/v1/sources", hook)
-	e.do(dlg, "POST", "/v1/sources", pull)
+	e.web("POST", "/v1/sources", hook)
+	e.web("POST", "/v1/sources", pull)
 
-	for name, c := range map[string]struct {
-		tok  string
-		path string
-		want int
-	}{
-		"observer": {obs, "/v1/sources/src_hook/webhook", 403},
-		"worker":   {wrk, "/v1/sources/src_hook/webhook", 403},
-		"missing":  {dlg, "/v1/sources/src_nope/webhook", 404},
-		"pull":     {dlg, "/v1/sources/src_feed/webhook", 400},
-	} {
-		if r := e.do(c.tok, "POST", c.path, ""); r.Code != c.want {
+	// 发接收密钥是 3b：任何 Agent 钥匙都是硬线，只有 Web 本人能发。
+	for name, tok := range map[string]string{"observer": obs, "worker": wrk, "delegate": dlg} {
+		if r := e.do(tok, "POST", "/v1/sources/src_hook/webhook", ""); r.Code != 403 || r.code() != "web_only" {
 			t.Fatalf("%s: %d %s", name, r.Code, r.Body)
 		}
+	}
+	if r := e.web("POST", "/v1/sources/src_nope/webhook", ""); r.Code != 404 {
+		t.Fatalf("missing: %d %s", r.Code, r.Body)
+	}
+	if r := e.web("POST", "/v1/sources/src_feed/webhook", ""); r.Code != 400 {
+		t.Fatalf("pull: %d %s", r.Code, r.Body)
 	}
 	if n := len(receiveKeys(e)); n != 0 {
 		t.Fatalf("failed attempts must not issue keys, got %d", n)
@@ -385,7 +392,7 @@ func TestWebhookKeyIngestsAndReplay(t *testing.T) {
 		Secret, URL string
 		Rotated     bool
 	}
-	r := e.do(dlg, "POST", "/v1/sources/src_hook/webhook", "", "Idempotency-Key", "ignored")
+	r := e.web("POST", "/v1/sources/src_hook/webhook", "")
 	r.into(&k1)
 	if r.Code != 201 || k1.Rotated || !strings.HasPrefix(k1.Secret, "apa_whk_") || k1.URL != "/ingest/src_hook" {
 		t.Fatalf("create key: %d %s", r.Code, r.Body)
@@ -456,7 +463,7 @@ func TestWebhookKeyIngestsAndReplay(t *testing.T) {
 		Secret  string
 		Rotated bool
 	}
-	r = e.do(dlg, "POST", "/v1/sources/src_hook/webhook", "")
+	r = e.web("POST", "/v1/sources/src_hook/webhook", "")
 	r.into(&k2)
 	if r.Code != 200 || !k2.Rotated || k2.Secret == k1.Secret || e.events(EvWebhookRotated) != 1 {
 		t.Fatalf("rotate: %d %s", r.Code, r.Body)
@@ -473,7 +480,7 @@ func TestWebhookKeyIngestsAndReplay(t *testing.T) {
 	}
 	// 再轮换一次：轮换的是新密钥，不会连带复活旧的
 	var k3 struct{ Secret string }
-	r = e.do(dlg, "POST", "/v1/sources/src_hook/webhook", "")
+	r = e.web("POST", "/v1/sources/src_hook/webhook", "")
 	r.into(&k3)
 	if r.Code != 200 || receive(e, "src_hook", k2.Secret, `{"n":5}`, "d5").Status != 200 || receive(e, "src_hook", k3.Secret, `{"n":6}`, "d6").Status != 200 {
 		t.Fatalf("second rotate: %d %s", r.Code, r.Body)
@@ -492,12 +499,12 @@ func signedReceive(e *env, key, body, delivery string) webhook.Response {
 // 账本、事件和任何 API 都读不回明文；轮换后新旧并存，宽限期满旧的失效并从文件里删掉。共享 token 方案不留明文。
 func TestHMACWebhookKeyIsKeptOnlyInKeyFile(t *testing.T) {
 	e := setup(t)
-	obs, dlg := e.token(auth.Observer), e.token(auth.Delegate)
-	e.do(dlg, "POST", "/v1/sources", hook)
-	if r := e.do(dlg, "POST", "/v1/sources", `{"id":"src_signed","type":"webhook","source_type":"forge","config":{"scheme":"signed"}}`); r.Code != 201 {
+	obs := e.token(auth.Observer)
+	e.web("POST", "/v1/sources", hook)
+	if r := e.web("POST", "/v1/sources", `{"id":"src_signed","type":"webhook","source_type":"forge","config":{"scheme":"signed"}}`); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources/src_hook/webhook", ""); r.Code != 201 {
+	if r := e.web("POST", "/v1/sources/src_hook/webhook", ""); r.Code != 201 {
 		t.Fatalf("token key: %d %s", r.Code, r.Body)
 	}
 	if _, err := os.Stat(filepath.Join(e.keys, "src_hook")); !os.IsNotExist(err) {
@@ -505,7 +512,7 @@ func TestHMACWebhookKeyIsKeptOnlyInKeyFile(t *testing.T) {
 	}
 
 	var k1, k2 struct{ Secret string }
-	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "").into(&k1)
+	e.web("POST", "/v1/sources/src_signed/webhook", "").into(&k1)
 	file := filepath.Join(e.keys, "src_signed")
 	fi, err := os.Stat(file)
 	if err != nil || fi.Mode().Perm() != 0o600 {
@@ -531,7 +538,7 @@ func TestHMACWebhookKeyIsKeptOnlyInKeyFile(t *testing.T) {
 		t.Fatalf("hmac key sent as a token: %d", got.Status)
 	}
 
-	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "").into(&k2)
+	e.web("POST", "/v1/sources/src_signed/webhook", "").into(&k2)
 	if signedReceive(e, k1.Secret, `{"n":5}`, "s5").Status != 200 || signedReceive(e, k2.Secret, `{"n":6}`, "s6").Status != 200 {
 		t.Fatal("old and new keys must both verify within the grace period")
 	}
@@ -539,7 +546,7 @@ func TestHMACWebhookKeyIsKeptOnlyInKeyFile(t *testing.T) {
 	if got := signedReceive(e, k1.Secret, `{"n":7}`, "s7"); got.Status != 401 {
 		t.Fatalf("old key after grace: %d", got.Status)
 	}
-	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "")
+	e.web("POST", "/v1/sources/src_signed/webhook", "")
 	if b, _ := os.ReadFile(file); strings.Contains(string(b), k1.Secret) || !strings.Contains(string(b), k2.Secret) {
 		t.Fatalf("rotation must drop expired keys and keep the valid one: %q", b)
 	}
@@ -572,20 +579,22 @@ func TestHMACWebhookKeyIsKeptOnlyInKeyFile(t *testing.T) {
 func TestRevokeWebhookKeyDeletesKeyFile(t *testing.T) {
 	e := setup(t)
 	obs, dlg := e.token(auth.Observer), e.token(auth.Delegate)
-	e.do(dlg, "POST", "/v1/sources", `{"id":"src_signed","type":"webhook","source_type":"forge","config":{"scheme":"signed"}}`)
+	e.web("POST", "/v1/sources", `{"id":"src_signed","type":"webhook","source_type":"forge","config":{"scheme":"signed"}}`)
 	var k1, k2 struct{ Secret string }
-	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "").into(&k1)
-	e.do(dlg, "POST", "/v1/sources/src_signed/webhook", "").into(&k2) // 轮换：宽限期内两把都有效
+	e.web("POST", "/v1/sources/src_signed/webhook", "").into(&k1)
+	e.web("POST", "/v1/sources/src_signed/webhook", "").into(&k2) // 轮换：宽限期内两把都有效
 	file := filepath.Join(e.keys, "src_signed")
 
-	if r := e.do(obs, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code == 200 {
-		t.Fatal("observer must not revoke receive keys")
+	for _, tok := range []string{obs, dlg} {
+		if r := e.do(tok, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 403 || r.code() != "web_only" {
+			t.Fatalf("revoking receive keys is 3b, Agent keys hit the hard line: %d %s", r.Code, r.Body)
+		}
 	}
 	if os.Geteuid() != 0 { // root 不受目录权限限制，无法制造删除失败
 		if err := os.Chmod(e.keys, 0o500); err != nil {
 			t.Fatal(err)
 		}
-		r := e.do(dlg, "DELETE", "/v1/sources/src_signed/webhook", "")
+		r := e.web("DELETE", "/v1/sources/src_signed/webhook", "")
 		_ = os.Chmod(e.keys, 0o700)
 		if r.Code == 200 {
 			t.Fatal("revoke must fail when the key file cannot be deleted")
@@ -596,7 +605,7 @@ func TestRevokeWebhookKeyDeletesKeyFile(t *testing.T) {
 	}
 
 	var out struct{ Revoked int }
-	if r := e.do(dlg, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 200 {
+	if r := e.web("DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 200 {
 		t.Fatalf("revoke: %d %s", r.Code, r.Body)
 	} else {
 		r.into(&out)
@@ -610,7 +619,7 @@ func TestRevokeWebhookKeyDeletesKeyFile(t *testing.T) {
 	if signedReceive(e, k1.Secret, `{}`, "r1").Status != 401 || signedReceive(e, k2.Secret, `{}`, "r2").Status != 401 {
 		t.Fatal("revoked keys must stop verifying")
 	}
-	if r := e.do(dlg, "DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 200 {
+	if r := e.web("DELETE", "/v1/sources/src_signed/webhook", ""); r.Code != 200 {
 		t.Fatalf("revoking again must be a no-op: %d", r.Code)
 	}
 	if strings.Contains(eventPayloads(e), k1.Secret) {
@@ -695,8 +704,8 @@ type eventPage struct {
 
 func TestSourceEventsListFilterAndPage(t *testing.T) {
 	e := setup(t)
-	dlg, obs := e.token(auth.Delegate), e.token(auth.Observer)
-	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 201 {
+	obs := e.token(auth.Observer)
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(obs, "GET", "/v1/sources/src_hook/events", ""); r.Code != 200 || !strings.Contains(r.Body.String(), `"events":[]`) {
@@ -779,8 +788,8 @@ type rejectPage struct {
 // ACT-SRC-04：坏事件不入账，原因在来源页可查：分页、字段、接收密钥遮蔽，运行凭据与 ext 不可读。
 func TestSourceRejectsListPageAndAccess(t *testing.T) {
 	e := setup(t)
-	dlg, obs := e.token(auth.Delegate), e.token(auth.Observer)
-	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 201 {
+	obs := e.token(auth.Observer)
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(obs, "GET", "/v1/sources/src_hook/rejects", ""); r.Code != 200 || !strings.Contains(r.Body.String(), `"rejects":[]`) {
@@ -836,7 +845,7 @@ func TestSourceRejectsListPageAndAccess(t *testing.T) {
 // runCredential 建一个事项和它的后台运行，返回运行凭据明文。
 func (e *env) runCredential() string {
 	e.t.Helper()
-	res, err := e.x.Do(context.Background(), command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb},
+	res, err := e.x.Do(context.Background(), command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true},
 		Command: "item.create", Input: json.RawMessage(`{"kind":"task","title":"t"}`)})
 	if err != nil {
 		e.t.Fatal(err)
@@ -862,7 +871,7 @@ func (e *env) runCredential() string {
 // ACT-TRI-02：Web 把未判定事件转为建议；没有来源管理权的凭据被拒绝，非 unjudged 返回冲突。
 func TestProposeSourceEventRoute(t *testing.T) {
 	e := setup(t)
-	if r := e.do(e.token(auth.Delegate), "POST", "/v1/sources", hook); r.Code != 201 {
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
 	e.seedEvents("src_hook", [2]string{"a", "unjudged"})
@@ -926,7 +935,7 @@ func TestCaptureSourceEventsAreWebOnly(t *testing.T) {
 // 入站记录的原始请求体未经转发白名单，运行凭据不能读（§14.3、§14.6）。
 func TestRunCredentialCannotReadIngests(t *testing.T) {
 	e := setup(t)
-	if r := e.do(e.token(auth.Delegate), "POST", "/v1/sources", hook); r.Code != 201 {
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
 	if r := e.do(e.runCredential(), "GET", "/v1/sources/src_hook/ingests", ""); r.Code != 403 {
@@ -940,8 +949,8 @@ func TestRunCredentialCannotReadIngests(t *testing.T) {
 // ACT-IRL-20：digest、alerted 处置可过滤读出，v2 字段随事件返回，非法值仍是 400。
 func TestSourceEventsDigestAlertedFilterAndV2Fields(t *testing.T) {
 	e := setup(t)
-	dlg, obs := e.token(auth.Delegate), e.token(auth.Observer)
-	if r := e.do(dlg, "POST", "/v1/sources", hook); r.Code != 201 {
+	obs := e.token(auth.Observer)
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
 	e.seedEvents("src_hook", [2]string{"p", "proposed"}, [2]string{"d", "digest"}, [2]string{"a", "alerted"}, [2]string{"u", "unjudged"})
@@ -976,17 +985,17 @@ func TestSourceRoutesWriteDefaultProjectButNeverOutbound(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := `{"id":"src_feed","type":"pull","command":"fetch-feed","schedule":"10m","timeout":60,"default_project":"acc-home"}`
-	if r := e.do(dlg, "POST", "/v1/sources", reg); r.Code != 201 {
+	if r := e.web("POST", "/v1/sources", reg); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
 	r := e.do(obs, "GET", "/v1/sources/src_feed", "")
 	if !strings.Contains(r.Body.String(), `"default_project":"acc-home"`) || !strings.Contains(r.Body.String(), `"outbound":{"local":"full","external":null}`) {
 		t.Fatalf("show: %s", r.Body)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources", `{"id":"src_other","type":"pull","command":"fetch-feed","schedule":"10m","timeout":60,"default_project":"nope"}`); r.Code != 404 {
+	if r := e.web("POST", "/v1/sources", `{"id":"src_other","type":"pull","command":"fetch-feed","schedule":"10m","timeout":60,"default_project":"nope"}`); r.Code != 404 {
 		t.Fatalf("unknown default project: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"default_project":""}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"default_project":""`) {
+	if r := e.web("PATCH", "/v1/sources/src_feed", `{"default_project":""}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"default_project":""`) {
 		t.Fatalf("clear default project: %d %s", r.Code, r.Body)
 	}
 
@@ -995,6 +1004,9 @@ func TestSourceRoutesWriteDefaultProjectButNeverOutbound(t *testing.T) {
 		"delegate patch": func() resp { return e.do(dlg, "PATCH", "/v1/sources/src_feed", `{"outbound":{"external":"full"}}`) },
 		"delegate register": func() resp {
 			return e.do(dlg, "POST", "/v1/sources", `{"id":"src_two","type":"pull","command":"fetch-feed","schedule":"1m","timeout":5,"outbound":{"external":"full"}}`)
+		},
+		"web register": func() resp {
+			return e.web("POST", "/v1/sources", `{"id":"src_two","type":"pull","command":"fetch-feed","schedule":"1m","timeout":5,"outbound":{"external":"full"}}`)
 		},
 		"web patch": func() resp { return e.web("PATCH", "/v1/sources/src_feed", `{"outbound":{"external":"full"}}`) },
 	} {
@@ -1013,10 +1025,10 @@ func TestSourceRoutesWriteDefaultProjectButNeverOutbound(t *testing.T) {
 	}
 }
 
-// ACT-RST-03、04、05、06、09：预览只读且要时间段，运行凭据不能预览或放回；放回只接受本人原话；同一时间段再放回 0 条（含同一幂等键）。
+// ACT-RST-03、04、05、06、09：预览只读且要时间段，运行凭据不能预览或放回；放回是一档；同一时间段再放回 0 条（含同一幂等键）。
 func TestRestoreSourceEventsRoutes(t *testing.T) {
 	e := setup(t)
-	if r := e.do(e.token(auth.Delegate), "POST", "/v1/sources", hook); r.Code != 201 {
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
 	e.seedEvents("src_hook", [2]string{"old", "ignored"}, [2]string{"user", "ignored"})
@@ -1067,7 +1079,6 @@ func TestRestoreSourceEventsRoutes(t *testing.T) {
 	}
 	dlg := e.token(auth.Delegate)
 	for name, r := range map[string]resp{
-		"no words":  e.do(dlg, "POST", "/v1/source-events/restore", body, core.EvidenceHeader, ""),
 		"observer":  e.do(obs, "POST", "/v1/source-events/restore", body),
 		"no window": e.do(dlg, "POST", "/v1/source-events/restore", `{}`),
 	} {
@@ -1112,7 +1123,7 @@ func TestRestoreSourceEventsRoutes(t *testing.T) {
 // 对话捕获的事件只给 Web）；返回 full、excerpt、meta 三档，与外发同源，不写 Event。
 func TestOutboundPreviewRoute(t *testing.T) {
 	e := setup(t)
-	if r := e.do(e.token(auth.Delegate), "POST", "/v1/sources", hook); r.Code != 201 {
+	if r := e.web("POST", "/v1/sources", hook); r.Code != 201 {
 		t.Fatalf("register: %d %s", r.Code, r.Body)
 	}
 	e.seedEvents("src_hook", [2]string{"a", "unjudged"})
@@ -1160,7 +1171,7 @@ func TestOutboundPreviewRoute(t *testing.T) {
 }
 
 // 显示名（§9.1）：Web 与 CLI 的登记都经 POST /sources，三种情况：带名字、不带名字（内核起名并在响应里给出）、重名 409；
-// PATCH name 改名记 source.renamed，空名改回内核起的名字；delegate 改名同其他来源管理一样要本人原话。
+// PATCH name 改名记 source.renamed，空名改回内核起的名字；delegate 改名是 3a，档位未放开为 23。
 // declared 是测试装配的接入层声明（§9.1）：附带的 fetch-feed 与 webhook 来源按实例声明名字，其他程序（如自定义脚本）没有声明。
 func declared(s domain.Source) string {
 	switch {
@@ -1183,14 +1194,14 @@ func TestSourceDisplayNameThroughRoutes(t *testing.T) {
 	if r.into(&s); s.Name != "工作邮箱" {
 		t.Fatalf("named: %q", s.Name)
 	}
-	r = e.do(dlg, "POST", "/v1/sources", `{"id":"src_b","type":"webhook","source_type":"forge","config":{"scheme":"shared"}}`)
+	r = e.web("POST", "/v1/sources", `{"id":"src_b","type":"webhook","source_type":"forge","config":{"scheme":"shared"}}`)
 	if r.into(&s); r.Code != 201 || s.Name != "推送 src_b" {
 		t.Fatalf("declared name stored and returned: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("POST", "/v1/sources", `{"id":"src_s","type":"script","command":"/opt/x.sh","schedule":"1h","timeout":60}`); r.Code != 400 || !strings.Contains(r.Body.String(), "--name") {
 		t.Fatalf("no name and no declaration: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "POST", "/v1/sources", `{"id":"src_c","name":"工作邮箱","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`); r.Code != 409 {
+	if r := e.web("POST", "/v1/sources", `{"id":"src_c","name":"工作邮箱","type":"pull","command":"fetch-feed","schedule":"15m","timeout":60}`); r.Code != 409 {
 		t.Fatalf("duplicate name: %d %s", r.Code, r.Body)
 	}
 	if r := e.web("PATCH", "/v1/sources/src_b", `{"name":"仓库推送"}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"name":"仓库推送"`) {
@@ -1199,11 +1210,11 @@ func TestSourceDisplayNameThroughRoutes(t *testing.T) {
 	if r := e.web("PATCH", "/v1/sources/src_b", `{"name":"工作邮箱"}`); r.Code != 409 {
 		t.Fatalf("rename onto a taken name: %d %s", r.Code, r.Body)
 	}
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_b", `{"name":""}`, core.EvidenceHeader, ""); r.Code == 200 {
-		t.Fatalf("delegate rename without the owner's words: %d %s", r.Code, r.Body)
-	}
-	if r := e.do(dlg, "PATCH", "/v1/sources/src_b", `{"name":""}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"name":"推送 src_b"`) {
+	if r := e.web("PATCH", "/v1/sources/src_b", `{"name":""}`); r.Code != 200 || !strings.Contains(r.Body.String(), `"name":"推送 src_b"`) {
 		t.Fatalf("reset to the declared name: %d %s", r.Code, r.Body)
+	}
+	if r := e.do(dlg, "PATCH", "/v1/sources/src_b", `{"name":"别的名字"}`); r.Code != 403 || r.code() != "tier_closed" {
+		t.Fatalf("delegate rename without rules tier: %d %s", r.Code, r.Body)
 	}
 	if n := e.events("source.renamed"); n != 2 {
 		t.Fatalf("source.renamed events: %d", n)
@@ -1301,7 +1312,7 @@ func TestTrustedSendersReplaceOnlyThisSource(t *testing.T) {
 	if e.events("allowlist.changed") != 3 {
 		t.Fatalf("allowlist.changed = %d, want 3 (seed, set, clear)", e.events("allowlist.changed"))
 	}
-	if r := e.do(e.token(auth.Delegate), "PUT", "/v1/settings/sources/src_a/trusted-senders", `{"senders":["x"]}`); r.Code != 403 || r.code() != "web_only" {
+	if r := e.do(e.token(auth.Delegate), "PUT", "/v1/settings/sources/src_a/trusted-senders", `{"senders":["x"]}`); r.Code != 403 || r.code() != "tier_closed" { // 信任的发件人是 3a：没放开档位的 Agent 得 23
 		t.Fatalf("token: %d %s", r.Code, r.Body)
 	}
 }

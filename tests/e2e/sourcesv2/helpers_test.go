@@ -140,16 +140,18 @@ func (k *kit) idOf(r baseline.Result) string {
 
 // ---- 来源与事件 ----
 
-// addPull 用 `apa source add` 登记附带的拉取程序（type=pull，DEL 可登记），周期 1 秒。
+// addPull 用 `apa source add` 登记附带的拉取程序（type=pull），周期 1 秒。登记来源是 3b，由本人经 Web 会话做。
 func (k *kit) addPull(id, program, sourceType string, extra map[string]any, config any) {
 	k.t.Helper()
 	cfg, _ := json.Marshal(config)
 	args := []string{"source", "add", "--id", id, "--name", id, "--type", "pull", "--command", program, "--schedule", "1s", "--timeout", "20",
-		"--source-type", sourceType, "--config", string(cfg), "--evidence", "登记附带的拉取程序"}
+		"--source-type", sourceType, "--config", string(cfg)}
 	for flag, v := range extra {
 		args = append(args, "--"+flag, fmt.Sprint(v))
 	}
-	k.apa(k.DEL, 0, args...)
+	if r := k.OwnerApa("", args...); r.Code != 0 {
+		k.t.Fatalf("apa %s 退出码 %d\nstdout: %s\nstderr: %s", strings.Join(args, " "), r.Code, r.Stdout, r.Stderr)
+	}
 }
 
 // SrcState 是 `apa source show` 的输出里本测试关心的部分。

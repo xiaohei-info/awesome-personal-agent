@@ -36,7 +36,7 @@ type Project struct {
 	Repos  []Repo        `json:"repos,omitempty"`
 	// nil 不限制；空切片只能指派给本人（§14.7）。只在 Web 设置。
 	AllowedExecutors []string `json:"allowed_executors"`
-	// AllowedExecutorMatch 按维度允许的执行者：任一项命中即允许；非空时名单生效（§14.7）。只在 Web 设置。
+	// AllowedExecutorMatch 是旧的按维度匹配规则，只读保留：不再参与判定，切换时展开成 AllowedExecutors 后清空。
 	AllowedExecutorMatch []ExecutorMatch `json:"allowed_executor_match,omitempty"`
 	Capture              bool            `json:"capture,omitempty"`
 	// CaptureOutbound 是对话增量送外部端点的范围（full、excerpt、meta、none）；nil 未选择，没有缺省值（§6.5、§14.14）。
@@ -71,18 +71,14 @@ func (p Project) Restricted() bool {
 	return p.AllowedExecutors != nil || len(p.AllowedExecutorMatch) > 0
 }
 
-// ExecutorAllowed 按 §6.14 第 5 条判断指派是否在项目允许范围内：本人、名单里的 id，或登记信息命中任一匹配规则。
+// ExecutorAllowed 按 §6.14 第 5 条判断指派是否在项目允许范围内：本人或名单里的 id。
+// 按机器、harness 维度匹配已取消（2026-11-20，§14.7）：自报的登记信息不参与判定；旧的匹配规则在切换时展开成 id 名单。
 func (p Project) ExecutorAllowed(e ExecutorRef, self string) bool {
 	if !p.Restricted() || e.ID == self {
 		return true
 	}
 	for _, id := range p.AllowedExecutors {
 		if id == e.ID {
-			return true
-		}
-	}
-	for _, m := range p.AllowedExecutorMatch {
-		if (m.Host != "" || m.Harness != "") && (m.Host == "" || m.Host == e.Host) && (m.Harness == "" || m.Harness == e.Harness) {
 			return true
 		}
 	}
@@ -157,7 +153,7 @@ type DeliveryContent struct {
 	Options   []string `json:"options,omitempty"`
 	Recommend string   `json:"recommend,omitempty"`
 	WebURL    string   `json:"web_url,omitempty"`
-	FormURL   string   `json:"form_url,omitempty"` // 一次性表单链接（§10.3）
+	FormURL   string   `json:"form_url,omitempty"` // 旧模型的一次性表单链接；已取消，恒空，字段为 ext 协议保留
 	// WebOnly 由触达在写入决策投递时按事项现状填写，只读。为真时本内容不含 options、recommend、form_url，
 	// 只给标题、摘要与 Web 链接，渠道不得渲染可点选项（§14.4）。
 	WebOnly bool `json:"web_only,omitempty"`

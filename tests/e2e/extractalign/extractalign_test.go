@@ -110,9 +110,8 @@ func ids(l any) []string {
 func (f *fx) setLocality(loc string) {
 	f.t.Helper()
 	b, _ := json.Marshal(map[string]any{
-		"judge_endpoint":       map[string]any{"url": f.Cls.URL(), "api_key": "stub-key", "protocol": modelstub.ProtocolJudgment, "locality": "local"},
-		"generate_endpoint":    map[string]any{"url": f.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": loc},
-		"screening_timeout_ms": 2000})
+		"judge_endpoint":    map[string]any{"url": f.Cls.URL(), "api_key": "stub-key", "protocol": modelstub.ProtocolJudgment, "locality": "local"},
+		"generate_endpoint": map[string]any{"url": f.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": loc}})
 	f.webOK("PUT", "/settings/model-endpoints", string(b), 200)
 }
 

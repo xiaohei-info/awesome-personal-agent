@@ -48,7 +48,7 @@ func TestDoctorRouteNeedsCredentialAndReturnsKernelSideChecks(t *testing.T) {
 			t.Errorf("incomplete check: %+v", c)
 		}
 	}
-	if strings.Join(names, ",") != "tier,model_endpoint,sources,packs,channels" {
+	if strings.Join(names, ",") != "tier,model_endpoint,sources,packs,channels,authz" {
 		t.Fatalf("kernel-side checks expected, got %v", names)
 	}
 	for _, k := range []auth.Kind{auth.Ext, auth.Webhook} {

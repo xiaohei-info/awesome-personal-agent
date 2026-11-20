@@ -17,7 +17,7 @@ import (
 
 var bg = context.Background()
 
-var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 var delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
 var worker = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI}, Level: authz.LevelWorker}
 
@@ -49,7 +49,7 @@ func setup(t *testing.T) *env {
 func (e *env) do(t *testing.T, id command.Identity, cmd string, in any) (command.Result, error) {
 	t.Helper()
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"})
 }
 
 func (e *env) must(t *testing.T, id command.Identity, cmd string, in any) command.Result {
@@ -115,7 +115,12 @@ func TestCreateAndUpdatePersist(t *testing.T) {
 		t.Fatalf("events: %+v", ev)
 	}
 
-	e.must(t, delegate, "project.update", map[string]any{"id": out.ID, "status": "paused", "capture": true, "name": "Work2"})
+	// 改项目信息是一档；对话捕获开关是 3a，档位只整理的 delegate 得 23。
+	e.must(t, delegate, "project.update", map[string]any{"id": out.ID, "status": "paused", "name": "Work2"})
+	if _, err := e.do(t, delegate, "project.update", map[string]any{"id": out.ID, "capture": true}); exit(err) != domain.ExitTierClosed {
+		t.Fatalf("delegate capture switch: %v", err)
+	}
+	e.must(t, owner, "project.update", map[string]any{"id": out.ID, "capture": true})
 	p = e.get(t, out.ID)
 	if p.Status != domain.ProjectPaused || !p.Capture || p.Name != "Work2" || p.Intro != "i" || len(p.Tags) != 2 {
 		t.Fatalf("patch must only change given fields: %+v", p)
@@ -163,10 +168,13 @@ func TestReposAndCheckouts(t *testing.T) {
 	other := e.create(t, "Q")
 	const remote = "https://git.example/x/app.git"
 
-	if _, err := e.do(t, worker, "project.repo.add", map[string]any{"id": id, "remote": remote}); exit(err) != domain.ExitPermissionDenied {
-		t.Fatalf("worker must not add remote: %v", err)
+	// 远程仓库是 3b：任何钥匙都是硬线。
+	for _, id2 := range []command.Identity{worker, delegate} {
+		if _, err := e.do(t, id2, "project.repo.add", map[string]any{"id": id, "remote": remote}); exit(err) != domain.ExitWebOnly {
+			t.Fatalf("agent must not add remote: %v", err)
+		}
 	}
-	e.must(t, delegate, "project.repo.add", map[string]any{"id": id, "remote": remote})
+	e.must(t, owner, "project.repo.add", map[string]any{"id": id, "remote": remote})
 	if _, err := e.do(t, owner, "project.repo.add", map[string]any{"id": id, "remote": remote}); exit(err) != domain.ExitConflict {
 		t.Fatalf("duplicate remote in same project: %v", err)
 	}
@@ -207,7 +215,7 @@ func TestReposAndCheckouts(t *testing.T) {
 
 	// 删除远程地址同时带走其检出，之后别的项目可以登记它。
 	e.must(t, worker, "project.checkout.set", co)
-	if _, err := e.do(t, worker, "project.repo.remove", map[string]any{"id": id, "remote": remote}); exit(err) != domain.ExitPermissionDenied {
+	if _, err := e.do(t, worker, "project.repo.remove", map[string]any{"id": id, "remote": remote}); exit(err) != domain.ExitWebOnly {
 		t.Fatalf("worker must not remove remote: %v", err)
 	}
 	e.must(t, owner, "project.repo.remove", map[string]any{"id": id, "remote": remote})
@@ -300,7 +308,7 @@ func TestAllowedExecutorsAreWebOnly(t *testing.T) {
 	if exit(err) != domain.ExitWebOnly {
 		t.Fatalf("delegate/CLI must get exit 20, got %v", err)
 	}
-	if _, err := e.do(t, worker, "project.allowed_executors.set", in); exit(err) != domain.ExitPermissionDenied {
+	if _, err := e.do(t, worker, "project.allowed_executors.set", in); exit(err) != domain.ExitWebOnly {
 		t.Fatalf("worker: %v", err)
 	}
 	if p := e.get(t, id); p.AllowedExecutors != nil {
@@ -312,8 +320,8 @@ func TestAllowedExecutorsAreWebOnly(t *testing.T) {
 			rejected++
 		}
 	}
-	if rejected != 1 {
-		t.Fatalf("exit-20 attempt must leave one command.rejected event, got %d", rejected)
+	if rejected != 2 {
+		t.Fatalf("each exit-20 attempt must leave one command.rejected event, got %d", rejected)
 	}
 	// 其它项目编辑命令也写不了名单。
 	if _, err := e.do(t, owner, "project.create", map[string]any{"name": "x", "allowed_executors": []string{"a"}}); exit(err) != domain.ExitUsage {
@@ -326,7 +334,7 @@ func TestExecutorViolationUsesPersistedList(t *testing.T) {
 	id := e.create(t, "P")
 	e.must(t, owner, "project.allowed_executors.set", map[string]any{"id": id, "executors": []string{"a"}})
 	p := e.get(t, id)
-	d := authz.Decide(policy.Policy{}, authz.Request{Actor: owner.Actor, Level: authz.LevelWeb, Action: authz.ActionDelegate,
+	d := authz.Decide(policy.Policy{}, authz.Request{Actor: owner.Actor, Level: authz.LevelWeb, Action: authz.ActionDelegate, Tier: authz.TierOrganize,
 		Owner: "me", Object: authz.Object{ProjectInfo: &p, Executor: "stranger"}})
 	if d.Err == nil || d.ExitCode() != domain.ExitExecutorNotAllowed || len(d.Err.Allowed) != 1 || d.Err.Allowed[0] != "a" {
 		t.Fatalf("decision %+v", d)
@@ -543,37 +551,21 @@ func TestRepoCommandsAcceptAnySpelling(t *testing.T) {
 	if p := e.get(t, id); len(p.Repos) != 1 || p.Repos[0].Remote != remote || len(p.Repos[0].Checkouts) != 1 {
 		t.Fatalf("%+v", p.Repos)
 	}
-	e.must(t, delegate, "project.repo.remove", map[string]any{"id": id, "remote": "acme/app"})
+	e.must(t, owner, "project.repo.remove", map[string]any{"id": id, "remote": "acme/app"})
 	if p := e.get(t, id); len(p.Repos) != 0 {
 		t.Fatalf("%+v", p.Repos)
 	}
 }
 
-// 按维度匹配的名单（§14.7）：随名单一起设、去重、可清空；投影与事件折叠一致。
+// 按维度匹配已取消（§14.7）：名单只认执行者 id，带 match 的设置被拒，名单不变。
 func TestAllowedExecutorMatch(t *testing.T) {
 	e := setup(t)
 	id := e.create(t, "P")
-	in := map[string]any{"id": id, "executors": nil, "match": []map[string]string{{"host": "mbp"}, {"host": "mbp"}, {"harness": "h", "host": " x "}}}
-	if _, err := e.do(t, owner, "project.allowed_executors.set", in); err != nil {
-		t.Fatal(err)
-	}
-	p := e.get(t, id)
-	if !p.Restricted() || len(p.AllowedExecutorMatch) != 2 || p.AllowedExecutorMatch[1] != (domain.ExecutorMatch{Host: "x", Harness: "h"}) {
-		t.Fatalf("match %+v", p.AllowedExecutorMatch)
-	}
-	if !p.ExecutorAllowed(domain.ExecutorRef{ID: "a", Host: "mbp"}, "me") || p.ExecutorAllowed(domain.ExecutorRef{ID: "a", Host: "x"}, "me") {
-		t.Fatal("match rules not applied")
-	}
-	if _, err := e.do(t, owner, "project.allowed_executors.set", map[string]any{"id": id, "executors": nil, "match": []map[string]string{{}}}); err == nil {
-		t.Fatal("an empty match rule must be rejected")
-	}
-	if _, err := e.do(t, owner, "project.allowed_executors.set", map[string]any{"id": id, "executors": nil}); err != nil {
-		t.Fatal(err)
+	in := map[string]any{"id": id, "executors": nil, "match": []map[string]string{{"host": "mbp"}}}
+	if _, err := e.do(t, owner, "project.allowed_executors.set", in); exit(err) != domain.ExitUsage {
+		t.Fatalf("match must be rejected: %v", err)
 	}
 	if p := e.get(t, id); p.Restricted() {
-		t.Fatalf("clearing must unrestrict: %+v", p)
-	}
-	if err := e.st.View(bg, func(tx *store.Tx) error { return Verify(tx) }); err != nil {
-		t.Fatal(err)
+		t.Fatalf("rejected match changed the project: %+v", p)
 	}
 }

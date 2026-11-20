@@ -145,7 +145,7 @@ func setup(t *testing.T) *fx {
 			ID string `json:"id"`
 		} `json:"instances"`
 	}](t, f.apa(f.OBS, 0, "instance", "list").Stdout).Instances {
-		f.apa(f.DEL, 0, "instance", "disable", in.ID, "--evidence", "验收：停用出厂实例")
+		f.apa(f.DEL, 0, "instance", "disable", in.ID)
 	}
 	return f
 }
@@ -165,7 +165,7 @@ func (f *fx) declareBriefHarness() {
 		"session": map[string]any{"extract": "$.session_id"},
 		"access":  map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}},
 	}})
-	if r := f.Apa(f.DEL, string(decl), "declare", "-", "--evidence", "验收：简报替身声明"); r.Code != 0 {
+	if r := f.Apa(f.DEL, string(decl), "declare", "-"); r.Code != 0 {
 		f.t.Fatalf("apa declare: %d %s%s", r.Code, r.Stdout, r.Stderr)
 	}
 	f.web("POST", "/v1/settings/declarations/"+briefHarness+"/1/confirm", "", 200)
@@ -285,7 +285,7 @@ type item struct {
 
 func (f *fx) addItem(args ...string) string {
 	f.t.Helper()
-	return idOf(f.t, f.apa(f.DEL, 0, append([]string{"item", "add", "--kind", "task", "--evidence", "验收夹具"}, args...)...).Stdout)
+	return idOf(f.t, f.apa(f.DEL, 0, append([]string{"item", "add", "--kind", "task"}, args...)...).Stdout)
 }
 
 func (f *fx) show(id string) item {
@@ -307,7 +307,7 @@ func (f *fx) briefs() []item {
 // addInstance 建一个简报实例（schedule 取永不到期的年度时刻，只靠"立即跑一次"触发）。
 func (f *fx) addInstance(want int, params ...string) string {
 	f.t.Helper()
-	args := []string{"instance", "add", "brief", "--param", "schedule=0 3 1 1 *", "--evidence", "验收实例"}
+	args := []string{"instance", "add", "brief", "--param", "schedule=0 3 1 1 *"}
 	for _, p := range params {
 		args = append(args, "--param", p)
 	}

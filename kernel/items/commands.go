@@ -300,11 +300,7 @@ func projectOf(tx *store.Tx, id string) (domain.Project, error) {
 // object 解析授权对象。Assignee 是当前执行者（判定"自己的事项"）；Executor 与 ProjectInfo 是写入后的
 // 执行者与所属项目，交给 §14.7 的名单校验（两者都有才校验）。
 func object(tx *store.Tx, cur, next domain.Item) (authz.Object, error) {
-	o := authz.Object{ID: cur.ID, Assignee: cur.Assignee, Kind: string(cur.Kind), Tags: cur.Tags, Project: cur.Project, Executor: next.Assignee}
-	if a := cur.Ask; a != nil { // 内核维护的风险类别与初筛状态进入代答判定（§14.4）
-		// 初筛挡的是那张还没回答的决策请求；本人已经答了，就没有待定的请求要挡，同一张授权单随即可用（§14.5）。
-		o.Category, o.ScreeningPending = a.RiskClass, a.ScreeningPending && a.Resolution == nil
-	}
+	o := authz.Object{ID: cur.ID, Assignee: cur.Assignee, Kind: string(cur.Kind), Project: cur.Project, Executor: next.Assignee}
 	if next.Project != cur.Project {
 		o.ToProject = &next.Project
 	}
@@ -321,22 +317,18 @@ func object(tx *store.Tx, cur, next domain.Item) (authz.Object, error) {
 	return o, nil
 }
 
-// annotateExecutor 给名单校验补上执行者在名录里的登记与命中名单的候选（§14.7）；项目不限制时不必读。
+// annotateExecutor 给名单校验补上名单内的候选（§14.7）；项目不限制时不必读。
 func annotateExecutor(tx *store.Tx, o *authz.Object, p domain.Project) error {
 	if !p.Restricted() {
 		return nil
 	}
-	ref, err := executors.Ref(tx, o.Executor)
-	if err != nil {
-		return err
-	}
-	o.ExecutorHost, o.ExecutorHarness = ref.Host, ref.Harness
+	var err error
 	o.Candidates, err = executors.Candidates(tx, p, "")
 	return err
 }
 
-// BoundTo 是 §14.5 第一档的对象绑定，只据账本：事项的 assignee 等于该凭据，或这个委派子事项由该凭据发起
-// （delegate.create 事件的操作者）。输入里的任何声明都不算。
+// BoundTo 是对象绑定，只据账本：事项的 assignee 等于该凭据，或这个委派子事项由该凭据发起
+// （delegate.create 事件的操作者）。输入里的任何声明都不算。它只决定钥匙范围（自己的事项），不决定档位。
 func BoundTo(tx *store.Tx, principal string, o authz.Object) (bool, error) {
 	if principal == "" {
 		return false, nil
@@ -356,13 +348,8 @@ func BoundTo(tx *store.Tx, principal string, o authz.Object) (bool, error) {
 	return false, nil
 }
 
-// bound 供命令登记 Spec.Bound 用。
-func bound(tx *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) (bool, error) {
-	return BoundTo(tx, c.Actor.Principal, o)
-}
-
 func boundOr(tx *store.Tx, c command.Caller, o authz.Object) bool {
-	ok, _ := BoundTo(tx, c.Actor.Principal, o) // 查不到按未绑定，落到更严的第二档
+	ok, _ := BoundTo(tx, c.Actor.Principal, o) // 查不到按未绑定，落到更窄的范围
 	return ok
 }
 
@@ -400,9 +387,6 @@ func emit(c *command.Ctx, typ, reason, evidence string, p payload) error {
 	b, err := marshalPayload(p)
 	if err != nil {
 		return err
-	}
-	if blank(evidence) {
-		evidence = c.Evidence // 第二档：请求头带的本人原话也要记进事件
 	}
 	_, err = c.Emit(domain.Event{Type: typ, Object: p.Item.ID, Reason: reason, Evidence: evidence, Payload: b})
 	return err
@@ -462,9 +446,9 @@ func syncTimer(tx *store.Tx, cur, it domain.Item) error {
 
 // Register 在命令执行器上登记事项命令。kinds 为 nil 表示没有登记任何 kind schema。
 //
-// 授权（§14.3）：以 proposed 新建所有级别可；其余写入改自己的事项为 update_own、改他人的为 edit_any_item；
-// 离开 proposed（接受或丢弃建议）与离开 needs_input（决定）按代答（answer_decision）判定，使 worker、
-// 运行身份不能自己确认；item.revert 与 item.start 只在 Web（change_settings）。assignee 与 project 的写入都过名单校验。
+// 范围（§14.2）：以 proposed 新建所有钥匙可；其余写入改自己的事项为 update_own、改他人的为 edit_any_item。
+// 档位（§14.3）：事项写入是一档；按状态变化归档——以非 proposed 新建（立项）、离开 proposed（处理建议）、
+// 离开 needs_input（回答）是二档；改事项的指定 Agent、item.revert、item.start 是 3a。assignee 与 project 的写入都过名单校验。
 func Register(x *command.Executor, kinds *Kinds) error {
 	s := &svc{kinds: kinds}
 	for _, sp := range []command.Spec{s.create(), s.update(), s.transition(), s.relate(), s.revert(), s.progress(), s.start()} {
@@ -480,10 +464,13 @@ func (s *svc) create() command.Spec {
 		var v createIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.create", Action: authz.ActionCreateProposed, Tier: authz.TierDecide,
-		Bound: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (bool, error) {
+	return command.Spec{Name: "item.create", Action: authz.ActionCreateProposed, Tier: authz.TierOrganize,
+		TierFor: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
 			v, err := parse(in)
-			return v.phase() == domain.PhaseProposed, err
+			if v.phase() == domain.PhaseProposed {
+				return authz.TierOrganize, err
+			}
+			return authz.TierDecide, err
 		},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
@@ -560,7 +547,14 @@ func (s *svc) update() command.Spec {
 		next, err = applyPatch(cur, patch)
 		return
 	}
-	return command.Spec{Name: "item.update", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound,
+	return command.Spec{Name: "item.update", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
+		TierFor: func(tx *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
+			_, _, _, patch, err := plan(tx, in)
+			if _, chosen := patch["preferred_agent_id"]; chosen {
+				return authz.TierRules, err // 指定由哪个 Agent 来做是改日常（§14.3）
+			}
+			return authz.TierOrganize, err
+		},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			cur, next, _, _, err := plan(tx, in)
 			if err != nil {
@@ -572,11 +566,7 @@ func (s *svc) update() command.Spec {
 			_, _, _, patch, _ := plan(tx, in)
 			_, a := patch["assignee"]
 			_, p := patch["project"]
-			actions := editActions(c, o, boundOr(tx, c, o), a, p)
-			if _, chosen := patch["preferred_agent_id"]; chosen {
-				actions = append(actions, authz.ActionChangeSettings)
-			}
-			return actions
+			return editActions(c, o, boundOr(tx, c, o), a, p)
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			cur, next, _, _, err := plan(tx, in)
@@ -613,7 +603,7 @@ func (s *svc) update() command.Spec {
 			if err := syncTimer(c.Tx, cur, next); err != nil {
 				return nil, err
 			}
-			return ref{next.ID}, emit(c, domain.EvItemUpdated, reason, c.Evidence, payload{Op: "update", Before: &cur, Item: next})
+			return ref{next.ID}, emit(c, domain.EvItemUpdated, reason, "", payload{Op: "update", Before: &cur, Item: next})
 		}}
 }
 
@@ -628,7 +618,14 @@ func (s *svc) transition() command.Spec {
 		next, err = transit(cur, v)
 		return
 	}
-	return command.Spec{Name: "item.transition", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound,
+	return command.Spec{Name: "item.transition", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
+		TierFor: func(tx *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
+			cur, _, v, err := plan(tx, in)
+			if leavesPending(cur.Phase, v.To) {
+				return authz.TierDecide, err
+			}
+			return authz.TierOrganize, err
+		},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			cur, next, _, err := plan(tx, in)
 			if err != nil {
@@ -639,7 +636,7 @@ func (s *svc) transition() command.Spec {
 		Actions: func(tx *store.Tx, c command.Caller, o authz.Object, in json.RawMessage) []authz.Action {
 			cur, _, v, _ := plan(tx, in)
 			as := editActions(c, o, boundOr(tx, c, o), false, false)
-			if (cur.Phase == domain.PhaseProposed || cur.Phase == domain.PhaseNeedsInput) && v.To != cur.Phase {
+			if leavesPending(cur.Phase, v.To) {
 				as = append(as, authz.ActionAnswerDecision)
 			}
 			return as
@@ -678,7 +675,7 @@ func (s *svc) relate() command.Spec {
 		var v relateIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.relate", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound,
+	return command.Spec{Name: "item.relate", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -747,7 +744,7 @@ func (s *svc) relate() command.Spec {
 				if err := save(c.Tx, cur); err != nil {
 					return nil, err
 				}
-				return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, c.Evidence, payload{Op: "relate", Item: cur, Key: &k, Remove: v.Remove})
+				return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, "", payload{Op: "relate", Item: cur, Key: &k, Remove: v.Remove})
 			}
 			if err := setRelation(c.Tx, rel, v.Remove); err != nil {
 				return nil, err
@@ -756,7 +753,7 @@ func (s *svc) relate() command.Spec {
 			if err := save(c.Tx, cur); err != nil {
 				return nil, err
 			}
-			return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, c.Evidence, payload{Op: "relate", Item: cur, Relation: &rel, Remove: v.Remove})
+			return ref{cur.ID}, emit(c, domain.EvItemUpdated, v.Reason, "", payload{Op: "relate", Item: cur, Relation: &rel, Remove: v.Remove})
 		}}
 }
 
@@ -814,20 +811,9 @@ type revertPlan struct {
 // 外部副作用（已发出的消息等）不在账本里，撤销不碰。
 var revertible = []string{domain.EvItemUpdated, domain.EvItemPhaseChanged, domain.EvDecisionResolved}
 
-// rearmAskTimeout：撤销把已回答的决定恢复成未回答时，补回回答时被撤掉的超时 Timer，
-// 否则带 default_on_timeout 的请求永不自动决定。id 与 kind 必须同 decisions.TimerID（"ask_"+事项）；
-// 不能 import decisions（它依赖本包），Timer 到期仍由 decisions 处理。
-func rearmAskTimeout(tx *store.Tx, it domain.Item) error {
-	a := it.Ask
-	if it.Phase != domain.PhaseNeedsInput || a == nil || a.Resolution != nil || a.DefaultOnTimeout == "" || a.Deadline == nil {
-		return nil
-	}
-	id := "ask_" + it.ID
-	if err := clock.Cancel(tx, id); err != nil && !isNotFound(err) {
-		return err
-	}
-	_, err := clock.Add(tx, domain.Timer{ID: id, Target: it.ID, Kind: domain.TimerDue, At: *a.Deadline})
-	return err
+// leavesPending：离开"建议"（立项或丢弃）与离开"等你决定"（回答）是二档，不论走哪条命令（§14.3）。
+func leavesPending(from, to domain.Phase) bool {
+	return (from == domain.PhaseProposed || from == domain.PhaseNeedsInput) && to != from
 }
 
 // planRevert 找出要撤销的事件。只撤销 agent 做的、且是该事项最新的一次事项变更：
@@ -883,7 +869,7 @@ func (s *svc) revert() command.Spec {
 		var v revertIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.revert", Action: authz.ActionChangeSettings,
+	return command.Spec{Name: "item.revert", Action: authz.ActionChangeSettings, Tier: authz.TierRules, Page: "/agent-changes",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -929,9 +915,6 @@ func (s *svc) revert() command.Spec {
 				} else {
 					err = syncTimer(c.Tx, rp.cur, rp.next)
 				}
-				if err == nil {
-					err = rearmAskTimeout(c.Tx, rp.next)
-				}
 			}
 			if err != nil {
 				return nil, err
@@ -944,6 +927,6 @@ func (s *svc) revert() command.Spec {
 			if reason == "" {
 				reason = "revert of event " + strconv.FormatInt(v.Seq, 10)
 			}
-			return ref{rp.next.ID}, emit(c, typ, reason, c.Evidence, payload{Op: "revert", Before: &rp.cur, Item: rp.next, Relation: rp.rel, Remove: rp.remove, Reverts: v.Seq})
+			return ref{rp.next.ID}, emit(c, typ, reason, "", payload{Op: "revert", Before: &rp.cur, Item: rp.next, Relation: rp.rel, Remove: rp.remove, Reverts: v.Seq})
 		}}
 }

@@ -17,7 +17,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 
 	t.Run("ACT-ITEM-01 CLI 建的事项在 Web 可见", func(t *testing.T) {
 		a = idOf(t, e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--phase", "open", "--title", "item-a",
-			"--project", project(e, "acc-open"), "--evidence", "owner: track item-a"), "item add")
+			"--project", project(e, "acc-open")), "item add")
 		r := e.Web("GET", "/v1/items/"+a, "")
 		if r.Code != 200 {
 			t.Fatalf("Web 读事项: %d %s", r.Code, r.Body)
@@ -49,7 +49,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 	})
 
 	t.Run("ACT-ITEM-03 waiting 必须有 waiting_on", func(t *testing.T) {
-		r := e.Apa(e.DEL, "", "item", "transition", a, "--to", "waiting", "--reason", "wait for vendor", "--evidence", "owner: wait")
+		r := e.Apa(e.DEL, "", "item", "transition", a, "--to", "waiting", "--reason", "wait for vendor")
 		if r.Code == 0 {
 			t.Fatal("没有 waiting_on 也进入了 waiting")
 		}
@@ -58,7 +58,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 			t.Fatalf("失败后阶段应不变，实际 %v", p)
 		}
 		ok(t, e.Apa(e.DEL, "", "item", "transition", a, "--to", "waiting", "--reason", "wait for vendor",
-			"--waiting-on", "external:报价单", "--evidence", "owner: wait"), "带 waiting_on 重试")
+			"--waiting-on", "external:报价单"), "带 waiting_on 重试")
 		it := show(t, e, a)
 		wo, _ := it["waiting_on"].(map[string]any)
 		if it["phase"] != "waiting" || wo["kind"] != "external" || wo["ref"] != "报价单" {
@@ -67,7 +67,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 	})
 
 	t.Run("ACT-ITEM-04 needs_input 必须有 ask", func(t *testing.T) {
-		r := e.Apa(e.DEL, "", "item", "transition", a, "--to", "needs_input", "--reason", "need input", "--evidence", "owner: ask me")
+		r := e.Apa(e.DEL, "", "item", "transition", a, "--to", "needs_input", "--reason", "need input")
 		if r.Code == 0 {
 			t.Fatal("没有 ask 也进入了 needs_input")
 		}
@@ -79,7 +79,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 
 	t.Run("ACT-ITEM-05 dropped 必须有 reason", func(t *testing.T) {
 		dropped = addTask(t, e, "to-drop")
-		r := e.Apa(e.DEL, "", "item", "transition", dropped, "--to", "dropped", "--evidence", "owner: drop it")
+		r := e.Apa(e.DEL, "", "item", "transition", dropped, "--to", "dropped")
 		if r.Code == 0 {
 			t.Fatal("没有 reason 也进入了 dropped")
 		}
@@ -87,7 +87,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 		if p := show(t, e, dropped)["phase"]; p != "open" {
 			t.Fatalf("失败后阶段应不变，实际 %v", p)
 		}
-		ok(t, e.Apa(e.DEL, "", "item", "transition", dropped, "--to", "dropped", "--reason", "no longer needed", "--evidence", "owner: drop it"), "带 reason 重试")
+		ok(t, e.Apa(e.DEL, "", "item", "transition", dropped, "--to", "dropped", "--reason", "no longer needed"), "带 reason 重试")
 		if p := show(t, e, dropped)["phase"]; p != "dropped" {
 			t.Errorf("应进入 dropped 且仍可查询，实际 %v", p)
 		}
@@ -116,7 +116,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 
 	t.Run("ACT-ITEM-07 终态可以重开", func(t *testing.T) {
 		for _, id := range []string{dg, dropped} {
-			ok(t, e.Apa(e.DEL, "", "item", "transition", id, "--to", "open", "--reason", "reopen "+id, "--evidence", "owner: reopen"), "重开 "+id)
+			ok(t, e.Apa(e.DEL, "", "item", "transition", id, "--to", "open", "--reason", "reopen "+id), "重开 "+id)
 			if p := show(t, e, id)["phase"]; p != "open" {
 				t.Errorf("%s 应回到 open，实际 %v", id, p)
 			}
@@ -159,7 +159,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 		if it["title"] != fmt.Sprintf("racer-%d", winner) || version(it) != n+1 {
 			t.Errorf("事项应只反映成功的那次: %v", it)
 		}
-		fail(t, e.Apa(e.DEL, "", "item", "update", b, "--title", "stale", "--version", fmt.Sprint(n), "--reason", "r", "--evidence", "e"), 6, "CLI 过期版本")
+		fail(t, e.Apa(e.DEL, "", "item", "update", b, "--title", "stale", "--version", fmt.Sprint(n), "--reason", "r"), 6, "CLI 过期版本")
 	})
 
 	t.Run("ACT-ITEM-09 幂等键防止重复写入", func(t *testing.T) {
@@ -191,7 +191,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 
 	t.Run("ACT-ITEM-10 调用方不能写内核维护的字段", func(t *testing.T) {
 		c := addTask(t, e, "kernel-fields")
-		ok(t, e.Apa(e.DEL, "", "item", "update", c, "--ask", `{"question":"q?","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}`, "--reason", "prep", "--evidence", "owner: prep"), "准备 ask")
+		ok(t, e.Apa(e.DEL, "", "item", "update", c, "--ask", `{"question":"q?","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}`, "--reason", "prep"), "准备 ask")
 		snap := func() [3]any {
 			it := show(t, e, c)
 			ask, _ := it["ask"].(map[string]any)
@@ -210,14 +210,14 @@ func TestFlowItemLifecycle(t *testing.T) {
 	t.Run("ACT-ITEM-11 按 kind 校验 spec，ext 原样透传", func(t *testing.T) {
 		count := func() int { return len(parse(t, e.Web("GET", "/v1/items?kind=brief", "").Body)["items"].([]any)) }
 		n := count()
-		r := e.Apa(e.DEL, "", "item", "add", "--kind", "brief", "--phase", "open", "--title", "bad-brief", "--spec", `{"period":5}`, "--evidence", "owner: brief")
+		r := e.Apa(e.DEL, "", "item", "add", "--kind", "brief", "--phase", "open", "--title", "bad-brief", "--spec", `{"period":5}`)
 		fail(t, r, 2, "非法 brief spec")
 		if count() != n {
 			t.Error("被拒绝的 brief 不应入账")
 		}
 		spec := `{"anything":[1,{"k":"v"}],"n":null}`
 		ext := `{"github":{"pr":88}}`
-		u := idOf(t, e.Apa(e.DEL, "", "item", "add", "--kind", "acc-unregistered", "--phase", "open", "--title", "unregistered", "--evidence", "owner: x",
+		u := idOf(t, e.Apa(e.DEL, "", "item", "add", "--kind", "acc-unregistered", "--phase", "open", "--title", "unregistered",
 			"--spec", spec), "未注册 kind")
 		if r := req(t, e, "PATCH", "/v1/items/"+u, `{"ext":`+ext+`}`, e.DEL, map[string]string{"X-APA-Evidence": "owner: ext"}); r.Code != 200 {
 			t.Fatalf("写 ext: %d %s", r.Code, r.Body)
@@ -234,8 +234,8 @@ func TestFlowItemLifecycle(t *testing.T) {
 
 	t.Run("ACT-ITEM-12 关联事项并按标签筛选", func(t *testing.T) {
 		x, y := addTask(t, e, "rel-x"), addTask(t, e, "rel-y")
-		ok(t, e.Apa(e.DEL, "", "item", "update", x, "--tags", "alpha,beta", "--reason", "tag", "--evidence", "owner: tag"), "加 tag")
-		ok(t, e.Apa(e.DEL, "", "item", "relate", x, "--to", y, "--type", "relates", "--evidence", "owner: relate"), "relate")
+		ok(t, e.Apa(e.DEL, "", "item", "update", x, "--tags", "alpha,beta", "--reason", "tag"), "加 tag")
+		ok(t, e.Apa(e.DEL, "", "item", "relate", x, "--to", y, "--type", "relates"), "relate")
 		rels, _ := ok(t, e.Apa(e.OBS, "", "item", "show", x), "show")["relations"].([]any)
 		if len(rels) != 1 || rels[0].(map[string]any)["to"] != y || rels[0].(map[string]any)["type"] != "relates" {
 			t.Errorf("item show 应看到 relates 边: %v", rels)

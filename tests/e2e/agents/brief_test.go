@@ -70,7 +70,7 @@ func TestFlowBrief(t *testing.T) {
 	f.briefScript()
 	work, open := f.Projects["acc-work"], f.Projects["acc-open"]
 	for name, p := range map[string]string{"BRF 示例任务 acc-work": work, "BRF 示例任务 acc-open": open} { // 账本里有可分节的素材
-		f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", name, "--phase", "open", "--project", p, "--evidence", "简报素材")
+		f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", name, "--phase", "open", "--project", p)
 	}
 	// 周期推进一格并等该周期的简报离开 open（Run 已写回）。
 	tick := func(prefix string, want int) {
@@ -110,7 +110,7 @@ func TestFlowBrief(t *testing.T) {
 	var inst string
 
 	t.Run("ACT-BRF-01 到期生成简报，按项目分节", func(t *testing.T) {
-		inst = idOf(t, f.apa(f.DEL, 0, "instance", "add", "brief", "--param", "schedule=* * * * *", "--evidence", "每分钟出一份简报").Stdout)
+		inst = idOf(t, f.apa(f.DEL, 0, "instance", "add", "brief", "--param", "schedule=* * * * *").Stdout)
 		tick("brief ", 1)
 		b := f.briefs("brief ")[0]
 		eq(t, "简报最终阶段", b.Phase, "done")
@@ -257,11 +257,11 @@ func TestFlowBrief(t *testing.T) {
 			t.Logf("停机前 %s", stopAt)
 		}
 		eq(t, "错过 5 个周期只补一份", after-before, 1) // 稳定后再数，给多补的第二份留出出现的时间
-		f.apa(f.DEL, 0, "instance", "disable", inst, "--evidence", "停止每分钟简报")
+		f.apa(f.DEL, 0, "instance", "disable", inst)
 	})
 
 	t.Run("ACT-BRF-06 周期复盘，由 spec.period 区分周期", func(t *testing.T) {
-		f.apa(f.DEL, 0, "instance", "add", "review", "--param", "schedule=* * * * *", "--evidence", "每分钟复盘")
+		f.apa(f.DEL, 0, "instance", "add", "review", "--param", "schedule=* * * * *")
 		tick("review ", 1)
 		tick("review ", 2)
 		periods := map[string]bool{}

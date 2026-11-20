@@ -42,7 +42,7 @@ var (
 	bg = context.Background()
 	t0 = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	owner  = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner  = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	worker = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelWorker}
 )
 
@@ -435,40 +435,6 @@ func TestProposedItemsProduceNoDeliveries(t *testing.T) {
 	}
 }
 
-func TestDecisionWaitsForScreeningThenDelivers(t *testing.T) {
-	e := setup(t)
-	e.toChannel()
-	// 把另一个事项的 ask 标为初筛未返回：内核维护字段，只能直接改投影来模拟
-	other := e.asked(nil)
-	e.update(func(tx *store.Tx) error {
-		_, _, _, err := items.Revise(tx, other, "test", time.Now(), func(it *domain.Item) error { it.Ask.ScreeningPending = true; return nil })
-		return err
-	})
-	e.update(func(tx *store.Tx) error { _, err := command.Bump(tx, other); return err })
-	e.update(func(tx *store.Tx) error {
-		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemUpdated, Object: other, Actor: owner.Actor, Payload: json.RawMessage("{}"), At: e.now})
-		return err
-	})
-	e.update(e.a.Sync)
-	if d := e.claim("channel:chan"); d != nil && d.Item == other {
-		t.Fatalf("delivered while screening pending: %+v", d)
-	}
-	e.update(func(tx *store.Tx) error {
-		_, _, _, err := items.Revise(tx, other, "test", time.Now(), func(it *domain.Item) error { it.Ask.ScreeningPending = false; return nil })
-		return err
-	})
-	e.update(func(tx *store.Tx) error { _, err := command.Bump(tx, other); return err })
-	e.update(func(tx *store.Tx) error {
-		_, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemUpdated, Object: other, Actor: owner.Actor, Payload: json.RawMessage("{}"), At: e.now})
-		return err
-	})
-	e.update(e.a.Sync)
-	d := e.claim("channel:chan")
-	if d == nil || d.Item != other {
-		t.Fatalf("not delivered after screening ended: %+v", d)
-	}
-}
-
 // ---- ACT-TMO-02 / ACT-LIF-06 ----
 
 func TestUnansweredDecisionPastDeadlineStaysAndIsRemindedAgain(t *testing.T) {
@@ -666,81 +632,6 @@ func TestDecisionDeliveryCarriesRecommend(t *testing.T) {
 	}
 }
 
-// 表单链接只发给只能发文字的渠道上的非 web_only 决策；一次性、24 小时过期（§10.3）。
-func TestFormLinkOnlyOnTextOnlyChannels(t *testing.T) {
-	e := setup(t)
-	e.toChannel()
-	e.asked(nil)
-	if d := e.claim("channel:chan"); d == nil || d.Content.FormURL != "" {
-		t.Fatalf("interactive channel got a form link: %+v", d)
-	}
-
-	e.policy(func(p *policy.Policy) { p.Channels = map[string]policy.Channel{"chan": {TextOnly: true}} })
-	id := e.asked(nil)
-	d := e.claim("channel:chan")
-	token, ok := strings.CutPrefix(d.Content.FormURL, "/forms/")
-	if !ok || token == "" {
-		t.Fatalf("no form link: %+v", d.Content)
-	}
-
-	e.update(func(tx *store.Tx) error {
-		f, err := channel.RedeemForm(tx, token, e.now)
-		if err != nil || f.Item != id || f.Version != d.Version {
-			t.Fatalf("redeem: %+v %v", f, err)
-		}
-		if _, err := channel.RedeemForm(tx, token, e.now); !hasCode(err, domain.CodeConflict) {
-			t.Fatalf("second redeem: %v", err)
-		}
-		if _, err := channel.RedeemForm(tx, "unknown", e.now); !hasCode(err, domain.CodeNotFound) {
-			t.Fatalf("unknown token: %v", err)
-		}
-		return nil
-	})
-
-	e.asked(nil)
-	expired := strings.TrimPrefix(e.claim("channel:chan").Content.FormURL, "/forms/")
-	e.update(func(tx *store.Tx) error {
-		if _, err := channel.RedeemForm(tx, expired, e.now.Add(channel.FormTTL)); !hasCode(err, domain.CodeConflict) {
-			t.Fatalf("expired token: %v", err)
-		}
-		return nil
-	})
-
-	// web_only 类不发表单链接。
-	e.policy(func(p *policy.Policy) {
-		p.WebOnly.Rules = []policy.WebOnlyRule{{Tag: "money", Category: policy.CategoryFunds}}
-	})
-	web := e.item(map[string]any{"tags": []string{"money"}})
-	e.ask(web, nil)
-	if d := e.claim("channel:chan"); d == nil || d.Item != web || d.Content.FormURL != "" {
-		t.Fatalf("web_only decision got a form link: %+v", d)
-	}
-}
-
-// web_only 决策的投递内容只给标题、摘要与 Web 链接，不带选项、推荐、表单链接；普通决策不变（§6.9、§14.4）。
-func TestWebOnlyDecisionDeliveryCarriesOnlyWebLink(t *testing.T) {
-	e := setup(t)
-	e.toChannel()
-	e.policy(func(p *policy.Policy) {
-		p.Channels = map[string]policy.Channel{"chan": {TextOnly: true}}
-		p.WebOnly.Rules = []policy.WebOnlyRule{{Tag: "money", Category: policy.CategoryFunds}}
-	})
-	web := e.item(map[string]any{"tags": []string{"money"}})
-	e.ask(web, map[string]any{"recommend": "A"})
-	d := e.claim("channel:chan")
-	c := domain.DeliveryContent{Title: "t", Summary: "ship it?", WebURL: "/items/" + web, WebOnly: true}
-	if d == nil || d.Item != web || !reflect.DeepEqual(d.Content, c) {
-		t.Fatalf("web_only content %+v, want %+v", d, c)
-	}
-
-	plain := e.item(nil)
-	e.ask(plain, map[string]any{"recommend": "A"})
-	d = e.claim("channel:chan")
-	if d == nil || d.Item != plain || d.Content.WebOnly || len(d.Content.Options) != 2 || d.Content.Recommend != "A" || d.Content.FormURL == "" {
-		t.Fatalf("plain decision content: %+v", d)
-	}
-}
-
 func hasCode(err error, code domain.Code) bool {
 	de, ok := err.(*domain.Error)
 	return ok && de.Code == code
@@ -773,7 +664,7 @@ func (f *fakeDrafter) Judge(_ context.Context, c direct.JudgeCall) (direct.Verdi
 
 func (e *env) withModel() {
 	e.policy(func(p *policy.Policy) {
-		p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: "http://model.invalid", Model: "m"}, 1000
+		p.GenerateEndpoint = policy.GenerateEndpoint{URL: "http://model.invalid", Model: "m"}
 	})
 }
 
@@ -959,14 +850,15 @@ func TestDecisionCardFailureFallsBackToRulesAndAlerts(t *testing.T) {
 	}
 }
 
-// 只有本人在 Web/聊天给出真实回答才算确认；超时默认值、授权单代答、relocate 之类系统收口都不是。
+// 只有本人在 Web 给出真实回答才算确认；Agent 自答、旧记录里的聊天转述、超时默认、授权单代答、relocate 之类系统收口都不是。
 func TestAnsweredByPersonIsAnAllowlistOfRealAnswers(t *testing.T) {
 	for _, c := range []struct {
 		r    domain.Resolution
 		want bool
 	}{
 		{domain.Resolution{ResolvedVia: decisions.ViaWeb, Choice: "A"}, true},
-		{domain.Resolution{ResolvedVia: decisions.ViaChat, Text: "ok"}, true},
+		{domain.Resolution{ResolvedVia: decisions.ViaAgent, Choice: "A"}, false},
+		{domain.Resolution{ResolvedVia: decisions.ViaChat, Text: "ok"}, false},
 		{domain.Resolution{ResolvedVia: decisions.ViaTimeout, Choice: "A"}, false},
 		{domain.Resolution{ResolvedVia: decisions.ViaGrant, Choice: "A"}, false},
 		{domain.Resolution{ResolvedVia: "relocate"}, false},
@@ -1051,13 +943,12 @@ func TestDailyCapKeepsOverflowInWebWithOneNotice(t *testing.T) {
 	}
 }
 
-func TestDailyCapExemptsInjectionHealthWebOnlyAndNearDeadline(t *testing.T) {
+func TestDailyCapExemptsInjectionHealthAndNearDeadline(t *testing.T) {
 	e := setup(t)
 	e.policy(func(p *policy.Policy) {
 		p.Disturb.DailyCap, p.Disturb.MergeWindowSec, p.Disturb.QuietExempt = 1, 0, true
 		p.Disturb.Routes["reminder:normal"], p.Disturb.Routes["decision"] = "inject", "chan"
 		p.Disturb.Routes["reminder:high"] = "chan"
-		p.WebOnly.Rules = []policy.WebOnlyRule{{Tag: "money", Category: policy.CategoryFunds}}
 	})
 	e.dueReminder(map[string]any{"priority": "normal"}) // 注入
 	e.dueReminder(map[string]any{"priority": "normal"})
@@ -1072,8 +963,6 @@ func TestDailyCapExemptsInjectionHealthWebOnlyAndNearDeadline(t *testing.T) {
 	if d := e.claim("channel:chan"); d == nil || !strings.HasPrefix(d.ID, "capnotice:") {
 		t.Fatalf("expected the notice, got %+v", d)
 	}
-	web := e.item(map[string]any{"tags": []string{"money"}})
-	e.ask(web, nil)
 	near := e.item(nil)
 	e.ask(near, map[string]any{"deadline": e.now.Add(10 * time.Minute)})
 	far := e.item(nil)
@@ -1081,9 +970,6 @@ func TestDailyCapExemptsInjectionHealthWebOnlyAndNearDeadline(t *testing.T) {
 	got := map[string]domain.Delivery{}
 	for _, d := range e.drain("channel:chan") {
 		got[d.Item] = d
-	}
-	if _, ok := got[web]; !ok {
-		t.Error("web_only decision must bypass the cap")
 	}
 	if _, ok := got[near]; !ok {
 		t.Error("near-deadline decision must bypass the cap when exemption is on")
@@ -1333,7 +1219,6 @@ func TestCardDraftSendsNothingToExternalEndpointWhenScopeNotChosen(t *testing.T)
 	late.Drafter = svc
 	e.policy(func(p *policy.Policy) {
 		p.GenerateEndpoint = policy.GenerateEndpoint{URL: stub.URL(), Model: "m", APIKey: "k", Locality: policy.LocalityExternal}
-		p.ScreeningTimeoutMs = 1000
 	})
 	e.update(func(tx *store.Tx) error {
 		_, err := tx.Exec(`INSERT INTO sources_registry_source
@@ -1395,5 +1280,28 @@ func TestImportedEventsDoNotReconcileDeliveries(t *testing.T) {
 	touch("")
 	if u := e.unread(); len(u) != 0 {
 		t.Fatalf("control: live event must reconcile and supersede, got %+v", u)
+	}
+}
+
+// 裁决 2：档位放开二档的 Agent 替本人答了问题，推一条提醒说它替你答了什么，链接到可撤回的「Agent 改动」；只推一次。
+func TestAgentAnswerPushesWhatItAnswered(t *testing.T) {
+	e := setup(t)
+	e.toChannel()
+	e.policy(func(p *policy.Policy) {
+		p.AgentTier.ByAgent = map[string]policy.AgentAllowance{"ag": {Tier: policy.AllowDecide}}
+	})
+	id := e.asked(nil)
+	if d := e.claim("channel:chan"); d == nil || d.Class != domain.DeliveryDecision {
+		t.Fatalf("question card first: %+v", d)
+	}
+	agent := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "cred_ag", Via: domain.ViaCLI}, Level: authz.LevelDelegate, CredentialAgentID: "ag"}
+	e.do(agent, "decision.answer", map[string]any{"id": id, "choice": "A"})
+	d := e.claim("channel:chan")
+	if d == nil || d.Class != domain.DeliveryReminder || !strings.HasPrefix(d.Content.Title, "Agent 替你答了") || !strings.HasSuffix(d.Content.Summary, "→ yes") || d.Content.WebURL != "/agent-changes" {
+		t.Fatalf("want one agent-answer reminder, got %+v", d)
+	}
+	e.do(owner, "item.update", map[string]any{"id": id, "title": "t2"})
+	if d := e.claim("channel:chan"); d != nil {
+		t.Fatalf("later edits must not push again: %+v", d)
 	}
 }

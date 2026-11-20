@@ -57,9 +57,9 @@ func TestSetContentRetentionOnlyWebAndValidInput(t *testing.T) {
 	if _, err := e.do(owner, CmdRegister, pull("src_ret")); err != nil {
 		t.Fatal(err)
 	}
-	// delegate（附本人原话）也不行：web_only，退出码 20；内容不变
-	if _, err := e.do(e.bearer(t, auth.Delegate), CmdSetRetention, m{"id": "src_ret", "days": 5}); exit(err) != 20 {
-		t.Fatalf("delegate exit = %d (%v), want 20", exit(err), err)
+	// 保留期是 3a：档位只整理的 delegate 得 23（档位未放开）；内容不变
+	if _, err := e.do(e.bearer(t, auth.Delegate), CmdSetRetention, m{"id": "src_ret", "days": 5}); exit(err) != 23 {
+		t.Fatalf("delegate exit = %d (%v), want 23", exit(err), err)
 	}
 	if e.get(t, "src_ret").ContentRetentionDays != nil {
 		t.Fatal("delegate changed retention")

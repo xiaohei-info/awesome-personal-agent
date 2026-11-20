@@ -38,16 +38,12 @@ type Attached struct {
 }
 
 // Messages 返回 level 能看到的、事项的全部挂靠消息；只读，不推进 attach_state。
-// web_only 初筛中的事项对非 Web 凭据返回空列表（§14.4）。
 func Messages(tx *store.Tx, item string, level authz.Level) ([]Attached, error) {
 	it, err := items.Get(tx, item)
 	if err != nil {
 		return nil, err
 	}
 	out := []Attached{}
-	if level != authz.LevelWeb && it.Ask != nil && it.Ask.ScreeningPending {
-		return out, nil
-	}
 	_, pol, err := policy.Current(tx)
 	if err != nil {
 		return nil, err

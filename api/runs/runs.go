@@ -53,7 +53,7 @@ func authorize(tx *store.Tx, p *core.Principal) error {
 		return err
 	}
 	// Decision.Err 是 *domain.Error：直接返回会把 nil 指针包成非空 error。
-	if d := authz.Decide(pol, authz.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, Action: authz.ActionRead}); d.Err != nil {
+	if d := authz.Decide(pol, authz.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, Action: authz.ActionRead, Tier: authz.TierRead}); d.Err != nil {
 		return d.Err
 	}
 	return nil

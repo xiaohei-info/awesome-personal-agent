@@ -57,7 +57,7 @@ func TestBacklogRestoreOnUpgradedFixture(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, b
 	}
-	words := map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "direct", "X-APA-Evidence": "本人：把旧级联忽略的放回来"}
+	words := map[string]string{"X-APA-Session": "s1"} // 放回是一档：delegate 不要本人原话
 	q := "from=" + win.From + "&to=" + win.To
 	body := fmt.Sprintf(`{"from":%q,"to":%q}`, win.From, win.To)
 
@@ -192,13 +192,7 @@ func TestBacklogRestoreOnUpgradedFixture(t *testing.T) {
 		}
 	}
 
-	// ACT-RST-05：缺原话、observer 都不能放回，预览仍是全部。
-	if code, _ := do("POST", "/source-events/restore", dlg, map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "direct"}, body); code != 403 {
-		t.Fatalf("without words: %d", code)
-	}
-	if code, _ := do("POST", "/source-events/restore", dlg, map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "group", "X-APA-Evidence": "本人：放回"}, body); code != 403 {
-		t.Fatalf("group session: %d", code)
-	}
+	// ACT-RST-05：observer 不能放回（钥匙范围外），预览仍是全部。
 	if code, _ := do("POST", "/source-events/restore", obs, words, body); code != 403 {
 		t.Fatalf("observer: %d", code)
 	}

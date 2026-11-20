@@ -151,7 +151,7 @@ func Run(ctx context.Context, in Input) kdoctor.Report {
 		if l.st != nil {
 			why, reason = "the ledger structure differs from this binary; an older one migrates when apa serve starts", kdoctor.CodeLedgerSchemaDiffers
 		}
-		for _, n := range []string{kdoctor.Tier, kdoctor.ModelEndpoint, kdoctor.Sources, kdoctor.Packs, kdoctor.HostPlugin, kdoctor.Overlaps, kdoctor.Channels, kdoctor.Secrets, kdoctor.Connections} {
+		for _, n := range []string{kdoctor.Tier, kdoctor.ModelEndpoint, kdoctor.Sources, kdoctor.Packs, kdoctor.HostPlugin, kdoctor.Overlaps, kdoctor.Channels, kdoctor.Secrets, kdoctor.Connections, kdoctor.Authz} {
 			checks = append(checks, kdoctor.Check{Name: n, Status: kdoctor.Warning, Code: kdoctor.CodeSkipped, Data: map[string]any{"reason": reason}, Why: "skipped: " + why,
 				Next: "fix the data directory check first; run apa doctor --upgrade-check before upgrading"})
 		}

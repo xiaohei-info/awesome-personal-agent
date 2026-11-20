@@ -624,15 +624,8 @@ func TestDoctorHostPluginAndOverlaps(t *testing.T) {
 	if ov := find(t, r, kdoctor.Overlaps); ov.Status != kdoctor.OK || len(ov.Details) != 0 {
 		t.Fatalf("overlaps: %+v", ov)
 	}
-	// 不上报会话类型。
-	in := e.input()
-	in.Env = append(os.Environ(), "DOCTOR_CASE=no-session-kind")
-	hp = find(t, Run(bg, in), kdoctor.HostPlugin)
-	if hp.Status != kdoctor.Warning || hp.Details[0].Code != kdoctor.CodeHostNoSessionKind || !strings.Contains(hp.Details[0].Why, "does not report the session type") ||
-		!strings.Contains(hp.Details[0].Why, "exit 23") || !strings.Contains(hp.Details[0].Next, "upgrade the plugin") || hp.Details[0].Data["plugin_version"] != "0.1.0" {
-		t.Fatalf("no session kind: %+v", hp)
-	}
 	// 重复提醒：列出两项；宿主一侧的脚本文件不变。
+	in := e.input()
 	dir := filepath.Dir(e.home)
 	before := tree(t, dir)
 	in.Env = append(os.Environ(), "DOCTOR_CASE=overlaps")

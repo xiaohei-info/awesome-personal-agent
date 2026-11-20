@@ -114,7 +114,7 @@ func echoSteps(k *kit) {
 		if !k.timerExists(followup) {
 			t.Fatal("waiting 的外部等待应有跟进定时")
 		}
-		r := k.Apa(k.DEL, "", "item", "relate", landlord, "--key", "fm-thread-1", "--evidence", "本人原话：房东的回复归到这件事")
+		r := k.Apa(k.DEL, "", "item", "relate", landlord, "--key", "fm-thread-1")
 		k.expect("item relate --key（直接会话）", r, 0)
 		if !k.webItem(landlord).hasKey("fm-thread-1") {
 			t.Fatal("事项详情应显示登记的关联键")
@@ -171,7 +171,7 @@ func echoSteps(k *kit) {
 		quote = k.newWebItem("下月再看报价")
 		until := time.Now().Add(7 * 24 * time.Hour).UTC().Format(time.RFC3339)
 		k.webWaiting(quote, "time", until)
-		k.expect("relate fm-thread-2", k.Apa(k.DEL, "", "item", "relate", quote, "--key", "fm-thread-2", "--evidence", "本人原话：报价的回复归到这件事"), 0)
+		k.expect("relate fm-thread-2", k.Apa(k.DEL, "", "item", "relate", quote, "--key", "fm-thread-2"), 0)
 		if !k.timerExists("wait_" + quote) {
 			t.Fatal("等时间的事项应有到点定时")
 		}
@@ -191,7 +191,7 @@ func echoSteps(k *kit) {
 
 	k.step("ACT-MSG-13 命中 proposed 事项时只更新来源数，不提醒", func(t *testing.T) {
 		plan = k.idOf("propose", k.Apa(k.DEL, "", "propose", "--kind", "task", "--title", "换宽带套餐", "--project", k.Projects["acc-open"]))
-		k.expect("relate fm-thread-3", k.Apa(k.DEL, "", "item", "relate", plan, "--key", "fm-thread-3", "--evidence", "本人原话：这条回复归到换套餐"), 0)
+		k.expect("relate fm-thread-3", k.Apa(k.DEL, "", "item", "relate", plan, "--key", "fm-thread-3"), 0)
 		items := k.itemCount()
 		id := k.emit("acc.reply", "套餐有优惠", "fm-thread-3")
 		k.waitFor("回音被处置", 20*time.Second, func() bool { e, ok := k.event(id); return ok && e.Disposition != "pending" })
@@ -209,7 +209,7 @@ func echoSteps(k *kit) {
 	})
 
 	k.step("ACT-MSG-14 移除关联键后不再归属", func(t *testing.T) {
-		k.expect("relate --remove", k.Apa(k.DEL, "", "item", "relate", landlord, "--key", "fm-thread-1", "--remove", "--evidence", "本人原话：解除关联"), 0)
+		k.expect("relate --remove", k.Apa(k.DEL, "", "item", "relate", landlord, "--key", "fm-thread-1", "--remove"), 0)
 		if k.webItem(landlord).hasKey("fm-thread-1") {
 			t.Fatal("事项详情不应再显示该键")
 		}
@@ -224,7 +224,7 @@ func echoSteps(k *kit) {
 	})
 
 	k.step("ACT-MSG-15 关联键按去重域隔离", func(t *testing.T) {
-		k.expect("relate other-domain", k.Apa(k.DEL, "", "item", "relate", quote, "--key", "fm-thread-4", "--domain", "other-domain", "--evidence", "本人原话：另一个域的线程"), 0)
+		k.expect("relate other-domain", k.Apa(k.DEL, "", "item", "relate", quote, "--key", "fm-thread-4", "--domain", "other-domain"), 0)
 		id := k.emit("acc.reply", "fm-15 异域来信", "fm-thread-4")
 		ev := k.settled(id)
 		if ev.Item == quote || ev.Disposition == "attached" {
@@ -252,12 +252,13 @@ func echoSteps(k *kit) {
 		}
 	})
 
-	k.step("ACT-MSG-17 依据不足或凭据不够时不能登记关联键", func(t *testing.T) {
+	// 2026-11-20 改写（权限模型第二版）：登记关联键是一档，任何 delegate 直接生效；只读钥匙在范围外（4）。
+	k.step("ACT-MSG-17 只读钥匙不能登记关联键，delegate 一档直接登记", func(t *testing.T) {
 		k.expect("OBS relate", k.Apa(k.OBS, "", "item", "relate", quote, "--key", "fm-x"), exitDenied)
-		k.expect("DEL 无依据 relate", k.Apa(k.DEL, "", "item", "relate", quote, "--key", "fm-y"), 23)
+		k.expect("DELO（只整理）relate", k.Apa(k.DELO, "", "item", "relate", quote, "--key", "fm-y"), 0)
 		it := k.webItem(quote)
-		if it.hasKey("fm-x") || it.hasKey("fm-y") {
-			t.Errorf("被拒绝的登记不应出现在详情: %+v", it.Correlation)
+		if it.hasKey("fm-x") || !it.hasKey("fm-y") {
+			t.Errorf("被拒绝的登记不应出现、一档登记应出现在详情: %+v", it.Correlation)
 		}
 	})
 

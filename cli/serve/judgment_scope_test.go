@@ -54,7 +54,7 @@ func TestRunCredentialReadsOnlyTargetItemJudgmentRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	mk := func(title string) string {
-		res, err := x.Do(ctx, command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb},
+		res, err := x.Do(ctx, command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true},
 			Command: "item.create", Input: json.RawMessage(`{"kind":"task","title":"` + title + `"}`)})
 		if err != nil {
 			t.Fatal(err)

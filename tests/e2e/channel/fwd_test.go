@@ -150,7 +150,7 @@ $APA delegate --parent "$ITEM" --assignee work-host.cli --title fwd-child > "$OU
 	f.step("ACT-FWD-02 运行者只看到白名单内的消息", func(t *testing.T) {
 		f.mode("summary-only", runnerScript(child))
 		f.auto("reread")
-		f.apa(f.DEL, 0, "item", "update", parent, "--title", "fwd-parent 再读", "--reason", "再读", "--evidence", "e2e 再触发一次运行")
+		f.apa(f.DEL, 0, "item", "update", parent, "--title", "fwd-parent 再读", "--reason", "再读")
 		f.waitFor("第二次运行拉起", 20*time.Second, func() bool { return len(f.runsOf(parent)) == 2 })
 		f.setMode("reread", "observe") // 运行结束时内核改事项，不应再触发
 		f.settled(parent, 2)
@@ -220,7 +220,7 @@ $APA delegate --parent "$ITEM" --assignee work-host.cli --title fwd-child > "$OU
 		// 下一次运行才带上。
 		f.mode("summary-only", runnerScript(child))
 		f.setMode("reread", "auto")
-		f.apa(f.DEL, 0, "item", "update", parent, "--title", "fwd-parent 下一次", "--reason", "下一次", "--evidence", "e2e 再触发一次运行")
+		f.apa(f.DEL, 0, "item", "update", parent, "--title", "fwd-parent 下一次", "--reason", "下一次")
 		f.waitFor("下一次运行拉起", 20*time.Second, func() bool { return len(f.runsOf(parent)) == 3 })
 		f.setMode("reread", "observe")
 		f.settled(parent, 3)
@@ -236,7 +236,7 @@ $APA delegate --parent "$ITEM" --assignee work-host.cli --title fwd-child > "$OU
 			t.Fatalf("应挂靠且未处理: %+v", ev)
 		}
 		runs := f.launched()
-		f.apa(f.DEL, 0, "item", "transition", child, "--to", "done", "--reason", "完成", "--evidence", "e2e 关闭子事项")
+		f.CloseDelegation(f.DEL, child, "完成")
 		var ev srcEvent
 		f.waitFor("退回的消息重新进入入站流水线并得到处置", 40*time.Second, func() bool {
 			ev, _ = src.event(id)
@@ -301,7 +301,7 @@ func TestForwardAllowlistDefaults(t *testing.T) {
 		t.Errorf("声明白名单字段的能力包应被拒绝: %s", r.Stdout)
 	}
 	for _, method := range []string{"PATCH", "PUT"} {
-		r := e.APIRaw(method, "/v1/settings/allowlists", `{"forward_allowlist":{"src_acc":["mallory"]}}`, e.DEL)
+		r := e.APIRaw(method, "/v1/settings/allowlists", `{"forward_allowlist":{"src_acc":["mallory"]}}`, e.DELO) // 信任的发件人是 3a：只整理的钥匙得 23
 		if r.Code == 200 {
 			t.Errorf("DEL %s 不应成功: %d %s", method, r.Code, r.Body)
 		}

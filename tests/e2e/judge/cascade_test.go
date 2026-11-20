@@ -325,9 +325,9 @@ func TestFlowAgentCascade(t *testing.T) {
 		if f.hasPhase("cas10", "needs_input") {
 			t.Errorf("没拉起不应把事项转 needs_input")
 		}
-		manual := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "cas10-ledger", "--phase", "open", "--project", f.Projects["acc-open"], "--evidence", "账本照常")
+		manual := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "cas10-ledger", "--phase", "open", "--project", f.Projects["acc-open"])
 		mid := jsonMap(t, manual.Stdout)["id"].(string)
-		f.apa(f.DEL, 0, "item", "transition", mid, "--to", "dropped", "--reason", "harness 不可用时 CLI 照常", "--evidence", "账本照常")
+		f.apa(f.DEL, 0, "item", "transition", mid, "--to", "dropped", "--reason", "harness 不可用时 CLI 照常")
 		eq(t, "CLI 转阶段", f.phase(mid), "dropped")
 		if r := f.Web("GET", "/v1/items/"+mid, ""); r.Code != 200 {
 			t.Errorf("Web 读事项 HTTP %d", r.Code)
@@ -508,17 +508,17 @@ func TestFlowAgentCascade(t *testing.T) {
 		f.ModelStub.When("ACCRELAYGEN", reply(`{"insufficient_info":true}`))
 		const pr = "https://example.invalid/acc/test-repo/pull/20"
 		parent := jsonMap(t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "cas20-parent", "--phase", "open",
-			"--project", f.Projects["acc-open"], "--evidence", "验收父事项").Stdout)["id"].(string)
-		child := jsonMap(t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", "cas20-child", "--evidence", "委派").Stdout)["id"].(string)
+			"--project", f.Projects["acc-open"]).Stdout)["id"].(string)
+		child := jsonMap(t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", "cas20-child").Stdout)["id"].(string)
 		f.apa(f.WRK, 0, "report", child, "--outcome", "progress", "--summary", "已开 PR", "--pr", pr)
 		raw, _ := json.Marshal(map[string]any{"id": "cas20-msg", "type": "acc.comment", "subject": "cas20 后续消息", "detail": "来自白名单之外的发送者",
 			"sender": "stranger@elsewhere.invalid", "correlation_keys": []string{pr}, "occurred_at": "2030-01-01T00:00:00Z"})
 		appendLine(t, f.events, string(raw))
 		f.waitFor("挂靠消息落盘", 60*time.Second, func() bool { e, ok := f.srcEvent("cas20-msg"); return ok && e.Disposition == "attached" })
 		before := len(f.runs("--category", "task"))
-		f.apa(f.DEL, 0, "item", "update", child, "--tags", "acc-relay-open", "--reason", "触发接力", "--evidence", "验收")
-		f.apa(f.DEL, 0, "item", "transition", child, "--to", "waiting", "--waiting-on", "external:cas20", "--reason", "go", "--evidence", "验收")
-		f.apa(f.DEL, 0, "item", "transition", child, "--to", "open", "--reason", "go", "--evidence", "触发接力")
+		f.apa(f.DEL, 0, "item", "update", child, "--tags", "acc-relay-open", "--reason", "触发接力")
+		f.apa(f.DEL, 0, "item", "transition", child, "--to", "waiting", "--waiting-on", "external:cas20", "--reason", "go")
+		f.apa(f.DEL, 0, "item", "transition", child, "--to", "open", "--reason", "go")
 		// 2026-11-20 改写（本人裁决："没拉起"类改为事件）：原等待接力另建的同名目标事项转 needs_input、needs_input 列表写明"白名单"；
 		// 复核挪到建目标事项之前：不另建事项，诊断页有一条 task_refused 通知、原因写明"白名单"。"不应拉起任务型"不变。
 		f.waitFor("接力没拉起的通知", 60*time.Second, func() bool { return f.NoticeWith("task_refused", "白名单") >= 1 })
@@ -567,7 +567,7 @@ func TestFlowAgentCascade(t *testing.T) {
 
 	const screenQ = "这份回执需要本人核实吗"
 	pair := func(name string) (parent, child string) {
-		r := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", name+"-parent", "--phase", "open", "--project", f.Projects["acc-open"], "--evidence", "验收父事项")
+		r := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", name+"-parent", "--phase", "open", "--project", f.Projects["acc-open"])
 		parent = jsonMap(f.t, r.Stdout)["id"].(string)
 		d := f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", name+"-child")
 		child = jsonMap(f.t, d.Stdout)["id"].(string)

@@ -1,8 +1,8 @@
 // Package command 是所有写入的统一路径（设计 §7.0）：认证 → 授权 → 校验 → 事务 → 提交后。
 // 本包只提供管线与登记表，不含任何业务命令；业务模块登记 Spec，经 Do 执行，不直写对方的数据。
 //
-// 管线保证：乐观版本与幂等键、链路深度由内核继承（调用方只能指明"继承自哪个对象"，写不了数值，
-// 输入里出现内核维护字段直接拒绝）、被拒绝的高风险命令在独立事务里留痕。
+// 管线保证：每条命令登记一档（§14.3），授权只在这里判一次；乐观版本与幂等键、链路深度由内核继承（调用方只能指明
+// "继承自哪个对象"，写不了数值，输入里出现内核维护字段直接拒绝）；被拒绝的命令在独立事务里留痕。
 package command
 
 import (
@@ -55,22 +55,27 @@ type Caller struct {
 	Actor domain.Actor
 	Level authz.Level
 	Kind  auth.Kind // 仅凭据入口有值
-	// Credential 是凭据 id，仅凭据入口有值；授权单按它认人（Actor.Principal 在绑定执行者时是执行者 id）。
+	// Credential 是凭据 id，仅凭据入口有值（Actor.Principal 在绑定执行者时是执行者 id）。
 	Credential string
-	// CredentialHarness 是凭据上内核记录的所属 harness（§14.2），仅凭据入口有值；不是调用方自报的 Actor.Harness。
-	CredentialHarness string
+	// CredentialAgentID 是凭据上内核记录的所属 Agent，仅凭据入口有值；档位按它取（§14.3）。
 	CredentialAgentID string
 	// RunScope 只有运行凭据有值：据账本判断授权对象是否在运行范围内（目标事项及其子事项 / 目标事项所属项目）。
 	// 管线用它填 authz.Object 的 InRunScope、InRunProject，命令自己不必也无法声明。
 	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
 	// RunDepth 只有运行凭据有值：运行记录的链路深度，本运行发出的命令据它继承（§14.9）。
 	RunDepth int
-	// RunHarness 只有运行凭据有值：运行记录上内核记的 harness，agent 式授权单按它匹配（§14.5），不是自报的 Actor.Harness。
-	// 唤醒租约期间被降级的 delegate 没有它，所以用不了授权单。
-	RunHarness string
+	// RunAgentID 只有运行凭据有值：运行所属的 Agent（运行记录上的快照），后台运行随它的档位。
 	RunAgentID string
-	// RunTrusted 只有运行凭据有值：据账本判断触发这次运行的内容是否可信（§14.5）；只在运行带着授权单时调用。
-	RunTrusted func(tx *store.Tx) (bool, error)
+	// Fresh 只有 Web 本人有值：会话刚再输过一次口令，3b 动作要求它（§14.3）。
+	Fresh bool
+}
+
+// Agent 是调用者所属的 Agent：运行钥匙取运行记录，其余取凭据归属；没有归属为空（只整理）。
+func (c Caller) Agent() string {
+	if c.Level == authz.LevelRun {
+		return c.RunAgentID
+	}
+	return c.CredentialAgentID
 }
 
 // Identity 在事务内把请求携带的凭据确定为 Caller。
@@ -83,9 +88,6 @@ type Bearer struct {
 	Auth   *auth.Auth
 	Secret string
 	Origin auth.Origin
-	// OnBehalfOf 是传输层为 delegate 凭据声明的本人：Bearer 认证只知道凭据，不知道替谁说话。
-	// 管线只在第二档（替本人做决定，§14.5）保留它；第一档是 agent 自己的工作，Event 不带。
-	OnBehalfOf string
 }
 
 func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
@@ -100,11 +102,7 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	case auth.Delegate:
 		l = authz.LevelDelegate
 	}
-	a := c.Actor(b.Origin)
-	if l == authz.LevelDelegate {
-		a.OnBehalfOf = b.OnBehalfOf
-	}
-	return Caller{Actor: a, Level: l, Kind: c.Kind, Credential: c.ID, CredentialHarness: c.Harness, CredentialAgentID: c.AgentID}, nil
+	return Caller{Actor: c.Actor(b.Origin), Level: l, Kind: c.Kind, Credential: c.ID, CredentialAgentID: c.AgentID}, nil
 }
 
 // Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。
@@ -148,8 +146,6 @@ type Request struct {
 	ExpectVersion *int64 // 空表示不检查
 	Chain         Chain
 	RuleID        string // 自动动作（规则）的授权依据
-	Evidence      string
-	Grant         string // 第二档的另一条依据：授权单 id；与 Evidence 不能同时携带
 	Owner         string
 	WebURL        string
 	// Preflight 为真时只跑到校验为止：认证、授权与 Validate 通过则返回空结果，不写账本（授权被拒的留痕照常）。
@@ -165,11 +161,11 @@ type Ctx struct {
 	Object     authz.Object
 	ChainDepth int
 	Basis      *domain.Basis
-	Grant      string // 本次放行所依据的授权单 id；只有第二档且依据授权单时非空，Emit 的每条事件都记它
-	Evidence   string // 请求携带的本人原话（第二档已由授权校验过存在；会话引用在 Caller.Actor.Session）
-	now        func() time.Time
-	seqs       []int64
-	events     []domain.Event
+	// Tier 是本次实际适用的档（按状态变化定档的命令由 TierFor 给出）。
+	Tier   authz.Tier
+	now    func() time.Time
+	seqs   []int64
+	events []domain.Event
 }
 
 // Now 返回本次命令的时刻，业务写入的时间戳取它；一条命令内恒定，所以与 Emit 缺省的事件时间相同。
@@ -178,17 +174,14 @@ func (c *Ctx) Now() time.Time { return c.now() }
 // Events 返回本次命令到目前为止追加的事件（含序号），供同事务回调识别发生了什么。
 func (c *Ctx) Events() []domain.Event { return c.events }
 
-// Emit 在同一事务内追加事件。Actor、ChainDepth、Basis 一律由内核覆盖，调用方写不了。
+// Emit 在同一事务内追加事件。Actor、ChainDepth、Basis（谁、凭什么）一律由内核覆盖，调用方写不了。
 func (c *Ctx) Emit(e domain.Event) (int64, error) {
 	e.Actor, e.ChainDepth, e.Basis = c.Caller.Actor, c.ChainDepth, c.Basis
-	if c.Grant != "" {
-		e.Grant = c.Grant
-	}
 	return c.append(e)
 }
 
 // EmitAs 在同一事务内以内核自己的名义追加事件：actor 与 basis 由调用的内核模块给定（内置规则的自动动作，
-// 如回执里库内链接的自动登记，操作者是 system，§7.5），不是命令的调用者，也不带调用者的授权单。链路深度照旧由内核维护。
+// 如回执里库内链接的自动登记，操作者是 system，§7.5），不是命令的调用者。链路深度照旧由内核维护。
 func (c *Ctx) EmitAs(actor domain.Actor, basis *domain.Basis, e domain.Event) (int64, error) {
 	e.Actor, e.ChainDepth, e.Basis = actor, c.ChainDepth, basis
 	return c.append(e)
@@ -223,14 +216,15 @@ type Spec struct {
 	Validate func(tx *store.Tx, o authz.Object, in json.RawMessage) error
 	// Apply 更新投影并经 Emit 追加事件；返回值序列化为结果，幂等重放时原样返回。
 	Apply func(c *Ctx) (any, error)
-	// ChannelAnswer 非空时（ActionChannelAnswer），管线用返回的渠道与回答人填授权请求以查回答人白名单，
-	// webURL 随 web_only 拒绝返回；渠道与回答人只能据账本与凭据得出，不来自对象之外的声明。
+	// ChannelAnswer 非空时（ActionChannelAnswer），管线用返回的渠道与回答人填授权请求以查回答人名单；
+	// 渠道与回答人只能据账本与凭据得出，不来自对象之外的声明。
 	ChannelAnswer func(tx *store.Tx, c Caller, in json.RawMessage) (channel, sender, webURL string, err error)
-	// Tier 声明命令的代理写档位（§14.5、附录 B.1）；零值不是代理写命令。判定只在管线一处，命令体内不重复。
+	// Tier 是命令按后果固定的档（§14.3、附录 B.1），必填。判定只在管线一处，命令体内不重复。
 	Tier authz.Tier
-	// Bound 非空时，delegate 调用满足它则按第一档（agent 自己的工作）：对象绑定只据账本与凭据得出。
-	// 不满足时按 Tier。Tier 为第二档的命令用它声明"绑定时降到第一档"。
-	Bound func(tx *store.Tx, c Caller, o authz.Object, in json.RawMessage) (bool, error)
+	// TierFor 非空时取代 Tier：按状态变化定档（如离开"建议"是二档）；只据账本与输入得出。
+	TierFor func(tx *store.Tx, c Caller, o authz.Object, in json.RawMessage) (authz.Tier, error)
+	// Page 是这个动作所在的 Web 页面（如 /settings/agents），3a/3b 拒绝时作为链接返回。
+	Page string
 	// Receipt 标记回执与捕获类命令（§14.5 失败可见）：它们多由插件异步发起、对模型不可见，
 	// 内核可达但拒绝（退出码 2、4、23）时，管线在独立事务里另记 health.alert。
 	Receipt bool
@@ -260,11 +254,6 @@ type Commit struct {
 	Seqs    []int64
 	Input   json.RawMessage // 命令输入与结果：没有对象 id 的命令（新建、按仓库检查）靠它定位
 	Value   json.RawMessage
-}
-
-// basisMissing：本人原话这条依据不成立（缺失、缺会话引用、会话不是私聊），可以改由授权单放行。
-func basisMissing(c domain.Code) bool {
-	return c == domain.CodeBasisRequired || c == domain.CodeSessionNotDirect
 }
 
 // ReceiptKind 是回执与捕获被拒绝的 health.alert 的 payload.kind。
@@ -301,10 +290,13 @@ func New(st *store.Store, now func() time.Time) *Executor {
 	return &Executor{st: st, now: now, MaxChainDepth: DefaultMaxChainDepth, specs: map[string]Spec{}}
 }
 
-// Register 登记命令；名称重复或缺 Apply/Object 会被拒绝。
+// Register 登记命令；名称重复、缺 Apply/Object 或没有登记档位会被拒绝。
 func (x *Executor) Register(s Spec) error {
 	if s.Name == "" || s.Apply == nil || s.Object == nil {
 		return fmt.Errorf("command: spec %q needs name, Object and Apply", s.Name)
+	}
+	if s.Tier == authz.TierUnset {
+		return fmt.Errorf("command: spec %q has no tier", s.Name)
 	}
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -315,7 +307,7 @@ func (x *Executor) Register(s Spec) error {
 	return nil
 }
 
-// Tier 返回已登记命令声明的代理写档位，供契约测试对照附录 B.1 的清单。
+// Tier 返回已登记命令的档（按状态变化定档的命令返回它的基础档），供对照测试与权限页使用。
 func (x *Executor) Tier(name string) (authz.Tier, bool) {
 	x.mu.RLock()
 	defer x.mu.RUnlock()
@@ -342,7 +334,7 @@ func (x *Executor) InTx(f func(*Ctx) error) {
 	x.mu.Unlock()
 }
 
-// OnReject 登记拒绝回调：被拒绝的命令（退出码 20、21、22、23 与运行身份被拒绝的决策命令）在记 command.rejected 之后、
+// OnReject 登记拒绝回调：被拒绝的命令（硬线 20、执行者 21、档位 23、范围外 4）在记 command.rejected 之后、
 // 同一事务里按登记顺序调用，返回错误则拒绝留痕一并回滚。供事项转 needs_input 等"依据不足不静默"的处理（§14.5）。
 // 回调不得另开事务，也不得发起外呼。
 func (x *Executor) OnReject(f func(*store.Tx, Rejection) error) {
@@ -430,7 +422,7 @@ func (r *rejected) Error() string { return r.err.Error() }
 func (r *rejected) Unwrap() error { return r.err }
 
 // Do 执行一次命令：五步在同一写事务里完成（提交后消费者除外）。失败整体回滚；
-// 退出码 20/21/22 与运行身份被拒绝的决策命令另开事务记 command.rejected。
+// 硬线、执行者、档位、范围外的拒绝另开事务记 command.rejected。
 func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
 	x.mu.RLock()
 	spec, ok := x.specs[req.Command]
@@ -564,109 +556,31 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 		}
 	}
 	tier := spec.Tier
-	if spec.Bound != nil && caller.Level == authz.LevelDelegate {
-		if bound, err := spec.Bound(tx, caller, obj, req.Input); err != nil {
-			return Result{}, Commit{}, err
-		} else if bound {
-			tier = authz.TierWork
-		}
-	}
-	var grant *policy.Grant
-	grantable := caller.Level == authz.LevelDelegate || (caller.Level == authz.LevelRun && caller.RunHarness != "")
-	if req.Grant != "" && grantable {
-		g, err := policy.GetGrant(tx, req.Grant)
-		var de *domain.Error
-		if errors.As(err, &de) && de.Code == domain.CodeNotFound {
-			err = nil // 授权判定按"授权单不存在"返回退出码 23
-		} else if err == nil {
-			grant = &g
-		}
-		if err != nil {
+	if spec.TierFor != nil {
+		if tier, err = spec.TierFor(tx, caller, obj, req.Input); err != nil {
 			return Result{}, Commit{}, err
 		}
 	}
-	trustOf := func(g *policy.Grant) (bool, error) {
-		if g != nil && caller.Level == authz.LevelRun && caller.RunTrusted != nil {
-			return caller.RunTrusted(tx)
+	agent := caller.Agent()
+	allowance := pol.Allowance(agent)
+	for _, act := range actions {
+		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Tier: tier, Object: obj, Fresh: caller.Fresh,
+			Agent: agent, Allowance: allowance, Owner: req.Owner, WebURL: webURL, Page: spec.Page, Channel: channel, Sender: sender}
+		d := authz.Decide(pol, ar)
+		if d.Err == nil {
+			continue
 		}
-		return false, nil
-	}
-	request := func(act authz.Action, grantID string, g *policy.Grant, evidence string, trigger bool) authz.Request {
-		return authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
-			Evidence: evidence, Tier: tier, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender,
-			Command: spec.Name, GrantID: grantID, Grant: g, Credential: caller.Credential, Now: x.now(),
-			CredentialAgentID: caller.CredentialAgentID, CredentialHarness: caller.CredentialHarness, RunAgentID: caller.RunAgentID, RunHarness: caller.RunHarness, TriggerTrusted: trigger}
-	}
-	// decideAll 逐个动作判定；第一个不放行的动作决定结果。
-	decideAll := func(grantID string, g *policy.Grant, evidence string) (authz.Tier, authz.Request, authz.Decision, error) {
-		trigger, err := trustOf(g)
-		if err != nil {
-			return authz.TierNone, authz.Request{}, authz.Decision{}, err
-		}
-		decided := authz.TierNone
-		for _, act := range actions {
-			ar := request(act, grantID, g, evidence, trigger)
-			d := authz.Decide(pol, ar)
-			if d.Err != nil {
-				return decided, ar, d, nil
-			}
-			decided = max(decided, authz.TierOf(ar))
-		}
-		return decided, authz.Request{}, authz.Decision{}, nil
-	}
-	decided, failAr, failD, err := decideAll(req.Grant, grant, req.Evidence)
-	if err != nil {
-		return Result{}, Commit{}, err
-	}
-	// 授权单按被授权方生效（§14.5）：没带单、又因缺依据（原话缺失或会话不是私聊）被拒时，找本人签给这个调用方的有效授权单，
-	// 任一张在本次全部动作上都放行就按它放行，Event 照常记 grant id。被授权方、动作、范围、期限、撤销、风险上限、
-	// 来源与触发可信都按 grantMismatch 原样校验；找不到就维持原来的拒绝。web_only 与没授的动作不受影响。
-	// 运行凭据没带单时按"没有代答能力"得到退出码 4，同样改由它的授权单判定（单上须允许后台使用、触发可信）。
-	if failD.Err != nil && req.Grant == "" && grantable && (basisMissing(failD.Err.Code) || caller.Level == authz.LevelRun && failD.Err.Code == domain.CodePermissionDenied) {
-		gs, err := policy.ListGrants(tx)
-		if err != nil {
-			return Result{}, Commit{}, err
-		}
-		for i := range gs {
-			g := gs[i]
-			if !g.RevokedAt.IsZero() || (!g.ExpiresAt.IsZero() && !x.now().Before(g.ExpiresAt)) {
-				continue
-			}
-			t, _, d, err := decideAll(g.ID, &g, "")
-			if err != nil {
-				return Result{}, Commit{}, err
-			}
-			if d.Err == nil {
-				decided, failD, grant = t, authz.Decision{}, &g
-				req.Grant, req.Evidence = g.ID, "" // 依据是授权单，不是那句原话
-				break
-			}
-		}
-	}
-	if d := failD; d.Err != nil {
-		ar := failAr
 		if ev, ok := authz.RejectionEvent(ar, d); ok {
 			ev.At = x.now()
 			if ev.Object == "" { // 新建类命令没有对象：拒绝事件记在命令名下
 				ev.Object = spec.Name
 			}
 			if caller.Actor.Via == domain.ViaRule {
-				ev.Basis = &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID}
+				ev.Basis = &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID, Via: domain.BasisRule}
 			}
 			return Result{}, Commit{}, &rejected{err: d.Err, ev: ev}
 		}
 		return Result{}, Commit{}, d.Err
-	}
-	// 第一档的 Event 不带 on_behalf_of（§14.5）：Bearer 认证只知道凭据，替本人说话要由第二档的依据来换。
-	if caller.Level == authz.LevelDelegate && caller.Actor.Type == domain.ActorAgent && decided < authz.TierDecide {
-		caller.Actor.OnBehalfOf = ""
-	}
-	usedGrant := ""
-	if req.Grant != "" && grantable && decided >= authz.TierDecide {
-		usedGrant = req.Grant
-		if caller.Level == authz.LevelRun { // 运行凭据凭单代本人决定：Event 记替谁（§14.5），运行 id 保留在 Actor.Run
-			caller.Actor.OnBehalfOf = grant.Principal
-		}
 	}
 	// 3 校验：幂等 → 乐观版本 → 命令自身约束
 	hash := sha256.Sum256(req.Input)
@@ -714,17 +628,12 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 	if err != nil {
 		return Result{}, Commit{}, err
 	}
-	var basis *domain.Basis
-	if caller.Actor.Via == domain.ViaRule {
-		if req.RuleID == "" {
-			return Result{}, Commit{}, invalid("rule action requires a rule id")
-		}
+	if caller.Actor.Via == domain.ViaRule && req.RuleID == "" {
+		return Result{}, Commit{}, invalid("rule action requires a rule id")
 	}
-	if req.RuleID != "" || caller.Actor.Via == domain.ViaRule {
-		basis = &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID}
-	}
+	basis := &domain.Basis{PolicyVersion: pv, RuleID: req.RuleID, Via: basisVia(caller, spec, tier), Command: spec.Name, Tier: tier.String(), Agent: caller.Agent()}
 	at := x.now()
-	c := &Ctx{Tx: tx, Caller: caller, Input: req.Input, Object: obj, ChainDepth: depth, Basis: basis, Evidence: req.Evidence, Grant: usedGrant,
+	c := &Ctx{Tx: tx, Caller: caller, Input: req.Input, Object: obj, ChainDepth: depth, Basis: basis, Tier: tier,
 		now: func() time.Time { return at }}
 	// 4 事务
 	var out Result
@@ -789,6 +698,23 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 		}
 	}
 	return out, Commit{Command: spec.Name, Actor: caller.Actor, Object: obj.ID, Seqs: live, Input: req.Input, Value: out.Value}, nil
+}
+
+// basisVia 是事件的"凭什么"（§14.3 审计）。
+func basisVia(c Caller, spec Spec, t authz.Tier) string {
+	switch {
+	case c.Level == authz.LevelWeb:
+		return domain.BasisOwnerWeb
+	case spec.Action == authz.ActionChannelAnswer:
+		return domain.BasisOwnerChannel
+	case c.Actor.Via == domain.ViaRule:
+		return domain.BasisRule
+	case c.Actor.Type == domain.ActorSystem:
+		return ""
+	case t == authz.TierDecide || t == authz.TierRules:
+		return domain.BasisAllowance
+	}
+	return domain.BasisOrganize
 }
 
 // errPreflight 让预检在校验通过后回滚事务；Do 把它当作成功。

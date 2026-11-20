@@ -159,7 +159,7 @@ func windowOf(t *testing.T, r runResult) window {
 type fixtureIDs struct {
 	workDone, openDone, importedDone string
 	staleItem, followUp, echoItem    string
-	decNormal, decWebOnly, decPend   string
+	decNormal, decSecond             string
 }
 
 // 建议：三条来自 prop-src（外发范围全文）的事件，经初筛与起草成为建议；B 是把握低的。
@@ -207,21 +207,8 @@ func (f *fx) askItem(mark string) string {
 	return id
 }
 
-func (f *fx) askState(id string) (riskClass string, pending bool) {
-	f.t.Helper()
-	it := decode[struct {
-		Item struct {
-			Ask struct {
-				RiskClass string `json:"risk_class"`
-				Pending   bool   `json:"screening_pending"`
-			} `json:"ask"`
-		} `json:"item"`
-	}](f.t, f.web("GET", "/v1/items/"+id, "", 200)).Item
-	return it.Ask.RiskClass, it.Ask.Pending
-}
-
 // buildLedger 造账本夹具（测试时钟推进 15 天，之后的"今天"都以内核时间为准）：
-// 建议流 3 条（一条把握低）、待决策 3 条（普通、web_only、初筛未返回）、今天与明天到期与已过期各一、
+// 建议流 3 条（一条把握低）、待决策 2 条、今天与明天到期与已过期各一、
 // 回音转回 open、跟进到期仍在等、久未推进各一、当天完成的事项与进展、一批导入的事件。
 func (f *fx) buildLedger() fixtureIDs {
 	f.t.Helper()
@@ -234,7 +221,7 @@ func (f *fx) buildLedger() fixtureIDs {
 	// 15 天前就在的两件事：一件没有任何进展（久未推进），一件在等外部回复（跟进提醒到期）。
 	ids.staleItem = f.addItem("--title", "久未推进的事项", "--phase", "open", "--project", work)
 	ids.followUp = f.addItem("--title", "跟进到期仍在等的事项", "--phase", "open", "--assignee", "work-host.cli", "--project", work)
-	f.apa(f.WRK, 0, "item", "transition", ids.followUp, "--to", "waiting", "--waiting-on", "external:装修公司报价", "--reason", "等报价", "--evidence", "等装修公司报价")
+	f.apa(f.WRK, 0, "item", "transition", ids.followUp, "--to", "waiting", "--waiting-on", "external:装修公司报价", "--reason", "等报价")
 	f.advance(15 * 86400)
 	f.until("跟进提醒已记且仍在等", func() bool { return f.reminded(ids.followUp) >= 1 })
 	if it := f.show(ids.followUp); it.Phase != "waiting" {
@@ -259,19 +246,19 @@ func (f *fx) buildLedger() fixtureIDs {
 	f.addItem("--title", "已过期", "--phase", "open", "--project", work, "--deadline", yesterday)
 	// 当天完成的事项与写下的进展（两个项目）。
 	ids.workDone = f.addItem("--title", "今天完成 W", "--phase", "open", "--project", work)
-	f.apa(f.DEL, 0, "item", "progress", ids.workDone, "--text", "进展 W1", "--evidence", "验收夹具")
-	f.apa(f.DEL, 0, "item", "transition", ids.workDone, "--to", "done", "--reason", "完成", "--evidence", "验收夹具")
+	f.apa(f.DEL, 0, "item", "progress", ids.workDone, "--text", "进展 W1")
+	f.apa(f.DEL, 0, "item", "transition", ids.workDone, "--to", "done", "--reason", "完成")
 	ids.openDone = f.addItem("--title", "今天完成 O", "--phase", "open", "--project", open)
-	f.apa(f.DEL, 0, "item", "progress", ids.openDone, "--text", "进展 O1", "--evidence", "验收夹具")
-	f.apa(f.DEL, 0, "item", "transition", ids.openDone, "--to", "done", "--reason", "完成", "--evidence", "验收夹具")
+	f.apa(f.DEL, 0, "item", "progress", ids.openDone, "--text", "进展 O1")
+	f.apa(f.DEL, 0, "item", "transition", ids.openDone, "--to", "done", "--reason", "完成")
 	// 一批导入的历史事件：给已完成事项的一条进展，与把另一件事记为完成。
 	ids.importedDone = f.addItem("--title", "导入时记为完成的事项", "--phase", "open", "--project", open)
 	f.seedImported(ids.workDone, ids.importedDone)
 
 	// 等外部回音的事项收到回音，回到 open（关联键登记在事项上，回音事件带同一个键）。
 	ids.echoItem = f.addItem("--title", "等房东确认的事项", "--phase", "open", "--project", open)
-	f.apa(f.DEL, 0, "item", "transition", ids.echoItem, "--to", "waiting", "--waiting-on", "external:房东", "--reason", "等房东回复", "--evidence", "等房东回复")
-	f.apa(f.DEL, 0, "item", "relate", ids.echoItem, "--key", "acc-echo-thread", "--evidence", "本人原话：房东的回复归到这件事")
+	f.apa(f.DEL, 0, "item", "transition", ids.echoItem, "--to", "waiting", "--waiting-on", "external:房东", "--reason", "等房东回复")
+	f.apa(f.DEL, 0, "item", "relate", ids.echoItem, "--key", "acc-echo-thread")
 	echo := map[string]any{"id": "acc-echo-1", "type": "acc.reply", "subject": "周三上午可以", "occurred_at": f.now().UTC().Format(time.RFC3339),
 		"correlation_keys": []string{"acc-echo-thread"}, "sender": "landlord@example.com"}
 	f.addSource("src_acc_echo", "acc-echo", "echo-src", "full", []map[string]any{echo})
@@ -291,16 +278,8 @@ func (f *fx) buildLedger() fixtureIDs {
 	f.addSource("src_acc_prop", "acc-prop", "prop-src", "full", pl)
 	f.until("三条建议进入建议流", func() bool { return len(f.proposedTitles()) == 3 })
 
-	// 待决策：普通一条；初筛升级为 web_only 一条；初筛迟迟不返回一条（简报里不列）。
-	f.clsPYes("DEC-NORMAL", 0.05, 0)
-	f.clsPYes("DEC-WEBONLY", 0.90, 0)
-	f.clsPYes("DEC-PENDING", 0.05, 120000)
-	ids.decNormal, ids.decWebOnly, ids.decPend = f.askItem("DEC-NORMAL"), f.askItem("DEC-WEBONLY"), f.askItem("DEC-PENDING")
-	f.until("初筛结果：普通与 web_only 已返回", func() bool {
-		rc1, p1 := f.askState(ids.decNormal)
-		rc2, p2 := f.askState(ids.decWebOnly)
-		return !p1 && !p2 && rc1 != "web_only" && rc2 == "web_only"
-	})
+	// 待决策两条（2026-11-20 起高风险类别与初筛取消，问题一个口径，简报全部列出）。
+	ids.decNormal, ids.decSecond = f.askItem("DEC-NORMAL"), f.askItem("DEC-SECOND")
 	return ids
 }
 
@@ -332,9 +311,6 @@ func TestFlowBriefMaterial(t *testing.T) {
 			t.Fatalf("夹具里不应已有简报: %d", n)
 		}
 		sameSet(t, "建议流", f.proposedTitles(), wantProposals)
-		if _, pending := f.askState(ids.decPend); !pending {
-			t.Fatal("DEC-PENDING 的初筛应还没有返回")
-		}
 		amInst = f.addInstance(0, "instruction="+amInstruction)
 		pmInst = f.addInstance(0, "schedule_days=3")
 		if packs := f.web("GET", "/v1/packs", "", 200); !strings.Contains(packs, "default_instruction") {
@@ -365,23 +341,19 @@ func TestFlowBriefMaterial(t *testing.T) {
 				t.Errorf("建议 %s = %+v，期望 recommend=%s reason=%s low=%v", w.title, p, w.recommend, w.reason, w.low)
 			}
 		}
-		// 待决策：普通的与 web_only 的各一（web_only 带标记）；初筛未返回的不列。
+		// 待决策：两条都列出（高风险类别取消，2026-11-20）。
 		dec := decode[struct {
 			Decisions []struct {
 				ID       string `json:"id"`
 				Question string `json:"question"`
-				WebOnly  bool   `json:"web_only"`
 			} `json:"decisions"`
 		}](t, am.Mats["decisions"]).Decisions
 		gotDec := map[string]bool{}
 		for _, d := range dec {
-			gotDec[d.ID] = d.WebOnly
+			gotDec[d.ID] = true
 		}
-		if len(dec) != 2 || gotDec[ids.decNormal] || !gotDec[ids.decWebOnly] {
-			t.Errorf("decisions = %+v，期望普通（web_only=false）与 web_only（true）两条，不含初筛未返回的 %s", dec, ids.decPend)
-		}
-		if _, hit := gotDec[ids.decPend]; hit {
-			t.Errorf("初筛未返回的决策不应列出: %+v", dec)
+		if len(dec) != 2 || !gotDec[ids.decNormal] || !gotDec[ids.decSecond] {
+			t.Errorf("decisions = %+v，期望恰好两条待决策", dec)
 		}
 		// 到期与等待：今天、明天、已过期、回音、跟进到期、久未推进。
 		due := decode[struct {
@@ -498,7 +470,7 @@ func TestFlowBriefMaterial(t *testing.T) {
 		if len(got) != 3 || got[2].Title != f.calendars().c4.subject {
 			t.Errorf("7 天窗口应多出 C4: %+v", got)
 		}
-		r := f.Apa(f.DEL, "", "instance", "add", "brief", "--param", "schedule=0 3 1 1 *", "--param", "schedule_days=15", "--evidence", "验收实例")
+		r := f.Apa(f.DEL, "", "instance", "add", "brief", "--param", "schedule=0 3 1 1 *", "--param", "schedule_days=15")
 		if r.Code != 2 || !strings.Contains(r.Stderr, "schedule_days") {
 			t.Errorf("schedule_days=15 应以退出码 2 被拒并指出 schedule_days: %d %s%s", r.Code, r.Stdout, r.Stderr)
 		}

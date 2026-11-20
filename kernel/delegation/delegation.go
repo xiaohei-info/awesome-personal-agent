@@ -208,7 +208,7 @@ func (o Options) create() command.Spec {
 		}
 		return v, nil
 	}
-	return command.Spec{Name: "delegate.create", Action: authz.ActionDelegate, Tier: authz.TierWork,
+	return command.Spec{Name: "delegate.create", Action: authz.ActionDelegate, Tier: authz.TierOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -224,7 +224,7 @@ func (o Options) create() command.Spec {
 			if v.Project != "" && v.Project != parent.Project {
 				return authz.Object{}, invalid("a delegated item inherits its parent's project and cannot choose another")
 			}
-			obj := authz.Object{ID: parent.ID, Assignee: parent.Assignee, Kind: string(parent.Kind), Tags: parent.Tags,
+			obj := authz.Object{ID: parent.ID, Assignee: parent.Assignee, Kind: string(parent.Kind),
 				Project: parent.Project, Executor: v.Assignee}
 			if parent.Project != "" && v.Assignee != o.Owner {
 				p, err := projects.Get(tx, parent.Project)
@@ -232,35 +232,13 @@ func (o Options) create() command.Spec {
 					return authz.Object{}, err
 				}
 				obj.ProjectInfo = &p
-				if p.Restricted() {
-					// 名单按名录里已登记的值判定；还没登记、本次随委派登记的，按将要登记的值（harness 由 Refine 取调用方）。
-					e, found, err := executors.Get(tx, v.Assignee)
-					if err != nil {
-						return authz.Object{}, err
-					}
-					switch {
-					case found:
-						obj.ExecutorHost, obj.ExecutorHarness = e.Host, e.Harness
-					case v.Executor != nil:
-						obj.ExecutorHost = v.Executor.Host
-					}
+				if p.Restricted() { // 名单只认执行者 id（§14.7）
 					if obj.Candidates, err = executors.Candidates(tx, p, o.Owner); err != nil {
 						return authz.Object{}, err
 					}
 				}
 			}
 			return obj, nil
-		},
-		Refine: func(tx *store.Tx, c command.Caller, obj *authz.Object, in json.RawMessage) error {
-			v, _ := parse(in)
-			if v.Executor == nil || obj.ProjectInfo == nil || !obj.ProjectInfo.Restricted() {
-				return nil
-			}
-			if _, found, err := executors.Get(tx, v.Assignee); err != nil || found {
-				return err
-			}
-			obj.ExecutorHarness = c.Actor.Harness
-			return nil
 		},
 		Validate: func(tx *store.Tx, obj authz.Object, _ json.RawMessage) error {
 			parent, err := items.Get(tx, obj.ID)
@@ -338,7 +316,7 @@ func report() command.Spec {
 		var v reportIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound, Receipt: true,
+	return command.Spec{Name: "delegate.report", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize, Receipt: true,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -348,7 +326,7 @@ func report() command.Spec {
 			if err != nil {
 				return authz.Object{}, err
 			}
-			return authz.Object{ID: child.ID, Assignee: child.Assignee, Kind: string(child.Kind), Tags: child.Tags, Project: child.Project}, nil
+			return authz.Object{ID: child.ID, Assignee: child.Assignee, Kind: string(child.Kind), Project: child.Project}, nil
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)
@@ -412,10 +390,6 @@ func report() command.Spec {
 			}
 			return map[string]string{"id": child.ID}, nil
 		}}
-}
-
-func bound(tx *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) (bool, error) {
-	return items.BoundTo(tx, c.Actor.Principal, o)
 }
 
 // reportable 读出回执的目标事项：委派子事项，或任务型运行的目标事项（附录 C.13 的"写回事项"）。
@@ -527,7 +501,7 @@ func settle() command.Spec {
 		var v settleIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "delegate.settle", Action: authz.ActionChangeSettings,
+	return command.Spec{Name: "delegate.settle", Action: authz.ActionChangeSettings, Tier: authz.TierInternal,
 		Actions: func(_ *store.Tx, c command.Caller, _ authz.Object, _ json.RawMessage) []authz.Action {
 			if c.Actor.Type == domain.ActorSystem && c.Actor.Via == domain.ViaClock {
 				return []authz.Action{authz.ActionRead}

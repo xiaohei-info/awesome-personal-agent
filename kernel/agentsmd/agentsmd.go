@@ -154,7 +154,7 @@ type RenderResult struct {
 }
 
 func (s *Service) renderCmd() command.Spec {
-	return command.Spec{Name: "agents.render", Action: authz.ActionReviseMaterial,
+	return command.Spec{Name: "agents.render", Action: authz.ActionReviseMaterial, Tier: authz.TierInternal,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			var v struct{}
 			return authz.Object{}, decode(in, &v)
@@ -237,7 +237,7 @@ func (s *Service) checkCmd(name string, sync bool) command.Spec {
 		var v checkIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: name, Action: authz.ActionRead,
+	return command.Spec{Name: name, Action: authz.ActionRead, Tier: authz.TierOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -434,7 +434,7 @@ func (s *Service) resolveCmd() command.Spec {
 		var v ResolveIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "agents.resolve", Action: authz.ActionAnswerDecision,
+	return command.Spec{Name: "agents.resolve", Action: authz.ActionAnswerDecision, Tier: authz.TierRules, Page: "/decisions",
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -444,11 +444,7 @@ func (s *Service) resolveCmd() command.Spec {
 			if err != nil {
 				return authz.Object{}, err
 			}
-			o := authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Tags: it.Tags, Project: it.Project}
-			if a := it.Ask; a != nil {
-				o.Category, o.ScreeningPending = a.RiskClass, a.ScreeningPending
-			}
-			return o, nil
+			return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Project: it.Project}, nil
 		},
 		Validate: func(tx *store.Tx, _ authz.Object, in json.RawMessage) error {
 			v, _ := parse(in)

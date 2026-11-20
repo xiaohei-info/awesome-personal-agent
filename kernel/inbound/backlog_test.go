@@ -85,7 +85,7 @@ func TestStaleExpiresAndOwnerIgnoresBacklog(t *testing.T) {
 	}
 
 	in, _ := json.Marshal(map[string]any{"source": "src_m"})
-	res, err := e.x.Do(bg, command.Request{Identity: owner, Command: CmdIgnoreUnjudged, Input: in, Owner: "owner", Evidence: "owner said so"})
+	res, err := e.x.Do(bg, command.Request{Identity: owner, Command: CmdIgnoreUnjudged, Input: in, Owner: "owner"})
 	if err != nil || string(res.Value) != `{"ignored":2}` {
 		t.Fatalf("batch ignore: %v %s", err, res.Value)
 	}
@@ -106,7 +106,7 @@ func TestStaleExpiresAndOwnerIgnoresBacklog(t *testing.T) {
 		}
 	}
 	single, _ := json.Marshal(map[string]any{"event": got["m2"].ID})
-	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: CmdIgnoreUnjudged, Input: single, Owner: "owner", Evidence: "x"}); code(err) != domain.CodeConflict {
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: CmdIgnoreUnjudged, Input: single, Owner: "owner"}); code(err) != domain.CodeConflict {
 		t.Fatalf("ignoring an ignored event: %v", err)
 	}
 }

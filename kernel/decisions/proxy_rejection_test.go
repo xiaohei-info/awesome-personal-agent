@@ -11,7 +11,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 第二档依据不足（退出码 23）：被拒的写入不生效，open、waiting 的事项阶段与版本不变，不产出问题，只多一条 command.rejected（§14.5）。
+// 二档档位未放开（退出码 23）：被拒的写入不生效，open、waiting 的事项阶段与版本不变，不产出问题，只多一条 command.rejected（§14.5）。
 // 2026-11-20 改写：此前断言的是"转 needs_input 并挂单选项「继续」的内核问题"，该做法已取消（问题只给需要本人决定的事，§6.14 第 20 条）。
 func TestBasisRequiredTurnsOpenAndWaitingItemsToNeedsInput(t *testing.T) {
 	e := setup(t)
@@ -160,8 +160,8 @@ func TestBasisRequiredLeavesOtherObjectsUnchanged(t *testing.T) {
 			t.Fatalf("%s events: %+v", tc.id, es[nEv:])
 		}
 	}
-	// 不对应事项的命令（项目）：只拒绝和记录。
-	if _, err := e.do(delegate, "project.create", "", map[string]any{"name": "p1"}); exit(err) != domain.ExitBasisRequired {
+	// 建项目是一档，不需要任何附加依据。
+	if _, err := e.do(delegate, "project.create", "", map[string]any{"name": "p1"}); err != nil {
 		t.Fatalf("project.create: %v", err)
 	}
 	e.verify(t)

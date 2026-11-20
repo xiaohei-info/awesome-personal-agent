@@ -382,10 +382,9 @@ type ChangeIn struct {
 	Reason   string `json:"reason,omitempty"`
 
 	// 请求元数据，不是请求体字段。IdemKey 给两步命令（item.create、delegate.create）各用一次——幂等按命令名分键，
-	// 重放返回首次的父事项和子事项；Evidence 是 delegate 代答所需的本人原话。
+	// 重放返回首次的父事项和子事项。
 	// shortcut: 委派失败后父事项已丢弃，同键重试会重放到这个已丢弃的父事项并再次失败；换新键重试即可。
-	IdemKey  string `json:"-"`
-	Evidence string `json:"-"`
+	IdemKey string `json:"-"`
 }
 
 // ChangeOut 是生成的父事项与委派子事项。
@@ -446,7 +445,7 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 		b, _ := json.Marshal(map[string]any{"kind": domain.KindTask, "phase": domain.PhaseOpen, "title": "修改文档：" + e.Material.Title,
 			"summary": e.Repo + ":" + e.Path, "project": e.Material.Project, "assignee": s.opt.Owner, "reason": reason})
 		r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "item.create", Input: b, Owner: s.opt.Owner,
-			IdemKey: in.IdemKey, Evidence: in.Evidence})
+			IdemKey: in.IdemKey})
 		if err != nil {
 			return out, err
 		}
@@ -462,11 +461,11 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 		"summary": e.Repo + ":" + e.Path, "body": body, "project": e.Material.Project, "reason": reasonOr(in.Reason, "change hosted material")})
 	// 链路深度由命令管线按调用者推定（§14.9）：本人在 Web 委派开始新链路，其余继承父事项。
 	r, err := s.x.Do(ctx, command.Request{Identity: who, Command: "delegate.create", Input: b, Owner: s.opt.Owner,
-		IdemKey: in.IdemKey, Evidence: in.Evidence})
+		IdemKey: in.IdemKey})
 	if err != nil {
 		if out.ParentCreated {
 			drop, _ := json.Marshal(map[string]any{"id": out.Parent, "to": domain.PhaseDropped, "reason": "delegation failed: " + err.Error()})
-			if _, derr := s.x.Do(ctx, command.Request{Identity: who, Command: "item.transition", Input: drop, Owner: s.opt.Owner, Evidence: in.Evidence}); derr != nil {
+			if _, derr := s.x.Do(ctx, command.Request{Identity: who, Command: "item.transition", Input: drop, Owner: s.opt.Owner}); derr != nil {
 				err = errors.Join(err, derr)
 			}
 		}
@@ -486,7 +485,7 @@ func (s *Service) RequestChange(ctx context.Context, who command.Identity, in Ch
 	if !slices.Contains(rels, output) {
 		rel, _ := json.Marshal(map[string]any{"from": output.From, "to": output.To, "type": output.Type, "reason": "change hosted material"})
 		_, err = s.x.Do(ctx, command.Request{Identity: who, Command: "item.relate", Input: rel, Owner: s.opt.Owner,
-			IdemKey: in.IdemKey, Evidence: in.Evidence})
+			IdemKey: in.IdemKey})
 	}
 	return out, err
 }

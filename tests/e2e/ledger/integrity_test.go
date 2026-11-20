@@ -86,7 +86,7 @@ func TestFlowLedgerIntegrity(t *testing.T) {
 					return
 				default:
 				}
-				r := e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--phase", "open", "--title", fmt.Sprintf("kill-%d", i), "--evidence", "owner: add")
+				r := e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--phase", "open", "--title", fmt.Sprintf("kill-%d", i))
 				if r.Code != 0 {
 					return // 服务被杀后写入失败，循环结束
 				}
@@ -149,7 +149,7 @@ func TestFlowLedgerIntegrity(t *testing.T) {
 		passed(t, out,
 			"TestInv1LedgerChangeAndEventCommitTogether", "TestInv2ProposedItemsProduceNoDelivery",
 			"TestInv3PhaseEntryConstraints", "TestInv3ReportDoneNeedsResultEvidence",
-			"TestInv4WebOnlyOnlyEscalates", "TestInv5AllowedExecutorsBindEveryEntry",
+			"TestInv5AllowedExecutorsBindEveryEntry", // 第 4 条（web_only 只升不降）随高风险类别取消（2026-11-20）
 			"TestInv6RuleActionEventsDoNotRetriggerRules", "TestInv7OneRunPerItem",
 			"TestInv8RunIdentityCannotAnswer", "TestInv9RevisionsAreAppendOnly",
 			"TestInv10OnlyOutcallReachesNetworkOrSubprocess", "TestInv11ProxyDecisionsNeedWordsAndSession")

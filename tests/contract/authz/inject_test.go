@@ -28,7 +28,7 @@ func noLeak(t *testing.T, label string, de *domain.Error) {
 	}
 }
 
-// ACT-INJ-04：事项标题与项目名都写成 MARKER-TITLE，引发退出码 4、6、20、21 各一次，并运行 apa guide，
+// ACT-INJ-04：事项标题与项目名都写成 MARKER-TITLE，引发退出码 4、6、20、21、23 各一次，并运行 apa guide，
 // 所有错误的 why、next 与 guide 都不含 MARKER-TITLE。
 func TestErrorsAndGuideCarryNoLedgerContent(t *testing.T) {
 	e := setup(t)
@@ -44,15 +44,19 @@ func TestErrorsAndGuideCarryNoLedgerContent(t *testing.T) {
 	}{
 		// 退出码 4：worker 改不属于自己的事项。
 		{"exit 4", domain.ExitPermissionDenied, func() *httptest.ResponseRecorder {
-			return (e.api("WRK", "PATCH", "/v1/items/"+parent, patch("x"), ""))
+			return (e.api("WRK", "PATCH", "/v1/items/"+parent, patch("x")))
 		}},
 		// 退出码 20：delegate 改项目允许的执行者（设置类）。
 		{"exit 20", domain.ExitWebOnly, func() *httptest.ResponseRecorder {
-			return (e.api("DEL", "PUT", "/v1/settings/projects/"+prj+"/allowed-executors", `{"executors":["evil"]}`, ""))
+			return (e.api("DEL", "PUT", "/v1/settings/projects/"+prj+"/allowed-executors", `{"executors":["evil"]}`))
+		}},
+		// 退出码 23：只整理的 delegate 直接建进行中的事项（立项是二档）。
+		{"exit 23", domain.ExitTierClosed, func() *httptest.ResponseRecorder {
+			return (e.api("DEL", "POST", "/v1/items", `{"kind":"task","title":"`+marker+`","summary":"`+marker+`","phase":"open","project":"`+prj+`"}`))
 		}},
 		// 退出码 21：delegate 把任务派给项目名单之外的执行者。
 		{"exit 21", domain.ExitExecutorNotAllowed, func() *httptest.ResponseRecorder {
-			return (e.api("DEL", "POST", "/v1/delegations", `{"parent":"`+parent+`","assignee":"`+otherHost+`","title":"`+marker+`"}`, "owner said so (chat#1)"))
+			return (e.api("DEL", "POST", "/v1/delegations", `{"parent":"`+parent+`","assignee":"`+otherHost+`","title":"`+marker+`"}`))
 		}},
 	}
 	for _, c := range cases {

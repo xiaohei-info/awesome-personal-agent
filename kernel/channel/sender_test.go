@@ -235,7 +235,7 @@ func TestSenderSkipsSupersededAndDisabled(t *testing.T) {
 	}
 }
 
-// 连接命令只在 Web：delegate 得 web_only（退出码 20），worker 得 4。读接口与 Event 里没有凭据明文。
+// 连接命令是 3b：任何钥匙都得硬线 web_only（退出码 20）。读接口与 Event 里没有凭据明文。
 func TestConnectionCommandsAreWebOnlyAndNeverEchoSecrets(t *testing.T) {
 	e := newSenv(t)
 	delegate := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
@@ -243,7 +243,7 @@ func TestConnectionCommandsAreWebOnlyAndNeverEchoSecrets(t *testing.T) {
 	if _, err := e.do(delegate, connections.CmdCreate, in); exitOf(err) != 20 {
 		t.Fatalf("delegate create: %v", err)
 	}
-	if _, err := e.do(worker, connections.CmdCreate, in); exitOf(err) != 4 {
+	if _, err := e.do(worker, connections.CmdCreate, in); exitOf(err) != 20 {
 		t.Fatalf("worker create: %v", err)
 	}
 	id := e.create(false)

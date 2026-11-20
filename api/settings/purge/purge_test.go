@@ -39,7 +39,7 @@ const (
 
 var (
 	bg    = context.Background()
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 type env struct {
@@ -108,7 +108,7 @@ func setup(t *testing.T) *env {
 func (e *env) cmd(id command.Identity, name string, in any) map[string]any {
 	e.t.Helper()
 	b, _ := json.Marshal(in)
-	r, err := e.x.Do(bg, command.Request{Identity: id, Command: name, Input: b, Owner: "owner", Evidence: "owner said so"})
+	r, err := e.x.Do(bg, command.Request{Identity: id, Command: name, Input: b, Owner: "owner"})
 	if err != nil {
 		e.t.Fatalf("%s: %v", name, err)
 	}
@@ -229,14 +229,14 @@ func TestWebSessionPurgesMaterialAndBlob(t *testing.T) {
 	}
 }
 
-// 非 Web 入口：delegate 得 web_only，worker/observer 得 permission_denied，对象与事件原样；未登录 401。
+// 非 Web 入口：物理删除是 3b，任何 Agent 钥匙都得 web_only（硬线先于范围），对象与事件原样；未登录 401。
 func TestNonWebCredentialsCannotPurge(t *testing.T) {
 	e := setup(t)
 	id := e.item()
 	before := len(e.events())
 	body := `{"object":"` + id + `"}`
 
-	for kind, want := range map[auth.Kind]domain.Code{auth.Delegate: domain.CodeWebOnly, auth.Worker: domain.CodePermissionDenied, auth.Observer: domain.CodePermissionDenied} {
+	for kind, want := range map[auth.Kind]domain.Code{auth.Delegate: domain.CodeWebOnly, auth.Worker: domain.CodeWebOnly, auth.Observer: domain.CodeWebOnly} {
 		r := e.do("POST", "/v1/settings/purge", body, e.token(kind))
 		if r.Code != 403 || code(t, r) != want {
 			t.Fatalf("%s: %d %s, want 403 %s", kind, r.Code, r.Body, want)

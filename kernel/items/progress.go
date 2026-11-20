@@ -70,7 +70,7 @@ func (s *svc) progress() command.Spec {
 		var v progressIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: "item.progress", Action: authz.ActionUpdateOwn, Tier: authz.TierDecide, Bound: bound,
+	return command.Spec{Name: "item.progress", Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -163,7 +163,7 @@ func TodayItemsAfter(tx *store.Tx, now time.Time, staleAfter time.Duration) (Tod
 		if it.Deadline != nil && Today(*it.Deadline) == today && active(it) {
 			l.Due = append(l.Due, it)
 		}
-		if it.Phase == domain.PhaseNeedsInput && (it.Ask == nil || !it.Ask.ScreeningPending) {
+		if it.Phase == domain.PhaseNeedsInput {
 			l.Pending = append(l.Pending, it)
 		}
 		if it.Phase == domain.PhaseOpen && (it.Kind == domain.KindTask || it.Kind == domain.KindCommitment) &&

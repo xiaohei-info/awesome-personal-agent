@@ -37,16 +37,20 @@ func TestFlowMaterialOwned(t *testing.T) {
 		}
 	})
 
-	t.Run("ACT-MAT-02 方案类进入确认", func(t *testing.T) {
-		plan = f.commit(f.WRK, "# 方案 v1\n用令牌桶限流", "--reason", "初稿", "--kind", "design", "--title", "限流方案", "--project", open)
+	// 2026-11-20 改写（权限模型第二版，§12）：新建材料一律直接生效；改已有材料看调用者的档位，
+	// 档位未放开的钥匙（WRK 不归属任何 Agent）的修订进入确认。原"按材料类别直接写"并入档位。
+	t.Run("ACT-MAT-02 新建直接生效，档位未放开的改动进入确认", func(t *testing.T) {
+		first := f.commit(f.WRK, "# 方案 v0\n草案", "--reason", "起", "--kind", "design", "--title", "限流方案", "--project", open)
+		eq(t, "新建的修订状态", first.State, "current")
+		plan = f.revise(f.WRK, first.Material, "# 方案 v1\n用令牌桶限流", "--reason", "初稿", "--based-on", first.Revision)
 		eq(t, "修订状态", plan.State, "proposed")
 		s := f.show(plan.Material)
-		eq(t, "current_rev（不生效）", s.Material.CurrentRev, "")
-		if s.Revision != nil {
+		eq(t, "current_rev（不生效）", s.Material.CurrentRev, first.Revision)
+		if s.Revision == nil || s.Revision.Content == "# 方案 v1\n用令牌桶限流" {
 			t.Errorf("proposed 修订不应成为当前内容: %+v", s.Revision)
 		}
 		rs := f.revisions(plan.Material)
-		if len(rs) != 1 || rs[0].State != "proposed" || rs[0].Content == "" {
+		if len(rs) != 2 || rs[1].State != "proposed" || rs[1].Content == "" {
 			t.Errorf("Web 版本列表应有一条带正文的待确认修订: %+v", rs)
 		}
 		if len(f.events(plan.Material, "material.revision_proposed")) != 1 {
@@ -74,9 +78,10 @@ func TestFlowMaterialOwned(t *testing.T) {
 	})
 
 	t.Run("ACT-MAT-04 修订追加不改，版本列表带 actor/reason/based_on", func(t *testing.T) {
-		a := f.commit(f.WRK, "第一版", "--reason", "r1", "--kind", "worknote", "--title", "笔记", "--project", open)
-		b := f.revise(f.WRK, a.Material, "第二版", "--reason", "r2", "--based-on", a.Revision)
-		c := f.revise(f.WRK, a.Material, "第三版", "--reason", "r3", "--based-on", b.Revision)
+		// DEL 所属 Agent 的档位已放开：它改已有材料直接生效（2026-11-20）。
+		a := f.commit(f.DEL, "第一版", "--reason", "r1", "--kind", "worknote", "--title", "笔记", "--project", open)
+		b := f.revise(f.DEL, a.Material, "第二版", "--reason", "r2", "--based-on", a.Revision)
+		c := f.revise(f.DEL, a.Material, "第三版", "--reason", "r3", "--based-on", b.Revision)
 		old := f.show(a.Material, "--rev", a.Revision)
 		if old.Revision == nil || old.Revision.Content != "第一版" {
 			t.Errorf("旧修订内容被改写: %+v", old.Revision)
@@ -98,9 +103,9 @@ func TestFlowMaterialOwned(t *testing.T) {
 	})
 
 	t.Run("ACT-MAT-05 基线变化时直写冲突退出码 6", func(t *testing.T) {
-		a := f.commit(f.WRK, "基线", "--reason", "起", "--kind", "reference", "--title", "参考", "--project", open)
-		f.revise(f.WRK, a.Material, "先到的", "--reason", "x", "--based-on", a.Revision)
-		r := f.Apa(f.WRK, "", "material", "commit", a.Material, "--from", f.file("late.md", "后到的"), "--reason", "y", "--based-on", a.Revision)
+		a := f.commit(f.DEL, "基线", "--reason", "起", "--kind", "reference", "--title", "参考", "--project", open)
+		f.revise(f.DEL, a.Material, "先到的", "--reason", "x", "--based-on", a.Revision)
+		r := f.Apa(f.DEL, "", "material", "commit", a.Material, "--from", f.file("late.md", "后到的"), "--reason", "y", "--based-on", a.Revision)
 		eq(t, "后一次退出码", r.Code, 6)
 		if got := f.show(a.Material).Revision; got == nil || got.Content != "先到的" {
 			t.Errorf("先到的内容被静默覆盖: %+v", got)
@@ -108,8 +113,7 @@ func TestFlowMaterialOwned(t *testing.T) {
 	})
 
 	t.Run("ACT-MAT-06 proposed 修订基线变化时提示，可采用或基于当前重提", func(t *testing.T) {
-		base := f.commit(f.WRK, "# 规格 A", "--reason", "起", "--kind", "requirement", "--title", "需求", "--project", open)
-		f.webOK("POST", "/revisions/"+base.Revision+"/confirm", `{}`, http.StatusOK)
+		base := f.commit(f.WRK, "# 规格 A", "--reason", "起", "--kind", "requirement", "--title", "需求", "--project", open) // 新建直接生效
 		stale := f.revise(f.WRK, base.Material, "# 规格 B（旧基线）", "--reason", "旧基线", "--based-on", base.Revision)
 		cur := f.revise(f.WRK, base.Material, "# 规格 C", "--reason", "抢先", "--based-on", base.Revision)
 		f.webOK("POST", "/revisions/"+cur.Revision+"/confirm", `{}`, http.StatusOK)
@@ -132,11 +136,12 @@ func TestFlowMaterialOwned(t *testing.T) {
 		}
 	})
 
-	t.Run("ACT-MAT-07 回退只在 Web", func(t *testing.T) {
-		a := f.commit(f.WRK, "原文", "--reason", "起", "--kind", "worknote", "--title", "回退用", "--project", open)
-		b := f.revise(f.WRK, a.Material, "改坏了", "--reason", "改", "--based-on", a.Revision)
+	// 回退材料是 3a（2026-11-20）：档位未放开的钥匙（DELO）不能回退。
+	t.Run("ACT-MAT-07 回退不对档位未放开的钥匙开放", func(t *testing.T) {
+		a := f.commit(f.DEL, "原文", "--reason", "起", "--kind", "worknote", "--title", "回退用", "--project", open)
+		b := f.revise(f.DEL, a.Material, "改坏了", "--reason", "改", "--based-on", a.Revision)
 		body := `{"to":"` + a.Revision + `","reason":"回退"}`
-		if r := f.APIRaw("POST", "/v1/materials/"+a.Material+"/revert", body, f.DEL); r.Code < 400 {
+		if r := f.APIRaw("POST", "/v1/materials/"+a.Material+"/revert", body, f.DELO); r.Code < 400 {
 			t.Errorf("token 不应能回退: %d %s", r.Code, r.Body)
 		}
 		eq(t, "被拒绝后 current_rev", f.show(a.Material).Material.CurrentRev, b.Revision)
@@ -230,16 +235,17 @@ func TestFlowMaterialOwned(t *testing.T) {
 		}
 	})
 
-	t.Run("ACT-MAT-11 写入策略可在 Web 调整", func(t *testing.T) {
-		changed := len(f.events("", "policy.changed"))
-		f.webOK("PUT", "/settings/policy", `{"material_write":{"default":"proposed","kinds":{"minutes":"proposed","reference":"direct","worknote":"direct","requirement":"proposed","design":"proposed","guideline":"proposed"}}}`, http.StatusOK)
-		c := f.revise(f.WRK, note.Material, "策略改后的纪要", "--reason", "二次", "--based-on", note.Revision)
+	// 2026-11-20 改写：按材料类别的写入策略并入 Agent 档位（§12）；策略段 material_write 不再接受，
+	// 同一份纪要，档位未放开的钥匙改动进入确认，档位放开的 Agent 改动直接生效。
+	t.Run("ACT-MAT-11 写入方式跟随档位", func(t *testing.T) {
+		if r := f.Web("PUT", "/v1/settings/policy", `{"material_write":{"default":"direct"}}`); r.Code != http.StatusBadRequest {
+			t.Errorf("material_write 段应被拒绝（400）: %d %s", r.Code, r.Body)
+		}
+		c := f.revise(f.WRK, note.Material, "只整理的钥匙改纪要", "--reason", "二次", "--based-on", note.Revision)
 		eq(t, "纪要进入确认流", c.State, "proposed")
 		eq(t, "纪要 current_rev 不变", f.show(note.Material).Material.CurrentRev, note.Revision)
-		if len(f.events("", "policy.changed")) != changed+1 {
-			t.Error("策略变更应记一条 policy.changed Event")
-		}
-
+		d := f.revise(f.DEL, note.Material, "档位放开的 Agent 改纪要", "--reason", "三次", "--based-on", note.Revision)
+		eq(t, "档位放开直接生效", d.State, "current")
 	})
 
 	t.Run("ACT-MAT-12 observer 不能提交修订，退出码 4", func(t *testing.T) {
@@ -253,7 +259,7 @@ func TestFlowMaterialOwned(t *testing.T) {
 		item := decode[struct {
 			ID string `json:"id"`
 		}](t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "依据材料的任务", "--phase", "open", "--assignee", "work-host.cli",
-			"--project", open, "--evidence", "建个任务").Stdout).ID
+			"--project", open).Stdout).ID
 		f.apa(f.WRK, 0, "item", "relate", item, "--to", plan.Material, "--type", "derived_from", "--reason", "依据该方案")
 		got := f.apa(f.OBS, 0, "item", "show", item).Stdout
 		if !strings.Contains(got, plan.Material) || !strings.Contains(got, "derived_from") {

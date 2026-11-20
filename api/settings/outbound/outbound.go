@@ -79,7 +79,7 @@ func (a *api) put(r *http.Request, p *core.Principal, cmd string) error {
 	if err != nil {
 		return err
 	}
-	_, err = a.x.Do(r.Context(), command.Request{Identity: p.Identity, Command: cmd, Input: raw, Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL})
+	_, err = a.x.Do(r.Context(), command.Request{Identity: p.Identity, Command: cmd, Input: raw, WebURL: p.WebURL})
 	return err
 }
 

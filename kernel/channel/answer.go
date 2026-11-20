@@ -14,14 +14,12 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delivery"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
 // 命令名。
 const (
-	CmdAnswer     = "channel.answer"      // 渠道 ext 转达回答（POST /deliveries/{id}/answer）
-	CmdFormAnswer = "channel.form_answer" // 一次性表单作答（POST /forms/{令牌}）
+	CmdAnswer = "channel.answer" // 渠道 ext 转达回答（POST /deliveries/{id}/answer）
 )
 
 // extScope 是渠道 ext 密钥的 scope 前缀，Bearer 把它解析成 Principal "ext:channel.<名>"。
@@ -43,13 +41,6 @@ type answerIn struct {
 	Reason   string `json:"reason"`
 }
 
-type formIn struct {
-	Token  string `json:"token"`
-	Choice string `json:"choice"`
-	Text   string `json:"text"`
-	Reason string `json:"reason"`
-}
-
 type result struct {
 	ID string `json:"id"`
 }
@@ -69,15 +60,11 @@ func objectOf(tx *store.Tx, id string) (authz.Object, error) {
 	if err != nil {
 		return authz.Object{}, err
 	}
-	o := authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Tags: it.Tags, Project: it.Project}
-	if a := it.Ask; a != nil {
-		o.Category, o.ScreeningPending = a.RiskClass, a.ScreeningPending
-	}
-	return o, nil
+	return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Project: it.Project}, nil
 }
 
-// Register 登记 channel.answer 与 channel.form_answer。决定的写入仍经 decisions.Answer（唯一写入模块），
-// 本包只做渠道侧的校验：回答人白名单、ref 一致、版本未作废、web_only 拒绝，以及令牌一次性。
+// Register 登记 channel.answer。决定的写入仍经 decisions.Answer（唯一写入模块），
+// 本包只做渠道侧的校验：回答人名单（名单内的回复就是本人，§14.3）、ref 一致、版本未作废。
 func Register(x *command.Executor, o Options) error {
 	if o.WebURL == nil {
 		o.WebURL = func(id string) string { return "/items/" + id }
@@ -86,12 +73,7 @@ func Register(x *command.Executor, o Options) error {
 		o.Now = clock.Now
 	}
 	a := &answerer{o}
-	for _, s := range []command.Spec{a.answer(), a.formAnswer()} {
-		if err := x.Register(s); err != nil {
-			return err
-		}
-	}
-	return nil
+	return x.Register(a.answer())
 }
 
 type answerer struct{ o Options }
@@ -106,7 +88,7 @@ func (a *answerer) load(tx *store.Tx, in json.RawMessage) (answerIn, domain.Deli
 }
 
 func (a *answerer) answer() command.Spec {
-	return command.Spec{Name: CmdAnswer, Action: authz.ActionChannelAnswer, Kinds: []auth.Kind{auth.Ext},
+	return command.Spec{Name: CmdAnswer, Action: authz.ActionChannelAnswer, Tier: authz.TierDecide, Kinds: []auth.Kind{auth.Ext},
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			_, d, err := a.load(tx, in)
 			if err != nil {
@@ -157,54 +139,5 @@ func (a *answerer) answer() command.Spec {
 
 // reserved 挡住渠道名冒充其他决定入口（Resolution.ResolvedVia 与渠道名共用一个字段）。
 func reserved(name string) bool {
-	return name == "web" || name == "chat" || name == "timeout" || name == domain.ResolvedViaGrant
-}
-
-// formAnswer：令牌本身就是凭据，只对发放时的那一个决策、那一个版本有效；web_only 与初筛未返回在作答时重新判定
-// （策略可能在发放后变了）。校验失败整体回滚，令牌不算用过。
-func (a *answerer) formAnswer() command.Spec {
-	return command.Spec{Name: CmdFormAnswer, Action: authz.ActionRead,
-		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
-			var v formIn
-			if err := parse(in, &v); err != nil {
-				return authz.Object{}, err
-			}
-			f, err := PeekForm(tx, v.Token, a.o.Now())
-			if err != nil {
-				return authz.Object{}, err
-			}
-			return objectOf(tx, f.Item)
-		},
-		Apply: func(c *command.Ctx) (any, error) {
-			var v formIn
-			if err := parse(c.Input, &v); err != nil {
-				return nil, err
-			}
-			f, err := RedeemForm(c.Tx, v.Token, c.Now())
-			if err != nil {
-				return nil, err
-			}
-			if ver, err := command.Version(c.Tx, f.Item); err != nil {
-				return nil, err
-			} else if ver != f.Version {
-				return nil, domain.NewError(domain.CodeConflict, "this form link is outdated; the item has changed", "use the latest message or answer in the Web UI")
-			}
-			_, pol, err := policy.Current(c.Tx)
-			if err != nil {
-				return nil, err
-			}
-			if authz.WebOnly(pol, c.Object) {
-				return nil, webLink(domain.CodeWebOnly, "this decision is web_only and cannot be answered from a form", a.o.WebURL(f.Item))
-			}
-			if c.Object.ScreeningPending {
-				return nil, webLink(domain.CodeRiskScreeningPending, "web_only screening has not returned; form answers are not accepted yet", a.o.WebURL(f.Item))
-			}
-			return result{f.Item}, decisions.Answer(c, f.Item, v.Choice, v.Text, f.Channel, "", v.Reason)
-		}}
-}
-
-func webLink(code domain.Code, why, url string) error {
-	e := domain.NewError(code, why, "answer in the Web UI")
-	e.WebURL = &url
-	return e
+	return name == "web" || name == "agent" || name == "chat" || name == "timeout" || name == domain.ResolvedViaGrant
 }

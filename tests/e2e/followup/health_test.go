@@ -25,7 +25,7 @@ func (f *fx) stall() string {
 	hl1 := f.task("HL-1", "x-plain")
 	child := decode[struct {
 		ID string `json:"id"`
-	}](f.t, f.apa(f.DEL, 0, "delegate", "--parent", hl1, "--assignee", "work-host.cli", "--title", "HL-1 子事项", "--reason", "委派", "--evidence", "owner asked").Stdout).ID
+	}](f.t, f.apa(f.DEL, 0, "delegate", "--parent", hl1, "--assignee", "work-host.cli", "--title", "HL-1 子事项", "--reason", "委派").Stdout).ID
 	f.TCAdvance(180)
 	return child
 }
@@ -106,7 +106,7 @@ event_rules:
 		parent := f.task("HLT 回执被拒的父事项", "x-plain")
 		child := decode[struct {
 			ID string `json:"id"`
-		}](t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", "只有 WRK 能回执", "--reason", "委派", "--evidence", "owner asked").Stdout).ID
+		}](t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", "只有 WRK 能回执", "--reason", "委派").Stdout).ID
 		if r := f.Apa(f.WRK2, "", "report", child, "--outcome", "progress", "--summary", "越权回执"); r.Code == 0 {
 			t.Fatalf("WRK2 不应能给 WRK 的委派回执: %s", r.Stdout)
 		}

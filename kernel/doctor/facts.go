@@ -36,6 +36,10 @@ type Facts struct {
 	Connections     []connections.Connection
 	Secrets         secrets.Stats
 	Key             KeyFact
+	// 权限模型切换（§16.5）：账本里有没有 authz.switched，以及最新策略文档里还带着的旧段。
+	AuthzSwitched bool
+	LegacyPolicy  []string
+	ActiveGrants  int // 还没撤销的授权单：切换会把它们全部撤掉
 }
 
 // ReadFacts 读取自检需要的账本事实；账本结构必须是当前二进制的结构（旧结构用 LegacySources）。
@@ -57,6 +61,21 @@ func ReadFacts(ctx context.Context, st *store.Store) (f Facts, err error) {
 		for _, c := range creds {
 			if c.Kind == auth.Ext && c.RevokedAt.IsZero() {
 				f.ExtKeys = append(f.ExtKeys, ExtKey{ID: c.ID, Scope: c.Scope, Label: c.Label})
+			}
+		}
+		if f.AuthzSwitched, err = policy.Switched(tx); err != nil {
+			return err
+		}
+		if f.LegacyPolicy, err = policy.LegacyKeys(tx); err != nil {
+			return err
+		}
+		gs, err := policy.ListGrants(tx)
+		if err != nil {
+			return err
+		}
+		for _, g := range gs {
+			if g.RevokedAt.IsZero() {
+				f.ActiveGrants++
 			}
 		}
 		if f.Seen, err = readSeen(tx); err != nil {

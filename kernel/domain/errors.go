@@ -4,15 +4,17 @@ package domain
 type Code string
 
 const (
-	CodeInvalidRequest       Code = "invalid_request"        // 400 → 2
-	CodeUnauthenticated      Code = "unauthenticated"        // 401 → 3
-	CodePermissionDenied     Code = "permission_denied"      // 403 → 4
-	CodeWebOnly              Code = "web_only"               // 403 → 20
-	CodeExecutorNotAllowed   Code = "executor_not_allowed"   // 403 → 21
+	CodeInvalidRequest     Code = "invalid_request"      // 400 → 2
+	CodeUnauthenticated    Code = "unauthenticated"      // 401 → 3
+	CodePermissionDenied   Code = "permission_denied"    // 403 → 4
+	CodeWebOnly            Code = "web_only"             // 403 → 20：硬线，只有本人在 Web 做（reason hard_line）
+	CodeReauthRequired     Code = "reauth_required"      // 403 → 20：3b 动作，Web 会话须再输一次口令
+	CodeTierClosed         Code = "tier_closed"          // 403 → 23：该 Agent 的档位没有放开这一档
+	CodeExecutorNotAllowed Code = "executor_not_allowed" // 403 → 21
+	// 以下几个是旧权限模型的码（初筛、本人原话、私聊、授权单、导入）：内核不再产出，取值保留为只读的历史值，旧的拒绝记录仍能读懂。
 	CodeRiskScreeningPending Code = "risk_screening_pending" // 403 → 22
-	CodeBasisRequired        Code = "basis_required"         // 403 → 23：替本人做决定的依据不足（§14.5）
-	CodeSessionNotDirect     Code = "session_not_direct"     // 403 → 23：凭原话的代答，会话不是与本人的私聊（§14.5）
-	// 以下三个只为 import.apply 产出；导入已取消（§14.5），内核不再产出，取值保留为只读的历史值，旧的拒绝记录仍能读懂。
+	CodeBasisRequired        Code = "basis_required"         // 403 → 23
+	CodeSessionNotDirect     Code = "session_not_direct"     // 403 → 23
 	CodeGrantRequired        Code = "grant_required"         // 403 → 23：命令只接受授权单（import.apply），没有带单或只带了本人原话
 	CodeImportSourceMismatch Code = "import_source_mismatch" // 403 → 23：导入授权单的来源名不符
 	CodeImportLimitExceeded  Code = "import_limit_exceeded"  // 403 → 23：累计条数会超过导入授权单的上限
@@ -38,8 +40,9 @@ const (
 	ExitAgentsDrift        = 11
 	ExitWebOnly            = 20
 	ExitExecutorNotAllowed = 21
-	ExitScreeningPending   = 22
-	ExitBasisRequired      = 23
+	ExitScreeningPending   = 22             // 旧模型：初筛未返回，不再产出
+	ExitTierClosed         = 23             // 档位未放开
+	ExitBasisRequired      = ExitTierClosed // 旧名，旧的拒绝记录按它读
 )
 
 var codeHTTP = map[Code]int{
@@ -47,6 +50,8 @@ var codeHTTP = map[Code]int{
 	CodeUnauthenticated:      401,
 	CodePermissionDenied:     403,
 	CodeWebOnly:              403,
+	CodeReauthRequired:       403,
+	CodeTierClosed:           403,
 	CodeExecutorNotAllowed:   403,
 	CodeRiskScreeningPending: 403,
 	CodeBasisRequired:        403,
@@ -67,6 +72,8 @@ var codeExit = map[Code]int{
 	CodeUnauthenticated:      ExitUnauthenticated,
 	CodePermissionDenied:     ExitPermissionDenied,
 	CodeWebOnly:              ExitWebOnly,
+	CodeReauthRequired:       ExitWebOnly,
+	CodeTierClosed:           ExitTierClosed,
 	CodeExecutorNotAllowed:   ExitExecutorNotAllowed,
 	CodeRiskScreeningPending: ExitScreeningPending,
 	CodeBasisRequired:        ExitBasisRequired,
@@ -129,7 +136,15 @@ type Error struct {
 	WebURL *string `json:"web_url"`
 }
 
-// 授权单不可用的稳定原因（Error.Reason，§14.5），随退出码 23 返回并记进拒绝事件；web/src/app/ids.ts 的 GRANT_REASON 与它对照。
+// 拒绝的三种口径（Error.Reason，§14.3）：硬线、档位未放开、钥匙范围外；reauth_required 是硬线下 Web 会话还没再输口令。
+const (
+	ReasonHardLine       = "hard_line"
+	ReasonReauthRequired = "reauth_required"
+	ReasonTierClosed     = "tier_closed"
+	ReasonOutOfScope     = "out_of_scope"
+)
+
+// 旧模型授权单不可用的原因：内核不再产出，只供读旧的拒绝记录。
 const (
 	GrantReasonScreeningPending = "grant_screening_pending" // 事项上有初筛未返回的决策请求：处理那张卡或稍后再试，之后同一张单自动可用
 	GrantReasonRiskCeiling      = "grant_risk_ceiling"      // 对象属 web_only，授权单不能覆盖

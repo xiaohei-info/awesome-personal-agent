@@ -13,12 +13,13 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	apidecisions "github.com/xiaohei-info/awesome-personal-agent/api/decisions"
 	apidelegation "github.com/xiaohei-info/awesome-personal-agent/api/delegation"
+	apifm "github.com/xiaohei-info/awesome-personal-agent/api/followmsg"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
 	apiprojects "github.com/xiaohei-info/awesome-personal-agent/api/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
 	settingsexec "github.com/xiaohei-info/awesome-personal-agent/api/settings/exec"
-	settingsgrants "github.com/xiaohei-info/awesome-personal-agent/api/settings/grants"
 	settingspolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	settingspurge "github.com/xiaohei-info/awesome-personal-agent/api/settings/purge"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
@@ -27,6 +28,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/config"
+	kdecisions "github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/delegation"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -51,7 +53,7 @@ const (
 
 var (
 	bg    = context.Background()
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 // env 是真实账本 + 真实命令管线 + 真实 HTTP 骨干（含四组设置路由）。
@@ -67,7 +69,10 @@ type env struct {
 	csrf   string
 }
 
-func setup(t *testing.T) *env {
+func setup(t *testing.T) *env { t.Helper(); return setupWith(t, false) }
+
+// setupWith 同 setup；decisions 为真时另登记决策命令并挂它的路由（接受建议是二档的代表命令，对照矩阵要用）。
+func setupWith(t *testing.T, decisions bool) *env {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
@@ -110,10 +115,13 @@ func setup(t *testing.T) *env {
 	must(st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }))
 	cred, err := credentials.Mount(e.x, e.au)
 	must(err)
-	grantRoutes, err := settingsgrants.Mount(e.x, e.au, st)
-	must(err)
-	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: []core.RouteGroup{
-		cred, apiitems.Routes(e.x, st), apidelegation.Routes(e.x), apiprojects.Routes(st, e.x), settingspolicy.Routes(st, e.au), settingsexec.Routes(st, e.x), settingspurge.Routes(e.x), grantRoutes}})
+	groups := []core.RouteGroup{cred, apiitems.Routes(e.x, st), apifm.Routes(e.x), apidelegation.Routes(e.x), apiprojects.Routes(st, e.x),
+		settingspolicy.Routes(st, e.au), settingsexec.Routes(st, e.x), settingspurge.Routes(e.x)}
+	if decisions {
+		must(kdecisions.Register(e.x))
+		groups = append(groups, apidecisions.Routes(e.x, ""))
+	}
+	e.srv, err = core.New(core.Deps{Store: st, Auth: e.au, Groups: groups})
 	must(err)
 	rec := e.http("POST", "/v1/auth/login", `{"password":"`+ownerPW+`"}`, nil)
 	if rec.Code != 200 {
@@ -242,40 +250,24 @@ func (e *env) now() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UT
 
 func asErr(err error, de **domain.Error) bool { return errors.As(err, de) }
 
-// api 以名为 name 的 Bearer 凭据请求 HTTP；evidence 非空时带 X-APA-Evidence。不带会话引用。
-func (e *env) api(name, method, path, body, evidence string) *httptest.ResponseRecorder {
-	return e.apiIn(name, "", method, path, body, evidence)
+// api 以名为 name 的 Bearer 凭据请求 HTTP。
+func (e *env) api(name, method, path, body string) *httptest.ResponseRecorder {
+	return e.http(method, path, body, bearer(e.secret[name]))
 }
 
-// apiIn 同 api，另带会话引用 X-APA-Session（第二档的本人原话要与它同时携带）。
-func (e *env) apiIn(name, session, method, path, body, evidence string) *httptest.ResponseRecorder {
-	return e.http(method, path, body, func(r *http.Request) {
-		bearer(e.secret[name])(r)
-		if evidence != "" {
-			r.Header.Set(core.EvidenceHeader, evidence)
-		}
-		if session != "" {
-			r.Header.Set("X-APA-Session", session)
-		}
-		r.Header.Set(core.SessionKindHeader, "direct") // 这个助手代表与本人的私聊
-	})
-}
-
-// apiKind 同 apiIn，另带会话类型头；kind 为空则不带（未上报）。
-func (e *env) apiKind(name, session, kind, method, path, body, evidence string) *httptest.ResponseRecorder {
-	return e.http(method, path, body, func(r *http.Request) {
-		bearer(e.secret[name])(r)
-		if evidence != "" {
-			r.Header.Set(core.EvidenceHeader, evidence)
-		}
-		if session != "" {
-			r.Header.Set("X-APA-Session", session)
-		}
-		r.Header.Set("X-APA-Harness", "acc-stub")
-		if kind != "" {
-			r.Header.Set(core.SessionKindHeader, kind)
-		}
-	})
+// agent 签一把名为 name、归属 Agent agentID 的 delegate 钥匙，并由本人把该 Agent 的档位设为 tier（organize/decide/rules）。
+func (e *env) agent(name, agentID, tier string) {
+	e.t.Helper()
+	e.issue(name, auth.Spec{Kind: auth.Delegate, AgentID: agentID, Harness: "h"})
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent[agentID] = policy.AgentAllowance{Tier: tier}
+			return nil
+		})
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
 }
 
 // principal 是凭据在账本里的操作者标识：事项的 assignee 等于它，就是该凭据"绑定"的事项。

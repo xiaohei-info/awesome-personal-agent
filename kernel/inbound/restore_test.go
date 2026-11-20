@@ -105,7 +105,7 @@ func (e *restoreEnv) restore(who command.Identity, evidence, source, idem string
 		in["source"] = source
 	}
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: who, Command: CmdBacklogRestore, Input: b, Owner: "owner", Evidence: evidence, IdemKey: idem})
+	return e.x.Do(bg, command.Request{Identity: who, Command: CmdBacklogRestore, Input: b, Owner: "owner", IdemKey: idem})
 }
 
 func restored(r command.Result) (n int) {
@@ -160,21 +160,10 @@ func TestRestorePreviewMatchesOnlyOldCascadeIgnored(t *testing.T) {
 // ACT-RST-05：缺本人原话、非 direct 会话、observer 都不能放回；被拒后预览条数不变。
 func TestRestoreAuthorizationBoundary(t *testing.T) {
 	e := newRestoreEnv(t)
-	deleg := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
-	group := deleg
-	group.Actor.SessionKind = "group"
 	obs := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "obs", Via: domain.ViaCLI}, Level: authz.LevelObserver}
-	for name, c := range map[string]struct {
-		who      command.Identity
-		evidence string
-		want     domain.Code
-	}{
-		"no words":    {deleg, "", domain.CodeBasisRequired},
-		"group":       {group, "本人：放回", domain.CodeSessionNotDirect},
-		"observer":    {obs, "本人：放回", domain.CodePermissionDenied},
-		"bad session": {deleg, "", domain.CodeBasisRequired},
-	} {
-		if _, err := e.restore(c.who, c.evidence, "", ""); code(err) != c.want {
+	wrk := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI}, Level: authz.LevelWorker}
+	for name, who := range map[string]command.Identity{"observer": obs, "worker": wrk} {
+		if _, err := e.restore(who, "", "", ""); code(err) != domain.CodePermissionDenied {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
@@ -186,7 +175,7 @@ func TestRestoreAuthorizationBoundary(t *testing.T) {
 // ACT-RST-06、09、10：按来源放回，零模型调用、没有事项；每条一条 inbound.disposed（操作者是 delegate，载荷含原处置与时间段）；同一时间段再放回 0 条。
 func TestRestoreMovesEventsBackWithAuditAndIsIdempotent(t *testing.T) {
 	e := newRestoreEnv(t)
-	deleg := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	deleg := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1"}, Level: authz.LevelDelegate}
 	batches := len(e.cls.Batches())
 
 	r, err := e.restore(deleg, "本人：把旧级联忽略的放回来", "src_a", "")

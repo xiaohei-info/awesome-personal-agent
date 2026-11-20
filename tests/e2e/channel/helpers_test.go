@@ -62,7 +62,7 @@ func (f *fx) decision(title string) string {
 		ID string `json:"id"`
 	}
 	out := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", f.Projects["acc-work"], "--evidence", "建个任务").Stdout
+		"--project", f.Projects["acc-work"]).Stdout
 	if err := json.Unmarshal([]byte(out), &m); err != nil || m.ID == "" {
 		f.t.Fatalf("没有返回事项 id: %v", err)
 	}

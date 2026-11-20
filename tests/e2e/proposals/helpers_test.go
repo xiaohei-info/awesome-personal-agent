@@ -117,7 +117,7 @@ func (k *kit) proposal(title string) string {
 func (k *kit) openItem(title string) string {
 	k.t.Helper()
 	return k.idOf(k.apa(k.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open",
-		"--project", k.Projects["acc-open"], "--evidence", "记一下"))
+		"--project", k.Projects["acc-open"]))
 }
 
 // item 读事项对象（OBS 的 `apa item show`）。
@@ -189,7 +189,15 @@ type step struct {
 	Actor   actor          `json:"actor"`
 	Reason  string         `json:"reason"`
 	Ev      string         `json:"evidence"`
+	Basis   basis          `json:"basis"`
 	Payload map[string]any `json:"payload"`
+}
+
+// basis 是事件的"凭什么"（§14.3 审计）：via 为 organize、allowance、owner_web 等，agent 是调用者所属的 Agent。
+type basis struct {
+	Via   string `json:"via"`
+	Tier  string `json:"tier"`
+	Agent string `json:"agent"`
 }
 
 type actor struct {

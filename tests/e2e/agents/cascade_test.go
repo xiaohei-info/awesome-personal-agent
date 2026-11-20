@@ -386,7 +386,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		}
 		eq(t, "没有拉起任务型 Run", len(f.taskRuns()), runsBefore)
 		// 账本、Web、CLI、判断型、生成型都照常。
-		made := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "CAS10 照常建事项", "--phase", "open", "--evidence", "验收")
+		made := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "CAS10 照常建事项", "--phase", "open")
 		eq(t, "CLI 建的事项", f.phase(idOf(t, made.Stdout)), "open")
 		if r := f.Web("GET", "/v1/items", ""); r.Code != 200 || !strings.Contains(r.Body, "CAS10 照常建事项") {
 			t.Errorf("Web 读不到账本: %d %s", r.Code, r.Body)

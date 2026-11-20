@@ -26,7 +26,7 @@ import (
 
 var bg = context.Background()
 
-var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 
 const (
 	workHost  = "work-host.cli"
@@ -92,13 +92,12 @@ func (e *env) issue(t *testing.T, name string, s auth.Spec) {
 
 // as 以真实签发的凭据发起请求：操作者与信任级由认证步骤据账本得出。
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1"}}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
 	req := command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"}
-	req.Evidence = "owner said so"
 	return e.x.Do(bg, req)
 }
 
@@ -588,8 +587,8 @@ func (e *env) eventAt(t *testing.T, seq int64) domain.Event {
 	return domain.Event{}
 }
 
-// §14.5 第一档：发起委派的 delegate 凭据回执自己派出去的活不要本人原话，Event 不带 on_behalf_of；
-// 别的 delegate 凭据（绑定不成立）按第二档，缺依据为 23、记 command.rejected、子事项不变。
+// 回执是一档：delegate 钥匙范围是全部事项，任何 delegate 都能回执，不要附加依据；事件依据记一档、不带 on_behalf_of。
+// worker 钥匙只够得着指派给自己的事项：别人的子事项在范围外（4），留痕且子事项不变。
 func TestDelegateReceiptBindsToInitiatorOnly(t *testing.T) {
 	e := setup(t)
 	e.issue(t, "DEL2", auth.Spec{Kind: auth.Delegate})
@@ -597,9 +596,8 @@ func TestDelegateReceiptBindsToInitiatorOnly(t *testing.T) {
 	child := e.id(t, e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": parent, "assignee": workHost}))
 
 	before := countType(e.events(t), domain.EvCommandRejected)
-	_, err := e.doBare(e.as("DEL2"), "delegate.report", rep(child, "progress", Evidence{}))
-	if exitOf(err) != domain.ExitBasisRequired {
-		t.Fatalf("foreign delegate without basis: %v", err)
+	if _, err := e.doBare(e.as("WRK2"), "delegate.report", rep(child, "progress", Evidence{})); exitOf(err) != domain.ExitPermissionDenied {
+		t.Fatalf("worker on someone else's child: %v", err)
 	}
 	if got := countType(e.events(t), domain.EvCommandRejected) - before; got != 1 {
 		t.Fatalf("command.rejected recorded %d times", got)
@@ -607,19 +605,14 @@ func TestDelegateReceiptBindsToInitiatorOnly(t *testing.T) {
 	if got := e.item(t, child); got.StatusLabel != "" {
 		t.Fatalf("rejected receipt changed the child: %+v", got)
 	}
-
-	r, err := e.doBare(e.as("DEL"), "delegate.report", rep(child, "progress", Evidence{}))
-	if err != nil {
-		t.Fatalf("initiator receipt without words: %v", err)
-	}
-	if ev := e.eventAt(t, r.Seqs[0]); ev.Actor.OnBehalfOf != "" || ev.Actor.Principal == "" {
-		t.Fatalf("tier one event must not carry on_behalf_of: %+v", ev.Actor)
-	}
-
-	// 第二档：别的凭据带原话与会话照常放行，Event 带 on_behalf_of。
-	r = e.must(t, e.as("DEL2"), "delegate.report", rep(child, "blocked", Evidence{}))
-	if ev := e.eventAt(t, r.Seqs[0]); ev.Actor.OnBehalfOf != "owner" || ev.Evidence == "" {
-		t.Fatalf("tier two event: %+v", ev)
+	for _, who := range []string{"DEL", "DEL2", "WRK"} {
+		r, err := e.doBare(e.as(who), "delegate.report", rep(child, "progress", Evidence{}))
+		if err != nil {
+			t.Fatalf("%s receipt: %v", who, err)
+		}
+		if ev := e.eventAt(t, r.Seqs[0]); ev.Actor.OnBehalfOf != "" || ev.Actor.Principal == "" || ev.Basis == nil || ev.Basis.Via != domain.BasisOrganize {
+			t.Fatalf("%s: tier-one event: %+v basis=%+v", who, ev.Actor, ev.Basis)
+		}
 	}
 }
 
@@ -641,14 +634,13 @@ func TestReportDoneNeedsResultEvidenceForAnyKind(t *testing.T) {
 	}
 }
 
-// §14.5 失败可见：绑定不成立的回执记 health.alert（同一事务）。2026-11-20 起被拒的写入不再把子事项转 needs_input：
-// 子事项阶段与版本不变，告警带原因码；报 done 缺结果证据（退出码 2）同样只记 health.alert，事项不变。
+// §14.5 失败可见：被拒的回执（钥匙范围外、报 done 缺结果证据）记 health.alert（同一事务），带原因码；
+// 子事项阶段与版本不变，不转 needs_input。
 func TestRejectedReceiptTurnsChildToNeedsInputAndAlerts(t *testing.T) {
 	e := setup(t)
 	if err := decisions.Register(e.x); err != nil {
 		t.Fatal(err)
 	}
-	e.issue(t, "DEL2", auth.Spec{Kind: auth.Delegate})
 	child := e.id(t, e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": e.parent(t, ""), "assignee": workHost}))
 	alerts := func() (out []domain.Event) {
 		for _, ev := range e.events(t) {
@@ -664,14 +656,14 @@ func TestRejectedReceiptTurnsChildToNeedsInputAndAlerts(t *testing.T) {
 		t.Fatalf("done without evidence: phase=%s alerts=%d", got.Phase, len(alerts()))
 	}
 
-	if _, err := e.doBare(e.as("DEL2"), "delegate.report", rep(child, "progress", Evidence{})); exitOf(err) != domain.ExitBasisRequired {
-		t.Fatalf("unbound receipt: %v", err)
+	if _, err := e.doBare(e.as("WRK2"), "delegate.report", rep(child, "progress", Evidence{})); exitOf(err) != domain.ExitPermissionDenied {
+		t.Fatalf("out-of-scope receipt: %v", err)
 	}
 	got := e.item(t, child)
 	if got.Phase != domain.PhaseOpen || got.Ask != nil || got.StatusLabel != "" {
 		t.Fatalf("child after rejected receipt: %+v", got)
 	}
-	if as := alerts(); len(as) != 2 || as[1].Actor.Principal == "" || !strings.Contains(string(as[1].Payload), `"code":"basis_required"`) {
+	if as := alerts(); len(as) != 2 || as[1].Actor.Principal == "" || !strings.Contains(string(as[1].Payload), `"reason":"out_of_scope"`) {
 		t.Fatalf("alerts = %+v", as)
 	}
 	e.consistent(t)
@@ -714,7 +706,7 @@ func TestDelegateEnrollsExecutor(t *testing.T) {
 		t.Fatal("a conflicting enrolment must not create a child")
 	}
 	// 别的 harness 来改：冲突。
-	other := command.Bearer{Auth: e.au, Secret: e.secret["DEL"], Origin: auth.Origin{Harness: "h2", Session: "s9", SessionKind: "direct"}}
+	other := command.Bearer{Auth: e.au, Secret: e.secret["DEL"], Origin: auth.Origin{Harness: "h2", Session: "s9"}}
 	e.wantExit(t, domain.ExitConflict, other, "delegate.create", map[string]any{"parent": p2, "assignee": "h.paseo.mbp.quick", "executor": desc})
 	// 没有 harness 不能登记。
 	bare := command.Bearer{Auth: e.au, Secret: e.secret["DEL"]}
@@ -724,26 +716,20 @@ func TestDelegateEnrollsExecutor(t *testing.T) {
 	e.wantExit(t, domain.ExitUsage, e.as("DEL"), "delegate.create", map[string]any{"parent": p2, "assignee": "h.x",
 		"executor": map[string]any{"kind": "remote-agent", "handle": map[string]any{"mech": "x", "command": "rm -rf /"}}})
 
-	// 按机器匹配的名单：自报在 mbp 上的新执行者通过；别的机器 21，名录不留条目，返回匹配规则与候选。
+	// 项目名单只认执行者 id（按机器、harness 匹配已取消）：名单外的新执行者 21，名录不留条目，返回名单与候选。
 	work := e.project(t, "enroll-work", nil)
-	e.must(t, owner, "project.allowed_executors.set", map[string]any{"id": work, "executors": nil, "match": []map[string]string{{"host": "mbp"}}})
+	e.must(t, owner, "project.allowed_executors.set", map[string]any{"id": work, "executors": []string{"h.codex.mbp"}})
 	wp := e.parent(t, work)
 	e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": wp, "assignee": "h.codex.mbp",
 		"executor": map[string]any{"kind": "external-cli", "host": "mbp"}})
 	wp2 := e.parent(t, work)
-	de := e.wantExit(t, domain.ExitExecutorNotAllowed, e.as("DEL"), "delegate.create", map[string]any{"parent": wp2, "assignee": "h.sub.apa",
-		"executor": map[string]any{"kind": "native-subagent", "host": "apa"}})
-	if _, found := e.entry(t, "h.sub.apa"); found {
+	de := e.wantExit(t, domain.ExitExecutorNotAllowed, e.as("DEL"), "delegate.create", map[string]any{"parent": wp2, "assignee": "h.sub.mbp",
+		"executor": map[string]any{"kind": "native-subagent", "host": "mbp"}})
+	if _, found := e.entry(t, "h.sub.mbp"); found {
 		t.Fatal("a rejected delegation must not register its executor")
 	}
-	if len(de.AllowedMatch) != 1 || de.AllowedMatch[0].Host != "mbp" || !slices.Contains(de.Candidates, "h.codex.mbp") || !slices.Contains(de.Candidates, "h.paseo.mbp.quick") {
-		t.Fatalf("21 body: match %v candidates %v", de.AllowedMatch, de.Candidates)
+	if len(de.Allowed) != 1 || de.Allowed[0] != "h.codex.mbp" {
+		t.Fatalf("21 body: allowed %v", de.Allowed)
 	}
-	// 未登记、也不带描述的 id 只能按 id 命中。
-	e.wantExit(t, domain.ExitExecutorNotAllowed, e.as("DEL"), "delegate.create", map[string]any{"parent": wp2, "assignee": "ghost"})
-	// 按 harness 匹配：新登记的 harness 取调用方。
-	e.must(t, owner, "project.allowed_executors.set", map[string]any{"id": work, "executors": nil, "match": []map[string]string{{"harness": "h"}}})
-	e.must(t, e.as("DEL"), "delegate.create", map[string]any{"parent": wp2, "assignee": "h.sub.apa",
-		"executor": map[string]any{"kind": "native-subagent", "host": "apa"}})
 	e.consistent(t)
 }

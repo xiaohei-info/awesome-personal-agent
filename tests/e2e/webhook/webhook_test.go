@@ -108,11 +108,11 @@ func (f *fx) apa(token string, want int, args ...string) baseline.Result {
 
 func (f *fx) addSource(id, sourceType, config, dedupe string) {
 	f.t.Helper()
-	args := []string{"source", "add", "--id", id, "--name", id, "--type", "webhook", "--source-type", sourceType, "--config", config, "--evidence", "owner asked"}
+	args := []string{"source", "add", "--id", id, "--name", id, "--type", "webhook", "--source-type", sourceType, "--config", config}
 	if dedupe != "" {
 		args = append(args, "--dedupe-domain", dedupe)
 	}
-	f.apa(f.DEL, 0, args...)
+	f.OwnerApaOK("", args...) // 登记来源是 3b，只由本人在 Web 做（2026-11-20）
 }
 
 type keyOut struct {
@@ -124,7 +124,7 @@ type keyOut struct {
 
 func (f *fx) webhookKey(op, id string) keyOut {
 	f.t.Helper()
-	r := f.apa(f.DEL, 0, "source", "webhook", op, id, "--evidence", "owner asked")
+	r := f.OwnerApaOK("", "source", "webhook", op, id) // 接收密钥的签发、轮换、吊销是 3b，只由本人在 Web 做（2026-11-20）
 	var k keyOut
 	if err := json.Unmarshal([]byte(r.Stdout), &k); err != nil || k.Secret == "" || k.URL != "/ingest/"+id {
 		f.t.Fatalf("webhook %s 输出不对: %q %v", op, r.Stdout, err)
@@ -374,9 +374,11 @@ func TestFlowWebhook(t *testing.T) {
 		if st, err := os.Stat(kf); err != nil || st.Mode().Perm() != 0o600 {
 			t.Fatalf("HMAC 密钥文件 %s: %v %v", kf, st, err)
 		}
-		// OBS 不能创建。
-		r := f.Apa(f.OBS, "", "source", "webhook", "create", ghSource)
-		eq(t, "OBS 创建接收密钥的退出码", r.Code, 4)
+		// 任何钥匙都不能创建：3b 硬线先于钥匙范围，observer 与档位放开的 delegate 都是 20。
+		for name, tok := range map[string]string{"OBS": f.OBS, "DEL": f.DEL} {
+			r := f.Apa(tok, "", "source", "webhook", "create", ghSource)
+			eq(t, name+" 创建接收密钥的退出码", r.Code, 20)
+		}
 	})
 
 	step("ACT-HOOK-02 签名正确的请求落盘后回 2xx", func(t *testing.T) {
@@ -730,7 +732,7 @@ func TestFlowWebhook(t *testing.T) {
 		f.StopKernel()
 		f.StartKernelAgain()
 		before := len(f.items("proposed"))
-		f.apa(f.DEL, 0, "source", "replay", rec.ID, "--evidence", "owner asked")
+		f.apa(f.DEL, 0, "source", "replay", rec.ID)
 		f.waitFor("重放后生成事项", 30*time.Second, func() bool {
 			evs := f.events(id)
 			return len(evs) == 1 && evs[0].Disposition == "proposed" && evs[0].Item != ""
@@ -738,7 +740,7 @@ func TestFlowWebhook(t *testing.T) {
 		eq(t, "第一次重放后新增事项数", len(f.items("proposed")), before+1)
 		first := f.events(id)[0].Item
 
-		f.apa(f.DEL, 0, "source", "replay", rec.ID, "--evidence", "owner asked")
+		f.apa(f.DEL, 0, "source", "replay", rec.ID)
 		f.waitFor("第二次重放处理完成", 30*time.Second, func() bool {
 			g, _ := f.ingestBy(id, rec.DeliveryKey)
 			return g.State == "processed" && g.Events == 1

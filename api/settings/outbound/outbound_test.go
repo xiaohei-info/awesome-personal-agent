@@ -72,7 +72,7 @@ func setup(t *testing.T) *env {
 			e.cookie = c
 		}
 	}
-	web := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	web := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	for cmd, in := range map[string]string{
 		registry.CmdRegisterExec: `{"id":"src_obd","command":"echo","schedule":"1m","timeout":30}`,
 		"project.create":         `{"name":"acc-open","status":"active","capture":true}`,
@@ -210,7 +210,7 @@ func TestOwnerSetsAndReadsOutbound(t *testing.T) {
 		t.Errorf("project missing value: %d", rec.Code)
 	}
 	// 项目的其他更新不会把已选的范围冲回未选择
-	if _, err := e.x.Do(bg, command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb},
+	if _, err := e.x.Do(bg, command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true},
 		Command: "project.update", Input: json.RawMessage(`{"id":"` + e.projectID() + `","intro":"x"}`)}); err != nil {
 		t.Fatal(err)
 	}

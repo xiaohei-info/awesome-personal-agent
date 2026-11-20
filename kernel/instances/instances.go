@@ -286,15 +286,15 @@ func existing(tx *store.Tx, id string) (authz.Object, error) {
 	return authz.Object{ID: id}, nil
 }
 
-func agentActions(tx *store.Tx, _ command.Caller, obj authz.Object, raw json.RawMessage) []authz.Action {
+// agentTier：安排的新建与修改是 3a（改日常）；改了参数里的 agent_id（后台由谁干）是 3b（§14.3）。
+func agentTier(tx *store.Tx, _ command.Caller, obj authz.Object, raw json.RawMessage) (authz.Tier, error) {
 	var change struct {
 		ID     string
 		Params json.RawMessage
 	}
 	_ = json.Unmarshal(raw, &change)
-	actions := []authz.Action{authz.ActionManageSource}
 	if len(change.Params) == 0 {
-		return actions
+		return authz.TierRules, nil
 	}
 	agent := func(params json.RawMessage) string {
 		var v struct {
@@ -307,14 +307,14 @@ func agentActions(tx *store.Tx, _ command.Caller, obj authz.Object, raw json.Raw
 	if change.ID != "" {
 		in, err := Get(tx, obj.ID)
 		if err != nil {
-			return []authz.Action{authz.ActionChangeSettings}
+			return authz.TierPower, err
 		}
 		old = agent(in.Params)
 	}
 	if agent(change.Params) != old {
-		actions = append(actions, authz.ActionChangeSettings)
+		return authz.TierPower, nil
 	}
-	return actions
+	return authz.TierRules, nil
 }
 
 func (s *svc) create() command.Spec {
@@ -325,7 +325,7 @@ func (s *svc) create() command.Spec {
 	instance := func(id string, v createIn) Instance {
 		return Instance{ID: id, Pack: v.Pack, Project: v.Project, Params: v.Params, Enabled: v.Enabled == nil || *v.Enabled}
 	}
-	return command.Spec{Name: "instance.create", Actions: agentActions, Tier: authz.TierWords,
+	return command.Spec{Name: "instance.create", Action: authz.ActionManageSource, Tier: authz.TierRules, TierFor: agentTier, Page: "/rules",
 		Object: func(_ *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			if _, err := parse(raw); err != nil {
 				return authz.Object{}, err
@@ -377,7 +377,7 @@ func (s *svc) update() command.Spec {
 		}
 		return in, nil
 	}
-	return command.Spec{Name: "instance.update", Actions: agentActions, Tier: authz.TierWords,
+	return command.Spec{Name: "instance.update", Action: authz.ActionManageSource, Tier: authz.TierRules, TierFor: agentTier, Page: "/rules",
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {
@@ -429,7 +429,7 @@ func (s *svc) toggle() command.Spec {
 		}
 		return v, nil
 	}
-	return command.Spec{Name: "instance.toggle", Action: authz.ActionManageSource, Tier: authz.TierWords,
+	return command.Spec{Name: "instance.toggle", Action: authz.ActionManageSource, Tier: authz.TierRules, Page: "/rules",
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {
@@ -464,7 +464,7 @@ func (s *svc) run() command.Spec {
 		var v ref
 		return v, decode(raw, &v)
 	}
-	return command.Spec{Name: "instance.run", Action: authz.ActionManageSource, Tier: authz.TierWords,
+	return command.Spec{Name: "instance.run", Action: authz.ActionManageSource, Tier: authz.TierRules, Page: "/rules",
 		Object: func(tx *store.Tx, raw json.RawMessage) (authz.Object, error) {
 			v, err := parse(raw)
 			if err != nil {
@@ -529,7 +529,7 @@ func Seed(ctx context.Context, x *command.Executor, st *store.Store, p Packs, ow
 			return err
 		}
 		if _, err := x.Do(ctx, command.Request{Identity: system, Command: "instance.create", Input: raw,
-			IdemKey: "defaults:instance:" + d.Pack, Evidence: "default schedule shipped with APA (§7.3)", Owner: owner}); err != nil {
+			IdemKey: "defaults:instance:" + d.Pack, Owner: owner}); err != nil {
 			return fmt.Errorf("instances: default %s: %w", d.Pack, err)
 		}
 	}

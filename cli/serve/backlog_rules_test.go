@@ -85,23 +85,16 @@ func TestBacklogRulesOnUpgradedFixture(t *testing.T) {
 		t.Fatalf("listed backlog %v does not match manifest %+v", before, m.Backlog)
 	}
 
-	direct := map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "direct"}
-	withWords := map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "direct", "X-APA-Evidence": "本人：先只跑规则"}
-	group := map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "group", "X-APA-Evidence": "本人：先只跑规则"}
-	for name, c := range map[string]struct {
-		token string
-		hdr   map[string]string
-		want  int
-	}{"no words": {m.Tokens["delegate"], direct, 403}, "group": {m.Tokens["delegate"], group, 403}, "observer": {m.Tokens["observer"], withWords, 403}} {
-		if code, b := do("POST", "/source-events/rules", c.token, c.hdr, `{}`); code != c.want || !bytes.Contains(b, []byte(`"code"`)) {
-			t.Fatalf("%s: %d %s", name, code, b)
-		}
+	// 只跑规则是一档：observer 在钥匙范围外（403）、积压不变；delegate 不要本人原话。
+	sess := map[string]string{"X-APA-Session": "s1"}
+	if code, b := do("POST", "/source-events/rules", m.Tokens["observer"], sess, `{}`); code != 403 || !bytes.Contains(b, []byte(`"code"`)) {
+		t.Fatalf("observer: %d %s", code, b)
 	}
 	if got := count(); fmt.Sprint(got) != fmt.Sprint(before) {
 		t.Fatalf("refused calls changed the backlog: %v -> %v", before, got)
 	}
 
-	code, b := do("POST", "/source-events/rules", m.Tokens["delegate"], withWords, `{}`)
+	code, b := do("POST", "/source-events/rules", m.Tokens["delegate"], sess, `{}`)
 	var res struct{ Attached, Disposed, Remaining int }
 	if code != 200 || json.Unmarshal(b, &res) != nil {
 		t.Fatalf("rules: %d %s", code, b)

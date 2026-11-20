@@ -107,9 +107,8 @@ func (k *kit) apa(token string, want int, args ...string) baseline.Result {
 func (k *kit) endpoints(judge, generate string) {
 	k.t.Helper()
 	body, _ := json.Marshal(map[string]any{
-		"judge_endpoint":       map[string]any{"url": k.Cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1", "locality": judge},
-		"generate_endpoint":    map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": generate},
-		"screening_timeout_ms": 2000,
+		"judge_endpoint":    map[string]any{"url": k.Cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1", "locality": judge},
+		"generate_endpoint": map[string]any{"url": k.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": generate},
 	})
 	k.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
 }

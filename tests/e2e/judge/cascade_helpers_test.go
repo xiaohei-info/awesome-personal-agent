@@ -116,7 +116,7 @@ exec %q "$@"
 		"session": map[string]any{"extract": "$.session_id"},
 		"access":  map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}},
 	}})
-	if r := f.Apa(f.DEL, string(decl), "declare", "-", "--evidence", "验收声明替身 harness"); r.Code != 0 {
+	if r := f.Apa(f.DEL, string(decl), "declare", "-"); r.Code != 0 {
 		f.t.Fatalf("apa declare: %d %s%s", r.Code, r.Stdout, r.Stderr)
 	}
 	f.webOK("POST", "/settings/declarations/"+harnessName+"/1/confirm", "", 200)
@@ -207,7 +207,7 @@ func (f *fx) phase(id string) string { s, _ := f.item(id)["phase"].(string); ret
 func (f *fx) triggerItem(title, tag string) string {
 	f.t.Helper()
 	r := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", f.Projects["acc-open"], "--tags", tag, "--evidence", "验收触发")
+		"--project", f.Projects["acc-open"], "--tags", tag)
 	return jsonMap(f.t, r.Stdout)["id"].(string)
 }
 

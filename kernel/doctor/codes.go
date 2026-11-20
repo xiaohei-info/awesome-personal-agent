@@ -51,6 +51,10 @@ const (
 	CodeTierNoHost     = "tier_no_host"
 	CodeTierFull       = "tier_full"
 
+	// 权限模型（§14.3、§16.5）：authz_switched 已切换到三档模型；authz_not_switched 账本还没切换或策略里仍有旧段，Data["legacy_policy"] 列出旧段
+	CodeAuthzSwitched    = "authz_switched"
+	CodeAuthzNotSwitched = "authz_not_switched"
+
 	// 模型端点（检查一级）
 	CodeModelsPaused  = "models_paused"
 	CodeModelsNone    = "models_none"
@@ -92,7 +96,6 @@ const (
 	CodeHostReadyNoSelfcheck = "host_ready_no_selfcheck"
 	CodeHostHeadlessMissing  = "host_headless_missing"
 	CodeHostSelfcheckFailed  = "host_selfcheck_failed"
-	CodeHostNoSessionKind    = "host_no_session_kind"
 	CodeHostHookMissing      = "host_hook_missing"
 
 	// 重复提醒

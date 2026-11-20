@@ -35,7 +35,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 const (
@@ -152,7 +152,7 @@ func (e *env) packFS(taskExecutor string) fstest.MapFS {
 func (e *env) must(id command.Identity, cmd string, in any) json.RawMessage {
 	e.t.Helper()
 	b, _ := json.Marshal(in)
-	r, err := e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "x", WebURL: "http://web"})
+	r, err := e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web"})
 	if err != nil {
 		e.t.Fatalf("%s: %v", cmd, err)
 	}

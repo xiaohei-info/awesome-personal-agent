@@ -29,7 +29,7 @@ func (e *env) backlogged(source, kind, id string, disp domain.Disposition, reaso
 }
 
 func (e *env) rules(id command.Identity, evidence, source string) (RulesResult, error) {
-	return e.svc.BacklogRules(bg, command.Request{Identity: id, Evidence: evidence, Owner: "owner"}, source)
+	return e.svc.BacklogRules(bg, command.Request{Identity: id, Owner: "owner"}, source)
 }
 
 func disposedBy(t *testing.T, e *env, event string) []string {
@@ -128,19 +128,21 @@ func TestBacklogRulesAttachesAndScopesBySource(t *testing.T) {
 }
 
 // 缺本人原话被拒，积压不变；不受重判开关限制。
+// 积压只跑规则是一档：observer 在钥匙范围外，积压不变；delegate 不要附加依据直接跑。
 func TestBacklogRulesRequiresOwnersWords(t *testing.T) {
 	e := newEnv(t, false)
 	e.svc.o.Rejudge.Window = 0 // unjudged_rejudge_days: 0
 	e.emit("src_t", "plain", ev("n1", "ticket.noise", "噪声", nil))
 	e.backlogged("src_t", "ticket", "n1", domain.DispositionUnjudged, "")
-	deleg := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
-	if _, err := e.rules(deleg, "", ""); err == nil || code(err) != domain.CodeBasisRequired {
-		t.Fatalf("without words: %v", err)
+	obs := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "obs", Via: domain.ViaCLI}, Level: authz.LevelObserver}
+	if _, err := e.rules(obs, "", ""); err == nil || code(err) != domain.CodePermissionDenied {
+		t.Fatalf("observer: %v", err)
 	}
 	if x := e.byID("src_t")["n1"]; x.Disposition != domain.DispositionUnjudged {
-		t.Fatalf("changed without words: %+v", x)
+		t.Fatalf("changed by a refused call: %+v", x)
 	}
-	if _, err := e.rules(deleg, "本人：先只跑规则", ""); err != nil && code(err) != domain.CodeSessionNotDirect {
-		t.Fatalf("with words: %v", err)
+	deleg := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "agent", Via: domain.ViaCLI}, Level: authz.LevelDelegate}
+	if _, err := e.rules(deleg, "", ""); err != nil {
+		t.Fatalf("delegate: %v", err)
 	}
 }

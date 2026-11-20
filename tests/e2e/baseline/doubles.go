@@ -68,9 +68,8 @@ func (e *Env) WireEndpoints() {
 		e.ModelStub = modelstub.NewAt(loopback + ":0")
 	}
 	body, _ := json.Marshal(map[string]any{
-		"judge_endpoint":       map[string]any{"url": e.Cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1", "locality": "local"},
-		"generate_endpoint":    map[string]any{"url": e.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": "local"},
-		"screening_timeout_ms": 2000,
+		"judge_endpoint":    map[string]any{"url": e.Cls.URL(), "api_key": "stub-key", "protocol": "probability-judgment/1", "locality": "local"},
+		"generate_endpoint": map[string]any{"url": e.ModelStub.URL(), "api_key": "stub-key", "model": "acc-model", "locality": "local"},
 	})
 	e.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
 }
@@ -183,7 +182,7 @@ func (e *Env) ToolLog() []tools.LogEntry {
 func (e *Env) AskDecision(title string) string {
 	e.T.Helper()
 	r := e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", e.Projects["acc-work"], "--evidence", "建个任务")
+		"--project", e.Projects["acc-work"])
 	var m struct {
 		ID string `json:"id"`
 	}

@@ -61,7 +61,8 @@ func (s *session) json(method, p string, body any, want int) map[string]any {
 	return m
 }
 
-// PR2 验收：添加 Bark → 测试 → 启用 → 建决策请求 → 替身收到带表单链接的推送 → 打开链接作答成功；web_only 只带 Web 链接。
+// PR2 验收：添加 Bark → 测试 → 启用 → 建决策请求 → 替身收到推送，点开是需要登录的 Web 链接（一次性表单已取消）→ 本人在 Web 作答；
+// 不再有高风险类：带 money 标签的问题同样推送，链接同样落在事项页。
 func TestBarkChannelEndToEndWithStandIn(t *testing.T) {
 	stub := &barkStub{}
 	srv := httptest.NewServer(stub)
@@ -83,14 +84,11 @@ func TestBarkChannelEndToEndWithStandIn(t *testing.T) {
 		"secrets": map[string]string{"device_key": "stand-in-key"}, "enabled": true}, 201)
 	id, _ := c["id"].(string)
 
-	// 「用它来送」：等你决定的提醒走这条渠道；带 money 标签的事项按策略规则属于 web_only。
+	// 「用它来送」：等你决定的提醒走这条渠道。
 	pol := s.json("GET", "/settings/policy", nil, 200)
 	disturb := pol["disturb"].(map[string]any)
 	disturb["routes"].(map[string]any)["decision"] = "channel:" + id
-	webOnly := pol["web_only"].(map[string]any)
-	cats := webOnly["categories"].([]any)
-	webOnly["rules"] = []map[string]any{{"tag": "money", "category": cats[0]}}
-	s.json("PUT", "/settings/policy", map[string]any{"disturb": disturb, "web_only": webOnly}, 200)
+	s.json("PUT", "/settings/policy", map[string]any{"disturb": disturb}, 200)
 
 	ask := func(title string, tags []string) string {
 		it := s.json("POST", "/items", map[string]any{"kind": "task", "title": title, "tags": tags, "phase": "open"}, 201)
@@ -102,27 +100,19 @@ func TestBarkChannelEndToEndWithStandIn(t *testing.T) {
 	plain := ask("选哪个方案", nil)
 	guarded := ask("付不付这笔钱", []string{"money"})
 
-	m := stub.waitPush(t, "选哪个方案")
-	formURL, _ := m["url"].(string)
 	base := "http://" + addr.String()
-	tok, ok := strings.CutPrefix(formURL, base+"/forms/")
-	if !ok || tok == "" || m["level"] != "timeSensitive" {
+	m := stub.waitPush(t, "选哪个方案")
+	if u, _ := m["url"].(string); u != base+"/items/"+plain || strings.Contains(mustJSON(m), "/forms/") || m["level"] != "timeSensitive" {
 		t.Fatalf("decision push = %v", m)
 	}
-	req, _ := http.NewRequest("POST", base+"/forms/"+tok, strings.NewReader(`{"choice":"A"}`))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		t.Fatalf("answer through the form: %v %v", resp, err)
-	}
-	resp.Body.Close()
+	s.json("POST", "/items/"+plain+"/decide", map[string]any{"choice": "A"}, 200)
 	if it := s.json("GET", "/items/"+plain, nil, 200); !strings.Contains(mustJSON(it), `"choice":"A"`) {
 		t.Fatalf("decision not resolved: %v", it)
 	}
 
 	w := stub.waitPush(t, "付不付这笔钱")
 	if u, _ := w["url"].(string); u != base+"/items/"+guarded || strings.Contains(mustJSON(w), "/forms/") {
-		t.Fatalf("web_only push = %v", w)
+		t.Fatalf("money push = %v", w)
 	}
 
 	// 卡片现状：在用、最近成功

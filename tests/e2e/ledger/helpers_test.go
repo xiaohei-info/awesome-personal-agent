@@ -79,7 +79,7 @@ func idOf(t *testing.T, r baseline.Result, what string) string {
 // addTask 以 DEL 新建 open 的 task（附本人原话作证据）。
 func addTask(t *testing.T, e *baseline.Env, title string, extra ...string) string {
 	t.Helper()
-	args := append([]string{"item", "add", "--kind", "task", "--phase", "open", "--title", title, "--evidence", "owner: add " + title}, extra...)
+	args := append([]string{"item", "add", "--kind", "task", "--phase", "open", "--title", title}, extra...)
 	return idOf(t, e.Apa(e.DEL, "", args...), "item add "+title)
 }
 

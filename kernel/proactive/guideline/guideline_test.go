@@ -33,7 +33,7 @@ import (
 
 var (
 	bg    = context.Background()
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 const (
@@ -146,7 +146,7 @@ func newEnvWith(t *testing.T, adjust func(*Options)) *env {
 func (e *env) must(cmd string, in any) json.RawMessage {
 	e.t.Helper()
 	b, _ := json.Marshal(in)
-	r, err := e.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so", WebURL: "http://web"})
+	r, err := e.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web"})
 	if err != nil {
 		e.t.Fatalf("%s: %v", cmd, err)
 	}

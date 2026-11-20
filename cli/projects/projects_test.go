@@ -14,6 +14,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -29,6 +30,7 @@ type kernel struct {
 	st  *store.Store
 	au  *auth.Auth
 	url string
+	x   *command.Executor
 }
 
 func newKernel(t *testing.T) *kernel {
@@ -55,7 +57,7 @@ func newKernel(t *testing.T) *kernel {
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return &kernel{t, st, au, ts.URL}
+	return &kernel{t, st, au, ts.URL, x}
 }
 
 func (k *kernel) token(kind auth.Kind) string {
@@ -78,12 +80,22 @@ type result struct {
 
 func (k *kernel) apa(token string, args ...string) result {
 	k.t.Helper()
-	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": k.t.TempDir()}
+	vars := map[string]string{"APA_URL": k.url, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_HOME": k.t.TempDir()}
 	var out, errb bytes.Buffer
 	env := client.Env{Getenv: func(s string) string { return vars[s] }, UserHome: k.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient}
-	code := client.Main(append([]string{"--evidence", "owner: go ahead"}, args...), env)
+	code := client.Main(args, env)
 	return result{code, out.String(), errb.String()}
+}
+
+// owner 以 Web 本人（刚验过口令）执行一条命令：远程仓库是外部接入（3b），CLI 的 Agent 钥匙做不了。
+func (k *kernel) owner(cmd string, in any) {
+	k.t.Helper()
+	b, _ := json.Marshal(in)
+	if _, err := k.x.Do(context.Background(), command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb},
+		Level: authz.LevelWeb, Fresh: true}, Command: cmd, Input: b}); err != nil {
+		k.t.Fatalf("%s: %v", cmd, err)
+	}
 }
 
 func (r result) project(t *testing.T) domain.Project {
@@ -123,11 +135,18 @@ func (k *kernel) rejections(object string) (n int) {
 func TestCreateUpdateListShow(t *testing.T) {
 	k := newKernel(t)
 	dlg, obs := k.token(auth.Delegate), k.token(auth.Observer)
-	p := k.mustCreate(dlg, "--name", "Home", "--intro", "chores", "--tag", "a", "--tag", "b", "--capture")
-	if p.Name != "Home" || p.Intro != "chores" || len(p.Tags) != 2 || !p.Capture || p.Status != domain.ProjectActive {
+	// 建项目、改项目信息是一档；对话捕获开关是 3a，只整理的 Agent 为 23。
+	if r := k.apa(dlg, "project", "create", "--name", "Home", "--capture"); r.code != 23 {
+		t.Fatalf("create with capture must exit 23: %+v", r)
+	}
+	p := k.mustCreate(dlg, "--name", "Home", "--intro", "chores", "--tag", "a", "--tag", "b")
+	if p.Name != "Home" || p.Intro != "chores" || len(p.Tags) != 2 || p.Capture || p.Status != domain.ProjectActive {
 		t.Fatalf("created: %+v", p)
 	}
-	u := k.apa(dlg, "project", "update", p.ID, "--status", "paused", "--capture=false")
+	if r := k.apa(dlg, "project", "update", p.ID, "--capture=true"); r.code != 23 {
+		t.Fatalf("capture switch must exit 23: %+v", r)
+	}
+	u := k.apa(dlg, "project", "update", p.ID, "--status", "paused")
 	if u.code != 0 {
 		t.Fatalf("update: %+v", u)
 	}
@@ -153,21 +172,19 @@ func TestCreateUpdateListShow(t *testing.T) {
 	}
 }
 
-// ACT-AUTH-07：本机检出 worker 可改；远程地址只有 delegate 可改，worker 得 4。
+// ACT-AUTH-07：本机检出 worker 可改（一档）；远程地址是 3b，任何 Agent 钥匙都得 20，只有本人能改。
 func TestReposAuthorizationByCredentialLevel(t *testing.T) {
 	k := newKernel(t)
 	dlg, wrk, obs := k.token(auth.Delegate), k.token(auth.Worker), k.token(auth.Observer)
 	p := k.mustCreate(dlg, "--name", "Code")
 	const remote = "https://github.com/o/r.git"
 
-	for _, tk := range []string{wrk, obs} {
-		if r := k.apa(tk, "project", "repos", "add", p.ID, "--remote", remote); r.code != 4 {
-			t.Fatalf("non-delegate add remote must exit 4: %+v", r)
+	for _, tk := range []string{wrk, obs, dlg} {
+		if r := k.apa(tk, "project", "repos", "add", p.ID, "--remote", remote); r.code != 20 {
+			t.Fatalf("Agent keys adding a remote must exit 20: %+v", r)
 		}
 	}
-	if r := k.apa(dlg, "project", "repos", "add", p.ID, "--remote", remote); r.code != 0 {
-		t.Fatalf("delegate add remote: %+v", r)
-	}
+	k.owner("project.repo.add", map[string]string{"id": p.ID, "remote": remote})
 	// worker 写本机检出。
 	r := k.apa(wrk, "project", "repos", "add", p.ID, "--remote", remote, "--host", "box1", "--path", "/src/r")
 	if r.code != 0 {
@@ -181,14 +198,14 @@ func TestReposAuthorizationByCredentialLevel(t *testing.T) {
 		t.Fatalf("observer checkout must exit 4: %+v", r)
 	}
 	// worker 删不了远程地址，但能删自己的检出。
-	if r := k.apa(wrk, "project", "repos", "remove", p.ID, "--remote", remote); r.code != 4 {
-		t.Fatalf("worker remove remote must exit 4: %+v", r)
+	if r := k.apa(wrk, "project", "repos", "remove", p.ID, "--remote", remote); r.code != 20 {
+		t.Fatalf("worker remove remote must exit 20: %+v", r)
 	}
 	if r := k.apa(wrk, "project", "repos", "remove", p.ID, "--remote", remote, "--host", "box1", "--path", "/src/r"); r.code != 0 || len(r.project(t).Repos[0].Checkouts) != 0 {
 		t.Fatalf("worker remove checkout: %+v", r)
 	}
-	if r := k.apa(dlg, "project", "repos", "remove", p.ID, "--remote", remote); r.code != 0 || len(r.project(t).Repos) != 0 {
-		t.Fatalf("delegate remove remote: %+v", r)
+	if r := k.apa(dlg, "project", "repos", "remove", p.ID, "--remote", remote); r.code != 20 {
+		t.Fatalf("delegate remove remote must exit 20: %+v", r)
 	}
 }
 
@@ -222,9 +239,9 @@ func TestAllowedExecutorsRejectedOnBothPaths(t *testing.T) {
 	if c := k.apa(dlg, "project", "create", "--name", "Q", "--allowed-executors", "x"); c.code != 20 {
 		t.Fatalf("create with allowed_executors must exit 20: %+v", c)
 	}
-	// 非 delegate 得 4。
-	if w := k.apa(k.token(auth.Worker), "project", "update", p.ID, "--allowed-executors", "x"); w.code != 4 {
-		t.Fatalf("worker must exit 4: %+v", w)
+	// 硬线先于范围：worker 同样是 20。
+	if w := k.apa(k.token(auth.Worker), "project", "update", p.ID, "--allowed-executors", "x"); w.code != 20 {
+		t.Fatalf("worker must exit 20: %+v", w)
 	}
 }
 
@@ -248,7 +265,7 @@ func TestCheckoutDefaultsHostToThisMachine(t *testing.T) {
 	k := newKernel(t)
 	dlg := k.token(auth.Delegate)
 	p := k.mustCreate(dlg, "--name", "C")
-	k.apa(dlg, "project", "repos", "add", p.ID, "--remote", "r1")
+	k.owner("project.repo.add", map[string]string{"id": p.ID, "remote": "r1"})
 	r := k.apa(dlg, "project", "repos", "add", p.ID, "--remote", "r1", "--path", "/p")
 	if r.code != 0 || r.project(t).Repos[0].Checkouts[0].Host == "" {
 		t.Fatalf("host must default to the machine host name: %+v", r)

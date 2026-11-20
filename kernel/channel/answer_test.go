@@ -30,7 +30,7 @@ var (
 	bg = context.Background()
 	t0 = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	owner  = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner  = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	worker = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelWorker}
 	// 渠道 ext 密钥：scope channel.<名> 解析成 Principal ext:channel.<名>。
 	chanKey  = ext("chan")
@@ -95,7 +95,6 @@ func setup(t *testing.T) *env {
 		p.Disturb.Routes["decision"] = "chan"
 		p.Channels = map[string]policy.Channel{"chan": {TextOnly: true}}
 		p.ChannelAnswerers = map[string][]string{"chan": {"alice"}}
-		p.WebOnly.Rules = []policy.WebOnlyRule{{Tag: "money", Category: policy.CategoryFunds}}
 	})
 	return e
 }
@@ -290,24 +289,6 @@ func TestChannelAnswerFirstOneWins(t *testing.T) {
 	}
 }
 
-// web_only 类同样拒绝并回 Web 链接，且留拒绝记录。
-func TestChannelAnswerWebOnlyRefusedWithWebLink(t *testing.T) {
-	e := setup(t)
-	id, d, token := e.sent("money")
-	if token != "" || !d.Content.WebOnly || len(d.Content.Options) != 0 {
-		t.Fatalf("web_only decision content must carry only the Web link: %+v", d.Content)
-	}
-	err := e.answer(chanKey, d, "alice", "msg-"+id, "A")
-	de, ok := err.(*domain.Error)
-	if !ok || de.Code != domain.CodeWebOnly || de.WebURL == nil || *de.WebURL != "/items/"+id {
-		t.Fatalf("got %#v", err)
-	}
-	e.stillAsking(id)
-	if e.rejections(id) != 1 {
-		t.Fatal("web_only rejection not recorded")
-	}
-}
-
 // 事项变化后旧版本投递作废，旧消息里的回答被拒绝。
 func TestChannelAnswerOnOutdatedDeliveryConflicts(t *testing.T) {
 	e := setup(t)
@@ -315,68 +296,6 @@ func TestChannelAnswerOnOutdatedDeliveryConflicts(t *testing.T) {
 	e.do(owner, "item.update", map[string]any{"id": id, "title": "changed"})
 	if err := e.answer(chanKey, d, "alice", "msg-"+id, "A"); code(err) != domain.CodeConflict {
 		t.Fatalf("outdated answer: %v", err)
-	}
-	e.stillAsking(id)
-}
-
-func (e *env) formAnswer(token, choice string) error {
-	_, err := e.try(form, channel.CmdFormAnswer, map[string]any{"token": token, "choice": choice})
-	return err
-}
-
-// ACT-CHP-10 表单：第一次可答并记渠道名，用过即失效。
-func TestFormAnswersOnceThenExpires(t *testing.T) {
-	e := setup(t)
-	id, _, token := e.sent()
-	if token == "" {
-		t.Fatal("no form link")
-	}
-	if err := e.formAnswer(token, "B"); err != nil {
-		t.Fatal(err)
-	}
-	if r := e.item(id).Ask.Resolution; r == nil || r.Choice != "B" || r.ResolvedVia != "chan" {
-		t.Fatalf("resolution %+v", r)
-	}
-	if err := e.formAnswer(token, "A"); code(err) != domain.CodeConflict {
-		t.Fatalf("reused link: %v", err)
-	}
-	if err := e.formAnswer("unknown", "A"); code(err) != domain.CodeNotFound {
-		t.Fatalf("unknown link: %v", err)
-	}
-}
-
-func TestFormExpiresAfterTTL(t *testing.T) {
-	e := setup(t)
-	id, _, token := e.sent()
-	e.now = e.now.Add(channel.FormTTL)
-	if err := e.formAnswer(token, "A"); code(err) != domain.CodeConflict {
-		t.Fatalf("expired link: %v", err)
-	}
-	e.stillAsking(id)
-}
-
-// 链接只对发放时的那个版本有效：事项变化后旧链接作答被拒绝，令牌不算用过。
-func TestFormOutdatedVersionRejected(t *testing.T) {
-	e := setup(t)
-	id, _, token := e.sent()
-	e.do(owner, "item.update", map[string]any{"id": id, "title": "changed"})
-	if err := e.formAnswer(token, "A"); code(err) != domain.CodeConflict {
-		t.Fatalf("outdated link: %v", err)
-	}
-	e.stillAsking(id)
-}
-
-// 策略在发放后把决策划为 web_only：链接作答仍被拒绝并回 Web 链接。
-func TestFormRefusedWhenDecisionBecameWebOnly(t *testing.T) {
-	e := setup(t)
-	id, _, token := e.sent()
-	e.policy(func(p *policy.Policy) {
-		p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Kind: "task", Category: policy.CategoryFunds})
-	})
-	err := e.formAnswer(token, "A")
-	de, ok := err.(*domain.Error)
-	if !ok || de.Code != domain.CodeWebOnly || de.WebURL == nil || *de.WebURL != "/items/"+id {
-		t.Fatalf("got %#v", err)
 	}
 	e.stillAsking(id)
 }

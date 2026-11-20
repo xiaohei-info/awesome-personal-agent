@@ -34,7 +34,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	wrk   = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelWorker}
 )
 
@@ -97,7 +97,6 @@ func setup(t *testing.T) *env {
 		p.Disturb.Routes["decision"] = "chan"
 		p.Channels = map[string]policy.Channel{"chan": {TextOnly: true}}
 		p.ChannelAnswerers = map[string][]string{"chan": {"alice"}}
-		p.WebOnly.Rules = []policy.WebOnlyRule{{Tag: "money", Category: policy.CategoryFunds}}
 	})
 	e.srv, err = core.New(core.Deps{Store: st, Auth: e.a, Now: e.clock, Groups: []core.RouteGroup{Routes(e.x, st, e.clock)}})
 	if err != nil {
@@ -262,8 +261,8 @@ func TestAnswerRouteMapsRejections(t *testing.T) {
 	e.stillAsking(id)
 }
 
-// 事项变化后旧消息里的回答 409；web_only 类回 Web 链接。
-func TestAnswerRouteOutdatedAndWebOnly(t *testing.T) {
+// 事项变化后旧消息里的回答 409；不再有高风险类：带 money 标签的问题同样可由回答人在渠道里回答，投递里没有表单链接。
+func TestAnswerRouteOutdatedAndNoRiskClass(t *testing.T) {
 	e := setup(t)
 	ch := e.key("chan")
 	id, d, _ := e.sent()
@@ -275,80 +274,25 @@ func TestAnswerRouteOutdatedAndWebOnly(t *testing.T) {
 	ch = e.key("chan")
 	id2, d2, token := e.sent("money")
 	if token != "" {
-		t.Fatalf("web_only decision got a form link")
+		t.Fatalf("deliveries must not carry a form link: %q", token)
 	}
-	de := want(t, e.req("POST", "/v1/deliveries/"+d2.ID+"/answer", answerBody("alice", "msg-"+id2, "A"), ch), domain.CodeWebOnly.HTTPStatus(), domain.CodeWebOnly)
-	if de.WebURL == nil || *de.WebURL != "/items/"+id2 {
-		t.Fatalf("web url %v", de.WebURL)
+	want(t, e.req("POST", "/v1/deliveries/"+d2.ID+"/answer", answerBody("alice", "msg-"+id2, "A"), ch), 200, "")
+	if r := e.item(id2).Ask.Resolution; r == nil || r.Choice != "A" || r.ResolvedVia != "chan" {
+		t.Fatalf("resolution %+v", r)
 	}
-	e.stillAsking(id2)
 	want(t, e.req("POST", "/v1/deliveries/nope/answer", answerBody("alice", "x", "A"), ch), 404, domain.CodeNotFound)
 }
 
-// ACT-CHP-06 表单：GET 只回问题与选项且不兑现令牌；POST 作答一次，记发放时的渠道，再用即 409。
-func TestFormRoutes(t *testing.T) {
+// 旧表单链接只作导航：GET 302 到需要登录的"等你决定"，不兑现；POST 不再有路由。
+func TestOldFormLinksRedirectToDecisions(t *testing.T) {
 	e := setup(t)
-	id, _, token := e.sent()
-	if token == "" {
-		t.Fatal("no form link")
+	id, _, _ := e.sent()
+	rec := e.req("GET", "/forms/any-old-token", "", nil)
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/decisions" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("old form link: %d %v", rec.Code, rec.Header())
 	}
-	rec := e.req("GET", "/forms/"+token, "", nil)
-	want(t, rec, 200, "")
-	var shown struct {
-		Question string
-		Options  []struct{ ID, Label string }
-		FreeText bool `json:"free_text"`
+	if rec := e.req("POST", "/forms/any-old-token", `{"choice":"B"}`, nil); rec.Code == 200 {
+		t.Fatalf("form answers must be gone: %d %s", rec.Code, rec.Body)
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &shown); err != nil || shown.Question != "ship it?" || len(shown.Options) != 2 || shown.Options[0].ID != "A" || !shown.FreeText {
-		t.Fatalf("form %s", rec.Body)
-	}
-	if strings.Contains(rec.Body.String(), id) || rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("form leaks ledger content or is cacheable: %s %v", rec.Body, rec.Header())
-	}
-	e.stillAsking(id) // GET 不兑现
-	want(t, e.req("GET", "/forms/"+token, "", nil), 200, "")
-
-	want(t, e.req("POST", "/forms/"+token, `{"choice":"B","token":"x"}`, nil), 400, domain.CodeInvalidRequest)
-	want(t, e.req("POST", "/forms/"+token, `{"choice":"B"}`, nil), 200, "")
-	if r := e.item(id).Ask.Resolution; r == nil || r.Choice != "B" || r.ResolvedVia != "chan" {
-		t.Fatalf("resolution %+v", r)
-	}
-	want(t, e.req("POST", "/forms/"+token, `{"choice":"A"}`, nil), 409, domain.CodeConflict)
-	want(t, e.req("GET", "/forms/"+token, "", nil), 409, domain.CodeConflict)
-	want(t, e.req("GET", "/forms/no-such-token", "", nil), 404, domain.CodeNotFound)
-	want(t, e.req("POST", "/forms/no-such-token", `{"choice":"A"}`, nil), 404, domain.CodeNotFound)
-}
-
-// 令牌过期、事项变更、策略后来改成 web_only：作答全部拒绝，且校验失败不消耗令牌。
-func TestFormRoutesRefusals(t *testing.T) {
-	e := setup(t)
-	_, _, expired := e.sent()
-	e.advance(kchannel.FormTTL + time.Second)
-	want(t, e.req("POST", "/forms/"+expired, `{"choice":"A"}`, nil), 409, domain.CodeConflict)
-
-	e2 := setup(t)
-	id, _, token := e2.sent()
-	e2.do(t, owner, "item.update", map[string]any{"id": id, "title": "changed"})
-	want(t, e2.req("GET", "/forms/"+token, "", nil), 409, domain.CodeConflict)
-	want(t, e2.req("POST", "/forms/"+token, `{"choice":"A"}`, nil), 409, domain.CodeConflict)
-	e2.stillAsking(id)
-
-	e3 := setup(t)
-	id3, _, token3 := e3.sent()
-	e3.policy(func(p *policy.Policy) {
-		p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Kind: "task", Category: policy.CategoryFunds})
-	})
-	de := want(t, e3.req("POST", "/forms/"+token3, `{"choice":"A"}`, nil), domain.CodeWebOnly.HTTPStatus(), domain.CodeWebOnly)
-	if de.WebURL == nil || *de.WebURL != "/items/"+id3 {
-		t.Fatalf("web url %v", de.WebURL)
-	}
-	e3.stillAsking(id3)
-}
-
-// 表单令牌不是 Bearer：拿它访问 /v1 路由在骨干处 401。
-func TestFormTokenIsNotABearer(t *testing.T) {
-	e := setup(t)
-	_, d, token := e.sent()
-	rec := e.req("POST", "/v1/deliveries/"+d.ID+"/answer", answerBody("alice", "x", "A"), func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+token) })
-	want(t, rec, 401, domain.CodeUnauthenticated)
+	e.stillAsking(id)
 }

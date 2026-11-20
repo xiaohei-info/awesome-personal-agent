@@ -32,7 +32,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	ruleA = domain.Actor{Type: domain.ActorAgent, Principal: "judge", Via: domain.ViaRule, Run: "run_x"}
 	basis = &domain.Basis{PolicyVersion: 1, RuleID: "r1"}
 )
@@ -111,7 +111,7 @@ func setup(t *testing.T, configured bool) *env {
 	if configured {
 		err = st.Update(bg, func(tx *store.Tx) error {
 			_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-				p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}, 1000
+				p.GenerateEndpoint = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}
 				return nil
 			})
 			return err

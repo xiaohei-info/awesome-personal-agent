@@ -83,7 +83,7 @@ func (k *kit) idOf(label string, r baseline.Result) string {
 // addItem 以 DEL 建一个 open 事项（delegate 写操作须附本人原话）。
 func (k *kit) addItem(project, assignee string) string {
 	k.t.Helper()
-	args := []string{"item", "add", "--kind", "task", "--title", "acc-" + project + "-" + assignee, "--phase", "open", "--evidence", "e2e setup"}
+	args := []string{"item", "add", "--kind", "task", "--title", "acc-" + project + "-" + assignee, "--phase", "open"}
 	if project != "" {
 		args = append(args, "--project", k.Projects[project])
 	}
@@ -93,10 +93,10 @@ func (k *kit) addItem(project, assignee string) string {
 	return k.idOf("item add", k.Apa(k.DEL, "", args...))
 }
 
-// delegate 以 DEL 运行 `apa delegate`（delegate.create 属代理写命令，须附本人原话）。
+// delegate 以 DEL 运行 `apa delegate`（delegate.create 是一档）。
 func (k *kit) delegate(args ...string) baseline.Result {
 	k.t.Helper()
-	return k.Apa(k.DEL, "", append([]string{"delegate"}, append(args, "--evidence", "owner asked")...)...)
+	return k.Apa(k.DEL, "", append([]string{"delegate"}, args...)...)
 }
 
 // item 以 OBS 读事项。
@@ -128,6 +128,7 @@ type Event struct {
 	Reason   string         `json:"reason"`
 	Evidence string         `json:"evidence"`
 	Grant    string         `json:"grant"`
+	Basis    map[string]any `json:"basis"`
 	Payload  map[string]any `json:"payload"`
 }
 

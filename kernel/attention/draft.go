@@ -68,10 +68,9 @@ type drafted struct {
 }
 
 // content 按规则组装决策投递内容，有卡片时用卡片文案替换标题、摘要、选项说明与推荐。
-// web_only 只给标题、摘要（含问题）与 Web 链接（§6.9、§14.4），卡片的选项与推荐一律不用。
-func (d drafted) content(it domain.Item, webOnly bool) domain.DeliveryContent {
+func (d drafted) content(it domain.Item) domain.DeliveryContent {
 	ask := it.Ask
-	c := domain.DeliveryContent{Title: it.Title, Summary: ask.Question, WebOnly: webOnly}
+	c := domain.DeliveryContent{Title: it.Title, Summary: ask.Question}
 	if k := d.Card; k != nil {
 		if k.Title != "" {
 			c.Title = k.Title
@@ -82,9 +81,6 @@ func (d drafted) content(it domain.Item, webOnly bool) domain.DeliveryContent {
 		if k.WhyNow != "" {
 			c.Summary += "\n为什么现在：" + k.WhyNow
 		}
-	}
-	if webOnly {
-		return c
 	}
 	for _, o := range ask.Options {
 		line := o.ID + ": " + o.Label

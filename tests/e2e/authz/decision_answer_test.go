@@ -9,24 +9,22 @@ import (
 )
 
 // TestFlowDecisionAnswer 按验收文档 flow-decision-answer 的顺序执行 ACT-DEC-01..09：决策请求进入待办流，本人可在 Web 回答，
-// delegate 可在私聊会话附原话或凭授权单代答，只认第一次回答。任一动作未通过即停止。
+// 档位放开的 Agent 可以替本人回答（二档，记成 Agent 自己做的、可按次撤回），只整理的得 23，只认第一次回答。任一动作未通过即停止。
 func TestFlowDecisionAnswer(t *testing.T) {
 	k := newKit(t)
 	// workItem 是 DEL 代本人建的、分配给 work-host.cli 的 open 事项；ask 由 WRK 提出。
 	workItem := func(title string) string {
 		return k.idOf("item add", k.Apa(k.DEL, "", "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", workHost,
-			"--project", k.Projects["acc-work"], "--evidence", "e2e setup"))
+			"--project", k.Projects["acc-work"]))
 	}
 	askBy := func(id string, extra ...string) {
 		k.expect("ask", k.Apa(k.WRK, "", append([]string{"ask", id, "--question", "选哪个方案", "--option", "A=方案A", "--option", "B=方案B", "--recommend", "A", "--free-text"}, extra...)...), 0)
-		k.settle(id)
 	}
 	pending := func() string { return k.Apa(k.OBS, "", "inbox").Stdout }
 
 	k.step("ACT-DEC-01 worker 为自己的事项提交决策请求", func(t *testing.T) {
 		id := workItem("dec-1")
 		k.expect("ask", k.Apa(k.WRK, "", "ask", id, "--question", "选哪个方案", "--option", "A=方案A", "--option", "B=方案B", "--recommend", "A", "--free-text"), 0)
-		k.settle(id)
 		eq(t, "阶段", k.phase(id), "needs_input")
 		a := k.ask(id)
 		if a["question"] != "选哪个方案" || a["recommend"] != "A" || a["free_text"] != true || len(a["options"].([]any)) != 2 {
@@ -60,43 +58,50 @@ func TestFlowDecisionAnswer(t *testing.T) {
 		eq(t, "按选项声明前进", k.phase(declared), "done")
 	})
 
-	k.step("ACT-DEC-03 delegate 在私聊会话附原话代答", func(t *testing.T) {
+	// 2026-11-20 改写（裁决 2：二档全开含回答问题）：档位放开的 Agent 替本人回答，记成 Agent 自己做的，可在 Agent 改动里按次撤回。
+	k.step("ACT-DEC-03 档位放开的 Agent 代答，可见且可按次撤回", func(t *testing.T) {
 		id := workItem("dec-3")
 		askBy(id)
-		k.expect("direct decide", k.run(k.DEL, at("dec-s3", "direct"), "decide", id, "--option", "B", "--evidence", "就选方案 B"), 0)
+		k.expect("Agent decide", k.Apa(k.DEL, "", "decide", id, "--option", "B"), 0)
 		eq(t, "choice", k.resolution(id)["choice"], "B")
-		eq(t, "resolved_via", k.resolution(id)["resolved_via"], "chat")
+		eq(t, "resolved_via", k.resolution(id)["resolved_via"], "agent")
 		ev := k.lastEvent(id, "decision.resolved")
-		if ev.Actor["on_behalf_of"] != "owner" || ev.Evidence != "就选方案 B" || ev.Actor["session"] != "dec-s3" || ev.Actor["session_kind"] != "direct" {
-			t.Errorf("Event 缺 on_behalf_of、证据、会话引用或会话类型: %+v", ev)
+		if ev.Actor["type"] != "agent" || ev.Actor["on_behalf_of"] != nil || ev.Evidence != "" || ev.Basis["via"] != "allowance" || ev.Basis["agent"] != k.AgentID {
+			t.Errorf("代答的 Event 应记 Agent 自己与它的档位依据: %+v", ev)
 		}
 		found := false
 		for _, c := range k.agentChanges(id) {
 			found = found || c.Seq == ev.Seq
 		}
 		if !found {
-			t.Error("“agent 变更”视图里没有这次代答")
+			t.Fatal("“Agent 改动”视图里没有这次代答")
+		}
+		k.webOK("POST", "/v1/items/"+id+"/revert", `{"event":`+itoa(ev.Seq)+`}`, 200)
+		eq(t, "撤回后阶段", k.phase(id), "needs_input")
+		if k.resolution(id) != nil {
+			t.Error("撤回后回答应清除")
 		}
 	})
 
-	k.step("ACT-DEC-04 无本人原话也无授权单的代答被拒绝", func(t *testing.T) {
+	k.step("ACT-DEC-04 档位未放开的代答被拒绝", func(t *testing.T) {
 		id := workItem("dec-4")
 		askBy(id)
-		k.expect("无依据", k.run(k.DEL, nil, "decide", id, "--option", "A"), exitBasis)
+		k.expect("只整理", k.run(k.DELO, selfReported, "decide", id, "--option", "A"), exitBasis)
 		eq(t, "阶段", k.phase(id), "needs_input")
 		if k.resolution(id) != nil {
 			t.Error("决策不应生效")
 		}
-		if rej := k.lastRejection(id); rej == nil || rej["code"] != "basis_required" {
+		if rej := k.lastRejection(id); rej == nil || rej["code"] != "tier_closed" {
 			t.Errorf("决策待办应标明这次被拒绝的代答: %v", rej)
 		}
 	})
 
-	k.step("ACT-DEC-05 worker 不能回答决策", func(t *testing.T) {
+	// worker 在自己的事项上在范围内，但它的钥匙不归属任何 Agent，档位恒为只整理：23（2026-11-20 前为 4）。
+	k.step("ACT-DEC-05 未归属 Agent 的 worker 不能回答决策", func(t *testing.T) {
 		id := workItem("dec-5")
 		askBy(id)
 		v := k.version(id)
-		k.expect("worker decide", k.run(k.WRK, at("dec-s5", "direct"), "decide", id, "--option", "A", "--evidence", "x"), exitDenied)
+		k.expect("worker decide", k.run(k.WRK, nil, "decide", id, "--option", "A"), exitBasis)
 		if k.version(id) != v || k.phase(id) != "needs_input" || k.resolution(id) != nil {
 			t.Error("事项不应变化")
 		}
@@ -105,8 +110,8 @@ func TestFlowDecisionAnswer(t *testing.T) {
 	k.step("ACT-DEC-06 只认第一次回答", func(t *testing.T) {
 		first := workItem("dec-6a")
 		askBy(first)
-		k.expect("先到", k.run(k.DEL, at("dec-s6", "direct"), "decide", first, "--option", "A", "--evidence", "先"), 0)
-		late := k.run(k.DEL, at("dec-s6", "direct"), "decide", first, "--option", "B", "--evidence", "x")
+		k.expect("先到", k.run(k.DEL, nil, "decide", first, "--option", "A"), 0)
+		late := k.run(k.DEL, nil, "decide", first, "--option", "B")
 		k.expect("后到", late, 6)
 		// 已有结果由 next 指向 ask.resolution，第一次回答原样保留。
 		if b := k.errBody(late); b["code"] != "conflict" || !strings.Contains(asString(b["next"]), "ask.resolution") {
@@ -122,7 +127,7 @@ func TestFlowDecisionAnswer(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				codes[i] = k.run(k.DEL, at("dec-s6", "direct"), "decide", race, "--option", opt, "--evidence", "并发"+opt).Code
+				codes[i] = k.run(k.DEL, nil, "decide", race, "--option", opt).Code
 			}()
 		}
 		wg.Wait()
@@ -154,24 +159,6 @@ func TestFlowDecisionAnswer(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-DEC-08 多人会话附原话的代答被拒", func(t *testing.T) {
-		id := workItem("dec-8")
-		askBy(id)
-		k.rejectedNotDirect("group decide", k.run(k.DEL, at("dec-g8", "group"), "decide", id, "--option", "A", "--evidence", "选 A"))
-		eq(t, "阶段", k.phase(id), "needs_input")
-		if k.resolution(id) != nil {
-			t.Error("决策不应生效")
-		}
-	})
-
-	k.step("ACT-DEC-09 凭授权单代答不看会话类型", func(t *testing.T) {
-		g := k.grant([]string{"decision.answer"}, "acc-work")
-		id := workItem("dec-9")
-		askBy(id)
-		k.expect("unknown + grant", k.run(k.DEL, at("", "unknown"), "decide", id, "--option", "A", "--grant", g), 0)
-		eq(t, "resolved_via", k.resolution(id)["resolved_via"], "grant")
-		eq(t, "Event 记的授权单", k.lastEvent(id, "decision.resolved").Grant, g)
-	})
 }
 
 func mapStrings(m map[string]any) []string {

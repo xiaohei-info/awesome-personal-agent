@@ -26,11 +26,22 @@ var bg = context.Background()
 var t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func human(p string, lvl authz.Level, via domain.Via) command.Trusted {
-	return command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: p, Via: via}, Level: lvl}
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: p, Via: via}, Level: lvl, Fresh: lvl == authz.LevelWeb}
 }
 
 func agent(p string, lvl authz.Level) command.Trusted {
-	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: lvl}
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1"}, Level: lvl, CredentialAgentID: "agent_" + p}
+}
+
+// setTier 以本人身份设 agent 的档位（3b 设置，测试里直接写策略）。
+func (e *env) setTier(t *testing.T, agent string, a policy.AgentAllowance) {
+	t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error { p.AgentTier.ByAgent[agent] = a; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 var (
@@ -77,7 +88,7 @@ func setup(t *testing.T) *env {
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"})
 }
 
 func (e *env) must(t *testing.T, id command.Identity, cmd string, in any) command.Result {
@@ -313,7 +324,7 @@ func TestInvalidWritesAreRefused(t *testing.T) {
 	}
 }
 
-// §14.3：observer 只能以 proposed 新建；接受建议、改他人事项各有门槛。
+// §14.3：observer 只能以 proposed 新建；接受建议是二档（档位未放开 23）；worker 只够得着自己的事项，delegate 改别人的事项是一档。
 func TestAuthorizationLevels(t *testing.T) {
 	e := setup(t)
 	if _, err := e.do(observer, "item.create", map[string]any{"kind": "task", "title": "s", "phase": "open"}); exit(err) != domain.ExitPermissionDenied {
@@ -330,21 +341,17 @@ func TestAuthorizationLevels(t *testing.T) {
 		t.Fatalf("observer update: %v", err)
 	}
 
-	// worker 不能自己接受建议（那是代答），本人可以。
+	// worker 不能自己接受建议（那是立项，二档），本人可以。
 	mine := e.create(t, worker, map[string]any{"title": "mine", "assignee": "wrk"})
-	if _, err := e.do(worker, "item.transition", map[string]any{"id": mine, "to": "open", "reason": "accept"}); exit(err) != domain.ExitPermissionDenied {
+	if _, err := e.do(worker, "item.transition", map[string]any{"id": mine, "to": "open", "reason": "accept"}); exit(err) != domain.ExitTierClosed {
 		t.Fatalf("worker accepting a suggestion: %v", err)
 	}
 	e.must(t, owner, "item.transition", map[string]any{"id": mine, "to": "open", "reason": "accept"})
-	// 对自己的事项 worker 可写，别人的不行；delegate 改别人的需要证据。
+	// 对自己的事项 worker 可写，别人的不行（钥匙范围外）；delegate 改别人的事项直接生效。
 	e.must(t, worker, "item.update", map[string]any{"id": mine, "summary": "s"})
 	other := e.create(t, owner, map[string]any{"phase": "open", "assignee": "someone"})
 	if _, err := e.do(worker, "item.update", map[string]any{"id": other, "summary": "s"}); exit(err) != domain.ExitPermissionDenied {
 		t.Fatalf("worker on others' item: %v", err)
-	}
-	b, _ := json.Marshal(map[string]any{"id": other, "summary": "s"})
-	if _, err := e.x.Do(bg, command.Request{Identity: delegate, Command: "item.update", Input: b, Owner: "owner"}); exit(err) != domain.ExitBasisRequired {
-		t.Fatalf("delegate without evidence: %v", err)
 	}
 	e.must(t, delegate, "item.update", map[string]any{"id": other, "summary": "s"})
 	// worker 不能把非 proposed 事项直接建出来，除非是给自己的。
@@ -354,17 +361,14 @@ func TestAuthorizationLevels(t *testing.T) {
 	e.verify(t)
 }
 
-// §14.7 / §6.14 第 5 条：写 assignee 与写 project 都校验名单，拒绝留痕。
-// §14.5：delegate 写自己绑定的事项是第一档（不要原话，Event 不带 on_behalf_of）；
-// 写其他事项、以非 proposed 新建是第二档（要本人原话加会话引用，缺一为 23，记 command.rejected，事项不变）。
+// §14.3 按状态变化定档：改事项、写进展、关联、以 proposed 新建是一档，任何事项都直接生效，事件依据记一档、不带 on_behalf_of；
+// 让事项成为承诺（以非 proposed 新建、离开 proposed）与离开 needs_input 是二档：档位未放开 23 并留痕、事项不变；
+// 放开（可按项目限定）后生效，依据记档位放开。
 func TestDelegateWritesFollowTiers(t *testing.T) {
 	e := setup(t)
-	a := e.create(t, owner, map[string]any{"title": "A", "phase": "open", "assignee": "dlg"}) // 绑定 delegate 的事项
-	b := e.create(t, owner, map[string]any{"title": "B", "phase": "open"})                    // 他人的事项
-	call := func(id command.Identity, ev, cmd string, in any) (command.Result, error) {
-		raw, _ := json.Marshal(in)
-		return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: raw, Owner: "owner", Evidence: ev})
-	}
+	p1, p2 := e.project(t, nil), e.project(t, nil)
+	a := e.create(t, owner, map[string]any{"title": "A", "phase": "open", "assignee": "dlg"})
+	b := e.create(t, owner, map[string]any{"title": "B", "phase": "open"})
 	event := func(r command.Result) domain.Event {
 		for _, ev := range e.events(t) {
 			if ev.Seq == r.Seqs[0] {
@@ -375,60 +379,65 @@ func TestDelegateWritesFollowTiers(t *testing.T) {
 		return domain.Event{}
 	}
 	wait := map[string]any{"kind": "external", "ref": "x"}
-	first := map[string]map[string]any{ // 第一档：绑定的事项，以 proposed 新建
+	for cmd, in := range map[string]map[string]any{
 		"item.create":     {"kind": "task", "title": "x", "phase": "proposed"},
-		"item.update":     {"id": a, "title": "A2"},
-		"item.transition": {"id": a, "to": "waiting", "waiting_on": wait, "reason": "r"},
-		"item.relate":     {"from": a, "to": b, "type": domain.RelRelates},
-	}
-	for cmd, in := range first {
-		r, err := call(delegate, "", cmd, in)
-		if err != nil {
-			t.Fatalf("%s on own work without evidence: %v", cmd, err)
-		}
-		if ev := event(r); ev.Actor.Principal != "dlg" || ev.Actor.OnBehalfOf != "" {
-			t.Fatalf("%s: tier one acts as the agent itself, got %+v", cmd, ev.Actor)
-		}
-	}
-	rejectedBefore := rejections(e.events(t))
-	second := map[string]map[string]any{ // 第二档：他人的事项，其他阶段新建
-		"item.create":     {"kind": "task", "title": "y", "phase": "open"},
 		"item.update":     {"id": b, "title": "B2"},
 		"item.transition": {"id": b, "to": "waiting", "waiting_on": wait, "reason": "r"},
 		"item.relate":     {"from": b, "to": a, "type": domain.RelRelates},
-	}
-	noSession := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
-	n := 0
-	for cmd, in := range second {
-		for _, c := range []struct {
-			id command.Identity
-			ev string
-		}{{delegate, ""}, {delegate, "  "}, {noSession, "owner said so"}} {
-			if _, err := call(c.id, c.ev, cmd, in); exit(err) != domain.ExitBasisRequired {
-				t.Fatalf("%s without full basis %q: %v", cmd, c.ev, err)
-			}
-			n++
-		}
-		r, err := call(delegate, "owner: go ahead", cmd, in)
+	} {
+		r, err := e.do(delegate, cmd, in)
 		if err != nil {
-			t.Fatalf("%s with evidence and session: %v", cmd, err)
+			t.Fatalf("%s: tier one: %v", cmd, err)
 		}
-		if ev := event(r); ev.Evidence != "owner: go ahead" || ev.Actor.Principal != "dlg" || ev.Actor.OnBehalfOf != "owner" || ev.Actor.Session != "s1" {
-			t.Fatalf("%s event lost evidence, session or on_behalf_of: %+v", cmd, ev)
+		if ev := event(r); ev.Actor.Principal != "dlg" || ev.Actor.OnBehalfOf != "" || ev.Basis == nil || ev.Basis.Via != domain.BasisOrganize {
+			t.Fatalf("%s: tier one acts as the agent itself, got %+v basis=%+v", cmd, ev.Actor, ev.Basis)
 		}
 	}
-	if got := rejections(e.events(t)) - rejectedBefore; got != n {
-		t.Fatalf("every 23 must record command.rejected: %d of %d", got, n)
+	prop := e.create(t, owner, map[string]any{"title": "P", "project": p1})
+	asked := e.create(t, owner, map[string]any{"title": "Q", "phase": "open", "project": p1})
+	e.must(t, owner, "item.update", map[string]any{"id": asked, "ask": map[string]any{"question": "q?", "free_text": true}})
+	e.must(t, owner, "item.transition", map[string]any{"id": asked, "to": "needs_input", "reason": "ask"})
+	second := []struct {
+		cmd string
+		in  map[string]any
+	}{
+		{"item.create", map[string]any{"kind": "task", "title": "y", "phase": "open", "project": p1}},
+		{"item.transition", map[string]any{"id": prop, "to": "open", "reason": "accept"}},
+		{"item.transition", map[string]any{"id": asked, "to": "open", "reason": "never mind"}},
 	}
-	if e.get(t, b).Title != "B2" {
-		t.Fatal("authorized write must take effect")
+	before := rejections(e.events(t))
+	for _, c := range second {
+		if _, err := e.do(delegate, c.cmd, c.in); exit(err) != domain.ExitTierClosed {
+			t.Fatalf("%s %v: want 23, got %v", c.cmd, c.in, err)
+		}
 	}
-	// 本人与 worker 不受影响：不带证据照常写。
-	if _, err := call(worker, "", "item.update", map[string]any{"id": a, "title": "A1"}); exit(err) != domain.ExitPermissionDenied {
+	if got := rejections(e.events(t)) - before; got != len(second) {
+		t.Fatalf("every 23 must record command.rejected: %d of %d", got, len(second))
+	}
+	if e.get(t, prop).Phase != domain.PhaseProposed || e.get(t, asked).Phase != domain.PhaseNeedsInput {
+		t.Fatal("refused writes must not take effect")
+	}
+	// 只在 p2 放开：p1 上仍是 23。
+	e.setTier(t, "agent_dlg", policy.AgentAllowance{Tier: policy.AllowDecide, Projects: []string{p2}})
+	if _, err := e.do(delegate, second[1].cmd, second[1].in); exit(err) != domain.ExitTierClosed {
+		t.Fatalf("outside the allowed projects: %v", err)
+	}
+	e.setTier(t, "agent_dlg", policy.AgentAllowance{Tier: policy.AllowDecide, Projects: []string{p1}})
+	for _, c := range second {
+		r, err := e.do(delegate, c.cmd, c.in)
+		if err != nil {
+			t.Fatalf("%s with decide tier: %v", c.cmd, err)
+		}
+		if ev := event(r); ev.Basis == nil || ev.Basis.Via != domain.BasisAllowance || ev.Actor.OnBehalfOf != "" {
+			t.Fatalf("%s: basis %+v actor %+v", c.cmd, ev.Basis, ev.Actor)
+		}
+	}
+	if e.get(t, prop).Phase != domain.PhaseOpen || e.get(t, asked).Phase != domain.PhaseOpen {
+		t.Fatal("allowed writes must take effect")
+	}
+	// worker 仍只够得着自己的事项。
+	if _, err := e.do(worker, "item.update", map[string]any{"id": a, "title": "A1"}); exit(err) != domain.ExitPermissionDenied {
 		t.Fatalf("worker on others' item stays denied: %v", err)
-	}
-	if _, err := call(owner, "", "item.update", second["item.update"]); err != nil {
-		t.Fatalf("owner update without evidence: %v", err)
 	}
 }
 
@@ -990,7 +999,7 @@ func TestRelateMaterial(t *testing.T) {
 	e.verify(t)
 }
 
-// §6.4 回退：撤销 agent 变更写反向命令，只在 Web；不覆盖后来的改动。
+// §6.4 回退：撤销 agent 变更写反向命令，是 3a（档位只整理的 delegate 得 23，worker 在钥匙范围外）；不覆盖后来的改动。
 func TestRevertAgentChange(t *testing.T) {
 	e := setup(t)
 	id := e.create(t, owner, map[string]any{"phase": "open", "title": "orig", "assignee": "wrk"})
@@ -1001,11 +1010,11 @@ func TestRevertAgentChange(t *testing.T) {
 		t.Fatalf("worker revert: %v", err)
 	}
 	before := rejections(e.events(t))
-	if _, err := e.do(delegate, "item.revert", map[string]any{"id": id, "event": seq}); exit(err) != domain.ExitWebOnly {
-		t.Fatalf("delegate revert must be web-only: %v", err)
+	if _, err := e.do(delegate, "item.revert", map[string]any{"id": id, "event": seq}); exit(err) != domain.ExitTierClosed {
+		t.Fatalf("delegate revert is 3a: %v", err)
 	}
 	if rejections(e.events(t)) != before+1 {
-		t.Fatal("web-only rejection must be recorded")
+		t.Fatal("tier rejection must be recorded")
 	}
 	r := e.must(t, owner, "item.revert", map[string]any{"id": id, "event": seq})
 	if it := e.get(t, id); it.Title != "orig" || it.Version != r.Version {
@@ -1114,38 +1123,6 @@ func TestSchemaValueTypes(t *testing.T) {
 	}
 	if (*Kinds)(nil).check("x", nil) != nil {
 		t.Fatal("nil registry accepts everything")
-	}
-}
-
-// §14.4：离开 needs_input 是决定，内核维护的风险类别与初筛状态必须进入代答判定。
-func TestLeavingNeedsInputHonoursKernelAskState(t *testing.T) {
-	e := setup(t)
-	mk := func(state domain.AskKernelState) string {
-		id := e.create(t, owner, map[string]any{"phase": "open", "ask": map[string]any{"question": "ok?", "free_text": true}})
-		e.must(t, owner, "item.transition", map[string]any{"id": id, "to": "needs_input", "reason": "r"})
-		it := e.get(t, id)
-		it.Ask.AskKernelState = state // 这些字段只有内核能写，测试直接落到投影
-		if err := e.st.Update(bg, func(tx *store.Tx) error { return save(tx, it) }); err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-	leave := func(id string) error {
-		_, err := e.do(delegate, "item.transition", map[string]any{"id": id, "to": "open", "reason": "answered"})
-		return err
-	}
-	if err := leave(mk(domain.AskKernelState{ScreeningPending: true})); exit(err) != domain.ExitScreeningPending {
-		t.Fatalf("screening pending: %v", err)
-	}
-	if err := leave(mk(domain.AskKernelState{RiskClass: policy.CategoryFunds})); exit(err) != domain.ExitWebOnly {
-		t.Fatalf("web_only risk class: %v", err)
-	}
-	plain := mk(domain.AskKernelState{RiskClass: "none"})
-	if err := leave(plain); err != nil {
-		t.Fatalf("ordinary decision with evidence: %v", err)
-	}
-	if e.get(t, plain).Phase != domain.PhaseOpen {
-		t.Fatal("allowed transition not applied")
 	}
 }
 

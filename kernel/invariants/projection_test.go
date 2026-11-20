@@ -19,7 +19,7 @@ func TestProjectionRebuildFromEventsMatchesAllFields(t *testing.T) {
 	var p struct{ ID string }
 	_ = json.Unmarshal(e.must(t, owner, "project.create", map[string]any{"name": "P", "intro": "i", "tags": []string{"a"}}).Value, &p)
 	e.must(t, owner, "project.update", map[string]any{"id": p.ID, "name": "P2", "status": "paused", "capture": true})
-	e.must(t, delegate, "project.repo.add", map[string]any{"id": p.ID, "remote": "https://git.example/x/app.git"})
+	e.must(t, owner, "project.repo.add", map[string]any{"id": p.ID, "remote": "https://git.example/x/app.git"})
 	e.must(t, owner, "project.checkout.set", map[string]any{"id": p.ID, "remote": "https://git.example/x/app.git", "host": "h1", "path": "/tmp/app"})
 	e.must(t, owner, "project.capture_outbound.set", map[string]any{"id": p.ID, "value": "excerpt"})
 	e.must(t, owner, "project.allowed_executors.set", map[string]any{"id": p.ID, "executors": []string{"wrk"}})

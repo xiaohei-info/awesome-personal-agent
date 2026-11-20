@@ -69,7 +69,8 @@ func TestFlowRawRetention(t *testing.T) {
 		if n := len(k.audit("source.updated", "src_acc_raw_ex")); n != before+1 {
 			t.Errorf("设置应记一条 Event（source.updated）：%d → %d", before, n)
 		}
-		for name, tok := range map[string]string{"DEL": k.DEL, "OBS": k.OBS, "WRK": k.WRK} {
+		// 保留期是 3a（2026-11-20）：档位未放开的 delegate（DELO）得 23，observer 与 worker 在范围外，都是 403。
+		for name, tok := range map[string]string{"DELO": k.DELO, "OBS": k.OBS, "WRK": k.WRK} {
 			if r := k.APIRaw("PUT", "/v1/settings/sources/src_acc_raw_ex/content-retention", `{"days": 7}`, tok); r.Code != 403 {
 				t.Errorf("%s 设保留天数应为 403: %d %s", name, r.Code, r.Body)
 			}

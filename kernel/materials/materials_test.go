@@ -21,11 +21,33 @@ import (
 var bg = context.Background()
 
 func agent(p string, lvl authz.Level) command.Trusted {
-	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: lvl}
+	return command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: p, Via: domain.ViaCLI, Session: "s1"}, Level: lvl, CredentialAgentID: "agent_" + p}
+}
+
+// setTier 以本人身份设 agent 的档位（3b 设置，测试里直接写策略）。
+func (e *env) setTier(t *testing.T, agent, tier string) {
+	t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent[agent] = policy.AgentAllowance{Tier: tier}
+			return nil
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// pending 由本人建一份材料，再由档位只整理的 worker 改一次：改已有材料留待确认，返回那条待确认修订。
+func (e *env) pending(t *testing.T, kind string) (base, rev Result) {
+	t.Helper()
+	base = e.must(t, owner, "", "material.commit", commitIn{Project: e.prj, Kind: kind, Title: "方案", Content: "v1", Reason: "初版"})
+	rev = e.must(t, worker, "", "material.commit", commitIn{ID: base.Material, Content: "v2", Reason: "改", BasedOn: base.Revision})
+	return base, rev
 }
 
 var (
-	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	worker   = agent("wrk", authz.LevelWorker)
 	delegate = agent("dlg", authz.LevelDelegate)
 	observer = agent("obs", authz.LevelObserver)
@@ -72,7 +94,7 @@ func setup(t *testing.T) *env {
 
 func (e *env) do(id command.Identity, evidence, cmd string, in any) (Result, error) {
 	b, _ := json.Marshal(in)
-	r, err := e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: evidence, WebURL: "http://web/m"})
+	r, err := e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", WebURL: "http://web/m"})
 	var out Result
 	if err == nil {
 		json.Unmarshal(r.Value, &out)
@@ -154,15 +176,18 @@ func TestDirectKindBecomesCurrentWithAgentActor(t *testing.T) {
 	}
 }
 
-// ACT-MAT-02：方案类进入确认，不成为 current。
+// ACT-MAT-02：新建材料直接生效；档位只整理的 Agent 改已有材料进入确认，不成为 current。
 func TestProposedKindQueuesForConfirmation(t *testing.T) {
 	e := setup(t)
-	r := e.must(t, worker, "", "material.commit", commitIn{Project: e.prj, Kind: "design", Title: "方案", Content: "v1", Reason: "初版"})
-	if r.State != StateProposed {
-		t.Fatalf("state %s", r.State)
+	first := e.must(t, worker, "", "material.commit", commitIn{Project: e.prj, Kind: "design", Title: "方案", Content: "v1", Reason: "初版"})
+	if first.State != StateCurrent {
+		t.Fatalf("new material: state %s", first.State)
 	}
-	m, _ := e.show(t, r.Material, r.Revision)
-	if m.CurrentRev != "" {
+	r := e.must(t, worker, "", "material.commit", commitIn{ID: first.Material, Content: "v2", Reason: "改", BasedOn: first.Revision})
+	if r.State != StateProposed {
+		t.Fatalf("edit: state %s", r.State)
+	}
+	if m, _ := e.show(t, r.Material, r.Revision); m.CurrentRev != first.Revision {
 		t.Fatal("proposed revision became current")
 	}
 	var p []Pending
@@ -170,18 +195,20 @@ func TestProposedKindQueuesForConfirmation(t *testing.T) {
 	if len(p) != 1 || p[0].Revision.ID != r.Revision || p[0].BaselineChanged {
 		t.Fatalf("pending %+v", p)
 	}
-	es := e.events(t, r.Material)
-	if !hasEvent(es, domain.EvMaterialRevisionProposed) || hasEvent(es, domain.EvMaterialRevised) {
-		t.Fatalf("events %+v", es)
+	if !hasEvent(e.events(t, r.Material), domain.EvMaterialRevisionProposed) {
+		t.Fatal("no proposed event")
+	}
+	// 放开二档后，同一个 Agent 的改动直接生效。
+	e.setTier(t, "agent_wrk", policy.AllowDecide)
+	if d := e.must(t, worker, "", "material.commit", commitIn{ID: first.Material, Content: "v3", Reason: "再改", BasedOn: first.Revision}); d.State != StateCurrent {
+		t.Fatalf("edit with decide tier: state %s", d.State)
 	}
 }
 
 // ACT-MAT-03：确认的成为 current 且旧修订 superseded；拒绝的不生效且内容保留。
 func TestConfirmSupersedesPreviousAndRejectKeepsContent(t *testing.T) {
 	e := setup(t)
-	a := e.must(t, worker, "", "material.commit", commitIn{Project: e.prj, Kind: "design", Title: "方案", Content: "v1", Reason: "初版"})
-	e.must(t, owner, "", "revision.confirm", confirmIn{ID: a.Revision})
-	b := e.must(t, worker, "", "material.commit", commitIn{ID: a.Material, Content: "v2", Reason: "改", BasedOn: a.Revision})
+	a, b := e.pending(t, "design")
 	e.must(t, owner, "", "revision.confirm", confirmIn{ID: b.Revision})
 	m, cur := e.show(t, a.Material, "")
 	if m.CurrentRev != b.Revision || cur.Content != "v2" {
@@ -210,6 +237,7 @@ func TestConfirmSupersedesPreviousAndRejectKeepsContent(t *testing.T) {
 func TestRevisionsAreAppendOnlyWithProvenanceAndDiff(t *testing.T) {
 	e := setup(t)
 	r1 := e.newNote(t, "a\nb\nc")
+	e.setTier(t, "agent_wrk", policy.AllowDecide)
 	r2 := e.must(t, worker, "", "material.commit", commitIn{ID: r1.Material, Content: "a\nB\nc", Reason: "二", BasedOn: r1.Revision})
 	r3 := e.must(t, worker, "", "material.commit", commitIn{ID: r1.Material, Content: "a\nB\nc\nd", Reason: "三", BasedOn: r2.Revision})
 	var h []Revision
@@ -238,6 +266,7 @@ func TestRevisionsAreAppendOnlyWithProvenanceAndDiff(t *testing.T) {
 func TestDirectBaselineMismatchConflicts(t *testing.T) {
 	e := setup(t)
 	r1 := e.newNote(t, "v1")
+	e.setTier(t, "agent_wrk", policy.AllowDecide)
 	e.must(t, worker, "", "material.commit", commitIn{ID: r1.Material, Content: "v2", Reason: "一", BasedOn: r1.Revision})
 	_, err := e.do(worker, "", "material.commit", commitIn{ID: r1.Material, Content: "v2'", Reason: "二", BasedOn: r1.Revision})
 	code(t, err, domain.CodeConflict)
@@ -259,7 +288,6 @@ func TestDirectBaselineMismatchConflicts(t *testing.T) {
 func TestProposedStaleBaselineNeedsExplicitChoice(t *testing.T) {
 	e := setup(t)
 	a := e.must(t, worker, "", "material.commit", commitIn{Project: e.prj, Kind: "design", Title: "方案", Content: "v1", Reason: "初版"})
-	e.must(t, owner, "", "revision.confirm", confirmIn{ID: a.Revision})
 	stale := e.must(t, worker, "", "material.commit", commitIn{ID: a.Material, Content: "mine", Reason: "旧基线", BasedOn: a.Revision})
 	fresh := e.must(t, worker, "", "material.commit", commitIn{ID: a.Material, Content: "theirs", Reason: "另一份", BasedOn: a.Revision})
 	e.must(t, owner, "", "revision.confirm", confirmIn{ID: fresh.Revision}) // 当前变为 fresh，stale 的基线过期
@@ -292,14 +320,15 @@ func TestProposedStaleBaselineNeedsExplicitChoice(t *testing.T) {
 	}
 }
 
-// ACT-MAT-07：回退只在 Web；回退新增一条内容等于旧快照的修订，历史不改。
+// ACT-MAT-07：回退是 3a（档位只整理的 delegate 得 23，worker 在钥匙范围外）；回退新增一条内容等于旧快照的修订，历史不改。
 func TestRevertIsWebOnlyAndAppendsRevision(t *testing.T) {
 	e := setup(t)
 	r1 := e.newNote(t, "原文")
+	e.setTier(t, "agent_wrk", policy.AllowDecide)
 	r2 := e.must(t, worker, "", "material.commit", commitIn{ID: r1.Material, Content: "被 agent 改坏", Reason: "改", BasedOn: r1.Revision})
 	in := revertIn{ID: r1.Material, To: r1.Revision, Reason: "回退"}
-	_, err := e.do(delegate, "本人原话", "material.revert", in)
-	code(t, err, domain.CodeWebOnly)
+	_, err := e.do(delegate, "", "material.revert", in)
+	code(t, err, domain.CodeTierClosed)
 	_, err = e.do(worker, "", "material.revert", in)
 	code(t, err, domain.CodePermissionDenied)
 	if _, cur := e.show(t, r1.Material, ""); cur.ID != r2.Revision {
@@ -314,24 +343,6 @@ func TestRevertIsWebOnlyAndAppendsRevision(t *testing.T) {
 	}
 	if _, err := e.do(owner, "", "material.revert", revertIn{ID: r1.Material, To: rv.Revision, Reason: "x"}); err == nil {
 		t.Fatal("reverting to the current revision must fail")
-	}
-}
-
-// ACT-MAT-11：写入策略在 Web 调整后立即生效：纪要改为 proposed 后进入确认流。
-func TestWritePolicyChangeTakesEffect(t *testing.T) {
-	e := setup(t)
-	err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "纪要也要确认", func(p *policy.Policy) error {
-			p.MaterialWrite.Kinds["minutes"] = policy.WriteProposed
-			return nil
-		})
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r := e.newNote(t, "x"); r.State != StateProposed {
-		t.Fatalf("state %s", r.State)
 	}
 }
 
@@ -350,20 +361,19 @@ func TestObserverCannotCommit(t *testing.T) {
 	}
 }
 
-// flow-agents-md / ACT-AGM-01：规范提交后是 proposed，agent 不能使其生效；Web 确认后生效并记 guideline.activated。
+// flow-agents-md / ACT-AGM-01：规范恒留待确认（新建也是）；规范生效是 3a：档位未放开的 delegate 确认或拒绝得 23，
+// worker 在钥匙范围外；Web 确认后生效并记 guideline.activated；放开 3a 的 Agent 也能确认。
 func TestGuidelineActivationIsWebOnly(t *testing.T) {
 	e := setup(t)
-	r := e.must(t, delegate, "本人原话", "material.commit", commitIn{Project: e.prj, Kind: KindGuideline, Title: "规范", Content: "## 处理规则\n先问", Reason: "初版"})
+	r := e.must(t, delegate, "", "material.commit", commitIn{Project: e.prj, Kind: KindGuideline, Title: "规范", Content: "## 处理规则\n先问", Reason: "初版"})
 	if r.State != StateProposed {
 		t.Fatalf("state %s", r.State)
 	}
-	_, err := e.do(delegate, "本人原话", "revision.confirm", confirmIn{ID: r.Revision})
-	code(t, err, domain.CodeWebOnly)
-	if de := err.(*domain.Error); de.ExitCode() != domain.ExitWebOnly {
-		t.Fatalf("exit %d", de.ExitCode())
-	}
-	_, err = e.do(delegate, "本人原话", "revision.reject", rejectIn{ID: r.Revision})
-	code(t, err, domain.CodeWebOnly)
+	_, err := e.do(delegate, "", "revision.confirm", confirmIn{ID: r.Revision})
+	code(t, err, domain.CodeTierClosed)
+	e.setTier(t, "agent_dlg", policy.AllowDecide) // 二档放开也不够
+	_, err = e.do(delegate, "", "revision.reject", rejectIn{ID: r.Revision})
+	code(t, err, domain.CodeTierClosed)
 	_, err = e.do(worker, "", "revision.confirm", confirmIn{ID: r.Revision})
 	code(t, err, domain.CodePermissionDenied)
 	es := e.events(t, r.Material)
@@ -380,6 +390,12 @@ func TestGuidelineActivationIsWebOnly(t *testing.T) {
 	if !hasEvent(e.events(t, r.Material), domain.EvGuidelineActivated) {
 		t.Fatal("no guideline.activated event")
 	}
+	e.setTier(t, "agent_dlg", policy.AllowRules)
+	r2 := e.must(t, delegate, "", "material.commit", commitIn{ID: r.Material, Content: "## 处理规则\n先问再做", Reason: "改", BasedOn: r.Revision})
+	if r2.State != StateProposed {
+		t.Fatalf("guideline edit: state %s", r2.State)
+	}
+	e.must(t, delegate, "", "revision.confirm", confirmIn{ID: r2.Revision})
 }
 
 func (e *env) show2(t *testing.T, id string) (Material, error) {
@@ -389,35 +405,14 @@ func (e *env) show2(t *testing.T, id string) (Material, error) {
 	return m, err
 }
 
-// 规范的写入策略不能被策略配置放宽成 direct；非规范 kind 的 delegate 凭本人原话可确认。
-func TestGuidelineStaysProposedEvenIfPolicyIsDirect(t *testing.T) {
-	e := setup(t)
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "放宽", func(p *policy.Policy) error {
-			p.MaterialWrite.Default = policy.WriteDirect
-			p.MaterialWrite.Kinds[KindGuideline], p.MaterialWrite.Kinds["design"] = policy.WriteDirect, policy.WriteDirect
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	g := e.must(t, worker, "", "material.commit", commitIn{Kind: KindGuideline, Title: "全局规范", Content: "x", Reason: "r"})
-	if g.State != StateProposed {
-		t.Fatalf("guideline state %s", g.State)
-	}
-	d := e.must(t, worker, "", "material.commit", commitIn{Project: e.prj, Kind: "design", Title: "方案", Content: "x", Reason: "r"})
-	if d.State != StateCurrent {
-		t.Fatalf("design state %s (policy is direct)", d.State)
-	}
-}
-
+// 确认普通材料的修订是二档：档位只整理的 delegate 得 23，放开后可以确认。
 func TestDelegateConfirmsNonGuidelineWithEvidenceOnly(t *testing.T) {
 	e := setup(t)
-	r := e.must(t, worker, "", "material.commit", commitIn{Project: e.prj, Kind: "requirement", Title: "需求", Content: "x", Reason: "r"})
+	_, r := e.pending(t, "requirement")
 	_, err := e.do(delegate, "", "revision.confirm", confirmIn{ID: r.Revision})
-	code(t, err, domain.CodeBasisRequired)
-	e.must(t, delegate, "本人原话：同意", "revision.confirm", confirmIn{ID: r.Revision})
+	code(t, err, domain.CodeTierClosed)
+	e.setTier(t, "agent_dlg", policy.AllowDecide)
+	e.must(t, delegate, "", "revision.confirm", confirmIn{ID: r.Revision})
 	if m, _ := e.show(t, r.Material, ""); m.CurrentRev != r.Revision {
 		t.Fatal("not confirmed")
 	}
@@ -471,17 +466,8 @@ func TestCommitValidation(t *testing.T) {
 	if err := RegisterWith(e2.x, retroPack{}); err != nil {
 		t.Fatal(err)
 	}
-	// 能力包声明的 kind 与默认写入策略：Web 总默认是 proposed，这里用 direct 的总默认验证包声明的 proposed 生效。
-	if err := e2.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "material_write", func(p *policy.Policy) error {
-			p.MaterialWrite.Default = policy.WriteDirect
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if r, err := e2.do(worker, "", "material.commit", commitIn{Project: e2.prj, Kind: "retro", Title: "t", Content: "c", Reason: "r"}); err != nil || r.State != StateProposed {
+	// 能力包声明的 kind：新建材料直接生效（§12.4）。
+	if r, err := e2.do(worker, "", "material.commit", commitIn{Project: e2.prj, Kind: "retro", Title: "t", Content: "c", Reason: "r"}); err != nil || r.State != StateCurrent {
 		t.Errorf("extended kind: state %q err %v", r.State, err)
 	}
 }
@@ -572,7 +558,7 @@ func TestCommitIdempotentReplay(t *testing.T) {
 // 确认、拒绝与回退的失败语义：未知或已处理的修订、非法取舍、跨材料引用、proposed 不能当回退目标。
 func TestRevisionCommandFailures(t *testing.T) {
 	e := setup(t)
-	a := e.must(t, worker, "", "material.commit", commitIn{Project: e.prj, Kind: "design", Title: "方案", Content: "v1", Reason: "r"})
+	_, a := e.pending(t, "design")
 	other := e.newNote(t, "别的材料")
 	for name, c := range map[string]struct {
 		cmd string

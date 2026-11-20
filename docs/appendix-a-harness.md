@@ -25,9 +25,9 @@
 | 压缩前保存 | 同候选捕获 | 只保存，不阻止压缩 |
 | 会话唤醒 | 领取 `class: wake` 的投递，用插件自己的 token 经 `POST /runs/{id}/credential` 把运行 id 换成运行凭据，调 harness 的唤醒入口，并把 `APA_RUN` 与运行凭据透传到该回合的 CLI 调用（主文档 §13.6） | 网关插件才有 |
 | 执行者登记与委派记录 | harness 用自己的机制派出；插件随 `apa delegate --executor` 登记执行者，执行者 id 与显示名由插件按 harness、`mech`、机器与关键变体规范化生成，不由模型命名。委派记录以调用后自动捕获为主：对本插件定义了句柄形状的派出工具，参数里含本会话委派的子事项 id 时，从参数与结果取会话 id、目录、机器组装句柄，异步 `apa dispatch add`（给已有会话发消息时带 `continues`），带幂等键，失败与补发同回执捕获；认不出的派法由模型经包装 `apa dispatch add` 的工具补记；续接失败时 `apa dispatch update --state lost`（主文档 §6.17） | 插件不持有"执行者 id → 调用"的表。`harness` 经会话身份头部带上，`host` 由插件填（原生子 agent 取本机主机名，远端 agent 取 harness 配置里的机器名），都不让模型填。句柄形状由插件定义，首个键 `mech` 为方式名，写入前校验；读回时只对本 harness 写入、形状校验通过的记录给出续接建议，只映射到本 harness 自己的工具，参数逐项按形状校验，不接受自由命令；其余标"仅供参考"。句柄不放密钥、token、提示词正文与环境变量 |
-| 会话身份透传 | 让 CLI 调用带上 `APA_SESSION`、`APA_HARNESS` 和 `APA_SESSION_KIND`，或把 CLI 包成原生工具 | 都不可用时操作者只到 token 粒度；本人原话依据要求会话引用和私聊会话，此时只能用授权单或到 Web 处理 |
-| 会话类型 | `APA_SESSION_KIND`（HTTP 头 `X-APA-Session-Kind`）：`direct`、`group`、`unknown` | 只有本人与 agent 的会话报 `direct`；多人会话，或本人之外的人也能发言的会话报 `group`；判断不了报 `unknown`。终端里的单人 harness 固定报 `direct`。不报等同 `unknown`，凭原话的代答被拒（主文档 §14.5）。插件按会话的实际情况取值，不让模型填写 |
-| 原生工具的依据参数 | 把 CLI 包成原生工具时，代答、接受、丢弃和改事项类工具带可选的 `evidence`、`grant`，原样交给 `--evidence`、`--grant` | 回执、提议、提问、委派、委派记录、声明类工具不带；工具描述写明本人原话只能来自本回合，不能改写或编造 |
+| 会话身份透传 | 让 CLI 调用带上 `APA_SESSION`、`APA_HARNESS`，或把 CLI 包成原生工具 | 都不可用时操作者只到 token 粒度；两者只用于审计，不参与权限判定（主文档 §14.3）。~~`APA_SESSION_KIND`；本人原话依据要求会话引用和私聊会话，此时只能用授权单或到 Web 处理~~ **已取消（2026-11-20）** |
+| ~~会话类型~~ | ~~`APA_SESSION_KIND`（HTTP 头 `X-APA-Session-Kind`）：`direct`、`group`、`unknown`~~ | **已取消（2026-11-20）**：会话类型不再参与判定（主文档 §14.3、决定 84），插件不再上报，内核收到也忽略。原条款：~~只有本人与 agent 的会话报 `direct`；多人会话，或本人之外的人也能发言的会话报 `group`；判断不了报 `unknown`。终端里的单人 harness 固定报 `direct`。不报等同 `unknown`，凭原话的代答被拒（主文档 §14.5）。插件按会话的实际情况取值，不让模型填写~~ |
+| ~~原生工具的依据参数~~ | **已取消（2026-11-20）**：工具不再带 `evidence`、`grant`，代答、接受、丢弃与改事项类工具按 Agent 的档位判定；退出码 23 时把卡片链接交给本人 | ~~回执、提议、提问、委派、委派记录、声明类工具不带；工具描述写明本人原话只能来自本回合，不能改写或编造~~ |
 | 自检 | 声明里的 `selfcheck.command`（A.2），由 `apa doctor` 在 APA 主机上执行 | 只读，不超过 5 秒。stdout 是一份 JSON：`plugin_version`、`hooks[]`（能力名与是否已安装）、`reports_session_kind`、`overlaps[]`（harness 一侧与 APA 重复的东西，每项 `kind` 为 `injection` 或 `schedule`，另有 `name`、`detail`）。只盘点，不改 harness 配置；未声明时 `apa doctor` 跳过这一项（主文档 §15.5） |
 
 **回执与捕获失败。** 对模型不可见不等于静默。两个插件的每次失败都写插件本地日志（命令、事项 id、退出码、原因，不写凭据和对话正文）。内核可达但拒绝时，内核已记入健康视图（主文档 §15.2），插件只记日志、不重发。内核不可达时，插件保留这次请求和幂等键，在内核恢复后的下一次钩子补发一次；补发被拒绝时按前一种情况处理。
@@ -144,20 +144,20 @@ Hermes 结构化输出的末行是 `result` 事件，只带 `session_id` 和 `ex
 | MEAS-HERMES-COMPACT | 成立 | 命题：没有通用的压缩前入口。钩子清单里与压缩相关的只有 `post_compaction`（压缩提交后的观察者）和 `pre_auxiliary_call`（所有辅助模型调用共用，用 `aux_task` 区分，每次尝试各触发一次，不是压缩专用，也不保证压缩前整体只触发一次）。压缩前保存按设计跳过。v0.11.0+52141 |
 | MEAS-HERMES-TOKEN | 有条件成立 | 命题：`terminal` 子进程保留 `APA_TOKEN`。条件：以客户端环境带 `APA_TOKEN`、`APA_RUN` 启动 `hermes chat -t terminal`，模型在终端里读到二者均已设置；这是实测构建上一次性运行的结果，没有区分进程内执行与共享网关继承（共享网关会留着拉起它的客户端的变量，见上，因此不能证明按运行隔离的凭据到得了终端）。v0.23.0 及以后按运行传值走 `terminal.client_env_passthrough` 与 `APA_RUN_CONTEXT`，未实测。构建与版本号说明同 MEAS-ALL-CRED |
 | MEAS-HOST-CTX | 待实测 | 命题：v0.23.0 及以后，一次性命令的工具跑在共享网关里时，`APA_RUN_CONTEXT` 经 `terminal.client_env_passthrough` 到达插件工具与 `terminal` 子进程，且不同运行互不串值。已读源码确认，未在真实运行中验证。由 v0.2.0 本机升级验证清单 L9（第三档运行形态）证实（主文档 §20.4、§21.3） |
-| SPIKE-SESSION-KIND | 开发部分已定（取法如下）；真实 harness 上的证实由 L9 承接 | 命题：插件能可靠取得会话类型。取法按 Hermes 源码（`gateway/session_context.py`、`gateway/session.py`）确定：网关为每个回合绑定 `HERMES_SESSION_PLATFORM`、`HERMES_SESSION_SOURCE`（CLI、TUI 绑这一项）、`HERMES_SESSION_CHAT_TYPE`（`dm`、`group`、`channel`、`thread`）和 `HERMES_SESSION_USER_ID`，插件经 `get_session_env` 读取，不经模型。规则（`plugins/hermes/tools/run_context.py:session_kind`，所有发出 `apa` 的插件共用）：平台与来源都为空、`cli`、`tui` 或 `local` 的终端会话固定报 `direct`；网关会话的 `chat_type` 为 `dm` 且有发送者时报 `direct`，为 `group`、`channel`、`thread` 时报 `group`；`api_server`、`webhook` 等非聊天入口、`dm` 却没有发送者、类型缺失或不认识、Hermes 的会话模块读不到或读取抛错，一律报 `unknown`。不继承网关进程环境里已有的 `APA_SESSION_KIND`；唤醒回合用运行凭据，不带会话类型。工具 schema 没有会话类型参数。开发验收用 `STUB_HARNESS` 与会话来源替身验证上报（`plugins/hermes/tests/tools/test_tools.py`、`tests/core/test_core.py`、`tests/wake/test_wake.py`），内核一侧见 `tests/contract/authz/session_kind_test.go`。仍待真实 harness 证实：Telegram 观察模式、Slack 共享话题这类"类型是 `dm` 或频道但本人之外的人也能发言"的共享会话是否都被标成 `group`（源码里有 `shared_session` 标记，但没有对应的 `HERMES_SESSION_*` 变量），以及一个允许多个发送者的私聊是否都是本人；L9 在私聊与多人会话各发起一次凭原话的代答，私聊被接受、多人会话被拒（退出码 23）。证实前如发现共享会话被报成 `direct`，插件改为对该平台报 `unknown`，内核不变 |
-| SPIKE-SESSION-KIND-OWNCHAT | 待实测 | 命题：Hermes 自带的一对一聊天界面（宿主的 Bot 聊天入口）上报的平台、来源与聊天类型能与多人会话可靠区分。判定顺序见下文"聊天里处置"：多人聊天类型永远先判 `group`；这类界面的平台或来源若不在"只有本人的入口"名单里、聊天类型又不是 `dm`，会落到 `unknown`，凭原话的代答会被拒。取值由 v0.2.0 本机升级验证清单 L17 实测后写回本行（主文档 §20.4、§21.3）；规则的改法见下文"聊天里处置" |
+| SPIKE-SESSION-KIND | **已取消（2026-11-20）**：会话类型不再参与判定，不再需要证实。原结论：开发部分已定（取法如下）；真实 harness 上的证实由 L9 承接 | 命题：插件能可靠取得会话类型。取法按 Hermes 源码（`gateway/session_context.py`、`gateway/session.py`）确定：网关为每个回合绑定 `HERMES_SESSION_PLATFORM`、`HERMES_SESSION_SOURCE`（CLI、TUI 绑这一项）、`HERMES_SESSION_CHAT_TYPE`（`dm`、`group`、`channel`、`thread`）和 `HERMES_SESSION_USER_ID`，插件经 `get_session_env` 读取，不经模型。规则（`plugins/hermes/tools/run_context.py:session_kind`，所有发出 `apa` 的插件共用）：平台与来源都为空、`cli`、`tui` 或 `local` 的终端会话固定报 `direct`；网关会话的 `chat_type` 为 `dm` 且有发送者时报 `direct`，为 `group`、`channel`、`thread` 时报 `group`；`api_server`、`webhook` 等非聊天入口、`dm` 却没有发送者、类型缺失或不认识、Hermes 的会话模块读不到或读取抛错，一律报 `unknown`。不继承网关进程环境里已有的 `APA_SESSION_KIND`；唤醒回合用运行凭据，不带会话类型。工具 schema 没有会话类型参数。开发验收用 `STUB_HARNESS` 与会话来源替身验证上报（`plugins/hermes/tests/tools/test_tools.py`、`tests/core/test_core.py`、`tests/wake/test_wake.py`），内核一侧见 `tests/contract/authz/session_kind_test.go`。仍待真实 harness 证实：Telegram 观察模式、Slack 共享话题这类"类型是 `dm` 或频道但本人之外的人也能发言"的共享会话是否都被标成 `group`（源码里有 `shared_session` 标记，但没有对应的 `HERMES_SESSION_*` 变量），以及一个允许多个发送者的私聊是否都是本人；L9 在私聊与多人会话各发起一次凭原话的代答，私聊被接受、多人会话被拒（退出码 23）。证实前如发现共享会话被报成 `direct`，插件改为对该平台报 `unknown`，内核不变 |
+| SPIKE-SESSION-KIND-OWNCHAT | **已取消（2026-11-20）**：会话类型不再参与判定。原状态：待实测 | 命题：Hermes 自带的一对一聊天界面（宿主的 Bot 聊天入口）上报的平台、来源与聊天类型能与多人会话可靠区分。判定顺序见下文"聊天里处置"：多人聊天类型永远先判 `group`；这类界面的平台或来源若不在"只有本人的入口"名单里、聊天类型又不是 `dm`，会落到 `unknown`，凭原话的代答会被拒。取值由 v0.2.0 本机升级验证清单 L17 实测后写回本行（主文档 §20.4、§21.3）；规则的改法见下文"聊天里处置" |
 
-**聊天里处置**（工作台能力迭代，主文档 §21.1 决定 74）。Hermes 插件在已有的 `apa_decide`、`apa_accept`、`apa_dismiss`、`apa_item_update` 之外补三个代答工具，都是对 CLI 的薄封装，参数里的 `evidence`（本人原话）与 `grant`（授权单 id）二选一，会话引用与会话类型由插件随调用带上，模型改不了：
+**聊天里处置**（工作台能力迭代，主文档 §21.1 决定 74）。Hermes 插件在已有的 `apa_decide`、`apa_accept`、`apa_dismiss`、`apa_item_update` 之外补三个代答工具，都是对 CLI 的薄封装，按 Agent 的档位判定（主文档 §14.5）；会话引用由插件随调用带上，只作审计。~~参数里的 `evidence`（本人原话）与 `grant`（授权单 id）二选一，会话类型由插件随调用带上~~ **已取消（2026-11-20）**：
 
 | 工具 | 对应的 CLI | 用途 |
 |---|---|---|
 | `apa_attach` | `apa attach <建议> --to <事项>` | 把一条建议补到已有事项 |
 | `apa_proposals_apply` | `apa proposals apply --recommended`，或 `--file -` 经标准输入给处置清单 | 按推荐批量处理，或按清单逐条处理（"第 3 条忽略，其余按建议"）；可按来源、项目收窄。输出逐条结果，模型据此向本人复述 |
-| `apa_item_progress` | `apa item progress <事项> --text … [--on <日期>]` | 给本人的事项记一条进展；绑定在该凭据上的事项不要求依据 |
+| `apa_item_progress` | `apa item progress <事项> --text … [--on <日期>]` | 给本人的事项记一条进展（一档） |
 
-工具的说明里写明：处置建议与给本人的事项记进展属于替本人做决定，要带本人这一回合的原话；退出码 23 时不换说法重试，把原因与 Web 链接告诉本人。
+工具的说明里写明：处置建议属于拍板，Agent 的档位没放开时返回退出码 23，不换说法重试，把原因与 Web 链接告诉本人；记进展是一档。~~处置建议与给本人的事项记进展属于替本人做决定，要带本人这一回合的原话~~ **已取消（2026-11-20）**。
 
-会话类型的判定（`plugins/hermes/tools/run_context.py:session_kind`）按下面的顺序，前一条成立就不再往下看：
+~~会话类型的判定（`plugins/hermes/tools/run_context.py:session_kind`）按下面的顺序，前一条成立就不再往下看：~~ **已取消（2026-11-20）**：会话类型不再参与判定，插件已删除这段判定；以下原文保留作历史记录。
 
 1. 聊天类型是 `group`、`channel`、`thread` 之一：`group`。这一条永远最先判，后面任何一条都不能把多人会话变成私聊。
 2. 平台与来源都是终端（空、`cli`、`tui`、`local`）：`direct`。
@@ -165,7 +165,7 @@ Hermes 结构化输出的末行是 `result` 事件，只带 `session_id` 和 `ex
 4. 聊天类型是 `dm` 且有发送者：`direct`。
 5. 其余（非聊天入口、`dm` 却没有发送者、取不到）：`unknown`。
 
-`APA_DIRECT_PLATFORMS` 是本人对自己机器上的入口作的声明，只在本人确知那个入口只有自己能发言时才填；它写在插件的环境里，不经模型，也不进账本。内核的规则不变：只在 `direct` 时接受原话（主文档 §14.5）。用 harness 替身的验收覆盖这五条的顺序，特别是"名单里的平台加多人聊天类型仍是 `group`"。
+`APA_DIRECT_PLATFORMS` 是本人对自己机器上的入口作的声明，只在本人确知那个入口只有自己能发言时才填；它写在插件的环境里，不经模型，也不进账本。~~内核的规则不变：只在 `direct` 时接受原话（主文档 §14.5）。~~ **已取消（2026-11-20）**。用 harness 替身的验收覆盖这五条的顺序，特别是"名单里的平台加多人聊天类型仍是 `group`"。
 
 ## A.6 其余 harness 的落地方式（调研结论）
 
@@ -216,7 +216,7 @@ Hermes 结构化输出的末行是 `result` 事件，只带 `session_id` 和 `ex
 
 **插件组合参考**：
 
-- **Claude Code**：常驻指令写成 skill；`SessionStart` 负责会话开始注入、`apa agents check`，并写 `$CLAUDE_ENV_FILE` 导出 `APA_SESSION` 与 `APA_SESSION_KIND`；`UserPromptSubmit` 负责消息前注入；`PostToolUse`、`SubagentStop` 负责回执捕获；`Stop` 负责候选捕获（用 `last_assistant_message`）；`PreCompact` 负责压缩前保存；harness 自己的委派走 `Agent` 工具或 Bash。
+- **Claude Code**：常驻指令写成 skill；`SessionStart` 负责会话开始注入、`apa agents check`，并写 `$CLAUDE_ENV_FILE` 导出 `APA_SESSION`（~~与 `APA_SESSION_KIND`~~ **已取消（2026-11-20）**）；`UserPromptSubmit` 负责消息前注入；`PostToolUse`、`SubagentStop` 负责回执捕获；`Stop` 负责候选捕获（用 `last_assistant_message`）；`PreCompact` 负责压缩前保存；harness 自己的委派走 `Agent` 工具或 Bash。
 - **Codex CLI**：常驻指令走 AGENTS.md 或 skill；`SessionStart`、`UserPromptSubmit`、`PostToolUse`、`SubagentStop`、`Stop`、`PreCompact` 对应同上；带钩子的插件需手动安装并在 `/hooks` 审核；默认只读沙箱可能阻止 CLI 访问 APA 端口，stdout 末段回执是这种情况下的兜底。
 - **OpenClaw**：`openclaw.plugin.json` + skills，钩子写在代码里；`before_prompt_build` 负责会话开始注入和消息前注入；`after_tool_call`、`subagent_ended` 负责回执捕获；`agent_end` 负责候选捕获；`before_compaction` 负责压缩前保存；`resolve_exec_env` 透传会话身份；`POST /hooks/agent` 或 `POST /hooks/wake` 承担会话唤醒。
 

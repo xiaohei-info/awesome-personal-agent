@@ -147,6 +147,20 @@ var webCaller = command.Caller{
 	Level: authz.LevelWeb,
 }
 
+// ReauthWindow 是"刚输过口令"的时长：登录或再输口令之后这段时间内，Web 会话可以做 3b 的动作（§14.3）。
+const ReauthWindow = 10 * time.Minute
+
+// fresh 报告会话是否刚输过口令：登录本身算一次，之后经再输口令延续。
+func (s *Server) fresh(hash string, created, now time.Time) bool {
+	if now.Sub(created) < ReauthWindow {
+		return true
+	}
+	s.reauthMu.Lock()
+	defer s.reauthMu.Unlock()
+	at, ok := s.reauth[hash]
+	return ok && now.Sub(at) < ReauthWindow
+}
+
 // touchEvery：最近使用时间的写入粒度，避免每个请求都写账本。
 const touchEvery = time.Minute
 
@@ -155,18 +169,18 @@ func (s *Server) resolveSession(ctx context.Context, id string) (*Principal, err
 		return nil, errUnauthenticated()
 	}
 	var csrf string
-	var used int64
+	var used, created int64
 	found := false
 	now := s.d.Now()
 	err := s.d.Store.View(ctx, func(tx *store.Tx) error {
-		rows, err := tx.Query("SELECT csrf, expires_at, last_used_at FROM apicore_session WHERE id_hash = ?", hashID(id))
+		rows, err := tx.Query("SELECT csrf, expires_at, last_used_at, created_at FROM apicore_session WHERE id_hash = ?", hashID(id))
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		var expires int64
 		if rows.Next() {
-			if err := rows.Scan(&csrf, &expires, &used); err != nil {
+			if err := rows.Scan(&csrf, &expires, &used, &created); err != nil {
 				return err
 			}
 			// 绝对有效期与空闲有效期任一到期即失效；升级前的会话 expires_at 为 0，永远过期。
@@ -186,7 +200,9 @@ func (s *Server) resolveSession(ctx context.Context, id string) (*Principal, err
 	if !found {
 		return nil, errUnauthenticated()
 	}
-	return &Principal{Identity: command.Trusted(webCaller), Caller: webCaller, Web: true, csrf: csrf, session: hashID(id)}, nil
+	c := webCaller
+	c.Fresh = s.fresh(hashID(id), time.Unix(0, created), now)
+	return &Principal{Identity: command.Trusted(c), Caller: c, Web: true, csrf: csrf, session: hashID(id)}, nil
 }
 
 // audit 在 tx 内记一条登录相关的审计 Event（对外事件类型，附录 B.4）。载荷不得含口令。
@@ -275,6 +291,7 @@ func (s *Server) authRoutes(r *Router) {
 	r.Handle(Route{Method: "POST", Path: "/auth/login", Auth: AuthNone, MaxBody: 4 << 10, Handler: s.login})
 	r.Handle(Route{Method: "POST", Path: "/auth/logout", Handler: s.logout})
 	r.Handle(Route{Method: "POST", Path: "/auth/password", MaxBody: 4 << 10, Handler: s.changePassword})
+	r.Handle(Route{Method: "POST", Path: "/auth/reauth", MaxBody: 4 << 10, Handler: s.reauthenticate})
 	r.Handle(Route{Method: "GET", Path: "/auth/sessions", Handler: s.listSessions})
 	r.Handle(Route{Method: "DELETE", Path: "/auth/sessions/{id}", Handler: s.revokeSession})
 	r.Handle(Route{Method: "DELETE", Path: "/auth/sessions", Handler: s.revokeAllSessions})
@@ -343,6 +360,58 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request, _ *Principal) err
 	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: id, Path: "/", Expires: expires,
 		HttpOnly: true, Secure: secureTransport(r), SameSite: http.SameSiteStrictMode})
 	return WriteJSON(w, http.StatusOK, map[string]any{"csrf_token": csrf, "expires_at": expires.UTC().Format(time.RFC3339)})
+}
+
+// requireFresh：3b 的会话管理（吊销会话）要 Web 本人且刚输过口令（§14.3）。
+func requireFresh(p *Principal) error {
+	if err := requireWeb(p); err != nil {
+		return err
+	}
+	if !p.Caller.Fresh {
+		e := domain.NewError(domain.CodeReauthRequired, "this action needs the login password entered again", "enter it again (POST /auth/reauth) and retry")
+		e.Reason = domain.ReasonReauthRequired
+		return e
+	}
+	return nil
+}
+
+// reauthenticate 是 3b 动作前的再输口令（§14.3）：口令对了，本会话在 ReauthWindow 内算"刚输过"。只在内存，重启即失效。
+// 错误口令与登录共用同一套锁定与节流，劫持到会话的人不能借此猜口令。
+func (s *Server) reauthenticate(w http.ResponseWriter, r *http.Request, p *Principal) error {
+	if err := requireWeb(p); err != nil {
+		return err
+	}
+	var in struct {
+		PW string `json:"password"`
+	}
+	if err := DecodeJSON(r, &in); err != nil {
+		return err
+	}
+	addr := clientAddr(r)
+	release, err := s.guardAttempt(w, r, addr)
+	if err != nil {
+		return err
+	}
+	defer release()
+	var ok bool
+	if err := s.d.Store.View(r.Context(), func(tx *store.Tx) (err error) { ok, err = checkPassword(tx, in.PW); return }); err != nil {
+		return err
+	}
+	if !ok {
+		if err := s.attemptFailed(r.Context(), addr); err != nil {
+			return err
+		}
+		return errUnauthenticated()
+	}
+	s.lim.success(addr)
+	s.reauthMu.Lock()
+	if s.reauth == nil {
+		s.reauth = map[string]time.Time{}
+	}
+	s.reauth[p.session] = s.d.Now()
+	s.reauthMu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 func requireWeb(p *Principal) error {
@@ -439,7 +508,7 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request, p *Princip
 }
 
 func (s *Server) revokeSession(w http.ResponseWriter, r *http.Request, p *Principal) error {
-	if err := requireWeb(p); err != nil {
+	if err := requireFresh(p); err != nil {
 		return err
 	}
 	id := r.PathValue("id")
@@ -454,7 +523,7 @@ func (s *Server) revokeSession(w http.ResponseWriter, r *http.Request, p *Princi
 }
 
 func (s *Server) revokeAllSessions(w http.ResponseWriter, r *http.Request, p *Principal) error {
-	if err := requireWeb(p); err != nil {
+	if err := requireFresh(p); err != nil {
 		return err
 	}
 	n, err := s.revoke(r.Context(), "")

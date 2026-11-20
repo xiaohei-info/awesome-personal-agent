@@ -1,4 +1,4 @@
-// Package decisions 是 apa 的决策与建议命令（附录 B.1、设计 §7.2、§14.5）：ask、decide、accept、dismiss、grant list。
+// Package decisions 是 apa 的决策与建议命令（附录 B.1、设计 §7.2、§14.5）：ask、decide、accept、dismiss。
 //
 // 本包只把命令行参数搬成 POST /v1/items/{id}/{ask|decide|accept|dismiss} 的请求体：
 // 授权（web_only 20、初筛未返回 22、运行身份 4）、代答证据与"只认第一次回答"（6）都由内核判定，
@@ -22,7 +22,6 @@ func init() {
 	client.Register("decide", decide)
 	client.Register("accept", accept)
 	client.Register("dismiss", dismiss)
-	client.Register("grant", grant)
 }
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
@@ -61,10 +60,10 @@ func post(c *client.Ctx, id, verb string, body map[string]any) error {
 	return c.Print(out)
 }
 
-const askUsage = `apa ask <id> --question <q> [--option <id=label>]... [--next <id=phase>]... [--recommend <id>] [--free-text] [--deadline <RFC3339> --default-on-timeout <id>] [--resume-note <t>] [--reason <t>]`
+const askUsage = `apa ask <id> --question <q> [--option <id=label>]... [--next <id=phase>]... [--recommend <id>] [--free-text] [--deadline <RFC3339>] [--resume-note <t>] [--reason <t>]`
 
 func ask(c *client.Ctx, args []string) error {
-	var q, rec, defTimeout, deadline, note, reason string
+	var q, rec, deadline, note, reason string
 	var free bool
 	var opts, nexts kv
 	id, err := parse("ask", askUsage, args, func(fs *flag.FlagSet) {
@@ -74,7 +73,6 @@ func ask(c *client.Ctx, args []string) error {
 		fs.StringVar(&rec, "recommend", "", "")
 		fs.BoolVar(&free, "free-text", false, "")
 		fs.StringVar(&deadline, "deadline", "", "")
-		fs.StringVar(&defTimeout, "default-on-timeout", "", "")
 		fs.StringVar(&note, "resume-note", "", "")
 		fs.StringVar(&reason, "reason", "", "")
 	})
@@ -105,7 +103,7 @@ func ask(c *client.Ctx, args []string) error {
 	if len(next) > 0 {
 		return usage("--next refers to an option that was not given with --option", "usage: "+askUsage)
 	}
-	a := map[string]any{"question": q, "recommend": rec, "default_on_timeout": defTimeout, "resume_note": note}
+	a := map[string]any{"question": q, "recommend": rec, "resume_note": note}
 	if len(options) > 0 {
 		a["options"] = options
 	}
@@ -126,7 +124,7 @@ func ask(c *client.Ctx, args []string) error {
 	return post(c, id, "ask", map[string]any{"ask": a, "reason": reason})
 }
 
-const decideUsage = `apa decide <id> (--option <id> | --text <t>) [--evidence <owner's words> | --grant <id>] [--reason <t>]`
+const decideUsage = `apa decide <id> (--option <id> | --text <t>) [--reason <t>]`
 
 func decide(c *client.Ctx, args []string) error {
 	var opt, text, reason string
@@ -141,7 +139,7 @@ func decide(c *client.Ctx, args []string) error {
 	return post(c, id, "decide", map[string]any{"choice": opt, "text": text, "reason": reason})
 }
 
-const acceptUsage = `apa accept <id> [--evidence <owner's words> | --grant <id>] [--reason <t>]`
+const acceptUsage = `apa accept <id> [--reason <t>]`
 
 func accept(c *client.Ctx, args []string) error {
 	var reason string
@@ -154,7 +152,7 @@ func accept(c *client.Ctx, args []string) error {
 	return post(c, id, "accept", map[string]any{"reason": reason})
 }
 
-const dismissUsage = `apa dismiss <id> [--reason <t>] [--evidence <owner's words> | --grant <id>]`
+const dismissUsage = `apa dismiss <id> [--reason <t>]`
 
 func dismiss(c *client.Ctx, args []string) error {
 	var reason string
@@ -165,18 +163,4 @@ func dismiss(c *client.Ctx, args []string) error {
 		return err
 	}
 	return post(c, id, "dismiss", map[string]any{"reason": reason})
-}
-
-const grantUsage = "usage: apa grant list"
-
-// grant list 只读：列出调用者能用的有效授权单（delegate：凭据名下的与签给所属 Agent 的；运行凭据：签给该 Agent 且允许后台使用的）。签发和撤销只在 Web，这里没有对应的写命令。
-func grant(c *client.Ctx, args []string) error {
-	if len(args) != 1 || args[0] != "list" {
-		return usage("apa grant takes the subcommand list", grantUsage)
-	}
-	var out any
-	if err := c.Do(context.Background(), "GET", "/grants", nil, &out); err != nil {
-		return err
-	}
-	return c.Print(out)
 }

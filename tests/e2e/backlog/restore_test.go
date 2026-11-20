@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
 )
 
@@ -189,24 +188,9 @@ func TestBacklogRestoreFlow(t *testing.T) {
 
 	k.step("ACT-RST-05 放回的授权边界", func(t *testing.T) {
 		grantsBefore := k.maxSeq()
-		// 授权单事先由本人在 Web 为夹具 delegate 签发：有效期内，动作勾选全部可选项。
-		mixed := policy.GrantableActions
-		g, _ := json.Marshal(map[string]any{"grantee": map[string]string{"credential": "cred_fx_delegate"}, "scope": map[string]any{"kinds": []string{"task"}},
-			"actions": mixed, "expires_at": time.Now().Add(7 * 24 * time.Hour).UTC().Format(time.RFC3339), "reason": "e2e"})
-		var grant struct{ ID string }
-		k.must(json.Unmarshal([]byte(k.webOK("POST", "/v1/settings/grants", string(g), 201)), &grant))
+		// 2026-11-20 改写（权限模型第二版）：放回积压是一档，delegate 不再需要本人原话；边界只剩钥匙范围：observer 与运行凭据在范围外。
 		base := []string{"source", "backlog", "restore", "--from", win.From, "--to", win.To}
-		if r := k.Apa(k.DEL, "", base...); r.Code != 23 {
-			t.Fatalf("① 不带 --evidence 退出码 %d，期望 23\n%s%s", r.Code, r.Stdout, r.Stderr)
-		}
-		if r := k.Apa(k.DEL, "", append(base, "--grant", grant.ID)...); r.Code != 23 {
-			t.Fatalf("② 带 --grant 不带 --evidence 退出码 %d，期望 23\n%s%s", r.Code, r.Stdout, r.Stderr)
-		}
-		r := k.run(k.DEL, []string{"APA_SESSION=e2e-session", "APA_SESSION_KIND=group"}, append(base, "--evidence", "本人：放回")...)
-		if r.Code != 23 || !strings.Contains(r.Stdout+r.Stderr, "session_not_direct") {
-			t.Fatalf("③ group 会话退出码 %d，期望 23 session_not_direct\n%s%s", r.Code, r.Stdout, r.Stderr)
-		}
-		if r := k.Apa(k.OBS, "", append(base, "--evidence", "本人：放回")...); r.Code != 4 {
+		if r := k.Apa(k.OBS, "", base...); r.Code != 4 {
 			t.Fatalf("④ observer 退出码 %d，期望 4\n%s%s", r.Code, r.Stdout, r.Stderr)
 		}
 		run := k.runCredential()

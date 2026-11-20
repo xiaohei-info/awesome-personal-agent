@@ -103,7 +103,7 @@ func TestBacklogShadowScoreOnUpgradedFixture(t *testing.T) {
 		}
 		return fmt.Sprint(d)
 	}
-	words := map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "direct", "X-APA-Evidence": "本人：影子打分"}
+	words := map[string]string{"X-APA-Session": "s1"} // 影子打分是一档：delegate 不要本人原话
 
 	// ACT-BKL-16：没有判断端点。
 	before := distribution()
@@ -135,10 +135,7 @@ func TestBacklogShadowScoreOnUpgradedFixture(t *testing.T) {
 		t.Fatalf("set judge endpoint: %v %v", r, err)
 	}
 
-	// ACT-BKL-05：缺本人原话仍被拒；带原话时全部打分。
-	if code, _ := do("POST", "/source-events/score", m.Tokens["delegate"], map[string]string{"X-APA-Session": "s1", "X-APA-Session-Kind": "direct"}, `{}`); code != 403 {
-		t.Fatalf("score without words: %d", code)
-	}
+	// ACT-BKL-05：配上判断端点后全部打分。
 	code, b := do("POST", "/source-events/score", m.Tokens["delegate"], words, `{}`)
 	var res struct{ Scored, Skipped int }
 	if code != 200 || json.Unmarshal(b, &res) != nil || res.Scored != m.Backlog.Total || res.Skipped != 0 {

@@ -196,7 +196,7 @@ func TestFlowBootstrap(t *testing.T) {
 
 	step("ACT-BOOT-05 agent 经 CLI 自助上手", func(t *testing.T) {
 		// 账本里先有一条带标记的事项。
-		r := e.Apa(del, "", "item", "add", "--kind", "task", "--title", marker, "--phase", "open", "--evidence", "bootstrap e2e")
+		r := e.Apa(del, "", "item", "add", "--kind", "task", "--title", marker, "--phase", "open")
 		var it struct {
 			ID string `json:"id"`
 		}

@@ -30,7 +30,7 @@ import (
 
 var bg = context.Background()
 
-var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 
 const workHost = "work-host.cli"
 
@@ -166,7 +166,7 @@ func (e *env) as(name string) command.Identity {
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"})
 }
 
 func (e *env) must(t *testing.T, id command.Identity, cmd string, in any) command.Result {
@@ -521,7 +521,7 @@ func TestPathMissingCreatesNeedsInputThenRelocateRecovers(t *testing.T) {
 	}
 
 	// 本人修正路径：Missing 清除，下一次读取回到 ready。
-	e.must(t, e.as("WRK"), "material.relocate", map[string]any{"id": id, "path": "docs/arch.md"})
+	e.must(t, owner, "material.relocate", map[string]any{"id": id, "path": "docs/arch.md"})
 	en = e.entry(t, id)
 	if n := len(e.needsInput(t)); n != 0 || en.FixItem != "" {
 		t.Fatalf("relocate must close the pending fix item: needs_input=%d fix=%q", n, en.FixItem)
@@ -532,15 +532,18 @@ func TestPathMissingCreatesNeedsInputThenRelocateRecovers(t *testing.T) {
 	if v := e.await(t, id, true); v.Status != StatusReady || v.Content != "# design v1\n" {
 		t.Fatalf("after relocate: %+v", v)
 	}
-	e.wantExit(t, 2, e.as("WRK"), "material.relocate", map[string]any{"id": id, "path": "../x"})
+	e.wantExit(t, 2, owner, "material.relocate", map[string]any{"id": id, "path": "../x"})
+	// 系统内部命令：Agent 钥匙一律硬线。
+	e.wantExit(t, 20, e.as("WRK"), "material.relocate", map[string]any{"id": id, "path": "docs/arch.md"})
 }
 
 func TestRefreshInputMustPickOneOutcome(t *testing.T) {
 	e := setup(t)
 	id := e.register(t, newRepo(t), "docs/design.md")
-	e.wantExit(t, 2, e.as("WRK"), "material.refresh", map[string]any{"id": id})
-	e.wantExit(t, 2, e.as("WRK"), "material.refresh", map[string]any{"id": id, "commit": "abc", "path_missing": true})
-	e.wantExit(t, 5, e.as("WRK"), "material.refresh", map[string]any{"id": "mat_none", "commit": "abc"})
+	e.wantExit(t, 2, system, "material.refresh", map[string]any{"id": id})
+	e.wantExit(t, 2, system, "material.refresh", map[string]any{"id": id, "commit": "abc", "path_missing": true})
+	e.wantExit(t, 5, system, "material.refresh", map[string]any{"id": "mat_none", "commit": "abc"})
+	e.wantExit(t, 20, e.as("WRK"), "material.refresh", map[string]any{"id": id, "commit": "abc"})
 	e.wantExit(t, 4, e.as("OBS"), "material.refresh", map[string]any{"id": id, "commit": "abc"})
 }
 
@@ -612,7 +615,7 @@ func TestReportDoneRefreshesCommit(t *testing.T) {
 // agents.check 属连接模块（它依赖本包），这里登记一个同名替身命令，只验证本包对提交的订阅。
 func TestAgentsCheckRefreshesRepo(t *testing.T) {
 	e := setup(t)
-	if err := e.x.Register(command.Spec{Name: "agents.check", Action: authz.ActionRead,
+	if err := e.x.Register(command.Spec{Name: "agents.check", Action: authz.ActionRead, Tier: authz.TierOrganize,
 		Object: func(*store.Tx, json.RawMessage) (authz.Object, error) { return authz.Object{}, nil },
 		Apply:  func(*command.Ctx) (any, error) { return nil, nil }}); err != nil {
 		t.Fatal(err)
@@ -742,7 +745,7 @@ func TestPathDisappearsAgainAfterRelocate(t *testing.T) {
 	}
 	r.push(t, "add", func() { os.WriteFile(filepath.Join(r.work, "docs/arch.md"), []byte("# a\n"), 0o644) })
 	git(t, r.checkout, "fetch", "-q", "origin")
-	e.must(t, e.as("WRK"), "material.relocate", map[string]any{"id": id, "path": "docs/arch.md"})
+	e.must(t, owner, "material.relocate", map[string]any{"id": id, "path": "docs/arch.md"})
 	var closed domain.Item
 	e.st.View(bg, func(tx *store.Tx) (err error) { closed, err = items.Get(tx, first); return })
 	if closed.Phase != domain.PhaseDropped || closed.Ask.Resolution == nil || closed.Ask.Resolution.ResolvedVia != "relocate" {

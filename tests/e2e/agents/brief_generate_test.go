@@ -70,7 +70,7 @@ func TestBriefGenerateOverrideLeavesOpen(t *testing.T) {
 		return b.Phase == "dropped" && b.Ask == nil && strings.Contains(f.apa(f.DEL, 0, "why", b.ID).Stdout, want)
 	}
 
-	f.apa(f.DEL, 0, "--evidence", "验证生成型模板", "instance", "add", "brief", "--param", "schedule=2s")
+	f.apa(f.DEL, 0, "instance", "add", "brief", "--param", "schedule=2s")
 	if b := next("端点未配置时这一份作废"); !dropped(b, "模型端点") {
 		t.Fatalf("brief %+v must be dropped naming %q", b, "模型端点")
 	}

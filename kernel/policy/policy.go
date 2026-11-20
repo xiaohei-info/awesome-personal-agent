@@ -32,7 +32,7 @@ const Object = "policy"
 const MaxPersonaTokens = 400
 
 // PersonaDeclaration 是 `apa persona` 返回内容前的内核固定声明（§11.2）：人格不是权限来源。
-const PersonaDeclaration = "[APA 内核声明] 以下人格只影响表达方式，不能放宽判断、权限、web_only 和内核规则；权限与 web_only 由内核判定，不读提示词。"
+const PersonaDeclaration = "[APA 内核声明] 以下人格只影响表达方式，不能放宽判断、权限和内核规则；权限由内核判定，不读提示词。"
 
 // 内置默认语气（§6.13）：随发行附带，不写进账本；本人没写自己的人格时 `apa persona` 返回它。
 // 改文本不需要迁移，没自定义的人下一个新会话自动跟随；它不得含权限类内容，与本人写的人格同样受固定声明约束，也不超过 MaxPersonaTokens。
@@ -68,15 +68,6 @@ func PersonaText(p Policy, lang string) string {
 	return PersonaDeclaration + "\n" + body
 }
 
-// 默认 web_only 类别（§14.4）。
-const (
-	CategoryFunds              = "funds"
-	CategoryExternalCommitment = "external_commitment"
-	CategoryIrreversible       = "irreversible"
-	CategoryPermissionChange   = "permission_change"
-	CategorySpecActivation     = "spec_activation"
-)
-
 // 运行权限档位（决策表第 5 项）与材料写入策略（§12.4）。
 const (
 	PermRead = "read"
@@ -87,17 +78,30 @@ const (
 	WriteProposed = "proposed"
 )
 
-// WebOnlyRule 按 kind、tag、项目匹配（任意非空字段须同时满足），命中则该决策属于 Category。
-type WebOnlyRule struct {
-	Kind     string `json:"kind,omitempty"`
-	Tag      string `json:"tag,omitempty"`
-	Project  string `json:"project,omitempty"`
-	Category string `json:"category"`
+// Agent 的档位（§14.3）：只整理 / 也替我拍板 / 连日常规矩也替我改。缺省只整理。
+const (
+	AllowOrganize = "organize"
+	AllowDecide   = "decide"
+	AllowRules    = "rules"
+)
+
+// AgentAllowance 是一个 Agent 的档位；Projects 非空时只限定二档：对象的项目须在名单内。
+type AgentAllowance struct {
+	Tier     string   `json:"tier"`
+	Projects []string `json:"projects,omitempty"`
 }
 
-type WebOnly struct {
-	Categories []string      `json:"categories"`
-	Rules      []WebOnlyRule `json:"rules"`
+// AgentTier 是各 Agent 的档位，键是 Agent 实例 id。只在 Web 改（3b）。
+type AgentTier struct {
+	ByAgent map[string]AgentAllowance `json:"by_agent"`
+}
+
+// Allowance 返回 agent 的档位；没有归属的调用者与没设过的 Agent 都是只整理。
+func (p Policy) Allowance(agent string) AgentAllowance {
+	if a, ok := p.AgentTier.ByAgent[agent]; ok && agent != "" {
+		return a
+	}
+	return AgentAllowance{Tier: AllowOrganize}
 }
 
 // Quiet 是每日静默时段，Start、End 为 "HH:MM"（跨午夜时 Start > End），Zone 为 IANA 时区，空取 UTC。
@@ -149,12 +153,6 @@ func ParseClock(s string) (int, error) {
 		return 0, err
 	}
 	return t.Hour()*60 + t.Minute(), nil
-}
-
-// MaterialWrite 是材料 kind 到写入策略的映射；未登记的 kind 走 Default。
-type MaterialWrite struct {
-	Default string            `json:"default"`
-	Kinds   map[string]string `json:"kinds"`
 }
 
 // PermissionCap 是运行权限上限：按 harness 设置，未设置的用 Default。
@@ -210,7 +208,6 @@ const (
 	DefaultJudgeTimeoutMs        = 10000
 	DefaultJudgeMaxBatch         = 32
 	DefaultJudgeMaxMaterialChars = 8000
-	DefaultScreeningTimeoutMs    = 30000
 	// DefaultGenerateMaxMaterialChars 是生成端点的资料预算缺省值（§8.4）；默认值是否合适见 SPIKE-GEN-BUDGET。
 	DefaultGenerateMaxMaterialChars = 24000
 )
@@ -257,13 +254,12 @@ type JudgeEndpoint struct {
 
 // legacyModelEndpoint 是 v0.1 策略文档里的单一 model_endpoint，只在读取旧版本时出现（§16.5）。
 type legacyModelEndpoint struct {
-	URL                string `json:"url"`
-	Model              string `json:"model"`
-	APIKey             string `json:"api_key"`
-	ScreeningTimeoutMs int    `json:"screening_timeout_ms"`
+	URL    string `json:"url"`
+	Model  string `json:"model"`
+	APIKey string `json:"api_key"`
 }
 
-// Channel 是渠道的登记属性（§10.3）。TextOnly：渠道只能发文字，决策投递带一次性表单链接。
+// Channel 是渠道的登记属性（§10.3）。TextOnly：渠道只能发文字，决策投递只带一条需要登录的链接。
 type Channel struct {
 	TextOnly bool `json:"text_only"`
 }
@@ -293,15 +289,13 @@ type Judgment struct {
 
 // Policy 是一个版本的完整配置。两份白名单相互独立：键是来源或渠道，值是发送者或回答人。
 type Policy struct {
-	WebOnly          WebOnly          `json:"web_only"`
+	// 旧版本文档里的 web_only、material_write、screening_timeout_ms 段已随旧权限模型取消，解码时忽略（§14.3）。
 	Disturb          Disturb          `json:"disturb"`
-	MaterialWrite    MaterialWrite    `json:"material_write"`
 	PermissionCap    PermissionCap    `json:"permission_cap"`
+	AgentTier        AgentTier        `json:"agent_tier"`
 	JudgeEndpoint    *JudgeEndpoint   `json:"judge_endpoint"`
 	GenerateEndpoint GenerateEndpoint `json:"generate_endpoint"`
-	// ScreeningTimeoutMs 是 web_only 初筛的超时（v0.1 时在 model_endpoint 里）。
-	ScreeningTimeoutMs int    `json:"screening_timeout_ms"`
-	Persona            string `json:"persona"` // 只影响表达方式，不进入任何权限判定
+	Persona          string           `json:"persona"` // 只影响表达方式，不进入任何权限判定
 	// PersonaLang 是助手说哪种语言：zh、en，空串 = 跟随系统（调用方的区域设置）。旧版本策略文档没有此键，读作空串。
 	PersonaLang      string              `json:"persona_lang"`
 	ForwardAllowlist map[string][]string `json:"forward_allowlist"`
@@ -390,29 +384,19 @@ func uriComponent(s string) string {
 // Default 是版本 0 的配置：默认类别、权限上限 read、人格与白名单为空。
 func Default() Policy {
 	return Policy{
-		WebOnly: WebOnly{
-			// 已按字典序排列：normalize 会排序，默认值必须是它的不动点。
-			Categories: []string{CategoryExternalCommitment, CategoryFunds, CategoryIrreversible, CategoryPermissionChange, CategorySpecActivation},
-			Rules:      []WebOnlyRule{},
-		},
 		Disturb: Disturb{Routes: map[string]string{
 			string(domain.DeliveryDecision): "inject", string(domain.DeliveryBrief): "inject",
 			string(domain.DeliveryReminder): "inject", string(domain.DeliveryHealth): "web",
 			string(domain.DeliveryWake): "web",
 		}, MergeWindowSec: 30 * 60, RemindOnDeadline: true, DailyCap: DefaultDailyCap, Mutes: []Mute{}}, // 合并窗口默认 30 分钟（§7.4）
-		// 规范、方案类须本人确认；纪要类直写（§12.4）。未登记的 kind 取更严的 proposed。
-		MaterialWrite: MaterialWrite{Default: WriteProposed, Kinds: map[string]string{
-			"minutes": WriteDirect, "reference": WriteDirect, "worknote": WriteDirect,
-			"requirement": WriteProposed, "design": WriteProposed, "guideline": WriteProposed,
-		}},
-		PermissionCap:      PermissionCap{Default: PermRead, ByHarness: map[string]string{}},
-		MainSessionLaunch:  MainSessionLaunch{ByHarness: map[string]string{}, ByRule: map[string]string{}},
-		ScreeningTimeoutMs: DefaultScreeningTimeoutMs,
-		ForwardAllowlist:   map[string][]string{},
-		ChannelAnswerers:   map[string][]string{},
-		Channels:           map[string]Channel{},
-		NoteVaults:         []NoteVault{},
-		Judgment:           Judgment{Bands: []JudgmentBand{}, Shadow: []string{}, SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}},
+		PermissionCap:     PermissionCap{Default: PermRead, ByHarness: map[string]string{}},
+		AgentTier:         AgentTier{ByAgent: map[string]AgentAllowance{}},
+		MainSessionLaunch: MainSessionLaunch{ByHarness: map[string]string{}, ByRule: map[string]string{}},
+		ForwardAllowlist:  map[string][]string{},
+		ChannelAnswerers:  map[string][]string{},
+		Channels:          map[string]Channel{},
+		NoteVaults:        []NoteVault{},
+		Judgment:          Judgment{Bands: []JudgmentBand{}, Shadow: []string{}, SpotCheck: SpotCheck{PerBrief: DefaultSpotCheckPerBrief}},
 	}
 }
 
@@ -499,26 +483,6 @@ func oneOf(v string, set ...string) bool {
 
 // normalize 校验并规整 p；失败返回 ErrInvalid。
 func normalize(p Policy) (Policy, error) {
-	p.WebOnly.Categories = dedupSorted(p.WebOnly.Categories)
-	if len(p.WebOnly.Categories) == 0 {
-		return p, invalid("web_only categories is empty")
-	}
-	cats := map[string]bool{}
-	for _, c := range p.WebOnly.Categories {
-		cats[c] = true
-	}
-	if p.WebOnly.Rules == nil {
-		p.WebOnly.Rules = []WebOnlyRule{}
-	}
-	for i, r := range p.WebOnly.Rules {
-		if r.Kind == "" && r.Tag == "" && r.Project == "" {
-			return p, invalid("web_only rule %d matches nothing (kind/tag/project all empty)", i)
-		}
-		if !cats[r.Category] {
-			return p, invalid("web_only rule %d category %q is not in categories", i, r.Category)
-		}
-	}
-
 	if len(p.Disturb.Routes) == 0 {
 		return p, invalid("disturb routes is empty")
 	}
@@ -560,16 +524,17 @@ func normalize(p Policy) (Policy, error) {
 		}
 	}
 
-	if !oneOf(p.MaterialWrite.Default, WriteDirect, WriteProposed) {
-		return p, invalid("material_write default %q", p.MaterialWrite.Default)
+	if p.AgentTier.ByAgent == nil {
+		p.AgentTier.ByAgent = map[string]AgentAllowance{}
 	}
-	for k, v := range p.MaterialWrite.Kinds {
-		if k == "" || !oneOf(v, WriteDirect, WriteProposed) {
-			return p, invalid("material_write kind %q policy %q", k, v)
+	for a, v := range p.AgentTier.ByAgent {
+		if a == "" || !oneOf(v.Tier, AllowOrganize, AllowDecide, AllowRules) {
+			return p, invalid("agent_tier agent %q tier %q", a, v.Tier)
 		}
-	}
-	if p.MaterialWrite.Kinds == nil {
-		p.MaterialWrite.Kinds = map[string]string{}
+		if v.Projects = dedupSorted(v.Projects); len(v.Projects) == 0 {
+			v.Projects = nil
+		}
+		p.AgentTier.ByAgent[a] = v
 	}
 
 	if !oneOf(p.PermissionCap.Default, PermRead, PermEdit, PermFull) {
@@ -599,9 +564,6 @@ func normalize(p Policy) (Policy, error) {
 		}
 	}
 
-	if p.ScreeningTimeoutMs <= 0 {
-		return p, invalid("screening_timeout_ms %d <= 0", p.ScreeningTimeoutMs)
-	}
 	if err := normalizeEndpoints(&p); err != nil {
 		return p, err
 	}
@@ -758,7 +720,6 @@ func decode(doc string) (p Policy, legacy bool, err error) {
 	if l := w.Legacy; l != nil {
 		legacy = true
 		p.GenerateEndpoint = GenerateEndpoint{URL: l.URL, Model: l.Model, APIKey: l.APIKey}
-		p.ScreeningTimeoutMs = l.ScreeningTimeoutMs
 	}
 	p, err = normalize(p)
 	return p, legacy, err
@@ -800,6 +761,118 @@ func latest(tx *store.Tx) (int, Policy, bool, error) {
 	return int(v), p, legacy, err
 }
 
+// SwitchObject 是权限模型切换事件（authz.switched）的对象。
+const SwitchObject = "authz"
+
+// Switched 报告账本是否已切换到权限模型第二版（§16.5）：有一条 authz.switched 即已切换。
+func Switched(tx *store.Tx) (bool, error) {
+	es, err := eventlog.Query(tx, eventlog.Filter{Object: SwitchObject, Type: domain.EvAuthzSwitched}, 0, 1)
+	return len(es) > 0, err
+}
+
+// legacyKeys 是旧权限模型留在策略文档里的段：高风险类别、初筛超时、按材料类别直接写（2026-11-20 取消，§14.3）。
+var legacyKeys = []string{"material_write", "screening_timeout_ms", "web_only"}
+
+// LegacyKeys 返回最新一版存储文档里还带着的旧权限模型段；空表示已切换到新文档。
+func LegacyKeys(tx *store.Tx) ([]string, error) {
+	m, err := StoredRaw(tx, legacyKeys...)
+	var out []string
+	for _, k := range legacyKeys {
+		if _, ok := m[k]; ok {
+			out = append(out, k)
+		}
+	}
+	return out, err
+}
+
+// StoredRaw 返回最新一版存储文档里 keys 这些顶层段的原文（含已不在结构体里的旧段）；没有的段不在结果里。
+// 调用方自己负责不把端点密钥之类的段带出去：只取需要的段。
+func StoredRaw(tx *store.Tx, keys ...string) (map[string]json.RawMessage, error) {
+	out := map[string]json.RawMessage{}
+	r, err := tx.Query("SELECT doc FROM policy_version ORDER BY version DESC LIMIT 1")
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	if !r.Next() {
+		return out, r.Err()
+	}
+	var doc string
+	if err := r.Scan(&doc); err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(doc), &m); err != nil {
+		return nil, err
+	}
+	for _, k := range keys {
+		if v, ok := m[k]; ok {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
+// RulesSections 是策略里属于 3a 改日常的顶层段（§14.3）：Agent 档位放开到 3a 可改，规矩改动清单列出并可撤回。
+// 其余段都是 3b。设置路由的段表与它一致（api/settings/policy）。
+var RulesSections = []string{"channels", "disturb", "forward_allowlist", "judgment", "models_paused", "persona", "persona_lang"}
+
+// At 读第 v 版策略（存储原文，不按模型暂停改写）；没有这一版返回 not_found。
+func At(tx *store.Tx, v int) (Policy, error) {
+	var doc string
+	found := false
+	r, err := tx.Query("SELECT doc FROM policy_version WHERE version = ?", int64(v))
+	if err != nil {
+		return Policy{}, err
+	}
+	defer r.Close()
+	if r.Next() {
+		found = true
+		if err := r.Scan(&doc); err != nil {
+			return Policy{}, err
+		}
+	}
+	if err := r.Err(); err != nil {
+		return Policy{}, err
+	}
+	if !found {
+		if v == 0 {
+			return Default(), nil
+		}
+		return Policy{}, domain.NewError(domain.CodeNotFound, fmt.Sprintf("policy version %d does not exist", v), "list policy changes and retry")
+	}
+	p, _, err := decode(doc)
+	return p, err
+}
+
+// Sections 把配置拆成顶层段（段名 → JSON），供比较前后值与撤回。
+func Sections(p Policy) (map[string]json.RawMessage, error) { return sections(p) }
+
+// Restore 把 p 的 keys 段换成 from 的值（撤回一次段改动），其余段不动。
+func Restore(p *Policy, from Policy, keys []string) error {
+	cur, err := sections(*p)
+	if err != nil {
+		return err
+	}
+	src, err := sections(from)
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		cur[k] = src[k]
+	}
+	b, err := json.Marshal(cur)
+	if err != nil {
+		return err
+	}
+	var out Policy
+	if err := json.Unmarshal(b, &out); err != nil {
+		return err
+	}
+	*p = out
+	return nil
+}
+
 // sections 把配置拆成顶层段，用于判断哪些段变了。
 func sections(p Policy) (map[string]json.RawMessage, error) {
 	b, err := json.Marshal(p)
@@ -810,14 +883,16 @@ func sections(p Policy) (map[string]json.RawMessage, error) {
 	return m, json.Unmarshal(b, &m)
 }
 
-// Update 是策略的唯一写入口：actor 必须是 Web 上的本人，否则返回 web_only 错误（退出码 20）。
+// Update 是策略的唯一写入口；谁能改哪一段由调用方先经 authz.Decide 判定，actor 只用于留痕。
 // mutate 在当前配置的副本上修改；结果经校验后若与当前不同，就追加新版本并在同一事务记
 // policy.changed（改了白名单时另记 allowlist.changed）。无变化时不产生版本，返回当前版本号。
 func Update(tx *store.Tx, actor domain.Actor, reason string, mutate func(*Policy) error) (int, error) {
-	if actor.Type != domain.ActorHuman || actor.Via != domain.ViaWeb {
-		return 0, domain.NewError(domain.CodeWebOnly, "policy can only be changed by the owner in the Web UI", "ask the owner to change it in the Web settings")
-	}
-	cur, old, legacy, err := latest(tx)
+	return UpdateWith(tx, actor, nil, reason, mutate)
+}
+
+// UpdateWith 同 Update，并在 policy.changed 上记依据 basis（档位、所属 Agent），规矩改动清单据此认出 Agent 改的段（§14.3）。
+func UpdateWith(tx *store.Tx, actor domain.Actor, basis *domain.Basis, reason string, mutate func(*Policy) error) (int, error) {
+	cur, old, legacy, err := latest(tx) // 判权在调用方：设置路由与命令管线都先过 authz.Decide（§14.3）
 	if err != nil {
 		return 0, err
 	}
@@ -845,6 +920,11 @@ func Update(tx *store.Tx, actor domain.Actor, reason string, mutate func(*Policy
 	if legacy { // 最新版本还是旧形状：本人保存即写成新字段，哪怕值没变（§16.5）
 		changed = append(changed, "model_endpoint")
 	}
+	dropped, err := LegacyKeys(tx) // 旧权限模型的段：下一次写入就不再带它们（旧版本留在历史里）
+	if err != nil {
+		return 0, err
+	}
+	changed = append(changed, dropped...)
 	if len(changed) == 0 {
 		return cur, nil
 	}
@@ -871,7 +951,7 @@ func Update(tx *store.Tx, actor domain.Actor, reason string, mutate func(*Policy
 	if err != nil {
 		return 0, err
 	}
-	ev := domain.Event{Type: domain.EvPolicyChanged, Object: Object, Actor: actor, Reason: reason, Payload: payload, At: at}
+	ev := domain.Event{Type: domain.EvPolicyChanged, Object: Object, Actor: actor, Basis: basis, Reason: reason, Payload: payload, At: at}
 	if _, err := eventlog.Append(tx, ev); err != nil {
 		return 0, err
 	}

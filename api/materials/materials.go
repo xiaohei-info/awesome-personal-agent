@@ -9,7 +9,7 @@
 //
 // 路由里没有业务规则：写入全部映射到内核命令（material.commit/add、revision.confirm|reject、material.revert、blob.put|get），
 // 授权（回退与规范生效只认 Web、delegate 代答须附本人原话）、写入策略、基线冲突、幂等都由命令管线判定。
-// 本层只做 HTTP 到命令请求的搬运：路径里的 id 注入请求体，Idempotency-Key 头 → 幂等键，X-APA-Evidence 头 → 本人原话。
+// 本层只做 HTTP 到命令请求的搬运：路径里的 id 注入请求体，Idempotency-Key 头 → 幂等键，
 // 唯一的路由级判定是 /content 只给 Web 登录——托管型读取走 hosted.Service，不经命令管线，管线无从授权。
 package materials
 
@@ -102,17 +102,10 @@ func object(r *http.Request) (map[string]json.RawMessage, error) {
 	return m, nil
 }
 
-// run 以请求的凭据执行一条内核命令。evidence 是请求元数据，不是命令输入（命令对未知字段严格拒绝），所以从体里取出。
+// run 以请求的凭据执行一条内核命令。旧客户端带的本人原话（evidence）不参与判定，忽略。
 func (h *handlers) run(r *http.Request, p *core.Principal, cmd string, in map[string]json.RawMessage) (command.Result, error) {
-	req := command.Request{Identity: p.Identity, Command: cmd, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
-	if raw, ok := in["evidence"]; ok {
-		delete(in, "evidence")
-		if req.Evidence == "" {
-			if err := json.Unmarshal(raw, &req.Evidence); err != nil {
-				return command.Result{}, invalid("evidence must be a string", "send the owner's words as a string")
-			}
-		}
-	}
+	req := command.Request{Identity: p.Identity, Command: cmd, IdemKey: r.Header.Get(IdempotencyHeader), WebURL: p.WebURL}
+	delete(in, "evidence")
 	b, err := json.Marshal(in)
 	if err != nil {
 		return command.Result{}, err
@@ -376,7 +369,7 @@ func (h *handlers) changes(w http.ResponseWriter, r *http.Request, p *core.Princ
 	if in.ID != "" {
 		return invalid("field id comes from the URL and cannot be in the body", "remove it from the body")
 	}
-	in.ID, in.IdemKey, in.Evidence = r.PathValue("id"), r.Header.Get(IdempotencyHeader), p.Evidence
+	in.ID, in.IdemKey = r.PathValue("id"), r.Header.Get(IdempotencyHeader)
 	out, err := h.hs.RequestChange(context.WithoutCancel(r.Context()), p.Identity, in)
 	if err != nil {
 		return err
@@ -394,7 +387,7 @@ func (h *handlers) putBlob(w http.ResponseWriter, r *http.Request, p *core.Princ
 		return invalid("the body does not hash to the sha256 in the URL", "put the file at /blobs/<sha256 of its content>")
 	}
 	in, _ := json.Marshal(map[string]any{"content": data})
-	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "blob.put", Input: in, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL})
+	res, err := h.x.Do(context.WithoutCancel(r.Context()), command.Request{Identity: p.Identity, Command: "blob.put", Input: in, IdemKey: r.Header.Get(IdempotencyHeader), WebURL: p.WebURL})
 	if err != nil {
 		return err
 	}

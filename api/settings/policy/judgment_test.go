@@ -52,7 +52,8 @@ func TestJudgmentSettingsWebOnly(t *testing.T) {
 		mod := e.bearer(kind)
 		for _, m := range []string{"GET", "PUT"} {
 			rec := e.do(m, judgmentRoute, `{"bands":[],"shadow":["x"]}`, mod)
-			if rec.Code != 403 || errCode(t, rec) != domain.CodeWebOnly {
+			// 没有放开 3a 档的钥匙一律被拒：范围外（4）、档位未放开（23）或硬线（20），§14.3
+			if rec.Code != 403 || !refused(errCode(t, rec)) {
 				t.Fatalf("%s as %s: %d %s", m, kind, rec.Code, rec.Body)
 			}
 		}

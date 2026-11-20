@@ -60,7 +60,7 @@ func (f *fx) eventID(key string) string {
 func (f *fx) openItem(title, project string) string {
 	f.t.Helper()
 	r := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", f.Projects[project], "--evidence", "建个已有事项")
+		"--project", f.Projects[project])
 	var m struct {
 		ID string `json:"id"`
 	}
@@ -94,7 +94,7 @@ STUB_HARNESS_MODE=summary-only exec %[5]s "$@"
 		"session": map[string]any{"extract": "$.session_id"},
 		"access":  map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}},
 	}})
-	if r := f.Apa(f.DEL, string(decl), "declare", "-", "--evidence", "验收声明替身 harness"); r.Code != 0 {
+	if r := f.Apa(f.DEL, string(decl), "declare", "-"); r.Code != 0 {
 		f.t.Fatalf("apa declare: %d %s%s", r.Code, r.Stdout, r.Stderr)
 	}
 	f.webOK("POST", "/settings/declarations/acc-jrc-run/1/confirm", "", 200)
@@ -363,5 +363,5 @@ func (f *fx) cleanup(t *testing.T) {
 	for _, i := range inst.Instances {
 		f.webOK("PATCH", "/instances/"+i.ID, `{"enabled":false}`, 200)
 	}
-	f.apa(f.DEL, 0, "source", "disable", f.srcID, "--evidence", "清理")
+	f.apa(f.DEL, 0, "source", "disable", f.srcID)
 }

@@ -233,6 +233,7 @@ func ReadMentioning(tx *store.Tx, message string) ([]Entry, error) {
 // Imported 只取某个导入批次的事件。Live 为真走"现场"读法，跳过导入事件；与 Imported 同时给出没有结果。
 type Filter struct {
 	Actor, Object, Type, Grant, Imported string
+	Tier                                 string // 事件依据里的档位（basis.tier），如 rules：规矩改动清单按它取（§14.3）
 	Live                                 bool
 }
 
@@ -254,7 +255,7 @@ func query(tx *store.Tx, f Filter, cursor string, bound int64, order string, lim
 		return nil, nil
 	}
 	sql, args := "SELECT "+cols+" FROM eventlog_event WHERE "+cursor, []any{bound}
-	for _, c := range []struct{ col, val string }{{"json_extract(actor, '$.principal')", f.Actor}, {"object", f.Object}, {"type", f.Type}, {"grant_id", f.Grant}, {"import_batch", f.Imported}} {
+	for _, c := range []struct{ col, val string }{{"json_extract(actor, '$.principal')", f.Actor}, {"object", f.Object}, {"type", f.Type}, {"grant_id", f.Grant}, {"import_batch", f.Imported}, {"json_extract(NULLIF(basis, ''), '$.tier')", f.Tier}} {
 		if c.val != "" {
 			sql, args = sql+" AND "+c.col+" = ?", append(args, c.val)
 		}

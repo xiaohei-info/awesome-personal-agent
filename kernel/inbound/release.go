@@ -61,7 +61,7 @@ func parseRelease(in json.RawMessage) (releaseIn, error) {
 }
 
 func rejudgeSpec() command.Spec {
-	return command.Spec{Name: CmdBacklogRejudge, Action: authz.ActionManageSource, Tier: authz.TierWords,
+	return command.Spec{Name: CmdBacklogRejudge, Action: authz.ActionManageSource, Tier: authz.TierOrganize,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseRelease(in)
 			return authz.Object{ID: v.Event}, err

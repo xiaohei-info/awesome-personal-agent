@@ -36,7 +36,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 const (
@@ -177,7 +177,7 @@ func (e *env) configure() {
 	e.t.Helper()
 	err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}, 1000
+			p.GenerateEndpoint = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}
 			p.JudgeEndpoint = &policy.JudgeEndpoint{URL: e.cls.URL(), Protocol: policy.ProtocolProbability, Locality: policy.LocalityLocal, TimeoutMs: 1000}
 			return nil
 		})
@@ -191,7 +191,7 @@ func (e *env) configure() {
 func (e *env) do(cmd string, in any) json.RawMessage {
 	e.t.Helper()
 	b, _ := json.Marshal(in)
-	r, err := e.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	r, err := e.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner"})
 	if err != nil {
 		e.t.Fatalf("%s: %v", cmd, err)
 	}
@@ -781,7 +781,7 @@ func TestSettleValidationAndPackWithoutRule(t *testing.T) {
 	e := setup(t, false)
 	id := e.waiting(domain.WaitingHuman, "小王")
 	in, _ := json.Marshal(map[string]any{"id": id, "pending": 1, "action": "bogus", "due": t0})
-	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: "followup.settle", Input: in, Owner: "owner", Evidence: "x"}); err == nil {
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: "followup.settle", Input: in, Owner: "owner"}); err == nil {
 		t.Fatal("bad action accepted")
 	}
 	e.advance(first) // 到期登记待跟进，再卸掉包

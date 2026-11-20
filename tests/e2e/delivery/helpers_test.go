@@ -79,7 +79,7 @@ func route(extra map[string]string) map[string]string {
 func (f *fx) task(title string, extra ...string) string {
 	f.t.Helper()
 	args := append([]string{"item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", f.Projects["acc-work"], "--evidence", "建个任务"}, extra...)
+		"--project", f.Projects["acc-work"]}, extra...)
 	var m struct {
 		ID string `json:"id"`
 	}

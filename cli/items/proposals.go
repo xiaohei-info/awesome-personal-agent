@@ -16,7 +16,7 @@ func init() {
 	client.Register("proposals", proposals)
 }
 
-const attachUsage = "usage: apa attach <id> --to <item id> [--reason <t>] [--evidence <owner's words> | --grant <id>]"
+const attachUsage = "usage: apa attach <id> --to <item id> [--reason <t>]"
 
 // attach：建议的第三种处置，补到已有事项。POST /items/{id}/attach；目标是否合法由内核判定（404/409）。
 func attach(c *client.Ctx, args []string) error {
@@ -42,7 +42,7 @@ func attach(c *client.Ctx, args []string) error {
 	return c.Print(out)
 }
 
-const proposalsUsage = "usage: apa proposals apply (--recommended | --file <plan.json|->) [--source <id>] [--project <id>] [--evidence <owner's words> | --grant <id>]"
+const proposalsUsage = "usage: apa proposals apply (--recommended | --file <plan.json|->) [--source <id>] [--project <id>]"
 
 // proposals apply：批量处理建议，POST /proposals/batch。每条各自成败，输出内核返回的逐条结果。
 func proposals(c *client.Ctx, args []string) error {

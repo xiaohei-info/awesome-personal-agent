@@ -22,8 +22,8 @@ func TestFlowAgentRevert(t *testing.T) {
 	var renameSeq int64
 
 	t.Run("ACT-REV-01 查看 agent 变更视图", func(t *testing.T) {
-		f.apa(f.DEL, 0, "item", "update", target, "--title", "renamed-by-agent", "--reason", "clearer title", "--evidence", "owner: rename it")
-		f.apa(f.DEL, 0, "decide", decided, "--option", "A", "--evidence", "owner: yes, ship it")
+		f.apa(f.DEL, 0, "item", "update", target, "--title", "renamed-by-agent", "--reason", "clearer title")
+		f.apa(f.DEL, 0, "decide", decided, "--option", "A")
 
 		var mine []step
 		for _, s := range f.agentChanges("") {
@@ -44,8 +44,9 @@ func TestFlowAgentRevert(t *testing.T) {
 			t.Fatalf("agent 变更视图缺记录（改标题 %v，代答 %v）: %+v", rename != nil, decide != nil, mine)
 		}
 		for _, s := range []*step{rename, decide} {
-			if s.Actor.Principal == "" || s.Actor.OnBehalfOf != "owner" || s.Ev == "" {
-				t.Errorf("应带操作者与证据: %+v", *s)
+			// 2026-11-20：Agent 做的永远记成 Agent 自己做的，不带"代本人"与本人原话（§14.3 审计）。
+			if s.Actor.Principal == "" || s.Actor.OnBehalfOf != "" || s.Ev != "" {
+				t.Errorf("应带操作者、不带代本人与原话: %+v", *s)
 			}
 		}
 		if len(mine) != 2 {
@@ -84,12 +85,13 @@ func TestFlowAgentRevert(t *testing.T) {
 		}
 	})
 
-	t.Run("ACT-REV-03 撤销只在 Web", func(t *testing.T) {
-		f.apa(f.DEL, 0, "item", "update", target, "--title", "second-title", "--reason", "again", "--evidence", "owner: again")
+	// 2026-11-20 改写：撤销是 3a；档位未放开的 delegate（DELO）得 403 tier_closed，worker 与 observer 在范围外。
+	t.Run("ACT-REV-03 撤销不对档位未放开的钥匙开放", func(t *testing.T) {
+		f.apa(f.DEL, 0, "item", "update", target, "--title", "second-title", "--reason", "again")
 		last := f.last(target, "item.updated")
 		changes := func() int { return len(f.events(target, "")) - len(f.events(target, "command.rejected")) }
 		n := changes()
-		for name, tok := range map[string]string{"DEL": f.DEL, "WRK": f.WRK, "OBS": f.OBS} {
+		for name, tok := range map[string]string{"DELO": f.DELO, "WRK": f.WRK, "OBS": f.OBS} {
 			if r := f.APIRaw("POST", "/v1/items/"+target+"/revert", `{"event":`+strconv.FormatInt(last.Seq, 10)+`}`, tok); r.Code != 403 {
 				t.Errorf("%s 请求撤销应被拒绝(403)，实际 %d %s", name, r.Code, r.Body)
 			}

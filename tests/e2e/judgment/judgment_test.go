@@ -363,11 +363,12 @@ func TestFlowJudgmentRecord(t *testing.T) {
 	})
 
 	// ---- ACT-JRC-13 ----
-	step("ACT-JRC-13 不确定带、影子模式与抽检结论不能经凭据写入", func(t *testing.T) {
+	step("ACT-JRC-13 不确定带、影子模式与抽检结论不能经档位未放开的凭据写入", func(t *testing.T) {
 		before := policyChanged()
 		var bandsBefore string
 		bandsBefore = f.webOK("GET", "/settings/judgment", "", 200)
-		for _, tok := range []string{f.DEL, f.OBS} {
+		// 判断设置与抽检结论是 3a（2026-11-20）：只整理的钥匙（DELO）得 23，observer 在范围外。
+		for _, tok := range []string{f.DELO, f.OBS} {
 			if r := f.APIRaw("PUT", "/v1/settings/judgment", `{"bands":[],"shadow":["triage-screen"]}`, tok); r.Code != 403 {
 				t.Errorf("PUT /settings/judgment 凭据写入应 403，实际 %d %s", r.Code, r.Body)
 			}

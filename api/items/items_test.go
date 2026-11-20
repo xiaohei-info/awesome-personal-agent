@@ -142,6 +142,27 @@ func (e *env) token(kind auth.Kind, executor string) func(*http.Request) {
 	return hdr("Authorization", "Bearer "+secret)
 }
 
+// agent 签一把归属 Agent id 的 delegate 钥匙，并由本人把该 Agent 的档位设为 tier。
+func (e *env) agent(id, tier string) func(*http.Request) {
+	e.t.Helper()
+	var secret string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, s, err := e.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: id, Harness: "h"})
+		if err != nil {
+			return err
+		}
+		secret = s
+		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent[id] = policy.AgentAllowance{Tier: tier}
+			return nil
+		})
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return hdr("Authorization", "Bearer "+secret)
+}
+
 type writeResp struct {
 	ID       string `json:"id"`
 	Version  int64  `json:"version"`
@@ -440,18 +461,6 @@ func TestExportExtCanOnlyReadItems(t *testing.T) {
 	}
 	if rec := e.do("PATCH", "/v1/items/"+id, `{"title":"x"}`, exp); rec.Code != 403 {
 		t.Fatalf("export update: %d %s", rec.Code, rec.Body)
-	}
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, _, _, err := kitems.Revise(tx, id, "test", time.Now(), func(it *domain.Item) error {
-			it.Ask = &domain.Ask{AskInput: domain.AskInput{Question: "q", FreeText: true}, AskKernelState: domain.AskKernelState{ScreeningPending: true}}
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if rec := e.do("GET", "/v1/items/"+id, "", exp); rec.Code != 200 || strings.Contains(rec.Body.String(), "secret title") {
-		t.Fatalf("screening not redacted: %d %s", rec.Code, rec.Body)
 	}
 }
 

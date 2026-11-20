@@ -311,7 +311,7 @@ func (s *Service) Intercept(ctx context.Context, ev domain.SourceEvent, onUpdate
 	}
 	in, _ := json.Marshal(attachIn{Event: ev.ID, Item: p.item, Applied: p.how != forward, Echo: p.how == echo})
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: CmdAttach, Input: in, IdemKey: "followmsg:attach:" + ev.ID,
-		Chain: command.Chain{Mode: command.ChainKeep, From: p.item}, Evidence: "followmsg", Owner: s.o.Owner})
+		Chain: command.Chain{Mode: command.ChainKeep, From: p.item}, Owner: s.o.Owner})
 	return err == nil, "", err
 }
 
@@ -326,7 +326,7 @@ func (s *Service) wake(ctx context.Context, item string, ev domain.SourceEvent) 
 	in, _ := json.Marshal(map[string]string{"id": item, "to": string(domain.PhaseOpen),
 		"reason": "收到回音：来源事件 " + ev.ID + "（" + ev.Type + "）"})
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: s.onBehalf(), Command: "item.transition", Input: in, IdemKey: "followmsg:echo:" + ev.ID,
-		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Evidence: "followmsg", Owner: s.o.Owner})
+		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Owner: s.o.Owner})
 	return err
 }
 
@@ -345,7 +345,7 @@ func (s *Service) refresh(ctx context.Context, item string, ev domain.SourceEven
 	}
 	in, _ := json.Marshal(patch)
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: s.onBehalf(), Command: "item.update", Input: in, IdemKey: "followmsg:update:" + ev.ID,
-		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Evidence: "followmsg", Owner: s.o.Owner})
+		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Owner: s.o.Owner})
 	return err
 }
 
@@ -448,7 +448,7 @@ func (s *Service) after(ctx context.Context, c command.Commit) error {
 func (s *Service) do(ctx context.Context, cmd, item string, in any) error {
 	b, _ := json.Marshal(in)
 	_, err := s.o.Exec.Do(ctx, command.Request{Identity: system, Command: cmd, Input: b,
-		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Evidence: "followmsg", Owner: s.o.Owner})
+		Chain: command.Chain{Mode: command.ChainKeep, From: item}, Owner: s.o.Owner})
 	return err
 }
 
@@ -477,7 +477,7 @@ func attach() command.Spec {
 		var v attachIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: CmdAttach, Action: authz.ActionUpdateOwn,
+	return command.Spec{Name: CmdAttach, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return ownObject(v.Event), err
@@ -525,7 +525,7 @@ func addEchoSource(c *command.Ctx, v attachIn) error {
 	if _, err := command.Bump(c.Tx, w.Object); err != nil {
 		return err
 	}
-	_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "echo source event " + v.Event, Evidence: c.Evidence})
+	_, err = c.Emit(domain.Event{Type: w.Type, Object: w.Object, Payload: w.Payload, Reason: "echo source event " + v.Event})
 	return err
 }
 
@@ -534,7 +534,7 @@ func ack() command.Spec {
 		var v ackIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: CmdAck, Action: authz.ActionUpdateOwn,
+	return command.Spec{Name: CmdAck, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return ownObject(v.Item), err
@@ -567,10 +567,7 @@ func handback() command.Spec {
 		var v handbackIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: CmdHandback, Action: authz.ActionUpdateOwn, Tier: authz.TierDecide,
-		Bound: func(tx *store.Tx, c command.Caller, o authz.Object, _ json.RawMessage) (bool, error) {
-			return items.BoundTo(tx, c.Actor.Principal, o)
-		},
+	return command.Spec{Name: CmdHandback, Action: authz.ActionUpdateOwn, Tier: authz.TierOrganize,
 		Object: func(tx *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			if err != nil {
@@ -591,7 +588,7 @@ func handback() command.Spec {
 			if err != nil {
 				return authz.Object{}, err
 			}
-			return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Tags: it.Tags, Project: it.Project}, nil
+			return authz.Object{ID: it.ID, Assignee: it.Assignee, Kind: string(it.Kind), Project: it.Project}, nil
 		},
 		Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 			if v, _ := parse(in); strings.TrimSpace(v.Reason) == "" {
@@ -614,7 +611,7 @@ func release() command.Spec {
 		var v releaseIn
 		return v, decode(in, &v)
 	}
-	return command.Spec{Name: CmdRelease, Action: authz.ActionUpdateOwn,
+	return command.Spec{Name: CmdRelease, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parse(in)
 			return ownObject(v.Item), err

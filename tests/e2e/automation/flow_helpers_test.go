@@ -374,7 +374,7 @@ func (k *kit) declareHarness(name, mode string) *accHarness {
 		"session": map[string]any{"extract": "$.session_id"},
 		"access":  map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}},
 	}})
-	if r := k.Apa(k.DEL, string(decl), "declare", "-", "--evidence", "验收声明"+name); r.Code != 0 {
+	if r := k.Apa(k.DEL, string(decl), "declare", "-"); r.Code != 0 {
 		k.t.Fatalf("apa declare %s: %d %s%s", name, r.Code, r.Stdout, r.Stderr)
 	}
 	k.webOK("POST", "/v1/settings/declarations/"+name+"/1/confirm", "", 200)

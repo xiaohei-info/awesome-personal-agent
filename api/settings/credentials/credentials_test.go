@@ -202,23 +202,31 @@ func TestBootstrapIssueListRevokeToken(t *testing.T) {
 	}
 }
 
-// 授权矩阵：这些路由只接受 Web 会话。
+// 授权矩阵：这些路由只接受 Web 会话。签发与吊销是 3b：Agent 钥匙一律硬线（20，先于范围）；
+// 列出钥匙是只给 Web 的读，Agent 钥匙在范围外（4）。ext 钥匙调不了这些命令（4）。
 func TestOnlyWebSessionMayManageCredentials(t *testing.T) {
 	e := setup(t)
 	target := e.issue("/v1/settings/tokens", `{"kind":"observer"}`)
 	ext := e.issue("/v1/settings/ext-keys", `{"scope":"channel","label":"tg"}`)
 	obs, wrk, dlg := target.Secret, e.issue("/v1/settings/tokens", `{"kind":"worker"}`).Secret, e.issue("/v1/settings/tokens", `{"kind":"delegate"}`).Secret
 
-	paths := []struct{ method, path, body string }{
-		{"GET", "/v1/settings/tokens", ""},
-		{"POST", "/v1/settings/tokens", `{"kind":"worker"}`},
-		{"DELETE", "/v1/settings/tokens/" + target.Credential.ID, ""},
-		{"GET", "/v1/settings/ext-keys", ""},
-		{"POST", "/v1/settings/ext-keys", `{"scope":"x"}`},
-		{"DELETE", "/v1/settings/ext-keys/" + ext.Credential.ID, ""},
+	paths := []struct {
+		method, path, body string
+		power              bool
+	}{
+		{"GET", "/v1/settings/tokens", "", false},
+		{"POST", "/v1/settings/tokens", `{"kind":"worker"}`, true},
+		{"DELETE", "/v1/settings/tokens/" + target.Credential.ID, "", true},
+		{"GET", "/v1/settings/ext-keys", "", false},
+		{"POST", "/v1/settings/ext-keys", `{"scope":"x"}`, true},
+		{"DELETE", "/v1/settings/ext-keys/" + ext.Credential.ID, "", true},
 	}
 	before := len(e.list("/v1/settings/tokens")) + len(e.list("/v1/settings/ext-keys"))
 	for _, p := range paths {
+		agent := domain.CodePermissionDenied
+		if p.power {
+			agent = domain.CodeWebOnly
+		}
 		for name, c := range map[string]struct {
 			mod  func(*http.Request)
 			want domain.Code
@@ -226,9 +234,9 @@ func TestOnlyWebSessionMayManageCredentials(t *testing.T) {
 		}{
 			"none":     {nil, domain.CodeUnauthenticated, 401},
 			"bad":      {bearer("apa_wrk_nope"), domain.CodeUnauthenticated, 401},
-			"observer": {bearer(obs), domain.CodePermissionDenied, 403},
-			"worker":   {bearer(wrk), domain.CodePermissionDenied, 403},
-			"delegate": {bearer(dlg), domain.CodeWebOnly, 403}, // 退出码 20
+			"observer": {bearer(obs), agent, 403},
+			"worker":   {bearer(wrk), agent, 403},
+			"delegate": {bearer(dlg), agent, 403},
 			"ext":      {bearer(ext.Secret), domain.CodePermissionDenied, 403},
 		} {
 			r := e.do(p.method, p.path, p.body, c.mod)
@@ -245,7 +253,7 @@ func TestOnlyWebSessionMayManageCredentials(t *testing.T) {
 			t.Fatalf("a refused caller revoked %s", c.ID)
 		}
 	}
-	// delegate 的越权尝试在账本留痕（退出码 20）。
+	// Agent 钥匙的越权尝试在账本留痕（退出码 20 与 4）。
 	var rejected int
 	e.st.View(context.Background(), func(tx *store.Tx) error {
 		es, err := eventlog.ReadObject(tx, "settings:credentials")
@@ -259,8 +267,8 @@ func TestOnlyWebSessionMayManageCredentials(t *testing.T) {
 		}
 		return nil
 	})
-	if rejected != 6 {
-		t.Fatal("each of the 6 delegate attempts must leave a command.rejected event")
+	if rejected != 18 { // 3 种 Agent 钥匙 × 6 条路由：硬线与范围外的拒绝都留痕
+		t.Fatalf("each Agent-key attempt must leave a command.rejected event, got %d", rejected)
 	}
 
 	// Cookie 写请求缺 CSRF 令牌被拒。

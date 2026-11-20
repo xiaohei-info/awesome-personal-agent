@@ -148,7 +148,7 @@ func TestFetchStoresContentAddressedBlobAndRecordsItInTheManifest(t *testing.T) 
 	}
 }
 
-// 授权：Web 登录与附本人原话的 delegate 可取回；observer、worker、运行凭据不可；delegate 没有本人原话是退出码 23；
+// 授权：取回附件是一档，Web 与 delegate 直接可取回；observer、worker、运行凭据在钥匙范围外（4）；
 // 被拒的调用者不会触发来源程序，也不改清单。
 func TestFetchAuthorization(t *testing.T) {
 	e, id, calls := fetchEnv(t)
@@ -156,20 +156,14 @@ func TestFetchAuthorization(t *testing.T) {
 	before, _, _, _ := e.attachmentsPart(id)
 
 	denied := map[string]resp{
-		"observer":   e.do(e.token(auth.Observer), "POST", path, ""),
-		"worker":     e.do(e.token(auth.Worker), "POST", path, ""),
-		"run":        e.do(e.runCredential(), "POST", path, ""),
-		"no words":   e.do(e.token(auth.Delegate), "POST", path, "", "X-APA-Evidence", ""),
-		"not direct": e.do(e.token(auth.Delegate), "POST", path, "", "X-APA-Session-Kind", "group"),
+		"observer": e.do(e.token(auth.Observer), "POST", path, ""),
+		"worker":   e.do(e.token(auth.Worker), "POST", path, ""),
+		"run":      e.do(e.runCredential(), "POST", path, ""),
 	}
 	for name, r := range denied {
-		t.Logf("%s: %d %s", name, r.Code, r.code())
-		if r.Code != 403 {
+		if r.Code != 403 || r.code() != "permission_denied" {
 			t.Errorf("%s: got %d %s", name, r.Code, r.Body)
 		}
-	}
-	if c := denied["no words"].code(); c != "basis_required" {
-		t.Errorf("delegate without the owner's words must be basis_required (exit 23), got %s", c)
 	}
 	if len(*calls) != 0 {
 		t.Fatalf("a denied caller must not start the source program: %+v", *calls)
@@ -179,7 +173,7 @@ func TestFetchAuthorization(t *testing.T) {
 	}
 
 	if r := e.do(e.token(auth.Delegate), "POST", path, ""); r.Code != 200 {
-		t.Fatalf("delegate with the owner's words: %d %s", r.Code, r.Body)
+		t.Fatalf("delegate (tier 1): %d %s", r.Code, r.Body)
 	}
 	if len(*calls) != 1 {
 		t.Fatalf("calls: %+v", *calls)

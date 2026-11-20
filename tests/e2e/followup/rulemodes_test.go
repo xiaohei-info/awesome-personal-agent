@@ -82,8 +82,8 @@ func (f *fx) openItem(tag string) string {
 	f.t.Helper()
 	id := decode[struct {
 		ID string `json:"id"`
-	}](f.t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "rule-"+tag, "--tags", tag, "--reason", "rule e2e", "--evidence", "rule e2e").Stdout).ID
-	f.apa(f.DEL, 0, "item", "transition", id, "--to", "open", "--reason", "rule e2e", "--evidence", "rule e2e")
+	}](f.t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "rule-"+tag, "--tags", tag, "--reason", "rule e2e").Stdout).ID
+	f.apa(f.DEL, 0, "item", "transition", id, "--to", "open", "--reason", "rule e2e")
 	return id
 }
 
@@ -127,8 +127,9 @@ func TestFlowRuleModes(t *testing.T) {
 		}
 	})
 
-	step(t, "ACT-RULE-03 只在 Web 切换到 auto", func(t *testing.T) {
-		if r := f.APIRaw("PATCH", "/v1"+modePath(tagKey), `{"mode":"auto"}`, f.DEL); r.Code != 403 {
+	// 2026-11-20 改写：切规则模式是 3a，档位未放开的 Agent（DELO）得 403 tier_closed。
+	step(t, "ACT-RULE-03 档位未放开的钥匙不能切换到 auto", func(t *testing.T) {
+		if r := f.APIRaw("PATCH", "/v1"+modePath(tagKey), `{"mode":"auto"}`, f.DELO); r.Code != 403 {
 			t.Errorf("token 切 auto 应 403，实际 %d %s", r.Code, r.Body)
 		}
 		if f.rules()["acc-tag"].Mode != "observe" {
@@ -184,7 +185,7 @@ func TestFlowRuleModes(t *testing.T) {
 		}
 		id := decode[struct {
 			ID string `json:"id"`
-		}](t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "loop", "--tags", "acc-loop", "--reason", "rule e2e", "--evidence", "rule e2e").Stdout).ID
+		}](t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "loop", "--tags", "acc-loop", "--reason", "rule e2e").Stdout).ID
 		waitFor(t, "第一层动作 set_phase=waiting 应发生", 30*time.Second, func() bool { return f.show(id).Phase == "waiting" })
 		f.TCAdvance(60) // 触发后等 1 分钟
 		time.Sleep(3 * time.Second)
@@ -303,7 +304,7 @@ func freshInstall(t *testing.T) {
 	step(t, "ACT-RULE-11 截止提醒开箱生效", func(t *testing.T) {
 		id := decode[struct {
 			ID string `json:"id"`
-		}](t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--phase", "open", "--title", "RULE-11 截止提醒", "--evidence", "owner: add").Stdout).ID
+		}](t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--phase", "open", "--title", "RULE-11 截止提醒").Stdout).ID
 		f.webOK("PATCH", "/items/"+id, `{"deadline":"`+time.Now().Add(time.Minute).UTC().Format(time.RFC3339)+`"}`, 200)
 		f.TCAdvance(120)
 		waitFor(t, "截止已过", 30*time.Second, func() bool { return len(f.events(id, "item.deadline_passed")) == 1 })

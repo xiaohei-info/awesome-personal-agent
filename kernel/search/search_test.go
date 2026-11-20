@@ -29,7 +29,7 @@ func agent(lvl authz.Level) command.Trusted {
 }
 
 var (
-	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner    = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	worker   = agent(authz.LevelWorker)
 	observer = agent(authz.LevelObserver)
 )
@@ -204,23 +204,24 @@ func TestIndexFollowsCurrentRevision(t *testing.T) {
 	if len(e.search(t, Query{Text: "苹果"})) != 1 {
 		t.Fatal("old body must hit")
 	}
-	e.commit(t, map[string]any{"id": a.Material, "content": "新内容香蕉", "based_on": a.Revision})
+	var b materials.Result
+	json.Unmarshal(e.must(t, owner, "material.commit", map[string]any{"id": a.Material, "content": "新内容香蕉", "based_on": a.Revision, "reason": "r"}), &b)
 	if h := e.search(t, Query{Text: "苹果"}); len(h) != 0 {
 		t.Fatalf("superseded body still indexed: %v", ids(h))
 	}
 	if h := e.search(t, Query{Text: "香蕉"}); len(h) != 1 {
 		t.Fatal("new body must hit")
 	}
-	// 需求类默认 proposed：确认前不命中，确认后命中。
-	p := e.commit(t, map[string]any{"project": e.prj, "kind": "requirement", "title": "需求单", "content": "待确认的橘子"})
+	// 档位只整理的 Agent 改已有材料留待确认：确认前不命中，确认后命中。
+	p := e.commit(t, map[string]any{"id": a.Material, "content": "待确认的橘子", "based_on": b.Revision})
 	if p.State != materials.StateProposed {
 		t.Fatalf("want proposed, got %s", p.State)
 	}
 	if h := e.search(t, Query{Text: "橘子"}); len(h) != 0 {
 		t.Fatalf("proposed revision indexed: %v", ids(h))
 	}
-	b, _ := json.Marshal(map[string]any{"id": p.Revision, "reason": "ok"})
-	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: "revision.confirm", Input: b, Owner: "owner", WebURL: "http://web/m"}); err != nil {
+	in, _ := json.Marshal(map[string]any{"id": p.Revision, "reason": "ok"})
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: "revision.confirm", Input: in, Owner: "owner", WebURL: "http://web/m"}); err != nil {
 		t.Fatal(err)
 	}
 	if h := e.search(t, Query{Text: "橘子"}); len(h) != 1 {

@@ -69,11 +69,11 @@ $APA report "$ITEM" --outcome done --summary 任务型完成 --link https://exam
 	f.step("ACT-BGT-03 运行凭据只限目标范围", func(t *testing.T) {
 		// 无关事项：另一条委派链上的子事项（assignee 是 WRK 的执行者），运行凭据不属于它。
 		other := f.task("bgt-unrelated-parent", "acc-work")
-		unrelated := idOf(t, f.apa(f.DEL, 0, "delegate", "--parent", other, "--assignee", "work-host.cli", "--evidence", "e2e 准备无关子事项").Stdout)
+		unrelated := idOf(t, f.apa(f.DEL, 0, "delegate", "--parent", other, "--assignee", "work-host.cli").Stdout)
 		f.mode("summary-only", preamble+`
 $APA report "$ITEM" --outcome progress --summary 写目标 > "$OUT/target_report.out" 2>&1; rc target_report
 $APA delegate --parent "$ITEM" --assignee work-host.cli --title 运行建的子事项 > "$OUT/sub.out" 2>&1; rc sub_delegate
-$APA ask "$ITEM" --question 要继续吗 --option A=是 --option B=否 --deadline 2099-01-01T00:00:00Z --default-on-timeout B > "$OUT/timer_ask.out" 2>&1; rc timer_ask
+$APA ask "$ITEM" --question 要继续吗 --option A=是 --option B=否 --deadline 2099-01-01T00:00:00Z > "$OUT/timer_ask.out" 2>&1; rc timer_ask
 $APA report `+unrelated+` --outcome progress --summary 越界 > /dev/null 2>&1; rc other_report
 $APA item transition `+unrelated+` --to done --reason 越界 --evidence 越界 > /dev/null 2>&1; rc other_transition
 $APA project create --name evil-project > /dev/null 2>&1; rc project_create
@@ -90,7 +90,7 @@ $APA project create --name evil-project > /dev/null 2>&1; rc project_create
 		}
 		eq(t, "运行建的子事项 assignee", f.item(idFrom(f.outFile("sub.out")))["assignee"], "work-host.cli")
 		if len(f.events(idFrom(f.outFile("timer_ask.out")), "decision.requested")) == 0 {
-			t.Error("Timer（决策超时）应已建立")
+			t.Error("带截止时间的决策请求应已建立（超时默认已取消，2026-11-20）")
 		}
 	})
 

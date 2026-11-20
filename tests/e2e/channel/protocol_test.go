@@ -9,10 +9,8 @@
 package channel
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -314,67 +312,27 @@ func TestCHP09KeyScopedToChannelActions(t *testing.T) {
 	}
 }
 
-// formID 取投递里的一次性表单令牌（form_url 形如 /forms/<令牌>）。
-func formToken(t *testing.T, d *delivery) string {
-	t.Helper()
-	tok, ok := strings.CutPrefix(d.Content.FormURL, "/forms/")
-	if !ok || tok == "" {
-		t.Fatalf("投递没有一次性表单链接: %+v", d)
-	}
-	return tok
-}
-
-// ACT-CHP-10：只能发文字的渠道得到一次性表单链接：可答一次、只对该决策、过期失效。
-func TestCHP10OneShotForm(t *testing.T) {
+// ACT-CHP-10（2026-11-20 改写，一次性表单取消，§10.3）：只能发文字的渠道只收到导航用的链接，没有一次性表单；
+// 旧的表单链接只跳转到需要登录的「等你决定」，不兑现、不作答。
+func TestCHP10NoOneShotForm(t *testing.T) {
 	t.Parallel()
 	f := setup(t)
 	f.putPolicy("/settings/policy", map[string]any{"channels": map[string]any{"acc-chan": map[string]bool{"text_only": true}}})
 
-	idA, idOther := f.decision("chp-10-a"), f.decision("chp-10-other")
-	got := map[string]*delivery{}
-	for len(got) < 2 {
-		d := f.claimWithin(settle)
-		if d == nil {
-			t.Fatalf("没有领到全部决策投递: %v", got)
-		}
-		got[d.Item] = d
+	id := f.decision("chp-10-a")
+	d := f.claimWithin(settle)
+	if d == nil || d.Item != id {
+		t.Fatalf("没有领到决策投递: %+v", d)
 	}
-	tokA := formToken(t, got[idA])
-
-	// 令牌不是 Bearer：拿它读账本被拒绝，也读不到别的决策。
-	f.expect(f.APIRaw("GET", "/v1/items", "", tokA), http.StatusUnauthorized, http.StatusForbidden)
-	f.expect(f.APIRaw("GET", "/v1/items/"+idOther, "", tokA), http.StatusUnauthorized, http.StatusForbidden)
-	if r := f.WebRaw("GET", "/forms/"+tokA, "", false); r.Code != http.StatusOK || strings.Contains(r.Body, "chp-10-other") {
-		t.Fatalf("打开表单: HTTP %d %s", r.Code, r.Body)
+	if d.Content.FormURL != "" {
+		t.Errorf("投递不应再带一次性表单链接: %+v", d.Content)
 	}
-	if f.resolution(idA) != nil {
-		t.Fatal("只是打开表单就兑现了令牌")
+	// 测试客户端跟随跳转：302 落到 Web 外壳页（需要登录的「等你决定」由页面路由），不再是表单页；302 本身由 api/channel 的单测钉住。
+	if r := f.WebRaw("GET", "/forms/legacy-token", "", false); r.Code != http.StatusOK || !strings.Contains(r.Body, "<!doctype html>") {
+		t.Errorf("旧表单链接应跳到 Web 外壳页: HTTP %d %.200s", r.Code, r.Body)
 	}
-
-	f.expect(f.WebRaw("POST", "/forms/"+tokA, `{"choice":"B"}`, false), http.StatusOK)
-	if res := f.resolution(idA); res == nil || res.Choice != "B" || res.ResolvedVia != "acc-chan" {
-		t.Fatalf("表单作答没有写入决策: %+v", res)
-	}
-	if f.resolution(idOther) != nil {
-		t.Fatal("令牌作用到了别的决策")
-	}
-	f.expect(f.WebRaw("POST", "/forms/"+tokA, `{"choice":"A"}`, false), http.StatusConflict)
-	f.expect(f.WebRaw("GET", "/forms/"+tokA, "", false), http.StatusConflict)
-
-	// 过期：真实二进制没有可调的时钟，把账本里这条令牌的 expires_at 改到过去（等同 24 小时后）。
-	tokOther := formToken(t, got[idOther])
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(f.Home, "ledger.db")+"?_pragma=busy_timeout(10000)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if res, err := db.Exec(`UPDATE channel_form SET expires_at = ? WHERE item = ?`, time.Now().Add(-time.Minute).UnixNano(), idOther); err != nil {
-		t.Fatal(err)
-	} else if n, _ := res.RowsAffected(); n != 1 {
-		t.Fatalf("应改到 1 条令牌，实际 %d", n)
-	}
-	f.expect(f.WebRaw("POST", "/forms/"+tokOther, `{"choice":"A"}`, false), http.StatusConflict)
-	if f.resolution(idOther) != nil {
-		t.Fatal("过期链接仍能作答")
+	f.expect(f.WebRaw("POST", "/forms/legacy-token", `{"choice":"B"}`, false), http.StatusNotFound, http.StatusMethodNotAllowed)
+	if f.resolution(id) != nil {
+		t.Fatal("旧表单链接不应能作答")
 	}
 }

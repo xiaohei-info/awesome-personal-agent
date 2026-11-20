@@ -332,7 +332,6 @@ func (s *Service) generate(ctx context.Context, c direct.Call, out any, summary 
 func (s *Service) write(ctx context.Context, c direct.Call, req command.Request) error {
 	req.Identity = command.Trusted{Actor: s.actor(), Level: authz.LevelDelegate}
 	req.Owner, req.RuleID = s.o.Owner, c.Basis.RuleID
-	req.Evidence = "kernel drafted " + c.Basis.RuleID
 	req.Chain = command.Chain{Mode: command.ChainKeep, From: c.Target}
 	_, err := s.o.Exec.Do(ctx, req)
 	var de *domain.Error

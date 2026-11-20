@@ -10,6 +10,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -43,11 +44,14 @@ func TestAttachRoute(t *testing.T) {
 		t.Fatal("rejected attach changed the proposal")
 	}
 
-	dlg := e.token(auth.Delegate, "")
-	if rec := e.do("POST", "/v1/items/"+pc+"/attach", `{"to":"`+target+`"}`, dlg); rec.Code != 403 || code(t, rec) != domain.CodeBasisRequired {
-		t.Fatalf("delegate without evidence: %d %s", rec.Code, rec.Body)
+	// 补到已有事项是立项（二档）：只整理的 Agent 为 23，放开拍板的 Agent 直接生效。
+	if rec := e.do("POST", "/v1/items/"+pc+"/attach", `{"to":"`+target+`"}`, e.token(auth.Delegate, "")); rec.Code != 403 || code(t, rec) != domain.CodeTierClosed {
+		t.Fatalf("delegate with tier closed: %d %s", rec.Code, rec.Body)
 	}
-	rec := e.do("POST", "/v1/items/"+pc+"/attach", `{"to":"`+target+`"}`, both(dlg, hdr("X-APA-Evidence", "补到目标", "X-APA-Session", "s1", "X-APA-Session-Kind", "direct")))
+	if e.phase(pc) != domain.PhaseProposed {
+		t.Fatal("a refused attach changed the proposal")
+	}
+	rec := e.do("POST", "/v1/items/"+pc+"/attach", `{"to":"`+target+`"}`, e.agent("agent_a", policy.AllowDecide))
 	if rec.Code != 200 {
 		t.Fatalf("attach: %d %s", rec.Code, rec.Body)
 	}
@@ -65,16 +69,24 @@ type batchResp struct {
 	Results []inbound.BatchResult `json:"results"`
 }
 
-// ACT-PRH-15、17：POST /proposals/batch 逐条各自成败；形态错误、超上限整批不生效。
+// ACT-PRH-15、17：POST /proposals/batch 逐条各自成败（批量等于逐条）；形态错误、超上限整批不生效。
 func TestBatchRoute(t *testing.T) {
 	e := setup(t)
 	a, b, c := e.proposal("a"), e.proposal("b"), e.proposal("c")
 	target := e.openItem("目标")
 	plan := fmt.Sprintf(`{"mode":"explicit","actions":[{"id":"%s","do":"accept"},{"id":"%s","do":"dismiss","reason":"不需要"},{"id":"%s","do":"attach","to":"%s"},{"id":"itm-not-exist","do":"accept"}]}`, a, b, c, target)
 
-	dlg := e.token(auth.Delegate, "")
-	if rec := e.do("POST", "/v1/proposals/batch", plan, dlg); rec.Code != 403 || code(t, rec) != domain.CodeBasisRequired {
-		t.Fatalf("no evidence: %d %s", rec.Code, rec.Body)
+	// 批量等于逐条：没有整批的门，每条按同一规则判定；只整理的 Agent 每条都是 23，什么也不处理。
+	var closed batchResp
+	rec := e.do("POST", "/v1/proposals/batch", plan, e.token(auth.Delegate, ""))
+	_ = json.Unmarshal(rec.Body.Bytes(), &closed)
+	if rec.Code != 200 || len(closed.Results) != 4 || closed.Results[3].Code != domain.CodeNotFound {
+		t.Fatalf("tier closed: %d %s", rec.Code, rec.Body)
+	}
+	for _, r := range closed.Results[:3] {
+		if r.OK || r.Code != domain.CodeTierClosed {
+			t.Fatalf("each entry is judged on its own and refused: %s", rec.Body)
+		}
 	}
 	var many []string
 	for range inbound.MaxBatch + 1 {
@@ -82,11 +94,6 @@ func TestBatchRoute(t *testing.T) {
 	}
 	if rec := e.do("POST", "/v1/proposals/batch", `{"mode":"explicit","actions":[`+strings.Join(many, ",")+`]}`, e.web); rec.Code != 400 {
 		t.Fatalf("over the limit: %d %s", rec.Code, rec.Body)
-	}
-	// 缺依据：第一条是不存在的 id 也不影响整批的 403 basis_required。
-	first := fmt.Sprintf(`{"mode":"explicit","actions":[{"id":"itm-not-exist","do":"accept"},{"id":"%s","do":"accept"}]}`, a)
-	if rec := e.do("POST", "/v1/proposals/batch", first, dlg); rec.Code != 403 || code(t, rec) != domain.CodeBasisRequired {
-		t.Fatalf("invalid first entry, no evidence: %d %s", rec.Code, rec.Body)
 	}
 	for _, bad := range []string{`{}`, `{"mode":"nope"}`, `not json`, `{"mode":"explicit","actions":[],"x":1}`} {
 		if rec := e.do("POST", "/v1/proposals/batch", bad, e.web); rec.Code != 400 {
@@ -99,7 +106,7 @@ func TestBatchRoute(t *testing.T) {
 		}
 	}
 
-	rec := e.do("POST", "/v1/proposals/batch", plan, both(dlg, hdr("X-APA-Evidence", "这几条按我说的处理", "X-APA-Session", "s1", "X-APA-Session-Kind", "direct")))
+	rec = e.do("POST", "/v1/proposals/batch", plan, e.agent("agent_a", policy.AllowDecide))
 	if rec.Code != 200 {
 		t.Fatalf("batch: %d %s", rec.Code, rec.Body)
 	}

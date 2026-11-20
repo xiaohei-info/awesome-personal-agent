@@ -151,9 +151,8 @@ func (k *kit) putEndpoints(locality string, budget int) {
 		gen["max_material_chars"] = budget
 	}
 	body, _ := json.Marshal(map[string]any{
-		"judge_endpoint":       map[string]any{"url": k.Cls.URL(), "protocol": "probability-judgment/1", "locality": "local"},
-		"generate_endpoint":    gen,
-		"screening_timeout_ms": 2000,
+		"judge_endpoint":    map[string]any{"url": k.Cls.URL(), "protocol": "probability-judgment/1", "locality": "local"},
+		"generate_endpoint": gen,
 	})
 	k.web("PUT", "/v1/settings/model-endpoints", string(body), 200)
 }

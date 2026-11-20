@@ -208,7 +208,6 @@ type decisionEntry struct {
 	Project  string     `json:"project,omitempty"`
 	Question string     `json:"question,omitempty"`
 	Deadline *time.Time `json:"deadline,omitempty"`
-	WebOnly  bool       `json:"web_only"`
 	WebURL   string     `json:"web_url,omitempty"`
 }
 
@@ -344,7 +343,7 @@ func (s *Service) briefLedger(ctx context.Context, c rules.Call, p briefPlan) (o
 				}
 				d := decisionEntry{ID: it.ID, Title: it.Title, Project: pname(it.Project), WebURL: p.itemURL(it.ID)}
 				if it.Ask != nil {
-					d.Question, d.Deadline, d.WebOnly = it.Ask.Question, p.atp(it.Ask.Deadline), it.Ask.RiskClass == domain.RiskClassWebOnly
+					d.Question, d.Deadline = it.Ask.Question, p.atp(it.Ask.Deadline)
 				}
 				ds = append(ds, d)
 			}
@@ -775,8 +774,7 @@ func openItemsSection(tx *store.Tx, all []domain.Item, now time.Time, p briefPla
 	}
 	var sel []domain.Item
 	for _, it := range all {
-		if it.Kind == domain.KindBrief || !p.inScope(it) || !(it.Phase == domain.PhaseOpen || it.Phase == domain.PhaseWaiting || it.Phase == domain.PhaseNeedsInput) ||
-			it.Phase == domain.PhaseNeedsInput && it.Ask != nil && it.Ask.ScreeningPending {
+		if it.Kind == domain.KindBrief || !p.inScope(it) || !(it.Phase == domain.PhaseOpen || it.Phase == domain.PhaseWaiting || it.Phase == domain.PhaseNeedsInput) {
 			continue
 		}
 		sel = append(sel, it)

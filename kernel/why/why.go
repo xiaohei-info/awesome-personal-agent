@@ -16,13 +16,11 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// Request 是一次回放。ID 是事项 id 或运行 id（即 Event 的 object）；
-// ScreeningPending 由调用方据账本给出：该事项有 web_only 初筛未返回的决策请求（§14.4）。
+// Request 是一次回放。ID 是事项 id 或运行 id（即 Event 的 object）。
 type Request struct {
-	Actor            domain.Actor
-	Level            authz.Level
-	ID               string
-	ScreeningPending bool
+	Actor domain.Actor
+	Level authz.Level
+	ID    string
 }
 
 // Step 是时间线上的一条 Event。Redacted 为真表示该条有内容因凭据级别被裁掉；
@@ -58,11 +56,10 @@ type Judgment struct {
 	Record    *record.Record `json:"record,omitempty"`
 }
 
-// Timeline 是回放结果。ScreeningPending 为真时（仅对非 Web 凭据）Steps 为空，只返回这一标记。
+// Timeline 是回放结果。
 type Timeline struct {
-	ID               string `json:"id"`
-	ScreeningPending bool   `json:"screening_pending,omitempty"`
-	Steps            []Step `json:"steps"`
+	ID    string `json:"id"`
+	Steps []Step `json:"steps"`
 	// Alerts 是来源事件命中数值条件规则的回放（§3.12）：规则、条件、上一次与本次取值、产出的投递及其当前状态。
 	// 只含规则 id、条件文本、数值和投递的状态，不含来源正文，各凭据级别都可见。
 	Alerts []Alert `json:"alerts,omitempty"`
@@ -109,14 +106,10 @@ func Replay(tx *store.Tx, p policy.Policy, r Request) (Timeline, error) {
 	if r.ID == "" {
 		return Timeline{}, domain.NewError(domain.CodeInvalidRequest, "id is empty", "pass an item or run id")
 	}
-	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead, Object: authz.Object{ID: r.ID}}); d.Err != nil {
+	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead, Tier: authz.TierRead, Object: authz.Object{ID: r.ID}}); d.Err != nil {
 		return Timeline{}, d.Err
 	}
 	tl := Timeline{ID: r.ID, Steps: []Step{}}
-	if r.ScreeningPending && r.Level != authz.LevelWeb {
-		tl.ScreeningPending = true
-		return tl, nil
-	}
 	entries, err := eventlog.ReadObject(tx, r.ID)
 	if err != nil {
 		return Timeline{}, err
@@ -219,16 +212,14 @@ func StepOf(en eventlog.Entry, l authz.Level) Step {
 }
 
 // AuditRequest 是一次审计查询（§15.3）：按操作者、对象、类型筛选全量 Event（含被拒绝的命令）。
-// Pending 是有 web_only 初筛未返回的事项 id；非 Web 凭据看不到这些对象的事件，与回放一致。
 type AuditRequest struct {
-	Actor   domain.Actor
-	Level   authz.Level
-	Filter  eventlog.Filter
-	After   int64 // 升序翻页游标：只要序号大于它的
-	Before  int64 // 降序翻页游标：只要序号小于它的；0 表示从最新开始
-	Desc    bool  // 最新的在前；与 After 互斥
-	Limit   int
-	Pending map[string]bool
+	Actor  domain.Actor
+	Level  authz.Level
+	Filter eventlog.Filter
+	After  int64 // 升序翻页游标：只要序号大于它的
+	Before int64 // 降序翻页游标：只要序号小于它的；0 表示从最新开始
+	Desc   bool  // 最新的在前；与 After 互斥
+	Limit  int
 }
 
 // MaxAuditLimit 是单页上限。
@@ -242,7 +233,7 @@ func Audit(tx *store.Tx, p policy.Policy, r AuditRequest) ([]Step, error) {
 	if r.Limit == 0 {
 		r.Limit = 100
 	}
-	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead}); d.Err != nil {
+	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead, Tier: authz.TierRead}); d.Err != nil {
 		return nil, d.Err
 	}
 	steps := []Step{}
@@ -259,9 +250,6 @@ func Audit(tx *store.Tx, p policy.Policy, r AuditRequest) ([]Step, error) {
 		}
 		for _, en := range entries {
 			r.After, r.Before = en.Event.Seq, en.Event.Seq
-			if r.Level != authz.LevelWeb && r.Pending[en.Event.Object] {
-				continue
-			}
 			steps = append(steps, StepOf(en, r.Level))
 		}
 		if len(entries) < r.Limit {

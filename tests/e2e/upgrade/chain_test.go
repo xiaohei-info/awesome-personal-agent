@@ -77,6 +77,7 @@ type run struct {
 	groups    map[string]int    // 升级前来源事件按 来源/处置/原因 的计数
 	srv       *server
 	session   string
+	csrf      string
 	itemSeq   int
 }
 
@@ -513,8 +514,9 @@ func (r *run) upg07(t *testing.T) {
 func (r *run) newDecision(title string) string {
 	r.t.Helper()
 	r.itemSeq++
-	res := r.apa(r.home, r.direct(r.del), 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--evidence", "升级演练造一条事项")
-	id := decode[struct{ ID string }](r.t, res.Stdout).ID
+	// 2026-11-20：直接新建为进行中的事项是二档（立项），夹具里的 delegate 不归属任何 Agent、只整理；由本人在 Web 建。
+	body, _ := json.Marshal(map[string]any{"kind": "task", "title": title, "phase": "open"})
+	id := decode[struct{ ID string }](r.t, r.mustWeb(r.session, r.csrf, "POST", "/v1/items", string(body), 201)).ID
 	r.apa(r.home, r.direct(r.del), 0, "ask", id, "--question", "选哪个", "--option", "A=甲", "--option", "B=乙", "--recommend", "A")
 	return id
 }
@@ -524,7 +526,7 @@ func (r *run) upg08(t *testing.T) {
 	if code != 200 || cookie == "" {
 		t.Fatalf("夹具口令登录失败: %d", code)
 	}
-	r.session = cookie
+	r.session, r.csrf = cookie, csrf
 	web := r.srv.web(cookie, csrf, "GET", "/v1/settings/model-endpoints", "")
 	if web.Code != 200 {
 		t.Fatalf("读取端点设置: %d %s", web.Code, web.Body)
@@ -788,7 +790,7 @@ echo '{"plugin_version":"0.1.0","hooks":[],"reports_session_kind":false,"overlap
 	if err := os.WriteFile(declFile, decl, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r.apa(r.home, r.direct(r.del), 0, "declare", declFile, "--evidence", "模拟未升级的旧插件")
+	r.apa(r.home, r.direct(r.del), 0, "declare", declFile)
 	code, cookie, csrf := r.srv.webLogin(r.m.WebSecret)
 	if code != 200 {
 		t.Fatalf("登录: %d", code)
@@ -807,13 +809,13 @@ echo '{"plugin_version":"0.1.0","hooks":[],"reports_session_kind":false,"overlap
 		t.Fatalf("签发 worker 凭据: %v", err)
 	}
 	r.mustWeb(cookie, csrf, "PUT", "/v1/settings/projects/"+prj+"/allowed-executors", `{"executors":["upg-host.cli"]}`, 200)
-	delegated := decode[struct{ ID string }](t, r.apa(r.home, r.direct(r.del), 0, "item", "add", "--kind", "task", "--title", "升级演练：已委派事项",
-		"--phase", "open", "--assignee", "upg-host.cli", "--project", prj, "--evidence", "造一条已委派事项").Stdout).ID
+	dbody, _ := json.Marshal(map[string]any{"kind": "task", "title": "升级演练：已委派事项", "phase": "open", "assignee": "upg-host.cli", "project": prj})
+	delegated := decode[struct{ ID string }](t, r.mustWeb(cookie, csrf, "POST", "/v1/items", string(dbody), 201)).ID
 
-	old := r.extra(r.del, "APA_SESSION=e2e-upgrade") // 不上报会话类型（没有 APA_SESSION_KIND）
-	res := r.run(r.apaBin(), r.home, old, "decide", id, "--option", "A", "--evidence", "按本人原话同意")
-	if res.Code != 23 || !strings.Contains(res.Stderr+res.Stdout, "session_not_direct") {
-		t.Errorf("凭原话的代答应被拒（退出码 23 / session_not_direct）: %d %s%s", res.Code, res.Stdout, res.Stderr)
+	old := r.extra(r.del, "APA_SESSION=e2e-upgrade") // 旧插件写法；会话类型等自报内容 2026-11-20 起不参与判定
+	res := r.run(r.apaBin(), r.home, old, "decide", id, "--option", "A")
+	if res.Code != 23 || !strings.Contains(res.Stderr+res.Stdout, "tier_closed") {
+		t.Errorf("夹具 delegate 不归属 Agent、档位只整理，代答应被拒（退出码 23 / tier_closed）: %d %s%s", res.Code, res.Stdout, res.Stderr)
 	}
 	show := r.apa(r.home, r.extra(r.obs), 0, "item", "show", id)
 	contains(t, "被拒的代答不应生效", show.Stdout, `"phase":"needs_input"`)
@@ -826,15 +828,11 @@ echo '{"plugin_version":"0.1.0","hooks":[],"reports_session_kind":false,"overlap
 		t.Errorf("旧回执写法的 apa report 应不受影响: %d %s%s", res.Code, res.Stdout, res.Stderr)
 	}
 	rep := r.doctorReport(r.home, "--json")
-	found := false
+	// 会话类型不再参与判定（2026-11-20），doctor 不再因旧插件不上报会话类型而告警。
 	for _, d := range rep["host_plugin"].Details {
-		if d.Subject == "acc-oldplug" {
-			found = true
-			contains(t, "doctor 宿主插件一项", d.Why+" "+d.Next, "does not report the session type", "upgrade the plugin together with the kernel")
+		if d.Subject == "acc-oldplug" && (d.Status != "ok" || d.Next != "") {
+			t.Errorf("doctor 不应再因会话类型要求升级旧插件: %+v", d)
 		}
-	}
-	if !found {
-		t.Errorf("doctor 宿主插件一项应指出旧插件: %+v", rep["host_plugin"])
 	}
 }
 

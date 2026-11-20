@@ -256,38 +256,10 @@ func (f *fx) asRun(runID, cred string, want int, env map[string]string, args ...
 	return r.Stdout, r.Stderr
 }
 
-// delAnswer 以 DEL 在 direct 会话里附原话代答一条决策，期望退出码 want。
+// delAnswer 以网关钥匙 DELO 代答一条决策（带的自报会话不参与判定），期望退出码 want。
 func (f *fx) delAnswer(decision string, want int) {
 	f.t.Helper()
-	f.apaEnv(f.DEL, want, map[string]string{"APA_SESSION": "wak-other", "APA_SESSION_KIND": "direct"}, "decide", decision, "--option", "A", "--evidence", "选 A")
-}
-
-func (f *fx) grantFor(cred string) string {
-	f.t.Helper()
-	var creds struct {
-		Credentials []struct{ ID, Label string } `json:"credentials"`
-	}
-	if err := json.Unmarshal([]byte(f.webOK("GET", "/settings/tokens", "", 200)), &creds); err != nil {
-		f.t.Fatal(err)
-	}
-	id := ""
-	for _, c := range creds.Credentials {
-		if c.Label == cred {
-			id = c.ID
-		}
-	}
-	if id == "" {
-		f.t.Fatalf("没有找到凭据 %s", cred)
-	}
-	body := `{"grantee":{"credential":"` + id + `"},"scope":{"projects":["` + f.Projects["acc-open"] + `"]},"actions":["decision.answer"],"expires_at":"` +
-		time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `","reason":"away"}`
-	var g struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(f.webOK("POST", "/settings/grants", body, 201)), &g); err != nil || g.ID == "" {
-		f.t.Fatalf("签发授权单没有返回 id: %v", err)
-	}
-	return g.ID
+	f.apaEnv(f.DELO, want, map[string]string{"APA_SESSION": "wak-other", "APA_SESSION_KIND": "direct"}, "decide", decision, "--option", "A")
 }
 
 const (
@@ -312,7 +284,7 @@ echo '{"cursor":"c'"$(ls "$Q/done" | wc -l | tr -d ' ')"'"}'
 // 委派子事项上的消息保持待转发，由负责它的运行取走（§9.4）。
 func (f *fx) attachedChild(parent string) string {
 	f.t.Helper()
-	child := idOf(f.t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", "wake-child", "--evidence", "委派带 PR 的子事项").Stdout)
+	child := idOf(f.t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", "wake-child").Stdout)
 	f.attachMessages(child)
 	return child
 }

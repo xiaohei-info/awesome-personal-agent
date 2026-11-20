@@ -81,19 +81,18 @@ def test_submodules_register_independently(core):
     assert set(ctx.sections) == {"apa.instructions"}
 
 
-# ACT-HCTX-09、ACT-HCTX-12：钩子发出的 apa 调用也带 APA_SESSION、APA_HARNESS 和 APA_SESSION_KIND；终端会话固定 direct，
-# 网关里的群聊报 group，不继承网关进程环境里的旧值。
-def test_hook_calls_carry_session_identity_and_kind(core, tmp_path, monkeypatch):
+# ACT-HCTX-09：钩子发出的 apa 调用带 APA_SESSION、APA_HARNESS；会话类型不参与判定（§14.3），插件不从会话绑定推算它。
+def test_hook_calls_carry_session_identity(core, tmp_path, monkeypatch):
     import sys
     import types
-    monkeypatch.setenv("APA_BIN", fake_apa(tmp_path, 'echo "$APA_SESSION $APA_HARNESS $APA_SESSION_KIND"'))
-    monkeypatch.setenv("APA_SESSION_KIND", "direct")  # stale value in the gateway's own environment
-    bound = {}
+    monkeypatch.setenv("APA_BIN", fake_apa(tmp_path, 'echo "$APA_SESSION $APA_HARNESS [$APA_SESSION_KIND]"'))
+    monkeypatch.delenv("APA_SESSION_KIND", raising=False)
+    bound = {"HERMES_SESSION_PLATFORM": "telegram", "HERMES_SESSION_CHAT_TYPE": "group", "HERMES_SESSION_USER_ID": "7"}
     mod = types.ModuleType("gateway.session_context")
     mod.get_session_env = lambda name, default="": bound.get(name, default)
     monkeypatch.setitem(sys.modules, "gateway", types.ModuleType("gateway"))
     monkeypatch.setitem(sys.modules, "gateway.session_context", mod)
     render = sections(core)["apa.persona"][0]
-    assert render({"session_id": "s1"}) == "s1 hermes direct"  # terminal: nothing bound
-    bound.update(HERMES_SESSION_PLATFORM="telegram", HERMES_SESSION_CHAT_TYPE="group", HERMES_SESSION_USER_ID="7")
-    assert render({"session_id": "s2"}) == "s2 hermes group"
+    assert render({"session_id": "s1"}) == "s1 hermes []"
+
+

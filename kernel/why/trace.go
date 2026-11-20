@@ -222,7 +222,7 @@ func readTrace(p policy.Policy, r Request) error {
 	if r.ID == "" {
 		return domain.NewError(domain.CodeInvalidRequest, "id is empty", "pass a source event or item id")
 	}
-	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead, Object: authz.Object{ID: r.ID}}); d.Err != nil {
+	if d := authz.Decide(p, authz.Request{Actor: r.Actor, Level: r.Level, Action: authz.ActionRead, Tier: authz.TierRead, Object: authz.Object{ID: r.ID}}); d.Err != nil {
 		return d.Err
 	}
 	return nil

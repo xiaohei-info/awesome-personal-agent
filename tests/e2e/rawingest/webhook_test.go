@@ -94,12 +94,12 @@ func TestFlowRawWebhook(t *testing.T) {
 	hdr := func() map[string]string { return map[string]string{"X-Acc-Token": secret, "X-Acc-Event": "created"} }
 
 	k.step("登记只用字段映射（映射不写 detail）的 webhook 来源并取接收密钥", func(t *testing.T) {
-		k.apa(k.DEL, 0, "source", "add", "--id", src, "--name", src, "--type", "webhook", "--source-type", "acc-hook",
-			"--config", `{"scheme":"acc-token","mappings":["acc-generic"]}`, "--evidence", "owner asked")
+		k.OwnerApaOK("", "source", "add", "--id", src, "--name", src, "--type", "webhook", "--source-type", "acc-hook",
+			"--config", `{"scheme":"acc-token","mappings":["acc-generic"]}`)
 		var out struct {
 			Secret string `json:"secret"`
 		}
-		r := k.apa(k.DEL, 0, "source", "webhook", "create", src, "--evidence", "owner asked")
+		r := k.OwnerApaOK("", "source", "webhook", "create", src)
 		if err := json.Unmarshal([]byte(r.Stdout), &out); err != nil || out.Secret == "" {
 			t.Fatalf("webhook create 没有返回密钥: %q", r.Stdout)
 		}

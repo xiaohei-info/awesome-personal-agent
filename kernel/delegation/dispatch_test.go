@@ -34,7 +34,9 @@ func TestDispatchRecordLifecycle(t *testing.T) {
 	proj := e.project(t, "dsp", nil)
 	parent := e.parent(t, proj)
 	child := e.delegate(t, e.as("DEL"), parent, workHost)
-	add := func(id command.Identity, in map[string]any) (command.Result, error) { return e.do(id, "delegate.dispatch", in) }
+	add := func(id command.Identity, in map[string]any) (command.Result, error) {
+		return e.do(id, "delegate.dispatch", in)
+	}
 
 	handle := map[string]any{"mech": "paseo", "host": "mbp", "agent_id": "agt_1"}
 	d1 := dispatchOf(t, e.must(t, e.as("DEL"), "delegate.dispatch", map[string]any{"id": child, "session": "agt_1", "resumable": true, "cwd": "/w/app", "handle": handle}))
@@ -55,12 +57,13 @@ func TestDispatchRecordLifecycle(t *testing.T) {
 		t.Fatalf("second dispatch %+v", d2)
 	}
 
-	// 拒绝：无关的 worker 4；未绑定的 delegate 不带依据 23；没有 harness 2；坏句柄 2；可续接却没有会话 2；接续别的项目 2。
-	e.wantExit(t, domain.ExitPermissionDenied, e.as("WRK2"), "delegate.dispatch", map[string]any{"id": child, "session": "x"})
+	// 派出记录是一档：别的 delegate 也能写，不要附加依据（同 harness 同会话，返回已有记录）。
 	e.issue(t, "DEL2", auth.Spec{Kind: auth.Delegate})
-	if _, err := e.x.Do(bg, command.Request{Identity: e.as("DEL2"), Command: "delegate.dispatch", Input: json.RawMessage(`{"id":"` + child + `","session":"y"}`), Owner: "owner"}); exitOf(err) != domain.ExitBasisRequired {
-		t.Fatalf("unbound delegate: %v", err)
+	if d := dispatchOf(t, e.must(t, e.as("DEL2"), "delegate.dispatch", map[string]any{"id": child, "session": "agt_2", "continues": d1.ID})); d.ID != d2.ID {
+		t.Fatalf("another delegate: %+v", d)
 	}
+	// 拒绝：无关的 worker 在钥匙范围外 4；没有 harness 2；坏句柄 2；可续接却没有会话 2；接续别的项目 2。
+	e.wantExit(t, domain.ExitPermissionDenied, e.as("WRK2"), "delegate.dispatch", map[string]any{"id": child, "session": "x"})
 	bare := command.Bearer{Auth: e.au, Secret: e.secret["DEL"]}
 	e.wantExit(t, domain.ExitUsage, bare, "delegate.dispatch", map[string]any{"id": child, "session": "z"})
 	e.wantExit(t, domain.ExitUsage, e.as("DEL"), "delegate.dispatch", map[string]any{"id": child, "handle": map[string]any{"mech": "x", "command": "rm -rf /"}})

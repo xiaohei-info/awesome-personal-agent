@@ -144,7 +144,7 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 	f := opsFx(t, cfg)
 	f.auto("once", "run-hold")
 	f.addWebhookSource("src_acc_ret")
-	tok := f.apa(f.DEL, 0, "source", "webhook", "create", "src_acc_ret", "--evidence", "验收签发").Stdout
+	tok := f.OwnerApaOK("", "source", "webhook", "create", "src_acc_ret").Stdout
 	secret := decode[struct {
 		Secret string `json:"secret"`
 	}](t, tok).Secret
@@ -168,11 +168,11 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 				t.Errorf("%s的请求体不应被清理: %+v", name, g)
 			}
 		}
-		r := f.Apa(f.DEL, "", "source", "replay", outside.ID, "--evidence", "验收重放")
+		r := f.Apa(f.DEL, "", "source", "replay", outside.ID)
 		if r.Code == 0 {
 			t.Errorf("请求体已清理的入站记录 replay 应明确报错: %s", r.Stdout)
 		}
-		f.apa(f.DEL, 0, "source", "replay", inside.ID, "--evidence", "验收重放")
+		f.apa(f.DEL, 0, "source", "replay", inside.ID)
 	})
 
 	step(t, "ACT-RET-02 运行目录过期清理，Run 记录和在途目录不动", func(t *testing.T) {
@@ -222,7 +222,7 @@ func retentionCase(t *testing.T, cfg string, ingestDays, runDays int) {
 
 func (f *fx) addWebhookSource(id string) {
 	f.t.Helper()
-	f.apa(f.DEL, 0, "source", "add", "--id", id, "--name", id, "--type", "webhook", "--source-type", "acc-ret", "--config", `{"scheme":"acc-token","mappings":["acc-generic"]}`, "--evidence", "验收登记")
+	f.OwnerApaOK("", "source", "add", "--id", id, "--name", id, "--type", "webhook", "--source-type", "acc-ret", "--config", `{"scheme":"acc-token","mappings":["acc-generic"]}`)
 }
 
 // TestFlowRetention 对应验收文档 flow-retention（ACT-RET-01、ACT-RET-02）。

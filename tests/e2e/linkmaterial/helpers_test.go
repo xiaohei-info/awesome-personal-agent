@@ -119,10 +119,10 @@ func (f *fx) delegated(title, project string) (parent, child string) {
 	f.t.Helper()
 	parent = decode[struct {
 		ID string `json:"id"`
-	}](f.t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--project", f.Projects[project], "--evidence", "验收触发").Stdout).ID
+	}](f.t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--project", f.Projects[project]).Stdout).ID
 	child = decode[struct {
 		ID string `json:"id"`
-	}](f.t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", title+" 子事项", "--reason", "委派", "--evidence", "owner asked").Stdout).ID
+	}](f.t, f.apa(f.DEL, 0, "delegate", "--parent", parent, "--assignee", "work-host.cli", "--title", title+" 子事项", "--reason", "委派").Stdout).ID
 	return
 }
 

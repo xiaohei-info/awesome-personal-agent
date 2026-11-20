@@ -25,7 +25,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 // env 用真实的存储、命令管线、事项中心、实例、时钟和内置 review 与 brief 包（经 embed 加载）。
@@ -81,7 +81,7 @@ func newEnv(t *testing.T, dataDir string) *env {
 
 func (e *env) do(cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	return e.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner"})
 }
 
 func (e *env) tick(at time.Time) int {

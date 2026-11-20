@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
@@ -59,7 +60,7 @@ func newReleaseEnv(t *testing.T, perDay, high, mid, low int) *scoreEnv {
 }
 
 func (e *scoreEnv) rejudge(source string, limit int) (ReleaseResult, error) {
-	return e.svc.BacklogRejudge(bg, command.Request{Identity: owner, Evidence: "本人：放开", Owner: "owner"}, source, limit)
+	return e.svc.BacklogRejudge(bg, command.Request{Identity: owner, Owner: "owner"}, source, limit)
 }
 
 func (e *scoreEnv) count(d domain.Disposition) (n int) {
@@ -281,7 +282,7 @@ func TestRejudgeResumesAfterCrash(t *testing.T) {
 	for _, id := range crashed {
 		x := e.byID("src_t")[id]
 		in, _ := json.Marshal(releaseIn{Event: x.ID, Attempt: x.Rejudges + 1})
-		if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: CmdBacklogRejudge, Input: in, Evidence: "本人：放开", Owner: "owner",
+		if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: CmdBacklogRejudge, Input: in, Owner: "owner",
 			IdemKey: fmt.Sprintf("inbound:rejudge:%s:%d", x.ID, x.Rejudges+1)}); err != nil {
 			t.Fatal(err)
 		}
@@ -306,7 +307,7 @@ func TestRejudgeResumesAfterCrash(t *testing.T) {
 	// 同一个放回的幂等键重放不会再记一条。
 	x := e.byID("src_t")["e000"]
 	in, _ := json.Marshal(releaseIn{Event: x.ID, Attempt: 1})
-	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: CmdBacklogRejudge, Input: in, Evidence: "本人：放开", Owner: "owner",
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: CmdBacklogRejudge, Input: in, Owner: "owner",
 		IdemKey: fmt.Sprintf("inbound:rejudge:%s:%d", x.ID, 1)}); err != nil || len(e.requeuedBy(x.ID)) != 1 {
 		t.Fatalf("replay: %v %v", err, e.requeuedBy(x.ID))
 	}
@@ -363,8 +364,9 @@ func TestRejudgeStopsWhenModelUnavailable(t *testing.T) {
 // 授权：缺本人原话、负的 limit 被拒，什么也没发生。
 func TestRejudgeRefusals(t *testing.T) {
 	e := newReleaseEnv(t, 5, 2, 0, 0)
-	if _, err := e.svc.BacklogRejudge(bg, command.Request{Identity: delegate, Owner: "owner"}, "", 0); code(err) != domain.CodeBasisRequired {
-		t.Fatalf("without words: %v", err)
+	obs := command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "obs", Via: domain.ViaCLI}, Level: authz.LevelObserver}
+	if _, err := e.svc.BacklogRejudge(bg, command.Request{Identity: obs, Owner: "owner"}, "", 0); code(err) != domain.CodePermissionDenied {
+		t.Fatalf("observer: %v", err)
 	}
 	if _, err := e.rejudge("", -1); code(err) != domain.CodeInvalidRequest {
 		t.Fatalf("negative limit: %v", err)

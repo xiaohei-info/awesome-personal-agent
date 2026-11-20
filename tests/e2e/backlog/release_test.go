@@ -183,18 +183,10 @@ func TestBacklogReleaseFlow(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-BKL-04 积压放开命令缺本人原话被拒", func(t *testing.T) {
+	// 2026-11-20 改写（权限模型第二版）：积压的规则、打分、重判是一档，delegate 不再要本人原话；只读钥匙在范围外（4）。
+	k.step("ACT-BKL-04 积压放开命令对只读钥匙关闭", func(t *testing.T) {
 		before := k.distribution()
-		for _, step := range []string{"rules", "score", "rejudge"} {
-			if r := k.Apa(k.DEL, "", "source", "backlog", step); r.Code != 23 {
-				t.Fatalf("不带 --evidence 运行 %s 退出码 %d，期望 23\n%s%s", step, r.Code, r.Stdout, r.Stderr)
-			}
-		}
-		g := k.run(k.DEL, []string{"APA_SESSION=e2e-session", "APA_SESSION_KIND=group"}, "source", "backlog", "rules", "--evidence", "本人：群里说")
-		if g.Code != 23 || !strings.Contains(g.Stderr+g.Stdout, "session_not_direct") {
-			t.Fatalf("group 会话运行退出码 %d，期望 23 session_not_direct\n%s%s", g.Code, g.Stdout, g.Stderr)
-		}
-		if r := k.Apa(k.OBS, "", "source", "backlog", "rules", "--evidence", "本人：只读"); r.Code != 4 {
+		if r := k.Apa(k.OBS, "", "source", "backlog", "rules"); r.Code != 4 {
 			t.Fatalf("observer 退出码 %d，期望 4\n%s%s", r.Code, r.Stdout, r.Stderr)
 		}
 		if after := k.distribution(); after != before || len(k.eventRequests()) != 0 {

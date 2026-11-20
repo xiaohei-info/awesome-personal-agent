@@ -1,33 +1,16 @@
 package policy
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"strings"
 	"time"
-	"unicode"
 
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// 授权单（设计 §6.13、§14.5）：本人在 Web 事先签发的代理授权。本包只管记录本身——签发、撤销、列出；
-// 授权单何时放行命令是授权判定的事，这里不判定。内容不可改，要改就撤销后重签。
-
-// RiskNormal 是目前唯一的风险上限：只放行未判为 web_only 的对象。
-const RiskNormal = "normal"
-
-// GrantableActions 是授权单 actions 的全部可选值：附录 B.1「第二档（可用授权单）」一列。
-// 项目、来源、能力包实例管理只接受本人原话，不在其中。
-var GrantableActions = []string{
-	"item.create", "item.update", "item.transition", "item.relate", "item.progress",
-	"decision.answer", "proposal.accept", "proposal.dismiss", "proposal.attach",
-	"revision.confirm", "revision.reject",
-	"delegate.report", "followmsg.handback",
-}
+// 授权单是旧权限模型的代理授权（已取消，2026-11-20，§14.3）：不再签发、不再放行任何命令。
+// policy_grant 表只读保留，旧单在切换时一次撤销（RevokeAllGrants），历史事件照常可读。
 
 // Grantee 是被授权方，二选一（§6.13）：Credential 是一个 delegate token（Harness 只用于收窄和审计，不是安全边界）；
 // 或 Agent，一个 harness 标识，判定时只比内核记录的值（凭据的 harness 列、运行记录的 harness）。
@@ -55,16 +38,6 @@ type ImportScope struct {
 	MaxRecords int    `json:"max_records"`
 }
 
-// GrantInput 是签发请求；id、主体、签发时间由内核给出。
-type GrantInput struct {
-	Grantee     Grantee   `json:"grantee"`
-	Scope       Scope     `json:"scope"`
-	Actions     []string  `json:"actions"`
-	RiskCeiling string    `json:"risk_ceiling,omitempty"` // 空取 normal
-	ExpiresAt   time.Time `json:"expires_at,omitzero"`    // 零值：长期有效，直到撤销
-	Reason      string    `json:"reason,omitempty"`
-}
-
 // Grant 是一张授权单。撤销字段是唯一会变的部分。
 type Grant struct {
 	ID            string       `json:"id"`
@@ -81,136 +54,31 @@ type Grant struct {
 	RevokedReason string       `json:"revoked_reason,omitempty"`
 }
 
-// Active 报告授权单在 at 时刻是否未撤销且未过期（没有有效期的单长期有效）。凭据是否仍有效另见 ActiveGrants。
-func (g Grant) Active(at time.Time) bool {
-	return g.RevokedAt.IsZero() && (g.ExpiresAt.IsZero() || at.Before(g.ExpiresAt))
-}
+// ListGrants 按签发顺序列出全部授权单，含已撤销与已过期（审计与切换用）。
+func ListGrants(tx *store.Tx) ([]Grant, error) { return queryGrants(tx, "") }
 
-func webOnlyErr() error {
-	return domain.NewError(domain.CodeWebOnly, "grants can only be issued or revoked by the owner in the Web UI", "ask the owner to use the Web settings")
-}
-
-func contains(set []string, v string) bool { return oneOf(v, set...) }
-
-func newGrantID() (string, error) {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
+// RevokeAllGrants 把所有未撤销的授权单标为撤销并各记 grant.revoked，返回被撤销的 id。只给权限模型切换用（§16.5）。
+func RevokeAllGrants(tx *store.Tx, actor domain.Actor, now time.Time, reason string) ([]string, error) {
+	gs, err := queryGrants(tx, "WHERE revoked_at = 0")
+	if err != nil {
+		return nil, err
 	}
-	return "grt_" + hex.EncodeToString(b), nil
-}
-
-// normalizeGrant 校验 in 并返回规整后的授权单（不含 id、主体与签发时间）。
-func normalizeGrant(tx *store.Tx, a *auth.Auth, now time.Time, in GrantInput) (Grant, error) {
-	g := Grant{Grantee: in.Grantee, Reason: in.Reason, RiskCeiling: in.RiskCeiling, ExpiresAt: in.ExpiresAt.UTC(),
-		Scope:   Scope{Projects: dedupSorted(in.Scope.Projects), Kinds: dedupSorted(in.Scope.Kinds), Items: dedupSorted(in.Scope.Items)},
-		Actions: dedupSorted(in.Actions)}
-	g.Scope.All = in.Scope.All
-	switch n := len(g.Scope.Projects) + len(g.Scope.Kinds) + len(g.Scope.Items); {
-	case g.Scope.All && n > 0:
-		return g, invalid("scope.all cannot be combined with projects, kinds or items")
-	case !g.Scope.All && n == 0:
-		return g, invalid("scope needs at least one of projects, kinds, items, or all")
-	}
-	if len(g.Actions) == 0 {
-		return g, invalid("actions is empty")
-	}
-	for _, act := range g.Actions {
-		if !oneOf(act, GrantableActions...) { // 通配符与只接受本人原话的命令都落在这里
-			return g, invalid("action %q cannot be granted; see appendix B.1 for the grantable commands", act)
+	ids := []string{}
+	for _, g := range gs {
+		if _, err := tx.Exec(`UPDATE policy_grant SET revoked_at = ?, revoked_reason = ? WHERE id = ? AND revoked_at = 0`, now.UnixNano(), reason, g.ID); err != nil {
+			return nil, err
 		}
-	}
-	if g.RiskCeiling == "" {
-		g.RiskCeiling = RiskNormal
-	}
-	if g.RiskCeiling != RiskNormal {
-		return g, invalid("risk_ceiling %q: only %q exists", g.RiskCeiling, RiskNormal)
-	}
-	if !in.ExpiresAt.IsZero() && !g.ExpiresAt.After(now) {
-		return g, invalid("expires_at must be in the future; leave it out for a grant that lasts until revoked")
-	}
-	g.Grantee.Harness = strings.TrimSpace(g.Grantee.Harness)
-	if g.Grantee.Agent != "" {
-		switch {
-		case g.Grantee.Credential != "" || g.Grantee.Harness != "":
-			return g, invalid("grantee takes either agent or credential, not both")
-		case strings.ContainsFunc(g.Grantee.Agent, unicode.IsSpace):
-			return g, invalid("grantee.agent must be a harness identifier without spaces")
+		g.RevokedAt, g.RevokedReason = now.UTC(), reason
+		payload, err := json.Marshal(g)
+		if err != nil {
+			return nil, err
 		}
-		return g, nil
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvGrantRevoked, Object: g.ID, Actor: actor, Reason: reason, Payload: payload, Grant: g.ID, At: now}); err != nil {
+			return nil, err
+		}
+		ids = append(ids, g.ID)
 	}
-	if g.Grantee.Instance {
-		return g, invalid("instance requires agent")
-	}
-	if g.Grantee.Background {
-		return g, invalid("grantee.background needs grantee.agent: background runs are matched by Agent, not by token")
-	}
-	if g.Grantee.Credential == "" {
-		return g, invalid("grantee needs credential or agent")
-	}
-	cred, err := a.Get(tx, g.Grantee.Credential)
-	if err != nil {
-		return g, invalid("grantee.credential is not a known credential")
-	}
-	if cred.Kind != auth.Delegate || !cred.RevokedAt.IsZero() {
-		return g, invalid("grantee.credential must be a live delegate token")
-	}
-	return g, nil
-}
-
-// IssueGrant 是授权单的唯一签发入口：actor 必须是 Web 上的本人，否则返回 web_only（退出码 20）。
-// 记录与 grant.issued 事件在同一事务提交。校验失败返回 ErrInvalid，什么都不写。
-func IssueGrant(tx *store.Tx, a *auth.Auth, actor domain.Actor, now time.Time, in GrantInput) (Grant, error) {
-	if actor.Type != domain.ActorHuman || actor.Via != domain.ViaWeb {
-		return Grant{}, webOnlyErr()
-	}
-	g, err := normalizeGrant(tx, a, now, in)
-	if err != nil {
-		return g, err
-	}
-	if g.ID, err = newGrantID(); err != nil {
-		return g, err
-	}
-	g.Principal, g.CreatedAt = actor.Principal, now.UTC()
-	doc, err := json.Marshal(g)
-	if err != nil {
-		return g, err
-	}
-	if _, err := tx.Exec(`INSERT INTO policy_grant (id, credential, doc, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`,
-		g.ID, g.Grantee.Credential, string(doc), expiresCol(g.ExpiresAt), now.UnixNano()); err != nil {
-		return g, err
-	}
-	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvGrantIssued, Object: g.ID, Actor: actor, Reason: g.Reason, Payload: doc, Grant: g.ID, At: now})
-	return g, err
-}
-
-// RevokeGrant 撤销授权单，立即生效；actor 必须是 Web 上的本人。重复撤销保留首次时间且不再记事件；不存在返回 not_found。
-func RevokeGrant(tx *store.Tx, actor domain.Actor, now time.Time, id, reason string) (Grant, error) {
-	if actor.Type != domain.ActorHuman || actor.Via != domain.ViaWeb {
-		return Grant{}, webOnlyErr()
-	}
-	g, err := GetGrant(tx, id)
-	if err != nil || !g.RevokedAt.IsZero() {
-		return g, err
-	}
-	if _, err := tx.Exec(`UPDATE policy_grant SET revoked_at = ?, revoked_reason = ? WHERE id = ? AND revoked_at = 0`, now.UnixNano(), reason, id); err != nil {
-		return g, err
-	}
-	g.RevokedAt, g.RevokedReason = now.UTC(), reason
-	payload, err := json.Marshal(g)
-	if err != nil {
-		return g, err
-	}
-	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvGrantRevoked, Object: g.ID, Actor: actor, Reason: reason, Payload: payload, Grant: g.ID, At: now})
-	return g, err
-}
-
-// expiresCol 是 expires_at 列的取值：长期有效的单存 0。
-func expiresCol(t time.Time) int64 {
-	if t.IsZero() {
-		return 0
-	}
-	return t.UnixNano()
+	return ids, nil
 }
 
 const grantCols = "doc, revoked_at, revoked_reason"
@@ -248,94 +116,4 @@ func queryGrants(tx *store.Tx, where string, args ...any) ([]Grant, error) {
 		out = append(out, g)
 	}
 	return out, r.Err()
-}
-
-// GetGrant 按 id 取授权单；不存在返回 not_found。
-func GetGrant(tx *store.Tx, id string) (Grant, error) {
-	gs, err := queryGrants(tx, "WHERE id = ?", id)
-	if err != nil {
-		return Grant{}, err
-	}
-	if len(gs) == 0 {
-		return Grant{}, domain.NewError(domain.CodeNotFound, "grant not found", "list grants and retry")
-	}
-	return gs[0], nil
-}
-
-// ListGrants 按签发顺序列出全部授权单，含已撤销与已过期（Web 审计用）。
-func ListGrants(tx *store.Tx) ([]Grant, error) { return queryGrants(tx, "") }
-
-// AgentGrants 列出签给 agent（harness 标识）的、在 at 时刻有效的 agent 式授权单；它们不随某一把钥匙失效。
-func AgentGrants(tx *store.Tx, agent string, at time.Time) ([]Grant, error) {
-	return AgentIdentityGrants(tx, agent, at, false)
-}
-func AgentIdentityGrants(tx *store.Tx, agent string, at time.Time, instance bool) ([]Grant, error) {
-	all, err := queryGrants(tx, "WHERE credential = '' AND revoked_at = 0")
-	if err != nil {
-		return nil, err
-	}
-	out := []Grant{}
-	for _, g := range all {
-		if g.Grantee.Instance == instance && g.Grantee.Agent == agent && g.Active(at) {
-			out = append(out, g)
-		}
-	}
-	return out, nil
-}
-
-// ReplaceAgentGrant 是 Agent 卡片的保存（附录 B.2 PUT /settings/agents/{harness}/grant）：在调用方的事务里撤销 agent 名下
-// 全部有效的 agent 式授权单，再按 in 签发新单；in.Actions 为空时只撤销、返回 nil。in.Grantee 只取 Background，被授权方恒为 agent。
-// 签发失败时调用方回滚整个事务，旧单不会被撤掉。
-func ReplaceAgentGrant(tx *store.Tx, a *auth.Auth, actor domain.Actor, now time.Time, agent string, in GrantInput) (revoked []string, issued *Grant, err error) {
-	if actor.Type != domain.ActorHuman || actor.Via != domain.ViaWeb {
-		return nil, nil, webOnlyErr()
-	}
-	if strings.TrimSpace(agent) == "" || strings.ContainsFunc(agent, unicode.IsSpace) {
-		return nil, nil, invalid("agent must be a harness identifier without spaces")
-	}
-	old, err := AgentIdentityGrants(tx, agent, now, in.Grantee.Instance)
-	if err != nil {
-		return nil, nil, err
-	}
-	revoked = []string{}
-	for _, g := range old {
-		if _, err := RevokeGrant(tx, actor, now, g.ID, "replaced"); err != nil {
-			return nil, nil, err
-		}
-		revoked = append(revoked, g.ID)
-	}
-	if len(in.Actions) == 0 {
-		return revoked, nil, nil
-	}
-	in.Grantee = Grantee{Agent: agent, Instance: in.Grantee.Instance, Background: in.Grantee.Background}
-	g, err := IssueGrant(tx, a, actor, now, in)
-	if err != nil {
-		return nil, nil, err
-	}
-	return revoked, &g, nil
-}
-
-// ActiveGrants 列出凭据名下在 at 时刻未撤销、未过期的授权单；凭据本身已吊销或已过期时授权单同时失效，返回空。
-func ActiveGrants(tx *store.Tx, a *auth.Auth, credential string, at time.Time) ([]Grant, error) {
-	cred, err := a.Get(tx, credential)
-	if err != nil {
-		if e, ok := err.(*domain.Error); ok && e.Code == domain.CodeNotFound {
-			return []Grant{}, nil
-		}
-		return nil, err
-	}
-	if !cred.RevokedAt.IsZero() || (!cred.ExpiresAt.IsZero() && !at.Before(cred.ExpiresAt)) {
-		return []Grant{}, nil
-	}
-	all, err := queryGrants(tx, "WHERE credential = ? AND revoked_at = 0", credential)
-	if err != nil {
-		return nil, err
-	}
-	out := all[:0]
-	for _, g := range all {
-		if g.Active(at) {
-			out = append(out, g)
-		}
-	}
-	return out, nil
 }

@@ -19,8 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/channel"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
@@ -86,13 +84,10 @@ CREATE INDEX attention_held_release ON attention_held(release_at);`,
 type Options struct {
 	Queue     *delivery.Queue
 	Now       func() time.Time
-	TickEvery time.Duration             // 周期 Timer 间隔，默认 30 秒
-	WebURL    func(item string) string  // 投递里的 Web 链接，默认 /items/<id>
-	FormURL   func(token string) string // 投递里的一次性表单链接，默认 /forms/<令牌>
+	TickEvery time.Duration            // 周期 Timer 间隔，默认 30 秒
+	WebURL    func(item string) string // 投递里的 Web 链接，默认 /items/<id>
 	// Drafter 起草决策卡片文案与做投递推迟判定；为空时投递内容与路由只按规则。
 	Drafter Drafter
-	// ViewOnly 判断路由指向的渠道是否只能看（内置渠道连接的能力声明推出，§2.3）；为空时只看策略的 text_only。
-	ViewOnly func(tx *store.Tx, route string) (bool, error)
 }
 
 // Attention 的状态都在账本里；draftDue 只是"有待起草"的唤醒信号。
@@ -111,9 +106,6 @@ func New(o Options) *Attention {
 	}
 	if o.WebURL == nil {
 		o.WebURL = func(id string) string { return "/items/" + id }
-	}
-	if o.FormURL == nil {
-		o.FormURL = func(token string) string { return "/forms/" + token }
 	}
 	return &Attention{o: o}
 }
@@ -249,8 +241,11 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	if it.Kind == domain.KindBrief && it.Phase == domain.PhaseDone {
 		return a.briefDone(tx, pol, it)
 	}
-	if it.Phase != domain.PhaseNeedsInput || ask == nil || ask.Resolution != nil || ask.ScreeningPending {
-		return a.drop(tx, id) // proposed 不产生投递（§6.14.2）；初筛返回前决策不投递（§14.4）；阶段离开则作废
+	if ask != nil && ask.Resolution != nil && ask.Resolution.ResolvedVia == decisions.ViaAgent {
+		return a.agentAnswered(tx, pol, it)
+	}
+	if it.Phase != domain.PhaseNeedsInput || ask == nil || ask.Resolution != nil {
+		return a.drop(tx, id) // proposed 不产生投递（§6.14.2）；阶段离开则作废
 	}
 	ver, err := command.Version(tx, id)
 	if err != nil {
@@ -266,8 +261,7 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	if err != nil || !ready {
 		return err // 起草未返回前不投递；返回后 Drafts 会再重算这个事项
 	}
-	webOnly := authz.WebOnly(pol, authz.Object{Kind: string(it.Kind), Tags: it.Tags, Project: it.Project, Category: ask.RiskClass})
-	content := dr.content(it, webOnly)
+	content := dr.content(it)
 	content.WebURL = a.o.WebURL(id)
 	h := held{
 		id: fmt.Sprintf("decision:%s:%d", id, ver), item: id, class: domain.DeliveryDecision, priority: it.Priority, version: ver,
@@ -299,10 +293,35 @@ func (a *Attention) briefDone(tx *store.Tx, pol policy.Policy, it domain.Item) e
 		content: delivery.BriefContent(it, a.o.WebURL(it.ID))})
 }
 
-// answeredByPerson：只有本人在 Web 或聊天里给出了真实回答才算（渠道回答自己已经 Confirm 过）。
-// 用白名单：超时默认值、授权单代答、relocate 等系统收口都不是本人确认。
+// agentAnswered：档位放开二档的 Agent 替本人答了问题（§14.3、裁决 2），推一条提醒说它替你答了什么，链接到可按次撤回的「Agent 改动」。
+// 一次回答只推一次（id 带回答时刻）：之后的事项变化既不重推也不作废它；撤回后再答是新的一次。
+func (a *Attention) agentAnswered(tx *store.Tx, pol policy.Policy, it domain.Item) error {
+	r := it.Ask.Resolution
+	id := fmt.Sprintf("agent-answer:%s:%d", it.ID, r.ResolvedAt.UnixNano())
+	if known, err := a.known(tx, id); err != nil || known {
+		return err
+	}
+	if err := a.drop(tx, it.ID); err != nil { // 原来那张等本人回答的卡随回答作废
+		return err
+	}
+	ver, err := command.Version(tx, it.ID)
+	if err != nil {
+		return err
+	}
+	answer := r.Text
+	for _, o := range it.Ask.Options {
+		if o.ID == r.Choice {
+			answer = o.Label
+		}
+	}
+	return a.offer(tx, pol, held{id: id, item: it.ID, class: domain.DeliveryReminder, priority: it.Priority, version: ver,
+		content: domain.DeliveryContent{Title: "Agent 替你答了：" + it.Title, Summary: it.Ask.Question + " → " + answer, WebURL: "/agent-changes"}})
+}
+
+// answeredByPerson：只有本人在 Web 给出了真实回答才算（渠道回答自己已经 Confirm 过）。
+// 用白名单：Agent 替本人答（agent）、旧模型的原话代答（chat）、超时默认、授权单都不是本人确认。
 func answeredByPerson(r *domain.Resolution) bool {
-	return (r.ResolvedVia == decisions.ViaWeb || r.ResolvedVia == decisions.ViaChat) && (r.Choice != "" || r.Text != "")
+	return r.ResolvedVia == decisions.ViaWeb && (r.Choice != "" || r.Text != "")
 }
 
 // nearDeadline：本人开启了豁免，且事项的决策截止距 now 不超过 NearDeadline（已过也算）。
@@ -325,7 +344,7 @@ func (a *Attention) drop(tx *store.Tx, id string) error {
 // ---- 截止已过再提醒 ----
 
 // remindOverdue：事项截止或决策 ask.deadline 已过仍未处理，且策略开启再提醒，则产出一条提醒。
-// 内核不会替本人决定：没有默认值的决策保持 needs_input（有默认值的由决策模块到期决定，这里不抢）。
+// 内核不会替本人决定：决策保持 needs_input，问题永不超时代答。
 // 提醒 id 含截止时间，每个截止只提醒一次；截止被改后是新的截止。
 func (a *Attention) remindOverdue(tx *store.Tx, pol policy.Policy) error {
 	if !pol.Disturb.RemindOnDeadline {
@@ -344,7 +363,7 @@ func (a *Attention) remindOverdue(tx *store.Tx, pol policy.Policy) error {
 				}
 			}
 			ask := it.Ask
-			if ph != domain.PhaseNeedsInput || ask == nil || ask.Resolution != nil || ask.ScreeningPending || ask.DefaultOnTimeout != "" ||
+			if ph != domain.PhaseNeedsInput || ask == nil || ask.Resolution != nil ||
 				ask.Deadline == nil || ask.Deadline.After(now) {
 				continue
 			}
@@ -618,9 +637,6 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 		d.Content = domain.DeliveryContent{Title: fmt.Sprintf("%d 条低优先级提醒", len(hs)), Summary: strings.Join(titles, "；")}
 	}
 	d.Route = a.route(pol, hs[0].class, hs[0].priority)
-	if err := a.attachForm(tx, pol, &d); err != nil {
-		return err
-	}
 	t, err := a.target(tx, hs[0])
 	if err != nil {
 		return err
@@ -676,32 +692,6 @@ func orElse(a, b string) string {
 		return a
 	}
 	return b
-}
-
-// attachForm 在写入决策投递时发放一次性表单链接（§10.3）。放在这里而不是暂存时，令牌只为真正写入的投递发放。
-func (a *Attention) attachForm(tx *store.Tx, pol policy.Policy, d *domain.Delivery) error {
-	if d.Class != domain.DeliveryDecision {
-		return nil
-	}
-	it, err := items.Get(tx, d.Item)
-	if isNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	viewOnly := false
-	if a.o.ViewOnly != nil {
-		if viewOnly, err = a.o.ViewOnly(tx, d.Route); err != nil {
-			return err
-		}
-	}
-	token, err := channel.IssueForm(tx, pol, it, d.Route, d.Version, a.o.Now(), viewOnly)
-	if err != nil || token == "" {
-		return err
-	}
-	d.Content.FormURL = a.o.FormURL(token)
-	return nil
 }
 
 // route 是阈值：「类别:优先级」优先于「类别」；策略没给就退回 Web 未读。

@@ -33,7 +33,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 func loadPack(t *testing.T) (*packs.Loader, *packs.Pack) {
@@ -154,7 +154,7 @@ func (e *env) configure() {
 	e.t.Helper()
 	err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}, 1000
+			p.GenerateEndpoint = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k"}
 			return nil
 		})
 		return err
@@ -167,7 +167,7 @@ func (e *env) configure() {
 func (e *env) do(cmd string, in any) json.RawMessage {
 	e.t.Helper()
 	b, _ := json.Marshal(in)
-	r, err := e.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	r, err := e.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner"})
 	if err != nil {
 		e.t.Fatalf("%s: %v", cmd, err)
 	}

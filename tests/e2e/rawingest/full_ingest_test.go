@@ -238,7 +238,7 @@ func TestFlowRawFullIngest(t *testing.T) {
 
 	k.step("ACT-RAW-06 任何入口都不能改写来源原文", func(t *testing.T) {
 		const edited = "改过的正文"
-		k.apa(k.DEL, 0, "item", "update", itemID, "--body", edited, "--evidence", "owner asked")
+		k.apa(k.DEL, 0, "item", "update", itemID, "--body", edited)
 		var it struct {
 			Item struct {
 				Body string `json:"body"`

@@ -240,15 +240,14 @@ func TestProjectAllowedExecutors(t *testing.T) {
 			t.Errorf("%s: got %v", c.name, got)
 		}
 	}
-	// 按维度匹配（§14.7）：非空字段都相等才命中；任一规则命中即允许；没有登记信息的 id 只能按 id 命中。
+	// 按维度匹配已取消（§14.7）：自报的机器与 harness 不参与判定，旧的匹配规则只让项目保持受限，只认 id 名单与本人。
 	mbp := Project{AllowedExecutorMatch: []ExecutorMatch{{Host: "mbp"}, {Harness: "h2", Host: "studio"}}}
 	for _, c := range []struct {
 		ref  ExecutorRef
 		want bool
 	}{
-		{ExecutorRef{ID: "x", Host: "mbp", Harness: "h1"}, true},
-		{ExecutorRef{ID: "x", Host: "studio", Harness: "h1"}, false},
-		{ExecutorRef{ID: "x", Host: "studio", Harness: "h2"}, true},
+		{ExecutorRef{ID: "x", Host: "mbp", Harness: "h1"}, false},
+		{ExecutorRef{ID: "x", Host: "studio", Harness: "h2"}, false},
 		{ExecutorRef{ID: "unregistered"}, false},
 		{ExecutorRef{ID: "me"}, true},
 	} {

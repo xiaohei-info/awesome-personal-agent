@@ -101,7 +101,7 @@ func TestFlowStale(t *testing.T) {
 		st[3] = k.webItem(map[string]any{"kind": "commitment", "title": "ST-3"})
 		st[4] = k.webItem(map[string]any{"kind": "task", "title": "ST-4", "planned_for": day2})
 		st[5] = k.webItem(map[string]any{"kind": "task", "title": "ST-5"})
-		k.apa(k.DEL, 0, "item", "transition", st[5], "--to", "waiting", "--waiting-on", "external:等对方回复", "--reason", "等回复", "--evidence", "等对方回复")
+		k.apa(k.DEL, 0, "item", "transition", st[5], "--to", "waiting", "--waiting-on", "external:等对方回复", "--reason", "等回复")
 		st[6] = k.webItem(map[string]any{"kind": "decision", "title": "ST-6"})
 		for i := 1; i <= 6; i++ {
 			if st[i] == "" {

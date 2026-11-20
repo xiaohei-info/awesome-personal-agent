@@ -162,9 +162,8 @@ func lastBackup(l config.Layout) (time.Time, bool) {
 // ---- 宿主插件与重复提醒（附录 A.1） ----
 
 type selfcheckOut struct {
-	PluginVersion      string `json:"plugin_version"`
-	ReportsSessionKind bool   `json:"reports_session_kind"`
-	Hooks              []struct {
+	PluginVersion string `json:"plugin_version"`
+	Hooks         []struct {
 		Name      string `json:"name"`
 		Installed bool   `json:"installed"`
 	} `json:"hooks"`
@@ -258,12 +257,6 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 			} else {
 				ran++
 				d.Data["plugin_version"] = out.PluginVersion
-				if !out.ReportsSessionKind {
-					d.Status = kdoctor.Worst(d.Status, kdoctor.Warning)
-					problems = append(problems, kdoctor.CodeHostNoSessionKind)
-					why = append(why, "the plugin does not report the session type, so agent answers on the owner's own words are rejected (exit 23, §14.5)")
-					next = append(next, "upgrade the plugin together with the kernel")
-				}
 				var hooks []string
 				for _, h := range out.Hooks {
 					if !h.Installed {
@@ -286,7 +279,7 @@ func hostChecks(ctx context.Context, in Input, f kdoctor.Facts) (host, overlaps 
 			}
 		}
 		if len(why) == 0 {
-			d.Code, d.Why = kdoctor.CodeHostReady, "declaration confirmed and executable; plugin reports its session type"
+			d.Code, d.Why = kdoctor.CodeHostReady, "declaration confirmed and executable; selfcheck passed"
 			if rec.Declaration.Selfcheck == nil {
 				d.Code, d.Why = kdoctor.CodeHostReadyNoSelfcheck, "declaration confirmed and executable; no selfcheck.command is declared"
 			}

@@ -6,9 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
@@ -23,7 +21,7 @@ import (
 )
 
 var (
-	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1", SessionKind: "direct", OnBehalfOf: "owner"}, Level: authz.LevelDelegate}
+	delegate = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "dlg", Via: domain.ViaCLI, Session: "s1"}, Level: authz.LevelDelegate, CredentialAgentID: "agent_dlg"}
 	runIdent = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "run", Via: domain.ViaCLI, Run: "run_1"}, Level: authz.LevelRun}
 )
 
@@ -62,6 +60,20 @@ func (e *env) proposalOf(id, subject string, keys ...string) string {
 	return ""
 }
 
+// decideFor 以本人身份把 delegate 所属 Agent 调到「也替我拍板」（3b 设置，测试里直接写策略）。
+func (e *env) decideFor() {
+	e.t.Helper()
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "test", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent["agent_dlg"] = policy.AgentAllowance{Tier: policy.AllowDecide}
+			return nil
+		})
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 func (e *env) openItem(title string) string {
 	e.t.Helper()
 	var made struct{ ID string }
@@ -71,7 +83,7 @@ func (e *env) openItem(title string) string {
 
 func (e *env) do(who command.Trusted, cmd, evidence string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: who, Command: cmd, Input: b, Owner: "owner", Evidence: evidence})
+	return e.x.Do(bg, command.Request{Identity: who, Command: cmd, Input: b, Owner: "owner"})
 }
 
 func (e *env) eventsOf(obj string) (out []domain.Event) {
@@ -111,14 +123,15 @@ func (e *env) verify() {
 	}
 }
 
-// ACT-PRH-08、09、18：delegate 附本人原话把建议补到已有事项；之后同一线程的消息直接回到目标事项。
+// ACT-PRH-08、09、18：把建议补到已有事项是二档：档位只整理的 delegate 得 23，运行钥匙在范围外；
+// 放开后补到，之后同一线程的消息直接回到目标事项。
 func TestAttachProposalToExistingItem(t *testing.T) {
 	e := attachEnv(t)
 	pa := e.proposalOf("att-1", "合同第二版意见", "thread-9")
 	t3 := e.openItem("合同谈判")
 
-	if _, err := e.do(delegate, CmdAttach, "", map[string]any{"id": pa, "to": t3}); exitOf(err) != domain.ExitBasisRequired {
-		t.Fatalf("delegate without the owner's words must get exit 23: %v", err)
+	if _, err := e.do(delegate, CmdAttach, "", map[string]any{"id": pa, "to": t3}); exitOf(err) != domain.ExitTierClosed {
+		t.Fatalf("organize-only delegate must get exit 23: %v", err)
 	}
 	if _, err := e.do(runIdent, CmdAttach, "", map[string]any{"id": pa, "to": t3}); exitOf(err) != domain.ExitPermissionDenied {
 		t.Fatalf("run identity must get exit 4: %v", err)
@@ -127,7 +140,8 @@ func TestAttachProposalToExistingItem(t *testing.T) {
 		t.Fatalf("rejected attach changed the proposal: %+v", got)
 	}
 
-	if _, err := e.do(delegate, CmdAttach, "这条补到合同谈判", map[string]any{"id": pa, "to": t3}); err != nil {
+	e.decideFor()
+	if _, err := e.do(delegate, CmdAttach, "", map[string]any{"id": pa, "to": t3}); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.item(pa); got.Phase != domain.PhaseDropped {
@@ -155,12 +169,12 @@ func TestAttachProposalToExistingItem(t *testing.T) {
 	// proposal.attached 以被补到的事项为对象（附录 B.4）；建议自己的变更是一条 item.phase_changed。
 	att := e.eventsOf(t3)
 	last := att[len(att)-1]
-	if last.Type != domain.EvProposalAttached || last.Actor.OnBehalfOf != "owner" || last.Actor.SessionKind != "direct" || last.Evidence != "这条补到合同谈判" ||
+	if last.Type != domain.EvProposalAttached || last.Actor.OnBehalfOf != "" || last.Actor.Principal != "dlg" || last.Basis == nil || last.Basis.Via != domain.BasisAllowance ||
 		!strings.Contains(last.Reason, pa) && !strings.Contains(string(last.Payload), pa) {
 		t.Fatalf("proposal.attached event: %+v", last)
 	}
 	pe := e.eventsOf(pa)
-	if p := pe[len(pe)-1]; p.Type != domain.EvItemPhaseChanged || p.Evidence != last.Evidence || !strings.Contains(p.Reason, t3) {
+	if p := pe[len(pe)-1]; p.Type != domain.EvItemPhaseChanged || p.Evidence != "" || !strings.Contains(p.Reason, t3) {
 		t.Fatalf("proposal change event: %+v", p)
 	}
 	if !domain.IsRegisteredEventType(domain.EvProposalAttached) || !domain.IsRegisteredEventType(domain.EvItemProgressAdded) {
@@ -194,7 +208,7 @@ func TestAttachProposalToExistingItem(t *testing.T) {
 		}
 	}
 	// 重复补到同一建议：只认第一次。
-	if _, err := e.do(delegate, CmdAttach, "再来一次", map[string]any{"id": pa, "to": t3}); exitOf(err) != domain.ExitConflict {
+	if _, err := e.do(delegate, CmdAttach, "", map[string]any{"id": pa, "to": t3}); exitOf(err) != domain.ExitConflict {
 		t.Fatalf("second attach must conflict: %v", err)
 	}
 }
@@ -239,22 +253,24 @@ func TestAttachRejectsInvalidTargetsAtomically(t *testing.T) {
 	e.verify()
 }
 
-// ACT-PRH-15、16、17：处置清单批量，每条各自成败、各有 Event、可逐条撤销；缺依据或超上限整批不生效。
+// ACT-PRH-15、16、17：处置清单批量等于逐条：每条各自判档、各自成败、各有 Event、可逐条撤销；
+// 档位未放开时每条都是 23、钥匙范围外每条都是 4，都不生效；超上限整批不生效。
 func TestBatchExplicitPerItemOutcomesAndRevert(t *testing.T) {
 	e := attachEnv(t)
 	e1, e2, e3 := e.proposalOf("e-1", "一"), e.proposalOf("e-2", "二"), e.proposalOf("e-3", "三")
 	t3 := e.openItem("合同谈判")
-	req := command.Request{Identity: delegate, Evidence: "这几条按我说的处理", Owner: "owner"}
+	req := command.Request{Identity: delegate, Owner: "owner"}
 	plan := BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{
 		{ID: e1, Do: "accept"}, {ID: e2, Do: "dismiss", Reason: "不需要"}, {ID: e3, Do: "attach", To: t3}, {ID: "itm-not-exist", Do: "accept"}}}
 
-	// 缺依据：整批不生效，退出码 23。
-	if _, err := Batch(bg, e.x, e.st, command.Request{Identity: delegate, Owner: "owner"}, plan); exitOf(err) != domain.ExitBasisRequired {
-		t.Fatalf("missing basis: %v", err)
+	// 档位未放开：逐条 23，什么都不生效。
+	closed, err := Batch(bg, e.x, e.st, command.Request{Identity: delegate, Owner: "owner"}, plan)
+	if err != nil || len(closed) != 4 || closed[0].Code != domain.CodeTierClosed || closed[2].Code != domain.CodeTierClosed || closed[3].Code != domain.CodeNotFound {
+		t.Fatalf("organize-only delegate: %+v %v", closed, err)
 	}
-	// 运行身份：退出码 4。
-	if _, err := Batch(bg, e.x, e.st, command.Request{Identity: runIdent, Owner: "owner"}, plan); exitOf(err) != domain.ExitPermissionDenied {
-		t.Fatalf("run identity: %v", err)
+	// 运行钥匙：这些建议都在它的范围外，逐条 4。
+	if out, err := Batch(bg, e.x, e.st, command.Request{Identity: runIdent, Owner: "owner"}, plan); err != nil || out[0].Code != domain.CodePermissionDenied || out[1].Code != domain.CodePermissionDenied {
+		t.Fatalf("run identity: %+v %v", out, err)
 	}
 	// 超上限：整批不生效。
 	big := BatchRequest{Mode: BatchExplicit}
@@ -270,6 +286,7 @@ func TestBatchExplicitPerItemOutcomesAndRevert(t *testing.T) {
 		}
 	}
 
+	e.decideFor()
 	res, err := Batch(bg, e.x, e.st, req, plan)
 	if err != nil {
 		t.Fatal(err)
@@ -283,7 +300,7 @@ func TestBatchExplicitPerItemOutcomesAndRevert(t *testing.T) {
 	for _, id := range []string{e1, e2, e3} {
 		es := e.eventsOf(id)
 		last := es[len(es)-1]
-		if last.Type != domain.EvItemPhaseChanged || last.Evidence != "这几条按我说的处理" || last.Actor.OnBehalfOf != "owner" || last.Actor.SessionKind != "direct" {
+		if last.Type != domain.EvItemPhaseChanged || last.Actor.OnBehalfOf != "" || last.Basis == nil || last.Basis.Via != domain.BasisAllowance {
 			t.Errorf("%s: event %+v", id, last)
 		}
 	}
@@ -306,7 +323,7 @@ func TestBatchExplicitPerItemOutcomesAndRevert(t *testing.T) {
 	if len(after) != len(es)+1 || after[len(es)-1].Type != domain.EvItemPhaseChanged {
 		t.Fatalf("revert must append an event and keep the original: %+v", after)
 	}
-	if tes := e.eventsOf(t3); tes[len(tes)-1].Type != domain.EvProposalAttached || tes[len(tes)-1].Evidence != "这几条按我说的处理" {
+	if tes := e.eventsOf(t3); tes[len(tes)-1].Type != domain.EvProposalAttached || tes[len(tes)-1].Actor.Principal != "dlg" {
 		t.Errorf("attach in a batch must record proposal.attached on the target: %+v", tes[len(tes)-1])
 	}
 	// 补到事项的那条不可逐条撤销（来源事件已改挂，单撤阶段会留下不一致）。
@@ -371,19 +388,15 @@ func (e *env) recommend(id, js string) {
 	}
 }
 
-// 没有可处理的建议时，无权的调用者也得不到成功：身份与依据对整批一视同仁。
+// 批量没有整批的门：没有可处理的建议时什么也不做，结果为空，谁调用都一样。
 func TestBatchGateRejectsUnauthorizedEvenWhenNothingToDo(t *testing.T) {
 	e := attachEnv(t)
 	b := BatchRequest{Mode: BatchRecommended}
-	if _, err := Batch(bg, e.x, e.st, command.Request{Identity: delegate, Owner: "owner"}, b); exitOf(err) != domain.ExitBasisRequired {
-		t.Fatalf("delegate without evidence: %v", err)
-	}
-	if _, err := Batch(bg, e.x, e.st, command.Request{Identity: runIdent, Owner: "owner"}, b); exitOf(err) != domain.ExitPermissionDenied {
-		t.Fatalf("run identity: %v", err)
-	}
-	res, err := Batch(bg, e.x, e.st, command.Request{Identity: delegate, Evidence: "按推荐", Owner: "owner"}, b)
-	if err != nil || len(res) != 0 {
-		t.Fatalf("authorized empty batch: %+v %v", res, err)
+	for _, who := range []command.Trusted{delegate, runIdent} {
+		res, err := Batch(bg, e.x, e.st, command.Request{Identity: who, Owner: "owner"}, b)
+		if err != nil || len(res) != 0 {
+			t.Fatalf("%s empty batch: %+v %v", who.Actor.Principal, res, err)
+		}
 	}
 }
 
@@ -444,48 +457,6 @@ func TestBatchRecommendedSourceFilterAndRepeatedKey(t *testing.T) {
 	e.verify()
 }
 
-// 授权单逐条校验范围：范围外的一条只是它自己失败，与它排在第几位无关；缺依据的整批 23，与第一条是否有效无关。
-func TestBatchGrantScopeIsPerEntryAndBasisIsPerBatch(t *testing.T) {
-	e := attachEnv(t)
-	a, b := e.proposalOf("g-a", "范围外"), e.proposalOf("g-b", "范围内")
-	au := auth.New(nil)
-	var cred auth.Credential
-	var secret string
-	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
-		cred, secret, err = au.Issue(tx, auth.Spec{Kind: auth.Delegate})
-		return
-	}); err != nil {
-		t.Fatal(err)
-	}
-	var g policy.Grant
-	if err := e.st.Update(bg, func(tx *store.Tx) (err error) {
-		g, err = policy.IssueGrant(tx, au, owner.Actor, e.now, policy.GrantInput{Grantee: policy.Grantee{Credential: cred.ID},
-			Scope: policy.Scope{Items: []string{b}}, Actions: []string{"proposal.accept"}, ExpiresAt: e.now.Add(time.Hour)})
-		return
-	}); err != nil {
-		t.Fatal(err)
-	}
-	who := command.Bearer{Auth: au, Secret: secret, Origin: auth.Origin{Session: "s1", SessionKind: "direct"}}
-	plan := BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: a, Do: "accept"}, {ID: b, Do: "accept"}}}
-
-	res, err := Batch(bg, e.x, e.st, command.Request{Identity: who, Grant: g.ID, Owner: "owner"}, plan)
-	if err != nil || len(res) != 2 || res[0].OK || !res[1].OK {
-		t.Fatalf("out-of-scope entry must fail alone: %+v %v", res, err)
-	}
-	if e.item(a).Phase != domain.PhaseProposed || e.item(b).Phase != domain.PhaseOpen {
-		t.Fatal("only the in-scope entry may be processed")
-	}
-	// 缺依据：第一条是不存在的 id 也不影响整批的 23。
-	c := e.proposalOf("g-c", "另一条")
-	bad := BatchRequest{Mode: BatchExplicit, Actions: []BatchAction{{ID: "itm-not-exist", Do: "accept"}, {ID: c, Do: "accept"}}}
-	if _, err := Batch(bg, e.x, e.st, command.Request{Identity: delegate, Owner: "owner"}, bad); exitOf(err) != domain.ExitBasisRequired {
-		t.Fatalf("missing basis with an invalid first entry: %v", err)
-	}
-	if e.item(c).Phase != domain.PhaseProposed {
-		t.Fatal("rejected batch processed an entry")
-	}
-}
-
 // 入站六步：归属在初筛之前。会挂靠原事项的事件不进批量预取，分类端点只收到真正要初筛的事件。
 func TestPrefetchSkipsAttachedEvents(t *testing.T) {
 	e := newEnv(t, true)
@@ -500,7 +471,8 @@ func TestPrefetchSkipsAttachedEvents(t *testing.T) {
 	e.svc.o.Intercept, e.svc.o.Attaches = fm.Intercept, fm.Attaches
 	pa := e.proposalOf("pf-0", "原事项", "thread-pf")
 	t3 := e.openItem("合同谈判")
-	if _, err := e.do(delegate, CmdAttach, "这条补到合同谈判", map[string]any{"id": pa, "to": t3}); err != nil {
+	e.decideFor()
+	if _, err := e.do(delegate, CmdAttach, "", map[string]any{"id": pa, "to": t3}); err != nil {
 		t.Fatal(err)
 	}
 	e.emit("src_t", "ticket",

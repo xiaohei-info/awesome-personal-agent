@@ -43,7 +43,7 @@ func open(t *testing.T) *store.Store {
 }
 
 var (
-	owner  = command.Trusted{Actor: human, Level: authz.LevelWeb}
+	owner  = command.Trusted{Actor: human, Level: authz.LevelWeb, Fresh: true}
 	worker = command.Trusted{Actor: domain.Actor{Type: domain.ActorAgent, Principal: "wrk", Via: domain.ViaCLI, OnBehalfOf: "owner"},
 		Level: authz.LevelWorker}
 )

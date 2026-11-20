@@ -420,11 +420,16 @@ func repoOwner(tx *store.Tx, remote string) (string, error) {
 
 // Register 在命令执行器上登记本模块的全部命令。
 //
-// allowed_executors 只有 project.allowed_executors.set 一条写入路径，它要求 change_settings
-// （Web 本人）；delegate 得到退出码 20 并留拒绝事件，其余级别得到退出码 4（§14.7）。
+// 档位（§14.3）：建项目、改项目信息、登记检出是一档；改对话捕获开关是 3a；远程仓库、对话外发范围、
+// 项目允许的执行者是 3b（只在 Web，再输口令）。allowed_executors 只有 project.allowed_executors.set 一条写入路径（§14.7）。
 func Register(x *command.Executor) error {
 	specs := []command.Spec{
-		{Name: "project.create", Action: authz.ActionManageProject, Tier: authz.TierWords,
+		{Name: "project.create", Action: authz.ActionManageProject, Tier: authz.TierOrganize, Page: "/projects",
+			TierFor: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
+				var v createIn
+				_ = decode(in, &v)
+				return captureTier(v.Capture), nil
+			},
 			Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 				var v createIn
 				return authz.Object{}, decode(in, &v)
@@ -459,7 +464,12 @@ func Register(x *command.Executor) error {
 				}
 				return ref{id}, nil
 			}},
-		{Name: "project.update", Action: authz.ActionManageProject, Tier: authz.TierWords,
+		{Name: "project.update", Action: authz.ActionManageProject, Tier: authz.TierOrganize, Page: "/projects",
+			TierFor: func(_ *store.Tx, _ command.Caller, _ authz.Object, in json.RawMessage) (authz.Tier, error) {
+				var v updateIn
+				_ = decode(in, &v)
+				return captureTier(v.Capture != nil), nil
+			},
 			Object: objectOf(func(v updateIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var v updateIn
@@ -502,7 +512,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.repo.add", Action: authz.ActionManageProject, Tier: authz.TierWords,
+		{Name: "project.repo.add", Action: authz.ActionManageProject, Tier: authz.TierPower, Page: "/projects",
 			Object: objectOf(func(v repoIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var v repoIn
@@ -522,7 +532,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.repo.remove", Action: authz.ActionManageProject, Tier: authz.TierWords,
+		{Name: "project.repo.remove", Action: authz.ActionManageProject, Tier: authz.TierPower, Page: "/projects",
 			Object: objectOf(func(v repoIn) string { return v.ID }),
 			Apply: func(c *command.Ctx) (any, error) {
 				var v repoIn
@@ -536,7 +546,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.checkout.set", Action: authz.ActionEditCheckout, Tier: authz.TierWork,
+		{Name: "project.checkout.set", Action: authz.ActionEditCheckout, Tier: authz.TierOrganize,
 			Object: objectOf(func(v checkoutIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				var v checkoutIn
@@ -558,7 +568,7 @@ func Register(x *command.Executor) error {
 					return nil
 				})
 			}},
-		{Name: "project.checkout.remove", Action: authz.ActionEditCheckout, Tier: authz.TierWork,
+		{Name: "project.checkout.remove", Action: authz.ActionEditCheckout, Tier: authz.TierOrganize,
 			Object: objectOf(func(v checkoutIn) string { return v.ID }),
 			Apply: func(c *command.Ctx) (any, error) {
 				var v checkoutIn
@@ -575,8 +585,8 @@ func Register(x *command.Executor) error {
 					return domain.NewError(domain.CodeNotFound, "checkout is not registered in this project", "list the project's repos")
 				})
 			}},
-		// 对话捕获送外部端点的范围只在 Web（§14.14）：delegate 得 web_only（退出码 20，留痕）。
-		{Name: CmdSetCaptureOutbound, Action: authz.ActionChangeSettings,
+		// 对话捕获送外部端点的范围是数据去向，属 3b（§14.14）。
+		{Name: CmdSetCaptureOutbound, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/projects",
 			Object: objectOf(func(v captureOutboundIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				_, err := parseCaptureOutbound(in)
@@ -600,7 +610,7 @@ func Register(x *command.Executor) error {
 				}
 				return ref{p.ID}, nil
 			}},
-		{Name: "project.allowed_executors.set", Action: authz.ActionChangeSettings,
+		{Name: "project.allowed_executors.set", Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/projects",
 			Object: objectOf(func(v executorsIn) string { return v.ID }),
 			Validate: func(_ *store.Tx, _ authz.Object, in json.RawMessage) error {
 				_, _, err := parseExecutors(in)
@@ -632,22 +642,25 @@ func Register(x *command.Executor) error {
 	return nil
 }
 
+// captureTier：改对话捕获开关是 3a（改日常），其余项目信息是一档。
+func captureTier(capture bool) authz.Tier {
+	if capture {
+		return authz.TierRules
+	}
+	return authz.TierOrganize
+}
+
 // parseExecutors 把 executors 字段落成三态：null → nil（不限制），[] → 空非 nil，名单 → 去重后的名单。
 func parseExecutors(in json.RawMessage) ([]string, []domain.ExecutorMatch, error) {
 	var v executorsIn
 	if err := decode(in, &v); err != nil {
 		return nil, nil, err
 	}
-	var match []domain.ExecutorMatch
-	for _, m := range v.Match {
-		m.Host, m.Harness = strings.TrimSpace(m.Host), strings.TrimSpace(m.Harness)
-		if m.Host == "" && m.Harness == "" {
-			return nil, nil, invalid("each match needs host or harness")
-		}
-		if !slices.Contains(match, m) {
-			match = append(match, m)
-		}
+	// 按机器、harness 维度匹配已取消（§14.7）：名单只认执行者 id。
+	if len(v.Match) > 0 {
+		return nil, nil, invalid("match is no longer accepted: list executor ids instead")
 	}
+	var match []domain.ExecutorMatch
 	if len(v.Executors) == 0 {
 		return nil, nil, invalid("executors is required: null for unrestricted, [] for owner only")
 	}

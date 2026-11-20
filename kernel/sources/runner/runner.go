@@ -258,12 +258,12 @@ func (r *Runner) fail(err error) {
 
 // Register 登记内部命令，并让来源登记的变更（登记、改周期、启停）提交后同步时间轮。
 func (r *Runner) Register(x *command.Executor) error {
-	err := x.Register(command.Spec{Name: CmdRunResult, Action: authz.ActionUpdateOwn, Object: objectOf,
+	err := x.Register(command.Spec{Name: CmdRunResult, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, Object: objectOf,
 		Apply: r.applyResult})
 	if err != nil {
 		return err
 	}
-	if err := x.Register(command.Spec{Name: CmdIngest, Action: authz.ActionUpdateOwn, Object: objectOf, Apply: r.applyIngest}); err != nil {
+	if err := x.Register(command.Spec{Name: CmdIngest, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal, Object: objectOf, Apply: r.applyIngest}); err != nil {
 		return err
 	}
 	x.OnCommit(func(c command.Commit) {
@@ -567,8 +567,7 @@ func (r *Runner) recovered(ctx context.Context, in resultIn) error {
 	body, _ := json.Marshal(map[string]any{"id": item, "to": domain.PhaseDone, "reason": "来源已恢复：拉取 " + in.RunID + " 成功"})
 	_, err := r.o.Exec.Do(ctx, command.Request{
 		Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorSystem, Principal: systemPrinc, Via: domain.ViaSource, OnBehalfOf: owner}, Level: authz.LevelDelegate},
-		Command:  "item.transition", Input: body, IdemKey: "runner:recovered:" + in.RunID,
-		Evidence: "source " + in.SourceID + " pulled successfully in run " + in.RunID, Owner: owner,
+		Command:  "item.transition", Input: body, IdemKey: "runner:recovered:" + in.RunID, Owner: owner,
 	})
 	var de *domain.Error
 	if errors.As(err, &de) {

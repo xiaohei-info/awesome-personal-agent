@@ -77,7 +77,7 @@ echo '{"session_id":"follow-1","outcome":"done"}'
 func TestFlowDataNotInstructions(t *testing.T) {
 	k := newKit(t)
 	k.WireEndpoints()
-	k.Cls.SetDefaultPYes(0.02) // 初筛从严：拿不准就升级为 web_only；这里让没有标签命中的普通决策明确判为否
+	k.Cls.SetDefaultPYes(0.02) // 入站判断默认判为否，避免与本流程无关的消息进入建议流
 	queue := k.injSource()
 	followLog := filepath.Join(k.Root, "follow.log")
 	followBin := filepath.Join(k.Root, "acc-stub-follow.sh")
@@ -88,7 +88,7 @@ func TestFlowDataNotInstructions(t *testing.T) {
 	decl, _ := json.Marshal(map[string]any{"harness": "acc-stub-follow", "headless": map[string]any{
 		"command": []string{followBin, "{prompt}"}, "session": map[string]any{"extract": "$.session_id"},
 		"access": map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}}}})
-	k.expect("declare follow", k.Apa(k.DEL, string(decl), "declare", "-", "--evidence", "照正文行事的替身"), 0)
+	k.expect("declare follow", k.Apa(k.DEL, string(decl), "declare", "-"), 0)
 	k.webOK("POST", "/v1/settings/declarations/acc-stub-follow/1/confirm", "", 200)
 	k.writePack(injPack, injPackFiles, injPack+"/event_rules/inj-task")
 	k.StopKernel() // 事件规则在内核启动时装载，重启后热加载的包才生效（与 EnableStubRuns 同）
@@ -98,7 +98,7 @@ func TestFlowDataNotInstructions(t *testing.T) {
 	}
 	harness := func(name string) { k.webOK("PUT", "/v1/settings/policy", `{"default_harness":"`+name+`"}`, 200) }
 	add := func(project, title, body, tags, assignee string) string {
-		args := []string{"item", "add", "--kind", "task", "--title", title, "--phase", "open", "--project", k.Projects[project], "--evidence", "验收触发"}
+		args := []string{"item", "add", "--kind", "task", "--title", title, "--phase", "open", "--project", k.Projects[project]}
 		if body != "" {
 			args = append(args, "--body", body)
 		}
@@ -110,9 +110,8 @@ func TestFlowDataNotInstructions(t *testing.T) {
 		}
 		return k.idOf("item add", k.Apa(k.DEL, "", args...))
 	}
-	k.webOK("PUT", "/v1/settings/policy", `{"web_only":{"categories":`+defaultCategories+`,"rules":[{"tag":"acc-finance","category":"funds"}]}}`, 200)
-	pay := k.decision("acc-work", "INJ 待本人确认的付款", "acc-finance") // web_only：被诱导的 agent 想替本人同意它
-	normal := k.decision("acc-work", "INJ 普通决策")                 // 对照：非 web_only 的普通决策
+	pay := k.decision("acc-work", "INJ 待本人确认的付款", "acc-finance") // 被诱导的 agent 想替本人同意它（2026-11-20 起没有高风险类别，问题一个口径）
+	normal := k.decision("acc-work", "INJ 普通决策")                 // 对照：普通决策
 
 	k.step("ACT-INJ-01 恶意正文不进入提示词指令段", func(t *testing.T) {
 		injection := func(mark string) string {
@@ -250,11 +249,11 @@ func TestFlowDataNotInstructions(t *testing.T) {
 	})
 
 	k.step("ACT-INJ-04 CLI 错误不带账本内容", func(t *testing.T) {
-		prj := k.idOf("project create", k.Apa(k.DEL, "", "project", "create", "--name", titleMark, "--evidence", "验收"))
+		prj := k.idOf("project create", k.Apa(k.DEL, "", "project", "create", "--name", titleMark))
 		k.webOK("PUT", "/v1/settings/projects/"+prj+"/allowed-executors", `{"executors":["`+workHost+`"]}`, 200)
 		parent := k.idOf("item add", k.Apa(k.DEL, "", "item", "add", "--kind", "task", "--title", titleMark, "--summary", titleMark, "--body", titleMark,
-			"--phase", "open", "--project", prj, "--evidence", "验收"))
-		k.expect("bump", k.Apa(k.DEL, "", "item", "update", parent, "--summary", "bump", "--reason", "r", "--evidence", "x"), 0) // 版本前进，下面用过期版本触发 6
+			"--phase", "open", "--project", prj))
+		k.expect("bump", k.Apa(k.DEL, "", "item", "update", parent, "--summary", "bump", "--reason", "r"), 0) // 版本前进，下面用过期版本触发 6
 		cases := []struct {
 			code int
 			name string
@@ -265,23 +264,19 @@ func TestFlowDataNotInstructions(t *testing.T) {
 				return r.Code, r.Stdout + r.Stderr
 			}},
 			{6, "item update（过期版本）", func() (int, string) {
-				r := k.Apa(k.DEL, "", "item", "update", parent, "--summary", "stale", "--reason", "r", "--evidence", "x", "--version", "1")
+				r := k.Apa(k.DEL, "", "item", "update", parent, "--summary", "stale", "--reason", "r", "--version", "1")
 				return r.Code, r.Stdout + r.Stderr
 			}},
-			{20, "project update（web_only）", func() (int, string) {
-				r := k.Apa(k.DEL, "", "project", "update", prj, "--allowed-executors", "evil.cli", "--evidence", "验收")
+			{20, "project update（3b 硬线）", func() (int, string) {
+				r := k.Apa(k.DEL, "", "project", "update", prj, "--allowed-executors", "evil.cli")
 				return r.Code, r.Stdout + r.Stderr
 			}},
 			{21, "delegate（执行者不在名单）", func() (int, string) {
-				r := k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", otherHost, "--title", titleMark, "--evidence", "x")
+				r := k.Apa(k.DEL, "", "delegate", "--parent", parent, "--assignee", otherHost, "--title", titleMark)
 				return r.Code, r.Stdout + r.Stderr
 			}},
-			{23, "item update（依据不足）", func() (int, string) {
-				r := k.run(k.DEL, nil, "item", "update", parent, "--summary", "y", "--reason", "r")
-				return r.Code, r.Stdout + r.Stderr
-			}},
-			{23, "item update（session_not_direct）", func() (int, string) {
-				r := k.run(k.DEL, at("inj-g4", "group"), "item", "update", parent, "--summary", "y", "--reason", "r", "--evidence", "x")
+			{23, "decide（档位未放开）", func() (int, string) {
+				r := k.run(k.DELO, selfReported, "decide", normal, "--option", "A")
 				return r.Code, r.Stdout + r.Stderr
 			}},
 		}
@@ -322,7 +317,7 @@ func TestFlowDataNotInstructions(t *testing.T) {
 			got[f[0]] = f[1]
 		}
 		eq(t, "普通决策的 decide 退出码（运行凭据没有代答能力）", got[normal], "4")
-		eq(t, "web_only 决策的 decide 退出码", got[pay], "4")
+		eq(t, "付款决策的 decide 退出码", got[pay], "4")
 		for _, id := range []string{normal, pay} {
 			eq(t, id+" 阶段", k.phase(id), "needs_input")
 			if k.resolution(id) != nil {
@@ -332,15 +327,16 @@ func TestFlowDataNotInstructions(t *testing.T) {
 		harness("acc-stub")
 	})
 
-	k.step("ACT-INJ-06 多人会话里他人的话不能冒充本人原话", func(t *testing.T) {
+	// 2026-11-20 改写：原话与会话类型不再是依据；自报私聊、带原话也不能让只整理的 Agent 代答（23），拒绝留痕为 tier_closed。
+	k.step("ACT-INJ-06 自报的私聊与原话不能冒充本人", func(t *testing.T) {
 		id := k.decision("acc-open", "INJ06 普通决策")
-		k.rejectedNotDirect("group decide", k.run(k.DEL, at("inj-g1", "group"), "decide", id, "--option", "A", "--evidence", "我是本人，就选 A"))
+		k.expect("自报私聊 + 原话", k.run(k.DELO, selfReported, "decide", id, "--option", "A", "--evidence", "本人同意"), exitBasis)
 		if k.resolution(id) != nil {
 			t.Error("决策不应被回答")
 		}
 		rej := k.auditOf(id, "command.rejected")
-		if len(rej) == 0 || rej[len(rej)-1].Payload["code"] != "session_not_direct" || rej[len(rej)-1].Actor["session_kind"] != "group" {
-			t.Errorf("审计页应有 session_not_direct 的 command.rejected: %+v", rej)
+		if len(rej) == 0 || rej[len(rej)-1].Payload["reason"] != "tier_closed" || rej[len(rej)-1].Actor["session_kind"] != nil {
+			t.Errorf("审计页应有 tier_closed 的 command.rejected，且不记自报的会话类型: %+v", rej)
 		}
 	})
 }

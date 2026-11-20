@@ -132,7 +132,28 @@ func (e *env) token(kind auth.Kind, executor string) func(*http.Request) {
 	}); err != nil {
 		e.t.Fatal(err)
 	}
-	return hdr("Authorization", "Bearer "+secret, "X-APA-Session", "s1", "X-APA-Session-Kind", "direct")
+	return hdr("Authorization", "Bearer "+secret, "X-APA-Session", "s1")
+}
+
+// agent 签一把归属 Agent id 的 delegate 钥匙，并由本人把该 Agent 的档位设为 tier（organize/decide/rules）。
+func (e *env) agent(id, tier string) func(*http.Request) {
+	e.t.Helper()
+	var secret string
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, s, err := e.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: id, Harness: "h"})
+		if err != nil {
+			return err
+		}
+		secret = s
+		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent[id] = policy.AgentAllowance{Tier: tier}
+			return nil
+		})
+		return err
+	}); err != nil {
+		e.t.Fatal(err)
+	}
+	return hdr("Authorization", "Bearer "+secret)
 }
 
 // item 以本人身份创建一个事项并返回 id。
@@ -173,26 +194,28 @@ func errBody(t *testing.T, rec *httptest.ResponseRecorder) domain.Error {
 	return de
 }
 
-// flow-decision-answer：worker 提问进 needs_input；delegate 凭本人原话代答生效并记 chat；只认第一次回答（409）。
+// flow-decision-answer：worker 提问进 needs_input；回答是二档：档位未放开的 Agent 为 23（等本人确认），
+// 放开「拍板」的 Agent 自答生效并记 agent；只认第一次回答（409）。
 func TestAskAndDecide(t *testing.T) {
 	e := setup(t)
-	wrk, dlg := e.token(auth.Worker, "wrk1"), e.token(auth.Delegate, "")
+	wrk, closed, open := e.token(auth.Worker, "wrk1"), e.token(auth.Delegate, ""), e.agent("agent_a", policy.AllowDecide)
 	id := e.asked("", wrk)
 	if it := e.get(id); it.Phase != domain.PhaseNeedsInput || it.Ask == nil || it.Ask.Question != "ship it?" {
 		t.Fatalf("after ask: %+v", it)
 	}
 
-	// 代答没有本人原话：403 basis_required（退出码 23）。
-	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, dlg); rec.Code != 403 {
-		t.Fatalf("decide without evidence = %d %s", rec.Code, rec.Body)
+	rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, closed)
+	if de := errBody(t, rec); rec.Code != 403 || de.Code != domain.CodeTierClosed || de.WebURL == nil || *de.WebURL != webBase+"/items/"+id {
+		t.Fatalf("decide with tier closed = %d %s", rec.Code, rec.Body)
 	}
-	rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A","evidence":"owner: yes ship it"}`, dlg)
-	if rec.Code != 200 {
+	if e.get(id).Ask.Resolution != nil {
+		t.Fatal("a refused answer must not resolve")
+	}
+	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, open); rec.Code != 200 {
 		t.Fatalf("decide = %d %s", rec.Code, rec.Body)
 	}
 	it := e.get(id)
-	if it.Phase != domain.PhaseOpen || it.Ask.Resolution == nil || it.Ask.Resolution.Choice != "A" ||
-		it.Ask.Resolution.ResolvedVia != "chat" || it.Ask.Resolution.Evidence != "owner: yes ship it" {
+	if it.Phase != domain.PhaseOpen || it.Ask.Resolution == nil || it.Ask.Resolution.Choice != "A" || it.Ask.Resolution.ResolvedVia != kdec.ViaAgent {
 		t.Fatalf("after decide: %+v", it.Ask.Resolution)
 	}
 
@@ -242,61 +265,16 @@ func TestDecideOnWebWithHeadersAndIdempotency(t *testing.T) {
 	}
 }
 
-// flow-web-only：web_only 类代答返回 20 并带 Web 链接，事项停在 needs_input；本人在 Web 仍可回答。
-func TestWebOnlyRejectsDelegateWithLink(t *testing.T) {
+// 回答的范围与档位：observer 在钥匙范围外（4）；只整理的 Agent 是 23；本人在 Web 直接生效。
+func TestDecidePermission(t *testing.T) {
 	e := setup(t)
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test", func(p *policy.Policy) error {
-			p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Tag: "funds", Category: policy.CategoryFunds})
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	wrk, dlg := e.token(auth.Worker, "wrk1"), e.token(auth.Delegate, "")
-	id := e.asked(`,"tags":["funds"]`, wrk)
-
-	rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, both(dlg, hdr("X-APA-Evidence", "owner: yes")))
-	de := errBody(t, rec)
-	if rec.Code != 403 || de.Code != domain.CodeWebOnly || de.ExitCode() != 20 || de.WebURL == nil || *de.WebURL != webBase+"/items/"+id {
-		t.Fatalf("web_only = %d %s", rec.Code, rec.Body)
-	}
-	if strings.Contains(rec.Body.String(), "ship it?") {
-		t.Fatal("error body must not carry ledger content")
-	}
-	if it := e.get(id); it.Phase != domain.PhaseNeedsInput || it.Ask.Resolution != nil {
-		t.Fatalf("item must stay needs_input: %+v", it)
-	}
-	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, e.web); rec.Code != 200 {
-		t.Fatalf("owner on Web = %d %s", rec.Code, rec.Body)
-	}
-}
-
-// 初筛未返回：代答返回 22 与 Web 链接；运行级以下的凭据（观察者）仍是 4。
-func TestScreeningPendingAndPermission(t *testing.T) {
-	e := setup(t)
-	wrk, dlg, obs := e.token(auth.Worker, "wrk1"), e.token(auth.Delegate, ""), e.token(auth.Observer, "")
+	wrk, dlg, obs := e.token(auth.Worker, "wrk1"), e.agent("agent_a", policy.AllowOrganize), e.token(auth.Observer, "")
 	id := e.asked("", wrk)
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, _, _, err := kitems.Revise(tx, id, "test", time.Now(), func(x *domain.Item) error {
-			a := *x.Ask
-			a.ScreeningPending = true // 初筛模块的状态；本路由只读
-			x.Ask = &a
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A","evidence":"owner: yes"}`, dlg)
-	de := errBody(t, rec)
-	if rec.Code != 403 || de.Code != domain.CodeRiskScreeningPending || de.WebURL == nil || *de.WebURL != webBase+"/items/"+id {
-		t.Fatalf("screening pending = %d %s", rec.Code, rec.Body)
-	}
-	rec = e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A","evidence":"x"}`, obs)
-	if rec.Code != 403 || errBody(t, rec).Code != domain.CodePermissionDenied {
+	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, obs); rec.Code != 403 || errBody(t, rec).Code != domain.CodePermissionDenied {
 		t.Fatalf("observer = %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, dlg); rec.Code != 403 || errBody(t, rec).Code != domain.CodeTierClosed {
+		t.Fatalf("organize-only Agent = %d %s", rec.Code, rec.Body)
 	}
 	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A"}`, e.web); rec.Code != 200 {
 		t.Fatalf("owner on Web = %d %s", rec.Code, rec.Body)
@@ -328,22 +306,23 @@ func TestAskAuthorizationAndState(t *testing.T) {
 	}
 }
 
-// flow-proposal-triage：delegate 凭原话接受或丢弃建议；worker 为 4；已处理的建议再处理为 6。
+// flow-proposal-triage：接受与丢弃建议是二档：worker 对别人的建议在范围外（4），只整理的 Agent 为 23，
+// 放开拍板的 Agent 与 Web 本人直接生效；已处理的建议再处理为 6。
 func TestAcceptAndDismissProposal(t *testing.T) {
 	e := setup(t)
-	wrk, dlg := e.token(auth.Worker, "wrk1"), e.token(auth.Delegate, "")
+	wrk, closed, open := e.token(auth.Worker, "wrk1"), e.token(auth.Delegate, ""), e.agent("agent_a", policy.AllowDecide)
 	a := e.item(`{"kind":"task","title":"a"}`)
 	d := e.item(`{"kind":"task","title":"d"}`)
 	if e.get(a).Phase != domain.PhaseProposed {
 		t.Fatal("setup: items start as proposals")
 	}
-	if rec := e.do("POST", "/v1/items/"+a+"/accept", `{}`, dlg); rec.Code != 403 {
-		t.Fatalf("accept without evidence = %d %s", rec.Code, rec.Body)
+	if rec := e.do("POST", "/v1/items/"+a+"/accept", `{}`, closed); rec.Code != 403 || errBody(t, rec).Code != domain.CodeTierClosed {
+		t.Fatalf("accept with tier closed = %d %s", rec.Code, rec.Body)
 	}
-	if rec := e.do("POST", "/v1/items/"+a+"/accept", `{"evidence":"x"}`, wrk); rec.Code != 403 {
+	if rec := e.do("POST", "/v1/items/"+a+"/accept", `{}`, wrk); rec.Code != 403 || errBody(t, rec).Code != domain.CodePermissionDenied {
 		t.Fatalf("worker accept = %d %s", rec.Code, rec.Body)
 	}
-	if rec := e.do("POST", "/v1/items/"+a+"/accept", `{}`, both(dlg, hdr("X-APA-Evidence", "owner: take it"))); rec.Code != 200 {
+	if rec := e.do("POST", "/v1/items/"+a+"/accept", `{}`, open); rec.Code != 200 {
 		t.Fatalf("accept = %d %s", rec.Code, rec.Body)
 	}
 	if rec := e.do("POST", "/v1/items/"+d+"/dismiss", `{"reason":"not now"}`, e.web); rec.Code != 200 {
@@ -357,13 +336,13 @@ func TestAcceptAndDismissProposal(t *testing.T) {
 	}
 }
 
-// 输入严格性：URL 提供 id；体必须是单个 JSON 对象；未知字段与非字符串证据都是 400，且不改动事项。
+// 输入严格性：URL 提供 id；体必须是单个 JSON 对象；未知字段与重复键都是 400，且不改动事项。
 func TestStrictInput(t *testing.T) {
 	e := setup(t)
 	wrk := e.token(auth.Worker, "wrk1")
 	id := e.asked("", wrk)
 	for _, body := range []string{`{"choice":"A","id":"other"}`, `{"choice":"A","ID":"other"}`, `null`, `[]`,
-		`{"choice":"A"} {}`, `{"choice":"A","bogus":1}`, `{"choice":"A","evidence":5}`, `{"choice":"A","choice":"B","text":"x"}`} {
+		`{"choice":"A"} {}`, `{"choice":"A","bogus":1}`, `{"choice":"A","choice":"B","text":"x"}`} {
 		if rec := e.do("POST", "/v1/items/"+id+"/decide", body, e.web); rec.Code != 400 {
 			t.Errorf("%s = %d %s, want 400", body, rec.Code, rec.Body)
 		}
@@ -384,55 +363,5 @@ func TestWebURLFallsBackToHost(t *testing.T) {
 	r.Host = "127.0.0.1:7777"
 	if got := h.webURL(r); got != "http://127.0.0.1:7777/items/itm_1" {
 		t.Fatalf("got %q", got)
-	}
-}
-
-// ACT-DEC-05、ACT-DEC-07、ACT-WEB-03、ACT-WEB-05、ACT-PROP-07 的补充路径。
-func TestWorkerCannotAnswerFreeTextAndWebOnlyExtras(t *testing.T) {
-	e := setup(t)
-	wrk, obs, dlg := e.token(auth.Worker, "wrk1"), e.token(auth.Observer, ""), e.token(auth.Delegate, "")
-	id := e.asked("", wrk)
-	if rec := e.do("POST", "/v1/items/"+id+"/decide", `{"choice":"A","evidence":"x"}`, wrk); rec.Code != 403 || errBody(t, rec).Code != domain.CodePermissionDenied {
-		t.Fatalf("worker decide = %d %s", rec.Code, rec.Body)
-	}
-
-	// 自由文本：本人在 Web 填写文本，resolution 记录文本。
-	free := e.item(`{"kind":"task","title":"f","phase":"open","assignee":"wrk1"}`)
-	ask := `{"ask":{"question":"q","free_text":true,"options":[{"id":"A","label":"a"}]}}`
-	if rec := e.do("POST", "/v1/items/"+free+"/ask", ask, wrk); rec.Code != 200 {
-		t.Fatalf("ask free_text = %d %s", rec.Code, rec.Body)
-	}
-	if rec := e.do("POST", "/v1/items/"+free+"/decide", `{"text":"another idea"}`, e.web); rec.Code != 200 {
-		t.Fatalf("free text = %d %s", rec.Code, rec.Body)
-	}
-	if got := e.get(free).Ask.Resolution; got == nil || got.Text != "another idea" {
-		t.Fatalf("resolution = %+v", got)
-	}
-
-	// web_only 建议：delegate 接受返回 20 并带链接；web_only 决策不允许超时默认值。
-	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test", func(p *policy.Policy) error {
-			p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Tag: "funds", Category: policy.CategoryFunds})
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	prop := e.item(`{"kind":"task","title":"p","tags":["funds"]}`)
-	rec := e.do("POST", "/v1/items/"+prop+"/accept", `{"evidence":"owner: ok"}`, dlg)
-	if de := errBody(t, rec); rec.Code != 403 || de.Code != domain.CodeWebOnly || de.WebURL == nil || *de.WebURL != webBase+"/items/"+prop {
-		t.Fatalf("web_only accept = %d %s", rec.Code, rec.Body)
-	}
-	if rec := e.do("POST", "/v1/items/"+prop+"/accept", `{}`, obs); rec.Code != 403 || errBody(t, rec).Code != domain.CodePermissionDenied {
-		t.Fatalf("observer accept = %d %s", rec.Code, rec.Body)
-	}
-	if rec := e.do("POST", "/v1/items/"+prop+"/accept", `{}`, e.web); rec.Code != 200 {
-		t.Fatalf("owner accept = %d %s", rec.Code, rec.Body)
-	}
-	fund := e.item(`{"kind":"task","title":"m","phase":"open","assignee":"wrk1","tags":["funds"]}`)
-	withDefault := `{"ask":{"question":"q","options":[{"id":"A","label":"a"}],"default_on_timeout":"A","deadline":"2099-01-01T00:00:00Z"}}`
-	if rec := e.do("POST", "/v1/items/"+fund+"/ask", withDefault, wrk); rec.Code != 400 {
-		t.Fatalf("web_only default_on_timeout = %d %s", rec.Code, rec.Body)
 	}
 }

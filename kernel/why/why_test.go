@@ -131,22 +131,6 @@ func TestCredentialLevelTrimsContent(t *testing.T) {
 	}
 }
 
-func TestScreeningPendingReturnsOnlyMarkerToNonWeb(t *testing.T) {
-	s := open(t)
-	seed(t, s)
-	tl, err := replay(t, s, Request{Actor: agent, Level: authz.LevelDelegate, ID: "item_1", ScreeningPending: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !tl.ScreeningPending || len(tl.Steps) != 0 {
-		t.Fatalf("non-web must get marker only: %+v", tl)
-	}
-	tl, err = replay(t, s, Request{Actor: owner, Level: authz.LevelWeb, ID: "item_1", ScreeningPending: true})
-	if err != nil || len(tl.Steps) != 3 {
-		t.Fatalf("owner sees full timeline while screening: %v %+v", err, tl)
-	}
-}
-
 func TestTombstonedContentStaysErased(t *testing.T) {
 	s := open(t)
 	seed(t, s)
@@ -228,14 +212,8 @@ func TestAuditFilterTrimPendingAndLimits(t *testing.T) {
 	if len(rej) != 1 || rej[0].Object != "item_1" {
 		t.Fatalf("rejected = %v", rej)
 	}
-	// 非 Web 且对象初筛未返回：该对象的事件被跳过，其余照常，且翻页能越过被跳过的行。
-	obs, _ := audit(t, s, AuditRequest{Actor: owner, Level: authz.LevelObserver, Pending: map[string]bool{"item_1": true}, Limit: 1})
-	if len(obs) != 1 || obs[0].Object != "run_1" || obs[0].Payload != nil {
-		t.Fatalf("observer = %v", obs)
-	}
-	web, _ := audit(t, s, AuditRequest{Actor: owner, Level: authz.LevelWeb, Pending: map[string]bool{"item_1": true}})
-	if len(web) != 4 {
-		t.Fatalf("web ignores pending, got %d", len(web))
+	if web, _ := audit(t, s, AuditRequest{Actor: owner, Level: authz.LevelWeb}); len(web) != 4 {
+		t.Fatalf("web sees every event, got %d", len(web))
 	}
 	for _, bad := range []AuditRequest{{Limit: -1}, {Limit: MaxAuditLimit + 1}, {After: -1}} {
 		bad.Actor, bad.Level = owner, authz.LevelWeb

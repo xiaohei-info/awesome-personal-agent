@@ -75,8 +75,8 @@ func writeFile(t *testing.T, path, body string) {
 func (k *kit) triggerRun() string {
 	k.t.Helper()
 	id := k.idOf("触发事项", k.Apa(k.DEL, "", "item", "add", "--kind", "task", "--title", "run-trigger", "--phase", "proposed",
-		"--project", k.Projects["acc-open"], "--tags", "acc-run", "--evidence", "e2e setup"))
-	k.expect("触发运行", k.Apa(k.DEL, "", "item", "transition", id, "--to", "open", "--reason", "go", "--evidence", "owner asked"), 0)
+		"--project", k.Projects["acc-open"], "--tags", "acc-run"))
+	k.expect("触发运行", k.Apa(k.DEL, "", "item", "transition", id, "--to", "open", "--reason", "go"), 0)
 	return id
 }
 
@@ -95,14 +95,14 @@ func TestFlowCommandRegistration(t *testing.T) {
 	k.step("ACT-CMD-01 delegate 不能登记自定义命令", func(t *testing.T) {
 		marker := filepath.Join(work, "evil.ran")
 		evil := script(t, work, "evil.sh", marker)
-		r := k.Apa(k.DEL, "", "source", "add", "--id", "src_evil", "--command", evil, "--schedule", "1s", "--timeout", "10", "--evidence", "owner asked")
+		r := k.Apa(k.DEL, "", "source", "add", "--id", "src_evil", "--command", evil, "--schedule", "1s", "--timeout", "10")
 		k.expect("CLI 登记自定义命令", r, exitWebOnly)
 		body := `{"id":"src_evil2","name":"src_evil2","type":"script","command":"` + evil + `","schedule":"1s","timeout":10}`
 		if w := k.APIRaw("POST", "/v1/sources", body, k.DEL); w.Code != http.StatusForbidden {
 			t.Errorf("POST /v1/sources 带自定义命令: HTTP %d，期望 403 %s", w.Code, w.Body)
 		}
 		// 把自定义命令塞进"附带拉取程序"也不行：pull 只接受随发行附带的程序名。
-		if r := k.Apa(k.DEL, "", "source", "add", "--id", "src_evil3", "--name", "src_evil3", "--type", "pull", "--command", evil, "--schedule", "1s", "--timeout", "10", "--evidence", "owner asked"); r.Code == 0 {
+		if r := k.Apa(k.DEL, "", "source", "add", "--id", "src_evil3", "--name", "src_evil3", "--type", "pull", "--command", evil, "--schedule", "1s", "--timeout", "10"); r.Code == 0 {
 			t.Error("pull 来源不应接受自定义命令")
 		}
 		// 登记要是生效，来源会在 1 秒节拍内被拉起；等 3 个节拍仍无标记文件才算没有执行。
@@ -118,7 +118,7 @@ func TestFlowCommandRegistration(t *testing.T) {
 	k.step("ACT-CMD-02 声明未确认前不生效", func(t *testing.T) {
 		marker := filepath.Join(work, "pending.ran")
 		decl := declaration("acc-pending", marker)
-		r := k.Apa(k.DEL, decl, "declare", "-", "--evidence", "owner asked")
+		r := k.Apa(k.DEL, decl, "declare", "-")
 		k.expect("apa declare", r, 0)
 		if p := k.webOK("GET", "/v1/settings/declarations", "", 200); !strings.Contains(p, "acc-pending") {
 			t.Fatalf("Web 设置页应显示待确认: %s", p)
@@ -202,9 +202,11 @@ func TestFlowCommandRegistration(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-CMD-05 delegate 可以登记随发行附带的拉取程序", func(t *testing.T) {
-		r := k.Apa(k.DEL, "", "source", "add", "--id", "src_rss", "--name", "src_rss", "--type", "pull", "--command", "rss-source", "--schedule", "1h", "--timeout", "30", "--evidence", "owner asked")
-		k.expect("登记 RSS 拉取程序", r, 0)
+	// 2026-11-20 改写（权限模型第二版）：登记任何来源都是外部接入（3b），delegate 一律 20；随发行附带的拉取程序由本人在 Web 登记。
+	k.step("ACT-CMD-05 随发行附带的拉取程序也只由本人登记", func(t *testing.T) {
+		args := []string{"source", "add", "--id", "src_rss", "--name", "src_rss", "--type", "pull", "--command", "rss-source", "--schedule", "1h", "--timeout", "30"}
+		k.expect("delegate 登记 RSS 拉取程序", k.Apa(k.DEL, "", args...), exitWebOnly)
+		k.expect("本人登记 RSS 拉取程序", k.OwnerApa("", args...), 0)
 		if show := k.Apa(k.OBS, "", "source", "show", "src_rss"); show.Code != 0 || !contains(show.Stdout, `"rss-source"`, `"pull"`) {
 			t.Errorf("来源应已登记: %d %s", show.Code, show.Stdout)
 		}

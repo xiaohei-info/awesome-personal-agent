@@ -171,8 +171,7 @@ func legacyFixture(t *testing.T, e *baseline.Env) {
 	}
 	want := map[int]string{}
 	var endpoint struct {
-		URL                string `json:"url"`
-		ScreeningTimeoutMs int    `json:"screening_timeout_ms"`
+		URL string `json:"url"`
 	}
 	for _, d := range pre.M.PolicyDetails {
 		want[d.ID] = d.SHA256
@@ -199,24 +198,25 @@ func legacyFixture(t *testing.T, e *baseline.Env) {
 		if got["judge_endpoint"] != nil {
 			t.Errorf("judge_endpoint 应为 null: %v", got["judge_endpoint"])
 		}
-		if endpoint.ScreeningTimeoutMs != 0 {
-			eq(t, "screening_timeout_ms", got["screening_timeout_ms"], float64(endpoint.ScreeningTimeoutMs))
-		}
 		after := policyVersions(t, fx.Home)
 		for id, sum := range want {
 			if after[id] != sum {
 				t.Errorf("策略版本 %d 的内容哈希改变: %s → %s", id, sum, after[id])
 			}
 		}
-		if len(after) != len(want) {
-			t.Errorf("升级不应新增策略版本: %d → %d", len(want), len(after))
+		// 权限模型切换（2026-11-20，§16.5）在启动时写一个新策略版本：去掉旧字段（含旧形状的 model_endpoint），旧版本原样保留。
+		if len(after) != len(want)+1 {
+			t.Errorf("升级只应新增切换写的那一个策略版本: %d → %d", len(want), len(after))
+		}
+		if latest := latestPolicyDoc(t, fx.Home); strings.Contains(latest, `"model_endpoint"`) || !strings.Contains(latest, "generate_endpoint") {
+			t.Errorf("切换后的策略版本应是新形状: %s", latest)
 		}
 	})
 
 	t.Run("ACT-EPC-06 本人在 Web 保存后写成新字段，旧版本不变", func(t *testing.T) {
 		_, body := k.do("GET", "/v1/settings/model-endpoints", "")
 		got := jsonMap(t, body)
-		save := map[string]any{"generate_endpoint": stripResponseOnly(sub(got, "generate_endpoint")), "screening_timeout_ms": got["screening_timeout_ms"]}
+		save := map[string]any{"generate_endpoint": stripResponseOnly(sub(got, "generate_endpoint"))}
 		if j := sub(got, "judge_endpoint"); j != nil {
 			save["judge_endpoint"] = stripResponseOnly(j)
 		}
@@ -224,8 +224,8 @@ func legacyFixture(t *testing.T, e *baseline.Env) {
 			t.Fatalf("保存: %d %s", code, b)
 		}
 		after := policyVersions(t, fx.Home)
-		if len(after) != len(want)+1 {
-			t.Fatalf("应新增一个策略版本: %d → %d", len(want), len(after))
+		if len(after) != len(want)+2 { // 切换一个 + 本次保存一个
+			t.Fatalf("应新增一个策略版本: %d → %d", len(want)+1, len(after))
 		}
 		for id, sum := range want {
 			if after[id] != sum {
@@ -233,10 +233,8 @@ func legacyFixture(t *testing.T, e *baseline.Env) {
 			}
 		}
 		latest := latestPolicyDoc(t, fx.Home)
-		for _, must := range []string{"generate_endpoint", "screening_timeout_ms"} {
-			if !strings.Contains(latest, must) {
-				t.Errorf("新版本缺少 %s: %s", must, latest)
-			}
+		if !strings.Contains(latest, "generate_endpoint") || strings.Contains(latest, "screening_timeout_ms") {
+			t.Errorf("新版本应有 generate_endpoint、不再有 screening_timeout_ms: %s", latest)
 		}
 		if strings.Contains(latest, `"model_endpoint"`) {
 			t.Errorf("新版本不应再有 model_endpoint: %s", latest)
@@ -248,7 +246,7 @@ func legacyFixture(t *testing.T, e *baseline.Env) {
 		if code, b := k.do("PUT", "/v1/settings/model-endpoints", mustJSON(map[string]any{"judge_endpoint": j})); code != 200 {
 			t.Fatalf("设置判断端点 J: %d %s", code, b)
 		}
-		legacy := `{"model_endpoint": {"url": "http://127.0.0.1:2/v1", "model": "acc-model", "api_key": "k1", "screening_timeout_ms": 45000}}`
+		legacy := `{"model_endpoint": {"url": "http://127.0.0.1:2/v1", "model": "acc-model", "api_key": "k1"}}`
 		code, b := k.do("PUT", "/v1/settings/model-endpoints", legacy)
 		if code != 200 {
 			t.Fatalf("旧形状 PUT: %d %s", code, b)
@@ -258,7 +256,6 @@ func legacyFixture(t *testing.T, e *baseline.Env) {
 		eq(t, "generate.url", g["url"], "http://127.0.0.1:2/v1")
 		eq(t, "generate.model", g["model"], "acc-model")
 		eq(t, "generate.locality", g["locality"], "external")
-		eq(t, "screening_timeout_ms（顶层）", got["screening_timeout_ms"], 45000.0)
 		eq(t, "judge_endpoint 保持 J", sub(got, "judge_endpoint")["url"], "http://127.0.0.1:1/judge")
 	})
 }

@@ -60,32 +60,19 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		}
 	})
 
-	var auth03 string // ACT-AUTH-08 沿用 ACT-AUTH-03 的事项
-	k.step("ACT-AUTH-03 delegate 改别人的事项须私聊会话里的本人原话加会话引用，或授权单", func(t *testing.T) {
+	// 2026-11-20 改写（权限模型第二版，§14.3）：改别人的事项是一档，不再要本人原话、会话引用或授权单；
+	// 调用方自报的会话类型、宿主名与原话、授权单的旧参数都被忽略，不改变结果。
+	k.step("ACT-AUTH-03 delegate 改别人的事项是一档，自报的会话与原话不参与判定", func(t *testing.T) {
 		target := k.addItem("acc-open", otherHost)
-		auth03 = target
-		unchanged := func(label string) {
-			t.Helper()
-			// 2026-11-20 起被拒的写入不转阶段、不产出问题（§14.5）
-			if it := k.item(target); it["title"] == "no-basis" || it["phase"] != "open" || it["ask"] != nil {
-				t.Errorf("%s: 修改不应生效，事项阶段不变、不挂问题", label)
-			}
-		}
-		k.expect("不带 --evidence 也不带 --grant", k.run(k.DEL, nil, "item", "update", target, "--title", "no-basis", "--reason", "x"), exitBasis)
-		unchanged("无依据")
-		const words = "把标题改成 with-evidence"
-		k.expect("direct 会话 + 原话", k.run(k.DEL, at("auth-s3", "direct"), "item", "update", target, "--title", "with-evidence", "--reason", "owner asked", "--evidence", words), 0)
-		if k.item(target)["title"] != "with-evidence" {
-			t.Error("direct 会话里带原话的修改应生效")
-		}
+		k.expect("只整理的 delegate，不带任何依据", k.run(k.DELO, nil, "item", "update", target, "--title", "organize-1", "--reason", "x"), 0)
 		ev := k.lastEvent(target, "item.updated")
-		if ev.Evidence != words || ev.Actor["on_behalf_of"] != "owner" || ev.Actor["session"] != "auth-s3" || ev.Actor["session_kind"] != "direct" {
-			t.Errorf("Event 应含 on_behalf_of、原话、会话引用与会话类型 direct: %+v", ev)
+		if ev.Actor["type"] != "agent" || ev.Actor["on_behalf_of"] != nil || ev.Evidence != "" || ev.Basis["via"] != "organize" {
+			t.Errorf("一档的 Event 应记 Agent 自己、依据 organize，不带代本人与原话: %+v", ev)
 		}
-		before := k.version(target)
-		k.expect("同时带 --evidence 与 --grant", k.run(k.DEL, at("auth-s3", "direct"), "item", "update", target, "--title", "both", "--reason", "x", "--evidence", words, "--grant", "gnt_none"), exitInvalid)
-		if k.item(target)["title"] == "both" || k.version(target) != before {
-			t.Error("两种依据同时携带不应生效")
+		k.expect("同一命令带自报的私聊、原话与授权单", k.run(k.DELO, selfReported, "item", "update", target, "--title", "organize-2", "--reason", "x", "--evidence", "本人说的", "--grant", "gnt_none"), 0)
+		ev = k.lastEvent(target, "item.updated")
+		if k.item(target)["title"] != "organize-2" || ev.Evidence != "" || ev.Grant != "" || ev.Actor["session_kind"] != nil || ev.Actor["on_behalf_of"] != nil {
+			t.Errorf("自报内容不应进入判定或审计: %+v", ev)
 		}
 	})
 
@@ -105,28 +92,33 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		k.expect("吊销后 apa inbox", k.Apa(out.Secret, "", "inbox"), exitAuth) // 不重启内核、不等待
 	})
 
-	k.step("ACT-AUTH-05 设置接口只接受 Web 登录", func(t *testing.T) {
+	// 2026-11-20 改写：3b（钥匙、执行者名单、物理删除）任何钥匙都是 20（硬线，先于档位）；3a 的策略段看档位，只整理的钥匙得 23。
+	k.step("ACT-AUTH-05 3b 设置只接受 Web，3a 设置看档位", func(t *testing.T) {
 		victim := k.addItem("acc-open", "")
 		policyBefore := k.webOK("GET", "/v1/settings/policy", "", 200)
 		tokensBefore := k.webOK("GET", "/v1/settings/tokens", "", 200)
 		allowedBefore := k.allowed("acc-work")
 		auditBefore := len(k.rejections())
 
-		attempts := []struct{ method, path, body string }{
-			{"PUT", "/v1/settings/policy", `{"persona":"hijacked"}`},
-			{"POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`},
-			{"PUT", "/v1/settings/projects/" + k.Projects["acc-work"] + "/allowed-executors", `{"executors":["` + otherHost + `"]}`},
-			{"POST", "/v1/settings/purge", `{"object":"` + victim + `"}`},
+		attempts := []struct {
+			token, method, path, body, reason string
+		}{
+			{k.DELO, "PUT", "/v1/settings/policy", `{"persona":"hijacked"}`, "tier_closed"},
+			{k.DELO, "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`, "hard_line"},
+			{k.DEL, "POST", "/v1/settings/tokens", `{"kind":"delegate","label":"evil"}`, "hard_line"},
+			{k.DEL, "PUT", "/v1/settings/projects/" + k.Projects["acc-work"] + "/allowed-executors", `{"executors":["` + otherHost + `"]}`, "hard_line"},
+			{k.DEL, "POST", "/v1/settings/purge", `{"object":"` + victim + `"}`, "hard_line"},
+			{k.DEL, "PUT", "/v1/settings/agents/" + k.AgentID + "/tier", `{"tier":"rules"}`, "hard_line"},
 		}
 		for _, a := range attempts {
-			r := k.APIRaw(a.method, a.path, a.body, k.DEL)
+			r := k.APIRaw(a.method, a.path, a.body, a.token)
 			if r.Code != http.StatusForbidden {
-				t.Errorf("DEL %s %s: HTTP %d，期望 403 %s", a.method, a.path, r.Code, r.Body)
+				t.Errorf("%s %s: HTTP %d，期望 403 %s", a.method, a.path, r.Code, r.Body)
 				continue
 			}
 			var e map[string]any
-			if json.Unmarshal([]byte(r.Body), &e) != nil || e["code"] == nil || e["why"] == "" || e["next"] == "" {
-				t.Errorf("DEL %s %s: 错误体缺 code/why/next: %s", a.method, a.path, r.Body)
+			if json.Unmarshal([]byte(r.Body), &e) != nil || e["code"] == nil || e["why"] == "" || e["next"] == "" || e["reason"] != a.reason {
+				t.Errorf("%s %s: 错误体应含 code/why/next 与 reason %s: %s", a.method, a.path, a.reason, r.Body)
 			}
 		}
 		// 验收文档字面写的是 PATCH /v1/settings/policy 与 PATCH .../allowed-executors；实现的路由是 PUT（附录 B.2 只列路径）。
@@ -135,7 +127,7 @@ func TestFlowAuthzMatrix(t *testing.T) {
 			{"/v1/settings/policy", `{"persona":"hijacked"}`},
 			{"/v1/settings/projects/" + k.Projects["acc-work"] + "/allowed-executors", `{"executors":["` + otherHost + `"]}`},
 		} {
-			r := k.APIRaw("PATCH", a.path, a.body, k.DEL)
+			r := k.APIRaw("PATCH", a.path, a.body, k.DELO)
 			if r.Code < 400 {
 				t.Errorf("DEL PATCH %s 不应成功: %d", a.path, r.Code)
 			}
@@ -179,11 +171,11 @@ func TestFlowAuthzMatrix(t *testing.T) {
 			}
 		}
 		// 矩阵每一行、每一列、表中每个动作都有断言；缺任一项即矩阵有未覆盖的格子。
-		for _, name := range []string{"TestMatrixEveryRowAndColumn", "TestMatrixCoversEveryTableAction", "TestWebLevelCannotBeClaimedByAgent",
-			"TestMatrixRunIDExchange", "TestSettingsRejectEveryBearerAndAcceptWebSession",
-			// §14.5 会话类型规则：凭原话的第二档在 direct 之外（group、unknown、缺失）都被拒；授权单、自己的工作、读取不看会话类型。
-			"TestOwnerWordsOnlyInDirectSessions", "TestSessionKindDoesNotGateGrantsOwnWorkOrReads",
-			"TestDelegateDoneOnOwnersItemNeedsWordsInDirectSessionOrGrant", "TestGrantAuthorisesDoneOnlyInScope"} {
+		// 三档的对照矩阵（身份 × 每档代表命令，CLI 与 HTTP 两个入口逐格一致）及管线、设置路由的契约都要通过。
+		for _, name := range []string{"TestEntryMatrixIdentityByTier", "TestWebLevelCannotBeClaimedByAgent", "TestMatrixRunIDExchange",
+			"TestSettingsRejectEveryBearerAndAcceptWebSession", "TestObserverReadsAndProposesOnly", "TestWorkerCanOnlyUpdateOwnItems",
+			"TestDelegateEditsAnyItemOnTierOne", "TestDelegateReceiptsAndDoneEvidence", "TestProjectWritesFollowTheirTier",
+			"TestRegisteredTiersMatchAppendixB1"} {
 			if !passed[name] {
 				t.Errorf("契约测试 %s 没有通过（或没有运行）", name)
 			}
@@ -193,10 +185,11 @@ func TestFlowAuthzMatrix(t *testing.T) {
 	k.step("ACT-AUTH-07 repos 属性按级别修改", func(t *testing.T) {
 		home := k.Projects["acc-home"]
 		const remote = "https://example.invalid/acc/home.git"
-		// 本机检出挂在已登记的远程地址上，先由 DEL 登记远程地址（建项目、改远程地址属 delegate）。
-		k.expect("DEL 增加远程地址", k.Apa(k.DEL, "", "project", "repos", "add", home, "--remote", remote, "--evidence", "owner asked"), 0)
+		// 本机检出挂在已登记的远程地址上。远程地址是外部接入（3b）：任何钥匙都是 20，由本人在 Web 登记（2026-11-20）。
+		k.expect("DEL 增加远程地址", k.Apa(k.DEL, "", "project", "repos", "add", home, "--remote", remote), exitWebOnly)
+		k.expect("本人增加远程地址", k.OwnerApa("", "project", "repos", "add", home, "--remote", remote), 0)
 		k.expect("WRK 增加本机检出", k.Apa(k.WRK, "", "project", "repos", "add", home, "--remote", remote, "--path", "/srv/acc/home", "--host", "work-host"), 0)
-		k.expect("WRK 增加新的远程地址", k.Apa(k.WRK, "", "project", "repos", "add", home, "--remote", "https://example.invalid/acc/other.git"), exitDenied)
+		k.expect("WRK 增加新的远程地址", k.Apa(k.WRK, "", "project", "repos", "add", home, "--remote", "https://example.invalid/acc/other.git"), exitWebOnly)
 		show := k.Apa(k.OBS, "", "project", "show", home).Stdout
 		if !contains(show, remote, "/srv/acc/home") || strings.Contains(show, "other.git") {
 			t.Errorf("repos 状态不符: %s", show)
@@ -209,22 +202,11 @@ func TestFlowAuthzMatrix(t *testing.T) {
 			t.Errorf("变更应都记 Event，project.updated 只有 %d 条: %v", n, kinds)
 		}
 	})
-	k.step("ACT-AUTH-08 多人会话里的原话不能让 delegate 改别人的事项", func(t *testing.T) {
-		// 2026-11-20 起被拒的写入不转 needs_input、不挂内核问题：ACT-AUTH-03 的事项仍在 open，被拒后也仍在 open。
-		eq(t, "ACT-AUTH-03 之后的阶段", k.phase(auth03), "open")
-		title := k.item(auth03)["title"]
-		k.rejectedNotDirect("group item update", k.run(k.DEL, at("auth-g8", "group"), "item", "update", auth03, "--title", "x", "--reason", "x", "--evidence", "本人说改"))
-		eq(t, "标题不变", k.item(auth03)["title"], title)
-		eq(t, "阶段不变", k.phase(auth03), "open")
-	})
-
-	k.step("ACT-AUTH-09 delegate 无依据把本人的事项标为完成被拒（SPIKE-DONE-AUTHZ）", func(t *testing.T) {
+	// 2026-11-20 改写：把本人的事项标为完成不离开"建议"或"等你决定"，是一档；回执的 done 仍要结果证据。
+	k.step("ACT-AUTH-09 delegate 把本人的事项标为完成是一档，回执 done 仍要结果证据", func(t *testing.T) {
 		own := k.ownItem("acc-open", "AUTH-I9")
-		k.expect("无依据 transition done", k.run(k.DEL, nil, "item", "transition", own, "--to", "done", "--reason", "x"), exitBasis)
-		eq(t, "AUTH-I9 阶段（被拒不转阶段，2026-11-20）", k.phase(own), "open")
-		if len(k.auditOf(own, "command.rejected")) == 0 {
-			t.Error("应记 command.rejected")
-		}
+		k.expect("只整理的 delegate transition done", k.run(k.DELO, nil, "item", "transition", own, "--to", "done", "--reason", "x"), 0)
+		eq(t, "AUTH-I9 阶段", k.phase(own), "done")
 		// DEL 自己委派出去的子事项：回执标记完成缺结果证据，退出码 2。
 		parent := k.addItem("acc-open", workHost)
 		child := k.idOf("delegate", k.delegate("--parent", parent, "--assignee", workHost))
@@ -235,31 +217,17 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-AUTH-10 私聊会话原话可以把本人的事项标为完成", func(t *testing.T) {
-		own := k.ownItem("acc-open", "AUTH-I10")
-		k.expect("direct transition done", k.run(k.DEL, at("auth-s10", "direct"), "item", "transition", own, "--to", "done", "--reason", "x", "--evidence", "这件事做完了"), 0)
-		eq(t, "AUTH-I10 阶段", k.phase(own), "done")
-		ev := k.lastEvent(own, "item.phase_changed")
-		if ev.Actor["on_behalf_of"] != "owner" || ev.Evidence != "这件事做完了" || ev.Actor["session"] != "auth-s10" || ev.Actor["session_kind"] != "direct" {
-			t.Errorf("Event 缺依据字段: %+v", ev)
+	k.step("ACT-AUTH-10 二档看档位：只整理得 23，放开后生效", func(t *testing.T) {
+		p := k.idOf("propose", k.Apa(k.DELO, "", "propose", "--kind", "task", "--title", "auth-10-proposal"))
+		k.expect("只整理接受建议", k.run(k.DELO, selfReported, "accept", p), exitBasis)
+		if b := k.errBody(k.run(k.DELO, nil, "accept", p)); b["reason"] != "tier_closed" || !strings.Contains(asString(b["web_url"]), p) {
+			t.Errorf("档位未放开应为 tier_closed 并指向该事项: %v", b)
 		}
-	})
-
-	k.step("ACT-AUTH-11 授权单可以把范围内本人的事项标为完成，范围外不行", func(t *testing.T) {
-		g := k.grant([]string{"item.transition"}, "acc-home")
-		inScope, outScope := k.ownItem("acc-home", "AUTH-I11-home"), k.ownItem("acc-open", "AUTH-I11-open")
-		k.expect("范围内", k.run(k.DEL, nil, "item", "transition", inScope, "--to", "done", "--reason", "x", "--grant", g), 0)
-		eq(t, "范围内阶段", k.phase(inScope), "done")
-		eq(t, "Event 记的授权单", k.lastEvent(inScope, "item.phase_changed").Grant, g)
-		k.expect("范围外", k.run(k.DEL, nil, "item", "transition", outScope, "--to", "done", "--reason", "x", "--grant", g), exitBasis)
-		eq(t, "范围外阶段（被拒不转阶段，2026-11-20）", k.phase(outScope), "open")
-	})
-
-	k.step("ACT-AUTH-12 多人会话原话不能把本人的事项标为完成", func(t *testing.T) {
-		own := k.ownItem("acc-open", "AUTH-I12")
-		k.rejectedNotDirect("group transition done", k.run(k.DEL, at("auth-g12", "group"), "item", "transition", own, "--to", "done", "--reason", "x", "--evidence", "做完了"))
-		if k.phase(own) == "done" {
-			t.Error("事项不应被标为完成")
+		eq(t, "被拒后仍是建议", k.phase(p), "proposed")
+		k.expect("档位放开的 Agent 接受建议", k.run(k.DEL, nil, "accept", p), 0)
+		eq(t, "接受后", k.phase(p), "open")
+		if ev := k.lastEvent(p, "item.phase_changed"); ev.Basis["via"] != "allowance" || ev.Basis["agent"] != k.AgentID {
+			t.Errorf("二档放行的依据应是该 Agent 的档位: %+v", ev)
 		}
 	})
 }

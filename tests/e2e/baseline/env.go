@@ -13,11 +13,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,7 +29,8 @@ import (
 )
 
 const (
-	loopback = "127.0.0.1"
+	loopback       = "127.0.0.1"
+	reauthRequired = "re" + "auth_required"
 	// Password 是 Web 登录口令（apa init 设置）。
 	Password = "e2e-baseline-password"
 	// DefaultTestRepo 是 <TEST_REPO> 的占位地址（仅供需要"一个远程地址"的用例）；用例需要可写远程时用 APA_E2E_TEST_REPO 指向它。
@@ -42,15 +45,15 @@ type Env struct {
 	URL  string // APA_URL
 	// WebSecret 是 Web 登录口令；缺省为 Password，在账本夹具上启动时是夹具自己的口令（ServeFixture）。
 	WebSecret string
-	NoSession bool // 为真时带 --evidence 的命令也不设 APA_SESSION
-	// SessionKind 非空时作为 APA_SESSION_KIND 传给 apa 子命令（验收文档默认 direct；缺省留空以保持已交付流程的行为）。
-	SessionKind string
-	Bin         map[string]string // apa（-tags apa_testclock 测试构建）、stub-harness、tool-stub、telegram-ext 的可执行文件
-	TestRepo    string            // <TEST_REPO>
-	LocalRepo   string            // LOCAL_REPO：file:// 本地 git 仓库（已提交一次），acc-work 的 repos
-	ToolBin     string            // TOOL_STUB_BIN，InstallToolStub 之后非空；之后启动的内核 PATH 以它开头
+	Bin       map[string]string // apa（-tags apa_testclock 测试构建）、stub-harness、tool-stub、telegram-ext 的可执行文件
+	TestRepo  string            // <TEST_REPO>
+	LocalRepo string            // LOCAL_REPO：file:// 本地 git 仓库（已提交一次），acc-work 的 repos
+	ToolBin   string            // TOOL_STUB_BIN，InstallToolStub 之后非空；之后启动的内核 PATH 以它开头
 
 	OBS, WRK, WRK2, DEL, CHAN string
+	// DELO 是没有归属任何 Agent 的 delegate 钥匙：档位恒为只整理（§14.5）。DEL 在 IssueCredentials 末尾换成归属 AgentID、
+	// 档位为「连日常规矩也替我改」的钥匙，已交付流程里由 Agent 做的二档、3a 动作照常生效；3b 仍只在 Web。
+	DELO, AgentID string
 
 	Projects  map[string]string  // 项目名 → 项目 id
 	ModelStub *modelstub.Stub    // MODEL_STUB（生成端点；判断题按 Key 配置）
@@ -61,6 +64,7 @@ type Env struct {
 	logs     *syncBuf
 	session  string // Web 会话 cookie 值
 	csrf     string
+	ownerURL string // OwnerApa 的本机转发层
 	fixtures int
 }
 
@@ -200,27 +204,51 @@ func Setup(t testing.TB) *Env {
 	return e
 }
 
+// AgentHarness 是 DEL 所属 Agent 卡片的宿主：只为建卡片声明，只读一档，不是任何流程的默认宿主。
+const AgentHarness = "acc-agent"
+
+// OpenDelegateTier 声明并确认 acc-agent 宿主，建一张它的 Agent 卡片，签一把归属它的 delegate 钥匙作为 DEL，
+// 并在 Web 把它的档位设为 tier；原来那把未归属的 delegate 钥匙留作 DELO（只整理）。
+func (e *Env) OpenDelegateTier(tier string) {
+	e.T.Helper()
+	decl, _ := json.Marshal(map[string]any{"harness": AgentHarness, "headless": map[string]any{
+		"command": []string{e.Bin["stub-harness"], "{prompt}"}, "session": map[string]any{"extract": "$.session_id"},
+		"access": map[string]any{"read": []string{"--access=read"}}}})
+	if r := e.Apa(e.DEL, string(decl), "declare", "-"); r.Code != 0 {
+		e.fatal("apa declare %s 退出码 %d: %s%s", AgentHarness, r.Code, r.Stdout, r.Stderr)
+	}
+	e.webOK("POST", "/v1/settings/declarations/"+AgentHarness+"/1/confirm", "", 200)
+	var card struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(e.webOK("POST", "/v1/settings/agents", `{"harness":"`+AgentHarness+`","name":"acc-agent","enabled":true}`, 200)), &card); err != nil || card.ID == "" {
+		e.fatal("建 Agent 卡片: %v", err)
+	}
+	var out struct {
+		Secret string `json:"secret"`
+	}
+	if err := json.Unmarshal([]byte(e.webOK("POST", "/v1/settings/tokens", `{"kind":"delegate","label":"DEL-agent","harness":"`+AgentHarness+`","agent_id":"`+card.ID+`"}`, 201)), &out); err != nil || out.Secret == "" {
+		e.fatal("签发归属 Agent 的 delegate 钥匙: %v", err)
+	}
+	e.SetTier(card.ID, tier)
+	e.AgentID, e.DELO, e.DEL = card.ID, e.DEL, out.Secret
+}
+
+// SetTier 在 Web 设一个 Agent 的档位（organize / decide / rules）。
+func (e *Env) SetTier(agent, tier string) {
+	e.T.Helper()
+	e.webOK("PUT", "/v1/settings/agents/"+agent+"/tier", `{"tier":"`+tier+`"}`, 200)
+}
+
 func (e *Env) fatal(format string, a ...any) {
 	e.T.Helper()
 	e.T.Fatalf(format, a...)
 }
 
-func (e *Env) env(token string, args []string) []string {
-	env := append(os.Environ(), "APA_HOME="+e.Home, "APA_URL="+e.URL)
+func (e *Env) env(url, token string) []string {
+	env := append(os.Environ(), "APA_HOME="+e.Home, "APA_URL="+url)
 	if token != "" {
 		env = append(env, "APA_TOKEN="+token)
-	}
-	if e.SessionKind != "" {
-		env = append(env, "APA_SESSION_KIND="+e.SessionKind)
-	}
-	// 带本人原话（--evidence）的第二档命令还要会话引用；harness 插件会设 APA_SESSION，这里替身。
-	// NoSession 供要验证"只带原话不带会话"的用例关掉它。
-	// 会话类型是另一条依据（§14.5）：替身按私聊上报，缺会话引用时仍是"依据不足"。
-	if slices.ContainsFunc(args, func(a string) bool { return a == "--evidence" || strings.HasPrefix(a, "--evidence=") }) {
-		env = append(env, "APA_SESSION_KIND=direct")
-		if !e.NoSession {
-			env = append(env, "APA_SESSION=e2e-session")
-		}
 	}
 	return env
 }
@@ -228,10 +256,61 @@ func (e *Env) env(token string, args []string) []string {
 // Apa 以 token 运行 apa 子命令（APA_HOME 与 APA_URL 指向本环境），stdin 可为空。
 func (e *Env) Apa(token, stdin string, args ...string) Result {
 	e.T.Helper()
+	return e.apaAt(e.URL, token, stdin, args...)
+}
+
+// OwnerApa 以本人的 Web 会话运行 apa 子命令，用于 3b 动作（只在 Web、须刚验过口令）的环境准备：CLI 只会带 Bearer，
+// 这里经一个本机转发层把请求换成本人会话（Cookie + CSRF，去掉 Authorization），走的仍是页面调用的同一组路由。
+func (e *Env) OwnerApa(stdin string, args ...string) Result {
+	e.T.Helper()
+	e.Reauth()
+	if e.ownerURL == "" {
+		target, err := url.Parse(e.URL)
+		if err != nil {
+			e.fatal("%v", err)
+		}
+		p := httputil.NewSingleHostReverseProxy(target)
+		direct := p.Director
+		p.Director = func(r *http.Request) {
+			direct(r)
+			r.Host = target.Host
+			r.Header.Del("Authorization")
+			r.Header.Set("Cookie", "apa_session="+e.session)
+			r.Header.Set("X-CSRF-Token", e.csrf)
+		}
+		srv := httptest.NewServer(p)
+		e.T.Cleanup(srv.Close)
+		e.ownerURL = srv.URL
+	}
+	return e.apaAt(e.ownerURL, "owner-web-session", stdin, args...)
+}
+
+// CloseDelegation 以 token 把委派子事项转为 done：进入 done 要带结果证据，CLI 已不收 --evidence（那是本人原话的旧参数），
+// 这里经 HTTP 体的 evidence 字段给出（同 apa report --outcome done 的结果证据）。
+func (e *Env) CloseDelegation(token, id, reason string) {
+	e.T.Helper()
+	body, _ := json.Marshal(map[string]string{"to": "done", "reason": reason, "evidence": "https://example.invalid/pr/1"})
+	if r := e.APIRaw("POST", "/v1/items/"+id+"/transition", string(body), token); r.Code != 200 {
+		e.fatal("委派子事项 %s 转 done: HTTP %d %s", id, r.Code, r.Body)
+	}
+}
+
+// OwnerApaOK 同 OwnerApa，退出码不为 0 即失败。
+func (e *Env) OwnerApaOK(stdin string, args ...string) Result {
+	e.T.Helper()
+	r := e.OwnerApa(stdin, args...)
+	if r.Code != 0 {
+		e.fatal("本人 apa %s 退出码 %d\nstdout: %s\nstderr: %s", strings.Join(args, " "), r.Code, r.Stdout, r.Stderr)
+	}
+	return r
+}
+
+func (e *Env) apaAt(url, token, stdin string, args ...string) Result {
+	e.T.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, e.Bin["apa"], args...)
-	cmd.Env = e.env(token, args)
+	cmd.Env = e.env(url, token)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -302,7 +381,7 @@ func (e *Env) startServe(port string) {
 	e.T.Helper()
 	e.logs = &syncBuf{}
 	e.srv = exec.Command(e.Bin["apa"], "serve")
-	e.srv.Env = e.env("", nil)
+	e.srv.Env = e.env(e.URL, "")
 	if e.ToolBin != "" { // 来源程序继承内核的 PATH：把工具替身目录放在最前
 		e.srv.Env = append(e.srv.Env, "PATH="+e.ToolBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
@@ -397,6 +476,14 @@ func (e *Env) webLogin() {
 	e.csrf = out.CSRF
 }
 
+// Reauth 再输一次口令（POST /v1/auth/reauth）：3b 动作要求会话刚验过口令，测试时钟推进后用它续上，与页面的弹框同一路由。
+func (e *Env) Reauth() {
+	e.T.Helper()
+	if r := e.WebRaw("POST", "/v1/auth/reauth", `{"password":"`+cmp.Or(e.WebSecret, Password)+`"}`, true); r.Code != 204 {
+		e.fatal("再输口令失败: %d %s", r.Code, r.Body)
+	}
+}
+
 // WebRaw 发一次 Web 请求；session 为 true 时带会话 Cookie 与 CSRF 头（本人在 Web 上操作）。
 func (e *Env) WebRaw(method, path, body string, session bool) Resp {
 	e.T.Helper()
@@ -407,6 +494,12 @@ func (e *Env) WebRaw(method, path, body string, session bool) Resp {
 	}
 	saved := e.session
 	r := e.do(method, path, body, hdr)
+	// 与页面一致：3b 动作遇到"须再输口令"就再输一次口令后重试一次。
+	if session && r.Code == 403 && strings.Contains(r.Body, `"`+reauthRequired+`"`) && path != "/v1/auth/reauth" {
+		e.Reauth()
+		hdr["Cookie"], hdr["X-CSRF-Token"] = "apa_session="+e.session, e.csrf
+		r = e.do(method, path, body, hdr)
+	}
 	if !session {
 		e.session = saved // 未登录的探测请求不改变已有会话
 	}
@@ -451,6 +544,7 @@ func (e *Env) IssueCredentials() {
 	e.WRK2 = issue("/v1/settings/tokens", `{"kind":"worker","label":"WRK2","executor":"other-host.cli"}`)
 	e.DEL = issue("/v1/settings/tokens", `{"kind":"delegate","label":"DEL"}`)
 	e.CHAN = issue("/v1/settings/ext-keys", `{"label":"CHAN","scope":"channel.acc-chan"}`)
+	e.OpenDelegateTier("rules")
 }
 
 // CreateProjects 新建 acc-work（repos=[LOCAL_REPO]）、acc-open、acc-empty、acc-home，并设置允许的执行者。
@@ -482,14 +576,9 @@ func (e *Env) StartModelStub() {
 	e.ModelStub = modelstub.NewAt(loopback + ":0")
 	// 位置声明为 local：替身在本机；未声明按 external，外部端点在来源未选外发范围时不送内容（§14.14）。
 	body, _ := json.Marshal(map[string]any{"generate_endpoint": map[string]any{
-		"url": e.ModelStub.URL(), "model": "acc-model", "api_key": "stub-key", "locality": "local"}, "screening_timeout_ms": 2000})
+		"url": e.ModelStub.URL(), "model": "acc-model", "api_key": "stub-key", "locality": "local"}})
 	e.webOK("PUT", "/v1/settings/model-endpoints", string(body), 200)
-	// 只有生成端点时 web_only 初筛由它回答；默认回"否、资料足够"，其他流程不被升级为 web_only（初筛用例自己覆盖）。
-	e.ModelStub.Judge(modelstub.ChatJudge{Key: modelstub.Key{Contains: ScreeningPhrase}, Answer: "no"})
 }
-
-// ScreeningPhrase 出现在 web_only 初筛的提问里（decision-card/web-only-screening），用来在替身上匹配这道题。
-const ScreeningPhrase = "是否应当只由本人在 Web 回答"
 
 // DeclareStubHarness 经 `apa declare` 提交 acc-stub（read/edit/full 三档，声明 resume 与 session 取法）与
 // acc-stub-noresume（不声明 resume）两份无头运行声明，并在 Web 确认。
@@ -509,7 +598,7 @@ func (e *Env) DeclareStubHarness() {
 		return string(b)
 	}
 	for harness, resume := range map[string]bool{"acc-stub": true, "acc-stub-noresume": false} {
-		if r := e.Apa(e.DEL, decl(harness, resume), "declare", "-", "--evidence", "环境基线声明替身"); r.Code != 0 {
+		if r := e.Apa(e.DEL, decl(harness, resume), "declare", "-"); r.Code != 0 {
 			e.fatal("apa declare %s 退出码 %d: %s%s", harness, r.Code, r.Stdout, r.Stderr)
 		}
 		e.webOK("POST", "/v1/settings/declarations/"+harness+"/1/confirm", "", 200)

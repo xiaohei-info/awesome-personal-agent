@@ -79,7 +79,7 @@ func TestSameHostCardsResolveIndependently(t *testing.T) {
 	}
 }
 
-var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+var owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 
 type env struct {
 	st *store.Store
@@ -125,7 +125,7 @@ func (e *env) bearer(t *testing.T, s auth.Spec) command.Bearer {
 	if err := e.st.Update(bg, func(tx *store.Tx) (err error) { _, secret, err = e.au.Issue(tx, s); return }); err != nil {
 		t.Fatal(err)
 	}
-	return command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: secret, Origin: auth.Origin{Session: "s1"}}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
@@ -133,7 +133,7 @@ func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error
 	if s, ok := in.(string); ok {
 		b = []byte(s)
 	}
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Evidence: "owner said so"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b})
 }
 
 func (e *env) must(t *testing.T, id command.Identity, cmd string, in any) command.Result {
@@ -250,11 +250,9 @@ func TestOnlyOwnerCanConfirmOrRegister(t *testing.T) {
 	ext := e.bearer(t, auth.Spec{Kind: auth.Ext, Scope: "chan"})
 	e.must(t, worker, "executor.declare", decl("acme", build))
 
+	// 3b 硬线先于钥匙范围：任何非 Web 钥匙都是 20。
 	for name, id := range map[string]command.Identity{"worker": worker, "delegate": delegate, "observer": observer} {
-		want := domain.ExitPermissionDenied
-		if name == "delegate" {
-			want = domain.ExitWebOnly
-		}
+		want := domain.ExitWebOnly
 		for cmd, in := range map[string]any{
 			"executor.confirm": ref{"acme", 1}, "executor.register": decl("other", chat),
 			"executor.put": chat, "executor.remove": idIn{"acme.build"},

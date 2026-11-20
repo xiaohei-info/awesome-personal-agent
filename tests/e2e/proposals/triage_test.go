@@ -44,7 +44,7 @@ func (k *kit) runCredential() (tok, runID, item string) {
 		"command": []string{"env", "STUB_HARNESS_MODE=hang", "STUB_HARNESS_HANG_FOR=2m", k.Bin["stub-harness"], "{prompt}"},
 		"session": map[string]any{"extract": "$.session_id"},
 		"access":  map[string]any{"read": []string{"--access=read"}, "edit": []string{"--access=edit"}, "full": []string{"--access=full"}}}})
-	if r := k.Apa(k.DEL, string(decl), "declare", "-", "--evidence", "声明挂住的 harness 以取得运行凭据"); r.Code != 0 {
+	if r := k.Apa(k.DEL, string(decl), "declare", "-"); r.Code != 0 {
 		k.t.Fatalf("apa declare acc-hang: %d %s%s", r.Code, r.Stdout, r.Stderr)
 	}
 	k.webOK("POST", "/settings/declarations/acc-hang/1/confirm", "", 200)
@@ -139,21 +139,20 @@ func TestFlowProposalTriage(t *testing.T) {
 		eq(t, "重开后阶段", k.phase(b), "open")
 	})
 
-	k.step("ACT-PROP-05 delegate 在私聊会话里附本人原话代为接受", func(t *testing.T) {
+	// 2026-11-20 改写（权限模型第二版）：接受建议是二档；DEL 所属 Agent 的档位已放开，直接生效，记成 Agent 自己做的。
+	k.step("ACT-PROP-05 档位放开的 Agent 代为接受", func(t *testing.T) {
 		c := k.proposal("prop-c")
-		r := k.Apa(k.DEL, "", "accept", c, "--evidence", "这个接了") // 基线为带 --evidence 的命令设 APA_SESSION_KIND=direct 与会话引用
+		r := k.Apa(k.DEL, "", "accept", c)
 		if r.Code != 0 {
 			t.Fatalf("apa accept 退出码 %d: %s%s", r.Code, r.Stdout, r.Stderr)
 		}
 		eq(t, "阶段", k.phase(c), "open")
 		ev := k.last(c, "item.phase_changed")
-		if ev.Actor.OnBehalfOf != "owner" || ev.Ev != "这个接了" {
-			t.Errorf("Event 缺 on_behalf_of 或证据: %+v", ev)
+		if ev.Actor.Type != "agent" || ev.Actor.OnBehalfOf != "" || ev.Ev != "" {
+			t.Errorf("Event 应记 Agent 自己、不带代本人与原话: %+v", ev)
 		}
-		eq(t, "Event 会话类型", ev.Actor.SessionKind, "direct")
-		if ev.Actor.Session == "" {
-			t.Error("Event 应带会话引用")
-		}
+		eq(t, "依据", ev.Basis.Via, "allowance")
+		eq(t, "依据里的 Agent", ev.Basis.Agent, k.AgentID)
 		found := false
 		for _, s := range k.agentChanges() {
 			found = found || s.Seq == ev.Seq
@@ -163,12 +162,13 @@ func TestFlowProposalTriage(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-PROP-06 无本人原话也无授权单的代答被拒绝，Web 建议流标明被拒绝的处理", func(t *testing.T) {
+	// 2026-11-20 改写：依据不再是原话或授权单，而是 Agent 的档位；只整理的钥匙（DELO）处理建议得 23（tier_closed）。
+	k.step("ACT-PROP-06 档位未放开的代答被拒绝，Web 建议流标明被拒绝的处理", func(t *testing.T) {
 		d = k.proposal("prop-d")
 		open = k.openItem("prop-open")
-		k.apa(k.DEL, exitBasis, "accept", d)
-		k.apa(k.DEL, exitBasis, "dismiss", d, "--reason", "重复")
-		k.apa(k.DEL, exitBasis, "attach", d, "--to", open)
+		k.apa(k.DELO, exitBasis, "accept", d)
+		k.apa(k.DELO, exitBasis, "dismiss", d, "--reason", "重复")
+		k.apa(k.DELO, exitBasis, "attach", d, "--to", open)
 		eq(t, "阶段", k.phase(d), "proposed")
 		items, rejections := k.streamItems()
 		var inStream bool
@@ -193,9 +193,9 @@ func TestFlowProposalTriage(t *testing.T) {
 
 	k.step("ACT-PROP-07 observer 和 worker 不能处理建议", func(t *testing.T) {
 		for name, tok := range map[string]string{"OBS": k.OBS, "WRK": k.WRK} {
-			k.apa(tok, exitDenied, "accept", d, "--evidence", "x")
-			k.apa(tok, exitDenied, "dismiss", d, "--reason", "x", "--evidence", "x")
-			k.apa(tok, exitDenied, "attach", d, "--to", open, "--evidence", "x")
+			k.apa(tok, exitDenied, "accept", d)
+			k.apa(tok, exitDenied, "dismiss", d, "--reason", "x")
+			k.apa(tok, exitDenied, "attach", d, "--to", open)
 			eq(t, name+" 之后阶段", k.phase(d), "proposed")
 		}
 	})
@@ -212,14 +212,17 @@ func TestFlowProposalTriage(t *testing.T) {
 		defer k.stopRuns()
 		before := len(k.events("", "proposal.attached"))
 		for _, args := range [][]string{
-			{"accept", d, "--evidence", "x"},
-			{"dismiss", d, "--reason", "x", "--evidence", "x"},
-			{"attach", d, "--to", open, "--evidence", "x"},
-			{"proposals", "apply", "--recommended", "--evidence", "x"},
+			{"accept", d},
+			{"dismiss", d, "--reason", "x"},
+			{"attach", d, "--to", open},
 		} {
 			if r := k.apaRun(runTok, runID, args...); r.Code != exitDenied {
 				t.Errorf("运行凭据 apa %s 退出码 %d，期望 %d\n%s%s", strings.Join(args, " "), r.Code, exitDenied, r.Stdout, r.Stderr)
 			}
+		}
+		// 批量等于逐条（2026-11-20）：没有一条在运行范围内，整批什么也不处理；全部被拒时为 4，没有可处理的条目时为 0。
+		if r := k.apaRun(runTok, runID, "proposals", "apply", "--recommended"); r.Code != exitDenied && r.Code != 0 {
+			t.Errorf("运行凭据 apa proposals apply --recommended 退出码 %d\n%s%s", r.Code, r.Stdout, r.Stderr)
 		}
 		eq(t, "prop-d 阶段", k.phase(d), "proposed")
 		eq(t, "新增 proposal.attached", len(k.events("", "proposal.attached")), before)

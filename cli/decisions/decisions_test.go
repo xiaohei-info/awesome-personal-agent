@@ -13,7 +13,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	apidecisions "github.com/xiaohei-info/awesome-personal-agent/api/decisions"
 	apiitems "github.com/xiaohei-info/awesome-personal-agent/api/items"
-	apigrants "github.com/xiaohei-info/awesome-personal-agent/api/settings/grants"
 	"github.com/xiaohei-info/awesome-personal-agent/cli/client"
 	_ "github.com/xiaohei-info/awesome-personal-agent/cli/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
@@ -67,11 +66,7 @@ func newWorld(t *testing.T) *world {
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	gr, err := apigrants.Mount(x, a, st)
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apiitems.Routes(x, st), apidecisions.Routes(x, "http://apa.example"), gr}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{apiitems.Routes(x, st), apidecisions.Routes(x, "http://apa.example")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,17 +142,25 @@ func (w *world) token(kind auth.Kind, executor string) string {
 	return secret
 }
 
-func (w *world) webOnlyFunds() {
+// agent 签一把归属 Agent id 的 delegate 钥匙，并由本人把该 Agent 的档位设为 tier。
+func (w *world) agent(id, tier string) string {
 	w.t.Helper()
+	var secret string
 	if err := w.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test", func(p *policy.Policy) error {
-			p.WebOnly.Rules = append(p.WebOnly.Rules, policy.WebOnlyRule{Tag: "funds", Category: policy.CategoryFunds})
+		_, s, err := w.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: id, Harness: "h"})
+		if err != nil {
+			return err
+		}
+		secret = s
+		_, err = policy.Update(tx, domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, "test tier", func(p *policy.Policy) error {
+			p.AgentTier.ByAgent[id] = policy.AgentAllowance{Tier: tier}
 			return nil
 		})
 		return err
 	}); err != nil {
 		w.t.Fatal(err)
 	}
+	return secret
 }
 
 type result struct {
@@ -168,7 +171,7 @@ type result struct {
 func (w *world) apa(token string, args ...string) result {
 	w.t.Helper()
 	var out, errb bytes.Buffer
-	vars := map[string]string{"APA_URL": w.ts.URL, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_SESSION_KIND": "direct", "APA_HOME": w.t.TempDir()}
+	vars := map[string]string{"APA_URL": w.ts.URL, "APA_TOKEN": token, "APA_SESSION": "s1", "APA_HOME": w.t.TempDir()}
 	code := client.Main(args, client.Env{Getenv: func(k string) string { return vars[k] }, UserHome: w.t.TempDir(),
 		Stdin: strings.NewReader(""), Stdout: &out, Stderr: &errb, HTTP: http.DefaultClient})
 	return result{code, out.String(), errb.String()}
@@ -193,10 +196,11 @@ func (w *world) asked(extra, wrk string) string {
 	return id
 }
 
-// flow-decision-answer / ACT-DEC-01、03、06：worker 经 apa ask 进 needs_input；delegate 凭本人原话 apa decide 代答，只认第一次（6）。
+// flow-decision-answer / ACT-DEC-01、03、06：worker 经 apa ask 进 needs_input；回答是二档：只整理的 Agent 为 23，
+// 放开拍板的 Agent apa decide 自答生效并记 agent，只认第一次（6）。
 func TestAskDecideAndFirstAnswerWins(t *testing.T) {
 	w := newWorld(t)
-	wrk, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, "")
+	wrk, closed, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, ""), w.agent("agent_a", policy.AllowDecide)
 	id := w.asked("", wrk)
 	it := w.get(id)
 	if it.Phase != domain.PhaseNeedsInput || it.Ask.Question != "ship it?" || len(it.Ask.Options) != 2 ||
@@ -206,40 +210,43 @@ func TestAskDecideAndFirstAnswerWins(t *testing.T) {
 	if r := w.apa(wrk, "ask", id, "--question", "again?"); r.code != 6 {
 		t.Fatalf("second ask want 6: %+v", r)
 	}
-	// 代答没有本人原话：退出码 23，状态不变。
-	if r := w.apa(dlg, "decide", id, "--option", "A"); r.code != 23 {
-		t.Fatalf("decide without evidence want 23: %+v", r)
+	// 档位未放开：退出码 23，状态不变；旧的 --evidence 不再是依据。
+	if r := w.apa(closed, "decide", id, "--option", "A", "--evidence", "owner: yes"); r.code != 23 || errOf(t, r).Code != domain.CodeTierClosed {
+		t.Fatalf("decide with tier closed want 23: %+v", r)
 	}
-	r := w.apa(dlg, "decide", id, "--option", "A", "--evidence", "owner: yes ship it")
+	if w.get(id).Ask.Resolution != nil {
+		t.Fatal("a refused answer must not resolve")
+	}
+	r := w.apa(dlg, "decide", id, "--option", "A")
 	if r.code != 0 || !strings.Contains(r.out, `"id":"`+id+`"`) {
 		t.Fatalf("decide: %+v", r)
 	}
 	got := w.get(id)
-	if got.Phase != domain.PhaseOpen || got.Ask.Resolution.Choice != "A" || got.Ask.Resolution.ResolvedVia != "chat" ||
-		got.Ask.Resolution.Evidence != "owner: yes ship it" {
+	if got.Phase != domain.PhaseOpen || got.Ask.Resolution.Choice != "A" || got.Ask.Resolution.ResolvedVia != kdec.ViaAgent {
 		t.Fatalf("after decide: %+v", got.Ask.Resolution)
 	}
-	r = w.apa(dlg, "decide", id, "--option", "B", "--evidence", "owner: no")
+	r = w.apa(dlg, "decide", id, "--option", "B")
 	if r.code != 6 || errOf(t, r).Code != domain.CodeConflict || w.get(id).Ask.Resolution.Choice != "A" {
 		t.Fatalf("late answer want 6 and first answer kept: %+v", r)
 	}
 }
 
-// ACT-DEC-04、05：worker 与观察者代答为 4；自由文本答案记录原文。
+// ACT-DEC-04、05：观察者回答在钥匙范围外（4）；worker 回答自己事项上的问题在范围内，但档位未放开（23）；自由文本答案记录原文。
 func TestDecidePermissionAndFreeText(t *testing.T) {
 	w := newWorld(t)
-	wrk, dlg, obs := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, ""), w.token(auth.Observer, "")
+	wrk, dlg, obs := w.token(auth.Worker, "wrk1"), w.agent("agent_a", policy.AllowDecide), w.token(auth.Observer, "")
 	id := w.asked("", wrk)
-	for _, tok := range []string{wrk, obs} {
-		if r := w.apa(tok, "decide", id, "--option", "A", "--evidence", "x"); r.code != 4 {
-			t.Fatalf("want 4: %+v", r)
-		}
+	if r := w.apa(obs, "decide", id, "--option", "A"); r.code != 4 {
+		t.Fatalf("observer want 4: %+v", r)
+	}
+	if r := w.apa(wrk, "decide", id, "--option", "A"); r.code != 23 {
+		t.Fatalf("worker on its own item want 23: %+v", r)
 	}
 	free := w.item(`{"kind":"task","title":"f","phase":"open","assignee":"wrk1"}`)
 	if r := w.apa(wrk, "ask", free, "--question", "q", "--free-text", "--option", "A=a"); r.code != 0 {
 		t.Fatal(r)
 	}
-	if r := w.apa(dlg, "decide", free, "--text", "another idea", "--evidence", "owner: do X"); r.code != 0 {
+	if r := w.apa(dlg, "decide", free, "--text", "another idea"); r.code != 0 {
 		t.Fatal(r)
 	}
 	if got := w.get(free).Ask.Resolution; got == nil || got.Text != "another idea" {
@@ -250,81 +257,29 @@ func TestDecidePermissionAndFreeText(t *testing.T) {
 	}
 }
 
-// flow-web-only / ACT-WEB-02、03、04：web_only 类代答与接受返回 20 并附 Web 链接；事项不变；CLI 无绕过选项。
-func TestWebOnlyMapsTo20WithLink(t *testing.T) {
-	w := newWorld(t)
-	w.webOnlyFunds()
-	wrk, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, "")
-	id := w.asked(`,"tags":["funds"]`, wrk)
-	r := w.apa(dlg, "decide", id, "--option", "A", "--evidence", "owner: yes")
-	e := errOf(t, r)
-	if r.code != 20 || e.Code != domain.CodeWebOnly || e.WebURL == nil || *e.WebURL != "http://apa.example/items/"+id {
-		t.Fatalf("decide on web_only: %+v", r)
-	}
-	if strings.Contains(r.errOut, "ship it?") {
-		t.Fatal("error body must not carry ledger content")
-	}
-	if it := w.get(id); it.Phase != domain.PhaseNeedsInput || it.Ask.Resolution != nil {
-		t.Fatalf("item must stay needs_input: %+v", it)
-	}
-	// 没有绕过选项：任何 override 类标志都是用法错误。
-	for _, f := range []string{"--force", "--web-only-override", "--bypass"} {
-		if r := w.apa(dlg, "decide", id, "--option", "A", "--evidence", "x", f); r.code != 2 {
-			t.Fatalf("%s must be rejected as usage: %+v", f, r)
-		}
-	}
-	// web_only 提案：接受为 20 带链接。
-	p := w.item(`{"kind":"task","title":"p","tags":["funds"]}`)
-	r = w.apa(dlg, "accept", p, "--evidence", "owner: take it")
-	if e := errOf(t, r); r.code != 20 || e.WebURL == nil || !strings.HasSuffix(*e.WebURL, "/items/"+p) {
-		t.Fatalf("accept on web_only: %+v", r)
-	}
-}
-
-// ACT-WEB-05：初筛未返回时代答为 22 并附 Web 链接。
-func TestScreeningPendingMapsTo22(t *testing.T) {
-	w := newWorld(t)
-	wrk, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, "")
-	id := w.asked("", wrk)
-	if err := w.st.Update(bg, func(tx *store.Tx) error {
-		_, _, _, err := kitems.Revise(tx, id, "test", time.Now(), func(x *domain.Item) error {
-			a := *x.Ask
-			a.ScreeningPending = true
-			x.Ask = &a
-			return nil
-		})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	r := w.apa(dlg, "decide", id, "--option", "A", "--evidence", "owner: yes")
-	if e := errOf(t, r); r.code != 22 || e.Code != domain.CodeRiskScreeningPending || e.WebURL == nil {
-		t.Fatalf("want 22 with link: %+v", r)
-	}
-}
-
-// flow-proposal-triage / ACT-PROP-05、06、07：delegate 凭原话接受或丢弃建议；worker 为 4；已处理再处理为 6。
+// flow-proposal-triage / ACT-PROP-05、06、07：接受与丢弃建议是二档：只整理的 Agent 为 23，worker 为 4；
+// 放开拍板的 Agent 直接生效；已处理再处理为 6。
 func TestAcceptDismissProposal(t *testing.T) {
 	w := newWorld(t)
-	wrk, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, "")
+	wrk, closed, dlg := w.token(auth.Worker, "wrk1"), w.token(auth.Delegate, ""), w.agent("agent_a", policy.AllowDecide)
 	a := w.item(`{"kind":"task","title":"a"}`)
 	d := w.item(`{"kind":"task","title":"d"}`)
-	if r := w.apa(dlg, "accept", a); r.code != 23 {
-		t.Fatalf("accept without evidence want 23: %+v", r)
+	if r := w.apa(closed, "accept", a); r.code != 23 {
+		t.Fatalf("accept with tier closed want 23: %+v", r)
 	}
-	if r := w.apa(wrk, "accept", a, "--evidence", "x"); r.code != 4 {
+	if r := w.apa(wrk, "accept", a); r.code != 4 {
 		t.Fatalf("worker accept want 4: %+v", r)
 	}
-	if r := w.apa(dlg, "accept", a, "--evidence", "owner: take it"); r.code != 0 {
+	if r := w.apa(dlg, "accept", a); r.code != 0 {
 		t.Fatal(r)
 	}
-	if r := w.apa(dlg, "dismiss", d, "--reason", "not now", "--evidence", "owner: drop it"); r.code != 0 {
+	if r := w.apa(dlg, "dismiss", d, "--reason", "not now"); r.code != 0 {
 		t.Fatal(r)
 	}
 	if w.get(a).Phase != domain.PhaseOpen || w.get(d).Phase != domain.PhaseDropped {
 		t.Fatal("accept opens, dismiss drops")
 	}
-	if r := w.apa(dlg, "dismiss", a, "--evidence", "owner: drop it"); r.code != 6 {
+	if r := w.apa(dlg, "dismiss", a); r.code != 6 {
 		t.Fatalf("dismiss after accept want 6: %+v", r)
 	}
 }
@@ -334,7 +289,7 @@ func TestUsageErrorsAndUnreachable(t *testing.T) {
 	w := newWorld(t)
 	dlg := w.token(auth.Delegate, "")
 	for _, args := range [][]string{
-		{"ask"}, {"decide"}, {"accept", "--evidence", "x"}, {"dismiss", "id", "extra"},
+		{"ask"}, {"decide"}, {"accept"}, {"dismiss", "id", "extra"},
 		{"ask", "i", "--question", "q", "--option", "noequals"},
 		{"ask", "i", "--question", "q", "--next", "A"},
 		{"ask", "i", "--question", "q", "--next", "A=dropped"},
@@ -346,74 +301,7 @@ func TestUsageErrorsAndUnreachable(t *testing.T) {
 		}
 	}
 	w.ts.Close()
-	if r := w.apa(dlg, "accept", "i", "--evidence", "x"); r.code != 7 {
+	if r := w.apa(dlg, "accept", "i"); r.code != 7 {
 		t.Fatalf("want 7: %+v", r)
-	}
-}
-
-// ask 带 deadline 与 default_on_timeout 时原样交给内核，决策请求落账。
-func TestAskWithDeadlineAndDefault(t *testing.T) {
-	w := newWorld(t)
-	wrk := w.token(auth.Worker, "wrk1")
-	id := w.item(`{"kind":"task","title":"t","phase":"open","assignee":"wrk1"}`)
-	dl := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-	r := w.apa(wrk, "ask", id, "--question", "q", "--option", "A=a", "--option", "B=b", "--default-on-timeout", "A", "--deadline", dl, "--resume-note", "n", "--reason", "why")
-	if r.code != 0 {
-		t.Fatal(r)
-	}
-	if a := w.get(id).Ask; a == nil || a.DefaultOnTimeout != "A" || a.Deadline == nil || a.ResumeNote != "n" {
-		t.Fatalf("ask = %+v", a)
-	}
-}
-
-// 授权单（§14.5）：本人在 Web 签发后，delegate 凭据经 apa grant list 只读到自己名下有效的授权单；
-// 其他凭据为退出码 4，撤销后不再列出。
-func TestGrantListShowsOnlyOwnLiveGrants(t *testing.T) {
-	w := newWorld(t)
-	var d1, d2 auth.Credential
-	var s1 string
-	if err := w.st.Update(bg, func(tx *store.Tx) (err error) {
-		if d1, s1, err = w.auth.Issue(tx, auth.Spec{Kind: auth.Delegate}); err != nil {
-			return
-		}
-		d2, _, err = w.auth.Issue(tx, auth.Spec{Kind: auth.Delegate})
-		return
-	}); err != nil {
-		t.Fatal(err)
-	}
-	issue := func(cred string) string {
-		exp := time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
-		r := w.raw("POST", "/v1/settings/grants", `{"grantee":{"credential":"`+cred+`"},"scope":{"items":["it1"]},"actions":["decision.answer"],"expires_at":"`+exp+`"}`,
-			func(r *http.Request) { r.AddCookie(w.cookie); r.Header.Set(core.CSRFHeader, w.csrf) })
-		var g struct{ ID string }
-		if r.code != 201 || json.Unmarshal(r.body, &g) != nil {
-			t.Fatalf("issue: %d %s", r.code, r.body)
-		}
-		return g.ID
-	}
-	mine, _ := issue(d1.ID), issue(d2.ID)
-
-	r := w.apa(s1, "grant", "list")
-	var out struct{ Grants []policy.Grant }
-	if err := json.Unmarshal([]byte(r.out), &out); r.code != 0 || err != nil || len(out.Grants) != 1 || out.Grants[0].ID != mine ||
-		out.Grants[0].Actions[0] != "decision.answer" || out.Grants[0].ExpiresAt.IsZero() {
-		t.Fatalf("grant list: %+v (%v)", r, err)
-	}
-
-	for _, tok := range []string{w.token(auth.Worker, "wrk1"), w.token(auth.Observer, "")} {
-		if r := w.apa(tok, "grant", "list"); r.code != domain.ExitPermissionDenied {
-			t.Errorf("non-delegate: %+v", r)
-		}
-	}
-	if r := w.apa(s1, "grant"); r.code != domain.ExitUsage || !strings.Contains(errOf(t, r).Next, "usage: apa grant list") {
-		t.Errorf("no subcommand: %+v", r)
-	}
-	if r := w.apa(s1, "grant", "list", "extra"); r.code != domain.ExitUsage {
-		t.Errorf("extra arg: %+v", r)
-	}
-
-	w.raw("POST", "/v1/settings/grants/"+mine+"/revoke", `{}`, func(r *http.Request) { r.AddCookie(w.cookie); r.Header.Set(core.CSRFHeader, w.csrf) })
-	if r := w.apa(s1, "grant", "list"); r.code != 0 || !strings.Contains(r.out, `"grants": []`) && !strings.Contains(r.out, `"grants":[]`) {
-		t.Errorf("revoked grant must not be listed: %+v", r)
 	}
 }

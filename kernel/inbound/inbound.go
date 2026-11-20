@@ -222,7 +222,7 @@ func parseDispose(in json.RawMessage) (disposeIn, error) {
 
 // Register 登记本模块的命令，并在每次来源拉取结果入账后立即处理新事件。
 func (s *Service) Register(x *command.Executor) error {
-	err := x.Register(command.Spec{Name: CmdDispose, Action: authz.ActionUpdateOwn,
+	err := x.Register(command.Spec{Name: CmdDispose, Action: authz.ActionUpdateOwn, Tier: authz.TierInternal,
 		Object: func(_ *store.Tx, in json.RawMessage) (authz.Object, error) {
 			v, err := parseDispose(in)
 			if err != nil {
@@ -1508,5 +1508,5 @@ func (s *Service) do(ctx context.Context, id command.Identity, rule, idem, cmd s
 		return command.Result{}, err
 	}
 	return s.o.Exec.Do(ctx, command.Request{Identity: id, Command: cmd, Input: b, IdemKey: idem, Chain: chain,
-		RuleID: rule, Evidence: orElse(rule, "inbound"), Owner: s.o.Owner})
+		RuleID: rule, Owner: s.o.Owner})
 }

@@ -524,15 +524,16 @@ func TestExitCodesMatchSection173(t *testing.T) {
 	}
 	diff(t, "exit codes (§17.3 vs domain.Exit*)", d, i)
 
-	// B.3：HTTP 状态到退出码的对应，以及三个 403 子码。
+	// B.3：HTTP 状态到退出码的对应，以及 403 的各个子码（三种拒绝口径与再输口令）。
 	want := map[domain.Code][2]int{ // 码 → {HTTP, 退出码}
 		domain.CodeInvalidRequest: {400, 2}, domain.CodeUnauthenticated: {401, 3},
 		domain.CodePermissionDenied: {403, 4}, domain.CodeWebOnly: {403, 20},
-		domain.CodeExecutorNotAllowed: {403, 21}, domain.CodeRiskScreeningPending: {403, 22},
-		domain.CodeNotFound: {404, 5}, domain.CodeConflict: {409, 6}, domain.CodeInternal: {500, 1},
+		domain.CodeExecutorNotAllowed: {403, 21}, domain.CodeTierClosed: {403, 23}, domain.CodeReauthRequired: {403, 20},
+		domain.CodeRiskScreeningPending: {403, 22}, // 旧模型的码，只读历史值，映射不变
+		domain.CodeNotFound:             {404, 5}, domain.CodeConflict: {409, 6}, domain.CodeInternal: {500, 1},
 	}
 	b3 := between(t, doc(t, "appendix-b-api-cli.md"), "## B.3", "## B.4")
-	for _, frag := range []string{"400 → 2", "401 → 3", "404 → 5", "409 → 6", "不可达时 CLI 返回 7", "403 → 4、20、21、22"} {
+	for _, frag := range []string{"400 → 2", "401 → 3", "404 → 5", "409 → 6", "不可达时 CLI 返回 7", "403 → 4、20、21、23"} {
 		if !strings.Contains(b3, frag) {
 			t.Errorf("B.3 no longer says %q; update this check together with the doc", frag)
 		}

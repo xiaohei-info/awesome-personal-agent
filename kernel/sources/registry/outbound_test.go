@@ -126,8 +126,7 @@ func setupWithProjects(t *testing.T) *env {
 // 验收 ACT-OBD-02/11：登记时本机范围缺省 full、外部范围未选择；CLI 路径可带默认项目。
 func TestRegisterDefaultsOutboundAndDefaultProject(t *testing.T) {
 	e := setupWithProjects(t)
-	del := e.bearer(t, auth.Delegate)
-	if _, err := e.do(del, CmdRegister, m{"id": "src_rss", "type": "pull", "command": "pull-feed", "schedule": "10m", "timeout": 60, "default_project": "acc-home"}); err == nil {
+	if _, err := e.do(owner, CmdRegister, m{"id": "src_rss", "type": "pull", "command": "pull-feed", "schedule": "10m", "timeout": 60, "default_project": "acc-home"}); err == nil {
 		t.Fatal("default project that does not exist must be rejected")
 	} else if de, ok := err.(*domain.Error); !ok || de.Code != domain.CodeNotFound {
 		t.Fatalf("err = %v", err)
@@ -138,7 +137,7 @@ func TestRegisterDefaultsOutboundAndDefaultProject(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.do(del, CmdRegister, m{"id": "src_rss", "type": "pull", "command": "pull-feed", "schedule": "10m", "timeout": 60, "default_project": "acc-home"}); err != nil {
+	if _, err := e.do(owner, CmdRegister, m{"id": "src_rss", "type": "pull", "command": "pull-feed", "schedule": "10m", "timeout": 60, "default_project": "acc-home"}); err != nil {
 		t.Fatal(err)
 	}
 	s := e.get(t, "src_rss")
@@ -146,7 +145,7 @@ func TestRegisterDefaultsOutboundAndDefaultProject(t *testing.T) {
 		t.Fatalf("source = %+v", s)
 	}
 	// 登记请求里不能带 outbound（只经设置命令）
-	if _, err := e.do(del, CmdRegister, m{"id": "src_x", "type": "pull", "command": "pull-feed", "schedule": "10m", "timeout": 60,
+	if _, err := e.do(owner, CmdRegister, m{"id": "src_x", "type": "pull", "command": "pull-feed", "schedule": "10m", "timeout": 60,
 		"outbound": m{"external": "full"}}); err == nil {
 		t.Fatal("outbound in register must be rejected")
 	}
@@ -154,7 +153,7 @@ func TestRegisterDefaultsOutboundAndDefaultProject(t *testing.T) {
 	if _, err := e.do(owner, CmdSetOutbound, m{"id": "src_rss", "external": "excerpt"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.do(del, CmdUpdate, m{"id": "src_rss", "default_project": ""}); err != nil {
+	if _, err := e.do(owner, CmdUpdate, m{"id": "src_rss", "default_project": ""}); err != nil {
 		t.Fatal(err)
 	}
 	s = e.get(t, "src_rss")
@@ -163,7 +162,7 @@ func TestRegisterDefaultsOutboundAndDefaultProject(t *testing.T) {
 	}
 }
 
-// 验收 ACT-OBD-10：外发范围只有 Web 能写；delegate 得 web_only（20），其余凭据被拒，范围不变也不记事件。
+// 验收 ACT-OBD-10：外发范围是 3b，只有 Web 能写；任何钥匙都得硬线 web_only（20），范围不变也不记事件。
 func TestSetOutboundWebOnly(t *testing.T) {
 	e := setupWithProjects(t)
 	if _, err := e.do(owner, CmdRegisterExec, m{"id": "src_obd", "command": "echo", "schedule": "1m", "timeout": 30}); err != nil {
@@ -176,10 +175,7 @@ func TestSetOutboundWebOnly(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: err = %v", k, err)
 		}
-		if k == auth.Delegate && de.Code != domain.CodeWebOnly {
-			t.Errorf("delegate: %v", de)
-		}
-		if k != auth.Delegate && de.Code == domain.CodeWebOnly {
+		if de.Code != domain.CodeWebOnly || de.Reason != domain.ReasonHardLine {
 			t.Errorf("%s: %v", k, de)
 		}
 	}

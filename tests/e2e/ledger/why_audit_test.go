@@ -5,26 +5,19 @@ package ledger
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
-const secretEvidence = "owner: pick option x because the vendor is cheaper"
+const secretEvidence = "owner: pick option x because the vendor is cheaper" // 调用方带的旧原话参数：被忽略，不入账
 
 // decidedItem 造一个经历创建、决策请求、回答、转阶段的事项。
 func decidedItem(t *testing.T, e *baseline.Env, title string) string {
 	t.Helper()
 	id := addTask(t, e, title, "--assignee", "work-host.cli")
 	ok(t, e.Apa(e.WRK, "", "ask", id, "--question", "which vendor?", "--option", "x=Vendor X", "--option", "y=Vendor Y", "--reason", "need the owner's call"), "ask")
-	// web_only 初筛是异步的：返回前代答被拒（退出码 22，§6.14 第 4 条），等它返回后重试。
-	var r baseline.Result
-	waitFor(t, 30*time.Second, "初筛返回后可代答", func() bool {
-		r = e.Apa(e.DEL, "", "decide", id, "--option", "x", "--evidence", secretEvidence)
-		return r.Code != 22
-	})
-	ok(t, r, "decide")
-	ok(t, e.Apa(e.DEL, "", "item", "transition", id, "--to", "done", "--reason", "vendor chosen", "--evidence", "owner: done"), "done")
+	ok(t, e.Apa(e.DEL, "", "decide", id, "--option", "x", "--evidence", secretEvidence), "decide")
+	ok(t, e.Apa(e.DEL, "", "item", "transition", id, "--to", "done", "--reason", "vendor chosen"), "done")
 	return id
 }
 
@@ -60,8 +53,8 @@ func TestFlowWhyAudit(t *testing.T) {
 				t.Errorf("seq 应严格递增: %d 后是 %d", steps[i-1].Seq, steps[i].Seq)
 			}
 		}
-		if steps[idx["decision.requested"]].Reason != "need the owner's call" || steps[idx["item.phase_changed"]].Reason != "vendor chosen" || steps[idx["decision.resolved"]].Evidence != secretEvidence {
-			t.Errorf("原因或证据缺失: %+v", steps)
+		if steps[idx["decision.requested"]].Reason != "need the owner's call" || steps[idx["item.phase_changed"]].Reason != "vendor chosen" || steps[idx["decision.resolved"]].Evidence != "" {
+			t.Errorf("原因缺失，或旧原话参数被入账: %+v", steps)
 		}
 		// Web 事项详情的时间线与 apa why 同源且一致。
 		if web := webSteps(t, e, id); !sameJSON(toAny(web), toAny(steps)) {
@@ -77,7 +70,7 @@ func TestFlowWhyAudit(t *testing.T) {
 			}
 			last = at
 		}
-		for _, w := range []string{"reason: vendor chosen", "evidence: " + secretEvidence, "agent/"} {
+		for _, w := range []string{"reason: vendor chosen", "agent/"} {
 			if !strings.Contains(pretty, w) {
 				t.Errorf("--pretty 缺 %q:\n%s", w, pretty)
 			}
@@ -101,8 +94,8 @@ func TestFlowWhyAudit(t *testing.T) {
 		if strings.Contains(raw, secretEvidence) || strings.Contains(raw, "vendor chosen") {
 			t.Errorf("observer 看到了本人原话或原因:\n%s", raw)
 		}
-		if r := e.Apa(e.DEL, "", "why", id); !strings.Contains(r.Stdout, secretEvidence) {
-			t.Error("对照组 delegate 应能看到证据，否则裁剪断言没有意义")
+		if r := e.Apa(e.DEL, "", "why", id); !strings.Contains(r.Stdout, "vendor chosen") || strings.Contains(r.Stdout, secretEvidence) {
+			t.Error("对照组 delegate 应能看到原因（旧原话参数不入账），否则裁剪断言没有意义")
 		}
 	})
 

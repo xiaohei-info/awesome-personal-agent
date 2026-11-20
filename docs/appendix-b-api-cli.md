@@ -18,37 +18,37 @@
 | `apa declare <文件>` | 提交插件声明（无头运行；旧插件的 `executors[]` 仍被接受，确认后并入执行者名录），本人在 Web 确认后生效 | worker | 4 |
 | `apa version` | 版本号、构建提交、各模块数据结构版本与各协议版本 | 无 | |
 | `apa doctor [--json] [--upgrade-check]` | 自检（主文档 §15.5）；`--upgrade-check` 是升级前的只读预检（主文档 §16.5） | 主机本地；内核一侧的检查需 observer | 1 |
+| `apa authz preview [--json] [--days 30]` | 权限模型切换的只读预演（主文档 §16.5）：在账本快照上列出切换会做什么（撤销的授权单、清理的旧问题状态、写入的 Agent 档位、去掉的旧策略段），按新分档重判最近 N 天 Agent 发出的命令（照常生效、变为等本人确认、被拒、无法判定），并列出 Agent、钥匙（不含哈希）、材料类别与参与判定的设置；不写账本 | 主机本地 | 1 |
 | `apa backup create/verify/restore` | `create [--out <目录>] [--no-secrets]` 备份（默认带连接凭据的主密钥 `master.key`，`--no-secrets` 不带）；`verify <备份>` 校验；`restore <备份> --home <目录>` 恢复到空目录（主文档 §16.5） | 主机本地 | 1、6 |
 | `apa secrets rekey` | 换连接凭据的主密钥：全部可解的密文用新密钥重新加密，再原子替换 `master.key`；只在服务停止时运行，服务仍在监听时拒绝；账本还没迁移到本二进制时拒绝（主文档 §14.2、§16.5） | 主机本地 | 2、6 |
 | **上下文** | | | |
 | `apa context [--session] [--scope project/cwd/item/all] [--item <id>] [--format inject]` | 账本增量投影，含路由为注入的投递和挂靠消息；`--scope item` 见主文档 §7.6 | observer | 3、5、7 |
 | `apa persona [--lang zh\|en]` | 读取当前人格，供插件在新会话开始时注入；本人没写时是内置默认语气（主文档 §11.2）；语言：`--lang` > Web 里选的助手语言 > `LC_ALL`、`LC_MESSAGES`、`LANG` > 英文 | observer | 3、7 |
-| `apa inbox` | 列出待决和建议；web_only 初筛未返回的决策请求不列出 | observer | |
+| `apa inbox` | 列出待决和建议 | observer | |
 | `apa today` | 今天的清单：计划今天或更早且未完成的、今天到期的、待决的、久未推进的（主文档 §4.1） | observer | |
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建；可带 `--deadline`、`--origin`、`--ext`（规则同 `apa item add`） | observer | |
 | `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--from <日期> --to <日期>`（按日期范围读，同 HTTP 的 `from`、`to`）、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 5 |
-| `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` 与 `--planned-slot "HH:MM - HH:MM"`（`update` 传空串清除；有时段必须有计划日期，否则退出码 2）；`add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐。 | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
-| `apa item progress <id> --text [--on <日期>]` | 追加一条进展，不改阶段；`--on` 不能晚于今天 | worker（自己的事项）；delegate（绑定的事项不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、23 |
+| `apa item add/update/transition/relate` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` 与 `--planned-slot "HH:MM - HH:MM"`（`update` 传空串清除；有时段必须有计划日期，否则退出码 2）；`add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐；`add`、`transition` 可带 `--evidence <说明或结果证据>`，进请求体的 `evidence`（委派子事项进入 `done` 必须带），只作记录，不参与权限判定。 | worker（自己的事项）；delegate（任意事项）。一档；以非 `proposed` 阶段新建、使事项离开 `proposed` 或 `needs_input` 为二档（见下文三档表） | 2、4、6、20、23 |
+| `apa item progress <id> --text [--on <日期>]` | 追加一条进展，不改阶段；`--on` 不能晚于今天 | worker（自己的事项）；delegate（任意事项） | 2、4 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
-| `apa decide <id> --option [--evidence \| --grant]` | 代答决策；本人原话或授权单二选一 | delegate | 2、4、6、20、22、23 |
-| `apa accept <id> [--evidence \| --grant]` | 接受建议；依据同上 | delegate | 2、4、20、23 |
-| `apa dismiss <id> [--reason] [--evidence \| --grant]` | 丢弃建议；依据同上；理由选填，缺省时事件理由为 `proposal dismissed` | delegate | 2、4、23 |
-| `apa attach <id> --to <事项> [--reason] [--evidence \| --grant]` | 把建议补到已有事项；依据同上；补到之后不能逐条撤销（来源事件已改挂） | delegate | 2、4、5、6、23 |
-| `apa proposals apply (--recommended \| --file <处置清单>) [--source] [--project] [--evidence \| --grant]` | 批量处理建议：按推荐，或逐条给出处置；每条各自成败，输出逐条结果；`--file -` 从标准输入读处置清单，供插件不落临时文件调用 | delegate | 2、4、23 |
-| `apa grant list` | 列出调用者能用的有效授权单：id、范围、动作、有效期。delegate 是凭据名下的单加上签给凭据所属 Agent 的单；运行凭据只有签给本次运行所属 Agent 且允许后台使用的单。签发和撤销只在 Web | delegate、运行凭据 | 4 |
+| `apa decide <id> --option` | Agent 替本人回答问题（二档）：该 Agent 的档位放开拍板才生效，答案记为 Agent 所答，本人可在"Agent 改动"逐次撤回 | delegate | 2、4、6、23 |
+| `apa accept <id>` | 接受建议（二档，立项） | delegate | 2、4、23 |
+| `apa dismiss <id> [--reason]` | 丢弃建议（二档）；理由选填，缺省时事件理由为 `proposal dismissed` | delegate | 2、4、23 |
+| `apa attach <id> --to <事项> [--reason]` | 把建议补到已有事项（二档）；补到之后不能逐条撤销（来源事件已改挂） | delegate | 2、4、5、6、23 |
+| `apa proposals apply (--recommended \| --file <处置清单>) [--source] [--project]` | 批量处理建议：按推荐，或逐条给出处置；每条按对应的单条命令各自判定、各自成败（批量等于逐条），输出逐条结果；`--file -` 从标准输入读处置清单，供插件不落临时文件调用 | delegate | 2、4、23 |
 | **委派** | | | |
 | `apa executors [--project]` | 列出执行者名录（主文档 §6.17），带项目时标明是否允许 | observer | |
 | `apa delegate --parent --assignee` | 建子事项，校验项目允许的执行者。`--executor <JSON 文件或 ->`（`kind`、`host`、`label`、`handle`）在同一事务里登记或更新执行者，`harness` 取 `APA_HARNESS`；`assignee` 不必先在名录里；身份字段冲突或名录已满返回 6 | worker（自己的事项）；delegate（任意） | 2、4、5、6、21 |
-| `apa dispatch add <子事项> [--session] [--resumable] [--cwd] [--repo] [--handle <JSON 文件或 ->] [--continues <记录>] [--idempotency-key]` | 在委派子事项上写一条委派记录，输出该记录；`harness` 取 `APA_HARNESS`，必填；`--resumable` 要有 `--session`；同一子事项上已有运行中、harness 与会话都相同的记录时不新增，返回已有记录；句柄规则见主文档 §6.17 | 同 `apa report` | 2、4、5、6、23 |
-| `apa dispatch update <记录> [--state ended\|lost] [--resumable true\|false]` | 推进委派记录；`lost` 同时置 `resumable` 为假，终态不可改 | 同 `apa report` | 2、4、5、6、23 |
-| `apa report <id> --outcome --summary [--pr --commit --branch --link] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`done` 必须带结果证据（`--pr`、`--commit`、`--branch`、`--link` 至少一项），附不出只能报 `progress` 或 `blocked`。`--link` 可重复给出多个；报 `done` 时落在已登记笔记库内的链接（`vault:<库名>/<路径>`）自动登记为链接型材料并以"产出"关联到父事项（主文档 §7.5） | 绑定该 assignee 的 worker、该运行的运行凭据、发起该委派的 delegate；其他 delegate 附 `--evidence` 或 `--grant` | 2、4、6、23 |
+| `apa dispatch add <子事项> [--session] [--resumable] [--cwd] [--repo] [--handle <JSON 文件或 ->] [--continues <记录>] [--idempotency-key]` | 在委派子事项上写一条委派记录，输出该记录；`harness` 取 `APA_HARNESS`，必填；`--resumable` 要有 `--session`；同一子事项上已有运行中、harness 与会话都相同的记录时不新增，返回已有记录；句柄规则见主文档 §6.17 | 同 `apa report` | 2、4、5、6 |
+| `apa dispatch update <记录> [--state ended\|lost] [--resumable true\|false]` | 推进委派记录；`lost` 同时置 `resumable` 为假，终态不可改 | 同 `apa report` | 2、4、5、6 |
+| `apa report <id> --outcome --summary [--pr --commit --branch --link] --ack-cursor` | 回执：进展、完成、阻塞，确认挂靠消息；`done` 必须带结果证据（`--pr`、`--commit`、`--branch`、`--link` 至少一项），附不出只能报 `progress` 或 `blocked`。`--link` 可重复给出多个；报 `done` 时落在已登记笔记库内的链接（`vault:<库名>/<路径>`）自动登记为链接型材料并以"产出"关联到父事项（主文档 §7.5） | 绑定该 assignee 的 worker、该运行的运行凭据、delegate | 2、4、6 |
 | `apa handback <消息> --reason` | 把挂靠消息交回一次 | 同上 | 4、6 |
 | **项目** | | | |
 | `apa project list/show` | 读项目，含 repos 与允许的执行者 | observer | |
-| `apa project create/update` | 建项目、改基本信息。`allowed_executors` 不能改 | delegate | 20 |
-| `apa project repos add/remove` | 增改本机检出（worker）或远程地址（delegate） | worker | 4 |
+| `apa project create/update` | 建项目、改基本信息（一档）；改对话捕获开关为 3a。`allowed_executors`、远程地址与外发范围是 3b，只在 Web | delegate | 20、23 |
+| `apa project repos add/remove` | 增改本机检出（一档）；远程地址是 3b，只在 Web | worker | 4、20 |
 | **材料与规范** | | | |
 | `apa material add --repo --path [--project] [--kind]` | 登记托管型；project 缺省取登记了该仓库的项目，kind 缺省 `design`。`apa material add --link <位置> --title <标题> [--project] [--kind]` 登记链接型材料（主文档 §12.8）：位置是 `vault:<库名>/<库内相对路径>` 或网址，kind 缺省 `reference`；同一项目内同一位置重复登记返回已有的那条。`apa material show` 对链接型只回位置与打开地址 | worker | 2、5 |
 | `apa material commit <id> --from --reason [--kind]` | 提交自有型修订 | worker | 6 |
@@ -61,20 +61,20 @@
 | `apa agents sync` | 写入工作区；漂移时不覆盖并返回 6，本人选择"覆盖"后才写入 | observer | 6 |
 | **来源** | | | |
 | `apa source list/show` | 来源与统计 | observer | |
-| `apa source add` | 登记附带的拉取程序或 webhook source，可带 `--default-project`、`--name`（显示名；不带时取来源程序接入声明的名字，输出里给出；程序没有声明又不带时退出码 2；重名退出码 6）；自定义命令（含邮件、日历工具的适配命令）与外发范围只在 Web | delegate | 20 |
+| `apa source add` | 登记附带的拉取程序或 webhook source，可带 `--default-project`、`--name`（显示名；不带时取来源程序接入声明的名字，输出里给出；程序没有声明又不带时退出码 2；重名退出码 6）；登记来源是 3b，只在 Web；CLI 调用返回 20 | Web 登录 | 20 |
 | `apa source auth <id>` | 以该来源登记的 `credentials_path` 启动附带拉取程序的认证模式（在本机运行 `<来源命令> auth <credentials_path>`，继承标准输入输出），凭据写在该路径；不是 pull 类型或未登记 `credentials_path` 的来源返回 2，工具适配的来源用工具自己的认证命令（主文档 §9.7） | 主机本地，经 API 读来源登记，需 observer | 2、5 |
-| `apa source rename <id> <名字>` | 改显示名（主文档 §9.1）；空串改回接入声明的名字（没有声明时退出码 2）；重名退出码 6；记 `source.renamed` | delegate | 6 |
-| `apa source enable/disable` | 启停 | delegate | |
-| `apa source webhook create/rotate/revoke` | 创建、轮换、吊销 webhook 接收密钥 | delegate | |
+| `apa source rename <id> <名字>` | 改显示名（3a，主文档 §9.1）；空串改回接入声明的名字（没有声明时退出码 2）；重名退出码 6；记 `source.renamed` | delegate | 6、23 |
+| `apa source enable/disable` | 启停（3a） | delegate | 23 |
+| `apa source webhook create/rotate/revoke` | 创建、轮换、吊销 webhook 接收密钥（3b，只在 Web；CLI 调用返回 20） | Web 登录 | 20 |
 | `apa source ingests` | 查看原始 payload、校验结果、转换结果 | observer | |
 | `apa source rejects <id> [--after N] [--limit N]` | 查看没有入账的输出行及原因（`next_after` 作为下一次的 `--after`） | observer | |
 | `apa source event <事件 id> [--part body\|original\|headers\|attachments\|messages]` | 读一条来源事件及其原文（主文档 §7.6）：不带 `--part` 输出事件、原文清单与正文，带时只输出那一部分。token 读到的内容按该来源对外部端点的外发范围裁剪，输出写明所用范围与裁剪量；运行凭据不可用 | observer | 4、5 |
 | `apa source replay <入站记录>` | 重放 | delegate | |
 | `apa source backlog list [--source] [--sort score]` | 列出积压（未判定与已到期），旧原因 `undecided`、空原样返回；`--sort score` 按影子分数从高到低排（各来源合并后统一排序，同分保持来源顺序），每条带 `score`，没有分数的排最后 | observer | |
-| `apa source backlog rules [--source] --evidence` | 积压只跑规则：重走归属与确定性规则，能挂靠的挂靠、规则有明确出口的按出口处置，其余原样；不调模型，不受 `unjudged_rejudge_days` 限制，输出 `attached`、`disposed`、`remaining`（主文档 §9.3） | delegate | 23 |
-| `apa source backlog score [--source] --evidence` | 影子打分：用判断端点给积压按批（每批不超过判断端点的 `max_batch`）打分，只写带 `shadow` 的判断记录，不改处置、不建事项、不问对话端点；输出 `scored`、`skipped`（外发范围不允许送出的，或判断端点没有给出概率的）；没有判断端点时返回 6（说明没有判断端点），不写记录；模型已暂停时返回 6（`models_paused`），什么也不做（主文档 §8.7、§9.3） | delegate | 23 |
-| `apa source backlog rejudge [--source] [--limit N] --evidence` | 放开重判：剩余积压（含已 `expired` 与旧原因）按分数从高到低（没有判断端点时按落盘顺序，由对话端点逐条回答同一道初筛题）走完整流水线；进入建议流的数量受每日上限 `backlog_release_per_day` 约束，被忽略的不占额度，当天用完只推迟、次日继续；`--limit N` 把本次进入建议流的数量再压到 N 以内；输出 `requeued`、`deferred`；模型已暂停时返回 6（`models_paused`），不放回任何事件（主文档 §8.7、§9.3） | delegate | 23 |
-| `apa source backlog restore --from <时间> --to <时间> [--source] [--dry-run] --evidence` | 把时间段内被旧级联的判断忽略、没有判断记录的事件放回积压（未判定原因 `restored`），之后只经上面三步重判（主文档 §9.3）；`--dry-run` 只返回命中条数与按来源的分布，不写入，不需要 `--evidence` | delegate（`--dry-run` 为 observer） | 23 |
+| `apa source backlog rules [--source]` | 积压只跑规则：重走归属与确定性规则，能挂靠的挂靠、规则有明确出口的按出口处置，其余原样；不调模型，不受 `unjudged_rejudge_days` 限制，输出 `attached`、`disposed`、`remaining`（主文档 §9.3） | delegate | |
+| `apa source backlog score [--source]` | 影子打分：用判断端点给积压按批（每批不超过判断端点的 `max_batch`）打分，只写带 `shadow` 的判断记录，不改处置、不建事项、不问对话端点；输出 `scored`、`skipped`（外发范围不允许送出的，或判断端点没有给出概率的）；没有判断端点时返回 6（说明没有判断端点），不写记录；模型已暂停时返回 6（`models_paused`），什么也不做（主文档 §8.7、§9.3） | delegate | |
+| `apa source backlog rejudge [--source] [--limit N]` | 放开重判：剩余积压（含已 `expired` 与旧原因）按分数从高到低（没有判断端点时按落盘顺序，由对话端点逐条回答同一道初筛题）走完整流水线；进入建议流的数量受每日上限 `backlog_release_per_day` 约束，被忽略的不占额度，当天用完只推迟、次日继续；`--limit N` 把本次进入建议流的数量再压到 N 以内；输出 `requeued`、`deferred`；模型已暂停时返回 6（`models_paused`），不放回任何事件（主文档 §8.7、§9.3） | delegate | |
+| `apa source backlog restore --from <时间> --to <时间> [--source] [--dry-run]` | 把时间段内被旧级联的判断忽略、没有判断记录的事件放回积压（未判定原因 `restored`），之后只经上面三步重判（主文档 §9.3）；`--dry-run` 只返回命中条数与按来源的分布，不写入 | delegate（`--dry-run` 为 observer） | |
 | **对外** | | | |
 | `apa events --follow [--cursor]` | 跟随事件流 | observer | |
 | `apa ext list` | 列出仓库提供的 ext | 无 | |
@@ -82,7 +82,7 @@
 | `apa ext check` | 协议一致性自测 | 无 | |
 | `apa connection list [--direction channel]` | 列出连接（内置渠道）：id、方向、类型、名字、启停、状态、问题代码与最近成功、失败的时间；不含配置值与凭据（主文档 §7.6）。就是 `GET /connections` | observer | |
 | **自动化** | | | |
-| `apa instance add/list/enable/disable` | 能力包实例 | delegate（`list` 为 observer） | |
+| `apa instance add/list/enable/disable` | 能力包实例（3a；改实例的执行 Agent 为 3b） | delegate（`list` 为 observer） | 20、23 |
 | `apa pack list` | 列出已加载能力包 | observer | |
 | `apa pack validate <目录>` | 本地校验能力包 | 无 | |
 | **可观测** | | | |
@@ -92,6 +92,26 @@
 | `apa judgment stats [--use] [--template] [--source] [--since]` | 各级调用次数与升级率、未定率、接受率、误丢率（主文档 §8.10） | observer | |
 | `apa judgment show <id>` | 一条判断记录的逐级结果 | observer，按权限裁剪 | 5 |
 | `apa judgment spot-check` | 列出待抽检的条目；抽检结论只在 Web 填 | observer | |
+
+**三档与硬线**（主文档 §14.3）：每条登记命令固定在下表的一档，不随调用者、对象归属或通道变化；少数命令按这一次的状态变化取更高的档（表内注明）。钥匙只决定能碰哪些对象（主文档 §14.2），档位决定 Agent 发起时能否直接生效：一档永远开；二档、3a 由本人在 Web 给每个 Agent 选档位放开（`PUT /settings/agents/{agent}/tier`，二档可限定项目）；3b 永不放开，只有本人在 Web 做，且须刚输过口令。Web 上的本人不受档位限制。判定顺序是硬线 → 钥匙范围 → 档位 → 项目允许的执行者，硬线不读档位。
+
+| 档 | 命令 | Agent 发起而档位未放开时 |
+|---|---|---|
+| 读 | `credential.list`（只有 Web 登录）、`executor.list`、`executor.pending`、`delegate.dispatch_list`、`blob.get` | 不涉及 |
+| 一档 整理 | `decision.request`；`delegate.create`、`delegate.report`、`delegate.dispatch`、`delegate.dispatch_update`；`followmsg.handback`；`rule.create_timer`；`material.commit`、`material.link`、`material.add`、`blob.put`；`inbound.capture`、`inbound.propose_unjudged`、`inbound.ignore_unjudged`、`inbound.backlog_rules`、`inbound.backlog_score`、`inbound.backlog_rejudge`、`inbound.backlog_restore`；`project.create`、`project.update`、`project.checkout.set`、`project.checkout.remove`；`source.replay`、`source.fetch_attachment`；`executor.declare`；`agents.check`、`agents.sync`；`item.create`、`item.update`、`item.transition`、`item.relate`、`item.progress`。按状态升档：以 `proposed` 之外的阶段新建、使事项离开 `proposed` 或 `needs_input` 的转阶段为二档；改事项的指定 Agent、改项目的对话捕获开关为 3a | 不涉及：一档永远开，可在"Agent 改动"撤回 |
+| 二档 拍板 | `decision.answer`、`proposal.accept`、`proposal.dismiss`、`proposal.attach`、`revision.confirm`、`revision.reject`、`channel.answer`。按状态升档：回答 AGENTS.md 漂移问题、确认或拒绝规范类修订为 3a。`channel.answer` 是本人经渠道回答，只看渠道回答人白名单，不看档位 | 退出码 23（`tier_closed`），不写入；`web_url` 指向该对象。修订在档位未放开时留待确认（主文档 §14.3） |
+| 3a 改日常 | `source.set_enabled`、`source.rename`、`source.set_content_retention`；`instance.create`、`instance.update`、`instance.toggle`、`instance.run`；`item.start`、`item.revert`；`rule.set_mode`；`judgment.review`；`material.revert`、`material.update`；`agents.resolve`。按状态升档：新建或修改实例时改了它的执行 Agent 为 3b | 退出码 23（`tier_closed`），`web_url` 指向该动作的设置页 |
+| 3b 造新权力 | `credential.issue`、`credential.revoke`、`credential.assign`；`source.webhook_key`、`source.webhook_revoke`、`source.register`、`source.register_script`、`source.update`、`source.update_script`、`source.set_outbound`；`connection.create`、`connection.configure`、`connection.enable`、`connection.disable`、`connection.rename`、`connection.remove`；`executor.confirm`、`executor.reject`、`executor.register`、`executor.put`、`executor.remove`；`agent.configure`；`project.repo.add`、`project.repo.remove`、`project.capture_outbound.set`、`project.allowed_executors.set`；`purge.object` | 退出码 20（`hard_line`），不论档位；Web 会话没刚输过口令为退出码 20（`reauth_required`） |
+| 系统内部 | `source.ingest`、`source.run_result`；`inbound.dispose`、`inbound.requeue`、`inbound.expire`；`followmsg.attach`、`followmsg.ack`、`followmsg.release`；`delegate.settle`；`followup.settle`；`retention.purge_content`；`agents.render`；`revision.summarize`；`material.refresh`、`material.relocate` | 没有对外入口；Agent 凭据调用为退出码 20（`hard_line`） |
+
+不走命令的设置路由按段定档（主文档 §14.3）：3a 是打扰与提醒（`disturb`）、人格与助手语言、渠道的登记属性（`channels`）、不确定带与影子模式、抽检设置、暂停模型、信任的发件人（转发白名单）、来源的原文保留天数；3b 是工具档位上限（`permission_cap`）、判断端点与生成端点、渠道回答人、默认 Agent 与后台由谁干（`default_agent_id`、`main_agent_id`、`rule_agent`、`default_harness`）、启动方式（`main_session_launch`）、笔记库、Agent 档位本身、删除渠道与识别回答人、外发范围、口令与会话。CLI 没有这些设置的写命令。
+
+钥匙范围外（observer 写入、worker 改别人的事项、运行凭据写本次目标之外的对象）为退出码 4（`out_of_scope`）。三种拒绝都记 `command.rejected`，走同一条留痕路径。
+
+**会话身份**：环境变量 `APA_SESSION`、`APA_HARNESS` 由接入方（harness 插件）设置，CLI 随每次请求以 HTTP 头 `X-APA-Session`、`X-APA-Harness` 发出，只用于把 Event actor 审计到会话粒度，不参与任何权限判定（主文档 §14.2）。
+
+<details>
+<summary><b>已取消（2026-11-20）：原"只在 Web"清单、代理写命令清单、授权单与会话类型说明</b>。理由：由上面的三档与硬线取代（主文档 §14.3、决定 84）。原文保留如下，其中的命令与参数已不再登记。</summary>
 
 **只在 Web**：策略、信任级、token、ext 密钥、web_only 分类、两份白名单、项目允许的执行者、移除执行者名录条目、规则切 `auto`、运行权限上限、判断端点与生成端点、不确定带与影子模式、抽检结论、打扰上限与静音、来源与对话捕获的外发范围、登录口令与在线会话、可执行命令登记（另可由本人写主机配置文件，§14.12）、撤销 agent 变更、物理删除、规范生效、签发和撤销授权单。CLI 没有对应的写命令；相关命令（如 `apa project update`、`apa source add`）带上这些字段时返回退出码 20。
 
@@ -120,6 +140,8 @@
 
 **会话身份**：环境变量 `APA_SESSION`、`APA_HARNESS`、`APA_SESSION_KIND` 由接入方（harness 插件）设置，CLI 随每次请求以 HTTP 头 `X-APA-Session`、`X-APA-Harness`、`X-APA-Session-Kind` 发出。前两项让 Event actor 审计到会话粒度；`X-APA-Session-Kind` 取 `direct`、`group`、`unknown`，缺失等同 `unknown`，只有 `direct` 时内核接受凭本人原话的第二档命令（主文档 §11.2、§14.5、§17.4）。
 
+</details>
+
 ## B.2 HTTP API
 
 | 分组 | 方法与路径 | 说明 | 凭据 |
@@ -127,17 +149,16 @@
 | 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for`、`from` 与 `to`（日期范围） | 按 §14.3；导出 ext 密钥可 `GET` |
 | | `GET /today` | 今天的清单，四组：`planned`、`due`、`pending`、`stale` | observer |
 | | 已有路由 GET /items 的新增查询参数 | `origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
-| | `POST /items/{id}/progress` | 追加进展 `{text, on?}`；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate 按 §14.5 |
+| | `POST /items/{id}/progress` | 追加进展 `{text, on?}`；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate |
 | | `POST /items/{id}/correlation-keys`，`DELETE /items/{id}/correlation-keys` | 登记或移除关联键 `{key, domain?}`（经 `item.relate`；`GET /items/{id}` 返回 `correlation_keys[]`） | 同 `relations` |
 | | `GET /items/{id}/messages` | 事项的全部挂靠消息 | observer；运行身份和无人值守事项按转发白名单过滤；ext 密钥不可用 |
 | | `POST /items/{id}/transition`，`POST /items/{id}/relations` | 转阶段、关联 | 同上 |
-| | `POST /items/{id}/revert` | 撤销 agent 变更 | 只有 Web 登录 |
-| | `POST /items/{id}/start` | 现在开工（`item.start`，主文档 §13.6）：事项须是 `open`，否则 409；记内部事件 `item.start_requested`，规则引擎随后执行能为它拉起后台运行的规则，不看规则模式，权限上限、项目允许的执行者、链路深度与在途运行照常复核；返回 202 与 `{"id"}` | 只有 Web 登录 |
+| | `POST /items/{id}/revert` | 撤销 agent 变更，含 Agent 替本人的回答（3a） | Web 登录；delegate 按档位 |
+| | `POST /items/{id}/start` | 现在开工（`item.start`，主文档 §13.6）：事项须是 `open`，否则 409；记内部事件 `item.start_requested`，规则引擎随后执行能为它拉起后台运行的规则，不看规则模式，权限上限、项目允许的执行者、链路深度与在途运行照常复核；返回 202 与 `{"id"}`（3a） | Web 登录；delegate 按档位 |
 | 决策 | `POST /items/{id}/ask` | 写入决策请求 | worker |
-| | `POST /items/{id}/decide`，`/accept`，`/dismiss` | 回答或处理建议；delegate 带 `X-APA-Evidence` 或 `X-APA-Grant`，二选一 | Web 登录、delegate |
-| | `POST /items/{id}/attach` | 把建议补到已有事项，请求体 `{to, reason?}`；依据同上 | Web 登录、delegate |
-| | `POST /proposals/batch` | 批量处理建议，见下 | Web 登录、delegate |
-| | `GET /grants` | 调用者能用的有效授权单（同 `apa grant list`） | delegate、运行凭据 |
+| | `POST /items/{id}/decide`，`/accept`，`/dismiss` | 回答或处理建议（二档）：delegate 按其 Agent 的档位，未放开为 403（退出码 23）；旧客户端带的 `X-APA-Evidence`、`X-APA-Grant`、`X-APA-Session-Kind` 一律忽略 | Web 登录、delegate |
+| | `POST /items/{id}/attach` | 把建议补到已有事项，请求体 `{to, reason?}`（二档） | Web 登录、delegate |
+| | `POST /proposals/batch` | 批量处理建议，逐条按单条命令判定，见下 | Web 登录、delegate |
 | 委派 | `GET /executors` | 执行者名录：`id`、`kind`、`host`、`harness`、`label`、`handle`、`created_at`；带 `project` 时另带 `allowed` | observer |
 | | `DELETE /executors/{id}` | 移除名录条目，已有事项与委派记录里的 id 原样保留 | 只有 Web 登录 |
 | | `POST /delegations` | 建子事项 | worker |
@@ -146,16 +167,16 @@
 | | `PATCH /dispatches/{id}` | 推进委派记录 `{state?, resumable?}` | 同回执 |
 | | `GET /dispatches` | 列委派记录，可带 `executor`、`item`、`resumable`、`limit` | observer；运行凭据限范围内的事项 |
 | | `POST /messages/{id}/handback` | 交回挂靠消息 | worker |
-| 项目 | `GET/POST /projects`，`GET/PATCH /projects/{id}` | 项目 | observer 读，delegate 写 |
-| | `POST /projects/{id}/repos` | repos 属性 | worker、delegate |
+| 项目 | `GET/POST /projects`，`GET/PATCH /projects/{id}` | 项目；建与改是一档，改对话捕获开关是 3a | observer 读，delegate 写 |
+| | `POST /projects/{id}/repos` | repos 属性：本机检出是一档，远程地址是 3b | worker；远程地址只有 Web 登录 |
 | | `GET /projects/resolve?path&host` | 当前目录到项目的映射 | observer |
 | 材料 | `GET/POST /materials`，`GET /materials/{id}` | 材料；单个材料带与事项的类型化关系 `relations` | observer 读，worker 写；导出 ext 密钥可 `GET` |
 | | `GET /materials/{id}/content` | 托管型正文，异步读取 | 只有 Web 登录 |
 | | `POST /materials/{id}/changes` | 对托管型发起修改，生成委派子事项 | Web 登录、delegate；worker、运行凭据须带自己范围内的 `parent` |
 | | `GET/POST /materials/{id}/revisions` | 修订 | observer 读，worker 写 |
-| | `POST /materials/{id}/revert` | 回退一次 `direct` 修订 | 只有 Web 登录 |
-| | `PATCH /materials/{id}` | 改链接型材料的标题、kind 与标签 `{"title"?, "kind"?, "tags"?, "reason"?}`，经 `material.update`；位置不可改，非链接型返回 409 | 只有 Web 登录 |
-| | `POST /revisions/{id}/confirm`，`/reject` | 确认或拒绝 proposed 修订 | Web 登录、delegate（规范生效只有 Web） |
+| | `POST /materials/{id}/revert` | 回退一次 `direct` 修订（3a） | Web 登录；delegate 按档位 |
+| | `PATCH /materials/{id}` | 改链接型材料的标题、kind 与标签 `{"title"?, "kind"?, "tags"?, "reason"?}`，经 `material.update`；位置不可改，非链接型返回 409（3a） | Web 登录；delegate 按档位 |
+| | `POST /revisions/{id}/confirm`，`/reject` | 确认或拒绝 proposed 修订（二档；规范类为 3a） | Web 登录、delegate |
 | | `GET /revisions/pending` | 全站等本人确认的 proposed 修订，先提交的在前：`{"pending": [{"revision", "material", "baseline_changed"}]}`；只读 | 同材料读取 |
 | | `GET /materials/search` | 检索 | observer |
 | | `PUT/GET /blobs/{hash}` | 附件 | worker 写，observer 读 |
@@ -167,58 +188,59 @@
 | | `GET /context/persona` | 当前人格，前面带内核固定声明；本人没写时是内置默认；语言：查询参数 `lang`（`zh` 或 `en`）> 策略的 `persona_lang` > 查询参数 `locale`（调用方的区域设置，`zh` 开头为中文）> 英文；另带 `default`，即该语言的默认原文（不含声明） | observer |
 | | `POST /capture` | 提交对话增量 `{text, project?, path?, host?}`；运行身份下、项目未开启捕获时不生效，返回 200 `{"captured": false, "reason"}`；候选在提交后异步抽取 | worker |
 | 插件声明 | `POST /declarations` | 提交无头运行声明（旧插件可带 `executors[]`），进 Web 待确认 | worker |
-| 来源 | `GET/POST /sources`，`GET/PATCH /sources/{id}` | 来源登记 | observer 读，delegate 写；自定义命令只有 Web |
+| 来源 | `GET/POST /sources`，`GET/PATCH /sources/{id}` | 来源登记。登记与修改配置是 3b；`PATCH` 只改启停或显示名是 3a | observer 读；登记与改配置只有 Web 登录；启停与改名 delegate 按档位 |
 | | `GET /sources/declared-name?type&command&source_type&config` | 来源程序接入声明的显示名（中英），新登记表单预填 | observer |
-| | `POST /sources/{id}/webhook` | 创建或轮换接收密钥 | delegate |
-| | `DELETE /sources/{id}/webhook` | 吊销该来源全部接收密钥，同时删除 HMAC 密钥文件 | delegate |
+| | `POST /sources/{id}/webhook` | 创建或轮换接收密钥（3b） | 只有 Web 登录 |
+| | `DELETE /sources/{id}/webhook` | 吊销该来源全部接收密钥，同时删除 HMAC 密钥文件（3b） | 只有 Web 登录 |
 | | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | observer、delegate；运行凭据不能读入站记录（返回 403，原始请求体未经转发白名单） |
 | | `GET /sources/{id}/events?disposition&sort&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 只有 Web 登录能读 | observer；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
 | | `GET /sources/{id}/rejects?after&limit` | 被拒收的输出行及原因 | observer；运行凭据不可用（返回 403，原始行是未过滤的外部输出） |
 | | `POST /source-events/{id}/propose` | 把未判定事件或 digest 事件转为建议 | Web 登录、delegate |
-| | `POST /source-events/{id}/ignore`，`POST /source-events/ignore` | 忽略未判定事件：单条；或批量，请求体 `{"source"}` 按来源、`{"all": true}` 全部 | Web 登录、delegate（附本人原话） |
-| | `POST /source-events/rules` | 积压放开第 1 步：只跑规则，返回 `{"attached", "disposed", "remaining"}`；请求体 `{"source"?}` | Web 登录、delegate（附本人原话） |
-| | `POST /source-events/score` | 积压放开第 2 步：影子打分，返回 `{"scored", "skipped"}`；请求体 `{"source"?}`；没有判断端点是 409；模型已暂停是 409 `models_paused` | Web 登录、delegate（附本人原话） |
-| | `POST /source-events/rejudge` | 积压放开第 4 步：放开重判，返回 `{"requeued", "deferred"}`；请求体 `{"source"?, "limit"?}`；模型已暂停是 409 `models_paused` | Web 登录、delegate（附本人原话） |
+| | `POST /source-events/{id}/ignore`，`POST /source-events/ignore` | 忽略未判定事件：单条；或批量，请求体 `{"source"}` 按来源、`{"all": true}` 全部 | Web 登录、delegate |
+| | `POST /source-events/rules` | 积压放开第 1 步：只跑规则，返回 `{"attached", "disposed", "remaining"}`；请求体 `{"source"?}` | Web 登录、delegate |
+| | `POST /source-events/score` | 积压放开第 2 步：影子打分，返回 `{"scored", "skipped"}`；请求体 `{"source"?}`；没有判断端点是 409；模型已暂停是 409 `models_paused` | Web 登录、delegate |
+| | `POST /source-events/rejudge` | 积压放开第 4 步：放开重判，返回 `{"requeued", "deferred"}`；请求体 `{"source"?, "limit"?}`；模型已暂停是 409 `models_paused` | Web 登录、delegate |
 | | `GET /source-events/restorable?from&to&source` | 预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer；运行凭据不可用 |
 | | `GET /source-events/{id}/outbound-preview` | 外发预览：这条事件按 `full`、`excerpt`、`meta` 裁剪后实际送给模型的内容，与外发同源（主文档 §14.14）；只读，不写 Event | observer；运行凭据不可用（返回 403）；内部来源 `capture:<项目>` 的事件只有 Web 登录能读 |
-| | `POST /source-events/restore` | 把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate（附本人原话） |
+| | `POST /source-events/restore` | 把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate |
 | | `GET /source-events/{id}` | 单条读取来源事件及其原文，见下 | Web 登录读全文；token 按外发范围裁剪；运行凭据、ext 密钥不可用（403） |
-| | `POST /source-events/{id}/attachments/{n}/fetch` | 取回第 n 个附件（`source.fetch_attachment`，主文档 §7.6）：成功返回 200 与更新后的附件清单项（带 `blob`）；来源程序不支持取回是 409，取回失败是 502 并带原因 | Web 登录、delegate（附本人原话） |
+| | `POST /source-events/{id}/attachments/{n}/fetch` | 取回第 n 个附件（`source.fetch_attachment`，主文档 §7.6）：成功返回 200 与更新后的附件清单项（带 `blob`）；来源程序不支持取回是 409，取回失败是 502 并带原因 | Web 登录、delegate |
 | | `GET /storage` | 存储用量：`{"ledger_bytes", "blobs_bytes", "content_bytes", "sources": [{"id", "name", "events", "content_bytes", "oldest", "retention_days"?}]}` | observer |
 | | 已有路由 GET /sources/{id}/events 与 GET /items/{id}/messages 的改动 | 列表不再带正文全文：每条事件的 `detail` 是前 2000 个字符的预览，另带 `content`（原文清单：各部分的字节数、总字节数、`state`、`missing?`）；全文经上面的单条读取（见 B.6） | 同原路由 |
 | 判断 | `GET /judgments?subject&use&template&source&after&limit`，`GET /judgments/{id}` | 判断记录（主文档 §6.16），不含资料正文 | observer；运行凭据限目标事项 |
 | | `GET /judgments/stats?use&template&source&since` | 各级调用次数与四项指标（主文档 §8.10） | observer |
-| | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}` | 读 observer；填只有 Web 登录 |
+| | `GET /judgments/spot-check`，`POST /judgments/{id}/review` | 抽检池；填抽检结论 `{result: "should_see" \| "correct"}`（3a） | 读 observer；填 Web 登录，delegate 按档位 |
 | 入站 | `POST /ingest/{source_id}` | webhook 接收路由 | webhook 接收密钥 |
-| Agent | `GET /agents` | 卡片列表与选择预览（`rule`、`runner`、`schedule`、`item_agent`、`harness`），本人可见实例参数 | observer |
-| 设置 | `POST /settings/agents` | 创建或更新卡片，更新时须带原 `id`、`harness` 和 `rev`。同时修改权限上限时传 `permission_cap` 和 `policy_version`，在同一事务生效 | 只有 Web 登录 |
+| Agent | `GET /agents` | 卡片列表与选择预览（`rule`、`runner`、`schedule`、`item_agent`、`harness`），本人可见实例参数；每张卡带 `tier`（`organize`、`decide`、`rules`，没设过为 `organize`）与 `tier_projects`（拍板限定的项目，空为全部） | observer |
+| 设置 | `POST /settings/agents` | 创建或更新卡片，更新时须带原 `id`、`harness` 和 `rev`。同时修改权限上限时传 `permission_cap` 和 `policy_version`，在同一事务生效（3b） | 只有 Web 登录 |
 | 事件 | `GET /events?cursor=` | JSON 长轮询 | observer、导出和转发 ext 密钥 |
 | 投递 | `GET /deliveries/next?wait=` | 长轮询领取；有租约 | 渠道 ext 密钥；网关插件 token（worker 及以上，只领唤醒类投递） |
 | | `POST /deliveries/{id}/ack`，`/fail`，`/answer` | 送达、失败、转达回答 | 同上 |
 | | `POST /channels/identify` | 渠道 ext 上报谁发来了识别口令：`{code, sender, display}`。`sender` 是平台用户 ID；ext 密钥的渠道须与发起识别的渠道一致，口令不符、已用过或过期返回 404。不写名单 | ext（channel） |
 | | `GET /deliveries/unread`，`POST /deliveries/{id}/read` | Web 未读；`read` 即本人确认（投递转 `acknowledged`） | Web 登录 |
 | | `GET /deliveries/today` | 今天的推送计数，与打扰日上限同口径（主文档 §7.4）；只读 | Web 登录 |
-| | `GET/POST /forms/{一次性令牌}` | 一次性表单 | 令牌本身 |
+| | `GET /forms/{令牌}` | 旧的一次性表单链接：302 到需要登录的 `/decisions`，不兑现令牌、不回答 | 不需要凭据 |
 | 运行 | `GET /runs?state&category&target&before&limit`，`GET /runs/{id}` | 运行记录 | observer |
 | | `POST /runs/{id}/credential` | 把唤醒运行的 id 换成短期运行凭据 | worker、delegate（网关插件 token） |
 | 回放与健康 | `GET /why/{id}`，`GET /health` | 回放（来源事件命中数值条件规则时另带 `alerts`：规则、条件文本、上一次与本次取值、产出的投递及其状态（提醒还被静默或合并窗口暂存时状态为 `held`），各凭据级别可见）、健康视图；所有健康告警都经同一处产出健康类投递（§15.2），读取走 `GET /deliveries/unread` | observer |
 | | `GET /source-events/{id}/trace`，`GET /items/{id}/trace` | 处理经过（主文档 §15.1）：消息经过是 `{message, entries}`，事项经过是 `{origins, more_origins?, entries}`；每行 `{at, who: {kind, name?, role?}, kind, args?, item?: {id, title, gone?}, mech?, steps}`，`steps` 与 `/why` 的 Step 同形、同样按凭据级别裁剪。`kind` 与 `args` 见下文"处理经过的行"；内部来源 `capture:<项目>` 的消息只有 Web 登录能读 | observer；运行凭据 403 |
 | | `GET /doctor` | 内核一侧的自检结果（主文档 §15.5）；每项检查与每个对象都带稳定机器码 `code` 与可变参数 `data`，形状见下文"自检结果"。已保存端点的探测通过、且该端点有未恢复的失败时，记一条探测通过的 `run.finished`（同测试连接），健康视图据此清除该端点此前的失败（§15.2） | observer |
+| | `GET /audit/rule-changes?agent&before&limit` | 规矩改动清单（主文档 §15.3）：3a 的每次改动 `{"changes": [{seq, at, actor, agent?, command, object, sections?, before?, after?, revert: {ok, why?}}]}`，最新的在前；`command` 为 `policy` 时是策略段改动，`before`、`after` 是该段的前值与后值；`revert.why` 是撤不回的原因码：`run_started`（已拉起的运行）、`data_purged`（已清除的数据）、`superseded`（之后又被改过）、`not_revertible` | 只有 Web 登录 |
+| | `POST /audit/rule-changes/{seq}/revert`，`POST /audit/rule-changes/revert` | 按次撤回一条（撤不回为 409，`reason` 为上面的原因码）；按 Agent 批量撤回 `{"agent"}`，逐条各自成败，返回 `{"results": [{seq, ok, reason?}]}`。撤回以本人身份执行，记各自的事件 | 只有 Web 登录 |
 | | `GET /version` | 版本与各协议版本（B.5） | 不需要凭据 |
-| 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例。`GET /packs` 的每个包另带 `default_instruction`（实例驱动的 `call_agent` 模板的默认内容要求，没有时省略，附录 C.7）；`GET /instances` 另带顶层 `agent_ready`（Web 设置了默认 Agent 且其无头运行声明已确认；为假时周期简报到点跳过，主文档 §7.3）。实例参数 `instruction` 不超过 2000 字 | observer 读，delegate 写 |
-| | `POST /instances/{id}/run` | 立即跑一次（`instance.run`）：以当前时刻为到期时刻记 `instance.fired`，与定时到期同一路径，含 Agent 不能后台运行时的跳过；返回 202 与实例 | delegate |
-| | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；每条带 `class`（`reminder` 提醒类或 `action` 动作类，由加载器推定，主文档 §14.8）；实例驱动的时钟规则（`schedule` 含 `{instance.…}`）不是可见规则，不列出，对它改模式与规则不存在同为 404 `not_found`（主文档 §7.3）；切换只有 Web | Web 登录 |
-| 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/grants`、`/settings/purge` | 策略（含人格、打扰上限与静音）、两个模型端点、凭据、白名单、名单、命令登记、声明确认、授权单签发与撤销（`POST /settings/grants`、`POST /settings/grants/{id}/revoke`）、物理删除（`POST /settings/purge` 的 `object` 可以是事项、材料或来源事件 id；删除事项时可带 `"with_source_events": true` 连同它的来源事件一并删除，对其他对象带它是 400；去重键留作墓碑，主文档 §6.15） | 只有 Web 登录 |
-| | `/settings/judgment` | 不确定带与影子模式 | 只有 Web 登录 |
+| 能力包 | `GET /packs`，`GET/POST /instances`，`PATCH /instances/{id}` | 能力包与实例。`GET /packs` 的每个包另带 `default_instruction`（实例驱动的 `call_agent` 模板的默认内容要求，没有时省略，附录 C.7）；`GET /instances` 另带顶层 `agent_ready`（Web 设置了默认 Agent 且其无头运行声明已确认；为假时周期简报到点跳过，主文档 §7.3）。实例参数 `instruction` 不超过 2000 字 | observer 读，delegate 按档位写（3a；改执行 Agent 为 3b） |
+| | `POST /instances/{id}/run` | 立即跑一次（`instance.run`，3a）：以当前时刻为到期时刻记 `instance.fired`，与定时到期同一路径，含 Agent 不能后台运行时的跳过；返回 202 与实例 | delegate 按档位 |
+| | `GET /rules`，`PATCH /rules/{id}/mode` | 规则与模式；每条带 `class`（`reminder` 提醒类或 `action` 动作类，由加载器推定，主文档 §14.8）；实例驱动的时钟规则（`schedule` 含 `{instance.…}`）不是可见规则，不列出，对它改模式与规则不存在同为 404 `not_found`（主文档 §7.3）；切换模式是 3a | Web 登录；切换 delegate 按档位 |
+| 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/purge` | 策略（含人格、打扰上限与静音）、两个模型端点、凭据、白名单、名单、命令登记、声明确认、物理删除（`POST /settings/purge` 的 `object` 可以是事项、材料或来源事件 id；删除事项时可带 `"with_source_events": true` 连同它的来源事件一并删除，对其他对象带它是 400；去重键留作墓碑，主文档 §6.15）。策略各段按 B.1"不走命令的设置路由"定档：3a 段 delegate 按档位可读可写；3b 段与凭据、名单、命令登记、声明确认、物理删除只有 Web 登录 | 只有 Web 登录；3a 段 delegate 按档位 |
+| | `/settings/judgment` | 不确定带与影子模式（3a） | Web 登录；delegate 按档位 |
 | | `POST /settings/model-endpoints/models`、`POST /settings/model-endpoints/test` | "设置 › 模型"的获取模型与测试连接：不改策略；只有测试的正是已保存的端点、测试通过且该端点有未恢复的失败时，记一条探测通过的 `run.finished`（见下文"测试连接"），其余情况不写 Event；同一类端点同一时刻只跑一个，其余返回 409（主文档 §4.1、§15.2、§15.5） | 只有 Web 登录 |
-| | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围 | 只有 Web 登录 |
+| | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围（3b） | 只有 Web 登录 |
 | | `GET/PUT /settings/note-vaults` | 笔记库登记：`{"vaults": [{"name", "open_url"}]}`，整体替换；经 `policy.Update`，记 `policy.changed`。名字重复、模板不以协议开头或用了被拒绝的协议返回 400 | 只有 Web 登录 |
-| | `PUT /settings/sources/{id}/content-retention` | 来源的原文保留天数：`{"days": 90}`，`null` 为不清理（主文档 §6.15） | 只有 Web 登录 |
-| | 已有路由 POST /settings/grants 的新增请求体 | `actions` 可含 `item.progress`；不接受 `import` 段与 `import.apply`（导入已取消，返回 400）。已签发的旧导入专用单读出时原样带回 `import` 段 | 只有 Web 登录 |
+| | `PUT /settings/sources/{id}/content-retention` | 来源的原文保留天数：`{"days": 90}`，`null` 为不清理（主文档 §6.15；3a） | Web 登录；delegate 按档位 |
 | | 已有路由 /settings/model-endpoints 的新增字段 | `generate_endpoint.max_material_chars`：生成端点的资料预算，缺省 24000（主文档 §8.4） | 只有 Web 登录 |
-| | `PUT /settings/sources/{id}/trusted-senders` | 只替换这个来源的转发白名单 `{"senders": [...]}`，经 `policy.Update`，记 `policy.changed` 与 `allowlist.changed`；来源声明为需确认时只接受空名单（清掉以前填的、不生效的条目），非空为 400（`sender_unverifiable`）；名单为空即策略里没有这个键，Web 再次按"从未设置"预填本人 | 只有 Web 登录 |
+| | `PUT /settings/sources/{id}/trusted-senders` | 只替换这个来源的转发白名单 `{"senders": [...]}`，经 `policy.Update`，记 `policy.changed` 与 `allowlist.changed`；来源声明为需确认时只接受空名单（清掉以前填的、不生效的条目），非空为 400（`sender_unverifiable`）；名单为空即策略里没有这个键，Web 再次按"从未设置"预填本人（3a） | Web 登录；delegate 按档位 |
 | | `GET /settings/sources/{id}/self-sender` | 声明了 `sender.self: identity` 的来源：运行一次来源程序的 `identity` 模式（登记命令的第一个词加 `identity`，超时 10 秒），返回 `{"sender"}` 供预填；不产生来源事件、不写 Event；其他来源 404，程序失败或没给出身份时 409 `conflict` | 只有 Web 登录 |
-| | `PUT /settings/channels/{name}/answerers` | 只替换这个渠道的回答人白名单 `{"answerers": [...]}`，记 `policy.changed` 与 `allowlist.changed` | 只有 Web 登录 |
+| | `PUT /settings/channels/{name}/answerers` | 只替换这个渠道的回答人白名单 `{"answerers": [...]}`，记 `policy.changed` 与 `allowlist.changed`（3b）；名单为空时该渠道只送提醒，确认只走 Web | 只有 Web 登录 |
 | | `DELETE /settings/channels/{name}` | 删除一个自写程序渠道：同一事务里吊销该渠道 `channel.<名>` 的全部未吊销渠道密钥，并从策略的 `channels` 与 `channel_answerers` 里删掉这个名字；要么三件都成、要么都不动，重复删除返回 `{"version": 当前版本, "revoked": 0}`，记 `policy.changed`（改到回答人时另记 `allowlist.changed`）。指向它的打扰路由不动。内置渠道的名字前缀 `ch-` 为 400 | 只有 Web 登录 |
 | | `POST /settings/channels/{name}/identify`，`GET /settings/channels/{name}/identify` | 开始识别：返回一次性口令 `{code, expires_at}`（10 分钟，同一渠道同时一个，只在内存里，重启作废）；查看：`{state: waiting \| got \| expired, sender?, display?}` | 只有 Web 登录 |
 | 连接 | `GET /connections?direction=` | 列出连接（渠道），按创建顺序：`{"connections": [{"id", "direction", "type", "name", "config", "secrets": {"<字段>": true/false}, "enabled", "state": ok/problem/disabled, "problem"?, "detail"?, "last_ok_at"?, "last_error_at"?, "created_at", "updated_at"}]}`。凭据只回是否已设置且可用（主文档 §14.2）；必填凭据不可用时 `problem` 为 `credentials_missing`。token 读到的每条不含 `config`、`secrets`、`detail`（主文档 §7.6） | observer 读裁剪后的字段；Web 登录读全部；ext 与 webhook 密钥不可 |
@@ -231,10 +253,11 @@
 | | `POST /connections/{id}/test` | 对已保存的连接发一条测试消息，结果写进连接现状；返回同上 | 只有 Web 登录 |
 | | 已有路由 GET /settings/ext-keys 的新增字段 | 每把密钥带 `last_seen_at`：同一权限范围（`channel.<名>`、`export` 等）的密钥最近一次经认证调用内核的时间，从未调用过时省略（与 `apa doctor` 的 `last_seen_at` 同源） | 只有 Web 登录 |
 | | `PATCH /settings/tokens/{id}` | 认领 token 所属的 harness `{"harness"}`（非空、不含空白，同无头运行声明的 `harness`）：只能从空设一次，已有值或已吊销为 409（`credential.assign`，记 `credential.assigned`，载荷 `{"harness"}`）；只对 worker、delegate。`POST /settings/tokens` 可带同一字段，在签发时给定；其他种类带它为 400。`GET /settings/tokens` 每条带 `harness`（空为未认领）与 `seen_harness`（该凭据最近一次事件里自报的 harness，没有时省略，只作认领推荐，不参与判定） | 只有 Web 登录 |
-| | `PUT /settings/agents/{harness}/grant` | 替换该 Agent 的长期授权单：同一事务撤销它名下现有的 `grantee.agent` 式有效单（撤销原因 `replaced`）并按请求体 `{grantee: {background}, scope, actions, expires_at?, reason?}` 签发新单，记 `grant.revoked` 与 `grant.issued`；`actions` 为空即只撤销。响应 `{"grant": 新单或 null, "revoked": [被撤销的单 id]}`；新单校验失败为 400，旧单不动 | 只有 Web 登录 |
+| | `PUT /settings/agents/{agent}/tier` | 设这个 Agent 的档位 `{"tier": "organize" \| "decide" \| "rules", "projects"?: [...], "version"?}`（3b）：`organize` 只整理，`decide` 另可拍板（`projects` 非空时只对这些项目），`rules` 另可改日常规矩；`version` 不符为 409。记 `policy.changed`（主文档 §14.3） | 只有 Web 登录 |
 | 认证 | `POST /auth/login`、`/logout` | Web 会话。连续失败的限速与锁定见主文档 §14.13，锁定期间返回 429 | |
 | | `POST /auth/password` | 改口令 `{current, new}`；新口令少于 12 个字符返回 400；成功后其他会话全部失效 | 只有 Web 登录 |
-| | `GET /auth/sessions`，`DELETE /auth/sessions/{id}`，`DELETE /auth/sessions` | 在线会话与吊销 | 只有 Web 登录 |
+| | `POST /auth/reauth` | 再输一次口令，请求体与登录相同：成功返回 204，当前会话在 10 分钟内可做 3b 动作；口令不对为 401，失败计入登录限速与锁定（主文档 §14.13） | 只有 Web 登录 |
+| | `GET /auth/sessions`，`DELETE /auth/sessions/{id}`，`DELETE /auth/sessions` | 在线会话与吊销；吊销是 3b，会话须刚输过口令 | 只有 Web 登录 |
 | 动作链接 | `GET /act/{item}?do=done\|progress\|plan` | 不属于 API：Web 的确认页地址，不带版本前缀，不含凭据；未登录时先登录再回到确认页（主文档 §4.1、§14.13） | Web 登录 |
 
 事项字段 `deadline`：`POST /items` 与 `PATCH /items/{id}` 可写，值为 RFC 3339 时间；`PATCH` 传 `null` 清除；`GET` 在已设置时返回。行为见主文档 §6.8。
@@ -249,9 +272,9 @@
 
 `POST /items/{id}/progress` 的请求体 `{"text": "…", "on": "YYYY-MM-DD"}`，`on` 可省略、不能晚于今天；成功返回 201 与这条进展，Event 为 `item.progress_added`。进展不改阶段，不推进 `version` 以外的字段。
 
-`GET /items` 返回 `last_rejections`（事项 id → 最近一次未处理的退出码 23 拒绝：`seq`、`at`、`actor`、`action`、`code`、`why`、`grant`），`GET /items/{id}` 返回 `last_rejection`；对未终结的事项给出：`needs_input`、`proposed` 在其后有回答或阶段变化前给出，`open`、`waiting` 在其后事项有任何变更前给出（被拒的写入不转阶段，主文档 §14.5）。被拒的写入从不生效。事项的 `ask` 可带 `code`、`params`（内核生成的问题的类别码与参数，主文档 §6.3）；agent 凭据写它们返回用法错误。`GET /audit/events` 可加 `grant=<授权单 id>` 查该授权单的签发、使用与撤销记录。
+`GET /items` 返回 `last_rejections`（事项 id → 最近一次未处理的退出码 23 拒绝：`seq`、`at`、`actor`、`action`、`code`、`reason`、`why`；旧模型留下的拒绝另带 `grant`），`GET /items/{id}` 返回 `last_rejection`；对未终结的事项给出：`needs_input`、`proposed` 在其后有回答或阶段变化前给出，`open`、`waiting` 在其后事项有任何变更前给出（被拒的写入不转阶段，主文档 §14.5）。被拒的写入从不生效。事项的 `ask` 可带 `code`、`params`（内核生成的问题的类别码与参数，主文档 §6.3）；agent 凭据写它们返回用法错误。`GET /audit/events` 可加 `grant=<授权单 id>` 查旧模型授权单的签发、使用与撤销记录（只读历史，主文档 §14.5）。
 
-`GET /audit/events?actor&object&type&grant&imported&limit` 返回 `{"events": [...]}`，缺省按 Event 序号升序，`after=<序号>` 取其后的一页，`limit` 缺省 100、上限 500。加 `order=desc` 改为最新的在前，`before=<序号>` 取序号小于它的一页（缺省从最新开始），游标是 Event 序号，与筛选组合时翻页稳定，不重复、不漏。`order` 取 `asc` 或 `desc`，其他值返回 400；`after` 只配升序、`before` 只配 `order=desc`，混用返回 400。Web 的操作记录页与授权单使用记录用 `order=desc`，CLI 与其他调用方沿用升序的 `after`，不受影响。
+`GET /audit/events?actor&object&type&grant&imported&limit` 返回 `{"events": [...]}`，缺省按 Event 序号升序，`after=<序号>` 取其后的一页，`limit` 缺省 100、上限 500。加 `order=desc` 改为最新的在前，`before=<序号>` 取序号小于它的一页（缺省从最新开始），游标是 Event 序号，与筛选组合时翻页稳定，不重复、不漏。`order` 取 `asc` 或 `desc`，其他值返回 400；`after` 只配升序、`before` 只配 `order=desc`，混用返回 400。Web 的操作记录页用 `order=desc`，CLI 与其他调用方沿用升序的 `after`，不受影响。
 
 事项字段 `created_at`、`updated_at`：`GET /items` 与 `GET /items/{id}` 返回，值为 RFC 3339 时间，只读。`created_at` 是该事项首条事项事件的时间（委派子事项的首条是 `delegation.created`，其余是 `item.created`）；`updated_at` 是最后一条事项事件的时间，与 `version` 同步推进（含关系变更；`item.deadline_passed` 与 `command.rejected` 不算）。
 
@@ -284,7 +307,7 @@
 
 `GET /source-events/restorable` 与 `POST /source-events/restore` 对应主文档 §9.3 的"补救旧级联误丢的事件"。`from`、`to` 必填，是 RFC 3339 时刻，按来源事件的落盘时间取左闭右开区间，`from` 不早于 `to` 返回 400；`source` 可选，不存在时返回 404。命中条件：处置为 `ignored`，最近一次处置由内核依判断结论写入（不是规则的 `ignore` 出口，也不是调用者的忽略），且没有判断记录。预览返回 200 `{"matched": n, "sources": [{"source", "count"}]}`，不写入。执行返回 200 `{"restored": n}`：每条命中的事件转 `unjudged`、`unjudged_reason` 为 `restored`，各记一条 `inbound.disposed`，操作者是调用者，载荷带原处置 `ignored` 与本次的 `from`、`to`；不调模型、不建事项。同一时间段再次执行时已放回的不再命中，返回 `{"restored": 0}`；可带 `Idempotency-Key`。`restored` 的事件只经 `/rules`、`/score`、`/rejudge` 重判，不参与自动重判，也不转 `expired`。
 
-`POST /proposals/batch` 的请求体二选一：`{"mode": "recommended", "filter": {"source"?, "project"?, "ids"?}}` 按推荐处理范围内带推荐的建议；或 `{"mode": "explicit", "actions": [{"id", "do": "accept" \| "attach" \| "dismiss", "to"?, "reason"?}]}`。响应 200 `{"results": [{"id", "do", "ok", "code"?, "why"?}]}`，每条各自成败、各记一条 Event；一次至多 200 条。delegate 调用时依据作用于整批，授权单逐条校验范围。
+`POST /proposals/batch` 的请求体二选一：`{"mode": "recommended", "filter": {"source"?, "project"?, "ids"?}}` 按推荐处理范围内带推荐的建议；或 `{"mode": "explicit", "actions": [{"id", "do": "accept" \| "attach" \| "dismiss", "to"?, "reason"?}]}`。响应 200 `{"results": [{"id", "do", "ok", "code"?, "why"?}]}`，每条各自成败、各记一条 Event；一次至多 200 条。每条按对应的单条命令（`proposal.accept`、`proposal.attach`、`proposal.dismiss`）判定，没有整批的门（主文档 §14.3）。
 
 `POST /items/{id}/attach` 的请求体 `{"to": "<事项 id>", "reason"?: "…"}`：建议转 `dropped`，它的来源事件改挂到目标事项，Event 为 `proposal.attached`；目标已终结返回 409，不存在返回 404（主文档 §7.2）。
 
@@ -292,7 +315,7 @@
 
 `GET /health` 返回 `{"healthy": bool, "signals": [...]}`，信号恒为十三项且顺序固定（主文档 §15.2）：`source_failures`、`outcall`、`delivery_backlog`、`chain_trips`、`agentsmd_drift`、`pack_rejections`、`model_unavailable`、`unjudged_backlog`、`rule_fallbacks`、`receipt_failures`、`other_alerts`、`stalled_delegations`、`clock_lag`。前十一项的 id 与顺序同 v0.1，后两项是 v0.2.0 追加的，都是 `warning`，不影响 `healthy`。每项 `{id, ok, count, severity?, why?, next, detail?}`；`severity` 只在异常时给出，取 `error` 或 `warning`。`unjudged_backlog` 是 `warning`，不影响 `healthy`；它的 `detail` 为 `{"model_unavailable": n, "models_paused": n, "outbound_unset": n, "undecided": n, "restored": n, "expired": n, "rejudge_days": n, "sources": [{"source", "count"}]}`，`undecided` 只统计 v0.1 留下的事件，`expired` 只作参考、不计入 `count`；`rejudge_days` 是运行配置 `unjudged_rejudge_days` 的值，`0` 表示自动重判与到期都关闭（主文档 §9.3），Web 据它说明积压会不会自动判断。`outcall` 的 `detail` 另带 `failures`：`[{"run", "target", "category", "fault"}]`，是仍为目标最近一次的失败的任务型与后台运行（24 小时内），计入 `count`。`receipt_failures` 另带 `receipts`：`[{"object", "command", "exit", "code"?, "credential"}]`，`code` 是拒绝的原因码（升级前的告警从同一对象紧挨着的 `command.rejected` 补上），不带原因原文；`detail` 仍是对象 id 列表。`source_failures` 的 `detail` 每项为 `{"source", "enabled", "consecutive_failures", "kind"?, "needs_input_item"?}`，只列当前连续失败或已停用的来源，最近一次拉取成功即不再出现；`kind` 是最近一次失败的类别（`transient`、`auth_or_config`、`permanent`，同来源统计的 `last_failure_kind`），Web 据 `auth_or_config` 说"要重新登录"；`needs_input_item` 只在升级前留下的认证失败事项仍未结束时给出，当前版本不再建这类事项。`other_alerts` 另带 `notices`：`[{"object", "rule"?, "code"?, "params"?, "item"?, "dropped"?}]`，每条是一条仍算现状的告警，`code` 取动作没能完成的类别码（`task_refused`、`background_refused`、`resume_refused`、`model_unset`、`models_paused`、`outbound_blocked`、`chain_tripped`、`action_rejected`、`action_failed`，主文档 §8.7），`params` 只放内核生成的机制值（`detail`；`action_rejected` 另带拒绝原因码 `code`），`item` 是受影响的事项，`dropped` 为真表示规则建的那一份已转 `dropped`；升级前的告警没有 `code`；`detail` 仍是对象 id 列表。`model_unavailable` 的 `detail` 为 `{"judge": s, "generate": s, "endpoint": s, "paused": b, "screening": [事项 id], "judgements": [{"kind", "object", "endpoint"}]}`，`judgements` 是尚未恢复的模型调用失败，`endpoint` 取 `judge` 或 `generate`，表示这次失败归哪个端点（判断型模板在配了判断端点时归 `judge`，否则与生成型一样归 `generate`）；`judge`、`generate` 各取空、`not_configured`、`failing` 或 `paused`；`endpoint` 是 v0.1 的字段，保留，取两者中较差的一个。本人暂停了模型时 `paused` 为 true，`judge`、`generate` 都是 `paused`，`endpoint` 为空，信号正常（主文档 §8.7）。
 
-`GET /items/{id}/messages` 返回 `{"messages": [...]}`，按落盘顺序。每条字段：`id`、`source`、`sender`、`sender_verified`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`attach_state`、`forward_allowed`（是否进转发白名单）。只读，不推进 `attach_state`。运行身份和 `unattended` 事项的 worker、observer 只拿到 `forward_allowed` 为真的消息；Web 登录和 delegate 拿到全部。web_only 初筛中的事项对非 Web 凭据返回空列表。事项不存在返回 404。`apa item show` 把这个列表合进输出的 `messages`。
+`GET /items/{id}/messages` 返回 `{"messages": [...]}`，按落盘顺序。每条字段：`id`、`source`、`sender`、`sender_verified`、`subject`、`summary`、`detail`、`link`、`occurred_at`、`attach_state`、`forward_allowed`（是否进转发白名单）。只读，不推进 `attach_state`。运行身份和 `unattended` 事项的 worker、observer 只拿到 `forward_allowed` 为真的消息；Web 登录和 delegate 拿到全部。事项不存在返回 404。`apa item show` 把这个列表合进输出的 `messages`。
 
 `GET /context?scope=item[&item=<id>]` 在普通字段外返回 `messages`：`[{"item": "...", "cursor": "12", "messages": [...]}]`，消息字段同 §9.4 的转发内容（不含 `attach_state`、`forward_allowed`）。`cursor` 只给负责者，回执时作为 `--ack-cursor` 带回。只有 `scope=item` 接受 `item` 参数，其他作用域带它返回 400。
 
@@ -300,7 +323,7 @@
 
 `POST /runs/{id}/credential` 不带请求体，成功返回 200：`{"run": "...", "token": "apa_run_…", "expires_at": "<RFC 3339>"}`。`token` 只出现这一次，不进幂等结果表。运行不存在返回 404，不是未结束的 `launch: wake` 后台运行返回 409，其他凭据返回 403。用 delegate token 换取时，同时为该 token 开唤醒租约（§13.6）。
 
-`GET /deliveries/next` 返回的投递：`content.recommend` 是决策的推荐选项，未给推荐时省略；`content.form_url` 是一次性表单链接，只出现在只能发文字的渠道上的非 web_only 决策里；`content.web_only` 为 `true` 表示这是 web_only 决策：内容只有标题、摘要与 `web_url`，不含 `options`、`recommend`、`form_url`，渠道只发 Web 链接、不渲染可点选项，也不要把回答转达给 `POST /deliveries/{id}/answer`（内核拒绝并回 Web 链接）；内核按事项的风险类别在写入投递时填写，初筛升级后产生的新版本投递同样带它；`run` 只出现在唤醒类投递上。规则 `alert` 出口的提醒没有事项：`item` 为空，带 `origin`（`{source_event, rule, source}`，触发它的来源事件、规则 id 与来源 id），`content` 取来源事件的标题、摘要与链接，不带选项；`notify_urgent` 规则的紧急建议提醒同样没有事项，投递 id 等于建议事项 id，`origin` 另带 `item`（这条建议），`content` 是建议的标题、摘要、起草理由与指向它的 Web 链接；渠道 ext 须能处理空的 `item`（主文档 §6.9）。
+`GET /deliveries/next` 返回的投递：`content.recommend` 是决策的推荐选项，未给推荐时省略；`content.form_url` 与 `content.web_only` 是旧模型的字段，协议里保留，内核恒不填（一次性表单与 web_only 类别已取消，主文档 §14.4）；只能发文字的渠道在决策投递里只发 `web_url`，本人点开后登录作答；Agent 替本人回答问题后，内核另投一条提醒类投递（`class` 为 `reminder`），标题与摘要写明替答的问题与所选选项，`web_url` 指向"Agent 改动"页，不带选项（主文档 §14.3）；`run` 只出现在唤醒类投递上。规则 `alert` 出口的提醒没有事项：`item` 为空，带 `origin`（`{source_event, rule, source}`，触发它的来源事件、规则 id 与来源 id），`content` 取来源事件的标题、摘要与链接，不带选项；`notify_urgent` 规则的紧急建议提醒同样没有事项，投递 id 等于建议事项 id，`origin` 另带 `item`（这条建议），`content` 是建议的标题、摘要、起草理由与指向它的 Web 链接；渠道 ext 须能处理空的 `item`（主文档 §6.9）。
 
 `/settings/policy` 的 `channels` 段是渠道的登记属性：`{"<渠道名>": {"text_only": true}}`。`persona_lang` 段是助手说哪种语言：`"zh"`、`"en"`，空串为跟随系统（默认；旧策略版本没有这个键，读作空串），其他值 400。兼容模式的 `default_harness` 段是规则未指定 harness 时任务型与后台运行用的 harness，值为 harness 名，空串表示未设置（主文档 §13.6）。`main_session_launch` 段是以 Agent 本人身份做事时的拉起方式：`{"by_harness": {"<harness>": "<方式>"}, "by_rule": {"<规则键>": "<方式>"}}`，方式取 `headless` 或 `wake`，没有的键表示没选，其他值 400；取值顺序是规则、Agent、声明初始值、无头（主文档 §13.6）。旧策略版本没有这个段，读作两份空表。`disturb` 段在 v0.2.0 新增三个键，旧键不变：`daily_cap`（整数，默认 20，`0` 不限）、`mutes`（`[{"scope": "source" \| "project" \| "item", "id", "until"?}]`）、`followup_defer`（布尔，默认 `false`）；`threshold_judge` 保留，含义改为"是否开启投递推迟判定"（主文档 §7.4）。
 
@@ -309,7 +332,6 @@
 ```json
 {"judge_endpoint": {"url": "…", "api_key": "…", "protocol": "system-one", "model": "…", "locality": "external", "timeout_ms": 10000, "max_batch": 32, "max_material_chars": 8000},
  "generate_endpoint": {"url": "…", "api_key": "…", "protocol": "chat-completions", "model": "…", "locality": "external", "max_material_chars": 24000},
- "screening_timeout_ms": 30000,
  "models_paused": false}
 ```
 
@@ -333,17 +355,18 @@
 | `model_endpoint` | `models_paused`、`models_none`、`models_ok`、`models_failing` | 同 `POST /settings/model-endpoints/test` 的 `code`，另有 `not_configured`、`no_client` | 同测试连接 |
 | `sources` | `sources_none`、`sources_ok`、`sources_attention`、`sources_restored_missing` | `source_ok`（`data.last_run` 为 `ok`、`never`、`unreadable`）、`source_command_missing`、`source_outbound_unset`、`source_outbound_full`、`source_last_failed`、`source_tool_timeout`、`source_tool_version`、`source_tool_missing`、`source_tool_config`、`source_tool_failed`、`source_creds_missing`、`source_webhook_key_missing` | 检查一级 `count`；对象一级 `enabled`、`type`、`command`、`outbound`、`last_run`、`consecutive_failures`、`last_success_at`、`last_failure_at`、`tool`、`problems` |
 | `packs` | `packs_no_loader`、`packs_ok`、`packs_rejected` | `pack_rejected` | 检查一级 `loaded`、`rejected`；对象一级 `source`、`in_effect` |
-| `host_plugin` | `host_none`、`host_ok`、`host_attention` | `host_ready`、`host_ready_no_selfcheck`、`host_headless_missing`、`host_selfcheck_failed`、`host_no_session_kind`、`host_hook_missing` | `last_call_at`、`plugin_version`、`missing_hooks`、`problems` |
+| `host_plugin` | `host_none`、`host_ok`、`host_attention` | `host_ready`、`host_ready_no_selfcheck`、`host_headless_missing`、`host_selfcheck_failed`、`host_hook_missing` | `last_call_at`、`plugin_version`、`missing_hooks`、`problems` |
 | `overlaps` | `overlaps_skipped`、`overlaps_none`、`overlaps_found` | `overlap` | `harness`、`kind`、`name` |
 | `channels` | `channels_none`、`channels_ok`、`channels_backlog` | `channel_ok`、`channel_backlog`、`channel_orphan`、`export_ok` | `kind`、`backlog`、`last_seen_at` |
 | `secrets` | `secrets_none`、`secrets_ok`、`secrets_key_missing`、`secrets_key_mode`、`secrets_unreadable` | — | `rows`、`unreadable`、`other_key`、`key_file`、`mode` |
 | `connections` | `connections_none`、`connections_ok`、`connections_problem` | `connection_ok`、`connection_problem`、`connection_disabled` | 检查一级 `count`；对象一级 `direction`、`type`、`name`、`enabled`、`problem`、`last_ok_at`、`missing_credentials` |
+| `authz` | `authz_switched`、`authz_not_switched`（`error`：策略里仍有旧模型的段，或还没切换且仍有有效授权单，主文档 §16.5） | — | `switched`、`legacy_policy`、`active_grants` |
 
 `apa doctor` 在数据目录不可读或数据结构与二进制不符时只做前两项，其余各项为 `warning`，`code` 为 `skipped`，`data.reason` 取 `ledger_unreadable` 或 `ledger_schema_differs`。升级预检（`--upgrade-check`）的专用项只在 CLI 输出，不带 `code`。
 
 两条路由的密钥规则相同：`api_key` 显式给出时照用，`""` 表示不带；省略或为占位 `***` 时沿用该端点已存的密钥，但只在请求的 URL 与已存 URL 同源（scheme、主机、端口相同）时沿用，否则返回 400，要求重新输入密钥。
 
-v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_timeout_ms"}}` 在本版仍被 `PUT` 接受：等同只设置 `generate_endpoint`（`locality` 记为 `external`），`screening_timeout_ms` 提到顶层，判断端点不变；响应一律是新形状。下一个次版本起不再接受旧形状。
+v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_timeout_ms"}}` 在本版仍被 `PUT` 接受：等同只设置 `generate_endpoint`（`locality` 记为 `external`），`screening_timeout_ms` 随初筛取消而被忽略，判断端点不变；响应一律是新形状。下一个次版本起不再接受旧形状。
 
 `/settings/judgment`：`{"bands": [{"template", "source"?, "low", "high"}], "shadow": ["<模板>"], "spot_check": {"per_brief": 5}}`。`bands` 覆盖能力包声明的不确定带，带 `source` 的条目优先；`low` 大于 `high` 返回 400。每次修改是一次策略变更，记 `policy.changed`（主文档 §8.10）。
 
@@ -408,11 +431,10 @@ HTTP 200 返回登记过的现场事件，按 `seq > cursor` 升序排列，允�
 ```
 
 - `why` 与 `next` 只写机制，不含账本里的用户内容。`allowed` 是 Web 中配置的执行者 id。本版另加：`allowed_match`（按机器或 harness 的匹配规则）与 `candidates`（名录里当前命中名单的执行者 id）。
-- `reason`（可缺）：同一个 `code` 之下更细的稳定原因。退出码 23 因授权单不可用时给出：`grant_screening_pending`（事项上有初筛未返回的决策请求，先处理那张卡或稍后再试，同一张单随即可用；`web_url` 指向该事项页）、`grant_risk_ceiling`（对象属 web_only）、`grant_not_for_background`、`untrusted_origin`、`untrusted_trigger`。同一取值记进 `command.rejected` 与回执告警的载荷，`last_rejection(s)` 与 `GET /health` 的 `receipt_failures.receipts` 也带它。只增字段，按 `code` 判断的调用方不受影响。
+- `reason`（可缺）：同一个 `code` 之下更细的稳定原因。权限拒绝只有三种口径（主文档 §14.3）：`hard_line`（`code` 为 `web_only`，退出码 20：3b 或系统内部动作，只有本人在 Web 做，与档位无关）、`tier_closed`（`code` 为 `tier_closed`，退出码 23：该 Agent 的档位没放开这一档）、`out_of_scope`（`code` 为 `permission_denied`，退出码 4：钥匙范围外）；Web 会话做 3b 而没刚输过口令时 `code` 与 `reason` 都是 `reauth_required`（退出码 20）。拒绝的 `web_url` 落在该动作所在的页面。同一取值记进 `command.rejected` 与回执告警的载荷，`last_rejection(s)` 与 `GET /health` 的 `receipt_failures.receipts` 也带它。旧模型的原因 `grant_screening_pending`、`grant_risk_ceiling`、`grant_not_for_background`、`untrusted_origin`、`untrusted_trigger` 不再产出，只出现在旧的拒绝记录里。
 - 委派记录与执行者句柄未通过校验时返回 400（退出码 2），`why` 只写键路径与规则名，不回显取值（主文档 §6.17）。
-- HTTP 状态与退出码的对应：400 → 2；401 → 3；403 → 4、20、21、22（由 `code` 区分）；404 → 5；409 → 6；其余错误 → 1。不可达时 CLI 返回 7。
-- 退出码 22 的 `code` 为 `risk_screening_pending`，`why` 说明 web_only 初筛未返回，`web_url` 给出 Web 链接（主文档 §14.4）。
-- 退出码 23 在 v0.2.0 新增一个原因：`code` 为 `session_not_direct`，`why` 说明会话不是与本人的私聊，`web_url` 给出 Web 链接（主文档 §14.5）。HTTP 状态与其他依据不足的情况相同。
+- HTTP 状态与退出码的对应：400 → 2；401 → 3；403 → 4、20、21、23（由 `code` 区分）；404 → 5；409 → 6；其余错误 → 1。不可达时 CLI 返回 7。
+- 退出码 22（`risk_screening_pending`）与退出码 23 的旧码 `basis_required`、`session_not_direct` 属于已取消的初筛与本人原话机制（主文档 §14.4、§14.5），内核不再产出，取值保留为只读的历史值。
 - 登录被限速或锁定时 `POST /auth/login` 返回 429，`code` 为 `login_locked`，带 `Retry-After`。
 - 本人暂停了模型时，需要模型的本人操作（积压的影子打分与放开重判）返回 409，退出码 6，`code` 为 `models_paused`，`next` 提示到"设置 › 模型"恢复（主文档 §8.7）。
 - 退出码 23 的原因 `grant_required`、`import_source_mismatch`、`import_limit_exceeded` 只为 `import.apply` 产出；导入已取消（主文档 §7.1），内核不再产出，取值保留为只读的历史值，只出现在旧的拒绝记录里。
@@ -439,7 +461,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 `import.completed`。
 
-连接登记的事件（连接的新建、改配置、启用、停用、改名、删除）是内部类型，不进订阅流，不在本表。
+连接登记的事件（连接的新建、改配置、启用、停用、改名、删除）是内部类型，不进订阅流，不在本表。权限模型切换（主文档 §16.5）记一条内部事件 `authz.switched`（对象 `authz`，载荷是每一步的计数与明细），同样不进订阅流。`grant.issued`、`grant.revoked` 保留在本表：授权单取消后内核只在切换时写 `grant.revoked`，此后不再写入。
 
 已有类型的信封不变；工作台能力迭代给信封新增两个可选字段 `imported`、`recorded_at`（只出现在导入事件上，而导入事件不进订阅流，所以订阅方看不到它们）；入站处置类事件的载荷新增可选的 `material`（这次调用送出的资料字符数、裁剪前的字符数与裁剪方式）；`delegation.reported` 的证据新增可选的 `links[]`。`item.updated` 的载荷新增可选的 `planned_for`，入站处置类事件的载荷新增可选的 `judgment`（判断记录 id）。v0.1 写下的 `run.finished`（`category: judge`）仍可回放，新的判断不再产生它（主文档 §8.6）。
 
@@ -467,7 +489,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 数据目录与备份 | 无主密钥 | `master.key`（0600）在升级后第一次启动时生成；`apa backup create` 默认带上，`--no-secrets` 不带并列入待办记录 | 恢复不带主密钥的备份时服务照常启动，连接显示要重新填写凭据 |
 | 渠道 ext 的名字 | 任意 | 不能以 `ch-` 开头（留给内置渠道连接的路由） | 已签发的密钥不受影响；新签发时拒绝这个前缀 |
 |---|---|---|---|
-| 凭原话的第二档命令 | 只要求原话与会话引用非空 | 另要求 `X-APA-Session-Kind: direct` | 没有兼容期：缺这个头即退出码 23。harness 插件须与内核一同升级 |
+| 凭原话的第二档命令 | 只要求原话与会话引用非空 | 另要求 `X-APA-Session-Kind: direct` | 没有兼容期：缺这个头即退出码 23。harness 插件须与内核一同升级。**已取消（2026-11-20）**：本人原话与会话类型不再参与判定，见本表末行 |
 | `/settings/model-endpoints` | 一个 `model_endpoint` | `judge_endpoint`、`generate_endpoint`、顶层 `screening_timeout_ms` | 本版 `PUT` 仍接受旧形状；已存的策略版本不改写，读取时等同 `generate_endpoint` |
 | `GET /health` 的信号数 | 十一项 | 十三项，末尾追加两项 | 前十一项的 id 与顺序不变；按下标取信号的调用方不受影响，按总数断言的要改 |
 | 问题与事件分离（主文档决定 81） | 运行故障与被拒的代理写入把 `open`、`waiting` 事项转 `needs_input` 并挂内核问题（被拒的写入是单选项"继续"）；问题可以只有一个选项；授权单只在显式携带时生效 | 运行故障不转阶段，`run.finished` 载荷另带 `recorded`、`fault`，`GET /health` 的 `outcall` 计入并列出 `failures`；被拒的写入不转阶段，`last_rejection(s)` 对 `open`、`waiting` 也给出并带 `action`；写入问题须至少两个选项或 `free_text`，否则用法错误（退出码 2）；`ask` 只增 `code`、`params`，`Run` 只增 `fault`，回执告警载荷只增 `code`，`receipt_failures` 只增 `receipts`；delegate 与运行凭据没带 `--grant` 且原话依据不成立时，内核按被授权方找可用的授权单 | 不改账本结构、不迁移：旧记录没有新字段时按旧格式读，故障类别码按已存的终态、退出码与失败附注算出。升级后首次启动把仍未回答的 `system:proxy-rejection` 单选项问题降级为通知（回到原阶段、去掉问题、记 `item.phase_changed`，不写回答）。写单选项问题的客户端要补第二个选项或 `free_text`；按"被拒后转 `needs_input`"断言的调用方要改；带 `--grant` 的调用不受影响 |
@@ -484,7 +506,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 来源的显示名 | 无；Web 显示来源 id | `name` 总有值：登记时给定或取来源程序的接入声明；都没有时登记被拒（400），重名的登记与改名返回 409 | 只增字段与列（`sources_registry` 迁移 3，账本结构版本 3 → 4）。已有来源在 `apa serve` 启动时补名：先按接入声明，没有声明的按类型起名并记一条健康说明，逐个记 `source.renamed`（操作者 system），不触发判断、重判或健康说明以外的投递。**调用方要改的**：登记仓库之外的来源程序（自定义脚本、自建拉取程序、非自带类型的 webhook）以前可以不带名字，现在必须带 `name` / `--name`，否则 400；同一程序登记多个实例而声明给出同名时（如两个 RSS 订阅）要显式起名。迁移后旧二进制拒绝打开账本（结构版本更高），回退要用升级前快照，见主文档 §16.5 |
 | 规则初始模式 | 一律 `observe` | 提醒类 `auto`，动作类 `observe` | 升级时未动过的内置提醒类规则切到 `auto` 并记 Event（主文档 §16.5） |
 | 执行者与委派（主文档 §6.17） | 执行者由本人在 Web 手填或确认插件声明后进入清单；`assignee` 不在清单里返回 5；确认声明时覆盖该 harness 的全部条目；名单只按 id；挂靠消息只对 `assignee` 推进 | harness 随 `apa delegate --executor` 登记，身份字段固定；不在名录里也可指派；确认声明并入名录、不删除；新增委派记录（`apa dispatch`、`/items/{id}/dispatches`、`/dispatches`）与 `apa context --scope item` 的 `history`；名单可按机器或 harness 匹配（`allowed-executors` 的请求与返回加 `match`）；21 的返回体加 `allowed_match`、`candidates`；发起委派的凭据与运行身份对目标的委派子事项也能推进挂靠消息并拿到确认游标；删除 `GET /settings/executors`（读名录改用 `GET /executors`）与 Web 设置里的手填表单；`DELETE /settings/executors/{id}` 改为 `DELETE /executors/{id}`；`POST /settings/executors`（`executor.put`）保留为只 Web 登录、无界面的本人维护入口（如登记交给人的执行者） | 只增列与表（账本结构版本 4 → 5），已有条目、声明与名单原样保留，名单判定不变。**调用方要改的**：依赖"未登记返回 5"的调用方改为自己先查 `GET /executors`；用 `/settings/executors` 读名录的改用 `GET /executors`。带调用表的旧插件仍可委派，只是不写委派记录。删除的路由与 Web 切换在同一次改动里完成 |
-| 授权单的被授权方与有效期 | `grantee.credential` 必填；`expires_at` 必填，不超过 90 天；运行凭据带 `--grant` 一律退出码 4 | 另可 `grantee.agent`（按内核记录的 harness 匹配）与 `background`；`scope.all`；`expires_at` 可选（不设即长期）；允许后台使用的单对该 Agent 的运行凭据生效，不符时退出码 23（原 4） | 已签发的单原样生效。按"运行凭据带单为 4"断言的调用方改为 23。见主文档 §6.13、§14.5 |
+| 授权单的被授权方与有效期 | `grantee.credential` 必填；`expires_at` 必填，不超过 90 天；运行凭据带 `--grant` 一律退出码 4 | 另可 `grantee.agent`（按内核记录的 harness 匹配）与 `background`；`scope.all`；`expires_at` 可选（不设即长期）；允许后台使用的单对该 Agent 的运行凭据生效，不符时退出码 23（原 4） | 已签发的单原样生效。按"运行凭据带单为 4"断言的调用方改为 23。见主文档 §6.13、§14.5。**已取消（2026-11-20）**：授权单整套取消，见本表末行 |
 | 来源事件的 `sender_verified` | 来源程序逐条自报 | 以来源程序的接入声明为上限，没有声明的程序按需确认（恒为假）；声明为"不带发件人"的事件类型清空 `sender` | 已落盘的事件不改写。自定义脚本与 webhook 转换脚本以前自报为真的，之后按未核实处理，转发白名单对它们不再生效（主文档 §9.1） |
 | 代码托管来源的事件 | `*.updated`、`*.closed`、`*.merged` 的 `sender` 为对象作者 | 这些类型不带 `sender`；新增评论事件 `issue.commented`、`pr.commented`、`pr.review_commented`（webhook 另有 `pr.reviewed`），带已核实的评论作者 | 已落盘的事件不改写。按事件类型匹配的用户规则若要处理评论，需加上新类型（附录 D.4） |
 | 渠道回答人 | 即时通讯渠道 ext 优先报用户名 | 一律报平台用户 ID | 写着用户名的旧条目不再匹配，本人在"设置 › 渠道"识别一次 ID（主文档 §16.5） |
@@ -507,7 +529,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 来源规则的 `prescreen` | 值是提示词模板名 | `none` 是保留字，表示跳过预筛 | 用户包里名为 `none` 的提示词模板在加载时被拒绝，改名即可 |
 | webhook 映射产出的事件 | 映射没写 `detail` 时原始 payload 只在接收记录里，30 天后清除 | 请求体另作为事件原文的 `original` 部分永久保存 | 只增；已落盘的事件不补。请求体上限成为运行配置 `max_webhook_body_mb`，默认值与此前写死的 1 MiB 相同 |
 | 事件日志与订阅流 | 每条事件只有一个时刻 `at` | 新增可选的 `imported`、`recorded_at`；带 `imported` 的事件不进订阅流、注入增量与规则 | 只增字段；已有事件没有这两个字段，即普通事件。不导入就没有任何变化 |
-| 授权单可授权的动作 | 不含 `item.progress`（文档此前已列，实现未放行）；没有导入 | 加入 `item.progress`；不含 `import.apply`（导入已取消，见下一行） | 已签发的单内容不可改，不会因此多出权限 |
+| 授权单可授权的动作 | 不含 `item.progress`（文档此前已列，实现未放行）；没有导入 | 加入 `item.progress`；不含 `import.apply`（导入已取消，见下一行） | 已签发的单内容不可改，不会因此多出权限。**已取消（2026-11-20）**：授权单整套取消，见本表末行 |
 | 带原始时间的导入（已取消，2026-11-20） | 工作台能力迭代曾提供 `import.apply`、`POST /import`、`GET /imports`、`apa import`、Web "设置 › 导入"与导入专用授权单 | 全部删除：`POST /import`、`GET /imports` 返回 404，`apa import` 为未知命令（退出码 2），签发带 `import` 段或 `import.apply` 的授权单返回 400（主文档 §7.1、决定 83） | 账本结构不变：导入批次表、对照表、`policy_grant.used_records`、事件的 `import_batch`、`recorded_at` 与事项的 `imported` 只读保留、不再写入；旧的导入专用单读出时原样带回 `import` 段，不放行任何命令；`import.completed` 与三个导入原因码保留为只读的历史值。按 `origin` 查询照常可用 |
 | 回执的链接 | `--link` 一个 | 可多个；库内链接在报 `done` 时自动登记为产出 | 只给一个时行为同前，证据里的 `link` 字段不变，另增 `links[]`。未登记任何笔记库的部署没有自动登记 |
 | 材料的形态 | 两种，由有没有仓库位置区分 | 三种，新增只读字段 `form`；`POST /materials` 带 `link` 时登记链接型 | 只增；已有材料的 `form` 在读取时推定，不改写 |
@@ -520,3 +542,4 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 随发行附带的导出 ext 与 webhook 转发 ext | 发布包的 `ext/` 下附带 | 不再附带，需要的人自己写客户端接对外接口（主文档决定 79） | 导出与转发密钥、事件订阅、只读 API 与 ext 协议不变；已在运行的旧版程序照常可用，无需迁移 |
 | `apa connection list --direction` 与连接的方向 | 取值 `channel`、`output` | 只接受 `channel`；`output` 返回用法错误（退出码 2）。`GET /connections?direction=output` 返回空列表 | 从未有过输出类型的连接，账本里没有方向为 `output` 的连接记录或事件，无需迁移；`direction` 列保持原样（只增不改） |
 | 生成端点的资料长度 | 资料原样拼进提示词，没有预算 | 受 `generate_endpoint.max_material_chars` 约束（默认 24000），超出时裁剪并留痕 | 已存的策略版本没有这个键，读作默认值，不改写 |
+| 权限模型第二版：三档与硬线（2026-11-20，主文档 §14、决定 84） | 四档代理授权：第一档凭对象绑定；第二档凭本人原话（`--evidence`、`X-APA-Evidence`）加会话引用与会话类型（`X-APA-Session-Kind: direct`），或授权单（`--grant`、`X-APA-Grant`，另有自动匹配）；只接受本人原话的管理命令；web_only 类别与模型初筛（退出码 22）；问题的超时默认选项（`default_on_timeout`）；一次性表单回答；材料按类别"直接写"（策略段 `material_write`）；本人只在 Web | 每条命令固定一档（B.1 三档表）：一档永远开；二档、3a 按 Agent 的档位（策略段 `agent_tier`，经 `PUT /settings/agents/{agent}/tier`）；3b 永不放开，只在 Web 且会话须刚输过口令（`POST /auth/reauth`，登录后 10 分钟内视为刚输过）；拒绝只有 `hard_line`（20）、`tier_closed`（23）、`out_of_scope`（4）三种；本人另可经已配对渠道、回答人名单内的账号回答内核投出的那张卡。删除：`apa grant list`（"列出调用者能用的有效授权单"）、全局 `--evidence` 与 `--grant`、`apa ask --default-on-timeout`、`GET /grants`、`/settings/grants`（签发与撤销）、`PUT /settings/agents/{harness}/grant`（替换 Agent 的长期授权单）、`POST /forms/{一次性令牌}`（一次性表单回答）、命令 `channel.form_answer`、`grant.issue`、`grant.list`、`grant.replace`、`grant.revoke`、`proposal.batch`（批量改为逐条调用单条命令）、策略段 `web_only`、`material_write`、`screening_timeout_ms`（`PUT` 带它们为 400）、自检码 `host_no_session_kind`。新增：`apa authz preview`、`POST /auth/reauth`、`PUT /settings/agents/{agent}/tier`、`GET /audit/rule-changes` 与两条撤回路由、`GET /agents` 的 `tier` 与 `tier_projects`、事件 Basis 的 `via`、`command`、`tier`、`agent`、自检项 `authz`；改动：`GET /forms/{令牌}` 改为 302 到 `/decisions`；`DELETE /auth/sessions*` 要求刚输过口令；新建材料一律直接生效，改已有材料看 Agent 档位，规范类恒留待确认；Agent 替本人的回答记 `resolved_via: agent` 并另推一条提醒 | 不改账本结构（结构版本仍为 9）、不改写旧行。**迁移**：新版本的 `apa serve` 第一次启动时在一个事务里自动切换一次（主文档 §16.5）：撤销全部有效授权单（原因 `permission model switch`，记 `grant.revoked`）；写一个不含 `web_only`、`screening_timeout_ms`、`material_write` 的新策略版本，并为每个现有 Agent 显式写 `organize`（只整理），记 `policy.changed`；清除未答问题上的初筛标记、风险类别与超时默认，并取消它们的超时定时；记 `authz.switched`。切换前可用 `apa authz preview` 在快照上预演。旧数据只读保留：`policy_grant` 表、旧事件里的原话、会话引用、会话类型、`grant`、`on_behalf_of`、`channel_form` 表、旧策略版本都不删不改。旧客户端带来的 `X-APA-Evidence`、`X-APA-Grant`、`X-APA-Session-Kind` 与 `--evidence`、`--grant` 被忽略，不报错也不采信；请求体里的 `default_on_timeout` 返回 400。**调用方要改的**：按"带原话或授权单即放行"写的插件与提示词改为按档位处理 23；需要 3b 的自动化改为给出设置页链接。**回退**：旧二进制能打开同一结构版本的账本，但切换写入的策略版本缺少旧模型必需的段，旧二进制按它运行会出错；回退等于恢复切换前的账本备份，切换后写入的数据会丢 |

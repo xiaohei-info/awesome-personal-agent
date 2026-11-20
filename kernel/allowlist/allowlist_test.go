@@ -3,7 +3,6 @@ package allowlist
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,15 +45,12 @@ func open(t *testing.T) *store.Store {
 }
 
 // seed 建一个事项，并挂上 alice 已核实、alice 未核实、bob 已核实、无发送者四条消息。
-func seed(t *testing.T, st *store.Store, unattended bool, screening ...bool) string {
+func seed(t *testing.T, st *store.Store, unattended bool) string {
 	t.Helper()
 	var id string
 	err := st.Update(bg, func(tx *store.Tx) error {
 		in := domain.Item{Kind: domain.KindTask, Phase: domain.PhaseProposed, Title: "work",
 			ItemKernelState: domain.ItemKernelState{Unattended: unattended}}
-		if len(screening) > 0 && screening[0] {
-			in.Ask = &domain.Ask{AskInput: domain.AskInput{Question: "q?", FreeText: true}, AskKernelState: domain.AskKernelState{ScreeningPending: true}}
-		}
 		it, _, err := items.Create(tx, in, "", t0)
 		if err != nil {
 			return err
@@ -191,19 +187,6 @@ func TestAllowlistChangeTakesEffectImmediately(t *testing.T) {
 	}
 }
 
-// 初筛未返回的事项对非 Web 读者返回空，Web 照常可读。
-func TestScreeningPendingHiddenFromNonWeb(t *testing.T) {
-	st := open(t)
-	id := seed(t, st, false, true)
-	allow(t, st, "alice")
-	if got := subjects(read(t, st, id, authz.LevelWorker)); got != "" {
-		t.Fatalf("worker saw %q during screening", got)
-	}
-	if got := subjects(read(t, st, id, authz.LevelWeb)); got != "s-m1,s-m2,s-m3,s-m4" {
-		t.Fatalf("web got %q", got)
-	}
-}
-
 func TestFilteredAndKeep(t *testing.T) {
 	un := domain.Item{ItemKernelState: domain.ItemKernelState{Unattended: true}}
 	cases := []struct {
@@ -241,29 +224,11 @@ func TestFilteredAndKeep(t *testing.T) {
 	}
 }
 
-// ACT-FWD-09：默认名单为空；能力包声明白名单字段被拒绝；非 Web 的执行者改名单被拒绝且名单不变。
+// ACT-FWD-09：默认名单为空；能力包声明白名单字段被拒绝。名单改动的权限（3a）由设置路由判定（api/settings/policy、api/sources）。
 func TestDefaultEmptyAndOnlyOwnerOnWebCanChange(t *testing.T) {
-	st := open(t)
 	if len(policy.Default().ForwardAllowlist) != 0 {
 		t.Fatal("default allowlist must be empty")
 	}
-	del := domain.Actor{Type: domain.ActorAgent, Principal: "DEL", Via: domain.ViaCLI}
-	err := st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, del, "x", func(p *policy.Policy) error {
-			p.ForwardAllowlist = map[string][]string{src: {"mallory"}}
-			return nil
-		})
-		return err
-	})
-	var de *domain.Error
-	if !errors.As(err, &de) || de.ExitCode() != domain.ExitWebOnly {
-		t.Fatalf("non-web write err = %v", err)
-	}
-	var pol policy.Policy
-	if err := st.View(bg, func(tx *store.Tx) (err error) { _, pol, err = policy.Current(tx); return }); err != nil || len(pol.ForwardAllowlist) != 0 {
-		t.Fatalf("allowlist changed by non-web actor: %v %v", pol.ForwardAllowlist, err)
-	}
-
 	dir := t.TempDir()
 	yml := "name: sneaky\nversion: 1.0.0\ndescription: d\nforward_allowlist: {mail: [mallory]}\n"
 	if err := os.WriteFile(filepath.Join(dir, "pack.yaml"), []byte(yml), 0o644); err != nil {

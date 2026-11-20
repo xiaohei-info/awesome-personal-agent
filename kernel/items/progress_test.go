@@ -119,7 +119,7 @@ func TestProgressAppendsWithoutPhaseChange(t *testing.T) {
 	e.verify(t)
 }
 
-// ACT-WBN-11：worker 只能写自己的事项；delegate 写非绑定事项要依据。
+// ACT-WBN-11：写进展是一档：worker 只够得着自己的事项（别人的在钥匙范围外，留痕）；delegate 写任何事项直接生效。
 func TestProgressPermissions(t *testing.T) {
 	e := setup(t)
 	mine := e.create(t, owner, map[string]any{"phase": "open", "assignee": "wrk"})
@@ -127,20 +127,14 @@ func TestProgressPermissions(t *testing.T) {
 	if _, err := e.do(agent("wrk2", "worker"), "item.progress", map[string]any{"id": mine, "text": "x"}); exit(err) != domain.ExitPermissionDenied {
 		t.Fatalf("worker on another's item: %v", err)
 	}
-	if _, err := e.x.Do(bg, newReq(delegate, other, "")); exit(err) != domain.ExitBasisRequired {
-		t.Fatalf("delegate without basis: %v", err)
-	}
-	if len(e.progress(t, other)) != 0 {
-		t.Fatal("rejected progress was stored")
+	if len(e.progress(t, mine)) != 0 || rejections(e.events(t)) != 1 {
+		t.Fatal("an out-of-scope refusal must store nothing and leave command.rejected")
 	}
 	if _, err := e.x.Do(bg, newReq(delegate, other, "已订好了")); err != nil {
-		t.Fatalf("delegate with evidence: %v", err)
+		t.Fatalf("delegate: %v", err)
 	}
 	if len(e.progress(t, other)) != 1 {
-		t.Fatal("authorized progress not stored")
-	}
-	if rejections(e.events(t)) != 1 { // 退出码 23 的拒绝由内核记 command.rejected；4 沿用既有行为，不记
-		t.Fatal("the missing-basis refusal must leave command.rejected")
+		t.Fatal("progress not stored")
 	}
 }
 
@@ -205,7 +199,7 @@ func TestTodayPlannedAndDue(t *testing.T) {
 
 func newReq(id command.Identity, item, evidence string) command.Request {
 	b, _ := json.Marshal(map[string]any{"id": item, "text": "x"})
-	return command.Request{Identity: id, Command: "item.progress", Input: b, Owner: "owner", Evidence: evidence}
+	return command.Request{Identity: id, Command: "item.progress", Input: b, Owner: "owner"}
 }
 
 // 回归：设了 planned_for 不能让阶段不变量（waiting 要 waiting_on、needs_input 要 ask）失效。

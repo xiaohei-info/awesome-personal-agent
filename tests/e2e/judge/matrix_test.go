@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/tests/doubles/modelstub"
-	"github.com/xiaohei-info/awesome-personal-agent/tests/e2e/baseline"
 )
 
 // §8.9 表逐格验收：每个用途（模板）× 低于下限 / 不确定带内 / 高于上限 / 各级未定 / 端点都不可用，
@@ -22,14 +21,13 @@ const (
 	capMark   = "cap-matrix"
 	deferQ    = "这条决策可以晚点送吗"
 	fuDeferQ  = "这一轮提醒可以晚点提吗"
-	screenQ   = baseline.ScreeningPhrase
 	extractOK = `{"candidates":[{"title":"matrix 抽取出的事项","kind":"task"}]}`
 )
 
 func (f *fx) workTask(title string) string {
 	f.t.Helper()
 	r := f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", f.Projects["acc-work"], "--evidence", "建任务")
+		"--project", f.Projects["acc-work"])
 	return jsonMap(f.t, r.Stdout)["id"].(string)
 }
 
@@ -130,38 +128,6 @@ func TestMatrixCapturePrescreen(t *testing.T) {
 	})
 }
 
-// ---- web-only-screening：下限 0.20，single_shot ----
-
-func TestMatrixWebOnlyScreening(t *testing.T) {
-	f := setup(t)
-	f.webOK("PUT", "/settings/policy", `{"disturb":{"routes":{"brief":"inject","decision":"channel:acc-chan","health":"web","reminder":"inject","wake":"web"},"merge_window_sec":0,"remind_on_deadline":true}}`, 200)
-	cell := func(name string, setup func(), wantWebOnly bool) {
-		f.step(t, name, func(t *testing.T) {
-			f.reset()
-			setup()
-			id := f.workTask("scr-" + strings.Fields(name)[0])
-			f.ask(id)
-			f.waitFor("初筛结束", 60*time.Second, func() bool {
-				p, _ := sub(f.webItem(id), "ask")["screening_pending"].(bool)
-				return !p
-			})
-			got := sub(f.webItem(id), "ask")["risk_class"] == "web_only"
-			eq(t, "升级为 web_only", got, wantWebOnly)
-			if n := len(f.judgeRequests()); n != 0 && wantWebOnly && f.judgeConfigured() {
-				t.Errorf("single_shot 不升级到对话端点，MODEL_LOG 判断题 = %d", n)
-			}
-		})
-	}
-	cell("low 低于下限 0.05：不升级", func() { f.cls(screenQ, 0.05) }, false)
-	cell("band 带内（p 恰等于下限 0.20）：升级", func() { f.cls(screenQ, 0.20) }, true)
-	cell("high 高于上限（无上限，p=0.90）：升级", func() { f.cls(screenQ, 0.90) }, true)
-	cell("undecided 各级未定（只配对话端点且自报资料不足，取保守默认是）：升级", func() {
-		f.webOK("PUT", "/settings/model-endpoints", `{"judge_endpoint": null}`, 200)
-		f.chat(screenQ, "no", false)
-	}, true)
-	cell("unavail 端点都不可用：按规则的结果继续，不升级也不等待", func() { f.down() }, false)
-}
-
 // ---- delivery-defer：上限 0.85，single_shot，默认关闭 ----
 
 func TestMatrixDeliveryDefer(t *testing.T) {
@@ -173,7 +139,6 @@ func TestMatrixDeliveryDefer(t *testing.T) {
 	cell := func(name string, setup func(), wantDeferred bool) {
 		f.step(t, name, func(t *testing.T) {
 			f.reset()
-			f.cls(screenQ, 0.05) // 决策本身不是 web_only
 			setup()
 			id := f.workTask("dfr-" + strings.Fields(name)[0])
 			f.ask(id)
@@ -216,8 +181,8 @@ func TestMatrixFollowupDefer(t *testing.T) {
 			f.reset()
 			setup()
 			id := jsonMap(t, f.apa(f.DEL, 0, "item", "add", "--kind", "task", "--title", "fud-"+strings.Fields(name)[0], "--phase", "open",
-				"--assignee", "work-host.cli", "--project", f.Projects["acc-work"], "--evidence", "建任务").Stdout)["id"].(string)
-			f.apa(f.DEL, 0, "item", "transition", id, "--to", "waiting", "--waiting-on", "external:装修公司报价", "--reason", "等报价", "--evidence", "等报价")
+				"--assignee", "work-host.cli", "--project", f.Projects["acc-work"]).Stdout)["id"].(string)
+			f.apa(f.DEL, 0, "item", "transition", id, "--to", "waiting", "--waiting-on", "external:装修公司报价", "--reason", "等报价")
 			f.TCAdvance(65)
 			f.waitFor("第一次到期有结论", 60*time.Second, func() bool {
 				return len(f.audit(id, "followup.deferred"))+len(f.audit(id, "followup.reminded")) > 0

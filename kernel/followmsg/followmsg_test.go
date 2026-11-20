@@ -40,7 +40,7 @@ import (
 var (
 	bg    = context.Background()
 	t0    = time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner = command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 )
 
 const (
@@ -117,7 +117,7 @@ func newEnv(t *testing.T) *env {
 	}
 	err = st.Update(bg, func(tx *store.Tx) error {
 		_, err := policy.Update(tx, owner.Actor, "model", func(p *policy.Policy) error {
-			p.GenerateEndpoint, p.ScreeningTimeoutMs = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}, 1000
+			p.GenerateEndpoint = policy.GenerateEndpoint{URL: e.stub.URL(), Model: "m1", APIKey: "k", Locality: policy.LocalityLocal}
 			return nil
 		})
 		return err
@@ -206,12 +206,12 @@ func (e *env) issue(name string, s auth.Spec) {
 }
 
 func (e *env) as(name string) command.Identity {
-	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1", SessionKind: "direct"}, OnBehalfOf: "owner"}
+	return command.Bearer{Auth: e.au, Secret: e.secret[name], Origin: auth.Origin{Harness: "h", Session: "s1"}}
 }
 
 func (e *env) do(id command.Identity, cmd string, in any) (command.Result, error) {
 	b, _ := json.Marshal(in)
-	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner", Evidence: "owner said so"})
+	return e.x.Do(bg, command.Request{Identity: id, Command: cmd, Input: b, Owner: "owner"})
 }
 
 func (e *env) must(id command.Identity, cmd string, in any) json.RawMessage {
@@ -683,11 +683,12 @@ func TestNewRequiresStoreAndExec(t *testing.T) {
 	}
 }
 
-// §14.5 第一档：发起委派的 delegate 凭据交回自己派出去的活的挂靠消息不要本人原话，Event 不带 on_behalf_of；
-// 别的 delegate 凭据绑定不成立，按第二档，缺依据为 23、消息状态不变。
+// 交回挂靠消息是一档：delegate 钥匙范围是全部事项，不是发起委派的 delegate 也能交回，不要附加依据；
+// observer 在钥匙范围外（4），消息状态不变。事件依据记一档、不带 on_behalf_of。
 func TestHandbackBindsToDelegationInitiator(t *testing.T) {
 	e := newEnv(t)
 	e.issue("DEL2", auth.Spec{Kind: auth.Delegate})
+	e.issue("OBS", auth.Spec{Kind: auth.Observer})
 	child := e.delegated() // 由 DEL 发起
 	e.report("WRK", child, "progress", pr1, "")
 	e.emit(comment("c1", pr1))
@@ -696,15 +697,15 @@ func TestHandbackBindsToDelegationInitiator(t *testing.T) {
 		b, _ := json.Marshal(map[string]string{"message": id, "reason": "不归我"})
 		return e.x.Do(bg, command.Request{Identity: e.as(who), Command: CmdHandback, Input: b, Owner: "owner"})
 	}
-	if _, err := bare("DEL2"); exitOf(err) != domain.ExitBasisRequired {
-		t.Fatalf("foreign delegate without words: %v", err)
+	if _, err := bare("OBS"); exitOf(err) != domain.ExitPermissionDenied {
+		t.Fatalf("observer: %v", err)
 	}
 	if got := e.msg("c1").AttachState; got != runner.AttachPending {
 		t.Fatalf("rejected handback changed the state to %s", got)
 	}
-	r, err := bare("DEL")
+	r, err := bare("DEL2")
 	if err != nil {
-		t.Fatalf("initiator handback without words: %v", err)
+		t.Fatalf("another delegate's handback: %v", err)
 	}
 	var ev domain.Event
 	_ = e.st.View(bg, func(tx *store.Tx) error {
@@ -714,8 +715,8 @@ func TestHandbackBindsToDelegationInitiator(t *testing.T) {
 		}
 		return err
 	})
-	if ev.Seq != r.Seqs[0] || ev.Actor.OnBehalfOf != "" || ev.Actor.Principal == "" {
-		t.Fatalf("tier one event must not carry on_behalf_of: %+v", ev)
+	if ev.Seq != r.Seqs[0] || ev.Actor.OnBehalfOf != "" || ev.Actor.Principal == "" || ev.Basis == nil || ev.Basis.Via != domain.BasisOrganize {
+		t.Fatalf("tier-one event: %+v basis=%+v", ev, ev.Basis)
 	}
 	e.noErrs()
 }
@@ -914,25 +915,31 @@ func TestRegisteredKeyIsScopedToDedupeDomain(t *testing.T) {
 	}
 }
 
-// ACT-MSG-17：依据不足或凭据不够不能登记关联键；重复登记与移除不存在的键明确报错。
+// ACT-MSG-17：登记关联键是一档：observer 在钥匙范围外不能登记，delegate 直接登记；重复登记与移除不存在的键明确报错。
 func TestRelateKeyNeedsCredentialAndEvidence(t *testing.T) {
 	e := newEnv(t)
 	e.issue("OBS", auth.Spec{Kind: auth.Observer})
 	item := e.own("下月再看报价", domain.PhaseWaiting, external())
 	in, _ := json.Marshal(map[string]any{"from": item, "key": "fm-x"})
-	do := func(who string, evidence string) error {
-		_, err := e.x.Do(bg, command.Request{Identity: e.as(who), Command: "item.relate", Input: in, Owner: "owner", Evidence: evidence})
+	do := func(who string) error {
+		_, err := e.x.Do(bg, command.Request{Identity: e.as(who), Command: "item.relate", Input: in, Owner: "owner"})
 		return err
 	}
-	if err := do("OBS", "本人原话"); exitOf(err) != domain.ExitPermissionDenied {
+	if err := do("OBS"); exitOf(err) != domain.ExitPermissionDenied {
 		t.Fatalf("observer: %v", err)
-	}
-	if err := do("DEL", ""); exitOf(err) != 23 {
-		t.Fatalf("delegate without evidence: %v", err)
 	}
 	e.st.View(bg, func(tx *store.Tx) error {
 		if ks, _ := items.Correlations(tx, item); len(ks) != 0 {
 			t.Fatalf("rejected registration left keys: %+v", ks)
+		}
+		return nil
+	})
+	if err := do("DEL"); err != nil {
+		t.Fatalf("delegate: %v", err)
+	}
+	e.st.View(bg, func(tx *store.Tx) error {
+		if ks, _ := items.Correlations(tx, item); len(ks) != 1 {
+			t.Fatalf("delegate registration: %+v", ks)
 		}
 		return nil
 	})

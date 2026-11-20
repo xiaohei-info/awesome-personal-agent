@@ -6,7 +6,7 @@
 // 本层只做 HTTP 到命令请求的搬运：
 //   - 路径里的 id 注入请求体（体里不许再写 id/from，避免两处不一致）；
 //   - Idempotency-Key 头 → 幂等键；If-Match 头 → 期望版本（版本是内核字段，不能写在请求体里）；
-//   - X-APA-Evidence 头（缺省取体里的 evidence）→ delegate 动作所需的本人原话证据。
+//   - 体里的 evidence 只是说明或结果证据，不参与权限判定（本人原话已取消，§14.3）。
 package items
 
 import (
@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
-	"github.com/xiaohei-info/awesome-personal-agent/api/screening"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -113,14 +112,6 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	}); err != nil {
 		return err
 	}
-	// 先脱敏再检索：初筛中的事项对低级凭据不带标题与正文，也就不能被全文、标签或日期命中；它的进展同样不参与。
-	for i := range its {
-		shown := screening.Redact(its[i], p.Caller.Level)
-		if shown.Title != its[i].Title {
-			delete(prog, its[i].ID)
-		}
-		its[i] = shown
-	}
 	its, err := search.FilterItems(its, prog, sq)
 	if err != nil {
 		return err
@@ -168,17 +159,16 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	if prog == nil {
 		prog = []domain.Progress{}
 	}
-	shown := screening.Redact(it, p.Caller.Level)
-	if rels == nil || shown.Ask != it.Ask {
-		rels = []domain.Relation{} // 初筛中的事项对非 Web 凭据不带关系
+	if rels == nil {
+		rels = []domain.Relation{}
 	}
-	if keys == nil || shown.Ask != it.Ask {
+	if keys == nil {
 		keys = []kitems.Correlation{}
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": shown, "relations": rels, "progress": prog, "correlation_keys": keys, "last_rejection": rej})
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": it, "relations": rels, "progress": prog, "correlation_keys": keys, "last_rejection": rej})
 }
 
-// today：四组取材全在内核（kitems.TodayItems）；初筛中的事项照常按凭据级别脱敏。
+// today：四组取材全在内核（kitems.TodayItems）。
 func (h *handlers) today(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if err := readable(p); err != nil {
 		return err
@@ -189,11 +179,6 @@ func (h *handlers) today(w http.ResponseWriter, r *http.Request, p *core.Princip
 		return err
 	}); err != nil {
 		return err
-	}
-	for _, g := range [][]domain.Item{l.Planned, l.Due, l.Pending, l.Stale} {
-		for i := range g {
-			g[i] = screening.Redact(g[i], p.Caller.Level)
-		}
 	}
 	return core.WriteJSON(w, http.StatusOK, l)
 }
@@ -225,10 +210,7 @@ func (h *handlers) write(cmd, pathKey string, status int, extra ...func(r *http.
 			return err
 		}
 		req := command.Request{Identity: p.Identity, Command: cmd, Input: in,
-			IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
-		if req.Evidence == "" {
-			_ = json.Unmarshal(body["evidence"], &req.Evidence)
-		}
+			IdemKey: r.Header.Get(IdempotencyHeader), WebURL: p.WebURL}
 		if v := r.Header.Get(IfMatchHeader); v != "" {
 			n, err := strconv.ParseInt(strings.Trim(v, `"`), 10, 64)
 			if err != nil || n < 0 {
@@ -272,8 +254,9 @@ func (h *handlers) withProgress(r *http.Request, id string, out map[string]any) 
 	})
 }
 
-// Rejection 是事项上最近一次被拒绝的代理操作（退出码 23，§14.5）：事项详情、事项列表、决策待办与建议流据此标明
-// "谁的什么操作被拒、为什么、事项未被修改"。只带机制（操作者、授权动作、原因码、原因、授权单 id），不含账本用户内容。
+// Rejection 是事项上最近一次因档位未放开被拒的 Agent 操作（退出码 23，§14.3）：事项详情、事项列表、决策待办与建议流据此标明
+// "谁的什么操作被拒、为什么、事项未被修改"。只带机制（操作者、授权动作、原因码、原因），不含账本用户内容。
+// Grant 只出现在旧模型的拒绝记录上。
 // 被拒的写入从不生效，所以这里没有"是否已改"的字段：凡出现即未生效。
 type Rejection struct {
 	Seq    int64        `json:"seq"`
@@ -281,7 +264,7 @@ type Rejection struct {
 	Actor  domain.Actor `json:"actor"`
 	Action string       `json:"action,omitempty"` // 被拒的授权动作（如 edit_any_item、answer_decision）
 	Code   domain.Code  `json:"code"`
-	Reason string       `json:"reason,omitempty"` // 更细的稳定原因（domain.GrantReason*），如授权单因初筛未返回暂不可用
+	Reason string       `json:"reason,omitempty"` // 更细的稳定原因（domain.Reason*）
 	Why    string       `json:"why"`
 	Grant  string       `json:"grant,omitempty"`
 }
@@ -338,7 +321,7 @@ func (h *handlers) batch(w http.ResponseWriter, r *http.Request, p *core.Princip
 	if err := dec.Decode(&b); err != nil {
 		return domain.NewError(domain.CodeInvalidRequest, "request body is not a valid batch", "send {\"mode\":\"recommended\"|\"explicit\", …}")
 	}
-	req := command.Request{Identity: p.Identity, IdemKey: r.Header.Get(IdempotencyHeader), Evidence: p.Evidence, Grant: p.Grant, WebURL: p.WebURL}
+	req := command.Request{Identity: p.Identity, IdemKey: r.Header.Get(IdempotencyHeader), WebURL: p.WebURL}
 	res, err := inbound.Batch(context.WithoutCancel(r.Context()), h.x, h.st, req, b)
 	if err != nil {
 		return err

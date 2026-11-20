@@ -15,24 +15,22 @@ def _schema(name, desc, props, required):
             "parameters": {"type": "object", "properties": props, "required": required}}
 
 
-_EVIDENCE = _s("The owner's own words, quoted verbatim, that justify acting for them. They must come from this turn: never paraphrase, "
-               "reword or invent them. Give this or grant, not both.")
-_GRANT = _s("Id of a grant the owner issued in Web (apa grant list) for when they are absent. Give this or evidence, not both.")
-_EXIT23 = "On exit 23 do not rephrase and retry: tell the owner why and give the Web link."
+_EXIT23 = ("Only works if the owner opened the decide tier for you in Web; every answer is shown to the owner and can be undone. "
+           "On exit 23 (tier closed) do not retry: ask the owner (apa_ask) or give the Web link.")
 _REASON = _s("Short reason, recorded in the ledger event.")
 
 # name -> (description, properties, required, argv builder)
 _CLI_TOOLS = {
-    "apa_decide": ("Answer a decision on the owner's behalf (apa decide). Exit 20 = web_only: give the owner the Web link and stop.",
+    "apa_decide": ("Answer a decision on the owner's behalf (apa decide). " + _EXIT23,
                    {"id": _s("Item id"), "option": _s("Chosen option id"), "text": _s("Free-text answer"),
-                    "evidence": _EVIDENCE, "grant": _GRANT, "reason": _REASON}, ["id"],
-                   lambda a: ["decide", a["id"], *_flags(a, "option", "text", "evidence", "reason", "grant")]),
-    "apa_accept": ("Accept a proposed item on the owner's behalf (apa accept).",
-                   {"id": _s("Item id"), "evidence": _EVIDENCE, "grant": _GRANT, "reason": _REASON}, ["id"],
-                   lambda a: ["accept", a["id"], *_flags(a, "evidence", "reason", "grant")]),
-    "apa_dismiss": ("Dismiss a proposed item on the owner's behalf (apa dismiss).",
-                    {"id": _s("Item id"), "evidence": _EVIDENCE, "grant": _GRANT, "reason": _REASON}, ["id"],
-                    lambda a: ["dismiss", a["id"], *_flags(a, "evidence", "reason", "grant")]),
+                    "reason": _REASON}, ["id"],
+                   lambda a: ["decide", a["id"], *_flags(a, "option", "text", "reason")]),
+    "apa_accept": ("Accept a proposed item on the owner's behalf (apa accept). " + _EXIT23,
+                   {"id": _s("Item id"), "reason": _REASON}, ["id"],
+                   lambda a: ["accept", a["id"], *_flags(a, "reason")]),
+    "apa_dismiss": ("Dismiss a proposed item on the owner's behalf (apa dismiss). " + _EXIT23,
+                    {"id": _s("Item id"), "reason": _REASON}, ["id"],
+                    lambda a: ["dismiss", a["id"], *_flags(a, "reason")]),
     "apa_propose": ("Suggest a new item for the owner (apa propose); it lands as proposed.",
                     {"kind": _s("Item kind"), "title": _s("Title"), "summary": _s("Summary"), "body": _s("Body"),
                      "priority": _s("Priority"), "project": _s("Project id"), "tags": _s("Comma-separated tags"),
@@ -45,10 +43,10 @@ _CLI_TOOLS = {
                  "option": {"type": "array", "items": {"type": "string"}, "description": "Options, each 'id=label'"},
                  "next": {"type": "array", "items": {"type": "string"}, "description": "Phase after an option, each 'id=phase'"},
                  "recommend": _s("Recommended option id"), "free_text": {"type": "boolean", "description": "Allow a free-text answer"},
-                 "deadline": _s("RFC3339 deadline"), "default_on_timeout": _s("Option id applied at the deadline"),
+                 "deadline": _s("RFC3339 deadline"),
                  "resume_note": _s("Note for resuming after the answer"), "reason": _REASON}, ["id", "question"],
                 lambda a: ["ask", a["id"], *_flags(a, "question", "option", "next", "recommend", "free_text", "deadline",
-                                                   "default_on_timeout", "resume_note", "reason")]),
+                                                   "resume_note", "reason")]),
     "apa_executors": ("List the executors the project allows (apa executors).",
                       {"project": _s("Project id")}, [],
                       lambda a: ["executors", *_flags(a, "project")]),
@@ -64,19 +62,17 @@ _CLI_TOOLS = {
                         {"id": _s("Item id"), "spec": {"type": "object", "description": "Structured result, e.g. period and sections"},
                          "title": _s("Title"), "summary": _s("Summary"), "body": _s("Body"),
                          "status_label": _s("Status label"), "priority": _s("Priority"), "tags": _s("Comma-separated tags"),
-                         "reason": _s("Short reason, recorded in the ledger event"), "evidence": _EVIDENCE, "grant": _GRANT}, ["id", "reason"],
+                         "reason": _s("Short reason, recorded in the ledger event")}, ["id", "reason"],
                         lambda a: ["item", "update", a["id"], *_flags(a, "title", "summary", "body", "status_label", "priority",
-                                                                      "tags", "spec", "reason", "evidence", "grant")]),
-    "apa_attach": ("Attach a proposed item to an existing item on the owner's behalf (apa attach). Deciding for the owner needs "
-                   "the owner's words from this turn (evidence) or a grant. " + _EXIT23,
+                                                                      "tags", "spec", "reason")]),
+    "apa_attach": ("Attach a proposed item to an existing item on the owner's behalf (apa attach). " + _EXIT23,
                    {"id": _s("Proposal item id"), "to": _s("Existing item id to attach it to"),
-                    "reason": _REASON, "evidence": _EVIDENCE, "grant": _GRANT}, ["id", "to"],
-                   lambda a: ["attach", a["id"], *_flags(a, "to", "reason", "evidence", "grant")]),
-    "apa_item_progress": ("Record a progress note on the owner's item (apa item progress). Doing so for the owner needs the owner's words "
-                          "from this turn (evidence) or a grant, except on the item bound to your own credential. " + _EXIT23,
-                          {"id": _s("Item id"), "text": _s("The progress note"), "on": _s("Date it happened (YYYY-MM-DD), not later than today"),
-                           "evidence": _EVIDENCE, "grant": _GRANT}, ["id", "text"],
-                          lambda a: ["item", "progress", a["id"], *_flags(a, "text", "on", "evidence", "grant")]),
+                    "reason": _REASON}, ["id", "to"],
+                   lambda a: ["attach", a["id"], *_flags(a, "to", "reason")]),
+    "apa_item_progress": ("Record a progress note on an item (apa item progress). The owner can undo it.",
+                          {"id": _s("Item id"), "text": _s("The progress note"), "on": _s("Date it happened (YYYY-MM-DD), not later than today")},
+                          ["id", "text"],
+                          lambda a: ["item", "progress", a["id"], *_flags(a, "text", "on")]),
 }
 
 
@@ -122,9 +118,8 @@ def _proposals_apply(args, session_id=None, **_):
     actions = args.get("actions")
     if bool(args.get("recommended")) == bool(actions):
         return json.dumps({"ok": False, "error": "give exactly one of recommended=true and actions"})
-    evidence = _flags(args, "evidence", "grant")
     if args.get("recommended"):
-        return json.dumps(cli.call(["proposals", "apply", "--recommended", *_flags(args, "source", "project"), *evidence], session_id))
+        return json.dumps(cli.call(["proposals", "apply", "--recommended", *_flags(args, "source", "project")], session_id))
     if args.get("source") or args.get("project"):
         return json.dumps({"ok": False, "error": "source and project only narrow recommended"})
     if not isinstance(actions, list) or len(actions) > _BATCH_MAX:
@@ -132,7 +127,7 @@ def _proposals_apply(args, session_id=None, **_):
     for a in actions:
         if not isinstance(a, dict) or not a.get("id") or a.get("do") not in _BATCH_DO or (a["do"] == "attach") != bool(a.get("to")):
             return json.dumps({"ok": False, "error": "each action needs id and do (accept|attach|dismiss); to goes with attach only"})
-    return json.dumps(cli.call(["proposals", "apply", "--file", "-", *evidence], session_id, stdin=json.dumps({"actions": actions}, ensure_ascii=False)))
+    return json.dumps(cli.call(["proposals", "apply", "--file", "-"], session_id, stdin=json.dumps({"actions": actions}, ensure_ascii=False)))
 
 
 _DELEGATE_FLAGS = ("parent", "title", "summary", "body", "priority", "project", "reason", "idempotency_key")
@@ -225,14 +220,13 @@ def register(ctx):
                           handler=_cli_handler(build), description=desc)
     desc = ("Handle proposals in bulk on the owner's behalf (apa proposals apply): recommended=true takes each proposal's recommendation "
             "(narrow with source or project), or actions lists one disposal per proposal ('item 3 dismiss, the rest as recommended' = list the rest explicitly). "
-            "Needs the owner's words from this turn (evidence) or a grant. The result is per proposal; tell the owner each outcome. " + _EXIT23)
+            "The result is per proposal; tell the owner each outcome. " + _EXIT23)
     ctx.register_tool(name="apa_proposals_apply", toolset=TOOLSET, handler=_proposals_apply, description=desc, schema=_schema("apa_proposals_apply", desc, {
         "recommended": {"type": "boolean", "description": "Apply every recommendation in scope"},
         "actions": {"type": "array", "description": "Explicit disposals, up to 200", "items": {"type": "object", "properties": {
             "id": _s("Proposal id"), "do": {"type": "string", "enum": list(_BATCH_DO)}, "to": _s("attach: the existing item id"),
             "reason": _s("Reason")}, "required": ["id", "do"]}},
-        "source": _s("recommended only: narrow to a source"), "project": _s("recommended only: narrow to a project id"),
-        "evidence": _EVIDENCE, "grant": _GRANT}, []))
+        "source": _s("recommended only: narrow to a source"), "project": _s("recommended only: narrow to a project id")}, []))
     desc = ("Create a child item and put the parent in waiting (apa delegate). Run it BEFORE handing work to anyone, then delegate "
             "with your own tools and put the child item id in the task. For an agent give mech (delegate_task, or paseo with host and "
             "profile, or provider and model); the plugin names the executor. For a person give assignee. Exit 21 = not allowed in this project.")

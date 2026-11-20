@@ -62,7 +62,7 @@ func writeForever(home string) error {
 	if err := items.Register(x, items.NewKinds()); err != nil {
 		return err
 	}
-	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb}
+	owner := command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true}
 	run := func(cmd string, in map[string]any) (json.RawMessage, error) {
 		b, _ := json.Marshal(in)
 		r, err := x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner"})

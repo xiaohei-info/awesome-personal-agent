@@ -44,7 +44,7 @@ func (f *fx) idOf(r baseline.Result) string {
 func (f *fx) task(title, project string, tags ...string) string {
 	f.t.Helper()
 	args := []string{"item", "add", "--kind", "task", "--title", title, "--phase", "open", "--assignee", "work-host.cli",
-		"--project", f.Projects[project], "--evidence", "建个任务"}
+		"--project", f.Projects[project]}
 	if len(tags) > 0 {
 		args = append(args, "--tags", strings.Join(tags, ","))
 	}

@@ -69,7 +69,7 @@ func TestFlowRuleModes(t *testing.T) {
 
 	newItem := func(tag string) string {
 		t.Helper()
-		r := e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--title", "rule-"+tag, "--tags", tag, "--reason", "rule e2e", "--evidence", "rule e2e")
+		r := e.Apa(e.DEL, "", "item", "add", "--kind", "task", "--title", "rule-"+tag, "--tags", tag, "--reason", "rule e2e")
 		var it item
 		if r.Code != 0 {
 			t.Fatalf("建事项: %d %s", r.Code, r.Stderr)
@@ -79,7 +79,7 @@ func TestFlowRuleModes(t *testing.T) {
 	}
 	open := func(id string) {
 		t.Helper()
-		if r := e.Apa(e.DEL, "", "item", "transition", id, "--to", "open", "--reason", "rule e2e", "--evidence", "rule e2e"); r.Code != 0 {
+		if r := e.Apa(e.DEL, "", "item", "transition", id, "--to", "open", "--reason", "rule e2e"); r.Code != 0 {
 			t.Fatalf("事项 %s 转 open: %d %s", id, r.Code, r.Stderr)
 		}
 	}
@@ -130,8 +130,9 @@ func TestFlowRuleModes(t *testing.T) {
 		}
 	})
 
-	step(t, "ACT-RULE-03 只在 Web 切换到 auto", func(t *testing.T) {
-		r := e.APIRaw("PATCH", modePath(tagKey), `{"mode":"auto"}`, e.DEL)
+	// 2026-11-20 改写：切规则模式是 3a，档位未放开的 Agent（DELO）得 403 tier_closed。
+	step(t, "ACT-RULE-03 档位未放开的钥匙不能切换到 auto", func(t *testing.T) {
+		r := e.APIRaw("PATCH", modePath(tagKey), `{"mode":"auto"}`, e.DELO)
 		if r.Code != 403 {
 			t.Errorf("token 切 auto 应 403，实际 %d %s", r.Code, r.Body)
 		}
