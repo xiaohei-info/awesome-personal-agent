@@ -289,4 +289,25 @@ describe("运行故障与被拒的交回说人话（界面设计 §5.3）", () =
     expect(within(rej).getByRole("link", { name: "看被拒的原因" })).toHaveAttribute("href", "/audit?object=itm_7");
     expect(main().queryByText(/exit status|basis_required/)).toBeNull();
   });
+
+  // 2026-11-20 本人裁决：规则动作失败、运行没拉起是事件不是问题；诊断页逐条说清哪件事、为什么、下一步。来源认证失败按 kind 说"要重新登录"。
+  it("动作没能完成：模型没接的写「去接模型」与「看这件事」，作废的说明可以重开；没拉起的写原因；来源认证失败按 kind", async () => {
+    const bad = {
+      other_alerts: { ok: false, count: 2, severity: "error", why: "x", detail: ["ins_1", "itm_open"], notices: [
+        { object: "ins_1", rule: "brief/clock_rules/scheduled", code: "model_unset", item: "itm_brief", dropped: true },
+        { object: "itm_open", code: "background_refused", params: { detail: "执行者 other-host.cli 不在项目允许的执行者名单内" }, item: "itm_open" },
+      ] },
+      source_failures: { ok: false, count: 1, severity: "error", why: "x", detail: [{ source: "src_mail", enabled: true, consecutive_failures: 1, kind: "auth_or_config" }] },
+    };
+    mount(serve(() => json(200, report(bad))).impl);
+    const unset = (await screen.findByText("需要的模型还没接")).closest("li")!;
+    expect(unset).toHaveTextContent("已作废");
+    expect(within(unset).getByRole("link", { name: "去接模型" })).toHaveAttribute("href", "/settings/models");
+    expect(within(unset).getByRole("link", { name: "看这件事" })).toHaveAttribute("href", "/items/itm_brief");
+    const refused = act().getByText(/没能开始：执行者 other-host.cli 不在项目允许的执行者名单内/).closest("li")!;
+    expect(refused).toHaveTextContent("事项没被修改");
+    expect(within(refused).getByRole("link", { name: "看这件事" })).toHaveAttribute("href", "/items/itm_open");
+    expect(act().getByText(/要重新登录/)).toBeInTheDocument();
+    expect(main().queryByText(/其他告警/)).toBeNull();
+  });
 });

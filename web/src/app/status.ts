@@ -14,6 +14,8 @@ export interface Signal {
   rejections?: { pack: string; source: string; reason: string }[];
   /** receipt_failures 的逐条原因（api/health.ReceiptRejection）：命令、退出码、原因码、凭据。 */
   receipts?: { object: string; command: string; exit: number; code?: string; reason?: string; credential: string }[];
+  /** other_alerts 的逐条通知：动作没能完成的类别码、机制参数与受影响的事项（dropped：规则建的那一份已作废）。 */
+  notices?: { object: string; rule?: string; code?: string; params?: Record<string, string>; item?: string; dropped?: boolean }[];
 }
 export interface HealthReport {
   healthy: boolean;
@@ -68,10 +70,10 @@ export function rowsOf(s: Signal): Row[] {
   const d = s.detail;
   switch (s.id) {
     case "source_failures":
-      return list<{ source: string; enabled: boolean; consecutive_failures: number; needs_input_item?: string }>(d).map((x) =>
+      return list<{ source: string; enabled: boolean; consecutive_failures: number; kind?: string; needs_input_item?: string }>(d).map((x) =>
         !x.enabled
           ? row("sourceOff", false, 0, "/sources?open=" + enc(x.source), x.source) // 本人停用的：仅供知晓（同暂停模型）
-          : row(x.needs_input_item ? "sourceAuth" : "sourceFail", true, x.consecutive_failures, "/sources?open=" + enc(x.source), x.source),
+          : row(x.kind === "auth_or_config" || x.needs_input_item ? "sourceAuth" : "sourceFail", true, x.consecutive_failures, "/sources?open=" + enc(x.source), x.source),
       );
     case "outcall": {
       const q = (d ?? {}) as { long?: { queued: number }; short?: { queued: number }; timeouts?: string[]; failures?: { run: string; target: string; fault?: { code: string; params?: Record<string, string> } }[] };
@@ -124,8 +126,15 @@ export function rowsOf(s: Signal): Row[] {
         ? rs.map((x) => ({ ...row("receipt", true, 1, "/audit", x.object), code: x.code, params: x.reason ? { reason: x.reason } : undefined, who: x.credential, cmd: x.command }))
         : [row("receipts", true, s.count, "/audit")];
     }
-    case "other_alerts":
-      return [row("others", true, s.count, "/audit")];
+    case "other_alerts": {
+      // 有类别码的逐条说清（哪件事、为什么、下一步）；升级前的告警没有类别码，合成一行计数去操作记录看。
+      const ns = (s.notices ?? []).filter((x) => x.code);
+      const rest = s.count - ns.length;
+      return [
+        ...ns.map((x) => ({ ...row(x.dropped ? "notice:dropped" : "notice", true, 1, x.item ? "/items/" + enc(x.item) : "/audit?object=" + enc(x.object), x.item ?? x.object), code: x.code, params: x.params })),
+        ...(rest > 0 ? [row("others", true, rest, "/audit")] : []),
+      ];
+    }
     case "stalled_delegations": {
       const ids = list<string>(d).filter(Boolean);
       return ids.length ? ids.map((id) => row("stalled", true, 1, "/delegation#d-" + enc(id), id)) : [row("stalled", true, s.count, "/delegation")];

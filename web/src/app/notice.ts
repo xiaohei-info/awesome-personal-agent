@@ -15,6 +15,12 @@ export function useAskSay(): (a?: { code?: string; params?: NoticeParams }) => s
   return (a) => (a?.code && say[a.code] ? say[a.code](a.params) : undefined);
 }
 
+/** 动作没能完成（other_alerts 的 notices）：一句话与下一步；没有类别码或词表里没有时为 undefined。 */
+export function useNoticeSay(): (code?: string, params?: NoticeParams) => { say: string; go?: { label: string; to: string } } | undefined {
+  const t = vocab[useLang()].notice as Record<string, { say: (p: NoticeParams) => string; go?: { label: string; to: string } }>;
+  return (code, params) => (code && t[code] ? { say: t[code].say(params), go: t[code].go } : undefined);
+}
+
 /** 运行故障：出了什么事、下一步做什么；没有类别码或词表里没有时为 undefined。 */
 export function useFaultSay(): (f?: Fault | null) => { say: string; next: string } | undefined {
   const t = vocab[useLang()].runFault as Record<string, { say: (p: NoticeParams) => string; next: string }>;

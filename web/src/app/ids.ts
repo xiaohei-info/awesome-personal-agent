@@ -144,6 +144,9 @@ export type AskCode = (typeof ASK_CODE)[number];
 /** 运行故障的类别码：kernel/domain/notice.go RunFaultCode（Run.fault，设计 §6.11）。运行故障是事件，不是问题。 */
 export const RUN_FAULT = ["start_failed", "exec_denied", "exec_not_found", "exit_nonzero", "killed", "timeout", "lost"] as const;
 export type RunFault = (typeof RUN_FAULT)[number];
+/** 动作没能完成的类别码：kernel/domain/notice.go NoticeCode（other_alerts 的 notices，设计 §6.14 第 20 条、§15.2）。 */
+export const NOTICE_CODE = ["task_refused", "background_refused", "resume_refused", "model_unset", "models_paused", "outbound_blocked", "chain_tripped", "action_rejected", "action_failed"] as const;
+export type NoticeCode = (typeof NOTICE_CODE)[number];
 /** 授权单不可用的细分原因：kernel/domain/errors.go GrantReason*（错误体与拒绝记录的 reason，设计 §14.5）。 */
 export const GRANT_REASON = ["grant_screening_pending", "grant_risk_ceiling", "grant_not_for_background", "untrusted_origin", "untrusted_trigger"] as const;
 
