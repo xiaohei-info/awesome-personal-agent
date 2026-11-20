@@ -334,6 +334,7 @@ func markMissing(c *command.Ctx, e Entry) (any, error) {
 		Project: e.Material.Project,
 		Ask: &domain.Ask{AskInput: domain.AskInput{
 			Question: "托管文档 " + e.Path + "（" + e.Repo + "）在默认分支上已不存在，请修正登记的路径，或确认已废弃。",
+			Code:     domain.AskHostedMissing, Params: map[string]string{"path": e.Path, "repo": e.Repo},
 			FreeText: true,
 			Options:  []domain.AskOption{{ID: "deprecated", Label: "已废弃，保持现状", Next: domain.PhaseDone}},
 		}},

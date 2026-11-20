@@ -262,6 +262,11 @@ type Commit struct {
 	Value   json.RawMessage
 }
 
+// basisMissing：本人原话这条依据不成立（缺失、缺会话引用、会话不是私聊），可以改由授权单放行。
+func basisMissing(c domain.Code) bool {
+	return c == domain.CodeBasisRequired || c == domain.CodeSessionNotDirect
+}
+
 // ReceiptKind 是回执与捕获被拒绝的 health.alert 的 payload.kind。
 const ReceiptKind = "receipt"
 
@@ -478,10 +483,10 @@ func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
 
 // recordRejection 在同一事务里写 command.rejected、跑拒绝回调、记回执与捕获的 health.alert（§14.5）。
 func (x *Executor) recordRejection(tx *store.Tx, spec Spec, tr trace, rj *rejected, orig error, alert bool) error {
-	why := orig.Error()
+	why, reason := orig.Error(), domain.Code("")
 	var de *domain.Error
 	if errors.As(orig, &de) {
-		why = de.Why
+		why, reason = de.Why, de.Code
 	}
 	code, at := exitOf(orig), x.now()
 	if rj != nil {
@@ -506,7 +511,7 @@ func (x *Executor) recordRejection(tx *store.Tx, spec Spec, tr trace, rj *reject
 	}
 	_, err := eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: obj, Actor: tr.actor, At: at,
 		Reason:  spec.Name + " rejected: " + why,
-		Payload: mustJSON(map[string]any{"kind": ReceiptKind, "command": spec.Name, "exit": code, "why": why})})
+		Payload: mustJSON(map[string]any{"kind": ReceiptKind, "command": spec.Name, "exit": code, "code": reason, "why": why})})
 	return err
 }
 
@@ -580,23 +585,66 @@ func (x *Executor) pipeline(tx *store.Tx, spec Spec, req Request, tr *trace) (Re
 			return Result{}, Commit{}, err
 		}
 	}
-	trigger := false
-	if grant != nil && caller.Level == authz.LevelRun && caller.RunTrusted != nil {
-		if trigger, err = caller.RunTrusted(tx); err != nil {
+	trustOf := func(g *policy.Grant) (bool, error) {
+		if g != nil && caller.Level == authz.LevelRun && caller.RunTrusted != nil {
+			return caller.RunTrusted(tx)
+		}
+		return false, nil
+	}
+	request := func(act authz.Action, grantID string, g *policy.Grant, evidence string, trigger bool) authz.Request {
+		return authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
+			Evidence: evidence, Tier: tier, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender,
+			Command: spec.Name, GrantID: grantID, Grant: g, Credential: caller.Credential, Now: x.now(),
+			CredentialAgentID: caller.CredentialAgentID, CredentialHarness: caller.CredentialHarness, RunAgentID: caller.RunAgentID, RunHarness: caller.RunHarness, TriggerTrusted: trigger}
+	}
+	// decideAll 逐个动作判定；第一个不放行的动作决定结果。
+	decideAll := func(grantID string, g *policy.Grant, evidence string) (authz.Tier, authz.Request, authz.Decision, error) {
+		trigger, err := trustOf(g)
+		if err != nil {
+			return authz.TierNone, authz.Request{}, authz.Decision{}, err
+		}
+		decided := authz.TierNone
+		for _, act := range actions {
+			ar := request(act, grantID, g, evidence, trigger)
+			d := authz.Decide(pol, ar)
+			if d.Err != nil {
+				return decided, ar, d, nil
+			}
+			decided = max(decided, authz.TierOf(ar))
+		}
+		return decided, authz.Request{}, authz.Decision{}, nil
+	}
+	decided, failAr, failD, err := decideAll(req.Grant, grant, req.Evidence)
+	if err != nil {
+		return Result{}, Commit{}, err
+	}
+	// 授权单按被授权方生效（§14.5）：没带单、又因缺依据（原话缺失或会话不是私聊）被拒时，找本人签给这个调用方的有效授权单，
+	// 任一张在本次全部动作上都放行就按它放行，Event 照常记 grant id。被授权方、动作、范围、期限、撤销、风险上限、
+	// 来源与触发可信都按 grantMismatch 原样校验；找不到就维持原来的拒绝。web_only 与没授的动作不受影响。
+	// 运行凭据没带单时按"没有代答能力"得到退出码 4，同样改由它的授权单判定（单上须允许后台使用、触发可信）。
+	if failD.Err != nil && req.Grant == "" && grantable && (basisMissing(failD.Err.Code) || caller.Level == authz.LevelRun && failD.Err.Code == domain.CodePermissionDenied) {
+		gs, err := policy.ListGrants(tx)
+		if err != nil {
 			return Result{}, Commit{}, err
 		}
-	}
-	decided := authz.TierNone
-	for _, act := range actions {
-		ar := authz.Request{Actor: caller.Actor, Level: caller.Level, Action: act, Object: obj,
-			Evidence: req.Evidence, Tier: tier, Owner: req.Owner, WebURL: webURL, Channel: channel, Sender: sender,
-			Command: spec.Name, GrantID: req.Grant, Grant: grant, Credential: caller.Credential, Now: x.now(),
-			CredentialAgentID: caller.CredentialAgentID, CredentialHarness: caller.CredentialHarness, RunAgentID: caller.RunAgentID, RunHarness: caller.RunHarness, TriggerTrusted: trigger}
-		d := authz.Decide(pol, ar)
-		if d.Err == nil {
-			decided = max(decided, authz.TierOf(ar))
-			continue
+		for i := range gs {
+			g := gs[i]
+			if !g.RevokedAt.IsZero() || (!g.ExpiresAt.IsZero() && !x.now().Before(g.ExpiresAt)) {
+				continue
+			}
+			t, _, d, err := decideAll(g.ID, &g, "")
+			if err != nil {
+				return Result{}, Commit{}, err
+			}
+			if d.Err == nil {
+				decided, failD, grant = t, authz.Decision{}, &g
+				req.Grant, req.Evidence = g.ID, "" // 依据是授权单，不是那句原话
+				break
+			}
 		}
+	}
+	if d := failD; d.Err != nil {
+		ar := failAr
 		if ev, ok := authz.RejectionEvent(ar, d); ok {
 			ev.At = x.now()
 			if ev.Object == "" { // 新建类命令没有对象：拒绝事件记在命令名下

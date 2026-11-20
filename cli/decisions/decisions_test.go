@@ -357,7 +357,7 @@ func TestAskWithDeadlineAndDefault(t *testing.T) {
 	wrk := w.token(auth.Worker, "wrk1")
 	id := w.item(`{"kind":"task","title":"t","phase":"open","assignee":"wrk1"}`)
 	dl := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-	r := w.apa(wrk, "ask", id, "--question", "q", "--option", "A=a", "--default-on-timeout", "A", "--deadline", dl, "--resume-note", "n", "--reason", "why")
+	r := w.apa(wrk, "ask", id, "--question", "q", "--option", "A=a", "--option", "B=b", "--default-on-timeout", "A", "--deadline", dl, "--resume-note", "n", "--reason", "why")
 	if r.code != 0 {
 		t.Fatal(r)
 	}

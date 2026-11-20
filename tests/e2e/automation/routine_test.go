@@ -287,7 +287,7 @@ func TestFlowRoutine(t *testing.T) {
 
 	// 以下两步复用一个新的 run 实例：每次到期换一次替身模式。
 	var failInst string
-	k.step("ACT-RTN-10 run 模式运行失败转 needs_input、不重试", func(t *testing.T) {
+	k.step("ACT-RTN-10 run 模式运行失败只记事件、不转 needs_input、不重试", func(t *testing.T) {
 		var status int
 		var body string
 		failInst, status, body = newInstance(map[string]any{"schedule": "* * * * *", "mode": "run", "title": "acc 失败 {date}",
@@ -300,14 +300,21 @@ func TestFlowRoutine(t *testing.T) {
 		before := routineItems()
 		tick(1)
 		it := waitNew(before, "exit1 到期", func(it ledgerItem) bool { return strings.HasPrefix(it.Title, "acc 失败 ") })
-		var cur ledgerItem
-		var raw string
-		if !k.WaitFor(45*time.Second, func() bool { cur, raw = k.show(it.ID); return cur.Phase == "needs_input" }) {
-			t.Fatalf("运行失败后事项应转 needs_input: %s", raw)
+		// 2026-11-20 改写：运行故障是事件不是问题——事项不转 needs_input、不挂问题，运行记录带类别码 exit_nonzero。
+		var runs string
+		if !k.WaitFor(45*time.Second, func() bool {
+			runs = k.apa(e.OBS, 0, "run", "list", "--target", it.ID).Stdout
+			return strings.Contains(runs, `"state":"failed"`)
+		}) {
+			t.Fatalf("运行应以失败结束: %s", runs)
 		}
+		if !contains(runs, `"code":"exit_nonzero"`) {
+			t.Errorf("失败的运行应带类别码: %s", runs)
+		}
+		cur, raw := k.show(it.ID)
 		t.Logf("运行失败后的事项: %s", raw)
-		if !contains(raw, "任务型运行未完成", "exit status 1") {
-			t.Errorf("needs_input 应写明运行失败的原因: %s", raw)
+		if cur.Phase != "open" || strings.Contains(raw, `"ask"`) {
+			t.Errorf("运行故障不应把事项转 needs_input 或挂问题: %s", raw)
 		}
 		time.Sleep(5 * time.Second)
 		if n := runsOf(it.ID); n != 1 {

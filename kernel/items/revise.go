@@ -20,6 +20,9 @@ func Revise(tx *store.Tx, id, op string, at time.Time, f func(*domain.Item) erro
 	if err = f(&after); err != nil {
 		return
 	}
+	if err = checkAskWrite(before.Ask, after.Ask); err != nil {
+		return
+	}
 	if after.Phase != before.Phase {
 		if e := domain.CheckEntry(after, after.Phase, "revise", true); e != nil {
 			err = e
@@ -51,6 +54,9 @@ func Create(tx *store.Tx, it domain.Item, parent string, at time.Time) (domain.I
 	it.ID = id
 	if e := domain.CheckEntry(it, it.Phase, "created", true); e != nil {
 		return it, nil, e
+	}
+	if err := checkAskWrite(nil, it.Ask); err != nil {
+		return it, nil, err
 	}
 	if err := (&svc{}).check(tx, it); err != nil {
 		return it, nil, err

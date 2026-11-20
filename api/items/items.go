@@ -267,23 +267,27 @@ func (h *handlers) withProgress(r *http.Request, id string, out map[string]any) 
 	})
 }
 
-// Rejection 是事项上最近一次被拒绝的代理操作（退出码 23，§14.5）：决策待办与建议流据此标明"这次被拒绝的代答/处理"。
-// 只带机制（操作者、原因、授权单 id），不含账本用户内容。
+// Rejection 是事项上最近一次被拒绝的代理操作（退出码 23，§14.5）：事项详情、事项列表、决策待办与建议流据此标明
+// "谁的什么操作被拒、为什么、事项未被修改"。只带机制（操作者、授权动作、原因码、原因、授权单 id），不含账本用户内容。
+// 被拒的写入从不生效，所以这里没有"是否已改"的字段：凡出现即未生效。
 type Rejection struct {
-	Seq   int64        `json:"seq"`
-	At    time.Time    `json:"at"`
-	Actor domain.Actor `json:"actor"`
-	Code  domain.Code  `json:"code"`
-	Why   string       `json:"why"`
-	Grant string       `json:"grant,omitempty"`
+	Seq    int64        `json:"seq"`
+	At     time.Time    `json:"at"`
+	Actor  domain.Actor `json:"actor"`
+	Action string       `json:"action,omitempty"` // 被拒的授权动作（如 edit_any_item、answer_decision）
+	Code   domain.Code  `json:"code"`
+	Why    string       `json:"why"`
+	Grant  string       `json:"grant,omitempty"`
 }
 
-// LastRejection 返回 needs_input、proposed 事项上仍未被处理的最近一次 23 拒绝；其后若有回答或阶段变化则视为已处理，返回 nil。
-// 读的是内核已记的 command.rejected，不重新判定。
+// LastRejection 返回未终结事项上仍未被处理的最近一次 23 拒绝，读的是内核已记的 command.rejected，不重新判定。
+// needs_input、proposed：其后有回答或阶段变化即视为已处理。open、waiting：拒绝不再转阶段（§14.5），其后事项有任何变更
+// （改字段、写进展、转阶段、提问或回答）即被取代。
 func LastRejection(tx *store.Tx, it domain.Item) (*Rejection, error) {
-	if it.Phase != domain.PhaseNeedsInput && it.Phase != domain.PhaseProposed {
+	if it.Phase.Terminal() {
 		return nil, nil
 	}
+	live := it.Phase == domain.PhaseOpen || it.Phase == domain.PhaseWaiting
 	es, err := eventlog.ReadObject(tx, it.ID)
 	if err != nil {
 		return nil, err
@@ -293,17 +297,22 @@ func LastRejection(tx *store.Tx, it domain.Item) (*Rejection, error) {
 		switch e.Type {
 		case domain.EvDecisionResolved, domain.EvItemPhaseChanged:
 			return nil, nil
+		case domain.EvItemUpdated, domain.EvItemProgressAdded, domain.EvDecisionRequested:
+			if live {
+				return nil, nil
+			}
 		case domain.EvCommandRejected:
 			var pl struct {
-				Code  domain.Code `json:"code"`
-				Exit  int         `json:"exit"`
-				Why   string      `json:"why"`
-				Grant string      `json:"grant"`
+				Action string      `json:"action"`
+				Code   domain.Code `json:"code"`
+				Exit   int         `json:"exit"`
+				Why    string      `json:"why"`
+				Grant  string      `json:"grant"`
 			}
 			if json.Unmarshal(e.Payload, &pl) != nil || pl.Exit != domain.ExitBasisRequired {
 				continue
 			}
-			return &Rejection{Seq: e.Seq, At: e.At, Actor: e.Actor, Code: pl.Code, Why: pl.Why, Grant: pl.Grant}, nil
+			return &Rejection{Seq: e.Seq, At: e.At, Actor: e.Actor, Action: pl.Action, Code: pl.Code, Why: pl.Why, Grant: pl.Grant}, nil
 		}
 	}
 	return nil, nil

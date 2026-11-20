@@ -265,6 +265,30 @@ func (e *env) runList() []proc.Record {
 	return rs
 }
 
+// assertUnrecorded：事项上最近的 run.finished 是失败、写明结果没落账、带类别码，失败附注含 want。
+func (e *env) assertUnrecorded(t *testing.T, item, want string) {
+	t.Helper()
+	var last *domain.Event
+	for _, ev := range e.ofType(domain.EvRunFinished) {
+		if ev.Object == item {
+			ev := ev
+			last = &ev
+		}
+	}
+	if last == nil {
+		t.Fatalf("no run.finished on %s", item)
+	}
+	var p struct {
+		State    string        `json:"state"`
+		Error    string        `json:"error"`
+		Recorded *bool         `json:"recorded"`
+		Fault    *domain.Fault `json:"fault"`
+	}
+	if err := json.Unmarshal(last.Payload, &p); err != nil || p.State != "failed" || p.Recorded == nil || *p.Recorded || p.Fault == nil || !strings.Contains(p.Error, want) {
+		t.Fatalf("run.finished payload: %s (%v)", last.Payload, err)
+	}
+}
+
 func (e *env) ofType(typ string) []domain.Event {
 	e.t.Helper()
 	var out []domain.Event
@@ -467,7 +491,8 @@ func TestStillOpenAfterRunGoesToNeedsInput(t *testing.T) {
 	}
 }
 
-// ACT-BGG-04：运行失败（退出码 1）与超时都转 needs_input，只有一次 Run，不自动重试。
+// ACT-BGG-04（2026-11-20 改写）：运行失败（退出码 1）与超时是运行故障：事项阶段不变、不挂问题，
+// run.finished 写明结果没落账、带类别码；只有一次 Run，不自动重试。
 func TestFailureAndTimeoutGoToNeedsInputWithoutRetry(t *testing.T) {
 	for _, tc := range []struct{ script, tag, want string }{
 		{"exit1", "agent-ok", string(domain.RunFailed)},
@@ -484,9 +509,13 @@ func TestFailureAndTimeoutGoToNeedsInputWithoutRetry(t *testing.T) {
 			if string(res.Run.State) != tc.want {
 				t.Fatalf("state = %s", res.Run.State)
 			}
-			if it := e.item(id); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, tc.want) {
+			if it := e.item(id); it.Phase != domain.PhaseOpen || it.Ask != nil {
 				t.Fatalf("item = %+v", it)
 			}
+			if res.Run.Fault == nil || (res.Run.Fault.Code != domain.FaultExitNonzero && res.Run.Fault.Code != domain.FaultTimeout) {
+				t.Fatalf("fault = %+v", res.Run.Fault)
+			}
+			e.assertUnrecorded(t, id, tc.want)
 			if n := len(e.runList()); n != 1 {
 				t.Fatalf("runs = %d", n)
 			}
@@ -732,7 +761,7 @@ func TestTaskRunnerExecutorNotAllowed(t *testing.T) {
 	}
 }
 
-// ACT-BGG-05：重启时无存活进程的运行已被按失败落账，事项转 needs_input。
+// ACT-BGG-05（2026-11-20 改写）：重启时无存活进程的运行已被按失败落账（类别码 lost），事项阶段不变。
 func TestRecoveredRunGoesToNeedsInput(t *testing.T) {
 	e := setup(t, 0)
 	e.configure("hang")
@@ -755,9 +784,10 @@ func TestRecoveredRunGoesToNeedsInput(t *testing.T) {
 		t.Fatalf("recover: %+v %+v %v", failed, alive, err)
 	}
 	e.svc.Recovered(bg, failed)
-	if it := e.item(id); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "restart") {
-		t.Fatalf("item = %+v", it)
+	if it := e.item(id); it.Phase != domain.PhaseOpen || it.Ask != nil || failed[0].Fault == nil || failed[0].Fault.Code != domain.FaultLost {
+		t.Fatalf("item = %+v fault = %+v", it, failed[0].Fault)
 	}
+	e.assertUnrecorded(t, id, "restart")
 	if n := len(e.runList()); n != 1 {
 		t.Fatalf("runs = %d", n)
 	}
@@ -873,7 +903,7 @@ func TestWakeDeclarationLaunchesWakeRun(t *testing.T) {
 	if res.Run.ID != r.Run.ID || res.Run.State != domain.RunTimeout {
 		t.Fatalf("result: %+v", res.Run)
 	}
-	if it := e.item(id); it.Phase != domain.PhaseNeedsInput {
+	if it := e.item(id); it.Phase != domain.PhaseOpen || it.Ask != nil { // 超时是运行故障，不是问题（2026-11-20）
 		t.Fatalf("timed out wake run: item = %s", it.Phase)
 	}
 	if _, err := os.Stat(filepath.Join(e.runs, r.Run.ID, "ran")); !os.IsNotExist(err) {

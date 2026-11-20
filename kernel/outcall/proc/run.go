@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
@@ -261,6 +263,7 @@ func scan(rows *store.Rows) (Record, error) {
 		t := time.Unix(0, finished)
 		r.FinishedAt = &t
 	}
+	r.Fault = FaultOf(r.State, r.ExitCode, reason, r.TimeoutSec)
 	rec.Run, rec.Queue, rec.Explicit, rec.PGID, rec.Reason = r, Queue(queue), explicit != 0, int(pgid), reason
 	return rec, nil
 }
@@ -372,4 +375,42 @@ func Settle(tx *store.Tx, id string, state domain.RunState, exit *int, reason st
 	_, err = tx.Exec("UPDATE outcall_run SET state = ?, exit_code = ?, finished_at = ?, reason = ?, pgid = 0 WHERE id = ?",
 		string(state), ec, now.UnixNano(), reason, id)
 	return err
+}
+
+// 失败附注里由本包写下的固定前缀（dispatcher.exec、Recover）；FaultOf 据它们归类，不解析程序输出。
+const (
+	reasonShutdown  = "shutdown"
+	reasonRestarted = "no live process after restart"
+)
+
+// FaultOf 把终态、退出码与失败附注归成稳定的类别码（§6.11）：成功、未结束返回 nil。
+// 参数只含退出码与时限；失败附注（可能带程序输出的末行）不进参数，只留在账本供 apa why 查看。
+func FaultOf(state domain.RunState, exit *int, reason string, timeoutSec int) *domain.Fault {
+	f := func(c domain.RunFaultCode, kv ...string) *domain.Fault {
+		out := &domain.Fault{Code: c}
+		for i := 0; i+1 < len(kv); i += 2 {
+			if out.Params == nil {
+				out.Params = map[string]string{}
+			}
+			out.Params[kv[i]] = kv[i+1]
+		}
+		return out
+	}
+	switch {
+	case state == domain.RunTimeout:
+		return f(domain.FaultTimeout, "timeout", strconv.Itoa(timeoutSec))
+	case state != domain.RunFailed:
+		return nil
+	case reason == reasonShutdown || reason == reasonRestarted || strings.HasPrefix(reason, "record process group"):
+		return f(domain.FaultLost)
+	case exit == nil:
+		return f(domain.FaultStartFailed)
+	case *exit == 126:
+		return f(domain.FaultExecDenied, "exit", "126")
+	case *exit == 127:
+		return f(domain.FaultExecNotFound, "exit", "127")
+	case *exit < 0:
+		return f(domain.FaultKilled)
+	}
+	return f(domain.FaultExitNonzero, "exit", strconv.Itoa(*exit))
 }

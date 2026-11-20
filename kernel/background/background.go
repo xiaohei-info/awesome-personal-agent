@@ -552,15 +552,15 @@ func (s *Service) refuse(ctx context.Context, c rules.Call, f facts, reason stri
 	if f.item.Phase == domain.PhaseNeedsInput {
 		return nil
 	}
-	if _, err := c.Do("item.update", map[string]any{"id": f.item.ID, "ask": askFor(reason), "reason": reason}); err != nil {
+	if _, err := c.Do("item.update", map[string]any{"id": f.item.ID, "ask": askFor(domain.AskBackgroundRefused, reason), "reason": reason}); err != nil {
 		return err
 	}
 	_, err := c.Do("item.transition", map[string]any{"id": f.item.ID, "to": domain.PhaseNeedsInput, "reason": reason})
 	return err
 }
 
-func askFor(reason string) map[string]any {
-	return map[string]any{"question": "后台运行未完成：" + reason, "options": []domain.AskOption{
+func askFor(code domain.AskCode, reason string) map[string]any {
+	return map[string]any{"question": "后台运行未完成：" + reason, "code": code, "params": map[string]string{"detail": reason}, "options": []domain.AskOption{
 		{ID: "rerun", Label: "重新运行"}, {ID: "reassign", Label: "改派"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
 }
 
@@ -636,13 +636,15 @@ func (s *Service) settle(ctx context.Context, res proc.Result) error {
 		return err
 	}
 	failure := ""
+	faulted := run.State != domain.RunSucceeded
 	switch {
-	case run.State != domain.RunSucceeded:
+	case faulted:
 		failure = "运行" + string(run.State) + "：" + res.Reason
 	case it.Phase == domain.PhaseOpen:
 		failure = "运行结束，事项仍是 open，没有回执"
 	}
-	if failure != "" && it.Phase != domain.PhaseNeedsInput && !it.Phase.Terminal() { // 运行者自己提了问题就保留它的问题
+	// 运行故障是事件不是问题：记 run.finished（带类别码）并进健康视图，事项阶段不变；跑完了却没交回才问本人（§6.14 第 20 条）。
+	if failure != "" && !faulted && it.Phase != domain.PhaseNeedsInput && !it.Phase.Terminal() { // 运行者自己提了问题就保留它的问题
 		if err := s.needsInput(ctx, it.ID, failure); err != nil {
 			return err
 		}
@@ -655,7 +657,7 @@ func (s *Service) needsInput(ctx context.Context, itemID, reason string) error {
 		cmd string
 		in  map[string]any
 	}{
-		{"item.update", map[string]any{"id": itemID, "ask": askFor(reason), "reason": "background run failed"}},
+		{"item.update", map[string]any{"id": itemID, "ask": askFor(domain.AskBackgroundIncomplete, reason), "reason": "background run failed"}},
 		{"item.transition", map[string]any{"id": itemID, "to": domain.PhaseNeedsInput, "reason": "background run: " + reason}},
 	} {
 		b, _ := json.Marshal(step.in)
@@ -671,6 +673,14 @@ func (s *Service) needsInput(ctx context.Context, itemID, reason string) error {
 }
 
 // record 记会话 id（续接用），并追加一条 actor=agent 的 Event。
+// faultOf 取运行故障的类别码；恢复时落账的运行由调用方给出终态，这里补算。
+func faultOf(r domain.Run) *domain.Fault {
+	if r.Fault != nil {
+		return r.Fault
+	}
+	return proc.FaultOf(r.State, r.ExitCode, "", r.TimeoutSec)
+}
+
 func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID, failure string) error {
 	if sessionID == "" {
 		sessionID = run.SessionID
@@ -680,7 +690,7 @@ func (s *Service) record(ctx context.Context, run domain.Run, itemID, sessionID,
 		state = "failed"
 	}
 	body, err := json.Marshal(map[string]any{"run_id": run.ID, "category": "background", "runner": run.Runner, "state": state,
-		"session_id": sessionID, "error": failure})
+		"session_id": sessionID, "error": failure, "recorded": failure == "", "fault": faultOf(run)})
 	if err != nil {
 		return err
 	}

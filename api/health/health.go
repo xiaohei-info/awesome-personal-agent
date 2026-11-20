@@ -36,6 +36,27 @@ type Signal struct {
 	Detail   any    `json:"detail,omitempty"`
 	// Rejections 只有 pack_rejections 给：逐个列出被拒的包、来源与原因（要改的字段和 C.7 的新写法）。detail 仍是包名列表。
 	Rejections []PackRejection `json:"rejections,omitempty"`
+	// Receipts 只有 receipt_failures 给：逐条列出被拒的命令、退出码与原因码，展示层据原因码说人话、给下一步。
+	// detail 仍是对象 id 列表。
+	Receipts []ReceiptRejection `json:"receipts,omitempty"`
+}
+
+// ReceiptRejection 是 receipt_failures 的一条：只含机制（命令、退出码、稳定的原因码、凭据），不带告警里的原因原文——
+// 那可能夹着账本内容；要原文的人经操作记录按自己的权限去看。
+type ReceiptRejection struct {
+	Object     string      `json:"object"`
+	Command    string      `json:"command"`
+	Exit       int         `json:"exit"`
+	Code       domain.Code `json:"code,omitempty"`
+	Credential string      `json:"credential"`
+}
+
+// RunFailure 是 outcall.detail.failures 的一条：失败的 Agent 运行、为哪件事跑、故障类别码。
+type RunFailure struct {
+	Run      string             `json:"run"`
+	Target   string             `json:"target"`
+	Category domain.RunCategory `json:"category"`
+	Fault    *domain.Fault      `json:"fault,omitempty"`
 }
 
 // PackRejection 是 pack_rejections 的一条。
@@ -116,8 +137,12 @@ func build(v khealth.View, rejudgeDays int) Report {
 	queue := func(q khealth.QueueHealth) map[string]any {
 		return map[string]any{"running": q.Running, "queued": q.Queued, "longest_wait_seconds": int64(q.LongestWait.Seconds())}
 	}
+	failures := make([]RunFailure, 0, len(v.Outcall.Failures))
+	for _, r := range v.Outcall.Failures {
+		failures = append(failures, RunFailure{Run: r.ID, Target: r.Target, Category: r.Category, Fault: r.Fault})
+	}
 	outcall := map[string]any{"long": queue(v.Outcall.Long), "short": queue(v.Outcall.Short),
-		"timeouts": ids(v.Outcall.Timeouts, func(r domain.Run) string { return r.ID })}
+		"timeouts": ids(v.Outcall.Timeouts, func(r domain.Run) string { return r.ID }), "failures": failures}
 	type modelDetail struct {
 		Kind     string `json:"kind"`
 		Object   string `json:"object"`
@@ -175,8 +200,8 @@ func build(v khealth.View, rejudgeDays int) Report {
 	rep := Report{Healthy: v.Healthy(), Signals: []Signal{
 		sig("source_failures", len(v.SourceFailures), "a source's latest pulls are failing (its auth or config failures have a needs_input item), or it is disabled; a successful pull clears it",
 			"source page: open the source and fix its credentials or config", srcs),
-		sig("outcall", len(v.Outcall.Timeouts), "an outcall run timed out and is still the latest run of its target (within 24 hours); queue depth and longest wait are in detail",
-			"run detail; if queues stay backed up, raise the matching quota in run settings", outcall),
+		sig("outcall", len(v.Outcall.Timeouts)+len(v.Outcall.Failures), "an outcall run timed out, or an Agent run failed (did not start, exited non-zero), and it is still the latest run of its target (within 24 hours); its result was not recorded and the item was not changed; queue depth, longest wait and each failure's fault code are in detail",
+			"run detail or the item; fix what the fault code names on the host, then start it again from the item or the schedule; if queues stay backed up, raise the matching quota in run settings", outcall),
 		sig("delivery_backlog", len(v.DeliveryBacklog), "deliveries are queued or retrying without being sent",
 			"channel ext and interruption policy", ids(v.DeliveryBacklog, func(d domain.Delivery) string { return d.ID })),
 		sig("chain_trips", len(v.ChainTrips), "the chain-depth breaker stopped a command or background run, and the owner has not handled that item since (objectless trips clear after 24 hours)",
@@ -201,7 +226,15 @@ func build(v khealth.View, rejudgeDays int) Report {
 		warn(sig("clock_lag", len(v.ClockLags), "a timer fired 5 minutes or more after its scheduled time (including timers missed while the kernel was down); clears after an hour without lateness",
 			"health page; if it keeps happening, check host sleep and load", ids(v.ClockLags, func(l khealth.ClockLag) string { return l.Timer }))),
 	}}
-	return withRejections(rep, v.PackRejections)
+	rep = withRejections(rep, v.PackRejections)
+	for i := range rep.Signals {
+		if rep.Signals[i].ID == "receipt_failures" {
+			for _, r := range v.ReceiptFailures {
+				rep.Signals[i].Receipts = append(rep.Signals[i].Receipts, ReceiptRejection{r.Object, r.Command, r.Exit, r.Code, r.Credential})
+			}
+		}
+	}
+	return rep
 }
 
 // withRejections 给 pack_rejections 补上逐字段的原因（C.11）；本人据此就能修。

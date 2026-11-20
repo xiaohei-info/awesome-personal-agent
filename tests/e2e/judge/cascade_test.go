@@ -114,7 +114,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		}
 	})
 
-	f.step(t, "ACT-CAS-04 任务型失败交本人，不重试", func(t *testing.T) {
+	f.step(t, "ACT-CAS-04 任务型失败只记事件，不交本人、不重试", func(t *testing.T) {
 		f.reset()
 		f.mode("exit1")
 		before := len(f.runs("--category", "task"))
@@ -131,20 +131,18 @@ func TestFlowAgentCascade(t *testing.T) {
 		}
 		last := rs[len(rs)-1]
 		eq(t, "Run state", last.State, "failed")
+		// 2026-11-20 改写：运行故障是事件不是问题——事项阶段不变、不挂问题；原因与类别码记在 run.finished。
 		target := f.item(last.Target)
-		eq(t, "目标事项阶段", target["phase"], "needs_input")
-		opts := mustJSON(target["ask"])
-		if q, _ := sub(target, "ask")["question"].(string); !strings.Contains(q, "exit status 1") {
-			t.Errorf("needs_input 应附失败摘要（harness 退出码 1 的原因），实际问题: %q", q)
+		eq(t, "目标事项阶段（不转 needs_input）", target["phase"], "open")
+		if _, has := target["ask"]; has {
+			t.Errorf("运行故障不应挂问题: %v", target["ask"])
 		}
 		fin := taskFinished(f.audit(last.Target, "run.finished"))
 		if len(fin) != 1 || !strings.Contains(fmt.Sprint(fin[0].Payload["error"]), "exit status 1") {
 			t.Errorf("run.finished 应记失败原因: %+v", fin)
 		}
-		for _, want := range []string{"重新运行", "改派", "放弃"} {
-			if !strings.Contains(opts, want) {
-				t.Errorf("needs_input 的选项缺少 %q: %s", want, opts)
-			}
+		if len(fin) == 1 && (fin[0].Payload["recorded"] != false || !strings.Contains(fmt.Sprint(fin[0].Payload["fault"]), "exit_nonzero")) {
+			t.Errorf("run.finished 应写明结果没落账并带类别码: %+v", fin[0].Payload)
 		}
 	})
 

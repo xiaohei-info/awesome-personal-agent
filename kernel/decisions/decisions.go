@@ -13,6 +13,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist/trust"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
@@ -86,7 +87,6 @@ type Screening interface {
 
 // RegisterWith 同 Register；s 非空时，决策请求按 s.Needed 在同一事务置 screening_pending 并调 s.Begin。
 func RegisterWith(x *command.Executor, s Screening) error {
-	x.OnReject(onReject)
 	for _, sp := range []command.Spec{request(s), answer(), proposal("proposal.accept", domain.PhaseOpen, "proposal accepted"),
 		proposal("proposal.dismiss", domain.PhaseDropped, "proposal dismissed")} {
 		if err := x.Register(sp); err != nil {
@@ -187,6 +187,9 @@ func request(scr Screening) command.Spec {
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			v, _ := parse(c.Input)
+			if (v.Ask.Code != "" || v.Ask.Params != nil) && c.Caller.Actor.Type != domain.ActorSystem && c.Caller.Level != authz.LevelWeb {
+				return nil, invalid("ask.code and ask.params are written by the kernel only")
+			}
 			_, pol, err := policy.Current(c.Tx)
 			if err != nil {
 				return nil, err
@@ -227,20 +230,11 @@ func request(scr Screening) command.Spec {
 
 // checkAsk 校验决策请求自身：问题、选项、推荐、下一阶段与超时默认值。
 func checkAsk(a domain.AskInput, it domain.Item) error {
-	if blank(a.Question) {
-		return invalid("ask.question is required")
-	}
-	if len(a.Options) == 0 && !a.FreeText {
-		return invalid("ask needs options or free_text")
+	if e := domain.CheckAsk(a); e != nil { // 问题的最小语义：至少两个真实选项或允许写别的想法（§6.14 第 20 条）
+		return e
 	}
 	ids := map[string]bool{}
 	for _, o := range a.Options {
-		switch {
-		case blank(o.ID) || blank(o.Label):
-			return invalid("every option needs an id and a label")
-		case ids[o.ID]:
-			return invalid("duplicate option id " + o.ID)
-		}
 		ids[o.ID] = true
 		switch o.NextPhase() {
 		case domain.PhaseOpen, domain.PhaseDropped:
@@ -403,51 +397,79 @@ func proposal(name string, to domain.Phase, def string) command.Spec {
 }
 
 // ---- 依据不足不静默（§14.5） ----
+//
+// 退出码 23 的代理写入不生效、阶段不变，不产出问题：拒绝本身已在同一事务记为 command.rejected，
+// 事项详情、事项列表、决策待办流与建议流读它标明"谁的什么操作被拒、事项未被修改"（api/items.LastRejection）。
+// 早先的版本把 open、waiting 的事项转 needs_input 并挂一个只有"继续"的内核问题；那不是决定，见 WithdrawProxyRejectionAsks。
 
-// rejectActor 是内核代写 ask 的操作者。
-var rejectActor = domain.Actor{Type: domain.ActorSystem, Principal: "system:proxy-rejection", Via: domain.ViaClock}
+// ProxyRejectionActor 是早先版本为被拒的代理写入代写问题的操作者；只用来认出这些升级前留下的问题。
+const ProxyRejectionActor = "system:proxy-rejection"
 
-// onReject 在记 command.rejected 的同一事务里处理退出码 23：open、waiting 的事项转 needs_input 并附内核生成的 ask；
-// needs_input、proposed、已终结的事项与不对应事项的命令不变。ask 只写操作者、命令名和拒绝原因，不带 agent 自述的内容，
-// risk_class 固定 web_only（不初筛，只有本人在 Web 能答），选项只有"继续"，回答后回 open，不重放被拒绝的修改。
-func onReject(tx *store.Tx, r command.Rejection) error {
-	if r.Exit != domain.ExitBasisRequired || r.Object == "" {
-		return nil
-	}
-	it, err := items.Get(tx, r.Object)
-	var de *domain.Error
-	if errors.As(err, &de) && de.Code == domain.CodeNotFound {
-		return nil // 对象不是事项（项目、来源、实例）
-	}
+// withdrawActor 是撤回这些问题的内核身份。
+var withdrawActor = domain.Actor{Type: domain.ActorSystem, Principal: "system:ask-withdraw", Via: domain.ViaClock}
+
+// WithdrawProxyRejectionAsks 把升级前为被拒的代理写入挂上的单选项问题降级为通知（§16.5）：仍未回答、且最近一次
+// decision.requested 由 ProxyRejectionActor 写下的事项，回到挂问题之前的阶段（open，或带原 waiting_on 的 waiting），
+// 去掉问题，记 item.phase_changed。它不替本人选任何选项（不写 resolution）；拒绝记录照旧，事项详情仍能看到。
+// 幂等：撤回过的事项已不在 needs_input。返回撤回的事项 id。
+func WithdrawProxyRejectionAsks(tx *store.Tx, now time.Time) ([]string, error) {
+	its, err := items.List(tx, items.Filter{Phase: domain.PhaseNeedsInput})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if it.Phase != domain.PhaseOpen && it.Phase != domain.PhaseWaiting {
-		return nil
+	var done []string
+	for _, it := range its {
+		if it.Ask == nil || it.Ask.Resolution != nil {
+			continue
+		}
+		es, err := eventlog.ReadObject(tx, it.ID)
+		if err != nil {
+			return nil, err
+		}
+		var req *domain.Event
+		for i := len(es) - 1; i >= 0; i-- {
+			if es[i].Event.Type == domain.EvDecisionRequested {
+				req = &es[i].Event
+				break
+			}
+		}
+		if req == nil || req.Actor.Principal != ProxyRejectionActor {
+			continue
+		}
+		var snap struct {
+			Before *domain.Item `json:"before"`
+		}
+		if json.Unmarshal(req.Payload, &snap) != nil || snap.Before == nil {
+			continue
+		}
+		prev := snap.Before
+		depth, err := items.ChainDepth(tx, it.ID)
+		if err != nil {
+			return nil, err
+		}
+		_, _, body, err := items.Revise(tx, it.ID, "transition", now, func(x *domain.Item) error {
+			x.Ask, x.Phase, x.WaitingOn = nil, domain.PhaseOpen, nil
+			if prev.Phase == domain.PhaseWaiting && prev.WaitingOn != nil {
+				x.Phase, x.WaitingOn = domain.PhaseWaiting, prev.WaitingOn
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := cancelTimer(tx, it.ID); err != nil {
+			return nil, err
+		}
+		if _, err := command.Bump(tx, it.ID); err != nil {
+			return nil, err
+		}
+		if _, err := eventlog.Append(tx, domain.Event{Type: domain.EvItemPhaseChanged, Object: it.ID, Actor: withdrawActor, ChainDepth: depth,
+			Reason: "withdrew a kernel question that was not a decision: a proxy write was rejected and nothing was changed", Payload: body, At: now}); err != nil {
+			return nil, err
+		}
+		done = append(done, it.ID)
 	}
-	depth, err := items.ChainDepth(tx, it.ID)
-	if err != nil {
-		return err
-	}
-	q := "代理 " + r.Actor.Principal + " 执行 " + r.Command + " 被拒绝：" + r.Why + "。同意请在 Web 直接修改，或签发授权单后让代理重试。"
-	_, _, snap, err := items.Revise(tx, it.ID, "decision.request", r.At, func(it *domain.Item) error {
-		it.Ask = &domain.Ask{AskInput: domain.AskInput{Question: q, Options: []domain.AskOption{{ID: "continue", Label: "继续"}}},
-			AskKernelState: domain.AskKernelState{RiskClass: domain.RiskClassWebOnly}}
-		it.Phase, it.WaitingOn = domain.PhaseNeedsInput, nil
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if err := cancelTimer(tx, it.ID); err != nil {
-		return err
-	}
-	if _, err := command.Bump(tx, it.ID); err != nil {
-		return err
-	}
-	_, err = eventlog.Append(tx, domain.Event{Type: domain.EvDecisionRequested, Object: it.ID, Actor: rejectActor, ChainDepth: depth,
-		Reason: "proxy write rejected: basis required", Payload: snap, At: r.At})
-	return err
+	return done, nil
 }
 
 // ---- 超时默认值 ----

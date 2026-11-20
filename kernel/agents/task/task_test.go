@@ -664,7 +664,8 @@ func TestDelegationChildIsNotClosedByWriteBack(t *testing.T) {
 	}
 }
 
-// ACT-CAS-04：退出码 1 → Run failed，事项进 needs_input，选项含重新运行、改派、放弃；只有一次 Run，不重试。
+// ACT-CAS-04（2026-11-20 改写）：退出码 1 → Run failed。运行故障是事件不是问题：事项阶段不变、不挂问题，
+// run.finished 写明结果没落账并带类别码；只有一次 Run，不重试（§6.4、§6.14 第 20 条）。
 func TestFailureGoesToOwnerWithoutRetry(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "exit1")
@@ -677,17 +678,20 @@ func TestFailureGoesToOwnerWithoutRetry(t *testing.T) {
 		t.Fatalf("run state %s", res.Run.State)
 	}
 	it := e.item(out.Item)
-	if it.Phase != domain.PhaseNeedsInput || strings.Join(askOptionIDs(it), ",") != "rerun,reassign,drop" ||
-		!strings.Contains(it.Ask.Question, "exit status 1") {
-		t.Fatalf("item: %+v", it.Ask)
+	if it.Phase != domain.PhaseOpen || it.Ask != nil {
+		t.Fatalf("a run fault must not become a question: %s %+v", it.Phase, it.Ask)
 	}
+	if f := res.Run.Fault; f == nil || f.Code != domain.FaultExitNonzero || f.Params["exit"] != "1" {
+		t.Fatalf("fault: %+v", res.Run.Fault)
+	}
+	assertFaultEvent(t, e, out.Item, domain.FaultExitNonzero, "exit status 1")
 	time.Sleep(200 * time.Millisecond)
 	if n := len(e.runList()); n != 1 {
 		t.Fatalf("runs: %d", n)
 	}
 }
 
-// §8.3：超时同样进 needs_input。
+// §8.3（2026-11-20 改写）：超时同样是运行故障：事项阶段不变，run.finished 带 timeout 类别码。
 func TestTimeoutGoesToOwner(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "hang")
@@ -698,9 +702,34 @@ func TestTimeoutGoesToOwner(t *testing.T) {
 	if res := e.waitResult(); res.Run.State != domain.RunTimeout {
 		t.Fatalf("run state %s", res.Run.State)
 	}
-	if it := e.item(out.Item); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "timeout") {
+	if it := e.item(out.Item); it.Phase != domain.PhaseOpen || it.Ask != nil {
 		t.Fatalf("item: %+v", it)
 	}
+	assertFaultEvent(t, e, out.Item, domain.FaultTimeout, "timeout")
+}
+
+// assertFaultEvent：事项上的 run.finished 是失败、写明结果没落账、带类别码，失败附注含 want。
+func assertFaultEvent(t *testing.T, e *env, item string, code domain.RunFaultCode, want string) {
+	t.Helper()
+	for _, ev := range e.eventsOfType(domain.EvRunFinished) {
+		if ev.Object != item {
+			continue
+		}
+		var p struct {
+			State    string        `json:"state"`
+			Error    string        `json:"error"`
+			Recorded *bool         `json:"recorded"`
+			Fault    *domain.Fault `json:"fault"`
+		}
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.State != "failed" || p.Recorded == nil || *p.Recorded || p.Fault == nil || p.Fault.Code != code || !strings.Contains(p.Error, want) {
+			t.Fatalf("run.finished payload: %s", ev.Payload)
+		}
+		return
+	}
+	t.Fatalf("no run.finished on %s", item)
 }
 
 // ACT-CMD-02：声明经 declare 提交但未确认时不执行；确认后才拉起。
@@ -900,7 +929,8 @@ func TestTemplateCheckoutCwdRefusedWithoutLocalCheckout(t *testing.T) {
 	}
 }
 
-// 登记的检出目录在磁盘上已不存在：进程起不来，事项转 needs_input，原因带上目录，不伪装成功。
+// 登记的检出目录在磁盘上已不存在：进程起不来。2026-11-20 起这是运行故障（事件）：事项阶段不变，
+// run.finished 的失败附注带上目录、类别码为 start_failed，不伪装成功。
 func TestTemplateCheckoutCwdMissingDirIsVisibleFailure(t *testing.T) {
 	e := setup(t)
 	e.harness("hx", "pwd")
@@ -914,9 +944,10 @@ func TestTemplateCheckoutCwdMissingDirIsVisibleFailure(t *testing.T) {
 	if res := e.waitResult(); res.Run.State != domain.RunFailed {
 		t.Fatalf("run: %+v", res.Run)
 	}
-	if it := e.item(out.Item); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, gone) {
+	if it := e.item(out.Item); it.Phase != domain.PhaseOpen || it.Ask != nil {
 		t.Fatalf("item: %+v", it)
 	}
+	assertFaultEvent(t, e, out.Item, domain.FaultStartFailed, gone)
 }
 
 func TestCommandFollowsDeclaration(t *testing.T) {
@@ -1311,7 +1342,7 @@ func TestLedgerSnapshotHidesScreeningPendingAsk(t *testing.T) {
 	e.st.Update(bg, func(tx *store.Tx) error { // 直接置位内核维护的标记以模拟初筛未返回
 		_, _, _, err := items.Revise(tx, ref.ID, "test", t0, func(it *domain.Item) error {
 			it.Phase = domain.PhaseNeedsInput
-			it.Ask = &domain.Ask{AskInput: domain.AskInput{Question: "q"}, AskKernelState: domain.AskKernelState{ScreeningPending: true}}
+			it.Ask = &domain.Ask{AskInput: domain.AskInput{Question: "q", FreeText: true}, AskKernelState: domain.AskKernelState{ScreeningPending: true}}
 			return nil
 		})
 		return err

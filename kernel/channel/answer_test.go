@@ -263,7 +263,7 @@ func TestChannelAnswerRejections(t *testing.T) {
 	e2 := setup(t)
 	var out struct{ ID string }
 	_ = json.Unmarshal(e2.do(owner, "item.create", map[string]any{"title": "t", "kind": "task", "phase": "open", "assignee": "wrk"}), &out)
-	e2.do(worker, "decision.request", map[string]any{"id": out.ID, "ask": map[string]any{"question": "q", "options": []map[string]any{{"id": "A", "label": "a"}}}})
+	e2.do(worker, "decision.request", map[string]any{"id": out.ID, "ask": map[string]any{"question": "q", "options": []map[string]any{{"id": "A", "label": "a"}, {"id": "A2", "label": "other"}}}})
 	var fresh domain.Delivery
 	e2.update(func(tx *store.Tx) error {
 		g, err := e2.q.Claim(tx, delivery.ChannelRoute("chan"))

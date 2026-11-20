@@ -66,8 +66,9 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		auth03 = target
 		unchanged := func(label string) {
 			t.Helper()
-			if k.item(target)["title"] == "no-basis" || k.item(target)["phase"] != "needs_input" {
-				t.Errorf("%s: 修改不应生效，事项应转 needs_input", label)
+			// 2026-11-20 起被拒的写入不转阶段、不产出问题（§14.5）
+			if it := k.item(target); it["title"] == "no-basis" || it["phase"] != "open" || it["ask"] != nil {
+				t.Errorf("%s: 修改不应生效，事项阶段不变、不挂问题", label)
 			}
 		}
 		k.expect("不带 --evidence 也不带 --grant", k.run(k.DEL, nil, "item", "update", target, "--title", "no-basis", "--reason", "x"), exitBasis)
@@ -209,23 +210,18 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		}
 	})
 	k.step("ACT-AUTH-08 多人会话里的原话不能让 delegate 改别人的事项", func(t *testing.T) {
-		// 先在 Web 回答内核生成的 ask，让事项回到 open。
-		opts, _ := k.ask(auth03)["options"].([]any)
-		if len(opts) == 0 {
-			t.Fatalf("ACT-AUTH-03 留下的事项应带内核生成的 ask: %v", k.ask(auth03))
-		}
-		k.webOK("POST", "/v1/items/"+auth03+"/decide", `{"choice":"`+opts[0].(map[string]any)["id"].(string)+`"}`, 200)
-		eq(t, "回答后阶段", k.phase(auth03), "open")
+		// 2026-11-20 起被拒的写入不转 needs_input、不挂内核问题：ACT-AUTH-03 的事项仍在 open，被拒后也仍在 open。
+		eq(t, "ACT-AUTH-03 之后的阶段", k.phase(auth03), "open")
 		title := k.item(auth03)["title"]
 		k.rejectedNotDirect("group item update", k.run(k.DEL, at("auth-g8", "group"), "item", "update", auth03, "--title", "x", "--reason", "x", "--evidence", "本人说改"))
 		eq(t, "标题不变", k.item(auth03)["title"], title)
-		eq(t, "阶段", k.phase(auth03), "needs_input")
+		eq(t, "阶段不变", k.phase(auth03), "open")
 	})
 
 	k.step("ACT-AUTH-09 delegate 无依据把本人的事项标为完成被拒（SPIKE-DONE-AUTHZ）", func(t *testing.T) {
 		own := k.ownItem("acc-open", "AUTH-I9")
 		k.expect("无依据 transition done", k.run(k.DEL, nil, "item", "transition", own, "--to", "done", "--reason", "x"), exitBasis)
-		eq(t, "AUTH-I9 阶段", k.phase(own), "needs_input")
+		eq(t, "AUTH-I9 阶段（被拒不转阶段，2026-11-20）", k.phase(own), "open")
 		if len(k.auditOf(own, "command.rejected")) == 0 {
 			t.Error("应记 command.rejected")
 		}
@@ -256,7 +252,7 @@ func TestFlowAuthzMatrix(t *testing.T) {
 		eq(t, "范围内阶段", k.phase(inScope), "done")
 		eq(t, "Event 记的授权单", k.lastEvent(inScope, "item.phase_changed").Grant, g)
 		k.expect("范围外", k.run(k.DEL, nil, "item", "transition", outScope, "--to", "done", "--reason", "x", "--grant", g), exitBasis)
-		eq(t, "范围外阶段", k.phase(outScope), "needs_input")
+		eq(t, "范围外阶段（被拒不转阶段，2026-11-20）", k.phase(outScope), "open")
 	})
 
 	k.step("ACT-AUTH-12 多人会话原话不能把本人的事项标为完成", func(t *testing.T) {

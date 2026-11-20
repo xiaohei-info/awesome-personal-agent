@@ -442,7 +442,8 @@ func TestSessionGoneFallsBackToNewSession(t *testing.T) {
 	e.waitResult()
 }
 
-// 其他失败（同一退出码但输出不含声明的片段，如模型端点不可达）不当作会话失效、不重试：按后台运行的收尾转 needs_input。
+// 其他失败（同一退出码但输出不含声明的片段，如模型端点不可达）不当作会话失效、不重试：按后台运行的收尾处理。
+// 2026-11-20 起运行故障是事件不是问题：事项留在 open，不再挂新问题（§6.4、§6.14 第 20 条）。
 func TestOtherResumeFailureIsNotRetried(t *testing.T) {
 	e := setup(t)
 	e.harness(true, true)
@@ -458,7 +459,7 @@ func TestOtherResumeFailureIsNotRetried(t *testing.T) {
 	if n := len(e.runList()); n != 2 {
 		t.Fatalf("runs = %d", n)
 	}
-	if it := e.item(id); it.Phase != domain.PhaseNeedsInput || !strings.Contains(it.Ask.Question, "failed") {
+	if it := e.item(id); it.Phase != domain.PhaseOpen || (it.Ask != nil && it.Ask.Resolution == nil) {
 		t.Fatalf("item = %+v", it)
 	}
 	if n := len(e.ofType(EvSessionLost)); n != 0 {
@@ -543,7 +544,7 @@ func TestNotResumableIsSkipped(t *testing.T) {
 	e.must(owner, "item.transition", map[string]any{"id": root, "to": "open", "reason": "go"})
 	r := e.runList()[0].Run
 	run := runidentity.Identity{Secret: waitFile(t, filepath.Join(e.runs, r.ID, "token"))}
-	e.must(run, "decision.request", map[string]any{"id": root, "ask": map[string]any{"question": "q", "options": []map[string]any{{"id": "A", "label": "a"}}}})
+	e.must(run, "decision.request", map[string]any{"id": root, "ask": map[string]any{"question": "q", "options": []map[string]any{{"id": "A", "label": "a"}, {"id": "A2", "label": "other"}}}})
 	e.release(r.ID)
 	e.waitResult()
 	if out, err := e.svc.Resume(bg, root); err != nil || out != Skipped {

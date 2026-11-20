@@ -393,7 +393,8 @@ func (s *Service) raiseDrift(c *command.Ctx, p domain.Project, rec Render, fileH
 		Project: p.ID,
 		Ask: &domain.Ask{AskInput: domain.AskInput{
 			Question: "仓库 " + rec.Repo + " 的 AGENTS.md 被手改过（diff 见正文）。合回成项目规范的修订、用渲染结果覆盖，还是本次忽略？",
-			Options:  opts, Recommend: ChoiceMerge,
+			Code:     domain.AskAgentsMDDrift, Params: map[string]string{"repo": rec.Repo},
+			Options: opts, Recommend: ChoiceMerge,
 		}},
 		ItemKernelState: domain.ItemKernelState{ChainDepth: c.ChainDepth}}
 	child, snap, err := items.Create(c.Tx, child, "", c.Now())

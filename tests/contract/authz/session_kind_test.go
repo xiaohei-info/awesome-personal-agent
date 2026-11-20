@@ -59,7 +59,7 @@ func TestOwnerWordsOnlyInDirectSessions(t *testing.T) {
 		if strings.Contains(string(a.Payload)+a.Reason, "MARKER-SKD") {
 			t.Fatalf("kind %q: rejection record carries user content", kind)
 		}
-		e.answerAsk(t, other) // 被拒后事项转 needs_input，让下一轮从 open 开始
+		e.unchangedAfterRejection(t, other) // 2026-11-20 起被拒的写入不转阶段：事项仍在 open，下一轮照常
 	}
 	rec := e.apiKind("DEL", "skd-s", "direct", "PATCH", "/v1/items/"+other, patch("edited"), skdWords)
 	if rec.Code != 200 || e.get(other).Summary != "edited" {
@@ -74,16 +74,11 @@ func TestOwnerWordsOnlyInDirectSessions(t *testing.T) {
 	t.Fatal("accepted write must record harness, session and session kind in the actor")
 }
 
-// answerAsk 在 Web 回答内核为被拒绝的代答生成的 ask，让事项回到 open。
-func (e *env) answerAsk(t *testing.T, id string) {
+// unchangedAfterRejection：被拒的代理写入不生效、不转阶段、不产出问题（§14.5，2026-11-20）。
+func (e *env) unchangedAfterRejection(t *testing.T, id string) {
 	t.Helper()
-	it := e.get(id)
-	if it.Phase != domain.PhaseNeedsInput || it.Ask == nil {
-		t.Fatalf("a rejected write must turn the item to needs_input with a kernel ask: %+v", it)
-	}
-	e.cmd(owner, "decision.answer", map[string]any{"id": id, "choice": it.Ask.Options[0].ID})
-	if e.get(id).Phase != domain.PhaseOpen {
-		t.Fatalf("item did not return to open: %s", e.get(id).Phase)
+	if it := e.get(id); it.Phase != domain.PhaseOpen || it.Ask != nil {
+		t.Fatalf("a rejected write must leave the item as it was, with no question: %+v", it)
 	}
 }
 
@@ -123,7 +118,7 @@ func TestSessionKindDoesNotGateGrantsOwnWorkOrReads(t *testing.T) {
 	}
 }
 
-// ACT-AUTH-09…12（SPIKE-DONE-AUTHZ）：delegate 把本人的事项标为 done 属第二档——无依据 23 并转 needs_input，
+// ACT-AUTH-09…12（SPIKE-DONE-AUTHZ）：delegate 把本人的事项标为 done 属第二档——无依据 23、事项不变（2026-11-20 起不再转 needs_input），
 // direct 会话的原话放行，group 为 session_not_direct，授权单只在范围内放行。
 func TestDelegateDoneOnOwnersItemNeedsWordsInDirectSessionOrGrant(t *testing.T) {
 	e := setup(t)
@@ -134,7 +129,7 @@ func TestDelegateDoneOnOwnersItemNeedsWordsInDirectSessionOrGrant(t *testing.T) 
 	i9 := e.item("", "i9")
 	head := e.rejected()
 	wantReject(t, e.apiKind("DEL", "", "", "POST", "/v1/items/"+i9+"/transition", done(i9), ""), domain.ExitBasisRequired)
-	if e.get(i9).Phase != domain.PhaseNeedsInput || e.rejected() != head+1 {
+	if e.get(i9).Phase != domain.PhaseOpen || e.get(i9).Ask != nil || e.rejected() != head+1 {
 		t.Fatalf("no basis: %s", e.get(i9).Phase)
 	}
 	i12 := e.item("", "i12")
@@ -154,7 +149,7 @@ func TestDelegateDoneOnOwnersItemNeedsWordsInDirectSessionOrGrant(t *testing.T) 
 	t.Fatal("done by words must record on_behalf_of, evidence, session and session kind")
 }
 
-// ACT-AUTH-11（SPIKE-DONE-AUTHZ）：授权单把本人的事项标为完成——范围内放行且 Event 记 grant；范围外为 23 且事项转 needs_input；
+// ACT-AUTH-11（SPIKE-DONE-AUTHZ）：授权单把本人的事项标为完成——范围内放行且 Event 记 grant；范围外为 23、事项不变（2026-11-20 起不转 needs_input）；
 // 授权单的 actions 不含 item.transition 也是 23。授权单不看会话类型（这里不带会话类型）。
 func TestGrantAuthorisesDoneOnlyInScope(t *testing.T) {
 	e := setup(t)
@@ -193,7 +188,7 @@ func TestGrantAuthorisesDoneOnlyInScope(t *testing.T) {
 
 	rej := e.rejected()
 	e.wantExit(domain.ExitBasisRequired, e.asKind("DEL", "", ""), "item.transition", with(outScope), withGrant(g.ID))
-	if e.get(outScope).Phase != domain.PhaseNeedsInput || e.rejected() != rej+1 {
+	if e.get(outScope).Phase != domain.PhaseOpen || e.get(outScope).Ask != nil || e.rejected() != rej+1 {
 		t.Fatalf("out of scope: %s", e.get(outScope).Phase)
 	}
 

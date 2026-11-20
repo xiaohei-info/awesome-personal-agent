@@ -53,7 +53,7 @@ func seed(t *testing.T, st *store.Store, unattended bool, screening ...bool) str
 		in := domain.Item{Kind: domain.KindTask, Phase: domain.PhaseProposed, Title: "work",
 			ItemKernelState: domain.ItemKernelState{Unattended: unattended}}
 		if len(screening) > 0 && screening[0] {
-			in.Ask = &domain.Ask{AskInput: domain.AskInput{Question: "q?"}, AskKernelState: domain.AskKernelState{ScreeningPending: true}}
+			in.Ask = &domain.Ask{AskInput: domain.AskInput{Question: "q?", FreeText: true}, AskKernelState: domain.AskKernelState{ScreeningPending: true}}
 		}
 		it, _, err := items.Create(tx, in, "", t0)
 		if err != nil {

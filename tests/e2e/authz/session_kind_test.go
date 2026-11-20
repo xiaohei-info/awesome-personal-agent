@@ -121,20 +121,18 @@ func TestFlowSessionKind(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-SKD-08 非私聊会话修改本人的事项被拒，事项转 needs_input", func(t *testing.T) {
-		title := k.item(i1)["title"]
+	k.step("ACT-SKD-08 非私聊会话修改本人的事项被拒，事项不变、不产出问题", func(t *testing.T) { // 2026-11-20 改写（§14.5）
+		before := k.item(i1)
 		k.rejectedNotDirect("group item update", k.run(k.DEL, at("skd-s7", "group"), "item", "update", i1, "--title", "改个标题", "--reason", "x", "--evidence", "帮我改标题"))
 		it := k.item(i1)
-		eq(t, "标题不变", it["title"], title)
-		eq(t, "SKD-I1 阶段", it["phase"], "needs_input")
-		a, _ := it["ask"].(map[string]any)
-		eq(t, "ask.risk_class", a["risk_class"], "web_only")
-		opts, _ := a["options"].([]any)
-		if len(opts) != 1 || opts[0].(map[string]any)["label"] != "继续" {
-			t.Errorf("内核生成的 ask 选项只能是“继续”: %v", a["options"])
+		eq(t, "标题不变", it["title"], before["title"])
+		eq(t, "SKD-I1 阶段不变", it["phase"], before["phase"])
+		if _, has := it["ask"]; has {
+			t.Errorf("被拒的写入不应产出问题: %v", it["ask"])
 		}
-		raw, _ := json.Marshal(a)
-		notContains(t, "内核生成的 ask", string(raw), "改个标题")
+		if rej := k.lastRejection(i1); rej == nil || rej["code"] != "session_not_direct" {
+			t.Errorf("事项上应标明这次被拒的操作: %v", rej)
+		}
 	})
 
 	k.step("ACT-SKD-09 授权单不受会话类型影响", func(t *testing.T) {
@@ -148,6 +146,12 @@ func TestFlowSessionKind(t *testing.T) {
 			eq(t, "on_behalf_of", ev.Actor["on_behalf_of"], "owner")
 			eq(t, "Event 记的授权单", ev.Grant, g)
 		}
+		// 授权单按被授权方生效（2026-11-20）：同一 Agent 不带 --grant，在多人会话里也命中这张单，Event 记 grant id。
+		implicit := k.decision("acc-open", q)
+		k.expect("group 不带 --grant", k.run(k.DEL, at("skd-s9", "group"), "decide", implicit, "--option", "A", "--evidence", "同意 A"), 0)
+		eq(t, "按被授权方命中的授权单", k.lastEvent(implicit, "decision.resolved").Grant, g)
+		// 撤销后，后面各步照常检验"没有授权时只认私聊里的本人原话"。
+		k.webOK("POST", "/v1/settings/grants/"+g+"/revoke", `{"reason":"e2e"}`, 200)
 	})
 
 	k.step("ACT-SKD-10 agent 自己的工作（第一档）在非私聊会话里照常", func(t *testing.T) {

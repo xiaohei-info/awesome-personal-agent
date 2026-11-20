@@ -151,7 +151,7 @@ func TestTodayGroups(t *testing.T) {
 	e.create(t, owner, map[string]any{"title": "B", "phase": "open", "planned_for": day(e, 0)})
 	e.create(t, owner, map[string]any{"title": "C", "phase": "open", "planned_for": day(e, 1)})
 	e.create(t, owner, map[string]any{"title": "E", "phase": "done", "planned_for": day(e, 0), "reason": "r"})
-	pend := e.create(t, owner, map[string]any{"title": "G", "phase": "needs_input", "ask": map[string]any{"question": "q?"}})
+	pend := e.create(t, owner, map[string]any{"title": "G", "phase": "needs_input", "ask": map[string]any{"question": "q?", "free_text": true}})
 	stale := e.create(t, owner, map[string]any{"title": "S", "phase": "open"})
 	fresh := e.create(t, owner, map[string]any{"title": "F", "phase": "open"})
 	e.now = e.now.Add(StaleAfter + time.Hour)
@@ -213,7 +213,7 @@ func TestPlannedForKeepsPhaseInvariants(t *testing.T) {
 	e := setup(t)
 	w := e.create(t, owner, map[string]any{"phase": "waiting", "assignee": "wrk", "planned_for": day(e, 1),
 		"waiting_on": map[string]any{"kind": "external", "ref": "x"}})
-	n := e.create(t, owner, map[string]any{"phase": "needs_input", "assignee": "wrk", "planned_for": day(e, 1), "ask": map[string]any{"question": "q?"}})
+	n := e.create(t, owner, map[string]any{"phase": "needs_input", "assignee": "wrk", "planned_for": day(e, 1), "ask": map[string]any{"question": "q?", "free_text": true}})
 	if _, err := e.do(worker, "item.update", map[string]any{"id": w, "waiting_on": nil}); exit(err) != domain.ExitUsage {
 		t.Fatalf("clearing waiting_on on a waiting item must be rejected: %v", err)
 	}

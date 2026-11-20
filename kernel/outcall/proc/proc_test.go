@@ -780,3 +780,44 @@ func TestRawStdoutKeepsBinaryAndFlagsOverflow(t *testing.T) {
 		t.Fatalf("overflow=%v state=%s stdout=%q", res.Overflow, res.Run.State, res.Stdout)
 	}
 }
+
+// 运行故障的类别码（§6.11）：只按终态、退出码与本包写下的失败附注前缀归类，不解析程序输出。
+func TestFaultOf(t *testing.T) {
+	n := func(i int) *int { return &i }
+	for _, tc := range []struct {
+		state  domain.RunState
+		exit   *int
+		reason string
+		want   domain.RunFaultCode
+	}{
+		{domain.RunSucceeded, n(0), "", ""},
+		{domain.RunTimeout, n(-1), "timeout after 900s", domain.FaultTimeout},
+		{domain.RunFailed, nil, "start: work dir: missing", domain.FaultStartFailed},
+		{domain.RunFailed, n(126), "exit status 126: sh: Operation not permitted", domain.FaultExecDenied},
+		{domain.RunFailed, n(127), "exit status 127", domain.FaultExecNotFound},
+		{domain.RunFailed, n(1), "exit status 1", domain.FaultExitNonzero},
+		{domain.RunFailed, n(-1), "wait: boom", domain.FaultKilled},
+		{domain.RunFailed, n(-1), "shutdown", domain.FaultLost},
+		{domain.RunFailed, nil, "no live process after restart", domain.FaultLost},
+	} {
+		f := FaultOf(tc.state, tc.exit, tc.reason, 900)
+		if (f == nil) != (tc.want == "") || (f != nil && f.Code != tc.want) {
+			t.Errorf("%s %v %q: got %+v, want %s", tc.state, tc.exit, tc.reason, f, tc.want)
+		}
+	}
+	if f := FaultOf(domain.RunFailed, n(1), "exit status 1: secret token xyz", 0); f.Params["exit"] != "1" || len(f.Params) != 1 {
+		t.Errorf("params must carry only mechanism values: %+v", f.Params)
+	}
+}
+
+// 非 0 退出的失败附注接上 stderr 最后一个非空行（最多 300 字节），"为什么没跑起来"才有据可查。
+func TestWithStderrKeepsLastLine(t *testing.T) {
+	var errb tail
+	errb.Write([]byte("warming up\n/usr/bin/agent-cli: line 4: /x/agent-cli: Operation not permitted\n\n"))
+	if got := withStderr("exit status 126", &errb); got != "exit status 126: /usr/bin/agent-cli: line 4: /x/agent-cli: Operation not permitted" {
+		t.Fatalf("got %q", got)
+	}
+	if got := withStderr("exit status 1", &tail{}); got != "exit status 1" {
+		t.Fatalf("empty stderr: %q", got)
+	}
+}

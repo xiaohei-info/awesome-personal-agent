@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/agents/direct"
@@ -136,6 +137,7 @@ func (o Options) run(ctx context.Context, c rules.Call) error {
 	}
 	_, err = c.Do("decision.request", map[string]any{"id": s.parent.ID, "reason": "delegation verify gate: judgment " + v.Record.ID, "ask": domain.AskInput{
 		Question: fmt.Sprintf("委派「%s」已回执完成，需要你核实（%s）。是否采信该结果？", s.child.Title, why),
+		Code:     domain.AskVerifyDelegation, Params: map[string]string{"title": s.child.Title, "low_confidence": strconv.FormatBool(v.LowConfidence)},
 		Options: []domain.AskOption{
 			{ID: OptAccept, Label: "采信该结果"},
 			{ID: OptRework, Label: "不采信，由我决定如何重新委派"},

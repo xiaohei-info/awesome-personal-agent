@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -640,8 +641,8 @@ func TestReportDoneNeedsResultEvidenceForAnyKind(t *testing.T) {
 	}
 }
 
-// §14.5 失败可见：绑定不成立的回执既让子事项转 needs_input 又记 health.alert（同一事务）；
-// 报 done 缺结果证据（退出码 2）只记 health.alert，事项不变。
+// §14.5 失败可见：绑定不成立的回执记 health.alert（同一事务）。2026-11-20 起被拒的写入不再把子事项转 needs_input：
+// 子事项阶段与版本不变，告警带原因码；报 done 缺结果证据（退出码 2）同样只记 health.alert，事项不变。
 func TestRejectedReceiptTurnsChildToNeedsInputAndAlerts(t *testing.T) {
 	e := setup(t)
 	if err := decisions.Register(e.x); err != nil {
@@ -667,10 +668,10 @@ func TestRejectedReceiptTurnsChildToNeedsInputAndAlerts(t *testing.T) {
 		t.Fatalf("unbound receipt: %v", err)
 	}
 	got := e.item(t, child)
-	if got.Phase != domain.PhaseNeedsInput || got.Ask == nil || got.Ask.RiskClass != domain.RiskClassWebOnly || got.StatusLabel != "" {
+	if got.Phase != domain.PhaseOpen || got.Ask != nil || got.StatusLabel != "" {
 		t.Fatalf("child after rejected receipt: %+v", got)
 	}
-	if as := alerts(); len(as) != 2 || as[1].Actor.Principal == "" {
+	if as := alerts(); len(as) != 2 || as[1].Actor.Principal == "" || !strings.Contains(string(as[1].Payload), `"code":"basis_required"`) {
 		t.Fatalf("alerts = %+v", as)
 	}
 	e.consistent(t)

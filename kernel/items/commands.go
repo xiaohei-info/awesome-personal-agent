@@ -3,6 +3,7 @@ package items
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -179,6 +180,29 @@ func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item,
 		}
 	}
 	return it, nil
+}
+
+// checkAskWrite 在问题被写入或改写时校验它的最小语义（§6.14 第 20 条，domain.CheckAsk）。
+// 只看这次写下的问题：问题没变（改标题、写回答）时不校验，升级前留下的旧问题照常可读、可答。
+func checkAskWrite(cur, next *domain.Ask) error {
+	if next == nil || (cur != nil && reflect.DeepEqual(cur.AskInput, next.AskInput)) {
+		return nil
+	}
+	if e := domain.CheckAsk(next.AskInput); e != nil {
+		return e
+	}
+	return nil
+}
+
+// askCodeBy：问题的类别码与参数只由内核身份（及 Web 上的本人）写（§6.3），否则 agent 能把自己的问题伪装成内核的类别。
+func askCodeBy(c command.Caller, cur *domain.Ask, next *domain.AskInput) error {
+	if next == nil || (next.Code == "" && next.Params == nil) || c.Actor.Type == domain.ActorSystem || c.Level == authz.LevelWeb {
+		return nil
+	}
+	if cur != nil && cur.Code == next.Code && reflect.DeepEqual(cur.Params, next.Params) {
+		return nil
+	}
+	return invalid("ask.code and ask.params are written by the kernel only")
 }
 
 // checkOrigin：import: 前缀的 origin.source 只由导入写入（§7.1），普通创建与更新都拒绝。
@@ -479,6 +503,9 @@ func (s *svc) create() command.Spec {
 			if e := domain.CheckEntry(it, it.Phase, reason, !blank(v.Evidence)); e != nil {
 				return e
 			}
+			if err := checkAskWrite(nil, it.Ask); err != nil {
+				return err
+			}
 			return s.check(tx, it)
 		},
 		Apply: func(c *command.Ctx) (any, error) {
@@ -486,6 +513,9 @@ func (s *svc) create() command.Spec {
 			// proposal 对外只读，只有入站流水线（内核身份）能写（附录 B.2）。
 			if v.Proposal != nil && c.Caller.Actor.Type != domain.ActorSystem {
 				return nil, invalid("proposal is written by the inbound pipeline only")
+			}
+			if err := askCodeBy(c.Caller, nil, v.Ask); err != nil {
+				return nil, err
 			}
 			it := stamped(v.item(c.Object.ID), c.Now())
 			it.ChainDepth = c.ChainDepth
@@ -546,12 +576,20 @@ func (s *svc) update() command.Spec {
 					return invalid("a delegated item inherits its parent's project and cannot be moved")
 				}
 			}
+			if err := checkAskWrite(cur.Ask, next.Ask); err != nil {
+				return err
+			}
 			return s.check(tx, next)
 		},
 		Apply: func(c *command.Ctx) (any, error) {
 			cur, next, reason, _, err := plan(c.Tx, c.Input)
 			if err != nil {
 				return nil, err
+			}
+			if next.Ask != nil {
+				if err := askCodeBy(c.Caller, cur.Ask, &next.Ask.AskInput); err != nil {
+					return nil, err
+				}
 			}
 			next = stamped(next, c.Now())
 			if err := save(c.Tx, next); err != nil {

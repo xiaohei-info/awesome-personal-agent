@@ -229,7 +229,7 @@ func TestTransitionToNeedsInputNeedsAsk(t *testing.T) {
 	if r := k.apa(auth.Delegate, "item", "transition", id, "--to", "needs_input", "--reason", "q", "--evidence", "owner said so"); r.code == 0 || k.phase(id) != "open" {
 		t.Fatalf("needs_input without ask must fail and keep the phase: %+v", r)
 	}
-	k.ok(auth.Delegate, "item", "update", id, "--ask", `{"question":"which one?"}`, "--reason", "need a choice", "--evidence", "owner said so")
+	k.ok(auth.Delegate, "item", "update", id, "--ask", `{"question":"which one?","free_text":true}`, "--reason", "need a choice", "--evidence", "owner said so")
 	k.ok(auth.Delegate, "item", "transition", id, "--to", "needs_input", "--reason", "q", "--evidence", "owner said so")
 	it := k.item(id)
 	if it["phase"] != "needs_input" || it["ask"].(map[string]any)["question"] != "which one?" {
@@ -424,7 +424,7 @@ func TestMovingIntoProjectWithDisallowedExecutorExits21(t *testing.T) {
 func TestInboxListsPendingAndSuggestions(t *testing.T) {
 	k := newKernel(t)
 	sug := k.idOf(k.ok(auth.Observer, "propose", "--kind", "task", "--title", "suggest"))
-	ask := k.openItem(map[string]any{"kind": "decision", "phase": "needs_input", "ask": map[string]any{"question": "A or B?"}})
+	ask := k.openItem(map[string]any{"kind": "decision", "phase": "needs_input", "ask": map[string]any{"question": "A or B?", "free_text": true}})
 	k.ok(auth.Worker, "item", "transition", k.openItem(), "--to", "done", "--reason", "x")
 	m := k.ok(auth.Observer, "inbox").json(t)
 	ids := func(key string) (out []string) {

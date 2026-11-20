@@ -261,7 +261,7 @@ func TestPhaseEntryConstraints(t *testing.T) {
 	}
 
 	// needs_input 需要 ask；ask 经 update 写入，内核维护字段写不进去。
-	e.must(t, owner, "item.update", map[string]any{"id": task, "ask": map[string]any{"question": "ship?"}})
+	e.must(t, owner, "item.update", map[string]any{"id": task, "ask": map[string]any{"question": "ship?", "free_text": true}})
 	if err := tr(task, map[string]any{"to": "needs_input", "reason": "r"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1121,7 +1121,7 @@ func TestSchemaValueTypes(t *testing.T) {
 func TestLeavingNeedsInputHonoursKernelAskState(t *testing.T) {
 	e := setup(t)
 	mk := func(state domain.AskKernelState) string {
-		id := e.create(t, owner, map[string]any{"phase": "open", "ask": map[string]any{"question": "ok?"}})
+		id := e.create(t, owner, map[string]any{"phase": "open", "ask": map[string]any{"question": "ok?", "free_text": true}})
 		e.must(t, owner, "item.transition", map[string]any{"id": id, "to": "needs_input", "reason": "r"})
 		it := e.get(t, id)
 		it.Ask.AskKernelState = state // 这些字段只有内核能写，测试直接落到投影

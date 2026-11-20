@@ -109,12 +109,13 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		})
 	})
 
-	f.step("ACT-BGG-04 失败或超时交本人", func(t *testing.T) {
+	// 2026-11-20 改写：运行故障（失败、超时）是事件不是问题——事项阶段不变、不挂问题，只有一次 Run。
+	f.step("ACT-BGG-04 失败或超时只记事件，不交本人、不重试", func(t *testing.T) {
 		f.mode("exit1", "")
 		id := f.task("bgg-04-exit1", "acc-work", "acc-main")
 		rs := f.settledFinal(id, 1)
 		eq(t, "退出码 1 的 Run 状态", rs[0].State, "failed")
-		eq(t, "退出码 1 时事项", f.phase(id), "needs_input")
+		eq(t, "退出码 1 时事项（阶段不变）", f.phase(id), "open")
 
 		f.mode("hang", "")
 		id2 := f.task("bgg-04-timeout", "acc-work", "acc-short")
@@ -122,7 +123,7 @@ $APA delegate --parent "$ITEM" --assignee other-host.cli > "$OUT/delegate.out" 2
 		if rs2[0].State == "succeeded" {
 			t.Errorf("超时的 Run 不应成功: %+v", rs2[0])
 		}
-		eq(t, "超时时事项", f.phase(id2), "needs_input")
+		eq(t, "超时时事项（阶段不变）", f.phase(id2), "open")
 		time.Sleep(6 * time.Second) // 不自动重试
 		eq(t, "退出码 1 的 Run 数", len(f.runsOf(id)), 1)
 		eq(t, "超时的 Run 数", len(f.runsOf(id2)), 1)

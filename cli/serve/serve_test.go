@@ -1218,7 +1218,7 @@ func TestResumeChainDepthAlertIsDelivered(t *testing.T) {
 		t.Fatal(err)
 	}
 	k.do(t, command.Chain{}, "decision.request", map[string]any{"id": id, "reason": "need owner",
-		"ask": map[string]any{"question": "继续吗", "options": []map[string]string{{"id": "go", "label": "继续"}}, "resume_note": "从第二步继续"}})
+		"ask": map[string]any{"question": "继续吗", "options": []map[string]string{{"id": "go", "label": "继续"}, {"id": "stop", "label": "先不做"}}, "resume_note": "从第二步继续"}})
 	k.do(t, command.Chain{}, "decision.answer", map[string]string{"id": id, "choice": "go"})
 	k.healthAlertDelivered(t, id)
 }
@@ -1249,7 +1249,7 @@ curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TO
 if [ -f "$d/asked" ]; then sleep 1; exit 0; fi
 touch "$d/asked"
 curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"reason":"need owner","ask":{"question":"继续吗","options":[{"id":"go","label":"继续"}],"resume_note":"从第二步继续"}}' \
+  -d '{"reason":"need owner","ask":{"question":"继续吗","options":[{"id":"go","label":"继续"},{"id":"stop","label":"先不做"}],"resume_note":"从第二步继续"}}' \
   "$APA_URL/v1/items/$item/ask" > "$d/$APA_RUN.ask"
 `
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
@@ -1394,8 +1394,20 @@ curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $APA_TO
 	addr, stop = start(t, home)
 	s = webLogin(t, addr)
 	it.ID = crashed.ID
-	waitItem("recovered run did not settle the item", func(i domain.Item) bool {
-		return i.Phase == domain.PhaseNeedsInput && i.Ask != nil && strings.Contains(i.Ask.Question, "no live process after restart")
+	// 2026-11-20 起运行故障是事件不是问题：重启时没有存活进程的运行按 lost 落账，事项留在 open、不挂问题（§6.4）。
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		_, rb := s.do("GET", "/runs?target="+crashed.ID, "")
+		if strings.Contains(rb, `"state":"failed"`) && strings.Contains(rb, `"code":"lost"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("recovered run did not settle as lost: %s", rb)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	waitItem("recovered run must leave the item open without a question", func(i domain.Item) bool {
+		return i.Phase == domain.PhaseOpen && i.Ask == nil
 	})
 	stop()
 	if logs.Len() != 0 {

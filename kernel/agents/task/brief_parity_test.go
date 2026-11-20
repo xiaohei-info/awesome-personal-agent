@@ -46,7 +46,7 @@ func TestDigestConsumedOnlyAfterSuccessfulBrief(t *testing.T) {
 
 	e.harness("hx", "exit1") // 运行失败
 	e.setDefaultHarness("hx")
-	if id, m := e.runCall("brief"); !strings.Contains(m["digest"], "资讯一") || e.item(id).Phase != domain.PhaseNeedsInput || e.pendingDigest() != 1 {
+	if id, m := e.runCall("brief"); !strings.Contains(m["digest"], "资讯一") || e.item(id).Phase != domain.PhaseOpen || e.pendingDigest() != 1 {
 		t.Fatalf("a failed run must not consume digest: %s pending=%d", e.item(id).Phase, e.pendingDigest())
 	}
 	e.harness("hs", "summary") // 报 done 但没写声明的字段：写回不全
@@ -186,7 +186,7 @@ func TestContextCoverageScopeAndOpenItems(t *testing.T) {
 	_ = json.Unmarshal(e.must(owner, "project.create", map[string]any{"name": "工作"}).Value, &p1)
 	_ = json.Unmarshal(e.must(owner, "project.create", map[string]any{"name": "家里"}).Value, &p2)
 	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "范围内-在途", "phase": "open", "project": p1.ID})
-	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "范围内-待决", "phase": "needs_input", "project": p1.ID, "ask": map[string]any{"question": "选哪个？"}})
+	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "范围内-待决", "phase": "needs_input", "project": p1.ID, "ask": map[string]any{"question": "选哪个？", "free_text": true}})
 	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "范围外-到期", "phase": "open", "project": p2.ID, "deadline": t0})
 	for _, in := range []map[string]any{{"kind": "task", "title": "范围内-完成", "phase": "open", "project": p1.ID}, {"kind": "brief", "title": "OLD-BRIEF", "phase": "open", "project": p1.ID}} {
 		var ref struct{ ID string }
@@ -307,7 +307,7 @@ func TestOnlyAValidBriefConsumesDigestAndSeedsNext(t *testing.T) {
 	if e.item(blocked).Phase == domain.PhaseDone || e.pendingDigest() != 1 {
 		t.Fatalf("blocked brief: %s pending=%d", e.item(blocked).Phase, e.pendingDigest())
 	}
-	if failed, _ := run(t0.Add(50*time.Minute), nil); e.item(failed).Phase != domain.PhaseNeedsInput || e.pendingDigest() != 1 {
+	if failed, _ := run(t0.Add(50*time.Minute), nil); e.item(failed).Phase == domain.PhaseDone || e.pendingDigest() != 1 {
 		t.Fatalf("failed run: %s pending=%d", e.item(failed).Phase, e.pendingDigest())
 	}
 	_, m := run(t0.Add(time.Hour), write)

@@ -43,7 +43,7 @@ func (e *env) asked() string {
 	e.t.Helper()
 	id := e.item(workHost, "ask")
 	e.cmd(e.as("WRK"), "decision.request", map[string]any{"id": id, "ask": map[string]any{"question": "ship?",
-		"options": []map[string]any{{"id": "A", "label": "yes"}}}})
+		"options": []map[string]any{{"id": "A", "label": "yes"}, {"id": "B", "label": "no"}}}})
 	return id
 }
 

@@ -70,6 +70,13 @@ func TestReceiptRejectionsAreTheirOwnSignal(t *testing.T) {
 	if r := v.ReceiptFailures[2]; r.Command != "inbound.capture" || r.Exit != domain.ExitBasisRequired || r.Credential != "dlg" {
 		t.Fatalf("detail %+v", r)
 	}
+	// 告警带原因码与内核的原因（2026-11-20）：展示层据它说出"为什么被拒、下一步做什么"。
+	if r := v.ReceiptFailures[2]; r.Code != domain.CodeBasisRequired || r.Why != "need basis" {
+		t.Fatalf("reason %+v", r)
+	}
+	if r := v.ReceiptFailures[1]; r.Code != domain.CodePermissionDenied {
+		t.Fatalf("reason %+v", r)
+	}
 	if len(v.OtherAlerts) != 1 || v.OtherAlerts[0].Object != "item_4" || len(v.ModelUnavailable) != 0 {
 		t.Fatalf("other alerts changed: %+v %+v", v.OtherAlerts, v.ModelUnavailable)
 	}

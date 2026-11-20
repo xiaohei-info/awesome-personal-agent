@@ -211,7 +211,7 @@ func TestDecisionsHiddenAndWebOnlyNotice(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	q := map[string]any{"question": "go?", "options": []map[string]any{{"id": "A", "label": "yes"}}}
+	q := map[string]any{"question": "go?", "options": []map[string]any{{"id": "A", "label": "yes"}, {"id": "A2", "label": "other"}}}
 	plain := e.item(t, map[string]any{"title": "plain", "assignee": "wrk"})
 	risky := e.item(t, map[string]any{"title": "risky", "assignee": "wrk", "tags": []string{"funds"}})
 	hidden := e.item(t, map[string]any{"title": "hidden", "assignee": "wrk"})
@@ -412,7 +412,7 @@ func TestAllScopeWebOnlyNoticeSpansProjects(t *testing.T) {
 	a := e.project(t, "A", "https://git.example/a.git", "box", "/w/a")
 	b := e.project(t, "B", "https://git.example/b.git", "box", "/w/b")
 	risky := e.item(t, map[string]any{"title": "risky", "project": b, "assignee": "wrk", "tags": []string{"funds"}})
-	e.do(t, worker, "decision.request", map[string]any{"id": risky, "ask": map[string]any{"question": "go?", "options": []map[string]any{{"id": "A", "label": "y"}}}})
+	e.do(t, worker, "decision.request", map[string]any{"id": risky, "ask": map[string]any{"question": "go?", "options": []map[string]any{{"id": "A", "label": "y"}, {"id": "A2", "label": "other"}}}})
 	cwdA := projects.Scope{Cwd: "/w/a", Host: "box"}
 
 	if r := e.build(t, Request{Scope: cwdA}); r.WebOnlyPending || len(r.Items) != 0 {

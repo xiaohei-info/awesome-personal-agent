@@ -45,7 +45,7 @@ func (c Call) Ask(itemID, reason string) error { return askOwner(c.Do, itemID, r
 
 // askOwner 的选项不含"重新运行"：回答不会再次执行规则动作，给这个选项只会让事项回到 open 后无人处理。
 func askOwner(do func(string, any) (command.Result, error), itemID, reason string) error {
-	q := map[string]any{"question": reason, "options": []domain.AskOption{
+	q := map[string]any{"question": reason, "code": domain.AskRuleActionFailed, "params": map[string]string{"detail": reason}, "options": []domain.AskOption{
 		{ID: "handle", Label: "我来处理"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
 	if _, err := do("item.update", map[string]any{"id": itemID, "ask": q, "reason": reason}); err != nil {
 		return err

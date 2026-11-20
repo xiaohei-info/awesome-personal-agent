@@ -217,6 +217,7 @@ func (o Options) local(ctx context.Context, c rules.Call, pack, tmpl string, m m
 // noExecutor 是未配置委派执行者时的起草事项：转 needs_input 写明原因，交本人处理，之后不会每轮重复建。
 func (o Options) noExecutor(c rules.Call, m missing) (string, error) {
 	ask := map[string]any{"question": "无法委派起草项目规范：运行配置没有 guideline_draft_executor，且本机没有该项目的检出",
+		"code": domain.AskGuidelineNoExecutor,
 		"options": []domain.AskOption{{ID: "retry", Label: "已配置，下次检测重新起草", Next: domain.PhaseDone},
 			{ID: "drop", Label: "不需要起草", Next: domain.PhaseDropped}}}
 	res, err := c.Do("item.create", map[string]any{"kind": domain.KindTask, "title": title(m.project), "phase": domain.PhaseNeedsInput,

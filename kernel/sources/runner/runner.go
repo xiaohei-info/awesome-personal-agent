@@ -572,6 +572,8 @@ func (r *Runner) needsInput(ctx context.Context, in resultIn) (string, error) {
 		"origin":   map[string]string{"source": in.SourceID, "ref": in.RunID},
 		"ask": map[string]any{
 			"question":  "来源 " + in.SourceID + " 的拉取返回了认证或配置失败（退出码 2），请检查凭据与配置后再启用或等待下次拉取。",
+			"code":      domain.AskSourceAuthFailed,
+			"params":    map[string]string{"source": in.SourceID},
 			"free_text": true,
 		},
 		"reason": "source run " + in.RunID,

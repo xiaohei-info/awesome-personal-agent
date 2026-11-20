@@ -191,7 +191,7 @@ func TestFlowItemLifecycle(t *testing.T) {
 
 	t.Run("ACT-ITEM-10 调用方不能写内核维护的字段", func(t *testing.T) {
 		c := addTask(t, e, "kernel-fields")
-		ok(t, e.Apa(e.DEL, "", "item", "update", c, "--ask", `{"question":"q?","options":[{"id":"a","label":"A"}]}`, "--reason", "prep", "--evidence", "owner: prep"), "准备 ask")
+		ok(t, e.Apa(e.DEL, "", "item", "update", c, "--ask", `{"question":"q?","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}`, "--reason", "prep", "--evidence", "owner: prep"), "准备 ask")
 		snap := func() [3]any {
 			it := show(t, e, c)
 			ask, _ := it["ask"].(map[string]any)

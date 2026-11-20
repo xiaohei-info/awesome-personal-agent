@@ -111,7 +111,7 @@ func (d *Dispatcher) Recover(ctx context.Context) (failed []domain.Run, alive []
 				alive = append(alive, rec.Run)
 				continue
 			}
-			if err := Settle(tx, rec.Run.ID, domain.RunFailed, nil, "no live process after restart", d.opt.Now()); err != nil {
+			if err := Settle(tx, rec.Run.ID, domain.RunFailed, nil, reasonRestarted, d.opt.Now()); err != nil {
 				return err
 			}
 			got, err := Get(tx, rec.Run.ID)
@@ -391,7 +391,7 @@ func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState
 	case <-timer.C:
 		killed, why = domain.RunTimeout, fmt.Sprintf("timeout after %ds", rec.Run.TimeoutSec)
 	case <-d.ctx.Done():
-		killed, why = domain.RunFailed, "shutdown"
+		killed, why = domain.RunFailed, reasonShutdown
 	}
 	if killed != "" {
 		syscall.Kill(-pgid, syscall.SIGKILL)
@@ -405,7 +405,8 @@ func (d *Dispatcher) exec(rec Record, stdout, stderr io.Writer) (domain.RunState
 	case werr == nil:
 		return domain.RunSucceeded, &code, ""
 	case errors.As(werr, &ee):
-		return domain.RunFailed, &code, fmt.Sprintf("exit status %d", code)
+		// stderr 的最后一行随失败附注落账（不进事件载荷与 /runs），否则"为什么没跑起来"只剩一个退出码。
+		return domain.RunFailed, &code, withStderr(fmt.Sprintf("exit status %d", code), stderr)
 	default: // 管道错误或 WaitDelay 到期等
 		return domain.RunFailed, &code, "wait: " + werr.Error()
 	}
@@ -510,3 +511,20 @@ func (t *tail) bytes() []byte {
 }
 
 func (t *tail) result() ([]byte, bool) { return t.bytes(), false }
+
+// withStderr 在失败附注后接上 stderr 的最后一个非空行，最多 300 字节。
+func withStderr(reason string, stderr io.Writer) string {
+	t, ok := stderr.(*tail)
+	if !ok {
+		return reason
+	}
+	lines := strings.Split(strings.TrimSpace(string(t.bytes())), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if last == "" {
+		return reason
+	}
+	if len(last) > 300 {
+		last = last[len(last)-300:]
+	}
+	return reason + ": " + last
+}

@@ -254,6 +254,8 @@ type Run struct {
 	FinishedAt  *time.Time  `json:"finished_at,omitempty"`
 	TimeoutSec  int         `json:"timeout,omitempty"`
 	Fingerprint string      `json:"fingerprint,omitempty"` // 判断型与生成型的输入指纹
+	// Fault 是失败与超时的类别码（读取时由外呼调用器按终态、退出码与失败附注归类，不另存）；成功与未结束为空。
+	Fault *Fault `json:"fault,omitempty"`
 }
 
 func (r Run) InstanceID() string {

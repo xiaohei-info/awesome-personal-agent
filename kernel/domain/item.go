@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -105,15 +106,41 @@ func (o AskOption) NextPhase() Phase {
 	return o.Next
 }
 
-// AskInput 是调用方可写的决策请求字段。
+// AskInput 是调用方可写的决策请求字段。Code、Params 只由内核身份写入（items、decisions 拒绝其他调用方带它们，§6.3）。
 type AskInput struct {
-	Question         string      `json:"question"`
-	Options          []AskOption `json:"options,omitempty"`
-	Recommend        string      `json:"recommend,omitempty"`
-	FreeText         bool        `json:"free_text,omitempty"`
-	Deadline         *time.Time  `json:"deadline,omitempty"`
-	DefaultOnTimeout string      `json:"default_on_timeout,omitempty"`
-	ResumeNote       string      `json:"resume_note,omitempty"`
+	Question string `json:"question"`
+	// Code 是内核生成的问题的稳定类别码（AskCode），Params 是它的参数；Web 按词表渲染，Question 是给 CLI、渠道与旧版界面的原文兜底。
+	Code             AskCode           `json:"code,omitempty"`
+	Params           map[string]string `json:"params,omitempty"`
+	Options          []AskOption       `json:"options,omitempty"`
+	Recommend        string            `json:"recommend,omitempty"`
+	FreeText         bool              `json:"free_text,omitempty"`
+	Deadline         *time.Time        `json:"deadline,omitempty"`
+	DefaultOnTimeout string            `json:"default_on_timeout,omitempty"`
+	ResumeNote       string            `json:"resume_note,omitempty"`
+}
+
+// CheckAsk 是问题的最小语义（§6.14 第 20 条）：问题非空，选项 id 与名字非空且不重复，并且本人有真实的选择——
+// 至少两个选项，或允许写别的想法。只有一个选项又不能写别的想法的「问题」不需要回答，不能构造。
+func CheckAsk(a AskInput) *Error {
+	if strings.TrimSpace(a.Question) == "" {
+		return NewError(CodeInvalidRequest, "ask.question is required", "fix the request and retry")
+	}
+	ids := map[string]bool{}
+	for _, o := range a.Options {
+		if strings.TrimSpace(o.ID) == "" || strings.TrimSpace(o.Label) == "" {
+			return NewError(CodeInvalidRequest, "every option needs an id and a label", "fix the request and retry")
+		}
+		if ids[o.ID] {
+			return NewError(CodeInvalidRequest, "duplicate option id "+o.ID, "fix the request and retry")
+		}
+		ids[o.ID] = true
+	}
+	if len(a.Options) < 2 && !a.FreeText {
+		return NewError(CodeInvalidRequest, "ask needs at least two options or free_text: a question with one possible answer is not a decision",
+			"offer at least two real choices, allow free_text, or record an event instead of asking")
+	}
+	return nil
 }
 
 // RiskClassWebOnly 是 web_only 初筛升级后写入 risk_class 的值（§14.4）；authz.WebOnly 认它。

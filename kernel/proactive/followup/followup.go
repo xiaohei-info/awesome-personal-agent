@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -549,6 +550,7 @@ func (s *Service) askKeep(ctx context.Context, r rule, it domain.Item, key strin
 	}
 	_, err = s.run(ctx, r, it.ID, key+":ask", "decision.request", map[string]any{"id": it.ID, "reason": "follow-up rounds used up", "ask": domain.AskInput{
 		Question: fmt.Sprintf("「%s」已经提醒过 %d 轮，等待仍没有进展。继续等、你来处理，还是放弃？", it.Title, r.rounds),
+		Code:     domain.AskFollowupRoundsUsed, Params: map[string]string{"title": it.Title, "rounds": strconv.Itoa(r.rounds)},
 		Options: []domain.AskOption{
 			{ID: OptContinue, Label: "继续等"},
 			{ID: OptMine, Label: "我来处理"},

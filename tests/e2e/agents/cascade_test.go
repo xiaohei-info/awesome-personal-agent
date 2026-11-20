@@ -185,7 +185,7 @@ func TestFlowAgentCascade(t *testing.T) {
 		eq(t, "会话 id 取自 stdout 末段", call.Payload["session_id"], "stub-session-1")
 	})
 
-	step("ACT-CAS-04 任务型失败交本人，不重试", func(t *testing.T) {
+	step("ACT-CAS-04 任务型失败只记事件，不交本人、不重试", func(t *testing.T) { // 2026-11-20 改写：运行故障不是问题
 		insufficient()
 		f.mode("exit1")
 		f.task("CAS04 任务型失败", "acc-gen")
@@ -194,19 +194,15 @@ func TestFlowAgentCascade(t *testing.T) {
 		if r.ExitCode == nil || *r.ExitCode != 1 {
 			t.Errorf("退出码 = %v，期望 1", r.ExitCode)
 		}
-		taskCall(r.Target)
+		call := taskCall(r.Target)
 		it := f.item(r.Target)
-		eq(t, "目标事项阶段", it["phase"], "needs_input")
-		ask, _ := it["ask"].(map[string]any)
-		if q, _ := ask["question"].(string); !strings.Contains(q, "exit status 1") {
-			t.Errorf("needs_input 没有附失败摘要: %v", ask["question"])
+		eq(t, "目标事项阶段（不转 needs_input）", it["phase"], "open")
+		if _, has := it["ask"]; has {
+			t.Errorf("运行故障不应挂问题: %v", it["ask"])
 		}
-		var ids []string
-		opts, _ := ask["options"].([]any)
-		for _, o := range opts {
-			ids = append(ids, o.(map[string]any)["id"].(string))
+		if fault, _ := call.Payload["fault"].(map[string]any); fault["code"] != "exit_nonzero" || call.Payload["recorded"] != false {
+			t.Errorf("run.finished 应写明结果没落账并带类别码: %v", call.Payload)
 		}
-		eq(t, "选项", strings.Join(ids, ","), "rerun,reassign,drop")
 		time.Sleep(3 * time.Second)
 		eq(t, "目标事项的 Run 数（不重试）", len(f.runs("--target", r.Target)), 1)
 		eq(t, "任务型 Run 总数", len(f.taskRuns()), 2)

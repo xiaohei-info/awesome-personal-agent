@@ -506,7 +506,7 @@ func (s *Service) refuse(tx *store.Tx, f facts, reason string) error {
 	if err := s.audit(tx, f, EvRefused, reason, nil); err != nil {
 		return err
 	}
-	ask := domain.AskInput{Question: "续接未执行：" + reason, Options: []domain.AskOption{
+	ask := domain.AskInput{Question: "续接未执行：" + reason, Code: domain.AskResumeRefused, Params: map[string]string{"detail": reason}, Options: []domain.AskOption{
 		{ID: "rerun", Label: "重新运行"}, {ID: "reassign", Label: "改派"}, {ID: "drop", Label: "放弃", Next: domain.PhaseDropped}}}
 	now := s.o.Now()
 	_, _, snap, err := items.Revise(tx, f.it.ID, "transition", now, func(it *domain.Item) error {

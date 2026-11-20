@@ -112,7 +112,7 @@ func (e *env) askedFrom(ev string) string {
 	id := e.cmd(owner, "item.create", map[string]any{"kind": "task", "title": "from " + ev, "phase": "open", "assignee": workHost,
 		"ext": map[string]string{"source_event": e.sev[ev]}})
 	e.cmd(e.as("WRK"), "decision.request", map[string]any{"id": id, "ask": map[string]any{"question": "ship?",
-		"options": []map[string]any{{"id": "A", "label": "yes"}}}})
+		"options": []map[string]any{{"id": "A", "label": "yes"}, {"id": "B", "label": "no"}}}})
 	return id
 }
 
@@ -121,7 +121,7 @@ func (e *env) childAsked(parent string) string {
 	e.t.Helper()
 	id := e.cmd(owner, "delegate.create", map[string]any{"parent": parent, "assignee": workHost, "title": "child"})
 	e.cmd(e.as("WRK"), "decision.request", map[string]any{"id": id, "ask": map[string]any{"question": "ship?",
-		"options": []map[string]any{{"id": "A", "label": "yes"}}}})
+		"options": []map[string]any{{"id": "A", "label": "yes"}, {"id": "B", "label": "no"}}}})
 	return id
 }
 
@@ -348,5 +348,50 @@ func revise(e *env, id string, f func(*domain.Item)) {
 		return err
 	}); err != nil {
 		e.t.Fatal(err)
+	}
+}
+
+// 授权单按被授权方生效（§14.5，本人 2026-11-20 裁决）：签给 hermes 的单，hermes 的 delegate 在任何调用通道都能用——
+// 不带 --grant、不报会话类型（命令行直连），或在多人会话里带原话，内核都会找到这张单放行并在 Event 记 grant id。
+// 被授权方仍按内核记录的 harness 匹配：另一把不属于 hermes 的 delegate 照旧 23；撤销后 hermes 也是 23。
+func TestGrantFollowsGranteeAcrossChannels(t *testing.T) {
+	e := agentEnv(t)
+	g := e.agentGrant(nil)
+	gotGrant := func(id string) string {
+		evs := e.events4(id)
+		for i := len(evs) - 1; i >= 0; i-- {
+			if evs[i].Type == domain.EvItemUpdated {
+				return evs[i].Grant
+			}
+		}
+		return ""
+	}
+	cli := e.item(otherHost, "cli")
+	e.cmd(e.asKind("HDEL", "", ""), "item.update", map[string]any{"id": cli, "summary": "by grant"})
+	if gotGrant(cli) != g.ID {
+		t.Fatalf("cli write must record grant %s, got %q", g.ID, gotGrant(cli))
+	}
+	group := e.item(otherHost, "group")
+	e.cmd(e.asKind("HDEL", "s", "group"), "item.update", map[string]any{"id": group, "summary": "by grant"}, func(r *command.Request) { r.Evidence = "owner: yes" })
+	if it := e.get(group); it.Summary != "by grant" || gotGrant(group) != g.ID {
+		t.Fatalf("group session with a grant: %+v grant=%q", it, gotGrant(group))
+	}
+	// 另一个 Agent 的 delegate：A 的授权不给 B 用。
+	e.issue("ODEL", auth.Spec{Kind: auth.Delegate, Harness: "other-agent"})
+	other := e.item(otherHost, "other")
+	e.wantExit(domain.ExitBasisRequired, e.asKind("ODEL", "", ""), "item.update", map[string]any{"id": other, "summary": "x"})
+	// 单上没有的动作照旧拒绝。
+	e.wantExit(domain.ExitBasisRequired, e.asKind("HDEL", "", ""), "item.transition", map[string]any{"id": other, "to": "done", "reason": "x"})
+	// 撤销后同一场景被拒。
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.RevokeGrant(tx, owner.Actor, e.now(), g.ID, "test")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := e.item(otherHost, "after")
+	e.wantExit(domain.ExitBasisRequired, e.asKind("HDEL", "", ""), "item.update", map[string]any{"id": after, "summary": "x"})
+	if e.get(after).Summary != "" {
+		t.Fatal("a rejected write changed the item")
 	}
 }

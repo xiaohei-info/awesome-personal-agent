@@ -505,7 +505,8 @@ func TestRunModeNeverRunsAboveThePermissionCap(t *testing.T) {
 	}
 }
 
-// ACT-RTN-10：运行失败转 needs_input 并写明原因；这条事项只有一个 Run，之后的重新处理不重试。
+// ACT-RTN-10（2026-11-20 改写）：运行失败是运行故障（事件），不转 needs_input、不挂问题，原因与类别码记在 run.finished
+// 与运行记录上（健康视图列出）；这条事项只有一个 Run，之后不重试。
 func TestRunModeFailureGoesToOwnerWithoutRetry(t *testing.T) {
 	e := newEnv(t)
 	e.harness("exit1")
@@ -517,8 +518,11 @@ func TestRunModeFailureGoesToOwnerWithoutRetry(t *testing.T) {
 		t.Fatalf("items: %+v", items)
 	}
 	it := e.item(items[0].ID)
-	if it.Phase != domain.PhaseNeedsInput || it.Ask == nil || it.Ask.Question == "" {
+	if it.Phase != domain.PhaseOpen || it.Ask != nil {
 		t.Fatalf("item: %s %+v", it.Phase, it.Ask)
+	}
+	if rs := e.runList(); len(rs) != 1 || rs[0].Run.Fault == nil || rs[0].Run.Fault.Code != domain.FaultExitNonzero || !strings.Contains(rs[0].Reason, "exit status 1") {
+		t.Fatalf("run must carry the fault code and reason: %+v", rs)
 	}
 	e.tick(t0.Add(24*time.Hour + time.Minute))
 	if n := len(e.runList()); n != 1 {

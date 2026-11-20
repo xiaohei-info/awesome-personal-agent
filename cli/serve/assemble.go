@@ -523,6 +523,16 @@ func (k *kernel) start(ctx context.Context) error {
 	if err := k.loadHostFiles(ctx); err != nil {
 		return err
 	}
+	// 升级前为被拒的代理写入挂的单选项问题降级为通知（§14.5、§16.5）；幂等，之后每次启动都找不到要撤的。
+	if err := k.st.Update(ctx, func(tx *store.Tx) error {
+		ids, err := kdecisions.WithdrawProxyRejectionAsks(tx, clock.Now())
+		if len(ids) > 0 {
+			slog.Info("withdrew proxy-rejection questions", "items", ids)
+		}
+		return err
+	}); err != nil {
+		return err
+	}
 	if err := instances.Seed(ctx, k.x, k.st, k.packs, owner, defaultSchedules); err != nil {
 		return err
 	}

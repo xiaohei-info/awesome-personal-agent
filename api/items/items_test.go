@@ -448,7 +448,7 @@ func TestExportExtCanOnlyReadItems(t *testing.T) {
 	}
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
 		_, _, _, err := kitems.Revise(tx, id, "test", time.Now(), func(it *domain.Item) error {
-			it.Ask = &domain.Ask{AskKernelState: domain.AskKernelState{ScreeningPending: true}}
+			it.Ask = &domain.Ask{AskInput: domain.AskInput{Question: "q", FreeText: true}, AskKernelState: domain.AskKernelState{ScreeningPending: true}}
 			return nil
 		})
 		return err
@@ -578,7 +578,7 @@ func TestTodayOverHTTP(t *testing.T) {
 	tmrw := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
 	a := e.create(e.web, `{"kind":"task","title":"A","phase":"open","planned_for":"`+yday+`"}`)
 	e.create(e.web, `{"kind":"task","title":"C","phase":"open","planned_for":"`+tmrw+`"}`)
-	g := e.create(e.web, `{"kind":"decision","title":"G","phase":"needs_input","ask":{"question":"q?"}}`)
+	g := e.create(e.web, `{"kind":"decision","title":"G","phase":"needs_input","ask":{"question":"q?","free_text":true}}`)
 	rec := e.do("GET", "/v1/today", "", obs)
 	var l map[string][]domain.Item
 	_ = json.Unmarshal(rec.Body.Bytes(), &l)

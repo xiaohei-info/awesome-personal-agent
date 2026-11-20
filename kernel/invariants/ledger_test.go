@@ -125,7 +125,7 @@ func TestInv3PhaseEntryConstraints(t *testing.T) {
 	if it := e.get(t, task); it.WaitingOn == nil || it.WaitingOn.Ref != "bob" {
 		t.Fatalf("waiting_on not recorded: %+v", it)
 	}
-	e.must(t, owner, "item.update", map[string]any{"id": task, "ask": map[string]any{"question": "ship?"}})
+	e.must(t, owner, "item.update", map[string]any{"id": task, "ask": map[string]any{"question": "ship?", "free_text": true}})
 	if err := tr(task, map[string]any{"to": "needs_input", "reason": "r"}); err != nil {
 		t.Fatal(err)
 	}

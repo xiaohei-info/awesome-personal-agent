@@ -218,6 +218,9 @@ type run struct {
 	State    string `json:"state"`
 	ExitCode *int   `json:"exit_code"`
 	Harness  string `json:"harness"`
+	Fault    *struct {
+		Code string `json:"code"`
+	} `json:"fault"`
 }
 
 // runs 是 `apa run list` 的结果（可带筛选参数）。

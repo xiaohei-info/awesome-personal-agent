@@ -116,7 +116,7 @@ func TestBriefMaterialsCarryLedgerSectionsAndWindow(t *testing.T) {
 	for i := 0; i < 52; i++ {
 		prop("建议-" + string(rune('A'+i%26)) + string(rune('a'+i/26)))
 	}
-	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "待决事", "phase": "needs_input", "ask": map[string]any{"question": "要不要？"}})
+	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "待决事", "phase": "needs_input", "ask": map[string]any{"question": "要不要？", "free_text": true}})
 	e.must(owner, "item.create", map[string]any{"kind": "task", "title": "今天到期", "phase": "open", "deadline": t0})
 	var done struct{ ID string }
 	_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "task", "title": "现场完成", "phase": "open"}).Value, &done)

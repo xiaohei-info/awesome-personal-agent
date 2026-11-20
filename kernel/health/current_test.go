@@ -117,3 +117,31 @@ func TestEventAlertsClearOnCurrentEvidence(t *testing.T) {
 		t.Fatalf("after %s: trips=%+v other=%+v", StaleAfter, v.ChainTrips, v.OtherAlerts)
 	}
 }
+
+// Agent 运行故障（2026-11-20）：任务型、后台运行失败且仍是该目标最近一次运行时列为 Outcall.Failures，带类别码，计入异常；
+// 来源与判断的失败有各自的信号，不在这里；之后同一目标再跑一次即被取代。
+func TestAgentRunFailuresListedWithFaultCode(t *testing.T) {
+	e := setup(t)
+	settle := func(r domain.Run, state domain.RunState, exit *int, reason string) {
+		e.update(func(tx *store.Tx) error {
+			if _, err := tx.Exec("UPDATE outcall_run SET state = 'running' WHERE id = ?", r.ID); err != nil {
+				return err
+			}
+			return proc.Settle(tx, r.ID, state, exit, reason, t0)
+		})
+	}
+	denied := 126
+	settle(e.enqueue(domain.RunTask, "item_brief", t0), domain.RunFailed, &denied, "exit status 126: agent-cli: Operation not permitted")
+	settle(e.enqueue(domain.RunSource, "src_a", t0), domain.RunFailed, nil, "spawn failed")
+	v := e.collect(nil)
+	if len(v.Outcall.Failures) != 1 || v.Outcall.Failures[0].Target != "item_brief" || v.Healthy() {
+		t.Fatalf("failures %+v", v.Outcall.Failures)
+	}
+	if f := v.Outcall.Failures[0].Fault; f == nil || f.Code != domain.FaultExecDenied {
+		t.Fatalf("fault %+v", f)
+	}
+	settle(e.enqueue(domain.RunTask, "item_brief", t0), domain.RunSucceeded, nil, "")
+	if v := e.collect(nil); len(v.Outcall.Failures) != 0 {
+		t.Fatalf("superseded: %+v", v.Outcall.Failures)
+	}
+}

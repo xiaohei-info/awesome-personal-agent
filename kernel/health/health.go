@@ -68,6 +68,9 @@ type QueueHealth struct {
 type Outcall struct {
 	Long, Short QueueHealth
 	Timeouts    []domain.Run
+	// Failures 是 Agent 运行（任务型、后台）失败且仍是该目标最近一次运行（结束不到 StaleAfter）：运行故障不再转 needs_input，
+	// 这里是它的出口（§6.4、§15.2）。每条带 Run.Fault 类别码；之后同一目标再跑一次（不论成败）即被取代。
+	Failures []domain.Run
 }
 
 // FollowupKind 是跟进判断失败 health.alert 的 payload.kind（kernel/proactive/followup 写入）。
@@ -109,11 +112,15 @@ type RuleFallback struct {
 }
 
 // ReceiptFailure 是一次回执或捕获被内核拒绝（退出码 2、4、23）的告警；Credential 是被拒绝的操作者（凭据）。
+// Code 是拒绝的稳定原因码（如 basis_required、session_not_direct），Why 是内核的机制性英文原因：展示层按 Code 说人话并给下一步。
+// 升级前的告警载荷没有 code，从同一对象紧挨着的 command.rejected 补上。
 type ReceiptFailure struct {
 	Seq        int64
 	Object     string
 	Command    string
 	Exit       int
+	Code       domain.Code
+	Why        string
 	Credential string
 	at         time.Time
 }
@@ -152,7 +159,7 @@ type View struct {
 
 // Healthy 为真表示异常级信号都正常。未判定积压只是待本人处理的提醒，不影响它。
 func (v View) Healthy() bool {
-	return len(v.SourceFailures) == 0 && len(v.Outcall.Timeouts) == 0 && len(v.DeliveryBacklog) == 0 &&
+	return len(v.SourceFailures) == 0 && len(v.Outcall.Timeouts) == 0 && len(v.Outcall.Failures) == 0 && len(v.DeliveryBacklog) == 0 &&
 		len(v.ChainTrips) == 0 && len(v.AgentsMDDrift) == 0 && len(v.PackRejections) == 0 &&
 		len(v.ModelUnavailable) == 0 && v.Endpoint == "" && len(v.RuleFallbacks) == 0 && len(v.ReceiptFailures) == 0 && len(v.OtherAlerts) == 0
 }
@@ -299,8 +306,13 @@ func outcall(tx *store.Tx, now time.Time) (Outcall, error) {
 		latest[key(r.Run)] = r.Run.ID
 	}
 	for _, r := range recs {
-		if r.Run.State == domain.RunTimeout && latest[key(r.Run)] == r.Run.ID && (r.Run.FinishedAt == nil || now.Sub(*r.Run.FinishedAt) < StaleAfter) {
+		current := latest[key(r.Run)] == r.Run.ID && (r.Run.FinishedAt == nil || now.Sub(*r.Run.FinishedAt) < StaleAfter)
+		switch {
+		case !current:
+		case r.Run.State == domain.RunTimeout:
 			out.Timeouts = append(out.Timeouts, r.Run)
+		case r.Run.State == domain.RunFailed && (r.Run.Category == domain.RunTask || r.Run.Category == domain.RunBackground):
+			out.Failures = append(out.Failures, r.Run)
 		}
 	}
 	return out, nil
@@ -338,11 +350,13 @@ func alerts(tx *store.Tx, now time.Time, ph PackHealth) (model []ModelIssue, rul
 				continue
 			}
 			var p struct {
-				Kind     string `json:"kind"`
-				Rule     string `json:"rule"`
-				Template string `json:"template"`
-				Command  string `json:"command"`
-				Exit     int    `json:"exit"`
+				Kind     string      `json:"kind"`
+				Rule     string      `json:"rule"`
+				Template string      `json:"template"`
+				Command  string      `json:"command"`
+				Exit     int         `json:"exit"`
+				Code     domain.Code `json:"code"`
+				Why      string      `json:"why"`
 			}
 			_ = json.Unmarshal(e.Payload, &p)
 			switch {
@@ -354,7 +368,12 @@ func alerts(tx *store.Tx, now time.Time, ph PackHealth) (model []ModelIssue, rul
 			case p.Kind == ScreeningKind || p.Kind == FollowupKind || p.Kind == DraftKind:
 				model = append(model, ModelIssue{Seq: e.Seq, Kind: p.Kind, Object: e.Object, Reason: e.Reason, template: p.Template, at: e.At})
 			case p.Kind == command.ReceiptKind:
-				receipts = append(receipts, ReceiptFailure{Seq: e.Seq, Object: e.Object, Command: p.Command, Exit: p.Exit, Credential: e.Actor.Principal, at: e.At})
+				if p.Code == "" {
+					if p.Code, err = rejectionCode(tx, e.Object, e.Seq); err != nil {
+						return nil, nil, nil, nil, nil, err
+					}
+				}
+				receipts = append(receipts, ReceiptFailure{Seq: e.Seq, Object: e.Object, Command: p.Command, Exit: p.Exit, Code: p.Code, Why: p.Why, Credential: e.Actor.Principal, at: e.At})
 			case e.Reason == RuleFallbackReason:
 				rules = append(rules, RuleFallback{Seq: e.Seq, Rule: p.Rule, At: e.At, object: e.Object})
 			default:
@@ -383,6 +402,26 @@ func receiptsOpen(tx *store.Tx, rs []ReceiptFailure) ([]ReceiptFailure, error) {
 		}
 	}
 	return open, nil
+}
+
+// rejectionCode 取 seq 之前、同一对象最近一条 command.rejected 的原因码（管线在同一事务里先记拒绝、再记告警）。
+func rejectionCode(tx *store.Tx, obj string, seq int64) (domain.Code, error) {
+	es, err := eventlog.ReadObject(tx, obj)
+	if err != nil {
+		return "", err
+	}
+	for i := len(es) - 1; i >= 0; i-- {
+		e := es[i].Event
+		if e.Seq >= seq || e.Type != domain.EvCommandRejected {
+			continue
+		}
+		var p struct {
+			Code domain.Code `json:"code"`
+		}
+		_ = json.Unmarshal(e.Payload, &p)
+		return p.Code, nil
+	}
+	return "", nil
 }
 
 // terminal 报告 obj 是已终结（done、dropped）的事项；不是事项为假。

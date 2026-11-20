@@ -531,7 +531,9 @@ func TestFlowOutcallProc(t *testing.T) {
 			t.Errorf("超时过早: 距拉起不足 20 秒（%v）", d)
 		}
 		f.waitFor("残留进程清理", 5*time.Second, func() bool { return len(procsIn(dir)) == 0 && !alive(child) })
-		f.waitFor("事项转 needs_input", 10*time.Second, func() bool { return f.phase(r.Target) == "needs_input" })
+		// 2026-11-20 起超时是运行故障（事件）：事项阶段不变、不挂问题，运行带故障类别码 timeout。
+		f.waitFor("运行带故障类别码", 10*time.Second, func() bool { rr := f.runByID(r.ID); return rr.Fault != nil && rr.Fault.Code == "timeout" })
+		eq(t, "超时后的事项阶段（不转 needs_input）", f.phase(r.Target), "open")
 		_ = trig
 	})
 }
@@ -570,7 +572,9 @@ func TestFlowOutcallRestart(t *testing.T) {
 	f.StartKernelAgain()
 
 	f.waitFor("running 的按失败处理", 30*time.Second, func() bool { return f.runByID(a.ID).State == "failed" })
-	f.waitFor("running 的事项转 needs_input", 15*time.Second, func() bool { return f.phase(a.Target) == "needs_input" })
+	// 2026-11-20 起重启时中断的运行是运行故障（lost）：事项阶段不变、不挂问题。
+	f.waitFor("running 的运行带故障类别码 lost", 15*time.Second, func() bool { rr := f.runByID(a.ID); return rr.Fault != nil && rr.Fault.Code == "lost" })
+	eq(t, "中断后的事项阶段（不转 needs_input）", f.phase(a.Target), "open")
 	f.waitFor("queued 的重新执行", 30*time.Second, func() bool { return f.runByID(b.ID).State == "succeeded" })
 	f.waitFor("queued 的事项完成", 15*time.Second, func() bool { return f.phase(b.Target) == "done" })
 	eq(t, "没有 Run 卡在 running 或 queued", count(f.taskRuns(), func(r run) bool { return r.State == "running" || r.State == "queued" }), 0)
