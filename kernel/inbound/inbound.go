@@ -540,6 +540,7 @@ type proposal struct {
 	project    string
 	deadline   *time.Time
 	plannedFor string
+	slot       string
 	rec        *domain.Proposal
 	body       string        // 非空时作事项正文，否则用来源事件的正文（抽取按 refs 取）
 	judgment   string        // 初筛的判断记录 id
@@ -994,6 +995,7 @@ type fieldsOut struct {
 	Project    string `json:"project"`
 	Deadline   string `json:"deadline"`
 	PlannedFor string `json:"planned_for"`
+	Slot       string `json:"planned_slot"`
 	Recommend  string `json:"recommend"`
 	AttachTo   string `json:"attach_to"`
 	Reason     string `json:"reason"`
@@ -1080,6 +1082,9 @@ func (s *Service) fill(sn snapshot, p *proposal, d fieldsOut, l lists) {
 	}
 	if _, ok := parseDay(d.PlannedFor); ok {
 		p.plannedFor = d.PlannedFor
+		if _, _, ok := domain.ParseSlot(d.Slot); ok { // 时段只跟着计划日期给，格式不对就丢（§9.3）
+			p.slot = d.Slot
+		}
 	}
 	switch d.Recommend {
 	case "accept", "dismiss":
@@ -1440,6 +1445,9 @@ func (s *Service) createItemKeyed(ctx context.Context, id command.Identity, rule
 	}
 	if p.plannedFor != "" {
 		in["planned_for"] = p.plannedFor
+	}
+	if p.slot != "" {
+		in["planned_slot"] = p.slot
 	}
 	if p.rec != nil {
 		in["proposal"] = p.rec

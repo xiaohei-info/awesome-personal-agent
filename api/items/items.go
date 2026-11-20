@@ -87,7 +87,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	q := r.URL.Query()
 	f := kitems.Filter{Phase: domain.Phase(q.Get("phase")), Kind: domain.Kind(q.Get("kind")),
 		Project: q.Get("project"), Assignee: q.Get("assignee"), OriginSource: q.Get("origin_source"), OriginRef: q.Get("origin_ref")}
-	sq := search.ItemQuery{Text: q.Get("q"), Tag: q.Get("tag"), PlannedFor: q.Get("planned_for"), Sort: q.Get("sort")}
+	sq := search.ItemQuery{Text: q.Get("q"), Tag: q.Get("tag"), PlannedFor: q.Get("planned_for"), Sort: q.Get("sort"), From: q.Get("from"), To: q.Get("to")}
 	var (
 		its  []domain.Item
 		prog map[string]string
@@ -128,7 +128,12 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 	if its == nil {
 		its = []domain.Item{}
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"items": its, "last_rejections": rejs})
+	out := map[string]any{"items": its, "last_rejections": rejs}
+	if sq.From != "" { // 按范围读时给出本机日界，日历页不用浏览器时区猜（§7.1）
+		now := clock.Now().In(time.Local)
+		out["today"], out["utc_offset"] = kitems.Today(now), now.Format("-07:00")
+	}
+	return core.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal) error {

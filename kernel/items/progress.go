@@ -1,6 +1,7 @@
 package items
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -170,8 +171,19 @@ func TodayItemsAfter(tx *store.Tx, now time.Time, staleAfter time.Duration) (Tod
 			l.Stale = append(l.Stale, it)
 		}
 	}
-	slices.SortStableFunc(l.Planned, func(a, b domain.Item) int { return strings.Compare(a.PlannedFor, b.PlannedFor) })
+	// 同一天里有时段的在前、按开始时间排，没时段的在后（§7.1）；HH:MM 补零，字符串序即时间序。
+	slices.SortStableFunc(l.Planned, func(a, b domain.Item) int {
+		return cmp.Or(strings.Compare(a.PlannedFor, b.PlannedFor), strings.Compare(slotKey(a), slotKey(b)))
+	})
 	return l, nil
+}
+
+// slotKey 让没有时段的排在有时段的之后（"~" 大于任何数字）。
+func slotKey(it domain.Item) string {
+	if it.PlannedSlot == "" {
+		return "~"
+	}
+	return it.PlannedSlot
 }
 
 // importedAt 返回导入事项的实际写入时刻（items.imported 里的 at）；非导入事项不在表里。

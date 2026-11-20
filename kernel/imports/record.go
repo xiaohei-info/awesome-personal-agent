@@ -86,6 +86,7 @@ type itemBody struct {
 	WaitingOn   *domain.WaitingOn `json:"waiting_on"`
 	Deadline    *time.Time        `json:"deadline"`
 	PlannedFor  string            `json:"planned_for"`
+	PlannedSlot string            `json:"planned_slot"`
 	Spec        json.RawMessage   `json:"spec"`
 	Ext         json.RawMessage   `json:"ext"`
 	Assignee    json.RawMessage   `json:"assignee"`
@@ -230,7 +231,7 @@ func buildItem(r itemRec, source string, now time.Time) (items.ImportedItem, *li
 		return im, bad("history_first", "created must be the earliest history entry")
 	}
 	final := domain.Item{Kind: b.Kind, Title: b.Title, Summary: b.Summary, Body: b.Body, StatusLabel: b.StatusLabel, Priority: b.Priority,
-		Tags: b.Tags, WaitingOn: b.WaitingOn, Deadline: b.Deadline, PlannedFor: b.PlannedFor, Spec: b.Spec, Ext: b.Ext,
+		Tags: b.Tags, WaitingOn: b.WaitingOn, Deadline: b.Deadline, PlannedFor: b.PlannedFor, PlannedSlot: b.PlannedSlot, Spec: b.Spec, Ext: b.Ext,
 		Origin: &domain.Origin{Source: "import:" + source, Ref: r.ExternalID}}
 	if final.Priority == "" {
 		final.Priority = domain.PriorityNormal

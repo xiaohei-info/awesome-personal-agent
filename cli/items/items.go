@@ -29,7 +29,7 @@ var bg = context.Background()
 
 func usage(why, next string) error { return domain.NewError(domain.CodeInvalidRequest, why, next) }
 
-const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee --tag --q --sort --planned-for --origin-source --origin-ref] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
+const itemUsage = "usage: apa item show <id> | list [--phase --kind --project --assignee --tag --q --sort --planned-for --from --to --origin-source --origin-ref] | add | update <id> | progress <id> --text <t> [--on <YYYY-MM-DD>] | transition <id> --to <phase> --reason <r> | relate <from> (--to <item or material id> --type <t> | --key <k> [--domain <d>])"
 
 func item(c *client.Ctx, args []string) error {
 	if len(args) == 0 {
@@ -159,11 +159,11 @@ func (f *form) headers() map[string]string {
 	return h
 }
 
-var itemFields = []string{"kind", "title", "summary", "body", "status-label", "priority", "project", "tags", "assignee", "waiting-on", "ask", "spec", "planned-for", "deadline", "origin", "ext", "reason"}
+var itemFields = []string{"kind", "title", "summary", "body", "status-label", "priority", "project", "tags", "assignee", "waiting-on", "ask", "spec", "planned-for", "planned-slot", "deadline", "origin", "ext", "reason"}
 
 // add 实现 item add 与 propose：POST /items。propose 不带 --phase，由内核缺省为 proposed。
 func add(c *client.Ctx, args []string, name string) error {
-	hint := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --deadline <RFC 3339|YYYY-MM-DD> --origin <JSON> --ext <JSON> --reason]"
+	hint := "usage: apa " + name + " --kind <kind> --title <title> [--summary --body --priority --project --tags a,b --assignee --planned-for <YYYY-MM-DD> --planned-slot <HH:MM - HH:MM> --deadline <RFC 3339|YYYY-MM-DD> --origin <JSON> --ext <JSON> --reason]"
 	fields := itemFields
 	if name == "item add" {
 		fields = append([]string{"phase"}, fields...)
@@ -192,7 +192,7 @@ func write(c *client.Ctx, args []string, sub, method, suffix string) error {
 	switch sub {
 	case "update":
 		fields = itemFields[1:]
-		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--evidence <text> | --grant <id> --version <n>]"
+		hint = "usage: apa item update <id> [--title --summary --body --status-label --priority --project --tags --assignee --waiting-on --ask --spec --planned-for <YYYY-MM-DD, empty clears it and the slot> --planned-slot <HH:MM - HH:MM, empty clears> --deadline <RFC 3339|YYYY-MM-DD, empty clears> --origin <JSON> --ext <JSON>] --reason <r> [--evidence <text> | --grant <id> --version <n>]"
 	case "progress":
 		fields = []string{"text", "on"}
 		hint = "usage: apa item progress <id> --text <text> [--on <YYYY-MM-DD, not later than today>] [--evidence <text> | --grant <id>]"
@@ -277,8 +277,8 @@ func show(c *client.Ctx, args []string) error {
 }
 
 func list(c *client.Ctx, args []string) error {
-	f, _ := newForm("item list", []string{"phase", "kind", "project", "assignee", "tag", "q", "sort", "planned-for", "origin-source", "origin-ref"}, nil, nil)
-	if _, err := f.parse(args, false, "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>] [--tag <t>] [--q <text>] [--sort updated|deadline|planned_for|priority] [--planned-for <YYYY-MM-DD>] [--origin-source <source, e.g. import:notes>] [--origin-ref <external id>]"); err != nil {
+	f, _ := newForm("item list", []string{"phase", "kind", "project", "assignee", "tag", "q", "sort", "planned-for", "from", "to", "origin-source", "origin-ref"}, nil, nil)
+	if _, err := f.parse(args, false, "usage: apa item list [--phase <p>] [--kind <k>] [--project <id>] [--assignee <executor>] [--tag <t>] [--q <text>] [--sort updated|deadline|planned_for|priority] [--planned-for <YYYY-MM-DD>] [--from <YYYY-MM-DD> --to <YYYY-MM-DD>, at most 62 days] [--origin-source <source, e.g. import:notes>] [--origin-ref <external id>]"); err != nil {
 		return err
 	}
 	q := url.Values{}

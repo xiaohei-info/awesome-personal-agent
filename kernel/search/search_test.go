@@ -381,3 +381,43 @@ func TestSnippetWindow(t *testing.T) {
 		t.Fatalf("fallback: %q", s)
 	}
 }
+
+// W26：范围读法含首尾；截止按本机日界落日；跨度与参数不合法时是请求错误。
+func TestFilterItemsDateRange(t *testing.T) {
+	at := func(d string, h, m, s int) *time.Time {
+		day, _ := time.ParseInLocation("2006-01-02", d, time.Local)
+		v := day.Add(time.Duration(h)*time.Hour + time.Duration(m)*time.Minute + time.Duration(s)*time.Second).UTC() // 存成 UTC，读时换回本机日
+		return &v
+	}
+	its := []domain.Item{
+		{ID: "first", PlannedFor: "2026-05-04"},
+		{ID: "last", PlannedFor: "2026-05-10"},
+		{ID: "before", PlannedFor: "2026-05-03"},
+		{ID: "after", PlannedFor: "2026-05-11"},
+		{ID: "due-end", Deadline: at("2026-05-10", 23, 59, 59)},
+		{ID: "due-next", Deadline: at("2026-05-11", 0, 0, 0)},
+		{ID: "due-prev", Deadline: at("2026-05-03", 23, 59, 59)},
+		{ID: "plan-out-due-in", PlannedFor: "2026-04-01", Deadline: at("2026-05-04", 0, 0, 0)},
+		{ID: "unscheduled"},
+	}
+	got, err := FilterItems(its, nil, ItemQuery{From: "2026-05-04", To: "2026-05-10"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, it := range got {
+		ids = append(ids, it.ID)
+	}
+	if want := []string{"first", "last", "due-end", "plan-out-due-in"}; !reflect.DeepEqual(ids, want) {
+		t.Fatalf("range: got %v want %v", ids, want)
+	}
+	if _, err := FilterItems(its, nil, ItemQuery{From: "2026-05-01", To: "2026-07-01"}); err != nil { // 62 天整
+		t.Fatalf("a 62-day range must be accepted: %v", err)
+	}
+	for _, q := range []ItemQuery{{From: "2026-05-04"}, {From: "2026-05-10", To: "2026-05-04"}, {From: "2026-05-01", To: "2026-07-02"}, {From: "5/4", To: "2026-05-10"}} {
+		var de *domain.Error
+		if _, err := FilterItems(its, nil, q); !errors.As(err, &de) || de.Code != domain.CodeInvalidRequest {
+			t.Fatalf("%+v must be an invalid request, got %v", q, err)
+		}
+	}
+}

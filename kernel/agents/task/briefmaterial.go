@@ -245,6 +245,7 @@ type plannedEntry struct {
 	Phase      domain.Phase `json:"phase"`
 	PlannedFor string       `json:"planned_for"`
 	WebURL     string       `json:"web_url,omitempty"`
+	Slot       string       `json:"planned_slot,omitempty"`
 }
 
 type openEntry struct {
@@ -253,6 +254,7 @@ type openEntry struct {
 	Phase        domain.Phase  `json:"phase"`
 	Deadline     *time.Time    `json:"deadline,omitempty"`
 	PlannedFor   string        `json:"planned_for,omitempty"`
+	PlannedSlot  string        `json:"planned_slot,omitempty"`
 	UpdatedAt    time.Time     `json:"updated_at"`
 	Question     string        `json:"question,omitempty"`
 	LastProgress *progressNote `json:"last_progress,omitempty"`
@@ -357,7 +359,7 @@ func (s *Service) briefLedger(ctx context.Context, c rules.Call, p briefPlan) (o
 			pl := []plannedEntry{}
 			for _, it := range td.Planned {
 				if p.inScope(it) {
-					pl = append(pl, plannedEntry{it.ID, it.Title, pname(it.Project), it.Phase, it.PlannedFor, p.itemURL(it.ID)})
+					pl = append(pl, plannedEntry{it.ID, it.Title, pname(it.Project), it.Phase, it.PlannedFor, p.itemURL(it.ID), it.PlannedSlot})
 				}
 			}
 			seg["planned"] = pl
@@ -791,7 +793,7 @@ func openItemsSection(tx *store.Tx, all []domain.Item, now time.Time, p briefPla
 		if err != nil {
 			return nil, err
 		}
-		e := openEntry{Title: it.Title, Project: pname(it.Project), Phase: it.Phase, Deadline: p.atp(it.Deadline), PlannedFor: it.PlannedFor,
+		e := openEntry{Title: it.Title, Project: pname(it.Project), Phase: it.Phase, Deadline: p.atp(it.Deadline), PlannedFor: it.PlannedFor, PlannedSlot: it.PlannedSlot,
 			UpdatedAt: p.at(it.UpdatedAt), LastProgress: lp, WebURL: p.itemURL(it.ID)}
 		if it.Ask != nil {
 			e.Question = it.Ask.Question

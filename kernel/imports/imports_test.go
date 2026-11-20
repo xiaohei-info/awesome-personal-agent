@@ -771,3 +771,24 @@ func TestProjectAndShapeRules(t *testing.T) {
 		t.Fatalf("project: %+v", p)
 	}
 }
+
+// W26：时段是事项结构里的普通字段，导入通道照收；重放不产生重复，有时段没日期的整行不合法。
+func TestImportCarriesPlannedSlot(t *testing.T) {
+	e := setup(t)
+	rec := func(ext, item string) string {
+		return `{"type":"item","external_id":"` + ext + `","item":` + item + `,"history":[{"at":"2026-10-10T09:00:00+08:00","event":"created","phase":"open"}]}`
+	}
+	slotted := rec("S-1", `{"kind":"task","title":"会","planned_for":"2026-10-20","planned_slot":"14:00 - 16:00"}`)
+	noDate := rec("S-2", `{"kind":"task","title":"会","planned_slot":"14:00 - 16:00"}`)
+	r := e.must(web, "wb", false, slotted, noDate)
+	if r.Results[0].Outcome != OutcomeCreated || r.Results[1].Outcome != OutcomeInvalid {
+		t.Fatalf("%+v", r.Results)
+	}
+	it := view(t, e, func(tx *store.Tx) (domain.Item, error) { return items.Get(tx, r.Results[0].Object) })
+	if it.PlannedFor != "2026-10-20" || it.PlannedSlot != "14:00 - 16:00" {
+		t.Fatalf("imported item: %+v", it)
+	}
+	if again := e.must(web, "wb", false, slotted); again.Created != 0 || again.Existing != 1 {
+		t.Fatalf("replay: %+v", again.Counts)
+	}
+}

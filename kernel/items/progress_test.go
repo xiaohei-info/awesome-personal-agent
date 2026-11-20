@@ -263,3 +263,87 @@ func TestStaleCountsFromImportTimeForImportedItems(t *testing.T) {
 		t.Fatalf("import time past the threshold must list it: %v", got)
 	}
 }
+
+// W26：时段的写法与边界、有时段必须有日期、改日期时段不动、清日期一起清时段。
+func TestPlannedSlotRules(t *testing.T) {
+	e := setup(t)
+	id := e.create(t, owner, map[string]any{"phase": "open", "planned_for": day(e, 1), "planned_slot": "00:00 - 00:30"})
+	for _, ok := range []string{"23:30 - 24:00", "09:05 - 09:06"} {
+		e.must(t, owner, "item.update", map[string]any{"id": id, "planned_slot": ok})
+		if got := e.get(t, id).PlannedSlot; got != ok {
+			t.Fatalf("slot %q stored as %q", ok, got)
+		}
+	}
+	before := e.get(t, id)
+	for _, bad := range []string{"9:00 - 10:00", "09:00-10:00", "09:00 – 10:00", "10:00 - 09:00", "10:00 - 10:00", "23:00 - 01:00", "24:00 - 24:30", "09:60 - 10:00", "09:00 - 24:01"} {
+		if _, err := e.do(owner, "item.update", map[string]any{"id": id, "planned_slot": bad}); exit(err) != domain.ExitUsage {
+			t.Fatalf("%q must be refused as a usage error, got %v", bad, err)
+		}
+	}
+	if after := e.get(t, id); after.PlannedSlot != before.PlannedSlot || after.Version != before.Version {
+		t.Fatalf("refused writes changed the item: %+v", after)
+	}
+	// 有时段必须有日期：新建不给日期、更新时同时清日期都被拒。
+	if _, err := e.do(owner, "item.create", map[string]any{"kind": "task", "title": "x", "phase": "open", "planned_slot": "09:00 - 10:00"}); exit(err) != domain.ExitUsage {
+		t.Fatalf("slot without a date must be refused, got %v", err)
+	}
+	if _, err := e.do(owner, "item.update", map[string]any{"id": id, "planned_for": nil, "planned_slot": "09:00 - 10:00"}); exit(err) != domain.ExitUsage {
+		t.Fatalf("clearing the date while writing a slot must be refused, got %v", err)
+	}
+	e.must(t, owner, "item.update", map[string]any{"id": id, "planned_for": day(e, 3)})
+	if it := e.get(t, id); it.PlannedFor != day(e, 3) || it.PlannedSlot != "09:05 - 09:06" {
+		t.Fatalf("changing the date must keep the slot: %+v", it)
+	}
+	e.must(t, owner, "item.update", map[string]any{"id": id, "planned_for": nil})
+	if it := e.get(t, id); it.PlannedFor != "" || it.PlannedSlot != "" {
+		t.Fatalf("clearing the date must clear the slot in the same command: %+v", it)
+	}
+	e.verify(t) // 折叠回放后时段与投影一致
+}
+
+// W26：同一幂等键重复提交只建一件；带旧版本号的改期返回冲突且不改数据。
+func TestScheduleWritesAreIdempotentAndVersioned(t *testing.T) {
+	e := setup(t)
+	in, _ := json.Marshal(map[string]any{"kind": "task", "title": "会", "phase": "open", "planned_for": day(e, 1), "planned_slot": "14:00 - 15:00"})
+	req := command.Request{Identity: owner, Command: "item.create", Input: in, Owner: "owner", IdemKey: "new-page-1"}
+	r1, err1 := e.x.Do(bg, req)
+	r2, err2 := e.x.Do(bg, req)
+	if err1 != nil || err2 != nil || string(r1.Value) != string(r2.Value) {
+		t.Fatalf("replay must return the first result: %s / %s (%v %v)", r1.Value, r2.Value, err1, err2)
+	}
+	var all []domain.Item
+	_ = e.st.View(bg, func(tx *store.Tx) (err error) { all, err = List(tx, Filter{}); return })
+	if len(all) != 1 {
+		t.Fatalf("two submits made %d items", len(all))
+	}
+	var out struct{ ID string }
+	_ = json.Unmarshal(r1.Value, &out)
+	stale := e.get(t, out.ID).Version
+	e.must(t, owner, "item.update", map[string]any{"id": out.ID, "planned_for": day(e, 2)}) // 别处先改了
+	up, _ := json.Marshal(map[string]any{"id": out.ID, "planned_for": day(e, 5), "reason": "改期"})
+	if _, err := e.x.Do(bg, command.Request{Identity: owner, Command: "item.update", Input: up, Owner: "owner", ExpectVersion: &stale}); exit(err) != domain.ExitConflict {
+		t.Fatalf("a stale version must be a conflict, got %v", err)
+	}
+	if got := e.get(t, out.ID).PlannedFor; got != day(e, 2) {
+		t.Fatalf("the conflicting write must not apply: %s", got)
+	}
+}
+
+// W26："今天"的计划组同一天里有时段的在前、按开始时间排，没时段的在后。
+func TestTodayPlannedOrdersBySlot(t *testing.T) {
+	e := setup(t)
+	e.create(t, owner, map[string]any{"title": "无时段", "phase": "open", "planned_for": day(e, 0)})
+	e.create(t, owner, map[string]any{"title": "下午", "phase": "open", "planned_for": day(e, 0), "planned_slot": "14:00 - 15:00"})
+	e.create(t, owner, map[string]any{"title": "上午", "phase": "open", "planned_for": day(e, 0), "planned_slot": "09:00 - 10:00"})
+	var l TodayList
+	if err := e.st.View(bg, func(tx *store.Tx) (err error) { l, err = TodayItems(tx, e.now); return }); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, it := range l.Planned {
+		got = append(got, it.Title)
+	}
+	if len(got) != 3 || got[0] != "上午" || got[1] != "下午" || got[2] != "无时段" {
+		t.Fatalf("planned order: %v", got)
+	}
+}

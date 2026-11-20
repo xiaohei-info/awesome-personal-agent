@@ -889,7 +889,7 @@ func observedRule(payload json.RawMessage) string {
 }
 
 // traced 是"改了什么"要比较的事项字段；版本、时间戳、阶段与内核状态不算。
-var traced = []string{"title", "summary", "body", "priority", "project", "assignee", "deadline", "planned_for", "kind", "spec", "status_label", "tags"}
+var traced = []string{"title", "summary", "body", "priority", "project", "assignee", "deadline", "planned_for", "planned_slot", "kind", "spec", "status_label", "tags"}
 
 // changed 返回一条事项事件里改过的字段。
 func changed(payload json.RawMessage) []string {

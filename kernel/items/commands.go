@@ -91,7 +91,7 @@ func (c createIn) item(id string) domain.Item {
 	in := c.ItemInput
 	it := domain.Item{ID: id, Phase: c.phase(), Kind: in.Kind, Title: in.Title, Summary: in.Summary, Body: in.Body,
 		StatusLabel: in.StatusLabel, Priority: in.Priority, Project: in.Project, Tags: in.Tags, Assignee: in.Assignee,
-		WaitingOn: in.WaitingOn, Deadline: in.Deadline, PlannedFor: in.PlannedFor, Origin: in.Origin, Proposal: in.Proposal, Spec: in.Spec, Ext: in.Ext}
+		WaitingOn: in.WaitingOn, Deadline: in.Deadline, PlannedFor: in.PlannedFor, PlannedSlot: in.PlannedSlot, Origin: in.Origin, Proposal: in.Proposal, Spec: in.Spec, Ext: in.Ext}
 	if it.Priority == "" {
 		it.Priority = domain.PriorityNormal
 	}
@@ -153,6 +153,8 @@ func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item,
 			err = put(raw, &it.Deadline)
 		case "planned_for":
 			err = put(raw, &it.PlannedFor)
+		case "planned_slot":
+			err = put(raw, &it.PlannedSlot)
 		case "origin":
 			if err = put(raw, &it.Origin); err == nil {
 				err = checkOrigin(it.Origin)
@@ -178,6 +180,10 @@ func applyPatch(cur domain.Item, patch map[string]json.RawMessage) (domain.Item,
 		if err != nil {
 			return cur, err
 		}
+	}
+	// 时段跟着计划日期走（§6.3）：清掉日期时一起清掉时段；这次明确写了时段却没有日期，交给 check 报错。
+	if _, wrote := patch["planned_slot"]; it.PlannedFor == "" && !wrote {
+		it.PlannedSlot = ""
 	}
 	return it, nil
 }
@@ -254,6 +260,14 @@ func (s *svc) check(tx *store.Tx, it domain.Item) error {
 	if it.PlannedFor != "" {
 		if err := checkDate("planned_for", it.PlannedFor); err != nil {
 			return err
+		}
+	}
+	if it.PlannedSlot != "" {
+		if _, _, ok := domain.ParseSlot(it.PlannedSlot); !ok {
+			return invalid("planned_slot only accepts HH:MM - HH:MM within one day, end later than start")
+		}
+		if it.PlannedFor == "" {
+			return invalid("planned_slot requires planned_for")
 		}
 	}
 	if w := it.WaitingOn; w != nil {

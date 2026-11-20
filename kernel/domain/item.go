@@ -186,7 +186,8 @@ type ItemInput struct {
 	Assignee    string          `json:"assignee,omitempty"`
 	WaitingOn   *WaitingOn      `json:"waiting_on,omitempty"`
 	Deadline    *time.Time      `json:"deadline,omitempty"`
-	PlannedFor  string          `json:"planned_for,omitempty"` // 计划日期 YYYY-MM-DD（§6.3），不带定时
+	PlannedFor  string          `json:"planned_for,omitempty"`  // 计划日期 YYYY-MM-DD（§6.3），不带定时
+	PlannedSlot string          `json:"planned_slot,omitempty"` // 时段 HH:MM - HH:MM（§6.3），落在计划日期那天
 	Ask         *AskInput       `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
 	Proposal    *Proposal       `json:"proposal,omitempty"` // 建议信息，由入站流水线写入（§6.3）
@@ -240,8 +241,9 @@ type Item struct {
 	Tags        []string        `json:"tags,omitempty"`
 	Assignee    string          `json:"assignee,omitempty"`
 	WaitingOn   *WaitingOn      `json:"waiting_on,omitempty"`
-	Deadline    *time.Time      `json:"deadline,omitempty"`    // 事项自身的截止，与 ask.deadline（决策超时）无关
-	PlannedFor  string          `json:"planned_for,omitempty"` // 计划日期 YYYY-MM-DD（§6.3），不带定时、不产生提醒
+	Deadline    *time.Time      `json:"deadline,omitempty"`     // 事项自身的截止，与 ask.deadline（决策超时）无关
+	PlannedFor  string          `json:"planned_for,omitempty"`  // 计划日期 YYYY-MM-DD（§6.3），不带定时、不产生提醒
+	PlannedSlot string          `json:"planned_slot,omitempty"` // 时段 HH:MM - HH:MM（§6.3），有它必须有计划日期，不产生提醒
 	Ask         *Ask            `json:"ask,omitempty"`
 	Origin      *Origin         `json:"origin,omitempty"`
 	Proposal    *Proposal       `json:"proposal,omitempty"`
@@ -276,4 +278,31 @@ type Progress struct {
 	At    time.Time `json:"at"`
 	// Precision 为 day 表示只知道日期（导入时给了当天的一个时刻），界面只显示到日（§7.1）；空为精确时刻。
 	Precision string `json:"precision,omitempty"`
+}
+
+// ParseSlot 解析时段 `HH:MM - HH:MM`（§6.3），返回起止分钟数。只认这一种写法：两位补零、空格连字符空格；
+// 开始 00:00–23:59，结束 00:01–24:00 且晚于开始（不跨午夜）。
+func ParseSlot(s string) (start, end int, ok bool) {
+	if len(s) != 13 || s[5:8] != " - " {
+		return 0, 0, false
+	}
+	hm := func(v string) (int, bool) {
+		if v[2] != ':' || !digits(v[:2]) || !digits(v[3:]) {
+			return 0, false
+		}
+		h, m := int(v[0]-'0')*10+int(v[1]-'0'), int(v[3]-'0')*10+int(v[4]-'0')
+		return h*60 + m, m < 60 && (h < 24 || h == 24 && m == 0)
+	}
+	start, ok1 := hm(s[:5])
+	end, ok2 := hm(s[8:])
+	return start, end, ok1 && ok2 && start < 24*60 && end > start
+}
+
+func digits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
