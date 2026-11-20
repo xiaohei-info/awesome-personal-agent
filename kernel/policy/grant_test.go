@@ -266,3 +266,54 @@ func TestRevokedExpiredAndForeignGrantsAreNotActive(t *testing.T) {
 		t.Fatalf("unknown grant: %v", err)
 	}
 }
+
+func TestProgressIsGrantable(t *testing.T) {
+	s, a := openGrants(t)
+	dlg := issueCred(t, s, a, auth.Delegate)
+	in := validInput(dlg.ID)
+	in.Actions = []string{"item.progress"}
+	g, err := issue(t, s, a, owner, in)
+	if err != nil || g.Actions[0] != "item.progress" || g.Import != nil {
+		t.Fatalf("%+v %v", g, err)
+	}
+	for _, bad := range []string{"delegate.dispatch", "delegate.dispatch_update"} {
+		in.Actions = []string{bad}
+		if _, err := issue(t, s, a, owner, in); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s must stay ungrantable in this node: %v", bad, err)
+		}
+	}
+}
+
+// 已有的 JSON 内容不变：旧单读出时没有 import 段。
+func TestOldGrantHasNoImportSegment(t *testing.T) {
+	s, a := openGrants(t)
+	dlg := issueCred(t, s, a, auth.Delegate)
+	g, _ := issue(t, s, a, owner, validInput(dlg.ID))
+	got := active(t, s, a, dlg.ID, time.Now())
+	if len(got) != 1 || got[0].Import != nil || got[0].ID != g.ID {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// 导入已取消（§14.5）：import.apply 不能再签发；下线前签发的导入专用单仍能原样读出。
+func TestImportApplyIsNoLongerGrantableButOldImportGrantsStillRead(t *testing.T) {
+	s, a := openGrants(t)
+	dlg := issueCred(t, s, a, auth.Delegate)
+	in := validInput(dlg.ID)
+	in.Actions, in.Scope = []string{"import.apply"}, Scope{All: true}
+	if _, err := issue(t, s, a, owner, in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("import.apply must not be grantable: %v", err)
+	}
+	doc := `{"id":"grt_old","principal":"owner","grantee":{"credential":"` + dlg.ID + `"},"scope":{"projects":[],"kinds":[],"items":[],"all":true},` +
+		`"actions":["import.apply"],"import":{"source":"notes","max_records":50},"risk_ceiling":"normal","created_at":"2026-11-01T00:00:00Z"}`
+	if err := s.Update(ctx, func(tx *store.Tx) error {
+		_, err := tx.Exec(`INSERT INTO policy_grant (id, credential, doc, expires_at, created_at, used_records) VALUES ('grt_old', ?, ?, 0, 1, 7)`, dlg.ID, doc)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := active(t, s, a, dlg.ID, time.Now())
+	if len(got) != 1 || got[0].ID != "grt_old" || got[0].Import == nil || got[0].Import.Source != "notes" || got[0].Import.MaxRecords != 50 {
+		t.Fatalf("old import grant must read back unchanged: %+v", got)
+	}
+}

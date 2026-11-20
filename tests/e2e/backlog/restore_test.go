@@ -189,14 +189,8 @@ func TestBacklogRestoreFlow(t *testing.T) {
 
 	k.step("ACT-RST-05 放回的授权边界", func(t *testing.T) {
 		grantsBefore := k.maxSeq()
-		// 授权单事先由本人在 Web 为夹具 delegate 签发：有效期内，动作勾选全部可选项；
-		// 导入专用单必须单独成单，不在"全部可选项"的混合单里。
-		var mixed []string
-		for _, a := range policy.GrantableActions {
-			if a != policy.ImportApply {
-				mixed = append(mixed, a)
-			}
-		}
+		// 授权单事先由本人在 Web 为夹具 delegate 签发：有效期内，动作勾选全部可选项。
+		mixed := policy.GrantableActions
 		g, _ := json.Marshal(map[string]any{"grantee": map[string]string{"credential": "cred_fx_delegate"}, "scope": map[string]any{"kinds": []string{"task"}},
 			"actions": mixed, "expires_at": time.Now().Add(7 * 24 * time.Hour).UTC().Format(time.RFC3339), "reason": "e2e"})
 		var grant struct{ ID string }

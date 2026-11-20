@@ -33,7 +33,7 @@ export const SETTINGS_GROUPS: { title: Text; ids: string[] }[] = [
   { title: { zh: "日常", en: "Everyday" }, ids: ["settings-general", "settings-notify", "settings-policy"] },
   { title: { zh: "Agent 与模型", en: "Agents and models" }, ids: ["settings-agents", "settings-models"] },
   { title: { zh: "连接", en: "Connections" }, ids: ["settings-channels", "settings-vaults", "settings-outward-api"] },
-  { title: { zh: "数据与安全", en: "Data and security" }, ids: ["settings-security", "settings-storage", "settings-import", "purge"] },
+  { title: { zh: "数据与安全", en: "Data and security" }, ids: ["settings-security", "settings-storage", "purge"] },
 ];
 /** 手机上的「设置首页」：设置入口在窄屏上落到这里。 */
 export const SETTINGS_HOME = "settings/home";

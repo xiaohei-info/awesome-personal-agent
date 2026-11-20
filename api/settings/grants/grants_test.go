@@ -327,24 +327,18 @@ func TestReplaceAgentGrantRoute(t *testing.T) {
 	}
 }
 
-// ACT-IGR-01：经 Web 的 POST /settings/grants 签发导入专用单；规则违反时 400、不落库。
-func TestWebIssuesImportGrantAndProgressGrant(t *testing.T) {
+// 导入已取消（§14.5）：经 Web 的 POST /settings/grants 不能再签发 import.apply，带不带 import 段都是 400、不落库；普通单照常签发。
+func TestWebCannotIssueImportGrantButIssuesProgressGrant(t *testing.T) {
 	e := setup(t)
 	d, _ := e.token(auth.Delegate)
 	exp := func(h int) string { return time.Now().Add(time.Duration(h) * time.Hour).UTC().Format(time.RFC3339) }
 	imp := func(actions, extra, expires string) string {
 		return `{"grantee":{"credential":"` + d.ID + `"},"scope":{"all":true},"actions":` + actions + extra + `,"expires_at":"` + expires + `"}`
 	}
-	ok := e.web("POST", "/v1/settings/grants", imp(`["import.apply"]`, `,"import":{"source":"notes","max_records":50}`, exp(24)))
-	var g policy.Grant
-	json.Unmarshal(ok.Body.Bytes(), &g)
-	if ok.Code != 201 || g.Import == nil || g.Import.Source != "notes" || g.Import.MaxRecords != 50 || !g.Scope.All {
-		t.Fatalf("import grant: %d %s", ok.Code, ok.Body)
-	}
 	for name, b := range map[string]string{
+		"import grant":      imp(`["import.apply"]`, `,"import":{"source":"notes","max_records":50}`, exp(24)),
 		"no import segment": imp(`["import.apply"]`, ``, exp(24)),
-		"over 7 days":       imp(`["import.apply"]`, `,"import":{"source":"notes","max_records":50}`, exp(8*24)),
-		"mixed actions":     imp(`["import.apply","item.update"]`, `,"import":{"source":"notes","max_records":50}`, exp(24)),
+		"mixed actions":     imp(`["import.apply","item.update"]`, ``, exp(24)),
 	} {
 		if r := e.web("POST", "/v1/settings/grants", b); r.Code != 400 || code(t, r) != domain.CodeInvalidRequest {
 			t.Errorf("%s: %d %s", name, r.Code, r.Body)
@@ -353,7 +347,7 @@ func TestWebIssuesImportGrantAndProgressGrant(t *testing.T) {
 	if r := e.web("POST", "/v1/settings/grants", imp(`["item.progress"]`, ``, exp(24))); r.Code != 201 {
 		t.Fatalf("item.progress grant: %d %s", r.Code, r.Body)
 	}
-	if r := e.web("GET", "/v1/settings/grants", ""); !strings.Contains(r.Body.String(), `"max_records":50`) || strings.Count(r.Body.String(), `"id":"grt_`) != 2 {
-		t.Fatalf("only the two valid grants are stored: %s", r.Body)
+	if r := e.web("GET", "/v1/settings/grants", ""); strings.Contains(r.Body.String(), "import.apply") || strings.Count(r.Body.String(), `"id":"grt_`) != 1 {
+		t.Fatalf("only the valid grant is stored: %s", r.Body)
 	}
 }

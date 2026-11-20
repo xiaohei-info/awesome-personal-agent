@@ -59,8 +59,6 @@ export function createClient(o: ClientOptions) {
     get: <T>(path: string) => request<T>("GET", path),
     /** headers 用于 If-Match / Idempotency-Key 等请求头。 */
     post: <T>(path: string, body?: unknown, headers?: Record<string, string>) => request<T>("POST", path, body ?? {}, headers),
-    /** 原样发送文本请求体（如 POST /import 的 application/x-ndjson）；headers 里给 Content-Type。 */
-    postText: <T>(path: string, text: string, headers: Record<string, string>) => request<T>("POST", path, text, headers),
     patch: <T>(path: string, body: unknown, headers?: Record<string, string>) => request<T>("PATCH", path, body, headers),
     put: <T>(path: string, body: unknown, headers?: Record<string, string>) => request<T>("PUT", path, body, headers),
     del: <T>(path: string) => request<T>("DELETE", path),

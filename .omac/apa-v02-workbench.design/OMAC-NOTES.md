@@ -117,3 +117,7 @@
 - **导入不触发自动化也是不变量**（第 17 条）：I1 之后新增的任何事件读取方，默认用"现场"读法；I5 的断言逐个订阅方列出，新增订阅方时同步加一条。
 - **需要在真实环境才有结论的**（不阻塞节点）：邮件工具能给出多少原文（`MEAS-RAW-MAIL`、`MEAS-RAW-ATTACH`）、宿主自带聊天界面上报的取值（`SPIKE-SESSION-KIND-OWNCHAT`）、提醒事项工具的筛选参数（`MEAS-REM-UNDATED`）、生成端点预算的默认值（`SPIKE-GEN-BUDGET`）。节点按录制样本与替身实现，取不到的部分走设计里写明的兜底。
 - **图**：领域模型图与入站流水线图要加上来源原文、导入批次、链接型材料与紧急提醒，放在 Z1；图的 HTML 与 PNG 成对更新。
+
+## 6 取消记录（2026-11-20）
+
+本人裁决下线带原始时间的导入通道（设计决定 83）。本计划里 I2 的导入专用单、I3 的 `import.apply` 与 `POST /import`、`GET /imports`、`apa import`、Web"设置 › 导入"，以及 I5 的验收流程 `flow-import-apply`、`flow-import-no-automation`、`flow-import-grant`（`ACT-IMP-*`、`ACT-IGR-*`、`ACT-INA-*`、`ACT-WIM-*`）已从代码与测试中删除，`tests/e2e/importwb` 一并删除。仍然有效的是 I1 的导入标记与"现场"读法（旧数据只读）、I3 的按 `origin` 查询与 `import:` 前缀保留。本目录其余 `.yaml` 是编排工具生成的过程证据，带摘要与状态，不手工改写；凡与本节冲突的，以本节与设计文档为准。

@@ -343,7 +343,7 @@ func Purge(tx *store.Tx, id string) error {
 	if _, err = tx.Exec(`DELETE FROM item_relations WHERE from_id = ? OR to_id = ?`, id, id); err != nil {
 		return err
 	}
-	// 物理删除同时清掉导入对照，之后可以重导（§7.1）。
+	// 物理删除同时清掉旧的导入对照（只读的历史数据，§7.1）。
 	_, err = tx.Exec(`DELETE FROM item_import_map WHERE object_id = ?`, id)
 	return err
 }

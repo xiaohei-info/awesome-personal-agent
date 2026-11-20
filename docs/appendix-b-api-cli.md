@@ -30,7 +30,6 @@
 | `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--from <日期> --to <日期>`（按日期范围读，同 HTTP 的 `from`、`to`）、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 5 |
 | `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` 与 `--planned-slot "HH:MM - HH:MM"`（`update` 传空串清除；有时段必须有计划日期，否则退出码 2）；`add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐。 | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
 | `apa item progress <id> --text [--on <日期>]` | 追加一条进展，不改阶段；`--on` 不能晚于今天 | worker（自己的事项）；delegate（绑定的事项不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、23 |
-| `apa import --file <计划文件> --source <来源名> [--dry-run] --grant <id>` | 带原始时间的导入（主文档 §7.1）：计划文件是 JSONL，CLI 按 500 条一批提交并沿用同一个批次号，逐行输出 `created`、`existing` 或 `invalid`；`--dry-run` 只预检，不写账本、不占授权单的条数 | delegate，只凭授权单（`--evidence` 不被接受） | 2、4、23 |
 | **决策** | | | |
 | `apa ask <id>` | 写入决策请求并转 `needs_input` | worker | 4 |
 | `apa decide <id> --option [--evidence \| --grant]` | 代答决策；本人原话或授权单二选一 | delegate | 2、4、6、20、22、23 |
@@ -110,7 +109,6 @@
 |---|---|---|---|
 | 事项 | `item.create`（以 `proposed` 新建）；`item.update`、`item.transition`、`item.relate`、`item.progress`（绑定的事项） | `item.create`（其他阶段）；`item.update`、`item.transition`、`item.relate`、`item.progress`（其他事项） | |
 | 对话捕获 | `inbound.capture` | | |
-| 导入 | | `import.apply`：只接受授权单，不接受本人原话；授权单须是只含这一个动作的专用单（主文档 §6.13、§14.5） | |
 | 链接型材料与来源原文 | `material.link` | | `source.fetch_attachment` |
 | 决策 | `decision.request` | `decision.answer`、`proposal.accept`、`proposal.attach`、`proposal.dismiss`、`proposal.batch` | |
 | 材料 | `material.commit`、`material.add`、`blob.put` | `revision.confirm`、`revision.reject` | |
@@ -118,7 +116,7 @@
 | 项目 | `project.checkout.set`、`project.checkout.remove` | | `project.create`、`project.update`、`project.repo.add`、`project.repo.remove` |
 | 来源与能力包 | | | `source.register`、`source.update`、`source.set_enabled`、`source.webhook_key`、`source.webhook_revoke`、`source.replay`、`inbound.backlog_rules`、`inbound.backlog_score`、`inbound.backlog_rejudge`、`inbound.backlog_restore`、`instance.create`、`instance.update`、`instance.toggle`、`instance.run` |
 
-授权单的 `actions` 只能取"可用授权单"一列的命令；`import.apply` 不能与其他动作出现在同一张单上。运行凭据只能使用签给本次运行所属 Agent（`grantee.agent` 等于运行记录的 harness）且允许后台使用的单，`apa grant list` 与 `GET /grants` 对运行凭据只列出这些单（凭据归属某个 Agent 的 delegate 另能看到签给该 Agent 的单），对象须同时在运行范围内，触发不可信时为退出码 23（`untrusted_trigger`）；`grantee.agent` 式的单放行 `proposal.accept`、`proposal.attach` 时，建议须来自可信发件人（`untrusted_origin`，主文档 §14.5）。
+授权单的 `actions` 只能取"可用授权单"一列的命令（`import.apply` 已取消，不能签发，主文档 §14.5）。运行凭据只能使用签给本次运行所属 Agent（`grantee.agent` 等于运行记录的 harness）且允许后台使用的单，`apa grant list` 与 `GET /grants` 对运行凭据只列出这些单（凭据归属某个 Agent 的 delegate 另能看到签给该 Agent 的单），对象须同时在运行范围内，触发不可信时为退出码 23（`untrusted_trigger`）；`grantee.agent` 式的单放行 `proposal.accept`、`proposal.attach` 时，建议须来自可信发件人（`untrusted_origin`，主文档 §14.5）。
 
 **会话身份**：环境变量 `APA_SESSION`、`APA_HARNESS`、`APA_SESSION_KIND` 由接入方（harness 插件）设置，CLI 随每次请求以 HTTP 头 `X-APA-Session`、`X-APA-Harness`、`X-APA-Session-Kind` 发出。前两项让 Event actor 审计到会话粒度；`X-APA-Session-Kind` 取 `direct`、`group`、`unknown`，缺失等同 `unknown`，只有 `direct` 时内核接受凭本人原话的第二档命令（主文档 §11.2、§14.5、§17.4）。
 
@@ -129,8 +127,6 @@
 | 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for`、`from` 与 `to`（日期范围） | 按 §14.3；导出 ext 密钥可 `GET` |
 | | `GET /today` | 今天的清单，四组：`planned`、`due`、`pending`、`stale` | observer |
 | | 已有路由 GET /items 的新增查询参数 | `origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
-| 导入 | `POST /import` | 带原始时间的导入，请求体是 JSONL，见下 | Web 登录；delegate 只凭授权单 |
-| | `GET /imports` | 导入批次：`{"batches": [{"id", "source", "created", "existing", "invalid", "started_at", "actor", "grant"?}]}`，最新在前 | observer |
 | | `POST /items/{id}/progress` | 追加进展 `{text, on?}`；`GET /items/{id}` 返回 `progress[]` | worker（自己的事项）；delegate 按 §14.5 |
 | | `POST /items/{id}/correlation-keys`，`DELETE /items/{id}/correlation-keys` | 登记或移除关联键 `{key, domain?}`（经 `item.relate`；`GET /items/{id}` 返回 `correlation_keys[]`） | 同 `relations` |
 | | `GET /items/{id}/messages` | 事项的全部挂靠消息 | observer；运行身份和无人值守事项按转发白名单过滤；ext 密钥不可用 |
@@ -218,7 +214,7 @@
 | | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围 | 只有 Web 登录 |
 | | `GET/PUT /settings/note-vaults` | 笔记库登记：`{"vaults": [{"name", "open_url"}]}`，整体替换；经 `policy.Update`，记 `policy.changed`。名字重复、模板不以协议开头或用了被拒绝的协议返回 400 | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/content-retention` | 来源的原文保留天数：`{"days": 90}`，`null` 为不清理（主文档 §6.15） | 只有 Web 登录 |
-| | 已有路由 POST /settings/grants 的新增请求体 | `actions` 为 `["import.apply"]` 时须带 `import: {"source", "max_records"}` 与不超过 7 天的 `expires_at`，不得带 `background`；`actions` 可含 `item.progress` | 只有 Web 登录 |
+| | 已有路由 POST /settings/grants 的新增请求体 | `actions` 可含 `item.progress`；不接受 `import` 段与 `import.apply`（导入已取消，返回 400）。已签发的旧导入专用单读出时原样带回 `import` 段 | 只有 Web 登录 |
 | | 已有路由 /settings/model-endpoints 的新增字段 | `generate_endpoint.max_material_chars`：生成端点的资料预算，缺省 24000（主文档 §8.4） | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/trusted-senders` | 只替换这个来源的转发白名单 `{"senders": [...]}`，经 `policy.Update`，记 `policy.changed` 与 `allowlist.changed`；来源声明为需确认时只接受空名单（清掉以前填的、不生效的条目），非空为 400（`sender_unverifiable`）；名单为空即策略里没有这个键，Web 再次按"从未设置"预填本人 | 只有 Web 登录 |
 | | `GET /settings/sources/{id}/self-sender` | 声明了 `sender.self: identity` 的来源：运行一次来源程序的 `identity` 模式（登记命令的第一个词加 `identity`，超时 10 秒），返回 `{"sender"}` 供预填；不产生来源事件、不写 Event；其他来源 404，程序失败或没给出身份时 409 `conflict` | 只有 Web 登录 |
@@ -375,15 +371,13 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 **工作台能力迭代的路由细节**：
 
-`POST /import?source=<来源名>[&batch=<批次>][&dry_run=1]`：请求体 `Content-Type: application/x-ndjson`，一行一条记录（主文档 §7.1），不超过 500 行、8 MiB，超限返回 413。响应 200：`{"batch": "imp_…", "results": [{"line": 1, "external_id": "…", "outcome": "created" | "existing" | "invalid", "object"?: "<事项或项目 id>", "code"?, "why"?}], "created", "existing", "invalid"}`。`dry_run` 时不返回 `batch`，不写账本。`batch` 用于把多次请求归入同一批次，必须是同一来源名、同一调用者此前返回的值。delegate 须带 `X-APA-Grant`；不带、只带 `X-APA-Evidence`、授权单不是导入专用单、来源名不符或累计条数会超过 `max_records` 时返回 403（退出码 23），`why` 写明哪一项；运行凭据返回 403（退出码 4）。可带 `Idempotency-Key`。
-
 `GET /source-events/{id}[?part=<部分>]`：响应 200：`{"event": {…来源事件字段…}, "content": {"state", "bytes", "parts": [{"part", "media_type", "bytes", "sha256"}], "missing"?}, "body"?, "original"?: {"media_type", "text"}, "headers"?, "attachments"?, "messages"?, "scope": "full" | "excerpt" | "meta", "trimmed"?: {"total_chars", "returned_chars"}}`。Web 登录的 `scope` 恒为 `full`。token 的 `scope` 取该来源的 `outbound.external`：`excerpt` 只回摘要与正文前 500 个字符，不回 `original`、`headers` 与 `messages`；`meta`、`none` 与未选择只回 `event` 里的元信息与 `content` 清单。带 `part` 时只回那一部分。事件是挂在已接受事项上的挂靠消息时，按 `GET /items/{id}/messages` 的权限读，不按外发范围裁剪。对话捕获的内部来源只对 Web 登录开放。`attachments` 里的 `ref` 是来源程序的取回句柄：来源接入声明里没有 `content.attachments: fetch` 时，响应不带每项的 `ref`（没有新字段；Web 以有无 `ref` 决定是否显示「取回」）。
 
 `GET /sources/{id}/events` 与 `GET /items/{id}/messages` 的每条事件：`detail` 改为预览（至多 2000 个字符），新增 `content`（同上，不含各部分内容）；聚合消息不在列表里返回。
 
 来源事件字段新增：`content`（只读）。来源登记字段新增：`content_retention_days`（只读，经 `/settings/sources/{id}/content-retention` 改）；`stats` 新增 `events`、`content_bytes`、`last_failure_kind`（最近一次失败的类别：`transient`、`auth_or_config`、`permanent`；拉取成功后清空，没有失败时不出现）。
 
-事项字段新增：`imported`（只读，`{"batch", "at"}`）；`proposal.urgent`（只读，可缺）。`GET /items/{id}` 的进展条目与阶段变更在导入写入时带 `precision`（`day` 时界面只显示到日）。`GET /audit/events` 的每条事件新增可选的 `imported`、`recorded_at`；带 `imported=<批次>` 可只取一个批次的事件。`GET /events`（事件订阅）不返回带导入标记的事件。
+事项字段新增：`imported`（只读，`{"batch", "at"}`；导入已取消，只见于旧记录）；`proposal.urgent`（只读，可缺）。`GET /items/{id}` 的进展条目与阶段变更在导入写入时带 `precision`（`day` 时界面只显示到日）。`GET /audit/events` 的每条事件新增可选的 `imported`、`recorded_at`；带 `imported=<批次>` 可只取一个批次的事件。`GET /events`（事件订阅）不返回带导入标记的事件。
 
 `POST /items/{id}/report` 的 `link` 可以是字符串或字符串数组；回执事件的证据里 `link` 仍是第一个，另带 `links[]`。
 
@@ -421,7 +415,7 @@ HTTP 200 返回登记过的现场事件，按 `seq > cursor` 升序排列，允�
 - 退出码 23 在 v0.2.0 新增一个原因：`code` 为 `session_not_direct`，`why` 说明会话不是与本人的私聊，`web_url` 给出 Web 链接（主文档 §14.5）。HTTP 状态与其他依据不足的情况相同。
 - 登录被限速或锁定时 `POST /auth/login` 返回 429，`code` 为 `login_locked`，带 `Retry-After`。
 - 本人暂停了模型时，需要模型的本人操作（积压的影子打分与放开重判）返回 409，退出码 6，`code` 为 `models_paused`，`next` 提示到"设置 › 模型"恢复（主文档 §8.7）。
-- 退出码 23 新增原因 `grant_required`：命令只接受授权单（`import.apply`），调用没有带单或只带了本人原话；`import_source_mismatch`、`import_limit_exceeded`：授权单的来源名不符，或累计条数会超过上限。
+- 退出码 23 的原因 `grant_required`、`import_source_mismatch`、`import_limit_exceeded` 只为 `import.apply` 产出；导入已取消（主文档 §7.1），内核不再产出，取值保留为只读的历史值，只出现在旧的拒绝记录里。
 - 取回附件失败（来源程序报错、超时或超出输出上限）返回 502，退出码 1，`code` 为 `fetch_failed`，`why` 取自来源程序 stderr 的末行；附件清单不变（主文档 §7.6）。
 - 来源事件超过单条上限被拒收时，"被拒收的事件"里的原因是 `event_too_large`，带实际字节数。
 
@@ -441,7 +435,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 `proposal.attached`。
 
-工作台能力迭代新增一个类型（下一行）：一个导入请求写完，对象是批次，载荷是来源名与新建、已存在、不合法的条数（`source`、`created`、`existing`、`invalid`）；同一批次分几次请求提交时每次各记一条。带导入标记的事项事件不进订阅流，订阅方要拿到导入的内容，在收到它之后按 `origin` 经只读 API 取（主文档 §7.1）。
+工作台能力迭代新增一个类型（下一行），导入取消后是只读的历史值，不再写入：一个导入请求写完，对象是批次，载荷是来源名与新建、已存在、不合法的条数（`source`、`created`、`existing`、`invalid`）；同一批次分几次请求提交时每次各记一条。带导入标记的事项事件不进订阅流，订阅方要拿到导入的内容，在收到它之后按 `origin` 经只读 API 取（主文档 §7.1）。
 
 `import.completed`。
 
@@ -502,7 +496,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 声明里唤醒能力的来源 | Hermes 插件看 `APA_WAKE_SESSION_KEY` 是否设置决定 `main_session.wake`，只在 Agent 调 `apa_declare_headless` 时提交；同一内容等于已生效版本时，仍待确认的旧版本留着 | 插件按唤醒插件的实际启用情况（已启用、指定了对话、允许插件发起回合、有连 APA 的钥匙）算 `wake`，不满足时带新的可选字段 `main_session.wake_missing`（每项 `{zh, en, how: {zh, en}}`，只在不能唤醒时允许）；gateway 启动时自动提交一次；`executor.declare` 的内容等于已生效版本时，同 harness 仍待确认的版本转 `superseded` | 只增字段，不迁移、不加表。旧内核严格解码会拒绝带 `wake_missing` 的声明，插件与内核一同升级。升级后插件提交的内容会变，本人在 Web 确认一次；确认前已生效的旧版本照常生效 |
 | 凭据表 | 无 `harness` | `auth_credential.harness`，账本结构版本 5 → 6 | 只增列，已有 token 照常可用；迁移后旧二进制拒绝打开账本，回退用升级前快照 |
 | 账本结构版本（工作台能力迭代） | 7 | 8：新增原文表、导入批次与导入对照两张表；来源事件表、Event 表、事项表、材料表、来源登记表各加列（主文档 §16.5） | 只增表与列，不改写已有行。升级时自动留快照；旧二进制拒绝打开新账本，回退用快照 |
-| 时段与按日期范围读（W26） | 事项只有计划日期；`GET /items` 只能按某一天精确筛选 | 事项新增可选字段 `planned_slot`（经事项新建、更新与导入写入，随事项事件的快照下发）；清除 `planned_for` 时一并清除 `planned_slot`；`GET /items` 新增 `from`、`to`，带范围时响应另有 `today`、`utc_offset`；内置起草与抽取的输出新增可选的 `planned_slot` | 只增字段与参数：时段存在事项数据里，不改账本结构、不迁移；已有事项与旧事件没有时段，按未定时显示；不认识新字段的客户端原样忽略 |
+| 时段与按日期范围读（W26） | 事项只有计划日期；`GET /items` 只能按某一天精确筛选 | 事项新增可选字段 `planned_slot`（经事项新建与更新写入，随事项事件的快照下发）；清除 `planned_for` 时一并清除 `planned_slot`；`GET /items` 新增 `from`、`to`，带范围时响应另有 `today`、`utc_offset`；内置起草与抽取的输出新增可选的 `planned_slot` | 只增字段与参数：时段存在事项数据里，不改账本结构、不迁移；已有事项与旧事件没有时段，按未定时显示；不认识新字段的客户端原样忽略 |
 | 来源事件列表里的正文 | `GET /sources/{id}/events`、`GET /items/{id}/messages` 的 `detail` 是来源程序给的全部内容 | `detail` 是至多 2000 个字符的预览，另带 `content` 清单；全文经 `GET /source-events/{id}` | **调用方要改的**：从列表里读正文全文的脚本与插件改用单条读取。升级前落盘的事件（`content.state: legacy`）在单条读取里照常返回原来的内容 |
 | token 读来源事件的原文 | observer 及以上的 token 能从事件列表读到全文，不受外发范围约束 | 全文只经单条读取，token 读到的内容按该来源的 `outbound.external` 裁剪；未选择或 `none` 时只有元信息 | 收紧。依赖 token 读全文的调用方，由本人把该来源对外部端点的范围选为全文；Web 上本人始终看到全文。挂靠消息不受影响 |
 | 提醒事项来源的游标与事件 | 游标是拉取时刻；只发 `reminder.due`、`reminder.open` | 游标是拉取范围的指纹与上一轮看到的未完成提醒（id 到标题）；离开未完成集合的逐条核实，已完成的发 `reminder.completed`，仍未完成或读不到的发 `reminder.out_of_view`，内置规则 `reminder-status` 挂到已有事项（附录 D.2） | 旧游标读作基线：升级后第一轮不发这两种事件，此后正常；拉取范围变了同样只建基线；按事件类型穷举的规则要认识新类型 |
@@ -513,7 +507,8 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 来源规则的 `prescreen` | 值是提示词模板名 | `none` 是保留字，表示跳过预筛 | 用户包里名为 `none` 的提示词模板在加载时被拒绝，改名即可 |
 | webhook 映射产出的事件 | 映射没写 `detail` 时原始 payload 只在接收记录里，30 天后清除 | 请求体另作为事件原文的 `original` 部分永久保存 | 只增；已落盘的事件不补。请求体上限成为运行配置 `max_webhook_body_mb`，默认值与此前写死的 1 MiB 相同 |
 | 事件日志与订阅流 | 每条事件只有一个时刻 `at` | 新增可选的 `imported`、`recorded_at`；带 `imported` 的事件不进订阅流、注入增量与规则 | 只增字段；已有事件没有这两个字段，即普通事件。不导入就没有任何变化 |
-| 授权单可授权的动作 | 不含 `item.progress`（文档此前已列，实现未放行）；没有导入 | 加入 `item.progress`；新增只能单独成单的 `import.apply` | 已签发的单内容不可改，不会因此多出权限 |
+| 授权单可授权的动作 | 不含 `item.progress`（文档此前已列，实现未放行）；没有导入 | 加入 `item.progress`；不含 `import.apply`（导入已取消，见下一行） | 已签发的单内容不可改，不会因此多出权限 |
+| 带原始时间的导入（已取消，2026-11-20） | 工作台能力迭代曾提供 `import.apply`、`POST /import`、`GET /imports`、`apa import`、Web "设置 › 导入"与导入专用授权单 | 全部删除：`POST /import`、`GET /imports` 返回 404，`apa import` 为未知命令（退出码 2），签发带 `import` 段或 `import.apply` 的授权单返回 400（主文档 §7.1、决定 83） | 账本结构不变：导入批次表、对照表、`policy_grant.used_records`、事件的 `import_batch`、`recorded_at` 与事项的 `imported` 只读保留、不再写入；旧的导入专用单读出时原样带回 `import` 段，不放行任何命令；`import.completed` 与三个导入原因码保留为只读的历史值。按 `origin` 查询照常可用 |
 | 回执的链接 | `--link` 一个 | 可多个；库内链接在报 `done` 时自动登记为产出 | 只给一个时行为同前，证据里的 `link` 字段不变，另增 `links[]`。未登记任何笔记库的部署没有自动登记 |
 | 材料的形态 | 两种，由有没有仓库位置区分 | 三种，新增只读字段 `form`；`POST /materials` 带 `link` 时登记链接型 | 只增；已有材料的 `form` 在读取时推定，不改写 |
 | 简报的写回结构 | `spec.sections[]` 每节必须有 `project` | 每节有 `project` 或 `title` 之一；`spec` 另有内核写入的 `since`、`until` | 已有简报原样可读。自定义的简报视图若按 `project` 分组，要能处理没有 `project` 的节 |

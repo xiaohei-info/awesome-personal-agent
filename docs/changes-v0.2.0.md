@@ -275,7 +275,7 @@ v0.2.0 发布前追加的一个迭代，补齐"把 APA 当作唯一的工作台"
 | 能力 | 内容 | 工作组 |
 |---|---|---|
 | 来源原文完整保留 | 账本存完整原文；派生内容与原文分开；裁剪只在调用模型时；Web 查看；存储统计、保留期与物理删除 | W17 |
-| 带原始时间的导入 | `import.apply`、导入标记、幂等、专用授权单、Web 上传、按 `origin` 查询 | W18 |
+| 带原始时间的导入 | ~~`import.apply`、幂等、专用授权单、Web 上传~~（已取消，2026-11-20，主文档决定 83）；导入标记（旧数据只读）、按 `origin` 查询 | W18 |
 | 链接型材料与笔记库 | 链接型材料、笔记库登记与打开方式、回执链接自动登记、预填新建页 | W19 |
 | 简报资料扩展 | 日程、新增建议、待决策、到期与等待、当天活动；按实例的窗口；带来源原文 | W20 |
 | 抽取与起草对齐、紧急建议即时提醒 | 同一组字段、同一份清单、同一条合并路径；`prescreen: none`；`notify_urgent` | W21 |
@@ -328,9 +328,9 @@ v0.2.0 发布前追加的一个迭代，补齐"把 APA 当作唯一的工作台"
   **迁移**：已存的策略版本没有这个键，读作没有登记，不改写。
 - **WB-18 生成端点新增 `max_material_chars`（默认 24000）。** §8.4。
   **迁移**：已存的策略版本没有这个键，读作默认值。**行为变化**：此前生成端点的资料没有预算；升级后超过 24000 个字符的资料会被裁剪并留痕。此前各来源把正文截在 16 KiB 以内，所以对已有来源的实际输入量影响不大，变化主要来自原文变长。
-- **WB-19 授权单：`item.progress` 可授权；新增导入专用单。** §6.13、§14.5。
+- **WB-19 授权单：`item.progress` 可授权；~~新增导入专用单~~（已取消，2026-11-20，主文档决定 83）。** §6.13、§14.5。
   **迁移**：已签发的单内容不可改，不会多出权限；要让 Agent 凭授权单记进展或导入，由本人在 Web 新签。文档此前已把 `item.progress` 列为可用授权单，实现没有放行，这次对齐。
-- **WB-20 第二档新增"只接受授权单"的判定。** 只有 `import.apply`。§14.5。
+- ~~**WB-20 第二档新增"只接受授权单"的判定。** 只有 `import.apply`。~~（已取消，2026-11-20，主文档决定 83）。§14.5。
   **迁移**：新命令，无存量调用。
 - **WB-21 来源登记新增 `content_retention_days`。** 只在 Web 设。§6.15。
   **迁移**：见 WB-07。
@@ -341,7 +341,7 @@ v0.2.0 发布前追加的一个迭代，补齐"把 APA 当作唯一的工作台"
 
 ### 10.4 HTTP API
 
-- **WB-24 新路由。** `POST /import`、`GET /imports`、`GET /source-events/{id}`、`POST /source-events/{id}/attachments/{n}/fetch`、`GET /storage`、`GET /note-vaults`、`GET/PUT /settings/note-vaults`、`PUT /settings/sources/{id}/content-retention`。附录 B.2。
+- **WB-24 新路由。** ~~`POST /import`、`GET /imports`~~（已取消，2026-11-20，主文档决定 83）、`GET /source-events/{id}`、`POST /source-events/{id}/attachments/{n}/fetch`、`GET /storage`、`GET /note-vaults`、`GET/PUT /settings/note-vaults`、`PUT /settings/sources/{id}/content-retention`。附录 B.2。
   **迁移**：只增。
 - **WB-25 来源事件列表不再带正文全文。** `GET /sources/{id}/events` 与 `GET /items/{id}/messages` 的 `detail` 改为至多 2000 个字符的预览，另带 `content` 清单。附录 B.6。
   **迁移**：**调用方要改**：从列表里读全文的脚本与插件改用 `GET /source-events/{id}`。升级前落盘的事件在单条读取里照常返回原来的内容。
@@ -349,12 +349,12 @@ v0.2.0 发布前追加的一个迭代，补齐"把 APA 当作唯一的工作台"
   **迁移**：收紧，没有兼容期。需要 Agent 读到全文的来源，由本人把该来源对外部端点的范围选为全文。挂靠消息与已接受事项的内容不受影响。
 - **WB-27 已有路由的新增参数与字段。** `GET /items` 的 `origin_source`、`origin_ref`；`POST /materials` 带 `link`；`PATCH /materials/{id}` 改链接型材料的标题、kind 与标签；材料的 `form`、`link`、`open_url`；事项的 `imported`、`proposal.urgent`；`POST /items/{id}/report` 的 `link` 可为数组；`POST /settings/purge` 可删来源事件；`POST /settings/grants` 的 `import` 段；`/settings/model-endpoints` 的 `generate_endpoint.max_material_chars`；`GET /audit/events` 的 `imported` 筛选。附录 B.2。
   **迁移**：只增；不带新参数时行为同前。
-- **WB-28 新的错误原因。** 退出码 23 的 `grant_required`、`import_source_mismatch`、`import_limit_exceeded`；被拒收事件的 `event_too_large`。附录 B.3。
+- **WB-28 新的错误原因。** 退出码 23 的 `grant_required`、`import_source_mismatch`、`import_limit_exceeded`（导入取消后只读的历史值，不再产出）；被拒收事件的 `event_too_large`。附录 B.3。
   **迁移**：没有新增退出码；按 `code` 穷举判断的调用方要接受新值。
 
 ### 10.5 CLI
 
-- **WB-29 新命令。** `apa import`、`apa source event`。附录 B.1。
+- **WB-29 新命令。** ~~`apa import`~~（已取消，2026-11-20，主文档决定 83）、`apa source event`。附录 B.1。
   **迁移**：只增。
 - **WB-30 已有命令的新增标志。** `apa item add`、`apa item update`、`apa propose` 的 `--deadline`、`--origin`、`--ext`；`apa item list` 的 `--origin-source`、`--origin-ref`；`apa material add --link --title`；`apa report` 的 `--link` 可重复；`apa proposals apply --file -`。附录 B.1。
   **迁移**：只增；不带新标志时行为同前。

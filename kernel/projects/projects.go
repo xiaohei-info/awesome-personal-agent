@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -669,54 +668,4 @@ func parseExecutors(in json.RawMessage) ([]string, []domain.ExecutorMatch, error
 		}
 	}
 	return out, match, nil
-}
-
-// ImportedProject 是一条已校验的导入项目记录（§7.1）。
-type ImportedProject struct {
-	Name, Intro string
-	Tags        []string
-	Status      domain.ProjectStatus
-	CreatedAt   time.Time // project.updated（create）事件的时刻，取记录的 created_at
-}
-
-// ImportCreate 在导入命令的事务里新建项目：事件时刻取 CreatedAt，带导入批次与实际写入时刻；
-// 不设 allowed_executors、repos 与对话捕获（§7.1）。返回新项目 id。
-func ImportCreate(c *command.Ctx, in ImportedProject, batch string, recordedAt time.Time) (string, error) {
-	if err := validName(in.Name); err != nil {
-		return "", err
-	}
-	if err := validTags(in.Tags); err != nil {
-		return "", err
-	}
-	if in.Status == "" {
-		in.Status = domain.ProjectActive
-	}
-	if !validStatus(in.Status) {
-		return "", invalid("unknown status " + string(in.Status))
-	}
-	id, err := newID()
-	if err != nil {
-		return "", err
-	}
-	p := domain.Project{ID: id, Name: in.Name, Intro: in.Intro, Tags: in.Tags, Status: in.Status}
-	if err := save(c.Tx, p, true); err != nil {
-		return "", err
-	}
-	_, err = c.Emit(domain.Event{Type: domain.EvProjectUpdated, Object: id, Payload: snapshot("create", p), At: in.CreatedAt, Imported: batch, RecordedAt: recordedAt})
-	return id, err
-}
-
-// FindByName 按名字找项目：去掉首尾空白、不分大小写；有多个同名时取 id 最小的（导入的绑定规则，§7.1）。
-func FindByName(tx *store.Tx, name string) (domain.Project, bool, error) {
-	want := strings.ToLower(strings.TrimSpace(name))
-	ps, err := query(tx, "ORDER BY id")
-	if err != nil {
-		return domain.Project{}, false, err
-	}
-	for _, p := range ps {
-		if strings.ToLower(strings.TrimSpace(p.Name)) == want {
-			return p, true, nil
-		}
-	}
-	return domain.Project{}, false, nil
 }

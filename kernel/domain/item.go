@@ -214,7 +214,7 @@ type ItemKernelState struct {
 	Unattended bool      `json:"unattended,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitzero"`
 	UpdatedAt  time.Time `json:"updated_at,omitzero"`
-	// Imported 只有导入写下的事项才有：导入批次与实际写入时刻。跟进与久未推进以它和最后一次非导入变更中较晚的一个起算（§7.1、§7.3）。
+	// Imported 只有导入写下的事项才有（导入已取消，只读的历史值）：导入批次与实际写入时刻。跟进与久未推进以它和最后一次非导入变更中较晚的一个起算（§7.1、§7.3）。
 	Imported *ImportInfo `json:"imported,omitempty"`
 }
 

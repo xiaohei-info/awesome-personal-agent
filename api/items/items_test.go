@@ -18,7 +18,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
-	kimports "github.com/xiaohei-info/awesome-personal-agent/kernel/imports"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -66,15 +65,11 @@ func setup(t *testing.T, staleAfter ...func() time.Duration) *env {
 	if err := inbound.RegisterAttach(x); err != nil {
 		t.Fatal(err)
 	}
-	imp, err := kimports.Register(x, kimports.Options{Kinds: kitems.NewKinds()})
-	if err != nil {
-		t.Fatal(err)
-	}
 	a := auth.New(nil)
 	if err := st.Update(bg, func(tx *store.Tx) error { return core.SetOwnerPassword(tx, ownerPW) }); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(x, st, staleAfter...), ImportRoutes(st, imp)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: a, Groups: []core.RouteGroup{Routes(x, st, staleAfter...)}})
 	if err != nil {
 		t.Fatal(err)
 	}

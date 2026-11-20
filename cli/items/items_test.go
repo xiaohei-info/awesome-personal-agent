@@ -23,7 +23,6 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/decisions"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
-	kimports "github.com/xiaohei-info/awesome-personal-agent/kernel/imports"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
@@ -75,11 +74,7 @@ func newKernel(t *testing.T) *kernel {
 	if err := inbound.RegisterAttach(k.x); err != nil {
 		t.Fatal(err)
 	}
-	imp, err := kimports.Register(k.x, kimports.Options{Kinds: kitems.NewKinds(), Now: func() time.Time { return k.now }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv, err := core.New(core.Deps{Store: st, Auth: k.auth, Groups: []core.RouteGroup{apiitems.Routes(k.x, st), apiitems.ImportRoutes(st, imp), apifm.Routes(k.x)}})
+	srv, err := core.New(core.Deps{Store: st, Auth: k.auth, Groups: []core.RouteGroup{apiitems.Routes(k.x, st), apifm.Routes(k.x)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -675,6 +670,30 @@ func TestItemDeadlineFlag(t *testing.T) {
 	p := k.idOf(k.ok(auth.Worker, "propose", "--kind", "task", "--title", "p", "--deadline", "2026-03-05T10:00:00Z"))
 	if k.item(p)["deadline"] != "2026-03-05T10:00:00Z" {
 		t.Fatalf("propose deadline: %v", k.item(p))
+	}
+}
+
+// apa item list --origin-source/--origin-ref 按事项的 origin 精确筛选（§7.1）。
+func TestItemListByOrigin(t *testing.T) {
+	k := newKernel(t)
+	for _, ref := range []string{"O-0001", "O-0002", "O-0003"} {
+		k.ok(auth.Worker, "propose", "--kind", "task", "--title", ref, "--origin", `{"source":"acc-src","ref":"`+ref+`"}`)
+	}
+	ids := func(r run) []string {
+		var out []string
+		for _, it := range r.json(t)["items"].([]any) {
+			out = append(out, it.(map[string]any)["origin"].(map[string]any)["ref"].(string))
+		}
+		return out
+	}
+	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src")); len(got) != 3 {
+		t.Fatalf("by source: %v", got)
+	}
+	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "acc-src", "--origin-ref", "O-0001")); len(got) != 1 || got[0] != "O-0001" {
+		t.Fatalf("by source and ref: %v", got)
+	}
+	if got := ids(k.ok(auth.Observer, "item", "list", "--origin-source", "other")); len(got) != 0 {
+		t.Fatalf("other source: %v", got)
 	}
 }
 

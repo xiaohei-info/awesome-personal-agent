@@ -12,9 +12,10 @@ const (
 	CodeRiskScreeningPending Code = "risk_screening_pending" // 403 → 22
 	CodeBasisRequired        Code = "basis_required"         // 403 → 23：替本人做决定的依据不足（§14.5）
 	CodeSessionNotDirect     Code = "session_not_direct"     // 403 → 23：凭原话的代答，会话不是与本人的私聊（§14.5）
-	CodeGrantRequired        Code = "grant_required"         // 403 → 23：命令只接受授权单（import.apply），没有带单或只带了本人原话（§14.5）
-	CodeImportSourceMismatch Code = "import_source_mismatch" // 403 → 23：导入授权单的来源名不符（§14.5）
-	CodeImportLimitExceeded  Code = "import_limit_exceeded"  // 403 → 23：累计条数会超过导入授权单的上限（§14.5）
+	// 以下三个只为 import.apply 产出；导入已取消（§14.5），内核不再产出，取值保留为只读的历史值，旧的拒绝记录仍能读懂。
+	CodeGrantRequired        Code = "grant_required"         // 403 → 23：命令只接受授权单（import.apply），没有带单或只带了本人原话
+	CodeImportSourceMismatch Code = "import_source_mismatch" // 403 → 23：导入授权单的来源名不符
+	CodeImportLimitExceeded  Code = "import_limit_exceeded"  // 403 → 23：累计条数会超过导入授权单的上限
 	CodeNotFound             Code = "not_found"              // 404 → 5
 	CodeConflict             Code = "conflict"               // 409 → 6
 	CodeModelsPaused         Code = "models_paused"          // 409 → 6：本人暂停了模型，需要模型的本人操作被拒（§8.7）

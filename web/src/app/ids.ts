@@ -37,7 +37,7 @@ export const ACTOR_TYPE = ["human", "agent", "system"] as const;
 export const VIA = ["web", "cli", "clock", "rule", "source", "ext"] as const;
 /** 会话类型：kernel/domain/event.go Session* */
 export const SESSION_KIND = ["direct", "group", "unknown"] as const;
-/** 错误码：kernel/domain/errors.go Code。models_paused 由「暂停模型」改动新增 */
+/** 错误码：kernel/domain/errors.go Code。models_paused 由「暂停模型」改动新增；grant_required、import_* 是导入取消后只读的历史值（旧拒绝记录用） */
 export const ERROR_CODE = [
   "invalid_request", "unauthenticated", "permission_denied", "web_only", "executor_not_allowed", "risk_screening_pending",
   "basis_required", "session_not_direct", "grant_required", "import_source_mismatch", "import_limit_exceeded", "not_found", "conflict", "login_locked", "internal", "models_paused", "fetch_failed",
@@ -150,7 +150,7 @@ export type NoticeCode = (typeof NOTICE_CODE)[number];
 /** 授权单不可用的细分原因：kernel/domain/errors.go GrantReason*（错误体与拒绝记录的 reason，设计 §14.5）。 */
 export const GRANT_REASON = ["grant_screening_pending", "grant_risk_ceiling", "grant_not_for_background", "untrusted_origin", "untrusted_trigger"] as const;
 
-/** 对外事件类型：kernel/domain/event.go Ev*（附录 B.4） */
+/** 对外事件类型：kernel/domain/event.go Ev*（附录 B.4）；import.completed 是导入取消后只读的历史值 */
 export const EVENT = [
   "item.created", "item.updated", "item.phase_changed", "item.deadline_passed", "item.progress_added", "proposal.attached", "import.completed",
   "decision.requested", "decision.resolved", "delegation.created", "delegation.reported", "command.rejected",
