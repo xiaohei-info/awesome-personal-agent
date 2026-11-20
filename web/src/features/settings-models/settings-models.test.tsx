@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -278,8 +278,8 @@ describe("设置 › 模型", () => {
 
     await userEvent.click(j.getByLabelText("配置打分模型"));
     await save("打分模型");
-    await j.findByText(/已保存（版本 3）/);
-    expect(s.puts.at(-1)).toEqual({ judge_endpoint: null });
+    await waitFor(() => expect(s.puts.at(-1)).toEqual({ judge_endpoint: null }));
+    expect(j.getByText(/已保存/)).toBeInTheDocument(); // 保存成功只说「已保存」，不带版本号（界面设计 §6.2）
   });
 
   it("flow-endpoint-config: 服务端拒绝时显示原因，草稿保留；筛选超时单独保存，非法值本地提示", async () => {

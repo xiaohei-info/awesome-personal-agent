@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
-import { PageHead } from "../../app/page";
+import { Go, PageHead } from "../../app/page";
 import { useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { useLabel } from "../../app/values";
@@ -12,15 +12,10 @@ import { strings } from "./strings";
 
 export const PAGE = 20;
 
-/** 简报页的导航：看已生成的 / 管安排。 */
-export function Tabs() {
+/** 简报页只读：定时安排归在「自动规则 › 定时安排」（界面设计 §3.1），这里只给一个去改的链接。 */
+export function ScheduleLink() {
   const t = useT(strings);
-  return (
-    <nav aria-label={t.title} className="subnav">
-      <NavLink to="/briefs" end>{t.tabRead}</NavLink>
-      <NavLink to="/briefs/schedule">{t.tabSchedule}</NavLink>
-    </nav>
-  );
+  return <p className="sub"><Go to="/briefs/schedule">{t.manageSchedule}</Go></p>;
 }
 
 // 读已生成的简报：最新一份整份展开，其余按时间倒排成历史列表（?page= 翻页，刷新与返回都还在）。
@@ -53,7 +48,7 @@ export function Library() {
   return (
     <main>
       <PageHead>{t.title}</PageHead>
-      <Tabs />
+      <ScheduleLink />
       {error != null && <ErrorNote error={error} />}
       {!latest ? (
         <p className="sub">{t.none} <Link to="schedule" state={{ suggest: true }}>{t.suggest}</Link></p>

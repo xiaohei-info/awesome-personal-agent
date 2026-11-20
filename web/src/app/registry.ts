@@ -5,14 +5,14 @@ import type { Dict, Lang } from "./i18n";
 /** 一段两种语言的界面文字。 */
 export type Text = Dict<string>;
 
-/** 导航入口：一个入口下的多个页面在入口里以页签切换（设计 §4.1）。short 是手机顶栏上的短名。 */
+/** 导航入口：一个入口下的多个页面在入口里以页签切换（界面设计 §3.1）。short 是手机顶栏上的短名。 */
 export const SECTIONS = {
   today: { title: { zh: "今天", en: "Today" } },
-  decisions: { title: { zh: "决策待办", en: "Decisions" }, short: { zh: "决策", en: "Decide" } },
-  proposals: { title: { zh: "建议流", en: "Proposals" }, short: { zh: "建议", en: "Proposals" } },
+  decisions: { title: { zh: "等你决定", en: "For you to decide" }, short: { zh: "决定", en: "Decide" } },
+  proposals: { title: { zh: "建议", en: "Proposals" } },
   items: { title: { zh: "事项", en: "Items" } },
   projects: { title: { zh: "项目", en: "Projects" } },
-  agents: { title: { zh: "Agent 动态", en: "Agent activity" } },
+  agents: { title: { zh: "Agent 工作", en: "Agent work" } },
   sources: { title: { zh: "消息来源", en: "Sources" } },
   automation: { title: { zh: "自动规则", en: "Automation" } },
   settings: { title: { zh: "设置", en: "Settings" } },
@@ -28,16 +28,16 @@ export const NAV: { group: Text; sections: SectionId[] }[] = [
 ];
 export const SETTINGS: SectionId = "settings";
 export const DIAG: SectionId = "diag";
-/** 设置里的分组（设计 §3.1）：桌面上是设置页的第二列，手机上是「设置首页」列表。按页面 id 归组，没列出的页面排在最后一组。 */
+/** 设置里的分组（界面设计 §3.1）：桌面上是设置页的第二列，手机上是「设置首页」列表。按页面 id 归组，没列出的页面排在最后一组。 */
 export const SETTINGS_GROUPS: { title: Text; ids: string[] }[] = [
   { title: { zh: "日常", en: "Everyday" }, ids: ["settings-general", "settings-notify", "settings-policy"] },
-  { title: { zh: "连接", en: "Connections" }, ids: ["settings-channels", "settings-vaults"] },
-  { title: { zh: "Agent", en: "Agents" }, ids: ["settings-agents"] },
-  { title: { zh: "系统", en: "System" }, ids: ["settings-models", "settings-security", "settings-storage", "settings-outward-api", "settings-import", "purge"] },
+  { title: { zh: "Agent 与模型", en: "Agents and models" }, ids: ["settings-agents", "settings-models"] },
+  { title: { zh: "连接", en: "Connections" }, ids: ["settings-channels", "settings-vaults", "settings-outward-api"] },
+  { title: { zh: "数据与安全", en: "Data and security" }, ids: ["settings-security", "settings-storage", "settings-import", "purge"] },
 ];
 /** 手机上的「设置首页」：设置入口在窄屏上落到这里。 */
 export const SETTINGS_HOME = "settings/home";
-/** 手机顶栏直接显示的入口（§4.1 手机主路径），其余收进"更多"。 */
+/** 手机顶栏直接显示的入口（界面设计 §3.1 手机主路径），其余收进"更多"。 */
 export const MOBILE: SectionId[] = ["today", "decisions", "proposals", "items"];
 
 // 页面按 web/src/features/<名称>/index.ts(x) 注册：导出 `feature`。新增页面只加目录，不改中心路由表。
@@ -52,8 +52,13 @@ export interface Feature {
   section?: SectionId;
   /** 旧地址或服务端拼出的地址（不含前导 /），打开时改写到 path，保留查询串与锚点。 */
   aliases?: string[];
-  /** 导航上显示的数量（如待决数）；取不到或为 0 不显示。 */
+  /**
+   * 页签上的灰色数量（如待抽查条数）：可以处理、不处理也不卡住任何事，只显示在自己的页签上，不上浮到入口（界面设计 §5.1）。
+   * 取不到或为 0 不显示。
+   */
   count?: (api: ApiClient) => Promise<number>;
+  /** 入口上的数字取自注意力汇总：decide 是红色（等你本人，不做就卡住），proposals 是灰色。 */
+  badge?: "decide" | "proposals";
   /** 设置首页上这一项的当前值摘要（如「每天最多 20 条」）；取不到时不显示。 */
   summary?: (api: ApiClient, lang: Lang) => Promise<string>;
   element: ReactNode;

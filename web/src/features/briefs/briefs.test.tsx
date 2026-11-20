@@ -173,11 +173,13 @@ describe("简报页", () => {
     expect(await screen.findByText("还没有简报")).toBeInTheDocument();
   });
 
-  it("简报页把「已生成的」与「定时安排」分开，安排页不再混着简报正文", async () => {
-    mount(server());
+  it("简报页把「已生成的」与「定时安排」分开：安排页不混着简报正文，简报页只给一个去改安排的链接（界面设计 §3.1）", async () => {
+    const v = mount(server());
     expect(await screen.findByRole("group", { name: "简报" })).toBeInTheDocument();
     expect(screen.queryByLabelText("简报 周一简报")).toBeNull();
-    expect(screen.getByRole("link", { name: "已生成的简报" })).toHaveAttribute("href", "/briefs");
+    v.unmount();
+    mount(server(), "/briefs");
+    expect(await screen.findByRole("link", { name: "改定时安排 ›" })).toHaveAttribute("href", "/briefs/schedule");
   });
 
   it("flow-brief: 只列出简报类能力包的实例；每个一张卡，收起时一行摘要，不露 cron 串", async () => {

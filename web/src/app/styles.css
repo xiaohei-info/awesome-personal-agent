@@ -82,6 +82,17 @@ kbd {
 .shell > nav a:hover { background: color-mix(in oklch, var(--ink) 6%, transparent); color: var(--ink); }
 .shell > nav a.active { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
 .count { min-width: 20px; padding: 0 6px; border-radius: 99px; font: 600 11px/18px var(--sans); text-align: center; color: oklch(98% 0.01 60); background: var(--seal); }
+/* 灰色数字：可以处理、不处理也不卡住任何事（建议、抽查）；红色只留给「等你决定」（界面设计 §5.1）。 */
+.count.quiet { color: var(--ink-2); background: var(--sunken); }
+.backbar { margin: 0 0 8px; font-size: 13px; }
+.landed { outline: 2px solid var(--seal-soft); outline-offset: 4px; }
+/* 状态加动作的一行：一句话在左，主按钮在右；窄屏换行（界面设计 §5.3）。 */
+.act-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; justify-content: space-between; }
+.act-row > div { flex: 1 1 220px; min-width: 0; }
+.act-row .sub { display: block; }
+.saved-note { margin-left: 8px; font-size: 13px; color: var(--ok); }
+.saved-note.bad { color: var(--seal); }
+.unsaved { margin-left: 8px; font: 12px/1 var(--sans); color: var(--warn); }
 .nav-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
 .nav-foot > div { display: flex; gap: 6px; margin-top: 8px; }
 

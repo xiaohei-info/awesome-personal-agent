@@ -11,7 +11,7 @@ import { Pick } from "../../app/values";
 import { RoutineForm, type Instance } from "./Routine";
 import { ScheduleCard, When } from "./ScheduleCard";
 import { BriefDetail } from "./BriefDetail";
-import { Library, Tabs } from "./Library";
+import { Library } from "./Library";
 import type { Brief } from "./BriefBody";
 
 // 形状对应 GET /v1/items?kind=brief（spec.period、spec.sections[{project|title,body}]、origin.source）、GET/POST /v1/instances（列表带 agent_ready）、
@@ -39,7 +39,8 @@ export function BriefsPage() {
   );
 }
 
-function Schedule() {
+/** 自动规则 › 定时安排（/briefs/schedule，地址不变）：定时简报与例行任务两节。 */
+export function Schedule() {
   const { api } = useSession();
   const t = useT(strings);
   const [briefs, setBriefs] = useState<Brief[] | null>(null);
@@ -136,8 +137,7 @@ function Schedule() {
 
   return (
     <main>
-      <PageHead>{t.title}</PageHead>
-      <Tabs />
+      <PageHead>{t.tabSchedule}</PageHead>
       {error != null && <ErrorNote error={error} />}
       <section aria-label={t.instances}>
         <h2>{t.scheduled}</h2>

@@ -7,7 +7,7 @@ export const feature: Feature = {
   id: "settings-outward-api",
   title: { zh: "对外接口", en: "Outward API" },
   path: "settings/outward-api",
-  order: 8.2,
+  order: 7.6,
   section: "settings",
   summary: async (api, lang) => {
     const r = await api.get<Creds>("/settings/ext-keys");

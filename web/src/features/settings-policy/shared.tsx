@@ -3,8 +3,9 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, lang, useT } from "../../app/i18n";
 import { shared } from "./strings";
+import { useDirty } from "../../app/leave";
 
-// 「我来拍板」「提醒与打扰」「后台权限」「通用 › 助手的语气」共用：形状对应 /v1/settings/{policy,allowlists,access-limits}（附录 B.2）。
+// 「我来拍板」「提醒与打扰」「设置 › Agent」共用：形状对应 /v1/settings/{policy,allowlists,access-limits}（附录 B.2）。
 // 校验、规整、人格上限（约 400 token）全部由服务端判定，页面只搬运编辑结果并原样显示拒绝原因；被拒绝时什么都没保存，草稿保留。
 // PUT 按段替换：每张卡片只发自己的段，且与改版前的请求体逐字段一致（settings-payload.test.tsx 守住）。
 export type PolicyRoute = "policy" | "allowlists" | "access-limits";
@@ -60,16 +61,23 @@ export function PolicyPage({ title, lede, error, ready, onRetry, children }: {
   );
 }
 
-/** 一张可单独保存的卡片：标题即说明，至多一条短提示。 */
-export function Card({ title, hint, onSave, children }: { title: string; hint?: string; onSave: () => Promise<number>; children: ReactNode }) {
+/**
+ * 一张可单独保存的卡片（界面设计 §6.1「整块保存」）：标题即说明，至多一条短提示；保存成功就地写「已保存」，出错写原因。
+ * 给了 dirty 时：没有改动按钮不可点，有改动时标题旁标「未保存」，离开页面前先问一句（useLeaveGuard）。
+ */
+export function Card({ title, hint, onSave, dirty, id, saveLabel, children }: {
+  title: string; hint?: string; onSave: () => Promise<number>; dirty?: boolean; id?: string; saveLabel?: string; children: ReactNode;
+}) {
   const t = useT(shared);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  useDirty(!!dirty);
   async function save() {
     setBusy(true);
     setStatus(null);
     try {
-      setStatus({ ok: true, text: t.saved(await onSave()) });
+      await onSave();
+      setStatus({ ok: true, text: t.saved() });
     } catch (e) {
       setStatus({ ok: false, text: msg(e) });
     } finally {
@@ -77,24 +85,26 @@ export function Card({ title, hint, onSave, children }: { title: string; hint?: 
     }
   }
   return (
-    <section aria-label={title} className="panel stack">
-      <h2>{title}</h2>
+    <section aria-label={title} className="panel stack" id={id}>
+      <h2>{title}{dirty && <span className="unsaved">{t.unsaved}</span>}</h2>
       {children}
       {hint && <p className="sub">{hint}</p>}
       <div>
-        <button type="button" className="primary" disabled={busy} onClick={() => void save()} aria-label={t.saveCard(title)}>{t.save}</button>
+        <button type="button" className="primary" disabled={busy || dirty === false} onClick={() => void save()} aria-label={t.saveCard(title)}>{saveLabel ?? t.save}</button>
+        {status && <span role={status.ok ? "status" : "alert"} className={"saved-note" + (status.ok ? "" : " bad")}>{status.text}</span>}
       </div>
-      {status && <p role={status.ok ? "status" : "alert"}>{status.text}</p>}
     </section>
   );
 }
 
 // 仅当本段的服务端内容真正变化（保存后返回规整结果、或重新加载）时，草稿才重置；同路由其它段保存不影响本段草稿。
+// 第三项是「有没有改动」：草稿与按服务端内容算出的初值不同。
 export function useDraft<T>(doc: unknown, init: () => T) {
   const [d, setD] = useState<T>(init);
   const sig = JSON.stringify(doc);
   useEffect(() => setD(init()), [sig]); // eslint-disable-line react-hooks/exhaustive-deps
-  return [d, setD] as const;
+  const dirty = JSON.stringify(d) !== JSON.stringify(init());
+  return [d, setD, dirty] as const;
 }
 
 /** 分段按钮：两三个互斥取值，按下的那个就是当前值。 */

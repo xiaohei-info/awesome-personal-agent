@@ -111,19 +111,28 @@ describe("登录与导航框架", () => {
     expect(sessionStorage.getItem("apa.csrf")).toBeNull();
   });
 
-  it("未声明入口的页面各自成为一个入口，排在最后一组；入口数量为其中页面数量之和，为 0 或取不到时不显示", async () => {
+  it("未声明入口的页面各自成为一个入口，排在最后一组；入口上的数字取自注意力汇总：等你决定是红色，建议是灰色，为 0 不显示（界面设计 §5.1）", async () => {
     sessionStorage.setItem("apa.csrf", "tok-1");
     const srv = fakeServer();
     srv.setValid();
-    mount(srv.impl, [
-      { ...feat("decisions", "决策待办", 1), section: "decisions", count: async () => 3 },
-      { ...feat("proposals", "建议流", 2), section: "proposals", count: async () => 0 },
+    const json = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    const asked = { id: "i", title: "t", ask: { question: "q" } };
+    const impl = ((u: string, i: RequestInit) =>
+      u === "/v1/items?phase=needs_input" ? json({ items: [asked, asked, { ...asked, ask: { question: "q", resolution: {} } }] })
+        : u === "/v1/revisions/pending" ? json({ pending: [{ revision: { id: "r1" }, material: { id: "m1", title: "设计" } }] })
+          : u === "/v1/items?phase=proposed" ? json({ items: [{}, {}] })
+            : srv.impl(u, i)) as typeof fetch;
+    mount(impl, [
+      { ...feat("decisions", "等你决定", 1), section: "decisions", badge: "decide" },
+      { ...feat("proposals", "建议", 2), section: "proposals", badge: "proposals" },
       { ...feat("items", "事项", 3), count: () => Promise.reject(new Error("down")) },
     ]);
     const nav = await screen.findByRole("navigation", { name: "主导航" });
     expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["处理", "自动化"]);
-    expect(await within(nav).findByRole("link", { name: "决策待办 3" })).toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: "建议流" })).toBeInTheDocument();
+    // 两个还没答的问题 + 一处等你确认的文档修改；答过的不算
+    const decide = await within(nav).findByRole("link", { name: "等你决定 3" });
+    expect(decide.querySelector(".count")).not.toHaveClass("quiet");
+    expect(within(nav).getByRole("link", { name: "建议 2" }).querySelector(".count")).toHaveClass("quiet");
     expect(within(nav).getByRole("link", { name: "事项" })).toBeInTheDocument();
   });
 
@@ -184,25 +193,25 @@ async function openAt(at: string) {
   return screen.findByRole("navigation", { name: "主导航" });
 }
 
-describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
+describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
   it("三组八个入口，设置与诊断在底部；默认落到今天", async () => {
     const nav = await openAt("/");
     expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["处理", "工作", "自动化"]);
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "今天", "决策待办", "建议流", "事项", "项目", "Agent 动态", "消息来源", "自动规则", "设置", "诊断",
+      "今天", "等你决定", "建议", "事项", "项目", "Agent 工作", "消息来源", "自动规则", "设置", "诊断",
     ]);
     expect(await screen.findByRole("heading", { name: "今天 页面" })).toBeInTheDocument();
   });
 
   // 旧地址一个不改：每个原页面仍在原地址，落到所属入口并高亮对应页签。
   const OLD: [string, string, string][] = [
-    ["/today", "今天", "今天"], ["/briefs", "今天", "简报"], ["/unread", "今天", "未读提醒"],
-    ["/decisions", "决策待办", "决策待办"], ["/proposals", "建议流", "建议流"],
+    ["/today", "今天", "今天"], ["/briefs", "今天", "简报"], ["/unread", "今天", "今天"], ["/briefs/schedule", "自动规则", "定时安排"],
+    ["/decisions", "等你决定", "等你决定"], ["/proposals", "建议", "建议"],
     ["/items", "事项", "事项"], ["/items/itm_1", "事项", "事项"], ["/pack-views", "事项", "事项"],
     ["/projects", "项目", "项目"], ["/materials", "项目", "材料"],
-    ["/agent-changes", "Agent 动态", "改动"], ["/delegation", "Agent 动态", "委派"], ["/executors", "Agent 动态", "执行者"], ["/runs", "诊断", "运行日志"],
-    ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "被忽略的，抽几条看看"],
-    ["/rules", "自动规则", "规则"], ["/judgment", "自动规则", "筛选门槛"],
+    ["/agent-changes", "Agent 工作", "改动"], ["/delegation", "Agent 工作", "进行中"], ["/executors", "Agent 工作", "执行者"], ["/runs", "诊断", "运行记录"],
+    ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "抽查"], ["/judgment", "消息来源", "筛选门槛"],
+    ["/rules", "自动规则", "规则"],
     ["/health", "诊断", "状态"], ["/audit", "诊断", "操作记录"],
     ["/settings", "设置", "我来拍板"], ["/settings/channels", "设置", "提醒渠道"], ["/settings/outward-api", "设置", "对外接口"], ["/settings-exec", "设置", "Agent"],
     ["/settings/grants", "设置", "Agent"], ["/settings/agents", "设置", "Agent"], ["/settings-security", "设置", "登录与会话"], ["/purge", "设置", "永久删除"],
@@ -217,9 +226,9 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     else expect(entry).toBe(tab); // 只有一个页面的入口没有页签
   });
 
-  it("简报抽检链接 /judgments/… 改写到消息来源 › 被忽略的，抽几条看看，保留查询串", async () => {
+  it("简报抽检链接 /judgments/… 改写到消息来源 › 抽查，保留查询串", async () => {
     await openAt("/judgments/spot-check?judgment=jdg_1");
-    expect(await screen.findByRole("heading", { name: "被忽略的，抽几条看看 页面" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "抽查 页面" })).toBeInTheDocument();
     expect(screen.getByTestId("at")).toHaveTextContent("/spot-check?judgment=jdg_1");
   });
 
@@ -245,11 +254,11 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
     window.matchMedia = ((q: string) => ({ matches: true, media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
     try {
       const nav = await openAt("/today");
-      expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["今天", "决策", "建议", "事项"]);
+      expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(["今天", "决定", "建议", "事项"]);
       const more = within(nav).getByRole("button", { name: "更多" });
       await userEvent.click(more);
       const sheet = screen.getByRole("dialog", { name: "全部页面" });
-      expect(within(sheet).getAllByRole("link").map((a) => a.textContent)).toEqual(["项目", "Agent 动态", "消息来源", "自动规则", "设置", "诊断"]);
+      expect(within(sheet).getAllByRole("link").map((a) => a.textContent)).toEqual(["项目", "Agent 工作", "消息来源", "自动规则", "设置", "诊断"]);
       expect(within(sheet).getAllByRole("link")[0]).toHaveFocus();
       await userEvent.keyboard("{Escape}");
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -265,7 +274,7 @@ describe("导航：入口、页签与旧地址（设计 §4.1）", () => {
 });
 
 // 导航底部的状态灯：取自 GET /v1/health 的十三项信号；本人暂停了模型是中性的「模型已暂停」，不算要处理（§8.7）。
-describe("状态灯（设计 §3.1）", () => {
+describe("状态灯（界面设计 §5.1）", () => {
   const ok = (id: string) => ({ id, ok: true, count: 0, next: "" });
   const IDS = ["source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable",
     "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag"];
@@ -295,23 +304,31 @@ describe("状态灯（设计 §3.1）", () => {
     expect(link.querySelector(".dot")).toHaveClass("paused");
   });
 
-  it("有要处理的：显示条数；暂停时其他积压照样算", async () => {
+  it("有要处理的：按对象计数显示件数；暂停时其他积压照样算", async () => {
     const nav = await light(report({
       model_unavailable: { detail: { judge: "paused", generate: "paused", endpoint: "", paused: true } },
       unjudged_backlog: { ok: false, count: 5, severity: "warning", detail: { models_paused: 4, outbound_unset: 1, model_unavailable: 0, undecided: 0, restored: 0, expired: 0, sources: [] } },
       source_failures: { ok: false, count: 1, severity: "error", detail: [{ source: "mail", enabled: true, consecutive_failures: 3 }] },
     }));
-    expect(await nav.findByRole("link", { name: "2 项要处理" })).toBeInTheDocument();
+    expect(await nav.findByRole("link", { name: "2 件要处理" })).toBeInTheDocument();
+  });
+
+  it("本人停用的来源只是仅供知晓：不亮灯，写「运行正常 · 1 条提示」（界面设计 §5.1）", async () => {
+    const nav = await light(report({
+      source_failures: { ok: false, count: 1, severity: "error", detail: [{ source: "mail", enabled: false, consecutive_failures: 0 }] },
+    }));
+    const link = await nav.findByRole("link", { name: "运行正常 · 1 条提示" });
+    expect(link.querySelector(".dot")).toHaveClass("ok");
   });
 });
 
-describe("设置的分组（设计 §3.1）", () => {
-  it("桌面：设置页左侧按 日常 / 连接 / Agent / 系统 分组列出，当前页高亮，永久删除排最后", async () => {
+describe("设置的分组（界面设计 §3.1）", () => {
+  it("桌面：设置页左侧按 日常 / Agent 与模型 / 连接 / 数据与安全 分组列出，当前页高亮，永久删除排最后", async () => {
     await openAt("/settings/notify");
     const sub = await screen.findByRole("navigation", { name: "设置页签" });
-    expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "连接", "Agent", "系统"]);
+    expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "Agent 与模型", "连接", "数据与安全"]);
     expect(within(sub).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "通用", "提醒与打扰", "我来拍板", "提醒渠道", "笔记库", "Agent", "模型", "登录与会话", "存储", "对外接口", "导入", "永久删除",
+      "通用", "提醒与打扰", "我来拍板", "Agent", "模型", "提醒渠道", "笔记库", "对外接口", "登录与会话", "存储", "导入", "永久删除",
     ]);
     expect(within(sub).getByRole("link", { name: "提醒与打扰" })).toHaveAttribute("aria-current", "page");
   });
@@ -324,11 +341,11 @@ describe("设置的分组（设计 §3.1）", () => {
       await userEvent.click(within(nav).getByRole("button", { name: "更多" }));
       await userEvent.click(within(screen.getByRole("dialog")).getByRole("link", { name: "设置" }));
       expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("设置");
-      expect(screen.getAllByRole("list").filter((l) => ["日常", "连接", "Agent", "系统"].includes(l.getAttribute("aria-label") ?? ""))).toHaveLength(4);
+      expect(screen.getAllByRole("list").filter((l) => ["日常", "Agent 与模型", "连接", "数据与安全"].includes(l.getAttribute("aria-label") ?? ""))).toHaveLength(4);
       await userEvent.click(within(screen.getByRole("list", { name: "日常" })).getByRole("link", { name: /提醒与打扰/ }));
       expect(await screen.findByRole("heading", { name: "提醒与打扰 页面" })).toBeInTheDocument();
       await userEvent.click(screen.getByRole("link", { name: /‹ 设置/ }));
-      expect(await screen.findByRole("list", { name: "系统" })).toBeInTheDocument();
+      expect(await screen.findByRole("list", { name: "数据与安全" })).toBeInTheDocument();
     } finally {
       window.matchMedia = mm;
     }

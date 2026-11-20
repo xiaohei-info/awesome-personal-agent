@@ -75,120 +75,106 @@ beforeEach(() => {
   DOCTOR = FINE;
 });
 
-describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
-  it("全部正常：页头「一切正常」，十三项都有中文名并折叠在一起；没有写请求", async () => {
+describe("诊断 › 状态（flow-health / ACT-HLT-01；界面设计 §5.3）", () => {
+  const act = () => within(main().getByRole("region", { name: "要你处理" }));
+  const info = () => within(main().getByRole("region", { name: "仅供知晓" }));
+  /** 「要你处理」里含某句话的那一行。 */
+  const row = (re: RegExp) => act().getByText(re).closest("li")!;
+
+  it("全部正常：页头「运行正常」，十三项都有中文名并折叠在一起；没有写请求", async () => {
     const s = serve(() => json(200, report()));
     mount(s.impl);
-    expect(await screen.findByRole("heading", { level: 1, name: "一切正常" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "运行正常" })).toBeInTheDocument();
     const fine = main().getByText("13 项都正常").closest("details")!;
     expect([...fine.querySelectorAll("li")].map((li) => li.textContent)).toEqual(TITLES);
-    for (const t of TITLES) expect(main().queryByRole("article", { name: t })).not.toBeInTheDocument();
+    expect(main().queryByRole("region", { name: "要你处理" })).not.toBeInTheDocument();
     expect(s.calls.filter((c) => !c.startsWith("GET"))).toEqual([]);
   });
 
-  it("只列要处理的：每条一句中文结论加去处，英文原因不上主界面；正常的折叠", async () => {
+  it("要你处理：每行一句问题、一句影响、一个写着要做什么的主按钮，按对象计数；英文原因与 id 不上主界面", async () => {
     const bad = {
-      source_failures: { ok: false, count: 1, severity: "error", why: "a source has consecutive pull failures", detail: [{ source: "src_mail", enabled: true, consecutive_failures: 5, needs_input_item: "itm_9" }] },
+      source_failures: { ok: false, count: 2, severity: "error", why: "a source has consecutive pull failures", detail: [{ source: "src_mail", enabled: true, consecutive_failures: 5, needs_input_item: "itm_9" }, { source: "src_new", enabled: false, consecutive_failures: 0 }] },
       outcall: { ok: false, count: 2, severity: "error", why: "outcall runs timed out", detail: { long: { running: 1, queued: 3, longest_wait_seconds: 42 }, short: { running: 0, queued: 0, longest_wait_seconds: 0 }, timeouts: ["r1", "r2"] } },
       delivery_backlog: { ok: false, count: 1, severity: "error", why: "deliveries are queued", detail: ["d1"] },
       chain_trips: { ok: false, count: 1, severity: "error", why: "the breaker stopped", detail: ["itm_3"] },
       pack_rejections: { ok: false, count: 1, severity: "error", why: "a pack failed to load", detail: ["pk"], rejections: [{ pack: "pk", source: "user", reason: "band is required" }] },
       model_unavailable: { ok: false, count: 3, severity: "error", why: "x", detail: { judge: "", generate: "not_configured", endpoint: "not_configured", screening: ["x"], judgements: [{ kind: "decision-card", object: "itm_1", endpoint: "generate" }] } },
       unjudged_backlog: { ok: false, count: 57, severity: "warning", why: "w", detail: { model_unavailable: 50, models_paused: 0, outbound_unset: 3, undecided: 2, restored: 2, expired: 3, sources: [{ source: "src_mail", count: 57 }] } },
-      rule_fallbacks: { ok: false, count: 1, severity: "error", why: "fell back to observe", detail: ["rule-1"] },
+      rule_fallbacks: { ok: false, count: 1, severity: "error", why: "fell back to observe", detail: ["p/event_rules/rule-1"] },
       receipt_failures: { ok: false, count: 2, severity: "error", why: "rejected", detail: ["itm_7", "itm_8"] },
       stalled_delegations: { ok: false, count: 1, severity: "warning", why: "stalled", detail: ["itm_5"] },
     };
     mount(serve(() => json(200, report(bad))).impl);
-    expect(await screen.findByRole("heading", { level: 1, name: "10 项要处理" })).toBeInTheDocument();
-    const src = main().getByRole("article", { name: "来源读取失败" });
-    expect(src).toHaveTextContent("邮件 登录或配置有问题，读不到");
+    // 来源 1（停用的那个只是知晓）+ 超时 2 + 提醒 1 + 连锁 1 + 能力包 1 + 模型 2 + 外发范围 1 + 放开 1 + 规则 1 + 交回 1 + 久无回音 1 = 13
+    expect(await screen.findByRole("heading", { level: 1, name: "13 件要处理" })).toBeInTheDocument();
+    const src = row(/邮件 要重新登录/);
+    expect(src).toHaveTextContent("这个来源的新消息进不来");
     expect(src).not.toHaveTextContent("连续"); // 认证失败不说次数，更不会出现「连续 0 次」
-    expect(within(src).getByRole("link", { name: "去看来源" })).toHaveAttribute("href", "/sources?open=src_mail");
-    expect(src).not.toHaveTextContent("consecutive pull failures");
+    expect(within(src).getByRole("link", { name: "去修" })).toHaveAttribute("href", "/sources?open=src_mail");
     expect(document.querySelector("main")!.textContent, "主界面不出现来源 id").not.toMatch(/src_/);
-    const out = main().getByRole("article", { name: "后台任务排队或超时" });
-    expect(out).toHaveTextContent("后台任务超时 2 次");
-    expect(out).toHaveTextContent("还有 3 个在排队，最久等了 42 秒");
-    expect(within(out).getByRole("link", { name: "去看运行日志" })).toHaveAttribute("href", "/runs");
-    expect(within(main().getByRole("article", { name: "提醒发不出去" })).getByRole("link", { name: "去看提醒设置" })).toHaveAttribute("href", "/settings/notify");
-    expect(within(main().getByRole("article", { name: "自动化连锁被叫停" })).getByRole("link", { name: "去看事项" })).toHaveAttribute("href", "/items/itm_3");
-    const pk = main().getByRole("article", { name: "能力包加载失败" });
-    expect(pk).toHaveTextContent("pk");
-    expect(pk).not.toHaveTextContent("band is required"); // 加载器的英文原因只在「显示原始值」里
-    expect(within(pk).queryByRole("link")).not.toBeInTheDocument();
-    const m = main().getByRole("article", { name: "模型连不上" });
-    expect(m).toHaveTextContent("写作模型还没配置，有消息在等它");
-    expect(m).toHaveTextContent("1 次风险判断没完成");
-    expect(m).toHaveTextContent("写作模型 1 次失败"); // 按端点说，不再一律说「打分」
-    expect(m).not.toHaveTextContent("打分");
-    expect(within(m).getAllByRole("link", { name: "去看模型" })[0]).toHaveAttribute("href", "/settings/models");
-    // 积压按原因分列，各带去处；undecided 按内核口径并进「等模型恢复」
-    const b = main().getByRole("article", { name: "积压待处理" });
-    expect(b).toHaveTextContent("52 条等模型恢复");
-    expect(within(b).getByRole("link", { name: "去选" })).toHaveAttribute("href", "/sources");
-    expect(b).toHaveTextContent("3 条等你选外发范围");
-    expect(b).toHaveTextContent("2 条已放回，等你放开");
-    expect(within(b).getByRole("link", { name: "去放开" })).toHaveAttribute("href", "/sources");
-    expect(b).toHaveTextContent("另有 3 条已过期");
-    expect(within(main().getByRole("article", { name: "自动规则被退回试运行" })).getByRole("link", { name: "去看规则" })).toHaveAttribute("href", "/rules");
-    const rc = main().getByRole("article", { name: "回报失败" });
-    expect(within(rc).getByRole("link", { name: "去看操作记录" })).toHaveAttribute("href", "/audit");
-    expect(within(rc).getByRole("link", { name: "去看 Agent 设置" })).toHaveAttribute("href", "/settings/agents");
-    expect(within(main().getByRole("article", { name: "委派久无回音" })).getByRole("link", { name: "去看委派" })).toHaveAttribute("href", "/delegation");
+    expect(document.querySelector("main")!.textContent).not.toMatch(/consecutive pull failures|band is required/);
+    expect(act().getAllByText("这件事没做完")).toHaveLength(2);
+    expect(within(row(/条提醒没送到/)).getByRole("link", { name: "去看渠道" })).toHaveAttribute("href", "/settings/channels");
+    expect(within(row(/层数太多/)).getByRole("link", { name: "看这件事" })).toHaveAttribute("href", "/items/itm_3");
+    const pk = row(/个能力包没加载上/);
+    expect(pk).toHaveTextContent("修好包文件后会自动重新加载");
+    expect(within(pk).queryByRole("link")).not.toBeInTheDocument(); // 动作在本机，网页上没有按钮
+    const gen = row(/写作模型还没配置/);
+    expect(gen).toHaveTextContent("建议和简报暂时写不出来");
+    expect(within(gen).getByRole("link", { name: "去配置" })).toHaveAttribute("href", "/settings/models");
+    expect(row(/1 次风险判断没完成/)).toBeInTheDocument();
+    expect(within(row(/3 条消息在等你选发给模型多少内容/)).getByRole("link", { name: "去选" })).toHaveAttribute("href", "/sources");
+    expect(within(row(/2 条找回的消息等你放进建议/)).getByRole("link", { name: "去放开" })).toHaveAttribute("href", "/sources");
+    expect(within(row(/已退回试运行/)).getByRole("link", { name: "去重新打开" })).toHaveAttribute("href", "/rules#rule-p%2Fevent_rules%2Frule-1");
+    const rc = row(/交回的结果被拒了 2 次/);
+    expect(within(rc).getByRole("link", { name: "看被拒的原因" })).toHaveAttribute("href", "/audit");
+    expect(within(rc).getByRole("link", { name: "看这个 Agent 的钥匙与授权" })).toHaveAttribute("href", "/settings/agents");
+    expect(within(row(/没回音/)).getByRole("link", { name: "去催或改派" })).toHaveAttribute("href", "/delegation#d-itm_5");
+    // 仅供知晓：本人停用的来源、排队、等模型恢复、已过期——不计数
+    expect(info().getByText("新来源 已停用")).toBeInTheDocument();
+    expect(info().getByText("还有 3 个在排队")).toBeInTheDocument();
+    expect(info().getByText("52 条等模型恢复后处理")).toBeInTheDocument();
+    expect(info().getByText("3 条已过期，不再自动处理")).toBeInTheDocument();
     expect(main().getByText("其余 3 项正常")).toBeInTheDocument();
     expect(main().queryByRole("button", { name: /修复|fix/i })).not.toBeInTheDocument();
   });
 
-  it("模型已暂停：中性的「已暂停」卡，不计入要处理、页头不变成异常；暂停期间积下的条数并在卡里", async () => {
+  it("模型已暂停：放在仅供知晓、不计数，页头是中性的「模型已暂停」；暂停期间积下的条数一并说明", async () => {
     const r = report({
       model_unavailable: { detail: { judge: "paused", generate: "paused", endpoint: "", paused: true } },
       unjudged_backlog: { ok: false, count: 2, severity: "warning", why: "w", detail: { model_unavailable: 0, models_paused: 2, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, rejudge_days: 7, sources: [] } },
     });
     mount(serve(() => json(200, r)).impl);
     expect(await screen.findByRole("heading", { level: 1, name: "模型已暂停" })).toBeInTheDocument();
-    const card = main().getByRole("article", { name: "模型已暂停" });
-    expect(card.querySelector(".dot")).toHaveClass("paused");
-    expect(card).toHaveTextContent("暂停期间积下 2 条 · 恢复后自动判断（最近 7 天的）");
-    expect(within(card).getByRole("link", { name: "去恢复" })).toHaveAttribute("href", "/settings/models");
-    expect(main().queryByRole("article", { name: "积压待处理" })).not.toBeInTheDocument();
-    expect(main().queryByRole("article", { name: "模型连不上" })).not.toBeInTheDocument();
-  });
-
-  it("自动重判关闭（rejudge_days 为 0）：暂停卡说恢复后在积压里放开", async () => {
-    const r = report({
-      model_unavailable: { detail: { judge: "paused", generate: "paused", endpoint: "", paused: true } },
-      unjudged_backlog: { ok: false, count: 2, severity: "warning", why: "w", detail: { model_unavailable: 0, models_paused: 2, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, rejudge_days: 0, sources: [] } },
-    });
-    mount(serve(() => json(200, r)).impl);
-    await screen.findByRole("heading", { level: 1, name: "模型已暂停" });
-    expect(main().getByRole("article", { name: "模型已暂停" })).toHaveTextContent("暂停期间积下 2 条 · 恢复后在积压里放开");
+    expect(main().queryByRole("region", { name: "要你处理" })).not.toBeInTheDocument();
+    const paused = info().getByText("模型已暂停，积下 2 条").closest("li")!;
+    expect(within(paused).getByRole("link", { name: "去恢复" })).toHaveAttribute("href", "/settings/models");
+    expect(info().getByText("2 条是模型暂停期间积下的 · 恢复后自动判断（最近 7 天的）")).toBeInTheDocument();
   });
 
   it.each([
     [7, "2 条是模型暂停期间积下的 · 恢复后自动判断（最近 7 天的）"],
     [0, "2 条是模型暂停期间积下的 · 恢复后在积压里放开"],
     [undefined, "2 条是模型暂停期间积下的"],
-  ])("恢复之后：暂停期间积下的仍在积压里列出，去向随 rejudge_days（%s）", async (days, text) => {
+  ])("恢复之后：暂停期间积下的仍列在仅供知晓里，去向随 rejudge_days（%s）", async (days, text) => {
     const r = report({
       unjudged_backlog: { ok: false, count: 2, severity: "warning", why: "w", detail: { model_unavailable: 0, models_paused: 2, outbound_unset: 0, undecided: 0, restored: 0, expired: 0, rejudge_days: days, sources: [] } },
     });
     mount(serve(() => json(200, r)).impl);
-    await screen.findByRole("heading", { level: 1 , name: "1 项要处理" });
-    const line = within(main().getByRole("article", { name: "积压待处理" })).getByText(/条是模型暂停期间积下的/);
-    expect(line.textContent).toBe(text);
+    await screen.findByRole("heading", { level: 1, name: "运行正常" });
+    expect(info().getByText(/条是模型暂停期间积下的/).textContent).toBe(text);
   });
 
   it.each([
-    [7, "3 条等模型恢复 · 恢复后自动判断（最近 7 天的）"],
-    [0, "3 条等模型恢复 · 恢复后在积压里放开"],
+    [7, "3 条等模型恢复后处理 · 恢复后自动判断（最近 7 天的）"],
+    [0, "3 条等模型恢复后处理 · 恢复后在积压里放开"],
   ])("v0.1 的 undecided 并进「等模型恢复」，去向随 rejudge_days（%s）", async (days, text) => {
     const r = report({
       unjudged_backlog: { ok: false, count: 3, severity: "warning", why: "w", detail: { model_unavailable: 1, models_paused: 0, outbound_unset: 0, undecided: 2, restored: 0, expired: 0, rejudge_days: days, sources: [] } },
     });
     mount(serve(() => json(200, r)).impl);
-    await screen.findByRole("heading", { level: 1, name: "1 项要处理" });
-    expect(within(main().getByRole("article", { name: "积压待处理" })).getByText(/条等模型恢复/).textContent).toBe(text);
+    await screen.findByRole("heading", { level: 1, name: "运行正常" });
+    expect(info().getByText(/条等模型恢复后处理/).textContent).toBe(text);
   });
 
   it("读取失败：显示服务端原因并可重试", async () => {
@@ -197,13 +183,13 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01）", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     fail = false;
     await userEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(await screen.findByRole("heading", { level: 1, name: "一切正常" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "运行正常" })).toBeInTheDocument();
   });
 
   it("没有读权限（403）：显示权限原因，不显示任何信号", async () => {
     mount(serve(() => json(403, { code: "permission_denied", why: "credential kind cannot read the ledger", next: "use an owner or agent credential" })).impl);
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(main().queryByRole("article")).not.toBeInTheDocument();
+    expect(main().queryByRole("region", { name: "要你处理" })).not.toBeInTheDocument();
   });
 });
 

@@ -56,11 +56,11 @@ const cred = (id: string, scope: string, over: Partial<Cred> = {}): Cred => ({ i
 
 beforeEach(() => sessionStorage.clear());
 
-describe("设置 › 系统 › 对外接口 › 导出与转发密钥（flow-bootstrap / flow-authz-matrix）", () => {
-  it("ACT-BOOT-04：从设置首页「系统」组可打开，列表只列导出与转发密钥并标出已吊销的；文案分清取数据与收提醒", async () => {
+describe("设置 › 连接 › 对外接口 › 导出与转发密钥（flow-bootstrap / flow-authz-matrix）", () => {
+  it("ACT-BOOT-04：从设置首页「连接」组可打开，列表只列导出与转发密钥并标出已吊销的；文案分清取数据与收提醒", async () => {
     const s = server([cred("e", "export", { label: "vault" }), cred("f", "forward", { revoked_at: "2026-01-02T00:00:00Z" }), cred("c", "channel.tg", { label: "channel-key" })]);
     mount(s.impl, "/settings/home");
-    const entry = within(await screen.findByRole("list", { name: "系统" })).getByRole("link", { name: /对外接口/ });
+    const entry = within(await screen.findByRole("list", { name: "连接" })).getByRole("link", { name: /对外接口/ });
     await userEvent.click(entry);
     expect(await screen.findByText("vault")).toBeVisible();
     expect(screen.getByText("L-f").closest("li")).toHaveTextContent("已停用");

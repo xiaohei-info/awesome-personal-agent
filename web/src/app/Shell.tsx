@@ -1,13 +1,15 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { COUNTS_EVENT, SectionContext } from "./page";
+import { BackBar, COUNTS_EVENT, SectionContext } from "./page";
+import { AttentionProvider, useAttention } from "./attention";
 import { DIAG, MOBILE, SETTINGS, SETTINGS_HOME, buildNav, featureAt, settingsGroups, type Entry, type Feature, type NavModel } from "./registry";
 import { SettingsHome } from "./SettingsHome";
 import { useLang, useT } from "./i18n";
 import { BRAND_MARK, common } from "./strings";
 import { useSession } from "./session";
 import { toggleTheme } from "./theme";
-import { useStatus, type Status } from "./status";
+import type { Status } from "./status";
+import { useLeaveGuard } from "./leave";
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 // 与 styles.css 的窄屏断点一致：窄屏只渲染手机顶栏，宽屏只渲染侧栏，DOM 里不重复出现同名链接。
@@ -25,20 +27,34 @@ function useNarrow() {
   return narrow;
 }
 
-export function Shell({ features: all }: { features: Feature[] }) {
+export function Shell(props: { features: Feature[] }) {
+  const { api } = useSession();
+  const lang = useLang();
+  const { pathname } = useLocation();
+  return (
+    <AttentionProvider api={api} lang={lang} pathname={pathname}>
+      <ShellBody {...props} />
+    </AttentionProvider>
+  );
+}
+
+function ShellBody({ features: all }: { features: Feature[] }) {
   const features = useMemo(() => all.filter((f) => !f.hidden), [all]); // 稳定引用：下面的 effect 依赖它
   const lang = useLang();
   const t = useT(common);
   const nav = useMemo(() => buildNav(features, lang), [features, lang]);
   const entryOf = useMemo(() => new Map(nav.entries.flatMap((e) => e.features.map((f) => [f.id, e] as const))), [nav]);
   const { api, logout } = useSession();
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   const narrow = useNarrow();
   const [error, setError] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [jumping, setJumping] = useState(false);
   const [more, setMore] = useState(false);
-  const status = useStatus(api, pathname);
+  const attention = useAttention();
+  const status = attention?.status ?? null;
+  useHashLanding(pathname, hash);
+  useLeaveGuard(t.leaveUnsaved);
 
   useEffect(() => {
     const refresh = () =>
@@ -68,10 +84,15 @@ export function Shell({ features: all }: { features: Feature[] }) {
   const current = atHome ? undefined : featureAt(features, pathname);
   const here = atHome ? nav.settings : current && entryOf.get(current.id);
   const inSettings = !!here && here.id === SETTINGS;
-  const sum = (fs: Feature[]) => fs.reduce((n, f) => n + (counts[f.id] ?? 0), 0);
+  // 入口上的数字只取注意力汇总：等你决定是红色，建议是灰色；页签上的灰色数量（抽查）不上浮到入口（界面设计 §5.1）。
+  const badgeOf = (fs: Feature[]): { n: number; quiet: boolean } => {
+    const b = fs.find((f) => f.badge)?.badge;
+    if (!b || !attention) return { n: 0, quiet: true };
+    return b === "decide" ? { n: attention.decide, quiet: false } : { n: attention.proposals, quiet: true };
+  };
   const signOut = () => logout().catch((e: Error) => setError(e.message));
   const entryLink = (e: Entry, label: string = e.title, onClick?: () => void) => (
-    <NavItem to={narrow && e.id === SETTINGS ? SETTINGS_HOME : e.features[0].path} active={e === here} count={sum(e.features)} onClick={onClick} quiet={e.id === DIAG}>
+    <NavItem to={narrow && e.id === SETTINGS ? SETTINGS_HOME : e.features[0].path} active={e === here} badge={badgeOf(e.features)} onClick={onClick} quiet={e.id === DIAG}>
       {label}
     </NavItem>
   );
@@ -147,6 +168,7 @@ export function Shell({ features: all }: { features: Feature[] }) {
           </button>
         </div>
         {here && here.features.length > 1 && !inSettings && <Tabs entry={here} current={current} counts={counts} />}
+        <BackBar />
         {inSettings && narrow && !atHome && (
           <Link className="back" to={"/" + SETTINGS_HOME}>
             ‹ {here.title}
@@ -200,10 +222,13 @@ function AppRoutes({ all, nav, entryOf, noPages }: { all: Feature[]; nav: NavMod
   );
 }
 
-/** 导航底部的状态灯：一切正常、模型已暂停（中性，不算异常）或 n 项要处理；点开是诊断 › 状态。 */
+/**
+ * 导航底部的状态灯（界面设计 §5.1）：只有「要你处理」的行亮灯并计数（按对象计）；只有仅供知晓的提示时不亮，写「运行正常 · n 条提示」；
+ * 模型已暂停是中性的。点开是诊断 › 状态。
+ */
 function StatusLight({ status, onClick }: { status: Status; onClick?: () => void }) {
   const t = useT(common);
-  const text = status.kind === "ok" ? t.statusOk : status.kind === "paused" ? t.statusPaused : t.statusNeeds(status.needs.length);
+  const text = status.act.length ? t.statusNeeds(status.act.length) : status.paused ? t.statusPaused : status.info.length ? t.statusNotes(status.info.length) : t.statusOk;
   return (
     <Link to="/health" className={"status-light " + status.kind} onClick={onClick}>
       <span className={"dot " + status.kind} aria-hidden="true" />
@@ -212,13 +237,33 @@ function StatusLight({ status, onClick }: { status: Status; onClick?: () => void
   );
 }
 
-function NavItem({ to, active, count, onClick, quiet, children }: { to: string; active: boolean; count: number; onClick?: () => void; quiet?: boolean; children: ReactNode }) {
+function NavItem({ to, active, badge, onClick, quiet, children }: { to: string; active: boolean; badge: { n: number; quiet: boolean }; onClick?: () => void; quiet?: boolean; children: ReactNode }) {
   return (
     <Link to={"/" + to} className={[active ? "active" : "", quiet ? "quiet" : ""].join(" ").trim() || undefined} aria-current={active ? "page" : undefined} onClick={onClick}>
       {children}
-      {count > 0 && <span className="count">{count}</span>}
+      {badge.n > 0 && <span className={"count" + (badge.quiet ? " quiet" : "")}>{badge.n}</span>}
     </Link>
   );
+}
+
+/** 带锚点的落点：数据是异步读的，目标区块出现后再滚过去，并展开它所在的折叠区（界面设计 §3.3）。 */
+function useHashLanding(pathname: string, hash: string) {
+  useEffect(() => {
+    if (!hash || hash.length < 2) return;
+    const id = decodeURIComponent(hash.slice(1));
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      const el = document.getElementById(id);
+      if (el) {
+        for (let p = el.parentElement; p; p = p.parentElement) if (p instanceof HTMLDetailsElement) p.open = true;
+        if (el instanceof HTMLDetailsElement) el.open = true;
+        el.scrollIntoView?.({ block: "start" });
+        el.classList.add("landed");
+      }
+      if (el || ++tries > 20) window.clearInterval(timer);
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, [pathname, hash]);
 }
 
 /** 入口内的页签：每个页签就是一个页面的原地址，旧链接直接落到对应页签。 */
@@ -234,7 +279,7 @@ function Tabs({ entry, current, counts }: { entry: Entry; current?: Feature; cou
       {entry.features.map((f) => (
         <Link key={f.id} ref={f === current ? on : undefined} to={"/" + f.path} className={f === current ? "on" : undefined} aria-current={f === current ? "page" : undefined}>
           {f.title[lang]}
-          {(counts[f.id] ?? 0) > 0 && <span className="count">{counts[f.id]}</span>}
+          {(counts[f.id] ?? 0) > 0 && <span className="count quiet">{counts[f.id]}</span>}
         </Link>
       ))}
     </nav>

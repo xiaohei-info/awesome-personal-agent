@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, type ApiClient } from "../../app/api";
-import { COUNTS_EVENT, PageHead } from "../../app/page";
+import { Go, PageHead } from "../../app/page";
 import { useSession } from "../../app/session";
+import { refreshCounts, useAttention } from "../../app/attention";
 import { ScreeningBadge } from "../decision-screening/ScreeningBadge";
 import { RejectionNote, type Rejection } from "./RejectionNote";
 import { locale, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
+import { useNames } from "../../app/names";
+import { useLabel, Val } from "../../app/values";
 import { strings } from "./strings";
-import { Val } from "../../app/values";
 
-// 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。排序之外的判定（web_only、权限、只认第一次回答）都在服务端。
+// 等你决定（界面设计 §5.2）：两节——问题（卡片）与待确认（Agent 的启动请求、文档修改，各一行加「去确认」）。
+// 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。排序之外的判定（web_only、权限、只认第一次回答）都在服务端；
+// 回答始终是本人在 Web 的动作，不改变任何授权规则。待确认的行只是摘要加链接，确认仍在权威位置完成。
 export interface AskOption {
   id: string;
   label: string;
@@ -21,6 +24,7 @@ export interface DecisionItem {
   phase: string;
   kind: string;
   title: string;
+  project?: string;
   priority?: "low" | "normal" | "high" | "urgent";
   ask?: {
     question: string;
@@ -43,9 +47,8 @@ export function sortDecisions(items: DecisionItem[]): DecisionItem[] {
   return [...items].sort((a, b) => due(a) - due(b) || rank(a) - rank(b));
 }
 
-
 interface WhyResp {
-  steps: { type: string; reason?: string }[];
+  steps: { type: string; reason?: string; actor?: { type: string; principal: string; via: string } }[];
 }
 
 const DAY_MS = 86_400_000;
@@ -63,35 +66,59 @@ function Due({ deadline }: { deadline: string }) {
   );
 }
 
-function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionItem; focused: boolean; onFocus: () => void; rejection?: Rejection; onAnswer: (id: string, body: { choice: string } | { text: string }) => Promise<void> }) {
-  const { api } = useSession();
+/** 谁在问、为什么问：取回放里最近一次 decision.requested，默认展开（不再藏在「为什么在这」后面）。 */
+function Asker({ id }: { id: string }) {
   const t = useT(strings);
+  const { api } = useSession();
+  const label = useLabel();
+  const credential = useNames("credential");
+  const [step, setStep] = useState<WhyResp["steps"][number] | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.get<WhyResp>("/why/" + encodeURIComponent(id)).then(
+      (r) => live && setStep([...r.steps].reverse().find((s) => s.type === "decision.requested") ?? { type: "", reason: "" }),
+      () => live && setStep(null),
+    );
+    return () => { live = false; };
+  }, [api, id]);
+  if (!step) return null;
+  const a = step.actor;
+  const who = !a ? "" : a.type === "agent" ? credential(a.principal) : label("actorType", a.type);
+  return <p className="why">{[who && t.asks(who), step.reason || t.noReason].filter(Boolean).join(" · ")}</p>;
+}
+
+/** 一张问题卡（等你决定页与事项详情共用）：问题、截止、是哪件事、谁在问为什么问、选项、别的想法；答完收成一行回执。 */
+export function QuestionCard({ item, focused, onFocus, rejection, onAnswer, inItem }: {
+  item: DecisionItem;
+  focused?: boolean;
+  onFocus?: () => void;
+  rejection?: Rejection;
+  onAnswer: (id: string, body: { choice: string } | { text: string }, said: string) => Promise<boolean>;
+  inItem?: boolean;
+}) {
+  const t = useT(strings);
+  const project = useNames("project");
   const ask = item.ask!;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [why, setWhy] = useState<string | null>(null);
-  const [whyErr, setWhyErr] = useState<unknown>(null);
+  const [done, setDone] = useState<string | null>(null);
 
-  const answer = async (body: { choice: string } | { text: string }) => {
+  const answer = async (body: { choice: string } | { text: string }, said: string) => {
     setBusy(true);
     try {
-      await onAnswer(item.id, body);
+      if (await onAnswer(item.id, body, said)) setDone(said);
     } finally {
       setBusy(false);
     }
   };
 
-  const toggleWhy = () =>
-    why !== null
-      ? setWhy(null)
-      : api.get<WhyResp>("/why/" + encodeURIComponent(item.id)).then(
-          (r) => {
-            const step = [...r.steps].reverse().find((s) => s.type === "decision.requested");
-            setWhy(step?.reason || t.noReason);
-            setWhyErr(null);
-          },
-          (e) => setWhyErr(e),
-        );
+  if (done)
+    return (
+      <p role="status" className="panel receipt" aria-label={item.title}>
+        {t.answered(done)}
+        {!inItem && <> · <Link to={"/items/" + encodeURIComponent(item.id)}>{t.seeItem}</Link></>}
+      </p>
+    );
 
   return (
     <article aria-label={item.title} className={"decision" + (focused ? " focus" : "")} onFocus={onFocus}>
@@ -100,16 +127,22 @@ function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionI
         {ask.deadline && <Due deadline={ask.deadline} />}
       </header>
       <p className="meta">
-        <span>{item.title}</span>
+        {inItem ? null : <Link to={"/items/" + encodeURIComponent(item.id)}>{item.title}</Link>}
+        {item.project && <span className={inItem ? undefined : "dot"}>{project(item.project)}</span>}
         {item.priority && item.priority !== "normal" && <span className="dot"><Val k="priority" id={item.priority} /></span>}
-        {ask.risk_class === "web_only" && <Link to="/settings" className="badge bad plain">{t.webOnly}</Link>}
         <ScreeningBadge pending={ask.screening_pending} />
       </p>
+      {ask.risk_class === "web_only" && (
+        <p className="sub">
+          <span className="badge bad plain">{t.webOnly}</span> {t.webOnlyWhy} <Go to="/settings">{t.why}</Go>
+        </p>
+      )}
+      <Asker id={item.id} />
       <RejectionNote rejection={rejection} what="answer" />
       {/* 选项一律同等样式：不替本人暗示选哪个 */}
       <div role="group" aria-label={t.options} className="options">
         {(ask.options ?? []).map((o, n) => (
-          <button key={o.id} disabled={busy} onClick={() => answer({ choice: o.id })}>
+          <button key={o.id} disabled={busy} onClick={() => void answer({ choice: o.id }, o.label)}>
             {n < 9 && <kbd aria-hidden="true">{n + 1}</kbd>}
             {o.label}
             {ask.recommend === o.id ? t.recommended : ""}
@@ -119,39 +152,55 @@ function Card({ item, focused, onFocus, rejection, onAnswer }: { item: DecisionI
       {ask.free_text && (
         <div className="free">
           <input aria-label={t.otherIdea} placeholder={t.otherIdeaPlaceholder} value={text} onChange={(e) => setText(e.target.value)} />
-          <button className="primary" disabled={busy || !text.trim()} onClick={() => answer({ text: text.trim() })}>
+          <button className="primary" disabled={busy || !text.trim()} onClick={() => void answer({ text: text.trim() }, text.trim())}>
             {t.submitIdea}
           </button>
         </div>
       )}
-      <footer>
-        <button className="quiet why-toggle" aria-expanded={why !== null} onClick={toggleWhy}>
-          {t.why} <kbd aria-hidden="true">?</kbd>
-        </button>
-      </footer>
-      {why && <p className="why">{why}</p>}
-      {whyErr != null && <ErrorNote error={whyErr} />}
     </article>
   );
 }
 
 const pending = (i: DecisionItem) => !!i.ask && !i.ask.resolution;
 
-/** 导航上的待决数：与本页同一个接口、同一个过滤。 */
-export const countDecisions = (api: ApiClient) =>
-  api.get<{ items: DecisionItem[] }>("/items?phase=needs_input").then((r) => r.items.filter(pending).length);
-
 // 焦点在输入框里时不抢键；带修饰键的组合留给浏览器和跳转面板。
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && !!t.closest("input, textarea, select, [contenteditable='true']");
+
+/** 回答一个问题：失败（含 409：已有人先答）时报原因并返回 false，成功后让导航上的数字重取。 */
+export function useAnswer(onError: (e: unknown) => void) {
+  const { api } = useSession();
+  return async (id: string, body: { choice: string } | { text: string }) => {
+    try {
+      await api.post("/items/" + encodeURIComponent(id) + "/decide", body);
+      return true;
+    } catch (e) {
+      onError(e);
+      return false;
+    } finally {
+      refreshCounts();
+    }
+  };
+}
 
 export function DecisionsPage() {
   const { api } = useSession();
   const t = useT(strings);
+  const attention = useAttention();
   const [items, setItems] = useState<DecisionItem[] | null>(null);
   const [rejections, setRejections] = useState<Record<string, Rejection>>({});
   const [error, setError] = useState<unknown>(null);
   const [cur, setCur] = useState(0);
+  const [receipts, setReceipts] = useState<{ id: string; title: string; said: string }[]>([]);
   const list = useRef<HTMLDivElement>(null);
+  const post = useAnswer(setError);
+  // 答完的卡收成一行回执（本次停留期间保留）；列表随即重读，以服务端为准（含 409：已有人先答）。
+  const answer = async (id: string, body: { choice: string } | { text: string }, said: string) => {
+    setError(null);
+    const ok = await post(id, body);
+    if (ok) setReceipts((r) => [...r, { id, title: items?.find((i) => i.id === id)?.title ?? id, said }]);
+    await load();
+    return ok;
+  };
 
   const load = useCallback(
     () =>
@@ -169,21 +218,12 @@ export function DecisionsPage() {
     load();
   }, [load]);
 
-  const answer = async (id: string, body: { choice: string } | { text: string }) => {
-    setError(null);
-    try {
-      await api.post("/items/" + encodeURIComponent(id) + "/decide", body);
-    } catch (e) {
-      setError(e); // 含 409：已有人先答，刷新后以服务端为准
-    }
-    await load();
-    window.dispatchEvent(new Event(COUNTS_EVENT));
-  };
+  const confirms = attention?.confirms ?? [];
+  // 答完的卡在本次停留期间收成回执，所以计数取「还没答」的：与导航角标同口径（问题 + 待确认）。
+  const n = (items?.length ?? 0) + confirms.length;
+  const at = Math.min(cur, Math.max((items?.length ?? 0) - 1, 0));
 
-  const n = items?.length ?? 0;
-  const at = Math.min(cur, Math.max(n - 1, 0));
-
-  // 键盘：1–9 选当前卡的第 N 个选项，J/K 切换卡，? 展开「为什么在这」。按键只是点击对应按钮，答复逻辑不变。
+  // 键盘：1–9 选当前卡的第 N 个选项，J/K 切换卡。按键只是点击对应按钮，答复逻辑不变。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented || typing(e.target)) return;
@@ -195,9 +235,7 @@ export function DecisionsPage() {
         setCur(next);
         cards[next].scrollIntoView?.({ block: "nearest", behavior: "smooth" });
       } else if (/^[1-9]$/.test(key)) {
-        cards[at].querySelectorAll<HTMLButtonElement>(".options button")[Number(key) - 1]?.click();
-      } else if (key === "?") {
-        cards[at].querySelector<HTMLButtonElement>(".why-toggle")?.click();
+        cards[at]?.querySelectorAll<HTMLButtonElement>(".options button")[Number(key) - 1]?.click();
       } else return;
       e.preventDefault();
     };
@@ -212,16 +250,11 @@ export function DecisionsPage() {
       ) : (
         <PageHead
           lede={
-            <>
-              {t.waiting}
-              <span className="kbd-hint">
-                {t.hint1}
-                <kbd>J</kbd> <kbd>K</kbd>
-                {t.hint2}
-                <kbd>?</kbd>
-                {t.hint3}
-              </span>
-            </>
+            <span className="kbd-hint">
+              {t.hint1}
+              <kbd>J</kbd> <kbd>K</kbd>
+              {t.hint2}
+            </span>
           }
         >
           {t.countPre}
@@ -244,14 +277,40 @@ export function DecisionsPage() {
       )}
       {items === null ? (
         error == null && <p role="status">{t.loading}</p>
-      ) : n === 0 ? (
+      ) : n === 0 && !receipts.length ? (
         <p className="empty">{t.empty}</p>
       ) : (
-        <div ref={list}>
-          {items.map((i, k) => (
-            <Card key={i.id} item={i} focused={k === at} onFocus={() => setCur(k)} rejection={rejections[i.id]} onAnswer={answer} />
-          ))}
-        </div>
+        <>
+          {receipts.length > 0 && (
+            <ul className="rows" aria-label={t.receipts}>
+              {receipts.map((r) => (
+                <li key={r.id} role="status">{r.title}{t.colon}{t.answered(r.said)} · <Link to={"/items/" + encodeURIComponent(r.id)}>{t.seeItem}</Link></li>
+              ))}
+            </ul>
+          )}
+          {items.length > 0 && (
+            <section aria-label={t.questions}>
+              <div ref={list}>
+                {items.map((i, k) => (
+                  <QuestionCard key={i.id} item={i} focused={k === at} onFocus={() => setCur(k)} rejection={rejections[i.id]} onAnswer={answer} />
+                ))}
+              </div>
+            </section>
+          )}
+          {confirms.length > 0 && (
+            <section aria-label={t.confirms} className="panel">
+              <h2>{t.confirms}</h2>
+              <ul className="rows">
+                {confirms.map((c) => (
+                  <li key={c.kind + c.id} className="act-row">
+                    <div><span>{c.kind === "launch" ? t.launchAsk(c.name) : t.revisionAsk(c.name)}</span></div>
+                    <Go className="btn" to={c.to}>{t.goConfirm}</Go>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
       )}
     </main>
   );

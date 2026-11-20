@@ -103,12 +103,20 @@ describe("决策待办页（flow-decision-answer）", () => {
     expect(within(b).queryByLabelText("别的想法")).not.toBeInTheDocument();
   });
 
-  it("为什么在这：按需读 /why 并显示原因", async () => {
+  it("谁在问、为什么问：默认展开，读 /why 并显示原因（界面设计 §5.2）", async () => {
     const s = server([item("a")]);
     mount(s.impl);
     const card = (await screen.findByText("问题 a")).closest("article")!;
-    await userEvent.click(within(card).getByRole("button", { name: "为什么在这" }));
-    expect(await within(card).findByText("合并前需要本人确认")).toBeInTheDocument();
+    expect(await within(card).findByText(/合并前需要本人确认/)).toBeInTheDocument();
+  });
+
+  it("答完收成一行回执，带查看事项的链接", async () => {
+    const s = server([item("a"), item("b")]);
+    mount(s.impl);
+    const card = (await screen.findByText("问题 a")).closest("article")!;
+    await userEvent.click(within(card).getByRole("button", { name: "同意" }));
+    const receipt = await screen.findByText(/已回答：同意/);
+    expect(within(receipt.closest("li")!).getByRole("link", { name: "查看事项" })).toHaveAttribute("href", "/items/a");
   });
 
   it("后到的回答（409）：显示服务端原因并刷新列表", async () => {
@@ -139,7 +147,7 @@ describe("决策待办页（flow-decision-answer）", () => {
 });
 
 describe("键盘拍板", () => {
-  it("1–9 选当前卡的第 N 个选项，J/K 切换卡，? 展开原因；焦点在输入框时不生效", async () => {
+  it("1–9 选当前卡的第 N 个选项，J/K 切换卡；原因默认可见；焦点在输入框时不生效", async () => {
     const s = server([item("a", { ask: { free_text: true } }), item("b")]);
     mount(s.impl);
     const a = (await screen.findByText("问题 a")).closest("article")!;
@@ -149,8 +157,7 @@ describe("键盘拍板", () => {
     expect(a).toHaveClass("focus");
     (document.activeElement as HTMLElement).blur();
 
-    await userEvent.keyboard("?");
-    expect(await within(a).findByText("合并前需要本人确认")).toBeInTheDocument();
+    expect(await within(a).findByText(/合并前需要本人确认/)).toBeInTheDocument();
 
     await userEvent.keyboard("j");
     const b = screen.getByText("问题 b").closest("article")!;
@@ -168,7 +175,7 @@ describe("键盘拍板", () => {
   it("标题给出待决数量，导航显示同样的数量", async () => {
     mount(server([item("a"), item("b")]).impl);
     expect(await screen.findByRole("heading", { level: 1, name: "2 件事等你决定" })).toBeInTheDocument();
-    expect(await screen.findByRole("link", { name: "决策待办 2" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "等你决定 2" })).toBeInTheDocument();
   });
 });
 
@@ -179,7 +186,8 @@ describe("web_only 决策（flow-web-only、flow-life-renewal、flow-first-day�
     const s = server([wo]);
     mount(s.impl);
     const card = (await screen.findByText("续费吗？")).closest("article")!;
-    expect(within(card).getByText("需要你亲自确认")).toBeInTheDocument();
+    expect(within(card).getByText("只能你亲自确认")).toBeInTheDocument();
+    expect(within(card).getByText("这类事只能你在这里定。")).toBeInTheDocument();
     await userEvent.click(within(card).getByRole("button", { name: "同意" }));
     await screen.findByText("没有要你决定的事");
     expect(s.calls.find((c) => c.path === "/v1/items/w/decide")!.body).toEqual({ choice: "yes" });
@@ -188,7 +196,7 @@ describe("web_only 决策（flow-web-only、flow-life-renewal、flow-first-day�
   it("非 web_only 不显示该标记", async () => {
     mount(server([item("a")]).impl);
     await screen.findByText("问题 a");
-    expect(screen.queryByText("需要你亲自确认")).not.toBeInTheDocument();
+    expect(screen.queryByText("只能你亲自确认")).not.toBeInTheDocument();
   });
 });
 
