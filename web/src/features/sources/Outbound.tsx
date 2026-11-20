@@ -6,7 +6,7 @@ import { entryOf, Val } from "../../app/values";
 import { strings } from "./strings";
 import { SCOPES, when, type Outbound, type Source, type SourceEvent } from "./shared";
 
-// 外发范围（§14.14，设计 §6.1）：两档各一组单选，改了先看一条真实消息会被送出什么，点「就这样发」才写回。
+// 外发范围（§14.14，界面设计 §9.7）：两档各一组单选，改了先看一条真实消息会被送出什么，点「就这样发」才写回。
 // 裁剪在服务端做（GET /source-events/{id}/outbound-preview，与真实外发同源）；未选择与「不发送」的语义不变。
 
 interface Tier {

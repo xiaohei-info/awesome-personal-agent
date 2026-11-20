@@ -2,7 +2,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { browserLang } from "./i18n";
 
-// 防漏翻（设计 §4.1 界面语言）：界面文案只能写在各 feature 的 strings.ts 里（或就地写成 { zh, en } 两份），
+// 防漏翻（界面设计 §10 界面语言）：界面文案只能写在各 feature 的 strings.ts 里（或就地写成 { zh, en } 两份），
 // 页面代码里出现中文字面量就失败；每份英文文案里不能出现中文。注释不受限制。
 const HAN = /[\u4e00-\u9fff]/;
 const sources = import.meta.glob("../**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }) as Record<string, string>;

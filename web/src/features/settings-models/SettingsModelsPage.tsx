@@ -11,7 +11,7 @@ import { vocab } from "../../app/vocab";
 import type { DoctorCode } from "../../app/ids";
 import { strings } from "./strings";
 
-// 形状对应 /v1/settings/model-endpoints 与它的两条探测路由（附录 B.2；设计 §4.1、§14.14、§15.5）。
+// 形状对应 /v1/settings/model-endpoints 与它的两条探测路由（附录 B.2；界面设计 §9.9；设计 §14.14、§15.5）。
 // 校验、规整、默认值都在服务端；本页只搬运编辑结果，原样显示拒绝原因，被拒绝时草稿保留。
 // 密钥只写不读：读取只有 api_key_set 与末 4 位；回传占位 *** 表示沿用原密钥。
 const MASK = "***";

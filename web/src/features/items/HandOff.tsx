@@ -52,7 +52,7 @@ interface Run { id: string; target: string; state: string; started_at?: string; 
 const FLIGHT = new Set(["queued", "running"]);
 
 /**
- * 事项详情的「Agent 处理」区块（界面设计 §3.5、§7 路径一）：交给 Agent、用哪个 Agent、现在谁在做到哪了、最近一次的结果，
+ * 事项详情的「Agent 处理」区块（界面设计 §3.2、§7 路径一）：交给 Agent、用哪个 Agent、现在谁在做到哪了、最近一次的结果，
  * 以及下一步——已在进行中、没有在途运行时「现在开始」（item.start，只有本人在 Web 能点）。
  * 前提没满足时列成清单，每条带落点与回程。运行状态取 GET /runs?target=，只读。
  */

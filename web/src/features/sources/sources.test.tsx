@@ -635,7 +635,7 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
   });
 });
 
-describe("处理积压四步（§9.3、设计 §6.5）", () => {
+describe("处理积压四步（§9.3、界面设计 §9.7）", () => {
   const flow = async () => within(await screen.findByRole("region", { name: /积压的 \d+ 条/ }));
   const posts = (b: ReturnType<typeof backend>) => b.calls.filter((c) => c.method === "POST" && /source-events\/(rules|score|rejudge)$/.test(c.path)).map((c) => c.path.split("/").pop());
 

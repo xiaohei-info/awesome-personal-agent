@@ -11,7 +11,7 @@ import { useLabel, Val } from "../../app/values";
 import { EVENT, EVENT_INTERNAL } from "../../app/ids";
 import { strings } from "./strings";
 
-// 诊断 › 操作记录（原「审计」，设计 §5.27）：形状对应 GET /v1/audit/events（附录 B.2，§15.3）。
+// 诊断 › 操作记录（原「审计」，界面设计 §9.10）：形状对应 GET /v1/audit/events（附录 B.2，§15.3）。
 // 筛选（actor、object、type 精确匹配）、裁剪、分页都在服务端，本页只搬运条件并显示结果；只读，不提供撤销。
 // 最新的在最前：order=desc，往下翻用 before=<最后一条的序号> 取更早的。
 const PAGE = 100;

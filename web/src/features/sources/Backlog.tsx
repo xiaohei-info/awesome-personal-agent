@@ -10,7 +10,7 @@ import { rejudgeHint } from "../../app/strings";
 import { strings } from "./strings";
 import { backlogReason, when, type SourceEvent } from "./shared";
 
-// 积压放开四步（§9.3、设计 §6.5）：只跑规则 → 试打分 → 定自动处理的线 → 放开重判。每步一个数字、一个主按钮。
+// 积压放开四步（§9.3、界面设计 §9.7）：只跑规则 → 试打分 → 定自动处理的线 → 放开重判。每步一个数字、一个主按钮。
 // 进度存在这台浏览器里，刷新后从上一步的结果接着走；数字以服务端每步的回答为准。
 const KEY = "apa.backlog";
 type Progress = { step: number; rules?: { done: number; remaining: number }; score?: { scored: number; skipped: number }; release?: { requeued: number; deferred: number } };

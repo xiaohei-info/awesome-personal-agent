@@ -2,7 +2,7 @@ import { ApiError } from "./api";
 import { codeHeadline, errorText, useLang, whyNext } from "./i18n";
 import { common } from "./strings";
 
-/** 一条错误（设计 §2、§4.2）：主行是当前语言的一句话；服务端的原因说明（why、next）收在可展开的「详情」里。 */
+/** 一条错误（界面设计 §8.2；设计 §4.2）：主行是当前语言的一句话；服务端的原因说明（why、next）收在可展开的「详情」里。 */
 export function ErrorNote({ error }: { error: unknown }) {
   const t = common[useLang()];
   const api = error instanceof ApiError ? error.body : null;

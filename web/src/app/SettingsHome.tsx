@@ -5,7 +5,7 @@ import { PageHead } from "./page";
 import { settingsGroups, type Entry } from "./registry";
 import { useSession } from "./session";
 
-/** 设置首页（手机）：按组列出设置页，每项带当前值摘要，点进去就是那一页（设计 §3.1、§6.11）。 */
+/** 设置首页（手机）：按组列出设置页，每项带当前值摘要，点进去就是那一页（界面设计 §3.1）。 */
 export function SettingsHome({ entry }: { entry: Entry }) {
   const lang = useLang();
   const { api } = useSession();

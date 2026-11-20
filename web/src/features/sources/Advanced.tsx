@@ -8,7 +8,7 @@ import { Pick } from "../../app/values";
 import { strings } from "./strings";
 import { when, type Source } from "./shared";
 
-// 不常用、排障或一次性的操作（设计 §5.13）：都收在「高级」里。授权与校验在服务端，这里只调用并如实显示回答。
+// 不常用、排障或一次性的操作（界面设计 §9.7）：都收在「高级」里。授权与校验在服务端，这里只调用并如实显示回答。
 
 interface Ingest {
   id: string;

@@ -7,7 +7,7 @@ import { useLabel } from "../../app/values";
 import { useNames } from "../../app/names";
 import { strings } from "./strings";
 
-// 事项列表的类型筛选（原「能力包视图」，设计 §3.2）：形状对应 GET /v1/packs 的 views（附录 B.2、C.8）。
+// 事项列表的类型筛选（原「能力包视图」，界面设计 §9.4）：形状对应 GET /v1/packs 的 views（附录 B.2、C.8）。
 // 列、筛选、卡片字段全部来自能力包声明；这里只按字段路径取值，不含任何包专属逻辑，新增包不改这里。
 export interface View { kind: string; list: { columns: string[]; filters: string[] }; card: { fields: string[] } }
 interface Pack { name: string; views?: Record<string, View> | null }

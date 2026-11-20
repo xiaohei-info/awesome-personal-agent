@@ -352,7 +352,7 @@ describe("设置的分组（界面设计 §3.1）", () => {
   });
 });
 
-describe("界面语言（设计 §4.1）", () => {
+describe("界面语言（界面设计 §10）", () => {
   it("设置 › 通用 选 English：导航与页面切到英文，记在本机，<html lang> 随之改变；选跟随浏览器则清掉记录", async () => {
     sessionStorage.setItem("apa.csrf", "tok-1");
     const srv = fakeServer();

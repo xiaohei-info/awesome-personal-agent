@@ -18,7 +18,7 @@ import { Route, Routes, useSearchParams } from "react-router-dom";
 import { RecentMessages } from "./Recent";
 import { MessageTracePage } from "../trace/Trace";
 
-// 消息来源页（设计 §5.13）：来源列表 → 外发范围 → 积压四步；排障与一次性操作在「高级」里。
+// 消息来源页（界面设计 §9.7）：来源列表 → 外发范围 → 积压四步；排障与一次性操作在「高级」里。
 // 授权（自定义命令只 Web）、命令校验、转建议的规则都在服务端；本页只调用并如实展示服务端的回答。
 
 interface Backlog {

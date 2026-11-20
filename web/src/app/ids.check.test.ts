@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as I from "./ids";
 import { vocab } from "./vocab";
 
-// 防漂移（设计 §4.1）：ids.ts 是内核取值的前端镜像。这里读内核源码里的常量，内核有而 ids.ts 没有就失败，
+// 防漂移（界面设计 §10）：ids.ts 是内核取值的前端镜像。这里读内核源码里的常量，内核有而 ids.ts 没有就失败，
 // 失败信息指出要在 ids.ts 的哪一组、vocab.ts 的哪一类补上什么。单向检查：ids.ts 可以先放进内核即将新增的取值。
 const go = import.meta.glob(
   [

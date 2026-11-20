@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-// 文字预算（设计 §2）：页面上不出现成段解释，主界面不出现机制词。扫描全部 strings.ts 与 vocab.ts 的中文一份：
+// 文字预算（界面设计 §8.2）：页面上不出现成段解释，主界面不出现机制词。扫描全部 strings.ts 与 vocab.ts 的中文一份：
 // - 任何一条文案（函数按占位参数取返回值）超过 MAX 个字符：成段文字，应改成命名、控件或预览；
 // - 主界面文案里出现机制词：只允许出现在键路径含 advanced、raw、diag 的文案里（高级、原始值、诊断区）。
 // 违规一律让测试失败：新文案要么写短，要么放进高级、原始值或诊断区。
 export const MAX = 40;
 export const BANNED = ["账本", "投影", "墓碑", "注入", "级联", "Event", "blob", "actor", "schema", "scope", "harness", "web_only", "宿主", "主会话", "主助手", "无头"];
-/** 「后台运行」在主界面上只作「Agent 后台运行」出现（设计 §6：APA 在本人不在时拉起 Agent）。 */
+/** 「后台运行」在主界面上只作「Agent 后台运行」出现（界面设计 §8.1：APA 在本人不在时在后台启动 Agent）。 */
 const BARE_BACKGROUND_RUN = /(?<!Agent )后台运行/;
 /** 有意保留的长文字：键名（各页文案展开了共用文案，所以按键名，不按文件）→ 理由。 */
 const EXEMPT: Record<string, string> = {
-  loginSub: "登录页的产品介绍，不是功能说明（设计 §5.1）",
-  ownProgramSample: "调用示例是代码块，不是说明文字（设计 §4.1 要求给出最小可跑示例）",
+  loginSub: "登录页的产品介绍，不是功能说明（界面设计 §8.2）",
+  ownProgramSample: "调用示例是代码块，不是说明文字（界面设计 §9.9 要求给出最小可跑示例）",
 };
 const ALLOWED_PATH = /\.(advanced|raw|diag)\w*(\.|$)/i;
 

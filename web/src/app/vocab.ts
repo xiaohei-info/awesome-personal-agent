@@ -1,7 +1,7 @@
 import type { Dict } from "./i18n";
 import type * as I from "./ids";
 
-// 取值词表（设计 §4）：内核 ID → 界面上的名字（label）与可选的一短句（hint）。
+// 取值词表（界面设计 §10）：内核 ID → 界面上的名字（label）与可选的一短句（hint）。
 // 封闭集合用 Record：ids.ts 里多一个 ID 而这里没写，tsc 失败。开放集合用 Open：查不到时显示原值。
 export interface Entry {
   label: string;

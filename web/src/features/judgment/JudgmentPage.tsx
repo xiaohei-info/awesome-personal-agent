@@ -9,7 +9,7 @@ import { useLabel } from "../../app/values";
 import { JUDGE_TEMPLATE, PACK_BAND } from "../../app/ids";
 import { strings } from "./strings";
 
-// 筛选门槛（原「判断与校准」去掉抽检后的部分，设计 §5.16）：形状对应 GET /v1/judgments/stats 与 /v1/settings/judgment（附录 B.2，主文档 §8.10）。
+// 筛选门槛（原「判断与校准」去掉抽检后的部分，界面设计 §9.7）：形状对应 GET /v1/judgments/stats 与 /v1/settings/judgment（附录 B.2，主文档 §8.10）。
 // 不确定带与影子模式的写入语义不变：PUT 只带 bands（整份列表）或 shadow（整份列表），校验在服务端；本页只换了编辑方式。
 interface Row { use: string; template: string; source?: string; backend: string; calls: number; decided: number; uncertain: number; errors: number; reused: number }
 interface Rate { use: string; template: string; source?: string; escalation: number; undecided: number; acceptance: number; false_drop: number; reviewed: number }

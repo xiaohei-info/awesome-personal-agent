@@ -4,7 +4,7 @@ import { errorText as msg, useLang, useT, type Lang } from "../../app/i18n";
 import { useRaw } from "../../app/raw";
 import { strings } from "./strings";
 
-// 设置 › 提醒渠道的内置渠道（设计 §7）：卡片只显示现状；添加走四步：选类型 → 填表单 → 测试 → 启用。
+// 设置 › 提醒渠道的内置渠道（界面设计 §9.9）：卡片只显示现状；添加走四步：选类型 → 填表单 → 测试 → 启用。
 // 表单由接入声明（GET /connections/types）生成；凭据只能填写和替换，读接口只回是否已设置。
 // 「用它来送」写打扰策略的路由（disturb.routes 的类别键 → channel:<连接 id>）。规则与校验都在服务端。
 

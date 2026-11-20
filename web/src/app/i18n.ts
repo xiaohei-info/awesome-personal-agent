@@ -3,7 +3,7 @@ import { ApiError, type ApiErrorBody } from "./api";
 import { GENERIC_ERROR } from "./ids";
 import { vocab, type Entry } from "./vocab";
 
-// 界面语言（设计 §4.1）：只切换 Web 界面文案与日期格式；服务端的 why/next、通知、简报与内置提示词不随它变。
+// 界面语言（界面设计 §10）：只切换 Web 界面文案与日期格式；服务端的 why/next、通知、简报与内置提示词不随它变。
 // 选择存在这台浏览器的 localStorage，不进账本、不跨设备同步；没选过时跟随浏览器语言。
 export type Lang = "zh" | "en";
 export type Choice = Lang | "auto";

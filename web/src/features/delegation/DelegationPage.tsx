@@ -157,7 +157,7 @@ function RunRow({ run }: { run: Run }) {
   );
 }
 
-// Agent 工作 › 进行中（界面设计 §3.5）：我交出去的事现在怎样。上面是 APA 在后台启动 Agent 做的事（GET /v1/runs，按事项取最近一次，
+// Agent 工作 › 进行中（界面设计 §3.2）：我交出去的事现在怎样。上面是 APA 在后台启动 Agent 做的事（GET /v1/runs，按事项取最近一次，
 // 在途的在前），下面是派给执行者的活（委派子事项）。判定都在服务端，本页只读并提供改派、重新委派。
 export function DelegationPage() {
   const { api } = useSession();

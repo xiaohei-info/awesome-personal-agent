@@ -1,4 +1,4 @@
-// 预填新建页（设计 §4.1）：/new 与 /items/new 的查询参数只作表单初值，来自外部，按不可信文本处理。
+// 预填新建页（界面设计 §9.11）：/new 与 /items/new 的查询参数只作表单初值，来自外部，按不可信文本处理。
 export const MAX_TITLE = 200;
 export const MAX_BODY = 4000;
 

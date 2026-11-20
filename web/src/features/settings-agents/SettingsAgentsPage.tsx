@@ -140,7 +140,7 @@ function Row({ e, pol }: { e: Entry; pol: Doc }) {
 }
 
 // 页面级、很少用到的：给脚本和执行者的钥匙（含没归属的旧钥匙）、以前按钥匙签的临时授权（锚点 #grant-<id>）。
-// 是否挪到「对外接口」本版不动（界面设计 §10 X13）。
+// 是否挪到「对外接口」本版不动（界面设计 §4）。
 function Other({ data, list, reload, onError, secret, onSecret }: { data: Data; list: Entry[]; reload: () => Promise<void>; onError: (m: string | null) => void; secret: string | null; onSecret: (s: string | null) => void }) {
   const t = useT(strings);
   const { api } = useSession();

@@ -8,7 +8,7 @@ import { feature as notify } from "../settings-notify";
 import { feature as agents } from "../settings-agents";
 import { policyServer } from "./test-server";
 
-// 改版前后 PUT 载荷逐字段一致（设计 §8.1 PR 2）：「策略与人格」拆成「我来拍板 / 提醒与打扰 / 通用」（权限上限的载荷见 settings-agents.test）后，
+// 改版前后 PUT 载荷逐字段一致（界面设计 §6.1）：「策略与人格」拆成「我来拍板 / 提醒与打扰 / 通用」（权限上限的载荷见 settings-agents.test）后，
 // 每张卡片「不改直接保存」与「做一次与改版前测试相同的编辑再保存」发出的请求体，都必须与改版前的组件
 // （origin/feat/ux-vocab 的 SettingsPolicyPage.tsx）对同一夹具发出的请求体深度相等。期望值按改版前组件的行为写成固定 JSON：
 // web_only 规则四个字段都发、空的发空串；disturb 整段带回、routes/daily_cap/mutes 覆盖；其余段只发自己。
