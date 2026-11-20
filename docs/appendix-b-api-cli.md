@@ -160,6 +160,7 @@
 | | `POST /materials/{id}/revert` | 回退一次 `direct` 修订 | 只有 Web 登录 |
 | | `PATCH /materials/{id}` | 改链接型材料的标题、kind 与标签 `{"title"?, "kind"?, "tags"?, "reason"?}`，经 `material.update`；位置不可改，非链接型返回 409 | 只有 Web 登录 |
 | | `POST /revisions/{id}/confirm`，`/reject` | 确认或拒绝 proposed 修订 | Web 登录、delegate（规范生效只有 Web） |
+| | `GET /revisions/pending` | 全站等本人确认的 proposed 修订，先提交的在前：`{"pending": [{"revision", "material", "baseline_changed"}]}`；只读 | 同材料读取 |
 | | `GET /materials/search` | 检索 | observer |
 | | `PUT/GET /blobs/{hash}` | 附件 | worker 写，observer 读 |
 | | 已有路由 POST /materials 的新增请求体 | 带 `link` 键时登记链接型材料：`{"link", "title", "project", "kind"?, "tags"?}`，经 `material.link`；已有同项目同位置的返回 200 与那一条，新建返回 201。`GET /materials` 与 `GET /materials/{id}` 的每条材料加只读字段 `form`（`hosted`、`owned`、`link`），链接型另带 `link` 与 `open_url`（库已登记打开方式时） | worker 写，observer 读 |

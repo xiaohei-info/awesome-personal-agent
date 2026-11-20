@@ -2,7 +2,7 @@
 //
 //	GET/POST /materials          GET/PATCH /materials/{id}          GET /materials/search
 //	GET/POST /materials/{id}/revisions     POST /materials/{id}/revert
-//	POST /revisions/{id}/confirm|reject
+//	POST /revisions/{id}/confirm|reject      GET /revisions/pending（全站待确认的修订）
 //	GET /materials/{id}/content  POST /materials/{id}/changes   （托管型，需要 hosted.Service）
 //	PUT/GET /blobs/{hash}
 //	GET /note-vaults             （已登记的笔记库，§12.8）
@@ -58,6 +58,7 @@ func Routes(st *store.Store, x *command.Executor, hs *hosted.Service) core.Route
 		r.Handle(core.Route{Method: "GET", Path: "/materials/{id}/revisions", Handler: h.revisions})
 		r.Handle(core.Route{Method: "POST", Path: "/materials/{id}/revisions", Handler: h.write("material.commit", http.StatusCreated)})
 		r.Handle(core.Route{Method: "POST", Path: "/materials/{id}/revert", Handler: h.write("material.revert", http.StatusOK)})
+		r.Handle(core.Route{Method: "GET", Path: "/revisions/pending", Handler: h.pending})
 		r.Handle(core.Route{Method: "POST", Path: "/revisions/{id}/confirm", Handler: h.write("revision.confirm", http.StatusOK)})
 		r.Handle(core.Route{Method: "POST", Path: "/revisions/{id}/reject", Handler: h.write("revision.reject", http.StatusOK)})
 		if hs != nil { // 托管型读取与修改依赖读取器服务；没有就不挂这两条，而不是挂一个必然 panic 的处理器
@@ -300,6 +301,18 @@ func (h *handlers) revisions(w http.ResponseWriter, r *http.Request, p *core.Pri
 		vs = []km.Revision{}
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"revisions": vs})
+}
+
+// pending 列出全站等本人确认的 proposed 修订（先提交的在前），每条带所属材料与"基线已变化"；只读，权限同材料读取。
+func (h *handlers) pending(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
+	if err := readable(p); err != nil {
+		return err
+	}
+	var ps []km.Pending
+	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) { ps, err = km.PendingRevisions(tx); return }); err != nil {
+		return err
+	}
+	return core.WriteJSON(w, http.StatusOK, map[string]any{"pending": ps})
 }
 
 func (h *handlers) search(w http.ResponseWriter, r *http.Request, p *core.Principal) error {

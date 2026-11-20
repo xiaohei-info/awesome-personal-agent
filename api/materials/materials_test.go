@@ -278,10 +278,21 @@ func TestOwnedMaterialLifecycle(t *testing.T) {
 	if shown.Revision != nil || shown.Material.CurrentRev != "" {
 		t.Fatalf("a proposed-only material has no current revision: %+v", shown)
 	}
+	// 全站待确认的修订：observer 可读，带所属材料；确认之后不再列出。
+	var pend struct{ Pending []km.Pending }
+	into(t, e.do("obs", "GET", "/v1/revisions/pending", ""), &pend)
+	if len(pend.Pending) != 1 || pend.Pending[0].Revision.ID != p1.Revision || pend.Pending[0].Material.ID != p1.Material {
+		t.Fatalf("pending: %+v", pend)
+	}
 	confirm := "/v1/revisions/" + p1.Revision + "/confirm"
 	want(t, e.do("wrk", "POST", confirm, `{}`), 403, "permission_denied")
 	want(t, e.do("dlg", "POST", confirm, `{}`), 403, "basis_required") // 第二档：delegate 必须附本人原话
 	want(t, e.do("dlg", "POST", confirm, `{}`, core.EvidenceHeader, "owner: yes, adopt the design"), 200, "")
+	pend.Pending = nil
+	into(t, e.do("obs", "GET", "/v1/revisions/pending", ""), &pend)
+	if len(pend.Pending) != 0 {
+		t.Fatalf("confirmed revision still pending: %+v", pend)
+	}
 	want(t, e.do("web", "POST", confirm, `{}`), 409, "conflict")
 
 	// 拒绝：被拒绝的修订不生效，再拒绝是冲突。
