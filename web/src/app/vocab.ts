@@ -66,6 +66,14 @@ export interface Vocab {
 }
 export type VocabKey = keyof Vocab;
 
+/** 内核问题与运行故障的参数（Ask.params、Run.fault.params）：只有机制值与对象名。 */
+export type NoticeParams = Record<string, string> | undefined;
+/** 内核生成的问题（设计 §6.3）：按类别码与参数说一句人话；技术细节（params.detail、问题原文）收在「详情」里。 */
+type AskSay = Record<I.AskCode, (p: NoticeParams) => string>;
+/** 运行故障（设计 §6.11）：出了什么事一句（say），下一步做什么一句（next）。 */
+type FaultSay = Record<I.RunFault, { say: (p: NoticeParams) => string; next: string }>;
+const mins = (p: NoticeParams) => Math.max(1, Math.round(Number(p?.timeout ?? 0) / 60));
+
 /** 自检结论的可变参数（kernel/doctor 的 data，附录 B.2）。 */
 export type DoctorData = Record<string, unknown> | undefined;
 /** 自检结论（设计 §15.5）：按机器码与 data 生成一句话。封闭集合：DOCTOR_CODE 多一个而这里没写，tsc 失败。 */
@@ -95,7 +103,7 @@ const len = (d: DoctorData, k: string) => (Array.isArray(d?.[k]) ? (d![k] as unk
 /** 渠道路由 channel:<名> 的显示名。 */
 export const CHANNEL_PREFIX = "channel:";
 
-const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSay; captureSource: string } = {
+const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSay; askCode: AskSay; runFault: FaultSay; captureSource: string } = {
   phase: { proposed: { label: "建议" }, open: { label: "进行中" }, waiting: { label: "等待中" }, needs_input: { label: "等你决定" }, done: { label: "已完成" }, dropped: { label: "已放弃" } },
   priority: { low: { label: "低" }, normal: { label: "普通" }, high: { label: "高" }, urgent: { label: "紧急" } },
   itemKind: { task: { label: "任务" }, commitment: { label: "承诺" }, decision: { label: "决策" }, delegation: { label: "委派" }, brief: { label: "简报" }, routine: { label: "例行任务" } },
@@ -344,6 +352,29 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
     title: { label: "标题" }, project: { label: "项目" }, created_at: { label: "创建时间" }, updated_at: { label: "更新时间" },
     phase: { label: "阶段" }, summary: { label: "摘要" }, tag: { label: "标签" }, tags: { label: "标签" }, deadline: { label: "截止" },
     planned_for: { label: "计划日期" }, priority: { label: "优先级" }, "spec.period": { label: "周期" }, "spec.result": { label: "结果" },
+  },
+  askCode: {
+    task_incomplete: () => "Agent 跑完了，但结果没有写回这件事（没落账）",
+    task_refused: () => "没能交给 Agent：开始前的检查没通过",
+    background_incomplete: () => "Agent 跑完了，但这件事没有交回结果（没落账）",
+    background_refused: () => "没能在后台启动 Agent：开始前的检查没通过",
+    resume_refused: () => "没能让 Agent 接着做：复核没通过",
+    rule_action_failed: () => "自动规则替这件事做的下一步没完成",
+    source_auth_failed: (p) => `${p?.source ?? "来源"} 要重新登录或检查配置`,
+    guideline_no_executor: () => "没有可以起草项目规范的执行者",
+    agentsmd_drift: (p) => `仓库 ${p?.repo ?? ""} 的 AGENTS.md 被手改过，要怎么处理？`,
+    hosted_missing: (p) => `托管文档 ${p?.path ?? ""} 在仓库里找不到了`,
+    verify_delegation: (p) => `「${p?.title ?? ""}」交回说做完了，要不要采信？`,
+    followup_rounds_used: (p) => `「${p?.title ?? ""}」已提醒 ${p?.rounds ?? ""} 轮仍没进展，怎么办？`,
+  },
+  runFault: {
+    start_failed: { say: () => "执行程序没能启动", next: "检查这个 Agent 的工作目录与设置，修好后再开始" },
+    exec_denied: { say: () => "执行程序无法启动（没有运行权限）", next: "先在这台电脑上给它运行权限，再重新开始；不修好重跑还会失败" },
+    exec_not_found: { say: () => "找不到执行程序", next: "确认程序已安装、启动命令的路径正确" },
+    exit_nonzero: { say: (p) => `执行程序出错退出（退出码 ${p?.exit ?? "?"}）`, next: "看运行记录里的原因，修好后再开始" },
+    killed: { say: () => "执行程序被中途终止", next: "确认没有别的程序结束它，再重新开始" },
+    timeout: { say: (p) => `超过时限（${mins(p)} 分钟）没做完，已停下`, next: "可以调大时限，或把事情拆小再开始" },
+    lost: { say: () => "APA 重启时它正在运行，已中断", next: "需要的话重新开始" },
   },
   doctorCode: {
     ok: () => "连通，鉴权通过，示例请求得到了回答",
@@ -689,6 +720,29 @@ const en: typeof zh = {
     title: { label: "Title" }, project: { label: "Project" }, created_at: { label: "Created" }, updated_at: { label: "Updated" },
     phase: { label: "Phase" }, summary: { label: "Summary" }, tag: { label: "Tag" }, tags: { label: "Tags" }, deadline: { label: "Deadline" },
     planned_for: { label: "Planned for" }, priority: { label: "Priority" }, "spec.period": { label: "Period" }, "spec.result": { label: "Result" },
+  },
+  askCode: {
+    task_incomplete: () => "The Agent finished, but its result was not written back (not recorded)",
+    task_refused: () => "Couldn't hand this to the Agent: a pre-start check failed",
+    background_incomplete: () => "The Agent finished, but handed nothing back (not recorded)",
+    background_refused: () => "Couldn't start the Agent in the background: a pre-start check failed",
+    resume_refused: () => "Couldn't let the Agent carry on: the re-check failed",
+    rule_action_failed: () => "An automatic rule's next step for this didn't complete",
+    source_auth_failed: (p) => `${p?.source ?? "A source"} needs you to sign in again or check its settings`,
+    guideline_no_executor: () => "No executor can draft the project guideline",
+    agentsmd_drift: (p) => `AGENTS.md in ${p?.repo ?? "a repo"} was edited by hand. What should happen?`,
+    hosted_missing: (p) => `The hosted document ${p?.path ?? ""} is gone from the repo`,
+    verify_delegation: (p) => `"${p?.title ?? ""}" was reported done. Accept the result?`,
+    followup_rounds_used: (p) => `"${p?.title ?? ""}" had ${p?.rounds ?? ""} reminders and no progress. What now?`,
+  },
+  runFault: {
+    start_failed: { say: () => "The program could not start", next: "Check this Agent's working directory and settings, then start again" },
+    exec_denied: { say: () => "The program could not start (no permission to run)", next: "Give it permission on this computer first, then start again; a rerun before that fails again" },
+    exec_not_found: { say: () => "The program was not found", next: "Make sure it is installed and the launch path is right" },
+    exit_nonzero: { say: (p) => `The program exited with an error (code ${p?.exit ?? "?"})`, next: "See the reason in the run record, fix it, then start again" },
+    killed: { say: () => "The program was stopped midway", next: "Make sure nothing else ended it, then start again" },
+    timeout: { say: (p) => `It ran past its limit (${mins(p)} min) and was stopped`, next: "Raise the limit or split the work, then start again" },
+    lost: { say: () => "It was running when APA restarted and got cut off", next: "Start it again if you still need it" },
   },
   doctorCode: {
     ok: () => "Reachable, authenticated, and the sample request was answered",

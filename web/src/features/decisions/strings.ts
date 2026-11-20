@@ -32,10 +32,19 @@ const zh = {
   submitIdea: "提交想法",
   why: "为什么",
   // 被拒绝的代答 / 处理（决策待办与建议流共用）
-  rejectedWhat: { answer: "代答", handle: "处理" },
+  rejectedWhat: { answer: "代答", handle: "处理", edit: "修改" },
   rejected: (what: string) => `被拒绝的${what}`,
-  rejectedBody: (who: string, what: string) => `${who} 的${what}未生效`,
+  rejectedBody: (who: string, what: string) => `${who} 的${what}被拒`,
+  rejectedAction: { answer_decision: "替你回答", edit_any_item: "修改这件事", update_own: "改它负责的事", create_proposed: "提建议", delegate: "把活派出去" } as Record<string, string>,
+  notApplied: "事项未被修改（未生效）",
   rejectedGrant: (g: string) => ` · 授权 ${g}`,
+  goGrant: "去签发授权",
+  // 内核问题（按类别码渲染）与旧格式
+  details: "详情",
+  legacy: "旧格式",
+  legacyWhy: "升级前产生的问题，照原文显示",
+  ack: "我知道了",
+  ackWhy: "这张卡只有一个选项，不需要你决定；点「我知道了」收起，事项回到进行中。",
 };
 
 const en: typeof zh = {
@@ -68,10 +77,18 @@ const en: typeof zh = {
   otherIdeaPlaceholder: "Something else…",
   submitIdea: "Send",
   why: "Why",
-  rejectedWhat: { answer: "answer on behalf", handle: "handling" },
+  rejectedWhat: { answer: "answer on behalf", handle: "handling", edit: "change" },
   rejected: (what) => `Rejected ${what}`,
-  rejectedBody: (who, what) => `${what} by ${who} did not take effect`,
+  rejectedBody: (who, what) => `${what} by ${who} was rejected`,
+  rejectedAction: { answer_decision: "answering for you", edit_any_item: "changing this item", update_own: "changing its own item", create_proposed: "proposing", delegate: "handing work out" },
+  notApplied: "The item was not changed (did not take effect)",
   rejectedGrant: (g) => ` · grant ${g}`,
+  goGrant: "Issue a grant",
+  details: "Details",
+  legacy: "Old format",
+  legacyWhy: "Created before the upgrade; shown as written",
+  ack: "Got it",
+  ackWhy: "This card has a single option, so there is nothing to decide; \"Got it\" closes it and the item goes back to open.",
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

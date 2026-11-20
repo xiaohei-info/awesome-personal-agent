@@ -12,6 +12,8 @@ export interface Signal {
   next: string;
   detail?: unknown;
   rejections?: { pack: string; source: string; reason: string }[];
+  /** receipt_failures 的逐条原因（api/health.ReceiptRejection）：命令、退出码、原因码、凭据。 */
+  receipts?: { object: string; command: string; exit: number; code?: string; credential: string }[];
 }
 export interface HealthReport {
   healthy: boolean;
@@ -30,6 +32,12 @@ export interface Row {
   obj?: string;
   n: number;
   to?: string;
+  /** 原因码：运行故障的 fault.code（outcall）或被拒的原因码（receipt_failures）；展示层按它说人话。 */
+  code?: string;
+  params?: Record<string, string>;
+  /** 被拒的操作者凭据与命令（receipt_failures）。 */
+  who?: string;
+  cmd?: string;
 }
 
 export interface Status {
@@ -66,11 +74,15 @@ export function rowsOf(s: Signal): Row[] {
           : row(x.needs_input_item ? "sourceAuth" : "sourceFail", true, x.consecutive_failures, "/sources?open=" + enc(x.source), x.source),
       );
     case "outcall": {
-      const q = (d ?? {}) as { long?: { queued: number }; short?: { queued: number }; timeouts?: string[] };
+      const q = (d ?? {}) as { long?: { queued: number }; short?: { queued: number }; timeouts?: string[]; failures?: { run: string; target: string; fault?: { code: string; params?: Record<string, string> } }[] };
       const queued = (q.long?.queued ?? 0) + (q.short?.queued ?? 0);
       const runs = list<string>(q.timeouts);
-      const timeouts = runs.length ? runs.map((r) => row("outcall", true, 1, "/runs", r)) : [row("outcall", true, s.count, "/runs")];
-      return [...timeouts, ...(queued ? [row("queue", false, queued)] : [])];
+      // Agent 运行故障（2026-11-20）：每件事一行，带故障类别码；运行故障是事件，不在「等你决定」里。
+      const failures = list<{ run: string; target: string; fault?: { code: string; params?: Record<string, string> } }>(q.failures).map((f) => ({
+        ...row("runFail", true, 1, "/items/" + enc(f.target) + "#agent", f.target), code: f.fault?.code, params: f.fault?.params,
+      }));
+      const timeouts = runs.length ? runs.map((r) => row("outcall", true, 1, "/runs", r)) : failures.length ? [] : [row("outcall", true, s.count, "/runs")];
+      return [...timeouts, ...failures, ...(queued ? [row("queue", false, queued)] : [])];
     }
     case "delivery_backlog":
       return [row("delivery", true, s.count, "/settings/channels")];
@@ -105,8 +117,13 @@ export function rowsOf(s: Signal): Row[] {
       const ids = list<string>(d).filter(Boolean);
       return ids.length ? ids.map((k) => row("fallback", true, 1, "/rules#rule-" + enc(k), k)) : [row("fallback", true, s.count, "/rules")];
     }
-    case "receipt_failures":
-      return [row("receipts", true, s.count, "/audit")];
+    case "receipt_failures": {
+      // 逐条说清谁的什么操作被拒、为什么、下一步（原因码在服务端给出）；没有逐条明细的旧接口退回一行计数。
+      const rs = s.receipts ?? [];
+      return rs.length
+        ? rs.map((x) => ({ ...row("receipt", true, 1, "/audit", x.object), code: x.code, who: x.credential, cmd: x.command }))
+        : [row("receipts", true, s.count, "/audit")];
+    }
     case "other_alerts":
       return [row("others", true, s.count, "/audit")];
     case "stalled_delegations": {

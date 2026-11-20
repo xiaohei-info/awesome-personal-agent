@@ -9,6 +9,7 @@ import { entryOf, useLabel } from "../../app/values";
 import { rejudgeHint } from "../../app/strings";
 import { assess, type HealthReport, type Row, type Status } from "../../app/status";
 import { strings } from "./strings";
+import { useFaultSay } from "../../app/notice";
 import { DoctorDetails, type DoctorReport } from "./Doctor";
 
 // 诊断 › 状态（界面设计 §5.3）：形状对应 GET /v1/health 与 GET /v1/doctor（附录 B.2），判定全在服务端，这里只归类与措辞。
@@ -22,10 +23,16 @@ interface Run { id: string; target: string }
 /** 一行的问题、影响、主按钮与落点。 */
 interface Said { problem: string; impact?: string; button?: string; to?: string; second?: { button: string; to: string } }
 
+// 被拒原因码 → 下一步：缺依据的去签发授权（Agent 页的「可以替我决定」），没权限的看钥匙，其余看操作记录。
+const GRANT_CODES = new Set(["basis_required", "session_not_direct", "grant_required"]);
+
 function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: Status) => Said {
   const t = useT(strings);
   const lang = useLang();
   const source = useNames("source");
+  const credential = useNames("credential");
+  const label = useLabel();
+  const fault = useFaultSay();
   return (r, st) => {
     const [kind, sub] = r.kind.split(":");
     const model = sub ? t.models[sub] : "";
@@ -51,6 +58,21 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
       case "waitPaused": return { problem: [t.waitPaused(r.n), rejudgeHint(lang, "models_paused", st.rejudgeDays)].filter(Boolean).join(" · "), button: t.seeSources, to: r.to };
       case "expired": return { problem: t.expired(r.n) };
       case "fallback": return { problem: r.obj ? t.fallbackOne(ruleName(lang, r.obj)) : t.fallbacks(r.n), impact: t.fallbackImpact, button: t.reopen, to: r.to };
+      case "runFail": {
+        const f = fault(r.code ? { code: r.code, params: r.params } : undefined);
+        return { problem: f?.say ?? t.outcallItem, impact: t.runFailImpact(f?.next ?? ""), button: t.seeItem, to: r.to };
+      }
+      case "receipt": {
+        const why = r.code ? label("error", r.code) : t.receiptNoReason;
+        const grant = !!r.code && GRANT_CODES.has(r.code);
+        return {
+          problem: t.receiptOne(credential(r.who ?? ""), t.receiptCmd[r.cmd ?? ""] ?? r.cmd ?? "", why),
+          impact: t.receiptImpact,
+          button: grant ? t.goGrant : r.code === "permission_denied" ? t.seeKey : t.seeWhy,
+          to: grant || r.code === "permission_denied" ? "/settings/agents" : r.to,
+          second: { button: t.seeWhy, to: r.obj ? "/audit?object=" + encodeURIComponent(r.obj) : "/audit" },
+        };
+      }
       case "receipts": return { problem: t.receipts(r.n), impact: t.receiptsImpact, button: t.seeWhy, to: r.to, second: { button: t.seeAccess, to: "/settings/agents" } };
       case "others": return { problem: t.others(r.n), button: t.look, to: r.to };
       case "stalled": return { problem: t.stalled, impact: t.stalledImpact, button: t.nudge, to: r.to };
@@ -72,7 +94,7 @@ function ItemName({ id }: { id?: string }) {
 }
 
 function Line({ r, said, raw }: { r: Row; said: Said; raw: boolean }) {
-  const itemRow = r.kind === "chain" || r.kind === "stalled";
+  const itemRow = r.kind === "chain" || r.kind === "stalled" || r.kind === "runFail" || (r.kind === "receipt" && !!r.obj?.startsWith("itm_"));
   return (
     <li className="act-row">
       <div>

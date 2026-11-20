@@ -10,6 +10,7 @@ import { ErrorNote } from "../../app/errors";
 import { useNames } from "../../app/names";
 import { useLabel, Val } from "../../app/values";
 import { strings } from "./strings";
+import { useAskSay } from "../../app/notice";
 
 // 等你决定（界面设计 §5.2）：两节——问题（卡片）与待确认（Agent 的启动请求、文档修改，各一行加「去确认」）。
 // 形状对应 GET /v1/items 返回的 domain.Item（只取本页用到的字段）。排序之外的判定（web_only、权限、只认第一次回答）都在服务端；
@@ -28,6 +29,9 @@ export interface DecisionItem {
   priority?: "low" | "normal" | "high" | "urgent";
   ask?: {
     question: string;
+    /** 内核生成的问题的类别码与参数（§6.3）；没有 code 的是旧格式或 agent 自己写的问题，照原文显示。 */
+    code?: string;
+    params?: Record<string, string>;
     options?: AskOption[];
     recommend?: string;
     free_text?: boolean;
@@ -66,8 +70,9 @@ function Due({ deadline }: { deadline: string }) {
   );
 }
 
-/** 谁在问、为什么问：取回放里最近一次 decision.requested，默认展开（不再藏在「为什么在这」后面）。 */
-function Asker({ id }: { id: string }) {
+/** 谁在问、为什么问：取回放里最近一次 decision.requested（没有时取最近一次阶段变化，内核经 item.update 挂问题时是它），默认展开。
+ *  内核问的、带类别码的：理由已在标题里说了人话，这里只写谁在问；内核问的、没有类别码的：是升级前的旧格式，照原文并标出。 */
+function Asker({ id, code }: { id: string; code?: string }) {
   const t = useT(strings);
   const { api } = useSession();
   const label = useLabel();
@@ -76,7 +81,10 @@ function Asker({ id }: { id: string }) {
   useEffect(() => {
     let live = true;
     api.get<WhyResp>("/why/" + encodeURIComponent(id)).then(
-      (r) => live && setStep([...r.steps].reverse().find((s) => s.type === "decision.requested") ?? { type: "", reason: "" }),
+      (r) => {
+        const back = [...r.steps].reverse();
+        live && setStep(back.find((s) => s.type === "decision.requested") ?? back.find((s) => s.type === "item.phase_changed") ?? { type: "", reason: "" });
+      },
       () => live && setStep(null),
     );
     return () => { live = false; };
@@ -84,7 +92,14 @@ function Asker({ id }: { id: string }) {
   if (!step) return null;
   const a = step.actor;
   const who = !a ? "" : a.type === "agent" ? credential(a.principal) : label("actorType", a.type);
-  return <p className="why">{[who && t.asks(who), step.reason || t.noReason].filter(Boolean).join(" · ")}</p>;
+  const kernel = a?.type === "system";
+  const reason = kernel && code ? "" : step.reason || t.noReason;
+  return (
+    <p className="why">
+      {[who && t.asks(who), reason].filter(Boolean).join(" · ")}
+      {kernel && !code && <> <span className="badge plain" title={t.legacyWhy}>{t.legacy}</span></>}
+    </p>
+  );
 }
 
 /** 一张问题卡（等你决定页与事项详情共用）：问题、截止、是哪件事、谁在问为什么问、选项、别的想法；答完收成一行回执。 */
@@ -98,7 +113,11 @@ export function QuestionCard({ item, focused, onFocus, rejection, onAnswer, inIt
 }) {
   const t = useT(strings);
   const project = useNames("project");
+  const askSay = useAskSay();
   const ask = item.ask!;
+  const said = askSay(ask); // 内核问题按类别码说人话；没有类别码照原文
+  // 只有一个选项、又不能写别的想法：不是决定。新问题在内核侧就构造不出来（§6.14 第 20 条），这里只会是升级前的旧卡，给一个明确的收尾。
+  const single = !ask.free_text && (ask.options ?? []).length === 1;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -123,9 +142,15 @@ export function QuestionCard({ item, focused, onFocus, rejection, onAnswer, inIt
   return (
     <article aria-label={item.title} className={"decision" + (focused ? " focus" : "")} onFocus={onFocus}>
       <header>
-        <h2>{ask.question}</h2>
+        <h2>{said ?? ask.question}</h2>
         {ask.deadline && <Due deadline={ask.deadline} />}
       </header>
+      {said && (
+        <details className="sub">
+          <summary>{t.details}</summary>
+          <p>{ask.params?.detail ?? ask.question}</p>
+        </details>
+      )}
       <p className="meta">
         {inItem ? null : <Link to={"/items/" + encodeURIComponent(item.id)}>{item.title}</Link>}
         {item.project && <span className={inItem ? undefined : "dot"}>{project(item.project)}</span>}
@@ -137,11 +162,15 @@ export function QuestionCard({ item, focused, onFocus, rejection, onAnswer, inIt
           <span className="badge bad plain">{t.webOnly}</span> {t.webOnlyWhy} <Go to="/settings">{t.why}</Go>
         </p>
       )}
-      <Asker id={item.id} />
+      <Asker id={item.id} code={ask.code} />
       <RejectionNote rejection={rejection} what="answer" />
+      {single && <p className="sub">{t.ackWhy}</p>}
       {/* 选项一律同等样式：不替本人暗示选哪个 */}
       <div role="group" aria-label={t.options} className="options">
-        {(ask.options ?? []).map((o, n) => (
+        {single && (
+          <button disabled={busy} onClick={() => void answer({ choice: ask.options![0].id }, t.ack)}>{t.ack}</button>
+        )}
+        {!single && (ask.options ?? []).map((o, n) => (
           <button key={o.id} disabled={busy} onClick={() => void answer({ choice: o.id }, o.label)}>
             {n < 9 && <kbd aria-hidden="true">{n + 1}</kbd>}
             {o.label}

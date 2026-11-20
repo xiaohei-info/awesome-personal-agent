@@ -135,6 +135,16 @@ export const DOCTOR_CODE = [
 ] as const;
 export type DoctorCode = (typeof DOCTOR_CODE)[number];
 
+/** 内核生成的问题的类别码：kernel/domain/notice.go AskCode（Ask.code，设计 §6.3）。没有 code 的问题是旧格式，照原文显示。 */
+export const ASK_CODE = [
+  "task_incomplete", "task_refused", "background_incomplete", "background_refused", "resume_refused", "rule_action_failed",
+  "source_auth_failed", "guideline_no_executor", "agentsmd_drift", "hosted_missing", "verify_delegation", "followup_rounds_used",
+] as const;
+export type AskCode = (typeof ASK_CODE)[number];
+/** 运行故障的类别码：kernel/domain/notice.go RunFaultCode（Run.fault，设计 §6.11）。运行故障是事件，不是问题。 */
+export const RUN_FAULT = ["start_failed", "exec_denied", "exec_not_found", "exit_nonzero", "killed", "timeout", "lost"] as const;
+export type RunFault = (typeof RUN_FAULT)[number];
+
 /** 对外事件类型：kernel/domain/event.go Ev*（附录 B.4） */
 export const EVENT = [
   "item.created", "item.updated", "item.phase_changed", "item.deadline_passed", "item.progress_added", "proposal.attached", "import.completed",

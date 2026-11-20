@@ -11,7 +11,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 
 const item = (id: string, screening: boolean): DecisionItem => ({
   id, version: 1, phase: "needs_input", kind: "decision", title: "事项 " + id,
-  ask: { question: "问题 " + id, options: [{ id: "yes", label: "同意" }], ...(screening ? { screening_pending: true } : {}) },
+  ask: { question: "问题 " + id, options: [{ id: "yes", label: "同意" }, { id: "no", label: "不同意" }], ...(screening ? { screening_pending: true } : {}) },
 });
 
 function server(items: DecisionItem[]) {

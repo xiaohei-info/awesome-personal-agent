@@ -1,3 +1,4 @@
+import { useFaultSay, type Fault } from "../../app/notice";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
@@ -14,7 +15,7 @@ import { strings } from "./strings";
 // 今天（界面设计 §3.2、§5.2）：自上而下五块，空的不显示——要你处理、Agent 交回的、今天的事、提醒、久未推进（默认折叠）。
 // 「要你处理」与导航角标、状态灯取同一份注意力汇总；今天的事取自 GET /v1/today（附录 B.2），操作交给既有事项接口。
 interface Today { planned: Item[]; due: Item[]; pending: Item[]; stale: Item[] }
-interface Run { id: string; target: string; category: string; state: string; finished_at?: string }
+interface Run { id: string; target: string; category: string; state: string; finished_at?: string; fault?: Fault }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const SEEN = "apa.today.seen"; // 上次打开今天页的时刻：只存这台浏览器，与改动页「自上次访问以来」同一口径
@@ -110,14 +111,15 @@ function BackRow({ run }: { run: Run }) {
   const t = useT(strings);
   const title = useItemTitle(run.target);
   const ok = run.state === "succeeded";
+  const fault = useFaultSay()(run.fault); // 运行故障：说清没跑起来的原因与结果没落账，不叫人"去回答"——那里没有问题
   const when = run.finished_at ? new Date(run.finished_at).toLocaleString(locale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
   return (
     <li className="act-row">
       <div>
         <span>{title}</span>
-        <span className="sub">{[ok ? t.backDone : t.backNotDone, when].filter(Boolean).join(" · ")}</span>
+        <span className="sub">{[ok ? t.backDone : fault ? t.backFault(fault.say) : t.backNotDone, when].filter(Boolean).join(" · ")}</span>
       </div>
-      <Go className="btn" to={"/items/" + encodeURIComponent(run.target) + "#agent"}>{ok ? t.seeResult : t.answer}</Go>
+      <Go className="btn" to={"/items/" + encodeURIComponent(run.target) + "#agent"}>{ok ? t.seeResult : fault ? t.seeWhy : t.answer}</Go>
     </li>
   );
 }

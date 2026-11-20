@@ -267,3 +267,26 @@ describe("自检结论词表 doctorCode", () => {
     for (const c of fine) expect(vocab.zh.doctorCode[c]({ count: 1, last_run: "ok" }), c).not.toContain("错误");
   });
 });
+
+// 2026-11-20 根因整改：运行故障与被拒的交回是事件，带原因码；诊断页要说清原因、结果没落账，并给一个可点的下一步。
+describe("运行故障与被拒的交回说人话（界面设计 §5.3）", () => {
+  const act = () => within(main().getByRole("region", { name: "要你处理" }));
+  it("退出码 126：说「执行程序无法启动（没有运行权限）」与下一步，不给重新运行；被拒的交回写原因与「去签发授权」", async () => {
+    const bad = {
+      outcall: { ok: false, count: 1, severity: "error", why: "x", detail: { long: { running: 0, queued: 0, longest_wait_seconds: 0 }, short: { running: 0, queued: 0, longest_wait_seconds: 0 }, timeouts: [],
+        failures: [{ run: "run_1", target: "itm_brief", category: "task", fault: { code: "exec_denied", params: { exit: "126" } } }] } },
+      receipt_failures: { ok: false, count: 1, severity: "error", why: "rejected", detail: ["itm_7"], receipts: [{ object: "itm_7", command: "delegate.report", exit: 23, code: "basis_required", credential: "cred_x" }] },
+    };
+    mount(serve(() => json(200, report(bad))).impl);
+    const fault = (await screen.findByText(/执行程序无法启动（没有运行权限）/)).closest("li")!;
+    expect(fault).toHaveTextContent("结果没有落账，事项没被修改");
+    expect(fault).toHaveTextContent("先在这台电脑上给它运行权限");
+    expect(within(fault).getByRole("link", { name: "看这件事" })).toHaveAttribute("href", "/items/itm_brief#agent");
+    expect(within(fault).queryByRole("button", { name: /重新运行/ })).toBeNull();
+    const rej = act().getByText(/交回结果被拒：缺少你的原话或授权/).closest("li")!;
+    expect(rej).toHaveTextContent("结果没有落账");
+    expect(within(rej).getByRole("link", { name: "去签发授权" })).toHaveAttribute("href", "/settings/agents");
+    expect(within(rej).getByRole("link", { name: "看被拒的原因" })).toHaveAttribute("href", "/audit?object=itm_7");
+    expect(main().queryByText(/exit status|basis_required/)).toBeNull();
+  });
+});

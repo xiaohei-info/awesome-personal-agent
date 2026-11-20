@@ -93,6 +93,8 @@ const CASES: [string, string, () => string[]][] = [
   ["HEALTH_SIGNAL", "healthSignal", () => all(file("api/health/health.go"), /\bsig\("([a-z_]+)"/g)],
   ["DOCTOR_CHECK", "doctorCheck", () => block("kernel/doctor/report.go", "// 检查名")],
   ["DOCTOR_CODE", "doctorCode", () => named("kernel/doctor/codes.go", "Code")],
+  ["ASK_CODE", "askCode", () => typed("domain/notice.go", "AskCode")],
+  ["RUN_FAULT", "runFault", () => typed("domain/notice.go", "RunFaultCode")],
   ["EVENT", "event", () => named("domain/event.go", "Ev")],
 ];
 

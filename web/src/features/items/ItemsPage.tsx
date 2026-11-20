@@ -1,3 +1,5 @@
+import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
+import { LastRunNote } from "./LastRunNote";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
@@ -172,7 +174,7 @@ function ItemList() {
 const when = (at: string, precision?: string) => (precision === "day" ? new Date(at).toLocaleDateString(locale()) : new Date(at).toLocaleString(locale()));
 const grouped = (r: Relation, from: string) => r.from === from && isMaterialId(r.to) && (MATERIAL_RELATIONS as readonly string[]).includes(r.type);
 
-interface Detail { item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string; precision?: string }[]; materials: MaterialRel[] }
+interface Detail { rejection?: Rejection; item: Item; relations: Relation[]; keys: { key: string; domain?: string }[]; others: Item[]; progress: { id: string; text: string; on?: string; actor: string; at: string; precision?: string }[]; materials: MaterialRel[] }
 
 function ItemDetail() {
   const t = useT(strings);
@@ -190,7 +192,7 @@ function ItemDetail() {
   const load = useCallback(async () => {
     const eid = encodeURIComponent(id);
     const [it, list] = await Promise.all([
-      api.get<{ item: Item; relations: Relation[]; correlation_keys?: { key: string; domain?: string }[]; progress?: Detail["progress"] }>("/items/" + eid),
+      api.get<{ item: Item; relations: Relation[]; correlation_keys?: { key: string; domain?: string }[]; progress?: Detail["progress"]; last_rejection?: Rejection | null }>("/items/" + eid),
       api.get<{ items: Item[] }>("/items"),
     ]);
     // 材料区的关系：依据、产出、纪要三类指向材料的边；材料读不到时按 id 显示，不丢这条关系。
@@ -202,7 +204,7 @@ function ItemDetail() {
     );
     // 进展按发生时刻排：导入的历史条目不按写入顺序。
     const progress = [...(it.progress ?? [])].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-    setD({ item: it.item, relations: it.relations, keys: it.correlation_keys ?? [], progress, materials, others: list.items.filter((i) => i.id !== id) });
+    setD({ rejection: it.last_rejection ?? undefined, item: it.item, relations: it.relations, keys: it.correlation_keys ?? [], progress, materials, others: list.items.filter((i) => i.id !== id) });
   }, [api, id]);
 
   useEffect(() => {
@@ -246,9 +248,12 @@ function ItemDetail() {
         {[t.phaseNow(label("phase", item.phase)), item.project && projectName(item.project), item.deadline && t.due(new Date(item.deadline).toLocaleString(locale())), item.planned_for && t.planned(item.planned_for)].filter(Boolean).join(" · ")}
       </p>
       {actErr != null && <ErrorNote error={actErr} />}
-      {item.phase === "needs_input" && item.ask && !item.ask.resolution && (
-        <QuestionCard item={item as DecisionItem} onAnswer={answer} inItem />
+      {item.phase === "needs_input" && item.ask && !item.ask.resolution ? (
+        <QuestionCard item={item as DecisionItem} rejection={d.rejection} onAnswer={answer} inItem />
+      ) : (
+        <RejectionNote rejection={d.rejection} what="edit" />
       )}
+      {!ended && <LastRunNote item={item.id} />}
       {item.phase === "proposed" && (
         <div className="actions">
           <button type="button" className="primary" onClick={() => act(() => api.post(path + "/accept", {}))}>{t.accept}</button>

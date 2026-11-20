@@ -217,3 +217,21 @@ describe("被拒绝的代答（ACT-AUTH-03、flow-decision-answer）", () => {
     expect(note).not.toHaveTextContent(" · 授权 ");
   });
 });
+
+// 2026-11-20 根因整改：内核问题按类别码说人话；只有一个选项的旧卡给明确的收尾「我知道了」。
+describe("内核问题的类别码与旧格式", () => {
+  it("带类别码的问题按词表显示，原文收在详情里", async () => {
+    mount(server([item("k", { ask: { question: "任务型运行未完成：stdout 摘要的结果是 \"blocked\"", code: "task_incomplete", params: { detail: "stdout 摘要的结果是 \"blocked\"" } } })]).impl);
+    const card = await screen.findByRole("article", { name: "事项 k" });
+    expect(within(card).getByRole("heading", { name: "Agent 跑完了，但结果没有写回这件事（没落账）" })).toBeInTheDocument();
+    expect(within(card).getByText("详情").closest("details")).toHaveTextContent("blocked");
+  });
+  it("只有一个选项、不能写别的想法的旧卡：显示「我知道了」，点它回答那个选项", async () => {
+    const s = server([item("one", { ask: { question: "代理 x 执行 item.update 被拒绝", options: [{ id: "continue", label: "继续" }] } })]);
+    mount(s.impl);
+    const card = await screen.findByRole("article", { name: "事项 one" });
+    expect(within(card).queryByRole("button", { name: /继续/ })).toBeNull();
+    await userEvent.click(within(card).getByRole("button", { name: "我知道了" }));
+    await waitFor(() => expect(s.calls.find((c) => c.method === "POST")?.body).toEqual({ choice: "continue" }));
+  });
+});
