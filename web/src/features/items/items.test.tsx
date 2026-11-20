@@ -12,7 +12,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const err = (status: number, code: string, why: string) => json(status, { code, why, next: "re-read the item and retry" });
 
 interface Ev { seq: number; type: string; object: string; actor: { type: string; principal: string; via: string }; at: string; reason?: string; chain_depth: number; to?: string; fields?: string[] }
-interface It { id: string; phase: string; version: number; kind: string; title: string; status_label?: string; tags?: string[]; deadline?: string | null; waiting_on?: { kind: string; ref: string } }
+interface It { id: string; phase: string; version: number; kind: string; title: string; status_label?: string; tags?: string[]; deadline?: string | null; planned_for?: string | null; planned_slot?: string | null; waiting_on?: { kind: string; ref: string } }
 
 const AGENT = { type: "agent", principal: "del-1", via: "cli" };
 const HUMAN = { type: "human", principal: "owner", via: "web" };
@@ -152,21 +152,54 @@ describe("转阶段", () => {
 });
 
 describe("设截止（ACT-LIF-03）", () => {
-  it("写入 RFC 3339 截止并显示，可清除", async () => {
+  it("在排期区块写入截止（带时刻）、只到日的显示日期，可清除", async () => {
     const l = ledger();
     mount(l.impl, "/items/item_a");
-    const local = "2030-03-01T09:30";
-    fireEvent.change(await screen.findByLabelText("截止"), { target: { value: local } });
-    await userEvent.click(screen.getByRole("button", { name: "设置截止" }));
+    const block = within(await screen.findByRole("region", { name: "排期" }));
+    fireEvent.change(block.getByLabelText("截止"), { target: { value: "2030-03-01" } });
+    await userEvent.click(block.getByLabelText("具体时刻"));
+    fireEvent.change(block.getByLabelText("截止时刻"), { target: { value: "09:30" } });
+    await userEvent.click(block.getByRole("button", { name: "保存排期" }));
 
-    const iso = new Date(local).toISOString();
-    await waitFor(() => expect(l.items[0].deadline).toBe(iso));
-    expect(l.calls.find((c) => c.method === "PATCH")).toMatchObject({ body: { deadline: iso }, ifMatch: "1" });
-    expect(await screen.findByText(`截止：${new Date(iso).toLocaleString("zh-CN")}`)).toBeInTheDocument();
+    await waitFor(() => expect(Date.parse(l.items[0].deadline!)).toBe(new Date("2030-03-01T09:30").getTime()));
+    expect(l.calls.find((c) => c.method === "PATCH")).toMatchObject({ ifMatch: "1" });
+    expect(await screen.findByText(/截止 2030-03-01 09:30/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "清除截止" }));
+    await userEvent.click(block.getByLabelText("具体时刻"));
+    await userEvent.click(block.getByRole("button", { name: "保存排期" }));
+    await waitFor(() => expect(Date.parse(l.items[0].deadline!)).toBe(new Date("2030-03-01T23:59:59").getTime()));
+    expect(await screen.findByText(/截止 2030-03-01(?! )/)).toBeInTheDocument(); // 只到日：不写 23:59
+
+    fireEvent.change(block.getByLabelText("截止"), { target: { value: "" } });
+    await userEvent.click(block.getByRole("button", { name: "保存排期" }));
     await waitFor(() => expect(l.items[0].deadline).toBeNull());
-    expect(await screen.findByText("截止：未设置")).toBeInTheDocument();
+  });
+});
+
+describe("排期区块的并发（W26）", () => {
+  it("别处先改过：服务端返回冲突，载入最新值、保留本人填的并标出不同的项，确认后带新版本号重存；清日期一起清时段", async () => {
+    const l = ledger();
+    mount(l.impl, "/items/item_a");
+    const block = within(await screen.findByRole("region", { name: "排期" }));
+    fireEvent.change(block.getByLabelText("计划日期"), { target: { value: "2030-03-02" } });
+    await userEvent.click(block.getByLabelText("不定时"));
+    fireEvent.change(block.getByLabelText("开始"), { target: { value: "14:00" } });
+    fireEvent.change(block.getByLabelText("结束"), { target: { value: "15:30" } });
+    Object.assign(l.items[0], { planned_for: "2030-03-09", version: 2 }); // 另一处（如今天页的改期）先写了
+    await userEvent.click(block.getByRole("button", { name: "保存排期" }));
+
+    expect(await block.findByText("这件事刚被别处改过，已载入最新值")).toBeInTheDocument();
+    expect(block.getByLabelText(/^计划日期/)).toHaveValue("2030-03-02"); // 本人填的还在
+    expect(block.getByText("最新：2030-03-09")).toBeInTheDocument(); // 标出与最新值不同的项
+    expect(l.items[0].planned_slot).toBeUndefined(); // 冲突的那次没写进去
+    await userEvent.click(block.getByRole("button", { name: "确认并保存" }));
+    await waitFor(() => expect(l.items[0]).toMatchObject({ planned_for: "2030-03-02", planned_slot: "14:00 - 15:30" }));
+    expect(l.calls.filter((c) => c.method === "PATCH").map((c) => c.ifMatch)).toEqual(["1", "2"]);
+
+    fireEvent.change(block.getByLabelText(/^计划日期/), { target: { value: "" } });
+    await userEvent.click(block.getByRole("button", { name: "保存排期" }));
+    await waitFor(() => expect(l.items[0].planned_for).toBeNull());
+    expect(l.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ planned_for: null, reason: "在事项页改排期" }); // 时段由内核随日期一起清
   });
 });
 

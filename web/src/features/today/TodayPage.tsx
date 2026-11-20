@@ -128,7 +128,7 @@ function ItemLink({ item }: { item: Item }) {
   const t = useT(strings);
   return (
     <span>
-      <Link to={"/items/" + encodeURIComponent(item.id)}>{item.title}</Link>{" "}
+      {item.planned_slot && <span className="badge plain">{item.planned_slot}</span>} <Link to={"/items/" + encodeURIComponent(item.id)}>{item.title}</Link>{" "}
       <span className="sub">{[item.planned_for && t.planned(item.planned_for), item.deadline && t.deadline(new Date(item.deadline).toLocaleDateString(locale()))].filter(Boolean).join(" · ")}</span>
     </span>
   );

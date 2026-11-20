@@ -1,3 +1,5 @@
+import { parseSlot } from "./schedule";
+
 // 预填新建页（界面设计 §9.11）：/new 与 /items/new 的查询参数只作表单初值，来自外部，按不可信文本处理。
 export const MAX_TITLE = 200;
 export const MAX_BODY = 4000;
@@ -10,6 +12,8 @@ export interface Prefill {
   /** 项目 id 或名字，认不认得由页面对着项目列表决定。 */
   project: string;
   plannedFor: string;
+  /** 时段 HH:MM - HH:MM；只在有合法的计划日期时生效。 */
+  plannedSlot: string;
   /** datetime-local 的值（本地时间）。 */
   deadline: string;
   cutTitle: boolean;
@@ -43,8 +47,10 @@ export function readPrefill(p: URLSearchParams): Prefill {
   const project = (p.get("project") ?? "").trim();
   const planned = (p.get("planned_for") ?? "").trim();
   const plannedFor = validDay(planned) ? planned : "";
+  const slot = (p.get("planned_slot") ?? "").trim();
+  const plannedSlot = plannedFor && parseSlot(slot) ? slot : "";
   const deadline = parseDeadline(p.get("deadline") ?? "");
-  return { title, body, link, project, plannedFor, deadline, cutTitle, cutBody, any: !!(title || body || link || project || plannedFor || deadline) };
+  return { title, body, link, project, plannedFor, plannedSlot, deadline, cutTitle, cutBody, any: !!(title || body || link || project || plannedFor || deadline) };
 }
 
 export interface Vault { name: string; open_url?: string }

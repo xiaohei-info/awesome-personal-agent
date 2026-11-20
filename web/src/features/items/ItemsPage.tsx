@@ -1,7 +1,7 @@
 import { RejectionNote, type Rejection } from "../decisions/RejectionNote";
 import { LastRunNote } from "./LastRunNote";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { isMaterialId } from "../../app/relations";
@@ -21,6 +21,9 @@ import { QuestionCard, useAnswer, type DecisionItem } from "../decisions/Decisio
 import { TraceView } from "../trace/Trace";
 import { ItemMaterials, MATERIAL_RELATIONS, type MaterialRel, type MaterialRow } from "./ItemMaterials";
 import { linkTitle, readPrefill, registrable, withLink, type Vault } from "./prefill";
+import { ScheduleBlock } from "./ScheduleBlock";
+import { deadlineText, deadlineValue, hhmm, parseSlot, slotOf, useHostClock } from "./schedule";
+import { ApiError } from "../../app/api";
 
 // 形状对应 GET /v1/items、/v1/items/{id}、/v1/why/{id}（附录 B.2）。校验、授权、版本冲突、阶段进入约束都在服务端，
 // 本页只搬运输入并显示服务端的错误原因。
@@ -37,6 +40,7 @@ export interface Item {
   tags?: string[];
   deadline?: string | null;
   planned_for?: string;
+  planned_slot?: string;
   body?: string;
   spec?: { sections?: { project?: string; title?: string; body: string }[] };
   waiting_on?: { kind: string; ref: string };
@@ -90,6 +94,7 @@ function ItemList() {
   const [error, setError] = useState<unknown>(null);
   const views = useViews(api);
   const label = useLabel();
+  const { utc_offset: offset } = useHostClock(api);
   const [params, setParams] = useSearchParams();
   const view = views.find((x) => x.key === params.get("view"));
   const setView = (key: string) => setParams(key ? { view: key } : {}, { replace: true });
@@ -161,7 +166,7 @@ function ItemList() {
           <li key={i.id}>
             <Link to={i.id}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
             <span className="sub">
-              {[i.status_label, i.tags?.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" "), i.deadline && t.due(new Date(i.deadline).toLocaleString(locale()))].filter(Boolean).join(" · ")}
+              {[i.status_label, i.tags?.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" "), i.planned_for && t.planAt(i.planned_for, i.planned_slot), i.deadline && t.due(deadlineText(i.deadline, offset))].filter(Boolean).join(" · ")}
             </span>
           </li>
         ))}
@@ -188,6 +193,7 @@ function ItemDetail() {
   const credential = useNames("credential");
   const [editing, setEditing] = useState(false);
   const post = useAnswer(setActErr);
+  const { utc_offset: offset } = useHostClock(api);
 
   const load = useCallback(async () => {
     const eid = encodeURIComponent(id);
@@ -245,7 +251,7 @@ function ItemDetail() {
       <p className="eyebrow"><Link to="..">{t.back}</Link></p>
       <h1>{item.title}</h1>
       <p className="lede">
-        {[t.phaseNow(label("phase", item.phase)), item.project && projectName(item.project), item.deadline && t.due(new Date(item.deadline).toLocaleString(locale())), item.planned_for && t.planned(item.planned_for)].filter(Boolean).join(" · ")}
+        {[t.phaseNow(label("phase", item.phase)), item.project && projectName(item.project), item.planned_for && t.planAt(item.planned_for, item.planned_slot), item.deadline && t.due(deadlineText(item.deadline, offset))].filter(Boolean).join(" · ")}
       </p>
       {actErr != null && <ErrorNote error={actErr} />}
       {item.phase === "needs_input" && item.ask && !item.ask.resolution ? (
@@ -268,6 +274,8 @@ function ItemDetail() {
       {item.kind === "task" && (
         <AgentBlock key={"h" + item.version} item={item} onAgent={(aid) => act(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
       )}
+
+      {item.kind !== "brief" && <ScheduleBlock item={item} path={path} onSaved={load} />}
 
       {item.body ? <Markdown source={item.body} /> : null}
       {item.kind === "brief" && <BriefBody spec={item.spec} />}
@@ -303,11 +311,9 @@ function ItemDetail() {
         <summary>{t.moreActions}</summary>
         <div className="panel facts">
           <p>{t.label(item.status_label || t.notSet)}</p>
-          <p>{t.deadline(item.deadline ? new Date(item.deadline).toLocaleString(locale()) : t.notSet)}</p>
           {item.tags?.some((x) => x !== HANDOFF_TAG) ? <p>{t.tags(item.tags.filter((x) => x !== HANDOFF_TAG).join(t.listSep))}</p> : null}
         </div>
         <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
-        <DeadlineForm key={"d" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { deadline: v }, ifMatch))} />
         <TransitionForm key={"t" + item.version} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />
 
         <section aria-label={t.relationsLabel}>
@@ -346,21 +352,6 @@ function LabelForm({ item, onSave }: { item: Item; onSave: (v: string) => void }
     <form className="panel" onSubmit={(e) => { e.preventDefault(); onSave(v); }}>
       <label>{t.statusLabel} <input value={v} onChange={(e) => setV(e.target.value)} /></label>
       <button type="submit">{t.saveLabel}</button>
-    </form>
-  );
-}
-
-// datetime-local 是本地时间；发给服务端的是 RFC 3339（UTC）。
-function DeadlineForm({ item, onSave }: { item: Item; onSave: (v: string | null) => void }) {
-  const t = useT(strings);
-  const [v, setV] = useState("");
-  return (
-    <form className="panel" onSubmit={(e) => { e.preventDefault(); if (v) onSave(new Date(v).toISOString()); }}>
-      <label>{t.deadlineField} <input type="datetime-local" value={v} onChange={(e) => setV(e.target.value)} /></label>
-      <div className="actions">
-        <button type="submit" disabled={!v}>{t.setDeadline}</button>
-        <button type="button" disabled={!item.deadline} onClick={() => onSave(null)}>{t.clearDeadline}</button>
-      </div>
     </form>
   );
 }
@@ -468,8 +459,18 @@ function NewItem() {
   const [picked, setPicked] = useState<string | null>(null);
   const [deadline, setDeadline] = useState(pre.deadline);
   const [plannedFor, setPlannedFor] = useState(pre.plannedFor);
+  const preSlot = parseSlot(pre.plannedSlot);
+  const [timed, setTimed] = useState(!!preSlot);
+  const [slotStart, setSlotStart] = useState(preSlot ? hhmm(preSlot[0]) : "09:00");
+  const [slotEnd, setSlotEnd] = useState(preSlot ? hhmm(preSlot[1] % 1440) : "10:00");
   const [err, setErr] = useState<unknown>(null);
   const [created, setCreated] = useState<string | null>(null);
+  const { utc_offset: offset } = useHostClock(api);
+  const from = (useLocation().state as { from?: string } | null)?.from;
+  // 每次打开新建页一个幂等键：连点两次、网络重试都只建出一件（§3.2）；被服务端拒绝（4xx）后换新键，改过的输入不算重放。
+  const idem = useRef(crypto.randomUUID());
+  const slotPair = parseSlot(`${slotStart} - ${slotEnd === "00:00" ? "24:00" : slotEnd}`);
+  const badSlot = !!plannedFor && timed && !slotPair;
   useEffect(() => void api.get<{ projects: { id: string; name?: string }[] }>("/projects").then((r) => setProjects(r.projects), () => {}), [api]);
   useEffect(() => void api.get<{ vaults: Vault[] }>("/note-vaults").then((r) => setVaults(r.vaults ?? []), () => {}), [api]);
 
@@ -478,6 +479,7 @@ function NewItem() {
   const project = picked ?? known?.id ?? "";
 
   const create = async (c: Content) => {
+    if (badSlot) return;
     setErr(null);
     setCreated(null);
     const asMaterial = !!pre.link && !!project && registrable(pre.link, vaults);
@@ -489,11 +491,13 @@ function NewItem() {
         title: c.title,
         ...(asMaterial ? (c.body ? { body: c.body } : {}) : withLink(c.body, pre.link) ? { body: withLink(c.body, pre.link) } : {}),
         ...(project ? { project } : {}),
-        ...(deadline ? { deadline: new Date(deadline).toISOString() } : {}),
+        ...(deadline ? { deadline: deadlineValue(deadline.slice(0, 10), deadline.slice(11) === "23:59" ? null : deadline.slice(11), offset) } : {}),
         ...(plannedFor ? { planned_for: plannedFor } : {}),
-      });
+        ...(plannedFor && timed && slotPair ? { planned_slot: slotOf(slotPair[0], slotPair[1]) } : {}),
+      }, { "Idempotency-Key": idem.current });
       id = r.id;
     } catch (e) {
+      if (e instanceof ApiError && e.status >= 400 && e.status < 500) idem.current = crypto.randomUUID();
       return setErr(e);
     }
     if (asMaterial) {
@@ -506,7 +510,8 @@ function NewItem() {
         return setCreated(id);
       }
     }
-    nav("/items/" + encodeURIComponent(id));
+    // 新事项页顶部的"返回刚才的页面"回到打开新建页之前的地方（如日历）。
+    nav("/items/" + encodeURIComponent(id), from ? { state: { from } } : undefined);
   };
 
   return (
@@ -528,6 +533,17 @@ function NewItem() {
             <label>{t.projectField} <select value={project} onChange={(e) => setPicked(e.target.value)}><option value="">{t.noProject}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name ?? p.id}</option>)}</select></label>
             <label>{t.deadlineField} <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></label>
             <label>{t.plannedDate} <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} /></label>
+            <fieldset disabled={!plannedFor}>
+              <legend>{t.slot}</legend>
+              <label><input type="checkbox" checked={!timed} onChange={(e) => setTimed(!e.target.checked)} /> {t.untimed}</label>
+              {timed && (
+                <div className="actions">
+                  <label>{t.slotStart} <input type="time" step={60} value={slotStart} onChange={(e) => setSlotStart(e.target.value)} /></label>
+                  <label>{t.slotEnd} <input type="time" step={60} value={slotEnd} onChange={(e) => setSlotEnd(e.target.value)} /></label>
+                </div>
+              )}
+              {badSlot && <p role="alert">{t.badSlot}</p>}
+            </fieldset>
           </>
         }
       />

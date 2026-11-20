@@ -15,7 +15,7 @@ const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator
 // 与 styles.css 的窄屏断点一致：窄屏只渲染手机顶栏，宽屏只渲染侧栏，DOM 里不重复出现同名链接。
 const NARROW = "(max-width: 820px)";
 
-function useNarrow() {
+export function useNarrow() {
   const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(NARROW).matches);
   useEffect(() => {
     const mq = window.matchMedia?.(NARROW);

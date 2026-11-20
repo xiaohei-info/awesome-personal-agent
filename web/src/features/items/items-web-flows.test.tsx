@@ -127,7 +127,7 @@ describe("预填新建页（flow-prefill-new）", () => {
     const w = b.writes();
     expect(w[0]).toMatchObject({ method: "POST", path: "/v1/items" });
     expect(w[0].body).toMatchObject({ kind: "task", phase: "open", title: "买票", body: "第一行", project: "prj_work", planned_for: "2030-12-01" });
-    expect(w[0].body.deadline).toBe(new Date("2030-12-03T23:59").toISOString());
+    expect(Date.parse(w[0].body.deadline)).toBe(new Date("2030-12-03T23:59:59").getTime()); // 只给日期：当天 23:59:59
     expect(w[1]).toMatchObject({ method: "POST", path: "/v1/materials", body: { link: "vault:acc-vault/行程.md", title: "行程.md", project: "prj_work" } });
     expect(w[2]).toMatchObject({ path: "/v1/items/item_1/relations", body: { to: b.mats[0].id, type: "basis" } });
     // 详情的材料区：依据组里有这条链接型材料，“打开”是服务端渲染好的地址。

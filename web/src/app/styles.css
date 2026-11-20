@@ -549,3 +549,6 @@ pre.raw-text { margin: 6px 0; max-height: 32em; overflow: auto; font: 13px/1.5 v
 .md-table { overflow-x: auto; margin: 0 0 12px; }
 .pager { display: flex; align-items: center; gap: 12px; }
 .markdown .contains-task-list { list-style: none; padding-left: 4px; }
+
+/* 事项详情 › 排期：版本冲突后与最新值不同的项 */
+.differs { outline: 2px solid var(--warn); outline-offset: 4px; border-radius: 6px; }

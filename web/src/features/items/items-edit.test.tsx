@@ -87,7 +87,7 @@ describe("Web 新建与编辑事项", () => {
     await screen.findByRole("heading", { name: "WB-NEW 订机票", level: 1 });
     const post = l.calls.find((c) => c.method === "POST" && c.path === "/v1/items")!;
     expect(post.body).toMatchObject({ kind: "task", phase: "open", title: "WB-NEW 订机票", project: "acc-home", planned_for: "2030-03-04", body: BODY });
-    expect(post.body.deadline).toBe(new Date("2030-03-05T18:00").toISOString());
+    expect(Date.parse(post.body.deadline)).toBe(new Date("2030-03-05T18:00").getTime()); // 带主机时区偏移的同一时刻
     expect((await timelineText())).toContain("新建了");
   });
 

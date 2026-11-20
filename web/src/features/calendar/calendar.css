@@ -1,0 +1,82 @@
+/* 日历（界面设计 §9.12）：取值沿用全站变量；朱砂只用在"已过截止"的截止标记上，没有计数红点。 */
+main.cal { max-width: 1180px; }
+.cal-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.cal-bar label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.cal-bar select { width: auto; max-width: 14em; }
+.cal-bar .seg { display: inline-flex; gap: 2px; }
+.cal-bar .seg button.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.cal-period { font: 600 15px/1.4 var(--serif); }
+
+.cal-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; min-width: 0; }
+.cal-list > li, .cal-week > *, .cal-month > * { min-width: 0; }
+.cal-row { display: grid; grid-template-columns: 64px 1fr; gap: 8px; margin: 6px 0; }
+.cal-head { color: var(--ink-3); font-size: 12px; padding-top: 3px; }
+.cal-overdue { margin: 4px 0; font-size: 12.5px; color: var(--warn); }
+
+.cal-entry { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; min-width: 0; padding: 2px 6px;
+  border-radius: 6px; border: 1px solid transparent; background: var(--sunken); text-decoration: none; font-size: 12.5px; line-height: 1.5; }
+.cal-entry:hover, .cal-entry:focus-visible { background: color-mix(in oklch, var(--ink) 9%, var(--sunken)); z-index: 3; }
+.cal-entry .cal-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.cal-time { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.cal-time, .cal-mark { flex-shrink: 0; }
+/* 周、月的格子里每条一行：放不下时先省标题（省略号），时间与标记保留 */
+.cal-week .cal-entry, .cal-month .cal-entry { flex-wrap: nowrap; }
+.cal-week .cal-list .m-done, .cal-month .m-done { display: none; } /* 已有 ✓ 与划线，格子窄时先省这一层 */
+.cal-entry.s-waiting { background: transparent; border: 1px dashed var(--line-2); }
+.cal-entry.s-done { opacity: .55; }
+.cal-entry.s-done .cal-title { text-decoration: line-through; }
+.cal-mark { font-size: 11px; padding: 0 5px; border-radius: 99px; background: var(--surface); color: var(--ink-2); white-space: nowrap; }
+.cal-mark.m-needs_input { color: var(--seal); background: var(--seal-soft); }
+.cal-mark.m-overdue, .cal-mark.m-late, .cal-mark.m-overlap { color: var(--warn); background: var(--warn-soft); }
+.cal-mark.m-pastdue, .cal-entry.is-pastdue .cal-due { color: var(--seal); }
+
+/* 悬停或聚焦时的只读卡 */
+.cal-card { display: none; position: absolute; left: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; max-width: 280px; padding: 8px 10px;
+  flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-lift);
+  color: var(--ink); font-size: 12.5px; white-space: normal; text-decoration: none; }
+.cal-card span:first-child { font-weight: 600; }
+.cal-entry:hover > .cal-card, .cal-entry:focus-visible > .cal-card { display: flex; }
+
+/* 时间格 */
+.cal-grid { display: grid; grid-template-columns: 48px repeat(var(--cols), minmax(0, 1fr)); max-height: 64vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+.cal-hours span { display: block; font-size: 11px; color: var(--ink-3); text-align: right; padding-right: 6px; transform: translateY(-7px); }
+.cal-col { position: relative; border-left: 1px solid var(--line); }
+.cal-slot { position: absolute; left: 0; right: 0; border-top: 1px solid color-mix(in oklch, var(--line) 60%, transparent); }
+.cal-slot:hover { background: color-mix(in oklch, var(--ink) 4%, transparent); }
+.cal-block { position: absolute; align-content: flex-start; overflow: visible; margin: 1px; background: color-mix(in oklch, var(--ink) 10%, var(--surface)); }
+.cal-block.short { flex-wrap: nowrap; }
+.cal-block > :not(.cal-card) { overflow: hidden; }
+.cal-overflow { position: absolute; z-index: 4; }
+.cal-overflow summary { cursor: pointer; padding: 2px 6px; font-size: 12px; border-radius: 6px; background: var(--sunken); list-style: none; }
+.cal-overflow[open] .cal-list { position: relative; z-index: 5; min-width: 200px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-lift); }
+.cal-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid var(--seal); z-index: 2; pointer-events: none; }
+
+/* 周 */
+.cal-week { display: grid; grid-template-columns: 48px repeat(7, minmax(0, 1fr)); gap: 0 4px; margin: 4px 0; }
+.cal-week-head .cal-dayhead { font-weight: 500; text-decoration: none; text-align: left; }
+.cal-dayhead.is-today { font-weight: 700; text-decoration: underline; }
+
+/* 月 */
+.cal-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-month-head span { font-size: 12px; color: var(--ink-3); padding: 0 6px; }
+.cal-cell { min-height: 108px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
+.cal-cell.is-other { opacity: .5; }
+.cal-cell.is-today { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.cal-cellhead { display: flex; justify-content: space-between; align-items: center; }
+.cal-num { font-weight: 600; text-decoration: none; }
+.cal-add { padding: 0 6px; text-decoration: none; color: var(--ink-3); border-radius: 6px; }
+.cal-add:hover { background: var(--sunken); color: var(--ink); }
+.cal-dots { display: block; color: var(--ink-2); font-size: 12px; }
+
+/* 窄屏的周列表 */
+.cal-day { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.cal-day h2 { margin: 0 0 6px; font-size: 14px; }
+.cal-day.is-today h2 { text-decoration: underline; }
+
+@media (max-width: 820px) {
+  .cal-list .cal-entry, .cal-add, .cal-overflow summary { min-height: 44px; }
+  .cal-list .cal-entry { align-items: center; }
+  .cal-cell { min-height: 56px; display: flex; flex-direction: column; align-items: flex-start; }
+  .cal-grid { grid-template-columns: 40px repeat(var(--cols), minmax(0, 1fr)); }
+}
