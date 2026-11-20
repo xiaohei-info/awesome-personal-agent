@@ -73,7 +73,8 @@ export function AgentBlock({ item, onSave, onAgent }: { item: Item; onSave: (tag
   const last = runs?.length ? runs[runs.length - 1] : undefined;
   const busy = !!last && FLIGHT.has(last.state);
   const open = item.phase === "open";
-  const pre = on ? handoffPrereqs(t, h, item.phase === "proposed") : [];
+  const ended = item.phase === "done" || item.phase === "dropped";
+  const pre = on && !ended ? handoffPrereqs(t, h, item.phase === "proposed") : [];
   const ready = pre.every((x) => x.ok);
   const start = async () => {
     setError(null);
@@ -88,11 +89,13 @@ export function AgentBlock({ item, onSave, onAgent }: { item: Item; onSave: (tag
   };
   const next = on ? (item.tags ?? []).filter((x) => x !== HANDOFF_TAG) : [...(item.tags ?? []), HANDOFF_TAG];
   const when = (s?: string) => (s ? new Date(s).toLocaleString(locale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
+  // 已结束的事项只回看：谁做的、做完没有、什么时候；没交给过 Agent 的不显示这一块。
+  if (ended && !last) return null;
   return (
     <section aria-label={t.agentBlock} id="agent" className="panel stack">
       <h2>{t.agentBlock}</h2>
-      <label><input type="checkbox" checked={on} onChange={() => onSave(next)} /> {t.handoff}</label>
-      {on && <AgentPick item main rule={HANDOFF_RULE} value={item.preferred_agent_id ?? ""} onChange={onAgent} />}
+      {!ended && <label><input type="checkbox" checked={on} onChange={() => onSave(next)} /> {t.handoff}</label>}
+      {on && !ended && <AgentPick item main rule={HANDOFF_RULE} value={item.preferred_agent_id ?? ""} onChange={onAgent} />}
       {last && (
         <p className="sub">
           {[last.agent_name, label("runState", last.state), when(last.finished_at ?? last.started_at)].filter(Boolean).join(" · ")}{" "}

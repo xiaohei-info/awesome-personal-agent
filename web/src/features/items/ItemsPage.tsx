@@ -260,7 +260,7 @@ function ItemDetail() {
           <button type="button" className="primary" onClick={() => act(() => api.post(path + "/transition", { to: "done", reason: t.doneReason }, ifMatch))}>{t.done}</button>
         </div>
       )}
-      {item.kind === "task" && !ended && (
+      {item.kind === "task" && (
         <AgentBlock key={"h" + item.version} item={item} onAgent={(aid) => act(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
       )}
 

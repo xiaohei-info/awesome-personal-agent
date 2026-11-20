@@ -151,6 +151,8 @@ article, .panel {
 .due.soon { color: var(--seal); font-weight: 600; }
 .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0 14px; font-size: 12.5px; color: var(--ink-3); }
 .meta .dot::before { content: "·"; margin-right: 10px; }
+/* .dot 也是状态圆点（下面）；在 .meta 里只作「·」分隔，不画圆点。 */
+.meta .dot { width: auto; height: auto; border-radius: 0; background: none; }
 .options { display: grid; gap: 6px; margin: 0; }
 .options button {
   display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; text-align: left;
@@ -331,7 +333,7 @@ button.link { padding: 0; font: inherit; font-weight: 600; color: inherit; backg
 button.link:hover { text-decoration-color: currentColor; }
 
 /* 行式列表里的块级内容占满一行 */
-.rows > li > :is(pre, ul, ol, p, form, .actions, .full) { flex-basis: 100%; margin: 0; }
+.rows > li > :is(pre, ul, ol, p, form, .actions, .full, details, .act-row) { flex-basis: 100%; margin: 0; }
 .rows > li > [role="group"] { display: flex; gap: 8px; }
 /* 来源行内改名：与名字同处一行，不占满整行 */
 .rows > li > form.rename { display: inline-flex; flex-basis: auto; flex-wrap: wrap; align-items: center; gap: 6px; }
