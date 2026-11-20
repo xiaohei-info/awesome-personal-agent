@@ -483,10 +483,10 @@ func (x *Executor) Do(ctx context.Context, req Request) (Result, error) {
 
 // recordRejection 在同一事务里写 command.rejected、跑拒绝回调、记回执与捕获的 health.alert（§14.5）。
 func (x *Executor) recordRejection(tx *store.Tx, spec Spec, tr trace, rj *rejected, orig error, alert bool) error {
-	why, reason := orig.Error(), domain.Code("")
+	why, reason, detail := orig.Error(), domain.Code(""), ""
 	var de *domain.Error
 	if errors.As(orig, &de) {
-		why, reason = de.Why, de.Code
+		why, reason, detail = de.Why, de.Code, de.Reason
 	}
 	code, at := exitOf(orig), x.now()
 	if rj != nil {
@@ -511,7 +511,7 @@ func (x *Executor) recordRejection(tx *store.Tx, spec Spec, tr trace, rj *reject
 	}
 	_, err := eventlog.Append(tx, domain.Event{Type: domain.EvHealthAlert, Object: obj, Actor: tr.actor, At: at,
 		Reason:  spec.Name + " rejected: " + why,
-		Payload: mustJSON(map[string]any{"kind": ReceiptKind, "command": spec.Name, "exit": code, "code": reason, "why": why})})
+		Payload: mustJSON(map[string]any{"kind": ReceiptKind, "command": spec.Name, "exit": code, "code": reason, "reason": detail, "why": why})})
 	return err
 }
 

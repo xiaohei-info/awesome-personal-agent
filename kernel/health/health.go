@@ -120,6 +120,7 @@ type ReceiptFailure struct {
 	Command    string
 	Exit       int
 	Code       domain.Code
+	Reason     string // 同一个码之下更细的稳定原因（domain.GrantReason*），如授权单因初筛未返回暂不可用
 	Why        string
 	Credential string
 	at         time.Time
@@ -356,6 +357,7 @@ func alerts(tx *store.Tx, now time.Time, ph PackHealth) (model []ModelIssue, rul
 				Command  string      `json:"command"`
 				Exit     int         `json:"exit"`
 				Code     domain.Code `json:"code"`
+				Reason   string      `json:"reason"`
 				Why      string      `json:"why"`
 			}
 			_ = json.Unmarshal(e.Payload, &p)
@@ -373,7 +375,7 @@ func alerts(tx *store.Tx, now time.Time, ph PackHealth) (model []ModelIssue, rul
 						return nil, nil, nil, nil, nil, err
 					}
 				}
-				receipts = append(receipts, ReceiptFailure{Seq: e.Seq, Object: e.Object, Command: p.Command, Exit: p.Exit, Code: p.Code, Why: p.Why, Credential: e.Actor.Principal, at: e.At})
+				receipts = append(receipts, ReceiptFailure{Seq: e.Seq, Object: e.Object, Command: p.Command, Exit: p.Exit, Code: p.Code, Reason: p.Reason, Why: p.Why, Credential: e.Actor.Principal, at: e.At})
 			case e.Reason == RuleFallbackReason:
 				rules = append(rules, RuleFallback{Seq: e.Seq, Rule: p.Rule, At: e.At, object: e.Object})
 			default:

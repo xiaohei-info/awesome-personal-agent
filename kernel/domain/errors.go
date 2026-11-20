@@ -123,8 +123,19 @@ type Error struct {
 	// AllowedMatch 与 Candidates 只随退出码 21 返回：项目的匹配规则，以及名录里当前命中名单的执行者 id。
 	AllowedMatch []ExecutorMatch `json:"allowed_match,omitempty"`
 	Candidates   []string        `json:"candidates,omitempty"`
-	WebURL       *string         `json:"web_url"`
+	// Reason 是同一个码之下更细的稳定原因（如授权单不可用的具体原因 GrantReason*），展示层据它说人话；空表示只看 Code。
+	Reason string  `json:"reason,omitempty"`
+	WebURL *string `json:"web_url"`
 }
+
+// 授权单不可用的稳定原因（Error.Reason，§14.5），随退出码 23 返回并记进拒绝事件；web/src/app/ids.ts 的 GRANT_REASON 与它对照。
+const (
+	GrantReasonScreeningPending = "grant_screening_pending" // 事项上有初筛未返回的决策请求：处理那张卡或稍后再试，之后同一张单自动可用
+	GrantReasonRiskCeiling      = "grant_risk_ceiling"      // 对象属 web_only，授权单不能覆盖
+	GrantReasonNotForBackground = "grant_not_for_background"
+	GrantReasonUntrustedOrigin  = "untrusted_origin"
+	GrantReasonUntrustedTrigger = "untrusted_trigger"
+)
 
 func NewError(code Code, why, next string) *Error {
 	return &Error{Code: code, Why: why, Next: next}

@@ -48,6 +48,7 @@ type ReceiptRejection struct {
 	Command    string      `json:"command"`
 	Exit       int         `json:"exit"`
 	Code       domain.Code `json:"code,omitempty"`
+	Reason     string      `json:"reason,omitempty"` // 更细的稳定原因（domain.GrantReason*）
 	Credential string      `json:"credential"`
 }
 
@@ -230,7 +231,7 @@ func build(v khealth.View, rejudgeDays int) Report {
 	for i := range rep.Signals {
 		if rep.Signals[i].ID == "receipt_failures" {
 			for _, r := range v.ReceiptFailures {
-				rep.Signals[i].Receipts = append(rep.Signals[i].Receipts, ReceiptRejection{r.Object, r.Command, r.Exit, r.Code, r.Credential})
+				rep.Signals[i].Receipts = append(rep.Signals[i].Receipts, ReceiptRejection{r.Object, r.Command, r.Exit, r.Code, r.Reason, r.Credential})
 			}
 		}
 	}

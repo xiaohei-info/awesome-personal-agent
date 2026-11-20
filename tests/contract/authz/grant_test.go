@@ -260,3 +260,51 @@ func TestGrantDiesWithItsToken(t *testing.T) {
 		t.Fatalf("grant must die with its token: %v %v", live, err)
 	}
 }
+
+// 本人 2026-11-20 裁决：事项上挂着初筛未返回的决策请求时，授权单"暂不可用"，原因要说准——不是"风险超过上限"。
+// 拒绝仍是 23（判定不变、不放宽），带稳定原因 grant_screening_pending、指向事项页的 web_url 与"先处理那张卡"的下一步；
+// 本人在 Web 处理掉那张卡后，同一张单、同一次写入成功并记 grant id。
+func TestGrantWaitsForScreeningWithAccurateReason(t *testing.T) {
+	e := setup(t)
+	if err := decisions.Register(e.x); err != nil {
+		t.Fatal(err)
+	}
+	g := e.grant("DEL", nil)
+	id := e.asked()
+	it := e.get(id)
+	it.Ask.ScreeningPending = true
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, _, _, err := items.Revise(tx, id, "test", e.now(), func(x *domain.Item) error { x.Ask = it.Ask; return nil })
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	done := map[string]any{"id": id, "to": "done", "reason": "finished"}
+	viaHTTP := func(r *command.Request) { r.WebURL = "http://127.0.0.1:7777/items/" + id } // HTTP 层按请求路径给出事项页（api/core.webLink）
+	de := e.wantExit(23, e.as("DEL"), "item.transition", done, withGrant(g.ID), viaHTTP)
+	if de.Reason != domain.GrantReasonScreeningPending || strings.Contains(de.Why, "risk ceiling") || de.WebURL == nil || !strings.Contains(*de.WebURL, id) || !strings.Contains(de.Next, "card") {
+		t.Fatalf("screening-pending grant rejection must say so and point at the item: %+v", de)
+	}
+	if e.get(id).Phase != domain.PhaseNeedsInput {
+		t.Fatal("a rejected write changed the item")
+	}
+	// 拒绝事件也带这个原因，事项页据它说人话。
+	var rej domain.Event
+	for _, ev := range e.events4(id) {
+		if ev.Type == domain.EvCommandRejected {
+			rej = ev
+		}
+	}
+	if !strings.Contains(string(rej.Payload), `"reason":"grant_screening_pending"`) {
+		t.Fatalf("rejection event: %s", rej.Payload)
+	}
+	e.cmd(owner, "decision.answer", map[string]any{"id": id, "choice": "A"}) // 本人在 Web 处理掉那张卡
+	e.cmd(e.as("DEL"), "item.transition", done, withGrant(g.ID))
+	var ok bool
+	for _, ev := range e.events4(id) {
+		ok = ok || (ev.Type == domain.EvItemPhaseChanged && ev.Grant == g.ID)
+	}
+	if e.get(id).Phase != domain.PhaseDone || !ok {
+		t.Fatalf("after the card is handled the same grant must work: %s", e.get(id).Phase)
+	}
+}

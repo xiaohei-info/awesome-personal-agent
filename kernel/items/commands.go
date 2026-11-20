@@ -288,7 +288,8 @@ func projectOf(tx *store.Tx, id string) (domain.Project, error) {
 func object(tx *store.Tx, cur, next domain.Item) (authz.Object, error) {
 	o := authz.Object{ID: cur.ID, Assignee: cur.Assignee, Kind: string(cur.Kind), Tags: cur.Tags, Project: cur.Project, Executor: next.Assignee}
 	if a := cur.Ask; a != nil { // 内核维护的风险类别与初筛状态进入代答判定（§14.4）
-		o.Category, o.ScreeningPending = a.RiskClass, a.ScreeningPending
+		// 初筛挡的是那张还没回答的决策请求；本人已经答了，就没有待定的请求要挡，同一张授权单随即可用（§14.5）。
+		o.Category, o.ScreeningPending = a.RiskClass, a.ScreeningPending && a.Resolution == nil
 	}
 	if next.Project != cur.Project {
 		o.ToProject = &next.Project

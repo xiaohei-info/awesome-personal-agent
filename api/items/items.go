@@ -276,6 +276,7 @@ type Rejection struct {
 	Actor  domain.Actor `json:"actor"`
 	Action string       `json:"action,omitempty"` // 被拒的授权动作（如 edit_any_item、answer_decision）
 	Code   domain.Code  `json:"code"`
+	Reason string       `json:"reason,omitempty"` // 更细的稳定原因（domain.GrantReason*），如授权单因初筛未返回暂不可用
 	Why    string       `json:"why"`
 	Grant  string       `json:"grant,omitempty"`
 }
@@ -305,6 +306,7 @@ func LastRejection(tx *store.Tx, it domain.Item) (*Rejection, error) {
 			var pl struct {
 				Action string      `json:"action"`
 				Code   domain.Code `json:"code"`
+				Reason string      `json:"reason"`
 				Exit   int         `json:"exit"`
 				Why    string      `json:"why"`
 				Grant  string      `json:"grant"`
@@ -312,7 +314,7 @@ func LastRejection(tx *store.Tx, it domain.Item) (*Rejection, error) {
 			if json.Unmarshal(e.Payload, &pl) != nil || pl.Exit != domain.ExitBasisRequired {
 				continue
 			}
-			return &Rejection{Seq: e.Seq, At: e.At, Actor: e.Actor, Action: pl.Action, Code: pl.Code, Why: pl.Why, Grant: pl.Grant}, nil
+			return &Rejection{Seq: e.Seq, At: e.At, Actor: e.Actor, Action: pl.Action, Code: pl.Code, Reason: pl.Reason, Why: pl.Why, Grant: pl.Grant}, nil
 		}
 	}
 	return nil, nil

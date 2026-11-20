@@ -278,8 +278,14 @@ func TierOf(r Request) Tier {
 // needBasis 校验第二档的依据：本人原话与会话引用都非空（内核不能校验真伪，§21.2）。
 func needBasis(p policy.Policy, r Request) Decision {
 	if r.GrantID != "" {
-		if why := grantMismatch(p, r); why != "" {
-			return Decision{Verdict: Deny, Err: withLink(domain.CodeBasisRequired, why, "do not retry; give the Web link to the owner so they can decide or issue a grant", r.WebURL)}
+		if reason, why := grantMismatch(p, r); why != "" {
+			next := "do not retry; give the Web link to the owner so they can decide or issue a grant"
+			if reason == domain.GrantReasonScreeningPending {
+				next = "the grant itself is fine: open the item in Web (web_url) and handle the decision card waiting on it, or retry in a moment; the same grant works again once the card is handled"
+			}
+			e := withLink(domain.CodeBasisRequired, why, next, r.WebURL)
+			e.Reason = reason
+			return Decision{Verdict: Deny, Err: e}
 		}
 		return allow // 授权单是本人事先划定的，不需要会话引用
 	}
@@ -297,47 +303,51 @@ func needBasis(p policy.Policy, r Request) Decision {
 	return allow
 }
 
-// grantMismatch 按 §14.5 的顺序逐项校验授权单，返回第一个不符的原因；空串表示放行。
-func grantMismatch(p policy.Policy, r Request) string {
+// grantMismatch 按 §14.5 的顺序逐项校验授权单，返回第一个不符的原因（why）；空串表示放行。
+// reason 是有稳定原因码（domain.GrantReason*）的那几类，其余为空。
+func grantMismatch(p policy.Policy, r Request) (reason, why string) {
 	g, o := r.Grant, r.Object
 	run := r.Level == LevelRun
 	switch {
 	case g == nil:
-		return "grant " + r.GrantID + " does not exist"
+		return "", "grant " + r.GrantID + " does not exist"
 	case g.Grantee.Instance && (run && g.Grantee.Agent != r.RunAgentID || !run && g.Grantee.Agent != r.CredentialAgentID):
-		return "grant was issued to another Agent instance"
+		return "", "grant was issued to another Agent instance"
 	case !g.Grantee.Instance && (r.RunAgentID != "" || r.CredentialAgentID != "" && g.Grantee.Agent != ""):
-		return "grant was not issued to this Agent instance"
+		return "", "grant was not issued to this Agent instance"
 	case g.Grantee.Agent == "" && run:
-		return "grant_not_for_background: the grant was issued to a token, not to this Agent's background runs"
+		return domain.GrantReasonNotForBackground, "grant_not_for_background: the grant was issued to a token, not to this Agent's background runs"
 	case g.Grantee.Agent == "" && g.Grantee.Credential != r.Credential:
-		return "grant was issued to another credential"
+		return "", "grant was issued to another credential"
 	case g.Grantee.Agent == "" && g.Grantee.Harness != "" && g.Grantee.Harness != r.Actor.Harness:
-		return "grant is limited to another harness"
+		return "", "grant is limited to another harness"
 	case !g.Grantee.Instance && g.Grantee.Agent != "" && !run && g.Grantee.Agent != r.CredentialHarness:
-		return "grant was issued to another Agent"
+		return "", "grant was issued to another Agent"
 	case !g.Grantee.Instance && g.Grantee.Agent != "" && run && g.Grantee.Agent != r.RunHarness:
-		return "grant was issued to another Agent"
+		return "", "grant was issued to another Agent"
 	case run && !g.Grantee.Background:
-		return "grant_not_for_background: the owner did not allow this grant in background runs"
+		return domain.GrantReasonNotForBackground, "grant_not_for_background: the owner did not allow this grant in background runs"
 	case !g.RevokedAt.IsZero():
-		return "grant was revoked"
+		return "", "grant was revoked"
 	case !g.ExpiresAt.IsZero() && !r.Now.Before(g.ExpiresAt):
-		return "grant has expired"
+		return "", "grant has expired"
 	case !contains(g.Actions, r.Command):
-		return "grant does not cover " + r.Command
+		return "", "grant does not cover " + r.Command
 	case !inScope(g.Scope, o.Kind, o.Project, o.ID) || (o.ToProject != nil && !inScope(g.Scope, o.Kind, *o.ToProject, o.ID)):
-		return "object is outside the grant scope"
+		return "", "object is outside the grant scope"
 	case run && !o.InRunScope:
-		return "object is outside this run's scope: a grant does not widen what a background run may write"
-	case g.RiskCeiling == policy.RiskNormal && (WebOnly(p, o) || o.ScreeningPending):
-		return "object risk exceeds the grant's risk ceiling"
+		return "", "object is outside this run's scope: a grant does not widen what a background run may write"
+	case g.RiskCeiling == policy.RiskNormal && WebOnly(p, o):
+		return domain.GrantReasonRiskCeiling, "object risk exceeds the grant's risk ceiling: it is web_only, which no grant covers"
+	// 初筛未返回时风险类别还没定，单子"暂不可用"而不是"超过上限"：原因说准，判定本身不变（§14.4、§14.5）。
+	case g.RiskCeiling == policy.RiskNormal && o.ScreeningPending:
+		return domain.GrantReasonScreeningPending, "grant_screening_pending: a decision request on this item is still being risk-screened, so its risk is not known yet and the grant cannot be used until that card is handled"
 	case g.Grantee.Agent != "" && (r.Command == "proposal.accept" || r.Command == "proposal.attach") && !o.OriginTrusted:
-		return "untrusted_origin: this proposal did not come from a trusted sender, so it can only be accepted by the owner"
+		return domain.GrantReasonUntrustedOrigin, "untrusted_origin: this proposal did not come from a trusted sender, so it can only be accepted by the owner"
 	case run && !r.TriggerTrusted:
-		return "untrusted_trigger: this run was started by content from an untrusted sender, so it cannot use grants"
+		return domain.GrantReasonUntrustedTrigger, "untrusted_trigger: this run was started by content from an untrusted sender, so it cannot use grants"
 	}
-	return ""
+	return "", ""
 }
 
 // inScope：scope 的非空项都命中才算在范围内。授权单不继承到子事项，所以只比对象自己的字段。
@@ -441,7 +451,7 @@ func RejectionEvent(r Request, d Decision) (domain.Event, bool) {
 	default:
 		return domain.Event{}, false
 	}
-	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "code": d.Err.Code, "exit": d.ExitCode(), "why": d.Err.Why, "grant": r.GrantID, "session": r.Actor.Session, "session_kind": r.Actor.SessionKind})
+	payload, _ := json.Marshal(map[string]any{"action": r.Action, "level": r.Level, "code": d.Err.Code, "reason": d.Err.Reason, "exit": d.ExitCode(), "why": d.Err.Why, "grant": r.GrantID, "session": r.Actor.Session, "session_kind": r.Actor.SessionKind})
 	return domain.Event{Type: domain.EvCommandRejected, Object: r.Object.ID, Actor: r.Actor, Reason: d.Err.Why, Payload: payload}, true
 }
 
