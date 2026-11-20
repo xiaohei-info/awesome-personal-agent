@@ -410,6 +410,7 @@ HTTP 200 返回登记过的现场事件，按 `seq > cursor` 升序排列，允�
 ```
 
 - `why` 与 `next` 只写机制，不含账本里的用户内容。`allowed` 是 Web 中配置的执行者 id。本版另加：`allowed_match`（按机器或 harness 的匹配规则）与 `candidates`（名录里当前命中名单的执行者 id）。
+- `reason`（可缺）：同一个 `code` 之下更细的稳定原因。退出码 23 因授权单不可用时给出：`grant_screening_pending`（事项上有初筛未返回的决策请求，先处理那张卡或稍后再试，同一张单随即可用；`web_url` 指向该事项页）、`grant_risk_ceiling`（对象属 web_only）、`grant_not_for_background`、`untrusted_origin`、`untrusted_trigger`。同一取值记进 `command.rejected` 与回执告警的载荷，`last_rejection(s)` 与 `GET /health` 的 `receipt_failures.receipts` 也带它。只增字段，按 `code` 判断的调用方不受影响。
 - 委派记录与执行者句柄未通过校验时返回 400（退出码 2），`why` 只写键路径与规则名，不回显取值（主文档 §6.17）。
 - HTTP 状态与退出码的对应：400 → 2；401 → 3；403 → 4、20、21、22（由 `code` 区分）；404 → 5；409 → 6；其余错误 → 1。不可达时 CLI 返回 7。
 - 退出码 22 的 `code` 为 `risk_screening_pending`，`why` 说明 web_only 初筛未返回，`web_url` 给出 Web 链接（主文档 §14.4）。
