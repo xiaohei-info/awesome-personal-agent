@@ -252,6 +252,7 @@ criteria: 涉及真实资金、对外承诺、不可逆操作或权限变更的�
 | `summary` | 一句话摘要 | 原样采用 |
 | `project` | `projects` 里的一个 id，或空 | 不在清单里时不归项目（再按规则与来源的默认项目） |
 | `deadline`、`planned_for` | 能明确识别时才给 | 格式不对的丢弃 |
+| `planned_slot` | 时段 `HH:MM - HH:MM`，能明确识别钟点时才给；跨天或全天的日程不给 | 格式不对、跨午夜或没有 `planned_for` 时丢弃，计划日期照常采用 |
 | `recommend`、`attach_to`、`reason` | 推荐处置（`accept`、`attach`、`dismiss`）、补到的目标（`open_items` 里的一个 id）与一句理由 | `attach_to` 不在清单里时这条推荐作废，候选保留 |
 | `urgent` | 布尔："今天不处理是否有后果" | 只供声明了 `notify_urgent` 的规则使用；缺失按"可以等"对待 |
 | `refs` | 只在抽取里：这条候选出自事件 `items` 的哪几条（下标数组） | 越界的下标丢弃；用来组候选事项的正文 |

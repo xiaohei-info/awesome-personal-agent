@@ -27,8 +27,8 @@
 | `apa today` | 今天的清单：计划今天或更早且未完成的、今天到期的、待决的、久未推进的（主文档 §4.1） | observer | |
 | **事项** | | | |
 | `apa propose` | 以 `proposed` 新建；可带 `--deadline`、`--origin`、`--ext`（规则同 `apa item add`） | observer | |
-| `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 5 |
-| `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>`；`add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐。 | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
+| `apa item show/list` | 读事项；`show` 带挂靠消息（按转发白名单过滤）与进展；`list` 可带 `--q <全文>`、`--sort updated/deadline/planned_for/priority`、`--planned-for <日期>`、`--from <日期> --to <日期>`（按日期范围读，同 HTTP 的 `from`、`to`）、`--origin-source <来源>`、`--origin-ref <外部 id>` | observer | 5 |
+| `apa item add/update/transition/relate [--evidence \| --grant]` | 增改事项、转阶段、关联（`relate --to` 可以是事项或材料；`relate --key <键> [--domain <去重域>] [--remove]` 登记或移除关联键，主文档 §9.4）；`add`、`update` 可带 `--planned-for <日期>` 与 `--planned-slot "HH:MM - HH:MM"`（`update` 传空串清除；有时段必须有计划日期，否则退出码 2）；`add`、`update`、`propose` 可带 `--deadline <RFC 3339 时间或 YYYY-MM-DD>`（只给日期时取本机时区当天 23:59:59；`update` 传空串清除并取消截止定时）、`--origin <JSON>`（`{"source", "actor"?, "ref"?}`，`source` 不能以 `import:` 开头）、`--ext <JSON>`，与 HTTP 请求体对齐。 | worker（自己的事项）；delegate（绑定的事项和以 `proposed` 新建不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、6、23 |
 | `apa item progress <id> --text [--on <日期>]` | 追加一条进展，不改阶段；`--on` 不能晚于今天 | worker（自己的事项）；delegate（绑定的事项不要求依据；其他事项附 `--evidence` 或 `--grant`） | 2、4、23 |
 | `apa import --file <计划文件> --source <来源名> [--dry-run] --grant <id>` | 带原始时间的导入（主文档 §7.1）：计划文件是 JSONL，CLI 按 500 条一批提交并沿用同一个批次号，逐行输出 `created`、`existing` 或 `invalid`；`--dry-run` 只预检，不写账本、不占授权单的条数 | delegate，只凭授权单（`--evidence` 不被接受） | 2、4、23 |
 | **决策** | | | |
@@ -126,7 +126,7 @@
 
 | 分组 | 方法与路径 | 说明 | 凭据 |
 |---|---|---|---|
-| 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for` | 按 §14.3；导出 ext 密钥可 `GET` |
+| 事项 | `GET/POST /items`，`GET/PATCH /items/{id}` | 查询、创建、更新。`GET /items` 可带 `q`（全文）、`sort`（`updated`、`deadline`、`planned_for`、`priority`）、`phase`、`project`、`tag`、`assignee`、`planned_for`、`from` 与 `to`（日期范围） | 按 §14.3；导出 ext 密钥可 `GET` |
 | | `GET /today` | 今天的清单，四组：`planned`、`due`、`pending`、`stale` | observer |
 | | 已有路由 GET /items 的新增查询参数 | `origin_source`、`origin_ref`：按事项的 `origin.source` 与 `origin.ref` 精确筛选，可只给前者（主文档 §7.1） | observer |
 | 导入 | `POST /import` | 带原始时间的导入，请求体是 JSONL，见下 | Web 登录；delegate 只凭授权单 |
@@ -243,7 +243,11 @@
 
 事项字段 `deadline`：`POST /items` 与 `PATCH /items/{id}` 可写，值为 RFC 3339 时间；`PATCH` 传 `null` 清除；`GET` 在已设置时返回。行为见主文档 §6.8。
 
-事项字段 `planned_for`：`POST /items` 与 `PATCH /items/{id}` 可写，值为 `YYYY-MM-DD`（本机时区的日期），`PATCH` 传 `null` 清除；`GET` 在已设置时返回。它不产生定时与提醒（主文档 §6.3）。
+事项字段 `planned_for`：`POST /items` 与 `PATCH /items/{id}` 可写，值为 `YYYY-MM-DD`（本机时区的日期），`PATCH` 传 `null` 清除；`GET` 在已设置时返回。它不产生定时与提醒（主文档 §6.3）。清除计划日期时时段一起清除。
+
+事项字段 `planned_slot`：`POST /items`、`PATCH /items/{id}` 与导入的 `item` 可写，值为 `HH:MM - HH:MM`（本机时区的墙上时间，开始 00:00–23:59，结束 00:01–24:00 且晚于开始），`PATCH` 传 `null` 或空串清除；`GET` 在已设置时返回。写了时段而请求与事项上都没有计划日期、格式不对、跨午夜或结束不晚于开始时返回 400 `invalid_request`。不产生定时与提醒（主文档 §6.3）。事项事件的快照里随之带上这个字段。
+
+`GET /items?from=YYYY-MM-DD&to=YYYY-MM-DD`：按日期范围读，含首尾，`to` 不早于 `from`，跨度至多 62 天，两个参数须同时给，否则 400。收录 `planned_for` 落在范围内、或 `deadline` 所在的本机日落在范围内的事项，与其他筛选取交集；不按阶段过滤。带范围时响应另有 `today`（本机时区的今天）与 `utc_offset`（本机时区此刻的偏移，如 `+08:00`）。
 
 事项字段 `proposal`：只读，由入站流水线写入：`{recommend, attach_to?, reason, low_confidence, sources[]}`（主文档 §6.3）。`GET /items?phase=proposed` 可带 `sort=score` 按初筛分数排序。
 
@@ -497,6 +501,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | 声明里唤醒能力的来源 | Hermes 插件看 `APA_WAKE_SESSION_KEY` 是否设置决定 `main_session.wake`，只在 Agent 调 `apa_declare_headless` 时提交；同一内容等于已生效版本时，仍待确认的旧版本留着 | 插件按唤醒插件的实际启用情况（已启用、指定了对话、允许插件发起回合、有连 APA 的钥匙）算 `wake`，不满足时带新的可选字段 `main_session.wake_missing`（每项 `{zh, en, how: {zh, en}}`，只在不能唤醒时允许）；gateway 启动时自动提交一次；`executor.declare` 的内容等于已生效版本时，同 harness 仍待确认的版本转 `superseded` | 只增字段，不迁移、不加表。旧内核严格解码会拒绝带 `wake_missing` 的声明，插件与内核一同升级。升级后插件提交的内容会变，本人在 Web 确认一次；确认前已生效的旧版本照常生效 |
 | 凭据表 | 无 `harness` | `auth_credential.harness`，账本结构版本 5 → 6 | 只增列，已有 token 照常可用；迁移后旧二进制拒绝打开账本，回退用升级前快照 |
 | 账本结构版本（工作台能力迭代） | 7 | 8：新增原文表、导入批次与导入对照两张表；来源事件表、Event 表、事项表、材料表、来源登记表各加列（主文档 §16.5） | 只增表与列，不改写已有行。升级时自动留快照；旧二进制拒绝打开新账本，回退用快照 |
+| 时段与按日期范围读（W26） | 事项只有计划日期；`GET /items` 只能按某一天精确筛选 | 事项新增可选字段 `planned_slot`（经事项新建、更新与导入写入，随事项事件的快照下发）；清除 `planned_for` 时一并清除 `planned_slot`；`GET /items` 新增 `from`、`to`，带范围时响应另有 `today`、`utc_offset`；内置起草与抽取的输出新增可选的 `planned_slot` | 只增字段与参数：时段存在事项数据里，不改账本结构、不迁移；已有事项与旧事件没有时段，按未定时显示；不认识新字段的客户端原样忽略 |
 | 来源事件列表里的正文 | `GET /sources/{id}/events`、`GET /items/{id}/messages` 的 `detail` 是来源程序给的全部内容 | `detail` 是至多 2000 个字符的预览，另带 `content` 清单；全文经 `GET /source-events/{id}` | **调用方要改的**：从列表里读正文全文的脚本与插件改用单条读取。升级前落盘的事件（`content.state: legacy`）在单条读取里照常返回原来的内容 |
 | token 读来源事件的原文 | observer 及以上的 token 能从事件列表读到全文，不受外发范围约束 | 全文只经单条读取，token 读到的内容按该来源的 `outbound.external` 裁剪；未选择或 `none` 时只有元信息 | 收紧。依赖 token 读全文的调用方，由本人把该来源对外部端点的范围选为全文；Web 上本人始终看到全文。挂靠消息不受影响 |
 | 提醒事项来源的游标与事件 | 游标是拉取时刻；只发 `reminder.due`、`reminder.open` | 游标是拉取范围的指纹与上一轮看到的未完成提醒（id 到标题）；离开未完成集合的逐条核实，已完成的发 `reminder.completed`，仍未完成或读不到的发 `reminder.out_of_view`，内置规则 `reminder-status` 挂到已有事项（附录 D.2） | 旧游标读作基线：升级后第一轮不发这两种事件，此后正常；拉取范围变了同样只建基线；按事件类型穷举的规则要认识新类型 |
