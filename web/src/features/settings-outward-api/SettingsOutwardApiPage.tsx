@@ -124,12 +124,10 @@ function ApiDoc() {
   const base = window.location.origin + "/v1";
   const curl = (path: string) => `curl -H "Authorization: Bearer $APA_KEY" "${base}${path}"`;
   return (
-    <section aria-label={t.docTitle} className="panel stack">
+    <section aria-label={t.docTitle} className="panel stack api-doc">
       <h2>{t.docTitle}</h2>
-      <dl className="pair">
-        <div><dt>{t.docBase}</dt><dd><code data-testid="api-base">{base}</code></dd></div>
-        <div><dt>{t.docAuth}</dt><dd><code>Authorization: Bearer &lt;{t.docKey}&gt;</code></dd></div>
-      </dl>
+      <p>{t.docBase}{t.colon}<code data-testid="api-base">{base}</code></p>
+      <p>{t.docAuth}{t.colon}<code>Authorization: Bearer &lt;{t.docKey}&gt;</code></p>
       <p className="sub">{t.docReadOnly}</p>
       {METHODS.map((m, i) => (
         <section key={m.path} aria-label={t.methods[i].name} className="stack">
