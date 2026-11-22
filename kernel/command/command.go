@@ -59,6 +59,8 @@ type Caller struct {
 	Credential string
 	// CredentialAgentID 是凭据上内核记录的所属 Agent，仅凭据入口有值；档位按它取（§14.3）。
 	CredentialAgentID string
+	// CredentialHarness 是凭据所属程序；没有 Agent 归属的旧设置迁移来的凭据，档位按兼容卡 legacy:<程序> 取（只改档位，不改投递路由）。
+	CredentialHarness string
 	// RunScope 只有运行凭据有值：据账本判断授权对象是否在运行范围内（目标事项及其子事项 / 目标事项所属项目）。
 	// 管线用它填 authz.Object 的 InRunScope、InRunProject，命令自己不必也无法声明。
 	RunScope func(tx *store.Tx, o authz.Object) (inScope, inProject bool, err error)
@@ -74,6 +76,9 @@ type Caller struct {
 func (c Caller) Agent() string {
 	if c.Level == authz.LevelRun {
 		return c.RunAgentID
+	}
+	if c.CredentialAgentID == "" && c.CredentialHarness != "" {
+		return "legacy:" + c.CredentialHarness
 	}
 	return c.CredentialAgentID
 }
@@ -102,7 +107,7 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	case auth.Delegate:
 		l = authz.LevelDelegate
 	}
-	return Caller{Actor: c.Actor(b.Origin), Level: l, Kind: c.Kind, Credential: c.ID, CredentialAgentID: c.AgentID}, nil
+	return Caller{Actor: c.Actor(b.Origin), Level: l, Kind: c.Kind, Credential: c.ID, CredentialAgentID: c.AgentID, CredentialHarness: c.Harness}, nil
 }
 
 // Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。

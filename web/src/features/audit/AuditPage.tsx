@@ -94,7 +94,7 @@ export function AuditPage() {
   const { api } = useSession();
   const t = useT(strings);
   const label = useLabel();
-  const credentials = useNamed("credential");
+  const credentials = useNamed("key");
   const [params] = useSearchParams();
   const initial = { ...EMPTY, object: params.get("object") ?? "" };
   const [draft, setDraft] = useState<Filter>(initial);

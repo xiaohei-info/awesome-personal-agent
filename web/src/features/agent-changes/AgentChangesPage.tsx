@@ -38,7 +38,7 @@ function Row({ s, reverted, resumed, onRevert }: { s: Step; reverted: boolean; r
   const answered = s.type === "decision.resolved" && s.resolved_via === "agent";
   const byRun = s.actor.principal.startsWith("run:");
   const legacy = !!(s.grant || s.evidence || s.actor.on_behalf_of || s.resolved_via === "chat" || s.resolved_via === "grant");
-  // 操作者显示凭据的标签而不是 id。
+  // 操作者显示 Agent 名而不是钥匙名或 id；钥匙名在悬停里。
   const who = [credential(s.actor.principal), legacy && t.legacy].filter(Boolean).join(" · ");
   const canRevert = REVERTIBLE.has(s.type) && !reverted;
   // 起草建议失败是 APA 自己调模型出的错（actor 记的是内核入站），不是 Agent 的后台运行。

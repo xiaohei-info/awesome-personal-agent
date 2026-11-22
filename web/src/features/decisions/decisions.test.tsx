@@ -195,7 +195,7 @@ describe("被拒绝的替你回答（档位没放开，设计 §14.3）", () => 
   it("切换前的旧拒绝记录（缺原话）照旧能读，同样指向档位", async () => {
     mount(server([item("a")], undefined, { a: rej({ code: "basis_required", reason: undefined, why: "needs the owner's words" }) }).impl);
     const note = await screen.findByRole("note", { name: "被拒绝的替你回答" });
-    expect(note).toHaveTextContent("缺少你的原话或授权");
+    expect(note).toHaveTextContent("这一项需要你本人决定");
     expect(within(note).getByRole("link", { name: "去放开它的档位" })).toBeInTheDocument();
   });
 });

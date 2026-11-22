@@ -269,14 +269,14 @@ function Launch({ e, name, pol, save }: { e: Entry; name: string; pol: Doc; save
 }
 
 // 档位：一档整理永远开；二档拍板一个开关，可限定项目；3a 改日常规矩。3b（发钥匙、填凭据、改工具权限）永不放开，只在下方一行说明。
-// 这是 3b 设置本身，保存时网页可能要求再输一次口令（由 api 统一弹框）。旧设置迁移来的 Agent 没有自己的钥匙归属，档位恒为只整理。
+// 这是 3b 设置本身，保存时网页可能要求再输一次口令（由 api 统一弹框）。
 function TierCard({ e, pol, reload }: { e: Entry; pol: { version: number }; reload: () => Promise<void> }) {
   const t = useT(strings);
   const label = useLabel();
   const lang = useLang();
   const { api } = useSession();
   const projects = useNamed("project");
-  const cur = ((e.instance && e.card?.tier) || "organize") as AgentTier;
+  const cur = (e.card?.tier || "organize") as AgentTier;
   const curProjects = e.card?.tier_projects ?? [];
   const src = [cur, curProjects];
   const [tier, setTier, tierDirty] = useDraft(src, () => cur);
@@ -293,12 +293,12 @@ function TierCard({ e, pol, reload }: { e: Entry; pol: { version: number }; relo
       <fieldset className="choice" aria-label={t.tier}>
         {AGENT_TIER.map((v) => (
           <label key={v}>
-            <input type="radio" name={"tier-" + e.id} value={v} checked={tier === v} disabled={!e.instance} onChange={() => setTier(v)} />
+            <input type="radio" name={"tier-" + e.id} value={v} checked={tier === v} onChange={() => setTier(v)} />
             <span>{label("agentTier", v)}<small>{entryOf(lang, "agentTier", v)?.hint}</small></span>
           </label>
         ))}
       </fieldset>
-      {e.instance && tier !== "organize" && (
+      {tier !== "organize" && (
         <fieldset className="checks">
           <legend>{t.tierWhere}</legend>
           <label><input type="checkbox" checked={!some} onChange={(ev) => setSome(!ev.target.checked)} />{t.allProjects}</label>
@@ -307,17 +307,9 @@ function TierCard({ e, pol, reload }: { e: Entry; pol: { version: number }; relo
           ))}
         </fieldset>
       )}
-      {!e.instance && <p className="sub">{t.tierLegacy}</p>}
       <p className="sub hardline">{t.hardLine}</p>
     </>
   );
-  if (!e.instance)
-    return (
-      <section aria-label={t.tier} className="panel stack">
-        <h2>{t.tier}</h2>
-        {body}
-      </section>
-    );
   return (
     <Card title={t.tier} onSave={submit} dirty={tierDirty || (tier !== "organize" && (someDirty || pickedDirty))} id={"tier-" + e.id}>
       {body}

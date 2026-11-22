@@ -193,16 +193,19 @@ describe("设置 › Agent", () => {
     expect(c.getByRole("radio", { name: "在和你的对话里接着做" })).toBeChecked();
   });
 
-  it("档位：旧设置迁移来的 Agent 恒为只整理，不能改；钥匙在左、档位在右，下方写明硬线", async () => {
+  it("档位：旧设置迁移来的 Agent 默认只整理，本人可以直接改，存在 legacy:<程序> 名下；下方写明硬线", async () => {
     const s = server({ live: [hermes(1, "active")] });
     mount(s.impl, PAGE);
     const c = await card();
     expect(c.getByRole("region", { name: "钥匙" })).toBeInTheDocument();
     const d = within(c.getByRole("region", { name: "能做到哪一档" }));
     expect(d.getByRole("radio", { name: /只整理/ })).toBeChecked();
-    for (const r of d.getAllByRole("radio")) expect(r).toBeDisabled();
+    expect(d.queryByText(/复制成新 Agent 后可调档位/)).toBeNull();
     expect(d.getByText("发钥匙、填凭据、改工具权限，只能你本人做")).toBeInTheDocument();
-    expect(writes(s, "/tier")).toHaveLength(0);
+    await userEvent.click(d.getByRole("radio", { name: /也替我拍板/ }));
+    await userEvent.click(d.getByRole("button", { name: "保存能做到哪一档" }));
+    await waitFor(() => expect(writes(s, "/tier")).toHaveLength(1));
+    expect(writes(s, "/tier")[0]).toMatchObject({ method: "PUT", url: "/v1/settings/agents/legacy%3Ahermes/tier", body: { tier: "decide" } });
   });
 
   it("档位：本人建的 Agent 改成「也替我拍板」，保存只调一次档位路由，默认全部项目", async () => {

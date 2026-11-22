@@ -63,10 +63,11 @@ export function ActorBadge({ actor }: { actor: Step["actor"] }) {
   const t = useT(strings);
   const label = useLabel();
   const credential = useNames("credential");
-  // agent 显示凭据的标签；本人与系统不再重复显示身份串。
+  const key = useNames("key");
+  // agent 显示它所属 Agent 的名字，钥匙名放在悬停里；本人与系统不再重复显示身份串。
   const who = actor.type === "agent" ? credential(actor.principal) : "";
   return (
-    <span aria-label={t.actorLabel} data-actor={actor.type} className="badge plain">
+    <span aria-label={t.actorLabel} data-actor={actor.type} className="badge plain" title={who ? key(actor.principal) : undefined}>
       {[label("actorType", actor.type), label("via", actor.via), who].filter(Boolean).join(" · ")}
     </span>
   );

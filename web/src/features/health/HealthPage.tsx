@@ -25,8 +25,8 @@ interface Run { id: string; target: string }
 interface Said { problem: string; impact?: string; button?: string; to?: string; second?: { button: string; to: string } }
 
 // 被拒原因 → 下一步（设计 §14.3）：档位没放开的去 Agent 页放开档位，钥匙范围外的看钥匙，只有本人能做的看操作记录。
-// basis_required 等是切换前旧模型的码，读旧记录时同样指向档位。
-const TIER_CODES = new Set(["tier_closed", "basis_required", "session_not_direct", "grant_required"]);
+// session_not_direct 等是切换前旧模型的码，读旧记录时同样指向档位；basis_required 不是档位问题：这一项在等本人拍板，直达那件事。
+const TIER_CODES = new Set(["tier_closed", "session_not_direct", "grant_required"]);
 const isReason = (r?: string) => !!r && (REJECT_REASON as readonly string[]).includes(r);
 
 function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: Status) => Said {
@@ -68,6 +68,9 @@ function useSay(runTarget: (run?: string) => string | undefined): (r: Row, st: S
       case "receipt": {
         const reason = r.params?.reason;
         const why = isReason(reason) ? label("rejectReason", reason!) : reason ? label("grantReason", reason) : r.code ? label("error", r.code) : t.receiptNoReason;
+        if (r.code === "basis_required" && r.obj)
+          return { problem: t.receiptOne(credential(r.who ?? ""), t.receiptCmd[r.cmd ?? ""] ?? r.cmd ?? "", why), impact: t.receiptImpact, button: t.goDecide, to: "/items/" + encodeURIComponent(r.obj),
+            second: { button: t.seeWhy, to: "/audit?object=" + encodeURIComponent(r.obj) } };
         const tier = reason === "tier_closed" || (!!r.code && TIER_CODES.has(r.code));
         const scope = reason === "out_of_scope" || r.code === "permission_denied";
         return {

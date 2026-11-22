@@ -282,11 +282,12 @@ describe("运行故障与被拒的交回说人话（界面设计 §5.3）", () =
     expect(fault).toHaveTextContent("先在这台电脑上给它运行权限");
     expect(within(fault).getByRole("link", { name: "看这件事" })).toHaveAttribute("href", "/items/itm_brief#agent");
     expect(within(fault).queryByRole("button", { name: /重新运行/ })).toBeNull();
-    const rej = act().getByText(/交回结果被拒：缺少你的原话或授权/).closest("li")!;
+    const rej = act().getByText(/交回结果被拒：这一项需要你本人决定/).closest("li")!;
     expect(rej).toHaveTextContent("结果没有落账");
-    expect(within(rej).getByRole("link", { name: "去放开它的档位" })).toHaveAttribute("href", "/settings/agents");
+    expect(within(rej).getByRole("link", { name: "去决定这件事" })).toHaveAttribute("href", "/items/itm_7");
+    expect(within(rej).queryByRole("link", { name: "去放开它的档位" })).toBeNull();
     expect(within(rej).getByRole("link", { name: "看被拒的原因" })).toHaveAttribute("href", "/audit?object=itm_7");
-    expect(main().queryByText(/exit status|basis_required/)).toBeNull();
+    expect(main().queryByText(/缺少你的原话|exit status|basis_required/)).toBeNull();
   });
 
   // 2026-11-20 本人裁决：规则动作失败、运行没拉起是事件不是问题；诊断页逐条说清哪件事、为什么、下一步。来源认证失败按 kind 说"要重新登录"。

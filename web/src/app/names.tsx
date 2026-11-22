@@ -6,19 +6,27 @@ import { vocab } from "./vocab";
 
 // id → 显示名（设计 §4.2）：项目、来源、凭据、执行者按 id 显示名字，不让本人看 id、手打 id。
 // 每个 API 客户端各缓存一份，一个页面会话里只取一次；改名后调 forgetNames 让下次重取。
-export type NameKind = "project" | "source" | "credential" | "executor";
+// credential 显示的是它所属的 Agent 的名字（同一 Agent 的多把钥匙合并成同一个名字）；key 是钥匙自己的标签，只用在悬停与详情。
+export type NameKind = "project" | "source" | "credential" | "key" | "executor";
 export interface Named {
   id: string;
   name: string;
 }
 
-type Row = { id: string; name?: string; label?: string };
+type Row = { id: string; name?: string; label?: string; agent_id?: string; harness?: string };
 const SOURCES: Record<NameKind, { path: string; key: string; name: (r: Row) => string }> = {
   project: { path: "/projects", key: "projects", name: (r) => r.name || r.id },
   source: { path: "/sources", key: "sources", name: (r) => r.name || r.id }, // 内核保证有显示名（§9.1）；id 只在旧服务端时兜底
   credential: { path: "/settings/tokens", key: "credentials", name: (r) => r.label || r.id },
+  key: { path: "/settings/tokens", key: "credentials", name: (r) => r.label || r.id },
   executor: { path: "/executors", key: "executors", name: (r) => r.label || r.id },
 };
+
+/** 钥匙 → Agent 名：归属 Agent 的按卡名，旧设置迁移来的（只有程序标识）按 legacy:<程序> 的卡名；对不上返回 undefined，退回钥匙标签。 */
+async function agentNames(api: ApiClient): Promise<(k: Row) => string | undefined> {
+  const cards = await api.get<{ agents: { id: string; name: string }[] }>("/agents").then((r) => new Map(r.agents.map((a) => [a.id, a.name])), () => new Map<string, string>());
+  return (k) => cards.get(k.agent_id || "legacy:" + k.harness);
+}
 
 const cache = new WeakMap<ApiClient, Map<NameKind, Promise<Named[]>>>();
 // 已取到的名单：后挂载的组件首帧就用上名字，不先闪一下 id。
@@ -30,8 +38,9 @@ export function loadNames(api: ApiClient, kind: NameKind): Promise<Named[]> {
   let p = m.get(kind);
   if (!p) {
     const s = SOURCES[kind];
-    p = api.get<Record<string, Row[]>>(s.path).then((r) => {
-      const list = (r[s.key] ?? []).map((x) => ({ id: x.id, name: s.name(x) }));
+    const agents = kind === "credential" ? agentNames(api) : Promise.resolve(() => undefined);
+    p = Promise.all([api.get<Record<string, Row[]>>(s.path), agents]).then(([r, agent]) => {
+      const list = (r[s.key] ?? []).map((x) => ({ id: x.id, name: agent(x) ?? s.name(x) }));
       if (!resolved.has(api)) resolved.set(api, new Map());
       resolved.get(api)!.set(kind, list);
       return list;
