@@ -7,7 +7,7 @@ export const PHASE = ["proposed", "open", "waiting", "needs_input", "done", "dro
 /** 优先级：kernel/domain/item.go Priority* */
 export const PRIORITY = ["low", "normal", "high", "urgent"] as const;
 /** 事项类型：kernel/domain/item.go Kind*；routine 来自 packs/routine */
-export const ITEM_KIND = ["task", "commitment", "decision", "delegation", "brief", "routine"] as const;
+export const ITEM_KIND = ["task", "note", "commitment", "decision", "delegation", "brief", "routine"] as const;
 /** 等待对象：kernel/domain/item.go Waiting* */
 export const WAITING = ["human", "executor", "external", "time"] as const;
 /** 事项关系：kernel/domain/item.go Rel* */

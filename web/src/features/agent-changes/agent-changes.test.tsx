@@ -22,6 +22,8 @@ function server(initial: Step[], revert?: (body: any) => Response | undefined) {
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, path: url, body, csrf: (init.headers as Record<string, string> | undefined)?.["X-CSRF-Token"] ?? null });
     if (url === "/v1/projects") return json(200, { projects: [] });
+    if (url === "/v1/agents") return json(200, { agents: [{ id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1 }, { id: "agent_2", harness: "hermes", name: "编码", enabled: true, rev: 1 }], selected: {}, reason: "" });
+    if (url === "/v1/settings/tokens") return json(200, { credentials: [{ id: "DEL", kind: "delegate", harness: "hermes", agent_id: "agent_1" }, { id: "W2", kind: "worker", harness: "hermes", agent_id: "agent_2" }] });
     const q = url.match(/^\/v1\/audit\/events\?after=(\d+)&limit=500$/);
     if (q) return json(200, { events: events.filter((e) => e.seq > +q[1]).slice(0, 500) });
     const r = url.match(/^\/v1\/items\/(.+)\/revert$/);
@@ -37,10 +39,10 @@ function server(initial: Step[], revert?: (body: any) => Response | undefined) {
   return { impl, calls };
 }
 
-function mount(fetchImpl: typeof fetch) {
+function mount(fetchImpl: typeof fetch, at = "/agent-changes") {
   sessionStorage.setItem("apa.csrf", "tok-1");
   return render(
-    <MemoryRouter initialEntries={["/agent-changes"]}>
+    <MemoryRouter initialEntries={[at]}>
       <App features={[feature]} fetchImpl={fetchImpl} />
     </MemoryRouter>,
   );
@@ -175,5 +177,14 @@ describe("起草建议失败（APA 调模型出错，不是 Agent 后台运行�
     expect(within(a).queryByText(/kernel:inbound/)).not.toBeInTheDocument();
     const other = screen.getByRole("heading", { name: /Agent 后台运行结束/ }).closest("article")!;
     expect(within(other).getByText("generate failed")).toBeInTheDocument();
+  });
+
+  it("从 Agent 页带 ?agent= 进来只列这个 Agent 的钥匙做的改动；可换成全部", async () => {
+    const other = { type: "agent", principal: "W2", via: "cli" };
+    mount(server([upd(1, "2030-01-01T00:00:00Z"), upd(2, "2030-01-01T00:01:00Z", { actor: other, payload: { op: "update", item: { title: "别人改的" } } })]).impl, "/agent-changes?agent=agent_2");
+    expect(await screen.findByRole("heading", { name: /别人改的/ })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /新标题/ })).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("哪个 Agent"), "");
+    expect(await screen.findByRole("heading", { name: /新标题/ })).toBeInTheDocument();
   });
 });

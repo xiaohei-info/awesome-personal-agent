@@ -188,7 +188,7 @@ describe("被拒绝的替你回答（档位没放开，设计 §14.3）", () => 
     expect(note).toHaveTextContent("等你确认：它的档位没放开");
     expect(note).toHaveTextContent("the Agent's tier does not open this");
     expect(within(note).getByRole("link", { name: "你来处理" })).toHaveAttribute("href", "/items/a");
-    expect(within(note).getByRole("link", { name: "去放开它的档位" })).toHaveAttribute("href", "/settings/agents");
+    expect(within(note).getByRole("link", { name: "去放开它的档位" })).toHaveAttribute("href", "/settings") // 档位在「我来拍板」;
     expect(within(screen.getByRole("article", { name: "事项 b" })).queryByRole("note")).toBeNull();
   });
 

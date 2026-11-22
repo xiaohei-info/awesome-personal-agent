@@ -30,6 +30,7 @@ export function policyServer(opts: { webOnlyDenied?: boolean; agents?: Record<st
   const doc = initialDoc();
   if (opts.routes) doc.disturb.routes = opts.routes;
   const puts: { path: string; body: any; csrf?: string }[] = [];
+  const tiers: { url: string; body: any }[] = [];
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
     if (url === "/v1/projects") return json(200, { projects: [{ id: "acc-home", name: "Home" }] });
@@ -40,6 +41,10 @@ export function policyServer(opts: { webOnlyDenied?: boolean; agents?: Record<st
     if (url === "/v1/deliveries/today") return json(200, { pushed: 7, cap: doc.disturb.daily_cap, suppressed_daily_cap: 0, suppressed_muted: 0 });
     if (url.startsWith("/v1/items/")) return json(200, { id: url.slice("/v1/items/".length), title: "Renew domain" });
     if (url.startsWith("/v1/context/persona")) return json(200, { persona: "decl\n" + doc.persona, default: (doc.persona_lang || (url.endsWith("locale=zh") ? "zh" : "en")) === "zh" ? "Default tone (zh)" : "Default tone (en)" });
+    if (url.endsWith("/tier") && method === "PUT") {
+      tiers.push({ url, body: JSON.parse(init.body as string) });
+      return json(200, { version: ++version });
+    }
     if (url === "/v1/agents") return opts.webOnlyDenied ? err(403, "web_only", "settings can only be used by the owner in the Web UI") : json(200, { agents: opts.agents ?? [], selected: {}, reason: "" });
     const keys = SECTIONS[url];
     if (!keys) return err(404, "not_found", "no such route");
@@ -54,5 +59,5 @@ export function policyServer(opts: { webOnlyDenied?: boolean; agents?: Record<st
     if (JSON.stringify(doc) !== before) version++;
     return json(200, render());
   }) as unknown as typeof fetch;
-  return { impl, puts, doc };
+  return { impl, puts, doc, tiers };
 }

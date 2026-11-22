@@ -132,22 +132,27 @@ describe("改 status_label（ACT-ITEM-02）", () => {
   });
 });
 
-describe("转阶段", () => {
-  it("waiting 缺 waiting_on 被服务端拒绝并显示原因，阶段不变；补上后成功", async () => {
+describe("转阶段（主操作区）", () => {
+  it("等待就地填等什么再确认；回到进行中一键；不做了在更多操作里先确认", async () => {
     const l = ledger();
     mount(l.impl, "/items/item_a");
-    await userEvent.selectOptions(await screen.findByLabelText("目标阶段"), "waiting");
-    await userEvent.type(screen.getByLabelText("原因"), "等报价");
-    await userEvent.click(screen.getByRole("button", { name: "转阶段" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("waiting phase requires waiting_on");
-    expect(screen.getByText(/现在：进行中/)).toBeInTheDocument();
-
+    const last = () => l.calls.filter((c) => c.path.endsWith("/transition")).at(-1)?.body;
+    await userEvent.click(within(await screen.findByRole("group", { name: "改阶段" })).getByRole("button", { name: "转为等待…" }));
+    expect(last()).toBeUndefined();
     await userEvent.selectOptions(screen.getByLabelText("等待对象类别"), "external");
     await userEvent.type(screen.getByLabelText("等待对象"), "报价单");
-    await userEvent.click(screen.getByRole("button", { name: "转阶段" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认转为等待" }));
     expect(await screen.findByText(/现在：等待中/)).toBeInTheDocument();
-    expect(l.calls.filter((c) => c.path.endsWith("/transition")).at(-1)!.body).toEqual({ to: "waiting", reason: "等报价", waiting_on: { kind: "external", ref: "报价单" } });
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(last()).toEqual({ to: "waiting", reason: "在事项页改为等待中", waiting_on: { kind: "external", ref: "报价单" } });
+
+    await userEvent.click(within(await screen.findByRole("group", { name: "改阶段" })).getByRole("button", { name: "回到进行中" }));
+    expect(await screen.findByText(/现在：进行中/)).toBeInTheDocument();
+    expect(last()).toMatchObject({ to: "open" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "不做了…" }));
+    expect(last()).toMatchObject({ to: "open" }); // 只展开确认，还没改
+    await userEvent.click(screen.getByRole("button", { name: "确认不做了" }));
+    await waitFor(() => expect(last()).toEqual({ to: "dropped", reason: "在事项页标为不做了" }));
   });
 });
 
@@ -229,20 +234,39 @@ describe("关联与按 tag 筛选（ACT-ITEM-12）", () => {
     expect(basis.getByRole("link", { name: "mat_x" })).toHaveAttribute("href", "/materials?id=mat_x");
   });
 
-  it("按 tag 筛选只留下带该 tag 的事项；按阶段筛选走服务端", async () => {
+  it("标签、阶段在取回的列表上筛；选项带条数；正在筛一行可逐项去掉或清除全部", async () => {
     const l = ledger();
     l.items[1].phase = "done";
     mount(l.impl);
     expect(await screen.findByRole("link", { name: "item-b" })).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("标签筛选"), "urgent");
+    expect(screen.getByRole("option", { name: "已完成 (1)" })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("标签"), "urgent");
     expect(screen.getByRole("link", { name: "item-a" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "item-b" })).not.toBeInTheDocument();
-
-    await userEvent.selectOptions(screen.getByLabelText("标签筛选"), "");
-    await userEvent.selectOptions(screen.getByLabelText("阶段筛选"), "done");
-    await waitFor(() => expect(screen.queryByRole("link", { name: "item-a" })).not.toBeInTheDocument());
+    expect(screen.getByLabelText("标签").closest("label")).toHaveClass("on");
+    await userEvent.click(screen.getByRole("button", { name: "去掉筛选：标签" }));
     expect(screen.getByRole("link", { name: "item-b" })).toBeInTheDocument();
-    expect(l.calls.some((c) => c.path === "/v1/items?phase=done")).toBe(true);
+
+    await userEvent.selectOptions(screen.getByLabelText("阶段"), "done");
+    expect(screen.queryByRole("link", { name: "item-a" })).not.toBeInTheDocument();
+    expect(l.calls.some((c) => c.path.includes("phase=done"))).toBe(false); // 阶段在取回的列表上筛，不再走服务端
+    await userEvent.click(screen.getByRole("button", { name: "清除全部" }));
+    expect(screen.getByRole("link", { name: "item-a" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("正在筛：")).not.toBeInTheDocument();
+  });
+
+  it("每页 50 条，上一页 / 下一页带位置；换筛选回到第一页", async () => {
+    const l = ledger();
+    for (let n = 0; n < 60; n++) l.items.push({ id: "item_p" + n, phase: n < 55 ? "open" : "done", version: 1, kind: "task", title: "p-" + n });
+    mount(l.impl);
+    const pager = within(await screen.findByRole("navigation", { name: "翻页" }));
+    expect(pager.getByText("第 1–50 条，共 62 条")).toBeInTheDocument();
+    expect(pager.getByRole("button", { name: "上一页" })).toBeDisabled();
+    await userEvent.click(pager.getByRole("button", { name: "下一页" }));
+    expect(screen.getByText("第 51–62 条，共 62 条")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "p-59" })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("阶段"), "open");
+    expect(screen.getByText("第 1–50 条，共 57 条")).toBeInTheDocument();
   });
 
   it("搜索框、排序与计划日期筛选都走服务端参数", async () => {

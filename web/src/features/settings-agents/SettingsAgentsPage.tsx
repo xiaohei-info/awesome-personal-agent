@@ -163,6 +163,7 @@ function Other({ data, list, reload, onError, secret, onSecret }: { data: Data; 
         <div><button type="submit">{t.issueKey}</button></div>
         {secret && <Secret secret={secret} onDone={() => onSecret(null)} />}
       </form>
+      <p className="sub">{t.executorsHint} <Link to="/executors">{t.executorsLink}</Link></p>
     </details>
   );
 }

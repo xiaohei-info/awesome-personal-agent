@@ -1,5 +1,5 @@
 import type { Feature } from "../../app/registry";
 import { DelegationPage } from "./DelegationPage";
 
-// Agent 工作 › 进行中（界面设计 §3.2）：我交出去的事现在怎样——后台运行中的事与派给执行者的活。原地址不变。
-export const feature: Feature = { id: "delegation", title: { zh: "进行中", en: "In progress" }, path: "delegation", order: 0, section: "agents", element: <DelegationPage /> };
+// 派给执行者的活（原「Agent 工作 › 进行中」，界面设计 §9.6）：不进导航，地址不变；从状态页「久无回音」与委派事项详情进入。
+export const feature: Feature = { id: "delegation", title: { zh: "派给执行者的活", en: "Work handed to executors" }, path: "delegation", hidden: true, element: <DelegationPage /> };

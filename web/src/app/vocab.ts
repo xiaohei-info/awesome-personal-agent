@@ -109,7 +109,7 @@ export const CHANNEL_PREFIX = "channel:";
 const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSay; askCode: AskSay; runFault: FaultSay; notice: NoticeSay; captureSource: string } = {
   phase: { proposed: { label: "建议" }, open: { label: "进行中" }, waiting: { label: "等待中" }, needs_input: { label: "等你决定" }, done: { label: "已完成" }, dropped: { label: "已放弃" } },
   priority: { low: { label: "低" }, normal: { label: "普通" }, high: { label: "高" }, urgent: { label: "紧急" } },
-  itemKind: { task: { label: "任务" }, commitment: { label: "承诺" }, decision: { label: "决策" }, delegation: { label: "委派" }, brief: { label: "简报" }, routine: { label: "例行任务" } },
+  itemKind: { task: { label: "任务" }, note: { label: "笔记" }, commitment: { label: "承诺" }, decision: { label: "决策" }, delegation: { label: "委派" }, brief: { label: "简报" }, routine: { label: "例行任务" } },
   waiting: { human: { label: "等某人" }, executor: { label: "等执行者" }, external: { label: "等外部回复" }, time: { label: "等到某个时间" } },
   relation: { relates: { label: "相关" }, parent: { label: "上级" }, blocks: { label: "阻塞" }, derived_from: { label: "由此派生" }, supersedes: { label: "取代" }, basis: { label: "依据" }, output: { label: "产出" }, minutes: { label: "纪要" } },
   projectStatus: { active: { label: "进行中" }, paused: { label: "暂停" }, archived: { label: "已归档" } },
@@ -494,7 +494,7 @@ const zh: Vocab & { channelRoute: (name: string) => string; doctorCode: DoctorSa
 const en: typeof zh = {
   phase: { proposed: { label: "Proposed" }, open: { label: "Open" }, waiting: { label: "Waiting" }, needs_input: { label: "Needs you" }, done: { label: "Done" }, dropped: { label: "Dropped" } },
   priority: { low: { label: "Low" }, normal: { label: "Normal" }, high: { label: "High" }, urgent: { label: "Urgent" } },
-  itemKind: { task: { label: "Task" }, commitment: { label: "Commitment" }, decision: { label: "Decision" }, delegation: { label: "Delegation" }, brief: { label: "Brief" }, routine: { label: "Routine" } },
+  itemKind: { task: { label: "Task" }, note: { label: "Note" }, commitment: { label: "Commitment" }, decision: { label: "Decision" }, delegation: { label: "Delegation" }, brief: { label: "Brief" }, routine: { label: "Routine" } },
   waiting: { human: { label: "A person" }, executor: { label: "An executor" }, external: { label: "An outside reply" }, time: { label: "A point in time" } },
   relation: { relates: { label: "Related" }, parent: { label: "Parent" }, blocks: { label: "Blocks" }, derived_from: { label: "Derived from" }, supersedes: { label: "Supersedes" }, basis: { label: "Basis" }, output: { label: "Output" }, minutes: { label: "Minutes" } },
   projectStatus: { active: { label: "Active" }, paused: { label: "Paused" }, archived: { label: "Archived" } },

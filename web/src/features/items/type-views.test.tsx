@@ -88,7 +88,7 @@ describe("事项 › 类型筛选", () => {
   it("「全部」显示原来的事项列表；没有包声明视图时不出现类型筛选", async () => {
     mount(server({ packs: [{ name: "x", views: null }, { name: "y" }] }));
     expect(await screen.findByText("无关事项")).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "类型" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "快捷筛选" })).not.toBeInTheDocument();
   });
 
   it("该类型下没有事项时显示空状态，不渲染空表格", async () => {

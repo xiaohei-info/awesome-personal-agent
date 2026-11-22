@@ -3,7 +3,9 @@ import { common } from "../../app/strings";
 
 const zh = {
   ...common.zh,
-  title: "改动",
+  title: "Agent 改动",
+  agent: "哪个 Agent",
+  allAgents: "全部 Agent",
   runDid: (what: string, title: string) => `Agent 后台运行替你${what}「${title}」`,
   answered: (title: string) => `Agent 替你答了「${title}」`,
   resumed: "回答后已为它续接了运行；撤销只撤回答，已拉起的运行撤不回",
@@ -21,7 +23,9 @@ const zh = {
 
 const en: typeof zh = {
   ...common.en,
-  title: "Changes",
+  title: "Agent changes",
+  agent: "Agent",
+  allAgents: "All Agents",
   runDid: (what: string, title: string) => `An Agent background run ${what} for you: "${title}"`,
   answered: (title: string) => `An Agent answered for you: "${title}"`,
   resumed: "A run was continued after the answer; undoing removes the answer, not the run that already started",

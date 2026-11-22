@@ -193,34 +193,16 @@ describe("设置 › Agent", () => {
     expect(c.getByRole("radio", { name: "在和你的对话里接着做" })).toBeChecked();
   });
 
-  it("档位：旧设置迁移来的 Agent 默认只整理，本人可以直接改，存在 legacy:<程序> 名下；下方写明硬线", async () => {
-    const s = server({ live: [hermes(1, "active")] });
-    mount(s.impl, PAGE);
-    const c = await card();
-    expect(c.getByRole("region", { name: "钥匙" })).toBeInTheDocument();
-    const d = within(c.getByRole("region", { name: "能做到哪一档" }));
-    expect(d.getByRole("radio", { name: /只整理/ })).toBeChecked();
-    expect(d.queryByText(/复制成新 Agent 后可调档位/)).toBeNull();
-    expect(d.getByText("发钥匙、填凭据、改工具权限，只能你本人做")).toBeInTheDocument();
-    await userEvent.click(d.getByRole("radio", { name: /也替我拍板/ }));
-    await userEvent.click(d.getByRole("button", { name: "保存能做到哪一档" }));
-    await waitFor(() => expect(writes(s, "/tier")).toHaveLength(1));
-    expect(writes(s, "/tier")[0]).toMatchObject({ method: "PUT", url: "/v1/settings/agents/legacy%3Ahermes/tier", body: { tier: "decide" } });
-  });
-
-  it("档位：本人建的 Agent 改成「也替我拍板」，保存只调一次档位路由，默认全部项目", async () => {
-    const card1 = { id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1, tier: "organize", tier_projects: [] };
-    const s = server({ live: [hermes(1, "active")], cards: [card1] });
-    mount(s.impl, "/settings/agents/agent_1");
+  it("档位只读一行并链到「我来拍板」，页上不再有档位卡；「它做过什么」直达按这个 Agent 筛好的记录", async () => {
+    const card1 = { id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1, tier: "decide", tier_projects: [] };
+    mount(server({ live: [hermes(1, "active")], cards: [card1] }).impl, "/settings/agents/agent_1");
     const c = await card("日常");
-    const d = within(c.getByRole("region", { name: "能做到哪一档" }));
-    expect(d.getByRole("radio", { name: /只整理/ })).toBeChecked();
-    expect(d.getByRole("button", { name: "保存能做到哪一档" })).toBeDisabled();
-    await userEvent.click(d.getByRole("radio", { name: /也替我拍板/ }));
-    expect(d.getByLabelText("全部项目")).toBeChecked();
-    await userEvent.click(d.getByRole("button", { name: "保存能做到哪一档" }));
-    await waitFor(() => expect(writes(s, "/tier")).toHaveLength(1));
-    expect(writes(s, "/tier")[0]).toMatchObject({ method: "PUT", url: "/v1/settings/agents/agent_1/tier", body: { tier: "decide", projects: [] } });
+    expect(c.queryByRole("region", { name: /能做到哪一档/ })).toBeNull();
+    expect(c.getByText("能替你做到：也替我拍板")).toBeInTheDocument();
+    expect(c.getByRole("link", { name: "在「我来拍板」改" })).toHaveAttribute("href", "/settings#tier-agent_1");
+    const rec = within(c.getByRole("region", { name: "它做过什么" }));
+    expect(rec.getByRole("link", { name: /Agent 改动/ })).toHaveAttribute("href", "/agent-changes?agent=agent_1");
+    expect(rec.getByRole("link", { name: /规矩改动/ })).toHaveAttribute("href", "/rule-changes?agent=agent_1");
   });
 
   it("T15：旧地址 /settings/grants 落到 Agent 列表", async () => {

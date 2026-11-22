@@ -431,6 +431,14 @@ button[aria-pressed="true"] { font-weight: 600; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chips label { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 5px 12px; white-space: nowrap; font-size: 13.5px; color: var(--ink); border: 1px solid var(--line); border-radius: 99px; background: var(--paper); }
 .chips label:has(input:checked) { border-color: var(--ink); }
+/* 快捷筛选按钮：按下的那个反色，一眼看出现在筛的是什么 */
+.chips > button { border-radius: 99px; padding: 5px 14px; }
+.chips > button[aria-pressed="true"], .chips > button[aria-pressed="true"]:hover { color: var(--paper); background: var(--ink); border-color: var(--ink); }
+/* 已生效的筛选：控件描边加深；列表上方一行列出生效的条件，点一个去掉一个 */
+.filters label.on :is(select, input) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.active-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: -6px 0 14px; }
+.active-filters .badge { border: 0; box-shadow: none; cursor: pointer; color: var(--ink); }
+.pager { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
 /* 一行：名称在左，控件在右 */
 .line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 0; border-top: 1px solid var(--line); }
 .line:first-of-type { border-top: 0; }

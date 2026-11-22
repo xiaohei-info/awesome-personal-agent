@@ -12,7 +12,6 @@ export const SECTIONS = {
   proposals: { title: { zh: "建议", en: "Proposals" } },
   items: { title: { zh: "事项", en: "Items" } },
   projects: { title: { zh: "项目", en: "Projects" } },
-  agents: { title: { zh: "Agent 工作", en: "Agent work" } },
   sources: { title: { zh: "消息来源", en: "Sources" } },
   automation: { title: { zh: "自动规则", en: "Automation" } },
   settings: { title: { zh: "设置", en: "Settings" } },
@@ -23,7 +22,7 @@ export type SectionId = keyof typeof SECTIONS;
 /** 入口分组，按此顺序显示；"设置"与"诊断"不在组里，固定在导航底部（诊断是排障区，字色弱化）。 */
 export const NAV: { group: Text; sections: SectionId[] }[] = [
   { group: { zh: "处理", en: "Act" }, sections: ["today", "decisions", "proposals"] },
-  { group: { zh: "工作", en: "Work" }, sections: ["items", "projects", "agents"] },
+  { group: { zh: "工作", en: "Work" }, sections: ["items", "projects"] },
   { group: { zh: "自动化", en: "Automate" }, sections: ["sources", "automation"] },
 ];
 export const SETTINGS: SectionId = "settings";

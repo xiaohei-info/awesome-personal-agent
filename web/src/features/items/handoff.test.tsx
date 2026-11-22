@@ -105,8 +105,8 @@ describe("事项 › 交给 Agent", () => {
     await screen.findByText("改文档");
     expect(screen.getByText("交给 Agent #docs")).toBeInTheDocument();
     expect(screen.queryByText(/agent-ok/)).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "交给 Agent" })).toHaveValue("agent-ok");
-    await userEvent.selectOptions(screen.getByLabelText("标签筛选"), "agent-ok");
+    expect(screen.getByRole("option", { name: "交给 Agent (1)" })).toHaveValue("agent-ok");
+    await userEvent.selectOptions(screen.getByLabelText("标签"), "agent-ok");
     expect(screen.queryByText("修复登录")).not.toBeInTheDocument();
     expect(screen.getByText("改文档")).toBeInTheDocument();
   });

@@ -1,5 +1,5 @@
 import type { Feature } from "../../app/registry";
 import { RuleChangesPage } from "./RuleChangesPage";
 
-// 规矩改动（设计 §14.3 的 3a 兜底）：放在「Agent 工作」里，紧挨「改动」。
-export const feature: Feature = { id: "rule-changes", title: { zh: "规矩改动", en: "Rule changes" }, path: "rule-changes", order: 1.5, section: "agents", element: <RuleChangesPage /> };
+// 规矩改动（设计 §14.3 的 3a 兜底）：放在诊断里，紧挨「Agent 改动」；撤回是这份记录自己的动作。
+export const feature: Feature = { id: "rule-changes", title: { zh: "规矩改动", en: "Rule changes" }, path: "rule-changes", order: 1.4, section: "diag", element: <RuleChangesPage /> };

@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { errorText as msg, useLang, useT } from "../../app/i18n";
-import { AGENT_TIER } from "../../app/ids";
+import { AGENT_TIER, type AgentTier } from "../../app/ids";
+import { useNamed } from "../../app/names";
 import { useSession } from "../../app/session";
-import { entryOf, Val } from "../../app/values";
-import type { AgentView } from "../settings-agents/AgentPick";
-import { PolicyPage } from "./shared";
+import { entryOf, useLabel } from "../../app/values";
+import type { Agent, AgentView } from "../settings-agents/AgentPick";
+import { Card, PolicyPage, useDraft, usePolicyDocs } from "./shared";
 import { strings } from "./strings";
 
-// 设置 › 我来拍板（路径 /settings，沿用原地址；设计 §14.3）：只读总览。每个 Agent 现在的档位（GET /agents，判定读的同一份），
-// 三档各管什么，以及永不放开的那条硬线。档位只在各自的 Agent 页改；本页不写任何东西。
+// 设置 › 我来拍板（路径 /settings，沿用原地址；设计 §14.3）：每个 Agent 能替你做到哪一档，就在这里改——这是档位唯一可编辑的地方，
+// Agent 页只读一行。档位读 GET /agents（判定读的同一份），写 PUT /settings/agents/{id}/tier；它属 3b，网页可能要求再输一次口令（api 统一弹框）。
 export function SettingsPolicyPage() {
   const t = useT(strings);
-  const lang = useLang();
   const { api } = useSession();
+  const { docs, error: polError, load: loadPol } = usePolicyDocs(["policy"] as const);
   const [view, setView] = useState<AgentView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = () => {
@@ -21,44 +21,63 @@ export function SettingsPolicyPage() {
     api.get<AgentView>("/agents").then(setView, (e) => setError(msg(e)));
   };
   useEffect(load, [api]); // eslint-disable-line react-hooks/exhaustive-deps
-  // 旧设置迁移来的（rev 0）没有自己的钥匙归属，判定恒为只整理（与 Agent 页一致）。
-  const tierOf = (a: AgentView["agents"][number]) => (a.rev > 0 && a.tier) || "organize";
+  const reload = async () => { load(); await loadPol(); };
+  const pol = docs?.policy;
   return (
-    <PolicyPage title={t.title} lede={t.lede} error={error} ready={!!view} onRetry={load}>
-      {view && (
+    <PolicyPage title={t.title} lede={t.lede} error={error ?? polError} ready={!!view && !!pol} onRetry={() => void reload()}>
+      {view && pol && (
         <>
-          <section aria-label={t.agents} className="panel stack">
-            <h2>{t.agents}</h2>
-            {view.agents.length === 0 && <p className="sub">{t.noAgents}</p>}
-            <ul className="rows">
-              {view.agents.map((a) => (
-                <li key={a.id} className="act-row" aria-label={a.name || a.harness}>
-                  <div>
-                    <span>{a.name || a.harness}</span>
-                    <span className="sub"><Val k="agentTier" id={tierOf(a)} /></span>
-                  </div>
-                  <Link className="btn" to={"/settings/agents/" + encodeURIComponent(a.id) + "#tier-" + encodeURIComponent(a.id)}>{t.change}</Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-          <section aria-label={t.tiers} className="panel stack">
-            <h2>{t.tiers}</h2>
-            <dl>
-              {AGENT_TIER.map((v) => (
-                <div key={v}>
-                  <dt><Val k="agentTier" id={v} /></dt>
-                  <dd className="sub">{entryOf(lang, "agentTier", v)?.hint}</dd>
-                </div>
-              ))}
-              <div>
-                <dt>{t.hardLine}</dt>
-                <dd className="sub">{t.hardLineWhat} · {t.hardLineHow}</dd>
-              </div>
-            </dl>
+          {view.agents.length === 0 && <p className="empty">{t.noAgents}</p>}
+          {view.agents.map((a) => <TierCard key={a.id} a={a} version={pol.version} reload={reload} />)}
+          <section aria-label={t.hardLine} className="panel stack">
+            <h2>{t.hardLine}</h2>
+            <p className="sub">{t.hardLineWhat} · {t.hardLineHow}</p>
           </section>
         </>
       )}
     </PolicyPage>
+  );
+}
+
+// 一档整理永远开；二档拍板一个开关，可限定项目；3a 改日常规矩。3b 永不放开，在页底一节说明。
+function TierCard({ a, version, reload }: { a: Agent; version: number; reload: () => Promise<void> }) {
+  const t = useT(strings);
+  const label = useLabel();
+  const lang = useLang();
+  const { api } = useSession();
+  const projects = useNamed("project");
+  const cur = (a.tier || "organize") as AgentTier;
+  const curProjects = a.tier_projects ?? [];
+  const src = [cur, curProjects];
+  const [tier, setTier, tierDirty] = useDraft(src, () => cur);
+  const [some, setSome, someDirty] = useDraft(src, () => curProjects.length > 0);
+  const [picked, setPicked, pickedDirty] = useDraft(src, () => curProjects);
+  const flip = (id: string) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+  const submit = async () => {
+    await api.put("/settings/agents/" + encodeURIComponent(a.id) + "/tier", { tier, projects: tier !== "organize" && some ? picked : [], version });
+    await reload();
+    return 0;
+  };
+  const name = a.name || a.harness;
+  return (
+    <Card title={name} saveLabel={t.save} onSave={submit} dirty={tierDirty || (tier !== "organize" && (someDirty || pickedDirty))} id={"tier-" + a.id}>
+      <fieldset className="choice" aria-label={t.tier(name)}>
+        {AGENT_TIER.map((v) => (
+          <label key={v}>
+            <input type="radio" name={"tier-" + a.id} value={v} checked={tier === v} onChange={() => setTier(v)} />
+            <span>{label("agentTier", v)}<small>{entryOf(lang, "agentTier", v)?.hint}</small></span>
+          </label>
+        ))}
+      </fieldset>
+      {tier !== "organize" && (
+        <fieldset className="checks">
+          <legend>{t.tierWhere}</legend>
+          <label><input type="checkbox" checked={!some} onChange={(ev) => setSome(!ev.target.checked)} />{t.allProjects}</label>
+          {some && projects.map((p) => (
+            <label key={p.id}><input type="checkbox" checked={picked.includes(p.id)} onChange={() => flip(p.id)} />{p.name}</label>
+          ))}
+        </fieldset>
+      )}
+    </Card>
   );
 }

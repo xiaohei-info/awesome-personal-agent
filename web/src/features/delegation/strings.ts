@@ -3,9 +3,7 @@ import { common } from "../../app/strings";
 
 const zh = {
   ...common.zh,
-  title: "进行中",
-  background: "Agent 在后台做的",
-  delegated: "派给执行者的",
+  title: "派给执行者的活",
   allowedTail: (list: string) => `；该项目允许的执行者：${list}`,
   ownerOnly: "仅本人",
   noParent: "找不到父事项，无法重新委派",
@@ -31,9 +29,7 @@ const zh = {
 
 const en: typeof zh = {
   ...common.en,
-  title: "In progress",
-  background: "Your Agent is doing in the background",
-  delegated: "Handed to executors",
+  title: "Work handed to executors",
   allowedTail: (list) => `; executors allowed in this project: ${list}`,
   ownerOnly: "only you",
   noParent: "The parent item was not found, so it cannot be redelegated",

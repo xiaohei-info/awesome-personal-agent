@@ -1,4 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
@@ -17,15 +18,21 @@ function mount(fetchImpl: typeof fetch) {
 beforeEach(() => sessionStorage.clear());
 
 describe("设置 › 我来拍板（原「策略与人格」的地址 /settings）", () => {
-  it("每个 Agent 显示判定读的那份档位；旧设置迁移来的恒为只整理；硬线写明只有本人能做", async () => {
-    mount(policyServer({ agents: [
+  it("每个 Agent 一张档位卡，读判定的那份（旧身份也按实际值）；就地改、只调一次档位路由；硬线写明只有本人能做", async () => {
+    const s = policyServer({ agents: [
       { id: "agent_1", harness: "hermes", name: "日常", enabled: true, rev: 1, tier: "decide", tier_projects: [] },
       { id: "legacy:hermes", harness: "hermes", name: "", enabled: true, rev: 0, tier: "rules" },
-    ] }).impl);
-    const list = within(await screen.findByRole("region", { name: "每个 Agent 现在的档位" }));
-    expect(within(list.getByRole("listitem", { name: "日常" })).getByText("也替我拍板")).toBeInTheDocument();
-    expect(within(list.getByRole("listitem", { name: "hermes" })).getByText("只整理")).toBeInTheDocument();
-    expect(within(list.getByRole("listitem", { name: "日常" })).getByRole("link", { name: "去改" })).toHaveAttribute("href", "/settings/agents/agent_1#tier-agent_1");
+    ] });
+    mount(s.impl);
+    const daily = within(await screen.findByRole("region", { name: "日常" }));
+    expect(daily.getByRole("radio", { name: /也替我拍板/ })).toBeChecked();
+    const legacy = within(screen.getByRole("region", { name: "hermes" }));
+    expect(legacy.getByRole("radio", { name: /连日常规矩也替我改/ })).toBeChecked();
+    expect(screen.queryByRole("link", { name: "去改" })).toBeNull();
+    await userEvent.click(legacy.getByRole("radio", { name: /只整理/ }));
+    await userEvent.click(legacy.getByRole("button", { name: "保存hermes" }));
+    await waitFor(() => expect(s.tiers).toHaveLength(1));
+    expect(s.tiers[0]).toMatchObject({ url: "/v1/settings/agents/legacy%3Ahermes/tier", body: { tier: "organize", projects: [], version: 1 } });
     expect(screen.getByText("只有你本人能做")).toBeInTheDocument();
   });
 

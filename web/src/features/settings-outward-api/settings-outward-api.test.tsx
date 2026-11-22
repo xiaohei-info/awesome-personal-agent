@@ -76,17 +76,17 @@ describe("设置 › 连接 › 对外接口 › 导出与转发密钥（flow-bo
     setChoice("zh");
   });
 
-  it("ACT-BOOT-04：用途按类型拼成 scope；明文只显示一次，关闭后不再可见、不落存储", async () => {
+  it("ACT-BOOT-04：签发不用选用途：默认签可读的钥匙，备注可选；勾「只允许订阅事件」才签 forward；明文只显示一次、不落存储", async () => {
     const s = server();
     mount(s.impl);
-    await userEvent.type(await screen.findByLabelText("名称（可选）"), "vault");
+    await userEvent.type(await screen.findByLabelText("备注（可选，只给你自己看）"), "看板");
     await userEvent.click(screen.getByRole("button", { name: "签发" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("apa_SECRET_1");
     const posts = () => s.calls.filter((c) => c.method === "POST");
-    expect(posts()[0]).toMatchObject({ path: "/v1/settings/ext-keys", body: { scope: "export.vault" }, csrf: "tok-1" });
-    await userEvent.selectOptions(screen.getByLabelText("用途"), "forward");
-    expect(screen.queryByLabelText("名称（可选）")).not.toBeInTheDocument();
+    expect(posts()[0]).toMatchObject({ path: "/v1/settings/ext-keys", body: { scope: "export", label: "看板" }, csrf: "tok-1" });
+    expect(within(screen.getByRole("list", { name: "已签发的钥匙" })).getByText("能读事项、材料，能订阅事件")).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("只允许订阅事件（不能读事项和材料）"));
     await userEvent.click(screen.getByRole("button", { name: "签发" }));
     await screen.findByText(/apa_SECRET_2/);
     expect(screen.queryByText(/apa_SECRET_1/)).not.toBeInTheDocument();
@@ -94,6 +94,15 @@ describe("设置 › 连接 › 对外接口 › 导出与转发密钥（flow-bo
     expect(JSON.stringify(sessionStorage)).not.toContain("SECRET");
     await userEvent.click(screen.getByRole("button", { name: "我已保存" }));
     expect(document.body.textContent).not.toContain("apa_SECRET");
+  });
+
+  it("接口说明一眼可见：基址是本页地址加 /v1，写明鉴权头与读事项、订阅事件的请求", async () => {
+    mount(server().impl);
+    const doc = within(await screen.findByRole("region", { name: "接口说明" }));
+    expect(doc.getByTestId("api-base")).toHaveTextContent(window.location.origin + "/v1");
+    expect(doc.getByText("Authorization: Bearer <上面签发的钥匙>")).toBeVisible();
+    expect(doc.getByRole("region", { name: "读事项（导出）" })).toHaveTextContent("GET /items");
+    expect(doc.getByRole("region", { name: "订阅事件" })).toHaveTextContent("/events?cursor=0&limit=100&wait=30");
   });
 
   it("离开页面再回来不会显示刚签发的明文", async () => {
@@ -112,7 +121,7 @@ describe("设置 › 连接 › 对外接口 › 导出与转发密钥（flow-bo
     mount(s.impl);
     const li = (await screen.findByText("L-a")).closest("li")!;
     await userEvent.click(within(li).getByRole("button", { name: "停用" }));
-    await screen.findByText(/已停用/);
+    await within(li).findByText("已停用");
     expect(s.calls.find((c) => c.method === "DELETE")).toMatchObject({ path: "/v1/settings/ext-keys/a", csrf: "tok-1" });
     expect(screen.queryByRole("button", { name: "停用" })).not.toBeInTheDocument();
   });
@@ -132,6 +141,6 @@ describe("设置 › 连接 › 对外接口 › 导出与转发密钥（flow-bo
     const li = (await screen.findByText("L-a")).closest("li")!;
     await userEvent.click(within(li).getByRole("button", { name: "停用" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("credential not found");
-    expect(screen.queryByText(/已停用/)).not.toBeInTheDocument();
+    expect(within(li).queryByText("已停用")).not.toBeInTheDocument();
   });
 });

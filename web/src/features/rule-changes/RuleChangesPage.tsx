@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ErrorNote } from "../../app/errors";
 import { locale, useT } from "../../app/i18n";
 import { PageHead } from "../../app/page";
@@ -54,7 +55,8 @@ function Row({ c, who, onRevert }: { c: Change; who: string; onRevert: (c: Chang
 export function RuleChangesPage() {
   const t = useT(strings);
   const { api } = useSession();
-  const [agent, setAgent] = useState("");
+  const [params] = useSearchParams();
+  const [agent, setAgent] = useState(params.get("agent") ?? ""); // Agent 页「它做过什么」带 ?agent= 进来
   const [agents, setAgents] = useState<AgentView["agents"]>([]);
   const [list, setList] = useState<Change[] | null>(null);
   const [more, setMore] = useState(false);

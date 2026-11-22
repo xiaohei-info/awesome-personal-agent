@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ErrorNote } from "../../app/errors";
 import { useNames } from "../../app/names";
 import { useSession } from "../../app/session";
@@ -102,6 +103,19 @@ export function AgentChangesPage() {
   const [showOlder, setShowOlder] = useState(false);
   // 基线只在挂载时取一次；离开页面才推进，刷新不会让"新变更"凭空消失。
   const [since] = useState(() => localStorage.getItem(VISIT_KEY));
+  // 按 Agent 筛（从 Agent 页「它做过什么」带 ?agent= 进来）：钥匙归属 → Agent id，与 names.tsx 同一规则。
+  // shortcut: 后台运行（run:…）的写入对不上钥匙，按 Agent 筛时不显示；要显示得让审计事件带上 Agent id。
+  const [params, setParams] = useSearchParams();
+  const agent = params.get("agent") ?? "";
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  const [owner, setOwner] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    api.get<{ agents: { id: string; name: string; harness: string }[] }>("/agents").then((v) => setAgents(v.agents.map((a) => ({ id: a.id, name: a.name || a.harness }))), () => setAgents([]));
+    api.get<{ credentials: { id: string; agent_id?: string; harness?: string }[] }>("/settings/tokens").then(
+      (r) => setOwner(new Map(r.credentials.map((c) => [c.id, c.agent_id || (c.harness ? "legacy:" + c.harness : "")]))),
+      () => setOwner(new Map()),
+    );
+  }, [api]);
 
   useEffect(() => () => localStorage.setItem(VISIT_KEY, new Date().toISOString()), []);
 
@@ -134,7 +148,7 @@ export function AgentChangesPage() {
     }
   };
 
-  const mine = (steps ?? []).filter((s) => s.actor.type === "agent" && s.type !== "command.rejected");
+  const mine = (steps ?? []).filter((s) => s.actor.type === "agent" && s.type !== "command.rejected" && (!agent || owner.get(s.actor.principal) === agent));
   const reverted = new Set((steps ?? []).flatMap((s) => (s.payload?.op === "revert" && s.payload.reverts ? [s.payload.reverts] : [])));
   // 回答之后内核为这件事续接了运行：撤回只撤账本里的回答，已拉起的运行撤不回，行上直说。
   const resumedAfter = (s: Step) => (steps ?? []).some((e) => e.type === "resume.launched" && e.object === s.object && e.seq > s.seq);
@@ -143,6 +157,16 @@ export function AgentChangesPage() {
   return (
     <main>
       <PageHead>{t.title}</PageHead>
+      <div className="filters">
+        <label>
+          {t.agent}
+          <select value={agent} onChange={(e) => setParams(e.target.value ? { agent: e.target.value } : {}, { replace: true })}>
+            <option value="">{t.allAgents}</option>
+            {agent && !agents.some((a) => a.id === agent) && <option value={agent}>{agent}</option>}
+            {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </label>
+      </div>
       {since && (
         <label>
           <input type="checkbox" checked={showOlder} onChange={(e) => setShowOlder(e.target.checked)} />

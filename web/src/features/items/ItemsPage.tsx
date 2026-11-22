@@ -11,7 +11,7 @@ import { BriefBody } from "../briefs/BriefBody";
 import { ProgressForm } from "../today/ProgressForm";
 import { locale, useT } from "../../app/i18n";
 import { strings } from "./strings";
-import { HANDOFF_TAG, PHASE, WAITING } from "../../app/ids";
+import { HANDOFF_TAG, WAITING } from "../../app/ids";
 import { Pick, Val, useLabel } from "../../app/values";
 import { ErrorNote } from "../../app/errors";
 import { EntityPick, useItemTitle, useNames } from "../../app/names";
@@ -45,6 +45,7 @@ export interface Item {
   spec?: { sections?: { project?: string; title?: string; body: string }[] };
   waiting_on?: { kind: string; ref: string };
   ask?: DecisionItem["ask"];
+  origin?: { source: string; ref?: string };
 }
 interface Relation { type: string; from: string; to: string }
 export interface Step {
@@ -83,95 +84,151 @@ export function ItemsPage() {
   );
 }
 
+// 事项列表的筛选维度：全文、排序、计划日期在服务端做（与 CLI、HTTP 一致）；其余在取回的列表上筛和数。
+// shortcut: 一次取回全部事项再分页，个人规模（数百条）够用；上万条时要服务端分页。
+const PAGE_SIZE = 50;
+const DIMS = ["project", "kind", "phase", "priority", "planned", "origin", "tag"] as const;
+type Dim = (typeof DIMS)[number];
+const NONE = "-";
+// 来源按 origin.source 归组；定时安排建的（instance:<实例>）合成一组。
+const originKey = (s?: string) => (!s ? NONE : s.startsWith("instance:") ? "instance:" : s);
+const valuesOf = (i: Item, d: Dim): string[] =>
+  d === "tag" ? i.tags ?? []
+  : d === "planned" ? [i.planned_for ? "yes" : "no"]
+  : d === "origin" ? [originKey(i.origin?.source)]
+  : [(i[d] as string | undefined) || NONE];
+const keep = (i: Item, f: Partial<Record<Dim, string>>, skip?: Dim) => DIMS.every((d) => d === skip || !f[d] || valuesOf(i, d).includes(f[d]!));
+
 function ItemList() {
   const t = useT(strings);
   const { api } = useSession();
-  const [phase, setPhase] = useState("");
-  const [tag, setTag] = useState("");
-  const [q, setQ] = useState("");
-  const [sort, setSort] = useState("");
-  const [plannedFor, setPlannedFor] = useState("");
+  const location = useLocation();
+  const [params, setParams] = useSearchParams();
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const views = useViews(api);
   const label = useLabel();
+  const project = useNames("project");
+  const source = useNames("source");
   const { utc_offset: offset } = useHostClock(api);
-  const [params, setParams] = useSearchParams();
-  const view = views.find((x) => x.key === params.get("view"));
-  const setView = (key: string) => setParams(key ? { view: key } : {}, { replace: true });
+  const get = (k: string) => params.get(k) ?? "";
+  const q = get("q"), sort = get("sort"), plannedFor = get("date");
+  const view = views.find((x) => x.key === get("view"));
+  const f = Object.fromEntries(DIMS.map((d) => [d, get(d)])) as Record<Dim, string>;
+  // 改任何筛选都回到第一页；值为空即去掉这一项。
+  const set = (next: Record<string, string>) => {
+    const p = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(next)) (v ? p.set(k, v) : p.delete(k));
+    if (!("page" in next)) p.delete("page");
+    setParams(p, { replace: true });
+  };
 
   useEffect(() => {
     setError(null);
-    // 全文、排序与计划日期都在服务端做，Web 与 CLI、HTTP 的结果因此一致。
     const qs = new URLSearchParams();
-    for (const [k, v] of [["phase", phase], ["q", q.trim()], ["sort", sort], ["planned_for", plannedFor]]) if (v) qs.set(k, v);
+    for (const [k, v] of [["q", q.trim()], ["sort", sort], ["planned_for", plannedFor]]) if (v) qs.set(k, v);
     api.get<{ items: Item[] }>("/items" + (qs.size ? "?" + qs : "")).then(
       (r) => setItems(r.items),
       (e) => setError(e),
     );
-  }, [api, phase, q, sort, plannedFor]);
+  }, [api, q, sort, plannedFor]);
 
-  const tags = [...new Set((items ?? []).flatMap((i) => i.tags ?? []))].sort();
-  const shown = (items ?? []).filter((i) => !tag || i.tags?.includes(tag));
+  const all = items ?? [];
+  const shown = all.filter((i) => keep(i, f));
+  const name = (d: Dim, v: string): string =>
+    v === NONE ? t.none[d] ?? t.notSet
+    : d === "project" ? project(v)
+    : d === "kind" ? label("itemKind", v)
+    : d === "phase" ? label("phase", v)
+    : d === "priority" ? label("priority", v)
+    : d === "planned" ? t.plannedHas[v as "yes" | "no"]
+    : d === "origin" ? (v === "instance:" ? t.fromSchedule : source(v))
+    : tagName(v, t.handoffName);
+  // 每个维度的选项按「其余筛选都生效时」的条数从多到少排；只剩一种取值且没被选中的维度不显示。
+  const facets = DIMS.map((d) => {
+    const n = new Map<string, number>();
+    for (const i of all) if (keep(i, f, d)) for (const v of valuesOf(i, d)) n.set(v, (n.get(v) ?? 0) + 1);
+    return { d, opts: [...n.entries()].sort((a, b) => b[1] - a[1] || name(d, a[0]).localeCompare(name(d, b[0]))) };
+  }).filter((x) => x.opts.length > 1 || f[x.d]);
+  const active = DIMS.filter((d) => f[d]);
+  const filtered = active.length > 0 || !!q || !!plannedFor || !!view;
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
+  const page = Math.min(pages, Math.max(1, Number(get("page")) || 1));
+  const rows = shown.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <main>
       <PageHead>{t.title}</PageHead>
       <p><Link to="new"><button type="button">{t.create}</button></Link></p>
       {views.length > 0 && (
-        <nav className="chips" aria-label={t.typeFilter}>
-          <button type="button" className={view ? undefined : "on"} aria-pressed={!view} onClick={() => setView("")}>{t.allTypes}</button>
+        <nav className="chips" aria-label={t.quick}>
+          <button type="button" aria-pressed={!view} onClick={() => set({ view: "" })}>{t.allTypes}</button>
           {views.map((x) => (
-            <button key={x.key} type="button" className={x === view ? "on" : undefined} aria-pressed={x === view} onClick={() => setView(x.key)}>
+            // 快捷视图按能力包声明的列与筛选显示（TypeViews），通用筛选随之清空，免得两套同名筛选叠在一起。
+            <button key={x.key} type="button" aria-pressed={x === view} onClick={() => set({ view: x === view ? "" : x.key, ...Object.fromEntries(DIMS.map((d) => [d, ""])) })}>
               {label("itemKind", x.v.kind)}
             </button>
           ))}
         </nav>
       )}
       <div className="filters">
-      <label>
-        {t.phaseFilter}
-        <Pick k="phase" value={phase} onChange={setPhase} ids={PHASE} empty={t.all} />
-      </label>
-      <label>
-        {t.tagFilter}
-        <select value={tag} onChange={(e) => setTag(e.target.value)}>
-          <option value="">{t.all}</option>
-          {tags.map((x) => <option key={x} value={x}>{tagName(x, t.handoffName)}</option>)}
-        </select>
-      </label>
-      <label>
-        {t.search}
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t.searchPlaceholder} />
-      </label>
-      <label>
-        {t.sort}
-        <select value={sort} onChange={(e) => setSort(e.target.value)}>
-          {Object.entries(t.sorts).map(([k, v]) => (
-            <option key={k} value={k}>
-              {v}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        {t.plannedDate}
-        <input type="date" value={plannedFor} onChange={(e) => setPlannedFor(e.target.value)} />
-      </label>
+        {!view && facets.map(({ d, opts }) => (
+          <label key={d} className={f[d] ? "on" : undefined}>
+            {t.dims[d]}
+            <select value={f[d]} onChange={(e) => set({ [d]: e.target.value })}>
+              <option value="">{t.all}</option>
+              {f[d] && !opts.some(([v]) => v === f[d]) && <option value={f[d]}>{name(d, f[d])} (0)</option>}
+              {opts.map(([v, n]) => <option key={v} value={v}>{name(d, v)} ({n})</option>)}
+            </select>
+          </label>
+        ))}
+        <label className={q ? "on" : undefined}>
+          {t.search}
+          <input type="search" value={q} onChange={(e) => set({ q: e.target.value })} placeholder={t.searchPlaceholder} />
+        </label>
+        <label>
+          {t.sort}
+          <select value={sort} onChange={(e) => set({ sort: e.target.value })}>
+            {Object.entries(t.sorts).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </label>
+        <label className={plannedFor ? "on" : undefined}>
+          {t.plannedDate}
+          <input type="date" value={plannedFor} onChange={(e) => set({ date: e.target.value })} />
+        </label>
       </div>
+      {filtered && (
+        <p className="active-filters" aria-label={t.filtering}>
+          <span className="sub">{t.filtering}</span>
+          {view && <button type="button" className="badge" onClick={() => set({ view: "" })} aria-label={t.removeFilter(label("itemKind", view.v.kind))}>{label("itemKind", view.v.kind)} ✕</button>}
+          {active.map((d) => (
+            <button key={d} type="button" className="badge" onClick={() => set({ [d]: "" })} aria-label={t.removeFilter(t.dims[d])}>{t.dims[d]}：{name(d, f[d])} ✕</button>
+          ))}
+          {q && <button type="button" className="badge" onClick={() => set({ q: "" })} aria-label={t.removeFilter(t.search)}>{t.search}：{q} ✕</button>}
+          {plannedFor && <button type="button" className="badge" onClick={() => set({ date: "" })} aria-label={t.removeFilter(t.plannedDate)}>{t.plannedDate}：{plannedFor} ✕</button>}
+          <button type="button" className="link" onClick={() => setParams(sort ? { sort } : {}, { replace: true })}>{t.clearAll}</button>
+        </p>
+      )}
       {error != null && <ErrorNote error={error} />}
-      {view && items && <ViewTable view={view} items={shown} />}
+      {view && items && <ViewTable view={view} items={all} />}
       {!view && items && !shown.length && error == null && <p className="empty">{t.noMatch}</p>}
       {!view && <ul aria-label={t.list} className="rows">
-        {shown.map((i) => (
+        {rows.map((i) => (
           <li key={i.id}>
-            <Link to={i.id}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
+            <Link to={i.id} state={{ list: location.search }}>{i.title}</Link> <span className="badge plain"><Val k="phase" id={i.phase} /></span>
             <span className="sub">
-              {[i.status_label, i.tags?.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" "), i.planned_for && t.planAt(i.planned_for, i.planned_slot), i.deadline && t.due(deadlineText(i.deadline, offset))].filter(Boolean).join(" · ")}
+              {[i.project && project(i.project), i.status_label, i.tags?.map((x) => (x === HANDOFF_TAG ? t.handoffName : "#" + x)).join(" "), i.planned_for && t.planAt(i.planned_for, i.planned_slot), i.deadline && t.due(deadlineText(i.deadline, offset))].filter(Boolean).join(" · ")}
             </span>
           </li>
         ))}
       </ul>}
+      {!view && shown.length > PAGE_SIZE && (
+        <nav className="pager" aria-label={t.pager}>
+          <button type="button" disabled={page <= 1} onClick={() => set({ page: String(page - 1) })}>{t.prev}</button>
+          <span className="sub">{t.range((page - 1) * PAGE_SIZE + 1, (page - 1) * PAGE_SIZE + rows.length, shown.length)}</span>
+          <button type="button" disabled={page >= pages} onClick={() => set({ page: String(page + 1) })}>{t.next}</button>
+        </nav>
+      )}
     </main>
   );
 }
@@ -195,6 +252,7 @@ function ItemDetail() {
   const [editing, setEditing] = useState(false);
   const post = useAnswer(setActErr);
   const { utc_offset: offset } = useHostClock(api);
+  const back = ".." + ((useLocation().state as { list?: string } | null)?.list ?? ""); // 回到列表时带回原来的筛选与页码
 
   const load = useCallback(async () => {
     const eid = encodeURIComponent(id);
@@ -249,7 +307,7 @@ function ItemDetail() {
   // ④进展与经过 ⑤「更多操作」折叠：状态标签、截止、转阶段、关联、材料、关联键。
   return (
     <main>
-      <p className="eyebrow"><Link to="..">{t.back}</Link></p>
+      <p className="eyebrow"><Link to={back}>{t.back}</Link></p>
       <h1>{item.title}</h1>
       <p className="lede">
         {[t.phaseNow(label("phase", item.phase)), item.project && projectName(item.project), item.planned_for && t.planAt(item.planned_for, item.planned_slot), item.deadline && t.due(deadlineText(item.deadline, offset))].filter(Boolean).join(" · ")}
@@ -267,11 +325,7 @@ function ItemDetail() {
           <button type="button" onClick={() => act(() => api.post(path + "/dismiss", {}))}>{t.dismiss}</button>
         </div>
       )}
-      {item.phase === "open" && (
-        <div className="actions">
-          <button type="button" className="primary" onClick={() => act(() => api.post(path + "/transition", { to: "done", reason: t.doneReason }, ifMatch))}>{t.done}</button>
-        </div>
-      )}
+      {item.phase !== "proposed" && <PhaseActions key={"p" + item.version} item={item} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />}
       {item.kind === "task" && (
         <AgentBlock key={"h" + item.version} item={item} onAgent={(aid) => act(() => api.patch(path, { preferred_agent_id: aid, reason: t.handoff }, ifMatch))} onSave={(tags) => act(() => api.patch(path, { tags, reason: t.handoffReason(tags.includes(HANDOFF_TAG)) }, ifMatch))} />
       )}
@@ -314,8 +368,9 @@ function ItemDetail() {
           <p>{t.label(item.status_label || t.notSet)}</p>
           {item.tags?.some((x) => x !== HANDOFF_TAG) ? <p>{t.tags(item.tags.filter((x) => x !== HANDOFF_TAG).join(t.listSep))}</p> : null}
         </div>
+        {!ended && <DropAction key={"d" + item.version} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />}
+        {item.kind === "delegation" && <p><Link to={"/delegation#d-" + encodeURIComponent(item.id)}>{t.reassignLink}</Link></p>}
         <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
-        <TransitionForm key={"t" + item.version} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />
 
         <section aria-label={t.relationsLabel}>
           <h2>{t.relations}</h2>
@@ -357,42 +412,68 @@ function LabelForm({ item, onSave }: { item: Item; onSave: (v: string) => void }
   );
 }
 
-function TransitionForm({ onSubmit }: { onSubmit: (b: Record<string, unknown>) => void }) {
+// 主操作区的阶段变更（界面设计 §9.5）：按当前阶段列出能去的阶段，一键改；理由写明是在网页上改的。
+// 要补信息的就地展开再确认：等待要说等什么，委派完成要带证据（内核要求，§6.14）。「不做了」在「更多操作」里二次确认。
+function PhaseActions({ item, onSubmit }: { item: Item; onSubmit: (b: Record<string, unknown>) => void }) {
   const t = useT(strings);
-  const [to, setTo] = useState("open");
-  const [reason, setReason] = useState("");
+  const label = useLabel();
+  const [to, setTo] = useState<string | null>(null);
   const [evidence, setEvidence] = useState("");
   const [wKind, setWKind] = useState("human");
   const [wRef, setWRef] = useState("");
+  const ended = ["done", "dropped"].includes(item.phase);
+  const targets = ended ? ["open"] : ["done", "open", "waiting"].filter((p) => p !== item.phase);
+  const text = (p: string) => (p === "open" ? (ended ? t.reopen : t.backToOpen) : p === "waiting" ? t.toWaiting : t.done);
+  const reason = (p: string) => (p === "done" ? t.doneReason : t.phaseReason(label("phase", p)));
+  const needs = (p: string) => p === "waiting" || (p === "done" && item.kind === "delegation");
   // 等待对象随类别换控件：时间用日期时间（发 RFC 3339），执行者用名单，其余写一句话。
   const pickKind = (k: string) => { setWKind(k); setWRef(""); };
   const ref = wKind === "time" && wRef ? new Date(wRef).toISOString() : wRef.trim();
+  const submit = (p: string) => onSubmit({ to: p, reason: reason(p), ...(p === "done" && evidence.trim() ? { evidence: evidence.trim() } : {}), ...(p === "waiting" ? { waiting_on: { kind: wKind, ref } } : {}) });
   return (
-    <form
-      className="panel"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSubmit({ to, reason, ...(evidence ? { evidence } : {}), ...(to === "waiting" && ref ? { waiting_on: { kind: wKind, ref } } : {}) });
-      }}
-    >
-      <label>{t.targetPhase} <Pick k="phase" value={to} onChange={setTo} ids={PHASE} /></label>
-      <label>{t.reason} <input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
-      {/* 结果证据：委派完成必须带（链接、提交等）；只作记录，不参与权限判定 */}
-      {to === "done" && <label>{t.evidence} <input value={evidence} onChange={(e) => setEvidence(e.target.value)} /></label>}
-      {to === "waiting" && (
-        <>
-          <label>{t.waitKind} <Pick k="waiting" value={wKind} onChange={pickKind} ids={WAITING} /></label>
-          {wKind === "time" ? (
-            <label>{t.waitUntil} <input type="datetime-local" value={wRef} onChange={(e) => setWRef(e.target.value)} /></label>
-          ) : wKind === "executor" ? (
-            <label>{t.waitRef} <EntityPick kind="executor" value={wRef} onChange={setWRef} empty={t.choose} /></label>
-          ) : (
-            <label>{t.waitRef} <input value={wRef} onChange={(e) => setWRef(e.target.value)} /></label>
+    <div className="stack" aria-label={t.phaseActions} role="group">
+      <div className="actions">
+        {targets.map((p, n) => (
+          <button key={p} type="button" className={n === 0 ? "primary" : undefined} aria-expanded={needs(p) ? to === p : undefined} onClick={() => (needs(p) ? setTo(to === p ? null : p) : submit(p))}>{text(p)}</button>
+        ))}
+      </div>
+      {to && (
+        <form className="panel" onSubmit={(e) => { e.preventDefault(); submit(to); }}>
+          {to === "done" && <label>{t.evidence} <input value={evidence} onChange={(e) => setEvidence(e.target.value)} required /></label>}
+          {to === "waiting" && (
+            <>
+              <label>{t.waitKind} <Pick k="waiting" value={wKind} onChange={pickKind} ids={WAITING} /></label>
+              {wKind === "time" ? (
+                <label>{t.waitUntil} <input type="datetime-local" value={wRef} onChange={(e) => setWRef(e.target.value)} required /></label>
+              ) : wKind === "executor" ? (
+                <label>{t.waitRef} <EntityPick kind="executor" value={wRef} onChange={setWRef} empty={t.choose} /></label>
+              ) : (
+                <label>{t.waitRef} <input value={wRef} onChange={(e) => setWRef(e.target.value)} required /></label>
+              )}
+            </>
           )}
-        </>
+          <div className="actions">
+            <button type="submit" className="primary">{t.confirmPhase(text(to))}</button>
+            <button type="button" onClick={() => setTo(null)}>{t.cancel}</button>
+          </div>
+        </form>
       )}
-      <button type="submit">{t.transition}</button>
-    </form>
+    </div>
+  );
+}
+
+/** 不做了（放弃）：低频且会让事项离开所有待办，所以收在「更多操作」里，先确认再改。 */
+function DropAction({ onSubmit }: { onSubmit: (b: Record<string, unknown>) => void }) {
+  const t = useT(strings);
+  const [asking, setAsking] = useState(false);
+  const [why, setWhy] = useState("");
+  if (!asking) return <p><button type="button" className="danger" onClick={() => setAsking(true)}>{t.drop}</button></p>;
+  return (
+    <div className="panel actions" role="group" aria-label={t.drop}>
+      <label>{t.dropWhy} <input value={why} onChange={(e) => setWhy(e.target.value)} /></label>
+      <button type="button" className="danger" onClick={() => onSubmit({ to: "dropped", reason: why.trim() || t.dropReason })}>{t.confirmDrop}</button>
+      <button type="button" onClick={() => setAsking(false)}>{t.cancel}</button>
+    </div>
   );
 }
 

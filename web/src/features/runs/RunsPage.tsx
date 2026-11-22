@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { locale, useT } from "../../app/i18n";
@@ -120,7 +120,8 @@ export function RunsPage() {
   const t = useT(strings);
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [more, setMore] = useState(false);
-  const [kind, setKind] = useState<Kind>("all");
+  const [params] = useSearchParams();
+  const [kind, setKind] = useState<Kind>(() => (params.get("kind") ?? "all") in KINDS ? (params.get("kind") as Kind) : "all");
   const [failedOnly, setFailedOnly] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const seq = useRef(0); // 换筛选后丢弃迟到的旧响应

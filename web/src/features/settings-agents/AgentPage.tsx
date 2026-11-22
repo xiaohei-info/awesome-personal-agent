@@ -2,10 +2,9 @@ import { useEffect, useId, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { errorText as msg, useLang, useT } from "../../app/i18n";
-import { AGENT_TIER, PERM, type AgentTier } from "../../app/ids";
-import { useNamed } from "../../app/names";
+import { PERM } from "../../app/ids";
 import { useRaw } from "../../app/raw";
-import { entryOf, Val, useLabel } from "../../app/values";
+import { Val, useLabel } from "../../app/values";
 import { Basics } from "./AgentEditor";
 import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
 import { AGENT_KINDS, entries, hasKey, LEGACY, useData, type Credential, type Declaration, type Entry } from "./data";
@@ -13,8 +12,8 @@ import { useEntryName } from "./SettingsAgentsPage";
 import { strings } from "./strings";
 
 // 设置 › Agent › 某个 Agent（界面设计 §3.2、§4、§6.3；设计 §14.3）：这个 Agent 的全部属性只在这里改。
-// ①接入清单（没完成时置顶，每步就地做完）②基本信息 ③左栏钥匙（能碰哪些事）、右栏档位（能做到哪一档）④后台权限 ⑤在哪里做 ⑥被谁使用（只读）⑦高级。
-// 钥匙（/settings/tokens）只定范围，档位（PUT /settings/agents/{id}/tier）只定后果，两者互不影响；判定都在服务端。
+// ①接入清单（没完成时置顶，每步就地做完）②基本信息 ③档位一行（只读，在「我来拍板」改）④钥匙（能碰哪些事）⑤后台权限 ⑥在哪里做 ⑦被谁使用（只读）⑧它做过什么 ⑨高级。
+// 钥匙（/settings/tokens）只定范围，档位只定后果，两者互不影响；判定都在服务端。
 // 每档给 Agent 的工具只取声明里的 headless.tools / tool_notes（附录 A.2），不解析命令行参数。
 
 export function AgentPage() {
@@ -43,17 +42,16 @@ export function AgentPage() {
           <Connect e={e} name={name} reload={load} onError={setError} />
           <RolesLine e={e} pol={pol} />
           {e.instance ? <Basics key={e.card!.rev} card={e.card!} host={e.live?.declaration} onSaved={reloadAll} /> : <LegacyBasics e={e} />}
-          <div className="split">
-            <section aria-label={t.keys} className="panel stack">
-              <h2>{t.keys}</h2>
-              <p className="sub">{t.keysScope}</p>
-              <Keys e={e} reload={load} onError={setError} />
-            </section>
-            <TierCard e={e} pol={pol} reload={reloadAll} />
-          </div>
+          <TierLine e={e} />
+          <section aria-label={t.keys} className="panel stack">
+            <h2>{t.keys}</h2>
+            <p className="sub">{t.keysScope}</p>
+            <Keys e={e} reload={load} onError={setError} />
+          </section>
           <Tools e={e} lim={lim} save={save} />
           {e.live && <Launch e={e} name={name} pol={pol} save={save} />}
           <UsedBy e={e} pol={pol} />
+          <Records e={e} />
           <details className="panel">
             <summary>{t.advanced}</summary>
             {(e.live ?? e.pending) && (
@@ -268,52 +266,30 @@ function Launch({ e, name, pol, save }: { e: Entry; name: string; pol: Doc; save
   );
 }
 
-// 档位：一档整理永远开；二档拍板一个开关，可限定项目；3a 改日常规矩。3b（发钥匙、填凭据、改工具权限）永不放开，只在下方一行说明。
-// 这是 3b 设置本身，保存时网页可能要求再输一次口令（由 api 统一弹框）。
-function TierCard({ e, pol, reload }: { e: Entry; pol: { version: number }; reload: () => Promise<void> }) {
+/** 档位只在「我来拍板」改（设计 §14.3）；这里一行说它现在能替你做到哪一档，并给去改的链接，与分工那一行同一写法。 */
+function TierLine({ e }: { e: Entry }) {
   const t = useT(strings);
   const label = useLabel();
-  const lang = useLang();
-  const { api } = useSession();
-  const projects = useNamed("project");
-  const cur = (e.card?.tier || "organize") as AgentTier;
-  const curProjects = e.card?.tier_projects ?? [];
-  const src = [cur, curProjects];
-  const [tier, setTier, tierDirty] = useDraft(src, () => cur);
-  const [some, setSome, someDirty] = useDraft(src, () => curProjects.length > 0);
-  const [picked, setPicked, pickedDirty] = useDraft(src, () => curProjects);
-  const flip = (id: string) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
-  const submit = async () => {
-    await api.put("/settings/agents/" + encodeURIComponent(e.id) + "/tier", { tier, projects: tier !== "organize" && some ? picked : [], version: pol.version });
-    await reload();
-    return 0;
-  };
-  const body = (
-    <>
-      <fieldset className="choice" aria-label={t.tier}>
-        {AGENT_TIER.map((v) => (
-          <label key={v}>
-            <input type="radio" name={"tier-" + e.id} value={v} checked={tier === v} onChange={() => setTier(v)} />
-            <span>{label("agentTier", v)}<small>{entryOf(lang, "agentTier", v)?.hint}</small></span>
-          </label>
-        ))}
-      </fieldset>
-      {tier !== "organize" && (
-        <fieldset className="checks">
-          <legend>{t.tierWhere}</legend>
-          <label><input type="checkbox" checked={!some} onChange={(ev) => setSome(!ev.target.checked)} />{t.allProjects}</label>
-          {some && projects.map((p) => (
-            <label key={p.id}><input type="checkbox" checked={picked.includes(p.id)} onChange={() => flip(p.id)} />{p.name}</label>
-          ))}
-        </fieldset>
-      )}
-      <p className="sub hardline">{t.hardLine}</p>
-    </>
-  );
   return (
-    <Card title={t.tier} onSave={submit} dirty={tierDirty || (tier !== "organize" && (someDirty || pickedDirty))} id={"tier-" + e.id}>
-      {body}
-    </Card>
+    <p className="sub">
+      {t.tierNow(label("agentTier", e.card?.tier || "organize"))} <Link to={"/settings#tier-" + encodeURIComponent(e.id)}>{t.tierChange}</Link>
+    </p>
+  );
+}
+
+/** 它做过什么：直达诊断里这个 Agent 的改动、规矩改动（已按它筛好），以及运行记录。 */
+function Records({ e }: { e: Entry }) {
+  const t = useT(strings);
+  const q = "?agent=" + encodeURIComponent(e.id);
+  return (
+    <section aria-label={t.records} className="panel stack">
+      <h2>{t.records}</h2>
+      <ul className="plain">
+        <li><Link to={"/agent-changes" + q}>{t.recChanges}</Link></li>
+        <li><Link to={"/rule-changes" + q}>{t.recRules}</Link></li>
+        <li><Link to="/runs?kind=agent">{t.recRuns}</Link></li>
+      </ul>
+    </section>
   );
 }
 
