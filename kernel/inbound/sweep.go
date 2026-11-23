@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -392,7 +393,7 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, locality stri
 			if d.New != m.ref {
 				continue
 			}
-			v.Why = strings.TrimSpace(d.Reason)
+			v.Why = plainRefs(strings.TrimSpace(d.Reason), byRef)
 			ref, _ := d.Target.(string)
 			t, ok := byRef[ref]
 			inCands := ok && slices.ContainsFunc(m.cands, func(c sweepCand) bool { return c.rec == t })
@@ -419,6 +420,23 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, locality stri
 		res = append(res, v)
 	}
 	return res, nil
+}
+
+// batchRef 是资料里给记录编的号（N1、E3）；理由里出现时换成那条的标题，页面上不出现编号。
+var batchRef = regexp.MustCompile(`[NE]\d+`)
+
+func plainRefs(why string, byRef map[string]*sweepRec) string {
+	return batchRef.ReplaceAllStringFunc(why, func(ref string) string {
+		r, ok := byRef[ref]
+		if !ok {
+			return ref
+		}
+		t := []rune(r.it.Title)
+		if len(t) > 24 {
+			t = append(t[:24], '…')
+		}
+		return "「" + string(t) + "」"
+	})
 }
 
 func scoreOf(m, t *sweepRec) float64 {

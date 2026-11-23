@@ -67,7 +67,7 @@ func TestMergeBatchAgainstExistingAndUndo(t *testing.T) {
 
 	e.setPolicy(func(p *policy.Policy) { p.MergeJudge = policy.MergeSame; p.Merge.BatchSize = 3 })
 	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[
-		{"new":"N1","action":"attach","target":"E1","reason":"同一个资产编号 B18630823","confident":true},
+		{"new":"N1","action":"attach","target":"E1","reason":"N1 与 E1 是同一个资产编号 B18630823","confident":true},
 		{"new":"N2","action":"duplicate","target":"E2","reason":"同一次周报改版，本人忽略过","confident":true},
 		{"new":"N3","action":"merge","target":"E3","reason":"同一场预算评审会议","confident":true}]}`})
 	e.emit("src_b", "ticket", ev("n1", "ticket.opened", "AgentSafe 资产确认（B18630823）", nil))
@@ -106,6 +106,9 @@ func TestMergeBatchAgainstExistingAndUndo(t *testing.T) {
 			sw.By != "generate" || sw.Run == "" || sw.Size != 3 || sw.Chars == 0 || sw.Why == "" || sw.Batch == "" {
 			t.Fatalf("%s: %s %+v", c.it.Title, c.it.Phase, sw)
 		}
+	}
+	if why := n1.Proposal.Sweep.Why; strings.Contains(why, "N1") || strings.Contains(why, "E1") || !strings.Contains(why, "「AgentSafe 资产确认") || !strings.Contains(why, "「评审 AgentSafe") {
+		t.Fatalf("batch numbers in the reason become titles: %q", why)
 	}
 	if ps := e.progressOf(open); len(ps) != 1 || !strings.Contains(ps[0].Text, "AgentSafe 资产确认") || !strings.Contains(ps[0].Text, "B18630823") {
 		t.Fatalf("attach appends a supplement to the open item: %+v", ps)
