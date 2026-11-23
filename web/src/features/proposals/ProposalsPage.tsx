@@ -32,7 +32,7 @@ export interface Proposal {
 interface Merge { event: string; source: string; title: string; summary?: string; by: string; score?: number; judgment?: string; why?: string; batch?: string; item?: string; at: string }
 /** 批量归类的记录：结论、去处、理由、判断方。 */
 interface Sweep { state: string; action?: string; target?: string; why?: string; by?: string; at?: string }
-interface SourceRead { event: { id: string; source_id: string; subject: string; summary?: string; occurred_at: string; link?: string } }
+interface SourceRead { event: { id: string; source_id: string; subject: string; summary?: string; occurred_at: string; link?: string; disposition?: string; merge_key?: string } }
 
 type Action = "accept" | "dismiss" | "attach" | "handoff" | "split" | "unmerge";
 /** 处理完的一行回执：说清结果，并给去处（界面设计 §5.2、§7 路径一）。 */
@@ -157,68 +157,122 @@ function ItemName({ id, say }: { id: string; say: (title: string) => string }) {
   return <>{say(title || "…")}</>;
 }
 
-/** 来自几个来源时展开看每个来源：名字、时间、原话或摘要、原文链接；并入的那几个写明何时、由谁、凭什么合并，并可一键撤销或拆出。 */
+/** 来源事件的读视图（GET /source-events/{id}）里本页用到的字段。 */
+type Ev = SourceRead["event"];
+/** 被折叠进来的那条建议此前自己怎么合成的：它的标题、来源与合并留痕。 */
+interface Folded { title: string; sources: string[]; merges: Merge[] }
+
+const when = (s?: string) => (s ? new Date(s).toLocaleString() : "");
+// 页面只摆前若干个字，悬停看全文：理由常是一整段。
+const clip = (s: string, n = 60) => ([...s].length > n ? [...s].slice(0, n).join("") + "…" : s);
+
+/** 合成这一条用了几条消息、各自怎么进来的：「N 条消息 → 这一条」，逐条列来源、时间、原话、链接、相似度与判定理由。
+ *  被别的批次折叠进来的建议整组列在它下面，连同它此前自己合进来的几条（取它本身的留痕），跨批也是一串，不用人去翻两跳。 */
 function Sources({ item, onSplit, onUnmerge }: { item: Proposal; onSplit: (event: string) => Promise<void>; onUnmerge: (member: string) => Promise<void> }) {
   const t = useT(strings);
   const { api } = useSession();
   const sourceName = useNames("source");
-  const [rows, setRows] = useState<SourceRead["event"][] | null>(null);
+  const [rows, setRows] = useState<Ev[] | null>(null);
+  const [folded, setFolded] = useState<Record<string, Folded>>({});
   const [busy, setBusy] = useState(false);
   const p = item.proposal!;
+  const merges = new Map((p.merges ?? []).map((m) => [m.event, m]));
   const load = () => {
     if (rows) return;
     Promise.all(p.sources!.map((id) => api.get<SourceRead>("/source-events/" + encodeURIComponent(id)).then((r) => r.event, () => ({ id, source_id: "", subject: "", occurred_at: "" }))))
       .then(setRows);
+    const ids = [...new Set((p.merges ?? []).map((m) => m.item).filter((x): x is string => !!x))];
+    Promise.all(ids.map((id) => api.get<{ item?: Proposal }>("/items/" + encodeURIComponent(id)).then((r) => r.item, () => undefined)))
+      .then((xs) => setFolded(Object.fromEntries(xs.filter((x): x is Proposal => !!x).map((x) => [x.id, { title: x.title, sources: x.proposal?.sources ?? [], merges: x.proposal?.merges ?? [] }]))));
   };
-  const merges = new Map((p.merges ?? []).map((m) => [m.event, m]));
   const run = (f: () => Promise<void>) => async () => { setBusy(true); try { await f(); } finally { setBusy(false); } };
+  // 一条消息是怎么进到 to（「这条」或被折叠的那条）里的。
+  const how = (ev: Ev, m: Merge | undefined, first: boolean, to: string) => {
+    if (m?.item) return t.foldedInto(to);
+    if (!m) return first ? t.first(to) : ev.disposition === "attached" ? t.followUp(to) : t.joined(to);
+    if (m.by !== "merge_key") return t.mergedBy[m.by] ?? t.mergedBy.default;
+    const k = ev.merge_key ?? "";
+    return k.startsWith("link:") ? t.byLink(k.slice(5).replace(/^https?:\/\//, ""), to) : k.startsWith("title:") ? t.byTitle(to) : t.byKey(to);
+  };
+  const score = (m?: Merge) => (!m ? "" : m.by === "merge_key" ? t.keySame : m.score ? t.score(m.score) : "");
+  const line = (ev: Ev, m: Merge | undefined, first: boolean, to: string, split?: boolean) => (
+    <li key={ev.id} className="act-row" aria-label={sourceName(m?.source || ev.source_id) || ev.id} title={ev.id}>
+      <div>
+        <span>{sourceName(m?.source || ev.source_id)} · {when(ev.occurred_at)}</span>
+        <span className="sub">{m?.title || ev.subject}{(m?.summary || ev.summary) ? " — " + (m?.summary || ev.summary) : ""}</span>
+        <span className="sub">
+          {[how(ev, m, first, to), score(m), m && !m.item ? t.mergedAt(when(m.at)) : ""].filter(Boolean).join(" · ")}
+          {m?.judgment && <> · <Link to={"/judgment?id=" + encodeURIComponent(m.judgment)}>{t.seeJudgment}</Link></>}
+          {" · "}<Link to={"/sources/events/" + encodeURIComponent(ev.id)}>{t.original}</Link>
+          {ev.link && <> · <a href={ev.link} target="_blank" rel="noreferrer" title={ev.link}>{t.link}</a></>}
+        </span>
+        {m?.why && !m.item && <span className="sub" title={m.why}>{t.reasonIs(clip(m.why))}</span>}
+      </div>
+      {split && <button type="button" title={t.splitWhy} disabled={busy} onClick={run(() => onSplit(ev.id))}>{t.splitOut}</button>}
+    </li>
+  );
+  const byId = new Map((rows ?? []).map((ev) => [ev.id, ev]));
+  // 按到达先后排；同一条被折叠进来的建议带进来的几条收成一组，组放在它第一条出现的位置。
+  const entries: ({ ev: Ev; i: number } | { fold: string; evs: Ev[] })[] = [];
+  const groups = new Map<string, Ev[]>();
+  (rows ?? []).forEach((ev, i) => {
+    const f = merges.get(ev.id)?.item;
+    if (!f) return entries.push({ ev, i });
+    if (!groups.has(f)) entries.push({ fold: f, evs: groups.set(f, []).get(f)! });
+    groups.get(f)!.push(ev);
+  });
+  const tally = Object.entries((rows ?? []).reduce<Record<string, number>>((a, ev) => {
+    const n = sourceName(merges.get(ev.id)?.source || ev.source_id);
+    return { ...a, [n]: (a[n] ?? 0) + 1 };
+  }, {})).map(([n, k]) => t.partCount(n, k)).join(" · ");
   return (
     <details onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && load()}>
-      <summary>{t.sourcesHead}</summary>
+      <summary>{t.sourcesHead(p.sources!.length)}</summary>
       {!rows ? <p role="status">{t.loadingSources}</p> : (
-        <ul className="rows">
-          {rows.map((ev, i) => {
-            const m = merges.get(ev.id);
-            const when = ev.occurred_at ? new Date(ev.occurred_at).toLocaleString() : "";
-            const why = !m ? (i === 0 ? t.first : "") : [t.mergedBy[m.by] ?? t.mergedBy.default, m.score ? t.score(m.score) : "", t.mergedAt(new Date(m.at).toLocaleString())].filter(Boolean).join(" · ");
-            return (
-              <li key={ev.id} className="act-row" aria-label={sourceName(m?.source || ev.source_id) || ev.id}>
-                <div>
-                  <span>{sourceName(m?.source || ev.source_id)} · {when}</span>
-                  <span className="sub">{m?.title || ev.subject}{(m?.summary || ev.summary) ? " — " + (m?.summary || ev.summary) : ""}</span>
-                  <span className="sub">
-                    {why}
-                    {m?.judgment && <> · <Link to={"/judgment?id=" + encodeURIComponent(m.judgment)}>{t.seeJudgment}</Link></>}
-                    {" · "}<Link to={"/sources/events/" + encodeURIComponent(ev.id)}>{t.original}</Link>
-                    {ev.link && <> · <a href={ev.link} target="_blank" rel="noreferrer">{t.link}</a></>}
-                  </span>
-                  {m?.why && <span className="sub">{t.reasonIs(m.why)}</span>}
-                </div>
-                {m?.item ? (
-                  <button type="button" title={t.unmergeWhy} disabled={busy} onClick={run(() => onUnmerge(m.item!))}>{t.unmerge}</button>
-                ) : i > 0 && (
-                  <button type="button" title={t.splitWhy} disabled={busy} onClick={run(() => onSplit(ev.id))}>{t.splitOut}</button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <p className="sub">{tally}</p>
+          <ul className="rows">
+            {entries.map((x) => {
+              if ("ev" in x) {
+                const m = merges.get(x.ev.id);
+                return line(x.ev, m, x.i === 0, t.here, x.i > 0);
+              }
+              const m = merges.get(x.evs[0].id)!;
+              const f = folded[x.fold];
+              const name = f?.title || "…";
+              const inner = new Map((f?.merges ?? []).map((y) => [y.event, y]));
+              return (
+                <li key={x.fold} className="act-row" aria-label={t.foldLabel(name)} title={x.fold}>
+                  <div>
+                    <span>{t.foldHead(name, x.evs.length)}</span>
+                    <span className="sub">{[t.foldWhen(when(m.at)), t.mergedBy[m.by] ?? t.mergedBy.default, score(m)].filter(Boolean).join(" · ")}</span>
+                    {m.why && <span className="sub" title={m.why}>{t.reasonIs(clip(m.why))}</span>}
+                    <ul className="rows">
+                      {x.evs.map((ev) => line(ev, inner.get(ev.id), f?.sources[0] === ev.id, t.quoted(name)))}
+                    </ul>
+                  </div>
+                  <button type="button" title={t.unmergeWhy} disabled={busy} onClick={run(() => onUnmerge(x.fold))}>{t.unmerge}</button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </details>
   );
 }
 
+interface Decision { item: string; title: string; source?: string; sources?: number; action: string; target?: string; target_title?: string; why?: string; by: string }
 interface Activity {
   days: number; pending: number; model_calls: number; chars: number;
-  batches: { batch: string; at: string; size: number; run?: string; chars: number; deferred?: number;
-    decisions: { item: string; title: string; source?: string; action: string; target?: string; target_title?: string; why?: string; by: string }[] }[];
+  batches: { batch: string; at: string; size: number; run?: string; chars: number; deferred?: number; decisions: Decision[] }[];
 }
 
-// 规则比过、没有相似记录而留着的不逐条列，只记条数；折叠掉的排前面，其次是模型看过的。
+// 规则比过、没有相似记录而留着的不逐条列，只记条数；折叠掉的按去处收成「N 条 → 这一条」排前面，其次是模型看过的。
 const quiet = (d: { action: string; by: string }) => d.action === "keep" && d.by === "rule";
-const rank = (d: { action: string }) => (d.action === "keep" || d.action === "undone" ? 1 : 0);
+const isFold = (d: { action: string }) => d.action === "attach" || d.action === "merge" || d.action === "duplicate";
 
-/** 最近自动归类（§9.3）：每一批归了几条、调了几次模型、送出多少字；每条写明去处与理由，折叠掉的可以一键撤销。 */
+/** 最近自动归类（§9.3）：每一批归了几条、调了几次模型、送出多少字；折叠掉的按去处写成「N 条 → 「去处」」，逐条写明理由，可以一键撤销。 */
 function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => Promise<void>; reload: number }) {
   const t = useT(strings);
   const { api } = useSession();
@@ -232,37 +286,53 @@ function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => P
   const all = a.batches.flatMap((b) => b.decisions);
   const n = (k: string) => all.filter((d) => d.action === k).length;
   const parts = (["attach", "merge", "duplicate", "keep", "undone"] as const).filter((k) => n(k) > 0).map((k) => t.actionCount(t.sweepAction[k], n(k)));
+  const row = (d: Decision, fold: boolean) => (
+    <li key={d.item} className="act-row" aria-label={d.title} title={d.item}>
+      <div>
+        <span>
+          <Link to={"/items/" + encodeURIComponent(d.item)}>{d.title}</Link>
+          {(d.source || (fold && d.sources)) && <span className="sub"> · {[d.source ? sourceName(d.source) : "", fold && d.sources ? t.sources(d.sources) : ""].filter(Boolean).join(" · ")}</span>}
+        </span>
+        <span className="sub">
+          {t.sweepAction[d.action] ?? d.action}
+          {!fold && d.target && <> → <Link to={"/items/" + encodeURIComponent(d.target)}>「{d.target_title || "…"}」</Link></>}
+          {" · "}{t.sweepBy[d.by] ?? d.by}
+        </span>
+        {d.why && <span className="sub" title={d.why}>{t.reasonIs(clip(d.why))}</span>}
+      </div>
+      {fold && (
+        <button type="button" title={t.unmergeWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onUnmerge(d.item); } finally { setBusy(false); } }}>{t.unmerge}</button>
+      )}
+    </li>
+  );
   return (
     <details className="panel" aria-label={t.activityHead}>
       <summary>{t.activitySummary(a.days, parts.join("、") || t.nothingYet, a.model_calls, a.chars, a.pending)}</summary>
-      {a.batches.map((b) => (
-        <section key={b.batch} aria-label={t.batchHead(new Date(b.at).toLocaleString())}>
-          <h3>{t.batchHead(new Date(b.at).toLocaleString())}</h3>
-          <p className="sub">{t.batchCost(b.size, !!b.run, b.chars)}{b.deferred ? t.batchDeferred(b.deferred) : ""}</p>
-          <ul className="rows">
-            {b.decisions.filter((d) => !quiet(d)).sort((x, y) => rank(x) - rank(y)).map((d) => (
-              <li key={d.item} className="act-row" aria-label={d.title}>
-                <div>
-                  <span>
-                    <Link to={"/items/" + encodeURIComponent(d.item)}>{d.title}</Link>
-                    {d.source && <span className="sub"> · {sourceName(d.source)}</span>}
-                  </span>
-                  <span className="sub">
-                    {t.sweepAction[d.action] ?? d.action}
-                    {d.target && <> → <Link to={"/items/" + encodeURIComponent(d.target)}>「{d.target_title || "…"}」</Link></>}
-                    {" · "}{t.sweepBy[d.by] ?? d.by}
-                  </span>
-                  {d.why && <span className="sub">{t.reasonIs(d.why)}</span>}
-                </div>
-                {(d.action === "attach" || d.action === "merge" || d.action === "duplicate") && (
-                  <button type="button" title={t.unmergeWhy} disabled={busy} onClick={async () => { setBusy(true); try { await onUnmerge(d.item); } finally { setBusy(false); } }}>{t.unmerge}</button>
-                )}
-              </li>
-            ))}
-          </ul>
-          {b.decisions.some(quiet) && <p className="sub">{t.ruleKept(b.decisions.filter(quiet).length)}</p>}
-        </section>
-      ))}
+      {a.batches.map((b) => {
+        const into = new Map<string, Decision[]>();
+        for (const d of b.decisions.filter(isFold)) into.set(d.target ?? "", [...(into.get(d.target ?? "") ?? []), d]);
+        return (
+          <section key={b.batch} aria-label={t.batchHead(when(b.at))}>
+            <h3>{t.batchHead(when(b.at))}</h3>
+            <p className="sub">{t.batchCost(b.size, !!b.run, b.chars)}{b.deferred ? t.batchDeferred(b.deferred) : ""}</p>
+            <ul className="rows">
+              {[...into].map(([target, ds]) => (
+                <li key={"into-" + target} className="act-row" aria-label={t.intoLabel(ds[0].target_title || "…")} title={target}>
+                  <div>
+                    <span>
+                      {t.manyInto(ds.length, ds.reduce((k, d) => k + (d.sources ?? 0), 0))}
+                      <Link to={"/items/" + encodeURIComponent(target)}>「{ds[0].target_title || "…"}」</Link>
+                    </span>
+                    <ul className="rows">{ds.map((d) => row(d, true))}</ul>
+                  </div>
+                </li>
+              ))}
+              {b.decisions.filter((d) => !quiet(d) && !isFold(d)).map((d) => row(d, false))}
+            </ul>
+            {b.decisions.some(quiet) && <p className="sub">{t.ruleKept(b.decisions.filter(quiet).length)}</p>}
+          </section>
+        );
+      })}
       <p className="sub"><Link to="/settings/merge">{t.mergeSettings}</Link></p>
     </details>
   );

@@ -350,11 +350,10 @@ describe("跨来源合并：展开看来源与依据，一键拆分（§9.3）",
     }) as unknown as typeof fetch;
     mount(impl);
     const card = await screen.findByRole("article", { name: "建议 m" });
-    await userEvent.click(within(card).getByText("这条建议的来源"));
+    await userEvent.click(within(card).getByText("2 条消息 → 这一条"));
     const wx = await within(card).findByRole("listitem", { name: "微信" });
-    expect(wx).toHaveTextContent("打分模型判断为同一件事，自动合并");
-    expect(wx).toHaveTextContent("标题相似度 0.72");
-    expect(within(card).getByRole("listitem", { name: "QQ 邮箱" })).toHaveTextContent("最先到的");
+    expect(wx).toHaveTextContent("打分模型判断为同一件事，自动合并 · 标题相似度 0.72 · 合并于");
+    expect(within(card).getByRole("listitem", { name: "QQ 邮箱" })).toHaveTextContent("最先到，建出这条");
     expect(within(within(card).getByRole("listitem", { name: "QQ 邮箱" })).queryByRole("button", { name: "拆出来" })).toBeNull();
     await userEvent.click(within(wx).getByRole("button", { name: "拆出来" }));
     await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/source-events/e2/split")).toMatchObject({ method: "POST", body: { from: "m" }, csrf: "tok-1" }));
@@ -367,8 +366,8 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
   const merged = prop("m", { origin: { source: "src_mail_qq" }, proposal: { low_confidence: false, sources: ["e1", "e2"],
     merges: [{ event: "e2", source: "src_wx", title: "AgentSafe 资产确认", by: "generate", score: 0.81, why: "同一个资产编号 B18630823", batch: "mb_1", item: "f1", at: "2030-01-01T02:00:00Z" }] } as any });
   const activity = { days: 7, pending: 3, model_calls: 1, chars: 4200, batches: [{ batch: "mb_1", at: "2030-01-01T02:00:00Z", size: 3, run: "run_1", chars: 4200, decisions: [
-    { item: "f1", title: "AgentSafe 资产确认", source: "src_wx", action: "merge", target: "m", target_title: "建议 m", why: "同一个资产编号 B18630823", by: "generate" },
-    { item: "f2", title: "周报模板改版", source: "src_dx", action: "duplicate", target: "d9", target_title: "周报模板改版 W47", why: "本人忽略过的同一件事", by: "generate" },
+    { item: "f1", title: "AgentSafe 资产确认", source: "src_wx", sources: 1, action: "merge", target: "m", target_title: "建议 m", why: "同一个资产编号 B18630823", by: "generate" },
+    { item: "f2", title: "周报模板改版", source: "src_dx", sources: 1, action: "duplicate", target: "d9", target_title: "周报模板改版 W47", why: "本人忽略过的同一件事", by: "generate" },
     { item: "f3", title: "导出报表加一列", source: "src_wx", action: "keep", why: "和账本里已有的记录比过，没有相似的", by: "rule" }] },
     { batch: "mb_2", at: "2030-01-01T01:00:00Z", size: 20, run: "run_2", chars: 5900, deferred: 9, decisions: [] }] };
   function withMerge() {
@@ -379,6 +378,7 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
       if (url === "/v1/merge/activity?days=7") return json(200, activity);
       if (url === "/v1/source-events/e1") return json(200, { event: { id: "e1", source_id: "src_mail_qq", subject: "确认 AgentSafe AI 资产", occurred_at: "2030-01-01T00:00:00Z", link: "https://mail.example/1" } });
       if (url === "/v1/source-events/e2") return json(200, { event: { id: "e2", source_id: "src_wx", subject: "AgentSafe", summary: "@我 资产 B18630823 要确认", occurred_at: "2030-01-01T01:00:00Z" } });
+      if (url === "/v1/items/f1") return json(200, { item: { id: "f1", phase: "dropped", title: "AgentSafe 资产确认", proposal: { low_confidence: false, sources: ["e2"] } } });
       if (url.endsWith("/unmerge")) { (base as any)(url, init); return json(200, { item: url.split("/")[3] }); }
       return base(url, init);
     }) as unknown as typeof fetch;
@@ -389,14 +389,17 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
     const s = withMerge();
     mount(s.impl);
     const card = await screen.findByRole("article", { name: "建议 m" });
-    await userEvent.click(within(card).getByText("这条建议的来源"));
-    const wx = await within(card).findByRole("listitem", { name: "微信" });
+    await userEvent.click(within(card).getByText("2 条消息 → 这一条"));
+    // 批量归类折进来的那条（f1）整组列出：组头写它连同几条消息并进这条、哪一批、谁判断、相似度与理由，组里是它带来的消息。
+    const fold = await within(card).findByRole("listitem", { name: "「AgentSafe 资产确认」并进来的几条" });
+    expect(fold).toHaveTextContent("「AgentSafe 资产确认」连同 1 条消息 → 这条");
+    expect(fold).toHaveTextContent("那批自动归类 · 写作模型判断为同一件事，自动合并（与生成事项和建议相同） · 标题相似度 0.81");
+    expect(fold).toHaveTextContent("理由：同一个资产编号 B18630823");
+    const wx = within(fold).getByRole("listitem", { name: "微信" });
     expect(wx).toHaveTextContent("@我 资产 B18630823 要确认");
-    expect(wx).toHaveTextContent("写作模型判断为同一件事，自动合并（与生成事项和建议相同）");
-    expect(wx).toHaveTextContent("合并于");
-    expect(wx).toHaveTextContent("理由：同一个资产编号 B18630823");
-    expect(within(card).getByRole("listitem", { name: "QQ 邮箱" })).toHaveTextContent("链接");
-    await userEvent.click(within(wx).getByRole("button", { name: "撤销合并" }));
+    expect(wx).toHaveTextContent("最先到，建出「AgentSafe 资产确认」");
+    expect(within(card).getByRole("listitem", { name: "QQ 邮箱" })).toHaveTextContent("最先到，建出这条 · 原文 · 链接");
+    await userEvent.click(within(fold).getByRole("button", { name: "撤销合并" }));
     await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/items/f1/unmerge")).toMatchObject({ method: "POST", csrf: "tok-1" }));
     expect(await screen.findByText(/已撤销合并，它回到了建议里/)).toBeInTheDocument();
   });
@@ -409,12 +412,119 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
     expect(panel).toHaveTextContent("同批 3 条，一次模型调用，送出约 4200 字");
     expect(within(panel as HTMLElement).getByText(/同批 3 条/)).not.toHaveTextContent("砍半");
     expect(panel, "超出资料上限砍半的那批写明留到下一轮的条数").toHaveTextContent("同批 20 条，一次模型调用，送出约 5900 字；资料超出上限，这批砍半，9 条留到下一轮");
+    // 折叠掉的按去处收成「N 条 → 「去处」」，组里逐条写结论、判断方与理由。
+    expect(within(panel as HTMLElement).getByRole("listitem", { name: "合进「周报模板改版 W47」" })).toHaveTextContent("1 条建议（1 条消息）→ 「周报模板改版 W47」");
     const dup = within(panel as HTMLElement).getByRole("listitem", { name: "周报模板改版" });
-    expect(dup).toHaveTextContent("判定重复 → 「周报模板改版 W47」 · 写作模型判断");
+    expect(dup).toHaveTextContent("周报模板改版 · 大象 · 1 条消息判定重复 · 写作模型判断");
     expect(dup).toHaveTextContent("理由：本人忽略过的同一件事");
     expect(within(dup).getByRole("button", { name: "撤销合并" })).toBeInTheDocument();
     expect(within(panel as HTMLElement).queryByRole("listitem", { name: "导出报表加一列" }), "规则比过留着的只记条数").toBeNull();
     expect(panel).toHaveTextContent("另有 1 条规则比过没有相似的，留着");
     expect(document.querySelector("main")!.textContent, "界面不出现来源 id").not.toMatch(/src_|mb_|run_/);
+  });
+});
+
+describe("合并结果写成「N 条消息 → 这一条」（线上 2026-11-23 PR #227 那批的形状）", () => {
+  const names = [{ id: "src_mail_icloud", name: "iCloud 邮件" }, { id: "src_mail", name: "邮件" }, { id: "src_github", name: "GitHub" }];
+  const at = (m: number) => `2030-01-01T06:${String(m).padStart(2, "0")}:00Z`;
+  const ev = (id: string, source_id: string, subject: string, m: number, over: object = {}) => ({ id, source_id, subject, occurred_at: at(m), ...over });
+  function mountWith(items: P[], events: Record<string, object>, extra: Record<string, unknown> = {}) {
+    const s = server(items);
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      if (url === "/v1/sources") return json(200, { sources: names });
+      const e = url.match(/^\/v1\/source-events\/([^/]+)$/);
+      if (e) return json(200, { event: events[e[1]] });
+      if (url in extra) return json(200, extra[url]);
+      if (url.endsWith("/unmerge")) { (s.impl as any)(url, init); return json(200, { item: url.split("/")[3] }); }
+      return s.impl(url, init);
+    }) as unknown as typeof fetch;
+    mount(impl);
+    return s;
+  }
+  const noIds = () => expect(document.querySelector("main")!.textContent, "界面不出现裸 id").not.toMatch(/itm_|sev_|src_|mb_|run_|jdg_/);
+
+  it("改后：6 条在生成时就按同一链接合成 1 条，逐条写来源、时间、怎么进来的、相似度与理由，没有折叠组", async () => {
+    const key = { merge_key: "link:https://github.com/org/app/pull/227", link: "https://github.com/org/app/pull/227" };
+    const rule = (event: string, source: string, m: number) => ({ event, source, title: "评审 PR #227", by: "merge_key", at: at(m) });
+    const y = prop("itm_y", { title: "审阅 PR #227", origin: { source: "src_mail_icloud" }, proposal: { low_confidence: false,
+      sources: ["sev_1", "sev_2", "sev_3", "sev_4", "sev_5", "sev_6"],
+      merges: [rule("sev_2", "src_mail_icloud", 8), rule("sev_3", "src_mail", 21), rule("sev_6", "src_github", 29)] } as any });
+    mountWith([y], {
+      sev_1: ev("sev_1", "src_mail_icloud", "Re: [org/app] 卡片移到最上方 (PR #227)", 0, key),
+      sev_2: ev("sev_2", "src_mail_icloud", "[org/app] 卡片移到最上方 (PR #227)", 0, key),
+      sev_3: ev("sev_3", "src_mail", "[org/app] 卡片移到最上方 (PR #227)", 0, key),
+      sev_4: ev("sev_4", "src_mail", "Re: [org/app] 卡片移到最上方 (PR #227)", 0, { ...key, disposition: "attached" }),
+      sev_5: ev("sev_5", "src_mail", "Re: [org/app] 卡片移到最上方 (PR #227)", 6, { ...key, disposition: "attached" }),
+      sev_6: ev("sev_6", "src_github", "feat(desktop): 卡片移到最上方", 0, key),
+    });
+    const card = await screen.findByRole("article", { name: "审阅 PR #227" });
+    await userEvent.click(within(card).getByText("6 条消息 → 这一条"));
+    expect(await within(card).findByText("iCloud 邮件 2 条 · 邮件 3 条 · GitHub 1 条")).toBeInTheDocument();
+    const [first, second] = within(card).getAllByRole("listitem", { name: "iCloud 邮件" });
+    expect(first).toHaveTextContent("最先到，建出这条 · 原文 · 链接");
+    expect(second).toHaveTextContent("链接相同（github.com/org/app/pull/227），规则合入这条 · 相似度：键相同，不用算 · 合并于");
+    const mails = within(card).getAllByRole("listitem", { name: "邮件" });
+    expect(mails[1]).toHaveTextContent("同一会话的后续消息，挂到这条 · 原文 · 链接");
+    expect(within(card).getByRole("listitem", { name: "GitHub" })).toHaveTextContent("规则合入这条");
+    expect(within(card).queryByRole("button", { name: "撤销合并" }), "规则当场合并的没有折叠组").toBeNull();
+    expect(within(card).getAllByRole("button", { name: "拆出来" })).toHaveLength(5);
+    expect(first).toHaveAttribute("title", "sev_1"); // 悬停看全值
+    noIds();
+  });
+
+  it("改前：跨批的两跳串成一组——「评审…」连同它的 4 条（其中 1 条此前按标题与发件人合入它）→ 这条；撤销合并仍发 POST /items/{被折叠的那条}/unmerge", async () => {
+    const sweep = (event: string, source: string, item: string, score: number, why: string) => ({ event, source, title: "x", by: "generate", score, why, batch: "mb_1", item, at: at(57) });
+    const y = prop("itm_y", { title: "审阅 PR #227", origin: { source: "src_mail_icloud" }, proposal: { low_confidence: false,
+      sources: ["sev_y", "sev_a1", "sev_a2", "sev_a3", "sev_a4", "sev_w1"],
+      merges: [...["sev_a1", "sev_a2", "sev_a3", "sev_a4"].map((e, i) => sweep(e, i ? "src_mail" : "src_mail_icloud", "itm_x", 0.93, "都是 PR #227 的评审请求")),
+        sweep("sev_w1", "src_github", "itm_w", 0.47, "同一个 PR 的平台通知")] } as any });
+    const s = mountWith([y], {
+      sev_y: ev("sev_y", "src_mail_icloud", "Re: [org/app] 卡片 (PR #227)", 0),
+      sev_a1: ev("sev_a1", "src_mail_icloud", "[org/app] 卡片 (PR #227)", 0, { merge_key: "title:[org/app] 卡片 (pr #227)" }),
+      sev_a2: ev("sev_a2", "src_mail", "[org/app] 卡片 (PR #227)", 0, { merge_key: "title:[org/app] 卡片 (pr #227)" }),
+      sev_a3: ev("sev_a3", "src_mail", "Re: [org/app] 卡片 (PR #227)", 0, { disposition: "attached" }),
+      sev_a4: ev("sev_a4", "src_mail", "Re: [org/app] 卡片 (PR #227)", 6, { disposition: "attached" }),
+      sev_w1: ev("sev_w1", "src_github", "feat(desktop): 卡片", 0, { link: "https://github.com/org/app/pull/227" }),
+    }, {
+      "/v1/items/itm_x": { item: { id: "itm_x", phase: "dropped", title: "评审 PR #227", proposal: { low_confidence: false, sources: ["sev_a1", "sev_a2", "sev_a3", "sev_a4"],
+        merges: [{ event: "sev_a2", source: "src_mail", title: "x", by: "merge_key", at: at(47) }] } } },
+      "/v1/items/itm_w": { item: { id: "itm_w", phase: "dropped", title: "feat(desktop): 卡片", proposal: { low_confidence: false, sources: ["sev_w1"] } } },
+    });
+    const card = await screen.findByRole("article", { name: "审阅 PR #227" });
+    await userEvent.click(within(card).getByText("6 条消息 → 这一条"));
+    const x = await within(card).findByRole("listitem", { name: "「评审 PR #227」并进来的几条" });
+    expect(x).toHaveTextContent("「评审 PR #227」连同 4 条消息 → 这条");
+    expect(x).toHaveTextContent("那批自动归类 · 写作模型判断为同一件事，自动合并（与生成事项和建议相同） · 标题相似度 0.93");
+    expect(x).toHaveTextContent("理由：都是 PR #227 的评审请求");
+    const inner = within(x).getAllByRole("listitem");
+    expect(inner.map((li) => li.getAttribute("aria-label"))).toEqual(["iCloud 邮件", "邮件", "邮件", "邮件"]);
+    expect(inner[0]).toHaveTextContent("最先到，建出「评审 PR #227」");
+    expect(inner[1]).toHaveTextContent("标题和发件人都相同，规则合入「评审 PR #227」 · 相似度：键相同，不用算 · 合并于");
+    expect(inner[2]).toHaveTextContent("同一会话的后续消息，挂到「评审 PR #227」");
+    const w = within(card).getByRole("listitem", { name: "「feat(desktop): 卡片」并进来的几条" });
+    expect(w).toHaveTextContent("「feat(desktop): 卡片」连同 1 条消息 → 这条");
+    expect(w).toHaveTextContent("标题相似度 0.47");
+    expect(within(card).getAllByRole("listitem", { name: "iCloud 邮件" })[0]).toHaveTextContent("最先到，建出这条");
+    noIds();
+    await userEvent.click(within(x).getAllByRole("button", { name: "撤销合并" })[0]);
+    await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/items/itm_x/unmerge")).toMatchObject({ method: "POST", csrf: "tok-1" }));
+    expect(await screen.findByText(/已撤销合并，它回到了建议里/)).toBeInTheDocument();
+  });
+
+  it("最近自动归类：同一批里折进同一条的写成「2 条建议（5 条消息）→ 「审阅 PR #227」」，逐条可撤销", async () => {
+    const activity = { days: 7, pending: 0, model_calls: 1, chars: 2239, batches: [{ batch: "mb_1", at: at(57), size: 6, run: "run_1", chars: 2239, decisions: [
+      { item: "itm_x", title: "评审 PR #227", source: "src_mail_icloud", sources: 4, action: "merge", target: "itm_y", target_title: "审阅 PR #227", why: "都是 PR #227 的评审请求", by: "generate" },
+      { item: "itm_w", title: "feat(desktop): 卡片", source: "src_github", sources: 1, action: "merge", target: "itm_y", target_title: "审阅 PR #227", why: "同一个 PR", by: "generate" },
+      { item: "itm_y", title: "审阅 PR #227", source: "src_mail_icloud", sources: 6, action: "keep", why: "编号不同，不是同一个 PR", by: "generate" }] }] };
+    const s = mountWith([], {}, { "/v1/merge/activity?days=7": activity });
+    const panel = (await screen.findByText(/最近 7 天自动归类/)).closest("details")!;
+    await userEvent.click(within(panel).getByText(/最近 7 天自动归类/));
+    const into = within(panel).getByRole("listitem", { name: "合进「审阅 PR #227」" });
+    expect(into).toHaveTextContent("2 条建议（5 条消息）→ 「审阅 PR #227」");
+    expect(within(into).getByRole("listitem", { name: "评审 PR #227" })).toHaveTextContent("评审 PR #227 · iCloud 邮件 · 4 条消息合成一条建议 · 写作模型判断理由：都是 PR #227 的评审请求");
+    expect(within(panel).getAllByRole("listitem", { name: "审阅 PR #227" }).at(-1)).toHaveTextContent("留着 · 写作模型判断");
+    noIds();
+    await userEvent.click(within(within(into).getByRole("listitem", { name: "feat(desktop): 卡片" })).getByRole("button", { name: "撤销合并" }));
+    await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/items/itm_w/unmerge")).toMatchObject({ method: "POST", csrf: "tok-1" }));
   });
 });

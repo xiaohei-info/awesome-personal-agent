@@ -14,11 +14,12 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-// mergeDecision 是一批里一条新建议的归类：去处、理由、判断方，撤销过的标 undone。
+// mergeDecision 是一批里一条新建议的归类：去处、理由、判断方，撤销过的标 undone；Sources 是它带着的消息条数（折叠时一起并进去处）。
 type mergeDecision struct {
 	Item        string       `json:"item"`
 	Title       string       `json:"title"`
 	Source      string       `json:"source,omitempty"`
+	Sources     int          `json:"sources"`
 	Action      string       `json:"action"`
 	Target      string       `json:"target,omitempty"`
 	TargetTitle string       `json:"target_title,omitempty"`
@@ -82,7 +83,7 @@ func (a *api) mergeActivity(w http.ResponseWriter, r *http.Request, _ *core.Prin
 		if sw.At.After(b.At) {
 			b.At = *sw.At
 		}
-		d := mergeDecision{Item: it.ID, Title: it.Title, Action: sw.Action, Target: sw.Target, Why: sw.Why, By: sw.By}
+		d := mergeDecision{Item: it.ID, Title: it.Title, Sources: len(it.Proposal.Sources), Action: sw.Action, Target: sw.Target, Why: sw.Why, By: sw.By}
 		if it.Origin != nil {
 			d.Source = it.Origin.Source
 		}

@@ -199,7 +199,7 @@
 | | `POST /source-events/{id}/propose` | 把未判定事件或 digest 事件转为建议 | Web 登录、delegate |
 | | `POST /source-events/{id}/split` | 把误并入一条建议的来源事件拆出来另成一条建议（`inbound.split`，主文档 §9.3）：请求体 `{"from": "<建议 id>"}`，返回 `{"item": "<新建议 id>"}` | Web 登录、delegate |
 | | `POST /items/{id}/unmerge` | 撤销跨来源合并的一条折叠（`inbound.unmerge`，一档，主文档 §9.3）：被折叠的建议回到 proposed，`proposal.sweep.action` 记 `undone`，与去处互记 `not_same`；合并的来源事件与留痕从去处移回，并入的在去处追加一条撤回说明。返回 `{"item": "<id>"}`；不是被折叠的或已撤销过是 409 |
-| | `GET /merge/activity?days=7` | 最近自动归类（读）：`{"days", "pending", "model_calls", "chars", "batches": [{"batch", "at", "size", "run"?, "chars", "decisions": [{"item", "title", "source"?, "action", "target"?, "target_title"?, "target_phase"?, "why"?, "by", "hint"?}]}]}`；`days` 至多 90 |
+| | `GET /merge/activity?days=7` | 最近自动归类（读）：`{"days", "pending", "model_calls", "chars", "batches": [{"batch", "at", "size", "run"?, "chars", "decisions": [{"item", "title", "source"?, "sources", "action", "target"?, "target_title"?, "target_phase"?, "why"?, "by", "hint"?}]}]}`；`days` 至多 90 |；`sources` 是这条建议带着的消息条数（折叠时一起并进去处）
 | | `GET /packs/{pack}/prompts/{name}` | 已加载能力包里一个提示词的正文（不含头部声明）：`{"pack", "name", "agent", "body"}`；设置 › 跨来源合并用它显示内置默认与"恢复默认" |
 | | `POST /source-events/{id}/ignore`，`POST /source-events/ignore` | 忽略未判定事件：单条；或批量，请求体 `{"source"}` 按来源、`{"all": true}` 全部 | Web 登录、delegate |
 | | `POST /source-events/rules` | 积压放开第 1 步：只跑规则，返回 `{"attached", "disposed", "remaining"}`；请求体 `{"source"?}` | Web 登录、delegate |
@@ -494,6 +494,8 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 跨来源相似合并与推送哪些事（2026-11-23）只做加法：`proposal` 增 `merges`、`similar`、`not_same`、`split_from`，策略增 `merge_judge` 与 `disturb.push`，`source.failed` 增 `kind: streak`，新增 `POST /source-events/{id}/split`。不改账本结构、不迁移：旧建议没有这些键，读作没有合并留痕；旧策略没有这些键，按缺省（合并判断方 `same`，推送前三类开、新建议关）。升级前已合并的建议只有 `sources`，没有留痕的来源也能拆，新建议用来源事件的标题与摘要。同日修订为批量归类，仍只做加法：`proposal` 增 `sweep`（`state`、`batch`、`action`、`target`、`why`、`by`、`run`、`size`、`chars`、`at`），`proposal.merges[]` 增 `why`、`batch`、`run`、`item`，策略增 `merge` 段，`merge_judge` 只剩 `same` 与 `off`（第一版的 `judge`、`generate` 未被任何实例保存过）；`/settings/model-endpoints` 不再有 `merge_judge` 段，移到 `/settings/merge`；内置模板 `merge-same*` 换成 `merge-batch`。升级前的建议没有 `sweep`，不进批、不回填，只作为比对对象。
 
 "今天"的逾期与高优先级（2026-11-23）只做加法：`GET /today` 增 `overdue`、`high_priority` 两组，旧的四组含义不变；简报与复盘资料 `due_waiting` 的 `reason` 增 `high_priority`。不改账本、不迁移；只认四组的调用方原样忽略新组。
+
+合并结果按"N 条消息 → 这一条"展示（2026-11-23）只做加法：`GET /merge/activity` 每条结论增 `sources`（这条建议带着的消息条数）；邮件来源的事件在代码托管平台的通知邮件上增 `link`（所说 PR 或 issue 的规范链接，附录 D.2），其他邮件仍没有 `link`。不改账本结构、不迁移、不回填：已入账的旧通知邮件没有 `link`，与平台事件仍由批量归类判断。
 
 按进展日读事项（2026-11-23）只做加法：`GET /items` 增 `progress_from`、`progress_to`，带上时响应另有 `progress`。不改账本结构、不迁移；不带这两个参数时响应不变。
 
