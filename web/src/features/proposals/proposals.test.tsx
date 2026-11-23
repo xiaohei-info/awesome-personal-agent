@@ -748,3 +748,54 @@ describe("建议页降噪：折叠、合组与批量忽略", () => {
     expect(within(screen.getByRole("group", { name: "QQ 邮箱" })).getByRole("article", { name: "普通邮件一" })).toBeInTheDocument();
   });
 });
+
+// 历史清单（主文档 §7.2）：来源前缀命中的迁移清单默认折成一组；规则读 origin.source 的前缀，不认某一个来源名。
+describe("建议页折叠历史清单迁移", () => {
+  const migrated = Array.from({ length: 91 }, (_, n) => prop("h" + n, { title: "调研 " + n, origin: { source: n < 60 ? "agent:vault-migrate" : "agent:vault-archive" } }));
+  const items = [
+    ...migrated,
+    { ...prop("hd", { title: "迁移来的要不要做", origin: { source: "agent:vault-migrate" } }), kind: "decision" } as P, // 需要拍板的，同来源也置顶
+    prop("hh", { title: "迁移来的高优先级", origin: { source: "agent:vault-migrate" }, priority: "high" }),
+    prop("d1", { title: "日常建议", origin: { source: "src_mail_qq" } }),
+    prop("a1", { title: "别的 agent 的建议", origin: { source: "agent:daily" } }),
+    prop("v0", { title: "前缀不符", origin: { source: "agent:vault" } }),
+  ];
+  const history = async () => (await screen.findByRole("group", { name: "历史清单" })) as HTMLDetailsElement;
+
+  it("91 条迁移清单默认收成一组，写明条数与来源数；日常建议与前缀不符的不进组，需要拍板的置顶且不进组", async () => {
+    mount(server(items).impl);
+    const pinned = await screen.findByRole("region", { name: "需要你拍板" });
+    expect(within(pinned).getAllByRole("article").map((a) => a.getAttribute("aria-label")).sort()).toEqual(["迁移来的要不要做", "迁移来的高优先级"].sort());
+    const box = await history();
+    expect(box.open).toBe(false);
+    expect(box).toHaveTextContent("历史清单 91 条 · 2 个来源（已收起）");
+    expect(within(box).getAllByRole("article")).toHaveLength(91);
+    expect(box.contains(screen.getByRole("article", { name: "迁移来的要不要做" }))).toBe(false);
+    for (const n of ["日常建议", "别的 agent 的建议", "前缀不符"]) expect(box.contains(screen.getByRole("article", { name: n }))).toBe(false);
+    expect(screen.getByRole("group", { name: "agent:daily" })).toBeInTheDocument(); // 其余照旧按来源分组且展开
+  });
+
+  it("一键展开后按来源分组，仍可逐条接受或忽略（走原接口）", async () => {
+    const s = server(items);
+    mount(s.impl);
+    const box = await history();
+    await userEvent.click(within(box).getByText(/已收起/));
+    expect(box.open).toBe(true);
+    expect(within(within(box).getByRole("region", { name: "agent:vault-migrate" })).getAllByRole("article")).toHaveLength(60);
+    expect(within(within(box).getByRole("region", { name: "agent:vault-archive" })).getAllByRole("article")).toHaveLength(31);
+    await userEvent.click(within(within(box).getByRole("article", { name: "调研 0" })).getByRole("button", { name: "接受" }));
+    await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/items/h0/accept")).toMatchObject({ method: "POST", csrf: "tok-1" }));
+    const card = within(box).getByRole("article", { name: "调研 1" });
+    await userEvent.click(within(card).getByRole("button", { name: "忽略" }));
+    await userEvent.click(within(card).getByRole("button", { name: "确认忽略" }));
+    await waitFor(() => expect(s.calls.find((c) => c.path === "/v1/items/h1/dismiss")!.body).toEqual({}));
+    await waitFor(() => expect(within(box).getAllByRole("article")).toHaveLength(89));
+    expect(box).toHaveTextContent("历史清单 89 条 · 2 个来源");
+  });
+
+  it("没有命中前缀的来源时不出现这一组", async () => {
+    mount(server([prop("d1", { title: "日常建议", origin: { source: "src_mail_qq" } })]).impl);
+    await screen.findByRole("article", { name: "日常建议" });
+    expect(screen.queryByRole("group", { name: "历史清单" })).toBeNull();
+  });
+});

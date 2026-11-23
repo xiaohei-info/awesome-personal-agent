@@ -18,6 +18,16 @@ export const needsYou = (i: Groupable): boolean =>
 /** 来源事件类型的大类（类型约定 <对象>.<动作>，取对象）；没有来源事件的为空串。 */
 export const family = (type?: string): string => (type ? type.split(".")[0] : "");
 
+/**
+ * 历史清单迁移的来源前缀表：origin.source 以其中任一前缀开头的建议是从待办库迁进来的调研/学习类清单，不是当天要办的事，默认折成一组。
+ * 按前缀而不是整串匹配，同类迁移来源（agent:vault-*）新增时不改代码；shortcut: 表在代码里，要让本人在设置页改时再升级成策略项。
+ */
+// shortcut: 前缀表写在代码里，要让本人在设置页自己改时升级成策略项
+export const HISTORY_SOURCE_PREFIXES = ["agent:vault-"];
+
+export const isHistory = (i: Groupable, prefixes: string[] = HISTORY_SOURCE_PREFIXES): boolean =>
+  !!i.origin && prefixes.some((p) => i.origin!.source.startsWith(p));
+
 export interface ObjectGroup<T> { object: string; ended?: Origin["ended"]; items: T[] }
 
 /** 按出现顺序分组，组按条数从多到少。 */
@@ -30,15 +40,17 @@ export function groupBy<T>(items: T[], key: (i: T) => string): [string, T[]][] {
   return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
 }
 
-/** 拆成三块：需要拍板的（置顶）、代码托管通知（属于上游对象的，按对象合组）、其余。 */
+/** 拆成四块：需要拍板的（置顶，不进任何折叠）、代码托管通知（属于上游对象的，按对象合组）、历史清单（按来源分组）、其余。 */
 export function arrange<T extends Groupable>(items: T[], origins: Record<string, Origin>) {
   const pinned = items.filter(needsYou);
   const hosted = items.filter((i) => !needsYou(i) && origins[i.id]?.object);
-  const rest = items.filter((i) => !needsYou(i) && !origins[i.id]?.object);
+  const history = items.filter((i) => !needsYou(i) && !origins[i.id]?.object && isHistory(i));
+  const rest = items.filter((i) => !needsYou(i) && !origins[i.id]?.object && !isHistory(i));
+  const historySources = groupBy(history, (i) => i.origin!.source);
   const objects: ObjectGroup<T>[] = groupBy(hosted, (i) => origins[i.id].object!).map(([object, its]) => ({
     object,
     ended: its.map((i) => origins[i.id].ended).find(Boolean),
     items: its,
   }));
-  return { pinned, hosted, objects, rest };
+  return { pinned, hosted, objects, history, historySources, rest };
 }

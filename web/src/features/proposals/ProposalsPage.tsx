@@ -701,6 +701,18 @@ export function ProposalsPage() {
               ))}
             </details>
           )}
+          {parts.history.length > 0 && (
+            <details className="panel" aria-label={t.historyHead}>
+              <summary>{t.historySummary(parts.history.length, parts.historySources.length)}</summary>
+              <p className="sub">{t.historyWhy}</p>
+              {parts.historySources.map(([src, its]) => (
+                <section key={src} aria-label={sourceName(src) || src} className="group">
+                  <h3>{sourceName(src) || src} · {t.count(its.length)}</h3>
+                  {its.map(card)}
+                </section>
+              ))}
+            </details>
+          )}
           {parts.rest.length > 0 && (
             <>
               <label>
