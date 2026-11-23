@@ -13,7 +13,7 @@ output_schema:
         properties:
           new: {type: string}
           action: {type: string, enum: [attach, merge, duplicate, keep]}
-          target: {type: string}
+          target: {}
           reason: {type: string}
           confident: {type: boolean}
 ---

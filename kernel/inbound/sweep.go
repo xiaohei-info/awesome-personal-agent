@@ -278,7 +278,7 @@ type sweepOut struct {
 	Decisions []struct {
 		New       string `json:"new"`
 		Action    string `json:"action"`
-		Target    string `json:"target"`
+		Target    any    `json:"target"` // 模板里不限类型：留着时模型常给 null；只认字符串
 		Reason    string `json:"reason"`
 		Confident bool   `json:"confident"`
 	} `json:"decisions"`
@@ -393,7 +393,8 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, locality stri
 				continue
 			}
 			v.Why = strings.TrimSpace(d.Reason)
-			t, ok := byRef[d.Target]
+			ref, _ := d.Target.(string)
+			t, ok := byRef[ref]
 			inCands := ok && slices.ContainsFunc(m.cands, func(c sweepCand) bool { return c.rec == t })
 			switch {
 			case d.Action == domain.SweepKeep:

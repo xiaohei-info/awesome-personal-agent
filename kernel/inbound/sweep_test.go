@@ -197,7 +197,7 @@ func TestMergeBatchSettings(t *testing.T) {
 	e.setPolicy(func(p *policy.Policy) {
 		p.Merge = policy.MergeSettings{ExcludeSources: []string{"src_x"}, SkipExisting: true, BatchSize: 2, Prompt: body}
 	})
-	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[{"new":"N1","action":"keep","reason":"不是一回事","confident":true}]}`})
+	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[{"new":"N1","action":"keep","target":null,"reason":"不是一回事","confident":true}]}`})
 	e.emit("src_x", "ticket", ev("x1", "ticket.opened", "季度预算评审会议改期", nil))
 	e.emit("src_a", "ticket", ev("a1", "ticket.opened", "季度预算评审会议改期了", nil))
 	e.emit("src_b", "ticket", ev("b1", "ticket.opened", "导出报表加一列", nil))
