@@ -226,7 +226,7 @@ describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
     expect(screen.getByText("接受 2 条 · 忽略 1 条")).toBeInTheDocument();
   });
 
-  it("ACT-PRH-13：按来源与项目筛选后一次点击，确认后 POST batch {mode:recommended, filter}；只带筛选，不逐条列动作", async () => {
+  it("ACT-PRH-13：按来源与项目筛选后一次点击，确认后 POST batch {mode:recommended, filter}；filter 是筛选加上眼前可见且带推荐的建议 id，不逐条列动作", async () => {
     const s = server([
       prop("b1", { origin: { source: "PRH_A" }, project: "acc-open", ...rec("accept") }),
       prop("b4", { origin: { source: "PRH_A" }, project: "acc-open" }),
@@ -242,7 +242,7 @@ describe("按推荐批量处理（ACT-PRH-13、ACT-PRH-14）", () => {
     await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
     await waitFor(() => expect(s.calls.some((c) => c.path === "/v1/proposals/batch")).toBe(true));
     const b = s.calls.find((c) => c.path === "/v1/proposals/batch")!;
-    expect(b.body).toEqual({ mode: "recommended", filter: { source: "PRH_A", project: "acc-open" } });
+    expect(b.body).toEqual({ mode: "recommended", filter: { source: "PRH_A", project: "acc-open", ids: ["b1"] } });
     expect(b.csrf).toBe("tok-1");
   });
 
@@ -797,5 +797,61 @@ describe("建议页折叠历史清单迁移", () => {
     mount(server([prop("d1", { title: "日常建议", origin: { source: "src_mail_qq" } })]).impl);
     await screen.findByRole("article", { name: "日常建议" });
     expect(screen.queryByRole("group", { name: "历史清单" })).toBeNull();
+  });
+});
+
+// 按推荐处理只管看得见的：折叠着的组先展开才算（主文档 §7.2）。代码托管通知与历史清单是同一套折叠，同一规则。
+describe("按推荐处理不碰折叠里的建议", () => {
+  const rec = (a: string) => ({ proposal: { recommend: a, low_confidence: false } as any });
+  const items = [
+    prop("v1", { title: "调研一", origin: { source: "agent:vault-migrate" }, ...rec("accept") }),
+    prop("v2", { title: "调研二", origin: { source: "agent:vault-migrate" }, ...rec("dismiss") }),
+    prop("g1", { title: "PR 通知", origin: { source: "src_gh" }, ...rec("dismiss") }),
+    prop("d1", { title: "日常一", origin: { source: "src_mail_qq" }, ...rec("accept") }),
+    prop("d2", { title: "日常二", origin: { source: "src_mail_qq" } }),
+    { ...prop("dec", { title: "要拍板的", origin: { source: "agent:vault-migrate" }, ...rec("accept") }), kind: "decision" } as P,
+  ];
+  const origins = { g1: { type: "pr.opened", object: "o/r/pull/1" } };
+  const srv = () => {
+    const calls: { path: string; body?: any }[] = [];
+    const impl = (async (url: string, init: RequestInit = {}) => {
+      calls.push({ path: url, body: init.body ? JSON.parse(init.body as string) : undefined });
+      if (url === "/v1/projects") return json(200, { projects: [] });
+      if (url === "/v1/sources") return json(200, { sources: [] });
+      if (url === "/v1/items?phase=proposed") return json(200, { items, last_rejections: {}, origins });
+      if (url === "/v1/proposals/batch") return json(200, { results: [] });
+      return json(404, { code: "not_found", why: url, next: "x" });
+    }) as unknown as typeof fetch;
+    return { impl, calls };
+  };
+  const post = (calls: { path: string; body?: any }[]) => calls.find((c) => c.path === "/v1/proposals/batch")!.body;
+
+  it("两个折叠组都收着时，批量只含置顶与展开的那些：条数与分布不数折叠里的，请求的 ids 也不含", async () => {
+    const s = srv();
+    mount(s.impl);
+    await screen.findByRole("group", { name: "历史清单" });
+    await userEvent.click(screen.getByRole("button", { name: "按推荐处理 2 条" })); // dec（置顶）+ d1
+    expect(screen.getByText("接受 2 条")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
+    await waitFor(() => expect(post(s.calls)).toBeTruthy());
+    expect(post(s.calls)).toEqual({ mode: "recommended", filter: { ids: ["dec", "d1"] } });
+  });
+
+  it("展开历史清单后它的建议才进批量；再展开代码托管通知也一样；收回去又不算", async () => {
+    const s = srv();
+    mount(s.impl);
+    const history = (await screen.findByRole("group", { name: "历史清单" })) as HTMLDetailsElement;
+    const hosted = (await screen.findByRole("group", { name: "代码托管通知" })) as HTMLDetailsElement;
+    await userEvent.click(within(history).getByText(/已收起/));
+    await userEvent.click(screen.getByRole("button", { name: "按推荐处理 4 条" }));
+    expect(screen.getByText("接受 3 条 · 忽略 1 条")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await userEvent.click(within(hosted).getByText(/已收起/));
+    expect(screen.getByRole("button", { name: "按推荐处理 5 条" })).toBeInTheDocument();
+    await userEvent.click(within(history).getByText(/历史清单 2 条/));
+    await userEvent.click(screen.getByRole("button", { name: "按推荐处理 3 条" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认按推荐处理" }));
+    await waitFor(() => expect(post(s.calls)).toBeTruthy());
+    expect(post(s.calls)).toEqual({ mode: "recommended", filter: { ids: ["dec", "d1", "g1"] } });
   });
 });
