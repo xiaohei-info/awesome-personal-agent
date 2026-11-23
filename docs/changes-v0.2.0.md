@@ -36,7 +36,7 @@
 | K-06 | 入站流水线 [A2、B3、B4] | 去重 → 归属 → 规则 → 判断型三选一（建议、忽略、挂靠）；只在把握低时起草 | 六步：去重 → 归属 → 规则 → 初筛（是非题）→ 起草 → 合并与进入 `proposed`。凡进建议流的都起草（标题、摘要、类别、项目、日期、推荐处置）；起草失败不挡路 | §9.3、附录 C.7 |
 | K-07 | 来源规则的出口与条件 [A2、A6、A7] | `then` 只有成为建议、忽略、交判断；条件只按类型、来源、发送者 | 出口六种：`proposed`、`ignore`、`screen`、`extract`、`digest`、`alert`。新增 `where[]`（`eq, ne, in, gt, gte, lt, lte, changed, crosses_above, crosses_below`，后三种只用于 `metrics.<名>`）、`project_by: repo_remote \| fixed:<项目> \| draft \| none`、`on_update: refresh \| attach`、`merge_key`、按规则覆盖的模板名 | 附录 C.5、§9.3 |
 | K-08 | 来源事件的处置与未判定原因 [B1、F4] | 处置：`pending`、`attached`、`proposed`、`ignored`、`unjudged`、`expired`；原因：`model_unavailable`、`undecided` | 处置新增 `digest`、`alerted`；原因新增 `outbound_unset` 与 `restored`（N-25），`undecided` 不再产生。来源事件新增 `metrics`、`merge_key`、`items[]`、`judgment` | §6.10、§9.3 |
-| K-09 | Source 执行契约的标准事件 [A6、B5] | 固定字段 | 新增三个可选字段：`metrics`（数值字典）、`items[]`（聚合消息，每条 `{sender, text, at}`，至多 200 条）、`merge_key`。契约版本号不变 | §9.2 |
+| K-09 | Source 执行契约的标准事件 [A6、B5] | 固定字段 | 新增三个可选字段：`metrics`（数值字典）、`items[]`（聚合消息，每条 `{sender, text, at}`，至多 200 条；2026-11-23 起 `text` 可以为空，另有可选的 `attachments` 附件元数据，见附录 B.6）、`merge_key`。契约版本号不变 | §9.2 |
 | K-10 | 邮件来源的关联键 [A3] | 邮件适配器不产出关联键 | 以线程根邮件的 Message-ID 为关联键，回信与原信共用；邮件规则默认 `on_update: attach` | §9.4、§9.7、附录 D.2 |
 | K-11 | 归属：回音让等待中的事项回到可推进 [A3] | 关联键只用于挂到已委派事项，以及刷新来源对象建出的事项 | 新增"挂到本人的事项"：命中未委派、未关闭的事项时记为挂靠消息；事项在 `waiting` 且等的是人或外部时，由内核（操作者 system）转回 `open` 并取消未到期的跟进定时，可撤销。本人可为事项登记关联键。评论与评审是关于对象的消息，由规则声明 `on_update: attach`，只记为挂靠消息，不改事项的标题、正文与摘要；webhook 映射没写 `detail` 时不再拿原始 payload 充当正文 | §9.4、§9.5、附录 B.6、附录 C.14 |
 | K-12 | Source 登记与项目的新字段 [B3、F4] | 无 | Source：`default_project`、`outbound {local, external}`；Project：`capture_outbound`。外发范围只能在 Web 设置 | §6.5、§6.10、§14.14 |
