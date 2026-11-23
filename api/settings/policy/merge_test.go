@@ -44,22 +44,22 @@ func jsonString(s string) string {
 // 一批资料上限（budget_tokens）：0、负数、过小、过大都 400 并写明可用范围，不生效；合法值保存后读回；不带这个键恢复默认。
 func TestMergeBudgetTokensValidated(t *testing.T) {
 	e := setup(t)
-	for _, n := range []string{"0", "-1", "1999", "64001"} {
+	for _, n := range []string{"0", "-1", "1999", "500001"} {
 		rec := e.do("PUT", "/v1/settings/merge", `{"merge":{"budget_tokens":`+n+`}}`, e.web)
-		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "use 2000 to 64000") {
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "use 2000 to 500000") {
 			t.Fatalf("budget %s: %d %s", n, rec.Code, rec.Body)
 		}
 		if _, p := e.current(); p.Merge.BudgetTokens != nil {
 			t.Fatalf("a rejected budget must not take effect: %d", *p.Merge.BudgetTokens)
 		}
 	}
-	if rec := e.do("PUT", "/v1/settings/merge", `{"merge":{"budget_tokens":8000}}`, e.web); rec.Code != 200 {
+	if rec := e.do("PUT", "/v1/settings/merge", `{"merge":{"budget_tokens":500000}}`, e.web); rec.Code != 200 {
 		t.Fatalf("good budget: %d %s", rec.Code, rec.Body)
 	}
-	if _, p := e.current(); p.Merge.Budget() != 8000 {
+	if _, p := e.current(); p.Merge.Budget() != 500000 {
 		t.Fatalf("saved %+v", p.Merge)
 	}
-	if rec := e.do("GET", "/v1/settings/merge", "", e.web); !strings.Contains(rec.Body.String(), `"budget_tokens":8000`) {
+	if rec := e.do("GET", "/v1/settings/merge", "", e.web); !strings.Contains(rec.Body.String(), `"budget_tokens":500000`) {
 		t.Fatalf("get: %s", rec.Body)
 	}
 	if rec := e.do("PUT", "/v1/settings/merge", `{"merge":{}}`, e.web); rec.Code != 200 {

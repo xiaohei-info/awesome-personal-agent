@@ -911,7 +911,7 @@ func TestPausedModelsSendNothingAndResumeAtOnce(t *testing.T) {
 func TestEachLevelTrimsToItsOwnBudgetAndLeavesTrace(t *testing.T) {
 	e := setupJudge(t, true, true)
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "budget", func(p *policy.Policy) error { p.GenerateEndpoint.MaxMaterialChars = 3000; return nil })
+		_, err := policy.Update(tx, owner.Actor, "budget", func(p *policy.Policy) error { p.GenerateEndpoint.MaxMaterialTokens = 2000; return nil })
 		return err
 	}); err != nil {
 		t.Fatal(err)

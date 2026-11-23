@@ -598,8 +598,8 @@ func TestSaveUnchangedOverLegacyWritesNewVersion(t *testing.T) {
 	}
 }
 
-// ACT-BUD-01（generate-budget-setting）：生成端点的资料预算未设过读作 24000；Web 保存后读回；
-// 省略该字段的请求（旧形状）不重置已存的值；负数被拒。
+// ACT-BUD-01（generate-budget-setting）：生成端点的资料预算（估算 token）未设过读作缺省（与旧 24000 字等价）；Web 保存后读回；
+// 省略该字段的请求（旧形状）不重置已存的值；0、负数、过小、过大都 400 并写明可用范围，被拒后已存的值不变。
 func TestGenerateMaterialBudget(t *testing.T) {
 	e := setup(t)
 	gen := func(out map[string]json.RawMessage) map[string]any {
@@ -607,16 +607,25 @@ func TestGenerateMaterialBudget(t *testing.T) {
 		_ = json.Unmarshal(out["generate_endpoint"], &g)
 		return g
 	}
-	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v1","model":"m"}}`)); g["max_material_chars"] != 24000.0 {
-		t.Fatalf("缺省应读作 24000：%v", g)
+	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v1","model":"m"}}`)); g["max_material_tokens"] != float64(kpolicy.TokensOfChars(kpolicy.DefaultGenerateMaxMaterialChars)) {
+		t.Fatalf("缺省应与旧 24000 字等价：%v", g)
 	}
-	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v1","model":"m","max_material_chars":3000}}`)); g["max_material_chars"] != 3000.0 {
-		t.Fatalf("保存后应读回 3000：%v", g)
+	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v1","model":"m","max_material_tokens":500000}}`)); g["max_material_tokens"] != 500000.0 {
+		t.Fatalf("保存后应读回 500000：%v", g)
 	}
-	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v2","model":"m"}}`)); g["max_material_chars"] != 3000.0 {
+	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v2","model":"m"}}`)); g["max_material_tokens"] != 500000.0 {
 		t.Fatalf("省略字段不得重置预算：%v", g)
 	}
-	if rec := e.do("PUT", routes[2], `{"generate_endpoint":{"url":"http://gen.example/v1","max_material_chars":-1}}`, e.web); rec.Code != 400 {
-		t.Fatalf("负数预算被接受：%d", rec.Code)
+	for _, n := range []string{"0", "-1", "1999", "500001"} {
+		rec := e.do("PUT", routes[2], `{"generate_endpoint":{"url":"http://gen.example/v1","max_material_tokens":`+n+`}}`, e.web)
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "use 2000 to 500000") {
+			t.Fatalf("预算 %s：%d %s", n, rec.Code, rec.Body)
+		}
+	}
+	if g := gen(e.endpoints(`{"generate_endpoint":{"url":"http://gen.example/v2","model":"m"}}`)); g["max_material_tokens"] != 500000.0 {
+		t.Fatalf("被拒后预算不变：%v", g)
+	}
+	if rec := e.do("PUT", routes[2], `{"generate_endpoint":{"url":"http://gen.example/v1","max_material_chars":3000}}`, e.web); rec.Code != 400 {
+		t.Fatalf("旧的字数字段不再接受：%d", rec.Code)
 	}
 }

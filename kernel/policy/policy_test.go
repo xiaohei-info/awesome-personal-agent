@@ -455,7 +455,7 @@ func TestEndpointDefaultsAndValidation(t *testing.T) {
 	_, p = current(t, s)
 	j := p.JudgeEndpoint
 	if j.Protocol != ProtocolProbability || j.TimeoutMs != 10000 || j.MaxBatch != 32 || j.MaxMaterialChars != 8000 ||
-		j.Locality != LocalityExternal || p.GenerateEndpoint.Locality != LocalityExternal || p.GenerateEndpoint.MaterialBudget() != 24000 {
+		j.Locality != LocalityExternal || p.GenerateEndpoint.Locality != LocalityExternal || p.GenerateEndpoint.MaterialBudget() != DefaultGenerateBudgetTokens {
 		t.Fatalf("judge=%+v generate=%+v", j, p.GenerateEndpoint)
 	}
 	for _, e := range events(t, s) {
@@ -611,22 +611,80 @@ func TestMergeBudgetTokens(t *testing.T) {
 	if p.Merge.BudgetTokens != nil || p.Merge.Budget() != DefaultMergeBudgetTokens {
 		t.Fatalf("default budget: %v %d", p.Merge.BudgetTokens, p.Merge.Budget())
 	}
-	if MergeTokens(DefaultGenerateMaxMaterialChars) != DefaultMergeBudgetTokens || MergeTokens(DefaultGenerateMaxMaterialChars+1) != DefaultMergeBudgetTokens+1 {
-		t.Fatalf("default must equal the old %d-character budget at %.1f characters per token", DefaultGenerateMaxMaterialChars, MergeCharsPerToken)
+	if TokensOfChars(DefaultGenerateMaxMaterialChars) != DefaultMergeBudgetTokens || TokensOfChars(DefaultGenerateMaxMaterialChars+1) != DefaultMergeBudgetTokens+1 {
+		t.Fatalf("default must equal the old %d-character budget at %.1f characters per token", DefaultGenerateMaxMaterialChars, CharsPerToken)
 	}
-	for _, n := range []int{0, -1, MinMergeBudgetTokens - 1, MaxMergeBudgetTokens + 1} {
+	for _, n := range []int{0, -1, MinBudgetTokens - 1, MaxBudgetTokens + 1} {
 		p := Default()
 		p.Merge.BudgetTokens = &n
 		_, err := normalize(p)
-		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), fmt.Sprintf("use %d to %d", MinMergeBudgetTokens, MaxMergeBudgetTokens)) {
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), fmt.Sprintf("use %d to %d", MinBudgetTokens, MaxBudgetTokens)) {
 			t.Errorf("budget %d: %v", n, err)
 		}
 	}
-	for _, n := range []int{MinMergeBudgetTokens, MaxMergeBudgetTokens} {
+	for _, n := range []int{MinBudgetTokens, MaxBudgetTokens} {
 		p := Default()
 		p.Merge.BudgetTokens = &n
 		if q, err := normalize(p); err != nil || q.Merge.Budget() != n {
 			t.Errorf("budget %d: %v", n, err)
+		}
+	}
+}
+
+// 写作的资料预算（max_material_tokens）：缺省与改动前的 24000 字逐字等价（同一份系数）；0、负数、过小、过大都拒绝并给出范围；
+// 旧文档里按字存的预算读取时换算一次，重复读与存回后再读都不会二次换算；换算回字符数与旧行为一致。
+func TestGenerateMaterialBudgetTokens(t *testing.T) {
+	g := GenerateEndpoint{URL: "http://127.0.0.1:9/gen", Model: "m"}
+	if g.MaterialBudget() != DefaultGenerateBudgetTokens || TokensOfChars(DefaultGenerateMaxMaterialChars) != DefaultGenerateBudgetTokens ||
+		g.MaterialChars() != DefaultGenerateMaxMaterialChars || TokensOfChars(DefaultGenerateMaxMaterialChars+1) != DefaultGenerateBudgetTokens+1 {
+		t.Fatalf("default must equal the old %d-character budget at %.1f characters per token: %d tokens, %d chars", DefaultGenerateMaxMaterialChars, CharsPerToken, g.MaterialBudget(), g.MaterialChars())
+	}
+	if DefaultGenerateBudgetTokens != DefaultMergeBudgetTokens {
+		t.Fatalf("writing and merge defaults share one origin")
+	}
+	for _, n := range []int{0, -1, MinBudgetTokens - 1, MaxBudgetTokens + 1} {
+		p := Default()
+		p.GenerateEndpoint = g
+		p.GenerateEndpoint.MaxMaterialTokens = n
+		_, err := normalize(p)
+		if n == 0 {
+			if err != nil { // 0 在存储形状里等于没设；页面与接口另行拒绝 0（见 api 测试）
+				t.Errorf("stored zero means unset: %v", err)
+			}
+			continue
+		}
+		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), fmt.Sprintf("use %d to %d", MinBudgetTokens, MaxBudgetTokens)) {
+			t.Errorf("budget %d: %v", n, err)
+		}
+	}
+	for _, c := range []struct{ chars, tokens int }{{24000, 16000}, {3000, 2000}, {12000, 8000}, {1000, MinBudgetTokens}, {10_000_000, MaxBudgetTokens}} {
+		src := Default()
+		src.GenerateEndpoint = GenerateEndpoint{URL: "http://127.0.0.1:9/gen", Model: "m", MaxMaterialChars: c.chars}
+		doc, _ := json.Marshal(src)
+		p, _, err := decode(string(doc))
+		if err != nil || p.GenerateEndpoint.MaxMaterialTokens != c.tokens || p.GenerateEndpoint.MaxMaterialChars != 0 {
+			t.Fatalf("legacy %d chars: %+v %v", c.chars, p.GenerateEndpoint, err)
+		}
+		b, _ := json.Marshal(p)
+		again, _, err := decode(string(b)) // 存回再读：不再二次除
+		if err != nil || again.GenerateEndpoint.MaxMaterialTokens != c.tokens || strings.Contains(string(b), "max_material_chars") {
+			t.Fatalf("second read of %d chars: %+v %v %s", c.chars, again.GenerateEndpoint, err, b)
+		}
+	}
+}
+
+// 写作预算与合并预算共用同一份系数与范围，网页那一份常量必须与内核同值（两种语言各存一份，这里锁住）。
+func TestWebBudgetConstantsMatchKernel(t *testing.T) {
+	b, err := os.ReadFile("../../web/src/app/tokenBudget/constants.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("CHARS_PER_TOKEN = %v;", CharsPerToken), fmt.Sprintf("DEFAULT_BUDGET_TOKENS = %d;", DefaultGenerateBudgetTokens),
+		fmt.Sprintf("MIN_BUDGET_TOKENS = %d;", MinBudgetTokens), fmt.Sprintf("MAX_BUDGET_TOKENS = %d;", MaxBudgetTokens),
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("web/src/app/tokenBudget/constants.ts lacks %q", want)
 		}
 	}
 }

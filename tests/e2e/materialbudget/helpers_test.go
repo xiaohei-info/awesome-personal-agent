@@ -118,8 +118,8 @@ func tail(s string, n int) string {
 
 type endpoints struct {
 	Generate struct {
-		MaxMaterialChars int    `json:"max_material_chars"`
-		Locality         string `json:"locality"`
+		MaxMaterialTokens int    `json:"max_material_tokens"`
+		Locality          string `json:"locality"`
 	} `json:"generate_endpoint"`
 	Judge struct {
 		MaxMaterialChars int `json:"max_material_chars"`
@@ -148,7 +148,7 @@ func (k *kit) putEndpoints(locality string, budget int) {
 	k.t.Helper()
 	gen := map[string]any{"url": k.ModelStub.URL(), "model": "acc-model", "locality": locality}
 	if budget > 0 {
-		gen["max_material_chars"] = budget
+		gen["max_material_tokens"] = budget
 	}
 	body, _ := json.Marshal(map[string]any{
 		"judge_endpoint":    map[string]any{"url": k.Cls.URL(), "protocol": "probability-judgment/1", "locality": "local"},

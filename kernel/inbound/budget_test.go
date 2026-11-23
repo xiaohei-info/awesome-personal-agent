@@ -14,10 +14,14 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
+// genBudget 把写作预算设成 n 个字符（折成 token：1.5 字符一个，n 取 1.5 的整数倍时折算无余数）。
 func (e *env) genBudget(n int) {
 	e.t.Helper()
 	err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, err := policy.Update(tx, owner.Actor, "budget", func(p *policy.Policy) error { p.GenerateEndpoint.MaxMaterialChars = n; return nil })
+		_, err := policy.Update(tx, owner.Actor, "budget", func(p *policy.Policy) error {
+			p.GenerateEndpoint.MaxMaterialTokens = policy.TokensOfChars(n)
+			return nil
+		})
 		return err
 	})
 	if err != nil {

@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { errorText, useT } from "../../app/i18n";
 import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
+import { BudgetNote, useBudgetBad, useWritingModel } from "../../app/tokenBudget/BudgetNote";
+import { budgetOk, DEFAULT_BUDGET_TOKENS as DEFAULT_BUDGET, MAX_BUDGET_TOKENS as MAX_BUDGET, MIN_BUDGET_TOKENS as MIN_BUDGET } from "../../app/tokenBudget/constants";
 import { strings } from "./strings";
 
 // 设置 › 跨来源合并（§9.3）：/settings/merge 的 merge_judge 与 merge 两段。每张卡片单独保存，保存时带上整段 merge：
@@ -12,11 +14,6 @@ const PACK_PROMPT = "/packs/inbound-triage/prompts/merge-batch";
 const ACTIONS = ["attach", "merge", "duplicate", "keep"];
 const DEFAULT_BATCH = 20;
 const DEFAULT_WAIT = 30;
-// 与内核 policy 同值：DefaultMergeBudgetTokens、Min/MaxMergeBudgetTokens、MergeCharsPerToken。
-const DEFAULT_BUDGET = 16000;
-const MIN_BUDGET = 2000;
-const MAX_BUDGET = 64000;
-const CHARS_PER_TOKEN = 1.5;
 
 interface Merge { exclude_sources?: string[] | null; skip_existing?: boolean; batch_size?: number; wait_minutes?: number; budget_tokens?: number; prompt?: string; prompt_at?: string }
 
@@ -102,12 +99,14 @@ function ExistingCard({ doc, save }: { doc: Doc; save: Save }) {
 function BatchCard({ doc, save }: { doc: Doc; save: Save }) {
   const t = useT(strings);
   const m = doc.merge as Merge;
+  const model = useWritingModel();
+  const budgetBad = useBudgetBad();
   const init = () => ({ size: String(m.batch_size || DEFAULT_BATCH), wait: String(m.wait_minutes || DEFAULT_WAIT), budget: String(m.budget_tokens ?? DEFAULT_BUDGET) });
   const [v, setV, dirty] = useDraft([m.batch_size, m.wait_minutes, m.budget_tokens], init);
   const onSave = () => {
     const size = Number(v.size), wait = Number(v.wait), budget = Number(v.budget);
     if (!Number.isInteger(size) || size < 2 || size > 50 || !Number.isInteger(wait) || wait < 5 || wait > 1440) return reject(t.batchBad);
-    if (v.budget.trim() === "" || !Number.isInteger(budget) || budget < MIN_BUDGET || budget > MAX_BUDGET) return reject(t.budgetBad(MIN_BUDGET, MAX_BUDGET));
+    if (!budgetOk(v.budget)) return reject(budgetBad);
     // 等于默认值时条数与分钟存 0、预算不带这个键：以后默认值调整时跟着走。
     return putMerge(doc, save, { batch_size: size === DEFAULT_BATCH ? 0 : size, wait_minutes: wait === DEFAULT_WAIT ? 0 : wait, budget_tokens: budget === DEFAULT_BUDGET ? undefined : budget });
   };
@@ -118,7 +117,7 @@ function BatchCard({ doc, save }: { doc: Doc; save: Save }) {
         <label>{t.batchWait} <input type="number" min={5} max={1440} value={v.wait} onChange={(e) => setV({ ...v, wait: e.target.value })} /></label>
         <label>{t.budget} <input type="number" min={MIN_BUDGET} max={MAX_BUDGET} step={1000} value={v.budget} onChange={(e) => setV({ ...v, budget: e.target.value })} /></label>
       </div>
-      <p className="sub" role="note">{t.budgetWhat}<br />{t.budgetCount(CHARS_PER_TOKEN)}<br />{t.budgetRange(DEFAULT_BUDGET, DEFAULT_BUDGET * CHARS_PER_TOKEN, MIN_BUDGET, MAX_BUDGET)}</p>
+      <BudgetNote what={t.budgetWhat} model={model} />
     </Card>
   );
 }

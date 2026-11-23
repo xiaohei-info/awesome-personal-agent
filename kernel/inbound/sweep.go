@@ -357,7 +357,7 @@ func (s *Service) askBatch(ctx context.Context, pol policy.Policy, locality stri
 			news = append(news, refs[m])
 		}
 		text, input = b.String(), map[string]any{"new": news, "candidates": cands, "today": s.o.Now().In(time.Local).Format("2006-01-02")}
-		if policy.MergeTokens(len([]rune(text))) <= budget || len(ask) == 1 {
+		if policy.TokensOfChars(len([]rune(text))) <= budget || len(ask) == 1 {
 			for r, ref := range refs {
 				r.ref = ref
 			}

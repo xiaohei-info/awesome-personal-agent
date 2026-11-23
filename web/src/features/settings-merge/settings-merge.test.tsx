@@ -18,6 +18,7 @@ function server(merge: Record<string, unknown> = { exclude_sources: null, skip_e
     if (url === "/v1/sources") return json(200, { sources: [{ id: "src_wechat", name: "微信" }, { id: "src_daxiang", name: "大象" }, { id: "src_mail", name: "gmail 邮件" }] });
     if (url === "/v1/packs/inbound-triage/prompts/merge-batch") return json(200, { body: "\n" + BUILTIN + "\n" });
     if (url === "/v1/merge/activity?days=7") return json(200, { days: 7, pending: 4, model_calls: 2, chars: 5300, batches: [{}, {}] });
+    if (url === "/v1/settings/model-endpoints") return json(200, { generate_endpoint: { model: "gpt-6-luna" }, judge_endpoint: null });
     if (url === "/v1/settings/merge" && method === "GET") return json(200, doc);
     if (url === "/v1/settings/merge" && method === "PUT") {
       const body = JSON.parse(init.body as string);
@@ -57,7 +58,9 @@ describe("设置 › 跨来源合并", () => {
     expect(batch.getByLabelText("一批资料上限（token）")).toHaveValue(16000);
     expect(batch.getByRole("note")).toHaveTextContent("一批打包给模型的资料上限：超了就把这批砍半，余下的留到下一轮");
     expect(batch.getByRole("note")).toHaveTextContent("按约 1.5 个字符 ≈ 1 token 估算（不调用 tokenizer）");
-    expect(batch.getByRole("note")).toHaveTextContent("默认 16000（约合原先的 24000 字），可填 2000 到 64000");
+    expect(batch.getByRole("note")).toHaveTextContent("默认 16000（约合原先的 24000 字），可填 2000 到 500000");
+    await waitFor(() => expect(batch.getByRole("note")).toHaveTextContent("当前写作模型：gpt-6-luna")); // 与设置 › 模型同一份说明
+    expect(batch.getByRole("note")).toHaveTextContent("超出会让那次调用失败，并按原有的失败处理重试");
     const p = await card("合并提示词");
     expect(p.getByRole("note")).toHaveTextContent("现在用的是内置默认");
     await waitFor(() => expect(p.getByLabelText("提示词正文")).toHaveValue(BUILTIN));
@@ -106,11 +109,11 @@ describe("设置 › 跨来源合并", () => {
     mount(s.impl);
     const batch = await card("批量参数");
     const box = batch.getByLabelText("一批资料上限（token）");
-    for (const bad of ["0", "-1", "1999", "64001", "2500.5", ""]) {
+    for (const bad of ["0", "-1", "1999", "500001", "2500.5", ""]) {
       await userEvent.clear(box);
       if (bad) await userEvent.type(box, bad);
       await saveIn("批量参数");
-      expect(await batch.findByRole("alert"), bad).toHaveTextContent("资料上限填 2000 到 64000 之间的整数（token）");
+      expect(await batch.findByRole("alert"), bad).toHaveTextContent("资料上限填 2000 到 500000 之间的整数（token）");
     }
     expect(s.puts).toHaveLength(0);
     await userEvent.clear(box);

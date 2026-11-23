@@ -84,39 +84,49 @@ describe("设置 › 模型", () => {
 
     await save("写作模型");
     await g.findByText(/已保存/);
-    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://llm.example.com/v1", api_key: "***", model: "model-a", locality: "external", protocol: "chat-completions", max_material_chars: 24000 } });
+    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://llm.example.com/v1", api_key: "***", model: "model-a", locality: "external", protocol: "chat-completions", max_material_tokens: 16000 } });
     expect(s.keys.generate_endpoint).toBe("sk-test-key-9f2c"); // 占位沿用原密钥
   });
 
-  it("flow-material-budget ACT-BUD-01: 写作模型的资料字数上限缺省显示 24000，改后随写作模型一起保存，非正整数被拒且草稿保留", async () => {
+  it("flow-material-budget ACT-BUD-01: 写作资料上限缺省显示 16000 token（原 24000 字），说明写明估算系数、范围、当前模型与超出后果；0、负数、过小、过大、小数、空都被拦并写明范围，草稿保留", async () => {
     const s = server();
     mount(s.impl);
     const g = await card("写作模型");
-    const f = g.getByLabelText("资料字数上限");
-    expect(f).toHaveValue(24000);
+    const f = g.getByLabelText("写作资料上限（token）");
+    expect(f).toHaveValue(16000);
+    const note = g.getByRole("note");
+    expect(note).toHaveTextContent("这是写作任务打包给模型的资料上限");
+    expect(note).toHaveTextContent("按约 1.5 个字符 ≈ 1 token 估算（不调用 tokenizer）");
+    expect(note).toHaveTextContent("默认 16000（约合原先的 24000 字），可填 2000 到 500000");
+    expect(note).toHaveTextContent("当前写作模型：model-a");
+    expect(note).toHaveTextContent("这个数要装得进该模型的上下文窗口");
+    expect(note).toHaveTextContent("超出会让那次调用失败，并按原有的失败处理重试");
+    expect(g.queryByText(/max_material|budget_tokens/)).toBeNull(); // 文案不出现内部字段名
+
+    for (const bad of ["0", "-1", "1999", "500001", "2500.5", ""]) {
+      await userEvent.clear(f);
+      if (bad) await userEvent.type(f, bad);
+      await save("写作模型");
+      await g.findByText("资料上限填 2000 到 500000 之间的整数（token）");
+      expect(s.puts, bad).toHaveLength(0);
+      if (bad) expect(f).toHaveValue(Number(bad));
+    }
 
     await userEvent.clear(f);
-    await userEvent.type(f, "0");
-    await save("写作模型");
-    await g.findByText("资料字数上限必须是正整数");
-    expect(s.puts).toHaveLength(0);
-    expect(f).toHaveValue(0);
-
-    await userEvent.clear(f);
-    await userEvent.type(f, "12000");
+    await userEvent.type(f, "500000");
     await save("写作模型");
     await g.findByText(/已保存/);
-    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://llm.example.com/v1", api_key: "***", model: "model-a", locality: "external", protocol: "chat-completions", max_material_chars: 12000 } });
-    expect(s.doc.generate_endpoint.max_material_chars).toBe(12000);
-    expect(g.getByLabelText("资料字数上限")).toHaveValue(12000);
+    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://llm.example.com/v1", api_key: "***", model: "model-a", locality: "external", protocol: "chat-completions", max_material_tokens: 500000 } });
+    expect(s.doc.generate_endpoint.max_material_tokens).toBe(500000);
+    expect(g.getByLabelText("写作资料上限（token）")).toHaveValue(500000);
   });
 
-  it("flow-material-budget ACT-BUD-01: 新配写作模型时资料字数上限预填 24000", async () => {
+  it("flow-material-budget ACT-BUD-01: 新配写作模型时资料上限预填 16000", async () => {
     const s = server({ generate: null });
     mount(s.impl);
     const g = await card("写作模型");
     await userEvent.click(g.getByLabelText("配置写作模型"));
-    expect(g.getByLabelText("资料字数上限")).toHaveValue(24000);
+    expect(g.getByLabelText("写作资料上限（token）")).toHaveValue(16000);
   });
 
   it("flow-judge-protocol ACT-JDP-11: 判断端点协议是 system-one 与 probability-judgment/1，不开放 chat-logprobs；已存的自建服务配置原样显示、没有获取模型", async () => {
@@ -182,7 +192,7 @@ describe("设置 › 模型", () => {
     expect(s.posts.at(-1)!.body.config.protocol).toBe("messages");
     await userEvent.click(g.getByRole("radio", { name: /外部服务/ }));
     await save("写作模型");
-    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://gw.example.invalid/v1", api_key: "", model: "model-a", locality: "external", protocol: "messages", max_material_chars: 24000 } });
+    expect(s.puts.at(-1)).toEqual({ generate_endpoint: { url: "https://gw.example.invalid/v1", api_key: "", model: "model-a", locality: "external", protocol: "messages", max_material_tokens: 16000 } });
   });
 
   it("获取模型后从列表选择，再测试连接；请求用占位沿用已存密钥", async () => {
@@ -197,7 +207,7 @@ describe("设置 › 模型", () => {
     const r = await g.findByRole("status", { name: "测试结果" });
     expect(r).toHaveTextContent("✓ 连通，鉴权通过");
     expect(r).toHaveTextContent("耗时 820 ms");
-    expect(s.posts.at(-1)).toEqual({ path: "/v1/settings/model-endpoints/test", body: { endpoint: "generate", config: { url: "https://llm.example.com/v1", api_key: "***", model: "model-b", locality: "external", protocol: "chat-completions", max_material_chars: 24000 } } });
+    expect(s.posts.at(-1)).toEqual({ path: "/v1/settings/model-endpoints/test", body: { endpoint: "generate", config: { url: "https://llm.example.com/v1", api_key: "***", model: "model-b", locality: "external", protocol: "chat-completions", max_material_tokens: 16000 } } });
     expect(s.puts).toHaveLength(0); // 获取与测试都不保存
   });
 

@@ -9,6 +9,8 @@ import { useLabel } from "../../app/values";
 import { useRaw } from "../../app/raw";
 import { vocab } from "../../app/vocab";
 import type { DoctorCode } from "../../app/ids";
+import { BudgetNote, useBudgetBad } from "../../app/tokenBudget/BudgetNote";
+import { budgetOk, DEFAULT_BUDGET_TOKENS } from "../../app/tokenBudget/constants";
 import { strings } from "./strings";
 
 // 形状对应 /v1/settings/model-endpoints 与它的两条探测路由（附录 B.2；界面设计 §9.9；设计 §14.14、§15.5）。
@@ -49,6 +51,7 @@ interface Endpoint {
   timeout_ms?: number;
   max_batch?: number;
   max_material_chars?: number;
+  max_material_tokens?: number;
 }
 interface Doc {
   version: number;
@@ -99,9 +102,9 @@ type Draft = Record<string, string>;
 const JUDGE_NEW: Draft = { ...PRESETS[SYSTEM_ONE], protocol: SYSTEM_ONE, locality: "", max_batch: "32", max_material_chars: "8000" };
 
 function draftOf(kind: Kind, e: Endpoint | null): Draft {
-  if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { protocol: CHAT, url: "", model: "", locality: "", max_material_chars: "24000" };
+  if (!e) return kind === "judge" ? { ...JUDGE_NEW } : { protocol: CHAT, url: "", model: "", locality: "", max_material_tokens: String(DEFAULT_BUDGET_TOKENS) };
   const d: Draft = { url: e.url ?? "", model: e.model ?? "", locality: e.locality ?? "" };
-  if (kind === "generate") Object.assign(d, { protocol: e.protocol || CHAT, max_material_chars: String(e.max_material_chars ?? 24000) });
+  if (kind === "generate") Object.assign(d, { protocol: e.protocol || CHAT, max_material_tokens: String(e.max_material_tokens ?? DEFAULT_BUDGET_TOKENS) });
   if (kind === "judge")
     Object.assign(d, { protocol: e.protocol || PJ, timeout_ms: sec(e.timeout_ms ?? 10000), max_batch: String(e.max_batch ?? 32), max_material_chars: String(e.max_material_chars ?? 8000) });
   return d;
@@ -288,9 +291,14 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
     }
   };
   const apiKey = keyMode === "keep" ? MASK : key;
+  const budgetBad = useBudgetBad();
+  const tokenBudget = (v: string) => {
+    if (!budgetOk(v)) throw new Error(budgetBad);
+    return Number(v);
+  };
   const config = () => {
     const base = { url: d.url.trim(), api_key: apiKey, model: d.model.trim(), locality: d.locality };
-    if (kind === "generate") return { ...base, protocol: d.protocol, max_material_chars: posInt(d.max_material_chars, t.maxChars) };
+    if (kind === "generate") return { ...base, protocol: d.protocol, max_material_tokens: tokenBudget(d.max_material_tokens) };
     return { ...base, protocol: d.protocol, timeout_ms: posSec(d.timeout_ms, t.timeoutMs), max_batch: posInt(d.max_batch, t.maxBatch), max_material_chars: posInt(d.max_material_chars, t.maxChars) };
   };
   const saver = useSaver(async () => {
@@ -433,8 +441,8 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
           {kind === "generate" && (
             <details>
               <summary>{t.advanced}</summary>
-              <label>{t.maxChars}<input type="number" value={d.max_material_chars} onChange={(e) => set("max_material_chars", e.target.value)} /></label>
-              <small className="sub">{t.maxCharsGenerateHint}</small>
+              <label>{t.maxTokens}<input type="number" value={d.max_material_tokens} onChange={(e) => set("max_material_tokens", e.target.value)} /></label>
+              <BudgetNote what={t.maxTokensWhat} model={d.model.trim()} />
             </details>
           )}
           {kind === "judge" && (

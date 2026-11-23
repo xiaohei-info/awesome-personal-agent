@@ -186,7 +186,7 @@ type MergeSettings struct {
 	SkipExisting   bool     `json:"skip_existing"`
 	BatchSize      int      `json:"batch_size"`   // 0 取默认
 	WaitMinutes    int      `json:"wait_minutes"` // 0 取默认
-	// BudgetTokens 是一批打包给模型的资料上限（按 MergeCharsPerToken 估算的 token）；没有这个键取默认，给了就必须在范围内（0 也拒绝）。
+	// BudgetTokens 是一批打包给模型的资料上限（按 CharsPerToken 估算的 token）；没有这个键取默认，给了就必须在范围内（0 也拒绝）。
 	BudgetTokens *int       `json:"budget_tokens,omitempty"`
 	Prompt       string     `json:"prompt"` // 空串用内置提示词
 	PromptAt     *time.Time `json:"prompt_at,omitempty"`
@@ -198,14 +198,16 @@ const (
 	DefaultMergeWait  = 30
 	MaxMergePrompt    = 8000
 
-	// MergeCharsPerToken 是合并资料的 token 估算系数：每这么多个字符记 1 个 token（向上取整）。
-	// 写作模型由本人配置、分词各家不同，内核不带 tokenizer，按这个明写的系数估算（§9.3）。
-	MergeCharsPerToken = 1.5
+	// CharsPerToken 是资料预算的 token 估算系数：每这么多个字符记 1 个 token（向上取整）。合并与写作两处预算共用它。
+	// 模型由本人配置、分词各家不同，内核不带 tokenizer，按这个明写的系数估算（§9.3）。
+	CharsPerToken = 1.5
 	// DefaultMergeBudgetTokens 与改动前借用的写作预算 24000 字等价：24000 ÷ 1.5 = 16000。
 	DefaultMergeBudgetTokens = 16000
-	// MinMergeBudgetTokens 装得下一条新建议带满 5 条候选（标题、摘要各按上限）；MaxMergeBudgetTokens 是默认的 4 倍，防单次调用成本失控。
-	MinMergeBudgetTokens = 2000
-	MaxMergeBudgetTokens = 64000
+	// MinBudgetTokens 装得下一条新建议带满 5 条候选（标题、摘要各按上限）。
+	// MaxBudgetTokens 取 1M 上下文窗口的一半，给提示词与输出留余地；它不是技术上限，超出所配模型的上下文时那次调用会失败。
+	// 合并与写作两处预算共用这一对范围，设置页与服务端必须一致。
+	MinBudgetTokens = 2000
+	MaxBudgetTokens = 500000
 )
 
 // MergePromptSections 是合并提示词必须有的段落；MergeActions 是提示词必须写到的结论词（输出结构只认这四个）。
@@ -228,8 +230,19 @@ func (m MergeSettings) Budget() int {
 	return *m.BudgetTokens
 }
 
-// MergeTokens 按 MergeCharsPerToken 把字符数估成 token 数，向上取整。
-func MergeTokens(chars int) int { return int(math.Ceil(float64(chars) / MergeCharsPerToken)) }
+// TokensOfChars 按 CharsPerToken 把字符数估成 token 数，向上取整。
+func TokensOfChars(chars int) int { return int(math.Ceil(float64(chars) / CharsPerToken)) }
+
+// CheckBudgetTokens 校验一个资料预算（token）在 MinBudgetTokens 到 MaxBudgetTokens 之间；0、负数、过小、过大都拒绝并写明范围，不截到边界。
+func CheckBudgetTokens(field string, n int) error {
+	if n < MinBudgetTokens || n > MaxBudgetTokens {
+		return invalid("%s %d: use %d to %d", field, n, MinBudgetTokens, MaxBudgetTokens)
+	}
+	return nil
+}
+
+// TokenChars 是 TokensOfChars 的反向：token 预算最多装下多少个字符（向下取整，保证估出的 token 数不超预算）。
+func TokenChars(tokens int) int { return int(math.Floor(float64(tokens) * CharsPerToken)) }
 
 // Includes 报告来源是否参与合并。没有来源的记录（本人或 Agent 直接建的）总是参与。
 func (m MergeSettings) Includes(source string) bool {
@@ -342,8 +355,10 @@ const (
 	DefaultJudgeTimeoutMs        = 10000
 	DefaultJudgeMaxBatch         = 32
 	DefaultJudgeMaxMaterialChars = 8000
-	// DefaultGenerateMaxMaterialChars 是生成端点的资料预算缺省值（§8.4）；默认值是否合适见 SPIKE-GEN-BUDGET。
+	// DefaultGenerateMaxMaterialChars 是改动前写作预算的缺省字数（§8.4），只用来换算与锁等价：缺省 token 数 = 它 ÷ CharsPerToken。
 	DefaultGenerateMaxMaterialChars = 24000
+	// DefaultGenerateBudgetTokens 是写作资料预算的缺省值，与旧缺省逐字等价（24000 ÷ 1.5）。
+	DefaultGenerateBudgetTokens = 16000
 )
 
 // EffectiveLocality 是端点位置的实际取值：未声明按 external（§14.14）。
@@ -362,17 +377,22 @@ type GenerateEndpoint struct {
 	Model    string `json:"model,omitempty"`
 	Locality string `json:"locality,omitempty"`
 	Protocol string `json:"protocol,omitempty"`
-	// MaxMaterialChars 是每次调用的资料预算（字符）；已存的策略没有这个键，读作默认值，不改写。
+	// MaxMaterialTokens 是每次调用的资料预算（按 CharsPerToken 估算的 token）；已存的策略没有这个键，读作默认值。
+	MaxMaterialTokens int `json:"max_material_tokens,omitempty"`
+	// MaxMaterialChars 是旧版按字数存的预算，只读：读取时一次换算进 MaxMaterialTokens 并清空，之后存回的文档不再有它。
 	MaxMaterialChars int `json:"max_material_chars,omitempty"`
 }
 
-// MaterialBudget 是资料预算的实际取值：未设置按默认值。
+// MaterialBudget 是资料预算的实际取值（token）：未设置按默认值。
 func (g GenerateEndpoint) MaterialBudget() int {
-	if g.MaxMaterialChars <= 0 {
-		return DefaultGenerateMaxMaterialChars
+	if g.MaxMaterialTokens <= 0 {
+		return DefaultGenerateBudgetTokens
 	}
-	return g.MaxMaterialChars
+	return g.MaxMaterialTokens
 }
+
+// MaterialChars 是资料预算折成的字符数，交给按字符裁剪的 budget.Fit。
+func (g GenerateEndpoint) MaterialChars() int { return TokenChars(g.MaterialBudget()) }
 
 // JudgeEndpoint 是分类（判断）端点；Policy 里为 nil 表示未配置。
 type JudgeEndpoint struct {
@@ -631,8 +651,10 @@ func normalize(p Policy) (Policy, error) {
 	if m := p.Merge; m.WaitMinutes != 0 && (m.WaitMinutes < 5 || m.WaitMinutes > 1440) {
 		return p, invalid("merge wait_minutes %d: use 5 to 1440", m.WaitMinutes)
 	}
-	if b := p.Merge.BudgetTokens; b != nil && (*b < MinMergeBudgetTokens || *b > MaxMergeBudgetTokens) {
-		return p, invalid("merge budget_tokens %d: use %d to %d", *b, MinMergeBudgetTokens, MaxMergeBudgetTokens)
+	if b := p.Merge.BudgetTokens; b != nil {
+		if err := CheckBudgetTokens("merge budget_tokens", *b); err != nil {
+			return p, err
+		}
 	}
 	if err := CheckMergePrompt(p.Merge.Prompt); err != nil {
 		return p, err
@@ -818,11 +840,16 @@ func normalizeEndpoints(p *Policy) (err error) {
 		if !oneOf(g.Protocol, "", ProtocolChatCompletions, ProtocolMessages, ProtocolResponses) {
 			return invalid("generate_endpoint protocol %q", g.Protocol)
 		}
-		if g.MaxMaterialChars < 0 {
-			return invalid("generate_endpoint max_material_chars %d < 0", g.MaxMaterialChars)
+		if g.MaxMaterialTokens == 0 && g.MaxMaterialChars > 0 { // 旧文档：换算一次；有了 token 值就以它为准，所以重复读不会二次换算
+			// 旧值不受新范围约束，读取时落进范围，免得整份策略读不出来。
+			g.MaxMaterialTokens = min(max(int(float64(g.MaxMaterialChars)/CharsPerToken), MinBudgetTokens), MaxBudgetTokens)
 		}
-		if g.MaxMaterialChars == 0 {
-			g.MaxMaterialChars = DefaultGenerateMaxMaterialChars
+		g.MaxMaterialChars = 0
+		if g.MaxMaterialTokens == 0 {
+			g.MaxMaterialTokens = DefaultGenerateBudgetTokens
+		}
+		if err = CheckBudgetTokens("generate_endpoint max_material_tokens", g.MaxMaterialTokens); err != nil {
+			return err
 		}
 	}
 	j := p.JudgeEndpoint

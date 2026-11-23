@@ -1024,7 +1024,7 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 		p.draft = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}
 		return nil
 	}
-	res := budget.Fit(bs, gen.MaterialBudget()) // 先外发范围，后预算
+	res := budget.Fit(bs, gen.MaterialChars()) // 先外发范围，后预算
 	p.material = &res.Trace
 	list := func(loc string) lists { return sn.lists(ev, p.project, loc) }
 	in := eventInput(src, ev, hint, s.listInput(list(locality)))
@@ -1046,7 +1046,7 @@ func (s *Service) draft(ctx context.Context, sn snapshot, src domain.Source, ev 
 			p.draft, p.material = &Draft{Outcome: DraftSkipped, Code: DraftCodeOutbound}, nil
 			return nil
 		}
-		res = budget.Fit(bs, pol.GenerateEndpoint.MaterialBudget())
+		res = budget.Fit(bs, pol.GenerateEndpoint.MaterialChars())
 		p.material = &res.Trace
 	}
 	switch {
@@ -1316,7 +1316,7 @@ func (s *Service) extract(ctx context.Context, sn snapshot, src domain.Source, e
 	if !allowed {
 		return s.withdraw(ctx, m, ev, proposal{judgment: a.judgment}, outboundUnsetPrefix+"the generate endpoint is excluded by the outbound scope")
 	}
-	mat := budget.Fit(bs, pol.GenerateEndpoint.MaterialBudget()) // 先外发范围，后预算
+	mat := budget.Fit(bs, pol.GenerateEndpoint.MaterialChars()) // 先外发范围，后预算
 	l := list(locality)
 	out, err := s.o.Judge.Do(ctx, direct.Call{Pack: extractPack, Template: extract, Input: eventInput(src, ev, "", s.listInput(l)), Material: mat.Text, RequireLocality: locality,
 		Scope: direct.Scope{Source: src.ID}, Actor: domain.Actor{Type: domain.ActorAgent, Principal: systemPrinc, Via: domain.ViaSource}})

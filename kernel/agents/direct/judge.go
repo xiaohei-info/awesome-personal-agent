@@ -48,7 +48,7 @@ type JudgeCall struct {
 	Material     func(locality string) (text string, ok bool)
 	MaterialText string
 	// MaterialSource 同 Material，但给出带结构的资料（正文、聚合消息、清单），先于 Material 与 MaterialText 采用：
-	// 每一级按自己端点的资料预算裁剪（判断端点 max_material_chars，对话端点 generate_endpoint.max_material_chars），
+	// 每一级按自己端点的资料预算裁剪（判断端点 max_material_chars，对话端点 generate_endpoint.max_material_tokens 折成字符），
 	// 聚合消息因此能整条保留（§8.4）。
 	MaterialSource func(locality string) (budget.Source, bool)
 	Subject        string // 判断的对象：来源事件、事项或对话增量的 id
@@ -679,7 +679,7 @@ func (s *Service) chatLevel(ctx context.Context, p *pending, pol policy.Policy) 
 	}
 	loc := policy.EffectiveLocality(ep.Locality)
 	lv.Endpoint, lv.Locality, lv.Model = hostOf(ep.URL), loc, ep.Model
-	res, ok := p.fit("chat", loc, ep.MaterialBudget())
+	res, ok := p.fit("chat", loc, ep.MaterialChars())
 	if !ok {
 		lv.ErrorCode = "outbound_scope"
 		return lv, nil

@@ -276,18 +276,18 @@ func TestMergeBatchBudgetHalves(t *testing.T) {
 
 	e := run(nil)
 	done, pending, deferred, chars := tally(e)
-	if e.batchCalls() != 1 || done != 20 || pending != 0 || deferred != 0 || policy.MergeTokens(chars) > policy.DefaultMergeBudgetTokens {
+	if e.batchCalls() != 1 || done != 20 || pending != 0 || deferred != 0 || policy.TokensOfChars(chars) > policy.DefaultMergeBudgetTokens {
 		t.Fatalf("default budget: calls %d, done %d, pending %d, deferred %d, %d chars", e.batchCalls(), done, pending, deferred, chars)
 	}
 	full := chars
 
-	small := policy.MinMergeBudgetTokens
+	small := policy.MinBudgetTokens
 	e = run(&small)
 	done, pending, deferred, chars = tally(e)
-	if policy.MergeTokens(full) <= small {
+	if policy.TokensOfChars(full) <= small {
 		t.Fatalf("the full batch (%d chars) must be over %d tokens for this test", full, small)
 	}
-	if e.batchCalls() != 1 || done != 10 || pending != 10 || deferred != 10 || chars == 0 || policy.MergeTokens(chars) > small {
+	if e.batchCalls() != 1 || done != 10 || pending != 10 || deferred != 10 || chars == 0 || policy.TokensOfChars(chars) > small {
 		t.Fatalf("over budget halves: calls %d, done %d, pending %d, deferred %d, %d chars", e.batchCalls(), done, pending, deferred, chars)
 	}
 	e.now = e.now.Add(31 * time.Minute) // 余下的不够一批，等满时间成批

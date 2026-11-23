@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	genBudget   = 3000 // ACT-BUD-02 起生成端点的资料预算
-	judgeBudget = 8000 // 判断端点的资料预算缺省
-	excerptLen  = 500  // excerpt 外发范围的字符数
+	genBudget       = 3000 // ACT-BUD-02 起生成端点的资料预算
+	genBudgetTokens = 2000 // 同一份预算折成 token（3000 字 ÷ 1.5），页面与接口按 token 存
+	judgeBudget     = 8000 // 判断端点的资料预算缺省
+	excerptLen      = 500  // excerpt 外发范围的字符数
 )
 
 type mat struct {
@@ -78,20 +79,20 @@ func TestFlowMaterialBudget(t *testing.T) {
 	var bigItem string
 	var bigSent int
 
-	k.step("ACT-BUD-01 生成端点的资料预算缺省 24000 且只在 Web 可改", func(t *testing.T) {
+	k.step("ACT-BUD-01 生成端点的资料预算缺省 16000 token（原 24000 字）且只在 Web 可改", func(t *testing.T) {
 		_, ep := k.endpoints("")
-		eq(t, "未设过时 generate_endpoint.max_material_chars", ep.Generate.MaxMaterialChars, 24000)
-		k.putEndpoints("local", genBudget)
+		eq(t, "未设过时 generate_endpoint.max_material_tokens（与旧 24000 字等价）", ep.Generate.MaxMaterialTokens, 16000)
+		k.putEndpoints("local", genBudgetTokens)
 		_, ep = k.endpoints("")
-		eq(t, "保存后读回 max_material_chars", ep.Generate.MaxMaterialChars, genBudget)
+		eq(t, "保存后读回 max_material_tokens", ep.Generate.MaxMaterialTokens, genBudgetTokens)
 		eq(t, "判断端点的资料预算缺省", ep.Judge.MaxMaterialChars, judgeBudget)
 		if n := len(k.audit("policy.changed")); n == 0 {
 			t.Error("保存资料预算应记 policy.changed")
 		}
-		r := k.APIRaw("PUT", "/v1/settings/model-endpoints", `{"generate_endpoint":{"max_material_chars":1}}`, k.DEL)
+		r := k.APIRaw("PUT", "/v1/settings/model-endpoints", `{"generate_endpoint":{"max_material_tokens":2000}}`, k.DEL)
 		eq(t, "DEL 调 PUT /v1/settings/model-endpoints 的 HTTP 状态", r.Code, 403)
 		_, ep = k.endpoints("")
-		eq(t, "被拒后预算不变", ep.Generate.MaxMaterialChars, genBudget)
+		eq(t, "被拒后预算不变", ep.Generate.MaxMaterialTokens, genBudgetTokens)
 	})
 
 	k.step("ACT-BUD-02 超预算的长正文按首 3/4 尾 1/4 裁剪送给起草", func(t *testing.T) {
@@ -269,8 +270,8 @@ source_rules:
 	})
 
 	k.step("ACT-BUD-06 外发范围先于预算生效", func(t *testing.T) {
-		k.putEndpoints("external", genBudget)
-		defer k.putEndpoints("local", genBudget) // 流程结束改回 local
+		k.putEndpoints("external", genBudgetTokens)
+		defer k.putEndpoints("local", genBudgetTokens) // 流程结束改回 local
 		k.addStub("src_acc_raw_ex", "mail", "full", "excerpt")
 		k.clear()
 		k.setCase("src_acc_raw_ex", "big-body")
