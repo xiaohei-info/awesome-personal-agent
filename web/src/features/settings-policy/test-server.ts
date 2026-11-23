@@ -25,6 +25,45 @@ export function initialDoc(): Record<string, any> {
   };
 }
 
+/**
+ * 与 kernel/policy.DeriveDelivery 同一套换算（测试替身用）：disturb 没有 delivery 时，GET 返回按旧键换算出的矩阵。
+ * inject → (next_chat, off)；web → (off, off)；channel:X → (off, X 是默认渠道记 default，否则记 X)。
+ */
+export function deriveDelivery(d: Record<string, any>, packs: Record<string, string> = {}) {
+  const routes: Record<string, string> = d.routes ?? {};
+  const push: Record<string, { on?: boolean; route?: string }> = d.push ?? {};
+  const norm = (r?: string) => (!r ? "web" : ["inject", "wake", "web"].includes(r) || r.startsWith("channel:") ? r : "channel:" + r);
+  const n: Record<string, number> = {};
+  for (const r of [...Object.values(routes), ...Object.values(push).map((p) => p.route ?? "")]) if (r && norm(r).startsWith("channel:")) n[norm(r)] = (n[norm(r)] ?? 0) + 1;
+  const def = Object.keys(n).sort().reduce((b, k) => (!b || n[k] > n[b] ? k : b), "");
+  const user = (r?: string) => { const x = norm(r); return x === "web" || x === "inject" ? "off" : x === def ? "default" : x; };
+  type T = { agent: string; user: string; else?: string; by_priority?: Record<string, T> };
+  const conv = (r?: string): T => (norm(r) === "inject" ? { agent: "next_chat", user: "off" } : { agent: "off", user: user(r) });
+  const orElse = (r?: string) => { const c = conv(r); return c.agent === "next_chat" ? "next_chat" : c.user === "off" ? "" : c.user; };
+  const main = (r?: string): T => { const e = orElse(r); return { agent: "main", user: "off", ...(e ? { else: e } : {}) }; };
+  const from = (cls: string, wrap: (r?: string) => T): T => {
+    const t = wrap(routes[cls]);
+    for (const [k, r] of Object.entries(routes)) if (k.startsWith(cls + ":")) (t.by_priority ??= {})[k.slice(cls.length + 1)] = wrap(r);
+    return t;
+  };
+  const pr = d.proactive ?? {};
+  const pushTask = (t: string, id = "") => (id && id in (pr.instance_push ?? {}) ? pr.instance_push[id] : t in (pr.task_push ?? {}) ? pr.task_push[t] : { brief: true, review: true, routine: false }[t] ?? false);
+  const tmpl = push.template_failed?.route;
+  const briefPack = (p: string) => p === "brief" || p === "review";
+  const result = (p: string, on: boolean): T => (on && briefPack(p) ? from("brief", main) : on ? { agent: "main", user: "off" } : briefPack(p) ? from("brief", conv) : { agent: "off", user: "off" });
+  const failed = (on: boolean): T => (tmpl ? conv(tmpl) : on ? main(routes.decision) : conv(routes.decision));
+  const pushRoute = (c: string) => (push[c]?.route ? conv(push[c].route) : conv(routes.decision));
+  const rows: Record<string, T> = {
+    decision: from("decision", conv), scheduled: { agent: "main", user: "off" },
+    "task_result:other": from("brief", conv), "task_failed:other": failed(false),
+    source_failing: pushRoute("source_failing"), run_failed: pushRoute("run_failed"), new_proposals: pushRoute("new_proposals"), health: conv(routes.health),
+  };
+  for (const r of ["agent_answered", "overdue", "followup", "stale", "rule_reminder", "source_alert"]) rows[r] = from("reminder", conv);
+  for (const t of ["brief", "review", "routine"]) { rows["task_result:" + t] = result(t, pushTask(t)); rows["task_failed:" + t] = failed(pushTask(t)); }
+  for (const [id, on] of Object.entries((pr.instance_push ?? {}) as Record<string, boolean>)) if (packs[id]) { rows["instance:" + id] = result(packs[id], on); rows["instance_failed:" + id] = failed(on); }
+  return { default_channel: def, rows };
+}
+
 export function policyServer(opts: { preview?: Record<string, unknown>; instances?: Record<string, unknown>[]; webOnlyDenied?: boolean; agents?: Record<string, unknown>[]; connections?: { id: string; name: string; enabled: boolean }[]; routes?: Record<string, string>; extKeys?: Record<string, unknown>[] } = {}) {
   let version = 1;
   const doc = initialDoc();
@@ -55,13 +94,24 @@ export function policyServer(opts: { preview?: Record<string, unknown>; instance
     const keys = SECTIONS[url];
     if (!keys) return err(404, "not_found", "no such route");
     if (opts.webOnlyDenied) return err(403, "web_only", "settings can only be used by the owner in the Web UI");
-    const render = () => ({ version, ...Object.fromEntries(keys.map((k) => [k, doc[k]])) });
+    // disturb 照 api/settings/policy 的 disturbSection：总带生效的 delivery 与只读的 delivery_saved。
+    const packs = Object.fromEntries(((opts.instances ?? []) as { id: string; pack: string }[]).map((i) => [i.id, i.pack]));
+    const view = (k: string) => (k === "disturb" ? { ...doc.disturb, delivery: doc.disturb.delivery ?? deriveDelivery(doc.disturb, packs), delivery_saved: !!doc.disturb.delivery } : doc[k]);
+    const render = () => ({ version, ...Object.fromEntries(keys.map((k) => [k, view(k)])) });
     if (method === "GET") return json(200, render());
     const body = JSON.parse(init.body as string);
     puts.push({ path: url, body, csrf: (init.headers as Record<string, string>)["X-CSRF-Token"] });
     if (typeof body.persona === "string" && body.persona.length > 400) return err(400, "invalid_request", "persona is about 500 tokens, limit 400");
+    const apply = { ...body };
+    if (body.disturb) {
+      const { delivery_saved: _s, ...next } = body.disturb;
+      if (!next.delivery && doc.disturb.delivery) next.delivery = doc.disturb.delivery; // 没带矩阵时沿用已存的
+      const frozen = (x: any) => JSON.stringify([x.routes ?? {}, ["source_failing", "template_failed", "run_failed", "new_proposals"].map((c) => x.push?.[c]?.route ?? ""), x.proactive?.task_push ?? {}, x.proactive?.instance_push ?? {}]);
+      if (next.delivery && frozen(next) !== frozen(doc.disturb)) return err(400, "invalid_request", "disturb routes, push.*.route, proactive.task_push and proactive.instance_push are frozen once disturb.delivery is saved");
+      apply.disturb = next;
+    }
     const before = JSON.stringify(doc);
-    for (const [k, v] of Object.entries(body) as [string, any][]) doc[k] = v;
+    for (const [k, v] of Object.entries(apply) as [string, any][]) doc[k] = v;
     if (JSON.stringify(doc) !== before) version++;
     return json(200, render());
   }) as unknown as typeof fetch;

@@ -4,14 +4,14 @@ import { useT } from "../../app/i18n";
 import { Card, useDraft, type Doc } from "../settings-policy/shared";
 import { strings } from "./strings";
 
-// 主动提醒（§7.4）：策略 disturb.proactive。两件事：事项到点提醒（默认关，开启前先看预览），定时任务的结果要不要再推到主会话。
-// 送到的是主 Agent 的主会话（网关插件注入），不是无头运行；主会话不能唤醒时预览写明原因，提醒落今天页的提醒里。
+// 到点提醒（§7.4）：策略 disturb.proactive 的时间规则（默认关，开启前先看预览）；它是投递矩阵「到点提醒」行的展开区。
+// 送到哪由矩阵这一行决定（默认推到主 Agent 的对话里）；主会话不能唤醒时预览写明原因。定时任务的结果送到哪也在矩阵里，不在这里。
 // 静默时段沿用本页「安静时段」，不另设一份。开启时刻（since）由服务端记，页面不发。
 
 export interface Proactive {
   on: boolean; since?: string; work_start: string; work_end: string; workdays: number[]; shift: boolean;
   start: boolean; end: boolean; lead_min: number; dedup_min: number; max_items: number; max_batches: number;
-  task_push?: Record<string, boolean>; instance_push?: Record<string, boolean>;
+  task_push?: Record<string, boolean>; instance_push?: Record<string, boolean>; // 冻结键：只原样带回
 }
 
 /** 与 kernel/policy.DefaultProactive、TaskPushDefaults 一致：策略里没有这一段时就是它。 */
@@ -19,11 +19,8 @@ export const PROACTIVE_DEFAULT: Proactive = {
   on: false, work_start: "09:00", work_end: "18:00", workdays: [1, 2, 3, 4, 5], shift: true,
   start: true, end: true, lead_min: 0, dedup_min: 60, max_items: 20, max_batches: 6,
 };
-export const TASK_TYPES = ["brief", "review", "routine"] as const;
-export const TASK_PUSH_DEFAULT: Record<string, boolean> = { brief: true, review: true, routine: false };
 
 interface Preview { total: number; batches: number; next_at?: string; next_count: number; route: string; blocked?: string }
-interface Instance { id: string; pack: string; params: { title?: string; schedule?: string } }
 
 type Put = (fields: Record<string, unknown>) => Promise<number>;
 
@@ -98,39 +95,6 @@ export function ProactiveCard({ doc, put }: { doc: Doc; put: Put }) {
         <summary>{t.rules}</summary>
         <ul className="sub">{t.ruleLines.map((l) => <li key={l}>{l}</li>)}</ul>
       </details>
-    </Card>
-  );
-}
-
-/** 定时任务的结果：总是写回 APA；按类型、按实例决定要不要再推到主会话。简报与复盘默认推，可一键都关。 */
-export function TaskPushCard({ doc, put }: { doc: Doc; put: Put }) {
-  const t = useT(strings);
-  const { api } = useSession();
-  const saved = { ...PROACTIVE_DEFAULT, ...(doc.disturb.proactive ?? {}) } as Proactive;
-  const [types, setTypes, d1] = useDraft(doc.disturb.proactive, () => ({ ...TASK_PUSH_DEFAULT, ...saved.task_push }));
-  const [byInst, setByInst, d2] = useDraft(doc.disturb.proactive, () => ({ ...saved.instance_push }));
-  const [instances, setInstances] = useState<Instance[]>([]);
-  useEffect(() => {
-    api.get<{ instances: Instance[] }>("/instances").then((r) => setInstances(r.instances.filter((i) => (TASK_TYPES as readonly string[]).includes(i.pack))), () => setInstances([]));
-  }, [api]);
-  const submit = (tp: Record<string, boolean>, ip: Record<string, boolean>) => put({ proactive: body({ ...saved, task_push: tp, instance_push: ip }) });
-  return (
-    <Card title={t.taskPush} hint={t.taskPushHint} onSave={() => submit(types, byInst)} dirty={d1 || d2}>
-      {TASK_TYPES.map((k) => (
-        <label key={k}><input type="checkbox" role="switch" aria-label={t.taskKinds[k]} checked={!!types[k]} onChange={(e) => setTypes({ ...types, [k]: e.target.checked })} /> {t.taskKinds[k]}</label>
-      ))}
-      {instances.map((i) => (
-        <label key={i.id} className="line">
-          <span>{t.instanceName(t.taskKinds[i.pack], i.params.title || i.params.schedule || i.id)}</span>
-          <select aria-label={t.instancePush(i.params.title || i.params.schedule || i.id)} value={i.id in byInst ? String(byInst[i.id]) : ""}
-            onChange={(e) => { const n = { ...byInst }; if (e.target.value === "") delete n[i.id]; else n[i.id] = e.target.value === "true"; setByInst(n); }}>
-            <option value="">{t.followType}</option>
-            <option value="true">{t.pushIt}</option>
-            <option value="false">{t.recordOnly}</option>
-          </select>
-        </label>
-      ))}
-      <div><button type="button" className="link" onClick={() => void submit(Object.fromEntries(TASK_TYPES.map((k) => [k, false])), {})}>{t.allOff}</button></div>
     </Card>
   );
 }

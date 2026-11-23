@@ -1,22 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
-import { useT } from "../../app/i18n";
-import { PRIORITY } from "../../app/ids";
+import { errorText as msg, useLang, useT } from "../../app/i18n";
+import { RULE_MODE } from "../../app/ids";
 import { EntityPick, useItemTitle } from "../../app/names";
-import { Pick, useLabel } from "../../app/values";
+import { Pick, entryOf } from "../../app/values";
 import { CHANNEL_PREFIX } from "../../app/vocab";
 import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
-import { ProactiveCard, TaskPushCard } from "./Proactive";
+import { ProactiveCard } from "./Proactive";
+import { GROUPS, OFF, TASK_TYPES, recordOnly, type Delivery, type Target } from "./matrix";
 import { strings } from "./strings";
 
-// 设置 › 提醒与打扰：策略的 disturb 段（§7.4）。按使用者的一件事拆成几节、各自保存（界面设计 §6.1）：怎么送、每天上限、暂停、安静时段、更多。
-// PUT 替换整段，所以每节保存时带上整段：已保存的原样带回，只换这一节改过的字段。
-// 路由只能选合法值：下次聊天时告诉我（inject）、只放在今天页的提醒里（web）、启用中的内置渠道（channel:<连接 id>，按连接名字显示）、
-// 自写程序的渠道（channel:<名>，取自渠道扩展的密钥）；唤醒 Agent（wake）不是提醒本人，只在「高级」里出现。
-// 文档里已有的其他取值保留为选项，不丢；指向已停用或已删除连接的路由照样显示并标明。
+// 设置 › 提醒与推送：策略的 disturb 段（§7.4）。上半是投递矩阵（disturb.delivery，各类提醒送到哪的唯一可编辑处）：
+// 每行两层——推给 Agent（不推 / 推到对话里：马上或下次对话时）与推给你（不推 / 默认渠道 / 某个渠道）；产不产生的开关放在对应行里。
+// 下半是全局节流：每天上限、暂停、安静时段、合并窗口。每节各自保存，发整段 disturb：已保存的原样带回，只换这一节改过的字段。
+// 矩阵一经保存，旧键 routes、push.*.route、proactive.task_push/instance_push 冻结（服务端校验）：本页不改它们，原样带回。
+// GET 带的 delivery 在没保存过时是服务端按旧键换算的值；只有矩阵这一节保存时才写 delivery，其余节不带（不提前冻结旧键）。
 const ROUTES = ["policy"] as const;
-const CLASSES = ["decision", "brief", "reminder", "health"] as const;
 const MERGE_MIN = [0, 15, 30, 60];
+const FOLLOWUP_RULE = "follow-up/clock_rules/follow-up-interval";
+const STALE_RULE = "follow-up/clock_rules/stale-check";
 
 export function SettingsNotifyPage() {
   const t = useT(strings);
@@ -30,9 +33,9 @@ export function SettingsNotifyPage() {
   );
 }
 
-interface Channels { ids: string[]; names: Record<string, string> }
+interface Channels { ids: string[]; names: Record<string, string>; plain: Record<string, string> }
 
-/** 可选的渠道：启用中的内置渠道连接按名字列出，没吊销的渠道扩展密钥按渠道名列出。取不到就只给内置的两种。 */
+/** 可选的渠道：启用中的内置渠道连接按名字列出，没吊销的渠道扩展密钥按渠道名列出。 */
 function useChannels(): Channels {
   const t = useT(strings);
   const { api } = useSession();
@@ -45,11 +48,11 @@ function useChannels(): Channels {
       () => setExt([]),
     );
   }, [api]);
-  const names: Record<string, string> = {};
-  for (const c of conns) names[CHANNEL_PREFIX + c.id] = c.enabled ? t.pushTo(c.name) : t.pushToOff(c.name);
-  for (const n of ext) names[CHANNEL_PREFIX + n] = t.pushTo(n);
+  const names: Record<string, string> = {}, plain: Record<string, string> = {};
+  for (const c of conns) { names[CHANNEL_PREFIX + c.id] = c.enabled ? t.pushTo(c.name) : t.pushToOff(c.name); plain[CHANNEL_PREFIX + c.id] = c.name; }
+  for (const n of ext) { names[CHANNEL_PREFIX + n] = t.pushTo(n); plain[CHANNEL_PREFIX + n] = n; }
   const ids = [...conns.filter((c) => c.enabled).map((c) => CHANNEL_PREFIX + c.id), ...ext.map((n) => CHANNEL_PREFIX + n)];
-  return { ids, names };
+  return { ids, names, plain };
 }
 
 interface Today { pushed: number; cap: number }
@@ -62,7 +65,6 @@ function useToday(): Today | null {
   return today;
 }
 
-type Override = [cls: string, prio: string, route: string];
 type Mute = [scope: string, id: string, until: string];
 const pad = (n: number) => String(n).padStart(2, "0");
 const toLocalInput = (iso?: string) => {
@@ -76,113 +78,252 @@ const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 type Put = (fields: Record<string, unknown>) => Promise<number>;
 
 function DisturbCard({ doc, channels, save }: { doc: Doc; channels: Channels; save: Save }) {
-  const put: Put = (fields) => save("policy", { disturb: { ...doc.disturb, ...fields } });
   const t = useT(strings);
-  const routesIn = doc.disturb.routes as Record<string, string>;
-  const names: Record<string, string> = { ...channels.names };
-  // 列表里没有的渠道路由：连接或自写程序渠道已删除，照样列出并标明，不显示原始 id。
-  for (const r of Object.values(routesIn)) if (r.startsWith(CHANNEL_PREFIX) && !names[r]) names[r] = t.pushToGone;
-  const routeIds = (cur: string, withWake = false) => {
-    const ids = ["inject", "web", ...(withWake ? ["wake"] : []), ...channels.ids];
-    return cur && !ids.includes(cur) ? [...ids, cur] : ids;
-  };
+  const { delivery: _d, delivery_saved: _s, ...rest } = doc.disturb;
+  const put: Put = (fields) => save("policy", { disturb: { ...rest, ...fields } });
   return (
     <>
-      <Routes doc={doc} names={names} routeIds={routeIds} put={put} />
-      <Push doc={doc} channels={channels} names={names} put={put} />
-      <ProactiveCard doc={doc} put={put} />
-      <TaskPushCard doc={doc} put={put} />
+      <MatrixCard doc={doc} channels={channels} put={put} />
+      <h2>{t.throttleHead}</h2>
       <Cap doc={doc} put={put} />
       <Mutes doc={doc} put={put} />
       <Quiet doc={doc} put={put} />
-      <More doc={doc} names={names} routeIds={routeIds} put={put} />
+      <More doc={doc} put={put} />
     </>
   );
 }
 
-// 推送哪些事（§7.4）：逐类开关、选渠道；没选渠道的跟「需要你决定」走。缺的类别取内核默认：要本人动手的开，纯信息的关。
-// 同一串来源失败、同一次运行只推一次，新建议攒够才推且两次至少隔 2 小时（内核去重），这里只管开关与去向。
+// ---- 投递矩阵 ----
+
 const PUSH = ["source_failing", "template_failed", "run_failed", "new_proposals"] as const;
 const PUSH_DEFAULT: Record<string, Rule> = { source_failing: { on: true }, template_failed: { on: true }, run_failed: { on: true }, new_proposals: { on: false, min: 10 } };
 interface Rule { on: boolean; route?: string; min?: number }
-function Push({ doc, channels, names, put }: { doc: Doc; channels: Channels; names: Record<string, string>; put: Put }) {
+interface Instance { id: string; pack: string; params: { title?: string; schedule?: string } }
+interface RuleState { key: string; mode: string }
+const FLAGS = ["remind_on_deadline", "threshold_judge", "followup_defer"] as const;
+
+interface Draft { delivery: Delivery; push: Record<string, Rule>; flags: Record<string, boolean> }
+
+function MatrixCard({ doc, channels, put }: { doc: Doc; channels: Channels; put: Put }) {
   const t = useT(strings);
-  const label = useLabel();
-  const saved = (doc.disturb.push ?? {}) as Record<string, Rule>;
-  const decision = (doc.disturb.routes as Record<string, string>).decision ?? "web";
-  const [rules, setRules, dirty] = useDraft(doc.disturb.push, () => Object.fromEntries(PUSH.map((c) => [c, { ...PUSH_DEFAULT[c], ...saved[c] }])));
-  const set = (c: string, r: Partial<Rule>) => setRules({ ...rules, [c]: { ...rules[c], ...r } });
-  const opts = { ...names, "": t.pushFollow(names[decision] ?? label("route", decision)) };
+  const { api } = useSession();
+  const savedPush = (doc.disturb.push ?? {}) as Record<string, Rule>;
+  const init = (): Draft => ({
+    delivery: (doc.disturb.delivery as Delivery | undefined) ?? { default_channel: "", rows: {} },
+    push: Object.fromEntries(PUSH.map((c) => [c, { ...PUSH_DEFAULT[c], ...savedPush[c] }])),
+    flags: Object.fromEntries(FLAGS.map((k) => [k, !!doc.disturb[k]])),
+  });
+  const [d, setD, dirty] = useDraft([doc.disturb.delivery, doc.disturb.push, ...FLAGS.map((k) => doc.disturb[k])], init);
+  const [instances, setInstances] = useState<Instance[]>([]);
+  useEffect(() => {
+    api.get<{ instances: Instance[] }>("/instances").then((r) => setInstances(r.instances.filter((i) => (TASK_TYPES as readonly string[]).includes(i.pack))), () => setInstances([]));
+  }, [api]);
+  const m = d.delivery;
+  const setRow = (k: string, v: Target | undefined) => {
+    const rows = { ...m.rows };
+    if (v) rows[k] = v;
+    else delete rows[k];
+    setD({ ...d, delivery: { ...m, rows } });
+  };
+  const setPush = (c: string, r: Partial<Rule>) => setD({ ...d, push: { ...d.push, [c]: { ...d.push[c], ...r } } });
+  const setFlag = (k: string, v: boolean) => setD({ ...d, flags: { ...d.flags, [k]: v } });
   const submit = () => {
-    const out: Record<string, Rule> = {};
-    for (const c of PUSH) {
-      const r = rules[c];
-      if (c === "new_proposals" && !(Number.isInteger(Number(r.min)) && Number(r.min) >= 1)) return reject(t.pushMinInvalid);
-      out[c] = { on: r.on, ...(r.route ? { route: r.route } : {}), ...(c === "new_proposals" ? { min: Number(r.min) } : {}) };
+    const fields: Record<string, unknown> = { delivery: m };
+    const i0 = init();
+    if (JSON.stringify(d.push) !== JSON.stringify(i0.push)) {
+      const out: Record<string, Rule> = {};
+      for (const c of PUSH) {
+        const r = d.push[c];
+        if (c === "new_proposals" && !(Number.isInteger(Number(r.min)) && Number(r.min) >= 1)) return reject(t.pushMinInvalid);
+        // route 是冻结键：原样带回已存的值
+        out[c] = { on: r.on, ...(savedPush[c]?.route ? { route: savedPush[c].route } : {}), ...(c === "new_proposals" ? { min: Number(r.min) } : {}) };
+      }
+      fields.push = out;
     }
-    return put({ push: out });
+    for (const k of FLAGS) if (d.flags[k] !== i0.flags[k]) fields[k] = d.flags[k];
+    return put(fields);
+  };
+  const defIds = [...channels.ids, ...(m.default_channel && !channels.ids.includes(m.default_channel) ? [m.default_channel] : [])];
+  const defName = m.default_channel ? channels.plain[m.default_channel] ?? t.pushToGone : t.noDefault;
+  const kind = (pack: string) => t.taskKinds[pack] ?? pack;
+  const row = (k: string, extra?: ReactNode, pack?: string) => (
+    <MatrixRow key={k} id={k} label={t.rows[k] ?? k} throttle={t.throttle[k.split(":")[0]] ?? ""} target={m.rows[k] ?? OFF} channels={channels}
+      defName={defName} hasDefault={!!m.default_channel} record={recordOnly(k, pack)} onChange={(v) => setRow(k, v)}>{extra}</MatrixRow>
+  );
+  const extras: Record<string, ReactNode> = {
+    decision: (
+      <>
+        <label><input type="checkbox" checked={d.flags.threshold_judge} onChange={(e) => setFlag("threshold_judge", e.target.checked)} /> {t.thresholdJudge}</label>
+        <p className="sub"><Link to="/settings">{t.tierLink}</Link></p>
+      </>
+    ),
+    scheduled: (
+      <details>
+        <summary>{t.proactive}</summary>
+        <ProactiveCard doc={doc} put={put} />
+      </details>
+    ),
+    overdue: <label><input type="checkbox" role="switch" checked={d.flags.remind_on_deadline} onChange={(e) => setFlag("remind_on_deadline", e.target.checked)} /> {t.remindDeadline}</label>,
+    followup: (
+      <>
+        <RuleModes ruleKey={FOLLOWUP_RULE} name={t.rows.followup} />
+        <label><input type="checkbox" checked={d.flags.followup_defer} onChange={(e) => setFlag("followup_defer", e.target.checked)} /> {t.followupDefer}</label>
+      </>
+    ),
+    stale: <RuleModes ruleKey={STALE_RULE} name={t.rows.stale} />,
+    rule_reminder: <p className="sub"><Link to="/settings/rules">{t.ruleOwned}</Link></p>,
+    source_alert: <p className="sub"><Link to="/settings/rules">{t.ruleOwned}</Link></p>,
+    source_failing: <PushSwitch label={t.rows.source_failing} on={d.push.source_failing.on} onChange={(on) => setPush("source_failing", { on })} />,
+    run_failed: <PushSwitch label={t.rows.run_failed} on={d.push.run_failed.on} onChange={(on) => setPush("run_failed", { on })} />,
+    new_proposals: (
+      <>
+        <PushSwitch label={t.rows.new_proposals} on={d.push.new_proposals.on} onChange={(on) => setPush("new_proposals", { on })} />
+        <label>{t.pushMin} <input type="number" min={1} value={d.push.new_proposals.min ?? 10} aria-label={t.pushMin} onChange={(e) => setPush("new_proposals", { min: Number(e.target.value) })} /></label>
+      </>
+    ),
   };
   return (
-    <Card title={t.pushCard} hint={t.pushHint} onSave={submit} dirty={dirty}>
-      <div className="line">
-        <span>{t.pushKinds.decision}</span>
-        <span className="sub">{t.pushDecision(names[decision] ?? label("route", decision))}</span>
-      </div>
-      {PUSH.map((c) => (
-        <div key={c} className="line" role="group" aria-label={t.pushKinds[c]}>
-          <label>
-            <input type="checkbox" role="switch" checked={rules[c].on} aria-label={t.pushKinds[c]} onChange={(e) => set(c, { on: e.target.checked })} /> {t.pushKinds[c]}
-            <small className="sub"> {t.pushWhen[c]}</small>
-          </label>
-          {c === "new_proposals" && (
-            <label>{t.pushMin} <input type="number" min={1} value={rules[c].min ?? 10} aria-label={t.pushMin} onChange={(e) => set(c, { min: Number(e.target.value) })} /></label>
-          )}
-          <Pick k="route" names={opts} label={t.pushRoute(t.pushKinds[c])} value={rules[c].route ?? ""} ids={["", ...channels.ids]} disabled={!rules[c].on} onChange={(v) => set(c, { route: v })} />
-        </div>
+    <Card title={t.matrix} hint={t.matrixHint} onSave={submit} dirty={dirty} id="matrix">
+      <label>
+        {t.defaultChannel}
+        <select aria-label={t.defaultChannel} value={m.default_channel} onChange={(e) => setD({ ...d, delivery: { ...m, default_channel: e.target.value } })}>
+          <option value="">{t.noDefault}</option>
+          {defIds.map((id) => <option key={id} value={id}>{channels.plain[id] ?? t.pushToGone}</option>)}
+        </select>
+      </label>
+      {GROUPS.map((g) => (
+        <section key={g.id} aria-label={t.groups[g.id]} className="stack">
+          <h3>{t.groups[g.id]}</h3>
+          {g.rows.map((k) => (
+            <div key={k}>
+              {k === "task_failed:brief" && (
+                <div className="line"><span>{t.templateOn}</span><PushSwitch label={t.templateOn} on={d.push.template_failed.on} onChange={(on) => setPush("template_failed", { on })} /></div>
+              )}
+              {row(k, extras[k])}
+            </div>
+          ))}
+          {g.id === "D" && instances.flatMap((i) => {
+            const name = i.params.title || i.params.schedule || i.id;
+            return ([["instance:", t.instanceRow, "task_result:"], ["instance_failed:", t.instanceFailedRow, "task_failed:"]] as const).map(([prefix, label, type]) => {
+              const k = prefix + i.id;
+              const own = m.rows[k];
+              const typeKey = type + i.pack;
+              if (own)
+                return (
+                  <MatrixRow key={k} id={k} label={label(kind(i.pack), name)} throttle={t.throttle[type.slice(0, -1)]} target={own} channels={channels}
+                    defName={defName} hasDefault={!!m.default_channel} record={recordOnly(k, i.pack)} onChange={(v) => setRow(k, v)}>
+                    <button type="button" className="link" onClick={() => setRow(k, undefined)}>{t.backToType}</button>
+                  </MatrixRow>
+                );
+              return (
+                <div key={k} className="line" role="group" aria-label={label(kind(i.pack), name)}>
+                  <span>{label(kind(i.pack), name)}</span>
+                  <span className="sub">{t.followType}</span>
+                  <button type="button" className="link" onClick={() => setRow(k, { ...(m.rows[typeKey] ?? OFF) })}>{t.ownRow}</button>
+                </div>
+              );
+            });
+          })}
+        </section>
       ))}
     </Card>
   );
 }
 
-// 各类提醒怎么送：类别级路由（含文档里的其他键，如 wake）与「类别:优先级」级分开编辑，保存时合并；两行写到同一个键时在本地报重复。
-function Routes({ doc, names, routeIds, put }: { doc: Doc; names: Record<string, string>; routeIds: (cur: string) => string[]; put: Put }) {
+function PushSwitch({ label, on, onChange }: { label: string; on: boolean; onChange: (on: boolean) => void }) {
   const t = useT(strings);
-  const label = useLabel();
-  const routesIn = doc.disturb.routes as Record<string, string>;
-  const [base, setBase, d1] = useDraft(doc.disturb.routes, () => Object.fromEntries(Object.entries(routesIn).filter(([k]) => !k.includes(":"))));
-  const [overrides, setOverrides, d2] = useDraft(doc.disturb.routes, () => Object.entries(routesIn).filter(([k]) => k.includes(":")).map(([k, v]): Override => [k.split(":")[0], k.split(":")[1], v]));
-  const setOverride = (i: number, j: number, v: string) => setOverrides(overrides.map((o, n) => (n === i ? (o.map((x, m) => (m === j ? v : x)) as Override) : o)));
-  const submit = () => {
-    const routes: Record<string, string> = { ...base };
-    for (const [cls, prio, route] of overrides) {
-      const k = cls + ":" + prio;
-      if (k in routes) return reject(t.dup(`${label("deliveryClass", cls)} · ${label("priority", prio)}`));
-      routes[k] = route;
+  return <label><input type="checkbox" role="switch" checked={on} aria-label={t.pushOn(label)} onChange={(e) => onChange(e.target.checked)} /> {t.produce}</label>;
+}
+
+/** 一行的两层去处。改去处保留按优先级的覆盖（by_priority），原样回传。 */
+function MatrixRow({ id, label, throttle, target, channels, defName, hasDefault, record, onChange, children }: {
+  id: string; label: string; throttle: string; target: Target; channels: Channels; defName: string; hasDefault: boolean; record: boolean;
+  onChange: (t: Target) => void; children?: ReactNode;
+}) {
+  const t = useT(strings);
+  const set = (x: Partial<Target>) => {
+    const next = { ...target, ...x };
+    if (next.agent !== "main") delete next.else;
+    onChange(next);
+  };
+  const chan = (v: string) => (v && v.startsWith(CHANNEL_PREFIX) && !channels.ids.includes(v) ? [v] : []);
+  const userIds = ["off", "default", ...channels.ids, ...chan(target.user)];
+  const elseIds = ["", "next_chat", ...(hasDefault ? ["default"] : []), ...channels.ids, ...chan(target.else ?? "")];
+  const userText = (v: string) => (v === "off" ? t.userOff : v === "default" ? t.userDefault(defName) : channels.names[v] ?? (v.startsWith(CHANNEL_PREFIX) ? t.pushToGone : v));
+  const elseText = (v: string) => (v === "" ? t.elseWeb : v === "next_chat" ? t.elseNext : userText(v));
+  const agentOn = target.agent !== "off";
+  const prios = Object.keys(target.by_priority ?? {}).length;
+  return (
+    <div role="group" aria-label={label} className="stack" id={"row-" + id}>
+      <div className="line">
+        <strong>{label}</strong>
+        <span className="sentence">
+          <select aria-label={t.agentLayer(label)} value={agentOn ? "on" : "off"} onChange={(e) => set({ agent: e.target.value === "on" ? "main" : "off" })}>
+            <option value="off">{t.agentOpts.off}</option>
+            <option value="on">{t.agentOpts.on}</option>
+          </select>
+          {agentOn && (
+            <select aria-label={t.agentHow(label)} value={target.agent} onChange={(e) => set({ agent: e.target.value })}>
+              <option value="main">{t.howOpts.main}</option>
+              <option value="next_chat">{t.howOpts.next_chat}</option>
+            </select>
+          )}
+          <select aria-label={t.userLayer(label)} value={target.user} onChange={(e) => set({ user: e.target.value })}>
+            {[...new Set(userIds)].map((v) => <option key={v} value={v} disabled={v === "default" && !hasDefault && target.user !== "default"}>{userText(v)}</option>)}
+          </select>
+        </span>
+      </div>
+      {target.agent === "main" && (
+        <label className="sub">
+          {t.elseLayer(label)}
+          <select aria-label={t.elseLayer(label)} value={target.else ?? ""} onChange={(e) => set({ else: e.target.value || undefined })}>
+            {[...new Set(elseIds)].map((v) => <option key={v} value={v}>{elseText(v)}</option>)}
+          </select>
+        </label>
+      )}
+      {target.agent === "next_chat" && <p className="sub">{t.nextNote}</p>}
+      {agentOn && target.user !== "off" && <p className="sub" role="note">{t.both}</p>}
+      {!agentOn && target.user === "off" && record && <p className="sub">{t.floorRecord}</p>}
+      {prios > 0 && <p className="sub">{t.byPrio(prios)}</p>}
+      {throttle && <p className="sub">{throttle}</p>}
+      {children}
+    </div>
+  );
+}
+
+/** 跟进、停滞两条规则的模式（即改即存，PATCH /rules/{key}/mode）：这两条只在这里切。 */
+function RuleModes({ ruleKey, name }: { ruleKey: string; name: string }) {
+  const t = useT(strings);
+  const lang = useLang();
+  const { api } = useSession();
+  const [mode, setMode] = useState<string | null>(null);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    api.get<{ rules: RuleState[] }>("/rules").then((r) => setMode(r.rules.find((x) => x.key === ruleKey)?.mode ?? null), () => setMode(null));
+  }, [api, ruleKey]);
+  if (mode === null) return null;
+  const change = async (m: string) => {
+    try {
+      const next = await api.patch<RuleState>(`/rules/${encodeURIComponent(ruleKey)}/mode`, { mode: m });
+      setMode(next.mode ?? m);
+      setNote({ ok: true, text: t.ruleModeSaved });
+    } catch (e) {
+      setNote({ ok: false, text: msg(e) });
     }
-    return put({ routes });
   };
   return (
-    <Card title={t.card} onSave={submit} dirty={d1 || d2}>
-      <div>
-        {CLASSES.map((c) => (
-          <div key={c} className="line">
-            <span>{label("deliveryClass", c)}</span>
-            <Pick k="route" names={names} label={label("deliveryClass", c)} value={base[c] ?? "web"} ids={routeIds(base[c] ?? "web")} onChange={(v) => setBase({ ...base, [c]: v })} />
-          </div>
+    <div className="line">
+      <span>{t.produce}</span>
+      <fieldset className="seg-radio" role="radiogroup" aria-label={t.ruleMode(name)}>
+        {RULE_MODE.map((m) => (
+          <label key={m}>
+            <input type="radio" name={"mode-" + ruleKey} value={m} checked={mode === m} onChange={() => void change(m)} />
+            {entryOf(lang, "ruleMode", m)?.label ?? m}
+          </label>
         ))}
-        {overrides.map(([cls, prio, route], i) => (
-          <div key={i} className="line" role="group" aria-label={t.byPriority + " " + (i + 1)}>
-            <span className="sentence">
-              <Pick k="deliveryClass" label={t.overrideClass(i + 1)} value={cls} ids={[...CLASSES, ...(CLASSES as readonly string[]).includes(cls) ? [] : [cls]]} onChange={(v) => setOverride(i, 0, v)} />
-              <Pick k="priority" label={t.overridePrio(i + 1)} value={prio} ids={(PRIORITY as readonly string[]).includes(prio) ? PRIORITY : [...PRIORITY, prio]} onChange={(v) => setOverride(i, 1, v)} />
-            </span>
-            <Pick k="route" names={names} label={t.overrideRoute(i + 1)} value={route} ids={routeIds(route)} onChange={(v) => setOverride(i, 2, v)} />
-            <button type="button" aria-label={t.delOverride(i + 1)} onClick={() => setOverrides(overrides.filter((_, n) => n !== i))}>✕</button>
-          </div>
-        ))}
-        <button type="button" className="link" onClick={() => setOverrides([...overrides, ["decision", "urgent", base.decision ?? "web"]])}>{t.addOverride}</button>
-      </div>
-    </Card>
+      </fieldset>
+      {note && <span role={note.ok ? "status" : "alert"} className="saved-note">{note.text}</span>}
+    </div>
   );
 }
 
@@ -274,34 +415,23 @@ function Quiet({ doc, put }: { doc: Doc; put: Put }) {
   );
 }
 
-// 更多：合并窗口、截止后再提醒、两个只减不增的判断开关；唤醒 Agent 不是提醒本人，只在这里出现。
-function More({ doc, names, routeIds, put }: { doc: Doc; names: Record<string, string>; routeIds: (cur: string, withWake?: boolean) => string[]; put: Put }) {
+// 更多：低优先级提醒的合并窗口。截止后再提醒、两个"让模型判断"的开关在矩阵对应的行里。
+function More({ doc, put }: { doc: Doc; put: Put }) {
   const t = useT(strings);
-  const { patch, val, set, dirty: d1 } = usePatch(doc, ["merge_window_sec", "remind_on_deadline", "threshold_judge", "followup_defer"]);
-  const routesIn = doc.disturb.routes as Record<string, string>;
-  const [wake, setWake, d2] = useDraft(routesIn.wake, () => routesIn.wake ?? "web");
+  const { patch, val, set, dirty } = usePatch(doc, ["merge_window_sec"]);
   const mergeMin = Math.round(((val("merge_window_sec") as number) ?? 0) / 60);
   return (
     <details className="panel">
       <summary>{t.more}</summary>
-      <Card title={t.more} onSave={() => put({ ...patch, ...(d2 ? { routes: { ...routesIn, wake } } : {}) })} dirty={d1 || d2}>
-        <div className="stack">
-          <label>
-            {t.merge}
-            <select value={mergeMin} onChange={(e) => set("merge_window_sec", Number(e.target.value) * 60)}>
-              {[...new Set([...MERGE_MIN, mergeMin])].sort((a, b) => a - b).map((m) => (
-                <option key={m} value={m}>{m ? t.minutes(m) : t.mergeOff}</option>
-              ))}
-            </select>
-          </label>
-          <label><input type="checkbox" checked={!!val("remind_on_deadline")} onChange={(e) => set("remind_on_deadline", e.target.checked)} /> {t.remindDeadline}</label>
-          <label><input type="checkbox" checked={!!val("threshold_judge")} onChange={(e) => set("threshold_judge", e.target.checked)} /> {t.thresholdJudge}</label>
-          <label><input type="checkbox" checked={!!val("followup_defer")} onChange={(e) => set("followup_defer", e.target.checked)} /> {t.followupDefer}</label>
-          <label>
-            {t.wake}
-            <Pick k="route" names={names} value={wake} ids={routeIds(wake, true)} onChange={setWake} />
-          </label>
-        </div>
+      <Card title={t.more} onSave={() => put(patch)} dirty={dirty}>
+        <label>
+          {t.merge}
+          <select value={mergeMin} onChange={(e) => set("merge_window_sec", Number(e.target.value) * 60)}>
+            {[...new Set([...MERGE_MIN, mergeMin])].sort((a, b) => a - b).map((m) => (
+              <option key={m} value={m}>{m ? t.minutes(m) : t.mergeOff}</option>
+            ))}
+          </select>
+        </label>
       </Card>
     </details>
   );
