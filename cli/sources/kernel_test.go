@@ -165,7 +165,7 @@ func (k *kernel) rulesAgent() string {
 	k.t.Helper()
 	var secret string
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
-		_, s, err := k.au.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_r", Harness: "h"})
+		_, s, err := k.au.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_r", Harness: "h", Audience: auth.AudienceInternal})
 		if err != nil {
 			return err
 		}
@@ -185,7 +185,7 @@ func (k *kernel) token(kind auth.Kind) string {
 	k.t.Helper()
 	var secret string
 	if err := k.st.Update(context.Background(), func(tx *store.Tx) (err error) {
-		_, secret, err = k.au.Issue(tx, auth.Spec{Kind: kind})
+		_, secret, err = k.au.Issue(tx, auth.Spec{Kind: kind, Audience: agentAudience(kind)})
 		return
 	}); err != nil {
 		k.t.Fatal(err)
@@ -743,14 +743,17 @@ func TestSourceEventReadsContentScopedAndPartwise(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	setExternal := func(scope string) {
+	// 内部钥匙全文；外部钥匙按它自己的逐来源档位（§14.14），与来源送外部端点的范围无关。
+	keyWith := func(scope string) string {
 		t.Helper()
-		if err := k.st.Update(context.Background(), func(tx *store.Tx) error {
-			_, err := tx.Exec(`UPDATE sources_registry_source SET outbound_external = ? WHERE id = 'src_mail'`, scope)
+		var s string
+		if err := k.st.Update(context.Background(), func(tx *store.Tx) (err error) {
+			_, s, err = k.au.Issue(tx, auth.Spec{Kind: auth.Observer, SourceScopes: map[string]string{"src_mail": scope}})
 			return err
 		}); err != nil {
 			t.Fatal(err)
 		}
+		return s
 	}
 	type out struct {
 		Scope   string          `json:"scope"`
@@ -765,7 +768,6 @@ func TestSourceEventReadsContentScopedAndPartwise(t *testing.T) {
 		} `json:"content"`
 	}
 
-	setExternal("full")
 	var full out
 	decode(t, k.apa(obs, "source", "event", id), &full)
 	if full.Scope != "full" || full.Body == nil || *full.Body != body || full.Trimmed != nil || len(full.Content.Parts) != 2 {
@@ -777,9 +779,8 @@ func TestSourceEventReadsContentScopedAndPartwise(t *testing.T) {
 		t.Fatalf("--part headers must print only headers: %+v", hdr)
 	}
 
-	setExternal("excerpt")
 	var ex out
-	decode(t, k.apa(obs, "source", "event", id), &ex)
+	decode(t, k.apa(keyWith("excerpt"), "source", "event", id), &ex)
 	if ex.Scope != "excerpt" || ex.Body == nil || len([]rune(*ex.Body)) != 500 || ex.Trimmed == nil || ex.Trimmed.TotalChars != 800 || ex.Trimmed.ReturnedChars != 500 || ex.Headers != nil {
 		t.Fatalf("excerpt: %+v", ex)
 	}
@@ -805,4 +806,12 @@ func TestSourceEventReadsContentScopedAndPartwise(t *testing.T) {
 			t.Fatalf("%v: %+v", args, r)
 		}
 	}
+}
+
+// agentAudience：测试里的三级 token 代表 APA 内部的 Agent，读来源不受档位限制（§14.2）；ext、webhook 是外部钥匙。
+func agentAudience(k auth.Kind) string {
+	if k == auth.Observer || k == auth.Worker || k == auth.Delegate {
+		return auth.AudienceInternal
+	}
+	return ""
 }

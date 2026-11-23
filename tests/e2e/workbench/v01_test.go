@@ -163,7 +163,7 @@ func (k *kit) v01CompatList(t *testing.T) {
 	if code != 201 || json.Unmarshal([]byte(body), &p) != nil {
 		t.Fatalf("v0.1 新建项目: %d %s", code, body)
 	}
-	code, body = v.do(t, "POST", "/v1/settings/tokens", `{"kind":"observer","label":"OBS"}`, "")
+	code, body = v.do(t, "POST", "/v1/settings/tokens", `{"kind":"observer","audience":"internal","label":"OBS"}`, "")
 	var tok struct {
 		Secret string `json:"secret"`
 	}

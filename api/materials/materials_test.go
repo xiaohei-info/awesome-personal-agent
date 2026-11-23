@@ -107,7 +107,7 @@ func setup(t *testing.T) *env {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	for name, s := range map[string]auth.Spec{"obs": {Kind: auth.Observer}, "wrk": {Kind: auth.Worker}, "dlg": {Kind: auth.Delegate},
+	for name, s := range map[string]auth.Spec{"obs": {Kind: auth.Observer, Audience: auth.AudienceInternal}, "wrk": {Kind: auth.Worker, Audience: auth.AudienceInternal}, "dlg": {Kind: auth.Delegate, Audience: auth.AudienceInternal},
 		"dlgD": {Kind: auth.Delegate, AgentID: "agent_d", Harness: "h"},
 		"ext":  {Kind: auth.Ext, Scope: "src_1"}, "export": {Kind: auth.Ext, Scope: "export"}} {
 		if err := st.Update(context.Background(), func(tx *store.Tx) error {

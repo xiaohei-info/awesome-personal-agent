@@ -6,6 +6,7 @@ import { EntityPick } from "../../app/names";
 import { useLabel } from "../../app/values";
 import { AddAgent } from "./AgentEditor";
 import { AgentPage, KeyList, KindChoice, Secret } from "./AgentPage";
+import { AudienceChoice, SourceScopeTable, useSources, type Scopes } from "../key-scopes/KeyScopes";
 import { Persona } from "./Persona";
 import { PolicyPage, usePolicyDocs, type Doc, type Save } from "../settings-policy/shared";
 import { entries, hasKey, LEGACY, ready, useData, type Data, type Entry, type Rec } from "./data";
@@ -135,15 +136,20 @@ function Other({ data, list, reload, onError, secret, onSecret }: { data: Data; 
   const [kind, setKind] = useState("observer");
   const [note, setNote] = useState("");
   const [executor, setExecutor] = useState("");
+  const [audience, setAudience] = useState<string | null>(null); // 不预选（§14.2）
+  const [scopes, setScopes] = useState<Scopes>({});
+  const sources = useSources();
   const issue = async () => {
     onError(null);
-    const body: Record<string, string> = { kind };
+    const body: Record<string, unknown> = { kind, audience };
+    if (audience === "external") body.source_scopes = scopes;
     if (note.trim()) body.label = note.trim();
     if (kind === "worker" && executor) body.executor = executor;
     try {
       onSecret((await api.post<{ secret: string }>("/settings/tokens", body)).secret);
       setNote("");
       setExecutor("");
+      setScopes({});
     } catch (e) {
       onError(msg(e));
     }
@@ -159,8 +165,10 @@ function Other({ data, list, reload, onError, secret, onSecret }: { data: Data; 
       <form className="panel" aria-label={t.otherKeys} onSubmit={(e) => { e.preventDefault(); void issue(); }}>
         <KindChoice kinds={["observer", "worker"]} value={kind} onChange={setKind} />
         {kind === "worker" && <label>{t.executor} <EntityPick kind="executor" value={executor} onChange={setExecutor} empty={t.noExecutor} /></label>}
+        <AudienceChoice value={audience} onChange={setAudience} />
+        {audience === "external" && <SourceScopeTable sources={sources} value={scopes} onChange={setScopes} />}
         <label>{t.note} <input value={note} onChange={(e) => setNote(e.target.value)} /></label>
-        <div><button type="submit">{t.issueKey}</button></div>
+        <div><button type="submit" disabled={!audience}>{t.issueKey}</button></div>
         {secret && <Secret secret={secret} onDone={() => onSecret(null)} />}
       </form>
       <p className="sub">{t.executorsHint} <Link to="/executors">{t.executorsLink}</Link></p>

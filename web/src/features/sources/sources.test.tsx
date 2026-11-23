@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "../../app/App";
 import { feature } from "./index";
+import { feature as models } from "../settings-models/index";
 import { backlogReason } from "./shared";
 import { setChoice } from "../../app/i18n";
 
@@ -159,11 +160,11 @@ function backend(o: { projects?: { id: string; name: string }[]; sources?: Src[]
   return { impl, calls, events, sources, ingests, restoreKeys };
 }
 
-function mount(fetchImpl: typeof fetch) {
+function mount(fetchImpl: typeof fetch, at = "/sources") {
   sessionStorage.setItem("apa.csrf", "tok-1");
   return render(
-    <MemoryRouter initialEntries={["/sources"]}>
-      <App features={[feature]} fetchImpl={fetchImpl} />
+    <MemoryRouter initialEntries={[at]}>
+      <App features={[feature, models]} fetchImpl={fetchImpl} />
     </MemoryRouter>,
   );
 }
@@ -416,10 +417,11 @@ describe("积压的状态与未判定原因一一对应", () => {
     expect(region.getByText("模型已暂停")).toBeInTheDocument();
     expect(region.getByText("已放回，等你放开")).toBeInTheDocument();
     expect(region.getByText("已过期")).toBeInTheDocument();
+    // 来源页不再逐个配外发：点「等你选外发范围」去「设置 › 模型」的「模型端点能收哪些来源」（§14.14）。
     const r = await row("新闻订阅");
     expect(r.queryByRole("radiogroup", { name: "发给外部模型时" })).not.toBeInTheDocument();
     await userEvent.click(region.getByRole("button", { name: "等你选外发范围" }));
-    expect(await r.findByRole("radiogroup", { name: "发给外部模型时" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "模型端点能收哪些来源" })).toBeInTheDocument();
   });
 });
 
@@ -491,7 +493,6 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     mount(b.impl);
     const f = await fill("src_check", "/opt/check.sh");
     await userEvent.type(within(f).getByLabelText("超时（秒）"), "30");
-    await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "excerpt");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     const post = b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!;
     expect(post.body).toEqual({ id: "src_check", name: "巡检", type: "script", command: "/opt/check.sh", schedule: "15m", timeout: 30 });
@@ -508,7 +509,6 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     expect(within(f).getByRole("button", { name: "登记" })).toBeDisabled();
     await userEvent.type(within(f).getByLabelText("间隔"), "2");
     await userEvent.selectOptions(within(f).getByLabelText("单位"), "h");
-    await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "none");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     await row("巡检");
     expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body.schedule).toBe("2h");
@@ -518,7 +518,6 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
     const b = backend({ webOnly: true });
     mount(b.impl);
     const f = await fill("src_x", "/tmp/evil.sh");
-    await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "none");
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
     expect(await within(f).findByRole("alert")).toHaveTextContent("only be registered in the Web UI");
     expect(within(f).getByLabelText("命令")).toHaveValue("/tmp/evil.sh");
@@ -534,47 +533,35 @@ describe("自定义命令来源（flow-command-registration / ACT-CMD-04）", ()
   });
 });
 
-describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () => {
-  it("登记必须选外部范围：不选被表单拒绝且不发请求；本机预填全部内容；类型可选「其他」自填；选后先登记再写范围", async () => {
+describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）：在「设置 › 模型」里按来源选", () => {
+  it("登记来源不再选外发范围：表单里没有，只发 POST /sources、不写范围；新来源在「设置 › 模型」里标还没选", async () => {
     const b = backend();
     mount(b.impl);
-    const f = await fill2();
-    async function fill2() {
-      await screen.findByText("高级");
-      await openAdvanced();
-      const f = await screen.findByRole("region", { name: "自定义命令来源" });
-      await userEvent.type(within(f).getByLabelText("名字"), "验收来源");
-      await userEvent.type(within(f).getByLabelText("内部标识"), "src_obd");
-      await userEvent.selectOptions(within(f).getByLabelText("这是什么"), "其他…");
-      await userEvent.type(within(f).getByLabelText("类型名"), "acc-obd");
-      await userEvent.type(within(f).getByLabelText("命令"), "/opt/obd.sh");
-      return f;
-    }
-    expect(within(f).getByLabelText("发给本机模型时")).toHaveValue("full");
-    expect(within(f).getByLabelText("发给外部模型时")).toHaveValue(""); // 外部范围没有缺省值
+    await screen.findByText("高级");
+    await openAdvanced();
+    const f = await screen.findByRole("region", { name: "自定义命令来源" });
+    await userEvent.type(within(f).getByLabelText("名字"), "验收来源");
+    await userEvent.type(within(f).getByLabelText("内部标识"), "src_obd");
+    await userEvent.selectOptions(within(f).getByLabelText("这是什么"), "其他…");
+    await userEvent.type(within(f).getByLabelText("类型名"), "acc-obd");
+    await userEvent.type(within(f).getByLabelText("命令"), "/opt/obd.sh");
+    expect(within(f).queryByLabelText("发给外部模型时")).not.toBeInTheDocument();
+    expect(within(f).queryByLabelText("发给本机模型时")).not.toBeInTheDocument();
     await userEvent.click(within(f).getByRole("button", { name: "登记" }));
-    expect(await within(f).findByRole("alert")).toHaveTextContent("请选好「发给外部模型时」");
-    expect(b.calls.some((c) => c.method === "POST" && c.path === "/v1/sources")).toBe(false);
-
-    await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "full");
-    await userEvent.click(within(f).getByRole("button", { name: "登记" }));
-    const r = await row("验收来源");
+    await row("验收来源");
     expect(b.calls.find((c) => c.method === "POST" && c.path === "/v1/sources")!.body).toMatchObject({ source_type: "acc-obd" });
-    const put = b.calls.find((c) => c.method === "PUT")!;
-    expect(put.path).toBe("/v1/settings/sources/src_obd/outbound");
-    expect(put.body).toEqual({ local: "full", external: "full" });
-    expect(put.csrf).toBe("tok-1");
-    await waitFor(() => expect(r.getByRole("group", { name: "验收来源 的外发范围" })).toHaveTextContent("发给本机模型时 全部内容 · 发给外部模型时 全部内容"));
+    expect(b.calls.some((c) => c.method === "PUT")).toBe(false);
+    expect((await row("验收来源")).queryByRole("group", { name: "验收来源 的外发范围" })).not.toBeInTheDocument();
   });
 
   it("显示服务端的两个范围；外部未选的直接展开且标「还没选 · n 条在等」；已选的点修改才展开", async () => {
     const b = backend({ sources: [{ ...rss, outbound: { local: "full", external: null } }, { ...hook, outbound: { local: "meta", external: "excerpt" } }], backlog: { count: 7, outbound_unset: 4 } });
-    mount(b.impl);
+    mount(b.impl, "/settings/models");
     const a = await row("新闻订阅");
     const ext = within(a.getByRole("radiogroup", { name: "发给外部模型时" }));
     expect(ext.getAllByRole("radio").every((x) => !(x as HTMLInputElement).checked)).toBe(true);
     expect(within(a.getByRole("radiogroup", { name: "发给本机模型时" })).getByRole("radio", { name: "全部内容" })).toBeChecked();
-    expect(await a.findByText("还没选 · 4 条在等")).toBeInTheDocument();
+    expect(await a.findByText("还没选")).toBeInTheDocument();
     const h = await row("仓库推送");
     expect(h.getByRole("group", { name: "仓库推送 的外发范围" })).toHaveTextContent("发给本机模型时 只有标题 · 发给外部模型时 摘要和开头");
     expect(h.queryByRole("radiogroup")).not.toBeInTheDocument();
@@ -582,7 +569,7 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
 
   it("改了先预览一条真实消息会发出什么，点「就这样发」才写回，以服务端回读为准", async () => {
     const b = backend({ sources: [{ ...hook, outbound: { local: "meta", external: "excerpt" } }], events: [ev("e1", "ignored"), ev("e2", "proposed")] });
-    mount(b.impl);
+    mount(b.impl, "/settings/models");
     const h = await row("仓库推送");
     await userEvent.click(h.getByRole("button", { name: "修改" }));
     const ext = within(h.getByRole("radiogroup", { name: "发给外部模型时" }));
@@ -607,31 +594,16 @@ describe("外发范围（flow-outbound-scope / ACT-OBD-02、ACT-OBD-15）", () =
 
   it("选「不发送」时预览说明不会发出去；还没有消息时说没有可预览的", async () => {
     const b = backend({ sources: [{ ...rss, outbound: { local: "full", external: null } }] });
-    const first = mount(b.impl);
+    const first = mount(b.impl, "/settings/models");
     const a = await row("新闻订阅");
     await userEvent.click(within(a.getByRole("radiogroup", { name: "发给外部模型时" })).getByRole("radio", { name: "不发送" }));
     expect(await a.findByText("还没有消息可预览")).toBeInTheDocument();
     first.unmount();
     b.events.push(ev("e9", "ignored"));
-    mount(b.impl);
+    mount(b.impl, "/settings/models");
     const a2 = await row("新闻订阅");
     await userEvent.click(within(a2.getByRole("radiogroup", { name: "发给外部模型时" })).getByRole("radio", { name: "不发送" }));
     expect(await a2.findByText("这个来源的消息不会发出去")).toBeInTheDocument();
-  });
-
-  it("来源登记成功但范围写入失败：显示原因并提示重选，来源仍列出", async () => {
-    const b = backend({ outboundFails: true });
-    mount(b.impl);
-    await screen.findByText("高级");
-    await openAdvanced();
-    const f = await screen.findByRole("region", { name: "自定义命令来源" });
-    await userEvent.type(within(f).getByLabelText("名字"), "巡检");
-    await userEvent.type(within(f).getByLabelText("内部标识"), "src_p");
-    await userEvent.type(within(f).getByLabelText("命令"), "/opt/p.sh");
-    await userEvent.selectOptions(within(f).getByLabelText("发给外部模型时"), "none");
-    await userEvent.click(within(f).getByRole("button", { name: "登记" }));
-    expect(await within(f).findByRole("alert")).toHaveTextContent(/来源已登记，外发范围没存上.*store is unavailable/);
-    expect(await row("巡检")).toBeTruthy();
   });
 });
 
@@ -842,7 +814,6 @@ describe("来源的显示名（§9.1）", () => {
     expect(name).toHaveValue("");
     expect(name).toHaveAttribute("placeholder", "这个程序没有声明名字，请起一个");
     await userEvent.type(f.getByLabelText("内部标识"), "src_mail_qq");
-    await userEvent.selectOptions(f.getByLabelText("发给外部模型时"), "none");
     await userEvent.click(f.getByRole("button", { name: "登记" }));
     expect(await f.findByRole("alert")).toHaveTextContent("请给这个来源起个名字");
     expect(b.calls.some((c) => c.method === "POST" && c.path === "/v1/sources")).toBe(false);

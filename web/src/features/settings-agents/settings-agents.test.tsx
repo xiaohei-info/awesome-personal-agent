@@ -223,10 +223,14 @@ describe("设置 › Agent", () => {
     const s = server({ live: [hermes(1, "active")] });
     const v = mount(s.impl, PAGE);
     const c = await card();
-    // 接入清单里就地生成：明文就在这一行，不放到页面顶部（界面设计 §6.2）。
-    await userEvent.click(within(c.getByRole("region", { name: "接入" })).getByRole("button", { name: "生成钥匙" }));
+    // 接入清单里就地生成：明文就在这一行，不放到页面顶部（界面设计 §6.2）。给谁用不预选，选之前不能生成（§14.2）。
+    const connect = within(c.getByRole("region", { name: "接入" }));
+    expect(connect.getByRole("button", { name: "生成钥匙" })).toBeDisabled();
+    expect(connect.getByRole("radio", { name: /APA 内部/ })).not.toBeChecked();
+    await userEvent.click(connect.getByRole("radio", { name: /APA 内部/ }));
+    await userEvent.click(connect.getByRole("button", { name: "生成钥匙" }));
     expect(await within(c.getByRole("region", { name: "接入" })).findByText("apa_dlg_SECRET")).toBeInTheDocument();
-    expect(writes(s, "/settings/tokens")[0]).toEqual({ method: "POST", url: "/v1/settings/tokens", body: { kind: "delegate", harness: "hermes" } });
+    expect(writes(s, "/settings/tokens")[0]).toEqual({ method: "POST", url: "/v1/settings/tokens", body: { kind: "delegate", harness: "hermes", audience: "internal" } });
     v.unmount();
     mount(s.impl);
     await screen.findByRole("listitem", { name: "Hermes" });
@@ -238,9 +242,10 @@ describe("设置 › Agent", () => {
     expect(other.getByText("能更新派给它的事、提问、交材料；不能替你决定")).toBeInTheDocument();
     expect(other.getByText("交回给哪个执行者")).toBeInTheDocument();
     await userEvent.type(other.getByLabelText("备注"), "ci");
+    await userEvent.click(other.getByRole("radio", { name: /外部程序/ }));
     await userEvent.click(other.getByRole("button", { name: "生成钥匙" }));
     await waitFor(() => expect(writes(s, "/settings/tokens")).toHaveLength(2));
-    expect(writes(s, "/settings/tokens")[1].body).toEqual({ kind: "worker", label: "ci" });
+    expect(writes(s, "/settings/tokens")[1].body).toEqual({ kind: "worker", label: "ci", audience: "external", source_scopes: {} });
     await userEvent.click(screen.getByRole("button", { name: "我已保存" }));
     expect(document.body.textContent).not.toContain("apa_dlg_SECRET");
   });

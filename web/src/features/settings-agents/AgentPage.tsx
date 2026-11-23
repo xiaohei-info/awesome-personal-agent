@@ -10,6 +10,7 @@ import { Card, PolicyPage, reject, useDraft, usePolicyDocs, type Doc, type Save 
 import { AGENT_KINDS, entries, hasKey, LEGACY, useData, type Credential, type Declaration, type Entry } from "./data";
 import { useEntryName } from "./SettingsAgentsPage";
 import { strings } from "./strings";
+import { AudienceChoice, ScopeEditor, ScopeSummary, SourceScopeTable, useSources, type Scopes } from "../key-scopes/KeyScopes";
 
 // 设置 › Agent › 某个 Agent（界面设计 §3.2、§4、§6.3；设计 §14.3）：这个 Agent 的全部属性只在这里改。
 // ①接入清单（没完成时置顶，每步就地做完）②基本信息 ③档位一行（只读，在「我来拍板」改）④钥匙（能碰哪些事）⑤后台权限 ⑥在哪里做 ⑦被谁使用（只读）⑧它做过什么 ⑨高级。
@@ -88,6 +89,7 @@ function Connect({ e, name, reload, onError }: { e: Entry; name: string; reload:
   const { api } = useSession();
   const [secret, setSecret] = useState<string | null>(null);
   const [viewing, setViewing] = useState(false);
+  const [audience, setAudience] = useState<string | null>(null); // 不预选：内部还是外部由本人决定（§14.2）
   const key = hasKey(e);
   const left = (key ? 0 : 1) + (e.live ? 0 : 1);
   const act = async (f: () => Promise<unknown>) => {
@@ -100,7 +102,7 @@ function Connect({ e, name, reload, onError }: { e: Entry; name: string; reload:
     await reload();
   };
   const issue = () => act(async () => {
-    const body: Record<string, string> = { kind: "delegate", harness: e.harness };
+    const body: Record<string, string> = { kind: "delegate", harness: e.harness, audience: audience! };
     if (e.instance) body.agent_id = e.card!.id;
     setSecret((await api.post<{ secret: string }>("/settings/tokens", body)).secret);
   });
@@ -111,8 +113,9 @@ function Connect({ e, name, reload, onError }: { e: Entry; name: string; reload:
       <ol className="rows">
         <li className="act-row">
           <div><span>{key ? "✓ " + t.stepKeyDone : t.stepKey}</span></div>
-          {!key && !secret && <button type="button" className="primary" onClick={() => void issue()}>{t.issueKey}</button>}
+          {!key && !secret && <button type="button" className="primary" disabled={!audience} onClick={() => void issue()}>{t.issueKey}</button>}
         </li>
+        {!key && !secret && <li><AudienceChoice value={audience} onChange={setAudience} /></li>}
         {secret && <li><Secret secret={secret} onDone={() => setSecret(null)} /></li>}
         {e.unclaimed.map((c) => (
           <li key={c.id} className="act-row">
@@ -327,14 +330,19 @@ function Keys({ e, reload, onError }: { e: Entry; reload: () => Promise<void>; o
   const [kind, setKind] = useState("delegate");
   const [note, setNote] = useState("");
   const [secret, setSecret] = useState<string | null>(null);
+  const [audience, setAudience] = useState<string | null>(null);
+  const [scopes, setScopes] = useState<Scopes>({});
+  const sources = useSources();
   const issue = async () => {
     onError(null);
     try {
-      const body: Record<string, string> = { kind, harness: e.harness };
+      const body: Record<string, unknown> = { kind, harness: e.harness, audience };
+      if (audience === "external") body.source_scopes = scopes;
       if (e.instance) body.agent_id = e.card!.id;
       if (note.trim()) body.label = note.trim();
       setSecret((await api.post<{ secret: string }>("/settings/tokens", body)).secret);
       setNote("");
+      setScopes({});
     } catch (err) {
       onError(msg(err));
     }
@@ -346,8 +354,10 @@ function Keys({ e, reload, onError }: { e: Entry; reload: () => Promise<void>; o
       <KeyList keys={e.keys} reload={reload} onError={onError} />
       <form className="panel" onSubmit={(ev) => { ev.preventDefault(); void issue(); }}>
         <KindChoice kinds={AGENT_KINDS} value={kind} onChange={setKind} />
+        <AudienceChoice value={audience} onChange={setAudience} />
+        {audience === "external" && <SourceScopeTable sources={sources} value={scopes} onChange={setScopes} />}
         <label>{t.note} <input value={note} onChange={(ev) => setNote(ev.target.value)} /></label>
-        <div><button type="submit">{t.issueKey}</button></div>
+        <div><button type="submit" disabled={!audience}>{t.issueKey}</button></div>
         {secret && <Secret secret={secret} onDone={() => setSecret(null)} />}
       </form>
     </div>
@@ -358,6 +368,7 @@ export function KeyList({ keys, reload, onError }: { keys: Credential[]; reload:
   const t = useT(strings);
   const { api } = useSession();
   const [asking, setAsking] = useState<string | null>(null);
+  const sources = useSources();
   const revoke = async (id: string) => {
     onError(null);
     setAsking(null);
@@ -372,7 +383,8 @@ export function KeyList({ keys, reload, onError }: { keys: Credential[]; reload:
     <ul className="rows">
       {keys.map((c) => (
         <li key={c.id}>
-          <strong>{c.label || c.id}</strong> <span className="badge plain"><Val k="credKind" id={c.kind} /></span>
+          <strong>{c.label || c.id}</strong> <span className="badge plain"><Val k="credKind" id={c.kind} /></span> <ScopeSummary k={c} sources={sources} />{" "}
+          <ScopeEditor k={c} group="tokens" canInternal sources={sources} onSaved={reload} />
           {c.revoked_at ? <span className="badge">{t.revoked}</span> : asking === c.id ? (
             <>{" "}<button className="danger" onClick={() => void revoke(c.id)}>{t.revoke}</button> <button onClick={() => setAsking(null)}>{t.cancel}</button></>
           ) : <button className="danger" onClick={() => setAsking(c.id)}>{t.revoke}</button>}

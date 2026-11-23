@@ -390,6 +390,59 @@ func (f *Fixture) ServeV01(bin string) *V01Server {
 	return &V01Server{Base: "http://" + loopback + ":" + port, cmd: cmd}
 }
 
+// MarkTokensInternal 以本人身份（夹具的 Web 口令）把夹具里有效的 observer、worker、delegate token 都改成 APA 内部钥匙：
+// 升级后旧 token 一律迁成外部钥匙（§16.5），本人在 Web 把内部用的钥匙改回内部，这里替本人做这一步。
+func (s *V01Server) MarkTokensInternal(password string) error {
+	c := &http.Client{Timeout: 30 * time.Second}
+	login, err := c.Post(s.Base+"/v1/auth/login", "application/json", strings.NewReader(`{"password":"`+password+`"}`))
+	if err != nil {
+		return err
+	}
+	defer login.Body.Close()
+	var sess struct {
+		CSRF string `json:"csrf_token"`
+	}
+	if login.StatusCode != 200 || json.NewDecoder(login.Body).Decode(&sess) != nil {
+		return fmt.Errorf("login: HTTP %d", login.StatusCode)
+	}
+	do := func(method, path, body string) (*http.Response, error) {
+		req, _ := http.NewRequest(method, s.Base+path, strings.NewReader(body))
+		for _, ck := range login.Cookies() {
+			req.AddCookie(ck)
+		}
+		req.Header.Set("X-CSRF-Token", sess.CSRF)
+		return c.Do(req)
+	}
+	r, err := do("GET", "/v1/settings/tokens", "")
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+	var list struct {
+		Credentials []struct {
+			ID, Kind  string
+			RevokedAt string `json:"revoked_at"`
+		} `json:"credentials"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&list); err != nil {
+		return err
+	}
+	for _, cr := range list.Credentials {
+		if cr.RevokedAt != "" {
+			continue
+		}
+		w, err := do("PUT", "/v1/settings/tokens/"+cr.ID+"/scope", `{"audience":"internal"}`)
+		if err != nil {
+			return err
+		}
+		w.Body.Close()
+		if w.StatusCode != 200 {
+			return fmt.Errorf("mark %s internal: HTTP %d", cr.ID, w.StatusCode)
+		}
+	}
+	return nil
+}
+
 // Get 以 Bearer token 读旧版本内核。
 func (s *V01Server) Get(path, token string) (int, []byte) {
 	req, _ := http.NewRequest("GET", s.Base+path, nil)

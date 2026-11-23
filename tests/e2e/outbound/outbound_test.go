@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -379,9 +381,20 @@ func TestOutboundScope(t *testing.T) {
 			if err := json.Unmarshal([]byte(k.fixtureGet(base, "/v1/sources/"+s.ID, obs)), &sh); err != nil {
 				t.Fatal(err)
 			}
-			if sh.DefaultProject != "" || sh.Outbound.Local != "full" || sh.Outbound.External != nil {
-				t.Fatalf("来源 %s 升级后应是 default_project 空、local=full、external 未选择: %+v", s.ID, sh)
+			// 升级前的 token 迁成外部钥匙：看得到来源，看不到它送模型端点的范围（§14.14），范围按账本核对。
+			if sh.DefaultProject != "" || sh.Outbound.Local != "" || sh.Outbound.External != nil {
+				t.Fatalf("来源 %s 升级后应是 default_project 空，外部钥匙看不到 outbound: %+v", s.ID, sh)
 			}
+		}
+		ledger := "file:" + filepath.Join(fx.Home, "ledger.db") + "?mode=ro"
+		out, err := exec.Command("sqlite3", ledger, "select count(*) from sources_registry_source where outbound_local <> 'full' or outbound_external <> ''").CombinedOutput()
+		if err != nil || strings.TrimSpace(string(out)) != "0" {
+			t.Fatalf("升级后来源应是 local=full、external 未选择: %v %s", err, out)
+		}
+		// 一次性换算：旧 token 按它们升级前经 token 读到的档位（外部范围未选择 → 只有标题）写入，没有一把被标成内部。
+		out, err = exec.Command("sqlite3", ledger, "select count(*) from auth_credential where kind in ('observer','worker','delegate') and (audience <> 'external' or source_scopes = '' or source_scopes like '%full%' or source_scopes like '%excerpt%')").CombinedOutput()
+		if err != nil || strings.TrimSpace(string(out)) != "0" {
+			t.Fatalf("旧 token 应迁成外部、逐来源只有标题: %v %s", err, out)
 		}
 	})
 

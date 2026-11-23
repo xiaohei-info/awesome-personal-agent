@@ -16,8 +16,8 @@ var scopeSources = []struct{ id, external string }{
 	{"src_acc_raw", "full"}, {"src_acc_raw_ex", "excerpt"}, {"src_acc_raw_meta", "meta"}, {"src_acc_raw_none", "none"},
 }
 
-// TestFlowRawReadScope 是验收 flow-raw-read-scope（ACT-RSC-01…07）：本人在 Web 读到全文，token 读到的原文不超过该来源对外部端点的外发范围，
-// 运行凭据与 ext 密钥读不到；升级前落盘的事件（结构版本 7 夹具升级后）完整程度为 legacy 且照常可读。
+// TestFlowRawReadScope 是验收 flow-raw-read-scope（ACT-RSC-01…07）：本人在 Web 与内部钥匙读到全文，外部钥匙读到的原文不超过
+// 签发时给它的逐来源档位（与来源送模型端点的范围无关，§14.14），运行凭据与非导出 ext 密钥读不到；升级前落盘的事件（结构版本 7 夹具升级后）完整程度为 legacy 且照常可读。
 func TestFlowRawReadScope(t *testing.T) {
 	srcStubBin(t)
 	e := baseline.Setup(t)
@@ -25,6 +25,8 @@ func TestFlowRawReadScope(t *testing.T) {
 	k := newKit(t, e)
 	ids := map[string]string{} // 来源 id → 其 mail-like 事件 id
 	var mail map[string]any
+	// 外部钥匙：四个来源各给一档，最后一个不给；来源自己的 outbound 设成相反的值，证明钥匙读取不看它。
+	var key string
 
 	k.step("ACT-RSC-01 准备四种外发范围的来源", func(t *testing.T) {
 		mail = k.stubOut("mail-like")[0]
@@ -35,6 +37,14 @@ func TestFlowRawReadScope(t *testing.T) {
 		if r := k.APIRaw("GET", "/v1/today", "", k.OBS); r.Code != 200 {
 			t.Fatalf("OBS 应能调 GET /v1/today: %d", r.Code)
 		}
+		var out struct {
+			Secret string `json:"secret"`
+		}
+		body := `{"kind":"observer","label":"EXT","source_scopes":{"src_acc_raw":"full","src_acc_raw_ex":"excerpt","src_acc_raw_meta":"meta"}}`
+		if err := json.Unmarshal([]byte(k.web("POST", "/v1/settings/tokens", body, 201)), &out); err != nil || out.Secret == "" {
+			t.Fatalf("签发外部钥匙: %v", err)
+		}
+		key = out.Secret
 	})
 
 	k.step("ACT-RSC-02 Web 登录读到全文", func(t *testing.T) {
@@ -49,12 +59,12 @@ func TestFlowRawReadScope(t *testing.T) {
 		}
 	})
 
-	k.step("ACT-RSC-03 token 按 excerpt 范围读到摘录", func(t *testing.T) {
+	k.step("ACT-RSC-03 外部钥匙按 excerpt 档位读到摘录", func(t *testing.T) {
 		// excerpt 要有被裁的量：给 acc-raw-ex 再来一条 big-body 事件。
 		k.setCase("src_acc_raw_ex", "big-body")
 		big := k.eventByStubID("src_acc_raw_ex", "big-big-body").ID
 		wantBody := asString(k.stubOut("big-body")[0]["detail"])
-		ex := k.readEvent(k.OBS, big, "", 200)
+		ex := k.readEvent(key, big, "", 200)
 		eq(t, "scope", ex.Scope, "excerpt")
 		if ex.Body == nil || utf8.RuneCountInString(*ex.Body) != 500 || *ex.Body != wantBody[:500] {
 			t.Errorf("excerpt 只回正文前 500 个字符，得到 %d", lenOf(ex.Body))
@@ -69,24 +79,24 @@ func TestFlowRawReadScope(t *testing.T) {
 			t.Error("excerpt 应回摘要")
 		}
 		// 邮件事件（短正文）同样不回被排除的部分。
-		m := k.readEvent(k.OBS, ids["src_acc_raw_ex"], "", 200)
+		m := k.readEvent(key, ids["src_acc_raw_ex"], "", 200)
 		eq(t, "mail-like 的 scope", m.Scope, "excerpt")
 		if m.Original != nil || len(m.Headers) != 0 {
 			t.Errorf("excerpt 不回 original、headers: %+v", m)
 		}
 		// 全文范围的来源：全部部分。
-		full := k.readEvent(k.OBS, ids["src_acc_raw"], "", 200)
+		full := k.readEvent(key, ids["src_acc_raw"], "", 200)
 		eq(t, "acc-raw 的 scope", full.Scope, "full")
 		if full.Body == nil || full.Original == nil || len(full.Headers) == 0 || len(full.Attachments) == 0 || full.Trimmed != nil {
 			t.Errorf("full 范围应回全部部分且无 trimmed: %+v", full)
 		}
 		// 经 HTTP 头直接读一次（等价于验收里的 curl）。
-		if r := k.APIRaw("GET", "/v1/source-events/"+big, "", k.OBS); r.Code != 200 || !strings.Contains(r.Body, `"scope":"excerpt"`) {
+		if r := k.APIRaw("GET", "/v1/source-events/"+big, "", key); r.Code != 200 || !strings.Contains(r.Body, `"scope":"excerpt"`) {
 			t.Errorf("curl 等价读取: %d %.200s", r.Code, r.Body)
 		}
 	})
 
-	k.step("ACT-RSC-04 token 在 meta、none 与未选择时只读到元信息", func(t *testing.T) {
+	k.step("ACT-RSC-04 外部钥匙在 meta 档位只读到元信息，没给的来源 403；内部钥匙全文", func(t *testing.T) {
 		metaOnly := func(what string, got read) {
 			t.Helper()
 			eq(t, what+" 的 scope", got.Scope, "meta")
@@ -97,9 +107,11 @@ func TestFlowRawReadScope(t *testing.T) {
 				t.Errorf("%s 应回 event 元信息与 content 清单: %+v", what, got)
 			}
 		}
-		for _, s := range []string{"src_acc_raw_meta", "src_acc_raw_none"} {
-			metaOnly(s, k.readEvent(k.OBS, ids[s], "", 200))
-			metaOnly(s+" ?part=body", k.readEvent(k.OBS, ids[s], "body", 200))
+		metaOnly("src_acc_raw_meta", k.readEvent(key, ids["src_acc_raw_meta"], "", 200))
+		metaOnly("src_acc_raw_meta ?part=body", k.readEvent(key, ids["src_acc_raw_meta"], "body", 200))
+		eq(t, "没给的来源的 HTTP 状态", k.APIRaw("GET", "/v1/source-events/"+ids["src_acc_raw_none"], "", key).Code, 403)
+		for _, s := range []string{"src_acc_raw_meta", "src_acc_raw_none"} { // 内部钥匙不看任何档位
+			eq(t, s+" 内部钥匙的 scope", k.readEvent(k.OBS, ids[s], "", 200).Scope, "full")
 		}
 		// 未选择外部范围的来源：结构版本 7 夹具升级后的 v0.1 来源。
 		fx := newKit(t, baseline.New(t))
@@ -118,7 +130,7 @@ func TestFlowRawReadScope(t *testing.T) {
 		if len(evs) == 0 {
 			t.Fatalf("夹具来源 %s 没有事件", src)
 		}
-		metaOnly("未选择外部范围的来源", fx.readEvent(fx.OBS, evs[0].ID, "", 200))
+		metaOnly("升级前的 token 迁成外部钥匙、未选外部范围的来源换算为只有标题", fx.readEvent(fx.OBS, evs[0].ID, "", 200))
 
 		// 升级前落盘的事件：完整程度 legacy，照常可读（正文一字不变）。
 		if len(f.M.Mail16K) == 0 {
@@ -148,7 +160,7 @@ func TestFlowRawReadScope(t *testing.T) {
 		eq(t, "apa source event 的退出码（运行凭据）", k.Apa(tok, "", "source", "event", id).Code, exitDenied)
 	})
 
-	k.step("ACT-RSC-06 已接受事项上的挂靠消息按挂靠消息权限读，不按外发范围裁剪", func(t *testing.T) {
+	k.step("ACT-RSC-06 已接受事项上的挂靠消息：内部钥匙全文，外部钥匙按档位（挂上事项不再放行）", func(t *testing.T) {
 		src := "src_acc_raw_none"
 		item := ""
 		for _, ev := range k.events(src) {
@@ -185,6 +197,7 @@ func TestFlowRawReadScope(t *testing.T) {
 			}
 			return false
 		})
+		eq(t, "外部钥匙读没给的来源的挂靠消息", k.APIRaw("GET", "/v1/source-events/"+rid, "", key).Code, 403)
 		got := k.readEvent(k.OBS, rid, "", 200)
 		eq(t, "挂靠消息的 scope", got.Scope, "full")
 		if got.Body == nil || *got.Body != reply["detail"] {

@@ -194,8 +194,8 @@
 | | `GET /sources/declared-name?type&command&source_type&config` | 来源程序接入声明的显示名（中英），新登记表单预填 | observer |
 | | `POST /sources/{id}/webhook` | 创建或轮换接收密钥（3b） | 只有 Web 登录 |
 | | `DELETE /sources/{id}/webhook` | 吊销该来源全部接收密钥，同时删除 HMAC 密钥文件（3b） | 只有 Web 登录 |
-| | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | observer、delegate；运行凭据不能读入站记录（返回 403，原始请求体未经转发白名单） |
-| | `GET /sources/{id}/events?disposition&sort&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 只有 Web 登录能读 | observer；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
+| | `GET /sources/{id}/ingests`，`POST /ingests/{id}/replay` | 入站记录与重放 | Web 登录与内部钥匙；外部钥匙与运行凭据不能读入站记录（返回 403：原始请求体不按档位裁剪，也未经转发白名单） |
+| | `GET /sources/{id}/events?disposition&sort&after&limit` | 来源事件，`disposition` 可逗号分隔多个；内部来源 `capture:<项目>` 只有 Web 登录能读；外部钥匙按它对该来源的档位裁（见下），没给这个来源返回 403（退出码 4） | observer 及以上、有档位的导出 ext 密钥；运行凭据不可用（返回 403，挂靠消息经转发白名单读取） |
 | | `GET /sources/{id}/rejects?after&limit` | 被拒收的输出行及原因 | observer；运行凭据不可用（返回 403，原始行是未过滤的外部输出） |
 | | `POST /source-events/{id}/propose` | 把未判定事件或 digest 事件转为建议 | Web 登录、delegate |
 | | `POST /source-events/{id}/split` | 把误并入一条建议的来源事件拆出来另成一条建议（`inbound.split`，主文档 §9.3）：请求体 `{"from": "<建议 id>"}`，返回 `{"item": "<新建议 id>"}` | Web 登录、delegate |
@@ -207,9 +207,9 @@
 | | `POST /source-events/score` | 积压放开第 2 步：影子打分，返回 `{"scored", "skipped"}`；请求体 `{"source"?}`；没有判断端点是 409；模型已暂停是 409 `models_paused` | Web 登录、delegate |
 | | `POST /source-events/rejudge` | 积压放开第 4 步：放开重判，返回 `{"requeued", "deferred"}`；请求体 `{"source"?, "limit"?}`；模型已暂停是 409 `models_paused` | Web 登录、delegate |
 | | `GET /source-events/restorable?from&to&source` | 预览：时间段内可放回积压的旧判断忽略事件的条数与按来源的分布 | observer；运行凭据不可用 |
-| | `GET /source-events/{id}/outbound-preview` | 外发预览：这条事件按 `full`、`excerpt`、`meta` 裁剪后实际送给模型的内容，与外发同源（主文档 §14.14）；只读，不写 Event | observer；运行凭据不可用（返回 403）；内部来源 `capture:<项目>` 的事件只有 Web 登录能读 |
+| | `GET /source-events/{id}/outbound-preview` | 外发预览：这条事件按 `full`、`excerpt`、`meta` 裁剪后实际送给模型的内容，与外发同源（主文档 §14.14）；只读，不写 Event | Web 登录与内部钥匙；外部钥匙与运行凭据不可用（返回 403）；内部来源 `capture:<项目>` 的事件只有 Web 登录能读 |
 | | `POST /source-events/restore` | 把旧级联忽略的事件放回积压；请求体 `{"from", "to", "source"?}` | Web 登录、delegate |
-| | `GET /source-events/{id}` | 单条读取来源事件及其原文，见下 | Web 登录读全文；token 按外发范围裁剪；运行凭据、ext 密钥不可用（403） |
+| | `GET /source-events/{id}` | 单条读取来源事件及其原文，见下 | Web 登录与内部钥匙读全文；外部钥匙按钥匙的逐来源档位裁剪，没给的来源 403；运行凭据只经挂靠消息与转发白名单；非导出 ext 密钥不可用（403） |
 | | `POST /source-events/{id}/attachments/{n}/fetch` | 取回第 n 个附件（`source.fetch_attachment`，主文档 §7.6）：成功返回 200 与更新后的附件清单项（带 `blob`）；来源程序不支持取回是 409，取回失败是 502 并带原因 | Web 登录、delegate |
 | | `GET /storage` | 存储用量：`{"ledger_bytes", "blobs_bytes", "content_bytes", "sources": [{"id", "name", "events", "content_bytes", "oldest", "retention_days"?}]}` | observer |
 | | 已有路由 GET /sources/{id}/events 与 GET /items/{id}/messages 的改动 | 列表不再带正文全文：每条事件的 `detail` 是前 2000 个字符的预览，另带 `content`（原文清单：各部分的字节数、总字节数、`state`、`missing?`）；全文经上面的单条读取（见 B.6） | 同原路由 |
@@ -240,7 +240,8 @@
 | 设置 | `/settings/policy`、`/settings/tokens`、`/settings/ext-keys`、`/settings/allowlists`、`/settings/executors`、`/settings/commands`、`/settings/declarations`、`/settings/model-endpoints`、`/settings/access-limits`、`/settings/projects/{id}/allowed-executors`、`/settings/purge`、`POST /settings/proactive/preview` | 策略（含人格、打扰上限与静音、主动提醒）、两个模型端点、凭据、白名单、名单、命令登记、声明确认、物理删除（`POST /settings/purge` 的 `object` 可以是事项、材料或来源事件 id；删除事项时可带 `"with_source_events": true` 连同它的来源事件一并删除，对其他对象带它是 400；去重键留作墓碑，主文档 §6.15）。策略各段按 B.1"不走命令的设置路由"定档：3a 段 delegate 按档位可读可写；3b 段与凭据、名单、命令登记、声明确认、物理删除只有 Web 登录 | 只有 Web 登录；3a 段 delegate 按档位 |
 | | `/settings/judgment` | 不确定带与影子模式（3a） | Web 登录；delegate 按档位 |
 | | `POST /settings/model-endpoints/models`、`POST /settings/model-endpoints/test` | "设置 › 模型"的获取模型与测试连接：不改策略；只有测试的正是已保存的端点、测试通过且该端点有未恢复的失败时，记一条探测通过的 `run.finished`（见下文"测试连接"），其余情况不写 Event；同一类端点同一时刻只跑一个，其余返回 409（主文档 §4.1、§15.2、§15.5） | 只有 Web 登录 |
-| | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获的外发范围（3b） | 只有 Web 登录 |
+| | `/settings/sources/{id}/outbound`、`/settings/projects/{id}/capture-outbound` | 来源与对话捕获送模型端点的范围（3b）；只管内核调模型，不管钥匙读取（主文档 §14.14）。Web 在「设置 › 模型」里编辑 | 只有 Web 登录 |
+| | `PUT /settings/tokens/{id}/scope`、`PUT /settings/ext-keys/{id}/scope` | 改钥匙给谁用与逐来源档位 `{"audience": "internal"\|"external", "source_scopes": {"<来源 id>": "full"\|"excerpt"\|"meta"}}`（`credential.scope.set`，3b，记 `credential.scope_changed`，载荷 `{"before", "after"}`，各含 `audience` 与 `source_scopes`），立即生效。`internal` 只给 observer、worker、delegate token，且 `source_scopes` 必须为空；来源须已登记，不能写 `capture:*`；不在表里即不给；已吊销为 409；组不对（ext-keys 改 token）为 404。`POST /settings/tokens`、`POST /settings/ext-keys` 可带同样两个字段，缺省 `external`、空表；`GET` 两组列表每条带 `audience` 与 `source_scopes` | 只有 Web 登录 |
 | | `GET/PUT /settings/note-vaults` | 笔记库登记：`{"vaults": [{"name", "open_url"}]}`，整体替换；经 `policy.Update`，记 `policy.changed`。名字重复、模板不以协议开头或用了被拒绝的协议返回 400 | 只有 Web 登录 |
 | | `PUT /settings/sources/{id}/content-retention` | 来源的原文保留天数：`{"days": 90}`，`null` 为不清理（主文档 §6.15；3a） | Web 登录；delegate 按档位 |
 | | `GET /settings/retention` | 三项保留期与最近一次清理：`{"run_days", "ingest_days", "judgment_days", "defaults": {同前三项}, "last_sweep": null或{"at", "run_dirs", "run_dir_bytes", "ingest_bodies", "judgments", "skipped_in_flight": [运行 id], "error"?}}`；0 为不清理；ext 与 webhook 凭据不可读（主文档 §6.15） | observer |
@@ -412,9 +413,11 @@ v0.1 的请求形状 `{"model_endpoint": {"url", "model", "api_key", "screening_
 
 **工作台能力迭代的路由细节**：
 
-`GET /source-events/{id}[?part=<部分>]`：响应 200：`{"event": {…来源事件字段…}, "content": {"state", "bytes", "parts": [{"part", "media_type", "bytes", "sha256"}], "missing"?}, "body"?, "original"?: {"media_type", "text"}, "headers"?, "attachments"?, "messages"?, "scope": "full" | "excerpt" | "meta", "trimmed"?: {"total_chars", "returned_chars"}}`。Web 登录的 `scope` 恒为 `full`。token 的 `scope` 取该来源的 `outbound.external`：`excerpt` 只回摘要与正文前 500 个字符，不回 `original`、`headers` 与 `messages`；`meta`、`none` 与未选择只回 `event` 里的元信息与 `content` 清单。带 `part` 时只回那一部分。事件是挂在已接受事项上的挂靠消息时，按 `GET /items/{id}/messages` 的权限读，不按外发范围裁剪。对话捕获的内部来源只对 Web 登录开放。`attachments` 里的 `ref` 是来源程序的取回句柄：来源接入声明里没有 `content.attachments: fetch` 时，响应不带每项的 `ref`（没有新字段；Web 以有无 `ref` 决定是否显示「取回」）。
+`GET /source-events/{id}[?part=<部分>]`：响应 200：`{"event": {…来源事件字段…}, "content": {"state", "bytes", "parts": [{"part", "media_type", "bytes", "sha256"}], "missing"?}, "body"?, "original"?: {"media_type", "text"}, "headers"?, "attachments"?, "messages"?, "scope": "full" | "excerpt" | "meta", "trimmed"?: {"total_chars", "returned_chars"}}`。Web 登录与内部钥匙的 `scope` 恒为 `full`。外部钥匙的 `scope` 取钥匙对该来源的档位（`source_scopes`）：`excerpt` 只回摘要与正文前 500 个字符，不回 `original`、`headers` 与 `messages`；`meta` 只回 `event` 里的元信息与 `content` 清单；不在表里返回 403（`permission_denied`，`reason: out_of_scope`，退出码 4）。挂在事项上的挂靠消息同样按档位读；运行凭据只能读挂在本次范围内事项上、且过了转发白名单的挂靠消息。带 `part` 时只回那一部分。对话捕获的内部来源只对 Web 登录开放。
 
-`GET /sources/{id}/events` 与 `GET /items/{id}/messages` 的每条事件：`detail` 改为预览（至多 2000 个字符），新增 `content`（同上，不含各部分内容）；聚合消息不在列表里返回。
+**外部钥匙读到的事项与材料**（主文档 §14.14）：一条事项的来源是 `origin.source` 加上挂在它上面的全部来源事件的来源（只算已登记的来源与对话捕获），材料的来源是与它有关系边的全部事项的来源；取最严（不给 < `meta` < `excerpt` < `full`），不出自任何来源的按全文。`excerpt`：事项 `body` 与每条进展正文留前 500 个字符；`meta`：去掉 `body`、`summary`、建议的 `reason` 与合并留痕的摘要和理由，进展只留条目、正文为空，材料修订的 `content` 为空；不给：列表（`/items`、`/today`、`/materials`、`/revisions/pending`、`/context`）里不出现，单条读与它的经过、回放返回 403（退出码 4）。单条读另带 `content_scope` 与正文被截时的 `trimmed`；列表带 `content_scopes: {"<id>": "excerpt"|"meta"}`，全文的不列。带 `q` 的搜索在裁剪后的内容上匹配；材料搜索对外部钥匙只留按全文能读的材料。`/why/{id}` 对外部钥匙：全文档位按凭据级别回放，元信息与摘录档只给信封（同 observer：类型、时间、操作者、授权单号与判断结论，不含载荷、理由与证据），不给的 403；`/items/{id}/trace`、`/source-events/{id}/trace` 的行里带进展正文，只在全文档位可读；其余对象（运行等）与 `/audit/events` 只给信封。外部钥匙读 `GET /sources`、`/sources/{id}` 只看到有档位的来源，且不带 `command`、`config`、`credentials_path`、`cursor`、`outbound`。`attachments` 里的 `ref` 是来源程序的取回句柄：来源接入声明里没有 `content.attachments: fetch` 时，响应不带每项的 `ref`（没有新字段；Web 以有无 `ref` 决定是否显示「取回」）。
+
+`GET /sources/{id}/events` 与 `GET /items/{id}/messages` 的每条事件：`detail` 改为预览（至多 2000 个字符），新增 `content`（同上，不含各部分内容）；聚合消息不在列表里返回。外部钥匙按档位：`excerpt` 的 `detail` 是正文前 500 个字符、`meta` 不带 `summary` 与 `detail`，两者都不带 `content`；`GET /items/{id}/messages` 里没给的来源的消息不列。
 
 来源事件字段新增：`content`（只读）。来源登记字段新增：`content_retention_days`（只读，经 `/settings/sources/{id}/content-retention` 改）；`stats` 新增 `events`、`content_bytes`、`last_failure_kind`（最近一次失败的类别：`transient`、`auth_or_config`、`permanent`；拉取成功后清空，没有失败时不出现）。
 
@@ -479,7 +482,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 
 `import.completed`。
 
-连接登记的事件（连接的新建、改配置、启用、停用、改名、删除）是内部类型，不进订阅流，不在本表。权限模型切换（主文档 §16.5）记一条内部事件 `authz.switched`（对象 `authz`，载荷是每一步的计数与明细），同样不进订阅流。`grant.issued`、`grant.revoked` 保留在本表：授权单取消后内核只在切换时写 `grant.revoked`，此后不再写入。
+连接登记的事件（连接的新建、改配置、启用、停用、改名、删除）是内部类型，不进订阅流，不在本表。钥匙档位的两个事件同为内部类型：`credential.scope_changed`（对象是凭据 id）、`credential.scopes_migrated`（升级时的一次性换算，对象 `settings:credentials`，载荷是每把钥匙换算出的档位）。权限模型切换（主文档 §16.5）记一条内部事件 `authz.switched`（对象 `authz`，载荷是每一步的计数与明细），同样不进订阅流。`grant.issued`、`grant.revoked` 保留在本表：授权单取消后内核只在切换时写 `grant.revoked`，此后不再写入。
 
 已有类型的信封不变；工作台能力迭代给信封新增两个可选字段 `imported`、`recorded_at`（只出现在导入事件上，而导入事件不进订阅流，所以订阅方看不到它们）；入站处置类事件的载荷新增可选的 `material`（这次调用送出的资料字符数、裁剪前的字符数与裁剪方式）；`delegation.reported` 的证据新增可选的 `links[]`。`item.updated` 的载荷新增可选的 `planned_for`，入站处置类事件的载荷新增可选的 `judgment`（判断记录 id）。v0.1 写下的 `run.finished`（`category: judge`）仍可回放，新的判断不再产生它（主文档 §8.6）。
 
@@ -509,6 +512,8 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 对话捕获默认开启（2026-11-23）只做加法：新建项目的 `capture` 恒为 `true`，`POST /projects` 与 `apa project create` 不再接收 `capture`（带了是 400 与退出码 2）；已有项目升级后由启动迁移一次性补开（经 `project.update`，操作者 `kernel:defaults`，幂等，不改账本结构）；`PATCH /projects/{id}` 与 `apa project update --capture` 仍在（3a，默认已开，一般用不到），Web 项目页不再有这个开关。`POST /capture` 增可选 `failures`，`GET /health` 增第十四项 `capture_failures`，新增内部事件 `inbound.capture_failed`（不在 B.4 对外稳定集合里）。
 
 按进展日读事项（2026-11-23）只做加法：`GET /items` 增 `progress_from`、`progress_to`，带上时响应另有 `progress`。不改账本结构、不迁移；不带这两个参数时响应不变。
+
+钥匙档位（2026-11-23）：`auth` 迁移 v4（账本结构版本仍为 9）给凭据加 `audience`（缺省 `external`）与 `source_scopes`；升级后第一次启动时一次性换算，记 `credential.scopes_migrated`：observer、worker、delegate token 按各来源当时的 `outbound.external` 换算成它们当时经 token 实际读到的档位（`full`、`excerpt` 照给，`meta`、`none`、未选择换成 `meta`），ext、webhook 为空表，没有钥匙被标成内部。行为改动见下表「钥匙读来源内容」一行。回退只有旧二进制加升级前的账本快照一条路（新账本对旧二进制是 `ledger_too_new`）。
 
 除下表外，v0.2.0 对 v0.1 的命令、路由、字段和事件都只做加法。
 
@@ -573,6 +578,7 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 | `GET /connections` 的权限 | 只有 Web 登录 | observer 及以上的 token 读裁剪后的字段（不含 `config`、`secrets`、`detail`）；新增 `apa connection list` | 只增：Web 读到的内容不变；写命令仍只在 Web |
 | 笔记库打开地址的编码 | `{vault}`、`{path}` 按路径段编码：`&`、`=`、`+`、`$`、`:`、`@` 不编码，与 Web 预览不一致 | 按 URI 组件编码，内核与 Web 预览一致（主文档 §12.8） | 只改渲染结果，不迁移、不改存储；路径含这些字符时原来生成的是坏链接，修复后正确；另外 `!`、`'`、`(`、`)`、`*` 由百分号编码改为原样，两种写法等价；其余路径的结果不变 |
 | `GET /settings/ext-keys` | 没有最近调用时间 | 每把密钥另带 `last_seen_at` | 只增字段 |
+| 钥匙读来源内容 | token 读来源原文按该来源的 `outbound.external` 裁剪（挂在事项上的不裁）；列表、挂靠消息、外发预览、入站记录、被拒行与事项、材料不看档位；简报运行的原文文件按 `outbound.external` 写 | 只看钥匙：内部钥匙、运行凭据与 Web 全文；外部钥匙（含导出 ext）按 `source_scopes` 读来源事件、事项与材料，不给的不出现或 403；入站记录、被拒行、外发预览只给 Web 与内部钥匙；简报原文文件一律全文；`outbound` 只管内核调模型 | **调用方要改的**：迁移后现有 token 都是外部，事项正文按档位裁，本人在 Web 把 APA 内部用的钥匙标成「APA 内部」后恢复全文；依赖 `outbound.external = full` 才能读原文的脚本，标内部后不再依赖它 |
 | 导出与转发密钥的 Web 入口 | 独立设置页（"扩展程序"，`/settings-credentials`） | 设置 › 系统 › 对外接口（`/settings/outward-api`），与"提醒渠道"平级，不混列渠道钥匙；是长期对外能力（主文档 §4.1、决定 77）；内置输出已取消（决定 78），仓库不再附带导出与转发客户端（决定 79） | 旧地址不保留别名。已签发密钥、授权范围和 HTTP API 不变，无需迁移 |
 | 随发行附带的导出 ext 与 webhook 转发 ext | 发布包的 `ext/` 下附带 | 不再附带，需要的人自己写客户端接对外接口（主文档决定 79） | 导出与转发密钥、事件订阅、只读 API 与 ext 协议不变；已在运行的旧版程序照常可用，无需迁移 |
 | `apa connection list --direction` 与连接的方向 | 取值 `channel`、`output` | 只接受 `channel`；`output` 返回用法错误（退出码 2）。`GET /connections?direction=output` 返回空列表 | 从未有过输出类型的连接，账本里没有方向为 `output` 的连接记录或事件，无需迁移；`direction` 列保持原样（只增不改） |

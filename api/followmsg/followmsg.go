@@ -13,10 +13,12 @@ import (
 	"strings"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
@@ -34,23 +36,39 @@ const IdempotencyHeader = "Idempotency-Key"
 func Routes(x *command.Executor) core.RouteGroup {
 	return func(r *core.Router) {
 		r.Handle(core.Route{Method: "GET", Path: "/items/{id}/messages", Handler: func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-			if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
+			if (p.Caller.Kind == auth.Ext && !auth.IsExportExt(p.Caller.Kind, p.Caller.Actor.Principal)) || p.Caller.Kind == auth.Webhook {
 				return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read attached messages", "use an owner or agent credential")
 			}
-			var msgs []messageView
+			msgs := []messageView{}
 			if err := x.Store().View(r.Context(), func(tx *store.Tx) error {
 				as, err := allowlist.Messages(tx, r.PathValue("id"), p.Caller.Level)
 				if err != nil {
 					return err
 				}
-				msgs = make([]messageView, len(as))
-				for i, m := range as { // 列表只带正文预览与原文清单；全文经 GET /source-events/{id}，按挂靠消息自己的权限取（§7.6）
-					mf, err := runner.ContentOf(tx, m.ID)
+				rs := readscope.New(tx, p.Caller)
+				if !rs.All() { // 外部钥匙：事项本身要够得到，每条消息再按自己来源的档位裁（§14.14）
+					it, err := kitems.Get(tx, r.PathValue("id"))
 					if err != nil {
 						return err
 					}
+					if _, _, err := rs.Item(it); err != nil {
+						return err
+					}
+				}
+				for _, m := range as { // 列表只带正文预览与原文清单；全文经 GET /source-events/{id}，按挂靠消息自己的权限取（§7.6）
 					m.Detail = runner.Preview(m.Detail)
-					msgs[i] = messageView{Attached: m, Content: mf}
+					msg, ok := rs.Message(m.Message)
+					if !ok {
+						continue
+					}
+					m.Message = msg
+					var mf runner.Manifest
+					if rs.Tier(m.Source) == readscope.Full {
+						if mf, err = runner.ContentOf(tx, m.ID); err != nil {
+							return err
+						}
+					}
+					msgs = append(msgs, messageView{Attached: m, Content: mf})
 				}
 				return nil
 			}); err != nil {

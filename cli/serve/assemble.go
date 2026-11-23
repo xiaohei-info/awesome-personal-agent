@@ -508,6 +508,10 @@ func (k *kernel) start(ctx context.Context) error {
 	if err := k.loadHostFiles(ctx); err != nil {
 		return err
 	}
+	// 钥匙逐来源档位的一次性迁移，幂等（§16.5）：在主机配置里的来源登记对齐之后，按它们今天的外发范围换算。
+	if err := migrateKeyScopes(ctx, k.st, clock.Now); err != nil {
+		return err
+	}
 	// 升级前为被拒的代理写入挂的单选项问题降级为通知（§14.5、§16.5）；幂等，之后每次启动都找不到要撤的。
 	if err := k.st.Update(ctx, func(tx *store.Tx) error {
 		ids, err := kdecisions.WithdrawProxyRejectionAsks(tx, clock.Now())

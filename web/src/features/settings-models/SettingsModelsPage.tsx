@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, lang, useLang, useT } from "../../app/i18n";
@@ -12,6 +11,7 @@ import type { DoctorCode } from "../../app/ids";
 import { BudgetNote, useBudgetBad } from "../../app/tokenBudget/BudgetNote";
 import { budgetOk, DEFAULT_BUDGET_TOKENS } from "../../app/tokenBudget/constants";
 import { strings } from "./strings";
+import { EndpointSources } from "./EndpointSources";
 
 // 形状对应 /v1/settings/model-endpoints 与它的两条探测路由（附录 B.2；界面设计 §9.9；设计 §14.14、§15.5）。
 // 校验、规整、默认值都在服务端；本页只搬运编辑结果，原样显示拒绝原因，被拒绝时草稿保留。
@@ -162,6 +162,7 @@ export function SettingsModelsPage() {
       )}
       <EndpointCard kind="generate" doc={doc.generate_endpoint} paused={paused} unsetExternal={unsetExternal} save={(e) => save({ generate_endpoint: e as Endpoint | null })} />
       <EndpointCard kind="judge" doc={doc.judge_endpoint} paused={paused} unsetExternal={unsetExternal} save={(e) => save({ judge_endpoint: e as Endpoint | null })} />
+      <EndpointSources />
       <details className="panel">
         <summary>{t.advanced}</summary>
       </details>
@@ -401,7 +402,7 @@ function EndpointCard({ kind, doc, paused, unsetExternal, save }: { kind: Kind; 
           {d.locality === "external" && unsetExternal != null && unsetExternal > 0 && (
             <p className="note">
               {t.unsetPre(unsetExternal)}
-              <Link to="/sources">{t.toSources}</Link>
+              <a href="#endpoint-sources">{t.toSources}</a>
             </p>
           )}
           {kind === "judge" && (

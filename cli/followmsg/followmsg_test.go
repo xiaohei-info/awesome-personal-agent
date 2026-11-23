@@ -39,6 +39,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/runidentity"
+	sregistry "github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
@@ -71,7 +72,7 @@ func newWorld(t *testing.T) *world {
 	t.Helper()
 	reg := store.NewRegistry()
 	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, projects.Module, clock.Module,
-		kitems.Module, executors.Module, kdel.Module, runner.Module, delivery.Module, kcontext.Module, proc.Module, background.Module, runidentity.Module, core.Module} {
+		kitems.Module, executors.Module, kdel.Module, runner.Module, sregistry.Module, delivery.Module, kcontext.Module, proc.Module, background.Module, runidentity.Module, core.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -124,7 +125,7 @@ func (w *world) token(kind auth.Kind, executor string) string {
 	w.t.Helper()
 	var secret string
 	if err := w.st.Update(bg, func(tx *store.Tx) error {
-		_, s, err := w.au.Issue(tx, auth.Spec{Kind: kind, Executor: executor})
+		_, s, err := w.au.Issue(tx, auth.Spec{Kind: kind, Executor: executor, Audience: agentAudience(kind)})
 		secret = s
 		return err
 	}); err != nil {
@@ -407,8 +408,9 @@ func TestItemMessagesRouteFiltersUnattendedReaders(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := w.messages(ext, item); code != 403 {
-		t.Fatalf("ext: %d", code)
+	// 导出 ext 钥匙是外部程序的钥匙：没给它这些消息的来源，一条也不给（§14.14）。
+	if code, ms := w.messages(ext, item); code != 200 || len(ms) != 0 {
+		t.Fatalf("export ext without scopes: %d %d messages", code, len(ms))
 	}
 	if code, _ := w.messages(obs, "itm_none"); code != 404 {
 		t.Fatalf("unknown item: %d", code)
@@ -532,4 +534,12 @@ func TestSessionContextCarriesNewlyAttachedMessages(t *testing.T) {
 	if w.state(id) != runner.AttachPending {
 		t.Fatalf("main session read advanced state: %s", w.state(id))
 	}
+}
+
+// agentAudience：测试里的三级 token 代表 APA 内部的 Agent，读来源不受档位限制（§14.2）；ext、webhook 是外部钥匙。
+func agentAudience(k auth.Kind) string {
+	if k == auth.Observer || k == auth.Worker || k == auth.Delegate {
+		return auth.AudienceInternal
+	}
+	return ""
 }

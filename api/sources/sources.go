@@ -33,6 +33,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
 	apipolicy "github.com/xiaohei-info/awesome-personal-agent/api/settings/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
@@ -209,9 +210,10 @@ func Mount(st *store.Store, x *command.Executor, au *auth.Auth, rp Replayer, pr 
 }
 
 // readable：读来源对 observer 及以上开放；ext 与 webhook 凭据不能读账本（与 api/projects 一致）。
+// readable：webhook 密钥与非导出的 ext 密钥（渠道、转发）不读来源；导出 ext 密钥是外部程序的钥匙，按它的逐来源档位读（§14.14）。
 func readable(h core.Handler) core.Handler {
 	return func(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-		if p.Caller.Kind == auth.Ext || p.Caller.Kind == auth.Webhook {
+		if (p.Caller.Kind == auth.Ext && !auth.IsExportExt(p.Caller.Kind, p.Caller.Actor.Principal)) || p.Caller.Kind == auth.Webhook {
 			return domain.NewError(domain.CodePermissionDenied, "credential kind cannot read sources", "use an owner or agent credential")
 		}
 		return h(w, r, p)
@@ -269,7 +271,13 @@ func (a *api) source(r *http.Request, id string) (s domain.Source, err error) {
 
 // ---- 来源登记 ----
 
-func (a *api) list(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
+// forExternal：外部钥匙只看得到给了它的来源，且看不到来源在本机怎么跑（命令、配置、凭据路径、游标、送模型端点的范围）。
+func forExternal(s domain.Source) domain.Source {
+	s.Command, s.CredentialsPath, s.Config, s.Cursor, s.Outbound = "", "", nil, "", domain.Outbound{}
+	return s
+}
+
+func (a *api) list(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	var out []sourceView
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
 		ss, err := registry.List(tx)
@@ -281,7 +289,14 @@ func (a *api) list(w http.ResponseWriter, r *http.Request, _ *core.Principal) er
 			return err
 		}
 		out = make([]sourceView, 0, len(ss))
+		rs := readscope.New(tx, p.Caller)
 		for _, s := range ss {
+			if !rs.All() {
+				if rs.Tier(s.ID) == readscope.None {
+					continue
+				}
+				s = forExternal(s)
+			}
 			v, err := a.view(s, usage[s.ID])
 			if err != nil {
 				return err
@@ -314,12 +329,18 @@ func (a *api) declaredName(w http.ResponseWriter, r *http.Request, _ *core.Princ
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"name": name})
 }
 
-func (a *api) get(w http.ResponseWriter, r *http.Request, _ *core.Principal) error {
+func (a *api) get(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	var v sourceView
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
 		s, err := registry.Get(tx, r.PathValue("id"))
 		if err != nil {
 			return err
+		}
+		if p.Caller.External() {
+			if _, err := sourceTier(tx, p, s.ID); err != nil {
+				return err
+			}
+			s = forExternal(s)
 		}
 		usage, err := runner.UsageBySource(tx)
 		if err != nil {
@@ -635,8 +656,8 @@ func viewOf(g webhook.Ingest) ingestView {
 
 func (a *api) ingests(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	// 原始请求体未经转发白名单，也无从按发送者过滤：发送者要等转换后才有（§14.3、§14.6）。
-	if p.Caller.Level == authz.LevelRun {
-		return domain.NewError(domain.CodePermissionDenied, "run credential cannot read raw ingests", "read forwarded messages from the context instead")
+	if err := internalOnly(p, "raw ingests"); err != nil {
+		return err
 	}
 	id := r.PathValue("id")
 	var gs []webhook.Ingest
@@ -783,13 +804,16 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 				return err
 			}
 		}
-		var err error
+		scope, err := sourceTier(tx, p, id) // 列表的预览同样按档位裁，不再对外部钥匙一律给 2000 字
+		if err != nil {
+			return err
+		}
 		switch bySort {
 		case "score":
 			if scrd, next, err = scoredPage(tx, id, ds, after, limit); err != nil {
 				return err
 			}
-			out["events"], err = viewScored(tx, scrd)
+			out["events"], err = viewScored(tx, scrd, scope)
 			return err
 		case "recent": // 从新到旧，after/next_after 是偏移（同 score）
 			evs, next, err = runner.EventPageRecent(tx, id, ds, after, limit)
@@ -799,7 +823,7 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 		if err != nil {
 			return err
 		}
-		out["events"], err = viewEvents(tx, evs) // 正文只给预览与清单，全文经 GET /source-events/{id}
+		out["events"], err = viewEvents(tx, evs, scope) // 正文只给预览与清单，全文经 GET /source-events/{id}
 		return err
 	}); err != nil {
 		return err
@@ -813,8 +837,8 @@ func (a *api) events(w http.ResponseWriter, r *http.Request, p *core.Principal) 
 // outboundPreview 返回一条来源事件按 full、excerpt、meta 裁剪后实际送给模型的内容（§14.14），与外发同源，不写 Event。
 // 读取口径与 GET /sources/{id}/events 相同：这是未过滤的外部内容，运行凭据不可用；对话捕获的内部来源只给 Web。
 func (a *api) outboundPreview(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if p.Caller.Level == authz.LevelRun {
-		return domain.NewError(domain.CodePermissionDenied, "run credential cannot read source events", "read forwarded messages from the context instead")
+	if err := internalOnly(p, "the outbound preview"); err != nil {
+		return err
 	}
 	var ev domain.SourceEvent
 	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
@@ -841,7 +865,7 @@ func (a *api) propose(w http.ResponseWriter, r *http.Request, p *core.Principal)
 	if err != nil {
 		return err
 	}
-	return a.writeEvent(w, r, ev)
+	return a.writeEvent(w, r, p, ev)
 }
 
 // split 把并入某条建议的来源事件拆出来另成一条建议：请求体 {"from": 建议 id}，返回 {"item": 新建议 id}。
@@ -880,13 +904,23 @@ func (a *api) ignoreOne(w http.ResponseWriter, r *http.Request, p *core.Principa
 	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { ev, err = runner.Event(tx, id); return }); err != nil {
 		return err
 	}
-	return a.writeEvent(w, r, ev)
+	return a.writeEvent(w, r, p, ev)
 }
 
-// writeEvent 以列表口径（预览加清单）返回一条来源事件：写命令的响应也不带正文全文，全文只经单条读取。
-func (a *api) writeEvent(w http.ResponseWriter, r *http.Request, ev domain.SourceEvent) error {
+// writeEvent 以列表口径（预览加清单）返回一条来源事件：写命令的响应也不带正文全文，全文只经单条读取；同样按调用者的档位裁。
+func (a *api) writeEvent(w http.ResponseWriter, r *http.Request, p *core.Principal, ev domain.SourceEvent) error {
 	var v eventView
-	if err := a.st.View(r.Context(), func(tx *store.Tx) (err error) { v, err = viewEvent(tx, ev); return }); err != nil {
+	if err := a.st.View(r.Context(), func(tx *store.Tx) error {
+		scope := scopeFull
+		if !inbound.IsCaptureSource(ev.SourceID) {
+			if scope = readscope.New(tx, p.Caller).Tier(ev.SourceID); scope == readscope.None {
+				scope = scopeMeta // 写命令已经成功，响应只带元信息
+			}
+		}
+		var err error
+		v, err = viewEvent(tx, ev, scope)
+		return err
+	}); err != nil {
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, v)
@@ -1019,8 +1053,8 @@ func (a *api) restore(w http.ResponseWriter, r *http.Request, p *core.Principal)
 // rejects 返回来源没有入账的输出行及原因。原始行在落账时已截断到 512 字节；与入站记录的请求头同一规则，含接收密钥明文前缀的整行遮蔽。
 // 原始行是未过滤的外部输出，运行凭据不能读（与 events、ingests 一致）。
 func (a *api) rejects(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
-	if p.Caller.Level == authz.LevelRun {
-		return domain.NewError(domain.CodePermissionDenied, "run credential cannot list source rejects", "read forwarded messages from the context instead")
+	if err := internalOnly(p, "source rejects"); err != nil {
+		return err
 	}
 	after, limit, err := pageParams(r.URL.Query())
 	if err != nil {

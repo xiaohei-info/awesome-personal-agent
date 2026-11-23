@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/allowlist"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
@@ -21,7 +22,8 @@ import (
 )
 
 // 来源原文的读取（附录 B.2、B.6，设计 §7.6、§14.14）。原文由 kernel/sources/runner 存取，本文件只决定谁能读到多少：
-// Web 登录读全文；token 按该来源的 outbound.external 裁剪；运行凭据、ext 与 webhook 密钥读不到；对话捕获只对 Web 登录。
+// Web 登录与内部钥匙读全文；外部钥匙按钥匙自己的逐来源档位裁剪，不在表里不给（api/readscope）；
+// 运行凭据只经挂靠消息的权限读；webhook 密钥与非导出 ext 密钥读不到；对话捕获只对 Web 登录。
 // 没有任何写原文的路由：事项正文是事项自己的字段，改它不碰来源事件（§6.14 第 19 条）。
 
 // eventView 是读接口给出的来源事件：detail 只是预览（至多 runner.PreviewChars 个字符），content 是原文清单，全文经 GET /source-events/{id}。
@@ -30,20 +32,25 @@ type eventView struct {
 	Content runner.Manifest `json:"content"`
 }
 
-// viewEvent 把账本里读出的事件（Detail 是全文）改成列表口径。
-func viewEvent(tx *store.Tx, ev domain.SourceEvent) (eventView, error) {
+// viewEvent 把账本里读出的事件（Detail 是全文）改成列表口径，并按档位裁剪：全文给预览，摘录给前 500 字，元信息不给正文。
+// 档位不给的由调用方在此之前拒绝。
+func viewEvent(tx *store.Tx, ev domain.SourceEvent, scope string) (eventView, error) {
 	mf, err := runner.ContentOf(tx, ev.ID)
 	if err != nil {
 		return eventView{}, err
 	}
 	ev.Detail = runner.Preview(ev.Detail)
+	if scope != scopeFull {
+		ev = scoped(ev, scope)
+		mf = runner.Manifest{} // 原文清单里有附件名与大小，只随全文给
+	}
 	return eventView{SourceEvent: ev, Content: mf}, nil
 }
 
-func viewEvents(tx *store.Tx, evs []domain.SourceEvent) ([]eventView, error) {
+func viewEvents(tx *store.Tx, evs []domain.SourceEvent, scope string) ([]eventView, error) {
 	out := make([]eventView, len(evs))
 	for i, ev := range evs {
-		v, err := viewEvent(tx, ev)
+		v, err := viewEvent(tx, ev, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -58,10 +65,10 @@ type scoredView struct {
 	Score *float64 `json:"score,omitempty"`
 }
 
-func viewScored(tx *store.Tx, ss []inbound.Scored) ([]scoredView, error) {
+func viewScored(tx *store.Tx, ss []inbound.Scored, scope string) ([]scoredView, error) {
 	out := make([]scoredView, len(ss))
 	for i, s := range ss {
-		v, err := viewEvent(tx, s.SourceEvent)
+		v, err := viewEvent(tx, s.SourceEvent, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +106,7 @@ func denied(why, next string) error {
 	return domain.NewError(domain.CodePermissionDenied, why, next)
 }
 
-// readScope 决定 p 读 ev 的原文时的范围。ext 与 webhook 密钥已被 readable 挡在外面。
+// readScope 决定 p 读 ev 的原文时的范围。webhook 与非导出 ext 密钥已被 readable 挡在外面。
 func readScope(tx *store.Tx, p *core.Principal, ev domain.SourceEvent) (string, error) {
 	if inbound.IsCaptureSource(ev.SourceID) { // 对话内容只给本人
 		if !p.Web {
@@ -110,31 +117,40 @@ func readScope(tx *store.Tx, p *core.Principal, ev domain.SourceEvent) (string, 
 	if p.Web {
 		return scopeFull, nil
 	}
-	// 挂在已接受事项上的挂靠消息是工作现场，按 GET /items/{id}/messages 的权限读，不按外发范围裁剪（§14.14）。
-	if ev.Disposition == domain.DispositionAttached && ev.Item != "" {
-		msgs, err := allowlist.Messages(tx, ev.Item, p.Caller.Level)
-		if err != nil {
-			return "", err
+	if p.Caller.Level == authz.LevelRun { // 运行凭据只经挂靠消息的权限读（转发白名单），不读其他来源原文（§7.6、§14.6）
+		if ev.Disposition == domain.DispositionAttached && ev.Item != "" {
+			msgs, err := allowlist.Messages(tx, ev.Item, p.Caller.Level)
+			if err != nil {
+				return "", err
+			}
+			if slices.ContainsFunc(msgs, func(m allowlist.Attached) bool { return m.ID == ev.ID }) {
+				return scopeFull, nil
+			}
 		}
-		if slices.ContainsFunc(msgs, func(m allowlist.Attached) bool { return m.ID == ev.ID }) {
-			return scopeFull, nil
-		}
-	}
-	if p.Caller.Level == authz.LevelRun { // 运行凭据只经挂靠消息的权限读，不读来源原文（§7.6）
 		return "", denied("run credential cannot read source event content", "read forwarded messages from the context instead")
 	}
-	src, err := registry.Get(tx, ev.SourceID)
-	if err != nil {
-		return "", err
+	// 内部钥匙全文；外部钥匙只看钥匙自己的逐来源档位，挂在事项上也不例外（§14.14）。
+	return sourceTier(tx, p, ev.SourceID)
+}
+
+// sourceTier 是 p 读来源 id 的档位；不给时返回退出码 4 的拒绝。
+func sourceTier(tx *store.Tx, p *core.Principal, id string) (string, error) {
+	t := readscope.New(tx, p.Caller).Tier(id)
+	if t == readscope.None {
+		return "", readscope.Denied()
 	}
-	// token 读到的内容进它自己的模型，内核无从知道在哪，一律按外部端点的范围；未选择与 none 只回元信息。
-	switch registry.ScopeFor(src.Outbound, "external") {
-	case registry.ScopeFull:
-		return scopeFull, nil
-	case registry.ScopeExcerpt:
-		return scopeExcerpt, nil
+	return t, nil
+}
+
+// internalOnly 挡住外部钥匙与运行凭据：原始请求体、被拒行、外发预览是给本人排查用的，不按档位裁剪，只给 Web 与内部钥匙。
+func internalOnly(p *core.Principal, what string) error {
+	if p.Caller.Level == authz.LevelRun {
+		return denied("run credential cannot read "+what, "read forwarded messages from the context instead")
 	}
-	return scopeMeta, nil
+	if p.Caller.External() {
+		return denied("an external key cannot read "+what, "use the source events this key is given")
+	}
+	return nil
 }
 
 // scoped 按范围裁剪事件的元信息；全文范围保持列表口径（detail 为预览）。
@@ -143,8 +159,10 @@ func scoped(ev domain.SourceEvent, scope string) domain.SourceEvent {
 		return ev
 	}
 	t, _ := registry.Trim(ev, scope)
+	// 只留元信息与处置状态（处置、未判定原因、挂靠与判断的关联）；来源给的数值、关联键与合并键只随全文给。
 	out := domain.SourceEvent{ID: ev.ID, SourceID: ev.SourceID, Type: t.Type, Subject: t.Subject, Sender: t.Sender, SenderVerified: ev.SenderVerified,
-		OccurredAt: ev.OccurredAt, Link: t.Link, Disposition: ev.Disposition, Item: ev.Item, Summary: t.Summary, Detail: t.Detail}
+		OccurredAt: ev.OccurredAt, Link: t.Link, Disposition: ev.Disposition, Item: ev.Item, Summary: t.Summary, Detail: t.Detail,
+		DedupeKey: ev.DedupeKey, AttachState: ev.AttachState, UnjudgedReason: ev.UnjudgedReason, Rejudges: ev.Rejudges, Items: ev.Items, Judgment: ev.Judgment}
 	return out
 }
 

@@ -10,7 +10,7 @@ import { feature as channels } from "../settings-channels/index";
 // 测试边界替身：策略与连接只读，密钥操作按 /settings/ext-keys 的契约应答。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-interface Cred { id: string; label?: string; scope: string; revoked_at?: string }
+interface Cred { id: string; label?: string; scope: string; revoked_at?: string; audience?: string; source_scopes?: Record<string, string> }
 
 function server(initial: Cred[] = [], deny?: Response, failRevoke?: Response) {
   let creds = initial;
@@ -24,13 +24,20 @@ function server(initial: Cred[] = [], deny?: Response, failRevoke?: Response) {
     if (url === "/v1/settings/policy" || url === "/v1/settings/allowlists") return json(200, { version: 1 });
     if (url === "/v1/connections?direction=channel") return json(200, { connections: [] });
     if (url === "/v1/connections/types?direction=channel") return json(200, { types: [] });
+    if (url === "/v1/sources") return json(200, { sources: [{ id: "src_wx", name: "微信" }, { id: "src_mail", name: "邮件" }] });
+    const sc = url.match(/^\/v1\/settings\/ext-keys\/(.+)\/scope$/);
+    if (sc && method === "PUT") {
+      const c = creds.find((x) => x.id === sc[1])!;
+      Object.assign(c, { audience: "external", source_scopes: body.source_scopes });
+      return json(200, { credential: c });
+    }
     const m = url.match(/^\/v1\/settings\/ext-keys(?:\/(.+))?$/);
     if (!m) return json(404, { code: "not_found", why: "no such route", next: "x" });
     if (deny) return deny.clone();
     const [, id] = m;
     if (method === "GET") return json(200, { credentials: creds });
     if (method === "POST") {
-      const c: Cred = { id: "cred_" + ++n, label: body.label, scope: body.scope };
+      const c: Cred = { id: "cred_" + ++n, label: body.label, scope: body.scope, audience: "external", source_scopes: body.source_scopes ?? {} };
       creds = [...creds, c];
       return json(201, { credential: c, secret: "apa_SECRET_" + n });
     }
@@ -84,8 +91,9 @@ describe("设置 › 连接 › 对外接口 › 导出与转发密钥（flow-bo
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("apa_SECRET_1");
     const posts = () => s.calls.filter((c) => c.method === "POST");
-    expect(posts()[0]).toMatchObject({ path: "/v1/settings/ext-keys", body: { scope: "export", label: "看板" }, csrf: "tok-1" });
-    expect(within(screen.getByRole("list", { name: "已签发的钥匙" })).getByText("能读事项、材料，能订阅事件")).toBeInTheDocument();
+    expect(posts()[0]).toMatchObject({ path: "/v1/settings/ext-keys", body: { scope: "export", label: "看板", source_scopes: {} }, csrf: "tok-1" });
+    expect(within(screen.getByRole("list", { name: "已签发的钥匙" })).getByText("按来源档位读来源、事项与材料，能订阅事件")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "已签发的钥匙" })).getByText("外部：什么来源都不给")).toBeInTheDocument();
     await userEvent.click(screen.getByLabelText("只允许订阅事件（不能读事项和材料）"));
     await userEvent.click(screen.getByRole("button", { name: "签发" }));
     await screen.findByText(/apa_SECRET_2/);
@@ -94,6 +102,24 @@ describe("设置 › 连接 › 对外接口 › 导出与转发密钥（flow-bo
     expect(JSON.stringify(sessionStorage)).not.toContain("SECRET");
     await userEvent.click(screen.getByRole("button", { name: "我已保存" }));
     expect(document.body.textContent).not.toContain("apa_SECRET");
+  });
+
+  it("签发时逐来源选档位，不选就是不给；已签发的写明读得到什么，可以改（§14.14）", async () => {
+    const s = server();
+    mount(s.impl);
+    const wx = await screen.findByRole("radiogroup", { name: "微信" });
+    expect(within(wx).getByLabelText("不给")).toBeChecked();
+    await userEvent.click(within(wx).getByLabelText("全部内容"));
+    await userEvent.click(screen.getByRole("button", { name: "签发" }));
+    await screen.findByText(/apa_SECRET_1/);
+    expect(s.calls.find((c) => c.method === "POST")!.body.source_scopes).toEqual({ src_wx: "full" });
+    const row = within(screen.getByRole("list", { name: "已签发的钥匙" })).getByText(/外部：微信 全部内容/);
+    expect(row).toHaveTextContent("其余 1 个不给");
+    await userEvent.click(within(screen.getByRole("list", { name: "已签发的钥匙" })).getByRole("button", { name: "改" }));
+    const mail = within(screen.getByRole("list", { name: "已签发的钥匙" })).getByRole("radiogroup", { name: "邮件" });
+    await userEvent.click(within(mail).getByLabelText("只有标题"));
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(s.calls.find((c) => c.method === "PUT")).toMatchObject({ path: "/v1/settings/ext-keys/cred_1/scope", body: { audience: "external", source_scopes: { src_wx: "full", src_mail: "meta" } } }));
   });
 
   it("接口说明一眼可见：基址是本页地址加 /v1，写明鉴权头与读事项、订阅事件的请求", async () => {

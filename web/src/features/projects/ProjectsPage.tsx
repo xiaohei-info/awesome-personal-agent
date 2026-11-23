@@ -27,6 +27,8 @@ export interface Project {
   allowed_executors: string[] | null;
   /** 按机器或宿主匹配的名单（§14.7）；与 allowed_executors 任一命中即允许。 */
   allowed_executor_match?: Match[];
+  /** 只读：新建恒为开启、没有开关；仍可经 API 关掉，关掉的项目不在「设置 › 模型」里列外发范围。 */
+  capture?: boolean;
   /** 对话增量送外部模型的范围；null 为还没选，没有缺省值（§6.5、§14.14）。 */
   capture_outbound?: string | null;
 }
@@ -127,8 +129,6 @@ function ProjectDetail() {
       <details>
         <summary>{t.settings}</summary>
         <EditForm key={p.id + p.name} p={p} onSaved={setP} />
-        {/* 对话捕获默认开启、没有开关；这里只选聊天内容发给外部模型的范围 */}
-        <CaptureOutbound key={p.id + (p.capture_outbound ?? "")} p={p} onSaved={setP} />
         <Repos p={p} onChange={setP} />
         <Executors p={p} onSaved={setP} />
       </details>
@@ -179,8 +179,9 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
   );
 }
 
-/** 从聊天里记下的内容发给外部模型时送多少：PUT /settings/projects/{id}/capture-outbound {value}，只 Web；不预选。 */
-function CaptureOutbound({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }) {
+/** 从聊天里记下的内容发给外部模型时送多少：PUT /settings/projects/{id}/capture-outbound {value}，只 Web；不预选。
+ * 在「设置 › 模型」的「模型端点能收哪些来源」里编辑（§14.14），项目页不再逐个配。 */
+export function CaptureOutbound({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }) {
   const t = useT(strings);
   const { api } = useSession();
   const { error, run } = useAct();

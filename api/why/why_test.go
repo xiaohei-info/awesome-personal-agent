@@ -110,7 +110,7 @@ func (e *env) token(kind auth.Kind) func(*http.Request) {
 	}
 	var secret string
 	if err := e.st.Update(bg, func(tx *store.Tx) error {
-		_, s, err := e.auth.Issue(tx, auth.Spec{Kind: kind, Scope: scope})
+		_, s, err := e.auth.Issue(tx, auth.Spec{Kind: kind, Scope: scope, Audience: agentAudience(kind)})
 		secret = s
 		return err
 	}); err != nil {
@@ -455,4 +455,12 @@ func TestAuditShowsImportMarksAndFiltersByBatch(t *testing.T) {
 	if none, _ := e.get("/v1/audit/events?imported=nope", e.web); len(none.Events) != 0 {
 		t.Fatalf("unknown batch: %+v", none.Events)
 	}
+}
+
+// agentAudience：测试里的三级 token 代表 APA 内部的 Agent，读来源不受档位限制（§14.2）；ext、webhook 是外部钥匙。
+func agentAudience(k auth.Kind) string {
+	if k == auth.Observer || k == auth.Worker || k == auth.Delegate {
+		return auth.AudienceInternal
+	}
+	return ""
 }

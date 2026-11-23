@@ -126,7 +126,7 @@ describe("项目页", () => {
     expect(s.projects[0].status).toBe("paused");
   });
 
-  it("聊天内容发给外部模型时：记下待办是默认开启、没有开关；范围一直在，不预选、标「还没选」；保存只发 value", async () => {
+  it("记下待办默认开启、没有开关，保存项目不发 capture；项目页不再逐个选聊天内容的外发范围，在「设置 › 模型」里选（§14.14）", async () => {
     const s = server();
     const u = userEvent.setup();
     mount(s.impl, "/projects/p_work");
@@ -135,18 +135,8 @@ describe("项目页", () => {
     await u.click(screen.getByRole("button", { name: "保存项目" }));
     await waitFor(() => expect(s.calls.some((c) => c.method === "PATCH" && c.path === "/v1/projects/p_work")).toBe(true));
     expect(s.calls.find((c) => c.method === "PATCH" && c.path === "/v1/projects/p_work")!.body).not.toHaveProperty("capture");
-    const group = await screen.findByRole("radiogroup", { name: "聊天内容发给外部模型时" });
-    expect(within(group).getAllByRole("radio").every((r) => !(r as HTMLInputElement).checked)).toBe(true);
-    expect(screen.getByText("还没选")).toBeInTheDocument();
-    const region = within(screen.getByRole("region", { name: "聊天内容发给外部模型时" }));
-    expect(region.getByRole("button", { name: "保存" })).toBeDisabled();
-    await u.click(within(group).getByRole("radio", { name: "摘要和开头" }));
-    await u.click(region.getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(s.projects[0].capture_outbound).toBe("excerpt"));
-    const put = s.calls.find((c) => c.method === "PUT" && c.path === "/v1/settings/projects/p_work/capture-outbound")!;
-    expect(put.body).toEqual({ value: "excerpt" });
-    expect(put.csrf).toBe("tok-1");
-    await waitFor(() => expect(screen.queryByText("还没选")).not.toBeInTheDocument());
+    expect(screen.queryByRole("radiogroup", { name: "聊天内容发给外部模型时" })).not.toBeInTheDocument();
+    expect(s.calls.some((c) => c.path.endsWith("/capture-outbound"))).toBe(false);
   });
 
   it("repos：添加/删除远程地址、设置检出，显示服务端状态", async () => {

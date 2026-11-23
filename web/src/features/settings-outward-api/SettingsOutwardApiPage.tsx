@@ -3,6 +3,7 @@ import { useSession } from "../../app/session";
 import { PageHead } from "../../app/page";
 import { errorText as msg, useT } from "../../app/i18n";
 import { strings } from "./strings";
+import { ScopeEditor, ScopeSummary, SourceScopeTable, useSources, type Scopes } from "../key-scopes/KeyScopes";
 
 // 设置 › 对外接口：外部程序来向 APA 要数据用的钥匙与接口说明（§4.1、§10.3、§14.2；决定 77、79）。与「提醒渠道」的渠道钥匙不是一回事。
 // 钥匙的 scope 决定能读什么（api/events、kernel/auth.IsExportExt）：export 读事项、材料并订阅事件；forward 只订阅事件。
@@ -34,7 +35,7 @@ const METHODS = [
  "next": 43}` },
 ];
 
-interface Credential { id: string; kind: string; label?: string; scope?: string; revoked_at?: string }
+interface Credential { id: string; kind: string; label?: string; scope?: string; revoked_at?: string; audience?: string; source_scopes?: Scopes }
 
 export function SettingsOutwardApiPage() {
   const { api } = useSession();
@@ -46,6 +47,9 @@ export function SettingsOutwardApiPage() {
   const [onlyEvents, setOnlyEvents] = useState(false);
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
+  // 导出钥匙是外部程序的钥匙：读来源内容（含事项正文与材料）只按这里逐来源选的档位，不选就是不给（§14.14）。
+  const [scopes, setScopes] = useState<Scopes>({});
+  const sources = useSources();
   const load = useCallback(
     () => api.get<{ credentials: Credential[] }>("/settings/ext-keys").then((r) => setCreds(r.credentials.filter((c) => mine(c.scope))), (e) => setError(msg(e))),
     [api],
@@ -56,12 +60,14 @@ export function SettingsOutwardApiPage() {
     setBusy(true);
     setError(null);
     setSecret(null);
-    const body: Record<string, string> = { scope: onlyEvents ? "forward" : "export" };
+    const body: Record<string, unknown> = { scope: onlyEvents ? "forward" : "export" };
     if (label.trim()) body.label = label.trim();
+    if (!onlyEvents) body.source_scopes = scopes;
     try {
       setSecret((await api.post<{ secret: string }>("/settings/ext-keys", body)).secret);
       setLabel("");
       setOnlyEvents(false);
+      setScopes({});
     } catch (e) {
       setError(msg(e));
     } finally {
@@ -97,6 +103,7 @@ export function SettingsOutwardApiPage() {
         <label>{t.label}<input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t.labelHint} /></label>
         <label><input type="checkbox" checked={onlyEvents} onChange={(e) => setOnlyEvents(e.target.checked)} /> {t.onlyEvents}</label>
         <p className="sub">{onlyEvents ? t.canEvents : t.canAll}</p>
+        {!onlyEvents && <SourceScopeTable sources={sources} value={scopes} onChange={setScopes} />}
         <div><button type="submit" className="primary" disabled={busy}>{t.issue}</button></div>
       </form>
       {creds === null ? (
@@ -108,6 +115,7 @@ export function SettingsOutwardApiPage() {
           {creds.map((c) => (
             <li key={c.id}>
               <strong>{c.label || c.id}</strong> <span className="sub">{eventsOnly(c.scope!) ? t.canEvents : t.canAll}</span>
+              {!eventsOnly(c.scope!) && <> <ScopeSummary k={c} sources={sources} /> <ScopeEditor k={c} group="ext-keys" canInternal={false} sources={sources} onSaved={load} /></>}
               {c.revoked_at ? <span className="badge">{t.revoked}</span> : <button className="danger" onClick={() => void revoke(c.id)}>{t.revoke}</button>}
             </li>
           ))}

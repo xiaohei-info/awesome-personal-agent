@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/clock"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -104,6 +105,7 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		within map[string][]domain.Progress
 		origin map[string]inbound.Origin
 		dis    map[string]inbound.Dismissal
+		scopes map[string]string
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if its, err = kitems.List(tx, f); err != nil {
@@ -123,6 +125,15 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		if sq.Text != "" {
 			if prog, err = search.ItemProgressText(tx); err != nil {
 				return err
+			}
+		}
+		// 外部钥匙先裁后搜：不给的事项去掉，其余按档位裁正文与进展，只在裁后的内容上匹配（§14.14）。
+		if its, scopes, err = readscope.New(tx, p.Caller).Items(its); err != nil {
+			return err
+		}
+		for id, t := range scopes {
+			if prog[id] != "" {
+				prog[id] = readscope.TrimText(prog[id], t)
 			}
 		}
 		for _, it := range its {
@@ -150,6 +161,9 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		its = []domain.Item{}
 	}
 	out := map[string]any{"items": its, "last_rejections": rejs}
+	if len(scopes) > 0 {
+		out["content_scopes"] = scopes
+	}
 	if done != nil { // 只读已完成时给出各自的完成时刻，「已完成」页按它分周（附录 B.2）
 		at := map[string]time.Time{}
 		for _, it := range its {
@@ -188,6 +202,9 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		at := map[string][]domain.Progress{}
 		for _, it := range its {
 			at[it.ID] = within[it.ID]
+			if t, cut := scopes[it.ID]; cut { // 外部钥匙：进展正文与事项正文同档裁（§14.14）
+				at[it.ID] = readscope.TrimProgress(within[it.ID], t)
+			}
 		}
 		out["progress"] = at
 	}
@@ -203,16 +220,23 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 		return err
 	}
 	var (
-		it   domain.Item
-		rels []domain.Relation
-		rej  *Rejection
-		prog []domain.Progress
-		keys []kitems.Correlation
+		it    domain.Item
+		rels  []domain.Relation
+		rej   *Rejection
+		prog  []domain.Progress
+		keys  []kitems.Correlation
+		scope string
+		cut   *readscope.Trimmed
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if it, err = kitems.Get(tx, r.PathValue("id")); err != nil {
 			return err
 		}
+		body := it.Body
+		if it, scope, err = readscope.New(tx, p.Caller).Item(it); err != nil {
+			return err
+		}
+		cut = readscope.TrimmedOf(body, it.Body)
 		if keys, err = kitems.Correlations(tx, it.ID); err != nil {
 			return err
 		}
@@ -227,6 +251,7 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	}); err != nil {
 		return err
 	}
+	prog = readscope.TrimProgress(prog, scope)
 	if prog == nil {
 		prog = []domain.Progress{}
 	}
@@ -236,7 +261,14 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	if keys == nil {
 		keys = []kitems.Correlation{}
 	}
-	return core.WriteJSON(w, http.StatusOK, map[string]any{"item": it, "relations": rels, "progress": prog, "correlation_keys": keys, "last_rejection": rej})
+	out := map[string]any{"item": it, "relations": rels, "progress": prog, "correlation_keys": keys, "last_rejection": rej}
+	if scope != readscope.Full { // 只有外部钥匙会被裁：写明按哪一档给的、正文裁掉了多少
+		out["content_scope"] = scope
+		if cut != nil {
+			out["trimmed"] = cut
+		}
+	}
+	return core.WriteJSON(w, http.StatusOK, out)
 }
 
 // today：四组取材全在内核（kitems.TodayItems）。
@@ -244,14 +276,33 @@ func (h *handlers) today(w http.ResponseWriter, r *http.Request, p *core.Princip
 	if err := readable(p); err != nil {
 		return err
 	}
-	var l kitems.TodayList
+	var out struct {
+		kitems.TodayList
+		ContentScopes map[string]string `json:"content_scopes,omitempty"`
+	}
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
-		l, err = kitems.TodayItemsAfter(tx, clock.Now(), h.staleAfter())
-		return err
+		l, err := kitems.TodayItemsAfter(tx, clock.Now(), h.staleAfter())
+		if err != nil {
+			return err
+		}
+		rs := readscope.New(tx, p.Caller)
+		out.ContentScopes = map[string]string{}
+		for _, g := range []*[]domain.Item{&l.Planned, &l.Due, &l.Pending, &l.Stale, &l.Overdue, &l.HighPriority} {
+			kept, scopes, err := rs.Items(*g)
+			if err != nil {
+				return err
+			}
+			*g = kept
+			for id, t := range scopes {
+				out.ContentScopes[id] = t
+			}
+		}
+		out.TodayList = l
+		return nil
 	}); err != nil {
 		return err
 	}
-	return core.WriteJSON(w, http.StatusOK, l)
+	return core.WriteJSON(w, http.StatusOK, out)
 }
 
 // write 把请求体原样交给命令。pathKey 非空时把路径 id 写入体的该键（体里自带同名键直接拒绝）。

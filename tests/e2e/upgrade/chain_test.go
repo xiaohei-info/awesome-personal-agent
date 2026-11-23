@@ -805,7 +805,7 @@ echo '{"plugin_version":"0.1.0","hooks":[],"reports_session_kind":false,"overlap
 	prj := one[string](t, db, `SELECT id FROM projects ORDER BY id LIMIT 1`)
 	r.mustWeb(cookie, csrf, "POST", "/v1/settings/executors", `{"id":"upg-host.cli","kind":"external-cli"}`, 200)
 	var wrk struct{ Secret string }
-	if err := json.Unmarshal([]byte(r.mustWeb(cookie, csrf, "POST", "/v1/settings/tokens", `{"kind":"worker","label":"WRK","executor":"upg-host.cli"}`, 201)), &wrk); err != nil || wrk.Secret == "" {
+	if err := json.Unmarshal([]byte(r.mustWeb(cookie, csrf, "POST", "/v1/settings/tokens", `{"kind":"worker","audience":"internal","label":"WRK","executor":"upg-host.cli"}`, 201)), &wrk); err != nil || wrk.Secret == "" {
 		t.Fatalf("签发 worker 凭据: %v", err)
 	}
 	r.mustWeb(cookie, csrf, "PUT", "/v1/settings/projects/"+prj+"/allowed-executors", `{"executors":["upg-host.cli"]}`, 200)
