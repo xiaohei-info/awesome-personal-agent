@@ -200,13 +200,35 @@ def _history(args, session_id=None, **_):
     return json.dumps(r)
 
 
+def _read_file(args, **_):
+    # ensure_ascii=False: escaped CJK text is six times longer and pushes a page over Hermes' per-result threshold
+    return json.dumps(files.read_file(args.get("path"), args.get("offset"), args.get("limit"), bool(args.get("catalog")),
+                                      args.get("material"), args.get("since"), args.get("until"), args.get("from"), args.get("to")),
+                      ensure_ascii=False)
+
+
 def register(ctx):
-    desc = "Read a text file under the run directory (e.g. the {materials_path} file) or the working directory. Read-only."
-    ctx.register_tool(name="apa_read_file", toolset=TOOLSET, schema=_schema("apa_read_file", desc, {"path": _s("File path")}, ["path"]),
-                      handler=lambda args, **_: json.dumps(files.read_file(args.get("path"))), description=desc)
+    desc = ("Read a text file under the run directory (e.g. the {materials_path} file) or the working directory. Read-only. "
+            "Every result says total_bytes, returned_bytes, offset, has_more and next_offset; when has_more is true you have NOT "
+            "read the whole file: continue with offset=next_offset. Page with offset/limit (bytes, limit up to 60000, default 30000). "
+            "For a materials file, catalog=true lists each material (entries, time range, bytes, fields, a sample); then "
+            "material=<name> returns that material only, optionally since/until (time window on its time_fields, since inclusive, "
+            "until exclusive) or from/to (entry numbers, to exclusive); continue with from=next_from while has_more. "
+            "Read one page per call, not many in parallel.")
+    num = {"type": "integer"}
+    ctx.register_tool(name="apa_read_file", toolset=TOOLSET, schema=_schema("apa_read_file", desc, {
+        "path": _s("File path"), "offset": {**num, "description": "Byte offset to start at (default 0)"},
+        "limit": {**num, "description": "Bytes to return (default 30000, at most 60000)"},
+        "catalog": {"type": "boolean", "description": "Materials file: list the materials instead of reading"},
+        "material": _s("Materials file: return this material only"),
+        "since": _s("With material: entries at or after this date or RFC3339 time"),
+        "until": _s("With material: entries before this date or RFC3339 time"),
+        "from": {**num, "description": "With material: first entry number (0-based)"},
+        "to": {**num, "description": "With material: stop before this entry number"}}, ["path"]),
+        handler=_read_file, description=desc)
     desc = "List a directory under the run directory or the working directory. Read-only."
     ctx.register_tool(name="apa_list_dir", toolset=TOOLSET, schema=_schema("apa_list_dir", desc, {"path": _s("Directory, default '.'")}, []),
-                      handler=lambda args, **_: json.dumps(files.list_dir(args.get("path"))), description=desc)
+                      handler=lambda args, **_: json.dumps(files.list_dir(args.get("path")), ensure_ascii=False), description=desc)
     desc = ("Commit a draft as a pending revision the owner must confirm (apa material commit --from -). The text goes in content, "
             "never in a shell. New material: kind and title (e.g. kind=guideline); revision: id.")
     ctx.register_tool(name="apa_material_commit", toolset=TOOLSET, handler=_material_commit, description=desc,

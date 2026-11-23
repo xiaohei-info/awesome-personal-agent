@@ -168,3 +168,81 @@ def test_parallel_runs_only_see_their_own_directories(tools, tmp_path, monkeypat
     assert not failed
     assert out["a"] == [("repo a", False, False, True)] * 20
     assert out["b"] == [("repo b", False, False, True)] * 20
+
+
+def test_paging_reads_a_file_end_to_end_without_splitting_characters(tools, env):
+    text = "".join(f"第{i}行：资料 data\n" for i in range(20000))  # multibyte, ~400 KB
+    (env / "checkout" / "big.txt").write_text(text)
+    got, offset, pages = [], 0, 0
+    while True:
+        r = read(tools, "big.txt", offset=offset, limit=30000)
+        assert r["ok"] and r["total_bytes"] == len(text.encode()) and r["offset"] == offset and r["returned_bytes"] <= 30000
+        assert len(r["content"].encode()) == r["returned_bytes"]
+        got.append(r["content"])
+        pages += 1
+        if not r["has_more"]:
+            assert r["next_offset"] is None and "notice" not in r
+            break
+        assert "notice" in r and r["next_offset"] == offset + r["returned_bytes"]
+        offset = r["next_offset"]
+    assert "".join(got) == text and pages > 10
+
+
+def test_plain_read_of_a_large_file_states_what_is_missing(tools, env):
+    (env / "checkout" / "big.txt").write_text("a" * 300_000)
+    r = read(tools, "big.txt")
+    assert r["truncated"] and r["has_more"] and r["total_bytes"] == 300_000 and r["returned_bytes"] == 200_000
+    assert r["next_offset"] == 200_000 and "300000" in r["notice"]
+    assert list(r)[-1] == "content"  # the size fields come first, so a host preview of the result still shows them
+
+
+def test_limit_is_clamped_and_says_so(tools, env):
+    (env / "checkout" / "big.txt").write_text("a" * 100_000)
+    r = read(tools, "big.txt", offset=0, limit=500_000)
+    assert r["returned_bytes"] == 60_000 and "limit_note" in r and r["has_more"]
+    assert read(tools, "big.txt", offset=200_000)["ok"] is False
+
+
+def _materials_file(env):
+    acts = [{"text": f"进展{i}", "on": f"2026-11-{6 + i % 16:02d}", "at": "2026-11-22T23:00:00+08:00"} for i in range(300)]
+    acts.append({"text": "没有业务日期", "at": "2026-11-22T09:00:00+08:00"})
+    activity = {"activity": [{"project": "p", "entries": acts[:150]}, {"project": "q", "entries": acts[150:]}]}
+    mats = [{"Name": "activity", "Body": json.dumps(activity, ensure_ascii=False)},
+            {"Name": "context", "Body": json.dumps({"context": {"now": "2026-11-23T08:00:00+08:00"}})}]
+    catalog = [{"name": "activity", "bytes": len(mats[0]["Body"]), "entries": 301, "list": "activity[].entries[]",
+                "time_fields": ["on", "at"]}, {"name": "context", "bytes": len(mats[1]["Body"]), "fields": ["now"]}]
+    path = env / "home" / "runs" / "run1" / "materials.json"
+    path.write_text(json.dumps({"notice": "n", "catalog": catalog, "materials": mats, "messages": []}, ensure_ascii=False))
+    return str(path)
+
+
+def test_catalog_lists_the_materials(tools, env):
+    r = read(tools, _materials_file(env), catalog=True)
+    assert r["ok"] and [c["name"] for c in r["catalog"]] == ["activity", "context"] and r["catalog"][0]["entries"] == 301
+
+
+def test_material_by_time_window_and_paging_by_entry(tools, env):
+    path = _materials_file(env)
+    r = read(tools, path, material="activity", since="2026-11-21", until="2026-11-23")
+    texts = [e["text"] for e in r["entries"]]
+    assert r["matched_from"] == len(texts) == 18 + 1 and "没有业务日期" in texts and not r["has_more"]  # on 11-21 (18 of them) and the at-only one on 11-22
+    seen, frm = [], 0
+    while True:
+        r = read(tools, path, material="activity", **{"from": frm}, limit=2000)
+        seen += [e["_n"] for e in r["entries"]]
+        if not r["has_more"]:
+            break
+        assert "notice" in r
+        frm = r["next_from"]
+    assert seen == list(range(301))
+    r = read(tools, path, material="activity", **{"from": 10, "to": 12})
+    assert [e["text"] for e in r["entries"]] == ["进展10", "进展11"]
+
+
+def test_material_without_entries_comes_whole_and_rejects_a_window(tools, env):
+    path = _materials_file(env)
+    r = read(tools, path, material="context")
+    assert json.loads(r["content"]) == {"context": {"now": "2026-11-23T08:00:00+08:00"}} and not r["has_more"]
+    assert read(tools, path, material="context", since="2026-11-01")["ok"] is False
+    assert "activity" in read(tools, path, material="nope")["error"]
+    assert read(tools, "README.md", catalog=True)["ok"] is False
