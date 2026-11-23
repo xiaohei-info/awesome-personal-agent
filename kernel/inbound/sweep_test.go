@@ -338,8 +338,72 @@ func TestSimilarScore(t *testing.T) {
 		{"季度预算评审会议", "季度预算评审会议改期", true},
 		{"处理工单 T-6661", "跟进 T-6661 的回复", true},
 	} {
-		if got := similarScore(c.a, "", c.b, "") >= sweepMin; got != c.hit {
+		if got := similarScore(c.a, "", c.b, "") >= policy.SimilarityMin[""]; got != c.hit {
 			t.Errorf("%q vs %q: score %.2f", c.a, c.b, similarScore(c.a, "", c.b, ""))
 		}
 	}
+}
+
+// 相似度档位（merge.similarity）：默认档就是改成档位前写死的 0.30；改档写进策略，同一个运行中的服务下一批即按新档初筛，不重启。
+// 「季度预算评审会议」对「预算会议改期 / 延期 / 推迟」都是 0.33、对「季度总结 / 复盘 / 规划会议」都是 0.25：严档两条都不送模型，默认档只送前者，宽档两条都送。
+func TestMergeBatchSimilarityTiers(t *testing.T) {
+	if got := (policy.MergeSettings{}).MinScore(); got != 0.30 {
+		t.Fatalf("the default tier must equal the former constant 0.30, got %v", got)
+	}
+	if policy.SimilarityMin[policy.SimilarityLoose] != 0.25 || policy.SimilarityMin[policy.SimilarityStrict] != 0.40 || len(policy.SimilarityMin) != 3 {
+		t.Fatalf("tiers: %v", policy.SimilarityMin)
+	}
+	e := newEnv(t, true)
+	e.svc.o.Now = e.Now
+	e.openItem("季度预算评审会议")
+	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[]}`})
+	n, done := 0, []string{}
+	round := func(tier string, titles ...string) (asked []string) {
+		t.Helper()
+		// 前几轮的建议换个来源并排除在比对之外，每轮只和那条进行中的事项比。
+		e.setPolicy(func(p *policy.Policy) { p.Merge.Similarity, p.Merge.ExcludeSources = tier, slices.Clone(done) })
+		src := fmt.Sprintf("src_r%d", len(done))
+		done = append(done, src)
+		calls := e.batchCalls()
+		for _, title := range titles {
+			n++
+			e.emit(src, "ticket", ev(fmt.Sprintf("tier-%d", n), "ticket.opened", title, nil))
+		}
+		e.now = e.now.Add(31 * time.Minute) // 等满成批的时间
+		if err := e.svc.Sweep(bg); err != nil {
+			t.Fatal(err)
+		}
+		if e.batchCalls() > calls {
+			req := e.stub.Requests()
+			body := req[len(req)-1].BodyText
+			for _, title := range titles {
+				if strings.Contains(body, "标题："+title) {
+					asked = append(asked, title)
+				}
+			}
+		}
+		return
+	}
+	if got := round(policy.SimilarityStrict, "预算会议改期", "季度总结会议"); len(got) != 0 {
+		t.Fatalf("strict sent %v to the model", got)
+	}
+	for _, it := range e.proposed() {
+		if sw := it.Proposal.Sweep; sw == nil || sw.By != "rule" || sw.Action != domain.SweepKeep {
+			t.Fatalf("strict: %s must be kept by rule, got %+v", it.Title, sw)
+		}
+	}
+	if got := round("", "预算会议延期", "季度复盘会议"); !slices.Equal(got, []string{"预算会议延期"}) {
+		t.Fatalf("default tier sent %v, want only the 0.33 one", got)
+	}
+	if got := round(policy.SimilarityLoose, "预算会议推迟", "季度规划会议"); len(got) != 2 {
+		t.Fatalf("loose tier sent %v, want both", got)
+	}
+	// 档位不在三档里：策略写入拒绝。
+	if err := e.st.Update(bg, func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "merge", func(p *policy.Policy) error { p.Merge.Similarity = "medium"; return nil })
+		return err
+	}); err == nil {
+		t.Fatal("an unknown tier must be refused")
+	}
+	e.verify()
 }

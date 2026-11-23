@@ -37,7 +37,6 @@ const (
 	CmdSweep      = "inbound.sweep"
 	CmdUnmerge    = "inbound.unmerge"
 
-	sweepMin     = 0.30             // 规则初筛的相似度下限
 	sweepCands   = 5                // 每条新建议至多带几条候选给模型
 	sweepRetry   = 15 * time.Minute // 模型调用失败后多久再试（只在内存）
 	sweepTitle   = 120              // 送给模型的标题、摘要各自至多几个字
@@ -228,7 +227,7 @@ func (s *Service) sweepBatch(ctx context.Context, pol policy.Policy, all []domai
 			if k := mergeKeyOfItem(m.it); k != "" && k == mergeKeyOfItem(o.it) {
 				sc = 1
 			}
-			if sc >= sweepMin {
+			if sc >= pol.Merge.MinScore() { // 档位每批现读策略，改了下一批就生效
 				m.cands = append(m.cands, sweepCand{o, round2(sc)})
 			}
 		}
