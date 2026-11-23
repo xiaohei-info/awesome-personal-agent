@@ -133,7 +133,7 @@ describe("改 status_label（ACT-ITEM-02）", () => {
 });
 
 describe("转阶段（主操作区）", () => {
-  it("等待就地填等什么再确认；回到进行中一键；不做了在更多操作里先确认", async () => {
+  it("等待就地填等什么再确认；回到进行中一键；详情只有「删除…」一个放弃入口，先确认", async () => {
     const l = ledger();
     mount(l.impl, "/items/item_a");
     const last = () => l.calls.filter((c) => c.path.endsWith("/transition")).at(-1)?.body;
@@ -149,10 +149,12 @@ describe("转阶段（主操作区）", () => {
     expect(await screen.findByText(/现在：进行中/)).toBeInTheDocument();
     expect(last()).toMatchObject({ to: "open" });
 
-    await userEvent.click(await screen.findByRole("button", { name: "不做了…" }));
+    expect(screen.queryByRole("button", { name: /不做了/ })).toBeNull(); // 旧的第二个放弃入口已去掉
+    expect(screen.getAllByRole("button", { name: "删除…" })).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "删除…" }));
     expect(last()).toMatchObject({ to: "open" }); // 只展开确认，还没改
-    await userEvent.click(screen.getByRole("button", { name: "确认不做了" }));
-    await waitFor(() => expect(last()).toEqual({ to: "dropped", reason: "在事项页标为不做了" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(last()).toEqual({ to: "dropped", reason: "在事项页删除（移到已放弃）" }));
   });
 });
 

@@ -418,7 +418,6 @@ function ItemDetail() {
           <p>{t.label(item.status_label || t.notSet)}</p>
           {item.tags?.some((x) => x !== HANDOFF_TAG) ? <p>{t.tags(item.tags.filter((x) => x !== HANDOFF_TAG).join(t.listSep))}</p> : null}
         </div>
-        {!ended && <DropAction key={"d" + item.version} onSubmit={(b) => act(() => api.post(path + "/transition", b, ifMatch))} />}
         {item.kind === "delegation" && <p><Link to={"/delegation#d-" + encodeURIComponent(item.id)}>{t.reassignLink}</Link></p>}
         <LabelForm key={"l" + item.version} item={item} onSave={(v) => act(() => api.patch(path, { status_label: v }, ifMatch))} />
 
@@ -463,7 +462,7 @@ function LabelForm({ item, onSave }: { item: Item; onSave: (v: string) => void }
 }
 
 // 主操作区的阶段变更（界面设计 §9.5）：按当前阶段列出能去的阶段，一键改；理由写明是在网页上改的。
-// 要补信息的就地展开再确认：等待要说等什么，委派完成要带证据（内核要求，§6.14）。「不做了」在「更多操作」里二次确认。
+// 要补信息的就地展开再确认：等待要说等什么，委派完成要带证据（内核要求，§6.14）。放弃只有「删除…」一个入口（DeleteItem，转到已放弃，二次确认）。
 function PhaseActions({ item, onSubmit }: { item: Item; onSubmit: (b: Record<string, unknown>) => void }) {
   const t = useT(strings);
   const label = useLabel();
@@ -508,21 +507,6 @@ function PhaseActions({ item, onSubmit }: { item: Item; onSubmit: (b: Record<str
           </div>
         </form>
       )}
-    </div>
-  );
-}
-
-/** 不做了（放弃）：低频且会让事项离开所有待办，所以收在「更多操作」里，先确认再改。 */
-function DropAction({ onSubmit }: { onSubmit: (b: Record<string, unknown>) => void }) {
-  const t = useT(strings);
-  const [asking, setAsking] = useState(false);
-  const [why, setWhy] = useState("");
-  if (!asking) return <p><button type="button" className="danger" onClick={() => setAsking(true)}>{t.drop}</button></p>;
-  return (
-    <div className="panel actions" role="group" aria-label={t.drop}>
-      <label>{t.dropWhy} <input value={why} onChange={(e) => setWhy(e.target.value)} /></label>
-      <button type="button" className="danger" onClick={() => onSubmit({ to: "dropped", reason: why.trim() || t.dropReason })}>{t.confirmDrop}</button>
-      <button type="button" onClick={() => setAsking(false)}>{t.cancel}</button>
     </div>
   );
 }
