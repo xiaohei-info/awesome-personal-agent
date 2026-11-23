@@ -142,7 +142,7 @@ func (a *Attention) Attach(x *command.Executor, st *store.Store, onErr func(erro
 	})
 }
 
-// Tick 做所有与时间有关的事：追赶事件、截止已过再提醒、放行到期的暂存提醒、清扫无人领取的投递。
+// Tick 做所有与时间有关的事：追赶事件、截止已过再提醒、到点提醒（schedule.go）、放行到期的暂存提醒、清扫无人领取的投递。
 func (a *Attention) Tick(tx *store.Tx) error {
 	if err := a.Sync(tx); err != nil {
 		return err
@@ -152,6 +152,9 @@ func (a *Attention) Tick(tx *store.Tx) error {
 		return err
 	}
 	if err := a.remindOverdue(tx, pol); err != nil {
+		return err
+	}
+	if err := a.remindScheduled(tx, pol); err != nil {
 		return err
 	}
 	if err := a.flush(tx, pol); err != nil {
@@ -224,6 +227,9 @@ func (a *Attention) cursor(tx *store.Tx) (int64, error) {
 // reconcile 按事项现状重算它的投递：该有的补上，旧版本的作废，不该有的清掉。
 // shortcut: 待决决策在事项被无关字段修改后会以新版本重发（旧版本作废）；要避免需记录"已确认"，真有骚扰再做。
 func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error {
+	if err := a.voidScheduled(tx, id); err != nil {
+		return err
+	}
 	it, err := items.Get(tx, id)
 	if isNotFound(err) {
 		return a.drop(tx, id)
@@ -240,6 +246,11 @@ func (a *Attention) reconcile(tx *store.Tx, pol policy.Policy, id string) error 
 	}
 	if it.Kind == domain.KindBrief && it.Phase == domain.PhaseDone {
 		return a.briefDone(tx, pol, it)
+	}
+	if it.Phase == domain.PhaseDone && it.Kind != domain.KindBrief {
+		if handled, err := a.taskDone(tx, pol, it); err != nil || handled {
+			return err
+		}
 	}
 	if ask != nil && ask.Resolution != nil && ask.Resolution.ResolvedVia == decisions.ViaAgent {
 		return a.agentAnswered(tx, pol, it)
@@ -555,7 +566,7 @@ func (a *Attention) flush(tx *store.Tx, pol policy.Policy) error {
 		h.class, h.priority, h.exempt, h.mergeable, h.release = domain.DeliveryClass(class), domain.Priority(prio), exempt == 1, merge == 1, time.Unix(0, rel)
 		due = append(due, h)
 		return json.Unmarshal([]byte(body), &due[len(due)-1].content)
-	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at, origin FROM attention_held WHERE release_at <= ? OR class = 'decision' ORDER BY release_at, rowid`, now.UnixNano())
+	}, `SELECT id, item, class, priority, content, version, exempt, mergeable, release_at, origin FROM attention_held WHERE (release_at <= ? OR class = 'decision') AND id NOT LIKE 'sched:%' ORDER BY release_at, rowid`, now.UnixNano())
 	if err != nil {
 		return err
 	}
@@ -637,6 +648,11 @@ func (a *Attention) deliver(tx *store.Tx, pol policy.Policy, hs []held) error {
 		d.Content = domain.DeliveryContent{Title: fmt.Sprintf("%d 条低优先级提醒", len(hs)), Summary: strings.Join(titles, "；")}
 	}
 	d.Route = a.route(pol, hs[0].class, hs[0].priority)
+	if len(hs) == 1 { // 定时任务的产出：开了注入主会话就只走主会话（不再发原路由），内容换成正文摘要或全文
+		if err := a.taskRoute(tx, pol, &d); err != nil {
+			return err
+		}
+	}
 	t, err := a.target(tx, hs[0])
 	if err != nil {
 		return err

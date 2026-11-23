@@ -72,9 +72,28 @@ var disturbSection = section{
 		if err := strictDecode(raw, &v); err != nil {
 			return err
 		}
+		stampSince(p.Disturb.Proactive, v.Proactive)
 		p.Disturb = v
 		return nil
 	},
+}
+
+// stampSince：到点提醒的开启时刻只由这里记（请求体里带的一律不认）：从关到开记现在，一直开着沿用原值，关着清空。
+// 早于它的提醒点不推，所以开启时不会把过去的提醒一次灌进来（§7.4）。
+func stampSince(old, next *kpolicy.Proactive) {
+	if next == nil {
+		return
+	}
+	next.Since = nil
+	if !next.On {
+		return
+	}
+	if old != nil && old.On && old.Since != nil {
+		next.Since = old.Since
+		return
+	}
+	now := clock.Now().UTC()
+	next.Since = &now
 }
 
 const (
@@ -277,6 +296,7 @@ func Routes(st *store.Store, a *auth.Auth) core.RouteGroup {
 			r.Handle(core.Route{Method: "GET", Path: path, Handler: read(st, path, secs)})
 			r.Handle(core.Route{Method: "PUT", Path: path, Handler: write(st, path, secs)})
 		}
+		r.Handle(core.Route{Method: "POST", Path: "/settings/proactive/preview", Handler: proactivePreview(st)})
 		r.Handle(core.Route{Method: "PUT", Path: "/settings/channels/{name}/answerers", Handler: answerers(st)})
 		r.Handle(core.Route{Method: "PUT", Path: "/settings/agents/{agent}/tier", Handler: agentTier(st)})
 		r.Handle(core.Route{Method: "DELETE", Path: "/settings/channels/{name}", MaxBody: 1, Handler: removeChannel(st, a)})

@@ -1,11 +1,15 @@
 package health
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -136,5 +140,81 @@ func TestPushNewProposalsCountsAfterMerge(t *testing.T) {
 	e.push(p)
 	if n, ids := e.deliveries(); n != 1 {
 		t.Fatalf("two kept after merging reach the threshold, got %v", ids)
+	}
+}
+
+// 简报没出来：简报这类开了注入主会话（默认）且没单独选去处时，这条也说在主会话里；关掉注入就跟「需要你决定」走。
+func TestTemplateFailedFollowsTaskPush(t *testing.T) {
+	e := setup(t)
+	for _, err := range []error{items.Register(e.x, items.NewKinds()), executors.Register(e.x, executors.Options{Owner: "owner"})} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	do := func(cmd string, in map[string]any) json.RawMessage {
+		b, _ := json.Marshal(in)
+		r, err := e.x.Do(bg, command.Request{Identity: owner, Command: cmd, Input: b, Owner: "owner"})
+		if err != nil {
+			t.Fatalf("%s: %v", cmd, err)
+		}
+		return r.Value
+	}
+	do("executor.register", map[string]any{"harness": "hx", "main_session": map[string]any{"wake": true},
+		"headless": map[string]any{"command": []string{"true"}, "session": map[string]any{"extract": "$.session_id"}, "access": map[string]any{"edit": []string{}}}})
+	e.update(func(tx *store.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO instances_instance (id, pack, project, params, enabled) VALUES ('ins_b', 'brief', '', '{}', 1)`); err != nil {
+			return err
+		}
+		_, err := policy.Update(tx, owner.Actor, "main", func(p *policy.Policy) error {
+			main := "legacy:hx"
+			p.MainAgentID, p.Disturb.Routes["decision"] = &main, "channel:chan"
+			return nil
+		})
+		return err
+	})
+	brief := func() string {
+		var out struct{ ID string }
+		_ = json.Unmarshal(do("item.create", map[string]any{"kind": "brief", "title": "简报", "phase": "open", "assignee": "owner",
+			"origin": map[string]any{"source": domain.OriginInstancePrefix + "ins_b"}}), &out)
+		return out.ID
+	}
+	p := NewPusher(e.q)
+	e.push(p)
+	a := brief()
+	e.event(domain.EvRunFinished, a, "", map[string]any{"category": "task", "state": "failed", "run_id": "run_1", "error": "exit status 1"})
+	e.push(p)
+	route := func(item string) (r string) {
+		e.update(func(tx *store.Tx) error {
+			rows, err := tx.Query(`SELECT route FROM delivery_delivery WHERE item = ?`, item)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				if err := rows.Scan(&r); err != nil {
+					return err
+				}
+			}
+			return rows.Err()
+		})
+		return r
+	}
+	if r := route(a); r != "wake" {
+		t.Fatalf("brief failure with push on: route %q, want the main session", r)
+	}
+	e.update(func(tx *store.Tx) error {
+		_, err := policy.Update(tx, owner.Actor, "off", func(p *policy.Policy) error {
+			s := policy.DefaultProactive()
+			s.TaskPush = map[string]bool{"brief": false}
+			p.Disturb.Proactive = &s
+			return nil
+		})
+		return err
+	})
+	b := brief()
+	e.event(domain.EvRunFinished, b, "", map[string]any{"category": "task", "state": "failed", "run_id": "run_2", "error": "exit status 1"})
+	e.push(p)
+	if r := route(b); r != "channel:chan" {
+		t.Fatalf("brief failure with push off: route %q, want the decision route", r)
 	}
 }

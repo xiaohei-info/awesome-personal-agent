@@ -133,6 +133,8 @@ type Disturb struct {
 	// Push 是"推送哪些事"的逐类开关（§7.4）：键为 PushCategories 之一；缺的类别取 PushDefaults。
 	// 旧版本策略文档没有此键，读作全部取默认。
 	Push map[string]PushRule `json:"push,omitempty"`
+	// Proactive 是主动提醒（事项到点提醒、简报与复盘送到哪）；没有此键取 DefaultProactive。
+	Proactive *Proactive `json:"proactive,omitempty"`
 }
 
 // PushRule 是一类推送：On 为假时不产出投递；Route 为空时用决策类的路由；Min 只用于 new_proposals（攒够几条才推）。
@@ -685,6 +687,13 @@ func normalize(p Policy) (Policy, error) {
 
 	if p.Disturb.DailyCap < 0 {
 		return p, invalid("disturb daily_cap %d < 0", p.Disturb.DailyCap)
+	}
+	if pr := p.Disturb.Proactive; pr != nil {
+		c, err := CheckProactive(*pr) // 规整不改调用方传进来的切片
+		if err != nil {
+			return p, err
+		}
+		p.Disturb.Proactive = &c
 	}
 	if p.Disturb.Mutes == nil {
 		p.Disturb.Mutes = []Mute{}

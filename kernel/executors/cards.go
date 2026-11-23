@@ -268,3 +268,30 @@ func Resolve(tx *store.Tx, pol policy.Policy, sel Selection) (result Selected, e
 	result.Snapshot.PermissionCap, result.Snapshot.ConfiguredModel = cap, model
 	return
 }
+
+// 主会话不能唤醒的原因（MainWake 的 reason）：稳定类别码，Web 按词表说明。
+const (
+	MainNotSet      = "main_not_set"     // 没选主 Agent
+	MainUnavailable = "main_unavailable" // 选了，但不存在、已停用或没有已确认的声明
+	MainCannotWake  = "main_cannot_wake" // 主 Agent 的声明不支持唤醒（网关插件没启用等）
+)
+
+// MainWake 找主 Agent 的主会话（§13.6）：能唤醒时返回唤醒路由用的 Agent id（与唤醒运行同一口径：
+// 旧设置迁移来的卡与没改过配置的卡为空），否则 reason 给出原因。只读。
+func MainWake(tx *store.Tx, pol policy.Policy) (agent, reason string, err error) {
+	if pol.MainAgentID == nil && pol.DefaultHarness == "" {
+		return "", MainNotSet, nil
+	}
+	sel, err := Resolve(tx, pol, Selection{Runner: "main_session"})
+	switch {
+	case err != nil:
+		return "", "", err
+	case sel.Reason != "":
+		return "", MainUnavailable, nil
+	case !sel.Record.Declaration.MainSession.CanWake():
+		return "", MainCannotWake, nil
+	case sel.Snapshot.ConfigRev == 0:
+		return "", "", nil
+	}
+	return sel.Snapshot.AgentID, "", nil
+}

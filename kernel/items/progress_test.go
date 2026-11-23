@@ -341,3 +341,36 @@ func TestTodayPlannedOrdersBySlot(t *testing.T) {
 		t.Fatalf("planned order: %v", got)
 	}
 }
+
+// 每日钟点 daily_at（§6.3，主动提醒的"只有时间点"）：只认 HH:MM；与计划日期互斥——同时写被拒，排上日期在同一条命令里清掉它。
+func TestDailyAtRules(t *testing.T) {
+	e := setup(t)
+	id := e.create(t, owner, map[string]any{"phase": "open", "daily_at": "07:05"})
+	if got := e.get(t, id).DailyAt; got != "07:05" {
+		t.Fatalf("daily_at stored as %q", got)
+	}
+	before := e.get(t, id)
+	for _, bad := range []string{"7:05", "24:00", "07:60", "07:05:00", "07:05 - 08:00"} {
+		if _, err := e.do(owner, "item.update", map[string]any{"id": id, "daily_at": bad}); exit(err) != domain.ExitUsage {
+			t.Fatalf("%q must be refused as a usage error, got %v", bad, err)
+		}
+	}
+	if _, err := e.do(owner, "item.update", map[string]any{"id": id, "daily_at": "08:00", "planned_for": day(e, 1)}); exit(err) != domain.ExitUsage {
+		t.Fatalf("daily_at together with planned_for must be refused, got %v", err)
+	}
+	if _, err := e.do(owner, "item.create", map[string]any{"kind": "task", "title": "x", "phase": "open", "daily_at": "08:00", "planned_for": day(e, 1)}); exit(err) != domain.ExitUsage {
+		t.Fatalf("creating with both must be refused, got %v", err)
+	}
+	if after := e.get(t, id); after.DailyAt != before.DailyAt || after.Version != before.Version {
+		t.Fatalf("refused writes changed the item: %+v", after)
+	}
+	e.must(t, owner, "item.update", map[string]any{"id": id, "planned_for": day(e, 1)})
+	if it := e.get(t, id); it.PlannedFor != day(e, 1) || it.DailyAt != "" {
+		t.Fatalf("planning a date must clear daily_at in the same command: %+v", it)
+	}
+	e.must(t, owner, "item.update", map[string]any{"id": id, "planned_for": nil, "daily_at": "21:30"})
+	if it := e.get(t, id); it.PlannedFor != "" || it.DailyAt != "21:30" {
+		t.Fatalf("clearing the date and setting daily_at: %+v", it)
+	}
+	e.verify(t)
+}
