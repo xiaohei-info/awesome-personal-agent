@@ -44,7 +44,7 @@ describe("设置 › 提醒与推送：只留全局项", () => {
     const p = await section("暂停所有提醒");
     expect(p.getByText("关着：按各页的设置提醒。打开后，恢复之前的提醒都只在今天页。")).toBeInTheDocument();
     await userEvent.click(p.getByRole("switch", { name: "暂停所有提醒" }));
-    expect(p.getByText("开着：手机和对话里都不再收到提醒，都先放在今天页；问题照样进「等你决定」；来源连续读不到、Agent 运行失败这类告警照常送达。")).toBeInTheDocument();
+    expect(p.getByText("开着：提醒只放今天页；问题照进「等你决定」；来源读不到、运行失败等告警照发。")).toBeInTheDocument();
     await userEvent.type(p.getByLabelText("到这个时间自动恢复（留空表示一直暂停）"), "2030-01-01T10:00");
     await saveIn("暂停所有提醒");
     await waitFor(() => expect(s.puts).toHaveLength(1));
