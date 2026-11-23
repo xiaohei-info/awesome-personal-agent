@@ -227,7 +227,7 @@ func (e *Env) OpenDelegateTier(tier string) {
 	var out struct {
 		Secret string `json:"secret"`
 	}
-	if err := json.Unmarshal([]byte(e.webOK("POST", "/v1/settings/tokens", `{"kind":"delegate","label":"DEL-agent","harness":"`+AgentHarness+`","agent_id":"`+card.ID+`"}`, 201)), &out); err != nil || out.Secret == "" {
+	if err := json.Unmarshal([]byte(e.webOK("POST", "/v1/settings/tokens", `{"kind":"delegate","audience":"internal","label":"DEL-agent","harness":"`+AgentHarness+`","agent_id":"`+card.ID+`"}`, 201)), &out); err != nil || out.Secret == "" {
 		e.fatal("签发归属 Agent 的 delegate 钥匙: %v", err)
 	}
 	e.SetTier(card.ID, tier)
@@ -539,10 +539,10 @@ func (e *Env) IssueCredentials() {
 		}
 		return out.Secret
 	}
-	e.OBS = issue("/v1/settings/tokens", `{"kind":"observer","label":"OBS"}`)
-	e.WRK = issue("/v1/settings/tokens", `{"kind":"worker","label":"WRK","executor":"work-host.cli"}`)
-	e.WRK2 = issue("/v1/settings/tokens", `{"kind":"worker","label":"WRK2","executor":"other-host.cli"}`)
-	e.DEL = issue("/v1/settings/tokens", `{"kind":"delegate","label":"DEL"}`)
+	e.OBS = issue("/v1/settings/tokens", `{"kind":"observer","audience":"internal","label":"OBS"}`)
+	e.WRK = issue("/v1/settings/tokens", `{"kind":"worker","audience":"internal","label":"WRK","executor":"work-host.cli"}`)
+	e.WRK2 = issue("/v1/settings/tokens", `{"kind":"worker","audience":"internal","label":"WRK2","executor":"other-host.cli"}`)
+	e.DEL = issue("/v1/settings/tokens", `{"kind":"delegate","audience":"internal","label":"DEL"}`)
 	e.CHAN = issue("/v1/settings/ext-keys", `{"label":"CHAN","scope":"channel.acc-chan"}`)
 	e.OpenDelegateTier("rules")
 }
