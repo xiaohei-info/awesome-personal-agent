@@ -343,3 +343,85 @@ func TestSimilarScore(t *testing.T) {
 		}
 	}
 }
+
+// 线上 PR #227（2026-11-23，脱敏）在邮件还没带 PR 链接时的形状：两封通知标题只差 "Re:"，建成两条建议；平台上的 PR 再建一条，
+// 它之后的三条更新（合并、改动、请求评审）按"来源对象更新"挂在它名下，不在它的 sources 里。归类把后两条并进第一条：
+// 被折叠那条名下的消息（含这三条更新）全部搬到留下的那条，按到达先后排，每条带合并留痕；撤销后原样回到原处。
+func TestMergeFoldMovesEveryHeldMessage(t *testing.T) {
+	e := followEnv(t)
+	const gh, link = "notifications@github.com", "https://github.com/org/app/pull/227"
+	subj := "[org/app] feat(desktop): 能力页「帮我安装」卡片移到最上方并改标题 (PR #227)"
+	mail := func(id, subject, thread string) map[string]any {
+		return ev(id, "mail.received", subject, map[string]any{"sender": gh, "correlation_keys": []string{thread}})
+	}
+	pr := func(id, typ string) map[string]any {
+		return ev(id, typ, "feat(desktop): 能力页「帮我安装」卡片移到最上方并改标题", map[string]any{"sender": "dev", "link": link, "correlation_keys": []string{"org/app#227"}})
+	}
+	e.emit("src_mail_icloud", "mail", mail("i1", "Re: "+subj, "<org/app/pull/227/issue_event/101@github.com>"))
+	e.now = e.now.Add(time.Minute) // 同批按建立先后编号
+	e.emit("src_mail_icloud", "mail", mail("i2", subj, "<org/app/pull/227@github.com>"))
+	e.now = e.now.Add(time.Minute)
+	e.emit("src_mail", "mail", mail("m1", subj, "<org/app/pull/227/review/202@github.com>"), mail("m2", "Re: "+subj, "<org/app/pull/227/review/202@github.com>"))
+	e.now = e.now.Add(time.Minute)
+	e.emit("src_github", "pr", pr("g1", "pr.opened"), pr("g2", "pr.merged"), pr("g3", "pr.updated"), pr("g4", "notification.review_requested"))
+
+	keep, mid, gp := e.byTitle("Re: "+subj), e.byTitle(subj), e.byTitle("feat(desktop): 能力页「帮我安装」卡片移到最上方并改标题")
+	i, m, g := e.sev("src_mail_icloud", "i1", "i2"), e.sev("src_mail", "m1", "m2"), e.sev("src_github", "g1", "g2", "g3", "g4")
+	if len(e.allItems()) != 3 || !slices.Equal(keep.Proposal.Sources, i[:1]) || !slices.Equal(mid.Proposal.Sources, []string{i[1], m[0], m[1]}) || !slices.Equal(gp.Proposal.Sources, g[:1]) {
+		t.Fatalf("before the sweep: %+v / %+v / %+v", keep.Proposal, mid.Proposal, gp.Proposal)
+	}
+	for _, x := range e.events("src_github")[1:] {
+		if x.Item != gp.ID || x.Disposition != domain.DispositionAttached {
+			t.Fatalf("platform updates are held by the platform-built proposal, outside its sources: %+v", x)
+		}
+	}
+
+	e.stub.When(batchMark, modelstub.Reply{Content: `{"decisions":[
+		{"new":"N1","action":"merge","target":"N3","reason":"同一个 PR #227 的评审通知","confident":true},
+		{"new":"N2","action":"merge","target":"N3","reason":"同一个 PR #227","confident":true}]}`})
+	e.now = e.now.Add(31 * time.Minute)
+	if err := e.svc.Sweep(bg); err != nil || e.batchCalls() != 1 {
+		t.Fatalf("one model call: %v %d", err, e.batchCalls())
+	}
+	got := e.item(keep.ID).Proposal
+	want := append(append(append([]string{}, i...), m...), g...)
+	if !slices.Equal(got.Sources, want) || len(got.Merges) != 7 {
+		t.Fatalf("every held message moves, in arrival order: %+v", got)
+	}
+	for k, x := range got.Merges {
+		from := mid.ID
+		if k >= 3 {
+			from = gp.ID
+		}
+		if x.Event != want[k+1] || x.Item != from || x.By != "generate" || x.Batch == "" {
+			t.Fatalf("merge trace %d: %+v", k, x)
+		}
+	}
+	for _, src := range []string{"src_mail_icloud", "src_mail", "src_github"} {
+		for _, x := range e.events(src) {
+			if x.Item != keep.ID {
+				t.Fatalf("event left behind: %+v", x)
+			}
+		}
+	}
+	for _, id := range []string{mid.ID, gp.ID} {
+		if it := e.item(id); it.Phase != domain.PhaseDropped || it.Proposal.Sweep.Target != keep.ID {
+			t.Fatalf("folded %s: %+v", id, it.Proposal.Sweep)
+		}
+	}
+	e.verify()
+
+	if err := e.svc.Unmerge(bg, owner, gp.ID); err != nil {
+		t.Fatal(err)
+	}
+	got = e.item(keep.ID).Proposal
+	if !slices.Equal(got.Sources, want[:4]) || len(got.Merges) != 3 || !slices.Equal(e.item(gp.ID).Proposal.Sources, g[:1]) {
+		t.Fatalf("unmerge takes back exactly what was moved: %+v", got)
+	}
+	for k, x := range e.events("src_github") {
+		if x.Item != gp.ID || (k == 0) != (x.Disposition == domain.DispositionProposed) {
+			t.Fatalf("back where it was: %+v", x)
+		}
+	}
+	e.verify()
+}

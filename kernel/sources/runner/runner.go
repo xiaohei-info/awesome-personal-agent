@@ -1151,6 +1151,23 @@ func Attachments(tx *store.Tx, item string) ([]Attachment, error) {
 	return querySeq(tx, `WHERE disposition = ? AND item = ? ORDER BY seq`, string(domain.DispositionAttached), item)
 }
 
+// Held 按落盘顺序返回事项名下的全部来源事件：指向它的建议来源与挂靠消息，加上 also 里列出的（建议的 sources 可能含已不指向它的旧记录）。
+func Held(tx *store.Tx, item string, also []string) ([]domain.SourceEvent, error) {
+	where, args := `WHERE (item = ? AND disposition IN (?, ?))`, []any{item, string(domain.DispositionProposed), string(domain.DispositionAttached)}
+	if len(also) > 0 {
+		where += ` OR id IN (?` + strings.Repeat(`,?`, len(also)-1) + `)`
+		for _, id := range also {
+			args = append(args, id)
+		}
+	}
+	as, err := querySeq(tx, where+` ORDER BY seq`, args...)
+	out := make([]domain.SourceEvent, len(as))
+	for i, a := range as {
+		out[i] = a.SourceEvent
+	}
+	return out, err
+}
+
 // EventPage 按落盘顺序返回某来源 after 之后的至多 limit 条事件，ds 非空时只看这些处置；还有下一页时 next 是下一次的 after，否则为 0。
 func EventPage(tx *store.Tx, sourceID string, ds []domain.Disposition, after int64, limit int) ([]domain.SourceEvent, int64, error) {
 	where, args := `WHERE source_id = ? AND seq > ?`, []any{sourceID, after}

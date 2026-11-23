@@ -525,11 +525,13 @@ func registerSweep(x *command.Executor) error {
 				if t.Proposal != nil {
 					tp = *t.Proposal
 				}
-				for _, ev := range it.Proposal.Sources {
-					sev, err := runner.Event(c.Tx, ev)
-					if err != nil {
-						return nil, err
-					}
+				// 被折叠那条名下的消息全部搬过去（含不在 sources 里的挂靠消息，如平台上同一对象的更新），按到达先后；每条记合并留痕，撤销时按留痕搬回。
+				held, err := runner.Held(c.Tx, it.ID, it.Proposal.Sources)
+				if err != nil {
+					return nil, err
+				}
+				for _, sev := range held {
+					ev := sev.ID
 					if !slices.Contains(tp.Sources, ev) {
 						tp.Sources = append(slices.Clone(tp.Sources), ev)
 					}

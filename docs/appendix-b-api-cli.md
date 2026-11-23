@@ -199,7 +199,7 @@
 | | `POST /source-events/{id}/propose` | 把未判定事件或 digest 事件转为建议 | Web 登录、delegate |
 | | `POST /source-events/{id}/split` | 把误并入一条建议的来源事件拆出来另成一条建议（`inbound.split`，主文档 §9.3）：请求体 `{"from": "<建议 id>"}`，返回 `{"item": "<新建议 id>"}` | Web 登录、delegate |
 | | `POST /items/{id}/unmerge` | 撤销跨来源合并的一条折叠（`inbound.unmerge`，一档，主文档 §9.3）：被折叠的建议回到 proposed，`proposal.sweep.action` 记 `undone`，与去处互记 `not_same`；合并的来源事件与留痕从去处移回，并入的在去处追加一条撤回说明。返回 `{"item": "<id>"}`；不是被折叠的或已撤销过是 409 |
-| | `GET /merge/activity?days=7` | 最近自动归类（读）：`{"days", "pending", "model_calls", "chars", "batches": [{"batch", "at", "size", "run"?, "chars", "decisions": [{"item", "title", "source"?, "sources", "action", "target"?, "target_title"?, "target_phase"?, "why"?, "by", "hint"?}]}]}`；`days` 至多 90 |；`sources` 是这条建议带着的消息条数（折叠时一起并进去处）
+| | `GET /merge/activity?days=7` | 最近自动归类（读）：`{"days", "pending", "model_calls", "chars", "batches": [{"batch", "at", "size", "run"?, "chars", "decisions": [{"item", "title", "source"?, "sources", "action", "target"?, "target_title"?, "target_phase"?, "why"?, "by", "hint"?}]}]}`；`days` 至多 90；`sources` 是这条建议带着的消息条数：合并进别处的，按去处上从它搬去的合并留痕计（含不在它 `sources` 里的挂靠消息），其余按它自己的 `proposal.sources` |
 | | `GET /packs/{pack}/prompts/{name}` | 已加载能力包里一个提示词的正文（不含头部声明）：`{"pack", "name", "agent", "body"}`；设置 › 跨来源合并用它显示内置默认与"恢复默认" |
 | | `POST /source-events/{id}/ignore`，`POST /source-events/ignore` | 忽略未判定事件：单条；或批量，请求体 `{"source"}` 按来源、`{"all": true}` 全部 | Web 登录、delegate |
 | | `POST /source-events/rules` | 积压放开第 1 步：只跑规则，返回 `{"attached", "disposed", "remaining"}`；请求体 `{"source"?}` | Web 登录、delegate |
