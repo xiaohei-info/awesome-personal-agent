@@ -58,7 +58,8 @@ describe("agent 变更视图（flow-agent-revert）", () => {
     const s = server([upd(1, "2030-01-01T00:00:00Z"), dec(2, "2030-01-01T00:01:00Z"), upd(3, "2030-01-01T00:02:00Z", { actor: owner, reason: "人改的" }), upd(4, "2030-01-01T00:03:00Z", { type: "command.rejected", reason: "被拒" })]);
     mount(s.impl);
     const a = (await screen.findByRole("heading", { name: /新标题/ })).closest("article")!;
-    expect(within(a).getByText(/DEL/)).toBeInTheDocument();
+    // 操作者显示 Agent 名；名字表（/settings/tokens + /agents）可能晚于事件列表到，等名字出现再断言，不依赖先后
+    expect(await within(a).findByText(/日常/)).toBeInTheDocument();
     expect(within(a).getByText("改标题")).toBeInTheDocument();
     const d = screen.getByRole("heading", { name: "Agent 替你答了「要不要上线」" }).closest("article")!;
     expect(within(d).getByRole("button", { name: "撤销" })).toBeEnabled(); // Agent 自答可按次撤回（设计 §14.3）
