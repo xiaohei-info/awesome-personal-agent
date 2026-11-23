@@ -231,3 +231,18 @@ func waitUp(t *testing.T, addr string, logs *bytes.Buffer) {
 	}
 	t.Fatalf("serve 未启动: %s", logs.String())
 }
+
+// 退出码 126 的回归：本机构建是 ad-hoc 签名，换二进制后系统按签名记的隐私授权（可移除宗卷）失效，外置盘上的 Agent 运行以 126 失败。
+// 换二进制脚本必须在临时拷贝上以固定标识重签，再原子改名；不得就地重签正在运行的文件（会被系统杀掉）。
+func TestUpdateScriptResignsTheCopyBeforeSwap(t *testing.T) {
+	s := read(t, "launchd/update.sh")
+	sign := strings.Index(s, `codesign -f -s - -i "$sign_id" -r="designated => identifier \"$sign_id\"" "$tmp"`)
+	swap := strings.Index(s, `mv -f "$tmp" "$install"`)
+	kick := strings.Index(s, "launchctl kickstart")
+	if sign < 0 || swap < 0 || kick < 0 || !(sign < swap && swap < kick) {
+		t.Fatalf("须依次：重签临时拷贝 → 原子改名 → kickstart（位置 %d %d %d）", sign, swap, kick)
+	}
+	if strings.Contains(s, `-r="designated => identifier \"$sign_id\"" "$install"`) {
+		t.Error("不得就地重签已安装的文件")
+	}
+}
