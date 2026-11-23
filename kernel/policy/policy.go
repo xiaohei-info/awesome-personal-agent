@@ -302,7 +302,7 @@ const (
 	MuteSource  = "source"
 	MuteProject = "project"
 	MuteItem    = "item"
-	// MuteAll 是"暂停所有提醒"（设置 › 提醒与推送的总开关）：ID 为空；健康类也一并只留今天页，问题照样进等你决定。
+	// MuteAll 是"暂停所有提醒"（设置 › 提醒与推送的总开关）：ID 为空；问题照样进等你决定，健康类（来源连续失败、Agent 运行失败等）照常送达。
 	MuteAll = "all"
 )
 

@@ -162,7 +162,8 @@ func TestMutes(t *testing.T) {
 	}
 }
 
-// 暂停所有提醒（范围 all）：决策、提醒、简报、注入与唤醒路由、健康类都只留 Web 未读；内部唤醒类不受影响；到期恢复。
+// 暂停所有提醒（范围 all）：决策、提醒、简报（含注入与唤醒路由）都只留 Web 未读；健康类（来源连续失败、Agent 运行失败）
+// 照常送达，内部唤醒类不受影响；到期恢复。
 func TestPauseAll(t *testing.T) {
 	e := newEnv(t, Options{})
 	until := e.now.Add(time.Hour)
@@ -176,7 +177,8 @@ func TestPauseAll(t *testing.T) {
 		{"dec", domain.DeliveryDecision, "channel:x", true},
 		{"rem", domain.DeliveryReminder, RouteInject, true},
 		{"brief", domain.DeliveryBrief, "wake:agt_1", true},
-		{"health", domain.DeliveryHealth, "channel:x", true},
+		{"health", domain.DeliveryHealth, "channel:x", false},
+		{"health-inject", domain.DeliveryHealth, RouteInject, false},
 		{"wake", domain.DeliveryWake, "wake:agt_1", false},
 		{"web", domain.DeliveryReminder, RouteWeb, false},
 	} {
@@ -186,7 +188,7 @@ func TestPauseAll(t *testing.T) {
 		}
 	}
 	e.now = until
-	if d := e.gated(pol, "after", "i-after", domain.DeliveryHealth, "channel:x", Target{}); d.Suppressed != "" || d.Route != "channel:x" {
+	if d := e.gated(pol, "after", "i-after", domain.DeliveryReminder, "channel:x", Target{}); d.Suppressed != "" || d.Route != "channel:x" {
 		t.Fatalf("pause must end at until: %+v", d)
 	}
 }

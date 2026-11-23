@@ -31,8 +31,8 @@ type Target struct {
 //   - 静音：投递的事项、项目或来源命中未到期的静音，决策/提醒/简报改为只留 Web 未读（含注入路由）；
 //   - 日上限：经渠道推送的决策/提醒/简报每个自然日不超过 DailyCap 条（0 不限），超出的只留 Web 未读，
 //     并在当天第一次超限时补发一条说明；
-//   - 健康类、唤醒类、web_only 决策、豁免的临期决策不受日上限；健康与唤醒也不受静音，唯一例外是范围 all（暂停所有提醒）
-//     把健康类也改为只留 Web 未读；注入与 Web 路由不计入日上限。
+//   - 健康类、唤醒类、web_only 决策、豁免的临期决策不受日上限；健康与唤醒也不受静音，范围 all（暂停所有提醒）也不例外：
+//     来源连续失败、Agent 运行失败等健康类照常送达；注入与 Web 路由不计入日上限。
 //
 // 自然日按静默时段的时区算，未设置取 UTC。同 id 重复调用返回首次结果，不重复计数或补发说明。
 func (q *Queue) CreateGated(tx *store.Tx, pol policy.Policy, d domain.Delivery, t Target) (domain.Delivery, bool, error) {
@@ -40,9 +40,6 @@ func (q *Queue) CreateGated(tx *store.Tx, pol policy.Policy, d domain.Delivery, 
 		return old, false, nil
 	} else if e, ok := err.(*domain.Error); !ok || e.Code != domain.CodeNotFound {
 		return d, false, err
-	}
-	if d.Class == domain.DeliveryHealth && d.Route != RouteWeb && pausedAll(pol.Disturb.Mutes, q.o.Now()) {
-		d.Route, d.Suppressed = RouteWeb, SuppressedMuted // 暂停所有提醒连健康类也只留今天页（按来源、项目、事项的暂停不管健康类）
 	}
 	if d.Class != domain.DeliveryHealth && d.Class != domain.DeliveryWake {
 		now := q.o.Now()
@@ -81,16 +78,6 @@ func muted(mutes []policy.Mute, item string, t Target, now time.Time) bool {
 		case m.Scope == policy.MuteItem && m.ID == item,
 			m.Scope == policy.MuteProject && t.Project != "" && m.ID == t.Project,
 			m.Scope == policy.MuteSource && t.Source != "" && m.ID == t.Source:
-			return true
-		}
-	}
-	return false
-}
-
-// pausedAll 报告"暂停所有提醒"（范围 all）此刻是否生效。
-func pausedAll(mutes []policy.Mute, now time.Time) bool {
-	for _, m := range mutes {
-		if m.Scope == policy.MuteAll && (m.Until == nil || now.Before(*m.Until)) {
 			return true
 		}
 	}
