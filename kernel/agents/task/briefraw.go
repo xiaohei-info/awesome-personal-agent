@@ -55,12 +55,36 @@ type digestOut struct {
 }
 
 type briefProposals struct {
-	Entries []proposalEntry
-	Pending int
+	Entries       []proposalEntry
+	Also          []proposalBrief
+	Pending       int
+	New           int
+	BySource      map[string]int
+	MustNotListed int
+	MoreURL       string
 }
 
+// material 先给总数与没列出的条数，再给条目：读者不读完整段也知道还有多少、在哪看。
 func (p briefProposals) material() Material {
-	pb, _ := json.Marshal(map[string]any{"proposals": p.Entries, "pending_total": p.Pending})
+	entries, also := p.Entries, p.Also
+	if entries == nil {
+		entries = []proposalEntry{}
+	}
+	if also == nil {
+		also = []proposalBrief{}
+	}
+	body := struct {
+		Pending       int             `json:"pending_total"`
+		New           int             `json:"new_in_window"`
+		BySource      map[string]int  `json:"new_by_source"`
+		Listed        int             `json:"listed"`
+		NotListed     int             `json:"not_listed"`
+		MustNotListed int             `json:"must_not_listed,omitempty"`
+		MoreURL       string          `json:"more_web_url,omitempty"`
+		Proposals     []proposalEntry `json:"proposals"`
+		Also          []proposalBrief `json:"also_needs_you"`
+	}{p.Pending, p.New, p.BySource, len(entries) + len(also), p.Pending - len(entries) - len(also), p.MustNotListed, p.MoreURL, entries, also}
+	pb, _ := json.Marshal(body)
 	return Material{Name: "proposals", Body: string(pb)}
 }
 

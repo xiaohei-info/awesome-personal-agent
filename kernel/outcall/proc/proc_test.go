@@ -530,11 +530,12 @@ func TestCloseKillsRunningAndLeavesQueued(t *testing.T) {
 
 func TestOutputKeepsOnlyTail(t *testing.T) {
 	h := newHarness(t, 1, 1, Options{})
-	h.enqueue(domain.RunReader, "r", false, `head -c 200000 /dev/zero | tr '\0' a; echo END`)
+	h.enqueue(domain.RunReader, "r", false, `head -c 1100000 /dev/zero | tr '\0' a; echo END`)
 	h.dispatch()
 	res := h.next()
-	if len(res.Stdout) != tailLimit || !strings.HasSuffix(string(res.Stdout), "END\n") {
-		t.Fatalf("len=%d", len(res.Stdout))
+	if len(res.Stdout) != stdoutTailLimit || !strings.HasSuffix(string(res.Stdout), "END\n") ||
+		res.StdoutTotal != 1100004 || res.StdoutDropped != 1100004-stdoutTailLimit {
+		t.Fatalf("len=%d total=%d dropped=%d", len(res.Stdout), res.StdoutTotal, res.StdoutDropped)
 	}
 }
 
@@ -812,12 +813,22 @@ func TestFaultOf(t *testing.T) {
 
 // 非 0 退出的失败附注接上 stderr 最后一个非空行（最多 300 字节），"为什么没跑起来"才有据可查。
 func TestWithStderrKeepsLastLine(t *testing.T) {
-	var errb tail
+	errb := tail{limit: tailLimit}
 	errb.Write([]byte("warming up\n/usr/bin/agent-cli: line 4: /x/agent-cli: Operation not permitted\n\n"))
 	if got := withStderr("exit status 126", &errb); got != "exit status 126: /usr/bin/agent-cli: line 4: /x/agent-cli: Operation not permitted" {
 		t.Fatalf("got %q", got)
 	}
 	if got := withStderr("exit status 1", &tail{}); got != "exit status 1" {
 		t.Fatalf("empty stderr: %q", got)
+	}
+}
+
+// 只留末段时记下总共写了多少、丢了多少，调用模块据此写明截断，不静默。
+func TestTailCountsDroppedHead(t *testing.T) {
+	tl := tail{limit: 4}
+	tl.Write([]byte("abc"))
+	tl.Write([]byte("defg"))
+	if total, dropped := tl.counts(); string(tl.bytes()) != "defg" || total != 7 || dropped != 3 {
+		t.Fatalf("%q %d %d", tl.bytes(), total, dropped)
 	}
 }

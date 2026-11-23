@@ -483,6 +483,10 @@ v0.2.0 新增两个类型（下一行），排在初始集合之后：前者表�
 除下表外，v0.2.0 对 v0.1 的命令、路由、字段和事件都只做加法。
 
 | 改动 | v0.1 | v0.2.0 | 兼容 |
+| 简报与复盘资料的 `activity` | 进展按事件的写入时刻 `at` 取窗口 | 进展按业务日期 `on` 取（[窗口起点那天, 窗口终点那天)，主机日界）；没有 `on` 的进展与完成仍按 `at`；条目增 `on`、`date_source`（`on_date` 或 `at`） | 不改账本、不回填 `at`：只改哪些记录进窗口。按"写入时刻在窗口内即算本期"断言的调用方要改；补记的历史进展不再进本期活动 |
+| 简报资料的 `proposals` | 窗口内新建的建议，至多 50 条取最新，另给 `pending_total` | 全部未处置的建议按优先级与到期、今天不处理有后果、本期新增（把握低在前）、更早的把握低排序：前 20 条给全，其余必须本人看的进 `also_needs_you`（精简，至多 40 条）；新增 `new_in_window`、`new_by_source`、`listed`、`not_listed`、`must_not_listed`、`more_web_url`，条目增 `why`、`created_at`、`deadline` | `pending_total` 与条目原有字段含义不变；按"proposals 全是窗口内新增"读的调用方改读 `new_in_window` 与条目的 `why` |
+| 任务型资料文件 | `notice`、`item`、`materials`、`messages` | 在 `materials` 之前增 `catalog`（各段的目录） | 只增：旧键不变，按键读的调用方不受影响 |
+| 运行目录的 `output.txt` | stdout 只留最后 64 KB，丢掉的开头不留痕 | 留最后 1 MiB；丢了开头时第一行是一行 JSON：`{"type":"apa_output_truncated","total_bytes":…,"kept_bytes":…,"dropped_head_bytes":…,"note":…}` | 没截断时文件与原来相同；按行解析事件流的读者跳过这一类型即可 |
 | 连接与凭据保管 | 无 | 新增 `/connections` 路由与 `connection.*` 命令（只在 Web）；新增 `apa secrets rekey` | 只增：已有路由、命令与 ext 协议不变 |
 | 自检的检查项 | 九项 | 十一项：末尾追加 `secrets`、`connections` | 前九项的名字与顺序不变；`channels` 不再把内置渠道连接的路由 `channel:ch-…` 报成无密钥积压 |
 | 账本结构版本 | 6 | 7：只增 `connections_connection`、`connections_status`、`secrets_value` 三张表 | 升级时自动留快照；旧二进制拒绝打开新账本，回退用快照 |

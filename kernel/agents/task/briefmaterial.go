@@ -26,7 +26,8 @@ import (
 const (
 	defaultScheduleDays = 3
 	maxScheduleDays     = 14
-	maxProposals        = 50
+	proposalsListed     = 20             // 建议段给全的条数
+	maxProposalsBrief   = 40             // 其余必须本人看的建议精简列出的上限
 	firstBriefWindow    = 24 * time.Hour // 定时读不出上一个节拍时，第一份的窗口
 	calendarKind        = "calendar"
 	echoReasonPrefix    = "收到回音"
@@ -107,11 +108,13 @@ func scheduleDays(param int, period time.Duration) int {
 
 func (p briefPlan) inScope(it domain.Item) bool { return p.scope == nil || p.scope[it.Project] }
 
-func (p briefPlan) itemURL(id string) string {
+func (p briefPlan) itemURL(id string) string { return p.pageURL("/items/" + id) }
+
+func (p briefPlan) pageURL(path string) string {
 	if p.base == "" {
 		return ""
 	}
-	return p.base + "/items/" + id
+	return p.base + path
 }
 
 func (p briefPlan) at(t time.Time) time.Time { return t.In(p.loc) }
@@ -169,17 +172,31 @@ type scheduleEntry struct {
 }
 
 type proposalEntry struct {
-	ID            string    `json:"id"`
-	Title         string    `json:"title"`
-	Summary       string    `json:"summary,omitempty"`
-	Sources       string    `json:"sources,omitempty"`
-	Recommend     string    `json:"recommend,omitempty"`
-	Reason        string    `json:"reason,omitempty"`
-	LowConfidence bool      `json:"low_confidence"`
-	WebURL        string    `json:"web_url,omitempty"`
-	FollowedBy    *followUp `json:"followed_by,omitempty"`
-	Events        []string  `json:"-"`             // 引用的来源事件 id，用来出原文文件
-	Raw           []rawRef  `json:"raw,omitempty"` // 各来源事件的原文文件名与裁剪量
+	ID            string     `json:"id"`
+	Title         string     `json:"title"`
+	Summary       string     `json:"summary,omitempty"`
+	Sources       string     `json:"sources,omitempty"`
+	Why           []string   `json:"why,omitempty"` // 排在前面的原因：priority_urgent/high、overdue、due_soon、urgent、low_confidence、new_in_window
+	CreatedAt     time.Time  `json:"created_at"`
+	Deadline      *time.Time `json:"deadline,omitempty"`
+	Recommend     string     `json:"recommend,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
+	LowConfidence bool       `json:"low_confidence"`
+	WebURL        string     `json:"web_url,omitempty"`
+	FollowedBy    *followUp  `json:"followed_by,omitempty"`
+	Events        []string   `json:"-"`             // 引用的来源事件 id，用来出原文文件
+	Raw           []rawRef   `json:"raw,omitempty"` // 各来源事件的原文文件名与裁剪量
+}
+
+// proposalBrief 是超出完整条数、但必须让本人看到的建议：只给能检索与打开它的字段。
+type proposalBrief struct {
+	ID        string     `json:"id"`
+	Title     string     `json:"title"`
+	Sources   string     `json:"sources,omitempty"`
+	Why       []string   `json:"why"`
+	CreatedAt time.Time  `json:"created_at"`
+	Deadline  *time.Time `json:"deadline,omitempty"`
+	WebURL    string     `json:"web_url,omitempty"`
 }
 
 // followUp 是建议引用的来源事件之后，同一来源里共用关联键（同一对象）的后续事件：数目，加最新几条按该来源外发范围裁剪的内容。
@@ -223,13 +240,16 @@ type dueEntry struct {
 }
 
 type activityEntry struct {
-	Item    string    `json:"item"`
-	Title   string    `json:"title"`
-	Kind    string    `json:"kind"` // done、progress
-	Text    string    `json:"text,omitempty"`
-	At      time.Time `json:"at"`
-	Project string    `json:"project,omitempty"`
-	WebURL  string    `json:"web_url,omitempty"`
+	Item  string    `json:"item"`
+	Title string    `json:"title"`
+	Kind  string    `json:"kind"` // done、progress
+	Text  string    `json:"text,omitempty"`
+	On    string    `json:"on,omitempty"` // 进展所指的业务日期（YYYY-MM-DD）
+	At    time.Time `json:"at"`           // 写入时刻
+	// DateSource 说明这条凭什么进了窗口：on_date 是按业务日期，at 是没有业务日期、按写入时刻兜底（完成一律按 at）。
+	DateSource string `json:"date_source"`
+	Project    string `json:"project,omitempty"`
+	WebURL     string `json:"web_url,omitempty"`
 }
 
 type projectActivity struct {
@@ -331,7 +351,7 @@ func (s *Service) briefLedger(ctx context.Context, c rules.Call, p briefPlan) (o
 			}
 		}
 		if want("proposals") {
-			if out.props, err = proposalsSection(tx, all, out.w, names, p); err != nil {
+			if out.props, err = proposalsSection(tx, all, out.w, names, p, now); err != nil {
 				return err
 			}
 		}
@@ -519,31 +539,86 @@ func isNotFoundErr(err error) bool {
 	return ok && de.Code == domain.CodeNotFound
 }
 
-// proposalsSection：窗口内新建且仍是 proposed 的建议（范围内），最新的至多 50 条；pending_total 是范围内全部未处置的建议数。
-// 每条带引用来源事件的后续（followUp）。
-func proposalsSection(tx *store.Tx, all []domain.Item, w window, names map[string]string, p briefPlan) (briefProposals, error) {
-	var cand []domain.Item
-	total := 0
+// proposalsSection：范围内全部未处置的建议排好序，前 proposalsListed 条给全（摘要、推荐、后续、原文），其余必须本人看的
+// （高优先级、已过期或今明到期、起草判今天不处理有后果、把握低）给精简条目，至多 maxProposalsBrief 条，再多的只计数；
+// 其余只计数，另给窗口内新增的条数与按来源的分布。顺序：优先级高或到期 → 今天不处理有后果 → 本期新增（把握低的在前）→
+// 更早的把握低 → 其余，同档新建的在前：简报讲的是本期新增，更早的必须本人看的仍一条不漏地列出（§7.3"简报的资料"）。
+func proposalsSection(tx *store.Tx, all []domain.Item, w window, names map[string]string, p briefPlan, now time.Time) (briefProposals, error) {
+	tomorrow := items.Today(now.AddDate(0, 0, 1))
+	why := func(it domain.Item) []string {
+		var ws []string
+		if it.Priority == domain.PriorityUrgent || it.Priority == domain.PriorityHigh {
+			ws = append(ws, "priority_"+string(it.Priority))
+		}
+		if it.Deadline != nil {
+			switch day := items.Today(*it.Deadline); {
+			case day < items.Today(now):
+				ws = append(ws, "overdue")
+			case day <= tomorrow:
+				ws = append(ws, "due_soon")
+			}
+		}
+		if pr := it.Proposal; pr != nil {
+			if pr.Urgent != nil && *pr.Urgent {
+				ws = append(ws, "urgent")
+			}
+			if pr.LowConfidence {
+				ws = append(ws, "low_confidence")
+			}
+		}
+		if it.CreatedAt.After(w.Since) && !it.CreatedAt.After(w.Until) {
+			ws = append(ws, "new_in_window")
+		}
+		return ws
+	}
+	// 档：0 高优先级或到期，1 今天不处理有后果，2 新增且把握低，3 新增，4 把握低，5 其余；0、1、2、4 是必须本人看的。
+	tier := func(ws []string) int {
+		has := func(w string) bool { return slices.Contains(ws, w) }
+		switch {
+		case slices.ContainsFunc(ws, func(s string) bool { return strings.HasPrefix(s, "priority_") || s == "overdue" || s == "due_soon" }):
+			return 0
+		case has("urgent"):
+			return 1
+		case has("new_in_window") && has("low_confidence"):
+			return 2
+		case has("new_in_window"):
+			return 3
+		case has("low_confidence"):
+			return 4
+		}
+		return 5
+	}
+	must := func(tier int) bool { return tier != 3 && tier != 5 }
+	type cand struct {
+		it   domain.Item
+		why  []string
+		tier int
+	}
+	var cs []cand
+	out := briefProposals{BySource: map[string]int{}, MoreURL: p.pageURL("/proposals")}
 	for _, it := range all {
 		if it.Phase != domain.PhaseProposed || !p.inScope(it) {
 			continue
 		}
-		total++
-		if it.CreatedAt.After(w.Since) && !it.CreatedAt.After(w.Until) {
-			cand = append(cand, it)
+		ws := why(it)
+		cs = append(cs, cand{it, ws, tier(ws)})
+		if slices.Contains(ws, "new_in_window") {
+			out.New++
 		}
 	}
-	slices.SortStableFunc(cand, func(a, b domain.Item) int { return b.CreatedAt.Compare(a.CreatedAt) })
-	if len(cand) > maxProposals {
-		cand = cand[:maxProposals]
-	}
-	out := []proposalEntry{}
-	for _, it := range cand {
-		e := proposalEntry{ID: it.ID, Title: it.Title, Summary: it.Summary, WebURL: p.itemURL(it.ID)}
+	out.Pending = len(cs)
+	slices.SortStableFunc(cs, func(a, b cand) int {
+		if a.tier != b.tier {
+			return a.tier - b.tier
+		}
+		return b.it.CreatedAt.Compare(a.it.CreatedAt)
+	})
+	for i, c := range cs {
+		it := c.it
+		var ns []string
+		var evs []string
+		var later []domain.SourceEvent
 		if pr := it.Proposal; pr != nil {
-			e.Recommend, e.Reason, e.LowConfidence = pr.Recommend, pr.Reason, pr.LowConfidence
-			var ns []string
-			var later []domain.SourceEvent
 			for _, id := range pr.Sources {
 				ev, err := runner.Event(tx, id)
 				if err != nil {
@@ -552,9 +627,12 @@ func proposalsSection(tx *store.Tx, all []domain.Item, w window, names map[strin
 					}
 					return briefProposals{}, err
 				}
-				e.Events = append(e.Events, id)
+				evs = append(evs, id)
 				if n := names[ev.SourceID]; n != "" && !slices.Contains(ns, n) {
 					ns = append(ns, n)
+				}
+				if i >= proposalsListed {
+					continue // 后续只给完整条目
 				}
 				ls, err := runner.Later(tx, id)
 				if err != nil {
@@ -566,12 +644,32 @@ func proposalsSection(tx *store.Tx, all []domain.Item, w window, names map[strin
 					}
 				}
 			}
-			e.Sources = strings.Join(ns, "、")
-			e.FollowedBy = followOf(tx, later, p)
 		}
-		out = append(out, e)
+		src := strings.Join(ns, "、")
+		if slices.Contains(c.why, "new_in_window") {
+			k := src
+			if k == "" {
+				k = "未记来源"
+			}
+			out.BySource[k]++
+		}
+		switch {
+		case i < proposalsListed:
+			e := proposalEntry{ID: it.ID, Title: it.Title, Summary: it.Summary, Sources: src, Why: c.why, CreatedAt: p.at(it.CreatedAt),
+				Deadline: p.atp(it.Deadline), WebURL: p.itemURL(it.ID), Events: evs}
+			if pr := it.Proposal; pr != nil {
+				e.Recommend, e.Reason, e.LowConfidence = pr.Recommend, pr.Reason, pr.LowConfidence
+				e.FollowedBy = followOf(tx, later, p)
+			}
+			out.Entries = append(out.Entries, e)
+		case must(c.tier) && len(out.Also) < maxProposalsBrief:
+			out.Also = append(out.Also, proposalBrief{ID: it.ID, Title: it.Title, Sources: src, Why: c.why, CreatedAt: p.at(it.CreatedAt),
+				Deadline: p.atp(it.Deadline), WebURL: p.itemURL(it.ID)})
+		case must(c.tier):
+			out.MustNotListed++
+		}
 	}
-	return briefProposals{Entries: out, Pending: total}, nil
+	return out, nil
 }
 
 // followOf 把后续事件按发生时刻排好，给数目与最新几条；每条按该来源对外部端点的外发范围裁剪（§14.14），摘要另按字符预算裁。
@@ -703,8 +801,9 @@ func eachLive(tx *store.Tx, typ string, w window, fn func(domain.Event)) error {
 	}
 }
 
-// activitySection：窗口内完成的事项与写下的进展条目，按项目分组；按事件的 at 取，导入事件不计（"现场"读法）。
-// 简报与复盘自己（brief 事项）不算活动。
+// activitySection：窗口内完成的事项与写下的进展条目，按项目分组；导入事件不计（"现场"读法），简报与复盘自己（brief 事项）不算活动。
+// 进展按业务日期 on 取：on 落在 [since 那天, until 那天)（主机日界，与 on 的"今天"同源），相邻窗口不重不漏；
+// 没有 on 的进展与完成按事件的 at 取（since, until]，条目标 date_source。写入时刻不代表发生时刻（迁移把历史进展都写在导入那晚）。
 func activitySection(tx *store.Tx, all []domain.Item, w window, p briefPlan, pname func(string) string) ([]projectActivity, error) {
 	byID := map[string]domain.Item{}
 	for _, it := range all {
@@ -719,27 +818,52 @@ func activitySection(tx *store.Tx, all []domain.Item, w window, p briefPlan, pna
 		en.Item, en.Title, en.Project, en.At, en.WebURL = it.ID, it.Title, pname(it.Project), p.at(e.At), p.itemURL(it.ID)
 		got = append(got, en)
 	}
+	inAt := func(e domain.Event) bool { return e.At.After(w.Since) && !e.At.After(w.Until) }
+	fromDay, toDay := items.Today(w.Since), items.Today(w.Until)
 	if err := eachLive(tx, domain.EvItemPhaseChanged, w, func(e domain.Event) {
 		var pl struct {
 			Item domain.Item `json:"item"`
 		}
 		if json.Unmarshal(e.Payload, &pl) == nil && pl.Item.Phase == domain.PhaseDone {
-			add(e, activityEntry{Kind: "done"})
+			add(e, activityEntry{Kind: "done", DateSource: "at"})
 		}
 	}); err != nil {
 		return nil, err
 	}
-	if err := eachLive(tx, domain.EvItemProgressAdded, w, func(e domain.Event) {
+	// on 不晚于写入那天，所以 on 落在窗口里的进展都写于 since 那天零点之后：从那里扫起即可。
+	dayStart, err := time.ParseInLocation("2006-01-02", fromDay, time.Local)
+	if err != nil {
+		return nil, err
+	}
+	if err := eachLive(tx, domain.EvItemProgressAdded, window{Since: dayStart.Add(-time.Nanosecond), Until: w.Until}, func(e domain.Event) {
 		var pl struct {
 			Progress *domain.Progress `json:"progress"`
 		}
-		if json.Unmarshal(e.Payload, &pl) == nil && pl.Progress != nil {
-			add(e, activityEntry{Kind: "progress", Text: pl.Progress.Text})
+		if json.Unmarshal(e.Payload, &pl) != nil || pl.Progress == nil {
+			return
+		}
+		if on := pl.Progress.On; on != "" {
+			if on >= fromDay && on < toDay {
+				add(e, activityEntry{Kind: "progress", Text: pl.Progress.Text, On: on, DateSource: "on_date"})
+			}
+		} else if inAt(e) {
+			add(e, activityEntry{Kind: "progress", Text: pl.Progress.Text, DateSource: "at"})
 		}
 	}); err != nil {
 		return nil, err
 	}
-	slices.SortStableFunc(got, func(a, b activityEntry) int { return a.At.Compare(b.At) })
+	key := func(a activityEntry) string { // 按业务日期排，没有的按写入时刻所在的日子
+		if a.On != "" {
+			return a.On
+		}
+		return items.Today(a.At)
+	}
+	slices.SortStableFunc(got, func(a, b activityEntry) int {
+		if c := strings.Compare(key(a), key(b)); c != 0 {
+			return c
+		}
+		return a.At.Compare(b.At)
+	})
 	out := []projectActivity{}
 	idx := map[string]int{}
 	for _, en := range got {

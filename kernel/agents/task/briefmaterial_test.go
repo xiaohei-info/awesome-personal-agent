@@ -3,6 +3,7 @@ package task
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -142,10 +143,15 @@ func TestBriefMaterialsCarryLedgerSectionsAndWindow(t *testing.T) {
 	}
 	var pr struct {
 		Proposals []struct{ Title string } `json:"proposals"`
+		Also      []struct{ Why []string } `json:"also_needs_you"`
 		Total     int                      `json:"pending_total"`
+		NotListed int                      `json:"not_listed"`
+		MustNot   int                      `json:"must_not_listed"`
 	}
-	if err := json.Unmarshal([]byte(m["proposals"]), &pr); err != nil || len(pr.Proposals) != 50 || pr.Total != 52 {
-		t.Fatalf("proposals must cap at 50 and report all 52 pending: %v %d/%d", err, len(pr.Proposals), pr.Total)
+	// 52 条都把握低：前 20 条给全，其余精简列 40 条，剩下 0 条；没有一条必须本人看的只被计数。
+	if err := json.Unmarshal([]byte(m["proposals"]), &pr); err != nil || len(pr.Proposals) != 20 || len(pr.Also) != 32 || pr.Total != 52 ||
+		pr.NotListed != 0 || pr.MustNot != 0 || !slices.Contains(pr.Also[0].Why, "low_confidence") {
+		t.Fatalf("proposals: 20 full, every other low-confidence one listed briefly: %v %+v", err, pr)
 	}
 	if !strings.Contains(m["decisions"], "要不要？") || !strings.Contains(m["due_waiting"], "今天到期") || !strings.Contains(m["due_waiting"], "due_today") {
 		t.Fatalf("decisions %s due_waiting %s", m["decisions"], m["due_waiting"])
@@ -221,5 +227,63 @@ func TestBriefWindowSurvivesAgentWriteBackAndSeedsNextBrief(t *testing.T) {
 	_ = e.st.View(bg, func(tx *store.Tx) (err error) { all, err = items.List(tx, items.Filter{}); return })
 	if w, _ := briefWindow(all, "ins_1", "next", t0.Add(24*time.Hour), t0, []string{"period", "sections[].body"}); !w.Since.Equal(t0) {
 		t.Fatalf("next brief must start at the first one's until: %+v", w)
+	}
+}
+
+// 进展按业务日期 on 进窗口：写入时刻在窗口内、on 是更早日子的历史进展不算本期；没有 on 的按写入时刻兜底并标 date_source。
+// 建议段先列高优先级，再列把握低，再列其余，并给出总数与没列出的条数。
+func TestActivityByBusinessDateAndProposalsOrder(t *testing.T) {
+	e := setup(t)
+	e.harness("hx", "summary")
+	e.setDefaultHarness("hx")
+	var it struct{ ID string }
+	_ = json.Unmarshal(e.must(owner, "item.create", map[string]any{"kind": "task", "title": "有进展的事", "phase": "open"}).Value, &it)
+	yesterday, today := items.Today(t0.Add(-24*time.Hour)), items.Today(t0)
+	e.must(owner, "item.progress", map[string]any{"id": it.ID, "text": "IN-WINDOW", "on": yesterday})
+	e.must(owner, "item.progress", map[string]any{"id": it.ID, "text": "HISTORY", "on": items.Today(t0.Add(-10 * 24 * time.Hour))})
+	e.must(owner, "item.progress", map[string]any{"id": it.ID, "text": "TODAY-NEXT-WINDOW", "on": today})
+	e.must(owner, "item.progress", map[string]any{"id": it.ID, "text": "NO-DATE"})
+	for _, p := range []map[string]any{
+		{"title": "普通", "proposal": map[string]any{"low_confidence": false}},
+		{"title": "把握低", "proposal": map[string]any{"low_confidence": true}},
+		{"title": "高优先级", "priority": "high", "proposal": map[string]any{"low_confidence": false}},
+	} {
+		p["kind"], p["phase"] = "task", "proposed"
+		e.must(kernel, "item.create", p)
+	}
+	id := e.openItemWithOrigin("instance:ins_1")
+	if err := e.svc.CallAgent(AgentOptions{})(bg, e.call("brief", id)); err != nil {
+		t.Fatal(err)
+	}
+	m := materialsOf(e, e.waitResult().Run.ID)
+	var act struct {
+		Activity []struct {
+			Entries []struct {
+				Text, On   string
+				DateSource string `json:"date_source"`
+			} `json:"entries"`
+		} `json:"activity"`
+	}
+	if err := json.Unmarshal([]byte(m["activity"]), &act); err != nil || len(act.Activity) != 1 {
+		t.Fatalf("activity: %v %s", err, m["activity"])
+	}
+	got := act.Activity[0].Entries
+	if len(got) != 2 || got[0].Text != "IN-WINDOW" || got[0].DateSource != "on_date" || got[0].On != yesterday ||
+		got[1].Text != "NO-DATE" || got[1].DateSource != "at" {
+		t.Fatalf("activity must follow on_date, falling back to at only without it: %+v", got)
+	}
+	var pr struct {
+		Proposals []struct {
+			Title string
+			Why   []string
+		} `json:"proposals"`
+		Total     int `json:"pending_total"`
+		New       int `json:"new_in_window"`
+		NotListed int `json:"not_listed"`
+	}
+	if err := json.Unmarshal([]byte(m["proposals"]), &pr); err != nil || pr.Total != 3 || pr.New != 3 || pr.NotListed != 0 || len(pr.Proposals) != 3 ||
+		pr.Proposals[0].Title != "高优先级" || pr.Proposals[1].Title != "把握低" || pr.Proposals[2].Title != "普通" ||
+		!slices.Contains(pr.Proposals[0].Why, "priority_high") {
+		t.Fatalf("proposals order: %v %s", err, m["proposals"])
 	}
 }

@@ -21,7 +21,11 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
-const tailLimit = 64 << 10 // 事件流以外的 stdout 与所有 stderr 只保留末段（任务型的结构化摘要在 stdout 末段，§8.4）
+// 事件流以外的 stdout 与所有 stderr 只保留末段（任务型的结构化摘要在 stdout 末段，§8.4）；丢掉的开头字节数随结果交回。
+const (
+	stdoutTailLimit = 1 << 20
+	tailLimit       = 64 << 10
+)
 
 // envWhitelist 是子进程能从内核环境继承的全部变量（§7.7）：PATH、HOME 和 XDG 目录变量及基本区域设置。
 var envWhitelist = map[string]bool{
@@ -47,6 +51,8 @@ type Result struct {
 	Reason string     // 失败、超时、关停的原因；成功为空
 	// Overflow 为真表示事件流类别的 stdout 超过单次总上限（max_source_output_mb），超出部分已丢弃。
 	Overflow bool
+	// StdoutDropped 是只留末段的 stdout 丢掉的开头字节数；StdoutTotal 是子进程写出的 stdout 总字节数（只留末段的类别才有）。
+	StdoutDropped, StdoutTotal int64
 }
 
 // Options 是调度器的依赖与扩展点；零值字段取默认。
@@ -311,8 +317,8 @@ func (d *Dispatcher) removeContext(rec Record) {
 // run 执行一条已置为 running 的 Run 并落账终态。
 func (d *Dispatcher) run(rec Record) {
 	defer d.wg.Done()
-	var errb tail
-	var out stdoutSink = &tail{}
+	errb := tail{limit: tailLimit}
+	var out stdoutSink = &tail{limit: stdoutTailLimit}
 	if rec.Spec.StdoutLimit > 0 {
 		out = &rawBytes{limit: rec.Spec.StdoutLimit}
 	} else if eventStream(rec.Run.Category) {
@@ -322,6 +328,9 @@ func (d *Dispatcher) run(rec Record) {
 	d.removeContext(rec)
 	stdout, overflow := out.result()
 	res := Result{Stdout: stdout, Stderr: errb.bytes(), Reason: reason, Overflow: overflow}
+	if t, ok := out.(*tail); ok {
+		res.StdoutTotal, res.StdoutDropped = t.counts()
+	}
 	// 落账不能被关停取消，否则 Run 会卡在 running。
 	err := d.st.Update(context.Background(), func(tx *store.Tx) error {
 		if err := Settle(tx, rec.Run.ID, state, exit, reason, d.opt.Now()); err != nil {
@@ -488,20 +497,30 @@ func (w *rawBytes) result() ([]byte, bool) {
 	return append([]byte(nil), w.buf...), w.over
 }
 
-// tail 只保留最后 tailLimit 字节。
+// tail 只保留最后 limit 字节，并记下总共写了多少、丢了多少。
 type tail struct {
-	mu  sync.Mutex
-	buf []byte
+	mu             sync.Mutex
+	buf            []byte
+	limit          int
+	total, dropped int64
 }
 
 func (t *tail) Write(p []byte) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.buf = append(t.buf, p...)
-	if n := len(t.buf) - tailLimit; n > 0 {
+	t.total += int64(len(p))
+	if n := len(t.buf) - t.limit; n > 0 {
 		t.buf = append([]byte(nil), t.buf[n:]...)
+		t.dropped += int64(n)
 	}
 	return len(p), nil
+}
+
+func (t *tail) counts() (total, dropped int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.total, t.dropped
 }
 
 func (t *tail) bytes() []byte {
