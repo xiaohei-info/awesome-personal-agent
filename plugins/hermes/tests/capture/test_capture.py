@@ -1,5 +1,6 @@
 """Unit tests: the capture hooks against a stand-in kernel HTTP endpoint (test boundary only)."""
 import importlib.util
+import json
 import os
 import pathlib
 import sys
@@ -271,3 +272,30 @@ def test_helper_main_reads_stdin_and_swallows_errors(kernel, env, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
     runpy.run_path(str(CAPTURE / "__init__.py"), run_name="__main__")  # must not raise, but is logged
     assert "helper failed" in (pathlib.Path(os.environ["APA_HERMES_CAPTURE_DIR"]) / "capture.log").read_text()
+
+
+# Failures are visible beyond the log: each is noted as {at, class} (no text, no credentials) and rides in the next accepted
+# request's `failures`; once delivered they are cleared and not sent again.
+def test_failures_are_noted_by_class_and_reported_with_the_next_accepted_request(hooks, kernel, env, tmp_path):
+    env.setenv("APA_URL", "http://127.0.0.1:9")
+    turn(hooks, "s", "secret words", "ok")
+    hooks["on_session_end"](session_id="s")
+    assert wait_for(lambda: settled_unreachable(tmp_path))
+    kernel["status"] = 403
+    env.setenv("APA_URL", kernel["url"])
+    hooks["post_llm_call"](session_id="s", user_message="", assistant_response="")  # re-send of the kept one: refused
+    assert len(posts(kernel, 1)) == 1
+    assert wait_for(lambda: "status=403" in log_text(tmp_path))
+    noted = json.loads((state(tmp_path) / "failed.json").read_text())
+    assert [n["class"] for n in noted] == ["kernel_unreachable", "kernel_refused"] and all(set(n) == {"at", "class"} for n in noted)
+    assert "secret" not in (state(tmp_path) / "failed.json").read_text() and "tok-1" not in (state(tmp_path) / "failed.json").read_text()
+    kernel["status"] = 200
+    turn(hooks, "s", "next", "turn")
+    hooks["on_session_end"](session_id="s")
+    got = posts(kernel, 2)
+    assert [f["class"] for f in got[1]["body"]["failures"]] == ["kernel_unreachable", "kernel_refused"]
+    assert [f["class"] for f in got[0]["body"]["failures"]] == ["kernel_unreachable"]  # the refused re-send already carried the first one
+    assert wait_for(lambda: json.loads((state(tmp_path) / "failed.json").read_text()) == [])
+    turn(hooks, "s", "third", "turn")
+    hooks["on_session_end"](session_id="s")
+    assert "failures" not in posts(kernel, 3)[2]["body"]
