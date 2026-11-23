@@ -58,6 +58,17 @@ def _injection_allowed(key):
         return False
 
 
+def in_gateway():
+    """True while this process hosts a live Hermes gateway: GatewayRunner has published its plugin message injector
+    (the only host that can take inject_message(session_key=...)). Never true in the dashboard, `hermes chat` or
+    `--oneshot` clients, and not yet true while the gateway is still loading plugins."""
+    try:
+        from hermes_cli.plugins import get_plugin_manager
+        return bool(get_plugin_manager().has_gateway_message_injector)
+    except Exception:  # noqa: BLE001 - no plugin runtime or another shape: not a gateway
+        return False
+
+
 def current(enabled=None, key=None):
     """Missing items for this process. apa-wake passes enabled=True and its own key from register()."""
     if enabled is None:

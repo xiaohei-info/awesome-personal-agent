@@ -79,3 +79,16 @@ def test_texts_are_product_language_and_config_keys_only_in_how(r):
     for g in r.missing(list(r.GAPS)):
         assert g["zh"] and g["en"] and g["how"]["zh"] and g["how"]["en"]
         assert "APA_" not in g["zh"] + g["en"] and "allow_gateway_injection" not in g["zh"] + g["en"]
+
+
+def test_in_gateway_is_hermes_live_gateway_injector(r, hermes, monkeypatch):
+    """The process kind comes from Hermes itself (GatewayRunner publishes the injector), not from env or process names."""
+    ready(hermes, monkeypatch)
+    plugins = sys.modules["hermes_cli.plugins"]
+    for live in (False, True):
+        monkeypatch.setattr(plugins, "get_plugin_manager", lambda live=live: types.SimpleNamespace(
+            has_gateway_message_injector=live, list_plugins=lambda: hermes["plugins"]))
+        assert r.in_gateway() is live
+        assert r.current() == []  # readiness (and so the declaration) does not depend on the process kind
+    monkeypatch.setitem(sys.modules, "hermes_cli.plugins", None)
+    assert r.in_gateway() is False
