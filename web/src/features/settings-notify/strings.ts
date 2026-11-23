@@ -17,7 +17,7 @@ const zh = {
   pauseAll: "暂停所有提醒",
   pauseAllOn: "暂停所有提醒",
   pauseUntil: "到这个时间自动恢复（留空表示一直暂停）",
-  pauseEffectOn: "开着：手机和对话里都不再收到提醒，都先放在今天页；问题照样进「等你决定」；来源连续读不到、Agent 运行失败这类告警照常送达。",
+  pauseEffectOn: "开着：提醒只放今天页；问题照进「等你决定」；来源读不到、运行失败等告警照发。",
   pauseEffectOff: "关着：按各页的设置提醒。打开后，恢复之前的提醒都只在今天页。",
   ofCap: (cap: number) => `，上限 ${cap} 条`,
   noMutes: "现在没有暂停的",
