@@ -410,7 +410,8 @@ describe("跨来源合并的批量归类：过程可追溯、可撤销（§9.3�
     expect(dup).toHaveTextContent("判定重复 → 「周报模板改版 W47」 · 写作模型判断");
     expect(dup).toHaveTextContent("理由：本人忽略过的同一件事");
     expect(within(dup).getByRole("button", { name: "撤销合并" })).toBeInTheDocument();
-    expect(within(within(panel as HTMLElement).getByRole("listitem", { name: "导出报表加一列" })).queryByRole("button")).toBeNull();
+    expect(within(panel as HTMLElement).queryByRole("listitem", { name: "导出报表加一列" }), "规则比过留着的只记条数").toBeNull();
+    expect(panel).toHaveTextContent("另有 1 条规则比过没有相似的，留着");
     expect(document.querySelector("main")!.textContent, "界面不出现来源 id").not.toMatch(/src_|mb_|run_/);
   });
 });

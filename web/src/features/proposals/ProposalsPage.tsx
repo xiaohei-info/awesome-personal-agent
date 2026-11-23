@@ -214,6 +214,10 @@ interface Activity {
     decisions: { item: string; title: string; source?: string; action: string; target?: string; target_title?: string; why?: string; by: string }[] }[];
 }
 
+// 规则比过、没有相似记录而留着的不逐条列，只记条数；折叠掉的排前面，其次是模型看过的。
+const quiet = (d: { action: string; by: string }) => d.action === "keep" && d.by === "rule";
+const rank = (d: { action: string }) => (d.action === "keep" || d.action === "undone" ? 1 : 0);
+
 /** 最近自动归类（§9.3）：每一批归了几条、调了几次模型、送出多少字；每条写明去处与理由，折叠掉的可以一键撤销。 */
 function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => Promise<void>; reload: number }) {
   const t = useT(strings);
@@ -236,7 +240,7 @@ function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => P
           <h3>{t.batchHead(new Date(b.at).toLocaleString())}</h3>
           <p className="sub">{t.batchCost(b.size, !!b.run, b.chars)}</p>
           <ul className="rows">
-            {b.decisions.map((d) => (
+            {b.decisions.filter((d) => !quiet(d)).sort((x, y) => rank(x) - rank(y)).map((d) => (
               <li key={d.item} className="act-row" aria-label={d.title}>
                 <div>
                   <span>
@@ -256,6 +260,7 @@ function MergeActivity({ onUnmerge, reload }: { onUnmerge: (member: string) => P
               </li>
             ))}
           </ul>
+          {b.decisions.some(quiet) && <p className="sub">{t.ruleKept(b.decisions.filter(quiet).length)}</p>}
         </section>
       ))}
       <p className="sub"><Link to="/settings/merge">{t.mergeSettings}</Link></p>
