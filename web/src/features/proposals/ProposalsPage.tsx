@@ -425,6 +425,8 @@ export function ProposalsPage() {
   const [source, setSource] = useState("");
   const [project, setProject] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [hostedOpen, setHostedOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [batching, setBatching] = useState(false);
   const [outcome, setOutcome] = useState<{ done: number; skipped: { title: string; why: string }[] } | null>(null);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
@@ -500,12 +502,15 @@ export function ProposalsPage() {
   const all = items ?? [];
   const opts = (pick: (i: Proposal) => string | undefined) => [...new Set(all.map(pick).filter((v): v is string => !!v))].sort();
   const shown = all.filter((i) => (!source || i.origin?.source === source) && (!project || i.project === project));
-  const recommended = shown.filter((i) => i.proposal?.recommend).length;
+  const parts = arrange(shown, origins);
+  // 按推荐处理只管眼前看得见的：折叠着的组（代码托管通知、历史清单）先展开才算，没展开的不进批量，也不进条数与分布。
+  const visible = [...parts.pinned, ...parts.rest, ...(hostedOpen ? parts.hosted : []), ...(historyOpen ? parts.history : [])];
+  const recommended = visible.filter((i) => i.proposal?.recommend).length;
   const projectName = useNames("project");
   const sourceName = useNames("source");
   // 按推荐处理前先看清楚会发生什么：各推荐处置各有几条。
   const plan = (["accept", "attach", "dismiss"] as const)
-    .map((a) => [a, shown.filter((i) => i.proposal?.recommend === a).length] as const)
+    .map((a) => [a, visible.filter((i) => i.proposal?.recommend === a).length] as const)
     .filter(([, n]) => n > 0)
     .map(([a, n]) => t.planPart(t.do[a], n))
     .join(" · ");
@@ -516,7 +521,7 @@ export function ProposalsPage() {
     setError(null);
     setOutcome(null);
     try {
-      const filter = { ...(source && { source }), ...(project && { project }) };
+      const filter = { ...(source && { source }), ...(project && { project }), ids: visible.filter((i) => i.proposal?.recommend).map((i) => i.id) };
       const r = await api.post<{ results: BatchResult[] }>("/proposals/batch", { mode: "recommended", filter });
       const title = (id: string) => all.find((i) => i.id === id)?.title ?? id;
       setOutcome({
@@ -569,7 +574,6 @@ export function ProposalsPage() {
     window.dispatchEvent(new Event(COUNTS_EVENT));
     return true;
   };
-  const parts = arrange(shown, origins);
   const ended = parts.hosted.filter((i) => origins[i.id]?.ended);
   const card = (i: Proposal) => <Card key={i.id} item={i} rejection={rejections[i.id]} candidates={candidates} onAct={act} ready={ready} />;
   const typeName = (k: string) => t.family[k] ?? (k || t.family[""]);
@@ -681,7 +685,7 @@ export function ProposalsPage() {
             </section>
           )}
           {parts.hosted.length > 0 && (
-            <details className="panel" aria-label={t.hostedHead}>
+            <details className="panel" aria-label={t.hostedHead} open={hostedOpen} onToggle={(e) => setHostedOpen(e.currentTarget.open)}>
               <summary>{t.hostedSummary(parts.hosted.length, parts.objects.length, ended.length)}</summary>
               <p className="sub">{t.hostedWhy}</p>
               {ended.length > 0 && (
@@ -697,6 +701,18 @@ export function ProposalsPage() {
                     </ul>
                   )}
                   {g.items.map(card)}
+                </section>
+              ))}
+            </details>
+          )}
+          {parts.history.length > 0 && (
+            <details className="panel" aria-label={t.historyHead} open={historyOpen} onToggle={(e) => setHistoryOpen(e.currentTarget.open)}>
+              <summary>{t.historySummary(parts.history.length, parts.historySources.length)}</summary>
+              <p className="sub">{t.historyWhy}</p>
+              {parts.historySources.map(([src, its]) => (
+                <section key={src} aria-label={sourceName(src) || src} className="group">
+                  <h3>{sourceName(src) || src} · {t.count(its.length)}</h3>
+                  {its.map(card)}
                 </section>
               ))}
             </details>
