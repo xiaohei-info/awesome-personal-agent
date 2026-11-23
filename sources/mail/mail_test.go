@@ -696,3 +696,13 @@ func TestNotificationMailLink(t *testing.T) {
 		t.Fatalf("links %v", links)
 	}
 }
+
+// 工具 stderr 压成一行真实原因：去颜色码与 --trace 提示行，末行不再是废话。
+func TestTemporaryFailureReportsRealReason(t *testing.T) {
+	stderr := "\x1b[91mError\x1b[0m: cannot connect to imap.example:993\n\x1b[96mNote\x1b[0m: Run with --trace to enable verbose logs with backtrace.\n"
+	r := failing("himalaya 2.0.0", stderr, errors.New("exit status 1"), "")
+	code, _, errs := exec1(t, r, input(""))
+	if code != ExitTemporary || errs != "himalaya 失败: exit status 1: Error: cannot connect to imap.example:993\n" {
+		t.Fatalf("code=%d err=%q", code, errs)
+	}
+}

@@ -211,6 +211,9 @@ func TestSourcesFlagMissingCommandUnsetScopeAndFullTextOutbound(t *testing.T) {
 	if d, _ := c.Find("src_full"); d.Data["last_run"] != "failed" || fmt.Sprint(d.Data["problems"]) != "[source_outbound_full source_last_failed]" || d.Data["consecutive_failures"] != 2 {
 		t.Fatalf("last run: %+v", d)
 	}
+	if d, _ := c.Find("src_full"); d.Data["last_failure_kind"] != "" || !strings.Contains(d.Next, "temporary failure, retried automatically with backoff: read last_error on the source page") {
+		t.Fatalf("next step: %+v", d)
+	}
 	// 没有外部端点时，外部范围不起作用。
 	f.Policy.GenerateEndpoint.Locality = "local"
 	if d, _ := sources(f, Env{CommandExists: func(string) bool { return true }}).Find("src_unset"); d.Status != OK {

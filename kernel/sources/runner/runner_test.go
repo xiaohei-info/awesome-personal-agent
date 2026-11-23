@@ -997,3 +997,26 @@ func TestPreviousMetricSurvivesRestart(t *testing.T) {
 		t.Fatalf("after restart: %+v", evs)
 	}
 }
+
+// 失败原因（外呼调用器附的 stderr 末行）进来源统计，不再只剩 "exit status N"。
+func TestClassifyKeepsStderrTail(t *testing.T) {
+	code := func(n int) domain.Run {
+		return domain.Run{State: domain.RunFailed, ExitCode: &n}
+	}
+	for _, c := range []struct {
+		run    domain.Run
+		reason string
+		cls    class
+		want   string
+	}{
+		{code(1), "exit status 1: imap connect refused", clsTransient, "exit status 1: imap connect refused"},
+		{code(1), "exit status 1", clsTransient, "exit status 1"},
+		{code(2), "exit status 2: login failed", clsNeedsHuman, "exit status 2 (auth or config failure): login failed"},
+		{code(3), "exit status 3: bad", clsPermanent, "exit status 3 (permanent failure): bad"},
+		{code(9), "exit status 9: x", clsTransient, "unexpected exit status 9: x"},
+	} {
+		if cls, got := classify(c.run, c.reason); cls != c.cls || got != c.want {
+			t.Errorf("%q: got %s %q, want %s %q", c.reason, cls, got, c.cls, c.want)
+		}
+	}
+}
