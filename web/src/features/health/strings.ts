@@ -55,6 +55,10 @@ const zh = {
   noticeUnknown: "有一步没完成，原因见操作记录",
   stalled: "派出去超过 24 小时没回音",
   lag: (n: number) => `${n} 个定时迟到了；常发生时检查主机是否休眠`,
+  captureLine: (cls: string, n: number, at: string) =>
+    `${({ no_project: "聊天所在目录不属于任何项目，没有记下", capture_disabled: "项目的聊天记录被关掉了，没有记下", kernel_unreachable: "插件连不上 APA，聊天没送出去",
+      no_credentials: "插件没有可用的凭据，聊天没送出去", kernel_refused: "APA 拒绝了插件送来的聊天", plugin_error: "插件自己出错，聊天没送出去" } as Record<string, string>)[cls] ?? "聊天没能记下"}（近 24 小时 ${n} 次，最近 ${new Date(at).toLocaleString("zh-CN")}）`,
+  captureFix: (cls: string): string => (cls === "no_project" ? "去登记项目目录" : "去看项目"),
   unknown: (n: number) => `${n} 处问题`,
   // 影响
   sourceImpact: "这个来源的新消息进不来",
@@ -139,6 +143,10 @@ const en: typeof zh = {
   noticeUnknown: "A step didn't finish; see the audit log for why",
   stalled: "Handed out over 24 hours ago with no reply",
   lag: (n) => `${n} timers fired late; if it keeps happening, check machine sleep`,
+  captureLine: (cls, n, at) =>
+    `${({ no_project: "A chat's directory belongs to no project, so it was not noted", capture_disabled: "Chat capture is off for the project, so it was not noted", kernel_unreachable: "The plugin could not reach APA; the chat was not sent",
+      no_credentials: "The plugin has no usable credential; the chat was not sent", kernel_refused: "APA refused what the plugin sent", plugin_error: "The plugin failed itself; the chat was not sent" } as Record<string, string>)[cls] ?? "A chat could not be noted"} (${n} in the last 24 hours, latest ${new Date(at).toLocaleString("en-US")})`,
+  captureFix: (cls) => (cls === "no_project" ? "Register the project directory" : "See the project"),
   unknown: (n) => `${n} problems`,
   sourceImpact: "New messages from it can't get in",
   notDone: "It didn't get done",

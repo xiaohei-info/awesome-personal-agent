@@ -6,13 +6,13 @@ import { App } from "../../app/App";
 import { feature } from "./index";
 import type { HealthReport, Signal } from "./HealthPage";
 
-// 测试边界替身：按 api/health 的契约应答 GET /v1/health（十三项信号、顺序固定，错误体见附录 B.3）与 GET /v1/doctor。
+// 测试边界替身：按 api/health 的契约应答 GET /v1/health（十四项信号、顺序固定，错误体见附录 B.3）与 GET /v1/doctor。
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 const ORDER = ["source_failures", "outcall", "delivery_backlog", "chain_trips", "agentsmd_drift", "pack_rejections", "model_unavailable",
-  "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag"];
+  "unjudged_backlog", "rule_fallbacks", "receipt_failures", "other_alerts", "stalled_delegations", "clock_lag", "capture_failures"];
 const TITLES = ["来源读取失败", "Agent 后台运行排队或超时", "提醒发不出去", "自动化连锁被叫停", "仓库规范和 APA 不一致", "能力包加载失败", "模型连不上",
-  "积压待处理", "自动规则被退回试运行", "交回被拒", "其他告警", "委派久无回音", "定时器迟到"];
+  "积压待处理", "自动规则被退回试运行", "交回被拒", "其他告警", "委派久无回音", "定时器迟到", "聊天没记下"];
 
 // 形状与取值同 kernel/doctor（codes.go）：全部正常的一份与有问题的一份。
 const FINE = {
@@ -81,11 +81,11 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01；界面设计 §5.3）",
   /** 「要你处理」里含某句话的那一行。 */
   const row = (re: RegExp) => act().getByText(re).closest("li")!;
 
-  it("全部正常：页头「运行正常」，十三项都有中文名并折叠在一起；没有写请求", async () => {
+  it("全部正常：页头「运行正常」，十四项都有中文名并折叠在一起；没有写请求", async () => {
     const s = serve(() => json(200, report()));
     mount(s.impl);
     expect(await screen.findByRole("heading", { level: 1, name: "运行正常" })).toBeInTheDocument();
-    const fine = main().getByText("13 项都正常").closest("details")!;
+    const fine = main().getByText("14 项都正常").closest("details")!;
     expect([...fine.querySelectorAll("li")].map((li) => li.textContent)).toEqual(TITLES);
     expect(main().queryByRole("region", { name: "要你处理" })).not.toBeInTheDocument();
     expect(s.calls.filter((c) => !c.startsWith("GET"))).toEqual([]);
@@ -134,7 +134,7 @@ describe("诊断 › 状态（flow-health / ACT-HLT-01；界面设计 §5.3）",
     expect(info().getByText("还有 3 个在排队")).toBeInTheDocument();
     expect(info().getByText("52 条等模型恢复后处理")).toBeInTheDocument();
     expect(info().getByText("3 条已过期，不再自动处理")).toBeInTheDocument();
-    expect(main().getByText("其余 3 项正常")).toBeInTheDocument();
+    expect(main().getByText("其余 4 项正常")).toBeInTheDocument();
     expect(main().queryByRole("button", { name: /修复|fix/i })).not.toBeInTheDocument();
   });
 
@@ -309,5 +309,23 @@ describe("运行故障与被拒的交回说人话（界面设计 §5.3）", () =
     expect(within(refused).getByRole("link", { name: "看这件事" })).toHaveAttribute("href", "/items/itm_open");
     expect(act().getByText(/要重新登录/)).toBeInTheDocument();
     expect(main().queryByText(/其他告警/)).toBeNull();
+  });
+
+  // 聊天没记下也看得见：没有对应项目是常态（仅供知晓、给去登记目录的入口）；插件或内核的问题要你处理。逐类写次数与最近时间，不含正文与凭据。
+  it("聊天没记下：没有项目归仅供知晓，插件送不出去归要你处理；各写次数与最近时间", async () => {
+    const bad = {
+      capture_failures: { ok: false, count: 2, severity: "warning", why: "x", detail: ["no_project", "kernel_unreachable"], captures: [
+        { class: "no_project", count: 3, last_at: "2030-01-02T03:04:05Z" },
+        { class: "kernel_unreachable", count: 1, last_at: "2030-01-02T01:00:00Z" },
+      ] },
+    };
+    mount(serve(() => json(200, report(bad))).impl);
+    const down = (await screen.findByText(/插件连不上 APA，聊天没送出去/)).closest("li")!;
+    expect(down).toHaveTextContent("近 24 小时 1 次");
+    expect(within(down).getByRole("link", { name: "去看项目" })).toHaveAttribute("href", "/projects");
+    const none = within(main().getByRole("region", { name: "仅供知晓" })).getByText(/聊天所在目录不属于任何项目，没有记下/).closest("li")!;
+    expect(none).toHaveTextContent("近 24 小时 3 次");
+    expect(within(none).getByRole("link", { name: "去登记项目目录" })).toHaveAttribute("href", "/projects");
+    expect(act().queryByText(/聊天所在目录不属于任何项目/)).toBeNull();
   });
 });
