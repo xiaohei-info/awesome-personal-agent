@@ -198,24 +198,24 @@ describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
     const nav = await openAt("/");
     expect(within(nav).getAllByRole("heading").map((h) => h.textContent)).toEqual(["处理", "工作", "自动化"]);
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "今天", "等你决定", "建议", "事项", "项目", "消息来源", "自动规则", "设置", "诊断",
+      "今天", "等你决定", "建议", "事项", "项目", "消息来源", "定时安排", "设置", "诊断",
     ]);
     expect(await screen.findByRole("heading", { name: "今天 页面" })).toBeInTheDocument();
   });
 
   // 旧地址一个不改：每个原页面仍在原地址，落到所属入口并高亮对应页签。
   const OLD: [string, string, string][] = [
-    ["/today", "今天", "今天"], ["/briefs", "今天", "简报"], ["/unread", "今天", "今天"], ["/briefs/schedule", "自动规则", "定时安排"],
+    ["/today", "今天", "今天"], ["/briefs", "今天", "简报"], ["/unread", "今天", "今天"], ["/briefs/schedule", "定时安排", "定时安排"],
     ["/decisions", "等你决定", "等你决定"], ["/proposals", "建议", "建议"],
     ["/items", "事项", "事项"], ["/items/itm_1", "事项", "事项"], ["/pack-views", "事项", "事项"],
     ["/projects", "项目", "项目"], ["/materials", "项目", "材料"],
     ["/agent-changes", "诊断", "Agent 改动"], ["/rule-changes", "诊断", "规矩改动"], ["/runs", "诊断", "运行记录"],
     ["/sources", "消息来源", "来源"], ["/spot-check", "消息来源", "抽查"], ["/judgment", "消息来源", "筛选门槛"],
-    ["/rules", "自动规则", "规则"],
+    ["/rules", "设置", "自动动手"], ["/settings/rules", "设置", "自动动手"],
     ["/health", "诊断", "状态"], ["/audit", "诊断", "操作记录"],
     ["/settings", "设置", "我来拍板"], ["/settings/channels", "设置", "提醒渠道"], ["/settings/outward-api", "设置", "对外接口"], ["/settings-exec", "设置", "Agent"],
     ["/settings/grants", "设置", "Agent"], ["/settings/agents", "设置", "Agent"], ["/settings-security", "设置", "登录与会话"], ["/purge", "设置", "永久删除"],
-    ["/settings/general", "设置", "通用"], ["/settings/notify", "设置", "提醒与打扰"], ["/settings/access", "设置", "Agent"], ["/settings/models", "设置", "模型"], ["/settings/note-vaults", "设置", "笔记库"], ["/settings/storage", "设置", "存储"],
+    ["/settings/general", "设置", "通用"], ["/settings/notify", "设置", "提醒与推送"], ["/settings/access", "设置", "Agent"], ["/settings/models", "设置", "模型"], ["/settings/note-vaults", "设置", "笔记库"], ["/settings/storage", "设置", "存储"],
   ];
   it.each(OLD)("%s → 入口「%s」页签「%s」", async (at, entry, tab) => {
     const nav = await openAt(at);
@@ -236,6 +236,12 @@ describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
     await openAt("/pack-views?view=brief/brief");
     expect(await screen.findByRole("heading", { name: "事项 页面" })).toBeInTheDocument();
     expect(screen.getByTestId("at")).toHaveTextContent("/items?view=brief/brief");
+  });
+
+  it("原「自动规则 › 规则」地址 /rules 改写到设置 › 自动动手，保留锚点", async () => {
+    await openAt("/rules#rule-follow-up%2Fclock_rules%2Ffollow-up-interval");
+    expect(await screen.findByRole("heading", { name: "自动动手 页面" })).toBeInTheDocument();
+    expect(screen.getByTestId("at")).toHaveTextContent("/settings/rules#rule-follow-up%2Fclock_rules%2Ffollow-up-interval");
   });
 
   it("久未推进提醒的锚点保留", async () => {
@@ -265,7 +271,7 @@ describe("导航：入口、页签与旧地址（界面设计 §3.1）", () => {
       const more = within(nav).getByRole("button", { name: "更多" });
       await userEvent.click(more);
       const sheet = screen.getByRole("dialog", { name: "全部页面" });
-      expect(within(sheet).getAllByRole("link").map((a) => a.textContent)).toEqual(["项目", "消息来源", "自动规则", "设置", "诊断"]);
+      expect(within(sheet).getAllByRole("link").map((a) => a.textContent)).toEqual(["项目", "消息来源", "定时安排", "设置", "诊断"]);
       expect(within(sheet).getAllByRole("link")[0]).toHaveFocus();
       await userEvent.keyboard("{Escape}");
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -335,9 +341,9 @@ describe("设置的分组（界面设计 §3.1）", () => {
     const sub = await screen.findByRole("navigation", { name: "设置页签" });
     expect(within(sub).getAllByRole("heading").map((h) => h.textContent)).toEqual(["日常", "Agent 与模型", "连接", "数据与安全"]);
     expect(within(sub).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "通用", "提醒与打扰", "我来拍板", "Agent", "模型", "跨来源合并", "提醒渠道", "笔记库", "对外接口", "登录与会话", "存储", "永久删除",
+      "通用", "提醒与推送", "我来拍板", "自动动手", "Agent", "模型", "跨来源合并", "提醒渠道", "笔记库", "对外接口", "登录与会话", "存储", "永久删除",
     ]);
-    expect(within(sub).getByRole("link", { name: "提醒与打扰" })).toHaveAttribute("aria-current", "page");
+    expect(within(sub).getByRole("link", { name: "提醒与推送" })).toHaveAttribute("aria-current", "page");
   });
 
   it("窄屏：设置入口落到设置首页，按组列出各页；进到某页后有返回设置首页的链接", async () => {
@@ -349,8 +355,8 @@ describe("设置的分组（界面设计 §3.1）", () => {
       await userEvent.click(within(screen.getByRole("dialog")).getByRole("link", { name: "设置" }));
       expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("设置");
       expect(screen.getAllByRole("list").filter((l) => ["日常", "Agent 与模型", "连接", "数据与安全"].includes(l.getAttribute("aria-label") ?? ""))).toHaveLength(4);
-      await userEvent.click(within(screen.getByRole("list", { name: "日常" })).getByRole("link", { name: /提醒与打扰/ }));
-      expect(await screen.findByRole("heading", { name: "提醒与打扰 页面" })).toBeInTheDocument();
+      await userEvent.click(within(screen.getByRole("list", { name: "日常" })).getByRole("link", { name: /提醒与推送/ }));
+      expect(await screen.findByRole("heading", { name: "提醒与推送 页面" })).toBeInTheDocument();
       await userEvent.click(screen.getByRole("link", { name: /‹ 设置/ }));
       expect(await screen.findByRole("list", { name: "数据与安全" })).toBeInTheDocument();
     } finally {

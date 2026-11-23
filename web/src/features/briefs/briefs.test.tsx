@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup as cleanupAll, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -20,7 +20,7 @@ const routines = [{ id: "ins_r", pack: "routine", params: { schedule: "CRON_TZ=U
 const instances = [{ id: "ins_1", pack: "brief", params: { schedule: "30 8 * * 1-5" }, enabled: true }, { id: "ins_2", pack: "follow-up", params: {}, enabled: true }];
 
 interface Calls { posts: { body: unknown; csrf: string | null }[]; urls: string[]; patches?: { url: string; body: unknown }[] }
-function server(o: { patchFail?: boolean; fail?: boolean; items?: unknown[]; reject?: boolean; routine?: boolean; host?: string; caps?: Record<string, string>; ready?: boolean; instances?: unknown[] } = {}, calls: Calls = { posts: [], urls: [] }) {
+function server(o: { delivery?: unknown; patchFail?: boolean; fail?: boolean; items?: unknown[]; reject?: boolean; routine?: boolean; host?: string; caps?: Record<string, string>; ready?: boolean; instances?: unknown[] } = {}, calls: Calls = { posts: [], urls: [] }) {
   const f = (async (url: string, init?: RequestInit) => {
     calls.urls.push(url);
     if (url === "/v1/projects") return json(200, { projects: [{ id: "home", name: "家务" }, { id: "work", name: "工作" }] });
@@ -31,6 +31,7 @@ function server(o: { patchFail?: boolean; fail?: boolean; items?: unknown[]; rej
       const it = (o.items ?? items).find((x) => (x as { id: string }).id === decodeURIComponent(one[1]));
       return it ? json(200, { item: it, relations: [] }) : json(404, { code: "not_found", why: "no such item", next: "" });
     }
+    if (url === "/v1/settings/policy" && o.delivery) return json(200, { version: 3, disturb: { delivery: o.delivery } });
     if (url === "/v1/packs") return json(200, { packs: o.routine ? [...packs, { name: "routine", instance_params: {} }] : packs });
     if (url.startsWith("/v1/agents?")) return json(200, { agents: [], selected: { agent_name: o.host, permission_cap: o.caps?.[o.host ?? ""] ?? "read" }, reason: "" });
     const ip = url.match(/^\/v1\/instances\/([^/]+)$/);
@@ -190,6 +191,22 @@ describe("简报页", () => {
     expect(card).not.toHaveAttribute("open");
     expect(within(card).getByText(/工作日 08:30 · 开/)).toBeInTheDocument();
     expect(screen.queryByText("30 8 * * 1-5")).not.toBeInTheDocument();
+  });
+
+  it("每张卡只读写明结果送到哪（取自投递矩阵：按实例覆盖或跟随类型），链到提醒与推送的对应行；取不到矩阵时不显示", async () => {
+    const delivery = { default_channel: "channel:ch-1", rows: { "task_result:brief": { agent: "main", user: "off" }, "task_result:review": { agent: "off", user: "default" } } };
+    mount(server({ delivery, instances: [...instances, { id: "ins_v", pack: "review", params: { schedule: "30 17 * * 5" }, enabled: true }] }));
+    const line1 = await screen.findByText("结果送到：推到对话里（马上）");
+    expect(line1.closest("p")!.querySelector("a")).toHaveAttribute("href", "/settings/notify#row-task_result:brief");
+    expect(screen.getByText("结果送到：默认渠道")).toBeInTheDocument();
+    cleanupAll();
+    mount(server({ delivery: { default_channel: "", rows: { "task_result:brief": { agent: "main", user: "off" }, "instance:ins_1": { agent: "off", user: "off" } } } }));
+    const own = await screen.findByText("结果送到：今天页的提醒");
+    expect(own.closest("p")!.querySelector("a")).toHaveAttribute("href", "/settings/notify#row-instance:ins_1");
+    cleanupAll();
+    mount(server());
+    await screen.findByText(/工作日 08:30/);
+    expect(screen.queryByText(/结果送到/)).toBeNull();
   });
 
   it("Agent 还不能后台运行时卡片写明等它接入并链到设置；「立即跑一次」不可点", async () => {

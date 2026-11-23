@@ -80,13 +80,14 @@ const checked = async (name: string) => ((await modes(name)).getAllByRole("radio
 
 beforeEach(() => sessionStorage.clear());
 
-describe("自动规则 › 规则", () => {
-  it("ACT-RULE-03: 按类别分「提醒我 / 替我动手 / 其他」，名字是中文，模式是「关 / 试运行 / 开」", async () => {
+describe("设置 › 自动动手（原 自动规则 › 规则）", () => {
+  it("ACT-RULE-03: 按类别分「替我动手 / 其他」，名字是中文，模式是「关 / 试运行 / 开」；提醒类规则不在这里（开关在提醒与推送的矩阵行）", async () => {
     mount(server().impl);
-    const remind = within(await screen.findByRole("region", { name: "提醒我" }));
-    expect(remind.getByText(N2)).toBeInTheDocument();
-    expect(await checked(N2)).toBe("开");
-    const act = within(screen.getByRole("region", { name: "替我动手" }));
+    const act = within(await screen.findByRole("region", { name: "替我动手" }));
+    expect(screen.queryByRole("region", { name: "提醒我" })).toBeNull();
+    expect(screen.queryByText(N2)).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: `${N2}：开关` })).toBeNull();
+    expect(screen.getByRole("link", { name: "跟进与停滞提醒的开关在「提醒与推送」" })).toHaveAttribute("href", "/settings/notify");
     expect(act.getByText(N1)).toBeInTheDocument();
     expect(await checked(N1)).toBe("试运行");
     expect(within(screen.getByRole("region", { name: "其他" })).getByText("x")).toBeInTheDocument();
@@ -104,8 +105,8 @@ describe("自动规则 › 规则", () => {
   it("ACT-RULE-03: 可切关", async () => {
     const s = server();
     mount(s.impl);
-    await userEvent.click((await modes(N2)).getByRole("radio", { name: "关" }));
-    await waitFor(() => expect(s.rules[1].mode).toBe("off"));
+    await userEvent.click((await modes(N1)).getByRole("radio", { name: "关" }));
+    await waitFor(() => expect(s.rules[0].mode).toBe("off"));
   });
 
   it("ACT-RULE-03: 服务端拒绝（web_only）时显示原因，模式保持原值", async () => {
@@ -132,7 +133,7 @@ describe("自动规则 › 规则", () => {
   it("ACT-RULE-03: 开着或关着的规则不查观察记录", async () => {
     const s = server();
     mount(s.impl);
-    await screen.findByRole("region", { name: "提醒我" });
+    await screen.findByRole("region", { name: "替我动手" });
     await waitFor(() => expect(s.audits.length).toBe(1));
     expect(s.audits.map((a) => a.get("actor"))).toEqual(["rule:" + K1]);
   });
