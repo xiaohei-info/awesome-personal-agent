@@ -95,6 +95,14 @@
 - 全量 e2e（`.github/e2e/full-*.txt`，覆盖 `tests/e2e` 全部包）只在发版时跑：推 `v*` tag 自动触发，发版前也可在 Actions 手动触发 `release` 工作流。发布以全量 e2e 通过为前提，不通过不出 release（`.github/workflows/release.yml`）。
 - 新增 e2e 包必须登记到某个 `full-*.txt`（`.github/e2e/pkgs.sh check` 在 CI 里校验）；主干流程级的用例再加入 `smoke.txt`。
 
+## 主干与部署
+
+- **main 是唯一主干，且始终等于线上。** 线上 `apa version` 自报的 commit 必须是 main 的 HEAD；不允许线上跑着 main 之外的提交。
+- **开发一律从 main 切分支**（各自的 worktree），不从别的功能分支或旧基点切；开工前先确认自己的基点就是当前 main。
+- **验好合回 main 之后才能部署**：构建、单测、冒烟 e2e 在合回 main 的结果上通过，才进入部署。
+- **部署只从 main 的检出做**：用 main 的 worktree 构建前端与二进制，部署前记下 main 的 commit，部署后核对 `apa version` 的 commit 等于它；不从功能分支、收敛分支或带未提交改动的工作树部署。
+- **一次只允许一个部署型任务**：并行开发的几批先依次合回 main，再由一个任务构建、部署一次；部署进行中不开第二个部署。
+
 ## 本机部署
 
 macOS 上换二进制一律走 `deploy/launchd/update.sh`（重启前确认没有在跑的运行、备份、对比账本）。它在拷贝之后以固定标识重签：ad-hoc 签名每次构建都变，系统按签名记的隐私授权会失效，外置盘上的 Agent 运行以 126 失败。不要就地重签正在运行的文件：进程会被系统杀掉，之后要 kickstart。原因与命令见 `deploy/README.md`。
