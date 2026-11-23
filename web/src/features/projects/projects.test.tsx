@@ -33,7 +33,15 @@ function server(opts: { putDenied?: boolean } = {}) {
     if (url === "/v1/executors") return json(200, { executors: [{ id: "work-host.cli", kind: "external-cli", host: "work-host" }, { id: "other-host.cli", kind: "external-cli" }] });
     if (url.startsWith("/v1/items?project=")) {
       const id = new URL(url, "http://x").searchParams.get("project");
-      return json(200, { items: id === "p_work" ? [{ id: "item_1", phase: "open", version: 1, kind: "task", title: "项目内事项" }] : [] });
+      return json(200, { items: id === "p_work" ? [
+        { id: "item_1", phase: "open", version: 1, kind: "task", title: "项目内事项" },
+        { id: "item_2", phase: "needs_input", version: 1, kind: "task", title: "等你拍板的事" },
+        { id: "item_3", phase: "proposed", version: 1, kind: "task", title: "一条建议" },
+        { id: "item_4", phase: "done", version: 1, kind: "task", title: "做完的事", project: "p_work" },
+      ] : [] });
+    }
+    if (url === "/v1/items?phase=done") {
+      return json(200, { items: [{ id: "item_4", phase: "done", version: 1, kind: "task", title: "做完的事", project: "p_work" }], done_at: { item_4: "2030-01-08T02:00:00Z" } });
     }
     const co = url.match(/^\/v1\/settings\/projects\/([^/]+)\/capture-outbound$/);
     if (co && method === "PUT") {
@@ -203,10 +211,16 @@ describe("项目页", () => {
     expect(await screen.findByText(/only be changed by the owner/)).toBeInTheDocument();
   });
 
-  it("事项视图：显示项目下的事项，空项目显示空状态", async () => {
+  it("事项视图：按阶段分组（等你决定在前），建议只给条数，已完成收起并写完成那天", async () => {
     const s = server();
     mount(s.impl, "/projects/p_work");
     expect(await screen.findByRole("link", { name: "项目内事项" })).toHaveAttribute("href", "/items/item_1");
+    const heads = within(screen.getByRole("main")).getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(heads.slice(0, 2)).toEqual(["等你决定 1", "进行中 1"]);
+    expect(screen.queryByRole("link", { name: "一条建议" })).toBeNull();
+    expect(screen.getByText(/另有 1 条建议还没处理/)).toBeInTheDocument();
+    expect(await screen.findByText("已完成（1）")).toBeInTheDocument();
+    expect(screen.getByText(/2030-01-08 完成/)).toBeInTheDocument();
     expect(s.calls.some((c) => c.path === "/v1/items?project=p_work")).toBe(true);
   });
 

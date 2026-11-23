@@ -8,7 +8,10 @@ import type { Item } from "../items/ItemsPage";
 import { ProgressForm } from "./ProgressForm";
 import { errorText as msg, locale, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
-import { useItemTitle } from "../../app/names";
+import { useItemTitle, useNamed } from "../../app/names";
+import { loadDone } from "../done/DonePage";
+import { monday } from "../calendar/layout";
+import { hostClock } from "../items/schedule";
 import { Val } from "../../app/values";
 import { strings } from "./strings";
 
@@ -28,12 +31,17 @@ export function TodayPage() {
   const [back, setBack] = useState<Run[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [since] = useState(() => localStorage.getItem(SEEN) ?? "");
+  const [doneN, setDoneN] = useState<{ today: number; week: number } | null>(null);
 
   const load = useCallback(
     () => api.get<Today>("/today").then((r) => setData(r), (e) => setError(e)),
     [api],
   );
   useEffect(() => { load(); }, [load]);
+  // 底部一行完成计数：做完的事从上面消失后仍看得到进度；明细只在「已完成」页，这里不重复列。取不到就不显示。
+  const countDone = useCallback(() => hostClock(api).then((c) => loadDone(api, c.utc_offset).then((ds) =>
+    setDoneN({ today: ds.filter((d) => d.day === c.today).length, week: ds.filter((d) => d.day >= monday(c.today)).length }))).catch(() => setDoneN(null)), [api]);
+  useEffect(() => { countDone(); }, [countDone]);
   useEffect(() => {
     localStorage.setItem(SEEN, new Date().toISOString());
     // Agent 交回的：上次打开今天页之后结束的 Agent 运行，按事项各取最近一次。取不到就不显示这一块。
@@ -50,6 +58,7 @@ export function TodayPage() {
     try { await fn(); } catch (e) { setError(e); }
     await load();
     refreshCounts();
+    countDone();
   };
 
   const a = attention;
@@ -100,6 +109,11 @@ export function TodayPage() {
           {reminders.length > 0 && <Reminders list={reminders} />}
           {data.stale.length > 0 && <Stale items={data.stale} act={act} />}
           {empty && <p className="empty">{t.allClear}</p>}
+          {doneN && (
+            <p className="sub">
+              {doneN.week ? t.doneLine(doneN.today, doneN.week) : t.doneNone} · <Link to="/done">{t.seeDone}</Link>
+            </p>
+          )}
         </>
       )}
     </main>
@@ -126,10 +140,14 @@ function BackRow({ run }: { run: Run }) {
 
 function ItemLink({ item }: { item: Item }) {
   const t = useT(strings);
+  const pname = useNamed("project").find((p) => p.id === item.project)?.name;
   return (
     <span>
       {item.planned_slot && <span className="badge plain">{item.planned_slot}</span>} <Link to={"/items/" + encodeURIComponent(item.id)}>{item.title}</Link>{" "}
-      <span className="sub">{[item.planned_for && t.planned(item.planned_for), item.deadline && t.deadline(new Date(item.deadline).toLocaleDateString(locale()))].filter(Boolean).join(" · ")}</span>
+      <span className="sub">
+        {pname && <><Link to={"/projects/" + encodeURIComponent(item.project!)}>{pname}</Link> · </>}
+        {[item.planned_for && t.planned(item.planned_for), item.deadline && t.deadline(new Date(item.deadline).toLocaleDateString(locale()))].filter(Boolean).join(" · ")}
+      </span>
     </span>
   );
 }

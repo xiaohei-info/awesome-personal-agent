@@ -91,10 +91,16 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		its  []domain.Item
 		prog map[string]string
 		rejs = map[string]Rejection{}
+		done map[string]time.Time
 	)
 	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) {
 		if its, err = kitems.List(tx, f); err != nil {
 			return err
+		}
+		if f.Phase == domain.PhaseDone {
+			if done, err = kitems.DoneAt(tx); err != nil {
+				return err
+			}
 		}
 		if sq.Text != "" {
 			if prog, err = search.ItemProgressText(tx); err != nil {
@@ -120,6 +126,15 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		its = []domain.Item{}
 	}
 	out := map[string]any{"items": its, "last_rejections": rejs}
+	if done != nil { // 只读已完成时给出各自的完成时刻，「已完成」页按它分周（附录 B.2）
+		at := map[string]time.Time{}
+		for _, it := range its {
+			if t, ok := done[it.ID]; ok {
+				at[it.ID] = t
+			}
+		}
+		out["done_at"] = at
+	}
 	if sq.From != "" { // 按范围读时给出本机日界，日历页不用浏览器时区猜（§7.1）
 		now := clock.Now().In(time.Local)
 		out["today"], out["utc_offset"] = kitems.Today(now), now.Format("-07:00")

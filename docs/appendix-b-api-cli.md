@@ -268,6 +268,8 @@
 
 `GET /items?from=YYYY-MM-DD&to=YYYY-MM-DD`：按日期范围读，含首尾，`to` 不早于 `from`，跨度至多 62 天，两个参数须同时给，否则 400。收录 `planned_for` 落在范围内、或 `deadline` 所在的本机日落在范围内的事项，与其他筛选取交集；不按阶段过滤。带范围时响应另有 `today`（本机时区的今天）与 `utc_offset`（本机时区此刻的偏移，如 `+08:00`）。
 
+`GET /items?phase=done`：响应另有 `done_at`（事项 id → 进入已完成的时刻，UTC）：取最近一次转入 `done` 的事件时刻；新建时就是已完成的事项（工作台迁移写入）没有转入那一刻，取 `ext.workbench.completed` 那天的本机 00:00，没记完成日期的取 `ext.workbench.updated` 那天，两样都没有才用写入时刻。Web「已完成」页按它所在的本机日分周（界面设计 §9.13）。
+
 事项字段 `proposal`：只读，由入站流水线写入：`{recommend, attach_to?, reason, low_confidence, sources[]}`（主文档 §6.3）。`GET /items?phase=proposed` 可带 `sort=score` 按初筛分数排序。
 
 `POST /items/{id}/progress` 的请求体 `{"text": "…", "on": "YYYY-MM-DD"}`，`on` 可省略、不能晚于今天；成功返回 201 与这条进展，Event 为 `item.progress_added`。进展不改阶段，不推进 `version` 以外的字段。
