@@ -1103,6 +1103,9 @@ func TestOwnerStartNow(t *testing.T) {
 	if len(rs) != 1 || rs[0].Run.Target != id || rs[0].Run.Access != "edit" || rs[0].Run.Basis == nil || rs[0].Run.Basis.RuleID != "bgr/event_rules/main" {
 		t.Fatalf("runs = %+v", rs)
 	}
+	// 等这次运行落账再往下：它秒退后 Settle 在调度器协程里发命令、触发规则引擎 Drain；与下面的 item.start 撞上时，
+	// 本协程的 Drain 只打标记就返回，start_requested 交给那个协程稍后处理，紧接着读告警就读不到（CI 上的偶发失败）。
+	e.waitResult()
 
 	over := e.newItem("over", []string{"full"}, nil) // full 超出上限 edit
 	e.open(over)
