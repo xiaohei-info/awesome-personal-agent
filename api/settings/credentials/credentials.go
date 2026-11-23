@@ -1,13 +1,14 @@
 // Package credentials 是 /settings/tokens 与 /settings/ext-keys 两组路由（设计 §14.2、§14.3，附录 B.2）：
 // 签发、列出、吊销长期凭据，明文只在签发响应里出现一次。
 //
-// 路由不含授权规则：三条命令都按"改设置"登记，由命令管线判定——只有 Web 会话通过，
+// 路由不含授权规则：签发、吊销、认领、改档位都按"改设置"登记，由命令管线判定——只有 Web 会话通过，
 // delegate 得到 web_only（退出码 20，留痕），其余 token 得到退出码 4，ext/webhook 密钥一律拒绝。
 // 命令不接受幂等键，因此明文不会进入幂等结果表；账本里只有哈希。
 package credentials
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/executors"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 )
 
@@ -29,10 +31,14 @@ const (
 	CmdList   = "credential.list"
 	CmdRevoke = "credential.revoke"
 	CmdAssign = "credential.assign"
+	CmdScope  = "credential.scope.set"
 )
 
 // EvAssigned 记 token 被认领到某个 harness（§14.2）。
 const EvAssigned = "credential.assigned"
+
+// EvScopeChanged 记钥匙给谁用与逐来源档位被改（§14.2、§14.14），载荷带改前改后。
+const EvScopeChanged = "credential.scope_changed"
 
 // group 是一组路由管理的凭据种类。
 type group struct {
@@ -70,6 +76,9 @@ type input struct {
 	Executor string    `json:"executor,omitempty"`
 	Scope    string    `json:"scope,omitempty"`
 	Harness  string    `json:"harness,omitempty"`
+	// Audience 是 internal 或 external（缺省 external）；SourceScopes 是外部钥匙逐来源的档位，不在表里即不给（§14.14）。
+	Audience     string            `json:"audience,omitempty"`
+	SourceScopes map[string]string `json:"source_scopes,omitempty"`
 }
 
 func parse(raw json.RawMessage) (input, group, error) {
@@ -92,7 +101,7 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 	}
 	for _, s := range []command.Spec{
 		{Name: CmdIssue, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: noObject,
-			Validate: func(_ *store.Tx, _ authz.Object, raw json.RawMessage) error {
+			Validate: func(tx *store.Tx, _ authz.Object, raw json.RawMessage) error {
 				in, g, err := parse(raw)
 				if err != nil {
 					return err
@@ -100,7 +109,7 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 				if !g.has(in.Kind) {
 					return invalid("kind is not valid for /settings/" + g.path)
 				}
-				return nil
+				return registered(tx, in.SourceScopes)
 			},
 			Apply: func(c *command.Ctx) (any, error) {
 				in, _, _ := parse(c.Input)
@@ -113,7 +122,8 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 						return nil, invalid("select an enabled Agent of this harness")
 					}
 				}
-				cred, secret, err := a.Issue(c.Tx, auth.Spec{Kind: in.Kind, Label: in.Label, Executor: in.Executor, Scope: in.Scope, Harness: in.Harness, AgentID: in.AgentID})
+				cred, secret, err := a.Issue(c.Tx, auth.Spec{Kind: in.Kind, Label: in.Label, Executor: in.Executor, Scope: in.Scope, Harness: in.Harness, AgentID: in.AgentID,
+					Audience: in.Audience, SourceScopes: in.SourceScopes})
 				if err != nil {
 					return nil, err
 				}
@@ -201,6 +211,38 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 				}
 				return map[string]any{"credential": cr}, nil
 			}},
+		{Name: CmdScope, Action: authz.ActionChangeSettings, Tier: authz.TierPower, Page: "/settings/agents", Object: noObject,
+			Validate: func(tx *store.Tx, _ authz.Object, raw json.RawMessage) error {
+				in, _, err := parse(raw)
+				if err != nil {
+					return err
+				}
+				return registered(tx, in.SourceScopes)
+			},
+			Apply: func(c *command.Ctx) (any, error) {
+				in, g, _ := parse(c.Input)
+				before, err := a.Get(c.Tx, in.ID)
+				if err != nil {
+					return nil, err
+				}
+				if !g.has(before.Kind) {
+					return nil, domain.NewError(domain.CodeNotFound, "credential not found", "list credentials and retry")
+				}
+				cr, err := a.SetScope(c.Tx, in.ID, in.Audience, in.SourceScopes)
+				if err != nil {
+					return nil, err
+				}
+				payload, err := json.Marshal(map[string]any{
+					"before": map[string]any{"audience": before.Audience, "source_scopes": before.SourceScopes},
+					"after":  map[string]any{"audience": cr.Audience, "source_scopes": cr.SourceScopes}})
+				if err != nil {
+					return nil, err
+				}
+				if _, err := c.Emit(domain.Event{Type: EvScopeChanged, Object: cr.ID, Reason: "credential scope changed", Payload: payload}); err != nil {
+					return nil, err
+				}
+				return map[string]any{"credential": cr}, nil
+			}},
 	} {
 		if err := x.Register(s); err != nil {
 			return nil, err
@@ -213,6 +255,19 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 			r.Handle(core.Route{Method: "POST", Path: base, MaxBody: 4 << 10, Handler: run(x, CmdIssue, g, http.StatusCreated, body)})
 			r.Handle(core.Route{Method: "DELETE", Path: base + "/{id}", MaxBody: 1, Handler: run(x, CmdRevoke, g, http.StatusOK, func(r *http.Request, in *input) error {
 				in.ID = r.PathValue("id")
+				return nil
+			})})
+		}
+		for _, g := range groups {
+			r.Handle(core.Route{Method: "PUT", Path: "/settings/" + g.path + "/{id}/scope", MaxBody: 64 << 10, Handler: run(x, CmdScope, g, http.StatusOK, func(r *http.Request, in *input) error {
+				var b struct {
+					Audience     string            `json:"audience"`
+					SourceScopes map[string]string `json:"source_scopes"`
+				}
+				if err := core.DecodeJSON(r, &b); err != nil {
+					return err
+				}
+				in.ID, in.Audience, in.SourceScopes = r.PathValue("id"), b.Audience, b.SourceScopes
 				return nil
 			})})
 		}
@@ -229,6 +284,20 @@ func Mount(x *command.Executor, a *auth.Auth) (core.RouteGroup, error) {
 	}, nil
 }
 
+// registered：钥匙档位里的来源必须已登记（对话捕获与取值规则由 kernel/auth 校验）。
+func registered(tx *store.Tx, scopes map[string]string) error {
+	for id := range scopes {
+		if _, err := registry.Get(tx, id); err != nil {
+			var de *domain.Error
+			if errors.As(err, &de) && de.Code == domain.CodeNotFound {
+				return invalid("source " + id + " is not registered")
+			}
+			return err
+		}
+	}
+	return nil
+}
+
 // body 读签发请求体。kind 在 ext-keys 组固定为 ext；group 与 id 不由请求体决定。
 func body(r *http.Request, in *input) error {
 	var b input
@@ -237,6 +306,7 @@ func body(r *http.Request, in *input) error {
 	}
 	in.AgentID = b.AgentID
 	in.Kind, in.Label, in.Executor, in.Scope, in.Harness = b.Kind, b.Label, b.Executor, b.Scope, b.Harness
+	in.Audience, in.SourceScopes = b.Audience, b.SourceScopes
 	if in.Group == "ext-keys" {
 		in.Kind = auth.Ext
 	}

@@ -79,15 +79,16 @@ func runBrief(e *env) (runDir string, m map[string]string) {
 	return e.runs + "/" + run, materialsOf(e, run)
 }
 
-// ACT-BRF-05/06：知会引用的来源事件按该来源对外部端点的外发范围写原文文件：全文写全文，摘录写摘录，其余不写。
-func TestBriefRawFilesFollowOutboundScope(t *testing.T) {
+// ACT-BRF-05/06：知会引用的来源事件一律写全文原文文件：简报运行属于 APA 内部，不受来源送外部模型端点的范围限制（§14.14）。
+func TestBriefRawFilesAreFullRegardlessOfTheEndpointScope(t *testing.T) {
 	e := setup(t)
 	long := strings.Repeat("长", 800)
-	full := e.rawSource("src_full", "full", domain.SourceEvent{ID: "f1", Type: "mail", Subject: "全文邮件", Summary: "摘要F", Detail: "FULL-BODY-" + long, OccurredAt: t0})
-	exc := e.rawSource("src_exc", "excerpt", domain.SourceEvent{ID: "x1", Type: "mail", Subject: "摘录邮件", Summary: "摘要X", Detail: "EXC-HEAD-" + long + "SECRET-TAIL", OccurredAt: t0})
-	meta := e.rawSource("src_meta", "meta", domain.SourceEvent{ID: "m1", Type: "mail", Subject: "元信息邮件", Detail: "META-BODY", OccurredAt: t0})
-	unset := e.rawSource("src_unset", "", domain.SourceEvent{ID: "u1", Type: "mail", Subject: "未选择邮件", Detail: "UNSET-BODY", OccurredAt: t0})
-	e.digest(full[0], exc[0], meta[0], unset[0])
+	var evs []string
+	for _, sc := range []string{"full", "excerpt", "meta", ""} { // 来源送外部模型端点的范围不管简报运行：运行属于 APA 内部（§14.14）
+		id := e.rawSource("src_"+sc+"x", sc, domain.SourceEvent{ID: "e-" + sc, Type: "mail", Subject: "邮件-" + sc, Summary: "摘要-" + sc, Detail: "BODY-" + sc + long + "TAIL-" + sc, OccurredAt: t0})
+		evs = append(evs, id[0])
+	}
+	e.digest(evs...)
 
 	dir, m := runBrief(e)
 	var d struct {
@@ -96,46 +97,18 @@ func TestBriefRawFilesFollowOutboundScope(t *testing.T) {
 	if err := json.Unmarshal([]byte(m["digest"]), &d); err != nil || len(d.Digest) != 4 {
 		t.Fatalf("digest: %v %s", err, m["digest"])
 	}
-	by := map[string]rawEntry{}
 	for _, en := range d.Digest {
-		if len(en.Raw) != 1 {
-			t.Fatalf("each digest entry names its source event: %+v", en)
+		if len(en.Raw) != 1 || en.Raw[0].File == "" || en.Raw[0].Material.Scope != "full" || en.Raw[0].Material.Mode != "none" {
+			t.Fatalf("every registered source is written in full: %+v", en)
 		}
-		by[en.Title] = en
-	}
-	read := func(title string) string {
-		t.Helper()
-		f := by[title].Raw[0].File
-		if f == "" {
-			t.Fatalf("%s must have a file", title)
-		}
-		st, err := os.Stat(dir + "/" + f)
+		st, err := os.Stat(dir + "/" + en.Raw[0].File)
 		if err != nil || st.Mode().Perm()&0o222 != 0 {
-			t.Fatalf("%s must be read-only: %v %v", f, err, st)
+			t.Fatalf("%s must be read-only: %v %v", en.Raw[0].File, err, st)
 		}
-		b, _ := os.ReadFile(dir + "/" + f)
-		if !strings.HasPrefix(string(b), rawNotice) {
-			t.Fatalf("%s must start with the data declaration: %.80s", f, b)
-		}
-		return string(b)
-	}
-	if txt := read("全文邮件"); !strings.Contains(txt, "FULL-BODY-") || !strings.Contains(txt, long) || by["全文邮件"].Raw[0].Material.Scope != "full" || by["全文邮件"].Raw[0].Material.Mode != "none" {
-		t.Fatalf("full scope writes the whole body: %.200s %+v", txt, by["全文邮件"])
-	}
-	txt := read("摘录邮件")
-	if !strings.Contains(txt, "EXC-HEAD-") || strings.Contains(txt, "SECRET-TAIL") || !strings.Contains(txt, "摘要X") {
-		t.Fatalf("excerpt scope writes summary and the first 500 chars only: %.300s", txt)
-	}
-	for _, title := range []string{"元信息邮件", "未选择邮件"} {
-		r := by[title].Raw[0]
-		if r.File != "" || r.Material.Mode != rawModeNotWritten {
-			t.Fatalf("%s: scope %q writes no file: %+v", title, r.Material.Scope, r)
-		}
-	}
-	ents, _ := os.ReadDir(dir)
-	for _, en := range ents {
-		if b, _ := os.ReadFile(dir + "/" + en.Name()); strings.Contains(string(b), "META-BODY") || strings.Contains(string(b), "UNSET-BODY") {
-			t.Fatalf("bodies outside the outbound scope must not reach the run dir: %s", en.Name())
+		b, _ := os.ReadFile(dir + "/" + en.Raw[0].File)
+		sc := strings.TrimPrefix(en.Title, "邮件-")
+		if txt := string(b); !strings.HasPrefix(txt, rawNotice) || !strings.Contains(txt, "BODY-"+sc+long+"TAIL-"+sc) || !strings.Contains(txt, "摘要-"+sc) {
+			t.Fatalf("%s must hold the declaration and the whole body: %.200s", en.Title, txt)
 		}
 	}
 }

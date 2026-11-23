@@ -12,11 +12,13 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
 	"github.com/xiaohei-info/awesome-personal-agent/api/settings/credentials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
 	kdoctor "github.com/xiaohei-info/awesome-personal-agent/kernel/doctor"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
+	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/registry"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
 	_ "modernc.org/sqlite"
 )
@@ -28,6 +30,7 @@ type env struct {
 	st   *store.Store
 	auth *auth.Auth
 	srv  *core.Server
+	x    *command.Executor
 	// 登录后的 Web 会话
 	cookie *http.Cookie
 	csrf   string
@@ -36,7 +39,7 @@ type env struct {
 func setup(t *testing.T) *env {
 	t.Helper()
 	reg := store.NewRegistry()
-	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, core.Module, kdoctor.Module} {
+	for _, m := range []store.Module{eventlog.Module, auth.Module, policy.Module, command.Module, core.Module, kdoctor.Module, registry.Module} {
 		if err := reg.Register(m); err != nil {
 			t.Fatal(err)
 		}
@@ -52,6 +55,10 @@ func setup(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	x := command.New(st, now)
+	e.x = x
+	if err := registry.Register(x, registry.Options{Declared: func(s domain.Source) string { return s.ID }}); err != nil {
+		t.Fatal(err)
+	}
 	group, err := credentials.Mount(x, e.auth)
 	if err != nil {
 		t.Fatal(err)
@@ -437,5 +444,59 @@ func TestExtKeyListShowsLastSeen(t *testing.T) {
 	}
 	if got := lastSeen(); got == nil {
 		t.Fatal("after one authenticated call the key must report last_seen_at")
+	}
+}
+
+// 钥匙给谁用与逐来源档位（§14.2、§14.14）：签发时可给定，缺省外部、什么都不给；内部只给三级 token、不能带档位；档位里的来源必须已登记；
+// PUT …/{id}/scope 改档位是 3b（agent 钥匙改不了），立即生效、记 credential.scope_changed（改前改后）；ext-keys 组改不到 token。
+func TestCredentialAudienceAndSourceScopes(t *testing.T) {
+	e := setup(t)
+	if _, err := e.x.Do(context.Background(), command.Request{Identity: command.Trusted{Actor: domain.Actor{Type: domain.ActorHuman, Principal: "owner", Via: domain.ViaWeb}, Level: authz.LevelWeb, Fresh: true},
+		Command: registry.CmdRegister, Input: json.RawMessage(`{"id":"src_mail","type":"webhook","source_type":"mail","config":{"scheme":"shared"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	def := e.issue("/v1/settings/tokens", `{"kind":"observer"}`)
+	if def.Credential.Audience != auth.AudienceExternal || len(def.Credential.SourceScopes) != 0 {
+		t.Fatalf("default is external, nothing given: %+v", def.Credential)
+	}
+	in := e.issue("/v1/settings/tokens", `{"kind":"delegate","audience":"internal"}`)
+	exp := e.issue("/v1/settings/ext-keys", `{"scope":"export","source_scopes":{"src_mail":"excerpt"}}`)
+	if in.Credential.Audience != "internal" || exp.Credential.SourceScopes["src_mail"] != "excerpt" {
+		t.Fatalf("issued: %+v %+v", in.Credential, exp.Credential)
+	}
+	for _, c := range []struct{ path, body string }{
+		{"/v1/settings/tokens", `{"kind":"observer","source_scopes":{"src_nope":"full"}}`},
+		{"/v1/settings/tokens", `{"kind":"observer","audience":"internal","source_scopes":{"src_mail":"full"}}`},
+		{"/v1/settings/ext-keys", `{"scope":"export","audience":"internal"}`},
+		{"/v1/settings/tokens", `{"kind":"observer","source_scopes":{"src_mail":"none"}}`},
+	} {
+		if r := e.web("POST", c.path, c.body); r.Code != 400 {
+			t.Errorf("%s must be refused: %d %s", c.body, r.Code, r.Body)
+		}
+	}
+	if r := e.web("PUT", "/v1/settings/tokens/"+def.Credential.ID+"/scope", `{"audience":"external","source_scopes":{"src_mail":"full"}}`); r.Code != 200 {
+		t.Fatalf("scope set: %d %s", r.Code, r.Body)
+	}
+	var got auth.Credential
+	if err := e.st.View(context.Background(), func(tx *store.Tx) (err error) { got, err = e.auth.Resolve(tx, def.Secret); return }); err != nil || got.SourceScopes["src_mail"] != "full" {
+		t.Fatalf("scope change takes effect: %+v %v", got, err)
+	}
+	if r := e.web("PUT", "/v1/settings/ext-keys/"+def.Credential.ID+"/scope", `{"source_scopes":{}}`); r.Code != 404 {
+		t.Fatalf("ext-keys group cannot reach a token: %d %s", r.Code, r.Body)
+	}
+	if r := e.do("PUT", "/v1/settings/tokens/"+def.Credential.ID+"/scope", `{"audience":"internal"}`, bearer(in.Secret)); r.Code != 403 {
+		t.Fatalf("an agent key cannot change key scopes: %d %s", r.Code, r.Body)
+	}
+	var changed int
+	if err := e.st.View(context.Background(), func(tx *store.Tx) error {
+		es, err := eventlog.ReadObject(tx, def.Credential.ID)
+		for _, x := range es {
+			if x.Event.Type == credentials.EvScopeChanged && strings.Contains(string(x.Event.Payload), `"before"`) {
+				changed++
+			}
+		}
+		return err
+	}); err != nil || changed != 1 {
+		t.Fatalf("one credential.scope_changed with before/after: %d %v", changed, err)
 	}
 }

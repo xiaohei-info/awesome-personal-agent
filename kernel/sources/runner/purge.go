@@ -66,6 +66,24 @@ func EventsOfItem(tx *store.Tx, item string) ([]string, error) {
 	return ids(tx, `WHERE item = ? OR EXISTS (SELECT 1 FROM json_each(CASE WHEN items = '' THEN '[]' ELSE items END) WHERE value = ?)`, item, item)
 }
 
+// SourcesOfItem 返回挂在事项上的来源事件所属的来源 id（去重），与 EventsOfItem 同一口径。外部钥匙读事项时据此取最严档位（§14.14）。
+func SourcesOfItem(tx *store.Tx, item string) ([]string, error) {
+	rows, err := tx.Query(`SELECT DISTINCT source_id FROM sources_runner_event WHERE item = ? OR EXISTS (SELECT 1 FROM json_each(CASE WHEN items = '' THEN '[]' ELSE items END) WHERE value = ?)`, item, item)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // PurgeEvent 物理删除一条来源事件：事件行与原文各部分都删除，只留去重键作墓碑。
 // 返回它的附件清单里已取回的 blob 哈希，由调用方在确认没有其他引用后删除文件；判断记录由调用方按事件 id 删除。
 func PurgeEvent(tx *store.Tx, id string) (blobs []string, err error) {

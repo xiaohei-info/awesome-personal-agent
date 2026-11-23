@@ -182,19 +182,18 @@ func TestWebReadsFullContentAndPartSelectsOne(t *testing.T) {
 	}
 }
 
-// ACT-RSC-03、04：token 读到的内容按该来源的 outbound.external 裁剪；未选择、none 与 meta 一样只回元信息，scope 是 meta。
-func TestTokenReadIsTrimmedToExternalOutboundScope(t *testing.T) {
+// ACT-RSC-03、04：外部钥匙按钥匙自己的逐来源档位读原文：全文、摘录（正文前 500 字，不给原始格式、头部、聚合消息，链接只留域名）、
+// 元信息；没给的来源 403（退出码 4）。来源送外部模型端点的范围不再参与；内部钥匙与 Web 始终全文。
+func TestExternalKeyReadIsTrimmedToItsSourceScopes(t *testing.T) {
 	e := setup(t)
-	e.registerRaw("src_full", "src_ex", "src_meta", "src_none", "src_unset")
+	e.registerRaw("src_full", "src_ex", "src_meta", "src_none")
 	ids := map[string]string{}
-	for _, s := range []string{"src_full", "src_ex", "src_meta", "src_none", "src_unset"} {
+	for _, s := range []string{"src_full", "src_ex", "src_meta", "src_none"} {
 		ids[s] = e.seedRaw(s, "k", rawFull)
 	}
-	e.setExternal("src_full", "full")
-	e.setExternal("src_ex", "excerpt")
-	e.setExternal("src_meta", "meta")
-	e.setExternal("src_none", "none")
-	obs := e.token(auth.Observer)
+	e.setExternal("src_none", "full") // 送外部端点是全文，与钥匙无关
+	e.setExternal("src_full", "none")
+	obs := e.scoped(auth.Observer, map[string]string{"src_full": "full", "src_ex": "excerpt", "src_meta": "meta"})
 
 	full := read(t, e.do(obs, "GET", "/v1/source-events/"+ids["src_full"], ""))
 	if full.Scope != "full" || full.Trimmed != nil || full.Body == nil || *full.Body != bigBody || full.Original == nil || full.Headers == nil || full.Messages == nil {
@@ -213,19 +212,26 @@ func TestTokenReadIsTrimmedToExternalOutboundScope(t *testing.T) {
 		t.Fatalf("?part=original under excerpt must not return the original")
 	}
 
-	for _, s := range []string{"src_meta", "src_none", "src_unset"} {
-		m := read(t, e.do(obs, "GET", "/v1/source-events/"+ids[s], ""))
-		if m.Scope != "meta" || m.Body != nil || m.Original != nil || m.Headers != nil || m.Attachments != nil || m.Messages != nil {
-			t.Fatalf("%s must return metadata only: %+v", s, m)
-		}
-		if m.Event.Subject != "subj-k" || m.Event.Sender != "alice" || m.Event.Summary != "" || m.Event.Detail != "" || m.Event.Link != "mail.example" ||
-			len(m.Content.Parts) != 5 || m.Trimmed == nil || m.Trimmed.TotalChars != 4200 || m.Trimmed.ReturnedChars != 0 {
-			t.Fatalf("%s meta event/manifest: %+v trimmed=%+v", s, m.Event, m.Trimmed)
-		}
+	m := read(t, e.do(obs, "GET", "/v1/source-events/"+ids["src_meta"], ""))
+	if m.Scope != "meta" || m.Body != nil || m.Original != nil || m.Headers != nil || m.Attachments != nil || m.Messages != nil {
+		t.Fatalf("meta must return metadata only: %+v", m)
 	}
-	// 本人在 Web 始终全文，不受范围影响。
-	if w := read(t, e.web("GET", "/v1/source-events/"+ids["src_none"], "")); w.Scope != "full" || w.Body == nil || *w.Body != bigBody {
-		t.Fatalf("web under none: %+v", w)
+	if m.Event.Subject != "subj-k" || m.Event.Sender != "alice" || m.Event.Summary != "" || m.Event.Detail != "" || m.Event.Link != "mail.example" ||
+		len(m.Content.Parts) != 5 || m.Trimmed == nil || m.Trimmed.TotalChars != 4200 || m.Trimmed.ReturnedChars != 0 {
+		t.Fatalf("meta event/manifest: %+v trimmed=%+v", m.Event, m.Trimmed)
+	}
+
+	if r := e.do(obs, "GET", "/v1/source-events/"+ids["src_none"], ""); r.Code != 403 || !strings.Contains(r.Body.String(), "out_of_scope") {
+		t.Fatalf("a source the key was not given: %d %s", r.Code, r.Body)
+	}
+	// 内部钥匙与 Web 始终全文，不看任何档位。
+	for name, got := range map[string]readResp{
+		"internal": read(t, e.do(e.token(auth.Observer), "GET", "/v1/source-events/"+ids["src_full"], "")),
+		"web":      read(t, e.web("GET", "/v1/source-events/"+ids["src_full"], "")),
+	} {
+		if got.Scope != "full" || got.Body == nil || *got.Body != bigBody {
+			t.Fatalf("%s reads in full: %+v", name, got.Scope)
+		}
 	}
 }
 
@@ -253,13 +259,12 @@ func TestRunCredentialExtAndCaptureCannotReadContent(t *testing.T) {
 	}
 }
 
-// ACT-RSC-06：挂在已接受事项上的挂靠消息按 GET /items/{id}/messages 的权限读，不因 none 被裁成元信息；
-// 运行凭据只经转发白名单读它（发送者不在名单时 403）。
-func TestAttachedMessageIsReadWithItsOwnPermissionNotOutboundScope(t *testing.T) {
+// ACT-RSC-06：挂在事项上的消息对外部钥匙同样按它来源的档位读（挂上事项不再放行全文）；内部钥匙全文；
+// 运行凭据只经转发白名单读它（发送者不在名单时 403）。GET /items/{id}/messages 同口径。
+func TestAttachedMessageFollowsTheKeysSourceScope(t *testing.T) {
 	e := setup(t)
-	e.registerRaw("src_none")
-	e.setExternal("src_none", "none")
-	id := e.seedRaw("src_none", "reply", rawFull)
+	e.registerRaw("src_mail")
+	id := e.seedRaw("src_mail", "reply", rawFull)
 	res, err := e.x.Do(bg, command.Request{Identity: webIdentity, Command: "item.create", Input: json.RawMessage(`{"kind":"task","title":"t"}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -268,15 +273,19 @@ func TestAttachedMessageIsReadWithItsOwnPermissionNotOutboundScope(t *testing.T)
 	if err := json.Unmarshal(res.Value, &it); err != nil {
 		t.Fatal(err)
 	}
-	obs := e.token(auth.Observer)
-	if m := read(t, e.do(obs, "GET", "/v1/source-events/"+id, "")); m.Scope != "meta" {
-		t.Fatalf("a message that is not attached follows the outbound scope: %s", m.Scope)
-	}
 	e.update(func(tx *store.Tx) error { return runner.SetAttachState(tx, id, runner.AttachPending, it.ID) })
 
-	got := read(t, e.do(obs, "GET", "/v1/source-events/"+id, ""))
-	if got.Scope != "full" || got.Body == nil || *got.Body != bigBody || got.Trimmed != nil {
-		t.Fatalf("attached message must be readable in full by a token: %+v", got.Scope)
+	none := e.scoped(auth.Observer, nil)
+	meta := e.scoped(auth.Observer, map[string]string{"src_mail": "meta"})
+	if r := e.do(none, "GET", "/v1/source-events/"+id, ""); r.Code != 403 {
+		t.Fatalf("attached message of a source the key was not given: %d %s", r.Code, r.Body)
+	}
+	if got := read(t, e.do(meta, "GET", "/v1/source-events/"+id, "")); got.Scope != "meta" || got.Body != nil {
+		t.Fatalf("attached message under meta stays metadata: %+v", got.Scope)
+	}
+	internal := e.token(auth.Observer)
+	if got := read(t, e.do(internal, "GET", "/v1/source-events/"+id, "")); got.Scope != "full" || got.Body == nil || *got.Body != bigBody || got.Trimmed != nil {
+		t.Fatalf("internal key reads the attached message in full: %+v", got.Scope)
 	}
 	if r := e.do(e.runCredential(), "GET", "/v1/source-events/"+id, ""); r.Code != 403 {
 		t.Errorf("run credential reads attached messages only through the forward allowlist: %d %s", r.Code, r.Body)
@@ -285,15 +294,17 @@ func TestAttachedMessageIsReadWithItsOwnPermissionNotOutboundScope(t *testing.T)
 		t.Errorf("ext: %d", r.Code)
 	}
 
-	// GET /items/{id}/messages：detail 是预览，另带 content 清单，不带各部分内容与聚合消息。
-	var list struct {
+	type msgList struct {
 		Messages []struct {
 			ID      string          `json:"id"`
 			Detail  string          `json:"detail"`
+			Summary string          `json:"summary"`
 			Content runner.Manifest `json:"content"`
 		} `json:"messages"`
 	}
-	lr := e.do(obs, "GET", "/v1/items/"+it.ID+"/messages", "")
+	// 内部：detail 是预览，另带 content 清单，不带各部分内容与聚合消息。
+	var list msgList
+	lr := e.do(internal, "GET", "/v1/items/"+it.ID+"/messages", "")
 	lr.into(&list)
 	if lr.Code != 200 || len(list.Messages) != 1 {
 		t.Fatalf("messages: %d %s", lr.Code, lr.Body)
@@ -304,6 +315,92 @@ func TestAttachedMessageIsReadWithItsOwnPermissionNotOutboundScope(t *testing.T)
 	}
 	if strings.Contains(lr.Body.String(), "hi\"") || strings.Contains(lr.Body.String(), rawFull.original) {
 		t.Fatal("message list must not carry part contents")
+	}
+	// 外部：元信息不给预览与清单。
+	var ml msgList
+	mr := e.do(meta, "GET", "/v1/items/"+it.ID+"/messages", "")
+	mr.into(&ml)
+	if mr.Code != 200 || len(ml.Messages) != 1 || ml.Messages[0].Detail != "" || ml.Messages[0].Summary != "" || len(ml.Messages[0].Content.Parts) != 0 {
+		t.Fatalf("meta message list: %d %s", mr.Code, mr.Body)
+	}
+	// 事项挂着这个来源的消息，内容就出自它：没给的钥匙连事项一起够不到（取最严）。
+	if nr := e.do(none, "GET", "/v1/items/"+it.ID+"/messages", ""); nr.Code != 403 || strings.Contains(nr.Body.String(), "长正文") {
+		t.Fatalf("an item carrying a source the key was not given: %d %s", nr.Code, nr.Body)
+	}
+}
+
+// 列表预览与诊断路由（口子 1、3、4、5）：外部钥匙的事件列表按档位裁（摘录 500 字、元信息不给正文与清单、没给的 403）；
+// 外发预览、原始请求体、被拒行只给 Web 与内部钥匙；来源列表只列给了的来源，且不带命令、配置、凭据路径与游标。
+func TestExternalKeyListsAndDiagnosticsFollowItsScopes(t *testing.T) {
+	e := setup(t)
+	e.registerRaw("src_ex", "src_meta", "src_hidden")
+	for _, s := range []string{"src_ex", "src_meta", "src_hidden"} {
+		e.seedRaw(s, "k", rawFull)
+	}
+	hidden := e.seedRaw("src_hidden", "k2", rawFull)
+	key := e.scoped(auth.Observer, map[string]string{"src_ex": "excerpt", "src_meta": "meta"})
+	type listed struct {
+		Events []struct {
+			Detail  string          `json:"detail"`
+			Summary string          `json:"summary"`
+			Content runner.Manifest `json:"content"`
+		} `json:"events"`
+	}
+	for _, q := range []string{"", "?sort=recent", "?sort=score"} {
+		var ex, me listed
+		r := e.do(key, "GET", "/v1/sources/src_ex/events"+q, "")
+		r.into(&ex)
+		if r.Code != 200 || len(ex.Events) != 1 || utf8.RuneCountInString(ex.Events[0].Detail) != 500 || ex.Events[0].Summary != "summary-k" || len(ex.Events[0].Content.Parts) != 0 {
+			t.Fatalf("%q excerpt list: %d %s", q, r.Code, r.Body)
+		}
+		r = e.do(key, "GET", "/v1/sources/src_meta/events"+q, "")
+		r.into(&me)
+		if r.Code != 200 || len(me.Events) != 1 || me.Events[0].Detail != "" || me.Events[0].Summary != "" {
+			t.Fatalf("%q meta list: %d %s", q, r.Code, r.Body)
+		}
+		if r := e.do(key, "GET", "/v1/sources/src_hidden/events"+q, ""); r.Code != 403 {
+			t.Fatalf("%q list of a source the key was not given: %d %s", q, r.Code, r.Body)
+		}
+	}
+	internal := e.token(auth.Observer)
+	for _, p := range []string{"/v1/source-events/" + hidden + "/outbound-preview", "/v1/sources/src_ex/ingests", "/v1/sources/src_ex/rejects"} {
+		if r := e.do(key, "GET", p, ""); r.Code != 403 {
+			t.Errorf("external key %s: %d %s", p, r.Code, r.Body)
+		}
+		if r := e.do(internal, "GET", p, ""); r.Code != 200 {
+			t.Errorf("internal key %s: %d %s", p, r.Code, r.Body)
+		}
+	}
+	var srcs struct {
+		Sources []map[string]any `json:"sources"`
+	}
+	r := e.do(key, "GET", "/v1/sources", "")
+	r.into(&srcs)
+	if r.Code != 200 || len(srcs.Sources) != 2 {
+		t.Fatalf("external key lists only given sources: %d %s", r.Code, r.Body)
+	}
+	for _, s := range srcs.Sources {
+		for _, f := range []string{"command", "config", "credentials_path", "cursor"} {
+			if _, ok := s[f]; ok {
+				t.Fatalf("external key must not see how a source runs (%s): %v", f, s)
+			}
+		}
+	}
+	if r := e.do(key, "GET", "/v1/sources/src_hidden", ""); r.Code != 403 {
+		t.Fatalf("external key reading a source it was not given: %d", r.Code)
+	}
+	var all struct {
+		Sources []map[string]any `json:"sources"`
+	}
+	ir := e.do(internal, "GET", "/v1/sources", "")
+	ir.into(&all)
+	if len(all.Sources) != 3 {
+		t.Fatalf("internal key lists every source: %s", ir.Body)
+	}
+	// 导出 ext 钥匙是外部程序的钥匙：按档位读得到给了它的来源。
+	exp := e.scoped(auth.Ext, map[string]string{"src_ex": "excerpt"})
+	if r := e.do(exp, "GET", "/v1/sources/src_ex/events", ""); r.Code != 200 {
+		t.Fatalf("export key with a scope: %d %s", r.Code, r.Body)
 	}
 }
 

@@ -672,7 +672,7 @@ func proposalsSection(tx *store.Tx, all []domain.Item, w window, names map[strin
 	return out, nil
 }
 
-// followOf 把后续事件按发生时刻排好，给数目与最新几条；每条按该来源对外部端点的外发范围裁剪（§14.14），摘要另按字符预算裁。
+// followOf 把后续事件按发生时刻排好，给数目与最新几条；简报运行属于内部，已登记来源一律全文（rawScope，§14.14），摘要另按字符预算裁。
 func followOf(tx *store.Tx, later []domain.SourceEvent, p briefPlan) *followUp {
 	if len(later) == 0 {
 		return nil
@@ -682,7 +682,7 @@ func followOf(tx *store.Tx, later []domain.SourceEvent, p briefPlan) *followUp {
 	for _, ev := range later[:min(followShown, len(later))] {
 		tr, ok := registry.Trim(ev, rawScope(tx, ev))
 		if !ok {
-			continue // 外发范围不允许：只计数
+			continue // 不是已登记来源（对话捕获只给本人）：只计数
 		}
 		l := laterEvent{Type: tr.Type, Subject: tr.Subject, Link: tr.Link, Summary: budget.Fit(budget.Source{Body: tr.Summary}, followSummaryChars).Text}
 		if !ev.OccurredAt.IsZero() {

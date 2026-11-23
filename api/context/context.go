@@ -13,9 +13,11 @@ import (
 	"strconv"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	kcontext "github.com/xiaohei-info/awesome-personal-agent/kernel/context"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/domain"
+	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/projects"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -77,7 +79,12 @@ func (h *handlers) context(w http.ResponseWriter, r *http.Request, p *core.Princ
 	}
 
 	var res kcontext.Result
-	run := func(tx *store.Tx) (err error) { res, err = kcontext.Build(tx, req); return }
+	run := func(tx *store.Tx) (err error) {
+		if res, err = kcontext.Build(tx, req); err != nil {
+			return err
+		}
+		return scoped(tx, p, &res)
+	}
 	var err error
 	if req.Session != "" || req.ItemScope { // 要推进游标或挂靠消息，需要写事务
 		err = h.st.Update(r.Context(), run)
@@ -93,6 +100,79 @@ func (h *handlers) context(w http.ResponseWriter, r *http.Request, p *core.Princ
 		return err
 	}
 	return core.WriteJSON(w, http.StatusOK, res)
+}
+
+// scoped 按外部钥匙的来源档位裁上下文（§14.14）：够不到的事项连同它的投递、挂靠消息、委派记录一起去掉；
+// 只有元信息的事项，投递不带摘要与选项；挂靠消息各按自己来源的档位裁。内部钥匙与运行凭据不变。
+func scoped(tx *store.Tx, p *core.Principal, res *kcontext.Result) error {
+	rs := readscope.New(tx, p.Caller)
+	if rs.All() {
+		return nil
+	}
+	tiers := map[string]string{}
+	tier := func(id string) (string, error) {
+		if t, ok := tiers[id]; ok {
+			return t, nil
+		}
+		it, err := kitems.Get(tx, id)
+		if err != nil {
+			return readscope.None, err
+		}
+		t, err := rs.ItemTier(it)
+		tiers[id] = t
+		return t, err
+	}
+	items := res.Items[:0]
+	for _, e := range res.Items {
+		t, err := tier(e.ID)
+		if err != nil {
+			return err
+		}
+		if t != readscope.None {
+			items = append(items, e)
+		}
+	}
+	res.Items = items
+	var ds []kcontext.DeliveryEntry
+	for _, d := range res.Deliveries {
+		t, err := tier(d.Item)
+		if err != nil {
+			return err
+		}
+		switch t {
+		case readscope.None:
+			continue
+		case readscope.Meta:
+			d.Summary, d.Options = "", nil
+		}
+		ds = append(ds, d)
+	}
+	res.Deliveries = ds
+	var ms []kcontext.ItemMessages
+	for _, m := range res.Messages {
+		t, err := tier(m.Item)
+		if err != nil {
+			return err
+		}
+		if t == readscope.None {
+			continue
+		}
+		m.Forwarded.Messages = rs.Messages(m.Forwarded.Messages)
+		ms = append(ms, m)
+	}
+	res.Messages = ms
+	var hs []kcontext.ItemHistory
+	for _, h := range res.History {
+		t, err := tier(h.Item)
+		if err != nil {
+			return err
+		}
+		if t != readscope.None {
+			hs = append(hs, h)
+		}
+	}
+	res.History = hs
+	return nil
 }
 
 // persona 返回注入用的人格全文，以及同一语言的内置默认原文（Web 在没自定义时显示它）。

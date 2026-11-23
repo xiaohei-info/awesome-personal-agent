@@ -95,7 +95,7 @@ func TestReviewNeitherQueriesNorConsumesDigest(t *testing.T) {
 	}
 }
 
-// 后续事件只认同一来源里共用关联键的事件（同一对象），按该来源外发范围裁剪；不按链接推测，没有后续就不给。
+// 后续事件只认同一来源里共用关联键的事件（同一对象），不按链接推测，没有后续就不给；简报运行属于内部，来源送外部端点的范围不裁它（§14.14）。
 func TestProposalFollowedByLaterEventsOfSameObject(t *testing.T) {
 	e := setup(t)
 	gh := e.rawSource("src_gh", "meta",
@@ -105,7 +105,7 @@ func TestProposalFollowedByLaterEventsOfSameObject(t *testing.T) {
 		domain.SourceEvent{ID: "m1", Type: "pr.merged", Subject: "PR 一", Summary: "SUMMARY-HIDDEN-BY-META", OccurredAt: t0.Add(-time.Hour), CorrelationKeys: []string{"r#1"}},
 		domain.SourceEvent{ID: "x2", Type: "pr.updated", Subject: "同链接别的对象", Link: "https://example.org/r", OccurredAt: t0.Add(-time.Hour), CorrelationKeys: []string{"r#9"}},
 	)
-	hidden := e.rawSource("src_none", "", // 外发范围未选择：只计数
+	hidden := e.rawSource("src_none", "", // 送外部端点的范围未选择：不影响简报
 		domain.SourceEvent{ID: "h1", Type: "mail", Subject: "原信", OccurredAt: t0.Add(-3 * time.Hour), CorrelationKeys: []string{"thread:a"}},
 		domain.SourceEvent{ID: "h2", Type: "mail", Subject: "SECRET-REPLY", OccurredAt: t0.Add(-time.Hour), CorrelationKeys: []string{"thread:a"}},
 	)
@@ -136,14 +136,14 @@ func TestProposalFollowedByLaterEventsOfSameObject(t *testing.T) {
 	if f := got["合并的"]; f == nil || f.Count != 2 || len(f.Latest) != 2 || f.Latest[0].Type != "pr.merged" || f.Latest[1].Type != "pr.commented" {
 		t.Fatalf("merged PR follow-up: %+v", f)
 	}
-	if strings.Contains(m["proposals"], "SUMMARY-HIDDEN-BY-META") || strings.Contains(m["proposals"], "SECRET-REPLY") || strings.Contains(m["proposals"], "同链接别的对象") {
-		t.Fatalf("follow-ups must respect outbound scope and object keys: %s", m["proposals"])
+	if !strings.Contains(m["proposals"], "SUMMARY-HIDDEN-BY-META") || strings.Contains(m["proposals"], "同链接别的对象") {
+		t.Fatalf("follow-ups are full and keyed by object: %s", m["proposals"])
 	}
 	if got["没后续的"] != nil {
 		t.Fatalf("a shared link is not the same object: %+v", got["没后续的"])
 	}
-	if f := got["看不到的"]; f == nil || f.Count != 1 || len(f.Latest) != 0 {
-		t.Fatalf("outbound none gives a count only: %+v", f)
+	if f := got["看不到的"]; f == nil || f.Count != 1 || len(f.Latest) != 1 || f.Latest[0].Subject != "SECRET-REPLY" {
+		t.Fatalf("a source with no endpoint scope still shows its follow-up to the brief run: %+v", f)
 	}
 }
 
@@ -348,8 +348,8 @@ func TestDigestEntriesCarryOccurredAtInReportZone(t *testing.T) {
 	if err := json.Unmarshal([]byte(materialsOf(e, e.waitResult().Run.ID)["digest"]), &d); err != nil || len(d.Digest) != 1 {
 		t.Fatalf("digest: %v %+v", err, d)
 	}
-	if x := d.Digest[0]; x.OccurredAt == nil || *x.OccurredAt != "2026-02-28T08:14:43-05:00" || len(x.Raw) != 1 || x.Raw[0].File != "" {
-		t.Errorf("a meta-scope entry still carries its own time in the report zone: %+v", x)
+	if x := d.Digest[0]; x.OccurredAt == nil || *x.OccurredAt != "2026-02-28T08:14:43-05:00" || len(x.Raw) != 1 || x.Raw[0].File == "" {
+		t.Errorf("an entry carries its own time in the report zone and its raw file: %+v", x)
 	}
 	dm, _, err := e.svc.briefRaw(bg, []summaries.DigestEntry{{Event: "gone", Title: "无时间"}}, briefProposals{}, time.UTC)
 	if err != nil || strings.Contains(dm.Body, "occurred_at") {

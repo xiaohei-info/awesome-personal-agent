@@ -46,10 +46,10 @@ func TestV01JudgeEventsReplayAfterUpgradeAndStayOutOfJudgmentRecords(t *testing.
 	au := auth.New(nil)
 	var del, obs string
 	if err := s.Update(context.Background(), func(tx *store.Tx) (err error) {
-		if _, del, err = au.Issue(tx, auth.Spec{Kind: auth.Delegate}); err != nil {
+		if _, del, err = au.Issue(tx, auth.Spec{Kind: auth.Delegate, Audience: auth.AudienceInternal}); err != nil {
 			return err
 		}
-		_, obs, err = au.Issue(tx, auth.Spec{Kind: auth.Observer})
+		_, obs, err = au.Issue(tx, auth.Spec{Kind: auth.Observer, Audience: auth.AudienceInternal})
 		return err
 	}); err != nil {
 		t.Fatal(err)

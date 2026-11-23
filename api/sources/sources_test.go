@@ -151,12 +151,28 @@ func setup(t *testing.T) *env {
 	return e
 }
 
+// token 签一把钥匙：三级 token 是 APA 内部钥匙（读来源不受档位限制），ext、webhook 是外部的；外部钥匙的逐来源档位用 scoped。
 func (e *env) token(kind auth.Kind) string {
 	e.t.Helper()
-	spec := auth.Spec{Kind: kind}
+	spec := auth.Spec{Kind: kind, Audience: auth.AudienceInternal}
 	if kind == auth.Ext || kind == auth.Webhook {
-		spec.Scope = "src_other"
+		spec.Scope, spec.Audience = "src_other", ""
 	}
+	return e.issueSpec(spec)
+}
+
+// scoped 签一把外部钥匙，只给 scopes 里列出的来源。
+func (e *env) scoped(kind auth.Kind, scopes map[string]string) string {
+	e.t.Helper()
+	spec := auth.Spec{Kind: kind, SourceScopes: scopes}
+	if kind == auth.Ext {
+		spec.Scope = "export"
+	}
+	return e.issueSpec(spec)
+}
+
+func (e *env) issueSpec(spec auth.Spec) string {
+	e.t.Helper()
 	var secret string
 	if err := e.st.Update(context.Background(), func(tx *store.Tx) (err error) { _, secret, err = e.au.Issue(tx, spec); return }); err != nil {
 		e.t.Fatal(err)

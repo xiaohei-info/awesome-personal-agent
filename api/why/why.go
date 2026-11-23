@@ -15,6 +15,7 @@ import (
 	"strconv"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/authz"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -22,6 +23,7 @@ import (
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/eventlog"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/inbound"
 	kitems "github.com/xiaohei-info/awesome-personal-agent/kernel/items"
+	km "github.com/xiaohei-info/awesome-personal-agent/kernel/materials"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/policy"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/sources/runner"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/store"
@@ -49,6 +51,38 @@ func readable(p *core.Principal) error {
 	return nil
 }
 
+// replayLevel 是回放与经过对外部钥匙的口径（§14.14）：回放里有事项快照、进展与来源原文，按档位拆不干净，
+// 所以事项、材料、来源事件只在全文档位可回放，否则按够不到拒绝；其余对象（运行等）只给信封，与 observer 同。
+// 内部钥匙、运行凭据与 Web 照旧按凭据级别裁剪。
+func replayLevel(tx *store.Tx, p *core.Principal, id string) (authz.Level, error) {
+	if !p.Caller.External() {
+		return p.Caller.Level, nil
+	}
+	rs := readscope.New(tx, p.Caller)
+	full := func(t string, err error) (authz.Level, error) {
+		if err == nil && t != readscope.Full {
+			err = readscope.Denied()
+		}
+		return p.Caller.Level, err
+	}
+	if it, err := kitems.Get(tx, id); err == nil {
+		return full(rs.ItemTier(it))
+	} else if !isNotFound(err) {
+		return "", err
+	}
+	if _, err := km.Get(tx, id); err == nil {
+		return full(rs.MaterialTier(id))
+	} else if !isNotFound(err) {
+		return "", err
+	}
+	if ev, err := runner.Event(tx, id); err == nil {
+		return full(rs.Tier(ev.SourceID), nil)
+	} else if !isNotFound(err) {
+		return "", err
+	}
+	return authz.LevelObserver, nil
+}
+
 func (h *handlers) why(w http.ResponseWriter, r *http.Request, p *core.Principal) error {
 	if err := readable(p); err != nil {
 		return err
@@ -60,7 +94,11 @@ func (h *handlers) why(w http.ResponseWriter, r *http.Request, p *core.Principal
 		if err != nil {
 			return err
 		}
-		tl, err = kwhy.Replay(tx, pol, kwhy.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, ID: id})
+		level, err := replayLevel(tx, p, id)
+		if err != nil {
+			return err
+		}
+		tl, err = kwhy.Replay(tx, pol, kwhy.Request{Actor: p.Caller.Actor, Level: level, ID: id})
 		return err
 	})
 	if err != nil {
@@ -104,7 +142,11 @@ func (h *handlers) audit(w http.ResponseWriter, r *http.Request, p *core.Princip
 	default:
 		return domain.NewError(domain.CodeInvalidRequest, "order must be asc or desc", "send order=desc for newest first")
 	}
-	req := kwhy.AuditRequest{Actor: p.Caller.Actor, Level: p.Caller.Level, After: after, Before: before, Desc: desc, Limit: int(limit),
+	level := p.Caller.Level
+	if p.Caller.External() { // 审计跨对象，外部钥匙只给信封（§14.14）
+		level = authz.LevelObserver
+	}
+	req := kwhy.AuditRequest{Actor: p.Caller.Actor, Level: level, After: after, Before: before, Desc: desc, Limit: int(limit),
 		Filter: eventlog.Filter{Actor: q.Get("actor"), Object: q.Get("object"), Type: q.Get("type"), Grant: q.Get("grant"), Imported: q.Get("imported")}}
 	var steps []kwhy.Step
 	if err := h.st.View(r.Context(), func(tx *store.Tx) error {
@@ -154,7 +196,11 @@ func (h *handlers) messageTrace(w http.ResponseWriter, r *http.Request, p *core.
 		if !p.Web && inbound.IsCaptureSource(ev.SourceID) { // 对话内容只给本人；其他凭据与不存在一样
 			return domain.NewError(domain.CodeNotFound, "source event not found", "check the id")
 		}
-		t, err = kwhy.MessageTrace(tx, pol, kwhy.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, ID: id})
+		level, err := replayLevel(tx, p, id)
+		if err != nil {
+			return err
+		}
+		t, err = kwhy.MessageTrace(tx, pol, kwhy.Request{Actor: p.Caller.Actor, Level: level, ID: id})
 		return err
 	})
 	if err != nil {
@@ -177,7 +223,11 @@ func (h *handlers) itemTrace(w http.ResponseWriter, r *http.Request, p *core.Pri
 		if _, err := kitems.Get(tx, id); err != nil {
 			return err
 		}
-		if t, err = kwhy.ItemTrace(tx, pol, kwhy.Request{Actor: p.Caller.Actor, Level: p.Caller.Level, ID: id}); err != nil {
+		level, err := replayLevel(tx, p, id)
+		if err != nil {
+			return err
+		}
+		if t, err = kwhy.ItemTrace(tx, pol, kwhy.Request{Actor: p.Caller.Actor, Level: level, ID: id}); err != nil {
 			return err
 		}
 		if !p.Web {

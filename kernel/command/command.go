@@ -70,7 +70,15 @@ type Caller struct {
 	RunAgentID string
 	// Fresh 只有 Web 本人有值：会话刚再输过一次口令，3b 动作要求它（§14.3）。
 	Fresh bool
+	// Internal 与 SourceScopes 只有凭据入口有值（§14.2、§14.14）：内部钥匙读来源内容不受档位限制；
+	// 外部钥匙只读 SourceScopes 里列出的来源（来源 id → full/excerpt/meta），不在表里即不给。
+	Internal     bool
+	SourceScopes map[string]string
 }
+
+// External 报告调用者是否按外部钥匙读来源内容：只有凭据入口（token、ext、webhook）而且钥匙不是内部的才是。
+// Web 本人、运行凭据与内核自己的入口没有 Kind，一律按内部。
+func (c Caller) External() bool { return c.Kind != "" && !c.Internal }
 
 // Agent 是调用者所属的 Agent：运行钥匙取运行记录，其余取凭据归属；没有归属为空（只整理）。
 func (c Caller) Agent() string {
@@ -107,7 +115,8 @@ func (b Bearer) Authenticate(tx *store.Tx) (Caller, error) {
 	case auth.Delegate:
 		l = authz.LevelDelegate
 	}
-	return Caller{Actor: c.Actor(b.Origin), Level: l, Kind: c.Kind, Credential: c.ID, CredentialAgentID: c.AgentID, CredentialHarness: c.Harness}, nil
+	return Caller{Actor: c.Actor(b.Origin), Level: l, Kind: c.Kind, Credential: c.ID, CredentialAgentID: c.AgentID, CredentialHarness: c.Harness,
+		Internal: c.Audience == auth.AudienceInternal, SourceScopes: c.SourceScopes}, nil
 }
 
 // Trusted 是内核内部与已由其他模块核实的入口：Web 本人会话、运行凭据、时钟、规则。

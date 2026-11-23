@@ -84,7 +84,7 @@ func newKernel(t *testing.T) *kernel {
 	k.restartClock()
 	for _, kind := range []auth.Kind{auth.Observer, auth.Worker, auth.Delegate} {
 		if err := st.Update(bg, func(tx *store.Tx) error {
-			_, s, err := k.auth.Issue(tx, auth.Spec{Kind: kind, Executor: map[auth.Kind]string{auth.Worker: "wrk1"}[kind]})
+			_, s, err := k.auth.Issue(tx, auth.Spec{Kind: kind, Executor: map[auth.Kind]string{auth.Worker: "wrk1"}[kind], Audience: agentAudience(kind)})
 			k.tokens[kind] = s
 			return err
 		}); err != nil {
@@ -93,7 +93,7 @@ func newKernel(t *testing.T) *kernel {
 	}
 	// decider 是归属 agent_d、本人放开到「也替我拍板」的 delegate 钥匙；auth.Delegate 那把没有归属，只整理。
 	if err := st.Update(bg, func(tx *store.Tx) error {
-		_, s, err := k.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_d", Harness: "h"})
+		_, s, err := k.auth.Issue(tx, auth.Spec{Kind: auth.Delegate, AgentID: "agent_d", Harness: "h", Audience: auth.AudienceInternal})
 		if err != nil {
 			return err
 		}
@@ -713,4 +713,12 @@ func TestItemOriginAndExtFlags(t *testing.T) {
 	if k.item(oid)["origin"].(map[string]any)["source"] != "manual" {
 		t.Fatalf("origin not updated: %v", k.item(oid))
 	}
+}
+
+// agentAudience：测试里的三级 token 代表 APA 内部的 Agent，读来源不受档位限制（§14.2）；ext、webhook 是外部钥匙。
+func agentAudience(k auth.Kind) string {
+	if k == auth.Observer || k == auth.Worker || k == auth.Delegate {
+		return auth.AudienceInternal
+	}
+	return ""
 }

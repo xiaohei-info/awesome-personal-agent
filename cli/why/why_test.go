@@ -80,7 +80,7 @@ func newRig(t *testing.T) *rig {
 func (r *rig) token(kind auth.Kind) string {
 	var secret string
 	if err := r.st.Update(bg, func(tx *store.Tx) error {
-		_, s, err := r.auth.Issue(tx, auth.Spec{Kind: kind})
+		_, s, err := r.auth.Issue(tx, auth.Spec{Kind: kind, Audience: agentAudience(kind)})
 		secret = s
 		return err
 	}); err != nil {
@@ -277,4 +277,12 @@ func TestRenderAlertReplay(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
+}
+
+// agentAudience：测试里的三级 token 代表 APA 内部的 Agent，读来源不受档位限制（§14.2）；ext、webhook 是外部钥匙。
+func agentAudience(k auth.Kind) string {
+	if k == auth.Observer || k == auth.Worker || k == auth.Delegate {
+		return auth.AudienceInternal
+	}
+	return ""
 }

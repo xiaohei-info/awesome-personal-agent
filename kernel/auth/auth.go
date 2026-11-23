@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -48,20 +49,42 @@ var Module = store.Module{Name: "auth", Migrations: []store.Migration{{
 	// 账本结构版本 6：token 所属的 harness（§14.2）。已有行为空，由本人在 Web 认领一次。
 	Version: 2, Ledger: 6, Name: "ledger-v6-credential-harness",
 	SQL: `ALTER TABLE auth_credential ADD COLUMN harness TEXT NOT NULL DEFAULT '';`,
-}, {Version: 3, Ledger: 9, Name: "credential-agent-instance", SQL: `ALTER TABLE auth_credential ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''; CREATE INDEX auth_credential_agent ON auth_credential(agent_id);`}}}
+}, {Version: 3, Ledger: 9, Name: "credential-agent-instance", SQL: `ALTER TABLE auth_credential ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''; CREATE INDEX auth_credential_agent ON auth_credential(agent_id);`},
+	// 钥匙给谁用与逐来源档位（§14.2、§14.14）。source_scopes 为空串是升级前的行，由启动时的一次性迁移按旧外发范围换算（§16.5）。
+	{Version: 4, Ledger: 9, Name: "credential-audience-source-scopes", SQL: `ALTER TABLE auth_credential ADD COLUMN audience TEXT NOT NULL DEFAULT 'external';
+ALTER TABLE auth_credential ADD COLUMN source_scopes TEXT NOT NULL DEFAULT '';`}}}
+
+// 钥匙给谁用（§14.2）：内部钥匙读来源内容不受档位限制；外部钥匙只读 source_scopes 里列出的来源。
+const (
+	AudienceInternal = "internal"
+	AudienceExternal = "external"
+)
+
+// 外部钥匙的来源档位取值；不在表里就是不给（§14.14）。
+const (
+	ScopeFull    = "full"
+	ScopeExcerpt = "excerpt"
+	ScopeMeta    = "meta"
+)
+
+// ValidSourceScope 报告 s 是否是钥匙上合法的来源档位。
+func ValidSourceScope(s string) bool { return s == ScopeFull || s == ScopeExcerpt || s == ScopeMeta }
 
 // Credential 是凭据登记，不含明文也不对外暴露哈希。
 type Credential struct {
-	AgentID   string    `json:"agent_id,omitempty"`
-	ID        string    `json:"id"`
-	Kind      Kind      `json:"kind"`
-	Label     string    `json:"label,omitempty"`
-	Executor  string    `json:"executor,omitempty"` // 绑定的执行者 id；空表示未绑定
-	Scope     string    `json:"scope,omitempty"`
-	Harness   string    `json:"harness"` // 所属 harness（§14.2）；空表示未认领。设定后不可改
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at,omitzero"` // 零值：不过期；轮换后的旧密钥才有
-	RevokedAt time.Time `json:"revoked_at,omitzero"`
+	AgentID  string `json:"agent_id,omitempty"`
+	ID       string `json:"id"`
+	Kind     Kind   `json:"kind"`
+	Label    string `json:"label,omitempty"`
+	Executor string `json:"executor,omitempty"` // 绑定的执行者 id；空表示未绑定
+	Scope    string `json:"scope,omitempty"`
+	Harness  string `json:"harness"` // 所属 harness（§14.2）；空表示未认领。设定后不可改
+	// Audience 是 internal 或 external；SourceScopes 是外部钥匙逐来源的档位（来源 id → full/excerpt/meta），不在表里即不给。
+	Audience     string            `json:"audience"`
+	SourceScopes map[string]string `json:"source_scopes"`
+	CreatedAt    time.Time         `json:"created_at"`
+	ExpiresAt    time.Time         `json:"expires_at,omitzero"` // 零值：不过期；轮换后的旧密钥才有
+	RevokedAt    time.Time         `json:"revoked_at,omitzero"`
 }
 
 // IsExportExt 报告凭据是否是导出 ext 密钥（scope 为 export 或 export.<名>，§10.3）：只读事项与材料。
@@ -77,6 +100,9 @@ type Spec struct {
 	Executor string // 只对 worker 有意义（回执据此校验）；delegate 无需绑定
 	Scope    string // ext、webhook 必填，其余种类必须为空
 	Harness  string // 只对 worker、delegate 有意义
+	// Audience 空表示 external。internal 只给 observer、worker、delegate，且不能带 SourceScopes。
+	Audience     string
+	SourceScopes map[string]string
 }
 
 // Auth 签发与校验凭据；now 可注入以便测试过期。
@@ -119,6 +145,9 @@ func (s Spec) validate() error {
 	if s.AgentID != "" && s.Harness == "" {
 		return invalid("instance binding requires its harness")
 	}
+	if err := validScope(s.Kind, s.Audience, s.SourceScopes); err != nil {
+		return err
+	}
 	if s.Harness != "" {
 		if s.Kind != Worker && s.Kind != Delegate {
 			return invalid("harness is only valid for worker and delegate")
@@ -126,6 +155,50 @@ func (s Spec) validate() error {
 		return validHarness(s.Harness)
 	}
 	return nil
+}
+
+// validScope：内部只给三级 token，且内部钥匙没有来源档位；webhook 不读来源，不带档位；档位只取 full、excerpt、meta。
+// 来源 id 是否已登记由命令层校验（本包不认识来源）。
+func validScope(kind Kind, audience string, scopes map[string]string) error {
+	switch audience {
+	case "", AudienceExternal:
+	case AudienceInternal:
+		if kind != Observer && kind != Worker && kind != Delegate {
+			return invalid("only observer, worker and delegate tokens can be internal")
+		}
+		if len(scopes) > 0 {
+			return invalid("an internal key reads every source in full; source_scopes must be empty")
+		}
+	default:
+		return invalid("audience must be internal or external")
+	}
+	if kind == Webhook && len(scopes) > 0 {
+		return invalid("webhook keys cannot read sources")
+	}
+	for src, sc := range scopes {
+		if src == "" || strings.HasPrefix(src, "capture:") {
+			return invalid("source_scopes names registered sources; conversation capture is only readable by the owner")
+		}
+		if !ValidSourceScope(sc) {
+			return invalid("a source scope must be full, excerpt or meta; leave the source out to give nothing")
+		}
+	}
+	return nil
+}
+
+func audienceOr(a string) string {
+	if a == "" {
+		return AudienceExternal
+	}
+	return a
+}
+
+func encodeScopes(m map[string]string) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
 }
 
 // validHarness 与无头运行声明的 harness 标识同一规则：非空、不含空白。
@@ -163,22 +236,37 @@ func (a *Auth) Issue(tx *store.Tx, s Spec) (Credential, string, error) {
 		return Credential{}, "", err
 	}
 	secret := prefix[s.Kind] + body
-	c := Credential{ID: "cred_" + id, Kind: s.Kind, Label: s.Label, Executor: s.Executor, Scope: s.Scope, Harness: s.Harness, AgentID: s.AgentID, CreatedAt: a.now()}
-	if _, err := tx.Exec(`INSERT INTO auth_credential (id, kind, hash, label, executor, scope, harness, agent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, string(c.Kind), hashOf(secret), c.Label, c.Executor, c.Scope, c.Harness, c.AgentID, c.CreatedAt.UnixNano()); err != nil {
+	c := Credential{ID: "cred_" + id, Kind: s.Kind, Label: s.Label, Executor: s.Executor, Scope: s.Scope, Harness: s.Harness, AgentID: s.AgentID, CreatedAt: a.now(),
+		Audience: audienceOr(s.Audience), SourceScopes: copyScopes(s.SourceScopes)}
+	if _, err := tx.Exec(`INSERT INTO auth_credential (id, kind, hash, label, executor, scope, harness, agent_id, created_at, audience, source_scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, string(c.Kind), hashOf(secret), c.Label, c.Executor, c.Scope, c.Harness, c.AgentID, c.CreatedAt.UnixNano(), c.Audience, encodeScopes(c.SourceScopes)); err != nil {
 		return Credential{}, "", err
 	}
 	return c, secret, nil
 }
 
-const cols = "id, kind, label, executor, scope, harness,agent_id, created_at, expires_at, revoked_at"
+const cols = "id, kind, label, executor, scope, harness,agent_id, created_at, expires_at, revoked_at, audience, source_scopes"
+
+func copyScopes(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
 
 func scan(r *store.Rows) (Credential, error) {
 	var c Credential
-	var kind string
+	var kind, scopes string
 	var created, expires, revoked int64
-	if err := r.Scan(&c.ID, &kind, &c.Label, &c.Executor, &c.Scope, &c.Harness, &c.AgentID, &created, &expires, &revoked); err != nil {
+	if err := r.Scan(&c.ID, &kind, &c.Label, &c.Executor, &c.Scope, &c.Harness, &c.AgentID, &created, &expires, &revoked, &c.Audience, &scopes); err != nil {
 		return c, err
+	}
+	c.SourceScopes = map[string]string{}
+	if scopes != "" { // 空串：升级前的行还没迁移，按空表（最严）
+		if err := json.Unmarshal([]byte(scopes), &c.SourceScopes); err != nil {
+			return c, err
+		}
 	}
 	c.Kind, c.CreatedAt = Kind(kind), time.Unix(0, created)
 	if expires != 0 {
@@ -249,7 +337,8 @@ func (a *Auth) Rotate(tx *store.Tx, id string, grace time.Duration) (Credential,
 	if grace < 0 {
 		return Credential{}, "", invalid("grace must not be negative")
 	}
-	c, secret, err := a.Issue(tx, Spec{Kind: old.Kind, Label: old.Label, Executor: old.Executor, Scope: old.Scope, Harness: old.Harness, AgentID: old.AgentID})
+	c, secret, err := a.Issue(tx, Spec{Kind: old.Kind, Label: old.Label, Executor: old.Executor, Scope: old.Scope, Harness: old.Harness, AgentID: old.AgentID,
+		Audience: old.Audience, SourceScopes: old.SourceScopes})
 	if err != nil {
 		return Credential{}, "", err
 	}
@@ -281,6 +370,49 @@ func (a *Auth) Assign(tx *store.Tx, id, harness string) (Credential, error) {
 	}
 	c.Harness = harness
 	return c, nil
+}
+
+// SetScope 改钥匙给谁用与逐来源档位，立即生效；已吊销的不能改。来源 id 是否已登记由命令层校验。
+func (a *Auth) SetScope(tx *store.Tx, id, audience string, scopes map[string]string) (Credential, error) {
+	c, err := a.Get(tx, id)
+	if err != nil {
+		return Credential{}, err
+	}
+	if !c.RevokedAt.IsZero() {
+		return Credential{}, domain.NewError(domain.CodeConflict, "credential is revoked", "issue a new credential")
+	}
+	if err := validScope(c.Kind, audience, scopes); err != nil {
+		return Credential{}, err
+	}
+	c.Audience, c.SourceScopes = audienceOr(audience), copyScopes(scopes)
+	if _, err := tx.Exec("UPDATE auth_credential SET audience = ?, source_scopes = ? WHERE id = ?", c.Audience, encodeScopes(c.SourceScopes), id); err != nil {
+		return Credential{}, err
+	}
+	return c, nil
+}
+
+// Unmigrated 返回 source_scopes 还是空串（升级前签发、尚未换算档位）的凭据，含已吊销的，供启动时的一次性迁移使用。
+func (a *Auth) Unmigrated(tx *store.Tx) ([]Credential, error) {
+	r, err := tx.Query("SELECT " + cols + " FROM auth_credential WHERE source_scopes = '' ORDER BY created_at, id")
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	var out []Credential
+	for r.Next() {
+		c, err := scan(r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, r.Err()
+}
+
+// MigrateScopes 写入一次性迁移换算出的档位；只改仍是空串的行，重复执行无副作用。
+func (a *Auth) MigrateScopes(tx *store.Tx, id string, scopes map[string]string) error {
+	_, err := tx.Exec("UPDATE auth_credential SET source_scopes = ? WHERE id = ? AND source_scopes = ''", encodeScopes(scopes), id)
+	return err
 }
 
 // Get 按 id 取凭据登记（含已吊销）；不存在返回 not_found。

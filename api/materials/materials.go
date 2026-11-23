@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/xiaohei-info/awesome-personal-agent/api/core"
+	"github.com/xiaohei-info/awesome-personal-agent/api/readscope"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/auth"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/blobs"
 	"github.com/xiaohei-info/awesome-personal-agent/kernel/command"
@@ -174,6 +175,34 @@ func (h *handlers) create(w http.ResponseWriter, r *http.Request, p *core.Princi
 	return reply(w, http.StatusCreated, res)
 }
 
+// visible 去掉外部钥匙按来源档位够不到的材料（§14.14）。
+func visible(tx *store.Tx, p *core.Principal, ms []km.Material) ([]km.Material, error) {
+	rs := readscope.New(tx, p.Caller)
+	if rs.All() {
+		return ms, nil
+	}
+	out := []km.Material{}
+	for _, m := range ms {
+		t, err := rs.MaterialTier(m.ID)
+		if err != nil {
+			return nil, err
+		}
+		if t != readscope.None {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// materialTier 是调用者读这份材料的档位；够不到时返回退出码 4 的拒绝。
+func materialTier(tx *store.Tx, p *core.Principal, id string) (string, error) {
+	t, err := readscope.New(tx, p.Caller).MaterialTier(id)
+	if err == nil && t == readscope.None {
+		err = readscope.Denied()
+	}
+	return t, err
+}
+
 // materialView 是读出的材料：登记本身加只读的 open_url（链接型、库已登记打开方式时才有，§12.8）。
 type materialView struct {
 	km.Material
@@ -221,6 +250,9 @@ func (h *handlers) list(w http.ResponseWriter, r *http.Request, p *core.Principa
 		if err != nil {
 			return err
 		}
+		if all, err = visible(tx, p, all); err != nil {
+			return err
+		}
 		ms, err = views(tx, all)
 		return err
 	}); err != nil {
@@ -239,9 +271,13 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 	}
 	id, rev := r.PathValue("id"), r.URL.Query().Get("rev")
 	out := map[string]any{}
+	scope := readscope.Full
 	err := h.st.View(r.Context(), func(tx *store.Tx) error {
 		m, err := km.Get(tx, id)
 		if err != nil {
+			return err
+		}
+		if scope, err = materialTier(tx, p, id); err != nil {
 			return err
 		}
 		vs, err := views(tx, []km.Material{m})
@@ -266,11 +302,19 @@ func (h *handlers) get(w http.ResponseWriter, r *http.Request, p *core.Principal
 			return nil
 		}
 		_, v, err := km.Show(tx, id, rev)
+		content := v.Content
+		v.Content = readscope.TrimText(v.Content, scope)
+		if cut := readscope.TrimmedOf(content, v.Content); cut != nil {
+			out["trimmed"] = cut
+		}
 		out["revision"] = v
 		return err
 	})
 	if err != nil {
 		return err
+	}
+	if scope != readscope.Full { // 只有外部钥匙会被裁：写明按哪一档给的
+		out["content_scope"] = scope
 	}
 	return core.WriteJSON(w, http.StatusOK, out)
 }
@@ -284,9 +328,17 @@ func (h *handlers) revisions(w http.ResponseWriter, r *http.Request, p *core.Pri
 		if _, err := km.Get(tx, r.PathValue("id")); err != nil {
 			return err
 		}
-		var err error
-		vs, err = km.History(tx, r.PathValue("id"))
-		return err
+		scope, err := materialTier(tx, p, r.PathValue("id"))
+		if err != nil {
+			return err
+		}
+		if vs, err = km.History(tx, r.PathValue("id")); err != nil {
+			return err
+		}
+		for i := range vs {
+			vs[i].Content = readscope.TrimText(vs[i].Content, scope)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -302,8 +354,29 @@ func (h *handlers) pending(w http.ResponseWriter, r *http.Request, p *core.Princ
 		return err
 	}
 	var ps []km.Pending
-	if err := h.st.View(r.Context(), func(tx *store.Tx) (err error) { ps, err = km.PendingRevisions(tx); return }); err != nil {
+	if err := h.st.View(r.Context(), func(tx *store.Tx) error {
+		all, err := km.PendingRevisions(tx)
+		if err != nil {
+			return err
+		}
+		rs := readscope.New(tx, p.Caller)
+		for _, pr := range all {
+			t, err := rs.MaterialTier(pr.Material.ID)
+			if err != nil {
+				return err
+			}
+			if t == readscope.None {
+				continue
+			}
+			pr.Revision.Content = readscope.TrimText(pr.Revision.Content, t)
+			ps = append(ps, pr)
+		}
+		return nil
+	}); err != nil {
 		return err
+	}
+	if ps == nil {
+		ps = []km.Pending{}
 	}
 	return core.WriteJSON(w, http.StatusOK, map[string]any{"pending": ps})
 }
@@ -333,6 +406,25 @@ func (h *handlers) search(w http.ResponseWriter, r *http.Request, p *core.Princi
 	hits, err := search.Search(r.Context(), h.st, q)
 	if err != nil {
 		return err
+	}
+	if p.Caller.External() { // 正文命中会暴露看不到正文的材料：外部钥匙只留按全文能读的材料
+		if err := h.st.View(r.Context(), func(tx *store.Tx) error {
+			rs := readscope.New(tx, p.Caller)
+			kept := hits[:0]
+			for _, hit := range hits {
+				t, err := rs.MaterialTier(hit.ID)
+				if err != nil {
+					return err
+				}
+				if t == readscope.Full {
+					kept = append(kept, hit)
+				}
+			}
+			hits = kept
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 	if hits == nil {
 		hits = []search.Hit{}
