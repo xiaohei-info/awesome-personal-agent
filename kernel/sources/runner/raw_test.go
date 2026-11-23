@@ -124,10 +124,43 @@ func TestInvalidContentFieldsAreRejected(t *testing.T) {
 		"header not string":  {base + `"headers":{"A":1}}`, "headers.A"},
 		"attachment no name": {base + `"attachments":[{"size":1}]}`, "attachments[0].name"},
 		"original no type":   {base + `"original":{"text":"x"}}`, "original.media_type"},
+		"msg attachment no kind": {base + `"items":[{"sender":"a","text":"","at":"2026-03-01T00:00:00Z","attachments":[{"name":"a.png"}]}]}`,
+			"items[0].attachments[0].kind"},
 	} {
 		p := parse([]byte(tc.line+"\n"), 1<<20)
 		if len(p.events) != 0 || len(p.rejects) != 1 || !strings.Contains(p.rejects[0].Reason, tc.want) {
 			t.Errorf("%s: events=%d rejects=%+v", name, len(p.events), p.rejects)
+		}
+	}
+}
+
+// 只有附件、没有文字的消息（图片、文件、语音）照常入账，不连累同一事件里的其他消息；
+// 原文的 messages 部分与读回的事件都带着附件的类型、名字与媒体类型，送给模型的消息行写明这是一条什么消息。
+// 契约改回「items[].text 非空」，这条事件会被整条拒收，本用例失败。
+func TestAttachmentOnlyMessagesLandWithAttachmentMetadata(t *testing.T) {
+	e := setup(t, defaults())
+	pull(e, "src_a", `cat <<'EOF'
+{"id":"w1","type":"chat.window","subject":"g","occurred_at":"2026-03-01T00:03:00Z","items":[{"sender":"bob","text":"看下这个","at":"2026-03-01T00:00:00Z"},{"sender":"bob","text":"","at":"2026-03-01T00:01:00Z","attachments":[{"kind":"file","name":"周报.pdf","media_type":"application/pdf","ref":"h1"}]},{"sender":"bob","text":"","at":"2026-03-01T00:02:00Z","attachments":[{"kind":"image"}]},{"sender":"bob","text":"","at":"2026-03-01T00:03:00Z"}]}
+{"cursor":"c1"}
+EOF
+`)
+	if rj := e.rejects("src_a"); len(rj) != 0 {
+		t.Fatalf("attachment-only messages rejected: %+v", rj)
+	}
+	evs := e.events("src_a")
+	if len(evs) != 1 || len(evs[0].Messages) != 4 {
+		t.Fatalf("events=%d, want 1 with 4 messages", len(evs))
+	}
+	m := evs[0].Messages
+	if a := m[1].Attachments; len(a) != 1 || a[0].Kind != "file" || a[0].Name != "周报.pdf" || a[0].MediaType != "application/pdf" || a[0].Ref != "h1" {
+		t.Fatalf("file attachment not read back: %+v", m[1])
+	}
+	if p, err := e.part(evs[0].ID, "messages"); err != nil || !strings.Contains(string(p.Content), `"name":"周报.pdf"`) || !strings.Contains(string(p.Content), `"kind":"image"`) {
+		t.Fatalf("messages part lost attachments: %s %v", p.Content, err)
+	}
+	for i, want := range []string{"看下这个", `[attachment kind=file name="周报.pdf" media_type=application/pdf]`, "[attachment kind=image]", "[no text, no attachment]"} {
+		if got := m[i].Body(); got != want {
+			t.Errorf("message %d body = %q, want %q", i, got, want)
 		}
 	}
 }

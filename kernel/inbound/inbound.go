@@ -856,7 +856,7 @@ func materialAt(ev domain.SourceEvent, scope string) (budget.Source, bool) {
 			src.Body += "\n" + t.Link // 完整链接只在全文范围内送出，其余范围只有结构化输入里的域名
 		}
 		for _, m := range ev.Messages {
-			src.Messages = append(src.Messages, m.Sender+": "+m.Text)
+			src.Messages = append(src.Messages, m.Sender+": "+m.Body())
 		}
 	}
 	return src, true
@@ -870,7 +870,7 @@ func withMessages(ev domain.SourceEvent) domain.SourceEvent {
 	var b strings.Builder
 	b.WriteString(ev.Detail)
 	for _, m := range ev.Messages {
-		fmt.Fprintf(&b, "\n%s: %s", m.Sender, m.Text)
+		fmt.Fprintf(&b, "\n%s: %s", m.Sender, m.Body())
 	}
 	ev.Detail = b.String()
 	return ev
@@ -1280,7 +1280,7 @@ func refBody(ev domain.SourceEvent, refs []int) string {
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
-		fmt.Fprintf(&b, "%s: %s", ev.Messages[r].Sender, ev.Messages[r].Text)
+		fmt.Fprintf(&b, "%s: %s", ev.Messages[r].Sender, ev.Messages[r].Body())
 	}
 	return b.String()
 }

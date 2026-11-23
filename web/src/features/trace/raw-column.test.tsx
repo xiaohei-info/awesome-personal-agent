@@ -29,6 +29,7 @@ const CHAT = {
   messages: [
     { sender: "owner", text: "先改登录页", at: "2030-01-01T08:00:00Z" },
     { sender: "agent", text: "好的，\n再查一下超时", at: "2030-01-01T08:01:00Z" },
+    { sender: "owner", text: "", at: "2030-01-01T08:02:00Z", attachments: [{ kind: "file", name: "周报.pdf", media_type: "application/pdf" }, { kind: "image" }] },
   ],
   scope: "full",
 };
@@ -115,12 +116,16 @@ describe("处理经过页的原文栏（ACT-WRP-01）", () => {
     const col = await column();
     const list = await col.findByRole("list", { name: "会话消息" });
     const rows = within(list).getAllByRole("listitem");
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows[0].textContent).toContain("owner");
     expect(rows[0].textContent).toContain("先改登录页");
     expect(rows[1].textContent).toContain("agent");
     expect(within(rows[1]).getByText(/好的，\s*再查一下超时/).tagName).toBe("PRE");
     expect(rows[0].querySelector("time")).toHaveAttribute("datetime", "2030-01-01T08:00:00Z");
+    // 只有附件没有文字的消息：写明是文件、图片，带文件名与类型，不留空白
+    expect(rows[2].textContent).toContain("文件：周报.pdf · application/pdf");
+    expect(rows[2].textContent).toContain("图片");
+    expect(rows[2].querySelector("pre")).toBeNull();
     expect(col.queryByRole("table", { name: "附件" })).toBeNull();
   });
 

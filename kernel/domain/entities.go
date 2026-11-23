@@ -2,6 +2,8 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -386,11 +388,46 @@ type SourceEvent struct {
 	PrevMetrics map[string]float64 `json:"-"`
 }
 
-// EventMessage 是聚合事件 items[] 里的一条消息（§9.2）。
+// EventMessage 是聚合事件 items[] 里的一条消息（§9.2）。图片、文件、语音消息可以没有 Text，附件在 Attachments。
 type EventMessage struct {
-	Sender string    `json:"sender"`
-	Text   string    `json:"text"`
-	At     time.Time `json:"at"`
+	Sender      string              `json:"sender"`
+	Text        string              `json:"text"`
+	At          time.Time           `json:"at"`
+	Attachments []MessageAttachment `json:"attachments,omitempty"`
+}
+
+// MessageAttachment 是一条消息带的附件：只有元数据，没有内容；Ref 是来源程序自己认得的取回句柄或链接。
+type MessageAttachment struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+	Size      int64  `json:"size,omitempty"`
+	Ref       string `json:"ref,omitempty"`
+}
+
+// Body 是这条消息送给模型的正文：文字之后逐个写明附件的类型、名字与媒体类型；不带 Ref，链接只按外发范围随正文走。
+func (m EventMessage) Body() string {
+	parts := make([]string, 0, 1+len(m.Attachments))
+	if t := strings.TrimSpace(m.Text); t != "" {
+		parts = append(parts, m.Text)
+	}
+	for _, a := range m.Attachments {
+		desc := []string{"attachment kind=" + a.Kind}
+		if a.Name != "" {
+			desc = append(desc, fmt.Sprintf("name=%q", a.Name))
+		}
+		if a.MediaType != "" {
+			desc = append(desc, "media_type="+a.MediaType)
+		}
+		if a.Size > 0 {
+			desc = append(desc, fmt.Sprintf("size=%d", a.Size))
+		}
+		parts = append(parts, "["+strings.Join(desc, " ")+"]")
+	}
+	if len(parts) == 0 {
+		return "[no text, no attachment]"
+	}
+	return strings.Join(parts, " ")
 }
 
 // TrustedSender：缺失或未核实按不在白名单处理（§6.10）。
