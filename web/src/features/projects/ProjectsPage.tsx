@@ -128,7 +128,6 @@ function ProjectDetail() {
       <details>
         <summary>{t.settings}</summary>
         <EditForm key={p.id + p.name} p={p} onSaved={setP} />
-        {p.capture && <CaptureOutbound key={p.id + (p.capture_outbound ?? "")} p={p} onSaved={setP} />}
         <Repos p={p} onChange={setP} />
         <Executors p={p} onSaved={setP} />
       </details>
@@ -181,8 +180,9 @@ function EditForm({ p, onSaved }: { p: Project; onSaved: (p: Project) => void })
   );
 }
 
-/** 从聊天里记下的内容发给外部模型时送多少：PUT /settings/projects/{id}/capture-outbound {value}，只 Web；不预选。 */
-function CaptureOutbound({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }) {
+/** 从聊天里记下的内容发给外部模型时送多少：PUT /settings/projects/{id}/capture-outbound {value}，只 Web；不预选。
+ * 在「设置 › 模型」的「模型端点能收哪些来源」里编辑（§14.14），项目页不再逐个配。 */
+export function CaptureOutbound({ p, onSaved }: { p: Project; onSaved: (p: Project) => void }) {
   const t = useT(strings);
   const { api } = useSession();
   const { error, run } = useAct();

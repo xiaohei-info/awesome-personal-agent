@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../app/api";
 import { useSession } from "../../app/session";
-import { errorText, useLang, useT } from "../../app/i18n";
+import { useLang, useT } from "../../app/i18n";
 import { ErrorNote } from "../../app/errors";
 import { useRaw } from "../../app/raw";
-import { Pick } from "../../app/values";
 import { strings } from "./strings";
 import { when, type Source } from "./shared";
 
@@ -289,7 +288,7 @@ const OTHER = "\u0000other";
 export function Registration({ sources, onDone }: { sources: Source[]; onDone: () => void }) {
   const t = useT(strings);
   const { api } = useSession();
-  const blank = { name: null as string | null, id: "", kind: "", custom: "", command: "", every: "15", unit: "m", timeout: "", credentials_path: "", local: "full", external: "" };
+  const blank = { name: null as string | null, id: "", kind: "", custom: "", command: "", every: "15", unit: "m", timeout: "", credentials_path: "" };
   const [f, setF] = useState(blank);
   const [error, setError] = useState<unknown>(null);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
@@ -318,10 +317,6 @@ export function Registration({ sources, onDone }: { sources: Source[]; onDone: (
       setError(new Error(t.needName));
       return;
     }
-    if (!f.external) {
-      setError(new Error(t.needExternal));
-      return;
-    }
     const body: Record<string, unknown> = { id: f.id.trim(), name: name.trim(), type: "script", command: f.command.trim(), schedule: `${f.every.trim()}${f.unit}` };
     if (sourceType) body.source_type = sourceType;
     if (f.timeout.trim()) body.timeout = Number(f.timeout);
@@ -332,12 +327,7 @@ export function Registration({ sources, onDone }: { sources: Source[]; onDone: (
       setError(e);
       return;
     }
-    setF({ ...blank, local: f.local });
-    try {
-      await api.put(`/settings/sources/${encodeURIComponent(body.id as string)}/outbound`, { local: f.local, external: f.external });
-    } catch (e) {
-      setError(new Error(t.scopeNotSaved(errorText(e))));
-    }
+    setF(blank); // 送模型端点的范围在「设置 › 模型」里选；钥匙读多少在签发钥匙时选（§14.14）
     onDone();
   };
 
@@ -396,14 +386,6 @@ export function Registration({ sources, onDone }: { sources: Source[]; onDone: (
         <label>
           {t.credential}
           <input value={f.credentials_path} onChange={set("credentials_path")} />
-        </label>
-        <label>
-          {t.toLocal}
-          <Pick k="outboundScope" value={f.local} onChange={(v) => setF({ ...f, local: v })} />
-        </label>
-        <label>
-          {t.toExternal}
-          <Pick k="outboundScope" value={f.external} onChange={(v) => setF({ ...f, external: v })} empty={t.choose} />
         </label>
         <div>
           <button type="submit" disabled={!f.id.trim() || !f.command.trim() || !/^\d+$/.test(f.every.trim()) || Number(f.every) < 1}>{t.register}</button>

@@ -31,7 +31,7 @@ const zh = {
   toExternal: "发给外部模型时",
   notChosen: "还没选",
   waiting: (n: number) => `${n} 条在等`,
-  unsetNotice: (n: number) => `${n} 条消息在等你选「发给外部模型时」`,
+  unsetNotice: (n: number) => `${n} 条消息在等你选外部模型能收什么`,
   change: "修改",
   sendThis: "就这样发",
   outbound: (id: string) => `${id} 的外发范围`,
@@ -161,10 +161,8 @@ const zh = {
   credential: "登录信息文件",
   choose: "请选择",
   register: "登记",
-  needExternal: "请选好「发给外部模型时」",
   needName: "请给这个来源起个名字",
   namePlaceholder: "这个程序没有声明名字，请起一个",
-  scopeNotSaved: (e: string) => `来源已登记，外发范围没存上：${e}`,
 };
 
 const en: typeof zh = {
@@ -193,7 +191,7 @@ const en: typeof zh = {
   toExternal: "To outside models",
   notChosen: "Not chosen",
   waiting: (n) => `${n} waiting`,
-  unsetNotice: (n) => `${n} messages wait for "To outside models"`,
+  unsetNotice: (n) => `${n} messages wait for what outside models may get`,
   change: "Change",
   sendThis: "Send like this",
   outbound: (id) => `What ${id} may send`,
@@ -320,10 +318,8 @@ const en: typeof zh = {
   credential: "Credentials file",
   choose: "Choose",
   register: "Add",
-  needExternal: 'Choose "To outside models" first',
   needName: "Give this source a name",
   namePlaceholder: "This program declares no name; give it one",
-  scopeNotSaved: (e) => `Source added, but what it may send was not saved: ${e}`,
 };
 
 export const strings: Dict<typeof zh> = { zh, en };

@@ -10,16 +10,19 @@ import { rejudgeDays } from "../../app/status";
 import { strings } from "./strings";
 import { ago, period, when, type Source } from "./shared";
 import { BacklogFlow, IgnoreAll, inProgress, SourceBacklog, type Models } from "./Backlog";
-import { OutboundEditor } from "./Outbound";
 import { Ingests, Registration, Rejects, RestorePanel, WebhookKey } from "./Advanced";
 import { DefaultProject, Digest } from "./Digest";
 import { TrustedSenders } from "./TrustedSenders";
-import { Route, Routes, useSearchParams } from "react-router-dom";
+import { Link, Route, Routes, useNavigate, useSearchParams } from "react-router-dom";
 import { RecentMessages } from "./Recent";
 import { MessageTracePage } from "../trace/Trace";
 
-// 消息来源页（界面设计 §9.7）：来源列表 → 外发范围 → 积压四步；排障与一次性操作在「高级」里。
+// 消息来源页（界面设计 §9.7）：来源列表 → 积压四步；排障与一次性操作在「高级」里。
+// 来源不再逐个配外发：送模型端点的范围在「设置 › 模型」（MODEL_SOURCES），钥匙读多少在签发钥匙时选（§14.14）。
 // 授权（自定义命令只 Web）、命令校验、转建议的规则都在服务端；本页只调用并如实展示服务端的回答。
+
+/** 「设置 › 模型」里「模型端点能收哪些来源」一节。 */
+export const MODEL_SOURCES = "/settings/models#endpoint-sources";
 
 interface Backlog {
   count: number;
@@ -141,7 +144,8 @@ function SourcesHome() {
   const [error, setError] = useState<unknown>(null);
   const [params] = useSearchParams(); // 挂靠消息的「加入可读名单」带 ?open=<来源>&add=<发件人>
   const [selected, setSelected] = useState<string | null>(params.get("open"));
-  const [editing, setEditing] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const chooseOutbound = () => navigate(MODEL_SOURCES);
   const [notice, setNotice] = useState<string | null>(null);
   const [rev, setRev] = useState(0); // 积压变化后让打开的详情重读
   const [backlog, setBacklog] = useState<Backlog | null>(null);
@@ -195,8 +199,6 @@ function SourcesHome() {
   };
 
   const current = sources?.find((s) => s.id === selected);
-  // 外部范围未选的来源只有一个时，积压里「等你选外发范围」的条数都属于它；多个时只在页首给合计。
-  const unset = sources?.filter((s) => (s.outbound?.external ?? null) === null) ?? [];
   const waiting = backlog?.outbound_unset ?? 0;
   const total = backlog?.count ?? 0;
   const ignoreAll = total > 0 && (
@@ -216,7 +218,7 @@ function SourcesHome() {
       <PageHead lede={t.lede}>{t.title}</PageHead>
       {error !== null && <ErrorNote error={error} />}
       {notice && <p role="status">{notice}</p>}
-      {unset.length > 1 && waiting > 0 && <p className="badge warn">{t.unsetNotice(waiting)}</p>}
+      {waiting > 0 && <p className="badge warn"><Link to={MODEL_SOURCES}>{t.unsetNotice(waiting)}</Link></p>}
       <section role="region" aria-label={t.list}>
         {sources === null ? (
           error === null && <p role="status">{t.loading}</p>
@@ -240,16 +242,6 @@ function SourcesHome() {
                 <span aria-hidden="true">{ICON[s.source_type ?? s.type] ?? "\ud83d\udcf0"}</span>{" "}
                 <Rename s={s} onSaved={() => { forgetNames(api, "source"); void load(); }} />{" "}
                 <span className="sub">{(s.source_type && t.kinds[s.source_type]) || <Val k="sourceType" id={s.type} />}</span> <Schedule s={s.schedule} /> <Status s={s} />
-                <OutboundEditor
-                  source={s}
-                  waiting={unset.length === 1 ? waiting : 0}
-                  open={editing === s.id}
-                  onOpen={(o) => setEditing(o ? s.id : null)}
-                  onSaved={async () => {
-                    await load();
-                    loadBacklog();
-                  }}
-                />
                 <div role="group" aria-label={t.ops(s.name)}>
                   <button onClick={() => toggle(s)}>{s.enabled ? t.disable : t.enable}</button> <button onClick={() => setSelected(s.id)}>{t.details}</button>
                 </div>
@@ -259,7 +251,7 @@ function SourcesHome() {
         )}
       </section>
       {(total > 0 || inProgress()) && models && <BacklogFlow total={total} models={models} onChanged={changed} ignoreAll={ignoreAll} />}
-      {current && <Detail key={`${current.id}:${rev}`} source={current} add={current.id === params.get("open") ? params.get("add") ?? undefined : undefined} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={() => setEditing(current.id)} onSaved={() => void load()} />}
+      {current && <Detail key={`${current.id}:${rev}`} source={current} add={current.id === params.get("open") ? params.get("add") ?? undefined : undefined} rejudgeDays={backlog?.rejudgeDays} onChooseOutbound={chooseOutbound} onSaved={() => void load()} />}
       <details ref={advanced}>
         <summary>{t.advanced}</summary>
         <RestorePanel sources={sources ?? []} onRestored={changed} />

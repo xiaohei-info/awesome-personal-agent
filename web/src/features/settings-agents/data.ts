@@ -17,7 +17,7 @@ export interface Declaration {
   main_session?: { wake?: boolean; launch?: string; wake_missing?: (Label & { how: Label })[] };
 }
 export interface Rec { harness: string; rev: number; state: string; declaration: Declaration }
-export interface Credential { agent_id?: string; id: string; kind: string; label?: string; harness?: string; seen_harness?: string; revoked_at?: string }
+export interface Credential { agent_id?: string; id: string; kind: string; label?: string; harness?: string; seen_harness?: string; revoked_at?: string; audience?: string; source_scopes?: Record<string, string> }
 export interface Data { pending: Rec[]; live: Rec[]; tokens: Credential[]; cards: Agent[] }
 
 export const AGENT_KINDS = ["delegate", "worker"];

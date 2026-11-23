@@ -24,9 +24,10 @@ function server(init: { judge?: any; generate?: any; days?: number } = {}) {
   let probe: any = { subject: "generate_endpoint", status: "ok", code: "ok", why: "answered the structured-output sample request in 820 ms", data: { elapsed_ms: 820, model: "model-b" } };
   const impl = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
-    if (url === "/v1/projects") return json(200, { projects: [] });
+    if (url === "/v1/projects") return json(200, { projects: [{ id: "p_chat", name: "聊天项目", capture: true, capture_outbound: null }, { id: "p_x", name: "不记聊天", capture: false }] });
+    if (url === "/v1/settings/projects/p_chat/capture-outbound" && method === "PUT") return puts.push({ capture: JSON.parse(init.body as string) }), json(200, { value: JSON.parse(init.body as string).value });
     if (url === "/v1/health") return json(200, { healthy: true, signals: [{ id: "unjudged_backlog", ok: false, detail: { models_paused: 14, rejudge_days: days } }] });
-    if (url === "/v1/sources") return json(200, { sources: [{ outbound: { local: "full", external: null } }, { outbound: { local: "full", external: "meta" } }, {}] });
+    if (url === "/v1/sources") return json(200, { sources: [{ id: "s1", name: "甲来源", outbound: { local: "full", external: null } }, { id: "s2", name: "乙来源", outbound: { local: "full", external: "meta" } }, { id: "s3", name: "丙来源" }] });
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     if (url === "/v1/settings/model-endpoints/models") return posts.push({ path: url, body }), json(200, models);
     if (url === "/v1/settings/model-endpoints/test") return posts.push({ path: url, body }), json(200, probe);
@@ -254,11 +255,24 @@ describe("设置 › 模型", () => {
     expect(r).not.toHaveTextContent("响应不符合所选协议");
   });
 
-  it("外部端点提示还没设置外部外发范围的来源数，并链接到来源页", async () => {
+  it("外部端点提示还没设置外部外发范围的来源数，并指到本页「模型端点能收哪些来源」", async () => {
     mount(server().impl);
     const g = await card("写作模型");
     expect(await g.findByText(/2 个来源没选外发范围/)).toBeInTheDocument();
-    expect(g.getByRole("link", { name: "去来源页设置" })).toHaveAttribute("href", "/sources");
+    expect(g.getByRole("link", { name: "在下面选" })).toHaveAttribute("href", "#endpoint-sources");
+  });
+
+  it("模型端点能收哪些来源：每个来源一行、记聊天的项目一行，只在这里改（§14.14）", async () => {
+    const s = server();
+    mount(s.impl);
+    const sec = await card("模型端点能收哪些来源");
+    expect(await sec.findByRole("listitem", { name: "甲来源" })).toBeInTheDocument();
+    expect(sec.getByRole("listitem", { name: "丙来源" })).toBeInTheDocument();
+    expect(sec.queryByRole("listitem", { name: "不记聊天" })).not.toBeInTheDocument();
+    const chat = within(sec.getByRole("listitem", { name: "聊天项目" }));
+    await userEvent.click(within(chat.getByRole("radiogroup", { name: "聊天内容发给外部模型时" })).getByRole("radio", { name: "只有标题" }));
+    await userEvent.click(chat.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(s.puts).toContainEqual({ capture: { value: "meta" } }));
   });
 
   it("flow-endpoint-config: 两个都没配时有空状态；新配端点的位置没有预选，选之前不保存；取消配置发 null", async () => {

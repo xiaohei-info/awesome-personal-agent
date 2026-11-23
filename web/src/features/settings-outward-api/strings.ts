@@ -31,7 +31,7 @@ const zh = {
   label: "备注（可选，只给你自己看）",
   labelHint: "比如：家里的看板脚本",
   onlyEvents: "只允许订阅事件（不能读事项和材料）",
-  canAll: "能读事项、材料，能订阅事件",
+  canAll: "按来源档位读来源、事项与材料，能订阅事件",
   canEvents: "只能订阅事件",
   issue: "签发",
   keys: "已签发的钥匙",
@@ -52,7 +52,7 @@ const zh = {
   errors: [
     ["400 invalid_request", "参数不对：按 why 与 next 改参数再试"],
     ["401 unauthenticated", "没带钥匙、钥匙不对或已停用：检查请求头"],
-    ["403 permission_denied", "这把钥匙不能做这件事：只能订阅事件的钥匙读了事项或材料"],
+    ["403 permission_denied", "这把钥匙不能做这件事，或没给它这个来源"],
     ["404 not_found", "对象不存在或已删除"],
   ] as [string, string][],
 };
@@ -68,7 +68,7 @@ const en: typeof zh = {
   label: "Note (optional, only for you)",
   labelHint: "e.g. the dashboard script at home",
   onlyEvents: "Only subscribe to events (cannot read items or materials)",
-  canAll: "Reads items and materials, subscribes to events",
+  canAll: "Reads sources, items and materials by source level; subscribes to events",
   canEvents: "Subscribes to events only",
   issue: "Issue",
   keys: "Issued keys",
@@ -89,7 +89,7 @@ const en: typeof zh = {
   errors: [
     ["400 invalid_request", "Bad parameters: fix them per why and next"],
     ["401 unauthenticated", "Missing, wrong or revoked key: check the header"],
-    ["403 permission_denied", "This key may not do that: an events-only key read items or materials"],
+    ["403 permission_denied", "This key may not do that, or was not given this source"],
     ["404 not_found", "The object does not exist or was deleted"],
   ],
 };
